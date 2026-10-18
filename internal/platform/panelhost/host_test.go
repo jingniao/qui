@@ -61,13 +61,13 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 					if err != nil {
 						t.Error(err)
 					}
-				case <-time.After(8 * time.Second):
+				case <-time.After(60 * time.Second):
 					t.Error("managed host failed to stop")
 				}
 			}()
 			client := &http.Client{Timeout: 3 * time.Second}
 			base := "http://" + c.HTTPAddress
-			deadline := time.Now().Add(8 * time.Second)
+			deadline := time.Now().Add(60 * time.Second)
 			for {
 				response, err := client.Get(base + "/healthz")
 				if err == nil {

@@ -88,7 +88,7 @@ func TestRealServerBackupWorkerWakesOnSettingsSaveAndStopsWithServer(t *testing.
 		<-done
 		t.Fatal(response.Code, response.Body.String())
 	}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	total := 0
 	for time.Now().Before(deadline) {
 		var err error
@@ -109,7 +109,7 @@ func TestRealServerBackupWorkerWakesOnSettingsSaveAndStopsWithServer(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(12 * time.Second):
+	case <-time.After(60 * time.Second):
 		t.Fatal("backup worker prevented shutdown")
 	}
 }

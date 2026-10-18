@@ -1,4 +1,4 @@
-# Proxy Control
+# Proxy Control d
 
 面向 1～10 名内部用户的自托管多节点代理控制平台。中央端是一个 Go 单体程序（SQLite + 嵌入式 Vue 前端），Node Agent 通过 gRPC + mTLS 主动接入并管理**官方** Xray 或 sing-box 二进制；用户代理流量不经过中央端。
 

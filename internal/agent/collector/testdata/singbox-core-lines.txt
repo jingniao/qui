@@ -1,0 +1,30 @@
+# Captured from the official sing-box 1.14.3 windows-amd64 release
+# (singbox-1.14.3-windows-amd64, zip sha256 d8b86ef5...1518) on 2026-10-17.
+#
+# The probe rendered "log": {"level": "debug", "output": <file>, "timestamp":
+# true} with a socks inbound ("entry", user u1/p1), a direct outbound, a
+# terminal direct outbound, a domain reject rule and an inbound route rule,
+# plus the Clash API on loopback. Every line below is one upstream core log
+# line, unmodified. Local probe ports are ephemeral.
+#
+# A rejected connection: the core names the user, the destination and the rule
+# index it matched, then closes the connection.
+-0700 2026-10-17 11:34:55 INFO [2317276399 0ms] inbound/socks[entry]: inbound connection from 127.0.0.1:63261
+-0700 2026-10-17 11:34:55 INFO [2317276399 0ms] inbound/socks[entry]: [u1] inbound connection to blocked.example:80
+-0700 2026-10-17 11:34:55 DEBUG [2317276399 0ms] router: match[0] domain=blocked.example => reject
+-0700 2026-10-17 11:34:55 DEBUG [2317276399 1ms] router: connection closed: rejected
+# An allowed connection: the core names the rule index and the outbound tag.
+-0700 2026-10-17 11:34:55 INFO [2235685953 0ms] inbound/socks[entry]: inbound connection from 127.0.0.1:63281
+-0700 2026-10-17 11:34:55 INFO [2235685953 0ms] inbound/socks[entry]: [u1] inbound connection to localhost:63257
+-0700 2026-10-17 11:34:55 DEBUG [2235685953 0ms] router: match[1] inbound=entry => route(direct)
+-0700 2026-10-17 11:34:55 INFO [2235685953 0ms] outbound/direct[direct]: outbound connection to localhost:63257
+# Interleaved core noise that carries no access fact.
+-0700 2026-10-17 11:34:55 INFO inbound/socks[entry]: tcp server started at 127.0.0.1:63255
+-0700 2026-10-17 11:34:55 INFO network: updated default interface 以太网, index 4
+-0700 2026-10-17 11:34:55 INFO clash-api: restful api listening at 127.0.0.1:63256
+-0700 2026-10-17 11:34:55 INFO sing-box started (0.01s)
+-0700 2026-10-17 11:34:55 DEBUG [2235685953 0ms] dns: lookup domain localhost
+-0700 2026-10-17 11:34:55 DEBUG [2235685953 6ms] dns: exchanged A localhost. 0 IN A 127.0.0.1
+-0700 2026-10-17 11:34:55 DEBUG [2235685953 6ms] dns: lookup succeed for localhost: 127.0.0.1
+-0700 2026-10-17 11:34:55 DEBUG [2235685953 16ms] connection: connection upload finished
+-0700 2026-10-17 11:34:55 DEBUG [2235685953 16ms] connection: connection download finished

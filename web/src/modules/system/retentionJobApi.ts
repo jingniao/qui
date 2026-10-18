@@ -1,0 +1,3 @@
+import { request } from '../../app/apiClient';
+export interface RetentionJob {generation:number;phase:number;status:string;policy:{allowedDays:number;blockedDays:number;hourlyDays:number};cutoffAt:string;startedAt:string;updatedAt:string;lastSuccessAt:string;deletedRun:number;deletedTotal:number;failures:number;errorCode:string;batchRows:number;}
+export const retentionJobAPI=()=>request<RetentionJob>('/access-retention-job');

@@ -1,0 +1,26 @@
+development: false
+# 可选的签名发布公钥目录见 docs/operations.md 第 9 节；私钥保留在离线签名端。
+# release_keys:
+#   - public_key: "替换为真实 Base64 Ed25519 公钥"
+#     components: [xray, sing-box]
+#     revoked: false
+http_address: 0.0.0.0:443
+grpc_address: 0.0.0.0:9443
+database: /var/lib/proxy-panel/panel.db
+node_identity_directory: /var/lib/proxy-panel/identity
+shutdown_timeout: 10s
+# 首次启动且尚无 Owner 时，面板会生成一次性安装令牌：
+#   - 在日志中以 WARN 打印一次：first-run setup token
+#   - 写入 <database 所在目录>/setup-token（权限 0600）
+# 在 Web 初始化页面粘贴该令牌即可创建 Owner；初始化成功后令牌与文件立即失效。
+# 可选：仅当面板位于受信任的反向代理之后时才信任其转发头。填入代理的 IP 或 CIDR 列表。
+# server:
+#   trusted_proxies:
+#     - 10.0.0.0/8
+#     - 192.0.2.10
+tls:
+  certificate: /etc/proxy-panel/tls/server.crt
+  key: /etc/proxy-panel/tls/server.key
+  # client_ca 可选。面板的节点 mTLS 使用 node_identity_directory 中的面板 CA，
+  # 因此通常无需设置；保留该字段仅为兼容既有配置。
+  # client_ca: /etc/proxy-panel/tls/ca.crt

@@ -1,0 +1,190 @@
+{
+  "endpoints": [
+    {
+      "type": "wireguard",
+      "tag": "wg-out",
+      "system": false,
+      "address": [
+        "10.66.0.2/32"
+      ],
+      "private_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "mtu": 1420,
+      "peers": [
+        {
+          "address": "198.51.100.30",
+          "port": 51820,
+          "public_key": "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=",
+          "allowed_ips": [
+            "0.0.0.0/0"
+          ],
+          "persistent_keepalive_interval": 15
+        }
+      ],
+      "bind_interface": "eth0",
+      "inet4_bind_address": "192.0.2.10",
+      "domain_resolver": {
+        "server": "_panel_dns_",
+        "strategy": "ipv4_only"
+      }
+    },
+    {
+      "type": "wireguard",
+      "tag": "wg-entry",
+      "system": false,
+      "address": [
+        "10.66.0.1/32"
+      ],
+      "private_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "peers": [
+        {
+          "address": "",
+          "port": 0,
+          "public_key": "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=",
+          "allowed_ips": [
+            "10.66.0.2/32"
+          ]
+        }
+      ],
+      "listen_port": 51821
+    }
+  ],
+  "log": {
+    "disabled": true
+  },
+  "inbounds": [
+    {
+      "type": "socks",
+      "tag": "entry",
+      "listen": "127.0.0.1",
+      "listen_port": 1080,
+      "users": [
+        {
+          "username": "golden-user",
+          "password": "golden-socks-secret"
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct",
+      "bind_interface": "eth0",
+      "inet4_bind_address": "192.0.2.10",
+      "domain_resolver": {
+        "server": "_panel_dns_",
+        "strategy": "ipv4_only"
+      }
+    },
+    {
+      "type": "http",
+      "tag": "egress-primary",
+      "server": "198.51.100.20",
+      "server_port": 8080,
+      "bind_interface": "eth0",
+      "inet4_bind_address": "192.0.2.10",
+      "domain_resolver": {
+        "server": "_panel_dns_",
+        "strategy": "ipv4_only"
+      }
+    },
+    {
+      "type": "trojan",
+      "tag": "egress-backup",
+      "server": "198.51.100.21",
+      "server_port": 443,
+      "password": "independent-relay-password",
+      "tls": {
+        "enabled": true,
+        "server_name": "exit.example.test"
+      },
+      "bind_interface": "eth0",
+      "inet4_bind_address": "192.0.2.10",
+      "domain_resolver": {
+        "server": "_panel_dns_",
+        "strategy": "ipv4_only"
+      }
+    },
+    {
+      "type": "direct",
+      "tag": "_panel_terminal_",
+      "bind_interface": "eth0",
+      "inet4_bind_address": "192.0.2.10",
+      "domain_resolver": {
+        "server": "_panel_dns_",
+        "strategy": "ipv4_only"
+      }
+    },
+    {
+      "type": "urltest",
+      "tag": "_panel_group_egress-pool",
+      "outbounds": [
+        "egress-backup",
+        "egress-primary"
+      ],
+      "url": "https://probe.example.test/generate_204",
+      "interval": "30s"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "port": [
+          15402
+        ],
+        "action": "reject"
+      },
+      {
+        "inbound": [
+          "entry"
+        ],
+        "action": "route",
+        "outbound": "_panel_group_egress-pool"
+      },
+      {
+        "inbound": [
+          "wg-entry"
+        ],
+        "domain": [
+          "localhost"
+        ],
+        "action": "resolve",
+        "server": "_panel_loopback_"
+      },
+      {
+        "inbound": [
+          "wg-entry"
+        ],
+        "action": "route",
+        "outbound": "direct"
+      }
+    ],
+    "final": "_panel_terminal_",
+    "default_domain_resolver": "_panel_dns_"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "_panel_dns_"
+      },
+      {
+        "type": "hosts",
+        "tag": "_panel_loopback_",
+        "predefined": {
+          "localhost": [
+            "127.0.0.1",
+            "::1"
+          ]
+        }
+      }
+    ],
+    "final": "_panel_dns_"
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:15402",
+      "secret": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}

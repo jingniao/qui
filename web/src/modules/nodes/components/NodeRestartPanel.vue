@@ -1,0 +1,14 @@
+<template>
+ <section class="panel-card p-6 space-y-4 text-sm"><div class="flex justify-between gap-3"><h2 class="font-semibold">重启当前核心</h2><div class="flex gap-3"><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新结果</button><button class="ios-action-btn-danger" :disabled="busy || pending || !eligible" @click="capture">重启核心</button></div></div><p class="text-xs text-gray-500">保留当前成功配置和授权账本，按当前剩余额度重新编译。现有连接会中断；升级、暂停或未知消费保护未解除时拒绝操作。这里只重启代理核心。</p><p v-if="error" class="text-red-600">{{ error }}</p><p v-if="!items.length" class="text-gray-500">暂无重启任务。</p><div v-for="item in items" :key="item.commandId" class="border-b border-gray-100 py-3"><p>配置 #{{ item.revision }} · {{ formatTime(item.createdAt) }} · {{ {pending:'等待节点结果',success:'已完成',failed:'失败，保护状态保持'}[item.status] }}</p><p v-if="item.code" class="text-xs text-gray-500 mt-1">{{ item.code }}</p></div>
+ <ConfirmDialog v-model="confirm" title="重启当前代理核心" :message="`节点 ${node.name}，配置 #${capturedRevision}。现有连接会中断。`" warning-details="任务受理不等于执行成功；不会清空额度、关闭历史或解除未知消费保护。" confirm-text="确认重启" @confirm="restart" />
+ </section>
+</template>
+<script setup lang="ts">
+import {computed,onMounted,onUnmounted,ref,watch} from 'vue';import {nodeAPI,type NodeView,type RestartTask} from '../api';import {formatTime} from '../../../app/auth';import {showToast} from '../../../app/api';import ConfirmDialog from '../../../components/ConfirmDialog.vue';
+const props=defineProps<{node:NodeView}>();const items=ref<RestartTask[]>([]),error=ref(''),loading=ref(false),busy=ref(false),confirm=ref(false),capturedRevision=ref(0);let timer:ReturnType<typeof setTimeout>|null=null;let generation=0;let stopped=false;
+const pending=computed(()=>items.value.some(item=>item.status==='pending'));const eligible=computed(()=>props.node.enabled&&['online','degraded'].includes(props.node.status)&&(props.node.heartbeat.current_revision??0)>0);
+function capture(){capturedRevision.value=props.node.heartbeat.current_revision??0;confirm.value=true;}
+async function load(){if(loading.value||stopped)return;const current=++generation;loading.value=true;try{const result=await nodeAPI.restartTasks(props.node.id);if(current===generation){items.value=result.items;error.value='';}}catch(e){if(current===generation)error.value=(e as Error).message;}finally{if(current===generation){loading.value=false;if(timer)clearTimeout(timer);timer=null;if(pending.value&&!stopped)timer=setTimeout(()=>{timer=null;void load();},2500);}}}
+async function restart(){if(busy.value)return;busy.value=true;try{await nodeAPI.restartCore(props.node.id,capturedRevision.value);showToast('重启任务已受理，等待节点结果');await load();}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}
+watch(()=>props.node.id,()=>{generation++;loading.value=false;confirm.value=false;items.value=[];void load();});onMounted(load);onUnmounted(()=>{stopped=true;generation++;if(timer)clearTimeout(timer);});
+</script>

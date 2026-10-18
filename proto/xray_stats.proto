@@ -1,0 +1,12 @@
+// Wire-compatible read-only subset of the upstream Xray StatsService proto,
+// github.com/XTLS/Xray-core/app/stats/command/command.proto (package
+// xray.app.stats.command). protoc is unavailable here, so this file is kept in
+// sync with the generated package by hand.
+// Agent always queries cumulative counters with reset=false.
+syntax = "proto3";
+package xray.app.stats.command;
+option go_package = "proxycontrol/pkg/contracts/xraystatspb";
+message Stat { string name = 1; int64 value = 2; }
+message QueryStatsRequest { string pattern = 1; bool reset = 2; }
+message QueryStatsResponse { repeated Stat stat = 1; }
+service StatsService { rpc QueryStats(QueryStatsRequest) returns (QueryStatsResponse); }

@@ -1,0 +1,14 @@
+-- W05 step 5 (round 3): bind one fixed offline consumption to its own claim so
+-- a late writer can never overwrite another consumer's result.
+--
+-- The fixed offline consumer holds the panel lifetime ownership from the offline
+-- Owner authentication through Begin/execute/Complete/Fail, so two consumers can
+-- never run concurrently. This column additionally binds every status update to
+-- the exact claim that Begin recorded: Begin writes a fresh random claim_token,
+-- and Complete/Fail only succeed while the row is running AND still carries that
+-- same token. A stale consumer whose claim was superseded can therefore never
+-- overwrite the winner's result. The token is cleared on completion/failure and
+-- never leaves the process in command output or audit JSON. Appended after 0096;
+-- the 0096 table is otherwise untouched, and an older evidence database without
+-- this column is copied through the common columns with an empty claim token.
+ALTER TABLE node_ca_operation_requests ADD COLUMN claim_token TEXT NOT NULL DEFAULT '';

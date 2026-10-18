@@ -1,0 +1,3 @@
+ALTER TABLE traffic_cursors ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE traffic_cursors ADD COLUMN device_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE traffic_cursors ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;

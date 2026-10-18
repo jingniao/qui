@@ -1,0 +1,181 @@
+{
+  "log": {
+    "access": "none",
+    "error": "none",
+    "loglevel": "none"
+  },
+  "inbounds": [
+    {
+      "tag": "entry",
+      "listen": "127.0.0.1",
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "auth": "password",
+        "accounts": [
+          {
+            "user": "golden-user",
+            "pass": "golden-socks-secret"
+          }
+        ],
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ],
+        "routeOnly": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "settings": {
+        "domainStrategy": "ForceIPv4"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "none",
+        "sockopt": {
+          "interface": "eth0"
+        }
+      },
+      "tag": "direct",
+      "protocol": "freedom",
+      "sendThrough": "192.0.2.10"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    },
+    {
+      "settings": {
+        "servers": [
+          {
+            "address": "198.51.100.20",
+            "port": 8080
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "none",
+        "sockopt": {
+          "interface": "eth0",
+          "domainStrategy": "ForceIPv4"
+        }
+      },
+      "tag": "egress-primary",
+      "protocol": "http",
+      "sendThrough": "192.0.2.10"
+    },
+    {
+      "settings": {
+        "servers": [
+          {
+            "address": "198.51.100.21",
+            "port": 443,
+            "password": "independent-relay-password"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "exit.example.test"
+        },
+        "sockopt": {
+          "interface": "eth0",
+          "domainStrategy": "ForceIPv4"
+        }
+      },
+      "tag": "egress-backup",
+      "protocol": "trojan",
+      "sendThrough": "192.0.2.10"
+    },
+    {
+      "settings": {
+        "secretKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+        "address": [
+          "10.66.0.2/32"
+        ],
+        "peers": [
+          {
+            "publicKey": "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=",
+            "endpoint": "198.51.100.30:51820",
+            "allowedIPs": [
+              "0.0.0.0/0"
+            ],
+            "keepAlive": 15,
+            "email": "credential:wg-credential"
+          }
+        ],
+        "mtu": 1420,
+        "noKernelTun": true
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "none",
+        "sockopt": {
+          "interface": "eth0",
+          "domainStrategy": "ForceIPv4"
+        }
+      },
+      "tag": "wg-out",
+      "protocol": "wireguard",
+      "sendThrough": "192.0.2.10"
+    },
+    {
+      "settings": {},
+      "tag": "_stats_guard_block_",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "entry"
+        ],
+        "port": "15401",
+        "network": "tcp,udp",
+        "outboundTag": "_stats_guard_block_"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "entry"
+        ],
+        "outboundTag": "wg-out"
+      }
+    ]
+  },
+  "api": {
+    "tag": "_stats_api_",
+    "listen": "127.0.0.1:15401",
+    "services": [
+      "StatsService"
+    ]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true,
+        "statsUserOnline": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": false,
+      "statsOutboundDownlink": false
+    }
+  }
+}

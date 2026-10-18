@@ -1,0 +1,6 @@
+development: true
+http_address: 127.0.0.1:8080
+grpc_address: 127.0.0.1:9443
+database: ../../state/panel.db
+node_identity_directory: ../../state/panel-identity
+shutdown_timeout: 10s

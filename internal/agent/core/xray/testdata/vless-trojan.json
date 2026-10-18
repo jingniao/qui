@@ -1,0 +1,111 @@
+{
+  "log": {
+    "access": "none",
+    "error": "none",
+    "loglevel": "none"
+  },
+  "inbounds": [
+    {
+      "tag": "entry",
+      "listen": "127.0.0.1",
+      "port": 1080,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "6f1a1d4e-2f4a-4a4f-9d6e-3a1c0b7e5d21",
+            "email": "credential:device-credential"
+          }
+        ],
+        "decryption": "none"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ],
+        "routeOnly": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    },
+    {
+      "settings": {
+        "servers": [
+          {
+            "address": "198.51.100.10",
+            "port": 443,
+            "password": "independent-relay-password"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "exit.example.test"
+        }
+      },
+      "tag": "to-exit",
+      "protocol": "trojan"
+    },
+    {
+      "settings": {},
+      "tag": "_stats_guard_block_",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "entry"
+        ],
+        "port": "15401",
+        "network": "tcp,udp",
+        "outboundTag": "_stats_guard_block_"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "entry"
+        ],
+        "outboundTag": "to-exit"
+      }
+    ]
+  },
+  "api": {
+    "tag": "_stats_api_",
+    "listen": "127.0.0.1:15401",
+    "services": [
+      "StatsService"
+    ]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true,
+        "statsUserOnline": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": false,
+      "statsOutboundDownlink": false
+    }
+  }
+}

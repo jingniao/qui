@@ -1,0 +1,26 @@
+CREATE TABLE recovery_traffic_executions (
+ id TEXT PRIMARY KEY,
+ case_id TEXT NOT NULL,
+ issue_id TEXT NOT NULL,
+ decision_id TEXT NOT NULL UNIQUE REFERENCES recovery_case_decisions(id) ON DELETE RESTRICT,
+ node_id TEXT NOT NULL,
+ batch_id TEXT NOT NULL,
+ batch_digest TEXT NOT NULL CHECK(length(batch_digest)=64),
+ snapshot_digest TEXT NOT NULL CHECK(length(snapshot_digest)=64),
+ issue_digest TEXT NOT NULL CHECK(length(issue_digest)=64),
+ evidence_digest TEXT NOT NULL CHECK(length(evidence_digest)=64),
+ owner TEXT NOT NULL,
+ request_key TEXT NOT NULL,
+ request_digest TEXT NOT NULL CHECK(length(request_digest)=64),
+ status TEXT NOT NULL CHECK(status IN ('running','pending','not_confirmed','completed')),
+ attempts INTEGER NOT NULL CHECK(attempts BETWEEN 1 AND 2147483647),
+ claim_token TEXT NOT NULL,
+ lease_until TEXT NOT NULL,
+ result_code TEXT NOT NULL,
+ completed_at TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ FOREIGN KEY(case_id,issue_id) REFERENCES recovery_case_issues(case_id,issue_id) ON DELETE RESTRICT,
+ UNIQUE(owner,request_key)
+);
+CREATE INDEX recovery_traffic_executions_issue ON recovery_traffic_executions(case_id,issue_id,created_at DESC,id DESC);

@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the Proxy Control node agent enforced outbound source
+
+[Path]
+PathChanged=/var/lib/proxy-agent/host-network/desired.json
+Unit=proxy-agent-host-network.service
+
+[Install]
+WantedBy=multi-user.target

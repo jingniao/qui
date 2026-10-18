@@ -1,0 +1,92 @@
+{
+  "log": {
+    "access": "none",
+    "error": "none",
+    "loglevel": "none"
+  },
+  "inbounds": [
+    {
+      "tag": "entry",
+      "listen": "127.0.0.1",
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "auth": "password",
+        "accounts": [
+          {
+            "user": "golden-user",
+            "pass": "golden-socks-secret"
+          }
+        ],
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ],
+        "routeOnly": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    },
+    {
+      "settings": {},
+      "tag": "_stats_guard_block_",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "entry"
+        ],
+        "port": "15401",
+        "network": "tcp,udp",
+        "outboundTag": "_stats_guard_block_"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "entry"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  "api": {
+    "tag": "_stats_api_",
+    "listen": "127.0.0.1:15401",
+    "services": [
+      "StatsService"
+    ]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true,
+        "statsUserOnline": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": false,
+      "statsOutboundDownlink": false
+    }
+  }
+}

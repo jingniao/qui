@@ -1,0 +1,154 @@
+name: Check
+
+# push/pull_request run the gate. workflow_dispatch and the weekly schedule also
+# run the optional `cores` job, which downloads the official Xray and sing-box
+# releases, verifies their SHA-256 and runs the real-core integration tests. A
+# push of a v* tag additionally runs `release`, which builds the archives and
+# publishes them as a GitHub release.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 0'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        run: npm --prefix web ci
+      - name: Build the embedded web UI
+        run: npm --prefix web run build
+      - name: Frontend time tests
+        run: npm run test:time
+      - run: go vet ./...
+      # The Agent command-line and storage tests run against a real binary built
+      # with a fixed version string. AGENT_CANDIDATE_BINARY, AGENT_RELEASE_BINARY
+      # and PANEL_BINARY have no remaining consumer, so no other fixture is built.
+      - name: Build the Agent fixture
+        run: |
+          mkdir -p bin
+          go build -trimpath -ldflags '-X main.version=1.0.0-storage-test' -o bin/proxy-agent-storage-test ./cmd/agent
+      - name: Tests
+        run: go test -race -timeout 35m ./...
+        env:
+          AGENT_BINARY: ${{ github.workspace }}/bin/proxy-agent-storage-test
+      - name: Build the panel
+        run: go build -o bin/proxy-panel ./cmd/panel
+      - name: Build the agent
+        run: go build -o bin/proxy-agent ./cmd/agent
+
+
+  # Optional real-core job. Both releases are stable upstream releases and every
+  # archive is checked against its published SHA-256 before it is extracted.
+  cores:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      XRAY_VERSION: '26.3.27'
+      SINGBOX_VERSION: '1.14.3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        run: npm --prefix web ci
+      - name: Build the embedded web UI
+        run: npm --prefix web run build
+      - name: Download and verify Xray
+        run: |
+          set -euo pipefail
+          asset="Xray-linux-64.zip"
+          base="https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}"
+          mkdir -p cores
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o "cores/${asset}" "${base}/${asset}"
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o "cores/${asset}.dgst" "${base}/${asset}.dgst"
+          expected=$(grep -i -E '(sha2[-_]?256|sha256)[[:space:]]*=' "cores/${asset}.dgst" | grep -o -E '[0-9a-fA-F]{64}' | head -n 1 | tr 'A-F' 'a-f')
+          test -n "${expected}"
+          printf '%s  %s\n' "${expected}" "cores/${asset}" | sha256sum --check --strict
+          unzip -q -d cores/xray "cores/${asset}"
+          test -x cores/xray/xray
+          printf 'XRAY_BINARY=%s/cores/xray/xray\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Download and verify sing-box
+        run: |
+          set -euo pipefail
+          asset="sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz"
+          base="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}"
+          mkdir -p cores
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o "cores/${asset}" "${base}/${asset}"
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o cores/singbox-release.json "https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${SINGBOX_VERSION}"
+          expected=$(ASSET="${asset}" node -e '
+            const fs = require("fs");
+            const release = JSON.parse(fs.readFileSync("cores/singbox-release.json", "utf8"));
+            const asset = (release.assets || []).find((item) => item.name === process.env.ASSET);
+            if (!asset || typeof asset.digest !== "string" || !asset.digest.startsWith("sha256:")) {
+              console.error("release asset carries no sha256 digest");
+              process.exit(1);
+            }
+            console.log(asset.digest.slice("sha256:".length).toLowerCase());
+          ')
+          test -n "${expected}"
+          printf '%s  %s\n' "${expected}" "cores/${asset}" | sha256sum --check --strict
+          mkdir -p cores/singbox
+          tar -xzf "cores/${asset}" -C cores/singbox
+          test -x "cores/singbox/sing-box-${SINGBOX_VERSION}-linux-amd64/sing-box"
+          printf 'SINGBOX_BINARY=%s/cores/singbox/sing-box-%s-linux-amd64/sing-box\n' "$GITHUB_WORKSPACE" "$SINGBOX_VERSION" >> "$GITHUB_ENV"
+      - name: Real-core tests
+        run: go test -count=1 -timeout 60m ./...
+
+
+  # Publishing a release is a tag push. The job reuses the gate above and only
+  # accepts vMAJOR.MINOR.PATCH tags; build-release.sh then produces one archive
+  # per architecture plus SHA256SUMS, and both are attached to the release that
+  # qui-update and the manual upgrade path download from. node-install.sh is
+  # attached as well, because the register dialog pipes it straight from the
+  # release URL into bash on a fresh node.
+  release:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject a tag that is not vMAJOR.MINOR.PATCH
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            printf 'Tag %s is not vMAJOR.MINOR.PATCH.\n' "$GITHUB_REF_NAME" >&2
+            exit 1
+          }
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the release archives
+        run: VERSION="${GITHUB_REF_NAME#v}" OUTPUT_DIRECTORY="$RUNNER_TEMP/dist" scripts/build-release.sh
+      - name: Publish the GitHub release
+        run: gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/proxy-control-*.tar.gz "$RUNNER_TEMP/dist/SHA256SUMS" deploy/linux/node-install.sh --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

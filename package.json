@@ -1,0 +1,11 @@
+{
+  "name": "proxy-control",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "typecheck": "npm --prefix web run typecheck",
+	"test:time": "node --test scripts/time.test.cjs",
+    "build": "npm --prefix web run build",
+    "preview": "npm --prefix web run preview"
+  }
+}

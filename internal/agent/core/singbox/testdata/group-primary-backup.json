@@ -1,0 +1,85 @@
+{
+  "log": {
+    "disabled": true
+  },
+  "inbounds": [
+    {
+      "type": "socks",
+      "tag": "entry",
+      "listen": "127.0.0.1",
+      "listen_port": 1080,
+      "users": [
+        {
+          "username": "golden-user",
+          "password": "golden-socks-secret"
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "http",
+      "tag": "egress-primary",
+      "server": "198.51.100.20",
+      "server_port": 8080
+    },
+    {
+      "type": "socks",
+      "tag": "egress-backup",
+      "server": "198.51.100.21",
+      "server_port": 1080
+    },
+    {
+      "type": "direct",
+      "tag": "_panel_terminal_"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "port": [
+          15402
+        ],
+        "action": "reject"
+      },
+      {
+        "inbound": [
+          "entry"
+        ],
+        "action": "route",
+        "outbound": "egress-backup"
+      }
+    ],
+    "final": "_panel_terminal_",
+    "default_domain_resolver": "_panel_dns_"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "_panel_dns_"
+      },
+      {
+        "type": "hosts",
+        "tag": "_panel_loopback_",
+        "predefined": {
+          "localhost": [
+            "127.0.0.1",
+            "::1"
+          ]
+        }
+      }
+    ],
+    "final": "_panel_dns_"
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:15402",
+      "secret": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}

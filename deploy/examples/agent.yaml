@@ -1,0 +1,19 @@
+development: false
+control_address: panel.example.com:9443
+server_name: panel.example.com
+data_directory: /var/lib/proxy-agent
+core_name: xray
+core_path: /usr/local/lib/proxy-agent/xray
+# 可选签名发布下载配置见 docs/operations.md 第 9 节（只用于 Agent 自更新）。
+# updates:
+#   catalogue: https://releases.example.com/proxy-control
+#   ca: /etc/proxy-agent/release-ca.crt
+#   keys:
+#     - public_key: "替换为真实 Base64 Ed25519 公钥"
+#       components: [proxy-agent, xray, sing-box]
+#       revoked: false
+tls:
+  # 注册/续期在 data_directory/identity 中保存；注册前只需可信中央 CA。
+  certificate: /var/lib/proxy-agent/identity/client.crt
+  key: /var/lib/proxy-agent/identity/client.key
+  client_ca: /etc/proxy-agent/tls/ca.crt  # 校验面板 Web 证书（gRPC 9443 同用）的 CA，不是面板节点 CA

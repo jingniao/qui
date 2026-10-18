@@ -1,0 +1,26 @@
+[Unit]
+Description=Proxy Control node agent enforced outbound source
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=proxy-agent
+Group=proxy-agent
+ExecStart=/usr/local/bin/proxy-agent --apply-host-network /var/lib/proxy-agent/host-network
+WorkingDirectory=/var/lib/proxy-agent
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/proxy-agent/host-network
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

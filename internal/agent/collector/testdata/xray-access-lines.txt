@@ -1,0 +1,28 @@
+# Captured from the official Xray 26.3.27 windows-amd64 release
+# (xray-26.3.27-windows-amd64, zip sha256 d004c392...e1ad) on 2026-10-17.
+#
+# The probe rendered "log": {"access": <file>, "error": "none", "loglevel":
+# "error"} with a socks5 password inbound, a no-auth socks5 inbound, a vless
+# inbound with "email": "credential:cred-1", a freedom outbound, a blackhole
+# outbound, a domain rule to the blackhole and an inbound rule to freedom.
+# Every line below is one upstream access line, unmodified. Sources are local
+# probe ports, so the numbers are ephemeral.
+#
+# accepted, domain destination, route hit ("->")
+2026/10/17 11:33:29.727545 from tcp:127.0.0.1:63160 accepted tcp:localhost:63157 [entry -> direct]
+# accepted, IPv4 destination
+2026/10/17 11:33:29.934228 from tcp:127.0.0.1:63163 accepted tcp:127.0.0.1:63157 [entry -> direct]
+# accepted, bracketed IPv6 destination
+2026/10/17 11:33:31.135462 from tcp:127.0.0.1:63165 accepted tcp:[::1]:63157 [entry -> direct]
+# accepted, UDP session through SOCKS5 UDP associate
+2026/10/17 11:33:32.343632 from udp:127.0.0.1:58863 accepted udp:127.0.0.1:63158 [entry -> direct]
+# accepted into the blackhole outbound, which is how the panel blocks a domain
+2026/10/17 11:33:32.345014 from tcp:127.0.0.1:63175 accepted tcp:blocked.example:80 [entry -> block]
+# accepted through the default route ("->" vs ">>" vs "==>")
+2026/10/17 11:33:32.345598 from tcp:127.0.0.1:63176 accepted tcp:127.0.0.1:63157 [open >> direct]
+# rejected before routing: no destination, no detour, free-form reason
+2026/10/17 11:33:32.346148 from tcp:127.0.0.1:63178 rejected  proxy/socks: invalid username or password
+# accepted without any email field (socks5 password authentication)
+2026/10/17 11:33:32.546671 from tcp:127.0.0.1:63179 accepted tcp:127.0.0.1:63157 [entry -> direct]
+# accepted with the configured per-credential email (vless inbound)
+2026/10/17 11:33:33.463904 from 127.0.0.1:63186 accepted tcp:localhost:63157 [vless-entry -> direct] email: credential:cred-1

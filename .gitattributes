@@ -1,0 +1,5 @@
+*.sh text eol=lf
+# Migrations are embedded and their SHA-256 is stored in every database
+# (schema_migrations.checksum). Never convert their line endings.
+migrations/*.sql -text
+internal/agent/identity/testdata/store_write2/** -text

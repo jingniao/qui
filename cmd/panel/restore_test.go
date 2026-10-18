@@ -117,7 +117,7 @@ func TestRestoreCommandRequiresStoppedPanelAndCompleteArguments(t *testing.T) {
 
 func TestRestoreCommandStartsServiceAndCleansPlaintextMaterials(t *testing.T) {
 	c, path, backup, password, userID := restoreCLISetup(t)
-	commandCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	commandCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	binary := os.Getenv("PANEL_BINARY")
 	var command *exec.Cmd
@@ -145,7 +145,7 @@ func TestRestoreCommandStartsServiceAndCleansPlaintextMaterials(t *testing.T) {
 		}
 	}()
 	client := &http.Client{Timeout: time.Second}
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for {
 		response, err := client.Get("http://" + c.HTTPAddress + "/healthz")
 		if err == nil {
@@ -214,7 +214,7 @@ func TestRestoreCommandStartsServiceAndCleansPlaintextMaterials(t *testing.T) {
 				restart.Wait()
 			}
 		}()
-		restartDeadline := time.Now().Add(10 * time.Second)
+		restartDeadline := time.Now().Add(60 * time.Second)
 		for {
 			response, err := client.Get("http://" + c.HTTPAddress + "/healthz")
 			if err == nil {

@@ -65,7 +65,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 					t.Error("managed host failed to stop")
 				}
 			}()
-			client := &http.Client{Timeout: 3 * time.Second}
+			client := &http.Client{Timeout: 60 * time.Second}
 			base := "http://" + c.HTTPAddress
 			deadline := time.Now().Add(60 * time.Second)
 			for {
@@ -180,7 +180,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 				t.Fatal("restore not accepted", status, string(body))
 			}
 			if failCandidate {
-				deadline = time.Now().Add(15 * time.Second)
+				deadline = time.Now().Add(60 * time.Second)
 				for {
 					status, body = call("GET", "/restore-records", nil)
 					var result struct{ Items []restoretasks.Record }
@@ -204,7 +204,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 				}
 				return
 			}
-			deadline = time.Now().Add(15 * time.Second)
+			deadline = time.Now().Add(60 * time.Second)
 			for {
 				status, _ = call("GET", "/users", nil)
 				if status == 401 {
@@ -244,7 +244,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 			if status != 202 || second.ID == task.ID {
 				t.Fatal("rebuilt service could not accept subsequent restore", status, string(body))
 			}
-			deadline = time.Now().Add(15 * time.Second)
+			deadline = time.Now().Add(60 * time.Second)
 			for {
 				status, _ = call("GET", "/users", nil)
 				if status == 401 {

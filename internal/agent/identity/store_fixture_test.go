@@ -88,7 +88,12 @@ func TestWrite2StoreFixtureOpensUnchanged(t *testing.T) {
 	if !bytes.Equal(fixtureCertificate, materialCertificate) {
 		t.Fatal("fixture certificate bytes changed")
 	}
-	required, present, err := storage.Check(fixtureStoreDir, state.NodeID, agentstorage.Current("test"))
+	// The fixture was written on windows/amd64, and the sealed floor contract is
+	// platform-bound, so read it back with the fixture's platform to keep this
+	// test platform-independent.
+	reader := agentstorage.Current("test")
+	reader.OS, reader.Architecture = "windows", "amd64"
+	required, present, err := storage.Check(fixtureStoreDir, state.NodeID, reader)
 	if err != nil || !present {
 		t.Fatalf("open fixture storage floor: %v present=%v", err, present)
 	}

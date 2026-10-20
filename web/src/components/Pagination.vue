@@ -1,21 +1,21 @@
 <template>
-  <div class="flex items-center justify-between text-xs text-[#8E8E93]">
+  <div class="flex items-center justify-between text-xs text-ios-tertiary">
     <div>
-      共 <span class="font-semibold text-[#1C1C1E]">{{ total }}</span> 条记录
-      <span v-if="totalPages > 1" class="ml-2">第 {{ currentPage }} / {{ totalPages }} 页</span>
+      共 <span class="font-semibold text-ios-label tabular-nums">{{ total }}</span> 条记录
+      <span v-if="totalPages > 1" class="ml-2 font-normal">第 <span class="tabular-nums font-medium text-ios-label">{{ currentPage }}</span> / <span class="tabular-nums">{{ totalPages }}</span> 页</span>
     </div>
-    <div class="flex items-center gap-1.5">
+    <div class="flex items-center gap-2">
       <button
         :disabled="currentPage <= 1"
         @click="$emit('update:page', currentPage - 1)"
-        class="px-3 py-1 rounded-full border border-black/[0.08] bg-white text-[#1C1C1E] font-medium hover:bg-black/[0.03] disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-2xs"
+        class="px-3.5 py-1 rounded-full border border-[#D1D1D6] bg-white text-ios-label text-xs font-medium hover:bg-[#F5F5F7] disabled:opacity-35 disabled:cursor-not-allowed transition-all shadow-xs"
       >
         上一页
       </button>
       <button
         :disabled="currentPage >= totalPages"
         @click="$emit('update:page', currentPage + 1)"
-        class="px-3 py-1 rounded-full border border-black/[0.08] bg-white text-[#1C1C1E] font-medium hover:bg-black/[0.03] disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-2xs"
+        class="px-3.5 py-1 rounded-full border border-[#D1D1D6] bg-white text-ios-label text-xs font-medium hover:bg-[#F5F5F7] disabled:opacity-35 disabled:cursor-not-allowed transition-all shadow-xs"
       >
         下一页
       </button>

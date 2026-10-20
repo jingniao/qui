@@ -1,6 +1,6 @@
 <template>
-  <span :class="['inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border', classes[tone]]">
-    <span :class="['w-2 h-2 rounded-full shrink-0', dots[tone]]"></span><span>{{ label || displayLabel }}</span>
+  <span :class="['inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border tracking-tight', classes[tone]]">
+    <span :class="['w-1.5 h-1.5 rounded-full shrink-0', dots[tone]]"></span><span>{{ label || displayLabel }}</span>
   </span>
 </template>
 <script setup lang="ts">
@@ -19,7 +19,18 @@ const tone = computed<Tone>(() => {
   if (['expired', 'unhealthy', 'failed', 'error'].includes(status)) return 'red';
   return 'gray';
 });
-const classes: Record<Tone, string> = { green: 'bg-emerald-50 text-emerald-700 border-emerald-200', yellow: 'bg-amber-50 text-amber-700 border-amber-200', red: 'bg-red-50 text-red-700 border-red-200', gray: 'bg-gray-50 text-gray-600 border-gray-200', blue: 'bg-blue-50 text-blue-700 border-blue-200' };
-const dots: Record<Tone, string> = { green: 'bg-emerald-500', yellow: 'bg-amber-500', red: 'bg-red-500', gray: 'bg-gray-400', blue: 'bg-blue-500' };
+const classes: Record<Tone, string> = {
+  green: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  yellow: 'bg-amber-50 text-amber-800 border-amber-200',
+  red: 'bg-rose-50 text-rose-800 border-rose-200',
+  gray: 'bg-black/[0.05] text-[#48484A] border-black/[0.08]',
+  blue: 'bg-blue-50 text-[#0071E3] border-blue-200'
+};
+const dots: Record<Tone, string> = {
+  green: 'bg-emerald-500',
+  yellow: 'bg-amber-500',
+  red: 'bg-rose-500',
+  gray: 'bg-[#6E6E73]',
+  blue: 'bg-[#0071E3]'
+};
 </script>
-

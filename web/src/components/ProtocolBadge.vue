@@ -1,7 +1,7 @@
 <template>
   <span
     :class="[
-      'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold border transition-colors',
+      'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono tabular-nums font-semibold border transition-colors',
       badgeClass
     ]"
   >
@@ -20,23 +20,23 @@ const badgeClass = computed(() => {
   const p = props.protocol.toUpperCase();
   switch (p) {
     case 'VLESS':
-      return 'bg-[#007AFF]/10 text-[#007AFF] border-[#007AFF]/20';
+      return 'bg-ios-blue/10 text-ios-blue border-ios-blue/20';
     case 'TROJAN':
-      return 'bg-[#AF52DE]/10 text-[#AF52DE] border-[#AF52DE]/20';
+      return 'bg-ios-purple/10 text-ios-purple border-ios-purple/20';
     case 'SHADOWSOCKS':
-      return 'bg-[#5856D6]/10 text-[#5856D6] border-[#5856D6]/20';
+      return 'bg-ios-indigo/10 text-ios-indigo border-ios-indigo/20';
     case 'WIREGUARD':
-      return 'bg-[#34C759]/10 text-[#248A3D] border-[#34C759]/20';
+      return 'bg-ios-green/10 text-emerald-800 border-ios-green/20';
     case 'SOCKS5':
-      return 'bg-[#32ADE6]/10 text-[#0077A6] border-[#32ADE6]/20';
+      return 'bg-ios-teal/10 text-cyan-800 border-ios-teal/20';
     case 'HTTP':
-      return 'bg-[#FF9500]/10 text-[#B26B00] border-[#FF9500]/20';
+      return 'bg-ios-orange/10 text-amber-800 border-ios-orange/20';
     case 'DIRECT':
-      return 'bg-[#30B0C7]/10 text-[#007788] border-[#30B0C7]/20';
+      return 'bg-ios-teal/10 text-cyan-800 border-ios-teal/20';
     case 'BLOCK':
-      return 'bg-[#FF3B30]/10 text-[#D70015] border-[#FF3B30]/20';
+      return 'bg-ios-red/10 text-rose-800 border-ios-red/20';
     default:
-      return 'bg-black/[0.04] text-[#636366] border-black/[0.08]';
+      return 'bg-black/[0.04] text-ios-tertiary border-black/[0.08]';
   }
 });
 </script>

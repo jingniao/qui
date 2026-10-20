@@ -16,7 +16,9 @@ const messages: Record<string, string> = {
   not_found: '目标记录不存在。',
   internal_error: '服务暂时无法完成操作，请稍后重试。',
   user_inactive: '用户或设备已禁用、到期，或流量额度已用完。',
-  subscription_unavailable: '订阅已失效或当前用户、设备不可用。'
+  subscription_unavailable: '订阅已失效或当前用户、设备不可用。',
+  node_delete_not_allowed: '仅可取消尚未登记的节点；已登记节点请禁用并吊销证书。',
+  node_in_use: '节点已被入站、出站、代理链、分流规则或发布记录引用，请先移除这些配置。'
 };
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, options: { timeoutMs?: number } = {}): Promise<T> {

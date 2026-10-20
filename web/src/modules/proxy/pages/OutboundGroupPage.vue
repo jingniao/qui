@@ -1,7 +1,13 @@
 <template>
   <div class="space-y-6">
     <PageHeader title="出口组" parent="代理" description="将同一节点的多个出站组成调度目标。保存为草稿，配置发布后由 Agent 探测和选择出口。"><template #actions><button @click="openCreate" class="ios-btn-primary">创建出口组</button><button @click="load" class="ios-btn-secondary">刷新</button></template></PageHeader>
-    <label class="block text-sm">所属节点<select v-model="nodeId" @change="page = 1; load()" class="form-input-base mt-2"><option value="">全部节点</option><option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
+    <div class="flex items-center gap-3">
+      <span class="text-xs font-medium text-ios-secondary">所属节点</span>
+      <select v-model="nodeId" @change="page = 1; load()" class="ios-filter-select">
+        <option value="">全部节点</option>
+        <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
+      </select>
+    </div>
     <ErrorState v-if="error" :message="error" @retry="load" /><LoadingSkeleton v-else-if="loading && !groups.length" /><EmptyState v-else-if="!groups.length" title="暂无出口组" description="先创建出站，再选择组成员和调度方式。" />
     <DataTable v-else><template #header><th>名称 / 节点</th><th>调度方式</th><th>成员与最近探测</th><th>探测 / 失败策略</th><th>状态</th><th>操作</th></template><template #body><tr v-for="group in groups" :key="group.id">
       <td class="p-4 font-semibold">{{ group.name }}<p class="text-xs font-normal text-gray-500">{{ nodeName(group.nodeId) }}</p></td><td>{{ strategyNames[group.strategy] }}</td>

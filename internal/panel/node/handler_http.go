@@ -43,6 +43,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/nodes/enrollment-token", h.Auth.Require(http.HandlerFunc(h.enroll), true))
 	mux.Handle("PUT /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.update), true))
 	mux.Handle("POST /api/v1/nodes/{id}/revoke-certificate", h.Auth.Require(http.HandlerFunc(h.revoke), true))
+	mux.Handle("DELETE /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.delete), true))
 }
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	page, size, err := httpapi.Pagination(r)
@@ -161,9 +162,37 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	n, err := h.Repository.Get(r.Context(), id)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	if err := h.Repository.CancelEnrollment(r.Context(), id); err != nil {
+		h.fail(w, err)
+		return
+	}
+	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "取消节点登记", n.Name+" ("+n.ID+")", "成功", r.RemoteAddr); err != nil {
+		h.fail(w, err)
+		return
+	}
+	w.WriteHeader(204)
+	if h.Notify != nil {
+		h.Notify(id)
+	}
+}
 func (h *Handler) fail(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrNotFound) {
 		httpapi.Error(w, 404, "not_found", err.Error())
+		return
+	}
+	if errors.Is(err, ErrNodeEnrolled) {
+		httpapi.Error(w, 409, "node_delete_not_allowed", "仅可取消尚未登记的节点；已登记节点请禁用并吊销证书。")
+		return
+	}
+	if errors.Is(err, ErrNodeInUse) {
+		httpapi.Error(w, 409, "node_in_use", "节点已被入站、出站、代理链、分流规则或发布记录引用，请先移除这些配置。")
 		return
 	}
 	h.Auth.Logger.Error("node operation failed", "error", err)

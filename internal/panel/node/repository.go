@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"modernc.org/sqlite"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
@@ -18,6 +20,15 @@ var ErrToken = errors.New("invalid, expired or consumed enrollment token")
 var ErrIdentity = errors.New("invalid or revoked node identity")
 var ErrSequence = errors.New("message sequence is not consecutive")
 var ErrNotFound = errors.New("node not found")
+var ErrNodeEnrolled = errors.New("node is already enrolled")
+var ErrNodeInUse = errors.New("node is still referenced by configuration")
+
+// SQLite reports a refused delete either as SQLITE_CONSTRAINT or, when extended
+// result codes are on, as SQLITE_CONSTRAINT_FOREIGNKEY.
+const (
+	sqliteConstraint           = 19
+	sqliteConstraintForeignKey = 787
+)
 
 type Repository struct {
 	Database         *sql.DB
@@ -298,4 +309,64 @@ func (r *Repository) List(ctx context.Context, keyword string, page, size int) (
 		items = append(items, n)
 	}
 	return items, count, rows.Err()
+}
+
+// CancelEnrollment removes a node that has not enrolled an Agent yet. A node that
+// is already enrolled, or still referenced by other configuration, is kept: the
+// delete either matches no row or is refused by a foreign key. The enrollment
+// tokens and node group memberships cascade with the node.
+func (r *Repository) CancelEnrollment(ctx context.Context, id string) error {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var found int
+	err = tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=?", id).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := nodeInUse(ctx, tx, id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, "DELETE FROM nodes WHERE id=? AND status='pending' AND NOT EXISTS (SELECT 1 FROM node_identities WHERE node_id=?)", id, id)
+	if err != nil {
+		if foreignKeyViolation(err) {
+			return ErrNodeInUse
+		}
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrNodeEnrolled
+	}
+	return tx.Commit()
+}
+
+// nodeInUse reads the policies of another module to refuse the delete; it never
+// writes them.
+func nodeInUse(ctx context.Context, tx *sql.Tx, id string) error {
+	var found int
+	err := tx.QueryRowContext(ctx, "SELECT 1 FROM policies WHERE EXISTS(SELECT 1 FROM json_each(policies.scope_json, '$.node_ids') WHERE json_each.value=?)", id).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return ErrNodeInUse
+}
+
+func foreignKeyViolation(err error) bool {
+	var failure *sqlite.Error
+	if errors.As(err, &failure) {
+		return failure.Code() == sqliteConstraintForeignKey || failure.Code() == sqliteConstraint
+	}
+	return strings.Contains(err.Error(), "FOREIGN KEY constraint failed")
 }

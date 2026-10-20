@@ -1,14 +1,14 @@
 <template>
   <div class="space-y-4">
-    <p class="text-sm text-gray-600">{{ diff.baseRevision ? '#' + diff.baseRevision : '空配置' }} → #{{ diff.revision }} · {{ diff.changes.length }} 项字段变化</p>
-    <p class="text-xs text-gray-500">比较已保存的业务配置。凭据和密钥只显示变更标记；发布时仍会执行节点能力、依赖和核心校验。</p>
-    <p v-if="!diff.changes.length" class="p-4 bg-gray-50 rounded-xl text-sm text-gray-600">这两个版本没有业务配置变化。</p>
+    <p class="text-sm text-ios-secondary font-medium">{{ diff.baseRevision ? '#' + diff.baseRevision : '空配置' }} → #{{ diff.revision }} · {{ diff.changes.length }} 项字段变化</p>
+    <p class="text-xs text-ios-tertiary">比较已保存的业务配置。凭据和密钥只显示变更标记；发布时仍会执行节点能力、依赖和核心校验。</p>
+    <p v-if="!diff.changes.length" class="p-4 bg-black/[0.03] rounded-2xl text-sm text-ios-tertiary">这两个版本没有业务配置变化。</p>
     <div v-else class="space-y-3">
-      <section v-for="change in diff.changes" :key="change.category + '/' + change.id + '/' + change.field" class="border rounded-xl p-4 space-y-2">
-        <div class="flex justify-between gap-3 text-sm"><span class="font-semibold">{{ categoryLabel(change.category) }} · {{ fieldLabel(change.field) }}</span><span :class="change.kind === 'removed' ? 'text-red-600' : change.kind === 'added' ? 'text-green-700' : 'text-blue-600'">{{ kindLabel(change.kind) }}</span></div>
-        <p class="text-xs text-gray-500 break-all">{{ change.id }}</p>
-        <div class="grid md:grid-cols-2 gap-3 text-xs"><div class="bg-red-50 rounded-lg p-3"><p class="text-gray-500 mb-2">比较版本</p><pre class="whitespace-pre-wrap break-words">{{ valueLabel(change.before) }}</pre></div><div class="bg-green-50 rounded-lg p-3"><p class="text-gray-500 mb-2">目标版本</p><pre class="whitespace-pre-wrap break-words">{{ valueLabel(change.after) }}</pre></div></div>
-        <p v-if="change.hidden" class="text-xs text-gray-500">敏感字段已变化，具体内容保持隐藏。</p>
+      <section v-for="change in diff.changes" :key="change.category + '/' + change.id + '/' + change.field" class="border border-black/[0.08] rounded-2xl p-4 space-y-2 bg-white">
+        <div class="flex justify-between gap-3 text-sm"><span class="font-semibold text-ios-label">{{ categoryLabel(change.category) }} · {{ fieldLabel(change.field) }}</span><span :class="change.kind === 'removed' ? 'text-ios-red' : change.kind === 'added' ? 'text-ios-green' : 'text-ios-blue'" class="font-medium text-xs">{{ kindLabel(change.kind) }}</span></div>
+        <p class="text-xs font-mono tabular-nums text-ios-tertiary break-all">{{ change.id }}</p>
+        <div class="grid md:grid-cols-2 gap-3 text-xs"><div class="bg-rose-50/70 border border-rose-200/50 rounded-xl p-3"><p class="text-rose-800 font-medium mb-1.5">比较版本</p><pre class="font-mono tabular-nums whitespace-pre-wrap break-words text-rose-950">{{ valueLabel(change.before) }}</pre></div><div class="bg-emerald-50/70 border border-emerald-200/50 rounded-xl p-3"><p class="text-emerald-800 font-medium mb-1.5">目标版本</p><pre class="font-mono tabular-nums whitespace-pre-wrap break-words text-emerald-950">{{ valueLabel(change.after) }}</pre></div></div>
+        <p v-if="change.hidden" class="text-xs text-ios-tertiary">敏感字段已变化，具体内容保持隐藏。</p>
       </section>
     </div>
   </div>

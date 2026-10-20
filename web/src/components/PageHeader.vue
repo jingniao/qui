@@ -1,16 +1,16 @@
 <template>
   <div class="mb-7 flex flex-col md:flex-row md:items-center justify-between gap-4">
     <div>
-      <div v-if="parent" class="flex items-center gap-2 text-xs font-medium text-[#8E8E93] mb-1">
+      <div v-if="parent" class="flex items-center gap-1.5 text-xs font-medium text-ios-tertiary mb-1">
         <span>{{ parent }}</span>
-        <span class="text-[#C7C7CC]">/</span>
-        <span class="text-[#007AFF] font-medium">{{ title }}</span>
+        <span class="text-ios-quaternary">/</span>
+        <span class="text-ios-blue font-medium">{{ title }}</span>
       </div>
-      <h1 class="text-2xl sm:text-[28px] font-bold text-[#1C1C1E] tracking-tight flex items-center gap-3">
+      <h1 class="text-2xl sm:text-[28px] font-bold text-ios-label tracking-tight flex items-center gap-3">
         <span>{{ title }}</span>
         <slot name="badge"></slot>
       </h1>
-      <p v-if="description" class="text-sm text-[#8E8E93] mt-1 max-w-3xl leading-relaxed">
+      <p v-if="description" class="text-sm text-ios-secondary mt-1.5 max-w-3xl leading-relaxed font-normal">
         {{ description }}
       </p>
     </div>

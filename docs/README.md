@@ -9,6 +9,7 @@
 | 产品需求和架构原则 | [项目说明书](../AGENTS.md) |
 | 项目首页 | [项目首页](../README.md) |
 | 系统组成、模块边界和数据流 | [架构总览](architecture.md) |
+| 前端设计系统、视觉交互与按钮规范 | [设计系统规范](design-system.md) |
 | 安装面板、接入节点、升级 | [部署与升级](deployment.md) |
 | 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
 | 协议与能力支持范围 | [协议支持矩阵](protocol-support-matrix.md) |

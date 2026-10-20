@@ -409,6 +409,18 @@ func TestNodeHTTPAuthorizationAndExpiredEnrollment(t *testing.T) {
 	if response.Code != 404 {
 		t.Fatal("unknown node did not return 404")
 	}
+	// Cancelling a registration is Owner-only, and an enrolled node is kept: the
+	// Agent's certificate is revoked instead of deleting the record.
+	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", viewerCookie, viewerSession.CSRFToken); response.Code != 403 {
+		t.Fatalf("Viewer cancelled a node enrollment: %d", response.Code)
+	}
+	if _, err := app.Database.Exec("INSERT INTO node_identities(node_id,certificate_pem,fingerprint,expires_at) VALUES(?,'pem','enrolled-fingerprint',?)", enrolled.Node.ID, time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05.000000000Z")); err != nil {
+		t.Fatal(err)
+	}
+	response = call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken)
+	if response.Code != 409 || !strings.Contains(response.Body.String(), "node_delete_not_allowed") {
+		t.Fatalf("enrolled node was cancelled: %d %s", response.Code, response.Body.String())
+	}
 }
 
 func TestAgentReconnectsAfterCentralDatabaseReopen(t *testing.T) {

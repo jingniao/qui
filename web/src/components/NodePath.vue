@@ -2,23 +2,23 @@
   <div class="inline-flex items-center flex-wrap gap-1.5 py-1">
     <template v-for="(hop, idx) in normalizedHops" :key="idx">
       <!-- Node Chip -->
-      <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-slate-200 shadow-2xs text-xs">
+      <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white border border-[#D1D1D6] shadow-2xs text-xs">
         <span
-          class="w-1.5 h-1.5 rounded-full"
+          class="w-1.5 h-1.5 rounded-full shrink-0"
           :class="hop.status === 'unhealthy' ? 'bg-rose-500' : 'bg-emerald-500'"
         ></span>
-        <span class="font-medium text-slate-800">{{ hop.nodeName }}</span>
-        <span v-if="hop.latency" class="text-[10px] text-slate-400 font-mono">
+        <span class="font-medium text-ios-label">{{ hop.nodeName }}</span>
+        <span v-if="hop.latency" class="text-[10px] text-ios-tertiary font-mono tabular-nums">
           {{ hop.latency }}ms
         </span>
       </div>
 
       <!-- Arrow & Protocol Transition -->
-      <div v-if="idx < normalizedHops.length - 1" class="inline-flex items-center gap-1 text-slate-400">
+      <div v-if="idx < normalizedHops.length - 1" class="inline-flex items-center gap-1 text-ios-tertiary">
         <span class="text-xs">→</span>
         <span
           v-if="hop.protocol"
-          class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/60"
+          class="text-[10px] font-mono tabular-nums font-semibold px-1.5 py-0.5 rounded-full bg-black/[0.04] text-ios-secondary border border-black/[0.08]"
         >
           {{ hop.protocol }}
         </span>

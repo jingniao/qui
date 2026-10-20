@@ -1,7 +1,13 @@
 <template>
   <div class="space-y-6">
     <PageHeader title="出站" parent="代理" description="选择直连、阻断、外部代理或内部节点中转，入口协议与下一跳协议独立。"><template #actions><button @click="openCreate" class="ios-btn-primary">创建出站</button><button @click="revision" :disabled="!nodeId" class="ios-btn-secondary disabled:opacity-40">生成节点配置版本</button></template></PageHeader>
-    <label class="text-sm">所属节点<select v-model="nodeId" @change="page = 1; load()" class="form-input-base mt-2"><option value="">全部节点</option><option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
+    <div class="flex items-center gap-3">
+      <span class="text-xs font-medium text-ios-secondary">所属节点</span>
+      <select v-model="nodeId" @change="page = 1; load()" class="ios-filter-select">
+        <option value="">全部节点</option>
+        <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
+      </select>
+    </div>
     <ErrorState v-if="error" :message="error" @retry="load" /><EmptyState v-else-if="!outbounds.length" title="暂无自定义出站" description="每个节点默认具有 Direct 与 Block，其他出站可在此创建。" />
     <DataTable v-else><template #header><th>名称</th><th>节点</th><th>协议</th><th>目标</th><th>TCP / UDP</th><th>状态 / 探测</th><th>操作</th></template><template #body><tr v-for="outbound in outbounds" :key="outbound.id"><td class="p-4 font-semibold">{{ outbound.name }}</td><td>{{ nodes.find(node => node.id === outbound.nodeId)?.name || outbound.nodeId }}</td><td>{{ outbound.protocol }}</td><td class="text-xs">{{ outbound.targetNodeId ? nodes.find(node => node.id === outbound.targetNodeId)?.name || outbound.targetNodeId : outbound.address || '本地' }}<p>{{ outbound.port || '—' }} · {{ outbound.targetInboundId ? '内部中转' : '外部或本地出站' }}</p></td><td class="text-xs"><p v-if="outbound.wireGuardPublicKey" class="max-w-48 break-all font-mono" :title="outbound.wireGuardPublicKey">公钥：{{ outbound.wireGuardPublicKey }}</p>{{ outbound.supportTcp ? 'TCP' : '—' }} / {{ outbound.supportUdp ? 'UDP' : '—' }}</td><td><StatusBadge :status="outbound.enabled ? 'active' : 'disabled'" /><p class="text-xs text-gray-500 mt-2">{{ healthLabel(outbound, outbound.probeInterval) }}</p></td><td class="space-x-2"><button @click="openEdit(outbound)" class="ios-action-btn-primary">编辑</button><button @click="target = outbound; confirmVisible = true" class="ios-action-btn-danger">删除</button></td></tr></template><template #footer><Pagination :total="total" :current-page="page" :page-size="20" @update:page="changePage" /></template></DataTable>
     <FormDrawer v-model="drawer" :title="editing ? '编辑出站' : '创建出站'" :loading="saving" @confirm="save" confirm-text="保存草稿">
@@ -63,5 +69,3 @@ async function remove() { if (!target.value) return; try { await proxyAPI.delete
 async function revision() { if (!nodeId.value) return; try { await proxyAPI.revision(nodeId.value, '更新节点代理出站'); await router.push('/system/revisions'); } catch (e) { showToast((e as Error).message, 'error'); } }
 watch(drawer, visible => { if (!visible) { form.secret = ''; wgSecret.value = ''; } }); onMounted(() => { loadProtocolSupport(); load(); });
 </script>
-
-

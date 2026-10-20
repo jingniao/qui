@@ -1,13 +1,13 @@
 <template>
   <div class="flex items-center gap-2">
-    <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200/60">
+    <div class="flex-1 h-2 bg-black/[0.06] rounded-full overflow-hidden">
       <div
         class="h-full rounded-full transition-all duration-300"
         :class="barColor"
         :style="{ width: `${clampedPercent}%` }"
       ></div>
     </div>
-    <span class="text-xs font-mono font-medium text-slate-600 min-w-[36px] text-right">
+    <span v-if="showLabel" class="text-xs font-mono tabular-nums font-medium text-ios-secondary min-w-[36px] text-right">
       {{ clampedPercent }}%
     </span>
   </div>

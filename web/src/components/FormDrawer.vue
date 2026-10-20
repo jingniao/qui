@@ -1,76 +1,65 @@
 <template>
   <Teleport to="body">
-    <Transition
-      enter-active-class="transition duration-300 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-200 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
+    <Transition name="ios-modal">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-50 bg-black/30 backdrop-blur-md flex justify-end transition-all"
+        class="fixed inset-0 z-50 bg-black/45 backdrop-blur-md flex items-center justify-center p-6 sm:p-8 lg:p-12 overflow-hidden"
         @click.self="handleClose"
       >
-        <Transition
-          enter-active-class="transform transition ease-out duration-300"
-          enter-from-class="translate-x-full"
-          enter-to-class="translate-x-0"
-          leave-active-class="transform transition ease-in duration-200"
-          leave-from-class="translate-x-0"
-          leave-to-class="translate-x-full"
+        <div
+          :class="[
+            'ios-modal-panel w-full bg-white rounded-3xl shadow-ios-lg border border-black/[0.08] overflow-hidden flex flex-col max-h-[85vh] my-auto',
+            widthClass
+          ]"
         >
-          <div
-            v-if="modelValue"
-            :class="[
-              'w-full bg-[#F8F8FA]/98 backdrop-blur-2xl h-full shadow-2xl flex flex-col border-l border-black/[0.08]',
-              widthClass
-            ]"
-          >
-            <!-- Drawer Header -->
-            <div class="px-6 py-4.5 border-b border-black/[0.05] flex items-center justify-between bg-white/70 backdrop-blur-xl">
-              <div>
-                <h3 class="text-base font-bold text-[#1C1C1E] tracking-tight">{{ title }}</h3>
-                <p v-if="description" class="text-xs text-[#8E8E93] mt-0.5">{{ description }}</p>
-              </div>
-              <button
-                @click="handleClose"
-                class="w-7 h-7 rounded-full flex items-center justify-center bg-black/[0.05] text-[#8E8E93] hover:text-[#1C1C1E] hover:bg-black/[0.1] transition-colors"
-              >
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+          <!-- Modal Header (Symmetrical with Footer) -->
+          <div class="px-7 py-[1.125rem] min-h-[4rem] border-b border-black/[0.08] flex items-center justify-between bg-[#F5F5F7] shrink-0">
+            <div>
+              <h3 class="text-lg font-semibold text-ios-label tracking-tight leading-none">{{ title }}</h3>
+              <p v-if="description" class="text-xs text-ios-tertiary mt-1.5 leading-normal">{{ description }}</p>
             </div>
-
-            <!-- Drawer Body -->
-            <div class="flex-1 overflow-y-auto p-6 space-y-5 bg-[#F8F8FA]">
-              <slot></slot>
-            </div>
-
-            <!-- Drawer Footer -->
-            <div v-if="showFooter" class="px-6 py-4 border-t border-black/[0.05] bg-white/70 backdrop-blur-xl flex items-center justify-end gap-3">
-              <slot name="footer">
-                <button
-                  type="button"
-                  @click="handleClose"
-                  class="px-4 py-2 text-xs font-semibold rounded-full bg-black/[0.05] hover:bg-black/[0.08] text-[#1C1C1E] transition-all"
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  :disabled="loading"
-                  @click="$emit('confirm')"
-                  class="px-5 py-2 text-xs font-semibold rounded-full text-white bg-[#007AFF] hover:bg-[#0071E3] disabled:opacity-40 transition-all shadow-[0_2px_8px_rgba(0,122,255,0.25)]"
-                >
-                  {{ confirmText }}
-                </button>
-              </slot>
-            </div>
+            <button
+              type="button"
+              @click="handleClose"
+              class="w-[1.875rem] h-[1.875rem] rounded-full flex items-center justify-center bg-black/[0.05] text-ios-tertiary hover:text-ios-label hover:bg-black/[0.1] transition-colors"
+              title="关闭"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-        </Transition>
+
+          <!-- Modal Body (Generous & Symmetrical Padding) -->
+          <div class="flex-1 overflow-y-auto px-7 py-5 space-y-[1.125rem] scrollbar-thin">
+            <slot></slot>
+          </div>
+
+          <!-- Modal Footer (Symmetrical with Header) -->
+          <div v-if="showFooter" class="px-7 py-4 min-h-[3.75rem] border-t border-black/[0.08] bg-[#F5F5F7] flex items-center justify-end gap-3 shrink-0">
+            <slot name="footer">
+              <button
+                type="button"
+                @click="handleClose"
+                class="ios-dialog-btn-secondary"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                :disabled="loading"
+                @click="$emit('confirm')"
+                class="ios-dialog-btn-primary"
+              >
+                <svg v-if="loading" class="animate-spin -ml-0.5 h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>{{ confirmText }}</span>
+              </button>
+            </slot>
+          </div>
+        </div>
       </div>
     </Transition>
   </Teleport>

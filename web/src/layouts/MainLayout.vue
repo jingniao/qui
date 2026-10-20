@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-screen w-screen overflow-hidden bg-[#F2F2F7]">
+  <div class="flex h-screen w-screen overflow-hidden bg-ios-bg">
     <!-- Desktop & Tablet Sidebar -->
     <div :class="['hidden lg:block shrink-0 transition-all duration-300', sidebarCollapsed ? 'w-20' : 'w-68']">
       <AppSidebar :collapsed="sidebarCollapsed" @toggle="sidebarCollapsed = !sidebarCollapsed" />
@@ -22,7 +22,7 @@
       <AppHeader @toggle-sidebar="mobileSidebarOpen = !mobileSidebarOpen" />
 
       <!-- Scrollable Main View -->
-      <main class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 bg-[#F2F2F7]">
+      <main class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 bg-ios-bg">
         <div class="max-w-[1536px] mx-auto w-full">
           <router-view v-slot="{ Component }">
             <transition name="fade-fast" mode="out-in">
@@ -58,7 +58,3 @@ const mobileSidebarOpen = ref(false);
   opacity: 0;
 }
 </style>
-
-
-
-

@@ -56,7 +56,8 @@ requestHealth:(id:string,expectedRevision:number)=>request<HealthCheck>(`/nodes/
   enroll: (name: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name }),
   update: (node: NodeView, enabled: boolean) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled }),
   save: (node: NodeSettingsInput) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled: node.enabled, publicIp: node.publicIp, allowSubscription: node.allowSubscription, maintenance: node.maintenance, outboundSourceIp: node.outboundSourceIp, outboundInterface: node.outboundInterface, hostSourceIpv4: node.hostSourceIpv4, hostSourceIpv6: node.hostSourceIpv6 }),
-  revoke: (id: string) => request(`/nodes/${id}/revoke-certificate`, 'POST')
+  revoke: (id: string) => request(`/nodes/${id}/revoke-certificate`, 'POST'),
+  cancelEnrollment: (id: string) => request(`/nodes/${encodeURIComponent(id)}`, 'DELETE')
 };
 
 

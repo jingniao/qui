@@ -1,21 +1,25 @@
 <template>
-  <header class="h-16 bg-white border-b border-black/[0.06] px-4 sm:px-6 flex items-center justify-between shrink-0">
+  <header class="h-16 bg-white border-b border-black/[0.08] px-4 sm:px-6 flex items-center justify-between shrink-0 shadow-2xs">
     <div class="flex items-center gap-3">
-      <button @click="$emit('toggle-sidebar')" aria-label="打开导航" class="lg:hidden text-xl">☰</button>
-      <span class="text-sm text-[#8E8E93]">{{ route.meta.parent }}</span><span class="text-sm font-semibold">{{ route.meta.title }}</span>
+      <button @click="$emit('toggle-sidebar')" aria-label="打开导航" class="lg:hidden text-xl text-ios-label">☰</button>
+      <div class="flex items-center gap-1.5 text-xs">
+        <span v-if="route.meta.parent" class="text-ios-tertiary font-medium">{{ route.meta.parent }}</span>
+        <span v-if="route.meta.parent" class="text-ios-quaternary">/</span>
+        <span class="font-semibold text-ios-label text-sm">{{ route.meta.title }}</span>
+      </div>
     </div>
     <div class="flex items-center gap-3 text-xs">
-      <span>{{ authState.currentUser?.displayName || authState.currentUser?.username }}</span>
-      <span class="rounded-full bg-blue-50 text-blue-700 px-2 py-1">{{ authState.currentUser?.role }}</span>
-      <button @click="passwordVisible = true" class="text-[#007AFF]">修改密码</button>
-      <button @click="handleLogout" class="text-red-600">退出</button>
+      <span class="font-medium text-ios-label">{{ authState.currentUser?.displayName || authState.currentUser?.username }}</span>
+      <span class="rounded-full bg-ios-blue/10 text-ios-blue border border-ios-blue/20 px-2.5 py-0.5 font-medium">{{ authState.currentUser?.role }}</span>
+      <button @click="passwordVisible = true" class="text-ios-blue hover:underline font-medium">修改密码</button>
+      <button @click="handleLogout" class="text-ios-red hover:underline font-medium">退出</button>
     </div>
   </header>
   <FormDrawer v-model="passwordVisible" title="修改登录密码" description="修改后所有会话将失效，需要重新登录。" @confirm="submitPassword" :loading="busy">
     <div class="space-y-4">
-      <label class="block text-sm">当前密码<input v-model="currentPassword" type="password" autocomplete="current-password" class="form-input-base mt-2" /></label>
-      <label class="block text-sm">新密码<input v-model="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" class="form-input-base mt-2" /></label>
-      <label class="block text-sm">确认新密码<input v-model="confirmPassword" type="password" autocomplete="new-password" class="form-input-base mt-2" /></label>
+      <label class="block text-xs font-medium text-ios-secondary">当前密码<input v-model="currentPassword" type="password" autocomplete="current-password" class="form-input-base mt-1.5" /></label>
+      <label class="block text-xs font-medium text-ios-secondary">新密码<input v-model="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" class="form-input-base mt-1.5" /></label>
+      <label class="block text-xs font-medium text-ios-secondary">确认新密码<input v-model="confirmPassword" type="password" autocomplete="new-password" class="form-input-base mt-1.5" /></label>
     </div>
   </FormDrawer>
 </template>
@@ -42,4 +46,3 @@ async function submitPassword() {
   finally { busy.value = false; }
 }
 </script>
-

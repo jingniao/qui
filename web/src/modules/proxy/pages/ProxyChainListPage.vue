@@ -1,7 +1,13 @@
 <template>
   <div class="space-y-6">
     <PageHeader title="代理链" parent="代理" description="使用专用内部入站连接两个或三个节点。保存后通过批次发布，按出口到入口的顺序应用。"><template #actions><router-link to="/proxy/chains/new" class="ios-btn-primary">创建代理链</router-link><router-link to="/system/revisions" class="ios-btn-secondary">查看发布批次</router-link></template></PageHeader>
-    <label class="block text-sm">包含节点<select v-model="nodeId" @change="page = 1; load()" class="form-input-base mt-2"><option value="">全部节点</option><option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
+    <div class="flex items-center gap-3">
+      <span class="text-xs font-medium text-ios-secondary">包含节点</span>
+      <select v-model="nodeId" @change="page = 1; load()" class="ios-filter-select">
+        <option value="">全部节点</option>
+        <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
+      </select>
+    </div>
     <ErrorState v-if="error" :message="error" @retry="load" /><LoadingSkeleton v-else-if="loading && !chains.length" /><EmptyState v-else-if="!chains.length" title="暂无代理链" description="先创建目标内部入站和对应中转出站，再组合代理链。" />
     <DataTable v-else><template #header><th>名称 / 配置路径</th><th>每跳协议与最近探测</th><th>能力 / 失败策略</th><th>状态</th><th>操作</th></template><template #body><tr v-for="chain in chains" :key="chain.id">
       <td class="p-4"><router-link :to="'/proxy/chains/' + chain.id + '/edit'" class="font-semibold text-blue-600">{{ chain.name }}</router-link><p class="text-xs mt-2">{{ chain.nodeIds.map(nodeName).join(' → ') }} → {{ outboundName(chain.finalOutboundId) }}</p></td>

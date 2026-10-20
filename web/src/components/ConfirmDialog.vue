@@ -1,24 +1,17 @@
 <template>
   <Teleport to="body">
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
+    <Transition name="ios-modal">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-50 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 transition-all"
+        class="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4 overflow-hidden"
         @click.self="handleClose"
       >
-        <div class="w-full max-w-md bg-white/95 backdrop-blur-2xl rounded-3xl shadow-ios-lg border border-black/[0.08] p-6 space-y-4">
+        <div class="ios-modal-panel w-full max-w-md bg-white rounded-3xl shadow-ios-lg border border-black/[0.08] p-6 space-y-4">
           <div class="flex items-start gap-4">
             <div
               :class="[
-                'w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-2xs',
-                isDanger ? 'bg-[#FF3B30]/12 text-[#FF3B30]' : 'bg-[#FF9500]/12 text-[#FF9500]'
+                'w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-2xs',
+                isDanger ? 'bg-ios-red/10 text-ios-red' : 'bg-ios-orange/10 text-ios-orange'
               ]"
             >
               <svg v-if="isDanger" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -29,9 +22,9 @@
               </svg>
             </div>
             <div class="flex-1">
-              <h3 class="text-base font-bold text-[#1C1C1E] tracking-tight">{{ title }}</h3>
-              <p class="text-xs text-[#8E8E93] mt-1 leading-relaxed">{{ message }}</p>
-              <div v-if="warningDetails" class="mt-2.5 p-2.5 rounded-xl bg-[#FF3B30]/8 text-[#D70015] text-xs border border-[#FF3B30]/15">
+              <h3 class="text-base font-semibold text-ios-label tracking-tight">{{ title }}</h3>
+              <p class="text-sm text-ios-secondary mt-1 leading-relaxed">{{ message }}</p>
+              <div v-if="warningDetails" class="mt-2.5 p-2.5 rounded-xl bg-ios-red/[0.08] text-ios-red text-xs border border-ios-red/15">
                 {{ warningDetails }}
               </div>
             </div>
@@ -41,17 +34,14 @@
             <button
               type="button"
               @click="handleClose"
-              class="px-4 py-2 text-xs font-semibold rounded-full bg-black/[0.05] hover:bg-black/[0.08] text-[#1C1C1E] transition-all"
+              class="ios-dialog-btn-secondary"
             >
               取消
             </button>
             <button
               type="button"
               @click="handleConfirm"
-              :class="[
-                'px-5 py-2 text-xs font-semibold rounded-full text-white transition-all shadow-xs',
-                isDanger ? 'bg-[#FF3B30] hover:bg-[#D70015] shadow-[0_2px_8px_rgba(255,59,48,0.25)]' : 'bg-[#FF9500] hover:bg-[#D97D00] shadow-[0_2px_8px_rgba(255,149,0,0.25)]'
-              ]"
+              :class="isDanger ? 'ios-dialog-btn-danger' : 'ios-dialog-btn-warning'"
             >
               {{ confirmText }}
             </button>

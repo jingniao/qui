@@ -1,7 +1,7 @@
 <template>
-  <span class="font-mono text-slate-800 tracking-tight">
+  <span class="font-mono tabular-nums text-ios-label tracking-tight">
     <span :class="valueClass">{{ formatted.value }}</span>
-    <span class="text-xs text-slate-500 ml-1 font-sans">{{ formatted.unit }}</span>
+    <span class="text-xs text-ios-tertiary ml-1 font-sans font-normal">{{ formatted.unit }}</span>
   </span>
 </template>
 

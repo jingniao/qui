@@ -1,20 +1,25 @@
 <template>
   <aside
     :class="[
-      'h-full bg-[#F8F8FA]/95 backdrop-blur-xl text-[#1C1C1E] flex flex-col border-r border-black/[0.06] transition-all duration-300 z-40 select-none w-full'
+      'h-full bg-[#F8F8FA]/95 backdrop-blur-xl text-ios-label flex flex-col border-r border-black/[0.06] transition-all duration-300 select-none w-full relative',
+      isCollapsed ? 'z-50' : 'z-40'
     ]"
   >
     <!-- Brand Logo & Title (Apple Squircle Vibe with comfortable spacing) -->
-    <div class="h-16 px-4 flex items-center justify-between border-b border-black/[0.05] shrink-0">
-      <router-link to="/dashboard" class="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
-        <div class="w-8.5 h-8.5 rounded-[10px] bg-gradient-to-tr from-[#007AFF] to-[#5856D6] flex items-center justify-center text-white shrink-0 shadow-[0_3px_10px_rgba(0,122,255,0.25)]">
-          <svg class="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <div :class="['h-16 flex items-center border-b border-black/[0.05] shrink-0 transition-all', isCollapsed ? 'justify-center px-0' : 'justify-between px-4']">
+      <router-link
+        to="/dashboard"
+        :class="['flex items-center min-w-0 overflow-hidden group', isCollapsed ? 'justify-center' : 'gap-2.5 flex-1']"
+        :title="isCollapsed ? (authState.platformName || '轻量代理控制平台') : undefined"
+      >
+        <div class="w-9 h-9 rounded-[10px] bg-gradient-to-tr from-[#0071E3] to-[#5856D6] flex items-center justify-center text-white shrink-0 shadow-[0_3px_10px_rgba(0,113,227,0.25)] group-hover:scale-105 transition-transform">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         </div>
         <div v-if="!isCollapsed" class="flex flex-col min-w-0 truncate">
-          <span class="font-bold text-[#1C1C1E] text-sm tracking-tight truncate leading-snug">{{ authState.platformName }}</span>
-          <span class="text-[11px] text-[#8E8E93] font-medium leading-none truncate">轻量代理控制平台</span>
+          <span class="font-semibold text-ios-label text-sm tracking-tight truncate leading-snug">{{ authState.platformName }}</span>
+          <span class="text-[11px] text-ios-tertiary font-normal leading-none truncate">轻量代理控制平台</span>
         </div>
       </router-link>
 
@@ -22,134 +27,221 @@
         v-if="!isCollapsed"
         type="button"
         @click="toggleCollapse"
-        class="hidden lg:flex w-7 h-7 rounded-lg text-[#8E8E93] hover:text-[#1C1C1E] hover:bg-black/[0.05] items-center justify-center transition-colors shrink-0 ml-1.5"
+        class="hidden lg:flex w-7 h-7 rounded-lg text-ios-tertiary hover:text-ios-label hover:bg-black/[0.05] items-center justify-center transition-colors shrink-0 ml-1.5"
         title="折叠导航栏"
       >
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <rect x="3" y="4" width="18" height="16" rx="2.5" stroke-width="1.8" />
+          <path d="M9 4v16" stroke-width="1.8" />
+          <path d="M16 9.5L13.5 12l2.5 2.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
     </div>
 
-    <!-- Top Action bar: Quick All Expand / Collapse toggle -->
-    <div v-if="!isCollapsed" class="px-4 pt-3 pb-1 flex items-center justify-between text-[11px] text-[#8E8E93]">
-      <span class="font-semibold uppercase tracking-wider">业务导航分栏</span>
-      <button
-        type="button"
-        @click="toggleAllSections"
-        class="px-2 py-0.5 rounded-full hover:bg-black/[0.05] hover:text-[#007AFF] font-medium transition-all"
-      >
-        {{ areAllSectionsOpen ? '折叠全部' : '展开全部' }}
-      </button>
-    </div>
-
-    <!-- Navigation Menu Items (Collapsible Section Groups) -->
-    <div class="flex-1 overflow-y-auto px-3 py-2 space-y-1 scrollbar-thin">
+    <!-- Navigation Menu Items -->
+    <div :class="['flex-1 py-2.5', isCollapsed ? 'overflow-visible px-2 flex flex-col items-center space-y-2' : 'overflow-y-auto px-3 space-y-1 scrollbar-thin']">
       <!-- 1. Standalone Top Item: Dashboard (系统总览) -->
-      <router-link
-        to="/dashboard"
-        :class="[
-          'flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all group',
-          isCurrentPath('/dashboard') ? 'bg-[#007AFF] text-white shadow-[0_2px_8px_rgba(0,122,255,0.28)] font-semibold' : 'text-[#3C3C43] hover:text-[#1C1C1E] hover:bg-black/[0.04]'
-        ]"
-      >
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-        </svg>
-        <span v-if="!isCollapsed">系统总览</span>
-      </router-link>
-
-      <!-- 2. Collapsible Sections (默认为折叠) -->
-      <div v-for="sec in navSections" :key="sec.id" v-show="!isViewer || sec.id === 'nodes'" class="pt-0.5">
-        <!-- Section Collapsible Header Button -->
-        <button
-          type="button"
-          @click="toggleSection(sec.id)"
+      <div :class="['relative group/item', isCollapsed ? 'flex justify-center w-full' : '']">
+        <router-link
+          to="/dashboard"
           :class="[
-            'w-full flex items-center justify-between px-3 py-2 rounded-xl text-[13px] font-medium transition-all group select-none',
-            isSectionActive(sec.id) && !openSections[sec.id]
-              ? 'bg-[#007AFF]/10 text-[#007AFF] font-semibold'
-              : 'text-[#8E8E93] hover:text-[#1C1C1E] hover:bg-black/[0.04]'
+            'transition-all flex items-center select-none',
+            isCollapsed
+              ? 'w-11 h-11 justify-center rounded-xl'
+              : 'gap-2.5 px-3 py-2 rounded-xl text-sm w-full',
+            isCurrentPath('/dashboard')
+              ? 'bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,113,227,0.28)] font-semibold'
+              : 'text-ios-label font-normal hover:text-black hover:bg-black/[0.04]'
           ]"
-          :title="sec.label"
         >
-          <div class="flex items-center gap-2.5 truncate">
-            <!-- Section Icon -->
-            <svg
-              class="w-4 h-4 shrink-0 transition-colors"
-              :class="isSectionActive(sec.id) ? 'text-[#007AFF]' : 'text-[#8E8E93] group-hover:text-[#1C1C1E]'"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sec.iconPath" />
-            </svg>
-            <span v-if="!isCollapsed" class="tracking-wide truncate">{{ sec.label }}</span>
-          </div>
+          <svg :class="['shrink-0', isCollapsed ? 'w-5 h-5' : 'w-4 h-4']" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+          </svg>
+          <span v-if="!isCollapsed">系统总览</span>
+        </router-link>
 
-          <div v-if="!isCollapsed" class="flex items-center gap-2 shrink-0">
-            <!-- Active Indicator Pill when collapsed -->
-            <span
-              v-if="!openSections[sec.id] && isSectionActive(sec.id)"
-              class="w-2 h-2 rounded-full bg-[#007AFF] shadow-[0_0_6px_rgba(0,122,255,0.7)]"
-              title="当前页面属于该分栏"
-            ></span>
-            <!-- Section Chevron Arrow -->
-            <svg
-              class="w-3.5 h-3.5 transition-transform duration-200"
-              :class="openSections[sec.id] ? 'rotate-90 text-[#007AFF]' : 'rotate-0 text-[#8E8E93] group-hover:text-[#1C1C1E]'"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7" />
-            </svg>
-          </div>
-        </button>
+        <!-- Tooltip for collapsed mode -->
+        <div
+          v-if="isCollapsed"
+          class="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 hidden group-hover/item:flex items-center px-2.5 py-1 rounded-lg bg-neutral-900/90 text-white text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur-md z-50 pointer-events-none"
+        >
+          系统总览
+        </div>
+      </div>
 
-        <!-- Section Children Items (Visible only when expanded) -->
-        <transition name="accordion">
-          <div v-show="openSections[sec.id]" class="pl-2 space-y-0.5 mt-0.5 border-l border-black/[0.08] ml-4">
-            <template v-for="item in sec.items" :key="item.path">
-              <router-link
-                v-if="(!item.ownerOnly || isOwner) && (!isViewer || item.path === '/nodes')"
-                :to="item.path"
-                :class="navItemClass(item.path)"
+      <!-- 2. Collapsible Sections -->
+      <div :class="['w-full', isCollapsed ? 'pt-1 flex flex-col items-center space-y-2' : 'pt-1.5 space-y-1']">
+        <div
+          v-for="sec in navSections"
+          :key="sec.id"
+          v-show="!isViewer || sec.id === 'nodes'"
+          :class="['relative group/popover', isCollapsed ? 'flex justify-center w-full' : 'w-full']"
+        >
+          <!-- Section Collapsible Header Button -->
+          <button
+            type="button"
+            @click="handleSectionClick(sec.id)"
+            :class="[
+              'transition-all flex items-center select-none relative',
+              isCollapsed
+                ? 'w-11 h-11 justify-center rounded-xl'
+                : 'w-full justify-between px-3 py-2 rounded-xl text-sm',
+              isSectionActive(sec.id) && (!openSections[sec.id] || isCollapsed)
+                ? 'bg-ios-blue/10 text-ios-blue font-semibold ring-1 ring-ios-blue/20'
+                : 'text-ios-label font-normal hover:text-black hover:bg-black/[0.04]'
+            ]"
+            :title="!isCollapsed ? sec.label : undefined"
+          >
+            <div :class="['flex items-center truncate', isCollapsed ? 'justify-center' : 'gap-2.5']">
+              <!-- Section Icon -->
+              <svg
+                :class="[
+                  'shrink-0 transition-colors',
+                  isCollapsed ? 'w-5 h-5' : 'w-4 h-4',
+                  isSectionActive(sec.id) ? 'text-ios-blue' : 'text-ios-tertiary group-hover/popover:text-ios-label'
+                ]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
               >
-                <!-- Child Item Icon -->
-                <svg
-                  class="w-3.5 h-3.5 shrink-0 text-current opacity-80"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sec.iconPath" />
+              </svg>
+              <span v-if="!isCollapsed" class="tracking-wide truncate">{{ sec.label }}</span>
+            </div>
+
+            <!-- Active Indicator Dot in Collapsed Mode -->
+            <span
+              v-if="isCollapsed && isSectionActive(sec.id)"
+              class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-ios-blue shadow-[0_0_4px_rgba(0,113,227,0.7)]"
+              title="当前处于该功能模块"
+            ></span>
+
+            <!-- Expanded State Chevrons & Pill -->
+            <div v-if="!isCollapsed" class="flex items-center gap-2 shrink-0">
+              <span
+                v-if="!openSections[sec.id] && isSectionActive(sec.id)"
+                class="w-2 h-2 rounded-full bg-ios-blue shadow-[0_0_6px_rgba(0,113,227,0.7)]"
+                title="当前页面属于该分栏"
+              ></span>
+              <svg
+                class="w-3.5 h-3.5 text-ios-tertiary group-hover/popover:text-ios-label transition-transform duration-200"
+                :class="openSections[sec.id] ? 'rotate-90' : 'rotate-0'"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </button>
+
+          <!-- Floating Popover Submenu in Collapsed Mode -->
+          <div
+            v-if="isCollapsed"
+            class="absolute left-full top-0 ml-2 hidden group-hover/popover:flex flex-col z-50 min-w-[170px] bg-white/95 backdrop-blur-2xl rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.12),0_1px_3px_rgba(0,0,0,0.06)] border border-black/[0.08] p-1.5 py-2 pointer-events-auto"
+          >
+            <!-- Invisible bridge to avoid losing hover across gap -->
+            <div class="absolute -left-2 top-0 w-2 h-full"></div>
+
+            <!-- Header -->
+            <div class="px-2.5 py-1 text-[11px] font-semibold text-ios-tertiary uppercase tracking-wider border-b border-black/[0.05] mb-1">
+              {{ sec.label }}
+            </div>
+
+            <!-- Children -->
+            <div class="space-y-0.5">
+              <template v-for="item in sec.items" :key="item.path">
+                <router-link
+                  v-if="(!item.ownerOnly || isOwner) && (!isViewer || item.path === '/nodes')"
+                  :to="item.path"
+                  :class="[
+                    'flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[13px] transition-all',
+                    isCurrentPath(item.path)
+                      ? 'bg-ios-blue text-white font-medium shadow-[0_2px_6px_rgba(0,113,227,0.25)]'
+                      : 'text-ios-label hover:bg-black/[0.05]'
+                  ]"
                 >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="item.iconPath" />
-                </svg>
-                <span v-if="!isCollapsed" class="truncate text-[13px]">{{ item.label }}</span>
-              </router-link>
-            </template>
+                  <svg class="w-3.5 h-3.5 shrink-0 opacity-80" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="item.iconPath" />
+                  </svg>
+                  <span class="truncate">{{ item.label }}</span>
+                </router-link>
+              </template>
+            </div>
           </div>
-        </transition>
+
+          <!-- Section Children Items (Expanded Mode) -->
+          <transition name="accordion">
+            <div v-show="openSections[sec.id] && !isCollapsed" class="pl-3 space-y-0.5 mt-0.5 ml-2.5 border-l border-black/[0.06]">
+              <template v-for="item in sec.items" :key="item.path">
+                <router-link
+                  v-if="(!item.ownerOnly || isOwner) && (!isViewer || item.path === '/nodes')"
+                  :to="item.path"
+                  :class="navItemClass(item.path)"
+                >
+                  <!-- Child Item Icon -->
+                  <svg
+                    class="w-3.5 h-3.5 shrink-0 text-current opacity-80"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="item.iconPath" />
+                  </svg>
+                  <span v-if="!isCollapsed" class="truncate text-[13px]">{{ item.label }}</span>
+                </router-link>
+              </template>
+            </div>
+          </transition>
+        </div>
       </div>
     </div>
 
     <!-- Sidebar Footer -->
-    <div class="p-3.5 border-t border-black/[0.05] flex items-center justify-between text-xs text-[#8E8E93]">
-      <span v-if="!isCollapsed" class="font-mono text-[11px]">开发版本</span>
-      <button
-        @click="toggleCollapse"
-        class="w-full lg:w-auto p-1.5 rounded-lg hover:bg-black/[0.05] text-[#8E8E93] hover:text-[#1C1C1E] flex items-center justify-center transition-colors"
-      >
-        <span v-if="isCollapsed">→</span>
-        <span v-else class="text-xs">收起侧栏</span>
-      </button>
+    <div :class="['border-t border-black/[0.05] flex items-center shrink-0 transition-all', isCollapsed ? 'justify-center p-3' : 'justify-between p-3.5 text-xs text-ios-tertiary']">
+      <span v-if="!isCollapsed" class="font-mono text-[11px] text-ios-quaternary">开发版本</span>
+      <div :class="['relative group/expand', isCollapsed ? 'flex justify-center' : '']">
+        <button
+          type="button"
+          @click="toggleCollapse"
+          :class="[
+            'flex items-center justify-center transition-all font-medium active:scale-95',
+            isCollapsed
+              ? 'w-10 h-10 rounded-xl bg-white border border-black/[0.08] shadow-2xs text-ios-secondary hover:text-ios-label hover:bg-[#F5F5F7]'
+              : 'gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-ios-tertiary hover:text-ios-label hover:bg-black/[0.05]'
+          ]"
+          :title="!isCollapsed ? '收起侧栏' : undefined"
+        >
+          <svg
+            :class="['shrink-0 transition-colors', isCollapsed ? 'w-4 h-4' : 'w-3.5 h-3.5']"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <!-- macOS Sidebar Toggle Icon -->
+            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke-width="1.8" />
+            <path d="M9 4v16" stroke-width="1.8" />
+            <path v-if="isCollapsed" d="M14 9.5l2.5 2.5-2.5 2.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            <path v-else d="M16 9.5L13.5 12l2.5 2.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span v-if="!isCollapsed">收起侧栏</span>
+        </button>
+
+        <!-- Tooltip for collapsed footer button -->
+        <div
+          v-if="isCollapsed"
+          class="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 hidden group-hover/expand:flex items-center px-2.5 py-1 rounded-lg bg-neutral-900/90 text-white text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur-md z-50 pointer-events-none"
+        >
+          展开侧栏
+        </div>
+      </div>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { ref, computed, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { authState, isOwner, isViewer } from '../app/auth';
 
 interface Props {
@@ -165,6 +257,7 @@ const emit = defineEmits<{
 }>();
 
 const route = useRoute();
+const router = useRouter();
 const internalCollapsed = ref(false);
 
 const isCollapsed = computed(() => {
@@ -176,7 +269,7 @@ function toggleCollapse() {
   emit('toggle');
 }
 
-// 默认为折叠 (All sections default to false / collapsed as requested)
+// 默认为折叠
 const openSections = ref<Record<string, boolean>>({
   users: false,
   nodes: false,
@@ -186,20 +279,36 @@ const openSections = ref<Record<string, boolean>>({
   system: false
 });
 
-const areAllSectionsOpen = computed(() => {
-  return Object.values(openSections.value).every(Boolean);
-});
-
-function toggleSection(secId: string) {
+function handleSectionClick(secId: string) {
+  if (isCollapsed.value) {
+    const sec = navSections.find(s => s.id === secId);
+    if (sec && sec.items.length > 0) {
+      const accessible = sec.items.find(item => (!item.ownerOnly || isOwner.value) && (!isViewer.value || item.path === '/nodes'));
+      if (accessible) {
+        router.push(accessible.path);
+      }
+    }
+    return;
+  }
   openSections.value[secId] = !openSections.value[secId];
 }
 
-function toggleAllSections() {
-  const target = !areAllSectionsOpen.value;
-  for (const key of Object.keys(openSections.value)) {
-    openSections.value[key] = target;
+function syncRouteSection() {
+  if (route.path === '/dashboard') return;
+  for (const sec of navSections) {
+    if (isSectionActive(sec.id)) {
+      openSections.value[sec.id] = true;
+    }
   }
 }
+
+watch(
+  () => route.fullPath,
+  () => {
+    syncRouteSection();
+  },
+  { immediate: true }
+);
 
 // Navigation Structure: 6 Collapsible Sections with direct SVG path strings
 const navSections = [
@@ -305,8 +414,8 @@ function navItemClass(targetPath: string) {
   return [
     'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-all group select-none',
     active
-      ? 'bg-[#007AFF] text-white font-medium shadow-[0_2px_8px_rgba(0,122,255,0.22)]'
-      : 'text-[#48484A] hover:text-[#1C1C1E] hover:bg-black/[0.04]'
+      ? 'bg-ios-blue text-white font-semibold shadow-[0_2px_8px_rgba(0,113,227,0.25)]'
+      : 'text-ios-secondary font-normal hover:text-ios-label hover:bg-black/[0.04]'
   ];
 }
 </script>
@@ -330,4 +439,3 @@ function navItemClass(targetPath: string) {
   transform: translateY(0);
 }
 </style>
-

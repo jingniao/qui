@@ -302,14 +302,6 @@ function syncRouteSection() {
   }
 }
 
-watch(
-  () => route.fullPath,
-  () => {
-    syncRouteSection();
-  },
-  { immediate: true }
-);
-
 // Navigation Structure: 6 Collapsible Sections with direct SVG path strings
 const navSections = [
   {
@@ -379,6 +371,15 @@ const navSections = [
     ]
   }
 ];
+
+// The immediate watcher reads navSections, so register it after initialization.
+watch(
+  () => route.fullPath,
+  () => {
+    syncRouteSection();
+  },
+  { immediate: true }
+);
 
 function isCurrentPath(targetPath: string) {
   if (targetPath === '/dashboard') return route.path === '/dashboard';

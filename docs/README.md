@@ -10,6 +10,7 @@
 | 项目首页 | [项目首页](../README.md) |
 | 系统组成、模块边界和数据流 | [架构总览](architecture.md) |
 | 前端设计系统、视觉交互与按钮规范 | [设计系统规范](design-system.md) |
+| 节点删除功能规划（英文，已按精简方案实现） | [Node Deletion Implementation Plan](node-deletion-plan.en.md) |
 | 安装面板、接入节点、升级 | [部署与升级](deployment.md) |
 | 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
 | 协议与能力支持范围 | [协议支持矩阵](protocol-support-matrix.md) |

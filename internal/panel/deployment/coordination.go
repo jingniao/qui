@@ -54,10 +54,6 @@ func (r *Repository) stateInTransaction(ctx context.Context, tx *sql.Tx, revisio
 	return desiredstate.Decode(data)
 }
 
-func relayMatches(outbound desiredstate.Outbound, target desiredstate.State) bool {
-	return relayDependency(outbound, target) == "matched"
-}
-
 func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, state desiredstate.State) error {
 	var enabled bool
 	if err := tx.QueryRowContext(ctx, "SELECT enabled FROM nodes WHERE id=?", state.NodeID).Scan(&enabled); err != nil {

@@ -22,13 +22,6 @@ import (
 	"time"
 )
 
-func (a *Adapter) now() time.Time {
-	if a.Now != nil {
-		return a.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
 type Adapter struct {
 	TrafficSink     func(context.Context, []traffic.Counter) error
 	EnableStats     bool

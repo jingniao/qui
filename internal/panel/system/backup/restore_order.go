@@ -7,13 +7,6 @@ import (
 	"strings"
 )
 
-type RestoreInstallStep struct {
-	Position int         `json:"position"`
-	Category string      `json:"category"`
-	Material RestoreFile `json:"material"`
-	Status   string      `json:"status"`
-}
-
 // Ordering is derived from authenticated mappings, never an installation
 // permission. Preserve original File bytes/digests and destination exactly.
 func OrderRestoreFiles(files []RestoreFile) ([]RestoreFile, error) {
@@ -79,16 +72,4 @@ func restoreInstallCategory(name string) (int, string, bool) {
 		}
 		return 0, "", false
 	}
-}
-func restoreInstallSteps(files []RestoreFile) ([]RestoreInstallStep, error) {
-	ordered, err := OrderRestoreFiles(files)
-	if err != nil {
-		return nil, err
-	}
-	steps := make([]RestoreInstallStep, 0, len(ordered))
-	for i, f := range ordered {
-		_, category, _ := restoreInstallCategory(f.Name)
-		steps = append(steps, RestoreInstallStep{Position: i + 1, Category: category, Material: f, Status: "not_installed"})
-	}
-	return steps, nil
 }

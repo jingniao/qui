@@ -9,7 +9,6 @@ import (
 	"proxycontrol/pkg/contracts/desiredstate"
 	shared "proxycontrol/pkg/contracts/policy"
 	"strings"
-	"time"
 )
 
 type Nodes interface {
@@ -280,4 +279,3 @@ func (s *Service) Simulate(ctx context.Context, request shared.Request) (shared.
 	}
 	return decision, nil
 }
-func Now() time.Time { return time.Now().UTC() }

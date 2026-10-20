@@ -360,19 +360,6 @@ func (s *Server) healthHTTP(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 200, map[string]string{"status": "ok", "service": "proxy-panel"})
 }
 
-func (s *Server) Run(ctx context.Context) error {
-	httpListener, err := net.Listen("tcp", s.Config.HTTPAddress)
-	if err != nil {
-		return fmt.Errorf("listen HTTP: %w", err)
-	}
-	grpcListener, err := net.Listen("tcp", s.Config.GRPCAddress)
-	if err != nil {
-		httpListener.Close()
-		return fmt.Errorf("listen gRPC: %w", err)
-	}
-	return s.Serve(ctx, httpListener, grpcListener)
-}
-
 func (s *Server) closeReadPool() {
 	if s.readPool == nil {
 		return

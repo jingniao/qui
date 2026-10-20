@@ -4,11 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"proxycontrol/internal/panel/auth"
-	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/vault"
 	"strings"
 	"testing"
 )
@@ -48,13 +44,4 @@ func budgetOwner(t *testing.T, app *Server) budgetHTTP {
 	client.cookie = response.Result().Cookies()[0]
 	client.csrf = session.CSRFToken
 	return client
-}
-
-func budgetRepositories(t *testing.T, app *Server) (*user.Repository, *node.Repository) {
-	t.Helper()
-	key, err := vault.Open(filepath.Join(app.Config.NodeIdentityDirectory, "configuration.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &user.Repository{Database: app.Database, Vault: key}, &node.Repository{Database: app.Database}
 }

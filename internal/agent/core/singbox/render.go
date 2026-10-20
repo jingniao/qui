@@ -481,16 +481,6 @@ func appendRoute(doc *document, terminal route) {
 	doc.Route.Rules = append(doc.Route.Rules, terminal)
 }
 
-func targetRoute(target string, protocols map[string]string) (route, error) {
-	kind, exists := protocols[target]
-	if !exists {
-		return route{}, errors.New("sing-box routing target unavailable")
-	}
-	if kind == "block" {
-		return route{Action: "reject", origin: collector.Exit{ID: target, Protocol: kind, LogDomain: true}}, nil
-	}
-	return route{Action: "route", Outbound: target, origin: collector.Exit{ID: target, Protocol: kind, LogDomain: true}}, nil
-}
 func supported(protocol string) error {
 	switch protocol {
 	case "direct", "block", "http", "socks5", "shadowsocks", "vless", "trojan", "hysteria2", "tuic":

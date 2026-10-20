@@ -146,17 +146,6 @@ func VerifyPreparedRestore(ctx context.Context, directory, expectedManifestSHA25
 	return verifyPreparedRestore(ctx, directory, expectedManifestSHA256)
 }
 
-// ReadPreparedRestoreTarget authenticates the pinned stage manifest and returns
-// its declared target without validating the staged contents. It is never an
-// execution, serving or install permit.
-func ReadPreparedRestoreTarget(directory, expectedManifestSHA256 string) (RestoreTarget, error) {
-	plan, err := readRestorePlan(directory, expectedManifestSHA256)
-	if err != nil {
-		return RestoreTarget{}, err
-	}
-	return plan.Target, nil
-}
-
 func readRestorePlan(directory, expectedManifestSHA256 string) (RestorePlan, error) {
 	var plan RestorePlan
 	if !validDigest(expectedManifestSHA256) {

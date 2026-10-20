@@ -29,12 +29,6 @@ func CoreRedirectHost(host string) bool {
 	return false
 }
 
-// CoreSourcePrefix returns the single accepted download prefix for a component.
-func CoreSourcePrefix(component string) (string, bool) {
-	prefix, ok := coreSourcePrefixes[component]
-	return prefix, ok
-}
-
 // CoreAssetURL validates an operator-entered official release asset URL and
 // returns it with the expected <tag>/<asset> parts. Remote data never supplies
 // this value: it comes from the Owner and is re-validated by the Agent.

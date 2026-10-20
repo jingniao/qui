@@ -222,12 +222,6 @@ func Ensure(directory, nodeID string, current agentstorage.Contract) (agentstora
 	return required, nil
 }
 
-// Called under Worker/reconciliation ownership after native validation and
-// before saving a connection-aware snapshot or binding its protected ledger.
-// This is one-way activation, not permission to downgrade a stored format.
-func ActivateConnectionFormats(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
-	return activateStorageFormats(directory, nodeID, reader, 0, 0)
-}
 func ActivateSuccessReceiptFormat(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
 	return activateStorageFormats(directory, nodeID, reader, 2, 0)
 }

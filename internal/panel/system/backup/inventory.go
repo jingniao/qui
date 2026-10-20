@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -195,34 +194,6 @@ func (m Materials) OriginalMaterials() Materials {
 	m.RecoveredAuthorityDigest = [sha256.Size]byte{}
 	m.RecoveredRetirementDigest = [sha256.Size]byte{}
 	return m
-}
-
-// ChainDigest returns a stable digest over the retained original material set
-// (configuration key, ca.crt and the ordinary active/retired/successor
-// records). A recovered-root publication binds this digest so a recovered root
-// is authorized against the exact complete original chain it replaced, not
-// merely the initial root fingerprint.
-func (m Materials) ChainDigest() [sha256.Size]byte {
-	original := m.OriginalMaterials()
-	hash := sha256.New()
-	for _, field := range [][sha256.Size]byte{original.KeyDigest, original.NodeCADigest, original.ActiveCADigest, original.RetiredCADigest, original.SuccessorCADigest, original.SuccessorRetiredCADigest} {
-		hash.Write(field[:])
-	}
-	var result [sha256.Size]byte
-	copy(result[:], hash.Sum(nil))
-	return result
-}
-
-// OriginalMaterialsDigest reads and digests the retained original material set
-// of an identity directory. It is the exact value a recovered-root publication
-// binds and every consumer re-derives.
-func OriginalMaterialsDigest(identityDirectory string) (string, error) {
-	materials, err := ReadMaterials(identityDirectory)
-	if err != nil {
-		return "", err
-	}
-	digest := materials.ChainDigest()
-	return hex.EncodeToString(digest[:]), nil
 }
 
 func ReadMaterials(identityDirectory string) (Materials, error) {

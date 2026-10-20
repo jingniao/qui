@@ -16,24 +16,6 @@ type RecoveryProof struct {
 	baseline  *BaselineRecovery
 }
 
-func (i *Installer) RecoveryProof(ctx context.Context, request release.UpdateRequest) (RecoveryProof, error) {
-	if i.History == nil || request.Validate() != nil || request.Operation != "recover" || request.NodeID != i.History.nodeID {
-		return RecoveryProof{}, ErrInstallation
-	}
-	s, ok, err := i.History.Installation(request.Release.Manifest.Component)
-	m := request.Release.Manifest
-	if m.OS != runtime.GOOS || m.Architecture != runtime.GOARCH {
-		return RecoveryProof{}, ErrInstallation
-	}
-	if err != nil || !ok || s.RequestID != request.OriginalID || s.Revision != request.Revision || s.Target == nil || *s.Target != imageOf(m) || s.Phase == "ready" {
-		return RecoveryProof{}, ErrInstallation
-	}
-	if _, err := ResolveImage(ctx, i.Directory, s.Component, s.Current); err != nil {
-		return RecoveryProof{}, err
-	}
-	return RecoveryProof{history: i.History, directory: i.Directory, state: copyInstallation(s), request: request}, nil
-}
-
 func (p RecoveryProof) Authorize(ctx context.Context, nodeID string, revision int64, request release.UpdateRequest) (Installation, error) {
 	if p.history == nil || p.request != request || request.Operation != "recover" || p.history.nodeID != nodeID || request.NodeID != nodeID || request.Revision != revision {
 		return Installation{}, ErrInstallation

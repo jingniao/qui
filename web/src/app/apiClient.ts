@@ -2,7 +2,9 @@ let csrfToken = '';
 export function setCSRFToken(token: string) { csrfToken = token; }
 
 export class APIError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  // details carries the extra fields of the error body, e.g. the blockers of a
+  // refused node deletion.
+  constructor(public status: number, public code: string, message: string, public details: Record<string, unknown> = {}) { super(message); }
 }
 
 const messages: Record<string, string> = {
@@ -17,8 +19,10 @@ const messages: Record<string, string> = {
   internal_error: '服务暂时无法完成操作，请稍后重试。',
   user_inactive: '用户或设备已禁用、到期，或流量额度已用完。',
   subscription_unavailable: '订阅已失效或当前用户、设备不可用。',
-  node_delete_not_allowed: '仅可取消尚未登记的节点；已登记节点请禁用并吊销证书。',
-  node_in_use: '节点已被入站、出站、代理链、分流规则或发布记录引用，请先移除这些配置。'
+  node_delete_not_allowed: '节点已登记，不能按取消登记处理。',
+  node_in_use: '节点已被入站、出站、代理链、分流规则或发布记录引用，请先移除这些配置。',
+  node_delete_blocked: '节点仍被配置引用或有进行中的发布，请先处理下列项目。',
+  node_deleted: '节点已删除，不能修改。'
 };
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, options: { timeoutMs?: number } = {}): Promise<T> {
@@ -34,7 +38,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, o
     const data = await response.json().catch(() => ({}));
     const code = data.error?.code || 'request_failed';
     if (response.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('auth-expired'));
-    throw new APIError(response.status, code, messages[code] || data.error?.message || '请求失败');
+    throw new APIError(response.status, code, messages[code] || data.error?.message || '请求失败', data.error || {});
   }
   return response.status === 204 ? undefined as T : response.json();
 }

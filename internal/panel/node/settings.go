@@ -60,13 +60,17 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	}
 	defer tx.Rollback()
 	var allow, maintenance, wasEnabled bool
-	var publicIP string
+	var publicIP, deleted string
 	var network desiredstate.Network
-	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6 FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,coalesce(deleted_at,'') FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6, &deleted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
+	}
+	// A deleted node cannot be enabled, renamed or pointed at another address.
+	if deleted != "" {
+		return ErrNodeDeleted
 	}
 	if input.AllowSubscription != nil {
 		allow = *input.AllowSubscription

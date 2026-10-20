@@ -678,6 +678,8 @@ Agent 使用 mTLS 建立长期连接
 
 注册节点成功后，面板对话框同时显示一键安装命令（`deploy/linux/node-install.sh`）：从 GitHub Release 下载与面板同版本的归档并校验 `SHA256SUMS`，按公网证书或面板显示的固定 SHA-256 建立对面板证书的信任，然后登记并启动 Agent（见[部署与升级](docs/deployment.md)第 4 节）。
 
+**删除节点**：尚未登记且没有身份的节点走“取消登记”，记录直接移除；已登记的节点是**逻辑删除**——写入 `nodes.deleted_at`、吊销证书、退出所有节点组并从订阅与各列表（含选择器）中消失，流量与访问记录保留，且不能再次启用；同一台服务器要重新接入时请作为新节点登记。删除前必须先处理仍引用它的入站、出站（含其他节点指向它的中转出站）、出口组、代理链与分流规则，并等进行中的批量发布结束，否则返回 409 `node_delete_blocked` 并列出阻塞项（`GET /api/v1/nodes/{id}/deletion-preview` 可先查看）。面板无法停止服务器上的 Agent，删除不会结束远端代理；删除还会关闭该节点自己的待发布配置、核心/Agent 更新任务与排队中的健康检查。运维步骤见[运维手册](docs/operations.md)第 15 节。
+
 ## 11.4 节点状态
 
 节点状态统一为：
@@ -1579,11 +1581,16 @@ DELETE /api/v1/users/{id}/node-groups/{groupId}
 ## 27.4 节点
 
 ```text
-GET  /api/v1/nodes
-GET  /api/v1/nodes/{id}
-POST /api/v1/nodes/enrollment-token
-PUT  /api/v1/nodes/{id}
+GET    /api/v1/nodes
+GET    /api/v1/nodes?deleted=1
+GET    /api/v1/nodes/{id}
+GET    /api/v1/nodes/{id}/deletion-preview
+POST   /api/v1/nodes/enrollment-token
+PUT    /api/v1/nodes/{id}
+DELETE /api/v1/nodes/{id}
 ```
+
+`GET /api/v1/nodes` 默认只返回未删除的节点；`?deleted=1` 只返回已删除的节点（Owner 与 Viewer 都可读）。`DELETE` 需要 Owner：未登记节点等同取消登记（记录移除），已登记节点执行逻辑删除，被引用时返回 409 `node_delete_blocked`，阻塞项（`blockers: [{kind,id,name}]`）位于错误体中（见第 11.3 节）。
 
 `GET /install/ca.pem` 无需登录，返回面板 Web 证书链顶层的 PEM（`application/x-pem-file`，`Cache-Control: no-store`），供节点安装脚本建立对面板证书的信任（见第 11.3 节）；开发模式或证书不可读时返回 404。
 

@@ -192,7 +192,7 @@ func (d *quotaDeployer) run(ctx context.Context) {
 // revision, and records that the pass completed. A failed read leaves the pass
 // unfinished so the next tick runs it again instead of skipping the node.
 func (d *quotaDeployer) recover(ctx context.Context) {
-	items, _, err := d.nodes.List(ctx, "", 1, quotaStartupPageSize)
+	items, _, err := d.nodes.List(ctx, "", 1, quotaStartupPageSize, false)
 	if err != nil {
 		d.logger.Error("automatic quota startup pass could not list nodes", "error", err)
 		return
@@ -260,8 +260,9 @@ func (d *quotaDeployer) scheduleTransition(ctx context.Context, transition user.
 	// A grant the Owner removed but did not publish leaves the node running the
 	// user's credential while the user is no longer in any granted group, so a
 	// later disable would never reach it. Every node whose published state still
-	// holds one of the user's credentials is queued as well.
-	items, _, err := d.nodes.List(ctx, "", 1, quotaStartupPageSize)
+	// holds one of the user's credentials is queued as well. A deleted node is
+	// never queued: its Agent can no longer apply a revision.
+	items, _, err := d.nodes.List(ctx, "", 1, quotaStartupPageSize, false)
 	if err != nil {
 		return err
 	}

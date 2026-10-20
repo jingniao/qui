@@ -134,6 +134,11 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 			return Group{}, errors.New("duplicate node group member")
 		}
 		seen[nodeID] = true
+		// A deleted node is not a member of any node group.
+		var exists int
+		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=? AND deleted_at IS NULL", nodeID).Scan(&exists); err != nil {
+			return Group{}, errors.New("node group member does not exist")
+		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_members(group_id,node_id) VALUES(?,?)", groupID, nodeID); err != nil {
 			return Group{}, errors.New("node group member does not exist")
 		}
@@ -188,7 +193,7 @@ func (r *Repository) SubscriptionFlags(ctx context.Context, id string, allow, ma
 	}
 	defer tx.Rollback()
 	var exists int
-	if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=?", id).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=? AND deleted_at IS NULL", id).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}

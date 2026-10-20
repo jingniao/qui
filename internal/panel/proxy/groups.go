@@ -105,7 +105,7 @@ func (s *Service) SaveGroup(ctx context.Context, groupID string, input GroupInpu
 	if strings.TrimSpace(input.Name) == "" || len(input.Name) > 120 {
 		return Group{}, errors.New("group name required")
 	}
-	if n, err := s.Nodes.Get(ctx, input.NodeID); err != nil || !n.Enabled {
+	if n, err := s.Nodes.Get(ctx, input.NodeID); err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Group{}, errors.New("group node unavailable")
 	}
 	if input.ProbeURL == "" {

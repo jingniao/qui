@@ -11,7 +11,7 @@ import (
 type Service struct {
 	Repository *Repository
 	Nodes      interface {
-		List(context.Context, string, int, int) ([]node.Node, int, error)
+		List(context.Context, string, int, int, bool) ([]node.Node, int, error)
 		Get(context.Context, string) (node.Node, error)
 	}
 	Deployments interface {
@@ -60,7 +60,7 @@ func (s *Service) Read(ctx context.Context, owner bool) (View, error) {
 	if err != nil {
 		return view, err
 	}
-	view.Nodes, _, err = s.Nodes.List(ctx, "", 1, 5)
+	view.Nodes, _, err = s.Nodes.List(ctx, "", 1, 5, false)
 	if err != nil {
 		return view, err
 	}

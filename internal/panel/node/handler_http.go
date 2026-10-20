@@ -22,12 +22,22 @@ type InstallInfo struct {
 	CASHA256 string `json:"caSha256"`
 }
 
+// auditLog is the operation log: Record for its own writes, RecordTx when the
+// entry must commit with a change owned by this package.
+type auditLog interface {
+	auth.Audit
+	DeletionAudit
+}
+
 type Handler struct {
 	Authority  *pki.Authority
 	Repository *Repository
-	Audit      auth.Audit
+	Audit      auditLog
 	Auth       *auth.Handler
 	Notify     func(string)
+	// Tasks closes a deleted node's own coordination rows; the deployment module
+	// owns those tables. A nil field leaves them as they are.
+	Tasks Tasks
 	// Install supplies the one-command install metadata. A nil field leaves the
 	// fields empty; enrollment never depends on it.
 	Install func() InstallInfo
@@ -38,6 +48,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/nodes/{id}/certificate-status", h.Auth.Require(http.HandlerFunc(h.certificateStatus), true))
 	mux.Handle("POST /api/v1/nodes/{id}/health-checks", h.Auth.Require(http.HandlerFunc(h.requestHealthCheck), true))
 	mux.Handle("GET /api/v1/nodes/{id}/health-checks", h.Auth.Require(http.HandlerFunc(h.listHealthChecks), true))
+	mux.Handle("GET /api/v1/nodes/{id}/deletion-preview", h.Auth.Require(http.HandlerFunc(h.deletionPreview), true))
 	mux.Handle("GET /api/v1/nodes", h.Auth.Require(http.HandlerFunc(h.list), false))
 	mux.Handle("GET /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.get), false))
 	mux.Handle("POST /api/v1/nodes/enrollment-token", h.Auth.Require(http.HandlerFunc(h.enroll), true))
@@ -51,12 +62,20 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Invalid pagination")
 		return
 	}
-	items, total, err := h.Repository.List(r.Context(), r.URL.Query().Get("keyword"), page, size)
+	items, total, err := h.Repository.List(r.Context(), r.URL.Query().Get("keyword"), page, size, r.URL.Query().Get("deleted") == "1")
 	if err != nil {
 		h.fail(w, err)
 		return
 	}
 	httpapi.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "pageSize": size})
+}
+func (h *Handler) deletionPreview(w http.ResponseWriter, r *http.Request) {
+	preview, err := h.Repository.Preview(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, preview)
 }
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	n, err := h.Repository.Get(r.Context(), r.PathValue("id"))
@@ -169,11 +188,31 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	if err := h.Repository.CancelEnrollment(r.Context(), id); err != nil {
-		h.fail(w, err)
+	// Deleting twice is a no-op.
+	if n.DeletedAt != "" {
+		w.WriteHeader(204)
 		return
 	}
-	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "取消节点登记", n.Name+" ("+n.ID+")", "成功", r.RemoteAddr); err != nil {
+	// A pending node that never enrolled keeps its own path: the unused record is
+	// removed and its registration code stops working.
+	if n.Status == "pending" {
+		if err := h.Repository.CancelEnrollment(r.Context(), id); err == nil {
+			if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "取消节点登记", n.Name+" ("+n.ID+")", "成功", r.RemoteAddr); err != nil {
+				h.fail(w, err)
+				return
+			}
+			w.WriteHeader(204)
+			if h.Notify != nil {
+				h.Notify(id)
+			}
+			return
+		} else if !errors.Is(err, ErrNodeEnrolled) {
+			h.fail(w, err)
+			return
+		}
+		// An Agent enrolled while this request was in flight: delete logically.
+	}
+	if err := h.Repository.Delete(r.Context(), id, h.Tasks, h.Audit, auth.Actor(r.Context()).Username, r.RemoteAddr); err != nil {
 		h.fail(w, err)
 		return
 	}
@@ -187,8 +226,17 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 		httpapi.Error(w, 404, "not_found", err.Error())
 		return
 	}
+	if errors.Is(err, ErrNodeDeleted) {
+		httpapi.Error(w, 409, "node_deleted", "节点已删除，不能修改。")
+		return
+	}
+	var blocked *BlockedError
+	if errors.As(err, &blocked) {
+		httpapi.ErrorDetails(w, 409, "node_delete_blocked", "节点仍被配置引用或有进行中的发布，请先处理下列项目。", map[string]any{"blockers": blocked.Items})
+		return
+	}
 	if errors.Is(err, ErrNodeEnrolled) {
-		httpapi.Error(w, 409, "node_delete_not_allowed", "仅可取消尚未登记的节点；已登记节点请禁用并吊销证书。")
+		httpapi.Error(w, 409, "node_delete_not_allowed", "节点已登记，不能按取消登记处理。")
 		return
 	}
 	if errors.Is(err, ErrNodeInUse) {

@@ -53,11 +53,11 @@ type Hour struct {
 func (r *Repository) Counts(ctx context.Context, from, to, now time.Time) (Counts, error) {
 	result := Counts{}
 	threshold := now.Add(-45 * time.Second).UTC().Format("2006-01-02T15:04:05.000000000Z")
-	err := r.Database.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN enabled=1 AND status='online' AND last_heartbeat>=? THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='offline' OR (status IN ('online','degraded') AND last_heartbeat<?)) THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='error' OR (status='degraded' AND last_heartbeat>=?)) THEN 1 ELSE 0 END),0) FROM nodes`, threshold, threshold, threshold).Scan(&result.TotalNodes, &result.OnlineNodes, &result.OfflineNodes, &result.AbnormalNodes)
+	err := r.Database.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN enabled=1 AND status='online' AND last_heartbeat>=? THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='offline' OR (status IN ('online','degraded') AND last_heartbeat<?)) THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='error' OR (status='degraded' AND last_heartbeat>=?)) THEN 1 ELSE 0 END),0) FROM nodes WHERE deleted_at IS NULL`, threshold, threshold, threshold).Scan(&result.TotalNodes, &result.OnlineNodes, &result.OfflineNodes, &result.AbnormalNodes)
 	if err != nil {
 		return result, err
 	}
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE enabled=1").Scan(&result.ExpectedNodes); err != nil {
+	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE enabled=1 AND deleted_at IS NULL").Scan(&result.ExpectedNodes); err != nil {
 		return result, err
 	}
 	snapshots := []traffic.ConnectionSnapshot{}

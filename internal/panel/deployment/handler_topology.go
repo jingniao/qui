@@ -44,11 +44,11 @@ func (h *Handler) publishedTopology(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var total int
-	if err := tx.QueryRowContext(r.Context(), "SELECT count(*) FROM nodes").Scan(&total); err != nil {
+	if err := tx.QueryRowContext(r.Context(), "SELECT count(*) FROM nodes WHERE deleted_at IS NULL").Scan(&total); err != nil {
 		h.fail(w, err)
 		return
 	}
-	rows, err := tx.QueryContext(r.Context(), `SELECT n.id,coalesce(s.revision,0),n.enabled,n.status,n.last_heartbeat,n.heartbeat_json FROM nodes n LEFT JOIN node_runtime_state s ON s.node_id=n.id ORDER BY n.created_at,n.id LIMIT ? OFFSET ?`, size, (page-1)*size)
+	rows, err := tx.QueryContext(r.Context(), `SELECT n.id,coalesce(s.revision,0),n.enabled,n.status,n.last_heartbeat,n.heartbeat_json FROM nodes n LEFT JOIN node_runtime_state s ON s.node_id=n.id WHERE n.deleted_at IS NULL ORDER BY n.created_at,n.id LIMIT ? OFFSET ?`, size, (page-1)*size)
 	if err != nil {
 		h.fail(w, err)
 		return

@@ -56,7 +56,7 @@ func publicKey(secret string) (string, error) {
 }
 func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput) (Inbound, error) {
 	n, err := s.Nodes.Get(ctx, input.NodeID)
-	if err != nil || !n.Enabled {
+	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Inbound{}, errors.New("node missing or disabled")
 	}
 	if err := ValidateCoreProtocol(n.Capabilities.GetCoreName(), input.Protocol, true); err != nil {
@@ -126,7 +126,7 @@ func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput
 }
 func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInput) (Outbound, error) {
 	n, err := s.Nodes.Get(ctx, input.NodeID)
-	if err != nil || !n.Enabled {
+	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Outbound{}, errors.New("node missing or disabled")
 	}
 	if err := ValidateCoreProtocol(n.Capabilities.GetCoreName(), input.Protocol, false); err != nil {
@@ -172,7 +172,7 @@ func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInp
 			return Outbound{}, errors.New("relay outbound must match target inbound protocol")
 		}
 		targetNode, err := s.Nodes.Get(ctx, target.NodeID)
-		if err != nil || !targetNode.Enabled || targetNode.PublicIP == "" {
+		if err != nil || !targetNode.Enabled || targetNode.DeletedAt != "" || targetNode.PublicIP == "" {
 			return Outbound{}, errors.New("target node needs an enabled public endpoint")
 		}
 		input.TargetNodeID = target.NodeID

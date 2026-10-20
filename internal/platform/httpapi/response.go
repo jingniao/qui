@@ -24,3 +24,14 @@ func Error(w http.ResponseWriter, status int, code, message string) {
 	body.Error.Code, body.Error.Message = code, message
 	JSON(w, status, body)
 }
+
+// ErrorDetails writes the same error body with extra fields inside "error", so a
+// client can read machine-readable context such as the blockers of a refused
+// deletion.
+func ErrorDetails(w http.ResponseWriter, status int, code, message string, details map[string]any) {
+	inner := map[string]any{"code": code, "message": message}
+	for key, value := range details {
+		inner[key] = value
+	}
+	JSON(w, status, map[string]any{"error": inner})
+}

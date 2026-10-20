@@ -4,8 +4,8 @@
       <template #actions>
         <router-link to="/nodes" class="ios-btn-secondary">返回列表</router-link>
         <button @click="load" class="ios-btn-secondary">刷新</button>
-        <button v-if="isOwner && node" @click="openSettings" class="ios-btn-secondary">节点设置</button>
-        <button v-if="isOwner && node" @click="revokeVisible = true" class="ios-btn-danger">吊销证书</button>
+        <button v-if="isOwner && node && !node.deletedAt" @click="openSettings" class="ios-btn-secondary">节点设置</button>
+        <button v-if="isOwner && node && !node.deletedAt" @click="revokeVisible = true" class="ios-btn-danger">吊销证书</button>
       </template>
     </PageHeader>
 
@@ -39,6 +39,7 @@
         <section class="panel-card p-6">
           <div class="flex gap-3 items-center mb-4">
             <StatusBadge kind="node" :status="node.status" />
+            <span v-if="node.deletedAt" class="rounded-full bg-black/[0.05] px-2 py-0.5 text-[11px] font-semibold text-ios-secondary">已删除</span>
             <span class="text-sm font-medium text-ios-secondary">{{ node.enabled ? '已启用' : '已禁用' }}</span>
           </div>
           <dl class="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
@@ -131,11 +132,12 @@
 
       <!-- Tab 3: 运维与健康 -->
       <div v-else-if="activeTab === 'operations'" class="space-y-6">
+        <p v-if="node.deletedAt" class="panel-card p-6 text-sm text-ios-secondary">节点已删除，运维与证书操作不可用；历史记录仍保留。</p>
         <!-- 核心健康检查 (统一 36px 按钮) -->
-        <NodeHealthPanel v-if="isOwner" :node="node" />
+        <NodeHealthPanel v-if="isOwner && !node.deletedAt" :node="node" />
 
         <!-- 重启当前核心 (统一 36px 按钮) -->
-        <NodeRestartPanel v-if="isOwner" :node="node" />
+        <NodeRestartPanel v-if="isOwner && !node.deletedAt" :node="node" />
 
         <!-- 本地断线缓存 -->
         <section class="panel-card p-6 space-y-4">
@@ -221,7 +223,7 @@ const tabs = computed(() => [
   { key: 'overview', label: '运行概览' },
   { key: 'network', label: '网络与出站' },
   { key: 'operations', label: '运维与健康' },
-  ...(isOwner.value ? [{ key: 'certificate', label: '证书与登记' }] : [])
+  ...(isOwner.value && !node.value?.deletedAt ? [{ key: 'certificate', label: '证书与登记' }] : [])
 ]);
 
 function normalize(tab: unknown) {
@@ -240,6 +242,11 @@ function selectTab(key: string) {
 }
 
 watch(isOwner, () => {
+  activeTab.value = normalize(activeTab.value);
+});
+
+// A deleted node has no certificate tab; a deep link to it falls back to overview.
+watch(() => node.value?.deletedAt, () => {
   activeTab.value = normalize(activeTab.value);
 });
 

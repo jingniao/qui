@@ -177,7 +177,7 @@ func (s *Service) validateChain(ctx context.Context, chainID string, input Chain
 		}
 		seen[nodeID] = true
 		n, err := s.Nodes.Get(ctx, nodeID)
-		if err != nil || !n.Enabled {
+		if err != nil || !n.Enabled || n.DeletedAt != "" {
 			return Chain{}, errors.New("chain node missing or disabled")
 		}
 		nodes[nodeID] = n

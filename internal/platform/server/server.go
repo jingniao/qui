@@ -223,7 +223,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.systemHandler.Runtime = s.runtimeInfo
 	s.systemHandler.Register(mux)
 	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository}).Register(mux)
-	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority}
+	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments}
 	nodeHandler.Install = s.installInfo
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)

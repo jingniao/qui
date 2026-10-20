@@ -81,7 +81,7 @@ systemctl start proxy-agent.service
 
 - 注册码只在节点记录**启用**时可用（`internal/panel/node/repository.go:88`、`repository.go:110` 要求 `nodes.enabled=1`），被禁用的节点不能登记；
 - `node_identities.node_id` 是主键，登记时是普通 `INSERT`（`repository.go:121`），所以**同一个节点 ID 无法二次登记**；
-- 面板没有删除节点的入口。
+- 面板只支持逻辑删除节点（见第 15 节）；被删除的节点记录仍保留，但不能再登记。
 
 因此 CA 轮换后，节点必须以**新的节点记录**回来：在面板新建节点、生成注册码，节点侧按第 5 节「复用同一台机器重新登记」的步骤处理（只清空 `/var/lib/proxy-agent/identity` 不够：其中的 `identity.json` 会让 Agent 以 `node is already enrolled` 拒绝登记，受管状态与 spool 也会拒绝）。旧节点记录请禁用，避免它继续计入在线节点；新节点需要重新加入原节点组并重新发布配置。
 
@@ -245,4 +245,18 @@ printf '%s\n%s\n' 'owner-name' 'new-password' | \
   runuser -u proxy-panel -- /usr/local/bin/proxy-panel --config /etc/proxy-panel/config.yaml --set-owner-credentials
 systemctl start proxy-panel.service
 ```
+
+## 15. 删除节点
+
+删除是**逻辑删除**：节点记录保留（`nodes.deleted_at`），证书立即吊销，节点退出所有节点组、不再出现在订阅与列表中，历史流量与访问记录保留，且不能再次启用。未登记且没有身份的节点走“取消登记”，记录直接移除。
+
+1. 打开节点的删除预览（页面上的“删除”，或 `GET /api/v1/nodes/{id}/deletion-preview`），确认 `mode`：`cancel`（未登记）、`delete`（已登记）或 `deleted`（已删除）。预览同时给出阻塞项 `blockers` 与所属节点组 `groups`。
+2. 逐项处理阻塞项：入站 / 出站 / 出口组 / 其他节点指向它的中转出站 / 代理链 / 分流规则 / 进行中的批量发布。入口节点的出站被删除后，**重新发布仍经由该节点中转的其他节点**，否则它们会继续按旧配置连接一个已吊销的节点。
+3. 可选：让离线节点先复连一次，把本地缓存（`/var/lib/proxy-agent/spool`）中的访问与流量记录补传完；删除后未上报的记录将丢失。
+4. 在服务器上停止或卸载 Agent（`systemctl stop proxy-agent`，或按[部署与升级](deployment.md)卸载脚本）。**面板无法停止远端代理**：删除只吊销证书，不会结束正在转发的进程。
+5. 面板确认删除。删除同时关闭该节点自己的待发布配置、核心/Agent 更新任务与排队中的健康检查；返回 409 `node_delete_blocked` 时先回到第 2 步。
+
+**服务器已经丢失 / 无法登录**时：直接删除即可，不需要先停机；删除后该节点不会再出现在订阅中，旧证书在 mTLS 上被拒绝。
+
+**重新接入同一台服务器**：删除后不能复用原节点记录（也不能重新登记），请按第 5 节“复用同一台机器重新登记”作为**新节点**接入，并把引用旧节点的出站、出口组成员与代理链改指新节点后重新发布。新节点需要重新加入原节点组。
 

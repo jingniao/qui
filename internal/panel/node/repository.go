@@ -56,6 +56,7 @@ type Node struct {
 	Capabilities      *pb.Capabilities `json:"capabilities"`
 	Heartbeat         *pb.Heartbeat    `json:"heartbeat"`
 	CreatedAt         string           `json:"createdAt"`
+	DeletedAt         string           `json:"deletedAt"`
 }
 
 func timestamp(value time.Time) string { return value.UTC().Format("2006-01-02T15:04:05.000000000Z") }
@@ -257,14 +258,14 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance"
+const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,'')"
 
 type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Node, error) {
 	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}}
 	var capabilities, heartbeat string
-	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance)
+	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt)
 	if err != nil {
 		return n, err
 	}
@@ -289,13 +290,21 @@ func (r *Repository) Get(ctx context.Context, id string) (Node, error) {
 	}
 	return n, err
 }
-func (r *Repository) List(ctx context.Context, keyword string, page, size int) ([]Node, int, error) {
+
+// List returns live nodes unless deleted is set, which returns only the deleted
+// ones. Every picker uses the default list, so a deleted node disappears from
+// them without a separate query.
+func (r *Repository) List(ctx context.Context, keyword string, page, size int, deleted bool) ([]Node, int, error) {
 	var count int
 	search := "%" + keyword + "%"
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE name LIKE ? OR public_ip LIKE ?", search, search).Scan(&count); err != nil {
+	scope := "deleted_at IS NULL"
+	if deleted {
+		scope = "deleted_at IS NOT NULL"
+	}
+	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE "+scope+" AND (name LIKE ? OR public_ip LIKE ?)", search, search).Scan(&count); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+columns+" FROM nodes WHERE name LIKE ? OR public_ip LIKE ? ORDER BY created_at,id LIMIT ? OFFSET ?", search, search, size, (page-1)*size)
+	rows, err := r.Database.QueryContext(ctx, "SELECT "+columns+" FROM nodes WHERE "+scope+" AND (name LIKE ? OR public_ip LIKE ?) ORDER BY created_at,id LIMIT ? OFFSET ?", search, search, size, (page-1)*size)
 	if err != nil {
 		return nil, 0, err
 	}

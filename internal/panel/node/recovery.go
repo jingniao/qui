@@ -26,14 +26,19 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp str
 	// Newer nodes absent from the chosen business snapshot remain disabled
 	// tombstones so issued allowances and received batch identities survive.
 	// Their outbound network settings are carried over like their other fields.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_sequence,capabilities_json,created_at,allow_subscription,maintenance)
-SELECT c.id,c.name,'disabled',0,c.hostname,c.operating_system,c.agent_version,c.public_ip,c.outbound_source_ip,c.outbound_interface,c.host_source_ipv4,c.host_source_ipv6,c.last_sequence,c.capabilities_json,c.created_at,0,1
+	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_sequence,capabilities_json,created_at,allow_subscription,maintenance,deleted_at)
+SELECT c.id,c.name,'disabled',0,c.hostname,c.operating_system,c.agent_version,c.public_ip,c.outbound_source_ip,c.outbound_interface,c.host_source_ipv4,c.host_source_ipv6,c.last_sequence,c.capabilities_json,c.created_at,0,1,c.deleted_at
 FROM restore_source.nodes c WHERE NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=c.id)`); err != nil {
+		return err
+	}
+	// A deleted node stays deleted, disabled and out of every subscription; its
+	// other fields still follow the snapshot.
+	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET deleted_at=coalesce(deleted_at,(SELECT c.deleted_at FROM restore_source.nodes c WHERE c.id=nodes.id)) WHERE EXISTS(SELECT 1 FROM restore_source.nodes c WHERE c.id=nodes.id)`); err != nil {
 		return err
 	}
 	for _, query := range []string{
 		"UPDATE nodes SET enabled=0,allow_subscription=0 WHERE NOT EXISTS(SELECT 1 FROM restore_source.nodes c WHERE c.id=nodes.id)",
-		"UPDATE nodes SET last_sequence=(SELECT c.last_sequence FROM restore_source.nodes c WHERE c.id=nodes.id),enabled=min(enabled,(SELECT c.enabled FROM restore_source.nodes c WHERE c.id=nodes.id)),allow_subscription=min(allow_subscription,(SELECT c.allow_subscription FROM restore_source.nodes c WHERE c.id=nodes.id)),maintenance=max(maintenance,(SELECT c.maintenance FROM restore_source.nodes c WHERE c.id=nodes.id)) WHERE EXISTS(SELECT 1 FROM restore_source.nodes c WHERE c.id=nodes.id)",
+		"UPDATE nodes SET last_sequence=(SELECT c.last_sequence FROM restore_source.nodes c WHERE c.id=nodes.id),enabled=min(enabled,(SELECT c.enabled FROM restore_source.nodes c WHERE c.id=nodes.id),CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END),allow_subscription=min(allow_subscription,(SELECT c.allow_subscription FROM restore_source.nodes c WHERE c.id=nodes.id),CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END),maintenance=max(maintenance,(SELECT c.maintenance FROM restore_source.nodes c WHERE c.id=nodes.id)) WHERE EXISTS(SELECT 1 FROM restore_source.nodes c WHERE c.id=nodes.id)",
 	} {
 		if _, err := tx.ExecContext(ctx, query); err != nil {
 			return err

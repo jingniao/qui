@@ -59,7 +59,7 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 		}
 	}
 	for _, id := range input.Scope.NodeIDs {
-		if _, err := s.Nodes.Get(ctx, id); err != nil {
+		if n, err := s.Nodes.Get(ctx, id); err != nil || n.DeletedAt != "" {
 			return Record{}, errors.New("policy node not found")
 		}
 	}
@@ -169,7 +169,7 @@ func (s *Service) Simulate(ctx context.Context, request shared.Request) (shared.
 	if err := shared.ValidateRequest(&request); err != nil {
 		return shared.Decision{}, err
 	}
-	if _, err := s.Nodes.Get(ctx, request.NodeID); err != nil {
+	if n, err := s.Nodes.Get(ctx, request.NodeID); err != nil || n.DeletedAt != "" {
 		return shared.Decision{}, errors.New("simulation node not found")
 	}
 	if request.DeviceID != "" {

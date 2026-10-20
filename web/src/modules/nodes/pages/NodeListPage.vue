@@ -26,18 +26,19 @@
         </button>
       </div>
       <button class="ios-search-btn shrink-0">查询</button>
+      <label v-if="isOwner" class="inline-flex items-center gap-2 text-sm font-medium text-ios-secondary shrink-0"><input v-model="showDeleted" type="checkbox" @change="search" /> 显示已删除</label>
     </form>
     <ErrorState v-if="error" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="loading && !nodes.length" />
-    <EmptyState v-else-if="!nodes.length" title="还没有节点" description="创建注册码，然后在节点本机运行 Agent 完成注册。" />
+    <EmptyState v-else-if="!nodes.length" :title="showDeleted ? '没有已删除的节点' : '还没有节点'" :description="showDeleted ? '删除后的节点会保留在这里，历史流量与访问记录不受影响。' : '创建注册码，然后在节点本机运行 Agent 完成注册。'" />
     <DataTable v-else>
       <template #header><th>节点</th><th>状态</th><th>系统</th><th>Agent / 核心</th><th>最后心跳</th><th>操作</th></template>
       <template #body><tr v-for="node in nodes" :key="node.id">
-        <td class="p-4"><router-link :to="`/nodes/${node.id}`" class="text-ios-blue font-semibold hover:underline text-[15px]">{{ node.name }}</router-link><p class="text-[13px] text-ios-secondary font-normal mt-0.5">{{ node.publicIp || node.hostname || '等待 Agent 注册' }}</p></td>
+        <td class="p-4"><router-link :to="`/nodes/${node.id}`" class="text-ios-blue font-semibold hover:underline text-[15px]">{{ node.name }}</router-link><span v-if="node.deletedAt" class="ml-2 rounded-full bg-black/[0.05] px-2 py-0.5 text-[11px] font-semibold text-ios-secondary align-middle">已删除</span><p class="text-[13px] text-ios-secondary font-normal mt-0.5">{{ node.publicIp || node.hostname || '等待 Agent 注册' }}</p></td>
         <td><StatusBadge kind="node" :status="node.status" /></td><td class="text-xs text-ios-secondary">{{ node.os || '—' }}</td>
         <td><span class="text-xs font-mono tabular-nums text-ios-label font-medium">{{ node.agentVersion || '—' }}</span><p class="text-[13px] text-ios-secondary font-normal mt-0.5">{{ node.capabilities?.core_name || '尚未检测核心' }} {{ node.capabilities?.core_version }}</p></td>
         <td class="text-xs font-mono tabular-nums text-ios-tertiary">{{ formatTime(node.lastHeartbeat) }}</td>
-        <td class="space-x-2"><router-link :to="`/nodes/${node.id}`" class="ios-action-btn-primary">详情</router-link><button v-if="isOwner" @click="promptToggle(node)" class="ios-action-btn-secondary">{{ node.enabled ? '禁用' : '启用' }}</button><button v-if="isOwner && node.status === 'pending'" @click="promptCancel(node)" class="ios-action-btn-danger">取消登记</button></td>
+        <td class="space-x-2"><router-link :to="`/nodes/${node.id}`" class="ios-action-btn-primary">详情</router-link><template v-if="isOwner && !node.deletedAt"><button @click="promptToggle(node)" class="ios-action-btn-secondary">{{ node.enabled ? '禁用' : '启用' }}</button><button @click="promptDelete(node)" class="ios-action-btn-danger">{{ node.status === 'pending' ? '取消登记' : '删除' }}</button></template></td>
       </tr></template>
       <template #footer><Pagination :total="total" :current-page="page" :page-size="20" @update:page="changePage" /></template>
     </DataTable>
@@ -61,19 +62,33 @@
         <p class="text-sm text-ios-secondary">在节点本机配置中央地址与可信 CA，将注册码写入受保护的本地文件，然后运行注册命令。</p><CodePreview code="proxy-agent --config /etc/proxy-agent/config.yaml --enroll --token-file /etc/proxy-agent/enrollment-token" /><p class="text-xs text-ios-tertiary">私钥由 Agent 本机生成，注册请求只提交公钥证书请求。</p></div>
     </AppDialog>
     <ConfirmDialog v-model="confirmVisible" title="确认节点状态修改" :message="`确认${target?.enabled ? '禁用' : '启用'}节点 ${target?.name || ''}？禁用会拒绝其控制连接。`" @confirm="toggle" />
-    <ConfirmDialog
-      v-model="cancelConfirmVisible"
-      title="取消节点登记"
-      :message="`确认取消节点 ${cancelTarget?.name || ''} 的登记？未使用的注册码将立即失效，该节点记录会被移除。`"
-      :is-danger="true"
-      confirm-text="取消登记"
-      @confirm="cancelEnrollment"
-    />
+    <AppDialog v-model="deleteDialog" :title="deletePreview?.mode === 'cancel' ? '取消节点登记' : '删除节点'" :show-footer="false">
+      <div class="space-y-4">
+        <div v-if="deleteLoading" class="text-sm text-ios-secondary">正在检查节点引用…</div>
+        <template v-else-if="deleteBlockers.length">
+          <p class="text-sm text-ios-secondary">节点仍被以下配置引用或有进行中的发布，请先处理：</p>
+          <ul class="space-y-2">
+            <li v-for="blocker in deleteBlockers" :key="blocker.kind + blocker.id" class="flex items-center gap-2 text-sm">
+              <span class="shrink-0 rounded-full bg-black/[0.05] px-2 py-0.5 text-[11px] font-semibold text-ios-secondary">{{ blockerLabel(blocker.kind) }}</span>
+              <span class="text-ios-label font-medium break-all">{{ blocker.name }}</span>
+            </li>
+          </ul>
+        </template>
+        <p v-else-if="deletePreview?.mode === 'cancel'" class="text-sm text-ios-secondary leading-relaxed">确认取消节点 {{ deleteTarget?.name || '' }} 的登记？未使用的注册码将立即失效，该节点记录会被移除。</p>
+        <p v-else class="text-sm text-ios-secondary leading-relaxed">删除后该节点的证书立即吊销、退出所有节点组、不再出现在订阅中，历史流量与访问记录保留。面板无法停止服务器上的代理程序，请另行停止或卸载 Agent。离线节点尚未上报的记录将丢失。若其他节点已发布的配置仍经由该节点中转，请重新发布这些节点。</p>
+        <p v-if="deleteError" role="alert" class="text-sm text-ios-red">{{ deleteError }}</p>
+        <div class="flex items-center justify-end gap-2.5 pt-2">
+          <button type="button" class="ios-dialog-btn-secondary" @click="deleteDialog = false">关闭</button>
+          <button v-if="!deleteLoading && !deleteBlockers.length && deletePreview" type="button" :disabled="deleting" class="ios-dialog-btn-danger" @click="confirmDelete">{{ deletePreview.mode === 'cancel' ? '取消登记' : '删除节点' }}</button>
+        </div>
+      </div>
+    </AppDialog>
   </div>
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { nodeAPI, installCommand, type NodeView, type Enrollment } from '../api';
+import { nodeAPI, installCommand, type NodeView, type Enrollment, type DeletionBlocker, type DeletionPreview } from '../api';
+import { APIError } from '../../../app/apiClient';
 import { isOwner, formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -88,6 +103,8 @@ import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 const nodes = ref<NodeView[]>([]); const total = ref(0); const page = ref(1); const keyword = ref('');
+// Owner only: the same list, restricted to logically deleted nodes.
+const showDeleted = ref(false);
 const loading = ref(false); const error = ref(''); const createDrawer = ref(false); const name = ref(''); const creating = ref(false);
 const enrollment = ref<Enrollment | null>(null); const tokenDialog = ref(false); const target = ref<NodeView | null>(null); const confirmVisible = ref(false);
 // Inputs of the one-command install block; the defaults describe this panel as
@@ -105,7 +122,7 @@ const installCommandText = computed(() => {
 let generation = 0;
 async function load() {
   const current = ++generation; loading.value = true; error.value = '';
-  try { const result = await nodeAPI.list(page.value, keyword.value); if (current === generation) { nodes.value = result.items; total.value = result.total; } }
+  try { const result = await nodeAPI.list(page.value, keyword.value, showDeleted.value); if (current === generation) { nodes.value = result.items; total.value = result.total; } }
   catch (e) { if (current === generation) error.value = (e as Error).message; }
   finally { if (current === generation) loading.value = false; }
 }
@@ -119,24 +136,49 @@ async function create() {
 }
 function promptToggle(node: NodeView) { target.value = node; confirmVisible.value = true; }
 async function toggle() { if (!target.value) return; try { await nodeAPI.update(target.value, !target.value.enabled); await load(); } catch (e) { showToast((e as Error).message, 'error'); } }
-const cancelTarget = ref<NodeView | null>(null);
-const cancelConfirmVisible = ref(false);
-const cancelling = ref(false);
-function promptCancel(node: NodeView) { cancelTarget.value = node; cancelConfirmVisible.value = true; }
-async function cancelEnrollment() {
-  if (!cancelTarget.value || cancelling.value) return;
-  cancelling.value = true;
+// Deleting is one action for both cases: the preview decides whether the unused
+// registration is cancelled or the enrolled node is logically deleted.
+const deleteTarget = ref<NodeView | null>(null);
+const deletePreview = ref<DeletionPreview | null>(null);
+const deleteDialog = ref(false);
+const deleteLoading = ref(false);
+const deleteError = ref('');
+const deleting = ref(false);
+const deleteBlockers = computed<DeletionBlocker[]>(() => deletePreview.value?.blockers ?? []);
+const blockerLabels: Record<string, string> = {
+  inbound: '入站',
+  outbound: '出站',
+  outbound_group: '出口组',
+  outbound_target: '其他节点的出站',
+  proxy_chain: '代理链',
+  policy: '分流规则',
+  deployment_batch: '进行中的批量发布'
+};
+function blockerLabel(kind: string) { return blockerLabels[kind] || kind; }
+async function promptDelete(node: NodeView) {
+  deleteTarget.value = node; deletePreview.value = null; deleteError.value = ''; deleteDialog.value = true; deleteLoading.value = true;
+  try { deletePreview.value = await nodeAPI.deletionPreview(node.id); }
+  catch (e) { deleteError.value = (e as Error).message; }
+  finally { deleteLoading.value = false; }
+}
+async function confirmDelete() {
+  if (!deleteTarget.value || !deletePreview.value || deleting.value) return;
+  const mode = deletePreview.value.mode;
+  deleting.value = true; deleteError.value = '';
   try {
-    await nodeAPI.cancelEnrollment(cancelTarget.value.id);
-    showToast('节点登记已取消');
-    cancelConfirmVisible.value = false;
+    await nodeAPI.deleteNode(deleteTarget.value.id);
+    showToast(mode === 'cancel' ? '节点登记已取消' : '节点已删除');
+    deleteDialog.value = false;
     await load();
     // The last row of a later page leaves the list empty; step back one page.
     if (!nodes.value.length && page.value > 1) changePage(page.value - 1);
   } catch (e) {
-    showToast((e as Error).message, 'error');
+    deleteError.value = (e as Error).message;
+    // A refusal carries the blockers that appeared since the preview.
+    const blockers = (e as APIError).details?.blockers;
+    if (Array.isArray(blockers) && deletePreview.value) deletePreview.value = { ...deletePreview.value, blockers: blockers as DeletionBlocker[] };
   } finally {
-    cancelling.value = false;
+    deleting.value = false;
   }
 }
 watch(tokenDialog, visible => { if (!visible) enrollment.value = null; });

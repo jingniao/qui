@@ -409,17 +409,23 @@ func TestNodeHTTPAuthorizationAndExpiredEnrollment(t *testing.T) {
 	if response.Code != 404 {
 		t.Fatal("unknown node did not return 404")
 	}
-	// Cancelling a registration is Owner-only, and an enrolled node is kept: the
-	// Agent's certificate is revoked instead of deleting the record.
+	// Deleting is Owner-only. An enrolled node is logically deleted: its history
+	// stays, but its certificate is revoked and it leaves every list.
 	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", viewerCookie, viewerSession.CSRFToken); response.Code != 403 {
-		t.Fatalf("Viewer cancelled a node enrollment: %d", response.Code)
+		t.Fatalf("Viewer deleted a node: %d", response.Code)
 	}
 	if _, err := app.Database.Exec("INSERT INTO node_identities(node_id,certificate_pem,fingerprint,expires_at) VALUES(?,'pem','enrolled-fingerprint',?)", enrolled.Node.ID, time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05.000000000Z")); err != nil {
 		t.Fatal(err)
 	}
-	response = call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken)
-	if response.Code != 409 || !strings.Contains(response.Body.String(), "node_delete_not_allowed") {
-		t.Fatalf("enrolled node was cancelled: %d %s", response.Code, response.Body.String())
+	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken); response.Code != 204 {
+		t.Fatalf("enrolled node was not deleted: %d %s", response.Code, response.Body.String())
+	}
+	var deleted int
+	if err := app.Database.QueryRow("SELECT (SELECT count(*) FROM node_identities WHERE node_id=? AND revoked_at IS NOT NULL)+(SELECT count(*) FROM nodes WHERE id=? AND deleted_at IS NOT NULL AND enabled=0)", enrolled.Node.ID, enrolled.Node.ID).Scan(&deleted); err != nil || deleted != 2 {
+		t.Fatalf("deleted node kept its identity or stayed enabled: %d %v", deleted, err)
+	}
+	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken); response.Code != 204 {
+		t.Fatalf("second delete was not idempotent: %d", response.Code)
 	}
 }
 

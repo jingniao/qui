@@ -365,3 +365,39 @@ func awaitResult(t *testing.T, worker *coreUpdates) release.UpdateResult {
 	}
 	return release.UpdateResult{}
 }
+
+// A node whose core came from install.sh has no release history. Its first
+// core update creates one, records the running core as the baseline and
+// switches to the downloaded image.
+func TestCoreUpdateWithoutHistoryCreatesItAndSwitches(t *testing.T) {
+	adapter := &fakeCoreRuntime{version: "26.3.27"}
+	worker, cfg, _, original := updateHarness(t, adapter, func(dataDirectory string) {
+		for _, path := range []string{filepath.Join(dataDirectory, "release-history"), filepath.Join(dataDirectory, "identity", "release-checkpoint.enc")} {
+			if err := os.RemoveAll(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	archive, digest, _ := updateArchive(t, original, "first-managed")
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(archive) }))
+	defer server.Close()
+	worker.source = updateSource(t, server)
+	request := release.CoreUpdateRequest{SchemaVersion: 2, ID: "upd_first", NodeID: "node-update", Revision: 1, Sequence: 1, Component: "xray", Version: "26.3.27", URL: updateAssetURL, SHA256: digest}
+	if err := worker.submit(updateRequest(request)); err != nil {
+		t.Fatal(err)
+	}
+	if result := awaitResult(t, worker); result.Status != "success" {
+		t.Fatalf("first core update without history: %+v", result)
+	}
+	if adapter.selected == original {
+		t.Fatal("core not switched to the downloaded image")
+	}
+	history, err := openCoreHistory(cfg, "node-update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer history.Close()
+	if state, ok, err := history.Installation("xray"); err != nil || !ok || state.Phase != "committed" {
+		t.Fatalf("installation not recorded: %+v %v %v", state, ok, err)
+	}
+}

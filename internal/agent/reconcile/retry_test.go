@@ -89,3 +89,27 @@ func TestRenderFailureIsCached(t *testing.T) {
 		t.Fatal("cached render failure re-ran render")
 	}
 }
+
+// A fresh node whose first revision fails keeps its failure receipt; the Agent
+// must still restart from that directory and later apply a good revision.
+func TestFirstRevisionFailureLeavesARestartableDirectory(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	manager, err := New(directory, "node-test", &fakeCoreAdapter{failRender: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := manager.Apply(ctx, state(1080, 1)); err == nil || result.Code != "render_failed" {
+		t.Fatalf("render failure not reported: %+v %v", result, err)
+	}
+	restarted, err := New(directory, "node-test", &fakeCoreAdapter{})
+	if err != nil {
+		t.Fatalf("restart after a failed first revision: %v", err)
+	}
+	if restarted.Current() != 0 {
+		t.Fatal("failed revision became current")
+	}
+	if result, err := restarted.Apply(ctx, state(1080, 2)); err != nil || !result.Success {
+		t.Fatalf("next revision after restart: %+v %v", result, err)
+	}
+}

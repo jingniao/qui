@@ -264,7 +264,7 @@ func DiscardPreparedRestore(ctx context.Context, prepared PreparedRestore) error
 }
 
 func normalizeRestoreTarget(target RestoreTarget) (RestoreTarget, error) {
-	if !target.Panel.Development && (target.Panel.TLS.Certificate == "" || target.Panel.TLS.Key == "" || target.Panel.TLS.ClientCA == "") {
+	if !target.Panel.Development && (target.Panel.TLS.Certificate == "" || target.Panel.TLS.Key == "") {
 		return target, ErrRestoreStage
 	}
 	for _, path := range []*string{&target.Panel.Database, &target.Panel.NodeIdentityDirectory, &target.ConfigurationPath} {
@@ -586,7 +586,7 @@ func validateTargetMaterials(panel config.Panel, stage string) error {
 	panel.Database = filepath.Join(stage, "database", "panel.db")
 	panel.NodeIdentityDirectory = filepath.Join(stage, "identity")
 	if !panel.Development {
-		panel.TLS = config.TLS{Certificate: filepath.Join(stage, "tls", "server.crt"), Key: filepath.Join(stage, "tls", "server.key"), ClientCA: filepath.Join(stage, "tls", "client-ca.crt")}
+		panel.TLS = stagedTLS(stage, panel.TLS.ClientCA != "")
 	}
 	if err := panel.Validate(); err != nil {
 		return ErrRestoreStage

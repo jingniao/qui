@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"net"
+	"net/netip"
 	"proxycontrol/pkg/contracts/access"
 	"strings"
 	"sync"
@@ -65,8 +67,12 @@ func (w *Writer) line() {
 		// Upstream recorded a rejection that has no destination, for example a
 		// failed inbound handshake. There is no domain or address to attribute,
 		// so the observation is counted as unattributed instead of being
-		// written as an invented domain.
-		w.failed()
+		// written as an invented domain. The Agent's own TCP health checks open
+		// and close every inbound from loopback, and Shadowsocks logs each one
+		// this way; those are not observations at all.
+		if !loopbackSource(string(line)) {
+			w.failed()
+		}
 		return
 	}
 	record, include, err := w.context.Record(event, w.now())
@@ -85,4 +91,22 @@ func (w *Writer) failed() {
 	if w.reject != nil {
 		w.reject()
 	}
+}
+
+// loopbackSource reports whether an Xray access line starts from a loopback
+// client ("from 127.0.0.1:port", "from tcp:[::1]:port"). The address is only
+// inspected here and never kept.
+func loopbackSource(line string) bool {
+	_, rest, found := strings.Cut(line, "from ")
+	if !found {
+		return false
+	}
+	source, _, _ := strings.Cut(rest, " ")
+	source = strings.TrimPrefix(strings.TrimPrefix(source, "tcp:"), "udp:")
+	host, _, err := net.SplitHostPort(source)
+	if err != nil {
+		return false
+	}
+	address, err := netip.ParseAddr(host)
+	return err == nil && address.IsLoopback()
 }

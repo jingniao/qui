@@ -56,7 +56,9 @@ func safeEntryName(name string) (string, error) {
 }
 
 func copyEntry(reader io.Reader, target string) error {
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	// The staged core is run for its version before it is installed, so it must
+	// be executable by its owner.
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
 	if err != nil {
 		return ErrCoreArchive
 	}

@@ -144,3 +144,28 @@ func TestStatsGuardIncludesHiddenProbeInbounds(t *testing.T) {
 		t.Fatal("probe inbound can bypass management isolation", guard)
 	}
 }
+
+// A device's HTTP and SOCKS5 credentials share one username, so they share one
+// Xray counter. That alias renders; the same username on another device does not.
+func TestStatsAcceptsOneDeviceUsernameAcrossHTTPAndSOCKS(t *testing.T) {
+	state := testState(1080, 1)
+	state.Inbounds = append(state.Inbounds, desiredstate.Inbound{ID: "http", Protocol: "http", Listen: "127.0.0.1", Port: 1081, Enabled: true, DefaultOutbound: "direct"})
+	state.Inbounds[0].CredentialIDs = []string{"socks-credential"}
+	state.Inbounds[1].CredentialIDs = []string{"http-credential"}
+	state.Credentials = []desiredstate.Credential{
+		{ID: "socks-credential", UserID: "user", DeviceID: "device", Protocol: "socks5", Username: "device-shared", Secret: "one"},
+		{ID: "http-credential", UserID: "user", DeviceID: "device", Protocol: "http", Username: "device-shared", Secret: "two"},
+	}
+	state.Users = []desiredstate.User{{ID: "user", Enabled: true}}
+	rendered, err := renderWithOptions(context.Background(), state, time.Now(), RenderOptions{StatsPort: 21000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counter, ok := rendered.StatsAccounts["user>>>device-shared"]; !ok || counter.DeviceID != "device" || len(rendered.StatsAccounts) != 1 {
+		t.Fatal("shared device username not counted once", rendered.StatsAccounts)
+	}
+	state.Credentials[1].DeviceID = "other-device"
+	if _, err := renderWithOptions(context.Background(), state, time.Now(), RenderOptions{StatsPort: 21000}); err == nil {
+		t.Fatal("username shared across devices accepted")
+	}
+}

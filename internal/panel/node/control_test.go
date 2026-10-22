@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/platform/db"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"strings"
 	"testing"
 	"time"
 )
@@ -136,5 +137,22 @@ func TestNodeRepositoryRejectsSequenceGapsAndDisabledUpdates(t *testing.T) {
 	current, err := repository.Get(ctx, n.ID)
 	if err != nil || current.Status != "disabled" || current.LastSequence != 1 {
 		t.Fatal("disabled state changed", err)
+	}
+}
+
+// A core update installs the binary unpacked from the archive, so a successful
+// result names the archive digest as its target and the binary digest as
+// installed. The stream must accept it, and core-only rejection codes too.
+func TestCoreUpdateResultsUseTheCoreContract(t *testing.T) {
+	archive, binary := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	for _, result := range []map[string]any{
+		{"id": "upd_core-success", "node_id": "node-a", "revision": 3, "target_digest": archive, "status": "success", "code": "success", "installed_digest": binary, "installed_version": "26.2.6", "installed_sequence": 1},
+		{"id": "upd_core-checksum", "node_id": "node-a", "revision": 3, "target_digest": archive, "status": "rejected", "code": "checksum_mismatch"},
+	} {
+		data, _ := json.Marshal(result)
+		message := &pb.AgentMessage{NodeId: "node-a", MessageId: "core", Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_CoreUpdateResult{CoreUpdateResult: &pb.CoreUpdateResult{ResultJson: data}}}
+		if err := validateMessage("node-a", message); err != nil {
+			t.Fatalf("%s: %v", result["code"], err)
+		}
 	}
 }

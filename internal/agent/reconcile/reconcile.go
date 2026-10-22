@@ -159,6 +159,12 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 			return result, err
 		}
 	}
+	// A fresh installation has no current.json, and startup refuses retained
+	// revisions without one. Commit the empty manifest before the first
+	// revision directory can appear, so a failed first apply stays restartable.
+	if err := r.ensureCurrentManifest(); err != nil {
+		return result, err
+	}
 	// The outbound source address and interface are node-local facts, not
 	// syntax: they are checked before rendering, and a missing address or
 	// interface is a temporary failure that the next attempt retries.
@@ -499,4 +505,19 @@ func writeFile(path string, data []byte) error {
 		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}
 	return renameErr
+}
+
+func (r *Reconciler) ensureCurrentManifest() error {
+	path := filepath.Join(r.Directory, "current.json")
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if r.manifest.Revision != 0 {
+		return errors.New("current manifest is missing for a committed revision")
+	}
+	data, err := json.Marshal(Manifest{})
+	if err != nil {
+		return err
+	}
+	return writeFile(path, data)
 }

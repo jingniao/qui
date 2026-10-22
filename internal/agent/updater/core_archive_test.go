@@ -167,3 +167,28 @@ func TestExtractTarGzNestedAndUnsafeEntries(t *testing.T) {
 		}
 	}
 }
+
+// The staged core is executed for its version before installation, so the
+// extracted file must carry the owner's execute bit on Unix.
+func TestExtractedCoreIsExecutableByOwner(t *testing.T) {
+	if coreExecutableSuffix() != "" {
+		t.Skip("Windows has no execute permission bits")
+	}
+	fixedCoreNames(t)
+	directory := t.TempDir()
+	archive := filepath.Join(directory, "archive")
+	if err := os.WriteFile(archive, zipBytes(t, []archiveEntry{{name: "xray", data: []byte("binary")}}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	extracted, err := extractCore("Xray-linux-64.zip", "xray", archive, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(extracted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0100 == 0 || info.Mode().Perm()&0077 != 0 {
+		t.Fatalf("staged core mode %v", info.Mode().Perm())
+	}
+}

@@ -122,3 +122,22 @@ func repairCoreInstallation(ctx context.Context, c config.Agent, installation *c
 	_, err := installation.history.TransitionInstallation(ctx, installation.state.RequestID, "rolled_back")
 	return err
 }
+
+// openOrCreateCoreHistory is openCoreHistory for a core update: a node whose
+// core came from install.sh has no history yet, so its first update creates
+// one. The installer then records the running core as the rollback baseline.
+func openOrCreateCoreHistory(c config.Agent, nodeID string) (*updater.History, error) {
+	directory := filepath.Join(c.DataDirectory, "release-history")
+	checkpoint := filepath.Join(c.DataDirectory, "identity", "release-checkpoint.enc")
+	_, directoryErr := os.Lstat(directory)
+	_, checkpointErr := os.Lstat(checkpoint)
+	if !errors.Is(directoryErr, os.ErrNotExist) || !errors.Is(checkpointErr, os.ErrNotExist) {
+		return openCoreHistory(c, nodeID)
+	}
+	key, err := os.ReadFile(filepath.Join(c.DataDirectory, "configuration.key"))
+	if err != nil {
+		return nil, err
+	}
+	defer clear(key)
+	return updater.CreateHistory(updater.HistoryOptions{Directory: directory, Checkpoint: checkpoint, NodeID: nodeID, Key: key})
+}

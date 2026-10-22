@@ -276,8 +276,9 @@ func (s Source) snapshot(ctx context.Context, work string) ([]fileSource, error)
 		}
 	}
 	if !s.Config.Development {
+		// client_ca is optional in the panel configuration and archived only when set.
 		for name, source := range map[string]string{"tls/server.crt": s.Config.TLS.Certificate, "tls/server.key": s.Config.TLS.Key, "tls/client-ca.crt": s.Config.TLS.ClientCA} {
-			if err := add(name, source, false, 1<<20); err != nil {
+			if err := add(name, source, name == "tls/client-ca.crt", 1<<20); err != nil {
 				return nil, err
 			}
 		}

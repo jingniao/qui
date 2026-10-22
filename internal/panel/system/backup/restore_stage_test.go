@@ -338,6 +338,36 @@ func TestRestoreStageProductionTLSRelocationAndMissingMaterials(t *testing.T) {
 	assertNoStage(t, directory)
 }
 
+// The shipped panel.yaml leaves client_ca unset; such a production panel must
+// still back up, and the archive must prepare a restore onto a matching target.
+func TestRestoreStageProductionWithoutClientCA(t *testing.T) {
+	ctx := context.Background()
+	source, directory, _ := sourceFixture(t)
+	source.Config.Development = false
+	source.Config.HTTPAddress, source.Config.GRPCAddress = "127.0.0.1:443", "127.0.0.1:9443"
+	source.Config.TLS = config.TLS{Certificate: filepath.Join(source.Config.NodeIdentityDirectory, "server.crt"), Key: filepath.Join(source.Config.NodeIdentityDirectory, "server.key")}
+	created, err := source.Create(ctx, directory, "restore_stage_014", "owner", testPassword)
+	if err != nil {
+		t.Fatal("production backup without client_ca:", err)
+	}
+	for _, file := range created.Manifest.Files {
+		if file.Name == "tls/client-ca.crt" {
+			t.Fatal("unset client_ca archived")
+		}
+	}
+	target := restoreTargetFixture(t)
+	target.Panel.Development = false
+	target.Panel.TLS = config.TLS{Certificate: target.ConfigurationPath + ".crt", Key: target.ConfigurationPath + ".key"}
+	prepared, err := PrepareRestore(ctx, directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DiscardPreparedRestore(ctx, prepared); err != nil {
+		t.Fatal(err)
+	}
+	assertNoStage(t, directory)
+}
+
 func TestRestoreStageStrictPlanEvenWithExplicitlyPinnedNewDigest(t *testing.T) {
 	ctx := context.Background()
 	source, directory, _ := sourceFixture(t)

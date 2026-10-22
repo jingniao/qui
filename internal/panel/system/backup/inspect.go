@@ -297,7 +297,7 @@ func validateContents(ctx context.Context, work string) error {
 	panel.Database = filepath.Join(work, "database", "panel.db")
 	panel.NodeIdentityDirectory = filepath.Join(work, "identity")
 	if !panel.Development {
-		panel.TLS = config.TLS{Certificate: filepath.Join(work, "tls", "server.crt"), Key: filepath.Join(work, "tls", "server.key"), ClientCA: filepath.Join(work, "tls", "client-ca.crt")}
+		panel.TLS = stagedTLS(work, panel.TLS.ClientCA != "")
 	}
 	if err := panel.Validate(); err != nil {
 		return ErrArchive
@@ -555,4 +555,14 @@ func validateMigrations(ctx context.Context, database *sql.DB) error {
 		return ErrArchive
 	}
 	return nil
+}
+
+// stagedTLS points the web TLS files at an unpacked archive. client_ca is
+// optional, so it is expected only when the configuration names one.
+func stagedTLS(directory string, clientCA bool) config.TLS {
+	staged := config.TLS{Certificate: filepath.Join(directory, "tls", "server.crt"), Key: filepath.Join(directory, "tls", "server.key")}
+	if clientCA {
+		staged.ClientCA = filepath.Join(directory, "tls", "client-ca.crt")
+	}
+	return staged
 }

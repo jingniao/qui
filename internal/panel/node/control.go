@@ -470,7 +470,7 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		return nil
 	}
 	if result := message.GetCoreUpdateResult(); result != nil {
-		r, err := release.DecodeUpdateResult(result.ResultJson)
+		r, err := release.DecodeCoreUpdateResult(result.ResultJson)
 		if err != nil || r.NodeID != id {
 			return errors.New("invalid core update result")
 		}

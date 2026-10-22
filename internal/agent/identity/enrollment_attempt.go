@@ -14,6 +14,10 @@ import (
 
 const enrollmentAttemptName = "enrollment-attempt.json"
 
+// hostNetworkDirectoryName is the helper directory install.sh creates in the
+// data directory (control.go joins the same name).
+const hostNetworkDirectoryName = "host-network"
+
 type enrollmentAttempt struct {
 	Version       int    `json:"version"`
 	TokenSHA256   string `json:"tokenSha256"`
@@ -98,7 +102,9 @@ func requireEnrollmentDirectoryMode(ctx context.Context, directory string, attem
 			}
 			name := entry.Name()
 			root := folder == directory
-			allowed := name == ".agent-owner.lock" || name == ".agent-supervisor.lock" || root && name == "identity" || root && attemptPresent && name == enrollmentAttemptName || !root && attemptPresent && name == "client.key"
+			// install.sh creates host-network/ for the enforced-source helper
+			// before the first enrollment.
+			allowed := name == ".agent-owner.lock" || name == ".agent-supervisor.lock" || root && (name == "identity" || name == hostNetworkDirectoryName) || root && attemptPresent && name == enrollmentAttemptName || !root && attemptPresent && name == "client.key"
 			allowed = allowed || resultPresent && (root && name == enrollmentResultName || !root && (name == "client.crt" || name == "node-ca.crt" || name == "identity.json"))
 			allowed = allowed || root && ownTemporary != "" && name == ownTemporary
 			if !allowed {
@@ -111,6 +117,12 @@ func requireEnrollmentDirectoryMode(ctx context.Context, directory string, attem
 			if root && name == "identity" {
 				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 					return errors.New("登记身份目录类型异常")
+				}
+				continue
+			}
+			if root && name == hostNetworkDirectoryName {
+				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					return errors.New("登记目录中的 host-network 类型异常")
 				}
 				continue
 			}

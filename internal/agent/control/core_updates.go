@@ -119,7 +119,7 @@ func (w *coreUpdates) execute(parent context.Context, request release.CoreUpdate
 	if w.manager.CoreUpdateHeld() {
 		return w.finish(request, "failed_closed", "installation_failed", updater.Installation{})
 	}
-	history, err := openCoreHistory(w.cfg, w.nodeID)
+	history, err := openOrCreateCoreHistory(w.cfg, w.nodeID)
 	if err != nil {
 		return w.finish(request, "failed_closed", "history_invalid", updater.Installation{})
 	}

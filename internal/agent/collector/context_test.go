@@ -51,9 +51,16 @@ func TestWriterFragmentedLinesOversizeAndRawContentNotPublished(t *testing.T) {
 	// A rejection the core recorded without a destination (a failed inbound
 	// handshake) has no domain or address to attribute: it is counted as an
 	// unattributed observation and never becomes a record.
-	writer.Write([]byte("2026/10/17 11:33:32.346148 from tcp:127.0.0.1:63178 rejected  proxy/socks: invalid username or password\n"))
+	writer.Write([]byte("2026/10/17 11:33:32.346148 from tcp:198.51.100.7:63178 rejected  proxy/socks: invalid username or password\n"))
 	if len(records) != 1 || rejected != 2 {
 		t.Fatal(records, rejected)
+	}
+	// The Agent's own health checks connect from loopback and close at once;
+	// Shadowsocks logs them as destination-less rejections. They are ignored.
+	writer.Write([]byte("2026/10/22 17:10:00.120000 from 127.0.0.1:55410 rejected  common/drain: unable to drain connection > EOF > proxy/shadowsocks: failed to read 50 bytes > EOF\n"))
+	writer.Write([]byte("2026/10/22 17:10:00.130000 from tcp:[::1]:55411 rejected  proxy/shadowsocks: failed to read 50 bytes > EOF\n"))
+	if len(records) != 1 || rejected != 2 {
+		t.Fatal("loopback health checks counted as observations", records, rejected)
 	}
 	encoded, _ := json.Marshal(records)
 	if strings.Contains(string(encoded), "PRIVATE") || strings.Contains(string(encoded), "192.0.2.1") {

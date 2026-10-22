@@ -89,16 +89,16 @@ Other standing rules:
 - **Keep it lightweight:** no new services, queues or ledgers.
 - **Prefer deleting code to adding it.**
 
-## 4. Current status (2026-10-21)
+## 4. Current status (2026-10-22)
 
 - **Done:**
   - all 15 phases of the lightweight refactor plan, accepted on Windows on 2026-10-17;
   - post-plan features: outbound network, `qui`, `qui-update`, `node-install.sh`, the CI release job, the iOS UI, cancelling unused registrations, logical node deletion;
   - a dead-code cleanup (2aaadd6).
 - **Released:** `v1.0.0`, tagged at 69be6d6, a GitHub release at https://github.com/jingniao/qui. Commits after the tag (iOS UI, node deletion, cleanup) are not in any release yet.
-- **V1 acceptance is NOT done.** Every [实机] item in `docs/v1-acceptance.md` needs the owner's Linux VMs, including the §33.2 multi-node scenarios and the §33.3 failure tests. Do not mark any of them passed without real evidence.
+- **V1 acceptance is NOT done.** The first field round ran on 2026-10-22 on two Debian 13 hosts (`docs/v1-acceptance.md` §8). It found and fixed 10 defects, including four that broke every Linux node install or enrollment in v1.0.0, backups on a default production panel, and panel core updates. Those fixes are not in any release. Three-node items (V01, A→B→C), arm64 and the items in §8.5 still need evidence. Do not mark anything passed without real evidence.
 - **Still open:**
-  1. Linux VM acceptance, plus the CI `cores` job on Linux.
+  1. Release the 2026-10-22 fixes, then finish the open field items in `docs/v1-acceptance.md` §8.5, plus the CI `cores` job on Linux. The observations in §8.4 are unfixed.
   2. An optional owner decision: move Agent self-update from the Ed25519 signed catalogue (`cmd/release`) to URL + SHA-256 like core updates.
   3. Dead proto fields stay until `protoc` is available (`scripts/generate-proto.sh`). Leave `*.pb.go` alone.
   4. Two Windows-only flaky tests: reconcile `TestSyncHostNetworkClearsTheTableWhenNothingIsConfigured` (file lock on status.json) and singbox `TestRealHTTPDirectBlockRollbackAndReconcilerRestart` (port reuse under load). Rerun them alone before calling a failure a regression.
@@ -116,7 +116,7 @@ Other standing rules:
 
 - Remote: `origin` = https://github.com/jingniao/qui.git. The default branch is `main`.
 - Work branch: `publish-main`. It tracks `origin/main` and is built on the public history (`e5023e3` initial public release and later).
-  - At handoff it is 1 commit ahead (2aaadd6 cleanup) and has uncommitted documentation changes, unless the owner has since committed them.
+  - On 2026-10-21 it matched `origin/main` at 3a61bbd. The 2026-10-22 acceptance fixes are on top of it; check `git status` for whether they have been committed.
 - Other local branches are history only; do not push them:
   - `master`: old pre-publication history;
   - `public-main`: points at v1.0.0;

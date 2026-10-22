@@ -74,7 +74,7 @@ func configureStats(document *configDocument, state desiredstate.State, port int
 	rendered.StatsAccounts = map[string]traffic.Counter{}
 	// User counters are global to the core, including internal relay users.
 	// Reject aliases before excluding internal accounts from user accounting.
-	names := map[string]string{}
+	names := map[string]desiredstate.Credential{}
 	for _, credential := range state.Credentials {
 		bound := false
 		for _, inbound := range state.Inbounds {
@@ -89,10 +89,16 @@ func configureStats(document *configDocument, state desiredstate.State, port int
 		if credential.Protocol == "http" || credential.Protocol == "socks5" {
 			name = credential.Username
 		}
-		if previous, exists := names[name]; exists && previous != credential.ID {
-			return errors.New("statistics account name is ambiguous")
+		if previous, exists := names[name]; exists && previous.ID != credential.ID {
+			// The panel gives a device's HTTP and SOCKS5 credentials one
+			// username, so Xray keeps one counter for both. It still belongs to
+			// a single user and device and is counted once.
+			if !sameDeviceUsername(previous, credential) {
+				return errors.New("statistics account name is ambiguous")
+			}
+			continue
 		}
-		names[name] = credential.ID
+		names[name] = credential
 		if credential.Internal || credential.UserID == "" || credential.DeviceID == "" {
 			continue
 		}
@@ -253,4 +259,9 @@ func (a *Adapter) TrafficCounters(ctx context.Context) ([]traffic.Counter, error
 		return nil, errors.New("core not running")
 	}
 	return readCounters(ctx, a.current, a.statsEpoch, &a.counterSources)
+}
+
+func sameDeviceUsername(a, b desiredstate.Credential) bool {
+	usernameKeyed := func(c desiredstate.Credential) bool { return c.Protocol == "http" || c.Protocol == "socks5" }
+	return usernameKeyed(a) && usernameKeyed(b) && !a.Internal && !b.Internal && a.UserID != "" && a.UserID == b.UserID && a.DeviceID != "" && a.DeviceID == b.DeviceID
 }

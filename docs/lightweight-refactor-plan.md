@@ -1,7 +1,7 @@
 # Lightweight Refactor Plan (2026-10-15, revision 2)
 
-**Status:** all phases implemented and accepted on Windows (Phase 15, 2026-10-17); V1 still awaits Linux acceptance (Section 8, owner)
-**Implementer:** OpenCode, one phase per delegation
+**Status:** all phases implemented and accepted on Windows (Phase 15, 2026-10-17); v1.0.0 published 2026-10, and V1 still awaits Linux acceptance (Sections 8 and 9, owner)
+**Implementer:** OpenCode, one phase per delegation (Phases 0–5 and 9–11); Cline from Phase 6 on, by the owner's instruction of 2026-10-17 (Phases 6–8 and 12–15)
 **Reviewer:** Claude Code. Each phase is reviewed against its acceptance criteria before the next one starts (Section 6).
 **Supersedes as the working entry point:** `docs/current-status.md`, `docs/remaining-work-plan.md`, `docs/superpowers/plans/*`, `docs/test-repair-plan-20261015.md`. Those files are history only.
 
@@ -1887,3 +1887,29 @@ The commands in `deployment.md` and `operations.md` were compared flag by flag a
 - The panel and agent CLIs have about 10 flags each.
 - There's one install script per role.
 - Real multi-node acceptance (AGENTS.md §33.2 on Linux VMs) is a separate owner-run step and isn't claimed by this plan.
+
+---
+
+## 9. After the plan (2026-10-17 to 2026-10-21)
+
+Phase 15 closed the plan on 2026-10-17. The items below landed afterwards. They are listed here so this file stays the working entry point, but they are **not** part of the 15 phases and none of them carries Linux evidence yet.
+
+| Item | Migration / artifact | Where it is documented |
+|---|---|---|
+| Node outbound network: core outbound source IP or interface, plus a server-wide enforced source address handled by a `CAP_NET_ADMIN` oneshot helper (nft table `inet proxy_agent_source`) | `migrations/0108_node_outbound_network.sql`; `internal/agent/hostnet`; `deploy/systemd/proxy-agent-host-network.service` and `.path` | AGENTS.md §11.3 and §30.2; architecture.md §4, §6, §7; deployment.md §4, §7; operations.md §9; protocol-support-matrix.md §2 |
+| Root terminal menu `qui` on the panel host (change Owner credentials, change the Web port, restart/start/stop, update); `qui-update` on both hosts (GitHub Release + `SHA256SUMS`, database backup before a panel upgrade) | `deploy/linux/qui.sh` → `/usr/local/bin/qui`; `deploy/linux/update.sh` → `/usr/local/bin/qui-update` | AGENTS.md §30.1; README quick start; deployment.md §3, §5; operations.md §14 |
+| One-line node installer and the unauthenticated CA endpoint it relies on | `deploy/linux/node-install.sh`; `GET /install/ca.pem` | AGENTS.md §11.3 and §27.4; deployment.md §4 |
+| CI `release` job and the v1.0.0 publication | `.github/workflows/check.yml` (`release`, only on `refs/tags/v*`); tag `v1.0.0` at `69be6d6` | README; deployment.md §5; v1-acceptance.md §2 |
+| iOS design system applied to the whole web UI; Owner can cancel an unused node registration | `web/src/styles/main.css`, `web/tailwind.config.js`, `web/src/components/*`, `internal/panel/node/deletion.go` | design-system.md; AGENTS.md §11.3 |
+| Logical deletion of registered nodes (blockers → 409 `node_delete_blocked`, certificate revoked, history kept, `GET /api/v1/nodes?deleted=1` and the deletion preview) | `migrations/0109_node_deletion.sql`; `internal/panel/node/deletion.go`; `internal/panel/deployment/node_tasks.go` | AGENTS.md §11.3 and §27.4; architecture.md §3, §6; operations.md §15; v1-acceptance.md §5 |
+| Cleanup: dead Go code, unused web components (`AppLayout`, `FilterBar`, `NodeBadge`, `NodePath`), `web/src/mocks`, the traffic budget-retirement and recovery-execution contracts, two old audit reports | `2aaadd6` | — |
+
+`v1.0.0` (tag at `69be6d6`) contains the first four rows. The iOS design system, cancelling unused registrations, logical node deletion and the cleanup came after the tag and are not in any release yet.
+
+**Still open.**
+
+1. **Linux VM acceptance.** The whole of `docs/v1-acceptance.md` is unexecuted, including the post-plan items in its §5; the verdict stays "V1 未完成" even though v1.0.0 is published.
+2. **Optional:** move Agent self-update from the signed catalogue (Ed25519, `cmd/release`) to URL + SHA-256 like core updates, which would delete most of `cmd/release` (see the open items after §7).
+3. **Known residue:** the dead `pkg/contracts/agentpb` fields stay until `protoc` is available (`scripts/generate-proto.sh`).
+4. **Windows-only flaky tests:** reconcile `TestSyncHostNetworkClearsTheTableWhenNothingIsConfigured` and sing-box `TestRealHTTPDirectBlockRollbackAndReconcilerRestart`.
+5. Gate commands for later changes: `gofmt -l` on the changed Go files, `go build ./...`, `go vet ./...`, `go test -count=1 ./...`, `npm --prefix web run build`, `npm run test:time`.

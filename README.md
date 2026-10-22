@@ -1,8 +1,8 @@
-# Proxy Control d
+# Proxy Control
 
 面向 1～10 名内部用户的自托管多节点代理控制平台。中央端是一个 Go 单体程序（SQLite + 嵌入式 Vue 前端），Node Agent 通过 gRPC + mTLS 主动接入并管理**官方** Xray 或 sing-box 二进制；用户代理流量不经过中央端。
 
-当前状态：按[轻量重构计划](docs/lightweight-refactor-plan.md)收敛完成，处于功能与交付验收阶段；**V1 未完成**，运行验收需在 Linux VM 上执行，标准见[验收矩阵](docs/v1-acceptance.md)。
+当前状态：按[轻量重构计划](docs/lightweight-refactor-plan.md)收敛完成，**v1.0.0 已发布**（GitHub Release，仓库 <https://github.com/jingniao/qui>）。**V1 仍未完成**：Linux VM 上的实机验收尚未执行，标准与实机清单见[验收矩阵](docs/v1-acceptance.md)。
 
 ## 快速开始
 
@@ -29,6 +29,8 @@ deploy/linux/enroll.sh --token-file /root/node1.token
 systemctl enable --now proxy-agent.service
 ```
 
+上面是手工步骤。面板登记节点后还会给出**一键安装命令**（`deploy/linux/node-install.sh`），在目标机 root shell 里粘贴执行即可完成下载、校验、面板证书信任、登记与启动。之后的面板与节点升级都用 `qui-update`（从 GitHub Release 取同版本归档并核对摘要）；面板主机上 root 输入 `qui` 可打开终端菜单（改管理员口令、改 Web 端口、重启/启停、更新）。
+
 完整步骤、参数说明和排错见 **[部署与升级](docs/deployment.md)**。
 
 ## 文档
@@ -37,11 +39,13 @@ systemctl enable --now proxy-agent.service
 | --- | --- |
 | 需求与架构约束 | [项目说明书](AGENTS.md) |
 | 系统组成与数据流 | [架构总览](docs/architecture.md) |
+| 前端设计系统与按钮、表单规范 | [设计系统规范](docs/design-system.md) |
 | 安装、接入节点、升级 | [部署与升级](docs/deployment.md) |
 | 备份恢复、证书、额度、故障 | [运维手册](docs/operations.md) |
 | 协议与能力范围 | [协议支持矩阵](docs/protocol-support-matrix.md) |
 | 验收标准与实机清单 | [验收矩阵](docs/v1-acceptance.md) |
 | 重构阶段与进度 | [轻量重构计划](docs/lightweight-refactor-plan.md) |
+| 交接给下一位实现者的现状与规则 | [接手说明](docs/agent-handoff.md) |
 | 文档索引与历史归档 | [文档导航](docs/README.md) |
 
 ## 本地开发
@@ -57,7 +61,7 @@ go run ./cmd/agent --config deploy/examples/agent.dev.yaml
 
 开发 Web 地址 `http://127.0.0.1:8080`，gRPC 为 `127.0.0.1:9443`，数据库在 `state/`。前端热更新用 `npm --prefix web run dev`（页面 `http://localhost:3000`，API 转发到中央端）。
 
-门禁命令：`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`npm --prefix web run build`；真实核用例需要 `XRAY_BINARY` / `SINGBOX_BINARY`，未设置时跳过（跳过不等于通过）。
+门禁命令：`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`npm --prefix web run build`、`npm run test:time`；真实核用例需要 `XRAY_BINARY` / `SINGBOX_BINARY`，未设置时跳过（跳过不等于通过）。
 
 ## 项目结构
 

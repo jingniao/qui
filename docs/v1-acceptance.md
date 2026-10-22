@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-17（Phase 14）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-21（v1.0.0 发布后的同步）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 本版只重整标准与执行方式，未运行任何验收。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -18,7 +18,7 @@
 | 面板 | `deploy/linux/install.sh --panel ...`，配置 `deploy/examples/panel.yaml` |
 | 节点 | `deploy/linux/install.sh --node ... [--core xray|sing-box ...]`，登记 `deploy/linux/enroll.sh --token-file FILE` |
 | 官方核心 | Xray 26.3.27、sing-box 1.14.3 官方发布二进制（核心相关项必须使用） |
-| 自动门禁 | `.github/workflows/check.yml` 的 `check` 作业（web 构建、`go vet`、Agent fixture、`go test -race`、两个构建）与可选的 `cores` 作业（真实核测试）。CI 通过不等于验收通过 |
+| 自动门禁 | `.github/workflows/check.yml` 的 `check` 作业（web 构建、前端时间测试、`go vet`、Agent fixture、`go test -race`、两个构建）与可选的 `cores` 作业（真实核测试）；`release` 作业只在 `refs/tags/v*` 上运行，拒绝非 `vMAJOR.MINOR.PATCH` 标签，构建两个架构的归档与 `SHA256SUMS` 并用 `gh release create` 发布（v1.0.0 即由它发布）。CI 通过不等于验收通过 |
 | 单元/集成测试 | `go test -count=1 ./...`；设置 `XRAY_BINARY` / `SINGBOX_BINARY` 后真实核用例不再跳过 |
 
 测试命令与参数见[部署与升级](deployment.md)，日常操作见[运维手册](operations.md)，能力范围见[协议支持矩阵](protocol-support-matrix.md)。
@@ -63,7 +63,20 @@
 | D4 上游缺失能力 | 每域名字节可为空并显示“—”；出口显示为“配置出口”并标注不代表实际到达；权重策略已移除（旧组按 `round_robin`）；UDP 行为按上游 |
 | D5 sing-box 每用户 | sing-box 节点只报节点总量；每用户流量与在线数为未知；额度只统计 Xray 节点流量；用户页在授权 sing-box 节点组时给出说明 |
 
-## 5. 必须由 owner 在 Linux VM 执行的清单
+## 5. 计划完成后新增功能的实机项
+
+以下功能在轻量重构计划结束（2026-10-17）之后加入：P01–P03 已包含在 v1.0.0 发布包中，P04（节点逻辑删除）在 v1.0.0 之后合入主分支、尚未进入任何发布；它们和原 25 条一样**没有任何实机证据**。全部 **[实机]**。
+
+| 编号 | 功能 | 验收动作与通过条件 |
+| --- | --- | --- |
+| P01 | 节点出站网络 | **核心出站源**：在节点设置里填源 IP 或网卡并发布后，渲染结果出现 Xray `sendThrough` + `streamSettings.sockopt.interface`（或 sing-box `inet4/inet6_bind_address` + `bind_interface`），实际出站源地址就是所填值；目标是另一族的字面量 IP 时连接失败。**服务器强制出站**：填 IPv4/IPv6 并发布后 `nft list table inet proxy_agent_source` 出现规则，经该网卡新建的连接源地址被改写，核心出站源地址被豁免，其他网卡不被改写；只填一个地址族时不改写另一族。**失败路径**：源地址或网卡在节点上不存在（`network_unavailable`）、helper 未安装或执行失败（`host_network_failed`）时保留上一成功配置并重试；B 失败时发布回滚且规则还原；四个字段留空再发布后表被删除 |
+| P02 | 终端菜单 `qui` 与升级工具 `qui-update` | `qui` 第 1 项改管理员口令后旧 Owner 会话全部失效、口令不进 argv；第 2 项改 Web 端口时 `--check-config` 失败会保留原配置（备份为 `config.yaml.bak`），成功重启后新端口可用；重启/启动/停止只作用于 `proxy-panel.service`。`qui-update` 从 GitHub Release 取归档与 `SHA256SUMS` 并核对摘要，面板升级前把数据库（含 `-wal`）备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，失败时服务回到停止前状态并打印降级命令；**迁移不可逆**，降级前必须用该备份恢复数据库 |
+| P03 | 一键节点安装与证书信任 | 用面板显示的 `node-install.sh` 命令装出的 Agent 与核心版本与面板一致，登记后节点在线；面板证书由公网 CA 签发时信任系统 CA 包，自签时要求 `GET /install/ca.pem` 的 SHA-256 等于 `--ca-sha256`（不一致立即中止）；`GET /install/ca.pem` 无需登录返回 PEM、开发模式下返回 404；登记成功前可重跑同一条命令，已登记主机被拒绝 |
+| P04 | 节点逻辑删除 | 有引用时 `DELETE /api/v1/nodes/{id}` 返回 409 `node_delete_blocked` 并列出 `blockers`，`GET /api/v1/nodes/{id}/deletion-preview` 给出同样的阻塞项；无引用时删除成功：证书立即吊销（旧证书的 mTLS 连接被拒）、节点从列表/选择器/订阅消失、`GET /api/v1/nodes?deleted=1` 可见、历史流量与访问记录保留、不能再次启用或重新登记；同一事务关闭该节点的待发布配置、核心/Agent 更新任务与排队健康检查；未登记节点走“取消登记”；删掉的服务器要作为新节点重新接入 |
+
+这些项目与第 6 节的清单一起执行；缺少任何一项证据都不能判定 V1 完成。
+
+## 6. 必须由 owner 在 Linux VM 执行的清单
 
 以下项目**无法在 Windows 上完成**，是 V1 完成的必要条件：
 
@@ -74,10 +87,11 @@
 5. 证书操作：自动续期、`renew-certificate.sh --renew`、`--rotate-key`、手工 CA 轮换（含节点以新记录重新登记）。
 6. 备份与恢复：计划备份、校验、恢复预览、停机命令行恢复、恢复后节点重连。
 7. 多节点验收：AGENTS 第 33.2 节的集成场景在真实多节点拓扑上跑一遍（轻量重构计划明确把这一步留给 owner，不在计划内声明完成）。
+8. 第 5 节的 P01–P04：节点出站网络（含回滚）、`qui` 菜单与 `qui-update` 升级（含数据库备份）、`node-install.sh` 一键安装与证书指纹信任、节点逻辑删除。
 
-## 6. 正式完成条件
+## 7. 正式完成条件
 
-- V01～V25 全部有最终版本证据，D1–D5 补充项全部观察通过。
+- V01～V25 全部有最终版本证据，D1–D5 补充项全部观察通过，第 5 节的 P01–P04 全部通过。
 - 第 33.3 节故障测试全部有结果，无未解决的数据正确性、越权、配置恢复、身份/额度问题。
 - Linux 支持范围、核心能力与实际发布包一致，运行限制（D2/D4/D5）在文档中写明。
 - 发布包有摘要、源码与依赖来源、迁移/升级路径和可重复的运维手册。

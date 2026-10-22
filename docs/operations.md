@@ -1,6 +1,6 @@
 # 运维手册
 
-更新时间：2026-10-17（Phase 14）。性质：按当前源码整理的运维结论，不是运行证据。未在 Linux 实机执行；带 **[待实机]** 的操作属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。安装与目录约定见[部署与升级](deployment.md)。
+更新时间：2026-10-21（v1.0.0 发布后的同步）。性质：按当前源码整理的运维结论，不是运行证据。未在 Linux 实机执行；带 **[待实机]** 的操作属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。安装与目录约定见[部署与升级](deployment.md)。
 
 ## 1. 日常检查
 
@@ -79,8 +79,8 @@ systemctl start proxy-agent.service
 
 **代码与计划草案不一致（以代码为准）**：轻量重构计划第 7 节的草案写的是“禁用旧节点记录并重新登记”。按当前代码：
 
-- 注册码只在节点记录**启用**时可用（`internal/panel/node/repository.go:88`、`repository.go:110` 要求 `nodes.enabled=1`），被禁用的节点不能登记；
-- `node_identities.node_id` 是主键，登记时是普通 `INSERT`（`repository.go:121`），所以**同一个节点 ID 无法二次登记**；
+- 注册码只在节点记录**启用**时可用（`internal/panel/node/repository.go:106` 的查询与 `repository.go:126` 的核销更新都要求 `nodes.enabled=1`），被禁用的节点不能登记；
+- `node_identities.node_id` 是主键，登记时是普通 `INSERT`（`repository.go:137`），所以**同一个节点 ID 无法二次登记**；
 - 面板只支持逻辑删除节点（见第 15 节）；被删除的节点记录仍保留，但不能再登记。
 
 因此 CA 轮换后，节点必须以**新的节点记录**回来：在面板新建节点、生成注册码，节点侧按第 5 节「复用同一台机器重新登记」的步骤处理（只清空 `/var/lib/proxy-agent/identity` 不够：其中的 `identity.json` 会让 Agent 以 `node is already enrolled` 拒绝登记，受管状态与 spool 也会拒绝）。旧节点记录请禁用，避免它继续计入在线节点；新节点需要重新加入原节点组并重新发布配置。
@@ -89,7 +89,7 @@ systemctl start proxy-agent.service
 
 ## 5. 替换丢失或失陷的节点 **[待实机]**
 
-1. 面板里**禁用**旧节点：这会让它的证书在 mTLS 上被拒绝（`internal/panel/node/repository.go:135` 要求节点启用；`TestDisabledNodeIsRefusedAtMTLS` 覆盖该行为）。
+1. 面板里**禁用**旧节点：这会让它的证书在 mTLS 上被拒绝（`internal/panel/node/repository.go:151` 的 `ValidateIdentity` 要求节点启用；`TestDisabledNodeIsRefusedAtMTLS` 覆盖该行为）。
 2. 新建节点记录并生成一次性注册码。
 3. 按[部署与升级](deployment.md)第 4 节安装并登记新节点，然后把它加入原节点组并重新发布配置。
 
@@ -97,7 +97,7 @@ systemctl start proxy-agent.service
 
 1. `systemctl stop proxy-agent`；
 2. 把整个数据目录移作备份：`mv /var/lib/proxy-agent /var/lib/proxy-agent.old-$(date +%Y%m%d)` —— 旧节点尚未上传的遥测与访问记录会随目录一起丢弃；备份只用于排查，确认无误后删除；
-3. 重跑安装脚本（见[部署与升级](deployment.md)第 4 节）：`deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256>`。它会重建 `/var/lib/proxy-agent`，属主 `proxy-agent`、权限 `0700`（`deploy/linux/install.sh:296`）；
+3. 重跑安装脚本（见[部署与升级](deployment.md)第 4 节）：`deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256>`。它会重建 `/var/lib/proxy-agent`，属主 `proxy-agent`、权限 `0700`（`deploy/linux/install.sh:310`）；
 4. 登记：`deploy/linux/enroll.sh --token-file FILE`；
 5. 在面板把新节点加回原节点组，并把引用旧节点的出站 / 出口组成员 / 代理链改指新节点，然后发布配置。
 

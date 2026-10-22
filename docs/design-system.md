@@ -171,8 +171,8 @@
 
 ### 1. 弹出面板容器与圆角
 - **确认弹窗 (`ConfirmDialog`)**：居中，最大宽度 448px (`max-w-md`)，圆角 **24px** (`rounded-3xl`)，柔和边框与深层投影。
-- **侧边抽屉 (`FormDrawer`)**：右侧滑入，固定宽 `28rem` (448px) 或 `32rem` (512px)，平滑弹性进出。
-- **背景蒙层**：统一采用 `bg-black/40 backdrop-blur-md` 毛玻璃模糊效果。
+- **表单弹窗 (`FormDrawer`)**：**居中模态**（`fixed inset-0` + `flex items-center justify-center`），圆角 **24px** (`rounded-3xl`)，宽度按 `width` 属性取 `max-w-md`（默认，448px）/ `max-w-lg` / `max-w-xl` / `max-w-2xl`，最高 `85vh`，内容区独立滚动；头部与底部操作条都是 `#F5F5F7` 背景。组件名沿用旧称，**它不再是右侧抽屉**。
+- **背景蒙层**：统一采用 `bg-black/40 backdrop-blur-md` 毛玻璃模糊效果（`FormDrawer` 为 `bg-black/45`）。
 
 ### 2. 动效曲线规范
 - 统一使用 Apple 标志性的弹簧减速曲线：
@@ -188,13 +188,13 @@
 ## 七、侧边栏与导航系统 (Navigation & Sidebar)
 
 ### 1. 展开态 (Expanded State)
-- **宽度**：`16rem` (256px)。
+- **宽度**：设计目标 `17rem` (272px)。`web/src/layouts/MainLayout.vue` 写的是 `w-68`，但 Tailwind 3.4 默认间距表没有 `68`，该类不生成样式，目前展开宽度实际由侧栏内容决定（已知问题，待修）。
 - **分组标题**：`text-[11px] font-semibold tracking-wider uppercase text-ios-tertiary px-3.5 pt-4 pb-1.5`。
 - **一级折叠菜单项**：未激活为常规灰色文本；展开/激活时为 `text-ios-blue bg-ios-blue/10 font-semibold`，右侧 Chevron 箭头平滑旋转 90 度。
 - **二级子路由项**：缩进 `pl-9`，字号收窄为 `text-[13px]`，形成明晰树形梯级。
 
 ### 2. 折叠态 (Collapsed State)
-- **宽度**：`4.5rem` (72px)。
+- **宽度**：`w-20` (80px)。
 - **视觉**：仅展示居中矢量图标；悬浮时在右侧弹出具有毛玻璃与微投影的提示气泡（Tooltip），保持极简状态下的可操作性。
 - **平滑过渡**：宽度与透明度均附加 `transition-all duration-300 cubic-bezier(0.16, 1, 0.3, 1)`。
 
@@ -204,7 +204,7 @@
 
 ### 1. 表格骨架与表头 (`thead th`)
 - **关键规则**：表头必须退居次席，避免粗黑抢镜。
-- **样式规范**：`text-xs font-medium text-ios-tertiary tracking-wider uppercase px-4 py-3 bg-black/[0.015] border-b border-black/[0.06]`。
+- **样式规范**：共享 `DataTable.vue` 的 `thead` 为 `text-xs font-medium text-ios-tertiary tracking-wider uppercase bg-[#F5F5F7] border-b border-black/[0.08]`。
 
 ### 2. 数据单元格与首列重点
 - **首列重点实体**：`text-[15px] font-semibold text-ios-label`（若可点击则为 `text-ios-blue hover:underline`），副说明文字为 `text-[13px] text-ios-secondary mt-0.5`。

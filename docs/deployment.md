@@ -1,6 +1,6 @@
 # 部署与升级
 
-更新时间：2026-10-17（Phase 14）。本文命令取自 `deploy/linux/*.sh`、`deploy/systemd/*.service`、`cmd/panel` 和 `cmd/agent` 的实际参数（`go run ./cmd/panel -h`、`go run ./cmd/agent -h`），文件名与路径取自 `deploy/examples/*.yaml` 和安装脚本。
+更新时间：2026-10-21（v1.0.0 发布后的同步）。本文命令取自 `deploy/linux/*.sh`、`deploy/systemd/*.service`、`cmd/panel` 和 `cmd/agent` 的实际参数（`go run ./cmd/panel -h`、`go run ./cmd/agent -h`），文件名与路径取自 `deploy/examples/*.yaml` 和安装脚本。
 
 **未在 Linux 实机执行。** 端到端安装、升级和服务运行属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。日常运维见[运维手册](operations.md)。
 
@@ -81,7 +81,7 @@ systemctl enable --now proxy-panel.service
 
 `journalctl -u proxy-panel -f` 查看日志；程序只写 stdout，不写 `/var/log` 下的文件。
 
-面板安装脚本还会安装终端菜单 `/usr/local/bin/qui`（root 专用）。在面板主机的 SSH 会话里输入 `qui` 即可打开菜单：1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止，0. 退出。它只做这几件事，细节见[运维手册](operations.md)。
+面板安装脚本还会安装终端菜单 `/usr/local/bin/qui`（root 专用）。在面板主机的 SSH 会话里输入 `qui` 即可打开菜单：1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止、6. 更新（从 GitHub）、0. 退出。它只做这几件事，细节见[运维手册](operations.md)。
 
 ## 4. 接入节点
 

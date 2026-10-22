@@ -1,0 +1,45 @@
+#!/bin/sh
+# Watch the enforced outbound source a Proxy Control node agent publishes.
+#
+# On systemd this job is proxy-agent-host-network.path: PathChanged on
+# desired.json runs the oneshot unit that applies the file. OpenRC has no path
+# units, so this watcher stands in for both: it applies whatever the Agent
+# already published when the service starts (the equivalent of the oneshot unit
+# running at boot, and what makes an upgraded node reapply its retained rule),
+# then hands the directory to busybox inotifyd and exits into it.
+#
+# inotifyd runs `PROG EVENT DIR FILE` for every event in the watched directory,
+# so this script is started once more per event. Only a publish of exactly
+# desired.json is applied: the Agent writes the file by renaming a dot-prefixed
+# temporary file into place, which is what the w and y masks catch, and the
+# helper's own status.json must not trigger another apply.
+#
+# The helper never receives anything but its fixed argument list: no event name,
+# no path the kernel supplied, and no other input.
+set -eu
+
+DIR=/var/lib/proxy-agent/host-network
+HELPER=/usr/local/bin/proxy-agent
+
+# A failed apply is not fatal: the Agent retries the publish, inotifyd stays
+# armed and the service must not be torn down by one bad rule file.
+apply_desired() {
+  "$HELPER" --apply-host-network "$DIR" \
+    || printf 'host-network: applying %s failed\n' "$DIR/desired.json" >&2
+}
+
+case $# in
+  0)
+    apply_desired
+    exec /sbin/inotifyd "$0" "$DIR:wy"
+    ;;
+  3)
+    # $1 = event mask, $2 = watched directory, $3 = file name.
+    if [ "$3" = desired.json ]; then apply_desired; fi
+    exit 0
+    ;;
+  *)
+    printf 'usage: %s  (no arguments, or "EVENT DIR FILE" as passed by inotifyd)\n' "$0" >&2
+    exit 2
+    ;;
+esac

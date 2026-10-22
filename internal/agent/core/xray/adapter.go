@@ -225,6 +225,10 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 	}
 	// The process lifetime belongs to the Agent, never to a control connection.
 	command := exec.Command(absolute, "run", "-config", file.Name())
+	// The core must also die with the Agent when the supervisor only signals the
+	// Agent PID (OpenRC supervise-daemon): the kernel kills the core with the
+	// starting thread.
+	command.SysProcAttr = core.CoreProcessAttributes()
 	// Record the pending child before it exists so no start-window crash can
 	// leave an orphan core without a durable marker.
 	if err := a.claimCoreRunLocked(epoch, configuration.Revision); err != nil {

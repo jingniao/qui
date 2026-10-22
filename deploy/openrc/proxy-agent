@@ -1,0 +1,68 @@
+#!/sbin/openrc-run
+# OpenRC init script for the Proxy Control node agent.
+#
+# This mirrors deploy/systemd/proxy-agent.service field for field. The systemd
+# unit stays the reference for Debian and Ubuntu hosts; this file exists so an
+# Alpine host, including an LXC container without systemd, runs the same program
+# as the same account with the same working directory, umask and capability.
+#
+#   User/Group=proxy-agent    -> command_user=proxy-agent:proxy-agent
+#   ExecStart=...             -> command + command_args
+#   WorkingDirectory=...      -> directory
+#   UMask=0077                -> umask=077 (OpenRC reads it as an octal mask)
+#   Restart=on-failure,RestartSec=5
+#                             -> supervisor=supervise-daemon, respawn_delay=5
+#   TimeoutStopSec=90         -> retry=TERM/90/KILL/5
+#   KillMode=mixed            -> rc_cgroup_cleanup=yes (the leftover processes in
+#                                the service cgroup are killed after stop)
+#   CapabilityBoundingSet/AmbientCapabilities=CAP_NET_BIND_SERVICE
+#                             -> capabilities="^cap_net_bind_service" (the ^ marks
+#                                the capability ambient, so the cores the Agent
+#                                spawns inherit it and can bind ports below 1024)
+#   NoNewPrivileges=true      -> no_new_privs=yes
+#   StateDirectory=proxy-agent-> start_pre checkpath creates /var/lib/proxy-agent
+#                                with the owner and mode the unit would give it
+#                                (install.sh already created it this way)
+#   Standard output to journald -> output_logger/error_logger send both streams to
+#                                busybox syslogd, which writes /var/log/messages
+#
+# Two deliberate differences from the unit:
+#   * respawn_max=0 keeps restarting forever, which is what the unit does in
+#     practice as well: Restart=on-failure with RestartSec=5 never reaches
+#     systemd's default start limit (5 starts within 10 s), so neither side gives
+#     up on a node that keeps crashing. It stays visible in
+#     `rc-service proxy-agent status` as "crashed".
+#   * systemd hardening options have no OpenRC equivalent, so they are simply
+#     missing here: ProtectSystem, ProtectHome, PrivateTmp, ProtectKernelTunables,
+#     ProtectKernelModules, ProtectControlGroups and RestrictSUIDSGID. The
+#     process hardening that does exist (user, no_new_privs, capabilities, umask)
+#     is applied.
+name="Proxy Control node agent"
+description="Proxy Control node agent"
+
+supervisor="supervise-daemon"
+command="/usr/local/bin/proxy-agent"
+command_args="--config /etc/proxy-agent/config.yaml"
+command_user="proxy-agent:proxy-agent"
+directory="/var/lib/proxy-agent"
+umask=077
+capabilities="^cap_net_bind_service"
+no_new_privs="yes"
+respawn_delay=5
+respawn_max=0
+retry="TERM/90/KILL/5"
+rc_cgroup_cleanup="yes"
+output_logger="logger -t proxy-agent -p daemon.info"
+error_logger="logger -t proxy-agent -p daemon.err"
+
+start_pre() {
+  # checkpath only creates what is missing and enforces the owner and mode, so
+  # an existing data directory keeps its contents, as StateDirectory does.
+  checkpath --directory --owner proxy-agent:proxy-agent --mode 0700 /var/lib/proxy-agent
+}
+
+depend() {
+  need net
+  use logger dns
+  after firewall
+}

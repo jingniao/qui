@@ -2,10 +2,12 @@
 # Local installer and in-place upgrader for the panel or a node agent.
 #
 # It installs the binary, the service account, the fixed AGENTS.md section 30
-# directories and the packaged systemd unit. For a node it also installs an
-# official Xray or sing-box release after verifying its SHA256. Nothing is
-# started, and an existing configuration, identity or data is never touched, so
-# re-running the script upgrades the program in place.
+# directories and the packaged service definition: the systemd unit on a systemd
+# host, the OpenRC init scripts on an Alpine host. Only --node is supported on
+# OpenRC; the panel needs systemd. For a node it also installs an official Xray
+# or sing-box release after verifying its SHA256. Nothing is started, and an
+# existing configuration, identity or data is never touched, so re-running the
+# script upgrades the program in place.
 set -euo pipefail
 umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -32,6 +34,19 @@ the service account, directories, configuration and data are left untouched.
 No service is started. Managed agent and core upgrades go through the panel.
 USAGE
 }
+
+# The init-system helpers (deploy/linux/service.sh) are sourced, never executed.
+# The release archive carries a copy next to this script, and install.sh also
+# publishes one to /usr/local/lib/proxycontrol/service.sh for the scripts that
+# are not run from an archive (the installed qui-update, or an uninstall.sh
+# extracted on its own). The sibling wins; anything but a root-owned regular
+# file is refused rather than read as root.
+service_library=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/service.sh
+if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol/service.sh; fi
+[[ -f $service_library && ! -L $service_library && $(stat -c '%u' "$service_library" 2>/dev/null) == 0 ]] \
+  || fail "Missing the init-system library service.sh: $service_library"
+# shellcheck source=service.sh
+. "$service_library"
 
 mode=''; binary=''; digest=''; config=''; core=''; core_version=''; core_digest=''; core_url=''; reinstall=false
 while (($#)); do
@@ -64,9 +79,9 @@ target=/usr/local/bin/$name
 # and the updater (deploy/linux/update.sh); both go onto panel and node hosts.
 qui=/usr/local/bin/qui
 update=/usr/local/bin/qui-update
-unit=/etc/systemd/system/$name.service
-host_network_service=/etc/systemd/system/proxy-agent-host-network.service
-host_network_path=/etc/systemd/system/proxy-agent-host-network.path
+# The init-system library is installed once per host, like the updater, so the
+# scripts that do not run from an archive can source it.
+library=/usr/local/lib/proxycontrol/service.sh
 registry=/var/lib/proxycontrol-install
 record=$registry/$component.manifest
 removed=$registry/$component.removed
@@ -75,15 +90,68 @@ core_target=''
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 [[ $(uname -s) == Linux && $EUID -eq 0 ]] || fail 'Run locally as root on Linux.'
-for tool in systemctl install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir; do
+init_system=$(detect_init) || fail 'Neither systemd nor OpenRC is running on this host.'
+# The panel owns its own service, its database directory and the terminal menu,
+# all of which are written for systemd; a node agent runs on either init system.
+if [[ $component == panel && $init_system != systemd ]]; then
+  fail 'The panel requires systemd; on OpenRC only --node is supported.'
+fi
+# The service definitions follow the init system: systemd takes units from
+# deploy/systemd, OpenRC takes init scripts from deploy/openrc. The enforced
+# outbound source keeps both variable names on each: on systemd it is a oneshot
+# unit plus a path unit, on OpenRC an init script plus the inotify watcher that
+# script supervises.
+if [[ $init_system == systemd ]]; then
+  service_directory=$root/systemd
+  unit=/etc/systemd/system/$name.service
+  service_mode=0644
+  host_network_files=(proxy-agent-host-network.service proxy-agent-host-network.path)
+  host_network_service=/etc/systemd/system/proxy-agent-host-network.service
+  host_network_path=/etc/systemd/system/proxy-agent-host-network.path
+else
+  service_directory=$root/openrc
+  unit=/etc/init.d/$name
+  service_mode=0755
+  host_network_files=(proxy-agent-host-network host-network-watch)
+  host_network_service=/etc/init.d/proxy-agent-host-network
+  host_network_path=/usr/local/lib/proxy-agent/host-network-watch
+fi
+if [[ $init_system == openrc ]] && command -v apk >/dev/null; then
+  # A stock Alpine host has neither bash (the interpreter of this script) nor
+  # curl, ca-certificates, GNU coreutils/findutils/tar, shadow (useradd and
+  # groupadd), runuser or nftables. They are installed here, before the tool
+  # check, so the rest of the script needs no second dialect; repeating the
+  # command on a host that already has them is a no-op.
+  apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables \
+    || fail 'Installing the required Alpine packages failed: run "apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables" and retry.'
+fi
+required_tools=(install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir)
+if [[ $init_system == systemd ]]; then
+  required_tools+=(systemctl)
+else
+  required_tools+=(rc-service rc-update openrc-run)
+fi
+for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null || fail "Required command unavailable: $tool"
 done
-[[ -d /run/systemd/system ]] || fail 'systemd must be running.'
+if [[ $init_system == openrc ]]; then
+  # supervise-daemon learned the capabilities option in OpenRC 0.45. An older
+  # release cannot give the Agent CAP_NET_BIND_SERVICE, so a core could not bind
+  # a port below 1024 and the node would publish nothing that works.
+  openrc_version=$(openrc --version 2>/dev/null || true)
+  openrc_version=$(printf '%s\n' "$openrc_version" | grep -o -E '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1 || true)
+  [[ $openrc_version =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]] \
+    || fail 'Cannot determine the OpenRC version (openrc --version).'
+  if ((BASH_REMATCH[1] == 0 && BASH_REMATCH[2] < 45)); then
+    fail "OpenRC 0.45 or newer is required for supervise-daemon capabilities (found $openrc_version)."
+  fi
+fi
 [[ -n $binary && $digest =~ ^[0-9a-f]{64}$ ]] || fail 'Provide the binary and its trusted lowercase SHA256.'
-[[ -f $root/systemd/$name.service && ! -L $root/systemd/$name.service ]] || fail 'Missing packaged systemd unit.'
+packaged_service=$service_directory/${unit##*/}
+[[ -f $packaged_service && ! -L $packaged_service ]] || fail "Missing packaged service file: ${unit##*/}"
 if [[ $component == agent ]]; then
-  for packaged in proxy-agent-host-network.service proxy-agent-host-network.path; do
-    [[ -f $root/systemd/$packaged && ! -L $root/systemd/$packaged ]] || fail "Missing packaged systemd unit: $packaged"
+  for packaged in "${host_network_files[@]}"; do
+    [[ -f $service_directory/$packaged && ! -L $service_directory/$packaged ]] || fail "Missing packaged service file: $packaged"
   done
 fi
 if [[ -n $core || -n $core_version || -n $core_digest || -n $core_url ]]; then
@@ -96,9 +164,16 @@ fi
 [[ -z $config || -f $config && ! -L $config ]] || fail 'Config template must be a regular local file.'
 
 # Refuse symlinked system destinations rather than traversing them as root.
-for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /etc/systemd /etc/systemd/system /var/lib /run/lock "$etc" "$data" "$data/host-network" "$registry"; do
+for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib /run/lock "$etc" "$data" "$data/host-network" "$registry"; do
   [[ ! -L $path ]] || fail "Symlinked destination: $path"
 done
+if [[ $init_system == systemd ]]; then
+  for path in /etc/systemd /etc/systemd/system; do
+    [[ ! -L $path ]] || fail "Symlinked destination: $path"
+  done
+else
+  [[ ! -L /etc/init.d ]] || fail 'Symlinked destination: /etc/init.d'
+fi
 install -d -o root -g root -m 0755 /usr/local/bin /usr/local/lib
 if [[ -e $registry ]]; then
   [[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'Unsafe installation registry.'
@@ -115,8 +190,8 @@ exec 9<>"$registry/operation.lock"
 flock -n 9 || fail 'Another installation operation is running.'
 
 # Replacing a program under a running service is not an upgrade: the operator
-# stops the unit, installs, and starts it again.
-systemctl is-active --quiet "$name.service" && fail "Stop $name.service before installing or upgrading."
+# stops the service, installs, and starts it again.
+service_is_active "$name" && fail "Stop $name before installing or upgrading (systemctl stop $name.service, or rc-service $name stop)."
 if [[ -e $removed || -L $removed ]]; then
   $reinstall || fail 'The component was uninstalled; use --reinstall after inspecting the retained record.'
   [[ -f $removed && ! -L $removed && $(stat -c '%u:%a:%h' "$removed") == 0:600:1 ]] || fail 'Unsafe retained uninstall record.'
@@ -162,6 +237,40 @@ ensure_nft() {
   command -v nft >/dev/null || fail 'The nftables package did not provide nft.'
 }
 
+# The Agent's core-lifetime check
+# (internal/agent/core/lifetime_environment_linux.go) identifies a boot by the
+# machine id, the kernel boot id and the pid namespace link, and only concludes
+# that a core died uncleanly when all three are readable. Nothing creates
+# /etc/machine-id without systemd or dbus, so a stock Alpine container has none,
+# and without a valid one an unclean core exit can never be confirmed: the data
+# plane stays blocked. A valid file is never overwritten, because it is the
+# host's identity.
+ensure_machine_id() {
+  local path=/etc/machine-id source=/var/lib/dbus/machine-id value=''
+  # systemd and dbus own this file on their hosts: it is always there and it is
+  # the identity of the machine, so an install on systemd must not read, rewrite
+  # or refuse it. Only a host without either (Alpine, or an LXC container of it)
+  # can lack it, and only there does the Agent need it created.
+  if [[ $init_system == systemd ]]; then return 0; fi
+  if [[ -f $path ]]; then
+    value=$(tr -d '\n' < "$path")
+    [[ $value =~ ^[0-9a-fA-F]{32}$ ]] && return 0
+  fi
+  # Written through a rename, so a symlink at this path is refused instead of
+  # being followed as root.
+  [[ ! -L $path ]] || fail "$path is a symbolic link; replace it with a regular 32-hex-character machine id and retry."
+  if [[ -f $source && ! -L $source ]]; then
+    value=$(tr -d '\n' < "$source")
+  fi
+  if [[ ! $value =~ ^[0-9a-fA-F]{32}$ ]]; then
+    value=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  fi
+  [[ $value =~ ^[0-9a-fA-F]{32}$ ]] || fail 'Cannot produce a 32-hex-character machine id.'
+  printf '%s\n' "$value" > "$stage/machine-id"
+  publish "$stage/machine-id" "$path" root root 0444
+  printf 'Created %s (%s); the Agent needs it to confirm core lifetimes.\n' "$path" "$value"
+}
+
 host_architecture() {
   case $(uname -m) in x86_64) printf 'amd64';; aarch64|arm64) printf 'arm64';; *) fail 'Unsupported machine architecture.';; esac
 }
@@ -182,7 +291,9 @@ core_prefix() {
 download() {
   local url=$1 destination=$2
   if command -v curl >/dev/null; then
-    curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 --output "$destination" -- "$url"
+    # --no-insecure overrides a -k that a curl wrapper or alias may add in front
+    # of the arguments, so the release is never fetched without verified TLS.
+    curl --no-insecure --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 --output "$destination" -- "$url"
   elif command -v wget >/dev/null; then
     wget --quiet --max-redirect=3 --output-document="$destination" -- "$url"
   else
@@ -224,14 +335,14 @@ keep_stage=false
 cleanup() {
   if $keep_stage; then printf 'Installation material retained for inspection: %s\n' "${stage##*/}" >&2; return; fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/service-library" "$stage/machine-id"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
 trap cleanup EXIT
 install -o root -g root -m 0600 -- "$binary" "$stage/program"
 verify_binary "$stage/program" "$digest"
-install -o root -g root -m 0600 -- "$root/systemd/$name.service" "$stage/unit"
+install -o root -g root -m 0600 -- "$packaged_service" "$stage/unit"
 unit_digest=$(sha256sum -- "$stage/unit"); unit_digest=${unit_digest%% *}
 if [[ $component == panel ]]; then
   # The terminal menu is a plain script: it is staged and published like the
@@ -243,15 +354,34 @@ fi
 # The updater serves both components, so it is installed on panel and node hosts.
 [[ -f $root/linux/update.sh && ! -L $root/linux/update.sh ]] || fail 'Missing packaged updater script.'
 install -o root -g root -m 0600 -- "$root/linux/update.sh" "$stage/qui-update"
+# The init-system library serves both components too and is installed once per
+# host, because the installed qui-update and a uninstall.sh that was extracted on
+# its own have no sibling to source it from. The copy this script itself resolved
+# is what gets published, so an archive always carries its own version.
+[[ -f $service_library && ! -L $service_library ]] || fail "Missing the init-system library: $service_library"
+install -o root -g root -m 0600 -- "$service_library" "$stage/service-library"
 host_network_service_digest=''
 host_network_path_digest=''
 if [[ $component == agent ]]; then
-  install -o root -g root -m 0600 -- "$root/systemd/proxy-agent-host-network.service" "$stage/host-network-service"
-  install -o root -g root -m 0600 -- "$root/systemd/proxy-agent-host-network.path" "$stage/host-network-path"
+  # On systemd these are the oneshot unit and the path unit that arms it; on
+  # OpenRC the init script and the watcher that script supervises. The digests
+  # are taken over the staged files whatever the init system, so uninstall.sh
+  # verifies the same two record lines on both.
+  install -o root -g root -m 0600 -- "$service_directory/${host_network_files[0]}" "$stage/host-network-service"
+  install -o root -g root -m 0600 -- "$service_directory/${host_network_files[1]}" "$stage/host-network-path"
   host_network_service_digest=$(sha256sum -- "$stage/host-network-service"); host_network_service_digest=${host_network_service_digest%% *}
   host_network_path_digest=$(sha256sum -- "$stage/host-network-path"); host_network_path_digest=${host_network_path_digest%% *}
-  ensure_nft
+  if [[ $init_system == systemd ]]; then
+    ensure_nft
+  else
+    # Alpine installs nftables from apk above; package managers are not driven
+    # from here on OpenRC, but the helper still needs the binary.
+    command -v nft >/dev/null || fail 'nft is required for the enforced outbound source: run "apk add --no-cache nftables" and retry.'
+  fi
 fi
+# The staging directory exists by now and publish() is defined above it, so the
+# Agent's machine id can be published before the program itself.
+if [[ $component == agent ]]; then ensure_machine_id; fi
 
 # A first install writes the packaged configuration template. An upgrade keeps
 # the configuration that is already in place.
@@ -298,7 +428,12 @@ fi
 
 if ! getent group "$account" >/dev/null; then groupadd --system "$account"; fi
 if ! getent passwd "$account" >/dev/null; then
-  useradd --system --gid "$account" --home-dir "$data" --no-create-home --shell /usr/sbin/nologin "$account"
+  # Debian and Ubuntu keep nologin in /usr/sbin, Alpine (shadow) in /sbin. The
+  # first one that exists is used, so the account never gets a login shell.
+  nologin=/usr/sbin/nologin
+  [[ -f $nologin ]] || nologin=/sbin/nologin
+  [[ -f $nologin ]] || fail 'Neither /usr/sbin/nologin nor /sbin/nologin exists; install the shadow/login package first.'
+  useradd --system --gid "$account" --home-dir "$data" --no-create-home --shell "$nologin" "$account"
 fi
 [[ $(id -u "$account") != 0 && $(id -g "$account") != 0 && $(id -gn "$account") == "$account" ]] || fail 'Service account must be a dedicated non-root account.'
 account_uid=$(id -u "$account"); account_gid=$(id -g "$account")
@@ -316,26 +451,54 @@ fi
 
 keep_stage=true
 publish "$stage/program" "$target" root root 0755
-publish "$stage/unit" "$unit" root root 0644
+publish "$stage/unit" "$unit" root root "$service_mode"
 if [[ $component == panel ]]; then publish "$stage/qui" "$qui" root root 0755; fi
 publish "$stage/qui-update" "$update" root root 0755
+# /usr/local/lib/proxycontrol holds the init-system library only; it is created
+# here so an install that is not run from an archive can source it later.
+install -d -o root -g root -m 0755 /usr/local/lib/proxycontrol
+publish "$stage/service-library" "$library" root root 0644
 if [[ -n $host_network_service_digest ]]; then
-  publish "$stage/host-network-service" "$host_network_service" root root 0644
-  publish "$stage/host-network-path" "$host_network_path" root root 0644
+  if [[ $init_system == systemd ]]; then
+    publish "$stage/host-network-service" "$host_network_service" root root 0644
+    publish "$stage/host-network-path" "$host_network_path" root root 0644
+  else
+    # The OpenRC watcher is a program, not a service definition, and it lives
+    # next to the core in /usr/local/lib/proxy-agent. Today that directory is
+    # only created when a core is installed, so it is created here as well.
+    install -d -o root -g root -m 0755 /usr/local/lib/proxy-agent
+    publish "$stage/host-network-service" "$host_network_service" root root 0755
+    publish "$stage/host-network-path" "$host_network_path" root root 0755
+  fi
 fi
 if [[ -n $config_source ]]; then publish "$stage/config" "$etc/config.yaml" "$account_uid" "$account_gid" 0600; fi
 if [[ -n $core ]]; then
   install -d -o root -g root -m 0755 /usr/local/lib/proxy-agent
   publish "$stage/core" "$core_target" root root 0755
 fi
-systemctl daemon-reload
+service_reload_definitions
 if [[ -n $host_network_service_digest ]]; then
-  # Enabled and armed, while no proxy service is started by this script: the path
-  # unit only watches the desired file the Agent publishes. Arming it here is what
-  # lets the first publish of an installation that has not rebooted yet reach the
-  # helper, and the oneshot unit reapplies the retained file at every boot.
-  systemctl enable "$host_network_path" "$host_network_service"
-  systemctl start "$host_network_path"
+  if [[ $init_system == systemd ]]; then
+    # Enabled and armed, while no proxy service is started by this script: the path
+    # unit only watches the desired file the Agent publishes. Arming it here is what
+    # lets the first publish of an installation that has not rebooted yet reach the
+    # helper, and the oneshot unit reapplies the retained file at every boot.
+    # systemctl reads an absolute path as a mount unit for start and stop, so
+    # every call names the units.
+    systemctl enable "${host_network_path##*/}" "${host_network_service##*/}"
+    systemctl start "${host_network_path##*/}"
+  else
+    # On OpenRC the watcher is one supervised service and there is no path unit:
+    # it has to be in the default runlevel so a boot reapplies the retained rule,
+    # and restarting it when it already runs is what makes an upgraded watcher
+    # take effect. Both apply only what the panel publishes, as on systemd.
+    service_enable proxy-agent-host-network
+    if service_is_active proxy-agent-host-network; then
+      service_restart proxy-agent-host-network
+    else
+      service_start proxy-agent-host-network
+    fi
+  fi
 fi
 
 # An agent upgrade without --core replaces the program and unit only, so the
@@ -366,6 +529,11 @@ printf 'proxycontrol-install-v1\n%s\n%s\n%s\n%s\n%s\ninstalled\n' "$component" "
 if [[ -n $host_network_service_digest ]]; then
   printf '%s\n%s\n' "$host_network_service_digest" "$host_network_path_digest" >> "$stage/installed-manifest"
 fi
+# Line 10 names the init system the service definitions were written for, so
+# uninstall.sh can refuse to remove a service with the tooling of the other one.
+# It is appended last to keep the fixed line numbers above, and a systemd record
+# keeps the original file contents: no line, which reads as systemd.
+if [[ $init_system == openrc ]]; then printf 'openrc\n' >> "$stage/installed-manifest"; fi
 chmod 0600 "$stage/installed-manifest"
 publish "$stage/installed-manifest" "$record" root root 0600
 if $reinstall; then rm -- "$removed"; sync -f -- "$registry"; fi
@@ -375,10 +543,19 @@ keep_stage=false
 printf '%s installed at %s with unit %s.\n' "$name" "$target" "$unit"
 if [[ -n $core ]]; then printf 'Core %s %s installed at %s.\n' "$core" "$core_version" "$core_target"; fi
 printf 'Existing configuration, identity and data were left untouched and nothing was started.\n'
-printf 'Next: review %s/config.yaml, then systemctl enable --now %s.service.\n' "$etc" "$name"
+if [[ $init_system == systemd ]]; then
+  printf 'Next: review %s/config.yaml, then systemctl enable --now %s.service.\n' "$etc" "$name"
+else
+  printf 'Next: review %s/config.yaml, then rc-update add %s default && rc-service %s start.\n' "$etc" "$name" "$name"
+  printf 'The service logs through logger into /var/log/messages.\n'
+fi
 if [[ $component == panel ]]; then printf 'Run qui for the terminal menu.\n'; fi
 if [[ -n $host_network_service_digest ]]; then
-  printf 'The enforced-source units %s and %s are enabled and armed; they apply only what the panel publishes.\n' "${host_network_service##*/}" "${host_network_path##*/}"
+  if [[ $init_system == systemd ]]; then
+    printf 'The enforced-source units %s and %s are enabled and armed; they apply only what the panel publishes.\n' "${host_network_service##*/}" "${host_network_path##*/}"
+  else
+    printf 'The enforced-source service %s and the watcher %s are enabled and started; they apply only what the panel publishes.\n' "${host_network_service##*/}" "${host_network_path##*/}"
+  fi
 fi
 if [[ $component == agent ]]; then printf 'Then enroll the node with deploy/linux/enroll.sh --token-file FILE.\n'; fi
 printf 'Managed agent and core upgrades are deployed from the panel.\n'

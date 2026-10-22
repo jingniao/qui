@@ -9,6 +9,18 @@ if [[ ${1:-} == --help ]]; then
 fi
 [[ $# == 1 && ( $1 == panel || $1 == agent ) ]] || fail 'Use uninstall.sh panel|agent.'
 [[ $(uname -s) == Linux && $EUID == 0 ]] || fail 'Run locally as root on Linux.'
+# The init-system helpers (deploy/linux/service.sh) are sourced before anything is
+# removed, because the installed copy is deleted at the end of this script: an
+# archive's sibling copy wins, and the installed one is read only when this script
+# was extracted on its own. Anything but a root-owned regular file is refused
+# rather than read as root.
+service_library=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/service.sh
+if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol/service.sh; fi
+[[ -f $service_library && ! -L $service_library && $(stat -c '%u' "$service_library" 2>/dev/null) == 0 ]] \
+  || fail "Missing the init-system library service.sh: $service_library"
+# shellcheck source=service.sh
+. "$service_library"
+init_system=$(detect_init) || fail 'Neither systemd nor OpenRC is running on this host.'
 component=$1
 name=proxy-$component
 registry=/var/lib/proxycontrol-install
@@ -17,14 +29,32 @@ removed=$registry/$component.removed
 target=/usr/local/bin/$name
 # The panel's terminal menu is removed with the program.
 qui=/usr/local/bin/qui
-# The updater serves both components, so it is removed only when no other
-# component of this platform is installed on the host.
+# The updater and the init-system library serve both components, so they are
+# removed only when no other component of this platform is installed.
 update=/usr/local/bin/qui-update
-unit=/etc/systemd/system/$name.service
-host_network_service=/etc/systemd/system/proxy-agent-host-network.service
-host_network_path=/etc/systemd/system/proxy-agent-host-network.path
-for tool in systemctl sha256sum stat flock sed install rm; do command -v "$tool" >/dev/null || fail "Missing command: $tool"; done
-for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /etc/systemd /etc/systemd/system /var/lib "$registry" /run/lock; do [[ ! -L $path ]] || fail "Symlinked destination: $path"; done
+library=/usr/local/lib/proxycontrol/service.sh
+# The service definitions follow the init system the installation was made for:
+# a unit file on systemd, an init script on OpenRC, plus the watcher the OpenRC
+# init script supervises where systemd has a path unit.
+if [[ $init_system == systemd ]]; then
+  unit=/etc/systemd/system/$name.service
+  host_network_service=/etc/systemd/system/proxy-agent-host-network.service
+  host_network_path=/etc/systemd/system/proxy-agent-host-network.path
+  init_directories=(/etc/systemd /etc/systemd/system)
+else
+  unit=/etc/init.d/$name
+  host_network_service=/etc/init.d/proxy-agent-host-network
+  host_network_path=/usr/local/lib/proxy-agent/host-network-watch
+  init_directories=(/etc/init.d)
+fi
+required_tools=(sha256sum stat flock sed install rm)
+if [[ $init_system == systemd ]]; then
+  required_tools+=(systemctl)
+else
+  required_tools+=(rc-service rc-update)
+fi
+for tool in "${required_tools[@]}"; do command -v "$tool" >/dev/null || fail "Missing command: $tool"; done
+for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /var/lib "$registry" /run/lock "${init_directories[@]}"; do [[ ! -L $path ]] || fail "Symlinked destination: $path"; done
 [[ -d $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'No protected installation registry.'
 [[ ! -L $registry/operation.lock ]] || fail 'Symlinked installation lock.'
 exec 9>"$registry/operation.lock"
@@ -32,6 +62,14 @@ flock -n 9 || fail 'Another installation operation is running.'
 [[ -f $record && ! -L $record && $(stat -c '%u:%a' "$record") == 0:600 ]] || fail 'Missing protected installation record.'
 [[ ! -e $removed && ! -L $removed ]] || fail 'Uninstall was already recorded; inspect retained files.'
 [[ $(sed -n '1p' "$record") == proxycontrol-install-v1 && $(sed -n '2p' "$record") == "$component" && $(sed -n '7p' "$record") == installed ]] || fail 'Installation is incomplete or unknown.'
+# Line 10 names the init system the service definitions were written for; a
+# record written before that line existed is a systemd record. Removing with the
+# tooling of the other init system would leave a service behind that still points
+# at a deleted program, so the mismatch is refused.
+recorded_init=$(sed -n '10p' "$record")
+[[ -n $recorded_init ]] || recorded_init=systemd
+[[ $recorded_init == "$init_system" ]] \
+  || fail "The installation was made for $recorded_init but this host runs $init_system; use the uninstall.sh of the other init system."
 binary_digest=$(sed -n '3p' "$record")
 unit_digest=$(sed -n '4p' "$record")
 core=$(sed -n '5p' "$record")
@@ -64,30 +102,57 @@ if [[ -n $core ]]; then
   verify_owned "$core_target" "$core_digest"
 fi
 # A failed stop is not a clean handoff: never delete the program underneath it.
-systemctl stop "$name.service"
-[[ $(systemctl show "$name.service" -p ActiveState --value) == inactive ]] || fail 'Service did not stop cleanly.'
-[[ $(systemctl show "$name.service" -p Result --value) == success ]] || fail 'Service stop failed; preserve programs and inspect accounting/recovery state.'
-systemctl disable "$name.service"
+if [[ $init_system == systemd ]]; then
+  systemctl stop "$name.service"
+  [[ $(systemctl show "$name.service" -p ActiveState --value) == inactive ]] || fail 'Service did not stop cleanly.'
+  [[ $(systemctl show "$name.service" -p Result --value) == success ]] || fail 'Service stop failed; preserve programs and inspect accounting/recovery state.'
+  systemctl disable "$name.service"
+else
+  # OpenRC has neither ActiveState nor Result: the runscript's own status is the
+  # only verdict, and it has to read "stopped" before anything is deleted. A stop
+  # of an already stopped service is an rc warning, not an error, so its exit
+  # status is not the verdict - the state check below is.
+  rc-service "$name" stop || true
+  [[ $(service_state "$name") == stopped ]] || fail 'Service did not stop cleanly; preserve programs and inspect accounting/recovery state.'
+  # Leaving the default runlevel is idempotent: rc-update reports an error for a
+  # service that is not in it, and that is not a failed uninstall.
+  rc-update del "$name" default 2>/dev/null || true
+fi
 if $host_network_units; then
-  # The path unit may be armed and the oneshot unit is only run by it, so the
-  # watcher is stopped first. A unit that is already inactive or was removed by
-  # hand is not an error: the files and the table are what this script owns.
-  systemctl disable --now "$host_network_path" || true
-  systemctl disable "$host_network_service" || true
+  if [[ $init_system == systemd ]]; then
+    # The path unit may be armed and the oneshot unit is only run by it, so the
+    # watcher is stopped first. A unit that is already inactive or was removed by
+    # hand is not an error: the files and the table are what this script owns.
+    systemctl disable --now "${host_network_path##*/}" || true
+    systemctl disable "${host_network_service##*/}" || true
+  else
+    # The watcher is one supervised service here; it is stopped before its file
+    # goes away for the same reason, and a service that is already stopped or not
+    # in the runlevel is not an error.
+    rc-service proxy-agent-host-network stop || true
+    rc-update del proxy-agent-host-network default || true
+  fi
 fi
 install -o root -g root -m 0600 -- "$record" "$removed"
 rm -- "$unit" "$target"
 # /usr/local/bin/qui is not part of the recorded manifest, so it has no digest to
 # verify; it belongs to the panel program and goes away with it.
 if [[ $component == panel ]]; then rm -f -- "$qui"; fi
-# /usr/local/bin/qui-update has no digest either and is shared by both
-# components, so it stays while the other component is still installed.
+# /usr/local/bin/qui-update and /usr/local/lib/proxycontrol/service.sh have no
+# digest either and are shared by both components, so they stay while the other
+# component is still installed and its scripts still source the library.
 other=panel
 if [[ $component == panel ]]; then other=agent; fi
-if [[ ! -e $registry/$other.manifest && ! -L $registry/$other.manifest ]]; then rm -f -- "$update"; fi
+if [[ ! -e $registry/$other.manifest && ! -L $registry/$other.manifest ]]; then
+  rm -f -- "$update"
+  rm -f -- "$library"
+  # rmdir refuses a directory that still holds anything else, which is the only
+  # case in which it should stay.
+  rmdir -- "${library%/*}" 2>/dev/null || true
+fi
 if $host_network_units; then rm -- "$host_network_service" "$host_network_path"; fi
 [[ -z $core_target ]] || rm -- "$core_target"
-systemctl daemon-reload
+service_reload_definitions
 # The enforced-source table belongs to this Agent, so removing it restores the
 # host's normal source selection. It may legitimately be absent.
 if [[ $component == agent ]] && command -v nft >/dev/null && nft list table inet proxy_agent_source >/dev/null 2>&1; then

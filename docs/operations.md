@@ -1,6 +1,6 @@
 # 运维手册
 
-更新时间：2026-10-21（v1.0.0 发布后的同步）。性质：按当前源码整理的运维结论，不是运行证据。未在 Linux 实机执行；带 **[待实机]** 的操作属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。安装与目录约定见[部署与升级](deployment.md)。
+更新时间：2026-10-22（节点 Agent 支持 Alpine / OpenRC）。性质：按当前源码整理的运维结论，不是运行证据。未在 Linux 实机执行；带 **[待实机]** 的操作属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。安装与目录约定见[部署与升级](deployment.md)。
 
 ## 1. 日常检查
 
@@ -11,7 +11,20 @@
 | 访问记录 | 全部访问 / 已阻断，可按时间、节点、用户、域名筛选 |
 | 系统 → 配置版本 | 发布状态、差异、手动回滚入口 |
 | 系统 → 备份 | 备份列表、校验、恢复预览 |
-| `journalctl -u proxy-panel`、`journalctl -u proxy-agent` | 结构化日志（两个程序都写 stdout） |
+| `journalctl -u proxy-panel`、`journalctl -u proxy-agent` | 结构化日志（两个程序都写 stdout）；OpenRC 节点见下表 |
+
+**节点服务管理（systemd 与 OpenRC 对照）**。节点 Agent 可以运行在 systemd（Debian、Ubuntu）或 OpenRC（Alpine，含 LXC）上，见[部署与升级](deployment.md)第 4.1 节；本手册其余部分写的 `systemctl`/`journalctl` 命令，在 OpenRC 节点上按此表替换：
+
+| 操作 | systemd | OpenRC |
+| --- | --- | --- |
+| 状态 | `systemctl status proxy-agent` | `rc-service proxy-agent status`（`started` / `stopped` / `crashed`） |
+| 启动 / 停止 / 重启 | `systemctl start\|stop\|restart proxy-agent` | `rc-service proxy-agent start\|stop\|restart` |
+| 开机启动 / 取消 | `systemctl enable\|disable proxy-agent` | `rc-update add\|del proxy-agent default` |
+| 全部服务 | `systemctl list-units 'proxy-agent*'` | `rc-status default` |
+| 日志 | `journalctl -u proxy-agent -n 200` | `grep -F proxy-agent /var/log/messages \| tail -n 200` |
+| 强制出站 helper | `systemctl status proxy-agent-host-network.path` | `rc-service proxy-agent-host-network status` |
+
+OpenRC 上 Agent 由 `supervise-daemon` 监管：进程退出后 5 秒重启，不设次数上限；`stop` 先发 TERM，最多等 90 秒，再发 KILL。
 
 面板通过一条 SSE（`GET /api/v1/events`）推送节点状态、发布状态、总览变化和告警，不轮询数据库。
 
@@ -46,7 +59,7 @@ systemctl stop proxy-panel.service
   --inspect-restore-installation --restore-installation-report /root/install-report.json
 ```
 
-**恢复后的预期差异**：所有管理员会话被清除（必须重新登录）；管理员口令按恢复点写回（恢复点之后的改密会被覆盖），恢复点之外的 Viewer 被禁用；恢复点里不存在的节点证书被标记撤销，节点状态回到 `offline`/`pending`，需要重新连接。
+**恢复后的预期差异**：所有管理员会话被清除（必须重新登录）；管理员口令按恢复点写回（恢复点之后的改密会被覆盖），恢复点之外的 Viewer 被禁用；恢复点之后新建的代理用户与设备被禁用而不删除（恢复预览的 `usersRemoved` 计的就是这些用户），其凭据被撤销，已用流量不回退；恢复点里不存在的节点证书被标记撤销，节点状态回到 `offline`/`pending`，需要重新连接。
 
 ## 3. 节点证书
 
@@ -179,6 +192,8 @@ journalctl -u proxy-agent-host-network -n 100
 journalctl -u proxy-agent -n 200
 cat /var/lib/proxy-agent/host-network/desired.json /var/lib/proxy-agent/host-network/status.json
 ```
+
+OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监管 `host-network-watch`，后者在服务启动时应用一次已保留的 `desired.json`，之后由 busybox `inotifyd` 在 Agent 发布新文件时再运行 helper。排查时把上面的 `systemctl`/`journalctl` 换成 `rc-service proxy-agent-host-network status` 与 `grep -F proxy-agent-host-network /var/log/messages`。重启该服务（`rc-service proxy-agent-host-network restart`）会重放一次保留的规则，作用相当于开机。
 
 `desired.json` 是 Agent 下发的目标状态（含随机 `id`），`status.json` 是 helper 对同一 `id` 的结果；两者不一致说明 helper 未安装或尚未处理完。
 

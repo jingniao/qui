@@ -12,7 +12,13 @@
 # token, unreachable gRPC port, wrong --panel) is retried with a fresh
 # registration, and the panel's gRPC port (9443 by default) has to be reachable
 # from this host for enrollment to succeed. Only a host that is already enrolled,
-# or that still runs proxy-agent.service, is refused.
+# or that still runs the Agent service, is refused.
+#
+# The host may run systemd (Debian, Ubuntu) or OpenRC (Alpine, including an LXC
+# container without systemd): the init system is detected before anything is
+# downloaded and the archive's deploy/linux/service.sh then starts the service the
+# way that init system expects. --bundle and --sums install from a local release
+# archive instead of GitHub, for a node that has no route to it.
 #
 # Trust in the panel certificate is established in one of two ways: when the
 # certificate at /install/ca.pem verifies against the system CA bundle the bundle
@@ -39,11 +45,15 @@ usage() {
   --http-port N         面板 HTTPS 端口（默认 443）
   --grpc-port N         面板 gRPC 端口（默认 9443）
   --core xray|sing-box  同时安装的官方核心（默认 xray）
+  --bundle FILE --sums FILE
+                        离线安装：用本地发布归档与其 SHA256SUMS，不访问 GitHub
+                        （两个参数必须同时给出）
 
 脚本从 https://github.com/$repository/releases 下载与面板同版本的归档，用归档里
 的 deploy/linux/install.sh 安装 Agent 与核心，按公网证书或固定 SHA-256 建立对面板
 证书的信任，再用归档里的 deploy/linux/enroll.sh 登记并启动 Agent。注册码只能用
 一次且会过期；节点登记成功前可以重跑本脚本（登记成功后会被拒绝），升级用 qui-update。
+支持 systemd（Debian、Ubuntu）与 OpenRC（Alpine，含没有 systemd 的 LXC 容器）。
 USAGE
 }
 
@@ -54,14 +64,16 @@ grpc_port=9443
 ca_sha256=''
 token=''
 core=xray
+bundle_file=''
+sums_file=''
 while (($#)); do
   case $1 in
-    --version|--panel|--http-port|--grpc-port|--ca-sha256|--token|--core)
+    --version|--panel|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums)
       (($# >= 2)) || fail "缺少 $1 的值。"
       case $1 in
         --version) version=$2;; --panel) panel=$2;; --http-port) http_port=$2;;
         --grpc-port) grpc_port=$2;; --ca-sha256) ca_sha256=${2,,};; --token) token=$2;;
-        --core) core=$2;;
+        --core) core=$2;; --bundle) bundle_file=$2;; --sums) sums_file=$2;;
       esac
       shift 2;;
     --help) usage; exit 0;;
@@ -76,9 +88,44 @@ done
 [[ $ca_sha256 =~ ^[0-9a-f]{64}$ ]] || fail '面板证书 SHA-256 必须是 64 位小写十六进制。'
 [[ $token =~ ^[A-Za-z0-9_-]{16,128}$ ]] || fail '注册码必须是 16-128 位 URL 安全字符。'
 [[ $core == xray || $core == sing-box ]] || fail '核心只能是 xray 或 sing-box。'
+# An offline installation supplies both files: the archive is checked against the
+# supplied SHA256SUMS exactly like a download, so one path has no weaker trust.
+if [[ -n $bundle_file || -n $sums_file ]]; then
+  [[ -n $bundle_file && -n $sums_file ]] || fail '--bundle 与 --sums 必须同时给出（离线安装需要发布归档和它的 SHA256SUMS）。'
+  for offline in "$bundle_file" "$sums_file"; do
+    [[ -f $offline && ! -L $offline ]] || fail "离线安装的文件必须是普通文件（不能是目录或符号链接）：$offline"
+  done
+fi
 
 [[ $(uname -s) == Linux && $EUID -eq 0 ]] || fail '请以 root 身份在 Linux 上运行。'
-for tool in systemctl curl tar sha256sum install mktemp stat chown chmod sed rm uname; do
+# A stock Alpine host has none of bash, curl, ca-certificates or GNU tar, but this
+# script is bash, the archive is fetched with curl and unpacked with GNU tar, so
+# they are installed before anything is checked. busybox tar is not enough:
+# --no-same-owner is a GNU option. On any other host this is a no-op because apk
+# does not exist there.
+if command -v apk >/dev/null 2>&1; then
+  if ! command -v curl >/dev/null 2>&1 || ! tar --version 2>/dev/null | grep -q GNU; then
+    apk add --no-cache bash curl ca-certificates tar \
+      || fail '无法安装 bash、curl、ca-certificates 与 tar：请先执行 apk add --no-cache bash curl ca-certificates tar，再重跑本脚本。'
+  fi
+fi
+# The init system decides which service tool is required and which command starts
+# the Agent at the end. It is detected here, before anything is downloaded, so an
+# unsupported host fails before it touches the network.
+if [[ -d /run/systemd/system ]]; then
+  init_system=systemd
+elif [[ -d /run/openrc ]] && { [[ -x /sbin/openrc-run ]] || command -v openrc-run >/dev/null 2>&1; }; then
+  init_system=openrc
+else
+  fail '不支持的初始化系统：需要 systemd 或 OpenRC。'
+fi
+required_tools=(curl tar sha256sum install mktemp stat chown chmod sed rm uname)
+if [[ $init_system == systemd ]]; then
+  required_tools+=(systemctl)
+else
+  required_tools+=(rc-service rc-update)
+fi
+for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null || fail "缺少命令：$tool"
 done
 
@@ -93,8 +140,14 @@ identity_certificate=/var/lib/proxy-agent/identity/client.crt
 if [[ -e $identity_certificate || -L $identity_certificate ]]; then
   fail '本机已安装并登记 Agent；升级用 qui-update，重新登记见 docs/operations.md 第 5 节'
 fi
-if systemctl is-active --quiet proxy-agent.service; then
-  fail '请先停止 proxy-agent.service（systemctl stop proxy-agent.service）再重跑本脚本。'
+# OpenRC has no is-active; the runscript's status is the equivalent verdict.
+if [[ $init_system == systemd ]]; then
+  if systemctl is-active --quiet proxy-agent.service; then agent_running=true; else agent_running=false; fi
+else
+  if rc-service proxy-agent status >/dev/null 2>&1; then agent_running=true; else agent_running=false; fi
+fi
+if $agent_running; then
+  fail '请先停止 proxy-agent 服务（systemctl stop proxy-agent.service 或 rc-service proxy-agent stop）再重跑本脚本。'
 fi
 
 case $(uname -m) in
@@ -124,8 +177,11 @@ cleanup() { if [[ -n $directory ]]; then rm -rf -- "$directory"; fi; }
 trap cleanup EXIT
 directory=$(mktemp -d) || fail '无法创建临时目录。'
 
+# --no-insecure overrides a -k that a curl wrapper or alias may put in front of
+# the arguments (one Alpine LXC image ships /usr/bin/curl as `curl.orig -k "$@"`),
+# so a download is never accepted without a verified certificate.
 download() {
-  curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 5 --output "$2" -- "$1" \
+  curl --no-insecure -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 5 --output "$2" -- "$1" \
     || fail "下载失败：$1"
 }
 
@@ -147,9 +203,18 @@ sums_digest() {
 
 bundle=proxy-control-$version-linux-$architecture
 base=https://github.com/$repository/releases/download/v$version
-printf '下载 %s ...\n' "$bundle.tar.gz"
-download "$base/$bundle.tar.gz" "$directory/$bundle.tar.gz"
-download "$base/SHA256SUMS" "$directory/SHA256SUMS"
+if [[ -n $bundle_file ]]; then
+  # Offline installation: the two local files are copied under the names the rest
+  # of the script uses, so the digest check below is the same code for both paths
+  # and the archive is verified against its SHA256SUMS either way.
+  install -o root -g root -m 0600 -- "$bundle_file" "$directory/$bundle.tar.gz" || fail '无法复制离线归档。'
+  install -o root -g root -m 0600 -- "$sums_file" "$directory/SHA256SUMS" || fail '无法复制离线 SHA256SUMS。'
+  printf '使用离线归档 %s 与其 SHA256SUMS。\n' "${bundle_file##*/}"
+else
+  printf '下载 %s ...\n' "$bundle.tar.gz"
+  download "$base/$bundle.tar.gz" "$directory/$bundle.tar.gz"
+  download "$base/SHA256SUMS" "$directory/SHA256SUMS"
+fi
 expected=$(sums_digest "$bundle.tar.gz") || fail "SHA256SUMS 里没有 $bundle.tar.gz 的条目。"
 actual=$(sha256sum -- "$directory/$bundle.tar.gz"); actual=${actual%% *}
 [[ $actual == "$expected" ]] || fail "归档 SHA256 与 SHA256SUMS 不一致：$bundle.tar.gz"
@@ -177,12 +242,16 @@ ca_url=https://$authority/install/ca.pem
 fetched=$directory/panel-ca.pem
 
 printf '\n获取面板证书信任锚：%s\n' "$ca_url"
-if curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 3 --output "$fetched" -- "$ca_url"; then
-  system_bundle=''
-  for candidate in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
-    if [[ -f $candidate && ! -L $candidate ]]; then system_bundle=$candidate; break; fi
-  done
-  [[ -n $system_bundle ]] || fail '面板证书可由公网 CA 验证，但本机没有系统 CA 包（/etc/ssl/certs/ca-certificates.crt、/etc/pki/tls/certs/ca-bundle.crt）。'
+# The panel certificate counts as publicly trusted only when it verifies against
+# the very bundle that would become the node CA: --cacert names that bundle and
+# --no-insecure overrides a -k that a curl wrapper may add, so a host whose curl
+# skips verification falls through to the pinned SHA-256 instead of installing a
+# bundle the Agent's gRPC handshake would then reject.
+system_bundle=''
+for candidate in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
+  if [[ -f $candidate && ! -L $candidate ]]; then system_bundle=$candidate; break; fi
+done
+if [[ -n $system_bundle ]] && curl --no-insecure --cacert "$system_bundle" -fs --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 3 --output "$fetched" -- "$ca_url"; then
   install -o root -g proxy-agent -m 0644 -- "$system_bundle" "$ca_file" || fail "无法安装 $ca_file。"
   printf '面板证书由公网 CA 签发：已把系统 CA 包 %s 安装为 %s。\n' "$system_bundle" "$ca_file"
 else
@@ -223,6 +292,26 @@ chmod "$mode" -- "$config" || fail "无法恢复 $config 的权限。"
 [[ $(read_value "$config" server_name) == "$panel" ]] || fail "配置里的 server_name 不是 $panel：$config"
 printf '已写入 control_address: %s 与 server_name: %s。\n' "$panel:$grpc_port" "$panel"
 
+# A run whose enrollment failed leaves its retry marker (enrollment-attempt.json)
+# and the private key it generated. The Agent binds both to that token and panel
+# and refuses to reuse the key for another binding, so the fresh registration a
+# rerun brings would be refused for good. Nothing was enrolled with that key - no
+# certificate and no enrollment result exist, or this run was already refused
+# above or here - so the two files are moved aside, never deleted, and the Agent
+# generates a new key. An enrollment result means the panel may have issued a
+# certificate; that state is left for the operator.
+data_directory=/var/lib/proxy-agent
+[[ ! -e $data_directory/enrollment-result.json && ! -L $data_directory/enrollment-result.json ]] \
+  || fail '本机存在未完成确认的登记结果（enrollment-result.json）；处理方法见 docs/operations.md 第 5 节。'
+if [[ -e $data_directory/enrollment-attempt.json || -L $data_directory/enrollment-attempt.json ]]; then
+  retired=$(mktemp -d /var/lib/proxy-agent-enrollment-retired.XXXXXXXX) || fail '无法创建旧登记尝试的保留目录。'
+  mv -- "$data_directory/enrollment-attempt.json" "$retired/" || fail '无法移走旧的登记尝试。'
+  if [[ -e $data_directory/identity/client.key || -L $data_directory/identity/client.key ]]; then
+    mv -- "$data_directory/identity/client.key" "$retired/" || fail '无法移走旧登记尝试的私钥。'
+  fi
+  printf '上一次未完成的登记尝试（标记与私钥）已移到 %s，未删除；确认新登记成功后可删除该目录。\n' "$retired"
+fi
+
 token_directory=$(mktemp -d) || fail '无法创建注册码临时目录。'
 token_file=$token_directory/enrollment-token
 printf '%s\n' "$token" > "$token_file" || fail '无法写入注册码文件。'
@@ -236,8 +325,16 @@ fi
 rm -f -- "$token_file"
 rmdir -- "$token_directory" 2>/dev/null || true
 
-systemctl enable --now proxy-agent.service || fail '无法启动 proxy-agent.service；日志：journalctl -u proxy-agent -n 50'
-printf 'proxy-agent.service 状态：%s\n' "$(systemctl is-active proxy-agent.service 2>/dev/null || true)"
+# The init-system library comes from the archive that was just verified, so the
+# same helper that decided the service file starts the service here; nothing is
+# started by install.sh itself.
+[[ -f $source_dir/deploy/linux/service.sh && ! -L $source_dir/deploy/linux/service.sh ]] || fail "归档里缺少 deploy/linux/service.sh。"
+# shellcheck source=service.sh
+. "$source_dir/deploy/linux/service.sh"
+init_system=$(detect_init) || fail '不支持的初始化系统：需要 systemd 或 OpenRC。'
+service_enable proxy-agent && service_start proxy-agent \
+  || fail "无法启动 proxy-agent；日志：$(service_log_hint proxy-agent)"
+printf 'proxy-agent 服务状态：%s\n' "$(service_state proxy-agent)"
 printf '\n节点已安装并登记：面板 %s，核心 %s %s。\n' "$panel" "$core" "$core_version"
 printf '注册码文件已删除；私钥只保存在本机 /var/lib/proxy-agent/identity。\n'
 printf '在面板里为该节点配置入站并发布配置版本后才会代理流量。\n'

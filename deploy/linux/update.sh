@@ -5,11 +5,12 @@
 # Trust in the archive rests on the GitHub repository: SHA256SUMS is published in
 # the same release as the archives, so its digest only proves that the download
 # matches what the repository published. The script replaces only the program,
-# the systemd units and the packaged scripts, and it does so by running the
-# deploy/linux/install.sh of the downloaded release; configuration, node
-# identity and every database are left untouched. A panel update copies the
-# database into /var/lib/proxy-panel/backups/ while the service is stopped,
-# because database migrations are not reversible and a downgrade needs that copy.
+# the service definitions (systemd units or OpenRC init scripts) and the packaged
+# scripts, and it does so by running the deploy/linux/install.sh of the downloaded
+# release; configuration, node identity and every database are left untouched. A
+# panel update copies the database into /var/lib/proxy-panel/backups/ while the
+# service is stopped, because database migrations are not reversible and a
+# downgrade needs that copy.
 set -euo pipefail
 umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -25,10 +26,10 @@ usage() {
   --yes             不询问确认，直接更新
 
 脚本从 https://github.com/$repository/releases 下载归档与 SHA256SUMS，校验
-摘要后调用归档里的 deploy/linux/install.sh 原地替换程序与 systemd 单元。
-配置、身份与数据不会被修改；面板更新前会在服务停止时把数据库备份到
-/var/lib/proxy-panel/backups/。同一台主机同时装有面板与节点时，两个组件都
-从同一个归档更新（先节点，后面板）。
+摘要后调用归档里的 deploy/linux/install.sh 原地替换程序与服务定义（systemd 单元
+或 OpenRC 初始化脚本）。配置、身份与数据不会被修改；面板更新前会在服务停止时把
+数据库备份到 /var/lib/proxy-panel/backups/。同一台主机同时装有面板与节点时，两个
+组件都从同一个归档更新（先节点，后面板）。
 USAGE
 }
 
@@ -47,8 +48,31 @@ done
 [[ -z $version || $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '版本号必须是 X.Y.Z 形式。'
 
 [[ $(uname -s) == Linux && $EUID -eq 0 ]] || fail '请以 root 身份在 Linux 上运行。'
-# date comes from the same coreutils package as install and sha256sum.
-for tool in systemctl curl tar sha256sum install mktemp uname grep sed; do
+# The init-system library shared with install.sh, enroll.sh and uninstall.sh: this
+# script is installed as /usr/local/bin/qui-update and has no sibling in an
+# archive, so the installed copy is what it normally reads. It is not reimplemented
+# inline: a stopped service must be started again by exactly the same command that
+# install.sh and uninstall.sh use, and a second copy of that logic would be an
+# untested dialect. An installation old enough to predate the library is told to
+# run the archive's install.sh once, which writes the library and this script.
+service_library=/usr/local/lib/proxycontrol/service.sh
+if [[ ! -f $service_library && -f $(dirname -- "${BASH_SOURCE[0]}")/service.sh ]]; then
+  service_library=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/service.sh
+fi
+[[ -f $service_library && ! -L $service_library && $(stat -c '%u' "$service_library" 2>/dev/null) == 0 ]] \
+  || fail "缺少初始化系统库 $service_library：这是旧版安装。请用与安装版本相同的发布归档执行一次 deploy/linux/install.sh，再重跑本脚本。"
+# shellcheck source=service.sh
+. "$service_library"
+init_system=$(detect_init) || fail '既不是 systemd 也不是 OpenRC：不支持本机的初始化系统。'
+# date comes from the same coreutils package as install and sha256sum; rc-service
+# and rc-update are the OpenRC equivalents of systemctl.
+required_tools=(curl tar sha256sum install mktemp uname grep sed)
+if [[ $init_system == systemd ]]; then
+  required_tools+=(systemctl)
+else
+  required_tools+=(rc-service rc-update)
+fi
+for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null || fail "缺少命令：$tool"
 done
 
@@ -108,8 +132,10 @@ sums_digest() {
   return 1
 }
 
+# --no-insecure overrides a -k that a curl wrapper or alias may add in front of
+# the arguments, so nothing is fetched without a verified certificate.
 download() {
-  curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 5 --output "$2" -- "$1" \
+  curl --no-insecure -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 5 --output "$2" -- "$1" \
     || fail "下载失败：$1"
 }
 
@@ -139,10 +165,10 @@ backup_database() {
   printf '%s\n' "$destination"
 }
 
-# Print the log, the downgrade command and the database copy after a failure.
+# Print the log hint, the downgrade command and the database copy after a failure.
 report_failure() {
-  local service=$1 previous=$2 backup=$3
-  printf '日志：journalctl -u %s -n 50\n' "$service"
+  local name=$1 previous=$2 backup=$3
+  printf '日志：%s\n' "$(service_log_hint "$name")"
   if [[ $previous =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf '降级：用 qui-update --version %s 装回旧版本。\n' "$previous"
   else
@@ -156,15 +182,16 @@ report_failure() {
 # Stop the component, back up the panel database while it is stopped, run the
 # bundled install.sh and start the service again when it was active. install.sh
 # publishes the program with a rename, so a failure leaves the previous binary in
-# place and the service can be started on it again.
+# place and the service can be started on it again. The service name carries no
+# .service suffix: the init-system library adds it on systemd.
 update_component() {
-  local component=$1 name=proxy-$1 service=proxy-$1.service mode=--panel
+  local component=$1 name=proxy-$1 mode=--panel
   local binary=$source_dir/bin/proxy-$1 digest='' previous='' backup='' was_active=false
   [[ $component == agent ]] && mode=--node
   previous=$(installed_version "$component")
-  if systemctl is-active --quiet "$service"; then was_active=true; fi
-  printf '\n[%s] 停止 %s ...\n' "$name" "$service"
-  systemctl stop "$service" || fail "无法停止 $service，未做任何修改。"
+  if service_is_active "$name"; then was_active=true; fi
+  printf '\n[%s] 停止 %s ...\n' "$name" "$name"
+  service_stop "$name" || fail "无法停止 $name，未做任何修改。"
   if [[ $component == panel ]]; then
     backup=$(backup_database "$previous")
     printf '[%s] 数据库已备份：%s\n' "$name" "$backup"
@@ -173,19 +200,19 @@ update_component() {
   if ! "$source_dir/deploy/linux/install.sh" "$mode" --binary "$binary" --sha256 "$digest"; then
     printf '[%s] 更新失败，程序未被替换。\n' "$name"
     if $was_active; then
-      systemctl start "$service" || printf '[%s] 启动 %s 失败。\n' "$name" "$service"
-      printf '[%s] 服务状态：%s\n' "$name" "$(systemctl is-active "$service" 2>/dev/null || true)"
+      service_start "$name" || printf '[%s] 启动 %s 失败。\n' "$name" "$name"
+      printf '[%s] 服务状态：%s\n' "$name" "$(service_state "$name" || true)"
     fi
-    report_failure "$service" "$previous" "$backup"
+    report_failure "$name" "$previous" "$backup"
     exit 1
   fi
   if $was_active; then
-    if systemctl start "$service"; then
+    if service_start "$name"; then
       printf '[%s] 已更新到 %s，服务状态：%s\n' "$name" "$version" \
-        "$(systemctl is-active "$service" 2>/dev/null || true)"
+        "$(service_state "$name" || true)"
     else
       printf '[%s] 已更新到 %s，但启动失败。\n' "$name" "$version"
-      report_failure "$service" "$previous" "$backup"
+      report_failure "$name" "$previous" "$backup"
       exit 1
     fi
   else
@@ -203,7 +230,7 @@ done
 
 if [[ -z $version ]]; then
   printf '查询 GitHub 最新发布 ...\n'
-  release=$(curl -fsSL --proto '=https' --tlsv1.2 "https://api.github.com/repos/$repository/releases/latest") \
+  release=$(curl --no-insecure -fsSL --proto '=https' --tlsv1.2 "https://api.github.com/repos/$repository/releases/latest") \
     || fail '无法查询 GitHub 最新发布；请检查网络，或用 --version 指定版本。'
   tag=$(printf '%s\n' "$release" | grep -m1 '"tag_name"' | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//' -e 's/".*//') \
     || fail 'GitHub 返回的内容里没有 tag_name。'
@@ -271,5 +298,5 @@ done
 printf '\n更新完成：\n'
 for component in "${components[@]}"; do
   printf 'proxy-%s %s（服务状态：%s）\n' "$component" "$(installed_version "$component")" \
-    "$(systemctl is-active "proxy-$component.service" 2>/dev/null || true)"
+    "$(service_state "proxy-$component" || true)"
 done

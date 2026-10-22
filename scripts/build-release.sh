@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Build the Linux release archives: one tar.gz per architecture with the panel
 # and agent binaries (the production web build is embedded in the panel), the
-# deploy scripts, the systemd units and the example configurations, plus a
-# SHA256SUMS file next to them.
+# deploy scripts, the systemd units, the OpenRC init scripts and the example
+# configurations, plus a SHA256SUMS file next to them. A node archive carries both
+# init-system definitions, because the same archive installs on Debian, Ubuntu and
+# Alpine; deploy/linux/install.sh and node-install.sh pick the right one on the
+# target host.
 #
 # Environment:
 #   VERSION=1.0.0            version recorded in both binaries
@@ -50,7 +53,7 @@ for architecture in "${architectures[@]}"; do
       -ldflags "-s -w -X main.version=$version" \
       -o "$stage/bin/proxy-$component" "./cmd/$component"
   done
-  for directory in linux systemd examples; do
+  for directory in linux systemd openrc examples; do
     cp -R -- "deploy/$directory" "$stage/deploy/$directory"
   done
   tar --create --file - -C "$output" \

@@ -42,7 +42,23 @@ done
 case $action in --inspect|--trust) ;; *) usage >&2; exit 2;; esac
 [[ $ca_path == /* && $data == /* ]] || fail 'Use absolute paths.'
 [[ $(uname -s) == Linux && $EUID -eq 0 ]] || fail 'Run locally as root on Linux.'
-for tool in systemctl stat sha256sum install cmp rm sed flock; do command -v "$tool" >/dev/null || fail "Missing command: $tool"; done
+# The init-system helpers (deploy/linux/service.sh) are sourced so the service
+# state is read the same way on systemd and OpenRC; the sibling copy of an
+# archive wins over the one install.sh publishes to /usr/local/lib/proxycontrol.
+service_library=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/service.sh
+if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol/service.sh; fi
+[[ -f $service_library && ! -L $service_library && $(stat -c '%u' "$service_library" 2>/dev/null) == 0 ]] \
+  || fail "Missing the init-system library service.sh: $service_library"
+# shellcheck source=service.sh
+. "$service_library"
+init_system=$(detect_init) || fail 'Neither systemd nor OpenRC is running on this host.'
+required_tools=(stat sha256sum install cmp rm sed flock)
+if [[ $init_system == systemd ]]; then
+  required_tools+=(systemctl)
+else
+  required_tools+=(rc-service)
+fi
+for tool in "${required_tools[@]}"; do command -v "$tool" >/dev/null || fail "Missing command: $tool"; done
 [[ -d $data && ! -L $data ]] || fail 'Missing agent data directory.'
 registry=/var/lib/proxycontrol-install
 [[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'No private installation registry.'
@@ -54,7 +70,11 @@ record=$registry/agent.manifest
 [[ $(sed -n '1p' "$record") == proxycontrol-install-v1 && $(sed -n '2p' "$record") == agent ]] || fail 'Unknown installation record.'
 account=proxy-agent
 [[ $(id -u "$account") != 0 ]] || fail 'Service account cannot be root.'
-service_state=$(systemctl show --property=ActiveState --value proxy-agent.service)
+if [[ $init_system == systemd ]]; then
+  service_state=$(systemctl show --property=ActiveState --value proxy-agent.service)
+else
+  service_state=$(service_state proxy-agent)
+fi
 
 report(){
   local file=$1 digest
@@ -72,7 +92,8 @@ if [[ $action == --inspect ]]; then
   printf 'Inspection only; no material was changed.\n'
   exit 0
 fi
-[[ $service_state == inactive || $service_state == failed ]] || fail 'Stop proxy-agent.service before installing a trusted CA.'
+# systemd reports inactive or failed for a stopped unit, OpenRC stopped or crashed.
+case $service_state in inactive|failed|stopped|crashed) ;; *) fail 'Stop the proxy-agent service before installing a trusted CA.';; esac
 [[ -f $source && ! -L $source ]] || fail 'The new CA must be a regular local file.'
 [[ $(stat -c '%s' "$source") -le 65536 ]] || fail 'The new CA file is larger than 64 KiB.'
 grep -q -- '-----BEGIN CERTIFICATE-----' "$source" || fail 'The new CA file carries no PEM certificate.'
@@ -93,4 +114,4 @@ sync -f -- "$ca_path.new"
 mv -T -- "$ca_path.new" "$ca_path"
 sync -f -- "${ca_path%/*}"
 printf 'Trusted control CA installed at %s.\n' "$ca_path"
-printf 'Start proxy-agent.service and enroll the node again with deploy/linux/enroll.sh --token-file FILE.\n'
+printf 'Enroll the node again with deploy/linux/enroll.sh --token-file FILE, then start the proxy-agent service.\n'

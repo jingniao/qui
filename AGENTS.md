@@ -29,6 +29,7 @@
 - 第 30 节：面板与节点主机增加 `/usr/local/bin/qui-update`（从 GitHub Release 下载、校验 SHA256SUMS 后用 install.sh 原地升级，面板升级前备份数据库），`qui` 菜单增加“更新”。
 - 第 11.3 节：注册节点后面板显示一键安装命令（`node-install.sh`：从 GitHub Release 下载与面板同版本的归档并校验，按公网证书或固定 SHA-256 建立对面板证书的信任，登记并启动 Agent）；新增无需登录的 `GET /install/ca.pem`。
 - 文档版本号由 V1.0 升为 V1.1；文档中“第 5.5 步”的表述改为“Phase 14”。
+- 第 4.3、30.2 节（2026-10-22）：节点 Agent 除 systemd 外正式支持 OpenRC（Alpine 3.19+，OpenRC ≥ 0.45，含无 systemd 的 LXC 容器）。脚本自动识别初始化系统，服务定义在 `deploy/openrc/`。强制出站 helper 在 OpenRC 上由 `inotifyd` watcher 服务触发；代理核心以 `Pdeathsig` 启动，Agent 被杀时核心随之退出；缺少 `/etc/machine-id` 时由安装脚本创建。面板仍只支持 systemd。
 
 **V1.0（2026-08-20）**：初版，完整需求与架构约束。
 
@@ -255,7 +256,7 @@ Internet
 技术方案：
 
 - Go 单文件程序
-- systemd 管理
+- systemd 或 OpenRC（Alpine，含 LXC）管理
 - gRPC 双向连接
 - mTLS 节点身份认证
 - 本地轻量数据库或持久化队列
@@ -1807,7 +1808,12 @@ Agent 上报消息包括：
 
 `host-network/` 是服务器强制出站的 helper 目录：Agent 写 `desired.json`，`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）读它、写 `status.json`，由 `proxy-agent-host-network.path` 监视并在开机时重放。helper 只维护一个 nft 表 `inet proxy_agent_source`，卸载脚本会删除该表与这两个单元。
 
-中央端和节点端均使用 systemd 管理。
+中央端使用 systemd 管理。节点端使用 systemd，或在 Alpine 上使用 OpenRC：
+- `/etc/init.d/proxy-agent` 由 `supervise-daemon` 监管。
+- `/etc/init.d/proxy-agent-host-network` 监管 `/usr/local/lib/proxy-agent/host-network-watch`（busybox `inotifyd`），代替上面的 path 单元与 oneshot 单元。
+- 日志经 `logger` 写入 syslog。
+
+两种初始化系统共用 `/usr/local/lib/proxycontrol/service.sh`，安装记录第 10 行为 `openrc` 时表示 OpenRC 安装。
 
 ---
 

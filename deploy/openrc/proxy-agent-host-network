@@ -1,0 +1,38 @@
+#!/sbin/openrc-run
+# OpenRC service for the enforced outbound source of a Proxy Control node agent.
+#
+# On systemd this job is a oneshot unit plus a path unit
+# (deploy/systemd/proxy-agent-host-network.service and .path): the path unit
+# fires the oneshot whenever the Agent publishes desired.json, and the oneshot
+# applies the file at boot. OpenRC has no path units, so the same job is one
+# supervised service that runs the packaged watche
+# (/usr/local/lib/proxy-agent/host-network-watch), which applies the retained
+# file once at start and then waits for changes with busybox inotifyd.
+#
+# The watcher runs as the Agent account with only CAP_NET_ADMIN, exactly like the
+# oneshot unit: it is the only process allowed to touch the nft table
+# `inet proxy_agent_source`. Every systemd hardening option of that unit
+# (ProtectSystem, ProtectHome, PrivateTmp, ProtectKernelTunables,
+# ProtectKernelModules, ProtectControlGroups, RestrictSUIDSGID and the
+# ReadWritePaths restriction) has no OpenRC equivalent and is missing here; the
+# process hardening that does exist (user, capabilities, no_new_privs, umask) is
+# applied.
+name="Proxy Control node agent enforced outbound source"
+description="Apply the enforced outbound source the Proxy Control node agent publishes"
+
+supervisor="supervise-daemon"
+command="/usr/local/lib/proxy-agent/host-network-watch"
+command_user="proxy-agent:proxy-agent"
+directory="/var/lib/proxy-agent"
+umask=077
+capabilities="^cap_net_admin"
+no_new_privs="yes"
+respawn_delay=5
+respawn_max=0
+output_logger="logger -t proxy-agent-host-network -p daemon.info"
+error_logger="logger -t proxy-agent-host-network -p daemon.err"
+
+depend() {
+  need net
+  use logge
+}

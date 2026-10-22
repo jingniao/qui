@@ -3,11 +3,14 @@
 // outbound connection leaving the interface that owns a configured address.
 //
 // The Agent never gains CAP_NET_ADMIN and never executes anything but this one
-// fixed program. A systemd oneshot unit runs
-// `proxy-agent --apply-host-network <dir>`, which reads one validated desired
-// file from that directory, runs `nft -f -` with the rendered rules on stdin and
-// writes one status file back. No shell is involved and the argument list of the
-// one program is fixed.
+// fixed program. The packaged service runs
+// `proxy-agent --apply-host-network <dir>`: on systemd the oneshot unit together
+// with the path unit that triggers it, on OpenRC the proxy-agent-host-network
+// watcher service (busybox inotifyd) that runs it once at start and again
+// whenever desired.json changes. It reads one validated desired file from that
+// directory, runs `nft -f -` with the rendered rules on stdin and writes one
+// status file back. No shell is involved and the argument list of the one
+// program is fixed.
 package hostnet
 
 import (
@@ -61,7 +64,8 @@ type Status struct {
 }
 
 // Validate re-checks the desired state with the shared contract validator. The
-// helper is a separate process started by systemd and does not trust its input.
+// helper is a separate process started by the packaged service (the systemd
+// oneshot/path units or the OpenRC watcher) and does not trust its input.
 func (d Desired) Validate() error {
 	if d.ID == "" {
 		return errors.New("missing id")

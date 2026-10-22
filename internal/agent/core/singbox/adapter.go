@@ -284,6 +284,10 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 		return err
 	}
 	command := exec.Command(executable, "run", "--disable-color", "-c", path)
+	// The core must also die with the Agent when the supervisor only signals the
+	// Agent PID (OpenRC supervise-daemon): the kernel kills the core with the
+	// starting thread.
+	command.SysProcAttr = core.CoreProcessAttributes()
 	command.Stdout = io.Discard
 	if configuration.AccessContext != nil && a.hooks.AccessSink != nil {
 		command.Stdout = collector.NewSingboxWriter(configuration.AccessContext, a.hooks.AccessSink, a.hooks.AccessRejected)

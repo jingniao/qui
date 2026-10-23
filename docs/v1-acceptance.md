@@ -366,7 +366,7 @@
 - 卸载本轮在面板主机上安装的 `systemd-container`、`debootstrap` 及其自动依赖 `libnss-mymachines`、`arch-test`、`distro-info`；`/etc/nsswitch.conf` 的 `hosts` 行恢复为 `files dns`，DNS 正常，没有失败的单元。
 - 最终状态：`uk-node`、`alpine-node`、`us2-node` 均 `online`，Agent 与面板都是 `1.0.2`。三台主机上 `/var/lib/proxycontrol-install` 只有安装记录与锁文件。
 
-### 9.8 第五轮：中断后的自动恢复与面板跨迁移降级（2026-10-23，发布前）
+### 9.8 第五轮：中断后的自动恢复与面板跨迁移降级（2026-10-23，发布前；已作为 v1.0.3 发布，见 9.9）
 
 **风险审查（修改前）。**
 - 面板本身是安全的：数据库里有它不认识的迁移时，旧面板在迁移检查阶段拒绝启动，不改动数据库；所有迁移在一个事务里执行。
@@ -377,7 +377,7 @@
   - 回滚直接覆盖新版本写过的数据库，不留副本。
   - 无法与匹配的旧备份一起降级面板：跨迁移降级只会失败并回滚。
 
-**修复（尚未提交与发布）。**
+**修复（提交 `8f592f0`，作为 v1.0.3 发布）。**
 - `update.sh`：快照里写入进度日志（`prepared`/`started`/`committed`/`restored`，临时文件 → 同步 → 改名 → 同步目录）以及正在运行的 `qui-update` 与 `service.sh` 的副本。
   - 一套恢复例程 `recover_snapshot` 供所有路径共用：失败、信号（INT/TERM/HUP）、`--recover`、开机。
   - 加更新锁；下次运行时先完成未结束的恢复。
@@ -443,3 +443,38 @@
 - arm64。
 - 面板 ≤1.0.2 作为降级目标时的预检（这类目标没有该参数，代码按“不支持”处理，回归测试场景 15 覆盖）。
 - 从 1.0.2 升级到本版本时，运行的仍是 1.0.2 的 `qui-update`，没有本节的保护。
+
+### 9.9 v1.0.3 发布与三台主机升级（2026-10-23）
+
+经 owner 批准，`8f592f0` 推送到 `main`，标签 `v1.0.3` 由 CI 发布。`main` 与标签两次检查都通过，新增的 “Deploy script checks”（以 root 运行 `update-test.sh`）也在其中。发布为正式版（非草稿、非预发布），发布时间 2026-10-23T07:58:16Z，附件为两个归档、`SHA256SUMS` 与 `node-install.sh`；amd64 摘要 `ae7778a5…cada`，arm64 `abb7138e…4d33`。
+
+**升级（从 GitHub，各主机已安装的 1.0.2 `qui-update`）。** 1.0.2 的 `qui-update` 没有进度日志与开机恢复，这一次升级本身按 1.0.2 的方式执行（快照 + 健康检查）。
+
+| 主机 | 结果 | 实际观察 |
+| --- | --- | --- |
+| `uk-node`（Debian，systemd） | 通过 | Agent `1.0.2 → 1.0.3`，摘要核对一致，健康检查通过，退出码 0。`proxycontrol-update-recovery.service` 已创建并启用。`xboard-node`、`cf-probe` PID 不变（833、834）。 |
+| `alpine-node`（Alpine LXC，OpenRC） | 通过 | Agent `1.0.2 → 1.0.3`，`proxy-agent` 与 watcher `started`；`proxycontrol-update-recovery` 加入 `default` 运行级（安装时不启动，符合设计）。`komari-agent` PID 不变（544），`cf-probe` `started`，`xboard-node` 保持测试前的 `crashed`。 |
+| 面板主机（Agent + 面板，systemd） | 通过 | 先 Agent 后面板，都到 `1.0.3`；面板停止时备份为 `pre-update-1.0.2-20261023-160445.db`。两个服务 `active`、`NRestarts=0`，HTTP 200。`xboard-node`、`cf-probe` PID 不变（738、740）。 |
+
+**开机恢复单元的验证（三台主机，不重启、不影响服务）。** 每台主机从 GitHub 重新下载 v1.0.3 归档并核对 `SHA256SUMS`，然后：
+
+| 项 | 结果 | 实际观察 |
+| --- | --- | --- |
+| 安装的文件与发布一致 | 通过 | 三台主机上 `/usr/local/lib/proxycontrol/update-recovery`、`/usr/local/bin/qui-update`，以及 `proxycontrol-update-recovery.service` 或 `/etc/init.d/proxycontrol-update-recovery`，都与归档内的文件逐字节相同。 |
+| 启用与顺序（systemd） | 通过 | `enabled`，`WantedBy=multi-user.target`；`Before=` 包含 `proxy-agent.service`、`proxy-panel.service`、`proxy-agent-host-network.service`、`proxy-agent-host-network.path`；`systemd-analyze verify` 没有报告。 |
+| 启用与顺序（OpenRC） | 通过 | 在 `default` 运行级。OpenRC 依赖树（`/run/openrc/deptree`）中它 `ineed localmount`、`ibefore proxy-agent proxy-panel proxy-agent-host-network`，而 `proxy-agent` 与 `proxy-agent-host-network` 都记录 `iafter proxycontrol-update-recovery`。 |
+| 没有进度日志时实际启动 | 通过 | systemd：`systemctl start` 返回 0，单元因 `ConditionPathExistsGlob=/var/lib/proxycontrol-install/rollback.*/journal` 不满足而跳过。OpenRC：`rc-service proxycontrol-update-recovery start` 为 `[ ok ]`，状态 `started`。三台主机直接运行脚本，退出码都是 0，安装登记目录没有变化。 |
+| 恢复路径（发布内的回归测试） | 通过 | 三台主机各以 root 运行归档里的 `deploy/linux/tests/update-test.sh`（临时根目录、假服务库，不接触真实服务），都是 22/22 通过；其中包括开机脚本在 `prepared`、`started` 两个阶段断电后的恢复，以及 OpenRC 变体。真实初始化系统下的断电与信号恢复见 9.8 的 E4–E10。 |
+
+**最终状态。**
+- 面板显示 `uk-node`、`alpine-node`、`us2-node` 均 `online`、Agent `1.0.3`；面板 `1.0.3`。
+- 链路：第三台主机经 `127.0.0.1:990`，`api.ipify.org` 从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218）。
+- 三台主机的 `/var/lib/proxycontrol-install` 只有安装记录与锁文件，没有残留快照。
+- 共存服务的 PID 与升级前相同。
+
+**顺带发现并清理的两个旧失败状态。**
+- 面板主机：`systemd-machined.service` 处于 `failed`/`not-found`，是 9.8 那一轮卸载 `systemd-container` 时留下的记录；已 `systemctl reset-failed`。
+- `uk-node`：`proxy-agent-host-network.service` 自 2026-10-22 17:52 起处于 `failed`。
+  - 来源：第一轮验收里故意用文档地址 `2001:db8::5` 做的强制出站失败测试。连续失败触发了 systemd 的启动频率限制，path 单元以 `unit-start-limit-hit` 停止，17:53 写入的“清除”请求（四个字段全空）因此没有被执行，`status.json` 一直停留在旧请求的失败结果上。18:03 的重新安装重新启用了 path 单元。
+  - 处理：期望状态是清除（不加任何规则），所以执行它不会改变网络。`reset-failed` 后手动运行一次 oneshot 单元（等同开机时的重放），`status.json` 变为当前请求 `ok:true`，nft 表仍不存在。之后两台 systemd 主机都没有失败的单元。
+  - **遗留问题（未修复）**：强制出站 helper 在短时间内连续失败时，systemd 会停用 path 单元，之后的期望状态在下次安装或重启前都不会被执行。需要单独修复（例如给 oneshot 单元设置合适的 `StartLimitIntervalSec`/`StartLimitBurst`，或让 Agent 发现 helper 没有回应时报告）。

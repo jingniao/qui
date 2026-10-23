@@ -1,8 +1,8 @@
 # V1 验收矩阵
 
-更新时间：2026-10-21（v1.0.0 发布后的同步）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-23（v1.0.1 发布后的第三轮实机验收）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
-**当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷；修复尚未进入任何发布，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节）：节点 Agent 的 OpenRC 一键安装、服务管理、崩溃恢复与强制出站已实机通过（9.4），V01 与 A→B→C 仍待面板主机重新登记出口节点。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
+**当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
 ## 1. 状态与证据规则
 
@@ -118,7 +118,7 @@
 
 | 编号 | 结果 | 实际观察 |
 | --- | --- | --- |
-| V01 | 第一轮跳过，第二轮见第 9 节 | 只有两台主机，最多两个节点；两个节点各自登记、在线，任一 Agent 重启不影响另一个 |
+| V01 | 第一轮跳过，第三轮通过（9.5） | 只有两台主机，最多两个节点；两个节点各自登记、在线，任一 Agent 重启不影响另一个 |
 | V02 | 通过 | 停面板约 2 分钟后启动，两节点在约 90 秒内按退避重连；期间数据面不中断 |
 | V03 | 通过 | 无客户端证书、自签伪造节点 ID、其他 CA（Web CA）签发的证书调用 `Connect` 均为 `Unauthenticated`；`renew-certificate.sh --renew` 换序列号不换密钥、`--rotate-key` 换序列号与密钥，旧身份被拒（`node certificate revoked or unknown`）；删除节点后其 Agent 被拒 |
 | V04 | 通过 | 单一 `proxy-panel` 进程，SQLite 在本地 ext4，WAL 模式 |
@@ -132,7 +132,7 @@
 | V12 | 通过 | 同节点 SOCKS5/HTTP/VLESS/SS/Trojan 五个入站同时真实可用；重复端口在保存时 400；被其他进程占用的端口在应用时 `start_failed` 并回滚 |
 | V13 | 通过 | SS 入站 → SOCKS5 中转出站 → `us-node`，出口为 `us-node` 地址 |
 | V14 | 通过 | VLESS → `uk-node` → Trojan(TLS) → `us-node` → Direct，出口为 `us-node`；中转凭据由面板单独生成，与用户凭据不同 |
-| V15 | 部分通过 | A→B（链 UK→US，VLESS 跳）真实可用；重复节点/环路与超过 3 跳被拒；A→B→C 因环境缺失而跳过 |
+| V15 | 通过（A→B→C 见 9.5） | A→B（链 UK→US，VLESS 跳）真实可用；重复节点/环路与超过 3 跳被拒；A→B→C 第一轮因环境缺失跳过，第三轮通过 |
 | V16 | 通过 | Direct、Block、指定 Outbound、出口组（primary 选中首成员）、代理链都实际生效；`weighted` 策略被拒 |
 | V17 | 通过 | 内置 Netflix 服务 → 出口组、内置 GitHub → Direct、自定义服务 `ip-check` → 代理链，访问记录里命中的规则与出站正确 |
 | V18 | 通过 | 精确 `example.com`、后缀 `tiktok.com`、通配 `*.example.net` 在 SOCKS5 与 VLESS 入站都被拒，并记录为阻断 |
@@ -212,14 +212,14 @@
 | A→B（新主机） | 通过 | `nat-node` 的分流规则把 `api.ipify.org` 经 Shadowsocks 中转出站送到 `uk-node` 的内部中转入站，出口为 `uk-node` 地址；其他域名仍直连。访问记录按分钟聚合，命中规则与动作正确 |
 | 订阅 | 通过 | `nat-node` 加入已授权的 `UK entry` 组后用户授权不变；其入站只监听回环，订阅按设计不包含它 |
 | 重连隔离 | 通过 | 重启 `nat-node` 的 Agent 后约 15 秒内重连，数据面恢复；`uk-node` 心跳不受影响 |
-| V01 | 未完成 | 面板上 `uk-node`、`nat-node` 在线；第三个节点 `us2-node`（面板主机）已在面板创建，待在面板主机上重新登记（见 9.3） |
-| V15 A→B→C | 未执行 | 需要 `us2-node` 作为出口 C（见 9.3） |
+| V01 | 第三轮通过（9.5） | 本轮时 `uk-node`、`nat-node` 在线，第三个节点待登记 |
+| V15 A→B→C | 第三轮通过（9.5） | 本轮缺少出口 C |
 
 以上是手工安装的 `nat-node` 的结果。该节点已在 9.4 中删除，第三台主机改用受支持的 OpenRC 安装重新登记为 `alpine-node`。
 
 ### 9.3 待处理
 
-- 面板主机上仍运行第一轮 P04 中已删除的 `us-node` 的 Agent（被面板拒绝，不承载流量）。要把该主机登记为新节点 `us2-node`，需要停止这个 Agent 并把它的数据目录移到备份位置。该步骤等待 owner 确认，确认后再完成 V01 与 A→B→C，计划改为 `alpine-node` → `uk-node` → `us2-node` → Direct。
+- ~~面板主机上仍运行第一轮 P04 中已删除的 `us-node` 的 Agent（被面板拒绝，不承载流量）。要把该主机登记为新节点 `us2-node`，需要停止这个 Agent 并把它的数据目录移到备份位置。~~ 已处理：owner 于 2026-10-23 确认，旧 Agent 的配置与数据移到 `/root/qui-accept/us-node.old/`，主机重新登记为 `us2-node`，V01 与 A→B→C 见 9.5。
 
 观察项：
 - ~~受支持的安装与登记脚本只适用于 systemd 主机；Alpine/OpenRC 等环境没有安装路径，文档也未说明这一前提。~~ 已解决：节点 Agent 正式支持 OpenRC，见 9.4。
@@ -263,9 +263,34 @@
 3. **重跑登记被拒。** 失败的登记留下 `enrollment-attempt.json` 与私钥，Agent 拒绝把它们换绑到新注册码，所以“登记成功前可以重跑”实际不可行（systemd 主机同样如此）。已修复：`node-install.sh` 在本机没有证书、也没有 `enrollment-result.json` 时，把这两个文件移到 `/var/lib/proxy-agent-enrollment-retired.*`，不删除，再登记。
 4. **`node-ca.sh` 只支持 systemd。** 它直接调用 `systemctl show`，已改为通过 `service.sh` 读取服务状态。
 
-未覆盖：
-- 原版 Alpine（没有 bash/curl）上的引导段。
+未覆盖（除 arm64 外均已在 9.5 用 v1.0.1 补测）：
+- ~~原版 Alpine（没有 bash/curl）上的引导段。~~ 见 9.5。
 - arm64。
-- 真正重启容器。只用重启 watcher 服务模拟开机重放，没有实际重启 LXC。
-- 通过 GitHub 发布下载 `node-install.sh`（需要正式发布）。
-- 主机上的 `qui-update` 只验证了 `--help`；真实更新会降级到 GitHub 上的 v1.0.0，所以没有执行。
+- ~~真正重启容器。只用重启 watcher 服务模拟开机重放，没有实际重启 LXC。~~ 见 9.5。
+- ~~通过 GitHub 发布下载 `node-install.sh`（需要正式发布）。~~ 见 9.5。
+- ~~主机上的 `qui-update` 只验证了 `--help`；真实更新会降级到 GitHub 上的 v1.0.0，所以没有执行。~~ 见 9.5。
+
+### 9.5 第三轮：v1.0.1 发布版（2026-10-23）
+
+**发布。** 两轮修复提交为 `0cd70c3`（第一轮缺陷修复）与 `68688dd`（Alpine/OpenRC 支持），推送到 `main` 后 CI `check` 通过；标签 `v1.0.1` 的 CI 再次通过 `check` 并由 `release` 任务发布 GitHub Release `v1.0.1`。附件为两个架构的归档、`SHA256SUMS` 与 `node-install.sh`；`proxy-control-1.0.1-linux-amd64.tar.gz` 的 SHA-256 为 `a1c235b4…727d`。发布前本地门禁：`bash -n`/`sh -n` 全部脚本、`gofmt`、`go vet`（Windows 与 `GOOS=linux`）、`go test -p 1 ./...` 无失败、Web 构建与前端时间测试通过。
+
+**环境。** 三台主机同 9.1 与第 8 节：面板主机（Debian 13，systemd，23.254.158.3）、`uk-node`（Debian 13，systemd，195.72.166.247）、第三台主机（Alpine 3.19 LXC，OpenRC，NAT 出口 113.29.231.218）。本轮结束时三个节点 `alpine-node`、`uk-node`、`us2-node` 都运行发布版 Agent `1.0.1` 与官方 Xray 26.3.27。
+
+| 项 | 结果 | 实际观察 |
+| --- | --- | --- |
+| 真实 `qui-update`：面板主机（面板＋Agent） | 通过 | 用主机上已有的旧版 `qui-update`（发布前的 systemd 版，没有 `service.sh`）执行 `qui-update --yes`：查询到最新发布 `v1.0.1`，归档摘要与 `SHA256SUMS` 一致；先停止并更新 Agent，再停止面板、在停止状态下把数据库复制为 `/var/lib/proxy-panel/backups/pre-update-1.0.1-dev.3a61bbd.fix7-20261023-082249.db`（0600，proxy-panel 所有）、更新面板；两个服务重新 `active`，`--version` 均为 `1.0.1`，并写入了 `/usr/local/lib/proxycontrol/service.sh` 与新版 `qui-update`。面板重启后 `uk-node`、`alpine-node` 自动重连。备份文件头为 SQLite 3；主机上没有 `sqlite3`，未做完整性检查。 |
+| `qui-update` 失败路径：`uk-node` | 通过 | 用 `chattr +i` 锁住 `/usr/local/bin/proxy-agent` 制造安装失败：`install.sh` 在替换程序时 `mv` 失败，脚本输出“更新失败，程序未被替换”，重新启动 Agent（`active`），给出日志与降级提示，退出码 1；程序版本仍是 `1.0.1-dev.3a61bbd.fix6`，三个 systemd 单元摘要不变，安装记录仍完整。解除锁定后重跑 `qui-update --yes` 成功：Agent `1.0.1`、单元摘要与升级前相同、记录 9 行，节点重新 `online`。版本降级（`--version` 旧版本）未测试：v1.0.1 含迁移 `0109`，面板不可直接降级，节点降级没有实际需要。 |
+| `qui-update`：`alpine-node`（OpenRC） | 部分通过 | 新版 `qui-update` 在 OpenRC 上识别初始化系统、查询 GitHub 并正确报告“已是最新版本 1.0.1”。没有更早的支持 OpenRC 的发布，因此 OpenRC 上带版本变化的真实升级无法测试，要等下一个发布。随后按 `qui-update` 的同样步骤（`rc-service proxy-agent stop` → 发布归档的 `install.sh --node` → `start`）把本地构建换成发布版二进制，记录第 10 行仍为 `openrc`。 |
+| 原版 Alpine 引导 ＋ 从 GitHub 一键安装（OpenRC） | 通过（容器为模拟） | 环境：在面板主机上把官方 `alpine-minirootfs-3.19.9-x86_64.tar.gz`（SHA-256 与官方 `.sha256` 一致）解包，`apk add alpine-base`（与 Alpine LXC 镜像相同：busybox、apk、OpenRC 0.52，**没有 bash、curl，没有 `/etc/machine-id`**），在独立的 pid/mount/uts/ipc 命名空间里以 busybox `init` 为 PID 1 启动，`openrc sysinit/boot/default` 正常执行（`rc_sys="lxc"`，boot 运行级别为 bootmisc/hostname/syslog/networking）。**与真实 LXC 的差别**：网络命名空间与面板主机共享，`/etc/network/interfaces` 因此不配置任何接口。<br>在面板新建节点 `alpine-clean`，按面板显示的命令原样在 ash 里执行（`command -v apk … && apk add --no-cache bash curl ca-certificates; curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.1/node-install.sh \| bash -s -- --version 1.0.1 …`）：apk 装上 bash、curl、ca-certificates，脚本从 GitHub 下载并校验归档，补装依赖，创建 `/etc/machine-id`，安装 Agent 与 Xray，两个服务加入 `default` 并启动，固定 SHA-256 建立面板证书信任，登记后 `proxy-agent` `started`；Agent 以 `proxy-agent` 运行，`CapEff` 为 `0x400`，日志进入 `/var/log/messages`，面板显示 `alpine-clean` `online`、Agent `1.0.1`。测试后停止容器、在面板删除该节点并删除 rootfs。<br>前两次尝试失败，都是模拟容器本身的问题，已记录：第一次只伪造了 `/run/openrc/softlevel`，OpenRC 没有状态目录；第二次缺少 `/etc/network/interfaces`，`need net` 拉起的 `networking` 启动失败。 |
+| 从 GitHub 一键安装（systemd）：`us2-node` | 通过 | 面板主机上停止并禁用旧 `us-node` 的 Agent，把 `/etc/proxy-agent`、`/var/lib/proxy-agent` 移到 `/root/qui-accept/us-node.old/`；删除过期的待登记 `us2-node`，新建 `us2-node`，原样执行面板命令（apk 段在 Debian 上为空操作）：从 GitHub 下载、校验、安装、登记，`proxy-agent.service` 启用并 `active`，面板显示 `online`、Agent `1.0.1`。面板与共存服务不受影响。 |
+| V01 三节点 | 通过 | 面板同时管理 `alpine-node`（OpenRC）、`uk-node`、`us2-node`（systemd），均 `online`、Agent `1.0.1`。依次停止每个节点的 Agent：被停节点约 25 秒内显示 `offline`，另外两个节点心跳持续更新、保持 `online`；再启动后 20 秒内恢复 `online`。面板状态与各主机上的服务状态一致。 |
+| V15 A→B→C | 通过 | 链 `ALP-UK-US2`：`alpine-node` →（Shadowsocks，复用 `uk-node` 内部中转入站 `uk-relay-ss`）→ `uk-node` →（VLESS，`us2-node` 新建内部中转入站 `us2-relay-vless`，35210）→ `us2-node` → Direct。分流规则：`alpine-node` 上 `api.ipify.org`（TCP）→ 该链。按出口、中转、入口顺序发布版本 36、37、38，均成功。<br>经 `alpine-node` 的 `127.0.0.1:990`：`api.ipify.org` 三次都返回 `us2-node` 地址 23.254.158.3，`ifconfig.me` 返回本机出口 113.29.231.218，错误凭据被拒。访问记录：`api.ipify.org` 命中该规则，动作 `Proxy`，出站为 `alpine-to-uk-ss`。<br>失败处理：停止 `us2-node` 的 Agent（其 Xray 随之停止）后，经链的请求失败（curl 退出码 35），没有回退为直连，直连流量不受影响；恢复后链路重新可用。<br>创建过程中的校验也符合预期：`us2-node` 未设置公网地址时，指向它的中转出站被拒（`target node needs an enabled public endpoint`）；匹配 `all` 的规则因链只支持 TCP 被拒。 |
+| 真实 LXC 重启（`alpine-node`） | 通过 | 重启前设置强制出站 `hostSourceIpv4=10.111.111.41`（版本 39），nft 表存在，链路可用，主机已运行 2 天。执行 `reboot` 后约 10 秒 SSH 恢复（`up 0 min`）：`proxy-agent` 与 `proxy-agent-host-network` 从 `default` 运行级别启动，Xray 运行，watcher 开机时重放规则（`status.json` 为新的 `id`、`ok:true`，表 `inet proxy_agent_source` 存在），Agent 重连面板，链路与直连都恢复。随后清空该字段（版本 40），表被删除，链路仍可用。 |
+| 共存服务 | 通过 | 第三台主机：`komari-agent`、`cf-probe`、`crond` 重启前后都是 `started`（重启只发生在本次批准的 LXC 重启中），`xboard-node` 保持测试前的 `crashed`。面板主机与 `uk-node`：`xboard-node`、`cf-probe` 始终 `active`，启动时间仍是 2026-10-17，未被重启。 |
+
+本轮发现的问题（未修复，留待下一个发布）：
+1. **失败的安装留下临时程序文件。** `install.sh` 的 `mv` 失败时，`/usr/local/bin/.proxy-agent.installing.<pid>`（约 20 MB）留在原处，`qui-update` 不清理；暂存目录按设计保留供检查。测试后已手工删除。
+2. **`node-install.sh` 的失败提示不准确。** `install.sh` 在发布程序与服务定义之后失败时（例如服务启动失败），`node-install.sh` 仍提示“Agent 安装失败，本机未被修改”；实际上程序、init 脚本与运行级别条目已经写入。
+3. **OpenRC 上带版本变化的 `qui-update`** 要等下一个发布才能实测（见上表）。
+
+仍未覆盖：arm64；面板与节点的版本降级。

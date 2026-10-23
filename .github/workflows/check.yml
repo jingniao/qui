@@ -59,6 +59,9 @@ jobs:
       # separate change. host-network-test.sh runs the enforced-source units of the
       # release against a fake helper below /run and skips itself where neither
       # systemd nor OpenRC with busybox inotifyd is available.
+      # core-asset-test.sh extracts the architecture and libc helpers of
+      # install.sh and node-install.sh and needs no privileges, so it runs without
+      # sudo.
       - name: Deploy script checks
         run: |
           set -euo pipefail
@@ -74,6 +77,10 @@ jobs:
           if [ -f deploy/linux/tests/host-network-test.sh ]; then
             bash -n -- deploy/linux/tests/host-network-test.sh
             sudo bash deploy/linux/tests/host-network-test.sh
+          fi
+          if [ -f deploy/linux/tests/core-asset-test.sh ]; then
+            bash -n -- deploy/linux/tests/core-asset-test.sh
+            bash deploy/linux/tests/core-asset-test.sh
           fi
 
 

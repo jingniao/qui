@@ -87,7 +87,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **自动额度版本**：流量入库后由 `internal/panel/user` 的额度状态机判断，`internal/platform/server/quota.go` 按节点合并（60 秒窗口）后创建并部署只调整用户访问面的自动 Revision；目标节点是该用户当前授权的节点加上**已发布**状态里仍持有其凭据的节点。自动版本以节点**已发布**状态为基线，除用户与入站的绑定取自当前草稿（这类未发布编辑可能被带出）外，不会带出未发布的 Owner 编辑。
 
-**订阅**：`GET /sub/{token}?format=uri|base64|sing-box`（省略时用系统设置里的默认格式，出厂默认 `uri`）按授权节点组展开、过滤不可用节点和协议后生成，Token 只保存哈希。
+**订阅**：`GET /sub/{token}?format=uri|base64|sing-box`（省略时用系统设置里的默认格式，出厂默认 `uri`）按授权节点组展开、过滤不可用节点和协议后生成，Token 只保存哈希。URI 与 Base64 列表无法携带固定证书，因此省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点并且不报错（其余链接照常输出）；这类端点用 sing-box 格式获取，该格式会写入 `tls.certificate`。
 
 **节点出站网络**：Owner 在节点设置里填核心出站源 IP / 网卡和服务器强制出站 IPv4 / IPv6（迁移 `0108_node_outbound_network.sql` 的四个 `nodes` 列），改动在**发布配置后**生效。核心出站源在渲染时写入拨号出站（Xray `sendThrough` + `streamSettings.sockopt.interface`，sing-box `inet4/inet6_bind_address` + `bind_interface`）；整机强制出站走 helper：Agent 写 `/var/lib/proxy-agent/host-network/desired.json`，`proxy-agent-host-network.service`（oneshot，只带 `CAP_NET_ADMIN`）执行 `proxy-agent --apply-host-network`，由 `internal/agent/hostnet` 渲染并应用 nft 表 `inet proxy_agent_source`，结果写回 `status.json`。缺失网卡/源地址或 helper 失败是临时失败码，节点保留上一成功配置。
 

@@ -612,6 +612,8 @@ Osaka-01
 - Base64 URI 列表
 - sing-box JSON
 
+通用 URI 与 Base64 列表带不了固定证书，因此省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点（不因此报错，其余链接照常输出）；这类端点由 sing-box 格式输出，并写入 `tls.certificate`。
+
 后续通过导出器接口增加其他格式。
 
 ---

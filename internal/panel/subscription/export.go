@@ -15,6 +15,11 @@ import (
 
 var ErrWireGuardKeyPair = errors.New("WireGuard订阅密钥与已发布设备身份不一致；请保留原凭据，核对设备公钥及已发布配置")
 
+// errURIUnrepresentable marks an endpoint a URI cannot describe at all, so the
+// URI and Base64 formats leave it out instead of failing the whole list. It is
+// not exported: only this package decides what its own exporter can carry.
+var errURIUnrepresentable = errors.New("endpoint has no URI representation")
+
 func uri(endpoint Endpoint) (string, error) {
 	name := endpoint.NodeName + " · " + endpoint.Protocol
 	target := net.JoinHostPort(endpoint.Address, strconv.Itoa(endpoint.Port))
@@ -64,7 +69,10 @@ func uri(endpoint Endpoint) (string, error) {
 		return "ss://" + userinfo + "@" + target + "#" + url.PathEscape(name), nil
 	case "hysteria2", "tuic":
 		if endpoint.Settings.TrustedCAPEM != "" {
-			return "", errors.New("custom QUIC CA material requires sing-box subscription format")
+			// A hysteria2 or tuic URI has no field for a pinned CA, so the
+			// endpoint only survives in the sing-box format, which carries the
+			// certificate itself.
+			return "", errURIUnrepresentable
 		}
 		u := url.URL{Scheme: endpoint.Protocol, Host: target, Fragment: name, User: url.User(endpoint.Credential.Secret)}
 		if endpoint.Protocol == "tuic" {
@@ -237,6 +245,14 @@ func Export(endpoints []Endpoint, format string) ([]byte, error) {
 	uris := []string{}
 	for _, endpoint := range endpoints {
 		value, err := uri(endpoint)
+		if errors.Is(err, errURIUnrepresentable) {
+			// A URI list has nowhere to put the CA a Hysteria2 or TUIC endpoint
+			// pins, and one such endpoint used to fail the whole document: the
+			// token holder then lost every other link as well. Skipping it keeps
+			// the rest, and the sing-box format still lists it with its
+			// certificate.
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

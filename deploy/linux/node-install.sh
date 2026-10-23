@@ -156,20 +156,46 @@ case $(uname -m) in
   *) fail "不支持的架构：$(uname -m)";;
 esac
 
+# The official sing-box release ships a glibc build and a musl build per
+# architecture, and only the second one starts on Alpine: the plain archive is
+# linked against the glibc loader, so the kernel answers "not found" for a binary
+# that is present. install.sh names the archive the same way from its own copy of
+# this detection, and both scripts run on the same host. The loader is looked up
+# in the directory given as the first argument (default /lib), so the regression
+# test (deploy/linux/tests/core-asset-test.sh) can hand it a directory of its own.
+host_libc() {
+  local directory=${1:-/lib} loader
+  for loader in "$directory"/ld-musl-*.so.1; do
+    if [[ -e $loader ]]; then printf 'musl'; return; fi
+  done
+  printf 'glibc'
+}
+# The digest of the sing-box archive install.sh will download for this host:
+# every architecture and libc combination has its own official GitHub asset
+# digest of sing-box-1.14.3, and the musl archive is a different file from the
+# glibc one.
+singbox_digest() {
+  case $1:$2 in
+    amd64:glibc) printf 'e2bdf179c15a3652955dc44867e33ca0965c9c9b91b34267dcc5a5d639a5feee';;
+    arm64:glibc) printf '29dae24d76bea3bc62d07dd3e60cfc12003de7debbd6b768df9be9c68360174e';;
+    amd64:musl) printf '41fc81fd041134d4d7d850a928d7d2cde17a7d6563953f406b22d32a68bfab1f';;
+    arm64:musl) printf '12d6d67a4edf0dd54590865b1f4f79cd09ae043a02d648e9d1b5fccc8446ee07';;
+    *) fail "不支持的架构与 libc 组合：$1:$2";;
+  esac
+}
+
 # The core release is pinned here and install.sh verifies the archive before it
 # installs anything. Xray publishes a .dgst file next to its asset and install.sh
 # reads it itself; sing-box publishes no such file, so its asset digest is pinned
-# per architecture (official GitHub asset digests of sing-box-1.14.3).
+# per architecture and libc (official GitHub asset digests of sing-box-1.14.3).
 case $core in
   xray)
     core_version=26.3.27
     core_digest='';;
   sing-box)
     core_version=1.14.3
-    case $architecture in
-      amd64) core_digest=e2bdf179c15a3652955dc44867e33ca0965c9c9b91b34267dcc5a5d639a5feee;;
-      arm64) core_digest=29dae24d76bea3bc62d07dd3e60cfc12003de7debbd6b768df9be9c68360174e;;
-    esac;;
+    libc=$(host_libc)
+    core_digest=$(singbox_digest "$architecture" "$libc");;
 esac
 
 directory=''

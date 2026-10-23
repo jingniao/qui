@@ -287,12 +287,36 @@ ensure_machine_id() {
 host_architecture() {
   case $(uname -m) in x86_64) printf 'amd64';; aarch64|arm64) printf 'arm64';; *) fail 'Unsupported machine architecture.';; esac
 }
+# The official sing-box release ships a glibc build and a musl build per
+# architecture, and only the second one starts on Alpine: the plain archive is
+# linked against the glibc loader, so the kernel answers "not found" for a binary
+# that is present. The loader is looked up in the directory given as the first
+# argument (default /lib), so the regression test
+# (deploy/linux/tests/core-asset-test.sh) can hand it a directory of its own.
+host_libc() {
+  local directory=${1:-/lib} loader
+  for loader in "$directory"/ld-musl-*.so.1; do
+    if [[ -e $loader ]]; then printf 'musl'; return; fi
+  done
+  printf 'glibc'
+}
+# The Xray release is one static binary per architecture, whatever the libc.
+# sing-box depends on it, so its asset carries the -musl suffix on a musl host;
+# the caller may name the libc as the second argument, which the test does, and
+# the installer leaves it to host_libc.
 core_asset() {
-  case $(host_architecture):$1 in
+  local architecture libc
+  architecture=$(host_architecture)
+  libc=${2:-$(host_libc)}
+  case $architecture:$1 in
     amd64:xray) printf 'Xray-linux-64.zip';;
     arm64:xray) printf 'Xray-linux-arm64-v8a.zip';;
-    amd64:sing-box) printf 'sing-box-%s-linux-amd64.tar.gz' "$core_version";;
-    arm64:sing-box) printf 'sing-box-%s-linux-arm64.tar.gz' "$core_version";;
+    amd64:sing-box)
+      if [[ $libc == musl ]]; then printf 'sing-box-%s-linux-amd64-musl.tar.gz' "$core_version"
+      else printf 'sing-box-%s-linux-amd64.tar.gz' "$core_version"; fi;;
+    arm64:sing-box)
+      if [[ $libc == musl ]]; then printf 'sing-box-%s-linux-arm64-musl.tar.gz' "$core_version"
+      else printf 'sing-box-%s-linux-arm64.tar.gz' "$core_version"; fi;;
   esac
 }
 core_prefix() {

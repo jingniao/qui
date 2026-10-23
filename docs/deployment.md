@@ -106,7 +106,7 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.
 - **离线安装**：在 `node-install.sh` 后加 `--bundle <proxy-control-<版本>-linux-<架构>.tar.gz> --sums <SHA256SUMS>`（两个必须同时给出），脚本就改用本地文件而不访问 GitHub 下载归档。本地归档仍要按 `SHA256SUMS` 核对；Xray 核心仍从官方发布地址下载。
 
 - 命令由面板生成：版本是面板自身的版本，端口取自 `grpc_address`，摘要是面板 Web 证书信任锚的 SHA-256。只有**正式发布版本**（X.Y.Z）且面板以非开发模式运行时对话框才显示该命令，否则提示按下面的手工步骤安装。
-- `node-install.sh` 从 `https://github.com/jingniao/qui/releases/download/v<版本>/` 下载与面板**同版本**的归档和 `SHA256SUMS`，核对摘要后解压，再用归档里的 `deploy/linux/install.sh` 安装 Agent 与固定的官方核心（xray 26.3.27；sing-box 1.14.3，摘要按架构固定）。因此这台服务器必须能访问 GitHub，且**必须先有与该面板版本一致的发布**。
+- `node-install.sh` 从 `https://github.com/jingniao/qui/releases/download/v<版本>/` 下载与面板**同版本**的归档和 `SHA256SUMS`，核对摘要后解压，再用归档里的 `deploy/linux/install.sh` 安装 Agent 与固定的官方核心（xray 26.3.27；sing-box 1.14.3，摘要按架构与 libc 固定）。因此这台服务器必须能访问 GitHub，且**必须先有与该面板版本一致的发布**。
 - 面板证书信任按两种情况之一建立：先尝试用系统 CA 包（即随后会被安装为节点 CA 的那个文件，`--cacert` 指定，并带 `--no-insecure`）验证 `https://<面板>/install/ca.pem`，成功说明面板证书由公网 CA 签发（例如 Let's Encrypt，其中间证书会轮换），此时把系统 CA 包（`/etc/ssl/certs/ca-certificates.crt` 或 `/etc/pki/tls/certs/ca-bundle.crt`）安装为 `/etc/proxy-agent/tls/ca.crt`；失败则改用 `curl -k` 取回该文件，并要求它的 SHA-256 等于 `--ca-sha256`，不一致立即中止（可能中间人攻击，或面板地址/端口填错）。
 - 之后脚本把 `control_address` 与 `server_name` 写入 `/etc/proxy-agent/config.yaml`（保持原属主与权限），用一次性注册码登记，最后启用并启动 Agent：systemd 上是 `systemctl enable` + `start proxy-agent.service`，OpenRC 上是 `rc-update add proxy-agent default` + `rc-service proxy-agent start`。
 - 注册码只能用一次且会过期；它出现在新服务器的 shell 历史里，登记成功后请清理该历史。节点**登记成功前**可以重跑这条命令：会原地升级 Agent 并用新的注册码重新登记，登记要求本机能访问面板的 gRPC 端口（默认 9443）；已登记的主机再跑会被拒绝，升级用 `qui-update`。
@@ -149,7 +149,7 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
 - `--core` 只允许 `xray` 或 `sing-box`，且必须给出 `--core-version`；脚本对版本号只做宽松格式校验，能装到的仍是官方发布的稳定版本（面板的“核心版本”入口额外要求纯发布版本号，如 `26.3.27`）。
 - 归档 URL 只能来自官方发布前缀（`https://github.com/XTLS/Xray-core/releases/download/`、`https://github.com/SagerNet/sing-box/releases/download/`）。
 - SHA256 来自 `--core-sha256`，或对 Xray 自动读取同版本的 `.dgst` 文件；**没有可信摘要就不安装**。
-- 核心安装到 `/usr/local/lib/proxy-agent/<core>`，摘要记入安装记录；首次安装 sing-box 时脚本会把配置模板里的 `core_name`/`core_path` 改成 sing-box。
+- 核心安装到 `/usr/local/lib/proxy-agent/<core>`，摘要记入安装记录；首次安装 sing-box 时脚本会把配置模板里的 `core_name`/`core_path` 改成 sing-box。musl 主机（Alpine）装 sing-box 时取官方的 `sing-box-<版本>-linux-<架构>-musl.tar.gz`（glibc 归档在那里起不来），它有单独的固定摘要。
 - 脚本还会创建服务账号 `proxy-agent` 和目录 `/etc/proxy-agent`、`/etc/proxy-agent/tls`、`/var/lib/proxy-agent`，不启动服务。
 - 脚本还会创建 `/var/lib/proxy-agent/host-network`（0700，服务器强制出站的 helper 目录），安装并启用两个固定单元：`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）与监视 `desired.json` 的 `proxy-agent-host-network.path`。它们只维护一个 nft 表 `inet proxy_agent_source`，不改变主机上的其他规则。
 

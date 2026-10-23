@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-23（第五轮：qui-update 中断后的自动恢复与面板跨迁移降级，9.8）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-23（全部协议的真实流量验收，9.12；此前为第五轮 qui-update 中断恢复，9.8）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -538,3 +538,87 @@
 | 共存服务 | 通过 | 面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID（738/740、833/834）与测试前相同。第三台主机上 `komari-agent` 的运行时长持续增加（未重启），`cf-probe` 为 `started`，`xboard-node` 保持测试前的 `crashed`。 |
 
 最终状态：两个节点的强制出站字段都为空，与测试前相同。复测时上传和生成的临时文件都已删除。
+
+### 9.12 全部协议的真实流量验收（2026-10-23，v1.0.4）
+
+**范围与方法。**
+- 三台主机都运行 v1.0.4 发布版，核心为官方 Xray 26.3.27 与 sing-box 1.14.3。
+- 为本轮新建测试用户 `proto` 与节点组 `proto-test`（三个节点），一台设备持有全部 8 种协议的凭据。已有用户、凭据与配置都未改动。
+- 用户侧入站由面板主机上的真实客户端测试。客户端配置直接由该设备的 sing-box 格式订阅生成：每个端点一个本地 SOCKS 端口（TCP），以及两个 UDP 转发（到 `1.1.1.1:53` 与 `1.0.0.1:53`）。
+  - TCP 判定：经代理访问 `api.ipify.org` 得到的出口地址。
+  - UDP 判定：经代理向 Cloudflare 查询 `whoami.cloudflare`（CH TXT）得到的来源地址。
+- 中转出站在源节点上测试：在源节点建回环 SOCKS5 入站，默认出站指向被测的中转出站。在该节点上用 curl 测 TCP，用 Xray 客户端的 SOCKS5 UDP ASSOCIATE 测 UDP。
+- 认证：每个入站都用同一客户端、但把凭据全部换成错误值再测一遍（UUID、口令、SS 密钥、WireGuard 私钥）。
+- 发布一律用 `POST /api/v1/deployment-batches/relay`，面板按“先目标、后源”的顺序发布到三个节点（修订 54～71），全部 `success`。
+- 环境限制：面板主机的 ufw 只放行 35000～40000/tcp，`uk-node` 另放行同范围的 UDP，第三台主机在 NAT 后。本轮没有改动任何防火墙，所以凡是需要 UDP 包直接到达面板主机的组合都无法测试（见下文“未覆盖”）。
+
+**Xray 节点用户侧入站（`uk-node`，客户端在面板主机，经公网）。**
+
+| 入站 | TCP | UDP | 错误凭据 |
+|---|---|---|---|
+| SOCKS5 | 通过（出口 `uk-node`） | 通过 | 拒绝 |
+| HTTP | 通过 | 不适用（HTTP 无 UDP，客户端拒绝） | 拒绝 |
+| VLESS tcp / 无 TLS | 通过 | 通过 | 拒绝 |
+| VLESS tcp + TLS + `xtls-rprx-vision` | 通过 | 通过 | 拒绝 |
+| VLESS ws + TLS | 通过 | 通过 | 拒绝 |
+| VLESS gRPC（无 TLS） | 通过 | 通过 | 拒绝 |
+| Trojan ws + TLS | 通过 | 通过 | 拒绝 |
+| Trojan gRPC + TLS | 通过 | 通过 | 拒绝 |
+| Shadowsocks aes-256-gcm / aes-128-gcm / chacha20-ietf-poly1305 / xchacha20-ietf-poly1305 | 均通过 | 均通过 | 均拒绝 |
+| WireGuard（Xray 入站，设备地址 10.77.0.2/32 由面板分配） | 通过 | 通过 | 拒绝（错误私钥无法握手） |
+
+第一轮建的 `uk-trojan` 没有 `trusted_ca_pem`，订阅里不带它的自签证书，按订阅生成的客户端因此无法校验证书。这是该入站的配置，不是缺陷；它在第一轮用固定证书验证过。
+
+**中转出站（Xray → Xray，源 `uk-node`，目标 `us2-node` 的内部入站）。**
+
+| 出站 | TCP | UDP | 说明 |
+|---|---|---|---|
+| HTTP | 通过（出口 `us2-node`） | 不适用 | — |
+| SOCKS5 | 通过 | 未覆盖 | SOCKS5 UDP 需要 UDP 包直达 `us2-node`，被面板主机防火墙丢弃 |
+| Trojan ws + TLS（自动自签证书，固定信任） | 通过 | 通过 | UDP 封装在 TCP 内 |
+| VLESS gRPC + TLS | 通过 | 通过 | 同上 |
+| Shadowsocks xchacha20-ietf-poly1305 | 通过 | 未覆盖 | 同 SOCKS5 |
+| WireGuard（第三台主机 → `uk-node` 的 WireGuard 中转入站） | 通过（出口 `uk-node`） | 通过 | `us2-node → uk-node` 被拒绝：`relay outbound would create a routing loop`（已有 `uk → us2` 中转），符合预期 |
+| SOCKS5（第三台主机 → `uk-node`） | 通过 | 通过 | 补测 SOCKS5 的 UDP 出站 |
+| Shadowsocks（第三台主机 → `uk-node`，即链 1 的第一跳） | 通过 | 通过 | 该内部入站属于链 1，流量按链继续到 `us2-node` |
+
+源节点上错误口令的 SOCKS5 连接全部被拒。
+
+**分流与代理链。**
+- UDP 分流：`uk-node` 上的规则把发往 `1.0.0.1` 的 UDP 送到 VLESS gRPC 中转，发往 `1.1.1.1` 的 UDP 仍直连。
+  - Xray 上：经 WireGuard 与 SOCKS5 中转进入 `uk-node` 的 UDP 命中该规则，从 `us2-node` 出口，说明节点规则也作用于中转进来的流量。用户侧入站的 UDP 也命中了该规则（访问记录为 `udp`、`Proxy`），但那时规则还指向 SOCKS5 中转，包被面板主机防火墙丢弃；改为 VLESS gRPC 后没有再从面板主机跑这一项。
+  - sing-box 上：经 12 个可承载 UDP 的用户侧入站（SOCKS5 除外，见下文）发起的查询都从 `us2-node` 出口。
+- 策略优先于入站默认出站：第三台主机的回环入站默认出站指向中转，但命中链规则的目标（`api.ipify.org`、`1.1.1.1`）仍走代理链。
+- 新建第二条 A→B→C 链 `ALP-UK-US2-tj-vlessws`：第三台主机 → Trojan gRPC + TLS → `uk-node` → VLESS ws + TLS → `us2-node`，`supportUdp=true`。经该链的 TCP（`icanhazip.com`，从 `us2-node` 的 IPv6 出口）与 UDP（`1.1.1.1`）都从 `us2-node` 出口。原有链 `ALP-UK-US2`（SS → VLESS）同时正常。
+- 访问记录：以上流量都按用户、设备、入站协议、网络（tcp/udp）、动作与出站协议记录。WireGuard 入站的 TCP 记录为目标 IP（客户端自行解析域名），符合“无法确定域名时记录目标 IP”。
+
+**sing-box 节点。** 先把第三台主机、再把 `uk-node` 临时切换为 sing-box 1.14.3。做法：停 Agent，改 `config.yaml` 的 `core_name`/`core_path`，再启动；Agent 用新核心重新渲染当前修订后，面板发布新修订。
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 能力校验 | 通过 | 在 sing-box 节点上保存 WireGuard 入站，以及在 Xray 节点上保存 Hysteria2 入站，都返回 400，并说明该核心不支持此协议 |
+| 用户侧入站（`uk-node`） | 通过 | 与 Xray 相同的入站（SOCKS5、HTTP、各种 VLESS/Trojan/SS），加上 **Hysteria2** 与 **TUIC**：TCP 全部从 `uk-node` 出口；除 HTTP 与 SOCKS5 外 UDP 全部通过；`1.0.0.1` 的 UDP 分流从 `us2-node` 出口；15 个入站都拒绝错误凭据。旧 `uk-trojan` 与 Xray 时一样因订阅不带证书而失败 |
+| 出站（`uk-node` sing-box → `us2-node` Xray） | 通过 | HTTP、SOCKS5、Trojan ws、VLESS gRPC + TLS、SS 的 TCP 都从 `us2-node` 出口；Trojan ws 与 VLESS gRPC 的 UDP 通过 |
+| Hysteria2 / TUIC 中转（第三台主机 sing-box → `uk-node` sing-box） | 通过 | TCP 与 UDP（`1.1.1.2` 的 whoami）都从 `uk-node` 出口 |
+| WireGuard 出站（第三台主机 sing-box → `uk-node` 的 Xray WireGuard 入站） | 通过 | TCP 从 `uk-node` 出口，UDP 经 `uk-node` 的 UDP 规则从 `us2-node` 出口 |
+| 两条代理链（sing-box 入口） | 通过 | 链 1 TCP、链 2 TCP 与 UDP 都从 `us2-node` 出口 |
+| sing-box SOCKS5 入站的 UDP | 未完全覆盖 | 在 `uk-node` 本机通过（TCP 与 UDP 都从 `uk-node` 出口）。从面板主机或第三台主机远程访问时 UDP 失败，而同一路径在 Xray 上通过。最可能的原因是 sing-box 的 UDP ASSOCIATE 使用另一个 UDP 端口，不在 `uk-node` 防火墙放行的 35000～40000 范围内。没有抓到该端口，所以记为环境所限，既不判为通过，也不判为缺陷 |
+
+**发现的问题（已在主分支修复，尚未进入发布）。**
+
+| # | 问题 | 影响 | 修复与验证 |
+|---|---|---|---|
+| 1 | `install.sh --core sing-box` 与 `node-install.sh --core sing-box` 在 Alpine（musl）上安装 `sing-box-<版本>-linux-amd64.tar.gz`。该构建动态链接 glibc，在 Alpine 上执行报 `not found`。官方还发布了 `linux-amd64-musl`（以及 `-glibc`）归档，但脚本只认前者，固定摘要也只有前者 | **Alpine 节点无法使用 sing-box**。本轮在第三台主机上改用官方 musl 归档，SHA-256 与 GitHub 资产摘要 `41fc81fd…bab1f` 一致，之后一切正常。Xray 不受影响 | 两个脚本按 `/lib/ld-musl-*.so.1` 判断 libc，musl 主机使用 `-musl` 归档；`node-install.sh` 按架构与 libc 固定四个官方摘要。新增 `deploy/linux/tests/core-asset-test.sh`（17 项，无需 root，CI 中运行），在 `uk-node` 与第三台主机上均 17/17。用修复后的函数在真实主机上选择并下载归档：`uk-node` 选 `linux-amd64`、第三台主机选 `linux-amd64-musl`，摘要都与固定值一致，解出的 sing-box 都能运行（只在临时目录，未安装） |
+| 2 | 只要 Hysteria2 或 TUIC 入站设置了 `trusted_ca_pem`，该用户的整个 URI/Base64 订阅就返回 400 `Subscription unavailable`。这是 `subscription/export.go` 的有意行为（URI 无法携带证书），但错误信息不说明原因，也连带让其他协议的链接不可用 | 用户只能改用 sing-box 格式订阅。sing-box 格式正常，可携带证书 | URI/Base64 只省略这类端点（URI 没有放证书的字段），其余链接照常输出；sing-box 格式不变，仍带证书。单元测试 `TestURIFormatsOmitQUICEndpointWithPinnedCA` 覆盖省略、无固定证书的 Hysteria2 照常输出、全部被省略时返回空列表而非错误，以及 sing-box 格式保留证书。未在实机上复测：需要包含修复的面板发布 |
+
+**未覆盖。**
+- SOCKS5 与 Shadowsocks 的 UDP 中转到 `us2-node`，以及 sing-box 的 WireGuard 出站指向 `us2-node`：都需要面板主机放行 UDP。前两者已改在 `uk-node` 方向上验证。
+- sing-box SOCKS5 入站的远程 UDP：见上表。
+- arm64：仍无主机。
+
+**恢复。**
+- 两台主机都恢复 Xray（原 `config.yaml` 原样复制回去），本轮下载的 sing-box 二进制已删除。
+- 测试用户、节点组、全部入站/出站/链/规则都已删除，面板对象数恢复到测试前：入站 8、出站 2、链 1、规则 4。之后发布了修订 69～71。
+- 恢复后，原链 `ALP-UK-US2` 的 `api.ipify.org` 从 `us2-node` 出口（23.254.158.3），直连为 113.29.231.218。
+- 共存服务：`xboard-node`、`cf-probe` 的 PID 在面板主机与 `uk-node` 上与测试前相同（738/740、833/834），没有失败的单元。第三台主机的 `komari-agent` 重启计数为 0、运行时长持续增加，`xboard-node` 保持测试前的 `crashed`。
+- 三台主机上的临时脚本与凭据文件都已删除。

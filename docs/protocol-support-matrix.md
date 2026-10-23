@@ -77,7 +77,7 @@
 - 出口组主备/轮询/延迟优先与递归备用、健康失败不隐式 Direct：源码已有，运行待验收。
 - A→B、A→B→C 环路/跳数/缺内部入口/协议-UDP 不匹配/端口冲突校验、先出口后入口发布、回滚反向：源码已有，运行待验收。
 - 订阅授权组动态展开、隐藏中转、撤销凭据、未成功发布过滤与三种导出格式：源码已有，运行待验收。
-- Xray WireGuard TUN 入站 UDP 端到端、A→B/A→B→C 数据面：受控环境实测待做。
+- ~~Xray WireGuard TUN 入站 UDP 端到端、A→B/A→B→C 数据面：受控环境实测待做。~~ 已实测：全部协议的入站、出站、认证、UDP、分流与两条 A→B→C 链见[验收矩阵](v1-acceptance.md) 9.12（Xray 与 sing-box 都覆盖）。
 - 完整系统 TUN 按 AGENTS 第 36 节延后，不冒充已交付。
 - 域名级访问记录已改由上游输出生成（Xray access log、sing-box 核心日志）：Phase 7 完成，运行验收仍待做。
 
@@ -89,3 +89,4 @@
 - 核心能力随版本不同：Agent 在运行时探测（Xray 读 `version` 并探测统计/在线统计；sing-box 读 `version` 的 `Tags:` 并探测 Clash API），缺失能力上报为不可用而不是拒绝运行（D1）。
 - 后续升级由面板“系统 → 核心版本”录入 `组件 / 稳定版本号 / 官方 GitHub 资源 URL / 归档 SHA-256`（Phase 8，`CoreUpdateRequest` schema 2），节点侧再次校验摘要后切换，健康失败回滚；核心不再使用签名目录，签名目录只服务 Agent 自更新。
 - 本表以 Xray 26.3.27 与 sing-box 1.14.3 为基准版本；换成其他稳定版本时需重新核对本表。
+- Alpine（musl）节点装 sing-box 时 `install.sh` 与 `node-install.sh` 取官方的 `-musl` 归档（glibc 归档在那里起不来），摘要按架构与 libc 各自固定；Xray 只发静态二进制，不分 libc。

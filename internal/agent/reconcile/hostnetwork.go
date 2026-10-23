@@ -101,15 +101,21 @@ func (r *Reconciler) syncHostNetwork(ctx context.Context, network desiredstate.N
 	}
 	if !configured {
 		// Nothing is configured, so the helper is only needed when the
-		// retained desired file still enforces a family. Writing a clear
-		// request to a helper that is missing or broken would fail every
-		// apply on a node that never used the feature.
+		// retained desired file still enforces a family, or when it is a clear
+		// request the helper never confirmed: that request may have been
+		// published while the helper was not running, so an earlier table can
+		// still be in force. Writing a clear request to a helper that is
+		// missing or broken would fail every apply on a node that never used
+		// the feature, which is why an absent file stays a no-op.
 		retained, err := hostnet.ReadDesired(directory)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			return nil
 		case err == nil && retained.Clear():
-			return nil
+			status, statusErr := hostnet.ReadStatus(directory)
+			if statusErr == nil && status.ID == retained.ID && status.OK {
+				return nil
+			}
 		}
 	}
 	// A fresh context: the helper must still be driven to the state of the

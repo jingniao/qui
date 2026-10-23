@@ -477,4 +477,34 @@
 - `uk-node`：`proxy-agent-host-network.service` 自 2026-10-22 17:52 起处于 `failed`。
   - 来源：第一轮验收里故意用文档地址 `2001:db8::5` 做的强制出站失败测试。连续失败触发了 systemd 的启动频率限制，path 单元以 `unit-start-limit-hit` 停止，17:53 写入的“清除”请求（四个字段全空）因此没有被执行，`status.json` 一直停留在旧请求的失败结果上。18:03 的重新安装重新启用了 path 单元。
   - 处理：期望状态是清除（不加任何规则），所以执行它不会改变网络。`reset-failed` 后手动运行一次 oneshot 单元（等同开机时的重放），`status.json` 变为当前请求 `ok:true`，nft 表仍不存在。之后两台 systemd 主机都没有失败的单元。
-  - **遗留问题（未修复）**：强制出站 helper 在短时间内连续失败时，systemd 会停用 path 单元，之后的期望状态在下次安装或重启前都不会被执行。需要单独修复（例如给 oneshot 单元设置合适的 `StartLimitIntervalSec`/`StartLimitBurst`，或让 Agent 发现 helper 没有回应时报告）。
+  - **遗留问题**：强制出站 helper 在短时间内连续失败时，systemd 会停用 path 单元，之后的期望状态在下次安装或重启前都不会被执行。已在发布前修复，见 9.10。
+
+### 9.10 强制出站 helper 的启动频率限制（2026-10-23，发布前）
+
+**原因。**
+- systemd 默认每个单元 10 秒内最多启动 5 次，成功和失败都计数。path 单元每次发布触发一次 oneshot 单元；helper 连续失败几次后，path 单元以 `unit-start-limit-hit` 停止，之后写入的 `desired.json` 都不会被执行。
+- Agent 在没有配置强制出站时，只要保留的 `desired.json` 已经是“清除”请求就直接跳过。如果这个清除请求从未被执行，之后的清除版本也不会再到达 helper，旧的 nft 表可能一直生效到重启。
+- OpenRC 不受影响：watcher 吞掉 helper 的失败，`supervise-daemon` 无限重启。
+
+**修复。**
+- `proxy-agent-host-network.service` 的 `[Unit]` 增加 `StartLimitIntervalSec=0`。触发频率由 Agent 自己的重试决定。
+- `reconcile/hostnetwork.go`：只有 `status.json` 确认同一 `id` 的清除请求 `ok:true` 时才跳过；否则重新发布清除请求并等待结果。从未使用该功能（没有 `desired.json`）的节点行为不变。
+- `install.sh`（systemd）：oneshot 单元处于 `failed` 时执行 `reset-failed`，并用 `start --no-block` 重放一次保留的文件（相当于开机，也相当于 OpenRC 重启 watcher）。helper 失败不会让安装失败。
+- `deploy/openrc/proxy-agent-host-network`：修正 `use logge` → `use logger` 与一处注释拼写。
+- 新增回归测试 `deploy/linux/tests/host-network-test.sh`，并加入 CI 的 “Deploy script checks”。
+  - 它在 `/run` 下用仓库里的真实单元文件（systemd，完整保留 `[Unit]`）或真实 watcher（OpenRC），配合一个假 helper，按 Agent 的方式发布。
+  - 先发布 8 个失败请求，再发布一个清除请求；然后发布一个失败请求后立刻发布清除请求。
+  - 不接触真实单元、`/var/lib/proxy-agent` 或 nft。
+
+**结果。**
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| Go 检查 | 通过 | `gofmt -l` 无输出；`go vet`（Windows 与 `GOOS=linux`）通过；`go test ./internal/agent/... ./cmd/agent/` 全部 `ok`。新测试 `TestSyncHostNetworkRepublishesAClearTheHelperNeverConfirmed` 覆盖四种情况：没有状态、同一 `id` 失败、其他 `id` 成功、没有 helper。恢复旧的跳过逻辑后，这四种情况都失败。 |
+| 回归测试能复现问题（v1.0.3 单元，`uk-node`） | 通过（按预期失败） | 0/4。`fail-6`～`fail-8` 没有回应，helper 只运行 5 次，path 单元停止，清除请求没有被执行。 |
+| 修复后（systemd 257，`uk-node` 与面板主机） | 通过 | 两台主机都是 4/4：清除请求被执行，path 单元仍在监视，helper 每次发布运行一次，最后一个请求生效。 |
+| OpenRC（第三台主机，旧版与新版 watcher） | 通过 | 都是 4/4，8 次失败后 watcher 仍在运行。 |
+| 单元文件 | 通过 | `systemd-analyze verify` 无输出；加载后 `StartLimitIntervalUSec=0`。 |
+| `install.sh` 重放 | 通过 | 在一个必然失败的临时单元上运行同一段代码：`failed` 单元被重新执行一次（运行次数 1 → 2），代码段退出码 0。 |
+| 清理与共存服务 | 通过 | 测试单元、`/run/qui-hn-test.*` 与上传的文件都已删除，没有失败的单元。面板主机与 `uk-node` 上 `proxy-agent`、`proxy-panel`、`xboard-node`、`cf-probe` 的 PID 与测试前相同；第三台主机上 `komari-agent`、`cf-probe`、`proxy-agent`、`proxy-agent-host-network` 的运行时长持续增加，`xboard-node` 保持测试前的 `crashed`。 |
+| 真实 Agent 端到端（发布强制出站失败后再清除） | 跳过 | 修复尚未发布；三台主机仍运行 v1.0.3。 |

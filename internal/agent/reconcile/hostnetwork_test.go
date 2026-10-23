@@ -38,6 +38,22 @@ func fakeHostNetworkDial(t *testing.T, dial func(ctx context.Context, network, a
 	t.Cleanup(func() { hostNetworkDial = previous })
 }
 
+// writeFakeHostNetworkStatus publishes one answer of the fake helper. A replace
+// that a concurrent reader blocks is retried: on Windows an open file cannot be
+// renamed over, and an answer lost that way would look like a helper that never
+// reported. The packaged helper runs in its own process on Linux, where a rename
+// replaces an open file.
+func writeFakeHostNetworkStatus(directory string, status hostnet.Status) error {
+	var err error
+	for attempt := 0; attempt < 100; attempt++ {
+		if err = hostnet.WriteStatus(directory, status); err == nil {
+			return nil
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return err
+}
+
 // startFakeHostNetworkHelper answers desired files the way the packaged oneshot
 // unit does: it waits for a new id and publishes a status for that id.
 func startFakeHostNetworkHelper(t *testing.T, directory string, answer func(hostnet.Desired) (bool, string)) {
@@ -56,7 +72,7 @@ func startFakeHostNetworkHelper(t *testing.T, directory string, answer func(host
 			if desired, err := hostnet.ReadDesired(directory); err == nil && desired.ID != seen {
 				seen = desired.ID
 				ok, message := answer(desired)
-				if err := hostnet.WriteStatus(directory, hostnet.Status{ID: desired.ID, OK: ok, Error: message}); err != nil {
+				if err := writeFakeHostNetworkStatus(directory, hostnet.Status{ID: desired.ID, OK: ok, Error: message}); err != nil {
 					return
 				}
 			}
@@ -304,16 +320,22 @@ func TestSyncHostNetworkClearsTheTableWhenNothingIsConfigured(t *testing.T) {
 }
 
 // TestSyncHostNetworkLeavesTheHelperAloneWhenNothingIsEnforced pins the nodes that
-// never used the feature: with nothing configured, an absent or already empty
-// retained desired file means there is nothing to clear, so the helper is neither
-// written to nor waited for and a missing or broken helper cannot fail the apply.
+// never used the feature: with nothing configured, an absent retained desired file
+// means there is nothing to clear, and a retained clear request the helper confirmed
+// is already in force, so the helper is neither written to nor waited for and a
+// missing or broken helper cannot fail the apply.
 func TestSyncHostNetworkLeavesTheHelperAloneWhenNothingIsEnforced(t *testing.T) {
 	cases := []struct {
 		name   string
 		retain *hostnet.Desired
+		status *hostnet.Status
 	}{
 		{name: "no retained desired file"},
-		{name: "retained clear desired file", retain: &hostnet.Desired{ID: "previous"}},
+		{
+			name:   "retained clear desired file",
+			retain: &hostnet.Desired{ID: "previous"},
+			status: &hostnet.Status{ID: "previous", OK: true},
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -327,6 +349,11 @@ func TestSyncHostNetworkLeavesTheHelperAloneWhenNothingIsEnforced(t *testing.T) 
 			})
 			if test.retain != nil {
 				if err := hostnet.WriteDesired(directory, *test.retain); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.status != nil {
+				if err := hostnet.WriteStatus(directory, *test.status); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -345,6 +372,70 @@ func TestSyncHostNetworkLeavesTheHelperAloneWhenNothingIsEnforced(t *testing.T) 
 			}
 			if desired != *test.retain {
 				t.Fatalf("an unconfigured revision rewrote the helper input: %+v", desired)
+			}
+		})
+	}
+}
+
+// TestSyncHostNetworkRepublishesAClearTheHelperNeverConfirmed pins the other half:
+// a retained clear request without a success status of its own id may have been
+// published while the helper was not running, so it proves nothing about the table
+// and the Agent publishes the clear again and waits for that answer. The fake
+// helper answers the retained request itself as failed, so the seeded status cannot
+// turn into a success before the sync reads it.
+func TestSyncHostNetworkRepublishesAClearTheHelperNeverConfirmed(t *testing.T) {
+	cases := []struct {
+		name   string
+		status *hostnet.Status
+		helper bool
+	}{
+		{name: "no status file", helper: true},
+		{name: "the same id failed", status: &hostnet.Status{ID: "previous", OK: false, Error: "test failure"}, helper: true},
+		{name: "another id succeeded", status: &hostnet.Status{ID: "earlier", OK: true}, helper: true},
+		{name: "no helper running"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			manager := syncingManager(t, directory, "127.0.0.1:9443")
+			allowHostNetwork(t)
+			shortHostNetworkWait(t)
+			fakeHostNetworkDial(t, func(context.Context, string, string) error {
+				t.Fatal("a clear revision dialed the panel")
+				return nil
+			})
+			if err := hostnet.WriteDesired(directory, hostnet.Desired{ID: "previous"}); err != nil {
+				t.Fatal(err)
+			}
+			if test.status != nil {
+				if err := hostnet.WriteStatus(directory, *test.status); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.helper {
+				startFakeHostNetworkHelper(t, directory, func(desired hostnet.Desired) (bool, string) {
+					if desired.ID == "previous" {
+						return false, "test failure"
+					}
+					return true, ""
+				})
+			}
+			err := manager.syncHostNetwork(context.Background(), desiredstate.Network{})
+			if !test.helper {
+				if err == nil || !strings.Contains(err.Error(), "did not report") {
+					t.Fatalf("a clear nobody applied was accepted: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			desired, readErr := hostnet.ReadDesired(directory)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if desired.ID == "" || desired.ID == "previous" || !desired.Clear() {
+				t.Fatalf("an unconfirmed clear was not published again: %+v", desired)
 			}
 		})
 	}

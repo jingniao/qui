@@ -32,6 +32,7 @@
 - 第 4.3、30.2 节（2026-10-22）：节点 Agent 除 systemd 外正式支持 OpenRC（Alpine 3.19+，OpenRC ≥ 0.45，含无 systemd 的 LXC 容器）。脚本自动识别初始化系统，服务定义在 `deploy/openrc/`。强制出站 helper 在 OpenRC 上由 `inotifyd` watcher 服务触发；代理核心以 `Pdeathsig` 启动，Agent 被杀时核心随之退出；缺少 `/etc/machine-id` 时由安装脚本创建。面板仍只支持 systemd。
 - 第 30 节（2026-10-23，v1.0.2）：`qui-update` 在替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，更新后要求服务 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照（面板还恢复更新前的数据库）并启动旧版本。新增离线选项 `--bundle/--sums`。`install.sh` 失败时不再留下 `.installing` 临时文件与暂存目录，systemd 主机缺少 `unzip` 时自动安装；面板的一键安装命令在 Debian/Ubuntu 缺少 curl 时先用 apt 安装。
 - 第 30 节（2026-10-23，v1.0.3）：`qui-update` 在快照里写入进度日志（`prepared`/`started`/`committed`/`restored`，原子写入并落盘）与它自己的副本；Ctrl-C、SIGTERM、SSH 断线时按日志自动回滚，`kill -9`、断电后由开机单元 `proxycontrol-update-recovery`（systemd oneshot / OpenRC 初始化脚本，排在 Agent、面板与强制出站单元之前）完成回滚，下一次运行 `qui-update` 也会先完成未结束的恢复；同时只允许一个 `qui-update`。面板数据库备份先写 `.partial`、校验后改名；回滚覆盖数据库前把新版本的数据库保留为 `failed-update-*.db`。面板新增只读的 `--check-database FILE`（退出码 0/3/4/5），`qui-update` 用目标版本预检数据库：降级跨过迁移时不做任何替换并列出可用备份；新增 `--database FILE`，把面板降级与对应的 `pre-update-*` 数据库一起安装（第 30.1、31 节）。
+- 第 30.2 节（2026-10-23，v1.0.4）：`proxy-agent-host-network.service` 设置 `StartLimitIntervalSec=0`，helper 连续失败不再让 systemd 停用 path 单元；Agent 只有在 `status.json` 确认同一请求成功后才把保留的“清除”请求视为已生效，否则重新发布；`install.sh` 发现 oneshot 单元处于 `failed` 时重放一次保留的请求。新增回归测试 `deploy/linux/tests/host-network-test.sh`。
 
 **V1.0（2026-08-20）**：初版，完整需求与架构约束。
 

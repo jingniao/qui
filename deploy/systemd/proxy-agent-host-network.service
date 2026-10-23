@@ -2,6 +2,14 @@
 Description=Proxy Control node agent enforced outbound source
 After=network-online.target
 Wants=network-online.target
+# Every start of this unit counts against systemd's default start rate limit (5
+# starts in 10 s), whether it succeeded or not. The path unit fires this oneshot
+# once per publish of desired.json, so the Agent's own retries are what bounds
+# the rate; with the default limit a few quick failures stop the path unit with
+# unit-start-limit-hit, and every later publish - including a clear request - is
+# ignored until a reboot. StartLimitIntervalSec=0 in [Unit] disables the limit
+# and is supported since systemd 230, which every supported release ships.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

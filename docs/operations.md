@@ -197,6 +197,8 @@ OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监�
 
 `desired.json` 是 Agent 下发的目标状态（含随机 `id`），`status.json` 是 helper 对同一 `id` 的结果；两者不一致说明 helper 未安装或尚未处理完。
 
+helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartLimitIntervalSec=0`，不受 systemd 默认的启动频率限制（10 秒内 5 次），path 单元因此不会以 `unit-start-limit-hit` 停止；OpenRC 的 watcher 不会因 helper 失败而退出。Agent 只有在 `status.json` 确认同一 `id` 的“清除”请求成功后，才把保留的清除请求视为已生效，否则重新发布并等待结果。早于此修复的版本可能已经停在这种状态（`systemctl status proxy-agent-host-network.path` 显示 `unit-start-limit-hit`）：升级时 `install.sh` 发现 oneshot 单元处于 `failed` 会 `reset-failed` 并重放一次保留的文件；不升级时可手动执行 `systemctl reset-failed proxy-agent-host-network.service proxy-agent-host-network.path && systemctl start proxy-agent-host-network.path proxy-agent-host-network.service`。
+
 ## 10. 核心与 Agent 更新
 
 **代理核心（面板驱动，直接 URL + SHA-256）**：系统 → 核心版本里填 `组件 / 稳定版本号 / 官方 GitHub 发布资源 URL / 归档 SHA-256`。面板在入队时校验组件、纯发布版本号、摘要格式、URL 前缀和资源名与节点平台是否匹配（`internal/panel/deployment/core_updates.go`）。Agent 侧再次校验：URL 只接受官方前缀，重定向最多 3 跳且只允许 `github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`；先校验归档摘要再解包；解包拒绝符号链接、路径穿越和多余候选；版本不匹配或健康检查失败时回滚到上一镜像（`internal/agent/updater/core_source.go`、`internal/agent/control/core_updates.go`）。排队、状态和结果见 `GET /api/v1/core-updates`；卡住的任务在节点重连时关闭，Owner 也可用 `POST /api/v1/core-updates/{id}/clear` 关闭。旧任务（无 URL）按 `failed_closed/history_invalid` 关闭。

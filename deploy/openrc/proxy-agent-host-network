@@ -5,7 +5,7 @@
 # (deploy/systemd/proxy-agent-host-network.service and .path): the path unit
 # fires the oneshot whenever the Agent publishes desired.json, and the oneshot
 # applies the file at boot. OpenRC has no path units, so the same job is one
-# supervised service that runs the packaged watche
+# supervised service that runs the packaged watcher
 # (/usr/local/lib/proxy-agent/host-network-watch), which applies the retained
 # file once at start and then waits for changes with busybox inotifyd.
 #
@@ -34,5 +34,5 @@ error_logger="logger -t proxy-agent-host-network -p daemon.err"
 
 depend() {
   need net
-  use logge
+  use logger
 }

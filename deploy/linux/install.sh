@@ -543,6 +543,16 @@ if [[ -n $host_network_service_digest ]]; then
     # every call names the units.
     systemctl enable "${host_network_path##*/}" "${host_network_service##*/}"
     systemctl start "${host_network_path##*/}"
+    # An installation upgraded from a release without the start-limit fix can
+    # have the oneshot unit in the failed state, so nothing has been applied
+    # since the path unit hit its limit. Replaying the retained file once is what
+    # a boot does (and what restarting the OpenRC watcher does) and the outcome
+    # goes to status.json for the Agent. --no-block keeps a helper failure - a
+    # rule the host rejects, for instance - from failing this install.
+    if systemctl is-failed --quiet "${host_network_service##*/}"; then
+      systemctl reset-failed "${host_network_service##*/}"
+      systemctl start --no-block "${host_network_service##*/}"
+    fi
   else
     # On OpenRC the watcher is one supervised service and there is no path unit:
     # it has to be in the default runlevel so a boot reapplies the retained rule,

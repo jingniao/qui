@@ -56,7 +56,9 @@ jobs:
       # and they also have to run under busybox ash on Alpine. update-test.sh
       # exercises the update and recovery paths under QUI_UPDATE_TEST_ROOT and only
       # needs the scripts, so its absence is not a failure while it lives in a
-      # separate change.
+      # separate change. host-network-test.sh runs the enforced-source units of the
+      # release against a fake helper below /run and skips itself where neither
+      # systemd nor OpenRC with busybox inotifyd is available.
       - name: Deploy script checks
         run: |
           set -euo pipefail
@@ -68,6 +70,10 @@ jobs:
           if [ -f deploy/linux/tests/update-test.sh ]; then
             bash -n -- deploy/linux/tests/update-test.sh
             sudo bash deploy/linux/tests/update-test.sh
+          fi
+          if [ -f deploy/linux/tests/host-network-test.sh ]; then
+            bash -n -- deploy/linux/tests/host-network-test.sh
+            sudo bash deploy/linux/tests/host-network-test.sh
           fi
 
 

@@ -3,7 +3,7 @@
 **文档版本：** V1.1  
 **编制日期：** 2026 年 8 月 20 日  
 **本次修订：** 2026-10-17（Phase 14，按轻量重构计划决策 D1–D5 更新）  
-**项目状态：** 核心业务已实现，按轻量重构计划收敛完成；v1.0.0 已于 2026-10 作为 GitHub 发布出版，v1.0.1（节点 Agent 支持 Alpine/OpenRC 与实机验收修复）于 2026-10-23 发布，一键安装与 qui-update 的失败处理与自动回滚于 2026-10-23 作为 v1.0.2 发布；功能与交付验收阶段（状态核对：2026-10-23；三台主机实机验收进行中，arm64 未验证，V1 未完成）  
+**项目状态：** 核心业务已实现，按轻量重构计划收敛完成；v1.0.0 已于 2026-10 作为 GitHub 发布出版，v1.0.1（节点 Agent 支持 Alpine/OpenRC 与实机验收修复）于 2026-10-23 发布，一键安装与 qui-update 的失败处理与自动回滚于 2026-10-23 作为 v1.0.2 发布，qui-update 的中断自动恢复（含断电）与面板跨迁移降级已提交、待发布；功能与交付验收阶段（状态核对：2026-10-23；三台主机实机验收进行中，arm64 未验证，V1 未完成）  
 **目标用户规模：** 1～10 名内部用户  
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
@@ -31,6 +31,7 @@
 - 文档版本号由 V1.0 升为 V1.1；文档中“第 5.5 步”的表述改为“Phase 14”。
 - 第 4.3、30.2 节（2026-10-22）：节点 Agent 除 systemd 外正式支持 OpenRC（Alpine 3.19+，OpenRC ≥ 0.45，含无 systemd 的 LXC 容器）。脚本自动识别初始化系统，服务定义在 `deploy/openrc/`。强制出站 helper 在 OpenRC 上由 `inotifyd` watcher 服务触发；代理核心以 `Pdeathsig` 启动，Agent 被杀时核心随之退出；缺少 `/etc/machine-id` 时由安装脚本创建。面板仍只支持 systemd。
 - 第 30 节（2026-10-23，v1.0.2）：`qui-update` 在替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，更新后要求服务 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照（面板还恢复更新前的数据库）并启动旧版本。新增离线选项 `--bundle/--sums`。`install.sh` 失败时不再留下 `.installing` 临时文件与暂存目录，systemd 主机缺少 `unzip` 时自动安装；面板的一键安装命令在 Debian/Ubuntu 缺少 curl 时先用 apt 安装。
+- 第 30 节（2026-10-23，待发布）：`qui-update` 在快照里写入进度日志（`prepared`/`started`/`committed`/`restored`，原子写入并落盘）与它自己的副本；Ctrl-C、SIGTERM、SSH 断线时按日志自动回滚，`kill -9`、断电后由开机单元 `proxycontrol-update-recovery`（systemd oneshot / OpenRC 初始化脚本，排在 Agent、面板与强制出站单元之前）完成回滚，下一次运行 `qui-update` 也会先完成未结束的恢复；同时只允许一个 `qui-update`。面板数据库备份先写 `.partial`、校验后改名；回滚覆盖数据库前把新版本的数据库保留为 `failed-update-*.db`。面板新增只读的 `--check-database FILE`（退出码 0/3/4/5），`qui-update` 用目标版本预检数据库：降级跨过迁移时不做任何替换并列出可用备份；新增 `--database FILE`，把面板降级与对应的 `pre-update-*` 数据库一起安装（第 30.1、31 节）。
 
 **V1.0（2026-08-20）**：初版，完整需求与架构约束。
 
@@ -1782,6 +1783,8 @@ Agent 上报消息包括：
 ```
 
 说明：`/var/lib/proxy-panel/` 下实际还有面板自己的节点 CA 目录 `identity/`（`node_identity_directory`）。日志不写文件：两个程序都写 stdout，由 systemd 收进 journald（`journalctl -u proxy-panel`）。
+
+更新相关（面板与节点主机共用）：`backups/` 里有 `qui-update` 的更新前备份 `pre-update-<版本>-<时间>.db` 与回滚时保留的 `failed-update-<版本>-<时间>.db`；`/var/lib/proxycontrol-install/`（root 0700）保存安装记录、`operation.lock`、`update.lock`，更新进行中时还有快照 `rollback.*/`（被替换的文件、`updater`、`service.sh`、进度日志 `journal`）。开机恢复由 `/usr/local/lib/proxycontrol/update-recovery` 与 `proxycontrol-update-recovery.service`（OpenRC：`/etc/init.d/proxycontrol-update-recovery`）完成，它们排在 Agent、面板与强制出站单元之前，不记入安装记录。跨迁移降级面板用 `qui-update --version X.Y.Z --database <pre-update-X.Y.Z-*.db>`（见[部署与升级](docs/deployment.md)第 5.1 节）。
 
 ## 30.2 节点端
 

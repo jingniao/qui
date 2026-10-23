@@ -82,6 +82,10 @@ update=/usr/local/bin/qui-update
 # The init-system library is installed once per host, like the updater, so the
 # scripts that do not run from an archive can source it.
 library=/usr/local/lib/proxycontrol/service.sh
+# The boot-time hook that finishes an update qui-update could not finish is
+# installed once per host as well, and by both components: a host runs at most one
+# of them and the recovery must run before whichever one starts.
+recovery=/usr/local/lib/proxycontrol/update-recovery
 registry=/var/lib/proxycontrol-install
 record=$registry/$component.manifest
 removed=$registry/$component.removed
@@ -108,6 +112,7 @@ if [[ $init_system == systemd ]]; then
   host_network_files=(proxy-agent-host-network.service proxy-agent-host-network.path)
   host_network_service=/etc/systemd/system/proxy-agent-host-network.service
   host_network_path=/etc/systemd/system/proxy-agent-host-network.path
+  recovery_service=/etc/systemd/system/proxycontrol-update-recovery.service
 else
   service_directory=$root/openrc
   unit=/etc/init.d/$name
@@ -115,6 +120,7 @@ else
   host_network_files=(proxy-agent-host-network host-network-watch)
   host_network_service=/etc/init.d/proxy-agent-host-network
   host_network_path=/usr/local/lib/proxy-agent/host-network-watch
+  recovery_service=/etc/init.d/proxycontrol-update-recovery
 fi
 if [[ $init_system == openrc ]] && command -v apk >/dev/null; then
   # A stock Alpine host has neither bash (the interpreter of this script) nor
@@ -149,6 +155,10 @@ fi
 [[ -n $binary && $digest =~ ^[0-9a-f]{64}$ ]] || fail 'Provide the binary and its trusted lowercase SHA256.'
 packaged_service=$service_directory/${unit##*/}
 [[ -f $packaged_service && ! -L $packaged_service ]] || fail "Missing packaged service file: ${unit##*/}"
+# The recovery service definition comes from the same directory as the unit: the
+# systemd unit on a systemd host, the init script on an Alpine host.
+packaged_recovery_service=$service_directory/${recovery_service##*/}
+[[ -f $packaged_recovery_service && ! -L $packaged_recovery_service ]] || fail "Missing packaged service file: ${recovery_service##*/}"
 if [[ $component == agent ]]; then
   for packaged in "${host_network_files[@]}"; do
     [[ -f $service_directory/$packaged && ! -L $service_directory/$packaged ]] || fail "Missing packaged service file: $packaged"
@@ -360,7 +370,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/service-library" "$stage/machine-id"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/machine-id"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
@@ -385,6 +395,15 @@ install -o root -g root -m 0600 -- "$root/linux/update.sh" "$stage/qui-update"
 # is what gets published, so an archive always carries its own version.
 [[ -f $service_library && ! -L $service_library ]] || fail "Missing the init-system library: $service_library"
 install -o root -g root -m 0600 -- "$service_library" "$stage/service-library"
+# The boot-time recovery hook and its service definition serve both components and
+# are staged like the library. They are deliberately not recorded in the install
+# manifest, whose fixed line numbers every other script reads, and deliberately not
+# part of the files qui-update snapshots: a rollback to an older version has to
+# keep them, because the older qui-update still writes the journals this hook
+# recovers, and without a journal they do nothing at all.
+[[ -f $root/linux/update-recovery.sh && ! -L $root/linux/update-recovery.sh ]] || fail 'Missing packaged update recovery script.'
+install -o root -g root -m 0600 -- "$root/linux/update-recovery.sh" "$stage/update-recovery"
+install -o root -g root -m 0600 -- "$packaged_recovery_service" "$stage/update-recovery-service"
 host_network_service_digest=''
 host_network_path_digest=''
 if [[ $component == agent ]]; then
@@ -480,10 +499,16 @@ publish "$stage/program" "$target" root root 0755
 publish "$stage/unit" "$unit" root root "$service_mode"
 if [[ $component == panel ]]; then publish "$stage/qui" "$qui" root root 0755; fi
 publish "$stage/qui-update" "$update" root root 0755
-# /usr/local/lib/proxycontrol holds the init-system library only; it is created
-# here so an install that is not run from an archive can source it later.
+# /usr/local/lib/proxycontrol holds the init-system library and the boot-time
+# update recovery hook; it is created here so an install that is not run from an
+# archive can source the library and run the recovery later.
 install -d -o root -g root -m 0755 /usr/local/lib/proxycontrol
 publish "$stage/service-library" "$library" root root 0644
+publish "$stage/update-recovery" "$recovery" root root 0755
+# The recovery runs before every service of both components, so its definition is
+# published together with them: the systemd unit (0644) or the OpenRC init script
+# (0755), which is the mode the component's own definition gets as well.
+publish "$stage/update-recovery-service" "$recovery_service" root root "$service_mode"
 if [[ -n $host_network_service_digest ]]; then
   if [[ $init_system == systemd ]]; then
     publish "$stage/host-network-service" "$host_network_service" root root 0644
@@ -503,6 +528,11 @@ if [[ -n $core ]]; then
   publish "$stage/core" "$core_target" root root 0755
 fi
 service_reload_definitions
+# Enabled, never started: when qui-update runs this install.sh, the journal of
+# that very update is in place, and a recovery started now would try to undo the
+# update in progress (it would wait for qui-update's lock and then give up). It
+# only has work at boot; on every other boot it finds no journal.
+service_enable proxycontrol-update-recovery
 if [[ -n $host_network_service_digest ]]; then
   if [[ $init_system == systemd ]]; then
     # Enabled and armed, while no proxy service is started by this script: the path
@@ -585,4 +615,5 @@ if [[ -n $host_network_service_digest ]]; then
 fi
 if [[ $component == agent ]]; then printf 'Then enroll the node with deploy/linux/enroll.sh --token-file FILE.\n'; fi
 printf 'Managed agent and core upgrades are deployed from the panel.\n'
+printf 'An interrupted qui-update is finished or rolled back at boot by proxycontrol-update-recovery.\n'
 printf 'Run qui-update to update from GitHub.\n'

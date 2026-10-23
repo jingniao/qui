@@ -1,0 +1,26 @@
+# Finish or roll back an update that qui-update could not finish, before the
+# services of this platform start. qui-update keeps
+# /var/lib/proxycontrol-install/rollback.* only while an update is in progress and
+# removes it once the update or the rollback has succeeded, so the condition makes
+# this unit a no-op on every other boot instead of something that has to be checked
+# by hand.
+#
+# Before= is the point of the unit: the files a snapshot replaces belong to
+# proxy-agent, proxy-panel and the enforced-source units, so a service that starts
+# first would run a mix of the old and the new version, or a new panel would
+# migrate the database before the old one is put back. None of those units
+# Requires= or After= this one on purpose: a recovery that fails must not keep a
+# node or the panel down, so the failure stays visible in this unit's result while
+# the services still start on whatever is installed.
+[Unit]
+Description=Proxy Control: finish or roll back an interrupted qui-update
+ConditionPathExistsGlob=/var/lib/proxycontrol-install/rollback.*/journal
+After=local-fs.target
+Before=proxy-agent.service proxy-panel.service proxy-agent-host-network.service proxy-agent-host-network.path
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/proxycontrol/update-recovery
+
+[Install]
+WantedBy=multi-user.target

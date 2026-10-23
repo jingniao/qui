@@ -1,0 +1,39 @@
+#!/sbin/openrc-run
+# OpenRC counterpart of deploy/systemd/proxycontrol-update-recovery.service.
+#
+# It runs the same program (/usr/local/lib/proxycontrol/update-recovery) once, at
+# boot, before the services of this platform start: an update that qui-update was
+# killed in the middle of leaves a journal behind, and the services would otherwise
+# start on a mix of the old and the new program, unit or init script, or a new
+# panel would keep a database the old one cannot read.
+#
+# Two deliberate differences from the unit:
+#   * There is no ConditionPathExistsGlob equivalent, so the script always runs.
+#     It is cheap: without a journal every snapshot check fails on the first test
+#     and it exits 0.
+#   * It is not a supervised service and has no start_pre: the run is one oneshot
+#     pass whose exit status is the result, which is what `Type=oneshot` gives the
+#     unit as well.
+#
+# As on systemd, no service depends on this one: a failed recovery must not keep
+# proxy-agent or proxy-agent-host-network down. proxy-panel is named for symmetry
+# only, because the panel requires systemd and is never installed on OpenRC.
+name="Proxy Control interrupted update recovery"
+description="Finish or roll back an update qui-update could not finish"
+
+start() {
+  ebegin "Finishing an interrupted qui-update"
+  /usr/local/lib/proxycontrol/update-recovery
+  eend $?
+}
+
+stop() {
+  # Nothing stays running: the recovery is a single pass over the snapshots, so
+  # there is no process to signal and stopping always succeeds.
+  return 0
+}
+
+depend() {
+  need localmount
+  before proxy-agent proxy-panel proxy-agent-host-network
+}

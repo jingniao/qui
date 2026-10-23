@@ -194,13 +194,39 @@ qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sum
 - 面板更新：先停止 `proxy-panel.service`，在停止状态下把数据库（以及存在的 `-wal`）复制到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<YYYYmmdd-HHMMSS>.db`（属主 `proxy-panel`、0600），再替换程序，最后按停止前的状态启动服务并打印状态。
 - 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，两个组件从同一个归档更新，**先节点后面板**。
 - `--bundle` 与 `--sums` 必须同时给出，并且必须用 `--version` 指定版本（`SHA256SUMS` 里核对的文件名带版本号）；核对方式与下载时完全相同。
-- **回滚快照**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`service.sh`，面板加 `qui`，节点加强制出站的两个文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700）。保存不了快照就不更新，并把服务启动回来。
-- **健康检查**：原本在运行的服务更新后会被启动，并且要在 10 秒内保持运行、主进程 PID 不变才算成功（两种初始化系统都会在崩溃 5 秒后重启程序，崩溃循环在每次轮询时都可能显示为运行中，但 PID 会变）。成功时打印 `已更新到 X，服务运行正常（10 秒内无重启）` 并删除快照。
-- **自动回滚**：`install.sh` 失败（即使已经替换了部分文件）、装上的程序版本不是目标版本、或新版本没有持续运行时，脚本停止服务，把快照里的文件放回（与快照相同的文件不动，所以导致失败的只读或 immutable 文件不会让恢复也失败），删除新版本多出的文件，再启动旧版本并做同样的健康检查，打印 `更新失败，已恢复到 <旧版本>`。面板在新版本已经运行过之后回滚时，还会删除 `-wal`/`-shm` 并用更新前的备份覆盖数据库，因为新版本可能已经执行了不可逆的迁移。退出码为 1。
-- 只有回滚本身没能让旧版本恢复健康时，脚本才保留快照目录并打印它的路径、日志命令（systemd：`journalctl -u proxy-<组件> -n 50`；OpenRC：`grep -F 'proxy-agent' /var/log/messages | tail -n 50`）、降级命令 `qui-update --version <旧版本>` 和数据库备份路径。**数据库迁移不可逆**：手工降级面板前先用该备份恢复数据库。
-- 回滚保护由**正在运行的** `qui-update` 提供：从 1.0.1 升级到 1.0.2 时运行的是 1.0.1 的 `qui-update`，它没有快照与健康检查（失败时只把服务启动回来）；1.0.2 起的更新才有。在更新过程中按 Ctrl-C 中断不会触发回滚，快照目录会留下，可以用它手工恢复。
+- **数据库备份**：面板备份先写成 `.partial` 文件，同步到磁盘并与原文件逐字节比较后才改名为最终名字，所以 `pre-update-*.db` 要么完整、要么不存在；断电不会留下看起来可用的半截备份。
+- **数据库预检**（面板，1.0.3 起）：停止并备份后，脚本用**目标版本**的程序执行 `proxy-panel --check-database <备份>`（只读，在私有副本上检查完整性与迁移记录）。目标版本打不开这份数据库（数据库里有它不认识的迁移，即降级跨过了迁移）时，什么都不替换，删掉刚才的备份，重新启动面板，并列出可以一起回退的 `pre-update-<目标版本>-*.db` 备份（见 5.1）。目标版本早于 1.0.3、不认识这个参数，或程序在本机无法执行时，跳过预检：旧面板遇到更新的数据库会拒绝启动，由健康检查与回滚兜底。
+- **回滚快照与进度日志**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`service.sh`，面板加 `qui`，节点加强制出站的两个文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），再放入正在运行的 `qui-update` 与它的 `service.sh` 的副本，同步到磁盘后最后写进度日志 `journal`。日志记录组件、新旧版本、服务原来是否在运行、数据库备份路径和阶段：`prepared`（`install.sh` 运行前）→ `started`（新版本可能接触数据库之前）→ `committed`（健康检查通过）或 `restored`（回滚已放回文件与数据库）。每次写入都先写临时文件、同步、再改名，断电只会看到旧阶段或新阶段。保存不了快照或日志就不更新，并把服务启动回来。
+- **健康检查**：原本在运行的服务更新后会被启动，并且要在 10 秒内保持运行、主进程 PID 不变才算成功（两种初始化系统都会在崩溃 5 秒后重启程序，崩溃循环在每次轮询时都可能显示为运行中，但 PID 会变）。成功时打印 `已更新到 X，服务运行正常（10 秒内无重启）`，记为 `committed` 并删除快照（先把目录改名为 `discard.*` 再删除，删到一半断电也不会被当成未完成的更新）。
+- **自动回滚**：`install.sh` 失败（即使已经替换了部分文件）、装上的程序版本不是目标版本、或新版本没有持续运行时，脚本停止服务，把快照里的文件放回（与快照相同的文件不动，所以导致失败的只读或 immutable 文件不会让恢复也失败），删除新版本多出的文件，再启动旧版本并做同样的健康检查，打印 `更新失败，已恢复到 <旧版本>`，退出码为 1。面板的数据库在阶段为 `started` 时（新面板可能已经迁移），或数据库与备份不一致时被恢复：先把当前数据库保留为 `failed-update-<目标版本>-<时间>.db`，再删除 `-wal`/`-shm` 并用更新前的备份原子替换。**回滚从不直接丢掉新版本写过的数据库**。
+- **中断后的自动恢复**：
+  - **Ctrl-C、`kill`（SIGTERM）、SSH 断线（SIGHUP）**：脚本捕获信号，按进度日志执行同一套回滚并启动旧版本，退出码 130、143、129。SSH 断线时终端已经不在，输出写入 `/var/lib/proxycontrol-install/interrupted-update.log`。快照建立前收到信号时只删除半成品，并把已停止的服务启动回来。
+  - **`kill -9`、断电、系统崩溃**：进度日志留在磁盘上。开机时 `proxycontrol-update-recovery`（systemd oneshot 单元，或 OpenRC 的同名初始化脚本，由 `install.sh` 安装并启用）在 `proxy-agent`、`proxy-panel` 与强制出站单元**之前**运行，用快照里自带的那份 `qui-update`（正是写下这份日志的版本）恢复文件，必要时恢复数据库，然后由初始化系统照常启动服务。没有进度日志时它什么也不做。输出写入 `/var/lib/proxycontrol-install/update-recovery.log` 与系统日志。恢复时它还会删除被杀掉的 `install.sh` 留下的 `staging.*` 暂存目录（只在 `install.sh` 的锁空闲时）。
+  - **没有重启**（例如 `kill -9` 后直接重跑）：下一次运行 `qui-update` 会先发现未完成的更新、完成恢复，然后才开始新的更新。
+  - 恢复是幂等的：恢复本身再被打断，下次会从进度日志继续，结果一致。
+- 同时只能运行一个 `qui-update`（`/var/lib/proxycontrol-install/update.lock`），第二个会被拒绝。
+- 只有回滚本身没能让旧版本恢复健康时，脚本才保留快照目录并打印它的路径与日志命令（systemd：`journalctl -u proxy-<组件> -n 50`；OpenRC：`grep -F 'proxy-agent' /var/log/messages | tail -n 50`）；下一次运行或下一次开机会再试。
+- 回滚保护由**正在运行的** `qui-update` 提供：从 1.0.1 升级时运行的是 1.0.1 的 `qui-update`（没有快照与健康检查），从 1.0.2 升级时没有进度日志、信号处理与开机恢复；这些从 1.0.3 起的更新才有。旧版 `qui-update` 留下的无日志快照目录会被保留并提示，可检查后手工删除。
 - 替换文件的是**目标版本**的 `install.sh`：降级到 1.0.1 或更早时，它失败后仍会留下 `/var/lib/proxycontrol-install/staging.*` 与 `.<文件名>.installing.*` 临时文件（回滚本身不受影响），确认回滚成功后可以手工删除。
+- 断电保护依赖 `sync`（`syncfs`）把快照、日志与备份落盘；它保护不了会谎报写入完成的磁盘或虚拟化存储。
+- 更新前备份（`pre-update-*`）与回滚保留的数据库（`failed-update-*`）不会自动清理，确认不再需要后可手工删除。
 - **先更新面板，再更新节点**；面板升级期间节点继续用旧配置运行。
+
+### 5.1 面板降级与数据库回退
+
+数据库迁移不可逆：较新的面板执行过的迁移，较旧的面板不认识，会拒绝打开这份数据库（不会损坏它）。所以跨迁移降级面板时，必须同时换回一份**在目标版本上产生的**数据库，也就是当初从该版本升级时留下的 `pre-update-<目标版本>-*.db`。
+
+```sh
+qui-update --version 1.0.3                       # 先试：没有跨迁移就直接降级成功；
+                                                 # 跨了迁移会被拒绝并列出可用备份
+qui-update --version 1.0.3 --database /var/lib/proxy-panel/backups/pre-update-1.0.3-20261023-145040.db
+```
+
+- `--database` 只用于把面板降级到更旧的版本（`--version` 必须低于已安装的面板版本），文件必须是普通文件。
+- 动手前（服务还没停）先检查这份文件：目标版本支持 `--check-database` 时由它判断能否打开；目标版本更旧时，由已安装的面板检查文件的完整性与迁移记录。不通过就拒绝。
+- 确认信息里会显示文件与它的时间。**这份备份之后写入面板的数据都会丢失**：新建的用户与设备、之后登记的节点（需要重新登记）、配置与发布记录、流量与访问记录。
+- 过程：停止面板 → 照常备份当前数据库（`pre-update-<当前版本>-*.db`，降级失败或以后想回到新版本时用它）→ 快照与进度日志 → 安装旧程序 → 把 `--database` 指定的文件原子复制为面板数据库（原文件不变）→ 启动并做健康检查。任何一步失败或被中断，都会恢复新版本的文件和降级前的数据库。
+- 降级没有跨过迁移时不需要 `--database`。不带它的降级如果因数据库失败，回滚后也会打印同样的备份列表。
 
 以下手动步骤用于离线环境，或需要用自己构建的归档时。
 
@@ -236,7 +262,7 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 deploy/linux/uninstall.sh panel     # 或 agent
 ```
 
-`uninstall.sh` 会先停止服务，确认已经停下来：systemd 上要求 `ActiveState=inactive` 且 `Result=success`；OpenRC 上没有这两个属性，要求 `rc-service proxy-agent status` 为 `stopped`。然后删除程序、服务定义（systemd 单元，或 `/etc/init.d/proxy-agent`、`/etc/init.d/proxy-agent-host-network` 与 watcher 脚本）和安装记录，保留身份、配置、数据、备份与服务账号。它在 `/var/lib/proxycontrol-install/` 留下 `<component>.removed` 记录；再次安装必须加 `--reinstall`，否则脚本拒绝。
+`uninstall.sh` 会先停止服务，确认已经停下来：systemd 上要求 `ActiveState=inactive` 且 `Result=success`；OpenRC 上没有这两个属性，要求 `rc-service proxy-agent status` 为 `stopped`。然后删除程序、服务定义（systemd 单元，或 `/etc/init.d/proxy-agent`、`/etc/init.d/proxy-agent-host-network` 与 watcher 脚本）和安装记录，保留身份、配置、数据、备份与服务账号。它在 `/var/lib/proxycontrol-install/` 留下 `<component>.removed` 记录；再次安装必须加 `--reinstall`，否则脚本拒绝。面板与节点都卸载后，`qui-update`、`service.sh` 与开机恢复单元一起删除。
 
 ## 7. 目录与权限
 
@@ -250,7 +276,10 @@ deploy/linux/uninstall.sh panel     # 或 agent
 | `/var/lib/proxy-panel/` | proxy-panel:proxy-panel 0700 | `panel.db`、`identity/`、`backups/` |
 | `/var/lib/proxy-agent/` | proxy-agent:proxy-agent 0700 | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/` |
 | `/var/lib/proxy-agent/host-network/` | proxy-agent:proxy-agent 0700 | `desired.json`、`status.json`（服务器强制出站，只有 helper 单元能写） |
-| `/var/lib/proxycontrol-install/` | root:root 0700 | 安装记录与操作锁 |
+| `/var/lib/proxycontrol-install/` | root:root 0700 | 安装记录、操作锁（`operation.lock`）与更新锁（`update.lock`）；更新进行中时还有 `rollback.*/`（快照、`updater`、`service.sh`、`journal`）；`update-recovery.log`、`interrupted-update.log`（开机恢复与断线中断的输出） |
+| `/usr/local/lib/proxycontrol/update-recovery` | root:root 0755 | 开机时完成被中断的 `qui-update`（由下面的单元调用） |
+| `/etc/systemd/system/proxycontrol-update-recovery.service` 或 `/etc/init.d/proxycontrol-update-recovery` | root:root 0644 / 0755 | 开机恢复单元，排在 `proxy-agent`、`proxy-panel` 与强制出站单元之前；没有进度日志时不做任何事。不记入安装记录，回滚到旧版本也保留 |
+| `/var/lib/proxy-panel/backups/` | proxy-panel:proxy-panel 0700 | `pre-update-<版本>-<时间>.db`（更新前备份）、`failed-update-<版本>-<时间>.db`（回滚时保留的新版本数据库） |
 | `/usr/local/lib/proxy-agent/<core>` | root:root 0755 | 安装脚本放置的核心 |
 | `/usr/local/lib/proxycontrol/service.sh` | root:root 0644 | 两种初始化系统通用的服务命令库（`qui-update`、`uninstall.sh` 等使用） |
 | `/etc/init.d/proxy-agent`、`/etc/init.d/proxy-agent-host-network` | root:root 0755 | 仅 OpenRC：Agent 与强制出站 watcher 服务 |
@@ -281,4 +310,6 @@ grep -F proxy-agent /var/log/messages | tail -n 200
 - 面板起不来：先跑 `--check-config`；非开发模式下证书/私钥缺失、`database` 落在网络路径都会被拒绝。
 - 节点登记失败：确认服务已停止、token 文件权限与硬链接数正确、安装记录未被改动、`/etc/proxy-agent/tls/ca.crt` 是签发面板 Web 证书的 CA 且与 `server_name` 匹配。
 - 节点连上后立刻断开：检查面板里该节点是否被禁用、证书是否过期或被吊销（见[运维手册](operations.md)）。
+- 更新被打断或开机后版本不对：看 `/var/lib/proxycontrol-install/update-recovery.log`、`interrupted-update.log`，以及 `journalctl -u proxycontrol-update-recovery`（OpenRC：`rc-service proxycontrol-update-recovery status` 与 `/var/log/messages`）。`/var/lib/proxycontrol-install/rollback.*` 仍在说明恢复没有完成，再运行一次 `qui-update` 会先重试恢复。
+- 面板起不来且怀疑数据库版本：`proxy-panel --check-database /var/lib/proxy-panel/backups/<文件>.db` 只读检查一份**停止状态**的数据库副本，输出 `database: compatible|newer|foreign|damaged`（退出码 0/3/4/5）；`newer` 表示数据库来自更新的面板，需按 5.1 带 `--database` 降级。
 

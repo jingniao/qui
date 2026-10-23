@@ -49,6 +49,26 @@ jobs:
         run: go build -o bin/proxy-panel ./cmd/panel
       - name: Build the agent
         run: go build -o bin/proxy-agent ./cmd/agent
+      # The deploy scripts are the only way an operator installs, upgrades or
+      # removes a host, so a syntax error in one of them is caught here rather
+      # than at the first install. The POSIX scripts are parsed by sh (dash on this
+      # runner) one file at a time, because sh -n only reads its first operand,
+      # and they also have to run under busybox ash on Alpine. update-test.sh
+      # exercises the update and recovery paths under QUI_UPDATE_TEST_ROOT and only
+      # needs the scripts, so its absence is not a failure while it lives in a
+      # separate change.
+      - name: Deploy script checks
+        run: |
+          set -euo pipefail
+          for script in deploy/linux/*.sh; do bash -n -- "$script"; done
+          for script in deploy/linux/update-recovery.sh deploy/openrc/host-network-watch \
+            deploy/openrc/proxycontrol-update-recovery; do
+            sh -n -- "$script"
+          done
+          if [ -f deploy/linux/tests/update-test.sh ]; then
+            bash -n -- deploy/linux/tests/update-test.sh
+            sudo bash deploy/linux/tests/update-test.sh
+          fi
 
 
   # Optional real-core job. Both releases are stable upstream releases and every

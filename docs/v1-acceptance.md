@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-23（第四轮：一键安装与 qui-update 的失败处理和回滚；v1.0.2 发布版复测）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-23（第五轮：qui-update 中断后的自动恢复与面板跨迁移降级，9.8）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -365,3 +365,81 @@
 - 停止两个容器，删除面板主机上的 `debian-clean`、`alpine-clean`、`bundles` 目录，以及三台主机上的 `v102test` 目录。
 - 卸载本轮在面板主机上安装的 `systemd-container`、`debootstrap` 及其自动依赖 `libnss-mymachines`、`arch-test`、`distro-info`；`/etc/nsswitch.conf` 的 `hosts` 行恢复为 `files dns`，DNS 正常，没有失败的单元。
 - 最终状态：`uk-node`、`alpine-node`、`us2-node` 均 `online`，Agent 与面板都是 `1.0.2`。三台主机上 `/var/lib/proxycontrol-install` 只有安装记录与锁文件。
+
+### 9.8 第五轮：中断后的自动恢复与面板跨迁移降级（2026-10-23，发布前）
+
+**风险审查（修改前）。**
+- 面板本身是安全的：数据库里有它不认识的迁移时，旧面板在迁移检查阶段拒绝启动，不改动数据库；所有迁移在一个事务里执行。
+- `qui-update` 的问题：
+  - 没有持久的进度记录。`kill -9` 或断电后，新旧文件可能混合，开机时没有任何东西去恢复。
+  - 没有信号处理。Ctrl-C 或 SSH 断线后，服务停着、文件只换了一半。
+  - 更新前的数据库备份没有落盘，也没有校验；断电会留下看起来可用的半截 `pre-update-*.db`。
+  - 回滚直接覆盖新版本写过的数据库，不留副本。
+  - 无法与匹配的旧备份一起降级面板：跨迁移降级只会失败并回滚。
+
+**修复（尚未提交与发布）。**
+- `update.sh`：快照里写入进度日志（`prepared`/`started`/`committed`/`restored`，临时文件 → 同步 → 改名 → 同步目录）以及正在运行的 `qui-update` 与 `service.sh` 的副本。
+  - 一套恢复例程 `recover_snapshot` 供所有路径共用：失败、信号（INT/TERM/HUP）、`--recover`、开机。
+  - 加更新锁；下次运行时先完成未结束的恢复。
+  - 备份经 `.partial`、`cmp` 校验后改名；覆盖数据库前保留 `failed-update-*.db`。
+  - 用目标版本的 `--check-database` 预检；新增 `--database FILE` 降级。
+  - 被杀掉的 `install.sh` 留下的暂存目录在 `operation.lock` 空闲时清除。
+- 面板：新增只读的 `proxy-panel --check-database FILE`（`internal/platform/db/inspect.go`），在私有副本上做 `integrity_check` 并比较迁移记录，退出码 0/3/4/5。
+- 开机恢复：
+  - 新增 `deploy/linux/update-recovery.sh`、`proxycontrol-update-recovery.service` 与 OpenRC 的 `proxycontrol-update-recovery`。
+  - `install.sh` 安装并启用它们（不记入安装记录，回滚也保留）；`uninstall.sh` 在两个组件都卸载时删除它们。
+- 回归测试：
+  - 新增 `deploy/linux/tests/update-test.sh`：用 `QUI_UPDATE_TEST_ROOT` 把真实的 `update.sh` 与开机脚本放进临时根目录，配假的服务库与安装器，共 22 个场景。
+  - CI 增加 “Deploy script checks” 步骤：对所有部署脚本做 `bash -n`/`sh -n`，并以 root 运行该测试。
+  - Go 新增 `inspect_test.go` 与 `cmd/panel` 的 `--check-database` 测试。
+
+**测试与实测中发现并修复的问题。**
+- 停止服务期间收到信号时，处理程序只在 `stop` 返回后运行，那时“服务已停”的标记尚未设置，服务会一直停着。改为在 `stop` 前设置标记（回归测试场景 8 发现）。
+- Alpine 的 busybox `flock` 不支持 `-w`，开机恢复等待锁会直接失败（Alpine 上首次运行回归测试：5 个开机场景失败）。改为循环 `flock -n`。
+- 预检直接执行归档里的程序：程序权限不是可执行时，或 `/tmp` 挂成 `noexec` 时，会被误判为“数据库无法使用”（真实容器实测发现；该次运行没有替换任何文件，面板继续运行 1.0.3）。改为把程序复制成 root 0700 的私有副本放在安装登记目录里执行，仍无法执行（126/127）时按“不支持预检”处理。
+- `--recover` 校验快照路径时没有解析安装登记目录的真实路径；`--boot` 用 `tee` 但没有检查它是否存在；预检拒绝时会留下多余的备份；`--database` 后的提示写成了“已恢复更新前的数据库”。都已修正。
+
+**本地门禁。**
+- 通过：`gofmt` 无差异，`go vet ./...`（Windows 与 `GOOS=linux`）通过，`go test -p 1 ./...` 无失败。
+- 通过：所有 `deploy/linux/*.sh` 与 `deploy/linux/tests/*.sh` 的 `bash -n`；`update-recovery.sh`、`host-network-watch` 与 `proxycontrol-update-recovery` 的 `sh -n`。
+- 未执行：Web 构建与前端时间测试，本轮没有修改前端。
+
+**回归测试（`deploy/linux/tests/update-test.sh`，root）。**
+
+| 环境 | 结果 |
+| --- | --- |
+| 面板主机（Debian 13，bash 5、GNU coreutils） | 通过：22/22 |
+| 第三台主机（Alpine 3.19 LXC，busybox `flock`） | 通过：22/22（修复 `flock -w` 之前 17/22） |
+
+场景：成功更新；`install.sh` 替换后失败；新版本不健康且已写数据库；`prepared` 与 `started` 两个阶段断电后开机恢复；SIGINT、SIGHUP；快照前 SIGTERM；下次运行接手未完成的更新；恢复的幂等性（含 `restored` 阶段）；并发运行被拒；带 `--database` 降级（成功与不健康两种）；`--database` 用于升级被拒；预检 `newer` 被拒且不留备份；预检不支持时继续；备份原子写入；OpenRC 的成功、不健康与断电；只装 Agent 的主机的成功与断电。另验证开机恢复删除被杀的 `install.sh` 的暂存目录，`operation.lock` 被持有时保留。
+
+**实测环境。**
+- 面板主机上临时安装 `systemd-container` 与 `debootstrap`，建两个一次性容器：
+  - Debian 13 minbase，`systemd-nspawn -b`，systemd 为 PID 1。
+  - 官方 Alpine 3.19.9 minirootfs，busybox init + OpenRC，`rc_sys=lxc`。
+- 两个容器与主机共享网络，面板测试实例监听 `127.0.0.1:18443/19443`，自签证书。
+- 测试归档：
+  - 用工作区代码构建 `1.0.3`。
+  - `1.0.95`：同一代码，另加一个**只用于测试、未提交**的迁移 `0110_qa_downgrade_probe.sql`（建表并写入一行），用来制造真实的跨迁移降级。构建后已删除该文件。
+  - 修复脚本后，用新的 `deploy/` 目录重新打包这两个归档。
+- “断电”的做法：对整个容器发 SIGKILL（`machinectl kill --signal=SIGKILL --kill-whom=all`；Alpine 容器杀掉其 init），然后真实开机。它验证进度日志与开机恢复的逻辑，但宿主机的页缓存不会丢失，所以 `sync` 顺序是靠代码审查保证的，没有在真实掉电下验证。
+
+| 项 | 结果 | 实际观察 |
+| --- | --- | --- |
+| E1 正常升级跨迁移（systemd，面板 1.0.3 → 1.0.95） | 通过 | 预检通过，`pre-update-1.0.3-*.db` 生成，健康检查通过，HTTP 200；数据库 110 个迁移，`qa_downgrade_probe` 有一行。 |
+| E2 不带 `--database` 降级 1.0.95 → 1.0.3 | 通过 | 输出“目标版本 1.0.3 无法打开当前数据库”，列出 `pre-update-1.0.3-20261023-145040.db` 与命令，退出码 1。程序摘要不变，1.0.95 继续运行，没有快照，也没有留下检查程序副本。修复后复测：没有留下多余的 `pre-update-1.0.95-*.db`。 |
+| E3 带 `--database` 降级 | 通过 | 面板 1.0.3，`NRestarts=0`，HTTP 200，数据库 109 个迁移、没有探测表。`--database` 指定的文件摘要不变；降级前的数据库保留为 `pre-update-1.0.95-*.db`。修复后提示为“已换用 --database 指定的数据库”。 |
+| E4 `started` 阶段断电（新面板已运行 3 秒） | 通过 | 断电时数据库已迁移（`--check-database`：110 个迁移，`last: 0110_qa_downgrade_probe.sql`），日志为 `phase=started`。开机时 `proxycontrol-update-recovery` 先于面板运行：恢复文件，把迁移后的数据库保留为 `failed-update-1.0.95-*.db`（探测行仍在），用更新前的备份恢复。面板 1.0.3 `active`、`NRestarts=0`、HTTP 200，数据库 109 个迁移，快照已删除。 |
+| E5 `prepared` 阶段断电（新程序已就位、尚未启动） | 通过 | 断电时程序为 1.0.95，`install.sh` 的 `staging.*` 残留。开机恢复只放回文件，没有恢复数据库（与备份相同）：恢复后数据库摘要等于断电时，面板 1.0.3 健康、HTTP 200。该次运行发现暂存目录残留，加入清理后由回归测试场景 4 覆盖、E8 实测。 |
+| E6 真实 SIGINT（systemd，安装进行中） | 通过 | 输出“更新被中断（INT）”，恢复文件，1.0.3 健康，退出码 130；程序、单元与 `qui-update` 的摘要与更新前相同。 |
+| E7 真实 SIGHUP（模拟 SSH 断线） | 通过 | 退出码 129，文件摘要与更新前相同，`interrupted-update.log` 记录了完整的回滚输出，1.0.3 `active`。 |
+| E8 OpenRC `prepared` 阶段断电（Agent 1.0.3 → 1.0.95，已登记到真实面板的临时节点 `e2e-alp`） | 通过 | 断电时程序为 1.0.95，有 `staging.*` 残留。开机后 `proxycontrol-update-recovery` 为 `started`，恢复日志记录“已恢复到 1.0.3”。四个文件摘要与更新前相同，暂存目录已删除。运行中的 Agent 进程的可执行文件不是 `(deleted)`，说明它启动于恢复之后；面板显示节点 `online`。 |
+| E9 真实 SIGINT（OpenRC） | 通过 | 退出码 130，文件摘要与更新前相同，强制出站 watcher 重启，Agent 1.0.3 `started`。第一次尝试时 busybox `sh` 的后台任务忽略了 SIGINT（信号没有送达，更新正常完成）；用 `env --default-signal=INT` 启动以模拟前台按 Ctrl-C 后通过。 |
+| E10 OpenRC `started` 阶段断电（新 Agent 已运行 2 秒） | 通过 | 开机恢复后 Agent 1.0.3 运行于恢复后的程序，文件摘要相同，节点 `online`。 |
+| 共存服务 | 通过 | 面板主机上只在临时目录与容器里操作；真实面板与 `us2-node` 没有被更新或重启，回归测试只使用临时根目录与假服务库。第三台主机上回归测试同样只使用临时目录，`komari-agent`、`cf-probe` 未受影响。 |
+
+仍未覆盖：
+- 真实掉电下的 `sync` 顺序（见上）。
+- arm64。
+- 面板 ≤1.0.2 作为降级目标时的预检（这类目标没有该参数，代码按“不支持”处理，回归测试场景 15 覆盖）。
+- 从 1.0.2 升级到本版本时，运行的仍是 1.0.2 的 `qui-update`，没有本节的保护。

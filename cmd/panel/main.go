@@ -9,26 +9,57 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"proxycontrol/internal/platform/config"
+	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/logging"
 	"proxycontrol/internal/platform/panelhost"
 	"proxycontrol/internal/platform/panelstore"
 	"proxycontrol/internal/platform/recovery"
 	"proxycontrol/internal/platform/restoretasks"
 	"proxycontrol/internal/platform/server"
+	"proxycontrol/migrations"
 	"proxycontrol/web"
 )
 
 var version = "dev"
 
 func main() {
-	if err := run(); err != nil {
-		slog.Error("panel failed", "error", err)
-		os.Exit(1)
-	}
+	os.Exit(exitStatus(run()))
 }
+
+// exitStatus maps a run outcome to the process status. Commands that already
+// printed their result carry their own code and must not be logged as failures;
+// everything else keeps the historical exit code 1.
+func exitStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	var code exitCode
+	if errors.As(err, &code) {
+		return int(code)
+	}
+	slog.Error("panel failed", "error", err)
+	return 1
+}
+
+// exitCode is a process status that a command reports instead of an error.
+type exitCode int
+
+func (c exitCode) Error() string {
+	return fmt.Sprintf("exit status %d", int(c))
+}
+
+// Database compatibility verdicts that the update script distinguishes. They
+// stay away from 1 (generic failure) and 2 (flag parsing) so an installed
+// binary that predates this flag cannot be mistaken for a verdict.
+const (
+	exitDatabaseNewer   = exitCode(3)
+	exitDatabaseForeign = exitCode(4)
+	exitDatabaseDamaged = exitCode(5)
+)
 
 func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -46,6 +77,7 @@ func runWithContext(ctx context.Context, args []string) (resultErr error) {
 	restorePath := flags.String("restore-backup", "", "restore a verified encrypted backup while the panel is stopped, then serve")
 	passwordPath := flags.String("restore-password-file", "", "protected local file containing the backup password")
 	setOwner := flags.Bool("set-owner-credentials", false, "replace the Owner username and password of a stopped panel, reading two lines from stdin")
+	checkDatabase := flags.String("check-database", "", "report whether this binary can open a stopped panel database file (read-only, works on a private copy)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -54,6 +86,26 @@ func runWithContext(ctx context.Context, args []string) (resultErr error) {
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	// The update script asks the target binary first, so the check has to work
+	// without a config, a service manager or any panel state.
+	databaseRequested := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "check-database" {
+			databaseRequested = true
+		}
+	})
+	if databaseRequested {
+		valid := *checkDatabase != ""
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name != "check-database" {
+				valid = false
+			}
+		})
+		if !valid {
+			return errors.New("database compatibility check requires a file and no other flag")
+		}
+		return checkDatabaseFile(ctx, *checkDatabase)
 	}
 	installationRequested := false
 	flags.Visit(func(f *flag.Flag) {
@@ -178,4 +230,48 @@ func runWithContext(ctx context.Context, args []string) (resultErr error) {
 		return restoreAndServe(ctx, owner, c, *configPath, *restorePath, restorePassword, logger)
 	}
 	return panelhost.Run(ctx, owner, c, *configPath, web.Files(), logger)
+}
+
+// checkDatabaseFile prints the report the update script parses and returns the
+// verdict as the process status. The report is written before the status so a
+// caller can always explain a refusal.
+func checkDatabaseFile(ctx context.Context, path string) error {
+	inspection := db.Inspect(ctx, path, migrations.Files)
+	fmt.Printf("database: %s\n", inspection.Verdict)
+	fmt.Printf("applied: %d\n", len(inspection.Applied))
+	fmt.Printf("pending: %d\n", len(inspection.Pending))
+	fmt.Printf("unknown: %s\n", nameList(inspection.Unknown))
+	fmt.Printf("mismatched: %s\n", nameList(inspection.Mismatched))
+	fmt.Printf("last: %s\n", lastName(inspection.Applied))
+	fmt.Printf("integrity: %s\n", singleLine(inspection.Integrity))
+	switch inspection.Verdict {
+	case db.VerdictCompatible:
+		return nil
+	case db.VerdictNewer:
+		return exitDatabaseNewer
+	case db.VerdictForeign:
+		return exitDatabaseForeign
+	default:
+		return exitDatabaseDamaged
+	}
+}
+
+func nameList(names []string) string {
+	if len(names) == 0 {
+		return "-"
+	}
+	return strings.Join(names, ",")
+}
+
+func lastName(names []string) string {
+	if len(names) == 0 {
+		return "-"
+	}
+	return names[len(names)-1]
+}
+
+// singleLine keeps an integrity_check message, which may span lines, inside the
+// one output line the script expects.
+func singleLine(message string) string {
+	return strings.Join(strings.Fields(message), " ")
 }

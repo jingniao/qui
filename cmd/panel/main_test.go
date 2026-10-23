@@ -3,17 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"gopkg.in/yaml.v3"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"proxycontrol/internal/platform/config"
+	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/filelock"
 	"proxycontrol/internal/platform/panelstore"
+	"strings"
 	"testing"
 	"time"
 )
@@ -239,5 +243,206 @@ func TestCorruptRestoreJournalStopsPanelBeforeCreatingDatabaseOrCA(t *testing.T)
 	data, err := os.ReadFile(journal)
 	if err != nil || string(data) != `{"untrusted":true}` {
 		t.Fatal("unverified restore journal deleted or changed", err)
+	}
+}
+
+// captureStdout runs fn with its report redirected to a pipe; the lines are a
+// contract the update script parses, so tests read them verbatim.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdout
+	os.Stdout = writer
+	done := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(reader)
+		done <- string(data)
+	}()
+	defer func() {
+		os.Stdout = previous
+		reader.Close()
+	}()
+	runErr := fn()
+	writer.Close()
+	return <-done, runErr
+}
+
+// quietExitStatus maps an outcome while muting the failure log a refused
+// database check must not print.
+func quietExitStatus(t *testing.T, err error) int {
+	t.Helper()
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer slog.SetDefault(previous)
+	return exitStatus(err)
+}
+
+func stoppedDatabase(t *testing.T, path string) {
+	t.Helper()
+	database, err := db.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDatabaseCompatibilityCheckCreatesNoStateOrLocks(t *testing.T) {
+	root := t.TempDir()
+	c, path := panelConfig(t, filepath.Join(root, "data", "panel.db"), filepath.Join(root, "identity"))
+	// The inspected file lives outside the panel directories: only a private
+	// copy of it may ever be touched.
+	source := filepath.Join(t.TempDir(), "stopped.db")
+	stoppedDatabase(t, source)
+	before, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, runErr := captureStdout(t, func() error {
+		return runWithContext(context.Background(), []string{"--check-database", source})
+	})
+	if runErr != nil {
+		t.Fatalf("compatible database rejected: %v", runErr)
+	}
+	if !strings.Contains(output, "database: compatible\n") {
+		t.Fatalf("unexpected report:\n%s", output)
+	}
+	if after, err := os.ReadFile(source); err != nil || !bytes.Equal(before, after) {
+		t.Fatal("check modified the inspected database", err)
+	}
+	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
+		t.Fatal("database check created runtime state", entries, err)
+	}
+	// The panel directories are still free, so the check neither loaded a
+	// configuration nor kept a lock behind.
+	owner, err := panelstore.Try(c.Database, c.NodeIdentityDirectory)
+	if err != nil {
+		t.Fatal("database check left the panel directories locked", err)
+	}
+	owner.Close()
+	if err := runWithContext(context.Background(), []string{"--config", path, "--check-config"}); err != nil {
+		t.Fatal("database check left the configuration unusable", err)
+	}
+}
+
+func TestDatabaseCompatibilityCheckRejectsOtherFlags(t *testing.T) {
+	garbage := filepath.Join(t.TempDir(), "garbage.db")
+	if err := os.WriteFile(garbage, bytes.Repeat([]byte("broken"), 100), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"--check-database", garbage, "--version"},
+		{"--check-database", garbage, "--config", ""},
+		{"--check-database", ""},
+	} {
+		err := runWithContext(context.Background(), args)
+		if err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+		var code exitCode
+		if errors.As(err, &code) {
+			t.Fatalf("%v reported a verdict instead of a usage error: %v", args, err)
+		}
+		if status := quietExitStatus(t, err); status != 1 {
+			t.Fatalf("%v exited %d, want 1", args, status)
+		}
+	}
+}
+
+func TestDatabaseCompatibilityCheckExitCodes(t *testing.T) {
+	ctx := context.Background()
+	compatible := filepath.Join(t.TempDir(), "stopped.db")
+	stoppedDatabase(t, compatible)
+	output, err := captureStdout(t, func() error {
+		return runWithContext(ctx, []string{"--check-database", compatible})
+	})
+	if status := exitStatus(err); status != 0 {
+		t.Fatalf("compatible database exited %d: %v", status, err)
+	}
+	for _, line := range []string{"database: compatible\n", "pending: 0\n", "unknown: -\n", "mismatched: -\n", "integrity: ok\n"} {
+		if !strings.Contains(output, line) {
+			t.Fatalf("report lacks %q:\n%s", line, output)
+		}
+	}
+	if strings.Contains(output, "last: -\n") || !strings.Contains(output, "applied: ") {
+		t.Fatalf("report lacks the applied migrations:\n%s", output)
+	}
+	garbage := filepath.Join(t.TempDir(), "garbage.db")
+	if err := os.WriteFile(garbage, bytes.Repeat([]byte("broken"), 100), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output, err = captureStdout(t, func() error {
+		return runWithContext(ctx, []string{"--check-database", garbage})
+	})
+	if status := exitStatus(err); status != 5 {
+		t.Fatalf("damaged database exited %d: %v", status, err)
+	}
+	if !strings.Contains(output, "database: damaged\n") {
+		t.Fatalf("unexpected report:\n%s", output)
+	}
+}
+
+func TestDatabaseCompatibilityCheckReportsNewerDatabase(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "newer.db")
+	stoppedDatabase(t, path)
+	uri, err := db.URI(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A row for a migration this binary does not embed is exactly what a panel
+	// of a later version leaves behind.
+	if _, err := database.Exec("INSERT INTO schema_migrations(version, checksum, applied_at) VALUES('9999_future.sql', 'x', '2026-10-23T00:00:00Z')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, runErr := captureStdout(t, func() error {
+		return runWithContext(ctx, []string{"--check-database", path})
+	})
+	if status := exitStatus(runErr); status != 3 {
+		t.Fatalf("newer database exited %d: %v", status, runErr)
+	}
+	for _, line := range []string{"database: newer\n", "unknown: 9999_future.sql\n", "last: 9999_future.sql\n"} {
+		if !strings.Contains(output, line) {
+			t.Fatalf("report lacks %q:\n%s", line, output)
+		}
+	}
+}
+
+func TestDatabaseCompatibilityCheckReportsForeignDatabase(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "foreign.db")
+	uri, err := db.URI(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec("CREATE TABLE unrelated(id INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, runErr := captureStdout(t, func() error {
+		return runWithContext(ctx, []string{"--check-database", path})
+	})
+	if status := exitStatus(runErr); status != 4 {
+		t.Fatalf("foreign database exited %d: %v", status, runErr)
+	}
+	if !strings.Contains(output, "database: foreign\n") {
+		t.Fatalf("unexpected report:\n%s", output)
 	}
 }

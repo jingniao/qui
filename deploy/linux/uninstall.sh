@@ -33,6 +33,10 @@ qui=/usr/local/bin/qui
 # removed only when no other component of this platform is installed.
 update=/usr/local/bin/qui-update
 library=/usr/local/lib/proxycontrol/service.sh
+# The boot-time hook that finishes an interrupted update belongs to both
+# components in the same way: it is inert without a journal, and the updater that
+# writes the journals is what has to be gone before the hook is useless.
+recovery=/usr/local/lib/proxycontrol/update-recovery
 # The service definitions follow the init system the installation was made for:
 # a unit file on systemd, an init script on OpenRC, plus the watcher the OpenRC
 # init script supervises where systemd has a path unit.
@@ -40,11 +44,13 @@ if [[ $init_system == systemd ]]; then
   unit=/etc/systemd/system/$name.service
   host_network_service=/etc/systemd/system/proxy-agent-host-network.service
   host_network_path=/etc/systemd/system/proxy-agent-host-network.path
+  recovery_service=/etc/systemd/system/proxycontrol-update-recovery.service
   init_directories=(/etc/systemd /etc/systemd/system)
 else
   unit=/etc/init.d/$name
   host_network_service=/etc/init.d/proxy-agent-host-network
   host_network_path=/usr/local/lib/proxy-agent/host-network-watch
+  recovery_service=/etc/init.d/proxycontrol-update-recovery
   init_directories=(/etc/init.d)
 fi
 required_tools=(sha256sum stat flock sed install rm)
@@ -54,7 +60,7 @@ else
   required_tools+=(rc-service rc-update)
 fi
 for tool in "${required_tools[@]}"; do command -v "$tool" >/dev/null || fail "Missing command: $tool"; done
-for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /var/lib "$registry" /run/lock "${init_directories[@]}"; do [[ ! -L $path ]] || fail "Symlinked destination: $path"; done
+for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib "$registry" /run/lock "${init_directories[@]}"; do [[ ! -L $path ]] || fail "Symlinked destination: $path"; done
 [[ -d $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'No protected installation registry.'
 [[ ! -L $registry/operation.lock ]] || fail 'Symlinked installation lock.'
 exec 9>"$registry/operation.lock"
@@ -146,6 +152,12 @@ if [[ $component == panel ]]; then other=agent; fi
 if [[ ! -e $registry/$other.manifest && ! -L $registry/$other.manifest ]]; then
   rm -f -- "$update"
   rm -f -- "$library"
+  # The boot-time hook and its service definition have nothing to recover once
+  # the updater that writes the journals is gone, so they go with it. A host
+  # installed before the hook existed has neither, and disabling a service that
+  # was never enabled is not a failed uninstall.
+  service_disable proxycontrol-update-recovery || true
+  rm -f -- "$recovery_service" "$recovery"
   # rmdir refuses a directory that still holds anything else, which is the only
   # case in which it should stay.
   rmdir -- "${library%/*}" 2>/dev/null || true

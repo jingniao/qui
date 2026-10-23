@@ -1,8 +1,8 @@
 # V1 验收矩阵
 
-更新时间：2026-10-23（第四轮：一键安装与 qui-update 的失败处理和回滚）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-23（第四轮：一键安装与 qui-update 的失败处理和回滚；v1.0.2 发布版复测）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
-**当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
+**当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
 ## 1. 状态与证据规则
 
@@ -297,7 +297,7 @@
 
 ### 9.6 第四轮：一键安装与 `qui-update` 的失败处理和回滚（2026-10-23，发布前）
 
-**修复（提交 `8895e0a`，尚未发布）。** 9.5 的问题 1、2 已修复，另修复本轮发现的三处问题：
+**修复（提交 `8895e0a`，已作为 v1.0.2 发布，见 9.7）。** 9.5 的问题 1、2 已修复，另修复本轮发现的三处问题：
 - `install.sh` 任何失败都删除进行中的 `.installing` 临时文件与暂存目录（不再保留 20–40 MB 的 `staging.*`）；已开始替换文件后失败时，明确提示新旧文件可能混合。
 - `node-install.sh` 的失败提示改为“`install.sh` 可能已经替换了部分文件，本机尚未登记，可以重跑”。
 - **新发现：** 最小化 Debian（debootstrap minbase）上一键安装失败，提示 `unzip is required to extract the Xray release archive`。现在 systemd 主机缺少 `unzip` 时，`install.sh` 像 `nftables` 一样用 apt/dnf/yum 安装它。面板的一键命令在 Debian/Ubuntu 缺少 curl 时也会先用 apt 安装。
@@ -331,7 +331,37 @@
 | 面板崩溃回滚并恢复数据库（Debian 容器） | 通过 | 在容器里装面板 `1.0.2`（`127.0.0.1:18443/19443`，自签证书，HTTP 200），暂时移开 Agent 安装记录，只更新面板到 `1.0.93`。脚本在停止状态下备份数据库并快照文件；新面板启动后向 `panel.db` 与 `panel.db-wal` 写入垃圾（journald 记录 1 次），健康检查失败。回滚恢复文件，删除 `-wal`/`-shm` 并用备份覆盖数据库，启动 `1.0.2`：`active`，`NRestarts=0`，HTTP 200，两个数据库文件里的垃圾计数均为 0，没有残留快照。随后恢复 Agent 安装记录。 |
 | 回滚后的数据面 | 通过 | 第三台主机上经 `127.0.0.1:990`：`api.ipify.org` 仍经链路从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218）。面板显示 `uk-node`、`alpine-node`、`us2-node` 均 `online`、Agent `1.0.1`。 |
 | 共存服务 | 通过 | 面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 保持 `active`，启动时间仍是 2026-10-17。第三台主机上 `komari-agent` 的运行时长持续增加（未重启），`cf-probe`、`crond` 为 `started`，`xboard-node` 保持测试前的 `crashed`。 |
-| 从 GitHub 一键安装 v1.0.2（systemd、OpenRC） | 未执行 | 需要先发布 v1.0.2，发布需 owner 批准。 |
-| 用旧版 `qui-update`（1.0.1）从 GitHub 升级到 v1.0.2（`uk-node`、`alpine-node`、面板主机） | 未执行 | 同上。这也是 OpenRC 上第一次带版本变化的真实 `qui-update`（9.5 问题 3）。 |
+| 从 GitHub 一键安装 v1.0.2（systemd、OpenRC） | 通过 | 见 9.7。 |
+| 用旧版 `qui-update`（1.0.1）从 GitHub 升级到 v1.0.2（`uk-node`、`alpine-node`、面板主机） | 通过 | 见 9.7。 |
 
 仍未覆盖：arm64；面板跨迁移的手工降级；更新中途被 Ctrl-C 或断电打断（此时不回滚，快照保留，见[部署与升级](deployment.md)第 5 节）。
+
+### 9.7 v1.0.2 发布版：从 GitHub 安装与更新（2026-10-23）
+
+经 owner 批准，`8895e0a` 与 `a67d9b9` 推送到 `main`，标签 `v1.0.2` 由 CI 发布：`main` 与标签两次检查都通过。发布的 `SHA256SUMS`：amd64 `0287a69b…cf90`，arm64 `6b9c3308…2759`。
+
+| 项 | 结果 | 实际观察 |
+| --- | --- | --- |
+| 旧版 `qui-update`（1.0.1）升级 `uk-node`（systemd） | 通过 | `qui-update --version 1.0.2 --yes`：从 GitHub 下载并核对摘要，Agent `1.0.1 → 1.0.2`，`active`，退出码 0。没有残留，`xboard-node`、`cf-probe` 的 PID 与启动时间（2026-10-17）不变。 |
+| 旧版 `qui-update` 升级 `alpine-node`（OpenRC，真实 LXC） | 通过 | OpenRC 上第一次带版本变化的真实 `qui-update`（关闭 9.5 问题 3）：Agent `1.0.1 → 1.0.2`，`proxy-agent` 与 `proxy-agent-host-network` 都 `started`，安装记录第 10 行仍为 `openrc`，没有残留。`komari-agent` PID 不变，`cf-probe` `started`。 |
+| 旧版 `qui-update` 升级面板主机（Agent + 面板） | 通过 | 先 Agent 后面板，都到 `1.0.2`；面板停止时备份数据库为 `pre-update-1.0.1-20261023-130428.db`。两个服务 `active`、`NRestarts=0`。`us2-node` 在面板重启期间按退避重连，约 20 秒后 `online`。`xboard-node`、`cf-probe` PID 不变。 |
+| 升级后的数据面 | 通过 | 第三台主机经 `127.0.0.1:990`：`api.ipify.org` 经链路 ALP→UK→US2 从 23.254.158.3 出口，`ifconfig.me` 直连 113.29.231.218。`dataplane.sh` 对 `uk-node`：SOCKS5/HTTP/VLESS/SS/Trojan 直连都返回 `uk-node` 地址，四条阻断规则都被拒（curl 35），错误口令被拒（97），GitHub 与 Netflix robots 都 200。<br>脚本里三条“中转/链到 US”的检查也返回 `uk-node` 地址：对应的分流规则在先前一轮改为链 ALP-UK-US2 时已删除（当前策略只有阻断、GitHub 直连和该链），因此直连是正确结果，不是回归。 |
+| 从 GitHub 一键安装（systemd，全新 Debian 13 minbase 容器） | 通过 | 面板登记 `deb-gh`，返回安装版本 `1.0.2`；在容器里原样执行面板一键命令。容器自带 curl，没有 unzip：脚本从 GitHub 下载 `node-install.sh` 与归档并核对摘要，自动安装 unzip。面板证书自签，按固定 SHA-256 建立信任。登记后 `proxy-agent.service` `enabled` 并 `active`，Agent `1.0.2`。没有 `staging.*` 或 `.installing` 残留，面板显示 `online`。 |
+| 从 GitHub 一键安装（OpenRC，全新 Alpine 3.19.9 容器） | 通过 | 登记 `alp-gh`，在 ash 里原样执行同一命令（容器没有 bash 与 curl）：apk 装上依赖，创建 `/etc/machine-id`，`proxy-agent` 与 `proxy-agent-host-network` 加入 `default` 并 `started`。记录第 10 行为 `openrc`，Agent `1.0.2`，没有残留，面板显示 `online`。 |
+| 新版 `qui-update` 取最新版本（两个容器） | 通过 | `qui-update --yes`：经 GitHub API 查到最新发布，输出“已是最新版本 1.0.2。”，退出码 0。 |
+| 新版 `qui-update` 指定不存在的版本（两个容器） | 通过 | `--version 9.9.9`：下载返回 404，输出“更新被拒绝：下载失败…”。服务未被停止（启动时间与 `NRestarts=0` 不变），没有残留。 |
+| 新版 `qui-update` 从 GitHub 降级到 1.0.1（Debian 容器） | 通过 | 本意是锁文件测试，但全新容器里没有 `chattr`，所以实际做成了一次正常降级：下载 1.0.1，快照，替换，10 秒健康检查通过，Agent `1.0.1`。随后用容器里已是 1.0.1 的 `qui-update` 再从 GitHub 升回 `1.0.2`，成功。 |
+| 新版 `qui-update` 从 GitHub 下载后 `install.sh` 失败（Debian 容器） | 通过 | 在主机侧对容器的 `proxy-agent.service` 执行 `chattr +i`，再 `qui-update --version 1.0.1 --yes`：1.0.1 的 `install.sh` 替换程序后 `mv` 单元失败。脚本恢复快照，输出“更新失败，已恢复到 1.0.2，服务运行正常（10 秒内无重启）”。程序与 `qui-update` 的摘要和测试前相同，Agent `1.0.2` `active`，`rollback.*` 已删除。<br>**残留（预期）：** 本次运行的是 1.0.1 的 `install.sh`，它仍会留下 `staging.*` 与 `.proxy-agent.service.installing.*`。这是 9.5 问题 1，已在 1.0.2 的 `install.sh` 修复，所以只在降级到 ≤1.0.1 时出现。 |
+| 共存服务 | 通过 | 测试前后面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 不变；第三台主机上 `komari-agent` PID 不变，`cf-probe` 保持 `started`。 |
+
+**第三台主机的 curl 包装脚本（经 owner 批准修复）。** `/usr/bin/curl` 是两行脚本 `exec /usr/bin/curl.orig -k "$@"`，因此该主机上所有用 curl 的程序都不校验 HTTPS 证书。
+- **来源：** 文件时间 2026-02-02 22:43，与 `/etc/hosts`、`/etc/hostname`、`/etc/inittab`、`/fastboot` 同时写入，即服务商的 LXC 模板在开通时加入，不属于任何应用。模板自带的 `ca-certificates-bundle` 是 2023-05 版，这很可能是当初加 `-k` 的原因；当前的 CA 文件（2026-05-30）已能正常校验。
+- **影响范围：** 没有程序直接调用 `curl.orig`。唯一用 curl 的应用是 `cf-probe`（bash 脚本），它访问的上报地址使用 Google Trust Services 证书，`cloudflare.com` 同样有效。`komari-agent` 与 `xboard-node` 是独立程序，不用 curl。
+- **修复：** `curl.orig` 的 SHA-1 与 apk 数据库里 `curl-8.5.0-r0` 的 `/usr/bin/curl` 记录一致，即未被改动的原版程序。先把包装脚本备份到 `/root/qui-accept/curl-wrapper.bak`，再把原版复制为临时文件，用 `mv` 原子替换 `/usr/bin/curl`；`curl.orig` 保留不动，便于回退。之后 `apk audit` 不再报告 `/usr/bin/curl`。不需要重启任何服务。
+- **验证：** 不带任何选项时 `github.com`、`cf-probe` 的上报地址、`cloudflare.com/cdn-cgi/trace` 都返回 200，`ssl_verify_result=0`；`expired.badssl.com`、`self-signed.badssl.com`、`wrong.host.badssl.com` 都被 curl 以错误 60 拒绝。`cf-probe` 继续 `started`，它的上报不写日志，为不暴露其密钥，没有重放它的带密钥请求。随后链路测试与一键安装都在启用校验的 curl 下完成。
+
+**清理。**
+- 面板上删除测试节点 `deb-clean`、`alpine-clean`、`deb-gh`、`alp-gh`（均无阻塞项，HTTP 204）。
+- 停止两个容器，删除面板主机上的 `debian-clean`、`alpine-clean`、`bundles` 目录，以及三台主机上的 `v102test` 目录。
+- 卸载本轮在面板主机上安装的 `systemd-container`、`debootstrap` 及其自动依赖 `libnss-mymachines`、`arch-test`、`distro-info`；`/etc/nsswitch.conf` 的 `hosts` 行恢复为 `files dns`，DNS 正常，没有失败的单元。
+- 最终状态：`uk-node`、`alpine-node`、`us2-node` 均 `online`，Agent 与面板都是 `1.0.2`。三台主机上 `/var/lib/proxycontrol-install` 只有安装记录与锁文件。

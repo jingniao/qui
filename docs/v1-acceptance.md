@@ -479,7 +479,7 @@
   - 处理：期望状态是清除（不加任何规则），所以执行它不会改变网络。`reset-failed` 后手动运行一次 oneshot 单元（等同开机时的重放），`status.json` 变为当前请求 `ok:true`，nft 表仍不存在。之后两台 systemd 主机都没有失败的单元。
   - **遗留问题**：强制出站 helper 在短时间内连续失败时，systemd 会停用 path 单元，之后的期望状态在下次安装或重启前都不会被执行。已在发布前修复，见 9.10。
 
-### 9.10 强制出站 helper 的启动频率限制（2026-10-23，发布前）
+### 9.10 强制出站 helper 的启动频率限制（2026-10-23，发布前；已作为 v1.0.4 发布，见 9.11）
 
 **原因。**
 - systemd 默认每个单元 10 秒内最多启动 5 次，成功和失败都计数。path 单元每次发布触发一次 oneshot 单元；helper 连续失败几次后，path 单元以 `unit-start-limit-hit` 停止，之后写入的 `desired.json` 都不会被执行。
@@ -507,4 +507,34 @@
 | 单元文件 | 通过 | `systemd-analyze verify` 无输出；加载后 `StartLimitIntervalUSec=0`。 |
 | `install.sh` 重放 | 通过 | 在一个必然失败的临时单元上运行同一段代码：`failed` 单元被重新执行一次（运行次数 1 → 2），代码段退出码 0。 |
 | 清理与共存服务 | 通过 | 测试单元、`/run/qui-hn-test.*` 与上传的文件都已删除，没有失败的单元。面板主机与 `uk-node` 上 `proxy-agent`、`proxy-panel`、`xboard-node`、`cf-probe` 的 PID 与测试前相同；第三台主机上 `komari-agent`、`cf-probe`、`proxy-agent`、`proxy-agent-host-network` 的运行时长持续增加，`xboard-node` 保持测试前的 `crashed`。 |
-| 真实 Agent 端到端（发布强制出站失败后再清除） | 跳过 | 修复尚未发布；三台主机仍运行 v1.0.3。 |
+| 真实 Agent 端到端（发布强制出站失败后再清除） | 见 9.11 | 发布前跳过（当时三台主机仍运行 v1.0.3），发布后在 9.11 完成。 |
+
+### 9.11 v1.0.4 发布、三台主机升级与实机复测（2026-10-23）
+
+**发布。**
+- 提交 `a820647` 推送到 `main`。该提交与标签 `v1.0.4` 的 CI 都是 `success`，包括调用 `host-network-test.sh` 的 “Deploy script checks” 步骤。CI 日志需要登录才能下载，所以无法确认该测试在 runner 上实际运行，还是因环境不满足而跳过；它的实际结果以 9.10 的三台主机为准。
+- GitHub Release `v1.0.4` 于 2026-10-23T10:36:29Z 发布，正式版，不是草稿。附件有两个归档、`SHA256SUMS` 与 `node-install.sh`。
+- amd64 归档 SHA-256 为 `5ea8a4a9…9173893`，与 `SHA256SUMS` 一致。归档里的单元带 `StartLimitIntervalSec=0`，并包含 `deploy/linux/tests/host-network-test.sh`。
+
+**升级（各主机用已安装的 1.0.3 `qui-update --version 1.0.4 --yes` 从 GitHub 升级）。**
+
+| 主机 | 结果 |
+|---|---|
+| `uk-node`（Debian，systemd） | Agent `1.0.3 → 1.0.4`，`active`，10 秒内无重启，退出码 0；加载后 `StartLimitIntervalUSec=0`，path 单元 `active` |
+| 第三台主机 `alpine-node`（OpenRC） | Agent `1.0.4`，`started`，watcher 随升级重启，退出码 0 |
+| 面板主机 | Agent 与面板都到 `1.0.4`；面板更新前备份 `pre-update-1.0.3-20261023-183900.db`；HTTPS 返回 200 |
+
+三台主机都没有残留快照（`/var/lib/proxycontrol-install` 只有安装记录与锁文件），也没有失败的单元。面板显示三个节点 `online`、Agent `1.0.4`。
+
+**实机复测：真实 Agent、真实 helper，经面板发布。**
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 失败请求被拒绝并回滚（`uk-node`） | 通过 | 把强制出站 IPv6 设为文档地址 `2001:db8::5`，然后发布修订 41～47。每个修订都是 `rollback`、`host_network_failed`。 |
+| 超过 systemd 原限制的连续启动（`uk-node`） | 通过 | 修订 41～44 依次部署：helper 共启动 16 次、失败 8 次，但任意 10 秒内最多 4 次。修订 45～47 一结束就部署下一个：10 秒内启动 12 次、失败 6 次，超过旧的 10 秒 5 次限制。日志里没有 start-limit 消息，path 单元仍为 `ActiveState=active`、`Result=success`。 |
+| 连续失败后清除生效（`uk-node`） | 通过 | 清空字段，发布修订 48：`success`。`desired.json` 与 `status.json` 是同一个新 `id`，且 `ok:true`。nft 表 `inet proxy_agent_source` 不存在，oneshot 单元 `Result=success`，没有失败的单元。 |
+| OpenRC 同一流程（`alpine-node`） | 通过 | 修订 49～52 连续部署：都是 `rollback`、`host_network_failed`。清除修订 53：`success`，`status.json` 与 `desired.json` 是同一个 `id` 且 `ok:true`，没有 nft 表。`proxy-agent-host-network` 仍是 `started`。 |
+| 数据面 | 通过 | 第三台主机经 `127.0.0.1:990`（带 SOCKS 凭据）：`api.ipify.org` 从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），与升级前相同。 |
+| 共存服务 | 通过 | 面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID（738/740、833/834）与测试前相同。第三台主机上 `komari-agent` 的运行时长持续增加（未重启），`cf-probe` 为 `started`，`xboard-node` 保持测试前的 `crashed`。 |
+
+最终状态：两个节点的强制出站字段都为空，与测试前相同。复测时上传和生成的临时文件都已删除。

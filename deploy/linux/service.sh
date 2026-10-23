@@ -20,10 +20,10 @@
 #
 # API: detect_init, service_is_active, service_start, service_stop,
 # service_restart, service_enable, service_disable, service_reload_definitions,
-# service_state and service_log_hint. Service names are given without the
-# ".service" suffix and the systemd branch adds it, so the same call works on
-# both init systems. Callers set the global init_system from detect_init before
-# calling anything else.
+# service_state, service_healthy and service_log_hint. Service names are given
+# without the ".service" suffix and the systemd branch adds it, so the same call
+# works on both init systems. Callers set the global init_system from detect_init
+# before calling anything else.
 
 # Print the init system this host runs: "systemd" or "openrc". Prints nothing and
 # returns 1 when neither is running, so the caller decides how to refuse.
@@ -149,6 +149,53 @@ service_state() {
         *) if ((code == 0)); then printf 'started\n'; else printf 'stopped\n'; fi;;
       esac;;
   esac
+}
+
+# Print the main PID of a running service, or fail when there is none to trust.
+# systemd is asked for MainPID directly. OpenRC has no such query: supervise-daemon
+# writes the child it watches to /run/openrc/options/<service>/child_pid (checked on
+# the target host), so the file is read as a file and a missing or non-numeric value
+# means "no pid" instead of a number to believe. The pid is also tested with kill -0,
+# because the file of a service that just died can still name the dead child.
+service_main_pid() {
+  local name=$1 pid=''
+  init_system_known || return 1
+  case $init_system in
+    systemd) pid=$(systemctl show -p MainPID --value "$name.service" 2>/dev/null || true);;
+    openrc) pid=$(cat "/run/openrc/options/$name/child_pid" 2>/dev/null || true);;
+  esac
+  [[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
+  if [[ $init_system == openrc ]]; then kill -0 "$pid" 2>/dev/null || return 1; fi
+  printf '%s\n' "$pid"
+}
+
+# Wait for a service to be active with a main process, then watch it for $2 seconds
+# (10 by default, one poll per second) and report whether it stayed that way. A
+# program that starts, crashes and is started again looks active at every poll, so
+# the test is the main PID: both init systems restart a crashed program after five
+# seconds (Restart=on-failure RestartSec=5, supervise-daemon respawn_delay=5), which
+# changes the PID, and a changed PID is a failed start. A service that is not active,
+# or has no PID, at any poll fails as well. Returns 1 in all of those cases and 0 only
+# when the service was active with one unchanged PID for the whole window.
+service_healthy() {
+  local name=$1 seconds=${2:-10} waited=0 first='' pid=''
+  init_system_known || return 1
+  while ((waited < 15)); do
+    if service_is_active "$name" && pid=$(service_main_pid "$name"); then
+      first=$pid
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  [[ -n $first ]] || return 1
+  for ((waited = 0; waited < seconds; waited += 1)); do
+    sleep 1
+    service_is_active "$name" || return 1
+    pid=$(service_main_pid "$name") || return 1
+    [[ $pid == "$first" ]] || return 1
+  done
+  return 0
 }
 
 # Print a command that shows the last 50 log lines of a service. Both programs

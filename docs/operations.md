@@ -248,7 +248,7 @@ OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监�
 | 1. 修改管理员账号密码 | 依次提示新用户名（留空保持不变）和两次新密码，确认后**短暂停止** `proxy-panel.service`，再以服务账号身份运行 `proxy-panel --config /etc/proxy-panel/config.yaml --set-owner-credentials`（用户名与口令两行从标准输入读入，口令不进 argv、不回显），然后按停止前的状态把服务启动回来。口令策略由程序校验，错误原样显示；成功后**所有 Owner 会话立即失效**，必须重新登录。 |
 | 2. 修改端口 | 只改 `http_address` 的端口，`grpc_address`（节点连接）不动：校验端口是 1-65535 的整数且与当前不同，端口与 `grpc_address` 相同时给一行提示；在 `/etc/proxy-panel` 里生成候选文件，先让程序 `--check-config` 校验，通过后把原文件备份为 `/etc/proxy-panel/config.yaml.bak`（属主与 0600 权限和原来一致）再原子替换；校验或备份失败时删除候选文件、保留原配置。最后询问是否立即重启，并提示放行防火墙与含旧端口的订阅链接需要用户刷新。 |
 | 3 / 4 / 5. 重启 / 启动 / 停止 | 直接 `systemctl restart`、`systemctl start`、`systemctl stop proxy-panel.service` 并打印结果状态；启动或重启失败会提示 `journalctl -u proxy-panel -n 50`。服务本来就在运行或已停止时只提示，不重复操作。 |
-| 6. 更新（从 GitHub） | 运行 `/usr/local/bin/qui-update`：默认取 `https://github.com/jingniao/qui/releases/latest`（也可 `--version X.Y.Z` 指定），下载归档与同一发布的 `SHA256SUMS` 并核对摘要，停止 `proxy-panel.service`，在停止状态下把数据库备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，再用归档里的 `deploy/linux/install.sh` 原地替换程序与单元，最后按停止前的状态启动服务并打印结果；失败时打印 `journalctl`、降级命令与备份路径。 |
+| 6. 更新（从 GitHub） | 运行 `/usr/local/bin/qui-update`：默认取 `https://github.com/jingniao/qui/releases/latest`（也可 `--version X.Y.Z` 指定），下载归档与同一发布的 `SHA256SUMS` 并核对摘要，停止 `proxy-panel.service`，在停止状态下把数据库备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，再用归档里的 `deploy/linux/install.sh` 原地替换程序与单元，最后按停止前的状态启动服务，并要求它 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照与更新前的数据库，启动旧版本。只有回滚也失败时才打印 `journalctl`、降级命令与备份路径（细节见[部署与升级](deployment.md)第 5 节）。 |
 
 菜单只调用上面这些固定操作，不提供 shell 或日志查看入口。
 

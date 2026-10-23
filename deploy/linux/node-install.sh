@@ -232,7 +232,7 @@ core_arguments=(--core "$core" --core-version "$core_version")
 if [[ -n $core_digest ]]; then core_arguments+=(--core-sha256 "$core_digest"); fi
 printf '\n安装 Agent 与核心 %s %s ...\n' "$core" "$core_version"
 "$source_dir/deploy/linux/install.sh" --node --binary "$binary" --sha256 "$digest" "${core_arguments[@]}" \
-  || fail 'Agent 安装失败，本机未被修改。'
+  || fail 'Agent 安装失败（原因见上面 install.sh 的输出）；install.sh 可能已经替换了部分文件，本机尚未登记，修正问题后可以直接重跑本脚本（install.sh 原地升级）。'
 
 config=/etc/proxy-agent/config.yaml
 ca_file=/etc/proxy-agent/tls/ca.crt

@@ -218,23 +218,26 @@ verify_binary() {
   verify_elf "$file"
 }
 
-# The enforced outbound source needs nftables. The Agent runs nft only from the
-# packaged helper unit, and only when the panel publishes a host source address,
-# so the package is installed here instead of being required at boot. A node
-# without it keeps running; the publish that needs it fails and is retried.
-ensure_nft() {
-  if command -v nft >/dev/null; then return; fi
+# Install the package that provides a command this script needs on a systemd host
+# when the command is missing. The enforced outbound source needs nft: the Agent
+# runs it only from the packaged helper unit, and only when the panel publishes a
+# host source address, so the package is installed here instead of being required
+# at boot. The Xray release is a zip, and a minimal Debian or Ubuntu install has no
+# unzip. Alpine gets both from the apk line above.
+ensure_command() {
+  local command=$1 package=$2 purpose=$3
+  if command -v "$command" >/dev/null; then return; fi
   if command -v apt-get >/dev/null; then
-    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends nftables \
-      || { DEBIAN_FRONTEND=noninteractive apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends nftables; }
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends "$package" \
+      || { DEBIAN_FRONTEND=noninteractive apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends "$package"; }
   elif command -v dnf >/dev/null; then
-    dnf install --assumeyes nftables
+    dnf install --assumeyes "$package"
   elif command -v yum >/dev/null; then
-    yum install --assumeyes nftables
+    yum install --assumeyes "$package"
   else
-    fail 'nft is required for the enforced outbound source; install the nftables package of this distribution and run this again.'
+    fail "$command is required $purpose; install the $package package of this distribution and run this again."
   fi
-  command -v nft >/dev/null || fail 'The nftables package did not provide nft.'
+  command -v "$command" >/dev/null || fail "The $package package did not provide $command."
 }
 
 # The Agent's core-lifetime check
@@ -319,21 +322,43 @@ core_archive_digest() {
   printf '%s' "$value"
 }
 
+# The temporary file the current publish() is writing. It is global because a failure
+# inside publish has to remove it, and because cleanup() removes it after a signal as
+# well: an install interrupted between the copy and the rename used to leave a
+# full-size dot file next to the destination (in the field, a 20 MB
+# /usr/local/bin/.proxy-agent.installing.<pid> after the rename had been refused by an
+# immutable target).
+publishing_temporary=''
+
 # Publish a staged file over its destination in one rename, so an interrupted
 # install never leaves a half-written program, unit or record behind.
 publish() {
   local source=$1 destination=$2 owner=$3 group=$4 mode=$5 temporary
   temporary=${destination%/*}/.${destination##*/}.installing.$$
-  install -o "$owner" -g "$group" -m "$mode" -- "$source" "$temporary"
-  sync -f -- "$temporary"
-  mv -T -- "$temporary" "$destination"
+  publishing_temporary=$temporary
+  if ! install -o "$owner" -g "$group" -m "$mode" -- "$source" "$temporary" \
+    || ! sync -f -- "$temporary" \
+    || ! mv -T -- "$temporary" "$destination"; then
+    rm -f -- "$temporary"
+    publishing_temporary=''
+    return 1
+  fi
+  publishing_temporary=''
   sync -f -- "${destination%/*}"
 }
 
 stage=$(mktemp -d "$registry/staging.XXXXXXXX")
-keep_stage=false
+# True once the first publish() has replaced a file. From that point a failure leaves a
+# mix of old and new files behind, so cleanup() reports that instead of keeping the
+# staging directory: a retained directory is 20-40 MB per failed attempt and piles up
+# in the registry, while the staged material is rebuilt by re-running the same
+# install.sh anyway.
+publishing_started=false
 cleanup() {
-  if $keep_stage; then printf 'Installation material retained for inspection: %s\n' "${stage##*/}" >&2; return; fi
+  if [[ -n $publishing_temporary ]]; then rm -f -- "$publishing_temporary"; fi
+  if $publishing_started; then
+    printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
+  fi
   [[ $stage == "$registry"/staging.* ]] || return 1
   rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/service-library" "$stage/machine-id"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
@@ -372,7 +397,7 @@ if [[ $component == agent ]]; then
   host_network_service_digest=$(sha256sum -- "$stage/host-network-service"); host_network_service_digest=${host_network_service_digest%% *}
   host_network_path_digest=$(sha256sum -- "$stage/host-network-path"); host_network_path_digest=${host_network_path_digest%% *}
   if [[ $init_system == systemd ]]; then
-    ensure_nft
+    ensure_command nft nftables 'for the enforced outbound source'
   else
     # Alpine installs nftables from apk above; package managers are not driven
     # from here on OpenRC, but the helper still needs the binary.
@@ -411,6 +436,7 @@ if [[ -n $core ]]; then
   mkdir -- "$stage/extract"
   case $asset in
     *.zip)
+      if [[ $init_system == systemd ]]; then ensure_command unzip unzip 'to extract the Xray release archive'; fi
       command -v unzip >/dev/null || fail 'unzip is required to extract the Xray release archive.'
       unzip -q -o -d "$stage/extract" -- "$stage/archive";;
     *.tar.gz)
@@ -449,7 +475,7 @@ if [[ $component == agent ]]; then
   install -d -o "$account" -g "$account" -m 0700 "$data/host-network"
 fi
 
-keep_stage=true
+publishing_started=true
 publish "$stage/program" "$target" root root 0755
 publish "$stage/unit" "$unit" root root "$service_mode"
 if [[ $component == panel ]]; then publish "$stage/qui" "$qui" root root 0755; fi
@@ -538,7 +564,7 @@ chmod 0600 "$stage/installed-manifest"
 publish "$stage/installed-manifest" "$record" root root 0600
 if $reinstall; then rm -- "$removed"; sync -f -- "$registry"; fi
 verify_binary "$target" "$digest"
-keep_stage=false
+publishing_started=false
 
 printf '%s installed at %s with unit %s.\n' "$name" "$target" "$unit"
 if [[ -n $core ]]; then printf 'Core %s %s installed at %s.\n' "$core" "$core_version" "$core_target"; fi
@@ -560,4 +586,3 @@ fi
 if [[ $component == agent ]]; then printf 'Then enroll the node with deploy/linux/enroll.sh --token-file FILE.\n'; fi
 printf 'Managed agent and core upgrades are deployed from the panel.\n'
 printf 'Run qui-update to update from GitHub.\n'
-

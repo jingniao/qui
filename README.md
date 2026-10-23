@@ -2,19 +2,19 @@
 
 面向 1～10 名内部用户的自托管多节点代理控制平台。中央端是一个 Go 单体程序（SQLite + 嵌入式 Vue 前端），Node Agent 通过 gRPC + mTLS 主动接入并管理**官方** Xray 或 sing-box 二进制；用户代理流量不经过中央端。
 
-当前状态：按[轻量重构计划](docs/lightweight-refactor-plan.md)收敛完成，**v1.0.1 已发布**（GitHub Release，节点 Agent 支持 Alpine/OpenRC，仓库 <https://github.com/jingniao/qui>）。**V1 仍未完成**：实机验收进行中，标准与实机清单见[验收矩阵](docs/v1-acceptance.md)。
+当前状态：按[轻量重构计划](docs/lightweight-refactor-plan.md)收敛完成，**v1.0.2 已发布**（GitHub Release，节点 Agent 支持 Alpine/OpenRC，`qui-update` 带回滚快照与健康检查，仓库 <https://github.com/jingniao/qui>）。**V1 仍未完成**：实机验收进行中，标准与实机清单见[验收矩阵](docs/v1-acceptance.md)。
 
 ## 快速开始
 
 ```sh
-VERSION=1.0.1 bash scripts/build-release.sh      # 产出 Linux amd64/arm64 包与 SHA256SUMS
+VERSION=1.0.2 bash scripts/build-release.sh      # 产出 Linux amd64/arm64 包与 SHA256SUMS
 ```
 
 在目标 Linux 主机上（root、systemd）：
 
 ```sh
-tar -xzf proxy-control-1.0.1-linux-amd64.tar.gz
-cd proxy-control-1.0.1-linux-amd64
+tar -xzf proxy-control-1.0.2-linux-amd64.tar.gz
+cd proxy-control-1.0.2-linux-amd64
 deploy/linux/install.sh --panel --binary bin/proxy-panel --sha256 <sha256>
 # 放好 Web TLS 证书、改好 /etc/proxy-panel/config.yaml，然后
 systemctl enable --now proxy-panel.service       # 首次访问用日志/文件里的一次性令牌创建 Owner

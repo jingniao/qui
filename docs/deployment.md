@@ -14,7 +14,7 @@
 - 节点需要签发面板 Web 证书的 CA 文件（第 1 条的 `tls.certificate`；面板的 gRPC 9443 也用同一张证书），默认放在 `/etc/proxy-agent/tls/ca.crt`，`server_name` 必须与该证书匹配。
 - 节点若要使用服务器强制出站源地址，需要 nftables（Linux ≥ 5.2）。`install.sh --node` 在 systemd 主机上缺少 `nft` 时用发行版的包管理器（apt / dnf / yum）安装 `nftables`，装不上就拒绝安装；在 Alpine 上它随下一条的 apk 依赖一起安装。
 - 在 Alpine（OpenRC 且有 `apk`）上，`install.sh --node` 先执行 `apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables`（已装的包不变），因此后面的命令与 Debian 上相同。
-- `install.sh` 会检查它用到的命令是否存在，缺失即拒绝：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 上另加 `systemctl`，OpenRC 上另加 `rc-service rc-update openrc-run`。安装核心时还需要 `unzip`（Xray zip）或 `tar`（sing-box tar.gz），下载需要 `curl` 或 `wget`。
+- `install.sh` 会检查它用到的命令是否存在，缺失即拒绝：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 上另加 `systemctl`，OpenRC 上另加 `rc-service rc-update openrc-run`。安装核心时还需要 `unzip`（Xray zip）或 `tar`（sing-box tar.gz），下载需要 `curl` 或 `wget`。最小化安装的 Debian/Ubuntu 没有 `unzip`：systemd 主机上缺少时，`install.sh` 像 `nftables` 一样用 apt / dnf / yum 安装它（实测：debootstrap minbase 的 Debian 13）。
 - 脚本里所有需要校验证书的 `curl` 调用都带 `--no-insecure`。它会覆盖 curl 包装脚本或别名加在前面的 `-k`：实测有一台 Alpine LXC 的 `/usr/bin/curl` 被换成了 `curl.orig -k "$@"`。
 
 ## 2. 构建发布包
@@ -24,7 +24,7 @@
 仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：`scripts/build-release.sh`、`.github/workflows/check.yml` 和 `deploy/linux/install.sh` 只使用 `PATH` 上的 `go`、`npm`、`tar`。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
 
 ```sh
-VERSION=1.0.1 bash scripts/build-release.sh
+VERSION=1.0.2 bash scripts/build-release.sh
 ```
 
 - `SKIP_NPM_CI=1` 复用已安装的前端依赖（离线构建）；`OUTPUT_DIRECTORY=/abs/path` 改变输出目录，默认 `dist/`。
@@ -38,8 +38,8 @@ VERSION=1.0.1 bash scripts/build-release.sh
 在解包目录内执行（脚本要求同级的 `systemd/` 与 `examples/`）：
 
 ```sh
-tar -xzf proxy-control-1.0.1-linux-amd64.tar.gz
-cd proxy-control-1.0.1-linux-amd64
+tar -xzf proxy-control-1.0.2-linux-amd64.tar.gz
+cd proxy-control-1.0.2-linux-amd64
 sha256sum bin/proxy-panel
 deploy/linux/install.sh --panel --binary bin/proxy-panel --sha256 <sha256>
 ```
@@ -95,13 +95,14 @@ systemctl enable --now proxy-panel.service
 ### 一键安装（推荐）
 
 ```sh
-command -v apk >/dev/null 2>&1 && apk add --no-cache bash curl ca-certificates; \
-curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.1/node-install.sh | bash -s -- \
-  --version 1.0.1 --panel panel.example.com --grpc-port 9443 \
+if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; \
+elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; \
+curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.2/node-install.sh | bash -s -- \
+  --version 1.0.2 --panel panel.example.com --grpc-port 9443 \
   --ca-sha256 <面板显示的 64 位小写十六进制> --token <一次性注册码> --core xray
 ```
 
-- 开头的 `command -v apk … ;` 只在 Alpine 上生效：原版 Alpine 既没有 bash 也没有 curl，root 的登录 shell 是 busybox ash；在其他发行版上这一段什么也不做。同一条命令可以直接粘贴到 Debian、Ubuntu 和 Alpine（含 LXC）的 root shell 里。
+- 开头的 `if … fi;` 只补齐这条命令自己需要的工具：Alpine 上用 apk 安装 bash 与 curl（原版 Alpine 两者都没有，root 的登录 shell 是 busybox ash）；Debian/Ubuntu 上只在没有 curl 时用 apt 安装（最小化安装可能没有）；已经具备时什么也不做。它在 ash、dash 与 bash 里都合法，同一条命令可以直接粘贴到 Debian、Ubuntu 和 Alpine（含 LXC）的 root shell 里。
 - **离线安装**：在 `node-install.sh` 后加 `--bundle <proxy-control-<版本>-linux-<架构>.tar.gz> --sums <SHA256SUMS>`（两个必须同时给出），脚本就改用本地文件而不访问 GitHub 下载归档。本地归档仍要按 `SHA256SUMS` 核对；Xray 核心仍从官方发布地址下载。
 
 - 命令由面板生成：版本是面板自身的版本，端口取自 `grpc_address`，摘要是面板 Web 证书信任锚的 SHA-256。只有**正式发布版本**（X.Y.Z）且面板以非开发模式运行时对话框才显示该命令，否则提示按下面的手工步骤安装。
@@ -109,6 +110,7 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.
 - 面板证书信任按两种情况之一建立：先尝试用系统 CA 包（即随后会被安装为节点 CA 的那个文件，`--cacert` 指定，并带 `--no-insecure`）验证 `https://<面板>/install/ca.pem`，成功说明面板证书由公网 CA 签发（例如 Let's Encrypt，其中间证书会轮换），此时把系统 CA 包（`/etc/ssl/certs/ca-certificates.crt` 或 `/etc/pki/tls/certs/ca-bundle.crt`）安装为 `/etc/proxy-agent/tls/ca.crt`；失败则改用 `curl -k` 取回该文件，并要求它的 SHA-256 等于 `--ca-sha256`，不一致立即中止（可能中间人攻击，或面板地址/端口填错）。
 - 之后脚本把 `control_address` 与 `server_name` 写入 `/etc/proxy-agent/config.yaml`（保持原属主与权限），用一次性注册码登记，最后启用并启动 Agent：systemd 上是 `systemctl enable` + `start proxy-agent.service`，OpenRC 上是 `rc-update add proxy-agent default` + `rc-service proxy-agent start`。
 - 注册码只能用一次且会过期；它出现在新服务器的 shell 历史里，登记成功后请清理该历史。节点**登记成功前**可以重跑这条命令：会原地升级 Agent 并用新的注册码重新登记，登记要求本机能访问面板的 gRPC 端口（默认 9443）；已登记的主机再跑会被拒绝，升级用 `qui-update`。
+- 安装失败（例如缺少依赖）时脚本报告 `Agent 安装失败（原因见上面 install.sh 的输出）`：`install.sh` 可能已经替换了部分文件，但本机尚未登记，修正原因后直接重跑同一条命令即可。`install.sh` 不会留下暂存目录或 `.installing` 临时文件。
 - 失败的登记会留下重试标记 `/var/lib/proxy-agent/enrollment-attempt.json` 和它生成的私钥。Agent 把这两个文件绑定到原注册码与面板，不允许换绑。所以重跑时，只要本机既没有证书也没有 `enrollment-result.json`，脚本就把它们移到 `/var/lib/proxy-agent-enrollment-retired.XXXXXXXX/`（root 0700，**不删除**），再用新注册码登记；新登记成功后可以删除该目录。存在 `enrollment-result.json` 时，面板可能已经签发过证书，脚本拒绝继续，处理方法见运维手册第 5 节。
 
 ### 4.1 Alpine / OpenRC 节点
@@ -138,8 +140,8 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.
 **第 2 步（节点）**：安装 Agent，需要时同时安装官方核心。
 
 ```sh
-tar -xzf proxy-control-1.0.1-linux-amd64.tar.gz
-cd proxy-control-1.0.1-linux-amd64
+tar -xzf proxy-control-1.0.2-linux-amd64.tar.gz
+cd proxy-control-1.0.2-linux-amd64
 deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
   --core xray --core-version 26.3.27
 ```
@@ -181,15 +183,22 @@ systemctl enable --now proxy-agent.service
 
 ```sh
 qui-update                  # 安装 GitHub 上的最新发布
-qui-update --version 1.0.0  # 指定版本
+qui-update --version 1.0.1  # 指定版本
 qui-update --yes            # 不询问确认
+qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sums SHA256SUMS
+                            # 离线：用本地归档与其 SHA256SUMS，不访问 GitHub
 ```
 
 - 它从 `https://github.com/jingniao/qui/releases` 下载 `proxy-control-<版本>-linux-<架构>.tar.gz` 和同一发布的 `SHA256SUMS`，按文件名核对归档的 SHA-256 后才解包，然后调用归档里的 `deploy/linux/install.sh` 原地替换程序、systemd 单元和脚本（`qui`、`qui-update`）；配置、节点身份与数据库都不动。**摘要只证明下载内容与仓库发布一致，信任仍建立在 GitHub 仓库本身**：它不下载也不执行别的东西。
 - 只接受 `vMAJOR.MINOR.PATCH` 形式的发布；版本由 `--version X.Y.Z` 指定，否则取 GitHub 上的最新发布。
 - 面板更新：先停止 `proxy-panel.service`，在停止状态下把数据库（以及存在的 `-wal`）复制到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<YYYYmmdd-HHMMSS>.db`（属主 `proxy-panel`、0600），再替换程序，最后按停止前的状态启动服务并打印状态。
 - 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，两个组件从同一个归档更新，**先节点后面板**。
-- 失败时旧程序仍在原处（`install.sh` 用一次 rename 发布），脚本按停止前的状态把服务启动回来，并打印 `journalctl -u proxy-<组件> -n 50`、降级命令 `qui-update --version <旧版本>` 和数据库备份路径。**数据库迁移不可逆**：降级前先用该备份恢复数据库。
+- `--bundle` 与 `--sums` 必须同时给出，并且必须用 `--version` 指定版本（`SHA256SUMS` 里核对的文件名带版本号）；核对方式与下载时完全相同。
+- **回滚快照**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`service.sh`，面板加 `qui`，节点加强制出站的两个文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700）。保存不了快照就不更新，并把服务启动回来。
+- **健康检查**：原本在运行的服务更新后会被启动，并且要在 10 秒内保持运行、主进程 PID 不变才算成功（两种初始化系统都会在崩溃 5 秒后重启程序，崩溃循环在每次轮询时都可能显示为运行中，但 PID 会变）。成功时打印 `已更新到 X，服务运行正常（10 秒内无重启）` 并删除快照。
+- **自动回滚**：`install.sh` 失败（即使已经替换了部分文件）、装上的程序版本不是目标版本、或新版本没有持续运行时，脚本停止服务，把快照里的文件放回（与快照相同的文件不动，所以导致失败的只读或 immutable 文件不会让恢复也失败），删除新版本多出的文件，再启动旧版本并做同样的健康检查，打印 `更新失败，已恢复到 <旧版本>`。面板在新版本已经运行过之后回滚时，还会删除 `-wal`/`-shm` 并用更新前的备份覆盖数据库，因为新版本可能已经执行了不可逆的迁移。退出码为 1。
+- 只有回滚本身没能让旧版本恢复健康时，脚本才保留快照目录并打印它的路径、日志命令（systemd：`journalctl -u proxy-<组件> -n 50`；OpenRC：`grep -F 'proxy-agent' /var/log/messages | tail -n 50`）、降级命令 `qui-update --version <旧版本>` 和数据库备份路径。**数据库迁移不可逆**：手工降级面板前先用该备份恢复数据库。
+- 回滚保护由**正在运行的** `qui-update` 提供：从 1.0.1 升级到 1.0.2 时运行的是 1.0.1 的 `qui-update`，它没有快照与健康检查（失败时只把服务启动回来）；1.0.2 起的更新才有。在更新过程中按 Ctrl-C 中断不会触发回滚，快照目录会留下，可以用它手工恢复。
 - **先更新面板，再更新节点**；面板升级期间节点继续用旧配置运行。
 
 以下手动步骤用于离线环境，或需要用自己构建的归档时。
@@ -212,7 +221,7 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <new-sha256>
 systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent start
 ```
 
-`qui-update` 在 OpenRC 节点上同样可用：它通过 `/usr/local/lib/proxycontrol/service.sh` 停止和启动 `proxy-agent`。
+`qui-update` 在 OpenRC 节点上同样可用：它通过 `/usr/local/lib/proxycontrol/service.sh` 停止和启动 `proxy-agent`，健康检查读取 supervise-daemon 记录的子进程 PID（`/run/openrc/options/proxy-agent/child_pid`）。
 
 节点升级同样保留 `config.yaml`、`identity/`、`revisions/`、`spool/`。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；Agent 自身升级要走面板的 Agent 更新任务（系统 → Agent），它按签名清单校验，并在失败时回滚。
 

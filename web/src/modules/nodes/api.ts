@@ -31,14 +31,15 @@ export const releaseRepository = 'jingniao/qui';
 // The single line the register dialog shows: it installs the agent and the core,
 // establishes trust in the panel certificate and enrolls the node. The script
 // validates the host, ports, digest and token again on the node. The line starts
-// by installing bash and curl on Alpine: a stock node has neither, and the
-// command below is a bash script fetched with curl. `command -v apk` makes that
-// prefix a no-op on every other distribution, and the trailing `;` keeps it valid
-// in both busybox ash and bash. --no-insecure overrides a -k that a curl wrapper
+// by installing what the command needs: a stock Alpine node has neither bash nor
+// curl, and a minimal Debian or Ubuntu install may have no curl. The prefix is a
+// no-op on a host that already has them, and the trailing `;` keeps it valid in
+// busybox ash, dash and bash. --no-insecure overrides a -k that a curl wrapper
 // on the node may add, so the script is never fetched without verified TLS.
 export function installCommand(input: { version: string; host: string; httpPort: number; grpcPort: number; caSha256: string; token: string; core: string }): string {
   const port = input.httpPort === 443 ? '' : ` --http-port ${input.httpPort}`;
-  const bootstrap = 'command -v apk >/dev/null 2>&1 && apk add --no-cache bash curl ca-certificates; ';
+  const bootstrap = 'if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; '
+    + 'elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; ';
   return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${port} --grpc-port ${input.grpcPort} --ca-sha256 ${input.caSha256} --token ${input.token} --core ${input.core}`;
 }
 

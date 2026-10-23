@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-23（v1.0.1 发布后的第三轮实机验收）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-23（第四轮：一键安装与 qui-update 的失败处理和回滚）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -294,3 +294,44 @@
 3. **OpenRC 上带版本变化的 `qui-update`** 要等下一个发布才能实测（见上表）。
 
 仍未覆盖：arm64；面板与节点的版本降级。
+
+### 9.6 第四轮：一键安装与 `qui-update` 的失败处理和回滚（2026-10-23，发布前）
+
+**修复（提交 `8895e0a`，尚未发布）。** 9.5 的问题 1、2 已修复，另修复本轮发现的三处问题：
+- `install.sh` 任何失败都删除进行中的 `.installing` 临时文件与暂存目录（不再保留 20–40 MB 的 `staging.*`）；已开始替换文件后失败时，明确提示新旧文件可能混合。
+- `node-install.sh` 的失败提示改为“`install.sh` 可能已经替换了部分文件，本机尚未登记，可以重跑”。
+- **新发现：** 最小化 Debian（debootstrap minbase）上一键安装失败，提示 `unzip is required to extract the Xray release archive`。现在 systemd 主机缺少 `unzip` 时，`install.sh` 像 `nftables` 一样用 apt/dnf/yum 安装它。面板的一键命令在 Debian/Ubuntu 缺少 curl 时也会先用 apt 安装。
+- **新发现：** 原 `qui-update` 在 `install.sh` 已替换程序、随后失败时（例如单元文件不可写）仍提示“程序未被替换”，并把新程序当作旧程序启动；它也不检查新版本启动后是否持续运行。现在它在替换前快照会被替换的文件，启动后要求 10 秒内主进程 PID 不变；`install.sh` 失败、版本不符或新版本崩溃循环时恢复快照（与快照相同的文件不动），面板还恢复更新前的数据库，然后启动旧版本并再次检查健康。新增离线选项 `--bundle/--sums`。
+- **新发现：** 恢复成功后仍打印“降级：用 qui-update --version … 装回旧版本”，现在只在回滚本身失败时打印。
+
+**本地门禁。** `bash -n` 全部 `deploy/linux/*.sh` 与 OpenRC 脚本、`sh -n host-network-watch`、`gofmt`、`go vet`（Windows 与 `GOOS=linux`）、`go test -p 1 ./...` 无失败、Web 构建、前端时间测试，全部通过。
+
+**测试材料。** 用工作区代码构建的测试归档（未发布）：
+- `1.0.2`：发布候选。
+- `1.0.90`：同一代码，只改版本号。
+- `1.0.91`：两个程序都换成测试用崩溃程序，`--version` 报 `1.0.91`，启动 2 秒后退出码 1。
+- `1.0.93`：面板换成崩溃前会向 `panel.db` 与 `panel.db-wal` 追加垃圾的程序。
+- 损坏的 `SHA256SUMS`：把首个十六进制字符换成另一个。
+
+第一次的损坏规则是“首字符改成 0”，恰好遇上首字符本来就是 0 的摘要，等于没有损坏，因此 OpenRC 容器上那一次“错误摘要”测试实际做成了一次正常升级（脚本行为正确）。已改用必然不同的字符并重测，下表只记录重测结果。
+
+**测试环境：**
+- **Debian 容器**：面板主机上用 `debootstrap --variant=minbase` 新建 Debian 13，`systemd-nspawn -b` 以 systemd 为 PID 1 启动，与主机共享网络，因此未在其中测试强制出站。为此在面板主机上安装了 `systemd-container` 与 `debootstrap`。
+- **Alpine 容器**：同 9.5 的原版 Alpine 3.19 容器，重新从官方 minirootfs 构建，没有 bash、curl 与 machine-id。
+- **真实主机**：`uk-node`、面板主机（`us2-node`）、第三台主机（`alpine-node`，真实 LXC）。真实主机上运行的是新 `update.sh`（与 `service.sh` 一起放在测试目录），对象是 Agent `1.0.1`，因此每次失败都应回到 `1.0.1`。
+
+| 项 | 结果 | 实际观察 |
+| --- | --- | --- |
+| 全新一键安装（systemd，离线归档） | 通过 | 先在容器里卸载 curl，执行面板一键命令的引导段：apt 装上 curl。再运行 `node-install.sh --bundle/--sums`。第一次失败，暴露了 unzip 问题（见上）：失败后没有暂存目录，也没有 `.installing` 文件。修复后在同一主机直接重跑成功（验证了“可以重跑”）：自动安装 unzip 与 nftables，安装 Agent 与 Xray 26.3.27，登记，`proxy-agent.service` 启用并 `active`。面板显示 `deb-clean` `online`、Agent `1.0.2`。 |
+| 全新一键安装（OpenRC，离线归档） | 通过 | 原版 Alpine 容器里在 ash 中执行同一引导段：apk 装上 bash、curl 与 ca-certificates。`node-install.sh --bundle/--sums` 补装依赖，创建 `/etc/machine-id`，两个服务加入 `default` 并 `started`，记录第 10 行为 `openrc`。面板显示 `alpine-clean` `online`、Agent `1.0.2`。 |
+| 错误摘要：Debian 容器、Alpine 容器、`uk-node`、第三台主机 | 通过 | 每次都输出“归档 SHA256 与 SHA256SUMS 不一致”，退出码 1；服务没有被停止（主进程 PID 不变），程序、服务定义、`qui-update`、`service.sh` 与安装记录的摘要都不变。 |
+| 正常升级：Debian 容器 1.0.2 → 1.0.90，Alpine 容器 1.0.2 → 1.0.90 | 通过 | 打印快照路径，`install.sh` 替换文件，服务启动后输出“已更新到 1.0.90，服务运行正常（10 秒内无重启）”，退出码 0。快照目录被删除，没有临时文件；安装记录 9 行，Alpine 上 10 行且第 10 行为 `openrc`。 |
+| 崩溃循环版本自动回滚：Debian 容器、Alpine 容器、`uk-node`、面板主机、第三台主机 | 通过 | 升级到 `1.0.91` 后，健康检查发现主进程 PID 变化（systemd `Restart=on-failure`，supervise-daemon `respawn_delay=5`），输出“新版本 1.0.91 没有持续运行”和对应的日志命令（OpenRC 上是 `grep -F 'proxy-agent' /var/log/messages`）。随后停止服务，恢复快照，启动旧版本并再次检查，输出“更新失败，已恢复到 <旧版本>，服务运行正常（10 秒内无重启）”，退出码 1。<br>真实主机上五个文件的摘要与测试前完全相同，Agent 为 `1.0.1`，Xray 在运行，没有留下快照与临时文件。第三台主机上 watcher `proxy-agent-host-network` 被重启（恢复快照时的预期行为）。<br>面板主机上 Agent 失败后脚本退出，面板没有被停止（PID 不变，没有新的数据库备份）。 |
+| `install.sh` 替换程序后失败：Debian 容器、Alpine 容器、`uk-node` | 通过 | 用 `chattr +i` 锁住主服务定义（systemd 单元或 `/etc/init.d/proxy-agent`）：`install.sh` 先替换了程序，再在发布服务定义时 `mv` 失败，提示新旧文件可能混合。`qui-update` 恢复快照（被锁的文件与快照相同，未改动），输出“更新失败，已恢复到 <旧版本>”，退出码 1。程序摘要与安装记录第 3 行都回到旧值，没有 `.installing`、`staging.*` 或 `rollback.*` 残留。第三台主机（LXC）上 `chattr +i` 不生效，未测此项。 |
+| 面板崩溃回滚并恢复数据库（Debian 容器） | 通过 | 在容器里装面板 `1.0.2`（`127.0.0.1:18443/19443`，自签证书，HTTP 200），暂时移开 Agent 安装记录，只更新面板到 `1.0.93`。脚本在停止状态下备份数据库并快照文件；新面板启动后向 `panel.db` 与 `panel.db-wal` 写入垃圾（journald 记录 1 次），健康检查失败。回滚恢复文件，删除 `-wal`/`-shm` 并用备份覆盖数据库，启动 `1.0.2`：`active`，`NRestarts=0`，HTTP 200，两个数据库文件里的垃圾计数均为 0，没有残留快照。随后恢复 Agent 安装记录。 |
+| 回滚后的数据面 | 通过 | 第三台主机上经 `127.0.0.1:990`：`api.ipify.org` 仍经链路从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218）。面板显示 `uk-node`、`alpine-node`、`us2-node` 均 `online`、Agent `1.0.1`。 |
+| 共存服务 | 通过 | 面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 保持 `active`，启动时间仍是 2026-10-17。第三台主机上 `komari-agent` 的运行时长持续增加（未重启），`cf-probe`、`crond` 为 `started`，`xboard-node` 保持测试前的 `crashed`。 |
+| 从 GitHub 一键安装 v1.0.2（systemd、OpenRC） | 未执行 | 需要先发布 v1.0.2，发布需 owner 批准。 |
+| 用旧版 `qui-update`（1.0.1）从 GitHub 升级到 v1.0.2（`uk-node`、`alpine-node`、面板主机） | 未执行 | 同上。这也是 OpenRC 上第一次带版本变化的真实 `qui-update`（9.5 问题 3）。 |
+
+仍未覆盖：arm64；面板跨迁移的手工降级；更新中途被 Ctrl-C 或断电打断（此时不回滚，快照保留，见[部署与升级](deployment.md)第 5 节）。

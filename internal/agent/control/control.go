@@ -175,6 +175,17 @@ func RunWithStartup(ctx context.Context, c config.Agent, logger *slog.Logger, st
 	return run(ctx, c, logger, &startup, version)
 }
 
+// startupRestoreNonFatal reports whether a failure to restore the retained
+// revision at startup leaves the control connection usable. A held release and
+// an unconfirmed core exit already keep the Agent alive, and a retained revision
+// the installed core cannot run is repaired by the next revision the panel
+// sends, so none of them may end the worker before it reaches the panel. Only
+// the manager.Restore site uses this: the core-installation repair must stay
+// fatal, because it leaves the core-update hold in place when it fails.
+func startupRestoreNonFatal(err error) bool {
+	return errors.Is(err, core.ErrReleaseRecovery) || errors.Is(err, core.ErrCoreStopUnconfirmed) || errors.Is(err, reconcile.ErrRuntimeRestore)
+}
+
 func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Startup, versions ...string) (resultErr error) {
 	if err := c.Validate(); err != nil {
 		return err
@@ -327,6 +338,10 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		defer closeCore()
 	}
 	adapter.ConfigureRuntime(hooks)
+	// Only a held release and an unconfirmed core exit survive here: on a
+	// refused restore RepairCoreRollback returns before releasing the hold, so
+	// exiting lets the respawn retry the repair and self-heal from the previous
+	// core image, which already ran this revision.
 	if err := repairCoreInstallation(ctx, c, installation, manager); err != nil {
 		if !errors.Is(err, core.ErrReleaseRecovery) && !errors.Is(err, core.ErrCoreStopUnconfirmed) {
 			return fmt.Errorf("roll back interrupted core installation: %w", err)
@@ -334,10 +349,14 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		logger.Error("proxy remains stopped pending core exit confirmation; control connection continues")
 	}
 	if err := manager.Restore(ctx); err != nil {
-		if !errors.Is(err, core.ErrReleaseRecovery) && !errors.Is(err, core.ErrCoreStopUnconfirmed) {
+		if !startupRestoreNonFatal(err) {
 			return fmt.Errorf("restore previous core configuration: %w", err)
 		}
-		logger.Error("proxy remains stopped pending release recovery or core exit confirmation; control connection continues")
+		if errors.Is(err, reconcile.ErrRuntimeRestore) {
+			logger.Error("retained revision cannot start with the installed core; proxy remains stopped; control connection continues", "error", err)
+		} else {
+			logger.Error("proxy remains stopped pending release recovery or core exit confirmation; control connection continues")
+		}
 	}
 	installation.Close()
 	supervisorCtx, supervisorCancel := context.WithCancel(ctx)

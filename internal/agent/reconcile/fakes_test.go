@@ -17,6 +17,12 @@ type fakeCoreAdapter struct {
 	applyCalls    int
 	failRender    bool
 	failValidate  bool
+	// failRenderRevision fails only that revision's render, the way a core the
+	// operator installed cannot start a retained revision built for another one.
+	failRenderRevision int64
+	// failHealth keeps Health unhealthy even after a successful apply, so a
+	// re-apply of the retained revision does not take the early exit.
+	failHealth    bool
 	renderVariant string
 	applyCodes    []string // one per Apply call; an empty entry means success
 	closed        bool
@@ -29,7 +35,7 @@ func (a *fakeCoreAdapter) DetectCapabilities(context.Context) (*pb.Capabilities,
 }
 func (a *fakeCoreAdapter) Render(_ context.Context, state desiredstate.State) (core.RenderedConfig, error) {
 	a.renderCalls++
-	if a.failRender {
+	if a.failRender || a.failRenderRevision != 0 && state.Revision == a.failRenderRevision {
 		return core.RenderedConfig{}, errors.New("render failed")
 	}
 	data, err := json.Marshal(state)
@@ -60,7 +66,7 @@ func (a *fakeCoreAdapter) Apply(_ context.Context, configuration core.RenderedCo
 }
 func (a *fakeCoreAdapter) Rollback(context.Context, int64) error { return nil }
 func (a *fakeCoreAdapter) Health(context.Context) (core.HealthStatus, error) {
-	return core.HealthStatus{Healthy: len(a.applied) > 0}, nil
+	return core.HealthStatus{Healthy: !a.failHealth && len(a.applied) > 0}, nil
 }
 func (a *fakeCoreAdapter) CollectStats(context.Context) (core.StatsBatch, error) {
 	return core.StatsBatch{}, nil

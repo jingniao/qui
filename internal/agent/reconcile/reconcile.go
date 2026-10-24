@@ -18,6 +18,13 @@ import (
 	"time"
 )
 
+// ErrRuntimeRestore reports a retained revision that decodes and verifies but
+// cannot be started with the installed core, for example a sing-box revision
+// with Hysteria2 inbounds after the node switched to Xray. The revision is
+// intact, so the caller keeps the Agent alive with the core stopped and waits
+// for a revision the installed core can run instead of crash-looping.
+var ErrRuntimeRestore = errors.New("retained revision could not be started with the installed core")
+
 type Manifest struct {
 	Revision        int64   `json:"revision"`
 	Digest          string  `json:"digest"`
@@ -179,20 +186,30 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 			return result, err
 		}
 	}
+	// Re-applying the retained revision is the one case where a render or
+	// validation failure must not be cached: the revision directory is the only
+	// copy of the configuration that can still be restored, and the installed
+	// core may simply be unable to render it (for example sing-box to Xray). It
+	// is reported without touching disk so the next revision still applies.
+	retainedRevision := state.Revision == r.manifest.Revision
 	rendered, err := r.Adapter.Render(ctx, state)
 	if err != nil {
 		result.Code = "render_failed"
 		result.Message = err.Error()
-		if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
-			return result, saveErr
+		if !retainedRevision {
+			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
+				return result, saveErr
+			}
 		}
 		return result, err
 	}
 	if err := r.Adapter.Validate(ctx, rendered); err != nil {
 		result.Code = "validation_failed"
 		result.Message = err.Error()
-		if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
-			return result, saveErr
+		if !retainedRevision {
+			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
+				return result, saveErr
+			}
 		}
 		return result, err
 	}
@@ -223,6 +240,13 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	}
 	result, err = r.Adapter.Apply(ctx, rendered)
 	if err != nil {
+		// The retained revision is the only copy a later startup can restore,
+		// so re-applying it reports the failure without touching its directory:
+		// a removed directory, or one holding only a failure receipt, would turn
+		// the next Restore into a fatal read error and bring the crash loop back.
+		if retainedRevision {
+			return result, err
+		}
 		if permanentFailure(result.Code) {
 			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
 				return result, saveErr
@@ -252,8 +276,12 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 			}
 			result.RolledBack = true
 		}
-		if removeErr := os.RemoveAll(revisionDir); removeErr != nil {
-			return result, errors.Join(err, removeErr)
+		// The retained revision keeps its directory here too, for the same
+		// reason as a failed apply above.
+		if !retainedRevision {
+			if removeErr := os.RemoveAll(revisionDir); removeErr != nil {
+				return result, errors.Join(err, removeErr)
+			}
 		}
 		return result, err
 	}
@@ -354,6 +382,10 @@ func recordPermanentFailure(revisionDir, hash string, result core.ApplyResult) e
 	return writeFile(filepath.Join(revisionDir, "result.json"), data)
 }
 
+// restoreRevision starts a saved revision again. Integrity failures stay plain
+// (they are fatal for the Agent); only rendering, starting and host-network
+// failures are marked as ErrRuntimeRestore, because a core the operator
+// installed cannot run them while the saved state itself is still sound.
 func (r *Reconciler) restoreRevision(ctx context.Context, revision int64) error {
 	data, err := r.readRevision(revision)
 	if err != nil {
@@ -373,16 +405,18 @@ func (r *Reconciler) restoreRevision(ctx context.Context, revision int64) error 
 	}
 	rendered, err := r.Adapter.Render(ctx, state)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
 	}
-	_, err = r.Adapter.Apply(ctx, rendered)
-	if err != nil {
-		return err
+	if _, err := r.Adapter.Apply(ctx, rendered); err != nil {
+		return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
 	}
 	r.renderedDigest = digest(rendered.Data)
 	// A failure rollback, a manual rollback and a startup restore all end here,
 	// so the helper is driven to the restored revision as well.
-	return r.applyHostNetwork(ctx, state.Network)
+	if err := r.applyHostNetwork(ctx, state.Network); err != nil {
+		return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
+	}
+	return nil
 }
 func (r *Reconciler) Restore(ctx context.Context) error {
 	r.mu.Lock()

@@ -34,6 +34,7 @@
 - 第 30 节（2026-10-23，v1.0.3）：`qui-update` 在快照里写入进度日志（`prepared`/`started`/`committed`/`restored`，原子写入并落盘）与它自己的副本；Ctrl-C、SIGTERM、SSH 断线时按日志自动回滚，`kill -9`、断电后由开机单元 `proxycontrol-update-recovery`（systemd oneshot / OpenRC 初始化脚本，排在 Agent、面板与强制出站单元之前）完成回滚，下一次运行 `qui-update` 也会先完成未结束的恢复；同时只允许一个 `qui-update`。面板数据库备份先写 `.partial`、校验后改名；回滚覆盖数据库前把新版本的数据库保留为 `failed-update-*.db`。面板新增只读的 `--check-database FILE`（退出码 0/3/4/5），`qui-update` 用目标版本预检数据库：降级跨过迁移时不做任何替换并列出可用备份；新增 `--database FILE`，把面板降级与对应的 `pre-update-*` 数据库一起安装（第 30.1、31 节）。
 - 第 30.2 节（2026-10-23，v1.0.4）：`proxy-agent-host-network.service` 设置 `StartLimitIntervalSec=0`，helper 连续失败不再让 systemd 停用 path 单元；Agent 只有在 `status.json` 确认同一请求成功后才把保留的“清除”请求视为已生效，否则重新发布；`install.sh` 发现 oneshot 单元处于 `failed` 时重放一次保留的请求。新增回归测试 `deploy/linux/tests/host-network-test.sh`。
 - 第 10.3、30.2 节（2026-10-24，v1.0.5）：`install.sh` 与 `node-install.sh` 在 musl 主机（Alpine）上安装 sing-box 的官方 `-musl` 归档，按架构与 libc 固定摘要；新增 `deploy/linux/tests/core-asset-test.sh`。通用 URI 与 Base64 订阅省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点，其余链接照常输出，不再整体返回 400。
+- 第 22 节（2026-10-24，v1.0.6）：Agent 启动时如果已安装的核心编译或启动不了保留的成功修订（例如手工换成不支持 Hysteria2/TUIC 的 Xray），不再退出并被反复重启，而是让核心保持停止、照常连上面板并上报核心不健康，收到新修订后正常应用；supervisor 的重试间隔从 3 秒倍增到 1 分钟。重新应用保留修订失败时不再删除或改写它的修订目录。修订完整性错误（校验和、身份、回执、解密）仍然退出；核心更新中断后的修复路径也仍然退出，由重启重试。
 
 **V1.0（2026-08-20）**：初版，完整需求与架构约束。
 
@@ -1243,6 +1244,7 @@ Agent 编译核心配置
 - 核心启动失败：恢复上一成功版本
 - 健康检查失败：自动回滚
 - 中央服务失联：保持当前成功版本
+- Agent 启动时已安装的核心运行不了保留的成功版本：核心保持停止，Agent 照常连接中央端并上报核心不健康，等待新版本
 
 每个节点默认保留最近 3～5 个成功配置版本。
 

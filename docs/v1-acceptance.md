@@ -680,5 +680,5 @@
 
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
-| 1 | Agent 启动时，如果当前核心编译不了上一个成功修订，就整体退出：`internal/agent/control/control.go` 中 `manager.Restore` 的错误只有 `ErrReleaseRecovery` 与 `ErrCoreStopUnconfirmed` 两种会被容忍 | 本地换了核心，或者核心换成不支持某入站的版本以后，Agent 反复重启、连不上面板，面板也无法用新修订修复，只能上主机处理。换核心不是面板支持的操作，所以只在手工操作时会遇到 | 恢复失败时让核心保持停止，但继续建立控制连接，等面板下发新修订（与现有两种容忍错误的处理相同）。修复前换核心必须先删掉目标核心不支持的入站、发布并确认成功，再切换（[部署与升级](deployment.md)已补充） |
+| 1 | Agent 启动时，如果当前核心编译不了上一个成功修订，就整体退出：`internal/agent/control/control.go` 中 `manager.Restore` 的错误只有 `ErrReleaseRecovery` 与 `ErrCoreStopUnconfirmed` 两种会被容忍 | 本地换了核心，或者核心换成不支持某入站的版本以后，Agent 反复重启、连不上面板，面板也无法用新修订修复，只能上主机处理。换核心不是面板支持的操作，所以只在手工操作时会遇到 | **已在 v1.0.6 修复**：核心编译或启动不了保留修订时（新错误 `reconcile.ErrRuntimeRestore`），核心保持停止，Agent 继续建立控制连接，等面板下发新修订；重新应用保留修订失败时不再删除它的目录；supervisor 重试间隔 3 秒倍增到 1 分钟。完整性错误仍然退出。单元测试见 `internal/agent/reconcile/runtime_restore_test.go`、`internal/agent/control/startup_restore_test.go`、`internal/agent/supervisor/supervisor_test.go`；实机复测见 9.14 |
 | 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |

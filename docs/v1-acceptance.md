@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-24（v1.0.5 发布与两项修复的实机复测，9.13；此前为全部协议的真实流量验收，9.12）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-24（v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -681,4 +681,52 @@
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
 | 1 | Agent 启动时，如果当前核心编译不了上一个成功修订，就整体退出：`internal/agent/control/control.go` 中 `manager.Restore` 的错误只有 `ErrReleaseRecovery` 与 `ErrCoreStopUnconfirmed` 两种会被容忍 | 本地换了核心，或者核心换成不支持某入站的版本以后，Agent 反复重启、连不上面板，面板也无法用新修订修复，只能上主机处理。换核心不是面板支持的操作，所以只在手工操作时会遇到 | **已在 v1.0.6 修复**：核心编译或启动不了保留修订时（新错误 `reconcile.ErrRuntimeRestore`），核心保持停止，Agent 继续建立控制连接，等面板下发新修订；重新应用保留修订失败时不再删除它的目录；supervisor 重试间隔 3 秒倍增到 1 分钟。完整性错误仍然退出。单元测试见 `internal/agent/reconcile/runtime_restore_test.go`、`internal/agent/control/startup_restore_test.go`、`internal/agent/supervisor/supervisor_test.go`；实机复测见 9.14 |
+| 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |
+
+### 9.14 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测（2026-10-24）
+
+**发布。**
+- 修复提交 `03b87d0`，`main` 上的 CI 为 `success`。标签 `v1.0.6` 指向该提交，标签的 CI 为 `success`。
+- GitHub Release `v1.0.6` 于 2026-10-24T17:46:28Z 发布，正式版，不是草稿。附件有两个归档、`SHA256SUMS` 与 `node-install.sh`。amd64 归档的 SHA-256 为 `fc9f7368…a322`，arm64 为 `fcb7f2b7…40c2`。
+
+**升级（各主机用已安装的 1.0.5 `qui-update --version 1.0.6 --yes` 从 GitHub 升级）。**
+
+| 主机 | 结果 |
+|---|---|
+| `uk-node`（Debian，systemd） | Agent `1.0.5 → 1.0.6`，`active`，`NRestarts=0`，退出码 0；path 单元 `active` |
+| 第三台主机 `alpine-node`（OpenRC） | Agent `1.0.6`，`started`，watcher `started`，退出码 0 |
+| 面板主机 | Agent 与面板都到 `1.0.6`；面板更新前备份为 `pre-update-1.0.5-20261025-014812.db`；HTTPS 返回 200 |
+
+- 三台主机都没有残留快照，也没有失败的单元。面板显示三个节点 `online`、Agent `1.0.6`。升级后原链 `ALP-UK-US2` 正常。
+
+**复现 9.13 的场景（`alpine-node`，只使用 v1.0.6 发布物）。**
+1. 从 GitHub 下载 v1.0.6 归档，按 `SHA256SUMS` 核对后解压。停 Agent，用发布版 `install.sh --node … --core sing-box --core-version 1.14.3 --core-sha256 41fc81fd…ab1f` 装上 musl 版 sing-box，把 `config.yaml` 的 `core_name`/`core_path` 改成 sing-box，再启动。面板显示 `sing-box 1.14.3`，修订 83 恢复正常。
+2. 在 `alpine-node` 上新建临时入站 `v106-hy2-test`（Hysteria2，内部中转，`127.0.0.1:35270`，证书由面板生成），发布修订 84：`success`，节点上 UDP `127.0.0.1:35270` 在监听。
+3. **不发布**，直接停 Agent、把 `config.yaml` 改回 Xray（与测试前的文件逐字节相同）、再启动（17:55:45）。保留的成功修订 84 含 Hysteria2，Xray 编译不了。
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| Agent 不再反复重启 | 通过 | 从 17:55:45 启动到恢复后（17:59:48 之后），Agent 一直是同一个 PID，supervise-daemon 没有重启它。v1.0.5 在同样情况下 4.5 分钟里重启了 53 次 |
+| 启动日志 | 通过 | 启动时只有一条 `ERROR retained revision cannot start with the installed core; proxy remains stopped; control connection continues`，错误为 `unsupported inbound protocol`；不到 1 秒后 `node control connected` |
+| 恢复重试的退避 | 通过 | `core recovery failed` 的 `retry_in` 从 3 秒开始倍增，17:57:33 到达 60 秒上限后只再记一次；之后每分钟尝试一次 |
+| 面板显示 | 通过 | 节点 `degraded`，核心 `xray 26.3.27`，心跳 `core_healthy=false`、`core_error=core_unhealthy`，心跳时间持续更新（查询时 8 秒前） |
+| 代理在此期间停止 | 符合设计 | 没有核心进程，`127.0.0.1:990` 拒绝连接（curl rc 7）；另外两台节点不受影响 |
+| 用新修订修复 | 通过 | 删除 `v106-hy2-test` 并发布修订 85（17:59:37 发起），13 秒后 `success`。节点 `online`、`core_healthy=true`，Xray 在运行，PID 仍不变 |
+| 恢复后的数据面 | 通过 | `api.ipify.org` 经链从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝（curl rc 97） |
+| 保留修订未被删除 | 通过 | 失败期间修订目录 84 一直存在，修复后修订目录为 77、80、83、84、85 |
+
+**测试中发现的问题（未修复，见下文“遗留问题”第 1 项）。** 核心停止期间，supervisor 每 3 秒的 `Refresh`（按时间段规则重新渲染当前修订）不受恢复退避控制，每 3 秒记一条 `ERROR approved runtime state reconciliation failed: unsupported inbound protocol`（17:55:48～17:59:48 约 80 条）。
+
+**恢复。**
+- `alpine-node` 恢复 Xray 26.3.27：停 Agent，用发布版 `install.sh --core xray --core-version 26.3.27` 重装，安装记录第 5 行重新为 `xray`；sing-box 二进制已删除；`config.yaml` 与测试前逐字节相同。重启后恢复修订 85，没有错误或警告日志。
+- 临时入站已删除。面板对象数与测试前相同：入站 8、出站 2、链 1、规则 4、节点组 2、用户 2。`alpine-node` 的公网 IP 保持为空。
+- 原链恢复：`api.ipify.org` 从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝。三个节点 `online`、核心健康。
+- 共存服务：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 与测试前相同（738/740、833/834），没有失败的单元。第三台主机上 `komari-agent`、`cf-probe` 的 PID 与测试前相同（539、415），状态 `started`；`xboard-node` 保持测试前的 `crashed`。没有 nft 表 `inet proxy_agent_source`，三台主机都没有残留快照。
+- 第三台主机上的临时脚本、归档与配置备份都已删除。
+
+**遗留问题。**
+
+| # | 问题 | 影响 | 建议 |
+|---|---|---|---|
+| 1 | `internal/agent/supervisor/supervisor.go` 每个 tick 先调用 `reconciler.Refresh`，再判断健康与退避。启动恢复失败后 `renderedDigest` 为空：渲染失败时每 3 秒记一条错误；如果修订能渲染、只是启动失败（例如端口被别的进程占用），`Refresh` 会每 3 秒调用一次 `Adapter.Apply` 重新启动核心，绕过退避 | Agent 仍保持连接，面板仍能修复，不影响本次修复的目标；但日志被刷屏，第二种情况下退避实际不生效。另外 `retry_in` 以纳秒整数记录（`3000000000`），不便阅读 | 恢复失败、尚未成功之前跳过 `Refresh`（由退避后的 `Restore` 负责重试）；`retry_in` 改记 `delay.String()`。需要一个后续版本 |
 | 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |

@@ -2,7 +2,7 @@
 
 面向 1～10 名内部用户的自托管多节点代理控制平台。中央端是一个 Go 单体程序（SQLite + 嵌入式 Vue 前端），Node Agent 通过 gRPC + mTLS 主动接入并管理**官方** Xray 或 sing-box 二进制；用户代理流量不经过中央端。
 
-当前状态：按[轻量重构计划](docs/lightweight-refactor-plan.md)收敛完成，**v1.0.5 已发布**（GitHub Release；v1.0.1 起节点 Agent 支持 Alpine/OpenRC，v1.0.2 起 `qui-update` 失败时自动回滚；v1.0.3 起中断（含断电）后自动恢复、面板可带数据库跨迁移降级；v1.0.4 修复强制出站 helper 连续失败后不再执行新配置的问题；v1.0.5 让 Alpine 节点可用 sing-box，并且钉证书的 Hysteria2/TUIC 不再让 URI 订阅整体失败，仓库 <https://github.com/jingniao/qui>）。**V1 仍未完成**：实机验收进行中，标准与实机清单见[验收矩阵](docs/v1-acceptance.md)。
+当前状态：按[轻量重构计划](docs/lightweight-refactor-plan.md)收敛完成，**v1.0.6 已发布**（GitHub Release；v1.0.1 起节点 Agent 支持 Alpine/OpenRC，v1.0.2 起 `qui-update` 失败时自动回滚；v1.0.3 起中断（含断电）后自动恢复、面板可带数据库跨迁移降级；v1.0.4 修复强制出站 helper 连续失败后不再执行新配置的问题；v1.0.5 让 Alpine 节点可用 sing-box，并且钉证书的 Hysteria2/TUIC 不再让 URI 订阅整体失败；v1.0.6 起核心运行不了保留的修订时 Agent 保持连接、不再反复重启，仓库 <https://github.com/jingniao/qui>）。**V1 仍未完成**：实机验收进行中，标准与实机清单见[验收矩阵](docs/v1-acceptance.md)。
 
 ## 快速开始
 

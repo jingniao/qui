@@ -3,7 +3,7 @@
 **文档版本：** V1.1  
 **编制日期：** 2026 年 8 月 20 日  
 **本次修订：** 2026-10-17（Phase 14，按轻量重构计划决策 D1–D5 更新）  
-**项目状态：** 核心业务已实现，按轻量重构计划收敛完成；v1.0.0 已于 2026-10 作为 GitHub 发布出版，v1.0.1（节点 Agent 支持 Alpine/OpenRC 与实机验收修复）于 2026-10-23 发布，一键安装与 qui-update 的失败处理与自动回滚于 2026-10-23 作为 v1.0.2 发布，qui-update 的中断自动恢复（含断电）与面板跨迁移降级于 2026-10-23 作为 v1.0.3 发布，强制出站 helper 连续失败后不再执行新配置的问题于 2026-10-23 作为 v1.0.4 发布；功能与交付验收阶段（状态核对：2026-10-23；三台主机实机验收进行中，arm64 未验证，V1 未完成）  
+**项目状态：** 核心业务已实现，按轻量重构计划收敛完成；v1.0.0 已于 2026-10 作为 GitHub 发布出版，v1.0.1（节点 Agent 支持 Alpine/OpenRC 与实机验收修复）于 2026-10-23 发布，一键安装与 qui-update 的失败处理与自动回滚于 2026-10-23 作为 v1.0.2 发布，qui-update 的中断自动恢复（含断电）与面板跨迁移降级于 2026-10-23 作为 v1.0.3 发布，强制出站 helper 连续失败后不再执行新配置的问题于 2026-10-23 作为 v1.0.4 发布，Alpine 节点的 sing-box（musl 构建）与钉证书 QUIC 端点的 URI 订阅于 2026-10-24 作为 v1.0.5 发布；功能与交付验收阶段（状态核对：2026-10-24；三台主机实机验收进行中，arm64 未验证，V1 未完成）  
 **目标用户规模：** 1～10 名内部用户  
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
@@ -33,6 +33,7 @@
 - 第 30 节（2026-10-23，v1.0.2）：`qui-update` 在替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，更新后要求服务 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照（面板还恢复更新前的数据库）并启动旧版本。新增离线选项 `--bundle/--sums`。`install.sh` 失败时不再留下 `.installing` 临时文件与暂存目录，systemd 主机缺少 `unzip` 时自动安装；面板的一键安装命令在 Debian/Ubuntu 缺少 curl 时先用 apt 安装。
 - 第 30 节（2026-10-23，v1.0.3）：`qui-update` 在快照里写入进度日志（`prepared`/`started`/`committed`/`restored`，原子写入并落盘）与它自己的副本；Ctrl-C、SIGTERM、SSH 断线时按日志自动回滚，`kill -9`、断电后由开机单元 `proxycontrol-update-recovery`（systemd oneshot / OpenRC 初始化脚本，排在 Agent、面板与强制出站单元之前）完成回滚，下一次运行 `qui-update` 也会先完成未结束的恢复；同时只允许一个 `qui-update`。面板数据库备份先写 `.partial`、校验后改名；回滚覆盖数据库前把新版本的数据库保留为 `failed-update-*.db`。面板新增只读的 `--check-database FILE`（退出码 0/3/4/5），`qui-update` 用目标版本预检数据库：降级跨过迁移时不做任何替换并列出可用备份；新增 `--database FILE`，把面板降级与对应的 `pre-update-*` 数据库一起安装（第 30.1、31 节）。
 - 第 30.2 节（2026-10-23，v1.0.4）：`proxy-agent-host-network.service` 设置 `StartLimitIntervalSec=0`，helper 连续失败不再让 systemd 停用 path 单元；Agent 只有在 `status.json` 确认同一请求成功后才把保留的“清除”请求视为已生效，否则重新发布；`install.sh` 发现 oneshot 单元处于 `failed` 时重放一次保留的请求。新增回归测试 `deploy/linux/tests/host-network-test.sh`。
+- 第 10.3、30.2 节（2026-10-24，v1.0.5）：`install.sh` 与 `node-install.sh` 在 musl 主机（Alpine）上安装 sing-box 的官方 `-musl` 归档，按架构与 libc 固定摘要；新增 `deploy/linux/tests/core-asset-test.sh`。通用 URI 与 Base64 订阅省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点，其余链接照常输出，不再整体返回 400。
 
 **V1.0（2026-08-20）**：初版，完整需求与架构约束。
 

@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-23（全部协议的真实流量验收，9.12；此前为第五轮 qui-update 中断恢复，9.8）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-24（v1.0.5 发布与两项修复的实机复测，9.13；此前为全部协议的真实流量验收，9.12）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -604,12 +604,12 @@
 | 两条代理链（sing-box 入口） | 通过 | 链 1 TCP、链 2 TCP 与 UDP 都从 `us2-node` 出口 |
 | sing-box SOCKS5 入站的 UDP | 未完全覆盖 | 在 `uk-node` 本机通过（TCP 与 UDP 都从 `uk-node` 出口）。从面板主机或第三台主机远程访问时 UDP 失败，而同一路径在 Xray 上通过。最可能的原因是 sing-box 的 UDP ASSOCIATE 使用另一个 UDP 端口，不在 `uk-node` 防火墙放行的 35000～40000 范围内。没有抓到该端口，所以记为环境所限，既不判为通过，也不判为缺陷 |
 
-**发现的问题（已在主分支修复，尚未进入发布）。**
+**发现的问题（已修复，v1.0.5 发布，实机复测见 9.13）。**
 
 | # | 问题 | 影响 | 修复与验证 |
 |---|---|---|---|
-| 1 | `install.sh --core sing-box` 与 `node-install.sh --core sing-box` 在 Alpine（musl）上安装 `sing-box-<版本>-linux-amd64.tar.gz`。该构建动态链接 glibc，在 Alpine 上执行报 `not found`。官方还发布了 `linux-amd64-musl`（以及 `-glibc`）归档，但脚本只认前者，固定摘要也只有前者 | **Alpine 节点无法使用 sing-box**。本轮在第三台主机上改用官方 musl 归档，SHA-256 与 GitHub 资产摘要 `41fc81fd…bab1f` 一致，之后一切正常。Xray 不受影响 | 两个脚本按 `/lib/ld-musl-*.so.1` 判断 libc，musl 主机使用 `-musl` 归档；`node-install.sh` 按架构与 libc 固定四个官方摘要。新增 `deploy/linux/tests/core-asset-test.sh`（17 项，无需 root，CI 中运行），在 `uk-node` 与第三台主机上均 17/17。用修复后的函数在真实主机上选择并下载归档：`uk-node` 选 `linux-amd64`、第三台主机选 `linux-amd64-musl`，摘要都与固定值一致，解出的 sing-box 都能运行（只在临时目录，未安装） |
-| 2 | 只要 Hysteria2 或 TUIC 入站设置了 `trusted_ca_pem`，该用户的整个 URI/Base64 订阅就返回 400 `Subscription unavailable`。这是 `subscription/export.go` 的有意行为（URI 无法携带证书），但错误信息不说明原因，也连带让其他协议的链接不可用 | 用户只能改用 sing-box 格式订阅。sing-box 格式正常，可携带证书 | URI/Base64 只省略这类端点（URI 没有放证书的字段），其余链接照常输出；sing-box 格式不变，仍带证书。单元测试 `TestURIFormatsOmitQUICEndpointWithPinnedCA` 覆盖省略、无固定证书的 Hysteria2 照常输出、全部被省略时返回空列表而非错误，以及 sing-box 格式保留证书。未在实机上复测：需要包含修复的面板发布 |
+| 1 | `install.sh --core sing-box` 与 `node-install.sh --core sing-box` 在 Alpine（musl）上安装 `sing-box-<版本>-linux-amd64.tar.gz`。该构建动态链接 glibc，在 Alpine 上执行报 `not found`。官方还发布了 `linux-amd64-musl`（以及 `-glibc`）归档，但脚本只认前者，固定摘要也只有前者 | **Alpine 节点无法使用 sing-box**。本轮在第三台主机上改用官方 musl 归档，SHA-256 与 GitHub 资产摘要 `41fc81fd…bab1f` 一致，之后一切正常。Xray 不受影响 | 两个脚本按 `/lib/ld-musl-*.so.1` 判断 libc，musl 主机使用 `-musl` 归档；`node-install.sh` 按架构与 libc 固定四个官方摘要。新增 `deploy/linux/tests/core-asset-test.sh`（17 项，无需 root，CI 中运行），在 `uk-node` 与第三台主机上均 17/17。用修复后的函数在真实主机上选择并下载归档：`uk-node` 选 `linux-amd64`、第三台主机选 `linux-amd64-musl`，摘要都与固定值一致，解出的 sing-box 都能运行（只在临时目录，未安装）。v1.0.5 发布后用发布物实机安装并作为节点核心运行，见 9.13 |
+| 2 | 只要 Hysteria2 或 TUIC 入站设置了 `trusted_ca_pem`，该用户的整个 URI/Base64 订阅就返回 400 `Subscription unavailable`。这是 `subscription/export.go` 的有意行为（URI 无法携带证书），但错误信息不说明原因，也连带让其他协议的链接不可用 | 用户只能改用 sing-box 格式订阅。sing-box 格式正常，可携带证书 | URI/Base64 只省略这类端点（URI 没有放证书的字段），其余链接照常输出；sing-box 格式不变，仍带证书。单元测试 `TestURIFormatsOmitQUICEndpointWithPinnedCA` 覆盖省略、无固定证书的 Hysteria2 照常输出、全部被省略时返回空列表而非错误，以及 sing-box 格式保留证书。v1.0.5 发布后已实机复测，见 9.13 |
 
 **未覆盖。**
 - SOCKS5 与 Shadowsocks 的 UDP 中转到 `us2-node`，以及 sing-box 的 WireGuard 出站指向 `us2-node`：都需要面板主机放行 UDP。前两者已改在 `uk-node` 方向上验证。
@@ -622,3 +622,63 @@
 - 恢复后，原链 `ALP-UK-US2` 的 `api.ipify.org` 从 `us2-node` 出口（23.254.158.3），直连为 113.29.231.218。
 - 共存服务：`xboard-node`、`cf-probe` 的 PID 在面板主机与 `uk-node` 上与测试前相同（738/740、833/834），没有失败的单元。第三台主机的 `komari-agent` 重启计数为 0、运行时长持续增加，`xboard-node` 保持测试前的 `crashed`。
 - 三台主机上的临时脚本与凭据文件都已删除。
+
+### 9.13 v1.0.5 发布、三台主机升级与两项修复的实机复测（2026-10-24）
+
+**发布。**
+- 标签 `v1.0.5` 指向 `c52643c`（修复在 `4c7572e`）。标签的 CI 是 `success`，包括 `check` 与 `release` 两个任务。
+- GitHub Release `v1.0.5` 于 2026-10-24T14:59:54Z 发布，正式版，不是草稿。附件有两个归档、`SHA256SUMS` 与 `node-install.sh`。amd64 归档的 SHA-256 为 `b6e8c34b…6918`，arm64 为 `d5d16f97…e833`。
+
+**升级（各主机用已安装的 1.0.4 `qui-update --version 1.0.5 --yes` 从 GitHub 升级）。**
+
+| 主机 | 结果 |
+|---|---|
+| `uk-node`（Debian，systemd） | Agent `1.0.4 → 1.0.5`，`active`，10 秒内无重启，退出码 0；path 单元 `active` |
+| 第三台主机 `alpine-node`（OpenRC） | Agent `1.0.5`，`started`，watcher `started`，退出码 0 |
+| 面板主机 | Agent 与面板都到 `1.0.5`；面板更新前备份为 `pre-update-1.0.4-20261024-230344.db`；HTTPS 返回 200 |
+
+- 三台主机都没有残留快照，也没有失败的单元。面板显示三个节点 `online`、Agent `1.0.5`。
+- 升级后原链 `ALP-UK-US2` 正常：`api.ipify.org` 从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218）。
+
+**修复 1：Alpine 上的 sing-box（9.12 问题 1）。** 只使用发布物：在第三台主机上从 GitHub 下载 v1.0.5 归档，按 `SHA256SUMS` 核对一致后解压。
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| `node-install.sh` 的选择 | 通过 | 取发布版 `node-install.sh` 里的 `host_libc` 与 `singbox_digest` 在主机上执行：`libc=musl`，摘要 `41fc81fd…ab1f` |
+| `install.sh` 安装 | 通过 | 发布版 `install.sh --node … --core sing-box --core-version 1.14.3 --core-sha256 <上面的摘要>` 下载 `-musl` 资产并通过摘要核对；安装记录第 5 行为 `sing-box`。二进制是静态链接，`sing-box version` 输出 `1.14.3`。修复前同一命令装的是 glibc 构建，执行报 `not found` |
+| 作为节点核心运行 | 通过 | 停 Agent，把 `core_name`/`core_path` 改成 sing-box，再启动。面板显示 `sing-box 1.14.3`，发布修订 72～74 全部 `success`，节点上运行的核心进程是 `sing-box` |
+| 数据面 | 通过 | 第三台主机经 `127.0.0.1:990`（带 SOCKS 凭据）：`api.ipify.org` 经链从 `us2-node` 出口，`ifconfig.me` 直连，错误口令被拒绝（curl rc 97） |
+
+**修复 2：钉证书的 Hysteria2/TUIC 不再让 URI 订阅整体失败（9.12 问题 2）。**
+- 临时对象，均只为本测试建立：
+  - 节点组 `subtest`（只含 `alpine-node`）和用户 `subtest`，用户只允许 hysteria2、tuic、shadowsocks；一台设备，以及该设备的订阅 Token。
+  - `alpine-node` 上的三个入站：Hysteria2 `:35260` 与 TUIC `:35261`，两者用同一张临时自签证书，`trusted_ca_pem` 是这张证书本身；另有 Shadowsocks `:35262` 作对照。
+  - 测试期间把 `alpine-node` 的公网 IP 设成 `113.29.231.218`。没有公网 IP 的节点不进入订阅，该节点的这个字段原本为空。
+- 发布修订 75～77，全部 `success`。
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| URI 列表 | 通过 | `GET /sub/<token>` 返回 200，只有 `ss://…@113.29.231.218:35262` 一条；修复前同样的数据返回 400 `Subscription unavailable` |
+| Base64 列表 | 通过 | `?format=base64` 返回 200，解码后与 URI 列表相同 |
+| sing-box 格式 | 通过 | `?format=sing-box` 返回 200，有 hysteria2、shadowsocks、tuic 三个出站；两个 QUIC 出站都带 `tls.server_name` 与 `tls.certificate`（即钉住的证书） |
+| 用订阅里的证书收发真实流量 | 通过 | 用 sing-box 格式订阅生成客户端（`ptclient.py`），在第三台主机上运行。第三台主机在 NAT 后，所以只把 `server` 改成 `127.0.0.1`，`server_name` 保持不变。三个协议的 TCP 都经链从 `us2-node` 出口，UDP（Cloudflare `whoami`）都是 113.29.231.218。系统信任库里没有这张证书，所以 QUIC 握手成功只能是靠订阅里的 `certificate` 验证 |
+| 错误凭据 | 通过 | 把凭据换成错误值后，三个协议都失败，Hysteria2 报 `authentication failed` |
+
+**测试中发现的问题（未修复，见下文“遗留问题”第 1 项）。**
+- 删除临时入站后，测试先把 `alpine-node` 换回 Xray，然后才发布。Agent 启动时要恢复上一个成功修订 77，其中还有 Hysteria2/TUIC 入站。用 Xray 编译失败，Agent 报 `restore previous core configuration: unsupported inbound protocol` 后退出。supervise-daemon 每 5 秒重启它一次，从 15:14:29 到 15:19:03 共 53 次。
+- 这段时间 Agent 连不上面板，修订 80 一直是 `pending`，面板仍显示该节点是 sing-box。`alpine-node` 没有核心运行，原链入口中断约 4.5 分钟；另外两台节点不受影响。
+- 恢复方法：暂时装回同一发布版的 sing-box musl 核心并改回配置，Agent 恢复修订 77 后连上面板，修订 80 随即 `success`。之后再切换到 Xray，Agent 恢复修订 80 正常，最后发布修订 81～83，全部 `success`。
+
+**恢复。**
+- `alpine-node` 恢复 Xray 26.3.27：用发布版 `install.sh --core xray` 重装，安装记录第 5 行重新为 `xray`；`config.yaml` 的 `core_name`/`core_path` 改回 Xray，与测试前只差这两行；sing-box 二进制已删除。
+- 公网 IP 恢复为空。临时用户（连同设备与 Token）、节点组与三个入站都已删除。面板对象数与测试前相同：入站 8、出站 2、链 1、规则 4、节点组 2、用户 2（`alice`、`bob`）。
+- 原链恢复：`api.ipify.org` 从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝。
+- 共存服务：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 与测试前相同（738/740、833/834），没有失败的单元。第三台主机上 `komari-agent`、`cf-probe` 的 PID 与测试前相同（539、415），状态 `started`；`xboard-node` 保持测试前的 `crashed`。没有 nft 表 `inet proxy_agent_source`。
+- 三台主机上的临时脚本、归档、客户端配置与证书都已删除。本地的临时证书与私钥也已删除。
+
+**遗留问题。**
+
+| # | 问题 | 影响 | 建议 |
+|---|---|---|---|
+| 1 | Agent 启动时，如果当前核心编译不了上一个成功修订，就整体退出：`internal/agent/control/control.go` 中 `manager.Restore` 的错误只有 `ErrReleaseRecovery` 与 `ErrCoreStopUnconfirmed` 两种会被容忍 | 本地换了核心，或者核心换成不支持某入站的版本以后，Agent 反复重启、连不上面板，面板也无法用新修订修复，只能上主机处理。换核心不是面板支持的操作，所以只在手工操作时会遇到 | 恢复失败时让核心保持停止，但继续建立控制连接，等面板下发新修订（与现有两种容忍错误的处理相同）。修复前换核心必须先删掉目标核心不支持的入站、发布并确认成功，再切换（[部署与升级](deployment.md)已补充） |
+| 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |

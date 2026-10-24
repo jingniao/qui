@@ -150,6 +150,7 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
 - 归档 URL 只能来自官方发布前缀（`https://github.com/XTLS/Xray-core/releases/download/`、`https://github.com/SagerNet/sing-box/releases/download/`）。
 - SHA256 来自 `--core-sha256`，或对 Xray 自动读取同版本的 `.dgst` 文件；**没有可信摘要就不安装**。
 - 核心安装到 `/usr/local/lib/proxy-agent/<core>`，摘要记入安装记录；首次安装 sing-box 时脚本会把配置模板里的 `core_name`/`core_path` 改成 sing-box。musl 主机（Alpine）装 sing-box 时取官方的 `sing-box-<版本>-linux-<架构>-musl.tar.gz`（glibc 归档在那里起不来），它有单独的固定摘要。
+- 面板不能给已登记的节点换核心；手工换（停 Agent、改 `core_name`/`core_path`、再启动）之前，必须先删掉目标核心不支持的入站（例如 Xray 不支持 Hysteria2/TUIC），发布并确认成功。否则 Agent 启动时用新核心恢复上一修订会失败，然后反复退出、连不上面板（[验收矩阵](v1-acceptance.md) 9.13）。
 - 脚本还会创建服务账号 `proxy-agent` 和目录 `/etc/proxy-agent`、`/etc/proxy-agent/tls`、`/var/lib/proxy-agent`，不启动服务。
 - 脚本还会创建 `/var/lib/proxy-agent/host-network`（0700，服务器强制出站的 helper 目录），安装并启用两个固定单元：`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）与监视 `desired.json` 的 `proxy-agent-host-network.path`。它们只维护一个 nft 表 `inet proxy_agent_source`，不改变主机上的其他规则。
 

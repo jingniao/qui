@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-24（代码审查报告五个问题的核实与修复，9.15，尚未发布；此前为 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-25（v1.0.7 发布、三台主机升级与四项修复的实机复测，9.16；此前为代码审查报告五个问题的核实与修复，9.15；此前为 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -178,9 +178,9 @@
 - Agent 的渲染失败原因只写在节点的 `revisions/<n>/result.json`，面板只显示失败码；面板备份失败的日志也没有原因。
 - 已激活用户设置一个未来的到期时间会立刻产生一次 `auto: … renewed` 版本，重启该节点核心。
 - 在线恢复会禁用（不删除）备份之后创建的用户；`operations.md` 第 2 节未写明，预览字段 `usersRemoved` 实际表示“将被禁用”。
-- `uninstall.sh` 的提示仍提到已删除的 “quota ledgers / reserved allowances”；`install.sh --reinstall` 仍提示去登记已登记的节点。（v1.0.6 之后已在 `main` 修复，尚未发布：卸载提示按组件列出保留内容，只对 Agent 提示去面板删除节点；已有 `identity/client.crt` 时不再提示登记。）
-- sing-box 适配器的 `TrafficSourceStatus` 注释仍写着节点总量读取器“尚未实现”，实际已实现并在心跳中上报。（已在 `main` 修正注释，尚未发布。）
-- `/var/lib/proxy-panel` 与 `/var/lib/proxy-agent` 被 systemd `StateDirectory` 设为 0755（内容仍为 0600/0700），与 `install.sh` 和文档写的 0700 不一致。（已在 `main` 加 `StateDirectoryMode=0700`，尚未发布。）
+- `uninstall.sh` 的提示仍提到已删除的 “quota ledgers / reserved allowances”；`install.sh --reinstall` 仍提示去登记已登记的节点。（v1.0.7 修复：卸载提示按组件列出保留内容，只对 Agent 提示去面板删除节点；已有 `identity/client.crt` 时不再提示登记。）
+- sing-box 适配器的 `TrafficSourceStatus` 注释仍写着节点总量读取器“尚未实现”，实际已实现并在心跳中上报。（v1.0.7 修正注释。）
+- `/var/lib/proxy-panel` 与 `/var/lib/proxy-agent` 被 systemd `StateDirectory` 设为 0755（内容仍为 0600/0700），与 `install.sh` 和文档写的 0700 不一致。（v1.0.7 加 `StateDirectoryMode=0700`，升级后实测两台 systemd 主机的状态目录为 0700，见 9.16。）
 - Windows 上构建的发布包里两个程序是 0644（`install.sh` 安装时会设 0755）；正式发布由 CI 在 Linux 上构建。
 
 ### 8.5 未执行
@@ -728,12 +728,12 @@
 
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
-| 1 | `internal/agent/supervisor/supervisor.go` 每个 tick 先调用 `reconciler.Refresh`，再判断健康与退避。启动恢复失败后 `renderedDigest` 为空：渲染失败时每 3 秒记一条错误；如果修订能渲染、只是启动失败（例如端口被别的进程占用），`Refresh` 会每 3 秒调用一次 `Adapter.Apply` 重新启动核心，绕过退避 | Agent 仍保持连接，面板仍能修复，不影响本次修复的目标；但日志被刷屏，第二种情况下退避实际不生效。另外 `retry_in` 以纳秒整数记录（`3000000000`），不便阅读 | **已在 `main` 修复，尚未发布**：每个 tick 先查核心健康，核心不健康时不调用 `Refresh`，只走退避后的 `Restore`；`Refresh` 只在核心健康时执行，同样的失败只记一次，恢复时记一条 Info；`retry_in` 记为 `3s` 这样的时长；出站探测失败只在由成功变为失败时告警。测试见 `internal/agent/supervisor/supervisor_test.go` 与 `internal/agent/reconcile/schedule_reliability_test.go`。发布新版本后需要实机复测 |
+| 1 | `internal/agent/supervisor/supervisor.go` 每个 tick 先调用 `reconciler.Refresh`，再判断健康与退避。启动恢复失败后 `renderedDigest` 为空：渲染失败时每 3 秒记一条错误；如果修订能渲染、只是启动失败（例如端口被别的进程占用），`Refresh` 会每 3 秒调用一次 `Adapter.Apply` 重新启动核心，绕过退避 | Agent 仍保持连接，面板仍能修复，不影响本次修复的目标；但日志被刷屏，第二种情况下退避实际不生效。另外 `retry_in` 以纳秒整数记录（`3000000000`），不便阅读 | **已修复，v1.0.7 发布（实机复测见 9.16）**：每个 tick 先查核心健康，核心不健康时不调用 `Refresh`，只走退避后的 `Restore`；`Refresh` 只在核心健康时执行，同样的失败只记一次，恢复时记一条 Info；`retry_in` 记为 `3s` 这样的时长；出站探测失败只在由成功变为失败时告警。测试见 `internal/agent/supervisor/supervisor_test.go` 与 `internal/agent/reconcile/schedule_reliability_test.go` |
 | 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |
 
-### 9.15 代码审查报告的五个问题：核实与修复（2026-10-24，`main` 上未发布）
+### 9.15 代码审查报告的五个问题：核实与修复（2026-10-24，v1.0.7 发布）
 
-外部审查报告了五个问题。每个都先在独立的工作树里用临时测试复现（复现后删除），再修复。下表的“核实”列是复现结果；修复都在 `main` 的工作树里，与 9.14 遗留问题 1 的修复一起，尚未发布，也还没有实机复测。
+外部审查报告了五个问题。每个都先在独立的工作树里用临时测试复现（复现后删除），再修复。下表的“核实”列是复现结果。修复与 9.14 遗留问题 1 的修复一起在提交 `9980c86` 中，作为 v1.0.7 发布，实机复测见 9.16。
 
 | # | 问题 | 核实 | 根因 | 修复 | 测试 |
 |---|---|---|---|---|---|
@@ -747,4 +747,88 @@
 
 **门禁。** `gofmt -l` 无输出，`go vet ./...` 通过，`go test -p 1 -count=1 ./...` 全部 49 个包通过，`npm --prefix web run build`（含 `vue-tsc`）通过。
 
-**仍待完成。** 发布新版本后的实机复测：supervisor 端口被占用场景、删除用户后的流量上传、回滚后的自动纠正、快捷用户接入在面板重启后的保留。
+**实机复测。** 已在 v1.0.7 上完成，见 9.16：supervisor 端口被占用场景、删除用户后的流量上传、回滚后的自动纠正、快捷用户接入在面板重启后的保留。
+
+### 9.16 v1.0.7 发布、三台主机升级与四项修复的实机复测（2026-10-25）
+
+**发布。**
+- 修复提交 `9980c86`（9.15 的五个问题与 9.14 遗留问题 1）在 `main` 上的 CI 失败：`internal/platform/server` 有六个额度测试在 `-race` 下失败（五个快捷接入测试部署时返回 409 `deployment_conflict`，`TestQuotaDeployFailureKeepsTheEntryForTheNextWindow` 得到 2 个修订）。本地 Windows 不带 `-race` 的全量测试通过。CI 日志需要仓库管理员权限，因此用 Zig 交叉编译 `-race` 测试二进制，在面板主机的临时目录里以 `nobody` 运行，复现了同样的六个失败；其余 12 个改动过的包在 `-race` 下通过。
+- 原因在测试，不在产品代码：每次部署成功后会排队一次额度对账，而测试夹具的发布与快捷接入辅助函数没有等它执行完。在 `-race` 下变慢后，这次对账在测试的下一步中途触发：要么用自动修订占住节点（409），要么对测试刚设置的超额用户再生成一个修订。修复提交 `f87ffdf`：额度部署器记录仍在对账的 flush 数，夹具在准备性部署之后等节点没有排队、计时或进行中的对账再继续。修复后该包在 Linux `-race` 下通过（1351 秒），`main` 上的 CI 为 `success`。
+- 标签 `v1.0.7` 指向 `f87ffdf`，标签的 CI 为 `success`。GitHub Release `v1.0.7` 于 2026-10-25T11:37:03Z 发布，正式版，不是草稿。附件有两个归档、`SHA256SUMS` 与 `node-install.sh`。amd64 归档的 SHA-256 为 `ae83a06d…d07c`，arm64 为 `ef96e55e…c621`。
+- 面板主机上的临时测试目录已删除，`/root` 恢复为 0700。
+
+**升级（各主机用已安装的 1.0.6 `qui-update --version 1.0.7 --yes` 从 GitHub 升级）。**
+
+| 主机 | 结果 |
+|---|---|
+| `uk-node`（Debian，systemd） | Agent `1.0.6 → 1.0.7`，`active`，`NRestarts=0`，退出码 0；path 单元 `active` |
+| 第三台主机 `alpine-node`（OpenRC） | Agent `1.0.7`，`started`，watcher `started`，退出码 0 |
+| 面板主机 | Agent 与面板都到 `1.0.7`（含迁移 `0110_credential_tombstones.sql`）；面板更新前备份为 `pre-update-1.0.6-20261025-194149.db`；HTTPS 返回 200 |
+
+- 三台主机都没有残留快照，也没有失败的单元。面板显示三个节点 `online`、Agent `1.0.7`。升级引起的面板重启没有产生自动修订（最新仍为 85）。原链 `ALP-UK-US2` 正常。
+- 两台 systemd 主机的 `/var/lib/proxy-agent` 与 `/var/lib/proxy-panel` 升级后为 0700（`StateDirectoryMode=0700`）。
+
+**测试前的基线。** 面板对象：入站 8、出站 2、链 1、规则 4、节点组 2、用户 2；三个节点 `online`、Xray 26.3.27。`api.ipify.org` 经链从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝（curl rc 97）。共存服务的 PID：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 为 738/740、833/834；第三台主机上 `komari-agent`、`cf-probe` 为 539、415，`xboard-node` 为 `crashed`。
+
+**复测 1：核心起不来时 supervisor 走退避（9.14 遗留问题 1，`alpine-node`）。** 停 Agent，用 `socat` 占住入站端口 `127.0.0.1:990`（11:43:59），再启动 Agent；保留的修订能渲染但 Xray 起不来。4 分钟后（11:48:05）结束 `socat`。
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 启动 | 通过 | 只有一条 `retained revision cannot start with the installed core; proxy remains stopped; control connection continues`（`Xray startup or health check failed`），1 秒后 `node control connected` |
+| 恢复只走退避 | 通过 | 端口被占期间的恢复尝试在 11:44:02、:08、:17、:32、:59、11:45:50、11:46:53、11:47:56，共 8 次，间隔 6、9、15、27、51 秒后到达 1 分钟上限。v1.0.6 的 `Refresh` 会每 3 秒重新启动一次核心 |
+| 日志 | 通过 | `core recovery failed` 只记 2 条：第一次失败（`retry_in`=`3s`）与到达上限（`retry_in`=`1m0s`）；没有任何 `approved runtime state reconciliation failed` |
+| Agent 不重启 | 通过 | 从启动到恢复后 Agent 一直是同一个 PID |
+| 端口释放后恢复 | 通过 | 11:48:59 的下一次尝试成功，Xray 运行，节点 `online`；原链、直连、错误口令三项与基线相同；修订目录 77、80、83、84、85 都在 |
+
+**复测 2～4 的准备。** 新建临时用户 `t107`（只有 SOCKS5，授权节点组“UK entry”，含 `alpine-node` 与 `uk-node`）与一台设备。现有入站的允许用户列表都为空（表示该组的所有授权用户），授权本身不触发自动修订。
+
+**复测 4：快捷用户接入在面板重启与 Owner 发布后保留（9.15 问题 3，`uk-node`）。**
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 写入真实入站 | 通过 | `POST /api/v1/revisions/user-access`（SOCKS5 `0.0.0.0:35190`）后入站数 8 → 9，名称为 `User access socks5`，绑定 `alice` 与 `t107`；修订 86 `success`；`t107` 经 `195.72.166.247:35190` 访问 `api.ipify.org` 得到 UK 地址 |
+| 第一次重启面板（11:54:30） | 通过 | `t107` 仍可用。启动对账为 `alpine-node` 生成修订 87（`auto: startup reconcile`）：授权 `t107` 后 `alpine-socks-990` 的用户面已变化但从未发布，对账把它补上，`t107` 随后能经 `127.0.0.1:990` 访问。这是对账应做的事；`uk-node` 没有修订 |
+| 第二次重启面板（11:58:31） | 通过 | 一切已一致，150 秒内没有任何新修订；`t107` 仍可用 |
+| Owner 正常发布 | 通过 | `POST /api/v1/revisions/proxy` 生成修订 88，`success`，`35190` 仍在监听，`t107` 仍可用；随后的部署后对账没有产生修订。v1.0.6 的这次发布会删掉快捷接入的入站 |
+
+**复测 3：回滚到禁用前的修订后自动纠正（9.15 问题 2，`uk-node`）。**
+
+| 时间（UTC） | 事件 |
+|---|---|
+| 12:03:08 | 禁用 `t107` |
+| 12:04:08 | 修订 89（`alpine-node`）与 90（`uk-node`）`auto: user t107 disabled`，都 `success`；`t107` 被拒绝（curl rc 97） |
+| 12:04:43 | `POST /api/v1/nodes/{uk}/rollback`，回滚到修订 88（`t107` 仍启用） |
+| 12:04:50 | 旧修订生效，`t107` 又能访问 |
+| 12:05:08 | 修订 91 `auto: post-rollback reconcile; user t107 disabled`，`success` |
+| 12:05:24 | `t107` 再次被拒绝（curl rc 97） |
+
+- 判定：通过。纠正在回滚成功后约 18 秒创建（合并窗口内），修订 91 自身成功后没有再产生修订。
+- 随后重新启用 `t107`：修订 92（`uk-node`，`auto: post-deploy reconcile; user t107 reactivated`）与 93（`alpine-node`）恢复凭据；经 `uk-node` 下载 5 MB 后 `usedTraffic` 为 5 061 573，计量正常。
+
+**复测 2：节点离线期间删除用户，删除前的流量与访问记录照常上传（9.15 问题 1，`uk-node`）。**
+1. 12:08:27 在 `uk-node` 上加临时 nft 表 `inet qui_test107`，只丢弃发往面板控制端口 `23.254.158.3:9443` 的包。
+2. 12:08:29 经 `uk-node` 用 `t107` 下载 20 MB 并访问 3 次 `api.ipify.org`。面板显示 `uk-node` `offline`（最后心跳 12:08:24），`t107` 的 `usedTraffic` 仍为 5 061 573，流量留在 Agent 的队列里。
+3. 12:09:17 删除 `t107`（204）。
+4. 12:09:48 删除 nft 表。
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 重连后不再被拒 | 通过 | Agent 在 12:09:55 `node control connected`，之后一直保持连接；Agent 日志没有 `quarantin`、`rejection`、`FailedPrecondition`，面板日志没有 `identity_conflict` 或拒绝记录。v1.0.6 在这里会对队首流量批次返回 `identity_conflict` 并结束连接，每次重连都重复 |
+| 后面的记录没有被堵住 | 通过 | 离线期间（12:08 时间桶，修订 92，用户 `t107`）的访问记录 `speed.cloudflare.com` 与 `api.ipify.org`（3 次连接）在删除用户之后入库，访问记录总数 14 → 18 |
+| 节点状态 | 通过 | `uk-node` 重新 `online`，核心健康 |
+
+**观察（不是回归）。** 删除用户不会自动发布修订：删除后 `t107` 在 `uk-node` 与 `alpine-node` 上仍能访问，直到 Owner 重新发布（下文恢复步骤里的修订 94、95）。删除处理与 v1.0.6 相同，用户列表的删除确认框也写明“节点配置需重新发布以撤销既有接入”。禁用会自动撤销，删除不会；是否让删除也自动撤销需要 owner 决定。
+
+**恢复。**
+- 删除快捷接入入站，Owner 发布 `uk-node`（修订 94）与 `alpine-node`（修订 95），都 `success`；之后 75 秒内没有自动修订。`uk-node` 不再监听 `35190`（curl rc 7），`alpine-node` 拒绝 `t107`（curl rc 97）。
+- 面板对象数与测试前相同：入站 8、出站 2、链 1、规则 4、节点组 2、用户 2。三个节点 `online`、Agent 1.0.7、核心健康。`alpine-node` 的公网 IP 保持为空。
+- 原链恢复：`api.ipify.org` 从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝。面板主机上对 `uk-node` 的数据面脚本：SOCKS5、HTTP、VLESS、Shadowsocks、Trojan 直连都从 UK 出口，三条阻断规则生效（curl rc 35），GitHub 直连正常，错误口令被拒绝（rc 97）。脚本里“经中转到 US”的三行现在也从 UK 出口，与当前规则一致：`uk-node` 上已没有这些域名的中转规则，只剩两条阻断、GitHub 直连与 `alpine-node` 的链规则。
+- 共存服务：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 与测试前相同（738/740、833/834），没有失败的单元。第三台主机上 `komari-agent`、`cf-probe` 的 PID 与测试前相同（539、415），状态 `started`；`xboard-node` 保持测试前的 `crashed`。三台主机都没有 nft 表 `inet proxy_agent_source` 与 `inet qui_test107`，没有残留快照，没有残留的 `socat`。
+- 三台主机上的临时脚本、凭据文件与日志都已删除。
+
+**遗留问题。**
+
+| # | 问题 | 影响 | 建议 |
+|---|---|---|---|
+| 1 | 删除用户或设备不会自动撤销节点上的凭据（见上文观察） | 已删除用户在下一次发布前仍能使用代理；界面已提示需要重新发布 | 由 owner 决定是否像禁用一样排队一次自动修订 |
+| 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |

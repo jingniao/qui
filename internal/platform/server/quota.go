@@ -144,6 +144,37 @@ func (d *quotaDeployer) renewExpiry(ctx context.Context, userID string) {
 	d.schedule(ctx, user.Transition{UserID: userID, Username: account.Username, Reason: "renewed"})
 }
 
+// accessRemoved is the Owner-delete hook for a proxy user and for one of its
+// devices. A delete takes the user row, its devices, its credentials, its node
+// group grants and its subscription token with it, so nothing an Owner can edit
+// afterwards points at the nodes any more: the nodes would keep accepting the
+// deleted credential until someone republished by hand. schedule still finds
+// them, because every node whose published state carries one of the user's
+// credentials is queued on its own, and reconcile renders the current — now
+// smaller — user access surface onto that published state.
+//
+// The deletion is not an activity transition: QuotaState compares a user record
+// against its previous reason, and the record is gone. The transition is
+// therefore scheduled directly, like renewExpiry. The alert is not, though:
+// renewExpiry stays silent because a renewal keeps the same access with a later
+// deadline, while a deletion takes access away, which is exactly what the
+// user_access alert of emitTransitions announces for every credential-affecting
+// transition. It is published here with that same payload shape.
+func (d *quotaDeployer) accessRemoved(ctx context.Context, userID, username, reason string) {
+	if userID == "" {
+		return
+	}
+	d.publish("system.alert", map[string]string{"alert": "user_access", "userId": userID, "username": username, "reason": reason})
+	d.schedule(ctx, user.Transition{UserID: userID, Username: username, Reason: reason})
+	// Only a deleted user is forgotten. A deleted device leaves its owner very
+	// much alive, and dropping the owner's entry would swallow its next
+	// transition: Evaluate reports changes only against a previous state it
+	// still tracks.
+	if _, err := d.users.Get(ctx, userID); errors.Is(err, user.ErrNotFound) {
+		d.quota.Forget(userID)
+	}
+}
+
 // reconcileNode queues one reconciliation of a node's user access surface. The
 // Deployment module calls it after every successful deploy and rollback: both
 // re-publish a stored revision verbatim, so a rollback to a revision rendered
@@ -547,8 +578,12 @@ func (d *quotaDeployer) reconcile(ctx context.Context, nodeID string, entry *quo
 // publishedFallback derives the user-access surface from the published state
 // alone. A user whose current record is inactive or gone is disabled here, and
 // RuntimeAt then drops that user's credentials, inbound bindings and WireGuard
-// peers, so the result is a valid revision that takes access away without
-// touching anything else the node runs.
+// peers. A published credential that no longer exists or now belongs to another
+// user is dropped the same way: deleting one device of an active user is not an
+// activity transition, its credential is cascade-deleted from the credentials
+// table, and only this check takes the credential off the node. Either way
+// the result is a valid revision that takes access away without touching
+// anything else the node runs.
 func (d *quotaDeployer) publishedFallback(ctx context.Context, published desiredstate.State) (desiredstate.State, error) {
 	next := published
 	next.Users = append([]desiredstate.User(nil), published.Users...)
@@ -564,6 +599,31 @@ func (d *quotaDeployer) publishedFallback(ctx context.Context, published desired
 		}
 		if user.InactivityReason(account, now) != "" {
 			next.Users[index].Enabled = false
+		}
+	}
+	publishedIDs := []string{}
+	for _, credential := range published.Credentials {
+		if !credential.Internal && credential.UserID != "" {
+			publishedIDs = append(publishedIDs, credential.ID)
+		}
+	}
+	owners, err := d.users.CredentialOwners(ctx, publishedIDs)
+	if err != nil {
+		return desiredstate.State{}, err
+	}
+	removed := map[string]bool{}
+	for _, credential := range published.Credentials {
+		if credential.Internal || credential.UserID == "" {
+			continue
+		}
+		if owner, exists := owners[credential.ID]; !exists || owner != credential.UserID {
+			removed[credential.ID] = true
+		}
+	}
+	if len(removed) > 0 {
+		next, err = next.WithoutCredentials(removed)
+		if err != nil {
+			return desiredstate.State{}, err
 		}
 	}
 	return next.RuntimeAt(now)

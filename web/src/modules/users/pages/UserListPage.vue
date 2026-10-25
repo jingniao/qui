@@ -217,7 +217,7 @@
         </div>
       </div>
     </FormDrawer>
-    <ConfirmDialog v-model="confirmVisible" title="删除代理用户" :message="`删除 ${removeTarget?.username || ''} 及其设备、凭据和订阅授权？节点配置需重新发布以撤销既有接入。`" @confirm="remove" />
+    <ConfirmDialog v-model="confirmVisible" title="删除代理用户" :message="`删除 ${removeTarget?.username || ''} 及其设备、凭据和订阅授权？已发布到节点的凭据会在约一分钟内自动撤销，无需重新发布。`" @confirm="remove" />
   </div>
 </template>
 

@@ -50,6 +50,18 @@ FROM restore_source.credentials c JOIN devices d ON d.id=c.device_id WHERE NOT E
 	if err := db.CopyRecoveryTable(ctx, tx, "user_traffic_cursors", "node_id,epoch,credential_id,user_id,device_id,upload_bytes,download_bytes"); err != nil {
 		return err
 	}
+	// A user or device deleted after the backup was taken left a tombstone in the
+	// current database only. Keeping it lets the counters the nodes still send
+	// for those credentials stay acceptable after the restore instead of turning
+	// into unknown identities. The tombstone carries the exact identity
+	// credentialTombstoned matches, and the checks above already refuse a
+	// credential whose user or device differs between the two databases, so a
+	// carried tombstone can only ever cover the identity that was really deleted
+	// and never a credential the restored database still has under another owner.
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO credential_tombstones(credential_id,user_id,device_id,deleted_at)
+SELECT c.credential_id,c.user_id,c.device_id,c.deleted_at FROM restore_source.credential_tombstones c`); err != nil {
+		return err
+	}
 	if err := validateStoredTrafficMaterial(ctx, tx, ""); err != nil {
 		return err
 	}

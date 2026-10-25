@@ -231,6 +231,79 @@ func TestCoreUpdateDispatchReconnectClosureAndClear(t *testing.T) {
 	}
 }
 
+// TestCoreUpdateClosedAsSuccessStillAcceptsTheReceipt is the reconnect case of
+// 2026-10-25: the node comes back already running the requested core version, so
+// CloseStaleCoreUpdates closes the running task as a success without a result.
+// The authenticated receipt the Agent delivers next is the only proof of what
+// happened on the node and used to affect no row, which dropped the control
+// stream instead of recording it.
+func TestCoreUpdateClosedAsSuccessStillAcceptsTheReceipt(t *testing.T) {
+	digest := strings.Repeat("cd", 32)
+	assetURL := strings.Replace(coreAssetURLForTest(), "v26.3.27", "v26.3.28", 1)
+	r, catalogue, nodeID, revision := coreNodeFixture(t, runtime.GOOS+"/"+runtime.GOARCH, "xray")
+	ctx := context.Background()
+	nodes := &node.Repository{Database: r.Database}
+	sequence := uint64(1)
+	reportCapabilities := func(version string) {
+		t.Helper()
+		sequence++
+		message := &pb.AgentMessage{NodeId: nodeID, MessageId: "capabilities", Sequence: sequence, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{CoreName: "xray", CoreVersion: version}}}
+		if _, err := nodes.Record(ctx, nodeID, message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	task, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.PendingCoreUpdate(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	reportCapabilities("26.3.28")
+	if err := r.CloseStaleCoreUpdates(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := r.ListCoreUpdates(ctx, 1, 20)
+	if err != nil || len(items) != 1 || items[0].Status != "success" || items[0].Result != nil {
+		t.Fatalf("the reconnect did not close the task as a result-less success: %+v %v", items, err)
+	}
+
+	receipt, err := json.Marshal(release.UpdateResult{ID: task.CommandID, NodeID: nodeID, Revision: revision.ID, TargetDigest: digest, Status: "success", Code: "success", InstalledDigest: strings.Repeat("ef", 32), InstalledVersion: "26.3.28", InstalledSequence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CoreUpdateResult(ctx, nodeID, &pb.CoreUpdateResult{ResultJson: receipt}); err != nil {
+		t.Fatalf("the receipt of a task closed as success was rejected: %v", err)
+	}
+	items, _, err = r.ListCoreUpdates(ctx, 1, 20)
+	if err != nil || len(items) != 1 || items[0].Status != "success" || items[0].Result == nil || items[0].Result.InstalledVersion != "26.3.28" {
+		t.Fatalf("the receipt was not recorded: %+v %v", items, err)
+	}
+	if err := r.CoreUpdateResult(ctx, nodeID, &pb.CoreUpdateResult{ResultJson: receipt}); err != nil {
+		t.Fatalf("identical replay rejected: %v", err)
+	}
+
+	// A task the Owner cleared stays closed: its receipt must not be
+	// acknowledged, because no row would record it.
+	cleared, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.PendingCoreUpdate(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ClearCoreUpdate(ctx, catalogue, cleared.ID, "owner", "local"); err != nil {
+		t.Fatal(err)
+	}
+	unrecorded, err := json.Marshal(release.UpdateResult{ID: cleared.CommandID, NodeID: nodeID, Revision: revision.ID, TargetDigest: digest, Status: "success", Code: "success", InstalledDigest: strings.Repeat("ef", 32), InstalledVersion: "26.3.28", InstalledSequence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CoreUpdateResult(ctx, nodeID, &pb.CoreUpdateResult{ResultJson: unrecorded}); err == nil {
+		t.Fatal("result for a cleared task was acknowledged without being recorded")
+	}
+}
+
 // TestCoreUpdateUndispatchableLegacyTaskIsClosed covers the row migration 0107
 // backfills for a historical task: it keeps status 'queued' with an empty direct
 // URL, so no schema-2 command can be built from it. The task must be closed

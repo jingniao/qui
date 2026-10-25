@@ -72,3 +72,41 @@ func TestQuotaStateSeedThenReportEachChangeOnce(t *testing.T) {
 		t.Fatalf("reactivation: %v %v", transitions, err)
 	}
 }
+
+// TestQuotaStateForgetsDeletedUser: a deleted user is dropped from the tracked
+// state on purpose, so the map does not keep a record that can never be
+// evaluated again.
+func TestQuotaStateForgetsDeletedUser(t *testing.T) {
+	ctx := context.Background()
+	repository := testRepository(t)
+	account, err := repository.Save(ctx, "", userInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := NewQuotaState(repository)
+	if err := state.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tracked := func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		_, exists := state.previous[account.ID]
+		return exists
+	}
+	if !tracked() {
+		t.Fatal("Seed did not track the user")
+	}
+	if err := repository.Delete(ctx, account.ID); err != nil {
+		t.Fatal(err)
+	}
+	state.Forget(account.ID)
+	if tracked() {
+		t.Fatal("Forget kept the deleted user")
+	}
+	if transitions, err := state.Evaluate(ctx, []string{account.ID}); err != nil || len(transitions) != 0 {
+		t.Fatalf("the forgotten user reported a transition: %v %v", transitions, err)
+	}
+	if tracked() {
+		t.Fatal("a deleted user was tracked again")
+	}
+}

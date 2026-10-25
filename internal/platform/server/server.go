@@ -247,7 +247,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// user access surface is only known to be correct after the Deployment module
 	// reports it applied.
 	deployments.Applied = s.quotaDeployer.reconcileNode
-	userHandler := &user.Handler{Repository: users, Auth: authHandler, Audit: systemRepository, Nodes: nodeRepository, QuotaChanged: s.quotaDeployer.evaluateUser, ExpiryRenewed: s.quotaDeployer.renewExpiry, Observations: s.connectionObserver}
+	userHandler := &user.Handler{Repository: users, Auth: authHandler, Audit: systemRepository, Nodes: nodeRepository, QuotaChanged: s.quotaDeployer.evaluateUser, ExpiryRenewed: s.quotaDeployer.renewExpiry, AccessRemoved: s.quotaDeployer.accessRemoved, Observations: s.connectionObserver}
 	userHandler.Register(mux)
 	// The subscription path only reads users, nodes and published state, and a
 	// snapshot that lags a just-committed write is acceptable there. Pointing

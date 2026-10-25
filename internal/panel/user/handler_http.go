@@ -22,6 +22,13 @@ type Handler struct {
 	// Renewing a user who stays active is not an activity transition, so
 	// QuotaChanged alone would leave the nodes on the old deadline. Optional.
 	ExpiryRenewed func(context.Context, string)
+	// AccessRemoved revokes access a user or one of its devices lost to a
+	// delete. The deleted rows, credentials, grants and subscription token are
+	// gone, so no later Owner edit can reach the nodes that still run those
+	// credentials; the panel has to schedule that revocation itself. It is
+	// called only after the delete succeeded, with the reason deleted or
+	// device deleted. Optional.
+	AccessRemoved func(ctx context.Context, userID, username, reason string)
 	// Observations fills in the live connection count and over-limit flag on
 	// returned users. Optional and nil-safe.
 	Observations *ConnectionObserver
@@ -48,6 +55,12 @@ func (h *Handler) quotaChanged(ctx context.Context, userID string) {
 func (h *Handler) expiryRenewed(ctx context.Context, userID string) {
 	if h.ExpiryRenewed != nil {
 		h.ExpiryRenewed(ctx, userID)
+	}
+}
+
+func (h *Handler) accessRemoved(ctx context.Context, userID, username, reason string) {
+	if h.AccessRemoved != nil {
+		h.AccessRemoved(ctx, userID, username, reason)
 	}
 }
 
@@ -123,10 +136,18 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// The username only exists until the delete succeeds, and the revocation
+	// below reports it to the Owner.
+	account, err := h.Repository.Get(r.Context(), id)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
 	if err := h.Repository.Delete(r.Context(), id); err != nil {
 		h.fail(w, err)
 		return
 	}
+	h.accessRemoved(r.Context(), id, account.Username, "deleted")
 	if err := h.audit(r, "删除代理用户", id); err != nil {
 		h.internal(w, err)
 		return
@@ -195,10 +216,24 @@ func (h *Handler) updateDevice(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (h *Handler) deleteDevice(w http.ResponseWriter, r *http.Request) {
+	// Deleting the row leaves the device's credentials in the published
+	// revisions the nodes run, so the device and its owner are resolved before
+	// the cascade removes them, for the revocation below.
+	device, err := h.Repository.Device(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	account, err := h.Repository.Get(r.Context(), device.UserID)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
 	if err := h.Repository.DeleteDevice(r.Context(), r.PathValue("id")); err != nil {
 		h.fail(w, err)
 		return
 	}
+	h.accessRemoved(r.Context(), account.ID, account.Username, "device deleted")
 	if err := h.audit(r, "删除设备", r.PathValue("id")); err != nil {
 		h.internal(w, err)
 		return

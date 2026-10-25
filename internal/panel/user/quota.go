@@ -84,6 +84,16 @@ func (q *QuotaState) Seed(ctx context.Context) error {
 	return nil
 }
 
+// Forget drops a user from the tracked state. A deleted user has no record left
+// to evaluate, so the entry could only be leaked memory; the next Evaluate would
+// remove it as well, but a deletion must not wait for a tick to clean up after
+// itself.
+func (q *QuotaState) Forget(userID string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.previous, userID)
+}
+
 func (q *QuotaState) AllUserIDs(ctx context.Context) ([]string, error) {
 	rows, err := q.Repository.Database.QueryContext(ctx, "SELECT id FROM users ORDER BY id")
 	if err != nil {

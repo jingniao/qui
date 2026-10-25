@@ -27,27 +27,31 @@ func (s State) RuntimeAt(at time.Time) (State, error) {
 	return result.filterInactive(inactive)
 }
 
-func (s State) filterInactive(inactive map[string]bool) (State, error) {
+// WithoutCredentials derives a state without the given credentials, which is the
+// same removal RuntimeAt applies to an inactive user's credentials: each one
+// disappears from the credential list, from the inbound bindings and from the
+// WireGuard peers, and an inbound left without credentials is disabled. An
+// inbound therefore never becomes a listener without authentication, and the
+// receiver keeps its own values.
+func (s State) WithoutCredentials(remove map[string]bool) (State, error) {
 	result := s
 	result.Credentials = []Credential{}
-	removed := map[string]bool{}
 	for _, credential := range s.Credentials {
-		if !credential.Internal && credential.UserID != "" && inactive[credential.UserID] {
-			removed[credential.ID] = true
+		if remove[credential.ID] {
 			continue
 		}
 		result.Credentials = append(result.Credentials, credential)
 	}
 	result.Inbounds = append([]Inbound(nil), s.Inbounds...)
 	for index, inbound := range s.Inbounds {
-		ids := []string{}
+		bound := []string{}
 		for _, id := range inbound.CredentialIDs {
-			if !removed[id] {
-				ids = append(ids, id)
+			if !remove[id] {
+				bound = append(bound, id)
 			}
 		}
-		result.Inbounds[index].CredentialIDs = ids
-		if len(inbound.CredentialIDs) > 0 && len(ids) == 0 {
+		result.Inbounds[index].CredentialIDs = bound
+		if len(inbound.CredentialIDs) > 0 && len(bound) == 0 {
 			result.Inbounds[index].Enabled = false
 		}
 		if inbound.Settings.WireGuard != nil {
@@ -55,7 +59,7 @@ func (s State) filterInactive(inactive map[string]bool) (State, error) {
 			settings.Addresses = append([]string(nil), settings.Addresses...)
 			settings.Peers = []WireGuardPeer{}
 			for _, peer := range inbound.Settings.WireGuard.Peers {
-				if removed[peer.CredentialID] {
+				if remove[peer.CredentialID] {
 					continue
 				}
 				copy := peer
@@ -66,4 +70,16 @@ func (s State) filterInactive(inactive map[string]bool) (State, error) {
 		}
 	}
 	return result, nil
+}
+
+// filterInactive removes the credentials of the given inactive users through the
+// same path as any other credential removal.
+func (s State) filterInactive(inactive map[string]bool) (State, error) {
+	removed := map[string]bool{}
+	for _, credential := range s.Credentials {
+		if !credential.Internal && credential.UserID != "" && inactive[credential.UserID] {
+			removed[credential.ID] = true
+		}
+	}
+	return s.WithoutCredentials(removed)
 }

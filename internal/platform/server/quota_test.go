@@ -1217,3 +1217,236 @@ func TestQuotaRollbackToPreEnableRevisionRestoresCredential(t *testing.T) {
 		t.Fatalf("corrective summary: %q", corrective.Summary)
 	}
 }
+
+// TestQuotaDeletedUserRevokedOnNode is the field case of 2026-10-25: deleting a
+// proxy user removed the rows (with credential tombstones for the counters), but
+// the nodes kept accepting the credential until the Owner republished by hand.
+// Deleting is now a revocation like disabling: one automatic revision that no
+// longer carries the credential.
+func TestQuotaDeletedUserRevokedOnNode(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, credential := f.addUser(t, "deleted_user", "")
+	f.publish(t)
+	alerts := f.recordAlerts()
+
+	if response := f.owner.call("DELETE", "/api/v1/users/"+account.ID, nil); response.Code != 204 {
+		t.Fatalf("delete user: %d %s", response.Code, response.Body.String())
+	}
+	flowWait(t, "one automatic revision removing the deleted credential", func() bool {
+		return len(f.autoRevisions(t)) == 1
+	})
+	automatic := f.autoRevisions(t)[0]
+	if automatic.NodeID != f.nodeID {
+		t.Fatalf("automatic revision targeted %q", automatic.NodeID)
+	}
+	if stateHasCredential(f.state(t, automatic.ID), credential) {
+		t.Fatal("the deleted credential survived in the automatic revision")
+	}
+	if !strings.Contains(automatic.Summary, "deleted_user deleted") {
+		t.Fatalf("summary %q does not name the deleted user", automatic.Summary)
+	}
+	if reasons := alerts.reasons(); len(reasons) != 1 || reasons[0] != "deleted" {
+		t.Fatalf("alerts: %v", reasons)
+	}
+
+	// Applying the revocation settles the node: the post-deploy reconcile finds
+	// it in sync and creates nothing, and no later tick resurrects the user.
+	f.apply(t, automatic.ID)
+	f.idle(t)
+	f.markRecovered()
+	f.app.quotaDeployer.tickOnce(f.ctx)
+	f.idle(t)
+	if count := len(f.autoRevisions(t)); count != 1 {
+		t.Fatalf("the applied revocation produced %d automatic revisions", count)
+	}
+}
+
+// TestQuotaDeletedDeviceRevokesOnlyThatDevice: deleting one device must take
+// only that device's credential off the node, not the user's other device.
+func TestQuotaDeletedDeviceRevokesOnlyThatDevice(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, first := f.addUser(t, "device_user", "")
+	account.MaxDevices = 2
+	saveUser(t, f, account, 0)
+	response := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "second device", "protocols": []string{"vless"}})
+	if response.Code != 201 {
+		t.Fatalf("second device: %d %s", response.Code, response.Body.String())
+	}
+	var second user.Device
+	if err := json.Unmarshal(response.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Credentials) != 1 || second.Credentials[0].Protocol != "vless" {
+		t.Fatalf("second device credentials: %v", second.Credentials)
+	}
+	kept := second.Credentials[0]
+	f.publish(t)
+	alerts := f.recordAlerts()
+
+	var firstDeviceID string
+	if err := f.app.Database.QueryRowContext(f.ctx, "SELECT device_id FROM credentials WHERE id=?", first.ID).Scan(&firstDeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if response := f.owner.call("DELETE", "/api/v1/devices/"+firstDeviceID, nil); response.Code != 204 {
+		t.Fatalf("delete device: %d %s", response.Code, response.Body.String())
+	}
+	flowWait(t, "one automatic revision removing the deleted device's credential", func() bool {
+		return len(f.autoRevisions(t)) == 1
+	})
+	automatic := f.autoRevisions(t)[0]
+	revoked := f.state(t, automatic.ID)
+	if stateHasCredential(revoked, first) {
+		t.Fatal("the deleted device's credential survived in the automatic revision")
+	}
+	if !stateHasCredential(revoked, kept) {
+		t.Fatal("the surviving device's credential was removed with the deleted one")
+	}
+	if !strings.Contains(automatic.Summary, "device deleted") {
+		t.Fatalf("summary %q does not mention the deleted device", automatic.Summary)
+	}
+	if reasons := alerts.reasons(); len(reasons) != 1 || reasons[0] != "device deleted" {
+		t.Fatalf("alerts: %v", reasons)
+	}
+
+	f.apply(t, automatic.ID)
+	f.idle(t)
+	if count := len(f.autoRevisions(t)); count != 1 {
+		t.Fatalf("the applied revocation produced %d automatic revisions", count)
+	}
+}
+
+// TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt is the same delete while the
+// Owner's saved draft cannot be rendered: every automatic revision is then built
+// from the published state alone, and the deleted device's credential is gone
+// from the credentials table while its published entry still names the active
+// user. Without the credential-owner check that fallback found nothing to change
+// and the credential stayed valid on the node forever.
+func TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, first := f.addUser(t, "fallback_device_user", "")
+	account.MaxDevices = 2
+	saveUser(t, f, account, 0)
+	response := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "second device", "protocols": []string{"vless"}})
+	if response.Code != 201 {
+		t.Fatalf("second device: %d %s", response.Code, response.Body.String())
+	}
+	var second user.Device
+	if err := json.Unmarshal(response.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Credentials) != 1 {
+		t.Fatalf("second device credentials: %v", second.Credentials)
+	}
+	kept := second.Credentials[0]
+	f.publish(t)
+	flaky := &quotaFlakySnapshotter{inner: f.app.quotaDeployer.proxy, fail: true}
+	f.app.quotaDeployer.proxy = flaky
+
+	var firstDeviceID string
+	if err := f.app.Database.QueryRowContext(f.ctx, "SELECT device_id FROM credentials WHERE id=?", first.ID).Scan(&firstDeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if response := f.owner.call("DELETE", "/api/v1/devices/"+firstDeviceID, nil); response.Code != 204 {
+		t.Fatalf("delete device: %d %s", response.Code, response.Body.String())
+	}
+	flowWait(t, "one automatic revision removing the deleted device's credential", func() bool {
+		return len(f.autoRevisions(t)) == 1
+	})
+	automatic := f.autoRevisions(t)[0]
+	revoked := f.state(t, automatic.ID)
+	if stateHasCredential(revoked, first) {
+		t.Fatal("the deleted device's credential survived the published-only revision")
+	}
+	if !stateHasCredential(revoked, kept) {
+		t.Fatal("the surviving device's credential was removed with the deleted one")
+	}
+	if !strings.Contains(automatic.Summary, "device deleted") {
+		t.Fatalf("summary %q does not mention the deleted device", automatic.Summary)
+	}
+
+	// Once the draft renders again the regular render takes over and finds the
+	// node in sync, so the fix costs no further revision.
+	flaky.setFail(false)
+	f.apply(t, automatic.ID)
+	f.idle(t)
+	if count := len(f.autoRevisions(t)); count != 1 {
+		t.Fatalf("the applied revocation produced %d automatic revisions", count)
+	}
+}
+
+// field report: the Owner removed the user's node group grant without
+// publishing, so the node still runs the credential while no granted group
+// contains the user. Deleting the user has to reach that node, which only the
+// published-state scan of schedule can find.
+func TestQuotaDeletedUserAfterRemovedGrantReachesNode(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, credential := f.addUser(t, "deleted_after_grant_user", "")
+	f.publish(t)
+	account.NodeGroupIDs = []string{}
+	saveUser(t, f, account, 0)
+	published, err := f.app.deployments.Published(f.ctx, f.nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stateHasCredential(published, credential) {
+		t.Fatal("the node must still run the credential the grant removal did not publish")
+	}
+	f.markRecovered()
+
+	if response := f.owner.call("DELETE", "/api/v1/users/"+account.ID, nil); response.Code != 204 {
+		t.Fatalf("delete user: %d %s", response.Code, response.Body.String())
+	}
+	flowWait(t, "one automatic revision removing the deleted credential", func() bool {
+		return len(f.autoRevisions(t)) == 1
+	})
+	automatic := f.autoRevisions(t)[0]
+	if stateHasCredential(f.state(t, automatic.ID), credential) {
+		t.Fatal("the deleted credential survived on the node that still ran it")
+	}
+	if !strings.Contains(automatic.Summary, "deleted") {
+		t.Fatalf("summary %q does not mention the deletion", automatic.Summary)
+	}
+}
+
+// TestQuotaDeletedUserWithoutPublishedCredentialDoesNothing: a user no node ever
+// received a credential for leaves every published state untouched, so the
+// delete must not create a revision for them.
+func TestQuotaDeletedUserWithoutPublishedCredentialDoesNothing(t *testing.T) {
+	f := newQuotaFixture(t)
+	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: "ungranted_user", DisplayName: "ungranted_user", Status: "active", MaxDevices: 1, MaxConnections: 8, AllowedProtocols: []string{"vless"}})
+	if response.Code != 201 {
+		t.Fatalf("user: %d %s", response.Code, response.Body.String())
+	}
+	var account user.User
+	if err := json.Unmarshal(response.Body.Bytes(), &account); err != nil {
+		t.Fatal(err)
+	}
+	if device := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "ungranted device", "protocols": []string{"vless"}}); device.Code != 201 {
+		t.Fatalf("device: %d %s", device.Code, device.Body.String())
+	}
+	baseline := f.publish(t)
+	f.markRecovered()
+	alerts := f.recordAlerts()
+
+	if response := f.owner.call("DELETE", "/api/v1/users/"+account.ID, nil); response.Code != 204 {
+		t.Fatalf("delete user: %d %s", response.Code, response.Body.String())
+	}
+	flowWait(t, "the delete alert", func() bool { return len(alerts.reasons()) == 1 })
+	if reasons := alerts.reasons(); reasons[0] != "deleted" {
+		t.Fatalf("alerts: %v", reasons)
+	}
+	// Nothing may be queued for the node at all, and its published state must
+	// still be the baseline.
+	f.idle(t)
+	f.settle()
+	if count := len(f.autoRevisions(t)); count != 0 {
+		t.Fatalf("the delete of an unpublished user produced %d automatic revisions", count)
+	}
+	published, err := f.app.deployments.Published(f.ctx, f.nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.Revision != baseline {
+		t.Fatalf("the node moved from revision %d to %d", baseline, published.Revision)
+	}
+}

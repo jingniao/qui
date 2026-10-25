@@ -252,10 +252,13 @@ func (r *Repository) PendingCoreUpdate(ctx context.Context, nodeID string) (*pb.
 	return &pb.CoreUpdateCommand{RequestJson: data}, nil
 }
 
-// CoreUpdateResult records the node's authenticated outcome for its own task.
-// A reconnect that closed the task without an outcome (failed_closed with no
-// result) still accepts the authenticated result the Agent produced meanwhile,
-// because that outcome is the only proof of what happened on the node.
+// CoreUpdateResult records the node's authenticated outcome for its own task. A
+// reconnect that closed the task without an outcome still accepts the
+// authenticated result the Agent produced meanwhile, because that outcome is the
+// only proof of what happened on the node. That holds for both closures: a task
+// closed as failed_closed, and one closed as success because the node already
+// reported the target core version (CloseStaleCoreUpdates). A task the Owner
+// cleared keeps its status and its result is refused.
 func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payload *pb.CoreUpdateResult) error {
 	result, err := release.DecodeCoreUpdateResult(payload.ResultJson)
 	if err != nil || result.NodeID != nodeID {
@@ -283,8 +286,11 @@ func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payloa
 		return nil
 	}
 	// The task must still be open, or closed without an outcome. A task the
-	// Owner cleared or otherwise finished keeps its status.
-	update, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status=?,result_json=?,updated_at=? WHERE id=? AND command_id=? AND (status IN ('queued','running') OR (status='failed_closed' AND result_json IS NULL))", result.Status, payload.ResultJson, now(), t.ID, result.ID)
+	// Owner cleared or otherwise finished keeps its status. A task closed as
+	// success without a result was closed by CloseStaleCoreUpdates, because the
+	// node already reported the requested version; the receipt the node then
+	// delivers is still the only proof of what happened on it.
+	update, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status=?,result_json=?,updated_at=? WHERE id=? AND command_id=? AND (status IN ('queued','running') OR (status IN ('failed_closed','success') AND result_json IS NULL))", result.Status, payload.ResultJson, now(), t.ID, result.ID)
 	if err != nil {
 		return err
 	}

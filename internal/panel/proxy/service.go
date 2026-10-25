@@ -124,6 +124,14 @@ func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput
 	}
 	return s.Repository.SaveInbound(ctx, id, input)
 }
+
+// InboundAtListener reports the inbound that already owns a node listener, so a
+// caller holding business data for that listener can update it rather than
+// collide with it. The module boundary stays here: callers never query the
+// inbounds table themselves.
+func (s *Service) InboundAtListener(ctx context.Context, nodeID, protocol, listen string, port int) (Inbound, error) {
+	return s.Repository.InboundAtListener(ctx, nodeID, protocol, listen, port)
+}
 func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInput) (Outbound, error) {
 	n, err := s.Nodes.Get(ctx, input.NodeID)
 	if err != nil || !n.Enabled || n.DeletedAt != "" {

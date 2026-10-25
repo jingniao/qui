@@ -9,6 +9,7 @@ Group=proxy-panel
 ExecStart=/usr/local/bin/proxy-panel --config /etc/proxy-panel/config.yaml
 WorkingDirectory=/var/lib/proxy-panel
 StateDirectory=proxy-panel
+StateDirectoryMode=0700
 ReadWritePaths=/etc/proxy-panel
 UMask=0077
 Restart=on-failure

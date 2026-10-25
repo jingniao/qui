@@ -7,6 +7,7 @@ import (
 	"errors"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/pkg/contracts/traffic"
+	"time"
 )
 
 type cursor struct{ Upload, Download int64 }
@@ -117,31 +118,50 @@ func (s *Spool) SaveTraffic(ctx context.Context, counters []traffic.Counter) err
 	return s.commitAccounting(ctx, tx)
 }
 
+// PendingTraffic returns the next delivery: the oldest batch that is not
+// quarantined, or, when no such batch is left, the oldest quarantined batch
+// whose cool-down expired. Quarantined batches stay on disk but never occupy the
+// head while anything else is deliverable, and they come back as the last
+// resort because a rejection can be transient or already fixed on the panel.
 func (s *Spool) PendingTraffic(ctx context.Context) (*traffic.Batch, error) {
+	batch, _, err := s.pendingTraffic(ctx)
+	return batch, err
+}
+
+// PendingTrafficRetry is PendingTraffic with the quarantine flag of the
+// delivered batch, so the caller can report the retry after the cool-down.
+func (s *Spool) PendingTrafficRetry(ctx context.Context) (*traffic.Batch, bool, error) {
+	return s.pendingTraffic(ctx)
+}
+
+func (s *Spool) pendingTraffic(ctx context.Context) (*traffic.Batch, bool, error) {
 	var payload []byte
 	var batchID string
-	err := s.database.QueryRowContext(ctx, "SELECT id,CASE WHEN typeof(payload)='blob' AND length(payload) BETWEEN 1 AND ? THEN payload ELSE NULL END FROM traffic_batches ORDER BY rowid LIMIT 1", maxQueuedBatchBytes).Scan(&batchID, &payload)
+	var quarantined int
+	// "ORDER BY quarantined,rowid" keeps every deliverable batch ahead of a
+	// quarantined one, so a retry never delays newer traffic.
+	err := s.database.QueryRowContext(ctx, "SELECT id,CASE WHEN typeof(payload)='blob' AND length(payload) BETWEEN 1 AND ? THEN payload ELSE NULL END,quarantined FROM traffic_batches WHERE quarantined=0 OR (quarantined=1 AND quarantined_at<=?) ORDER BY quarantined,rowid LIMIT 1", maxQueuedBatchBytes, time.Now().Unix()-int64(TrafficQuarantineCooldown/time.Second)).Scan(&batchID, &payload, &quarantined)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(payload) == 0 {
-		return nil, invalidQueuedBatch(errors.New("traffic queue payload exceeds bounds; preserve original batch"))
+		return nil, false, invalidQueuedBatch(errors.New("traffic queue payload exceeds bounds; preserve original batch"))
 	}
 	data, err := s.vault.Open(payload)
 	if err != nil {
-		return nil, invalidQueuedBatch(err)
+		return nil, false, invalidQueuedBatch(err)
 	}
 	batch, err := traffic.Decode(data)
 	if err != nil {
-		return nil, invalidQueuedBatch(err)
+		return nil, false, invalidQueuedBatch(err)
 	}
 	if batch.ID != batchID || batch.NodeID != s.nodeID {
-		return nil, invalidQueuedBatch(errors.New("traffic queue identity mismatch"))
+		return nil, false, invalidQueuedBatch(errors.New("traffic queue identity mismatch"))
 	}
-	return &batch, nil
+	return &batch, quarantined == 1, nil
 }
 func (s *Spool) AckTraffic(ctx context.Context, batchID string, sent ...[]byte) error {
 	if batchID == "" || len(batchID) > 128 {

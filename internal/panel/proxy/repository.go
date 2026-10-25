@@ -69,6 +69,21 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 	}
 	return inbound, nil
 }
+
+// InboundAtListener returns the inbound already bound to one of a node's
+// protocol listeners. A caller that must not create a second listener on the
+// same port reads it first and reuses it instead.
+func (r *Repository) InboundAtListener(ctx context.Context, nodeID, protocol, listen string, port int) (Inbound, error) {
+	var inboundID string
+	err := r.Database.QueryRowContext(ctx, "SELECT id FROM inbounds WHERE node_id=? AND protocol=? AND listen=? AND port=? ORDER BY created_at LIMIT 1", nodeID, protocol, listen, port).Scan(&inboundID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Inbound{}, ErrNotFound
+	}
+	if err != nil {
+		return Inbound{}, err
+	}
+	return r.Inbound(ctx, inboundID, false)
+}
 func (r *Repository) Outbound(ctx context.Context, outboundID string, reveal bool) (Outbound, error) {
 	var outbound Outbound
 	var encoded []byte

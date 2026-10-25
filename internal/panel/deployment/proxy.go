@@ -13,8 +13,14 @@ import (
 	"strings"
 )
 
+// ProxyConfiguration is the proxy module's public surface as the Deployment
+// module sees it. The quick user-access feature writes its inbound through the
+// same service the Owner's inbound pages use, and renders through the same
+// renderer as POST /api/v1/revisions/proxy.
 type ProxyConfiguration interface {
 	Snapshot(context.Context, string, proxy.AccessReader) (desiredstate.State, error)
+	SaveInbound(context.Context, string, proxy.InboundInput) (proxy.Inbound, error)
+	InboundAtListener(context.Context, string, string, string, int) (proxy.Inbound, error)
 }
 
 func (h *Handler) proxyRevision(w http.ResponseWriter, r *http.Request) {

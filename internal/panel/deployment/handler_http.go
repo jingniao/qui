@@ -1,7 +1,6 @@
 package deployment
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
@@ -19,9 +18,6 @@ type Handler struct {
 	Audit      auth.Audit
 	Users      UserAccess
 	Proxy      ProxyConfiguration
-	Policies   interface {
-		ForNode(context.Context, string) ([]desiredstate.Policy, error)
-	}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -72,6 +68,16 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if err := body.State.Validate(); err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
+	}
+	// A user credential that exists only inside a revision cannot survive: the
+	// proxy renderer and every automatic quota revision read user credentials
+	// from the users and inbounds business data, so the next publication would
+	// silently drop it. Raw revisions therefore carry internal credentials only.
+	for _, credential := range body.State.Credentials {
+		if !credential.Internal {
+			httpapi.Error(w, 400, "unmanaged_user_credentials", "Raw revisions cannot carry user credentials; create devices under Users and publish the node's inbounds or the user access draft instead")
+			return
+		}
 	}
 	n, err := h.Nodes.Get(r.Context(), body.State.NodeID)
 	if err != nil || !n.Enabled {

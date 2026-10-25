@@ -56,22 +56,28 @@ func (r *Repository) applyTraffic(ctx context.Context, batch traffic.Batch, stat
 		if delta == 0 {
 			continue
 		}
-		if !affectedSeen[counter.UserID] {
-			affectedSeen[counter.UserID] = true
-			affected = append(affected, counter.UserID)
-		}
 		var used int64
 		err = tx.QueryRowContext(ctx, "SELECT CASE WHEN typeof(used_traffic)='integer' THEN used_traffic ELSE -1 END FROM users WHERE id=?", counter.UserID).Scan(&used)
-		if err == nil && used < 0 {
-			return ErrTrafficMaterial
-		}
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrTrafficIdentity
-		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err == nil {
+		if err == nil && used < 0 {
+			return ErrTrafficMaterial
+		}
+		// A user deleted after this revision was published keeps no usage row.
+		// Only a tombstoned identity that the counter's own revision contains is
+		// accepted; the counter still advances its cursor below, so a replay
+		// stays idempotent, but there is no row left to charge.
+		userDeleted := errors.Is(err, sql.ErrNoRows)
+		if userDeleted {
+			accepted, err := deletedIdentityAccepted(ctx, tx, states, counter)
+			if err != nil {
+				return err
+			}
+			if !accepted {
+				return ErrTrafficIdentity
+			}
+		} else {
 			if math.MaxInt64-used < delta {
 				return errors.New("user traffic overflow")
 			}
@@ -82,18 +88,32 @@ func (r *Repository) applyTraffic(ctx context.Context, batch traffic.Batch, stat
 			if err := requireOneTrafficUpdate(update); err != nil {
 				return err
 			}
+			if !affectedSeen[counter.UserID] {
+				affectedSeen[counter.UserID] = true
+				affected = append(affected, counter.UserID)
+			}
 		}
 		err = tx.QueryRowContext(ctx, "SELECT CASE WHEN typeof(used_traffic)='integer' THEN used_traffic ELSE -1 END FROM devices WHERE id=? AND user_id=?", counter.DeviceID, counter.UserID).Scan(&used)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		if err == nil && used < 0 {
 			return ErrTrafficMaterial
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrTrafficIdentity
-		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err == nil {
+			// A deleted device stops accumulating usage while its user keeps
+			// accumulating the same bytes above. Without the tombstone and the
+			// revision evidence it is an unknown device, not a deletion.
+			if !userDeleted {
+				accepted, err := deletedIdentityAccepted(ctx, tx, states, counter)
+				if err != nil {
+					return err
+				}
+				if !accepted {
+					return ErrTrafficIdentity
+				}
+			}
+		} else {
 			if math.MaxInt64-used < delta {
 				return errors.New("device traffic overflow")
 			}

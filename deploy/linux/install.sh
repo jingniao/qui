@@ -647,7 +647,12 @@ if [[ -n $host_network_service_digest ]]; then
     printf 'The enforced-source service %s and the watcher %s are enabled and started; they apply only what the panel publishes.\n' "${host_network_service##*/}" "${host_network_path##*/}"
   fi
 fi
-if [[ $component == agent ]]; then printf 'Then enroll the node with deploy/linux/enroll.sh --token-file FILE.\n'; fi
+# Enrollment is the only thing that writes the identity certificate, so a node
+# that already has one is not told to enroll again; node-install.sh treats the
+# same file (and a replaced symlink) as enrolled.
+if [[ $component == agent && ! -e $data/identity/client.crt && ! -L $data/identity/client.crt ]]; then
+  printf 'Then enroll the node with deploy/linux/enroll.sh --token-file FILE.\n'
+fi
 printf 'Managed agent and core upgrades are deployed from the panel.\n'
 printf 'An interrupted qui-update is finished or rolled back at boot by proxycontrol-update-recovery.\n'
 printf 'Run qui-update to update from GitHub.\n'

@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-24（v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-24（代码审查报告五个问题的核实与修复，9.15，尚未发布；此前为 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -178,9 +178,9 @@
 - Agent 的渲染失败原因只写在节点的 `revisions/<n>/result.json`，面板只显示失败码；面板备份失败的日志也没有原因。
 - 已激活用户设置一个未来的到期时间会立刻产生一次 `auto: … renewed` 版本，重启该节点核心。
 - 在线恢复会禁用（不删除）备份之后创建的用户；`operations.md` 第 2 节未写明，预览字段 `usersRemoved` 实际表示“将被禁用”。
-- `uninstall.sh` 的提示仍提到已删除的 “quota ledgers / reserved allowances”；`install.sh --reinstall` 仍提示去登记已登记的节点。
-- sing-box 适配器的 `TrafficSourceStatus` 注释仍写着节点总量读取器“尚未实现”，实际已实现并在心跳中上报。
-- `/var/lib/proxy-panel` 与 `/var/lib/proxy-agent` 被 systemd `StateDirectory` 设为 0755（内容仍为 0600/0700），与 `install.sh` 和文档写的 0700 不一致。
+- `uninstall.sh` 的提示仍提到已删除的 “quota ledgers / reserved allowances”；`install.sh --reinstall` 仍提示去登记已登记的节点。（v1.0.6 之后已在 `main` 修复，尚未发布：卸载提示按组件列出保留内容，只对 Agent 提示去面板删除节点；已有 `identity/client.crt` 时不再提示登记。）
+- sing-box 适配器的 `TrafficSourceStatus` 注释仍写着节点总量读取器“尚未实现”，实际已实现并在心跳中上报。（已在 `main` 修正注释，尚未发布。）
+- `/var/lib/proxy-panel` 与 `/var/lib/proxy-agent` 被 systemd `StateDirectory` 设为 0755（内容仍为 0600/0700），与 `install.sh` 和文档写的 0700 不一致。（已在 `main` 加 `StateDirectoryMode=0700`，尚未发布。）
 - Windows 上构建的发布包里两个程序是 0644（`install.sh` 安装时会设 0755）；正式发布由 CI 在 Linux 上构建。
 
 ### 8.5 未执行
@@ -728,5 +728,23 @@
 
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
-| 1 | `internal/agent/supervisor/supervisor.go` 每个 tick 先调用 `reconciler.Refresh`，再判断健康与退避。启动恢复失败后 `renderedDigest` 为空：渲染失败时每 3 秒记一条错误；如果修订能渲染、只是启动失败（例如端口被别的进程占用），`Refresh` 会每 3 秒调用一次 `Adapter.Apply` 重新启动核心，绕过退避 | Agent 仍保持连接，面板仍能修复，不影响本次修复的目标；但日志被刷屏，第二种情况下退避实际不生效。另外 `retry_in` 以纳秒整数记录（`3000000000`），不便阅读 | 恢复失败、尚未成功之前跳过 `Refresh`（由退避后的 `Restore` 负责重试）；`retry_in` 改记 `delay.String()`。需要一个后续版本 |
+| 1 | `internal/agent/supervisor/supervisor.go` 每个 tick 先调用 `reconciler.Refresh`，再判断健康与退避。启动恢复失败后 `renderedDigest` 为空：渲染失败时每 3 秒记一条错误；如果修订能渲染、只是启动失败（例如端口被别的进程占用），`Refresh` 会每 3 秒调用一次 `Adapter.Apply` 重新启动核心，绕过退避 | Agent 仍保持连接，面板仍能修复，不影响本次修复的目标；但日志被刷屏，第二种情况下退避实际不生效。另外 `retry_in` 以纳秒整数记录（`3000000000`），不便阅读 | **已在 `main` 修复，尚未发布**：每个 tick 先查核心健康，核心不健康时不调用 `Refresh`，只走退避后的 `Restore`；`Refresh` 只在核心健康时执行，同样的失败只记一次，恢复时记一条 Info；`retry_in` 记为 `3s` 这样的时长；出站探测失败只在由成功变为失败时告警。测试见 `internal/agent/supervisor/supervisor_test.go` 与 `internal/agent/reconcile/schedule_reliability_test.go`。发布新版本后需要实机复测 |
 | 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |
+
+### 9.15 代码审查报告的五个问题：核实与修复（2026-10-24，`main` 上未发布）
+
+外部审查报告了五个问题。每个都先在独立的工作树里用临时测试复现（复现后删除），再修复。下表的“核实”列是复现结果；修复都在 `main` 的工作树里，与 9.14 遗留问题 1 的修复一起，尚未发布，也还没有实机复测。
+
+| # | 问题 | 核实 | 根因 | 修复 | 测试 |
+|---|---|---|---|---|---|
+| 1 | 删除用户或设备后，节点上尚未上传的流量批次永远无法确认 | 确认，且比报告更严重 | `internal/panel/user/traffic.go` 按当前 `users`/`devices` 表查身份，删除是硬删除并级联删掉凭据，于是返回 `identity_conflict`；`internal/panel/node/control.go` 因此结束控制连接且不确认，Agent 每次重连都重发同一个队首批次，后面的流量与访问记录也被堵住，队列写满后开始淘汰允许访问记录 | 新迁移 `0110_credential_tombstones.sql`：删除用户或设备时在同一事务里记录凭据墓碑。只有墓碑存在、且批次所属修订里确实有这个身份时才接受计数：推进游标保证重放幂等，只给仍存在的行计量（删除设备时用户仍计量）。没有墓碑或修订里没有这个身份仍是 `identity_conflict`。Agent 侧：同一队首批次连续被拒 3 次后进入隔离，保留在磁盘上、不被淘汰，后面的批次继续上传；隔离 1 小时后或 Agent 重启时重新尝试 | `internal/panel/user/traffic_test.go`、`internal/panel/access/traffic_service_test.go`、`internal/agent/spool/traffic_quarantine_test.go`、`internal/agent/control/traffic_delivery_test.go` |
+| 2 | 回滚到旧修订会恢复已禁用用户的凭据，且不会自动纠正 | 确认 | 回滚（`coordination.go`）与部署旧草稿都原样下发存储的状态；额度状态机只在用户状态变化时触发，tick 只在启动时做全量对比，所以只有面板重启才会纠正。反过来，回滚也会把已重新启用的用户锁在外面 | 每次部署或回滚成功后，部署模块回调平台，为该节点排队一次额度对账（沿用 60 秒合并窗口与忙碌处理）。节点已一致时对账不产生修订，自动修订自身的成功不会形成连锁 | `internal/panel/deployment/applied_test.go`；`internal/platform/server/quota_test.go` 的回滚、旧草稿部署与反向用例 |
+| 3 | 启动对账删除“用户接入”快捷功能发布的有效凭据 | 确认，且范围更大 | 快捷功能手工拼出整份修订（合成入站 `user-inbound`），业务数据里没有对应的入站；自动修订从入站业务数据渲染用户凭据，因此启动对账、续期、任何用户的额度变化都会删掉这些凭据并停用该入站，Owner 正常发布也会删掉它；快捷功能本身还会覆盖该节点的其他入站与出站 | 快捷功能改为通过代理模块写入（或复用同一监听的）真实入站，并用与 `POST /revisions/proxy` 相同的渲染器生成修订，保留该节点的其他配置。原始 `POST /api/v1/revisions` 拒绝携带用户凭据的状态（400 `unmanaged_user_credentials`），配置版本页面去掉了手工填写用户名和密码的模式 | `internal/panel/deployment/user_access_test.go`；`internal/platform/server/quota_test.go` 的启动对账、续期、禁用后重新启用、旁观用户与 Owner 发布用例 |
+| 4 | 节点重连后，核心更新的成功结果被静默忽略 | 确认 | 面板在收到 Hello 后、Agent 发来新能力之前就按缓存的旧核心版本关闭任务（`failed_closed`）；随后的成功结果只更新 `queued`/`running`，影响 0 行却仍返回成功并确认。另外 Agent 每次重连都发送进程启动时检测的能力，核心更新成功后重连会把面板上的核心版本改回旧值 | 面板在本次连接存下第一条能力消息之后才关闭过期任务；结果处理也接受被重连关闭且没有结果的任务，并检查影响行数，0 行时返回错误而不确认。Agent 在核心更新成功或回滚后重新检测能力，之后的连接都用新值 | `internal/panel/node/core_capabilities_test.go`、`internal/panel/deployment/core_updates_test.go`、`internal/agent/control/capabilities_test.go`、`internal/agent/control/core_update_worker_test.go` |
+| 5 | 节点详情页的过期响应覆盖当前节点，操作发到错误的节点 | 部分确认：代码里存在竞态并已复现，但现有界面没有从一个节点详情直接跳到另一个节点详情的入口，目前触发不了 | `NodeDetailPage.vue` 的 `load()` 不检查响应是否过期，同一组件实例跨节点复用，吊销与设置使用已加载节点的 ID；`UserDetailPage.vue` 同样 | 两个详情页按请求序号与路由 ID 丢弃过期响应，切换 ID 时清空数据并关闭对话框，提交前核对目标 ID；`MainLayout.vue` 按 `route.path` 给路由组件加 key，参数变化时得到新实例（也覆盖了不监听参数的编辑页） | 无前端测试框架；用编译后的真实组件脚本与模拟 API 复现与验证，`npm --prefix web run build` 通过 |
+
+一并修复的较小问题（9.5 观察项与 9.14 遗留问题 1）见对应条目。
+
+**门禁。** `gofmt -l` 无输出，`go vet ./...` 通过，`go test -p 1 -count=1 ./...` 全部 49 个包通过，`npm --prefix web run build`（含 `vue-tsc`）通过。
+
+**仍待完成。** 发布新版本后的实机复测：supervisor 端口被占用场景、删除用户后的流量上传、回滚后的自动纠正、快捷用户接入在面板重启后的保留。

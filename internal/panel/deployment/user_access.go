@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -28,11 +29,11 @@ func (h *Handler) userAccess(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
-	if h.Users == nil {
+	if h.Users == nil || h.Proxy == nil {
 		httpapi.Error(w, 503, "unavailable", "User access service unavailable")
 		return
 	}
-	state, err := h.UserState(r.Context(), input)
+	state, err := h.EnsureUserAccess(r.Context(), input)
 	if err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
@@ -48,12 +49,25 @@ func (h *Handler) userAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.JSON(w, 201, revision)
 }
-func (h *Handler) UserState(ctx context.Context, input UserAccessInput) (desiredstate.State, error) {
+
+// EnsureUserAccess writes the quick user-access feature's business data and
+// returns the node's rendered configuration.
+//
+// The feature owns one subscription-visible inbound per listener, bound to the
+// users of the node's subscription groups that hold a credential for the
+// requested protocol. It is a real inbounds row, not a state only the revision
+// knows about: the proxy renderer, the publisher and the automatic quota
+// revisions all read that row, so a later publication can neither lose the
+// user's credential nor wipe the rest of the node's configuration.
+func (h *Handler) EnsureUserAccess(ctx context.Context, input UserAccessInput) (desiredstate.State, error) {
 	if strings.TrimSpace(input.Summary) == "" || len(input.Summary) > 512 {
 		return desiredstate.State{}, errors.New("revision summary required")
 	}
 	if input.Protocol != "http" && input.Protocol != "socks5" {
 		return desiredstate.State{}, errors.New("user access bootstrap supports HTTP and SOCKS5")
+	}
+	if h.Proxy == nil || h.Users == nil {
+		return desiredstate.State{}, errors.New("user access service unavailable")
 	}
 	n, err := h.Nodes.Get(ctx, input.NodeID)
 	if err != nil || !n.Enabled {
@@ -67,29 +81,77 @@ func (h *Handler) UserState(ctx context.Context, input UserAccessInput) (desired
 	if err != nil {
 		return desiredstate.State{}, err
 	}
-	state := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: n.ID, Logging: desiredstate.Logging{DomainOnly: true}, Users: []desiredstate.User{}, Credentials: []desiredstate.Credential{}, Inbounds: []desiredstate.Inbound{}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}, {ID: "block", Protocol: "block", Enabled: true}}, OutboundGroups: []desiredstate.OutboundGroup{}, ProxyChains: []desiredstate.ProxyChain{}, Policies: []desiredstate.Policy{}}
-	// The node's outbound network settings travel with every published state;
-	// a node that configures none keeps the field absent.
-	state.Network = desiredstate.NetworkOrNil(n.OutboundSourceIP, n.OutboundInterface, n.HostSourceIPv4, n.HostSourceIPv6)
-	inbound := desiredstate.Inbound{ID: "user-inbound", Protocol: input.Protocol, Listen: input.Listen, Port: input.Port, DefaultOutbound: "direct", SubscriptionVisible: true, CredentialIDs: []string{}}
+	// The inbound is bound to the same users the feature has always selected:
+	// every granted user that holds a credential for the requested protocol.
+	userIDs := []string{}
 	for _, entry := range access {
-		state.Users = append(state.Users, desiredstate.User{ID: entry.User.ID, Enabled: true, ExpiresAt: entry.User.ExpiresAt})
 		for _, credential := range entry.Credentials {
-			if credential.Protocol != input.Protocol {
-				continue
+			if credential.Protocol == input.Protocol {
+				userIDs = append(userIDs, entry.User.ID)
+				break
 			}
-			state.Credentials = append(state.Credentials, desiredstate.Credential{ID: credential.ID, UserID: credential.UserID, DeviceID: credential.DeviceID, Protocol: credential.Protocol, Username: credential.Username, Secret: credential.Secret})
-			inbound.CredentialIDs = append(inbound.CredentialIDs, credential.ID)
 		}
 	}
-	inbound.Enabled = len(inbound.CredentialIDs) > 0
-	state.Inbounds = append(state.Inbounds, inbound)
-	if h.Policies != nil {
-		rules, err := h.Policies.ForNode(ctx, input.NodeID)
-		if err != nil {
-			return state, err
-		}
-		state.Policies = rules
+	if err := h.bindUserAccessInbound(ctx, input, userIDs); err != nil {
+		return desiredstate.State{}, err
 	}
-	return state, state.Validate()
+	// Render through the module that owns the proxy configuration, exactly like
+	// POST /api/v1/revisions/proxy, so the revision preserves the Owner's other
+	// inbounds, outbounds, groups, chains and policies on this node.
+	return h.Proxy.Snapshot(ctx, n.ID, h.Users)
+}
+
+// bindUserAccessInbound creates the feature's inbound, or updates the one that
+// already owns the listener. The inbound stays enabled even while no user has
+// access: the renderer disables a credential-less inbound on its own and
+// re-enables it when credentials come back, so re-enabling a user restores
+// access without editing the business data.
+func (h *Handler) bindUserAccessInbound(ctx context.Context, input UserAccessInput, userIDs []string) error {
+	existing, err := h.Proxy.InboundAtListener(ctx, input.NodeID, input.Protocol, input.Listen, input.Port)
+	if errors.Is(err, proxy.ErrNotFound) {
+		if err := userAccessInboundInput(input, userIDs); err != nil {
+			return err
+		}
+		_, err := h.Proxy.SaveInbound(ctx, "", proxy.InboundInput{Name: userAccessInboundName(input), NodeID: input.NodeID, Protocol: input.Protocol, Listen: input.Listen, Port: input.Port, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct", AllowedUserIDs: userIDs})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if existing.InternalRelay {
+		return errors.New("listener belongs to an internal relay inbound")
+	}
+	// A reuse keeps the Owner's routing and visibility: rerouting a published
+	// inbound to Direct only because its users were re-published would change
+	// how their traffic leaves the node without an Owner review.
+	_, err = h.Proxy.SaveInbound(ctx, existing.ID, proxy.InboundInput{Name: existing.Name, NodeID: existing.NodeID, Protocol: existing.Protocol, Listen: existing.Listen, Port: existing.Port, Enabled: true, SubscriptionVisible: existing.SubscriptionVisible, DefaultOutbound: existing.DefaultOutbound, AllowedUserIDs: mergeUserIDs(existing.AllowedUserIDs, userIDs), Settings: existing.Settings})
+	return err
+}
+
+func userAccessInboundName(input UserAccessInput) string { return "User access " + input.Protocol }
+
+// userAccessInboundInput runs the proxy module's own inbound validation on the
+// inbound the feature is about to create, so a bad listener or port fails before
+// anything is written.
+func userAccessInboundInput(input UserAccessInput, userIDs []string) error {
+	return proxy.ValidateInbound(proxy.InboundInput{Name: userAccessInboundName(input), NodeID: input.NodeID, Protocol: input.Protocol, Listen: input.Listen, Port: input.Port, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct", AllowedUserIDs: userIDs})
+}
+
+// mergeUserIDs unions a stored binding with the users selected now. An empty
+// stored list already means "every granted user", so it stays empty instead of
+// narrowing to today's selection.
+func mergeUserIDs(existing, selected []string) []string {
+	if len(existing) == 0 {
+		return []string{}
+	}
+	seen := map[string]bool{}
+	merged := []string{}
+	for _, id := range append(append([]string{}, existing...), selected...) {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		merged = append(merged, id)
+	}
+	return merged
 }

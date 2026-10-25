@@ -419,5 +419,11 @@ func (r *Repository) CommandResult(ctx context.Context, nodeID string, result *p
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if result.Success {
+		r.notifyApplied(nodeID, "post-rollback")
+	}
+	return nil
 }

@@ -42,3 +42,38 @@ func TestFailedScheduledRefreshKeepsRunningRevision(t *testing.T) {
 		t.Fatalf("retry applied %d times, want %d", adapter.applyCalls, applied+1)
 	}
 }
+
+// TestSuccessfulRestoreRecordsRenderedState proves a successful restore records
+// what it rendered. Without that digest the supervisor's next healthy refresh
+// would apply the same configuration again, restarting the core after every
+// recovery.
+func TestSuccessfulRestoreRecordsRenderedState(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	committed, err := New(directory, "node-test", &fakeCoreAdapter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := committed.Apply(ctx, state(1080, 1)); err != nil || !result.Success {
+		t.Fatalf("initial apply failed: %+v %v", result, err)
+	}
+	// A restarted Agent starts over with no rendered digest.
+	adapter := &fakeCoreAdapter{}
+	restarted, err := New(directory, "node-test", adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if adapter.applyCalls != 1 {
+		t.Fatalf("restore applied %d times, want 1", adapter.applyCalls)
+	}
+	changed, err := restarted.Refresh(ctx)
+	if err != nil || changed {
+		t.Fatalf("refresh after restore: changed=%v err=%v", changed, err)
+	}
+	if adapter.applyCalls != 1 {
+		t.Fatalf("refresh applied the restored revision again: %d applies", adapter.applyCalls)
+	}
+}

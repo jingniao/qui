@@ -10,6 +10,7 @@ Group=proxy-agent
 ExecStart=/usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml
 WorkingDirectory=/var/lib/proxy-agent
 StateDirectory=proxy-agent
+StateDirectoryMode=0700
 UMask=0077
 Restart=on-failure
 RestartSec=5

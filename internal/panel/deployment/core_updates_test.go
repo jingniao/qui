@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"runtime"
@@ -121,13 +122,26 @@ func TestCoreUpdateQueueValidation(t *testing.T) {
 }
 
 // TestCoreUpdateDispatchReconnectClosureAndClear checks the reserved command,
-// the reconnect closure of an unconfirmed task and the Owner clear action.
+// the reconnect closure of an unconfirmed task, the late outcome a reconnected
+// node still delivers and the Owner clear action.
 func TestCoreUpdateDispatchReconnectClosureAndClear(t *testing.T) {
 	digest := strings.Repeat("cd", 32)
 	assetURL := strings.Replace(coreAssetURLForTest(), "v26.3.27", "v26.3.28", 1)
 	platform := runtime.GOOS + "/" + runtime.GOARCH
 	r, catalogue, nodeID, revision := coreNodeFixture(t, platform, "xray")
 	ctx := context.Background()
+	// A reconnect stores the capabilities of the core that runs now, and only
+	// then is a stale update closed.
+	nodes := &node.Repository{Database: r.Database}
+	sequence := uint64(1)
+	reportCapabilities := func(version string) {
+		t.Helper()
+		sequence++
+		message := &pb.AgentMessage{NodeId: nodeID, MessageId: "capabilities", Sequence: sequence, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{CoreName: "xray", CoreVersion: version}}}
+		if _, err := nodes.Record(ctx, nodeID, message); err != nil {
+			t.Fatal(err)
+		}
+	}
 	task, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
 	if err != nil {
 		t.Fatal(err)
@@ -144,40 +158,73 @@ func TestCoreUpdateDispatchReconnectClosureAndClear(t *testing.T) {
 		t.Fatalf("unexpected command: %+v", request)
 	}
 	// The node reconnects still reporting the old core version.
+	reportCapabilities("26.3.27")
 	if err := r.CloseStaleCoreUpdates(ctx, nodeID); err != nil {
 		t.Fatal(err)
 	}
 	items, _, err := r.ListCoreUpdates(ctx, 1, 20)
-	if err != nil || len(items) != 1 || items[0].Status != "failed_closed" {
-		t.Fatalf("stale task not closed: %+v %v", items, err)
+	if err != nil || len(items) != 1 || items[0].Status != "failed_closed" || items[0].Result != nil {
+		t.Fatalf("stale task not closed without an outcome: %+v %v", items, err)
 	}
-	if _, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest)); err != nil {
+	// The outcome the Agent produced while the stream was down is still recorded.
+	result, err := json.Marshal(release.UpdateResult{ID: task.CommandID, NodeID: nodeID, Revision: revision.ID, TargetDigest: digest, Status: "success", Code: "success", InstalledDigest: strings.Repeat("ef", 32), InstalledVersion: "26.3.28", InstalledSequence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	late := &pb.CoreUpdateResult{ResultJson: result}
+	if err := r.CoreUpdateResult(ctx, nodeID, late); err != nil {
+		t.Fatalf("late success result rejected: %v", err)
+	}
+	items, _, err = r.ListCoreUpdates(ctx, 1, 20)
+	if err != nil || len(items) != 1 || items[0].Status != "success" || items[0].Result == nil || items[0].Result.InstalledVersion != "26.3.28" {
+		t.Fatalf("late result not recorded: %+v %v", items, err)
+	}
+	if err := r.CoreUpdateResult(ctx, nodeID, late); err != nil {
+		t.Fatalf("identical replay rejected: %v", err)
+	}
+	conflicting, err := json.Marshal(release.UpdateResult{ID: task.CommandID, NodeID: nodeID, Revision: revision.ID, TargetDigest: digest, Status: "rejected", Code: "checksum_mismatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CoreUpdateResult(ctx, nodeID, &pb.CoreUpdateResult{ResultJson: conflicting}); err == nil {
+		t.Fatal("a second, different outcome was accepted")
+	}
+	// The closed task frees the slot; this time the node reports the requested
+	// version, so the reconnect closes the new task as a success.
+	second, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
+	if err != nil {
 		t.Fatalf("closed task still blocks a new update: %v", err)
 	}
-	// The node reconnects reporting the requested version this time.
-	if _, err := r.Database.Exec("UPDATE nodes SET capabilities_json=? WHERE id=?", `{"coreName":"xray","coreVersion":"26.3.28"}`, nodeID); err != nil {
+	if _, err := r.PendingCoreUpdate(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	reportCapabilities("26.3.28")
+	if err := r.CloseStaleCoreUpdates(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err = r.ListCoreUpdates(ctx, 1, 20)
+	if err != nil || len(items) != 2 || items[0].ID != second.ID || items[0].Status != "success" || items[1].Status != "success" {
+		t.Fatalf("task list after reconnect: %+v %v", items, err)
+	}
+	// A running task can still be cleared, and a result that arrives afterwards
+	// changes no row, so the panel must report it instead of acknowledging it.
+	third, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.PendingCoreUpdate(ctx, nodeID); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CloseStaleCoreUpdates(ctx, nodeID); err != nil {
-		t.Fatal(err)
-	}
-	items, _, err = r.ListCoreUpdates(ctx, 1, 20)
-	if err != nil || len(items) != 2 {
-		t.Fatalf("task list after reconnect: %+v %v", items, err)
-	}
-	closed := map[string]bool{}
-	for _, item := range items {
-		closed[item.Status] = true
-	}
-	if !closed["success"] || !closed["failed_closed"] {
-		t.Fatalf("unexpected task statuses: %+v", items)
-	}
-	cleared, err := r.ClearCoreUpdate(ctx, catalogue, task.ID, "owner", "local")
+	cleared, err := r.ClearCoreUpdate(ctx, catalogue, third.ID, "owner", "local")
 	if err != nil || cleared.Status != "cleared" {
 		t.Fatalf("clear failed: %+v %v", cleared, err)
+	}
+	unrecorded, err := json.Marshal(release.UpdateResult{ID: third.CommandID, NodeID: nodeID, Revision: revision.ID, TargetDigest: digest, Status: "rejected", Code: "checksum_mismatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CoreUpdateResult(ctx, nodeID, &pb.CoreUpdateResult{ResultJson: unrecorded}); err == nil {
+		t.Fatal("result for a cleared task was acknowledged without being recorded")
 	}
 	if err := r.CoreUpdateResult(ctx, nodeID, &pb.CoreUpdateResult{ResultJson: []byte(`{}`)}); err == nil {
 		t.Fatal("malformed result accepted")

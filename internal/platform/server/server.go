@@ -243,6 +243,10 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.quotaDeployer = newQuotaDeployer(logger, users, quotaState, proxyService, nodeRepository, deployments, eventBus.Publish)
 	s.quotaDeployer.record = systemRepository.Record
 	users.TrafficApplied = s.quotaDeployer.evaluate
+	// A deploy or rollback re-publishes a stored revision verbatim, so the node's
+	// user access surface is only known to be correct after the Deployment module
+	// reports it applied.
+	deployments.Applied = s.quotaDeployer.reconcileNode
 	userHandler := &user.Handler{Repository: users, Auth: authHandler, Audit: systemRepository, Nodes: nodeRepository, QuotaChanged: s.quotaDeployer.evaluateUser, ExpiryRenewed: s.quotaDeployer.renewExpiry, Observations: s.connectionObserver}
 	userHandler.Register(mux)
 	// The subscription path only reads users, nodes and published state, and a
@@ -260,7 +264,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	subscriptionPublished := *deployments
 	subscriptionPublished.Database = subscriptionReads
 	(&subscription.Handler{Service: &subscription.Service{Repository: &subscription.Repository{Database: database, Reader: s.readPool}, Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished}, Auth: authHandler, Audit: systemRepository, Settings: systemRepository}).Register(mux)
-	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService, Policies: policyService}).Register(mux)
+	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux)
 	mux.Handle("GET /api/v1/events", eventBus.Handler(authHandler))
 	mux.Handle("GET /api/v1/operations", authHandler.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page, size, err := httpapi.Pagination(r)

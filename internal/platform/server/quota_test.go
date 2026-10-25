@@ -57,8 +57,15 @@ func newQuotaFixture(t *testing.T) *quotaFixture {
 }
 
 func (f *quotaFixture) addUser(t *testing.T, username, expiresAt string) (user.User, user.Credential) {
+	return f.addProtocolUser(t, username, expiresAt, "vless")
+}
+
+// addProtocolUser creates a user whose only credential is for one protocol, so a
+// test can drive the quick user-access feature, which only supports HTTP and
+// SOCKS5.
+func (f *quotaFixture) addProtocolUser(t *testing.T, username, expiresAt, protocol string) (user.User, user.Credential) {
 	t.Helper()
-	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: username, DisplayName: username, Status: "active", ExpiresAt: expiresAt, MaxDevices: 1, MaxConnections: 8, AllowedProtocols: []string{"vless"}, NodeGroupIDs: []string{f.groupID}})
+	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: username, DisplayName: username, Status: "active", ExpiresAt: expiresAt, MaxDevices: 1, MaxConnections: 8, AllowedProtocols: []string{protocol}, NodeGroupIDs: []string{f.groupID}})
 	if response.Code != 201 {
 		t.Fatalf("user %s: %d %s", username, response.Code, response.Body.String())
 	}
@@ -66,7 +73,7 @@ func (f *quotaFixture) addUser(t *testing.T, username, expiresAt string) (user.U
 	if err := json.Unmarshal(response.Body.Bytes(), &account); err != nil {
 		t.Fatal(err)
 	}
-	deviceResponse := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": username + " device", "protocols": []string{"vless"}})
+	deviceResponse := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": username + " device", "protocols": []string{protocol}})
 	if deviceResponse.Code != 201 {
 		t.Fatalf("device %s: %d %s", username, deviceResponse.Code, deviceResponse.Body.String())
 	}
@@ -74,8 +81,8 @@ func (f *quotaFixture) addUser(t *testing.T, username, expiresAt string) (user.U
 	if err := json.Unmarshal(deviceResponse.Body.Bytes(), &device); err != nil {
 		t.Fatal(err)
 	}
-	if len(device.Credentials) != 1 || device.Credentials[0].Secret == "" {
-		t.Fatalf("user %s has no VLESS credential", username)
+	if len(device.Credentials) != 1 || device.Credentials[0].Secret == "" || device.Credentials[0].Protocol != protocol {
+		t.Fatalf("user %s has no %s credential", username, protocol)
 	}
 	return account, device.Credentials[0]
 }
@@ -444,9 +451,12 @@ func countAdminOperations(t *testing.T, f *quotaFixture, action string) int {
 
 // restartQuotaDeployer builds the deployer a restarted panel would have: a
 // fresh QuotaState seeded from the current database, so the pre-restart state is
-// the baseline and no transition exists for it.
+// the baseline and no transition exists for it. The old deployer is stopped as
+// well, because a restart ends it: a deploy it saw before the restart would
+// otherwise queue a reconciliation that races the one the test drives.
 func restartQuotaDeployer(t *testing.T, f *quotaFixture) *quotaDeployer {
 	t.Helper()
+	f.stopDeployer(f.app.quotaDeployer)
 	state := user.NewQuotaState(f.app.quotaDeployer.users)
 	if err := state.Seed(f.ctx); err != nil {
 		t.Fatal(err)
@@ -455,6 +465,19 @@ func restartQuotaDeployer(t *testing.T, f *quotaFixture) *quotaDeployer {
 	restarted.window = f.app.quotaDeployer.window
 	restarted.record = f.app.quotaDeployer.record
 	return restarted
+}
+
+// stopDeployer drops everything a deployer still has queued.
+func (f *quotaFixture) stopDeployer(d *quotaDeployer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for nodeID, timer := range d.timers {
+		if timer != nil {
+			timer.Stop()
+		}
+		d.timers[nodeID] = nil
+	}
+	d.pending = map[string]*quotaPending{}
 }
 
 // quotaFlakySnapshotter fails the Owner render until it is switched back on, so
@@ -834,5 +857,346 @@ func TestQuotaStartupPassRetriesAfterReadFailure(t *testing.T) {
 	}
 	if stateHasCredential(f.state(t, automatic[0].ID), credential) {
 		t.Fatal("over-quota credential survived the retried startup pass")
+	}
+}
+
+// quickAccess publishes the quick user-access draft through the real HTTP
+// handler and applies it, so the node runs the inbound that feature created.
+func (f *quotaFixture) quickAccess(t *testing.T, protocol, listen string, port int) deployment.Revision {
+	t.Helper()
+	response := f.owner.call("POST", "/api/v1/revisions/user-access", deployment.UserAccessInput{NodeID: f.nodeID, Summary: "Quick user access", Protocol: protocol, Listen: listen, Port: port})
+	if response.Code != 201 {
+		t.Fatalf("user access draft: %d %s", response.Code, response.Body.String())
+	}
+	var revision deployment.Revision
+	if err := json.Unmarshal(response.Body.Bytes(), &revision); err != nil {
+		t.Fatal(err)
+	}
+	if deploy := f.owner.call("POST", "/api/v1/revisions/"+strconv.FormatInt(revision.ID, 10)+"/deploy", nil); deploy.Code != 202 {
+		t.Fatalf("user access deploy: %d %s", deploy.Code, deploy.Body.String())
+	}
+	f.apply(t, revision.ID)
+	return revision
+}
+
+// markRecovered models a long-running panel, whose startup pass is over. Without
+// this the next tick would reconcile every node and the test could not tell a
+// correction caused by the deploy from one caused by the startup pass.
+func (f *quotaFixture) markRecovered() {
+	f.app.quotaDeployer.mu.Lock()
+	f.app.quotaDeployer.recovered = true
+	f.app.quotaDeployer.mu.Unlock()
+}
+
+// settle waits past the coalescing window, so no pending reconcile of the caller
+// is still running when the test acts.
+func (f *quotaFixture) settle() { time.Sleep(3 * f.app.quotaDeployer.window) }
+
+func (f *quotaFixture) publishedInbound(t *testing.T, protocol string) desiredstate.Inbound {
+	t.Helper()
+	published, err := f.app.deployments.Published(f.ctx, f.nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stateInbound(t, published, protocol)
+}
+
+// stateInbound returns one protocol's rendered inbound, so a test can check that
+// an automatic revision kept the inbound's identity, its enablement and its
+// credential bindings.
+func stateInbound(t *testing.T, state desiredstate.State, protocol string) desiredstate.Inbound {
+	t.Helper()
+	for _, inbound := range state.Inbounds {
+		if inbound.Protocol == protocol {
+			return inbound
+		}
+	}
+	t.Fatalf("the state has no %s inbound", protocol)
+	return desiredstate.Inbound{}
+}
+
+// TestQuotaStartupReconcileKeepsQuickAccessCredential is issue 3 (a): the quick
+// user-access feature's inbound used to live only inside its revision, so the
+// startup reconcile compared the published state against a render that had never
+// heard of it and stripped the user's credential.
+func TestQuotaStartupReconcileKeepsQuickAccessCredential(t *testing.T) {
+	f := newQuotaFixture(t)
+	_, credential := f.addProtocolUser(t, "quick_startup_user", "", "socks5")
+	f.publish(t)
+	f.quickAccess(t, "socks5", "0.0.0.0", 1080)
+	inbound := f.publishedInbound(t, "socks5")
+
+	restarted := restartQuotaDeployer(t, f)
+	restarted.recover(f.ctx)
+	f.settle()
+	if count := len(f.autoRevisions(t)); count != 0 {
+		t.Fatalf("the startup reconcile created %d automatic revisions for an in-sync node", count)
+	}
+	published, err := f.app.deployments.Published(f.ctx, f.nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stateHasCredential(published, credential) {
+		t.Fatal("the startup reconcile dropped the quick-access credential")
+	}
+	if kept := stateInbound(t, published, "socks5"); !kept.Enabled || kept.ID != inbound.ID {
+		t.Fatalf("the startup reconcile changed the quick-access inbound: %+v", kept)
+	}
+}
+
+// TestQuotaRenewalKeepsQuickAccessInbound is issue 3 (b): a renewal is not an
+// activity transition but still deploys, and that automatic revision used to
+// remove the quick-access credential and disable its inbound.
+func TestQuotaRenewalKeepsQuickAccessInbound(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, credential := f.addProtocolUser(t, "quick_renew_user", time.Now().UTC().Add(time.Hour).Format(time.RFC3339), "socks5")
+	f.publish(t)
+	f.quickAccess(t, "socks5", "0.0.0.0", 1080)
+	inbound := f.publishedInbound(t, "socks5")
+
+	renewed := renewUser(t, f, account, time.Now().UTC().Add(72*time.Hour).Format(time.RFC3339))
+	flowWait(t, "one automatic revision carrying the new expiry", func() bool { return len(f.autoRevisions(t)) == 1 })
+	automatic := f.autoRevisions(t)[0]
+	state := f.state(t, automatic.ID)
+	if !stateHasCredential(state, credential) {
+		t.Fatal("the renewal dropped the quick-access credential")
+	}
+	kept := stateInbound(t, state, "socks5")
+	if !kept.Enabled || kept.ID != inbound.ID || len(kept.CredentialIDs) != 1 || kept.CredentialIDs[0] != credential.ID {
+		t.Fatalf("the renewal changed the quick-access inbound: %+v", kept)
+	}
+	if got := stateUser(t, state, account.ID).ExpiresAt; got != renewed {
+		t.Fatalf("the renewal kept %q, want %q", got, renewed)
+	}
+}
+
+// TestQuotaDisableAndReEnableKeepQuickAccessInbound is issue 3 (c): a disable
+// must remove the credential and a re-enable must restore it on the same
+// business-data inbound, not on a revision-only one.
+func TestQuotaDisableAndReEnableKeepQuickAccessInbound(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, credential := f.addProtocolUser(t, "quick_cycle_user", "", "socks5")
+	f.publish(t)
+	f.quickAccess(t, "socks5", "0.0.0.0", 1080)
+	inbound := f.publishedInbound(t, "socks5")
+
+	account.Status = "disabled"
+	saveUser(t, f, account, 0)
+	flowWait(t, "the disable to remove the credential", func() bool { return len(f.autoRevisions(t)) == 1 })
+	removed := f.autoRevisions(t)[0]
+	state := f.state(t, removed.ID)
+	if stateHasCredential(state, credential) {
+		t.Fatal("the disabled credential survived")
+	}
+	if kept := stateInbound(t, state, "socks5"); kept.Enabled || kept.ID != inbound.ID {
+		t.Fatalf("the disabled inbound: %+v", kept)
+	}
+	f.apply(t, removed.ID)
+
+	account.Status = "active"
+	saveUser(t, f, account, 0)
+	flowWait(t, "the re-enable to restore the credential", func() bool { return len(f.autoRevisions(t)) == 2 })
+	restored := f.autoRevisions(t)[1]
+	state = f.state(t, restored.ID)
+	if !stateHasCredential(state, credential) {
+		t.Fatal("the re-enabled credential was not restored")
+	}
+	if kept := stateInbound(t, state, "socks5"); !kept.Enabled || kept.ID != inbound.ID || len(kept.CredentialIDs) != 1 || kept.CredentialIDs[0] != credential.ID {
+		t.Fatalf("the restored inbound: %+v", kept)
+	}
+}
+
+// TestQuotaBystanderTransitionKeepsQuickAccessCredential is issue 3 (d): another
+// user's over-quota transition must not touch the quick-access credential.
+func TestQuotaBystanderTransitionKeepsQuickAccessCredential(t *testing.T) {
+	f := newQuotaFixture(t)
+	bystander, credential := f.addProtocolUser(t, "quick_bystander_user", "", "socks5")
+	other, otherCredential := f.addUser(t, "quick_over_user", "")
+	f.publish(t)
+	f.quickAccess(t, "socks5", "0.0.0.0", 1080)
+	inbound := f.publishedInbound(t, "socks5")
+
+	setQuota(t, f.ctx, f, other.ID, 50, 100)
+	f.app.quotaDeployer.evaluate(f.ctx, []string{other.ID})
+	flowWait(t, "the over-quota transition", func() bool { return len(f.autoRevisions(t)) == 1 })
+	state := f.state(t, f.autoRevisions(t)[0].ID)
+	if stateHasCredential(state, otherCredential) {
+		t.Fatal("the over-quota credential survived")
+	}
+	if !stateHasCredential(state, credential) {
+		t.Fatal("the over-quota transition stripped the bystander's quick-access credential")
+	}
+	if kept := stateInbound(t, state, "socks5"); !kept.Enabled || kept.ID != inbound.ID || !strings.Contains(strings.Join(kept.CredentialIDs, ","), credential.ID) {
+		t.Fatalf("the bystander's inbound: %+v", kept)
+	}
+	// The bystander stays an authorized user of the revision.
+	stateUser(t, state, bystander.ID)
+}
+
+// TestOwnerProxyRevisionKeepsQuickAccessInbound is issue 3 (e): the normal
+// renderer must see the quick-access inbound too, so an Owner publication keeps
+// it and the rest of the node's configuration instead of wiping it.
+func TestOwnerProxyRevisionKeepsQuickAccessInbound(t *testing.T) {
+	f := newQuotaFixture(t)
+	_, credential := f.addProtocolUser(t, "quick_owner_user", "", "socks5")
+	f.publish(t)
+	f.quickAccess(t, "socks5", "0.0.0.0", 1080)
+	inbound := f.publishedInbound(t, "socks5")
+
+	response := f.owner.call("POST", "/api/v1/revisions/proxy", map[string]any{"nodeId": f.nodeID, "summary": "Owner publication"})
+	if response.Code != 201 {
+		t.Fatalf("owner revision: %d %s", response.Code, response.Body.String())
+	}
+	var revision deployment.Revision
+	if err := json.Unmarshal(response.Body.Bytes(), &revision); err != nil {
+		t.Fatal(err)
+	}
+	state := f.state(t, revision.ID)
+	if !stateHasCredential(state, credential) {
+		t.Fatal("the Owner publication dropped the quick-access credential")
+	}
+	kept := stateInbound(t, state, "socks5")
+	if !kept.Enabled || kept.ID != inbound.ID || !strings.Contains(strings.Join(kept.CredentialIDs, ","), credential.ID) {
+		t.Fatalf("the Owner publication changed the quick-access inbound: %+v", kept)
+	}
+	// The quick draft no longer replaces the rest of the node's configuration:
+	// the VLESS entry inbound of the fixture is still there.
+	if entry := stateInbound(t, state, "vless"); entry.ID == "" || entry.Port != 24443 {
+		t.Fatalf("the Owner publication lost the node's other inbound: %+v", entry)
+	}
+}
+
+// rollbackNode rolls a node back to a successfully applied revision through the
+// real HTTP endpoint and reports the agent's success, so the panel records the
+// old revision as the node's runtime state.
+func (f *quotaFixture) rollbackNode(t *testing.T, revision int64) {
+	t.Helper()
+	response := f.owner.call("POST", "/api/v1/nodes/"+f.nodeID+"/rollback", map[string]any{"revision": revision})
+	if response.Code != 202 {
+		t.Fatalf("rollback: %d %s", response.Code, response.Body.String())
+	}
+	var command struct {
+		CommandID string `json:"commandId"`
+		Revision  int64  `json:"revision"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &command); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.deployments.Result(f.ctx, f.nodeID, &pb.ApplyResult{CommandId: command.CommandID, Revision: command.Revision, Success: true}); err != nil {
+		t.Fatalf("rollback result: %v", err)
+	}
+}
+
+// TestQuotaRollbackToPreDisableRevisionIsCorrected is issue 2: a rollback
+// re-applies a stored revision verbatim, so rolling back past a disable used to
+// restore the disabled user's credential and leave it there until a panel
+// restart. The successful rollback now queues one reconciliation, and the
+// revision it creates must not start a chain of revisions.
+func TestQuotaRollbackToPreDisableRevisionIsCorrected(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, credential := f.addUser(t, "rollback_disable_user", "")
+	baseline := f.publish(t)
+	f.markRecovered()
+	f.settle()
+
+	account.Status = "disabled"
+	saveUser(t, f, account, 0)
+	flowWait(t, "the disable to remove the credential", func() bool { return len(f.autoRevisions(t)) == 1 })
+	f.apply(t, f.autoRevisions(t)[0].ID)
+	f.settle()
+
+	f.rollbackNode(t, baseline)
+	flowWait(t, "the corrective revision after the rollback", func() bool { return len(f.autoRevisions(t)) == 2 })
+	corrective := f.autoRevisions(t)[1]
+	if stateHasCredential(f.state(t, corrective.ID), credential) {
+		t.Fatal("the rollback restored the disabled user's credential and nothing corrected it")
+	}
+	if !strings.Contains(corrective.Summary, "post-rollback") {
+		t.Fatalf("corrective summary: %q", corrective.Summary)
+	}
+
+	// The corrective revision's own success must not queue another one.
+	f.apply(t, corrective.ID)
+	f.settle()
+	if count := len(f.autoRevisions(t)); count != 2 {
+		t.Fatalf("the corrected node produced %d automatic revisions", count)
+	}
+}
+
+// TestQuotaStaleDraftDeployIsCorrected is issue 2 on the deploy path: a draft
+// rendered before a disable is still deployable, and applying it used to leave
+// the disabled user's credential on the node.
+func TestQuotaStaleDraftDeployIsCorrected(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, credential := f.addUser(t, "stale_draft_user", "")
+	f.publish(t)
+	f.markRecovered()
+	response := f.owner.call("POST", "/api/v1/revisions/proxy", map[string]any{"nodeId": f.nodeID, "summary": "Stale draft"})
+	if response.Code != 201 {
+		t.Fatalf("stale draft: %d %s", response.Code, response.Body.String())
+	}
+	var stale deployment.Revision
+	if err := json.Unmarshal(response.Body.Bytes(), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if !stateHasCredential(f.state(t, stale.ID), credential) {
+		t.Fatal("the stale draft must still carry the credential for this test to mean anything")
+	}
+	f.settle()
+
+	account.Status = "disabled"
+	saveUser(t, f, account, 0)
+	flowWait(t, "the disable to remove the credential", func() bool { return len(f.autoRevisions(t)) == 1 })
+	f.apply(t, f.autoRevisions(t)[0].ID)
+	f.settle()
+
+	if deploy := f.owner.call("POST", "/api/v1/revisions/"+strconv.FormatInt(stale.ID, 10)+"/deploy", nil); deploy.Code != 202 {
+		t.Fatalf("stale deploy: %d %s", deploy.Code, deploy.Body.String())
+	}
+	f.apply(t, stale.ID)
+	flowWait(t, "the corrective revision after the stale deploy", func() bool { return len(f.autoRevisions(t)) == 2 })
+	corrective := f.autoRevisions(t)[1]
+	if stateHasCredential(f.state(t, corrective.ID), credential) {
+		t.Fatal("the stale deploy restored the disabled user's credential and nothing corrected it")
+	}
+	if !strings.Contains(corrective.Summary, "post-deploy") {
+		t.Fatalf("corrective summary: %q", corrective.Summary)
+	}
+	f.apply(t, corrective.ID)
+	f.settle()
+	if count := len(f.autoRevisions(t)); count != 2 {
+		t.Fatalf("the corrected node produced %d automatic revisions", count)
+	}
+}
+
+// TestQuotaRollbackToPreEnableRevisionRestoresCredential is the reverse of issue
+// 2: rolling back to a revision rendered while the user was disabled must not
+// lock a re-enabled user out.
+func TestQuotaRollbackToPreEnableRevisionRestoresCredential(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, credential := f.addUser(t, "rollback_enable_user", "")
+	account.Status = "disabled"
+	saveUser(t, f, account, 0)
+	baseline := f.publish(t)
+	f.markRecovered()
+	f.settle()
+	if stateHasCredential(f.state(t, baseline), credential) {
+		t.Fatal("the baseline must not carry a disabled user's credential")
+	}
+
+	account.Status = "active"
+	saveUser(t, f, account, 0)
+	flowWait(t, "the re-enable to restore the credential", func() bool { return len(f.autoRevisions(t)) == 1 })
+	f.apply(t, f.autoRevisions(t)[0].ID)
+	f.settle()
+
+	f.rollbackNode(t, baseline)
+	flowWait(t, "the corrective revision after the rollback", func() bool { return len(f.autoRevisions(t)) == 2 })
+	corrective := f.autoRevisions(t)[1]
+	if !stateHasCredential(f.state(t, corrective.ID), credential) {
+		t.Fatal("the rollback locked the re-enabled user out and nothing corrected it")
+	}
+	if !strings.Contains(corrective.Summary, "post-rollback") {
+		t.Fatalf("corrective summary: %q", corrective.Summary)
 	}
 }

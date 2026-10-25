@@ -38,10 +38,7 @@
         <label class="block text-sm">入站协议<select v-model="form.protocol" class="form-input-base mt-2"><option value="socks5">SOCKS5</option><option value="http">HTTP CONNECT</option></select></label>
         <label class="block text-sm">监听地址<select v-model="form.listen" class="form-input-base mt-2"><option value="127.0.0.1">127.0.0.1（本机接入）</option><option value="0.0.0.0">0.0.0.0（外部接入）</option></select></label>
         <label class="block text-sm">监听端口<input v-model.number="form.port" type="number" min="1" max="65535" class="form-input-base mt-2" /></label>
-        <label class="block text-sm"><input v-model="managed" type="checkbox" /> 使用已授权用户和设备的凭据</label>
-<label v-if="!managed" class="block text-sm">接入用户名<input v-model="form.username" autocomplete="off" maxlength="64" class="form-input-base mt-2" /></label>
-        <label v-if="!managed" class="block text-sm">接入密码<input v-model="form.password" type="password" autocomplete="new-password" maxlength="128" class="form-input-base mt-2" /></label>
-        <p class="text-xs text-gray-500">用户接入会按节点组展开授权、过滤禁用及过期用户。此草稿为单入口 Direct 配置，发布后替换该节点当前配置。</p>
+        <p class="text-xs text-gray-500">接入会保存为该节点的普通入站，并绑定已授权用户的凭据。用户接入会按节点组展开授权、过滤禁用及过期用户，发布时保留该节点的其他入站、出站与分流配置。</p>
       </div>
     </FormDrawer>
     <ConfirmDialog v-model="confirmVisible" title="发布配置版本" :message="`将版本 #${target?.id || ''} 发布到目标节点。此版本会替换节点当前配置，成功后生效，启动或健康检查失败时恢复上一成功版本。`" @confirm="publish" confirm-text="确认发布" />
@@ -70,12 +67,11 @@ import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 const revisions = ref<Revision[]>([]); const page = ref(1); const total = ref(0); const loading = ref(false); const error = ref('');
 const diffVisible = ref(false); const diffLoading = ref(false); const diffError = ref(''); const diffBase = ref<string | number>(''); const diffTarget = ref<Revision | null>(null); const diffResult = ref<RevisionDiff | null>(null); let diffRequest = 0;
 const drawer = ref(false); const saving = ref(false); const nodes = ref<NodeView[]>([]); const target = ref<Revision | null>(null); const confirmVisible = ref(false);
-const managed = ref(true);
 const batches = ref<DeploymentBatch[]>([]); const batchPage = ref(1); const batchTotal = ref(0);
 const batchDrawer = ref(false); const chains = ref<ChainChoice[]>([]); const relayBatchNodes = ref<NodeView[]>([]); const batchForm = reactive({ mode: 'chain', chainId: '', nodeId: '', summary: '' });
 const batchConfirm = ref(false); const batchRollback = ref(false); const batchTarget = ref<DeploymentBatch | null>(null);
 const nodeRollbackConfirm = ref(false); const rollbackTarget = ref<Revision | null>(null); const executing = ref(false);
-const form = reactive({ nodeId: '', summary: '', protocol: 'socks5', listen: '127.0.0.1', port: 1080, username: '', password: '' });
+const form = reactive({ nodeId: '', summary: '', protocol: 'socks5', listen: '127.0.0.1', port: 1080 });
 function resultLabel(code: string) { return ({success:'已应用且健康',validation_failed:'核心校验失败',compile_failed:'配置编译失败',apply_failed:'应用失败',start_failed:'启动失败',rollback_failed:'回滚失败',stop_failed:'停止失败',persistence_failed:'保存成功清单失败，已恢复旧配置'} as Record<string,string>)[code] || code || '—'; }
 async function load() { loading.value = true; try { const [result, batchResult, nodeResult] = await Promise.all([request<Page<Revision>>(`/revisions?page=${page.value}&pageSize=20`), deploymentAPI.batches(batchPage.value), nodeAPI.list(1, '')]); revisions.value = result.items; total.value = result.total; batches.value = batchResult.items; batchTotal.value = batchResult.total; nodes.value = nodeResult.items; error.value = ''; } catch (e) { error.value = (e as Error).message; } finally { loading.value = false; } }
 function nodeName(id: string) { return nodes.value.find(node => node.id === id)?.name || id.slice(0, 12); }
@@ -102,18 +98,12 @@ async function loadDiff() {
   catch (e) { if (serial === diffRequest && diffVisible.value) diffError.value = (e as Error).message; }
   finally { if (serial === diffRequest) diffLoading.value = false; }
 }
-async function openCreate() { try { const result = await nodeAPI.list(1, ''); nodes.value = result.items.filter(node => node.enabled && node.status !== 'pending'); Object.assign(form, { nodeId: '', summary: '', protocol: 'socks5', listen: '127.0.0.1', port: 1080, username: '', password: '' }); managed.value = true; form.listen = '0.0.0.0'; drawer.value = true; } catch (e) { showToast((e as Error).message, 'error'); } }
+async function openCreate() { try { const result = await nodeAPI.list(1, ''); nodes.value = result.items.filter(node => node.enabled && node.status !== 'pending'); Object.assign(form, { nodeId: '', summary: '', protocol: 'socks5', listen: '0.0.0.0', port: 1080 }); drawer.value = true; } catch (e) { showToast((e as Error).message, 'error'); } }
 async function create() {
   if (saving.value) return;
   if (!form.nodeId || !form.summary) { showToast('请选择节点并填写变更说明', 'error'); return; }
-  if (managed.value) { saving.value = true; try { await request('/revisions/user-access', 'POST', { nodeId: form.nodeId, summary: form.summary, protocol: form.protocol, listen: form.listen, port: form.port }); drawer.value = false; showToast('用户接入草稿已创建，请确认发布'); await load(); } catch (e) { showToast((e as Error).message, 'error'); } finally { saving.value = false; } return; }
-  if ((form.username && !form.password) || (!form.username && form.password) || (form.listen !== '127.0.0.1' && (!form.username || !form.password))) { showToast('请完整填写接入用户名和密码', 'error'); return; }
   saving.value = true;
-  const credentialId = 'credential-' + crypto.randomUUID();
-  const state = { schema_version: 1, revision: 1, node_id: form.nodeId, users: [], credentials: form.username ? [{ id: credentialId, user_id: '', device_id: '', protocol: form.protocol, username: form.username, secret: form.password, internal: false }] : [],
-    inbounds: [{ id: 'inbound-' + crypto.randomUUID(), protocol: form.protocol, listen: form.listen, port: form.port, enabled: true, credential_ids: form.username ? [credentialId] : [], default_outbound: 'direct', subscription_visible: false, settings: {} }],
-    outbounds: [{ id: 'direct', protocol: 'direct', enabled: true, settings: {} }, { id: 'block', protocol: 'block', enabled: true, settings: {} }], outbound_groups: [], proxy_chains: [], policies: [], logging: { domain_only: true } };
-  try { await request('/revisions', 'POST', { summary: form.summary, state }); drawer.value = false; form.password = ''; showToast('配置草稿已创建'); await load(); }
+  try { await request('/revisions/user-access', 'POST', { nodeId: form.nodeId, summary: form.summary, protocol: form.protocol, listen: form.listen, port: form.port }); drawer.value = false; showToast('用户接入草稿已创建，请确认发布'); await load(); }
   catch (e) { showToast((e as Error).message, 'error'); } finally { saving.value = false; }
 }
 function confirmPublish(revision: Revision) { target.value = revision; confirmVisible.value = true; }

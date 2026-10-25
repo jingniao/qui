@@ -171,5 +171,15 @@ if [[ $component == agent ]] && command -v nft >/dev/null && nft list table inet
   nft delete table inet proxy_agent_source
 fi
 rm -- "$record"
-printf '%s removed. Identity, quota ledgers, configuration, backups and service account remain.\n' "$name"
-printf 'This does not revoke the node or release reserved allowances; close them explicitly in the panel.\n'
+# What this script deliberately leaves behind differs per component: the panel
+# keeps its database and backups, the Agent its revisions, spool and enforced
+# source directory. Identity, configuration and the service account stay in both.
+case $component in
+  panel) printf '%s removed. Identity, configuration, database, backups and service account remain.\n' "$name";;
+  agent) printf '%s removed. Identity, configuration, data, revisions and service account remain.\n' "$name";;
+esac
+# Only the Agent holds a node identity the panel can revoke; the panel has no
+# counterpart to close.
+if [[ $component == agent ]]; then
+  printf 'This does not revoke the node; delete it in the panel.\n'
+fi

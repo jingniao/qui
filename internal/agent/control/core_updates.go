@@ -27,20 +27,25 @@ type coreUpdates struct {
 	component string
 	manager   *reconcile.Reconciler
 	source    *updater.CoreSource
-	mu        sync.Mutex
-	active    *release.CoreUpdateRequest
-	requests  chan release.CoreUpdateRequest
-	results   chan *pb.CoreUpdateResult
-	cancel    context.CancelFunc
-	done      chan struct{}
+	// capabilities is the node's shared capability holder and detect re-reads
+	// the installed core, so a committed or rolled-back image immediately
+	// replaces what every later session reports.
+	capabilities *capabilityState
+	detect       func(context.Context) (*pb.Capabilities, error)
+	mu           sync.Mutex
+	active       *release.CoreUpdateRequest
+	requests     chan release.CoreUpdateRequest
+	results      chan *pb.CoreUpdateResult
+	cancel       context.CancelFunc
+	done         chan struct{}
 }
 
-func newCoreUpdates(ctx context.Context, c config.Agent, nodeID string, manager *reconcile.Reconciler) (*coreUpdates, error) {
+func newCoreUpdates(ctx context.Context, c config.Agent, nodeID string, manager *reconcile.Reconciler, capabilities *capabilityState, detect func(context.Context) (*pb.Capabilities, error)) (*coreUpdates, error) {
 	if manager == nil {
 		return nil, nil
 	}
 	workCtx, cancel := context.WithCancel(ctx)
-	w := &coreUpdates{cfg: c, nodeID: nodeID, component: coreComponent(c), manager: manager, source: updater.NewCoreSource(), requests: make(chan release.CoreUpdateRequest, 1), results: make(chan *pb.CoreUpdateResult, 1), cancel: cancel, done: make(chan struct{})}
+	w := &coreUpdates{cfg: c, nodeID: nodeID, component: coreComponent(c), manager: manager, source: updater.NewCoreSource(), capabilities: capabilities, detect: detect, requests: make(chan release.CoreUpdateRequest, 1), results: make(chan *pb.CoreUpdateResult, 1), cancel: cancel, done: make(chan struct{})}
 	go w.run(workCtx)
 	return w, nil
 }
@@ -54,6 +59,9 @@ func (w *coreUpdates) run(ctx context.Context) {
 		case request := <-w.requests:
 			result, err := w.execute(ctx, request)
 			if err == nil {
+				if coreUpdateChangedTheCore(result.Status) {
+					w.refreshCapabilities(ctx)
+				}
 				data, _ := json.Marshal(result)
 				select {
 				case w.results <- &pb.CoreUpdateResult{ResultJson: data}:
@@ -65,6 +73,26 @@ func (w *coreUpdates) run(ctx context.Context) {
 			w.mu.Unlock()
 		}
 	}
+}
+
+// A committed image is the new running core and a rollback restored the retained
+// one; every other outcome leaves the running binary untouched.
+func coreUpdateChangedTheCore(status string) bool {
+	return status == "success" || status == "rolled_back"
+}
+
+// refreshCapabilities replaces the node's reported capabilities with the ones of
+// the core that is installed now. A failed detection keeps the previous value,
+// which stays consistent with the core that is still running.
+func (w *coreUpdates) refreshCapabilities(ctx context.Context) {
+	if w.detect == nil || w.capabilities == nil {
+		return
+	}
+	detected, err := w.detect(ctx)
+	if err != nil || detected == nil {
+		return
+	}
+	w.capabilities.Store(detected)
 }
 
 func (w *coreUpdates) Close() {

@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+// Each tick health-checks the core before refreshing the runtime state. A failed
+// startup restore leaves the rendered digest empty, so refreshing first would
+// render and apply the retained revision on every tick: a revision the installed
+// core cannot render would log a failure every three seconds, and one that
+// renders but cannot start (a taken port, for instance) would be applied again
+// and again, so the restore backoff below would never take effect. An unhealthy
+// core therefore goes through the backoff and Restore, which re-renders the
+// current revision itself, and only a healthy core is refreshed.
+//
 // The unhealthy-core loop shares the refresh tick. A restore that keeps failing
 // the same way (a retained revision the installed core cannot run) must not be
 // retried every three seconds, so consecutive failures back off instead. They
@@ -67,6 +76,10 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			defer workers.Done()
 			probeTicker := time.NewTicker(3 * time.Second)
 			defer probeTicker.Stop()
+			// The probe usually reports the same result for minutes, so only a
+			// change of that result is logged; a line every three seconds would
+			// add nothing.
+			failing := false
 			for {
 				select {
 				case <-ctx.Done():
@@ -76,7 +89,13 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 						continue
 					}
 					if err := prober.Probe(ctx); err != nil {
-						logger.Warn("outbound health probe failed")
+						if !failing {
+							logger.Warn("outbound health probe failed", "error", err)
+							failing = true
+						}
+					} else if failing {
+						failing = false
+						logger.Info("outbound health probe recovered")
 					}
 				}
 			}
@@ -85,6 +104,9 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	var backoff restoreBackoff
+	// refreshFailure is the reason the last refresh failed, so the same transient
+	// failure is not logged on every tick.
+	refreshFailure := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -93,26 +115,38 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			if reconciler.Current() == 0 || reconciler.CoreUpdateHeld() {
 				continue
 			}
-			if changed, err := reconciler.Refresh(ctx); err != nil {
-				logger.Error("approved runtime state reconciliation failed", "error", err)
-			} else if changed {
-				logger.Info("approved runtime state applied", "revision", reconciler.Current())
-			}
+			// Health comes first: while the core cannot run the retained
+			// revision, a refresh would only re-render and re-apply it.
 			health, err := adapter.Health(ctx)
-			if err == nil && health.Healthy {
-				backoff.reset()
-				continue
-			}
-			if !backoff.ready(reconciler.Current(), time.Now()) {
-				continue
-			}
-			logger.Warn("core unhealthy; restoring last successful configuration")
-			if err := reconciler.Restore(ctx); err != nil {
-				if backoff.failed(err, time.Now()) {
-					logger.Error("core recovery failed", "error", err, "retry_in", backoff.delay)
+			if err != nil || !health.Healthy {
+				if !backoff.ready(reconciler.Current(), time.Now()) {
+					continue
 				}
-			} else {
-				backoff.reset()
+				logger.Warn("core unhealthy; restoring last successful configuration")
+				if err := reconciler.Restore(ctx); err != nil {
+					if backoff.failed(err, time.Now()) {
+						logger.Error("core recovery failed", "error", err, "retry_in", backoff.delay.String())
+					}
+				} else {
+					backoff.reset()
+				}
+				continue
+			}
+			backoff.reset()
+			changed, err := reconciler.Refresh(ctx)
+			if err != nil {
+				if message := err.Error(); message != refreshFailure {
+					logger.Error("approved runtime state reconciliation failed", "error", err)
+					refreshFailure = message
+				}
+				continue
+			}
+			if refreshFailure != "" {
+				refreshFailure = ""
+				logger.Info("approved runtime state reconciliation recovered")
+			}
+			if changed {
+				logger.Info("approved runtime state applied", "revision", reconciler.Current())
 			}
 		}
 	}

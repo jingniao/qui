@@ -384,7 +384,15 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		}
 	}()
 	defer func() { statsCancel(); <-statsDone }()
-	updates, err := newCoreUpdates(ctx, c, state.NodeID, manager)
+	// The capabilities are detected after the startup repair, so they describe
+	// the core that is actually installed. The core update worker shares the
+	// holder and replaces it whenever an update changes that core.
+	detected, detectErr := adapter.DetectCapabilities(ctx)
+	if detectErr != nil {
+		logger.Info("proxy core not available", "error", detectErr)
+	}
+	capabilities := newCapabilityState(detected)
+	updates, err := newCoreUpdates(ctx, c, state.NodeID, manager, capabilities, adapter.DetectCapabilities)
 	if err != nil {
 		return err
 	}
@@ -400,13 +408,6 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	version := "dev"
 	if len(versions) > 0 {
 		version = versions[0]
-	}
-	capabilities, detectErr := adapter.DetectCapabilities(ctx)
-	if capabilities == nil {
-		capabilities = &pb.Capabilities{}
-	}
-	if detectErr != nil {
-		logger.Info("proxy core not available", "error", detectErr)
 	}
 	if startup != nil {
 		healthy := !controlOnly
@@ -461,7 +462,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	return nil
 }
 
-func session(ctx context.Context, client pb.AgentControlClient, state *identity.State, logger *slog.Logger, sampler *capability.Sampler, capabilities *pb.Capabilities, version string, manager *reconcile.Reconciler, healthSource interface {
+func session(ctx context.Context, client pb.AgentControlClient, state *identity.State, logger *slog.Logger, sampler *capability.Sampler, capabilities *capabilityState, version string, manager *reconcile.Reconciler, healthSource interface {
 	OutboundHealth() map[string]scheduler.Health
 }, telemetryQueue *spool.Spool, updates *coreUpdates, agents *agentUpdates, renewals ...func(context.Context) (bool, error)) error {
 	stream, err := client.Connect(ctx)
@@ -690,7 +691,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		return nil
 	}
-	if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: capabilities}}); err != nil {
+	if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: capabilities.Snapshot()}}); err != nil {
 		return err
 	}
 	logger.Info("node control connected", "node_id", state.NodeID)
@@ -718,7 +719,10 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			updateResults = updateResults[1:]
 			if source, ok := healthSource.(core.Runtime); ok {
 				if fresh, err := source.DetectCapabilities(ctx); err == nil {
-					if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: fresh}}); err != nil {
+					// Publish and remember the core that now runs, so a later
+					// session does not report the version from process start.
+					capabilities.Store(fresh)
+					if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: capabilities.Snapshot()}}); err != nil {
 						return err
 					}
 				}
@@ -811,7 +815,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		if telemetryQueue != nil {
 			for count := 0; count < 8; count++ {
-				batch, err := telemetryQueue.PendingTraffic(ctx)
+				batch, retried, err := telemetryQueue.PendingTrafficRetry(ctx)
 				if err != nil {
 					logger.Error("traffic queue read failed")
 					break
@@ -819,11 +823,28 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				if batch == nil {
 					break
 				}
+				if retried {
+					// Quarantine is a cool-down, not a verdict: the batch the
+					// panel rejected comes back once nothing else is pending.
+					logger.Info("retrying quarantined traffic batch after cool-down", "batch_id", batch.ID)
+				}
 				data, err := json.Marshal(batch)
 				if err != nil {
 					return err
 				}
 				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TrafficBatch{TrafficBatch: &pb.TrafficBatch{BatchJson: data}}}); err != nil {
+					// A batch the panel rejects deterministically is retried by
+					// every later session, which would also block the access
+					// batches behind it. Count the rejection and quarantine the
+					// head once it repeats; the batch itself is kept on disk.
+					if trafficRejected(err) {
+						quarantined, rejectErr := telemetryQueue.RejectTraffic(ctx, batch.ID)
+						if rejectErr != nil {
+							logger.Error("traffic rejection could not be recorded", "error", rejectErr)
+						} else if quarantined {
+							logger.Error("traffic batch quarantined after repeated rejection", "batch_id", batch.ID)
+						}
+					}
 					return err
 				}
 			}

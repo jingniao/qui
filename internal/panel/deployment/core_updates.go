@@ -253,6 +253,9 @@ func (r *Repository) PendingCoreUpdate(ctx context.Context, nodeID string) (*pb.
 }
 
 // CoreUpdateResult records the node's authenticated outcome for its own task.
+// A reconnect that closed the task without an outcome (failed_closed with no
+// result) still accepts the authenticated result the Agent produced meanwhile,
+// because that outcome is the only proof of what happened on the node.
 func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payload *pb.CoreUpdateResult) error {
 	result, err := release.DecodeCoreUpdateResult(payload.ResultJson)
 	if err != nil || result.NodeID != nodeID {
@@ -279,8 +282,19 @@ func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payloa
 		}
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status=?,result_json=?,updated_at=? WHERE id=? AND command_id=? AND status IN ('queued','running')", result.Status, payload.ResultJson, now(), t.ID, result.ID); err != nil {
+	// The task must still be open, or closed without an outcome. A task the
+	// Owner cleared or otherwise finished keeps its status.
+	update, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status=?,result_json=?,updated_at=? WHERE id=? AND command_id=? AND (status IN ('queued','running') OR (status='failed_closed' AND result_json IS NULL))", result.Status, payload.ResultJson, now(), t.ID, result.ID)
+	if err != nil {
 		return err
+	}
+	rows, err := update.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		// Never acknowledge a result this panel did not store.
+		return release.ErrUpdate
 	}
 	return tx.Commit()
 }

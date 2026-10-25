@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-screen w-screen overflow-hidden bg-ios-bg">
     <!-- Desktop & Tablet Sidebar -->
-    <div :class="['hidden lg:block shrink-0 transition-all duration-300', sidebarCollapsed ? 'w-20' : 'w-68']">
+    <div :class="['hidden lg:block shrink-0 transition-all duration-300', sidebarCollapsed ? 'w-20' : 'w-[17rem]']">
       <AppSidebar :collapsed="sidebarCollapsed" @toggle="sidebarCollapsed = !sidebarCollapsed" />
     </div>
 
@@ -24,9 +24,11 @@
       <!-- Scrollable Main View -->
       <main class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 bg-ios-bg">
         <div class="max-w-[1536px] mx-auto w-full">
-          <router-view v-slot="{ Component }">
+          <!-- Keyed by path (not fullPath) so a different :id always gets a fresh
+               instance, while query-only changes such as ?tab= keep the page. -->
+          <router-view v-slot="{ Component, route: viewRoute }">
             <transition name="fade-fast" mode="out-in">
-              <component :is="Component" />
+              <component :is="Component" :key="viewRoute.path" />
             </transition>
           </router-view>
         </div>

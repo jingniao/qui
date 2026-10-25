@@ -14,6 +14,14 @@ import (
 type Repository struct {
 	Database *sql.DB
 	Vault    *vault.Vault
+	// Applied is called with the node ID and the operation name ("post-deploy"
+	// or "post-rollback") after the panel recorded that operation as successful.
+	// A deploy and a rollback both publish a stored revision verbatim, so a
+	// revision rendered before a user was disabled (or re-enabled) would leave
+	// the node's user access surface out of step with the user records. The
+	// platform uses it to queue one quota reconciliation, which is a no-op when
+	// the node is already in sync. Optional and nil-safe.
+	Applied func(nodeID, operation string)
 }
 type Revision struct {
 	ID         int64  `json:"id"`
@@ -227,7 +235,22 @@ func (r *Repository) Result(ctx context.Context, nodeID string, result *pb.Apply
 	if err := r.advanceBatch(ctx, tx, result.Revision, result.Success); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if result.Success {
+		r.notifyApplied(nodeID, "post-deploy")
+	}
+	return nil
+}
+
+// notifyApplied tells the platform that a node now runs a new revision, so its
+// user access surface can be re-checked against the user records outside this
+// transaction.
+func (r *Repository) notifyApplied(nodeID, operation string) {
+	if r.Applied != nil && nodeID != "" {
+		r.Applied(nodeID, operation)
+	}
 }
 func (r *Repository) List(ctx context.Context, page, size int) ([]Revision, int, error) {
 	var count int

@@ -37,7 +37,7 @@ func sampleSpoolStatus(ctx context.Context, queue *spool.Spool) *pb.SpoolStatus 
 		}
 		return result
 	}
-	if stats.Bytes < 0 || stats.DiskBytes < 0 || stats.DiskLimit <= 0 || stats.DatabaseBytes < 0 || stats.DatabaseLimit <= 0 || stats.Batches < 0 || stats.DroppedAllowedRollups < 0 {
+	if stats.Bytes < 0 || stats.DiskBytes < 0 || stats.DiskLimit <= 0 || stats.DatabaseBytes < 0 || stats.DatabaseLimit <= 0 || stats.Batches < 0 || stats.DroppedAllowedRollups < 0 || stats.TrafficQuarantined < 0 || stats.TrafficQuarantined > stats.Batches {
 		result.FailureCode = "capacity_invalid"
 		return result
 	}
@@ -50,6 +50,9 @@ func sampleSpoolStatus(ctx context.Context, queue *spool.Spool) *pb.SpoolStatus 
 	result.DatabaseLimit = uint64(stats.DatabaseLimit)
 	result.PendingBatches = uint64(stats.Batches)
 	result.DroppedAllowedRollups = uint64(stats.DroppedAllowedRollups)
+	// The wire format has no counter for the held-back batches, and the
+	// quarantine is a local cool-down that the Agent retries on its own, so it
+	// is not reported here. Only the bounds check above guards the count.
 	result.Status = "ok"
 	if stats.DiskBytes >= stats.DiskLimit || stats.DatabaseBytes >= stats.DatabaseLimit {
 		result.Status = "capacity_exceeded"

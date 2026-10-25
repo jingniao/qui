@@ -58,6 +58,10 @@ type Stats struct {
 	Rollups               int64
 	Bytes                 int64
 	DroppedAllowedRollups int64
+	// TrafficQuarantined counts the traffic batches a deterministic rejection
+	// moved behind the delivery head for a cool-down. They are retained, not
+	// deleted, so they stay inside Batches and Bytes and are never evicted.
+	TrafficQuarantined int64
 }
 
 func Open(ctx context.Context, directory, nodeID string, limit int64) (*Spool, error) {
@@ -129,7 +133,18 @@ func Open(ctx context.Context, directory, nodeID string, limit int64) (*Spool, e
 	if owner != nodeID || version != 1 {
 		return closeError(errors.New("spool identity or schema mismatch"))
 	}
-	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS traffic_batches(id TEXT PRIMARY KEY,payload BLOB NOT NULL);CREATE TABLE IF NOT EXISTS traffic_cursors(epoch TEXT NOT NULL,credential_id TEXT NOT NULL,payload BLOB NOT NULL,PRIMARY KEY(epoch,credential_id));`); err != nil {
+	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS traffic_batches(id TEXT PRIMARY KEY,payload BLOB NOT NULL,quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1)),rejections INTEGER NOT NULL DEFAULT 0 CHECK(rejections>=0),quarantined_at INTEGER NOT NULL DEFAULT 0 CHECK(quarantined_at>=0));CREATE TABLE IF NOT EXISTS traffic_cursors(epoch TEXT NOT NULL,credential_id TEXT NOT NULL,payload BLOB NOT NULL,PRIMARY KEY(epoch,credential_id));`); err != nil {
+		return closeError(err)
+	}
+	// A store written before traffic quarantine existed gains its columns in
+	// place. traffic_batches is outside the authenticated v1 checkpoint, so the
+	// stored digest still verifies after the upgrade.
+	if err := attachTrafficQuarantine(ctx, database); err != nil {
+		return closeError(err)
+	}
+	// Quarantine is a cool-down owned by this process: every start, including an
+	// upgrade, retries the held-back batches right away.
+	if err := releaseTrafficQuarantine(ctx, database); err != nil {
 		return closeError(err)
 	}
 	// budget_state is empty: the agent no longer keeps a local budget ledger. It
@@ -332,6 +347,9 @@ func (s *Spool) Stats(ctx context.Context) (Stats, error) {
 	stats.DatabaseBytes = pageSize * pageCount
 	stats.DatabaseLimit = pageSize * maxPages
 	if err := s.database.QueryRowContext(ctx, "SELECT "+queuedRowsSQL+",(SELECT coalesce(sum(records),0) FROM batches),"+queuedBytesSQL).Scan(&stats.Batches, &stats.Rollups, &stats.Bytes); err != nil {
+		return stats, err
+	}
+	if err := s.database.QueryRowContext(ctx, "SELECT count(*) FROM traffic_batches WHERE quarantined=1").Scan(&stats.TrafficQuarantined); err != nil {
 		return stats, err
 	}
 	err = s.database.QueryRowContext(ctx, "SELECT dropped_allowed FROM spool_metadata WHERE id=1").Scan(&stats.DroppedAllowedRollups)

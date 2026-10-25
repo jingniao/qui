@@ -40,11 +40,32 @@ type fakeCoreRuntime struct {
 	activate  int
 	applied   []core.RenderedConfig
 	lastError error
+	// baselineVersion is the version of the image the harness started, and
+	// imageVersions maps the marker appended to an installed image to the
+	// version that image reports. Both let a test observe the capabilities of
+	// the core that is selected now, like a real core reporting its own version.
+	baselineVersion string
+	imageVersions   map[string]string
 }
 
 func (a *fakeCoreRuntime) Name() string { return a.name }
 func (a *fakeCoreRuntime) DetectCapabilities(context.Context) (*pb.Capabilities, error) {
-	return &pb.Capabilities{CoreName: a.name, CoreVersion: a.version}, nil
+	return &pb.Capabilities{CoreName: a.name, CoreVersion: a.capabilityVersion()}, nil
+}
+
+func (a *fakeCoreRuntime) capabilityVersion() string {
+	version := a.version
+	if a.baselineVersion != "" {
+		version = a.baselineVersion
+	}
+	if data, err := os.ReadFile(a.selected); err == nil {
+		for marker, reported := range a.imageVersions {
+			if bytes.HasSuffix(data, []byte(marker)) {
+				version = reported
+			}
+		}
+	}
+	return version
 }
 func (a *fakeCoreRuntime) Render(_ context.Context, state desiredstate.State) (core.RenderedConfig, error) {
 	data, err := json.Marshal(state)
@@ -139,7 +160,8 @@ func updateHarness(t *testing.T, adapter *fakeCoreRuntime, options ...func(strin
 		}
 		manager.RequireSuccessReceipts = false
 	}
-	worker, err := newCoreUpdates(context.Background(), cfg, "node-update", manager)
+	detected, _ := adapter.DetectCapabilities(context.Background())
+	worker, err := newCoreUpdates(context.Background(), cfg, "node-update", manager, newCapabilityState(detected), adapter.DetectCapabilities)
 	if err != nil {
 		t.Fatal(err)
 	}

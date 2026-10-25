@@ -15,6 +15,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
@@ -181,9 +182,9 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
-	composer := &deployment.Handler{Repository: deployments, Nodes: nodes, Users: users}
+	composer := &deployment.Handler{Repository: deployments, Nodes: nodes, Users: users, Proxy: &proxy.Service{Repository: &proxy.Repository{Database: app.Database, Vault: configurationVault}, Nodes: nodes}}
 	input := deployment.UserAccessInput{NodeID: n.ID, Summary: "User credential test", Protocol: "socks5", Listen: "0.0.0.0", Port: port}
-	state, err := composer.UserState(ctx, input)
+	state, err := composer.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	if err != nil || len(content) != 0 {
 		t.Fatal("unpublished rotated credential exported", err)
 	}
-	state, err = composer.UserState(ctx, input)
+	state, err = composer.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +341,7 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err = composer.UserState(ctx, input)
+	state, err = composer.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}

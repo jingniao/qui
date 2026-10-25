@@ -181,6 +181,12 @@ func (r *Repository) Delete(ctx context.Context, userID string) error {
 		return err
 	}
 	defer tx.Rollback()
+	// The nodes still run revisions that contain this user's credentials, so
+	// their counters keep arriving. Keep the identity before the cascade removes
+	// it; see traffic_tombstones.go.
+	if err := recordUserCredentialTombstonesTx(ctx, tx, userID); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, "DELETE FROM users WHERE id=?", userID)
 	if err != nil {
 		return err
@@ -413,6 +419,11 @@ func (r *Repository) DeleteDevice(ctx context.Context, deviceID string) error {
 		return err
 	}
 	return r.changeDeviceTx(ctx, deviceID, device.UserID, func(tx *sql.Tx) error {
+		// The node may still run a revision that contains this device's
+		// credentials, so keep their identity before the cascade removes it.
+		if err := recordDeviceCredentialTombstonesTx(ctx, tx, deviceID); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM devices WHERE id=?", deviceID)
 		return err
 	})

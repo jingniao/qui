@@ -140,6 +140,21 @@ func (d *quotaDeployer) renewExpiry(ctx context.Context, userID string) {
 	d.schedule(ctx, user.Transition{UserID: userID, Username: account.Username, Reason: "renewed"})
 }
 
+// reconcileNode queues one reconciliation of a node's user access surface. The
+// Deployment module calls it after every successful deploy and rollback: both
+// re-publish a stored revision verbatim, so a rollback to a revision rendered
+// before a user was disabled (or re-enabled) would otherwise keep serving that
+// credential until the next transition or a panel restart. Like any other
+// transition the entry coalesces into the next window, and the reconciliation
+// itself computes nothing when the node is already in sync, so an automatic
+// revision's own success cannot start a chain of revisions.
+func (d *quotaDeployer) reconcileNode(nodeID, reason string) {
+	if nodeID == "" {
+		return
+	}
+	d.enqueue(nodeID, user.Transition{Reason: reason})
+}
+
 // tickOnce runs the startup pass again while it has not completed, retries the
 // transitions whose node set could not be read, and then re-evaluates every
 // user, so an idle expired user is still removed.

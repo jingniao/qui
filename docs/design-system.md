@@ -188,7 +188,7 @@
 ## 七、侧边栏与导航系统 (Navigation & Sidebar)
 
 ### 1. 展开态 (Expanded State)
-- **宽度**：设计目标 `17rem` (272px)。`web/src/layouts/MainLayout.vue` 写的是 `w-68`，但 Tailwind 3.4 默认间距表没有 `68`，该类不生成样式，目前展开宽度实际由侧栏内容决定（已知问题，待修）。
+- **宽度**：`17rem` (272px)，`web/src/layouts/MainLayout.vue` 使用 `w-[17rem]` 固定展开宽度。Tailwind 3.4 默认间距表没有 `68`，因此不能用 `w-68`。
 - **分组标题**：`text-[11px] font-semibold tracking-wider uppercase text-ios-tertiary px-3.5 pt-4 pb-1.5`。
 - **一级折叠菜单项**：未激活为常规灰色文本；展开/激活时为 `text-ios-blue bg-ios-blue/10 font-semibold`，右侧 Chevron 箭头平滑旋转 90 度。
 - **二级子路由项**：缩进 `pl-9`，字号收窄为 `text-[13px]`，形成明晰树形梯级。

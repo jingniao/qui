@@ -25,7 +25,7 @@ func TestRevisionDiffHTTPPermissionsValidationAndRealImmutableChanges(t *testing
 		t.Fatal(err)
 	}
 	state := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: n.ID, Logging: desiredstate.Logging{DomainOnly: true},
-		Credentials: []desiredstate.Credential{{ID: "credential", Protocol: "http", Username: "private-http-account", Secret: "private-http-first-password"}},
+		Credentials: []desiredstate.Credential{{ID: "credential", Protocol: "http", Username: "private-http-account", Secret: "private-http-first-password", Internal: true}},
 		Inbounds:    []desiredstate.Inbound{{ID: "entry", Protocol: "http", Listen: "127.0.0.1", Port: 1080, Enabled: true, DefaultOutbound: "direct", CredentialIDs: []string{"credential"}}},
 		Outbounds:   []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}},
 	}

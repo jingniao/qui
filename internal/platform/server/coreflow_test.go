@@ -188,6 +188,11 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 	ctx := context.Background()
 	app := testServer(t)
 	app.Config.ShutdownTimeout = time.Second
+	// A successful deploy queues one user-access reconciliation for its node, so
+	// the window is shortened before the first publication: the later quota edit
+	// in this flow must not queue behind the deploy's own entry in the default
+	// one-minute window.
+	app.quotaDeployer.window = 100 * time.Millisecond
 	address, stop := startControl(t, app)
 	defer stop()
 
@@ -403,7 +408,6 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 	// Step 5b (Phase 5): the Owner drops the quota below the already-counted
 	// usage. The panel evaluates the transition, builds and deploys an automatic
 	// revision without the user's credential, and the running Agent applies it.
-	app.quotaDeployer.window = 100 * time.Millisecond
 	quotaResponse := owner.call("PUT", "/api/v1/users/"+account.ID, user.Input{Username: account.Username, DisplayName: account.DisplayName, Status: account.Status, ExpiresAt: account.ExpiresAt, TrafficLimit: 300, MaxDevices: account.MaxDevices, MaxConnections: account.MaxConnections, AllowedProtocols: account.AllowedProtocols, NodeGroupIDs: account.NodeGroupIDs})
 	if quotaResponse.Code != 200 {
 		t.Fatalf("quota edit: %d %s", quotaResponse.Code, quotaResponse.Body.String())

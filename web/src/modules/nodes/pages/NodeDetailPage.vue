@@ -215,7 +215,14 @@ import TrafficValue from '../../../components/TrafficValue.vue';
 
 const route = useRoute();
 const router = useRouter();
-const node = ref<NodeView | null>(null);
+// The route param is read from the URL every time instead of being remembered:
+// the same component instance can move from /nodes/A to /nodes/B.
+const routeNodeId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''));
+// Raw response body. Nothing here renders or acts on it directly: `node` below
+// is null unless that record is the node the URL currently names, so a late
+// response for the node we just left can be neither shown, edited nor revoked.
+const loadedNode = ref<NodeView | null>(null);
+const node = computed<NodeView | null>(() => (loadedNode.value && loadedNode.value.id === routeNodeId.value ? loadedNode.value : null));
 const error = ref('');
 const revokeVisible = ref(false);
 
@@ -311,19 +318,38 @@ function cacheBytes(value: number | undefined) {
   return size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KiB` : `${(size / 1024 / 1024).toFixed(1)} MiB`;
 }
 
+// Each load takes a ticket and the id it asked for. A response is used only if
+// it is still the newest request and the URL still names the same node, so a
+// slow answer for the previous node cannot overwrite the current one.
+let generation = 0;
+
 async function load() {
+  const id = routeNodeId.value;
+  const current = ++generation;
+  // Leaving to /nodes keeps this instance around for one tick; there is no node
+  // to fetch and we must not request /nodes/undefined.
+  if (!id) {
+    loadedNode.value = null;
+    error.value = '';
+    return;
+  }
   try {
-    node.value = await nodeAPI.get(String(route.params.id));
+    const result = await nodeAPI.get(id);
+    if (current !== generation || id !== routeNodeId.value) return;
+    loadedNode.value = result;
     error.value = '';
   } catch (e) {
+    if (current !== generation || id !== routeNodeId.value) return;
+    loadedNode.value = null;
     error.value = (e as Error).message;
   }
 }
 
 async function revoke() {
-  if (!node.value) return;
+  const target = node.value?.id ?? '';
+  if (!target || staleTarget(target)) return;
   try {
-    await nodeAPI.revoke(node.value.id);
+    await nodeAPI.revoke(target);
     showToast('节点证书已吊销');
     await load();
   } catch (e) {
@@ -338,6 +364,26 @@ const settings = reactive({
   id: '', name: '', publicIp: '', enabled: true, allowSubscription: true, maintenance: false,
   outboundSourceIp: '', outboundInterface: '', hostSourceIpv4: '', hostSourceIpv6: ''
 });
+
+// Dialogs hold the id they were opened for, so leaving the node must close them
+// instead of letting a pending confirm apply to the node that is now in view.
+function closeDialogs() {
+  settingsVisible.value = false;
+  revokeVisible.value = false;
+  saving.value = false;
+  networkErrorText.value = '';
+  settings.id = '';
+}
+
+// Node-targeted actions re-check their target against the URL: a confirm dialog
+// opened for A may still be confirmable after the page moved to B.
+function staleTarget(id: string) {
+  if (id !== '' && id === routeNodeId.value) return false;
+  showToast('当前页面已切换到其他节点，操作已取消并重新加载', 'error');
+  closeDialogs();
+  void load();
+  return true;
+}
 
 function openSettings() {
   if (!node.value) return;
@@ -385,6 +431,7 @@ const mixedFamilyHint = computed(() => (settings.hostSourceIpv4 ? 1 : 0) + (sett
 
 async function saveSettings() {
   if (saving.value) return;
+  if (staleTarget(settings.id)) return;
   const invalid = networkError();
   if (invalid) {
     networkErrorText.value = invalid;
@@ -405,7 +452,16 @@ async function saveSettings() {
   }
 }
 
-watch(() => route.params.id, load);
+// A param change means everything loaded so far belongs to another node: drop
+// it (and any open dialog) before asking for the new one. The request already in
+// flight is discarded by its generation ticket.
+watch(() => route.params.id, () => {
+  generation++;
+  loadedNode.value = null;
+  error.value = '';
+  closeDialogs();
+  void load();
+});
 
 onMounted(() => {
   clockTimer = setInterval(() => { clockNow.value = Date.now(); }, 5000);
@@ -414,6 +470,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  generation++;
   if (clockTimer) clearInterval(clockTimer);
   window.removeEventListener('proxy-node-status', load);
 });

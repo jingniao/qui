@@ -227,11 +227,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if err := c.Repository.CoreUpdateSupport(ctx, id, updateSupported); err != nil {
 		return status.Error(codes.Internal, "core update capability persistence failed")
 	}
-	if updateSupported {
-		if err := c.CoreUpdates.CloseStaleCoreUpdates(ctx, id); err != nil {
-			return status.Error(codes.Internal, "stale core update closure failed")
-		}
-	}
+	// Closing a stale update waits until this connection stored fresh
+	// capabilities; see coreUpdateCapabilitiesStored.
+	coreUpdates := &coreUpdateSession{}
 	serverSequence := uint64(0)
 	send := func(payload any) error {
 		serverSequence++
@@ -362,6 +360,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		if err != nil {
 			return status.Error(codes.Internal, "message persistence failed")
+		}
+		if updateSupported {
+			if err := c.coreUpdateCapabilitiesStored(ctx, id, message, coreUpdates); err != nil {
+				return status.Error(codes.Internal, "stale core update closure failed")
+			}
 		}
 		if c.Notify != nil && (message.GetHeartbeat() != nil || message.GetAgentUpdateResult() != nil || message.GetHealthCheckResult() != nil) {
 			c.Notify(id)

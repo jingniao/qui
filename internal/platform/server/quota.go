@@ -72,6 +72,10 @@ type quotaDeployer struct {
 	// again, so a transient read failure at startup cannot skip a node for the
 	// lifetime of the process.
 	recovered bool
+	// flushing counts the flushes that took their entry and are still
+	// reconciling, so a caller can tell an idle node from one whose window just
+	// fired.
+	flushing int
 }
 
 // quotaPending is the coalesced work for one node. revision records a revision
@@ -412,7 +416,13 @@ func (d *quotaDeployer) flush(nodeID string) {
 	entry := d.pending[nodeID]
 	delete(d.pending, nodeID)
 	d.timers[nodeID] = nil
+	d.flushing++
 	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		d.flushing--
+		d.mu.Unlock()
+	}()
 	if entry == nil || len(entry.transitions) == 0 {
 		return
 	}

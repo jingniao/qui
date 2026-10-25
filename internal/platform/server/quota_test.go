@@ -105,7 +105,23 @@ func (f *quotaFixture) publish(t *testing.T) int64 {
 	if err := f.app.deployments.Result(f.ctx, f.nodeID, &pb.ApplyResult{Revision: revision.ID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
+	f.idle(t)
 	return revision.ID
+}
+
+// idle waits until the reconcile the last successful deploy queued has run.
+// Every success queues one; a setup step that returned before it ran would let
+// it fire in the middle of the test's next step, which on a slow runner (the
+// race detector) either holds the node with an automatic revision or reacts to
+// a change the test has only just made.
+func (f *quotaFixture) idle(t *testing.T) {
+	t.Helper()
+	deployer := f.app.quotaDeployer
+	flowWait(t, "the post-deploy reconcile", func() bool {
+		deployer.mu.Lock()
+		defer deployer.mu.Unlock()
+		return deployer.pending[f.nodeID] == nil && deployer.timers[f.nodeID] == nil && deployer.flushing == 0
+	})
 }
 
 // apply simulates the agent reporting a successful apply, advancing the
@@ -876,6 +892,7 @@ func (f *quotaFixture) quickAccess(t *testing.T, protocol, listen string, port i
 		t.Fatalf("user access deploy: %d %s", deploy.Code, deploy.Body.String())
 	}
 	f.apply(t, revision.ID)
+	f.idle(t)
 	return revision
 }
 

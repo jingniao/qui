@@ -333,7 +333,12 @@ func (r *Repository) CloseStaleCoreUpdates(ctx context.Context, nodeID string) e
 	return err
 }
 
-// ClearCoreUpdate closes a task the Owner no longer wants to track.
+// ClearCoreUpdate closes a task the Owner no longer wants to track. A task that
+// already stored the node's authenticated result is finished: clearing it keeps
+// its status and result, because backup inspection requires every stored result
+// to keep matching the status of its task. Only a task without a result becomes
+// 'cleared', and the UPDATE repeats that condition so a result stored meanwhile
+// is never overwritten.
 func (r *Repository) ClearCoreUpdate(ctx context.Context, audit ReleaseAccess, taskID, actor, ip string) (CoreUpdateTask, error) {
 	if actor == "" || len(actor) > 128 {
 		return CoreUpdateTask{}, release.ErrUpdate
@@ -347,11 +352,18 @@ func (r *Repository) ClearCoreUpdate(ctx context.Context, audit ReleaseAccess, t
 	if err != nil {
 		return t, err
 	}
-	if t.Status == "queued" || t.Status == "running" || t.Status == "failed_closed" {
-		t.Status = "cleared"
-		t.UpdatedAt = now()
-		if _, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status='cleared',updated_at=? WHERE id=?", t.UpdatedAt, t.ID); err != nil {
+	if t.Result == nil && (t.Status == "queued" || t.Status == "running" || t.Status == "failed_closed") {
+		updatedAt := now()
+		update, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status='cleared',updated_at=? WHERE id=? AND result_json IS NULL", updatedAt, t.ID)
+		if err != nil {
 			return t, err
+		}
+		rows, err := update.RowsAffected()
+		if err != nil {
+			return t, err
+		}
+		if rows == 1 {
+			t.Status, t.UpdatedAt = "cleared", updatedAt
 		}
 	}
 	if err := audit.RecordTx(ctx, tx, actor, "clear_core_update", t.ID, "成功", ip); err != nil {

@@ -346,6 +346,73 @@ func TestCoreUpdateUndispatchableLegacyTaskIsClosed(t *testing.T) {
 	}
 }
 
+// TestCoreUpdateClearKeepsStoredResult is the field test of 2026-10-25: a task
+// the Agent already closed as failed_closed was cleared into status 'cleared'
+// while keeping a result whose status is still 'failed_closed'. Backup
+// inspection refuses that pair, so one cleared task made every backup fail. A
+// task that stored a result is finished and keeps it; only a task without a
+// result becomes 'cleared'.
+func TestCoreUpdateClearKeepsStoredResult(t *testing.T) {
+	digest := strings.Repeat("cd", 32)
+	assetURL := strings.Replace(coreAssetURLForTest(), "v26.3.27", "v26.3.28", 1)
+	r, catalogue, nodeID, revision := coreNodeFixture(t, runtime.GOOS+"/"+runtime.GOARCH, "xray")
+	ctx := context.Background()
+	task, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.PendingCoreUpdate(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	failure, err := json.Marshal(release.UpdateResult{ID: task.CommandID, NodeID: nodeID, Revision: revision.ID, TargetDigest: digest, Status: "failed_closed", Code: "history_invalid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CoreUpdateResult(ctx, nodeID, &pb.CoreUpdateResult{ResultJson: failure}); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := r.ClearCoreUpdate(ctx, catalogue, task.ID, "owner", "local")
+	if err != nil {
+		t.Fatalf("clearing a task that stored its result failed: %v", err)
+	}
+	if finished.Status != "failed_closed" || finished.Result == nil || finished.Result.Code != "history_invalid" {
+		t.Fatalf("the clear rewrote a finished task: %+v", finished)
+	}
+	items, _, err := r.ListCoreUpdates(ctx, 1, 20)
+	if err != nil || len(items) != 1 || items[0].Status != "failed_closed" || items[0].Result == nil || items[0].Result.Status != "failed_closed" {
+		t.Fatalf("the stored result did not survive the clear: %+v %v", items, err)
+	}
+	// Tasks without a result are still cleared, whether the Owner clears one
+	// while it is queued or after a reconnect closed it without an outcome.
+	queued, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared, err := r.ClearCoreUpdate(ctx, catalogue, queued.ID, "owner", "local"); err != nil || cleared.Status != "cleared" {
+		t.Fatalf("queued task not cleared: %+v %v", cleared, err)
+	}
+	running, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.28", assetURL, digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.PendingCoreUpdate(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CloseStaleCoreUpdates(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if cleared, err := r.ClearCoreUpdate(ctx, catalogue, running.ID, "owner", "local"); err != nil || cleared.Status != "cleared" || cleared.Result != nil {
+		t.Fatalf("task closed without a result not cleared: %+v %v", cleared, err)
+	}
+	var audits int
+	if err := r.Database.QueryRow("SELECT count(*) FROM admin_operations WHERE action='clear_core_update'").Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 3 {
+		t.Fatalf("clear attempts recorded %d audit entries, want 3", audits)
+	}
+}
+
 func coreTarget(version, assetURL, digest string) CoreUpdateInput {
 	return CoreUpdateInput{Component: "xray", Version: version, URL: assetURL, SHA256: digest}
 }

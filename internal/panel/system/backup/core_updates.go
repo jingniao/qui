@@ -72,7 +72,7 @@ func validateLegacyCoreUpdates(ctx context.Context, database *sql.DB) error {
 		}
 		if len(resultData) > 0 {
 			result, err := release.DecodeUpdateResult(resultData)
-			if err != nil || result.ID != commandID || result.NodeID != nodeID || result.Revision != revision || result.TargetDigest != entry.Manifest.SHA256 || result.Status == "success" && (result.InstalledVersion != request.Release.Manifest.Version || result.InstalledSequence != request.Release.Manifest.Sequence) || commandID == current && result.Status != status {
+			if err != nil || result.ID != commandID || result.NodeID != nodeID || result.Revision != revision || result.TargetDigest != entry.Manifest.SHA256 || result.Status == "success" && (result.InstalledVersion != request.Release.Manifest.Version || result.InstalledSequence != request.Release.Manifest.Sequence) || commandID == current && !coreResultMatches(status, result.Status) {
 				return ErrArchive
 			}
 		} else if commandID == current && status != "queued" && status != "running" {
@@ -80,6 +80,15 @@ func validateLegacyCoreUpdates(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return rows.Err()
+}
+
+// coreResultMatches reports whether a stored Agent result may belong to a task
+// status. A task the Owner cleared after the node reported is finished: its
+// result was stored first and keeps the terminal status the node sent, so it no
+// longer equals 'cleared'. Both decoders above already refuse a result that is
+// not terminal. Every other task status stores exactly its own result status.
+func coreResultMatches(status, resultStatus string) bool {
+	return status == "cleared" || status == resultStatus
 }
 
 func legacyReleases(ctx context.Context, database *sql.DB) (map[string]release.Signed, error) {
@@ -152,7 +161,7 @@ func validateDirectCoreUpdates(ctx context.Context, database *sql.DB) error {
 		if result.Status == "success" && result.InstalledVersion != version {
 			return ErrArchive
 		}
-		if result.Status != status {
+		if !coreResultMatches(status, result.Status) {
 			return ErrArchive
 		}
 	}

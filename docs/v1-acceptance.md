@@ -1,6 +1,6 @@
 # V1 验收矩阵
 
-更新时间：2026-10-25（v1.0.7 发布、三台主机升级与四项修复的实机复测，9.16；其后删除用户或设备自动撤销凭据已在 `main` 修复，尚未发布；此前为代码审查报告五个问题的核实与修复，9.15；此前为 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
+更新时间：2026-10-25（v1.0.7 发布、三台主机升级与四项修复的实机复测，9.16；其后为 v1.0.8 发布前验收与五项实机回归，9.17（`7b99d8e`、`8608678`，尚未发布）；此前为代码审查报告五个问题的核实与修复，9.15；此前为 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
 **当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
@@ -834,3 +834,105 @@
 | 2 | sing-box SOCKS5 入站的远程 UDP、SOCKS5/SS 到 `us2-node` 的 UDP 中转、arm64 | 与 9.12 相同，受环境限制 | 未变 |
 | 3 | 代码审查：恢复较旧的备份会丢掉备份之后产生的凭据墓碑（v1.0.7 引入） | 备份后创建又删除的用户或设备，删除前产生的流量在恢复后再次因身份未知被拒（隔离只让后面的批次继续上传） | **已在 `main` 修复，尚未发布**：恢复时合并当前数据库的 `credential_tombstones`（`TestRestoreKeepsTombstonesCreatedAfterTheBackup`） |
 | 4 | 代码审查：核心更新成功后重连，面板拒绝有效的成功回执（v1.0.7） | 重连时按上报的核心版本把任务标成 `success` 但没有结果，随后到达的回执更新不到任务，控制连接被断开 | **已在 `main` 修复，尚未发布**：没有结果的 `success` 任务同样接受经过认证的回执，Owner 清除的任务仍然拒绝（`TestCoreUpdateClosedAsSuccessStillAcceptsTheReceipt`） |
+
+### 9.17 v1.0.8 发布前验收（2026-10-25）
+
+范围：9.16 遗留问题 1、3、4 的修复（提交 `7b99d8e`），以及本轮实机回归中发现并修复的备份问题（提交 `8608678`）。两个提交都已推送到 `main`，未打标签、未发布。
+
+**提交前检查（Windows 本机，两次提交各做一遍）。**
+
+- 工作区只含对应的修复、测试与文档；`go.mod`、`go.sum` 与已有迁移未改动。
+- `gofmt -l` 无输出，`go vet ./...` 通过，`go test -p 1 -count=1 ./...` 49 个包全部通过，前端构建通过。
+- 变异检查：分别撤掉每项修复后，对应测试失败：
+  - 草稿回退路径：`TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt` 超时，没有产生撤销修订。
+  - 删除钩子：`TestQuotaDeletedUserRevokedOnNode` 与 `TestQuotaDeletedDeviceRevokesOnlyThatDevice` 超时。
+  - 墓碑合并：`TestRestoreKeepsTombstonesCreatedAfterTheBackup`，恢复后剩 0 条墓碑。
+  - 回执接受：`TestCoreUpdateClosedAsSuccessStillAcceptsTheReceipt`，回执被拒。
+  - WireGuard peer 移除：`TestWithoutCredentials…` 失败。
+  - 备份校验：`TestClearedCoreUpdateKeepsStoredResultAndStillBacksUp`，备份校验失败。
+  - 清除守卫：`TestCoreUpdateClearKeepsStoredResult`，清除改写了已有结果的任务。
+
+  恢复修复后全部通过。新增测试各连续运行 10 次全部通过。
+
+**CI。** GitHub Actions `Check` 运行 40205812791（`7b99d8e`）与 40212630199（`8608678`）结论都是 success，包括 `go test -race -timeout 35m ./...`、`go vet`、前端构建与测试、部署脚本检查。可选的 `cores` 作业只在手动或定时触发时运行，两次都跳过。
+
+**测试环境。**
+- 面板主机先后安装 `7b99d8e` 与 `8608678` 的构建（版本号 `1.0.8-rc.<提交>`）。安装方式是仓库的 `install.sh --panel --binary`，用发布包的目录结构；第一次安装前保存了 1.0.7 的程序与停止状态下的数据库。
+- 三台主机的 Agent 保持 1.0.7。
+- 测试前基线：
+  - 面板对象：入站 8、出站 2、链 1、规则 4、节点组 2、用户 2、设备 2，最新修订 95；
+  - 链路：原链从 `us2-node` 出口（23.254.158.3），直连 113.29.231.218，错误口令被拒绝（rc 97）；
+  - 共存服务 PID：面板主机与 `uk-node` 上为 738/740、833/834；第三台主机 `komari-agent`、`cf-probe`、`crond` 均为 `started`。
+- 临时测试用户：`t108`（两台 SOCKS5 设备 a、b）与 `t108r`（一台设备），授权“UK entry”。
+
+**回归 1、2：草稿无法渲染时删除设备，只撤销该设备（`7b99d8e`，`uk-node`）。**
+
+| 时间（UTC） | 事件 |
+|---|---|
+| — | 修订 96（`uk-node`）、97（`alpine-node`）发布 `t108`；两台设备经 `195.72.166.247:35101` 都能访问，错误口令被拒绝 |
+| — | 在 `uk-node` 上保存出站 `ft108-dummy`（HTTP，`127.0.0.1:9`）与只含它的主备出口组 `ft108-group`，再把该出站改为不支持 TCP。手工发布 `uk-node` 返回 400 `group member unavailable or capability changed`，草稿已无法渲染 |
+| 15:53:36 | 面板日志 `automatic quota revision rendered from the published state alone`（部署后对账走回退，结果与已发布状态相同，没有修订） |
+| 15:53:47 | 删除设备 a（204） |
+| 15:53:53 | 修订 98（`alpine-node`，草稿能渲染）`auto: post-deploy reconcile; user t108 device deleted`，success |
+| 15:54:36 | 回退路径生成修订 99（`uk-node`），摘要同上，success |
+| 之后 | 设备 a 被拒绝（rc 97），设备 b 照常从 UK 出口，错误口令被拒绝 |
+
+- 判定：通过。在修复前，回退路径只禁用整个用户，设备 a 会一直可用。
+- 删除两个临时对象后草稿恢复可渲染，之后没有回退日志，也没有新修订。
+
+**回归 3：恢复备份保留备份之后的墓碑（`8608678`）。**
+1. 16:45:34 创建备份 B（`ZQLg1iFD…`，归档 SHA-256 `9dba0c5e…3a77`）。同一数据库在 `7b99d8e` 上无法备份，见下文问题 A。
+2. 备份之后创建 `t108r` 并发布 `uk-node`（修订 100）；经 `uk-node` 下载 3 MB，`usedTraffic` 为 3 013 262。
+3. 16:46:43 删除 `t108r`。16:46:54 生成修订 103（`alpine-node`）、104（`uk-node`），success，`t108r` 被拒绝（rc 97）。
+4. 当前数据库有 3 条墓碑，其中 1 条的凭据、用户、设备与 `t108r` 完全一致；没有待执行的部署。
+5. 恢复预览：没有移除的用户，没有重新启用的用户，没有待执行操作。提示项为 `session_revocation_required`、`backup_file_journal_reconciliation`、`node_reconciliation_required`、`message_cursor_regression`。
+6. 16:47:53 `POST /api/v1/backups/{B}/restore`（202）。面板在进程内切换：16:48:04 停止，16:48:11 以恢复后的数据库提供服务，恢复记录为 `serving`，管理员会话被清除。
+
+| 检查 | 结果 | 证据（恢复后数据库的只读快照） |
+|---|---|---|
+| 墓碑保留 | 通过 | 墓碑共 3 条（备份 B 自带 2 条），`t108r` 的那条在 |
+| 删除的用户没有回来 | 通过 | `users`、`credentials` 中没有 `t108r` |
+| 修订与节点 | 通过 | 修订保留到 104，三个节点 `online`，恢复没有产生修订，面板日志没有 identity 相关记录 |
+
+- 限制：“恢复之后才到达的旧流量批次被接受”这一步无法在实机上制造。恢复要求没有待执行的部署，而删除后面板会立即为离线节点排队撤销版本，这个版本在节点重新连接前一直处于待执行状态，所以恢复与“节点离线、流量还没上传”无法同时成立。该步骤由 `TestRestoreKeepsTombstonesCreatedAfterTheBackup` 覆盖。
+
+**回归 4、5：核心更新回执（`uk-node`，两种构建各做一遍）。**
+
+方法：
+- 在 `uk-node` 上用临时 nft 表 `inet qui_test108`：一条规则按 cgroup 只限制 Agent 的 HTTPS 下载速度（80 或 150 KB/s）；另一条在下载开始后对发往面板 `23.254.158.3:9443` 的连接回 TCP RST。
+- 更新完成后再放行，因此 Agent 在没有控制连接时得到结果，重新连接后先上报新能力，再送出回执。
+- 面板在保存这个连接的第一条 Capabilities 时调用 `CloseStaleCoreUpdates`，会先把任务标成 `success`、结果为空，所以随后到达的回执走的正是修复的路径。
+
+| 回归 | 构建 | 过程 | 结果 |
+|---|---|---|---|
+| 4 | `7b99d8e` | 26.3.27→26.2.6；16:07:26 下载开始并断开控制，约 16:11 更新完成，16:17:50 放行，16:19:27 重连 | 通过：任务 `success`，保存了回执（`installed_version` 26.2.6，序号 1），连接没有断开 |
+| 5 | `7b99d8e` | 26.2.6→26.3.27；16:22:32 断开，16:22:40 任务为 `running` 时 Owner 清除（`cleared`），16:25:23 放行 | 通过：16:26:03 重连后面板回 `FailedPrecondition: core update result rejected` 并结束该连接，任务仍为 `cleared`、没有结果；16:26:33 再次连接后一直在线 |
+| 5（复测） | `8608678` | 26.3.27→26.2.6，16:50:56 清除 | 通过：16:54:24 回执被拒，任务仍为 `cleared`、没有结果，16:54:54 重连后在线 |
+| 4（复测） | `8608678` | 26.2.6→26.3.27，16:55:55 断开，16:58:41 放行 | 通过：16:59:56 重连，任务 `success`，回执 `installed_version` 26.3.27，连接没有断开 |
+
+- `uk-node` 最终运行官方 Xray 26.3.27：Agent 管理的镜像 `releases/installed/xray-8255dd93….bin`，大小与原来的 `/usr/local/lib/proxy-agent/xray` 相同。
+- 测试工件（不是产品问题）：放行后的第一次重连有时仍收到 `connection refused`，30 秒后的下一次重试成功。
+
+**本轮发现的问题。**
+
+| # | 问题 | 影响 | 处理 |
+|---|---|---|---|
+| A | Owner 清除一个已保存节点结果的核心更新任务后，面板再也无法创建备份（P2，早于 v1.0.8，自核心更新“清除”功能起就存在） | 一个 `failed_closed` 任务带着 Agent 的 `failed_closed`/`history_invalid` 结果，被清除后状态是 `cleared`，结果仍是 `failed_closed`。备份校验要求结果状态与任务状态一致，每次 `POST /api/v1/backups` 都返回 `backup_verification_failed`。测试面板上这个任务清除于 2026-10-22 10:05，此后的手工备份全部失败（最后一个成功的备份是同日 09:42 的 `4N3rU_Fo…`）。`qui-update` 的更新前备份是直接复制 `.db`，不受影响 | 已在 `8608678` 修复：清除不再改写已有结果的任务（UPDATE 带 `result_json IS NULL`）；备份校验接受已存在的这类记录。实机：同一数据库在 `8608678` 上创建备份 B 成功并通过校验 |
+| B | 部署繁忙时自动对账留下没有目标节点的草稿修订（修订 101 `auto: startup reconcile`，`draft`） | 只在修订列表里多一条草稿，下一个窗口另建了修订 104，节点状态正确 | 观察，未修改；与 v1.0.7 相同 |
+
+**恢复。**
+- 删除 `t108`：17:02:11 生成修订 105（`uk-node`）、106（`alpine-node`）`auto: user t108 deleted`，success，两台设备都被拒绝。
+- 面板重新安装 1.0.7 程序。v1.0.7 之后没有新迁移，`deploy/` 也没有变化。面板 `active`、`NRestarts=0`，没有失败的单元，重启后没有新修订。
+- 面板对象数与测试前相同：入站 8、出站 2、出口组 0、链 1、规则 4、节点组 2、用户 2、设备 2。三个节点 `online`、Agent 1.0.7。
+- 原链、直连、错误口令三项与基线相同。共存服务 PID 与测试前相同（738/740、833/834），第三台主机上 `komari-agent`、`cf-probe`、`crond` 为 `started`。`uk-node` 的 Agent PID 全程未变。
+- 临时文件全部删除：面板主机 `/root/qui-rc108`（含数据库副本与测试凭据）、`uk-node` 的脚本与日志、本机的构建与凭据文件。两台主机上没有 `inet qui_test108` 表，没有更新快照。`/root`、`/var/lib/proxy-panel`、`/var/lib/proxy-agent` 为 0700。
+
+**留下的差异。**
+- 面板数据库是从备份 B 恢复后的库（备份 B 之后的数据都按恢复规则合并回来了）。
+- 修订历史增加到 106。
+- 核心更新任务列表增加 4 条（2 条 `cleared`、2 条 `success`）。
+- 备份列表增加备份 B。
+- `uk-node` 的核心改为由 Agent 管理的同版本镜像。
+- 测试面板仍有问题 A 的那条旧记录。1.0.7 上备份仍会失败，升级到 v1.0.8 后恢复正常。
+
+**结论。** 五项回归全部通过，CI 通过，没有未解决的 P1/P2；v1.0.8 可以发布，等待 owner 批准打标签与 GitHub Release。

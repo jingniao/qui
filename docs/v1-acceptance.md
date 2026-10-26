@@ -1097,4 +1097,48 @@
 - 经 `alpine-node` 的入站：`api.ipify.org` 经链从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝（curl rc 97），与基线相同。
 - 共存服务未受影响：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 仍为 738/740、833/834；第三台主机上 `komari-agent`、`cf-probe`、`crond` 为 `started`。
 
-**遗留。** 9.18 的问题 C（进程内恢复后额度定时器记 `database is closed`，P3）与 Agent 日志里 `retry_after` 以纳秒整数输出（外观问题）未在 v1.0.8 修改。arm64 仍未实机验证。（后续：两项已在 `main` 修复，尚未发布：面板停止服务时额度部署器停掉所有合并窗口定时器、取消进行中的对账并等它结束后才返回，停止过程中被打断的对账不计失败、不告警、不重排，留给下一个进程的启动对账；新测试 `TestQuotaRunStopsTimersOnShutdown`、`TestQuotaEnqueueAfterStopCreatesNoTimer`、`TestQuotaFlushInFlightStopsOnShutdownWithoutCountingAnAttempt`。Agent 的 `retry_after` 改为 `1s` 这样的时长文本。）
+**遗留。** 9.18 的问题 C（进程内恢复后额度定时器记 `database is closed`，P3）与 Agent 日志里 `retry_after` 以纳秒整数输出（外观问题）未在 v1.0.8 修改。arm64 仍未实机验证。（后续：两项已在 `c83f1c1` 修复，于 v1.0.9 发布并实机通过，见 9.20：面板停止服务时额度部署器停掉所有合并窗口定时器、取消进行中的对账并等它结束后才返回，停止过程中被打断的对账不计失败、不告警、不重排，留给下一个进程的启动对账；新测试 `TestQuotaRunStopsTimersOnShutdown`、`TestQuotaEnqueueAfterStopCreatesNoTimer`、`TestQuotaFlushInFlightStopsOnShutdownWithoutCountingAnAttempt`。Agent 的 `retry_after` 改为 `1s` 这样的时长文本。）
+
+### 9.20 v1.0.9 发布、三台主机升级与额度定时器实机复验（2026-10-26 UTC）
+
+**发布。**
+- 标签 `v1.0.9` 指向 `c83f1c1`（面板停止服务时停掉额度部署器的定时器；Agent 日志 `retry_after` 改为时长文本）。`main` 上同一提交的 CI（运行 40275103033）与标签的 CI（运行 40282357175）结论都为 success，包括 `go test -race`。
+- GitHub Release `v1.0.9` 于 2026-10-26T07:20:10Z 发布，正式版，不是草稿。附件有两个归档、`SHA256SUMS` 与 `node-install.sh`。amd64 归档的 SHA-256 为 `20e70aee…7f64`，arm64 为 `b5c7f750…e453`。
+
+**升级（各主机用已安装的 `qui-update --version 1.0.9 --yes` 从 GitHub 升级；先升级两台节点，使 1.0.9 的 Agent 经历面板重启）。**
+
+| 主机 | 结果 |
+|---|---|
+| `uk-node`（Debian，systemd） | Agent `1.0.8 → 1.0.9`，`active`，`NRestarts=0`，退出码 0；path 单元 `active` |
+| 第三台主机 `alpine-node`（OpenRC） | Agent `1.0.8 → 1.0.9`，`started`，watcher `started`，退出码 0 |
+| 面板主机 | Agent 与面板 `1.0.8 → 1.0.9`（没有新迁移）；更新前备份 `pre-update-1.0.8-20261026-152521.db`；`NRestarts=0`，HTTPS 返回 200 |
+
+- 三台主机都没有残留快照，也没有失败的单元。三个节点 `online`、Agent `1.0.9`；升级引起的面板重启没有产生自动修订（最新仍为 129），面板日志没有 WARN/ERROR。
+- **问题 D 复验：通过。** 面板 07:25:21 重启时，`uk-node` 与 `alpine-node` 的 Agent 记 `control channel disconnected; retaining local state`，`retry_after` 为 `"1s"`、`"2s"`，不再是纳秒整数。
+
+**问题 C 复验：进程内恢复时额度合并窗口的定时器随旧实例停止（`alpine-node`）。**
+
+| 时间（UTC） | 操作与结果 |
+|---|---|
+| 07:26:48 | 创建备份 B3（`gGPojvLl…`，归档 SHA-256 `821cf3f2…7328`），校验通过 |
+| 07:27:05 | 创建临时用户 `t109`（一台 SOCKS5 设备，授权“UK entry”），发布 `alpine-node`，修订 130 success；经 `127.0.0.1:990` 用 `t109` 访问返回 200 |
+| 07:28:01 | 删除 `t109`（204），按节点排入 60 秒合并窗口 |
+| 07:28:03 | 恢复预览 `executionAvailable: true`，`pendingOperations` 0；`POST /api/v1/backups/{B3}/restore` 返回 202 |
+| 07:28:15 | 旧实例 `panel stopped`；07:28:24 新实例以恢复后的数据库提供服务（恢复记录 `serving`），`NRestarts=0` |
+| 07:29:24 | 新实例的启动对账生成修订 131（`auto: startup reconcile`，`alpine-node`），success |
+| 之后 | `t109` 经 990 被拒绝（curl rc 97）；用户列表为 `alice`、`bob` |
+
+- 判定：通过。恢复前合并窗口里还有待执行的工作。07:27:55 之后面板日志只有 `panel stopped` 与 `panel started` 两行，没有 `database is closed`、`automatic quota revision gave up`、`automatic quota failure could not be recorded`，也没有其他 WARN/ERROR；9.18 的同一场景在恢复后连续 3 分钟每分钟记一次 ERROR。被停止打断的工作没有计为失败，由新实例的启动对账完成：运行中的修订 130 仍带 `t109` 的凭据，而恢复后的数据库里没有这个用户，于是生成修订 131 撤销它。
+- 升级时 `qui-update` 停止面板也走同一停止路径，同样没有错误日志。
+
+**回归。**
+- 经 `alpine-node` 的入站：`api.ipify.org` 经链从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝（curl rc 97），与基线相同。
+- 面板对象数与基线相同：入站 8、出站 2、出口组 0、链 1、规则 4、节点组 2、用户 2。
+- 三个节点 `online`；本轮之后 `uk-node` 与 `alpine-node` 的 Agent 日志没有 ERROR。
+
+**恢复与留下的差异。**
+- 临时用户 `t109` 已删除，凭据由修订 131 撤销；本机保存的临时凭据与备份信息文件已删除。
+- 面板数据库是从备份 B3 恢复后的库（B3 之后只有 `t109` 的创建与删除，按恢复规则合并墓碑）。修订历史增加到 131，备份列表增加 B3 与 `pre-update-1.0.8-*` 备份。
+- 共存服务未受影响：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 仍为 738/740、833/834；第三台主机上 `komari-agent`、`cf-probe`、`crond` 为 `started`。`/root`、`/var/lib/proxy-panel`、`/var/lib/proxy-agent` 为 0700。
+
+**结论。** v1.0.9 已发布，三台主机已升级到面板/Agent 1.0.9，两项修复实机通过，回归通过，没有未解决的 P1/P2。arm64 仍未实机验证。

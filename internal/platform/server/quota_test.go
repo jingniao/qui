@@ -520,6 +520,36 @@ func (s *quotaFlakySnapshotter) setFail(fail bool) {
 	s.fail = fail
 }
 
+// quotaBlockingSnapshotter holds the Owner render until its context is cancelled
+// and then until the test releases it, so a test can cancel the deployer's run
+// context while a flush is demonstrably in flight and observe that the shutdown
+// waits for it.
+type quotaBlockingSnapshotter struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *quotaBlockingSnapshotter) Snapshot(ctx context.Context, nodeID string, users proxy.AccessReader) (desiredstate.State, error) {
+	s.once.Do(func() { close(s.entered) })
+	<-ctx.Done()
+	<-s.release
+	return desiredstate.State{}, ctx.Err()
+}
+
+// waitClosed waits for a goroutine to finish through the channel it closes.
+func waitClosed(t *testing.T, what string, done <-chan struct{}) {
+	t.Helper()
+	flowWait(t, what, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
 // TestQuotaDeployFailureKeepsTheEntryForTheNextWindow is problem (a): a failed
 // deploy used to drop the work, leaving the over-quota user authorized on the
 // node with no transition left to fix it. The draft survives and is queued by
@@ -1457,5 +1487,186 @@ func TestQuotaDeletedUserWithoutPublishedCredentialDoesNothing(t *testing.T) {
 	}
 	if published.Revision != baseline {
 		t.Fatalf("the node moved from revision %d to %d", baseline, published.Revision)
+	}
+}
+
+// TestQuotaRunStopsTimersOnShutdown is the field case of 2026-10-25: an
+// in-process restore ended the old panel's Serve loop while a debounce timer was
+// still pending, so the old deployer kept flushing on the closed database once a
+// minute, gave up after three attempts, and reported a failure the new instance
+// had already handled.
+func TestQuotaRunStopsTimersOnShutdown(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, _ := f.addUser(t, "shutdown_user", "")
+	f.publish(t)
+	deployer := f.app.quotaDeployer
+	deployer.window = time.Second
+	alerts := f.recordAlerts()
+	// Hiding the nodes table keeps the startup pass from queueing a reconcile of
+	// its own, so the only timer in the test is the one enqueued below and the
+	// assertion cannot race the startup pass.
+	restore := hideTable(t, f.ctx, f, "nodes")
+
+	ctx, cancel := context.WithCancel(f.ctx)
+	running := make(chan struct{})
+	go func() {
+		defer close(running)
+		deployer.run(ctx)
+	}()
+	flowWait(t, "run to install its context", func() bool {
+		deployer.mu.Lock()
+		defer deployer.mu.Unlock()
+		return deployer.base != nil
+	})
+	setQuota(t, f.ctx, f, account.ID, 50, 100)
+	deployer.enqueue(f.nodeID, user.Transition{UserID: account.ID, Username: account.Username, Reason: "quota_exceeded"})
+	cancel()
+	waitClosed(t, "run to return", running)
+	restore()
+
+	deployer.mu.Lock()
+	timer, flushing := deployer.timers[f.nodeID], deployer.flushing
+	deployer.mu.Unlock()
+	if timer != nil {
+		t.Fatal("a debounce timer survived the shutdown")
+	}
+	if flushing != 0 {
+		t.Fatalf("%d flushes were still running when run returned", flushing)
+	}
+	// The stopped timer must stay quiet past its window: the over-quota
+	// transition must not become a revision, an attempt or a failure.
+	time.Sleep(1500 * time.Millisecond)
+	if count := len(f.autoRevisions(t)); count != 0 {
+		t.Fatalf("the stopped timer created %d automatic revisions", count)
+	}
+	if failures := alerts.payloads("user_access_failed"); len(failures) != 0 {
+		t.Fatalf("the shutdown published failure alerts: %v", failures)
+	}
+	if count := countAdminOperations(t, f, "自动额度发布失败"); count != 0 {
+		t.Fatalf("the shutdown recorded %d admin failures", count)
+	}
+}
+
+// TestQuotaEnqueueAfterStopCreatesNoTimer: hooks such as reconcileNode keep
+// firing while Serve shuts down, and a timer scheduled then would only flush into
+// the closing database. The work is dropped instead; the next process's startup
+// pass re-derives it.
+func TestQuotaEnqueueAfterStopCreatesNoTimer(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, _ := f.addUser(t, "stopped_hook_user", "")
+	f.publish(t)
+	deployer := f.app.quotaDeployer
+	deployer.window = time.Hour // nothing may fire, so only the flag can stop it
+
+	ctx, cancel := context.WithCancel(f.ctx)
+	running := make(chan struct{})
+	go func() {
+		defer close(running)
+		deployer.run(ctx)
+	}()
+	flowWait(t, "the startup pass", func() bool {
+		deployer.mu.Lock()
+		defer deployer.mu.Unlock()
+		return deployer.recovered
+	})
+	cancel()
+	waitClosed(t, "run to return", running)
+
+	deployer.reconcileNode(f.nodeID, "post-deploy")
+	deployer.enqueue(f.nodeID, user.Transition{UserID: account.ID, Username: account.Username, Reason: "quota_exceeded"})
+	deployer.mu.Lock()
+	timer := deployer.timers[f.nodeID]
+	remaining := 0
+	for _, value := range deployer.timers {
+		if value != nil {
+			remaining++
+		}
+	}
+	deployer.mu.Unlock()
+	if timer != nil || remaining != 0 {
+		t.Fatalf("a stopped deployer scheduled %d timers", remaining)
+	}
+	if count := len(f.autoRevisions(t)); count != 0 {
+		t.Fatalf("the stopped deployer created %d automatic revisions", count)
+	}
+}
+
+// TestQuotaFlushInFlightStopsOnShutdownWithoutCountingAnAttempt: run must not
+// return while a flush is still reconciling (Serve's wait group only covers run,
+// so that flush would otherwise outlive the panel), and the reconcile the
+// cancelled run context cut short must not count an attempt, requeue the entry or
+// report a failure.
+func TestQuotaFlushInFlightStopsOnShutdownWithoutCountingAnAttempt(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, _ := f.addUser(t, "inflight_user", "")
+	f.publish(t)
+	deployer := f.app.quotaDeployer
+	deployer.window = time.Hour // this test drives the flush by hand
+	blocker := &quotaBlockingSnapshotter{entered: make(chan struct{}), release: make(chan struct{})}
+	deployer.proxy = blocker
+	alerts := f.recordAlerts()
+
+	ctx, cancel := context.WithCancel(f.ctx)
+	running := make(chan struct{})
+	go func() {
+		defer close(running)
+		deployer.run(ctx)
+	}()
+	flowWait(t, "the startup pass", func() bool {
+		deployer.mu.Lock()
+		defer deployer.mu.Unlock()
+		return deployer.recovered
+	})
+	setQuota(t, f.ctx, f, account.ID, 50, 100)
+	deployer.enqueue(f.nodeID, user.Transition{UserID: account.ID, Username: account.Username, Reason: "quota_exceeded"})
+	deployer.mu.Lock()
+	entry, timer := deployer.pending[f.nodeID], deployer.timers[f.nodeID]
+	deployer.mu.Unlock()
+	if entry == nil || timer == nil {
+		t.Fatal("the enqueue did not schedule the node")
+	}
+	// flush clears the map entry without stopping the timer it took, so the
+	// armed timer of this hand-driven flush has to be stopped by the test.
+	t.Cleanup(func() { timer.Stop() })
+
+	flushing := make(chan struct{})
+	go func() {
+		defer close(flushing)
+		deployer.flush(f.nodeID)
+	}()
+	waitClosed(t, "the flush to reach the Owner render", blocker.entered)
+	cancel()
+	select {
+	case <-running:
+		t.Fatal("run returned while a flush was still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(blocker.release)
+	waitClosed(t, "the cancelled flush", flushing)
+	waitClosed(t, "run to return", running)
+
+	deployer.mu.Lock()
+	pending, remaining, inFlight := deployer.pending[f.nodeID], deployer.timers[f.nodeID], deployer.flushing
+	deployer.mu.Unlock()
+	if entry.attempts != 0 {
+		t.Fatalf("the shutdown counted %d attempts", entry.attempts)
+	}
+	if pending != nil {
+		t.Fatal("the cancelled flush requeued its entry")
+	}
+	if remaining != nil {
+		t.Fatal("the cancelled flush scheduled another timer")
+	}
+	if inFlight != 0 {
+		t.Fatalf("%d flushes were still running when run returned", inFlight)
+	}
+	if count := len(f.autoRevisions(t)); count != 0 {
+		t.Fatalf("the cancelled flush created %d automatic revisions", count)
+	}
+	if failures := alerts.payloads("user_access_failed"); len(failures) != 0 {
+		t.Fatalf("the cancelled flush published failure alerts: %v", failures)
+	}
+	if count := countAdminOperations(t, f, "自动额度发布失败"); count != 0 {
+		t.Fatalf("the cancelled flush recorded %d admin failures", count)
 	}
 }

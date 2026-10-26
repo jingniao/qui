@@ -450,7 +450,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		if ctx.Err() != nil {
 			break
 		}
-		logger.Warn("control channel disconnected; retaining local state", "error", err, "retry_after", retry)
+		logger.Warn("control channel disconnected; retaining local state", "error", err, "retry_after", retry.String())
 		timer := time.NewTimer(retry)
 		select {
 		case <-ctx.Done():

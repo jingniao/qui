@@ -76,6 +76,23 @@ type quotaDeployer struct {
 	// reconciling, so a caller can tell an idle node from one whose window just
 	// fired.
 	flushing int
+	// stopped marks a deployer whose run has returned. Hooks such as
+	// reconcileNode and accessRemoved are still called by other modules while
+	// Serve shuts down, so enqueue and requeue drop their work instead of
+	// scheduling a timer: nothing would ever flush it, and the next process
+	// re-derives every entry in its startup pass.
+	stopped bool
+	// base is the run context the flushes derive from, so cancelling the panel's
+	// background work also cuts short a reconcile that is already running. It is
+	// nil before run starts (tests drive flush directly); the one-minute bound is
+	// then all there is to stop a reconcile.
+	base context.Context
+	// stopRun cancels base. shutdown calls it so an in-flight flush always sees
+	// the shutdown, whatever made run return.
+	stopRun context.CancelFunc
+	// idle is broadcast whenever a flush finishes, so shutdown can wait for the
+	// flushes in flight without polling. It guards the same mutex as flushing.
+	idle *sync.Cond
 }
 
 // quotaPending is the coalesced work for one node. revision records a revision
@@ -91,11 +108,15 @@ type quotaPending struct {
 }
 
 func newQuotaDeployer(logger *slog.Logger, users *user.Repository, quota *user.QuotaState, renderer quotaSnapshotter, nodes *node.Repository, deployments *deployment.Repository, publish func(string, any)) *quotaDeployer {
-	return &quotaDeployer{
+	deployer := &quotaDeployer{
 		logger: logger, users: users, quota: quota, proxy: renderer, nodes: nodes, deployments: deployments, publish: publish,
 		window: defaultQuotaWindow, tick: defaultQuotaTick,
 		pending: map[string]*quotaPending{}, timers: map[string]*time.Timer{},
 	}
+	// The condition variable guards the same mutex as flushing, so the waiter
+	// can never miss the broadcast of the last flush.
+	deployer.idle = sync.NewCond(&deployer.mu)
+	return deployer
 }
 
 // evaluate is the single ingress: it reports the transitions for the given
@@ -219,23 +240,76 @@ func (d *quotaDeployer) retryHeld(ctx context.Context) {
 	}
 }
 
+// run drives the deployer until ctx is cancelled and then shuts it down, so that
+// the panel's wait group covers the flushes still in flight (see shutdown).
+// Serve starts exactly one run; a restarted panel builds a new deployer.
 func (d *quotaDeployer) run(ctx context.Context) {
+	// Flushes derive from a context run owns, so shutdown can cut a reconcile
+	// short even when the cancellation arrives through some other path.
+	base, stop := context.WithCancel(ctx)
+	d.mu.Lock()
+	// A deployer normally runs once, and a restarted panel builds a new one.
+	// Clearing the flag keeps a second run working instead of silently dropping
+	// every hook it receives.
+	d.stopped = false
+	d.base, d.stopRun = base, stop
+	d.mu.Unlock()
+	defer d.shutdown()
 	// QuotaState.Seed only knows the state it was seeded with, so a user who
 	// went over quota, expired or was disabled while the panel was down
 	// produces no transition. Reconciling every node with a published state
 	// once at startup catches those, and a node already in sync computes no
 	// revision at all.
-	d.recover(ctx)
+	d.recover(base)
 	ticker := time.NewTicker(d.tick)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-base.Done():
 			return
 		case <-ticker.C:
-			d.tickOnce(ctx)
+			d.tickOnce(base)
 		}
 	}
+}
+
+// shutdown ends the deployer. It marks itself stopped, so enqueue and requeue no
+// longer schedule timers, stops every pending debounce timer, cancels the run
+// context (which is what makes an in-flight reconcile give up), and then waits
+// until no flush is in flight. Serve's wait group only covers run, so without
+// that wait a flush would keep running after Serve returned and fail on the
+// database the panel is closing: the 2026-10-25 in-process restore logged
+// "sql: database is closed" once a minute for three minutes and then reported a
+// failure the new instance had already handled. Work left in the queues is
+// dropped on purpose; the next process re-derives everything in its startup
+// pass, so nothing is lost.
+func (d *quotaDeployer) shutdown() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stopped = true
+	if d.stopRun != nil {
+		d.stopRun()
+	}
+	for nodeID, timer := range d.timers {
+		if timer != nil {
+			timer.Stop()
+		}
+		d.timers[nodeID] = nil
+	}
+	for d.flushing > 0 {
+		d.idle.Wait()
+	}
+}
+
+// stopping reports whether the deployer is shutting down or its run context has
+// been cancelled. A failure seen in that window is the shutdown cutting a read
+// or a deploy short, not a node or data problem: it must not be counted as an
+// attempt, reported to the Owner, or retried, because the next process's startup
+// pass re-derives the work anyway.
+func (d *quotaDeployer) stopping() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stopped || d.base != nil && d.base.Err() != nil
 }
 
 // recover enqueues one reconciliation per node that already runs a published
@@ -378,6 +452,12 @@ func (d *quotaDeployer) releaseTransition(userID string) {
 func (d *quotaDeployer) enqueue(nodeID string, transition user.Transition) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.stopped {
+		// The panel is shutting down. Recording the work would be pointless —
+		// shutdown stops the timers and nothing would flush it — so it is
+		// dropped, and the next process re-derives it in its startup pass.
+		return
+	}
 	entry := d.pending[nodeID]
 	if entry == nil {
 		entry = &quotaPending{}
@@ -408,6 +488,11 @@ func mergeTransition(entry *quotaPending, transition user.Transition) {
 func (d *quotaDeployer) requeue(nodeID string, entry *quotaPending) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.stopped {
+		// Shutdown has already stopped every timer; scheduling another one here
+		// would flush into a database the panel is closing.
+		return
+	}
 	current := d.pending[nodeID]
 	if current == nil {
 		d.pending[nodeID] = entry
@@ -441,25 +526,45 @@ const (
 	quotaWait
 )
 
-// flush builds and deploys one revision for a node at the end of the window.
+// flush builds and deploys one revision for a node at the end of the window. Its
+// context derives from the run context, so a shutdown cuts a reconcile short
+// instead of letting it hit the closing database, and the result of such a
+// cancelled reconcile is not counted as an attempt (see stopping).
 func (d *quotaDeployer) flush(nodeID string) {
 	d.mu.Lock()
+	if d.stopped {
+		// The timer fired while shutdown was stopping it; the work goes away
+		// with the rest of the queued state.
+		d.mu.Unlock()
+		return
+	}
 	entry := d.pending[nodeID]
 	delete(d.pending, nodeID)
 	d.timers[nodeID] = nil
 	d.flushing++
+	base := d.base
 	d.mu.Unlock()
 	defer func() {
 		d.mu.Lock()
 		d.flushing--
+		d.idle.Broadcast()
 		d.mu.Unlock()
 	}()
 	if entry == nil || len(entry.transitions) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	if base == nil {
+		// No run owns this flush (the tests drive flush directly, and a hook
+		// may fire before run started): the one-minute bound is all there is.
+		base = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(base, time.Minute)
 	defer cancel()
-	if d.reconcile(ctx, nodeID, entry) == quotaDone {
+	if d.reconcile(ctx, nodeID, entry) == quotaDone || d.stopping() {
+		// The shutdown cut the reconcile short. The entry is dropped instead of
+		// retried: its attempt was not counted, requeue would schedule a timer
+		// on a deployer that is going away, and the next process re-derives the
+		// work in its startup pass.
 		return
 	}
 	d.requeue(nodeID, entry)
@@ -643,7 +748,13 @@ func (d *quotaDeployer) now() time.Time {
 // fail counts one failed attempt. Reaching quotaAttemptLimit stops the retries
 // for the entry and tells the operator through a log line, one SSE alert and
 // one admin operation, so an over-quota user is never silently left authorized.
+// A failure that is only the shutdown cutting the work short is not an attempt
+// at all: counting it would make a restart look like a node that keeps failing
+// and could publish a give-up alert for work the next process handles.
 func (d *quotaDeployer) fail(ctx context.Context, nodeID string, entry *quotaPending, reason string) quotaOutcome {
+	if d.stopping() {
+		return quotaWait
+	}
 	entry.attempts++
 	if entry.attempts < quotaAttemptLimit {
 		return quotaRetry

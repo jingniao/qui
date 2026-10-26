@@ -1097,4 +1097,4 @@
 - 经 `alpine-node` 的入站：`api.ipify.org` 经链从 `us2-node` 出口（23.254.158.3），`ifconfig.me` 直连（113.29.231.218），错误口令被拒绝（curl rc 97），与基线相同。
 - 共存服务未受影响：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 仍为 738/740、833/834；第三台主机上 `komari-agent`、`cf-probe`、`crond` 为 `started`。
 
-**遗留。** 9.18 的问题 C（进程内恢复后额度定时器记 `database is closed`，P3）与 Agent 日志里 `retry_after` 以纳秒整数输出（外观问题）未在 v1.0.8 修改。arm64 仍未实机验证。
+**遗留。** 9.18 的问题 C（进程内恢复后额度定时器记 `database is closed`，P3）与 Agent 日志里 `retry_after` 以纳秒整数输出（外观问题）未在 v1.0.8 修改。arm64 仍未实机验证。（后续：两项已在 `main` 修复，尚未发布：面板停止服务时额度部署器停掉所有合并窗口定时器、取消进行中的对账并等它结束后才返回，停止过程中被打断的对账不计失败、不告警、不重排，留给下一个进程的启动对账；新测试 `TestQuotaRunStopsTimersOnShutdown`、`TestQuotaEnqueueAfterStopCreatesNoTimer`、`TestQuotaFlushInFlightStopsOnShutdownWithoutCountingAnAttempt`。Agent 的 `retry_after` 改为 `1s` 这样的时长文本。）

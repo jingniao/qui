@@ -8,12 +8,11 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/httpapi"
-	"proxycontrol/pkg/contracts/desiredstate"
 	"strings"
 )
 
 type ChainConfiguration interface {
-	ChainSnapshots(context.Context, string, proxy.AccessReader) ([]desiredstate.State, error)
+	ChainSnapshots(context.Context, string, proxy.AccessReader) ([]proxy.NodeSnapshot, error)
 }
 
 func (h *Handler) batches(w http.ResponseWriter, r *http.Request) {
@@ -61,12 +60,12 @@ func (h *Handler) createBatch(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 503, "unavailable", "Chain configuration unavailable")
 		return
 	}
-	states, err := planner.ChainSnapshots(r.Context(), body.ChainID, h.Users)
+	snapshots, err := planner.ChainSnapshots(r.Context(), body.ChainID, h.Users)
 	if err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
-	batch, err := h.Repository.CreateBatch(r.Context(), body.ChainID, body.Summary, auth.Actor(r.Context()).Username, states)
+	batch, err := h.Repository.CreateBatch(r.Context(), body.ChainID, body.Summary, auth.Actor(r.Context()).Username, snapshots)
 	if err != nil {
 		h.fail(w, err)
 		return

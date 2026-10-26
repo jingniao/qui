@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
-	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 type Batch struct {
@@ -89,11 +89,17 @@ func (r *Repository) Batches(ctx context.Context, page, size int) ([]Batch, int,
 	}
 	return batches, count, nil
 }
-func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author string, states []desiredstate.State) (Batch, error) {
-	if err := validateBatchDependencies(states); err != nil {
+
+// CreateBatch stores one draft revision per captured node snapshot, in
+// publication order. Each revision keeps the inbound intent that belongs to its
+// node (see proxy.NodeSnapshot), exactly like a single-node publication, so an
+// automatic quota revision can re-enable an inbound the Owner wants enabled even
+// when this batch was the node's last publication.
+func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author string, snapshots []proxy.NodeSnapshot) (Batch, error) {
+	if err := validateBatchDependencies(snapshots); err != nil {
 		return Batch{}, err
 	}
-	if len(states) < 2 || len(states) > 64 {
+	if len(snapshots) < 2 || len(snapshots) > 64 {
 		return Batch{}, errors.New("batch must contain two to 64 dependency node snapshots")
 	}
 	batchID, err := id.New()
@@ -109,7 +115,8 @@ func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author stri
 		return Batch{}, err
 	}
 	seen := map[string]bool{}
-	for position, state := range states {
+	for position, snapshot := range snapshots {
+		state := snapshot.State
 		if seen[state.NodeID] {
 			return Batch{}, errors.New("duplicate batch node")
 		}
@@ -119,7 +126,11 @@ func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author stri
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return Batch{}, err
 		}
-		result, err := tx.ExecContext(ctx, "INSERT INTO config_revisions(author,summary,status,created_at,encrypted_state) VALUES(?,?,'draft',?,?)", author, name, now(), []byte{})
+		intent, err := encodeInboundIntent(snapshot.InboundIntent)
+		if err != nil {
+			return Batch{}, err
+		}
+		result, err := tx.ExecContext(ctx, "INSERT INTO config_revisions(author,summary,status,created_at,encrypted_state,inbound_enabled_json) VALUES(?,?,'draft',?,?,?)", author, name, now(), []byte{}, intent)
 		if err != nil {
 			return Batch{}, err
 		}

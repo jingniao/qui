@@ -119,7 +119,7 @@ func TestMergeUserAccessRemoval(t *testing.T) {
 		CredentialIDs: []string{}, DefaultOutbound: "direct",
 	}}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if len(next.Users) != 0 || len(next.Credentials) != 0 {
 		t.Fatalf("removed user survived: users=%d credentials=%d", len(next.Users), len(next.Credentials))
 	}
@@ -140,7 +140,7 @@ func TestMergeUserAccessReactivation(t *testing.T) {
 		CredentialIDs: []string{}, DefaultOutbound: "direct",
 	}}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, []string{"inbound-1"})
 	if len(next.Users) != 1 || next.Users[0].ID != "user-1" {
 		t.Fatalf("reactivated user missing: %+v", next.Users)
 	}
@@ -175,7 +175,7 @@ func TestMergeUserAccessMatchesProtocol(t *testing.T) {
 		{ID: "socks-in", Protocol: "socks5", Listen: "0.0.0.0", Port: 1080, Enabled: false, CredentialIDs: []string{}, DefaultOutbound: "direct"},
 	}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, []string{"vless-in"})
 	if next.Inbounds[0].Enabled != true || len(next.Inbounds[0].CredentialIDs) != 1 {
 		t.Fatalf("matching inbound not restored: %+v", next.Inbounds[0])
 	}
@@ -205,7 +205,7 @@ func TestMergeUserAccessInboundAbsentFromFresh(t *testing.T) {
 	fresh.Inbounds = []desiredstate.Inbound{}
 	fresh.Credentials = []desiredstate.Credential{{ID: "cred-2", UserID: "user-1", Protocol: "vless", Secret: "two"}}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if len(next.Credentials) != 1 || next.Credentials[0].ID != "cred-2" {
 		t.Fatalf("credentials were not replaced by the fresh view: %+v", next.Credentials)
 	}
@@ -224,7 +224,7 @@ func TestMergeUserAccessDropsAbsentInboundWhenAllCredentialsGone(t *testing.T) {
 	fresh.Credentials = []desiredstate.Credential{}
 	fresh.Inbounds = []desiredstate.Inbound{}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if next.Inbounds[0].Enabled || len(next.Inbounds[0].CredentialIDs) != 0 {
 		t.Fatalf("absent inbound was not disabled: %+v", next.Inbounds[0])
 	}
@@ -239,7 +239,7 @@ func TestMergeUserAccessTakesFreshUserEntries(t *testing.T) {
 	published.Users = []desiredstate.User{{ID: "user-1", Enabled: true, ExpiresAt: "2026-11-01T00:00:00Z"}}
 	fresh.Users = []desiredstate.User{{ID: "user-1", Enabled: true, ExpiresAt: "2026-12-01T00:00:00Z"}}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if len(next.Users) != 1 || next.Users[0].ExpiresAt != "2026-12-01T00:00:00Z" {
 		t.Fatalf("renewal did not reach the merged users: %+v", next.Users)
 	}
@@ -257,7 +257,7 @@ func TestMergeUserAccessNoOpEquality(t *testing.T) {
 	fresh.Policies = append([]desiredstate.Policy(nil), desiredstate.Policy{ID: "draft-policy", Priority: 50, Enabled: true})
 	fresh.ProxyChains = []desiredstate.ProxyChain{{ID: "draft-chain"}}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if !quotaStatesEqual(published, next) {
 		t.Fatal("an unchanged user surface must equal the published state")
 	}
@@ -294,7 +294,7 @@ func TestMergeUserAccessKeepsPublishedInternalCredential(t *testing.T) {
 	fresh.Outbounds = append([]desiredstate.Outbound(nil), published.Outbounds...)
 	fresh.Outbounds[1].CredentialID = "draft-cred"
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if len(next.Credentials) != 1 || next.Credentials[0].ID != "exit-cred" || next.Credentials[0].Secret != "published-secret" {
 		t.Fatalf("published outbound credential was not kept as published: %+v", next.Credentials)
 	}
@@ -322,7 +322,7 @@ func TestMergeUserAccessDropsInactiveWireGuardPeer(t *testing.T) {
 	inbound.Settings.WireGuard = &settings
 	fresh.Inbounds = []desiredstate.Inbound{inbound}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if err := next.Validate(); err != nil {
 		t.Fatalf("merged state does not validate: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestMergeUserAccessDropsInactiveWireGuardPeer(t *testing.T) {
 	}
 
 	// Reactivation: the credential is back in the draft, so the peer returns.
-	restored := mergeUserAccess(next, full)
+	restored := mergeUserAccess(next, full, []string{"wg-in"})
 	if err := restored.Validate(); err != nil {
 		t.Fatalf("reactivated state does not validate: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestMergeUserAccessWireGuardKeyRotation(t *testing.T) {
 	inbound.Settings.WireGuard = &settings
 	fresh.Inbounds = []desiredstate.Inbound{inbound}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, []string{"wg-in"})
 	if err := next.Validate(); err != nil {
 		t.Fatalf("merged state does not validate: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestMergeUserAccessKeepsLiteralAndInternalPeers(t *testing.T) {
 	inbound.Settings.WireGuard = &settings
 	fresh.Inbounds = []desiredstate.Inbound{inbound}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if err := next.Validate(); err != nil {
 		t.Fatalf("merged state does not validate: %v", err)
 	}
@@ -424,7 +424,9 @@ func TestMergeUserAccessKeepsLiteralAndInternalPeers(t *testing.T) {
 
 // TestMergeUserAccessKeepsDisabledInboundDisabled pins the re-enable rule: an
 // inbound the Owner disabled by hand stays disabled even when the draft assigns
-// credentials to it.
+// credentials to it and enables it again. The published revision recorded that
+// the Owner wanted no inbound enabled, which is the only thing that may re-enable
+// one.
 func TestMergeUserAccessKeepsDisabledInboundDisabled(t *testing.T) {
 	published := desiredstate.State{
 		SchemaVersion: 1, Revision: 4, NodeID: "node-1",
@@ -443,11 +445,11 @@ func TestMergeUserAccessKeepsDisabledInboundDisabled(t *testing.T) {
 	fresh.Users = []desiredstate.User{{ID: "user-1", Enabled: true}}
 	fresh.Credentials = []desiredstate.Credential{{ID: "cred-1", UserID: "user-1", Protocol: "vless", Secret: "secret"}}
 	fresh.Inbounds = []desiredstate.Inbound{{
-		ID: "inbound-1", Protocol: "vless", Listen: "0.0.0.0", Port: 443, Enabled: false,
+		ID: "inbound-1", Protocol: "vless", Listen: "0.0.0.0", Port: 443, Enabled: true,
 		CredentialIDs: []string{"cred-1"}, DefaultOutbound: "direct",
 	}}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, []string{})
 	if next.Inbounds[0].Enabled {
 		t.Fatalf("administratively disabled inbound was re-enabled: %+v", next.Inbounds[0])
 	}
@@ -456,6 +458,34 @@ func TestMergeUserAccessKeepsDisabledInboundDisabled(t *testing.T) {
 	}
 	if err := next.Validate(); err != nil {
 		t.Fatalf("merged state does not validate: %v", err)
+	}
+}
+
+// TestMergeUserAccessUnknownIntentNeverReenables covers a revision published
+// before the intent was recorded (NULL reads back as no intent) and one whose
+// recorded intent enables no inbound: both keep a disabled inbound off, because
+// an automatic revision must not undo an administrative disable it cannot rule
+// out. The credential is still attached, so the merge produces what the node can
+// run.
+func TestMergeUserAccessUnknownIntentNeverReenables(t *testing.T) {
+	published, fresh := mergedCredentialFixture()
+	published.Users = []desiredstate.User{}
+	published.Credentials = []desiredstate.Credential{}
+	published.Inbounds = []desiredstate.Inbound{{
+		ID: "inbound-1", Protocol: "vless", Listen: "0.0.0.0", Port: 443, Enabled: false,
+		CredentialIDs: []string{}, DefaultOutbound: "direct",
+	}}
+	for name, intent := range map[string][]string{"unknown intent": nil, "empty intent": {}} {
+		next := mergeUserAccess(published, fresh, intent)
+		if next.Inbounds[0].Enabled {
+			t.Fatalf("%s re-enabled a disabled inbound: %+v", name, next.Inbounds[0])
+		}
+		if len(next.Inbounds[0].CredentialIDs) != 1 || next.Inbounds[0].CredentialIDs[0] != "cred-1" {
+			t.Fatalf("%s did not bind the credential: %+v", name, next.Inbounds[0].CredentialIDs)
+		}
+		if err := next.Validate(); err != nil {
+			t.Fatalf("%s does not validate: %v", name, err)
+		}
 	}
 }
 
@@ -478,7 +508,7 @@ func TestMergeUserAccessDoesNotMutatePublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	after, err := json.Marshal(published)
 	if err != nil {
 		t.Fatal(err)
@@ -509,7 +539,7 @@ func TestMergeUserAccessNoOpEqualityWithReorderedFresh(t *testing.T) {
 	inbound.Settings.WireGuard = &settings
 	fresh.Inbounds = []desiredstate.Inbound{inbound}
 
-	next := mergeUserAccess(published, fresh)
+	next := mergeUserAccess(published, fresh, nil)
 	if !quotaStatesEqual(published, next) {
 		merged, _ := json.Marshal(next)
 		original, _ := json.Marshal(published)

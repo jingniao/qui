@@ -1021,6 +1021,15 @@ func TestQuotaDisableAndReEnableKeepQuickAccessInbound(t *testing.T) {
 	if kept := stateInbound(t, state, "socks5"); !kept.Enabled || kept.ID != inbound.ID || len(kept.CredentialIDs) != 1 || kept.CredentialIDs[0] != credential.ID {
 		t.Fatalf("the restored inbound: %+v", kept)
 	}
+	// The re-enable is only allowed because the published revision recorded that
+	// the Owner wants this inbound enabled.
+	intent, err := f.app.deployments.InboundIntent(f.ctx, restored.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inboundIntentNames(intent, inbound.ID) {
+		t.Fatalf("the automatic revision lost the owner-enabled inbound: %v", intent)
+	}
 }
 
 // TestQuotaBystanderTransitionKeepsQuickAccessCredential is issue 3 (d): another

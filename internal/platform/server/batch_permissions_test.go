@@ -9,6 +9,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -56,7 +57,11 @@ func TestDeploymentBatchHTTPPermissionsCSRFAndSafeDTO(t *testing.T) {
 		}
 		states = append(states, desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: n.ID, Logging: desiredstate.Logging{DomainOnly: true}, Credentials: []desiredstate.Credential{{ID: "device", Protocol: "socks5", Username: "device", Secret: "private-batch-password"}}, Inbounds: []desiredstate.Inbound{{ID: "socks", Protocol: "socks5", Listen: "127.0.0.1", Port: 2100 + index, Enabled: true, CredentialIDs: []string{"device"}, DefaultOutbound: "direct"}}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}}})
 	}
-	batch, err := r.CreateBatch(ctx, "chain", "permissions", "owner", states)
+	snapshots := make([]proxy.NodeSnapshot, len(states))
+	for index, state := range states {
+		snapshots[index] = proxy.NodeSnapshot{State: state}
+	}
+	batch, err := r.CreateBatch(ctx, "chain", "permissions", "owner", snapshots)
 	if err != nil {
 		t.Fatal(err)
 	}

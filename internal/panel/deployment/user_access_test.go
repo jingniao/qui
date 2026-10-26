@@ -85,7 +85,7 @@ func TestUserAccessFeatureWritesOneInboundBoundToItsUsers(t *testing.T) {
 	f := newUserAccessFixture(t)
 	ctx := context.Background()
 	input := UserAccessInput{NodeID: f.nodeID, Summary: "User access", Protocol: "socks5", Listen: "0.0.0.0", Port: 1080}
-	plain, err := f.handler.EnsureUserAccess(ctx, input)
+	plain, enabled, err := f.handler.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +113,11 @@ func TestUserAccessFeatureWritesOneInboundBoundToItsUsers(t *testing.T) {
 	if rendered.ID != inbound.ID || !rendered.Enabled || len(rendered.CredentialIDs) != 1 || rendered.CredentialIDs[0] != "credential-1" {
 		t.Fatalf("rendered user access inbound: %+v", rendered)
 	}
+	// The intent names the inbound the feature's business data enabled, which is
+	// what a later automatic revision may re-enable.
+	if len(enabled) != 1 || enabled[0] != inbound.ID {
+		t.Fatalf("the renderer reported %v as enabled, want the user access inbound %s", enabled, inbound.ID)
+	}
 	if len(plain.Credentials) != 1 || plain.Credentials[0].ID != "credential-1" || plain.Credentials[0].Internal {
 		t.Fatalf("rendered user access credentials: %+v", plain.Credentials)
 	}
@@ -120,7 +125,7 @@ func TestUserAccessFeatureWritesOneInboundBoundToItsUsers(t *testing.T) {
 	// A second draft on the same listener reuses the row and adds the users that
 	// appeared meanwhile, instead of failing on the port it already occupies.
 	f.addUser("user-2")
-	second, err := f.handler.EnsureUserAccess(ctx, input)
+	second, _, err := f.handler.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatalf("reusing the listener failed: %v", err)
 	}
@@ -142,7 +147,7 @@ func TestUserAccessFeatureWritesOneInboundBoundToItsUsers(t *testing.T) {
 	if err := f.nodes.UpdateSettings(ctx, f.nodeID, node.SettingsInput{Name: "User entry", Enabled: true, OutboundSourceIP: &sourceIP, OutboundInterface: &iface, HostSourceIPv4: &ipv4, HostSourceIPv6: &ipv6}); err != nil {
 		t.Fatal(err)
 	}
-	configured, err := f.handler.EnsureUserAccess(ctx, input)
+	configured, _, err := f.handler.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}

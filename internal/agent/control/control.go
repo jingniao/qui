@@ -538,7 +538,6 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		healthResults = append(healthResults, result)
 	}
 	results := []*pb.ApplyResult{}
-	updateResults := []*pb.CoreUpdateResult{}
 	agentResults := []*pb.AgentUpdateResult{}
 	agentUpdate := func(message *pb.ServerMessage) error {
 		if agents == nil || !welcome.GetWelcome().AgentUpdateSupported || message.NodeId != state.NodeID {
@@ -712,11 +711,24 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			}
 			agentResults = agentResults[1:]
 		}
-		for len(updateResults) > 0 {
-			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_CoreUpdateResult{CoreUpdateResult: updateResults[0]}}); err != nil {
+		for updates != nil {
+			// The pending list belongs to the worker, so a result the panel
+			// never acknowledged is sent again here instead of disappearing
+			// with the session that lost it.
+			updates.collect()
+			result := updates.next()
+			if result == nil {
+				break
+			}
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_CoreUpdateResult{CoreUpdateResult: result}}); err != nil {
+				// A result the panel refuses for good would fail every
+				// later session the same way; only that rejection counts.
+				if coreUpdateResultRejected(err) {
+					updates.rejected(logger)
+				}
 				return err
 			}
-			updateResults = updateResults[1:]
+			updates.acknowledged()
 			if source, ok := healthSource.(core.Runtime); ok {
 				if fresh, err := source.DetectCapabilities(ctx); err == nil {
 					// Publish and remember the core that now runs, so a later
@@ -873,7 +885,9 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			return ctx.Err()
 		case result := <-updateReplies:
 			timer.Stop()
-			updateResults = append(updateResults, result)
+			// Sent at the top of the next iteration, where the pending head is
+			// delivered.
+			updates.push(result)
 			continue
 		case received := <-incoming:
 			timer.Stop()

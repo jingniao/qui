@@ -52,20 +52,37 @@ func (r *Repository) TargetStatus(ctx context.Context, nodeID string, revision i
 
 func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z") }
 func (r *Repository) Create(ctx context.Context, state desiredstate.State, author, summary string) (Revision, error) {
+	return r.CreateWithInboundIntent(ctx, state, nil, author, summary)
+}
+
+// CreateWithInboundIntent stores a revision together with the set of inbounds
+// the Owner had enabled when it was created. The renderer disables every inbound
+// that no user credential reaches, so the state alone cannot tell such an
+// inbound from one the Owner disabled on purpose; the Deployment module keeps
+// that intent next to the revision. A nil intent records no intent at all
+// (unknown), which is what a raw revision built from a caller-supplied state
+// and every revision from before the column existed reports, and which an
+// automatic quota revision never widens. An empty, non-nil slice records "the
+// Owner wanted no inbound enabled".
+func (r *Repository) CreateWithInboundIntent(ctx context.Context, state desiredstate.State, enabled []string, author, summary string) (Revision, error) {
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return Revision{}, err
 	}
 	defer tx.Rollback()
-	revision, err := r.createStateTx(ctx, tx, state, author, summary)
+	revision, err := r.createStateTx(ctx, tx, state, enabled, author, summary)
 	if err != nil {
 		return Revision{}, err
 	}
 	return revision, tx.Commit()
 }
 
-func (r *Repository) createStateTx(ctx context.Context, tx *sql.Tx, state desiredstate.State, author, summary string) (Revision, error) {
-	result, err := tx.ExecContext(ctx, "INSERT INTO config_revisions(author,summary,status,created_at,encrypted_state) VALUES(?,?,'draft',?,?)", author, summary, now(), []byte{})
+func (r *Repository) createStateTx(ctx context.Context, tx *sql.Tx, state desiredstate.State, enabled []string, author, summary string) (Revision, error) {
+	intent, err := encodeInboundIntent(enabled)
+	if err != nil {
+		return Revision{}, err
+	}
+	result, err := tx.ExecContext(ctx, "INSERT INTO config_revisions(author,summary,status,created_at,encrypted_state,inbound_enabled_json) VALUES(?,?,'draft',?,?,?)", author, summary, now(), []byte{}, intent)
 	if err != nil {
 		return Revision{}, err
 	}
@@ -93,6 +110,39 @@ func (r *Repository) createStateTx(ctx context.Context, tx *sql.Tx, state desire
 	}
 	return Revision{ID: id, Author: author, Summary: summary, Status: "draft", NodeID: state.NodeID}, nil
 }
+
+// encodeInboundIntent renders the intent as it is stored: NULL keeps "unknown"
+// apart from an empty set, because only an explicit set may re-enable an
+// inbound an automatic revision finds disabled.
+func encodeInboundIntent(enabled []string) (any, error) {
+	if enabled == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(enabled)
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+// InboundIntent reads the set of inbounds the Owner had enabled when a revision
+// was created. A nil result means the intent is unknown: the revision predates
+// the column, or it was created from a state that never carried an intent.
+func (r *Repository) InboundIntent(ctx context.Context, id int64) ([]string, error) {
+	var stored sql.NullString
+	if err := r.Database.QueryRowContext(ctx, "SELECT inbound_enabled_json FROM config_revisions WHERE id=?", id).Scan(&stored); err != nil {
+		return nil, err
+	}
+	if !stored.Valid {
+		return nil, nil
+	}
+	enabled := []string{}
+	if err := json.Unmarshal([]byte(stored.String), &enabled); err != nil {
+		return nil, err
+	}
+	return enabled, nil
+}
+
 func (r *Repository) State(ctx context.Context, id int64) (desiredstate.State, error) {
 	var sealed []byte
 	if err := r.Database.QueryRowContext(ctx, "SELECT encrypted_state FROM config_revisions WHERE id=?", id).Scan(&sealed); err != nil {
@@ -106,12 +156,29 @@ func (r *Repository) State(ctx context.Context, id int64) (desiredstate.State, e
 }
 
 func (r *Repository) Published(ctx context.Context, nodeID string) (desiredstate.State, error) {
+	state, _, err := r.PublishedWithIntent(ctx, nodeID)
+	return state, err
+}
+
+// PublishedWithIntent is Published plus the inbound intent recorded with the
+// revision the node runs. An automatic quota revision inherits that intent
+// unchanged, so it can never adopt the Owner's unpublished draft of which
+// inbounds should be enabled.
+func (r *Repository) PublishedWithIntent(ctx context.Context, nodeID string) (desiredstate.State, []string, error) {
 	var revision int64
 	err := r.Database.QueryRowContext(ctx, "SELECT revision FROM node_runtime_state WHERE node_id=?", nodeID).Scan(&revision)
 	if err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
-	return r.State(ctx, revision)
+	state, err := r.State(ctx, revision)
+	if err != nil {
+		return desiredstate.State{}, nil, err
+	}
+	intent, err := r.InboundIntent(ctx, revision)
+	if err != nil {
+		return desiredstate.State{}, nil, err
+	}
+	return state, intent, nil
 }
 
 func (r *Repository) AppliedState(ctx context.Context, nodeID string, revision int64) (desiredstate.State, error) {

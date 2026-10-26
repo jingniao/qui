@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -51,6 +52,18 @@ func batchFixture(t *testing.T) (*Repository, []desiredstate.State, func()) {
 	return r, states, reopen
 }
 
+// batchSnapshots adapts captured states to CreateBatch's input. The fixtures
+// here publish states that were never rendered from business data, so they
+// record no inbound intent (nil: unknown), which is also what the column reports
+// for revisions created before it existed.
+func batchSnapshots(states []desiredstate.State) []proxy.NodeSnapshot {
+	snapshots := make([]proxy.NodeSnapshot, len(states))
+	for index, state := range states {
+		snapshots[index] = proxy.NodeSnapshot{State: state}
+	}
+	return snapshots
+}
+
 func applySnapshot(t *testing.T, r *Repository, state desiredstate.State) int64 {
 	t.Helper()
 	ctx := context.Background()
@@ -74,7 +87,7 @@ func TestBatchPublicationReverseRollbackPersistenceAndReservations(t *testing.T)
 	for index, state := range states {
 		previous[index] = applySnapshot(t, r, state)
 	}
-	batch, err := r.CreateBatch(ctx, "chain", "chain publication", "owner", states)
+	batch, err := r.CreateBatch(ctx, "chain", "chain publication", "owner", batchSnapshots(states))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +110,7 @@ func TestBatchPublicationReverseRollbackPersistenceAndReservations(t *testing.T)
 	if err != nil || batch.Items[1].PreviousRevision != previous[1] {
 		t.Fatal("stale draft rollback target", err)
 	}
-	other, err := r.CreateBatch(ctx, "other-chain", "overlapping batch", "owner", states[1:])
+	other, err := r.CreateBatch(ctx, "other-chain", "overlapping batch", "owner", batchSnapshots(states[1:]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +194,7 @@ func TestBatchFailureAtEveryHopRestoresFirstDeploymentToZero(t *testing.T) {
 		t.Run([]string{"exit", "middle", "entry"}[failingIndex], func(t *testing.T) {
 			ctx := context.Background()
 			r, states, reopen := batchFixture(t)
-			batch, err := r.CreateBatch(ctx, "chain", "first publication", "owner", states)
+			batch, err := r.CreateBatch(ctx, "chain", "first publication", "owner", batchSnapshots(states))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,7 +237,7 @@ func TestBatchFailureAtEveryHopRestoresFirstDeploymentToZero(t *testing.T) {
 func TestBatchRefusesStaleManualRollbackAndRetriesFailedRollback(t *testing.T) {
 	ctx := context.Background()
 	r, states, _ := batchFixture(t)
-	batch, _ := r.CreateBatch(ctx, "chain", "publication", "owner", states)
+	batch, _ := r.CreateBatch(ctx, "chain", "publication", "owner", batchSnapshots(states))
 	if err := r.StartBatch(ctx, batch.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +272,7 @@ func TestBatchRefusesStaleManualRollbackAndRetriesFailedRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	second, _ := r.CreateBatch(ctx, "chain", "another publication", "owner", states)
+	second, _ := r.CreateBatch(ctx, "chain", "another publication", "owner", batchSnapshots(states))
 	if err := r.StartBatch(ctx, second.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +301,7 @@ func TestBatchNextHopDependencyFailureCommitsReceiptAndRollsBack(t *testing.T) {
 	states[1].Credentials = []desiredstate.Credential{credential}
 	states[1].Outbounds = append(states[1].Outbounds, desiredstate.Outbound{ID: "next", Protocol: "socks5", Address: "127.0.0.1", Port: states[0].Inbounds[0].Port, TargetNodeID: states[0].NodeID, CredentialID: credential.ID, Enabled: true})
 	states[1].Inbounds[0].DefaultOutbound = "next"
-	batch, err := r.CreateBatch(ctx, "chain", "unpublished relay target", "owner", states)
+	batch, err := r.CreateBatch(ctx, "chain", "unpublished relay target", "owner", batchSnapshots(states))
 	if err != nil {
 		t.Fatal(err)
 	}

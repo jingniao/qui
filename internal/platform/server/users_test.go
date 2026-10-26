@@ -184,11 +184,11 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	listener.Close()
 	composer := &deployment.Handler{Repository: deployments, Nodes: nodes, Users: users, Proxy: &proxy.Service{Repository: &proxy.Repository{Database: app.Database, Vault: configurationVault}, Nodes: nodes}}
 	input := deployment.UserAccessInput{NodeID: n.ID, Summary: "User credential test", Protocol: "socks5", Listen: "0.0.0.0", Port: port}
-	state, err := composer.EnsureUserAccess(ctx, input)
+	state, enabled, err := composer.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision, err := deployments.Create(ctx, state, "owner", input.Summary)
+	revision, err := deployments.CreateWithInboundIntent(ctx, state, enabled, "owner", input.Summary)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	if err != nil || len(content) != 0 {
 		t.Fatal("unpublished rotated credential exported", err)
 	}
-	state, err = composer.EnsureUserAccess(ctx, input)
+	state, _, err = composer.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err = composer.EnsureUserAccess(ctx, input)
+	state, _, err = composer.EnsureUserAccess(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}

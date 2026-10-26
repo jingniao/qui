@@ -265,7 +265,9 @@ func (r *Repository) ChainInboundReferences(ctx context.Context, inboundID, exce
 
 // ChainSnapshots revalidates the saved topology against current capabilities
 // and bindings, then returns immutable inputs in exit-to-entry publication order.
-func (s *Service) ChainSnapshots(ctx context.Context, chainID string, users AccessReader) ([]desiredstate.State, error) {
+// Each entry carries the node's inbound intent, which the batch revision stores
+// alongside the state (see NodeSnapshot).
+func (s *Service) ChainSnapshots(ctx context.Context, chainID string, users AccessReader) ([]NodeSnapshot, error) {
 	chain, err := s.Repository.Chain(ctx, chainID)
 	if err != nil {
 		return nil, err
@@ -276,7 +278,7 @@ func (s *Service) ChainSnapshots(ctx context.Context, chainID string, users Acce
 	if _, err := s.validateChain(ctx, chainID, chainInput(chain)); err != nil {
 		return nil, err
 	}
-	states := make([]desiredstate.State, 0, len(chain.NodeIDs))
+	snapshots := make([]NodeSnapshot, 0, len(chain.NodeIDs))
 	// A node snapshot includes all enabled proxy configuration. Include its
 	// entire downstream dependency graph, including alternate chains, so the
 	// first publication of two mutually referenced drafts cannot deadlock.
@@ -306,11 +308,11 @@ func (s *Service) ChainSnapshots(ctx context.Context, chainID string, users Acce
 				}
 			}
 		}
-		state, err := s.Snapshot(ctx, nodeID, users)
+		state, enabled, err := s.SnapshotIntent(ctx, nodeID, users)
 		if err != nil {
 			return err
 		}
-		states = append(states, state)
+		snapshots = append(snapshots, NodeSnapshot{State: state, InboundIntent: enabled})
 		delete(visiting, nodeID)
 		done[nodeID] = true
 		return nil
@@ -318,7 +320,7 @@ func (s *Service) ChainSnapshots(ctx context.Context, chainID string, users Acce
 	if err := visit(chain.NodeIDs[0]); err != nil {
 		return nil, err
 	}
-	return states, nil
+	return snapshots, nil
 }
 func (r *Repository) saveChain(ctx context.Context, chainID string, input ChainInput, hops []ChainHop, create bool) (Chain, error) {
 	tx, err := r.Database.BeginTx(ctx, nil)

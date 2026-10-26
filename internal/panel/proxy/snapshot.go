@@ -34,30 +34,52 @@ func snapshotList[T any](read func(int, int) ([]T, int, error)) ([]T, error) {
 	}
 }
 
+// NodeSnapshot pairs one node's rendered configuration with the inbound intent
+// that belongs to it: the IDs of the inbounds the Owner had enabled before the
+// renderer disabled the ones no user credential reaches. The chain and relay
+// planners return one per node, so a batch revision records exactly the intent a
+// single-node publication records.
+type NodeSnapshot struct {
+	State         desiredstate.State
+	InboundIntent []string
+}
+
+// Snapshot renders the node's configuration.
 func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReader) (desiredstate.State, error) {
+	state, _, err := s.SnapshotIntent(ctx, nodeID, users)
+	return state, err
+}
+
+// SnapshotIntent renders the node's configuration and reports the inbound IDs
+// the business data has enabled on the node, before the renderer disables an
+// inbound that no user credential reaches. The Deployment module stores that set
+// as the revision's inbound intent, so an automatic quota revision can tell an
+// inbound the Owner disabled from one that merely has no users at the moment.
+func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users AccessReader) (desiredstate.State, []string, error) {
+	enabled := []string{}
 	n, err := s.Nodes.Get(ctx, nodeID)
 	if err != nil || !n.Enabled {
-		return desiredstate.State{}, errors.New("node unavailable")
+		return desiredstate.State{}, nil, errors.New("node unavailable")
 	}
 	groups, err := s.Nodes.SubscriptionGroups(ctx, nodeID)
 	if err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
 	access, err := users.AccessForGroups(ctx, groups)
 	if err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
 	inbounds, err := snapshotList(func(page, size int) ([]Inbound, int, error) {
 		return s.Repository.Inbounds(ctx, nodeID, page, size, true)
 	})
 	if err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
 	outbounds, err := snapshotList(func(page, size int) ([]Outbound, int, error) {
 		return s.Repository.Outbounds(ctx, nodeID, page, size, true)
 	})
 	if err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
 	state := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: nodeID, Logging: desiredstate.Logging{DomainOnly: true}, Users: []desiredstate.User{}, Credentials: []desiredstate.Credential{}, Inbounds: []desiredstate.Inbound{}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}, {ID: "block", Protocol: "block", Enabled: true}}, OutboundGroups: []desiredstate.OutboundGroup{}, ProxyChains: []desiredstate.ProxyChain{}, Policies: []desiredstate.Policy{}}
 	// The node's outbound network settings travel with every published state;
@@ -77,12 +99,12 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 		return s.Repository.Groups(ctx, nodeID, page, size)
 	})
 	if err != nil {
-		return state, err
+		return state, enabled, err
 	}
 	for _, group := range configuredGroups {
 		if group.Enabled {
 			if err := s.validateSavedGroup(ctx, group); err != nil {
-				return state, err
+				return state, enabled, err
 			}
 			state.OutboundGroups = append(state.OutboundGroups, group.Desired())
 		}
@@ -95,26 +117,31 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 		if record.CredentialID != "" {
 			credential, err := s.Repository.Credential(ctx, record.CredentialID)
 			if err != nil {
-				return state, err
+				return state, enabled, err
 			}
 			add(credential)
 		}
 		state.Outbounds = append(state.Outbounds, outbound)
 	}
 	for _, record := range inbounds {
+		// The intent is taken before the auto-disable below: an inbound the
+		// Owner enabled stays in it even while it has no users.
+		if record.Enabled {
+			enabled = append(enabled, record.ID)
+		}
 		inbound := desiredstate.Inbound{ID: record.ID, Protocol: record.Protocol, Listen: record.Listen, Port: record.Port, Enabled: record.Enabled, DefaultOutbound: record.DefaultOutbound, SubscriptionVisible: record.SubscriptionVisible, Settings: record.Settings, CredentialIDs: []string{}}
 		if record.InternalRelay {
 			if record.RelayCredentialID != "" {
 				credential, err := s.Repository.Credential(ctx, record.RelayCredentialID)
 				if err != nil {
-					return state, err
+					return state, enabled, err
 				}
 				add(credential)
 				inbound.CredentialIDs = append(inbound.CredentialIDs, credential.ID)
 			}
 			bindings, err := s.Repository.Bindings(ctx, record.ID)
 			if err != nil {
-				return state, err
+				return state, enabled, err
 			}
 			if inbound.Protocol == "wireguard" {
 				copy := *inbound.Settings.WireGuard
@@ -124,14 +151,14 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 			for _, binding := range bindings {
 				credential, err := s.Repository.Credential(ctx, binding.CredentialID)
 				if err != nil {
-					return state, err
+					return state, enabled, err
 				}
 				add(credential)
 				inbound.CredentialIDs = append(inbound.CredentialIDs, credential.ID)
 				if inbound.Protocol == "wireguard" {
 					public, err := publicKey(credential.Secret)
 					if err != nil {
-						return state, err
+						return state, enabled, err
 					}
 					inbound.Settings.WireGuard.Peers = append(inbound.Settings.WireGuard.Peers, desiredstate.WireGuardPeer{PublicKey: public, AllowedIPs: binding.TunnelAddresses, CredentialID: credential.ID})
 				}
@@ -161,7 +188,7 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 						desired.PublicKey = credential.PublicKey
 						addresses, err := s.Repository.DeviceAddresses(ctx, record.ID, credential.DeviceID, record.Settings)
 						if err != nil {
-							return state, err
+							return state, enabled, err
 						}
 						inbound.Settings.WireGuard.Peers = append(inbound.Settings.WireGuard.Peers, desiredstate.WireGuardPeer{PublicKey: credential.PublicKey, AllowedIPs: addresses, CredentialID: credential.ID})
 					}
@@ -178,7 +205,7 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 	if s.Policies != nil {
 		rules, err := s.Policies.ForNode(ctx, nodeID)
 		if err != nil {
-			return state, err
+			return state, enabled, err
 		}
 		state.Policies = rules
 	}
@@ -186,14 +213,14 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 		return s.Repository.Chains(ctx, nodeID, page, size)
 	})
 	if err != nil {
-		return state, err
+		return state, enabled, err
 	}
 	for _, chain := range chains {
 		if !chain.Enabled {
 			continue
 		}
 		if _, err := s.validateChain(ctx, chain.ID, chainInput(chain)); err != nil {
-			return state, err
+			return state, enabled, err
 		}
 		state.ProxyChains = append(state.ProxyChains, chain.Desired())
 		for index, hop := range chain.Hops {
@@ -226,5 +253,5 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 			}
 		}
 	}
-	return state, state.Validate()
+	return state, enabled, state.Validate()
 }

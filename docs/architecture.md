@@ -85,7 +85,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **配置发布与回滚**：Owner 保存业务配置 → 生成 Revision（`POST /api/v1/revisions`）→ 部署（`POST /api/v1/revisions/{id}/deploy`）→ Agent 渲染并校验核心原生配置 → 切换核心 → 健康检查 → 失败自动回滚到上一成功版本。代理链按“先出口、后中转、最后入口”发布，回滚反向（`internal/panel/deployment/relay_batches.go`）。
 
-**自动额度版本**：流量入库后由 `internal/panel/user` 的额度状态机判断，`internal/platform/server/quota.go` 按节点合并（60 秒窗口）后创建并部署只调整用户访问面的自动 Revision；目标节点是该用户当前授权的节点加上**已发布**状态里仍持有其凭据的节点。自动版本以节点**已发布**状态为基线，除用户与入站的绑定取自当前草稿（这类未发布编辑可能被带出）外，不会带出未发布的 Owner 编辑。
+**自动额度版本**：流量入库后由 `internal/panel/user` 的额度状态机判断，`internal/platform/server/quota.go` 按节点合并（60 秒窗口）后创建并部署只调整用户访问面的自动 Revision；目标节点是该用户当前授权的节点加上**已发布**状态里仍持有其凭据的节点。自动版本以节点**已发布**状态为基线，除用户与入站的绑定取自当前草稿（这类未发布编辑可能被带出）外，不会带出未发布的 Owner 编辑。入站的启用状态也不取自草稿：每个版本另行记录 Owner 当时启用的入站集合（`config_revisions.inbound_enabled_json`，迁移 `0111_inbound_enabled_intent.sql`），自动版本原样继承，凭据回到已发布状态下被禁用的入站时只有该记录说 Owner 曾启用才重新启用；记录为 NULL 时保守保持禁用。单节点发布、用户接入以及代理链/关联节点批次都会记录这份意图（`internal/panel/proxy/snapshot.go` 的 `SnapshotIntent`、`ChainSnapshots`、`RelaySnapshots` 与 `internal/panel/deployment/batches.go` 的 `CreateBatch`），只有调用方直接提交 state 的原始版本（`POST /api/v1/revisions`）留为 NULL。
 
 **订阅**：`GET /sub/{token}?format=uri|base64|sing-box`（省略时用系统设置里的默认格式，出厂默认 `uri`）按授权节点组展开、过滤不可用节点和协议后生成，Token 只保存哈希。URI 与 Base64 列表无法携带固定证书，因此省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点并且不报错（其余链接照常输出）；这类端点用 sing-box 格式获取，该格式会写入 `tls.certificate`。
 

@@ -40,7 +40,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 			return err
 		}
 	}
-	if err := db.CopyRecoveryTable(ctx, tx, "config_revisions", "id,author,summary,status,created_at,encrypted_state"); err != nil {
+	if err := db.CopyRecoveryTable(ctx, tx, "config_revisions", "id,author,summary,status,created_at,encrypted_state,inbound_enabled_json"); err != nil {
 		return err
 	}
 	if err := db.PreserveRecoverySequence(ctx, tx, "config_revisions"); err != nil {

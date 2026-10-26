@@ -97,7 +97,7 @@ func TestBatchRollbackNotifiesThePlatform(t *testing.T) {
 	r, states, _ := batchFixture(t)
 	applied := []string{}
 	r.Applied = func(nodeID, operation string) { applied = append(applied, nodeID+":"+operation) }
-	batch, err := r.CreateBatch(ctx, "chain", "publication", "owner", states)
+	batch, err := r.CreateBatch(ctx, "chain", "publication", "owner", batchSnapshots(states))
 	if err != nil {
 		t.Fatal(err)
 	}

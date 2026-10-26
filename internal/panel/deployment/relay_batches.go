@@ -9,11 +9,10 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/httpapi"
-	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 type RelayConfiguration interface {
-	RelaySnapshots(context.Context, string, proxy.AccessReader) ([]desiredstate.State, error)
+	RelaySnapshots(context.Context, string, proxy.AccessReader) ([]proxy.NodeSnapshot, error)
 }
 
 func (h *Handler) createRelayBatch(w http.ResponseWriter, r *http.Request) {
@@ -34,12 +33,12 @@ func (h *Handler) createRelayBatch(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 503, "unavailable", "Relay configuration unavailable")
 		return
 	}
-	states, err := planner.RelaySnapshots(r.Context(), body.NodeID, h.Users)
+	snapshots, err := planner.RelaySnapshots(r.Context(), body.NodeID, h.Users)
 	if err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
-	batch, err := h.Repository.CreateBatch(r.Context(), "", body.Summary, auth.Actor(r.Context()).Username, states)
+	batch, err := h.Repository.CreateBatch(r.Context(), "", body.Summary, auth.Actor(r.Context()).Username, snapshots)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -52,16 +51,17 @@ func (h *Handler) createRelayBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 // Validate all captured dependencies before creating any batch revisions.
-func validateBatchDependencies(states []desiredstate.State) error {
+func validateBatchDependencies(snapshots []proxy.NodeSnapshot) error {
 	positions := map[string]int{}
-	for position, state := range states {
-		if _, duplicate := positions[state.NodeID]; duplicate || state.NodeID == "" {
+	for position, snapshot := range snapshots {
+		nodeID := snapshot.State.NodeID
+		if _, duplicate := positions[nodeID]; duplicate || nodeID == "" {
 			return fmt.Errorf("%w: invalid duplicate batch node", ErrDependency)
 		}
-		positions[state.NodeID] = position
+		positions[nodeID] = position
 	}
-	for position, state := range states {
-		for _, outbound := range state.Outbounds {
+	for position, snapshot := range snapshots {
+		for _, outbound := range snapshot.State.Outbounds {
 			if !outbound.Enabled || outbound.TargetNodeID == "" {
 				continue
 			}
@@ -69,7 +69,7 @@ func validateBatchDependencies(states []desiredstate.State) error {
 			if !exists || targetPosition >= position {
 				return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
 			}
-			if reason := relayDependency(outbound, states[targetPosition]); reason != "matched" {
+			if reason := relayDependency(outbound, snapshots[targetPosition].State); reason != "matched" {
 				return fmt.Errorf("%w: captured batch relay mismatch (%s)", ErrDependency, reason)
 			}
 		}

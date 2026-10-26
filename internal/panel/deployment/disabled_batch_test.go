@@ -10,7 +10,7 @@ import (
 func TestBatchDisabledWaitingNodeTriggersRollback(t *testing.T) {
 	ctx := context.Background()
 	r, states, _ := batchFixture(t)
-	batch, err := r.CreateBatch(ctx, "chain", "node disabled mid-publication", "owner", states)
+	batch, err := r.CreateBatch(ctx, "chain", "node disabled mid-publication", "owner", batchSnapshots(states))
 	if err != nil {
 		t.Fatal(err)
 	}

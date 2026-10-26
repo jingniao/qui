@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"sort"
-
-	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // RelaySnapshots includes the enabled relay component around a changed node,
-// including its upstream callers and their downstream dependencies.
-func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessReader) ([]desiredstate.State, error) {
+// including its upstream callers and their downstream dependencies. Each entry
+// carries the node's inbound intent, which the batch revision stores alongside
+// the state (see NodeSnapshot).
+func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessReader) ([]NodeSnapshot, error) {
 	if root == "" || users == nil {
 		return nil, errors.New("node and access reader required")
 	}
@@ -59,12 +59,12 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 		return nil, errors.New("node has no enabled relay relationships; create a single-node revision")
 	}
 	sort.Strings(queue)
-	states := map[string]desiredstate.State{}
+	snapshots := map[string]NodeSnapshot{}
 	for _, nodeID := range queue {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		state, err := s.Snapshot(ctx, nodeID, users)
+		state, enabled, err := s.SnapshotIntent(ctx, nodeID, users)
 		if err != nil {
 			return nil, err
 		}
@@ -114,9 +114,9 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 				return nil, errors.New("relay graph changed while creating snapshots; retry")
 			}
 		}
-		states[nodeID] = state
+		snapshots[nodeID] = NodeSnapshot{State: state, InboundIntent: enabled}
 	}
-	result := make([]desiredstate.State, 0, len(states))
+	result := make([]NodeSnapshot, 0, len(snapshots))
 	visiting, done := map[string]bool{}, map[string]bool{}
 	var visit func(string) error
 	visit = func(nodeID string) error {
@@ -139,7 +139,7 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 		}
 		delete(visiting, nodeID)
 		done[nodeID] = true
-		result = append(result, states[nodeID])
+		result = append(result, snapshots[nodeID])
 		return nil
 	}
 	for _, nodeID := range queue {

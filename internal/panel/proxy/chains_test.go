@@ -49,14 +49,14 @@ func TestChainCapabilitiesDedicatedBindingAndSnapshotOrder(t *testing.T) {
 	if err != nil || len(states) != 3 {
 		t.Fatal(err)
 	}
-	for index, state := range states {
-		if state.NodeID != ids[2-index] {
+	for index, snapshot := range states {
+		if snapshot.State.NodeID != ids[2-index] {
 			t.Fatal("snapshots not exit first")
 		}
-		if state.NodeID == f.nodeB {
+		if snapshot.State.NodeID == f.nodeB {
 			matched := false
-			for _, outbound := range state.Outbounds {
-				if outbound.ID == state.Inbounds[0].DefaultOutbound && outbound.TargetNodeID == c.ID && outbound.Protocol == "socks5" && outbound.FailurePolicy == "Block" {
+			for _, outbound := range snapshot.State.Outbounds {
+				if outbound.ID == snapshot.State.Inbounds[0].DefaultOutbound && outbound.TargetNodeID == c.ID && outbound.Protocol == "socks5" && outbound.FailurePolicy == "Block" {
 					matched = true
 				}
 			}
@@ -120,6 +120,64 @@ func TestChainNodeScopeIsAppliedBeforePagination(t *testing.T) {
 	}
 }
 
+func TestChainSnapshotsCarryTheOwnerInboundIntent(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for _, nodeID := range []string{f.nodeA, f.nodeB} {
+		if _, err := f.nodes.Record(ctx, nodeID, &pb.AgentMessage{Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{CoreName: "Xray", Protocols: []*pb.ProtocolCapability{{Protocol: "socks5", Inbound: true, Outbound: true, Tcp: true, Udp: true}}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A subscription inbound without users: the renderer disables it, but the
+	// Owner enabled it, and that is the intent the batch has to carry.
+	empty, err := f.service.SaveInbound(ctx, "", InboundInput{Name: "No users yet", NodeID: f.nodeB, Protocol: "socks5", Listen: "0.0.0.0", Port: 1081, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	internal, err := f.service.SaveInbound(ctx, "", InboundInput{Name: "Internal", NodeID: f.nodeB, Protocol: "socks5", Listen: "0.0.0.0", Port: 1080, Enabled: true, InternalRelay: true, DefaultOutbound: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbound, err := f.service.SaveOutbound(ctx, "", OutboundInput{Name: "Next hop", NodeID: f.nodeA, Protocol: "socks5", TargetInboundID: internal.ID, Enabled: true, SupportTCP: true, SupportUDP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain, err := f.service.SaveChain(ctx, "", ChainInput{Name: "Two nodes", NodeIDs: []string{f.nodeA, f.nodeB}, OutboundIDs: []string{outbound.ID}, Enabled: true, SupportTCP: true, SupportUDP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := f.service.ChainSnapshots(ctx, chain.ID, f.users)
+	if err != nil || len(snapshots) != 2 {
+		t.Fatal(err)
+	}
+	var target NodeSnapshot
+	for _, snapshot := range snapshots {
+		if snapshot.State.NodeID == f.nodeB {
+			target = snapshot
+		}
+	}
+	disabled := false
+	for _, inbound := range target.State.Inbounds {
+		if inbound.ID == empty.ID {
+			disabled = !inbound.Enabled
+		}
+	}
+	if !disabled {
+		t.Fatal("the rendered state left a user-less inbound enabled")
+	}
+	for _, inboundID := range []string{empty.ID, internal.ID} {
+		recorded := false
+		for _, enabled := range target.InboundIntent {
+			if enabled == inboundID {
+				recorded = true
+			}
+		}
+		if !recorded {
+			t.Fatalf("snapshots did not record inbound %s as enabled by the owner: %v", inboundID, target.InboundIntent)
+		}
+	}
+}
+
 func TestBackupChainsPlanCompleteDependencyGraph(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -165,8 +223,8 @@ func TestBackupChainsPlanCompleteDependencyGraph(t *testing.T) {
 		t.Fatal("backup graph was not included", len(states), err)
 	}
 	positions := map[string]int{}
-	for index, state := range states {
-		positions[state.NodeID] = index
+	for index, snapshot := range states {
+		positions[snapshot.State.NodeID] = index
 	}
 	if positions[ids[2]] >= positions[ids[1]] || positions[ids[1]] >= positions[ids[0]] || positions[ids[3]] >= positions[ids[0]] {
 		t.Fatal("dependency order violated", positions)

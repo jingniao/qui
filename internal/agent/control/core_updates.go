@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"proxycontrol/internal/agent/reconcile"
 	"proxycontrol/internal/agent/updater"
 	"proxycontrol/internal/platform/config"
@@ -36,9 +39,25 @@ type coreUpdates struct {
 	active       *release.CoreUpdateRequest
 	requests     chan release.CoreUpdateRequest
 	results      chan *pb.CoreUpdateResult
-	cancel       context.CancelFunc
-	done         chan struct{}
+	// pending holds the results the panel has not acknowledged yet, oldest
+	// first, and rejections counts how often the panel refused the head with
+	// the permanent rejection. Both live as long as the worker, so a result
+	// whose acknowledgment a dropped stream swallowed is sent again by the next
+	// session instead of disappearing with the one that lost it. They are in
+	// memory only: an Agent restart forgets them, which the panel covers with
+	// CloseStaleCoreUpdates on the next connection.
+	pending    []*pb.CoreUpdateResult
+	rejections int
+	cancel     context.CancelFunc
+	done       chan struct{}
 }
+
+// coreUpdateRejectLimit is how many consecutive permanent rejections of one
+// result the Agent tolerates before it drops it. The panel answers a receipt
+// with FailedPrecondition and the rejection message when it will never store
+// it, for example because the Owner cleared the task, so keeping the result
+// would fail every later session and keep the node reconnecting for nothing.
+const coreUpdateRejectLimit = 3
 
 func newCoreUpdates(ctx context.Context, c config.Agent, nodeID string, manager *reconcile.Reconciler, capabilities *capabilityState, detect func(context.Context) (*pb.Capabilities, error)) (*coreUpdates, error) {
 	if manager == nil {
@@ -79,6 +98,90 @@ func (w *coreUpdates) run(ctx context.Context) {
 // one; every other outcome leaves the running binary untouched.
 func coreUpdateChangedTheCore(status string) bool {
 	return status == "success" || status == "rolled_back"
+}
+
+// collect moves every finished result into the pending list, keeping the order
+// in which the updates completed. The list outlives the session that sends it,
+// so a result stays until the panel acknowledges it.
+func (w *coreUpdates) collect() {
+	for {
+		select {
+		case result := <-w.results:
+			w.push(result)
+		default:
+			return
+		}
+	}
+}
+
+func (w *coreUpdates) push(result *pb.CoreUpdateResult) {
+	w.mu.Lock()
+	w.pending = append(w.pending, result)
+	w.mu.Unlock()
+}
+
+// next reports the oldest result the panel has not acknowledged yet, or nil.
+func (w *coreUpdates) next() *pb.CoreUpdateResult {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.pending) == 0 {
+		return nil
+	}
+	return w.pending[0]
+}
+
+// acknowledged drops the head because the panel stored it and answered it. Only
+// a nil send result gets here: every failure keeps the result for the next
+// session.
+func (w *coreUpdates) acknowledged() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.pending) > 0 {
+		w.pending = w.pending[1:]
+	}
+	w.rejections = 0
+}
+
+// rejected records one permanent rejection of the head. The panel ends the
+// stream with FailedPrecondition and the rejection message when it will never
+// store that receipt, for example because the Owner cleared the task; the
+// result has to stay until it repeats, because a single reconnect must not lose
+// a result the panel simply could not accept yet. After coreUpdateRejectLimit
+// consecutive rejections of the same result it is dropped, so the node stops
+// reconnecting only to fail the same way.
+func (w *coreUpdates) rejected(logger *slog.Logger) {
+	w.mu.Lock()
+	w.rejections++
+	var dropped *pb.CoreUpdateResult
+	if w.rejections >= coreUpdateRejectLimit && len(w.pending) > 0 {
+		dropped = w.pending[0]
+		w.pending = w.pending[1:]
+		w.rejections = 0
+	}
+	w.mu.Unlock()
+	if dropped == nil {
+		return
+	}
+	// The task ID is the only field of the result a log line needs, and it is
+	// the one an operator can look up in the panel.
+	logger.Warn("core update result dropped after repeated rejection", "attempts", coreUpdateRejectLimit, "task_id", coreUpdateTaskID(dropped))
+}
+
+// coreUpdateResultRejected reports the panel's permanent refusal of a core
+// update receipt: it ends the stream with FailedPrecondition and this exact
+// message when it will never store the result. Everything else, including a
+// transport failure or a panel that is merely unavailable, stays retryable.
+func coreUpdateResultRejected(err error) bool {
+	return status.Code(err) == codes.FailedPrecondition && status.Convert(err).Message() == "core update result rejected"
+}
+
+// coreUpdateTaskID names the task a result belongs to, for log lines only.
+func coreUpdateTaskID(result *pb.CoreUpdateResult) string {
+	decoded, err := release.DecodeCoreUpdateResult(result.ResultJson)
+	if err != nil {
+		return ""
+	}
+	return decoded.ID
 }
 
 // refreshCapabilities replaces the node's reported capabilities with the ones of

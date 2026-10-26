@@ -41,8 +41,15 @@ type controlStream struct {
 	// rejectTraffic names the traffic batch the fake panel rejects: the batch is
 	// received and the stream then ends with the panel's rejection code.
 	rejectTraffic string
-	mu            sync.Mutex
-	sent          []*pb.AgentMessage
+	// coreResultSendError makes the Agent's Send of a core-update result fail,
+	// like a stream that is already broken.
+	coreResultSendError error
+	// coreResultFailure makes the fake panel record the core-update result and
+	// then end the stream with this error: either the Ack was lost or the panel
+	// refused the receipt.
+	coreResultFailure error
+	mu                sync.Mutex
+	sent              []*pb.AgentMessage
 }
 
 func newControlStream(ctx context.Context) *controlStream {
@@ -54,6 +61,15 @@ func (c *controlStream) Send(message *pb.AgentMessage) error {
 	c.sent = append(c.sent, message)
 	c.mu.Unlock()
 	ack := &pb.Ack{AgentSequence: message.Sequence}
+	if message.GetCoreUpdateResult() != nil {
+		if c.coreResultSendError != nil {
+			return c.coreResultSendError
+		}
+		if c.coreResultFailure != nil {
+			c.incoming <- controlPacket{err: c.coreResultFailure}
+			return nil
+		}
+	}
 	if batch := message.GetTrafficBatch(); batch != nil {
 		decoded, err := traffic.Decode(batch.BatchJson)
 		if err != nil {
@@ -98,6 +114,20 @@ func (c *controlStream) firstCapabilities() *pb.Capabilities {
 		}
 	}
 	return nil
+}
+
+// coreUpdateResults returns the core-update results the Agent sent, in order, so
+// a test can count delivery attempts.
+func (c *controlStream) coreUpdateResults() []*pb.CoreUpdateResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	results := []*pb.CoreUpdateResult{}
+	for _, message := range c.sent {
+		if result := message.GetCoreUpdateResult(); result != nil {
+			results = append(results, result)
+		}
+	}
+	return results
 }
 
 // controlClient is the panel side of the control stream, enough for one session.

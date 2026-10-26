@@ -33,12 +33,12 @@ func (h *Handler) userAccess(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 503, "unavailable", "User access service unavailable")
 		return
 	}
-	state, err := h.EnsureUserAccess(r.Context(), input)
+	state, enabled, err := h.EnsureUserAccess(r.Context(), input)
 	if err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
-	revision, err := h.Repository.Create(r.Context(), state, auth.Actor(r.Context()).Username, input.Summary)
+	revision, err := h.Repository.CreateWithInboundIntent(r.Context(), state, enabled, auth.Actor(r.Context()).Username, input.Summary)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -51,7 +51,8 @@ func (h *Handler) userAccess(w http.ResponseWriter, r *http.Request) {
 }
 
 // EnsureUserAccess writes the quick user-access feature's business data and
-// returns the node's rendered configuration.
+// returns the node's rendered configuration together with the inbounds the Owner
+// has enabled, which the caller records as the revision's inbound intent.
 //
 // The feature owns one subscription-visible inbound per listener, bound to the
 // users of the node's subscription groups that hold a credential for the
@@ -59,27 +60,27 @@ func (h *Handler) userAccess(w http.ResponseWriter, r *http.Request) {
 // knows about: the proxy renderer, the publisher and the automatic quota
 // revisions all read that row, so a later publication can neither lose the
 // user's credential nor wipe the rest of the node's configuration.
-func (h *Handler) EnsureUserAccess(ctx context.Context, input UserAccessInput) (desiredstate.State, error) {
+func (h *Handler) EnsureUserAccess(ctx context.Context, input UserAccessInput) (desiredstate.State, []string, error) {
 	if strings.TrimSpace(input.Summary) == "" || len(input.Summary) > 512 {
-		return desiredstate.State{}, errors.New("revision summary required")
+		return desiredstate.State{}, nil, errors.New("revision summary required")
 	}
 	if input.Protocol != "http" && input.Protocol != "socks5" {
-		return desiredstate.State{}, errors.New("user access bootstrap supports HTTP and SOCKS5")
+		return desiredstate.State{}, nil, errors.New("user access bootstrap supports HTTP and SOCKS5")
 	}
 	if h.Proxy == nil || h.Users == nil {
-		return desiredstate.State{}, errors.New("user access service unavailable")
+		return desiredstate.State{}, nil, errors.New("user access service unavailable")
 	}
 	n, err := h.Nodes.Get(ctx, input.NodeID)
 	if err != nil || !n.Enabled {
-		return desiredstate.State{}, errors.New("target node missing or disabled")
+		return desiredstate.State{}, nil, errors.New("target node missing or disabled")
 	}
 	groups, err := h.Nodes.SubscriptionGroups(ctx, n.ID)
 	if err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
 	access, err := h.Users.AccessForGroups(ctx, groups)
 	if err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
 	// The inbound is bound to the same users the feature has always selected:
 	// every granted user that holds a credential for the requested protocol.
@@ -93,12 +94,12 @@ func (h *Handler) EnsureUserAccess(ctx context.Context, input UserAccessInput) (
 		}
 	}
 	if err := h.bindUserAccessInbound(ctx, input, userIDs); err != nil {
-		return desiredstate.State{}, err
+		return desiredstate.State{}, nil, err
 	}
 	// Render through the module that owns the proxy configuration, exactly like
 	// POST /api/v1/revisions/proxy, so the revision preserves the Owner's other
 	// inbounds, outbounds, groups, chains and policies on this node.
-	return h.Proxy.Snapshot(ctx, n.ID, h.Users)
+	return h.Proxy.SnapshotIntent(ctx, n.ID, h.Users)
 }
 
 // bindUserAccessInbound creates the feature's inbound, or updates the one that

@@ -17,8 +17,11 @@ import (
 // module sees it. The quick user-access feature writes its inbound through the
 // same service the Owner's inbound pages use, and renders through the same
 // renderer as POST /api/v1/revisions/proxy.
+// SnapshotIntent is Snapshot plus the inbounds the Owner has enabled, which
+// becomes the revision's inbound intent.
 type ProxyConfiguration interface {
 	Snapshot(context.Context, string, proxy.AccessReader) (desiredstate.State, error)
+	SnapshotIntent(context.Context, string, proxy.AccessReader) (desiredstate.State, []string, error)
 	SaveInbound(context.Context, string, proxy.InboundInput) (proxy.Inbound, error)
 	InboundAtListener(context.Context, string, string, string, int) (proxy.Inbound, error)
 }
@@ -40,12 +43,12 @@ func (h *Handler) proxyRevision(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Revision summary required")
 		return
 	}
-	state, err := h.Proxy.Snapshot(r.Context(), body.NodeID, h.Users)
+	state, enabled, err := h.Proxy.SnapshotIntent(r.Context(), body.NodeID, h.Users)
 	if err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
-	revision, err := h.Repository.Create(r.Context(), state, auth.Actor(r.Context()).Username, body.Summary)
+	revision, err := h.Repository.CreateWithInboundIntent(r.Context(), state, enabled, auth.Actor(r.Context()).Username, body.Summary)
 	if err != nil {
 		h.fail(w, err)
 		return

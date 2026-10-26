@@ -123,6 +123,7 @@ var applied = map[string]string{
 	"0108_node_outbound_network.sql":                    "ce48a86f17740c59cdd422ebca61cabed20c934e0c4240d6f35d22177826168a",
 	"0109_node_deletion.sql":                            "607ce78c0f25e79727a2fbd5b0a527743df84e8548e99ebed91e84ff4e8eb2e4",
 	"0110_credential_tombstones.sql":                    "9651c14984afa849b6b822dd4f253ea340ec008803cb5153e3fe49f95d976339",
+	"0111_inbound_enabled_intent.sql":                   "9ab9ca8a3dd2cdaa80060bb68435f18c53426b7c4abf1d26dabc86ecf4783730",
 }
 
 func TestAppliedMigrationsAreImmutable(t *testing.T) {

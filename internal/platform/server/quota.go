@@ -505,7 +505,7 @@ func (d *quotaDeployer) reconcile(ctx context.Context, nodeID string, entry *quo
 	// fresh render is used only as the current user/credential view, so an Owner
 	// edit that is saved but not yet published can never ride along on a quota
 	// transition (AGENTS.md §22).
-	published, err := d.deployments.Published(ctx, nodeID)
+	published, intent, err := d.deployments.PublishedWithIntent(ctx, nodeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Nothing published yet: there is no reviewed state to adjust.
 		return quotaDone
@@ -531,7 +531,7 @@ func (d *quotaDeployer) reconcile(ctx context.Context, nodeID string, entry *quo
 		entry.deferred = true
 	} else {
 		entry.deferred = false
-		next = mergeUserAccess(published, fresh)
+		next = mergeUserAccess(published, fresh, intent)
 	}
 	if quotaStatesEqual(published, next) {
 		if !entry.deferred {
@@ -554,7 +554,10 @@ func (d *quotaDeployer) reconcile(ctx context.Context, nodeID string, entry *quo
 		}
 	}
 	if entry.revision == 0 {
-		revision, err := d.deployments.Create(ctx, next, "auto", "auto: "+quotaSummary(entry.transitions))
+		// The intent is the published revision's, unchanged: an automatic
+		// revision never adopts the draft's idea of which inbounds should be
+		// enabled, and a later automatic revision inherits it again.
+		revision, err := d.deployments.CreateWithInboundIntent(ctx, next, intent, "auto", "auto: "+quotaSummary(entry.transitions))
 		if err != nil {
 			d.logger.Error("automatic quota revision failed", "node", nodeID, "error", err)
 			return d.fail(ctx, nodeID, entry, "revision_failed")
@@ -655,6 +658,17 @@ func (d *quotaDeployer) fail(ctx context.Context, nodeID string, entry *quotaPen
 	return quotaDone
 }
 
+// inboundEnabledByOwner reports whether the recorded intent of the published
+// revision names this inbound. An unknown intent (nil) answers no.
+func inboundEnabledByOwner(ownerEnabled []string, inboundID string) bool {
+	for _, id := range ownerEnabled {
+		if id == inboundID {
+			return true
+		}
+	}
+	return false
+}
+
 // quotaSummary describes the work of one entry for the revision summary. The
 // startup pass has no user, so its summary reads "startup reconcile".
 func quotaSummary(transitions []user.Transition) string {
@@ -723,10 +737,19 @@ func quotaStatesEqual(left, right desiredstate.State) bool {
 // indistinguishable from a published binding, so such an unpublished edit rides
 // along. That is the only accepted exception.
 //
+// ownerEnabled is the inbound intent of the published revision: the inbounds the
+// Owner had enabled when it was created, before the renderer disabled the ones no
+// user credential reached. An inbound the published state leaves disabled is
+// re-enabled only when that intent names it, so an inbound the Owner disabled on
+// purpose stays off even while the draft enables it again. An unknown intent
+// (a nil slice, from a revision published before the intent was recorded) never
+// re-enables anything: the conservative reading cannot publish an administrative
+// disable, and the Owner's next publication settles it.
+//
 // Every other field of the published state (the inbounds' other fields,
 // outbounds, groups, chains, policies and logging) is carried over byte-for-byte
 // so an automatic revision can never publish an unreviewed Owner edit.
-func mergeUserAccess(published, fresh desiredstate.State) desiredstate.State {
+func mergeUserAccess(published, fresh desiredstate.State, ownerEnabled []string) desiredstate.State {
 	next := published
 	next.Users = make([]desiredstate.User, len(fresh.Users))
 	copy(next.Users, fresh.Users)
@@ -863,11 +886,12 @@ func mergeUserAccess(published, fresh desiredstate.State) desiredstate.State {
 			// Mirror the renderer: an inbound left without credentials is
 			// disabled, which also satisfies DesiredState validation.
 			inbound.Enabled = false
-		case !hadCredentials && source.Enabled:
-			// The published inbound held no credentials, so it had been
-			// disabled by the renderer; credentials are back, so re-enable it.
-			// The renderer also emits administratively disabled inbounds, so
-			// the fresh view has to confirm the inbound is still wanted.
+		case !hadCredentials && source.Enabled && inboundEnabledByOwner(ownerEnabled, inbound.ID):
+			// The published inbound held no credentials, so the renderer had
+			// disabled it; credentials are back and the Owner wants the inbound
+			// enabled, so it is enabled again. Without that recorded intent the
+			// fresh view cannot be trusted: the inbound may be disabled because
+			// the Owner disabled it, and only the draft enables it now.
 			inbound.Enabled = true
 		}
 	}

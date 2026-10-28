@@ -1240,6 +1240,108 @@ scenario_18b() {
 }
 
 
+# RC updates on a combined host: only the selected component participates in
+# install/rollback/recovery. Shared updater/library files belong to either update.
+scenario_19() {
+  local selected other outcome
+  for selected in panel agent; do
+    if [[ $selected == panel ]]; then other=agent; else other=panel; fi
+    for outcome in ok fail-after-replace kill-parent; do
+      new_scenario "scenario-19-$selected-$outcome"
+      fake_reset
+      install_component agent 1.0.9
+      install_component panel 1.0.9
+      create_database
+      make_bundle 1.1.0-rc.1
+      snapshot_file_hashes "$selected" "$dir/selected-before.sha"
+      # Exclude the two shared files, but include the other program, unit,
+      # manifest, panel menu or Agent host-network pair.
+      snapshot_file_hashes "$other" "$dir/all-before.sha"
+      grep -vE '/(qui-update|service.sh)$' "$dir/all-before.sha" > "$dir/other-before.sha"
+      cp -- "$FAKE_PANEL_DB" "$dir/db-before"
+      export FAKE_INSTALL=$outcome
+      update_bundle 1.1.0-rc.1 --component "$selected"
+      case $outcome in
+        ok) expect_status 'RC component update' 0 "$LAST_STATUS"
+            expect_eq 'selected RC version' 1.1.0-rc.1 "$(program_version "$selected")";;
+        fail-after-replace) expect_status 'failed install rolled back' 1 "$LAST_STATUS";;
+        kill-parent) expect_status 'SIGKILL' 137 "$LAST_STATUS"
+                     expect_glob_exists 'pending RC journal' "$REGISTRY" 'rollback.*'
+                     expect_grep 'selected journal component' "component=$selected" "$FOUND_GLOB/journal"
+                     expect_grep 'RC target' 'target=1.1.0-rc.1' "$FOUND_GLOB/journal"
+                     run_boot_recovery
+                     expect_status 'RC boot recovery' 0 "$LAST_STATUS";;
+      esac
+      if [[ $outcome != ok ]]; then
+        snapshot_file_hashes "$selected" "$dir/selected-after.sha"
+        expect_same_tree 'selected files restored' "$dir/selected-before.sha" "$dir/selected-after.sha"
+      fi
+      snapshot_file_hashes "$other" "$dir/all-after.sha"
+      grep -vE '/(qui-update|service.sh)$' "$dir/all-after.sha" > "$dir/other-after.sha"
+      expect_same_tree 'other component untouched' "$dir/other-before.sha" "$dir/other-after.sha"
+      expect_eq 'other version unchanged' 1.0.9 "$(program_version "$other")"
+      if grep -E "^(start|stop|restart) proxy-$other$" "$FAKE_STATE/calls.log"; then
+        printf 'other service was touched\n' >> "$failure_file"
+      fi
+      if [[ $selected == agent ]]; then
+        expect_same 'agent update leaves database alone' "$dir/db-before" "$FAKE_PANEL_DB"
+        expect_absent 'no panel backup' "$BACKUPS"
+      fi
+    done
+  done
+}
+
+scenario_20() {
+  new_scenario scenario-20
+  fake_reset
+  install_component panel 1.1.0
+  create_database
+  make_bundle 1.1.0-rc.2
+  local backup=$BACKUPS/pre-update-1.0.9-20261028-010101.db
+  mkdir -p -- "$BACKUPS"
+  cp -- "$FAKE_PANEL_DB" "$backup"
+  update_bundle 1.1.0-rc.2 --component panel --database "$backup"
+  expect_status 'stable to RC is a downgrade with database' 0 "$LAST_STATUS"
+  make_bundle 1.1.0-rc.1
+  update_bundle 1.1.0-rc.1 --component panel --database "$backup"
+  expect_status 'RC2 to RC1 is a downgrade' 0 "$LAST_STATUS"
+  make_bundle 1.1.0-rc.2
+  update_bundle 1.1.0-rc.2 --component panel --database "$backup"
+  expect_status 'RC1 to RC2 database downgrade option refused' 1 "$LAST_STATUS"
+  update_bundle 1.1.0-rc.2 --component agent
+  expect_status 'uninstalled selected component refused' 1 "$LAST_STATUS"
+  run_update --component both
+  expect_status 'invalid component refused' 1 "$LAST_STATUS"
+  run_update --component
+  expect_status 'missing component value refused' 1 "$LAST_STATUS"
+}
+
+scenario_21() {
+  new_scenario scenario-21
+  fake_reset
+  install_component agent 1.0.9
+  install_component panel 1.1.0-rc.1
+  create_database
+  make_bundle 1.1.0-rc.1
+  update_bundle 1.1.0-rc.1 --component panel
+  expect_status 'selected panel already up to date' 0 "$LAST_STATUS"
+  expect_grep 'selected version equality is a no-op' '已是最新版本 1.1.0-rc.1' "$dir/update.out"
+  expect_eq 'old unselected Agent stays old' 1.0.9 "$(program_version agent)"
+  expect_absent 'no database backup on no-op' "$BACKUPS"
+  update_bundle 1.1.0-rc.1 --component agent --database "$FAKE_PANEL_DB"
+  expect_status 'agent selection refuses database option' 1 "$LAST_STATUS"
+  expect_grep 'database refusal reason' '--database 不能与 --component agent 一起使用' "$dir/update.out"
+  run_update --recover "$REGISTRY/rollback.invalid" --component panel
+  expect_status 'component cannot override a recovery journal' 1 "$LAST_STATUS"
+  expect_grep 'recovery option refusal reason' '--recover 不能与更新参数一起使用' "$dir/update.out"
+  make_bundle 1.1.0-rc.2
+  update_bundle 1.1.0-rc.2
+  expect_status 'default RC update both components' 0 "$LAST_STATUS"
+  expect_eq 'default order still Agent first' 'stop proxy-agent' "$(grep '^stop ' "$FAKE_STATE/calls.log" | head -n1)"
+  expect_eq 'agent RC2' 1.1.0-rc.2 "$(program_version agent)"
+  expect_eq 'panel RC2' 1.1.0-rc.2 "$(program_version panel)"
+}
+
 # --- runner ----------------------------------------------------------------
 # Each scenario runs in its own subshell with errexit on, so an unexpected failure ends
 # that scenario only; the reasons it collected are reported together.
@@ -1267,6 +1369,7 @@ run_scenario() {
 }
 
 write_fake_service_library "$TOP/harness/service.sh"
+sed -n '/^# Release versions shared/,$p' "$repo_dir/deploy/linux/service.sh" >> "$TOP/harness/service.sh"
 write_fake_install "$TOP/harness/install.sh"
 
 printf 'update-test: root %s, arch %s, update.sh %s\n' \
@@ -1294,8 +1397,10 @@ run_scenario '17b OpenRC unhealthy new version' scenario_17b
 run_scenario '17c OpenRC power loss at prepared' scenario_17c
 run_scenario '18a agent-only success' scenario_18a
 run_scenario '18b agent-only power loss at prepared' scenario_18b
+run_scenario '19 RC selected component success/rollback/recovery' scenario_19
+run_scenario '20 RC downgrade precedence and component refusals' scenario_20
+run_scenario '21 component up-to-date scope and default RC order' scenario_21
 
 printf '\nupdate-test: %s passed, %s failed\n' "$passes" "$failed"
 if ((failed > 0)); then exit 1; fi
 exit 0
-

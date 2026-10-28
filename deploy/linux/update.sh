@@ -40,10 +40,11 @@ repository=jingniao/qui
 fail() { printf '更新被拒绝：%s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<USAGE
-用法：qui-update [--version X.Y.Z] [--yes] [--database FILE]
+用法：qui-update [--version X.Y.Z[-rc.N]] [--component panel|agent] [--yes] [--database FILE]
                  [--bundle FILE --sums FILE]
 
-  --version X.Y.Z   安装指定发布版本（默认：GitHub 上的最新发布）
+  --version X.Y.Z[-rc.N] 安装指定发布版本（默认：GitHub 上的最新发布）
+  --component panel|agent  只更新指定的已安装组件（默认保持先 Agent 后面板）
   --yes             不询问确认，直接更新
   --database FILE   降级到更旧的面板版本时，同时把数据库换成该备份
                     （只用于已安装面板且 --version 低于当前版本；FILE 是
@@ -63,7 +64,7 @@ OpenRC 初始化脚本）、随包脚本与安装记录。配置、身份与数�
 后十秒内不重启才算成功。失败、Ctrl-C、SSH 断线、kill -9 或断电后都会恢复到更新前
 的版本（面板还恢复到更新前的数据库备份），开机时由
 proxycontrol-update-recovery.service 完成同样的恢复。同一台主机同时装有面板与节点
-时，两个组件都从同一个归档更新（先节点，后面板）。
+时，默认两个组件都从同一个归档更新（先节点，后面板）；--component 只更新指定组件。
 USAGE
 }
 
@@ -316,7 +317,8 @@ restore_database() {
 # everything written after that copy is lost. Printed instead of telling the operator
 # to overwrite files by hand, because qui-update can now do it in one step.
 downgrade_guidance() {
-  local target=$1 found=false file
+  local target=$1 found=false file selection=''
+  [[ ${selected_component:-} != panel ]] || selection=' --component panel'
   printf '目标版本 %s 无法打开当前数据库：数据库里有它不认识的迁移。\n' "$target"
   printf '要与该版本一起回退数据库，请用 --database 指定下面某个备份（新的在前）：\n'
   if [[ -d $backups ]]; then
@@ -327,22 +329,23 @@ downgrade_guidance() {
     done < <(ls -1t -- "$backups"/pre-update-"$target"-*.db 2>/dev/null || true)
   fi
   if ! $found; then printf '  没有找到 pre-update-%s-*.db 备份。\n' "$target"; fi
-  printf '命令：qui-update --version %s --database <上面的备份文件> --yes\n' "$target"
+  printf '命令：qui-update%s --version %s --database <上面的备份文件> --yes\n' "$selection" "$target"
   printf '注意：该备份之后写入的数据（新用户、之后登记的节点、配置改动）会丢失；\n'
   printf '      之后登记的节点需要重新登记。\n'
 }
 
 # Print the log hint, the downgrade command and the database copy after a failure.
 report_failure() {
-  local name=$1 previous=$2 backup=$3
+  local name=$1 previous=$2 backup=$3 selection=''
+  [[ -z ${selected_component:-} ]] || selection=" --component $selected_component"
   printf '日志：%s\n' "$(service_log_hint "$name" || true)"
-  if [[ $previous =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    printf '降级：用 qui-update --version %s 装回旧版本。\n' "$previous"
+  if qui_valid_release_version "$previous"; then
+    printf '降级：用 qui-update%s --version %s 装回旧版本。\n' "$selection" "$previous"
   else
-    printf '降级：用 qui-update --version X.Y.Z 装回旧版本。\n'
+    printf '降级：用 qui-update%s --version X.Y.Z 装回旧版本。\n' "$selection"
   fi
   if [[ -n $backup ]]; then
-    printf '数据库迁移不可逆：回到旧版本时用 qui-update --version <旧版本> --database %s 一起回退数据库。\n' "$backup"
+    printf '数据库迁移不可逆：回到旧版本时用 qui-update%s --version <旧版本> --database %s 一起回退数据库。\n' "$selection" "$backup"
   fi
 }
 
@@ -732,13 +735,9 @@ take_update_lock() {
   done
 }
 
-# Succeed when the X.Y.Z version $1 is strictly older than $2. sort -V orders the two, so
-# the first line names the oldest; equal versions and anything that is not X.Y.Z are not a
-# downgrade, which is what the callers rely on when the installed version is unreadable.
+# Unknown installed versions remain unordered, as before.
 version_is_older() {
-  [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $2 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
-  [[ $1 != "$2" ]] || return 1
-  [[ $(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1) == "$1" ]]
+  qui_release_is_older "$1" "$2"
 }
 
 # Put the service back after a failure that happened before anything was replaced. The
@@ -1055,10 +1054,15 @@ main() {
   local assume_yes=false bundle_file='' sums_file='' arch='' base='' bundle=''
   local release='' tag='' expected='' actual='' up_to_date=true answer=''
   local components=() component tool file required service_library=''
+  local selected_component=''
   local recover_directory='' boot=false status=0 installed_panel='' output=''
   local snapshot_directory='' registry_directory='' log=''
   while (($#)); do
     case $1 in
+      --component)
+        (($# >= 2)) || fail '缺少 --component 的值。'
+        case $2 in panel|agent) selected_component=$2;; *) fail '--component 必须是 panel 或 agent。';; esac
+        shift 2;;
       --version)
         (($# >= 2)) || fail '缺少 --version 的值。'
         version=$2; shift 2;;
@@ -1078,13 +1082,12 @@ main() {
       *) fail "未知参数：$1（用 --help 查看用法）";;
     esac
   done
-  [[ -z $version || $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '版本号必须是 X.Y.Z 形式。'
   # --recover and --boot are the internal entry points of a snapshot's updater and of the
   # boot unit. They undo what an earlier run left behind and nothing else, so mixing them
   # with update options would be ambiguous.
   if [[ -n $recover_directory || $boot == true ]]; then
     [[ -n $recover_directory ]] || fail '--boot 只能与 --recover 一起使用。'
-    if [[ -n $version || -n $database_file || -n $bundle_file || -n $sums_file || $assume_yes == true ]]; then
+    if [[ -n $selected_component || -n $version || -n $database_file || -n $bundle_file || -n $sums_file || $assume_yes == true ]]; then
       fail '--recover 不能与更新参数一起使用。'
     fi
   fi
@@ -1117,6 +1120,11 @@ main() {
     || fail "缺少初始化系统库 $service_library：这是旧版安装。请用与安装版本相同的发布归档执行一次 deploy/linux/install.sh，再重跑本脚本。"
   # shellcheck source=service.sh
   . "$service_library"
+  # A library older than this script lacks the release helpers; without this check
+  # version_is_older would return 127 and silently skip the downgrade guard.
+  declare -F qui_valid_release_version qui_release_is_older >/dev/null \
+    || fail "初始化系统库 $service_library 版本过旧：请用与本脚本同一发布归档里的 deploy/linux/update.sh 运行。"
+  [[ -z $version ]] || qui_valid_release_version "$version" || fail '版本号必须是 X.Y.Z 或 X.Y.Z-rc.N（N 为无前导零的正整数）。'
   init_system=$(detect_init) || fail '既不是 systemd 也不是 OpenRC：不支持本机的初始化系统。'
   if [[ -n $recover_directory ]]; then
     # The recovery entry point. A snapshot runs its own updater with --recover DIR and the
@@ -1164,7 +1172,7 @@ main() {
   fi
   # date comes from the same coreutils package as install and sha256sum; cp, cmp, mkdir
   # and sync are what the snapshot and its restore use; rc-service and rc-update are the
-  # OpenRC equivalents of systemctl; flock guards the update lock, sort -V orders versions
+  # OpenRC equivalents of systemctl; flock guards the update lock
   # and realpath resolves --recover.
   required_tools=(curl tar sha256sum install mktemp uname grep sed cp cmp mkdir mv sync chmod stat date rm flock sort realpath)
   if [[ $init_system == systemd ]]; then
@@ -1179,8 +1187,9 @@ main() {
   # The agent is updated before the panel, so a panel that cannot be replaced still
   # leaves a working node.
   for component in agent panel; do
-    if record_complete "$component"; then components+=("$component"); fi
+    if [[ -z $selected_component || $selected_component == "$component" ]] && record_complete "$component"; then components+=("$component"); fi
   done
+  [[ -z $selected_component ]] || record_complete "$selected_component" || fail "指定组件未安装：$selected_component"
   [[ ${#components[@]} -gt 0 ]] || fail "这台主机上没有有效的安装记录：$registry"
 
   # One update at a time, taken before this run writes a snapshot, a service definition or
@@ -1196,6 +1205,7 @@ main() {
   # anything is downloaded or stopped.
   if [[ -n $database_file ]]; then
     [[ -n $version ]] || fail '--database 必须与 --version 一起使用。'
+    [[ $selected_component != agent ]] || fail '--database 不能与 --component agent 一起使用。'
     record_complete panel || fail '--database 只用于已安装面板的主机。'
     [[ -f $database_file && ! -L $database_file ]] \
       || fail "--database 必须是普通文件，不能是符号链接：$database_file"
@@ -1209,7 +1219,7 @@ main() {
       || fail '无法查询 GitHub 最新发布；请检查网络，或用 --version 指定版本。'
     tag=$(printf '%s\n' "$release" | grep -m1 '"tag_name"' | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//' -e 's/".*//') \
       || fail 'GitHub 返回的内容里没有 tag_name。'
-    [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "最新发布的标签不是 vX.Y.Z：$tag"
+    [[ $tag == v* ]] && qui_valid_release_version "${tag#v}" || fail "最新发布的标签不是 vX.Y.Z 或 vX.Y.Z-rc.N：$tag"
     version=${tag#v}
   fi
 
@@ -1232,7 +1242,7 @@ main() {
   # message about this run says so: report_failure prints the matching --database command
   # and downgrade_guidance explains which copy fits. The target version does not have to
   # come with --database, and then the update is expected to fail on its health check.
-  if record_complete panel; then
+  if [[ $selected_component != agent ]] && record_complete panel; then
     installed_panel=$(installed_version panel)
     if version_is_older "$version" "$installed_panel"; then downgrade=true; fi
   fi
@@ -1286,7 +1296,7 @@ main() {
   # --database moves the panel down a version together with a copy from before the newer
   # one ran: a copy the target cannot open, or a target that is not older, would either
   # start a broken panel or migrate the copy forward again and make it pointless. Both
-  # versions have to be X.Y.Z to be ordered, which version_is_older also checks.
+  # versions must use the supported release grammar to be ordered, which version_is_older also checks.
   if [[ -n $database_file ]]; then
     if ! version_is_older "$version" "$installed_panel"; then
       fail '--database 只用于把面板降级到更旧的版本。'

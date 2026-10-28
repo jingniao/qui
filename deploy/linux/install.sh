@@ -62,7 +62,7 @@ qui_release_version() {
     [[ -z $value || $value == "$bundle_version" ]] || fail 'The qui core must come from the Agent bundle release.'
     value=$bundle_version
   fi
-  [[ $value =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'Provide --qui-version X.Y.Z matching the Agent release.'
+  qui_valid_release_version "$value" || fail 'Provide --qui-version X.Y.Z or X.Y.Z-rc.N matching the Agent release.'
   printf '%s' "$value"
 }
 while (($#)); do
@@ -110,6 +110,11 @@ removed=$registry/$component.removed
 core_target=''
 [[ -z $core ]] || core_target=/usr/local/lib/proxy-agent/$core
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# VERSION has the same grammar whether installing the panel or the Agent.
+if [[ -f $root/../VERSION ]]; then
+  qui_valid_release_version "$(cat -- "$root/../VERSION")" || fail 'Invalid bundle VERSION (expected X.Y.Z or X.Y.Z-rc.N).'
+fi
 
 [[ $(uname -s) == Linux && $EUID -eq 0 ]] || fail 'Run locally as root on Linux.'
 init_system=$(detect_init) || fail 'Neither systemd nor OpenRC is running on this host.'

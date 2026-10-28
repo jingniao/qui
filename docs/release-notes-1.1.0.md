@@ -12,6 +12,8 @@
 - 加密外部订阅源、按用户授权、缓存导入及 mihomo 客户端链；服务器元数据与提醒、真实可选指标、固定 TCP 探测、原生端口转发与按用户流量重置周期。
 - 沿用 Owner 的界面布局，移除伪造数据、隐式 Token 重置和浏览器凭据缓存。
 
+- qui-update 支持 RC 版本 `X.Y.Z-rc.N`、semver 优先级与 `--component panel|agent`。组合主机可先更新面板再更新 Agent；旧更新器的首次升级须从已审核并校验的归档运行新版 update.sh，见[部署 §5.0](deployment.md)。L4 本地完成，Linux/root 与主机验收仍待执行，RC1/RC2 未运行。
+
 ## 不兼容变化与升级前检查
 
 1. **设备管理 API 已移除。** 旧设备路由及带 `deviceId` 的订阅 Token 请求返回 410 `devices_removed`；旧 `maxDevices`、`maxConnections` API 字段退役，使用 `deviceLimit`（0–100，0 不限，升级默认 0）。设备策略作用域与页面设备字段移除。
@@ -40,18 +42,18 @@
 
 先完成验收和 Owner 批准，再备份数据库及身份材料，**先升级面板，再逐台升级 Agent**。1.1 面板可继续接受 1.0.9 Agent 的发布、回滚与 Xray 流量；旧 Agent 的新增统计/门控能力不可用且明确提示部分执行。再按能力选择 qui sing-box；换核心前清理目标核心不兼容入站并发布确认。sing-box 默认 `--core-source qui`，取同 qui 发布的静态归档与 SHA256SUMS；`--core-source official` 保留官方 glibc/musl 路径。Xray 始终官方。
 
-`qui-update` 的自动回滚与升级前数据库是回退路径。1.0.x 不能打开新迁移数据库，跨迁移降级需指定相应升级前数据库，见 [部署与升级](deployment.md) §5.1。当前 updater 只接受 X.Y.Z，拒绝 RC，即使离线 bundle 也拒绝；同机组件更新先 Agent 后面板，L4 的方案须由 Owner 决定，不能直接执行 RC 清单。
+`qui-update` 的自动回滚与升级前数据库是回退路径。1.0.x 不能打开新迁移数据库，跨迁移降级需指定相应升级前数据库，见 [部署与升级](deployment.md) §5.1。L4 已按 Owner 批准方案本地扩展 updater：支持 RC 与组件选择；首次使用须运行审核归档内的新版更新器。主机验收与 RC 清单执行仍需 Owner 批准。
 
 ## 已知限制与待验收
 
-以下对应 [计划 §12.3](v1.1-plan.md) L1–L10，不是已解决项：
+以下对应 [计划 §12.3](v1.1-plan.md) L1–L10；其中 L4 已本地解决、待主机验收：
 
 | 项目 | 范围与状态 |
 | --- | --- |
 | L1 | 每用户速率限制不支持，已按决策移除 |
 | L2 | 服务器调优/恢复和 nftables 转发需要新的特权边界批准；当前 sysctl 只读 |
 | L3 | 无 Agent 的导入节点不能作为受管服务器隧道 |
-| L4 | RC 版本被 updater 拒绝，组合主机组件顺序不满足检查点；待 Owner 方案 |
+| L4 | RC 与组件选择已本地修复；Linux/root 回归及 Owner/主机验收待执行，RC 未运行 |
 | L5 | 导入类型/选项受限，旧浏览器导入需重导并授权；客户端链只在 mihomo 中输出 |
 | L6 | 客户端链原生检查待 CI/Owner；恢复保留当前来源/撤销状态，旧备份不恢复被撤销授权 |
 | L7 | 可复现构建、静态 ELF、实际归档/溯源/sums、双架构 dry-run 待 CI（本机缺 readelf） |

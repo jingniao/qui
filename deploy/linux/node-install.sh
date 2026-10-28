@@ -36,9 +36,9 @@ repository=jingniao/qui
 fail() { printf '安装被拒绝：%s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<USAGE
-用法：node-install.sh --version X.Y.Z --panel HOST --ca-sha256 HEX --token TOKEN [选项]
+用法：node-install.sh --version X.Y.Z[-rc.N] --panel HOST --ca-sha256 HEX --token TOKEN [选项]
 
-  --version X.Y.Z       面板发布版本，必须与面板版本一致
+  --version X.Y.Z[-rc.N]       面板发布版本，必须与面板版本一致
   --panel HOST          面板地址：域名或 IPv4
   --ca-sha256 HEX       面板证书信任锚的 SHA-256（64 位小写十六进制，面板显示）
   --token TOKEN         一次性节点注册码
@@ -85,7 +85,7 @@ while (($#)); do
 done
 
 [[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
-[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '版本号必须是 X.Y.Z 形式。'
+[[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ ]] || fail '版本号必须是 X.Y.Z 或 X.Y.Z-rc.N（N 为无前导零的正整数）。'
 [[ $panel =~ ^[A-Za-z0-9.-]+$ ]] || fail '面板地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口）。'
 [[ $http_port =~ ^[0-9]{1,5}$ && $http_port -ge 1 && $http_port -le 65535 ]] || fail 'HTTPS 端口必须在 1-65535 之间。'
 [[ $grpc_port =~ ^[0-9]{1,5}$ && $grpc_port -ge 1 && $grpc_port -le 65535 ]] || fail 'gRPC 端口必须在 1-65535 之间。'

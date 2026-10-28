@@ -24,6 +24,8 @@
 # without the ".service" suffix and the systemd branch adds it, so the same call
 # works on both init systems. Callers set the global init_system from detect_init
 # before calling anything else.
+# Release helpers: qui_valid_release_version and qui_release_is_older share the
+# restricted release grammar and semver precedence with the release scripts.
 
 # Print the init system this host runs: "systemd" or "openrc". Prints nothing and
 # returns 1 when neither is running, so the caller decides how to refuse.
@@ -209,4 +211,34 @@ service_log_hint() {
     systemd) printf 'journalctl -u %s -n 50\n' "$name";;
     openrc) printf "grep -F '%s' /var/log/messages | tail -n 50\n" "$name";;
   esac
+}
+
+# Release versions shared by the installers, release builder and updater.
+# Keep the standalone node-install.sh validator identical (it runs before download).
+qui_valid_release_version() {
+  [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ ]]
+}
+
+# Compare canonical decimal strings without shell-integer overflow.
+qui_decimal_is_older() {
+  [[ ${#1} -lt ${#2} ]] || { [[ ${#1} -eq ${#2} && $1 < $2 ]]; }
+}
+
+# Semver precedence for our restricted release grammar; unknown versions are
+# unordered. Stable sorts AFTER every RC with the same major/minor/patch.
+qui_release_is_older() {
+  qui_valid_release_version "$1" && qui_valid_release_version "$2" || return 1
+  local left=${1%%-rc.*} right=${2%%-rc.*} i
+  local a=() b=()
+  IFS=. read -r -a a <<< "$left"
+  IFS=. read -r -a b <<< "$right"
+  for i in 0 1 2; do
+    if [[ ${a[i]} != "${b[i]}" ]]; then
+      qui_decimal_is_older "${a[i]}" "${b[i]}"
+      return $?
+    fi
+  done
+  [[ $1 == *-rc.* ]] || return 1
+  [[ $2 == *-rc.* ]] || return 0
+  qui_decimal_is_older "${1##*-rc.}" "${2##*-rc.}"
 }

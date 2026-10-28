@@ -17,7 +17,7 @@ import (
 // releaseVersion is the version form scripts/build-release.sh publishes and the
 // one-command install downloads. A local build reports "dev" and therefore gets
 // no install command in the register dialog.
-var releaseVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+var releaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$`)
 
 // Version is the panel release version, assigned by cmd/panel from the
 // -X main.version build flag. It stays empty for a plain `go run`, and the

@@ -125,3 +125,21 @@ func TestEnrollmentResponseCarriesInstallInfo(t *testing.T) {
 		t.Fatalf("install info does not match the trust anchor: %+v", enrolled.Install)
 	}
 }
+
+func TestInstallInfoReleaseVersions(t *testing.T) {
+	previous := Version
+	t.Cleanup(func() { Version = previous })
+	app := productionPanel(t)
+	for _, value := range []string{"0.0.0", "1.0.9", "1.1.0-rc.1", "1.1.0-rc.12", "1.1.0"} {
+		Version = value
+		if app.installInfo().Version != value {
+			t.Errorf("valid release rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"dev", "v1.1.0", "01.1.0", "1.1.0-rc.0", "1.1.0-rc.01", "1.1.0-rc.-1", "1.1.0-rc", "1.1.0-beta.1", "1.1.0+build", "1.1.0-rc.1+build", "1.1.0-rc.1\n"} {
+		Version = value
+		if app.installInfo().Version != "" {
+			t.Errorf("invalid release accepted: %q", value)
+		}
+	}
+}

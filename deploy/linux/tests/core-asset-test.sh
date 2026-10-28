@@ -20,6 +20,7 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 install_sh=$script_dir/../install.sh
 node_install_sh=$script_dir/../node-install.sh
+. "$script_dir/../service.sh"
 
 passes=0
 failed=0

@@ -19,7 +19,8 @@ version=${VERSION:-1.0.0}
 output=${OUTPUT_DIRECTORY:-$root/dist}
 architectures=(amd64 arm64)
 
-[[ $version =~ ^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$ ]] || { printf 'Invalid version: %s\n' "$version" >&2; exit 1; }
+. "$root/deploy/linux/service.sh"
+qui_valid_release_version "$version" || { printf 'Invalid version: %s\n' "$version" >&2; exit 1; }
 [[ $output == /* ]] || { printf 'OUTPUT_DIRECTORY must be an absolute path.\n' >&2; exit 1; }
 command -v go >/dev/null || { printf 'go is not on PATH.\n' >&2; exit 1; }
 command -v npm >/dev/null || { printf 'npm is not on PATH.\n' >&2; exit 1; }

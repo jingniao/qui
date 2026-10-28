@@ -228,6 +228,12 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 - 签名端：`cmd/release` 是离线工具，子命令为 `keygen`、`sign`、`verify`、`stage`、`fetch`、`prepare-agent`、`queue-agent`、`agent-result`。典型流程是 `keygen` 生成密钥对，`sign` 对本地二进制生成签名清单，`verify`/`stage` 校验并生成候选，`fetch`/`prepare-agent`/`queue-agent`/`agent-result` 面向本机已登记的 Agent 配置（`--agent-config`）。私钥始终留在离线签名端。
 - 节点侧：Agent 用配置里固定的公钥校验清单，按安装历史防重放，失败回滚到已确认镜像；受管 Agent 启动时会自行修复中断的切换（`internal/agent/agenthost/recovery.go`、`internal/agent/reconcile/core_rollback_repair.go`）。
 
+### RC 更新与组合主机的组件选择（L4，本地完成、待主机验收）
+
+`qui-update --component panel|agent` 只更新指定的已安装组件；不指定仍先 Agent 后面板。v1.1 在组合主机先运行 `--component panel`，确认后再 `--component agent`；RC1 只更新面板，Agent 保持 1.0.9。`qui` 菜单更新项仍使用默认方式，组合主机的 v1.1 升级应使用命令行组件选择。RC 版本必须是 `X.Y.Z-rc.N`（N 为无前导零的正整数），比较顺序为 `1.0.9 < 1.1.0-rc.1 < 1.1.0-rc.2 < 1.1.0`；线上显式指定 RC 使用同名 v 标签，离线仍必须同时提供 bundle/sums。旧版更新器不能识别新参数，首次更新从已审核并校验的 RC 归档运行新版 update.sh，完整命令见[部署与升级 §5.0](deployment.md#50-rc-与旧更新器的首次升级待-owner主机验收)。
+
+组件的回滚/恢复不替换或重启另一个组件，共享更新脚本与服务库随本次更新恢复；进入新更新前仍先处理已有未完成日志。面板数据库的备份、只读预检与跨迁移回退不变；`--database` 不能用于 `--component agent`。锁、10 秒健康窗口、systemd/OpenRC 和断电恢复机制均不变。RC1/RC2 仍 awaiting Owner approval，未执行。
+
 ## 11. 已移除的运维操作（不要再找这些命令）
 
 精简重构删掉了以下 Agent 本地运维模式（Phase 9/12 删除，`cmd/agent` 现在只有 14 个参数，含服务器强制出站的 `--apply-host-network`）。它们**不再存在**，对应的替代做法如下：
@@ -269,7 +275,7 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 | 1. 修改管理员账号密码 | 依次提示新用户名（留空保持不变）和两次新密码，确认后**短暂停止** `proxy-panel.service`，再以服务账号身份运行 `proxy-panel --config /etc/proxy-panel/config.yaml --set-owner-credentials`（用户名与口令两行从标准输入读入，口令不进 argv、不回显），然后按停止前的状态把服务启动回来。口令策略由程序校验，错误原样显示；成功后**所有 Owner 会话立即失效**，必须重新登录。 |
 | 2. 修改端口 | 只改 `http_address` 的端口，`grpc_address`（节点连接）不动：校验端口是 1-65535 的整数且与当前不同，端口与 `grpc_address` 相同时给一行提示；在 `/etc/proxy-panel` 里生成候选文件，先让程序 `--check-config` 校验，通过后把原文件备份为 `/etc/proxy-panel/config.yaml.bak`（属主与 0600 权限和原来一致）再原子替换；校验或备份失败时删除候选文件、保留原配置。最后询问是否立即重启，并提示放行防火墙与含旧端口的订阅链接需要用户刷新。 |
 | 3 / 4 / 5. 重启 / 启动 / 停止 | 直接 `systemctl restart`、`systemctl start`、`systemctl stop proxy-panel.service` 并打印结果状态；启动或重启失败会提示 `journalctl -u proxy-panel -n 50`。服务本来就在运行或已停止时只提示，不重复操作。 |
-| 6. 更新（从 GitHub） | 运行 `/usr/local/bin/qui-update`：默认取 `https://github.com/jingniao/qui/releases/latest`（也可 `--version X.Y.Z` 指定），下载归档与同一发布的 `SHA256SUMS` 并核对摘要，停止 `proxy-panel.service`，在停止状态下把数据库备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，再用归档里的 `deploy/linux/install.sh` 原地替换程序与单元，最后按停止前的状态启动服务，并要求它 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照与更新前的数据库（先把新版本的数据库保留为 `failed-update-*.db`），启动旧版本。按 Ctrl-C、SSH 断线或被 `kill` 时同样自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery` 在服务启动前完成回滚。目标版本打不开当前数据库（降级跨过了迁移）时不做任何替换，并列出可用 `--database` 一起回退的 `pre-update-*` 备份。只有回滚也失败时才保留快照并打印日志命令（细节见[部署与升级](deployment.md)第 5 节与 5.1）。 |
+| 6. 更新（从 GitHub） | 运行 `/usr/local/bin/qui-update`：默认取 `https://github.com/jingniao/qui/releases/latest`（也可 `--version X.Y.Z` 或 `--version X.Y.Z-rc.N` 指定），下载归档与同一发布的 `SHA256SUMS` 并核对摘要，停止 `proxy-panel.service`，在停止状态下把数据库备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，再用归档里的 `deploy/linux/install.sh` 原地替换程序与单元，最后按停止前的状态启动服务，并要求它 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照与更新前的数据库（先把新版本的数据库保留为 `failed-update-*.db`），启动旧版本。按 Ctrl-C、SSH 断线或被 `kill` 时同样自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery` 在服务启动前完成回滚。目标版本打不开当前数据库（降级跨过了迁移）时不做任何替换，并列出可用 `--database` 一起回退的 `pre-update-*` 备份。只有回滚也失败时才保留快照并打印日志命令（细节见[部署与升级](deployment.md)第 5 节与 5.1）。 |
 
 菜单只调用上面这些固定操作，不提供 shell 或日志查看入口。
 

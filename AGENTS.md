@@ -14,6 +14,8 @@
 
 **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，发布说明仍为草稿。
 
+- L4：qui-update 支持 `X.Y.Z-rc.N`、semver 优先级与 `--component panel|agent`；本地修复完成，Linux/root 与主机验收待执行，RC 未运行。
+
 - R1：订阅拆为中立代理模型、来源与格式注册表；增加 mihomo、legacy Clash 及一个全局客户端规则模板。
 - R2：外部订阅导入已实现，按用户授权、加密缓存，仅用于客户端；客户端链仅 mihomo 输出。
 - R3：Xray 保持官方发布核；sing-box 可用未修改上游源码的 qui 可复现构建，增加上游 `with_v2ray_api` 标签，官方核仍可用。
@@ -1866,6 +1868,8 @@ Agent 上报消息包括：
 ```
 
 说明：`/var/lib/proxy-panel/` 下实际还有面板自己的节点 CA 目录 `identity/`（`node_identity_directory`）。日志不写文件：两个程序都写 stdout，由 systemd 收进 journald（`journalctl -u proxy-panel`）。
+
+更新用法（L4）：新版 `qui-update --version X.Y.Z-rc.N --component panel|agent` 支持 RC；组合主机按 v1.1 顺序先 panel 再 agent，RC1 仅 panel、Agent 保持 1.0.9。不指定组件仍先 Agent 后面板。旧更新器首次使用须从已审核并校验的归档运行新版 `deploy/linux/update.sh`，见[部署与升级](docs/deployment.md)第 5.0 节；组件选择限定快照、日志与回滚范围，`--database` 不用于 agent。
 
 更新相关（面板与节点主机共用）：`backups/` 里有 `qui-update` 的更新前备份 `pre-update-<版本>-<时间>.db` 与回滚时保留的 `failed-update-<版本>-<时间>.db`；`/var/lib/proxycontrol-install/`（root 0700）保存安装记录、`operation.lock`、`update.lock`，更新进行中时还有快照 `rollback.*/`（被替换的文件、`updater`、`service.sh`、进度日志 `journal`）。开机恢复由 `/usr/local/lib/proxycontrol/update-recovery` 与 `proxycontrol-update-recovery.service`（OpenRC：`/etc/init.d/proxycontrol-update-recovery`）完成，它们排在 Agent、面板与强制出站单元之前，不记入安装记录。跨迁移降级面板用 `qui-update --version X.Y.Z --database <pre-update-X.Y.Z-*.db>`（见[部署与升级](docs/deployment.md)第 5.1 节）。
 

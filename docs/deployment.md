@@ -4,7 +4,7 @@ v1.1 补充（2026-10-28，尚未发布）：先升级面板，再逐台升级 A
 
 核心来源显式参数为 `--core-source qui|official`：sing-box 默认 qui，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各自架构归档）；`official` 保留官方版本与 musl 专用归档及摘要。Xray 保持官方。qui 构建仅添加上游 `with_v2ray_api` 标签，其逐用户流量开始计入额度；切换前告知用户并核对额度。构建可复现性、原生核检查、Linux/arm64 实跑仍待 CI/Owner，不以脚本存在作为通过。
 
-RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。现有 `qui-update` 只接受 `X.Y.Z`，拒绝 `1.1.0-rc.<sha>`，即使带 `--bundle` 也不行；同机安装两个组件时先 Agent 后面板，不能实现该检查点的面板先行要求。须先由 Owner 决定 L4 的预发布/组件选择方案，再执行进度记录中的检查清单，不能把 RC 冒充正式版本绕过。
+RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。L4 已按 Owner 批准的扩展方案本地修复：新版 `qui-update` 支持 `X.Y.Z-rc.N` 与 `--component`；Linux/root 回归与主机验收仍待执行。旧安装上的更新器仍不支持这些参数，首次 RC 更新须从审核过的归档运行新版更新器，见第 5 节。
 
 更新时间：2026-10-22（节点 Agent 支持 Alpine / OpenRC）。本文命令取自 `deploy/linux/*.sh`、`deploy/systemd/*.service`、`deploy/openrc/*`、`cmd/panel` 和 `cmd/agent` 的实际参数（`go run ./cmd/panel -h`、`go run ./cmd/agent -h`），文件名与路径取自 `deploy/examples/*.yaml` 和安装脚本。
 
@@ -200,10 +200,11 @@ qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sum
 ```
 
 - 它从 `https://github.com/jingniao/qui/releases` 下载 `proxy-control-<版本>-linux-<架构>.tar.gz` 和同一发布的 `SHA256SUMS`，按文件名核对归档的 SHA-256 后才解包，然后调用归档里的 `deploy/linux/install.sh` 原地替换程序、systemd 单元和脚本（`qui`、`qui-update`）；配置、节点身份与数据库都不动。**摘要只证明下载内容与仓库发布一致，信任仍建立在 GitHub 仓库本身**：它不下载也不执行别的东西。
-- 只接受 `vMAJOR.MINOR.PATCH` 形式的发布；版本由 `--version X.Y.Z` 指定，否则取 GitHub 上的最新发布。
+- 版本只接受 `X.Y.Z` 或 `X.Y.Z-rc.N`（三个版本段均无前导零，N 为无前导零的正整数），拒绝其他预发布标签与 build metadata。显式 `--version 1.1.0-rc.1` 在线下载使用标签 `v1.1.0-rc.1`，资产名为 `proxy-control-1.1.0-rc.1-linux-<架构>.tar.gz`；离线使用同名归档与配套 `SHA256SUMS`，摘要校验不变。未指定版本仍取 GitHub 最新正式发布，不自动选择 RC。
 - 面板更新：先停止 `proxy-panel.service`，在停止状态下把数据库（以及存在的 `-wal`）复制到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<YYYYmmdd-HHMMSS>.db`（属主 `proxy-panel`、0600），再替换程序，最后按停止前的状态启动服务并打印状态。
-- 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，两个组件从同一个归档更新，**先节点后面板**。
+- 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，不指定组件仍从同一个归档更新两个组件，**先节点后面板**（保持历史行为）。指定 `--component panel` 或 `--component agent` 只更新该组件，未安装则报错；v1.1 必须先 `--component panel`，验收后再 `--component agent`。
 - `--bundle` 与 `--sums` 必须同时给出，并且必须用 `--version` 指定版本（`SHA256SUMS` 里核对的文件名带版本号）；核对方式与下载时完全相同。
+- **组件隔离**：版本检查、停止/启动、快照、日志及回滚只针对选中组件的程序、服务、安装记录和附属文件；共享的 `qui-update`、`service.sh` 仍随该次更新快照/恢复，开机恢复 hook 仍按原机制共享。面板更新及其回滚不替换 Agent 程序、单元、强制出站文件或记录，也不停止/启动 Agent；Agent 更新及其回滚不触碰面板程序、单元、`qui`、记录或数据库。`--component agent` 不能与 `--database` 合用。启动前仍会恢复任何已有的未完成更新，这不受本次组件选择限制。
 - **数据库备份**：面板备份先写成 `.partial` 文件，同步到磁盘并与原文件逐字节比较后才改名为最终名字，所以 `pre-update-*.db` 要么完整、要么不存在；断电不会留下看起来可用的半截备份。
 - **数据库预检**（面板，1.0.3 起）：停止并备份后，脚本用**目标版本**的程序执行 `proxy-panel --check-database <备份>`（只读，在私有副本上检查完整性与迁移记录）。目标版本打不开这份数据库（数据库里有它不认识的迁移，即降级跨过了迁移）时，什么都不替换，删掉刚才的备份，重新启动面板，并列出可以一起回退的 `pre-update-<目标版本>-*.db` 备份（见 5.1）。目标版本早于 1.0.3、不认识这个参数，或程序在本机无法执行时，跳过预检：旧面板遇到更新的数据库会拒绝启动，由健康检查与回滚兜底。
 - **回滚快照与进度日志**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`service.sh`，面板加 `qui`，节点加强制出站的两个文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），再放入正在运行的 `qui-update` 与它的 `service.sh` 的副本，同步到磁盘后最后写进度日志 `journal`。日志记录组件、新旧版本、服务原来是否在运行、数据库备份路径和阶段：`prepared`（`install.sh` 运行前）→ `started`（新版本可能接触数据库之前）→ `committed`（健康检查通过）或 `restored`（回滚已放回文件与数据库）。每次写入都先写临时文件、同步、再改名，断电只会看到旧阶段或新阶段。保存不了快照或日志就不更新，并把服务启动回来。
@@ -221,6 +222,25 @@ qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sum
 - 断电保护依赖 `sync`（`syncfs`）把快照、日志与备份落盘；它保护不了会谎报写入完成的磁盘或虚拟化存储。
 - 更新前备份（`pre-update-*`）与回滚保留的数据库（`failed-update-*`）不会自动清理，确认不再需要后可手工删除。
 - **先更新面板，再更新节点**；面板升级期间节点继续用旧配置运行。
+
+### 5.0 RC 与旧更新器的首次升级（待 Owner/主机验收）
+
+旧版已安装的 `qui-update` 无法解析 RC 或组件参数。首次使用时，在 root shell 中从放有**已审核**归档与配套 SHA256SUMS 的目录执行下面的命令；先校验再解包，运行归档里的新版更新器（同目录的新版 service.sh 会被采用），仍由它执行备份、预检、快照、日志和回滚。不能只把 RC 改名为正式版本或直接运行 install.sh 绕过更新保护。以下为 amd64，其他架构须替换资产后缀；RC 编号由 Owner 指定。
+
+```sh
+rc_version='1.1.0-rc.1'
+arch=amd64
+rc_dir="proxy-control-${rc_version}-linux-${arch}"
+bundle="${rc_dir}.tar.gz"
+test -f "$bundle" || exit 1
+awk -v file="$bundle" '$2 == file { print }' SHA256SUMS | sha256sum --check --strict || exit 1
+tar -xzf "$bundle" || exit 1
+bash "$rc_dir/deploy/linux/update.sh" --component panel --version "$rc_version" --bundle "$bundle" --sums SHA256SUMS
+```
+
+校验或解包失败时停止，不执行下一行。RC1 到此为止，所有 Agent 保持 1.0.9。以后已安装新版更新器的组合主机可运行 `qui-update --component panel --version 1.1.0-rc.2 --bundle proxy-control-1.1.0-rc.2-linux-amd64.tar.gz --sums SHA256SUMS`；确认面板就绪后，再在每个节点主机（含组合主机）运行相同版本的 `--component agent`。仍为旧更新器的 Agent 主机须按上面的校验/解包方式运行归档内 update.sh，只把组件改为 agent。
+
+版本比较使用 semver 优先级：`1.0.9 < 1.1.0-rc.1 < 1.1.0-rc.2 < 1.1.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。安装记录继续使用原有 digest 格式和固定行号，不新增版本字段；实际版本仍读取程序的 `--version`，RC 不改变记录或恢复日志格式。
 
 ### 5.1 面板降级与数据库回退
 

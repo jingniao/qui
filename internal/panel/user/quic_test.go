@@ -21,7 +21,13 @@ func TestQUICDeviceCredentialsIndependentEncryptedAndRotatable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := repository.CreateDevice(ctx, u.ID, DeviceInput{Name: "Second", Protocols: input.AllowedProtocols})
+	otherInput := input
+	otherInput.Username = "other_quic"
+	other, err := repository.Save(ctx, "", otherInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.CreateDevice(ctx, other.ID, DeviceInput{Name: "Second", Protocols: input.AllowedProtocols})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,12 +29,25 @@ type Handler struct {
 	// called only after the delete succeeded, with the reason deleted or
 	// device deleted. Optional.
 	AccessRemoved func(ctx context.Context, userID, username, reason string)
+	// AccessChanged queues the automatic revision for a user whose credentials
+	// or grants may have changed: a save (protocols, node groups) or a
+	// credentials reset. The revision is only created for nodes whose user
+	// access surface differs. Optional.
+	AccessChanged func(ctx context.Context, userID, username, reason string)
 	// Observations fills in the live connection count and over-limit flag on
 	// returned users. Optional and nil-safe.
 	Observations *ConnectionObserver
+	Devices      *DeviceObserver
 }
 
 func (h *Handler) observe(ctx context.Context, account *User) {
+	if h.Devices != nil {
+		if view, err := h.Devices.View(ctx, *account); err == nil {
+			account.OnlineDevices = view.OnlineDevices
+			account.DeviceLimitEnforced = view.Enforced
+			account.DeviceLimitUnsupportedNodes = view.UnsupportedNodes
+		}
+	}
 	if h.Observations == nil {
 		return
 	}
@@ -43,7 +56,6 @@ func (h *Handler) observe(ctx context.Context, account *User) {
 		return
 	}
 	account.OnlineConnections = count
-	account.OverLimit = count != nil && account.MaxConnections > 0 && *count > account.MaxConnections
 }
 
 func (h *Handler) quotaChanged(ctx context.Context, userID string) {
@@ -64,10 +76,51 @@ func (h *Handler) accessRemoved(ctx context.Context, userID, username, reason st
 	}
 }
 
+func (h *Handler) accessChanged(ctx context.Context, userID, username, reason string) {
+	if h.AccessChanged != nil {
+		h.AccessChanged(ctx, userID, username, reason)
+	}
+}
+
 func (h *Handler) Register(mux *http.ServeMux) {
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/users": h.list, "POST /api/v1/users": h.save, "GET /api/v1/users/{id}": h.get, "PUT /api/v1/users/{id}": h.save, "DELETE /api/v1/users/{id}": h.delete, "GET /api/v1/users/{id}/devices": h.devices, "POST /api/v1/users/{id}/devices": h.createDevice, "GET /api/v1/devices": h.devices, "GET /api/v1/devices/{id}": h.getDevice, "PUT /api/v1/devices/{id}": h.updateDevice, "DELETE /api/v1/devices/{id}": h.deleteDevice, "POST /api/v1/devices/{id}/credentials/{protocol}/reset": h.rotate, "DELETE /api/v1/devices/{id}/credentials/{protocol}": h.rotate, "POST /api/v1/users/{id}/node-groups/{groupId}": h.grant, "DELETE /api/v1/users/{id}/node-groups/{groupId}": h.grant, "POST /api/v1/users/{id}/reset-traffic": h.resetTraffic} {
+	mux.Handle("GET /api/v1/users/{id}/devices-online", h.Auth.Require(http.HandlerFunc(h.devicesOnline), true))
+	mux.Handle("POST /api/v1/users/{id}/devices-online/reset", h.Auth.Require(http.HandlerFunc(h.devicesOnline), true))
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/users": h.list, "POST /api/v1/users": h.save, "GET /api/v1/users/{id}": h.get, "PUT /api/v1/users/{id}": h.save, "DELETE /api/v1/users/{id}": h.delete, "POST /api/v1/users/{id}/credentials/reset": h.resetCredentials, "POST /api/v1/users/{id}/node-groups/{groupId}": h.grant, "DELETE /api/v1/users/{id}/node-groups/{groupId}": h.grant, "POST /api/v1/users/{id}/reset-traffic": h.resetTraffic} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
+	// v1.1 manages access per user; the device API is gone. Its routes answer
+	// 410 so a stale caller gets a clear error instead of a 404 or a write.
+	for _, pattern := range []string{"GET /api/v1/users/{id}/devices", "POST /api/v1/users/{id}/devices", "GET /api/v1/devices", "GET /api/v1/devices/{id}", "PUT /api/v1/devices/{id}", "DELETE /api/v1/devices/{id}", "POST /api/v1/devices/{id}/credentials/{protocol}/reset", "DELETE /api/v1/devices/{id}/credentials/{protocol}"} {
+		mux.Handle(pattern, h.Auth.Require(http.HandlerFunc(devicesRemoved), true))
+	}
+}
+
+func devicesRemoved(w http.ResponseWriter, _ *http.Request) {
+	httpapi.Error(w, 410, "devices_removed", "设备管理已在 v1.1 移除：权限、凭据与订阅按用户管理")
+}
+
+// resetCredentials re-issues every proxy credential of the user. The old
+// settings stop working once the automatic revision with the new ones has been
+// applied on the nodes.
+func (h *Handler) resetCredentials(w http.ResponseWriter, r *http.Request) {
+	account, err := h.Repository.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	if err := h.Repository.ResetCredentials(r.Context(), account.ID); err != nil {
+		h.fail(w, err)
+		return
+	}
+	if h.Devices != nil {
+		h.Devices.Changed()
+	}
+	h.accessChanged(r.Context(), account.ID, account.Username, "credentials reset")
+	if err := h.audit(r, "重置用户凭据", account.Username); err != nil {
+		h.internal(w, err)
+		return
+	}
+	w.WriteHeader(204)
 }
 func (h *Handler) audit(r *http.Request, action, target string) error {
 	return h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, action, target, "成功", r.RemoteAddr)
@@ -123,6 +176,10 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.quotaChanged(r.Context(), user.ID)
 	}
+	if h.Devices != nil {
+		h.Devices.Changed()
+	}
+	h.accessChanged(r.Context(), user.ID, user.Username, "updated")
 	if err := h.audit(r, "保存代理用户", user.Username); err != nil {
 		h.internal(w, err)
 		return
@@ -147,6 +204,10 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	if h.Devices != nil {
+		h.Devices.Admission.Reset(id)
+		h.Devices.Changed()
+	}
 	h.accessRemoved(r.Context(), id, account.Username, "deleted")
 	if err := h.audit(r, "删除代理用户", id); err != nil {
 		h.internal(w, err)
@@ -154,117 +215,13 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
-func (h *Handler) devices(w http.ResponseWriter, r *http.Request) {
-	page, size, err := httpapi.Pagination(r)
-	if err != nil {
-		h.fail(w, errors.New("invalid pagination"))
-		return
-	}
-	userID := r.PathValue("id")
-	if userID != "" {
-		if _, err := h.Repository.Get(r.Context(), userID); err != nil {
-			h.fail(w, err)
-			return
-		}
-	}
-	items, total, err := h.Repository.Devices(r.Context(), userID, page, size)
-	if err != nil {
-		h.fail(w, err)
-		return
-	}
-	httpapi.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "pageSize": size})
-}
-func (h *Handler) createDevice(w http.ResponseWriter, r *http.Request) {
-	var input DeviceInput
-	if err := httpapi.Decode(w, r, &input); err != nil {
-		h.fail(w, err)
-		return
-	}
-	device, err := h.Repository.CreateDevice(r.Context(), r.PathValue("id"), input)
-	if err != nil {
-		h.fail(w, err)
-		return
-	}
-	if err := h.audit(r, "创建设备与凭据", device.ID); err != nil {
-		h.internal(w, err)
-		return
-	}
-	httpapi.JSON(w, 201, device)
-}
-func (h *Handler) getDevice(w http.ResponseWriter, r *http.Request) {
-	device, err := h.Repository.Device(r.Context(), r.PathValue("id"))
-	if err != nil {
-		h.fail(w, err)
-		return
-	}
-	httpapi.JSON(w, 200, device)
-}
-func (h *Handler) updateDevice(w http.ResponseWriter, r *http.Request) {
-	var input DeviceInput
-	if err := httpapi.Decode(w, r, &input); err != nil {
-		h.fail(w, err)
-		return
-	}
-	if err := h.Repository.UpdateDevice(r.Context(), r.PathValue("id"), input); err != nil {
-		h.fail(w, err)
-		return
-	}
-	if err := h.audit(r, "修改设备", r.PathValue("id")); err != nil {
-		h.internal(w, err)
-		return
-	}
-	w.WriteHeader(204)
-}
-func (h *Handler) deleteDevice(w http.ResponseWriter, r *http.Request) {
-	// Deleting the row leaves the device's credentials in the published
-	// revisions the nodes run, so the device and its owner are resolved before
-	// the cascade removes them, for the revocation below.
-	device, err := h.Repository.Device(r.Context(), r.PathValue("id"))
-	if err != nil {
-		h.fail(w, err)
-		return
-	}
-	account, err := h.Repository.Get(r.Context(), device.UserID)
-	if err != nil {
-		h.fail(w, err)
-		return
-	}
-	if err := h.Repository.DeleteDevice(r.Context(), r.PathValue("id")); err != nil {
-		h.fail(w, err)
-		return
-	}
-	h.accessRemoved(r.Context(), account.ID, account.Username, "device deleted")
-	if err := h.audit(r, "删除设备", r.PathValue("id")); err != nil {
-		h.internal(w, err)
-		return
-	}
-	w.WriteHeader(204)
-}
-func (h *Handler) rotate(w http.ResponseWriter, r *http.Request) {
-	revoke := r.Method == http.MethodDelete
-	credential, err := h.Repository.RotateCredential(r.Context(), r.PathValue("id"), r.PathValue("protocol"), revoke)
-	if err != nil {
-		h.fail(w, err)
-		return
-	}
-	action := "重置设备凭据"
-	if revoke {
-		action = "撤销协议凭据"
-	}
-	if err := h.audit(r, action, r.PathValue("id")+":"+r.PathValue("protocol")); err != nil {
-		h.internal(w, err)
-		return
-	}
-	if revoke {
-		w.WriteHeader(204)
-	} else {
-		httpapi.JSON(w, 201, credential)
-	}
-}
 func (h *Handler) grant(w http.ResponseWriter, r *http.Request) {
 	if err := h.Repository.Grant(r.Context(), r.PathValue("id"), r.PathValue("groupId"), r.Method == http.MethodDelete); err != nil {
 		h.fail(w, err)
 		return
+	}
+	if account, err := h.Repository.Get(r.Context(), r.PathValue("id")); err == nil {
+		h.accessChanged(r.Context(), account.ID, account.Username, "updated")
 	}
 	if err := h.audit(r, "修改用户节点组授权", r.PathValue("id")); err != nil {
 		h.internal(w, err)

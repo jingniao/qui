@@ -1,8 +1,10 @@
 # 协议与能力支持表（W12）
 
+v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列第 7 节为准；真实核心 CI 与实机证据仍待 CI/Owner，源码支持不等于通过。
+
 更新：2026-10-17（Phase 14 复核，原表 Phase 6.5）。性质：从当前源码与官方上游核提取的**结构化支持表**，不是验收报告，不含运行证据。本轮只做源码、必要编译和文档；未运行测试、核心、节点、浏览器或真实迁移。
 
-本表只描述**官方上游核**（计划 D1）：未修改的 Xray 26.x 与 sing-box 1.14.x 官方发布二进制。fork 专有维度（`egress_proof`、`inbound_bytes`）已随 Phase 6.4 删除，受控核版本号与 `proxycontrol_*` 能力标记不再存在。
+本表描述未修改的官方上游能力：Xray 26.x 官方发布核、sing-box 1.14.x 官方核及加上游标签的 qui 构建。fork 专有维度（`egress_proof`、`inbound_bytes`）已删除，v1.1 不恢复补丁核；账户统计和门控的新能力单独协商。
 
 ## 1. 依据与用法
 
@@ -52,9 +54,9 @@
 | 维度 | 含义 |
 | --- | --- |
 | `user_identity` | 入站可识别用户/设备身份 |
-| `account_metering` | 可计量账户流量（Xray 每用户；sing-box 仅节点总量，见第 4 节） |
+| `account_metering` | 可计量账户流量（Xray 与有标签/能力的 sing-box 每用户，无标签官方 sing-box 仅节点总量） |
 | `quota` | 参与用户额度计算（面板软执行，D3） |
-| `concurrency` | 并发/在线数为观测软限制（D2，面板只告警不断开） |
+| `concurrency` | v1.1 源地址估计与运行时设备门控，按协商能力执行，见第 7 节 |
 | `subscription` | 可进入用户订阅 |
 | `udp` / `ipv6` / `tls` / `quic` / `transport_ws` / `transport_grpc` | 协议/传输族能力 |
 
@@ -62,8 +64,8 @@
 
 ## 4. 官方上游无法提供的部分（D4/D5）
 
-- **每用户流量与在线数只有 Xray**：`StatsService` 的 `QueryStats`（`user>>>` 前缀，`reset:false` 读累计值，面板按游标差分）与 `GetStatsOnline`；在线数为去重客户端 IP 数，回环地址排除（`internal/agent/core/xray/online.go`）。
-- **sing-box 节点只报节点总量**：Clash API `/connections` 的 `uploadTotal` / `downloadTotal` 累计值差分（核心重启时基线归零，不重复计）。`/connections` 元数据不含用户，因此 sing-box 的每用户流量与在线数为 unknown（D5）；每用户额度只统计 Xray 节点上看到的流量。
+- **Xray 每用户统计**：`StatsService` 的 `QueryStats`（`user>>>` 前缀，`reset:false` 读累计值、按游标差分）和在线 IP RPC；回环排除，源地址不是 TCP 会话数。
+- **sing-box 按能力区分**：有 `with_v2ray_api` 且 Agent 上报 `singbox_user_stats` 时读取账户累计字节并计入额度；无标签官方核仍用 Clash API 节点总量，不能编造用户用量。在线设备来自日志用户与 Clash 源地址联接，不能由节点总量推导。
 - **出口组**：Xray 的主备/延迟优先由 Agent 选择（核内没有“首健康”策略），轮询渲染 `routing.balancers` 的 `roundRobin` + `observatory` + `fallbackTag`；sing-box 的轮询与延迟优先都渲染 `urltest`，主备由 Agent 选择。权重策略已移除（迁移 `0104_egress_weighted_to_round_robin.sql` 把旧组映射为 `round_robin`）。
 - **每域名精确字节**：不可得；访问记录字节列为空，UI 显示“—”（Phase 7.4 处理可空与显示）。
 - **跨中转的实际出口节点**：只记录策略在该节点解析出的**配置出口**，标注“configured egress”。
@@ -90,3 +92,30 @@
 - 后续升级由面板“系统 → 核心版本”录入 `组件 / 稳定版本号 / 官方 GitHub 资源 URL / 归档 SHA-256`（Phase 8，`CoreUpdateRequest` schema 2），节点侧再次校验摘要后切换，健康失败回滚；核心不再使用签名目录，签名目录只服务 Agent 自更新。
 - 本表以 Xray 26.3.27 与 sing-box 1.14.3 为基准版本；换成其他稳定版本时需重新核对本表。
 - Alpine（musl）节点装 sing-box 时 `install.sh` 与 `node-install.sh` 取官方的 `-musl` 归档（glibc 归档在那里起不来），摘要按架构与 libc 各自固定；Xray 只发静态二进制，不分 libc。
+
+## 7. v1.1 格式、账户计数与门控
+
+| 协议/功能 | URI / Base64 | sing-box 片段 | mihomo（clash） | legacy Clash |
+| --- | --- | --- | --- | --- |
+| HTTP、SOCKS5、Shadowsocks、Trojan | 支持 | 支持 | 支持 | 支持 |
+| VLESS | 支持 | 支持 | 支持 | 省略并警告 |
+| Hysteria2、TUIC | 支持；固定 CA 时省略 | 支持，含固定证书 | 支持，固定证书转指纹 | 省略并警告 |
+| WireGuard | 支持既有导出 | 支持既有导出 | 支持 | 省略并警告 |
+| 全局规则模板 | 不适用 | 不适用（不是完整配置） | 支持规则与 provider | 受限，无 GEOSITE/RULE-SET/provider |
+| 客户端链 | 省略依赖链并警告 | 省略依赖链并警告 | `dialer-proxy` | 省略依赖链并警告 |
+| forward 入站 | 不进入订阅 | 不进入订阅 | 不进入订阅 | 不进入订阅 |
+
+格式别名、预览警告与显式 `?format=` 优先规则见 AGENTS §10.3；UA 表仍为空，不能宣称客户端自动识别通过。每格式按自己能力过滤，不把不支持协议改写为另一协议。
+
+| 核心/能力 | 每用户字节与额度 | 在线设备估计/门控 |
+| --- | --- | --- |
+| 官方 Xray | 累计 StatsService 计数，进入统一额度 | 在线 IP；运行时规则阻止新连接，既有连接保留 |
+| qui sing-box，`with_v2ray_api` 且 Agent 声明 `singbox_user_stats` | 私有 loopback v2ray API 累计账户计数，游标/spool 去重，进入统一额度 | 用户日志与 Clash 源 IP/端口联接；周期关闭匹配连接，另需观测/门控能力协商 |
+| 官方 sing-box 无用户计数标签 | 仍仅节点总量，每用户未知，不计入额度 | 单独按观测能力判断；缺能力明确部分执行，不能从字节标签推断门控支持 |
+| 旧 Agent | 保持兼容路径，无新增 sing-box 用户统计 | 不发送门控，部分执行 |
+| WireGuard | 按原核心可归属能力；共享密钥一次一端 | 不计入限制 |
+| 原生 forward | 无用户身份，不计用户额度 | 不计入限制，无用户访问归属 |
+
+设备限制是 IPv4 / IPv6 /64 跨入口去重估计，NAT/双栈/切网有误差，TTL 过期放行。Xray SOCKS5 UDP 无用户归属不能门控；Xray 无 Hysteria2/TUIC 入站。sing-box 的 Hysteria2/TUIC UDP 数据报门控尚待专项实验（L8），不以 QUIC TCP 流关闭替代。每域名字节仍可空，账户统计不改变 D4。
+
+默认 sing-box 来源改为同发布的 qui 静态归档（未修改上游 v1.14.4 加上游标签，架构内 glibc/musl 共用）；显式 `--core-source official` 才用历史官方/musl 路径。两核原生 forward 支持 TCP/UDP，必须声明独立能力。A8/A9/A10/AU6 的原生、构建与实机证据状态见验收矩阵；本轮没有执行代理核心。

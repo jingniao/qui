@@ -3,6 +3,8 @@ package xray
 import (
 	"context"
 	"errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"net"
 	"proxycontrol/pkg/contracts/traffic"
 	stats "proxycontrol/pkg/contracts/xraystatspb"
@@ -58,9 +60,31 @@ func (a *Adapter) ConnectionSnapshot(ctx context.Context) (traffic.ConnectionSna
 		if value < 0 || value > 100000000 {
 			return traffic.ConnectionSnapshot{}, errors.New("online count exceeds bounds")
 		}
-		accounts = append(accounts, traffic.ConnectionAccount{CredentialID: a.current.StatsAccounts[name].CredentialID, Connections: uint64(value)})
+		account := traffic.ConnectionAccount{CredentialID: a.current.StatsAccounts[name].CredentialID, Connections: uint64(value)}
+		ips, ipErr := stats.NewStatsServiceClient(connection).GetStatsOnlineIpList(queryCtx, &stats.GetStatsOnlineIpListRequest{Name: name + ">>>online"})
+		if ipErr == nil || status.Code(ipErr) == codes.NotFound {
+			account.AddressesMeasured = true
+			keys := map[string]bool{}
+			if ips != nil {
+				for raw := range ips.Ips {
+					if key, ok := traffic.AddressKey(raw); ok {
+						keys[key] = true
+					}
+				}
+			}
+			for key := range keys {
+				account.AddressKeys = append(account.AddressKeys, key)
+			}
+			sort.Strings(account.AddressKeys)
+		}
+		accounts = append(accounts, account)
 		total += uint64(value)
 	}
-	sample = traffic.ConnectionSnapshot{NodeID: a.current.NodeID, Revision: a.current.Revision, CoreEpoch: a.statsEpoch, ObservedAt: time.Now().UTC(), Scope: traffic.ConnectionScope, Connections: total, Accounts: accounts}
+	sample = traffic.ConnectionSnapshot{ObservationContractVersion: 2, DeviceGateSupported: a.probeDeviceGate(ctx), NodeID: a.current.NodeID, Revision: a.current.Revision, CoreEpoch: a.statsEpoch, ObservedAt: a.gateNow().UTC(), Scope: traffic.ConnectionScope, Connections: total, Accounts: accounts}
+	for _, account := range sample.Accounts {
+		if !account.AddressesMeasured {
+			sample.DeviceGateSupported = false
+		}
+	}
 	return sample, sample.Validate()
 }

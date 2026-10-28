@@ -16,7 +16,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp, ba
 	if _, err := tx.ExecContext(ctx, "INSERT INTO system_settings(key,value_json) SELECT key,value_json FROM restore_source.system_settings WHERE key='runtime_policy'"); err != nil {
 		return err
 	}
-	if _, err := readRuntimeSettings(ctx, tx); err != nil {
+	if _, err := readRuntimeSettings(ctx, tx, r.formats); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM release_catalogue"); err != nil {

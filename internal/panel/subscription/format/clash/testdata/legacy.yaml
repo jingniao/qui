@@ -1,0 +1,189 @@
+mixed-port: 7890
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: false
+dns:
+    enable: true
+    ipv6: false
+    enhanced-mode: fake-ip
+    nameserver:
+        - 223.5.5.5
+        - https://dns.example/dns-query
+    fallback:
+        - tls://1.1.1.1
+proxies:
+    - name: http plain
+      type: http
+      server: 203.0.113.10
+      port: 8080
+      username: alice
+      password: pw
+    - name: http tls
+      type: http
+      server: 203.0.113.10
+      port: 8443
+      username: alice
+      password: pw
+      tls: true
+      sni: h.example.com
+    - name: socks5 plain
+      type: socks5
+      server: 203.0.113.10
+      port: 1080
+      username: alice
+      password: pw
+      udp: true
+    - name: socks5 tls
+      type: socks5
+      server: 203.0.113.10
+      port: 1443
+      username: alice
+      password: pw
+      udp: true
+      tls: true
+    - name: ss default cipher
+      type: ss
+      server: 198.51.100.7
+      port: 8388
+      password: ss-secret
+      cipher: chacha20-ietf-poly1305
+      udp: true
+    - name: ss aes-128-gcm
+      type: ss
+      server: 198.51.100.7
+      port: 8389
+      password: ss-secret
+      cipher: aes-128-gcm
+      udp: true
+    - name: ss aes-256-gcm
+      type: ss
+      server: 198.51.100.7
+      port: 8390
+      password: ss-secret
+      cipher: aes-256-gcm
+      udp: true
+    - name: ss xchacha20
+      type: ss
+      server: 198.51.100.7
+      port: 8391
+      password: ss-secret
+      cipher: xchacha20-ietf-poly1305
+      udp: true
+    - name: trojan tcp
+      type: trojan
+      server: 203.0.113.10
+      port: 4443
+      password: trojan-secret
+      udp: true
+      sni: t.example.com
+    - name: trojan ws
+      type: trojan
+      server: 203.0.113.10
+      port: 5443
+      password: trojan-secret
+      udp: true
+      sni: t.example.com
+      network: ws
+      ws-opts:
+        path: /t
+    - name: trojan grpc
+      type: trojan
+      server: 203.0.113.10
+      port: 6443
+      password: trojan-secret
+      udp: true
+      sni: t.example.com
+      network: grpc
+      grpc-opts:
+        grpc-service-name: tsvc
+proxy-groups:
+    - name: PROXY
+      type: select
+      proxies:
+        - AUTO
+        - FALLBACK
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+        - DIRECT
+    - name: AUTO
+      type: url-test
+      proxies:
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+    - name: FALLBACK
+      type: fallback
+      proxies:
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+    - name: DOMESTIC
+      type: select
+      proxies:
+        - DIRECT
+        - PROXY
+    - name: ADBLOCK
+      type: select
+      proxies:
+        - REJECT
+        - DIRECT
+    - name: 日本
+      type: select
+      proxies:
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+        - DIRECT
+    - name: 空组
+      type: select
+      proxies:
+        - DIRECT
+rules:
+    - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+    - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+    - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+    - IP-CIDR6,2001:db8::/32,DIRECT,no-resolve
+    - DST-PORT,25/465-587,REJECT
+    - DOMAIN-KEYWORD,google,PROXY
+    - DOMAIN-KEYWORD,github,PROXY
+    - DOMAIN-SUFFIX,openai.com,PROXY
+    - GEOIP,CN,DIRECT
+    - MATCH,PROXY

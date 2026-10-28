@@ -30,4 +30,9 @@ export const deploymentAPI = {
   deployBatch: (id: string) => request<DeploymentBatch>(`/deployment-batches/${encodeURIComponent(id)}/deploy`, 'POST'),
   rollbackBatch: (id: string) => request<DeploymentBatch>(`/deployment-batches/${encodeURIComponent(id)}/rollback`, 'POST'),
   rollbackNode: (nodeId: string, revision: number) => request(`/nodes/${encodeURIComponent(nodeId)}/rollback`, 'POST', { revision }),
+  nodeRevisions: (nodeId: string, page = 1, pageSize = 20) => request<Page<Revision>>(`/revisions?nodeId=${encodeURIComponent(nodeId)}&page=${page}&pageSize=${pageSize}`),
+  // Creates the node's revision from its business data and publishes it in one
+  // step; a refused deploy still leaves the draft and names it in the error.
+  publishNode: (nodeId: string, summary: string) => request<{ revision: number; status: string }>(`/nodes/${encodeURIComponent(nodeId)}/publish`, 'POST', { summary }),
+  deployRevision: (id: number) => request(`/revisions/${id}/deploy`, 'POST'),
 };

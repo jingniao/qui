@@ -13,11 +13,11 @@ import (
 	"strconv"
 )
 
-// experimentalOptions renders only upstream sing-box experimental modules.
-// Official builds have no v2ray API (plan D5) and no fork connection module, so
-// the Clash API is the only control surface the agent may render.
+// experimentalOptions renders upstream modules only. The v2ray API is enabled
+// separately when the installed binary advertises its build tag.
 type experimentalOptions struct {
 	ClashAPI *clashAPIOptions `json:"clash_api,omitempty"`
+	V2rayAPI *v2rayAPIOptions `json:"v2ray_api,omitempty"`
 }
 type clashAPIOptions struct {
 	ExternalController string `json:"external_controller"`
@@ -57,16 +57,36 @@ func configureStats(doc *document, state desiredstate.State, port int, secret st
 	return nil
 }
 
-// TrafficCounters reports per-user byte deltas for the running configuration.
-// Official sing-box builds expose no per-user statistics: the release binaries
-// are not built with the v2ray API (plan D5) and the Clash API does not name the
-// user of a connection. The adapter therefore reports the source as unavailable
-// instead of inventing a value; the node totals it can read live in
-// NodeTrafficTotals.
-func (a *Adapter) TrafficCounters(context.Context) ([]traffic.Counter, error) {
-	return nil, ErrTelemetryUnavailable
+// TrafficCounters returns cumulative per-credential counters for one process
+// epoch. Builds without the v2ray API retain the unavailable D5 behavior.
+func (a *Adapter) TrafficCounters(ctx context.Context) ([]traffic.Counter, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.current.UserStatsEndpoint == "" {
+		return nil, ErrTelemetryUnavailable
+	}
+	if a.process == nil {
+		return nil, errors.New("core not running")
+	}
+	return readCounters(ctx, a.current, a.statsEpoch, &a.counterSources)
 }
 
-func (a *Adapter) SampleTraffic(context.Context) error {
-	return ErrTelemetryUnavailable
+func (a *Adapter) SampleTraffic(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sampleTrafficLocked(ctx)
+}
+
+func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
+	if a.current.UserStatsEndpoint == "" {
+		return ErrTelemetryUnavailable
+	}
+	if a.process == nil || a.hooks.TrafficSink == nil {
+		return nil
+	}
+	counters, err := readCounters(ctx, a.current, a.statsEpoch, &a.counterSources)
+	if err != nil {
+		return err
+	}
+	return a.hooks.TrafficSink(ctx, counters)
 }

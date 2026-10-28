@@ -1,0 +1,8 @@
+vless://5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&path=%2Fray&security=tls&sni=cdn.example.com&type=ws#Tokyo-01%20%C2%B7%20vless
+trojan://trojan-secret@203.0.113.10:8443?security=tls&serviceName=svc&sni=grpc.example.com&type=grpc#Tokyo-01%20%C2%B7%20trojan
+ss://YWVzLTI1Ni1nY206c3Mtc2VjcmV0@198.51.100.7:8388#Osaka-01%20%C2%B7%20shadowsocks
+http://alice:http-pw@198.51.100.7:8080#Osaka-01%20%C2%B7%20http
+socks5://alice:socks-pw@198.51.100.7:1080#Osaka-01%20%C2%B7%20socks5
+hysteria2://hy2-secret@[2001:db8::1]:443?alpn=h3&downmbps=100&sni=hy2.example.com&upmbps=50#Seoul-01%20%C2%B7%20hysteria2
+tuic://6ebcdcf2-4dbe-4a89-9b40-a63ab69aacef:tuic-secret@[2001:db8::1]:443?alpn=h3&congestion_control=bbr&sni=tuic.example.com&udp_relay_mode=quic#Seoul-01%20%C2%B7%20tuic
+wireguard://AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=@192.0.2.9:51820?address=10.99.0.2%2F32%2C2001%3Adb8%3A99%3A%3A2%2F128&mtu=1420&publickey=ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5%2FgIGCg4Q%3D#Seoul-01%20%C2%B7%20wireguard

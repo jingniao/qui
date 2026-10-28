@@ -146,7 +146,10 @@ func (o *ConnectionObserver) Evaluate(ctx context.Context, nodeID string) {
 		if err != nil || count == nil {
 			continue
 		}
-		over := account.MaxConnections > 0 && *count > account.MaxConnections
+		// v1.1 retired the per-user connection soft limit (plan C10); the column
+		// stays for older backups, but no user is ever over it any more. The
+		// online count is still reported.
+		over := false
 		if o.crossedIntoOver(userID, over) {
 			o.alert(account, *count)
 		}

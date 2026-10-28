@@ -32,8 +32,13 @@ import (
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/policy"
+	"proxycontrol/internal/panel/portal"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/importer"
+	"proxycontrol/internal/panel/subscription/rules"
+	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/panel/system"
 	backupArchive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/panel/user"
@@ -53,6 +58,7 @@ type Server struct {
 	Database           *sql.DB
 	Logger             *slog.Logger
 	HTTP               *http.Server
+	httpMux            *http.ServeMux
 	GRPC               *grpc.Server
 	health             *health.Server
 	Authority          *pki.Authority
@@ -68,8 +74,11 @@ type Server struct {
 	systemHandler      *system.Handler
 	authService        *auth.Service
 	quotaDeployer      *quotaDeployer
+	cycleScheduler     *cycleScheduler
+	importStore        *importer.Store
 	connectionStore    *connections.Store
 	connectionObserver *user.ConnectionObserver
+	deviceObserver     *user.DeviceObserver
 	admission          admission
 	startedAt          time.Time
 }
@@ -138,7 +147,11 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.connectionStore = connections.NewStore(3 * node.HeartbeatInterval)
 	s.connectionObserver = &user.ConnectionObserver{Repository: users, Nodes: nodeRepository, Store: s.connectionStore, Publish: eventBus.Publish}
 	control.Connections = s.connectionStore
-	control.ConnectionsRecorded = s.connectionObserver.Evaluate
+	devices := &user.DeviceObserver{Repository: users, Nodes: nodeRepository, States: deployments, Store: s.connectionStore, Admission: &connections.Admission{}, Publish: eventBus.Publish}
+	s.deviceObserver = devices
+	control.DeviceGates = devices.Command
+	control.GateChanges = devices.Subscribe
+	control.ConnectionsRecorded = func(ctx context.Context, id string) { s.connectionObserver.Evaluate(ctx, id); devices.Record(ctx, id) }
 	s.trafficService = &access.Service{Repository: s.accessRepository, Snapshots: deployments, Users: users}
 	control.AccessRecorder = s.trafficService
 	options := []grpc.ServerOption{grpc.MaxRecvMsgSize(4 << 20), grpc.MaxSendMsgSize(4 << 20), grpc.MaxConcurrentStreams(32), grpc.UnaryInterceptor(node.UnaryAuthentication), grpc.StreamInterceptor(node.StreamAuthentication), grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second}), grpc.KeepaliveParams(keepalive.ServerParameters{Time: 30 * time.Second, Timeout: 10 * time.Second})}
@@ -167,7 +180,13 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	pb.RegisterAgentControlServer(s.GRPC, control)
 	healthpb.RegisterHealthServer(s.GRPC, s.health)
 	mux := http.NewServeMux()
+	s.httpMux = mux
 	systemRepository := &system.Repository{Database: database, Reader: s.readPool}
+	// One format registry per process: the subscription handler renders through it,
+	// the runtime policy validates the stored default against it, and it must be in
+	// place before the startup read below.
+	subscriptionFormats := subscription.DefaultFormats()
+	systemRepository.SubscriptionFormats = subscriptionFormats.Known
 	if _, err := systemRepository.ReadRuntimeSettings(context.Background()); err != nil {
 		return nil, err
 	}
@@ -222,32 +241,44 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}}
 	s.systemHandler.Runtime = s.runtimeInfo
 	s.systemHandler.Register(mux)
-	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository}).Register(mux)
+	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository, BaseSettings: systemRepository}).Register(mux)
 	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments}
 	nodeHandler.Install = s.installInfo
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)
 	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault}, Nodes: nodeRepository}
+	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
 	policyService := &policy.Service{Repository: &policy.Repository{Database: database}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository}
 	proxyService.Policies = policyService
 	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: database, Connections: s.connectionStore}, Nodes: nodeRepository, Deployments: deployments, Proxies: proxyService.Repository, Settings: systemRepository}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
 	(&policy.Handler{Service: policyService, Auth: authHandler, Audit: systemRepository}).Register(mux)
-	proxyHandler := &proxy.Handler{Service: proxyService, Auth: authHandler, Audit: systemRepository}
+	proxyHandler := &proxy.Handler{Service: proxyService, Auth: authHandler, Audit: systemRepository, Users: users}
 	proxyHandler.Register(mux)
 	proxyHandler.RegisterGroups(mux)
+	// Every user has exactly one access identity with one credential per allowed
+	// protocol (plan 4.1). An upgrade (migration 0113), a restored older backup or
+	// a protocol list edited elsewhere is brought in line here, before the quota
+	// deployer's startup reconciliation publishes the nodes whose user access
+	// surface now differs.
+	if changed, err := users.EnsureAllAccessIdentities(context.Background()); err != nil {
+		return nil, err
+	} else if len(changed) > 0 {
+		logger.Info("access identities updated at startup", "users", len(changed))
+	}
 	quotaState := user.NewQuotaState(users)
 	if err := quotaState.Seed(context.Background()); err != nil {
 		return nil, err
 	}
 	s.quotaDeployer = newQuotaDeployer(logger, users, quotaState, proxyService, nodeRepository, deployments, eventBus.Publish)
 	s.quotaDeployer.record = systemRepository.Record
+	s.cycleScheduler = &cycleScheduler{users: users, nodes: nodeRepository, settings: systemRepository, quota: s.quotaDeployer, now: time.Now, publish: eventBus.Publish}
 	users.TrafficApplied = s.quotaDeployer.evaluate
 	// A deploy or rollback re-publishes a stored revision verbatim, so the node's
 	// user access surface is only known to be correct after the Deployment module
 	// reports it applied.
 	deployments.Applied = s.quotaDeployer.reconcileNode
-	userHandler := &user.Handler{Repository: users, Auth: authHandler, Audit: systemRepository, Nodes: nodeRepository, QuotaChanged: s.quotaDeployer.evaluateUser, ExpiryRenewed: s.quotaDeployer.renewExpiry, AccessRemoved: s.quotaDeployer.accessRemoved, Observations: s.connectionObserver}
+	userHandler := &user.Handler{Repository: users, Auth: authHandler, Audit: systemRepository, Nodes: nodeRepository, QuotaChanged: s.quotaDeployer.evaluateUser, ExpiryRenewed: s.quotaDeployer.renewExpiry, AccessRemoved: s.quotaDeployer.accessRemoved, AccessChanged: s.quotaDeployer.accessChanged, Observations: s.connectionObserver, Devices: devices}
 	userHandler.Register(mux)
 	// The subscription path only reads users, nodes and published state, and a
 	// snapshot that lags a just-committed write is acceptable there. Pointing
@@ -263,7 +294,27 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	subscriptionNodes.Database = subscriptionReads
 	subscriptionPublished := *deployments
 	subscriptionPublished.Database = subscriptionReads
-	(&subscription.Handler{Service: &subscription.Service{Repository: &subscription.Repository{Database: database, Reader: s.readPool}, Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished}, Auth: authHandler, Audit: systemRepository, Settings: systemRepository}).Register(mux)
+	subscriptionService := &subscription.Service{
+		Repository: &subscription.Repository{Database: database, Reader: s.readPool, Vault: configurationVault},
+		Users:      &subscriptionUsers,
+		Sources:    source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished}),
+		Formats:    subscriptionFormats,
+		Settings:   systemRepository,
+		Traffic:    s.accessRepository,
+		Rules:      &rules.Store{Database: subscriptionReads},
+	}
+	s.importStore = &importer.Store{Database: database, Reader: s.readPool, Vault: configurationVault}
+	subscriptionService.Sources.Register(s.importStore)
+	subscriptionService.ClientChains = s.importStore
+	(&importer.Handler{Store: s.importStore, Auth: authHandler, Audit: systemRepository}).Register(mux)
+	portalRepository := &portal.Repository{Database: database}
+	(&portal.Handler{Repository: portalRepository, Auth: authHandler, Audit: systemRepository,
+		Service: &portal.Service{Repository: portalRepository, Auth: authService, Users: users, Nodes: nodeRepository, Traffic: s.accessRepository, Subscriptions: subscriptionService, Devices: devices},
+	}).Register(mux)
+	// The client rule template is written through the writer connection and
+	// checked against the node and policy modules, which own what it refers to.
+	ruleStore := &rules.Store{Database: database, Lookup: ruleLookup{nodes: nodeRepository, policies: policyService.Repository}}
+	(&subscription.Handler{Service: subscriptionService, Auth: authHandler, Audit: systemRepository, Rules: ruleStore, ServiceRules: serviceRules{policies: policyService.Repository}}).Register(mux)
 	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux)
 	mux.Handle("GET /api/v1/events", eventBus.Handler(authHandler))
 	mux.Handle("GET /api/v1/operations", authHandler.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -382,8 +433,10 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(4)
+	jobs.Add(6)
 	defer func() { stopBackground(); jobs.Wait() }()
+	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
+	go func() { defer jobs.Done(); s.importStore.Run(background) }()
 	go func() {
 		defer jobs.Done()
 		s.quotaDeployer.run(background)

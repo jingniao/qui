@@ -11,5 +11,11 @@ const app = createApp(App);
 app.use(router);
 
 app.mount('#app');
-watch(() => authState.isAuthenticated, value => value ? connectEvents() : disconnectEvents(), { immediate: true });
-window.addEventListener('auth-expired', () => { clearSession(); router.replace('/login'); });
+watch(() => [authState.isAuthenticated, router.currentRoute.value.path] as const, ([authenticated, path]) => {
+  if (authenticated && !path.startsWith('/portal/')) connectEvents();
+  else disconnectEvents();
+}, { immediate: true });
+window.addEventListener('auth-expired', () => {
+  clearSession();
+  if (!router.currentRoute.value.path.startsWith('/portal/')) void router.replace('/login');
+});

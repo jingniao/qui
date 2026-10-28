@@ -45,7 +45,7 @@ func NewContext(state desiredstate.State) *Context {
 		credentials[credential.ID] = credential
 	}
 	for _, inbound := range state.Inbounds {
-		if !inbound.Enabled {
+		if !inbound.Enabled || inbound.Protocol == "forward" {
 			continue
 		}
 		entry := Inbound{Protocol: inbound.Protocol, Accounts: map[string]Account{}, Internal: len(inbound.CredentialIDs) > 0}

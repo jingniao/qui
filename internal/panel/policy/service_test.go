@@ -39,7 +39,7 @@ func fixture(t *testing.T) (*Service, string, user.User, user.Device, node.Group
 		t.Fatal(err)
 	}
 	users := &user.Repository{Database: database, Vault: configurationVault}
-	u, err := users.Save(ctx, "", user.Input{Username: "policy_user", Status: "active", MaxDevices: 3, MaxConnections: 8, AllowedProtocols: []string{"socks5"}, NodeGroupIDs: []string{group.ID}})
+	u, err := users.Save(ctx, "", user.Input{Username: "policy_user", Status: "active", AllowedProtocols: []string{"socks5"}, NodeGroupIDs: []string{group.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,13 +50,13 @@ func fixture(t *testing.T) (*Service, string, user.User, user.Device, node.Group
 	return &Service{Repository: &Repository{Database: database}, Nodes: nodes, Users: users, Proxies: &proxy.Repository{Database: database, Vault: configurationVault}, Settings: &system.Repository{Database: database}}, n.ID, u, device, group
 }
 func TestServiceSetsExpandAtPublicationAndMatchSimulator(t *testing.T) {
-	service, nodeID, u, device, group := fixture(t)
+	service, nodeID, u, _, group := fixture(t)
 	ctx := context.Background()
-	rule, err := service.Save(ctx, "", Input{Name: "Netflix blocked", Priority: 10, Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{u.ID}, DeviceIDs: []string{device.ID}, GroupIDs: []string{group.ID}}, Match: desiredstate.Match{ServiceIDs: []string{"service-netflix"}, Ports: []string{"443"}, Network: "tcp"}, Action: desiredstate.Action{Type: "Block"}})
+	rule, err := service.Save(ctx, "", Input{Name: "Netflix blocked", Priority: 10, Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{u.ID}, GroupIDs: []string{group.ID}}, Match: desiredstate.Match{ServiceIDs: []string{"service-netflix"}, Ports: []string{"443"}, Network: "tcp"}, Action: desiredstate.Action{Type: "Block"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := shared.Request{NodeID: nodeID, UserID: u.ID, DeviceID: device.ID, Domain: "www.netflix.com", Port: 443, Network: "tcp", Time: time.Now().UTC()}
+	request := shared.Request{NodeID: nodeID, UserID: u.ID, Domain: "www.netflix.com", Port: 443, Network: "tcp", Time: time.Now().UTC()}
 	decision, err := service.Simulate(ctx, request)
 	if err != nil || !decision.Matched || decision.PolicyID != rule.ID {
 		t.Fatal("simulator did not match expanded service", err)
@@ -92,18 +92,23 @@ func TestServiceSetsExpandAtPublicationAndMatchSimulator(t *testing.T) {
 		t.Fatal("builtin deletion accepted")
 	}
 }
-func TestPolicyReferencesDefaultAndDeviceOwnership(t *testing.T) {
+
+// v1.1 removed the device scope from policies and the simulator: both refuse it.
+func TestPolicyReferencesDefaultAndDeviceScopeRemoval(t *testing.T) {
 	service, nodeID, u, device, _ := fixture(t)
 	ctx := context.Background()
 	if _, err := service.Save(ctx, "", Input{Name: "Unknown user", Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{"missing"}}, Action: desiredstate.Action{Type: "Block"}}); err == nil {
 		t.Fatal("unknown user scope accepted")
 	}
-	decision, err := service.Simulate(ctx, shared.Request{NodeID: nodeID, UserID: u.ID, DeviceID: device.ID, Domain: "example.test", Port: 80, Network: "tcp"})
+	if _, err := service.Save(ctx, "", Input{Name: "Device scope", Enabled: true, Scope: desiredstate.Scope{DeviceIDs: []string{device.ID}}, Action: desiredstate.Action{Type: "Block"}}); err == nil {
+		t.Fatal("a device scope was accepted")
+	}
+	decision, err := service.Simulate(ctx, shared.Request{NodeID: nodeID, UserID: u.ID, Domain: "example.test", Port: 80, Network: "tcp"})
 	if err != nil || decision.Matched || decision.Action.Type != "Direct" {
 		t.Fatal("default rule incorrect", err)
 	}
-	if _, err := service.Simulate(ctx, shared.Request{NodeID: nodeID, UserID: "different-user", DeviceID: device.ID, Domain: "example.test", Port: 80, Network: "tcp"}); err == nil {
-		t.Fatal("device ownership mismatch accepted")
+	if _, err := service.Simulate(ctx, shared.Request{NodeID: nodeID, UserID: u.ID, DeviceID: device.ID, Domain: "example.test", Port: 80, Network: "tcp"}); err == nil {
+		t.Fatal("a device simulation was accepted")
 	}
 	custom, err := service.Repository.SaveService(ctx, "", ServiceInput{Name: "Custom development", Enabled: true, Domains: []string{"git.example.test"}, CIDRs: []string{"192.0.2.0/24"}})
 	if err != nil {

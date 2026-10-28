@@ -135,7 +135,7 @@ func TestAuthenticationPermissionsAndCredentialRotation(t *testing.T) {
 	if err := service.Repository.Database.QueryRow("SELECT token_hash FROM sessions").Scan(&storedToken); err != nil {
 		t.Fatal(err)
 	}
-	if storedToken == ownerCookie.Value || storedToken != auth.TokenHash(ownerCookie.Value) {
+	if storedToken == ownerCookie.Value || storedToken != auth.HashToken(ownerCookie.Value) {
 		t.Fatal("raw session token persisted")
 	}
 	viewerBody := map[string]string{"username": "viewer", "displayName": "Observer", "password": testPassword, "role": "Viewer"}

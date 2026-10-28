@@ -70,6 +70,43 @@ func (b *restoreBackoff) failed(err error, now time.Time) bool {
 func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconciler, logger *slog.Logger) {
 	var workers sync.WaitGroup
 	defer workers.Wait()
+	if source, ok := adapter.(interface{ SampleConnections(context.Context) }); ok {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				source.SampleConnections(ctx)
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
+	if target, ok := adapter.(interface{ TickDeviceGates(context.Context) error }); ok {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if reconciler.CoreUpdateHeld() {
+						continue
+					}
+					if target.TickDeviceGates(ctx) != nil {
+						logger.Warn("device gate failed open; routing recovery may be required")
+					}
+				}
+			}
+		}()
+	}
 	if prober, ok := adapter.(interface{ Probe(context.Context) error }); ok {
 		workers.Add(1)
 		go func() {

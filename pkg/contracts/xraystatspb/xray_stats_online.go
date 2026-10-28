@@ -5,11 +5,10 @@
 // github.com/XTLS/Xray-core/app/stats/command/command.proto (package
 // xray.app.stats.command). It carries QueryStats and the online RPC the Agent
 // reads per-user counts from; the upstream service also defines GetStats,
-// GetSysStats, GetStatsOnlineIpList, GetAllOnlineUsers and GetUsersStats, which
-// the Agent never calls and which are therefore not part of this subset.
+// GetSysStats, GetAllOnlineUsers and GetUsersStats are not used. The address
+// list RPC is generated from proto/xray_stats.proto through generate-proto.sh.
 //
-// protoc is not available in this environment, so the generated subset in this
-// package cannot be regenerated from upstream. The online RPC is therefore
+// The count-only online RPC remains a companion helper and is
 // invoked by name with the generated messages, which are wire-compatible with
 // the upstream xray.app.stats.command pair:
 //
@@ -19,8 +18,7 @@
 //     message, which QueryStatsResponse {repeated Stat stat = 1;} decodes into a
 //     single-element slice.
 //
-// When protoc becomes available this package can be replaced by the full
-// upstream generated code; no caller depends on the extra upstream messages.
+// No caller depends on the remaining upstream messages.
 
 package xraystatspb
 

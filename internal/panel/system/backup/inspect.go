@@ -344,6 +344,34 @@ func validateContents(ctx context.Context, work string) error {
 			return ErrArchive
 		}
 	}
+	// A backup taken after migration 0112 must carry the canvas table. The list
+	// above may not hold it: an older backup is migrated forward when it is
+	// restored, so the table is required exactly when the archive applied it.
+	var canvasApplied, canvasTables int64
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0112_canvas_schemes.sql'").Scan(&canvasApplied); err != nil {
+		return ErrArchive
+	}
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='canvas_schemes'").Scan(&canvasTables); err != nil {
+		return ErrArchive
+	}
+	if canvasApplied != canvasTables {
+		return ErrArchive
+	}
+	if err := validatePortal(ctx, database, configurationVault); err != nil {
+		return err
+	}
+	if err := validateDeviceLimit(ctx, database); err != nil {
+		return err
+	}
+	if err := validateNodeMetaReset(ctx, database); err != nil {
+		return err
+	}
+	if err := validateTCPProbes(ctx, database); err != nil {
+		return err
+	}
+	if err := validateImports(ctx, database, configurationVault); err != nil {
+		return err
+	}
 	for _, item := range []struct {
 		table, field, kind string
 		limit              int

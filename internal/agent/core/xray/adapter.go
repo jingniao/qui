@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/agent/collector"
 	"proxycontrol/internal/agent/core"
+	"proxycontrol/internal/agent/gate"
+	"proxycontrol/internal/agent/observer"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/vault"
 	access "proxycontrol/pkg/contracts/access"
@@ -23,33 +25,40 @@ import (
 )
 
 type Adapter struct {
-	TrafficSink     func(context.Context, []traffic.Counter) error
-	EnableStats     bool
-	statsPort       int
-	statsEpoch      string
-	counterSources  core.CounterSources
-	NodeID          string
-	AccessSink      func(access.Rollup) error
-	AccessRejected  func()
-	Now             func() time.Time
-	Path, Directory string
-	mu              sync.Mutex
-	process         *exec.Cmd
-	done            chan error
-	stopPending     bool
-	coreRun         *core.CoreRun
-	coreRunKey      *vault.Vault
-	coreRunPending  bool
-	runPID          int
-	runToken        string
-	runEpoch        string
-	runRevision     int64
-	runEnv          core.OSEnvironment
-	current         core.RenderedConfig
-	accessTail      *accessLogTail
-	history         map[int64]core.RenderedConfig
-	probePorts      map[string]int
-	outboundHealth  map[string]scheduler.Health
+	startedAt          time.Time
+	connectionObserver observer.Store
+	deviceGate         gate.Lease
+	gateDigest         string
+	gateRecovery       bool
+	gateFailed         bool
+	gateRunner         func(context.Context, []string, io.Writer) error
+	TrafficSink        func(context.Context, []traffic.Counter) error
+	EnableStats        bool
+	statsPort          int
+	statsEpoch         string
+	counterSources     core.CounterSources
+	NodeID             string
+	AccessSink         func(access.Rollup) error
+	AccessRejected     func()
+	Now                func() time.Time
+	Path, Directory    string
+	mu                 sync.Mutex
+	process            *exec.Cmd
+	done               chan error
+	stopPending        bool
+	coreRun            *core.CoreRun
+	coreRunKey         *vault.Vault
+	coreRunPending     bool
+	runPID             int
+	runToken           string
+	runEpoch           string
+	runRevision        int64
+	runEnv             core.OSEnvironment
+	current            core.RenderedConfig
+	accessTail         *accessLogTail
+	history            map[int64]core.RenderedConfig
+	probePorts         map[string]int
+	outboundHealth     map[string]scheduler.Health
 }
 
 func (a *Adapter) Name() string { return "xray" }
@@ -260,6 +269,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 		abandonErr := a.abandonCoreRunLocked()
 		return errors.Join(err, abandonErr)
 	}
+	a.startedAt = time.Now()
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()
 	// Bind the exact launched child's OS identity. Failure to record an
@@ -323,6 +333,9 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 			a.process = command
 			a.done = done
 			a.current = configuration
+			a.gateDigest = ""
+			a.gateRecovery = false
+			a.gateFailed = false
 			a.statsEpoch = epoch
 			return nil
 		}
@@ -453,6 +466,9 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	result := core.HealthStatus{CheckedAt: time.Now().UTC()}
+	if a.gateRecovery {
+		return result, errors.New("routing recovery requires core restart")
+	}
 	if a.process == nil {
 		if err := a.lifecycleReadyLocked(); err != nil {
 			return result, err

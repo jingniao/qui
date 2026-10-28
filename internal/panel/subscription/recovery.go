@@ -16,8 +16,8 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp str
 	if _, err := tx.ExecContext(ctx, "UPDATE subscription_tokens SET revoked_at=coalesce(revoked_at,(SELECT c.revoked_at FROM restore_source.subscription_tokens c WHERE c.id=subscription_tokens.id)) WHERE EXISTS(SELECT 1 FROM restore_source.subscription_tokens c WHERE c.id=subscription_tokens.id)"); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO subscription_tokens(id,user_id,device_id,token_hash,created_at,revoked_at,last_fetched_at)
-SELECT id,user_id,device_id,token_hash,created_at,revoked_at,last_fetched_at FROM restore_source.subscription_tokens WHERE 1
-ON CONFLICT(id) DO UPDATE SET revoked_at=coalesce(subscription_tokens.revoked_at,excluded.revoked_at),last_fetched_at=max(subscription_tokens.last_fetched_at,excluded.last_fetched_at)`)
+	_, err := tx.ExecContext(ctx, `INSERT INTO subscription_tokens(id,user_id,device_id,token_hash,encrypted_token,created_at,revoked_at,last_fetched_at)
+SELECT id,user_id,device_id,token_hash,encrypted_token,created_at,revoked_at,last_fetched_at FROM restore_source.subscription_tokens WHERE 1
+ON CONFLICT(id) DO UPDATE SET encrypted_token=coalesce(subscription_tokens.encrypted_token,excluded.encrypted_token),revoked_at=coalesce(subscription_tokens.revoked_at,excluded.revoked_at),last_fetched_at=max(subscription_tokens.last_fetched_at,excluded.last_fetched_at)`)
 	return err
 }

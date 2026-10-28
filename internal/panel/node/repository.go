@@ -22,6 +22,7 @@ var ErrSequence = errors.New("message sequence is not consecutive")
 var ErrNotFound = errors.New("node not found")
 var ErrNodeEnrolled = errors.New("node is already enrolled")
 var ErrNodeInUse = errors.New("node is still referenced by configuration")
+var ErrNodeNotPending = errors.New("node is not pending")
 
 // SQLite reports a refused delete either as SQLITE_CONSTRAINT or, when extended
 // result codes are on, as SQLITE_CONSTRAINT_FOREIGNKEY.
@@ -93,6 +94,52 @@ func (r *Repository) CreateEnrollment(ctx context.Context, name string, duration
 		return Node{}, "", expires, err
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO node_enrollment_tokens(token_hash,node_id,expires_at) VALUES(?,?,?)", Hash(token), id, timestamp(expires)); err != nil {
+		return Node{}, "", expires, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Node{}, "", expires, err
+	}
+	return n, token, expires, nil
+}
+
+func (r *Repository) ReissueEnrollment(ctx context.Context, nodeID string, duration time.Duration) (Node, string, time.Time, error) {
+	token, err := RandomID()
+	if err != nil {
+		return Node{}, "", time.Time{}, err
+	}
+	now := time.Now().UTC()
+	expires := now.Add(duration)
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return Node{}, "", expires, err
+	}
+	defer tx.Rollback()
+	var n Node
+	var capabilities, heartbeat string
+	err = tx.QueryRowContext(ctx, "SELECT "+columns+" FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Node{}, "", expires, ErrNotFound
+	}
+	if err != nil {
+		return Node{}, "", expires, err
+	}
+	if n.DeletedAt != "" {
+		return Node{}, "", expires, ErrNodeNotPending
+	}
+	if n.Status != "pending" {
+		return Node{}, "", expires, ErrNodeNotPending
+	}
+	var identityCount int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM node_identities WHERE node_id=?", nodeID).Scan(&identityCount); err != nil {
+		return Node{}, "", expires, err
+	}
+	if identityCount != 0 {
+		return Node{}, "", expires, ErrNodeNotPending
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE node_enrollment_tokens SET consumed_at=? WHERE node_id=? AND consumed_at IS NULL", timestamp(now), nodeID); err != nil {
+		return Node{}, "", expires, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO node_enrollment_tokens(token_hash,node_id,expires_at) VALUES(?,?,?)", Hash(token), nodeID, timestamp(expires)); err != nil {
 		return Node{}, "", expires, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -262,6 +309,10 @@ const columns = "id,name,status,enabled,hostname,operating_system,agent_version,
 
 type scanner interface{ Scan(...any) error }
 
+// storedJSON reads capabilities and heartbeats written by this or a newer panel:
+// after a downgrade, fields a later version added must not hide every node.
+var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
+
 func scan(row scanner) (Node, error) {
 	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}}
 	var capabilities, heartbeat string
@@ -269,10 +320,10 @@ func scan(row scanner) (Node, error) {
 	if err != nil {
 		return n, err
 	}
-	if err := protojson.Unmarshal([]byte(capabilities), n.Capabilities); err != nil {
+	if err := storedJSON.Unmarshal([]byte(capabilities), n.Capabilities); err != nil {
 		return n, err
 	}
-	if err := protojson.Unmarshal([]byte(heartbeat), n.Heartbeat); err != nil {
+	if err := storedJSON.Unmarshal([]byte(heartbeat), n.Heartbeat); err != nil {
 		return n, err
 	}
 	if n.Status == "online" || n.Status == "degraded" {

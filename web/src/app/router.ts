@@ -3,6 +3,11 @@ import MainLayout from '../layouts/MainLayout.vue';
 import { setupNavigationGuards } from './guards';
 
 const routes: RouteRecordRaw[] = [
+  { path: '/portal/login', component: () => import('../portal/LoginPage.vue'), meta: { title: '用户登录' } },
+  { path: '/portal', redirect: '/portal/overview' },
+  { path: '/portal/client', redirect: '/portal/overview' },
+  { path: '/portal/:section(overview|subscription|nodes|traffic|account)', component: () => import('../portal/PortalLayout.vue'), meta: { title: '我的账号' } },
+  { path: '/portal-preview', component: () => import('../modules/users/pages/PortalPreviewPage.vue'), meta: { title: '用户门户预览' } },
   // Public auth routes
   {
     path: '/login',
@@ -43,30 +48,26 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '系统总览', icon: 'LayoutDashboard' }
       },
 
-      // 2. User Module
+      // 2. User Module (用户管理)
       {
         path: 'users',
         name: 'UserList',
         component: () => import('../modules/users/pages/UserListPage.vue'),
-        meta: { title: '用户列表', parent: '用户' }
+        meta: { title: '用户管理', parent: '用户管理' }
       },
       {
         path: 'users/:id',
         name: 'UserDetail',
         component: () => import('../modules/users/pages/UserDetailPage.vue'),
-        meta: { title: '用户详情', parent: '用户' }
+        meta: { title: '用户详情', parent: '用户管理' }
       },
       {
         path: 'devices',
-        name: 'DeviceList',
-        component: () => import('../modules/users/pages/DeviceListPage.vue'),
-        meta: { title: '设备管理', parent: '用户' }
+        redirect: '/users'
       },
       {
         path: 'subscriptions',
-        name: 'SubscriptionList',
-        component: () => import('../modules/users/pages/SubscriptionListPage.vue'),
-        meta: { title: '订阅管理', parent: '用户' }
+        redirect: '/users'
       },
 
       // 3. Node Module
@@ -74,7 +75,7 @@ const routes: RouteRecordRaw[] = [
         path: 'nodes',
         name: 'NodeList',
         component: () => import('../modules/nodes/pages/NodeListPage.vue'),
-        meta: { title: '节点列表', parent: '节点' }
+        meta: { title: '服务器', description: '以“列表看状态、详情做管理”为原则，保持简洁清晰。', parent: '服务器' }
       },
       {
         path: 'nodes/:id',
@@ -95,80 +96,97 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '节点拓扑', parent: '节点' }
       },
 
-      // 4. Proxy Module
+      // 4. Proxy Module (Unified Node List & Relay Canvas)
+      {
+        path: 'proxy',
+        redirect: '/proxy/nodes'
+      },
+      {
+        path: 'proxy/nodes',
+        name: 'ProxyNodeList',
+        component: () => import('../modules/proxy/pages/ProxyNodeListPage.vue'),
+        meta: { title: '节点列表', parent: '节点配置' }
+      },
+      {
+        path: 'proxy/relay',
+        name: 'RelayCanvas',
+        component: () => import('../modules/proxy/pages/RelayCanvasPage.vue'),
+        meta: { title: '中转搭建', parent: '节点配置' }
+      },
+      // Backward Compatibility Redirects
       {
         path: 'proxy/inbounds',
-        name: 'InboundList',
-        component: () => import('../modules/proxy/pages/InboundListPage.vue'),
-        meta: { title: '入站管理', parent: '代理' }
+        redirect: '/proxy/nodes'
       },
       {
         path: 'proxy/outbounds',
-        name: 'OutboundList',
-        component: () => import('../modules/proxy/pages/OutboundListPage.vue'),
-        meta: { title: '出站管理', parent: '代理' }
+        redirect: '/proxy/nodes'
       },
       {
         path: 'proxy/outbound-groups',
-        name: 'OutboundGroup',
-        component: () => import('../modules/proxy/pages/OutboundGroupPage.vue'),
-        meta: { title: '出口组', parent: '代理' }
+        redirect: '/proxy/nodes'
       },
       {
         path: 'proxy/chains',
-        name: 'ProxyChainList',
-        component: () => import('../modules/proxy/pages/ProxyChainListPage.vue'),
-        meta: { title: '代理链', parent: '代理' }
+        redirect: '/proxy/relay'
       },
       {
         path: 'proxy/chains/new',
-        name: 'ProxyChainCreate',
-        component: () => import('../modules/proxy/pages/ProxyChainEditorPage.vue'),
-        meta: { title: '新建代理链', parent: '代理' }
+        redirect: '/proxy/relay'
       },
       {
         path: 'proxy/chains/:id/edit',
-        name: 'ProxyChainEdit',
-        component: () => import('../modules/proxy/pages/ProxyChainEditorPage.vue'),
-        meta: { title: '编辑代理链', parent: '代理' }
+        redirect: '/proxy/relay'
       },
 
-      // 5. Routing Module
+      // 5. Routing Module (Client Policies, Node Policies, Rule Sets, Simulator)
+      {
+        path: 'routing',
+        redirect: '/routing/client'
+      },
+      {
+        path: 'routing/client',
+        name: 'ClientPolicy',
+        component: () => import('../modules/routing/pages/ClientPolicyPage.vue'),
+        meta: { title: '客户端策略', parent: '分流控制' }
+      },
       {
         path: 'routing/rules',
         name: 'RoutingRuleList',
         component: () => import('../modules/routing/pages/RoutingRulePage.vue'),
-        meta: { title: '分流规则', parent: '分流' }
+        meta: { title: '节点策略', parent: '分流控制' }
       },
       {
         path: 'routing/rules/new',
         name: 'RoutingRuleCreate',
         component: () => import('../modules/routing/pages/RoutingRuleEditorPage.vue'),
-        meta: { title: '新建分流规则', parent: '分流' }
+        meta: { title: '新建节点策略', parent: '分流控制' }
       },
       {
         path: 'routing/rules/:id/edit',
         name: 'RoutingRuleEdit',
         component: () => import('../modules/routing/pages/RoutingRuleEditorPage.vue'),
-        meta: { title: '编辑分流规则', parent: '分流' }
+        meta: { title: '编辑节点策略', parent: '分流控制' }
       },
       {
         path: 'routing/services',
-        name: 'ServiceRule',
+        name: 'RuleSetList',
         component: () => import('../modules/routing/pages/ServiceRulePage.vue'),
-        meta: { title: '服务规则', parent: '分流' }
+        meta: { title: '规则集', parent: '分流控制' }
+      },
+      {
+        path: 'routing/rule-sets',
+        redirect: '/routing/services'
       },
       {
         path: 'routing/websites',
-        name: 'WebsiteControl',
-        component: () => import('../modules/routing/pages/WebsiteControlPage.vue'),
-        meta: { title: '网站控制', parent: '分流' }
+        redirect: '/routing/rules'
       },
       {
         path: 'routing/simulator',
         name: 'PolicySimulator',
         component: () => import('../modules/routing/pages/PolicySimulatorPage.vue'),
-        meta: { title: '策略模拟', parent: '分流' }
+        meta: { title: '策略模拟', parent: '分流控制' }
       },
 
       // 6. Access Records Module
@@ -188,21 +206,15 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'system/agents',
-        name: 'AgentList',
-        component: () => import('../modules/system/pages/AgentPage.vue'),
-        meta: { title: 'Agent 管理', parent: '系统' }
+        redirect: '/nodes?tab=agents'
       },
       {
         path: 'system/cores',
-        name: 'CoreVersionList',
-        component: () => import('../modules/system/pages/CoreVersionPage.vue'),
-        meta: { title: '核心版本', parent: '系统' }
+        redirect: '/nodes?tab=cores'
       },
       {
         path: 'system/revisions',
-        name: 'RevisionList',
-        component: () => import('../modules/system/pages/RevisionPage.vue'),
-        meta: { title: '配置版本', parent: '系统' }
+        redirect: '/nodes'
       },
       {
         path: 'system/backups',
@@ -246,4 +258,3 @@ router.afterEach((to) => {
   const baseTitle = 'Proxy Control';
   document.title = to.meta?.title ? `${to.meta.title} - ${baseTitle}` : baseTitle;
 });
-

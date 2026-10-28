@@ -136,46 +136,21 @@ func TestForUserNeedsAnEntryForTheUser(t *testing.T) {
 	}
 }
 
-func TestObserverAlertsOncePerUpwardLimitCrossing(t *testing.T) {
+// v1.1 retired the per-user connection soft limit (plan C10): the column stays
+// for older backups, but even a count above it raises no alert.
+func TestObserverNoLongerAlertsOnTheRetiredLimit(t *testing.T) {
 	ctx := context.Background()
-	_, observer, _, account, credentialID := seedObservedUser(t, 5)
+	_, observer, _, _, credentialID := seedObservedUser(t, 5)
 	alerts := 0
-	observer.Publish = func(kind string, data any) {
-		if kind != "system.alert" {
-			t.Fatalf("unexpected event kind %q", kind)
-		}
-		payload, ok := data.(map[string]any)
-		if !ok || payload["alert"] != "connection_limit" || payload["userId"] != account.ID || payload["maxConnections"] != 5 {
-			t.Fatalf("unexpected alert payload: %+v", data)
-		}
-		alerts++
-	}
-	evaluate := func(count uint64) {
+	observer.Publish = func(string, any) { alerts++ }
+	for _, count := range []uint64{3, 9, 2, 12} {
 		if err := observer.Store.Record("n1", observationSnapshot("n1", credentialID, count)); err != nil {
 			t.Fatal(err)
 		}
 		observer.Evaluate(ctx, "n1")
 	}
-
-	evaluate(3)
 	if alerts != 0 {
-		t.Fatalf("under-limit count raised %d alerts", alerts)
-	}
-	evaluate(6)
-	if alerts != 1 {
-		t.Fatalf("crossing the limit raised %d alerts, want 1", alerts)
-	}
-	evaluate(6)
-	if alerts != 1 {
-		t.Fatalf("staying over the limit raised a duplicate alert (%d)", alerts)
-	}
-	evaluate(2)
-	if alerts != 1 {
-		t.Fatalf("dropping under the limit raised an alert (%d)", alerts)
-	}
-	evaluate(7)
-	if alerts != 2 {
-		t.Fatalf("second crossing raised %d alerts total, want 2", alerts)
+		t.Fatalf("the retired limit raised %d alerts", alerts)
 	}
 }
 
@@ -191,44 +166,30 @@ func TestHandlerObserveFillsConnectionFields(t *testing.T) {
 
 	// Unknown: no snapshot covers the user.
 	handler.observe(ctx, &loaded)
-	if loaded.OnlineConnections != nil || loaded.OverLimit {
-		t.Fatalf("unknown count = %v over=%v, want nil/false", loaded.OnlineConnections, loaded.OverLimit)
+	if loaded.OnlineConnections != nil {
+		t.Fatalf("unknown count = %v, want nil", loaded.OnlineConnections)
 	}
 
-	// Known and under the limit.
-	if err := observer.Store.Record("n1", observationSnapshot("n1", credentialID, 3)); err != nil {
-		t.Fatal(err)
-	}
-	handler.observe(ctx, &loaded)
-	if loaded.OnlineConnections == nil || *loaded.OnlineConnections != 3 || loaded.OverLimit {
-		t.Fatalf("under count = %v over=%v, want 3/false", loaded.OnlineConnections, loaded.OverLimit)
-	}
-
-	// Known and over the limit.
+	// Known: the count is reported as is.
 	if err := observer.Store.Record("n1", observationSnapshot("n1", credentialID, 9)); err != nil {
 		t.Fatal(err)
 	}
 	handler.observe(ctx, &loaded)
-	if loaded.OnlineConnections == nil || *loaded.OnlineConnections != 9 || !loaded.OverLimit {
-		t.Fatalf("over count = %v over=%v, want 9/true", loaded.OnlineConnections, loaded.OverLimit)
+	if loaded.OnlineConnections == nil || *loaded.OnlineConnections != 9 {
+		t.Fatalf("count = %v, want 9", loaded.OnlineConnections)
 	}
 
 	encoded, err := json.Marshal(loaded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(encoded), `"onlineConnections":9`) || !strings.Contains(string(encoded), `"overLimit":true`) {
-		t.Fatalf("response omits connection fields: %s", encoded)
+	text := string(encoded)
+	if !strings.Contains(text, "\"onlineConnections\":9") {
+		t.Fatalf("response omits the online count: %s", encoded)
 	}
-}
-
-func TestObserverIgnoresEvaluateWithoutSnapshot(t *testing.T) {
-	ctx := context.Background()
-	_, observer, _, _, _ := seedObservedUser(t, 5)
-	alerts := 0
-	observer.Publish = func(string, any) { alerts++ }
-	observer.Evaluate(ctx, "n1") // no snapshot recorded yet
-	if alerts != 0 {
-		t.Fatalf("evaluate without a snapshot raised %d alerts", alerts)
+	for _, retired := range []string{"overLimit", "maxConnections", "maxDevices", "devicesCount"} {
+		if strings.Contains(text, "\""+retired+"\"") {
+			t.Fatalf("response still carries the retired field %s: %s", retired, encoded)
+		}
 	}
 }

@@ -320,11 +320,30 @@ func (r *Repository) notifyApplied(nodeID, operation string) {
 	}
 }
 func (r *Repository) List(ctx context.Context, page, size int) ([]Revision, int, error) {
+	return r.list(ctx, "", page, size)
+}
+
+// ListForNode is List restricted to the revisions that target one node, which is
+// what the configuration history of a single node shows. The count applies the
+// same restriction, so the pager cannot promise more pages than there are.
+func (r *Repository) ListForNode(ctx context.Context, nodeID string, page, size int) ([]Revision, int, error) {
+	return r.list(ctx, nodeID, page, size)
+}
+
+func (r *Repository) list(ctx context.Context, nodeID string, page, size int) ([]Revision, int, error) {
+	var filter string
+	var args []any
+	if nodeID != "" {
+		filter = " WHERE coalesce(t.node_id,b.node_id,'') = ?"
+		args = append(args, nodeID)
+	}
 	var count int
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM config_revisions").Scan(&count); err != nil {
+	countQuery := "SELECT count(*) FROM config_revisions c LEFT JOIN deployment_targets t ON t.revision=c.id LEFT JOIN deployment_batch_items b ON b.revision=c.id" + filter
+	if err := r.Database.QueryRowContext(ctx, countQuery, args...).Scan(&count); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT c.id,c.author,c.summary,c.status,c.created_at,coalesce(t.node_id,b.node_id,''),coalesce(t.result_code,''),coalesce(b.batch_id,'') FROM config_revisions c LEFT JOIN deployment_targets t ON t.revision=c.id LEFT JOIN deployment_batch_items b ON b.revision=c.id ORDER BY c.id DESC LIMIT ? OFFSET ?", size, (page-1)*size)
+	queryArgs := append(append([]any{}, args...), size, (page-1)*size)
+	rows, err := r.Database.QueryContext(ctx, "SELECT c.id,c.author,c.summary,c.status,c.created_at,coalesce(t.node_id,b.node_id,''),coalesce(t.result_code,''),coalesce(b.batch_id,'') FROM config_revisions c LEFT JOIN deployment_targets t ON t.revision=c.id LEFT JOIN deployment_batch_items b ON b.revision=c.id"+filter+" ORDER BY c.id DESC LIMIT ? OFFSET ?", queryArgs...)
 	if err != nil {
 		return nil, 0, err
 	}

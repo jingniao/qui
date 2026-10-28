@@ -10,7 +10,7 @@ import (
 // capability or a wrong per-core direction cannot come back unnoticed.
 func TestProtocolSupportTablePinsOfficialCoreMatrix(t *testing.T) {
 	inbound := strings.Join(SupportedInboundProtocols(), ",")
-	if inbound != "http,socks5,shadowsocks,vless,trojan,wireguard,hysteria2,tuic" {
+	if inbound != "forward,http,socks5,shadowsocks,vless,trojan,wireguard,hysteria2,tuic" {
 		t.Fatal("inbound protocol basis changed", inbound)
 	}
 	outbound := strings.Join(SupportedOutboundProtocols(), ",")

@@ -13,8 +13,8 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	for _, query := range []string{
-		"SELECT count(*) FROM users u JOIN restore_source.users c ON c.id=u.id WHERE c.used_traffic<u.used_traffic",
-		"SELECT count(*) FROM devices d JOIN restore_source.devices c ON c.id=d.id WHERE c.user_id<>d.user_id OR c.used_traffic<d.used_traffic",
+		"SELECT count(*) FROM users u JOIN restore_source.users c ON c.id=u.id WHERE c.used_traffic<u.used_traffic AND c.traffic_reset_at<=u.traffic_reset_at",
+		"SELECT count(*) FROM devices d JOIN restore_source.devices c ON c.id=d.id JOIN users u ON u.id=d.user_id JOIN restore_source.users cu ON cu.id=c.user_id WHERE c.user_id<>d.user_id OR (c.used_traffic<d.used_traffic AND cu.traffic_reset_at<=u.traffic_reset_at)",
 		"SELECT count(*) FROM credentials d JOIN restore_source.credentials c ON c.id=d.id WHERE c.user_id<>d.user_id OR c.device_id<>d.device_id OR c.protocol<>d.protocol",
 		"SELECT count(*) FROM user_traffic_cursors s LEFT JOIN restore_source.user_traffic_cursors c ON c.node_id=s.node_id AND c.epoch=s.epoch AND c.credential_id=s.credential_id WHERE c.credential_id IS NULL OR c.user_id<>s.user_id OR c.device_id<>s.device_id OR c.upload_bytes<s.upload_bytes OR c.download_bytes<s.download_bytes",
 		"SELECT count(*) FROM users u WHERE u.traffic_limit>0 AND NOT EXISTS(SELECT 1 FROM restore_source.users c WHERE c.id=u.id)",
@@ -23,13 +23,15 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,username,display_name,status,expires_at,traffic_limit,used_traffic,max_devices,max_connections,protocols_json,remark,created_at)
-SELECT c.id,c.username,c.display_name,'disabled',c.expires_at,c.traffic_limit,c.used_traffic,c.max_devices,c.max_connections,c.protocols_json,c.remark,c.created_at FROM restore_source.users c WHERE NOT EXISTS(SELECT 1 FROM users u WHERE u.id=c.id)`); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,username,display_name,status,expires_at,traffic_limit,used_traffic,max_devices,max_connections,protocols_json,remark,created_at,device_limit)
+SELECT c.id,c.username,c.display_name,'disabled',c.expires_at,c.traffic_limit,c.used_traffic,c.max_devices,c.max_connections,c.protocols_json,c.remark,c.created_at,c.device_limit FROM restore_source.users c WHERE NOT EXISTS(SELECT 1 FROM users u WHERE u.id=c.id)`); err != nil {
 		return err
 	}
 	for _, query := range []string{
 		"UPDATE users SET status='disabled' WHERE NOT EXISTS(SELECT 1 FROM restore_source.users c WHERE c.id=users.id)",
+		`UPDATE users SET traffic_reset_cycle=c.traffic_reset_cycle,traffic_reset_anchor=c.traffic_reset_anchor,traffic_reset_at=c.traffic_reset_at FROM restore_source.users c WHERE c.id=users.id`,
 		`UPDATE users SET used_traffic=(SELECT c.used_traffic FROM restore_source.users c WHERE c.id=users.id),status=CASE WHEN status='disabled' THEN 'disabled' ELSE (SELECT c.status FROM restore_source.users c WHERE c.id=users.id) END,
+device_limit=CASE WHEN device_limit=0 THEN (SELECT c.device_limit FROM restore_source.users c WHERE c.id=users.id) WHEN (SELECT c.device_limit FROM restore_source.users c WHERE c.id=users.id)=0 THEN device_limit ELSE min(device_limit,(SELECT c.device_limit FROM restore_source.users c WHERE c.id=users.id)) END,
 traffic_limit=CASE WHEN traffic_limit=0 THEN (SELECT c.traffic_limit FROM restore_source.users c WHERE c.id=users.id) WHEN (SELECT c.traffic_limit FROM restore_source.users c WHERE c.id=users.id)=0 THEN traffic_limit ELSE min(traffic_limit,(SELECT c.traffic_limit FROM restore_source.users c WHERE c.id=users.id)) END,
 expires_at=CASE WHEN expires_at='' THEN (SELECT c.expires_at FROM restore_source.users c WHERE c.id=users.id) WHEN (SELECT c.expires_at FROM restore_source.users c WHERE c.id=users.id)='' THEN expires_at ELSE min(expires_at,(SELECT c.expires_at FROM restore_source.users c WHERE c.id=users.id)) END
 WHERE EXISTS(SELECT 1 FROM restore_source.users c WHERE c.id=users.id)`,

@@ -1,0 +1,101 @@
+{
+  "log": {
+    "disabled": true
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "entry",
+      "listen": "127.0.0.1",
+      "listen_port": 1080,
+      "users": [
+        {
+          "name": "device-credential",
+          "uuid": "6f1a1d4e-2f4a-4a4f-9d6e-3a1c0b7e5d21"
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "direct",
+      "tag": "_panel_terminal_"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "port": [
+          15403
+        ],
+        "action": "reject"
+      },
+      {
+        "port": [
+          15402
+        ],
+        "action": "reject"
+      },
+      {
+        "inbound": [
+          "entry"
+        ],
+        "domain": [
+          "localhost"
+        ],
+        "action": "resolve",
+        "server": "_panel_loopback_"
+      },
+      {
+        "inbound": [
+          "entry"
+        ],
+        "action": "route",
+        "outbound": "direct"
+      }
+    ],
+    "final": "_panel_terminal_",
+    "default_domain_resolver": "_panel_dns_"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "_panel_dns_"
+      },
+      {
+        "type": "hosts",
+        "tag": "_panel_loopback_",
+        "predefined": {
+          "localhost": [
+            "127.0.0.1",
+            "::1"
+          ]
+        }
+      }
+    ],
+    "final": "_panel_dns_"
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:15402",
+      "secret": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "v2ray_api": {
+      "listen": "127.0.0.1:15403",
+      "stats": {
+        "enabled": true,
+        "users": [
+          "device-credential"
+        ],
+        "inbounds": [
+          "entry"
+        ]
+      }
+    }
+  }
+}

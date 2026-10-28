@@ -42,11 +42,17 @@ type SingboxWriter struct {
 	discarding bool
 	poisoned   bool
 	now        func() time.Time
+	sources    map[string]singboxSource
 	pending    map[uint32]*singboxConnection
 	lastSweep  time.Time
 }
 
+type singboxSource struct {
+	credential string
+	updated    time.Time
+}
 type singboxConnection struct {
+	source     string
 	event      XrayEvent
 	observedAt time.Time
 	updated    time.Time
@@ -57,7 +63,7 @@ type singboxConnection struct {
 var singboxHeader = regexp.MustCompile(`^[+-][0-9]{4} [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} (INFO|DEBUG) \[([0-9]{1,10}) [^\]\r\n]{1,32}\] ([^:\r\n]{1,256}): (.*)$`)
 
 func NewSingboxWriter(context *Context, submit func(access.Rollup) error, reject func()) *SingboxWriter {
-	return &SingboxWriter{context: context, submit: submit, reject: reject, now: time.Now, pending: map[uint32]*singboxConnection{}}
+	return &SingboxWriter{context: context, submit: submit, reject: reject, now: time.Now, pending: map[uint32]*singboxConnection{}, sources: map[string]singboxSource{}}
 }
 
 func (w *SingboxWriter) Write(data []byte) (int, error) {
@@ -219,6 +225,25 @@ func (w *SingboxWriter) line(line string) {
 			}
 			accountID = account.ID
 		}
+		if strings.HasPrefix(message, "inbound connection from ") || strings.HasPrefix(message, "inbound packet connection from ") {
+			raw := strings.TrimPrefix(strings.TrimPrefix(message, "inbound connection from "), "inbound packet connection from ")
+			endpoint, parseErr := netip.ParseAddrPort(raw)
+			if parseErr != nil || endpoint.Addr().Zone() != "" || endpoint.Port() == 0 {
+				w.failed()
+				w.poisoned = true
+				return
+			}
+			entry := w.connection(id, at)
+			if entry == nil {
+				return
+			}
+			entry.source = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port()).String()
+			entry.updated = at
+			if entry.event.AccountID != "" {
+				w.rememberSource(entry, at)
+			}
+			return
+		}
 		network := "tcp"
 		destination := ""
 		if strings.HasPrefix(message, "inbound connection to ") {
@@ -261,6 +286,10 @@ func (w *SingboxWriter) line(line string) {
 			}
 		}
 		if inbound.Internal || internalAccount {
+			if entry := w.connection(id, at); entry != nil {
+				entry.event.AccountID = "_internal_"
+				w.rememberSource(entry, at)
+			}
 			return
 		}
 		entry := w.connection(id, at)
@@ -275,6 +304,7 @@ func (w *SingboxWriter) line(line string) {
 			return
 		}
 		entry.event = event
+		w.rememberSource(entry, at)
 		entry.observedAt = at
 		entry.updated = at
 		w.emit(entry, at)

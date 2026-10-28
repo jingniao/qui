@@ -1,6 +1,8 @@
 # 架构总览
 
-更新时间：2026-10-21（v1.0.0 发布后的同步）。性质：从当前源码提取的现状说明，不是验收报告。未运行测试、核心、节点或浏览器；结论均可按本文标注的源码位置复核。
+v1.1 同步：2026-10-28，尚未发布；下述历史 v1.0 描述中的 D1/D2/D5、设备管理与订阅路径由本次说明替代，运行证据见 [验收矩阵](v1-acceptance.md) 的 v1.1 部分。
+
+更新时间：2026-10-28（v1.1 文档同步）。性质：从当前源码提取的现状说明，不是验收报告。Phase 11 本地回归见进度记录；本轮未运行代理核心、远端节点或浏览器，结论可按源码复核。
 
 产品定位与完整需求见 [项目说明书](../AGENTS.md)；本节只写“代码里现在是什么”。与源码冲突时以源码为准。
 
@@ -10,7 +12,7 @@
 | --- | --- | --- | --- |
 | 中央面板 | `proxy-panel` | `cmd/panel`、`internal/panel/*`、`internal/platform/*`、`web/` | 管理、策略、订阅、发布、访问记录、备份 |
 | 节点 Agent | `proxy-agent` | `cmd/agent`、`internal/agent/*` | 注册、连接、编译、应用、采集、缓存、更新 |
-| 代理核心 | 官方 `xray` / `sing-box` 二进制 | 节点本地 `/usr/local/lib/proxy-agent/<core>` | 入站接入、分流、出站、中转、代理链 |
+| 代理核心 | 官方 Xray；官方或 qui 的未修改上游 sing-box 构建 | 节点本地 `/usr/local/lib/proxy-agent/<core>` | 入站接入、分流、出站、中转、代理链、原生端口转发 |
 
 中央端是一个 Go 程序加本地 SQLite，前端构建产物通过 `web.Files()` 嵌入同一程序（`cmd/panel/main.go:180`）。代理流量不经过中央端。
 
@@ -30,7 +32,8 @@
 | 模块 | 目录 | 职责 |
 | --- | --- | --- |
 | auth | `internal/panel/auth` | 管理员、会话、CSRF、登录限速、首次初始化令牌 |
-| user | `internal/panel/user` | 用户、设备、凭据、节点组授权、额度状态机、连接观测 |
+| user | `internal/panel/user` | 用户、隐藏接入身份、凭据、授权、额度、重置周期与设备观测 |
+| portal | `internal/panel/portal` | 独立终端用户账号会话、本人数据、订阅与只读 Owner 预览 |
 | node | `internal/panel/node` | 节点、节点组、注册码、证书、心跳、能力、健康检查、逻辑删除（`deleted_at` 与阻塞项检查） |
 | subscription | `internal/panel/subscription` | 按授权节点组展开并生成订阅 |
 | proxy | `internal/panel/proxy` | 入站、出站、出口组、代理链、协议校验、健康 |
@@ -51,7 +54,7 @@
 | reconcile | `internal/agent/reconcile` | 期望状态与实际状态协调、时间窗重渲染、核心回滚修复 |
 | supervisor | `internal/agent/supervisor` | 每 3 秒探测出站健康；核心不健康时恢复上一成功配置 |
 | core/xray | `internal/agent/core/xray` | 官方 Xray 探测、渲染、启动、健康、账户统计、在线数、访问日志 |
-| core/singbox | `internal/agent/core/singbox` | 官方 sing-box 探测、渲染、启动、健康、Clash API 节点总量 |
+| core/singbox | `internal/agent/core/singbox` | 探测、渲染、启动、健康；有标签时 v2ray API 每用户计数；Clash 源连接观测与关闭 |
 | collector | `internal/agent/collector` | 访问行解析、分钟桶聚合、隐私白名单 |
 | spool | `internal/agent/spool` | 断线缓存、批量上传、ACK 删除、容量上限 |
 | capability | `internal/agent/capability` | 系统资源采样（CPU、内存、磁盘）与心跳负载、采集/流量源状态 |
@@ -60,11 +63,11 @@
 | lifecycle / storage / agentprocess | `internal/agent/lifecycle` 等 | 共享状态进程锁与属主、存储格式下限检查、受管 Agent 进程的安装事务 |
 | identity | `internal/agent/identity` | 节点私钥、证书、ACK 位置、密钥轮换 |
 
-Agent 只执行固定操作（应用/回滚配置版本、重启核心、健康检查、轮换证书、更新 Agent 或核心），不提供任意命令执行（AGENTS 第 23 节）。
+Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查、证书与更新、TTL 设备门控、受限 TCP-connect 探测）。端口转发使用正常发布路径和两核原生入站；没有任意命令执行或替代转发器。门控和 observer 在 supervisor 生命周期内运行，不写配置 Revision；Xray 使用官方 adrules/lsrules 并在非原子替换失败后恢复规则，sing-box 仅关闭用户与源都匹配的连接。
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。迁移在 `migrations/`，按顺序执行到 `0109`（`0108_node_outbound_network.sql` 增加节点出站网络字段，`0109_node_deletion.sql` 增加 `nodes.deleted_at`），已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。迁移在 `migrations/`，按顺序执行到 `0119`；新结构见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |
@@ -87,7 +90,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **自动额度版本**：流量入库后由 `internal/panel/user` 的额度状态机判断，`internal/platform/server/quota.go` 按节点合并（60 秒窗口）后创建并部署只调整用户访问面的自动 Revision；目标节点是该用户当前授权的节点加上**已发布**状态里仍持有其凭据的节点。自动版本以节点**已发布**状态为基线，除用户与入站的绑定取自当前草稿（这类未发布编辑可能被带出）外，不会带出未发布的 Owner 编辑。入站的启用状态也不取自草稿：每个版本另行记录 Owner 当时启用的入站集合（`config_revisions.inbound_enabled_json`，迁移 `0111_inbound_enabled_intent.sql`），自动版本原样继承，凭据回到已发布状态下被禁用的入站时只有该记录说 Owner 曾启用才重新启用；记录为 NULL 时保守保持禁用。单节点发布、用户接入以及代理链/关联节点批次都会记录这份意图（`internal/panel/proxy/snapshot.go` 的 `SnapshotIntent`、`ChainSnapshots`、`RelaySnapshots` 与 `internal/panel/deployment/batches.go` 的 `CreateBatch`），只有调用方直接提交 state 的原始版本（`POST /api/v1/revisions`）留为 NULL。
 
-**订阅**：`GET /sub/{token}?format=uri|base64|sing-box`（省略时用系统设置里的默认格式，出厂默认 `uri`）按授权节点组展开、过滤不可用节点和协议后生成，Token 只保存哈希。URI 与 Base64 列表无法携带固定证书，因此省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点并且不报错（其余链接照常输出）；这类端点用 sing-box 格式获取，该格式会写入 `tls.certificate`。
+**订阅**：Token → 用户 → 来源（已发布节点、授权导入缓存）→ 中立代理模型 → 注册导出器（uri/base64/sing-box/clash/clash-legacy）。一个用户一个隐藏身份与共享链接，新 Token 以哈希查找、vault 加密副本供再次查看；旧 Token 无副本需重置。显式 format 优先，其次已验证 UA 表（当前为空），最后系统默认。sing-box 仍是片段；固定证书的 QUIC 在 URI/Base64 中省略，在 sing-box 中带证书、mihomo 中带指纹。全局规则模板按授权展开，不改节点策略；导入仅用于客户端，定时 HTTPS 固定公网 IP 抓取并加密缓存，不在订阅请求中联网。只有 mihomo 输出客户端链。
 
 **节点出站网络**：Owner 在节点设置里填核心出站源 IP / 网卡和服务器强制出站 IPv4 / IPv6（迁移 `0108_node_outbound_network.sql` 的四个 `nodes` 列），改动在**发布配置后**生效。核心出站源在渲染时写入拨号出站（Xray `sendThrough` + `streamSettings.sockopt.interface`，sing-box `inet4/inet6_bind_address` + `bind_interface`）；整机强制出站走 helper：Agent 写 `/var/lib/proxy-agent/host-network/desired.json`，`proxy-agent-host-network.service`（oneshot，只带 `CAP_NET_ADMIN`）执行 `proxy-agent --apply-host-network`，由 `internal/agent/hostnet` 渲染并应用 nft 表 `inet proxy_agent_source`，结果写回 `status.json`。缺失网卡/源地址或 helper 失败是临时失败码，节点保留上一成功配置。
 
@@ -119,11 +122,17 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 | 决策 | 架构后果 |
 | --- | --- |
-| D1 只用官方核 | 无 `integrations/`、无定制构建；能力靠运行时探测，缺失能力降级为“不可用” |
-| D2 并发不是硬限制 | 无核内准入与额度账本；面板内存快照（45 秒过期）只展示与告警 |
+| D1 被 R3 部分取代 | Xray 官方；sing-box 官方或 qui 的未修改上游构建加上游标签，运行时探测 |
+| D2 被 R6/R7 取代 | 取消设备管理；跨入口源地址估计与内存准入，TTL 门控，缺能力或租约过期放行 |
 | D3 无每节点预算 | 只有一个用户额度；超限/到期/禁用由面板自动发布移除凭据的版本 |
 | D4 上游缺失能力 | 每域名字节可空、只记录“配置出口”、UDP 按上游、权重策略删除 |
-| D5 sing-box 每用户未知 | sing-box 只报节点总量，每用户流量与在线数为未知，额度只统计 Xray 流量 |
+| D5 被 R3 条件取代 | `singbox_user_stats` 节点读取累计账户计数进入既有 spool/游标/额度；无能力的官方核仍节点总量、用户未知 |
+
+## 8.1 v1.1 存储与生命周期
+
+迁移现至 0119；0113 合并设备为隐藏身份。0114 增加用户登录、独立 `user_sessions` 与加密 Token；0115 增加 `device_limit`；0116 增加导入源、缓存、授权与客户端方案快照；0117 增加 `node_meta`；0118 增加流量重置周期/锚点/边界；0119 增加探测支持位、`probe_targets`、`node_tcp_probes`。备份校验与模块保守恢复覆盖新结构，恢复结束门户会话并使探测排队任务过期。完整表名见 AGENTS §26.9。
+
+定时导入、续费提醒、重置周期和额度对账均随面板停止/进程内恢复取消并等待结束。重置以面板时区本地日运算保留月锚点、夹紧短月；恢复保留当前重置边界。可选心跳增加宿主/核心 uptime、网卡计数及只读 sysctl，旧 Agent 缺字段显示未知。月节点流量只汇总本地月界内保留账户样本，`retained_account_samples` 不是清理后的完整月流量（L9）。原生核心、race、arm64 与实机证据仍待 CI/Owner；UDP 门控及无用户身份转发限制见 L8/L10。
 
 ## 9. 不在本版范围
 

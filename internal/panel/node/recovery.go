@@ -7,6 +7,13 @@ import (
 )
 
 func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp string) error {
+	// Queued operations from a snapshot must never execute after restore.
+	if _, err := tx.ExecContext(ctx, "UPDATE node_tcp_probes SET status='expired' WHERE status='queued'"); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=0"); err != nil {
+		return err
+	}
 	finishEnrollments, err := prepareEnrollmentReceiptRestore(ctx, tx)
 	if err != nil {
 		return err
@@ -74,6 +81,13 @@ revoked_at=CASE WHEN node_identities.fingerprint=excluded.fingerprint THEN coale
 		}
 	}
 	if err := finishEnrollments(); err != nil {
+		return err
+	}
+	// Current metadata stays authoritative during in-process recovery. In
+	// particular the daily alert claim cannot rewind to the backup's date.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO node_meta(node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day)
+SELECT node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day FROM restore_source.node_meta WHERE 1
+ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,last_alert_day=max(node_meta.last_alert_day,excluded.last_alert_day)`); err != nil {
 		return err
 	}
 	return nil

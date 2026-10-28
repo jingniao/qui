@@ -239,7 +239,7 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 	if err := json.Unmarshal(groupResponse.Body.Bytes(), &group); err != nil {
 		t.Fatal(err)
 	}
-	userResponse := owner.call("POST", "/api/v1/users", user.Input{Username: "flow_user", DisplayName: "Flow User", Status: "active", MaxDevices: 2, MaxConnections: 8, AllowedProtocols: []string{"vless"}, NodeGroupIDs: []string{group.ID}})
+	userResponse := owner.call("POST", "/api/v1/users", user.Input{Username: "flow_user", DisplayName: "Flow User", Status: "active", AllowedProtocols: []string{"vless"}, NodeGroupIDs: []string{group.ID}})
 	if userResponse.Code != 201 {
 		t.Fatalf("user: %d %s", userResponse.Code, userResponse.Body.String())
 	}
@@ -247,18 +247,17 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 	if err := json.Unmarshal(userResponse.Body.Bytes(), &account); err != nil {
 		t.Fatal(err)
 	}
-	deviceResponse := owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "Flow Laptop", "protocols": []string{"vless"}})
-	if deviceResponse.Code != 201 {
-		t.Fatalf("device: %d %s", deviceResponse.Code, deviceResponse.Body.String())
+	// v1.1 issues the credential on the user's hidden access identity; the device
+	// API that used to create it is gone.
+	identity, err := app.quotaDeployer.users.AccessIdentity(context.Background(), account.ID)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
 	}
-	var device user.Device
-	if err := json.Unmarshal(deviceResponse.Body.Bytes(), &device); err != nil {
-		t.Fatal(err)
+	credentials, err := app.quotaDeployer.users.Credentials(context.Background(), identity.ID, true)
+	if err != nil || len(credentials) != 1 || credentials[0].Secret == "" {
+		t.Fatalf("credentials: %v %v", err, credentials)
 	}
-	if len(device.Credentials) != 1 || device.Credentials[0].Secret == "" {
-		t.Fatal("device has no VLESS credential")
-	}
-	credential := device.Credentials[0]
+	credential := credentials[0]
 	inboundResponse := owner.call("POST", "/api/v1/inbounds", proxy.InboundInput{Name: "Flow VLESS", NodeID: pending.ID, Protocol: "vless", Listen: "0.0.0.0", Port: 24443, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
@@ -326,12 +325,12 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	allowedRecord := access.Rollup{Bucket: now, NodeID: pending.ID, Revision: revision.ID, UserID: account.ID, DeviceID: device.ID, InboundProtocol: "vless", Domain: "allowed.example", TargetPort: 443, Network: "tcp", Action: "Direct", OutboundID: "direct", OutboundProtocol: "direct", Allowed: true, Connections: 2, UploadBytes: 10, DownloadBytes: 20, TrafficKnown: true}
-	blockedRecord := access.Rollup{Bucket: now, NodeID: pending.ID, Revision: revision.ID, UserID: account.ID, DeviceID: device.ID, InboundProtocol: "vless", Domain: "blocked.example", TargetPort: 443, Network: "tcp", Action: "Block", Allowed: false, Connections: 1}
+	allowedRecord := access.Rollup{Bucket: now, NodeID: pending.ID, Revision: revision.ID, UserID: account.ID, DeviceID: identity.ID, InboundProtocol: "vless", Domain: "allowed.example", TargetPort: 443, Network: "tcp", Action: "Direct", OutboundID: "direct", OutboundProtocol: "direct", Allowed: true, Connections: 2, UploadBytes: 10, DownloadBytes: 20, TrafficKnown: true}
+	blockedRecord := access.Rollup{Bucket: now, NodeID: pending.ID, Revision: revision.ID, UserID: account.ID, DeviceID: identity.ID, InboundProtocol: "vless", Domain: "blocked.example", TargetPort: 443, Network: "tcp", Action: "Block", Allowed: false, Connections: 1}
 	if _, err := queue.Enqueue(ctx, []access.Rollup{allowedRecord, blockedRecord}); err != nil {
 		t.Fatal(err)
 	}
-	counter := traffic.Counter{CoreEpoch: "coreflow-epoch", Revision: revision.ID, CredentialID: credential.ID, UserID: account.ID, DeviceID: device.ID, Protocol: "vless", UploadBytes: 100, DownloadBytes: 200, ObservedAt: now}
+	counter := traffic.Counter{CoreEpoch: "coreflow-epoch", Revision: revision.ID, CredentialID: credential.ID, UserID: account.ID, DeviceID: identity.ID, Protocol: "vless", UploadBytes: 100, DownloadBytes: 200, ObservedAt: now}
 	if err := queue.SaveTraffic(ctx, []traffic.Counter{counter}); err != nil {
 		t.Fatal(err)
 	}
@@ -374,13 +373,15 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 		current, err := nodes.Get(ctx, pending.ID)
 		return err == nil && current.Heartbeat != nil && current.Heartbeat.UploadBytes == flowNodeUpload && current.Heartbeat.DownloadBytes == flowNodeDownload
 	})
+	// The per-user online count is an observation only since v1.1: the retired
+	// max-connections limit no longer produces an over-limit flag in the user view.
 	flowWait(t, "the core's online snapshot to reach the user view", func() bool {
 		response := owner.call("GET", "/api/v1/users/"+account.ID, nil)
-		return response.Code == 200 && strings.Contains(response.Body.String(), `"onlineConnections":2`) && strings.Contains(response.Body.String(), `"overLimit":false`)
+		return response.Code == 200 && strings.Contains(response.Body.String(), `"onlineConnections":2`)
 	})
 
 	// Step 5: the subscription is generated from the node group in every format.
-	tokenResponse := owner.call("POST", "/api/v1/users/"+account.ID+"/subscription-token", map[string]any{"deviceId": device.ID})
+	tokenResponse := owner.call("POST", "/api/v1/users/"+account.ID+"/subscription-token", map[string]any{})
 	if tokenResponse.Code != 201 {
 		t.Fatalf("subscription token: %d %s", tokenResponse.Code, tokenResponse.Body.String())
 	}

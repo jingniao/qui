@@ -6,6 +6,11 @@ import (
 	"sort"
 )
 
+// ErrNoRelayRelationships reports a node that no enabled relay outbound joins
+// to another node, so it is published with a single-node revision instead of a
+// batch.
+var ErrNoRelayRelationships = errors.New("node has no enabled relay relationships; create a single-node revision")
+
 // RelaySnapshots includes the enabled relay component around a changed node,
 // including its upstream callers and their downstream dependencies. Each entry
 // carries the node's inbound intent, which the batch revision stores alongside
@@ -56,7 +61,7 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 		}
 	}
 	if len(selected) < 2 {
-		return nil, errors.New("node has no enabled relay relationships; create a single-node revision")
+		return nil, ErrNoRelayRelationships
 	}
 	sort.Strings(queue)
 	snapshots := map[string]NodeSnapshot{}

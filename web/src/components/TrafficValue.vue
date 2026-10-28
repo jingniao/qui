@@ -1,7 +1,7 @@
 <template>
   <span class="font-mono tabular-nums text-ios-label tracking-tight">
     <span :class="valueClass">{{ formatted.value }}</span>
-    <span class="text-xs text-ios-tertiary ml-1 font-sans font-normal">{{ formatted.unit }}</span>
+    <span v-if="formatted.unit" class="text-xs text-ios-tertiary ml-1 font-sans font-normal">{{ formatted.unit }}</span>
   </span>
 </template>
 
@@ -10,7 +10,7 @@ import { computed } from 'vue';
 
 const props = withDefaults(
   defineProps<{
-    bytes: number;
+    bytes: number | null | undefined;
     valueClass?: string;
   }>(),
   {
@@ -20,7 +20,9 @@ const props = withDefaults(
 
 const formatted = computed(() => {
   const b = props.bytes;
-  if (!b || b === 0) return { value: '0', unit: 'B' };
+  if (b === null || b === undefined) return { value: '—', unit: '' };
+  if (b === 0) return { value: '0', unit: 'B' };
+  if (!b) return { value: '0', unit: 'B' };
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   const i = Math.floor(Math.log(b) / Math.log(k));

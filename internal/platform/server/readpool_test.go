@@ -19,7 +19,7 @@ func TestReadsAndSubscriptionsAnswerWhileTheWriterIsBusy(t *testing.T) {
 	}
 	owner := flowOwner(t, app)
 
-	response := owner.call("POST", "/api/v1/users", map[string]any{"username": "read_pool_user", "displayName": "Read pool", "status": "active", "maxDevices": 2, "maxConnections": 8, "allowedProtocols": []string{"socks5"}, "nodeGroupIds": []string{}})
+	response := owner.call("POST", "/api/v1/users", map[string]any{"username": "read_pool_user", "displayName": "Read pool", "status": "active", "allowedProtocols": []string{"socks5"}, "nodeGroupIds": []string{}})
 	if response.Code != 201 {
 		t.Fatalf("create user: %d %s", response.Code, response.Body.String())
 	}
@@ -29,17 +29,13 @@ func TestReadsAndSubscriptionsAnswerWhileTheWriterIsBusy(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &account); err != nil {
 		t.Fatal(err)
 	}
-	response = owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "Laptop", "protocols": []string{"socks5"}})
-	if response.Code != 201 {
-		t.Fatalf("create device: %d %s", response.Code, response.Body.String())
+	// U5 must use this pool for granted imports and client-chain lookups too.
+	response = owner.call("POST", "/api/v1/subscription-sources", map[string]any{"name": "read pool import", "content": "socks5://fixture:fixture@example.com:1080#external", "intervalSeconds": 60, "userIds": []string{account.ID}})
+	if response.Code != 200 {
+		t.Fatalf("create import: %d", response.Code)
 	}
-	var device struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &device); err != nil {
-		t.Fatal(err)
-	}
-	response = owner.call("POST", "/api/v1/users/"+account.ID+"/subscription-token", map[string]any{"deviceId": device.ID})
+	// Since v1.1 the subscription token belongs to the user; no device is created.
+	response = owner.call("POST", "/api/v1/users/"+account.ID+"/subscription-token", map[string]any{})
 	if response.Code != 201 {
 		t.Fatalf("rotate token: %d %s", response.Code, response.Body.String())
 	}

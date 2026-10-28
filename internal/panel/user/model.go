@@ -15,36 +15,51 @@ var ErrInactive = errors.New("user is disabled, expired or over quota")
 var ErrCredential = errors.New("credential unavailable")
 
 type User struct {
-	ID               string   `json:"id"`
-	Username         string   `json:"username"`
-	DisplayName      string   `json:"displayName"`
-	Status           string   `json:"status"`
-	ExpiresAt        string   `json:"expiresAt"`
-	TrafficLimit     int64    `json:"trafficLimit"`
-	UsedTraffic      int64    `json:"usedTraffic"`
-	MaxDevices       int      `json:"maxDevices"`
-	MaxConnections   int      `json:"maxConnections"`
+	TrafficResetCycle           string   `json:"trafficResetCycle"`
+	TrafficResetAnchor          string   `json:"trafficResetAnchor"`
+	TrafficResetAt              string   `json:"trafficResetAt"`
+	DeviceLimit                 int      `json:"deviceLimit"`
+	OnlineDevices               *int     `json:"onlineDevices"`
+	DeviceLimitEnforced         bool     `json:"deviceLimitEnforced"`
+	DeviceLimitUnsupportedNodes []string `json:"deviceLimitUnsupportedNodes"`
+	LoginEnabled                bool     `json:"loginEnabled"`
+	ID                          string   `json:"id"`
+	Username                    string   `json:"username"`
+	DisplayName                 string   `json:"displayName"`
+	Status                      string   `json:"status"`
+	ExpiresAt                   string   `json:"expiresAt"`
+	TrafficLimit                int64    `json:"trafficLimit"`
+	UsedTraffic                 int64    `json:"usedTraffic"`
+	// MaxDevices and MaxConnections are the retired v1.0 limits (plan C10).
+	// The columns stay for their CHECK constraints and older backups; the API
+	// no longer carries them.
+	MaxDevices       int      `json:"-"`
+	MaxConnections   int      `json:"-"`
 	AllowedProtocols []string `json:"allowedProtocols"`
 	Remark           string   `json:"remark"`
 	CreatedAt        string   `json:"createdAt"`
-	DevicesCount     int      `json:"devicesCount"`
+	DevicesCount     int      `json:"-"`
 	NodeGroupIDs     []string `json:"nodeGroupIds"`
 	// OnlineConnections is the number of live connections the user's active
 	// credentials currently hold, summed over the nodes that reported a fresh
 	// snapshot. It is null when no reporting node covers the user, so the UI can
 	// show "unknown" instead of a false zero.
 	OnlineConnections *int `json:"onlineConnections"`
-	// OverLimit reports that the user is currently above MaxConnections.
-	OverLimit bool `json:"overLimit"`
 }
 type Input struct {
-	Username         string   `json:"username"`
-	DisplayName      string   `json:"displayName"`
-	Status           string   `json:"status"`
-	ExpiresAt        string   `json:"expiresAt"`
-	TrafficLimit     int64    `json:"trafficLimit"`
-	MaxDevices       int      `json:"maxDevices"`
-	MaxConnections   int      `json:"maxConnections"`
+	TrafficResetCycle  string `json:"trafficResetCycle"`
+	TrafficResetAnchor string `json:"trafficResetAnchor"`
+	DeviceLimit        int    `json:"deviceLimit"`
+	Username           string `json:"username"`
+	DisplayName        string `json:"displayName"`
+	Status             string `json:"status"`
+	ExpiresAt          string `json:"expiresAt"`
+	TrafficLimit       int64  `json:"trafficLimit"`
+	// MaxDevices and MaxConnections are retired (plan C10) and ignored. They
+	// are not part of the API: a request that still sends them is refused as an
+	// unknown field.
+	MaxDevices       int      `json:"-"`
+	MaxConnections   int      `json:"-"`
 	AllowedProtocols []string `json:"allowedProtocols"`
 	Remark           string   `json:"remark"`
 	NodeGroupIDs     []string `json:"nodeGroupIds"`
@@ -92,6 +107,22 @@ func ValidateProtocols(protocols []string) error {
 	return nil
 }
 func (i *Input) Validate() error {
+	if i.TrafficResetCycle == "" {
+		i.TrafficResetCycle = "none"
+	}
+	if i.TrafficResetCycle != "none" && i.TrafficResetCycle != "monthly" && i.TrafficResetCycle != "30days" {
+		return errors.New("invalid traffic reset cycle")
+	}
+	if i.TrafficResetAnchor != "" {
+		at, err := time.Parse(time.RFC3339Nano, i.TrafficResetAnchor)
+		if err != nil || at.Year() < 2000 || at.Year() > 9998 {
+			return errors.New("invalid traffic reset anchor")
+		}
+		i.TrafficResetAnchor = timestamp(at)
+	}
+	if i.DeviceLimit < 0 || i.DeviceLimit > 100 {
+		return errors.New("invalid device limit: expected 0 to 100")
+	}
 	i.Username = strings.TrimSpace(i.Username)
 	i.DisplayName = strings.TrimSpace(i.DisplayName)
 	if len(i.Username) < 3 || len(i.Username) > 64 {
@@ -121,8 +152,8 @@ func (i *Input) Validate() error {
 		}
 		i.ExpiresAt = timestamp(value)
 	}
-	if i.TrafficLimit < 0 || i.MaxDevices < 1 || i.MaxDevices > 100 || i.MaxConnections < 1 || i.MaxConnections > 10000 {
-		return errors.New("invalid quota or device/connection limit")
+	if i.TrafficLimit < 0 {
+		return errors.New("invalid quota")
 	}
 	return ValidateProtocols(i.AllowedProtocols)
 }

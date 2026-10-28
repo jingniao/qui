@@ -11,6 +11,9 @@ import (
 )
 
 type Handler struct {
+	BaseSettings interface {
+		ReadSetup(context.Context) (string, string, error)
+	}
 	Repository *Repository
 	Auth       *auth.Handler
 	Service    *Service
@@ -20,6 +23,7 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.Handle("GET /api/v1/traffic/nodes/monthly", h.Auth.Require(http.HandlerFunc(h.monthlyNodes), false))
 	mux.Handle("GET /api/v1/access-retention-job", h.Auth.Require(http.HandlerFunc(h.retentionJob), true))
 	mux.Handle("GET /api/v1/access-storage-observation", h.Auth.Require(http.HandlerFunc(h.storageObservation), true))
 	mux.Handle("GET /api/v1/access-records", h.Auth.Require(http.HandlerFunc(h.list), true))

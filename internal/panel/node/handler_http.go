@@ -44,6 +44,13 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.Handle("GET /api/v1/probe-targets", h.Auth.Require(http.HandlerFunc(h.probeTargets), true))
+	mux.Handle("POST /api/v1/probe-targets", h.Auth.Require(http.HandlerFunc(h.probeTargets), true))
+	mux.Handle("DELETE /api/v1/probe-targets/{target}", h.Auth.Require(http.HandlerFunc(h.deleteProbeTarget), true))
+	mux.Handle("GET /api/v1/nodes/{id}/tcp-probes", h.Auth.Require(http.HandlerFunc(h.tcpProbes), true))
+	mux.Handle("POST /api/v1/nodes/{id}/tcp-probes", h.Auth.Require(http.HandlerFunc(h.tcpProbes), true))
+	mux.Handle("GET /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(h.getMeta), false))
+	mux.Handle("PUT /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(h.putMeta), true))
 	mux.Handle("GET /api/v1/nodes/{id}/enrollment-status", h.Auth.Require(http.HandlerFunc(h.enrollmentStatus), true))
 	mux.Handle("GET /api/v1/nodes/{id}/certificate-status", h.Auth.Require(http.HandlerFunc(h.certificateStatus), true))
 	mux.Handle("POST /api/v1/nodes/{id}/health-checks", h.Auth.Require(http.HandlerFunc(h.requestHealthCheck), true))
@@ -52,6 +59,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/nodes", h.Auth.Require(http.HandlerFunc(h.list), false))
 	mux.Handle("GET /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.get), false))
 	mux.Handle("POST /api/v1/nodes/enrollment-token", h.Auth.Require(http.HandlerFunc(h.enroll), true))
+	mux.Handle("POST /api/v1/nodes/{id}/enrollment-token", h.Auth.Require(http.HandlerFunc(h.reissueEnrollment), true))
 	mux.Handle("PUT /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.update), true))
 	mux.Handle("POST /api/v1/nodes/{id}/revoke-certificate", h.Auth.Require(http.HandlerFunc(h.revoke), true))
 	mux.Handle("DELETE /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.delete), true))
@@ -111,6 +119,40 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "创建节点注册码", n.Name, "成功", r.RemoteAddr); err != nil {
+		h.fail(w, err)
+		return
+	}
+	install := InstallInfo{}
+	if h.Install != nil {
+		install = h.Install()
+	}
+	httpapi.JSON(w, 201, map[string]any{"node": n, "enrollmentToken": token, "expiresAt": expires, "install": install})
+	if h.Notify != nil {
+		h.Notify(n.ID)
+	}
+}
+
+func (h *Handler) reissueEnrollment(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExpiresInSeconds int `json:"expiresInSeconds"`
+	}
+	if err := httpapi.Decode(w, r, &body); err != nil {
+		httpapi.Error(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if body.ExpiresInSeconds == 0 {
+		body.ExpiresInSeconds = 3600
+	}
+	if body.ExpiresInSeconds < 60 || body.ExpiresInSeconds > 86400 {
+		httpapi.Error(w, 400, "invalid_request", "Enrollment expiry must be between 60 and 86400 seconds")
+		return
+	}
+	n, token, expires, err := h.Repository.ReissueEnrollment(r.Context(), r.PathValue("id"), time.Duration(body.ExpiresInSeconds)*time.Second)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "重新签发节点注册码", n.Name, "成功", r.RemoteAddr); err != nil {
 		h.fail(w, err)
 		return
 	}
@@ -224,6 +266,10 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) fail(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrNotFound) {
 		httpapi.Error(w, 404, "not_found", err.Error())
+		return
+	}
+	if errors.Is(err, ErrNodeNotPending) {
+		httpapi.Error(w, 409, "node_not_pending", err.Error())
 		return
 	}
 	if errors.Is(err, ErrNodeDeleted) {

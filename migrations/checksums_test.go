@@ -124,6 +124,14 @@ var applied = map[string]string{
 	"0109_node_deletion.sql":                            "607ce78c0f25e79727a2fbd5b0a527743df84e8548e99ebed91e84ff4e8eb2e4",
 	"0110_credential_tombstones.sql":                    "9651c14984afa849b6b822dd4f253ea340ec008803cb5153e3fe49f95d976339",
 	"0111_inbound_enabled_intent.sql":                   "9ab9ca8a3dd2cdaa80060bb68435f18c53426b7c4abf1d26dabc86ecf4783730",
+	"0112_canvas_schemes.sql":                           "e31c9f3079971ed90b8be2348eb73018c2b1070d282bbdacc517237f7ec784fa",
+	"0113_user_level_access.sql":                        "e6e210fc3b9ed37a8dd205d9bf38f154f813dec6d18932fcd03fc7389f055c5d",
+	"0114_end_user_accounts.sql":                        "2e6451f4e5ad55d307400ac4e1c499ca5e07fc08c40b6ec389e1cbc75d2f74c8",
+	"0115_device_limit.sql":                             "c18cf852cb60561fe49bf0d537217d5cfde1ffeaab880639e08a4086438ac7b0",
+	"0116_subscription_sources.sql":                     "585677d162a733b66dee0fbb3ac4b6aceebc32e7758148f39dc9b47bd51e027f",
+	"0117_node_meta.sql":                                "e52ba9d90d67a6bcc7e3b967f360ad6406e2891e30b593d8eb4907cfbddbf9f8",
+	"0118_traffic_reset.sql":                            "28f6418c60276d50c71738a7ce7a28e4a20ea1885f3a0f70196c69e0604c2d96",
+	"0119_tcp_probes.sql":                               "ac045ecd3d31d967e6c83afa1102025912f8331480d13ac51fda86ed0a38c6b7",
 }
 
 func TestAppliedMigrationsAreImmutable(t *testing.T) {

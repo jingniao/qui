@@ -1,5 +1,7 @@
 # 运维手册
 
+v1.1 补充日期：2026-10-28，尚未发布。升级顺序为面板先、Agent 后；RC 与实机操作仍待 Owner 批准，验收状态见 [v1.1 进度](v1.1-progress.md)。
+
 更新时间：2026-10-22（节点 Agent 支持 Alpine / OpenRC）。性质：按当前源码整理的运维结论，不是运行证据。未在 Linux 实机执行；带 **[待实机]** 的操作属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。安装与目录约定见[部署与升级](deployment.md)。
 
 ## 1. 日常检查
@@ -131,16 +133,11 @@ systemctl start proxy-agent.service
 - 面板重启不会引发发布风暴：状态机启动时先从数据库播种，只有状态**变化**才触发（`internal/panel/user/quota.go`）；启动后还会对每个有已发布状态的节点对账一次（`quotaDeployer.recover`），只为「用户访问面与节点正在运行的配置不一致」的节点创建版本，因此面板停机期间变成不活跃的用户、以及合并窗口里丢失的工作都会被补上；如果这次启动对账读不到状态（读取失败），面板会在每个 tick 重跑一次，直到一次完整读完为止。
 - **失败重试与放弃**：节点繁忙或等待 Agent 结果只等下一个窗口，不算失败；读取、创建、部署失败，或 Agent 上报失败/回滚，则用**当前已发布状态**重新生成版本重试，连续 **3** 次失败后停止并告警 Owner：`system.alert`（`alert=user_access_failed`）＋系统 → 操作日志里的「自动额度发布失败」记录（面板日志 `automatic quota revision gave up`，可 `journalctl -u proxy-panel | grep "automatic quota revision gave up"` 查看）。
 - **草稿无法渲染时的兜底**：Owner 已保存的草稿整体渲染失败时，自动版本退回按已发布状态生成，只移除不活跃用户（日志 `automatic quota revision rendered from the published state alone`），恢复类转换要等草稿能再次渲染。
-- 每用户额度**只统计 Xray 节点**上看到的流量；用户被授权了任何 sing-box 节点组时，用户页会给出提示（D5）。
+- 每用户额度统计 Xray 节点，以及上报 `singbox_user_stats` 能力的 sing-box 节点流量。官方 sing-box 无 `with_v2ray_api` 的构建仍仅提供节点总量；用户被授权这类节点时，用户页会给出提示（D5）。
 
-**并发连接是观测软限制**（D2）：面板不切断、不阻塞任何连接。
+**v1.1 并发设备限制取代 D2 的旧 UI/API**：`deviceLimit` 范围 0–100，升级默认 0（不限）。在用户详情查看估计在线设备、部分执行节点与掩码地址，必要时由 Owner 重置准入顺序。跨入口节点按 IPv4 与 IPv6 /64 去重、先到先得；活跃 60 秒，失活后保留 120 秒再释放。限制不是物理设备识别：NAT 少算、双栈与切网多算，超限约延迟一个心跳加投递时间。
 
-| 核心 | 面板显示 | 依据 |
-| --- | --- | --- |
-| Xray | 该用户的去重客户端 IP 数（回环地址排除），来自 `GetStatsOnline` | `internal/agent/core/xray/online.go` |
-| sing-box | 未知；只有节点总量（Clash API `uploadTotal`/`downloadTotal`，自 Agent 启动起累计） | `internal/agent/core/singbox/node_traffic.go` |
-
-连接快照保存在面板内存里，45 秒（3 个心跳）后过期视为未知，从不落库、从不编造数值。超过 `max_connections` 只在向上跨越时发一次 `system.alert`（`alert=connection_limit`），用户列表/详情页显示“连接超限”徽标。总览页的“当前连接数”、总览页的说明文字、节点页的“当前用户连接”和用户页的“当前连接”都按本节口径显示（Xray 为去重客户端 IP 数，sing-box 为未知）。面板显示的值是各凭据、各节点上报值之和，**不跨节点去重**；没有任何上报节点为该用户给出条目时（例如只用 WireGuard 的用户，`internal/agent/core/xray/online.go` 不为其产出在线条目）显示“未知”，而不是 0。
+Xray 通过运行时规则阻止新连接，保留既有连接；sing-box 联接用户日志与 Clash 源 IP/端口，每约 2 秒关闭匹配连接。门控不发布 Revision、不重启核心。旧 Agent、缺观测能力或失败节点明确显示部分执行；面板断联 3 分钟租约过期放行。WireGuard 一次一个设备、不计数；Xray SOCKS5 UDP 不携带用户，不能限制。Hysteria2/TUIC UDP 数据报仍待专项验收（L8）；TCP 经 QUIC 传输测试不代表 UDP 通过。详见 [设备限制](device-limit.md)。面板完整源地址只在内存，Owner 与门户分别展示 /24、/48 掩码，不入库、日志或备份；节点调用 Xray 官方 CLI 使用的临时 JSON 为 0600，返回即删除。
 
 **续期刷新**：延长一个仍在活跃状态的用户到期时间不会产生“状态转换”，但 Agent 会按自己保存的到期时间切断用户，所以面板在到期时间被修改时会直接为该用户排队一次刷新（`reason=renewed`，不发告警）；如果这次修改同时跨越了活跃边界，则按上面的转换流程处理并发出告警。
 
@@ -203,6 +200,26 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 
 ## 10. 核心与 Agent 更新
 
+节点安装时，`--core sing-box` 默认使用与 Agent 同一 qui 发布的静态
+`sing-box-1.14.4-qui.1-linux-(amd64|arm64).tar.gz`，按发布的 `SHA256SUMS`
+校验；glibc 与 musl 使用同一个归档。`node-install.sh --core-source official`
+保留官方 1.14.3 路径和四组固定摘要，手工 `install.sh` 的官方路径仍支持
+`--core-version`、`--core-url`、`--core-sha256`。手工 qui 路径需要
+`--qui-version X.Y.Z` 与 Agent 发布版本一致；离线文件参数见[部署说明](deployment.md)。
+
+核心更新合约接受严格的 qui 资源 URL：
+`https://github.com/jingniao/qui/releases/download/<tag>/sing-box-<ver>-qui.<n>-linux-(amd64|arm64).tar.gz`。
+运行时版本号仍是上游版本（如 1.14.4），qui 修订号写在归档名和 provenance 文件中。
+该来源只对上报 `singbox_user_stats` 能力的 Agent 开放；面板表单与排队校验
+使用同一能力门控。旧 Agent 未上报该字段时仍仅能使用官方来源。
+
+**v1.1 升级后的额度变化**：新版 Agent 检测到 `with_v2ray_api` 后，下一次
+渲染/发布配置会在随机空闲的 `127.0.0.1` 端口启用每用户统计。原来未计入
+用户额度的 sing-box 流量从此开始计入，可能触发已有额度的自动停用版本；
+升级前请核对用户额度。统计不追补启用前的流量。此 API 只有本机信任边界，
+不应对外转发其端口；代理入站也会阻断访问该端口。Clash API 继续用于节点
+总量；没有该构建标签的官方核心保留 D5。
+
 **代理核心（面板驱动，直接 URL + SHA-256）**：系统 → 核心版本里填 `组件 / 稳定版本号 / 官方 GitHub 发布资源 URL / 归档 SHA-256`。面板在入队时校验组件、纯发布版本号、摘要格式、URL 前缀和资源名与节点平台是否匹配（`internal/panel/deployment/core_updates.go`）。Agent 侧再次校验：URL 只接受官方前缀，重定向最多 3 跳且只允许 `github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`；先校验归档摘要再解包；解包拒绝符号链接、路径穿越和多余候选；版本不匹配或健康检查失败时回滚到上一镜像（`internal/agent/updater/core_source.go`、`internal/agent/control/core_updates.go`）。排队、状态和结果见 `GET /api/v1/core-updates`；卡住的任务在节点重连时关闭，Owner 也可用 `POST /api/v1/core-updates/{id}/clear` 关闭。旧任务（无 URL）按 `failed_closed/history_invalid` 关闭。
 
 **Agent 自身（签名目录）**：Agent 自更新仍然使用 Ed25519 签名清单，不改成 URL + SHA-256。
@@ -240,7 +257,7 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 | 出站源地址未生效或发布失败 | 是否已发布配置（字段改动只在下一次发布生效）；`nft list table inet proxy_agent_source`；`systemctl status proxy-agent-host-network`、`journalctl -u proxy-agent-host-network`；失败码 `network_unavailable` / `host_network_failed` 见第 9 节 |
 | 用户仍能上网但已超限 | 自动版本尚未完成（最长一个上报周期＋60 秒＋发布耗时），或节点离线未收到版本 |
 | 访问记录为空 | Agent 是否上报（`journalctl -u proxy-agent` 里的遥测错误）、核心是否在跑、保留策略是否已清理该时间范围 |
-| 额度/在线数显示“未知” | 该用户只在 sing-box 节点上有流量（D5），或核心不支持/未启用对应统计（D2），或该用户在 Xray 节点上没有在线条目（例如只用 WireGuard） |
+| 额度/在线数显示“未知” | sing-box 节点没有 `singbox_user_stats` 能力时仅提供节点流量（D5）；每用户在线数仍为未知，或核心不支持/未启用对应统计（D2），或该用户在 Xray 节点上没有在线条目（例如只用 WireGuard） |
 | 备份恢复失败 | 口令是否正确、备份是否完整（先 `verify`）、当前库是否被其他进程占用（恢复要求面板停止写入） |
 
 ## 14. 终端菜单 qui
@@ -279,3 +296,26 @@ systemctl start proxy-panel.service
 
 **重新接入同一台服务器**：删除后不能复用原节点记录（也不能重新登记），请按第 5 节“复用同一台机器重新登记”作为**新节点**接入，并把引用旧节点的出站、出口组成员与代理链改指新节点后重新发布。新节点需要重新加入原节点组。
 
+## 16. v1.1 账号、订阅与客户端策略
+
+Owner 在用户详情开启门户登录并设置密码；代理凭据、订阅 Token、登录密码是三种不同操作。门户从 `/portal/login` 进入，显示本人状态、授权节点、流量、共享订阅与账号；被禁用/到期/超额仍可登录看原因，但不能取订阅。关闭登录、改密码或撤销会话立即生效；恢复备份结束门户会话。Owner 预览只读，不签发 Token。Viewer 留在后台只读视图。
+
+每用户一个共享链接，无设备新增/改名/删除。新 Token 可再次查看、复制或生成二维码，旧 Token 显示不可恢复时需显式确认重置。重置链接立即撤销旧链接；重置凭据通过自动版本替换代理设置，节点成功应用前旧设置仍可能使用。0113 移除多余设备及其链接，主身份链接保留，升级前通知受影响用户。历史记录仍保留内部设备 ID，页面隐藏设备列与筛选。
+
+在“客户端策略”编辑唯一全局模板，选择预设后保存为独立副本。服务端校验组引用、循环与最终 MATCH，按用户授权展开 `@all`、节点组及导入来源；保存遇到 409 时重新读取并合并，不覆盖别人的新版本。用用户/格式预览看过滤警告；客户端模板不覆盖服务器节点策略。provider 是订阅 Token 授权的 `/sub/{token}/rules/{id}` classical 文本，撤销旧链接也撤销 provider。格式从注册表读取；mihomo 完整规则、legacy 受限，URI/Base64 无规则，sing-box 仍是片段。
+
+格式显式参数优先。UA 开关已有，但可信匹配表因 Phase 0 A.7 未完成而为空；未知 UA 使用默认格式。当前只提供复制与二维码，不宣称未核实的一键导入协议。使用前选好显式格式，不依赖尚未验收的识别。
+
+外部订阅通过导入对话框保存 HTTPS 来源并授权用户；缓存刷新不发生在 `/sub` 请求内。逐跳公网地址校验与固定 IP、2 MiB/15 秒上限限制抓取；失败来源只给 Owner 预览警告。导入内容加密保存，支持中立模型内的 URI/Base64/Clash 条目，不透传 VMess、Reality、插件、不安全 TLS 或未知字段。旧浏览器导入不自动迁移，须重导入并授权。客户端链仅 mihomo `dialer-proxy`，其他格式省略依赖链并警告；凭据/端点变化需重新选择画布引用。导入不进入 Agent、Revision、配额或设备限制；不能转为被管理的服务器隧道（L3、L5、L6）。
+
+qui sing-box 增加上游 `with_v2ray_api`，声明 `singbox_user_stats` 后逐用户字节计入原有共享额度，官方无标签构建仍仅节点总量。升级后 sing-box 用户可能更早达到额度，升级前核对用量、额度并告知用户。计数使用累计游标和 spool 重传，不重置核心计数。原生双用户载荷/与 Xray 对比仍待 CI/Owner，不能宣称完成实机验收。
+
+## 17. v1.1 元数据、探测、转发与重置周期
+
+服务器详情可保存地区、备注、续费日期、周期、价格、币种与提醒天数。首次 Owner 读取可导入本机旧元数据一次；服务器已有值优先，失败保留本机数据，Viewer 不导入。到期窗口内通过持久化每日标记发送 `system.alert`，不是支付或自动续费。宿主/核心 uptime、网卡速率和只读 sysctl 来自实际观测，旧 Agent、首个样本或过期心跳显示“—”；基础调优和恢复尚未获批实现（L2）。月节点流量标为保留记录，基于面板时区内的账户样本，清理后不能保证完整月（L9）。
+
+在节点测试位置配置具名主机/端口并发起 TCP 探测；非公网目标必须 Owner 显式允许。面板解析并校验全部 IP，Agent 再校验字面量地址、次数与期限；最多 10 次、每次 3 秒，每节点同时一个待执行请求，历史每节点/目标最多 100 条。结果的丢失率指 TCP 建连失败比例，中位数只取成功尝试；全失败显示未知中位数。代理列表“连通性”从面板主机测自建入站首个解析地址的 TCP/已配置的可信 TLS，不关闭证书验证，不测带宽或 UDP/QUIC，也不改变节点可用状态（L10）。
+
+端口转发在入站/画布设置源监听端口、目标地址/端口与 TCP/UDP，通过原发布路径部署。需 Agent 声明 forward 能力；Xray 使用 `dokodemo-door`，sing-box 使用 `direct` override。画布已有 gost 标签的转发边映射到原生核心功能，不安装 gost。转发无用户认证归属，不出现在订阅、不执行每用户额度与设备限制、不生成用户域名归属；自动额度版本保持其已发布状态。原生校验、TCP/UDP echo 与受管节点实测仍待 CI/Owner（AU6.1）。
+
+用户重置周期可选不重置、每月或每 30 个本地日，存储独立周期、锚点与已处理边界；每月保留原日号、短月夹紧，下月恢复原锚点，30 日按面板时区日历运算而非固定秒数。调度器清零使用量，恢复活跃通过原额度自动发布。0118 迁移闭合的旧 `[config:…]` 前缀并去除旧 up/down 限速元数据；每用户限速已移除（L1），普通备注保留。恢复保守保留当前重置边界，避免旧备份再次清零；停止/恢复取消并等待调度任务。月末、时区与重启边界有假时钟测试，Linux/浏览器观察仍待 Owner。

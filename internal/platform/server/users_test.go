@@ -17,6 +17,8 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/vault"
@@ -26,7 +28,11 @@ import (
 	"time"
 )
 
-func TestUsersDevicesGroupsSubscriptionHTTPPermissions(t *testing.T) {
+// TestUsersGroupsSubscriptionHTTPPermissions covers the Owner-only user surface as
+// it is since v1.1: CSRF on writes, no credential secret in any response, the
+// removed device routes answering 410, subscription token rotation by user, and a
+// Viewer refused everywhere.
+func TestUsersGroupsSubscriptionHTTPPermissions(t *testing.T) {
 	app := testServer(t)
 	call := func(method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -53,7 +59,7 @@ func TestUsersDevicesGroupsSubscriptionHTTPPermissions(t *testing.T) {
 	}
 	var group node.Group
 	json.Unmarshal(response.Body.Bytes(), &group)
-	input := user.Input{Username: "alice", DisplayName: "Alice", Status: "active", MaxDevices: 2, MaxConnections: 8, AllowedProtocols: []string{"socks5"}, NodeGroupIDs: []string{group.ID}}
+	input := user.Input{Username: "alice", DisplayName: "Alice", Status: "active", AllowedProtocols: []string{"socks5"}, NodeGroupIDs: []string{group.ID}}
 	body, _ := json.Marshal(input)
 	if response := call("POST", "/api/v1/users", string(body), cookie, ""); response.Code != 403 {
 		t.Fatal("CSRF bypass")
@@ -64,20 +70,39 @@ func TestUsersDevicesGroupsSubscriptionHTTPPermissions(t *testing.T) {
 	}
 	var u user.User
 	json.Unmarshal(response.Body.Bytes(), &u)
-	response = call("POST", "/api/v1/users/"+u.ID+"/devices", `{"name":"Laptop","protocols":["socks5"]}`, cookie, owner.CSRFToken)
-	if response.Code != 201 {
-		t.Fatal(response.Body.String())
+	// v1.1 issues the credentials on the user's hidden access identity; the API
+	// never returns them, so the test reads the identity through the repository.
+	identity, err := app.quotaDeployer.users.AccessIdentity(context.Background(), u.ID)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
 	}
-	var device user.Device
-	json.Unmarshal(response.Body.Bytes(), &device)
-	if len(device.Credentials) != 1 || device.Credentials[0].Secret == "" {
-		t.Fatal("new credential not returned")
+	secret := ""
+	credentials, err := app.quotaDeployer.users.Credentials(context.Background(), identity.ID, true)
+	if err != nil {
+		t.Fatalf("credentials: %v", err)
 	}
-	response = call("GET", "/api/v1/devices/"+device.ID, "", cookie, "")
-	if response.Code != 200 || strings.Contains(response.Body.String(), device.Credentials[0].Secret) {
-		t.Fatal("default device endpoint exposed secret")
+	for _, credential := range credentials {
+		if credential.Secret != "" {
+			secret = credential.Secret
+		}
 	}
-	response = call("POST", "/api/v1/users/"+u.ID+"/subscription-token", `{"deviceId":"`+device.ID+`"}`, cookie, owner.CSRFToken)
+	if secret == "" {
+		data, _ := json.Marshal(credentials)
+		t.Fatalf("identity has no secret: %s", data)
+	}
+	response = call("GET", "/api/v1/users/"+u.ID, "", cookie, "")
+	if response.Code != 200 || strings.Contains(response.Body.String(), secret) {
+		t.Fatal("user endpoint exposed a credential secret")
+	}
+	// The device API is gone: its routes answer 410 instead of exposing or
+	// writing anything.
+	if response := call("GET", "/api/v1/users/"+u.ID+"/devices", "", cookie, ""); response.Code != 410 {
+		t.Fatalf("device list still answers %d", response.Code)
+	}
+	if response := call("POST", "/api/v1/users/"+u.ID+"/devices", `{"name":"Laptop","protocols":["socks5"]}`, cookie, owner.CSRFToken); response.Code != 410 {
+		t.Fatalf("device create still answers %d", response.Code)
+	}
+	response = call("POST", "/api/v1/users/"+u.ID+"/subscription-token", `{}`, cookie, owner.CSRFToken)
 	if response.Code != 201 {
 		t.Fatal(response.Body.String())
 	}
@@ -102,7 +127,7 @@ func TestUsersDevicesGroupsSubscriptionHTTPPermissions(t *testing.T) {
 	viewerCookie := response.Result().Cookies()[0]
 	var viewer auth.Session
 	json.Unmarshal(response.Body.Bytes(), &viewer)
-	for _, path := range []string{"/api/v1/users", "/api/v1/devices", "/api/v1/node-groups", "/api/v1/subscriptions", "/api/v1/users/" + u.ID + "/subscription-preview?deviceId=" + device.ID} {
+	for _, path := range []string{"/api/v1/users", "/api/v1/devices", "/api/v1/node-groups", "/api/v1/subscriptions", "/api/v1/users/" + u.ID + "/subscription-preview"} {
 		if response := call("GET", path, "", viewerCookie, ""); response.Code != 403 {
 			t.Fatal("Viewer accessed private endpoint", path)
 		}
@@ -119,9 +144,9 @@ func TestUsersDevicesGroupsSubscriptionHTTPPermissions(t *testing.T) {
 	if response.Code != 204 {
 		t.Fatal(response.Body.String())
 	}
-	response = call("GET", "/api/v1/devices/"+device.ID, "", cookie, "")
+	response = call("GET", "/api/v1/users/"+u.ID, "", cookie, "")
 	if response.Code != 404 {
-		t.Fatal("user deletion did not remove device")
+		t.Fatal("user deletion left the user readable")
 	}
 }
 
@@ -227,16 +252,21 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 		t.Fatalf("revision %d did not succeed", id)
 	}
 	wait(revision.ID)
-	service := &subscription.Service{Repository: &subscription.Repository{Database: app.Database}, Users: users, Nodes: nodes, Published: deployments}
+	service := &subscription.Service{
+		Repository: &subscription.Repository{Database: app.Database},
+		Users:      users,
+		Sources:    source.NewRegistry(&published.Source{Users: users, Nodes: nodes, Published: deployments}),
+		Formats:    subscription.DefaultFormats(),
+	}
 	_, subscriptionToken, err := service.Rotate(ctx, u.ID, device.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, _, err := service.Content(ctx, subscriptionToken, "uri")
+	rendered, err := service.Render(ctx, subscriptionToken, "uri", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "socks5://") {
+	if !strings.Contains(string(rendered.Body), "socks5://") {
 		t.Fatal("published user entry did not appear")
 	}
 	origin, err := net.Listen("tcp", "127.0.0.1:0")
@@ -304,8 +334,8 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, _, err = service.Content(ctx, subscriptionToken, "uri")
-	if err != nil || len(content) != 0 {
+	rendered, err = service.Render(ctx, subscriptionToken, "uri", "", nil)
+	if err != nil || len(rendered.Body) != 0 {
 		t.Fatal("unpublished rotated credential exported", err)
 	}
 	state, _, err = composer.EnsureUserAccess(ctx, input)
@@ -329,11 +359,11 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	} else {
 		connection.Close()
 	}
-	content, _, err = service.Content(ctx, subscriptionToken, "base64")
+	rendered, err = service.Render(ctx, subscriptionToken, "base64", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(string(content))
+	decoded, err := base64.StdEncoding.DecodeString(string(rendered.Body))
 	if err != nil || !strings.Contains(string(decoded), rotated.Secret) {
 		t.Fatal("rotated subscription did not use new credential")
 	}

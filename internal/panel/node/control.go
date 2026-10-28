@@ -52,6 +52,8 @@ type Control struct {
 	// Connections holds the live per-node connection snapshots. Optional; when
 	// nil connection status messages are accepted and ignored.
 	Connections *connections.Store
+	DeviceGates func(context.Context, string) (*pb.DeviceGateCommand, error)
+	GateChanges func() (<-chan struct{}, func())
 	// ConnectionsRecorded is called after a fresh snapshot is stored, so the
 	// per-user observer can re-evaluate its limit. Optional and nil-safe.
 	ConnectionsRecorded func(context.Context, string)
@@ -189,7 +191,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	}
 	c.connected[id] = true
 	c.mu.Unlock()
+	if c.Connections != nil {
+		c.Connections.SetGateSupport(id, first.GetHello().DeviceGateSupported && c.DeviceGates != nil)
+	}
 	defer func() {
+		if c.Connections != nil {
+			c.Connections.SetGateSupport(id, false)
+		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		c.Repository.Offline(cleanup, id)
@@ -230,6 +238,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	// Closing a stale update waits until this connection stored fresh
 	// capabilities; see coreUpdateCapabilitiesStored.
 	coreUpdates := &coreUpdateSession{}
+	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=? WHERE id=?", first.GetHello().TcpProbeSupported, id); err != nil {
+		return status.Error(codes.Internal, "probe capability persistence failed")
+	}
 	serverSequence := uint64(0)
 	send := func(payload any) error {
 		serverSequence++
@@ -239,6 +250,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		message := &pb.ServerMessage{NodeId: id, MessageId: messageID, Sequence: serverSequence, Timestamp: timestamppb.Now()}
 		switch p := payload.(type) {
+		case *pb.TCPProbeCommand:
+			message.Payload = &pb.ServerMessage_TcpProbeCommand{TcpProbeCommand: p}
+		case *pb.DeviceGateCommand:
+			message.Payload = &pb.ServerMessage_DeviceGateCommand{DeviceGateCommand: p}
 		case *pb.Welcome:
 			message.Payload = &pb.ServerMessage_Welcome{Welcome: p}
 		case *pb.Ack:
@@ -256,11 +271,70 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		return stream.Send(message)
 	}
-	if err := send(&pb.Welcome{LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: ""}); err != nil {
+	if err := send(&pb.Welcome{LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: ""}); err != nil {
 		return err
 	}
+	type gatePacket struct {
+		message *pb.AgentMessage
+		err     error
+	}
+	incoming := make(chan gatePacket, 1)
+	go func() {
+		for {
+			message, err := stream.Recv()
+			select {
+			case incoming <- gatePacket{message, err}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	var changes <-chan struct{}
+	if c.GateChanges != nil {
+		var cancel func()
+		changes, cancel = c.GateChanges()
+		defer cancel()
+	}
+	refresh := time.NewTicker(time.Minute)
+	defer refresh.Stop()
+	sendGates := func() error {
+		if !first.GetHello().DeviceGateSupported || c.DeviceGates == nil {
+			return nil
+		}
+		if c.Repository.ValidateIdentity(ctx, id, fingerprint) != nil {
+			return status.Error(codes.Unauthenticated, "node certificate revoked or disabled")
+		}
+		current, e := c.Repository.Get(ctx, id)
+		if e != nil || !current.Capabilities.GetDeviceGateSupported() {
+			return nil
+		}
+		command, e := c.DeviceGates(ctx, id)
+		if e != nil || command == nil {
+			return nil
+		}
+		return send(command)
+	}
 	for {
-		message, err := stream.Recv()
+		var packet gatePacket
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changes:
+			if err := sendGates(); err != nil {
+				return err
+			}
+			continue
+		case <-refresh.C:
+			if err := sendGates(); err != nil {
+				return err
+			}
+			continue
+		case packet = <-incoming:
+		}
+		message, err := packet.message, packet.err
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
@@ -303,7 +377,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.FailedPrecondition, "traffic batch rejected")
 			}
 		}
-		if status := message.GetConnectionStatus(); status != nil && c.Connections != nil {
+		if status := message.GetConnectionStatus(); status != nil && c.Connections != nil && message.Sequence > lastSequence {
 			// A live connection snapshot is advisory: keep it if it is valid,
 			// ignore it otherwise, but never fail the stream over it. The
 			// envelope size is already bounded by validateMessage.
@@ -346,6 +420,14 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.FailedPrecondition, "Agent update result rejected")
 			}
 		}
+		if result := message.GetTcpProbeResult(); result != nil {
+			if !first.GetHello().TcpProbeSupported {
+				return status.Error(codes.FailedPrecondition, "TCP probes unsupported")
+			}
+			if err := c.Repository.recordTCPProbe(ctx, id, result); err != nil {
+				return status.Error(codes.FailedPrecondition, "TCP probe result rejected")
+			}
+		}
 		if result := message.GetHealthCheckResult(); result != nil {
 			if !healthCheckSupported {
 				return status.Error(codes.FailedPrecondition, "health checks unsupported")
@@ -379,6 +461,19 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if err := send(&pb.Ack{AgentSequence: accepted, AccessBatchId: accessBatchID, TrafficBatchId: trafficBatchID}); err != nil {
 			return err
 		}
+		// Gates are volatile, refreshed on the live stream, and never queued for
+		// an older peer. Reconnection starts a fresh refresh cycle.
+		if first.GetHello().DeviceGateSupported && c.DeviceGates != nil {
+			current, e := c.Repository.Get(ctx, id)
+			if e == nil && current.Capabilities.GetDeviceGateSupported() {
+				command, e := c.DeviceGates(ctx, id)
+				if e == nil && command != nil {
+					if e = send(command); e != nil {
+						return e
+					}
+				}
+			}
+		}
 		// Agent requests reserve the node before other executable commands.
 		if agentUpdateSupported && message.GetAgentUpdateResult() == nil {
 			command, err := c.AgentUpdates.PendingAgentUpdate(ctx, id)
@@ -406,6 +501,17 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			}
 			if reserved {
 				continue
+			}
+		}
+		if first.GetHello().TcpProbeSupported {
+			command, err := c.Repository.pendingTCPProbe(ctx, id)
+			if err != nil {
+				return status.Error(codes.Internal, "TCP probe unavailable")
+			}
+			if command != nil {
+				if err := send(command); err != nil {
+					return err
+				}
 			}
 		}
 		if healthCheckSupported {
@@ -519,6 +625,9 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		return nil
 	}
 	if heartbeat := message.GetHeartbeat(); heartbeat != nil {
+		if err := validateHostMetrics(heartbeat); err != nil {
+			return err
+		}
 		if err := validateTrafficSourceStatus(heartbeat.TrafficSourceStatus); err != nil {
 			return err
 		}
@@ -611,6 +720,9 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		if result.Id == "" || len(result.Id) > 128 || result.Revision < 1 || result.ObservedAt == nil || result.ObservedAt.CheckValid() != nil {
 			return errors.New("invalid health result")
 		}
+		return nil
+	}
+	if r := message.GetTcpProbeResult(); r != nil && r.Id != "" && len(r.Id) <= 128 {
 		return nil
 	}
 	return errors.New("unsupported agent message")

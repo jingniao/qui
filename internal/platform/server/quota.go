@@ -196,6 +196,19 @@ func (d *quotaDeployer) accessRemoved(ctx context.Context, userID, username, rea
 	}
 }
 
+// accessChanged is the Owner-save hook for a user whose credentials or node
+// group grants may have changed: a protocol change issues or revokes
+// credentials, a credentials reset replaces all of them, a grant change adds or
+// removes nodes. Like renewExpiry it is not an activity transition, so the
+// user's nodes are scheduled directly and without an alert; the reconciliation
+// creates a revision only for nodes whose user access surface differs.
+func (d *quotaDeployer) accessChanged(ctx context.Context, userID, username, reason string) {
+	if userID == "" {
+		return
+	}
+	d.schedule(ctx, user.Transition{UserID: userID, Username: username, Reason: reason})
+}
+
 // reconcileNode queues one reconciliation of a node's user access surface. The
 // Deployment module calls it after every successful deploy and rollback: both
 // re-publish a stored revision verbatim, so a rollback to a revision rendered
@@ -903,6 +916,11 @@ func mergeUserAccess(published, fresh desiredstate.State, ownerEnabled []string)
 	copy(inbounds, published.Inbounds)
 	for index := range inbounds {
 		inbound := &inbounds[index]
+		// Forward listeners carry no user identity. Automatic user-access
+		// revisions preserve their published state, including enabled intent.
+		if inbound.Protocol == "forward" {
+			continue
+		}
 		hadCredentials := len(inbound.CredentialIDs) > 0
 		source, inFresh := freshByID[inbound.ID]
 		freshIDs := map[string]bool{}

@@ -1,0 +1,349 @@
+mixed-port: 7890
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: false
+dns:
+    enable: true
+    ipv6: false
+    enhanced-mode: fake-ip
+    nameserver:
+        - 223.5.5.5
+        - https://dns.example/dns-query
+    fallback:
+        - tls://1.1.1.1
+proxies:
+    - name: http plain
+      type: http
+      server: 203.0.113.10
+      port: 8080
+      username: alice
+      password: pw
+    - name: http tls
+      type: http
+      server: 203.0.113.10
+      port: 8443
+      username: alice
+      password: pw
+      tls: true
+      sni: h.example.com
+    - name: socks5 plain
+      type: socks5
+      server: 203.0.113.10
+      port: 1080
+      username: alice
+      password: pw
+      udp: true
+    - name: socks5 tls
+      type: socks5
+      server: 203.0.113.10
+      port: 1443
+      username: alice
+      password: pw
+      udp: true
+      tls: true
+    - name: ss default cipher
+      type: ss
+      server: 198.51.100.7
+      port: 8388
+      password: ss-secret
+      cipher: chacha20-ietf-poly1305
+      udp: true
+    - name: ss aes-128-gcm
+      type: ss
+      server: 198.51.100.7
+      port: 8389
+      password: ss-secret
+      cipher: aes-128-gcm
+      udp: true
+    - name: ss aes-256-gcm
+      type: ss
+      server: 198.51.100.7
+      port: 8390
+      password: ss-secret
+      cipher: aes-256-gcm
+      udp: true
+    - name: ss xchacha20
+      type: ss
+      server: 198.51.100.7
+      port: 8391
+      password: ss-secret
+      cipher: xchacha20-ietf-poly1305
+      udp: true
+    - name: vless tcp plain
+      type: vless
+      server: 203.0.113.10
+      port: 10000
+      uuid: 5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef
+      udp: true
+    - name: vless tcp tls vision
+      type: vless
+      server: 203.0.113.10
+      port: 443
+      uuid: 5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef
+      flow: xtls-rprx-vision
+      udp: true
+      tls: true
+      servername: v.example.com
+    - name: vless ws tls
+      type: vless
+      server: 203.0.113.10
+      port: 2443
+      uuid: 5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef
+      udp: true
+      tls: true
+      servername: v.example.com
+      network: ws
+      ws-opts:
+        path: /ray
+    - name: vless ws plain
+      type: vless
+      server: 203.0.113.10
+      port: 2080
+      uuid: 5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef
+      udp: true
+      network: ws
+      ws-opts:
+        path: /ray
+    - name: vless grpc tls
+      type: vless
+      server: 203.0.113.10
+      port: 3443
+      uuid: 5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef
+      udp: true
+      tls: true
+      servername: v.example.com
+      network: grpc
+      grpc-opts:
+        grpc-service-name: svc
+    - name: trojan tcp
+      type: trojan
+      server: 203.0.113.10
+      port: 4443
+      password: trojan-secret
+      udp: true
+      sni: t.example.com
+    - name: trojan ws
+      type: trojan
+      server: 203.0.113.10
+      port: 5443
+      password: trojan-secret
+      udp: true
+      sni: t.example.com
+      network: ws
+      ws-opts:
+        path: /t
+    - name: trojan grpc
+      type: trojan
+      server: 203.0.113.10
+      port: 6443
+      password: trojan-secret
+      udp: true
+      sni: t.example.com
+      network: grpc
+      grpc-opts:
+        grpc-service-name: tsvc
+    - name: hysteria2
+      type: hysteria2
+      server: 2001:db8::1
+      port: 443
+      password: hy2-secret
+      sni: hy2.example.com
+      alpn:
+        - h3
+      up: 50 Mbps
+      down: 100 Mbps
+    - name: hysteria2 pinned
+      type: hysteria2
+      server: 2001:db8::2
+      port: 8443
+      password: pinned
+      sni: p.example.com
+      alpn:
+        - h3
+      fingerprint: effaa3169667c0a112603d559ec33554e08e0dd0f43d5dc1ef48eeefc6211a6a
+    - name: tuic
+      type: tuic
+      server: 2001:db8::1
+      port: 8444
+      password: tuic-secret
+      uuid: 6ebcdcf2-4dbe-4a89-9b40-a63ab69aacef
+      udp: true
+      sni: tuic.example.com
+      alpn:
+        - h3
+      congestion-controller: bbr
+      udp-relay-mode: quic
+    - name: tuic pinned
+      type: tuic
+      server: 2001:db8::2
+      port: 8445
+      password: pinned
+      uuid: 7ebcdcf2-4dbe-4a89-9b40-a63ab69aacef
+      udp: true
+      sni: p.example.com
+      alpn:
+        - h3
+      fingerprint: effaa3169667c0a112603d559ec33554e08e0dd0f43d5dc1ef48eeefc6211a6a
+    - name: wireguard
+      type: wireguard
+      server: 192.0.2.9
+      port: 51820
+      udp: true
+      private-key: AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=
+      public-key: ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=
+      ip: 10.99.0.2
+      ipv6: 2001:db8:99::2
+      allowed-ips:
+        - 0.0.0.0/0
+        - ::/0
+      mtu: 1420
+      persistent-keepalive: 15
+proxy-groups:
+    - name: PROXY
+      type: select
+      proxies:
+        - AUTO
+        - FALLBACK
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - vless tcp plain
+        - vless tcp tls vision
+        - vless ws tls
+        - vless ws plain
+        - vless grpc tls
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+        - hysteria2
+        - hysteria2 pinned
+        - tuic
+        - tuic pinned
+        - wireguard
+        - DIRECT
+    - name: AUTO
+      type: url-test
+      proxies:
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - vless tcp plain
+        - vless tcp tls vision
+        - vless ws tls
+        - vless ws plain
+        - vless grpc tls
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+        - hysteria2
+        - hysteria2 pinned
+        - tuic
+        - tuic pinned
+        - wireguard
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+    - name: FALLBACK
+      type: fallback
+      proxies:
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - vless tcp plain
+        - vless tcp tls vision
+        - vless ws tls
+        - vless ws plain
+        - vless grpc tls
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+        - hysteria2
+        - hysteria2 pinned
+        - tuic
+        - tuic pinned
+        - wireguard
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+    - name: DOMESTIC
+      type: select
+      proxies:
+        - DIRECT
+        - PROXY
+    - name: ADBLOCK
+      type: select
+      proxies:
+        - REJECT
+        - DIRECT
+    - name: 日本
+      type: select
+      proxies:
+        - http plain
+        - http tls
+        - socks5 plain
+        - socks5 tls
+        - ss default cipher
+        - ss aes-128-gcm
+        - ss aes-256-gcm
+        - ss xchacha20
+        - vless tcp plain
+        - vless tcp tls vision
+        - vless ws tls
+        - vless ws plain
+        - vless grpc tls
+        - trojan tcp
+        - trojan ws
+        - trojan grpc
+        - hysteria2
+        - hysteria2 pinned
+        - tuic
+        - tuic pinned
+        - DIRECT
+    - name: 空组
+      type: select
+      proxies:
+        - DIRECT
+rule-providers:
+    ads:
+        type: http
+        behavior: domain
+        format: text
+        url: https://rules.example/ads.txt
+        path: ./ruleset/ads-788eb2ef.rules
+        interval: 86400
+    qui-service-svc-1:
+        type: http
+        behavior: classical
+        format: text
+        url: https://panel.example/sub/TOKEN/rules/svc-1
+        path: ./ruleset/qui-service-svc-1-56be95fd.rules
+        interval: 86400
+rules:
+    - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+    - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+    - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+    - GEOSITE,category-ads-all,REJECT
+    - RULE-SET,ads,REJECT
+    - RULE-SET,qui-service-svc-1,日本
+    - IP-CIDR6,2001:db8::/32,DIRECT,no-resolve
+    - DST-PORT,25/465-587,REJECT
+    - DOMAIN,wg.example.com,wireguard
+    - DOMAIN-KEYWORD,google,PROXY
+    - DOMAIN-KEYWORD,github,PROXY
+    - DOMAIN-SUFFIX,openai.com,PROXY
+    - GEOIP,CN,DIRECT
+    - MATCH,PROXY

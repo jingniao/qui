@@ -1,5 +1,11 @@
 # 部署与升级
 
+v1.1 补充（2026-10-28，尚未发布）：先升级面板，再逐台升级 Agent。1.1 面板兼容 1.0.9 Agent 的发布、回滚与 Xray 流量；旧 Agent 不接收设备门控，也不能排队 qui sing-box 核心更新，界面显示部分执行。升级前备份数据库与身份目录，核对 0113 合并设备对旧链接的影响；0114–0119 的内容见 [发布说明草稿](release-notes-1.1.0.md)。降级跨迁移必须带匹配的升级前数据库，不能直接用 1.0.x 打开新库。
+
+核心来源显式参数为 `--core-source qui|official`：sing-box 默认 qui，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各自架构归档）；`official` 保留官方版本与 musl 专用归档及摘要。Xray 保持官方。qui 构建仅添加上游 `with_v2ray_api` 标签，其逐用户流量开始计入额度；切换前告知用户并核对额度。构建可复现性、原生核检查、Linux/arm64 实跑仍待 CI/Owner，不以脚本存在作为通过。
+
+RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。现有 `qui-update` 只接受 `X.Y.Z`，拒绝 `1.1.0-rc.<sha>`，即使带 `--bundle` 也不行；同机安装两个组件时先 Agent 后面板，不能实现该检查点的面板先行要求。须先由 Owner 决定 L4 的预发布/组件选择方案，再执行进度记录中的检查清单，不能把 RC 冒充正式版本绕过。
+
 更新时间：2026-10-22（节点 Agent 支持 Alpine / OpenRC）。本文命令取自 `deploy/linux/*.sh`、`deploy/systemd/*.service`、`deploy/openrc/*`、`cmd/panel` 和 `cmd/agent` 的实际参数（`go run ./cmd/panel -h`、`go run ./cmd/agent -h`），文件名与路径取自 `deploy/examples/*.yaml` 和安装脚本。
 
 **未在 Linux 实机执行。** 端到端安装、升级和服务运行属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。日常运维见[运维手册](operations.md)。
@@ -21,15 +27,15 @@
 
 **构建工具链**：用官方安装的 Go（<https://go.dev/dl/>），版本按 `go.mod` 里的 `go` 指令（当前 `go 1.26.0`，即需要 Go 1.26 或更新；仓库最后一次完整验证用的是 **Go 1.27.1**）。CI 通过 `actions/setup-go` 的 `go-version-file: go.mod` 读取同一个要求，Node 用 22 加锁定的依赖（`npm --prefix web ci`）。
 
-仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：`scripts/build-release.sh`、`.github/workflows/check.yml` 和 `deploy/linux/install.sh` 只使用 `PATH` 上的 `go`、`npm`、`tar`。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
+仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：发布构建从 `PATH` 读取工具。sing-box 构建另需 `git`、GNU `tar`、`gzip`、`sha256sum`、`readelf`，通过 `GOTOOLCHAIN=go1.26.10` 固定其工具链；它在临时目录克隆上游，不改本仓库的模块文件。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
 
 ```sh
 VERSION=1.0.2 bash scripts/build-release.sh
 ```
 
-- `SKIP_NPM_CI=1` 复用已安装的前端依赖（离线构建）；`OUTPUT_DIRECTORY=/abs/path` 改变输出目录，默认 `dist/`。
-- 产物：`proxy-control-<version>-linux-amd64.tar.gz`、`proxy-control-<version>-linux-arm64.tar.gz` 和 `SHA256SUMS`。
-- 每个 tar.gz 内含 `bin/proxy-panel`、`bin/proxy-agent` 与 `deploy/{linux,systemd,openrc,examples}`；同一个归档既能装 Debian/Ubuntu，也能装 Alpine。
+- `SKIP_NPM_CI=1` 复用已安装的前端依赖；sing-box 构建仍需克隆固定上游标签及下载其所需模块/工具链。`OUTPUT_DIRECTORY=/abs/path` 改变输出目录，默认 `dist/`。
+- 产物：两种架构的 `proxy-control-<version>-linux-<arch>.tar.gz`、`sing-box-1.14.4-qui.1-linux-<arch>.tar.gz`、各自的 sing-box `.provenance.txt` 和覆盖这些文件的 `SHA256SUMS`。
+- qui 程序包内含 `VERSION`、`bin/proxy-panel`、`bin/proxy-agent` 与 `deploy/{linux,systemd,openrc,examples}`；同一个归档既能装 Debian/Ubuntu，也能装 Alpine。sing-box 包使用单层目录加 `sing-box` 可执行文件的上游布局。
 - 归档可复现：成员按名称排序、所有时间戳取源码提交时间（可用 `SOURCE_DATE_EPOCH` 覆盖）、属主统一为 root，gzip 不带时间戳，所以同一提交两次构建得到相同的 `SHA256SUMS`。
 - 脚本不运行测试、不部署。
 
@@ -53,7 +59,10 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
   --sha256 DIGEST        lowercase SHA256 of that executable
   --config FILE          config template for a first install
                          (default: the packaged examples/<component>.yaml)
-  --core xray|sing-box   install the official core release with --node
+  --core xray|sing-box   install a core with --node (sing-box defaults to qui)
+  --core-source qui|official  sing-box source (default: qui)
+  --qui-version VERSION same qui release as the Agent, required for qui source
+  --core-bundle FILE --core-sums FILE  local qui core archive and SHA256SUMS
   --core-version VERSION release version to download, for example 26.3.27
   --core-url URL         official release asset URL
                          (default: the official GitHub release asset)
@@ -106,7 +115,7 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.
 - **离线安装**：在 `node-install.sh` 后加 `--bundle <proxy-control-<版本>-linux-<架构>.tar.gz> --sums <SHA256SUMS>`（两个必须同时给出），脚本就改用本地文件而不访问 GitHub 下载归档。本地归档仍要按 `SHA256SUMS` 核对；Xray 核心仍从官方发布地址下载。
 
 - 命令由面板生成：版本是面板自身的版本，端口取自 `grpc_address`，摘要是面板 Web 证书信任锚的 SHA-256。只有**正式发布版本**（X.Y.Z）且面板以非开发模式运行时对话框才显示该命令，否则提示按下面的手工步骤安装。
-- `node-install.sh` 从 `https://github.com/jingniao/qui/releases/download/v<版本>/` 下载与面板**同版本**的归档和 `SHA256SUMS`，核对摘要后解压，再用归档里的 `deploy/linux/install.sh` 安装 Agent 与固定的官方核心（xray 26.3.27；sing-box 1.14.3，摘要按架构与 libc 固定）。因此这台服务器必须能访问 GitHub，且**必须先有与该面板版本一致的发布**。
+- `node-install.sh` 从 `https://github.com/jingniao/qui/releases/download/v<版本>/` 下载与面板**同版本**的归档和 `SHA256SUMS`，核对摘要后安装 Agent。Xray 仍用官方 26.3.27；`--core sing-box` 默认取同一 qui 发布的 `sing-box-1.14.4-qui.1-linux-<架构>.tar.gz`，用该发布的 `SHA256SUMS` 校验。必须先有与面板一致的发布。`--core-source official` 保留官方 sing-box 1.14.3 和按架构、libc 固定摘要的行为。
 - 面板证书信任按两种情况之一建立：先尝试用系统 CA 包（即随后会被安装为节点 CA 的那个文件，`--cacert` 指定，并带 `--no-insecure`）验证 `https://<面板>/install/ca.pem`，成功说明面板证书由公网 CA 签发（例如 Let's Encrypt，其中间证书会轮换），此时把系统 CA 包（`/etc/ssl/certs/ca-certificates.crt` 或 `/etc/pki/tls/certs/ca-bundle.crt`）安装为 `/etc/proxy-agent/tls/ca.crt`；失败则改用 `curl -k` 取回该文件，并要求它的 SHA-256 等于 `--ca-sha256`，不一致立即中止（可能中间人攻击，或面板地址/端口填错）。
 - 之后脚本把 `control_address` 与 `server_name` 写入 `/etc/proxy-agent/config.yaml`（保持原属主与权限），用一次性注册码登记，最后启用并启动 Agent：systemd 上是 `systemctl enable` + `start proxy-agent.service`，OpenRC 上是 `rc-update add proxy-agent default` + `rc-service proxy-agent start`。
 - 注册码只能用一次且会过期；它出现在新服务器的 shell 历史里，登记成功后请清理该历史。节点**登记成功前**可以重跑这条命令：会原地升级 Agent 并用新的注册码重新登记，登记要求本机能访问面板的 gRPC 端口（默认 9443）；已登记的主机再跑会被拒绝，升级用 `qui-update`。
@@ -146,10 +155,10 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
   --core xray --core-version 26.3.27
 ```
 
-- `--core` 只允许 `xray` 或 `sing-box`，且必须给出 `--core-version`；脚本对版本号只做宽松格式校验，能装到的仍是官方发布的稳定版本（面板的“核心版本”入口额外要求纯发布版本号，如 `26.3.27`）。
-- 归档 URL 只能来自官方发布前缀（`https://github.com/XTLS/Xray-core/releases/download/`、`https://github.com/SagerNet/sing-box/releases/download/`）。
-- SHA256 来自 `--core-sha256`，或对 Xray 自动读取同版本的 `.dgst` 文件；**没有可信摘要就不安装**。
-- 核心安装到 `/usr/local/lib/proxy-agent/<core>`，摘要记入安装记录；首次安装 sing-box 时脚本会把配置模板里的 `core_name`/`core_path` 改成 sing-box。musl 主机（Alpine）装 sing-box 时取官方的 `sing-box-<版本>-linux-<架构>-musl.tar.gz`（glibc 归档在那里起不来），它有单独的固定摘要。
+- `--core` 只允许 `xray` 或 `sing-box`。发布包内的 `VERSION` 自动确定 qui 来源版本；单独使用脚本时给出 `--core sing-box --qui-version X.Y.Z`，其中 X.Y.Z 必须与正在安装的 Agent 发布版本一致。显式版本与包内版本不符时拒绝；核心固定为 1.14.4-qui.1。官方来源仍要求 `--core-version`。
+- qui 来源只下载 `jingniao/qui` 的同版本资源和 `SHA256SUMS`，不接受覆盖 URL 或摘要。`--core-source official` 保留官方 URL 前缀、`--core-url`、`--core-sha256` 和 Xray `.dgst` 路径；没有可信摘要就不安装。
+- qui 构建使用未修改的上游 v1.14.4、go1.26.10、上游 non-naive 标签加 `with_v2ray_api`，CGO=0；同一架构的静态归档同时用于 glibc 和 musl。官方来源在 musl 主机仍选单独的 `-musl.tar.gz` 与摘要。
+- 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径与首次 sing-box 配置模板改写保持原样。
 - 面板不能给已登记的节点换核心；手工换（停 Agent、改 `core_name`/`core_path`、再启动）之前，建议先删掉目标核心不支持的入站（例如 Xray 不支持 Hysteria2/TUIC），发布并确认成功。从 v1.0.6 起，如果新核心编译或启动不了上一修订，Agent 记一条错误日志，让核心保持停止，但照常连上面板（节点显示核心不健康），收到能用的新修订后正常应用；重试间隔从 3 秒倍增到 1 分钟。修订文件校验失败等完整性错误仍会让 Agent 退出。v1.0.5 及更早版本在这种情况下会反复退出、连不上面板（[验收矩阵](v1-acceptance.md) 9.13）。
 - 脚本还会创建服务账号 `proxy-agent` 和目录 `/etc/proxy-agent`、`/etc/proxy-agent/tls`、`/var/lib/proxy-agent`，不启动服务。
 - 脚本还会创建 `/var/lib/proxy-agent/host-network`（0700，服务器强制出站的 helper 目录），安装并启用两个固定单元：`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）与监视 `desired.json` 的 `proxy-agent-host-network.path`。它们只维护一个 nft 表 `inet proxy_agent_source`，不改变主机上的其他规则。
@@ -313,4 +322,3 @@ grep -F proxy-agent /var/log/messages | tail -n 200
 - 节点连上后立刻断开：检查面板里该节点是否被禁用、证书是否过期或被吊销（见[运维手册](operations.md)）。
 - 更新被打断或开机后版本不对：看 `/var/lib/proxycontrol-install/update-recovery.log`、`interrupted-update.log`，以及 `journalctl -u proxycontrol-update-recovery`（OpenRC：`rc-service proxycontrol-update-recovery status` 与 `/var/log/messages`）。`/var/lib/proxycontrol-install/rollback.*` 仍在说明恢复没有完成，再运行一次 `qui-update` 会先重试恢复。
 - 面板起不来且怀疑数据库版本：`proxy-panel --check-database /var/lib/proxy-panel/backups/<文件>.db` 只读检查一份**停止状态**的数据库副本，输出 `database: compatible|newer|foreign|damaged`（退出码 0/3/4/5）；`newer` 表示数据库来自更新的面板，需按 5.1 带 `--database` 降级。
-

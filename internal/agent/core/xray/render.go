@@ -9,6 +9,7 @@ import (
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -152,7 +153,7 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 			address = "::1"
 		}
 		endpoint := net.JoinHostPort(address, strconv.Itoa(inbound.Port))
-		if inbound.Protocol == "wireguard" {
+		if inbound.Protocol == "wireguard" || inbound.Protocol == "forward" && inbound.Settings.Forward.Network == "udp" {
 			rendered.UDPHealthEndpoints = append(rendered.UDPHealthEndpoints, endpoint)
 		} else {
 			rendered.HealthEndpoints = append(rendered.HealthEndpoints, endpoint)
@@ -222,7 +223,15 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 	if err := applyOutboundSource(&document, state.Network); err != nil {
 		return rendered, err
 	}
+	// Every rendered rule has a stable unique tag so a failed CLI reload can
+	// be verified without accepting an empty routing table. Gate tags are reserved.
+	for i := range document.Routing.Rules {
+		if strings.HasPrefix(document.Routing.Rules[i].RuleTag, "qui-gate-") {
+			return rendered, errors.New("reserved routing tag")
+		}
+		document.Routing.Rules[i].RuleTag = "qui-rendered-" + strconv.Itoa(i)
+	}
 	data, err := json.MarshalIndent(document, "", "  ")
-	rendered.Data = data
+	rendered.Data = append(data, '\n')
 	return rendered, err
 }

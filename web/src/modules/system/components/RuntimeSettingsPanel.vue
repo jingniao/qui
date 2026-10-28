@@ -14,8 +14,13 @@
     <dl class="grid sm:grid-cols-2 gap-4"><div><dt class="text-gray-500">登录限制</dt><dd class="mt-1">每个来源 {{ info.security.loginWindowMinutes }} 分钟内 {{ info.security.loginAttempts }} 次尝试</dd></div><div><dt class="text-gray-500">密码长度</dt><dd class="mt-1">{{ info.security.passwordMinCharacters }}～{{ info.security.passwordMaxCharacters }} 字符</dd></div><div><dt class="text-gray-500">Cookie</dt><dd class="mt-1">HttpOnly · {{ info.security.sameSite }}{{ info.security.secureCookies ? ' · Secure' : ' · 开发模式' }}</dd></div><div><dt class="text-gray-500">请求保护</dt><dd class="mt-1">同源 / CSRF；普通 JSON 最大 {{ bytes(info.security.requestBytes) }}</dd></div></dl>
    </template>
    <template v-else-if="kind==='subscription'">
-    <label class="block">订阅链接默认格式<select v-model="form.subscriptionFormat" class="form-input-base mt-2"><option value="uri">通用 URI 列表</option><option value="base64">Base64 URI 列表</option><option value="sing-box">sing-box JSON</option></select></label>
-    <p class="text-gray-500">未指定 format 的订阅请求使用这个格式。带 ?format=uri、base64 或 sing-box 的链接保持显式选择；客户端需支持对应格式。</p>
+    <label class="block">订阅链接默认格式<select v-model="form.subscriptionFormat" class="form-input-base mt-2"><option v-for="item in formats" :key="item.id" :value="item.id">{{ formatNames[item.id] || item.id }}</option></select></label>
+    <p class="text-gray-500">未指定 format 的订阅请求使用这个格式。带 ?format= 的链接保持显式选择（{{ formats.map(item => item.id).join('、') }}）；客户端需支持对应格式。Clash 格式带有「客户端策略」中的分流规则。</p>
+    <div class="grid sm:grid-cols-2 gap-4">
+     <label class="block">客户端刷新间隔（小时）<input v-model.number="form.subscriptionUpdateHours" type="number" min="1" max="168" step="1" class="form-input-base mt-2" /></label>
+     <label class="flex items-center gap-2 sm:mt-7"><input v-model="form.subscriptionUaDetection" type="checkbox" class="h-4 w-4" />按客户端 User-Agent 自动选择格式</label>
+    </div>
+    <p class="text-xs text-gray-500">刷新间隔写入订阅响应的 profile-update-interval，客户端据此定期重新拉取（1～168 小时）。目前没有可验证的客户端 User-Agent 特征，自动识别即使开启也只会回落到默认格式；关闭后始终使用默认格式。</p>
     <p class="text-xs text-gray-500">订阅继续按用户授权节点组、已发布配置、有效设备凭据和协议能力过滤。默认格式不会改变用户权限或正在运行的节点配置。</p>
    </template>
    <template v-else>
@@ -28,15 +33,18 @@
 </template>
 <script setup lang="ts">
 import { computed,onMounted,reactive,ref } from 'vue';
-import { settingsAPI,type RuntimeInfo,type RuntimeSettings } from '../settingsApi';
+import { settingsAPI,type RuntimeInfo,type RuntimeSettings,type SubscriptionFormatInfo } from '../settingsApi';
 import { formatTime } from '../../../app/auth';import { showToast } from '../../../app/api';
 import ErrorState from '../../../components/ErrorState.vue';import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 const props=defineProps<{kind:'network'|'security'|'subscription'|'info'}>();
 const title=computed(()=>({network:'当前网络配置',security:'认证与会话安全',subscription:'订阅默认设置',info:'系统运行信息'}[props.kind]));
 const info=ref<RuntimeInfo|null>(null),saved=ref<RuntimeSettings|null>(null),loading=ref(false),saving=ref(false),error=ref('');
-const form=reactive({sessionMinutes:120,subscriptionFormat:'uri' as 'uri'|'base64'|'sing-box'});
+// The format list comes from the server registry, so a new format needs no change here.
+const formats=ref<SubscriptionFormatInfo[]>([{id:'uri',aliases:[],contentType:'',fileName:'',usesRules:false}]);
+const formatNames:Record<string,string>={uri:'通用 URI 列表',base64:'Base64 URI 列表','sing-box':'sing-box JSON（出站片段）',clash:'Clash / mihomo 完整配置','clash-legacy':'旧版 Clash / Clash Premium'};
+const form=reactive({sessionMinutes:120,subscriptionFormat:'uri',subscriptionUpdateHours:12,subscriptionUaDetection:true});
 function bytes(value:number){return value<1024*1024 ? `${(value/1024).toFixed(1)} KB` : `${(value/1024/1024).toFixed(1)} MB`;}
-async function load(){if(loading.value||saving.value)return;loading.value=true;try{const [runtime,settings]=await Promise.all([settingsAPI.runtime(),settingsAPI.runtimePolicy()]);info.value=runtime;saved.value=settings;Object.assign(form,settings.policy);error.value='';}catch(e){error.value=(e as Error).message;}finally{loading.value=false;}}
-async function save(){if(saving.value||!saved.value)return;if(!Number.isInteger(form.sessionMinutes)||form.sessionMinutes<15||form.sessionMinutes>1440){showToast('会话时间须为 15～1440 的整数','error');return;}saving.value=true;try{const policy={...saved.value.policy,...(props.kind==='security'?{sessionMinutes:form.sessionMinutes}:{subscriptionFormat:form.subscriptionFormat})};const result=await settingsAPI.saveRuntimePolicy(policy,saved.value.revision);saved.value=result;Object.assign(form,result.policy);error.value='';showToast('设置已保存');}catch(e){error.value=(e as Error).message;}finally{saving.value=false;}}
+async function load(){if(loading.value||saving.value)return;loading.value=true;try{const [runtime,settings,registry]=await Promise.all([settingsAPI.runtime(),settingsAPI.runtimePolicy(),settingsAPI.subscriptionFormats()]);info.value=runtime;formats.value=registry.items;saved.value=settings;Object.assign(form,settings.policy);error.value='';}catch(e){error.value=(e as Error).message;}finally{loading.value=false;}}
+async function save(){if(saving.value||!saved.value)return;if(!Number.isInteger(form.sessionMinutes)||form.sessionMinutes<15||form.sessionMinutes>1440){showToast('会话时间须为 15～1440 的整数','error');return;}if(props.kind==='subscription'&&(!Number.isInteger(form.subscriptionUpdateHours)||form.subscriptionUpdateHours<1||form.subscriptionUpdateHours>168)){showToast('刷新间隔须为 1～168 的整数','error');return;}saving.value=true;try{const policy={...saved.value.policy,...(props.kind==='security'?{sessionMinutes:form.sessionMinutes}:{subscriptionFormat:form.subscriptionFormat,subscriptionUpdateHours:form.subscriptionUpdateHours,subscriptionUaDetection:form.subscriptionUaDetection})};const result=await settingsAPI.saveRuntimePolicy(policy,saved.value.revision);saved.value=result;Object.assign(form,result.policy);error.value='';showToast('设置已保存');}catch(e){error.value=(e as Error).message;}finally{saving.value=false;}}
 onMounted(load);
 </script>

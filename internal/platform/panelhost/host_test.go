@@ -128,7 +128,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 				t.Fatal(status, string(body))
 			}
 			password := "online-restore-test-password"
-			status, body = call("POST", "/users", map[string]any{"username": "online-user", "displayName": "Snapshot name", "status": "active", "maxDevices": 2, "maxConnections": 8, "allowedProtocols": []string{"http"}})
+			status, body = call("POST", "/users", map[string]any{"username": "online-user", "displayName": "Snapshot name", "status": "active", "allowedProtocols": []string{"http"}})
 			var user struct{ ID string }
 			json.Unmarshal(body, &user)
 			if status != 201 {

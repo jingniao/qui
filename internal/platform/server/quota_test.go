@@ -65,7 +65,7 @@ func (f *quotaFixture) addUser(t *testing.T, username, expiresAt string) (user.U
 // SOCKS5.
 func (f *quotaFixture) addProtocolUser(t *testing.T, username, expiresAt, protocol string) (user.User, user.Credential) {
 	t.Helper()
-	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: username, DisplayName: username, Status: "active", ExpiresAt: expiresAt, MaxDevices: 1, MaxConnections: 8, AllowedProtocols: []string{protocol}, NodeGroupIDs: []string{f.groupID}})
+	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: username, DisplayName: username, Status: "active", ExpiresAt: expiresAt, AllowedProtocols: []string{protocol}, NodeGroupIDs: []string{f.groupID}})
 	if response.Code != 201 {
 		t.Fatalf("user %s: %d %s", username, response.Code, response.Body.String())
 	}
@@ -73,18 +73,24 @@ func (f *quotaFixture) addProtocolUser(t *testing.T, username, expiresAt, protoc
 	if err := json.Unmarshal(response.Body.Bytes(), &account); err != nil {
 		t.Fatal(err)
 	}
-	deviceResponse := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": username + " device", "protocols": []string{protocol}})
-	if deviceResponse.Code != 201 {
-		t.Fatalf("device %s: %d %s", username, deviceResponse.Code, deviceResponse.Body.String())
+	// v1.1 issues the credentials on the user's hidden access identity instead of
+	// a device created through the removed device API. The plaintext secret is
+	// only returned on request, so the identity is read with reveal set.
+	identity, err := f.app.quotaDeployer.users.AccessIdentity(f.ctx, account.ID)
+	if err != nil {
+		t.Fatalf("identity %s: %v", username, err)
 	}
-	var device user.Device
-	if err := json.Unmarshal(deviceResponse.Body.Bytes(), &device); err != nil {
-		t.Fatal(err)
+	credentials, err := f.app.quotaDeployer.users.Credentials(f.ctx, identity.ID, true)
+	if err != nil {
+		t.Fatalf("credentials %s: %v", username, err)
 	}
-	if len(device.Credentials) != 1 || device.Credentials[0].Secret == "" || device.Credentials[0].Protocol != protocol {
-		t.Fatalf("user %s has no %s credential", username, protocol)
+	for _, credential := range credentials {
+		if credential.Protocol == protocol && credential.Secret != "" {
+			return account, credential
+		}
 	}
-	return account, device.Credentials[0]
+	t.Fatalf("user %s has no %s credential", username, protocol)
+	return user.User{}, user.Credential{}
 }
 
 // publish builds and applies an initial revision containing every current
@@ -178,7 +184,7 @@ func setQuota(t *testing.T, ctx context.Context, f *quotaFixture, userID string,
 
 func saveUser(t *testing.T, f *quotaFixture, account user.User, limit int64) {
 	t.Helper()
-	response := f.owner.call("PUT", "/api/v1/users/"+account.ID, user.Input{Username: account.Username, DisplayName: account.DisplayName, Status: account.Status, ExpiresAt: account.ExpiresAt, TrafficLimit: limit, MaxDevices: account.MaxDevices, MaxConnections: account.MaxConnections, AllowedProtocols: account.AllowedProtocols, NodeGroupIDs: account.NodeGroupIDs})
+	response := f.owner.call("PUT", "/api/v1/users/"+account.ID, user.Input{Username: account.Username, DisplayName: account.DisplayName, Status: account.Status, ExpiresAt: account.ExpiresAt, TrafficLimit: limit, AllowedProtocols: account.AllowedProtocols, NodeGroupIDs: account.NodeGroupIDs})
 	if response.Code != 200 {
 		t.Fatalf("save user: %d %s", response.Code, response.Body.String())
 	}
@@ -366,7 +372,7 @@ func stateUser(t *testing.T, state desiredstate.State, userID string) desiredsta
 // stored expiry, exactly as the fresh render would carry it.
 func renewUser(t *testing.T, f *quotaFixture, account user.User, expiresAt string) string {
 	t.Helper()
-	response := f.owner.call("PUT", "/api/v1/users/"+account.ID, user.Input{Username: account.Username, DisplayName: account.DisplayName, Status: account.Status, ExpiresAt: expiresAt, TrafficLimit: account.TrafficLimit, MaxDevices: account.MaxDevices, MaxConnections: account.MaxConnections, AllowedProtocols: account.AllowedProtocols, NodeGroupIDs: account.NodeGroupIDs})
+	response := f.owner.call("PUT", "/api/v1/users/"+account.ID, user.Input{Username: account.Username, DisplayName: account.DisplayName, Status: account.Status, ExpiresAt: expiresAt, TrafficLimit: account.TrafficLimit, AllowedProtocols: account.AllowedProtocols, NodeGroupIDs: account.NodeGroupIDs})
 	if response.Code != 200 {
 		t.Fatalf("renew user: %d %s", response.Code, response.Body.String())
 	}
@@ -1300,45 +1306,40 @@ func TestQuotaDeletedUserRevokedOnNode(t *testing.T) {
 	}
 }
 
-// TestQuotaDeletedDeviceRevokesOnlyThatDevice: deleting one device must take
-// only that device's credential off the node, not the user's other device.
+// TestQuotaDeletedDeviceRevokesOnlyThatDevice: removing one access identity must
+// take only that identity's credential off the node. v1.1 keeps exactly one
+// identity per user and has no device API, so the bystander is a second user and
+// the removal goes through the same repository call and revocation hook the
+// removed device handler used (the path a restored pre-0113 database still takes
+// when the extra identity is dropped).
 func TestQuotaDeletedDeviceRevokesOnlyThatDevice(t *testing.T) {
 	f := newQuotaFixture(t)
 	account, first := f.addUser(t, "device_user", "")
-	account.MaxDevices = 2
-	saveUser(t, f, account, 0)
-	response := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "second device", "protocols": []string{"vless"}})
-	if response.Code != 201 {
-		t.Fatalf("second device: %d %s", response.Code, response.Body.String())
+	_, kept := f.addUser(t, "bystander_user", "")
+	baseline := f.publish(t)
+	if !stateHasCredential(f.state(t, baseline), first) || !stateHasCredential(f.state(t, baseline), kept) {
+		t.Fatalf("the baseline revision lacks a credential: %+v", f.state(t, baseline).Credentials)
 	}
-	var second user.Device
-	if err := json.Unmarshal(response.Body.Bytes(), &second); err != nil {
-		t.Fatal(err)
-	}
-	if len(second.Credentials) != 1 || second.Credentials[0].Protocol != "vless" {
-		t.Fatalf("second device credentials: %v", second.Credentials)
-	}
-	kept := second.Credentials[0]
-	f.publish(t)
 	alerts := f.recordAlerts()
 
-	var firstDeviceID string
-	if err := f.app.Database.QueryRowContext(f.ctx, "SELECT device_id FROM credentials WHERE id=?", first.ID).Scan(&firstDeviceID); err != nil {
+	identity, err := f.app.quotaDeployer.users.AccessIdentity(f.ctx, account.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if response := f.owner.call("DELETE", "/api/v1/devices/"+firstDeviceID, nil); response.Code != 204 {
-		t.Fatalf("delete device: %d %s", response.Code, response.Body.String())
+	if err := f.app.quotaDeployer.users.DeleteDevice(f.ctx, identity.ID); err != nil {
+		t.Fatalf("delete device: %v", err)
 	}
+	f.app.quotaDeployer.accessRemoved(f.ctx, account.ID, account.Username, "device deleted")
 	flowWait(t, "one automatic revision removing the deleted device's credential", func() bool {
 		return len(f.autoRevisions(t)) == 1
 	})
 	automatic := f.autoRevisions(t)[0]
 	revoked := f.state(t, automatic.ID)
 	if stateHasCredential(revoked, first) {
-		t.Fatal("the deleted device's credential survived in the automatic revision")
+		t.Fatal("the deleted identity's credential survived in the automatic revision")
 	}
 	if !stateHasCredential(revoked, kept) {
-		t.Fatal("the surviving device's credential was removed with the deleted one")
+		t.Fatal("the other user's credential was removed with the deleted one")
 	}
 	if !strings.Contains(automatic.Summary, "device deleted") {
 		t.Fatalf("summary %q does not mention the deleted device", automatic.Summary)
@@ -1354,50 +1355,38 @@ func TestQuotaDeletedDeviceRevokesOnlyThatDevice(t *testing.T) {
 	}
 }
 
-// TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt is the same delete while the
+// TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt is the same removal while the
 // Owner's saved draft cannot be rendered: every automatic revision is then built
-// from the published state alone, and the deleted device's credential is gone
+// from the published state alone, and the removed identity's credential is gone
 // from the credentials table while its published entry still names the active
 // user. Without the credential-owner check that fallback found nothing to change
 // and the credential stayed valid on the node forever.
 func TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt(t *testing.T) {
 	f := newQuotaFixture(t)
 	account, first := f.addUser(t, "fallback_device_user", "")
-	account.MaxDevices = 2
-	saveUser(t, f, account, 0)
-	response := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "second device", "protocols": []string{"vless"}})
-	if response.Code != 201 {
-		t.Fatalf("second device: %d %s", response.Code, response.Body.String())
-	}
-	var second user.Device
-	if err := json.Unmarshal(response.Body.Bytes(), &second); err != nil {
-		t.Fatal(err)
-	}
-	if len(second.Credentials) != 1 {
-		t.Fatalf("second device credentials: %v", second.Credentials)
-	}
-	kept := second.Credentials[0]
+	_, kept := f.addUser(t, "fallback_bystander_user", "")
 	f.publish(t)
 	flaky := &quotaFlakySnapshotter{inner: f.app.quotaDeployer.proxy, fail: true}
 	f.app.quotaDeployer.proxy = flaky
 
-	var firstDeviceID string
-	if err := f.app.Database.QueryRowContext(f.ctx, "SELECT device_id FROM credentials WHERE id=?", first.ID).Scan(&firstDeviceID); err != nil {
+	identity, err := f.app.quotaDeployer.users.AccessIdentity(f.ctx, account.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if response := f.owner.call("DELETE", "/api/v1/devices/"+firstDeviceID, nil); response.Code != 204 {
-		t.Fatalf("delete device: %d %s", response.Code, response.Body.String())
+	if err := f.app.quotaDeployer.users.DeleteDevice(f.ctx, identity.ID); err != nil {
+		t.Fatalf("delete device: %v", err)
 	}
+	f.app.quotaDeployer.accessRemoved(f.ctx, account.ID, account.Username, "device deleted")
 	flowWait(t, "one automatic revision removing the deleted device's credential", func() bool {
 		return len(f.autoRevisions(t)) == 1
 	})
 	automatic := f.autoRevisions(t)[0]
 	revoked := f.state(t, automatic.ID)
 	if stateHasCredential(revoked, first) {
-		t.Fatal("the deleted device's credential survived the published-only revision")
+		t.Fatal("the deleted identity's credential survived the published-only revision")
 	}
 	if !stateHasCredential(revoked, kept) {
-		t.Fatal("the surviving device's credential was removed with the deleted one")
+		t.Fatal("the other user's credential was removed with the deleted one")
 	}
 	if !strings.Contains(automatic.Summary, "device deleted") {
 		t.Fatalf("summary %q does not mention the deleted device", automatic.Summary)
@@ -1452,16 +1441,13 @@ func TestQuotaDeletedUserAfterRemovedGrantReachesNode(t *testing.T) {
 // delete must not create a revision for them.
 func TestQuotaDeletedUserWithoutPublishedCredentialDoesNothing(t *testing.T) {
 	f := newQuotaFixture(t)
-	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: "ungranted_user", DisplayName: "ungranted_user", Status: "active", MaxDevices: 1, MaxConnections: 8, AllowedProtocols: []string{"vless"}})
+	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: "ungranted_user", DisplayName: "ungranted_user", Status: "active", AllowedProtocols: []string{"vless"}})
 	if response.Code != 201 {
 		t.Fatalf("user: %d %s", response.Code, response.Body.String())
 	}
 	var account user.User
 	if err := json.Unmarshal(response.Body.Bytes(), &account); err != nil {
 		t.Fatal(err)
-	}
-	if device := f.owner.call("POST", "/api/v1/users/"+account.ID+"/devices", map[string]any{"name": "ungranted device", "protocols": []string{"vless"}}); device.Code != 201 {
-		t.Fatalf("device: %d %s", device.Code, device.Body.String())
 	}
 	baseline := f.publish(t)
 	f.markRecovered()

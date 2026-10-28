@@ -21,7 +21,10 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
   --sha256 DIGEST        lowercase SHA256 of that executable
   --config FILE          config template for a first install
                          (default: the packaged examples/<component>.yaml)
-  --core xray|sing-box   install the official core release with --node
+  --core xray|sing-box   install a core with --node (sing-box defaults to qui)
+  --core-source qui|official  sing-box source (default: qui; Xray stays official)
+  --qui-version VERSION same qui release as the Agent (required for qui source)
+  --core-bundle FILE --core-sums FILE  local qui core archive and SHA256SUMS
   --core-version VERSION release version to download, for example 26.3.27
   --core-url URL         official release asset URL
                          (default: the official GitHub release asset)
@@ -49,17 +52,32 @@ if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol
 . "$service_library"
 
 mode=''; binary=''; digest=''; config=''; core=''; core_version=''; core_digest=''; core_url=''; reinstall=false
+core_source=qui; qui_version=''; core_bundle=''; core_sums=''
+
+qui_release_version() {
+  local value=$qui_version bundle_version
+  # Release bundles carry their version so the default source follows the Agent.
+  if [[ -f $root/../VERSION ]]; then
+    bundle_version=$(cat -- "$root/../VERSION")
+    [[ -z $value || $value == "$bundle_version" ]] || fail 'The qui core must come from the Agent bundle release.'
+    value=$bundle_version
+  fi
+  [[ $value =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'Provide --qui-version X.Y.Z matching the Agent release.'
+  printf '%s' "$value"
+}
 while (($#)); do
   case $1 in
     --panel|--node)
       [[ -z $mode ]] || fail 'Choose exactly one of --panel and --node.'
       mode=$1; shift;;
-    --binary|--sha256|--config|--core|--core-version|--core-sha256|--core-url)
+    --binary|--sha256|--config|--core|--core-version|--core-sha256|--core-url|--core-source|--qui-version|--core-bundle|--core-sums)
       (($# >= 2)) || fail "Missing value for $1"
       case $1 in
         --binary) binary=$2;; --sha256) digest=${2,,};; --config) config=$2;;
         --core) core=$2;; --core-version) core_version=$2;;
         --core-sha256) core_digest=${2,,};; --core-url) core_url=$2;;
+        --core-source) core_source=$2;; --qui-version) qui_version=$2;;
+        --core-bundle) core_bundle=$2;; --core-sums) core_sums=$2;;
       esac
       shift 2;;
     --reinstall) reinstall=true; shift;;
@@ -131,7 +149,7 @@ if [[ $init_system == openrc ]] && command -v apk >/dev/null; then
   apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables \
     || fail 'Installing the required Alpine packages failed: run "apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables" and retry.'
 fi
-required_tools=(install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir)
+required_tools=(install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir awk cp)
 if [[ $init_system == systemd ]]; then
   required_tools+=(systemctl)
 else
@@ -163,6 +181,14 @@ if [[ $component == agent ]]; then
   for packaged in "${host_network_files[@]}"; do
     [[ -f $service_directory/$packaged && ! -L $service_directory/$packaged ]] || fail "Missing packaged service file: $packaged"
   done
+fi
+[[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
+if [[ $core == sing-box && $core_source == qui ]]; then
+  qui_version=$(qui_release_version)
+  [[ -z $core_url && -z $core_digest ]] || fail 'The qui source requires release SHA256SUMS, not --core-url/--core-sha256.'
+  core_version=${core_version:-1.14.4}
+  [[ $core_version == 1.14.4 ]] || fail 'This installer pins qui sing-box 1.14.4-qui.1.'
+  [[ -z $core_bundle && -z $core_sums || -f $core_bundle && ! -L $core_bundle && -f $core_sums && ! -L $core_sums ]] || fail 'Provide both local core files.'
 fi
 if [[ -n $core || -n $core_version || -n $core_digest || -n $core_url ]]; then
   [[ $component == agent ]] || fail 'A core is only installed with --node.'
@@ -308,6 +334,10 @@ core_asset() {
   local architecture libc
   architecture=$(host_architecture)
   libc=${2:-$(host_libc)}
+  if [[ $1 == sing-box && ${core_source:-qui} == qui ]]; then
+    printf 'sing-box-%s-qui.1-linux-%s.tar.gz' "$core_version" "$architecture"
+    return
+  fi
   case $architecture:$1 in
     amd64:xray) printf 'Xray-linux-64.zip';;
     arm64:xray) printf 'Xray-linux-arm64-v8a.zip';;
@@ -320,6 +350,10 @@ core_asset() {
   esac
 }
 core_prefix() {
+  if [[ $1 == sing-box && ${core_source:-qui} == qui ]]; then
+    printf 'https://github.com/jingniao/qui/releases/download/'
+    return
+  fi
   case $1 in
     xray) printf 'https://github.com/XTLS/Xray-core/releases/download/';;
     sing-box) printf 'https://github.com/SagerNet/sing-box/releases/download/';;
@@ -346,6 +380,15 @@ download() {
 # release is not installed.
 core_archive_digest() {
   local asset=$1 digest_file value
+  if [[ $core == sing-box && $core_source == qui ]]; then
+    digest_file=$stage/SHA256SUMS
+    if [[ -n $core_sums ]]; then cp -- "$core_sums" "$digest_file"
+    else download "$(core_prefix "$core")v$qui_version/SHA256SUMS" "$digest_file"; fi
+    value=$(awk -v asset="$asset" '$2 == asset && NF == 2 {n++; digest=$1} END {if(n==1) print digest}' "$digest_file")
+    [[ $value =~ ^[0-9a-f]{64}$ ]] || fail 'Missing or ambiguous qui core SHA256SUMS entry.'
+    printf '%s' "$value"
+    return
+  fi
   if [[ -n $core_digest ]]; then printf '%s' "$core_digest"; return; fi
   [[ $core == xray ]] || fail 'Pass --core-sha256: the sing-box release publishes no digest file.'
   digest_file=$stage/asset.dgst
@@ -354,6 +397,12 @@ core_archive_digest() {
   value=${value,,}
   [[ $value =~ ^[0-9a-f]{64}$ ]] || fail 'The Xray release digest file carries no SHA256 value.'
   printf '%s' "$value"
+}
+
+verify_core_archive() {
+  local file=$1 expected=$2 actual
+  actual=$(sha256sum -- "$file"); actual=${actual%% *}
+  [[ $actual == "$expected" ]] || fail 'Core archive SHA256 mismatch.'
 }
 
 # The temporary file the current publish() is writing. It is global because a failure
@@ -468,14 +517,16 @@ core_binary_digest=''
 if [[ -n $core ]]; then
   asset=$(core_asset "$core")
   url=$core_url
-  if [[ -z $url ]]; then url=$(core_prefix "$core")v$core_version/$asset; fi
+  release_version=$core_version
+  if [[ $core == sing-box && $core_source == qui ]]; then release_version=$qui_version; fi
+  if [[ -z $url ]]; then url=$(core_prefix "$core")v$release_version/$asset; fi
   prefix=$(core_prefix "$core")
   remainder=${url#"$prefix"}
   [[ $url == "$prefix"* && $remainder == */"$asset" && ${remainder%"/$asset"} != */* && -n ${remainder%"/$asset"} ]] || fail "Core URL must be an official $core release asset."
   expected=$(core_archive_digest "$asset")
-  download "$url" "$stage/archive"
-  actual=$(sha256sum -- "$stage/archive"); actual=${actual%% *}
-  [[ $actual == "$expected" ]] || fail 'Core archive SHA256 mismatch.'
+  if [[ -n $core_bundle && $core == sing-box && $core_source == qui ]]; then cp -- "$core_bundle" "$stage/archive"
+  else download "$url" "$stage/archive"; fi
+  verify_core_archive "$stage/archive" "$expected"
   mkdir -- "$stage/extract"
   case $asset in
     *.zip)

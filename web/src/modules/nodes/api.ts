@@ -17,7 +17,7 @@ export interface NodeView extends NodeNetworkSettings {
   enabled: boolean; allowSubscription: boolean; maintenance: boolean; hostname: string; os: string; agentVersion: string; publicIp: string; lastHeartbeat: string; createdAt: string;
   // Set once the node was logically deleted; an empty string means "live".
   deletedAt: string;
-  capabilities: { core_name?: string; core_version?: string; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
+  capabilities: { core_name?: string; core_version?: string; singbox_user_stats?: boolean; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
   heartbeat: { traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
 }
 // The panel publishes the release version, the gRPC port and the digest of the
@@ -68,11 +68,11 @@ requestHealth:(id:string,expectedRevision:number)=>request<HealthCheck>(`/nodes/
   list: (page: number, keyword: string, deleted = false) => request<Page<NodeView>>(`/nodes?page=${page}&pageSize=20&keyword=${encodeURIComponent(keyword)}${deleted ? '&deleted=1' : ''}`),
   get: (id: string) => request<NodeView>(`/nodes/${encodeURIComponent(id)}`),
   enroll: (name: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name }),
+  reissueEnrollment: (id: string) => request<Enrollment>(`/nodes/${encodeURIComponent(id)}/enrollment-token`, 'POST', {}),
   update: (node: NodeView, enabled: boolean) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled }),
   save: (node: NodeSettingsInput) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled: node.enabled, publicIp: node.publicIp, allowSubscription: node.allowSubscription, maintenance: node.maintenance, outboundSourceIp: node.outboundSourceIp, outboundInterface: node.outboundInterface, hostSourceIpv4: node.hostSourceIpv4, hostSourceIpv6: node.hostSourceIpv6 }),
   revoke: (id: string) => request(`/nodes/${id}/revoke-certificate`, 'POST'),
   deletionPreview: (id: string) => request<DeletionPreview>(`/nodes/${encodeURIComponent(id)}/deletion-preview`),
   deleteNode: (id: string) => request(`/nodes/${encodeURIComponent(id)}`, 'DELETE')
 };
-
 

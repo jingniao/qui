@@ -35,20 +35,11 @@ func (h *Handler) proxyRevision(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
-	if h.Proxy == nil || h.Users == nil {
-		httpapi.Error(w, 503, "unavailable", "Proxy configuration unavailable")
-		return
-	}
 	if strings.TrimSpace(body.Summary) == "" || len(body.Summary) > 512 {
 		httpapi.Error(w, 400, "invalid_request", "Revision summary required")
 		return
 	}
-	state, enabled, err := h.Proxy.SnapshotIntent(r.Context(), body.NodeID, h.Users)
-	if err != nil {
-		httpapi.Error(w, 400, "invalid_request", err.Error())
-		return
-	}
-	revision, err := h.Repository.CreateWithInboundIntent(r.Context(), state, enabled, auth.Actor(r.Context()).Username, body.Summary)
+	revision, err := h.createProxyRevision(r.Context(), body.NodeID, body.Summary, auth.Actor(r.Context()).Username)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -59,12 +50,35 @@ func (h *Handler) proxyRevision(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.JSON(w, 201, revision)
 }
+
+// createProxyRevision renders the node's configuration from its business data
+// and stores it as a draft together with the inbounds the Owner has enabled.
+// POST /api/v1/revisions/proxy and the one-step publication both go through it,
+// so the two paths always create the same revision.
+func (h *Handler) createProxyRevision(ctx context.Context, nodeID, summary, author string) (Revision, error) {
+	if h.Proxy == nil || h.Users == nil {
+		return Revision{}, &apiFailure{Status: 503, Code: "unavailable", Message: "Proxy configuration unavailable"}
+	}
+	state, enabled, err := h.Proxy.SnapshotIntent(ctx, nodeID, h.Users)
+	if err != nil {
+		return Revision{}, &apiFailure{Status: 400, Code: "invalid_request", Message: err.Error()}
+	}
+	return h.Repository.CreateWithInboundIntent(ctx, state, enabled, author, summary)
+}
 func (h *Handler) checkRelayTargets(ctx context.Context, state desiredstate.State) error {
+	return checkRelayTargets(ctx, h.Repository, state)
+}
+
+// checkRelayTargets refuses a node state whose relay outbounds point at a target
+// that has not published the matching inbound yet. Every single-node deployment
+// path runs it: the revision endpoint, the one-step publication and a one-node
+// canvas publication.
+func checkRelayTargets(ctx context.Context, repository *Repository, state desiredstate.State) error {
 	for _, outbound := range state.Outbounds {
 		if outbound.TargetNodeID == "" || !outbound.Enabled {
 			continue
 		}
-		target, err := h.Repository.Published(ctx, outbound.TargetNodeID)
+		target, err := repository.Published(ctx, outbound.TargetNodeID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.New("relay target node must be deployed first")
 		}

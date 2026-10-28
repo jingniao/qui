@@ -167,6 +167,10 @@ func method(settings desiredstate.ProtocolSettings) string {
 	return "chacha20-ietf-poly1305"
 }
 func buildInbound(inbound desiredstate.Inbound, credentials map[string]desiredstate.Credential) (string, any, *streamSettings, error) {
+	if inbound.Protocol == "forward" {
+		f := inbound.Settings.Forward
+		return "dokodemo-door", map[string]any{"address": f.Host, "port": f.Port, "network": f.Network, "followRedirect": false}, nil, nil
+	}
 	transport, err := stream(inbound.Settings, true)
 	if err != nil {
 		return "", nil, nil, err

@@ -1,6 +1,7 @@
 package deployment
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
@@ -37,6 +38,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/deployment-batches/{id}/deploy", h.Auth.Require(http.HandlerFunc(h.deployBatch), true))
 	mux.Handle("POST /api/v1/deployment-batches/{id}/rollback", h.Auth.Require(http.HandlerFunc(h.rollbackBatch), true))
 	mux.Handle("POST /api/v1/nodes/{id}/rollback", h.Auth.Require(http.HandlerFunc(h.rollbackNode), true))
+	mux.Handle("POST /api/v1/nodes/{id}/publish", h.Auth.Require(http.HandlerFunc(h.publishNode), true))
 }
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	page, size, err := httpapi.Pagination(r)
@@ -44,7 +46,18 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Invalid pagination")
 		return
 	}
-	items, total, err := h.Repository.List(r.Context(), page, size)
+	nodeID := strings.TrimSpace(r.URL.Query().Get("nodeId"))
+	if nodeID != "" && len(nodeID) > 128 {
+		httpapi.Error(w, 400, "invalid_request", "Invalid nodeId")
+		return
+	}
+	var items []Revision
+	var total int
+	if nodeID != "" {
+		items, total, err = h.Repository.ListForNode(r.Context(), nodeID, page, size)
+	} else {
+		items, total, err = h.Repository.List(r.Context(), page, size)
+	}
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -101,17 +114,8 @@ func (h *Handler) deploy(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Invalid revision ID")
 		return
 	}
-	state, err := h.Repository.State(r.Context(), id)
-	if err != nil {
-		httpapi.Error(w, 404, "not_found", "Revision not found")
-		return
-	}
-	if err := h.checkRelayTargets(r.Context(), state); err != nil {
-		httpapi.Error(w, 409, "dependency_not_ready", err.Error())
-		return
-	}
-	if err := h.Repository.Deploy(r.Context(), id); err != nil {
-		httpapi.Error(w, 409, "deployment_conflict", err.Error())
+	if err := h.deployRevision(r.Context(), id); err != nil {
+		h.fail(w, err)
 		return
 	}
 	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "发布配置版本", strconv.FormatInt(id, 10), "成功", r.RemoteAddr); err != nil {
@@ -120,7 +124,95 @@ func (h *Handler) deploy(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.JSON(w, 202, map[string]any{"revision": id, "status": "pending"})
 }
+
+// publishNode creates the node's draft from its business data and publishes it
+// in one step. The pages that only ever created a draft now reach the node
+// without a second call, while the draft they used to leave behind is still
+// what gets published, so a refused deploy names it in the error and the Owner
+// can retry it from the node's configuration history.
+func (h *Handler) publishNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := r.PathValue("id")
+	var body struct {
+		Summary string `json:"summary"`
+	}
+	if err := httpapi.Decode(w, r, &body); err != nil {
+		httpapi.Error(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if strings.TrimSpace(body.Summary) == "" || len(body.Summary) > 512 {
+		httpapi.Error(w, 400, "invalid_request", "Revision summary required")
+		return
+	}
+	actor := auth.Actor(r.Context()).Username
+	revision, err := h.createProxyRevision(r.Context(), nodeID, body.Summary, actor)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	if err := h.deployRevision(r.Context(), revision.ID); err != nil {
+		h.fail(w, withRevision(err, revision.ID))
+		return
+	}
+	if err := h.Audit.Record(r.Context(), actor, "发布节点配置", nodeID, "成功", r.RemoteAddr); err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.JSON(w, 202, map[string]any{"revision": revision.ID, "status": "pending"})
+}
+
+// deployRevision hands a stored revision to the node's Agent. The revision
+// endpoint and the one-step publication share it, so both answer a refused
+// dependency or a busy node identically.
+func (h *Handler) deployRevision(ctx context.Context, id int64) error {
+	state, err := h.Repository.State(ctx, id)
+	if err != nil {
+		return &apiFailure{Status: 404, Code: "not_found", Message: "Revision not found"}
+	}
+	if err := h.checkRelayTargets(ctx, state); err != nil {
+		return &apiFailure{Status: 409, Code: "dependency_not_ready", Message: err.Error()}
+	}
+	if err := h.Repository.Deploy(ctx, id); err != nil {
+		return &apiFailure{Status: 409, Code: "deployment_conflict", Message: err.Error()}
+	}
+	return nil
+}
+
+// apiFailure is a failure a shared helper reports with the status and error code
+// of the endpoint that used to own the logic. Details travel inside the error
+// body, the same way a refused node deletion reports its blockers.
+type apiFailure struct {
+	Status  int
+	Code    string
+	Message string
+	Details map[string]any
+}
+
+func (f *apiFailure) Error() string { return f.Message }
+
+// withRevision names the draft a refused one-step publication left behind, so
+// the caller can offer to retry it instead of saving the configuration again.
+func withRevision(err error, revision int64) error {
+	var failure *apiFailure
+	if !errors.As(err, &failure) {
+		return err
+	}
+	details := map[string]any{"revision": revision}
+	for key, value := range failure.Details {
+		details[key] = value
+	}
+	return &apiFailure{Status: failure.Status, Code: failure.Code, Message: failure.Message, Details: details}
+}
+
 func (h *Handler) fail(w http.ResponseWriter, err error) {
+	var failure *apiFailure
+	if errors.As(err, &failure) {
+		if len(failure.Details) == 0 {
+			httpapi.Error(w, failure.Status, failure.Code, failure.Message)
+		} else {
+			httpapi.ErrorDetails(w, failure.Status, failure.Code, failure.Message, failure.Details)
+		}
+		return
+	}
 	if errors.Is(err, ErrDependency) {
 		httpapi.Error(w, 409, "dependency_not_ready", err.Error())
 		return

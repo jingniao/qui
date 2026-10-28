@@ -17,6 +17,9 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/format"
+	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/pki"
@@ -156,19 +159,28 @@ func TestActualQUICAgentPublishedDeviceSubscriptionAndNativeClient(t *testing.T)
 				}
 				time.Sleep(30 * time.Millisecond)
 			}
-			service := &subscription.Service{Repository: &subscription.Repository{Database: app.Database}, Users: users, Nodes: nodes, Published: deployments}
-			endpoints, err := service.Endpoints(ctx, u.ID, device.ID)
-			if err != nil || len(endpoints) != 1 || endpoints[0].Protocol != protocol {
-				t.Fatal("published QUIC device missing from subscription", endpoints, err)
+			service := &subscription.Service{
+				Repository: &subscription.Repository{Database: app.Database},
+				Users:      users,
+				Sources:    source.NewRegistry(&published.Source{Users: users, Nodes: nodes, Published: deployments}),
+				Formats:    subscription.DefaultFormats(),
 			}
-			encoded, err := subscription.Export(endpoints, "sing-box")
+			proxies, _, err := service.Proxies(ctx, u.ID, device.ID)
+			if err != nil || len(proxies) != 1 || proxies[0].Protocol != protocol {
+				t.Fatal("published QUIC device missing from subscription", proxies, err)
+			}
+			exporter, known := subscription.DefaultFormats().Get("sing-box")
+			if !known {
+				t.Fatal("sing-box format missing")
+			}
+			rendered, err := exporter.Render(format.Profile{Proxies: proxies})
 			if err != nil {
 				t.Fatal(err)
 			}
 			var exported struct {
 				Outbounds []json.RawMessage `json:"outbounds"`
 			}
-			if err := json.Unmarshal(encoded, &exported); err != nil || len(exported.Outbounds) != 1 {
+			if err := json.Unmarshal(rendered.Body, &exported); err != nil || len(exported.Outbounds) != 1 {
 				t.Fatal(err)
 			}
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -177,7 +189,7 @@ func TestActualQUICAgentPublishedDeviceSubscriptionAndNativeClient(t *testing.T)
 			}
 			clientPort := listener.Addr().(*net.TCPAddr).Port
 			listener.Close()
-			clientDocument := map[string]any{"log": map[string]bool{"disabled": true}, "inbounds": []map[string]any{{"type": "http", "tag": "client", "listen": "127.0.0.1", "listen_port": clientPort}}, "outbounds": exported.Outbounds, "route": map[string]any{"final": endpoints[0].NodeName + "-" + endpoints[0].InboundID + "-" + protocol}}
+			clientDocument := map[string]any{"log": map[string]bool{"disabled": true}, "inbounds": []map[string]any{{"type": "http", "tag": "client", "listen": "127.0.0.1", "listen_port": clientPort}}, "outbounds": exported.Outbounds, "route": map[string]any{"final": proxies[0].Origin.Node.Name + "-" + proxies[0].Origin.Ref + "-" + protocol}}
 			data, _ := json.Marshal(clientDocument)
 			adapter := &singbox.Adapter{Path: binary, Directory: t.TempDir(), NodeID: "quic-client"}
 			defer adapter.Close()

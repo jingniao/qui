@@ -30,6 +30,15 @@ func (r *Repository) AccountSummary(ctx context.Context, filter Filter) (Account
 	err := r.Database.QueryRowContext(ctx, "SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0),count(*) FROM account_traffic_samples"+where, args...).Scan(&result.UploadBytes, &result.DownloadBytes, &result.Observations)
 	return result, err
 }
+
+// AccountUsage reports the traffic recorded for one account, summed over every
+// stored day. The subscription header needs the upload/download ratio, not a
+// window: samples counts the rows, so a caller can tell "no data" from "zero".
+func (r *Repository) AccountUsage(ctx context.Context, userID string) (upload, download, samples int64, err error) {
+	err = r.Database.QueryRowContext(ctx, "SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0),count(*) FROM account_traffic_daily WHERE user_id=?", userID).Scan(&upload, &download, &samples)
+	return upload, download, samples, err
+}
+
 func (r *Repository) AccountTraffic(ctx context.Context, filter Filter, granularity string, page, size int) ([]Traffic, int, error) {
 	table, from, to := "account_traffic_hourly", timestamp(filter.From.Truncate(time.Hour)), timestamp(filter.To.Truncate(time.Hour))
 	if granularity == "daily" {

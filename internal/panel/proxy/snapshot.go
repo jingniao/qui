@@ -124,6 +124,11 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		state.Outbounds = append(state.Outbounds, outbound)
 	}
 	for _, record := range inbounds {
+		if record.Protocol == "forward" && record.Enabled {
+			if !n.Capabilities.GetForwardInboundSupported() {
+				return state, enabled, errors.New("node Agent/core no longer advertises forward inbound support")
+			}
+		}
 		// The intent is taken before the auto-disable below: an inbound the
 		// Owner enabled stays in it even while it has no users.
 		if record.Enabled {
@@ -197,7 +202,7 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 				}
 			}
 		}
-		if len(inbound.CredentialIDs) == 0 {
+		if len(inbound.CredentialIDs) == 0 && inbound.Protocol != "forward" {
 			inbound.Enabled = false
 		}
 		state.Inbounds = append(state.Inbounds, inbound)

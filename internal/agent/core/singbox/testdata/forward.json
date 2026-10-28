@@ -1,0 +1,67 @@
+{
+  "log": {
+    "disabled": true
+  },
+  "inbounds": [
+    {
+      "override_address": "203.0.113.10",
+      "override_port": 8443,
+      "type": "direct",
+      "tag": "entry",
+      "listen": "127.0.0.1",
+      "listen_port": 1080
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "direct",
+      "tag": "_panel_terminal_"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "inbound": [
+          "entry"
+        ],
+        "domain": [
+          "localhost"
+        ],
+        "action": "resolve",
+        "server": "_panel_loopback_"
+      },
+      {
+        "inbound": [
+          "entry"
+        ],
+        "action": "route",
+        "outbound": "direct"
+      }
+    ],
+    "final": "_panel_terminal_",
+    "default_domain_resolver": "_panel_dns_"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "_panel_dns_"
+      },
+      {
+        "type": "hosts",
+        "tag": "_panel_loopback_",
+        "predefined": {
+          "localhost": [
+            "127.0.0.1",
+            "::1"
+          ]
+        }
+      }
+    ],
+    "final": "_panel_dns_"
+  }
+}

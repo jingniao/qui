@@ -42,7 +42,7 @@ type statsUserPolicy struct {
 
 func configureStats(document *configDocument, state desiredstate.State, port int, options RenderOptions, rendered *core.RenderedConfig) error {
 	endpoint := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	document.API = &statsAPIConfig{Tag: "_stats_api_", Listen: endpoint, Services: []string{"StatsService"}}
+	document.API = &statsAPIConfig{Tag: "_stats_api_", Listen: endpoint, Services: []string{"StatsService", "RoutingService"}}
 	document.Stats = &struct{}{}
 	document.Policy = &statsPolicyConfig{Levels: map[string]statsUserPolicy{"0": {Upload: true, Download: true, Online: options.OnlineStats}}}
 	// policy.system enables the per-inbound counters plus, when a WireGuard

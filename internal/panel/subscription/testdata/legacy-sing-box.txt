@@ -1,0 +1,156 @@
+{
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "Tokyo-01-in-vless-ws-vless",
+      "server": "203.0.113.10",
+      "server_port": 443,
+      "uuid": "5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "cdn.example.com"
+      },
+      "transport": {
+        "type": "ws",
+        "path": "/ray"
+      }
+    },
+    {
+      "type": "trojan",
+      "tag": "Tokyo-01-in-trojan-grpc-trojan",
+      "server": "203.0.113.10",
+      "server_port": 8443,
+      "password": "trojan-secret",
+      "tls": {
+        "enabled": true,
+        "server_name": "grpc.example.com"
+      },
+      "transport": {
+        "type": "grpc",
+        "service_name": "svc"
+      }
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "Osaka-01-in-ss-shadowsocks",
+      "server": "198.51.100.7",
+      "server_port": 8388,
+      "password": "ss-secret",
+      "method": "aes-256-gcm"
+    },
+    {
+      "type": "http",
+      "tag": "Osaka-01-in-http-http",
+      "server": "198.51.100.7",
+      "server_port": 8080,
+      "username": "alice",
+      "password": "http-pw"
+    },
+    {
+      "type": "socks",
+      "tag": "Osaka-01-in-socks-socks5",
+      "server": "198.51.100.7",
+      "server_port": 1080,
+      "username": "alice",
+      "password": "socks-pw",
+      "version": "5"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "Seoul-01-in-hy2-hysteria2",
+      "server": "2001:db8::1",
+      "server_port": 443,
+      "password": "hy2-secret",
+      "tls": {
+        "enabled": true,
+        "server_name": "hy2.example.com",
+        "alpn": [
+          "h3"
+        ]
+      },
+      "up_mbps": 50,
+      "down_mbps": 100
+    },
+    {
+      "type": "tuic",
+      "tag": "Seoul-01-in-tuic-tuic",
+      "server": "2001:db8::1",
+      "server_port": 443,
+      "password": "tuic-secret",
+      "uuid": "6ebcdcf2-4dbe-4a89-9b40-a63ab69aacef",
+      "tls": {
+        "enabled": true,
+        "server_name": "tuic.example.com",
+        "alpn": [
+          "h3"
+        ]
+      },
+      "congestion_control": "bbr",
+      "udp_relay_mode": "quic"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "Seoul-01-in-hy2-pinned-hysteria2",
+      "server": "2001:db8::2",
+      "server_port": 8443,
+      "password": "pinned-secret",
+      "tls": {
+        "enabled": true,
+        "server_name": "pinned.example.com",
+        "certificate": [
+          "-----BEGIN CERTIFICATE-----",
+          "MIIBszCCAVmgAwIBAgIUQ2VydGlmaWNhdGU=",
+          "-----END CERTIFICATE-----"
+        ],
+        "alpn": [
+          "h3"
+        ]
+      }
+    },
+    {
+      "type": "tuic",
+      "tag": "Seoul-01-in-tuic-pinned-tuic",
+      "server": "2001:db8::2",
+      "server_port": 8444,
+      "password": "pinned-tuic",
+      "uuid": "7ebcdcf2-4dbe-4a89-9b40-a63ab69aacef",
+      "tls": {
+        "enabled": true,
+        "server_name": "pinned.example.com",
+        "certificate": [
+          "-----BEGIN CERTIFICATE-----",
+          "MIIBszCCAVmgAwIBAgIUQ2VydGlmaWNhdGU=",
+          "-----END CERTIFICATE-----"
+        ],
+        "alpn": [
+          "h3"
+        ]
+      }
+    }
+  ],
+  "endpoints": [
+    {
+      "type": "wireguard",
+      "tag": "Seoul-01-in-wg",
+      "address": [
+        "10.99.0.2/32",
+        "2001:db8:99::2/128"
+      ],
+      "private_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "mtu": 1420,
+      "peers": [
+        {
+          "address": "192.0.2.9",
+          "port": 51820,
+          "public_key": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ],
+          "persistent_keepalive_interval": 15
+        }
+      ]
+    }
+  ]
+}

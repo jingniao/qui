@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -12,15 +13,40 @@ type Handler struct {
 	Service *Service
 	Auth    *auth.Handler
 	Audit   auth.Audit
+	// Users reads the user credentials a node snapshot needs. Publishing a
+	// canvas scheme snapshots the nodes it touches, exactly like a publish from
+	// the node page.
+	Users AccessReader
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.Handle("POST /api/v1/inbounds/{id}/reachability", h.Auth.Require(http.HandlerFunc(h.reachability), true))
 	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/inbounds": h.listInbounds, "POST /api/v1/inbounds": h.saveInbound, "PUT /api/v1/inbounds/{id}": h.saveInbound, "DELETE /api/v1/inbounds/{id}": h.deleteInbound, "GET /api/v1/outbounds": h.listOutbounds, "POST /api/v1/outbounds": h.saveOutbound, "PUT /api/v1/outbounds/{id}": h.saveOutbound, "DELETE /api/v1/outbounds/{id}": h.deleteOutbound} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
 	// The protocol capability basis is read-only and non-sensitive, so both Owner
 	// and Viewer may read it. It is the same table the server validates against.
 	mux.Handle("GET /api/v1/protocol-support", h.Auth.Require(http.HandlerFunc(h.protocolSupport), false))
+	h.registerCanvas(mux)
+}
+
+func (h *Handler) reachability(w http.ResponseWriter, r *http.Request) {
+	i, err := h.Service.Repository.Inbound(r.Context(), r.PathValue("id"), false)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	n, err := h.Service.Nodes.Get(r.Context(), i.NodeID)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	err = node.PanelReachability(r.Context(), n.PublicIP, i.Port, i.Settings.ServerName, i.Settings.Security == "tls", i.Settings.TrustedCAPEM, i.Settings.CertificatePEM)
+	code := "reachable"
+	if err != nil {
+		code = "unreachable"
+	}
+	httpapi.JSON(w, 200, map[string]any{"reachable": err == nil, "code": code, "origin": "panel"})
 }
 func (h *Handler) protocolSupport(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 200, map[string]any{"protocols": desiredstate.ProtocolSupportTable()})

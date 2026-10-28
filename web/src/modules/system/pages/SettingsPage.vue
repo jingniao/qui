@@ -31,7 +31,8 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { formatTime, isOwner } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import { refreshSettingsView } from '../../../app/events';
@@ -44,11 +45,40 @@ import BackupSchedulePanel from '../components/BackupSchedulePanel.vue';
 import RuntimeSettingsPanel from '../components/RuntimeSettingsPanel.vue';
 import RetentionJobPanel from '../components/RetentionJobPanel.vue';
 import StorageObservationPanel from '../components/StorageObservationPanel.vue';
-const tabs = [{ key: 'base', label: '基础设置' }, { key: 'network', label: '网络设置' }, { key: 'security', label: '安全设置' }, { key: 'accessLog', label: '访问记录设置' }, { key: 'subscription', label: '订阅设置' }, { key: 'backup', label: '备份设置' }, { key: 'info', label: '系统信息' }];
+const route = useRoute();
+const router = useRouter();
+const tabs = [
+  { key: 'base', label: '基础设置' },
+  { key: 'network', label: '网络设置' },
+  { key: 'security', label: '安全设置' },
+  { key: 'accessLog', label: '访问记录设置' },
+  { key: 'subscription', label: '订阅设置' },
+  { key: 'backup', label: '备份设置' },
+  { key: 'info', label: '系统信息' }
+];
 const activeTab = ref('accessLog'), saved = ref<RetentionSettings | null>(null), loading = ref(false), saving = ref(false), error = ref(''), confirmation = ref(false);
 const form = reactive({ allowedDays: 30, blockedDays: 90, hourlyDays: 90 });
 const retentionConfirm = ref({ allowedDays: 0, blockedDays: 0, hourlyDays: 0 });
-const runtimeTab=computed(()=>activeTab.value as 'network'|'security'|'subscription'|'info');
+const runtimeTab = computed(() => {
+  if (['network', 'security', 'subscription', 'info'].includes(activeTab.value)) {
+    return activeTab.value as 'network' | 'security' | 'subscription' | 'info';
+  }
+  return 'info';
+});
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (tab === 'clashRules' || tab === 'clash') {
+      router.replace('/routing/client');
+      return;
+    } else if (tab && typeof tab === 'string' && tabs.some(t => t.key === tab)) {
+      activeTab.value = tab;
+    }
+  },
+  { immediate: true }
+);
+
 const isShortening = computed(() => !!saved.value && (retentionConfirm.value.allowedDays < saved.value.policy.allowedDays || retentionConfirm.value.blockedDays < saved.value.policy.blockedDays || retentionConfirm.value.hourlyDays < saved.value.policy.hourlyDays));
 async function load() { if (loading.value || saving.value) return; loading.value = true; try { const result = await settingsAPI.retention(); saved.value = result; Object.assign(form, result.policy); error.value = ''; } catch (e) { error.value = (e as Error).message; } finally { loading.value = false; } }
 function confirmSave() { if (saving.value || !saved.value) return; if (Object.values(form).some(value => !Number.isInteger(value) || value < 1 || value > 3650)) { showToast('保留天数须为 1～3650 的整数', 'error'); return; } retentionConfirm.value = { allowedDays: form.allowedDays, blockedDays: form.blockedDays, hourlyDays: form.hourlyDays }; confirmation.value = true; }

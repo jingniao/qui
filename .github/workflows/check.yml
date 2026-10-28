@@ -1,8 +1,9 @@
 name: Check
 
 # push/pull_request run the gate. workflow_dispatch and the weekly schedule also
-# run the optional `cores` job, which downloads the official Xray and sing-box
-# releases, verifies their SHA-256 and runs the real-core integration tests. A
+# run the optional `cores` job, which downloads the official Xray, sing-box and
+# mihomo releases, verifies their SHA-256 and runs the real-core integration
+# tests (including `mihomo -t` on every generated Clash profile). A
 # push of a v* tag additionally runs `release`, which builds the archives and
 # publishes them as a GitHub release.
 on:
@@ -33,6 +34,15 @@ jobs:
         run: npm --prefix web run build
       - name: Frontend time tests
         run: npm run test:time
+      # The QR encoder is decoded again with jsQR, and the client policy
+      # simulator's address math is checked; both transpile the TypeScript
+      # sources in memory.
+      - name: Frontend self-tests
+        run: |
+          node web/scripts/qr-selftest.mjs
+          node web/scripts/client-policy-selftest.mjs
+          node web/scripts/portal-selftest.mjs
+          node web/scripts/node-metrics-selftest.mjs
       - run: go vet ./...
       # The Agent command-line and storage tests run against a real binary built
       # with a fixed version string. AGENT_CANDIDATE_BINARY, AGENT_RELEASE_BINARY
@@ -65,7 +75,7 @@ jobs:
       - name: Deploy script checks
         run: |
           set -euo pipefail
-          for script in deploy/linux/*.sh; do bash -n -- "$script"; done
+          for script in scripts/build-singbox.sh scripts/build-release.sh deploy/linux/*.sh; do bash -n -- "$script"; done
           for script in deploy/linux/update-recovery.sh deploy/openrc/host-network-watch \
             deploy/openrc/proxycontrol-update-recovery; do
             sh -n -- "$script"
@@ -89,10 +99,12 @@ jobs:
   cores:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     env:
       XRAY_VERSION: '26.3.27'
       SINGBOX_VERSION: '1.14.3'
+      MIHOMO_VERSION: '1.19.33'
+      GEODATA_COMMIT: '02ae05ac06e8c9287916fbabfe61ef5c8591407f'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -145,8 +157,83 @@ jobs:
           tar -xzf "cores/${asset}" -C cores/singbox
           test -x "cores/singbox/sing-box-${SINGBOX_VERSION}-linux-amd64/sing-box"
           printf 'SINGBOX_BINARY=%s/cores/singbox/sing-box-%s-linux-amd64/sing-box\n' "$GITHUB_WORKSPACE" "$SINGBOX_VERSION" >> "$GITHUB_ENV"
+      # mihomo checks every generated Clash profile with `mihomo -t`. `-t` loads
+      # GeoIP, GeoSite and the MMDB and downloads them on first use, so the home
+      # directory is seeded with files from a pinned meta-rules-dat commit whose
+      # SHA-256 values are fixed here (the rolling `latest` release replaces its
+      # assets daily and cannot be pinned).
+      - name: Download and verify mihomo and its geodata
+        run: |
+          set -euo pipefail
+          asset="mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz"
+          base="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}"
+          mkdir -p cores/mihomo cores/mihomo-home
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o "cores/${asset}" "${base}/${asset}"
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o cores/mihomo-release.json "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/v${MIHOMO_VERSION}"
+          expected=$(ASSET="${asset}" node -e '
+            const fs = require("fs");
+            const release = JSON.parse(fs.readFileSync("cores/mihomo-release.json", "utf8"));
+            const asset = (release.assets || []).find((item) => item.name === process.env.ASSET);
+            if (!asset || typeof asset.digest !== "string" || !asset.digest.startsWith("sha256:")) {
+              console.error("release asset carries no sha256 digest");
+              process.exit(1);
+            }
+            console.log(asset.digest.slice("sha256:".length).toLowerCase());
+          ')
+          test -n "${expected}"
+          printf '%s  %s\n' "${expected}" "cores/${asset}" | sha256sum --check --strict
+          gunzip -c "cores/${asset}" > cores/mihomo/mihomo
+          chmod 0755 cores/mihomo/mihomo
+          geo="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/${GEODATA_COMMIT}"
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o cores/mihomo-home/GeoIP.dat "${geo}/geoip.dat"
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o cores/mihomo-home/GeoSite.dat "${geo}/geosite.dat"
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o cores/mihomo-home/Country.mmdb "${geo}/country.mmdb"
+          printf '%s  %s\n' \
+            a6271d3c96361d96156e6d3f7cf1550ef21b00d2f951deb772f464db91e89ac5 cores/mihomo-home/GeoIP.dat \
+            c57333596b44aa061e84c3c224e97a4475c759a5e3baab1fcda002e48b4dc313 cores/mihomo-home/GeoSite.dat \
+            ccec4d6fa69de3a79960a460c377ac9a23c1a90e5f9052dae3488921e56201df cores/mihomo-home/Country.mmdb | sha256sum --check --strict
+          cores/mihomo/mihomo -v
+          printf 'MIHOMO_BINARY=%s/cores/mihomo/mihomo\nMIHOMO_HOME=%s/cores/mihomo-home\n' "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Phase 10 device gates (official Xray and sing-box)
+        run: go test -p 1 -count=1 -run 'TestRealDeviceGate' ./internal/agent/core/xray ./internal/agent/core/singbox
       - name: Real-core tests
-        run: go test -count=1 -timeout 60m ./...
+        # Includes U6 forward golden native validation and TCP/UDP echo tests.
+        run: go test -p 1 -count=1 -timeout 60m ./...
+      - name: Part I forward native config and TCP/UDP checks
+        run: go test -p 1 -count=1 -run 'TestForwardGolden|TestRealForward' ./internal/agent/core/xray ./internal/agent/core/singbox
+      - name: Build qui sing-box twice and verify reproducibility
+        run: |
+          set -euo pipefail
+          GOCACHE="$RUNNER_TEMP/singbox-cache-first" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-first" bash scripts/build-singbox.sh
+          GOCACHE="$RUNNER_TEMP/singbox-cache-second" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-second" bash scripts/build-singbox.sh
+          for file in "$RUNNER_TEMP"/singbox-first/*; do
+            cmp "$file" "$RUNNER_TEMP/singbox-second/${file##*/}"
+          done
+          mkdir -p cores/qui-singbox
+          tar -xzf "$RUNNER_TEMP/singbox-first/sing-box-1.14.4-qui.1-linux-amd64.tar.gz" -C cores/qui-singbox
+          binary="$GITHUB_WORKSPACE/cores/qui-singbox/sing-box-1.14.4-qui.1-linux-amd64/sing-box"
+          "$binary" version | tee "$RUNNER_TEMP/qui-singbox-version.txt"
+          grep -q 'sing-box version 1.14.4' "$RUNNER_TEMP/qui-singbox-version.txt"
+          grep -q with_v2ray_api "$RUNNER_TEMP/qui-singbox-version.txt"
+          grep -q go1.26.10 "$RUNNER_TEMP/qui-singbox-version.txt"
+          printf 'SINGBOX_BINARY=%s\n' "$binary" >> "$GITHUB_ENV"
+      - name: Qui sing-box real-core tests (including Phase 9 stats, Xray parity and Phase 10 gates)
+        run: go test -p 1 -count=1 -timeout 60m ./...
+      - name: Release dry-run (no publication)
+        run: |
+          set -euo pipefail
+          VERSION=1.1.0 SKIP_NPM_CI=1 OUTPUT_DIRECTORY="$RUNNER_TEMP/dry-release" bash scripts/build-release.sh
+          cd "$RUNNER_TEMP/dry-release"
+          sha256sum --check --strict SHA256SUMS
+          for arch in amd64 arm64; do
+            test -s "sing-box-1.14.4-qui.1-linux-$arch.tar.gz"
+            test -s "sing-box-1.14.4-qui.1-linux-$arch.provenance.txt"
+            for suffix in tar.gz provenance.txt; do
+              asset="sing-box-1.14.4-qui.1-linux-$arch.$suffix"
+              test "$(awk -v asset="$asset" '$2 == asset {n++} END {print n+0}' SHA256SUMS)" = 1
+            done
+            cmp "sing-box-1.14.4-qui.1-linux-$arch.tar.gz" "$RUNNER_TEMP/singbox-first/sing-box-1.14.4-qui.1-linux-$arch.tar.gz"
+          done
 
 
   # Publishing a release is a tag push. The job reuses the gate above and only
@@ -182,6 +269,6 @@ jobs:
       - name: Build the release archives
         run: VERSION="${GITHUB_REF_NAME#v}" OUTPUT_DIRECTORY="$RUNNER_TEMP/dist" scripts/build-release.sh
       - name: Publish the GitHub release
-        run: gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/proxy-control-*.tar.gz "$RUNNER_TEMP/dist/SHA256SUMS" deploy/linux/node-install.sh --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/proxy-control-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.provenance.txt "$RUNNER_TEMP/dist/SHA256SUMS" deploy/linux/node-install.sh --title "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

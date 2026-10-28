@@ -6,6 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/agent/identity"
@@ -13,7 +18,10 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/portal"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/panel/system"
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/panel/user"
@@ -273,6 +281,148 @@ func TestDatabaseRecoveryPreservesNewUsageReceiptsRevocationsAndDraftSnapshot(t 
 		t.Fatal("unreported offline increment rejected", err)
 	}
 	assertInt(t, candidateDB, "SELECT used_traffic FROM users WHERE id=?", 900, f.user.ID)
+}
+
+// The real candidate coordinator must revoke backup sessions while preserving
+// current authentication decisions and the encrypted copy of a rotated link.
+func TestDatabaseRecoveryPreservesPortalLoginAndRecoverableSubscription(t *testing.T) {
+	ctx := context.Background()
+	var accounts []user.User
+	var sharedToken subscription.Token
+	var sharedPlaintext string
+	f := listeningFixture(t, func(f *fixture) {
+		logins := &portal.Repository{Database: f.source.Database}
+		for i, enabled := range []bool{false, false, true, true} {
+			account, err := f.users.Save(ctx, "", user.Input{Username: fmt.Sprintf("restore-login-%d", i), DisplayName: "Restore login", Status: "active", AllowedProtocols: []string{"http"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			accounts = append(accounts, account)
+			if err := logins.SetLogin(ctx, account.ID, enabled, "backup-password-hash"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.source.Database.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", "2026-10-20T00:00:00.000000000Z", account.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := logins.CreateSession(ctx, "backup-portal-session", accounts[3].ID, time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := logins.SessionUser(ctx, "backup-portal-session"); err != nil {
+			t.Fatal("backup session must resolve before restore", err)
+		}
+		var err error
+		identity, err := f.users.AccessIdentity(ctx, accounts[3].ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sharedToken, sharedPlaintext, err = (&subscription.Repository{Database: f.source.Database, Vault: f.source.ConfigurationVault}).Rotate(ctx, accounts[3].ID, identity.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The same hash exists on both sides, but only the current side retains
+		// its encrypted copy, as with a pre-1.1 row upgraded before recovery.
+		if _, err := f.source.Database.ExecContext(ctx, "UPDATE subscription_tokens SET encrypted_token=NULL WHERE id=?", sharedToken.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+	live := f.source.Database
+	logins := &portal.Repository{Database: live}
+	for i, account := range accounts {
+		if err := logins.SetLogin(ctx, account.ID, i%2 == 1, "current-password-hash"); err != nil {
+			t.Fatal(err)
+		}
+		stamp := "2026-10-21T00:00:00.000000000Z"
+		if i%2 == 1 {
+			stamp = "2026-10-19T00:00:00.000000000Z"
+		}
+		if _, err := live.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", stamp, account.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := logins.CreateSession(ctx, "current-portal-session", accounts[3].ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	newUser, err := f.users.Save(ctx, "", user.Input{Username: "after-backup-login", DisplayName: "New", Status: "active", AllowedProtocols: []string{"http"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := logins.SetLogin(ctx, newUser.ID, true, "new-user-password-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := logins.TouchLogin(ctx, newUser.ID); err != nil {
+		t.Fatal(err)
+	}
+	newAccount, err := logins.Account(ctx, newUser.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := f.source.ConfigurationVault.Seal([]byte(sharedPlaintext))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := live.ExecContext(ctx, "UPDATE subscription_tokens SET encrypted_token=? WHERE id=?", sealed, sharedToken.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, rotated, err := (&subscription.Repository{Database: live, Vault: f.source.ConfigurationVault}).Rotate(ctx, f.user.ID, f.device.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	portalRepo := &portal.Repository{Database: restored}
+	for _, session := range []string{"backup-portal-session", "current-portal-session"} {
+		if _, err := portalRepo.SessionUser(ctx, session); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("restored session resolved: %v", err)
+		}
+	}
+	assertInt(t, restored, "SELECT count(*) FROM user_sessions", 0)
+	for i, account := range accounts {
+		assertText(t, restored, "SELECT password_hash FROM users WHERE id=?", "current-password-hash", account.ID)
+		wantEnabled := int64(0)
+		if i == 3 {
+			wantEnabled = 1
+		}
+		assertInt(t, restored, "SELECT login_enabled FROM users WHERE id=?", wantEnabled, account.ID)
+		stamp := "2026-10-21T00:00:00.000000000Z"
+		if i%2 == 1 {
+			stamp = "2026-10-20T00:00:00.000000000Z"
+		}
+		assertText(t, restored, "SELECT last_login_at FROM users WHERE id=?", stamp, account.ID)
+	}
+	assertText(t, restored, "SELECT password_hash FROM users WHERE id=?", newAccount.PasswordHash, newUser.ID)
+	assertText(t, restored, "SELECT last_login_at FROM users WHERE id=?", newAccount.LastLoginAt, newUser.ID)
+	assertInt(t, restored, "SELECT login_enabled FROM users WHERE id=?", 0, newUser.ID)
+	assertText(t, restored, "SELECT status FROM users WHERE id=?", "disabled", newUser.ID)
+	tokens := &subscription.Repository{Database: restored, Vault: f.source.ConfigurationVault}
+	for _, item := range []struct{ userID, plaintext string }{{f.user.ID, rotated}, {accounts[3].ID, sharedPlaintext}} {
+		if link, err := tokens.Link(ctx, item.userID); err != nil || link != item.plaintext {
+			t.Fatalf("restored link unavailable or changed: %v", err)
+		}
+	}
+	users := &user.Repository{Database: restored, Vault: f.source.ConfigurationVault}
+	handler := &subscription.Handler{Service: &subscription.Service{Repository: tokens, Users: users,
+		Sources: source.NewRegistry(&published.Source{Users: users, Nodes: &node.Repository{Database: restored}, Published: &deployment.Repository{Database: restored, Vault: f.source.ConfigurationVault}})},
+		Auth: &auth.Handler{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	for _, item := range []struct {
+		token string
+		code  int
+	}{{rotated, http.StatusOK}, {f.token, http.StatusForbidden}} {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, httptest.NewRequest("GET", "/sub/"+item.token+"?format=uri", nil))
+		if response.Code != item.code {
+			t.Fatalf("restored subscription: got %d, want %d: %s", response.Code, item.code, response.Body.String())
+		}
+	}
 }
 
 func TestDatabaseRecoveryRefusesMissingOwnershipForeignMaterialsAndRegressions(t *testing.T) {

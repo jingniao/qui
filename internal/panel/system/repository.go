@@ -21,6 +21,10 @@ type Operation struct {
 type Repository struct {
 	Database *sql.DB
 	Reader   *sql.DB
+	// SubscriptionFormats reports whether a subscription format ID is registered
+	// in the subscription format registry. The server wires it at startup; when it
+	// is unset the three formats every v1.1 panel understands are accepted.
+	SubscriptionFormats func(string) bool
 }
 
 // reader picks the read-only pool for list queries when one is configured.

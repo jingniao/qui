@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"proxycontrol/pkg/contracts/tcpprobe"
 	"runtime"
 	"strings"
 	"time"
@@ -500,7 +501,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: state.LastAcked, AgentVersion: version, HealthCheckSupported: true, CoreRestartSupported: true, BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
+	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: capabilities.Snapshot().GetDeviceGateSupported(), BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
 		return err
 	}
 	welcome, err := receive()
@@ -520,7 +521,42 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	if err := state.Save(sequence); err != nil {
 		return err
 	}
+	deviceGate := func(message *pb.ServerMessage) {
+		if message.NodeId != state.NodeID || !welcome.GetWelcome().DeviceGateSupported {
+			return
+		}
+		if target, ok := healthSource.(interface {
+			SetDeviceGate(context.Context, []byte) error
+		}); ok {
+			if target.SetDeviceGate(ctx, message.GetDeviceGateCommand().RequestJson) != nil {
+				logger.Warn("device gate failed open")
+			}
+		}
+	}
 	healthResults := []*pb.HealthCheckResult{}
+	probeReplies := make(chan *pb.TCPProbeResult, 1)
+	probeCtx, cancelProbes := context.WithCancel(ctx)
+	defer cancelProbes()
+	probeID := ""
+	var lastProbe *pb.TCPProbeResult
+	probe := func(message *pb.ServerMessage) {
+		command := message.GetTcpProbeCommand()
+		if message.NodeId != state.NodeID || command == nil || command.Id == "" || probeID != "" {
+			return
+		}
+		probeID = command.Id
+		if lastProbe != nil && lastProbe.Id == command.Id {
+			probeReplies <- lastProbe
+			return
+		}
+		go func() {
+			result := tcpprobe.Run(probeCtx, command)
+			select {
+			case probeReplies <- result:
+			case <-probeCtx.Done():
+			}
+		}()
+	}
 	var lastHealthResult *pb.HealthCheckResult
 	healthCheck := func(command *pb.HealthCheckCommand) {
 		if lastHealthResult != nil && lastHealthResult.Id == command.Id && lastHealthResult.Revision == command.Revision {
@@ -627,6 +663,14 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			response, err = receive()
 			if err != nil {
 				return err
+			}
+			if response.GetTcpProbeCommand() != nil {
+				probe(response)
+				continue
+			}
+			if response.GetDeviceGateCommand() != nil {
+				deviceGate(response)
+				continue
 			}
 			if command := response.GetHealthCheckCommand(); command != nil {
 				if response.NodeId != state.NodeID {
@@ -781,11 +825,22 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		// running or not healthy reports nothing (plan D2: observed, never
 		// invented).
 		if heartbeat.GetCoreHealthy() {
-			if source, ok := healthSource.(interface {
-				ConnectionSnapshot(context.Context) (traffic.ConnectionSnapshot, error)
-			}); ok {
-				sample, err := source.ConnectionSnapshot(ctx)
+			if source, ok := healthSource.(interface{ CoreStartedAt() time.Time }); ok && runtime.GOOS == "linux" {
+				if started := source.CoreStartedAt(); !started.IsZero() {
+					heartbeat.CoreStartedAt = timestamppb.New(started)
+				}
+			}
+			if source := connectionReader(healthSource); source != nil {
+				sample, err := source(ctx)
 				if err == nil && sample.NodeID == state.NodeID && sample.Revision == heartbeat.CurrentRevision && sample.Validate() == nil {
+					if !welcome.GetWelcome().DeviceGateSupported {
+						sample.ObservationContractVersion = 0
+						sample.DeviceGateSupported = false
+						for i := range sample.Accounts {
+							sample.Accounts[i].AddressKeys = nil
+							sample.Accounts[i].AddressesMeasured = false
+						}
+					}
 					connectionSample, err = json.Marshal(sample)
 					if err == nil {
 						measured := true
@@ -883,6 +938,14 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
+		case result := <-probeReplies:
+			timer.Stop()
+			lastProbe = result
+			probeID = ""
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TcpProbeResult{TcpProbeResult: result}}); err != nil {
+				return err
+			}
+			continue
 		case result := <-updateReplies:
 			timer.Stop()
 			// Sent at the top of the next iteration, where the pending head is
@@ -893,6 +956,14 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			timer.Stop()
 			if received.err != nil {
 				return received.err
+			}
+			if received.message.GetTcpProbeCommand() != nil {
+				probe(received.message)
+				continue
+			}
+			if received.message.GetDeviceGateCommand() != nil {
+				deviceGate(received.message)
+				continue
 			}
 			if command := received.message.GetHealthCheckCommand(); command != nil {
 				if received.message.NodeId != state.NodeID {

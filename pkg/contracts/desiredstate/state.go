@@ -95,6 +95,7 @@ type Outbound struct {
 	ProbeInterval  int              `json:"probe_interval,omitempty"`
 }
 type ProtocolSettings struct {
+	Forward        *ForwardSettings   `json:"forward,omitempty"`
 	Transport      string             `json:"transport,omitempty"`
 	Security       string             `json:"security,omitempty"`
 	ServerName     string             `json:"server_name,omitempty"`
@@ -107,6 +108,12 @@ type ProtocolSettings struct {
 	ServiceName    string             `json:"service_name,omitempty"`
 	WireGuard      *WireGuardSettings `json:"wireguard,omitempty"`
 	QUIC           *QUICSettings      `json:"quic,omitempty"`
+}
+
+type ForwardSettings struct {
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+	Network string `json:"network"`
 }
 
 type QUICSettings struct {
@@ -340,6 +347,9 @@ func (s State) Validate() error {
 	}
 	ports := map[string]bool{}
 	for _, inbound := range s.Inbounds {
+		if inbound.Protocol == "forward" && (inbound.SubscriptionVisible || len(inbound.CredentialIDs) != 0) {
+			return errors.New("forward inbounds cannot carry credentials or enter subscriptions")
+		}
 		if err := add(inbound.ID); err != nil {
 			return err
 		}
@@ -372,7 +382,7 @@ func (s State) Validate() error {
 		if err := ValidateSettings(inbound.Protocol, inbound.Settings, true); err != nil {
 			return err
 		}
-		if inbound.Enabled && len(inbound.CredentialIDs) == 0 && (inbound.Protocol != "socks5" && inbound.Protocol != "http" || !ip.IsLoopback()) {
+		if inbound.Enabled && inbound.Protocol != "forward" && len(inbound.CredentialIDs) == 0 && (inbound.Protocol != "socks5" && inbound.Protocol != "http" || !ip.IsLoopback()) {
 			return errors.New("public proxy inbounds require independent credentials")
 		}
 	}

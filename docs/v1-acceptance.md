@@ -1142,3 +1142,95 @@
 - 共存服务未受影响：面板主机与 `uk-node` 上 `xboard-node`、`cf-probe` 的 PID 仍为 738/740、833/834；第三台主机上 `komari-agent`、`cf-probe`、`crond` 为 `started`。`/root`、`/var/lib/proxy-panel`、`/var/lib/proxy-agent` 为 0700。
 
 **结论。** v1.0.9 已发布，三台主机已升级到面板/Agent 1.0.9，两项修复实机通过，回归通过，没有未解决的 P1/P2。arm64 仍未实机验证。
+
+## 10. v1.1 验收清单（2026-10-28，尚未发布）
+
+此节覆盖 [v1.1 计划](v1.1-plan.md) 全部 P/A/AU 验收编号。下表“本地证据”指既有阶段记录和本轮本地 gate；具体命令、测试名与审查修复见 [进度记录](v1.1-progress.md) 对应阶段，Phase 11 保留本轮真实退出码。未设置代理核心环境变量的跳过不算原生核心通过。历史第 3、4 节的设备、D1/D2/D5 标准不再适用于 v1.1 的对应部分，现按 R1–R9 与 D-a 至 D-e 验收；历史通过结论不自动延伸到新版本。
+
+### 10.1 Phase 0–7
+
+| 编号 | 证据与状态 |
+| --- | --- |
+| P0.1 | 部分：`v1.1-phase0-findings.md` A.1–A.6 记录上游命令/结果；数据审计与 Linux 探测 awaiting Owner；A.7 UA/导入 scheme 无可信数据，仍阻塞 |
+| P0.2 | 已记录停止条件及调整：计划 §3、§7、§12.3，findings A.6/A.7；没有补丁核或替代系统；剩余批准仍待 Owner |
+| A1.1 | 本地证据：`TestSubscriptionFormatsMatchThePreRefactorFixture`，URI/Base64/sing-box 全 fixture 字节对比 |
+| A1.2 | 本地证据：`TestTestOnlySourceAndExporterWorkEndToEnd`、`TestFailingSourceKeepsTheRestAndWarns` |
+| A1.3 | 部分：`TestFormatResolutionOrder` 覆盖优先级与开关；真实 UA 字符串 awaiting Owner/来源核实（Phase 0 A.7），当前表为空 |
+| A1.4 | 本地证据：`TestSubscriptionUserInfoHeader`、`TestSubscriptionHeadersAreSent`，有限/无限/到期头 |
+| A1.5 | 本地证据：`TestNeutralPackagesDoNotImportThePanel`；原“仅保留导入接口”已被 U5 明确取代，`TestImportFeatureParsersRegistered` 覆盖实际注册 |
+| A2.1 | 本地证据：`TestValidationCoversEveryRule`、`TestValidationAcceptsEveryType`、`TestPresetsAreValid` |
+| A2.2 | 本地证据：`TestStoreRevisions`、`TestRulesAPI`，409 与字段错误 |
+| A2.3 | 本地证据：`TestClientRuleTemplateBackupRoundTrip`，真实备份/恢复候选 |
+| A2.4 | 本地证据：`TestExpandPerUser`，授权、空组 DIRECT 与警告 |
+| A3.1 | 本地证据：`TestGoldenProfiles`、`TestHostileNamesRoundTrip`，协议/传输/TLS 与恶意名字 |
+| A3.2 | awaiting CI/Owner：`TestMihomoAcceptsTheProfiles`，cores job 已固定核心与 geodata，未在本轮执行 |
+| A3.3 | 本地证据：`TestLegacyExclusions`，排除类型与空组图 |
+| A3.4 | awaiting CI/Owner：`TestMihomoRoutesProxyDirectAndReject`，真实节点数据面不得以 golden 替代 |
+| A4.1 | 本地证据：web 构建、client-policy self-test，服务端模板；Phase 4 记录无浏览器 YAML 拼装 |
+| A4.2 | 本地证据：Phase 4 冲突处理/字段错误检查与 `TestRulesAPI`；完整浏览器走查另待 Owner |
+| A5.1 | 部分：`internal/panel/user/user_level_migration_test.go` 0/1/3 设备、策略与 WG fixtures；B3 副本实跑 awaiting Owner approval |
+| A5.2 | 本地证据：`TestStartupReconciliationAfterUserLevelMigration`，等待完整合并窗口后仅受影响节点自动版本 |
+| A5.3 | 本地证据：Phase 5 与审查记录的 tombstone 流量用例，删除凭据的迟到批次不拒绝 |
+| A5.4 | 本地证据：Phase 5 subscription/migration 用例，主链接保留、移除设备链接 403 |
+| A5.5 | 本地证据：`TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent`，旧合同 Agent harness 发布/回滚/Xray 计量；真实 1.0.9 兼容留 RC1 |
+| A5.6 | 本地证据：`TestProtocolChangeAddsAndResetRevokesCredentials`，HTTP 协议变化及凭据重置触发自动版本并移除旧凭据 |
+| A6.1 | 本地证据：`TestEveryAdminRouteRefusesAPortalSession`、`TestEveryPortalRouteRefusesAnAdminSession`，注册 mux 清单覆盖 |
+| A6.2 | 本地证据：Phase 6 portal 限流、CSRF、过期测试；复用管理员策略 |
+| A6.3 | 本地证据：`TestPortalInactiveUsersCanLoginButCannotSubscribe`，可见原因而订阅 403 |
+| A6.4 | 本地证据：Phase 6 HTTP 禁用登录、密码重置、删除用户后下次请求 401 |
+| A6.5 | 本地证据：Phase 6 两用户逐门户路由隔离，query/body 用户 ID 不改变归属 |
+| A6.6 | 本地证据：Phase 6 新链接再查看、旧 NULL 加密副本不可恢复、重置撤销 |
+| A6.7 | 本地证据：Phase 6 与 Review fix round 2 的 backup/candidate coordinator，密码/登录开关/Token 保守合并、恢复清会话 |
+| A7.1 | 本地证据：web 构建、`portal-selftest.mjs`，独立路由/CSRF、只读预览、无 viewMode |
+| A7.2 | awaiting Owner approval：Phase 7 RC1 三主机清单未执行；L4 拒绝 RC 版本及组合主机组件顺序是阻塞 |
+
+### 10.2 Phase 8–11
+
+| 编号 | 证据与状态 |
+| --- | --- |
+| A8.1 | awaiting CI/Owner：双次同 pin 构建比较、静态 ELF 与 provenance；本机缺 readelf（L7），不宣称可复现验收通过 |
+| A8.2 | awaiting CI/Owner：实际 release dry-run、两架构归档/溯源、SHA256SUMS、version/tag；脚本/工作流已有不等于产物已验收 |
+| A8.3 | 本地证据：Phase 8 34 项 installer fixtures，qui/official、glibc/musl、篡改拒绝；root/Linux 服务级行为留 Owner |
+| A8.4 | 本地证据：Phase 8 严格来源 URL/lookalike/能力与队列拒绝测试 |
+| A9.1 | 部分：两套 tag/no-tag golden 本地证据；原生 `sing-box check` awaiting CI/Owner |
+| A9.2 | awaiting CI/Owner：两用户 VLESS/Trojan/Hysteria2/TUIC、载荷 5% 与 Xray parity 的 env-gated 实核套件 |
+| A9.3 | 本地证据：Phase 9 累计计数、spool/游标重启、重试和 epoch 假服务回归；实核重启路径另待 CI |
+| A9.4 | 部分：render/free-port/non-loopback 拒绝本地证据；原生启动的 loopback 观察 awaiting CI/Owner |
+| A9.5 | 本地证据：Phase 9 sing-box-only 流量超额触发自动版本的面板测试 |
+| A10.1 | 本地证据：`TestAdmissionOrderStickyReleasePromotionLimitsResetAndIPv6`，假时钟顺序/窗口/升降限制/跨节点/中转排除 |
+| A10.2 | 本地证据：`TestLeaseTTLRefreshExpiryAndInvalidFailOpen`、`TestDeviceGateNegotiationOldAgentsAndReconnect`，租约与 mTLS 重连 |
+| A10.3 | awaiting CI/Owner：Xray scope/established/balancer/reload/UDP 与 sing-box source/close 套件；Hysteria2/TUIC UDP 数据报还需专项实验（L8），Xray 本身无此入站 |
+| A10.4 | 本地证据：`TestDeviceLimitViewsResetPrivacyAndOldNodePartial` 与 mTLS 能力协商，旧 Agent 不收门控并显示节点名 |
+| A10.5 | awaiting Owner approval：面板主机 -race；先前 Windows 尝试退出 1（cgo/gcc 不可用），本轮不冒充运行 |
+| A10.6 | 本地证据：全表/备份/accepted-message 无源地址断言及 `TestAddressImplementationsHaveNoPersistenceOrLoggingCalls`，两视图掩码 |
+| A11.1 | 部分：本轮完整本地 gate 与 A.7 的真实结果见进度 Phase 11；main CI（含 race/cores）awaiting Owner approval，无 push，不触发 |
+| A11.2 | awaiting Owner approval：RC2 未执行，进度 Phase 11 有三主机清单；先解决 L4 |
+| A11.3 | 未满足：仍有 P1/P2 发布阻塞/验收缺口，优先级见进度 Phase 11；arm64 version/check/qemu Agent 验证待安排，真实 arm64 主机未验证 |
+| A11.4 | awaiting Owner approval：未打 tag、未发布、未部署；进度 Phase 11 有发布清单 |
+
+### 10.3 UI 集成 U1–U8
+
+| 编号 | 证据与状态 |
+| --- | --- |
+| AU1.1 | 本地阶段证据：U1 静态检查移除隐式 Token 写入、缓存、伪造延迟/uptime/version、外部 IP 查询；QR/portal/web gate |
+| AU1.2 | 本地阶段证据：U1 endpoint tests，已登记节点拒绝重发注册码、按节点版本查询、Viewer 权限 |
+| AU1.3 | 本地阶段证据：U1 入站全字段 edit round-trip，改名不扩大授权或丢 TLS 设置 |
+| AU1.4 | 本地证据：`qr-selftest.mjs` 参考解码器 round-trip，跨版本/纠错级别、长串与超长拒绝 |
+| AU1.5 | awaiting Owner approval：Owner/Viewer 全页浏览器走查和前后 Token/设备/版本行数；已有 API/静态证据不能替代点击 |
+| AU2.1 | 部分：单步发布及 deployer 单元测试已有；fake-Agent 一步发布集成证据仍缺（计划 §12.5 U2a/U2c） |
+| AU2.2 | 本地证据：`TestCanvasMatchesTheEditors`、single/two-hop publish 与拒绝/删除边界；复用 Deployment 批次 |
+| AU2.3 | 本地阶段证据：U2 回滚到选定成功版本与节点归属校验；真实节点回滚仍属 RC |
+| AU3.1 | 本地证据：`node-metrics-selftest.mjs`、`TestHostMetricsProcReadOnlyAndMissing`，1.0.9 缺字段/首样本显示未知 |
+| AU3.2 | 部分：Part I 本地月界/时区/retained samples 求和测试；清理后的完整历史月缺口 L9，待明确保留/聚合方案 |
+| AU4.1 | 本地证据：`TestTCPProbeAddressPolicyAndLimits`、`TestTCPProbeOwnerLimitsRetentionAndOldAgent`、`TestTCPProbeFixedOperationOverAuthenticatedStream`；特殊用途 IP 拒绝含审查修复 |
+| AU5.1 | 本地证据：U5 SSRF/逐跳解析固定 IP、大小/时间边界、parser fuzz seeds、失败来源/取消与缓存读取测试；未运行额外长时 fuzz campaign |
+| AU5.2 | awaiting CI/Owner：`TestMihomoAcceptsClientDialerProxyChain`，本机不运行下载的核心（L6） |
+| AU6.1 | 部分：两核 `TestForwardGolden` 与 `TestForwardCanvasPublishCapabilityAndIdentity` 本地证据；原生 check/TCP/UDP `TestRealForward` 及受管节点转发 awaiting CI/Owner（L10） |
+| AU7.1 | 部分：`TestRuleProviderEndpoint` 本地 Token/403/classical 文本证据；mihomo 原生接受 awaiting CI/Owner，与 A3.2 共用 cores 作业 |
+| AU8.1 | 本地证据：`TestTrafficResetCalendarFakeClock`、`TestTrafficResetDueTimezoneIdempotentAndDisabled`、`TestCycleSchedulerReactivatesThroughAutomaticRevision`，短月/闰年/时区/清零再启用 |
+
+### 10.4 限制和证据边界
+
+L1 限速已移除；L2 调优/内核转发未批准；L3 无 Agent 的导入隧道不可用；L4 RC 安装阻塞；L5 导入类型和仅 mihomo 客户端链；L6 原生链检查与恢复保留当前撤销状态；L7 构建/dry-run；L8 UDP 门控；L9 样本保留月汇总；L10 TCP 测量范围与无身份转发。完整说明见计划 §12.3 与 [发布草稿](release-notes-1.1.0.md)。
+
+R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–F31、B1–B11 的实现与审查证据分别留在 U1/U2、Phases 1–10、U5 和 Part I 记录，不把 F29 的保留样本结果称为完整月统计。原生核心工作流虽已有双架构构建，现有 check.yml 无 qemu Agent 测试步骤，arm64 version/check 与 Agent/qemu 验收仍是待办，未改 CI 冒充完成。

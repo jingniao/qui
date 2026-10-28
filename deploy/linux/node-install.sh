@@ -44,7 +44,8 @@ usage() {
   --token TOKEN         一次性节点注册码
   --http-port N         面板 HTTPS 端口（默认 443）
   --grpc-port N         面板 gRPC 端口（默认 9443）
-  --core xray|sing-box  同时安装的官方核心（默认 xray）
+  --core xray|sing-box  同时安装的核心（默认 xray）
+  --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
   --bundle FILE --sums FILE
                         离线安装：用本地发布归档与其 SHA256SUMS，不访问 GitHub
                         （两个参数必须同时给出）
@@ -64,16 +65,18 @@ grpc_port=9443
 ca_sha256=''
 token=''
 core=xray
+core_source=qui
 bundle_file=''
 sums_file=''
 while (($#)); do
   case $1 in
-    --version|--panel|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums)
+    --version|--panel|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums|--core-source)
       (($# >= 2)) || fail "缺少 $1 的值。"
       case $1 in
         --version) version=$2;; --panel) panel=$2;; --http-port) http_port=$2;;
         --grpc-port) grpc_port=$2;; --ca-sha256) ca_sha256=${2,,};; --token) token=$2;;
         --core) core=$2;; --bundle) bundle_file=$2;; --sums) sums_file=$2;;
+        --core-source) core_source=$2;;
       esac
       shift 2;;
     --help) usage; exit 0;;
@@ -81,6 +84,7 @@ while (($#)); do
   esac
 done
 
+[[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '版本号必须是 X.Y.Z 形式。'
 [[ $panel =~ ^[A-Za-z0-9.-]+$ ]] || fail '面板地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口）。'
 [[ $http_port =~ ^[0-9]{1,5}$ && $http_port -ge 1 && $http_port -le 65535 ]] || fail 'HTTPS 端口必须在 1-65535 之间。'
@@ -193,9 +197,14 @@ case $core in
     core_version=26.3.27
     core_digest='';;
   sing-box)
-    core_version=1.14.3
-    libc=$(host_libc)
-    core_digest=$(singbox_digest "$architecture" "$libc");;
+    if [[ $core_source == qui ]]; then
+      core_version=1.14.4
+      core_digest=''
+    else
+      core_version=1.14.3
+      libc=$(host_libc)
+      core_digest=$(singbox_digest "$architecture" "$libc")
+    fi;;
 esac
 
 directory=''
@@ -254,7 +263,11 @@ done
 
 binary=$source_dir/bin/proxy-agent
 digest=$(sha256sum -- "$binary"); digest=${digest%% *}
-core_arguments=(--core "$core" --core-version "$core_version")
+[[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
+core_arguments=(--core "$core" --core-version "$core_version" --core-source "$core_source" --qui-version "$version")
+if [[ $core == sing-box && $core_source == qui && -n $bundle_file ]]; then
+  core_arguments+=(--core-bundle "$(dirname -- "$bundle_file")/sing-box-$core_version-qui.1-linux-$architecture.tar.gz" --core-sums "$sums_file")
+fi
 if [[ -n $core_digest ]]; then core_arguments+=(--core-sha256 "$core_digest"); fi
 printf '\n安装 Agent 与核心 %s %s ...\n' "$core" "$core_version"
 "$source_dir/deploy/linux/install.sh" --node --binary "$binary" --sha256 "$digest" "${core_arguments[@]}" \

@@ -62,6 +62,9 @@ type userOptions struct {
 	Flow     string `json:"flow,omitempty"`
 }
 type inbound struct {
+	OverrideAddress   string            `json:"override_address,omitempty"`
+	OverridePort      int               `json:"override_port,omitempty"`
+	Network           string            `json:"network,omitempty"`
 	Type              string            `json:"type"`
 	Tag               string            `json:"tag"`
 	Listen            string            `json:"listen"`
@@ -123,6 +126,7 @@ type route struct {
 
 type renderOptions struct {
 	statsPort         int
+	userStatsPort     int
 	statsSecret       string
 	access            bool
 	health            map[string]scheduler.Health
@@ -267,6 +271,14 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 			return result, err
 		}
 		compiled := inbound{Type: entry.Protocol, Tag: entry.ID, Listen: entry.Listen, Port: entry.Port}
+		if entry.Protocol == "forward" {
+			compiled.Type = "direct"
+			compiled.OverrideAddress = entry.Settings.Forward.Host
+			compiled.OverridePort = entry.Settings.Forward.Port
+			if entry.Settings.Forward.Network != "tcp,udp" {
+				compiled.Network = entry.Settings.Forward.Network
+			}
+		}
 		if entry.Protocol == "socks5" {
 			compiled.Type = "socks"
 		}
@@ -318,7 +330,7 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 			listen = "::1"
 		}
 		endpoint := net.JoinHostPort(listen, strconv.Itoa(entry.Port))
-		if entry.Protocol == "hysteria2" || entry.Protocol == "tuic" {
+		if entry.Protocol == "hysteria2" || entry.Protocol == "tuic" || entry.Protocol == "forward" && entry.Settings.Forward.Network == "udp" {
 			result.UDPHealthEndpoints = append(result.UDPHealthEndpoints, net.JoinHostPort(entry.Listen, strconv.Itoa(entry.Port)))
 		} else {
 			result.HealthEndpoints = append(result.HealthEndpoints, endpoint)
@@ -450,6 +462,11 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 			return result, err
 		}
 	}
+	if options.userStatsPort > 0 {
+		if err := configureUserStats(&doc, state, options.userStatsPort, &result); err != nil {
+			return result, err
+		}
+	}
 	if options.access {
 		result.AccessContext = collector.NewContext(state)
 		result.AccessContext.Selections = map[string]map[string]collector.Exit{}
@@ -482,6 +499,9 @@ func appendRoute(doc *document, terminal route) {
 }
 
 func supported(protocol string) error {
+	if protocol == "forward" {
+		return nil
+	}
 	switch protocol {
 	case "direct", "block", "http", "socks5", "shadowsocks", "vless", "trojan", "hysteria2", "tuic":
 		return nil

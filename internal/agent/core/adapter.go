@@ -23,7 +23,9 @@ type RenderedConfig struct {
 	// path means this configuration renders no access log.
 	AccessLogPath string
 	StatsEndpoint string
-	StatsAccounts map[string]traffic.Counter
+	// UserStatsEndpoint is sing-box's separate loopback v2ray statistics API.
+	UserStatsEndpoint string
+	StatsAccounts     map[string]traffic.Counter
 	// OnlineStats reports that this configuration rendered the core's per-user
 	// online statistics (Xray policy.levels.0.statsUserOnline). When it is false
 	// the online count is unknown, never zero.

@@ -105,6 +105,16 @@ func splitPlatform(platform string) (string, string, bool) {
 	return "", "", false
 }
 
+// storedJSON reads capabilities_json written by this or a newer panel: fields a
+// later version added must not make the stored record unreadable.
+var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
+
+// supportsQuiCore requires explicit support; old Agents keep official sources.
+// A core version or tag alone cannot establish an Agent's URL support.
+func supportsQuiCore(capabilities *pb.Capabilities) bool {
+	return capabilities != nil && capabilities.SingboxUserStats
+}
+
 func coreUpdateAvailable(ctx context.Context, tx *sql.Tx, nodeID string) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running')", nodeID).Scan(&n); err != nil {
@@ -146,7 +156,10 @@ func (r *Repository) QueueCoreUpdate(ctx context.Context, audit ReleaseAccess, n
 		return CoreUpdateTask{}, ErrNodeBusy
 	}
 	capabilities := &pb.Capabilities{}
-	if protojson.Unmarshal(caps, capabilities) != nil || capabilities.CoreName != input.Component {
+	if storedJSON.Unmarshal(caps, capabilities) != nil || capabilities.CoreName != input.Component {
+		return CoreUpdateTask{}, release.ErrPolicy
+	}
+	if release.QuiCoreSource(input.URL) && !supportsQuiCore(capabilities) {
 		return CoreUpdateTask{}, release.ErrPolicy
 	}
 	if err := ValidateCoreUpdateTarget(input.Component, input.Version, input.URL, input.SHA256, platform); err != nil {
@@ -322,7 +335,7 @@ func (r *Repository) CloseStaleCoreUpdates(ctx context.Context, nodeID string) e
 		return err
 	}
 	capabilities := &pb.Capabilities{}
-	if protojson.Unmarshal(caps, capabilities) != nil {
+	if storedJSON.Unmarshal(caps, capabilities) != nil {
 		return release.ErrUpdate
 	}
 	closed := "failed_closed"

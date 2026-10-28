@@ -113,6 +113,9 @@ func ValidateCoreProtocol(core, protocol string, inbound bool) error {
 	return nil
 }
 func ValidateInbound(input InboundInput) error {
+	if input.Protocol == "forward" && (input.SubscriptionVisible || input.InternalRelay || len(input.AllowedUserIDs) > 0) {
+		return errors.New("forward inbounds have no user credentials and must be hidden from subscriptions")
+	}
 	if strings.TrimSpace(input.Name) == "" || len(input.Name) > 120 || input.NodeID == "" || !protocol(input.Protocol, false) || net.ParseIP(input.Listen) == nil || input.Port < 1 || input.Port > 65535 {
 		return errors.New("invalid inbound name, node, protocol or listener")
 	}

@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
-	"encoding/base64"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -278,7 +276,7 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (str
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", Session{}, err
 	}
-	dummy := fmt.Sprintf("pbkdf2-sha256$600000$%s$%s", base64.RawStdEncoding.EncodeToString(make([]byte, 16)), base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
+	dummy := DummyPasswordHash()
 	hash := dummy
 	if err == nil {
 		hash = admin.PasswordHash

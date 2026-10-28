@@ -40,8 +40,9 @@ func TestFailedDeleteDoesNotRevokeAccess(t *testing.T) {
 	if code := remove(handler.delete, "missing"); code != 404 {
 		t.Fatalf("deleting an unknown user: %d", code)
 	}
-	if code := remove(handler.deleteDevice, "missing"); code != 404 {
-		t.Fatalf("deleting an unknown device: %d", code)
+	// The device API is gone since v1.1: the route answers 410 and touches nothing.
+	if code := remove(devicesRemoved, device.ID); code != 410 {
+		t.Fatalf("deleting a device: %d", code)
 	}
 	if len(removals) != 0 {
 		t.Fatalf("a failed delete revoked access: %v", removals)

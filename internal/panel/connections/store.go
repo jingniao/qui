@@ -22,6 +22,23 @@ type Store struct {
 	ttl   time.Duration
 	mu    sync.Mutex
 	nodes map[string]entry
+	gates map[string]bool
+}
+
+// GateSupport tracks this control session's negotiated support, not an old
+// capability record left in SQLite by a previously installed Agent.
+func (s *Store) SetGateSupport(nodeID string, supported bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gates == nil {
+		s.gates = map[string]bool{}
+	}
+	s.gates[nodeID] = supported
+}
+func (s *Store) GateSupport(nodeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gates[nodeID]
 }
 
 type entry struct {

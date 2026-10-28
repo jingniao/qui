@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/vault"
@@ -50,7 +52,12 @@ func setupWithLimit(t *testing.T, limit int64) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{database: database, users: &user.Repository{Database: database, Vault: configurationVault}, nodes: &node.Repository{Database: database}, deployments: &deployment.Repository{Database: database, Vault: configurationVault}}
-	f.service = &Service{Repository: &Repository{Database: database}, Users: f.users, Nodes: f.nodes, Published: f.deployments}
+	f.service = &Service{
+		Repository: &Repository{Database: database},
+		Users:      f.users,
+		Sources:    source.NewRegistry(&published.Source{Users: f.users, Nodes: f.nodes, Published: f.deployments}),
+		Formats:    DefaultFormats(),
+	}
 	for index := 0; index < 3; index++ {
 		n, _, _, err := f.nodes.CreateEnrollment(ctx, "Node "+string(rune('A'+index)), time.Hour)
 		if err != nil {
@@ -111,12 +118,12 @@ func TestGroupExpansionPublishedCredentialsAndFormats(t *testing.T) {
 	for _, nodeID := range f.nodeIDs {
 		f.publish(t, nodeID)
 	}
-	endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID)
+	endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID)
 	if err != nil || len(endpoints) != 4 {
 		t.Fatalf("deduplicated two nodes/two protocols expected: %d %v", len(endpoints), err)
 	}
 	for _, endpoint := range endpoints {
-		if endpoint.NodeID == f.nodeIDs[2] {
+		if endpoint.Origin.Node.ID == f.nodeIDs[2] {
 			t.Fatal("relay entered subscription")
 		}
 	}
@@ -131,40 +138,40 @@ func TestGroupExpansionPublishedCredentialsAndFormats(t *testing.T) {
 	if hash == plaintext || strings.Contains(hash, plaintext) {
 		t.Fatal("raw token stored")
 	}
-	uri, _, err := f.service.Content(ctx, plaintext, "uri")
+	list, err := f.service.Render(ctx, plaintext, "uri", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, _, err := f.service.Content(ctx, plaintext, "base64")
+	decoded, err := f.service.Render(ctx, plaintext, "base64", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := base64.StdEncoding.DecodeString(string(decoded))
-	if err != nil || !bytes.Equal(original, uri) {
+	original, err := base64.StdEncoding.DecodeString(string(decoded.Body))
+	if err != nil || !bytes.Equal(original, list.Body) {
 		t.Fatal("base64 export differs from URI")
 	}
-	for _, line := range strings.Fields(string(uri)) {
+	for _, line := range strings.Fields(string(list.Body)) {
 		parsed, err := url.Parse(line)
 		if err != nil || parsed.User == nil || parsed.Host == "" {
 			t.Fatal("invalid exported URI", err)
 		}
 	}
-	sing, _, err := f.service.Content(ctx, plaintext, "sing-box")
+	sing, err := f.service.Render(ctx, plaintext, "sing-box", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var document struct{ Outbounds []map[string]any }
-	if err := json.Unmarshal(sing, &document); err != nil || len(document.Outbounds) != 4 {
+	if err := json.Unmarshal(sing.Body, &document); err != nil || len(document.Outbounds) != 4 {
 		t.Fatal("invalid sing-box export", err)
 	}
 	_, newToken, err := f.service.Rotate(ctx, f.u.ID, f.device.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.service.Content(ctx, plaintext, "uri"); err != ErrToken {
+	if _, err := f.service.Render(ctx, plaintext, "uri", "", nil); err != ErrToken {
 		t.Fatal("old token remained usable")
 	}
-	if _, _, err := f.service.Content(ctx, newToken, "uri"); err != nil {
+	if _, err := f.service.Render(ctx, newToken, "uri", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	group := f.groups[0]
@@ -172,7 +179,7 @@ func TestGroupExpansionPublishedCredentialsAndFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoints, err = f.service.Endpoints(ctx, f.u.ID, f.device.ID)
+	endpoints, _, err = f.service.Proxies(ctx, f.u.ID, f.device.ID)
 	if err != nil || len(endpoints) != 6 {
 		t.Fatalf("new group member did not expand existing grant: %d %v", len(endpoints), err)
 	}
@@ -189,7 +196,7 @@ func TestSubscriptionFiltersDisabledMaintenanceQuotaAndRevocation(t *testing.T) 
 	if err := f.nodes.SubscriptionFlags(ctx, f.nodeIDs[1], false, false); err != nil {
 		t.Fatal(err)
 	}
-	endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID)
+	endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID)
 	if err != nil || len(endpoints) != 0 {
 		t.Fatal("maintenance or hidden node exported", err)
 	}
@@ -197,19 +204,19 @@ func TestSubscriptionFiltersDisabledMaintenanceQuotaAndRevocation(t *testing.T) 
 	if _, err := f.users.RotateCredential(ctx, f.device.ID, "socks5", true); err != nil {
 		t.Fatal(err)
 	}
-	endpoints, err = f.service.Endpoints(ctx, f.u.ID, f.device.ID)
+	endpoints, _, err = f.service.Proxies(ctx, f.u.ID, f.device.ID)
 	if err != nil || len(endpoints) != 1 || endpoints[0].Protocol != "http" {
 		t.Fatal("revoked protocol still exported", err)
 	}
 	if _, err := f.users.RotateCredential(ctx, f.device.ID, "http", false); err != nil {
 		t.Fatal(err)
 	}
-	endpoints, err = f.service.Endpoints(ctx, f.u.ID, f.device.ID)
+	endpoints, _, err = f.service.Proxies(ctx, f.u.ID, f.device.ID)
 	if err != nil || len(endpoints) != 0 {
 		t.Fatal("unpublished new credential exported", err)
 	}
 	f.users.UpdateDevice(ctx, f.device.ID, user.DeviceInput{Name: "Laptop", Status: "disabled"})
-	if _, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID); err != user.ErrCredential {
+	if _, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID); err != user.ErrCredential {
 		t.Fatal("disabled device exported", err)
 	}
 }
@@ -221,14 +228,14 @@ func TestSubscriptionTrafficLimitAllowsBelowAndRefusesAtLimit(t *testing.T) {
 	f := setupWithLimit(t, 100)
 	ctx := context.Background()
 	f.publish(t, f.nodeIDs[0])
-	endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID)
+	endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID)
 	if err != nil || len(endpoints) != 2 {
 		t.Fatalf("user below traffic limit got no endpoints: %d %v", len(endpoints), err)
 	}
 	if _, err := f.database.Exec("UPDATE users SET used_traffic=? WHERE id=?", int64(100), f.u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID); err != user.ErrInactive {
+	if _, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID); err != user.ErrInactive {
 		t.Fatalf("user at traffic limit not refused: %v", err)
 	}
 }
@@ -242,7 +249,7 @@ func TestSubscriptionIncludesNonOnlineNodesAndExcludesDisabled(t *testing.T) {
 	for _, nodeID := range f.nodeIDs[:2] {
 		f.publish(t, nodeID)
 	}
-	if endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 4 {
+	if endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 4 {
 		t.Fatalf("baseline endpoints: %d %v", len(endpoints), err)
 	}
 	if _, err := f.database.Exec("UPDATE nodes SET status='offline' WHERE id=?", f.nodeIDs[0]); err != nil {
@@ -251,25 +258,25 @@ func TestSubscriptionIncludesNonOnlineNodesAndExcludesDisabled(t *testing.T) {
 	if _, err := f.database.Exec("UPDATE nodes SET status='degraded' WHERE id=?", f.nodeIDs[1]); err != nil {
 		t.Fatal(err)
 	}
-	if endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 4 {
+	if endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 4 {
 		t.Fatalf("offline or degraded node dropped: %d %v", len(endpoints), err)
 	}
 	if _, err := f.database.Exec("UPDATE nodes SET allow_subscription=0 WHERE id=?", f.nodeIDs[1]); err != nil {
 		t.Fatal(err)
 	}
-	if endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 2 {
+	if endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 2 {
 		t.Fatalf("non-subscribable node exported: %d %v", len(endpoints), err)
 	}
 	if _, err := f.database.Exec("UPDATE nodes SET enabled=0,status='disabled' WHERE id=?", f.nodeIDs[0]); err != nil {
 		t.Fatal(err)
 	}
-	if endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 0 {
+	if endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 0 {
 		t.Fatalf("disabled node exported: %d %v", len(endpoints), err)
 	}
 	if _, err := f.database.Exec("UPDATE nodes SET enabled=1,status='offline',maintenance=1 WHERE id=?", f.nodeIDs[0]); err != nil {
 		t.Fatal(err)
 	}
-	if endpoints, err := f.service.Endpoints(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 0 {
+	if endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID); err != nil || len(endpoints) != 0 {
 		t.Fatalf("maintenance node exported: %d %v", len(endpoints), err)
 	}
 }

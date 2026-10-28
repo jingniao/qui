@@ -97,6 +97,7 @@ func ProtocolSupportTable() []ProtocolSupport {
 	identityQUIC := append([]string{}, append(identityUDP, DimTLS, DimQUIC)...)
 	both := map[string]CoreSupport{CoreXray: {Inbound: true, Outbound: true, TCP: true, UDP: true}, CoreSingBox: {Inbound: true, Outbound: true, TCP: true, UDP: true}}
 	return []ProtocolSupport{
+		{Protocol: "forward", Direction: "inbound", Transport: []string{"tcp", "udp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"none"}, Cores: map[string]CoreSupport{CoreXray: {Inbound: true, TCP: true, UDP: true}, CoreSingBox: {Inbound: true, TCP: true, UDP: true}}, Implemented: []string{DimUDP, DimIPv6}, Pending: []string{}, NotApplicable: []string{DimUserIdentity, DimAccountMeter, DimQuota, DimConcurrency, DimSubscription, DimTLS, DimQUIC, DimTransportWS, DimTransportGRPC}, Source: "Official Xray dokodemo-door and sing-box direct inbound override"},
 		{
 			Protocol: "http", Direction: "both", Transport: []string{"tcp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"none"},
 			Cores:         map[string]CoreSupport{CoreXray: {Inbound: true, Outbound: true, TCP: true}, CoreSingBox: {Inbound: true, Outbound: true, TCP: true}},

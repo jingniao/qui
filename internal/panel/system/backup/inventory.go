@@ -10,16 +10,24 @@ import (
 )
 
 type Totals struct {
+	ProbeTargets          int64 `json:"probeTargets"`
+	TCPProbes             int64 `json:"tcpProbes"`
+	NodeMeta              int64 `json:"nodeMeta"`
 	PendingTrafficBatches int64 `json:"pendingTrafficBatches,omitempty"`
 	Admins                int64 `json:"admins"`
 	ActiveOwners          int64 `json:"activeOwners"`
 	Sessions              int64 `json:"sessions"`
+	PortalSessions        int64 `json:"portalSessions"`
+	SubscriptionSources   int64 `json:"subscriptionSources"`
+	ImportedProxies       int64 `json:"importedProxies"`
+	SourceGrants          int64 `json:"sourceGrants"`
 	Users                 int64 `json:"users"`
 	Devices               int64 `json:"devices"`
 	Nodes                 int64 `json:"nodes"`
 	NodeGroups            int64 `json:"nodeGroups"`
 	Policies              int64 `json:"policies"`
 	Revisions             int64 `json:"revisions"`
+	CanvasSchemes         int64 `json:"canvasSchemes"`
 	PendingOperations     int64 `json:"pendingOperations"`
 	BackupFileOperations  int64 `json:"backupFileOperations"`
 	RunningBackupJobs     int64 `json:"runningBackupJobs"`
@@ -34,8 +42,10 @@ type IdentityRecord struct {
 	Revoked             bool
 }
 type UserRecord struct {
-	ID, Status  string
-	Used, Limit int64
+	TrafficResetCycle, TrafficResetAnchor, TrafficResetAt string
+	DeviceLimit                                           int
+	ID, Status                                            string
+	Used, Limit                                           int64
 }
 
 // Inventory is internal read-only evidence. No credentials, token values,
@@ -53,12 +63,47 @@ type Reader interface {
 
 func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	result := Inventory{Nodes: map[string]NodeRecord{}, Identities: map[string]IdentityRecord{}, Users: map[string]UserRecord{}}
+	for _, item := range []struct {
+		table string
+		count *int64
+	}{{"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
+		var present int
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&present); err != nil {
+			return Inventory{}, err
+		}
+		if present > 0 {
+			if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+item.table).Scan(item.count); err != nil {
+				return Inventory{}, err
+			}
+		}
+	}
 	var pendingTrafficTable int
 	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='traffic_pending_batches'").Scan(&pendingTrafficTable); err != nil {
 		return Inventory{}, err
 	}
 	if pendingTrafficTable != 0 {
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM traffic_pending_batches").Scan(&result.Totals.PendingTrafficBatches); err != nil {
+			return Inventory{}, err
+		}
+	}
+	// A backup taken before migration 0112 has no canvas table; the count stays
+	// zero instead of failing the inventory of an older archive.
+	var canvasTable int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='canvas_schemes'").Scan(&canvasTable); err != nil {
+		return Inventory{}, err
+	}
+	if canvasTable != 0 {
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM canvas_schemes").Scan(&result.Totals.CanvasSchemes); err != nil {
+			return Inventory{}, err
+		}
+	}
+	// As with canvas schemes, pre-0114 archives have no portal sessions.
+	var portalTable int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='user_sessions'").Scan(&portalTable); err != nil {
+		return Inventory{}, err
+	}
+	if portalTable != 0 {
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM user_sessions").Scan(&result.Totals.PortalSessions); err != nil {
 			return Inventory{}, err
 		}
 	}
@@ -144,17 +189,33 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	if err != nil {
 		return Inventory{}, err
 	}
-	rows, err = r.QueryContext(ctx, "SELECT id,status,used_traffic,traffic_limit FROM users")
+	var deviceLimitApplied int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0115_device_limit.sql'").Scan(&deviceLimitApplied); err != nil {
+		return Inventory{}, err
+	}
+	deviceColumn := "0"
+	if deviceLimitApplied != 0 {
+		deviceColumn = "device_limit"
+	}
+	var resetApplied int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0118_traffic_reset.sql'").Scan(&resetApplied); err != nil {
+		return Inventory{}, err
+	}
+	resetColumns := "'none','',''"
+	if resetApplied > 0 {
+		resetColumns = "traffic_reset_cycle,traffic_reset_anchor,traffic_reset_at"
+	}
+	rows, err = r.QueryContext(ctx, "SELECT id,status,used_traffic,traffic_limit,"+deviceColumn+","+resetColumns+" FROM users")
 	if err != nil {
 		return Inventory{}, err
 	}
 	for rows.Next() {
 		var user UserRecord
-		if err := rows.Scan(&user.ID, &user.Status, &user.Used, &user.Limit); err != nil {
+		if err := rows.Scan(&user.ID, &user.Status, &user.Used, &user.Limit, &user.DeviceLimit, &user.TrafficResetCycle, &user.TrafficResetAnchor, &user.TrafficResetAt); err != nil {
 			rows.Close()
 			return Inventory{}, err
 		}
-		if user.Used < 0 || user.Limit < 0 {
+		if user.Used < 0 || user.Limit < 0 || user.DeviceLimit < 0 || user.DeviceLimit > 100 {
 			rows.Close()
 			return Inventory{}, ErrArchive
 		}

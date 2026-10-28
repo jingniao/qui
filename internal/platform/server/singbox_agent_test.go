@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/agent/control"
+	"proxycontrol/internal/agent/core/singbox"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
@@ -35,6 +36,10 @@ func TestActualSingboxAgentCapabilitiesPublishAndOfflineContinuity(t *testing.T)
 		}
 	}()
 	ctx := context.Background()
+	expectedCapabilities, err := singbox.Detect(ctx, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
 	nodes := &node.Repository{Database: app.Database}
 	n, token, _, err := nodes.CreateEnrollment(ctx, "Sing-box Agent", time.Hour)
 	if err != nil {
@@ -101,7 +106,7 @@ func TestActualSingboxAgentCapabilitiesPublishAndOfflineContinuity(t *testing.T)
 	for {
 		current, err := repository.Current(ctx, n.ID)
 		node, lookupErr := nodes.Get(ctx, n.ID)
-		if err == nil && current == revision.ID && lookupErr == nil && node.Capabilities != nil && node.Capabilities.CoreName == "sing-box" {
+		if err == nil && current == revision.ID && lookupErr == nil && node.Capabilities != nil && node.Capabilities.CoreName == "sing-box" && node.Capabilities.SingboxUserStats == expectedCapabilities.SingboxUserStats {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -127,11 +132,35 @@ func TestActualSingboxAgentCapabilitiesPublishAndOfflineContinuity(t *testing.T)
 		}
 	}
 	request()
+	if expectedCapabilities.SingboxUserStats {
+		// The real Agent samples every five seconds and uploads on its heartbeat.
+		// Wait for that existing path before taking the control plane offline.
+		deadline := time.Now().Add(35 * time.Second)
+		for {
+			current, err := users.Get(ctx, u.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.UsedTraffic > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("qui sing-box traffic did not reach user accounting")
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	stop()
 	stopped = true
 	request()
 	current, err := users.Get(ctx, u.ID)
-	if err != nil || current.UsedTraffic != 0 {
-		t.Fatal("unmeasured account telemetry was fabricated", current.UsedTraffic, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expectedCapabilities.SingboxUserStats && current.UsedTraffic == 0 {
+		t.Fatal("measured account traffic was lost")
+	}
+	if !expectedCapabilities.SingboxUserStats && current.UsedTraffic != 0 {
+		t.Fatal("unmeasured account telemetry was fabricated", current.UsedTraffic)
 	}
 }

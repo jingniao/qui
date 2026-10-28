@@ -30,14 +30,14 @@ type Repository struct {
 	TrafficApplied func(context.Context, []string)
 }
 
-const userColumns = "id,username,display_name,status,expires_at,traffic_limit,used_traffic,max_devices,max_connections,protocols_json,remark,created_at,(SELECT count(*) FROM devices WHERE devices.user_id=users.id)"
+const userColumns = "traffic_reset_cycle,traffic_reset_anchor,traffic_reset_at,device_limit,login_enabled,id,username,display_name,status,expires_at,traffic_limit,used_traffic,max_devices,max_connections,protocols_json,remark,created_at,(SELECT count(*) FROM devices WHERE devices.user_id=users.id)"
 
 type scanner interface{ Scan(...any) error }
 
 func scanUser(row scanner) (User, error) {
 	var user User
 	var protocols string
-	err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Status, &user.ExpiresAt, &user.TrafficLimit, &user.UsedTraffic, &user.MaxDevices, &user.MaxConnections, &protocols, &user.Remark, &user.CreatedAt, &user.DevicesCount)
+	err := row.Scan(&user.TrafficResetCycle, &user.TrafficResetAnchor, &user.TrafficResetAt, &user.DeviceLimit, &user.LoginEnabled, &user.ID, &user.Username, &user.DisplayName, &user.Status, &user.ExpiresAt, &user.TrafficLimit, &user.UsedTraffic, &user.MaxDevices, &user.MaxConnections, &protocols, &user.Remark, &user.CreatedAt, &user.DevicesCount)
 	if err != nil {
 		return user, err
 	}
@@ -73,6 +73,19 @@ func (r *Repository) Get(ctx context.Context, userID string) (User, error) {
 	}
 	user.NodeGroupIDs, err = r.Groups(ctx, userID)
 	return user, err
+}
+
+// ByUsername resolves an account without exposing the user table to portal authentication.
+func (r *Repository) ByUsername(ctx context.Context, username string) (User, error) {
+	var userID string
+	err := r.Database.QueryRowContext(ctx, "SELECT id FROM users WHERE username=?", username).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, err
+	}
+	return r.Get(ctx, userID)
 }
 func (r *Repository) List(ctx context.Context, keyword string, page, size int) ([]User, int, error) {
 	search := "%" + keyword + "%"
@@ -146,9 +159,6 @@ func (r *Repository) Save(ctx context.Context, userID string, input Input) (User
 		if existing.Username != input.Username {
 			return User{}, errors.New("username cannot be changed")
 		}
-		if input.MaxDevices < existing.DevicesCount {
-			return User{}, errors.New("maximum devices cannot be less than existing device count")
-		}
 	}
 	protocols, _ := json.Marshal(input.AllowedProtocols)
 	tx, err := r.Database.BeginTx(ctx, nil)
@@ -156,10 +166,12 @@ func (r *Repository) Save(ctx context.Context, userID string, input Input) (User
 		return User{}, err
 	}
 	defer tx.Rollback()
+	// max_devices and max_connections are retired (plan C10): a new user gets
+	// values the CHECK constraints accept and an update leaves them alone.
 	if create {
-		_, err = tx.ExecContext(ctx, "INSERT INTO users(id,username,display_name,status,expires_at,traffic_limit,max_devices,max_connections,protocols_json,remark,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", userID, input.Username, input.DisplayName, input.Status, input.ExpiresAt, input.TrafficLimit, input.MaxDevices, input.MaxConnections, string(protocols), input.Remark, created)
+		_, err = tx.ExecContext(ctx, "INSERT INTO users(id,username,display_name,status,expires_at,traffic_limit,max_devices,max_connections,protocols_json,remark,created_at) VALUES(?,?,?,?,?,?,1,10000,?,?,?)", userID, input.Username, input.DisplayName, input.Status, input.ExpiresAt, input.TrafficLimit, string(protocols), input.Remark, created)
 	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE users SET display_name=?,status=?,expires_at=?,traffic_limit=?,max_devices=?,max_connections=?,protocols_json=?,remark=? WHERE id=?", input.DisplayName, input.Status, input.ExpiresAt, input.TrafficLimit, input.MaxDevices, input.MaxConnections, string(protocols), input.Remark, userID)
+		_, err = tx.ExecContext(ctx, "UPDATE users SET display_name=?,status=?,expires_at=?,traffic_limit=?,protocols_json=?,remark=? WHERE id=?", input.DisplayName, input.Status, input.ExpiresAt, input.TrafficLimit, string(protocols), input.Remark, userID)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -168,6 +180,23 @@ func (r *Repository) Save(ctx context.Context, userID string, input Input) (User
 		return User{}, err
 	}
 	if err := setGrants(ctx, tx, userID, input.NodeGroupIDs); err != nil {
+		return User{}, err
+	}
+	if input.TrafficResetAnchor == "" {
+		if err := tx.QueryRowContext(ctx, "SELECT CASE WHEN traffic_reset_anchor<>'' AND traffic_reset_cycle=? THEN traffic_reset_anchor ELSE ? END FROM users WHERE id=?", input.TrafficResetCycle, created, userID).Scan(&input.TrafficResetAnchor); err != nil {
+			return User{}, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET traffic_reset_at=CASE WHEN traffic_reset_cycle<>? OR traffic_reset_anchor<>? THEN '' ELSE traffic_reset_at END,traffic_reset_cycle=?,traffic_reset_anchor=? WHERE id=?", input.TrafficResetCycle, input.TrafficResetAnchor, input.TrafficResetCycle, input.TrafficResetAnchor, userID); err != nil {
+		return User{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET device_limit=? WHERE id=?", input.DeviceLimit, userID); err != nil {
+		return User{}, err
+	}
+	// The identity follows the allowed protocols in the same transaction, so a
+	// user never exists without one and a protocol change issues and revokes
+	// credentials atomically with it.
+	if _, err := r.ensureAccessIdentityTx(ctx, tx, userID); err != nil {
 		return User{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -320,11 +349,14 @@ func (r *Repository) Credentials(ctx context.Context, deviceID string, reveal bo
 	}
 	return credentials, rows.Err()
 }
+
+// CreateDevice is the v1.0 entry point for issuing credentials. Since v1.1 a
+// user has exactly one access identity, so it no longer adds a device: it checks
+// the request as before, makes sure the identity holds the user's credentials
+// and returns it, with the credentials of the requested protocols revealed the
+// way a newly created device returned them. Internal callers and fixtures use
+// it; the HTTP route is gone (410).
 func (r *Repository) CreateDevice(ctx context.Context, userID string, input DeviceInput) (Device, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || len(input.Name) > 240 {
-		return Device{}, errors.New("device name required, maximum 240 bytes")
-	}
 	if err := ValidateProtocols(input.Protocols); err != nil {
 		return Device{}, err
 	}
@@ -344,37 +376,28 @@ func (r *Repository) CreateDevice(ctx context.Context, userID string, input Devi
 			return Device{}, errors.New("protocol not allowed for this user")
 		}
 	}
-	deviceID, err := id.New()
+	if _, err := r.EnsureAccessIdentity(ctx, userID); err != nil {
+		return Device{}, err
+	}
+	identity, err := r.AccessIdentity(ctx, userID)
 	if err != nil {
 		return Device{}, err
 	}
-	device := Device{ID: deviceID, UserID: userID, Name: input.Name, Status: "active", CreatedAt: timestamp(time.Now()), Credentials: []Credential{}}
-	tx, err := r.Database.BeginTx(ctx, nil)
+	revealed, err := r.Credentials(ctx, identity.ID, true)
 	if err != nil {
 		return Device{}, err
 	}
-	defer tx.Rollback()
-	var count, limit int
-	if err := tx.QueryRowContext(ctx, "SELECT max_devices,(SELECT count(*) FROM devices WHERE user_id=users.id) FROM users WHERE id=?", userID).Scan(&limit, &count); err != nil {
-		return Device{}, err
-	}
-	if count >= limit {
-		return Device{}, ErrDeviceLimit
-	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO devices(id,user_id,name,status,created_at) VALUES(?,?,?,'active',?)", deviceID, userID, input.Name, device.CreatedAt); err != nil {
-		return Device{}, err
-	}
+	requested := map[string]bool{}
 	for _, protocol := range input.Protocols {
-		credential, err := r.addCredential(ctx, tx, deviceID, userID, protocol)
-		if err != nil {
-			return Device{}, err
+		requested[protocol] = true
+	}
+	identity.Credentials = []Credential{}
+	for _, credential := range revealed {
+		if credential.Status == "active" && requested[credential.Protocol] {
+			identity.Credentials = append(identity.Credentials, credential)
 		}
-		device.Credentials = append(device.Credentials, credential)
 	}
-	if err := tx.Commit(); err != nil {
-		return Device{}, err
-	}
-	return device, nil
+	return identity, nil
 }
 func (r *Repository) addCredential(ctx context.Context, tx *sql.Tx, deviceID, userID, protocol string) (Credential, error) {
 	credentialID, err := id.New()

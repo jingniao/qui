@@ -4,17 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"proxycontrol/internal/platform/id"
 	"time"
+
+	"proxycontrol/internal/platform/id"
+	"proxycontrol/internal/platform/vault"
 )
 
 var ErrToken = errors.New("subscription token unavailable")
 
+// ErrNotRecoverable reports a token that was issued before v1.1, when only the
+// hash was stored. Such a link cannot be shown again; the Owner resets it.
+var ErrNotRecoverable = errors.New("subscription link was issued before v1.1 and cannot be shown")
+
 // Repository owns subscription tokens. Reader is the optional read-only pool,
-// used for the token lookup and the list; writes always use Database.
+// used for the token lookup and the list; writes always use Database. Vault seals
+// the copy of the plaintext token that makes the link re-viewable (plan C2); a
+// repository without a Vault still rotates and resolves tokens, it only cannot
+// show them again.
 type Repository struct {
 	Database *sql.DB
 	Reader   *sql.DB
+	Vault    *vault.Vault
 }
 
 func (r *Repository) reader() *sql.DB {
@@ -44,6 +54,15 @@ func (r *Repository) Rotate(ctx context.Context, userID, deviceID string) (Token
 		return Token{}, "", err
 	}
 	token := Token{ID: tokenID, UserID: userID, DeviceID: deviceID, CreatedAt: timestamp(time.Now())}
+	// The encrypted copy is what lets the link be shown again; without a vault the
+	// token still works through its hash, it just cannot be re-viewed.
+	var sealed []byte
+	if r.Vault != nil {
+		sealed, err = r.Vault.Seal([]byte(plaintext))
+		if err != nil {
+			return token, "", err
+		}
+	}
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return token, "", err
@@ -52,7 +71,7 @@ func (r *Repository) Rotate(ctx context.Context, userID, deviceID string) (Token
 	if _, err := tx.ExecContext(ctx, "UPDATE subscription_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL", token.CreatedAt, userID); err != nil {
 		return token, "", err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_tokens(id,user_id,device_id,token_hash,created_at) VALUES(?,?,?,?,?)", token.ID, userID, deviceID, id.Hash(plaintext), token.CreatedAt); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_tokens(id,user_id,device_id,token_hash,encrypted_token,created_at) VALUES(?,?,?,?,?,?)", token.ID, userID, deviceID, id.Hash(plaintext), sealed, token.CreatedAt); err != nil {
 		return token, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -60,6 +79,30 @@ func (r *Repository) Rotate(ctx context.Context, userID, deviceID string) (Token
 	}
 	return token, plaintext, nil
 }
+
+// Link returns the plaintext of the user's active subscription token, so the
+// Owner and the user can view and copy the link again (R5). A token issued
+// before v1.1 has no encrypted copy and reports ErrNotRecoverable; the caller
+// tells the user to reset it.
+func (r *Repository) Link(ctx context.Context, userID string) (string, error) {
+	var sealed []byte
+	err := r.reader().QueryRowContext(ctx, "SELECT encrypted_token FROM subscription_tokens WHERE user_id=? AND revoked_at IS NULL", userID).Scan(&sealed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrToken
+	}
+	if err != nil {
+		return "", err
+	}
+	if len(sealed) == 0 || r.Vault == nil {
+		return "", ErrNotRecoverable
+	}
+	plaintext, err := r.Vault.Open(sealed)
+	if err != nil {
+		return "", ErrNotRecoverable
+	}
+	return string(plaintext), nil
+}
+
 func (r *Repository) Resolve(ctx context.Context, plaintext string) (Token, error) {
 	var token Token
 	if len(plaintext) != 43 {

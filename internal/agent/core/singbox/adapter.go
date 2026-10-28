@@ -12,6 +12,8 @@ import (
 	"proxycontrol/internal/agent/collector"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/core/scheduling"
+	"proxycontrol/internal/agent/gate"
+	"proxycontrol/internal/agent/observer"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -26,12 +28,20 @@ import (
 var ErrTelemetryUnavailable = errors.New("sing-box native account/connection telemetry has not been adapted for this build")
 
 type Adapter struct {
+	startedAt              time.Time
+	connectionObserver     observer.Store
+	deviceGate             gate.Lease
+	sourceWriter           *collector.SingboxWriter
+	gateFailed             bool
 	Path, Directory        string
 	NodeID                 string
 	Now                    func() time.Time
 	mu                     sync.Mutex
 	hooks                  core.RuntimeHooks
 	statsPort              int
+	userStatsPort          int
+	v2rayAPI               bool
+	counterSources         core.CounterSources
 	statsSecret            string
 	statsEpoch             string
 	nodeTotals             nodeTotals
@@ -80,6 +90,7 @@ func (a *Adapter) DetectCapabilities(ctx context.Context) (*pb.Capabilities, err
 func (a *Adapter) applyUpstreamCapabilities(capabilities *pb.Capabilities) {
 	a.statsChecked = true
 	a.nativeClashAPI = SupportsClashAPI(capabilities)
+	a.v2rayAPI = SupportsV2rayAPI(capabilities)
 	a.nativeWireGuard = hasWireGuardOutbound(capabilities)
 	a.nativeWireGuardInbound = hasWireGuardInbound(capabilities)
 }
@@ -96,14 +107,23 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	options.wireGuardOutbound = a.nativeWireGuard
 	options.wireGuardInbound = a.nativeWireGuardInbound
 	if a.hooks.EnableStats {
-		if a.nativeClashAPI {
-			if a.statsPort == 0 {
-				listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if a.v2rayAPI {
+			if a.userStatsPort == 0 {
+				port, err := a.privatePortLocked(state)
 				if err != nil {
 					return core.RenderedConfig{}, err
 				}
-				a.statsPort = listener.Addr().(*net.TCPAddr).Port
-				listener.Close()
+				a.userStatsPort = port
+			}
+			options.userStatsPort = a.userStatsPort
+		}
+		if a.nativeClashAPI {
+			if a.statsPort == 0 {
+				port, err := a.privatePortLocked(state)
+				if err != nil {
+					return core.RenderedConfig{}, err
+				}
+				a.statsPort = port
 			}
 			if a.statsSecret == "" {
 				secret, err := NewStatsSecret()
@@ -136,12 +156,11 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	options.probeFingerprints = map[string]string{}
 	for id, probe := range probes {
 		if a.probePorts[id] == 0 {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			port, err := a.privatePortLocked(state)
 			if err != nil {
 				return core.RenderedConfig{}, err
 			}
-			a.probePorts[id] = listener.Addr().(*net.TCPAddr).Port
-			listener.Close()
+			a.probePorts[id] = port
 		}
 		options.probePorts[id] = a.probePorts[id]
 		fingerprint := probeFingerprint(scheduled, probe)
@@ -155,6 +174,31 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	return renderWithOptions(ctx, state, at, options)
 }
 
+// privatePortLocked asks the OS for a free loopback port, excluding listeners
+// reserved by this render but not yet started. Apply still validates and rolls
+// back if another process takes the port between rendering and core startup.
+func (a *Adapter) privatePortLocked(state desiredstate.State) (int, error) {
+	for attempt := 0; attempt < 32; attempt++ {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return 0, err
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		listener.Close()
+		used := port == a.statsPort || port == a.userStatsPort
+		for _, entry := range state.Inbounds {
+			used = used || entry.Enabled && entry.Port == port
+		}
+		for _, reserved := range a.probePorts {
+			used = used || reserved == port
+		}
+		if !used {
+			return port, nil
+		}
+	}
+	return 0, errors.New("no free private statistics port")
+}
+
 func (a *Adapter) detectStatsLocked(ctx context.Context) error {
 	if a.statsChecked {
 		return nil
@@ -166,12 +210,12 @@ func (a *Adapter) detectStatsLocked(ctx context.Context) error {
 	return err
 }
 
-// SupportsAccountTelemetry reports whether this core can attribute traffic to a
-// user. Official sing-box release binaries cannot (plan D5): the v2ray API is
-// not built in and the Clash API does not name the user of a connection, so the
-// node reports node totals only and every per-user value stays unknown.
+// SupportsAccountTelemetry reports the detected native API capability. Builds
+// without with_v2ray_api keep per-user usage unknown (D5).
 func (a *Adapter) SupportsAccountTelemetry() bool {
-	return false
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.v2rayAPI
 }
 
 func (a *Adapter) Validate(ctx context.Context, configuration core.RenderedConfig) error {
@@ -290,13 +334,15 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 	command.SysProcAttr = core.CoreProcessAttributes()
 	command.Stdout = io.Discard
 	if configuration.AccessContext != nil && a.hooks.AccessSink != nil {
-		command.Stdout = collector.NewSingboxWriter(configuration.AccessContext, a.hooks.AccessSink, a.hooks.AccessRejected)
+		a.sourceWriter = collector.NewSingboxWriter(configuration.AccessContext, a.hooks.AccessSink, a.hooks.AccessRejected)
+		command.Stdout = a.sourceWriter
 	}
 	command.Stderr = io.Discard
 	if err := command.Start(); err != nil {
 		abandonErr := a.abandonCoreRunLocked()
 		return errors.Join(err, abandonErr)
 	}
+	a.startedAt = time.Now()
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()
 	accepted := false
@@ -386,6 +432,14 @@ func (a *Adapter) stopLocked() error {
 		a.stopPending = false
 		return a.confirmCoreExitLocked()
 	default:
+	}
+	if a.hooks.TrafficSink != nil && a.current.UserStatsEndpoint != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := a.sampleTrafficLocked(ctx)
+		cancel()
+		if err != nil {
+			return errors.New("final traffic sample could not be persisted")
+		}
 	}
 	if err := a.forceStopLocked(); err != nil {
 		return err
@@ -579,11 +633,16 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	if match == nil {
 		return &pb.Capabilities{}, errors.New("configured core does not identify as sing-box")
 	}
-	capabilities := &pb.Capabilities{CoreName: "sing-box", CoreVersion: match[1]}
+	capabilities := &pb.Capabilities{CoreName: "sing-box", CoreVersion: match[1], ForwardInboundSupported: true}
+	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
+	if capabilities.DeviceGateSupported {
+		capabilities.ObservationContractVersion = 2
+	}
 	for _, protocol := range []string{"http", "socks5", "shadowsocks", "vless", "trojan"} {
 		capabilities.Protocols = append(capabilities.Protocols, &pb.ProtocolCapability{Protocol: protocol, Inbound: true, Outbound: true, Tcp: true, Udp: protocol != "http"})
 	}
 	tags := buildTags(output.String())
+	capabilities.SingboxUserStats = tags["with_v2ray_api"]
 	if tags["with_quic"] {
 		for _, protocol := range []string{"hysteria2", "tuic"} {
 			capabilities.Protocols = append(capabilities.Protocols, &pb.ProtocolCapability{Protocol: protocol, Inbound: true, Outbound: true, Tcp: true, Udp: true})
@@ -620,11 +679,8 @@ func SupportsClashAPI(capabilities *pb.Capabilities) bool {
 	return capabilities != nil && capabilities.CoreName == "sing-box"
 }
 
-// SupportsV2rayAPI reports whether the detected core exposes the upstream v2ray
-// stats API. Official sing-box release binaries are built without the
-// `with_v2ray_api` tag (plan D5), so this is always false: sing-box nodes report
-// node totals only and their per-user traffic stays unknown.
+// SupportsV2rayAPI requires the detected with_v2ray_api build tag. Versions and
+// executable names cannot establish whether this optional API was compiled in.
 func SupportsV2rayAPI(capabilities *pb.Capabilities) bool {
-	_ = capabilities
-	return false
+	return capabilities != nil && capabilities.CoreName == "sing-box" && capabilities.SingboxUserStats
 }

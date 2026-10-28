@@ -1,7 +1,12 @@
 import type { NavigationGuardNext, RouteLocationNormalized } from 'vue-router';
 import { authState, ensureSession } from './auth';
+import { portalGuard } from '../portal/guard';
 
 export async function setupNavigationGuards(to: RouteLocationNormalized, _from: RouteLocationNormalized, next: NavigationGuardNext) {
+  if (to.path.startsWith('/portal/')) {
+    const result = await portalGuard(to);
+    return result === true ? next() : next(result);
+  }
   const publicPaths = ['/login', '/setup', '/403', '/404'];
   try { await ensureSession(); }
   catch {
@@ -16,4 +21,3 @@ export async function setupNavigationGuards(to: RouteLocationNormalized, _from: 
       !/^\/nodes\/[^/]+$/.test(to.path)) return next('/403');
   next();
 }
-

@@ -48,8 +48,9 @@ for architecture in "${architectures[@]}"; do
   stage=$output/$bundle
   if [[ -e $stage ]]; then rm -rf -- "$stage"; fi
   install -d -m 0755 -- "$stage/bin" "$stage/deploy"
+  printf '%s\n' "$version" > "$stage/VERSION"
   for component in panel agent; do
-    CGO_ENABLED=0 GOOS=linux GOARCH="$architecture" go build -trimpath \
+    CGO_ENABLED=0 GOOS=linux GOARCH="$architecture" go build -p 1 -trimpath \
       -ldflags "-s -w -X main.version=$version" \
       -o "$stage/bin/proxy-$component" "./cmd/$component"
   done
@@ -63,9 +64,10 @@ for architecture in "${architectures[@]}"; do
   printf 'Built %s\n' "$output/$bundle.tar.gz"
 done
 
+OUTPUT_DIRECTORY="$output" bash "$root/scripts/build-singbox.sh"
 cd -- "$output"
 : > SHA256SUMS
-for archive in proxy-control-*.tar.gz; do
+for archive in proxy-control-*.tar.gz sing-box-*-qui.*-linux-*.tar.gz sing-box-*-qui.*-linux-*.provenance.txt; do
   digest=$(sha256sum -- "$archive"); digest=${digest%% *}
   printf '%s  %s\n' "$digest" "$archive" >> SHA256SUMS
 done

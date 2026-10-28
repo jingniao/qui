@@ -3,3 +3,6 @@
 # (schema_migrations.checksum). Never convert their line endings.
 migrations/*.sql -text
 internal/agent/identity/testdata/store_write2/** -text
+# The subscription format fixtures are compared byte for byte against what the
+# exporters render, so their line endings must survive a checkout.
+internal/panel/subscription/testdata/** -text

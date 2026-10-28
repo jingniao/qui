@@ -52,10 +52,11 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 			return Record{}, errors.New("policy user not found")
 		}
 	}
-	for _, id := range input.Scope.DeviceIDs {
-		if _, err := s.Users.Device(ctx, id); err != nil {
-			return Record{}, errors.New("policy device not found")
-		}
+	// v1.1 scopes policies per user: a user has one hidden access identity,
+	// so a user scope is exactly what a device scope was (migration 0113
+	// rewrote the stored ones).
+	if len(input.Scope.DeviceIDs) > 0 {
+		return Record{}, errors.New("policy device scope was removed in v1.1; scope the policy to users")
 	}
 	for _, id := range input.Scope.NodeIDs {
 		if n, err := s.Nodes.Get(ctx, id); err != nil || n.DeletedAt != "" {
@@ -172,17 +173,7 @@ func (s *Service) Simulate(ctx context.Context, request shared.Request) (shared.
 		return shared.Decision{}, errors.New("simulation node not found")
 	}
 	if request.DeviceID != "" {
-		device, err := s.Users.Device(ctx, request.DeviceID)
-		if err != nil {
-			return shared.Decision{}, errors.New("simulation device not found")
-		}
-		if request.UserID != "" && request.UserID != device.UserID {
-			return shared.Decision{}, errors.New("device does not belong to selected user")
-		}
-		request.UserID = device.UserID
-		if device.Status != "active" {
-			return shared.Decision{}, errors.New("device is disabled")
-		}
+		return shared.Decision{}, errors.New("simulation device scope was removed in v1.1; simulate a user")
 	}
 	if request.UserID != "" {
 		u, err := s.Users.Get(ctx, request.UserID)

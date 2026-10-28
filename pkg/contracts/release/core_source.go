@@ -3,13 +3,23 @@ package release
 import (
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
-// ErrSourceURL reports a core asset URL that is not an official release asset
+// ErrSourceURL reports a core asset URL that is not an allowed release asset
 // of the expected project. Only the exact download prefix, with no userinfo,
 // query, fragment, path traversal or extra segment, is accepted.
-var ErrSourceURL = errors.New("core release URL must be an official Xray-core or sing-box release asset")
+var ErrSourceURL = errors.New("core release URL must be an official Xray-core, official sing-box or qui sing-box release asset")
+
+const quiCorePrefix = "https://github.com/jingniao/qui/releases/download/"
+
+var quiCoreAsset = regexp.MustCompile(`^sing-box-[0-9]+\.[0-9]+\.[0-9]+-qui\.[1-9][0-9]*-linux-(amd64|arm64)\.tar\.gz$`)
+
+// QuiCoreSource identifies our release source after CoreAssetURL validation.
+func QuiCoreSource(value string) bool {
+	return strings.HasPrefix(value, quiCorePrefix)
+}
 
 var coreSourcePrefixes = map[string]string{
 	"xray":     "https://github.com/XTLS/Xray-core/releases/download/",
@@ -29,11 +39,15 @@ func CoreRedirectHost(host string) bool {
 	return false
 }
 
-// CoreAssetURL validates an operator-entered official release asset URL and
+// CoreAssetURL validates an operator-entered allowed release asset URL and
 // returns it with the expected <tag>/<asset> parts. Remote data never supplies
 // this value: it comes from the Owner and is re-validated by the Agent.
 func CoreAssetURL(component, value string) (*url.URL, string, error) {
 	prefix, ok := coreSourcePrefixes[component]
+	qui := component == "sing-box" && QuiCoreSource(value)
+	if qui {
+		prefix = quiCorePrefix
+	}
 	if !ok || !strings.HasPrefix(value, prefix) || len(value) > 512 {
 		return nil, "", ErrSourceURL
 	}
@@ -42,6 +56,9 @@ func CoreAssetURL(component, value string) (*url.URL, string, error) {
 		return nil, "", ErrSourceURL
 	}
 	tag, asset, _ := strings.Cut(remainder, "/")
+	if qui && (!quiCoreAsset.MatchString(asset) || strings.Contains(tag, "..")) {
+		return nil, "", ErrSourceURL
+	}
 	if !validAssetPart(tag, 64) || !validAssetPart(asset, 128) || tag == "." || tag == ".." || asset == "." || asset == ".." {
 		return nil, "", ErrSourceURL
 	}

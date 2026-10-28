@@ -54,6 +54,11 @@ The largest packages at the start, in non-test lines:
 These decisions override the matching parts of AGENTS.md. Phase 14 updates AGENTS.md to match.
 
 ### D1. Official upstream cores only
+
+**Superseded in part by v1.1 R3 (2026-10-28):** Xray remains official. sing-box
+may also use a reproducible qui build of unmodified upstream with upstream
+non-naive tags plus `with_v2ray_api`. No patches or third-party forwarders.
+See `v1.1-plan.md` §4.5 and L7 for pending CI build evidence.
 - Nodes run unmodified official release binaries of Xray-core and sing-box.
 - No forked or patched builds, no custom build tags, and no core source in this repo.
 - Delete `integrations/` and the core-building scripts.
@@ -61,6 +66,12 @@ These decisions override the matching parts of AGENTS.md. Phase 14 updates AGENT
 - When an optional feature is missing, the agent degrades gracefully: it reports "unavailable" rather than refusing to run.
 
 ### D2. Max concurrent connections is not hard-enforced in the core
+
+**Superseded by v1.1 R6/R7:** device creation and old max-device/max-connection
+API fields are retired. `device_limit` (upgrade default 0, unlimited) admits
+source-address estimates across entry nodes and drives expiring runtime gates.
+Xray keeps established connections; sing-box closes matching connections.
+Missing capabilities/TTL expiry fail open explicitly. See v1.1 §7 and L8.
 - Remove all core-level connection admission, slot ledgers and cross-node connection authorization. This covers `connection_allowances`, connection generations, and the `ConnectionGrant`/admission code paths.
 - The panel keeps enforcing "max devices" when devices are created. This is pure panel logic.
 - "Max concurrent connections" becomes an **observed, soft limit**:
@@ -99,6 +110,11 @@ Use the upstream behaviour and document the gap. Do not re-implement any of thes
 If an upstream capability that this plan assumes turns out to be missing, **stop and report**. Don't patch a core, and don't build a substitute subsystem.
 
 ### D5. Per-user traffic on sing-box nodes (decided 2026-10-16)
+
+**v1.1 superseded scope (R3):** `singbox_user_stats` Agents read cumulative
+per-user counters from upstream `with_v2ray_api` into the quota/spool path.
+Official builds without that capability keep D5 below. Address observation is
+separate from byte counters. A9.1/A9.2 native checks still await CI/Owner.
 - Official sing-box builds have no v2ray stats API, and the Clash API doesn't name the user of a connection (see the Phase 6 pre-step findings in section 7).
 - **Xray nodes** report exact per-user uplink, downlink and online counts.
 - **sing-box nodes** report node totals only: the Clash API `uploadTotal` / `downloadTotal`. Their per-user traffic and online counts are "unknown".

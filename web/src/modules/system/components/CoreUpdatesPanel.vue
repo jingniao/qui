@@ -1,7 +1,7 @@
 <template>
   <section class="panel-card p-5 space-y-5">
     <div class="flex justify-between items-center gap-3"><h2 class="font-semibold">核心更新</h2><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新任务</button></div>
-    <p class="text-sm text-gray-600">填写官方 Xray-core 或 sing-box 发布版本的版本号、GitHub 发布资产地址和压缩包 SHA-256。节点会校验压缩包摘要、解压唯一的可执行文件、运行版本命令并在健康检查失败时自动回滚到上一核心。</p>
+    <p class="text-sm text-gray-600">填写官方 Xray-core 或 sing-box 发布版本的版本号、GitHub 发布资产地址和压缩包 SHA-256。支持的 Agent 也可使用 qui 发布中的 sing-box 构建。节点会校验压缩包摘要、解压唯一的可执行文件、运行版本命令并在健康检查失败时自动回滚到上一核心。</p>
     <ErrorState v-if="error" :message="error" @retry="load" />
     <div class="grid md:grid-cols-2 gap-3 text-sm">
       <label>目标节点<select v-model="nodeId" class="form-input-base mt-2"><option value="">选择节点</option><option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
@@ -9,7 +9,9 @@
       <label>版本<input v-model.trim="version" class="form-input-base mt-2" placeholder="26.3.27" /></label>
       <label>SHA-256<input v-model.trim="sha256" class="form-input-base mt-2 font-mono text-xs" placeholder="64 位十六进制摘要" /></label>
       <label class="md:col-span-2">发布资产地址<input v-model.trim="assetURL" class="form-input-base mt-2 font-mono text-xs" placeholder="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" /></label>
-      <div class="flex items-end"><button class="ios-btn-primary" :disabled="busy || !selected || !revision || !version || !sha256 || !assetURL" @click="confirmation = true">创建升级任务</button></div>
+      <p v-if="quiSourceBlocked" class="text-xs text-gray-500 md:col-span-2">该 Agent 尚未上报 qui sing-box 更新能力，请使用官方来源。</p>
+      <p v-else-if="supportsQuiCore && component === 'sing-box'" class="text-xs text-gray-500 md:col-span-2">该 Agent 支持 qui sing-box 构建；请填写对应发布资产的地址及 SHA256SUMS 中的摘要。</p>
+      <div class="flex items-end"><button class="ios-btn-primary" :disabled="busy || !selected || !revision || !version || !sha256 || !assetURL || quiSourceBlocked" @click="confirmation = true">创建升级任务</button></div>
     </div>
     <p v-if="selected" class="text-xs text-gray-500">目标 {{ selected.name }}，最近报告的配置 #{{ revision || '尚未确认' }}。中央会再次核对节点核心、平台、版本格式、官方地址和摘要。</p>
     <EmptyState v-if="!tasks.length && !loading" title="暂无更新任务" description="选择节点并填写版本、官方资产地址和 SHA-256 后创建任务。" />
@@ -49,6 +51,8 @@ const taskPage = ref(1), taskTotal = ref(0), loading = ref(false), busy = ref(fa
 const nodeId = ref(''), component = ref('xray'), version = ref(''), assetURL = ref(''), sha256 = ref('');
 const confirmation = ref(false);
 const selected = computed(() => props.nodes.find(node => node.id === nodeId.value));
+const supportsQuiCore = computed(() => selected.value?.capabilities?.singbox_user_stats === true);
+const quiSourceBlocked = computed(() => assetURL.value.startsWith('https://github.com/jingniao/qui/releases/download/') && !supportsQuiCore.value);
 const revision = computed(() => selected.value?.heartbeat?.current_revision || 0);
 const confirmMessage = computed(() => `确认升级 ${selected.value?.name || ''} 到 ${component.value} ${version.value}？连接可能中断，健康检查失败时节点会自动回滚到上一核心。`);
 let generation = 0;
@@ -64,7 +68,7 @@ async function load() {
 }
 async function queue() {
   confirmation.value = false;
-  if (!selected.value || busy.value) return;
+  if (!selected.value || busy.value || quiSourceBlocked.value) return;
   busy.value = true;
   try {
     await coreUpdatesAPI.queue({ nodeId: nodeId.value, revision: revision.value, component: component.value, version: version.value, url: assetURL.value, sha256: sha256.value });

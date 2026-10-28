@@ -34,13 +34,13 @@ message EnrollResponse {
   bytes ca_pem = 3;
   google.protobuf.Timestamp expires_at = 4;
 }
-message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; }
+message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; bool device_gate_supported = 9; bool tcp_probe_supported = 10; }
 message ProtocolCapability { string protocol = 1; bool inbound = 2; bool outbound = 3; bool tcp = 4; bool udp = 5; }
-// Fields 4-15 are the former patched-core capabilities. V1 runs official
-// upstream cores only (plan D1/D4/D5), so they are never set and always read as
-// false/zero: the agent reports the core name, the upstream version and the
-// protocol matrix, and derives the upstream API facts from the version.
-message Capabilities { string core_name = 1; string core_version = 2; repeated ProtocolCapability protocols = 3; bool connection_admission_supported = 4; bool connection_ledger_supported = 5; bool connection_generation_supported = 6; bool connection_fence_supported = 7; bool connection_observation_supported = 8; int32 observation_contract_version = 9; bool domain_bytes_supported = 10; bool egress_envelope_supported = 11; int32 egress_envelope_version = 12; bool udp_per_target_observed = 13; int32 max_egress_hops = 14; string observation_edition = 15; }
+// Fields 4-15 are former patched-core capabilities, except field 9 which v1.1
+// also uses for the additive address observation contract (version 2). Device
+// gates require the explicit field 17 and a negotiated Welcome; old peers
+// continue to see no admission or ledger capability.
+message Capabilities { string core_name = 1; string core_version = 2; repeated ProtocolCapability protocols = 3; bool connection_admission_supported = 4; bool connection_ledger_supported = 5; bool connection_generation_supported = 6; bool connection_fence_supported = 7; bool connection_observation_supported = 8; int32 observation_contract_version = 9; bool domain_bytes_supported = 10; bool egress_envelope_supported = 11; int32 egress_envelope_version = 12; bool udp_per_target_observed = 13; int32 max_egress_hops = 14; string observation_edition = 15; bool singbox_user_stats = 16; bool device_gate_supported = 17; bool forward_inbound_supported = 18; }
 message Heartbeat {
   optional double cpu_percent = 1;
   optional double memory_percent = 2;
@@ -59,6 +59,18 @@ message Heartbeat {
   SpoolStatus spool_status = 15;
   CollectorStatus collector_status = 16;
   TrafficSourceStatus traffic_source_status = 17;
+  optional double host_uptime_seconds = 18;
+  google.protobuf.Timestamp core_started_at = 19;
+  repeated InterfaceCounters interfaces = 20;
+  optional string tcp_congestion_control = 21;
+  optional string default_qdisc = 22;
+}
+message InterfaceCounters {
+  string name = 1;
+  uint64 receive_bytes = 2;
+  uint64 transmit_bytes = 3;
+  optional double receive_bytes_per_second = 4;
+  optional double transmit_bytes_per_second = 5;
 }
 message TrafficSourceStatus {
   string status = 1;
@@ -143,12 +155,13 @@ message AgentMessage {
   uint64 sequence = 3;
   google.protobuf.Timestamp timestamp = 4;
   int64 revision = 5;
-  oneof payload { Hello hello = 10; Heartbeat heartbeat = 11; Capabilities capabilities = 12; ApplyResult apply_result = 13; OutboundHealthBatch outbound_health = 14; AccessBatch access_batch = 15; TrafficBatch traffic_batch = 16; FinalUsageBatch final_usage_batch = 17; RuntimeSourceBatch runtime_source_batch = 18; BudgetRetirementResult budget_retirement_result = 19; CoreUpdateResult core_update_result = 20; AgentUpdateResult agent_update_result = 21; ConnectionStatus connection_status = 22; HealthCheckResult health_check_result = 23; ObservationBatch observation_batch = 24; EgressProofBatch egress_proof_batch = 25; }
+  oneof payload { Hello hello = 10; Heartbeat heartbeat = 11; Capabilities capabilities = 12; ApplyResult apply_result = 13; OutboundHealthBatch outbound_health = 14; AccessBatch access_batch = 15; TrafficBatch traffic_batch = 16; FinalUsageBatch final_usage_batch = 17; RuntimeSourceBatch runtime_source_batch = 18; BudgetRetirementResult budget_retirement_result = 19; CoreUpdateResult core_update_result = 20; AgentUpdateResult agent_update_result = 21; ConnectionStatus connection_status = 22; HealthCheckResult health_check_result = 23; ObservationBatch observation_batch = 24; EgressProofBatch egress_proof_batch = 25; TCPProbeResult tcp_probe_result = 26; }
 }
 message ObservationBatch { bytes batch_json = 1; }
 message EgressProofBatch { bytes proof_json = 1; }
 message ConnectionStatus { bytes snapshot_json = 1; }
-message Welcome { uint64 last_accepted_sequence = 1; uint32 heartbeat_interval_seconds = 2; bool final_usage_supported = 3; bool runtime_source_supported = 4; bool budget_retirement_supported = 5; bool core_update_supported = 6; bool agent_update_supported = 7; bool agent_recovery_supported = 8; bool connection_observation_supported = 9; bool health_check_supported = 10; bool core_restart_supported = 11; string node_ca_migration_plan_digest = 12; string node_ca_reconfirmation_plan_digest = 13; bool connection_observation_bytes_supported = 14; bool egress_envelope_supported = 15; int32 observation_contract_version = 16; int32 egress_envelope_version = 17; int32 max_egress_hops = 18; }
+message Welcome { uint64 last_accepted_sequence = 1; uint32 heartbeat_interval_seconds = 2; bool final_usage_supported = 3; bool runtime_source_supported = 4; bool budget_retirement_supported = 5; bool core_update_supported = 6; bool agent_update_supported = 7; bool agent_recovery_supported = 8; bool connection_observation_supported = 9; bool health_check_supported = 10; bool core_restart_supported = 11; string node_ca_migration_plan_digest = 12; string node_ca_reconfirmation_plan_digest = 13; bool connection_observation_bytes_supported = 14; bool egress_envelope_supported = 15; int32 observation_contract_version = 16; int32 egress_envelope_version = 17; int32 max_egress_hops = 18; bool device_gate_supported = 19; }
+message DeviceGateCommand { bytes request_json = 1; }
 message AgentUpdateCommand { bytes request_json = 1; }
 message AgentUpdateResult { bytes result_json = 1; }
 message CoreUpdateCommand { bytes request_json = 1; }
@@ -171,8 +184,12 @@ message ServerMessage {
   uint64 sequence = 3;
   google.protobuf.Timestamp timestamp = 4;
   int64 revision = 5;
-  oneof payload { Welcome welcome = 10; Ack ack = 11; ApplyCommand apply_command = 12; RollbackCommand rollback_command = 13; BudgetRetirementCommand budget_retirement_command = 14; CoreUpdateCommand core_update_command = 15; AgentUpdateCommand agent_update_command = 16; HealthCheckCommand health_check_command = 17; }
+  oneof payload { Welcome welcome = 10; Ack ack = 11; ApplyCommand apply_command = 12; RollbackCommand rollback_command = 13; BudgetRetirementCommand budget_retirement_command = 14; CoreUpdateCommand core_update_command = 15; AgentUpdateCommand agent_update_command = 16; HealthCheckCommand health_check_command = 17; DeviceGateCommand device_gate_command = 18; TCPProbeCommand tcp_probe_command = 19; }
 }
+
+// Addresses are panel-resolved IP literals. The Agent never performs DNS here.
+message TCPProbeCommand { string id = 1; repeated string addresses = 2; uint32 port = 3; uint32 attempts = 4; uint32 timeout_ms = 5; bool allow_non_public = 6; google.protobuf.Timestamp deadline = 7; }
+message TCPProbeResult { string id = 1; uint32 attempted = 2; uint32 lost = 3; optional double median_ms = 4; string code = 5; }
 
 
 

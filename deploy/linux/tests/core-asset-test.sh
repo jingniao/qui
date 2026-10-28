@@ -49,7 +49,7 @@ extract() {
 
 # The extracted helpers refuse what they cannot name; no case under test gets
 # there.
-fail() { printf 'core-asset-test: fail() reached: %s\n' "$*" >&2; return 1; }
+fail() { printf 'core-asset-test: fail() reached: %s\n' "$*" >&2; exit 1; }
 
 T=$(mktemp -d) || exit 1
 trap 'rm -rf -- "$T"' EXIT
@@ -77,6 +77,7 @@ machine=x86_64
 uname() { printf '%s\n' "$machine"; }
 core_version=1.14.3
 version=$core_version
+core_source=official
 
 check 'sing-box keeps its glibc archive on amd64' "$(core_asset sing-box glibc)" "sing-box-$version-linux-amd64.tar.gz"
 check 'sing-box takes the -musl archive on amd64' "$(core_asset sing-box musl)" "sing-box-$version-linux-amd64-musl.tar.gz"
@@ -97,6 +98,50 @@ check 'node-install.sh pins the musl amd64 digest' "$(singbox_digest amd64 musl)
 check 'node-install.sh pins the musl arm64 digest' "$(singbox_digest arm64 musl)" 12d6d67a4edf0dd54590865b1f4f79cd09ae043a02d648e9d1b5fccc8446ee07
 mapfile -t pinned < <(printf '%s\n' "$(singbox_digest amd64 glibc)" "$(singbox_digest arm64 glibc)" "$(singbox_digest amd64 musl)" "$(singbox_digest arm64 musl)" | sort -u)
 check 'the four pinned archives have four distinct digests' "${#pinned[@]}" 4
+
+eval "$(extract "$install_sh" core_prefix)"
+eval "$(extract "$install_sh" core_archive_digest)"
+eval "$(extract "$install_sh" verify_core_archive)"
+core=sing-box
+core_source=qui
+core_version=1.14.4
+qui_version=1.1.0
+core_digest=''
+core_sums=$T/sums
+stage=$T
+for machine in x86_64 aarch64; do
+  arch=amd64; [[ $machine == x86_64 ]] || arch=arm64
+  for libc in glibc musl; do
+    asset=$(core_asset sing-box "$libc")
+    check "qui static asset $arch/$libc" "$asset" "sing-box-1.14.4-qui.1-linux-$arch.tar.gz"
+    printf 'fixture archive\n' > "$T/archive"
+    expected=$(sha256sum "$T/archive"); expected=${expected%% *}
+    printf '%s  %s\n' "$expected" "$asset" > "$core_sums"
+    check "qui release digest $arch/$libc" "$(core_archive_digest "$asset")" "$expected"
+    verify_core_archive "$T/archive" "$(core_archive_digest "$asset")"
+    printf 'tampered\n' >> "$T/archive"
+    if (verify_core_archive "$T/archive" "$(core_archive_digest "$asset")") 2>/dev/null; then
+      check "tampered $arch/$libc refused" accepted refused
+    else check "tampered $arch/$libc refused" refused refused; fi
+  done
+done
+printf '%s  %s\n%s  %s\n' "$expected" "$asset" "$expected" "$asset" > "$core_sums"
+if (core_archive_digest "$asset") >/dev/null 2>&1; then
+  check 'ambiguous checksum refused' accepted refused
+else check 'ambiguous checksum refused' refused refused; fi
+check 'qui release prefix' "$(core_prefix sing-box)" 'https://github.com/jingniao/qui/releases/download/'
+eval "$(extract "$install_sh" qui_release_version)"
+mkdir -p "$T/bundle/deploy"
+root=$T/bundle/deploy
+printf '1.1.0\n' > "$T/bundle/VERSION"
+qui_version=''
+check 'qui defaults to Agent bundle version' "$(qui_release_version)" '1.1.0'
+qui_version=1.1.0
+check 'qui accepts matching explicit release' "$(qui_release_version)" '1.1.0'
+qui_version=1.0.9
+if (qui_release_version) >/dev/null 2>&1; then
+  check 'different qui release refused' accepted refused
+else check 'different qui release refused' refused refused; fi
 
 printf '\ncore-asset-test: %s/%s passed\n' "$passes" "$((passes + failed))"
 if ((failed > 0)); then exit 1; fi

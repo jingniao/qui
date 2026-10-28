@@ -11,6 +11,19 @@ import (
 )
 
 func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) error {
+	if protocol == "forward" {
+		f := settings.Forward
+		if !inbound || f == nil || !validForwardHost(f.Host) || f.Port < 1 || f.Port > 65535 || (f.Network != "tcp" && f.Network != "udp" && f.Network != "tcp,udp") {
+			return errors.New("forward requires a target host, port and tcp/udp network")
+		}
+		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" {
+			return errors.New("forward cannot carry proxy security or transport settings")
+		}
+		return nil
+	}
+	if settings.Forward != nil {
+		return errors.New("forward settings require a forward inbound")
+	}
 	quic := protocol == "hysteria2" || protocol == "tuic"
 	if settings.QUIC != nil && !quic {
 		return errors.New("QUIC settings require Hysteria2 or TUIC")
@@ -142,6 +155,26 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		}
 	}
 	return nil
+}
+
+func validForwardHost(host string) bool {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return !ip.IsUnspecified() && !ip.IsMulticast() && ip.Zone() == ""
+	}
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	for _, part := range strings.Split(host, ".") {
+		if len(part) == 0 || len(part) > 63 || part[0] == '-' || part[len(part)-1] == '-' {
+			return false
+		}
+		for _, c := range part {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func ValidateUUID(value string) error {

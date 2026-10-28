@@ -32,6 +32,7 @@ type onlineStatsFixture struct {
 	stats.UnimplementedStatsServiceServer
 	mu     sync.Mutex
 	online map[string]int64
+	ips    map[string]map[string]int64
 	asked  []string
 }
 
@@ -48,6 +49,15 @@ func (s *onlineStatsFixture) GetStatsOnline(_ context.Context, name string) (int
 		return 0, status.Error(codes.NotFound, name+" not found.")
 	}
 	return value, nil
+}
+
+func (s *onlineStatsFixture) GetStatsOnlineIpList(_ context.Context, request *stats.GetStatsOnlineIpListRequest) (*stats.GetStatsOnlineIpListResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ips == nil {
+		return nil, status.Error(codes.Unimplemented, "unsupported")
+	}
+	return &stats.GetStatsOnlineIpListResponse{Name: request.Name, Ips: s.ips[request.Name]}, nil
 }
 
 type onlineStatsServer interface {

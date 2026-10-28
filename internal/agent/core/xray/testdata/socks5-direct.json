@@ -55,14 +55,16 @@
         ],
         "port": "15401",
         "network": "tcp,udp",
-        "outboundTag": "_stats_guard_block_"
+        "outboundTag": "_stats_guard_block_",
+        "ruleTag": "qui-rendered-0"
       },
       {
         "type": "field",
         "inboundTag": [
           "entry"
         ],
-        "outboundTag": "direct"
+        "outboundTag": "direct",
+        "ruleTag": "qui-rendered-1"
       }
     ]
   },
@@ -70,7 +72,8 @@
     "tag": "_stats_api_",
     "listen": "127.0.0.1:15401",
     "services": [
-      "StatsService"
+      "StatsService",
+      "RoutingService"
     ]
   },
   "stats": {},

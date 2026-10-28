@@ -24,6 +24,10 @@ type Service struct {
 	Policies   interface {
 		ForNode(context.Context, string) ([]desiredstate.Policy, error)
 	}
+	// Deploy publishes a canvas drawing through the Deployment module's own
+	// batches. It is wired by the panel, because Deployment imports this package
+	// for snapshots and cannot be imported back.
+	Deploy CanvasDeployer
 }
 
 func mergeSettings(incoming, old desiredstate.ProtocolSettings) desiredstate.ProtocolSettings {
@@ -61,6 +65,11 @@ func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput
 	}
 	if err := ValidateCoreProtocol(n.Capabilities.GetCoreName(), input.Protocol, true); err != nil {
 		return Inbound{}, err
+	}
+	if input.Protocol == "forward" {
+		if !n.Capabilities.GetForwardInboundSupported() {
+			return Inbound{}, errors.New("node Agent/core does not advertise forward inbound support; upgrade it first")
+		}
 	}
 	if id != "" {
 		old, err := s.Repository.Inbound(ctx, id, true)

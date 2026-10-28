@@ -16,6 +16,7 @@ type systemMetrics struct {
 	memory, disk *float64
 }
 type Sampler struct {
+	interfaces          map[string][2]uint64
 	mu                  sync.Mutex
 	directory           string
 	previous            counters
@@ -41,6 +42,7 @@ func (s *Sampler) Heartbeat() *pb.Heartbeat {
 	now := time.Now()
 	metrics := readSystem(s.directory)
 	heartbeat := &pb.Heartbeat{MemoryPercent: metrics.memory, DiskPercent: metrics.disk}
+	s.hostHeartbeat(heartbeat, now)
 	if s.CollectorStatus != nil {
 		heartbeat.CollectorStatus = s.CollectorStatus()
 	}

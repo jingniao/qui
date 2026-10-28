@@ -33,6 +33,7 @@ coverage/
 !internal/agent/identity/testdata/store_write2/configuration.key
 !internal/agent/identity/testdata/store_write2/identity/client.key
 *.pem
+!internal/panel/subscription/format/clash/testdata/ca.pem
 *.p12
 *.pfx
 config.local.yaml

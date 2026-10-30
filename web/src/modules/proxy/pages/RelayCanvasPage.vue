@@ -1,6 +1,25 @@
 <template>
   <div class="h-full w-full flex flex-col overflow-hidden bg-[#F5F5F7] select-none relative">
-    <div v-if="!currentScheme.id" class="absolute inset-0 z-40 bg-ios-background flex flex-col items-center justify-center gap-4"><p class="text-ios-secondary">暂无中转方案</p><button class="ios-btn-primary" @click="createNewScheme">新建方案</button></div>
+    <!-- No scheme yet: the workspace has nothing to draw on. The overlay owns a
+         real background so the library and the inspector cannot be mistaken for
+         usable panels, and it is the only interactive surface until a scheme
+         exists (dragging into a non-existent scheme would edit nothing). -->
+    <div
+      v-if="!currentScheme.id"
+      class="absolute inset-0 z-40 bg-[#F5F5F7] flex flex-col items-center justify-center gap-3 px-6 text-center"
+      role="status"
+    >
+      <span class="w-12 h-12 rounded-2xl bg-ios-blue/10 text-ios-blue flex items-center justify-center">
+        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+        </svg>
+      </span>
+      <p class="text-sm font-semibold text-ios-label">暂无中转方案</p>
+      <p class="max-w-md text-xs text-ios-secondary leading-relaxed">
+        新建方案后即可从左侧资源库拖入服务器、自建节点或共享隧道并连线；方案保存在面板，不随浏览器丢失。
+      </p>
+      <button type="button" class="ios-btn-primary mt-1" @click="createNewScheme">新建方案</button>
+    </div>
     <!-- 1. Top Integrated Studio Toolbar -->
     <header class="h-14 px-4 bg-white/95 backdrop-blur-md border-b border-black/[0.08] flex items-center justify-between gap-3 shrink-0 shadow-2xs z-30">
       <!-- Left: Panel Toggle & Scheme Switcher -->
@@ -398,16 +417,23 @@
             </button>
 
             <div v-show="groupExpanded.selfHosted" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
-              <div v-if="!selfHostedNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary">
-                暂无自建节点
+              <div v-if="!selfHostedNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary leading-relaxed">
+                暂无自建节点<br/>
+                请先在「节点配置」中为服务器添加入站
               </div>
+              <p v-else class="px-1.5 pt-1 text-[10px] text-ios-tertiary leading-relaxed">
+                {{ currentScheme.executionLocation === 'server'
+                  ? '自建入站是所在服务器的入口入站：拖入后会绑定该入站，连线仍需使用「我的服务器」中的服务器节点。'
+                  : '自建入站作为客户端链的一跳：拖入后可与其他入站或导入节点依次连线。' }}
+              </p>
               <div
                 v-for="node in selfHostedNodes"
                 :key="'node-' + node.id"
-                draggable="true"
-                @dragstart="onDragStart($event, { type: 'node', id: node.id, name: node.name, server: `${node.server}:${node.port}`, protocol: node.protocol, status: node.status, isManageable: false })"
-                class="p-2 rounded-xl border border-black/[0.04] hover:border-ios-blue/40 hover:bg-blue-50/30 cursor-grab active:cursor-grabbing transition-all select-none"
-                :title="`协议: ${node.protocol.toUpperCase()} 地址: ${node.server}:${node.port}`"
+                :draggable="node.enabled"
+                @dragstart="node.enabled && onDragStart($event, { type: 'node', id: node.id, name: node.name, server: `${node.server}:${node.port}`, protocol: node.protocol, status: node.status, isManageable: true, entryBound: true })"
+                class="p-2 rounded-xl border border-black/[0.04] transition-all select-none"
+                :class="node.enabled ? 'hover:border-ios-blue/40 hover:bg-blue-50/30 cursor-grab active:cursor-grabbing' : 'opacity-60 cursor-not-allowed bg-black/[0.02]'"
+                :title="node.enabled ? `协议: ${node.protocol.toUpperCase()} 地址: ${node.server}:${node.port}（拖入后绑定为入口入站）` : '该入站已停用，请先在「节点配置」中启用'"
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[140px]">{{ node.name }}</span>
@@ -416,7 +442,7 @@
                 <div class="flex items-center justify-between text-[10px] text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate">{{ node.server }}:{{ node.port }}</span>
                   <span :class="node.status === 'online' ? 'text-emerald-600' : 'text-neutral-400'">
-                    {{ node.status === 'online' ? '在线' : '未检测' }}
+                    {{ node.status === 'online' ? '在线' : (node.enabled ? '未检测' : '已停用') }}
                   </span>
                 </div>
               </div>
@@ -1042,6 +1068,9 @@
           </div>
 
           <!-- Global Scheme Inspector -->
+          <div v-else-if="!currentScheme.id" class="p-4 rounded-xl bg-black/[0.02] border border-dashed border-black/[0.08] text-[11px] text-ios-tertiary leading-relaxed">
+            暂无中转方案：请先点击「新建方案」。方案名称、发布状态与删除操作只对已存在的方案生效。
+          </div>
           <div v-else class="space-y-4">
           <div class="space-y-3 text-xs">
             <label class="block">
@@ -1091,7 +1120,7 @@
               💡 提示：点击画布中的任意节点或连线可在本面板编辑详细属性；从左侧将服务器或代理节点拖入即可快速扩展链路。
             </div>
 
-            <div class="pt-2">
+            <div v-if="currentScheme.id" class="pt-2">
               <button
                 type="button"
                 @click="confirmDeleteScheme = true"
@@ -1259,6 +1288,7 @@ import TunnelEditorDrawer from '../components/relay/TunnelEditorDrawer.vue';
 import TunnelPlanSummary from '../components/relay/TunnelPlanSummary.vue';
 import { useTunnelPlan } from '../components/relay/useTunnelPlan';
 import { useCanvasTunnels } from '../components/relay/useCanvasTunnels';
+import { selfHostedLibraryItems } from '../components/relay/canvasLibrary';
 import { tunnelConflictText, type TunnelPlan } from '../components/relay/tunnelEditorModel';
 import { useRoute } from 'vue-router';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -1285,6 +1315,7 @@ import {
   canvasTunnelPublishStatusLabel,
   canvasTunnelReference,
   relaySchemeToCanvasInput,
+  selfHostedResourceId,
   type CanvasPublishResult,
   type CanvasSchemeContext,
   type CanvasTunnel,
@@ -1732,7 +1763,10 @@ const filteredServers = computed(() => {
   });
 });
 
-const filteredNodesGroup = computed(() => {
+// Imported proxies are the only browser-side records; the self-hosted group is
+// built from the panel's inbounds, so it is never empty just because no import
+// exists. Both groups are filtered by the resource search.
+const importedNodes = computed(() => {
   return proxyNodeStore.manualNodes.filter(n => {
     if (resourceSearch.value.trim()) {
       const q = resourceSearch.value.trim().toLowerCase();
@@ -1741,17 +1775,32 @@ const filteredNodesGroup = computed(() => {
     return true;
   });
 });
-const selfHostedNodes = computed(() => {
-  return filteredNodesGroup.value.filter(n => n.sourceType === 'self_hosted');
-});
+
+const selfHostedNodes = computed(() => selfHostedLibraryItems(servers.value, inbounds.value, resourceSearch.value));
 
 const subscriptionNodes = computed(() => {
-  return filteredNodesGroup.value.filter(n => n.sourceType === 'subscription');
+  return importedNodes.value.filter(n => n.sourceType === 'subscription');
 });
 
 const manualNodes = computed(() => {
-  return filteredNodesGroup.value.filter(n => n.sourceType === 'manual');
+  return importedNodes.value.filter(n => n.sourceType === 'manual');
 });
+
+// A box that is bound to a real inbound is the entry marker of its server when
+// the scheme runs on the servers: the panel's plan then rewrites that inbound as
+// the entry and the publisher only accepts connections between managed
+// *servers*, so an arrow touching the box would be refused. A client chain is the
+// opposite — it is exactly a path of inbound/import boxes (ValidateClientLayout
+// accepts both), so the guard must not touch client schemes.
+function isInboundBoundInstance(node: CanvasNodeInstance): boolean {
+  if (currentScheme.value.executionLocation !== 'server') return false;
+  if (node.resourceType !== 'node') return false;
+  return inbounds.value.some(inbound => selfHostedResourceId(inbound) === node.resourceId);
+}
+
+function inboundEntryHint(): string {
+  return '自建入站已绑定为所在服务器的入口，请在画布上使用「我的服务器」中的服务器节点连线';
+}
 
 
 function toggleGroup(g: 'servers' | 'selfHosted' | 'subscription' | 'manual' | 'tunnels') {
@@ -1850,7 +1899,34 @@ function onCanvasDrop(e: DragEvent) {
     return;
   }
 
-  const role = currentScheme.value.nodes.length === 0 ? 'entry' : 'relay';
+  // A self-hosted inbound is a real panel object, not a repeatable proxy: in a
+  // server scheme the dropped box becomes that server's entry inbound
+  // (`inbound:<id>` once saved), exactly like the node list's "添加中转" draft
+  // references a self-hosted target. The same inbound is therefore only ever
+  // added once per server scheme. A client chain keeps the ordinary behaviour,
+  // because there the inbound boxes are the hops of the path.
+  const entryBound = draggedPayload.entryBound === true && currentScheme.value.executionLocation === 'server';
+  if (entryBound) {
+    // Without the loaded inbound the reference would be saved as an import, so a
+    // library item whose inbound is not (yet) in `inbounds` is refused instead.
+    if (!inbounds.value.some(inbound => selfHostedResourceId(inbound) === draggedPayload.id)) {
+      draggedPayload = null;
+      showToast('该自建入站尚未载入，请刷新后重试', 'error');
+      return;
+    }
+    const existing = currentScheme.value.nodes.find(
+      node => node.resourceType === 'node' && node.resourceId === draggedPayload.id
+    );
+    if (existing) {
+      selectedNode.value = existing;
+      selectedConnection.value = null;
+      rightPanelOpen.value = true;
+      draggedPayload = null;
+      showToast('该自建入站已在当前方案中');
+      return;
+    }
+  }
+  const role = entryBound || currentScheme.value.nodes.length === 0 ? 'entry' : 'relay';
   let initialPort: number | undefined = undefined;
   // Keep the port absent: the backend allocates relay listeners from node metadata.
 
@@ -1959,6 +2035,9 @@ function onNodeMouseDown(e: MouseEvent, node: CanvasNodeInstance) {
 
 // ----------------- Directed Connecting Logic -----------------
 function startConnecting(e: MouseEvent, source: CanvasNodeInstance) {
+  // An inbound-bound box is the entry marker of its server, not a hop: the
+  // publisher refuses connections to or from it, so the canvas refuses first.
+  if (isInboundBoundInstance(source)) { showToast(inboundEntryHint(), 'info'); return; }
   connectingSource.value = source;
   connectingMousePos.x = source.x + 224;
   connectingMousePos.y = source.y + 45;
@@ -1987,6 +2066,11 @@ function startConnecting(e: MouseEvent, source: CanvasNodeInstance) {
 
 function onPortMouseUp(target: CanvasNodeInstance, portType: 'input') {
   if (!connectingSource.value || connectingSource.value.instanceId === target.instanceId) return;
+  if (isInboundBoundInstance(target)) {
+    showToast(inboundEntryHint(), 'info');
+    connectingSource.value = null;
+    return;
+  }
 
   const source = connectingSource.value;
   openEditor(undefined, source.instanceId, target.instanceId);

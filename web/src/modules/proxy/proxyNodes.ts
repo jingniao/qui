@@ -3,6 +3,11 @@ import { reactive } from 'vue';
 import { canvasAPI, canvasSchemeToRelayScheme, choices, relaySchemeToCanvasInput, type CanvasSchemeContext } from './api';
 
 export type NodeSourceType = 'self_hosted' | 'subscription' | 'manual';
+// How an import source was stored by the panel: a fetched HTTPS subscription
+// ("url") or content pasted into the panel once ("content", the node list's
+// 导入节点 action). The panel reports it read-only; it is what separates
+// "机场订阅" from "单独导入".
+export type ImportSourceKind = 'url' | 'content';
 
 export interface ProxyNodeItem {
   id: string;
@@ -41,6 +46,8 @@ export interface SubscriptionItem {
   expireDate?: string;
   usedTraffic?: string;
   totalTraffic?: string;
+  // Absent on entries an earlier build cached in localStorage; treated as "url".
+  kind?: ImportSourceKind;
 }
 
 // ----------------- Canvas Scheme Types -----------------
@@ -336,6 +343,24 @@ export async function createDraftSchemeForTargetNode(node: ProxyNodeItem, contex
   await persistCanvasScheme(newScheme, context);
 
   return { scheme: newScheme, exitInstanceId: exitInstId };
+}
+
+// Imported proxies carry no inbound record, so the only thing the panel knows
+// about their transports is the protocol's usual behaviour. Self-hosted items
+// must not use this: the panel owns the inbound and reads listenNetworks()
+// instead (see ProxyNodeListPage / nodeEditorModel).
+export function guessProtocolNetworks(protocol: string): { supportTcp: boolean; supportUdp: boolean } {
+  const p = (protocol || '').toLowerCase();
+  if (p === 'hysteria2' || p === 'hy2' || p === 'tuic' || p === 'wireguard') {
+    return { supportTcp: false, supportUdp: true };
+  }
+  if (p === 'http') {
+    return { supportTcp: true, supportUdp: false };
+  }
+  if (p === 'shadowsocks' || p === 'ss' || p === 'socks5') {
+    return { supportTcp: true, supportUdp: true };
+  }
+  return { supportTcp: true, supportUdp: false };
 }
 
 // Simple protocol parser helper for links

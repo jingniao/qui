@@ -1,3 +1,4 @@
+import { authState } from '../../../app/auth';
 import type { NodeMetricPoint, NodeView } from '../api';
 import { hostMetrics } from '../metrics';
 export interface SystemMetricPoint {
@@ -33,22 +34,26 @@ export function formatRate(bytesPerSec: number | null | undefined, decimals = 1)
   return `${val.toFixed(i === 0 ? 0 : decimals)} ${units[i]}`;
 }
 
+function timeParts(timestamp: number): Record<string, string> {
+  return Object.fromEntries(new Intl.DateTimeFormat('zh-CN', {
+    timeZone: authState.timezone, month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(timestamp)).map(part => [part.type, part.value]));
+}
+
 export function formatTimeHMS(timestamp: number): string {
-  const d = new Date(timestamp);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const p = timeParts(timestamp);
+  return `${p.hour}:${p.minute}:${p.second}`;
 }
 
 export function formatTimeHM(timestamp: number): string {
-  const d = new Date(timestamp);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const p = timeParts(timestamp);
+  return `${p.hour}:${p.minute}`;
 }
 
 export function formatTimeMD(timestamp: number): string {
-  const d = new Date(timestamp);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+  const p = timeParts(timestamp);
+  return `${p.month}/${p.day}`;
 }
 
 export function scaleLinear(val: number, inMin: number, inMax: number, outMin: number, outMax: number): number {

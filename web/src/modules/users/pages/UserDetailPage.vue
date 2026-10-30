@@ -134,7 +134,7 @@
               <div class="flex items-center justify-between">
                 <span class="text-xs font-semibold text-ios-tertiary">连接控制</span>
                 <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/[0.04] text-ios-secondary border border-black/[0.05]">
-                  {{ formatResetCycle(meta) }}
+                  {{ user.deviceLimit === 0 ? '不限设备' : `最多 ${user.deviceLimit} 个地址` }}
                 </span>
               </div>
 
@@ -257,7 +257,7 @@
           </div>
         </section>
 
-        <!-- 右侧 (5列): 可用线路组与节点列表 -->
+        <!-- 右侧 (5列): 可用节点分组与节点列表 -->
         <section class="lg:col-span-5 panel-card p-5 sm:p-6 bg-white flex flex-col justify-between space-y-4">
           <div>
             <div class="flex items-center justify-between">

@@ -32,9 +32,21 @@ func (s *Store) reader() *sql.DB {
 	return s.Database
 }
 
+// The two ways the panel can store an import source. Both keep their payload in
+// url_encrypted, so the kind is derived from what that column holds rather than
+// from a column of its own (see sourceKind).
+const (
+	sourceKindURL     = "url"
+	sourceKindContent = "content"
+)
+
 type Source struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Kind is read-only: "url" for a fetched HTTPS subscription, "content" for
+	// content pasted into the panel once (the node list's 导入节点 action). The
+	// node list uses it to tell 机场订阅 from 单独导入.
+	Kind      string   `json:"kind"`
 	Interval  int      `json:"intervalSeconds"`
 	LastFetch string   `json:"lastFetchAt"`
 	Status    string   `json:"lastStatus"`
@@ -51,18 +63,37 @@ type Input struct {
 
 func (s *Store) ID() string     { return "imported" }
 func (s *Store) Optional() bool { return true }
+
+// sourceKind reports how a source was stored. A content import seals an empty
+// URL (Refresh already returns early on it), so the decrypted plaintext is the
+// only reliable signal: last_fetch_at/status are written for both kinds. A value
+// that cannot be decrypted is reported as "url", the kind that owns a link.
+func (s *Store) sourceKind(sealed []byte) string {
+	raw, err := s.Vault.Open(sealed)
+	if err != nil {
+		return sourceKindURL
+	}
+	defer clear(raw)
+	if len(raw) == 0 {
+		return sourceKindContent
+	}
+	return sourceKindURL
+}
+
 func (s *Store) List(ctx context.Context) ([]Source, error) {
-	rows, err := s.reader().QueryContext(ctx, "SELECT id,name,interval_seconds,last_fetch_at,last_status,last_error FROM subscription_sources ORDER BY created_at,id")
+	rows, err := s.reader().QueryContext(ctx, "SELECT id,name,interval_seconds,last_fetch_at,last_status,last_error,url_encrypted FROM subscription_sources ORDER BY created_at,id")
 	if err != nil {
 		return nil, err
 	}
 	items := []Source{}
 	for rows.Next() {
 		var p Source
-		if err := rows.Scan(&p.ID, &p.Name, &p.Interval, &p.LastFetch, &p.Status, &p.Error); err != nil {
+		var sealed []byte
+		if err := rows.Scan(&p.ID, &p.Name, &p.Interval, &p.LastFetch, &p.Status, &p.Error, &sealed); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		p.Kind = s.sourceKind(sealed)
 		items = append(items, p)
 	}
 	err = rows.Err()

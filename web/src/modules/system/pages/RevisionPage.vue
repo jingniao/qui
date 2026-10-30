@@ -38,7 +38,7 @@
         <label class="block text-sm">入站协议<select v-model="form.protocol" class="form-input-base mt-2"><option value="socks5">SOCKS5</option><option value="http">HTTP CONNECT</option></select></label>
         <label class="block text-sm">监听地址<select v-model="form.listen" class="form-input-base mt-2"><option value="127.0.0.1">127.0.0.1（本机接入）</option><option value="0.0.0.0">0.0.0.0（外部接入）</option></select></label>
         <label class="block text-sm">监听端口<input v-model.number="form.port" type="number" min="1" max="65535" class="form-input-base mt-2" /></label>
-        <p class="text-xs text-gray-500">接入会保存为该节点的普通入站，并绑定已授权用户的凭据。用户接入会按线路组展开授权、过滤禁用及过期用户，发布时保留该节点的其他入站、出站与分流配置。</p>
+        <p class="text-xs text-gray-500">接入会保存为该节点的普通入站，并绑定已授权用户的凭据。用户接入会按节点分组展开授权、过滤禁用及过期用户，发布时保留该节点的其他入站、出站与分流配置。</p>
       </div>
     </FormDrawer>
     <ConfirmDialog v-model="confirmVisible" title="发布配置版本" :message="`将版本 #${target?.id || ''} 发布到目标节点。此版本会替换节点当前配置，成功后生效，启动或健康检查失败时恢复上一成功版本。`" @confirm="publish" confirm-text="确认发布" />

@@ -300,7 +300,8 @@
                 type="button"
                 @click="handleUpgradeSingle(node)"
                 class="ios-action-btn-secondary"
-                title="升级 Agent 到最新版本"
+                :disabled="!!upgradeUnavailableReason(node)"
+                :title="upgradeUnavailableReason(node) || '升级 Agent 到最新版本'"
               >
                 升级
               </button>
@@ -321,7 +322,8 @@
                   type="button"
                   @click="openUpgradeCore(node)"
                   class="ios-action-btn-secondary"
-                  title="升级代理内核版本"
+                  :disabled="!!upgradeUnavailableReason(node)"
+                :title="upgradeUnavailableReason(node) || '升级代理内核版本'"
                 >
                   升级
                 </button>
@@ -515,7 +517,8 @@
               type="button"
               @click="handleUpgradeSingle(node)"
               class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
-              title="升级 Agent 到最新版本"
+              :disabled="!!upgradeUnavailableReason(node)"
+                :title="upgradeUnavailableReason(node) || '升级 Agent 到最新版本'"
             >
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -564,7 +567,8 @@
               type="button"
               @click="openUpgradeCore(node)"
               class="flex-1 py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
-              title="升级代理内核版本"
+              :disabled="!!upgradeUnavailableReason(node)"
+                :title="upgradeUnavailableReason(node) || '升级代理内核版本'"
             >
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -759,7 +763,8 @@
                   type="button"
                   @click="triggerCoreUpgradeFromModal(core)"
                   class="py-1.5 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs transition-all flex items-center gap-1"
-                  title="升级该内核版本"
+                  :disabled="!coreManagementTargetNode || !!upgradeUnavailableReason(coreManagementTargetNode)"
+                  :title="coreManagementTargetNode ? upgradeUnavailableReason(coreManagementTargetNode) || '升级该内核版本' : '请选择服务器'"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -1369,10 +1374,19 @@ function getNodeAllProtocols(node: NodeView): string[] {
   return [...set].sort();
 }
 
+function upgradeUnavailableReason(node: NodeView): string {
+  if (node.status === 'pending' || !node.agentVersion || !Number.isFinite(Date.parse(node.lastHeartbeat))) return '尚未收到 Agent 和心跳报告，请先完成登记';
+  if (!node.enabled || node.deletedAt || node.status !== 'online') return '服务器需启用且在线后才能升级';
+  const age = Date.now() - Date.parse(node.lastHeartbeat);
+  if (age < -5000 || age >= 45000) return '心跳已过期，等待服务器上线';
+  if (!node.heartbeat?.current_revision) return '尚未上报当前配置版本，暂无法升级';
+  return '';
+}
+
 function detectArch(node?: NodeView | null): 'amd64' | 'arm64' | '' {
   if (!node) return '';
   const caps = node.capabilities as Record<string, unknown>;
-  const arch = String(caps?.architecture || '');
+  const arch = String(node.capabilities?.host?.architecture || caps?.architecture || '');
   if (arch === 'amd64' || arch === 'arm64') return arch;
   const platform = String(caps?.platform || node.os || '');
   return platform.endsWith('/amd64') ? 'amd64' : platform.endsWith('/arm64') ? 'arm64' : '';

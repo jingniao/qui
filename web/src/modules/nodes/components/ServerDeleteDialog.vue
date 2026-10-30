@@ -7,7 +7,7 @@
         <ul class="mt-3 space-y-2"><li v-for="blocker in preview.blockers" :key="blocker.kind + blocker.id">{{ labels[blocker.kind] || blocker.kind }} · {{ blocker.name }}</li></ul>
       </div>
       <p v-else-if="preview?.mode === 'cancel'">确认取消服务器 {{ target?.name }} 的登记？记录将直接移除。</p>
-      <p v-else-if="preview">确认删除服务器 {{ target?.name }}？证书将立即吊销，退出所有线路组，历史流量与访问记录保留。</p>
+      <p v-else-if="preview">确认删除服务器 {{ target?.name }}？证书将立即吊销，退出所有节点分组，历史流量与访问记录保留。</p>
       <p v-if="error" role="alert" class="text-ios-red">{{ error }}</p>
       <div class="flex justify-end gap-3">
         <button class="ios-dialog-btn-secondary" :disabled="deleting" @click="open = false">关闭</button>

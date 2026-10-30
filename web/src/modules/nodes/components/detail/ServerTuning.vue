@@ -55,6 +55,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { formatTime } from '../../../../app/auth';
 import { computed, ref, watch, onUnmounted } from 'vue';
 import { isOwner as sessionOwner } from '../../../../app/auth';
 import ConfirmDialog from '../../../../components/ConfirmDialog.vue';
@@ -68,7 +69,7 @@ const canEdit = computed(() => owner.value && state.value?.supported === true &&
 let lifecycle = 0, reads = 0, timer: ReturnType<typeof setTimeout> | undefined, deadline = 0;
 let confirmed: NodeTuningInput | null = null;
 const confirmMessage = computed(() => '将向服务器【' + props.node.name + '】的 Agent 发送' + (clearing.value ? '清除请求。root helper 将恢复初始快照并移除 /etc/sysctl.d/99-proxy-tuning.conf。' : '所确认的完整配置。root helper 将应用参数并持久化至 /etc/sysctl.d/99-proxy-tuning.conf。') + '代理核心不会重启。请以执行回执和后续心跳为准。');
-function time(value?:string|null) { return value ? new Date(value).toLocaleString() : '—'; }
+function time(value?:string|null) { return value ? formatTime(value) : '—'; }
 function stopPoll() { clearTimeout(timer); timer = undefined; }
 function schedulePoll() {
   stopPoll();

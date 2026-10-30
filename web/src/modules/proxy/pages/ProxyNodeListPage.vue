@@ -17,7 +17,7 @@
           <svg class="w-4 h-4 text-ios-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
           </svg>
-          <span>机场订阅管理 ({{ proxyNodeStore.subscriptions.length }})</span>
+          <span>机场订阅管理 ({{ airportSubscriptions.length }})</span>
         </button>
 
         <!-- 2. Import External Node -->
@@ -216,7 +216,7 @@
                 </div>
                 <p v-if="node.sourceType !== 'self_hosted' && node.sourceId" class="text-xs text-ios-secondary">所属分组：{{ importedGroupNames(node) }}</p>
                 <p class="text-xs text-neutral-400 font-mono mt-0.5 truncate">
-                  {{ node.supportTcp ? 'TCP' : '' }} {{ node.supportUdp ? '· UDP' : '' }}
+                  {{ networkLabel(node) }}
                 </p>
               </div>
             </div>
@@ -588,7 +588,7 @@
           <div class="flex justify-between items-center">
             <span class="text-neutral-500 font-medium">网络协议支持</span>
             <span class="font-mono text-neutral-900">
-              {{ selectedDetailNode.supportTcp ? 'TCP' : '' }} {{ selectedDetailNode.supportUdp ? '· UDP' : '' }}
+              {{ networkLabel(selectedDetailNode) }}
             </span>
           </div>
         </div>
@@ -722,11 +722,11 @@
       </div>
     </AppDialog>
 
-    <!-- Modal 3: Subscription Manager -->
+    <!-- Modal 3: Import Source Manager (airport subscriptions + single imports) -->
     <AppDialog
       v-model="openSubModal"
-      title="机场订阅管理"
-      description="添加并管理外部机场订阅源，自动同步代理节点。可在「节点分组」中分配所属节点组。"
+      title="导入来源管理"
+      description="添加并管理外部机场订阅源与单独导入的节点内容；两类来源都可在此编辑与删除，并可在「节点分组」中分配所属节点组。"
       max-width="2xl"
       :show-confirm="false"
     >
@@ -819,11 +819,13 @@
           </div>
         </div>
 
-        <!-- Subscription List Section -->
+        <!-- Source List Section -->
         <div class="space-y-3">
           <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary">
-            <span>已添加的订阅源（{{ proxyNodeStore.subscriptions.length }}）</span>
-            <span class="text-ios-tertiary font-normal">支持直接在线编辑与重新拉取</span>
+            <span>已添加的导入来源（{{ proxyNodeStore.subscriptions.length }}）</span>
+            <span class="font-normal text-ios-tertiary">
+              机场订阅 {{ airportSubscriptions.length }} · 单独导入 {{ manualSources.length }}
+            </span>
           </div>
 
           <!-- Empty State -->
@@ -834,7 +836,8 @@
             暂无已添加的机场订阅源，可在上方表单输入订阅链接添加
           </div>
 
-          <!-- Subscriptions Cards -->
+          <!-- Source Cards: airport subscriptions and single-content imports are
+               both listed here so a manual import stays editable and deletable. -->
           <div v-else class="space-y-3 max-h-[380px] overflow-y-auto pr-1">
             <div
               v-for="sub in proxyNodeStore.subscriptions"
@@ -883,7 +886,7 @@
                       class="form-input-base mt-1 text-xs"
                     />
                   </label>
-                  <label class="block text-xs font-medium text-ios-secondary sm:col-span-2">
+                  <label class="block text-xs font-medium text-ios-secondary sm:col-span-2" v-if="sub.kind !== 'content'">
                     更新订阅链接（留空保持原有加密链接）
                     <input
                       v-model="editSubForm.url"
@@ -893,6 +896,9 @@
                       class="form-input-base mt-1 text-xs font-mono"
                     />
                   </label>
+                  <div v-else class="block text-xs text-ios-secondary sm:col-span-2 p-2.5 rounded-xl bg-black/[0.02] border border-black/[0.06]">
+                    该来源由单独导入的内容创建，没有订阅链接可更新；如需换成订阅链接，请删除后重新添加。
+                  </div>
                 </div>
 
                 <!-- Interval presets in edit mode -->
@@ -938,9 +944,21 @@
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div class="flex items-center gap-2 min-w-0">
                     <span class="font-bold text-sm text-ios-label truncate" :title="sub.name">{{ sub.name }}</span>
+                    <span
+                      class="px-2 py-0.5 rounded-full text-[11px] font-medium"
+                      :class="sub.kind === 'content' ? 'bg-blue-100 text-ios-blue' : 'bg-purple-100 text-purple-700'"
+                    >
+                      {{ sub.kind === 'content' ? '单独导入' : '机场订阅' }}
+                    </span>
                     <span class="text-xs text-ios-secondary">通过节点分组可用：{{ sub.userIds?.length ?? 0 }} 个用户</span>
                     <span
-                      v-if="sub.lastStatus === 'failed' || sub.lastError"
+                      v-if="sub.kind === 'content'"
+                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.06]"
+                    >
+                      内容导入
+                    </span>
+                    <span
+                      v-else-if="sub.lastStatus === 'failed' || sub.lastError"
                       class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20"
                     >
                       拉取异常
@@ -971,6 +989,7 @@
                     </button>
                     <button
                       type="button"
+                      v-if="sub.kind !== 'content'"
                       @click="updateSubscription(sub)"
                       :disabled="updatingSubId === sub.id"
                       class="ios-action-btn-secondary inline-flex items-center gap-1"
@@ -994,9 +1013,11 @@
 
                 <!-- Metadata Info Row -->
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ios-secondary">
-                  <span class="font-mono text-ios-tertiary truncate max-w-[280px]" :title="sub.url">{{ sub.url }}</span>
-                  <span v-if="sub.lastUpdated">最后拉取：{{ sub.lastUpdated }}</span>
-                  <span>刷新间隔：{{ formatInterval(sub.intervalSeconds) }}</span>
+                  <span class="font-mono text-ios-tertiary truncate max-w-[280px]" :title="sub.url">
+                    {{ sub.kind === 'content' ? '内容导入（无订阅链接）' : sub.url }}
+                  </span>
+                  <span v-if="sub.lastUpdated && sub.kind !== 'content'">最后拉取：{{ sub.lastUpdated }}</span>
+                  <span v-if="sub.kind !== 'content'">刷新间隔：{{ formatInterval(sub.intervalSeconds) }}</span>
                 </div>
 
                 <!-- Error Banner -->
@@ -1023,12 +1044,13 @@ import { ref, computed, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { authState } from '../../../app/auth';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
-import { importAPI, loadImports } from '../importApi';
+import { importAPI, loadImports, airportSources, importSourceKind } from '../importApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import NodeEditorDrawer from '../components/node-editor/NodeEditorDrawer.vue';
+import { listenNetworks } from '../components/node-editor/nodeEditorModel';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import { showToast } from '../../../app/api';
@@ -1133,6 +1155,11 @@ const nodeForm = reactive({
 });
 
 const openSubModal = ref(false);
+// The panel stores every import source in one table; only the sources it derived
+// as "url" are airport subscriptions, so the header count and the airport list
+// must not include content imports (which are 单独导入 and live in manualNodes).
+const airportSubscriptions = computed(() => airportSources(proxyNodeStore.subscriptions));
+const manualSources = computed(() => proxyNodeStore.subscriptions.filter(s => importSourceKind(s) === 'content'));
 const newSubName = ref('');
 const newSubUrl = ref('');
 const submittingSub = ref(false);
@@ -1178,17 +1205,6 @@ async function loadData() {
   }
 }
 
-function getTcpUdpSupport(protocol: string) {
-  const p = (protocol || '').toLowerCase();
-  if (p === 'hysteria2' || p === 'tuic' || p === 'wireguard') {
-    return { supportTcp: false, supportUdp: true };
-  }
-  if (p === 'http') {
-    return { supportTcp: true, supportUdp: false };
-  }
-  return { supportTcp: true, supportUdp: true };
-}
-
 // Map self-hosted server inbounds into ProxyNodeItem with clean naming
 const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
   const result: ProxyNodeItem[] = [];
@@ -1204,7 +1220,10 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
         const finalDisplayName = cleanName ? `${srv.name} · ${cleanName}` : `${srv.name} · ${ib.protocol.toUpperCase()}`;
         const name = ib.internalRelay ? finalDisplayName + ' (内部中转)' : (ib.enabled ? finalDisplayName : finalDisplayName + ' (已停用)');
         const status = (srv.status === 'online' || srv.status === 'degraded') && ib.enabled ? 'online' : 'offline';
-        const tu = getTcpUdpSupport(ib.protocol);
+        // The panel holds the inbound, so the transports are read from it with the
+        // same helper the server detail page uses, instead of guessing from the
+        // protocol name (that showed "TCP · UDP" for every self-hosted node).
+        const networks = listenNetworks(ib);
 
         result.push({
           id: `self-${srv.id}-${ib.id}`,
@@ -1218,8 +1237,8 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
           protocol: ib.protocol || 'vless',
           status: status,
           latencyMs: undefined,
-          supportTcp: tu.supportTcp,
-          supportUdp: tu.supportUdp,
+          supportTcp: networks.includes('tcp'),
+          supportUdp: networks.includes('udp'),
           settings: ib.settings as any,
           createdAt: ib.createdAt || srv.createdAt,
           onlyViaRelay: ib.internalRelay
@@ -1311,6 +1330,11 @@ function getCountryInfo(node: ProxyNodeItem): CountryInfo {
 }
 
 // Styling helpers (Exact same status tones as Server Page)
+function networkLabel(node: Pick<ProxyNodeItem, 'supportTcp' | 'supportUdp'>): string {
+  const parts = [node.supportTcp ? 'TCP' : '', node.supportUdp ? 'UDP' : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : '—';
+}
+
 function sourceCapsuleColor(sourceType: string): string {
   if (sourceType === 'self_hosted') return 'bg-emerald-100 text-emerald-800';
   if (sourceType === 'subscription') return 'bg-purple-100 text-purple-800';

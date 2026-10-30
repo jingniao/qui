@@ -282,8 +282,8 @@
                             : 'bg-rose-50 text-ios-red border-rose-200/80'
                         ]"
                       >
-                        <span :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(node) ? 'bg-emerald-500' : 'bg-ios-red']"></span>
-                        {{ isNodeOnline(node) ? '在线' : '离线' }}
+                        <span :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(node) ? 'bg-emerald-500' : node.status === 'pending' ? 'bg-neutral-400' : 'bg-ios-red']"></span>
+                        {{ nodeStatusLabel(node) }}
                       </span>
                     </div>
 
@@ -426,8 +426,8 @@
                           </span>
 
                           <span
-                            :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(item.node) ? 'bg-emerald-500' : 'bg-ios-red']"
-                            :title="isNodeOnline(item.node) ? '在线' : '离线'"
+                            :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(item.node) ? 'bg-emerald-500' : item.node.status === 'pending' ? 'bg-neutral-400' : 'bg-ios-red']"
+                            :title="nodeStatusLabel(item.node)"
                           ></span>
 
                           <router-link
@@ -677,21 +677,31 @@ function barWidth(hour: Hour) {
 // ==========================================
 function isNodeOnline(node: NodeView): boolean {
   if (!node.enabled || node.deletedAt || node.maintenance) return false;
-  return node.status === 'online' || node.status === 'pending';
+  return node.status === 'online' || node.status === 'degraded';
 }
 
 const adminOnlineNodesCount = computed(() => allNodes.value.filter(isNodeOnline).length);
 const offlineNodesCount = computed(() => allNodes.value.filter(n => !isNodeOnline(n)).length);
 
 const healthyNodesCount = computed(() => {
-  return allNodes.value.filter(n => isNodeOnline(n) && n.heartbeat?.core_healthy !== false && !n.heartbeat?.core_error).length;
+  return allNodes.value.filter(n => isNodeOnline(n) && n.heartbeat?.core_healthy === true && !n.heartbeat?.core_error).length;
 });
 
-const activeUsersCount = computed(() => allUsers.value.filter(u => u.status === 'active').length);
+function nodeStatusLabel(node: NodeView): string {
+  return isNodeOnline(node) ? '在线' : node.status === 'pending' ? '待登记' : '离线';
+}
+
+function isUserActive(u: ProxyUser): boolean {
+  return u.status === 'active' && (!u.expiresAt || Date.parse(u.expiresAt) > Date.now())
+    && !(u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit);
+}
+
+const activeUsersCount = computed(() => allUsers.value.filter(isUserActive).length);
 
 const warningUsersCount = computed(() => {
   const now = Date.now();
   return allUsers.value.filter(u => {
+    if (u.status !== 'active') return false;
     if (u.trafficLimit && u.usedTraffic >= u.trafficLimit) return true;
     if (u.expiresAt) {
       const exp = new Date(u.expiresAt).getTime();
@@ -819,14 +829,14 @@ const pendingIssues = computed<PendingIssue[]>(() => {
   }
 
   // C. 配置发布失败
-  const failedRevs = allRevisions.value.filter(r => r.status === 'failed' || r.resultCode === 'error');
+  const failedRevs = latestFailedRevisions(allRevisions.value);
   for (const r of failedRevs.slice(0, 3)) {
     issues.push({
       title: `配置发布失败: 版本 #${r.id}`,
       desc: r.summary || '节点配置发布未成功应用。',
-      tag: `节点 #${r.nodeId}`,
+      tag: dashboard.value?.nodeNames?.[r.nodeId] || allNodes.value.find(n => n.id === r.nodeId)?.name || `节点 #${r.nodeId.slice(0, 8)}`,
       level: 'warning',
-      link: '/system/revisions'
+      link: `/nodes/${encodeURIComponent(r.nodeId)}?tab=revisions`
     });
   }
 
@@ -872,7 +882,18 @@ function formatGiB(bytes: number): string {
   return (bytes / 1073741824).toFixed(1) + ' GiB';
 }
 
+function latestFailedRevisions(revisions: Revision[]): Revision[] {
+  const latest = new Map<string, Revision>();
+  for (const revision of revisions) {
+    if (!['success', 'failed'].includes(revision.status) && !['success', 'error'].includes(revision.resultCode)) continue;
+    const previous = latest.get(revision.nodeId);
+    if (!previous || revision.id > previous.id) latest.set(revision.nodeId, revision);
+  }
+  return [...latest.values()].filter(r => r.status === 'failed' || r.resultCode === 'error').sort((a, b) => b.id - a.id);
+}
+
 function getUserExpiryBadgeClass(u: ProxyUser): string {
+  if (u.status !== 'active') return 'bg-black/[0.03] text-ios-secondary';
   if (u.trafficLimit && u.usedTraffic >= u.trafficLimit) {
     return 'bg-rose-50 text-ios-red border border-rose-200/80';
   }
@@ -890,6 +911,8 @@ function getUserExpiryBadgeClass(u: ProxyUser): string {
 }
 
 function getUserExpiryLabel(u: ProxyUser): string {
+  if (u.status !== 'active') return '已停用';
+  if (u.expiresAt && Date.parse(u.expiresAt) <= Date.now()) return '已过期';
   if (u.trafficLimit && u.usedTraffic >= u.trafficLimit) {
     return '已超额';
   }

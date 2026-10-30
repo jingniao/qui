@@ -36,8 +36,8 @@
         :class="[
           'flex-1 min-w-0 bg-ios-bg relative',
           isFluidPage
-            ? 'h-full overflow-hidden p-0'
-            : 'overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8'
+            ? 'h-full overflow-hidden px-0 pb-0 pt-16 lg:pt-0'
+            : 'overflow-y-auto px-4 sm:px-6 lg:px-8 pb-6 sm:pb-8 pt-16 lg:pt-8'
         ]"
       >
         <div :class="isFluidPage ? 'h-full w-full' : 'max-w-[1536px] mx-auto w-full'">

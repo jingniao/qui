@@ -4,7 +4,7 @@
     <p class="text-sm text-gray-600">填写官方 Xray-core 或 sing-box 发布版本的版本号、GitHub 发布资产地址和压缩包 SHA-256。支持的 Agent 也可使用 qui 发布中的 sing-box 构建。节点会校验压缩包摘要、解压唯一的可执行文件、运行版本命令并在健康检查失败时自动回滚到上一核心。</p>
     <ErrorState v-if="error" :message="error" @retry="load" />
     <div class="grid md:grid-cols-2 gap-3 text-sm">
-      <label>目标节点<select v-model="nodeId" class="form-input-base mt-2"><option value="">选择节点</option><option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
+      <label v-if="!fixedNodeId">目标节点<select v-model="nodeId" class="form-input-base mt-2"><option value="">选择节点</option><option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
       <label>核心<select v-model="component" class="form-input-base mt-2"><option value="xray">Xray</option><option value="sing-box">sing-box</option></select></label>
       <label>版本<input v-model.trim="version" class="form-input-base mt-2" placeholder="26.3.27" /></label>
       <label>SHA-256<input v-model.trim="sha256" class="form-input-base mt-2 font-mono text-xs" placeholder="64 位十六进制摘要" /></label>
@@ -35,7 +35,7 @@
 
 <script setup lang="ts">
 import { updateResultLabel, updateResultGuidance } from '../updateResultText';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { coreUpdatesAPI, type CoreUpdateTask } from '../coreUpdatesApi';
 import { type NodeView } from '../../nodes/api';
 import { formatTime } from '../../../app/auth';
@@ -45,10 +45,11 @@ import EmptyState from '../../../components/EmptyState.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
-const props = defineProps<{ nodes: NodeView[] }>();
+const props = defineProps<{ nodes: NodeView[]; fixedNodeId?: string }>();
 const tasks = ref<CoreUpdateTask[]>([]);
 const taskPage = ref(1), taskTotal = ref(0), loading = ref(false), busy = ref(false), error = ref('');
-const nodeId = ref(''), component = ref('xray'), version = ref(''), assetURL = ref(''), sha256 = ref('');
+const nodeId = ref(props.fixedNodeId || ''), component = ref('xray'), version = ref(''), assetURL = ref(''), sha256 = ref('');
+watch(() => props.fixedNodeId, id => { if (id) nodeId.value = id; });
 const confirmation = ref(false);
 const selected = computed(() => props.nodes.find(node => node.id === nodeId.value));
 const supportsQuiCore = computed(() => selected.value?.capabilities?.singbox_user_stats === true);

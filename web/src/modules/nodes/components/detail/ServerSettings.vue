@@ -156,7 +156,7 @@
               核心更新选项
             </summary>
             <div class="pt-2">
-              <CoreUpdatesPanel :nodes="[node]" />
+              <CoreUpdatesPanel :nodes="[node]" :fixed-node-id="node.id" />
             </div>
           </details>
 

@@ -17,13 +17,14 @@
           <circle v-for="p in dots(metric.key)" :key="p.time" :cx="p.x" :cy="p.y" r="1.5" fill="currentColor" />
         </svg>
         <p v-else class="text-xs text-ios-tertiary py-6">— · 暂无历史测量</p>
-        <p v-if="current[metric.key] === null" class="text-xs text-ios-secondary">— · 需要 Agent 1.2+ 上报</p>
-        <p class="text-xs text-ios-tertiary">{{ new Date(start).toLocaleString() }} – {{ new Date(end).toLocaleString() }}</p>
+        <p v-if="current[metric.key] === null" class="text-xs text-ios-secondary">{{ currentUnavailable ? '服务器离线，当前值不可用' : '需要新版 Agent 上报' }}</p>
+        <p class="text-xs text-ios-tertiary">{{ formatTime(new Date(start).toISOString()) }} – {{ formatTime(new Date(end).toISOString()) }}</p>
       </section>
     </div>
   </div>
 </template>
 <script setup lang="ts">
+import { formatTime } from '../../../app/auth';
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { nodeAPI, type NodeView } from '../api';
 import { metricPoint, metricPath, extractCurrentValues, formatRate, type MetricKey, type SystemMetricPoint } from './serverMetricsModel';
@@ -38,7 +39,11 @@ const metrics: { key: MetricKey; label: string }[] = [
 const points = ref<SystemMetricPoint[]>([]), intervalSeconds = ref(60), loading = ref(false), error = ref('');
 const end = ref(Date.now());
 const start = computed(() => end.value - props.hours * 3600000);
-const current = computed(() => extractCurrentValues(props.node, props.now));
+const currentUnavailable = computed(() => {
+  const age = props.now - Date.parse(props.node.lastHeartbeat);
+  return !['online', 'degraded'].includes(props.node.status) || !Number.isFinite(age) || age < -5000 || age >= 45000;
+});
+const current = computed(() => extractCurrentValues(currentUnavailable.value ? { ...props.node, lastHeartbeat: '' } : props.node, props.now));
 let generation = 0, disposed = false;
 async function load() {
   const ticket = ++generation, id = props.node.id, hours = props.hours;

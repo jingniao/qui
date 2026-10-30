@@ -63,13 +63,13 @@
           </fieldset>
 
           <fieldset>
-            <legend class="text-sm font-medium mb-2 text-neutral-700">限定入口线路组 (Group Scope)</legend>
+            <legend class="text-sm font-medium mb-2 text-neutral-700">限定入口节点分组 (Group Scope)</legend>
             <div class="max-h-44 overflow-y-auto space-y-1.5 p-2 bg-neutral-50 rounded-xl border border-black/[0.04]">
               <label v-for="group in groups" :key="group.id" class="flex items-center gap-2 text-sm text-neutral-700 hover:text-black">
                 <input v-model="form.scope.group_ids" type="checkbox" :value="group.id" />
                 <span>{{ group.name }}</span>
               </label>
-              <div v-if="!groups.length" class="text-xs text-neutral-400 py-1">暂无线路组</div>
+              <div v-if="!groups.length" class="text-xs text-neutral-400 py-1">暂无节点分组</div>
             </div>
           </fieldset>
         </div>

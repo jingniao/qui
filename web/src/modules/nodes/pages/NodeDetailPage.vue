@@ -198,7 +198,7 @@ async function load() {
       dayStart = utc.toISOString();
     }
     const [groupResult, revisionResult, daily, monthly] = await Promise.all([
-      isOwner.value ? optional('线路组读取失败', choices(groupAPI.list), []) : Promise.resolve([]),
+      isOwner.value ? optional('节点分组读取失败', choices(groupAPI.list), []) : Promise.resolve([]),
       isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), []) : Promise.resolve([]),
       optional('今日流量读取失败', accessAPI.accounts({ nodeId: id, from: dayStart, to: new Date().toISOString() }), null),
       optional('本月流量读取失败', request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly'), null),

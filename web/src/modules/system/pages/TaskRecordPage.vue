@@ -1,16 +1,5 @@
 <template>
   <div class="space-y-6">
-    <section v-if="isOwner" class="panel-card p-5 space-y-4">
-      <h2 class="font-semibold text-ios-label">Agent 签名发布目录</h2>
-      <p v-if="!configured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
-      <details class="space-y-3"><summary class="text-sm cursor-pointer">登记签名 Agent 版本</summary>
-        <p class="text-xs text-ios-secondary">粘贴离线签名工具生成的完整 proxy-agent 清单。</p>
-        <textarea v-model="manifest" maxlength="16384" rows="6" class="form-input-base w-full font-mono text-xs" aria-label="签名 Agent 清单" />
-        <button class="ios-btn-primary" :disabled="registerBusy || !configured || !manifest.trim()" @click="registerRelease">验证并登记</button>
-      </details>
-      <DataTable v-if="releasePageItems.length"><template #header><th>版本</th><th>平台</th><th>序列</th></template><template #body><tr v-for="r in releasePageItems" :key="r.id"><td>{{ r.signed.manifest.version }}</td><td>{{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</td><td>{{ r.signed.manifest.sequence }}</td></tr></template></DataTable>
-      <Pagination :total="releases.length" :current-page="releasePage" :page-size="20" @update:page="releasePage = $event" />
-    </section>
     <ConfirmDialog v-model="clearConfirm" title="清除核心更新任务" message="确认清除此任务？清除不会卸载核心，也不能代替节点结果确认。" @confirm="confirmClear" />
     <ConfirmDialog :model-value="!!recoveryTarget" @update:model-value="v => { if (!v) recoveryTarget = null; }" title="恢复 Agent 更新任务" :message="recoveryTarget ? '确认对服务器「' + nodeName(recoveryTarget.nodeId) + '」的原任务发起恢复？请先核对尝试记录与节点日志；运行中任务的结果尚未确认。' : ''" @confirm="recoverAgent" />
     <AppDialog :model-value="!!attemptTaskId" @update:model-value="v => { if (!v) attemptTaskId = ''; }" title="Agent 更新尝试记录" :show-confirm="false">
@@ -123,6 +112,18 @@
           共 <span class="font-medium text-gray-800">{{ filteredTasks.length }}</span> 条任务记录
         </div>
       </div>
+
+    <section v-if="isOwner" class="panel-card p-5 space-y-4">
+      <h2 class="font-semibold text-ios-label">Agent 签名发布目录</h2>
+      <p v-if="!configured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
+      <details class="space-y-3"><summary class="text-sm cursor-pointer">登记签名 Agent 版本</summary>
+        <p class="text-xs text-ios-secondary">粘贴离线签名工具生成的完整 proxy-agent 清单。</p>
+        <textarea v-model="manifest" maxlength="16384" rows="6" class="form-input-base w-full font-mono text-xs" aria-label="签名 Agent 清单" />
+        <button class="ios-btn-primary" :disabled="registerBusy || !configured || !manifest.trim()" @click="registerRelease">验证并登记</button>
+      </details>
+      <DataTable v-if="releasePageItems.length"><template #header><th>版本</th><th>平台</th><th>序列</th></template><template #body><tr v-for="r in releasePageItems" :key="r.id"><td>{{ r.signed.manifest.version }}</td><td>{{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</td><td>{{ r.signed.manifest.sequence }}</td></tr></template></DataTable>
+      <Pagination :total="releases.length" :current-page="releasePage" :page-size="20" @update:page="releasePage = $event" />
+    </section>
 
       <!-- 错误状态 -->
       <ErrorState v-if="error" :message="error" @retry="loadAll" />

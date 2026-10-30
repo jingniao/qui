@@ -8,7 +8,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">账号状态</div><StatusBadge :status="data.me.status" /><p>{{ reasons[data.me.reason] || data.me.reason || '正常服务' }}</p></div>
           <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">已用流量 / 额度</div><TrafficValue :bytes="data.me.usedTraffic" /> / {{ data.me.trafficLimit ? bytes(data.me.trafficLimit) : '不限额' }}<div class="h-1.5 bg-black/[0.05] rounded-full overflow-hidden"><div class="h-full bg-ios-blue" :style="{ width: quota + '%' }"></div></div></div>
-          <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">到期时间</div><p>{{ data.me.expiresAt ? new Date(data.me.expiresAt).toLocaleString() : '永不过期' }}</p></div>
+          <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">到期时间</div><p>{{ data.me.expiresAt ? formatPortalTime(data.me.expiresAt) : '永不过期' }}</p></div>
         </div>
         <section class="panel-card p-6 space-y-3"><h2 class="font-semibold">在线设备 / 上限</h2><p>{{ data.me.onlineDevices ?? '未知' }} / {{ data.me.deviceLimit === 0 ? '不限' : data.me.deviceLimit ?? '—' }}</p>
           <p v-if="data.me.deviceLimit !== null && data.me.deviceLimit > 0 && data.me.onlineDevices !== null && data.me.onlineDevices >= data.me.deviceLimit" class="text-amber-700">设备数量已达上限</p>
@@ -76,6 +76,11 @@ const titles: Record<string, string> = { overview: '概览', subscription: '我�
 const reasons: Record<string, string> = { disabled: '账号已禁用', expired: '账号已到期', over_quota: '流量额度已用完', quota_exceeded: '流量额度已用完', active: '正常服务' };
 const quota = computed(() => data.value?.me.trafficLimit ? Math.min(100, data.value.me.usedTraffic / data.value.me.trafficLimit * 100) : 0);
 const maxTraffic = computed(() => Math.max(1, ...traffic.value.items.map(i => i.uploadBytes + i.downloadBytes)));
+// Portal sessions do not expose a timezone; use zh-CN in the browser timezone.
+function formatPortalTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(date);
+}
 function absolute(path: string) { return new URL(path, window.location.origin).href; }
 function bytes(value: number) { return (value / 1073741824).toFixed(3) + ' GiB'; }
 async function load() {

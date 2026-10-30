@@ -54,7 +54,7 @@ assert.equal(host.storageDisplay('12','0',0), '占用率 0.0%');
 assert.equal(host.storageDisplay(undefined,'1024',42.5), '占用率 42.5%');
 assert.equal(host.storageDisplay('0','0'), '—');
 assert.equal(host.observed('0'), '0'); assert.equal(host.observed(undefined), '—');
-const history = await loadF2Model('serverMetricsModel.ts', s => s.replace("import { hostMetrics } from '../metrics';", 'const hostMetrics = node => node.heartbeat;'));
+const history = await loadF2Model('serverMetricsModel.ts', s => s.replace("import { authState } from '../../../app/auth';", "const authState = { timezone: 'Asia/Shanghai' };").replace("import { hostMetrics } from '../metrics';", 'const hostMetrics = node => node.heartbeat;'));
 const point = (at, cpuPercent) => history.metricPoint({at:new Date(at).toISOString(),cpuPercent,processCount:0.5,rxBytesPerSecond:0});
 const minute = 60000;
 const samples = [point(0,1),point(minute,null),point(2*minute,2),point(3*minute,0),point(6*minute,3)];

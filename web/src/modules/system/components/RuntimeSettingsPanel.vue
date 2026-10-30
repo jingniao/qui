@@ -21,7 +21,7 @@
      <label class="flex items-center gap-2 sm:mt-7"><input v-model="form.subscriptionUaDetection" type="checkbox" class="h-4 w-4" />按客户端 User-Agent 自动选择格式</label>
     </div>
     <p class="text-xs text-gray-500">刷新间隔写入订阅响应的 profile-update-interval，客户端据此定期重新拉取（1～168 小时）。目前没有可验证的客户端 User-Agent 特征，自动识别即使开启也只会回落到默认格式；关闭后始终使用默认格式。</p>
-    <p class="text-xs text-gray-500">订阅继续按用户授权线路组、已发布配置、有效设备凭据和协议能力过滤。默认格式不会改变用户权限或正在运行的节点配置。</p>
+    <p class="text-xs text-gray-500">订阅继续按用户授权节点分组、已发布配置、有效设备凭据和协议能力过滤。默认格式不会改变用户权限或正在运行的节点配置。</p>
    </template>
    <template v-else>
     <dl class="grid sm:grid-cols-2 gap-4"><div><dt class="text-gray-500">构建标识</dt><dd class="mt-1">{{ info.buildVersion }}</dd></div><div><dt class="text-gray-500">系统 / 架构</dt><dd class="mt-1">{{ info.os }} / {{ info.arch }}</dd></div><div><dt class="text-gray-500">Go</dt><dd class="mt-1">{{ info.goVersion }}</dd></div><div><dt class="text-gray-500">当前实例启动时间</dt><dd class="mt-1">{{ formatTime(info.startedAt) }} · 已运行 {{ Math.floor(info.uptimeSeconds/60) }} 分钟</dd></div><div><dt class="text-gray-500">SQLite / 日志模式</dt><dd class="mt-1">{{ info.sqliteVersion }} / {{ info.journalMode }}</dd></div><div><dt class="text-gray-500">最新数据库迁移</dt><dd class="mt-1 break-all">{{ info.migration || '暂无' }}</dd></div><div><dt class="text-gray-500">数据库主文件</dt><dd class="mt-1">{{ bytes(info.databaseBytes) }}，不含 WAL</dd></div><div><dt class="text-gray-500">Go 堆 / Goroutine</dt><dd class="mt-1">{{ bytes(info.heapBytes) }} / {{ info.goroutines }}</dd></div></dl>

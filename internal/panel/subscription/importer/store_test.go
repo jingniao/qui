@@ -123,6 +123,55 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 	}
 }
 
+// The node list tells 机场订阅 from 单独导入 by this field only, so the derived
+// kind must survive an edit that keeps the stored payload, and must appear in the
+// JSON the panel serves (the struct that also carries lastFetchAt).
+func TestSourceKindDistinguishesSubscriptionFromContent(t *testing.T) {
+	s, a, _ := storeFixture(t)
+	ctx := context.Background()
+	urlKey, err := s.Save(ctx, "", Input{Name: "airport", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentKey, err := s.Save(ctx, "", Input{Name: "manual", Content: "socks5://fixture:fixture@example.com:1080#manual", Interval: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := func() map[string]string {
+		t.Helper()
+		items, e := s.List(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		found := map[string]string{}
+		for _, item := range items {
+			found[item.ID] = item.Kind
+		}
+		return found
+	}
+	if got := kinds(); got[urlKey] != sourceKindURL || got[contentKey] != sourceKindContent {
+		t.Fatalf("kind not derived from the stored payload: %v", got)
+	}
+	// Renaming keeps url_encrypted untouched, so neither kind may flip.
+	if _, err = s.Save(ctx, contentKey, Input{Name: "manual renamed", Interval: 120}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Save(ctx, urlKey, Input{Name: "airport renamed", URL: "https://example.com/other", Interval: 120}); err != nil {
+		t.Fatal(err)
+	}
+	if got := kinds(); got[urlKey] != sourceKindURL || got[contentKey] != sourceKindContent {
+		t.Fatalf("edit changed the derived kind: %v", got)
+	}
+	items, err := s.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(items)
+	if err != nil || !bytes.Contains(raw, []byte(`"kind":"content"`)) || !bytes.Contains(raw, []byte(`"kind":"url"`)) || !bytes.Contains(raw, []byte(`"lastFetchAt"`)) {
+		t.Fatalf("kind missing from the source view: %s", raw)
+	}
+}
+
 func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	s, a, b := storeFixture(t)
 	ctx := context.Background()

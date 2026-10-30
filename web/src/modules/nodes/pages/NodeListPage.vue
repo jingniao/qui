@@ -37,7 +37,7 @@
 
         <!-- Group Filter (Owner only) -->
         <select v-if="isOwner" v-model="group" class="ios-filter-select !w-auto" @change="applyFilters">
-          <option value="">全部线路组</option>
+          <option value="">全部节点分组</option>
           <option v-for="item in groups" :key="item.id" :value="item.id">{{ item.name }}</option>
         </select>
 
@@ -58,7 +58,7 @@
         <ServerDisplayMode :display-mode="displayMode" @change="setDisplayMode" />
       </div>
     </div>
-    <p v-if="!isOwner" class="text-xs text-ios-tertiary -mt-3">线路组筛选需要 Owner 权限。</p>
+    <p v-if="!isOwner" class="text-xs text-ios-tertiary -mt-3">节点分组筛选需要 Owner 权限。</p>
 
     <ErrorState v-if="error" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="loading && !nodes.length" />
@@ -165,7 +165,7 @@ async function load() {
     ]);
     if (servers.status === 'rejected') throw servers.reason;
     const notices: string[] = [];
-    if (groupResult.status === 'rejected') notices.push(`线路组读取失败：${(groupResult.reason as Error).message}`);
+    if (groupResult.status === 'rejected') notices.push(`节点分组读取失败：${(groupResult.reason as Error).message}`);
     if (monthly.status === 'rejected') notices.push(`本月流量读取失败：${(monthly.reason as Error).message}`);
     // Midnight can fall in a DST gap in a few zones; fall back to UTC midnight then.
     let dayStart: string;

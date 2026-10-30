@@ -188,7 +188,7 @@
             <input
               v-model="grp.proxies"
               class="form-input-base text-xs font-mono"
-              placeholder="如 AUTO, @all, @nodeGroup:线路组ID, DIRECT"
+              placeholder="如 AUTO, @all, @nodeGroup:节点分组ID, DIRECT"
             />
           </div>
 

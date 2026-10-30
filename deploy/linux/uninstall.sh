@@ -71,7 +71,7 @@ exec 9>"$registry/operation.lock"
 flock -n 9 || fail 'Another installation operation is running.'
 [[ -f $record && ! -L $record && $(stat -c '%u:%a' "$record") == 0:600 ]] || fail 'Missing protected installation record.'
 [[ ! -e $removed && ! -L $removed ]] || fail 'Uninstall was already recorded; inspect retained files.'
-[[ $(sed -n '1p' "$record") == proxycontrol-install-v1 && $(sed -n '2p' "$record") == "$component" && $(sed -n '7p' "$record") == installed ]] || fail 'Installation is incomplete or unknown.'
+qui_record_cores "$record" "$component" || fail 'Installation is incomplete or unknown.'
 # Line 10 names the init system the service definitions were written for; a
 # record written before that line existed is a systemd record. Removing with the
 # tooling of the other init system would leave a service behind that still points
@@ -82,8 +82,6 @@ recorded_init=$(sed -n '10p' "$record")
   || fail "The installation was made for $recorded_init but this host runs $init_system; use the uninstall.sh of the other init system."
 binary_digest=$(sed -n '3p' "$record")
 unit_digest=$(sed -n '4p' "$record")
-core=$(sed -n '5p' "$record")
-core_digest=$(sed -n '6p' "$record")
 # The enforced-source units are recorded after the completion marker. An
 # installation made before that feature has no such lines, and its units are
 # then left untouched.
@@ -105,18 +103,15 @@ if $host_network_units; then
   verify_owned "$host_network_service" "$host_network_service_digest"
   verify_owned "$host_network_path" "$host_network_path_digest"
 fi
-core_target=''
 tuning_units=false
 if [[ $component == agent && -n $(sed -n '11p' "$record") && -n $(sed -n '12p' "$record") ]]; then
   tuning_units=true
   verify_owned "$tuning_service" "$(sed -n '11p' "$record")"
   verify_owned "$tuning_path" "$(sed -n '12p' "$record")"
 fi
-if [[ -n $core ]]; then
-  [[ $component == agent && ( $core == xray || $core == sing-box ) ]] || fail 'Invalid recorded core.'
-  core_target=/usr/local/lib/proxy-agent/$core
-  verify_owned "$core_target" "$core_digest"
-fi
+for i in "${!record_cores[@]}"; do
+  verify_owned "/usr/local/lib/proxy-agent/${record_cores[i]}" "${record_digests[i]}"
+done
 # A failed stop is not a clean handoff: never delete the program underneath it.
 if [[ $init_system == systemd ]]; then
   systemctl stop "$name.service"
@@ -196,7 +191,7 @@ if [[ ! -e $registry/$other.manifest && ! -L $registry/$other.manifest ]]; then
   rmdir -- "${library%/*}" 2>/dev/null || true
 fi
 if $host_network_units; then rm -- "$host_network_service" "$host_network_path"; fi
-[[ -z $core_target ]] || rm -- "$core_target"
+for core in "${record_cores[@]}"; do rm -- "/usr/local/lib/proxy-agent/$core"; done
 service_reload_definitions
 # The enforced-source table belongs to this Agent, so removing it restores the
 # host's normal source selection. It may legitimately be absent.

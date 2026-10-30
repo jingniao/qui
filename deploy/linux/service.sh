@@ -242,3 +242,51 @@ qui_release_is_older() {
   [[ $2 == *-rc.* ]] || return 0
   qui_decimal_is_older "${1##*-rc.}" "${2##*-rc.}"
 }
+
+# Record v2 retains metadata lines 2-12; lines 5/6 are reserved empty.
+# Each following line is: core NAME ABSOLUTE_PATH SHA256. Never source records.
+# Paths are deliberately restricted to installer-owned destinations.
+qui_record_cores() {
+  local record=$1 component=$2 format name path digest extra line remainder
+  record_cores=(); record_digests=()
+  [[ -f $record && ! -L $record ]] || return 1
+  format=$(sed -n '1p' "$record")
+  [[ $format == proxycontrol-install-v1 || $format == proxycontrol-install-v2 ]] || return 1
+  [[ $(sed -n '2p' "$record") == "$component" && $(sed -n '7p' "$record") == installed ]] || return 1
+  if [[ $format == proxycontrol-install-v1 ]]; then
+    name=$(sed -n '5p' "$record"); digest=$(sed -n '6p' "$record")
+    if [[ -n $name ]]; then
+      [[ $component == agent && ( $name == xray || $name == sing-box ) && $digest =~ ^[0-9a-f]{64}$ ]] || return 1
+      record_cores+=("$name"); record_digests+=("$digest")
+    else [[ -z $digest ]] || return 1; fi
+    return 0
+  fi
+  [[ -z $(sed -n '5p' "$record") && -z $(sed -n '6p' "$record") && $(sed -n '10p' "$record") =~ ^(systemd|openrc)$ ]] || return 1
+  [[ $(sed -n '$=' "$record") -ge 12 ]] || return 1
+  while IFS= read -r line || [[ -n $line ]]; do
+    read -r extra name path digest remainder <<< "$line"
+    [[ $extra == core && $component == agent && ( $name == xray || $name == sing-box ) && $path == /usr/local/lib/proxy-agent/"$name" && $digest =~ ^[0-9a-f]{64}$ && -z $remainder ]] || return 1
+    [[ " ${record_cores[*]} " != *" $name "* ]] || return 1
+    record_cores+=("$name"); record_digests+=("$digest")
+  done < <(sed -n '13,$p' "$record")
+}
+
+qui_write_record() {
+  local destination=$1 i
+  printf 'proxycontrol-install-v2\n%s\n%s\n%s\n\n\ninstalled\n%s\n%s\n%s\n%s\n%s\n' \
+    "$component" "$digest" "$unit_digest" "$host_network_service_digest" "$host_network_path_digest" \
+    "$init_system" "$tuning_service_digest" "$tuning_path_digest" > "$destination"
+  for i in "${!record_cores[@]}"; do
+    printf 'core %s /usr/local/lib/proxy-agent/%s %s\n' "${record_cores[i]}" "${record_cores[i]}" "${record_digests[i]}" >> "$destination"
+  done
+}
+
+# Only replace the three top-level core settings, preserving other YAML blocks.
+qui_agent_core_config() {
+  local source=$1 destination=$2 core
+  awk '/^["\047]?(cores|core_name|core_path)["\047]?[[:space:]]*:/ {skip=1; next} /^[^[:space:]#]/ {skip=0} !skip {print}' "$source" > "$destination" || return 1
+  printf 'core_name: %s\ncore_path: /usr/local/lib/proxy-agent/%s\ncores:\n' "${record_cores[0]}" "${record_cores[0]}" >> "$destination" || return 1
+  for core in "${record_cores[@]}"; do
+    printf '  - name: %s\n    path: /usr/local/lib/proxy-agent/%s\n' "$core" "$core" >> "$destination" || return 1
+  done
+}

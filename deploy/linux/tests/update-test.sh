@@ -35,7 +35,7 @@ set -euo pipefail
 if [[ $(uname -s) != Linux || ${EUID} -ne 0 ]]; then
   printf 'SKIP update-test: needs Linux and root (uname -s %s, EUID %s).\n' \
     "$(uname -s)" "${EUID}"
-  if [[ ${QUI_UPDATE_TEST_ALLOW_SKIP:-0} == 1 ]]; then exit 0; fi
+  if [[ $(uname -s) == MINGW* || $(uname -s) == MSYS* || ${QUI_UPDATE_TEST_ALLOW_SKIP:-0} == 1 ]]; then exit 0; fi
   exit 1
 fi
 
@@ -198,7 +198,8 @@ FAKE_SERVICE
 # agree with what the "installed" version put there.
 write_fake_install() {
   cat > "$1" <<'FAKE_INSTALL'
-#!/bin/sh
+#!/usr/bin/env bash
+# qui_write_record compatible fixture installer
 # Fake deploy/linux/install.sh, used by deploy/linux/tests/update-test.sh.
 # Called by update.sh as:  install.sh --panel|--node --binary FILE --sha256 DIGEST
 set -eu
@@ -251,6 +252,10 @@ write_unit() {
 
 install_everything() {
   install_program
+  if [ "${FAKE_MULTI_CORE:-0}" = 1 ] && [ "$component" = agent ]; then
+    for core in xray sing-box; do printf '%s-%s\n' "$core" "$version" > "$host_network_library_dir/$core"; done
+    printf 'cores: [] # changed by fixture %s\n' "$version" > "$root/etc/proxy-agent/config.yaml"
+  fi
   write_unit
   install -m 0755 "$FAKE_UPDATER_SOURCE" "$bin_dir/qui-update"
   printf '\n# qui-update of version %s, written by the fake install.sh\n' "$version" \
@@ -287,17 +292,18 @@ install_everything() {
   program_digest=${program_digest%% *}
   unit_digest=$(sha256sum "$unit")
   unit_digest=${unit_digest%% *}
-  {
-    printf 'proxycontrol-install-v1\n'
-    printf '%s\n' "$component"
-    printf '%s\n' "$program_digest"
-    printf '%s\n' "$unit_digest"
-    printf '\n'
-    printf '\n'
-    printf 'installed\n'
-    if [ "$component" = agent ]; then printf '%s\n%s\n' "$version" "$version"; fi
-    if [ "$init" = openrc ]; then printf 'openrc\n'; fi
-  } > "$state/manifest.tmp.new"
+  . "$FAKE_SERVICE_SOURCE"
+  qui_record_cores "$registry/$component.manifest" "$component"
+  digest=$program_digest; init_system=$init
+  host_network_service_digest=''; host_network_path_digest=''
+  tuning_service_digest=''; tuning_path_digest=''
+  if [[ ${FAKE_MULTI_CORE:-0} == 1 && $component == agent ]]; then
+    for i in "${!record_cores[@]}"; do
+      value=$(sha256sum "$host_network_library_dir/${record_cores[i]}")
+      record_digests[i]=${value%% *}
+    done
+  fi
+  qui_write_record "$state/manifest.tmp.new"
   install -m 0600 "$state/manifest.tmp.new" "$registry/$component.manifest"
 }
 
@@ -314,7 +320,7 @@ case ${FAKE_INSTALL:-ok} in
     install_everything
     ;;
   fail-after-replace)
-    install_program
+    if [ "${FAKE_MULTI_CORE:-0}" = 1 ]; then install_everything; else install_program; fi
     printf 'fake install.sh: failing after replacing the program\n' >&2
     exit 1
     ;;
@@ -415,7 +421,7 @@ new_scenario() {
 # a subtle leak).
 fake_reset() {
   unset FAKE_INIT FAKE_INSTALL FAKE_CHECK FAKE_TARGET FAKE_START_WRITES \
-    FAKE_START_KILL FAKE_STOP_SLEEP FAKE_UNHEALTHY_VERSION || true
+    FAKE_START_KILL FAKE_STOP_SLEEP FAKE_UNHEALTHY_VERSION FAKE_MULTI_CORE || true
   export FAKE_INSTALL=ok FAKE_CHECK=compatible
 }
 
@@ -505,6 +511,9 @@ component_files_list() {
   else
     printf '%s\n' "$ROOT/etc/init.d/proxy-agent-host-network" \
       "$ROOT/usr/local/lib/proxy-agent/host-network-watch"
+  fi
+  if [[ $component == agent ]]; then
+    printf '%s\n' "$ROOT/usr/local/lib/proxy-agent/xray" "$ROOT/usr/local/lib/proxy-agent/sing-box" "$ROOT/etc/proxy-agent/config.yaml"
   fi
   printf '%s\n' "$REGISTRY/$component.manifest"
 }
@@ -1343,6 +1352,73 @@ scenario_21() {
 }
 
 # --- runner ----------------------------------------------------------------
+# Exercise both binaries + configuration + v2 manifest across inline rollback
+# and SIGKILL/boot recovery; paths are part of the before/after tree comparison.
+scenario_22() {
+  local outcome init core
+  for init in systemd openrc; do
+    for outcome in ok fail-after-replace kill-parent; do
+      new_scenario "scenario-22-$init-$outcome"
+      fake_reset
+      export FAKE_INIT=$init FAKE_MULTI_CORE=1
+      install_component agent 1.1.0
+      mkdir -p "$ROOT/etc/proxy-agent"
+      for core in xray sing-box; do printf 'original-%s\n' "$core" > "$ROOT/usr/local/lib/proxy-agent/$core"; done
+      printf 'core_name: xray\ncores: [original]\n' > "$ROOT/etc/proxy-agent/config.yaml"
+      # Turn the legacy fixture into a real v2 record with both core digests.
+      . "$repo_dir/deploy/linux/service.sh"
+      component=agent; init_system=$init
+      digest=$(sed -n '3p' "$REGISTRY/agent.manifest")
+      unit_digest=$(sed -n '4p' "$REGISTRY/agent.manifest")
+      host_network_service_digest=''; host_network_path_digest=''
+      tuning_service_digest=''; tuning_path_digest=''
+      record_cores=(xray sing-box); record_digests=()
+      for core in xray sing-box; do
+        value=$(sha256sum "$ROOT/usr/local/lib/proxy-agent/$core"); record_digests+=("${value%% *}")
+      done
+      qui_write_record "$REGISTRY/agent.manifest"
+      # Reload fake service implementations after using the real record writer.
+      . "$WORK/service.sh"
+      make_bundle 1.2.0
+      snapshot_file_hashes agent "$dir/before.sha"
+      export FAKE_INSTALL=$outcome
+      update_bundle 1.2.0 --component agent
+      if [[ $outcome == kill-parent ]]; then
+        expect_status 'multi-core SIGKILL' 137 "$LAST_STATUS"
+        run_boot_recovery
+        expect_status 'multi-core boot recovery' 0 "$LAST_STATUS"
+      elif [[ $outcome == ok ]]; then
+        expect_status 'multi-core successful carry-forward' 0 "$LAST_STATUS"
+        qui_record_cores "$REGISTRY/agent.manifest" agent
+        expect_eq 'all cores retained' 'xray sing-box' "${record_cores[*]}"
+        expect_eq 'v2 retained' proxycontrol-install-v2 "$(sed -n '1p' "$REGISTRY/agent.manifest")"
+        continue
+      else expect_status 'multi-core failed install rollback' 1 "$LAST_STATUS"; fi
+      snapshot_file_hashes agent "$dir/after.sha"
+      expect_same_tree 'both cores, config and v2 record restored' "$dir/before.sha" "$dir/after.sha"
+      unset FAKE_MULTI_CORE
+    done
+  done
+}
+
+scenario_23() {
+  new_scenario scenario-23
+  fake_reset
+  install_component agent 1.1.0
+  printf 'legacy-xray\n' > "$ROOT/usr/local/lib/proxy-agent/xray"
+  local legacy_digest
+  legacy_digest=$(sha256sum "$ROOT/usr/local/lib/proxy-agent/xray"); legacy_digest=${legacy_digest%% *}
+  sed -i "5s/.*/xray/;6s/.*/$legacy_digest/" "$REGISTRY/agent.manifest"
+  make_bundle 1.2.0
+  update_bundle 1.2.0 --component agent
+  expect_status 'v1 single core update success' 0 "$LAST_STATUS"
+  expect_eq 'v1 to v2 format' proxycontrol-install-v2 "$(sed -n '1p' "$REGISTRY/agent.manifest")"
+  . "$WORK/service.sh"
+  qui_record_cores "$REGISTRY/agent.manifest" agent
+  expect_eq 'legacy core carried forward' xray "${record_cores[*]}"
+  expect_eq 'legacy digest carried forward' "$legacy_digest" "${record_digests[*]}"
+}
+
 # Each scenario runs in its own subshell with errexit on, so an unexpected failure ends
 # that scenario only; the reasons it collected are reported together.
 passes=0
@@ -1375,6 +1451,8 @@ write_fake_install "$TOP/harness/install.sh"
 printf 'update-test: root %s, arch %s, update.sh %s\n' \
   "$TOP" "$arch" "$update_script"
 
+run_scenario '22 multi-core rollback and boot recovery' scenario_22
+run_scenario '23 v1 single core to v2 migration' scenario_23
 run_scenario '1 success' scenario_1
 run_scenario '2 install fails after replacing' scenario_2
 run_scenario '3 unhealthy new version' scenario_3

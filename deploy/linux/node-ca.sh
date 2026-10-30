@@ -67,7 +67,7 @@ exec 9>"$registry/operation.lock"
 flock -n 9 || fail 'Another local installation operation is running.'
 record=$registry/agent.manifest
 [[ -f $record && ! -L $record && $(stat -c '%u:%a' "$record") == 0:600 && $(sed -n '7p' "$record") == installed ]] || fail 'No completed Agent installation.'
-[[ $(sed -n '1p' "$record") == proxycontrol-install-v1 && $(sed -n '2p' "$record") == agent ]] || fail 'Unknown installation record.'
+qui_record_cores "$record" agent || fail 'Unknown installation record.'
 account=proxy-agent
 [[ $(id -u "$account") != 0 ]] || fail 'Service account cannot be root.'
 if [[ $init_system == systemd ]]; then

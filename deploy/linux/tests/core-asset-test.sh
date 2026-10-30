@@ -144,6 +144,40 @@ if (qui_release_version) >/dev/null 2>&1; then
   check 'different qui release refused' accepted refused
 else check 'different qui release refused' refused refused; fi
 
+# select_core must reset per-core options in either order, including musl pins.
+eval "$(extract "$install_sh" select_core)"
+eval "$(extract "$install_sh" singbox_digest)"
+declare -A core_versions=() core_digests=() core_urls=()
+for order in 'xray sing-box' 'sing-box xray'; do
+  for core_source in official qui; do
+    for arch in amd64 arm64; do
+      for libc in glibc musl; do
+        host_architecture() { printf '%s' "$arch"; }
+        host_libc() { printf '%s' "$libc"; }
+        for selected in $order; do
+          select_core "$selected"
+          if [[ $selected == xray ]]; then
+            check "multi $order $core_source $arch/$libc Xray version" "$core_version" 26.3.27
+            check 'no sing-box digest leaks into Xray' "$core_digest" ''
+          elif [[ $core_source == official ]]; then
+            check "multi $order official $arch/$libc sing-box version" "$core_version" 1.14.3
+            check 'official digest selected for this core only' "$core_digest" "$(singbox_digest "$arch" "$libc")"
+          else
+            check "multi $order qui $arch/$libc sing-box version" "$core_version" 1.14.4
+            check 'qui digest still comes from release sums' "$core_digest" ''
+          fi
+          check 'distinct installation destination' "$core_target" "/usr/local/lib/proxy-agent/$selected"
+        done
+      done
+    done
+  done
+done
+core_versions[xray]=custom; core_digests[xray]=$(printf '%064d' 0); core_urls[xray]=https://example.invalid/xray
+select_core xray
+check 'explicit version stays with its core' "$core_version" custom
+select_core sing-box
+check 'explicit Xray URL does not leak' "$core_url" ''
+
 printf '\ncore-asset-test: %s/%s passed\n' "$passes" "$((passes + failed))"
 if ((failed > 0)); then exit 1; fi
 exit 0

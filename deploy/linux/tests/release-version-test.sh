@@ -111,5 +111,17 @@ fetch_fixture() (
 check 'RC online tag and asset URLs, digest verified (stub curl)' 0 fetch_fixture online
 check 'RC offline digest verified' 0 fetch_fixture offline
 check 'RC tampered offline bytes refused' 1 fetch_fixture tampered
+# Release spelling is independent of the versioned multi-core install record.
+component=agent; init_system=systemd
+host_network_service_digest=''; host_network_path_digest=''; tuning_service_digest=''; tuning_path_digest=''
+record_cores=(xray sing-box)
+digest=$(printf bytes | sha256sum); digest=${digest%% *}; unit_digest=$digest
+record_digests=("$digest" "$digest")
+for version in 1.2.0-rc.1 1.2.0; do
+  qui_write_record "$temporary/$version.manifest"
+  check "multi-core record accepts $version" 0 qui_record_cores "$temporary/$version.manifest" agent
+  check "multi-core set retained $version" 0 test "${record_cores[*]}" = 'xray sing-box'
+done
+
 printf '\nrelease-version-test: %s passed, %s failed\n' "$passes" "$failed"
 ((failed == 0))

@@ -44,7 +44,7 @@ usage() {
   --token TOKEN         一次性节点注册码
   --http-port N         面板 HTTPS 端口（默认 443）
   --grpc-port N         面板 gRPC 端口（默认 9443）
-  --core xray|sing-box  同时安装的核心（默认 xray）
+  --core xray|sing-box  可重复，例如 --core xray --core sing-box（默认 xray）
   --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
   --bundle FILE --sums FILE
                         离线安装：用本地发布归档与其 SHA256SUMS，不访问 GitHub
@@ -64,7 +64,7 @@ http_port=443
 grpc_port=9443
 ca_sha256=''
 token=''
-core=xray
+cores=(); core=''
 core_source=qui
 bundle_file=''
 sums_file=''
@@ -75,7 +75,7 @@ while (($#)); do
       case $1 in
         --version) version=$2;; --panel) panel=$2;; --http-port) http_port=$2;;
         --grpc-port) grpc_port=$2;; --ca-sha256) ca_sha256=${2,,};; --token) token=$2;;
-        --core) core=$2;; --bundle) bundle_file=$2;; --sums) sums_file=$2;;
+        --core) cores+=("$2");; --bundle) bundle_file=$2;; --sums) sums_file=$2;;
         --core-source) core_source=$2;;
       esac
       shift 2;;
@@ -91,7 +91,13 @@ done
 [[ $grpc_port =~ ^[0-9]{1,5}$ && $grpc_port -ge 1 && $grpc_port -le 65535 ]] || fail 'gRPC 端口必须在 1-65535 之间。'
 [[ $ca_sha256 =~ ^[0-9a-f]{64}$ ]] || fail '面板证书 SHA-256 必须是 64 位小写十六进制。'
 [[ $token =~ ^[A-Za-z0-9_-]{16,128}$ ]] || fail '注册码必须是 16-128 位 URL 安全字符。'
-[[ $core == xray || $core == sing-box ]] || fail '核心只能是 xray 或 sing-box。'
+if [[ ${#cores[@]} == 0 ]]; then cores=(xray); fi
+seen=' '
+for core in "${cores[@]}"; do
+  [[ $core == xray || $core == sing-box ]] || fail 'Core must be xray or sing-box.'
+  [[ $seen != *" $core "* ]] || fail 'Duplicate --core.'
+  seen+="$core "
+done
 # An offline installation supplies both files: the archive is checked against the
 # supplied SHA256SUMS exactly like a download, so one path has no weaker trust.
 if [[ -n $bundle_file || -n $sums_file ]]; then
@@ -192,20 +198,6 @@ singbox_digest() {
 # installs anything. Xray publishes a .dgst file next to its asset and install.sh
 # reads it itself; sing-box publishes no such file, so its asset digest is pinned
 # per architecture and libc (official GitHub asset digests of sing-box-1.14.3).
-case $core in
-  xray)
-    core_version=26.3.27
-    core_digest='';;
-  sing-box)
-    if [[ $core_source == qui ]]; then
-      core_version=1.14.4
-      core_digest=''
-    else
-      core_version=1.14.3
-      libc=$(host_libc)
-      core_digest=$(singbox_digest "$architecture" "$libc")
-    fi;;
-esac
 
 directory=''
 cleanup() { if [[ -n $directory ]]; then rm -rf -- "$directory"; fi; }
@@ -264,12 +256,29 @@ done
 binary=$source_dir/bin/proxy-agent
 digest=$(sha256sum -- "$binary"); digest=${digest%% *}
 [[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
-core_arguments=(--core "$core" --core-version "$core_version" --core-source "$core_source" --qui-version "$version")
-if [[ $core == sing-box && $core_source == qui && -n $bundle_file ]]; then
-  core_arguments+=(--core-bundle "$(dirname -- "$bundle_file")/sing-box-$core_version-qui.1-linux-$architecture.tar.gz" --core-sums "$sums_file")
-fi
-if [[ -n $core_digest ]]; then core_arguments+=(--core-sha256 "$core_digest"); fi
-printf '\n安装 Agent 与核心 %s %s ...\n' "$core" "$core_version"
+core_arguments=(--core-source "$core_source" --qui-version "$version")
+for core in "${cores[@]}"; do
+  case $core in
+    xray)
+      core_version=26.3.27
+      core_digest='';;
+    sing-box)
+      if [[ $core_source == qui ]]; then
+        core_version=1.14.4
+        core_digest=''
+      else
+        core_version=1.14.3
+        libc=$(host_libc)
+        core_digest=$(singbox_digest "$architecture" "$libc")
+      fi;;
+  esac
+  core_arguments+=(--core "$core" --core-version "$core_version")
+  if [[ $core == sing-box && $core_source == qui && -n $bundle_file ]]; then
+    core_arguments+=(--core-bundle "$(dirname -- "$bundle_file")/sing-box-$core_version-qui.1-linux-$architecture.tar.gz" --core-sums "$sums_file")
+  fi
+  if [[ -n $core_digest ]]; then core_arguments+=(--core-sha256 "$core_digest"); fi
+done
+printf '\nInstalling Agent and cores: %s ...\n' "${cores[*]}"
 "$source_dir/deploy/linux/install.sh" --node --binary "$binary" --sha256 "$digest" "${core_arguments[@]}" \
   || fail 'Agent 安装失败（原因见上面 install.sh 的输出）；install.sh 可能已经替换了部分文件，本机尚未登记，修正问题后可以直接重跑本脚本（install.sh 原地升级）。'
 
@@ -381,7 +390,7 @@ else
   service_is_active proxy-agent-tuning || service_start proxy-agent-tuning || fail '无法启动调优 watcher。'
 fi
 printf 'proxy-agent 服务状态：%s\n' "$(service_state proxy-agent)"
-printf '\n节点已安装并登记：面板 %s，核心 %s %s。\n' "$panel" "$core" "$core_version"
+printf '\n节点已安装并登记：面板 %s，核心 %s。\n' "$panel" "${cores[*]}"
 printf '注册码文件已删除；私钥只保存在本机 /var/lib/proxy-agent/identity。\n'
 printf '在面板里为该节点配置入站并发布配置版本后才会代理流量。\n'
 printf '以后升级用 qui-update（面板或节点主机），不要重跑本脚本。\n'

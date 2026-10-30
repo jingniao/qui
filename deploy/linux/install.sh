@@ -5,9 +5,9 @@
 # directories and the packaged service definition: the systemd unit on a systemd
 # host, the OpenRC init scripts on an Alpine host. Only --node is supported on
 # OpenRC; the panel needs systemd. For a node it also installs an official Xray
-# or sing-box release after verifying its SHA256. Nothing is started, and an
-# existing configuration, identity or data is never touched, so re-running the
-# script upgrades the program in place.
+# and/or sing-box releases after verifying SHA256. The main service is not
+# started. Agent core settings are normalized to the recorded set; identity,
+# data and other configuration settings are retained.
 set -euo pipefail
 umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -21,20 +21,20 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
   --sha256 DIGEST        lowercase SHA256 of that executable
   --config FILE          config template for a first install
                          (default: the packaged examples/<component>.yaml)
-  --core xray|sing-box   install a core with --node (sing-box defaults to qui)
+  --core xray|sing-box   repeatable; default xray on a new node
   --core-source qui|official  sing-box source (default: qui; Xray stays official)
   --qui-version VERSION same qui release as the Agent (required for qui source)
   --core-bundle FILE --core-sums FILE  local qui core archive and SHA256SUMS
-  --core-version VERSION release version to download, for example 26.3.27
-  --core-url URL         official release asset URL
+  --core-version VERSION version for the preceding --core (pinned default)
+  --core-url URL         asset URL for the preceding --core
                          (default: the official GitHub release asset)
-  --core-sha256 DIGEST   lowercase SHA256 of the downloaded release archive
+  --core-sha256 DIGEST   archive SHA256 for the preceding --core
                          (default for xray: the release .dgst file)
   --reinstall            install again after uninstall.sh removed the service
 
 Re-running this script upgrades in place: the program and unit are replaced,
-the service account, directories, configuration and data are left untouched.
-No service is started. Managed agent and core upgrades go through the panel.
+the service account, directories and data are retained. Agent core settings
+are normalized; other configuration is retained. No main service is started. Managed agent and core upgrades go through the panel.
 USAGE
 }
 
@@ -52,6 +52,7 @@ if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol
 . "$service_library"
 
 mode=''; binary=''; digest=''; config=''; core=''; core_version=''; core_digest=''; core_url=''; reinstall=false
+cores=(); declare -A core_versions=() core_digests=() core_urls=()
 core_source=qui; qui_version=''; core_bundle=''; core_sums=''
 
 qui_release_version() {
@@ -74,8 +75,13 @@ while (($#)); do
       (($# >= 2)) || fail "Missing value for $1"
       case $1 in
         --binary) binary=$2;; --sha256) digest=${2,,};; --config) config=$2;;
-        --core) core=$2;; --core-version) core_version=$2;;
-        --core-sha256) core_digest=${2,,};; --core-url) core_url=$2;;
+        --core)
+          [[ $2 == xray || $2 == sing-box ]] || fail 'Core must be xray or sing-box.'
+          [[ " ${cores[*]} " != *" $2 "* ]] || fail 'Duplicate --core.'
+          core=$2; cores+=("$core");;
+        --core-version) [[ -n $core ]] || fail 'Put --core before its options.'; core_versions[$core]=$2;;
+        --core-sha256) [[ -n $core ]] || fail 'Put --core before its options.'; core_digests[$core]=${2,,};;
+        --core-url) [[ -n $core ]] || fail 'Put --core before its options.'; core_urls[$core]=$2;;
         --core-source) core_source=$2;; --qui-version) qui_version=$2;;
         --core-bundle) core_bundle=$2;; --core-sums) core_sums=$2;;
       esac
@@ -193,21 +199,54 @@ if [[ $component == agent ]]; then
     [[ -f $service_directory/$packaged && ! -L $service_directory/$packaged ]] || fail "Missing packaged service file: $packaged"
   done
 fi
+host_architecture() {
+  case $(uname -m) in x86_64) printf 'amd64';; aarch64|arm64) printf 'arm64';; *) fail 'Unsupported machine architecture.';; esac
+}
+host_libc() {
+  local directory=${1:-/lib} loader
+  for loader in "$directory"/ld-musl-*.so.1; do
+    if [[ -e $loader ]]; then printf 'musl'; return; fi
+  done
+  printf 'glibc'
+}
+singbox_digest() {
+  case $1:$2 in
+    amd64:glibc) printf 'e2bdf179c15a3652955dc44867e33ca0965c9c9b91b34267dcc5a5d639a5feee';;
+    arm64:glibc) printf '29dae24d76bea3bc62d07dd3e60cfc12003de7debbd6b768df9be9c68360174e';;
+    amd64:musl) printf '41fc81fd041134d4d7d850a928d7d2cde17a7d6563953f406b22d32a68bfab1f';;
+    arm64:musl) printf '12d6d67a4edf0dd54590865b1f4f79cd09ae043a02d648e9d1b5fccc8446ee07';;
+    *) fail "不支持的架构与 libc 组合：$1:$2";;
+  esac
+}
+select_core() {
+  core=$1
+  core_version=${core_versions[$core]:-}
+  core_digest=${core_digests[$core]:-}
+  core_url=${core_urls[$core]:-}
+  if [[ $core == xray ]]; then core_version=${core_version:-26.3.27}
+  elif [[ $core_source == qui ]]; then core_version=${core_version:-1.14.4}
+  else
+    core_version=${core_version:-1.14.3}
+    if [[ -z $core_digest && $core_version == 1.14.3 ]]; then core_digest=$(singbox_digest "$(host_architecture)" "$(host_libc)"); fi
+  fi
+  core_target=/usr/local/lib/proxy-agent/$core
+}
 [[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
-if [[ $core == sing-box && $core_source == qui ]]; then
-  qui_version=$(qui_release_version)
-  [[ -z $core_url && -z $core_digest ]] || fail 'The qui source requires release SHA256SUMS, not --core-url/--core-sha256.'
-  core_version=${core_version:-1.14.4}
-  [[ $core_version == 1.14.4 ]] || fail 'This installer pins qui sing-box 1.14.4-qui.1.'
-  [[ -z $core_bundle && -z $core_sums || -f $core_bundle && ! -L $core_bundle && -f $core_sums && ! -L $core_sums ]] || fail 'Provide both local core files.'
-fi
-if [[ -n $core || -n $core_version || -n $core_digest || -n $core_url ]]; then
-  [[ $component == agent ]] || fail 'A core is only installed with --node.'
-  [[ $core == xray || $core == sing-box ]] || fail 'Core must be xray or sing-box.'
-  [[ -n $core_version ]] || fail '--core requires --core-version.'
+# Defaults apply only to first installs; an upgrade without --core carries the
+# recorded set without downloading or changing core binaries.
+if [[ $component == agent && ${#cores[@]} == 0 && ! -e $record ]]; then cores=(xray); fi
+if [[ $component != agent && ${#cores[@]} != 0 ]]; then fail 'A core is only installed with --node.'; fi
+for core in "${cores[@]}"; do
+  select_core "$core"
+  if [[ $core == sing-box && $core_source == qui ]]; then
+    qui_version=$(qui_release_version)
+    [[ -z $core_url && -z $core_digest ]] || fail 'The qui source requires release SHA256SUMS, not --core-url/--core-sha256.'
+    [[ $core_version == 1.14.4 ]] || fail 'This installer pins qui sing-box 1.14.4-qui.1.'
+    [[ -z $core_bundle && -z $core_sums || -f $core_bundle && ! -L $core_bundle && -f $core_sums && ! -L $core_sums ]] || fail 'Provide both local core files.'
+  fi
   [[ $core_version =~ ^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$ ]] || fail 'Invalid core version.'
   if [[ -n $core_digest && ! $core_digest =~ ^[0-9a-f]{64}$ ]]; then fail 'Core archive SHA256 must be lowercase hexadecimal.'; fi
-fi
+done
 [[ -z $config || -f $config && ! -L $config ]] || fail 'Config template must be a regular local file.'
 
 # Refuse symlinked system destinations rather than traversing them as root.
@@ -236,6 +275,11 @@ fi
 exec 9<>"$registry/operation.lock"
 flock -n 9 || fail 'Another installation operation is running.'
 
+record_cores=(); record_digests=()
+if [[ -e $record || -L $record ]]; then
+  [[ -f $record && ! -L $record && $(stat -c '%u:%a:%h' "$record") == 0:600:1 ]] || fail 'Unsafe installation record.'
+  qui_record_cores "$record" "$component" || fail 'Invalid installation record.'
+fi
 # Replacing a program under a running service is not an upgrade: the operator
 # stops the service, installs, and starts it again.
 service_is_active "$name" && fail "Stop $name before installing or upgrading (systemctl stop $name.service, or rc-service $name stop)."
@@ -321,22 +365,12 @@ ensure_machine_id() {
   printf 'Created %s (%s); the Agent needs it to confirm core lifetimes.\n' "$path" "$value"
 }
 
-host_architecture() {
-  case $(uname -m) in x86_64) printf 'amd64';; aarch64|arm64) printf 'arm64';; *) fail 'Unsupported machine architecture.';; esac
-}
 # The official sing-box release ships a glibc build and a musl build per
 # architecture, and only the second one starts on Alpine: the plain archive is
 # linked against the glibc loader, so the kernel answers "not found" for a binary
 # that is present. The loader is looked up in the directory given as the first
 # argument (default /lib), so the regression test
 # (deploy/linux/tests/core-asset-test.sh) can hand it a directory of its own.
-host_libc() {
-  local directory=${1:-/lib} loader
-  for loader in "$directory"/ld-musl-*.so.1; do
-    if [[ -e $loader ]]; then printf 'musl'; return; fi
-  done
-  printf 'glibc'
-}
 # The Xray release is one static binary per architecture, whatever the libc.
 # sing-box depends on it, so its asset carries the -musl suffix on a musl host;
 # the caller may name the libc as the second argument, which the test does, and
@@ -454,7 +488,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/machine-id"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/machine-id"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
@@ -517,21 +551,19 @@ fi
 # Agent's machine id can be published before the program itself.
 if [[ $component == agent ]]; then ensure_machine_id; fi
 
-# A first install writes the packaged configuration template. An upgrade keeps
-# the configuration that is already in place.
+# A first install uses the packaged configuration template. An upgrade retains
+# existing settings, normalizing only the Agent core settings below.
 config_source=''
 if [[ ! -e $etc/config.yaml ]]; then
   config_source=$config
   [[ -n $config_source ]] || config_source=$root/examples/$component.yaml
   [[ -f $config_source && ! -L $config_source ]] || fail 'Config template must be a regular local file.'
   install -o root -g root -m 0600 -- "$config_source" "$stage/config"
-  if [[ $core == sing-box ]]; then
-    sed -i 's/^core_name: xray$/core_name: sing-box/;s@^core_path: /usr/local/lib/proxy-agent/xray$@core_path: /usr/local/lib/proxy-agent/sing-box@' "$stage/config"
-  fi
 fi
 
 core_binary_digest=''
-if [[ -n $core ]]; then
+for core in "${cores[@]}"; do
+  select_core "$core"
   asset=$(core_asset "$core")
   url=$core_url
   release_version=$core_version
@@ -561,6 +593,26 @@ if [[ -n $core ]]; then
   install -o root -g root -m 0755 -- "${candidates[0]}" "$stage/core"
   verify_elf "$stage/core"
   core_binary_digest=$(sha256sum -- "$stage/core"); core_binary_digest=${core_binary_digest%% *}
+  mv -- "$stage/core" "$stage/core-$core"
+  if [[ " ${record_cores[*]} " == *" $core "* ]]; then
+    for i in "${!record_cores[@]}"; do
+      if [[ ${record_cores[i]} == "$core" ]]; then record_digests[i]=$core_binary_digest; fi
+    done
+  else record_cores+=("$core"); record_digests+=("$core_binary_digest"); fi
+  rm -rf -- "$stage/extract"
+done
+
+# An upgrade without core selection preserves existing configuration verbatim.
+# When installing cores, preserve other settings. The scalar pair keeps old Agents
+# usable during a rollback; cores is authoritative for the multi-core Agent.
+if [[ $component == agent && ${#record_cores[@]} -gt 0 && ( ${#cores[@]} -gt 0 || -n $config_source ) ]]; then
+  if [[ -z $config_source ]]; then
+    [[ -f $etc/config.yaml && ! -L $etc/config.yaml ]] || fail 'Unsafe Agent configuration.'
+    config_source=$etc/config.yaml
+    install -o root -g root -m 0600 -- "$config_source" "$stage/config"
+  fi
+  qui_agent_core_config "$stage/config" "$stage/config.new"
+  mv -- "$stage/config.new" "$stage/config"
 fi
 
 if ! getent group "$account" >/dev/null; then groupadd --system "$account"; fi
@@ -617,10 +669,10 @@ if [[ -n $host_network_service_digest ]]; then
   fi
 fi
 if [[ -n $config_source ]]; then publish "$stage/config" "$etc/config.yaml" "$account_uid" "$account_gid" 0600; fi
-if [[ -n $core ]]; then
+for core in "${cores[@]}"; do
   install -d -o root -g root -m 0755 /usr/local/lib/proxy-agent
-  publish "$stage/core" "$core_target" root root 0755
-fi
+  publish "$stage/core-$core" "/usr/local/lib/proxy-agent/$core" root root 0755
+done
 service_reload_definitions
 # Tuning uses the same publish/rollback bookkeeping as the enforced-source
 # helper. Stage verified package files before publishing; record on lines 11/12.
@@ -679,44 +731,7 @@ if [[ -n $host_network_service_digest ]]; then
   fi
 fi
 
-# An agent upgrade without --core replaces the program and unit only, so the
-# recorded core has to be carried forward: writing an empty core would make
-# uninstall.sh leave the installed core behind. The old record is read by the
-# same fixed line numbers every other script uses, and a record that is not
-# complete or does not name a known core is not trusted and is replaced as
-# before. $core itself stays empty here: setting it would trigger a core
-# download and the first-install configuration rewrite.
-core_record=$core
-core_record_digest=$core_binary_digest
-if [[ $component == agent && -z $core && -f $record && ! -L $record ]] \
-  && [[ $(sed -n '1p' "$record") == proxycontrol-install-v1 ]] \
-  && [[ $(sed -n '2p' "$record") == agent ]] \
-  && [[ $(sed -n '7p' "$record") == installed ]]; then
-  previous_core=$(sed -n '5p' "$record")
-  previous_core_digest=$(sed -n '6p' "$record")
-  if [[ ( $previous_core == xray || $previous_core == sing-box ) && $previous_core_digest =~ ^[0-9a-f]{64}$ ]]; then
-    core_record=$previous_core
-    core_record_digest=$previous_core_digest
-  fi
-fi
-
-printf 'proxycontrol-install-v1\n%s\n%s\n%s\n%s\n%s\ninstalled\n' "$component" "$digest" "$unit_digest" "$core_record" "$core_record_digest" > "$stage/installed-manifest"
-# The enforced-source units are recorded after the completion marker so the fixed
-# line numbers every other script reads stay unchanged. A record written before
-# this feature has no such lines, and uninstall.sh then leaves those units alone.
-if [[ -n $host_network_service_digest ]]; then
-  printf '%s\n%s\n' "$host_network_service_digest" "$host_network_path_digest" >> "$stage/installed-manifest"
-fi
-# Line 10 names the init system the service definitions were written for, so
-# uninstall.sh can refuse to remove a service with the tooling of the other one.
-# It is appended last to keep the fixed line numbers above, and a systemd record
-# keeps the original file contents: no line, which reads as systemd.
-if [[ $init_system == openrc ]]; then
-  printf 'openrc\n' >> "$stage/installed-manifest"
-elif [[ $component == agent ]]; then
-  printf 'systemd\n' >> "$stage/installed-manifest"
-fi
-if [[ $component == agent ]]; then printf '%s\n%s\n' "$tuning_service_digest" "$tuning_path_digest" >> "$stage/installed-manifest"; fi
+qui_write_record "$stage/installed-manifest"
 chmod 0600 "$stage/installed-manifest"
 publish "$stage/installed-manifest" "$record" root root 0600
 if $reinstall; then rm -- "$removed"; sync -f -- "$registry"; fi
@@ -724,8 +739,8 @@ verify_binary "$target" "$digest"
 publishing_started=false
 
 printf '%s installed at %s with unit %s.\n' "$name" "$target" "$unit"
-if [[ -n $core ]]; then printf 'Core %s %s installed at %s.\n' "$core" "$core_version" "$core_target"; fi
-printf 'Existing configuration, identity and data were left untouched and nothing was started.\n'
+for core in "${cores[@]}"; do printf 'Core %s installed at /usr/local/lib/proxy-agent/%s.\n' "$core" "$core"; done
+printf 'Identity and data were retained. Review the Agent core settings before starting.\n'
 if [[ $init_system == systemd ]]; then
   printf 'Next: review %s/config.yaml, then systemctl enable --now %s.service.\n' "$etc" "$name"
 else

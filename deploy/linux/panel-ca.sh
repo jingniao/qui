@@ -63,7 +63,7 @@ exec 9>"$registry/operation.lock"
 flock -n 9 || fail 'Another installation operation is running.'
 record=$registry/panel.manifest
 [[ -f $record && ! -L $record && $(stat -c '%u:%a' "$record") == 0:600 && $(sed -n '7p' "$record") == installed ]] || fail 'No completed Panel installation.'
-[[ $(sed -n '1p' "$record") == proxycontrol-install-v1 && $(sed -n '2p' "$record") == panel ]] || fail 'Unknown installation record.'
+qui_record_cores "$record" panel || fail 'Unknown installation record.'
 
 report(){
   local file=$1 digest

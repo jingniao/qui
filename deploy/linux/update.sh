@@ -9,8 +9,8 @@
 # from the local disk, for a host that has no route to the release. The script
 # replaces only the program, the service definitions (systemd units or OpenRC init
 # scripts), the packaged scripts and the install record, and it does so by running the
-# deploy/linux/install.sh of the archive; configuration, node identity and every
-# database are left untouched.
+# deploy/linux/install.sh of the archive. Agent core settings are normalized
+# and snapshotted for rollback; node identity and other configuration are retained.
 #
 # An update is reversible and survives being interrupted. While the service is stopped
 # and before install.sh runs, the files install.sh may replace are copied into a fresh
@@ -58,7 +58,7 @@ usage() {
 
 脚本从 https://github.com/$repository/releases 下载归档与 SHA256SUMS，校验摘要
 后调用归档里的 deploy/linux/install.sh 原地替换程序、服务定义（systemd 单元或
-OpenRC 初始化脚本）、随包脚本与安装记录。配置、身份与数据不会被修改；面板更新前
+OpenRC 初始化脚本）、随包脚本与安装记录。Agent 核心配置会规范化并纳入回滚；身份与其余配置保留。面板更新前
 会在服务停止时把数据库备份到 /var/lib/proxy-panel/backups/。更新前会把可能被替换
 的文件快照到 /var/lib/proxycontrol-install/rollback.*，并写入进度日志；新版本启动
 后十秒内不重启才算成功。失败、Ctrl-C、SSH 断线、kill -9 或断电后都会恢复到更新前
@@ -111,15 +111,12 @@ downgrade=false
 # Backup files written through a .partial name that the signal handler has to remove.
 partial_files=()
 
-# The install record is the fixed seven-line file install.sh writes: line 1 names
-# the format, line 2 the component and line 7 the completion marker.
+# Read both the legacy fixed-core v1 and the multi-core v2 install records.
 record_complete() {
   local component=$1 record
   record=$registry/$component.manifest
   [[ -f $record && ! -L $record ]] || return 1
-  [[ $(sed -n '1p' "$record") == proxycontrol-install-v1 ]] || return 1
-  [[ $(sed -n '2p' "$record") == "$component" ]] || return 1
-  [[ $(sed -n '7p' "$record") == installed ]] || return 1
+  qui_record_cores "$record" "$component"
 }
 
 # Print the raw value of the first top-level "key: value" line of a file, with a
@@ -376,6 +373,9 @@ component_files() {
       "$root/usr/local/lib/proxy-agent/host-network-watch" \
       "$root/etc/init.d/proxy-agent-tuning" \
       "$root/usr/local/lib/proxy-agent/tuning-watch"
+  fi
+  if [[ $component == agent ]]; then
+    printf '%s\n' "$root/usr/local/lib/proxy-agent/xray" "$root/usr/local/lib/proxy-agent/sing-box" "$root/etc/proxy-agent/config.yaml"
   fi
   printf '%s\n' "$registry/$component.manifest"
 }
@@ -837,6 +837,12 @@ update_component() {
   local binary=$source_dir/bin/proxy-$1 digest='' previous='' backup='' installed=''
   local was_active=false status=0
   [[ $component == agent ]] && mode=--node
+  # An older target installer cannot carry v2's complete set forward. Refuse
+  # before stopping; using it would silently lose uninstall/update ownership.
+  if [[ $component == agent && $(sed -n '1p' "$registry/agent.manifest") == proxycontrol-install-v2 ]] \
+    && ! grep -q 'qui_write_record' "$source_dir/deploy/linux/install.sh"; then
+    fail 'Target installer cannot preserve install record v2; use a multi-core capable release.'
+  fi
   previous=$(installed_version "$component")
   if service_is_active "$name"; then was_active=true; fi
   # The globals the journal and the signal handler read are filled before the service

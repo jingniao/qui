@@ -314,7 +314,7 @@ func TestCoreUpdateUndispatchableLegacyTaskIsClosed(t *testing.T) {
 	ctx := context.Background()
 	// Exactly what 0107 writes for a historical task: placeholder version and
 	// digest, empty URL, still queued.
-	if _, err := r.Database.Exec("INSERT INTO core_update_tasks("+coreTaskColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)", "task-legacy", nodeID, revision.ID, "xray", "0.0.0", "", strings.Repeat("0", 64), 1, "queued", "upd_legacy", "owner", now(), now()); err != nil {
+	if _, err := r.Database.Exec("INSERT INTO core_update_tasks("+coreTaskColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,0)", "task-legacy", nodeID, revision.ID, "xray", "0.0.0", "", strings.Repeat("0", 64), 1, "queued", "upd_legacy", "owner", now(), now()); err != nil {
 		t.Fatal(err)
 	}
 	command, err := r.PendingCoreUpdate(ctx, nodeID)

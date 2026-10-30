@@ -17,6 +17,8 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	for _, item := range []struct{ table, columns string }{
+		{"node_traffic_cursors", "node_id,epoch,credential_id,core,revision,upload_bytes,download_bytes,observed_at"},
+		{"core_traffic_samples", "node_id,core,epoch,observed_at,upload_bytes,download_bytes"},
 		{"access_batches", "node_id,batch_id,digest,received_at"}, {"traffic_batches", "node_id,batch_id,digest,received_at"},
 		{"access_rollups", "id,bucket,node_id,user_id,device_id,domain,target_ip,allowed,dimensions_json,connections,upload_bytes,download_bytes,traffic_known"},
 		{"traffic_hourly", "bucket,node_id,user_id,device_id,upload_bytes,download_bytes"}, {"traffic_daily", "bucket,node_id,user_id,device_id,upload_bytes,download_bytes"},

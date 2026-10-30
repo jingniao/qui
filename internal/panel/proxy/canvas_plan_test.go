@@ -10,17 +10,21 @@ import (
 	"testing"
 )
 
-func enableCanvasForward(t *testing.T, p *publishPanel) {
+func enableCanvasForwardFor(t *testing.T, p *publishPanel, nodeID string) {
 	t.Helper()
-	n, err := p.service.Nodes.Get(p.ctx, p.nodeA)
+	n, err := p.service.Nodes.Get(p.ctx, nodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	n.Capabilities.ForwardInboundSupported = true
 	raw, _ := json.Marshal(n.Capabilities)
-	if _, err := p.database.Exec("UPDATE nodes SET capabilities_json=? WHERE id=?", string(raw), p.nodeA); err != nil {
+	if _, err := p.database.Exec("UPDATE nodes SET capabilities_json=? WHERE id=?", string(raw), nodeID); err != nil {
 		t.Fatal(err)
 	}
+}
+func enableCanvasForward(t *testing.T, p *publishPanel) {
+	t.Helper()
+	enableCanvasForwardFor(t, p, p.nodeA)
 }
 func forwardCanvasLayout(p *publishPanel) CanvasLayout {
 	return canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, "", []CanvasConnection{{ID: "f", Source: "i-a", Target: "i-b", Type: "port_forward", ListenPort: canvasTestPort(12345), TargetPort: canvasTestPort(443), TargetHost: "example.com", SupportTCP: true}})
@@ -300,7 +304,7 @@ func TestCanvasTunnelProxyChainEquivalent(t *testing.T) {
 		t.Fatal(err)
 	}
 	scheme = savePlanScheme(t, p, layout)
-	if _, err := p.database.Exec("UPDATE canvas_schemes SET execution='client' WHERE id=?", scheme.ID); err != nil {
+	if _, err := p.database.Exec("UPDATE canvas_schemes SET execution='client',layout_json=json_set(layout_json,'$.connections',json((SELECT json_group_array(json_remove(value,'$.tunnelId')) FROM json_each(canvas_schemes.layout_json,'$.connections')))) WHERE id=?", scheme.ID); err != nil {
 		t.Fatal(err)
 	}
 	result, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, nil)
@@ -374,29 +378,79 @@ func TestCanvasPlanRelayDiffMatchesPublishedObjects(t *testing.T) {
 	}
 }
 
-// A TCP forward may share a port with an existing UDP-only inbound; a TCP
-// occupant still conflicts.
-func TestCanvasPlanTCPAndUDPShareAPort(t *testing.T) {
+// Listener ports are reserved by number on a node, exactly as the Agent's
+// DesiredState validation does: a UDP listener cannot take a port an enabled TCP
+// inbound of the same node already listens on, and a shared port between two
+// listeners of the plan conflicts too.
+func TestCanvasPlanReservesListenerPortNumber(t *testing.T) {
 	p := newPublishPanel(t)
-	enableCanvasForward(t, p)
-	layout := forwardCanvasLayout(p)
-	layout.Connections[0].ListenPort = canvasTestPort(12348)
-	scheme := savePlanScheme(t, p, layout)
-	udp := InboundInput{Name: "UDP forward", NodeID: p.nodeA, Protocol: "forward", Listen: "0.0.0.0", Port: 12348, Enabled: true, DefaultOutbound: "direct",
-		Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "1.1.1.1", Port: 53, Network: "udp"}}}
-	if _, err := p.service.SaveInbound(p.ctx, "", udp); err != nil {
+	enableCanvasForwardFor(t, p, p.nodeA)
+	if _, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "TCP owner", NodeID: p.nodeA, Protocol: "socks5", Listen: "0.0.0.0", Port: 12348, Enabled: true, DefaultOutbound: "direct"}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, nil)
-	if err != nil || !result.OK || len(result.Conflicts) != 0 {
-		t.Fatalf("TCP forward next to a UDP inbound: %+v %v", result, err)
+	layout := forwardCanvasLayout(p)
+	layout.Connections[0].SupportTCP = false
+	layout.Connections[0].SupportUDP = true
+	layout.Connections[0].ListenPort = canvasTestPort(12348)
+	scheme := savePlanScheme(t, p, layout)
+	conflict, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, nil)
+	if err != nil || conflict.OK || len(conflict.Conflicts) != 1 {
+		t.Fatalf("UDP listener on the TCP port: %+v %v", conflict, err)
 	}
-	if _, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "TCP owner", NodeID: p.nodeA, Protocol: "socks5", Listen: "0.0.0.0", Port: 12349, Enabled: true, DefaultOutbound: "direct"}); err != nil {
+	if c := conflict.Conflicts[0]; c.With != "TCP owner" || c.Reason != "listener" || c.Port != 12348 || c.ConnectionID != layout.Connections[0].ID {
+		t.Fatalf("conflict %+v", c)
+	}
+	if conflict.Connections[0].Status != "error" || conflict.Connections[0].Message == "" {
+		t.Fatalf("connection row %+v", conflict.Connections[0])
+	}
+	// The Agent validates enabled listeners only, so a disabled inbound on that
+	// port reserves nothing.
+	if _, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "off", NodeID: p.nodeA, Protocol: "forward", Listen: "0.0.0.0", Port: 12349, Enabled: false, DefaultOutbound: "direct",
+		Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "1.1.1.1", Port: 53, Network: "udp"}}}); err != nil {
 		t.Fatal(err)
 	}
 	layout.Connections[0].ListenPort = canvasTestPort(12349)
-	conflict, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, &layout)
-	if err != nil || conflict.OK || len(conflict.Conflicts) != 1 || conflict.Conflicts[0].With != "TCP owner" {
-		t.Fatalf("TCP forward on a TCP port: %+v %v", conflict, err)
+	free, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, &layout)
+	if err != nil || !free.OK || len(free.Conflicts) != 0 {
+		t.Fatalf("disabled inbound reserved a port: %+v %v", free, err)
+	}
+}
+
+// A drawing the canvas accepts must also render a DesiredState the Agent
+// accepts: the planner and desiredstate.Validate apply the same numeric rule, so
+// a UDP listener blocks the relay number and the accepted drawing publishes.
+func TestCanvasPlanRelayPortMatchesDesiredState(t *testing.T) {
+	p := newPublishPanel(t)
+	enableCanvasForwardFor(t, p, p.nodeB)
+	occupant, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "UDP forward", NodeID: p.nodeB, Protocol: "forward", Listen: "0.0.0.0", Port: 8443, Enabled: true, DefaultOutbound: "direct",
+		Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "1.1.1.1", Port: 53, Network: "udp"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The Trojan relay the canvas generates on nodeB listens on TCP 8443.
+	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, p.inbound.ID, []CanvasConnection{canvasTestHop("i-a", "i-b", 8443)})
+	scheme := savePlanScheme(t, p, layout)
+	result, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, nil)
+	if err != nil || result.OK || len(result.Conflicts) != 1 || result.Conflicts[0].With != "UDP forward" {
+		t.Fatalf("relay on the UDP number: %+v %v", result, err)
+	}
+	// Saving that listener without the planner is refused by the same rule.
+	_, err = p.service.SaveInbound(p.ctx, "", InboundInput{Name: "relay", NodeID: p.nodeB, Protocol: "trojan", Listen: "0.0.0.0", Port: 8443, Enabled: true, InternalRelay: true, DefaultOutbound: "direct"})
+	if err == nil || !strings.Contains(err.Error(), "inbound port") {
+		t.Fatalf("second enabled listener on 8443: %v", err)
+	}
+	// With the number free the same drawing is accepted and publishes a node state
+	// that passes the Agent's own desiredstate validation.
+	if err := p.service.Repository.DeleteInbound(p.ctx, occupant.ID); err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, nil); err != nil || !accepted.OK {
+		t.Fatalf("free port rejected: %+v %v", accepted, err)
+	}
+	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.service.Snapshot(p.ctx, p.nodeB, p.users); err != nil {
+		t.Fatalf("DesiredState rejected the published relay: %v", err)
 	}
 }

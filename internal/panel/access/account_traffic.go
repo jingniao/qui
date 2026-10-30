@@ -69,6 +69,12 @@ func (r *Repository) IngestTraffic(ctx context.Context, batch traffic.Batch, now
 		return err
 	}
 	for _, counter := range batch.Counters {
+		if counter.Kind == "node" {
+			if err := ingestNodeCounter(ctx, tx, batch.NodeID, counter); err != nil {
+				return err
+			}
+			continue
+		}
 		var upload, download int64
 		var observed string
 		var owner, device string

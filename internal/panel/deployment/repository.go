@@ -223,6 +223,9 @@ func (r *Repository) Deploy(ctx context.Context, id int64) error {
 	if err := nodeAvailable(ctx, tx, state.NodeID, ""); err != nil {
 		return err
 	}
+	if err := validateStateCoresTx(ctx, tx, state); err != nil {
+		return err
+	}
 	if err := r.relayTargetsInTransaction(ctx, tx, state); err != nil {
 		return err
 	}

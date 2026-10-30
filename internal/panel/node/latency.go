@@ -58,6 +58,9 @@ func (s *LatencyScheduler) Run(ctx context.Context) {
 }
 
 func (r *Repository) scheduleLatency(ctx context.Context, now time.Time) error {
+	if _, err := r.Database.ExecContext(ctx, "DELETE FROM node_metric_samples WHERE at<?", timestamp(now.Add(-7*24*time.Hour))); err != nil {
+		return err
+	}
 	if _, err := r.Database.ExecContext(ctx, "DELETE FROM node_latency_samples WHERE at<?", timestamp(now.Add(-7*24*time.Hour))); err != nil {
 		return err
 	}

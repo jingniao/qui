@@ -30,6 +30,18 @@ func stripLatencySnapshot(ctx context.Context, path string) error {
 	if present == 0 {
 		return nil
 	}
+	var metricsPresent int
+	if err = database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='node_metric_samples'").Scan(&metricsPresent); err != nil {
+		return err
+	}
+	if metricsPresent == 1 {
+		if _, err = database.ExecContext(ctx, "PRAGMA secure_delete=ON"); err != nil {
+			return err
+		}
+		if _, err = database.ExecContext(ctx, "DELETE FROM node_metric_samples"); err != nil {
+			return err
+		}
+	}
 	for _, q := range []string{"PRAGMA secure_delete=ON", "DELETE FROM node_latency_samples", "DELETE FROM node_tcp_probes WHERE source='scheduled'", "VACUUM"} {
 		if _, err = database.ExecContext(ctx, q); err != nil {
 			return err

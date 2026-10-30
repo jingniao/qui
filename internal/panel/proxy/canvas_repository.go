@@ -86,7 +86,11 @@ func scanCanvasScheme(row interface{ Scan(...any) error }) (CanvasScheme, error)
 }
 
 func (r *Repository) CanvasScheme(ctx context.Context, schemeID string) (CanvasScheme, error) {
-	return scanCanvasScheme(r.Database.QueryRowContext(ctx, "SELECT "+canvasSchemeColumns+" FROM canvas_schemes WHERE id=?", schemeID))
+	scheme, err := scanCanvasScheme(r.Database.QueryRowContext(ctx, "SELECT "+canvasSchemeColumns+" FROM canvas_schemes WHERE id=?", schemeID))
+	if err == nil {
+		scheme.Layout, err = r.resolveCanvasLayout(ctx, scheme.Execution, scheme.Layout)
+	}
+	return scheme, err
 }
 
 func (r *Repository) CanvasSchemes(ctx context.Context, page, size int) ([]CanvasScheme, int, error) {
@@ -107,13 +111,30 @@ func (r *Repository) CanvasSchemes(ctx context.Context, page, size int) ([]Canva
 		}
 		items = append(items, item)
 	}
-	return items, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	for n := range items {
+		var e error
+		items[n].Layout, e = r.resolveCanvasLayout(ctx, items[n].Execution, items[n].Layout)
+		if e != nil {
+			return nil, 0, e
+		}
+	}
+	return items, total, nil
 }
 
 // SaveCanvasScheme creates or updates one scheme. An update is conditional on
 // the stored updated_at, so two canvases open on the same scheme cannot
 // overwrite each other silently.
 func (r *Repository) SaveCanvasScheme(ctx context.Context, schemeID string, input CanvasSchemeInput) (CanvasScheme, error) {
+	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
+		return CanvasScheme{}, err
+	}
+	input.Layout.Connections = append([]CanvasConnection(nil), input.Layout.Connections...)
 	data, err := json.Marshal(input.Layout)
 	if err != nil {
 		return CanvasScheme{}, err
@@ -127,11 +148,24 @@ func (r *Repository) SaveCanvasScheme(ctx context.Context, schemeID string, inpu
 	}
 	defer tx.Rollback()
 	stamp := timestamp()
-	if schemeID == "" {
+	creating := schemeID == ""
+	if creating {
 		schemeID, err = id.New()
 		if err != nil {
 			return CanvasScheme{}, err
 		}
+	}
+	if err := saveInlineTunnels(ctx, tx, schemeID, &input); err != nil {
+		return CanvasScheme{}, err
+	}
+	data, err = json.Marshal(input.Layout)
+	if err != nil {
+		return CanvasScheme{}, err
+	}
+	if len(data) > canvasMaxLayoutBytes {
+		return CanvasScheme{}, errors.New("canvas layout exceeds size limit")
+	}
+	if creating {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO canvas_schemes(id,name,execution,layout_json,created_at,updated_at) VALUES(?,?,?,?,?,?)", schemeID, input.Name, input.Execution, string(data), stamp, stamp); err != nil {
 			return CanvasScheme{}, err
 		}
@@ -163,6 +197,9 @@ func (r *Repository) SaveCanvasScheme(ctx context.Context, schemeID string, inpu
 // DeleteCanvasScheme removes the drawing only. Every proxy object a scheme may
 // describe stays exactly as it is.
 func (r *Repository) DeleteCanvasScheme(ctx context.Context, schemeID string) error {
+	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
+		return err
+	}
 	result, err := r.Database.ExecContext(ctx, "DELETE FROM canvas_schemes WHERE id=?", schemeID)
 	if err != nil {
 		return err

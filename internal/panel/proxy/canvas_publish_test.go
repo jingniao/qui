@@ -127,7 +127,7 @@ func TestCanvasPublishIsIdempotent(t *testing.T) {
 	if inbounds[0].ID != firstInbounds[0].ID || outbounds[0].ID != firstOutbounds[0].ID {
 		t.Fatal("re-publishing replaced the generated objects instead of updating them")
 	}
-	if p.deployer.calls != 2 {
+	if p.deployer.calls != 1 {
 		t.Fatalf("deployer called %d times", p.deployer.calls)
 	}
 }

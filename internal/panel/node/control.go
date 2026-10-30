@@ -201,6 +201,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		c.Repository.Offline(cleanup, id)
+		c.Repository.unconfirmTuning(cleanup, id)
 		if c.Notify != nil {
 			c.Notify(id)
 		}
@@ -208,6 +209,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		delete(c.connected, id)
 		c.mu.Unlock()
 	}()
+	if err := c.Repository.unconfirmTuning(ctx, id); err != nil {
+		return status.Error(codes.Internal, "tuning recovery failed")
+	}
+	sentTuningID := ""
 	last, err := c.Repository.HandshakeSequence(ctx, id, first.GetHello().LastAckedSequence)
 	if err != nil {
 		return status.Error(codes.FailedPrecondition, "original node sequence or accepted message unavailable")
@@ -225,6 +230,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	healthCheckSupported := first.GetHello().HealthCheckSupported
 	if err := c.Repository.healthCapability(ctx, id, healthCheckSupported); err != nil {
 		return status.Error(codes.Internal, "health capability persistence failed")
+	}
+	multiSupported := first.GetHello().MultiCoreSupported
+	nodeTrafficSupported := first.GetHello().NodeTrafficSupported && c.AccessRecorder != nil
+	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET multi_core_supported=?,node_traffic_supported=? WHERE id=?", multiSupported, nodeTrafficSupported, id); err != nil {
+		return status.Error(codes.Internal, "multi-core negotiation persistence failed")
 	}
 	updateSupported := first.GetHello().CoreUpdateSupported && c.CoreUpdates != nil
 	agentUpdateSupported := first.GetHello().AgentUpdateSupported && c.AgentUpdates != nil
@@ -250,6 +260,8 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		message := &pb.ServerMessage{NodeId: id, MessageId: messageID, Sequence: serverSequence, Timestamp: timestamppb.Now()}
 		switch p := payload.(type) {
+		case *pb.TuningCommand:
+			message.Payload = &pb.ServerMessage_TuningCommand{TuningCommand: p}
 		case *pb.TCPProbeCommand:
 			message.Payload = &pb.ServerMessage_TcpProbeCommand{TcpProbeCommand: p}
 		case *pb.DeviceGateCommand:
@@ -264,6 +276,8 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			message.Payload = &pb.ServerMessage_ApplyCommand{ApplyCommand: p}
 		case *pb.RollbackCommand:
 			message.Payload = &pb.ServerMessage_RollbackCommand{RollbackCommand: p}
+		case *pb.RemoveCoreCommand:
+			message.Payload = &pb.ServerMessage_RemoveCoreCommand{RemoveCoreCommand: p}
 		case *pb.CoreUpdateCommand:
 			message.Payload = &pb.ServerMessage_CoreUpdateCommand{CoreUpdateCommand: p}
 		case *pb.AgentUpdateCommand:
@@ -271,7 +285,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		return stream.Send(message)
 	}
-	if err := send(&pb.Welcome{LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: ""}); err != nil {
+	if err := send(&pb.Welcome{MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: ""}); err != nil {
 		return err
 	}
 	type gatePacket struct {
@@ -308,7 +322,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			return status.Error(codes.Unauthenticated, "node certificate revoked or disabled")
 		}
 		current, e := c.Repository.Get(ctx, id)
-		if e != nil || !current.Capabilities.GetDeviceGateSupported() {
+		if e != nil || !AnyGateSupported(current.Capabilities) {
 			return nil
 		}
 		command, e := c.DeviceGates(ctx, id)
@@ -372,6 +386,15 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			if c.AccessRecorder == nil {
 				return status.Error(codes.FailedPrecondition, "traffic recorder unavailable")
 			}
+			decoded, decodeErr := traffic.Decode(batch.BatchJson)
+			if decodeErr != nil {
+				return status.Error(codes.InvalidArgument, "invalid traffic batch")
+			}
+			for _, counter := range decoded.Counters {
+				if counter.Kind == "node" && !nodeTrafficSupported {
+					return status.Error(codes.FailedPrecondition, "node traffic not negotiated")
+				}
+			}
 			trafficBatchID, err = c.AccessRecorder.RecordTraffic(ctx, id, batch, message.Sequence > lastSequence)
 			if err != nil {
 				return status.Error(codes.FailedPrecondition, "traffic batch rejected")
@@ -381,7 +404,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			// A live connection snapshot is advisory: keep it if it is valid,
 			// ignore it otherwise, but never fail the stream over it. The
 			// envelope size is already bounded by validateMessage.
-			if snapshot, decodeErr := traffic.DecodeConnections(status.SnapshotJson); decodeErr == nil && snapshot.NodeID == id {
+			if multiSupported && len(status.Cores) > 0 {
+				if c.recordCoreConnections(id, status) == nil && c.ConnectionsRecorded != nil {
+					c.ConnectionsRecorded(ctx, id)
+				}
+			} else if snapshot, decodeErr := traffic.DecodeConnections(status.SnapshotJson); decodeErr == nil && snapshot.NodeID == id {
 				if c.Connections.Record(id, snapshot) == nil && c.ConnectionsRecorded != nil {
 					c.ConnectionsRecorded(ctx, id)
 				}
@@ -410,6 +437,17 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			}
 			if err := c.CoreUpdates.CoreUpdateResult(ctx, id, result); err != nil {
 				return status.Error(codes.FailedPrecondition, "core update result rejected")
+			}
+		}
+		if result := message.GetRemoveCoreResult(); result != nil {
+			handler, ok := c.CoreUpdates.(interface {
+				RemoveCoreResult(context.Context, string, *pb.RemoveCoreResult) error
+			})
+			if !multiSupported || !ok {
+				return status.Error(codes.FailedPrecondition, "core removal unsupported")
+			}
+			if err := handler.RemoveCoreResult(ctx, id, result); err != nil {
+				return status.Error(codes.FailedPrecondition, "core removal result rejected")
 			}
 		}
 		if result := message.GetAgentUpdateResult(); result != nil {
@@ -503,6 +541,20 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				continue
 			}
 		}
+		if command, err := c.Repository.pendingTuning(ctx, id); err != nil {
+			return status.Error(codes.Internal, "tuning command unavailable")
+		} else if command != nil && command.RequestId != sentTuningID {
+			current, err := c.Repository.Get(ctx, id)
+			if err != nil {
+				return err
+			}
+			if current.Capabilities.GetTuningSupported() {
+				sentTuningID = command.RequestId
+				if err = send(command); err != nil {
+					return err
+				}
+			}
+		}
 		if first.GetHello().TcpProbeSupported {
 			command, err := c.Repository.pendingTCPProbe(ctx, id)
 			if err != nil {
@@ -527,6 +579,21 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			}
 		}
 		if c.Deployment != nil && message.GetApplyResult() == nil {
+			if multiSupported {
+				if handler, ok := c.CoreUpdates.(interface {
+					PendingRemoveCore(context.Context, string) (*pb.RemoveCoreCommand, error)
+				}); ok {
+					command, err := handler.PendingRemoveCore(ctx, id)
+					if err != nil {
+						return status.Error(codes.Internal, "core removal unavailable")
+					}
+					if command != nil {
+						if err := send(command); err != nil {
+							return err
+						}
+					}
+				}
+			}
 			if updateSupported && message.GetCoreUpdateResult() == nil {
 				command, err := c.CoreUpdates.PendingCoreUpdate(ctx, id)
 				if err != nil {
@@ -603,7 +670,18 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		// so accept and ignore the message rather than failing the stream.
 		return nil
 	}
+	if result := message.GetRemoveCoreResult(); result != nil {
+		return validateRemoveResult(result)
+	}
 	if status := message.GetConnectionStatus(); status != nil {
+		if len(status.Cores) > 2 {
+			return errors.New("too many core snapshots")
+		}
+		for _, core := range status.Cores {
+			if core == nil || !CoreNameValid(core.Name) || len(core.SnapshotJson) > traffic.MaxConnectionSnapshotBytes {
+				return errors.New("invalid core snapshot")
+			}
+		}
 		// A malformed or oversized live connection snapshot must never fail the
 		// stream; the handler re-decodes and ignores anything invalid. Only the
 		// envelope size is enforced here.
@@ -625,6 +703,9 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		return nil
 	}
 	if heartbeat := message.GetHeartbeat(); heartbeat != nil {
+		if err := validateCoreStatuses(heartbeat.Cores); err != nil {
+			return err
+		}
 		if err := validateHostMetrics(heartbeat); err != nil {
 			return err
 		}
@@ -692,6 +773,9 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 				return errors.New("invalid resource percentage")
 			}
 		}
+		if err := validateK2bMetrics(heartbeat); err != nil {
+			return err
+		}
 		if heartbeat.PublicIp != "" && net.ParseIP(heartbeat.PublicIp) == nil {
 			return errors.New("invalid public IP")
 		}
@@ -701,6 +785,9 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		return nil
 	}
 	if capabilities := message.GetCapabilities(); capabilities != nil {
+		if err := validateMultiCapabilities(capabilities); err != nil {
+			return err
+		}
 		if len(capabilities.Protocols) > 16 || len(capabilities.CoreVersion) > 64 {
 			return errors.New("invalid core capabilities")
 		}
@@ -721,6 +808,9 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 			return errors.New("invalid health result")
 		}
 		return nil
+	}
+	if result := message.GetTuningResult(); result != nil {
+		return validateTuningResult(result)
 	}
 	if r := message.GetTcpProbeResult(); r != nil && r.Id != "" && len(r.Id) <= 128 {
 		return nil

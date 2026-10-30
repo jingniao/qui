@@ -4,6 +4,7 @@
 DELETE /api/v1/admins/{id}
 DELETE /api/v1/backups/{id}
 DELETE /api/v1/canvas-schemes/{id}
+DELETE /api/v1/canvas-tunnels/{id}
 DELETE /api/v1/devices/{id}
 DELETE /api/v1/devices/{id}/credentials/{protocol}
 DELETE /api/v1/inbounds/{id}
@@ -34,6 +35,8 @@ GET /api/v1/backups
 GET /api/v1/backups/{id}/download
 GET /api/v1/canvas-schemes
 GET /api/v1/canvas-schemes/{id}
+GET /api/v1/canvas-tunnels
+GET /api/v1/canvas-tunnels/legacy-objects
 GET /api/v1/core-updates
 GET /api/v1/dashboard
 GET /api/v1/deployment-batches
@@ -47,14 +50,17 @@ GET /api/v1/node-groups
 GET /api/v1/nodes
 GET /api/v1/nodes/{id}
 GET /api/v1/nodes/{id}/certificate-status
+GET /api/v1/nodes/{id}/cores/{component}/removals
 GET /api/v1/nodes/{id}/deletion-preview
 GET /api/v1/nodes/{id}/enrollment-status
 GET /api/v1/nodes/{id}/health-checks
 GET /api/v1/nodes/{id}/latency
 GET /api/v1/nodes/{id}/latency-targets
 GET /api/v1/nodes/{id}/meta
+GET /api/v1/nodes/{id}/metrics
 GET /api/v1/nodes/{id}/restart-core
 GET /api/v1/nodes/{id}/tcp-probes
+GET /api/v1/nodes/{id}/tuning
 GET /api/v1/operations
 GET /api/v1/outbound-groups
 GET /api/v1/outbounds
@@ -123,6 +129,8 @@ POST /api/v1/backups/{id}/verify
 POST /api/v1/canvas-schemes
 POST /api/v1/canvas-schemes/{id}/plan
 POST /api/v1/canvas-schemes/{id}/publish
+POST /api/v1/canvas-tunnels
+POST /api/v1/canvas-tunnels/{id}/adopt
 POST /api/v1/core-updates
 POST /api/v1/core-updates/{id}/clear
 POST /api/v1/deployment-batches
@@ -134,6 +142,7 @@ POST /api/v1/inbounds
 POST /api/v1/inbounds/{id}/reachability
 POST /api/v1/node-groups
 POST /api/v1/nodes/enrollment-token
+POST /api/v1/nodes/{id}/cores/{component}/remove
 POST /api/v1/nodes/{id}/enrollment-token
 POST /api/v1/nodes/{id}/health-checks
 POST /api/v1/nodes/{id}/publish
@@ -169,12 +178,14 @@ POST /api/v1/users/{id}/subscription-token
 PUT /api/v1/admins/{id}
 PUT /api/v1/auth/password
 PUT /api/v1/canvas-schemes/{id}
+PUT /api/v1/canvas-tunnels/{id}
 PUT /api/v1/devices/{id}
 PUT /api/v1/inbounds/{id}
 PUT /api/v1/node-groups/{id}
 PUT /api/v1/nodes/{id}
 PUT /api/v1/nodes/{id}/latency-targets
 PUT /api/v1/nodes/{id}/meta
+PUT /api/v1/nodes/{id}/tuning
 PUT /api/v1/outbound-groups/{id}
 PUT /api/v1/outbounds/{id}
 PUT /api/v1/policies/{id}

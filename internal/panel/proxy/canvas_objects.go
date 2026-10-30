@@ -6,100 +6,12 @@ import (
 	"errors"
 )
 
-// The relay canvas generates inbounds, outbounds and chains whose names start
-// with "[<scheme name>] ". These helpers are the only place that looks those
-// objects up by name, so publishing can find, update and prune them without a
-// second table naming them.
-
-// canvasGenerated is the shape of each generated object besides its name: the
-// generated suffix (or chain marker) and, for inbounds and outbounds, the relay
-// role. An object the Owner created by hand under a similar name is therefore
-// never updated or pruned by a publication.
-var canvasGenerated = map[string]string{
-	"inbounds":     "(internal_relay=1 OR protocol='forward') AND substr(name, -length(?2)) = ?2",
-	"outbounds":    "target_inbound_id IS NOT NULL AND substr(name, -length(?2)) = ?2",
-	"proxy_chains": "instr(name, ?2) > 0",
-}
-
-var canvasGeneratedMarker = map[string]string{"inbounds": canvasInboundSuffix, "outbounds": canvasOutboundSuffix, "proxy_chains": canvasChainMarker}
-
-// canvasPrefixRows returns the ids of the generated objects of one proxy table
-// whose name starts with the prefix. instr() keeps a '%' or '_' inside an
-// Owner-chosen scheme name from behaving like a LIKE wildcard; scheme names
-// cannot contain brackets, so one scheme's prefix never matches another's.
-func (r *Repository) canvasPrefixRows(ctx context.Context, table, prefix string) ([]string, error) {
-	shape, ok := canvasGenerated[table]
-	if !ok {
-		return nil, errors.New("invalid proxy table")
-	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT id FROM "+table+" WHERE instr(name, ?1) = 1 AND "+shape+" ORDER BY id LIMIT 512", prefix, canvasGeneratedMarker[table])
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
-func (r *Repository) canvasInboundsByPrefix(ctx context.Context, prefix string) ([]Inbound, error) {
-	ids, err := r.canvasPrefixRows(ctx, "inbounds", prefix)
-	if err != nil {
-		return nil, err
-	}
-	items := []Inbound{}
-	for _, id := range ids {
-		inbound, err := r.Inbound(ctx, id, true)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, inbound)
-	}
-	return items, nil
-}
-
-func (r *Repository) canvasOutboundsByPrefix(ctx context.Context, prefix string) ([]Outbound, error) {
-	ids, err := r.canvasPrefixRows(ctx, "outbounds", prefix)
-	if err != nil {
-		return nil, err
-	}
-	items := []Outbound{}
-	for _, id := range ids {
-		outbound, err := r.Outbound(ctx, id, true)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, outbound)
-	}
-	return items, nil
-}
-
-func (r *Repository) canvasChainsByPrefix(ctx context.Context, prefix string) ([]Chain, error) {
-	ids, err := r.canvasPrefixRows(ctx, "proxy_chains", prefix)
-	if err != nil {
-		return nil, err
-	}
-	items := []Chain{}
-	for _, id := range ids {
-		chain, err := r.Chain(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, chain)
-	}
-	return items, nil
-}
+// Named lookups require explicit ownership; matching a legacy name never adopts it.
 
 // canvasInboundNamed returns the generated inbound of one node by exact name.
 func (r *Repository) canvasInboundNamed(ctx context.Context, nodeID, name string) (Inbound, error) {
 	var id string
-	err := r.Database.QueryRowContext(ctx, "SELECT id FROM inbounds WHERE node_id=? AND name=? AND (internal_relay=1 OR protocol='forward') ORDER BY id LIMIT 1", nodeID, name).Scan(&id)
+	err := r.Database.QueryRowContext(ctx, "SELECT id FROM inbounds WHERE node_id=? AND name=? AND EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='inbound' AND o.object_id=inbounds.id) AND (internal_relay=1 OR protocol='forward') ORDER BY id LIMIT 1", nodeID, name).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Inbound{}, ErrNotFound
 	}
@@ -111,7 +23,7 @@ func (r *Repository) canvasInboundNamed(ctx context.Context, nodeID, name string
 
 func (r *Repository) canvasOutboundNamed(ctx context.Context, nodeID, name string) (Outbound, error) {
 	var id string
-	err := r.Database.QueryRowContext(ctx, "SELECT id FROM outbounds WHERE node_id=? AND name=? AND target_inbound_id IS NOT NULL ORDER BY id LIMIT 1", nodeID, name).Scan(&id)
+	err := r.Database.QueryRowContext(ctx, "SELECT id FROM outbounds WHERE node_id=? AND name=? AND EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='outbound' AND o.object_id=outbounds.id) AND target_inbound_id IS NOT NULL ORDER BY id LIMIT 1", nodeID, name).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Outbound{}, ErrNotFound
 	}
@@ -123,7 +35,7 @@ func (r *Repository) canvasOutboundNamed(ctx context.Context, nodeID, name strin
 
 func (r *Repository) canvasChainNamed(ctx context.Context, name string) (Chain, error) {
 	var id string
-	err := r.Database.QueryRowContext(ctx, "SELECT id FROM proxy_chains WHERE name=? ORDER BY id LIMIT 1", name).Scan(&id)
+	err := r.Database.QueryRowContext(ctx, "SELECT id FROM proxy_chains WHERE name=? AND EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='chain' AND o.object_id=proxy_chains.id) ORDER BY id LIMIT 1", name).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Chain{}, ErrNotFound
 	}
@@ -189,13 +101,6 @@ UNION ALL SELECT 'chain', c.id, c.name FROM proxy_chain_hops h JOIN proxy_chains
 		result = append(result, item)
 	}
 	return result, rows.Err()
-}
-
-// MarkCanvasPublished records the publication a drawing's objects belong to.
-// The batch id is empty when the scheme published through a single revision.
-func (r *Repository) MarkCanvasPublished(ctx context.Context, schemeID, batchID string) error {
-	_, err := r.Database.ExecContext(ctx, "UPDATE canvas_schemes SET published_at=?,published_batch_id=? WHERE id=?", timestamp(), batchID, schemeID)
-	return err
 }
 
 // canvasSchemeNameTaken reports whether another scheme already uses the name.

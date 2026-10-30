@@ -82,7 +82,7 @@ func (r *Repository) Counts(ctx context.Context, from, to, now time.Time) (Count
 		result.OnlineDevices = &devices
 		result.ActiveConnections = &connections
 	}
-	err = r.Database.QueryRowContext(ctx, "SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0),count(*) FROM account_traffic_samples WHERE observed_at>=? AND observed_at<?", from.UTC().Format("2006-01-02T15:04:05.000000000Z"), to.UTC().Format("2006-01-02T15:04:05.000000000Z")).Scan(&result.TodayUpload, &result.TodayDownload, &result.TrafficObservations)
+	err = r.Database.QueryRowContext(ctx, "SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0),count(*) FROM node_traffic_samples WHERE observed_at>=? AND observed_at<?", from.UTC().Format("2006-01-02T15:04:05.000000000Z"), to.UTC().Format("2006-01-02T15:04:05.000000000Z")).Scan(&result.TodayUpload, &result.TodayDownload, &result.TrafficObservations)
 	if err != nil {
 		return result, err
 	}
@@ -143,7 +143,7 @@ func (r *Repository) Recent(ctx context.Context, blocked bool) ([]Recent, error)
 }
 
 func (r *Repository) Trend(ctx context.Context, from, to time.Time) ([]Hour, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT substr(observed_at,1,13)||':00:00Z',sum(upload_bytes),sum(download_bytes) FROM account_traffic_samples WHERE observed_at>=? AND observed_at<? GROUP BY substr(observed_at,1,13) ORDER BY substr(observed_at,1,13)", from.UTC().Format("2006-01-02T15:04:05.000000000Z"), to.UTC().Format("2006-01-02T15:04:05.000000000Z"))
+	rows, err := r.Database.QueryContext(ctx, "SELECT substr(observed_at,1,13)||':00:00Z',sum(upload_bytes),sum(download_bytes) FROM node_traffic_samples WHERE observed_at>=? AND observed_at<? GROUP BY substr(observed_at,1,13) ORDER BY substr(observed_at,1,13)", from.UTC().Format("2006-01-02T15:04:05.000000000Z"), to.UTC().Format("2006-01-02T15:04:05.000000000Z"))
 	if err != nil {
 		return nil, err
 	}

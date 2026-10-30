@@ -20,7 +20,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 			return err
 		}
 	}
-	for _, table := range []string{"agent_update_attempts", "agent_update_tasks", "core_update_tasks"} {
+	for _, table := range []string{"agent_update_attempts", "agent_update_tasks", "core_update_tasks", "core_remove_tasks"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
@@ -63,13 +63,22 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 // Run after System has preserved the current signed catalogue. Snapshot jobs
 // never issue old commands; only authenticated completed current tasks survive.
 func (r *Repository) PrepareCoreUpdatesRestoreTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM core_remove_tasks"); err != nil {
+		return err
+	}
+	if err := db.CopyRecoveryTable(ctx, tx, "core_remove_tasks", "id,node_id,component,revision,status,code,created_by,created_at,updated_at,result_json"); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE core_remove_tasks SET status='unconfirmed',updated_at=? WHERE status IN ('queued','running')", now()); err != nil {
+		return err
+	}
 	if err := db.CopyRecoveryTable(ctx, tx, "agent_update_tasks", agentTaskColumns); err != nil {
 		return err
 	}
 	if err := db.CopyRecoveryTable(ctx, tx, "agent_update_attempts", "command_id,task_id,generation,operation,request_json,result_json,created_at"); err != nil {
 		return err
 	}
-	if err := db.CopyRecoveryTable(ctx, tx, "core_update_tasks", "id,node_id,baseline_revision,release_id,component,version,url,sha256,sequence,status,command_id,created_by,created_at,updated_at,result_json"); err != nil {
+	if err := db.CopyRecoveryTable(ctx, tx, "core_update_tasks", "id,node_id,baseline_revision,release_id,component,version,url,sha256,sequence,status,command_id,created_by,created_at,updated_at,result_json,adding"); err != nil {
 		return err
 	}
 	return nil

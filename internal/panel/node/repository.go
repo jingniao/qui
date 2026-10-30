@@ -38,26 +38,27 @@ type Repository struct {
 	}
 }
 type Node struct {
-	AllowSubscription bool             `json:"allowSubscription"`
-	Maintenance       bool             `json:"maintenance"`
-	ID                string           `json:"id"`
-	Name              string           `json:"name"`
-	Status            string           `json:"status"`
-	Enabled           bool             `json:"enabled"`
-	Hostname          string           `json:"hostname"`
-	OS                string           `json:"os"`
-	AgentVersion      string           `json:"agentVersion"`
-	PublicIP          string           `json:"publicIp"`
-	OutboundSourceIP  string           `json:"outboundSourceIp"`
-	OutboundInterface string           `json:"outboundInterface"`
-	HostSourceIPv4    string           `json:"hostSourceIpv4"`
-	HostSourceIPv6    string           `json:"hostSourceIpv6"`
-	LastHeartbeat     string           `json:"lastHeartbeat"`
-	LastSequence      uint64           `json:"lastSequence"`
-	Capabilities      *pb.Capabilities `json:"capabilities"`
-	Heartbeat         *pb.Heartbeat    `json:"heartbeat"`
-	CreatedAt         string           `json:"createdAt"`
-	DeletedAt         string           `json:"deletedAt"`
+	CoreSelectionBlocked []string         `json:"coreSelectionBlocked"`
+	AllowSubscription    bool             `json:"allowSubscription"`
+	Maintenance          bool             `json:"maintenance"`
+	ID                   string           `json:"id"`
+	Name                 string           `json:"name"`
+	Status               string           `json:"status"`
+	Enabled              bool             `json:"enabled"`
+	Hostname             string           `json:"hostname"`
+	OS                   string           `json:"os"`
+	AgentVersion         string           `json:"agentVersion"`
+	PublicIP             string           `json:"publicIp"`
+	OutboundSourceIP     string           `json:"outboundSourceIp"`
+	OutboundInterface    string           `json:"outboundInterface"`
+	HostSourceIPv4       string           `json:"hostSourceIpv4"`
+	HostSourceIPv6       string           `json:"hostSourceIpv6"`
+	LastHeartbeat        string           `json:"lastHeartbeat"`
+	LastSequence         uint64           `json:"lastSequence"`
+	Capabilities         *pb.Capabilities `json:"capabilities"`
+	Heartbeat            *pb.Heartbeat    `json:"heartbeat"`
+	CreatedAt            string           `json:"createdAt"`
+	DeletedAt            string           `json:"deletedAt"`
 }
 
 func timestamp(value time.Time) string { return value.UTC().Format("2006-01-02T15:04:05.000000000Z") }
@@ -255,6 +256,9 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 		if err := sequenceRowsChanged(tx.ExecContext(ctx, "UPDATE nodes SET status=?,last_heartbeat=?,heartbeat_json=?,public_ip=CASE WHEN ?<>'' THEN ? ELSE public_ip END,last_sequence=? WHERE id=? AND enabled=1 AND last_sequence=?", status, timestamp(time.Now()), string(data), heartbeat.PublicIp, heartbeat.PublicIp, message.Sequence, id, last)); err != nil {
 			return 0, err
 		}
+		if err := recordMetricTx(ctx, tx, id, message, time.Now().UTC()); err != nil {
+			return 0, err
+		}
 		expected = message.Sequence
 	}
 	if capabilities := message.GetCapabilities(); capabilities != nil {
@@ -269,6 +273,11 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 	}
 	if err := sequenceRowsChanged(tx.ExecContext(ctx, "UPDATE nodes SET last_sequence=? WHERE id=? AND enabled=1 AND last_sequence=?", message.Sequence, id, expected)); err != nil {
 		return 0, err
+	}
+	if result := message.GetTuningResult(); result != nil {
+		if err := recordTuningTx(ctx, tx, id, result); err != nil {
+			return 0, err
+		}
 	}
 	digest, err := acceptedMessageDigest(message)
 	if err != nil {
@@ -326,6 +335,12 @@ func scan(row scanner) (Node, error) {
 	if err := storedJSON.Unmarshal([]byte(heartbeat), n.Heartbeat); err != nil {
 		return n, err
 	}
+	if !n.Capabilities.MultiCoreSupported {
+		n.Capabilities.Cores = EnabledCores(n.Capabilities)
+		if n.Capabilities.CoreName != "" && n.Heartbeat.CoreHealthy != nil {
+			n.Heartbeat.Cores = []*pb.CoreStatus{{Name: n.Capabilities.CoreName, Healthy: n.Heartbeat.GetCoreHealthy(), Error: n.Heartbeat.CoreError, StartedAt: n.Heartbeat.CoreStartedAt, TrafficSourceStatus: n.Heartbeat.TrafficSourceStatus}}
+		}
+	}
 	if n.Status == "online" || n.Status == "degraded" {
 		when, err := time.Parse(time.RFC3339Nano, n.LastHeartbeat)
 		if err != nil || time.Since(when) > 45*time.Second {
@@ -338,6 +353,11 @@ func (r *Repository) Get(ctx context.Context, id string) (Node, error) {
 	n, err := scan(r.Database.QueryRowContext(ctx, "SELECT "+columns+" FROM nodes WHERE id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
+	}
+	if err == nil {
+		items := []Node{n}
+		err = r.decorateCoreSelection(ctx, items)
+		n = items[0]
 	}
 	return n, err
 }
@@ -368,7 +388,12 @@ func (r *Repository) List(ctx context.Context, keyword string, page, size int, d
 		}
 		items = append(items, n)
 	}
-	return items, count, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err == nil {
+		err = r.decorateCoreSelection(ctx, items)
+	}
+	return items, count, err
 }
 
 // CancelEnrollment removes a node that has not enrolled an Agent yet. A node that

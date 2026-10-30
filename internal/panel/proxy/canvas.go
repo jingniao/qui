@@ -59,6 +59,7 @@ type CanvasInstance struct {
 // is accepted for every protocol the canvas can name; publishing (U2c) refuses
 // the ones the official cores cannot carry.
 type CanvasConnection struct {
+	TunnelID       string `json:"tunnelId,omitempty"`
 	ID             string `json:"id"`
 	Source         string `json:"source"`
 	Target         string `json:"target"`
@@ -247,6 +248,8 @@ func (s *Service) validateRefs(ctx context.Context, layout CanvasLayout) error {
 // a scheme and returns it with the id the panel generated; a set schemeID
 // updates it only when input.UpdatedAt still matches the stored version.
 func (s *Service) SaveCanvasScheme(ctx context.Context, schemeID string, input CanvasSchemeInput) (CanvasScheme, error) {
+	s.canvasMu.Lock()
+	defer s.canvasMu.Unlock()
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > canvasMaxNameBytes {
 		return CanvasScheme{}, fmt.Errorf("canvas scheme name must be 1 to %d bytes", canvasMaxNameBytes)
@@ -258,6 +261,14 @@ func (s *Service) SaveCanvasScheme(ctx context.Context, schemeID string, input C
 	}
 	if !canvasExecutions[input.Execution] {
 		return CanvasScheme{}, errors.New("invalid canvas scheme execution")
+	}
+	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
+		return CanvasScheme{}, err
+	}
+	var resolveErr error
+	input.Layout, resolveErr = s.Repository.resolveCanvasLayout(ctx, input.Execution, input.Layout)
+	if resolveErr != nil {
+		return CanvasScheme{}, resolveErr
 	}
 	if err := input.Layout.validate(); err != nil {
 		return CanvasScheme{}, err

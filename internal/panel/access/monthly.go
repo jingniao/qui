@@ -23,7 +23,7 @@ func (r *Repository) MonthlyNodes(ctx context.Context, now time.Time, zone strin
 	local := now.In(location)
 	from := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, location)
 	rows, err := r.Database.QueryContext(ctx, `SELECT n.id,coalesce(sum(t.upload_bytes),0),coalesce(sum(t.download_bytes),0)
- FROM nodes n LEFT JOIN account_traffic_samples t ON t.node_id=n.id AND t.observed_at>=? AND t.observed_at<?
+ FROM nodes n LEFT JOIN node_traffic_samples t ON t.node_id=n.id AND t.observed_at>=? AND t.observed_at<?
  WHERE n.deleted_at IS NULL GROUP BY n.id ORDER BY n.id`, from.UTC().Format("2006-01-02T15:04:05.000000000Z"), from.AddDate(0, 1, 0).UTC().Format("2006-01-02T15:04:05.000000000Z"))
 	if err != nil {
 		return nil, err

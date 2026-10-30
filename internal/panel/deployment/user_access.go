@@ -125,7 +125,7 @@ func (h *Handler) bindUserAccessInbound(ctx context.Context, input UserAccessInp
 	// A reuse keeps the Owner's routing and visibility: rerouting a published
 	// inbound to Direct only because its users were re-published would change
 	// how their traffic leaves the node without an Owner review.
-	_, err = h.Proxy.SaveInbound(ctx, existing.ID, proxy.InboundInput{Name: existing.Name, NodeID: existing.NodeID, Protocol: existing.Protocol, Listen: existing.Listen, Port: existing.Port, Enabled: true, SubscriptionVisible: existing.SubscriptionVisible, DefaultOutbound: existing.DefaultOutbound, AllowedUserIDs: mergeUserIDs(existing.AllowedUserIDs, userIDs), Settings: existing.Settings})
+	_, err = h.Proxy.SaveInbound(ctx, existing.ID, proxy.InboundInput{Core: existing.Core, Name: existing.Name, NodeID: existing.NodeID, Protocol: existing.Protocol, Listen: existing.Listen, Port: existing.Port, Enabled: true, SubscriptionVisible: existing.SubscriptionVisible, DefaultOutbound: existing.DefaultOutbound, AllowedUserIDs: mergeUserIDs(existing.AllowedUserIDs, userIDs), Settings: existing.Settings})
 	return err
 }
 

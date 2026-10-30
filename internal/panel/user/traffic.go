@@ -31,6 +31,9 @@ func (r *Repository) applyTraffic(ctx context.Context, batch traffic.Batch, stat
 	affected := []string{}
 	affectedSeen := map[string]bool{}
 	for _, counter := range batch.Counters {
+		if counter.Kind == "node" {
+			continue
+		}
 		cursor, err := readOriginalTrafficCursor(ctx, tx, batch.NodeID, counter.CoreEpoch, counter.CredentialID)
 		upload, download := cursor.Upload, cursor.Download
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -154,7 +154,33 @@ func (o *DeviceObserver) View(ctx context.Context, u User) (DevicesOnline, error
 			continue
 		}
 		snapshot, fresh := o.Store.Snapshot(n.ID)
-		if !o.Store.GateSupport(n.ID) || !n.Capabilities.GetDeviceGateSupported() || !fresh || snapshot.ObservationContractVersion != 2 || !snapshot.DeviceGateSupported {
+		supported := true
+		for _, in := range state.Inbounds {
+			if !in.Enabled || in.Protocol == "wireguard" || in.Protocol == "forward" {
+				continue
+			}
+			serves := false
+			for _, cid := range in.CredentialIDs {
+				if entryCredentials(state)[cid] == u.ID {
+					serves = true
+				}
+			}
+			if !serves {
+				continue
+			}
+			core := node.SelectedCore(n.Capabilities, in.Core)
+			if core == nil || !core.DeviceGateSupported {
+				supported = false
+				continue
+			}
+			if n.Capabilities.MultiCoreSupported {
+				part, ok := o.Store.CoreSnapshots(n.ID)[core.Name]
+				if !ok || !part.DeviceGateSupported {
+					supported = false
+				}
+			}
+		}
+		if !o.Store.GateSupport(n.ID) || !supported || !fresh || snapshot.ObservationContractVersion != 2 || !snapshot.DeviceGateSupported {
 			v.UnsupportedNodes = append(v.UnsupportedNodes, n.Name)
 		}
 	}

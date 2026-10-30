@@ -9,6 +9,7 @@ import (
 	"path"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/release"
@@ -18,6 +19,7 @@ import (
 // the component, the stable version, the official release asset URL and the
 // archive SHA-256; the Agent verifies everything again on the node.
 type CoreUpdateTask struct {
+	Adding    bool                  `json:"adding"`
 	ID        string                `json:"id"`
 	NodeID    string                `json:"nodeId"`
 	Component string                `json:"component"`
@@ -42,7 +44,7 @@ type CoreUpdateInput struct {
 	SHA256    string `json:"sha256"`
 }
 
-const coreTaskColumns = "id,node_id,baseline_revision,component,version,url,sha256,sequence,status,command_id,created_by,created_at,updated_at,result_json"
+const coreTaskColumns = "id,node_id,baseline_revision,component,version,url,sha256,sequence,status,command_id,created_by,created_at,updated_at,result_json,adding"
 
 // ReleaseAccess reads signed catalogue entries and records update operations in
 // the shared admin operation log. Core updates themselves no longer use the
@@ -55,7 +57,7 @@ type ReleaseAccess interface {
 func scanCoreTask(row interface{ Scan(...any) error }) (CoreUpdateTask, error) {
 	var t CoreUpdateTask
 	var data []byte
-	err := row.Scan(&t.ID, &t.NodeID, &t.Revision, &t.Component, &t.Version, &t.URL, &t.SHA256, &t.Sequence, &t.Status, &t.CommandID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &data)
+	err := row.Scan(&t.ID, &t.NodeID, &t.Revision, &t.Component, &t.Version, &t.URL, &t.SHA256, &t.Sequence, &t.Status, &t.CommandID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &data, &t.Adding)
 	if err != nil {
 		return t, err
 	}
@@ -112,12 +114,15 @@ var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 // supportsQuiCore requires explicit support; old Agents keep official sources.
 // A core version or tag alone cannot establish an Agent's URL support.
 func supportsQuiCore(capabilities *pb.Capabilities) bool {
-	return capabilities != nil && capabilities.SingboxUserStats
+	return capabilities != nil && (capabilities.SingboxUserStats || capabilities.MultiCoreSupported)
 }
 
 func coreUpdateAvailable(ctx context.Context, tx *sql.Tx, nodeID string) error {
+	return coreComponentAvailable(ctx, tx, nodeID, "")
+}
+func coreComponentAvailable(ctx context.Context, tx *sql.Tx, nodeID, component string) error {
 	var n int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running')", nodeID).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM core_update_tasks WHERE node_id=? AND (?='' OR component=?) AND status IN ('queued','running'))+(SELECT count(*) FROM core_remove_tasks WHERE node_id=? AND (?='' OR component=?) AND status IN ('queued','running'))", nodeID, component, component, nodeID, component, component).Scan(&n); err != nil {
 		return err
 	}
 	if n != 0 {
@@ -138,17 +143,17 @@ func (r *Repository) QueueCoreUpdate(ctx context.Context, audit ReleaseAccess, n
 		return CoreUpdateTask{}, err
 	}
 	defer tx.Rollback()
-	if err := nodeAvailable(ctx, tx, nodeID, ""); err != nil {
+	if err := operationAvailable(ctx, tx, nodeID, "", input.Component); err != nil {
 		return CoreUpdateTask{}, err
 	}
-	if err := coreUpdateAvailable(ctx, tx, nodeID); err != nil {
+	if err := coreComponentAvailable(ctx, tx, nodeID, input.Component); err != nil {
 		return CoreUpdateTask{}, err
 	}
-	var enabled, supported bool
+	var enabled, supported, multi bool
 	var platform string
 	var caps []byte
 	var revision int64
-	err = tx.QueryRowContext(ctx, "SELECT n.enabled,n.operating_system,n.capabilities_json,coalesce(c.core_supported,0),s.revision FROM nodes n LEFT JOIN node_update_capabilities c ON c.node_id=n.id JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=?", nodeID).Scan(&enabled, &platform, &caps, &supported, &revision)
+	err = tx.QueryRowContext(ctx, "SELECT n.enabled,n.operating_system,n.capabilities_json,coalesce(c.core_supported,0),s.revision,n.multi_core_supported FROM nodes n LEFT JOIN node_update_capabilities c ON c.node_id=n.id JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=?", nodeID).Scan(&enabled, &platform, &caps, &supported, &revision, &multi)
 	if err != nil {
 		return CoreUpdateTask{}, err
 	}
@@ -156,7 +161,10 @@ func (r *Repository) QueueCoreUpdate(ctx context.Context, audit ReleaseAccess, n
 		return CoreUpdateTask{}, ErrNodeBusy
 	}
 	capabilities := &pb.Capabilities{}
-	if storedJSON.Unmarshal(caps, capabilities) != nil || capabilities.CoreName != input.Component {
+	if storedJSON.Unmarshal(caps, capabilities) != nil || !capabilities.MultiCoreSupported && capabilities.CoreName != input.Component {
+		return CoreUpdateTask{}, release.ErrPolicy
+	}
+	if capabilities.MultiCoreSupported && !multi && capabilities.CoreName != input.Component {
 		return CoreUpdateTask{}, release.ErrPolicy
 	}
 	if release.QuiCoreSource(input.URL) && !supportsQuiCore(capabilities) {
@@ -166,7 +174,7 @@ func (r *Repository) QueueCoreUpdate(ctx context.Context, audit ReleaseAccess, n
 		return CoreUpdateTask{}, err
 	}
 	var next int64
-	if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(sequence),0)+1 FROM core_update_tasks WHERE node_id=?", nodeID).Scan(&next); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(sequence),0)+1 FROM core_update_tasks WHERE node_id=? AND component=?", nodeID, input.Component).Scan(&next); err != nil {
 		return CoreUpdateTask{}, err
 	}
 	taskID, err := id.New()
@@ -178,8 +186,8 @@ func (r *Repository) QueueCoreUpdate(ctx context.Context, audit ReleaseAccess, n
 		return CoreUpdateTask{}, err
 	}
 	commandID = "upd_" + commandID
-	t := CoreUpdateTask{ID: taskID, NodeID: nodeID, Component: input.Component, Version: input.Version, URL: input.URL, SHA256: input.SHA256, Sequence: next, Revision: expected, Status: "queued", CommandID: commandID, CreatedBy: actor, CreatedAt: now(), UpdatedAt: now()}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO core_update_tasks("+coreTaskColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)", t.ID, t.NodeID, t.Revision, t.Component, t.Version, t.URL, t.SHA256, t.Sequence, t.Status, t.CommandID, t.CreatedBy, t.CreatedAt, t.UpdatedAt); err != nil {
+	t := CoreUpdateTask{Adding: node.SelectedCore(capabilities, input.Component) == nil, ID: taskID, NodeID: nodeID, Component: input.Component, Version: input.Version, URL: input.URL, SHA256: input.SHA256, Sequence: next, Revision: expected, Status: "queued", CommandID: commandID, CreatedBy: actor, CreatedAt: now(), UpdatedAt: now()}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO core_update_tasks("+coreTaskColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)", t.ID, t.NodeID, t.Revision, t.Component, t.Version, t.URL, t.SHA256, t.Sequence, t.Status, t.CommandID, t.CreatedBy, t.CreatedAt, t.UpdatedAt, t.Adding); err != nil {
 		return t, err
 	}
 	if err := audit.RecordTx(ctx, tx, actor, "queue_core_update", taskID, "成功", ip); err != nil {
@@ -243,8 +251,11 @@ func (r *Repository) closeUndispatchableCoreUpdate(ctx context.Context, t CoreUp
 }
 
 // PendingCoreUpdate hands the reserved command to the node and marks it running.
+// Queued work is dispatched before a running command is re-sent, so two
+// components never starve each other while a reconnect still retries the same
+// identity.
 func (r *Repository) PendingCoreUpdate(ctx context.Context, nodeID string) (*pb.CoreUpdateCommand, error) {
-	t, err := scanCoreTask(r.Database.QueryRowContext(ctx, "SELECT "+coreTaskColumns+" FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running')", nodeID))
+	t, err := scanCoreTask(r.Database.QueryRowContext(ctx, "SELECT "+coreTaskColumns+" FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running') ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END,updated_at,component LIMIT 1", nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -259,10 +270,10 @@ func (r *Repository) PendingCoreUpdate(ctx context.Context, nodeID string) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	if _, err := r.Database.ExecContext(ctx, "UPDATE core_update_tasks SET status='running',updated_at=? WHERE command_id=? AND status='queued'", now(), t.CommandID); err != nil {
+	if _, err := r.Database.ExecContext(ctx, "UPDATE core_update_tasks SET status='running',updated_at=? WHERE command_id=?", now(), t.CommandID); err != nil {
 		return nil, err
 	}
-	return &pb.CoreUpdateCommand{RequestJson: data}, nil
+	return &pb.CoreUpdateCommand{Component: t.Component, RequestJson: data}, nil
 }
 
 // CoreUpdateResult records the node's authenticated outcome for its own task. A
@@ -286,10 +297,13 @@ func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payloa
 	if err != nil {
 		return err
 	}
+	if payload.Component != "" && payload.Component != t.Component {
+		return release.ErrUpdate
+	}
 	if result.Revision != t.Revision || result.TargetDigest != t.SHA256 {
 		return release.ErrUpdate
 	}
-	if result.Status == "success" && (result.InstalledVersion != t.Version || result.InstalledSequence < 1) {
+	if result.Status == "success" && (result.InstalledVersion != t.Version || result.InstalledSequence != t.Sequence) {
 		return release.ErrUpdate
 	}
 	if t.Result != nil {
@@ -322,11 +336,22 @@ func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payloa
 // node that already reports the requested core version succeeded; anything
 // else is closed as failed so the slot is free for a new attempt.
 func (r *Repository) CloseStaleCoreUpdates(ctx context.Context, nodeID string) error {
-	var commandID, version string
-	err := r.Database.QueryRowContext(ctx, "SELECT command_id,version FROM core_update_tasks WHERE node_id=? AND status='running'", nodeID).Scan(&commandID, &version)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+	rows, err := r.Database.QueryContext(ctx, "SELECT command_id,component,version FROM core_update_tasks WHERE node_id=? AND status='running'", nodeID)
+	if err != nil {
+		return err
 	}
+	type pending struct{ id, component, version string }
+	var tasks []pending
+	for rows.Next() {
+		var t pending
+		if err := rows.Scan(&t.id, &t.component, &t.version); err != nil {
+			rows.Close()
+			return err
+		}
+		tasks = append(tasks, t)
+	}
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
 		return err
 	}
@@ -338,12 +363,17 @@ func (r *Repository) CloseStaleCoreUpdates(ctx context.Context, nodeID string) e
 	if storedJSON.Unmarshal(caps, capabilities) != nil {
 		return release.ErrUpdate
 	}
-	closed := "failed_closed"
-	if capabilities.CoreName != "" && capabilities.CoreVersion == version {
-		closed = "success"
+	for _, t := range tasks {
+		closed := "failed_closed"
+		core := node.SelectedCore(capabilities, t.component)
+		if core != nil && core.Version == t.version {
+			closed = "success"
+		}
+		if _, err := r.Database.ExecContext(ctx, "UPDATE core_update_tasks SET status=?,updated_at=? WHERE command_id=? AND status='running'", closed, now(), t.id); err != nil {
+			return err
+		}
 	}
-	_, err = r.Database.ExecContext(ctx, "UPDATE core_update_tasks SET status=?,updated_at=? WHERE command_id=? AND status='running'", closed, now(), commandID)
-	return err
+	return nil
 }
 
 // ClearCoreUpdate closes a task the Owner no longer wants to track. A task that

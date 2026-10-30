@@ -22,6 +22,7 @@ type Store struct {
 	ttl   time.Duration
 	mu    sync.Mutex
 	nodes map[string]entry
+	cores map[string]map[string]entry
 	gates map[string]bool
 }
 

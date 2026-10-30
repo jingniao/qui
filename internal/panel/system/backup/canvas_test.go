@@ -23,6 +23,18 @@ func TestCanvasForwardFieldsBackupRestoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Ownership is portable data, including the IDs of ordinary server objects
+	// that the Owner explicitly assigned to the tunnel.
+	sealed, err := source.ConfigurationVault.Seal([]byte(`{"forward":{"host":"2001:db8::1","port":443,"network":"tcp,udp"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Database.Exec("INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES('canvas-owned','[backup] relay 中转入口',?,'forward','0.0.0.0',30000,1,0,0,'direct','[]',?,'2026-10-29T00:00:00Z')", nodeID, sealed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Database.Exec("INSERT INTO canvas_tunnel_objects VALUES(?,'inbound','canvas-owned')", scheme.Layout.Connections[0].TunnelID); err != nil {
+		t.Fatal(err)
+	}
 	created, err := source.Create(ctx, directory, "canvas_forward_001", "owner", testPassword)
 	if err != nil {
 		t.Fatal(err)
@@ -47,5 +59,13 @@ func TestCanvasForwardFieldsBackupRestoreRoundTrip(t *testing.T) {
 	restored, err := (&proxy.Repository{Database: database}).CanvasScheme(ctx, scheme.ID)
 	if err != nil || !reflect.DeepEqual(restored, scheme) {
 		t.Fatalf("backup/verified restore changed canvas: %+v %v", restored, err)
+	}
+	var owner string
+	if err := database.QueryRow("SELECT tunnel_id FROM canvas_tunnel_objects WHERE object_kind='inbound' AND object_id='canvas-owned'").Scan(&owner); err != nil || owner != scheme.Layout.Connections[0].TunnelID {
+		t.Fatal(owner, err)
+	}
+	inventory, err := ReadInventory(ctx, database)
+	if err != nil || inventory.Totals.CanvasTunnels != 1 || inventory.Totals.CanvasTunnelObjects != 1 {
+		t.Fatal(inventory.Totals, err)
 	}
 }

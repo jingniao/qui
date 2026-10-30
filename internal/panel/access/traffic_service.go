@@ -6,6 +6,7 @@ import (
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,12 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 				return trafficStageError("source_unavailable", err)
 			}
 			states[counter.Revision] = state
+			if counter.Kind == "node" {
+				if counter.UploadBytes > 1<<50 || counter.DownloadBytes > 1<<50 || !strings.HasSuffix(counter.CoreEpoch, ".node") {
+					return ErrInvalid
+				}
+				continue
+			}
 			matched := false
 			for _, credential := range state.Credentials {
 				if credential.ID == counter.CredentialID && !credential.Internal && credential.UserID == counter.UserID && credential.DeviceID == counter.DeviceID && credential.Protocol == counter.Protocol {
@@ -76,6 +83,18 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 		if err := s.Repository.IngestTraffic(ctx, batch, now); err != nil {
 			return trafficStageError("statistics_pending", err)
 		}
+	}
+	hasAccounts := false
+	for _, c := range batch.Counters {
+		if c.Kind != "node" {
+			hasAccounts = true
+		}
+	}
+	if !hasAccounts {
+		if s.Repository.Vault != nil {
+			return s.Repository.CompletePendingTraffic(ctx, batch)
+		}
+		return nil
 	}
 	if s.Users == nil {
 		return errors.New("user traffic recorder unavailable")
@@ -119,6 +138,9 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 }
 
 func (s *Service) trafficState(ctx context.Context, nodeID string, counter traffic.Counter) (desiredstate.State, error) {
+	if counter.Kind == "node" {
+		return s.Snapshots.AppliedState(ctx, nodeID, counter.Revision)
+	}
 	if source, ok := s.Snapshots.(interface {
 		TrafficState(context.Context, string, traffic.Counter) (desiredstate.State, error)
 	}); ok {

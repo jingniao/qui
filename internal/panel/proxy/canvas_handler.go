@@ -12,6 +12,7 @@ import (
 // registerCanvas serves the relay canvas drawings. They are Owner-only: a
 // Viewer reads the dashboard and node status, never a topology draft.
 func (h *Handler) registerCanvas(mux *http.ServeMux) {
+	h.registerCanvasTunnels(mux)
 	for pattern, handler := range map[string]http.HandlerFunc{
 		"GET /api/v1/canvas-schemes":               h.canvasSchemes,
 		"GET /api/v1/canvas-schemes/{id}":          h.canvasScheme,
@@ -26,6 +27,8 @@ func (h *Handler) registerCanvas(mux *http.ServeMux) {
 }
 
 func (h *Handler) canvasSchemes(w http.ResponseWriter, r *http.Request) {
+	h.Service.canvasMu.Lock()
+	defer h.Service.canvasMu.Unlock()
 	page, size, err := httpapi.Pagination(r)
 	if err != nil {
 		h.fail(w, err)
@@ -40,6 +43,8 @@ func (h *Handler) canvasSchemes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) canvasScheme(w http.ResponseWriter, r *http.Request) {
+	h.Service.canvasMu.Lock()
+	defer h.Service.canvasMu.Unlock()
 	scheme, err := h.Service.Repository.CanvasScheme(r.Context(), r.PathValue("id"))
 	if err != nil {
 		h.failCanvas(w, err)
@@ -71,6 +76,8 @@ func (h *Handler) saveCanvasScheme(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deleteCanvasScheme(w http.ResponseWriter, r *http.Request) {
+	h.Service.canvasMu.Lock()
+	defer h.Service.canvasMu.Unlock()
 	if err := h.Service.Repository.DeleteCanvasScheme(r.Context(), r.PathValue("id")); err != nil {
 		h.failCanvas(w, err)
 		return

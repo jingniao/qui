@@ -248,6 +248,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)
 	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault}, Nodes: nodeRepository}
+	if err := proxyService.Repository.ReconcileCanvasTunnels(context.Background()); err != nil {
+		return nil, err
+	}
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
 	policyService := &policy.Service{Repository: &policy.Repository{Database: database}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository}
 	proxyService.Policies = policyService

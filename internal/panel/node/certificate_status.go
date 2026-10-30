@@ -84,7 +84,7 @@ func certificateMetadata(nodeID, encoded, fingerprint, expiry string, at time.Ti
 		result.Status = "not_yet_valid"
 	case !at.Before(leaf.NotAfter):
 		result.Status = "expired"
-	case !leaf.NotAfter.After(at.Add(14 * 24 * time.Hour)):
+	case certificateRenewalDue(leaf, at):
 		result.Status = "renewal_due"
 	default:
 		result.Status = "valid"
@@ -175,4 +175,8 @@ func (h *Handler) certificateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, http.StatusOK, result)
+}
+
+func certificateRenewalDue(leaf *x509.Certificate, at time.Time) bool {
+	return !at.Before(leaf.NotBefore.Add(30*24*time.Hour)) || !leaf.NotAfter.After(at.Add(14*24*time.Hour))
 }

@@ -29,12 +29,15 @@ type CanvasPlanConnection struct {
 	Message string `json:"message"`
 }
 type CanvasPlanConflict struct {
+	Reason       string `json:"reason,omitempty"`
+	ObjectID     string `json:"objectId,omitempty"`
 	NodeID       string `json:"nodeId"`
 	Port         int    `json:"port"`
 	With         string `json:"with"`
 	ConnectionID string `json:"connectionId"`
 }
 type CanvasPlanResult struct {
+	Tunnels     []CanvasTunnelImpact   `json:"tunnels"`
 	OK          bool                   `json:"ok"`
 	Servers     []CanvasPlanServer     `json:"servers"`
 	Connections []CanvasPlanConnection `json:"connections"`
@@ -47,75 +50,35 @@ type canvasListener struct {
 	node, name, protocol, connection string
 	port                             int
 	edge                             *canvasEdge
-	networks                         []string
-}
-
-// listenNetworks is the transport an inbound listens on. A TCP and a UDP
-// listener may share a port (VLESS on TCP 443 next to Hysteria2 on UDP 443),
-// so only overlapping transports conflict. The node editor uses the same rule.
-func listenNetworks(protocol, forwardNetwork string) []string {
-	switch protocol {
-	case "hysteria2", "tuic", "wireguard":
-		return []string{"udp"}
-	case "forward":
-		if forwardNetwork == "" {
-			return []string{"tcp"}
-		}
-		return strings.Split(forwardNetwork, ",")
-	case "shadowsocks", "socks5":
-		return []string{"tcp", "udp"}
-	}
-	return []string{"tcp"}
-}
-
-func inboundNetworks(i Inbound) []string {
-	network := ""
-	if i.Settings.Forward != nil {
-		network = i.Settings.Forward.Network
-	}
-	return listenNetworks(i.Protocol, network)
-}
-
-func networksOverlap(a, b []string) bool {
-	for _, x := range a {
-		for _, y := range b {
-			if x == y {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // Both publication and preview use this exact listener check, including stale
-// relay adoption. A listener is reserved even when its existing inbound is off.
+// relay adoption. Listener ports are reserved node-wide by number: the Agent's
+// DesiredState validation rejects a second enabled inbound on the same port
+// whatever its transport or core, so a TCP and a UDP listener (VLESS on TCP 443
+// next to Hysteria2 on UDP 443) cannot share one either. The node editor applies
+// the same numeric rule. Disabled inbounds reserve nothing, because the Agent
+// only validates enabled listeners.
 func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan, stale *canvasStale) ([]CanvasPlanConflict, error) {
 	listeners := []canvasListener{}
 	for _, e := range plan.edges {
-		listeners = append(listeners, canvasListener{e.targetNode, e.inboundName, e.protocol, e.connectionID, e.port, e, listenNetworks(e.protocol, "")})
+		listeners = append(listeners, canvasListener{e.targetNode, e.inboundName, e.protocol, e.connectionID, e.port, e})
 	}
 	for i, f := range plan.forwards {
-		listeners = append(listeners, canvasListener{f.NodeID, f.Name, f.Protocol, plan.forwardConnections[i], f.Port, nil, listenNetworks(f.Protocol, f.Settings.Forward.Network)})
+		listeners = append(listeners, canvasListener{f.NodeID, f.Name, f.Protocol, plan.forwardConnections[i], f.Port, nil})
 	}
-	owned, err := s.Repository.canvasInboundsByPrefix(ctx, plan.prefix)
+	owned, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
 	claimed := map[string]canvasListener{}
 	conflicts := []CanvasPlanConflict{}
 	for _, l := range listeners {
-		for _, network := range l.networks {
-			key := fmt.Sprintf("%s:%d/%s", l.node, l.port, network)
-			if other, found := claimed[key]; found {
-				conflicts = append(conflicts, CanvasPlanConflict{l.node, l.port, other.name, l.connection}, CanvasPlanConflict{other.node, other.port, l.name, other.connection})
-				break
-			}
-		}
-		for _, network := range l.networks {
-			key := fmt.Sprintf("%s:%d/%s", l.node, l.port, network)
-			if _, found := claimed[key]; !found {
-				claimed[key] = l
-			}
+		key := fmt.Sprintf("%s:%d", l.node, l.port)
+		if other, found := claimed[key]; found {
+			conflicts = append(conflicts, CanvasPlanConflict{NodeID: l.node, Port: l.port, With: other.name, ConnectionID: l.connection}, CanvasPlanConflict{NodeID: other.node, Port: other.port, With: l.name, ConnectionID: other.connection})
+		} else {
+			claimed[key] = l
 		}
 		occupants, err := s.Repository.canvasInboundsAtPort(ctx, l.node, l.port)
 		if err != nil {
@@ -132,19 +95,42 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 				}
 			}
 			if isOwned && o.Name == l.name {
+				owner, e := s.Repository.objectOwner(ctx, "inbound", o.ID)
+				if e != nil {
+					return nil, e
+				}
+				if owner != plan.owners[l.name] {
+					conflicts = append(conflicts, CanvasPlanConflict{NodeID: l.node, Port: l.port, With: o.Name, ConnectionID: l.connection, Reason: "tunnel_object", ObjectID: o.ID})
+					continue
+				}
 				continue
 			}
-			if !networksOverlap(l.networks, inboundNetworks(o)) {
-				continue
+			owner, e := s.Repository.objectOwner(ctx, "inbound", o.ID)
+			if e != nil {
+				return nil, e
 			}
-			if stale.inbound[o.ID] && o.Protocol == l.protocol && l.edge != nil {
+			if stale.inbound[o.ID] && o.Protocol == l.protocol && l.edge != nil && owner == l.edge.tunnelID {
 				l.edge.adopt = o
 				delete(stale.inbound, o.ID)
 				continue
 			}
-			conflicts = append(conflicts, CanvasPlanConflict{l.node, l.port, o.Name, l.connection})
+			// The Agent rejects a duplicate port only among enabled inbounds, so a
+			// disabled occupant reserves nothing for the node-wide number.
+			if !o.Enabled {
+				continue
+			}
+			reason := "listener"
+			if owner == "" && legacyCanvasName("inbound", o.Name) {
+				reason = "legacy_object"
+			}
+			conflicts = append(conflicts, CanvasPlanConflict{NodeID: l.node, Port: l.port, With: o.Name, ConnectionID: l.connection, Reason: reason, ObjectID: o.ID})
 		}
 	}
+	named, err := s.canvasNamedObjectConflicts(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	conflicts = append(conflicts, named...)
 	return conflicts, nil
 }
 
@@ -152,6 +138,8 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 // memory, never saves it. It shares build, ownership/diff, listener and stale
 // reference checks with publish; it does not run Save*, Snapshot or Deploy.
 func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout *CanvasLayout) (CanvasPlanResult, error) {
+	s.canvasMu.Lock()
+	defer s.canvasMu.Unlock()
 	scheme, err := s.Repository.CanvasScheme(ctx, schemeID)
 	if err != nil {
 		return CanvasPlanResult{}, err
@@ -159,7 +147,7 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 	if layout != nil {
 		scheme.Layout = *layout
 	}
-	result := CanvasPlanResult{OK: true, Servers: []CanvasPlanServer{}, Connections: []CanvasPlanConnection{}, Conflicts: []CanvasPlanConflict{}, Warnings: []string{}}
+	result := CanvasPlanResult{Tunnels: []CanvasTunnelImpact{}, OK: true, Servers: []CanvasPlanServer{}, Connections: []CanvasPlanConnection{}, Conflicts: []CanvasPlanConflict{}, Warnings: []string{}}
 	for _, c := range scheme.Layout.Connections {
 		result.Connections = append(result.Connections, CanvasPlanConnection{c.ID, "ok", "可发布"})
 	}
@@ -174,6 +162,22 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 	if scheme.Execution != canvasExecutionServer {
 		failAll(errors.New("客户端方案暂不支持发布计划；客户端链仅在 mihomo 订阅中生效"))
 		return result, nil
+	}
+	impactLayout := scheme.Layout
+	if err := s.Repository.attachInlineTunnelIDs(ctx, scheme.ID, &impactLayout); err != nil {
+		return result, err
+	}
+	seenTunnels := map[string]bool{}
+	for _, c := range impactLayout.Connections {
+		if c.TunnelID == "" || seenTunnels[c.TunnelID] {
+			continue
+		}
+		seenTunnels[c.TunnelID] = true
+		refs, e := s.Repository.tunnelSchemes(ctx, c.TunnelID)
+		if e != nil {
+			return result, e
+		}
+		result.Tunnels = append(result.Tunnels, CanvasTunnelImpact{c.TunnelID, refs})
 	}
 	plan, err := s.canvasBuildPlan(ctx, scheme)
 	if err != nil {
@@ -213,9 +217,55 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 		}
 		return result, nil
 	}
+	for tunnelID := range plan.tunnelIDs {
+		if !seenTunnels[tunnelID] {
+			refs, e := s.Repository.tunnelSchemes(ctx, tunnelID)
+			if e != nil {
+				return result, e
+			}
+			result.Tunnels = append(result.Tunnels, CanvasTunnelImpact{tunnelID, refs})
+			seenTunnels[tunnelID] = true
+		}
+	}
 	stale, err := s.canvasStaleObjects(ctx, plan)
 	if err != nil {
 		return result, err
+	}
+	// A last-reference removal affects the publishing drawing even though the
+	// tunnel no longer appears in its saved layout.
+	removed := []struct{ kind, id string }{}
+	for _, o := range stale.inbounds {
+		removed = append(removed, struct{ kind, id string }{"inbound", o.ID})
+	}
+	for _, o := range stale.outbounds {
+		removed = append(removed, struct{ kind, id string }{"outbound", o.ID})
+	}
+	for _, o := range stale.chains {
+		removed = append(removed, struct{ kind, id string }{"chain", o.ID})
+	}
+	for _, o := range removed {
+		tunnelID, e := s.Repository.objectOwner(ctx, o.kind, o.id)
+		if e != nil {
+			return result, e
+		}
+		if tunnelID == "" || seenTunnels[tunnelID] {
+			continue
+		}
+		refs, e := s.Repository.tunnelSchemes(ctx, tunnelID)
+		if e != nil {
+			return result, e
+		}
+		found := false
+		for _, ref := range refs {
+			if ref.ID == scheme.ID {
+				found = true
+			}
+		}
+		if !found {
+			refs = append(refs, CanvasSchemeRef{ID: scheme.ID, Name: scheme.Name})
+		}
+		result.Tunnels = append(result.Tunnels, CanvasTunnelImpact{tunnelID, refs})
+		seenTunnels[tunnelID] = true
 	}
 	result.Conflicts, err = s.canvasListenerConflicts(ctx, plan, stale)
 	if err != nil {

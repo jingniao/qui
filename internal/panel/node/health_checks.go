@@ -13,6 +13,7 @@ import (
 )
 
 type HealthCheck struct {
+	Core      string                `json:"core"`
 	ID        string                `json:"id"`
 	NodeID    string                `json:"nodeId"`
 	Revision  int64                 `json:"revision"`
@@ -31,7 +32,7 @@ func (r *Repository) pendingHealthCheck(ctx context.Context, nodeID string) (*pb
 	if _, err := r.Database.ExecContext(ctx, "UPDATE node_health_checks SET status='expired' WHERE node_id=? AND status='queued' AND deadline<=?", nodeID, timestamp(now)); err != nil {
 		return nil, err
 	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT id,revision,deadline FROM node_health_checks WHERE node_id=? AND status='queued' LIMIT 1", nodeID)
+	rows, err := r.Database.QueryContext(ctx, "SELECT id,revision,deadline,core FROM node_health_checks WHERE node_id=? AND status='queued' LIMIT 1", nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -39,16 +40,16 @@ func (r *Repository) pendingHealthCheck(ctx context.Context, nodeID string) (*pb
 	if !rows.Next() {
 		return nil, rows.Err()
 	}
-	var id, deadline string
+	var id, deadline, core string
 	var revision int64
-	if err := rows.Scan(&id, &revision, &deadline); err != nil {
+	if err := rows.Scan(&id, &revision, &deadline, &core); err != nil {
 		return nil, err
 	}
 	limit, err := time.Parse(time.RFC3339Nano, deadline)
 	if err != nil {
 		return nil, err
 	}
-	return &pb.HealthCheckCommand{Id: id, Revision: revision, Deadline: timestamppb.New(limit)}, nil
+	return &pb.HealthCheckCommand{Core: core, Id: id, Revision: revision, Deadline: timestamppb.New(limit)}, nil
 }
 func (r *Repository) recordHealthCheck(ctx context.Context, nodeID string, result *pb.HealthCheckResult) error {
 	if result == nil || result.Id == "" || len(result.Id) > 128 || result.Revision < 1 || result.ObservedAt == nil || result.ObservedAt.CheckValid() != nil {
@@ -73,11 +74,11 @@ func (r *Repository) recordHealthCheck(ctx context.Context, nodeID string, resul
 	}
 	defer tx.Rollback()
 	var revision int64
-	var phase, deadline string
-	if err := tx.QueryRowContext(ctx, "SELECT revision,status,deadline FROM node_health_checks WHERE id=? AND node_id=?", result.Id, nodeID).Scan(&revision, &phase, &deadline); err != nil {
+	var phase, deadline, core string
+	if err := tx.QueryRowContext(ctx, "SELECT revision,status,deadline,core FROM node_health_checks WHERE id=? AND node_id=?", result.Id, nodeID).Scan(&revision, &phase, &deadline, &core); err != nil {
 		return err
 	}
-	if revision != result.Revision {
+	if revision != result.Revision || core != result.Core {
 		return errors.New("health result revision mismatch")
 	}
 	if phase != "queued" {
@@ -98,7 +99,8 @@ func (r *Repository) recordHealthCheck(ctx context.Context, nodeID string, resul
 }
 func (h *Handler) requestHealthCheck(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		ExpectedRevision int64 `json:"expectedRevision"`
+		ExpectedRevision int64  `json:"expectedRevision"`
+		Core             string `json:"core"`
 	}
 	if err := httpapi.Decode(w, r, &input); err != nil || input.ExpectedRevision < 1 {
 		httpapi.Error(w, 400, "invalid_request", "A positive expected revision is required")
@@ -110,7 +112,14 @@ func (h *Handler) requestHealthCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	item := HealthCheck{ID: id, NodeID: r.PathValue("id"), Revision: input.ExpectedRevision, Status: "queued", CreatedAt: timestamp(now), Deadline: timestamp(now.Add(5 * time.Minute))}
+	if input.Core != "" {
+		n, err := h.Repository.Get(r.Context(), r.PathValue("id"))
+		if err != nil || !n.Capabilities.GetMultiCoreSupported() || SelectedCore(n.Capabilities, input.Core) == nil {
+			httpapi.Error(w, 409, "core_unavailable", "Core not reported enabled")
+			return
+		}
+	}
+	item := HealthCheck{Core: input.Core, ID: id, NodeID: r.PathValue("id"), Revision: input.ExpectedRevision, Status: "queued", CreatedAt: timestamp(now), Deadline: timestamp(now.Add(5 * time.Minute))}
 	tx, err := h.Repository.Database.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.fail(w, err)
@@ -139,7 +148,7 @@ func (h *Handler) requestHealthCheck(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 409, "health_pending", "A health check is already pending")
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), "INSERT INTO node_health_checks(id,node_id,revision,status,created_at,deadline,created_by) VALUES(?,?,?,'queued',?,?,?)", item.ID, item.NodeID, item.Revision, item.CreatedAt, item.Deadline, auth.Actor(r.Context()).Username); err != nil {
+	if _, err := tx.ExecContext(r.Context(), "INSERT INTO node_health_checks(id,node_id,revision,status,created_at,deadline,created_by,core) VALUES(?,?,?,'queued',?,?,?,?)", item.ID, item.NodeID, item.Revision, item.CreatedAt, item.Deadline, auth.Actor(r.Context()).Username, item.Core); err != nil {
 		h.fail(w, err)
 		return
 	}
@@ -154,7 +163,7 @@ func (h *Handler) requestHealthCheck(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 202, item)
 }
 func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.Repository.Database.QueryContext(r.Context(), "SELECT id,node_id,revision,status,created_at,deadline,coalesce(result_json,'') FROM node_health_checks WHERE node_id=? ORDER BY created_at DESC LIMIT 10", r.PathValue("id"))
+	rows, err := h.Repository.Database.QueryContext(r.Context(), "SELECT id,node_id,revision,status,created_at,deadline,coalesce(result_json,''),core FROM node_health_checks WHERE node_id=? ORDER BY created_at DESC LIMIT 10", r.PathValue("id"))
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -164,7 +173,7 @@ func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item HealthCheck
 		var encoded string
-		if err := rows.Scan(&item.ID, &item.NodeID, &item.Revision, &item.Status, &item.CreatedAt, &item.Deadline, &encoded); err != nil {
+		if err := rows.Scan(&item.ID, &item.NodeID, &item.Revision, &item.Status, &item.CreatedAt, &item.Deadline, &encoded, &item.Core); err != nil {
 			h.fail(w, err)
 			return
 		}

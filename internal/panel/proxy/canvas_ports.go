@@ -6,11 +6,13 @@ import (
 	"errors"
 )
 
-// Allocate only implicit relay listeners. Both disabled listeners and planned
-// listeners reserve their transports. Existing generated names remain reusable
-// so repeated plan/publish calls choose the same port.
+// Allocate only implicit relay listeners. Ports are reserved by number on a node:
+// the Agent rejects a second enabled listener on one number whatever its
+// transport, so allocation skips every port any inbound of the node already uses
+// (enabled or not) plus this plan's own listeners. Existing generated names
+// remain reusable so repeated plan/publish calls choose the same port.
 func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, names map[string]string) error {
-	owned, err := s.Repository.canvasInboundsByPrefix(ctx, plan.prefix)
+	owned, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {
 		return err
 	}
@@ -19,6 +21,27 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 		ownedIDs[i.ID] = true
 	}
 	for _, edge := range plan.edges {
+		if edge.autoPort && edge.tunnelID != "" {
+			t, err := s.Repository.canvasTunnel(ctx, edge.tunnelID)
+			if err != nil {
+				return err
+			}
+			if t.allocatedPort != nil {
+				edge.port = *t.allocatedPort
+				edge.autoPort = false
+			}
+		}
+		for _, i := range owned {
+			owner, e := s.Repository.objectOwner(ctx, "inbound", i.ID)
+			if e != nil {
+				return e
+			}
+			if owner == edge.tunnelID && i.NodeID == edge.targetNode && i.Protocol == edge.protocol && edge.autoPort {
+				edge.port = i.Port
+				edge.autoPort = false
+				break
+			}
+		}
 		if !edge.autoPort {
 			continue
 		}
@@ -41,22 +64,23 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 		}
 		found := false
 		for port := int(start.Int64); port <= int(end.Int64); port++ {
-			name, _ := canvasEdgeNames(plan.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, port)
-			networks := listenNetworks(edge.protocol, "")
+			name, _ := canvasEdgeNames(edge.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, port)
 			busy := false
 			for _, i := range inbounds {
-				if i.Port == port && networksOverlap(networks, inboundNetworks(i)) && !(ownedIDs[i.ID] && i.Name == name) {
+				// A number used by either transport is unavailable; the edge's own
+				// generated listener stays reusable by name.
+				if i.Port == port && !(ownedIDs[i.ID] && i.Name == name) {
 					busy = true
 					break
 				}
 			}
 			for _, other := range plan.edges {
-				if other != edge && other.targetNode == edge.targetNode && other.port == port && (!other.autoPort || other.portAllocated) && networksOverlap(networks, listenNetworks(other.protocol, "")) {
+				if other != edge && other.targetNode == edge.targetNode && other.port == port && (!other.autoPort || other.portAllocated) {
 					busy = true
 				}
 			}
 			for _, f := range plan.forwards {
-				if f.NodeID == edge.targetNode && f.Port == port && networksOverlap(networks, listenNetworks(f.Protocol, f.Settings.Forward.Network)) {
+				if f.NodeID == edge.targetNode && f.Port == port {
 					busy = true
 				}
 			}

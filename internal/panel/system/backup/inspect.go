@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/panel/access"
 	nodeledger "proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/proxy"
 	userledger "proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/pki"
@@ -357,6 +358,9 @@ func validateContents(ctx context.Context, work string) error {
 	if canvasApplied != canvasTables {
 		return ErrArchive
 	}
+	if err := proxy.ValidateCanvasTunnels(ctx, database); err != nil {
+		return ErrArchive
+	}
 	if err := validatePortal(ctx, database, configurationVault); err != nil {
 		return err
 	}
@@ -367,6 +371,9 @@ func validateContents(ctx context.Context, work string) error {
 		return err
 	}
 	if err := validateNodeLatencyTargets(ctx, database); err != nil {
+		return err
+	}
+	if err := validateMetricsTuning(ctx, database); err != nil {
 		return err
 	}
 	if err := validateLatency(ctx, database); err != nil {
@@ -551,6 +558,9 @@ func validateContents(ctx context.Context, work string) error {
 	}
 	if err := access.ValidateSpaceMaintenanceMaterial(ctx, database); err != nil {
 		return ErrArchive
+	}
+	if err := validateMultiCore(ctx, database); err != nil {
+		return err
 	}
 	if err := validateCoreUpdates(ctx, database); err != nil {
 		return err

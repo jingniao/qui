@@ -17,12 +17,8 @@ import (
 // canvas only decides which objects exist and in which order their nodes are
 // published (exit, then relay, then entry).
 //
-// Every object a scheme generates carries the scheme's name as a name prefix
-// that also names the binding it implements, for example
-// "[Tokyo-relay] Node A → Node B (trojan:8443) 中转入口". Re-publishing looks
-// the objects up by that name and updates them, and an object of this scheme
-// whose name is no longer desired is removed, so a drawing can be published
-// again and again without duplicating anything.
+// Object identity is stored in canvas_tunnel_objects. Display names remain
+// stable for compatibility; they do not confer ownership.
 
 // canvasTunnels maps the tunnel protocol a connection names to the protocol the
 // official cores actually carry between two managed nodes. "tls" is Trojan over
@@ -57,6 +53,8 @@ type CanvasDeployer interface {
 // canvasEdge is one directed connection between two managed nodes together with
 // the objects it needs.
 type canvasEdge struct {
+	tunnelID      string
+	prefix        string
 	autoPort      bool
 	portAllocated bool
 	connectionID  string
@@ -94,6 +92,12 @@ type canvasEntry struct {
 
 // canvasPlan is the complete translation of one drawing.
 type canvasPlan struct {
+	schemeStamp        string
+	schemeTunnelIDs    map[string]bool
+	tunnelVersions     map[string]string
+	schemeID           string
+	tunnelIDs          map[string]bool
+	owners             map[string]string
 	forwards           []InboundInput
 	forwardConnections []string
 	prefix             string
@@ -115,9 +119,7 @@ func (p *canvasPlan) node(nodeID string) {
 	p.nodes = append(p.nodes, nodeID)
 }
 
-// canvasObjectPrefix is the name prefix every object generated for a scheme
-// carries. Scheme names are unique (SaveCanvasScheme refuses a duplicate), so
-// one scheme can never prune another scheme's objects.
+// canvasObjectPrefix builds a display label. It is never an ownership test.
 func canvasObjectPrefix(name string) string { return "[" + name + "] " }
 
 // canvasEdgeNames derives the object names of one edge. The protocol and port
@@ -160,23 +162,55 @@ func canvasInstanceNode(instance CanvasInstance) string {
 // snapshot; imported nodes, port forwarding and unsupported tunnel protocols
 // cannot enter a managed-node publication here.
 func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*canvasPlan, error) {
+	p, err := s.canvasBuildPlanInternal(ctx, scheme, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.canvasSharedDependencies(ctx, p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasScheme, checkRoutes bool) (*canvasPlan, error) {
 	if scheme.Execution != canvasExecutionServer {
 		return nil, errors.New("客户端方案暂不支持发布")
 	}
-	layout := scheme.Layout
+	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
+		return nil, err
+	}
+	layout, err := s.Repository.resolveCanvasLayout(ctx, scheme.Execution, scheme.Layout)
+	if err != nil {
+		return nil, err
+	}
 	if err := layout.validate(); err != nil {
 		return nil, err
 	}
 	if err := s.validateRefs(ctx, layout); err != nil {
 		return nil, err
 	}
+	if err := s.Repository.attachInlineTunnelIDs(ctx, scheme.ID, &layout); err != nil {
+		return nil, err
+	}
 	instances := map[string]CanvasInstance{}
 	for _, instance := range layout.Instances {
 		instances[instance.InstanceID] = instance
 	}
-	plan := &canvasPlan{prefix: canvasObjectPrefix(scheme.Name), inbounds: map[string]bool{}, outbounds: map[string]bool{}, chainName: map[string]bool{}}
+	plan := &canvasPlan{schemeStamp: scheme.UpdatedAt, schemeTunnelIDs: map[string]bool{}, tunnelVersions: map[string]string{}, schemeID: scheme.ID, tunnelIDs: map[string]bool{}, owners: map[string]string{}, prefix: canvasObjectPrefix(scheme.Name), inbounds: map[string]bool{}, outbounds: map[string]bool{}, chainName: map[string]bool{}}
 	incoming, outgoing := map[string][]*canvasEdge{}, map[string][]*canvasEdge{}
 	for _, connection := range layout.Connections {
+		prefix := plan.prefix
+		seed := connection.ID
+		if connection.TunnelID != "" {
+			t, e := s.Repository.canvasTunnel(ctx, connection.TunnelID)
+			if e != nil {
+				return nil, e
+			}
+			prefix = t.prefix
+			seed = t.connection.ID
+			plan.tunnelIDs[t.ID] = true
+			plan.schemeTunnelIDs[t.ID] = true
+			plan.tunnelVersions[t.ID] = t.UpdatedAt
+		}
 		sourceNode := canvasInstanceNode(instances[connection.Source])
 		targetNode := canvasInstanceNode(instances[connection.Target])
 		if sourceNode == "" || targetNode == "" {
@@ -205,8 +239,8 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 					network = "tcp,udp"
 				}
 			}
-			digest := sha256.Sum256([]byte(connection.ID + ":" + sourceNode + ":" + targetNode))
-			name := fmt.Sprintf("%sforward %x%s", plan.prefix, digest[:8], canvasInboundSuffix)
+			digest := sha256.Sum256([]byte(seed + ":" + sourceNode + ":" + targetNode))
+			name := fmt.Sprintf("%sforward %x%s", prefix, digest[:8], canvasInboundSuffix)
 			host := connection.TargetHost
 			if host == "" {
 				host = n.PublicIP
@@ -231,6 +265,7 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 			plan.forwards = append(plan.forwards, input)
 			plan.forwardConnections = append(plan.forwardConnections, connection.ID)
 			plan.inbounds[name] = true
+			plan.owners[name] = connection.TunnelID
 			plan.node(sourceNode)
 			continue
 		}
@@ -249,7 +284,7 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 		if connection.TunnelPort != nil {
 			port = *connection.TunnelPort
 		}
-		edge := &canvasEdge{autoPort: connection.TunnelPort == nil, connectionID: connection.ID, sourceNode: sourceNode, targetNode: targetNode, protocol: protocol, port: port, tcp: connection.SupportTCP, udp: connection.SupportUDP}
+		edge := &canvasEdge{tunnelID: connection.TunnelID, prefix: prefix, autoPort: connection.TunnelPort == nil, connectionID: connection.ID, sourceNode: sourceNode, targetNode: targetNode, protocol: protocol, port: port, tcp: connection.SupportTCP, udp: connection.SupportUDP}
 		plan.edges = append(plan.edges, edge)
 		incoming[targetNode] = append(incoming[targetNode], edge)
 		outgoing[sourceNode] = append(outgoing[sourceNode], edge)
@@ -267,9 +302,14 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 		return nil, err
 	}
 	for _, edge := range plan.edges {
-		edge.inboundName, edge.outboundName = canvasEdgeNames(plan.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, edge.port)
+		edge.inboundName, edge.outboundName = canvasEdgeNames(edge.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, edge.port)
+		plan.owners[edge.inboundName] = edge.tunnelID
+		plan.owners[edge.outboundName] = edge.tunnelID
 		plan.inbounds[edge.inboundName] = true
 		plan.outbounds[edge.outboundName] = true
+	}
+	if err := s.canvasReuseOwnedNames(ctx, plan); err != nil {
+		return nil, err
 	}
 	// A path of two edges becomes a proxy chain on its entry node. A node that
 	// starts a path has no incoming edge; a path is at most three nodes and never
@@ -290,9 +330,14 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 				chain.nodes = append(chain.nodes, edge.targetNode)
 				labels = append(labels, fmt.Sprintf("%s:%d", edge.protocol, edge.port))
 			}
-			chain.name = plan.prefix + strings.Join(nodeNames(names, chain.nodes), " → ") + canvasChainMarker + strings.Join(labels, ", ") + ")"
+			chain.name = path[0].prefix + strings.Join(nodeNames(names, chain.nodes), " → ") + canvasChainMarker + strings.Join(labels, ", ") + ")"
+			chain.name, err = s.canvasOwnedChainName(ctx, path, chain.name)
+			if err != nil {
+				return nil, err
+			}
 			plan.chains = append(plan.chains, chain)
 			plan.chainName[chain.name] = true
+			plan.owners[chain.name] = path[0].tunnelID
 		}
 	}
 	// Entry inbounds the drawing routes: a self-hosted inbound on the node a path
@@ -320,6 +365,11 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 			entry.edge = edges[0]
 		}
 		plan.entries = append(plan.entries, entry)
+	}
+	if checkRoutes {
+		if err := s.canvasEntryRoutingConflict(ctx, scheme, plan); err != nil {
+			return nil, err
+		}
 	}
 	return plan, nil
 }

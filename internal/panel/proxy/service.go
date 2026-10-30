@@ -12,6 +12,7 @@ import (
 	"proxycontrol/pkg/contracts/scheduler"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type Nodes interface {
@@ -19,6 +20,7 @@ type Nodes interface {
 	SubscriptionGroups(context.Context, string) ([]string, error)
 }
 type Service struct {
+	canvasMu   sync.Mutex
 	Repository *Repository
 	Nodes      Nodes
 	Policies   interface {
@@ -63,13 +65,11 @@ func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput
 	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Inbound{}, errors.New("node missing or disabled")
 	}
-	if err := ValidateCoreProtocol(n.Capabilities.GetCoreName(), input.Protocol, true); err != nil {
-		return Inbound{}, err
+	if node.CoreSelectionIsBlocked(n, input.Core) {
+		return Inbound{}, errors.New("core_pending: wait for success and refreshed capabilities")
 	}
-	if input.Protocol == "forward" {
-		if !n.Capabilities.GetForwardInboundSupported() {
-			return Inbound{}, errors.New("node Agent/core does not advertise forward inbound support; upgrade it first")
-		}
+	if err := ValidateInboundCore(n.Capabilities, input.Core, input.Protocol); err != nil {
+		return Inbound{}, err
 	}
 	if id != "" {
 		old, err := s.Repository.Inbound(ctx, id, true)
@@ -146,7 +146,7 @@ func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInp
 	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Outbound{}, errors.New("node missing or disabled")
 	}
-	if err := ValidateCoreProtocol(n.Capabilities.GetCoreName(), input.Protocol, false); err != nil {
+	if err := ValidateOutboundCores(n.Capabilities, input.Protocol); err != nil {
 		return Outbound{}, err
 	}
 	if id != "" {

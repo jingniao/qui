@@ -12,24 +12,28 @@ import (
 var ErrNotFound = errors.New("proxy configuration not found")
 
 type Inbound struct {
-	ID                  string                        `json:"id"`
-	Name                string                        `json:"name"`
-	NodeID              string                        `json:"nodeId"`
-	Protocol            string                        `json:"protocol"`
-	Listen              string                        `json:"listen"`
-	Port                int                           `json:"port"`
-	Enabled             bool                          `json:"enabled"`
-	SubscriptionVisible bool                          `json:"subscriptionVisible"`
-	InternalRelay       bool                          `json:"internalRelay"`
-	DefaultOutbound     string                        `json:"defaultOutbound"`
-	AllowedUserIDs      []string                      `json:"allowedUserIds"`
-	Settings            desiredstate.ProtocolSettings `json:"settings"`
-	RelayCredentialID   string                        `json:"relayCredentialId,omitempty"`
-	CreatedAt           string                        `json:"createdAt"`
-	HasTLSKey           bool                          `json:"hasTlsKey"`
-	HasWireGuardKey     bool                          `json:"hasWireGuardKey"`
+	UserTrafficSupported *bool                         `json:"userTrafficSupported"`
+	DeviceGateSupported  *bool                         `json:"deviceGateSupported"`
+	Core                 string                        `json:"core"`
+	ID                   string                        `json:"id"`
+	Name                 string                        `json:"name"`
+	NodeID               string                        `json:"nodeId"`
+	Protocol             string                        `json:"protocol"`
+	Listen               string                        `json:"listen"`
+	Port                 int                           `json:"port"`
+	Enabled              bool                          `json:"enabled"`
+	SubscriptionVisible  bool                          `json:"subscriptionVisible"`
+	InternalRelay        bool                          `json:"internalRelay"`
+	DefaultOutbound      string                        `json:"defaultOutbound"`
+	AllowedUserIDs       []string                      `json:"allowedUserIds"`
+	Settings             desiredstate.ProtocolSettings `json:"settings"`
+	RelayCredentialID    string                        `json:"relayCredentialId,omitempty"`
+	CreatedAt            string                        `json:"createdAt"`
+	HasTLSKey            bool                          `json:"hasTlsKey"`
+	HasWireGuardKey      bool                          `json:"hasWireGuardKey"`
 }
 type InboundInput struct {
+	Core                string                        `json:"core"`
 	Name                string                        `json:"name"`
 	NodeID              string                        `json:"nodeId"`
 	Protocol            string                        `json:"protocol"`

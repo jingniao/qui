@@ -38,15 +38,21 @@ func TestWireGuardSubscriptionUsesDevicePrivateKeyAndServerPublicPeer(t *testing
 	if _, e = f.database.Exec("INSERT INTO node_group_inbounds VALUES(?,'wg-in')", f.groups[0].ID); e != nil {
 		t.Fatal(e)
 	}
+	// The node has to advertise the WireGuard inbound capability before the
+	// revision is published: publishing validates each inbound against the core
+	// it is assigned to, and a WireGuard inbound is not part of the baseline
+	// socks5/http report of the fixture.
+	if _, err := f.nodes.Record(ctx, f.nodeIDs[0], &pb.AgentMessage{Sequence: 3, Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "wireguard", Inbound: true, Outbound: true, Tcp: true, Udp: true}}}}}); err != nil {
+		t.Fatal(err)
+	}
 	revision, err := f.deployments.Create(ctx, state, "owner", "WG subscription")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.deployments.Deploy(ctx, revision.ID)
-	if err := f.deployments.Result(ctx, f.nodeIDs[0], &pb.ApplyResult{Revision: revision.ID, Success: true, Code: "success"}); err != nil {
+	if err := f.deployments.Deploy(ctx, revision.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.nodes.Record(ctx, f.nodeIDs[0], &pb.AgentMessage{Sequence: 3, Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "wireguard", Inbound: true, Outbound: true, Tcp: true, Udp: true}}}}}); err != nil {
+	if err := f.deployments.Result(ctx, f.nodeIDs[0], &pb.ApplyResult{Revision: revision.ID, Success: true, Code: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	endpoints, _, err := f.service.Proxies(ctx, f.u.ID, f.device.ID)

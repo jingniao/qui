@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -21,10 +22,13 @@ func nodeAvailable(ctx context.Context, tx *sql.Tx, nodeID, ownBatch string) err
 }
 
 func deploymentAvailable(ctx context.Context, tx *sql.Tx, nodeID, ownBatch string) error {
+	return operationAvailable(ctx, tx, nodeID, ownBatch, "")
+}
+func operationAvailable(ctx context.Context, tx *sql.Tx, nodeID, ownBatch, component string) error {
 	if err := agentUpdateAvailable(ctx, tx, nodeID); err != nil {
 		return err
 	}
-	if err := coreUpdateAvailable(ctx, tx, nodeID); err != nil {
+	if err := coreComponentAvailable(ctx, tx, nodeID, component); err != nil {
 		return err
 	}
 	var count int
@@ -94,12 +98,15 @@ func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, 
 // RollbackNode accepts only a snapshot that this node successfully applied.
 // Commands have independent IDs because a snapshot may be restored repeatedly.
 func (r *Repository) RollbackNode(ctx context.Context, nodeID string, revision int64) (*pb.RollbackCommand, error) {
-	return r.rollbackNodeOperation(ctx, nodeID, revision, false)
+	return r.rollbackNodeOperation(ctx, nodeID, revision, false, "")
 }
 func (r *Repository) RestartNode(ctx context.Context, nodeID string, revision int64) (*pb.RollbackCommand, error) {
-	return r.rollbackNodeOperation(ctx, nodeID, revision, true)
+	return r.RestartCore(ctx, nodeID, revision, "")
 }
-func (r *Repository) rollbackNodeOperation(ctx context.Context, nodeID string, revision int64, restart bool) (*pb.RollbackCommand, error) {
+func (r *Repository) RestartCore(ctx context.Context, nodeID string, revision int64, core string) (*pb.RollbackCommand, error) {
+	return r.rollbackNodeOperation(ctx, nodeID, revision, true, core)
+}
+func (r *Repository) rollbackNodeOperation(ctx context.Context, nodeID string, revision int64, restart bool, core string) (*pb.RollbackCommand, error) {
 	if revision < 1 {
 		return nil, errors.New("rollback requires a successful revision")
 	}
@@ -115,6 +122,24 @@ func (r *Repository) rollbackNodeOperation(ctx context.Context, nodeID string, r
 		return nil, err
 	}
 	defer tx.Rollback()
+	if core != "" {
+		var caps []byte
+		if err := tx.QueryRowContext(ctx, "SELECT capabilities_json FROM nodes WHERE id=?", nodeID).Scan(&caps); err != nil {
+			return nil, err
+		}
+		c := &pb.Capabilities{}
+		if storedJSON.Unmarshal(caps, c) != nil || !c.MultiCoreSupported || node.SelectedCore(c, core) == nil {
+			return nil, errors.New("core unavailable")
+		}
+	}
+	if err := validateStateCoresTx(ctx, tx, state); err != nil {
+		if !restart {
+			// A removed component must be reinstalled, or an explicitly
+			// assigned copy published, before this revision can be restored.
+			return nil, fmt.Errorf("rollback refused: %w", err)
+		}
+		return nil, err
+	}
 	if restart {
 		var eligible int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=? AND s.revision=? AND n.enabled=1 AND n.core_restart_supported=1 AND n.status IN ('online','degraded') AND n.last_heartbeat>=?`, nodeID, revision, time.Now().UTC().Add(-45*time.Second).Format("2006-01-02T15:04:05.000000000Z")).Scan(&eligible); err != nil {
@@ -138,10 +163,16 @@ func (r *Repository) rollbackNodeOperation(ctx context.Context, nodeID string, r
 			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM node_restart_requests WHERE command_id=?", pendingID).Scan(&previousRestart); err != nil {
 				return nil, err
 			}
-			if (previousRestart != 0) != restart {
+			var previousCore string
+			if previousRestart != 0 {
+				if err := tx.QueryRowContext(ctx, "SELECT core FROM node_restart_requests WHERE command_id=?", pendingID).Scan(&previousCore); err != nil {
+					return nil, err
+				}
+			}
+			if (previousRestart != 0) != restart || previousCore != core {
 				return nil, ErrNodeBusy
 			}
-			return &pb.RollbackCommand{CommandId: pendingID, Revision: revision, RestartCurrent: restart}, nil
+			return &pb.RollbackCommand{CommandId: pendingID, Revision: revision, RestartCurrent: restart, Core: core}, nil
 		}
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -167,12 +198,12 @@ func (r *Repository) rollbackNodeOperation(ctx context.Context, nodeID string, r
 		return nil, err
 	}
 	if restart {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO node_restart_requests(command_id,node_id,revision,created_at) VALUES(?,?,?,?)", commandID, nodeID, revision, now()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO node_restart_requests(command_id,node_id,revision,created_at,core) VALUES(?,?,?,?,?)", commandID, nodeID, revision, now(), core); err != nil {
 			return nil, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &pb.RollbackCommand{CommandId: commandID, Revision: revision, RestartCurrent: restart}, nil
+	return &pb.RollbackCommand{CommandId: commandID, Revision: revision, RestartCurrent: restart, Core: core}, nil
 }

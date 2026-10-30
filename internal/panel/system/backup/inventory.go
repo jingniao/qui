@@ -10,6 +10,13 @@ import (
 )
 
 type Totals struct {
+	CoreRemoveTasks       int64 `json:"coreRemoveTasks"`
+	NodeTrafficCursors    int64 `json:"nodeTrafficCursors"`
+	CoreTrafficSamples    int64 `json:"coreTrafficSamples"`
+	CanvasTunnels         int64 `json:"canvasTunnels"`
+	CanvasTunnelObjects   int64 `json:"canvasTunnelObjects"`
+	MetricSamples         int64 `json:"metricSamples"`
+	NodeTuning            int64 `json:"nodeTuning"`
 	NodeGroupServers      int64 `json:"nodeGroupServers"`
 	NodeGroupInbounds     int64 `json:"nodeGroupInbounds"`
 	NodeGroupImports      int64 `json:"nodeGroupImports"`
@@ -71,7 +78,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	for _, item := range []struct {
 		table string
 		count *int64
-	}{{"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
+	}{{"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
 		var present int
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&present); err != nil {
 			return Inventory{}, err
@@ -113,7 +120,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 		}
 	}
 	var updatePending int64
-	for _, table := range []string{"core_update_tasks", "agent_update_tasks"} {
+	for _, table := range []string{"core_remove_tasks", "core_update_tasks", "agent_update_tasks"} {
 		var present, pending int64
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&present); err != nil {
 			return Inventory{}, err

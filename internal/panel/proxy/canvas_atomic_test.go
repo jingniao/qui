@@ -106,10 +106,8 @@ func TestCanvasFailureHalfwayUndoesTheCreatedObjects(t *testing.T) {
 	}
 }
 
-// Rewiring the source of an arrow keeps the target's listener: the stale relay
-// inbound on the same port and protocol is taken over instead of colliding with
-// a new one, and the old source's outbound is removed afterwards.
-func TestCanvasRewiredSourceTakesOverTheListener(t *testing.T) {
+// A new connection creates a distinct tunnel and cannot take an owned listener.
+func TestCanvasRewiredSourceRefusesOtherTunnelListener(t *testing.T) {
 	p := newPublishPanel(t)
 	scheme, _, err := p.publishScheme(t, "rewire", canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB, C: p.nodeC}, "", []CanvasConnection{canvasTestHop("i-a", "i-b", 8443)}))
 	if err != nil {
@@ -117,15 +115,12 @@ func TestCanvasRewiredSourceTakesOverTheListener(t *testing.T) {
 	}
 	first, _, _ := p.publishedObjects(t, "rewire")
 	p.redraw(t, scheme, canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB, C: p.nodeC}, "", []CanvasConnection{canvasTestHop("i-c", "i-b", 8443)}))
-	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err != nil {
-		t.Fatal(err)
+	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err == nil {
+		t.Fatal("another tunnel's listener taken over")
 	}
 	inbounds, outbounds, _ := p.publishedObjects(t, "rewire")
-	if len(inbounds) != 1 || inbounds[0].ID != first[0].ID || !strings.Contains(inbounds[0].Name, "Node C → Node B") {
-		t.Fatalf("listener not taken over: %+v", inbounds)
-	}
-	if len(outbounds) != 1 || outbounds[0].NodeID != p.nodeC {
-		t.Fatalf("outbounds after rewiring: %+v", outbounds)
+	if len(inbounds) != 1 || inbounds[0].ID != first[0].ID || len(outbounds) != 1 || outbounds[0].NodeID != p.nodeA {
+		t.Fatal(inbounds, outbounds)
 	}
 }
 

@@ -3,6 +3,9 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
+
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -124,17 +127,20 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		state.Outbounds = append(state.Outbounds, outbound)
 	}
 	for _, record := range inbounds {
-		if record.Protocol == "forward" && record.Enabled {
-			if !n.Capabilities.GetForwardInboundSupported() {
-				return state, enabled, errors.New("node Agent/core no longer advertises forward inbound support")
-			}
+		// A component being added or removed is not selectable yet: its capability
+		// report is stale in both directions.
+		if node.CoreSelectionIsBlocked(n, record.Core) {
+			return state, enabled, fmt.Errorf("inbound %s: %w", record.ID, ErrCoreSelectionPending)
+		}
+		if err := ValidateInboundCore(n.Capabilities, record.Core, record.Protocol); err != nil {
+			return state, enabled, err
 		}
 		// The intent is taken before the auto-disable below: an inbound the
 		// Owner enabled stays in it even while it has no users.
 		if record.Enabled {
 			enabled = append(enabled, record.ID)
 		}
-		inbound := desiredstate.Inbound{ID: record.ID, Protocol: record.Protocol, Listen: record.Listen, Port: record.Port, Enabled: record.Enabled, DefaultOutbound: record.DefaultOutbound, SubscriptionVisible: record.SubscriptionVisible, Settings: record.Settings, CredentialIDs: []string{}}
+		inbound := desiredstate.Inbound{Core: record.Core, ID: record.ID, Protocol: record.Protocol, Listen: record.Listen, Port: record.Port, Enabled: record.Enabled, DefaultOutbound: record.DefaultOutbound, SubscriptionVisible: record.SubscriptionVisible, Settings: record.Settings, CredentialIDs: []string{}}
 		if record.InternalRelay {
 			if record.RelayCredentialID != "" {
 				credential, err := s.Repository.Credential(ctx, record.RelayCredentialID)

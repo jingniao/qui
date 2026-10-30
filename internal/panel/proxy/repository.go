@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"google.golang.org/protobuf/encoding/protojson"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/vault"
+	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"strings"
 	"time"
@@ -48,7 +51,7 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 	var inbound Inbound
 	var encoded []byte
 	var users string
-	err := r.Database.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt)
+	err := r.Database.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt, &inbound.Core)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inbound, ErrNotFound
 	}
@@ -61,6 +64,20 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 	inbound.Settings, err = r.decode(encoded)
 	if err != nil {
 		return inbound, err
+	}
+	var caps []byte
+	if err := r.Database.QueryRowContext(ctx, "SELECT capabilities_json FROM nodes WHERE id=?", inbound.NodeID).Scan(&caps); err != nil {
+		return inbound, err
+	}
+	c := &pb.Capabilities{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(caps, c); err != nil {
+		return inbound, err
+	}
+	if core := node.SelectedCore(c, inbound.Core); core != nil {
+		supported := core.Name == "xray" || core.SingboxUserStats
+		gate := core.DeviceGateSupported && inbound.Protocol != "wireguard" && inbound.Protocol != "forward"
+		inbound.UserTrafficSupported = &supported
+		inbound.DeviceGateSupported = &gate
 	}
 	inbound.HasTLSKey = inbound.Settings.PrivateKeyPEM != ""
 	inbound.HasWireGuardKey = inbound.Settings.WireGuard != nil && inbound.Settings.WireGuard.SecretKey != ""
@@ -209,6 +226,9 @@ func (r *Repository) SaveInbound(ctx context.Context, inboundID string, input In
 		return Inbound{}, err
 	}
 	defer tx.Rollback()
+	if err := r.validateInboundPorts(ctx, tx, inboundID, input); err != nil {
+		return Inbound{}, err
+	}
 	if input.Protocol == "wireguard" {
 		pools, reserved, err := wireguardPools(input.Settings)
 		if err != nil {
@@ -230,9 +250,9 @@ func (r *Repository) SaveInbound(ctx context.Context, inboundID string, input In
 		relayCredential = credential.ID
 	}
 	if create {
-		_, err = tx.ExecContext(ctx, "INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", inboundID, input.Name, input.NodeID, input.Protocol, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.InternalRelay, input.DefaultOutbound, string(users), encoded, relayCredential, created)
+		_, err = tx.ExecContext(ctx, "INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", inboundID, input.Name, input.NodeID, input.Protocol, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.InternalRelay, input.DefaultOutbound, string(users), encoded, relayCredential, created, input.Core)
 	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE inbounds SET name=?,listen=?,port=?,enabled=?,subscription_visible=?,default_outbound=?,allowed_users_json=?,encrypted_settings=? WHERE id=?", input.Name, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.DefaultOutbound, string(users), encoded, inboundID)
+		_, err = tx.ExecContext(ctx, "UPDATE inbounds SET name=?,listen=?,port=?,enabled=?,subscription_visible=?,default_outbound=?,allowed_users_json=?,encrypted_settings=?,core=? WHERE id=?", input.Name, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.DefaultOutbound, string(users), encoded, input.Core, inboundID)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {

@@ -13,6 +13,8 @@ import (
 // and starts one batch (or a single revision for a one-node drawing) in
 // dependency order: targets first, the entry node last.
 func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author string, users AccessReader) (CanvasPublishResult, error) {
+	s.canvasMu.Lock()
+	defer s.canvasMu.Unlock()
 	if users == nil {
 		return CanvasPublishResult{}, errors.New("access reader required")
 	}
@@ -51,6 +53,16 @@ func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author stri
 	if err != nil {
 		return CanvasPublishResult{}, err
 	}
+	unchanged, err := s.canvasPublicationUnchanged(ctx, plan)
+	if err != nil {
+		return CanvasPublishResult{}, err
+	}
+	if unchanged {
+		if err := s.Repository.markTunnelPublication(ctx, scheme.ID, scheme.PublishedBatchID, plan); err != nil {
+			return CanvasPublishResult{}, err
+		}
+		return CanvasPublishResult{Nodes: []CanvasPublishNode{}, Warnings: []string{}}, nil
+	}
 	warnings, err := s.canvasApplyPlan(ctx, plan)
 	if err != nil {
 		return CanvasPublishResult{}, err
@@ -63,7 +75,7 @@ func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author stri
 	if err != nil {
 		return CanvasPublishResult{}, err
 	}
-	if err := s.Repository.MarkCanvasPublished(ctx, scheme.ID, result.BatchID); err != nil {
+	if err := s.Repository.markTunnelPublication(ctx, scheme.ID, result.BatchID, plan); err != nil {
 		return CanvasPublishResult{}, err
 	}
 	for index := range result.Nodes {
@@ -79,7 +91,7 @@ func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author stri
 }
 
 func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
-	return InboundInput{Name: inbound.Name, NodeID: inbound.NodeID, Protocol: inbound.Protocol, Listen: inbound.Listen, Port: inbound.Port, Enabled: inbound.Enabled, SubscriptionVisible: inbound.SubscriptionVisible, InternalRelay: inbound.InternalRelay, DefaultOutbound: defaultOutbound, AllowedUserIDs: inbound.AllowedUserIDs, Settings: inbound.Settings}
+	return InboundInput{Core: inbound.Core, Name: inbound.Name, NodeID: inbound.NodeID, Protocol: inbound.Protocol, Listen: inbound.Listen, Port: inbound.Port, Enabled: inbound.Enabled, SubscriptionVisible: inbound.SubscriptionVisible, InternalRelay: inbound.InternalRelay, DefaultOutbound: defaultOutbound, AllowedUserIDs: inbound.AllowedUserIDs, Settings: inbound.Settings}
 }
 
 // canvasSnapshots collects every node the publication depends on, targets
@@ -179,33 +191,69 @@ func (s *Service) canvasApplyPlan(ctx context.Context, plan *canvasPlan) ([]stri
 // canvasStaleObjects lists the scheme's generated objects the drawing no longer
 // names.
 func (s *Service) canvasStaleObjects(ctx context.Context, plan *canvasPlan) (*canvasStale, error) {
+	protected := map[string]bool{}
+	schemes, _, e := s.Repository.CanvasSchemes(ctx, 1, 1000000)
+	if e != nil {
+		return nil, e
+	}
+	for _, other := range schemes {
+		if other.ID == plan.schemeID || other.Execution != "server" {
+			continue
+		}
+		related := false
+		for _, c := range other.Layout.Connections {
+			if plan.tunnelIDs[c.TunnelID] {
+				related = true
+			}
+		}
+		if !related {
+			continue
+		}
+		other.Layout, e = s.canvasDependencyLayout(ctx, other.Layout, plan.tunnelIDs)
+		if e != nil {
+			return nil, e
+		}
+		op, e := s.canvasBuildPlanInternal(ctx, other, false)
+		if e != nil {
+			return nil, e
+		}
+		for name := range op.chainName {
+			protected[name] = true
+		}
+		for name := range op.inbounds {
+			protected[name] = true
+		}
+		for name := range op.outbounds {
+			protected[name] = true
+		}
+	}
 	stale := &canvasStale{chainID: map[string]bool{}, outbound: map[string]bool{}, inbound: map[string]bool{}}
-	chains, err := s.Repository.canvasChainsByPrefix(ctx, plan.prefix)
+	chains, err := s.canvasOwnedChains(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
 	for _, chain := range chains {
-		if !plan.chainName[chain.Name] {
+		if !plan.chainName[chain.Name] && !protected[chain.Name] {
 			stale.chains = append(stale.chains, chain)
 			stale.chainID[chain.ID] = true
 		}
 	}
-	outbounds, err := s.Repository.canvasOutboundsByPrefix(ctx, plan.prefix)
+	outbounds, err := s.canvasOwnedOutbounds(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
 	for _, outbound := range outbounds {
-		if !plan.outbounds[outbound.Name] {
+		if !plan.outbounds[outbound.Name] && !protected[outbound.Name] {
 			stale.outbounds = append(stale.outbounds, outbound)
 			stale.outbound[outbound.ID] = true
 		}
 	}
-	inbounds, err := s.Repository.canvasInboundsByPrefix(ctx, plan.prefix)
+	inbounds, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
 	for _, inbound := range inbounds {
-		if !plan.inbounds[inbound.Name] {
+		if !plan.inbounds[inbound.Name] && !protected[inbound.Name] {
 			stale.inbounds = append(stale.inbounds, inbound)
 			stale.inbound[inbound.ID] = true
 		}
@@ -240,12 +288,21 @@ func (s *Service) canvasCheckReferences(ctx context.Context, plan *canvasPlan, s
 	for _, entry := range plan.entries {
 		entries[entry.existing.ID] = true
 	}
+	plannedChains := map[string]bool{}
+	for _, chain := range plan.chains {
+		existing, err := s.Repository.canvasChainNamed(ctx, chain.name)
+		if err == nil {
+			plannedChains[existing.ID] = true
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
 	ignored := func(referrer canvasReferrer) bool {
 		switch referrer.Kind {
 		case "inbound":
 			return entries[referrer.ID]
 		case "chain":
-			return stale.chainID[referrer.ID]
+			return stale.chainID[referrer.ID] || plannedChains[referrer.ID]
 		case "outbound":
 			return stale.outbound[referrer.ID]
 		}

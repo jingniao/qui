@@ -19,8 +19,12 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return warnings, err
 		}
+		input.Core = existing.Core
 		saved, err := s.SaveInbound(ctx, existing.ID, input)
 		if err != nil {
+			return warnings, err
+		}
+		if err := s.ownCanvasObject(ctx, plan, "inbound", saved.ID, input.Name, undo); err != nil {
 			return warnings, err
 		}
 		if existing.ID == "" {
@@ -50,10 +54,14 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 				return warnings, err
 			}
 			undo.add(func(ctx context.Context) error { return s.Repository.DeleteInbound(ctx, inbound.ID) })
+			if err := s.ownCanvasObject(ctx, plan, "inbound", inbound.ID, edge.inboundName, undo); err != nil {
+				return warnings, err
+			}
 			edge.inboundID = inbound.ID
 			continue
 		}
 		previous := existing
+		input.Core = existing.Core
 		inbound, err := s.SaveInbound(ctx, existing.ID, input)
 		if err != nil {
 			return warnings, err
@@ -73,6 +81,9 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 				return warnings, err
 			}
 			undo.add(func(ctx context.Context) error { return s.Repository.DeleteOutbound(ctx, outbound.ID) })
+			if err := s.ownCanvasObject(ctx, plan, "outbound", outbound.ID, edge.outboundName, undo); err != nil {
+				return warnings, err
+			}
 			edge.outboundID = outbound.ID
 			continue
 		}
@@ -111,6 +122,9 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 				return warnings, err
 			}
 			undo.add(func(ctx context.Context) error { return s.Repository.DeleteChain(ctx, saved.ID) })
+			if err := s.ownCanvasObject(ctx, plan, "chain", saved.ID, chain.name, undo); err != nil {
+				return warnings, err
+			}
 			chain.id = saved.ID
 			continue
 		}
@@ -155,6 +169,28 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 			_, err := s.SaveInbound(ctx, previous.ID, inboundInputOf(previous, previous.DefaultOutbound))
 			return err
 		})
+	}
+	for _, edge := range plan.edges {
+		t, err := s.Repository.canvasTunnel(ctx, edge.tunnelID)
+		if err != nil {
+			return warnings, err
+		}
+		previous := t.allocatedPort
+		result, err := s.Repository.Database.ExecContext(ctx, "UPDATE canvas_tunnels SET allocated_port=? WHERE id=? AND updated_at=?", edge.port, edge.tunnelID, plan.tunnelVersions[edge.tunnelID])
+		if err != nil {
+			return warnings, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return warnings, err
+		}
+		if count > 0 {
+			tunnelID := edge.tunnelID
+			undo.add(func(ctx context.Context) error {
+				_, err := s.Repository.Database.ExecContext(ctx, "UPDATE canvas_tunnels SET allocated_port=? WHERE id=?", previous, tunnelID)
+				return err
+			})
+		}
 	}
 	return warnings, nil
 }

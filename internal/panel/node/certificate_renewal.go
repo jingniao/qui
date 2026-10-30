@@ -54,7 +54,7 @@ func (c *Control) RenewCertificate(ctx context.Context, request *pb.CertificateR
 	if !ok || !newOK || (!request.RotateKey && !oldKey.Equal(newKey)) || (request.RotateKey && (oldKey.Equal(newKey) || !request.Immediate)) {
 		return nil, status.Error(codes.InvalidArgument, "renewal must retain authenticated node key")
 	}
-	if !request.Immediate && time.Until(leaf.NotAfter) > 30*24*time.Hour {
+	if !request.Immediate && !certificateRenewalDue(leaf, time.Now()) {
 		return nil, status.Error(codes.FailedPrecondition, "node certificate renewal is not due")
 	}
 	encoded, renewed, err := c.Authority.IssueNode(csr, nodeID)

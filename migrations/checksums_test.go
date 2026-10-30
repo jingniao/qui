@@ -13,6 +13,7 @@ import (
 // ending) makes existing panels refuse to start and old backups fail to
 // restore. Add new migrations here; never change an existing entry.
 var applied = map[string]string{
+	"0123_node_metrics_tuning.sql":                      "567ce275bb026da13bfc44209ba04b25f2933d22f4258643085005f51910dd8b",
 	"0001_bootstrap.sql":                                "c76cde72c30e69b3427f5c1f445dd5851ba1612bd998d5d08a5a423c5236d42b",
 	"0002_auth.sql":                                     "d8759fd5eb5cfd836991dc655e44c4dfbcba9168d34ab12556c037734b809dc1",
 	"0003_nodes.sql":                                    "8ad8d20053a42cc135efaeea79c2305994155e8593624a639dfe6de1834c0a1f",
@@ -135,6 +136,8 @@ var applied = map[string]string{
 	"0120_latency_samples.sql":                          "f3a9232b8851ed3c91a7df4a7e50efd8d7b5c6178d0a8e604ee956bd3c0f043d",
 	"0121_node_latency_targets.sql":                     "7668ffce7c62be4c6cbf40b69f35a9a31dadf3a6c15bcaa99505ab1299f06c87",
 	"0122_node_group_entries.sql":                       "7743a39646acd7e3b4d211afe2620b521ff96a9932e32f528360e05578777366",
+	"0124_canvas_tunnels.sql":                           "48c7059ad42a49f27cbc08d518a4b7d7d3a43922dc80e729860ee871bb58a046",
+	"0125_multi_core_panel.sql":                         "0328e46bbbb4bf823b21f4b51a2261e96a30b374d6ae09692962e6f8d5c83812",
 }
 
 func TestAppliedMigrationsAreImmutable(t *testing.T) {

@@ -194,6 +194,13 @@ func (r *Repository) StartBatch(ctx context.Context, batchID string) error {
 		return errors.New("batch cannot be redeployed")
 	}
 	for _, item := range batch.Items {
+		state, err := r.stateInTransaction(ctx, tx, item.Revision)
+		if err != nil {
+			return err
+		}
+		if err := validateStateCoresTx(ctx, tx, state); err != nil {
+			return err
+		}
 		if err := nodeAvailable(ctx, tx, item.NodeID, batchID); err != nil {
 			return err
 		}
@@ -361,7 +368,7 @@ func (r *Repository) RollbackBatch(ctx context.Context, batchID string) error {
 }
 func (r *Repository) PendingRollback(ctx context.Context, nodeID string) (*pb.RollbackCommand, error) {
 	command := &pb.RollbackCommand{}
-	err := r.Database.QueryRowContext(ctx, "SELECT id,revision,EXISTS(SELECT 1 FROM node_restart_requests r WHERE r.command_id=deployment_commands.id) FROM deployment_commands WHERE node_id=? AND status='pending' ORDER BY created_at,id LIMIT 1", nodeID).Scan(&command.CommandId, &command.Revision, &command.RestartCurrent)
+	err := r.Database.QueryRowContext(ctx, "SELECT id,revision,EXISTS(SELECT 1 FROM node_restart_requests r WHERE r.command_id=deployment_commands.id),coalesce((SELECT core FROM node_restart_requests r WHERE r.command_id=deployment_commands.id),'') FROM deployment_commands WHERE node_id=? AND status='pending' ORDER BY created_at,id LIMIT 1", nodeID).Scan(&command.CommandId, &command.Revision, &command.RestartCurrent, &command.Core)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -383,7 +390,12 @@ func (r *Repository) CommandResult(ctx context.Context, nodeID string, result *p
 	if err := tx.QueryRowContext(ctx, "SELECT node_id,revision,status FROM deployment_commands WHERE id=?", result.CommandId).Scan(&owner, &revision, &previous); err != nil {
 		return err
 	}
-	if owner != nodeID || revision != result.Revision {
+	var core string
+	err = tx.QueryRowContext(ctx, "SELECT core FROM node_restart_requests WHERE command_id=?", result.CommandId).Scan(&core)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if owner != nodeID || revision != result.Revision || core != result.Core {
 		return errors.New("rollback command result mismatch")
 	}
 	status := "failed"

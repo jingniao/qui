@@ -7,6 +7,9 @@ import (
 )
 
 func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp string) error {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM node_metric_samples"); err != nil {
+		return err
+	}
 	// Telemetry is intentionally absent from restored snapshots.
 	if _, err := tx.ExecContext(ctx, "DELETE FROM node_latency_samples"); err != nil {
 		return err
@@ -18,7 +21,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp str
 	if _, err := tx.ExecContext(ctx, "UPDATE node_tcp_probes SET status='expired' WHERE status='queued'"); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=0"); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=0,multi_core_supported=0,node_traffic_supported=0"); err != nil {
 		return err
 	}
 	finishEnrollments, err := prepareEnrollmentReceiptRestore(ctx, tx)
@@ -112,6 +115,19 @@ AND NOT EXISTS(SELECT 1 FROM probe_targets p WHERE p.id=t.id)`,
 SELECT node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day,port_range_start,port_range_end FROM restore_source.node_meta WHERE 1
 ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,port_range_start=excluded.port_range_start,port_range_end=excluded.port_range_end,last_alert_day=max(node_meta.last_alert_day,excluded.last_alert_day)`); err != nil {
 		return err
+	}
+	// Preserve current tuning state even when the chosen archive predates it.
+	var tuningPresent int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_tuning'").Scan(&tuningPresent); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM node_tuning"); err != nil {
+		return err
+	}
+	if tuningPresent == 1 {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO node_tuning(node_id,desired_json,request_id,status,result_json,requested_at,updated_at) SELECT node_id,desired_json,request_id,CASE WHEN status='pending' THEN 'unconfirmed' ELSE status END,result_json,requested_at,CASE WHEN status='pending' THEN ? ELSE updated_at END FROM restore_source.node_tuning", stamp); err != nil {
+			return err
+		}
 	}
 	return nil
 }

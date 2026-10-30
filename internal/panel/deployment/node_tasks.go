@@ -30,6 +30,9 @@ func (r *Repository) CloseNodeTasks(ctx context.Context, tx *sql.Tx, nodeID stri
 	if _, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status='cleared',updated_at=? WHERE node_id=? AND status IN ('queued','running','failed_closed')", now(), nodeID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, "UPDATE core_remove_tasks SET status='unconfirmed',updated_at=? WHERE node_id=? AND status IN ('queued','running')", now(), nodeID); err != nil {
+		return err
+	}
 	if err := closeAgentUpdateTasks(ctx, tx, nodeID); err != nil {
 		return err
 	}

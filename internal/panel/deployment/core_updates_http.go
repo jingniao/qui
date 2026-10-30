@@ -16,6 +16,8 @@ type CoreUpdateHandler struct {
 }
 
 func (h *CoreUpdateHandler) Register(mux *http.ServeMux) {
+	mux.Handle("POST /api/v1/nodes/{id}/cores/{component}/remove", h.Auth.Require(http.HandlerFunc(h.remove), true))
+	mux.Handle("GET /api/v1/nodes/{id}/cores/{component}/removals", h.Auth.Require(http.HandlerFunc(h.removals), true))
 	mux.Handle("GET /api/v1/core-updates", h.Auth.Require(http.HandlerFunc(h.list), true))
 	mux.Handle("POST /api/v1/core-updates", h.Auth.Require(http.HandlerFunc(h.queue), true))
 	mux.Handle("POST /api/v1/core-updates/{id}/clear", h.Auth.Require(http.HandlerFunc(h.clear), true))

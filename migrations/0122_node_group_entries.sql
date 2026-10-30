@@ -1,4 +1,10 @@
--- Individual entries are authoritative; node_group_members is a derived index.
+-- Access comes only from inbound/import entries. Explicit servers preserve policy scope.
+CREATE TABLE node_group_servers (
+ group_id TEXT NOT NULL REFERENCES node_groups(id) ON DELETE CASCADE,
+ node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+ PRIMARY KEY(group_id,node_id)
+);
+CREATE INDEX node_group_servers_node ON node_group_servers(node_id);
 CREATE TABLE node_group_inbounds (
  group_id TEXT NOT NULL REFERENCES node_groups(id) ON DELETE CASCADE,
  inbound_id TEXT NOT NULL REFERENCES inbounds(id) ON DELETE CASCADE,
@@ -13,9 +19,13 @@ CREATE TABLE node_group_imports (
 );
 INSERT INTO node_group_inbounds
  SELECT m.group_id,i.id FROM node_group_members m JOIN inbounds i ON i.node_id=m.node_id
- WHERE i.subscription_visible=1 AND i.internal_relay=0;
+ JOIN node_groups g ON g.id=m.group_id
+ WHERE g.purpose IN ('subscription','mixed') AND i.subscription_visible=1 AND i.internal_relay=0;
+INSERT INTO node_group_servers SELECT m.group_id,m.node_id FROM node_group_members m
+ WHERE NOT EXISTS(SELECT 1 FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id
+ WHERE e.group_id=m.group_id AND i.node_id=m.node_id);
 DELETE FROM node_group_members;
-INSERT INTO node_group_members SELECT DISTINCT e.group_id,i.node_id FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id;
+INSERT INTO node_group_members SELECT group_id,node_id FROM node_group_servers UNION SELECT DISTINCT e.group_id,i.node_id FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id;
 
 CREATE TEMP TABLE k1_import_groups(source_id TEXT,group_id TEXT,name TEXT,created_at TEXT);
 INSERT INTO k1_import_groups
@@ -66,11 +76,25 @@ CREATE TRIGGER node_group_inbounds_insert AFTER INSERT ON node_group_inbounds BE
  INSERT OR IGNORE INTO node_group_members SELECT NEW.group_id,node_id FROM inbounds WHERE id=NEW.inbound_id;
 END;
 CREATE TRIGGER node_group_inbounds_delete AFTER DELETE ON node_group_inbounds BEGIN
- DELETE FROM node_group_members WHERE group_id=OLD.group_id AND NOT EXISTS(
+ DELETE FROM node_group_members WHERE group_id=OLD.group_id AND NOT EXISTS(SELECT 1 FROM node_group_servers s WHERE s.group_id=OLD.group_id AND s.node_id=node_group_members.node_id) AND NOT EXISTS(
  SELECT 1 FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id WHERE e.group_id=OLD.group_id AND i.node_id=node_group_members.node_id);
 END;
 CREATE TRIGGER node_group_inbound_move AFTER UPDATE OF node_id ON inbounds BEGIN
- DELETE FROM node_group_members WHERE NOT EXISTS(
+ DELETE FROM node_group_members WHERE NOT EXISTS(SELECT 1 FROM node_group_servers s WHERE s.group_id=node_group_members.group_id AND s.node_id=node_group_members.node_id) AND NOT EXISTS(
  SELECT 1 FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id WHERE e.group_id=node_group_members.group_id AND i.node_id=node_group_members.node_id);
  INSERT OR IGNORE INTO node_group_members SELECT group_id,NEW.node_id FROM node_group_inbounds WHERE inbound_id=NEW.id;
+END;
+
+CREATE TRIGGER node_group_servers_insert AFTER INSERT ON node_group_servers BEGIN
+ INSERT OR IGNORE INTO node_group_members VALUES(NEW.group_id,NEW.node_id);
+END;
+CREATE TRIGGER node_group_servers_delete AFTER DELETE ON node_group_servers BEGIN
+ DELETE FROM node_group_members WHERE group_id=OLD.group_id AND node_id=OLD.node_id AND NOT EXISTS(
+ SELECT 1 FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id WHERE e.group_id=OLD.group_id AND i.node_id=OLD.node_id);
+END;
+CREATE TRIGGER node_group_servers_update AFTER UPDATE ON node_group_servers BEGIN
+ DELETE FROM node_group_members WHERE group_id=OLD.group_id AND node_id=OLD.node_id AND NOT EXISTS(
+ SELECT 1 FROM node_group_servers s WHERE s.group_id=OLD.group_id AND s.node_id=OLD.node_id) AND NOT EXISTS(
+ SELECT 1 FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id WHERE e.group_id=OLD.group_id AND i.node_id=OLD.node_id);
+ INSERT OR IGNORE INTO node_group_members VALUES(NEW.group_id,NEW.node_id);
 END;

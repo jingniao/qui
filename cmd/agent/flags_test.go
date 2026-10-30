@@ -20,6 +20,7 @@ func TestAgentFlagsAreExactlyTheSupportedSurface(t *testing.T) {
 	sort.Strings(got)
 	want := []string{
 		"apply-host-network",
+		"apply-tuning",
 		"check-config",
 		"config",
 		"control-only-contract",

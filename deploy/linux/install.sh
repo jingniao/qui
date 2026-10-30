@@ -135,6 +135,9 @@ if [[ $init_system == systemd ]]; then
   host_network_files=(proxy-agent-host-network.service proxy-agent-host-network.path)
   host_network_service=/etc/systemd/system/proxy-agent-host-network.service
   host_network_path=/etc/systemd/system/proxy-agent-host-network.path
+  tuning_files=(proxy-agent-tuning.service proxy-agent-tuning.path)
+  tuning_service=/etc/systemd/system/proxy-agent-tuning.service
+  tuning_path=/etc/systemd/system/proxy-agent-tuning.path
   recovery_service=/etc/systemd/system/proxycontrol-update-recovery.service
 else
   service_directory=$root/openrc
@@ -143,6 +146,9 @@ else
   host_network_files=(proxy-agent-host-network host-network-watch)
   host_network_service=/etc/init.d/proxy-agent-host-network
   host_network_path=/usr/local/lib/proxy-agent/host-network-watch
+  tuning_files=(proxy-agent-tuning tuning-watch)
+  tuning_service=/etc/init.d/proxy-agent-tuning
+  tuning_path=/usr/local/lib/proxy-agent/tuning-watch
   recovery_service=/etc/init.d/proxycontrol-update-recovery
 fi
 if [[ $init_system == openrc ]] && command -v apk >/dev/null; then
@@ -183,7 +189,7 @@ packaged_service=$service_directory/${unit##*/}
 packaged_recovery_service=$service_directory/${recovery_service##*/}
 [[ -f $packaged_recovery_service && ! -L $packaged_recovery_service ]] || fail "Missing packaged service file: ${recovery_service##*/}"
 if [[ $component == agent ]]; then
-  for packaged in "${host_network_files[@]}"; do
+  for packaged in "${host_network_files[@]}" "${tuning_files[@]}"; do
     [[ -f $service_directory/$packaged && ! -L $service_directory/$packaged ]] || fail "Missing packaged service file: $packaged"
   done
 fi
@@ -205,7 +211,7 @@ fi
 [[ -z $config || -f $config && ! -L $config ]] || fail 'Config template must be a regular local file.'
 
 # Refuse symlinked system destinations rather than traversing them as root.
-for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib /run/lock "$etc" "$data" "$data/host-network" "$registry"; do
+for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib /run/lock /etc/sysctl.d "$etc" "$data" "$data/host-network" "$data/tuning" "$registry"; do
   [[ ! -L $path ]] || fail "Symlinked destination: $path"
 done
 if [[ $init_system == systemd ]]; then
@@ -448,7 +454,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/machine-id"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/core" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/machine-id"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
@@ -484,7 +490,13 @@ install -o root -g root -m 0600 -- "$root/linux/update-recovery.sh" "$stage/upda
 install -o root -g root -m 0600 -- "$packaged_recovery_service" "$stage/update-recovery-service"
 host_network_service_digest=''
 host_network_path_digest=''
+tuning_service_digest=''
+tuning_path_digest=''
 if [[ $component == agent ]]; then
+  install -o root -g root -m 0600 -- "$service_directory/${tuning_files[0]}" "$stage/tuning-service"
+  install -o root -g root -m 0600 -- "$service_directory/${tuning_files[1]}" "$stage/tuning-path"
+  tuning_service_digest=$(sha256sum -- "$stage/tuning-service"); tuning_service_digest=${tuning_service_digest%% *}
+  tuning_path_digest=$(sha256sum -- "$stage/tuning-path"); tuning_path_digest=${tuning_path_digest%% *}
   # On systemd these are the oneshot unit and the path unit that arms it; on
   # OpenRC the init script and the watcher that script supervises. The digests
   # are taken over the staged files whatever the init system, so uninstall.sh
@@ -572,6 +584,8 @@ if [[ $component == agent ]]; then
   # The helper reads its desired file and writes its status file here; it is the
   # only directory the helper unit can write to.
   install -d -o "$account" -g "$account" -m 0700 "$data/host-network"
+  install -d -o "$account" -g "$account" -m 0700 "$data/tuning"
+  install -d -o root -g root -m 0755 /etc/sysctl.d
 fi
 
 publishing_started=true
@@ -608,6 +622,24 @@ if [[ -n $core ]]; then
   publish "$stage/core" "$core_target" root root 0755
 fi
 service_reload_definitions
+# Tuning uses the same publish/rollback bookkeeping as the enforced-source
+# helper. Stage verified package files before publishing; record on lines 11/12.
+if [[ $component == agent ]]; then
+  publish "$stage/tuning-service" "$tuning_service" root root "$service_mode"
+  publish "$stage/tuning-path" "$tuning_path" root root "$service_mode"
+  service_reload_definitions
+  if [[ $init_system == systemd ]]; then
+    systemctl enable proxy-agent-tuning.path proxy-agent-tuning.service
+    systemctl start proxy-agent-tuning.path
+    if systemctl is-failed --quiet proxy-agent-tuning.service; then
+      systemctl reset-failed proxy-agent-tuning.service
+      systemctl start --no-block proxy-agent-tuning.service
+    fi
+  else
+    service_enable proxy-agent-tuning
+    if service_is_active proxy-agent-tuning; then service_restart proxy-agent-tuning; else service_start proxy-agent-tuning; fi
+  fi
+fi
 # Enabled, never started: when qui-update runs this install.sh, the journal of
 # that very update is in place, and a recovery started now would try to undo the
 # update in progress (it would wait for qui-update's lock and then give up). It
@@ -679,7 +711,12 @@ fi
 # uninstall.sh can refuse to remove a service with the tooling of the other one.
 # It is appended last to keep the fixed line numbers above, and a systemd record
 # keeps the original file contents: no line, which reads as systemd.
-if [[ $init_system == openrc ]]; then printf 'openrc\n' >> "$stage/installed-manifest"; fi
+if [[ $init_system == openrc ]]; then
+  printf 'openrc\n' >> "$stage/installed-manifest"
+elif [[ $component == agent ]]; then
+  printf 'systemd\n' >> "$stage/installed-manifest"
+fi
+if [[ $component == agent ]]; then printf '%s\n%s\n' "$tuning_service_digest" "$tuning_path_digest" >> "$stage/installed-manifest"; fi
 chmod 0600 "$stage/installed-manifest"
 publish "$stage/installed-manifest" "$record" root root 0600
 if $reinstall; then rm -- "$removed"; sync -f -- "$registry"; fi

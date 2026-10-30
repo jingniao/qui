@@ -9,8 +9,8 @@ export interface NodeMeta {
   renewPrice?: string | number; // e.g. '120' or 120
   renewCycle?: string; // e.g. '/年' | '/月' | '/季' | '/半年' | '/2年' | '/3年' | '一次性'
   renewNoticeDays?: number;
-  portRangeStart?: number;
-  portRangeEnd?: number;
+  portRangeStart?: number | null;
+  portRangeEnd?: number | null;
 }
 
 export const CURRENCY_LIST = [
@@ -40,47 +40,15 @@ export const CYCLE_LIST = ['/年', '/月', '/季', '/半年', '/2年', '/3年', 
 const metadata = reactive<Record<string, NodeMeta>>({});
 export function getNodeMeta(nodeId: string): NodeMeta { return metadata[nodeId] || {}; }
 
-export function parseNodeMetaRemark(rawRemark?: string): { remark: string; portRangeStart?: number; portRangeEnd?: number } {
-  const text = rawRemark || '';
-  const match = text.match(/\[ports:(\d+)-(\d+)\]/);
-  if (match) {
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    const clean = text.replace(/\s*\[ports:\d+-\d+\]\s*/g, '').trim();
-    if (start >= 1 && end <= 65535 && start <= end) {
-      return { remark: clean, portRangeStart: start, portRangeEnd: end };
-    }
-  }
-  return { remark: text.trim() };
-}
-
-export function cleanRemark(remark?: string): string {
-  return parseNodeMetaRemark(remark).remark;
-}
+export function cleanRemark(remark?: string): string { return (remark || '').trim(); }
 
 export function formatPortRange(meta?: NodeMeta | null): string {
-  if (meta?.portRangeStart && meta?.portRangeEnd) {
-    return `${meta.portRangeStart} - ${meta.portRangeEnd}`;
-  }
-  return '10000 - 65535 (默认)';
+  return meta?.portRangeStart && meta?.portRangeEnd ? meta.portRangeStart+' - '+meta.portRangeEnd : '—';
 }
 
 export function getNodePortRange(nodeId?: string): { start: number; end: number } | null {
-  if (!nodeId) return null;
-  const meta = metadata[nodeId];
-  if (meta?.portRangeStart && meta?.portRangeEnd && meta.portRangeStart <= meta.portRangeEnd) {
-    return { start: meta.portRangeStart, end: meta.portRangeEnd };
-  }
-  try {
-    const raw = localStorage.getItem(`qui_node_ports_${nodeId}`);
-    if (raw) {
-      const [s, e] = raw.split('-').map(Number);
-      if (s >= 1 && e <= 65535 && s <= e) {
-        return { start: s, end: e };
-      }
-    }
-  } catch {}
-  return null;
+  const meta = nodeId ? metadata[nodeId] : undefined;
+  return meta?.portRangeStart && meta?.portRangeEnd ? { start: meta.portRangeStart, end: meta.portRangeEnd } : null;
 }
 
 export function getRandomPortForNode(
@@ -103,82 +71,39 @@ export function getRandomPortForNode(
   return min + Math.floor(random() * span);
 }
 
-export async function loadNodeMeta(nodeId: string, owner: boolean): Promise<NodeMeta> {
-  const path = `/nodes/${encodeURIComponent(nodeId)}/meta`;
-  let result = await request<{ meta: NodeMeta; present: boolean }>(path);
-  if (owner) {
-    const key = `qui_node_meta_${nodeId}`;
-    const raw = localStorage.getItem(key);
+export async function loadNodeMeta(nodeId: string, _owner: boolean): Promise<NodeMeta> {
+  let result = await request<{ meta: NodeMeta; present: boolean }>('/nodes/'+encodeURIComponent(nodeId)+'/meta');
+  // Preserve the existing one-time financial metadata import; port ranges are API-owned.
+  if (_owner) {
+    const key = 'qui_node_meta_' + nodeId, raw = localStorage.getItem(key);
     if (raw && !result.present) {
       const legacy = JSON.parse(raw) as NodeMeta;
-      const parsed = parseRenewPrice(legacy.renewPrice, legacy.renewCurrency, legacy.renewCycle);
-      result = await request(path, 'PUT', { ...legacy, renewPrice: parsed.price, renewCurrency: parsed.currency, renewCycle: parsed.cycle, renewNoticeDays: legacy.renewNoticeDays ?? 7, importOnly: true });
+      const price = parseRenewPrice(legacy.renewPrice, legacy.renewCurrency, legacy.renewCycle);
+      result = await request('/nodes/'+encodeURIComponent(nodeId)+'/meta', 'PUT', {
+        region: legacy.region ?? '', remark: legacy.remark ?? '', renewDate: legacy.renewDate ?? '',
+        renewCycle: price.cycle, renewCurrency: price.currency, renewPrice: price.price,
+        renewNoticeDays: legacy.renewNoticeDays ?? 7, importOnly: true
+      });
     }
     if (raw) localStorage.removeItem(key);
   }
-
-  const parsed = parseNodeMetaRemark(result.meta.remark);
-  let start = parsed.portRangeStart;
-  let end = parsed.portRangeEnd;
-  if (!start) {
-    try {
-      const localRange = localStorage.getItem(`qui_node_ports_${nodeId}`);
-      if (localRange) {
-        const [s, e] = localRange.split('-').map(Number);
-        if (s >= 1 && e <= 65535 && s <= e) {
-          start = s;
-          end = e;
-        }
-      }
-    } catch {}
-  }
-  if (start && end) {
-    try {
-      localStorage.setItem(`qui_node_ports_${nodeId}`, `${start}-${end}`);
-    } catch {}
-  }
-
-  const meta: NodeMeta = {
-    ...result.meta,
-    remark: parsed.remark,
-    portRangeStart: start,
-    portRangeEnd: end
-  };
-  metadata[nodeId] = meta;
-  return meta;
+  metadata[nodeId] = result.meta;
+  return result.meta;
 }
 
 export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void> {
-  let combinedRemark = (meta.remark || '').trim();
-  if (meta.portRangeStart && meta.portRangeEnd && meta.portRangeStart >= 1 && meta.portRangeEnd <= 65535 && meta.portRangeStart <= meta.portRangeEnd) {
-    combinedRemark = combinedRemark ? `${combinedRemark} [ports:${meta.portRangeStart}-${meta.portRangeEnd}]` : `[ports:${meta.portRangeStart}-${meta.portRangeEnd}]`;
-    try {
-      localStorage.setItem(`qui_node_ports_${nodeId}`, `${meta.portRangeStart}-${meta.portRangeEnd}`);
-    } catch {}
-  } else {
-    try {
-      localStorage.removeItem(`qui_node_ports_${nodeId}`);
-    } catch {}
+  const start = meta.portRangeStart ?? null, end = meta.portRangeEnd ?? null;
+  if ((start === null) !== (end === null) || (start !== null && end !== null &&
+      (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end > 65535 || start > end))) {
+    throw new Error('请同时填写有效的起始和结束端口（1–65535），或全部留空');
   }
-
-  // The API rejects unknown fields, so send only its input fields.
-  const result = await request<{ meta: NodeMeta }>(`/nodes/${encodeURIComponent(nodeId)}/meta`, 'PUT', {
-    region: meta.region ?? '',
-    renewDate: meta.renewDate ?? '',
-    renewCycle: meta.renewCycle ?? '',
-    renewCurrency: meta.renewCurrency ?? '',
-    remark: combinedRemark,
-    renewPrice: String(meta.renewPrice ?? ''),
-    renewNoticeDays: meta.renewNoticeDays ?? 7
+  const result = await request<{ meta: NodeMeta }>('/nodes/'+encodeURIComponent(nodeId)+'/meta', 'PUT', {
+    region: meta.region ?? '', remark: (meta.remark || '').trim(),
+    renewDate: meta.renewDate ?? '', renewCycle: meta.renewCycle ?? '',
+    renewCurrency: meta.renewCurrency ?? '', renewPrice: String(meta.renewPrice ?? ''),
+    renewNoticeDays: meta.renewNoticeDays ?? 7, portRangeStart: start, portRangeEnd: end
   });
-
-  const parsed = parseNodeMetaRemark(result.meta.remark);
-  metadata[nodeId] = {
-    ...result.meta,
-    remark: parsed.remark,
-    portRangeStart: meta.portRangeStart,
-    portRangeEnd: meta.portRangeEnd
-  };
+  metadata[nodeId] = result.meta;
 }
 
 export function parseRenewPrice(

@@ -342,3 +342,11 @@ grep -F proxy-agent /var/log/messages | tail -n 200
 - 节点连上后立刻断开：检查面板里该节点是否被禁用、证书是否过期或被吊销（见[运维手册](operations.md)）。
 - 更新被打断或开机后版本不对：看 `/var/lib/proxycontrol-install/update-recovery.log`、`interrupted-update.log`，以及 `journalctl -u proxycontrol-update-recovery`（OpenRC：`rc-service proxycontrol-update-recovery status` 与 `/var/log/messages`）。`/var/lib/proxycontrol-install/rollback.*` 仍在说明恢复没有完成，再运行一次 `qui-update` 会先重试恢复。
 - 面板起不来且怀疑数据库版本：`proxy-panel --check-database /var/lib/proxy-panel/backups/<文件>.db` 只读检查一份**停止状态**的数据库副本，输出 `database: compatible|newer|foreign|damaged`（退出码 0/3/4/5）；`newer` 表示数据库来自更新的面板，需按 5.1 带 `--database` 降级。
+
+## K2a Agent 安装增量（K2b 面板接入待完成）
+
+Agent 安装与一键安装新增 `/var/lib/proxy-agent/tuning/`（Agent 所有、0700），systemd 的 proxy-agent-tuning.service/.path 或 OpenRC 的 proxy-agent-tuning 与 tuning-watch；安装时启用并布防，开机重放保留请求。主程序仍无调优特权，独立 root helper 带 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者用于 Agent 的 0700/0600 文件协议），固定写入 13 个 sysctl；fs.file-max 使用 root 文件权限。systemd 将 /proc/sys 默认设为只读，仅开放白名单文件；OpenRC 没有对应的文件系统隔离。无需 sysctl 二进制或新依赖，不加载拥塞控制模块；容器/内核拒绝时失败并恢复，不补权限。
+
+成功配置为 `/etc/sysctl.d/99-proxy-tuning.conf`，原值快照为 root 0600 的 `.proxy-tuning-snapshot.json`。不要把该快照放进 Agent 可写目录。卸载使用安装记录第 11/12 行校验新增单元，停止触发器后先恢复快照；失败中止卸载。qui-update 文件快照覆盖新增单元和 watcher，回滚到旧版本时恢复/移除对应文件。具体排障及 Linux/root 待验收范围见[运维手册第 18 节](operations.md#18-k2a-主机观测续证与调优-helper)。
+
+证书改为满 30 天或余期不超过 14 天时在控制连接内用原密钥续证；面板仍签发 90 天证书。先发布支持该准入条件的 K2b 面板，再升级 Agent，旧面板会拒绝过早的自动续证。HostInfo 与新增心跳字段均为增量协议，旧 Agent 的未知数据由面板显示“—”。

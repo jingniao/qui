@@ -113,7 +113,7 @@
                     <span>{{ serverMap[node.serverId].name }}</span>
                     <span
                       class="w-1.5 h-1.5 rounded-full inline-block"
-                      :class="serverMap[node.serverId].status === 'online' ? 'bg-emerald-500' : 'bg-neutral-400'"
+                      :class="serverMap[node.serverId].status === 'online' ? 'bg-ios-green' : 'bg-ios-tertiary'"
                     />
                   </router-link>
                   <span v-else class="text-xs text-ios-secondary font-medium">
@@ -121,7 +121,7 @@
                   </span>
                 </td>
                 <td>
-                  <StatusBadge :status="node.enabled ? 'active' : 'disabled'" />
+                  <StatusBadge v-if="node.sourceType === 'self_hosted'" :status="node.enabled ? 'active' : 'disabled'" /><span v-else class="text-xs text-ios-secondary">—</span>
                 </td>
                 <td v-if="isOwner">
                   <button class="ios-action-btn-danger" :disabled="busy" @click="removeNode(node.id)">移出</button>
@@ -136,6 +136,33 @@
           />
         </section>
 
+        <section v-if="!isUserGroup(selected)" class="panel-card p-6 space-y-3">
+          <p class="text-sm text-ios-secondary">中转 / 出口分组不授予用户接入权限。</p>
+          <template v-if="selected.serverIds !== undefined">
+            <h2 class="text-[17px] font-semibold text-ios-label">显式服务器成员</h2>
+            <label v-for="server in servers" :key="server.id" class="flex items-center gap-2 text-sm text-ios-label">
+              <input v-model="serverSelection" type="checkbox" :value="server.id" :disabled="!isOwner || busy" class="accent-ios-blue" />{{ server.name }}
+            </label>
+            <button v-if="isOwner" class="ios-btn-secondary" :disabled="busy" @click="saveServers">保存服务器成员</button>
+          </template>
+        </section>
+        <section class="panel-card p-6 space-y-3">
+          <h2 class="text-[17px] font-semibold text-ios-label">授权用户</h2>
+          <p v-if="!selected.enabled || !selected.subscriptionVisible" class="text-xs text-ios-secondary">分组停用或订阅隐藏时，授权不提供用户接入。</p>
+          <ul class="space-y-2">
+            <li v-for="id in selected.grantedUserIds || []" :key="id" class="flex items-center justify-between gap-3 text-sm text-ios-label">
+              <span>{{ users.find(user => user.id === id)?.displayName || users.find(user => user.id === id)?.username || '—' }}</span>
+              <button v-if="isOwner" class="ios-action-btn-danger" :disabled="busy" @click="askRevoke(id)">撤销授权</button>
+            </li>
+          </ul>
+          <p v-if="!selected.grantedUserIds?.length" class="text-xs text-ios-tertiary">暂无授权用户</p>
+          <div v-if="isOwner && isUserGroup(selected)" class="flex gap-2">
+            <select v-model="grantUserId" class="form-input-base" aria-label="选择授权用户">
+              <option value="">选择用户</option><option v-for="user in grantCandidates" :key="user.id" :value="user.id">{{ user.displayName || user.username }}</option>
+            </select>
+            <button class="ios-btn-primary shrink-0" :disabled="busy || !grantUserId" @click="grantUser">添加授权</button>
+          </div>
+        </section>
         <!-- 3. Policy References -->
         <section class="panel-card p-6 space-y-3">
           <h2 class="text-[17px] font-semibold text-ios-label">被引用</h2>
@@ -167,7 +194,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { request, type Page } from '../../../app/apiClient';
 import { showToast } from '../../../app/api';
@@ -180,13 +207,14 @@ import EmptyState from '../../../components/EmptyState.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import LineGroupEditor from '../components/LineGroupEditor.vue';
 import LineGroupPicker, { type GroupPickerNode } from '../components/LineGroupPicker.vue';
-import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
+import { groupAPI, freshGroup, type NodeGroup } from '../../nodes/groupsApi';
+import { userAPI, type ProxyUser } from '../../users/api';
 import type { NodeView } from '../../nodes/api';
 import { choices, proxyAPI, type Inbound } from '../api';
 import { loadImports } from '../importApi';
 import { proxyNodeStore } from '../proxyNodes';
 import { policyAPI, type PolicyRecord, type StoredRuleTemplate } from '../../routing/api';
-import { groupInput, groupPurposeNames } from '../lineGroups';
+import { groupInput, importMemberId, isUserGroup, groupPurposeNames } from '../lineGroups';
 
 const route = useRoute();
 const router = useRouter();
@@ -197,6 +225,9 @@ const inbounds = ref<Inbound[]>([]);
 const policies = ref<PolicyRecord[]>([]);
 const clientTemplate = ref<StoredRuleTemplate | null>(null);
 
+const users = ref<ProxyUser[]>([]);
+const grantUserId = ref('');
+const serverSelection = ref<string[]>([]);
 const loading = ref(true);
 const error = ref('');
 const busy = ref(false);
@@ -208,8 +239,6 @@ const pickerOpen = ref(false);
 const pickerGroup = ref<NodeGroup | null>(null);
 const pickerError = ref('');
 
-// Group -> Node IDs mapping
-const groupNodeMap = reactive<Record<string, string[]>>({});
 
 const serverMap = computed(() => {
   const map: Record<string, NodeView> = {};
@@ -220,9 +249,9 @@ const serverMap = computed(() => {
 });
 
 function sourceBadgeClass(type: string) {
-  if (type === 'self_hosted') return 'bg-emerald-100 text-emerald-800';
-  if (type === 'subscription') return 'bg-purple-100 text-purple-800';
-  return 'bg-blue-100 text-blue-800';
+  if (type === 'self_hosted') return 'bg-ios-green/10 text-ios-green';
+  if (type === 'subscription') return 'bg-ios-purple/10 text-ios-purple';
+  return 'bg-ios-blue/10 text-ios-blue';
 }
 
 // All available nodes combining self-hosted inbounds and imported nodes
@@ -248,22 +277,19 @@ const allAvailableNodes = computed<GroupPickerNode[]>(() => {
     });
   }
 
-  // 2. Imported manual nodes & subscription nodes from proxyNodeStore
+  // Stable API membership keys survive content hash changes on refresh.
+  for (const source of proxyNodeStore.subscriptions) {
+    result.push({ id: importMemberId({ sourceId: source.id, proxyKey: '' }),
+      sourceId: source.id, proxyKey: '', name: source.name + '（整个来源）', protocol: '—', port: '—',
+      sourceType: 'subscription', sourceTypeName: '整源', sourceName: source.name, status: 'active', enabled: true });
+  }
   for (const node of proxyNodeStore.manualNodes) {
-    const isManual = node.sourceType === 'manual';
-    result.push({
-      id: node.id,
-      name: node.name,
-      protocol: node.protocol,
-      port: node.port,
-      sourceType: isManual ? 'manual' : 'subscription',
-      sourceTypeName: isManual ? '单独' : '机场',
-      sourceName: node.sourceName || (isManual ? '单独导入' : '机场订阅'),
-      status: node.status === 'online' ? 'active' : 'disabled',
-      enabled: true,
-      subscriptionVisible: true,
-      internalRelay: false
-    });
+    if (!node.sourceId || node.proxyKey === undefined) continue;
+    const id = importMemberId({ sourceId: node.sourceId, proxyKey: node.proxyKey });
+    if (result.some(item => item.id === id)) continue;
+    result.push({ id, sourceId: node.sourceId, proxyKey: node.proxyKey, name: node.name,
+      protocol: node.protocol, port: node.port, sourceType: 'subscription', sourceTypeName: '导入',
+      sourceName: node.sourceName || '—', status: 'active', enabled: true });
   }
 
   return result;
@@ -271,18 +297,21 @@ const allAvailableNodes = computed<GroupPickerNode[]>(() => {
 
 const selected = computed(() => groups.value.find(group => group.id === route.query.group) || groups.value[0]);
 
-function groupNodesFor(groupId: string): GroupPickerNode[] {
-  const ids = groupNodeMap[groupId] || [];
-  return ids.map(id => allAvailableNodes.value.find(n => n.id === id)).filter(Boolean) as GroupPickerNode[];
+function memberIds(group: NodeGroup) {
+  return [...(group.inboundIds || []), ...(group.imports || []).map(importMemberId)];
 }
-
-const currentGroupNodes = computed(() => {
-  return selected.value ? groupNodesFor(selected.value.id) : [];
-});
-
-const pickerNodeIds = computed(() => {
-  return pickerGroup.value ? (groupNodeMap[pickerGroup.value.id] || []) : [];
-});
+function groupNodesFor(groupId: string): GroupPickerNode[] {
+  const group = groups.value.find(item => item.id === groupId);
+  if (!group) return [];
+  return memberIds(group).map(id => allAvailableNodes.value.find(item => item.id === id) || {
+    id, name: '失效成员（来源刷新后未找到）', protocol: '—', port: '—',
+    sourceType: 'subscription', sourceTypeName: '失效', sourceName: '—', status: 'disabled', enabled: false
+  });
+}
+const currentGroupNodes = computed(() => selected.value ? groupNodesFor(selected.value.id) : []);
+const pickerNodeIds = computed(() => pickerGroup.value ? memberIds(pickerGroup.value) : []);
+const grantCandidates = computed(() => users.value.filter(user => !selected.value?.grantedUserIds?.includes(user.id)));
+watch(() => selected.value, group => { serverSelection.value = [...(group?.serverIds || [])]; grantUserId.value = ''; });
 
 const filteredGroups = computed(() => {
   const q = keyword.value.trim().toLowerCase();
@@ -307,28 +336,6 @@ const references = computed(() => {
   ];
 });
 
-function initGroupNodes() {
-  for (const g of groups.value) {
-    const storageKeyNew = `qui_group_nodes_${g.id}`;
-    const storageKeyOld = `qui_group_inbounds_${g.id}`;
-    const saved = localStorage.getItem(storageKeyNew) || localStorage.getItem(storageKeyOld);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as string[];
-        groupNodeMap[g.id] = parsed.filter(id => allAvailableNodes.value.some(n => n.id === id));
-      } catch {
-        // Fallback
-      }
-    }
-    if (!groupNodeMap[g.id]) {
-      groupNodeMap[g.id] = inbounds.value
-        .filter(inbound => g.nodeIds.includes(inbound.nodeId) && inbound.subscriptionVisible && !inbound.internalRelay)
-        .map(i => i.id);
-      localStorage.setItem(storageKeyNew, JSON.stringify(groupNodeMap[g.id]));
-    }
-  }
-}
-
 async function load() {
   loading.value = true;
   error.value = '';
@@ -339,10 +346,11 @@ async function load() {
       choices((page, size) => proxyAPI.inbounds('', page, size)),
       choices((page, size) => policyAPI.list(page, '', size)),
       request<StoredRuleTemplate>('/subscription-rules'),
-      loadImports().catch(() => {})
+      loadImports(),
+      choices((page, size) => userAPI.list(page, '', size))
     ]);
     [groups.value, servers.value, inbounds.value, policies.value, clientTemplate.value] = data;
-    initGroupNodes();
+    users.value = data[6];
     syncSelection();
   } catch (e) {
     error.value = (e as Error).message;
@@ -406,20 +414,19 @@ async function savePicker(ids: string[]) {
   pickerError.value = '';
 
   try {
-    const current = groupNodeMap[group.id] || [];
-    const updated = Array.from(new Set([...current, ...ids]));
-    groupNodeMap[group.id] = updated;
-    localStorage.setItem(`qui_group_nodes_${group.id}`, JSON.stringify(updated));
-    localStorage.setItem(`qui_group_inbounds_${group.id}`, JSON.stringify(updated));
-
-    const associatedServers = Array.from(
-      new Set(
-        updated
-          .map(id => allAvailableNodes.value.find(n => n.id === id)?.serverId)
-          .filter((sId): sId is string => !!sId && servers.value.some(srv => srv.id === sId))
-      )
-    );
-    await groupAPI.save(group.id, groupInput(group, associatedServers));
+    const fresh = await freshGroup(group.id);
+    const input = groupInput(fresh);
+    for (const id of ids) {
+      const candidate = allAvailableNodes.value.find(item => item.id === id);
+      if (!candidate) throw new Error('候选节点已变化，请刷新后重试');
+      if (candidate.sourceId !== undefined && candidate.proxyKey !== undefined) {
+        if (!input.imports.some(item => importMemberId(item) === id)) input.imports.push({ sourceId: candidate.sourceId, proxyKey: candidate.proxyKey });
+      } else {
+        if (!candidate.enabled || !candidate.subscriptionVisible || candidate.internalRelay) throw new Error('入站不符合用户接入条件');
+        if (!input.inboundIds.includes(id)) input.inboundIds.push(id);
+      }
+    }
+    await groupAPI.save(group.id, input);
 
     pickerOpen.value = false;
     showToast(`已向分组添加 ${ids.length} 个代理节点`);
@@ -438,20 +445,11 @@ function removeNode(nodeId: string) {
   if (!group) return;
 
   mutate(async () => {
-    const current = groupNodeMap[group.id] || [];
-    const updated = current.filter(id => id !== nodeId);
-    groupNodeMap[group.id] = updated;
-    localStorage.setItem(`qui_group_nodes_${group.id}`, JSON.stringify(updated));
-    localStorage.setItem(`qui_group_inbounds_${group.id}`, JSON.stringify(updated));
-
-    const associatedServers = Array.from(
-      new Set(
-        updated
-          .map(id => allAvailableNodes.value.find(n => n.id === id)?.serverId)
-          .filter((sId): sId is string => !!sId && servers.value.some(srv => srv.id === sId))
-      )
-    );
-    await groupAPI.save(group.id, groupInput(group, associatedServers));
+    const fresh = await freshGroup(group.id);
+    const input = groupInput(fresh);
+    input.inboundIds = input.inboundIds.filter(id => id !== nodeId);
+    input.imports = input.imports.filter(item => importMemberId(item) !== nodeId);
+    await groupAPI.save(group.id, input);
     showToast('节点已从分组中移出');
   });
 }
@@ -467,14 +465,37 @@ function askDelete() {
   confirmTitle.value = '删除节点分组';
   confirmMessage.value = `确认删除“${group.name}”？相关策略引用可能受影响；代理节点本身会保留。`;
   confirmedAction = async () => {
-    localStorage.removeItem(`qui_group_nodes_${group.id}`);
-    localStorage.removeItem(`qui_group_inbounds_${group.id}`);
     await groupAPI.delete(group.id);
     showToast('节点分组已删除');
   };
   confirmOpen.value = true;
 }
 
+async function grantUser() {
+  const group = selected.value, userId = grantUserId.value;
+  if (!group || !userId) return;
+  await mutate(() => userAPI.grantGroup(userId, group.id));
+}
+function askRevoke(userId: string) {
+  const group = selected.value;
+  if (!group) return;
+  confirmTitle.value = '撤销分组授权';
+  confirmMessage.value = '确认撤销该用户的分组授权？用户仍可通过其他已授权分组访问相同节点。';
+  confirmedAction = () => userAPI.revokeGroup(userId, group.id);
+  confirmOpen.value = true;
+}
+async function saveServers() {
+  const group = selected.value;
+  const before = group?.serverIds || [], picked = [...serverSelection.value];
+  if (!group || isUserGroup(group) || group.serverIds === undefined) return;
+  await mutate(async () => {
+    const fresh = await freshGroup(group.id);
+    if (fresh.serverIds === undefined || isUserGroup(fresh)) throw new Error('服务器成员能力或分组用途已变化，请刷新');
+    const input = groupInput(fresh);
+    input.serverIds = [...new Set([...fresh.serverIds.filter(id => !before.includes(id) || picked.includes(id)), ...picked.filter(id => !before.includes(id))])];
+    await groupAPI.save(group.id, input);
+  });
+}
 function runConfirmed() {
   mutate(confirmedAction);
 }

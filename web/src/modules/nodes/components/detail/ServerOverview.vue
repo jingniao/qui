@@ -95,9 +95,9 @@
           </p>
         </div>
 
-        <!-- 默认端口范围 -->
+        <!-- 服务器端口范围 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">默认端口范围</div>
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">服务器端口范围</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="formatPortRange(meta)">
             {{ formatPortRange(meta) }}
           </p>

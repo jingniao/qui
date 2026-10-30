@@ -131,7 +131,10 @@ assert.match(page, /<PageHeader[\s\S]*title="节点配置"/);
 assert.match(page, /<NodeEditorDrawer/);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const imports = s => s.slice(s.indexOf('    <!-- Modal 2:'), s.indexOf('</template>\n\n<script'));
-assert.equal(hash(imports(page)), '416e21529a7538e85c31aafc81be05e636ce43751c0381d1d11a24a8cc44ed3b');
+// F1 adds derived source access counts; assert the contract instead of freezing the dialog markup.
+assert.match(page, /通过节点分组可用：/);
+assert.doesNotMatch(page, /grantUserIds|importUsers|v-model="editSubForm.userIds"/);
+assert.match(page, /userIds: \[\.\.\.\(sub.userIds \|\| \[\]\)\]/);
 assert.ok(page.split('\n').length < 1850);
 const drawer = readFileSync(new URL('../src/modules/proxy/components/node-editor/NodeEditorDrawer.vue', import.meta.url), 'utf8');
 assert.ok(drawer.indexOf('await proxyAPI.saveInbound') < drawer.indexOf('await deploymentAPI.publishNode'));
@@ -150,6 +153,10 @@ function saveHarness(mode) {
     defineProps: () => ({ serverId: 'server', inbound: null, origin: 'list' }), withDefaults: props => props,
     defineEmits: () => event => events.push(event), useRoute: () => ({ query: {} }), isOwner: { value: true },
     ...api,
+    getNodePortRange: () => null,
+    groupInput: group => ({ ...group, inboundIds: [...group.inboundIds], imports: [...group.imports] }),
+    freshGroup: async id => ({ id, inboundIds: ['other-inbound'], imports: [{ sourceId: 'source', proxyKey: '' }] }),
+    groupAPI: { save: async (id, value) => { calls.push(['group', id, value]); if (mode === 'group-error') throw Error('group refused'); } },
     choices: async read => (await read(1, 100)).items,
     proxyAPI: {
       inbounds: async () => ({ items: [], total: 0 }),
@@ -161,11 +168,22 @@ function saveHarness(mode) {
       return { revision: 42, status: 'queued' };
     } }
   };
-  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { save, state, servers, savedId, result, error, busy };`);
+  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { save, state, servers, savedId, result, error, busy, selectedGroupIds, initialGroupIds };`);
   const view = run(deps);
   view.servers.value = [server]; view.state.form.name = 'Tokyo-vless-1443'; view.state.form.port = 1443;
   return { ...view, calls, events };
 }
+assert.deepEqual(api.withInboundMembership(['other', 'saved'], 'saved', false), ['other']);
+assert.deepEqual(api.withInboundMembership(['other'], 'saved', true), ['other', 'saved']);
+const groupSave = saveHarness('groups'); groupSave.selectedGroupIds.value = ['group']; await groupSave.save(true);
+assert.deepEqual(groupSave.calls.map(c => c[0]), ['save', 'group', 'publish']);
+assert.deepEqual(groupSave.calls[1][2].inboundIds, ['other-inbound', 'saved-id']);
+assert.deepEqual(groupSave.calls[1][2].imports, [{ sourceId: 'source', proxyKey: '' }]);
+const groupFailure = saveHarness('group-error'); groupFailure.selectedGroupIds.value = ['group']; await groupFailure.save(true);
+assert.deepEqual(groupFailure.calls.map(c => c[0]), ['save', 'group']);
+assert.match(groupFailure.error.value, /分组保存未全部完成/);
+assert.equal(groupFailure.savedId.value, 'saved-id');
+await groupFailure.save(true); assert.equal(groupFailure.calls.length, 2);
 const draft = saveHarness('draft'); await draft.save(false);
 assert.deepEqual(draft.calls.map(c => c[0]), ['save']);
 assert.equal(draft.savedId.value, 'saved-id');
@@ -180,4 +198,4 @@ const unsaved = saveHarness('save-error'); await unsaved.save(true);
 assert.deepEqual(unsaved.calls.map(c => c[0]), ['save']);
 assert.equal(unsaved.savedId.value, ''); assert.equal(unsaved.busy.value, false);
 assert.match(unsaved.error.value, /save refused/);
-console.log('PASS NODE_EDITOR_SAVE: actual drawer handler covers draft-only, save-then-publish, retained draft on publish failure, no duplicate creation, no publish after save failure');
+console.log('PASS NODE_EDITOR_SAVE: actual drawer handler covers draft-only, save-then-publish, retained draft on publish failure, no duplicate creation, no publish after save failure; group delta preserves other members, partial failure blocks publish');

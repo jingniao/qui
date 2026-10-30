@@ -11,4 +11,9 @@ const proxy = read('modules/proxy/pages/ProxyNodeListPage.vue');
 const saveSub = proxy.slice(proxy.indexOf('async function saveEditSub'), proxy.indexOf('function formatInterval'));
 assert.doesNotMatch(saveSub, /userIds\s*:\s*\[\s*\]/, 'editing a source must preserve grants');
 assert.doesNotMatch(read('app/apiClient.ts'), /if\s*\([^)]*csrf_failed[^)]*\)|retried\s*:\s*true|return\s+request<T>\(path,\s*method,\s*body/, 'mutations must not auto-retry CSRF failures');
+for (const file of ['modules/proxy/pages/LineGroupPage.vue', 'modules/proxy/components/LineGroupPicker.vue']) {
+  assert.doesNotMatch(read(file), /localStorage/, file + ' must use API membership');
+}
+assert.ok(!meta.includes('[ports:'), 'port ranges must use dedicated API fields');
+assert.doesNotMatch(meta, /qui_node_ports_/, 'port ranges must not use browser storage');
 console.log('All UI regression self-tests passed');

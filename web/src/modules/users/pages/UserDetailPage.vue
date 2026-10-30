@@ -283,25 +283,29 @@
                     <span class="font-semibold text-ios-label truncate">{{ node.name }}</span>
                   </div>
                   <p class="font-mono text-[10px] text-ios-tertiary truncate mt-0.5">
-                    {{ node.publicIp || node.hostname || '未分配IP' }}
+                    {{ node.publicIp || node.hostname || '—' }}
                   </p>
                 </div>
 
                 <div class="text-right shrink-0">
                   <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-black/[0.04] text-ios-secondary">
-                    {{ node.capabilities?.core_name || 'Xray' }}
+                    {{ node.capabilities?.core_name || '—' }}
                   </span>
                 </div>
               </div>
 
-              <div v-if="availableNodes.length === 0" class="text-center py-6 text-xs text-ios-tertiary">
+              <div v-for="source in availableSources" :key="source.id" class="p-2.5 rounded-xl bg-ios-bg text-xs text-ios-label">
+                导入来源：{{ source.name }}<span class="text-ios-secondary">（分组内导入成员；不参与节点额度与设备门控）</span>
+              </div>
+              <p class="text-xs text-ios-tertiary">按分组与入站授权筛选；订阅内容还需核对已发布凭据及来源可用性。</p>
+              <div v-if="availableNodes.length === 0 && availableSources.length === 0" class="text-center py-6 text-xs text-ios-tertiary">
                 暂无节点接入该授权组
               </div>
             </div>
           </div>
 
           <div class="pt-3 border-t border-black/[0.04] text-[11px] text-ios-tertiary flex items-center justify-between">
-            <span>共 {{ availableNodes.length }} 个节点提供接入</span>
+            <span>共 {{ availableNodes.length }} 台服务器、{{ availableSources.length }} 个导入来源</span>
             <span class="font-mono">协议: {{ user.allowedProtocols.join(' · ') }}</span>
           </div>
         </section>
@@ -592,6 +596,8 @@ import {
   type UserInput,
   type UserMeta
 } from '../api';
+import { proxyAPI, type Inbound } from '../../proxy/api';
+import { importAPI, type ImportSource, type ImportedProxy } from '../../proxy/importApi';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { accessAPI, type AccessRecord } from '../../access/api';
@@ -626,6 +632,9 @@ const userId = computed(() => (typeof route.params.id === 'string' ? route.param
 const user = ref<ProxyUser | null>(null);
 const groups = ref<NodeGroup[]>([]);
 const allNodes = ref<NodeView[]>([]);
+const memberInbounds = ref<Inbound[]>([]);
+const importedSources = ref<ImportSource[]>([]);
+const importedProxies = ref<ImportedProxy[]>([]);
 const error = ref('');
 
 // 订阅与二维码
@@ -708,10 +717,13 @@ const accountStatusText = computed(() => {
   if (u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit) return '流量已用完';
   return '账号正常';
 });
+const accessGroups = computed(() => groups.value.filter(g => user.value?.nodeGroupIds.includes(g.id) && g.enabled && g.subscriptionVisible && (g.purpose === 'subscription' || g.purpose === 'mixed')));
+const availableSources = computed(() => importedSources.value.filter(source => accessGroups.value.some(g => g.imports?.some(item => item.sourceId === source.id && importedProxies.value.some(proxy => proxy.sourceId === item.sourceId && (item.proxyKey === '' || item.proxyKey === proxy.proxyKey) && user.value?.allowedProtocols.includes(proxy.protocol))))));
 const availableNodes = computed(() => {
   if (!user.value) return [];
-  const grantedGroups = new Set(user.value.nodeGroupIds);
-  const grantedNodes = new Set(groups.value.filter(g => grantedGroups.has(g.id)).flatMap(g => g.nodeIds));
+  const inboundIds = new Set(accessGroups.value.flatMap(g => g.inboundIds || []));
+  const grantedNodes = new Set(memberInbounds.value.filter(ib => inboundIds.has(ib.id) && ib.enabled && ib.subscriptionVisible && !ib.internalRelay &&
+    (!ib.allowedUserIds.length || ib.allowedUserIds.includes(user.value!.id)) && user.value!.allowedProtocols.includes(ib.protocol)).map(ib => ib.nodeId));
   return allNodes.value.filter(n => grantedNodes.has(n.id) && !n.deletedAt && n.enabled && !n.maintenance && n.allowSubscription);
 });
 
@@ -946,15 +958,21 @@ async function load() {
   if (!id || route.name !== 'UserDetail') return;
   error.value = '';
   try {
-    const [u, gRes, nRes] = await Promise.all([
+    const [u, gRes, nRes, ibRes, sourceRes, proxyRes] = await Promise.all([
       userAPI.get(id),
       readPages(page => groupAPI.list(page, 100)),
-      readPages(page => nodeAPI.list(page, '', false))
+      readPages(page => nodeAPI.list(page, '', false)),
+      readPages(page => proxyAPI.inbounds('', page, 100)),
+      importAPI.list(),
+      importAPI.proxies()
     ]);
     user.value = u;
     loginEnabled.value = u.loginEnabled;
     groups.value = gRes.items;
     allNodes.value = nRes.items;
+    memberInbounds.value = ibRes.items;
+    importedSources.value = sourceRes.items;
+    importedProxies.value = proxyRes.items;
 
     await loadSubscription();
 

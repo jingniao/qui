@@ -373,6 +373,13 @@ rmdir -- "$token_directory" 2>/dev/null || true
 init_system=$(detect_init) || fail '不支持的初始化系统：需要 systemd 或 OpenRC。'
 service_enable proxy-agent && service_start proxy-agent \
   || fail "无法启动 proxy-agent；日志：$(service_log_hint proxy-agent)"
+# install.sh also installs/enables the fixed tuning helper (systemd path/oneshot
+# or OpenRC inotifyd watcher); it must be armed before the first Agent command.
+if [[ $init_system == systemd ]]; then
+  systemctl start proxy-agent-tuning.path || fail '无法启动调优 path 单元。'
+else
+  service_is_active proxy-agent-tuning || service_start proxy-agent-tuning || fail '无法启动调优 watcher。'
+fi
 printf 'proxy-agent 服务状态：%s\n' "$(service_state proxy-agent)"
 printf '\n节点已安装并登记：面板 %s，核心 %s %s。\n' "$panel" "$core" "$core_version"
 printf '注册码文件已删除；私钥只保存在本机 /var/lib/proxy-agent/identity。\n'

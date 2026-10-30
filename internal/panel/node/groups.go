@@ -14,6 +14,7 @@ type GroupImport struct {
 }
 
 type Group struct {
+	ServerIDs           []string      `json:"serverIds"`
 	InboundIDs          []string      `json:"inboundIds"`
 	Imports             []GroupImport `json:"imports"`
 	GrantedUserIDs      []string      `json:"grantedUserIds"`
@@ -27,6 +28,7 @@ type Group struct {
 	CreatedAt           string        `json:"createdAt"`
 }
 type GroupInput struct {
+	ServerIDs           []string      `json:"serverIds"`
 	InboundIDs          []string      `json:"inboundIds"`
 	Imports             []GroupImport `json:"imports"`
 	Name                string        `json:"name"`
@@ -38,7 +40,7 @@ type GroupInput struct {
 }
 
 func (r *Repository) Group(ctx context.Context, id string) (Group, error) {
-	group := Group{NodeIDs: []string{}, InboundIDs: []string{}, Imports: []GroupImport{}, GrantedUserIDs: []string{}}
+	group := Group{ServerIDs: []string{}, NodeIDs: []string{}, InboundIDs: []string{}, Imports: []GroupImport{}, GrantedUserIDs: []string{}}
 	err := r.Database.QueryRowContext(ctx, "SELECT id,name,purpose,enabled,subscription_visible,remark,created_at FROM node_groups WHERE id=?", id).Scan(&group.ID, &group.Name, &group.Purpose, &group.Enabled, &group.SubscriptionVisible, &group.Remark, &group.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return group, ErrNotFound
@@ -66,6 +68,7 @@ func (r *Repository) Group(ctx context.Context, id string) (Group, error) {
 		sql    string
 		target *[]string
 	}{
+		{"SELECT node_id FROM node_group_servers WHERE group_id=? ORDER BY node_id", &group.ServerIDs},
 		{"SELECT inbound_id FROM node_group_inbounds WHERE group_id=? ORDER BY inbound_id", &group.InboundIDs},
 		{"SELECT user_id FROM user_node_group_grants WHERE group_id=? ORDER BY user_id", &group.GrantedUserIDs},
 	} {
@@ -142,13 +145,14 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if !strings.Contains("|subscription|relay|egress|mixed|", "|"+input.Purpose+"|") {
 		return Group{}, errors.New("invalid node group purpose")
 	}
-	if len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.Imports) > 200 {
+	if len(input.ServerIDs) > 100 || len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.Imports) > 200 {
 		return Group{}, errors.New("node group member limit exceeded")
 	}
 	if input.Purpose == "relay" || input.Purpose == "egress" {
 		input.SubscriptionVisible = false
 	}
 	create := groupID == ""
+	var previous Group
 	if create {
 		var err error
 		groupID, err = RandomID()
@@ -156,7 +160,9 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 			return Group{}, err
 		}
 	} else {
-		if _, err := r.Group(ctx, groupID); err != nil {
+		var err error
+		previous, err = r.Group(ctx, groupID)
+		if err != nil {
 			return Group{}, err
 		}
 	}
@@ -176,7 +182,34 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 		}
 		return Group{}, err
 	}
-	// Legacy server selection is expanded once, never used as an access grant.
+	// Omission preserves explicit servers. Legacy bulk leave filters them too.
+	legacy := input.InboundIDs == nil && input.NodeIDs != nil
+	if input.ServerIDs == nil {
+		input.ServerIDs = previous.ServerIDs
+		if input.Purpose == "relay" || input.Purpose == "egress" {
+			if input.NodeIDs != nil {
+				input.ServerIDs = input.NodeIDs
+			}
+		} else if legacy {
+			input.ServerIDs = []string{}
+			for _, id := range previous.ServerIDs {
+				for _, selected := range input.NodeIDs {
+					if id == selected {
+						input.ServerIDs = append(input.ServerIDs, id)
+						break
+					}
+				}
+			}
+		}
+	}
+	// Old bulk clients cannot represent imports: retain omitted imports.
+	if legacy && input.Imports == nil {
+		input.Imports = previous.Imports
+	}
+	if input.Purpose == "relay" || input.Purpose == "egress" {
+		input.NodeIDs = nil
+	}
+	// Legacy subscription servers expand once; they are never access grants.
 	if input.InboundIDs == nil && input.NodeIDs != nil {
 		input.InboundIDs = []string{}
 		seen := map[string]bool{}
@@ -211,12 +244,26 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if len(input.InboundIDs) > 500 {
 		return Group{}, errors.New("node group is limited to 500 inbounds")
 	}
-	for _, table := range []string{"node_group_inbounds", "node_group_imports", "node_group_members"} {
+	for _, table := range []string{"node_group_inbounds", "node_group_imports", "node_group_servers", "node_group_members"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE group_id=?", groupID); err != nil {
 			return Group{}, err
 		}
 	}
 	seen := map[string]bool{}
+	for _, id := range input.ServerIDs {
+		if seen[id] {
+			return Group{}, errors.New("duplicate server member")
+		}
+		seen[id] = true
+		var exists int
+		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=? AND deleted_at IS NULL", id).Scan(&exists); err != nil {
+			return Group{}, errors.New("server member does not exist")
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_servers VALUES(?,?)", groupID, id); err != nil {
+			return Group{}, err
+		}
+	}
+	seen = map[string]bool{}
 	for _, inboundID := range input.InboundIDs {
 		if seen[inboundID] {
 			return Group{}, errors.New("duplicate inbound member")

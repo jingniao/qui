@@ -15,7 +15,7 @@ func TestRestoreLatencyTargetsCurrentSettingsAndOldArchive(t *testing.T) {
 			f := listeningFixture(t, func(f *fixture) {
 				queries := []string{"INSERT INTO probe_targets(id,label,host,port,scheduled) VALUES('snapshot','snapshot','1.1.1.1',443,1)"}
 				if old {
-					queries = append(queries, "DROP TRIGGER node_group_inbounds_insert", "DROP TRIGGER node_group_inbounds_delete", "DROP TRIGGER node_group_inbound_move", "DROP TABLE node_group_inbounds", "DROP TABLE node_group_imports", "ALTER TABLE node_meta DROP COLUMN port_range_end", "ALTER TABLE node_meta DROP COLUMN port_range_start", "DELETE FROM schema_migrations WHERE version='0122_node_group_entries.sql'", "DROP TABLE node_latency_targets", "ALTER TABLE nodes DROP COLUMN latency_targets_custom", "DELETE FROM schema_migrations WHERE version='0121_node_latency_targets.sql'")
+					queries = append(queries, "DROP TRIGGER node_group_inbounds_insert", "DROP TRIGGER node_group_inbounds_delete", "DROP TRIGGER node_group_inbound_move", "DROP TABLE node_group_servers", "DROP TABLE node_group_inbounds", "DROP TABLE node_group_imports", "ALTER TABLE node_meta DROP COLUMN port_range_end", "ALTER TABLE node_meta DROP COLUMN port_range_start", "DELETE FROM schema_migrations WHERE version='0122_node_group_entries.sql'", "DROP TABLE node_latency_targets", "ALTER TABLE nodes DROP COLUMN latency_targets_custom", "DELETE FROM schema_migrations WHERE version='0121_node_latency_targets.sql'")
 				}
 				for _, q := range queries {
 					if _, err := f.source.Database.Exec(q); err != nil {

@@ -44,12 +44,16 @@ if [[ $init_system == systemd ]]; then
   unit=/etc/systemd/system/$name.service
   host_network_service=/etc/systemd/system/proxy-agent-host-network.service
   host_network_path=/etc/systemd/system/proxy-agent-host-network.path
+  tuning_service=/etc/systemd/system/proxy-agent-tuning.service
+  tuning_path=/etc/systemd/system/proxy-agent-tuning.path
   recovery_service=/etc/systemd/system/proxycontrol-update-recovery.service
   init_directories=(/etc/systemd /etc/systemd/system)
 else
   unit=/etc/init.d/$name
   host_network_service=/etc/init.d/proxy-agent-host-network
   host_network_path=/usr/local/lib/proxy-agent/host-network-watch
+  tuning_service=/etc/init.d/proxy-agent-tuning
+  tuning_path=/usr/local/lib/proxy-agent/tuning-watch
   recovery_service=/etc/init.d/proxycontrol-update-recovery
   init_directories=(/etc/init.d)
 fi
@@ -102,6 +106,12 @@ if $host_network_units; then
   verify_owned "$host_network_path" "$host_network_path_digest"
 fi
 core_target=''
+tuning_units=false
+if [[ $component == agent && -n $(sed -n '11p' "$record") && -n $(sed -n '12p' "$record") ]]; then
+  tuning_units=true
+  verify_owned "$tuning_service" "$(sed -n '11p' "$record")"
+  verify_owned "$tuning_path" "$(sed -n '12p' "$record")"
+fi
 if [[ -n $core ]]; then
   [[ $component == agent && ( $core == xray || $core == sing-box ) ]] || fail 'Invalid recorded core.'
   core_target=/usr/local/lib/proxy-agent/$core
@@ -138,6 +148,29 @@ if $host_network_units; then
     rc-service proxy-agent-host-network stop || true
     rc-update del proxy-agent-host-network default || true
   fi
+fi
+if $tuning_units; then
+  if [[ $init_system == systemd ]]; then
+    systemctl disable --now proxy-agent-tuning.path
+    systemctl stop proxy-agent-tuning.service
+    systemctl disable proxy-agent-tuning.service
+  else
+    service_stop proxy-agent-tuning
+    service_disable proxy-agent-tuning
+  fi
+  # A clear request restores the root-owned baseline before removing anything.
+  # A restore failure deliberately stops uninstall and preserves the binary.
+  tuning_clear=$(mktemp -d "$registry/tuning-clear.XXXXXXXX")
+  printf '{"request_id":"uninstall-clear","settings":{},"clear":true}\n' > "$tuning_clear/desired.json"
+  if ! "$target" --apply-tuning "$tuning_clear"; then
+    fail "Tuning restore failed; see $tuning_clear/status.json."
+  fi
+  # Atomic rename, without opening an Agent-controlled file as root.
+  [[ -d /var/lib/proxy-agent/tuning && ! -L /var/lib/proxy-agent/tuning ]] || fail 'Unsafe tuning directory.'
+  mv -T -- "$tuning_clear/desired.json" /var/lib/proxy-agent/tuning/desired.json
+  mv -T -- "$tuning_clear/status.json" /var/lib/proxy-agent/tuning/status.json
+  rmdir -- "$tuning_clear"
+  rm -- "$tuning_service" "$tuning_path"
 fi
 install -o root -g root -m 0600 -- "$record" "$removed"
 rm -- "$unit" "$target"

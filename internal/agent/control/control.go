@@ -534,6 +534,21 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 	}
 	healthResults := []*pb.HealthCheckResult{}
+	tuningReplies := make(chan *pb.TuningResult, 1)
+	tuningBusy := false
+	tuningCommand := func(message *pb.ServerMessage) {
+		if message.NodeId != state.NodeID || message.GetTuningCommand() == nil || tuningBusy {
+			return
+		}
+		tuningBusy = true
+		go func() {
+			result := applyTuning(ctx, message.GetTuningCommand())
+			select {
+			case tuningReplies <- result:
+			case <-ctx.Done():
+			}
+		}()
+	}
 	probeReplies := make(chan *pb.TCPProbeResult, 1)
 	probeCtx, cancelProbes := context.WithCancel(ctx)
 	defer cancelProbes()
@@ -668,6 +683,10 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				probe(response)
 				continue
 			}
+			if response.GetTuningCommand() != nil {
+				tuningCommand(response)
+				continue
+			}
 			if response.GetDeviceGateCommand() != nil {
 				deviceGate(response)
 				continue
@@ -734,7 +753,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		return nil
 	}
-	if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: capabilities.Snapshot()}}); err != nil {
+	if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
 		return err
 	}
 	logger.Info("node control connected", "node_id", state.NodeID)
@@ -778,7 +797,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 					// Publish and remember the core that now runs, so a later
 					// session does not report the version from process start.
 					capabilities.Store(fresh)
-					if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: capabilities.Snapshot()}}); err != nil {
+					if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
 						return err
 					}
 				}
@@ -946,6 +965,13 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				return err
 			}
 			continue
+		case result := <-tuningReplies:
+			timer.Stop()
+			tuningBusy = false
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TuningResult{TuningResult: result}}); err != nil {
+				return err
+			}
+			continue
 		case result := <-updateReplies:
 			timer.Stop()
 			// Sent at the top of the next iteration, where the pending head is
@@ -959,6 +985,10 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			}
 			if received.message.GetTcpProbeCommand() != nil {
 				probe(received.message)
+				continue
+			}
+			if received.message.GetTuningCommand() != nil {
+				tuningCommand(received.message)
 				continue
 			}
 			if received.message.GetDeviceGateCommand() != nil {

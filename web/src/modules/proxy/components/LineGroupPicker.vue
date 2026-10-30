@@ -71,6 +71,7 @@
             v-model="selected"
             type="checkbox"
             :value="node.id"
+            :disabled="!!disabledReason(node) || saving"
             class="mt-1 accent-ios-blue shrink-0 w-4 h-4 rounded"
           />
           <div class="flex-1 min-w-0 space-y-1">
@@ -93,10 +94,11 @@
             </div>
             <div class="flex items-center gap-2 text-xs text-ios-tertiary">
               <span>{{ node.sourceType === 'self_hosted' ? '所属服务器：' : '来源：' }}{{ node.sourceName }}</span>
-              <span v-if="node.subscriptionVisible" class="text-emerald-600">· 订阅可见</span>
+              <span v-if="node.subscriptionVisible" class="text-ios-green">· 订阅可见</span>
             </div>
           </div>
-          <StatusBadge :status="node.enabled ? 'active' : 'disabled'" />
+          <span v-if="disabledReason(node)" class="text-xs text-ios-orange">{{ disabledReason(node) }}</span>
+          <StatusBadge v-if="node.sourceType === 'self_hosted'" :status="node.enabled ? 'active' : 'disabled'" />
         </label>
         <p v-if="!filteredNodes.length" class="text-sm text-ios-tertiary text-center py-6">
           没有符合条件的代理节点
@@ -125,6 +127,8 @@ export interface GroupPickerNode {
   sourceTypeName: string;
   sourceName: string;
   serverId?: string;
+  sourceId?: string;
+  proxyKey?: string;
   status: 'online' | 'offline' | 'untested' | 'active' | 'disabled';
   enabled: boolean;
   subscriptionVisible?: boolean;
@@ -175,9 +179,9 @@ function serverName(serverId: string) {
 }
 
 function sourceBadgeClass(type: string) {
-  if (type === 'self_hosted') return 'bg-emerald-100 text-emerald-800';
-  if (type === 'subscription') return 'bg-purple-100 text-purple-800';
-  return 'bg-blue-100 text-blue-800';
+  if (type === 'self_hosted') return 'bg-ios-green/10 text-ios-green';
+  if (type === 'subscription') return 'bg-ios-purple/10 text-ios-purple';
+  return 'bg-ios-blue/10 text-ios-blue';
 }
 
 const allCandidateNodes = computed<GroupPickerNode[]>(() => {
@@ -228,7 +232,6 @@ const filteredNodes = computed(() => {
 
   return allCandidateNodes.value.filter(node => {
     if (assigned.includes(node.id)) return false;
-    if (node.internalRelay) return false;
 
     if (selectedSourceType.value && node.sourceType !== selectedSourceType.value) {
       return false;
@@ -249,8 +252,15 @@ const filteredNodes = computed(() => {
   });
 });
 
+function disabledReason(node: GroupPickerNode): string {
+  if (node.sourceType !== 'self_hosted') return '';
+  if (node.internalRelay) return '内部中转入站，不提供用户接入';
+  if (!node.enabled) return '入站已停用';
+  if (!node.subscriptionVisible) return '入站订阅不可见';
+  return '';
+}
 function selectAllFiltered() {
-  const toAdd = filteredNodes.value.map(n => n.id);
+  const toAdd = filteredNodes.value.filter(n => !disabledReason(n)).map(n => n.id);
   selected.value = Array.from(new Set([...selected.value, ...toAdd]));
 }
 </script>

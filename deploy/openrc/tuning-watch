@@ -1,0 +1,14 @@
+#!/bin/sh
+# OpenRC equivalent of the tuning oneshot/path pair. Replay at boot; only
+# desired.json rename/write events invoke the fixed helper. Failures keep watch.
+set -eu
+DIR=/var/lib/proxy-agent/tuning
+HELPER=/usr/local/bin/proxy-agent
+apply_desired() {
+  "$HELPER" --apply-tuning "$DIR" || printf 'tuning: apply failed; see status.json\n' >&2
+}
+case $# in
+  0) apply_desired; exec /sbin/inotifyd "$0" "$DIR:wy" ;;
+  3) if [ "$3" = desired.json ]; then apply_desired; fi ;;
+  *) exit 2 ;;
+esac

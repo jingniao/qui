@@ -125,3 +125,28 @@ func TestPolicyReferencesDefaultAndDeviceScopeRemoval(t *testing.T) {
 		t.Fatal("referenced service deletion accepted")
 	}
 }
+
+func TestExplicitServerGroupPolicyScope(t *testing.T) {
+	service, nodeID, _, _, _ := fixture(t)
+	ctx := context.Background()
+	for _, purpose := range []string{"relay", "egress", "subscription", "mixed"} {
+		g, err := (&node.Repository{Database: service.Repository.Database}).SaveGroup(ctx, "", node.GroupInput{Name: "explicit " + purpose, Purpose: purpose, Enabled: true, SubscriptionVisible: true, ServerIDs: []string{nodeID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rule, err := service.Save(ctx, "", Input{Name: "scope " + purpose, Priority: 10, Enabled: true, Scope: desiredstate.Scope{GroupIDs: []string{g.ID}}, Match: desiredstate.Match{Domains: []string{"example.com"}}, Action: desiredstate.Action{Type: "Block"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		policies, err := service.ForNode(ctx, nodeID)
+		found := false
+		for _, p := range policies {
+			if p.ID == rule.ID {
+				found = true
+			}
+		}
+		if err != nil || !found {
+			t.Fatal("explicit server lost group policy", purpose, policies, err)
+		}
+	}
+}

@@ -10,6 +10,7 @@ export interface ProxyNodeItem {
   sourceType: NodeSourceType;
   sourceName: string; // e.g. "香港 HKT" or "AmyTelecom 订阅" or "单独导入"
   sourceId?: string;
+  proxyKey?: string;
   inboundId?: string;   // Associated server ID or subscription ID
   server: string;
   port: number;

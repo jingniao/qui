@@ -1,5 +1,5 @@
 <template>
-  <FormDrawer :model-value="modelValue" :title="group ? '编辑线路组' : '新建线路组'" :loading="saving" confirm-text="保存"
+  <FormDrawer :model-value="modelValue" :title="group ? '编辑节点分组' : '新建节点分组'" :loading="saving" confirm-text="保存"
     @update:model-value="$emit('update:modelValue', $event)" @confirm="save">
     <div class="space-y-4 text-sm">
       <label class="block text-xs font-medium text-ios-secondary">名称
@@ -7,7 +7,7 @@
       </label>
       <label class="block text-xs font-medium text-ios-secondary">类型
         <select :value="isUserGroup(form) ? 'user' : 'internal'" class="form-input-base mt-1.5" @change="changeKind">
-          <option value="user">用户线路组</option><option value="internal">内部分组</option>
+          <option value="user">用户节点分组</option><option value="internal">内部分组</option>
         </select>
       </label>
       <label class="flex items-center gap-2 cursor-pointer text-ios-label"><input v-model="form.enabled" type="checkbox" class="accent-ios-blue" />启用</label>
@@ -38,20 +38,20 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
-import { groupAPI, type GroupInput, type NodeGroup } from '../../nodes/groupsApi';
-import { isUserGroup } from '../lineGroups';
+import { groupAPI, freshGroup, type GroupInput, type NodeGroup } from '../../nodes/groupsApi';
+import { groupInput, isUserGroup } from '../lineGroups';
 
 const props = defineProps<{ modelValue: boolean; group: NodeGroup | null }>();
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; saved: [group: NodeGroup] }>();
 const saving = ref(false);
 const error = ref('');
 function defaults(): GroupInput {
-  return { name: '', purpose: 'subscription', enabled: true, subscriptionVisible: true, nodeIds: [], remark: '' };
+  return { name: '', purpose: 'subscription', enabled: true, subscriptionVisible: true, inboundIds: [], imports: [], remark: '' };
 }
 const form = reactive(defaults());
 watch(() => props.modelValue, open => {
   if (!open) return;
-  Object.assign(form, props.group ? { ...props.group, nodeIds: [...props.group.nodeIds] } : defaults());
+  Object.assign(form, props.group ? groupInput(props.group) : defaults());
   error.value = '';
 });
 function changeKind(event: Event) {
@@ -60,12 +60,13 @@ function changeKind(event: Event) {
 }
 async function save() {
   if (saving.value) return;
-  if (!form.name.trim()) { error.value = '请输入线路组名称'; return; }
+  if (!form.name.trim()) { error.value = '请输入节点分组名称'; return; }
   saving.value = true;
   try {
+    const latest = props.group ? groupInput(await freshGroup(props.group.id)) : defaults();
     const result = await groupAPI.save(props.group?.id || null, {
-      name: form.name.trim(), purpose: form.purpose, enabled: form.enabled, remark: form.remark,
-      subscriptionVisible: isUserGroup(form) && form.subscriptionVisible, nodeIds: [...form.nodeIds]
+      ...latest, name: form.name.trim(), purpose: form.purpose, enabled: form.enabled, remark: form.remark,
+      subscriptionVisible: isUserGroup(form) && form.subscriptionVisible
     });
     emit('saved', result);
     emit('update:modelValue', false);

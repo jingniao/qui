@@ -184,8 +184,8 @@ func TestMergeUserAccessMatchesProtocol(t *testing.T) {
 	}
 }
 
-// TestMergeUserAccessInboundAbsentFromFresh keeps only the published credential
-// IDs that still exist in the fresh credential set when the inbound is gone.
+// TestMergeUserAccessInboundAbsentFromFresh removes the binding when its exact
+// inbound is gone, even if another inbound still uses the same user credential.
 func TestMergeUserAccessInboundAbsentFromFresh(t *testing.T) {
 	published := desiredstate.State{
 		SchemaVersion: 1, Revision: 4, NodeID: "node-1",
@@ -210,8 +210,8 @@ func TestMergeUserAccessInboundAbsentFromFresh(t *testing.T) {
 		t.Fatalf("credentials were not replaced by the fresh view: %+v", next.Credentials)
 	}
 	got := next.Inbounds[0].CredentialIDs
-	if len(got) != 1 || got[0] != "cred-2" {
-		t.Fatalf("stale inbound credential not pruned: %+v", got)
+	if len(got) != 0 || next.Inbounds[0].Enabled {
+		t.Fatalf("absent inbound retained user access: %+v", next.Inbounds[0])
 	}
 }
 

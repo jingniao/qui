@@ -15,7 +15,7 @@ func TestNodeGroupEntriesMigration(t *testing.T) {
 	for _, q := range []string{
 		"PRAGMA foreign_keys=ON",
 		"CREATE TABLE nodes(id TEXT PRIMARY KEY)",
-		"CREATE TABLE inbounds(id TEXT PRIMARY KEY,node_id TEXT REFERENCES nodes(id),subscription_visible INTEGER,internal_relay INTEGER)",
+		"CREATE TABLE inbounds(id TEXT PRIMARY KEY,node_id TEXT REFERENCES nodes(id) ON DELETE CASCADE,subscription_visible INTEGER,internal_relay INTEGER)",
 		"CREATE TABLE users(id TEXT PRIMARY KEY)",
 		"CREATE TABLE node_groups(id TEXT PRIMARY KEY,name TEXT UNIQUE,purpose TEXT,enabled INTEGER,subscription_visible INTEGER,remark TEXT DEFAULT '',created_at TEXT)",
 		"CREATE TABLE node_group_members(group_id TEXT REFERENCES node_groups(id) ON DELETE CASCADE,node_id TEXT,PRIMARY KEY(group_id,node_id))",
@@ -23,10 +23,12 @@ func TestNodeGroupEntriesMigration(t *testing.T) {
 		"CREATE TABLE subscription_sources(id TEXT PRIMARY KEY,name TEXT,created_at TEXT)",
 		"CREATE TABLE user_source_grants(user_id TEXT,source_id TEXT)",
 		"CREATE TABLE node_meta(node_id TEXT PRIMARY KEY,remark TEXT)",
-		"INSERT INTO nodes VALUES('a'),('b')",
-		"INSERT INTO inbounds VALUES('entry','a',1,0),('hidden','a',0,0),('relay','a',1,1)",
+		"INSERT INTO nodes VALUES('a'),('b'),('c')",
+		"INSERT INTO inbounds VALUES('entry','a',1,0),('hidden','a',0,0),('relay','a',1,1),('relay-only','c',0,1)",
 		"INSERT INTO node_groups(id,name,purpose,enabled,subscription_visible,created_at) VALUES('g','导入 · airport','subscription',1,1,'now')",
-		"INSERT INTO node_group_members VALUES('g','a'),('g','b')",
+		"INSERT INTO node_groups(id,name,purpose,enabled,subscription_visible,created_at) VALUES('r','relay','relay',1,0,'now'),('e','egress','egress',1,0,'now'),('m','mixed','mixed',1,1,'now')",
+		"INSERT INTO node_group_members VALUES('g','a'),('g','b'),('r','c'),('r','a'),('e','b'),('m','a'),('m','b')",
+		"CREATE TEMP TABLE original_members AS SELECT * FROM node_group_members",
 		"INSERT INTO users VALUES('u')",
 		"INSERT INTO subscription_sources VALUES('s','airport','now'),('t','airport','now')",
 		"INSERT INTO user_source_grants VALUES('u','s'),('u','t')",
@@ -51,8 +53,12 @@ func TestNodeGroupEntriesMigration(t *testing.T) {
 		}
 	}
 	check("SELECT count(*) FROM node_group_inbounds WHERE group_id='g' AND inbound_id='entry'", 1)
-	check("SELECT count(*) FROM node_group_members", 1)
-	check("SELECT count(*) FROM node_groups", 3)
+	check("SELECT count(*) FROM node_group_members", 7)
+	check("SELECT count(*) FROM (SELECT * FROM original_members EXCEPT SELECT * FROM node_group_members)", 0)
+	check("SELECT count(*) FROM (SELECT * FROM node_group_members EXCEPT SELECT * FROM original_members)", 0)
+	check("SELECT count(*) FROM node_group_servers", 5)
+	check("SELECT count(*) FROM node_group_inbounds WHERE group_id IN ('r','e')", 0)
+	check("SELECT count(*) FROM node_groups", 6)
 	check("SELECT count(*) FROM node_group_imports WHERE proxy_key=''", 2)
 	check("SELECT count(*) FROM user_node_group_grants", 2)
 	check("SELECT count(*) FROM node_meta WHERE node_id='a' AND remark='keep' AND port_range_start=100 AND port_range_end=102", 1)
@@ -65,9 +71,18 @@ func TestNodeGroupEntriesMigration(t *testing.T) {
 	if _, err = d.Exec("UPDATE inbounds SET node_id='b' WHERE id='entry'"); err != nil {
 		t.Fatal(err)
 	}
-	check("SELECT count(*) FROM node_group_members WHERE node_id='b'", 1)
+	check("SELECT count(*) FROM node_group_members WHERE node_id='b'", 3)
 	if _, err = d.Exec("DELETE FROM inbounds WHERE id='entry'"); err != nil {
 		t.Fatal(err)
 	}
-	check("SELECT count(*) FROM node_group_members", 0)
+	check("SELECT count(*) FROM node_group_members", 5)
+	if _, err = d.Exec("DELETE FROM node_group_servers WHERE group_id='g'"); err != nil {
+		t.Fatal(err)
+	}
+	check("SELECT count(*) FROM node_group_members WHERE group_id='g'", 0)
+	if _, err = d.Exec("DELETE FROM nodes WHERE id='c'"); err != nil {
+		t.Fatal(err)
+	}
+	check("SELECT count(*) FROM node_group_servers WHERE node_id='c'", 0)
+	check("SELECT count(*) FROM node_group_members WHERE node_id='c'", 0)
 }

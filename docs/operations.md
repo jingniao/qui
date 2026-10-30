@@ -324,7 +324,7 @@ K1（0122）：节点分组改为具体入站及导入代理。升级前备份�
 
 节点元数据增加 `portRangeStart/portRangeEnd`（同时设置或同时为空，1–65535）。升级提取备注末尾有效 `[ports:A-B]` 并移除该后缀，无效后缀原样保留。画布自动选择中转端口时在范围内按 TCP/UDP 检查所有入站与本次计划占用，范围耗尽报错；显式端口不受范围限制，未配置范围沿用旧默认端口。当前 UI 接线属于后续 F1。
 
-服务器详情可保存地区、备注、续费日期、周期、价格、币种与提醒天数。首次 Owner 读取可导入本机旧元数据一次；服务器已有值优先，失败保留本机数据，Viewer 不导入。到期窗口内通过持久化每日标记发送 `system.alert`，不是支付或自动续费。宿主/核心 uptime、网卡速率和只读 sysctl 来自实际观测，旧 Agent、首个样本或过期心跳显示“—”；基础调优和恢复尚未获批实现（L2）。月节点流量标为保留记录，基于面板时区内的账户样本，清理后不能保证完整月（L9）。
+服务器详情可保存地区、备注、续费日期、周期、价格、币种与提醒天数。首次 Owner 读取可导入本机旧元数据一次；服务器已有值优先，失败保留本机数据，Viewer 不导入。到期窗口内通过持久化每日标记发送 `system.alert`，不是支付或自动续费。宿主/核心 uptime、网卡速率和只读 sysctl 来自实际观测，旧 Agent、首个样本或过期心跳显示“—”；基础调优和恢复已获 Owner 批准，由固定白名单 helper 执行（K2a，变更 L2；K2b 面板接入待完成）。月节点流量标为保留记录，基于面板时区内的账户样本，清理后不能保证完整月（L9）。
 
 在节点测试位置配置具名主机/端口并发起 TCP 探测；非公网目标必须 Owner 显式允许。面板解析并校验全部 IP，Agent 再校验字面量地址、次数与期限；最多 10 次、每次 3 秒，每节点同时一个待执行请求，历史每节点/目标最多 100 条。结果的丢失率指 TCP 建连失败比例，中位数只取成功尝试；全失败显示未知中位数。代理列表“连通性”从面板主机测自建入站首个解析地址的 TCP/已配置的可信 TLS，不关闭证书验证，不测带宽或 UDP/QUIC，也不改变节点可用状态（L10）。
 
@@ -333,3 +333,18 @@ K1（0122）：节点分组改为具体入站及导入代理。升级前备份�
 端口转发在入站/画布设置源监听端口、目标地址/端口与 TCP/UDP，通过原发布路径部署。需 Agent 声明 forward 能力；Xray 使用 `dokodemo-door`，sing-box 使用 `direct` override。画布已有 gost 标签的转发边映射到原生核心功能，不安装 gost。转发无用户认证归属，不出现在订阅、不执行每用户额度与设备限制、不生成用户域名归属；自动额度版本保持其已发布状态。原生校验、TCP/UDP echo 与受管节点实测仍待 CI/Owner（AU6.1）。
 
 用户重置周期可选不重置、每月或每 30 个本地日，存储独立周期、锚点与已处理边界；每月保留原日号、短月夹紧，下月恢复原锚点，30 日按面板时区日历运算而非固定秒数。调度器清零使用量，恢复活跃通过原额度自动发布。0118 迁移闭合的旧 `[config:…]` 前缀并去除旧 up/down 限速元数据；每用户限速已移除（L1），普通备注保留。恢复保守保留当前重置边界，避免旧备份再次清零；停止/恢复取消并等待调度任务。月末、时区与重启边界有假时钟测试，Linux/浏览器观察仍待 Owner。
+
+## 18. K2a 主机观测、续证与调优 helper
+
+主机信息随 Capabilities 重发刷新；磁盘总量/用量与 disk_percent 都取 Agent 状态目录所在文件系统。load、进程数、TCP 全状态套接字数、UDP 套接字数及内存/交换/磁盘字节来自 Linux 实际读取，失败不填。tuning_current 是完整当前值，tcp_rmem/tcp_wmem 含三个整数；下发这两个键时只填最大值，前两个值保持应用时的现值。
+
+自动续证使用原私钥，证书满 30 天或余期不超过 14 天即在连接内尝试；失败退避 1 小时，离线不执行。K2b 须同步面板自动续证准入，否则旧面板会返回 renewal is not due；90 天签发期不变。
+
+调优是 Owner 批准的固定特权操作（变更 L2）。Agent 将 request_id、settings、clear 写入 /var/lib/proxy-agent/tuning/desired.json（0600），helper 返回同目录 status.json。status 为 applied/cleared/failed，keys 为逐键读回值与错误；30 秒未等到匹配 request_id 只表示结果未确认，不能宣称没有应用。面板接入待 K2b；请求 ID 须唯一，不自动重试未确认的变更。
+
+- systemd：查看 `systemctl status proxy-agent-tuning.path proxy-agent-tuning.service`、`journalctl -u proxy-agent-tuning`；path 应保持运行，oneshot 执行完为 inactive 正常。反复失败后仍应接收新请求。
+- OpenRC：查看 `rc-service proxy-agent-tuning status`、syslog 的 proxy-agent-tuning；检查 `/usr/local/lib/proxy-agent/tuning-watch`、busybox inotifyd 与启动运行级。
+- 检查 desired/status 的 request_id 是否一致及 keys 错误；算法必须已在 tcp_available_congestion_control 中。helper 不加载模块，不调用 shell 或 sysctl 命令。容器只读 procfs、权限不足、内核不支持或读回不符均报告失败，并尝试恢复全部原值；恢复失败也逐键记错，须管理员核对真实 sysctl。
+- `/etc/sysctl.d/99-proxy-tuning.conf` 保存成功配置；root 0600 的 `.proxy-tuning-snapshot.json` 保存首次应用前原值，不由 Agent 写。空 profile/clear 删除配置并恢复原值。卸载先停 watcher、恢复快照，恢复失败保留程序并中止卸载。不要手动删除快照来处理失败。
+
+systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者读取 Agent 的 0600 请求并写入其 0700 目录），fs.file-max 靠 root 文件权限；/proc/sys 默认只读，只开放 13 个固定键。OpenRC 同为 root/CAP_NET_ADMIN + CAP_DAC_OVERRIDE，但缺少 systemd 文件系统隔离。若宿主策略拒绝写入，保留失败结果；不扩权。Linux/root 集成及实际内核权限仍待主机验收，可运行 `sudo bash deploy/linux/tests/tuning-helper-test.sh` 验证隔离的触发/重放流程，Go tuning 测试用假 proc 验证应用/恢复，不改宿主。

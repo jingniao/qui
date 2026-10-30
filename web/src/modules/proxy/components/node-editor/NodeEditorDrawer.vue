@@ -29,6 +29,7 @@
               服务器分配范围: {{ serverPortRange.start }} - {{ serverPortRange.end }}
             </span>
           </div>
+          <p v-if="!serverPortRange" class="text-[11px] text-ios-secondary">未设置服务器范围；随机端口使用编辑器默认范围 10000–65535。</p>
           <input v-model.number="f.port" type="number" min="1" max="65535" class="form-input-base mt-1.5 font-mono" />
         </div>
         <button type="button" class="ios-btn-secondary" @click="pickPort">随机端口</button>
@@ -36,10 +37,19 @@
       </div>
       <NodeProtocolFields v-if="step === 3 || step === 4" :state="state" :step="step" />
       <NodeAdvancedFields v-if="step === 5" :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" />
+      <section v-if="step === 5 && isOwner" class="panel-card p-4 space-y-3">
+        <h3 class="text-sm font-semibold text-ios-label">所属分组</h3>
+        <label v-for="group in memberGroups" :key="group.id" class="flex items-center gap-2 text-sm text-ios-label">
+          <input v-model="selectedGroupIds" type="checkbox" :value="group.id" class="accent-ios-blue" />{{ group.name }}
+          <span v-if="group.purpose === 'relay' || group.purpose === 'egress'" class="text-xs text-ios-secondary">（不授予用户接入）</span>
+        </label>
+        <p class="text-xs text-ios-secondary">新入站不会自动加入分组。分组保存后影响订阅筛选；运行配置需发布后由服务器确认生效。</p>
+      </section>
       <div v-if="step === 6" class="space-y-4 text-sm">
         <p class="text-ios-label">{{ selectedServer?.name || '—' }} · {{ f.name }} · {{ f.protocol.toUpperCase() }} :{{ f.port }}</p>
         <p class="text-ios-secondary">{{ f.listen }} · {{ f.enabled ? '启用' : '停用' }} · {{ f.subscriptionVisible && !f.internalRelay ? '订阅可见' : '订阅隐藏' }} · {{ f.internalRelay ? '内部中转' : '用户接入' }}</p>
-        <p class="text-xs text-ios-secondary">默认出站：{{ f.defaultOutbound }}；用户范围：{{ f.allowedUserIds.length ? f.allowedUserIds.map(id => users.find(u => u.id === id)?.username || id).join('、') : '线路组内全部授权用户' }}</p>
+        <p class="text-xs text-ios-secondary">默认出站：{{ f.defaultOutbound }}；用户范围：{{ f.allowedUserIds.length ? f.allowedUserIds.map(id => users.find(u => u.id === id)?.username || id).join('、') : '已获授权、且分组包含此入站的用户' }}</p>
+        <p class="text-xs text-ios-secondary">所属分组：{{ selectedGroupIds.map(id => memberGroups.find(g => g.id === id)?.name || '—').join('、') || '—' }}。非空 allowedUserIds 只进一步缩小上述分组授权范围，不会单独授予接入权限。</p>
         <p class="text-xs text-ios-orange">保存草稿后运行配置不变。发布会包含该服务器的全部待发布修改；内部中转请先发布目标服务器。</p>
         <div class="overflow-x-auto rounded-2xl border border-ios-border">
           <table class="w-full text-xs text-left"><thead class="bg-ios-bg text-ios-secondary"><tr><th class="p-3">字段</th><th class="p-3">保存前</th><th class="p-3">保存后</th></tr></thead>
@@ -71,12 +81,14 @@ import FormDrawer from '../../../../components/FormDrawer.vue';
 import { isOwner } from '../../../../app/auth';
 import { proxyAPI, choices, loadProtocolSupport, protocolOptions, type Inbound, type Outbound, type OutboundGroup, type ProxyChain } from '../../api';
 import { nodeAPI, type NodeView } from '../../../nodes/api';
-import { getNodePortRange } from '../../../nodes/nodeMeta';
+import { getNodePortRange, loadNodeMeta } from '../../../nodes/nodeMeta';
+import { groupAPI, freshGroup, type NodeGroup } from '../../../nodes/groupsApi';
+import { groupInput } from '../../lineGroups';
 import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
-import { buildPayload, createEditor, changeProtocol, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
+import { withInboundMembership, buildPayload, createEditor, changeProtocol, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
 const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin }>(), { serverId: '', inbound: null, origin: 'list' });
 const emit = defineEmits<{ close: []; saved: [] }>();
 const route = useRoute();
@@ -84,6 +96,8 @@ const state = reactive(createEditor(props.serverId || String(route.query.server 
 const f = computed(() => state.form);
 const servers = ref<NodeView[]>([]), inbounds = ref<Inbound[]>([]), users = ref<ProxyUser[]>([]);
 const outbounds = ref<Outbound[]>([]), groups = ref<OutboundGroup[]>([]), chains = ref<ProxyChain[]>([]);
+const memberGroups = ref<NodeGroup[]>([]), selectedGroupIds = ref<string[]>([]);
+const initialGroupIds = ref<string[]>([]);
 const step = ref(props.inbound ? 6 : 1), reached = ref(props.inbound ? 6 : 1), autoName = ref(!props.inbound);
 const loading = ref(true), busy = ref(false), error = ref(''), loadError = ref(''), result = ref(''), savedId = ref('');
 const steps = ['服务器', '协议与端口', '传输与安全', '协议专属', '高级', '确认'].map((label, i) => ({ label, number: i + 1, symbol: '①②③④⑤⑥'[i] }));
@@ -101,7 +115,12 @@ const diff = computed(() => {
 watch(() => [f.value.nodeId, f.value.protocol, f.value.port, selectedServer.value?.name], () => {
   if (autoName.value && selectedServer.value) f.value.name = `${selectedServer.value.name}-${f.value.protocol}-${f.value.port}`;
 });
-watch(() => f.value.nodeId, (newNodeId) => {
+watch(() => f.value.nodeId, async (newNodeId) => {
+  if (newNodeId) {
+    try { await loadNodeMeta(newNodeId, isOwner.value); }
+    catch (e) { error.value = `端口范围读取失败：${(e as Error).message}`; return; }
+    if (disposed || f.value.nodeId !== newNodeId) return;
+  }
   if (!state.original && newNodeId) {
     const range = getNodePortRange(newNodeId);
     if (range) {
@@ -117,11 +136,15 @@ async function load() {
   loading.value = true; loadError.value = '';
   try {
     await loadProtocolSupport();
-    const data = await Promise.all([choices(p => nodeAPI.list(p, '')), choices((p, s) => proxyAPI.inbounds('', p, s)), choices((p, s) => userAPI.list(p, '', s)), choices((p, s) => proxyAPI.outbounds('', p, s)), choices((p, s) => proxyAPI.groups('', p, s)), choices((p, s) => proxyAPI.chains('', p, s))]);
+    const data = await Promise.all([choices(p => nodeAPI.list(p, '')), choices((p, s) => proxyAPI.inbounds('', p, s)), choices((p, s) => userAPI.list(p, '', s)), choices((p, s) => proxyAPI.outbounds('', p, s)), choices((p, s) => proxyAPI.groups('', p, s)), choices((p, s) => proxyAPI.chains('', p, s)), choices(groupAPI.list)]);
     if (disposed) return;
     [servers.value, inbounds.value, users.value, outbounds.value, groups.value, chains.value] = data;
+    memberGroups.value = data[6];
+    initialGroupIds.value = memberGroups.value.filter(g => g.inboundIds?.includes(props.inbound?.id || '')).map(g => g.id);
+    selectedGroupIds.value = [...initialGroupIds.value];
     if (!f.value.nodeId) f.value.nodeId = eligibleServers.value[0]?.id || '';
     else if (!eligibleServers.value.some(s => s.id === f.value.nodeId)) error.value = '预选服务器不可用，请选择其他已登记服务器';
+    if (f.value.nodeId) await loadNodeMeta(f.value.nodeId, isOwner.value);
     if (!props.inbound && f.value.nodeId) {
       const range = getNodePortRange(f.value.nodeId);
       if (range) {
@@ -164,6 +187,18 @@ async function save(publish: boolean) {
     const saved = await proxyAPI.saveInbound(state.original?.id || null, value);
     savedId.value = saved.id; step.value = 6;
     result.value = '节点草稿已保存，运行配置未改变。';
+    try {
+      const changed = [...new Set([...initialGroupIds.value, ...selectedGroupIds.value])]
+        .filter(id => initialGroupIds.value.includes(id) !== selectedGroupIds.value.includes(id));
+      for (const id of changed) {
+        const fresh = await freshGroup(id), input = groupInput(fresh);
+        input.inboundIds = withInboundMembership(input.inboundIds, saved.id, selectedGroupIds.value.includes(id));
+        await groupAPI.save(id, input);
+      }
+    } catch (e) {
+      error.value = '节点草稿已保存并保留，分组保存未全部完成：' + (e as Error).message + '。本次未发布；请重新打开节点核对分组后重试。';
+      emit('saved'); return;
+    }
     if (publish) {
       try {
         const published = await deploymentAPI.publishNode(value.nodeId, `${state.original ? '更新' : '新建'}自建节点入站: ${value.name}`);

@@ -5,8 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription"
 	"proxycontrol/internal/panel/subscription/importer"
+	"proxycontrol/internal/panel/user"
 )
 
 func TestImportAPIOwnerOnlyEncryptedAndSubscriptionReadsCache(t *testing.T) {
@@ -30,7 +32,17 @@ func TestImportAPIOwnerOnlyEncryptedAndSubscriptionReadsCache(t *testing.T) {
 	}
 	// An unreachable URL is saved without fetching. Reading the subscription
 	// uses the cache and produces a warning, never a network request or revision.
-	if _, err := app.importStore.Save(t.Context(), "", importer.Input{Name: "pending fixture", URL: "https://127.0.0.1/fixture", Interval: 60, UserIDs: []string{u.ID}}); err != nil {
+	pending, err := app.importStore.Save(t.Context(), "", importer.Input{Name: "pending fixture", URL: "https://127.0.0.1/fixture", Interval: 60, UserIDs: []string{u.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// K1 grants imports through group entries; source userIds is compatibility
+	// input only and must not authorize subscription access.
+	group, err := app.nodeRepository.SaveGroup(t.Context(), "", node.GroupInput{Name: "import access", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: saved.ID}, {SourceID: pending}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = (&user.Repository{Database: app.Database}).Grant(t.Context(), u.ID, group.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	repo := &subscription.Repository{Database: app.Database}

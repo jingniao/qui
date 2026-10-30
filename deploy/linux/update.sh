@@ -368,10 +368,14 @@ component_files() {
     printf '%s\n' "$program_directory/qui"
   elif [[ $init_system == systemd ]]; then
     printf '%s\n' "$root/etc/systemd/system/proxy-agent-host-network.service" \
-      "$root/etc/systemd/system/proxy-agent-host-network.path"
+      "$root/etc/systemd/system/proxy-agent-host-network.path" \
+      "$root/etc/systemd/system/proxy-agent-tuning.service" \
+      "$root/etc/systemd/system/proxy-agent-tuning.path"
   else
     printf '%s\n' "$root/etc/init.d/proxy-agent-host-network" \
-      "$root/usr/local/lib/proxy-agent/host-network-watch"
+      "$root/usr/local/lib/proxy-agent/host-network-watch" \
+      "$root/etc/init.d/proxy-agent-tuning" \
+      "$root/usr/local/lib/proxy-agent/tuning-watch"
   fi
   printf '%s\n' "$registry/$component.manifest"
 }
@@ -538,6 +542,19 @@ remove_install_staging() {
 restore_snapshot() {
   local component=$1 path source temporary
   [[ -n $snapshot && -d $snapshot ]] || { printf '没有可恢复的快照。\n' >&2; return 1; }
+  # Do not leave a new root watcher running when rolling back to a release
+  # without tuning. Stop before replacing its binary or unit definitions.
+  if [[ $component == agent ]]; then
+    if [[ $init_system == systemd && -f $root/etc/systemd/system/proxy-agent-tuning.service ]]; then
+      systemctl stop proxy-agent-tuning.path proxy-agent-tuning.service || return 1
+      if [[ ! -f $snapshot/files$root/etc/systemd/system/proxy-agent-tuning.service ]]; then
+        systemctl disable proxy-agent-tuning.path proxy-agent-tuning.service || return 1
+      fi
+    elif [[ $init_system == openrc && -f $root/etc/init.d/proxy-agent-tuning ]]; then
+      if service_is_active proxy-agent-tuning; then service_stop proxy-agent-tuning || return 1; fi
+      if [[ ! -f $snapshot/files$root/etc/init.d/proxy-agent-tuning ]]; then service_disable proxy-agent-tuning || return 1; fi
+    fi
+  fi
   while IFS= read -r path; do
     source=$snapshot/files$path
     if [[ ! -e $source && ! -L $source ]]; then
@@ -565,6 +582,13 @@ restore_snapshot() {
   service_reload_definitions || return 1
   if [[ $init_system == openrc && $component == agent ]] && service_is_active proxy-agent-host-network; then
     service_restart proxy-agent-host-network || return 1
+  fi
+  if [[ $component == agent ]]; then
+    if [[ $init_system == systemd && -f $root/etc/systemd/system/proxy-agent-tuning.path ]]; then
+      systemctl start proxy-agent-tuning.path || return 1
+    elif [[ $init_system == openrc && -f $root/etc/init.d/proxy-agent-tuning ]]; then
+      service_start proxy-agent-tuning || return 1
+    fi
   fi
   printf '[proxy-%s] 已恢复更新前的文件。\n' "$component"
 }

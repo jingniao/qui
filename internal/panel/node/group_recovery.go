@@ -13,6 +13,7 @@ func (r *Repository) PrepareGroupRestoreTx(ctx context.Context, tx *sql.Tx) erro
 	for _, q := range []string{
 		"DELETE FROM node_groups",
 		"INSERT INTO node_groups SELECT * FROM restore_source.node_groups",
+		"INSERT INTO node_group_servers SELECT e.* FROM restore_source.node_group_servers e JOIN nodes n ON n.id=e.node_id WHERE n.deleted_at IS NULL",
 		`INSERT INTO node_group_inbounds SELECT e.* FROM restore_source.node_group_inbounds e
 JOIN inbounds i ON i.id=e.inbound_id JOIN nodes n ON n.id=i.node_id WHERE n.deleted_at IS NULL`,
 		"INSERT INTO node_group_imports SELECT e.* FROM restore_source.node_group_imports e JOIN subscription_sources s ON s.id=e.source_id",

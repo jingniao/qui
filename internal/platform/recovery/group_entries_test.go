@@ -31,7 +31,7 @@ func TestRecoveryKeepsCurrentGroupEntriesAndPortRange(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if _, err := f.nodes.SaveGroup(ctx, groupID, node.GroupInput{Name: "current entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: sourceID, ProxyKey: "B|http"}}}); err != nil {
+	if _, err := f.nodes.SaveGroup(ctx, groupID, node.GroupInput{Name: "current entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, ServerIDs: []string{f.node.ID}, Imports: []node.GroupImport{{SourceID: sourceID, ProxyKey: "B|http"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.source.Database.Exec("UPDATE node_meta SET port_range_start=21000,port_range_end=21010 WHERE node_id=?", f.node.ID); err != nil {
@@ -51,7 +51,7 @@ func TestRecoveryKeepsCurrentGroupEntriesAndPortRange(t *testing.T) {
 		t.Fatal("backup restored whole-source access", p, err)
 	}
 	g, err := (&node.Repository{Database: database}).Group(ctx, groupID)
-	if err != nil || len(g.Imports) != 1 || g.Imports[0].ProxyKey != "B|http" || len(g.GrantedUserIDs) != 1 {
+	if err != nil || len(g.ServerIDs) != 1 || g.ServerIDs[0] != f.node.ID || len(g.NodeIDs) != 1 || len(g.Imports) != 1 || g.Imports[0].ProxyKey != "B|http" || len(g.GrantedUserIDs) != 1 {
 		t.Fatal(g, err)
 	}
 	assertInt(t, database, "SELECT port_range_start FROM node_meta WHERE node_id=?", 21000, f.node.ID)

@@ -921,6 +921,7 @@
               <label class="block">
                 <div class="flex items-center justify-between">
                   <span class="text-ios-secondary">监听转发端口</span>
+                  <span v-if="!selectedNodePortRange" class="text-[10px] text-ios-secondary">未设置范围；随机按钮使用编辑器默认范围 10000–65535，留空由后端分配</span>
                   <span v-if="selectedNodePortRange" class="text-[10px] text-ios-blue bg-ios-blue/10 px-1.5 py-0.5 rounded">
                     范围: {{ selectedNodePortRange.start }}-{{ selectedNodePortRange.end }}
                   </span>
@@ -1117,7 +1118,7 @@ import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
-import { getNodePortRange, getRandomPortForNode } from '../../nodes/nodeMeta';
+import { loadNodeMeta, getNodePortRange, getRandomPortForNode } from '../../nodes/nodeMeta';
 import { proxyAPI, choices, canvasAPI, canvasSchemeToRelayScheme, relaySchemeToCanvasInput, type CanvasPublishResult, type CanvasSchemeContext, type Inbound } from '../api';
 import {
   proxyNodeStore,
@@ -1186,9 +1187,9 @@ function pickListenPortForSelectedNode() {
   selectedNode.value.listenPort = port;
   saveDraft();
   if (range) {
-    showToast(`已从服务器端口范围 (${range.start}-${range.end}) 分配端口: ${port}`, 'info');
+    showToast(`已从服务器端口范围 (${range.start}-${range.end}) 选择候选端口: ${port}`, 'info');
   } else {
-    showToast(`已随机分配端口: ${port}`, 'info');
+    showToast(`已从编辑器默认范围 10000–65535 选择候选端口: ${port}`, 'info');
   }
 }
 const selectedConnection = ref<CanvasConnection | null>(null);
@@ -1693,12 +1694,7 @@ function onCanvasDrop(e: DragEvent) {
 
   const role = currentScheme.value.nodes.length === 0 ? 'entry' : 'relay';
   let initialPort: number | undefined = undefined;
-  if (draggedPayload.type === 'server' && draggedPayload.isManageable) {
-    const range = getNodePortRange(draggedPayload.id);
-    if (range) {
-      initialPort = getRandomPortForNode(draggedPayload.id);
-    }
-  }
+  // Keep the port absent: the backend allocates relay listeners from node metadata.
 
   // Requirement 2: Repeated drops create new instance without modifying original resource
   const newInst: CanvasNodeInstance = {
@@ -2103,6 +2099,7 @@ onMounted(async () => {
       choices((page, size) => proxyAPI.inbounds('', page, size))
     ]);
     servers.value = nodeRes;
+    await Promise.all(nodeRes.map(node => loadNodeMeta(node.id, true)));
     inbounds.value = inboundRes;
   } catch (e) { showToast(`载入画布资源失败: ${(e as Error).message}`, 'error'); }
 

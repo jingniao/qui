@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch Proxy Control whitelisted host tuning
+
+[Path]
+PathChanged=/var/lib/proxy-agent/tuning/desired.json
+Unit=proxy-agent-tuning.service
+
+[Install]
+WantedBy=multi-user.target

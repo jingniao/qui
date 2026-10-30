@@ -13,6 +13,7 @@ import (
 	"proxycontrol/internal/agent/agenthost"
 	"proxycontrol/internal/agent/control"
 	"proxycontrol/internal/agent/hostnet"
+	"proxycontrol/internal/agent/tuning"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/logging"
 	"proxycontrol/pkg/contracts/agentstorage"
@@ -31,6 +32,7 @@ type agentFlags struct {
 	storageVersion    *int
 	describeControl   *bool
 	applyHostNetwork  *string
+	applyTuning       *string
 	managed           *bool
 	supervise         *bool
 	initializeHistory *bool
@@ -49,6 +51,7 @@ func registerFlags(set *flag.FlagSet) *agentFlags {
 	f.storageVersion = set.Int("storage-contract-version", 1, "storage descriptor query version (1 or 2)")
 	f.describeControl = set.Bool("control-only-contract", false, "show fixed control-only worker capability and exit")
 	f.applyHostNetwork = set.String("apply-host-network", "", "apply the enforced outbound source of a helper directory and exit")
+	f.applyTuning = set.String("apply-tuning", "", "apply the fixed sysctl profile of a helper directory and exit")
 	f.managed = set.Bool("managed-worker", false, "run with a local authenticated supervisor handshake")
 	f.supervise = set.Bool("supervise", false, "run the authenticated installed Agent under supervision")
 	f.initializeHistory = set.Bool("initialize-agent-history", false, "explicitly adopt this Agent as the initial supervised version")
@@ -74,6 +77,18 @@ func run() error {
 }
 
 func execute(set *flag.FlagSet, f *agentFlags) error {
+	if *f.applyTuning != "" {
+		exclusive := set.NArg() == 0
+		set.Visit(func(o *flag.Flag) {
+			if o.Name != "apply-tuning" {
+				exclusive = false
+			}
+		})
+		if !exclusive {
+			return fmt.Errorf("--apply-tuning cannot be combined with other flags")
+		}
+		return tuning.RunHelper(*f.applyTuning)
+	}
 	// The enforced-source helper is a fixed operation of the packaged unit: it
 	// reads one validated file and runs exactly one program, so it never loads a
 	// configuration and never accepts another flag.

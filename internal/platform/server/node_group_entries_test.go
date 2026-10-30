@@ -127,3 +127,67 @@ func TestGroupEntriesAndPortRangeAPIDecode(t *testing.T) {
 		t.Fatal(r.Code, r.Body.String())
 	}
 }
+
+func TestExplicitGroupServerAPIAndAccessIsolation(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, _ := f.addUser(t, "server_only", "")
+	body := map[string]any{"name": "explicit only", "purpose": "subscription", "enabled": true, "subscriptionVisible": true, "serverIds": []string{f.nodeID}, "inboundIds": []string{}}
+	response := f.owner.call("PUT", "/api/v1/node-groups/"+f.groupID, body)
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var g node.Group
+	if err := json.Unmarshal(response.Body.Bytes(), &g); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.ServerIDs) != 1 || g.ServerIDs[0] != f.nodeID || len(g.NodeIDs) != 1 || len(g.InboundIDs) != 0 {
+		t.Fatal(g)
+	}
+	list := f.owner.call("GET", "/api/v1/node-groups", nil)
+	var groups struct{ Items []node.Group }
+	if err := json.Unmarshal(list.Body.Bytes(), &groups); err != nil || list.Code != 200 {
+		t.Fatal(list.Code, list.Body.String(), err)
+	}
+	found := false
+	for _, v := range groups.Items {
+		if v.ID == g.ID && len(v.ServerIDs) == 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("GET omitted explicit servers", list.Body.String())
+	}
+	allowed, err := f.app.nodeRepository.UserHasNode(f.ctx, f.nodeID, account.ID)
+	if err != nil || allowed {
+		t.Fatal("explicit server granted access", allowed, err)
+	}
+	state, err := f.app.quotaDeployer.proxy.Snapshot(f.ctx, f.nodeID, f.app.quotaDeployer.users)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stateHoldsUser(state, account.ID) {
+		t.Fatal("explicit server granted credentials")
+	}
+	proxies, _, err := (&published.Source{Users: f.app.quotaDeployer.users, Nodes: f.app.nodeRepository, Published: f.app.deployments}).Proxies(f.ctx, source.Viewer{UserID: account.ID, DeviceID: entriesDevice(t, f, account.ID), NodeGroupIDs: []string{f.groupID}, AllowedProtocols: []string{"vless"}})
+	if err != nil || len(proxies) != 0 {
+		t.Fatal("explicit server granted subscription", proxies, err)
+	}
+	visible, err := (&portal.Service{Users: f.app.quotaDeployer.users, Nodes: f.app.nodeRepository}).GrantedNodes(f.ctx, account.ID)
+	if err != nil || len(visible) != 0 {
+		t.Fatal("explicit server exposed in portal", visible, err)
+	}
+	for _, ids := range [][]string{{"missing"}, {f.nodeID, f.nodeID}, make([]string, 101)} {
+		body["serverIds"] = ids
+		if r := f.owner.call("PUT", "/api/v1/node-groups/"+f.groupID, body); r.Code != 400 {
+			t.Fatal(r.Code, r.Body.String())
+		}
+	}
+	body["serverIds"] = []string{}
+	if r := f.owner.call("PUT", "/api/v1/node-groups/"+f.groupID, body); r.Code != 200 {
+		t.Fatal(r.Code, r.Body.String())
+	}
+	g, err = f.app.nodeRepository.Group(f.ctx, f.groupID)
+	if err != nil || len(g.ServerIDs) != 0 || len(g.NodeIDs) != 0 {
+		t.Fatal(g, err)
+	}
+}

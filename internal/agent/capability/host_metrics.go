@@ -61,6 +61,8 @@ func (s *Sampler) hostHeartbeat(h *pb.Heartbeat, now time.Time) {
 		return
 	}
 	readHost("/proc", h)
+	readExtraHost("/proc", h)
+	_, h.DiskUsedBytes = diskBytes(s.directory)
 	s.interfaceRates(h, now)
 }
 

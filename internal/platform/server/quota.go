@@ -939,10 +939,10 @@ func mergeUserAccess(published, fresh desiredstate.State, ownerEnabled []string)
 				continue
 			}
 			// An internal credential belongs to the published configuration
-			// and stays attached; a user credential follows the fresh inbound
-			// when there is one, and otherwise survives while the merged set
-			// still holds it.
-			if !credential.Internal && inFresh && !freshIDs[id] {
+			// and stays attached; a user credential must still be authorized
+			// on this exact inbound. Deleting/moving one inbound must not retain
+			// its binding merely because another inbound uses the same secret.
+			if !credential.Internal && (!inFresh || !freshIDs[id]) {
 				continue
 			}
 			ids = append(ids, id)

@@ -50,7 +50,7 @@
                   </svg>
                   <span>默认端口分配范围</span>
                 </span>
-                <span class="text-[10px] text-neutral-400">新建节点、中转与隧道时默认在此范围随机分配</span>
+                <span class="text-[10px] text-neutral-400">新入站随机端口使用此范围；未指定中转端口时由后端分配。留空表示未设置。</span>
               </div>
               <div class="grid grid-cols-2 gap-2.5">
                 <label class="space-y-1">
@@ -61,7 +61,7 @@
                     min="1"
                     max="65535"
                     class="form-input-base text-xs font-mono"
-                    placeholder="留空默认 10000"
+                    placeholder="留空不设置"
                   />
                 </label>
                 <label class="space-y-1">
@@ -72,7 +72,7 @@
                     min="1"
                     max="65535"
                     class="form-input-base text-xs font-mono"
-                    placeholder="留空默认 65535"
+                    placeholder="留空不设置"
                   />
                 </label>
               </div>
@@ -296,7 +296,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { nodeAPI, type NodeView, type NodeSettingsInput } from '../../api';
-import { type NodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice, calculateRemainingDays, parseNodeMetaRemark, CURRENCY_LIST, CYCLE_LIST } from '../../nodeMeta';
+import { type NodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice, calculateRemainingDays, CURRENCY_LIST, CYCLE_LIST } from '../../nodeMeta';
 import { isOwner } from '../../../../app/auth';
 import { showToast } from '../../../../app/api';
 import NodeRestartPanel from '../NodeRestartPanel.vue';
@@ -337,17 +337,16 @@ watch(() => props.node.id, () => {
   Object.assign(form, props.node);
   const meta = props.meta;
   const price = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
-  const parsedRemark = parseNodeMetaRemark(meta.remark);
   Object.assign(metaForm, {
     region: meta.region || '',
-    remark: parsedRemark.remark || '',
+    remark: meta.remark || '',
     renewDate: meta.renewDate || '',
     renewCurrency: price.currency,
     renewPrice: price.price,
     renewCycle: price.cycle,
     renewNoticeDays: meta.renewNoticeDays ?? 7,
-    portRangeStart: meta.portRangeStart ?? parsedRemark.portRangeStart,
-    portRangeEnd: meta.portRangeEnd ?? parsedRemark.portRangeEnd
+    portRangeStart: meta.portRangeStart ?? undefined,
+    portRangeEnd: meta.portRangeEnd ?? undefined
   });
 }, { immediate: true });
 
@@ -416,14 +415,14 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
       if (hasStart && hasEnd) {
         const s = Number(metaForm.portRangeStart);
         const e = Number(metaForm.portRangeEnd);
-        if (s < 1 || s > 65535 || e < 1 || e > 65535) {
+        if (!Number.isInteger(s) || !Number.isInteger(e) || s < 1 || s > 65535 || e < 1 || e > 65535) {
           throw new Error('端口范围必须在 1 到 65535 之间');
         }
         if (s > e) {
           throw new Error('起始端口不能大于结束端口');
         }
       } else if (hasStart || hasEnd) {
-        throw new Error('请同时指定起始端口和结束端口，或全部留空使用默认范围');
+        throw new Error('请同时指定起始端口和结束端口，或全部留空清除范围');
       }
     }
 

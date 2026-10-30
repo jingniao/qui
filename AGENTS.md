@@ -14,6 +14,8 @@
 
 **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，发布说明仍为草稿。
 
+- K2a（2026-10-29）：Agent 增量上报主机信息、负载/进程/套接字/字节指标及实际 sysctl；证书满 30 天或余期不超过 14 天时在连接内用原密钥续证。Owner 批准调优白名单 root helper（变更 L2），支持事务恢复与清除；面板接入 K2b、Linux/root 实机验收待完成，未发布。
+
 - L4：qui-update 支持 `X.Y.Z-rc.N`、semver 优先级与 `--component panel|agent`；本地修复完成，Linux/root 与主机验收待执行，RC 未运行。
 
 - R1：订阅拆为中立代理模型、来源与格式注册表；增加 mihomo、legacy Clash 及一个全局客户端规则模板。
@@ -549,9 +551,9 @@ NAT 下多端只算一个，双栈与切网可能多算；超限检测约有一�
 
 ## 10.1 节点组授权
 
-用户绑定节点分组；分组成员是具体自建入站或导入代理，不再是整台服务器。Owner 在分组页授权用户，原用户授权接口继续可用。自建入站使用 `node_group_inbounds`；导入成员使用 `node_group_imports`，`proxy_key=''` 表示整个来源，否则按来源内 `name|protocol` 稳定匹配，刷新不依赖内容哈希 ID。
+Users are authorized through node groups. User-access entries are specific self-hosted inbounds or imported proxies; explicit server membership is only for server scope such as node policies. The Owner grants users access from the group page; the existing user grant API remains available. Self-hosted entries use `node_group_inbounds`, while imports use `node_group_imports`: `proxy_key=''` means the whole source, otherwise the stable source-local key is `name|protocol`, independent of refreshed content-hash IDs.
 
-`node_group_members` 仅为成员入站所在服务器的去重派生索引，供节点策略、服务器筛选与批量操作使用，不作为入站授权依据。分组仓储保存时重建；入站移动、删除与外键级联通过同事务触发器维护。新增入站不会自动加入已有分组。
+`node_group_servers` stores explicit server membership. `node_group_members` is the deduplicated union of explicit servers and the servers of member inbounds, used for node policy scope, server filtering and bulk operations. Explicit servers grant NO user access, subscription, portal visibility or credentials; access still comes only from authorized inbound/import entries. Migration 0122 preserves all original relay/egress servers explicitly and subscription/mixed servers without eligible inbounds, so every group retains exactly its pre-migration server set. Repository writes and transactional triggers maintain the union on inbound moves and deletes; server deletion removes explicit membership. New inbounds are not automatically added to groups. The API returns `serverIds` (explicit) and `nodeIds` (union). Optional `serverIds` accepts at most 100 existing, non-deleted servers; omission/null preserves existing explicit members and [] clears them. Legacy `nodeIds` expands eligible inbounds for subscription/mixed only when `inboundIds` is absent/null, filtering existing explicit members to the selected servers. For relay/egress it sets explicit servers, with explicit `serverIds` taking priority. Legacy bulk requests retain omitted import entries.
 
 ```text
 用户
@@ -1376,11 +1378,12 @@ Node Agent 不允许提供：
 - 更新 Agent
 - 更新代理核心
 - 应用服务器强制出站源地址（固定 nft 规则，独立 oneshot 单元，仅 CAP_NET_ADMIN）
+- 应用/清除服务器调优（K2a，变更 L2）：只接受 13 个固定 sysctl 键及边界；root helper 直接写 procfs、读回核对并原子保存 99-proxy-tuning.conf，失败恢复原值，清除恢复首次应用前快照；无 shell、无任意 sysctl
 - 应用有 TTL 的设备门控（Xray 官方运行时规则 API / sing-box Clash 连接关闭），不走配置 Revision，不重启核心
 - TCP-connect 探测（已解析 IP、端口、次数、超时与截止时间；Agent 再校验，最多 10 次、每次 3 秒，无 shell）
 - 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override，按能力拒绝旧 Agent；经正常配置发布）
 
-TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。intervalSeconds 表示返回点的桶步长，sampleSeconds 固定为原始检测周期 60 秒。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优仍只读，新增特权操作未实现（L2）。
+TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。intervalSeconds 表示返回点的桶步长，sampleSeconds 固定为原始检测周期 60 秒。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优已按 Owner 决定增加固定白名单特权操作（K2a，变更 L2）；面板接入 K2b 与 Linux/root 验收仍待完成。
 
 ---
 
@@ -1844,6 +1847,7 @@ Agent 上报消息包括：
 - 每个节点独立证书
 - 每个节点独立私钥
 - 节点证书支持轮换和吊销
+- 自动续证仅在控制连接内执行：NotBefore + 30 天或剩余不超过 14 天，原私钥不变；失败退避 1 小时，离线期间不执行，重连检查。90 天签发期不变，K2b 须同步服务端自动续证准入条件。
 - 一次性注册码注册
 - 不使用 SSH 作为日常控制方式
 - 不提供任意命令执行
@@ -1911,6 +1915,9 @@ Agent 上报消息包括：
 ├─ revisions/
 ├─ spool/
 ├─ releases/
+├─ tuning/
+│   ├─ desired.json
+│   └─ status.json
 └─ host-network/
     ├─ desired.json
     └─ status.json
@@ -1921,6 +1928,8 @@ Agent 上报消息包括：
 ```
 
 `host-network/` 是服务器强制出站的 helper 目录：Agent 写 `desired.json`，`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）读它、写 `status.json`，由 `proxy-agent-host-network.path` 监视并在开机时重放。helper 只维护一个 nft 表 `inet proxy_agent_source`，卸载脚本会删除该表与这两个单元。
+
+`tuning/` 同样由 Agent 写 0600 请求，`proxy-agent-tuning.service`（root oneshot，CAP_NET_ADMIN + CAP_DAC_OVERRIDE；后者用于 Agent 的 0700/0600 文件协议，fs.file-max 使用 root 文件权限）与 `.path` 执行 `proxy-agent --apply-tuning /var/lib/proxy-agent/tuning`。systemd 只开放固定 procfs 键、/etc/sysctl.d 与请求目录写入；OpenRC 为 `/etc/init.d/proxy-agent-tuning` 监管 `tuning-watch`，没有文件系统命名空间隔离。原值与已管理键保存在 root 0600 的 `/etc/sysctl.d/.proxy-tuning-snapshot.json`，以 flock 串行化；状态按 request_id 返回逐键结果，Agent 最长等 30 秒，超时表示未确认。空配置/clear 删除 99-proxy-tuning.conf 并恢复原值，卸载先恢复再移除单元。系统拒绝写入时明确失败，不补权限或加载模块。能力每次重发刷新主机信息；心跳新增值不可读则保持未知，磁盘与 disk_percent 同为 Agent 状态目录所在文件系统。
 
 中央端使用 systemd 管理。节点端使用 systemd，或在 Alpine 上使用 OpenRC：
 - `/etc/init.d/proxy-agent` 由 `supervise-daemon` 监管。

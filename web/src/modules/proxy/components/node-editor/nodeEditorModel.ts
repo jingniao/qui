@@ -174,3 +174,8 @@ export function previewPayload(value: InboundInput): Record<string, unknown> {
   }
   return safe;
 }
+
+// Apply only this inbound's membership delta to freshly read complete lists.
+export function withInboundMembership(ids: string[], inboundId: string, included: boolean): string[] {
+  return included ? [...new Set([...ids, inboundId])] : ids.filter(id => id !== inboundId);
+}

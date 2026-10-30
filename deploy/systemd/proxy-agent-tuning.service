@@ -1,0 +1,37 @@
+[Unit]
+Description=Proxy Control whitelisted host tuning
+After=systemd-sysctl.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/bin/proxy-agent --apply-tuning /var/lib/proxy-agent/tuning
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# This operation writes sysctls; ProtectKernelTunables=true would prevent it.
+ProtectKernelTunables=false
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
+# UID 0 owns the procfs sysctl files. Only the network handlers additionally
+# require CAP_NET_ADMIN. fs.file-max needs root DAC access, not CAP_SYS_ADMIN.
+# DAC_OVERRIDE is necessary for the Agent-owned 0700 directory / 0600 input;
+# filesystem namespace restrictions still limit writes to the paths below.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE
+ReadOnlyPaths=/proc/sys
+ReadWritePaths=/etc/sysctl.d /var/lib/proxy-agent/tuning
+ReadWritePaths=-/proc/sys/net/ipv4/tcp_congestion_control -/proc/sys/net/core/default_qdisc
+ReadWritePaths=-/proc/sys/net/ipv4/tcp_ecn -/proc/sys/fs/file-max
+ReadWritePaths=-/proc/sys/net/ipv4/tcp_rmem -/proc/sys/net/ipv4/tcp_wmem
+ReadWritePaths=-/proc/sys/net/ipv4/tcp_tw_reuse -/proc/sys/net/core/somaxconn
+ReadWritePaths=-/proc/sys/net/ipv4/tcp_max_syn_backlog -/proc/sys/net/core/rmem_max -/proc/sys/net/core/wmem_max
+ReadWritePaths=-/proc/sys/net/ipv4/tcp_fastopen -/proc/sys/net/ipv4/tcp_mtu_probing
+
+[Install]
+WantedBy=multi-user.target

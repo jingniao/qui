@@ -25,9 +25,15 @@ func TestGroupEntriesBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = nodes.SaveGroup(ctx, "", node.GroupInput{Name: "entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: []string{inbound.ID}, Imports: []node.GroupImport{{SourceID: src, ProxyKey: "A|http"}}})
+	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, ServerIDs: []string{server}, InboundIDs: []string{inbound.ID}, Imports: []node.GroupImport{{SourceID: src, ProxyKey: "A|http"}}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Current bulk UI sends only nodeIds, preserving existing imports and
+	// explicit server membership while expanding the server's eligible inbounds.
+	group, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{server}})
+	if err != nil || len(group.Imports) != 1 || len(group.ServerIDs) != 1 || len(group.InboundIDs) != 1 {
+		t.Fatal("legacy bulk save lost entries", group, err)
 	}
 	if _, err = s.Database.Exec("INSERT INTO node_meta(node_id,port_range_start,port_range_end) VALUES(?,20000,20100)", server); err != nil {
 		t.Fatal(err)
@@ -49,7 +55,7 @@ func TestGroupEntriesBackupRoundTrip(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if inventory.Totals.NodeGroupInbounds != 1 || inventory.Totals.NodeGroupImports != 1 {
+		if inventory.Totals.NodeGroupServers != 1 || inventory.Totals.NodeGroupInbounds != 1 || inventory.Totals.NodeGroupImports != 1 {
 			t.Fatal(inventory.Totals)
 		}
 		var n int
@@ -60,6 +66,14 @@ func TestGroupEntriesBackupRoundTrip(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Explicit membership can stand alone; the archive validator checks both
+	// directions of the union, and refuses a missing membership table.
+	if _, err = s.Database.Exec("DELETE FROM node_group_inbounds"); err != nil {
+		t.Fatal(err)
+	}
+	if err = validateNodeGroupEntries(ctx, s.Database); err != nil {
+		t.Fatal("explicit-only membership rejected", err)
 	}
 	if _, err = s.Database.Exec("DELETE FROM node_group_members"); err != nil {
 		t.Fatal(err)

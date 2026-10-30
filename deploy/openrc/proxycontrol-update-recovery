@@ -35,5 +35,5 @@ stop() {
 
 depend() {
   need localmount
-  before proxy-agent proxy-panel proxy-agent-host-network
+  before proxy-agent proxy-panel proxy-agent-host-network proxy-agent-tuning
 }

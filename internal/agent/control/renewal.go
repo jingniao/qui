@@ -11,22 +11,26 @@ import (
 var errCertificateRenewed = errors.New("node certificate renewed; reconnecting")
 
 func renewalCheck(state *identity.State, client func() pb.AgentControlClient) func(context.Context) (bool, error) {
+	return renewalCheckAt(state, client, time.Now)
+}
+
+func renewalCheckAt(state *identity.State, client func() pb.AgentControlClient, now func() time.Time) func(context.Context) (bool, error) {
 	next := time.Time{}
 	return func(ctx context.Context) (bool, error) {
-		if time.Now().Before(next) {
+		if now().Before(next) {
 			return false, nil
 		}
-		due, err := state.RenewalDue(time.Now())
+		due, err := state.RenewalDue(now())
 		if err != nil {
 			return false, err
 		}
 		if !due {
 			return false, nil
 		}
+		next = now().Add(time.Hour)
 		if _, err := identity.LoadKeyPair(state.Directory); err != nil {
 			return false, errors.New("original node private key is unavailable")
 		}
-		next = time.Now().Add(time.Hour)
 		csr, err := identity.RenewalCSR(state.Directory)
 		if err != nil {
 			return false, err

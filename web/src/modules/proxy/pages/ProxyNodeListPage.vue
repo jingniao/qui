@@ -214,6 +214,7 @@
                     {{ node.sourceName }}
                   </span>
                 </div>
+                <p v-if="node.sourceType !== 'self_hosted' && node.sourceId" class="text-xs text-ios-secondary">所属分组：{{ importedGroupNames(node) }}</p>
                 <p class="text-xs text-neutral-400 font-mono mt-0.5 truncate">
                   {{ node.supportTcp ? 'TCP' : '' }} {{ node.supportUdp ? '· UDP' : '' }}
                 </p>
@@ -871,6 +872,7 @@
                   </div>
                 </div>
 
+                <p class="text-xs text-ios-secondary">通过节点分组可用：{{ sub.userIds?.length ?? 0 }} 个用户</p>
                 <!-- Inputs -->
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <label class="block text-xs font-medium text-ios-secondary">
@@ -936,6 +938,7 @@
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div class="flex items-center gap-2 min-w-0">
                     <span class="font-bold text-sm text-ios-label truncate" :title="sub.name">{{ sub.name }}</span>
+                    <span class="text-xs text-ios-secondary">通过节点分组可用：{{ sub.userIds?.length ?? 0 }} 个用户</span>
                     <span
                       v-if="sub.lastStatus === 'failed' || sub.lastError"
                       class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20"
@@ -1019,7 +1022,7 @@
 import { ref, computed, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { authState } from '../../../app/auth';
-import { userAPI, type ProxyUser } from '../../users/api';
+import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { importAPI, loadImports } from '../importApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
@@ -1115,8 +1118,7 @@ function openNodeDetail(node: ProxyNodeItem) {
 const openSelfHostedModal = ref(false);
 const openImportNodeModal = ref(false);
 const isOwner = computed(() => authState.currentUser?.role === 'Owner');
-const importUsers = ref<ProxyUser[]>([]);
-const grantUserIds = ref<string[]>([]);
+const nodeGroups = ref<NodeGroup[]>([]);
 const refreshSeconds = ref(3600);
 
 const editingNode = ref<ProxyNodeItem | null>(null);
@@ -1140,10 +1142,13 @@ const savingSub = ref(false);
 const editSubForm = reactive({
   name: '',
   url: '',
-  intervalSeconds: 3600,
-  userIds: [] as string[]
+  intervalSeconds: 3600
 });
 
+function importedGroupNames(node: ProxyNodeItem): string {
+  return nodeGroups.value.filter(g => g.imports?.some(item => item.sourceId === node.sourceId &&
+    (item.proxyKey === '' || item.proxyKey === node.proxyKey))).map(g => g.name).join('、') || '—';
+}
 // Pagination
 const currentPage = ref(1);
 const pageSize = 12;
@@ -1164,7 +1169,7 @@ async function loadData() {
     serverInbounds.value = inboundRes;
     // Relay routes shown on this page come from the schemes the canvas stores on
     // the server, so they must be loaded here too.
-    if (isOwner.value) { await loadImports(); importUsers.value = await choices((page, size) => userAPI.list(page, '', size)); }
+    if (isOwner.value) { await loadImports(); nodeGroups.value = await choices(groupAPI.list); }
     await loadCanvasSchemes({ servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes });
   } catch (e) {
     showToast((e as Error).message, 'error');
@@ -1412,7 +1417,7 @@ async function saveManualNodeModal() {
   if (!isOwner.value) return;
   if (!quickLinkInput.value.trim()) { showToast('请粘贴包含凭据的 URI、Base64 或 Clash 内容', 'error'); return; }
   try {
-    await importAPI.create({name:nodeForm.name || '手动导入', content:quickLinkInput.value.trim(), intervalSeconds:refreshSeconds.value, userIds:grantUserIds.value});
+    await importAPI.create({name:nodeForm.name || '手动导入', content:quickLinkInput.value.trim(), intervalSeconds:refreshSeconds.value, userIds:[]});
     quickLinkInput.value=''; await loadImports(); openImportNodeModal.value=false;
     showToast('节点已保存，可在「节点分组」中分配');
   } catch(e) {showToast((e as Error).message,'error');}
@@ -1453,7 +1458,6 @@ function startEditSub(sub: SubscriptionItem) {
   editSubForm.name = sub.name;
   editSubForm.url = '';
   editSubForm.intervalSeconds = sub.intervalSeconds || 3600;
-  editSubForm.userIds = [];
 }
 
 function cancelEditSub() {

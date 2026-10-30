@@ -58,6 +58,25 @@ await metadata.loadNodeMeta('a', false);
 assert.equal(metadata.getNodeMeta('a').region, 'SG');
 console.log('PASS B3: Viewer never imports, Owner imports once, server wins, failed import retains local data, saved metadata reloads');
 
+// F1 dedicated range fields must round-trip, clear, and reject invalid pairs before PUT.
+await metadata.saveNodeMeta('range', { region: 'JP', portRangeStart: 21000, portRangeEnd: 21002 });
+await metadata.loadNodeMeta('range', false);
+assert.deepEqual(metadata.getNodePortRange('range'), { start: 21000, end: 21002 });
+assert.equal(metadata.getRandomPortForNode('range', port => port === 21000, () => 0), 21001);
+assert.equal(metadata.formatPortRange(metadata.getNodeMeta('range')), '21000 - 21002');
+const writesBeforeInvalid = writes;
+for (const range of [{portRangeStart: 1}, {portRangeStart: 2, portRangeEnd: 1}, {portRangeStart: 1.5, portRangeEnd: 2}, {portRangeStart: 1, portRangeEnd: 65536}]) {
+  await assert.rejects(metadata.saveNodeMeta('range', range), /端口/);
+}
+assert.equal(writes, writesBeforeInvalid);
+await metadata.saveNodeMeta('range', { portRangeStart: null, portRangeEnd: null });
+assert.equal(metadata.getNodePortRange('range'), null);
+assert.equal(metadata.formatPortRange(metadata.getNodeMeta('range')), '—');
+const body = remote.get('/nodes/range/meta');
+assert.deepEqual(Object.keys(body).sort(), ['region', 'remark', 'renewDate', 'renewCycle', 'renewPrice', 'renewCurrency', 'renewNoticeDays', 'portRangeStart', 'portRangeEnd'].sort());
+assert.equal(body.portRangeStart, null); assert.equal(body.portRangeEnd, null);
+console.log('PASS F1 PORT_RANGE: dedicated fields round-trip, random candidate uses range, invalid pairs rejected, null clears, API input whitelist');
+
 assert.deepEqual(metadata.calculateMonthlyExpenditure({ renewPrice: '219', renewCycle: '/年', renewCurrency: 'CNY' }), { value: '18.25', currency: 'CNY', symbol: '¥' });
 assert.deepEqual(metadata.calculateMonthlyExpenditure({ renewPrice: '15.99', renewCycle: '/月', renewCurrency: 'USD' }), { value: '15.99', currency: 'USD', symbol: '$' });
 assert.equal(metadata.calculateMonthlyExpenditure({}), null);

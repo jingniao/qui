@@ -1,11 +1,11 @@
-<template>
+﻿<template>
   <aside
     :class="[
       'h-full bg-[#F8F8FA]/95 backdrop-blur-xl text-ios-label flex flex-col border-r border-black/[0.06] transition-all duration-300 select-none w-full relative',
       isCollapsed ? 'z-50' : 'z-40'
     ]"
   >
-    <!-- Brand Logo & Title (Apple Squircle Vibe with comfortable spacing) -->
+    <!-- Brand Logo & Title -->
     <div :class="['h-16 flex items-center border-b border-black/[0.05] shrink-0 transition-all', isCollapsed ? 'justify-center px-0' : 'justify-between px-4']">
       <router-link
         to="/dashboard"
@@ -18,7 +18,7 @@
           </svg>
         </div>
         <div v-if="!isCollapsed" class="flex flex-col min-w-0 truncate">
-          <span class="font-semibold text-ios-label text-sm tracking-tight truncate leading-snug">{{ authState.platformName }}</span>
+          <span class="font-semibold text-ios-label text-sm tracking-tight truncate leading-snug">{{ authState.platformName || 'Proxy Control' }}</span>
           <span class="text-[11px] text-ios-tertiary font-normal leading-none truncate">轻量代理控制平台</span>
         </div>
       </router-link>
@@ -40,47 +40,84 @@
 
     <!-- Navigation Menu Items -->
     <div :class="['flex-1 py-2.5', isCollapsed ? 'overflow-visible px-2 flex flex-col items-center space-y-2' : 'overflow-y-auto px-3 space-y-1 scrollbar-thin']">
-      <!-- Portal Mode Navigation (Front-end: 概览, 节点) -->
+      <!-- 1. Standalone Top Item: Dashboard (系统总览) -->
+      <div :class="['relative group/item', isCollapsed ? 'flex justify-center w-full' : '']">
+        <router-link
+          to="/dashboard"
+          :class="[
+            'transition-all flex items-center select-none',
+            isCollapsed
+              ? 'w-11 h-11 justify-center rounded-xl'
+              : 'gap-2.5 px-3 py-2 rounded-xl text-sm w-full',
+            isCurrentPath('/dashboard')
+              ? 'bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,113,227,0.28)] font-semibold'
+              : 'text-ios-label font-normal hover:text-black hover:bg-black/[0.04]'
+          ]"
+        >
+          <svg :class="['shrink-0', isCollapsed ? 'w-5 h-5' : 'w-4 h-4']" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+          </svg>
+          <span v-if="!isCollapsed">系统总览</span>
+        </router-link>
 
-
-      <!-- Admin Mode Navigation (Management Backend) -->
-        <!-- 1. Standalone Top Item: Dashboard (系统总览) -->
-        <div :class="['relative group/item', isCollapsed ? 'flex justify-center w-full' : '']">
-          <router-link
-            to="/dashboard"
-            :class="[
-              'transition-all flex items-center select-none',
-              isCollapsed
-                ? 'w-11 h-11 justify-center rounded-xl'
-                : 'gap-2.5 px-3 py-2 rounded-xl text-sm w-full',
-              isCurrentPath('/dashboard')
-                ? 'bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,113,227,0.28)] font-semibold'
-                : 'text-ios-label font-normal hover:text-black hover:bg-black/[0.04]'
-            ]"
-          >
-            <svg :class="['shrink-0', isCollapsed ? 'w-5 h-5' : 'w-4 h-4']" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-            </svg>
-            <span v-if="!isCollapsed">系统总览</span>
-          </router-link>
-
-          <!-- Tooltip for collapsed mode -->
-          <div
-            v-if="isCollapsed"
-            class="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 hidden group-hover/item:flex items-center px-2.5 py-1 rounded-lg bg-neutral-900/90 text-white text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur-md z-50 pointer-events-none"
-          >
-            系统总览
-          </div>
+        <!-- Tooltip for collapsed mode -->
+        <div
+          v-if="isCollapsed"
+          class="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 hidden group-hover/item:flex items-center px-2.5 py-1 rounded-lg bg-neutral-900/90 text-white text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur-md z-50 pointer-events-none"
+        >
+          系统总览
         </div>
+      </div>
 
-        <!-- 4. Collapsible Sections -->
-        <div :class="['w-full', isCollapsed ? 'pt-1 flex flex-col items-center space-y-2' : 'pt-1 space-y-1']">
-          <div
-            v-for="sec in navSections"
-            :key="sec.id"
-            v-show="!isViewer || sec.id === 'servers'"
-            :class="['relative group/popover', isCollapsed ? 'flex justify-center w-full' : 'w-full']"
-          >
+      <!-- 2. Collapsible Sections -->
+      <div :class="['w-full', isCollapsed ? 'pt-1 flex flex-col items-center space-y-2' : 'pt-1 space-y-1']">
+        <div
+          v-for="sec in navSections"
+          :key="sec.id"
+          v-show="!isViewer || sec.id === 'servers'"
+          :class="['relative group/popover', isCollapsed ? 'flex justify-center w-full' : 'w-full']"
+        >
+          <!-- Direct Link Section (When section has direct path without sub-items, e.g. 用户管理) -->
+          <template v-if="sec.path">
+            <router-link
+              :to="sec.path"
+              :class="[
+                'transition-all flex items-center select-none',
+                isCollapsed
+                  ? 'w-11 h-11 justify-center rounded-xl'
+                  : 'w-full gap-2.5 px-3 py-2 rounded-xl text-sm',
+                isSectionActive(sec.id)
+                  ? 'bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,113,227,0.28)] font-semibold'
+                  : 'text-ios-label font-normal hover:text-black hover:bg-black/[0.04]'
+              ]"
+              :title="!isCollapsed ? sec.label : undefined"
+            >
+              <svg
+                :class="[
+                  'shrink-0 transition-colors',
+                  isCollapsed ? 'w-5 h-5' : 'w-4 h-4',
+                  isSectionActive(sec.id) ? 'text-white' : 'text-ios-tertiary group-hover/popover:text-ios-label'
+                ]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sec.iconPath" />
+              </svg>
+              <span v-if="!isCollapsed" class="tracking-wide truncate">{{ sec.label }}</span>
+            </router-link>
+
+            <!-- Floating Tooltip in Collapsed Mode for Direct Link -->
+            <div
+              v-if="isCollapsed"
+              class="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 hidden group-hover/popover:flex items-center px-2.5 py-1 rounded-lg bg-neutral-900/90 text-white text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur-md z-50 pointer-events-none"
+            >
+              {{ sec.label }}
+            </div>
+          </template>
+
+          <!-- Collapsible Section with Children -->
+          <template v-else>
             <!-- Section Collapsible Header Button -->
             <button
               type="button"
@@ -197,12 +234,100 @@
                 </template>
               </div>
             </transition>
-          </div>
+          </template>
         </div>
+      </div>
     </div>
 
-    <!-- Sidebar Footer -->
-    <div :class="['border-t border-black/[0.05] flex items-center shrink-0 transition-all', isCollapsed ? 'justify-center p-3' : 'justify-between p-3.5 text-xs text-ios-tertiary']">
+    <!-- User Account & Logout Area (Left Sidebar) -->
+    <div v-if="!isCollapsed" class="border-t border-black/[0.05] p-3 space-y-2 shrink-0">
+      <!-- Portal Preview Link for Owner -->
+      <router-link
+        v-if="isOwner"
+        to="/portal-preview"
+        class="flex items-center justify-between px-3 py-1.5 rounded-xl text-xs font-medium text-ios-blue bg-ios-blue/[0.06] hover:bg-ios-blue/[0.12] transition-colors"
+      >
+        <span>前台使用 · 只读预览</span>
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+      </router-link>
+
+      <!-- User Card with Profile & Logout -->
+      <div class="flex items-center justify-between gap-2 p-2 rounded-2xl bg-white border border-black/[0.06] shadow-2xs">
+        <button
+          type="button"
+          @click="userCenterOpen = true"
+          class="flex items-center gap-2.5 min-w-0 flex-1 text-left group transition-opacity"
+          title="点击打开用户中心"
+        >
+          <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-[#0071E3] to-[#5856D6] text-white font-semibold flex items-center justify-center shrink-0 text-xs shadow-sm group-hover:scale-105 transition-transform">
+            {{ userInitial }}
+          </div>
+          <div class="min-w-0 flex-1 truncate">
+            <div class="text-xs font-medium text-ios-label truncate group-hover:text-ios-blue transition-colors">
+              {{ authState.currentUser?.displayName || authState.currentUser?.username || '用户' }}
+            </div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="text-[10px] px-1.5 py-0.2 rounded-full bg-ios-blue/10 text-ios-blue font-medium leading-tight">
+                {{ authState.currentUser?.role }}
+              </span>
+              <span class="text-[11px] text-ios-tertiary group-hover:text-ios-blue transition-colors">用户中心 &rsaquo;</span>
+            </div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          @click="handleLogout"
+          class="flex items-center gap-1 px-2 py-1.5 text-xs text-ios-secondary hover:text-ios-red hover:bg-ios-red/10 rounded-xl transition-colors shrink-0 font-medium"
+          title="退出登录"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span>退出</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Collapsed mode User Profile & Logout -->
+    <div v-else class="border-t border-black/[0.05] p-2 flex flex-col items-center space-y-2 shrink-0">
+      <!-- User Center Avatar Button -->
+      <div class="relative group/user">
+        <button
+          type="button"
+          @click="userCenterOpen = true"
+          class="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#0071E3] to-[#5856D6] text-white font-semibold flex items-center justify-center text-xs shadow-sm hover:scale-105 transition-transform"
+          title="用户中心"
+        >
+          {{ userInitial }}
+        </button>
+        <div class="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 hidden group-hover/user:flex items-center px-2.5 py-1 rounded-lg bg-neutral-900/90 text-white text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur-md z-50 pointer-events-none">
+          用户中心 ({{ authState.currentUser?.displayName || authState.currentUser?.username }})
+        </div>
+      </div>
+
+      <!-- Logout Button -->
+      <div class="relative group/logout">
+        <button
+          type="button"
+          @click="handleLogout"
+          class="w-10 h-10 rounded-xl bg-white border border-black/[0.08] shadow-2xs text-ios-tertiary hover:text-ios-red hover:border-ios-red/30 hover:bg-ios-red/5 flex items-center justify-center transition-colors"
+          title="退出登录"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+        </button>
+        <div class="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 hidden group-hover/logout:flex items-center px-2.5 py-1 rounded-lg bg-neutral-900/90 text-white text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur-md z-50 pointer-events-none">
+          退出登录
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar Footer Toggle -->
+    <div :class="['border-t border-black/[0.05] flex items-center shrink-0 transition-all', isCollapsed ? 'justify-center p-2.5' : 'justify-between p-3 text-xs text-ios-tertiary']">
       <span v-if="!isCollapsed" class="font-mono text-[11px] text-ios-quaternary">开发版本</span>
       <div :class="['relative group/expand', isCollapsed ? 'flex justify-center' : '']">
         <button
@@ -241,12 +366,125 @@
       </div>
     </div>
   </aside>
+
+  <!-- User Center Modal / Drawer -->
+  <FormDrawer
+    v-model="userCenterOpen"
+    title="用户中心"
+    description="管理个人账户信息、安全凭证与登录状态"
+    width="lg"
+    :showFooter="false"
+  >
+    <div class="space-y-6">
+      <!-- Profile Information Card -->
+      <div class="p-4 rounded-2xl bg-[#F5F5F7] border border-black/[0.05] flex items-center justify-between">
+        <div class="flex items-center gap-3.5">
+          <div class="w-12 h-12 rounded-full bg-gradient-to-tr from-[#0071E3] to-[#5856D6] text-white text-base font-semibold flex items-center justify-center shadow-md">
+            {{ userInitial }}
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-ios-label">{{ authState.currentUser?.displayName || authState.currentUser?.username }}</span>
+              <span class="text-[11px] px-2 py-0.5 rounded-full bg-ios-blue/15 text-ios-blue font-medium border border-ios-blue/20">
+                {{ authState.currentUser?.role }}
+              </span>
+            </div>
+            <div class="text-xs text-ios-tertiary mt-0.5">
+              用户名: {{ authState.currentUser?.username }}
+            </div>
+          </div>
+        </div>
+
+        <router-link
+          v-if="isOwner"
+          to="/portal-preview"
+          @click="userCenterOpen = false"
+          class="ios-btn-secondary text-xs"
+        >
+          前台预览
+        </router-link>
+      </div>
+
+      <!-- Password Change Section -->
+      <div class="p-4 rounded-2xl bg-white border border-black/[0.08] shadow-2xs space-y-4">
+        <div class="border-b border-black/[0.06] pb-2.5">
+          <h4 class="text-xs font-semibold text-ios-label uppercase tracking-wider">修改登录密码</h4>
+          <p class="text-[11px] text-ios-tertiary mt-0.5">修改后所有设备的活跃会话将失效，需使用新密码重新登录。</p>
+        </div>
+
+        <form @submit.prevent="submitPassword" class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-ios-secondary mb-1">当前密码</label>
+            <input
+              v-model="currentPassword"
+              type="password"
+              placeholder="请输入当前登录密码"
+              class="form-input-base"
+              autocomplete="current-password"
+            />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-ios-secondary mb-1">新密码</label>
+            <input
+              v-model="newPassword"
+              type="password"
+              placeholder="请输入新密码（至少 6 位）"
+              class="form-input-base"
+              autocomplete="new-password"
+            />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-ios-secondary mb-1">确认新密码</label>
+            <input
+              v-model="confirmPassword"
+              type="password"
+              placeholder="请再次输入新密码"
+              class="form-input-base"
+              autocomplete="new-password"
+            />
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button
+              type="submit"
+              :disabled="passwordBusy"
+              class="ios-dialog-btn-primary"
+            >
+              <svg v-if="passwordBusy" class="animate-spin -ml-0.5 h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>{{ passwordBusy ? '正在更新...' : '保存新密码' }}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Quick Actions / Logout in Drawer -->
+      <div class="pt-1 flex items-center justify-between border-t border-black/[0.06]">
+        <span class="text-xs text-ios-tertiary">当前已安全连接到平台</span>
+        <button
+          type="button"
+          @click="handleLogout"
+          class="ios-btn-danger text-xs flex items-center gap-1.5"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span>退出当前账号</span>
+        </button>
+      </div>
+    </div>
+  </FormDrawer>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { authState, isOwner, isViewer } from '../app/auth';
+import { authState, isOwner, isViewer, logout, clearSession } from '../app/auth';
+import { request } from '../app/apiClient';
+import { showToast } from '../app/api';
+import FormDrawer from './FormDrawer.vue';
 
 interface Props {
   collapsed?: boolean;
@@ -273,6 +511,60 @@ function toggleCollapse() {
   emit('toggle');
 }
 
+// User Center state
+const userCenterOpen = ref(false);
+const currentPassword = ref('');
+const newPassword = ref('');
+const confirmPassword = ref('');
+const passwordBusy = ref(false);
+
+const userInitial = computed(() => {
+  const name = authState.currentUser?.displayName || authState.currentUser?.username || 'U';
+  return name.charAt(0).toUpperCase();
+});
+
+async function handleLogout() {
+  try {
+    await logout();
+  } catch {
+    // Ignore logout failures
+  } finally {
+    clearSession();
+    userCenterOpen.value = false;
+    router.push('/login');
+  }
+}
+
+async function submitPassword() {
+  if (!currentPassword.value || !newPassword.value) {
+    showToast('请输入当前密码和新密码', 'error');
+    return;
+  }
+  if (newPassword.value.length < 6) {
+    showToast('新密码长度不能少于 6 位', 'error');
+    return;
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    showToast('两次输入的新密码不一致', 'error');
+    return;
+  }
+  passwordBusy.value = true;
+  try {
+    await request('/auth/password', 'PUT', { currentPassword: currentPassword.value, newPassword: newPassword.value });
+    userCenterOpen.value = false;
+    currentPassword.value = '';
+    newPassword.value = '';
+    confirmPassword.value = '';
+    showToast('密码已修改，请重新登录');
+    clearSession();
+    await router.push('/login');
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    passwordBusy.value = false;
+  }
+}
+
 // 各二级分类折叠状态（默认折叠，通过路由或点击展开）
 const openSections = ref<Record<string, boolean>>({
   servers: false,
@@ -286,7 +578,12 @@ function handleSectionClick(secId: string) {
   const sec = navSections.find(s => s.id === secId);
   if (!sec) return;
 
-  const accessible = sec.items.find(item => !item.ownerOnly || isOwner.value);
+  if (sec.path) {
+    router.push(sec.path);
+    return;
+  }
+
+  const accessible = sec.items?.find(item => !item.ownerOnly || isOwner.value);
 
   if (isCollapsed.value) {
     if (accessible) {
@@ -318,14 +615,11 @@ function handleSectionClick(secId: string) {
 function syncRouteSection() {
   if (route.path === '/dashboard') return;
   for (const sec of navSections) {
-    if (isSectionActive(sec.id)) {
+    if (sec.items && isSectionActive(sec.id)) {
       openSections.value[sec.id] = true;
     }
   }
 }
-
-// Portal Mode Navigation Items (User Front-end)
-
 
 interface NavItem {
   label: string;
@@ -338,19 +632,23 @@ interface NavSection {
   id: string;
   label: string;
   iconPath: string;
-  items: NavItem[];
+  path?: string;
+  items?: NavItem[];
 }
 
-// Navigation Structure: 5 Collapsible Sections with direct SVG path strings
+// Navigation Structure: Collapsible Sections with direct SVG path strings
+// Note: "管理员" subset under "用户管理" has been removed as requested; admin management is consolidated in /users
 const navSections: NavSection[] = [
-  { id: 'users', label: '用户管理', iconPath: 'M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8z', items: [
-    { label: '用户', path: '/users', iconPath: 'M4 6h16M4 12h16M4 18h16' },
-    { label: '管理员', path: '/users/admins', iconPath: 'M4 6h16M4 12h16M4 18h16' }
-  ] },
+  {
+    id: 'users',
+    label: '用户管理',
+    iconPath: 'M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8z',
+    path: '/users'
+  },
   {
     id: 'servers',
     label: '服务器',
-      iconPath: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
+    iconPath: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
     items: [
       { label: '服务器列表', path: '/nodes', iconPath: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
       { label: '版本与更新', path: '/nodes/versions', ownerOnly: true, iconPath: 'M4 6h16M4 12h16M4 18h16' }
@@ -362,7 +660,7 @@ const navSections: NavSection[] = [
     iconPath: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4',
     items: [
       { label: '节点列表', path: '/proxy/nodes', iconPath: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
-      { label: '线路组', path: '/proxy/groups', iconPath: 'M4 6h16M4 12h16M4 18h16' },
+      { label: '节点分组', path: '/proxy/groups', iconPath: 'M4 6h16M4 12h16M4 18h16' },
       { label: '中转搭建', path: '/proxy/relay', iconPath: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' }
     ]
   },
@@ -391,6 +689,7 @@ const navSections: NavSection[] = [
     iconPath: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z',
     items: [
       { label: '备份恢复', path: '/system/backups', iconPath: 'M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2' },
+      { label: '任务记录', path: '/system/tasks', iconPath: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
       { label: '操作日志', path: '/system/operations', iconPath: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
       { label: '系统设置', path: '/system/settings', iconPath: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4' }
     ]
@@ -408,8 +707,8 @@ watch(
 
 function isCurrentPath(targetPath: string) {
   if (targetPath === '/dashboard') return route.path === '/dashboard';
-  if (targetPath === '/users/admins' || targetPath === '/nodes/versions') return route.path === targetPath;
-  if (targetPath === '/users') return route.path === '/users' || (route.path.startsWith('/users/') && route.path !== '/users/admins');
+  if (targetPath === '/nodes/versions') return route.path === targetPath;
+  if (targetPath === '/users') return route.path === '/users' || route.path.startsWith('/users/');
   if (targetPath === '/nodes') {
     if (route.query.tab && route.query.tab !== 'servers') return false;
     return route.path === '/nodes' || (route.path.startsWith('/nodes/') && route.path !== '/nodes/versions');
@@ -432,13 +731,16 @@ function isCurrentPath(targetPath: string) {
 function isSectionActive(sectionId: string) {
   const sec = navSections.find(s => s.id === sectionId);
   if (!sec) return false;
-  return sec.items.some(item => {
+  if (sec.path) {
+    return isCurrentPath(sec.path);
+  }
+  return sec.items?.some(item => {
     if (item.path.includes('?')) {
       const [base] = item.path.split('?');
       return route.path === base;
     }
     return route.path.startsWith(item.path);
-  });
+  }) ?? false;
 }
 
 function navItemClass(targetPath: string) {

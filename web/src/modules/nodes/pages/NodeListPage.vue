@@ -3,26 +3,72 @@
     <PageHeader title="服务器列表" parent="服务器" description="查看服务器运行状态、流量与续费信息。">
       <template #actions><button v-if="isOwner" class="ios-btn-primary" @click="enrollment?.open()">新增服务器</button></template>
     </PageHeader>
-    <form class="flex flex-wrap items-end gap-3" @submit.prevent="applyFilters">
-      <label class="flex-1 text-xs text-ios-secondary">搜索<input v-model="keyword" class="form-input-base mt-1.5" placeholder="名称、IP、主机名、地区或备注" /></label>
-      <label class="text-xs text-ios-secondary">状态<select v-model="status" class="form-input-base mt-1.5" @change="applyFilters"><option v-for="option in statusOptions" :key="option[0]" :value="option[0]">{{ option[1] }}</option></select></label>
-      <label v-if="isOwner" class="text-xs text-ios-secondary">线路组<select v-model="group" class="form-input-base mt-1.5" @change="applyFilters"><option value="">全部线路组</option><option v-for="item in groups" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-      <label class="text-sm text-ios-secondary flex items-center gap-2 cursor-pointer"><input v-model="deleted" type="checkbox" @change="applyFilters" />显示已删除</label>
-      <button class="ios-btn-secondary">查询</button>
-      <button type="button" class="ios-btn-secondary" :disabled="loading" @click="load">刷新</button>
-    </form>
-    <ServerDisplayMode :display-mode="displayMode" @change="setDisplayMode" />
-    <p v-if="!isOwner" class="text-xs text-ios-tertiary">线路组筛选需要 Owner 权限。</p>
+
+    <!-- Search, Filter & View Mode Toolbar -->
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <form class="flex flex-wrap items-center gap-2.5 flex-1" @submit.prevent="applyFilters">
+        <!-- Search Input -->
+        <div class="relative flex-1 min-w-[200px] max-w-sm">
+          <svg class="w-4 h-4 text-ios-tertiary absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            v-model="keyword"
+            placeholder="搜索名称、IP、主机名、地区或备注…"
+            class="ios-search-input"
+          />
+          <button
+            v-if="keyword"
+            type="button"
+            @click="keyword = ''; applyFilters()"
+            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-ios-tertiary hover:text-ios-label p-0.5 rounded-full hover:bg-black/5 transition-colors"
+            title="清空"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Status Filter -->
+        <select v-model="status" class="ios-filter-select !w-auto" @change="applyFilters">
+          <option v-for="option in statusOptions" :key="option[0]" :value="option[0]">{{ option[1] }}</option>
+        </select>
+
+        <!-- Group Filter (Owner only) -->
+        <select v-if="isOwner" v-model="group" class="ios-filter-select !w-auto" @change="applyFilters">
+          <option value="">全部线路组</option>
+          <option v-for="item in groups" :key="item.id" :value="item.id">{{ item.name }}</option>
+        </select>
+
+        <!-- Query Button -->
+        <button class="ios-search-btn shrink-0">查询</button>
+
+        <!-- Refresh Button -->
+        <button type="button" class="ios-search-btn shrink-0" :disabled="loading" @click="load" title="刷新服务器状态">
+          <svg class="w-3.5 h-3.5 text-ios-secondary" :class="{ 'animate-spin': loading }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>刷新</span>
+        </button>
+      </form>
+
+      <!-- View Switcher (List vs Grid) -->
+      <div class="flex items-center gap-2 shrink-0 self-start lg:self-auto">
+        <ServerDisplayMode :display-mode="displayMode" @change="setDisplayMode" />
+      </div>
+    </div>
+    <p v-if="!isOwner" class="text-xs text-ios-tertiary -mt-3">线路组筛选需要 Owner 权限。</p>
+
     <ErrorState v-if="error" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="loading && !nodes.length" />
     <template v-else>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
       <EmptyState v-if="!filtered.length" title="没有匹配的服务器" description="请调整筛选条件，或新增服务器并完成登记。" />
-      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="pageRows.map(row => row.node)" :clock-now="now" :node-month-traffic="monthDetails" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" />
+      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :node-month-traffic="monthDetails" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" />
       <ServerInventory v-else :rows="pageRows" :columns="columns" :owner="isOwner" :selected="selected" @toggle="toggle" @install="enrollment?.reissue($event)" @delete="deletion?.prompt($event)" />
       <p v-if="displayMode === 'list' && filtered.length && hiddenColumns.length" class="text-xs text-ios-tertiary">当前筛选的服务器均无可用数据，已隐藏：{{ hiddenColumns.join('、') }}。</p>
-      <p v-if="filtered.length" class="text-xs text-ios-tertiary">今日与本月流量按面板时区 {{ monthZone || authState.timezone }} 统计。流量来自保留的账户样本，不等于网卡总流量；过期心跳的实时指标不显示。</p>
-      <Pagination v-if="filtered.length" :total="filtered.length" :current-page="page" :page-size="20" @update:page="changePage" />
+      <Pagination v-if="displayMode === 'list' && filtered.length > 20" :total="filtered.length" :current-page="page" :page-size="20" @update:page="changePage" />
     </template>
     <ServerBulkActions v-if="isOwner && displayMode === 'list'" :selected="selectedNodes" :groups="groups" @clear="selected = []" @changed="load" />
     <ServerQuickEdit v-if="isOwner" ref="quickEdit" @changed="load" />
@@ -148,18 +194,13 @@ async function load() {
   finally { if (current === generation) loading.value = false; }
 }
 watch(() => route.query, () => {
-  if (!ours()) return;
-  readQuery(); selected.value = [];
-  if (page.value > Math.max(1, Math.ceil(filtered.value.length / 20))) changePage(1);
+  readQuery();
+  if (ours()) void load();
 });
-watch(() => route.query.deleted, () => { if (ours()) void load(); });
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
+  void load();
   timer = setInterval(() => { now.value = Date.now(); }, 5000);
-  void load(); window.addEventListener('proxy-node-status', load);
 });
-onUnmounted(() => {
-  generation++; if (timer) clearInterval(timer);
-  window.removeEventListener('proxy-node-status', load);
-});
+onUnmounted(() => { clearInterval(timer); });
 </script>

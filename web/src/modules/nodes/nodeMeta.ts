@@ -9,6 +9,8 @@ export interface NodeMeta {
   renewPrice?: string | number; // e.g. '120' or 120
   renewCycle?: string; // e.g. '/年' | '/月' | '/季' | '/半年' | '/2年' | '/3年' | '一次性'
   renewNoticeDays?: number;
+  portRangeStart?: number;
+  portRangeEnd?: number;
 }
 
 export const CURRENCY_LIST = [
@@ -38,6 +40,69 @@ export const CYCLE_LIST = ['/年', '/月', '/季', '/半年', '/2年', '/3年', 
 const metadata = reactive<Record<string, NodeMeta>>({});
 export function getNodeMeta(nodeId: string): NodeMeta { return metadata[nodeId] || {}; }
 
+export function parseNodeMetaRemark(rawRemark?: string): { remark: string; portRangeStart?: number; portRangeEnd?: number } {
+  const text = rawRemark || '';
+  const match = text.match(/\[ports:(\d+)-(\d+)\]/);
+  if (match) {
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    const clean = text.replace(/\s*\[ports:\d+-\d+\]\s*/g, '').trim();
+    if (start >= 1 && end <= 65535 && start <= end) {
+      return { remark: clean, portRangeStart: start, portRangeEnd: end };
+    }
+  }
+  return { remark: text.trim() };
+}
+
+export function cleanRemark(remark?: string): string {
+  return parseNodeMetaRemark(remark).remark;
+}
+
+export function formatPortRange(meta?: NodeMeta | null): string {
+  if (meta?.portRangeStart && meta?.portRangeEnd) {
+    return `${meta.portRangeStart} - ${meta.portRangeEnd}`;
+  }
+  return '10000 - 65535 (默认)';
+}
+
+export function getNodePortRange(nodeId?: string): { start: number; end: number } | null {
+  if (!nodeId) return null;
+  const meta = metadata[nodeId];
+  if (meta?.portRangeStart && meta?.portRangeEnd && meta.portRangeStart <= meta.portRangeEnd) {
+    return { start: meta.portRangeStart, end: meta.portRangeEnd };
+  }
+  try {
+    const raw = localStorage.getItem(`qui_node_ports_${nodeId}`);
+    if (raw) {
+      const [s, e] = raw.split('-').map(Number);
+      if (s >= 1 && e <= 65535 && s <= e) {
+        return { start: s, end: e };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+export function getRandomPortForNode(
+  nodeId?: string,
+  isPortBusy?: (port: number) => boolean,
+  random = Math.random
+): number {
+  const range = nodeId ? getNodePortRange(nodeId) : null;
+  const min = (range && range.start >= 1 && range.start <= 65535) ? range.start : 10000;
+  const max = (range && range.end >= min && range.end <= 65535) ? range.end : 65535;
+  const span = Math.max(1, max - min + 1);
+
+  const startOffset = Math.floor(random() * span);
+  for (let i = 0; i < span; i++) {
+    const port = min + ((startOffset + i) % span);
+    if (!isPortBusy || !isPortBusy(port)) {
+      return port;
+    }
+  }
+  return min + Math.floor(random() * span);
+}
+
 export async function loadNodeMeta(nodeId: string, owner: boolean): Promise<NodeMeta> {
   const path = `/nodes/${encodeURIComponent(nodeId)}/meta`;
   let result = await request<{ meta: NodeMeta; present: boolean }>(path);
@@ -49,17 +114,71 @@ export async function loadNodeMeta(nodeId: string, owner: boolean): Promise<Node
       const parsed = parseRenewPrice(legacy.renewPrice, legacy.renewCurrency, legacy.renewCycle);
       result = await request(path, 'PUT', { ...legacy, renewPrice: parsed.price, renewCurrency: parsed.currency, renewCycle: parsed.cycle, renewNoticeDays: legacy.renewNoticeDays ?? 7, importOnly: true });
     }
-    // Remove only after a successful server read/import; concurrent imports
-    // cannot overwrite a server value because the API uses INSERT DO NOTHING.
     if (raw) localStorage.removeItem(key);
   }
-  metadata[nodeId] = result.meta;
-  return result.meta;
+
+  const parsed = parseNodeMetaRemark(result.meta.remark);
+  let start = parsed.portRangeStart;
+  let end = parsed.portRangeEnd;
+  if (!start) {
+    try {
+      const localRange = localStorage.getItem(`qui_node_ports_${nodeId}`);
+      if (localRange) {
+        const [s, e] = localRange.split('-').map(Number);
+        if (s >= 1 && e <= 65535 && s <= e) {
+          start = s;
+          end = e;
+        }
+      }
+    } catch {}
+  }
+  if (start && end) {
+    try {
+      localStorage.setItem(`qui_node_ports_${nodeId}`, `${start}-${end}`);
+    } catch {}
+  }
+
+  const meta: NodeMeta = {
+    ...result.meta,
+    remark: parsed.remark,
+    portRangeStart: start,
+    portRangeEnd: end
+  };
+  metadata[nodeId] = meta;
+  return meta;
 }
 
 export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void> {
-  const result = await request<{ meta: NodeMeta }>(`/nodes/${encodeURIComponent(nodeId)}/meta`, 'PUT', { ...meta, renewPrice: String(meta.renewPrice ?? ''), renewNoticeDays: meta.renewNoticeDays ?? 7 });
-  metadata[nodeId] = result.meta;
+  let combinedRemark = (meta.remark || '').trim();
+  if (meta.portRangeStart && meta.portRangeEnd && meta.portRangeStart >= 1 && meta.portRangeEnd <= 65535 && meta.portRangeStart <= meta.portRangeEnd) {
+    combinedRemark = combinedRemark ? `${combinedRemark} [ports:${meta.portRangeStart}-${meta.portRangeEnd}]` : `[ports:${meta.portRangeStart}-${meta.portRangeEnd}]`;
+    try {
+      localStorage.setItem(`qui_node_ports_${nodeId}`, `${meta.portRangeStart}-${meta.portRangeEnd}`);
+    } catch {}
+  } else {
+    try {
+      localStorage.removeItem(`qui_node_ports_${nodeId}`);
+    } catch {}
+  }
+
+  // The API rejects unknown fields, so send only its input fields.
+  const result = await request<{ meta: NodeMeta }>(`/nodes/${encodeURIComponent(nodeId)}/meta`, 'PUT', {
+    region: meta.region ?? '',
+    renewDate: meta.renewDate ?? '',
+    renewCycle: meta.renewCycle ?? '',
+    renewCurrency: meta.renewCurrency ?? '',
+    remark: combinedRemark,
+    renewPrice: String(meta.renewPrice ?? ''),
+    renewNoticeDays: meta.renewNoticeDays ?? 7
+  });
+
+  const parsed = parseNodeMetaRemark(result.meta.remark);
+  metadata[nodeId] = {
+    ...result.meta,
+    remark: parsed.remark,
+    portRangeStart: meta.portRangeStart,
+    portRangeEnd: meta.portRangeEnd
+  };
 }
 
 export function parseRenewPrice(
@@ -75,7 +194,6 @@ export function parseRenewPrice(
     return { currency, price: '', cycle };
   }
 
-  // Detect currency symbol from priceStr if currency not explicitly set
   if (!rawCurrency) {
     if (priceStr.includes('$') && !priceStr.toUpperCase().includes('HK$') && !priceStr.toUpperCase().includes('S$') && !priceStr.toUpperCase().includes('NT$')) {
       currency = 'USD';
@@ -94,7 +212,6 @@ export function parseRenewPrice(
     }
   }
 
-  // Detect cycle if not explicitly set
   if (!rawCycle) {
     for (const c of CYCLE_LIST) {
       if (priceStr.includes(c)) {
@@ -104,7 +221,6 @@ export function parseRenewPrice(
     }
   }
 
-  // Strip symbols and cycle from numeric part
   const cleanNum = priceStr.replace(/[^0-9.]/g, '');
   return { currency, price: cleanNum, cycle };
 }
@@ -113,7 +229,6 @@ export function formatRenewPrice(meta?: NodeMeta): string {
   if (!meta) return '';
   const parsed = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
   if (!parsed.price) {
-    // Check if legacy string existed without numbers
     return meta.renewPrice ? String(meta.renewPrice) : '';
   }
   const symbol = CURRENCY_SYMBOLS[parsed.currency] || parsed.currency;
@@ -150,6 +265,47 @@ export function calculateRemainingDays(renewDate?: string): { days: number | nul
     isExpired: false,
     isNear: diffDays <= 7
   };
+}
+
+export function calculateMonthlyExpenditure(meta?: NodeMeta): { value: string; currency: string; symbol: string } | null {
+  if (!meta) return null;
+  const parsed = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
+  const num = parseFloat(parsed.price);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  let months = 1;
+  const cycle = parsed.cycle;
+  if (cycle.includes('3年')) months = 36;
+  else if (cycle.includes('2年')) months = 24;
+  else if (cycle.includes('年')) months = 12;
+  else if (cycle.includes('半年')) months = 6;
+  else if (cycle.includes('季')) months = 3;
+  else if (cycle.includes('月')) months = 1;
+  else if (cycle.includes('一次性')) return null;
+  const monthly = num / months;
+  const symbol = CURRENCY_SYMBOLS[parsed.currency] || parsed.currency;
+  return { value: monthly.toFixed(2), currency: parsed.currency, symbol };
+}
+
+export function calculateResidualValue(meta?: NodeMeta): { value: string; currency: string; symbol: string } | null {
+  if (!meta || !meta.renewDate) return null;
+  const remaining = calculateRemainingDays(meta.renewDate);
+  if (remaining.days === null || remaining.days <= 0) return null;
+  const parsed = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
+  const num = parseFloat(parsed.price);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  let totalDays = 30;
+  const cycle = parsed.cycle;
+  if (cycle.includes('3年')) totalDays = 365 * 3;
+  else if (cycle.includes('2年')) totalDays = 365 * 2;
+  else if (cycle.includes('年')) totalDays = 365;
+  else if (cycle.includes('半年')) totalDays = 182.5;
+  else if (cycle.includes('季')) totalDays = 91.25;
+  else if (cycle.includes('月')) totalDays = 30;
+  else if (cycle.includes('一次性')) return null;
+  const daily = num / totalDays;
+  const residual = Math.max(0, remaining.days * daily);
+  const symbol = CURRENCY_SYMBOLS[parsed.currency] || parsed.currency;
+  return { value: residual.toFixed(2), currency: parsed.currency, symbol };
 }
 
 // ================= Country Flag & Geo Recognition =================
@@ -213,13 +369,11 @@ function matchTextRule(text?: string): { code: string; name: string } | null {
   const lower = text.toLowerCase().trim();
   if (!lower) return null;
 
-  // Direct 2-letter country code match (e.g. "HK", "JP", "US")
   if (lower.length === 2) {
     const directRule = REGION_RULES.find(r => r.code.toLowerCase() === lower);
     if (directRule) return { code: directRule.code, name: directRule.name };
   }
 
-  // Substring pattern matching
   for (const rule of REGION_RULES) {
     for (const pat of rule.patterns) {
       const p = pat.toLowerCase();
@@ -266,8 +420,6 @@ export function onGeoResolved(listener: (ip: string, code: string) => void): () 
   };
 }
 
-const inFlightIps = new Set<string>();
-
 export function triggerIpLookup(_ip?: string): void {}
 
 /**
@@ -310,7 +462,6 @@ export function resolveCountryInfo(
         source: 'ip_geo'
       };
     }
-    // Trigger async background lookup
     triggerIpLookup(cleanIp);
   }
 

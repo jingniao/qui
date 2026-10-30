@@ -66,7 +66,7 @@
                   <span :class="['w-1.5 h-1.5 rounded-full shrink-0', offlineNodesCount === 0 && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-ios-red']"></span>
                   {{ offlineNodesCount === 0 && allNodes.length > 0 ? '全部就绪' : `${offlineNodesCount} 台离线` }}
                 </span>
-                <span class="text-ios-tertiary font-mono text-[11px]">{{ allNodes.length > 0 ? Math.round((adminOnlineNodesCount / allNodes.length) * 100) : 0 }}%</span>
+                <span class="text-ios-tertiary tabular-nums text-[11px] font-medium">{{ allNodes.length > 0 ? Math.round((adminOnlineNodesCount / allNodes.length) * 100) : 0 }}%</span>
               </div>
             </div>
 
@@ -98,7 +98,7 @@
                   <span :class="['w-1.5 h-1.5 rounded-full shrink-0', healthyNodesCount === allNodes.length && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-amber-500']"></span>
                   {{ healthyNodesCount === allNodes.length && allNodes.length > 0 ? '状态健康' : `${allNodes.length - healthyNodesCount} 核心待检` }}
                 </span>
-                <span class="text-ios-tertiary font-mono text-[11px]">{{ allNodes.length > 0 ? Math.round((healthyNodesCount / allNodes.length) * 100) : 0 }}%</span>
+                <span class="text-ios-tertiary tabular-nums text-[11px] font-medium">{{ allNodes.length > 0 ? Math.round((healthyNodesCount / allNodes.length) * 100) : 0 }}%</span>
               </div>
             </div>
 
@@ -130,7 +130,7 @@
                   <span :class="['w-1.5 h-1.5 rounded-full shrink-0', warningUsersCount > 0 ? 'bg-amber-500' : 'bg-emerald-500']"></span>
                   {{ warningUsersCount > 0 ? `${warningUsersCount} 位待关注` : '账号正常' }}
                 </span>
-                <span class="text-ios-tertiary font-mono text-[11px]">{{ allUsers.length > 0 ? Math.round((activeUsersCount / allUsers.length) * 100) : 0 }}%</span>
+                <span class="text-ios-tertiary tabular-nums text-[11px] font-medium">{{ allUsers.length > 0 ? Math.round((activeUsersCount / allUsers.length) * 100) : 0 }}%</span>
               </div>
             </div>
 
@@ -146,8 +146,10 @@
                   </div>
                 </div>
 
-                <div class="mt-3 text-2xl font-bold text-ios-label tabular-nums tracking-tight">
-                  <TrafficValue :bytes="todayTrafficTotal" />
+                <div class="mt-3 flex items-baseline gap-1.5">
+                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-tight">
+                    <TrafficValue :bytes="todayTrafficTotal" />
+                  </span>
                 </div>
               </div>
 
@@ -286,10 +288,10 @@
                     </div>
 
                     <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
-                      <span class="font-mono text-[11px] text-ios-tertiary truncate">
+                      <span class="tabular-nums text-[11px] text-ios-tertiary truncate">
                         {{ node.publicIp || node.hostname || '未分配IP' }}
                       </span>
-                      <span class="font-mono text-[11px] text-ios-tertiary shrink-0">
+                      <span class="tabular-nums text-[11px] text-ios-tertiary shrink-0">
                         {{ node.lastHeartbeat ? formatTime(node.lastHeartbeat).slice(11, 19) : '未同步' }}
                       </span>
                     </div>
@@ -349,12 +351,12 @@
                     </div>
                     <div class="flex items-center gap-3 text-xs">
                       <div class="text-right">
-                        <span class="text-[10px] text-ios-tertiary block font-mono">↑ 上行</span>
+                        <span class="text-[10px] text-ios-tertiary block font-medium">↑ 上行</span>
                         <span class="font-semibold text-ios-label tabular-nums"><TrafficValue :bytes="displayUploadBytes" /></span>
                       </div>
                       <div class="w-px h-6 bg-black/[0.08]"></div>
                       <div class="text-right">
-                        <span class="text-[10px] text-ios-tertiary block font-mono">↓ 下行</span>
+                        <span class="text-[10px] text-ios-tertiary block font-medium">↓ 下行</span>
                         <span class="font-semibold text-ios-label tabular-nums"><TrafficValue :bytes="displayDownloadBytes" /></span>
                       </div>
                     </div>
@@ -436,16 +438,16 @@
                             {{ item.node.name }}
                           </router-link>
 
-                          <span class="font-mono text-[10px] text-ios-tertiary truncate hidden sm:inline">
+                          <span class="tabular-nums text-[10px] text-ios-tertiary truncate hidden sm:inline">
                             {{ item.node.publicIp || item.node.hostname || '' }}
                           </span>
                         </div>
 
                         <div class="flex items-center gap-2 shrink-0">
-                          <span class="font-mono text-ios-label text-xs font-semibold">
+                          <span class="text-ios-label text-xs font-semibold tabular-nums">
                             <TrafficValue :bytes="item.traffic" />
                           </span>
-                          <span class="font-mono text-ios-tertiary text-[10px] w-8 text-right">
+                          <span class="tabular-nums text-ios-tertiary text-[10px] w-8 text-right font-medium">
                             {{ item.percent }}%
                           </span>
                         </div>
@@ -588,7 +590,7 @@
                       >
                         {{ item.allowed ? '通过' : '阻断' }}
                       </span>
-                      <p class="font-mono text-ios-label truncate font-medium text-[11px]">
+                      <p class="tabular-nums text-ios-label truncate font-medium text-[11px]">
                         {{ item.domain || item.targetIp }}
                       </p>
                     </div>
@@ -596,7 +598,7 @@
                       {{ item.userName || '匿名' }} · {{ item.nodeName }}
                     </p>
                   </div>
-                  <span class="text-[10px] font-mono text-ios-quaternary shrink-0">
+                  <span class="text-[10px] tabular-nums text-ios-quaternary shrink-0">
                     {{ formatTime(item.time).slice(11, 19) }}
                   </span>
                 </div>

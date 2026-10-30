@@ -65,7 +65,6 @@
       <template #header>
         <th>用户名</th>
         <th>状态</th>
-        <th>授权线路组</th>
         <th>设备</th>
         <th>连接</th>
         <th>额度 / 已用</th>
@@ -100,9 +99,6 @@
             </div>
           </td>
           <td><StatusBadge :status="admin.status" /></td>
-          <td class="text-xs text-ios-secondary">
-            {{ admin.role === 'Owner' ? '全局管理 · 不限节点' : '审计只读 · 查看总览' }}
-          </td>
           <td class="text-xs font-mono text-ios-tertiary tabular-nums">—</td>
           <td class="text-xs font-mono text-ios-tertiary tabular-nums">—</td>
           <td class="text-xs text-ios-tertiary font-mono">— (管理账号)</td>
@@ -129,9 +125,6 @@
             <p class="text-[13px] text-ios-secondary font-normal mt-0.5 font-mono">@{{ user.username }}</p>
           </td>
           <td><StatusBadge :status="effectiveStatus(user)" /></td>
-          <td class="text-xs text-ios-secondary">
-            {{ user.nodeGroupIds.map(id => groups.find(group => group.id === id)?.name || id).join('、') || '未授权' }}
-          </td>
           <td class="text-xs font-mono tabular-nums text-ios-tertiary">
             <button class="text-ios-blue" @click="showDevices(user)">{{ user.onlineDevices ?? '未知' }} / {{ user.deviceLimit || '不限' }}</button>
             <p v-if="!user.deviceLimitEnforced" class="text-amber-700" :title="user.deviceLimitUnsupportedNodes?.join('、')">部分执行 · {{ user.deviceLimitUnsupportedNodes?.join('、') }}</p>
@@ -245,47 +238,6 @@
               </svg>
               <span>{{ protocol }}</span>
             </label>
-          </div>
-        </div>
-
-        <!-- 授权线路组 -->
-        <div class="space-y-1.5">
-          <div class="flex items-center justify-between">
-            <label class="text-xs font-medium text-ios-secondary">授权线路组</label>
-            <span v-if="groups.length" class="text-[11px] text-ios-tertiary">已选 {{ form.nodeGroupIds.length }} 个线路组</span>
-          </div>
-          <div class="rounded-2xl p-3 bg-[#F5F5F7] border border-black/[0.06]">
-            <div v-if="groups.length" class="space-y-1.5 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
-              <label
-                v-for="group in groups"
-                :key="group.id"
-                :class="[
-                  'flex items-center justify-between p-2.5 rounded-xl text-xs cursor-pointer select-none transition-all',
-                  form.nodeGroupIds.includes(group.id)
-                    ? 'bg-white text-ios-label font-medium shadow-2xs border border-black/[0.08]'
-                    : 'text-ios-secondary hover:bg-white/60 hover:text-ios-label'
-                ]"
-              >
-                <div class="flex items-center gap-2.5 min-w-0">
-                  <div
-                    :class="[
-                      'w-4 h-4 rounded-[6px] flex items-center justify-center transition-colors',
-                      form.nodeGroupIds.includes(group.id)
-                        ? 'bg-ios-blue text-white'
-                        : 'border border-[#C7C7CC] bg-white'
-                    ]"
-                  >
-                    <svg v-if="form.nodeGroupIds.includes(group.id)" class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                    </svg>
-                  </div>
-                  <span class="truncate">{{ group.name }}</span>
-                </div>
-                <span v-if="group.purpose" class="text-[11px] text-ios-tertiary font-normal shrink-0 ml-2">{{ group.purpose }}</span>
-                <input v-model="form.nodeGroupIds" type="checkbox" :value="group.id" class="sr-only" />
-              </label>
-            </div>
-            <p v-else class="text-xs text-ios-tertiary py-1">请先创建线路组。</p>
           </div>
         </div>
 

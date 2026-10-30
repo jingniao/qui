@@ -345,7 +345,7 @@
       class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
     >
       <div
-        v-for="node in pagedNodes"
+        v-for="node in filteredNodes"
         :key="node.id"
         class="bg-white rounded-[24px] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-4"
       >
@@ -553,15 +553,7 @@
       </div>
     </div>
 
-    <!-- Pagination for Cards -->
-    <div v-if="displayMode === 'grid'" class="pt-2">
-      <Pagination
-        :total="filteredNodes.length"
-        :current-page="currentPage"
-        :page-size="pageSize"
-        @update:page="currentPage = $event"
-      />
-    </div>
+
 
     <!-- Modal 0: Node Details & Topology Restorability Evaluation -->
     <AppDialog
@@ -733,55 +725,288 @@
     <AppDialog
       v-model="openSubModal"
       title="机场订阅管理"
+      description="添加并管理外部机场订阅源，自动同步代理节点。可在「节点分组」中分配所属节点组。"
+      max-width="2xl"
       :show-confirm="false"
     >
-      <div class="space-y-4 text-sm">
-        <div class="bg-black/[0.02] p-3.5 rounded-2xl border border-black/[0.05] space-y-3">
-          <h4 class="text-xs font-bold text-ios-label">添加新的机场订阅</h4>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <input v-model="newSubName" placeholder="订阅备注 (如 某某机场)" class="form-input-base text-xs" />
-            <input v-model="newSubUrl" placeholder="订阅链接 (仅 HTTPS)" type="password" autocomplete="off" class="form-input-base text-xs sm:col-span-2 font-mono" />
+      <div class="space-y-5 text-sm">
+        <!-- New Subscription Form Card -->
+        <div class="bg-black/[0.02] p-4 sm:p-5 rounded-2xl border border-black/[0.06] space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-lg bg-ios-blue/10 text-ios-blue flex items-center justify-center">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+              </span>
+              <h4 class="text-sm font-semibold text-ios-label">添加新的机场订阅</h4>
+            </div>
+            <span class="text-xs text-ios-tertiary">凭据加密保存 · 支持 HTTPS</span>
           </div>
-          <label class="block text-xs">授权用户（多选；未授权不出现在订阅中）<select v-model="grantUserIds" multiple class="form-input-base"><option v-for="u in importUsers" :key="u.id" :value="u.id">{{ u.displayName || u.username }}</option></select></label>
-          <label class="block text-xs">刷新间隔（秒）<input v-model.number="refreshSeconds" type="number" min="60" max="2592000" class="form-input-base" /></label>
-          <div class="flex justify-end">
-            <button type="button" @click="addNewSubscription" class="ios-btn-primary !py-1 text-xs">
-              添加订阅并拉取
+
+          <!-- Name & URL Inputs -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label class="block text-xs font-medium text-ios-secondary">
+              订阅备注
+              <input
+                v-model="newSubName"
+                placeholder="例如：主力香港中转"
+                class="form-input-base mt-1 text-xs"
+              />
+            </label>
+            <label class="block text-xs font-medium text-ios-secondary sm:col-span-2">
+              订阅链接（仅支持 HTTPS）
+              <input
+                v-model="newSubUrl"
+                placeholder="https://airport.example.com/api/v1/client/subscribe?token=..."
+                type="password"
+                autocomplete="off"
+                class="form-input-base mt-1 text-xs font-mono"
+              />
+            </label>
+          </div>
+
+          <!-- Auto-refresh interval with presets -->
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <label class="text-xs font-medium text-ios-secondary">自动同步刷新周期</label>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button
+                v-for="preset in [
+                  { label: '1 小时', sec: 3600 },
+                  { label: '6 小时', sec: 21600 },
+                  { label: '12 小时', sec: 43200 },
+                  { label: '24 小时', sec: 86400 }
+                ]"
+                :key="preset.sec"
+                type="button"
+                @click="refreshSeconds = preset.sec"
+                :class="[
+                  'px-2.5 py-1 rounded-lg text-xs font-medium transition-all',
+                  refreshSeconds === preset.sec
+                    ? 'bg-ios-blue text-white shadow-xs'
+                    : 'bg-black/[0.04] text-ios-secondary hover:bg-black/[0.08] hover:text-ios-label'
+                ]"
+              >
+                {{ preset.label }}
+              </button>
+              <div class="flex items-center gap-1 ml-1 text-xs text-ios-tertiary">
+                <input
+                  v-model.number="refreshSeconds"
+                  type="number"
+                  min="60"
+                  max="2592000"
+                  class="form-input-base !w-20 !py-1 text-xs font-mono text-center"
+                />
+                <span>秒</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Submit Button -->
+          <div class="flex justify-end pt-1">
+            <button
+              type="button"
+              :disabled="submittingSub || !newSubUrl.trim()"
+              @click="addNewSubscription"
+              class="ios-btn-primary inline-flex items-center gap-1.5 text-xs !py-1.5 px-4 disabled:opacity-40"
+            >
+              <svg v-if="submittingSub" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>{{ submittingSub ? '正在添加并首次拉取…' : '添加订阅并拉取' }}</span>
             </button>
           </div>
         </div>
 
-        <!-- Subscription List -->
-        <div class="space-y-2 max-h-[300px] overflow-y-auto">
+        <!-- Subscription List Section -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary">
+            <span>已添加的订阅源（{{ proxyNodeStore.subscriptions.length }}）</span>
+            <span class="text-ios-tertiary font-normal">支持直接在线编辑与重新拉取</span>
+          </div>
+
+          <!-- Empty State -->
           <div
-            v-for="sub in proxyNodeStore.subscriptions"
-            :key="sub.id"
-            class="p-3 bg-white rounded-xl border border-black/[0.06] flex items-center justify-between"
+            v-if="!proxyNodeStore.subscriptions.length"
+            class="p-8 text-center text-xs text-ios-tertiary bg-black/[0.01] rounded-2xl border border-dashed border-black/[0.08]"
           >
-            <div>
-              <div class="font-bold text-xs text-ios-label">{{ sub.name }}</div>
-              <div class="text-[11px] text-ios-tertiary font-mono truncate max-w-[260px]">{{ sub.url }}</div>
-              <label class="block text-xs">授权用户<select v-model="sub.userIds" multiple class="form-input-base" @change="saveSourceGrants(sub)"><option v-for="u in importUsers" :key="u.id" :value="u.id">{{ u.displayName || u.username }}</option></select></label>
-              <div class="text-xs text-amber-600">{{ sub.lastError }}</div>
-              <div class="text-[10px] text-ios-tertiary mt-0.5">
-                节点: {{ sub.nodeCount }} 个 · 已用: {{ sub.usedTraffic || '—' }} / {{ sub.totalTraffic || '—' }} · {{ sub.lastStatus }}
+            暂无已添加的机场订阅源，可在上方表单输入订阅链接添加
+          </div>
+
+          <!-- Subscriptions Cards -->
+          <div v-else class="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+            <div
+              v-for="sub in proxyNodeStore.subscriptions"
+              :key="sub.id"
+              class="p-4 bg-white rounded-2xl border transition-all space-y-3"
+              :class="editingSubId === sub.id ? 'border-ios-blue shadow-sm ring-2 ring-ios-blue/10' : 'border-black/[0.08] shadow-xs hover:border-black/[0.14]'"
+            >
+              <!-- EDIT MODE -->
+              <div v-if="editingSubId === sub.id" class="space-y-4">
+                <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5">
+                  <div class="flex items-center gap-2">
+                    <span class="w-5 h-5 rounded-md bg-ios-blue/10 text-ios-blue flex items-center justify-center text-xs">✏️</span>
+                    <span class="font-bold text-sm text-ios-label">编辑订阅信息</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      @click="cancelEditSub"
+                      :disabled="savingSub"
+                      class="ios-action-btn-secondary"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      @click="saveEditSub(sub)"
+                      :disabled="savingSub"
+                      class="ios-btn-primary !py-1 text-xs inline-flex items-center gap-1.5"
+                    >
+                      <svg v-if="savingSub" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>{{ savingSub ? '保存中…' : '保存修改' }}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Inputs -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label class="block text-xs font-medium text-ios-secondary">
+                    订阅备注
+                    <input
+                      v-model="editSubForm.name"
+                      placeholder="例如：主力香港中转"
+                      class="form-input-base mt-1 text-xs"
+                    />
+                  </label>
+                  <label class="block text-xs font-medium text-ios-secondary sm:col-span-2">
+                    更新订阅链接（留空保持原有加密链接）
+                    <input
+                      v-model="editSubForm.url"
+                      placeholder="留空保持原有加密链接，或填入新 HTTPS 链接"
+                      type="password"
+                      autocomplete="off"
+                      class="form-input-base mt-1 text-xs font-mono"
+                    />
+                  </label>
+                </div>
+
+                <!-- Interval presets in edit mode -->
+                <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <label class="text-xs font-medium text-ios-secondary">自动同步刷新周期</label>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      v-for="preset in [
+                        { label: '1 小时', sec: 3600 },
+                        { label: '6 小时', sec: 21600 },
+                        { label: '12 小时', sec: 43200 },
+                        { label: '24 小时', sec: 86400 }
+                      ]"
+                      :key="preset.sec"
+                      type="button"
+                      @click="editSubForm.intervalSeconds = preset.sec"
+                      :class="[
+                        'px-2.5 py-1 rounded-lg text-xs font-medium transition-all',
+                        editSubForm.intervalSeconds === preset.sec
+                          ? 'bg-ios-blue text-white shadow-xs'
+                          : 'bg-black/[0.04] text-ios-secondary hover:bg-black/[0.08] hover:text-ios-label'
+                      ]"
+                    >
+                      {{ preset.label }}
+                    </button>
+                    <div class="flex items-center gap-1 ml-1 text-xs text-ios-tertiary">
+                      <input
+                        v-model.number="editSubForm.intervalSeconds"
+                        type="number"
+                        min="60"
+                        max="2592000"
+                        class="form-input-base !w-20 !py-1 text-xs font-mono text-center"
+                      />
+                      <span>秒</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                @click="updateSubscription(sub)"
-                class="ios-action-btn-secondary"
-              >
-                更新
-              </button>
-              <button
-                type="button"
-                @click="deleteSubscription(sub.id)"
-                class="ios-action-btn-danger"
-              >
-                删除
-              </button>
+
+              <!-- VIEW MODE -->
+              <div v-else class="space-y-3">
+                <!-- Top Row: Name + Badges + Actions -->
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-bold text-sm text-ios-label truncate" :title="sub.name">{{ sub.name }}</span>
+                    <span
+                      v-if="sub.lastStatus === 'failed' || sub.lastError"
+                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                    >
+                      拉取异常
+                    </span>
+                    <span
+                      v-else
+                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                    >
+                      正常运行
+                    </span>
+                    <span class="px-2 py-0.5 rounded-md text-[11px] font-mono bg-black/[0.04] text-ios-secondary">
+                      {{ sub.nodeCount }} 个节点
+                    </span>
+                  </div>
+
+                  <!-- Action Buttons -->
+                  <div class="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      @click="startEditSub(sub)"
+                      class="ios-action-btn-secondary inline-flex items-center gap-1"
+                      title="编辑此订阅备注、链接与刷新周期"
+                    >
+                      <svg class="w-3.5 h-3.5 text-ios-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      <span>编辑</span>
+                    </button>
+                    <button
+                      type="button"
+                      @click="updateSubscription(sub)"
+                      :disabled="updatingSubId === sub.id"
+                      class="ios-action-btn-secondary inline-flex items-center gap-1"
+                      title="立即拉取最新节点"
+                    >
+                      <svg class="w-3.5 h-3.5 text-ios-secondary" :class="{ 'animate-spin': updatingSubId === sub.id }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>{{ updatingSubId === sub.id ? '拉取中…' : '更新' }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      @click="deleteSubscription(sub.id)"
+                      class="ios-action-btn-danger"
+                      title="删除此订阅源及已导入节点"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Metadata Info Row -->
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ios-secondary">
+                  <span class="font-mono text-ios-tertiary truncate max-w-[280px]" :title="sub.url">{{ sub.url }}</span>
+                  <span v-if="sub.lastUpdated">最后拉取：{{ sub.lastUpdated }}</span>
+                  <span>刷新间隔：{{ formatInterval(sub.intervalSeconds) }}</span>
+                </div>
+
+                <!-- Error Banner -->
+                <div v-if="sub.lastError" class="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 flex items-start gap-2">
+                  <svg class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div class="space-y-0.5">
+                    <p class="font-medium text-amber-900">拉取状态说明</p>
+                    <p class="text-[11px] leading-relaxed break-all">{{ sub.lastError }}</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -908,6 +1133,16 @@ const nodeForm = reactive({
 const openSubModal = ref(false);
 const newSubName = ref('');
 const newSubUrl = ref('');
+const submittingSub = ref(false);
+const updatingSubId = ref<string | null>(null);
+const editingSubId = ref<string | null>(null);
+const savingSub = ref(false);
+const editSubForm = reactive({
+  name: '',
+  url: '',
+  intervalSeconds: 3600,
+  userIds: [] as string[]
+});
 
 // Pagination
 const currentPage = ref(1);
@@ -1210,27 +1445,102 @@ async function deleteNode(node: ProxyNodeItem) {
   }
 }
 
+// Subscriptions Helper Functions
+function startEditSub(sub: SubscriptionItem) {
+  editingSubId.value = sub.id;
+  editSubForm.name = sub.name;
+  editSubForm.url = '';
+  editSubForm.intervalSeconds = sub.intervalSeconds || 3600;
+  editSubForm.userIds = [];
+}
+
+function cancelEditSub() {
+  editingSubId.value = null;
+}
+
+async function saveEditSub(sub: SubscriptionItem) {
+  if (!editSubForm.name.trim()) {
+    showToast('订阅备注不能为空', 'error');
+    return;
+  }
+  savingSub.value = true;
+  try {
+    const payload: { name: string; intervalSeconds: number; userIds: string[]; url?: string } = {
+      name: editSubForm.name.trim(),
+      intervalSeconds: editSubForm.intervalSeconds || 3600,
+      userIds: [...(sub.userIds || [])]
+    };
+    const hasNewUrl = editSubForm.url.trim().length > 0;
+    if (hasNewUrl) {
+      payload.url = editSubForm.url.trim();
+    }
+    await importAPI.update(sub.id, payload);
+    if (hasNewUrl) {
+      await importAPI.refresh(sub.id);
+    }
+    await loadImports();
+    showToast(hasNewUrl ? '订阅已更新并完成重新拉取' : '订阅配置已更新', 'success');
+    editingSubId.value = null;
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    savingSub.value = false;
+  }
+}
+
+function formatInterval(seconds?: number) {
+  if (!seconds || seconds <= 0) return '未设置';
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`;
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(seconds % 3600 ? 1 : 0)} 小时`;
+  return `${(seconds / 86400).toFixed(seconds % 86400 ? 1 : 0)} 天`;
+}
+
 // Subscriptions
 async function addNewSubscription() {
-  if (!isOwner.value) return;
+  if (!isOwner.value || !newSubUrl.value.trim() || submittingSub.value) return;
+  submittingSub.value = true;
   try {
-    const result=await importAPI.create({name:newSubName.value.trim(),url:newSubUrl.value.trim(),intervalSeconds:refreshSeconds.value,userIds:grantUserIds.value});
-    newSubUrl.value=''; newSubName.value='';
-    await importAPI.refresh(result.id); await loadImports(); showToast('来源已保存，请查看刷新状态');
-  } catch(e) {showToast((e as Error).message,'error');}
+    const result = await importAPI.create({
+      name: newSubName.value.trim() || '机场订阅',
+      url: newSubUrl.value.trim(),
+      intervalSeconds: refreshSeconds.value || 3600,
+      userIds: []
+    });
+    newSubUrl.value = '';
+    newSubName.value = '';
+    await importAPI.refresh(result.id);
+    await loadImports();
+    showToast('来源已保存并完成首次拉取', 'success');
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    submittingSub.value = false;
+  }
 }
-async function saveSourceGrants(sub: SubscriptionItem) {
-  try {await importAPI.update(sub.id,{name:sub.name,intervalSeconds:sub.intervalSeconds || 3600,userIds:sub.userIds || []}); await loadImports();}
-  catch(e) {showToast((e as Error).message,'error'); await loadImports();}
-}
+
 async function updateSubscription(sub: SubscriptionItem) {
-  try {await importAPI.refresh(sub.id); await loadImports(); showToast('刷新完成，请查看来源状态');}
-  catch(e) {showToast((e as Error).message,'error');}
+  if (updatingSubId.value) return;
+  updatingSubId.value = sub.id;
+  try {
+    await importAPI.refresh(sub.id);
+    await loadImports();
+    showToast(`订阅 ${sub.name} 刷新完成`);
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    updatingSubId.value = null;
+  }
 }
+
 async function deleteSubscription(subId: string) {
   if (!confirm('确定删除该来源及其所有导入节点吗？')) return;
-  try {await importAPI.remove(subId); await loadImports(); showToast('来源已删除');}
-  catch(e) {showToast((e as Error).message,'error');}
+  try {
+    await importAPI.remove(subId);
+    await loadImports();
+    showToast('来源已删除');
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  }
 }
 
 onMounted(() => {

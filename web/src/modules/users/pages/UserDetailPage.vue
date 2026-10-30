@@ -166,7 +166,7 @@
             </div>
 
             <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-secondary">
-              <span>授权 {{ user.nodeGroupIds.length }} 个线路组</span>
+              <span>账号正常</span>
               <span class="text-ios-tertiary">{{ user.allowedProtocols.length }} 种协议</span>
             </div>
           </div>
@@ -262,28 +262,12 @@
           <div>
             <div class="flex items-center justify-between">
               <div>
-                <h3 class="text-base font-bold text-ios-label tracking-tight">可用节点与组</h3>
+                <h3 class="text-base font-bold text-ios-label tracking-tight">可用节点</h3>
                 <p class="text-xs text-ios-tertiary mt-0.5">该用户有权接入的网络节点</p>
               </div>
               <router-link to="/nodes" class="text-xs font-semibold text-ios-blue hover:underline">
                 节点网络 &rarr;
               </router-link>
-            </div>
-
-            <!-- 授权线路组标签 -->
-            <div class="mt-3 flex flex-wrap gap-1.5">
-              <template v-if="user.nodeGroupIds.length > 0">
-                <span
-                  v-for="gid in user.nodeGroupIds"
-                  :key="gid"
-                  class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-ios-blue border border-blue-200/60"
-                >
-                  {{ getGroupName(gid) }}
-                </span>
-              </template>
-              <span v-else class="text-xs text-ios-tertiary bg-black/[0.04] px-2.5 py-1 rounded-lg">
-                全部就绪节点
-              </span>
             </div>
 
             <!-- 可用节点明细列表 -->
@@ -573,40 +557,6 @@
 
 
 
-        <!-- 授权线路组 -->
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium text-ios-secondary">授权线路组</label>
-          <div class="rounded-2xl p-3 bg-[#F8F8FA] border border-black/[0.06]">
-            <div class="grid sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
-              <label
-                v-for="group in groups"
-                :key="group.id"
-                :class="[
-                  'flex items-center justify-between p-2 rounded-xl text-xs cursor-pointer select-none transition-all',
-                  form.nodeGroupIds.includes(group.id)
-                    ? 'bg-white text-ios-label font-medium shadow-2xs border border-ios-blue/40 ring-1 ring-ios-blue/10'
-                    : 'bg-white/70 text-ios-secondary hover:bg-white hover:text-ios-label border border-black/[0.04]'
-                ]"
-              >
-                <div class="flex items-center gap-2 truncate">
-                  <div
-                    :class="[
-                      'w-4 h-4 rounded flex items-center justify-center transition-all shrink-0',
-                      form.nodeGroupIds.includes(group.id) ? 'bg-ios-blue text-white' : 'border border-black/20 bg-white'
-                    ]"
-                  >
-                    <svg v-if="form.nodeGroupIds.includes(group.id)" class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                    </svg>
-                  </div>
-                  <span class="truncate">{{ group.name }}</span>
-                </div>
-                <input v-model="form.nodeGroupIds" type="checkbox" :value="group.id" class="sr-only" />
-              </label>
-            </div>
-          </div>
-        </div>
-
         <label class="block text-xs font-medium text-ios-secondary">
           管理备注
           <textarea v-model="formMeta.rawRemark" rows="2" class="form-input-base mt-1.5"></textarea>
@@ -752,13 +702,7 @@ const expiryCountdownText = computed(() => {
 
 const availableNodes = computed(() => {
   if (!user.value) return [];
-  if (user.value.nodeGroupIds.length === 0) return [];
-  const grantedNodeIds = new Set(
-    groups.value
-      .filter(g => user.value?.nodeGroupIds.includes(g.id))
-      .flatMap(g => g.nodeIds)
-  );
-  return allNodes.value.filter(n => grantedNodeIds.has(n.id));
+  return allNodes.value.filter(n => n.enabled && !n.maintenance && n.allowSubscription);
 });
 
 function formatGiB(bytes: number) {

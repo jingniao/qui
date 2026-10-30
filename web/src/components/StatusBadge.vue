@@ -1,6 +1,12 @@
 <template>
-  <span :class="['inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border tracking-tight', classes[tone]]">
-    <span :class="['w-1.5 h-1.5 rounded-full shrink-0', dots[tone]]"></span><span>{{ label || displayLabel }}</span>
+  <span
+    :class="[
+      'inline-flex items-center gap-1.5 px-2.5 h-[22px] rounded-full text-[11px] font-medium leading-none border tracking-tight select-none shrink-0 transition-colors',
+      classes[tone]
+    ]"
+  >
+    <span :class="['w-1.5 h-1.5 rounded-full shrink-0', dots[tone]]"></span>
+    <span class="inline-block">{{ label || displayLabel }}</span>
   </span>
 </template>
 <script setup lang="ts">
@@ -12,6 +18,7 @@ const displayLabel = computed(() => (props.kind === 'node' ? nodeLabels : generi
 type Tone = 'green' | 'yellow' | 'red' | 'gray' | 'blue';
 const tone = computed<Tone>(() => {
   const status = props.status.toLowerCase();
+  if (['green', 'yellow', 'red', 'gray', 'blue'].includes(status)) return status as Tone;
   if (props.kind === 'node') return ({ online: 'green', degraded: 'yellow', error: 'red', applying: 'blue', rollback: 'yellow' } as Record<string, Tone>)[status] || 'gray';
   if (['online', 'active', 'healthy', 'success', 'up_to_date', 'up-to-date', 'running'].includes(status)) return 'green';
   if (['warning', 'maintenance', 'partial', 'pending', 'rollback'].includes(status)) return 'yellow';
@@ -20,17 +27,17 @@ const tone = computed<Tone>(() => {
   return 'gray';
 });
 const classes: Record<Tone, string> = {
-  green: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-  yellow: 'bg-amber-50 text-amber-800 border-amber-200',
-  red: 'bg-rose-50 text-rose-800 border-rose-200',
-  gray: 'bg-black/[0.05] text-[#48484A] border-black/[0.08]',
-  blue: 'bg-blue-50 text-[#0071E3] border-blue-200'
+  green: 'bg-emerald-50 text-emerald-800 border-emerald-200/80',
+  yellow: 'bg-amber-50 text-amber-800 border-amber-200/80',
+  red: 'bg-rose-50 text-rose-800 border-rose-200/80',
+  gray: 'bg-black/[0.04] text-ios-secondary border-black/[0.08]',
+  blue: 'bg-blue-50 text-[#0071E3] border-blue-200/80'
 };
 const dots: Record<Tone, string> = {
   green: 'bg-emerald-500',
   yellow: 'bg-amber-500',
   red: 'bg-rose-500',
-  gray: 'bg-[#6E6E73]',
+  gray: 'bg-[#8E8E93]',
   blue: 'bg-[#0071E3]'
 };
 </script>

@@ -116,13 +116,23 @@ export function portConflict(form: InboundInput, inbounds: Inbound[], excludeId 
     && listenNetworks(i).some(network => networks.includes(network)));
   return conflict ? `端口 ${form.port} 已被「${conflict.name}」占用` : '';
 }
-export function randomPort(form: InboundInput, inbounds: Inbound[], excludeId = '', random = Math.random): number {
-  const start = 10000 + Math.floor(random() * 55536);
-  for (let n = 0; n < 55536; n++) {
-    const port = 10000 + (start - 10000 + n) % 55536;
+export function randomPort(
+  form: InboundInput,
+  inbounds: Inbound[],
+  excludeId = '',
+  random = Math.random,
+  portRange?: { start: number; end: number } | null
+): number {
+  const min = (portRange && portRange.start >= 1 && portRange.start <= 65535) ? portRange.start : 10000;
+  const max = (portRange && portRange.end >= min && portRange.end <= 65535) ? portRange.end : 65535;
+  const span = Math.max(1, max - min + 1);
+
+  const startOffset = Math.floor(random() * span);
+  for (let n = 0; n < span; n++) {
+    const port = min + (startOffset + n) % span;
     if (!portConflict({ ...form, port }, inbounds, excludeId)) return port;
   }
-  throw new Error('没有可用的随机端口');
+  throw new Error(`在指定端口范围 ${min}-${max} 内没有可用的端口`);
 }
 export function validateStep(step: number, state: EditorState, server: NodeView | undefined, inbounds: Inbound[]): string {
   const f = state.form, s = f.settings;

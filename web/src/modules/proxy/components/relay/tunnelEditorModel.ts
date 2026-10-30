@@ -1,7 +1,21 @@
 import type { CanvasConnection, CanvasNodeInstance, RelayScheme } from '../../proxyNodes';
 
-export interface PlanObject { kind: string; name: string; protocol?: string; port?: number; target?: string; }
-export interface PlanServer { nodeId: string; name: string; creates: PlanObject[] | null; updates: PlanObject[] | null; removes: PlanObject[] | null; }
+export interface PlanObject {
+  kind: string;
+  name: string;
+  protocol?: string;
+  port?: number;
+  target?: string;
+}
+
+export interface PlanServer {
+  nodeId: string;
+  name: string;
+  creates: PlanObject[] | null;
+  updates: PlanObject[] | null;
+  removes: PlanObject[] | null;
+}
+
 export interface TunnelPlan {
   ok: boolean;
   servers: PlanServer[] | null;
@@ -10,39 +24,77 @@ export interface TunnelPlan {
   warnings: string[] | null;
   message?: string;
 }
-export interface TunnelServer { id: string; name: string; publicIp?: string; status?: string; capabilities?: { core_name?: string; core_version?: string }; }
-export interface TunnelDraft {
-  id: string; source: string; target: string; kind: 'encrypted' | 'forward';
-  protocol: NonNullable<CanvasConnection['tunnelProtocol']>; port: number;
-  listenPort: number; targetHost: string; targetPort: number; tcp: boolean; udp: boolean;
+
+export interface TunnelServer {
+  id: string;
+  name: string;
+  publicIp?: string;
+  status?: string;
+  capabilities?: { core_name?: string; core_version?: string };
 }
-export function defaultPort(protocol: string) { return protocol === 'wireguard' ? 51820 : 8443; }
+
+export interface TunnelDraft {
+  id: string;
+  source: string;
+  target: string;
+  kind: 'encrypted' | 'forward';
+  protocol: NonNullable<CanvasConnection['tunnelProtocol']>;
+  port: number;
+  listenPort: number;
+  targetHost: string;
+  targetPort: number;
+  tcp: boolean;
+  udp: boolean;
+}
+
+export function defaultPort(protocol: string) {
+  return protocol === 'wireguard' ? 51820 : 8443;
+}
+
 export function createTunnelDraft(scheme: RelayScheme, connection?: CanvasConnection, source = '', target = ''): TunnelDraft {
   const c = connection;
   const protocol = c?.tunnelProtocol || 'tls';
   const from = scheme.nodes.find(n => n.instanceId === c?.sourceInstanceId);
   const to = scheme.nodes.find(n => n.instanceId === c?.targetInstanceId);
+
   return {
     id: c?.id || `conn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    source: c?.sourceInstanceId || source, target: c?.targetInstanceId || target,
-    kind: c?.type === 'port_forward' ? 'forward' : 'encrypted', protocol,
-    port: c?.tunnelPort ?? defaultPort(protocol), listenPort: c?.listenPort ?? from?.listenPort ?? 10080,
-    targetHost: c?.targetHost || '', targetPort: c?.targetPort ?? to?.targetPort ?? 443,
-    tcp: c?.supportTcp ?? true, udp: c?.supportUdp ?? true
+    source: c?.sourceInstanceId || source,
+    target: c?.targetInstanceId || target,
+    kind: c?.type === 'port_forward' ? 'forward' : 'encrypted',
+    protocol,
+    port: c?.tunnelPort ?? (protocol === 'wireguard' ? 51820 : 8443),
+    listenPort: c?.listenPort ?? from?.listenPort ?? 10080,
+    targetHost: c?.targetHost || '',
+    targetPort: c?.targetPort ?? to?.targetPort ?? 443,
+    tcp: c?.supportTcp ?? true,
+    udp: c?.supportUdp ?? (protocol === 'wireguard' ? true : false)
   };
 }
+
 // Selection keys refer either to an existing instance or a server not yet drawn.
 export function tunnelChoices(scheme: RelayScheme, servers: TunnelServer[]) {
   return [
-    ...scheme.nodes.map(n => ({ key: n.instanceId, name: n.name, address: n.serverAddress, status: n.status,
-      core: servers.find(s => n.resourceType === 'server' && s.id === n.resourceId)?.capabilities?.core_name || '—' })),
+    ...scheme.nodes.map(n => ({
+      key: n.instanceId,
+      name: n.name,
+      address: n.serverAddress,
+      status: n.status,
+      core: servers.find(s => n.resourceType === 'server' && s.id === n.resourceId)?.capabilities?.core_name || '—'
+    })),
     ...servers.filter(s => !scheme.nodes.some(n => n.resourceType === 'server' && n.resourceId === s.id)).map(s => ({
-      key: `server:${s.id}`, name: s.name, address: s.publicIp || '', status: s.status || '未知', core: s.capabilities?.core_name || '—'
+      key: `server:${s.id}`,
+      name: s.name,
+      address: s.publicIp || '',
+      status: s.status || '未知',
+      core: s.capabilities?.core_name || '—'
     }))
   ];
 }
+
 export function applyTunnel(scheme: RelayScheme, draft: TunnelDraft, servers: TunnelServer[]): RelayScheme {
   const nodes = scheme.nodes.map(n => ({ ...n }));
+
   function resolve(key: string, role: 'entry' | 'exit') {
     const existing = nodes.find(n => n.instanceId === key);
     if (existing) return existing.instanceId;
@@ -51,65 +103,150 @@ export function applyTunnel(scheme: RelayScheme, draft: TunnelDraft, servers: Tu
     const reused = nodes.find(n => n.resourceType === 'server' && n.resourceId === server.id);
     if (reused) return reused.instanceId;
     const index = nodes.length;
-    const instance: CanvasNodeInstance = { instanceId: `inst-${draft.id}-${role}`, resourceId: server.id, resourceType: 'server',
-      name: server.name, protocol: 'server', serverAddress: server.publicIp || '',
-      status: server.status === 'online' ? 'online' : 'offline', isManageable: true,
-      x: 60 + (index % 3) * 300, y: 60 + Math.floor(index / 3) * 160, role };
+    const instance: CanvasNodeInstance = {
+      instanceId: `inst-${draft.id}-${role}`,
+      resourceId: server.id,
+      resourceType: 'server',
+      name: server.name,
+      protocol: 'server',
+      serverAddress: server.publicIp || '',
+      status: server.status === 'online' ? 'online' : 'offline',
+      isManageable: true,
+      x: 60 + (index % 3) * 300,
+      y: 60 + Math.floor(index / 3) * 160,
+      role
+    };
     nodes.push(instance);
     return instance.instanceId;
   }
-  const source = resolve(draft.source, 'entry'), target = resolve(draft.target, 'exit');
+
+  const source = resolve(draft.source, 'entry');
+  const target = resolve(draft.target, 'exit');
   const previous = scheme.connections.find(c => c.id === draft.id);
+
   const connection: CanvasConnection = {
-    id: draft.id, sourceInstanceId: source, targetInstanceId: target,
+    id: draft.id,
+    sourceInstanceId: source,
+    targetInstanceId: target,
     type: draft.kind === 'forward' ? 'port_forward' : previous?.type === 'proxy_chain' ? 'proxy_chain' : 'tunnel',
-    supportTcp: draft.tcp, supportUdp: draft.udp, status: 'valid',
-    ...(draft.kind === 'forward' ? { listenPort: draft.listenPort, targetPort: draft.targetPort, targetHost: draft.targetHost.trim() }
-      : { tunnelProtocol: draft.protocol, tunnelPort: draft.port })
+    supportTcp: draft.tcp,
+    supportUdp: draft.udp,
+    status: 'valid',
+    ...(draft.kind === 'forward'
+      ? {
+          listenPort: draft.listenPort,
+          targetPort: draft.targetPort,
+          targetHost: draft.targetHost.trim()
+        }
+      : {
+          tunnelProtocol: draft.protocol,
+          tunnelPort: draft.port
+        })
   };
+
   // Keep instance ports: other legacy forwards may still fall back to them.
-  return { ...scheme, nodes, connections: [...scheme.connections.filter(c => c.id !== draft.id), connection] };
+  return {
+    ...scheme,
+    nodes,
+    connections: [...scheme.connections.filter(c => c.id !== draft.id), connection]
+  };
 }
+
 export function validateTunnel(scheme: RelayScheme, draft: TunnelDraft, servers: TunnelServer[]): string {
-  if (!draft.source || !draft.target) return '请选择起点与终点';
-  const next = applyTunnel(scheme, draft, servers);
-  const c = next.connections.find(c => c.id === draft.id)!;
-  if (c.sourceInstanceId === c.targetInstanceId) return '起点与终点不能相同';
-  const from = next.nodes.find(n => n.instanceId === c.sourceInstanceId);
-  const to = next.nodes.find(n => n.instanceId === c.targetInstanceId);
-  if (!from || !to) return '节点已不存在，请重新选择';
-  if ((scheme.executionLocation === 'server' || draft.kind === 'forward') && (!from.isManageable || !to.isManageable))
-    return '服务器隧道要求两端均为可管理服务器。导入节点不能部署 Agent 或安装服务器隧道。';
-  if (!draft.tcp && !draft.udp) return '至少选择 TCP 或 UDP';
-  const ports = draft.kind === 'forward' ? [draft.listenPort, draft.targetPort] : [draft.port];
-  if (ports.some(p => !Number.isInteger(p) || p < 1 || p > 65535)) return '端口必须为 1–65535 的整数';
-  if (draft.kind === 'encrypted' && !['tls', 'wireguard'].includes(draft.protocol)) return '需要 GOST 核心（后续阶段）';
+  if (!draft.source) return '请选择起点服务器';
+  if (!draft.target) return '请选择终点服务器';
+  if (draft.source === draft.target) return '起点和终点不能是相同服务器';
+  if (!draft.tcp && !draft.udp) return '至少启用 TCP 或 UDP';
+  if (draft.kind === 'encrypted') {
+    if (['gost', 'brook', 'nftables'].includes(draft.protocol)) return `协议 ${draft.protocol} 需要 GOST 核心，当前不可用`;
+    if (!Number.isInteger(draft.port) || draft.port < 1 || draft.port > 65535) return '端口必须为 1–65535';
+    const target = scheme.nodes.find(n => n.instanceId === draft.target);
+    if (target && !target.isManageable && scheme.executionLocation !== 'client') return '加密隧道终点必须是可管理服务器（或客户端方案）';
+  } else {
+    if (!Number.isInteger(draft.listenPort) || draft.listenPort < 1 || draft.listenPort > 65535) return '端口必须为 1–65535';
+    if (!Number.isInteger(draft.targetPort) || draft.targetPort < 1 || draft.targetPort > 65535) return '端口必须为 1–65535';
+  }
   return '';
 }
-export function tunnelStatus(plan: TunnelPlan | null, id: string, client = false) {
-  if (client) return null;
-  if (!plan) return { error: false, text: '待检查' };
-  const conflicts = (plan.conflicts || []).filter(c => c.connectionId === id);
-  const row = plan.connections?.find(c => c.id === id);
-  const messages = [...(row?.status === 'error' ? [row.message || '检查失败'] : []),
-    ...conflicts.map(c => `端口冲突 :${c.port}（${c.with}）`)];
-  if (messages.length) return { error: true, text: messages.join('；') };
-  if (row?.status === 'ok') return { error: false, text: '可发布' };
-  return { error: !plan.ok, text: plan.message || '待检查' };
+
+export function tunnelSummary(scheme: RelayScheme, connection: CanvasConnection): { title: string; kind: string; network: string } {
+  const src = scheme.nodes.find(n => n.instanceId === connection.sourceInstanceId);
+  const tgt = scheme.nodes.find(n => n.instanceId === connection.targetInstanceId);
+  const title = src && tgt ? `${src.name} → ${tgt.name}` : '';
+  const network = connection.supportTcp && connection.supportUdp ? 'TCP / UDP' : connection.supportTcp ? 'TCP' : connection.supportUdp ? 'UDP' : '—';
+
+  let kind = '';
+  if (connection.type === 'port_forward') {
+    const listen = connection.listenPort ?? src?.listenPort ?? '';
+    const host = connection.targetHost || tgt?.serverAddress || '';
+    const targetDisplay = host.includes(':') ? `[${host}]` : host;
+    const targetP = connection.targetPort ?? tgt?.targetPort ?? '';
+    kind = `端口转发 :${listen}→${targetDisplay ? targetDisplay + ':' : ''}${targetP}`;
+  } else {
+    const proto = (connection.tunnelProtocol || 'tls').toUpperCase();
+    const port = connection.tunnelPort ?? defaultPort(connection.tunnelProtocol || 'tls');
+    kind = `${connection.type === 'proxy_chain' ? '加密中转' : '隧道'} ${proto} :${port}`;
+  }
+
+  return { title, kind, network };
 }
-export function tunnelSummary(scheme: RelayScheme, c: CanvasConnection) {
-  const from = scheme.nodes.find(n => n.instanceId === c.sourceInstanceId);
-  const to = scheme.nodes.find(n => n.instanceId === c.targetInstanceId);
-  const host = c.targetHost || to?.serverAddress || '目标公网 IP';
-  const address = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  return { title: `${from?.name || '未知节点'} → ${to?.name || '未知节点'}`,
-    kind: c.type === 'port_forward' ? `端口转发 :${c.listenPort ?? from?.listenPort ?? '—'}→${address}:${c.targetPort ?? to?.targetPort ?? '—'}`
-      : `加密中转 ${c.tunnelProtocol === 'wireguard' ? 'WireGuard' : (c.tunnelProtocol || 'tls').toUpperCase()} :${c.tunnelPort ?? defaultPort(c.tunnelProtocol || 'tls')}`,
-    network: [c.supportTcp ? 'TCP' : '', c.supportUdp ? 'UDP' : ''].filter(Boolean).join('/') || '未选择传输' };
+
+export function tunnelStatus(
+  plan: TunnelPlan | null | undefined,
+  connectionId: string,
+  isClient = false
+): { error: boolean; text: string } | null {
+  if (isClient) return null;
+  if (!plan) return { text: '待检查', error: false };
+
+  const conn = plan.connections?.find(c => c.id === connectionId);
+  const conflicts = plan.conflicts?.filter(c => c.connectionId === connectionId) || [];
+
+  if (conn) {
+    if (conn.status === 'ok') {
+      return { error: false, text: '可发布' };
+    }
+    const msgs = [conn.message];
+    for (const conf of conflicts) {
+      msgs.push(`端口冲突 :${conf.port} (${conf.with})`);
+    }
+    return { error: true, text: msgs.filter(Boolean).join('；') };
+  }
+
+  if (conflicts.length > 0) {
+    const conflictMsgs = conflicts.map(c => `端口冲突 :${c.port} (${c.with})`).join('；');
+    return { error: true, text: conflictMsgs };
+  }
+
+  if (!plan.ok && plan.message) {
+    return { error: true, text: plan.message };
+  }
+
+  return { error: false, text: '可发布' };
 }
-export function planLines(plan: TunnelPlan | null, nodeIds?: string[]): string[] {
-  const kinds: Record<string, string> = { inbound: '入站', outbound: '出站', chain: '代理链', forward: '端口转发' };
-  return (plan?.servers || []).filter(s => !nodeIds || nodeIds.includes(s.nodeId)).flatMap(s =>
-    (['creates', 'updates', 'removes'] as const).flatMap(action => (s[action] || []).map(o =>
-      `${s.name || s.nodeId}：${({ creates: '新增', updates: '更新', removes: '移除' })[action]}${kinds[o.kind] || o.kind} ${o.name}${o.protocol ? ` ${o.protocol}` : ''}${o.port ? ` :${o.port}` : ''}${o.target ? ` → ${o.target}` : ''}`)));
+
+export function planLines(plan: TunnelPlan | null | undefined, nodeIds?: string[]): string[] {
+  if (!plan || !plan.servers) return [];
+  const lines: string[] = [];
+  const filtered = nodeIds ? plan.servers.filter(s => nodeIds.includes(s.nodeId)) : plan.servers;
+
+  for (const s of filtered) {
+    if (s.creates) {
+      for (const obj of s.creates) {
+        lines.push(`${s.name}：新增${obj.kind === 'inbound' ? '入站' : obj.kind} ${obj.name}${obj.protocol ? ' ' + obj.protocol : ''}${obj.port ? ' :' + obj.port : ''}`);
+      }
+    }
+    if (s.updates) {
+      for (const obj of s.updates) {
+        lines.push(`${s.name}：更新${obj.kind === 'outbound' ? '出站' : obj.kind} ${obj.name}${obj.target ? ' → ' + obj.target : ''}`);
+      }
+    }
+    if (s.removes) {
+      for (const obj of s.removes) {
+        lines.push(`${s.name}：移除${obj.kind === 'chain' ? '代理链' : obj.kind} ${obj.name}`);
+      }
+    }
+  }
+
+  return lines;
 }

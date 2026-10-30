@@ -5,9 +5,9 @@ export interface CoreUpdateTask { id: string; nodeId: string; component: string;
 export const coreUpdatesAPI = {
   // Signed catalogue endpoints. Core updates no longer use them; they remain
   // for Agent self-update.
-  releases: (page: number) => request<Page<ReleaseEntry> & { configured: boolean }>(`/releases?page=${page}&pageSize=20`),
+  releases: (page: number, pageSize = 20) => request<Page<ReleaseEntry> & { configured: boolean }>(`/releases?page=${page}&pageSize=${pageSize}`),
   register: (signed: unknown) => request<ReleaseEntry>('/releases', 'POST', signed),
-  tasks: (page: number) => request<Page<CoreUpdateTask>>(`/core-updates?page=${page}&pageSize=20`),
+  tasks: (page: number, pageSize = 20) => request<Page<CoreUpdateTask>>(`/core-updates?page=${page}&pageSize=${pageSize}`),
   queue: (input: { nodeId: string; revision: number; component: string; version: string; url: string; sha256: string }) => request<CoreUpdateTask>('/core-updates', 'POST', { ...input, confirmNodeId: input.nodeId }),
   clear: (id: string) => request<CoreUpdateTask>(`/core-updates/${encodeURIComponent(id)}/clear`, 'POST', {})
 };

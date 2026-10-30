@@ -1,7 +1,7 @@
 <template>
-  <span class="font-mono tabular-nums text-ios-label tracking-tight">
+  <span class="tabular-nums text-ios-label tracking-tight inline-flex items-baseline">
     <span :class="valueClass">{{ formatted.value }}</span>
-    <span v-if="formatted.unit" class="text-xs text-ios-tertiary ml-1 font-sans font-normal">{{ formatted.unit }}</span>
+    <span v-if="formatted.unit" class="text-[0.75em] text-ios-tertiary ml-1 font-normal opacity-85">{{ formatted.unit }}</span>
   </span>
 </template>
 

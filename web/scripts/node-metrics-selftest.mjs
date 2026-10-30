@@ -57,3 +57,18 @@ await metadata.saveNodeMeta('a', { region: 'SG', renewNoticeDays: 3 });
 await metadata.loadNodeMeta('a', false);
 assert.equal(metadata.getNodeMeta('a').region, 'SG');
 console.log('PASS B3: Viewer never imports, Owner imports once, server wins, failed import retains local data, saved metadata reloads');
+
+assert.deepEqual(metadata.calculateMonthlyExpenditure({ renewPrice: '219', renewCycle: '/年', renewCurrency: 'CNY' }), { value: '18.25', currency: 'CNY', symbol: '¥' });
+assert.deepEqual(metadata.calculateMonthlyExpenditure({ renewPrice: '15.99', renewCycle: '/月', renewCurrency: 'USD' }), { value: '15.99', currency: 'USD', symbol: '$' });
+assert.equal(metadata.calculateMonthlyExpenditure({}), null);
+
+const now = new Date();
+const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 20);
+const pad = n => String(n).padStart(2, '0');
+const in20Days = `${targetDate.getFullYear()}-${pad(targetDate.getMonth() + 1)}-${pad(targetDate.getDate())}`;
+const expectedDays = metadata.calculateRemainingDays(in20Days).days;
+const res = metadata.calculateResidualValue({ renewPrice: '219', renewCycle: '/年', renewCurrency: 'CNY', renewDate: in20Days });
+assert.equal(res?.currency, 'CNY');
+assert.equal(res?.symbol, '¥');
+assert.equal(res?.value, (219 / 365 * expectedDays).toFixed(2));
+console.log('PASS FINANCIAL: calculateMonthlyExpenditure and calculateResidualValue compute correct figures');

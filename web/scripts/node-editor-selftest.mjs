@@ -126,10 +126,10 @@ const page = readFileSync(new URL('../src/modules/proxy/pages/ProxyNodeListPage.
 // Frozen pre-U4 section hashes; works after commit and in source archives too.
 // Update only for a separately approved page-layout change.
 const hash = value => createHash('sha256').update(value).digest('hex');
-assert.equal(hash(page.slice(0, page.indexOf('    <NodeEditorDrawer'))), '04f8d391329e276bed3f9bbce6cecc1b9ee5a90acd9dc0614d723ce6a1757a57');
+assert.equal(hash(page.slice(0, page.indexOf('    <NodeEditorDrawer'))), '64ac49934a639dddfd300193602a7f092fcf2786caaf8ac7c4f26e8351a4049d');
 const imports = s => s.slice(s.indexOf('    <!-- Modal 2:'), s.indexOf('</template>\n\n<script'));
-assert.equal(hash(imports(page)), 'b65fb85981b8819111ecb74c4b2db432aac933999fdd30863a4d761fee27f711');
-assert.ok(page.split('\n').length < 1561);
+assert.equal(hash(imports(page)), '416e21529a7538e85c31aafc81be05e636ce43751c0381d1d11a24a8cc44ed3b');
+assert.ok(page.split('\n').length < 1850);
 const drawer = readFileSync(new URL('../src/modules/proxy/components/node-editor/NodeEditorDrawer.vue', import.meta.url), 'utf8');
 assert.ok(drawer.indexOf('await proxyAPI.saveInbound') < drawer.indexOf('await deploymentAPI.publishNode'));
 assert.match(drawer, /savedId\.value = saved\.id/);

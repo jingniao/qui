@@ -1,7 +1,13 @@
 <template>
-  <section class="panel-card p-5 space-y-3">
-    <div class="flex justify-between gap-3"><h2 class="font-semibold text-ios-label">节点</h2><div class="flex gap-3"><button class="ios-action-btn-secondary" @click="$emit('manage')">管理</button><button v-if="isOwner && !node.deletedAt" class="ios-action-btn-primary" @click="$emit('create')">+ 新建节点</button></div></div>
-    <p class="text-sm text-ios-secondary">{{ error || (isOwner ? summary : '当前权限无法读取节点配置') }}</p>
+  <section class="panel-card p-3.5 sm:p-4 space-y-2.5">
+    <div class="flex justify-between gap-3">
+      <h2 class="font-semibold text-ios-label text-sm sm:text-base">节点</h2>
+      <div class="flex gap-2">
+        <button class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="$emit('manage')">管理</button>
+        <button v-if="isOwner && !node.deletedAt" class="ios-action-btn-primary text-xs px-2.5 py-1" @click="$emit('create')">+ 新建节点</button>
+      </div>
+    </div>
+    <p class="text-xs sm:text-sm text-ios-secondary">{{ error || (isOwner ? summary : '当前权限无法读取节点配置') }}</p>
   </section>
 </template>
 <script setup lang="ts">

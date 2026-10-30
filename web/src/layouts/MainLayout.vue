@@ -16,14 +16,31 @@
       </div>
     </div>
 
-    <!-- Main Content Area -->
-    <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-      <!-- Top Header -->
-      <AppHeader @toggle-sidebar="mobileSidebarOpen = !mobileSidebarOpen" />
+    <!-- Main Content Area (Top bar removed as requested) -->
+    <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
+      <!-- Mobile Sidebar Toggle (Floating button on mobile when topbar is removed) -->
+      <button
+        v-if="!mobileSidebarOpen"
+        type="button"
+        @click="mobileSidebarOpen = true"
+        aria-label="打开导航"
+        class="lg:hidden fixed top-3 left-3 z-30 w-9 h-9 rounded-xl bg-white/90 backdrop-blur-md border border-black/10 shadow-sm flex items-center justify-center text-ios-label"
+      >
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
 
-      <!-- Scrollable Main View -->
-      <main class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 bg-ios-bg">
-        <div class="max-w-[1536px] mx-auto w-full">
+      <!-- Scrollable Main View (Edge-to-edge flush for Canvas Studio, padded for normal pages) -->
+      <main
+        :class="[
+          'flex-1 min-w-0 bg-ios-bg relative',
+          isFluidPage
+            ? 'h-full overflow-hidden p-0'
+            : 'overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8'
+        ]"
+      >
+        <div :class="isFluidPage ? 'h-full w-full' : 'max-w-[1536px] mx-auto w-full'">
           <!-- Keyed by path (not fullPath) so a different :id always gets a fresh
                instance, while query-only changes such as ?tab= keep the page. -->
           <router-view v-slot="{ Component, route: viewRoute }">
@@ -41,13 +58,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
+import { useRoute } from 'vue-router';
 import AppSidebar from '../components/AppSidebar.vue';
-import AppHeader from '../components/AppHeader.vue';
 import ToastContainer from '../components/ToastContainer.vue';
 
+const route = useRoute();
 const sidebarCollapsed = ref(false);
 const mobileSidebarOpen = ref(false);
+
+const isFluidPage = computed(() => {
+  return route.meta?.fluid === true || route.path.startsWith('/proxy/relay');
+});
 </script>
 
 <style scoped>

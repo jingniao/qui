@@ -56,6 +56,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '用户', parent: '用户管理' }
       },
       {
+        path: 'users/admins',
+        redirect: '/users'
+      },
+      {
         path: 'users/:id',
         name: 'UserDetail',
         component: () => import('../modules/users/pages/UserDetailPage.vue'),
@@ -70,9 +74,9 @@ const routes: RouteRecordRaw[] = [
         redirect: '/users'
       },
 
-      { path: 'system/admins', redirect: '/users/admins' },
+      { path: 'system/admins', redirect: '/users' },
       { path: 'nodes/versions', component: () => import('../modules/nodes/pages/NodeVersionsPage.vue'), meta: { title: '版本与更新', parent: '服务器' } },
-      { path: 'proxy/groups', component: () => import('../modules/proxy/pages/LineGroupPage.vue'), meta: { title: '线路组', parent: '节点配置' } },
+      { path: 'proxy/groups', component: () => import('../modules/proxy/pages/LineGroupPage.vue'), meta: { title: '节点分组', parent: '节点配置' } },
       // 3. Node Module
       {
         path: 'nodes',
@@ -104,7 +108,7 @@ const routes: RouteRecordRaw[] = [
         path: 'proxy/relay',
         name: 'RelayCanvas',
         component: () => import('../modules/proxy/pages/RelayCanvasPage.vue'),
-        meta: { title: '中转搭建', parent: '节点配置' }
+        meta: { title: '中转搭建', parent: '节点配置', fluid: true }
       },
       // Backward Compatibility Redirects
       {
@@ -192,40 +196,48 @@ const routes: RouteRecordRaw[] = [
 
       // 7. System Module
       {
-        path: 'users/admins',
-        name: 'AdminList',
-        component: () => import('../modules/system/pages/AdminPage.vue'),
-        meta: { title: '管理员', parent: '用户管理' }
-      },
-      {
         path: 'system/agents',
-        redirect: '/nodes/versions?tab=agents'
+        redirect: '/system/tasks'
       },
       {
         path: 'system/cores',
-        redirect: '/nodes/versions?tab=cores'
+        redirect: '/system/tasks'
       },
       {
         path: 'system/revisions',
         redirect: '/nodes'
       },
       {
+        path: 'system/tasks',
+        name: 'SystemTaskList',
+        component: () => import('../modules/system/pages/TaskRecordPage.vue'),
+        meta: { title: '任务记录', parent: '系统管理' }
+      },
+      {
+        path: 'system/task-records',
+        redirect: '/system/tasks'
+      },
+      {
+        path: 'system/updates',
+        redirect: '/system/tasks'
+      },
+      {
         path: 'system/backups',
         name: 'BackupList',
         component: () => import('../modules/system/pages/BackupPage.vue'),
-        meta: { title: '备份恢复', parent: '系统' }
+        meta: { title: '备份恢复', parent: '系统管理' }
       },
       {
         path: 'system/operations',
         name: 'OperationLogList',
         component: () => import('../modules/system/pages/OperationLogPage.vue'),
-        meta: { title: '操作日志', parent: '系统' }
+        meta: { title: '操作日志', parent: '系统管理' }
       },
       {
         path: 'system/settings',
         name: 'SystemSettings',
         component: () => import('../modules/system/pages/SettingsPage.vue'),
-        meta: { title: '系统设置', parent: '系统' }
+        meta: { title: '系统设置', parent: '系统管理' }
       }
     ]
   },

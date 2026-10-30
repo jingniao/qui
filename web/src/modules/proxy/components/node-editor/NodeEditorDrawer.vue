@@ -22,7 +22,15 @@
           </button>
         </div>
         <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" class="form-input-base mt-2" @input="autoName = false" /></label>
-        <label class="block text-xs text-ios-secondary">监听端口<input v-model.number="f.port" type="number" min="1" max="65535" class="form-input-base mt-2 font-mono" /></label>
+        <div>
+          <div class="flex items-center justify-between">
+            <label class="block text-xs text-ios-secondary">监听端口</label>
+            <span v-if="serverPortRange" class="text-[11px] text-ios-blue font-mono font-medium">
+              服务器分配范围: {{ serverPortRange.start }} - {{ serverPortRange.end }}
+            </span>
+          </div>
+          <input v-model.number="f.port" type="number" min="1" max="65535" class="form-input-base mt-1.5 font-mono" />
+        </div>
         <button type="button" class="ios-btn-secondary" @click="pickPort">随机端口</button>
         <p aria-live="polite" :class="['text-xs', conflict ? 'text-ios-red' : 'text-ios-secondary']">{{ conflict || '入站列表中无端口冲突（含画布方案入站）；不检测主机其他进程。' }}</p>
       </div>
@@ -63,6 +71,7 @@ import FormDrawer from '../../../../components/FormDrawer.vue';
 import { isOwner } from '../../../../app/auth';
 import { proxyAPI, choices, loadProtocolSupport, protocolOptions, type Inbound, type Outbound, type OutboundGroup, type ProxyChain } from '../../api';
 import { nodeAPI, type NodeView } from '../../../nodes/api';
+import { getNodePortRange } from '../../../nodes/nodeMeta';
 import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
@@ -83,6 +92,7 @@ const selectedServer = computed(() => servers.value.find(s => s.id === f.value.n
 const eligibleServers = computed(() => servers.value.filter(serverEligible));
 const securityStep = computed(() => hasSecurity(f.value.protocol));
 const conflict = computed(() => portConflict(f.value, inbounds.value, state.original?.id));
+const serverPortRange = computed(() => getNodePortRange(f.value.nodeId));
 const diff = computed(() => {
   const after = previewPayload(buildPayload(state));
   const before = state.original ? previewPayload(createEditor('', state.original, 'server').form) : {} as Record<string, unknown>;
@@ -90,6 +100,16 @@ const diff = computed(() => {
 });
 watch(() => [f.value.nodeId, f.value.protocol, f.value.port, selectedServer.value?.name], () => {
   if (autoName.value && selectedServer.value) f.value.name = `${selectedServer.value.name}-${f.value.protocol}-${f.value.port}`;
+});
+watch(() => f.value.nodeId, (newNodeId) => {
+  if (!state.original && newNodeId) {
+    const range = getNodePortRange(newNodeId);
+    if (range) {
+      try {
+        f.value.port = randomPort(f.value, inbounds.value, '', Math.random, range);
+      } catch {}
+    }
+  }
 });
 let disposed = false;
 onUnmounted(() => { disposed = true; f.value.settings.private_key_pem = ''; });
@@ -102,6 +122,14 @@ async function load() {
     [servers.value, inbounds.value, users.value, outbounds.value, groups.value, chains.value] = data;
     if (!f.value.nodeId) f.value.nodeId = eligibleServers.value[0]?.id || '';
     else if (!eligibleServers.value.some(s => s.id === f.value.nodeId)) error.value = '预选服务器不可用，请选择其他已登记服务器';
+    if (!props.inbound && f.value.nodeId) {
+      const range = getNodePortRange(f.value.nodeId);
+      if (range) {
+        try {
+          f.value.port = randomPort(f.value, inbounds.value, '', Math.random, range);
+        } catch {}
+      }
+    }
   } catch (e) { if (!disposed) loadError.value = (e as Error).message; }
   finally { if (!disposed) loading.value = false; }
 }
@@ -117,7 +145,13 @@ function next() {
   reached.value = Math.max(reached.value, n); step.value = n;
 }
 function back() { error.value = ''; step.value = step.value === 4 && !securityStep.value ? 2 : step.value - 1; }
-function pickPort() { try { f.value.port = randomPort(f.value, inbounds.value, state.original?.id); } catch (e) { error.value = (e as Error).message; } }
+function pickPort() {
+  try {
+    f.value.port = randomPort(f.value, inbounds.value, state.original?.id, Math.random, serverPortRange.value);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
 function close() { if (!busy.value) emit('close'); }
 async function save(publish: boolean) {
   if (busy.value || !isOwner.value || savedId.value) return;

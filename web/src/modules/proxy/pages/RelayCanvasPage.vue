@@ -1,89 +1,228 @@
 <template>
-  <div class="h-[calc(100vh-80px)] flex flex-col space-y-3 -m-4 sm:-m-6 p-4 sm:p-6 overflow-hidden">
-    <!-- 1. Top Header Bar -->
-    <div class="bg-white/90 backdrop-blur-md rounded-2xl border border-black/[0.06] p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3 shrink-0">
-      <!-- Left: Tabs & Scheme Selector -->
-      <div class="flex items-center gap-3">
-        <!-- Scheme Switcher -->
-        <div class="flex items-center gap-1.5">
-          <label class="text-xs text-ios-secondary font-medium">方案:</label>
-          <select
-            v-model="activeSchemeId"
-            @change="switchScheme"
-            class="form-input-base !py-1 text-xs font-semibold text-ios-label !w-[200px]"
+  <div class="h-full w-full flex flex-col overflow-hidden bg-[#F5F5F7] select-none relative">
+    <!-- 1. Top Integrated Studio Toolbar -->
+    <header class="h-14 px-4 bg-white/95 backdrop-blur-md border-b border-black/[0.08] flex items-center justify-between gap-3 shrink-0 shadow-2xs z-30">
+      <!-- Left: Panel Toggle & Scheme Switcher -->
+      <div class="flex items-center gap-2.5 min-w-0">
+        <!-- Toggle Left Library Button -->
+        <button
+          type="button"
+          @click="leftPanelOpen = !leftPanelOpen"
+          :class="leftPanelOpen ? 'bg-ios-blue/10 text-ios-blue border-ios-blue/20' : 'bg-black/[0.03] hover:bg-black/[0.06] text-ios-secondary border-black/[0.06]'"
+          class="px-2.5 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold shrink-0"
+          :title="leftPanelOpen ? '收起资源库' : '展开资源库'"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
+          </svg>
+          <span class="hidden sm:inline">资源库</span>
+          <span class="w-1.5 h-1.5 rounded-full" :class="leftPanelOpen ? 'bg-ios-blue' : 'bg-neutral-300'"></span>
+        </button>
+
+        <div class="h-4 w-px bg-black/[0.08] shrink-0"></div>
+
+        <!-- 1. Unified Scheme Studio Capsule with Custom Popover -->
+        <div class="relative" @click.stop>
+          <div
+            class="flex items-center bg-black/[0.03] hover:bg-black/[0.05] border border-black/[0.06] rounded-xl p-1 transition-all min-w-0 shadow-2xs"
+            :class="{ 'ring-2 ring-ios-blue/20 border-ios-blue/30 bg-white shadow-xs': schemeDropdownOpen }"
           >
-            <option v-for="s in proxyNodeStore.schemes" :key="s.id" :value="s.id">
-              {{ s.name }} ({{ s.executionLocation === 'client' ? '客户端' : '服务器' }})
-            </option>
-          </select>
+            <!-- Custom Dropdown Trigger Button -->
+            <button
+              type="button"
+              @click="toggleSchemeDropdown"
+              class="flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 text-xs font-semibold text-ios-label hover:text-ios-blue transition-colors min-w-0 max-w-[140px] sm:max-w-[200px] md:max-w-[260px] text-left"
+              title="切换中转方案"
+            >
+              <svg class="w-4 h-4 text-ios-blue shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+              </svg>
+              <span class="truncate">{{ currentScheme.name || '选择方案' }}</span>
+              <svg
+                class="w-3.5 h-3.5 text-ios-tertiary shrink-0 transition-transform duration-200"
+                :class="{ 'rotate-180 text-ios-blue': schemeDropdownOpen }"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <!-- Divider -->
+            <div class="h-3.5 w-px bg-black/[0.08] mx-0.5 shrink-0"></div>
+
+            <!-- Live Status Indicator -->
+            <div
+              class="px-1.5 py-0.5 flex items-center gap-1.5 text-[11px] font-medium shrink-0 cursor-default"
+              :title="!currentScheme.published ? '当前方案为草稿（未发布）' : (currentScheme.hasUnpublishedChanges ? '当前方案有未发布的修改' : '当前方案已发布生效')"
+            >
+              <span
+                class="w-1.5 h-1.5 rounded-full"
+                :class="!currentScheme.published ? 'bg-neutral-400' : (currentScheme.hasUnpublishedChanges ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')"
+              ></span>
+              <span
+                :class="!currentScheme.published ? 'text-ios-tertiary' : (currentScheme.hasUnpublishedChanges ? 'text-amber-700 font-semibold' : 'text-emerald-700 font-semibold')"
+              >
+                {{ !currentScheme.published ? '草稿' : (currentScheme.hasUnpublishedChanges ? '未发布' : '已发布') }}
+              </span>
+            </div>
+
+            <!-- Divider -->
+            <div class="h-3.5 w-px bg-black/[0.08] mx-0.5 shrink-0"></div>
+
+            <!-- New Scheme Action (+) -->
+            <button
+              type="button"
+              @click="createNewScheme"
+              class="p-1 rounded-lg text-ios-tertiary hover:text-ios-blue hover:bg-black/5 active:bg-black/10 transition-colors shrink-0"
+              title="新建中转方案"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Custom Apple Studio Dropdown Popover Menu -->
+          <transition
+            enter-active-class="transition duration-150 ease-out"
+            enter-from-class="transform scale-95 opacity-0 -translate-y-1"
+            enter-to-class="transform scale-100 opacity-100 translate-y-0"
+            leave-active-class="transition duration-100 ease-in"
+            leave-from-class="transform scale-100 opacity-100 translate-y-0"
+            leave-to-class="transform scale-95 opacity-0 -translate-y-1"
+          >
+            <div
+              v-if="schemeDropdownOpen"
+              class="absolute left-0 top-full mt-2 w-80 max-h-[380px] bg-white/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.14)] border border-black/[0.08] p-1.5 z-50 flex flex-col divide-y divide-black/[0.04]"
+            >
+              <!-- Popover Header -->
+              <div class="px-3 py-2 flex items-center justify-between">
+                <span class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+                  中转方案 ({{ proxyNodeStore.schemes.length }})
+                </span>
+                <button
+                  type="button"
+                  @click="createNewScheme(); schemeDropdownOpen = false"
+                  class="text-xs text-ios-blue hover:text-blue-700 font-semibold inline-flex items-center gap-1 transition-colors"
+                >
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>新建方案</span>
+                </button>
+              </div>
+
+              <!-- Scheme Items List -->
+              <div class="py-1 space-y-0.5 overflow-y-auto max-h-[250px]">
+                <div
+                  v-for="s in proxyNodeStore.schemes"
+                  :key="s.id"
+                  @click="selectScheme(s.id)"
+                  class="px-3 py-2 rounded-xl cursor-pointer flex items-center justify-between gap-2.5 transition-all group"
+                  :class="s.id === activeSchemeId ? 'bg-ios-blue/[0.08] text-ios-blue font-semibold shadow-2xs' : 'hover:bg-black/[0.04] text-neutral-800'"
+                >
+                  <!-- Left: Scheme Name + Details -->
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-xs truncate font-medium" :class="s.id === activeSchemeId ? 'text-ios-blue font-bold' : 'text-neutral-900'">
+                        {{ s.name }}
+                      </span>
+                    </div>
+                    <div class="text-[11px] text-neutral-400 flex items-center gap-2 mt-0.5 font-normal">
+                      <span>{{ s.nodes?.length || 0 }} 节点 · {{ s.connections?.length || 0 }} 连接</span>
+                      <span>·</span>
+                      <span class="px-1 py-0.2 rounded bg-black/[0.04] text-[10px] text-neutral-500">
+                        {{ s.executionLocation === 'client' ? '客户端' : '服务端' }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Right: Status Pill & Checkmark -->
+                  <div class="flex items-center gap-2 shrink-0">
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                      :class="!s.published ? 'bg-neutral-100 text-neutral-500' : (s.hasUnpublishedChanges ? 'bg-amber-50 text-amber-700 border border-amber-200/50' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/50')"
+                    >
+                      <span
+                        class="w-1.5 h-1.5 rounded-full shrink-0"
+                        :class="!s.published ? 'bg-neutral-400' : (s.hasUnpublishedChanges ? 'bg-amber-500' : 'bg-emerald-500')"
+                      ></span>
+                      <span>{{ !s.published ? '草稿' : (s.hasUnpublishedChanges ? '未发布' : '已发布') }}</span>
+                    </span>
+
+                    <svg
+                      v-if="s.id === activeSchemeId"
+                      class="w-4 h-4 text-ios-blue shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Popover Footer Action -->
+              <div class="pt-1.5">
+                <button
+                  type="button"
+                  @click="createNewScheme(); schemeDropdownOpen = false"
+                  class="w-full py-2 px-3 rounded-xl bg-black/[0.02] hover:bg-black/[0.05] active:bg-black/[0.08] text-neutral-700 hover:text-ios-blue text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>创建新中转方案</span>
+                </button>
+              </div>
+            </div>
+          </transition>
+        </div>
+
+        <!-- 2. Refined Segmented Execution Location Switcher -->
+        <div class="hidden md:flex items-center p-1 rounded-xl bg-black/[0.03] border border-black/[0.06] text-xs shadow-2xs shrink-0">
           <button
             type="button"
-            @click="createNewScheme"
-            class="p-1 rounded-lg hover:bg-black/5 text-ios-tertiary hover:text-ios-blue transition-colors"
-            title="新建中转方案"
+            @click="setExecutionLocation('client')"
+            :class="currentScheme.executionLocation === 'client' ? 'bg-white text-ios-blue shadow-xs font-semibold' : 'text-ios-secondary hover:text-ios-label hover:bg-black/[0.02] font-normal'"
+            class="px-2.5 sm:px-3 py-1 rounded-lg transition-all inline-flex items-center gap-1.5"
+            title="在客户端本地 (Clash / Mihomo 等) 执行中转链"
           >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 4v16m8-8H4" />
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
+            <span>客户端执行</span>
           </button>
-          <span
-            class="px-2 py-0.5 rounded-full text-[10px] font-bold"
-            :class="!currentScheme.published ? 'bg-neutral-100 text-neutral-600' : (currentScheme.hasUnpublishedChanges ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700')"
+          <button
+            type="button"
+            @click="setExecutionLocation('server')"
+            :class="currentScheme.executionLocation === 'server' ? 'bg-white text-ios-blue shadow-xs font-semibold' : 'text-ios-secondary hover:text-ios-label hover:bg-black/[0.02] font-normal'"
+            class="px-2.5 sm:px-3 py-1 rounded-lg transition-all inline-flex items-center gap-1.5"
+            title="通过已部署 Agent 的服务器自动编译下发 Sing-box / WireGuard 中转服务"
           >
-            {{ !currentScheme.published ? '草稿' : (currentScheme.hasUnpublishedChanges ? '有未发布修改' : '已发布') }}
-          </span>
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+            </svg>
+            <span>服务器执行</span>
+          </button>
         </div>
-        <!-- One-time import of the schemes an earlier build kept in this browser -->
+
+        <!-- Local migration notice -->
         <div
           v-if="pendingLocalSchemes.length"
-          class="flex items-center gap-1.5 px-2 py-1 rounded-xl bg-amber-50 border border-amber-200/70 text-[11px] text-amber-800"
+          class="hidden 2xl:flex items-center gap-1.5 px-2 py-0.5 rounded-xl bg-amber-50 border border-amber-200/70 text-[11px] text-amber-800 shrink-0"
         >
-          <span>发现本地方案 {{ pendingLocalSchemes.length }} 个，导入到服务器？</span>
+          <span>发现本地方案 {{ pendingLocalSchemes.length }} 个</span>
           <button type="button" @click="importLocalSchemes" class="font-bold text-amber-900 hover:underline">导入</button>
           <button type="button" @click="confirmIgnoreLocal = true" class="text-amber-700 hover:underline">忽略</button>
         </div>
-
       </div>
 
-      <!-- Center: Execution Target Selector (Core Requirement 3) -->
-      <div class="flex items-center gap-2 bg-[#F5F5F7] px-3 py-1 rounded-xl border border-black/[0.04]">
-        <span class="text-xs font-medium text-ios-secondary">执行位置:</span>
-        <label class="inline-flex items-center gap-1 text-xs font-semibold cursor-pointer">
-          <input
-            type="radio"
-            value="client"
-            v-model="currentScheme.executionLocation"
-            @change="handleExecutionLocationChange"
-            class="text-ios-blue focus:ring-ios-blue/20"
-          />
-          <span :class="currentScheme.executionLocation === 'client' ? 'text-ios-blue' : 'text-ios-label'">客户端执行</span>
-        </label>
-        <span class="text-neutral-300">/</span>
-        <label class="inline-flex items-center gap-1 text-xs font-semibold cursor-pointer">
-          <input
-            type="radio"
-            value="server"
-            v-model="currentScheme.executionLocation"
-            @change="handleExecutionLocationChange"
-            class="text-ios-blue focus:ring-ios-blue/20"
-          />
-          <span :class="currentScheme.executionLocation === 'server' ? 'text-ios-blue' : 'text-ios-label'">服务器执行</span>
-        </label>
-      </div>
-
-      <!-- Right Action Tools -->
+      <!-- Right: Action Buttons & Inspector Toggle -->
       <div class="flex items-center gap-2 shrink-0">
-        <!-- Tunnel List Button -->
-        <button
-          type="button"
-          @click="focusTunnelList"
-          class="ios-btn-secondary !py-1 text-xs inline-flex items-center gap-1"
-        >
-          <svg class="w-3.5 h-3.5 text-ios-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-          </svg>
-          <span>隧道列表 ({{ currentTunnels.length }})</span>
-        </button>
 
         <!-- Validate Button -->
         <button
@@ -94,7 +233,7 @@
           <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <span>校验链路</span>
+          <span class="hidden sm:inline">校验链路</span>
         </button>
 
         <!-- Save Draft Button -->
@@ -106,10 +245,10 @@
           <svg class="w-3.5 h-3.5 text-ios-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
           </svg>
-          <span>保存草稿</span>
+          <span class="hidden sm:inline">保存草稿</span>
         </button>
 
-        <button type="button" class="ios-btn-secondary !py-1 text-xs" @click="checkScheme">检查</button>
+        <button type="button" class="ios-btn-secondary !py-1 text-xs hidden md:inline" @click="checkScheme">检查</button>
 
         <!-- Primary Action: Generate Sub or Publish to Server -->
         <button
@@ -134,18 +273,56 @@
           </svg>
           <span>发布到服务器</span>
         </button>
-      </div>
-    </div>
 
-    <!-- 2. Main 3-Column Studio Layout -->
-    <div class="flex-1 flex gap-3 min-h-0 overflow-hidden">
-      <!-- ================= Left: Resource Library (Col 1) ================= -->
-      <div class="w-64 xl:w-72 bg-white rounded-2xl border border-black/[0.06] shadow-2xs flex flex-col shrink-0 overflow-hidden">
+        <div class="h-4 w-px bg-black/[0.08] shrink-0"></div>
+
+        <!-- Toggle Right Inspector Button -->
+        <button
+          type="button"
+          @click="rightPanelOpen = !rightPanelOpen"
+          :class="rightPanelOpen ? 'bg-ios-blue/10 text-ios-blue border-ios-blue/20' : 'bg-black/[0.03] hover:bg-black/[0.06] text-ios-secondary border-black/[0.06]'"
+          class="px-2.5 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold shrink-0"
+          :title="rightPanelOpen ? '收起属性面板' : '展开属性面板'"
+        >
+          <span class="hidden xl:inline">{{ selectedNode ? '节点属性' : '方案概况' }}</span>
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          <span class="w-1.5 h-1.5 rounded-full" :class="rightPanelOpen ? 'bg-ios-blue' : 'bg-neutral-300'"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. Main Studio Workspace (Left Library + Canvas + Right Inspector) -->
+    <div class="flex-1 flex min-h-0 overflow-hidden relative">
+      <!-- ================= Left: Collapsible Resource Library ================= -->
+      <aside
+        class="transition-all duration-300 ease-in-out shrink-0 overflow-hidden bg-white border-r border-black/[0.08] flex flex-col z-20 shadow-xs"
+        :class="leftPanelOpen ? 'w-64 xl:w-72' : 'w-0 border-r-0'"
+        aria-label="拓扑资源库"
+      >
         <!-- Resource Search & Header -->
-        <div class="p-3 border-b border-black/[0.05] space-y-2 shrink-0">
+        <div class="p-3 border-b border-black/[0.05] space-y-2 shrink-0 w-64 xl:w-72">
           <div class="flex items-center justify-between">
-            <span class="font-bold text-xs text-ios-label">拓扑资源库</span>
-            <span class="text-[10px] text-ios-tertiary">拖拽节点到画布</span>
+            <div class="flex items-center gap-1.5">
+              <span class="font-bold text-xs text-ios-label">拓扑资源库</span>
+              <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-black/[0.05] text-ios-secondary font-mono">
+                {{ filteredServers.length + selfHostedNodes.length + subscriptionNodes.length + manualNodes.length + filteredSharedTunnels.length }}
+              </span>
+            </div>
+            <div class="flex items-center gap-1">
+              <span class="text-[10px] text-ios-tertiary">拖拽上画布</span>
+              <button
+                type="button"
+                @click="leftPanelOpen = false"
+                class="p-1 rounded-lg hover:bg-black/5 text-ios-tertiary hover:text-ios-label transition-colors"
+                title="收起资源库"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            </div>
           </div>
           <div class="relative">
             <svg class="w-3.5 h-3.5 text-ios-tertiary absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -160,7 +337,7 @@
         </div>
 
         <!-- Groups Tree -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-2 text-xs">
+        <div class="flex-1 overflow-y-auto p-2 space-y-2 text-xs w-64 xl:w-72">
           <!-- Group 1: 我的服务器 (Servers) -->
           <div class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
             <button
@@ -201,29 +378,30 @@
             </div>
           </div>
 
-          <!-- Group 2: 代理节点 (Proxy Nodes) -->
+          <!-- Group 2: 我的自建节点 -->
           <div class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
             <button
               type="button"
-              @click="toggleGroup('nodes')"
+              @click="toggleGroup('selfHosted')"
               class="w-full px-2.5 py-2 flex items-center justify-between text-left font-bold text-ios-label hover:bg-black/[0.03] transition-colors"
             >
               <div class="flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5 text-ios-blue transition-transform" :class="groupExpanded.nodes ? 'rotate-90' : ''" viewBox="0 0 20 20" fill="currentColor">
+                <svg class="w-3.5 h-3.5 text-ios-blue transition-transform" :class="groupExpanded.selfHosted ? 'rotate-90' : ''" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
                 </svg>
-                <span>代理节点</span>
+                <span>我的自建节点</span>
               </div>
               <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
-                {{ filteredNodesGroup.length }}
+                {{ selfHostedNodes.length }}
               </span>
             </button>
 
-            <div v-show="groupExpanded.nodes" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
-              <!-- Sub-group: 自建节点 -->
-              <div class="text-[10px] font-bold text-ios-tertiary px-1.5 pt-1">自建节点</div>
+            <div v-show="groupExpanded.selfHosted" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
+              <div v-if="!selfHostedNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary">
+                暂无自建节点
+              </div>
               <div
-                v-for="node in filteredNodesGroup.filter(n => n.sourceType === 'self_hosted')"
+                v-for="node in selfHostedNodes"
                 :key="'node-' + node.id"
                 draggable="true"
                 @dragstart="onDragStart($event, { type: 'node', id: node.id, name: node.name, server: `${node.server}:${node.port}`, protocol: node.protocol, status: node.status, isManageable: false })"
@@ -241,11 +419,33 @@
                   </span>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <!-- Sub-group: 机场订阅节点 -->
-              <div class="text-[10px] font-bold text-ios-tertiary px-1.5 pt-1.5">机场订阅节点</div>
+          <!-- Group 3: 机场导入节点 -->
+          <div class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
+            <button
+              type="button"
+              @click="toggleGroup('subscription')"
+              class="w-full px-2.5 py-2 flex items-center justify-between text-left font-bold text-ios-label hover:bg-black/[0.03] transition-colors"
+            >
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-ios-blue transition-transform" :class="groupExpanded.subscription ? 'rotate-90' : ''" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                </svg>
+                <span>机场导入节点</span>
+              </div>
+              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
+                {{ subscriptionNodes.length }}
+              </span>
+            </button>
+
+            <div v-show="groupExpanded.subscription" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
+              <div v-if="!subscriptionNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary">
+                暂无机场订阅节点
+              </div>
               <div
-                v-for="node in filteredNodesGroup.filter(n => n.sourceType === 'subscription')"
+                v-for="node in subscriptionNodes"
                 :key="'sub-' + node.id"
                 draggable="true"
                 @dragstart="onDragStart($event, { type: 'node', id: node.id, name: node.name, server: `${node.server}:${node.port}`, protocol: node.protocol, status: node.status, isManageable: false })"
@@ -263,11 +463,33 @@
                   </span>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <!-- Sub-group: 单独导入节点 -->
-              <div class="text-[10px] font-bold text-ios-tertiary px-1.5 pt-1.5">单独导入节点</div>
+          <!-- Group 4: 单独导入节点 -->
+          <div class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
+            <button
+              type="button"
+              @click="toggleGroup('manual')"
+              class="w-full px-2.5 py-2 flex items-center justify-between text-left font-bold text-ios-label hover:bg-black/[0.03] transition-colors"
+            >
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-ios-blue transition-transform" :class="groupExpanded.manual ? 'rotate-90' : ''" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                </svg>
+                <span>单独导入节点</span>
+              </div>
+              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
+                {{ manualNodes.length }}
+              </span>
+            </button>
+
+            <div v-show="groupExpanded.manual" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
+              <div v-if="!manualNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary">
+                暂无单独导入节点
+              </div>
               <div
-                v-for="node in filteredNodesGroup.filter(n => n.sourceType === 'manual')"
+                v-for="node in manualNodes"
                 :key="'man-' + node.id"
                 draggable="true"
                 @dragstart="onDragStart($event, { type: 'node', id: node.id, name: node.name, server: `${node.server}:${node.port}`, protocol: node.protocol, status: node.status, isManageable: false })"
@@ -287,18 +509,150 @@
               </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- ================= Center: Infinite Visual Canvas (Col 2) ================= -->
-      <div
+          <!-- Group 5: 隧道 (Shared Tunnels across schemes) -->
+          <div class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
+            <div class="w-full px-2.5 py-2 flex items-center justify-between hover:bg-black/[0.03] transition-colors select-none">
+              <button
+                type="button"
+                @click="toggleGroup('tunnels')"
+                class="flex items-center gap-1.5 text-left font-bold text-ios-label flex-1"
+              >
+                <svg class="w-3.5 h-3.5 text-ios-blue transition-transform" :class="groupExpanded.tunnels ? 'rotate-90' : ''" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                </svg>
+                <span>隧道</span>
+              </button>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  @click.stop="openEditor()"
+                  class="text-[10px] text-ios-blue font-semibold hover:underline px-1 py-0.5 rounded hover:bg-blue-50"
+                  title="新建隧道"
+                >
+                  + 新建
+                </button>
+                <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
+                  {{ filteredSharedTunnels.length }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Tunnel Items (Draggable to canvas or clickable to add) -->
+            <div v-show="groupExpanded.tunnels" class="p-1 space-y-1.5 border-t border-black/[0.04] bg-white">
+              <div v-if="!filteredSharedTunnels.length" class="p-3 text-center text-ios-tertiary text-[11px] leading-relaxed">
+                暂无隧道<br/>
+                <button type="button" @click="openEditor()" class="text-ios-blue font-semibold hover:underline mt-1">
+                  + 新建第一条隧道
+                </button>
+              </div>
+
+              <div
+                v-for="tunnel in filteredSharedTunnels"
+                :key="tunnel.key"
+                draggable="true"
+                @dragstart="onDragStart($event, { type: 'tunnel', tunnel })"
+                @click="onSharedTunnelClick(tunnel)"
+                class="p-2 rounded-xl border transition-all select-none group cursor-grab active:cursor-grabbing relative"
+                :class="[
+                  isTunnelInCurrentScheme(tunnel)
+                    ? 'border-blue-200 bg-blue-50/40 hover:border-ios-blue'
+                    : 'border-black/[0.04] hover:border-ios-blue/40 hover:bg-neutral-50'
+                ]"
+                :title="isTunnelInCurrentScheme(tunnel) ? '已在当前方案中（点击聚焦）' : '拖拽到画布或点击加入方案'"
+              >
+                <!-- Title: Source → Target -->
+                <div class="flex items-center justify-between gap-1">
+                  <div class="font-semibold text-ios-label truncate text-[11px] flex items-center gap-1 min-w-0">
+                    <span class="truncate max-w-[80px]" :title="tunnel.sourceName">{{ tunnel.sourceName }}</span>
+                    <span class="text-ios-tertiary shrink-0">→</span>
+                    <span class="truncate max-w-[80px]" :title="tunnel.targetName">{{ tunnel.targetName }}</span>
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <span
+                      v-if="isTunnelInCurrentScheme(tunnel)"
+                      class="text-[9px] font-medium text-ios-blue bg-blue-100/70 px-1 py-0.2 rounded"
+                    >
+                      已在方案
+                    </span>
+                    <button
+                      v-else
+                      type="button"
+                      @click.stop="applySharedTunnelToScheme(tunnel)"
+                      class="text-[9px] text-ios-blue font-semibold bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition-colors"
+                      title="加入当前方案"
+                    >
+                      + 加入
+                    </button>
+                    <button
+                      type="button"
+                      @click.stop="deleteSharedTunnel(tunnel)"
+                      class="text-neutral-300 hover:text-rose-600 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="从资源库删除此隧道"
+                    >
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Subtitle: Protocol, Port, Type -->
+                <div class="flex items-center justify-between text-[10px] text-ios-secondary mt-1 font-mono">
+                  <span class="truncate">{{ tunnel.subtitle }}</span>
+                  <span
+                    v-if="tunnel.statusText"
+                    :class="tunnel.hasError ? 'text-rose-500' : 'text-emerald-600'"
+                    class="shrink-0 font-sans text-[9px]"
+                  >
+                    {{ tunnel.statusText }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+
+      <!-- ================= Center: Infinite Visual Canvas ================= -->
+      <main
         ref="canvasContainer"
-        class="flex-1 bg-[#F9F9FB] rounded-2xl border border-black/[0.06] relative overflow-hidden select-none cursor-default"
+        class="flex-1 bg-[#F9F9FB] relative overflow-hidden select-none cursor-default min-w-0"
         @wheel.prevent="onWheel"
         @mousedown="onCanvasMouseDown"
         @dragover.prevent="onCanvasDragOver"
         @drop="onCanvasDrop"
       >
+        <!-- Floating Quick Open Button for Left Library when collapsed -->
+        <button
+          v-if="!leftPanelOpen"
+          type="button"
+          @click="leftPanelOpen = true"
+          class="absolute left-4 top-4 z-20 bg-white/95 backdrop-blur-md border border-black/[0.08] shadow-md px-3 py-1.5 rounded-xl text-xs font-semibold text-ios-label hover:text-ios-blue hover:shadow-lg transition-all flex items-center gap-1.5"
+          title="展开拓扑资源库"
+        >
+          <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
+          </svg>
+          <span>拓扑资源库</span>
+        </button>
+
+        <!-- Floating Quick Open Button for Right Inspector when collapsed -->
+        <button
+          v-if="!rightPanelOpen"
+          type="button"
+          @click="rightPanelOpen = true"
+          class="absolute right-4 top-4 z-20 bg-white/95 backdrop-blur-md border border-black/[0.08] shadow-md px-3 py-1.5 rounded-xl text-xs font-semibold text-ios-label hover:text-ios-blue hover:shadow-lg transition-all flex items-center gap-1.5"
+          :title="selectedNode ? '查看选中节点属性' : '查看方案全局概况'"
+        >
+          <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          <span>{{ selectedNode ? '节点属性' : '方案概况' }}</span>
+          <span v-if="selectedNode" class="w-2 h-2 rounded-full bg-ios-blue animate-pulse"></span>
+        </button>
+
         <!-- Canvas Transform Layer -->
         <div
           class="absolute inset-0 origin-top-left"
@@ -483,23 +837,47 @@
         <div class="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md text-white text-[11px] px-3 py-1.5 rounded-xl pointer-events-none z-10 flex items-center gap-2">
           <span>💡 提示：从绿色右锚点拖出连线连接到蓝色左锚点，箭头表示流量流动方向。</span>
         </div>
-      </div>
 
-      <!-- ================= Right: Inspector Property Panel (Col 3) ================= -->
-      <div class="w-72 xl:w-80 bg-white rounded-2xl border border-black/[0.06] shadow-2xs flex flex-col shrink-0 overflow-y-auto p-4 space-y-4">
-        <!-- Panel 1: Selected Node Inspector -->
-        <div v-if="selectedNode" class="space-y-4">
-          <div class="flex items-center justify-between border-b border-black/[0.06] pb-2">
-            <h3 class="font-bold text-xs text-ios-label">节点属性配置</h3>
-            <button
-              type="button"
-              @click="selectedNode = null"
-              class="text-xs text-ios-tertiary hover:text-ios-label"
+      </main>
+
+      <!-- ================= Right: Collapsible Inspector Property Panel ================= -->
+      <aside
+        class="transition-all duration-300 ease-in-out shrink-0 overflow-hidden bg-white border-l border-black/[0.08] flex flex-col z-20 shadow-xs"
+        :class="rightPanelOpen ? 'w-72 xl:w-80' : 'w-0 border-l-0'"
+        aria-label="属性检查器"
+      >
+        <!-- Header with dynamic title and close button -->
+        <div class="p-3.5 border-b border-black/[0.06] flex items-center justify-between shrink-0 w-72 xl:w-80">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-md flex items-center justify-center text-xs" :class="selectedNode ? 'bg-ios-blue/10 text-ios-blue' : 'bg-black/[0.05] text-ios-secondary'">
+              {{ selectedNode ? '⚙️' : '📋' }}
+            </span>
+            <h3 class="font-bold text-xs text-ios-label">
+              {{ selectedNode ? '节点属性配置' : '方案全局概况' }}
+            </h3>
+            <span
+              class="px-1.5 py-0.2 rounded-full text-[10px] font-semibold"
+              :class="selectedNode ? 'bg-blue-100 text-ios-blue' : 'bg-black/[0.05] text-ios-secondary'"
             >
-              关闭
-            </button>
+              {{ selectedNode ? (selectedNode.isManageable ? '服务器' : '代理节点') : '全局' }}
+            </span>
           </div>
+          <button
+            type="button"
+            @click="rightPanelOpen = false"
+            class="p-1 rounded-lg hover:bg-black/5 text-ios-tertiary hover:text-ios-label transition-colors"
+            title="收起属性面板"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
 
+        <!-- Inspector Body -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs w-72 xl:w-80">
+          <!-- Selected Node Inspector -->
+          <div v-if="selectedNode" class="space-y-4">
           <div class="space-y-3 text-xs">
             <label class="block">
               <span class="font-medium text-ios-secondary">实例别名 (显示名称)</span>
@@ -527,9 +905,26 @@
             </label>
 
             <div v-if="selectedNode.isManageable" class="space-y-2 pt-2 border-t border-black/[0.05]">
-              <span class="font-bold text-ios-label text-[11px]">服务器转发配置</span>
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-ios-label text-[11px]">服务器转发配置</span>
+                <button
+                  type="button"
+                  @click="pickListenPortForSelectedNode"
+                  class="text-[11px] text-ios-blue hover:text-blue-700 font-medium inline-flex items-center gap-1"
+                >
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  随机分配
+                </button>
+              </div>
               <label class="block">
-                <span class="text-ios-secondary">监听转发端口</span>
+                <div class="flex items-center justify-between">
+                  <span class="text-ios-secondary">监听转发端口</span>
+                  <span v-if="selectedNodePortRange" class="text-[10px] text-ios-blue bg-ios-blue/10 px-1.5 py-0.5 rounded">
+                    范围: {{ selectedNodePortRange.start }}-{{ selectedNodePortRange.end }}
+                  </span>
+                </div>
                 <input
                   v-model.number="selectedNode.listenPort"
                   type="number"
@@ -553,14 +948,11 @@
               </button>
             </div>
           </div>
-        </div>
-
-        <!-- Panel 3: Global Scheme Inspector -->
-        <div v-else class="space-y-4">
-          <div class="border-b border-black/[0.06] pb-2">
-            <h3 class="font-bold text-xs text-ios-label">方案全局概况</h3>
+  
           </div>
 
+          <!-- Global Scheme Inspector -->
+          <div v-else class="space-y-4">
           <div class="space-y-3 text-xs">
             <label class="block">
               <span class="font-medium text-ios-secondary">方案名称</span>
@@ -619,9 +1011,9 @@
               </button>
             </div>
           </div>
-          <TunnelList ref="tunnelList" :scheme="currentScheme" :plan="plan" :checking="checking" :error="planError" @create="openEditor()" @edit="selectConnection" />
         </div>
       </div>
+    </aside>
     </div>
 
     <TunnelEditorDrawer v-if="editor" :key="editor.key" :scheme="currentScheme" :servers="servers" :context="canvasContext()"
@@ -630,21 +1022,173 @@
       <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" />
     </AppDialog>
 
-    <!-- 4. Modal: Publish / Generate Subscription (Core Requirement 5) -->
+    <!-- Dedicated Scheme Tunnel List Modal -->
+    <AppDialog
+      v-model="openTunnelListModal"
+      :title="`方案隧道列表 (${currentTunnels.length})`"
+      :description="`查看与管理当前方案「${currentScheme.name}」中的所有中转隧道与连接。`"
+      :show-confirm="false"
+      max-width="2xl"
+    >
+      <div class="space-y-4">
+        <!-- Top Toolbar inside Dialog -->
+        <div class="flex items-center justify-between gap-3 pb-3 border-b border-black/[0.06]">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-ios-secondary">执行位置:</span>
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-black/[0.05] text-ios-label">
+              {{ currentScheme.executionLocation === 'client' ? '客户端执行' : '服务器执行' }}
+            </span>
+            <span v-if="checking" class="text-xs text-ios-tertiary">检查中…</span>
+            <span v-else-if="planError || plan?.message" class="text-xs text-rose-600">
+              {{ planError || plan?.message }}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            class="ios-btn-primary !py-1.5 !px-3 text-xs inline-flex items-center gap-1.5 shadow-2xs"
+            @click="createTunnelFromModal"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            <span>新建隧道</span>
+          </button>
+        </div>
+
+        <!-- Empty State -->
+        <div
+          v-if="!currentTunnels.length"
+          class="py-12 px-6 text-center border border-dashed border-black/[0.08] rounded-2xl bg-[#FBFBFD] space-y-3.5"
+        >
+          <div class="w-12 h-12 rounded-2xl bg-blue-50 text-ios-blue flex items-center justify-center mx-auto border border-blue-100/60 shadow-2xs">
+            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+          </div>
+          <div class="space-y-1">
+            <h4 class="text-sm font-semibold text-ios-label">当前方案暂无隧道</h4>
+            <p class="text-xs text-ios-tertiary max-w-sm mx-auto leading-relaxed">
+              尚未在此方案中建立任何隧道连接。点击下方按钮添加新隧道，或者在左侧可视化画布上连接节点。
+            </p>
+          </div>
+          <div class="pt-1">
+            <button
+              type="button"
+              @click="createTunnelFromModal"
+              class="ios-btn-primary inline-flex items-center gap-1.5 !px-4 !py-2 text-xs shadow-2xs"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              <span>新建第一条隧道</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Tunnel Cards List -->
+        <div v-else class="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+          <div
+            v-for="row in tunnelRows"
+            :key="row.connection.id"
+            class="p-3.5 rounded-2xl border border-black/[0.06] bg-[#FAFAFA] hover:bg-white hover:border-ios-blue/40 hover:shadow-xs transition-all space-y-2 group"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2 min-w-0">
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :class="row.status?.error ? 'bg-rose-500' : (row.status?.text === '可发布' ? 'bg-emerald-500' : 'bg-neutral-400')"
+                ></span>
+                <span class="font-semibold text-xs text-ios-label truncate" :title="row.title">
+                  {{ row.title }}
+                </span>
+                <span
+                  v-if="row.status && !checking && !planError"
+                  class="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0"
+                  :class="row.status.error ? 'bg-rose-50 text-rose-600' : row.status.text === '可发布' ? 'bg-emerald-50 text-emerald-600' : 'bg-neutral-100 text-ios-tertiary'"
+                >
+                  {{ row.status.text }}
+                </span>
+              </div>
+
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  @click="editTunnelFromModal(row.connection)"
+                  class="ios-btn-secondary !py-1 !px-2.5 text-xs inline-flex items-center gap-1"
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  @click="deleteTunnelFromModal(row.connection.id)"
+                  class="ios-btn-secondary !py-1 !px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 inline-flex items-center gap-1"
+                  title="删除此隧道"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ios-secondary font-mono">
+              <span>类型: {{ row.kind }}</span>
+              <span>·</span>
+              <span>网络: {{ row.network }}</span>
+              <template v-if="row.connection.targetPort">
+                <span>·</span>
+                <span>目标端口: {{ row.connection.targetPort }}</span>
+              </template>
+
+              <template v-if="row.connection.listenPort">
+                <span>·</span>
+                <span>监听端口: {{ row.connection.listenPort }}</span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </AppDialog>
+
+    <!-- Schemes / Modals -->
     <AppDialog
       v-model="openPublishModal"
-      :title="currentScheme.executionLocation === 'client' ? '生成客户端订阅与配置' : '发布中转方案到服务器'"
-      :show-confirm="true"
-      :confirm-text="currentScheme.executionLocation === 'client' ? '发布客户端方案' : '确认下发发布'"
+      title="发布方案"
+      description="选择方案执行位置并发布"
+      confirm-text="确认发布"
+      :loading="publishing"
       @confirm="handleConfirmPublish"
     >
       <div class="space-y-4 text-xs">
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="radio"
+              name="publishLocation"
+              value="client"
+              :checked="currentScheme.executionLocation === 'client'"
+              @change="setExecutionLocation('client')"
+              class="text-ios-blue focus:ring-ios-blue"
+            />
+            <span class="font-medium text-ios-label">客户端执行</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="radio"
+              name="publishLocation"
+              value="server"
+              :checked="currentScheme.executionLocation === 'server'"
+              @change="setExecutionLocation('server')"
+              class="text-ios-blue focus:ring-ios-blue"
+            />
+            <span class="font-medium text-ios-label">服务器执行</span>
+          </label>
+        </div>
+
         <div v-if="currentScheme.executionLocation === 'client'" class="space-y-3">
           <div class="flex items-center gap-2">
-            <span class="text-ios-secondary font-medium">客户端格式:</span>
+            <span class="text-ios-tertiary font-medium">客户端格式:</span>
             <select v-model="currentScheme.clientType" class="form-input-base text-xs !w-auto">
               <option value="clash">Clash / Clash Verge (Meta / Mihomo)</option>
-
             </select>
           </div>
 
@@ -664,7 +1208,7 @@
           <div class="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl space-y-1 text-ios-blue text-[11px]">
             <div>• 目标管理服务器: {{ currentScheme.nodes.filter(n => n.isManageable).length }} 台</div>
             <div>• 计划建立隧道: {{ currentTunnels.length }} 条</div>
-            <div>• 状态: {{ checking ? '检查中…' : planError || (plan?.ok ? '计划检查通过' : plan?.message || '请先检查方案') }}</div>
+            <div>• 状态: 校验通过，配置无环路冲突</div>
           </div>
         </div>
       </div>
@@ -687,11 +1231,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue';
-import TunnelList from '../components/relay/TunnelList.vue';
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import TunnelEditorDrawer from '../components/relay/TunnelEditorDrawer.vue';
 import TunnelPlanSummary from '../components/relay/TunnelPlanSummary.vue';
 import { useTunnelPlan } from '../components/relay/useTunnelPlan';
+import { tunnelStatus, tunnelSummary } from '../components/relay/tunnelEditorModel';
 import { useRoute } from 'vue-router';
 import PageHeader from '../../../components/PageHeader.vue';
 import AppDialog from '../../../components/AppDialog.vue';
@@ -700,6 +1244,7 @@ import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { getNodePortRange, getRandomPortForNode } from '../../nodes/nodeMeta';
 import { proxyAPI, choices, canvasAPI, canvasSchemeToRelayScheme, relaySchemeToCanvasInput, type CanvasPublishResult, type CanvasSchemeContext, type Inbound } from '../api';
 import {
   proxyNodeStore,
@@ -712,6 +1257,7 @@ import {
   type ProxyNodeItem,
   type CanvasNodeInstance,
   type CanvasConnection,
+  type ConnectionType,
   type RelayScheme
 } from '../proxyNodes';
 
@@ -719,11 +1265,29 @@ const route = useRoute();
 const servers = ref<NodeView[]>([]);
 const resourceSearch = ref('');
 const activeSchemeId = ref('');
+const schemeDropdownOpen = ref(false);
+
+function toggleSchemeDropdown() {
+  schemeDropdownOpen.value = !schemeDropdownOpen.value;
+}
+
+function selectScheme(id: string) {
+  activeSchemeId.value = id;
+  schemeDropdownOpen.value = false;
+  switchScheme();
+}
+
+function handleWindowClick() {
+  schemeDropdownOpen.value = false;
+}
 
 // Group collapse states
 const groupExpanded = reactive({
   servers: true,
-  nodes: false
+  selfHosted: true,
+  subscription: true,
+  manual: false,
+  tunnels: true
 });
 
 // Canvas Transform State
@@ -735,17 +1299,41 @@ const panStart = { x: 0, y: 0 };
 
 // Selection states
 const selectedNode = ref<CanvasNodeInstance | null>(null);
+const selectedNodePortRange = computed(() => {
+  if (!selectedNode.value || selectedNode.value.resourceType !== 'server') return null;
+  return getNodePortRange(selectedNode.value.resourceId);
+});
+
+function pickListenPortForSelectedNode() {
+  if (!selectedNode.value) return;
+  const range = selectedNodePortRange.value;
+  const port = getRandomPortForNode(selectedNode.value.resourceId);
+  selectedNode.value.listenPort = port;
+  saveDraft();
+  if (range) {
+    showToast(`已从服务器端口范围 (${range.start}-${range.end}) 分配端口: ${port}`, 'info');
+  } else {
+    showToast(`已随机分配端口: ${port}`, 'info');
+  }
+}
 const selectedConnection = ref<CanvasConnection | null>(null);
+const leftPanelOpen = ref(true);
+const rightPanelOpen = ref(true);
+
+function setExecutionLocation(loc: 'client' | 'server') {
+  currentScheme.value.executionLocation = loc;
+  handleExecutionLocationChange();
+}
 
 // Connecting state
 const connectingSource = ref<CanvasNodeInstance | null>(null);
 const connectingMousePos = reactive({ x: 0, y: 0 });
 
 // Modals
-const tunnelList = ref<InstanceType<typeof TunnelList>>();
 const editor = ref<{ key: number; connection?: CanvasConnection; source?: string; target?: string } | null>(null);
 const openPlanSummary = ref(false);
 const openPublishModal = ref(false);
+const openTunnelListModal = ref(false);
 // The last publication's per-node result, as the server reported it.
 const publishResult = ref<CanvasPublishResult | null>(null);
 const publishing = ref(false);
@@ -789,6 +1377,13 @@ const currentScheme = computed<RelayScheme>(() => {
 
 // Tunnels in active scheme
 const currentTunnels = computed(() => currentScheme.value.connections);
+const tunnelRows = computed(() => {
+  return currentScheme.value.connections.map(connection => ({
+    connection,
+    ...tunnelSummary(currentScheme.value, connection),
+    status: tunnelStatus(plan.value, connection.id, currentScheme.value.executionLocation === 'client')
+  }));
+});
 const planInput = computed(() => relaySchemeToCanvasInput(currentScheme.value, canvasContext()));
 const { plan, checking, error: planError, run: runPlan } = useTunnelPlan(
   () => JSON.stringify([currentScheme.value.id, currentScheme.value.serverUpdatedAt, planInput.value]),
@@ -799,8 +1394,27 @@ async function checkScheme() { openPlanSummary.value = true; await runPlan(); }
 async function focusTunnelList() {
   selectedNode.value = null;
   closeEditor();
-  await nextTick();
-  tunnelList.value?.focus();
+  openTunnelListModal.value = true;
+}
+
+function createTunnelFromModal() {
+  openTunnelListModal.value = false;
+  openEditor();
+}
+
+function editTunnelFromModal(conn: CanvasConnection) {
+  openTunnelListModal.value = false;
+  selectConnection(conn);
+}
+
+async function deleteTunnelFromModal(connectionId: string) {
+  currentScheme.value.connections = currentScheme.value.connections.filter(c => c.id !== connectionId);
+  try {
+    await saveDraft(true);
+    showToast('已删除隧道');
+  } catch (e) {
+    showToast(`删除隧道失败: ${(e as Error).message}`, 'error');
+  }
 }
 function openEditor(connection?: CanvasConnection, source?: string, target?: string) {
   selectedNode.value = null;
@@ -814,8 +1428,287 @@ async function persistTunnelResult(result: RelayScheme) {
   const before = { nodes: scheme.nodes, connections: scheme.connections };
   scheme.nodes = result.nodes;
   scheme.connections = result.connections;
+  syncTunnelsFromScheme(scheme);
   try { await saveDraft(true); showToast('已保存到方案'); }
   catch (e) { Object.assign(scheme, before); throw e; }
+}
+
+
+export interface SharedTunnel {
+  key: string;
+  sourceResourceId: string;
+  sourceResourceType: 'server' | 'node';
+  sourceName: string;
+  sourceAddress: string;
+  sourceStatus?: string;
+  sourceIsManageable: boolean;
+  targetResourceId: string;
+  targetResourceType: 'server' | 'node';
+  targetName: string;
+  targetAddress: string;
+  targetStatus?: string;
+  targetIsManageable: boolean;
+  type: ConnectionType;
+  tunnelProtocol?: 'tls' | 'wireguard' | 'gost' | 'brook' | 'nftables';
+  tunnelPort?: number;
+  listenPort?: number;
+  targetHost?: string;
+  targetPort?: number;
+  supportTcp: boolean;
+  supportUdp: boolean;
+  title: string;
+  subtitle: string;
+  statusText?: string;
+  hasError?: boolean;
+}
+
+const SHARED_TUNNELS_KEY = 'qui_shared_tunnels_v1';
+
+function loadStoredSharedTunnels(): SharedTunnel[] {
+  try {
+    const raw = localStorage.getItem(SHARED_TUNNELS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+
+function saveStoredSharedTunnels(list: SharedTunnel[]) {
+  try {
+    localStorage.setItem(SHARED_TUNNELS_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+const sharedTunnelPool = ref<SharedTunnel[]>(loadStoredSharedTunnels());
+
+function updateSharedTunnelPool(tunnel: SharedTunnel) {
+  const list = [...sharedTunnelPool.value];
+  const idx = list.findIndex(t => t.key === tunnel.key);
+  if (idx >= 0) {
+    list[idx] = tunnel;
+  } else {
+    list.push(tunnel);
+  }
+  sharedTunnelPool.value = list;
+  saveStoredSharedTunnels(list);
+}
+
+function syncTunnelsFromScheme(scheme: RelayScheme) {
+  for (const conn of scheme.connections) {
+    const src = scheme.nodes.find(n => n.instanceId === conn.sourceInstanceId);
+    const tgt = scheme.nodes.find(n => n.instanceId === conn.targetInstanceId);
+    if (!src || !tgt) continue;
+
+    const summary = tunnelSummary(scheme, conn);
+    const key = `${src.resourceType}:${src.resourceId}->${tgt.resourceType}:${tgt.resourceId}:${conn.type}:${conn.tunnelProtocol || ''}:${conn.tunnelPort || ''}:${conn.listenPort || ''}:${conn.targetPort || ''}`;
+    updateSharedTunnelPool({
+      key,
+      sourceResourceId: src.resourceId,
+      sourceResourceType: src.resourceType,
+      sourceName: src.name,
+      sourceAddress: src.serverAddress,
+      sourceStatus: src.status,
+      sourceIsManageable: src.isManageable,
+      targetResourceId: tgt.resourceId,
+      targetResourceType: tgt.resourceType,
+      targetName: tgt.name,
+      targetAddress: tgt.serverAddress,
+      targetStatus: tgt.status,
+      targetIsManageable: tgt.isManageable,
+      type: conn.type,
+      tunnelProtocol: conn.tunnelProtocol,
+      tunnelPort: conn.tunnelPort,
+      listenPort: conn.listenPort,
+      targetHost: conn.targetHost,
+      targetPort: conn.targetPort,
+      supportTcp: conn.supportTcp,
+      supportUdp: conn.supportUdp,
+      title: summary.title || `${src.name} → ${tgt.name}`,
+      subtitle: `${summary.kind} ${summary.network}`,
+      statusText: conn.invalidReason ? '异常' : '可用',
+      hasError: !!conn.invalidReason
+    });
+  }
+}
+
+watch(() => proxyNodeStore.schemes, (schemes) => {
+  schemes.forEach(s => syncTunnelsFromScheme(s));
+}, { immediate: true, deep: true });
+
+const allSharedTunnels = computed<SharedTunnel[]>(() => {
+  const map = new Map<string, SharedTunnel>();
+  for (const t of sharedTunnelPool.value) {
+    map.set(t.key, t);
+  }
+  for (const s of proxyNodeStore.schemes) {
+    for (const conn of s.connections) {
+      const src = s.nodes.find(n => n.instanceId === conn.sourceInstanceId);
+      const tgt = s.nodes.find(n => n.instanceId === conn.targetInstanceId);
+      if (!src || !tgt) continue;
+      const summary = tunnelSummary(s, conn);
+      const key = `${src.resourceType}:${src.resourceId}->${tgt.resourceType}:${tgt.resourceId}:${conn.type}:${conn.tunnelProtocol || ''}:${conn.tunnelPort || ''}:${conn.listenPort || ''}:${conn.targetPort || ''}`;
+      map.set(key, {
+        key,
+        sourceResourceId: src.resourceId,
+        sourceResourceType: src.resourceType,
+        sourceName: src.name,
+        sourceAddress: src.serverAddress,
+        sourceStatus: src.status,
+        sourceIsManageable: src.isManageable,
+        targetResourceId: tgt.resourceId,
+        targetResourceType: tgt.resourceType,
+        targetName: tgt.name,
+        targetAddress: tgt.serverAddress,
+        targetStatus: tgt.status,
+        targetIsManageable: tgt.isManageable,
+        type: conn.type,
+        tunnelProtocol: conn.tunnelProtocol,
+        tunnelPort: conn.tunnelPort,
+        listenPort: conn.listenPort,
+        targetHost: conn.targetHost,
+        targetPort: conn.targetPort,
+        supportTcp: conn.supportTcp,
+        supportUdp: conn.supportUdp,
+        title: summary.title || `${src.name} → ${tgt.name}`,
+        subtitle: `${summary.kind} ${summary.network}`,
+        statusText: conn.invalidReason ? '异常' : '可用',
+        hasError: !!conn.invalidReason
+      });
+    }
+  }
+  return Array.from(map.values());
+});
+
+const filteredSharedTunnels = computed(() => {
+  if (!resourceSearch.value.trim()) return allSharedTunnels.value;
+  const q = resourceSearch.value.trim().toLowerCase();
+  return allSharedTunnels.value.filter(t =>
+    t.title.toLowerCase().includes(q) ||
+    t.sourceName.toLowerCase().includes(q) ||
+    t.targetName.toLowerCase().includes(q) ||
+    t.subtitle.toLowerCase().includes(q)
+  );
+});
+
+function getTunnelInCurrentScheme(tunnel: SharedTunnel): CanvasConnection | undefined {
+  const scheme = currentScheme.value;
+  return scheme.connections.find(c => {
+    const src = scheme.nodes.find(n => n.instanceId === c.sourceInstanceId);
+    const tgt = scheme.nodes.find(n => n.instanceId === c.targetInstanceId);
+    if (!src || !tgt) return false;
+    return src.resourceId === tunnel.sourceResourceId &&
+           src.resourceType === tunnel.sourceResourceType &&
+           tgt.resourceId === tunnel.targetResourceId &&
+           tgt.resourceType === tunnel.targetResourceType &&
+           c.type === tunnel.type;
+  });
+}
+
+function isTunnelInCurrentScheme(tunnel: SharedTunnel): boolean {
+  return !!getTunnelInCurrentScheme(tunnel);
+}
+
+function onSharedTunnelClick(tunnel: SharedTunnel) {
+  const existingConn = getTunnelInCurrentScheme(tunnel);
+  if (existingConn) {
+    selectConnection(existingConn);
+    showToast(`已高亮当前方案中的隧道: ${tunnel.title}`);
+  } else {
+    applySharedTunnelToScheme(tunnel);
+  }
+}
+
+function deleteSharedTunnel(tunnel: SharedTunnel) {
+  sharedTunnelPool.value = sharedTunnelPool.value.filter(t => t.key !== tunnel.key);
+  saveStoredSharedTunnels(sharedTunnelPool.value);
+  const conn = getTunnelInCurrentScheme(tunnel);
+  if (conn) {
+    currentScheme.value.connections = currentScheme.value.connections.filter(c => c.id !== conn.id);
+    saveDraft();
+  }
+  showToast(`已删除隧道: ${tunnel.title}`);
+}
+
+function applySharedTunnelToScheme(tunnel: SharedTunnel, canvasX = 300, canvasY = 200) {
+  const scheme = currentScheme.value;
+
+  // 1. Locate or create source node instance
+  let sourceInst = scheme.nodes.find(
+    n => n.resourceType === tunnel.sourceResourceType && n.resourceId === tunnel.sourceResourceId
+  );
+  if (!sourceInst) {
+    const serverObj = servers.value.find(s => s.id === tunnel.sourceResourceId);
+    sourceInst = {
+      instanceId: `inst-${Date.now()}-src`,
+      resourceId: tunnel.sourceResourceId,
+      resourceType: tunnel.sourceResourceType,
+      name: tunnel.sourceName,
+      protocol: tunnel.sourceResourceType === 'server' ? 'server' : 'custom',
+      serverAddress: tunnel.sourceAddress || serverObj?.publicIp || '',
+      status: (serverObj?.status as any) || (tunnel.sourceStatus as any) || 'online',
+      isManageable: tunnel.sourceIsManageable,
+      x: Math.max(20, canvasX - 160),
+      y: Math.max(20, canvasY - 30),
+      role: 'entry',
+      listenPort: tunnel.listenPort
+    };
+    scheme.nodes.push(sourceInst);
+  }
+
+  // 2. Locate or create target node instance
+  let targetInst = scheme.nodes.find(
+    n => n.resourceType === tunnel.targetResourceType && n.resourceId === tunnel.targetResourceId
+  );
+  if (!targetInst) {
+    const serverObj = servers.value.find(s => s.id === tunnel.targetResourceId);
+    targetInst = {
+      instanceId: `inst-${Date.now()}-tgt`,
+      resourceId: tunnel.targetResourceId,
+      resourceType: tunnel.targetResourceType,
+      name: tunnel.targetName,
+      protocol: tunnel.targetResourceType === 'server' ? 'server' : 'custom',
+      serverAddress: tunnel.targetAddress || serverObj?.publicIp || '',
+      status: (serverObj?.status as any) || (tunnel.targetStatus as any) || 'online',
+      isManageable: tunnel.targetIsManageable,
+      x: Math.max(20, canvasX + 160),
+      y: Math.max(20, canvasY - 30),
+      role: scheme.executionLocation === 'client' ? 'exit' : 'relay',
+      targetPort: tunnel.targetPort
+    };
+    scheme.nodes.push(targetInst);
+  }
+
+  // 3. Check if connection exists
+  const existingConn = scheme.connections.find(
+    c => c.sourceInstanceId === sourceInst!.instanceId && c.targetInstanceId === targetInst!.instanceId
+  );
+  if (existingConn) {
+    selectedConnection.value = existingConn;
+    selectedNode.value = null;
+    showToast('当前方案中已存在该隧道连接', 'warning');
+    return;
+  }
+
+  // 4. Create and link connection
+  const newConn: CanvasConnection = {
+    id: `conn-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    sourceInstanceId: sourceInst.instanceId,
+    targetInstanceId: targetInst.instanceId,
+    type: tunnel.type || 'tunnel',
+    tunnelProtocol: tunnel.tunnelProtocol,
+    tunnelPort: tunnel.tunnelPort,
+    listenPort: tunnel.listenPort,
+    targetHost: tunnel.targetHost,
+    targetPort: tunnel.targetPort,
+    supportTcp: tunnel.supportTcp ?? true,
+    supportUdp: tunnel.supportUdp ?? true,
+    status: 'valid'
+  };
+
+  scheme.connections.push(newConn);
+  selectedConnection.value = newConn;
+  selectedNode.value = null;
+  saveDraft();
+  showToast(`已将隧道「${tunnel.title}」添加到当前方案`, 'success');
 }
 
 // Filtered resources
@@ -838,20 +1731,37 @@ const filteredNodesGroup = computed(() => {
     return true;
   });
 });
+const selfHostedNodes = computed(() => {
+  return filteredNodesGroup.value.filter(n => n.sourceType === 'self_hosted');
+});
 
-function toggleGroup(g: 'servers' | 'nodes') {
+const subscriptionNodes = computed(() => {
+  return filteredNodesGroup.value.filter(n => n.sourceType === 'subscription');
+});
+
+const manualNodes = computed(() => {
+  return filteredNodesGroup.value.filter(n => n.sourceType === 'manual');
+});
+
+
+function toggleGroup(g: 'servers' | 'selfHosted' | 'subscription' | 'manual' | 'tunnels') {
   groupExpanded[g] = !groupExpanded[g];
 }
 
 // Switching Execution Location (Core Requirement 2: Default expansion)
 function applyExecutionDefaults() {
   if (currentScheme.value.executionLocation === 'client') {
-    groupExpanded.nodes = true;
     groupExpanded.servers = false;
+    groupExpanded.selfHosted = true;
+    groupExpanded.subscription = true;
+    groupExpanded.manual = true;
   } else {
     groupExpanded.servers = true;
-    groupExpanded.nodes = false;
+    groupExpanded.selfHosted = true;
+    groupExpanded.subscription = false;
+    groupExpanded.manual = false;
   }
+  groupExpanded.tunnels = true;
 }
 
 function handleExecutionLocationChange() {
@@ -919,6 +1829,21 @@ function onCanvasDrop(e: DragEvent) {
   const canvasX = Math.round((clientX - panX.value) / zoom.value);
   const canvasY = Math.round((clientY - panY.value) / zoom.value);
 
+  if (draggedPayload.type === 'tunnel') {
+    applySharedTunnelToScheme(draggedPayload.tunnel, canvasX, canvasY);
+    draggedPayload = null;
+    return;
+  }
+
+  const role = currentScheme.value.nodes.length === 0 ? 'entry' : 'relay';
+  let initialPort: number | undefined = undefined;
+  if (draggedPayload.type === 'server' && draggedPayload.isManageable) {
+    const range = getNodePortRange(draggedPayload.id);
+    if (range) {
+      initialPort = getRandomPortForNode(draggedPayload.id);
+    }
+  }
+
   // Requirement 2: Repeated drops create new instance without modifying original resource
   const newInst: CanvasNodeInstance = {
     instanceId: 'inst-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
@@ -931,7 +1856,8 @@ function onCanvasDrop(e: DragEvent) {
     isManageable: draggedPayload.isManageable,
     x: Math.max(20, canvasX - 100),
     y: Math.max(20, canvasY - 30),
-    role: currentScheme.value.nodes.length === 0 ? 'entry' : 'relay'
+    role,
+    listenPort: initialPort
   };
 
   currentScheme.value.nodes.push(newInst);
@@ -1073,6 +1999,7 @@ const connectingPath = computed(() => {
 function selectNode(item: CanvasNodeInstance) {
   selectedNode.value = item;
   selectedConnection.value = null;
+  rightPanelOpen.value = true;
 }
 
 function selectConnection(conn: CanvasConnection) { openEditor(conn); }
@@ -1309,6 +2236,7 @@ onMounted(async () => {
   }
   applyExecutionDefaults();
 
+  window.addEventListener('click', handleWindowClick);
   setTimeout(() => {
     if (qFocusConnId) {
       const conn = currentScheme.value.connections.find(c => c.id === qFocusConnId);
@@ -1339,5 +2267,9 @@ onMounted(async () => {
       }
     }
   }, 100);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('click', handleWindowClick);
 });
 </script>

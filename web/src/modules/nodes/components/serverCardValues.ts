@@ -86,6 +86,12 @@ function formatCompactBytes(bytes?: number): string {
   return `${Math.round(bytes / 1024 / 1024 / 1024)}G`;
 }
 
+function formatSpeedParts(rateStr: string): { value: string; unit: string } {
+  if (!rateStr || rateStr === '—') return { value: '—', unit: '' };
+  const parts = rateStr.trim().split(/\s+/);
+  return { value: parts[0] || '—', unit: parts[1] || '' };
+}
+
 // Geo Country Flag & Region helpers
 const geoTick = ref(0);
 let unsubGeo: (() => void) | undefined;
@@ -118,16 +124,28 @@ function getRenewalInfo(node: NodeView) {
 }
 
 // Monthly traffic
-
-
 function getNodeMonthTraffic(node: NodeView): number | null {
   const item = nodeMonthTraffic.value[node.id];
   return item ? item.uploadBytes + item.downloadBytes : null;
 }
 
-
 onMounted(() => { unsubGeo = onGeoResolved(() => { geoTick.value++; }); });
 onUnmounted(() => { unsubGeo?.(); });
-return { statusCapsuleText, statusCapsuleClass, statusDotClass, calculateRunningTime, formatPercent,
-  barColor, formatCompactBytes, getNodeCountry, getNodeRegion, getRenewalDate, getRenewalPriceDisplay, getRenewalInfo, getNodeMonthTraffic };
+
+return {
+  statusCapsuleText,
+  statusCapsuleClass,
+  statusDotClass,
+  calculateRunningTime,
+  formatPercent,
+  barColor,
+  formatCompactBytes,
+  formatSpeedParts,
+  getNodeCountry,
+  getNodeRegion,
+  getRenewalDate,
+  getRenewalPriceDisplay,
+  getRenewalInfo,
+  getNodeMonthTraffic
+};
 }

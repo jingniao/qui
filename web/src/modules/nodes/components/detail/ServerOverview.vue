@@ -1,80 +1,292 @@
 <template>
-  <div class="grid lg:grid-cols-3 gap-6 items-start">
-    <div class="lg:col-span-2 space-y-6 min-w-0">
-      <section class="panel-card p-5 space-y-3">
-        <h2 class="font-semibold text-ios-label">状态</h2>
-        <div class="flex flex-wrap items-center gap-3 text-sm text-ios-secondary"><StatusBadge :status="status.tone" :label="status.label" /><span>核心 {{ node.capabilities?.core_name || '—' }} {{ node.capabilities?.core_version || '' }} · {{ health }}</span><span>Agent {{ node.agentVersion || '—' }}</span></div>
-        <p class="text-sm text-ios-secondary">配置 {{ strip.running ? '#' + strip.running : '—' }} · {{ strip.state === 'latest' ? '最新' : strip.state === 'unapplied' ? '有更新' : '尚无最新版本信息' }} · 心跳 {{ relativeHeartbeat(node.lastHeartbeat, now) }}</p>
-        <p class="text-xs text-ios-secondary">接入：{{ node.deletedAt ? '已删除' : !node.enabled ? '已禁用' : node.maintenance ? '维护中（暂不分发）' : !node.allowSubscription ? '不分发订阅' : '允许订阅' }}</p>
-      </section>
-      <section class="panel-card p-5 space-y-4">
-        <h2 class="font-semibold text-ios-label" :title="'流量按面板时区 ' + authState.timezone + ' 汇总保留的账户样本；实时资源超过 45 秒显示未知'">运行状态 ⓘ</h2>
-        <div v-if="resources.some(field => field.value !== '—') || today !== undefined || month !== undefined" class="grid grid-cols-2 xl:grid-cols-4 gap-4 text-sm">
-          <div v-for="field in resources" :key="field.label"><p class="text-xs text-ios-secondary mb-2">{{ field.label }}</p><ResourceProgress v-if="field.value.endsWith('%')" :percentage="parseFloat(field.value)" /><p v-else class="font-mono text-ios-label tabular-nums">{{ field.value }}</p></div>
-          <div><p class="text-xs text-ios-secondary mb-2">今日流量</p><TrafficValue :bytes="today" /></div><div><p class="text-xs text-ios-secondary mb-2">本月流量</p><TrafficValue :bytes="month" /></div>
+  <div class="space-y-3.5 sm:space-y-4">
+    <!-- Top 4 Financial KPI Cards (Full Width 4 Columns) -->
+    <ServerFinancialCards :node="node" :meta="meta" />
+
+    <!-- 基础信息与系统信息合并卡片 (Full Width 4 Columns) -->
+    <section class="panel-card p-3.5 sm:p-4 bg-white space-y-3">
+      <!-- Header: Title, Status Badge, Heartbeat & Subscriptions -->
+      <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5 flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <h2 class="font-semibold text-ios-label text-sm sm:text-base">基础信息</h2>
+          <StatusBadge :status="status.tone" :label="status.label" />
+          <span class="text-xs text-ios-secondary font-mono">
+            {{ connections === '—' ? '无活跃会话' : `${connections} 个活跃会话` }}
+          </span>
         </div>
-        <p v-else class="text-sm text-ios-secondary">尚无有效的资源或账户流量样本。</p>
+
+        <div class="flex items-center gap-3 text-xs text-ios-secondary">
+          <span class="flex items-center gap-1.5" :title="'心跳报告: ' + (node.lastHeartbeat ? formatTime(node.lastHeartbeat) : '从晚上报')">
+            <span class="w-1.5 h-1.5 rounded-full" :class="status.tone === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-300'"></span>
+            <span>{{ heartbeatRelative }}</span>
+          </span>
+          <span class="text-black/[0.15]">|</span>
+          <span :class="node.enabled && node.allowSubscription && !node.maintenance ? 'text-ios-blue font-medium' : 'text-neutral-400'">
+            {{ !node.enabled ? '已停用' : (node.maintenance ? '维护中' : (node.allowSubscription ? '允许订阅' : '订阅隐藏')) }}
+          </span>
+          <span class="text-black/[0.15]">|</span>
+          <button
+            class="text-[11px] text-ios-blue hover:underline inline-flex items-center gap-0.5 font-medium transition-colors"
+            :title="'复制完整服务器 ID: ' + node.id"
+            @click="copyId"
+          >
+            复制 ID
+          </button>
+        </div>
+      </div>
+
+      <!-- Content Grid: 4 Columns Balanced Presentation -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+        <!-- 主机名 -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">主机名</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="node.hostname">
+            {{ node.hostname || '—' }}
+          </p>
+        </div>
+
+        <!-- 公网 IP -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] sm:text-xs text-ios-secondary font-medium">公网 IP</span>
+            <button
+              v-if="node.publicIp"
+              class="text-[11px] text-ios-blue hover:underline inline-flex items-center gap-0.5 font-medium transition-colors"
+              title="复制公网 IP"
+              @click="copyIp"
+            >
+              复制
+            </button>
+          </div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="node.publicIp">
+            {{ node.publicIp || '—' }}
+          </p>
+        </div>
+
+        <!-- 地区 -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">地区</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="regionDisplay">
+            {{ regionDisplay }}
+          </p>
+        </div>
+
+        <!-- 操作系统 -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">操作系统</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="node.os">
+            {{ node.os || '—' }}
+          </p>
+        </div>
+
+        <!-- 运行时间 (来自系统信息) -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">运行时间</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono tabular-nums truncate">
+            {{ uptimeDisplay }}
+          </p>
+        </div>
+
+        <!-- 启动时间 (来自系统信息) -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">启动时间</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono tabular-nums truncate">
+            {{ bootTime }}
+          </p>
+        </div>
+
+        <!-- 默认端口范围 -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">默认端口范围</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="formatPortRange(meta)">
+            {{ formatPortRange(meta) }}
+          </p>
+        </div>
+
+        <!-- 创建时间 -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">创建时间</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label truncate">
+            {{ node.createdAt ? formatTime(node.createdAt) : '—' }}
+          </p>
+        </div>
+      </div>
+
+      <!-- 备注说明 -->
+      <div v-if="cleanRemark(meta.remark)" class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 flex items-center justify-between">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-[11px] sm:text-xs text-ios-secondary font-medium shrink-0">备注说明</span>
+          <span class="text-xs sm:text-sm font-medium text-ios-label truncate" :title="cleanRemark(meta.remark)">
+            {{ cleanRemark(meta.remark) }}
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 System Performance Panels: 硬件信息, 存储信息, 网络信息 (Full Width 3 Columns) -->
+    <ServerSystemPanels
+      :node="node"
+      :metrics="metrics"
+      :now="now"
+      :today="today"
+      :month="month"
+    />
+
+    <!-- Bottom Section: Services & Configurations (Balanced 2-Column Grid) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4 items-start">
+      <!-- Left: 节点概览 & 协议能力 -->
+      <div class="space-y-3.5 sm:space-y-4 min-w-0">
+        <!-- 节点概览 -->
+        <ServerNodeSummary :node="node" @manage="$emit('tab', 'nodes')" @create="$emit('create')" />
+
+        <!-- 协议能力 -->
+        <section class="panel-card p-3.5 sm:p-4 space-y-2.5 bg-white">
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold text-ios-label text-sm sm:text-base">协议能力</h2>
+            <button v-if="customNetwork && isOwner" class="text-xs text-ios-blue hover:underline" @click="$emit('tab', 'settings')">
+              出站网络设置 →
+            </button>
+            <span v-else-if="customNetwork" class="text-xs text-ios-secondary">出站网络已自定义</span>
+          </div>
+          <div v-if="node.capabilities?.protocols?.length" class="flex flex-wrap gap-1.5">
+            <span
+              v-for="p in node.capabilities.protocols"
+              :key="p.protocol"
+              class="px-2 py-0.5 rounded-md text-xs font-mono font-medium"
+              :class="p.inbound && p.outbound ? 'bg-blue-50 text-ios-blue border border-blue-100/70' : (p.inbound ? 'bg-emerald-50 text-emerald-700 border border-emerald-100/70' : 'bg-neutral-100 text-neutral-600')"
+            >
+              {{ p.protocol }}
+              <span class="text-[10px] opacity-75 font-sans ml-0.5">{{ p.inbound && p.outbound ? '双向' : (p.inbound ? '入站' : '出站') }}</span>
+            </span>
+          </div>
+          <p v-else class="text-xs text-ios-secondary">尚未上报协议能力</p>
+        </section>
+      </div>
+
+      <!-- Right: 最近事件（配置版本记录） -->
+      <section class="panel-card p-3.5 sm:p-4 space-y-2.5 bg-white">
+        <div class="flex items-center justify-between">
+          <h2 class="font-semibold text-ios-label text-sm sm:text-base">最近事件</h2>
+          <span class="text-xs text-ios-tertiary">配置版本记录</span>
+        </div>
+        <ol v-if="events.length" class="space-y-2">
+          <li v-for="event in events" :key="event.id" class="border-l-2 border-ios-blue/40 pl-2.5 text-xs text-ios-secondary">
+            <time class="text-[11px] font-mono text-ios-tertiary">{{ formatTime(event.at) }}</time>
+            <p class="text-ios-label font-medium text-xs mt-0.5">{{ event.text }}</p>
+          </li>
+        </ol>
+        <p v-else class="text-xs text-ios-secondary">当前没有可读取的配置事件记录。</p>
       </section>
-      <LatencyChart :node-id="node.id" compact @monitoring="$emit('tab', 'monitoring')" />
-      <ServerNodeSummary :node="node" @manage="$emit('tab', 'nodes')" @create="$emit('create')" />
-      <section class="panel-card p-5 space-y-3"><h2 class="font-semibold text-ios-label">最近事件</h2><ol v-if="events.length" class="space-y-3"><li v-for="event in events" :key="event.id" class="border-l-2 border-ios-separator pl-3 text-sm text-ios-secondary"><time class="text-xs font-mono">{{ formatTime(event.at) }}</time><p>{{ event.text }}</p></li></ol><p v-else class="text-sm text-ios-secondary">当前没有可读取的配置事件记录。</p></section>
     </div>
-    <aside class="space-y-6 min-w-0">
-      <section class="panel-card p-5 space-y-3"><h2 class="font-semibold text-ios-label">基础信息</h2><dl class="space-y-3 text-sm"><div><dt class="text-xs text-ios-secondary">服务器 ID</dt><dd class="text-ios-label font-mono break-all"><span :title="node.id">{{ node.id.length > 12 ? node.id.slice(0, 8) + '…' + node.id.slice(-4) : node.id }}</span> <button class="ios-action-btn-secondary" @click="copyId">复制</button></dd></div><div v-for="field in basics" :key="field[0]"><dt class="text-xs text-ios-secondary">{{ field[0] }}</dt><dd class="break-all text-ios-label">{{ field[1] }}</dd></div></dl></section>
-      <ServerDetailGroups :node="node" :groups="groups" @changed="$emit('changed')" />
-      <section class="panel-card p-5 space-y-3"><h2 class="font-semibold text-ios-label">续费</h2><template v-if="meta.renewDate || formatRenewPrice(meta)"><p v-if="meta.renewDate" class="text-sm text-ios-label">{{ meta.renewDate }} · {{ calculateRemainingDays(meta.renewDate).label }}</p><p v-if="formatRenewPrice(meta)" class="text-sm text-ios-secondary">{{ formatRenewPrice(meta) }}</p></template><p v-else class="text-sm text-ios-secondary">尚未填写续费信息。</p></section>
-      <section class="panel-card p-5 space-y-3"><h2 class="font-semibold text-ios-label">协议能力</h2><div v-if="node.capabilities?.protocols?.length" class="flex flex-wrap gap-2"><span v-for="cap in node.capabilities.protocols" :key="cap.protocol" :title="'入站：' + cap.inbound + '；出站：' + cap.outbound + '；TCP：' + cap.tcp + '；UDP：' + cap.udp + '（服务器上报）'"><ProtocolBadge :protocol="cap.protocol" /></span></div><p v-else class="text-sm text-ios-secondary">服务器尚未上报协议能力。</p></section>
-      <button v-if="customNetwork && isOwner" class="text-sm text-ios-blue" @click="$emit('tab', 'settings')">出站网络已自定义 → 设置</button><p v-else-if="customNetwork" class="text-sm text-ios-secondary">出站网络已自定义</p>
-    </aside>
   </div>
 </template>
+
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import type { NodeView } from '../../api';
 import type { Revision } from '../../../system/deploymentApi';
-import { type NodeMeta, formatRenewPrice, calculateRemainingDays, resolveCountryInfo, onGeoResolved } from '../../nodeMeta';
-import { hostMetrics, uptime, nicRate } from '../../metrics';
-import { authState, formatTime } from '../../../../app/auth';
-import { basicFacts, revisionStrip } from './serverDetailModel';
+import { type NodeMeta, resolveCountryInfo, onGeoResolved, cleanRemark, formatPortRange } from '../../nodeMeta';
+import { hostMetrics, uptime } from '../../metrics';
+import { formatTime } from '../../../../app/auth';
 import { serverStatus, relativeHeartbeat } from '../serverListModel';
 import type { NodeGroup } from '../../groupsApi';
 import StatusBadge from '../../../../components/StatusBadge.vue';
-import ProtocolBadge from '../../../../components/ProtocolBadge.vue';
-import ResourceProgress from '../../../../components/ResourceProgress.vue';
-import LatencyChart from '../LatencyChart.vue';
-import ServerDetailGroups from './ServerDetailGroups.vue';
 import ServerNodeSummary from './ServerNodeSummary.vue';
+import ServerFinancialCards from './ServerFinancialCards.vue';
+import ServerSystemPanels from './ServerSystemPanels.vue';
 import { isOwner } from '../../../../app/auth';
 import { showToast } from '../../../../app/api';
-import TrafficValue from '../../../../components/TrafficValue.vue';
-const props = defineProps<{ node: NodeView; meta: NodeMeta; now: number; today?: number; month?: number; revisions: Revision[]; groups: NodeGroup[]; latestRevision?: number }>();
+
+const props = defineProps<{
+  node: NodeView;
+  meta: NodeMeta;
+  now: number;
+  today?: number;
+  month?: number;
+  revisions: Revision[];
+  groups?: NodeGroup[];
+  latestRevision?: number;
+}>();
+
 const geoTick = ref(0);
 let unsubscribe: (() => void) | undefined;
-onMounted(() => { unsubscribe = onGeoResolved(() => { geoTick.value++; }); });
-onUnmounted(() => unsubscribe?.());
-const country = computed(() => { void geoTick.value; return resolveCountryInfo(props.meta.region, props.node.publicIp, props.node.name, props.node.hostname); });
-const metrics = computed(() => hostMetrics(props.node, props.now));
-const resources = computed(() => {
-  const h = Object.keys(metrics.value).length ? props.node.heartbeat : undefined;
-  const percent = (v?: number) => typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)}%` : '—';
-  const at = (h?.active_connections_observed_at?.seconds ?? 0) * 1000;
-  const connections = h?.active_connections_measured && h.active_connections_scope === 'proxy_user_sessions_v1' && props.node.enabled && h.core_healthy === true && props.now - at >= -5000 && props.now - at < 45000 ? String(h.active_connections ?? 0) : '—';
-  return [{ label: 'CPU', value: percent(h?.cpu_percent) }, { label: '内存', value: percent(h?.memory_percent) }, { label: '磁盘', value: percent(h?.disk_percent) }, { label: '活跃连接', value: connections }, { label: '网卡接收 / 发送', value: nicRate(metrics.value, 'receive') === '—' && nicRate(metrics.value, 'transmit') === '—' ? '—' : `↓ ${nicRate(metrics.value, 'receive')} / ↑ ${nicRate(metrics.value, 'transmit')}` }, { label: '主机运行时间', value: uptime(metrics.value.host_uptime_seconds) }, { label: '核心运行时间', value: uptime(metrics.value.core_started_at?.seconds === undefined ? undefined : props.now / 1000 - metrics.value.core_started_at.seconds) }];
+onMounted(() => {
+  unsubscribe = onGeoResolved(() => {
+    geoTick.value++;
+  });
 });
-const basics = computed(() => basicFacts([
-  ['主机名', props.node.hostname], ['公网 IP', props.node.publicIp], ['操作系统', props.node.os],
-  ['地区', props.meta.region || (country.value.code ? country.value.flag + ' ' + country.value.name : '')],
-  ['备注', props.meta.remark], ['创建时间', props.node.createdAt ? formatTime(props.node.createdAt) : '']
-]));
+onUnmounted(() => {
+  if (unsubscribe) unsubscribe();
+});
+
+const regionDisplay = computed(() => {
+  void geoTick.value;
+  const adminRegion = props.meta.region?.trim();
+  if (adminRegion) return adminRegion;
+  const info = resolveCountryInfo(props.node.name, props.node.publicIp || props.node.hostname);
+  if (info && info.code !== 'UN') {
+    return `${info.flag} ${info.name}`;
+  }
+  return '—';
+});
+
+const heartbeatRelative = computed(() => {
+  if (props.node.lastHeartbeat) {
+    return relativeHeartbeat(props.node.lastHeartbeat, props.now);
+  }
+  return '—';
+});
+
+const metrics = computed(() => hostMetrics(props.node, props.now));
+
+const uptimeDisplay = computed(() => {
+  return uptime(metrics.value.host_uptime_seconds);
+});
+
+const bootTime = computed(() => {
+  const s = metrics.value.host_uptime_seconds;
+  if (s === undefined || !Number.isFinite(s) || s <= 0) return '—';
+  const bootDate = new Date(props.now - s * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${bootDate.getFullYear()}-${pad(bootDate.getMonth() + 1)}-${pad(bootDate.getDate())} ${pad(bootDate.getHours())}:${pad(bootDate.getMinutes())}:${pad(bootDate.getSeconds())}`;
+});
+
+const connections = computed(() => {
+  const h = Object.keys(metrics.value).length ? props.node.heartbeat : undefined;
+  const at = (h?.active_connections_observed_at?.seconds ?? 0) * 1000;
+  return h?.active_connections_measured && h.active_connections_scope === 'proxy_user_sessions_v1' && props.node.enabled && h.core_healthy === true && props.now - at >= -5000 && props.now - at < 45000 ? String(h.active_connections ?? 0) : '—';
+});
+
 const status = computed(() => serverStatus(props.node, props.now));
-const strip = computed(() => revisionStrip(props.node.heartbeat?.current_revision, props.latestRevision));
 const customNetwork = computed(() => !!(props.node.outboundSourceIp || props.node.outboundInterface || props.node.hostSourceIpv4 || props.node.hostSourceIpv6));
-const health = computed(() => !Object.keys(metrics.value).length ? '—' : props.node.heartbeat?.core_healthy === true ? '健康' : props.node.heartbeat?.core_healthy === false ? props.node.heartbeat.core_error === 'accounting_interrupted' ? '记账中断' : '核心异常' : '—');
+
 defineEmits<{ changed: []; tab: [value: string]; create: [] }>();
-async function copyId() { try { await navigator.clipboard.writeText(props.node.id); showToast('已复制服务器 ID'); } catch { showToast('复制失败，请手动复制 ID', 'error'); } }
+
+async function copyId() {
+  try {
+    await navigator.clipboard.writeText(props.node.id);
+    showToast('已复制服务器 ID');
+  } catch {
+    showToast('复制失败，请手动复制 ID', 'error');
+  }
+}
+
+async function copyIp() {
+  if (!props.node.publicIp) return;
+  try {
+    await navigator.clipboard.writeText(props.node.publicIp);
+    showToast('已复制公网 IP');
+  } catch {
+    showToast('复制失败', 'error');
+  }
+}
+
 const events = computed(() => {
-  const result = props.revisions.slice(0, 5).map(rev => ({ id: String(rev.id), at: rev.createdAt, text: `配置 #${rev.id} · ${{ draft: '草稿', pending: '待确认', success: '应用成功', failed: '失败', rolled_back: '已回滚' }[rev.status] || rev.status} · ${rev.summary} ${rev.resultCode || ''}` }));
-  if (props.node.heartbeat?.core_healthy === false) result.unshift({ id: 'core', at: props.node.lastHeartbeat, text: `核心异常：${props.node.heartbeat.core_error === 'accounting_interrupted' ? '记账中断' : '健康检查未通过'}` });
-  return result.slice(0, 5);
+  const result = props.revisions.slice(0, 5).map(rev => ({
+    id: String(rev.id),
+    at: rev.createdAt,
+    text: `配置 #${rev.id} · ${{ draft: '草稿', pending: '待确认', success: '应用成功', failed: '失败', rolled_back: '已回滚' }[rev.status] || rev.status} · ${rev.summary} ${rev.resultCode || ''}`
+  }));
+  return result;
 });
 </script>

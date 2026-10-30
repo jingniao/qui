@@ -2,13 +2,13 @@
 
 **文档版本：** V1.2  
 **编制日期：** 2026 年 8 月 20 日  
-**本次修订：** 2026-10-28（v1.1 Phase 11，文档与本地回归；尚未发布 v1.1.0）  
+**本次修订：** 2026-10-30（v1.1 与 v1.2 的工作合并为一个 v1.2.0 发布，不再单独发布 v1.1.0；GOST 推迟、S1 取消；尚未发布）  
 **项目状态：** 核心业务已实现，按轻量重构计划收敛完成；v1.0.0 已于 2026-10 作为 GitHub 发布出版，v1.0.1（节点 Agent 支持 Alpine/OpenRC 与实机验收修复）于 2026-10-23 发布，一键安装与 qui-update 的失败处理与自动回滚于 2026-10-23 作为 v1.0.2 发布，qui-update 的中断自动恢复（含断电）与面板跨迁移降级于 2026-10-23 作为 v1.0.3 发布，强制出站 helper 连续失败后不再执行新配置的问题于 2026-10-23 作为 v1.0.4 发布，Alpine 节点的 sing-box（musl 构建）与钉证书 QUIC 端点的 URI 订阅于 2026-10-24 作为 v1.0.5 发布，核心运行不了保留修订时 Agent 反复重启、连不上面板的问题于 2026-10-24 作为 v1.0.6 发布，删除用户后流量上传卡死、回滚恢复已禁用用户、快捷用户接入的凭据被自动修订删除、重连后核心更新结果丢失与 supervisor 绕过恢复退避等问题于 2026-10-25 作为 v1.0.7 发布，删除用户或设备后自动撤销凭据、恢复备份保留凭据墓碑、核心更新回执与结果重发、备份校验与入站启用意图等修复于 2026-10-26 作为 v1.0.8 发布，面板停止服务（含进程内恢复备份）时停掉自动额度版本的定时器、Agent 日志 `retry_after` 改为可读时长于 2026-10-26 作为 v1.0.9 发布；功能与交付验收阶段（状态核对：2026-10-26；三台主机实机验收进行中，arm64 未验证，V1 未完成）  
 **目标用户规模：** 1～10 名内部用户  
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
 
-当前工作入口见 [v1.1 计划](docs/v1.1-plan.md) 与 [进度记录](docs/v1.1-progress.md)，历史轻量化决策见 [轻量重构计划](docs/lightweight-refactor-plan.md)。系统组成见 [架构总览](docs/architecture.md)，部署与运维见 [部署与升级](docs/deployment.md) 和 [运维手册](docs/operations.md)，完成标准见 [验收矩阵](docs/v1-acceptance.md)。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；实现已完成本地审查，原生核心 CI、面板主机 -race、RC 与发布仍待验收，不表示 v1.1.0 已发布。
+当前工作入口见 [v1.1 计划](docs/v1.1-plan.md) 与 [进度记录](docs/v1.1-progress.md)，历史轻量化决策见 [轻量重构计划](docs/lightweight-refactor-plan.md)。系统组成见 [架构总览](docs/architecture.md)，部署与运维见 [部署与升级](docs/deployment.md) 和 [运维手册](docs/operations.md)，完成标准见 [验收矩阵](docs/v1-acceptance.md)。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；实现已完成本地审查，原生核心 CI、面板主机 -race、RC 与发布仍待验收。v1.2 的范围与结果见 [v1.2 计划](docs/v1.2-plan.md) 与 [v1.2 变更报告](docs/v1.2-ui-change-report.md)；v1.1 与 v1.2 合并为 v1.2.0 发布（尚未发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
 
 ## 变更记录
 
@@ -306,7 +306,7 @@ Internet
 
 ## 4.4 代理核心
 
-K3a Agent 本地实现完成（2026-10-29，原生 Linux/root 验收待执行）：`cores: [{name, path}]` 支持 xray 与 sing-box，首项为兼容主核心；旧标量配置仍映射为一个核心。所有生产节点使用 MultiRuntime 与 `runtime/<core>/`。通过校验过的 component 核心更新可添加缺失核心；`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写。GOST 尚未实现；协议、存储兼容与 K3b 要求见 [K3a Agent 报告](docs/v1.2-k3a-agent-report.md)。
+K3a Agent 本地实现完成（2026-10-29，原生 Linux/root 验收待执行）：`cores: [{name, path}]` 支持 xray 与 sing-box，首项为兼容主核心；旧标量配置仍映射为一个核心。所有生产节点使用 MultiRuntime 与 `runtime/<core>/`。通过校验过的 component 核心更新可添加缺失核心；`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写。GOST 推迟，不在 v1.2.0 范围内；协议、存储兼容与 K3b 要求见 [K3a Agent 报告](docs/v1.2-k3a-agent-report.md)。
 
 K3b 面板侧（2026-10-29，本地实现、未发布）：面板把节点建模为“已上报启用的核心集合”。`Welcome.multi_core_supported` 只对声明支持的 Agent 为真；未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成，缺测字段保持 `null` 而不是 0/健康。入站归属的核心由 `inbounds.core` 保存（空串＝当前主核心），删除或添加核心任务未落定期间该组件不可选（`core_selectionBlocked`）。面板不接受未上报启用的核心，也不容忍跨核心/转发的端口重复。详见 [K3b 面板报告](docs/v1.2-k3b-panel-report.md)。
 

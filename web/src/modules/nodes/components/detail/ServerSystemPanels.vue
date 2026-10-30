@@ -1,6 +1,6 @@
 <template>
-  <!-- 3 System Performance Cards (Full Width 3 Columns, Perfectly Symmetrical) -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-4 items-stretch">
+  <!-- 3 System Performance Cards (2 columns below xl, 3 columns from xl) -->
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4 items-stretch">
     <!-- 1. 硬件信息 -->
     <section class="panel-card p-4 sm:p-4.5 bg-white flex flex-col justify-between space-y-3 shadow-2xs">
       <!-- Card Header -->
@@ -26,7 +26,7 @@
       <!-- Upper Hero Metric Box -->
       <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-3 space-y-2">
         <div class="flex items-center justify-between text-xs">
-          <span class="text-ios-secondary font-medium truncate max-w-[180px]" :title="cpuModelName">
+          <span class="text-ios-secondary font-medium truncate" :title="cpuModelName">
             {{ cpuModelName }}
           </span>
           <span class="font-bold text-ios-label tabular-nums">{{ cpuPercentDisplay }}</span>
@@ -41,24 +41,24 @@
       </div>
 
       <!-- Lower 3-Column Sub-grid: 架构 / 内核 / GPU -->
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">架构</div>
-          <p class="text-xs font-semibold text-ios-label tabular-nums truncate" :title="architecture">
+          <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="architecture">
             {{ architecture }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">内核</div>
-          <p class="text-xs font-semibold text-ios-label tabular-nums truncate" :title="kernel">
+          <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="kernel">
             {{ kernel }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">GPU</div>
-          <p class="text-xs font-semibold text-ios-label tabular-nums truncate" :title="gpu">
+          <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="gpu">
             {{ gpu }}
           </p>
         </div>
@@ -108,24 +108,24 @@
       </div>
 
       <!-- Lower 3-Column Sub-grid: 内存 / 内存交换 / 硬盘 -->
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">内存</div>
-          <p class="text-xs font-semibold text-ios-label tabular-nums truncate" :title="memoryDisplay">
+          <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="memoryDisplay">
             {{ memoryDisplay }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">内存交换</div>
-          <p class="text-xs font-semibold text-ios-label tabular-nums truncate" :title="swapDisplay">
+          <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="swapDisplay">
             {{ swapDisplay }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">硬盘</div>
-          <p class="text-xs font-semibold text-ios-label tabular-nums truncate" :title="diskDisplay">
+          <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="diskDisplay">
             {{ diskDisplay }}
           </p>
         </div>
@@ -133,7 +133,7 @@
     </section>
 
     <!-- 3. 网络信息 -->
-    <section class="panel-card p-4 sm:p-4.5 bg-white flex flex-col justify-between space-y-3 shadow-2xs">
+    <section class="panel-card p-4 sm:p-4.5 bg-white flex flex-col justify-between space-y-3 shadow-2xs md:col-span-2 xl:col-span-1">
       <!-- Card Header -->
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
@@ -151,7 +151,7 @@
       <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-3 space-y-2">
         <div class="flex items-center justify-between text-xs">
           <span class="text-ios-secondary font-medium">实时速率</span>
-          <div class="flex items-center gap-2.5 tabular-nums font-semibold text-xs">
+          <div class="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 tabular-nums font-semibold text-xs">
             <span class="text-emerald-600 font-medium">▲ {{ nicRate(metrics, 'transmit') }}</span>
             <span class="text-ios-blue font-medium">▼ {{ nicRate(metrics, 'receive') }}</span>
           </div>
@@ -172,24 +172,24 @@
       </div>
 
       <!-- Lower 3-Column Sub-grid: 总流量 / 上行 / 下行 -->
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">总流量</div>
-          <p class="text-xs font-semibold text-ios-label tabular-nums truncate" :title="totalTrafficDisplay">
+          <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="totalTrafficDisplay">
             {{ totalTrafficDisplay }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">上行</div>
-          <p class="text-xs font-semibold text-emerald-600 tabular-nums truncate" :title="formatCompactBytes(uploadBytes)">
+          <p class="text-xs font-semibold text-emerald-600 tabular-nums break-words" :title="formatCompactBytes(uploadBytes)">
             ↑ {{ formatCompactBytes(uploadBytes) }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">下行</div>
-          <p class="text-xs font-semibold text-ios-blue tabular-nums truncate" :title="formatCompactBytes(downloadBytes)">
+          <p class="text-xs font-semibold text-ios-blue tabular-nums break-words" :title="formatCompactBytes(downloadBytes)">
             ↓ {{ formatCompactBytes(downloadBytes) }}
           </p>
         </div>

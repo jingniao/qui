@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <PageHeader title="数据备份与恢复" parent="系统" description="创建可携带到其他机器的加密备份，并验证数据库、配置和密钥材料。"><template #actions><button class="ios-btn-primary" @click="openCreate">创建加密备份</button><button class="ios-btn-secondary" @click="openImport">导入加密备份</button><button class="ios-btn-secondary" @click="load">刷新</button></template></PageHeader>
-    <section class="panel-card p-5 space-y-2 text-sm"><p>手动备份已接入真实服务，包含 SQLite 一致性快照、启动配置、中央证书与原始配置密钥，以及本地规则文件。</p><p class="text-gray-500">手动备份使用创建时设置的独立密码；自动备份使用系统设置中的密码，加密保存供后台执行。请单独妥善保管密码，下载的是加密文件。</p><p class="text-gray-500">自动备份与保留轮换可在系统设置中配置。完整恢复仍需核对节点账本与已消费额度，托管中央服务可在恢复预览后提交恢复；服务会短暂重启，旧会话失效，节点继续使用最后成功配置。</p></section>
+    <section class="panel-card p-5 space-y-2 text-sm"><p>手动备份已接入真实服务，包含 SQLite 一致性快照、启动配置、中央证书与原始配置密钥，以及本地规则文件。</p><p class="text-gray-500">手动备份使用创建时设置的独立密码；自动备份使用系统设置中的密码，加密保存供后台执行。请单独妥善保管密码，下载的是加密文件。</p><p class="text-gray-500">自动备份与保留轮换可在系统设置中配置。完整恢复后请核对用户额度与节点运行配置，托管中央服务可在恢复预览后提交恢复；服务会短暂重启，旧会话失效，节点继续使用最后成功配置。</p></section>
     <RestoreRecordsPanel />
     <p v-if="isOwner" class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">较早备份中的CA可能已经过期。可在独立私有目录使用固定历史档案检查命令保存完整认证报告；历史检查通过不授予恢复、安装或启动许可，也不更新本页“上次内容验证”。需要有效的正式信任接续后才能执行恢复，请保留原材料。</p>
     <ErrorState v-if="error" :message="error" @retry="load" /><LoadingSkeleton v-else-if="loading && !items.length" /><EmptyState v-else-if="!items.length" title="暂无系统备份" description="创建并验证首份加密备份，下载后保存到独立存储。" />

@@ -7,7 +7,10 @@
 //   2. the canvas "我的自建节点" library is built from the panel's inbounds and a
 //      dropped item still resolves to an `inbound:` reference;
 //   3. the empty state covers the workspace and hides the scheme inspector;
-//   4. an import source's derived kind decides 机场订阅 vs 单独导入.
+//   4. an import source's derived kind decides 机场订阅 vs 单独导入;
+//   5. below xl the library and the inspector are overlay drawers and the studio
+//      toolbar wraps instead of clipping (desktop geometry stays at xl, with a
+//      truncated scheme name at exactly 1280 px).
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
@@ -127,10 +130,47 @@ assert.ok(canvas.includes('该自建入站尚未载入，请刷新后重试'));
 // `bg-ios-background` is not a defined Tailwind colour (nothing was painted), and
 // the inspector used to show 方案名称/删除此方案 for a scheme that does not exist.
 assert.equal(canvas.includes('bg-ios-background'), false);
-assert.ok(canvas.includes('v-if="!currentScheme.id"'));
+assert.ok(canvas.includes('v-if="schemesLoading || schemesLoadError || !currentScheme.id"'));
 assert.ok(canvas.includes('absolute inset-0 z-40 bg-[#F5F5F7]'));
 assert.ok(canvas.includes('v-else-if="!currentScheme.id"'));
 assert.match(canvas, /<div v-if="currentScheme\.id" class="pt-2">\s*<button\s+type="button"\s+@click="confirmDeleteScheme = true"/);
+
+// Null/missing arrays from historical rows must not discard an entire page.
+const schemeContext = { servers: [], inbounds: [], imported: [] };
+for (const layout of [undefined, null, {}, { instances: null, connections: null }, { instances: [], connections: null }, { instances: null, connections: [] }]) {
+  const mapped = api.canvasSchemeToRelayScheme({ id: 'old', name: 'old', execution: 'server', layout, publishedAt: '', updatedAt: '' }, schemeContext);
+  assert.deepEqual(mapped.nodes, []);
+  assert.deepEqual(mapped.connections, []);
+}
+const nullableMetadata = api.canvasSchemeToRelayScheme({
+  id: 'populated', name: 'populated', execution: 'server', publishedAt: '', updatedAt: '',
+  client_published_layout: null, published_layout: null, tunnels: null, ports: null,
+  layout: { instances: [{ instanceId: 'a', ref: 'server:missing', x: 0, y: 0, role: 'entry', listenPort: null, targetPort: null }], connections: [] }
+}, schemeContext);
+assert.equal(nullableMetadata.id, 'populated');
+assert.equal(nullableMetadata.nodes.length, 1);
+assert.deepEqual(nullableMetadata.connections, []);
+assert.match(proxyNodesSource, /canvasAPI\.create\(\{ name, execution: executionLocation, layout: \{ instances: \[\], connections: \[\] \}/);
+assert.match(canvas, /v-else-if="schemesLoadError"[\s\S]*?@click="reloadSchemes">重试<\/button>[\s\S]*?<template v-else>[\s\S]*?暂无中转方案/);
+assert.match(canvas, /async function createNewScheme\(\) \{\s*if \(schemesLoading\.value \|\| schemesLoadError\.value\) return;/);
+// Exercise the real reload function: failure persists until a successful retry,
+// including when an older populated store is still present behind the overlay.
+const reloadSource = canvas.slice(canvas.indexOf('async function reloadSchemes()'), canvas.indexOf('// An earlier build kept schemes in this browser. Offer them once;'));
+const reloadHarness = await load(transpile(`
+  export const schemesLoading = { value: true }, schemesLoadError = { value: '' };
+  export let fail = true;
+  export function recover() { fail = false; }
+  const canvasContext = () => ({}), showToast = () => {};
+  async function loadCanvasSchemes() { if (fail) throw new Error('network down'); }
+  export ${reloadSource}
+`));
+await reloadHarness.reloadSchemes();
+assert.equal(reloadHarness.schemesLoading.value, false);
+assert.match(reloadHarness.schemesLoadError.value, /network down/);
+reloadHarness.recover();
+await reloadHarness.reloadSchemes();
+assert.equal(reloadHarness.schemesLoading.value, false);
+assert.equal(reloadHarness.schemesLoadError.value, '');
 
 // --------------------------------------------------------------- 4. source kinds
 // proxyNodes.ts (store + guess) and importApi.ts are transpiled with their
@@ -190,6 +230,169 @@ assert.ok(listPage.includes("const manualSources = computed(() => proxyNodeStore
 assert.ok(listPage.includes('已添加的导入来源（{{ proxyNodeStore.subscriptions.length }}）'));
 assert.ok(listPage.includes("v-if=\"sub.kind !== 'content'\""));
 assert.ok(listPage.includes('@click="deleteSubscription(sub.id)"'));
+// ------------------------------------------------- 5. narrow-screen studio layout
+// /proxy/relay is a desktop studio, but the shell sidebar takes 272 px: at a
+// 1120 px viewport the studio is only ~850 px, so the toolbar overlapped itself
+// (scheme capsule over 校验链路, the execution-mode control pushed onto the library
+// header) and both docked panels left the canvas with nothing. Below xl (1280 px)
+// both panels are overlay drawers — closed by default, one at a time — and the
+// toolbar wraps; from xl up it is one row again with a truncated scheme name.
+const header = canvas.slice(canvas.indexOf('<header'), canvas.indexOf('</header>'));
+const asideOf = label => {
+  const at = canvas.indexOf(`aria-label="${label}"`);
+  assert.ok(at > 0, `the ${label} aside is missing`);
+  return canvas.slice(canvas.lastIndexOf('<aside', at), canvas.indexOf('</aside>', at));
+};
+
+// The one-shot 56 px row that clipped the actions is gone; xl keeps exactly h-14,
+// so below xl the bar grows with its rows instead of spilling onto the library.
+assert.equal(header.includes('class="h-14 px-4'), false);
+assert.ok(header.includes('flex flex-wrap xl:flex-nowrap items-center justify-between'));
+assert.ok(header.includes('min-h-[3.5rem] xl:h-14 xl:py-0'));
+// Two wrapping rows below xl: the action group goes to its own row (ml-auto keeps
+// it right aligned there) instead of sliding under the scheme capsule.
+assert.ok(header.includes('class="flex flex-wrap xl:flex-nowrap items-center gap-2.5 min-w-0 xl:flex-1"'));
+assert.ok(header.includes('class="flex items-center gap-2 shrink-0 ml-auto"'));
+// Icon-only actions keep an accessible name once their labels are hidden, and the
+// compact padding/min-width only applies before sm, so xl is untouched.
+assert.match(header, /aria-label="校验链路"/);
+assert.match(header, /aria-label="保存草稿"/);
+assert.equal((header.match(/!min-w-0 !px-2 sm:!min-w-\[4\.5rem\] sm:!px-5/g) || []).length, 2);
+// At exactly 1280 px (studio ~1008 px) the single row cannot hold every label, so
+// the scheme name is the one thing that truncates: capped max-width per breakpoint,
+// a min-w-0 capsule that may shrink, and the full name in the title tooltip.
+assert.ok(header.includes('class="relative min-w-0" @click.stop'));
+assert.ok(header.includes('max-w-[140px] sm:max-w-[200px] md:max-w-[260px] xl:max-w-[7rem] 2xl:max-w-[16.25rem]'));
+assert.ok(header.includes(':title="currentScheme.name ? \'当前方案：\' + currentScheme.name + \'（点击切换）\' : \'切换中转方案\'"'));
+// The execution-mode control stays a normal, non-positioned child of the toolbar
+// (it used to render as a second line over the library panel header).
+const execSwitcher = header.slice(
+  header.indexOf('Refined Segmented Execution Location Switcher'),
+  header.indexOf('Local migration notice')
+);
+assert.ok(execSwitcher.length > 0, 'the execution-mode switcher is missing');
+assert.equal(/absolute|fixed/.test(execSwitcher), false);
+assert.ok(execSwitcher.includes('class="hidden md:flex items-center p-1 rounded-xl bg-black/[0.03] border border-black/[0.06] text-xs shadow-2xs shrink-0"'));
+assert.ok(execSwitcher.includes('hidden md:inline xl:hidden 2xl:inline">客户端执行<'));
+assert.ok(execSwitcher.includes('hidden xl:inline 2xl:hidden">客户端<'));
+assert.ok(execSwitcher.includes('hidden md:inline xl:hidden 2xl:inline">服务器执行<'));
+assert.ok(execSwitcher.includes('hidden xl:inline 2xl:hidden">服务器<'));
+// 检查 is the same action as 校验链路, so its duplicate only returns from 2xl up:
+// that is the room the scheme name gets back at exactly 1280 px. The <span> decides
+// it (a bare hidden on the control would lose to the global .ios-btn-secondary
+// display rule, which is what made the old md:inline duplicate always visible).
+assert.ok(header.includes('<span class="hidden 2xl:inline">'));
+assert.ok(header.includes('<button type="button" class="ios-btn-secondary !py-1 text-xs" @click="checkScheme">检查</button>'));
+assert.equal(header.includes('ios-btn-secondary !py-1 text-xs hidden'), false);
+// Every toggle goes through the helpers that keep only one drawer open below xl.
+assert.ok(header.includes('@click="toggleLeftPanel()"'));
+assert.ok(header.includes('@click="toggleRightPanel()"'));
+assert.equal(header.includes('@click="leftPanelOpen = !leftPanelOpen"'), false);
+assert.equal(header.includes('@click="rightPanelOpen = !rightPanelOpen"'), false);
+assert.ok(canvas.includes('@click="openLeftPanel()"'));
+assert.ok(canvas.includes('@click="openRightPanel()"'));
+// Nothing in the studio still answers to the old lg breakpoint (rounded-lg and the
+// Modal's max-width="lg" prop are unrelated, so only the class prefix is checked).
+assert.equal(canvas.includes('lg:'), false, 'the compact breakpoint must be xl everywhere');
+
+const libraryAside = asideOf('拓扑资源库');
+// Drawer below xl, in-flow column at xl and wider (identical desktop geometry).
+assert.ok(libraryAside.includes('absolute inset-y-0 left-0 z-30 w-[min(18rem,85vw)] xl:relative xl:inset-auto xl:z-20 xl:shrink-0'));
+assert.ok(libraryAside.includes("leftPanelOpen ? 'translate-x-0 xl:w-72'"));
+assert.ok(libraryAside.includes("'-translate-x-full pointer-events-none xl:pointer-events-auto xl:translate-x-0 xl:w-0 xl:border-r-0'"));
+// The inner columns fill the drawer below xl and keep their desktop width at xl.
+assert.equal((libraryAside.match(/w-full xl:w-72/g) || []).length, 2);
+assert.equal(/(?<!xl:)w-72/.test(libraryAside), false);
+
+const inspectorAside = asideOf('属性检查器');
+assert.ok(inspectorAside.includes('absolute inset-y-0 right-0 z-30 w-[min(20rem,85vw)] xl:relative xl:inset-auto xl:z-20 xl:shrink-0'));
+assert.ok(inspectorAside.includes("rightPanelOpen ? 'translate-x-0 xl:w-80'"));
+assert.ok(inspectorAside.includes("'translate-x-full pointer-events-none xl:pointer-events-auto xl:translate-x-0 xl:w-0 xl:border-l-0'"));
+assert.equal((inspectorAside.match(/w-full xl:w-80/g) || []).length, 2);
+assert.equal(/(?<!xl:)w-80/.test(inspectorAside), false);
+
+// One backdrop closes the open drawer. z-[25] sits above the canvas controls
+// (z-20) and below the drawers (z-30), and the no-scheme overlay (z-40) still
+// owns the workspace.
+const backdropAt = canvas.indexOf('@click="closeDrawers"');
+assert.ok(backdropAt > 0, 'the drawer backdrop is missing');
+const backdrop = canvas.slice(canvas.lastIndexOf('<div', backdropAt), backdropAt + 40);
+assert.ok(backdrop.includes('v-if="leftPanelOpen || rightPanelOpen"'));
+assert.ok(backdrop.includes('class="xl:hidden absolute inset-0 z-[25] bg-black/25"'));
+assert.equal(canvas.includes('absolute inset-0 z-40 bg-[#F5F5F7]'), true);
+
+// Closed by default below xl, both open at xl, and a resize across xl resets the
+// mode so a desktop panel is never left covering the canvas as a drawer.
+assert.ok(canvas.includes("const COMPACT_QUERY = '(max-width: 1279.98px)';"));
+assert.ok(canvas.includes('window.matchMedia(COMPACT_QUERY)'));
+assert.ok(canvas.includes('const compactViewport = ref(compactMedia ? compactMedia.matches : false);'));
+assert.ok(canvas.includes('const leftPanelOpen = ref(!compactViewport.value);'));
+assert.ok(canvas.includes('const rightPanelOpen = ref(!compactViewport.value);'));
+assert.ok(canvas.includes("compactMedia?.addEventListener('change', onCompactViewportChange);"));
+assert.ok(canvas.includes("compactMedia?.removeEventListener('change', onCompactViewportChange);"));
+assert.match(canvas, /function toggleLeftPanel\(\) \{\s*leftPanelOpen\.value = !leftPanelOpen\.value;\s*if \(leftPanelOpen\.value && compactViewport\.value\) rightPanelOpen\.value = false;/);
+assert.match(canvas, /function toggleRightPanel\(\) \{\s*rightPanelOpen\.value = !rightPanelOpen\.value;\s*if \(rightPanelOpen\.value && compactViewport\.value\) leftPanelOpen\.value = false;/);
+// A canvas tap still opens the inspector at xl, but never stacks a drawer over the
+// topology that was just tapped below xl (the floating 节点属性 button is the way in).
+assert.match(canvas, /function revealInspector\(\) \{\s*if \(!compactViewport\.value\) rightPanelOpen\.value = true;/);
+const selectNodeBody = canvas.slice(canvas.indexOf('function selectNode'), canvas.indexOf('function selectConnection'));
+assert.ok(selectNodeBody.includes('revealInspector();'));
+assert.equal(selectNodeBody.includes('rightPanelOpen.value = true'), false);
+// The canvas itself stays a full-width flex child: the drawers overlay it.
+assert.ok(canvas.includes('ref="canvasViewport" class="flex-1 bg-[#F9F9FB]'));
+// The bottom hint may only appear where the canvas is wide enough for it and the
+// zoom pill: from sm below xl (the panels are drawers, so the canvas has the full
+// studio width) and again from 2xl (both panels docked, canvas ~656 px). It is
+// suppressed at xl–2xl, where the sandbox is ~400 px and the two overlapped, and its
+// max-width keeps the last line clear of the pill.
+assert.ok(canvas.includes('hidden sm:flex xl:hidden 2xl:flex absolute bottom-4 left-4 max-w-[calc(100%-12rem)] bg-black/70'));
+assert.ok(canvas.includes('absolute bottom-4 right-4 bg-white/90'));
+
+// The drawer state machine is plain code, so pull the five helpers out of the page
+// and run them against fake refs: "one drawer at a time, closed below xl" is then a
+// behaviour check instead of only a string check.
+const drawerSource = canvas.slice(
+  canvas.indexOf('function applyCompactViewport'),
+  canvas.indexOf('function setExecutionLocation')
+);
+assert.ok(drawerSource.includes('function revealInspector'), 'drawer helpers are missing');
+const drawer = await load(transpile(`
+const compactViewport = { value: false };
+const leftPanelOpen = { value: true };
+const rightPanelOpen = { value: true };
+${drawerSource}
+export { compactViewport, leftPanelOpen, rightPanelOpen, applyCompactViewport,
+  toggleLeftPanel, toggleRightPanel, openLeftPanel, openRightPanel, closeDrawers, revealInspector };
+`));
+const state = () => [drawer.compactViewport.value, drawer.leftPanelOpen.value, drawer.rightPanelOpen.value];
+
+drawer.applyCompactViewport(true);
+assert.deepEqual(state(), [true, false, false], 'below xl both drawers start closed');
+// Opening one closes the other (they would otherwise stack at 320–509 px).
+drawer.toggleLeftPanel();
+assert.deepEqual(state(), [true, true, false]);
+drawer.toggleRightPanel();
+assert.deepEqual(state(), [true, false, true]);
+drawer.openLeftPanel();
+assert.deepEqual(state(), [true, true, false]);
+drawer.openRightPanel();
+assert.deepEqual(state(), [true, false, true]);
+// Tapping a node never drops a drawer over the canvas below xl…
+drawer.revealInspector();
+assert.deepEqual(state(), [true, false, true]);
+// …and the backdrop closes whatever is open.
+drawer.closeDrawers();
+assert.deepEqual(state(), [true, false, false]);
+// Desktop keeps the studio: both columns open, tap-to-reveal works again.
+drawer.applyCompactViewport(false);
+assert.deepEqual(state(), [false, true, true]);
+drawer.closeDrawers();
+drawer.revealInspector();
+assert.deepEqual(state(), [false, false, true], 'desktop still auto-opens the inspector');
+// A repeat notification for the current mode must not undo a manual collapse.
+drawer.applyCompactViewport(false);
+assert.deepEqual(state(), [false, false, true]);
+
 console.log('All canvas-library self-tests passed');
 
 assert.ok(canvas.includes('selfHostedResourceId(inbound) === node.resourceId'));

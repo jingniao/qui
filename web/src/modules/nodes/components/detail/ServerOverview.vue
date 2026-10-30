@@ -206,6 +206,7 @@ import { type NodeMeta, resolveCountryInfo, onGeoResolved, cleanRemark, formatPo
 import { hostMetrics, uptime } from '../../metrics';
 import { formatTime } from '../../../../app/auth';
 import { serverStatus, relativeHeartbeat } from '../serverListModel';
+import { revisionEventText } from './serverDetailModel';
 import { nodeCores } from '../../coreSummary';
 import type { NodeGroup } from '../../groupsApi';
 import StatusBadge from '../../../../components/StatusBadge.vue';
@@ -306,7 +307,7 @@ const events = computed(() => {
   const result = props.revisions.slice(0, 5).map(rev => ({
     id: String(rev.id),
     at: rev.createdAt,
-    text: `配置 #${rev.id} · ${{ draft: '草稿', pending: '待确认', success: '应用成功', failed: '失败', rolled_back: '已回滚' }[rev.status] || rev.status} · ${rev.summary} ${rev.resultCode || ''}`
+    text: revisionEventText(rev)
   }));
   return result;
 });

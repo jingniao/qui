@@ -219,6 +219,7 @@ func (s *Service) SaveCanvasTunnel(ctx context.Context, tunnelID string, input C
 // Reference-only connections are hydrated from the resource on every read and
 // plan. Inline edits can only update a tunnel created for this same scheme.
 func (r *Repository) resolveCanvasLayout(ctx context.Context, execution string, layout CanvasLayout) (CanvasLayout, error) {
+	layout = layout.normalized()
 	if execution != "server" {
 		for _, c := range layout.Connections {
 			if c.TunnelID != "" {
@@ -231,7 +232,7 @@ func (r *Repository) resolveCanvasLayout(ctx context.Context, execution string, 
 	for _, i := range layout.Instances {
 		instances[i.InstanceID] = i.Ref
 	}
-	layout.Connections = append([]CanvasConnection(nil), layout.Connections...)
+	layout.Connections = append([]CanvasConnection{}, layout.Connections...)
 	for n, c := range layout.Connections {
 		if c.TunnelID == "" {
 			continue

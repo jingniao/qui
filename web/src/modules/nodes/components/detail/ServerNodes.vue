@@ -23,6 +23,7 @@
               <td>
                 {{ item.name }}
                 <ProtocolBadge :protocol="item.protocol" />
+                <ProtocolBadge v-if="inboundCoreName(item)" :protocol="inboundCoreName(item)" />
               </td>
               <td class="font-mono tabular-nums">{{ item.listen }}:{{ item.port }} · {{ listenNetworks(item).join('/').toUpperCase() }}</td>
               <td>{{ item.internalRelay ? '内部中转' : item.allowedUserIds.length ? `${item.allowedUserIds.length} 位指定用户` : '全部授权用户' }}</td>
@@ -77,6 +78,10 @@ import DataTable from '../../../../components/DataTable.vue';
 const props = defineProps<{ node: NodeView; unpublished?: boolean }>();
 const emit = defineEmits<{ edit: [item: Inbound | null]; publish: []; saved: [] }>();
 const busy = ref(false);
+function inboundCoreName(item: Inbound): string {
+  const core = item.core || props.node.capabilities?.core_name || props.node.capabilities?.cores?.[0]?.name;
+  return core === 'xray' ? 'Xray' : core === 'sing-box' ? 'sing-box' : '';
+}
 async function toggle(item: Inbound) {
   if (busy.value || !isOwner.value || props.node.deletedAt) return;
   busy.value = true; error.value = '';

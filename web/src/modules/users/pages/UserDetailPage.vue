@@ -117,8 +117,13 @@
                 </span>
               </div>
 
-              <div class="mt-3 text-lg font-bold text-ios-label tabular-nums tracking-tight truncate">
-                {{ user.expiresAt ? formatTime(user.expiresAt).slice(0, 16) : '永不过期' }}
+              <div class="mt-3 tracking-tight">
+                <div class="text-lg font-bold text-ios-label tabular-nums whitespace-nowrap">
+                  {{ user.expiresAt ? (expiryParts.date || '—') : '永不过期' }}
+                </div>
+                <div v-if="user.expiresAt" class="text-xs font-semibold text-ios-secondary tabular-nums mt-0.5">
+                  {{ expiryParts.time }}
+                </div>
               </div>
             </div>
 
@@ -157,7 +162,7 @@
             <div>
               <div class="flex items-center justify-between">
                 <span class="text-xs font-semibold text-ios-tertiary">账号状态</span>
-                <StatusBadge :status="user.status" />
+                <StatusBadge :status="effectiveStatus" />
               </div>
 
               <div class="mt-3 text-base font-bold text-ios-label truncate">
@@ -603,7 +608,7 @@ import { nodeAPI, type NodeView } from '../../nodes/api';
 import { accessAPI, type AccessRecord } from '../../access/api';
 import { request, APIError, type Page } from '../../../app/apiClient';
 import { authState, formatTime } from '../../../app/auth';
-import { localInput, utcInput } from '../../../app/time';
+import { localInput, utcInput, formatMinuteParts } from '../../../app/time';
 import { generateQRCodeSVG } from '../../../app/qrcode';
 import { showToast } from '../../../app/api';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -707,6 +712,18 @@ const expiryCountdownText = computed(() => {
   if (diff < 0) return '已过期';
   const days = Math.floor(diff / (1000 * 3600 * 24));
   return `还剩 ${days} 天到期`;
+});
+
+// Narrow KPI card: the date is the headline and the time sits on a second line so
+// nothing is clipped at desktop widths.
+const expiryParts = computed(() => formatMinuteParts(user.value?.expiresAt || ''));
+
+// Same rule as the user list: an active user past expiresAt shows as expired
+// before the backend's state machine has caught up.
+const effectiveStatus = computed(() => {
+  const u = user.value;
+  if (!u) return '';
+  return u.status === 'active' && u.expiresAt && Date.parse(u.expiresAt) <= Date.now() ? 'expired' : u.status;
 });
 
 const accountStatusText = computed(() => {

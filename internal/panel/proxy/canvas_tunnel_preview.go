@@ -6,7 +6,8 @@ import (
 )
 
 func (r *Repository) attachInlineTunnelIDs(ctx context.Context, schemeID string, layout *CanvasLayout) error {
-	layout.Connections = append([]CanvasConnection(nil), layout.Connections...)
+	*layout = layout.normalized()
+	layout.Connections = append([]CanvasConnection{}, layout.Connections...)
 	if schemeID == "" {
 		return nil
 	}

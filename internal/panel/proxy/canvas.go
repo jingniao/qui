@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -39,6 +40,25 @@ var ErrDuplicateSchemeName = errors.New("canvas scheme name already in use")
 type CanvasLayout struct {
 	Instances   []CanvasInstance   `json:"instances"`
 	Connections []CanvasConnection `json:"connections"`
+}
+
+// normalized keeps empty collections stable across old rows, K4 projections,
+// recovery and publication snapshots. A layout always exposes JSON arrays.
+func (layout CanvasLayout) normalized() CanvasLayout {
+	if layout.Instances == nil {
+		layout.Instances = []CanvasInstance{}
+	}
+	if layout.Connections == nil {
+		layout.Connections = []CanvasConnection{}
+	}
+	return layout
+}
+
+func (layout CanvasLayout) MarshalJSON() ([]byte, error) {
+	// Only customize encoding: strict request/stored-row decoding must continue
+	// rejecting unknown fields, including those nested inside the layout.
+	type wireLayout CanvasLayout
+	return json.Marshal(wireLayout(layout.normalized()))
 }
 
 // CanvasInstance is one box on the canvas. Ref is server:<nodeId>,

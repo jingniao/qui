@@ -19,8 +19,8 @@
       <h3 class="font-semibold text-ios-label">白名单参数</h3>
       <p class="text-xs text-ios-secondary">草稿尚未应用。提交会替换整个期望配置，留空的旧参数将恢复初始值。算法是否可用由服务器校验；tcp_rmem / tcp_wmem 只提交最大值，Agent 保留前两项。</p>
       <div v-if="canEdit" class="flex flex-wrap gap-2">
-        <button v-for="preset in tuningPresets" :key="preset.name" type="button" class="ios-btn-secondary" @click="draft = { ...preset.settings }">{{ preset.name }}</button>
-        <button type="button" class="ios-btn-secondary" @click="draft = { ...state.desired }">载入期望配置为草稿</button>
+        <button v-for="preset in tuningPresets" :key="preset.name" type="button" class="ios-btn-secondary" @click="draft = tuningDraft(preset.settings)">{{ preset.name }}</button>
+        <button type="button" class="ios-btn-secondary" @click="draft = tuningDraft(state.desired)">载入期望配置为草稿</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs text-left">
@@ -33,7 +33,6 @@
               <td class="p-2">
                 <select v-if="field.choices" v-model="draft[field.key]" class="form-input-base" :disabled="!canEdit"><option value="">不设置</option><option v-for="value in field.choices" :key="value" :value="value">{{ value }}</option></select>
                 <input v-else v-model="draft[field.key]" type="text" inputmode="numeric" pattern="[0-9]*" :placeholder="field.min + '–' + field.max" :aria-label="field.label" class="form-input-base" :disabled="!canEdit" />
-                <p class="text-ios-tertiary mt-1">{{ field.choices?.join(' / ') || field.min + '–' + field.max }}</p>
               </td>
             </tr>
           </tbody>
@@ -60,7 +59,7 @@ import { computed, ref, watch, onUnmounted } from 'vue';
 import { isOwner as sessionOwner } from '../../../../app/auth';
 import ConfirmDialog from '../../../../components/ConfirmDialog.vue';
 import { nodeAPI, type NodeView, type NodeTuning, type NodeTuningInput } from '../../api';
-import { tuningFields, tuningStatus, tuningRequest, tuningPresets } from './serverTuningModel';
+import { tuningFields, tuningStatus, tuningRequest, tuningPresets, tuningDraft } from './serverTuningModel';
 const props = defineProps<{node:NodeView;isOwner?:boolean}>();
 const owner = computed(() => sessionOwner.value && props.isOwner !== false);
 const state = ref<NodeTuning | null>(null), draft = ref<Record<string,string>>({});
@@ -85,7 +84,7 @@ async function refresh() {
     if (cycle !== lifecycle || ticket !== reads) return;
     const initial = state.value === null;
     state.value = result;
-    if (initial) draft.value = {...result.desired};
+    if (initial) draft.value = tuningDraft(result.desired);
   } catch(e) { if (cycle === lifecycle && ticket === reads) error.value = '调优状态读取失败：' + (e as Error).message; }
   finally { if (cycle === lifecycle && ticket === reads) { loading.value = false; schedulePoll(); } }
 }
@@ -111,7 +110,7 @@ watch(() => props.node.lastHeartbeat, () => {
   if (state.value && state.value.status !== 'pending' && !sending.value && !loading.value) void refresh();
 });
 watch(() => props.node.id, () => {
-  lifecycle++; reads++; stopPoll(); state.value = null; draft.value = {}; sending.value = false; dialog.value = false; confirmed = null; pollExpired.value = false; deadline = Date.now()+60000; void refresh();
+  lifecycle++; reads++; stopPoll(); state.value = null; draft.value = tuningDraft(); sending.value = false; dialog.value = false; confirmed = null; pollExpired.value = false; deadline = Date.now()+60000; void refresh();
 }, {immediate:true});
 onUnmounted(() => { lifecycle++; stopPoll(); });
 </script>

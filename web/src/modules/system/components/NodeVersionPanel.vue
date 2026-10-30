@@ -299,7 +299,7 @@
               <button v-if="isOwner"
                 type="button"
                 @click="handleUpgradeSingle(node)"
-                class="ios-action-btn-secondary"
+                class="ios-action-btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
                 :disabled="!!upgradeUnavailableReason(node)"
                 :title="upgradeUnavailableReason(node) || '升级 Agent 到最新版本'"
               >
@@ -321,7 +321,7 @@
                 <button
                   type="button"
                   @click="openUpgradeCore(node)"
-                  class="ios-action-btn-secondary"
+                  class="ios-action-btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
                   :disabled="!!upgradeUnavailableReason(node)"
                 :title="upgradeUnavailableReason(node) || '升级代理内核版本'"
                 >
@@ -351,7 +351,7 @@
     <!-- ================= Mode 2: Grid Card View (Balanced Layout) ================= -->
     <div
       v-else-if="displayMode === 'grid'"
-      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-5"
+      class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5"
     >
       <div
         v-for="node in filteredNodes"
@@ -361,7 +361,7 @@
         <div class="space-y-3.5">
           <!-- Row 1: Flag · Name · OS & Status Capsule -->
           <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-2.5 min-w-0">
+            <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
               <div
                 class="w-7 h-7 rounded-lg bg-blue-50/90 border border-blue-100 text-xs font-bold font-mono text-ios-blue flex items-center justify-center shrink-0 shadow-2xs select-none"
                 :title="getCountryInfo(node).name"
@@ -370,7 +370,7 @@
               </div>
               <router-link
                 :to="`/nodes/${node.id}`"
-                class="font-bold text-[16px] text-neutral-900 truncate tracking-tight hover:text-ios-blue transition-colors"
+                class="min-w-0 max-w-full font-bold text-[16px] text-neutral-900 truncate tracking-tight hover:text-ios-blue transition-colors"
                 :title="node.name"
               >
                 {{ node.name }}
@@ -516,7 +516,7 @@
             <button v-if="isOwner"
               type="button"
               @click="handleUpgradeSingle(node)"
-              class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
+              class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-ios-blue/[0.08] disabled:active:scale-100"
               :disabled="!!upgradeUnavailableReason(node)"
                 :title="upgradeUnavailableReason(node) || '升级 Agent 到最新版本'"
             >
@@ -566,7 +566,7 @@
             <button
               type="button"
               @click="openUpgradeCore(node)"
-              class="flex-1 py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
+              class="flex-1 py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-ios-blue/[0.08]"
               :disabled="!!upgradeUnavailableReason(node)"
                 :title="upgradeUnavailableReason(node) || '升级代理内核版本'"
             >
@@ -762,7 +762,7 @@
                 <button
                   type="button"
                   @click="triggerCoreUpgradeFromModal(core)"
-                  class="py-1.5 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs transition-all flex items-center gap-1"
+                  class="py-1.5 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-ios-blue/[0.08]"
                   :disabled="!coreManagementTargetNode || !!upgradeUnavailableReason(coreManagementTargetNode)"
                   :title="coreManagementTargetNode ? upgradeUnavailableReason(coreManagementTargetNode) || '升级该内核版本' : '请选择服务器'"
                 >
@@ -1376,7 +1376,7 @@ function getNodeAllProtocols(node: NodeView): string[] {
 
 function upgradeUnavailableReason(node: NodeView): string {
   if (node.status === 'pending' || !node.agentVersion || !Number.isFinite(Date.parse(node.lastHeartbeat))) return '尚未收到 Agent 和心跳报告，请先完成登记';
-  if (!node.enabled || node.deletedAt || node.status !== 'online') return '服务器需启用且在线后才能升级';
+  if (!node.enabled || node.deletedAt || (node.status !== 'online' && node.status !== 'degraded')) return '服务器需启用且在线后才能升级';
   const age = Date.now() - Date.parse(node.lastHeartbeat);
   if (age < -5000 || age >= 45000) return '心跳已过期，等待服务器上线';
   if (!node.heartbeat?.current_revision) return '尚未上报当前配置版本，暂无法升级';

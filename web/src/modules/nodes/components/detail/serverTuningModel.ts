@@ -14,6 +14,15 @@ export const tuningFields: TuningField[] = [
 export function tuningStatus(status: string): string {
   return ({pending:'等待 Agent 执行',applied:'已应用',cleared:'已清除',failed:'执行失败',unconfirmed:'结果未确认'} as Record<string,string>)[status] || '未知状态';
 }
+/** Complete draft for every whitelisted key: an empty value selects the "不设置" option. */
+export function tuningDraft(settings:Record<string,string> = {}): Record<string,string> {
+  const draft:Record<string,string> = {};
+  for (const field of tuningFields) {
+    const value = settings[field.key];
+    draft[field.key] = typeof value === 'string' ? value : '';
+  }
+  return draft;
+}
 export function tuningRequest(nodeId:string, draft:Record<string,string>, clear=false): NodeTuningInput {
   if (clear) return {settings:{},clear:true,confirmNodeId:nodeId};
   const settings:Record<string,string> = {};

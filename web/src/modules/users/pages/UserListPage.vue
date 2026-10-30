@@ -146,7 +146,7 @@
             <ResourceProgress v-if="user.trafficLimit" :percentage="quotaPercent(user)" :show-label="false" class="mt-1.5 max-w-[140px]" />
             <span v-if="user.trafficLimit && user.usedTraffic >= user.trafficLimit" class="text-xs text-ios-red font-medium block mt-0.5">额度已用尽</span>
           </td>
-          <td class="text-xs font-mono tabular-nums text-ios-tertiary">{{ user.expiresAt ? formatTime(user.expiresAt) : '不过期' }}</td>
+          <td class="text-xs font-mono tabular-nums text-ios-tertiary whitespace-nowrap" :title="user.expiresAt ? formatTime(user.expiresAt) : ''">{{ user.expiresAt ? (formatMinute(user.expiresAt) || '—') : '不过期' }}</td>
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
             <button @click="openEdit(user)" class="ios-action-btn-primary">编辑</button>
             <button @click="removeTarget = user; confirmVisible = true" class="ios-action-btn-danger">删除</button>
@@ -300,7 +300,7 @@ import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import type { AdminUser } from '../../../types';
 import { request, type Page } from '../../../app/apiClient';
 import { authState, isOwner, formatTime } from '../../../app/auth';
-import { localInput, utcInput } from '../../../app/time';
+import { localInput, utcInput, formatMinute } from '../../../app/time';
 import { showToast } from '../../../app/api';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';

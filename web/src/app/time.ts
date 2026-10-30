@@ -9,9 +9,34 @@ export function localInput(value: string) {
   const p = components(date, authState.timezone);
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
+export function formatMinuteParts(value: string): { date: string; time: string } {
+  if (!value) return { date: '', time: '' };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { date: '', time: '' };
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: authState.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(date);
+  const part = (type: string) => parts.find(item => item.type === type)?.value ?? '';
+  return { date: `${part('year')}/${part('month')}/${part('day')}`, time: `${part('hour')}:${part('minute')}` };
+}
+
+/** Panel-timezone date and HH:mm without seconds, for narrow cells. */
+export function formatMinute(value: string): string {
+  const { date, time } = formatMinuteParts(value);
+  return date ? `${date} ${time}` : '';
+}
+
+/** Panel-timezone "10月30日 周五" label (browser timezone must not leak into headers). */
+export function panelDateLabel(date: Date): string {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: authState.timezone, month: 'numeric', day: 'numeric', weekday: 'short'
+  }).formatToParts(date);
+  const part = (type: string) => parts.find(item => item.type === type)?.value ?? '';
+  return `${part('month')}月${part('day')}日 ${part('weekday')}`;
+}
 export function utcInput(value: string) {
   if (!value) return '';
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new Error('请选择有效的到期时间');
   const desired = new Date(value + ':00Z').getTime();
   if (!Number.isFinite(desired) || new Date(desired).toISOString().slice(0, 16) !== value) throw new Error('到期时间无效');
   let instant = desired;

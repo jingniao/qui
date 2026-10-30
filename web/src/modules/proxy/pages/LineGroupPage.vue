@@ -84,8 +84,11 @@
             <template #body>
               <tr v-for="node in currentGroupNodes" :key="node.id">
                 <td>
-                  <span class="text-[15px] font-semibold text-ios-label">
+                  <span class="block text-[15px] font-semibold text-ios-label">
                     {{ node.name }}
+                  </span>
+                  <span class="block text-[11px] text-ios-tertiary truncate max-w-[220px]" :title="memberServerLabel(node)">
+                    {{ memberServerLabel(node) }}
                   </span>
                 </td>
                 <td>
@@ -252,6 +255,13 @@ function sourceBadgeClass(type: string) {
   if (type === 'self_hosted') return 'bg-ios-green/10 text-ios-green';
   if (type === 'subscription') return 'bg-ios-purple/10 text-ios-purple';
   return 'bg-ios-blue/10 text-ios-blue';
+}
+
+// Member names can repeat across servers, so the server (or import source) is shown
+// as a secondary line under the name instead of relying on the scrollable column.
+function memberServerLabel(node: GroupPickerNode) {
+  if (node.serverId && serverMap.value[node.serverId]) return serverMap.value[node.serverId].name;
+  return node.sourceName || '—';
 }
 
 // All available nodes combining self-hosted inbounds and imported nodes

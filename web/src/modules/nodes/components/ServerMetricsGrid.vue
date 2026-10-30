@@ -18,7 +18,10 @@
         </svg>
         <p v-else class="text-xs text-ios-tertiary py-6">— · 暂无历史测量</p>
         <p v-if="current[metric.key] === null" class="text-xs text-ios-secondary">{{ currentUnavailable ? '服务器离线，当前值不可用' : '需要新版 Agent 上报' }}</p>
-        <p class="text-xs text-ios-tertiary">{{ formatTime(new Date(start).toISOString()) }} – {{ formatTime(new Date(end).toISOString()) }}</p>
+        <p class="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-ios-tertiary">
+          <span class="tabular-nums" :title="`${formatTime(rangeStartIso)} – ${formatTime(rangeEndIso)}`">{{ rangeLabel }}</span>
+          <span class="tabular-nums">{{ metricRangeLabel(points, metric.key) }}</span>
+        </p>
       </section>
     </div>
   </div>
@@ -27,7 +30,7 @@
 import { formatTime } from '../../../app/auth';
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { nodeAPI, type NodeView } from '../api';
-import { metricPoint, metricPath, extractCurrentValues, formatRate, type MetricKey, type SystemMetricPoint } from './serverMetricsModel';
+import { metricPoint, metricPath, extractCurrentValues, formatMetricRange, formatMetricValue, metricRangeLabel, type MetricKey, type SystemMetricPoint } from './serverMetricsModel';
 const props = defineProps<{ node: NodeView; now: number; hours: number }>();
 const emit = defineEmits<{ 'update:hours': [hours: number] }>();
 const ranges = [1, 6, 12, 24, 168];
@@ -39,6 +42,9 @@ const metrics: { key: MetricKey; label: string }[] = [
 const points = ref<SystemMetricPoint[]>([]), intervalSeconds = ref(60), loading = ref(false), error = ref('');
 const end = ref(Date.now());
 const start = computed(() => end.value - props.hours * 3600000);
+const rangeStartIso = computed(() => new Date(start.value).toISOString());
+const rangeEndIso = computed(() => new Date(end.value).toISOString());
+const rangeLabel = computed(() => formatMetricRange(start.value, end.value));
 const currentUnavailable = computed(() => {
   const age = props.now - Date.parse(props.node.lastHeartbeat);
   return !['online', 'degraded'].includes(props.node.status) || !Number.isFinite(age) || age < -5000 || age >= 45000;
@@ -62,9 +68,7 @@ let timer: ReturnType<typeof setInterval>;
 onMounted(() => { timer = setInterval(load, 60000); window.addEventListener('proxy-node-status', load); });
 onUnmounted(() => { disposed = true; generation++; clearInterval(timer); window.removeEventListener('proxy-node-status', load); });
 function display(key: MetricKey, value: number | null) {
-  if (value === null) return '—';
-  if (key === 'rxRate' || key === 'txRate') return formatRate(value);
-  return ['cpu','memory','disk'].includes(key) ? value.toFixed(1) + '%' : String(value);
+  return formatMetricValue(key, value);
 }
 function dots(key: MetricKey) {
   const max = ['cpu','memory','disk'].includes(key) ? 100 : Math.max(1,...points.value.map(p => p[key] ?? 0));

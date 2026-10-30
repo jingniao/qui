@@ -7,6 +7,7 @@
       description="管理 Clash / Mihomo 客户端的分流规则、优先级、策略组与运行参数。通过完整配置订阅下发，用户更新订阅后生效。"
     >
       <template #actions>
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-2.5 min-w-0 w-full sm:w-auto">
         <button
           type="button"
           @click="resetToDefault"
@@ -38,6 +39,7 @@
         <router-link to="/routing/simulator?tab=client" class="ios-btn-secondary">
           策略模拟
         </router-link>
+        </div>
       </template>
     </PageHeader>
 

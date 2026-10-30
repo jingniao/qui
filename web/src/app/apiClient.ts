@@ -8,6 +8,42 @@ export class APIError extends Error {
 }
 
 const messages: Record<string, string> = {
+  'matched scope, address, port, network and active time window': '已匹配生效范围、目标地址、端口、网络与生效时间',
+  'no matching policy; inbound default rule': '未命中启用的策略，使用入站默认规则',
+  'domain must be a hostname without path or URL': '域名必须为主机名，不能包含路径或 URL',
+  'wildcard not allowed here': '此处不允许使用通配符',
+  'invalid domain': '域名无效',
+  'domain too long': '域名过长',
+  'invalid domain label': '域名标签无效',
+  'invalid domain character': '域名包含无效字符',
+  'invalid port': '端口无效',
+  'invalid port range': '端口范围无效',
+  'time window must be HH:MM-HH:MM': '生效时间格式必须为 HH:MM-HH:MM',
+  'invalid hour': '小时无效',
+  'invalid minute': '分钟无效',
+  'time window must have different start and end': '生效时间的开始与结束不能相同',
+  'network must be all, tcp or udp': '网络必须为 all、tcp 或 udp',
+  'invalid policy timezone': '策略时区无效',
+  'node, valid port and tcp/udp are required': '请选择节点、填写有效端口并选择 TCP 或 UDP',
+  'invalid target IP': '目标 IP 无效',
+  'domain or target IP required': '请填写域名或目标 IP',
+  'invalid policy identity or priority': '策略标识或优先级无效',
+  'policy scope exceeds limit': '策略生效范围超出数量限制',
+  'invalid or duplicate policy scope': '策略生效范围无效或重复',
+  'policy matcher limit exceeded': '策略匹配条件超出数量限制',
+  'invalid IP/CIDR': 'IP 或 CIDR 无效',
+  'invalid policy action': '策略动作无效',
+  'policy target required': '请选择策略目标',
+  'invalid policy failover': '策略容灾方式无效',
+  'backup target required': '请选择备用目标',
+  'simulation node not found': '模拟节点不存在',
+  'simulation device scope was removed in v1.1; simulate a user': 'v1.1 已移除设备范围，请按用户模拟',
+  'simulation user not found': '模拟用户不存在',
+  'user is disabled, expired or over quota at simulation time': '用户在模拟时间已禁用、到期或超额',
+  'simulation inbound not found on node': '该节点上不存在所选模拟入站',
+  'simulation outbound target unavailable': '模拟出站目标不可用',
+  'simulation chain target unavailable': '模拟代理链目标不可用',
+  'simulation outbound group unavailable': '模拟出口组不可用',
   invalid_credentials: '用户名或密码错误，或账号已被禁用。',
   unauthorized: '登录已过期，请重新登录。',
   forbidden: '当前账号没有执行此操作的权限。',
@@ -43,6 +79,11 @@ const messages: Record<string, string> = {
   object_owned: '该对象已由其他隧道认领，不能在此处接管。'
 };
 
+// Known backend text shares the API translation table; preserve unknown messages.
+export function translateAPIMessage(message: string): string {
+  return Object.prototype.hasOwnProperty.call(messages, message) ? messages[message]! : message;
+}
+
 export async function request<T>(path: string, method = 'GET', body?: unknown, options: { timeoutMs?: number } = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -56,7 +97,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, o
     const data = await response.json().catch(() => ({}));
     const code = data.error?.code || 'request_failed';
     if (response.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('auth-expired'));
-    throw new APIError(response.status, code, messages[code] || data.error?.message || '请求失败', data.error || {});
+    throw new APIError(response.status, code, messages[code] || translateAPIMessage(data.error?.message || '请求失败'), data.error || {});
   }
   return response.status === 204 ? undefined as T : response.json();
 }
@@ -71,7 +112,7 @@ export async function upload<T>(path: string, body: FormData, timeoutMs = 310000
   if (!response.ok) {
     const data = await response.json().catch(() => ({})); const code = data.error?.code || 'request_failed';
     if (response.status === 401) window.dispatchEvent(new Event('auth-expired'));
-    throw new APIError(response.status, code, messages[code] || data.error?.message || '上传失败');
+    throw new APIError(response.status, code, messages[code] || translateAPIMessage(data.error?.message || '上传失败'));
   }
   return response.json();
 }

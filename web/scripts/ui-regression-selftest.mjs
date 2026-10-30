@@ -249,3 +249,267 @@ assert.ok(tasksA.indexOf('Agent 签名发布目录') > tasksA.indexOf('共 <span
 assert.match(read('layouts/MainLayout.vue'), /pt-16 lg:pt-0/);
 assert.match(read('layouts/MainLayout.vue'), /pt-16 lg:pt-8/);
 console.log('PASS walkthrough A shell/settings/versions/tasks: mobile clearance, fixed core target, restart wording, enrollment guard, K2 architecture and header order');
+
+// Follow-up review: exercise the actual upgrade guard with a fixed clock.
+const upgradeNow = Date.now();
+const liveUpgrade = { ...onlineA, agentVersion: '1.0.9', lastHeartbeat: new Date(upgradeNow).toISOString(), heartbeat: { current_revision: 7 } };
+const reviewVersions = vueSubset(versionPathA, ['upgradeUnavailableReason'], { Date: { now: () => upgradeNow, parse: Date.parse } });
+for (const status of ['online', 'degraded']) assert.equal(reviewVersions.upgradeUnavailableReason({ ...liveUpgrade, status }), '');
+for (const patch of [
+  { status: 'pending' }, { status: 'offline' }, { status: 'disabled' }, { status: 'applying' },
+  { enabled: false }, { deletedAt: '2026-01-01' }, { agentVersion: '' }, { lastHeartbeat: '' },
+  { lastHeartbeat: new Date(upgradeNow - 45000).toISOString() },
+  { lastHeartbeat: new Date(upgradeNow + 5001).toISOString() }, { heartbeat: {} }
+]) assert.ok(reviewVersions.upgradeUnavailableReason({ ...liveUpgrade, status: 'degraded', ...patch }), JSON.stringify(patch));
+for (const offset of [-44999, 5000]) assert.equal(reviewVersions.upgradeUnavailableReason({ ...liveUpgrade, status: 'degraded', lastHeartbeat: new Date(upgradeNow + offset).toISOString() }), '');
+console.log('PASS review 1: online/degraded upgrades, enrollment and heartbeat boundary guards');
+
+const reviewNodeProps = { node: { capabilities: { core_name: 'xray', cores: [{ name: 'sing-box' }] } } };
+const serverNodesPath = 'modules/nodes/components/detail/ServerNodes.vue';
+const reviewNodes = vueSubset(serverNodesPath, ['inboundCoreName'], { props: reviewNodeProps });
+assert.equal(reviewNodes.inboundCoreName({ core: 'sing-box' }), 'sing-box');
+assert.equal(reviewNodes.inboundCoreName({ core: 'xray' }), 'Xray');
+assert.equal(reviewNodes.inboundCoreName({ core: '' }), 'Xray');
+reviewNodeProps.node.capabilities.core_name = '';
+assert.equal(reviewNodes.inboundCoreName({ core: '' }), 'sing-box');
+reviewNodeProps.node.capabilities = {};
+assert.equal(reviewNodes.inboundCoreName({ core: '' }), '');
+assert.match(read(serverNodesPath), /<ProtocolBadge v-if="inboundCoreName\(item\)" :protocol="inboundCoreName\(item\)"/);
+console.log('PASS review 2: inbound core badge, explicit core, primary/fallback core and unknown');
+
+const previewReview = read('modules/users/pages/PortalPreviewPage.vue');
+assert.equal((previewReview.match(/to="\/users"/g) || []).length, 1, 'toolbar keeps one return link');
+assert.match(previewReview, /<PortalLayout[^>]*class="portal-preview-content" preview/);
+assert.match(previewReview, /<style scoped>[\s\S]*\.portal-preview-content :deep\(header > a\[href="\/users"\]\)\s*\{\s*display: none;/);
+assert.match(read('portal/PortalLayout.vue'), /<router-link v-if="preview" to="\/users"/);
+assert.match(read('portal/PortalLayout.vue'), /<button v-else[^>]*@click="logout"/);
+console.log('PASS review 3: preview-only duplicate header link hidden, toolbar and portal logout retained');
+
+const clientActionsReview = read('modules/routing/pages/ClientPolicyPage.vue').split('<template #actions>')[1].split('</template>')[0];
+assert.match(clientActionsReview, /<div class="flex flex-wrap sm:flex-nowrap items-center gap-2.5 min-w-0 w-full sm:w-auto">/);
+for (const action of ['resetToDefault', 'openCreateRuleDrawer', 'saveAll', '/routing/simulator?tab=client']) assert.ok(clientActionsReview.includes(action));
+assert.match(clientActionsReview, /<\/router-link>\s*<\/div>/);
+console.log('PASS review 4: header actions wrap on small screens, desktop row and all actions retained');
+
+// Third round: execute the shared message mapping and API error path.
+const apiReview3 = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(read('app/apiClient.ts'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext }
+}).outputText).toString('base64'));
+assert.equal(apiReview3.translateAPIMessage('matched scope, address, port, network and active time window'), '已匹配生效范围、目标地址、端口、网络与生效时间');
+assert.equal(apiReview3.translateAPIMessage('no matching policy; inbound default rule'), '未命中启用的策略，使用入站默认规则');
+const matchContractReview3 = readFileSync(new URL('../../pkg/contracts/policy/match.go', import.meta.url), 'utf8');
+for (const [, message] of matchContractReview3.matchAll(/errors.New\("([^"]+)"\)/g)) {
+  assert.notEqual(apiReview3.translateAPIMessage(message), message, 'translate shared validation: ' + message);
+}
+for (const message of ['future backend reason', 'unknown validation message', '', 'toString']) assert.equal(apiReview3.translateAPIMessage(message), message);
+const originalFetchReview3 = globalThis.fetch;
+try {
+  for (const [message, expected] of [['invalid domain', '域名无效'], ['invalid target IP', '目标 IP 无效'], ['future validation', 'future validation']]) {
+    globalThis.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error: { code: 'invalid_request', message } }) });
+    await assert.rejects(apiReview3.request('/policies/simulate', 'POST', {}), error => error.message === expected);
+  }
+} finally { globalThis.fetch = originalFetchReview3; }
+assert.match(read('modules/routing/pages/PolicySimulatorPage.vue'), /translateAPIMessage\(nodeDecision.reason/);
+console.log('PASS third round 1: Chinese policy reasons/validation, API error path and unknown text fallback');
+
+const detailReview3 = read('modules/nodes/pages/NodeDetailPage.vue');
+const refreshSourceReview3 = detailReview3.slice(detailReview3.indexOf('const nodeRequests ='), detailReview3.indexOf('async function load()'));
+const refreshCodeReview3 = ts.transpileModule(refreshSourceReview3 + '\nreturn { refreshNode, readNode, visibilityChanged, mount: () => mounted = true, unmount: () => mounted = false };', {
+  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None }
+}).outputText;
+let resolveNodeReview3, nodeCallsReview3 = 0;
+const documentReview3 = { visibilityState: 'visible' }, nodeRefReview3 = { value: { id: 'n', status: 'offline' } };
+const refreshReview3 = new Function('nodeAPI', 'document', 'loading', 'route', 'generation', 'node', 'now', refreshCodeReview3)(
+  { get: () => { nodeCallsReview3++; return new Promise(resolve => { resolveNodeReview3 = resolve; }); } },
+  documentReview3, { value: false }, { name: 'NodeDetail', params: { id: 'n' } }, 1, nodeRefReview3, { value: 0 }
+);
+await refreshReview3.refreshNode();
+assert.equal(nodeCallsReview3, 0, 'no reads before mount');
+refreshReview3.mount();
+documentReview3.visibilityState = 'hidden';
+await refreshReview3.refreshNode();
+assert.equal(nodeCallsReview3, 0, 'hidden pages do not poll');
+documentReview3.visibilityState = 'visible';
+const refreshPendingReview3 = refreshReview3.refreshNode();
+await refreshReview3.refreshNode();
+const sharedReadReview3 = refreshReview3.readNode('n');
+assert.equal(nodeCallsReview3, 1, 'poll and full/SSE load share a pending read');
+resolveNodeReview3({ id: 'n', status: 'online', lastHeartbeat: 'fresh' });
+await Promise.all([refreshPendingReview3, sharedReadReview3]);
+assert.equal(nodeRefReview3.value.status, 'online');
+assert.equal(nodeRefReview3.value.lastHeartbeat, 'fresh');
+refreshReview3.visibilityChanged();
+assert.equal(nodeCallsReview3, 2, 'visible transition reads immediately');
+refreshReview3.unmount();
+resolveNodeReview3({ id: 'n', status: 'offline' });
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(nodeRefReview3.value.status, 'online', 'unmounted view ignores pending result');
+await refreshReview3.refreshNode();
+assert.equal(nodeCallsReview3, 2);
+assert.match(detailReview3, /setInterval\(refreshNode, 15000\)/);
+assert.match(detailReview3, /addEventListener\('visibilitychange', visibilityChanged\)/);
+assert.match(detailReview3, /clearInterval\(refreshTimer\)/);
+assert.match(detailReview3, /removeEventListener\('visibilitychange', visibilityChanged\)/);
+assert.match(detailReview3, /ServerSettings[^>]*:key="node.id"/);
+assert.equal((detailReview3.match(/<ServerSettings\b/g) || []).length, 1, 'enrollment transitions keep the same settings instance');
+const settingsReview3 = read('modules/nodes/components/detail/ServerSettings.vue');
+assert.match(settingsReview3, /reactive<NodeSettingsInput>\(\{ \.\.\.props.node \}\)/);
+assert.match(settingsReview3, /watch\(\(\) => props.node.id,/);
+assert.doesNotMatch(settingsReview3, /watch\(\(\) => props.node\s*,/);
+console.log('PASS third round 2: visible-only refresh, immediate resume, shared reads, unmount cleanup and independent settings edits');
+
+const dashboardReview3 = read('modules/dashboard/pages/DashboardPage.vue');
+const dashboardStatusReview3 = dashboardReview3.slice(dashboardReview3.indexOf('function isNodeOnline('), dashboardReview3.indexOf('const healthyNodesCount'));
+const dashboardCodeReview3 = ts.transpileModule(dashboardStatusReview3 + '\nreturn { offlineNodesCount, pendingNodesCount, nodeStatusSubtitle };', {
+  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None }
+}).outputText;
+const dashboardNodesReview3 = { value: [] };
+const dashboardCountsReview3 = new Function('computed', 'allNodes', dashboardCodeReview3)(fn => ({ get value() { return fn(); } }), dashboardNodesReview3);
+const dashboardNodeReview3 = (status, extra = {}) => ({ status, enabled: true, ...extra });
+for (const [rows, subtitle, offline, pending] of [
+  [[dashboardNodeReview3('offline'), dashboardNodeReview3('pending'), dashboardNodeReview3('pending')], '1 台离线 · 2 台待登记', 1, 2],
+  [[dashboardNodeReview3('pending'), dashboardNodeReview3('pending')], '2 台待登记', 0, 2],
+  [[dashboardNodeReview3('online'), dashboardNodeReview3('degraded')], '全部就绪', 0, 0],
+  [[dashboardNodeReview3('offline')], '1 台离线', 1, 0],
+  [[dashboardNodeReview3('offline', { enabled: false }), dashboardNodeReview3('online', { maintenance: true })], '1 台离线', 1, 0],
+  [[], '全部就绪', 0, 0]
+]) {
+  dashboardNodesReview3.value = rows;
+  assert.equal(dashboardCountsReview3.nodeStatusSubtitle.value, subtitle);
+  assert.equal(dashboardCountsReview3.offlineNodesCount.value, offline);
+  assert.equal(dashboardCountsReview3.pendingNodesCount.value, pending);
+}
+assert.match(dashboardReview3, /\{\{ nodeStatusSubtitle \}\}/);
+console.log('PASS third round 3: offline/pending subtitles, ready/degraded, disabled and maintenance counts');
+
+// ============================================================================
+// Walkthrough E: desktop-width (1120 px) table/card squeezing and the logic bugs
+// found in the same pass. Layout parts are source checks; the date, event,
+// metrics, tuning and dashboard ordering parts run the real helpers.
+// ============================================================================
+function walkthroughEModule(path, replacements = []) {
+  let source = read(path);
+  for (const [from, to] of replacements) source = source.split(from).join(to);
+  const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+  return import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
+}
+globalThis.walkthroughAuth.timezone = 'Asia/Shanghai';
+
+// (1) The last column of every DataTable is pinned to the right edge of the scroller.
+const dataTableE = read('components/DataTable.vue');
+assert.match(dataTableE, /:deep\(th:last-child\),\s*:deep\(td:last-child\)\s*\{[^}]*position: sticky;[^}]*right: 0;/, 'the last column is sticky on the right');
+assert.match(dataTableE, /:deep\(td:last-child\)\s*\{\s*background-color: #ffffff;/, 'pinned body cells stay opaque');
+assert.match(dataTableE, /:deep\(tbody tr:hover td:last-child\)/, 'the pinned cell follows the row hover');
+assert.match(dataTableE, /dt-sticky-shadow/, 'the left shadow is toggleable while content scrolls under it');
+assert.match(dataTableE, /@scroll\.passive="syncShadow"/);
+assert.match(read('components/StatusBadge.vue'), /shrink-0 whitespace-nowrap/, 'badges never wrap one character per line');
+console.log('PASS walkthrough E tables: sticky last column with opaque/hover surface and shadow, nowrap status badges');
+
+// (4) Card grids: 2 columns at lg, 3 from xl, and the name keeps the available width.
+assert.match(read('modules/nodes/components/ServerCardGrid.vue'), /grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5/);
+assert.match(read('modules/nodes/components/ServerCardGrid.vue'), /flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0/);
+assert.match(read('modules/system/components/NodeVersionPanel.vue'), /grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5/);
+// (10) Disabled 升级 buttons are visually disabled.
+for (const button of read('modules/system/components/NodeVersionPanel.vue').match(/class="[^"]*bg-ios-blue\/\[0\.08\][^"]*"/g) || []) assert.match(button, /disabled:opacity-50/);
+assert.match(read('modules/system/components/NodeVersionPanel.vue'), /ios-action-btn-secondary disabled:opacity-50 disabled:cursor-not-allowed/);
+// (5) The three 概况 panels use 2 columns below xl and readable values.
+const systemPanelsE = read('modules/nodes/components/detail/ServerSystemPanels.vue');
+assert.match(systemPanelsE, /grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3\.5 sm:gap-4 items-stretch/);
+assert.match(systemPanelsE, /md:col-span-2 xl:col-span-1/);
+assert.doesNotMatch(systemPanelsE, /tabular-nums truncate/, 'panel values wrap instead of being clipped');
+// (12) Group members show the server (or import source) under the member name.
+assert.match(read('modules/proxy/pages/LineGroupPage.vue'), /memberServerLabel\(node\)/);
+// (14) Stale wording about a per-node ledger and device attribution.
+assert.doesNotMatch(read('modules/system/pages/BackupPage.vue'), /节点账本/);
+assert.match(read('modules/system/pages/BackupPage.vue'), /完整恢复后请核对用户额度与节点运行配置/);
+assert.doesNotMatch(read('modules/access/pages/AccessRecordPage.vue'), /按凭据归属用户和设备/);
+assert.match(read('modules/access/pages/AccessRecordPage.vue'), /按凭据归属用户/);
+console.log('PASS walkthrough E layout: card columns, disabled buttons, panel width, member server line, refreshed wording');
+
+
+// (6) 最近事件 drops a code that repeats the status and translates known failures.
+const detailE = await walkthroughEModule('modules/nodes/components/detail/serverDetailModel.ts');
+assert.equal(detailE.eventResultLabel('success'), '', 'success only repeats 应用成功');
+assert.equal(detailE.eventResultLabel(''), '');
+assert.equal(detailE.eventResultLabel(undefined), '');
+assert.equal(detailE.eventResultLabel('validation_failed'), '核心校验失败');
+assert.equal(detailE.eventResultLabel('compile_failed'), '配置编译失败');
+assert.equal(detailE.revisionEventText({ id: 6, status: 'success', summary: '手动发布当前配置', resultCode: 'success' }), '配置 #6 · 应用成功 · 手动发布当前配置');
+assert.equal(detailE.revisionEventText({ id: 7, status: 'failed', summary: '手动发布当前配置', resultCode: 'validation_failed' }), '配置 #7 · 失败 · 手动发布当前配置 · 核心校验失败');
+assert.equal(detailE.revisionEventText({ id: 8, status: 'failed', summary: '手动发布当前配置' }), '配置 #8 · 失败 · 手动发布当前配置');
+const overviewE = read('modules/nodes/components/detail/ServerOverview.vue');
+assert.match(overviewE, /revisionEventText\(rev\)/);
+assert.doesNotMatch(overviewE, /rev\.resultCode \|\| ''/, 'raw English result codes are no longer appended');
+console.log('PASS walkthrough E events: success code dropped, known failure codes translated, raw codes gone');
+
+// (7) Charts show a compact range plus the min/max of the visible series.
+const chartStartE = Date.parse('2026-10-30T01:34:00Z'); // 09:34 in Asia/Shanghai
+assert.equal(metricsA.formatMetricRange(chartStartE, chartStartE + 3600000), '10/30 09:34 – 10:34', 'the same-day range repeats no date');
+assert.equal(metricsA.formatMetricRange(Date.parse('2026-10-29T15:00:00Z'), Date.parse('2026-10-29T20:05:00Z')), '10/29 23:00 – 10/30 04:05', 'a cross-day range keeps both dates');
+assert.equal(metricsA.formatMetricValue('cpu', 31.5), '31.5%');
+assert.equal(metricsA.formatMetricValue('processes', 111), '111');
+assert.equal(metricsA.formatMetricValue('rxRate', 1048576), '1.0 MB/s');
+assert.equal(metricsA.formatMetricValue('cpu', null), '—');
+assert.equal(metricsA.metricRangeLabel([{ time: 0, cpu: 18.24 }, { time: 1, cpu: null }, { time: 2, cpu: 31.46 }], 'cpu'), '最低 18.2% · 最高 31.5%');
+assert.equal(metricsA.metricRangeLabel([{ time: 0, cpu: null }], 'cpu'), '最低 — · 最高 —');
+const gridE = read('modules/nodes/components/ServerMetricsGrid.vue');
+assert.match(gridE, /metricRangeLabel\(points, metric\.key\)/);
+assert.match(gridE, /formatMetricRange\(start\.value, end\.value\)/);
+assert.doesNotMatch(gridE, /formatTime\(new Date\(start\)\.toISOString\(\)\)/, 'the full date is no longer printed twice');
+console.log('PASS walkthrough E charts: compact panel-timezone range, min/max of visible series, no duplicated timestamps');
+
+// (9) An empty tuning draft value selects 不设置, and hints no longer duplicate placeholders.
+const tuningModelE = await walkthroughEModule('modules/nodes/components/detail/serverTuningModel.ts');
+const draftE = tuningModelE.tuningDraft({ 'net.ipv4.tcp_congestion_control': 'bbr' });
+assert.equal(Object.keys(draftE).length, tuningModelE.tuningFields.length, 'every whitelisted key has a draft value');
+assert.equal(draftE['net.core.default_qdisc'], '', 'an unset choice selects 不设置');
+assert.equal(draftE['net.ipv4.tcp_congestion_control'], 'bbr');
+assert.deepEqual(tuningModelE.tuningRequest('n', draftE), { settings: { 'net.ipv4.tcp_congestion_control': 'bbr' }, clear: false, confirmNodeId: 'n' });
+const tuningE = read('modules/nodes/components/detail/ServerTuning.vue');
+assert.match(tuningE, /tuningDraft\(result\.desired\)/);
+assert.doesNotMatch(tuningE, /draft = \{ \.\.\.preset\.settings \}/, 'presets keep the complete draft');
+assert.match(tuningE, /<option value="">不设置<\/option>/);
+assert.doesNotMatch(tuningE, /field\.choices\?\.join\(' \/ '\)/, 'the hint no longer repeats the placeholder');
+console.log('PASS walkthrough E tuning: empty draft selects 不设置, single hint line');
+
+
+// (3) /users 到期时间 shows date + HH:mm in the panel timezone, on one line.
+const timeE = await walkthroughEModule('app/time.ts', [["import { authState } from './auth';", 'const authState = globalThis.walkthroughAuth;']]);
+assert.equal(timeE.formatMinute('2026-11-26T09:36:14Z'), '2026/11/26 17:36');
+assert.equal(timeE.formatMinute(''), '');
+assert.equal(timeE.formatMinute('not-a-date'), '');
+globalThis.walkthroughAuth.timezone = 'America/Los_Angeles';
+assert.equal(timeE.formatMinute('2026-11-26T09:36:14Z'), '2026/11/26 01:36', 'the cell follows the panel timezone');
+globalThis.walkthroughAuth.timezone = 'Asia/Shanghai';
+const usersListE = read('modules/users/pages/UserListPage.vue');
+assert.match(usersListE, /formatMinute\(user\.expiresAt\)/);
+assert.match(usersListE, /tabular-nums text-ios-tertiary whitespace-nowrap/);
+assert.doesNotMatch(usersListE, /formatTime\(user\.expiresAt\) \}\}/, 'the seconds-bearing formatter is no longer printed in the cell');
+const userDetailE = read('modules/users/pages/UserDetailPage.vue');
+assert.match(userDetailE, /expiryParts\.date/, 'the expiry card shows the date on its own line');
+assert.match(userDetailE, /expiryParts\.time/, 'and the time on a smaller second line');
+console.log('PASS walkthrough E expiry: minute precision in the panel timezone, nowrap cell, split detail card');
+
+// (11a) The dashboard date chip uses the panel timezone, not the browser's.
+assert.equal(timeE.panelDateLabel(new Date('2026-10-29T17:00:00Z')), '10月30日 周五');
+globalThis.walkthroughAuth.timezone = 'America/Los_Angeles';
+assert.equal(timeE.panelDateLabel(new Date('2026-10-29T17:00:00Z')), '10月29日 周四');
+globalThis.walkthroughAuth.timezone = 'Asia/Shanghai';
+const dashboardE = read('modules/dashboard/pages/DashboardPage.vue');
+assert.match(dashboardE, /panelDateLabel\(new Date\(\)\)/);
+assert.doesNotMatch(dashboardE, /weekDays\[now\.getDay\(\)\]/, 'the browser-timezone weekday is gone');
+// (11b) Ranking rows keep their natural height.
+assert.doesNotMatch(dashboardE, /space-y-2 flex-1 flex flex-col justify-around/, 'ranking rows are not stretched');
+// (11c) Over quota → expired → expiring within 7 days → usage %, disabled last.
+const attentionE = [
+  { id: 'heavy', status: 'active', expiresAt: '', trafficLimit: 100, usedTraffic: 90 },
+  { id: 'disabled', status: 'disabled', expiresAt: '2020-01-01T00:00:00Z', trafficLimit: 100, usedTraffic: 100 },
+  { id: 'soon', status: 'active', expiresAt: new Date(Date.now() + 2 * 86400000).toISOString(), trafficLimit: 100, usedTraffic: 5 },
+  { id: 'expired', status: 'active', expiresAt: '2020-01-01T00:00:00Z', trafficLimit: 100, usedTraffic: 1 },
+  { id: 'over', status: 'active', expiresAt: '2027-01-01T00:00:00Z', trafficLimit: 100, usedTraffic: 100 }
+];
+const rankedE = vueSubset('modules/dashboard/pages/DashboardPage.vue', ['userAttentionRank', 'topAttentionUsers'], { allUsers: { value: attentionE } });
+assert.deepEqual(rankedE.topAttentionUsers.value.map(user => user.id), ['over', 'expired', 'soon', 'heavy'], 'expired/expiring users outrank plain usage, disabled users last');
+assert.equal(rankedE.userAttentionRank({ status: 'disabled', trafficLimit: 0, usedTraffic: 0 }, Date.now()), 4);
+console.log('PASS walkthrough E dashboard: panel-timezone date chip, compact ranking rows, attention ordering');
+

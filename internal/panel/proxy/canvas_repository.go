@@ -65,7 +65,7 @@ func decodeCanvasLayout(data []byte) (CanvasLayout, error) {
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return CanvasLayout{}, errCanvasLayout
 	}
-	return layout, nil
+	return layout.normalized(), nil
 }
 
 func scanCanvasScheme(row interface{ Scan(...any) error }) (CanvasScheme, error) {
@@ -134,7 +134,8 @@ func (r *Repository) SaveCanvasScheme(ctx context.Context, schemeID string, inpu
 	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
 		return CanvasScheme{}, err
 	}
-	input.Layout.Connections = append([]CanvasConnection(nil), input.Layout.Connections...)
+	input.Layout = input.Layout.normalized()
+	input.Layout.Connections = append([]CanvasConnection{}, input.Layout.Connections...)
 	data, err := json.Marshal(input.Layout)
 	if err != nil {
 		return CanvasScheme{}, err

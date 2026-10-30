@@ -10,7 +10,7 @@
       <p class="text-xs text-ios-secondary">仅查看账号、节点与现有订阅，不创建 Token，不进入用户会话。</p>
       <ErrorState v-if="error" :message="error" @retry="load" /><LoadingSkeleton v-if="loading" />
     </div>
-    <PortalLayout v-if="snapshot && !loading" :key="selected" preview :snapshot="snapshot" />
+    <PortalLayout v-if="snapshot && !loading" :key="selected" class="portal-preview-content" preview :snapshot="snapshot" />
   </div>
 </template>
 <script setup lang="ts">
@@ -38,3 +38,10 @@ async function load() {
 }
 onMounted(async () => { await list(1); if (typeof route.query.user === 'string') { selected.value = route.query.user; await load(); } });
 </script>
+
+<style scoped>
+/* The preview toolbar already provides the return link. */
+.portal-preview-content :deep(header > a[href="/users"]) {
+  display: none;
+}
+</style>

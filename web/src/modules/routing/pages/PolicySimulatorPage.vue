@@ -282,7 +282,7 @@
               {{ actionNames[nodeDecision.action.type] || nodeDecision.action.type }}
             </h3>
             <p class="text-xs opacity-90 leading-relaxed pt-1">
-              {{ nodeDecision.reason || (nodeDecision.matched ? '已完全匹配范围、目标地址、端口、网络与时间窗口。' : '未命中启用策略，使用入站默认出站。') }}
+              {{ translateAPIMessage(nodeDecision.reason || (nodeDecision.matched ? 'matched scope, address, port, network and active time window' : 'no matching policy; inbound default rule')) }}
             </p>
           </div>
 
@@ -348,7 +348,7 @@ import {
   type ClientSimulationResult,
   type ServiceSet
 } from '../api';
-import { request, type Page } from '../../../app/apiClient';
+import { request, translateAPIMessage, type Page } from '../../../app/apiClient';
 import { authState } from '../../../app/auth';
 import { utcInput } from '../../../app/time';
 import { userAPI, type ProxyUser } from '../../users/api';

@@ -1,6 +1,6 @@
 <template>
     <div
-      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+      class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5"
     >
       <div
         v-for="node in nodes"
@@ -13,7 +13,7 @@
         <div class="space-y-3.5">
           <!-- Row 1: Name & Status Capsule -->
           <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-2 min-w-0">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
               <span
                 class="text-xl shrink-0 select-none leading-none cursor-default"
                 :title="`${getNodeCountry(node).name} (${getNodeCountry(node).source === 'admin_region' ? '管理员指定地区' : 'IP归属识别'})`"
@@ -23,7 +23,7 @@
               <router-link
                 :to="`/nodes/${node.id}`"
                 @click.stop
-                class="font-bold text-[17px] text-neutral-900 group-hover:text-ios-blue transition-colors truncate tracking-tight"
+                class="min-w-0 max-w-full font-bold text-[17px] text-neutral-900 group-hover:text-ios-blue transition-colors truncate tracking-tight"
                 :title="node.name"
               >
                 {{ node.name }}

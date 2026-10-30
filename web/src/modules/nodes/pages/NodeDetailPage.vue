@@ -30,9 +30,8 @@
         <button v-for="tab in tabs" :key="tab.key" class="ios-segmented-item whitespace-nowrap" :class="activeTab === tab.key ? 'active' : ''" :aria-current="activeTab === tab.key ? 'page' : undefined" @click="selectTab(tab.key)">{{ tab.label }}</button>
       </nav>
       <template v-if="pending">
-        <ServerSettings v-if="activeTab === 'settings' && isOwner" ref="settingsPanel" :key="node.id" :node="node" :meta="meta" @changed="load" @install="enrollment?.reissue(node)" @delete="deletion?.prompt(node)" />
-        <ServerSetupGuide v-else-if="activeTab === 'overview'" :node="node" :command="enrollment?.installCode(node.id)" @install="enrollment?.reissue(node)" />
-        <p v-else class="text-sm text-ios-secondary">服务器待登记，完成 Agent 安装并等待首次心跳后可查看此页。</p>
+        <ServerSetupGuide v-if="activeTab === 'overview'" :node="node" :command="enrollment?.installCode(node.id)" @install="enrollment?.reissue(node)" />
+        <p v-else-if="activeTab !== 'settings'" class="text-sm text-ios-secondary">服务器待登记，完成 Agent 安装并等待首次心跳后可查看此页。</p>
       </template>
       <template v-else>
         <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : '服务器离线' }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
@@ -41,9 +40,9 @@
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
         <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :latest-revision="latestRevision" @changed="load" @published="published" />
         <ServerTuning v-if="activeTab === 'tuning'" :key="node.id" :node="node" :is-owner="isOwner" />
-        <ServerSettings ref="settingsPanel" v-if="activeTab === 'settings' && isOwner" :key="node.id" :node="node" :meta="meta" @changed="load" @install="enrollment?.reissue(node)" @delete="deletion?.prompt(node)" />
         <NodeEditorDrawer v-if="editorOpen && isOwner" :server-id="node.id" :inbound="editing" origin="server" @close="editorOpen = false" @saved="nodeSaved" />
       </template>
+      <ServerSettings v-if="activeTab === 'settings' && isOwner" ref="settingsPanel" :key="node.id" :node="node" :meta="meta" @changed="load" @install="enrollment?.reissue(node)" @delete="deletion?.prompt(node)" />
     </template>
     <ConfirmDialog v-model="discardOpen" title="有未保存的更改" message="离开后将丢失设置中尚未保存的修改，确认离开？" confirm-text="放弃修改并离开" @confirm="discard" />
     <ServerEnrollment v-if="isOwner" ref="enrollment" @changed="load" />
@@ -173,13 +172,45 @@ function deleted() {
 
 let generation = 0, timer: ReturnType<typeof setInterval> | undefined;
 
+// Share reads between SSE/full loads and the lightweight heartbeat refresh.
+const nodeRequests = new Map<string, Promise<NodeView>>();
+function readNode(id: string): Promise<NodeView> {
+  const pending = nodeRequests.get(id);
+  if (pending) return pending;
+  const promise = nodeAPI.get(id).finally(() => nodeRequests.delete(id));
+  nodeRequests.set(id, promise);
+  return promise;
+}
+let refreshing = false, mounted = false;
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+async function refreshNode() {
+  if (!mounted || document.visibilityState !== 'visible' || loading.value || refreshing || route.name !== 'NodeDetail') return;
+  const id = String(route.params.id || ''), current = generation;
+  refreshing = true;
+  try {
+    const server = await readNode(id);
+    if (!mounted || current !== generation || route.params.id !== id) return;
+    // ServerSettings owns an edit copy and only initializes it when node.id changes.
+    node.value = server;
+    now.value = Date.now();
+  } catch {
+    // Keep the last view on a transient failure; SSE/the next interval can retry.
+  } finally {
+    refreshing = false;
+  }
+}
+function visibilityChanged() {
+  if (document.visibilityState === 'visible') void refreshNode();
+}
+
 async function load() {
+  if (loading.value) return;
   if (route.name !== 'NodeDetail') return;
   const id = String(route.params.id || ''), current = ++generation;
   loading.value = true;
   error.value = '';
   try {
-    const server = await nodeAPI.get(id);
+    const server = await readNode(id);
     const notices: string[] = [];
     const optional = async <T,>(label: string, promise: Promise<T>, fallback: T): Promise<T> => {
       try {
@@ -223,6 +254,7 @@ async function load() {
 watch(() => route.params.id, () => {
   if (route.name !== 'NodeDetail') return;
   generation++;
+  loading.value = false;
   editorOpen.value = false;
   unpublished.value = false;
   node.value = null;
@@ -235,7 +267,10 @@ watch(() => route.params.id, () => {
 });
 
 onMounted(() => {
+  mounted = true;
   void load();
+  refreshTimer = setInterval(refreshNode, 15000);
+  document.addEventListener('visibilitychange', visibilityChanged);
   timer = setInterval(() => {
     now.value = Date.now();
   }, 5000);
@@ -243,6 +278,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  mounted = false;
+  if (refreshTimer) clearInterval(refreshTimer);
+  document.removeEventListener('visibilitychange', visibilityChanged);
   cancelDiscard();
   generation++;
   if (timer) clearInterval(timer);

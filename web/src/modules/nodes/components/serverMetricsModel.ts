@@ -36,7 +36,7 @@ export function formatRate(bytesPerSec: number | null | undefined, decimals = 1)
 
 function timeParts(timestamp: number): Record<string, string> {
   return Object.fromEntries(new Intl.DateTimeFormat('zh-CN', {
-    timeZone: authState.timezone, month: '2-digit', day: '2-digit',
+    timeZone: authState.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
   }).formatToParts(new Date(timestamp)).map(part => [part.type, part.value]));
 }
@@ -54,6 +54,28 @@ export function formatTimeHM(timestamp: number): string {
 export function formatTimeMD(timestamp: number): string {
   const p = timeParts(timestamp);
   return `${p.month}/${p.day}`;
+}
+
+/** Compact chart range: "10/30 09:34 – 10:34" (second date omitted on the same day). */
+export function formatMetricRange(start: number, end: number): string {
+  const a = timeParts(start), b = timeParts(end);
+  const head = `${a.month}/${a.day} ${a.hour}:${a.minute}`;
+  const sameDay = a.year === b.year && a.month === b.month && a.day === b.day;
+  return sameDay ? `${head} – ${b.hour}:${b.minute}` : `${head} – ${b.month}/${b.day} ${b.hour}:${b.minute}`;
+}
+
+/** Single metric value with the same units the chart cards use for the live value. */
+export function formatMetricValue(key: MetricKey, value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '—';
+  if (key === 'rxRate' || key === 'txRate') return formatRate(value);
+  return ['cpu', 'memory', 'disk'].includes(key) ? value.toFixed(1) + '%' : String(value);
+}
+
+/** "最低 18.2% · 最高 31.5%" for the visible series; "—" when nothing was measured. */
+export function metricRangeLabel(points: SystemMetricPoint[], key: MetricKey): string {
+  const values = points.map(point => point[key]).filter((value): value is number => value !== null && Number.isFinite(value));
+  if (!values.length) return '最低 — · 最高 —';
+  return `最低 ${formatMetricValue(key, Math.min(...values))} · 最高 ${formatMetricValue(key, Math.max(...values))}`;
 }
 
 export function scaleLinear(val: number, inMin: number, inMax: number, outMin: number, outMax: number): number {

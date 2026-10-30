@@ -60,11 +60,11 @@
                 <span
                   :class="[
                     'inline-flex items-center gap-1.5 font-medium',
-                    offlineNodesCount === 0 && allNodes.length > 0 ? 'text-emerald-600' : 'text-ios-red'
+                    offlineNodesCount === 0 && pendingNodesCount === 0 && allNodes.length > 0 ? 'text-emerald-600' : 'text-ios-red'
                   ]"
                 >
-                  <span :class="['w-1.5 h-1.5 rounded-full shrink-0', offlineNodesCount === 0 && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-ios-red']"></span>
-                  {{ offlineNodesCount === 0 && allNodes.length > 0 ? '全部就绪' : `${offlineNodesCount} 台离线` }}
+                  <span :class="['w-1.5 h-1.5 rounded-full shrink-0', offlineNodesCount === 0 && pendingNodesCount === 0 && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-ios-red']"></span>
+                  {{ nodeStatusSubtitle }}
                 </span>
                 <span class="text-ios-tertiary tabular-nums text-[11px] font-medium">{{ allNodes.length > 0 ? Math.round((adminOnlineNodesCount / allNodes.length) * 100) : 0 }}%</span>
               </div>
@@ -392,8 +392,8 @@
                   </div>
                 </div>
 
-                <!-- 节点用量排行明细 (充实整个空间，消除空旷) -->
-                <div class="flex-1 flex flex-col justify-between space-y-2.5">
+                <!-- 节点用量排行明细 (rows stay compact at their natural height) -->
+                <div class="flex-1 flex flex-col space-y-2.5">
                   <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary px-0.5">
                     <span>各节点用量排行</span>
                     <span class="text-[11px] text-ios-tertiary font-normal">实时监控</span>
@@ -405,7 +405,7 @@
                     description="尚未添加节点服务器，请前往节点管理配置。"
                   />
 
-                  <div v-else class="space-y-2 flex-1 flex flex-col justify-around">
+                  <div v-else class="space-y-2">
                     <div
                       v-for="(item, index) in sortedNodeTrafficList"
                       :key="item.node.id"
@@ -622,6 +622,7 @@ import { unhealthyCoreLabel } from '../../nodes/coreSummary';
 import { userAPI, type ProxyUser } from '../../users/api';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
 import { authState, isOwner, formatTime } from '../../../app/auth';
+import { panelDateLabel } from '../../../app/time';
 import { showToast } from '../../../app/api';
 import { generateQRCodeSVG } from '../../../app/qrcode';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -639,15 +640,8 @@ const loading = ref(false);
 const error = ref('');
 let timer: ReturnType<typeof setInterval> | null = null;
 
-// Dynamic Date & Auto-refresh String
-const dateRefreshText = computed(() => {
-  const now = new Date();
-  const m = now.getMonth() + 1;
-  const d = now.getDate();
-  const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  const w = weekDays[now.getDay()];
-  return `${m}月${d}日 ${w} · 30s 自动刷新`;
-});
+// Dynamic Date & Auto-refresh String (panel timezone, not the browser's)
+const dateRefreshText = computed(() => `${panelDateLabel(new Date())} · 30s 自动刷新`);
 
 // Traffic Periods
 const traffic24h = ref<{ upload: number; download: number } | null>(null);
@@ -681,7 +675,12 @@ function isNodeOnline(node: NodeView): boolean {
 }
 
 const adminOnlineNodesCount = computed(() => allNodes.value.filter(isNodeOnline).length);
-const offlineNodesCount = computed(() => allNodes.value.filter(n => !isNodeOnline(n)).length);
+const offlineNodesCount = computed(() => allNodes.value.filter(n => n.enabled && n.status !== 'pending' && !isNodeOnline(n)).length);
+const pendingNodesCount = computed(() => allNodes.value.filter(n => n.status === 'pending').length);
+const nodeStatusSubtitle = computed(() => [
+  offlineNodesCount.value ? `${offlineNodesCount.value} 台离线` : '',
+  pendingNodesCount.value ? `${pendingNodesCount.value} 台待登记` : ''
+].filter(Boolean).join(' · ') || '全部就绪');
 
 const healthyNodesCount = computed(() => {
   return allNodes.value.filter(n => isNodeOnline(n) && n.heartbeat?.core_healthy === true && !n.heartbeat?.core_error).length;
@@ -859,12 +858,27 @@ const pendingIssues = computed<PendingIssue[]>(() => {
 // ==========================================
 // 3. 用户用量与到期提醒
 // ==========================================
+// 关注顺序：超额 → 已过期 → 7 天内到期 → 其余按用量百分比；禁用账号排最后。
+function userAttentionRank(u: ProxyUser, now: number): number {
+  if (u.status !== 'active') return 4;
+  if (u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit) return 0;
+  const expiry = u.expiresAt ? Date.parse(u.expiresAt) : NaN;
+  if (Number.isFinite(expiry) && expiry <= now) return 1;
+  if (Number.isFinite(expiry) && expiry - now <= 7 * 86400000) return 2;
+  return 3;
+}
+
 const topAttentionUsers = computed(() => {
+  const now = Date.now();
   const users = [...allUsers.value];
   users.sort((a, b) => {
-    const aWarn = a.trafficLimit > 0 && a.usedTraffic >= a.trafficLimit ? 1 : 0;
-    const bWarn = b.trafficLimit > 0 && b.usedTraffic >= b.trafficLimit ? 1 : 0;
-    if (aWarn !== bWarn) return bWarn - aWarn;
+    const aRank = userAttentionRank(a, now), bRank = userAttentionRank(b, now);
+    if (aRank !== bRank) return aRank - bRank;
+    if (aRank === 1 || aRank === 2) {
+      const aExpiry = a.expiresAt ? Date.parse(a.expiresAt) : Number.MAX_SAFE_INTEGER;
+      const bExpiry = b.expiresAt ? Date.parse(b.expiresAt) : Number.MAX_SAFE_INTEGER;
+      if (aExpiry !== bExpiry) return aExpiry - bExpiry;
+    }
     const aPct = a.trafficLimit > 0 ? a.usedTraffic / a.trafficLimit : 0;
     const bPct = b.trafficLimit > 0 ? b.usedTraffic / b.trafficLimit : 0;
     return bPct - aPct;

@@ -43,14 +43,14 @@
 
             <!-- 默认端口分配范围 -->
             <div class="sm:col-span-2 pt-2 border-t border-black/[0.04] space-y-1.5">
-              <div class="flex items-center justify-between">
-                <span class="font-medium text-neutral-700 text-[11px] flex items-center gap-1.5">
+              <div class="flex flex-col gap-1 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
+                <span class="font-medium text-neutral-700 text-[11px] flex items-center gap-1.5 whitespace-nowrap">
                   <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                   </svg>
                   <span>默认端口分配范围</span>
                 </span>
-                <span class="text-[10px] text-neutral-400">新入站随机端口使用此范围；未指定中转端口时由后端分配。留空表示未设置。</span>
+                <span class="text-[10px] text-neutral-400 leading-relaxed">新入站随机端口使用此范围；未指定中转端口时由后端分配。留空表示未设置。</span>
               </div>
               <div class="grid grid-cols-2 gap-2.5">
                 <label class="space-y-1">

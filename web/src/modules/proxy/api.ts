@@ -251,7 +251,7 @@ function canvasReferenceDisplay(ref: string, context: CanvasSchemeContext): Canv
 // Rebuilds the canvas shape from a stored scheme, filling every display field
 // from the reference so a renamed node or inbound shows its current name.
 export function canvasSchemeToRelayScheme(scheme: CanvasScheme, context: CanvasSchemeContext): RelayScheme {
-  const nodes: CanvasNodeInstance[] = scheme.layout.instances.map(instance => {
+  const nodes: CanvasNodeInstance[] = (scheme.layout?.instances ?? []).map(instance => {
     const display = canvasReferenceDisplay(instance.ref, context);
     return {
       instanceId: instance.instanceId,
@@ -263,7 +263,7 @@ export function canvasSchemeToRelayScheme(scheme: CanvasScheme, context: CanvasS
       targetPort: instance.targetPort
     };
   });
-  const connections: CanvasConnection[] = scheme.layout.connections.map(connection => ({
+  const connections: CanvasConnection[] = (scheme.layout?.connections ?? []).map(connection => ({
     id: connection.id,
     ...(connection.tunnelId ? { tunnelId: connection.tunnelId } : {}),
     sourceInstanceId: connection.source,

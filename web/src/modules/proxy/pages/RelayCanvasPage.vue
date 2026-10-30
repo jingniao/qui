@@ -5,7 +5,7 @@
          usable panels, and it is the only interactive surface until a scheme
          exists (dragging into a non-existent scheme would edit nothing). -->
     <div
-      v-if="!currentScheme.id"
+      v-if="schemesLoading || schemesLoadError || !currentScheme.id"
       class="absolute inset-0 z-40 bg-[#F5F5F7] flex flex-col items-center justify-center gap-3 px-6 text-center"
       role="status"
     >
@@ -14,20 +14,35 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
         </svg>
       </span>
+      <p v-if="schemesLoading" class="text-sm font-semibold text-ios-label">正在载入中转方案…</p>
+      <template v-else-if="schemesLoadError">
+        <p role="alert" class="text-sm font-semibold text-ios-label">{{ schemesLoadError }}</p>
+        <button type="button" class="ios-btn-primary mt-1" @click="reloadSchemes">重试</button>
+      </template>
+      <template v-else>
       <p class="text-sm font-semibold text-ios-label">暂无中转方案</p>
       <p class="max-w-md text-xs text-ios-secondary leading-relaxed">
         新建方案后即可从左侧资源库拖入服务器、自建节点或共享隧道并连线；方案保存在面板，不随浏览器丢失。
       </p>
       <button type="button" class="ios-btn-primary mt-1" @click="createNewScheme">新建方案</button>
+      </template>
     </div>
     <!-- 1. Top Integrated Studio Toolbar -->
-    <header class="h-14 px-4 bg-white/95 backdrop-blur-md border-b border-black/[0.08] flex items-center justify-between gap-3 shrink-0 shadow-2xs z-30">
+    <!-- The single 56 px row only works when the studio really is desktop wide. The
+         shell sidebar takes 272 px, so at a 1120 px viewport the studio is ~850 px
+         wide: the action group slid under the scheme capsule and the execution-mode
+         control was pushed out of the fixed height onto the library header. Below xl
+         (1280 px) the bar therefore grows and wraps into rows (icon labels keep
+         title/aria-label); from xl up it is one row again, and the scheme name
+         truncates (max-width + title tooltip) instead of overlapping the actions. -->
+    <header class="px-3 sm:px-4 py-2 min-h-[3.5rem] xl:h-14 xl:py-0 bg-white/95 backdrop-blur-md border-b border-black/[0.08] flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-3 gap-y-2 shrink-0 shadow-2xs z-30">
       <!-- Left: Panel Toggle & Scheme Switcher -->
-      <div class="flex items-center gap-2.5 min-w-0">
+      <div class="flex flex-wrap xl:flex-nowrap items-center gap-2.5 min-w-0 xl:flex-1">
         <!-- Toggle Left Library Button -->
         <button
           type="button"
-          @click="leftPanelOpen = !leftPanelOpen"
+          @click="toggleLeftPanel()"
+          :aria-expanded="leftPanelOpen"
           :class="leftPanelOpen ? 'bg-ios-blue/10 text-ios-blue border-ios-blue/20' : 'bg-black/[0.03] hover:bg-black/[0.06] text-ios-secondary border-black/[0.06]'"
           class="px-2.5 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold shrink-0"
           :title="leftPanelOpen ? '收起资源库' : '展开资源库'"
@@ -42,7 +57,10 @@
         <div class="h-4 w-px bg-black/[0.08] shrink-0"></div>
 
         <!-- 1. Unified Scheme Studio Capsule with Custom Popover -->
-        <div class="relative" @click.stop>
+        <!-- The capsule is the one item that may shrink: from xl up the row is a
+             single line, so the scheme name truncates (name stays reachable through
+             the title tooltip) instead of pushing the actions out of the bar. -->
+        <div class="relative min-w-0" @click.stop>
           <div
             class="flex items-center bg-black/[0.03] hover:bg-black/[0.05] border border-black/[0.06] rounded-xl p-1 transition-all min-w-0 shadow-2xs"
             :class="{ 'ring-2 ring-ios-blue/20 border-ios-blue/30 bg-white shadow-xs': schemeDropdownOpen }"
@@ -51,8 +69,8 @@
             <button
               type="button"
               @click="toggleSchemeDropdown"
-              class="flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 text-xs font-semibold text-ios-label hover:text-ios-blue transition-colors min-w-0 max-w-[140px] sm:max-w-[200px] md:max-w-[260px] text-left"
-              title="切换中转方案"
+              class="flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 text-xs font-semibold text-ios-label hover:text-ios-blue transition-colors min-w-0 max-w-[140px] sm:max-w-[200px] md:max-w-[260px] xl:max-w-[7rem] 2xl:max-w-[16.25rem] text-left"
+              :title="currentScheme.name ? '当前方案：' + currentScheme.name + '（点击切换）' : '切换中转方案'"
             >
               <svg class="w-4 h-4 text-ios-blue shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
@@ -203,6 +221,10 @@
         </div>
 
         <!-- 2. Refined Segmented Execution Location Switcher -->
+        <!-- Part of the toolbar flow at every width: with the 56 px bar it used to be
+             pushed out onto the library header at ~1120 px. Its labels shorten to
+             客户端 / 服务器 between xl and 2xl so the scheme name keeps a readable
+             prefix in the single-row desktop bar; the title keeps the full sentence. -->
         <div class="hidden md:flex items-center p-1 rounded-xl bg-black/[0.03] border border-black/[0.06] text-xs shadow-2xs shrink-0">
           <button
             type="button"
@@ -214,7 +236,8 @@
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
-            <span>客户端执行</span>
+            <span class="hidden md:inline xl:hidden 2xl:inline">客户端执行</span>
+            <span class="hidden xl:inline 2xl:hidden">客户端</span>
           </button>
           <button
             type="button"
@@ -226,7 +249,8 @@
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
             </svg>
-            <span>服务器执行</span>
+            <span class="hidden md:inline xl:hidden 2xl:inline">服务器执行</span>
+            <span class="hidden xl:inline 2xl:hidden">服务器</span>
           </button>
         </div>
 
@@ -242,13 +266,15 @@
       </div>
 
       <!-- Right: Action Buttons & Inspector Toggle -->
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="flex items-center gap-2 shrink-0 ml-auto">
 
         <!-- Validate Button -->
         <button
           type="button"
           @click="validateScheme"
-          class="ios-btn-secondary !py-1 text-xs inline-flex items-center gap-1"
+          class="ios-btn-secondary !py-1 !min-w-0 !px-2 sm:!min-w-[4.5rem] sm:!px-5 text-xs inline-flex items-center gap-1"
+          title="校验链路"
+          aria-label="校验链路"
         >
           <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -260,7 +286,9 @@
         <button
           type="button"
           @click="saveDraft"
-          class="ios-btn-secondary !py-1 text-xs inline-flex items-center gap-1"
+          class="ios-btn-secondary !py-1 !min-w-0 !px-2 sm:!min-w-[4.5rem] sm:!px-5 text-xs inline-flex items-center gap-1"
+          title="保存草稿"
+          aria-label="保存草稿"
         >
           <svg class="w-3.5 h-3.5 text-ios-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
@@ -268,7 +296,13 @@
           <span class="hidden sm:inline">保存草稿</span>
         </button>
 
-        <button type="button" class="ios-btn-secondary !py-1 text-xs hidden md:inline" @click="checkScheme">检查</button>
+        <!-- Same action as 校验链路 (validateScheme → checkScheme), so the duplicate
+             only returns from 2xl up: the single-row bar at exactly 1280 px needs the
+             room for the scheme name. The plain wrapper decides the visibility, because
+             the global .ios-btn-secondary display rule outranks Tailwind's .hidden. -->
+        <span class="hidden 2xl:inline">
+          <button type="button" class="ios-btn-secondary !py-1 text-xs" @click="checkScheme">检查</button>
+        </span>
 
         <!-- Primary Action: Generate Sub or Publish to Server -->
         <button
@@ -299,7 +333,8 @@
         <!-- Toggle Right Inspector Button -->
         <button
           type="button"
-          @click="rightPanelOpen = !rightPanelOpen"
+          @click="toggleRightPanel()"
+          :aria-expanded="rightPanelOpen"
           :class="rightPanelOpen ? 'bg-ios-blue/10 text-ios-blue border-ios-blue/20' : 'bg-black/[0.03] hover:bg-black/[0.06] text-ios-secondary border-black/[0.06]'"
           class="px-2.5 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold shrink-0"
           :title="rightPanelOpen ? '收起属性面板' : '展开属性面板'"
@@ -315,14 +350,28 @@
 
     <!-- 2. Main Studio Workspace (Left Library + Canvas + Right Inspector) -->
     <div class="flex-1 flex min-h-0 overflow-hidden relative">
+      <!-- Below xl both panels are overlay drawers, so this backdrop is what closes
+           them and gives the canvas back. z-[25] keeps it above the canvas controls
+           (z-20) and below the drawers (z-30); the no-scheme overlay (z-40) still
+           owns the workspace when there is no scheme. -->
+      <div
+        v-if="leftPanelOpen || rightPanelOpen"
+        class="xl:hidden absolute inset-0 z-[25] bg-black/25"
+        aria-hidden="true"
+        @click="closeDrawers"
+      ></div>
       <!-- ================= Left: Collapsible Resource Library ================= -->
+      <!-- xl and wider: an in-flow column that collapses to 0. Below xl: a fixed
+           width drawer that slides in from the left over the canvas instead of
+           squeezing it to zero (at a 1120 px viewport the studio is only ~850 px,
+           so a docked 288 px library left the canvas with nothing). -->
       <aside
-        class="transition-all duration-300 ease-in-out shrink-0 overflow-hidden bg-white border-r border-black/[0.08] flex flex-col z-20 shadow-xs"
-        :class="leftPanelOpen ? 'w-64 xl:w-72' : 'w-0 border-r-0'"
+        class="transition-all duration-300 ease-in-out overflow-hidden bg-white border-r border-black/[0.08] flex flex-col shadow-xs absolute inset-y-0 left-0 z-30 w-[min(18rem,85vw)] xl:relative xl:inset-auto xl:z-20 xl:shrink-0"
+        :class="leftPanelOpen ? 'translate-x-0 xl:w-72' : '-translate-x-full pointer-events-none xl:pointer-events-auto xl:translate-x-0 xl:w-0 xl:border-r-0'"
         aria-label="拓扑资源库"
       >
         <!-- Resource Search & Header -->
-        <div class="p-3 border-b border-black/[0.05] space-y-2 shrink-0 w-64 xl:w-72">
+        <div class="p-3 border-b border-black/[0.05] space-y-2 shrink-0 w-full xl:w-72">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1.5">
               <span class="font-bold text-xs text-ios-label">拓扑资源库</span>
@@ -357,7 +406,7 @@
         </div>
 
         <!-- Groups Tree -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-2 text-xs w-64 xl:w-72">
+        <div class="flex-1 overflow-y-auto p-2 space-y-2 text-xs w-full xl:w-72">
           <!-- Group 1: 我的服务器 (Servers) -->
           <div class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
             <button
@@ -743,7 +792,7 @@
         <button
           v-if="!leftPanelOpen"
           type="button"
-          @click="leftPanelOpen = true"
+          @click="openLeftPanel()"
           class="absolute left-4 top-4 z-20 bg-white/95 backdrop-blur-md border border-black/[0.08] shadow-md px-3 py-1.5 rounded-xl text-xs font-semibold text-ios-label hover:text-ios-blue hover:shadow-lg transition-all flex items-center gap-1.5"
           title="展开拓扑资源库"
         >
@@ -757,7 +806,7 @@
         <button
           v-if="!rightPanelOpen"
           type="button"
-          @click="rightPanelOpen = true"
+          @click="openRightPanel()"
           class="absolute right-4 top-4 z-20 bg-white/95 backdrop-blur-md border border-black/[0.08] shadow-md px-3 py-1.5 rounded-xl text-xs font-semibold text-ios-label hover:text-ios-blue hover:shadow-lg transition-all flex items-center gap-1.5"
           :title="selectedNode ? '查看选中节点属性' : '查看方案全局概况'"
         >
@@ -949,20 +998,27 @@
         </div>
 
         <!-- Canvas Bottom Tip -->
-        <div class="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md text-white text-[11px] px-3 py-1.5 rounded-xl pointer-events-none z-10 flex items-center gap-2">
+        <!-- Only drawn when the canvas is wide enough to hold the hint and the zoom
+             pill side by side: below xl the panels are drawers, so the canvas has the
+             full studio width again (from sm up); at xl–2xl both panels are docked and
+             a ~400 px canvas cannot fit both, so the hint stays away and the zoom
+             controls are never covered. max-w keeps the last line clear of the pill. -->
+        <div class="hidden sm:flex xl:hidden 2xl:flex absolute bottom-4 left-4 max-w-[calc(100%-12rem)] bg-black/70 backdrop-blur-md text-white text-[11px] px-3 py-1.5 rounded-xl pointer-events-none z-10 items-center gap-2">
           <span>💡 提示：从绿色右锚点拖出连线连接到蓝色左锚点，箭头表示流量流动方向。</span>
         </div>
 
       </main>
 
       <!-- ================= Right: Collapsible Inspector Property Panel ================= -->
+      <!-- Same two modes as the library: an in-flow column at xl and wider, an
+           overlay drawer from the right below xl. -->
       <aside
-        class="transition-all duration-300 ease-in-out shrink-0 overflow-hidden bg-white border-l border-black/[0.08] flex flex-col z-20 shadow-xs"
-        :class="rightPanelOpen ? 'w-72 xl:w-80' : 'w-0 border-l-0'"
+        class="transition-all duration-300 ease-in-out overflow-hidden bg-white border-l border-black/[0.08] flex flex-col shadow-xs absolute inset-y-0 right-0 z-30 w-[min(20rem,85vw)] xl:relative xl:inset-auto xl:z-20 xl:shrink-0"
+        :class="rightPanelOpen ? 'translate-x-0 xl:w-80' : 'translate-x-full pointer-events-none xl:pointer-events-auto xl:translate-x-0 xl:w-0 xl:border-l-0'"
         aria-label="属性检查器"
       >
         <!-- Header with dynamic title and close button -->
-        <div class="p-3.5 border-b border-black/[0.06] flex items-center justify-between shrink-0 w-72 xl:w-80">
+        <div class="p-3.5 border-b border-black/[0.06] flex items-center justify-between shrink-0 w-full xl:w-80">
           <div class="flex items-center gap-2">
             <span class="w-5 h-5 rounded-md flex items-center justify-center text-xs" :class="selectedNode ? 'bg-ios-blue/10 text-ios-blue' : 'bg-black/[0.05] text-ios-secondary'">
               {{ selectedNode ? '⚙️' : '📋' }}
@@ -990,7 +1046,7 @@
         </div>
 
         <!-- Inspector Body -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs w-72 xl:w-80">
+        <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs w-full xl:w-80">
           <!-- Selected Node Inspector -->
           <div v-if="selectedNode" class="space-y-4">
           <div class="space-y-3 text-xs">
@@ -1068,6 +1124,9 @@
           </div>
 
           <!-- Global Scheme Inspector -->
+          <div v-else-if="schemesLoading || schemesLoadError" role="status">
+            {{ schemesLoadError || '正在载入中转方案…' }}
+          </div>
           <div v-else-if="!currentScheme.id" class="p-4 rounded-xl bg-black/[0.02] border border-dashed border-black/[0.08] text-[11px] text-ios-tertiary leading-relaxed">
             暂无中转方案：请先点击「新建方案」。方案名称、发布状态与删除操作只对已存在的方案生效。
           </div>
@@ -1397,8 +1456,66 @@ function pickListenPortForSelectedNode() {
   }
 }
 const selectedConnection = ref<CanvasConnection | null>(null);
-const leftPanelOpen = ref(true);
-const rightPanelOpen = ref(true);
+
+// The studio is laid out for a desktop. The shell sidebar takes 272 px, so the
+// library (288 px) and the inspector (320 px) plus a usable canvas need ~1280 px of
+// viewport: at 1120 px the studio is only ~850 px and the docked panels squeezed the
+// canvas to nothing while the toolbar overlapped itself. Below xl (1280 px) both
+// panels are overlay drawers and the canvas owns the workspace; at xl and wider
+// nothing changes: two open columns, same widths, same collapse animation.
+const COMPACT_QUERY = '(max-width: 1279.98px)';
+const compactMedia = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia(COMPACT_QUERY)
+  : null;
+const compactViewport = ref(compactMedia ? compactMedia.matches : false);
+const leftPanelOpen = ref(!compactViewport.value);
+const rightPanelOpen = ref(!compactViewport.value);
+
+function applyCompactViewport(matches: boolean) {
+  if (matches === compactViewport.value) return;
+  compactViewport.value = matches;
+  // Entering the drawer layout: a panel left open would cover the canvas, so both
+  // start closed. Leaving it: back to the studio's two open columns.
+  leftPanelOpen.value = !matches;
+  rightPanelOpen.value = !matches;
+}
+
+function onCompactViewportChange(event: MediaQueryListEvent) {
+  applyCompactViewport(event.matches);
+}
+
+// Only one drawer may be open below xl: the second would stack on the first.
+function toggleLeftPanel() {
+  leftPanelOpen.value = !leftPanelOpen.value;
+  if (leftPanelOpen.value && compactViewport.value) rightPanelOpen.value = false;
+}
+
+function toggleRightPanel() {
+  rightPanelOpen.value = !rightPanelOpen.value;
+  if (rightPanelOpen.value && compactViewport.value) leftPanelOpen.value = false;
+}
+
+function openLeftPanel() {
+  leftPanelOpen.value = true;
+  if (compactViewport.value) rightPanelOpen.value = false;
+}
+
+function openRightPanel() {
+  rightPanelOpen.value = true;
+  if (compactViewport.value) leftPanelOpen.value = false;
+}
+
+function closeDrawers() {
+  leftPanelOpen.value = false;
+  rightPanelOpen.value = false;
+}
+
+// Tapping a node opens the inspector on desktop. Below xl that would drop a drawer
+// over the topology the Owner just tapped, so the floating 节点属性 button stays the
+// way in there and the canvas keeps its width.
+function revealInspector() {
+  if (!compactViewport.value) rightPanelOpen.value = true;
+}
 
 function setExecutionLocation(loc: 'client' | 'server') {
   currentScheme.value.executionLocation = loc;
@@ -1431,6 +1548,8 @@ const publishing = ref(false);
 const inbounds = ref<Inbound[]>([]);
 // Schemes an earlier build kept in this browser, offered once for import.
 const pendingLocalSchemes = ref<RelayScheme[]>([]);
+const schemesLoading = ref(true);
+const schemesLoadError = ref('');
 const confirmIgnoreLocal = ref(false);
 const confirmDeleteScheme = ref(false);
 
@@ -1836,6 +1955,7 @@ function switchScheme() {
 }
 
 async function createNewScheme() {
+  if (schemesLoading.value || schemesLoadError.value) return;
   try {
     const usedNames = new Set(proxyNodeStore.schemes.map(s => s.name));
     let number = 1;
@@ -1920,7 +2040,7 @@ function onCanvasDrop(e: DragEvent) {
     if (existing) {
       selectedNode.value = existing;
       selectedConnection.value = null;
-      rightPanelOpen.value = true;
+      revealInspector();
       draggedPayload = null;
       showToast('该自建入站已在当前方案中');
       return;
@@ -2105,7 +2225,7 @@ const connectingPath = computed(() => {
 function selectNode(item: CanvasNodeInstance) {
   selectedNode.value = item;
   selectedConnection.value = null;
-  rightPanelOpen.value = true;
+  revealInspector();
 }
 
 function selectConnection(conn: CanvasConnection) { openEditor(conn); }
@@ -2211,10 +2331,15 @@ async function persistScheme(scheme: RelayScheme) {
 }
 
 async function reloadSchemes() {
+  schemesLoading.value = true;
+  schemesLoadError.value = '';
   try {
     await loadCanvasSchemes(canvasContext());
   } catch (error) {
-    showToast(`载入中转方案失败: ${(error as Error).message}`, 'error');
+    schemesLoadError.value = `载入中转方案失败: ${(error as Error).message}`;
+    showToast(schemesLoadError.value, 'error');
+  } finally {
+    schemesLoading.value = false;
   }
 }
 
@@ -2368,6 +2493,8 @@ onMounted(async () => {
   applyExecutionDefaults();
 
   window.addEventListener('click', handleWindowClick);
+  // Keep the drawer/column mode in sync when the window is resized across xl.
+  compactMedia?.addEventListener('change', onCompactViewportChange);
   setTimeout(() => {
     if (qFocusConnId) {
       const conn = currentScheme.value.connections.find(c => c.id === qFocusConnId);
@@ -2405,5 +2532,6 @@ onUnmounted(() => {
   void flushPendingSaves();
   window.removeEventListener('beforeunload', warnUnsaved);
   window.removeEventListener('click', handleWindowClick);
+  compactMedia?.removeEventListener('change', onCompactViewportChange);
 });
 </script>

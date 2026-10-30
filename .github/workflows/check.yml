@@ -84,7 +84,7 @@ jobs:
           set -euo pipefail
           for script in scripts/build-singbox.sh scripts/build-release.sh deploy/linux/*.sh; do bash -n -- "$script"; done
           for script in deploy/linux/update-recovery.sh deploy/openrc/host-network-watch \
-            deploy/openrc/proxycontrol-update-recovery; do
+            deploy/openrc/tuning-watch deploy/openrc/proxycontrol-update-recovery; do
             sh -n -- "$script"
           done
           if [ -f deploy/linux/tests/update-test.sh ]; then
@@ -99,6 +99,11 @@ jobs:
             bash -n -- deploy/linux/tests/core-asset-test.sh
             bash deploy/linux/tests/core-asset-test.sh
           fi
+          # tuning-helper-test.sh activates the packaged tuning units against a fake
+          # helper below /run and never writes host sysctls; the other two are rootless.
+          sudo bash deploy/linux/tests/tuning-helper-test.sh
+          bash deploy/linux/tests/multi-core-test.sh
+          bash deploy/linux/tests/release-version-test.sh
 
 
   # Optional real-core job. Both releases are stable upstream releases and every

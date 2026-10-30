@@ -223,7 +223,7 @@ const regionDisplay = computed(() => {
   void geoTick.value;
   const adminRegion = props.meta.region?.trim();
   if (adminRegion) return adminRegion;
-  const info = resolveCountryInfo(props.node.name, props.node.publicIp || props.node.hostname);
+  const info = resolveCountryInfo(props.meta?.region, props.node.publicIp, props.node.name, props.node.hostname);
   if (info && info.code !== 'UN') {
     return `${info.flag} ${info.name}`;
   }

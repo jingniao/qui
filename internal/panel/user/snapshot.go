@@ -9,6 +9,7 @@ import (
 type Access struct {
 	User        User
 	Credentials []Credential
+	InboundIDs  []string
 }
 
 func (r *Repository) AccessForGroups(ctx context.Context, groups []string) ([]Access, error) {
@@ -59,7 +60,32 @@ func (r *Repository) AccessForGroups(ctx context.Context, groups []string) ([]Ac
 		for _, protocol := range u.AllowedProtocols {
 			allowed[protocol] = true
 		}
-		entry := Access{User: u, Credentials: []Credential{}}
+		entry := Access{User: u, Credentials: []Credential{}, InboundIDs: []string{}}
+		args := append(append([]any{}, arguments...), userID, userID)
+		rows, err := r.Database.QueryContext(ctx, `SELECT DISTINCT i.id FROM node_group_inbounds e
+JOIN node_groups g ON g.id=e.group_id JOIN user_node_group_grants a ON a.group_id=g.id
+JOIN inbounds i ON i.id=e.inbound_id JOIN nodes n ON n.id=i.node_id
+WHERE g.id IN (`+strings.Join(placeholders, ",")+`) AND a.user_id=?
+AND g.enabled=1 AND g.subscription_visible=1 AND g.purpose IN ('subscription','mixed')
+AND i.subscription_visible=1 AND i.internal_relay=0
+AND n.enabled=1 AND n.status<>'disabled' AND n.maintenance=0 AND n.allow_subscription=1 AND n.deleted_at IS NULL
+AND (json_array_length(i.allowed_users_json)=0 OR EXISTS(SELECT 1 FROM json_each(i.allowed_users_json) WHERE value=?)) ORDER BY i.id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			entry.InboundIDs = append(entry.InboundIDs, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
 		for _, device := range devices {
 			if device.Status != "active" {
 				continue

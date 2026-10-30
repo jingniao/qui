@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/db"
 )
 
@@ -17,6 +19,7 @@ func TestRestoreKeepsCurrentSourcesAndRevokedGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	groupID := grantImport(t, current, a, key, "")
 	candidate, err := db.Open(ctx, filepath.Join(t.TempDir(), "candidate.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +47,12 @@ func TestRestoreKeepsCurrentSourcesAndRevokedGrants(t *testing.T) {
 		if e = restored.PrepareRestoreTx(ctx, tx); e != nil {
 			t.Fatal(e)
 		}
+		if e = (&node.Repository{}).PrepareGroupRestoreTx(ctx, tx); e != nil {
+			t.Fatal(e)
+		}
+		if e = (&user.Repository{}).PrepareGroupGrantsRestoreTx(ctx, tx); e != nil {
+			t.Fatal(e)
+		}
 		if e = tx.Commit(); e != nil {
 			t.Fatal(e)
 		}
@@ -52,6 +61,12 @@ func TestRestoreKeepsCurrentSourcesAndRevokedGrants(t *testing.T) {
 	input.Content = ""
 	input.UserIDs = []string{b}
 	if _, err = current.Save(ctx, key, input); err != nil {
+		t.Fatal(err)
+	}
+	if err = (&user.Repository{Database: current.Database, Vault: current.Vault}).Grant(ctx, a, groupID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = (&user.Repository{Database: current.Database, Vault: current.Vault}).Grant(ctx, b, groupID, false); err != nil {
 		t.Fatal(err)
 	}
 	prepare()

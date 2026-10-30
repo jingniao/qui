@@ -6,6 +6,13 @@ import (
 	"proxycontrol/internal/platform/db"
 )
 
+// Group definitions/entries have already been restored by their owner module.
+// Current grants win, including revocations since the selected snapshot.
+func (r *Repository) PrepareGroupGrantsRestoreTx(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO user_node_group_grants SELECT a.* FROM restore_source.user_node_group_grants a JOIN users u ON u.id=a.user_id JOIN node_groups g ON g.id=a.group_id`)
+	return err
+}
+
 func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 	for _, prefix := range []string{"", "restore_source."} {
 		if err := validateStoredTrafficMaterial(ctx, tx, prefix); err != nil {

@@ -34,7 +34,7 @@
         </button>
 
         <!-- 3. Primary Action: Create Self-Hosted Node -->
-        <button
+        <button v-if="isOwner"
           type="button"
           @click="openCreateNodeModal"
           class="ios-btn-primary inline-flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
@@ -297,7 +297,7 @@
 
           <!-- 6. Actions (Aligned with Server Page Buttons) -->
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
-            <button
+            <button v-if="isOwner"
               type="button"
               @click="handleAddRelay(node)"
               class="ios-action-btn-primary"
@@ -311,14 +311,14 @@
             >
               详情
             </button>
-            <button
+            <button v-if="isOwner"
               type="button"
               @click="openEditNode(node)"
               class="ios-action-btn-secondary"
             >
               编辑
             </button>
-            <button
+            <button v-if="isOwner"
               type="button"
               @click="deleteNode(node)"
               class="ios-action-btn-danger"
@@ -477,7 +477,7 @@
                   </div>
                 </div>
 
-                <button
+                <button v-if="isOwner"
                   type="button"
                   @click.stop="goToEditRelayRoute(r)"
                   class="px-2 py-1 text-xs font-bold text-ios-blue hover:bg-ios-blue/10 rounded-lg transition-colors shrink-0"
@@ -493,7 +493,7 @@
         <!-- Row 5: Action Grid Buttons (Exact Same Style as Server Card Bottom Grid) -->
         <div class="pt-2 border-t border-black/[0.04] grid grid-cols-3 gap-1.5">
           <!-- 1. 添加中转 -->
-          <button
+          <button v-if="isOwner"
             type="button"
             @click="handleAddRelay(node)"
             class="py-1.5 rounded-xl bg-[#EFF8FF] text-[#175CD3] hover:bg-[#D1E9FF] font-semibold text-xs text-center transition-colors flex items-center justify-center gap-1"
@@ -526,7 +526,7 @@
               v-if="activeMoreId === node.id"
               class="absolute right-0 bottom-full mb-1.5 w-32 bg-white rounded-xl shadow-lg border border-black/[0.08] py-1 z-30 text-xs"
             >
-              <button
+              <button v-if="isOwner"
                 type="button"
                 @click="openEditNode(node); activeMoreId = null"
                 class="w-full text-left px-3 py-1.5 hover:bg-black/5 text-ios-label"
@@ -540,7 +540,7 @@
               >
                 连通性测试
               </button>
-              <button
+              <button v-if="isOwner"
                 type="button"
                 @click="deleteNode(node); activeMoreId = null"
                 class="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600"
@@ -626,7 +626,7 @@
                   </svg>
                   <span>配置完整，已准备可编辑画布拓扑。</span>
                 </div>
-                <button
+                <button v-if="isOwner"
                   type="button"
                   @click="openDetailModal = false; goToEditRelayRoute(r)"
                   class="px-2 py-0.5 rounded bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors"
@@ -1284,6 +1284,7 @@ function goToEditRelayRoute(route: NodeRelayRoute) {
 }
 
 async function handleAddRelay(node: ProxyNodeItem) {
+  if (!isOwner.value) return;
   try {
     const { scheme, exitInstanceId } = await createDraftSchemeForTargetNode(node, { servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes });
     showToast(`已创建草稿，自动将 [${node.name}] 设为落地出口`, 'success');
@@ -1346,12 +1347,14 @@ function copyNodeLink(node: ProxyNodeItem) {
 
 // Create / Edit Self-Hosted Nodes
 function openCreateNodeModal() {
+  if (!isOwner.value) return;
   editingNode.value = null;
   editingInbound.value = null;
   openSelfHostedModal.value = true;
 }
 
 function openEditNode(node: ProxyNodeItem) {
+  if (!isOwner.value) return;
   if (node.sourceType === 'self_hosted' && node.onlyViaRelay) {
     showToast('内部中转入站请在中转搭建中管理', 'info');
     return;
@@ -1366,13 +1369,11 @@ function openEditNode(node: ProxyNodeItem) {
     editingInbound.value = ib;
     openSelfHostedModal.value = true;
   } else {
-    nodeForm.name = node.name;
-    nodeForm.protocol = node.protocol;
-    nodeForm.server = node.server;
-    nodeForm.port = node.port;
-    nodeForm.supportTcp = node.supportTcp;
-    nodeForm.supportUdp = node.supportUdp;
-    openImportNodeModal.value = true;
+    const source = proxyNodeStore.subscriptions.find(s => s.id === node.sourceId);
+    if (!source) { showToast('未找到节点来源，请刷新后重试', 'error'); return; }
+    showToast('该节点来自导入源，请编辑来源；更改会影响该来源的全部节点', 'info');
+    startEditSub(source);
+    openSubModal.value = true;
   }
 }
 
@@ -1413,12 +1414,13 @@ async function saveManualNodeModal() {
   try {
     await importAPI.create({name:nodeForm.name || '手动导入', content:quickLinkInput.value.trim(), intervalSeconds:refreshSeconds.value, userIds:grantUserIds.value});
     quickLinkInput.value=''; await loadImports(); openImportNodeModal.value=false;
-    showToast('节点已保存，请在订阅管理中授权用户');
+    showToast('节点已保存，可在「节点分组」中分配');
   } catch(e) {showToast((e as Error).message,'error');}
 }
 
 async function deleteNode(node: ProxyNodeItem) {
-  if (!confirm(`确定要删除节点 [${node.name}] 吗？`)) return;
+  if (!isOwner.value) return;
+  if (node.sourceType === 'self_hosted' && !confirm(`确定要删除节点 [${node.name}] 吗？`)) return;
   if (node.sourceType === 'self_hosted') {
     if (node.inboundId) {
       try {

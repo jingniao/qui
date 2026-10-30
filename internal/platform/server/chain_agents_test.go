@@ -187,8 +187,11 @@ func runThreeAgentChain(t *testing.T, binaryPath, coreName string) {
 	if _, err := policyService.Save(ctx, "", policy.Input{Name: "TCP pool with real three-Agent backup chain", Priority: 0, Enabled: true, Match: desiredstate.Match{CIDRs: []string{"127.0.0.1/32"}, Ports: []string{originURL.Port()}, Network: "tcp"}, Action: desiredstate.Action{Type: "OutboundGroup", TargetID: primaryGroup.ID, Failover: "BackupProxyChain", BackupID: chain.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	entry, err := proxyService.SaveInbound(ctx, "", proxy.InboundInput{Name: "User VLESS", NodeID: nodeIDs[0], Protocol: "vless", Listen: "127.0.0.1", Port: port(), Enabled: true, DefaultOutbound: "block"})
+	entry, err := proxyService.SaveInbound(ctx, "", proxy.InboundInput{Name: "User VLESS", NodeID: nodeIDs[0], Protocol: "vless", Listen: "127.0.0.1", Port: port(), Enabled: true, SubscriptionVisible: true, DefaultOutbound: "block"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}}); err != nil {
 		t.Fatal(err)
 	}
 	call := func(method, path string, body any, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {

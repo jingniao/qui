@@ -203,6 +203,8 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 			func() error { return (&portal.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&subscription.Repository{}).PrepareRestoreTx(ctx, tx, stamp) },
 			func() error { return (&importer.Store{}).PrepareRestoreTx(ctx, tx) },
+			func() error { return (&node.Repository{}).PrepareGroupRestoreTx(ctx, tx) },
+			func() error { return (&user.Repository{}).PrepareGroupGrantsRestoreTx(ctx, tx) },
 			func() error { return (&proxy.Repository{}).PrepareClientRestoreTx(ctx, tx) },
 			func() error { return (&access.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&deployment.Repository{}).PrepareRestoreTx(ctx, tx) },

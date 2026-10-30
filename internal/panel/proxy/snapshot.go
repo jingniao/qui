@@ -180,6 +180,16 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 				allowed[id] = true
 			}
 			for _, entry := range access {
+				member := false
+				for _, id := range entry.InboundIDs {
+					if id == record.ID {
+						member = true
+						break
+					}
+				}
+				if !member {
+					continue
+				}
 				if len(allowed) > 0 && !allowed[entry.User.ID] {
 					continue
 				}

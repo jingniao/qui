@@ -71,6 +71,17 @@ func setupWithLimit(t *testing.T, limit int64) *fixture {
 			t.Fatal(err)
 		}
 	}
+	for _, nodeID := range f.nodeIDs {
+		for index, protocol := range []string{"socks5", "http"} {
+			sealed, e := configurationVault.Seal([]byte("{}"))
+			if e != nil {
+				t.Fatal(e)
+			}
+			if _, e = database.Exec("INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES(?,?,?,?,'0.0.0.0',?,1,1,0,'direct','[]',?,'now')", nodeID+"-in-"+protocol, protocol, nodeID, protocol, 1080+index, sealed); e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
 	for index, members := range [][]string{{f.nodeIDs[0]}, {f.nodeIDs[0], f.nodeIDs[1]}, {f.nodeIDs[2]}} {
 		purpose := "subscription"
 		if index == 2 {
@@ -99,7 +110,7 @@ func (f *fixture) publish(t *testing.T, nodeID string) {
 	state := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: nodeID, Users: []desiredstate.User{{ID: f.u.ID, Enabled: true, ExpiresAt: f.u.ExpiresAt}}, Credentials: []desiredstate.Credential{}, Inbounds: []desiredstate.Inbound{}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}}, Logging: desiredstate.Logging{DomainOnly: true}}
 	for index, credential := range f.device.Credentials {
 		state.Credentials = append(state.Credentials, desiredstate.Credential{ID: credential.ID, UserID: f.u.ID, DeviceID: f.device.ID, Protocol: credential.Protocol, Username: credential.Username, Secret: credential.Secret})
-		state.Inbounds = append(state.Inbounds, desiredstate.Inbound{ID: "in-" + credential.Protocol, Protocol: credential.Protocol, Listen: "0.0.0.0", Port: 1080 + index, Enabled: true, SubscriptionVisible: true, CredentialIDs: []string{credential.ID}, DefaultOutbound: "direct"})
+		state.Inbounds = append(state.Inbounds, desiredstate.Inbound{ID: nodeID + "-in-" + credential.Protocol, Protocol: credential.Protocol, Listen: "0.0.0.0", Port: 1080 + index, Enabled: true, SubscriptionVisible: true, CredentialIDs: []string{credential.ID}, DefaultOutbound: "direct"})
 	}
 	revision, err := f.deployments.Create(ctx, state, "owner", "Subscription integration")
 	if err != nil {

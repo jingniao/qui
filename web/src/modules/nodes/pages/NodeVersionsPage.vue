@@ -7,6 +7,7 @@
     >
       <template #actions>
         <button
+          v-if="isOwner"
           type="button"
           @click="triggerUpgradeAll"
           class="ios-btn-primary inline-flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,113,227,0.28)] text-xs py-2 px-3.5"
@@ -32,6 +33,7 @@
 </template>
 
 <script setup lang="ts">
+import { isOwner } from '../../../app/auth';
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PageHeader from '../../../components/PageHeader.vue';

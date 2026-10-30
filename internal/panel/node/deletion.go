@@ -126,6 +126,9 @@ func (r *Repository) Delete(ctx context.Context, id string, tasks Tasks, audit D
 	}
 	// An enrollment code of a deleted node never works again, and a deleted node
 	// is not a member of any node group.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM node_group_inbounds WHERE inbound_id IN (SELECT id FROM inbounds WHERE node_id=?)", id); err != nil {
+		return err
+	}
 	for _, table := range []string{"node_enrollment_tokens", "node_certificate_renewals", "node_group_members"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE node_id=?", id); err != nil {
 			return err

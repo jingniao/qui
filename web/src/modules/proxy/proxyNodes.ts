@@ -224,9 +224,7 @@ export function getNodeRelayRoutes(node: ProxyNodeItem, schemes: RelayScheme[]):
       inst =>
         inst.resourceId === node.id ||
         (node.inboundId && inst.resourceId === node.inboundId) ||
-        (inst.resourceId === 'manual-jp' && (node.id === 'manual-2' || node.name.includes('日本'))) ||
-        ((node.id === 'manual-2' || node.id === 'manual-jp' || node.name.includes('日本')) && (inst.resourceId === 'manual-jp' || inst.resourceId === 'manual-2' || inst.name.includes('日本') || inst.serverAddress.includes('jp'))) ||
-        (inst.serverAddress && (inst.serverAddress.includes(node.server) || node.server.includes(inst.serverAddress)))
+        (!!node.server && node.port > 0 && inst.serverAddress === `${node.server}:${node.port}`)
     );
 
     for (const exitInst of exitInstances) {

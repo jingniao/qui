@@ -108,9 +108,9 @@ AND NOT EXISTS(SELECT 1 FROM probe_targets p WHERE p.id=t.id)`,
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO node_meta(node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day)
-SELECT node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day FROM restore_source.node_meta WHERE 1
-ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,last_alert_day=max(node_meta.last_alert_day,excluded.last_alert_day)`); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO node_meta(node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day,port_range_start,port_range_end)
+SELECT node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day,port_range_start,port_range_end FROM restore_source.node_meta WHERE 1
+ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,port_range_start=excluded.port_range_start,port_range_end=excluded.port_range_end,last_alert_day=max(node_meta.last_alert_day,excluded.last_alert_day)`); err != nil {
 		return err
 	}
 	return nil

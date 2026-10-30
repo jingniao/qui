@@ -418,6 +418,9 @@ func TestPortalEveryEndpointUsesOnlySessionUser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err := app.Database.Exec("INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES(?, 'portal entry',?,'http','0.0.0.0',1080,1,1,0,'direct','[]',x'01','now')", n.ID, n.ID); err != nil {
+			t.Fatal(err)
+		}
 		g, err := app.nodeRepository.SaveGroup(context.Background(), "", node.GroupInput{Name: u.Username + "_group", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}})
 		if err != nil {
 			t.Fatal(err)

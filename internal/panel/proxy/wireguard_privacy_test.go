@@ -27,6 +27,9 @@ func TestUserWireGuardSnapshotOnlyContainsPeerPublicKey(t *testing.T) {
 	if _, err := f.service.SaveInbound(ctx, "", InboundInput{Name: "WG user entry", NodeID: f.nodeA, Protocol: "wireguard", Listen: "0.0.0.0", Port: 51820, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{f.nodeA}}); err != nil {
+		t.Fatal(err)
+	}
 	snapshot, err := f.service.Snapshot(ctx, f.nodeA, f.users)
 	if err != nil {
 		t.Fatal(err)

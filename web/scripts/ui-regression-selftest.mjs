@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8');
+assert.match(read('app/router.ts'), /router\.beforeEach\(setupNavigationGuards\)/, 'navigation guard must be registered');
+assert.doesNotMatch(read('modules/nodes/components/serverMetricsModel.ts'), /Math\.sin|431\s*\*\s*1024|1021\s*\*\s*1024|processes\s*[:=]\s*111|111\s*processes/, 'metrics must never use fabricated samples');
+const meta = read('modules/nodes/nodeMeta.ts');
+const saveMeta = meta.slice(meta.indexOf('export async function saveNodeMeta'));
+assert.doesNotMatch(saveMeta, /\.\.\.meta\b/, 'metadata request must whitelist API fields');
+assert.doesNotMatch(read('modules/system/components/NodeVersionPanel.vue'), /\b[a-f0-9]{64}\b/i, 'core hashes must be supplied by Owner');
+const proxy = read('modules/proxy/pages/ProxyNodeListPage.vue');
+const saveSub = proxy.slice(proxy.indexOf('async function saveEditSub'), proxy.indexOf('function formatInterval'));
+assert.doesNotMatch(saveSub, /userIds\s*:\s*\[\s*\]/, 'editing a source must preserve grants');
+assert.doesNotMatch(read('app/apiClient.ts'), /if\s*\([^)]*csrf_failed[^)]*\)|retried\s*:\s*true|return\s+request<T>\(path,\s*method,\s*body/, 'mutations must not auto-retry CSRF failures');
+console.log('All UI regression self-tests passed');

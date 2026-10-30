@@ -141,9 +141,7 @@
           </div>
           <h3 class="font-bold text-ios-label text-sm tracking-tight">网络信息</h3>
         </div>
-        <span class="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 tabular-nums">
-          网速实时
-        </span>
+
       </div>
 
       <!-- Upper Hero Metric Box -->
@@ -239,7 +237,7 @@ const cpuPercentColor = computed(() => {
 
 const cpuModelName = computed(() => {
   const m = (nodeAny.value.cpuModel as string) || (hbAny.value.cpu_model as string);
-  return m || '主板核心 / 计算处理器';
+  return m || '—';
 });
 
 const architecture = computed(() => {
@@ -258,7 +256,7 @@ const kernel = computed(() => {
 const gpu = computed(() => {
   return (nodeAny.value.gpu as string)
     || (hbAny.value.gpu as string)
-    || '-';
+    || '—';
 });
 
 // 2. Memory & Storage
@@ -304,9 +302,6 @@ const memoryDisplay = computed(() => {
   if (typeof hbAny.value.memory_total_bytes === 'number') {
     return formatBytes(hbAny.value.memory_total_bytes as number);
   }
-  if (props.node.heartbeat?.memory_percent !== undefined) {
-    return `${props.node.heartbeat.memory_percent.toFixed(1)}%`;
-  }
   return '—';
 });
 
@@ -321,20 +316,17 @@ const diskDisplay = computed(() => {
   if (typeof hbAny.value.disk_total_bytes === 'number') {
     return formatBytes(hbAny.value.disk_total_bytes as number);
   }
-  if (props.node.heartbeat?.disk_percent !== undefined) {
-    return `${props.node.heartbeat.disk_percent.toFixed(1)}%`;
-  }
   return '—';
 });
 
 // 3. Network & Traffic
-const uploadBytes = computed(() => props.node.heartbeat?.upload_bytes ?? 0);
-const downloadBytes = computed(() => props.node.heartbeat?.download_bytes ?? 0);
-const totalBytes = computed(() => uploadBytes.value + downloadBytes.value);
+const uploadBytes = computed(() => props.node.heartbeat?.upload_bytes);
+const downloadBytes = computed(() => props.node.heartbeat?.download_bytes);
+const totalBytes = computed(() => uploadBytes.value === undefined || downloadBytes.value === undefined ? undefined : uploadBytes.value + downloadBytes.value);
 
 const uploadRatioPercent = computed(() => {
-  if (totalBytes.value <= 0) return 50;
-  return Math.round((uploadBytes.value / totalBytes.value) * 100);
+  if (totalBytes.value === undefined || totalBytes.value <= 0) return 0;
+  return Math.round(((uploadBytes.value ?? 0) / totalBytes.value) * 100);
 });
 
 const downloadRatioPercent = computed(() => {
@@ -344,7 +336,7 @@ const downloadRatioPercent = computed(() => {
 
 const totalTrafficDisplay = computed(() => {
   const total = totalBytes.value;
-  if (total > 0) {
+  if (total !== undefined) {
     return formatBytes(total);
   }
   if (props.month !== undefined && props.month > 0) {

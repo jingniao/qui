@@ -35,7 +35,7 @@ func TestImportBackupVerifierAndInventory(t *testing.T) {
 		if e != nil {
 			return e
 		}
-		if inventory.Totals.SubscriptionSources != 1 || inventory.Totals.ImportedProxies != 1 || inventory.Totals.SourceGrants != 1 {
+		if inventory.Totals.SubscriptionSources != 1 || inventory.Totals.ImportedProxies != 1 || inventory.Totals.SourceGrants != 0 {
 			t.Fatal("import inventory missing")
 		}
 		return nil

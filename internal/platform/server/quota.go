@@ -747,6 +747,10 @@ func (d *quotaDeployer) publishedFallback(ctx context.Context, published desired
 			return desiredstate.State{}, err
 		}
 	}
+	next, err = d.filterPublishedGroupAccess(ctx, next)
+	if err != nil {
+		return desiredstate.State{}, err
+	}
 	return next.RuntimeAt(now)
 }
 

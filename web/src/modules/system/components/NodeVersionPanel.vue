@@ -4,10 +4,10 @@
       v-if="!embedded"
       :title="kind === 'agent' ? 'Agent 探针管理' : '代理核心版本'"
       parent="服务器"
-      :description="kind === 'agent' ? '统一管理与监控各服务器上部署的 Agent 探针运行状态、心跳上报与自动更新任务。' : '检测各服务器代理核心运行状态、版本信息与健康状况，支持 Xray 与 sing-box 核心安装、删除、编辑、升级与多核心共存。'"
+      :description="kind === 'agent' ? '统一管理与监控各服务器上部署的 Agent 探针运行状态、心跳上报与自动更新任务。' : '查看 Agent 上报的核心与版本，仅支持更新当前核心；多内核即将支持。'"
     >
       <template #actions>
-        <button
+        <button v-if="isOwner"
           type="button"
           @click="upgradeAll"
           class="ios-btn-primary inline-flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,113,227,0.28)] text-xs py-2 px-3.5"
@@ -35,7 +35,7 @@
             <span class="text-[10px] px-2 py-0.2 rounded-full bg-purple-100 text-purple-800 font-semibold">多核心协同共存</span>
           </div>
           <p class="text-[11px] text-ios-secondary mt-0.5 leading-relaxed">
-            支持 <strong>Xray-core</strong>（成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard）与 <strong>sing-box</strong>（新一代轻量 · Hysteria2 / TUIC / 自适应路由），现已支持单机同时兼容多种内核并存运行、随时添加与删除。
+            支持 <strong>Xray-core</strong>（成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard）与 <strong>sing-box</strong>（新一代轻量 · Hysteria2 / TUIC / 自适应路由），当前每台服务器仅支持更新已上报的单一核心；多内核即将支持。
           </p>
         </div>
       </div>
@@ -283,7 +283,7 @@
           <!-- 7. 操作 -->
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
             <template v-if="kind === 'agent'">
-              <button
+              <button v-if="isOwner"
                 type="button"
                 @click="handleUpgradeSingle(node)"
                 class="ios-action-btn-secondary"
@@ -295,7 +295,7 @@
             <template v-else>
               <!-- Core Actions in Table Mode -->
               <button
-                v-if="!getNodeInstalledCores(node).length"
+                v-if="isOwner && (!getNodeInstalledCores(node).length)"
                 type="button"
                 @click="openCoreManagementModal(node)"
                 class="ios-action-btn-primary"
@@ -312,11 +312,11 @@
                 >
                   升级
                 </button>
-                <button
+                <button v-if="isOwner"
                   type="button"
                   @click="openCoreManagementModal(node)"
                   class="ios-action-btn-secondary"
-                  title="编辑服务器内核（添加内核、删除内核）"
+                  title="管理当前核心"
                 >
                   编辑
                 </button>
@@ -478,7 +478,7 @@
                 <div class="flex items-center justify-between text-xs">
                   <span class="text-neutral-500 font-medium">核心状态</span>
                   <span class="px-2 py-0.5 rounded-lg text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200/60">
-                    尚未安装核心
+                    尚未上报核心
                   </span>
                 </div>
                 <div class="p-2 rounded-xl bg-amber-50/50 border border-amber-100 text-amber-900 text-[11px] leading-relaxed">
@@ -492,7 +492,7 @@
         <!-- Row 4: Action Buttons (Apple HIG Precision) -->
         <template v-if="kind === 'agent'">
           <div class="pt-2 border-t border-black/[0.04] grid grid-cols-2 gap-2.5">
-            <button
+            <button v-if="isOwner"
               type="button"
               @click="handleUpgradeSingle(node)"
               class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
@@ -520,7 +520,7 @@
         <template v-else>
           <!-- When uninstalled: prominent [+ 添加内核] & [详情] -->
           <div v-if="!getNodeInstalledCores(node).length" class="pt-2 border-t border-black/[0.04] flex items-center gap-2">
-            <button
+            <button v-if="isOwner"
               type="button"
               @click="openCoreManagementModal(node)"
               class="flex-1 py-2 px-3 rounded-xl bg-ios-blue text-white hover:bg-ios-blue/90 shadow-[0_2px_8px_rgba(0,113,227,0.25)] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
@@ -554,11 +554,11 @@
             </button>
 
             <!-- Unified [编辑] Button: opens Add & Delete Core Modal -->
-            <button
+            <button v-if="isOwner"
               type="button"
               @click="openCoreManagementModal(node)"
               class="py-2 px-3.5 rounded-xl bg-black/[0.04] text-neutral-700 hover:bg-black/[0.08] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1"
-              title="编辑服务器内核（添加内核、删除内核）"
+              title="管理当前核心"
             >
               <svg class="w-3.5 h-3.5 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -581,12 +581,16 @@
       </div>
     </div>
 
+    <p v-if="isOwner && !releasesConfigured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
+    <AppDialog :model-value="!!manualAgentNode" @update:model-value="v => { if (!v) manualAgentNode = null; }" title="手动选择 Agent 发布平台" description="节点架构未知或无完全匹配的版本，请核对目标主机后明确选择。" @confirm="prepareManualAgent">
+      <select v-model="manualReleaseId" class="form-input-base"><option value="">选择已签名版本与平台</option><option v-for="r in agentReleases.filter(r => r.signed.manifest.component === 'proxy-agent')" :key="r.id" :value="r.id">{{ r.signed.manifest.version }} · {{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</option></select>
+    </AppDialog>
     <!-- Dialog 1: Single Agent Upgrade Confirmation -->
     <ConfirmDialog
       v-model="singleAgentConfirmVisible"
       title="升级 Agent"
       :message="singleAgentConfirmMessage"
-      warning-details="系统将下发经过签名验证的最新版本，并在节点就地无感热切换。原有节点身份与已用额度保持不变。"
+      warning-details="系统将下发经过签名验证的最新版本，由 Agent 校验、切换并上报结果。原有节点身份与已用额度保持不变。"
       confirm-text="确认升级"
       :is-danger="false"
       @confirm="executeSingleAgentUpgrade"
@@ -609,7 +613,7 @@
     <AppDialog
       v-model="coreManagementModalVisible"
       :title="`内核管理 - ${coreManagementTargetNode?.name || ''}`"
-      description="管理服务器代理内核配置。现已支持同时兼容多种内核（如 Xray 与 sing-box 协同共存），可自由添加新内核或删除已安装内核。"
+      description="当前仅可更新节点上报的核心；多内核即将支持。"
       max-width="2xl"
       confirm-text="完成"
       :show-cancel="false"
@@ -626,7 +630,7 @@
               <div class="font-bold text-sm text-neutral-900 flex items-center gap-2">
                 <span>{{ coreManagementTargetNode.name }}</span>
                 <span class="text-[10px] px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-600 font-medium">
-                  {{ formatOS(coreManagementTargetNode.os) }} ({{ detectArch(coreManagementTargetNode) }})
+                  {{ formatOS(coreManagementTargetNode.os) }} ({{ detectArch(coreManagementTargetNode) || '—' }})
                 </span>
               </div>
               <p class="text-[11px] text-neutral-500 tabular-nums mt-0.5">
@@ -655,7 +659,7 @@
               <span>已安装内核</span>
               <span class="text-xs font-normal text-neutral-400">({{ manageInstalledCores.length }})</span>
             </h4>
-            <span class="text-[11px] text-neutral-400">多内核协同运行 · 可随时删除或升级</span>
+            <span class="text-[11px] text-neutral-400">多内核即将支持 · 当前仅可更新已上报核心</span>
           </div>
 
           <!-- Empty State when no cores installed -->
@@ -686,10 +690,10 @@
                     </span>
                     <span
                       class="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-semibold"
-                      :class="core.healthy ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'"
+                      :class="core.healthy ? 'bg-ios-green/10 text-ios-green' : core.healthy === false ? 'bg-ios-red/10 text-ios-red' : 'bg-ios-fill text-ios-tertiary'"
                     >
-                      <span class="w-1.5 h-1.5 rounded-full" :class="core.healthy ? 'bg-emerald-500' : 'bg-red-500'"></span>
-                      <span>{{ core.healthy ? '运行正常' : '异常' }}</span>
+                      <span class="w-1.5 h-1.5 rounded-full" :class="core.healthy ? 'bg-ios-green' : core.healthy === false ? 'bg-ios-red' : 'bg-ios-tertiary'"></span>
+                      <span>{{ core.healthy === undefined ? '—' : core.healthy ? '运行正常' : '异常' }}</span>
                     </span>
                   </div>
                   <div class="flex flex-wrap items-center gap-1 pt-0.5">
@@ -720,17 +724,6 @@
                 </button>
 
                 <!-- Delete Kernel Action Button -->
-                <button
-                  type="button"
-                  @click="requestDeleteCore(core)"
-                  class="py-1.5 px-3 rounded-xl bg-rose-50 text-ios-red hover:bg-rose-100 font-semibold text-xs transition-all flex items-center gap-1"
-                  title="从当前服务器删除并卸载此内核"
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  <span>删除内核</span>
-                </button>
               </div>
             </div>
           </div>
@@ -746,7 +739,7 @@
               <span>添加内核</span>
             </h4>
             <span class="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-medium">
-              不再二选一 · 兼容多种内核协同运行
+              多内核即将支持
             </span>
           </div>
 
@@ -760,15 +753,13 @@
                 <span>服务器尚未完成 Agent 注册</span>
               </div>
               <p class="text-[11px] leading-relaxed">
-                选择要添加的代理内核平台，并在终端运行一键部署命令。后续可随时再次添加更多内核。
+                在终端运行一键部署命令，注册时安装单一核心。后续多内核即将支持。
               </p>
             </div>
 
             <!-- Core Selection Cards -->
             <div class="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                @click="selectAddCoreComp('xray')"
+              <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'xray'" type="button" @click="selectAddCoreComp('xray')"
                 class="p-3 rounded-xl border text-left transition-all space-y-1.5"
                 :class="addCoreForm.component === 'xray' ? 'border-ios-blue bg-blue-50/50 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
               >
@@ -779,9 +770,7 @@
                 <p class="text-[11px] text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / WireGuard</p>
               </button>
 
-              <button
-                type="button"
-                @click="selectAddCoreComp('sing-box')"
+              <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'sing-box'" type="button" @click="selectAddCoreComp('sing-box')"
                 class="p-3 rounded-xl border text-left transition-all space-y-1.5"
                 :class="addCoreForm.component === 'sing-box' ? 'border-ios-blue bg-blue-50/50 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
               >
@@ -809,9 +798,7 @@
             <div>
               <label class="block text-neutral-700 font-bold mb-2">选择要添加的内核平台</label>
               <div class="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  @click="selectAddCoreComp('xray')"
+                <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'xray'" type="button" @click="selectAddCoreComp('xray')"
                   class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative"
                   :class="addCoreForm.component === 'xray' ? 'border-ios-blue bg-blue-50/60 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
                 >
@@ -827,9 +814,7 @@
                   <p class="text-[11px] text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard</p>
                 </button>
 
-                <button
-                  type="button"
-                  @click="selectAddCoreComp('sing-box')"
+                <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'sing-box'" type="button" @click="selectAddCoreComp('sing-box')"
                   class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative"
                   :class="addCoreForm.component === 'sing-box' ? 'border-ios-blue bg-blue-50/60 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
                 >
@@ -849,7 +834,7 @@
 
             <!-- Version Presets -->
             <div>
-              <label class="block text-neutral-600 font-medium mb-1.5">官方版本快捷点选 (预设资产与校验)</label>
+              <label class="block text-neutral-600 font-medium mb-1.5">版本与 URL 辅助（SHA-256 需自行核验并粘贴）</label>
               <div class="flex flex-wrap gap-2">
                 <button
                   v-for="preset in addCorePresets"
@@ -868,10 +853,7 @@
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">内核平台</label>
-                <select v-model="addCoreForm.component" @change="onAddCoreCompChange" class="form-input-base w-full !text-xs !py-1.5">
-                  <option value="xray">Xray-core</option>
-                  <option value="sing-box">sing-box</option>
-                </select>
+                <select v-model="addCoreForm.component" @change="onAddCoreCompChange" class="form-input-base"><option v-for="c in manageInstalledCores" :key="c.component" :value="c.component">{{ c.name }}</option></select>
               </div>
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">目标版本号</label>
@@ -916,17 +898,6 @@
       </div>
     </AppDialog>
 
-    <!-- Dialog 4: Delete Kernel Confirmation Modal (删除内核确认) -->
-    <ConfirmDialog
-      v-model="deleteCoreConfirmVisible"
-      :title="`删除代理内核 - ${deleteCoreTarget?.core.name || '内核'}`"
-      :message="`确认从服务器「${deleteCoreTarget?.node.name}」中删除并卸载内核「${deleteCoreTarget?.core.name} (${deleteCoreTarget?.core.version})」？`"
-      :warning-details="deleteCoreWarningDetails"
-      confirm-text="确认删除内核"
-      :is-danger="true"
-      @confirm="executeDeleteCore"
-    />
-
     <!-- Dialog 5: Core Upgrade / Batch Upgrade Modal -->
     <AppDialog
       v-model="coreDialogVisible"
@@ -955,7 +926,7 @@
           </div>
           <div class="flex items-center justify-between">
             <span class="text-neutral-500 font-medium">操作系统平台</span>
-            <span class="text-neutral-600">{{ coreDialogTargetNode.os || 'Linux' }} ({{ detectArch(coreDialogTargetNode) }})</span>
+            <span class="text-neutral-600">{{ coreDialogTargetNode.os || 'Linux' }} ({{ detectArch(coreDialogTargetNode) || '—' }})</span>
           </div>
         </div>
 
@@ -963,7 +934,7 @@
         <div class="space-y-3.5">
           <!-- Official Release Presets (Pills) -->
           <div>
-            <label class="block text-neutral-600 font-medium mb-1.5">官方版本快捷点选 (预设资产与校验)</label>
+            <label class="block text-neutral-600 font-medium mb-1.5">版本与 URL 辅助（SHA-256 需自行核验并粘贴）</label>
             <div class="flex flex-wrap gap-2">
               <button
                 v-for="preset in currentCorePresets"
@@ -983,8 +954,8 @@
             <div>
               <label class="block text-neutral-600 font-medium mb-1.5">升级内核平台</label>
               <select v-model="coreForm.component" @change="onCoreComponentChange" class="form-input-base w-full !text-xs !py-1.5">
-                <option value="xray">Xray-core</option>
-                <option value="sing-box">sing-box</option>
+                <option v-if="!coreDialogTargetNode || coreDialogTargetNode.capabilities?.core_name === 'xray'" value="xray">Xray-core</option>
+                <option v-if="!coreDialogTargetNode || coreDialogTargetNode.capabilities?.core_name === 'sing-box'" value="sing-box">sing-box</option>
               </select>
             </div>
             <div>
@@ -1053,7 +1024,7 @@
             </div>
 
             <div class="text-[11px] text-ios-tertiary space-y-0.5 pt-1">
-              <div><strong>推荐版本:</strong> v25.10.15 (当前稳定) / v26.3.27</div>
+              <div><strong>推荐版本:</strong> v25.10.15 (版本辅助) / v26.3.27</div>
               <div><strong>适用场景:</strong> 常规出入站、多用户订阅、抗封锁伪装</div>
             </div>
           </div>
@@ -1089,7 +1060,7 @@
             </div>
 
             <div class="text-[11px] text-ios-tertiary space-y-0.5 pt-1">
-              <div><strong>推荐版本:</strong> v1.10.7 (当前稳定) / v1.11.0</div>
+              <div><strong>推荐版本:</strong> v1.10.7 (版本辅助) / v1.11.0</div>
               <div><strong>适用场景:</strong> 弱网加速、UDP 直连加速、极小内存 VPS</div>
             </div>
           </div>
@@ -1101,12 +1072,12 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, reactive, computed } from 'vue';
-import { formatTime } from '../../../app/auth';
+import { isOwner, formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import { nodeAPI, installCommand, type Enrollment, type NodeView } from '../../nodes/api';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
 import { agentUpdatesAPI } from '../agentUpdatesApi';
-import { coreUpdatesAPI, type ReleaseEntry, type CoreUpdateTask } from '../coreUpdatesApi';
+import { coreUpdatesAPI, type ReleaseEntry } from '../coreUpdatesApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
@@ -1155,7 +1126,6 @@ function setDisplayMode(mode: 'grid' | 'list') {
 
 // Upgrade Context: Catalog Releases & Recent Core Tasks
 const agentReleases = ref<ReleaseEntry[]>([]);
-const recentCoreTasks = ref<CoreUpdateTask[]>([]);
 const showCoreCatalogModal = ref(false);
 
 const latestAgentRelease = computed(() => {
@@ -1165,53 +1135,39 @@ const latestAgentRelease = computed(() => {
 });
 
 function findLatestAgentReleaseForNode(node: NodeView, releases: ReleaseEntry[]): ReleaseEntry | undefined {
-  const list = releases.filter(r => r.signed?.manifest?.component === 'proxy-agent');
-  if (!list.length) return undefined;
-
-  const nodePlatform = (node.os || '').toLowerCase();
-  const matched = list.filter(r => {
-    const m = r.signed?.manifest;
-    if (!m) return false;
-    const osPart = (m.os || '').toLowerCase();
-    const archPart = (m.architecture || '').toLowerCase();
-    if (!osPart) return true;
-    if (nodePlatform.includes(osPart) && (!archPart || nodePlatform.includes(archPart))) {
-      return true;
-    }
-    if (osPart === 'linux' && (nodePlatform.includes('linux') || nodePlatform.includes('debian') || nodePlatform.includes('ubuntu') || nodePlatform.includes('centos') || nodePlatform.includes('alpine') || !nodePlatform)) {
-      return true;
-    }
-    return false;
-  });
-
-  const candidates = matched.length ? matched : list;
-  return candidates.slice().sort((a, b) => (b.signed?.manifest?.sequence || 0) - (a.signed?.manifest?.sequence || 0))[0];
+  const platform = nodePlatform(node);
+  if (!platform) return undefined;
+  return releases.filter(r => r.signed.manifest.component === 'proxy-agent' && r.signed.manifest.os + '/' + r.signed.manifest.architecture === platform)
+    .sort((a,b) => b.signed.manifest.sequence - a.signed.manifest.sequence)[0];
 }
+const releasesConfigured = ref(false);
+const manualAgentNode = ref<NodeView | null>(null);
+const manualReleaseId = ref('');
+async function readAllNodes(): Promise<NodeView[]> {
+  const first = await nodeAPI.list(1, '');
+  const list = [...first.items];
+  for (let page = 2; list.length < first.total; page++) {
+    const next = await nodeAPI.list(page, '');
+    if (!next.items.length) throw new Error('服务器分页读取不完整，请刷新重试');
+    list.push(...next.items);
+  }
+  return list;
+}
+const batchNodes = ref<NodeView[]>([]);
 
 async function loadUpgradeContext() {
+  if (!isOwner.value) return;
   try {
-    const [relRes, coreTaskRes] = await Promise.allSettled([
-      coreUpdatesAPI.releases(1),
-      coreUpdatesAPI.tasks(1)
-    ]);
-    if (relRes.status === 'fulfilled') {
-      agentReleases.value = relRes.value.items || [];
+    const first = await coreUpdatesAPI.releases(1, 100);
+    const list = [...first.items];
+    for (let page = 2; list.length < first.total; page++) {
+      const next = await coreUpdatesAPI.releases(page, 100);
+      if (!next.items.length) throw new Error('发布目录分页不完整');
+      list.push(...next.items);
     }
-    if (coreTaskRes.status === 'fulfilled') {
-      recentCoreTasks.value = coreTaskRes.value.items || [];
-      if (coreTaskRes.value.items?.length) {
-        const last = coreTaskRes.value.items[0];
-        if (!coreForm.sha256 && last.sha256) {
-          coreForm.component = last.component || coreForm.component;
-          coreForm.version = last.version || coreForm.version;
-          coreForm.url = last.url || coreForm.url;
-          coreForm.sha256 = last.sha256;
-        }
-      }
-    }
-  } catch {
-    // Non-critical background context
-  }
+    agentReleases.value = list;
+    releasesConfigured.value = first.configured;
+  } catch (e) { error.value = (e as Error).message; showToast(error.value, 'error'); }
 }
 
 // Single Agent Upgrade Dialog State
@@ -1228,13 +1184,12 @@ const singleAgentConfirmMessage = computed(() => {
 const batchAgentConfirmVisible = ref(false);
 
 const eligibleOnlineNodes = computed(() => {
-  return nodes.value.filter(n => n.status === 'online' && n.heartbeat?.current_revision);
+  return batchNodes.value.filter(n => n.status === 'online' && n.heartbeat?.current_revision);
 });
 
 const batchAgentConfirmMessage = computed(() => {
   const count = eligibleOnlineNodes.value.length;
-  const version = latestAgentRelease.value?.signed?.manifest?.version || '最新';
-  return `确认将全部 ${count} 台在线服务器的 Agent 升级至最新版本 v${version}？`;
+  return `确认遍历全部 ${count} 台符合条件的在线服务器，按各自 os/arch 下发最新签名版本？无完全匹配版本的服务器会跳过并报告原因，请逐台手动选择。`;
 });
 
 // ========================================================
@@ -1252,43 +1207,38 @@ export interface InstalledCoreInfo {
   component: 'xray' | 'sing-box';
   name: string;
   version: string;
-  healthy: boolean;
+  healthy: boolean | undefined;
   protocols: string[];
 }
-
-const DEFAULT_PROTOCOLS: Record<'xray' | 'sing-box', string[]> = {
-  xray: ['HTTP', 'SHADOWSOCKS', 'SOCKS5', 'TROJAN', 'VLESS', 'WIREGUARD'],
-  'sing-box': ['HYSTERIA2', 'TUIC', 'SHADOWSOCKS', 'VLESS', 'TROJAN', 'DIRECT']
-};
 
 const CORE_PRESETS: Record<string, CorePreset[]> = {
   xray: [
     {
       version: '25.10.15',
-      label: 'v25.10.15 (当前稳定)',
+      label: 'v25.10.15 (版本辅助)',
       amd64Url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
       arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-arm64-v8a.zip',
-      sha256: '98a72b6c00000000000000000000000000000000000000000000000000000000'
+      sha256: ''
     },
     {
       version: '26.3.27',
-      label: 'v26.3.27 (最新发布)',
+      label: 'v26.3.27 (版本辅助)',
       amd64Url: 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip',
       arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-arm64-v8a.zip',
-      sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+      sha256: ''
     }
   ],
   'sing-box': [
     {
       version: '1.10.7',
-      label: 'v1.10.7 (当前稳定)',
+      label: 'v1.10.7 (版本辅助)',
       amd64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.10.7/sing-box-1.10.7-linux-amd64.tar.gz',
       arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.10.7/sing-box-1.10.7-linux-arm64.tar.gz',
-      sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0'
+      sha256: ''
     },
     {
       version: '1.11.0',
-      label: 'v1.11.0 (最新发布)',
+      label: 'v1.11.0 (版本辅助)',
       amd64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz',
       arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-arm64.tar.gz',
       sha256: 'b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef01'
@@ -1299,72 +1249,12 @@ const CORE_PRESETS: Record<string, CorePreset[]> = {
 // ========================================================
 // MULTI-CORE INSTALLED STATE MANAGEMENT
 // ========================================================
-const nodeInstalledCoresState = reactive<Record<string, InstalledCoreInfo[]>>({});
-
-function initNodeInstalledCores(node: NodeView): InstalledCoreInfo[] {
-  // 1. Try local storage cache
-  try {
-    const raw = localStorage.getItem(`qui_node_cores_${node.id}`);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    }
-  } catch {}
-
-  // 2. Derive from capabilities
-  const list: InstalledCoreInfo[] = [];
-  const coreNameStr = node.capabilities?.core_name;
-  if (coreNameStr) {
-    const parts = coreNameStr.split(/[,+]/).map(s => s.trim().toLowerCase()).filter(Boolean);
-    for (const part of parts) {
-      const comp: 'xray' | 'sing-box' = part.includes('sing') ? 'sing-box' : 'xray';
-      const version = node.capabilities?.core_version || (comp === 'xray' ? '25.10.15' : '1.10.7');
-      const protocols = node.capabilities?.protocols?.length
-        ? [...new Set(node.capabilities.protocols.filter(p => p.inbound || p.outbound).map(p => p.protocol.toUpperCase()))]
-        : DEFAULT_PROTOCOLS[comp];
-
-      list.push({
-        component: comp,
-        name: comp === 'xray' ? 'Xray-core' : 'sing-box',
-        version,
-        healthy: node.heartbeat?.core_healthy !== false,
-        protocols
-      });
-    }
-  }
-
-  return list;
-}
-
 function getNodeInstalledCores(node: NodeView): InstalledCoreInfo[] {
-  if (!nodeInstalledCoresState[node.id]) {
-    nodeInstalledCoresState[node.id] = initNodeInstalledCores(node);
-  }
-  return nodeInstalledCoresState[node.id];
-}
-
-function saveNodeInstalledCores(nodeId: string, cores: InstalledCoreInfo[]) {
-  nodeInstalledCoresState[nodeId] = cores;
-  try {
-    localStorage.setItem(`qui_node_cores_${nodeId}`, JSON.stringify(cores));
-  } catch {}
-
-  // Sync to node view capabilities
-  const node = nodes.value.find(n => n.id === nodeId);
-  if (node) {
-    if (!node.capabilities) {
-      node.capabilities = { protocols: [] };
-    }
-    if (cores.length === 0) {
-      node.capabilities.core_name = undefined;
-      node.capabilities.core_version = undefined;
-    } else {
-      node.capabilities.core_name = cores.map(c => c.component).join(',');
-      node.capabilities.core_version = cores.map(c => c.version).join(', ');
-    }
-  }
+  const component = node.capabilities?.core_name;
+  if (component !== 'xray' && component !== 'sing-box') return [];
+  return [{ component, name: component === 'xray' ? 'Xray-core' : 'sing-box',
+    version: node.capabilities?.core_version || '—', healthy: node.heartbeat?.core_healthy,
+    protocols: protocols(node) }];
 }
 
 function getNodeAllProtocols(node: NodeView): string[] {
@@ -1379,15 +1269,25 @@ function getNodeAllProtocols(node: NodeView): string[] {
   return protocols(node);
 }
 
-function detectArch(node?: NodeView | null): 'amd64' | 'arm64' {
-  if (!node) return 'amd64';
-  const osLower = (node.os || '').toLowerCase();
-  const caps = (node.capabilities as unknown as Record<string, unknown>) || {};
-  const arch = String(caps.architecture || '').toLowerCase();
-  if (osLower.includes('arm64') || osLower.includes('aarch64') || arch.includes('arm64') || arch.includes('aarch64')) {
-    return 'arm64';
-  }
-  return 'amd64';
+function detectArch(node?: NodeView | null): 'amd64' | 'arm64' | '' {
+  if (!node) return '';
+  const caps = node.capabilities as Record<string, unknown>;
+  const arch = String(caps?.architecture || '');
+  if (arch === 'amd64' || arch === 'arm64') return arch;
+  const platform = String(caps?.platform || node.os || '');
+  return platform.endsWith('/amd64') ? 'amd64' : platform.endsWith('/arm64') ? 'arm64' : '';
+}
+function nodePlatform(node: NodeView): string {
+  const caps = node.capabilities as Record<string, unknown>;
+  if (typeof caps?.platform === 'string' && /^[^/]+\/[^/]+$/.test(caps.platform)) return caps.platform;
+  if (/^[^/]+\/[^/]+$/.test(node.os || '')) return node.os;
+  const os = String(caps?.os || node.os || '');
+  return detectArch(node) && os === 'linux' ? os + '/' + detectArch(node) : '';
+}
+function requireCoreTarget(node: NodeView, component: string) {
+  const age = Date.now() - Date.parse(node.lastHeartbeat);
+  if (!isOwner.value || !Number.isFinite(age) || age < -5000 || node.status !== 'online' || !node.enabled || node.deletedAt || Date.now() - Date.parse(node.lastHeartbeat) >= 45000 || !node.heartbeat?.current_revision) throw new Error('服务器需在线并上报当前配置版本');
+  if (node.capabilities?.core_name !== component) throw new Error('只能更新节点当前上报的核心，多内核即将支持');
 }
 
 // ========================================================
@@ -1407,17 +1307,11 @@ function isCoreInstalled(comp: 'xray' | 'sing-box'): boolean {
 }
 
 function openCoreManagementModal(node: NodeView) {
+  if (!isOwner.value) return;
+  addCoreForm.sha256 = ''; addCoreForm.url = '';
   coreManagementTargetNode.value = node;
-  // If node already has xray, default add form to sing-box; if has sing-box, default to xray
-  const installed = getNodeInstalledCores(node);
-  const hasXray = installed.some(c => c.component === 'xray');
-  const hasSing = installed.some(c => c.component === 'sing-box');
-  if (hasXray && !hasSing) {
-    selectAddCoreComp('sing-box');
-  } else {
-    selectAddCoreComp('xray');
-  }
-
+  const component = node.capabilities?.core_name;
+  if (component === 'xray' || component === 'sing-box') selectAddCoreComp(component);
   coreManagementModalVisible.value = true;
 
   if (node.status === 'pending') {
@@ -1437,7 +1331,7 @@ const addCoreForm = reactive({
   component: 'xray' as 'xray' | 'sing-box',
   version: '25.10.15',
   url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
-  sha256: '98a72b6c00000000000000000000000000000000000000000000000000000000'
+  sha256: ''
 });
 
 const addCorePresets = computed(() => {
@@ -1447,8 +1341,11 @@ const addCorePresets = computed(() => {
 const addCoreBusy = ref(false);
 
 function applyAddCorePreset(preset: CorePreset) {
+    addCoreForm.sha256 = ''; addCoreForm.url = '';
   addCoreForm.version = preset.version;
-  const isArm = detectArch(coreManagementTargetNode.value) === 'arm64';
+  const arch = detectArch(coreManagementTargetNode.value);
+  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
+  const isArm = arch === 'arm64';
   addCoreForm.url = isArm ? preset.arm64Url : preset.amd64Url;
   addCoreForm.sha256 = preset.sha256;
 }
@@ -1469,7 +1366,9 @@ function onAddCoreCompChange() {
 
 function autoFillAddCoreURL() {
   const v = addCoreForm.version || (addCoreForm.component === 'xray' ? '25.10.15' : '1.10.7');
-  const isArm = detectArch(coreManagementTargetNode.value) === 'arm64';
+  const arch = detectArch(coreManagementTargetNode.value);
+  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
+  const isArm = arch === 'arm64';
   if (addCoreForm.component === 'xray') {
     const asset = isArm ? 'Xray-linux-arm64-v8a.zip' : 'Xray-linux-64.zip';
     addCoreForm.url = `https://github.com/XTLS/Xray-core/releases/download/v${v}/${asset}`;
@@ -1488,101 +1387,29 @@ async function submitAddNewCore() {
     return;
   }
 
-  if (!addCoreForm.version || !addCoreForm.url || !addCoreForm.sha256) {
+  if (!addCoreForm.version || !addCoreForm.url || !/^[a-f0-9]{64}$/i.test(addCoreForm.sha256)) {
     showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和', 'warning');
     return;
   }
 
   addCoreBusy.value = true;
   try {
+    requireCoreTarget(node, addCoreForm.component);
     await coreUpdatesAPI.queue({
       nodeId: node.id,
-      revision: node.heartbeat?.current_revision || 1,
+      revision: node.heartbeat!.current_revision!,
       component: addCoreForm.component,
       version: addCoreForm.version,
       url: addCoreForm.url,
       sha256: addCoreForm.sha256
     });
 
-    // Add or update in multi-core list
-    const current = getNodeInstalledCores(node).slice();
-    const existingIdx = current.findIndex(c => c.component === addCoreForm.component);
-    const newEntry: InstalledCoreInfo = {
-      component: addCoreForm.component,
-      name: addCoreForm.component === 'xray' ? 'Xray-core' : 'sing-box',
-      version: addCoreForm.version,
-      healthy: true,
-      protocols: DEFAULT_PROTOCOLS[addCoreForm.component]
-    };
-
-    if (existingIdx >= 0) {
-      current[existingIdx] = newEntry;
-    } else {
-      current.push(newEntry);
-    }
-    saveNodeInstalledCores(node.id, current);
-
-    showToast(`已成功为服务器「${node.name}」下发添加内核「${newEntry.name}」任务`);
+    showToast('核心更新任务已受理，等待 Agent 确认');
     void load();
   } catch (e) {
     showToast((e as Error).message, 'error');
   } finally {
     addCoreBusy.value = false;
-  }
-}
-
-// ========================================================
-// DELETE CORE FLOW (删除内核)
-// ========================================================
-const deleteCoreConfirmVisible = ref(false);
-const deleteCoreTarget = ref<{ node: NodeView; core: InstalledCoreInfo } | null>(null);
-
-const deleteCoreWarningDetails = computed(() => {
-  const t = deleteCoreTarget.value;
-  if (!t) return '';
-  const current = getNodeInstalledCores(t.node);
-  const otherCores = current.filter(c => c.component !== t.core.component);
-  if (otherCores.length > 0) {
-    const names = otherCores.map(c => c.name).join('、');
-    return `删除后「${t.core.name}」将停止运行并释放所占端口。该服务器上部署的其他内核（${names}）将继续正常工作，流量转发不受影响。`;
-  }
-  return '删除后该服务器将暂无运行中的代理内核，出入站流量转发将暂停。原有节点配置与额度保持不变，后续可随时再次添加内核。';
-});
-
-function requestDeleteCore(core: InstalledCoreInfo) {
-  if (!coreManagementTargetNode.value) return;
-  deleteCoreTarget.value = {
-    node: coreManagementTargetNode.value,
-    core
-  };
-  deleteCoreConfirmVisible.value = true;
-}
-
-async function executeDeleteCore() {
-  const target = deleteCoreTarget.value;
-  deleteCoreConfirmVisible.value = false;
-  if (!target) return;
-
-  try {
-    // Clear active tasks if any
-    const activeTasks = recentCoreTasks.value.filter(
-      t => t.nodeId === target.node.id && t.component === target.core.component && (t.status === 'queued' || t.status === 'running')
-    );
-    for (const t of activeTasks) {
-      try {
-        await coreUpdatesAPI.clear(t.id);
-      } catch {}
-    }
-
-    // Remove from multi-core list
-    const current = getNodeInstalledCores(target.node).slice();
-    const filtered = current.filter(c => c.component !== target.core.component);
-    saveNodeInstalledCores(target.node.id, filtered);
-
-    showToast(`已从服务器「${target.node.name}」中成功删除内核「${target.core.name}」`);
-    void load();
-  } catch (e) {
-    showToast((e as Error).message, 'error');
   }
 }
 
@@ -1599,8 +1426,11 @@ const currentCorePresets = computed(() => {
 });
 
 function applyCorePreset(preset: CorePreset) {
+    coreForm.sha256 = ''; coreForm.url = '';
   coreForm.version = preset.version;
-  const isArm = detectArch(coreDialogTargetNode.value) === 'arm64';
+  const arch = detectArch(coreDialogTargetNode.value);
+  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
+  const isArm = arch === 'arm64';
   coreForm.url = isArm ? preset.arm64Url : preset.amd64Url;
   coreForm.sha256 = preset.sha256;
 }
@@ -1648,7 +1478,7 @@ const coreDialogDescription = computed(() => {
   if (!coreDialogTargetNode.value) {
     return `将对全部符合条件的在线服务器（共 ${eligibleOnlineNodes.value.length} 台）执行代理内核升级。`;
   }
-  return '配置目标内核版本、官方下载地址与校验和。Agent 将进行 SHA-256 校验并在节点无感热切升级。';
+  return '配置目标内核版本、官方下载地址与校验和。Agent 将进行 SHA-256 校验，切换可能中断连接，结果以节点回执为准。';
 });
 
 const coreDialogConfirmText = computed(() => {
@@ -1668,7 +1498,7 @@ const coreForm = reactive({
   component: savedCoreTarget?.component || 'xray',
   version: savedCoreTarget?.version || '25.10.15',
   url: savedCoreTarget?.url || 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
-  sha256: savedCoreTarget?.sha256 || '98a72b6c00000000000000000000000000000000000000000000000000000000'
+  sha256: ''
 });
 
 function onCoreComponentChange() {
@@ -1676,12 +1506,15 @@ function onCoreComponentChange() {
 }
 
 function onCoreVersionInput() {
+  coreForm.sha256 = '';
   autoFillCoreURL();
 }
 
 function autoFillCoreURL() {
   const v = coreForm.version || '26.3.27';
-  const isArm = detectArch(coreDialogTargetNode.value) === 'arm64';
+  const arch = detectArch(coreDialogTargetNode.value);
+  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
+  const isArm = arch === 'arm64';
   if (coreForm.component === 'xray') {
     const asset = isArm ? 'Xray-linux-arm64-v8a.zip' : 'Xray-linux-64.zip';
     coreForm.url = `https://github.com/XTLS/Xray-core/releases/download/v${v}/${asset}`;
@@ -1703,6 +1536,8 @@ function openUpgradeCore(node: NodeView) {
 }
 
 function openUpgradeCoreForComponent(node: NodeView, comp: 'xray' | 'sing-box') {
+  if (!isOwner.value) return;
+  coreForm.url = ''; coreForm.sha256 = '';
   coreDialogTargetNode.value = node;
   selectCoreComponent(comp);
   coreDialogVisible.value = true;
@@ -1710,6 +1545,7 @@ function openUpgradeCoreForComponent(node: NodeView, comp: 'xray' | 'sing-box') 
 
 // Single node upgrade trigger
 function handleUpgradeSingle(node: NodeView) {
+  if (!isOwner.value) return;
   const revision = node.heartbeat?.current_revision;
   if (!revision || node.status !== 'online') {
     showToast(`服务器「${node.name}」当前未在线或尚未上报配置版本，暂无法升级`, 'warning');
@@ -1717,9 +1553,10 @@ function handleUpgradeSingle(node: NodeView) {
   }
 
   if (props.kind === 'agent') {
-    const release = findLatestAgentReleaseForNode(node, agentReleases.value) || latestAgentRelease.value;
+    const release = findLatestAgentReleaseForNode(node, agentReleases.value);
+    if (!releasesConfigured.value) { showToast('中央尚未配置发布公钥', 'warning'); return; }
     if (!release) {
-      showToast('尚未在系统中登记可信 Agent 签名版本，请前往「系统管理 › 任务记录」登记签名清单', 'warning');
+      manualAgentNode.value = node; manualReleaseId.value = '';
       return;
     }
     singleAgentConfirmTarget.value = { node, release, revision };
@@ -1730,7 +1567,10 @@ function handleUpgradeSingle(node: NodeView) {
 }
 
 // Batch upgrade trigger (from top-right "全部升级")
-function upgradeAll() {
+async function upgradeAll() {
+  if (!isOwner.value) return;
+  try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
+  catch (e) { showToast((e as Error).message, 'error'); return; }
   const eligible = eligibleOnlineNodes.value;
   if (!eligible.length) {
     showToast('当前暂无满足升级条件的在线服务器 (需在线且已上报配置版本)', 'warning');
@@ -1738,6 +1578,7 @@ function upgradeAll() {
   }
 
   if (props.kind === 'agent') {
+    if (!releasesConfigured.value) { showToast('中央尚未配置发布公钥', 'warning'); return; }
     if (!latestAgentRelease.value) {
       showToast('尚未在系统中登记可信 Agent 签名版本，请前往「系统管理 › 任务记录」登记签名清单', 'warning');
       return;
@@ -1750,7 +1591,14 @@ function upgradeAll() {
 }
 
 // Execute single Agent upgrade
+function prepareManualAgent() {
+  const node = manualAgentNode.value, release = agentReleases.value.find(r => r.id === manualReleaseId.value);
+  if (!node || !release || !node.heartbeat?.current_revision) { showToast('请选择已签名版本', 'warning'); return; }
+  singleAgentConfirmTarget.value = { node, release, revision: node.heartbeat.current_revision };
+  manualAgentNode.value = null; singleAgentConfirmVisible.value = true;
+}
 async function executeSingleAgentUpgrade() {
+  if (!isOwner.value) return;
   const target = singleAgentConfirmTarget.value;
   singleAgentConfirmTarget.value = null;
   if (!target) return;
@@ -1767,6 +1615,7 @@ async function executeSingleAgentUpgrade() {
 
 // Execute batch Agent upgrade
 async function executeBatchAgentUpgrade() {
+  if (!isOwner.value) return;
   batchAgentConfirmVisible.value = false;
   const eligible = eligibleOnlineNodes.value;
   if (!eligible.length || !latestAgentRelease.value) return;
@@ -1774,11 +1623,13 @@ async function executeBatchAgentUpgrade() {
   let success = 0;
   let failed = 0;
   for (const node of eligible) {
-    const rel = findLatestAgentReleaseForNode(node, agentReleases.value) || latestAgentRelease.value;
+    const rel = findLatestAgentReleaseForNode(node, agentReleases.value);
     try {
+      if (!rel) throw new Error('无完全匹配的平台版本，请逐台手动选择');
       await agentUpdatesAPI.queue(node.id, rel.id, node.heartbeat!.current_revision!);
       success++;
-    } catch {
+    } catch (e) {
+      showToast(node.name + '：' + (e as Error).message, 'error');
       failed++;
     }
   }
@@ -1794,11 +1645,12 @@ async function executeBatchAgentUpgrade() {
 
 // Submit Core upgrade action (single node or batch)
 async function submitCoreAction() {
+  if (!isOwner.value) return;
   if (!coreForm.version || !coreForm.url || !coreForm.sha256) {
     showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和', 'warning');
     return;
   }
-  if (coreForm.sha256.length !== 64) {
+  if (!/^[a-f0-9]{64}$/i.test(coreForm.sha256)) {
     showToast('SHA-256 校验和必须为 64 位十六进制字符', 'warning');
     return;
   }
@@ -1811,32 +1663,17 @@ async function submitCoreAction() {
 
     if (coreDialogTargetNode.value) {
       const node = coreDialogTargetNode.value;
+      requireCoreTarget(node, coreForm.component);
       await coreUpdatesAPI.queue({
         nodeId: node.id,
-        revision: node.heartbeat?.current_revision || 1,
+        revision: node.heartbeat!.current_revision!,
         component: coreForm.component,
         version: coreForm.version,
         url: coreForm.url,
         sha256: coreForm.sha256
       });
 
-      // Update multi-core cache
-      const current = getNodeInstalledCores(node).slice();
-      const idx = current.findIndex(c => c.component === coreForm.component);
-      const comp = coreForm.component as 'xray' | 'sing-box';
-      const updated: InstalledCoreInfo = {
-        component: comp,
-        name: comp === 'xray' ? 'Xray-core' : 'sing-box',
-        version: coreForm.version,
-        healthy: true,
-        protocols: DEFAULT_PROTOCOLS[comp]
-      };
-      if (idx >= 0) {
-        current[idx] = updated;
-      } else {
-        current.push(updated);
-      }
-      saveNodeInstalledCores(node.id, current);
+      // Installed state changes only after the Agent reports capabilities.
 
       showToast(`已向「${node.name}」下发内核升级任务 (${coreForm.component} ${coreForm.version})`);
     } else {
@@ -1851,16 +1688,18 @@ async function submitCoreAction() {
       let failed = 0;
       for (const node of eligible) {
         try {
+          requireCoreTarget(node, coreForm.component);
           await coreUpdatesAPI.queue({
             nodeId: node.id,
-            revision: node.heartbeat?.current_revision || 1,
+            revision: node.heartbeat!.current_revision!,
             component: coreForm.component,
             version: coreForm.version,
             url: coreForm.url,
             sha256: coreForm.sha256
           });
           success++;
-        } catch {
+        } catch (e) {
+          showToast(node.name + '：' + (e as Error).message, 'error');
           failed++;
         }
       }

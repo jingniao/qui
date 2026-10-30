@@ -1,5 +1,6 @@
 <template>
   <div class="h-full w-full flex flex-col overflow-hidden bg-[#F5F5F7] select-none relative">
+    <div v-if="!currentScheme.id" class="absolute inset-0 z-40 bg-ios-background flex flex-col items-center justify-center gap-4"><p class="text-ios-secondary">暂无中转方案</p><button class="ios-btn-primary" @click="createNewScheme">新建方案</button></div>
     <!-- 1. Top Integrated Studio Toolbar -->
     <header class="h-14 px-4 bg-white/95 backdrop-blur-md border-b border-black/[0.08] flex items-center justify-between gap-3 shrink-0 shadow-2xs z-30">
       <!-- Left: Panel Toggle & Scheme Switcher -->
@@ -617,8 +618,7 @@
 
       <!-- ================= Center: Infinite Visual Canvas ================= -->
       <main
-        ref="canvasContainer"
-        class="flex-1 bg-[#F9F9FB] relative overflow-hidden select-none cursor-default min-w-0"
+        ref="canvasViewport" class="flex-1 bg-[#F9F9FB] relative overflow-hidden select-none cursor-default min-w-0"
         @wheel.prevent="onWheel"
         @mousedown="onCanvasMouseDown"
         @dragover.prevent="onCanvasDragOver"
@@ -880,8 +880,8 @@
           <div v-if="selectedNode" class="space-y-4">
           <div class="space-y-3 text-xs">
             <label class="block">
-              <span class="font-medium text-ios-secondary">实例别名 (显示名称)</span>
-              <input v-model="selectedNode.name" class="form-input-base text-xs mt-1" />
+              <span class="font-medium text-ios-secondary">实例名称（来自节点，只读）</span>
+              <input :value="selectedNode.name" readonly class="form-input-base text-xs mt-1" />
             </label>
 
             <div class="p-2.5 bg-[#F5F5F7] rounded-xl space-y-1">
@@ -1022,133 +1022,6 @@
       <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" />
     </AppDialog>
 
-    <!-- Dedicated Scheme Tunnel List Modal -->
-    <AppDialog
-      v-model="openTunnelListModal"
-      :title="`方案隧道列表 (${currentTunnels.length})`"
-      :description="`查看与管理当前方案「${currentScheme.name}」中的所有中转隧道与连接。`"
-      :show-confirm="false"
-      max-width="2xl"
-    >
-      <div class="space-y-4">
-        <!-- Top Toolbar inside Dialog -->
-        <div class="flex items-center justify-between gap-3 pb-3 border-b border-black/[0.06]">
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-ios-secondary">执行位置:</span>
-            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-black/[0.05] text-ios-label">
-              {{ currentScheme.executionLocation === 'client' ? '客户端执行' : '服务器执行' }}
-            </span>
-            <span v-if="checking" class="text-xs text-ios-tertiary">检查中…</span>
-            <span v-else-if="planError || plan?.message" class="text-xs text-rose-600">
-              {{ planError || plan?.message }}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            class="ios-btn-primary !py-1.5 !px-3 text-xs inline-flex items-center gap-1.5 shadow-2xs"
-            @click="createTunnelFromModal"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            <span>新建隧道</span>
-          </button>
-        </div>
-
-        <!-- Empty State -->
-        <div
-          v-if="!currentTunnels.length"
-          class="py-12 px-6 text-center border border-dashed border-black/[0.08] rounded-2xl bg-[#FBFBFD] space-y-3.5"
-        >
-          <div class="w-12 h-12 rounded-2xl bg-blue-50 text-ios-blue flex items-center justify-center mx-auto border border-blue-100/60 shadow-2xs">
-            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-          </div>
-          <div class="space-y-1">
-            <h4 class="text-sm font-semibold text-ios-label">当前方案暂无隧道</h4>
-            <p class="text-xs text-ios-tertiary max-w-sm mx-auto leading-relaxed">
-              尚未在此方案中建立任何隧道连接。点击下方按钮添加新隧道，或者在左侧可视化画布上连接节点。
-            </p>
-          </div>
-          <div class="pt-1">
-            <button
-              type="button"
-              @click="createTunnelFromModal"
-              class="ios-btn-primary inline-flex items-center gap-1.5 !px-4 !py-2 text-xs shadow-2xs"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-              </svg>
-              <span>新建第一条隧道</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Tunnel Cards List -->
-        <div v-else class="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-          <div
-            v-for="row in tunnelRows"
-            :key="row.connection.id"
-            class="p-3.5 rounded-2xl border border-black/[0.06] bg-[#FAFAFA] hover:bg-white hover:border-ios-blue/40 hover:shadow-xs transition-all space-y-2 group"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div class="flex items-center gap-2 min-w-0">
-                <span
-                  class="w-2 h-2 rounded-full shrink-0"
-                  :class="row.status?.error ? 'bg-rose-500' : (row.status?.text === '可发布' ? 'bg-emerald-500' : 'bg-neutral-400')"
-                ></span>
-                <span class="font-semibold text-xs text-ios-label truncate" :title="row.title">
-                  {{ row.title }}
-                </span>
-                <span
-                  v-if="row.status && !checking && !planError"
-                  class="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0"
-                  :class="row.status.error ? 'bg-rose-50 text-rose-600' : row.status.text === '可发布' ? 'bg-emerald-50 text-emerald-600' : 'bg-neutral-100 text-ios-tertiary'"
-                >
-                  {{ row.status.text }}
-                </span>
-              </div>
-
-              <div class="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  @click="editTunnelFromModal(row.connection)"
-                  class="ios-btn-secondary !py-1 !px-2.5 text-xs inline-flex items-center gap-1"
-                >
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  @click="deleteTunnelFromModal(row.connection.id)"
-                  class="ios-btn-secondary !py-1 !px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 inline-flex items-center gap-1"
-                  title="删除此隧道"
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ios-secondary font-mono">
-              <span>类型: {{ row.kind }}</span>
-              <span>·</span>
-              <span>网络: {{ row.network }}</span>
-              <template v-if="row.connection.targetPort">
-                <span>·</span>
-                <span>目标端口: {{ row.connection.targetPort }}</span>
-              </template>
-
-              <template v-if="row.connection.listenPort">
-                <span>·</span>
-                <span>监听端口: {{ row.connection.listenPort }}</span>
-              </template>
-            </div>
-          </div>
-        </div>
-      </div>
-    </AppDialog>
-
     <!-- Schemes / Modals -->
     <AppDialog
       v-model="openPublishModal"
@@ -1208,7 +1081,7 @@
           <div class="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl space-y-1 text-ios-blue text-[11px]">
             <div>• 目标管理服务器: {{ currentScheme.nodes.filter(n => n.isManageable).length }} 台</div>
             <div>• 计划建立隧道: {{ currentTunnels.length }} 条</div>
-            <div>• 状态: 校验通过，配置无环路冲突</div>
+            <div>• 状态: 发布时由服务端校验配置与冲突</div>
           </div>
         </div>
       </div>
@@ -1235,7 +1108,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 import TunnelEditorDrawer from '../components/relay/TunnelEditorDrawer.vue';
 import TunnelPlanSummary from '../components/relay/TunnelPlanSummary.vue';
 import { useTunnelPlan } from '../components/relay/useTunnelPlan';
-import { tunnelStatus, tunnelSummary } from '../components/relay/tunnelEditorModel';
+import { tunnelSummary, type TunnelPlan } from '../components/relay/tunnelEditorModel';
 import { useRoute } from 'vue-router';
 import PageHeader from '../../../components/PageHeader.vue';
 import AppDialog from '../../../components/AppDialog.vue';
@@ -1263,6 +1136,8 @@ import {
 
 const route = useRoute();
 const servers = ref<NodeView[]>([]);
+const canvasViewport = ref<HTMLElement | null>(null);
+const gestureCleanups = new Set<() => void>();
 const resourceSearch = ref('');
 const activeSchemeId = ref('');
 const schemeDropdownOpen = ref(false);
@@ -1333,7 +1208,6 @@ const connectingMousePos = reactive({ x: 0, y: 0 });
 const editor = ref<{ key: number; connection?: CanvasConnection; source?: string; target?: string } | null>(null);
 const openPlanSummary = ref(false);
 const openPublishModal = ref(false);
-const openTunnelListModal = ref(false);
 // The last publication's per-node result, as the server reported it.
 const publishResult = ref<CanvasPublishResult | null>(null);
 const publishing = ref(false);
@@ -1350,71 +1224,49 @@ function canvasContext(): CanvasSchemeContext {
   return { servers: servers.value, inbounds: inbounds.value, imported: proxyNodeStore.manualNodes };
 }
 
-// Active scheme reference. The placeholder only exists while a scheme is being
-// created on the server; the server assigns the real id.
-const currentScheme = computed<RelayScheme>(() => {
-  let s = proxyNodeStore.schemes.find(item => item.id === activeSchemeId.value);
-  if (!s) {
-    if (proxyNodeStore.schemes.length > 0) {
-      s = proxyNodeStore.schemes[0];
-      activeSchemeId.value = s.id;
-    } else {
-      s = {
-        id: 'scheme-' + Date.now(),
-        name: '新建中转方案',
-        executionLocation: 'server',
-        nodes: [],
-        connections: [],
-        published: false,
-        updatedAt: new Date().toISOString()
-      };
-      proxyNodeStore.schemes.push(s);
-      activeSchemeId.value = s.id;
-    }
-  }
-  return s;
-});
+// An empty display state is never added to the store or persisted.
+const emptyScheme: RelayScheme = { id: '', name: '', executionLocation: 'server', nodes: [], connections: [], published: false, updatedAt: '' };
+const currentScheme = computed<RelayScheme>(() => proxyNodeStore.schemes.find(s => s.id === activeSchemeId.value) || proxyNodeStore.schemes[0] || emptyScheme);
+watch(() => proxyNodeStore.schemes.map(s => s.id), ids => {
+  if (!ids.includes(activeSchemeId.value)) activeSchemeId.value = ids[0] || '';
+}, { immediate: true });
 
-// Tunnels in active scheme
 const currentTunnels = computed(() => currentScheme.value.connections);
-const tunnelRows = computed(() => {
-  return currentScheme.value.connections.map(connection => ({
-    connection,
-    ...tunnelSummary(currentScheme.value, connection),
-    status: tunnelStatus(plan.value, connection.id, currentScheme.value.executionLocation === 'client')
-  }));
-});
 const planInput = computed(() => relaySchemeToCanvasInput(currentScheme.value, canvasContext()));
 const { plan, checking, error: planError, run: runPlan } = useTunnelPlan(
   () => JSON.stringify([currentScheme.value.id, currentScheme.value.serverUpdatedAt, planInput.value]),
-  () => currentScheme.value.serverUpdatedAt ? canvasAPI.plan(currentScheme.value.id, planInput.value.layout) : null
+  () => {
+    if (!currentScheme.value.id) return null;
+    if (currentScheme.value.executionLocation === 'client') return Promise.resolve(validateClientChain());
+    return currentScheme.value.serverUpdatedAt ? canvasAPI.plan(currentScheme.value.id, planInput.value.layout) : null;
+  }
 );
 watch(() => currentScheme.value.id, () => { editor.value = null; });
 async function checkScheme() { openPlanSummary.value = true; await runPlan(); }
-async function focusTunnelList() {
-  selectedNode.value = null;
-  closeEditor();
-  openTunnelListModal.value = true;
-}
-
-function createTunnelFromModal() {
-  openTunnelListModal.value = false;
-  openEditor();
-}
-
-function editTunnelFromModal(conn: CanvasConnection) {
-  openTunnelListModal.value = false;
-  selectConnection(conn);
-}
-
-async function deleteTunnelFromModal(connectionId: string) {
-  currentScheme.value.connections = currentScheme.value.connections.filter(c => c.id !== connectionId);
-  try {
-    await saveDraft(true);
-    showToast('已删除隧道');
-  } catch (e) {
-    showToast(`删除隧道失败: ${(e as Error).message}`, 'error');
+function validateClientChain(): TunnelPlan {
+  const { instances, connections } = planInput.value.layout;
+  let message = '';
+  const ids = new Set(instances.map(i => i.instanceId));
+  const incoming = new Map<string, number>(), outgoing = new Map<string, string>();
+  if (instances.length < 2 || connections.length !== instances.length - 1) message = '客户端链需至少两个节点并连接为单一路径';
+  if (ids.size !== instances.length) message = '节点实例标识重复';
+  for (const i of instances) {
+    if (!/^(import|inbound):.+/.test(i.ref)) message = '客户端链仅支持导入节点与入站引用';
+    if (i.ref.startsWith('import:') && !proxyNodeStore.manualNodes.some(n => 'import:' + n.id === i.ref)) message = '导入节点引用已失效';
+    if (i.ref.startsWith('inbound:') && !inbounds.value.some(n => 'inbound:' + n.id === i.ref)) message = '入站引用已失效';
   }
+  for (const c of connections) {
+    if (!ids.has(c.source) || !ids.has(c.target) || c.source === c.target || c.type !== 'proxy_chain') message = '客户端链包含无效连接或服务端隧道';
+    if (outgoing.has(c.source) || incoming.has(c.target)) message = '客户端链不支持分支或汇合';
+    outgoing.set(c.source, c.target); incoming.set(c.target, 1);
+  }
+  const starts = instances.filter(i => !incoming.has(i.instanceId));
+  if (starts.length !== 1) message = '客户端链需有且仅有一个入口且无环路';
+  const seen = new Set<string>();
+  let cursor = starts[0]?.instanceId;
+  while (cursor && !seen.has(cursor)) { seen.add(cursor); cursor = outgoing.get(cursor); }
+  if (cursor || seen.size !== instances.length) message = '客户端链存在环路或不连通节点';
+  return { ok: !message, message: message || '本地结构检查通过；发布时仍由服务端验证节点授权、协议与客户端兼容性。', servers: [], connections: [], conflicts: [], warnings: ['发布时将再次验证客户端链'] };
 }
 function openEditor(connection?: CanvasConnection, source?: string, target?: string) {
   selectedNode.value = null;
@@ -1778,7 +1630,10 @@ function switchScheme() {
 
 async function createNewScheme() {
   try {
-    const scheme = await createCanvasScheme(`未命名方案 ${proxyNodeStore.schemes.length + 1}`, 'server', canvasContext());
+    const usedNames = new Set(proxyNodeStore.schemes.map(s => s.name));
+    let number = 1;
+    while (usedNames.has('未命名方案 ' + number)) number++;
+    const scheme = await createCanvasScheme('未命名方案 ' + number, 'server', canvasContext());
     activeSchemeId.value = scheme.id;
     selectedNode.value = null;
     selectedConnection.value = null;
@@ -1791,12 +1646,13 @@ async function createNewScheme() {
 // Deleting a scheme removes the drawing only: the objects it draws stay.
 async function removeScheme() {
   const scheme = currentScheme.value;
+  if (!scheme.id) return;
   try {
+    await flushPendingSaves();
     await deleteCanvasScheme(scheme.id);
     selectedNode.value = null;
     selectedConnection.value = null;
     activeSchemeId.value = proxyNodeStore.schemes[0]?.id || '';
-    if (!proxyNodeStore.schemes.length) await createNewScheme();
     showToast('已删除方案');
   } catch (error) {
     showToast(`删除方案失败: ${(error as Error).message}`, 'error');
@@ -1906,11 +1762,15 @@ function onCanvasMouseDown(e: MouseEvent) {
   const onMouseUp = () => {
     isPanning.value = false;
     window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('mouseup', onMouseUp, true);
+    window.removeEventListener('blur', onMouseUp);
+    gestureCleanups.delete(onMouseUp);
   };
 
   window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('mouseup', onMouseUp, true);
+  window.addEventListener('blur', onMouseUp);
+  gestureCleanups.add(onMouseUp);
 }
 
 // Node dragging inside canvas
@@ -1931,12 +1791,16 @@ function onNodeMouseDown(e: MouseEvent, node: CanvasNodeInstance) {
 
   const onMouseUp = () => {
     window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('mouseup', onMouseUp, true);
+    window.removeEventListener('blur', onMouseUp);
+    gestureCleanups.delete(onMouseUp);
     saveDraft();
   };
 
   window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('mouseup', onMouseUp, true);
+  window.addEventListener('blur', onMouseUp);
+  gestureCleanups.add(onMouseUp);
 }
 
 // ----------------- Directed Connecting Logic -----------------
@@ -1946,7 +1810,7 @@ function startConnecting(e: MouseEvent, source: CanvasNodeInstance) {
   connectingMousePos.y = source.y + 45;
 
   const onMouseMove = (ev: MouseEvent) => {
-    const rect = (document.querySelector('.cursor-default') as HTMLElement)?.getBoundingClientRect();
+    const rect = canvasViewport.value?.getBoundingClientRect();
     if (rect) {
       connectingMousePos.x = (ev.clientX - rect.left - panX.value) / zoom.value;
       connectingMousePos.y = (ev.clientY - rect.top - panY.value) / zoom.value;
@@ -1954,13 +1818,17 @@ function startConnecting(e: MouseEvent, source: CanvasNodeInstance) {
   };
 
   const onMouseUp = () => {
-    connectingSource.value = null;
+    setTimeout(() => { if (connectingSource.value === source) connectingSource.value = null; }, 0);
     window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('mouseup', onMouseUp, true);
+    window.removeEventListener('blur', onMouseUp);
+    gestureCleanups.delete(onMouseUp);
   };
 
   window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('mouseup', onMouseUp, true);
+  window.addEventListener('blur', onMouseUp);
+  gestureCleanups.add(onMouseUp);
 }
 
 function onPortMouseUp(target: CanvasNodeInstance, portType: 'input') {
@@ -2036,6 +1904,7 @@ function validateScheme() { void checkScheme(); }
 
 function saveDraft(immediate: boolean | Event = false): Promise<void> | void {
   const scheme = currentScheme.value;
+  if (!scheme.id) return;
   scheme.updatedAt = new Date().toISOString();
   if (scheme.published) {
     scheme.hasUnpublishedChanges = true;
@@ -2043,7 +1912,7 @@ function saveDraft(immediate: boolean | Event = false): Promise<void> | void {
   if (immediate === true) {
     const pending = saveTimers.get(scheme);
     if (pending) { clearTimeout(pending); saveTimers.delete(scheme); }
-    const flushed = saveQueue.then(() => persistCanvasScheme(scheme, canvasContext()));
+    const flushed = enqueueWrite(() => persistCanvasScheme(scheme, canvasContext()));
     saveQueue = flushed.catch(() => undefined);
     return flushed;
   }
@@ -2057,13 +1926,31 @@ function saveDraft(immediate: boolean | Event = false): Promise<void> | void {
 const SAVE_DEBOUNCE_MS = 800;
 const saveTimers = new Map<RelayScheme, ReturnType<typeof setTimeout>>();
 let saveQueue: Promise<void> = Promise.resolve();
+let queuedWrites = 0;
+function enqueueWrite(write: () => Promise<void>): Promise<void> {
+  queuedWrites++;
+  const result = saveQueue.then(write).finally(() => { queuedWrites--; });
+  saveQueue = result.catch(() => undefined);
+  return result;
+}
+async function flushPendingSaves() {
+  for (const [scheme, timer] of saveTimers) {
+    clearTimeout(timer); saveTimers.delete(scheme);
+    void enqueueWrite(() => persistScheme(scheme));
+  }
+  await saveQueue;
+}
+function warnUnsaved(event: BeforeUnloadEvent) {
+  if (saveTimers.size || queuedWrites) { event.preventDefault(); event.returnValue = ''; }
+}
+window.addEventListener('beforeunload', warnUnsaved);
 
 function scheduleSave(scheme: RelayScheme) {
   const pending = saveTimers.get(scheme);
   if (pending) clearTimeout(pending);
   saveTimers.set(scheme, setTimeout(() => {
     saveTimers.delete(scheme);
-    saveQueue = saveQueue.then(() => persistScheme(scheme)).catch(() => undefined);
+    void enqueueWrite(() => persistScheme(scheme));
   }, SAVE_DEBOUNCE_MS));
 }
 
@@ -2135,7 +2022,6 @@ async function importLocalSchemes() {
   if (!proxyNodeStore.schemes.some(item => item.id === activeSchemeId.value)) {
     activeSchemeId.value = proxyNodeStore.schemes[0]?.id || '';
   }
-  if (!proxyNodeStore.schemes.length) await createNewScheme();
   if (imported) showToast(`已导入 ${imported} 个本地方案`);
 }
 
@@ -2189,7 +2075,7 @@ async function handleConfirmPublish() {
       clearTimeout(pending);
       saveTimers.delete(scheme);
     }
-    const flushed = saveQueue.then(() => persistCanvasScheme(scheme, canvasContext()));
+    const flushed = enqueueWrite(() => persistCanvasScheme(scheme, canvasContext()));
     saveQueue = flushed.catch(() => undefined);
     await flushed;
     const result = await canvasAPI.publish(scheme.id);
@@ -2218,7 +2104,7 @@ onMounted(async () => {
     ]);
     servers.value = nodeRes;
     inbounds.value = inboundRes;
-  } catch {}
+  } catch (e) { showToast(`载入画布资源失败: ${(e as Error).message}`, 'error'); }
 
   // Schemes are stored by the server now; the browser keeps no copy of them.
   await reloadSchemes();
@@ -2230,9 +2116,6 @@ onMounted(async () => {
 
   if (qSchemeId && proxyNodeStore.schemes.some(s => s.id === qSchemeId)) {
     activeSchemeId.value = qSchemeId;
-  }
-  if (!proxyNodeStore.schemes.length) {
-    await createNewScheme();
   }
   applyExecutionDefaults();
 
@@ -2270,6 +2153,9 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  for (const cleanup of [...gestureCleanups]) cleanup();
+  void flushPendingSaves();
+  window.removeEventListener('beforeunload', warnUnsaved);
   window.removeEventListener('click', handleWindowClick);
 });
 </script>

@@ -26,7 +26,7 @@ const messages: Record<string, string> = {
   unmanaged_user_credentials: '配置版本不能直接携带用户凭据，请在入站或用户接入中配置'
 };
 
-export async function request<T>(path: string, method = 'GET', body?: unknown, options: { timeoutMs?: number; retried?: boolean } = {}): Promise<T> {
+export async function request<T>(path: string, method = 'GET', body?: unknown, options: { timeoutMs?: number } = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (!['GET', 'HEAD'].includes(method) && csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -38,21 +38,6 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, o
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     const code = data.error?.code || 'request_failed';
-    // If CSRF verification failed and haven't retried yet, refresh the session to get a fresh token and retry once!
-    if (code === 'csrf_failed' && !options.retried && !['GET', 'HEAD'].includes(method)) {
-      try {
-        const sessionRes = await fetch('/api/v1/auth/session', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-        if (sessionRes.ok) {
-          const sessionData = await sessionRes.json();
-          if (sessionData?.csrfToken) {
-            setCSRFToken(sessionData.csrfToken);
-            return request<T>(path, method, body, { ...options, retried: true });
-          }
-        }
-      } catch {
-        // Fall back to original error handling
-      }
-    }
     if (response.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('auth-expired'));
     throw new APIError(response.status, code, messages[code] || data.error?.message || '请求失败', data.error || {});
   }

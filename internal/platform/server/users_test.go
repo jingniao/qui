@@ -213,6 +213,13 @@ func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	state, enabled, err = composer.EnsureUserAccess(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	revision, err := deployments.CreateWithInboundIntent(ctx, state, enabled, "owner", input.Summary)
 	if err != nil {
 		t.Fatal(err)

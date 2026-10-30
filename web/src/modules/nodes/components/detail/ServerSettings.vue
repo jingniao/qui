@@ -29,7 +29,7 @@
               <input v-model.trim="form.name" required maxlength="40" class="form-input-base text-xs" />
             </label>
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">订阅接入 IP / 域名</span>
+              <span class="font-medium text-neutral-600 text-[11px]">订阅接入 IP</span>
               <input v-model.trim="form.publicIp" class="form-input-base text-xs font-mono" placeholder="留空默认使用服务器公网 IP" />
             </label>
             <label class="space-y-1">
@@ -134,7 +134,7 @@
             <h2 class="font-semibold text-ios-label text-sm sm:text-base">程序与运维</h2>
             <div class="flex items-center gap-2">
               <router-link to="/nodes/versions" class="ios-action-btn-secondary text-xs px-2.5 py-1">版本管理</router-link>
-              <button class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="$emit('install')">安装命令</button>
+              <button v-if="isOwner && node.status === 'pending'" class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="$emit('install')">安装命令</button>
             </div>
           </div>
 

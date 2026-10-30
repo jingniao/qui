@@ -130,6 +130,9 @@ func TestActualQUICAgentPublishedDeviceSubscriptionAndNativeClient(t *testing.T)
 			if response.Code != 201 {
 				t.Fatal("QUIC HTTP draft failed", response.Code, response.Body.String())
 			}
+			if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}}); err != nil {
+				t.Fatal(err)
+			}
 			response = owner.call("POST", "/api/v1/revisions/proxy", map[string]any{"nodeId": n.ID, "summary": "QUIC publish"})
 			var revision deployment.Revision
 			json.Unmarshal(response.Body.Bytes(), &revision)

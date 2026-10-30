@@ -262,6 +262,9 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
 	}
+	if r := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}}); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
 	policyResponse := owner.call("POST", "/api/v1/policies", map[string]any{"name": "Flow block", "priority": 10, "enabled": true, "scope": desiredstate.Scope{NodeIDs: []string{pending.ID}}, "match": desiredstate.Match{Domains: []string{"blocked.example"}}, "action": desiredstate.Action{Type: "Block"}})
 	if policyResponse.Code != 201 {
 		t.Fatalf("policy: %d %s", policyResponse.Code, policyResponse.Body.String())

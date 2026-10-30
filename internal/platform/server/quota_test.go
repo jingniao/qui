@@ -53,6 +53,9 @@ func newQuotaFixture(t *testing.T) *quotaFixture {
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
 	}
+	if response := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}}); response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
 	return &quotaFixture{app: app, owner: owner, ctx: ctx, nodeID: pending.ID, groupID: group.ID}
 }
 
@@ -919,6 +922,17 @@ func (f *quotaFixture) quickAccess(t *testing.T, protocol, listen string, port i
 	response := f.owner.call("POST", "/api/v1/revisions/user-access", deployment.UserAccessInput{NodeID: f.nodeID, Summary: "Quick user access", Protocol: protocol, Listen: listen, Port: port})
 	if response.Code != 201 {
 		t.Fatalf("user access draft: %d %s", response.Code, response.Body.String())
+	}
+	g, err := f.app.nodeRepository.Group(f.ctx, f.groupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.app.nodeRepository.SaveGroup(f.ctx, g.ID, node.GroupInput{Name: g.Name, Purpose: g.Purpose, Enabled: g.Enabled, SubscriptionVisible: g.SubscriptionVisible, NodeIDs: []string{f.nodeID}}); err != nil {
+		t.Fatal(err)
+	}
+	response = f.owner.call("POST", "/api/v1/revisions/user-access", deployment.UserAccessInput{NodeID: f.nodeID, Summary: "Quick user access", Protocol: protocol, Listen: listen, Port: port})
+	if response.Code != 201 {
+		t.Fatal(response.Body.String())
 	}
 	var revision deployment.Revision
 	if err := json.Unmarshal(response.Body.Bytes(), &revision); err != nil {

@@ -136,6 +136,13 @@ func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 	}
 	items := make([]Node, 0, len(nodes))
 	for _, n := range nodes {
+		allowed, err := s.Nodes.UserHasNode(ctx, n.ID, id)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			continue
+		}
 		meta, _, err := s.Nodes.Meta(ctx, n.ID)
 		if err != nil {
 			return nil, err

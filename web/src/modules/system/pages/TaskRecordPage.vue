@@ -1,5 +1,25 @@
 <template>
   <div class="space-y-6">
+    <section v-if="isOwner" class="panel-card p-5 space-y-4">
+      <h2 class="font-semibold text-ios-label">Agent 签名发布目录</h2>
+      <p v-if="!configured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
+      <details class="space-y-3"><summary class="text-sm cursor-pointer">登记签名 Agent 版本</summary>
+        <p class="text-xs text-ios-secondary">粘贴离线签名工具生成的完整 proxy-agent 清单。</p>
+        <textarea v-model="manifest" maxlength="16384" rows="6" class="form-input-base w-full font-mono text-xs" aria-label="签名 Agent 清单" />
+        <button class="ios-btn-primary" :disabled="registerBusy || !configured || !manifest.trim()" @click="registerRelease">验证并登记</button>
+      </details>
+      <DataTable v-if="releasePageItems.length"><template #header><th>版本</th><th>平台</th><th>序列</th></template><template #body><tr v-for="r in releasePageItems" :key="r.id"><td>{{ r.signed.manifest.version }}</td><td>{{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</td><td>{{ r.signed.manifest.sequence }}</td></tr></template></DataTable>
+      <Pagination :total="releases.length" :current-page="releasePage" :page-size="20" @update:page="releasePage = $event" />
+    </section>
+    <ConfirmDialog v-model="clearConfirm" title="清除核心更新任务" message="确认清除此任务？清除不会卸载核心，也不能代替节点结果确认。" @confirm="confirmClear" />
+    <ConfirmDialog :model-value="!!recoveryTarget" @update:model-value="v => { if (!v) recoveryTarget = null; }" title="恢复 Agent 更新任务" :message="recoveryTarget ? '确认对服务器「' + nodeName(recoveryTarget.nodeId) + '」的原任务发起恢复？请先核对尝试记录与节点日志；运行中任务的结果尚未确认。' : ''" @confirm="recoverAgent" />
+    <AppDialog :model-value="!!attemptTaskId" @update:model-value="v => { if (!v) attemptTaskId = ''; }" title="Agent 更新尝试记录" :show-confirm="false">
+      <ErrorState v-if="attemptError" :message="attemptError" @retry="loadAttempts" />
+      <LoadingSkeleton v-else-if="attemptLoading" />
+      <DataTable v-else-if="attempts.length"><template #header><th>代次 / 操作</th><th>状态</th><th>结果</th></template><template #body><tr v-for="a in attempts" :key="a.commandId"><td>{{ a.generation }} · {{ a.operation }} {{ a.current ? '（当前）' : '' }}</td><td>{{ a.status }}</td><td>{{ updateResultLabel(a.result?.code) }}</td></tr></template></DataTable>
+      <EmptyState v-else title="暂无尝试记录" />
+      <Pagination :total="attemptTotal" :current-page="attemptPage" :page-size="20" @update:page="changeAttemptPage" />
+    </AppDialog>
     <PageHeader
       title="任务记录"
       parent="系统管理"
@@ -177,7 +197,7 @@
                 {{ task.nodeName }}
               </router-link>
               <p class="text-[11px] text-gray-400 mt-0.5">
-                配置版本 #{{ task.revision || 0 }}
+                配置版本 #{{ task.revision || '—' }}
               </p>
             </td>
 
@@ -238,15 +258,19 @@
             <!-- 操作 -->
             <td class="p-3.5 align-middle text-right">
               <button
-                v-if="task.canClear"
+                v-if="isOwner && task.canClear"
                 type="button"
                 class="text-xs text-gray-500 hover:text-rose-600 transition-colors"
                 :disabled="busyId === task.id"
-                @click="clearCoreTask(task.id)"
+                @click="requestClear(task.id)"
               >
                 {{ busyId === task.id ? '清理中…' : '清除' }}
               </button>
-              <span v-else class="text-xs text-gray-300">—</span>
+              <span v-else-if="task.source !== 'agent'" class="text-xs text-ios-tertiary">—</span>
+              <div v-if="isOwner && task.source === 'agent'" class="flex gap-2 justify-end">
+                <button class="ios-action-btn-secondary" @click="openAttempts(task.id)">尝试记录</button>
+                <button v-if="['running', 'failed_closed'].includes(task.status)" class="ios-action-btn-secondary" :disabled="!!busyId" @click="prepareRecovery(task.id)">恢复</button>
+              </div>
             </td>
           </tr>
         </template>
@@ -275,10 +299,12 @@ import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import EmptyState from '../../../components/EmptyState.vue';
+import ConfirmDialog from '../../../components/ConfirmDialog.vue';
+import AppDialog from '../../../components/AppDialog.vue';
 import ErrorState from '../../../components/ErrorState.vue';
-import { formatTime } from '../../../app/auth';
+import { formatTime, isOwner } from '../../../app/auth';
 import { showToast } from '../../../app/api';
-import { agentUpdatesAPI, type AgentUpdateTask } from '../agentUpdatesApi';
+import { agentUpdatesAPI, type AgentUpdateAttempt, type AgentUpdateTask } from '../agentUpdatesApi';
 import { coreUpdatesAPI, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
 import { updateResultLabel, updateResultGuidance } from '../updateResultText';
 import { nodeAPI, type NodeView } from '../../nodes/api';
@@ -318,6 +344,57 @@ const searchKeyword = ref('');
 const currentPage = ref(1);
 const pageSize = 20;
 
+const configured = ref(false), manifest = ref(''), registerBusy = ref(false);
+const releasePage = ref(1);
+const releasePageItems = computed(() => releases.value.slice((releasePage.value - 1) * 20, releasePage.value * 20));
+const clearConfirm = ref(false), clearTargetId = ref('');
+const recoveryTarget = ref<AgentUpdateTask | null>(null);
+const attemptTaskId = ref(''), attemptPage = ref(1), attemptTotal = ref(0), attemptError = ref(''), attemptLoading = ref(false);
+const attempts = ref<AgentUpdateAttempt[]>([]);
+let attemptGeneration = 0;
+async function allPages<T extends { items: unknown[]; total: number }>(fetchPage: (page: number) => Promise<T>): Promise<T> {
+  const first = await fetchPage(1);
+  const items = [...first.items];
+  for (let page = 2; items.length < first.total; page++) {
+    const next = await fetchPage(page);
+    if (!next.items.length) throw new Error('分页读取不完整，请重试');
+    items.push(...next.items);
+  }
+  return { ...first, items } as T;
+}
+async function registerRelease() {
+  if (!isOwner.value || registerBusy.value) return;
+  registerBusy.value = true;
+  try {
+    const signed = JSON.parse(manifest.value);
+    if (signed?.manifest?.component !== 'proxy-agent') throw new Error('请选择 proxy-agent 的签名清单');
+    await coreUpdatesAPI.register(signed); manifest.value = ''; releasePage.value = 1;
+    showToast('Agent 签名版本已验证并登记'); await loadAll();
+  } catch (e) { showToast((e as Error).message, 'error'); }
+  finally { registerBusy.value = false; }
+}
+function requestClear(id: string) { if (isOwner.value) { clearTargetId.value = id; clearConfirm.value = true; } }
+function confirmClear() { void clearCoreTask(clearTargetId.value); }
+function prepareRecovery(id: string) { recoveryTarget.value = agentTasks.value.find(t => t.id === id) || null; }
+async function recoverAgent() {
+  const target = recoveryTarget.value; recoveryTarget.value = null;
+  if (!target || !isOwner.value || busyId.value) return;
+  busyId.value = target.id;
+  try { await agentUpdatesAPI.recover(target); showToast('恢复请求已受理，等待 Agent 确认'); await loadAll(); }
+  catch (e) { showToast((e as Error).message, 'error'); }
+  finally { busyId.value = ''; }
+}
+function openAttempts(id: string) { attemptTaskId.value = id; attemptPage.value = 1; void loadAttempts(); }
+function changeAttemptPage(page: number) { attemptPage.value = page; void loadAttempts(); }
+async function loadAttempts() {
+  const token = ++attemptGeneration;
+  attemptLoading.value = true; attemptError.value = '';
+  try {
+    const result = await agentUpdatesAPI.attempts(attemptTaskId.value, attemptPage.value);
+    if (token === attemptGeneration) { attempts.value = result.items; attemptTotal.value = result.total; }
+  } catch (e) { if (token === attemptGeneration) attemptError.value = (e as Error).message; }
+  finally { if (token === attemptGeneration) attemptLoading.value = false; }
+}
 let generation = 0;
 
 function nodeName(id: string): string {
@@ -378,10 +455,10 @@ async function loadAll() {
 
   try {
     const [nodesRes, agentRes, coreRes, releaseRes] = await Promise.all([
-      nodeAPI.list(1, '', false).catch(() => ({ items: [] as NodeView[], total: 0 })),
-      agentUpdatesAPI.tasks(1, 100).catch(() => ({ items: [] as AgentUpdateTask[], total: 0 })),
-      coreUpdatesAPI.tasks(1, 100).catch(() => ({ items: [] as CoreUpdateTask[], total: 0 })),
-      coreUpdatesAPI.releases(1, 100).catch(() => ({ items: [] as ReleaseEntry[], total: 0, configured: false }))
+      allPages(page => nodeAPI.list(page, '', false)),
+      allPages(page => agentUpdatesAPI.tasks(page, 100)),
+      allPages(page => coreUpdatesAPI.tasks(page, 100)),
+      allPages(page => coreUpdatesAPI.releases(page, 100))
     ]);
 
     if (cur !== generation) return;
@@ -390,6 +467,7 @@ async function loadAll() {
     agentTasks.value = agentRes.items || [];
     coreTasks.value = coreRes.items || [];
     releases.value = releaseRes.items || [];
+    configured.value = releaseRes.configured;
   } catch (e) {
     if (cur === generation) {
       error.value = (e as Error).message || '读取任务记录失败';
@@ -415,7 +493,7 @@ const allTasks = computed<UnifiedTask[]>(() => {
   // Agent updates
   for (const t of agentTasks.value) {
     const meta = mapStatusMeta(t.status, 'agent');
-    const version = releaseMap[t.releaseId] || t.result?.installed_version || '最新版本';
+    const version = releaseMap[t.releaseId] || t.result?.installed_version || '—';
     list.push({
       id: t.id,
       source: 'agent',
@@ -423,7 +501,7 @@ const allTasks = computed<UnifiedTask[]>(() => {
       nodeId: t.nodeId,
       nodeName: nodeName(t.nodeId),
       revision: t.revision,
-      targetVersion: version.startsWith('v') ? version : `v${version}`,
+      targetVersion: version === '—' ? version : version.startsWith('v') ? version : `v${version}`,
       status: t.status,
       statusLabel: meta.label,
       statusTone: meta.tone,
@@ -516,7 +594,7 @@ const paginatedTasks = computed(() => {
 });
 
 async function clearCoreTask(id: string) {
-  if (busyId.value) return;
+  if (busyId.value || !isOwner.value) return;
   busyId.value = id;
   try {
     await coreUpdatesAPI.clear(id);
@@ -535,7 +613,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  generation++;
+  generation++; attemptGeneration++;
   window.removeEventListener('proxy-node-status', loadAll);
 });
 </script>

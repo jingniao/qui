@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/db"
 )
 
@@ -34,8 +36,16 @@ func TestDatabaseRecoveryPreservesImportsWithoutResurrectingGrants(t *testing.T)
 	if err := store.Delete(ctx, removed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Save(ctx, "", importer.Input{Name: "post-backup fixture", Content: "http://fixture:fixture@example.com:8080#new", Interval: 60, UserIDs: []string{f.user.ID}}); err != nil {
+	if newSource, err := store.Save(ctx, "", importer.Input{Name: "post-backup fixture", Content: "http://fixture:fixture@example.com:8080#new", Interval: 60, UserIDs: []string{f.user.ID}}); err != nil {
 		t.Fatal(err)
+	} else {
+		g, e := (&node.Repository{Database: f.source.Database}).SaveGroup(ctx, "", node.GroupInput{Name: "new import", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: newSource}}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = (&user.Repository{Database: f.source.Database, Vault: f.source.ConfigurationVault}).Grant(ctx, f.user.ID, g.ID, false); e != nil {
+			t.Fatal(e)
+		}
 	}
 	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
 	if err != nil {

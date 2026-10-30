@@ -82,7 +82,7 @@ func TestRealTwoAgentVlessTrojanDeployment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, err := proxyService.SaveInbound(ctx, "", proxy.InboundInput{Name: "VLESS user", NodeID: a.ID, Protocol: "vless", Listen: "127.0.0.1", Port: port(), Enabled: true, DefaultOutbound: outbound.ID})
+	entry, err := proxyService.SaveInbound(ctx, "", proxy.InboundInput{Name: "VLESS user", NodeID: a.ID, Protocol: "vless", Listen: "127.0.0.1", Port: port(), Enabled: true, SubscriptionVisible: true, DefaultOutbound: outbound.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +157,9 @@ func TestRealTwoAgentVlessTrojanDeployment(t *testing.T) {
 	}
 	localPort := port()
 	credential := device.Credentials[0]
+	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}}); err != nil {
+		t.Fatal(err)
+	}
 	clientState := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: "client", Logging: desiredstate.Logging{DomainOnly: true}, Credentials: []desiredstate.Credential{{ID: credential.ID, Protocol: "vless", Secret: credential.Secret}}, Inbounds: []desiredstate.Inbound{{ID: "socks", Protocol: "socks5", Listen: "127.0.0.1", Port: localPort, Enabled: true, DefaultOutbound: "entry"}}, Outbounds: []desiredstate.Outbound{{ID: "entry", Protocol: "vless", Address: "127.0.0.1", Port: entry.Port, Enabled: true, CredentialID: credential.ID}}}
 	client := &xray.Adapter{Path: binaryPath, Directory: t.TempDir(), NodeID: clientState.NodeID}
 	defer client.Close()

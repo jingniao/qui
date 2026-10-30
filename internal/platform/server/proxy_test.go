@@ -143,8 +143,11 @@ func TestRealStoredProxyVlessTrojanConversion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, err := service.SaveInbound(ctx, "", proxy.InboundInput{Name: "VLESS entry", NodeID: a.ID, Protocol: "vless", Listen: "127.0.0.1", Port: port(), Enabled: true, DefaultOutbound: outbound.ID})
+	entry, err := service.SaveInbound(ctx, "", proxy.InboundInput{Name: "VLESS entry", NodeID: a.ID, Protocol: "vless", Listen: "127.0.0.1", Port: port(), Enabled: true, SubscriptionVisible: true, DefaultOutbound: outbound.ID})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}}); err != nil {
 		t.Fatal(err)
 	}
 	apply := func(state desiredstate.State) *xray.Adapter {

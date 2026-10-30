@@ -82,6 +82,9 @@ func TestStartupReconciliationAfterUserLevelMigration(t *testing.T) {
 	if inboundResponse.Code != 201 {
 		t.Fatalf("second inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
 	}
+	if r := f.owner.call("PUT", "/api/v1/node-groups/"+secondGroup.ID, node.GroupInput{Name: secondGroup.Name, Purpose: secondGroup.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{second.ID}}); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
 	userResponse := f.owner.call("POST", "/api/v1/users", user.Input{Username: "migrated_user", DisplayName: "Migrated", Status: "active", AllowedProtocols: []string{"vless"}, NodeGroupIDs: []string{secondGroup.ID}})
 	if userResponse.Code != 201 {
 		t.Fatalf("user: %d %s", userResponse.Code, userResponse.Body.String())
@@ -221,6 +224,9 @@ func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T)
 	inboundResponse := owner.call("POST", "/api/v1/inbounds", proxy.InboundInput{Name: "Legacy VLESS", NodeID: pending.ID, Protocol: "vless", Listen: "0.0.0.0", Port: port, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
+	}
+	if r := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}}); r.Code != 200 {
+		t.Fatal(r.Body.String())
 	}
 	// The baseline holds no user credential; the second revision adds the identity's
 	// credential, which is what the traffic batch below belongs to. Both are

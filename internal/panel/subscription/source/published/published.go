@@ -30,7 +30,7 @@ type Users interface {
 // Nodes expands the granted node groups.
 type Nodes interface {
 	ExpandedNodes(ctx context.Context, groupIDs []string) ([]node.Node, error)
-	GroupIDsForNode(ctx context.Context, nodeID string) ([]string, error)
+	UserInboundGroups(ctx context.Context, inboundID, userID string) ([]string, error)
 }
 
 // Published reads a node's last successfully applied state.
@@ -85,11 +85,14 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 		if err != nil {
 			return nil, nil, err
 		}
-		labels, err := s.labels(ctx, n.ID, viewer)
-		if err != nil {
-			return nil, nil, err
-		}
 		for _, inbound := range state.Inbounds {
+			labels, err := s.labels(ctx, inbound.ID, viewer)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(labels) == 0 {
+				continue
+			}
 			if inbound.Protocol == "forward" || !inbound.Enabled || !inbound.SubscriptionVisible || !viewer.AllowsProtocol(inbound.Protocol) {
 				continue
 			}
@@ -129,7 +132,7 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 // Only granted groups are labelled: a rule template expands @nodeGroup with them,
 // and it must never expand to a group the account cannot use.
 func (s *Source) labels(ctx context.Context, nodeID string, viewer source.Viewer) ([]string, error) {
-	groups, err := s.Nodes.GroupIDsForNode(ctx, nodeID)
+	groups, err := s.Nodes.UserInboundGroups(ctx, nodeID, viewer.UserID)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"proxycontrol/internal/panel/node"
 	canvas "proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/panel/subscription/source"
@@ -40,6 +41,19 @@ func storeFixture(t *testing.T) (*Store, string, string) {
 	}
 	return &Store{Database: d, Vault: v}, ids[0], ids[1]
 }
+func grantImport(t *testing.T, s *Store, userID, sourceID, proxyKey string) string {
+	t.Helper()
+	ctx := context.Background()
+	nodes := &node.Repository{Database: s.Database}
+	g, e := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "import " + sourceID + proxyKey, Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: sourceID, ProxyKey: proxyKey}}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = (&user.Repository{Database: s.Database, Vault: s.Vault}).Grant(ctx, userID, g.ID, false); e != nil {
+		t.Fatal(e)
+	}
+	return g.ID
+}
 func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 	s, a, b := storeFixture(t)
 	ctx := context.Background()
@@ -48,6 +62,7 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	grantImport(t, s, a, key, "")
 	var sealed []byte
 	if err = s.Database.QueryRow("SELECT payload_encrypted FROM imported_proxies").Scan(&sealed); err != nil || bytes.Contains(sealed, []byte("private-fixture")) {
 		t.Fatal("payload not encrypted")
@@ -115,6 +130,7 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	grantImport(t, s, a, key, "")
 	viewer := source.Viewer{UserID: a, AllowedProtocols: []string{"socks5"}}
 	p, _, err := s.Proxies(ctx, viewer)
 	if err != nil || len(p) != 2 {

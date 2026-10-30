@@ -134,6 +134,7 @@ var applied = map[string]string{
 	"0119_tcp_probes.sql":                               "ac045ecd3d31d967e6c83afa1102025912f8331480d13ac51fda86ed0a38c6b7",
 	"0120_latency_samples.sql":                          "f3a9232b8851ed3c91a7df4a7e50efd8d7b5c6178d0a8e604ee956bd3c0f043d",
 	"0121_node_latency_targets.sql":                     "7668ffce7c62be4c6cbf40b69f35a9a31dadf3a6c15bcaa99505ab1299f06c87",
+	"0122_node_group_entries.sql":                       "a18ca856fa59eb39cdbfdc27558b3e45132c7e0b885f3eec56212b05e46155d7",
 }
 
 func TestAppliedMigrationsAreImmutable(t *testing.T) {

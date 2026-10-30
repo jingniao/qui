@@ -60,7 +60,7 @@ func newUserAccessFixture(t *testing.T) *userAccessFixture {
 }
 
 func (f *userAccessFixture) addUser(id string) {
-	f.entries = append(f.entries, user.Access{User: user.User{ID: id, Status: "active"}, Credentials: []user.Credential{{ID: "credential-" + id, UserID: id, DeviceID: "device-" + id, Protocol: "socks5", Username: "name-" + id, Secret: "private-password-" + id}}})
+	f.entries = append(f.entries, user.Access{InboundIDs: f.entries[0].InboundIDs, User: user.User{ID: id, Status: "active"}, Credentials: []user.Credential{{ID: "credential-" + id, UserID: id, DeviceID: "device-" + id, Protocol: "socks5", Username: "name-" + id, Secret: "private-password-" + id}}})
 	f.handler.Users = stubUserAccess{access: f.entries}
 }
 
@@ -108,6 +108,16 @@ func TestUserAccessFeatureWritesOneInboundBoundToItsUsers(t *testing.T) {
 	}
 	if len(inbound.AllowedUserIDs) != 1 || inbound.AllowedUserIDs[0] != "user-1" {
 		t.Fatalf("user access inbound bindings: %v", inbound.AllowedUserIDs)
+	}
+	// A newly created inbound grants no access until it is explicitly included.
+	if ids := stateInbound(t, plain, "socks5").CredentialIDs; len(ids) != 0 {
+		t.Fatal("new inbound bypassed group membership")
+	}
+	f.entries[0].InboundIDs = []string{inbound.ID}
+	f.handler.Users = stubUserAccess{access: f.entries}
+	plain, enabled, err = f.handler.EnsureUserAccess(ctx, input)
+	if err != nil {
+		t.Fatal(err)
 	}
 	rendered := stateInbound(t, plain, "socks5")
 	if rendered.ID != inbound.ID || !rendered.Enabled || len(rendered.CredentialIDs) != 1 || rendered.CredentialIDs[0] != "credential-1" {

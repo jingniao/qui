@@ -8,27 +8,37 @@ import (
 	"time"
 )
 
+type GroupImport struct {
+	SourceID string `json:"sourceId"`
+	ProxyKey string `json:"proxyKey"`
+}
+
 type Group struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Purpose             string   `json:"purpose"`
-	Enabled             bool     `json:"enabled"`
-	SubscriptionVisible bool     `json:"subscriptionVisible"`
-	NodeIDs             []string `json:"nodeIds"`
-	Remark              string   `json:"remark"`
-	CreatedAt           string   `json:"createdAt"`
+	InboundIDs          []string      `json:"inboundIds"`
+	Imports             []GroupImport `json:"imports"`
+	GrantedUserIDs      []string      `json:"grantedUserIds"`
+	ID                  string        `json:"id"`
+	Name                string        `json:"name"`
+	Purpose             string        `json:"purpose"`
+	Enabled             bool          `json:"enabled"`
+	SubscriptionVisible bool          `json:"subscriptionVisible"`
+	NodeIDs             []string      `json:"nodeIds"`
+	Remark              string        `json:"remark"`
+	CreatedAt           string        `json:"createdAt"`
 }
 type GroupInput struct {
-	Name                string   `json:"name"`
-	Purpose             string   `json:"purpose"`
-	Enabled             bool     `json:"enabled"`
-	SubscriptionVisible bool     `json:"subscriptionVisible"`
-	NodeIDs             []string `json:"nodeIds"`
-	Remark              string   `json:"remark"`
+	InboundIDs          []string      `json:"inboundIds"`
+	Imports             []GroupImport `json:"imports"`
+	Name                string        `json:"name"`
+	Purpose             string        `json:"purpose"`
+	Enabled             bool          `json:"enabled"`
+	SubscriptionVisible bool          `json:"subscriptionVisible"`
+	NodeIDs             []string      `json:"nodeIds"`
+	Remark              string        `json:"remark"`
 }
 
 func (r *Repository) Group(ctx context.Context, id string) (Group, error) {
-	group := Group{NodeIDs: []string{}}
+	group := Group{NodeIDs: []string{}, InboundIDs: []string{}, Imports: []GroupImport{}, GrantedUserIDs: []string{}}
 	err := r.Database.QueryRowContext(ctx, "SELECT id,name,purpose,enabled,subscription_visible,remark,created_at FROM node_groups WHERE id=?", id).Scan(&group.ID, &group.Name, &group.Purpose, &group.Enabled, &group.SubscriptionVisible, &group.Remark, &group.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return group, ErrNotFound
@@ -47,6 +57,47 @@ func (r *Repository) Group(ctx context.Context, id string) (Group, error) {
 			return group, err
 		}
 		group.NodeIDs = append(group.NodeIDs, nodeID)
+	}
+	if err := rows.Err(); err != nil {
+		return group, err
+	}
+	rows.Close()
+	for _, q := range []struct {
+		sql    string
+		target *[]string
+	}{
+		{"SELECT inbound_id FROM node_group_inbounds WHERE group_id=? ORDER BY inbound_id", &group.InboundIDs},
+		{"SELECT user_id FROM user_node_group_grants WHERE group_id=? ORDER BY user_id", &group.GrantedUserIDs},
+	} {
+		rows, err := r.Database.QueryContext(ctx, q.sql, id)
+		if err != nil {
+			return group, err
+		}
+		for rows.Next() {
+			var v string
+			if err = rows.Scan(&v); err != nil {
+				rows.Close()
+				return group, err
+			}
+			*q.target = append(*q.target, v)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return group, err
+		}
+	}
+	rows, err = r.Database.QueryContext(ctx, "SELECT source_id,proxy_key FROM node_group_imports WHERE group_id=? ORDER BY source_id,proxy_key", id)
+	if err != nil {
+		return group, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v GroupImport
+		if err = rows.Scan(&v.SourceID, &v.ProxyKey); err != nil {
+			return group, err
+		}
+		group.Imports = append(group.Imports, v)
 	}
 	return group, rows.Err()
 }
@@ -91,8 +142,8 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if !strings.Contains("|subscription|relay|egress|mixed|", "|"+input.Purpose+"|") {
 		return Group{}, errors.New("invalid node group purpose")
 	}
-	if len(input.NodeIDs) > 100 {
-		return Group{}, errors.New("node group is limited to 100 members")
+	if len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.Imports) > 200 {
+		return Group{}, errors.New("node group member limit exceeded")
 	}
 	if input.Purpose == "relay" || input.Purpose == "egress" {
 		input.SubscriptionVisible = false
@@ -125,23 +176,83 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 		}
 		return Group{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM node_group_members WHERE group_id=?", groupID); err != nil {
-		return Group{}, err
+	// Legacy server selection is expanded once, never used as an access grant.
+	if input.InboundIDs == nil && input.NodeIDs != nil {
+		input.InboundIDs = []string{}
+		seen := map[string]bool{}
+		for _, nodeID := range input.NodeIDs {
+			if seen[nodeID] {
+				return Group{}, errors.New("duplicate node group member")
+			}
+			seen[nodeID] = true
+			var exists int
+			if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=? AND deleted_at IS NULL", nodeID).Scan(&exists); err != nil {
+				return Group{}, errors.New("node group member does not exist")
+			}
+			rows, err := tx.QueryContext(ctx, "SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", nodeID)
+			if err != nil {
+				return Group{}, err
+			}
+			for rows.Next() {
+				var id string
+				if err = rows.Scan(&id); err != nil {
+					rows.Close()
+					return Group{}, err
+				}
+				input.InboundIDs = append(input.InboundIDs, id)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return Group{}, err
+			}
+		}
+	}
+	if len(input.InboundIDs) > 500 {
+		return Group{}, errors.New("node group is limited to 500 inbounds")
+	}
+	for _, table := range []string{"node_group_inbounds", "node_group_imports", "node_group_members"} {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE group_id=?", groupID); err != nil {
+			return Group{}, err
+		}
 	}
 	seen := map[string]bool{}
-	for _, nodeID := range input.NodeIDs {
-		if seen[nodeID] {
-			return Group{}, errors.New("duplicate node group member")
+	for _, inboundID := range input.InboundIDs {
+		if seen[inboundID] {
+			return Group{}, errors.New("duplicate inbound member")
 		}
-		seen[nodeID] = true
-		// A deleted node is not a member of any node group.
+		seen[inboundID] = true
 		var exists int
-		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=? AND deleted_at IS NULL", nodeID).Scan(&exists); err != nil {
-			return Group{}, errors.New("node group member does not exist")
+		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM inbounds i JOIN nodes n ON n.id=i.node_id WHERE i.id=? AND n.deleted_at IS NULL", inboundID).Scan(&exists); err != nil {
+			return Group{}, errors.New("inbound member does not exist")
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_members(group_id,node_id) VALUES(?,?)", groupID, nodeID); err != nil {
-			return Group{}, errors.New("node group member does not exist")
+		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_inbounds VALUES(?,?)", groupID, inboundID); err != nil {
+			return Group{}, err
 		}
+	}
+	seen = map[string]bool{}
+	for _, item := range input.Imports {
+		key := item.SourceID + "\x00" + item.ProxyKey
+		if seen[key] || len(item.ProxyKey) > 1024 {
+			return Group{}, errors.New("invalid or duplicate import member")
+		}
+		seen[key] = true
+		var exists int
+		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM subscription_sources WHERE id=?", item.SourceID).Scan(&exists); err != nil {
+			return Group{}, errors.New("import source does not exist")
+		}
+		if item.ProxyKey != "" {
+			if err := tx.QueryRowContext(ctx, "SELECT 1 FROM imported_proxies WHERE source_id=? AND name||'|'||protocol=? LIMIT 1", item.SourceID, item.ProxyKey).Scan(&exists); err != nil {
+				return Group{}, errors.New("import proxy does not exist")
+			}
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_imports VALUES(?,?,?)", groupID, item.SourceID, item.ProxyKey); err != nil {
+			return Group{}, err
+		}
+	}
+	// Triggers also maintain this index on inbound moves/deletes in Proxy's transaction.
+	if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO node_group_members SELECT DISTINCT e.group_id,i.node_id FROM node_group_inbounds e JOIN inbounds i ON i.id=e.inbound_id WHERE e.group_id=?", groupID); err != nil {
+		return Group{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Group{}, err

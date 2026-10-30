@@ -28,6 +28,9 @@ func TestProxySnapshotIncludesExpiryAndBusinessEditDoesNotChangeOldSnapshot(t *t
 	if _, err := f.service.SaveInbound(ctx, "", InboundInput{Name: "User entry", NodeID: f.nodeA, Protocol: "socks5", Listen: "0.0.0.0", Port: 1080, Enabled: true, DefaultOutbound: "direct", SubscriptionVisible: true}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{f.nodeA}}); err != nil {
+		t.Fatal(err)
+	}
 	snapshot, err := f.service.Snapshot(ctx, f.nodeA, f.users)
 	if err != nil || len(snapshot.Users) != 1 || snapshot.Users[0].ExpiresAt != deadline {
 		t.Fatal("expiry missing from approved node input", snapshot.Users, err)

@@ -69,8 +69,11 @@ func TestRealPolicyPublicationToAgentMatchesDraftSimulator(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
-	inbound, err := proxyService.SaveInbound(ctx, "", proxy.InboundInput{Name: "Scoped SOCKS", NodeID: n.ID, Protocol: "socks5", Listen: "127.0.0.1", Port: port, Enabled: true, DefaultOutbound: "direct"})
+	inbound, err := proxyService.SaveInbound(ctx, "", proxy.InboundInput{Name: "Scoped SOCKS", NodeID: n.ID, Protocol: "socks5", Listen: "127.0.0.1", Port: port, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{inbound.ID}}); err != nil {
 		t.Fatal(err)
 	}
 	rule, err := policies.Save(ctx, "", policy.Input{Name: "Device example block", Priority: 10, Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{u.ID}, DeviceIDs: []string{device.ID}, GroupIDs: []string{group.ID}}, Match: desiredstate.Match{Suffixes: []string{"blocked.example"}, Network: "tcp"}, Action: desiredstate.Action{Type: "Block"}})

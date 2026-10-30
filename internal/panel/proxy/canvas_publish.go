@@ -57,17 +57,19 @@ type CanvasDeployer interface {
 // canvasEdge is one directed connection between two managed nodes together with
 // the objects it needs.
 type canvasEdge struct {
-	connectionID string
-	sourceNode   string
-	targetNode   string
-	protocol     string
-	port         int
-	tcp          bool
-	udp          bool
-	inboundName  string
-	outboundName string
-	inboundID    string
-	outboundID   string
+	autoPort      bool
+	portAllocated bool
+	connectionID  string
+	sourceNode    string
+	targetNode    string
+	protocol      string
+	port          int
+	tcp           bool
+	udp           bool
+	inboundName   string
+	outboundName  string
+	inboundID     string
+	outboundID    string
 	// adopt is a stale inbound of the same scheme on this listener and protocol
 	// that the edge takes over instead of creating a new one.
 	adopt Inbound
@@ -247,7 +249,7 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 		if connection.TunnelPort != nil {
 			port = *connection.TunnelPort
 		}
-		edge := &canvasEdge{connectionID: connection.ID, sourceNode: sourceNode, targetNode: targetNode, protocol: protocol, port: port, tcp: connection.SupportTCP, udp: connection.SupportUDP}
+		edge := &canvasEdge{autoPort: connection.TunnelPort == nil, connectionID: connection.ID, sourceNode: sourceNode, targetNode: targetNode, protocol: protocol, port: port, tcp: connection.SupportTCP, udp: connection.SupportUDP}
 		plan.edges = append(plan.edges, edge)
 		incoming[targetNode] = append(incoming[targetNode], edge)
 		outgoing[sourceNode] = append(outgoing[sourceNode], edge)
@@ -259,6 +261,9 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 	}
 	names, err := s.canvasNodeNames(ctx, plan.nodes)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.canvasAllocatePorts(ctx, plan, names); err != nil {
 		return nil, err
 	}
 	for _, edge := range plan.edges {

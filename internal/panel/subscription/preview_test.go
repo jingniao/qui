@@ -60,7 +60,7 @@ func (n previewNodes) ExpandedNodes(context.Context, []string) ([]node.Node, err
 
 // GroupIDsForNode reports the granted group, so the preview also proves the
 // nodeGroup label the rule template expands later.
-func (n previewNodes) GroupIDsForNode(context.Context, string) ([]string, error) {
+func (n previewNodes) UserInboundGroups(context.Context, string, string) ([]string, error) {
 	return []string{"preview-group", "other-group"}, nil
 }
 

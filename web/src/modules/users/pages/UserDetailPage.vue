@@ -166,7 +166,7 @@
             </div>
 
             <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-secondary">
-              <span>账号正常</span>
+              <span>{{ accountStatusText }}</span>
               <span class="text-ios-tertiary">{{ user.allowedProtocols.length }} 种协议</span>
             </div>
           </div>
@@ -700,9 +700,19 @@ const expiryCountdownText = computed(() => {
   return `还剩 ${days} 天到期`;
 });
 
+const accountStatusText = computed(() => {
+  const u = user.value;
+  if (!u) return '—';
+  if (u.status !== 'active') return u.status === 'disabled' ? '账号已禁用' : u.status === 'expired' ? '账号已到期' : u.status === 'over_quota' ? '流量已用完' : u.status;
+  if (u.expiresAt && Date.parse(u.expiresAt) <= Date.now()) return '账号已到期';
+  if (u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit) return '流量已用完';
+  return '账号正常';
+});
 const availableNodes = computed(() => {
   if (!user.value) return [];
-  return allNodes.value.filter(n => n.enabled && !n.maintenance && n.allowSubscription);
+  const grantedGroups = new Set(user.value.nodeGroupIds);
+  const grantedNodes = new Set(groups.value.filter(g => grantedGroups.has(g.id)).flatMap(g => g.nodeIds));
+  return allNodes.value.filter(n => grantedNodes.has(n.id) && !n.deletedAt && n.enabled && !n.maintenance && n.allowSubscription);
 });
 
 function formatGiB(bytes: number) {
@@ -922,15 +932,24 @@ async function copyText(text: string) {
 }
 
 // 主数据加载
+async function readPages<T>(fetchPage: (page: number) => Promise<{ items: T[]; total: number }>): Promise<{ items: T[] }> {
+  const first = await fetchPage(1), items = [...first.items];
+  for (let page = 2; items.length < first.total; page++) {
+    const next = await fetchPage(page);
+    if (!next.items.length) throw new Error('授权节点分页读取不完整');
+    items.push(...next.items);
+  }
+  return { items };
+}
 async function load() {
   const id = userId.value;
-  if (!id) return;
+  if (!id || route.name !== 'UserDetail') return;
   error.value = '';
   try {
     const [u, gRes, nRes] = await Promise.all([
       userAPI.get(id),
-      groupAPI.list(1, 100),
-      nodeAPI.list(1, '', false)
+      readPages(page => groupAPI.list(page, 100)),
+      readPages(page => nodeAPI.list(page, '', false))
     ]);
     user.value = u;
     loginEnabled.value = u.loginEnabled;

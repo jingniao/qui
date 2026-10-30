@@ -1,71 +1,30 @@
+import type { HostMetrics } from '../metrics';
+import { serverStatus } from './serverListModel';
 import { ref, onMounted, onUnmounted, type Ref } from 'vue';
 import type { NodeView } from '../api';
 import { getNodeMeta, resolveCountryInfo, onGeoResolved, formatRenewPrice, calculateRemainingDays } from '../nodeMeta';
 
 export function useServerCardValues(clockNow: Ref<number>, nodeMonthTraffic: Ref<Record<string, { uploadBytes: number; downloadBytes: number }>>) {
-function isAgentOnline(node: NodeView): boolean {
-  if (!node.lastHeartbeat || !node.enabled || node.deletedAt) return false;
-  const hbTime = Date.parse(node.lastHeartbeat);
-  if (isNaN(hbTime)) return false;
-  if (clockNow.value - hbTime >= 45000) return false;
-  return node.status === 'online' || node.status === 'degraded' || node.status === 'applying' || node.status === 'rollback';
-}
-
-function statusCapsuleText(node: NodeView): string {
-  if (node.deletedAt) return '已删除';
-  if (!node.enabled) return '已停用';
-  if (node.maintenance) return '维护中';
-  if (node.status === 'pending') return '等待登记';
-  if (isAgentOnline(node)) {
-    if (node.status === 'degraded') return '核心异常';
-    if (node.status === 'applying') return '发布中';
-    if (node.status === 'rollback') return '回滚中';
-    return '在线';
-  }
-  if (node.status === 'error') return '异常';
-  return '离线';
-}
-
+function statusCapsuleText(node: NodeView): string { return serverStatus(node, clockNow.value).label; }
 function statusCapsuleClass(node: NodeView): string {
-  if (node.deletedAt || !node.enabled) {
-    return 'bg-neutral-100 text-neutral-500';
-  }
-  if (node.maintenance) {
-    return 'bg-[#FEF6EE] text-[#F79009]';
-  }
-  if (node.status === 'pending') {
-    return 'bg-neutral-100 text-neutral-500';
-  }
-  if (isAgentOnline(node)) {
-    if (node.status === 'degraded') {
-      return 'bg-[#FEF6EE] text-[#F79009]';
-    }
-    if (node.status === 'applying' || node.status === 'rollback') {
-      return 'bg-blue-50 text-ios-blue';
-    }
-    return 'bg-[#E8F8F0] text-[#12B76A]';
-  }
-  if (node.status === 'error') {
-    return 'bg-rose-50 text-ios-red';
-  }
-  return 'bg-neutral-100 text-neutral-500';
+  const tone = serverStatus(node, clockNow.value).tone;
+  if (tone === 'error') return 'bg-ios-red/10 text-ios-red';
+  if (tone === 'warning') return 'bg-ios-orange/10 text-ios-orange';
+  if (tone === 'online') return 'bg-ios-green/10 text-ios-green';
+  if (tone === 'applying') return 'bg-ios-blue/10 text-ios-blue';
+  return 'bg-ios-fill text-ios-secondary';
 }
-
 function statusDotClass(node: NodeView): string {
-  if (node.deletedAt || !node.enabled) return 'bg-neutral-400';
-  if (node.maintenance) return 'bg-[#F79009]';
-  if (node.status === 'pending') return 'bg-neutral-400';
-  if (isAgentOnline(node)) {
-    if (node.status === 'degraded') return 'bg-[#F79009]';
-    if (node.status === 'applying' || node.status === 'rollback') return 'bg-ios-blue';
-    return 'bg-[#12B76A]';
-  }
-  if (node.status === 'error') return 'bg-ios-red';
-  return 'bg-neutral-400';
+  const tone = serverStatus(node, clockNow.value).tone;
+  return ({ error: 'bg-ios-red', warning: 'bg-ios-orange', online: 'bg-ios-green', applying: 'bg-ios-blue' } as Record<string, string>)[tone] || 'bg-ios-tertiary';
 }
-
 function calculateRunningTime(node: NodeView): string {
-  return '—';
+  const age = clockNow.value - Date.parse(node.lastHeartbeat);
+  const seconds = (node.heartbeat as HostMetrics)?.host_uptime_seconds;
+  if (!Number.isFinite(age) || age < -5000 || age >= 45000 || typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
+  if (seconds >= 86400) return Math.floor(seconds / 86400) + ' 天';
+  if (seconds >= 3600) return Math.floor(seconds / 3600) + ' 小时';
+  return Math.floor(seconds / 60) + ' 分钟';
 }
 
 function formatPercent(val?: number): string {
@@ -120,7 +79,8 @@ function getRenewalPriceDisplay(node: NodeView): string {
 
 function getRenewalInfo(node: NodeView) {
   const meta = getNodeMeta(node.id);
-  return calculateRemainingDays(meta.renewDate);
+  const info = calculateRemainingDays(meta.renewDate);
+  return { ...info, isNear: info.days !== null && info.days <= (meta.renewNoticeDays ?? 7) };
 }
 
 // Monthly traffic

@@ -28,6 +28,16 @@ func TestWireGuardSubscriptionUsesDevicePrivateKeyAndServerPublicPeer(t *testing
 		t.Fatal(err)
 	}
 	state := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: f.nodeIDs[0], Users: []desiredstate.User{{ID: f.u.ID, Enabled: true}}, Credentials: []desiredstate.Credential{{ID: client.ID, UserID: f.u.ID, DeviceID: f.device.ID, Protocol: "wireguard", PublicKey: client.PublicKey}}, Logging: desiredstate.Logging{DomainOnly: true}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}}, Inbounds: []desiredstate.Inbound{{ID: "wg-in", Protocol: "wireguard", Listen: "0.0.0.0", Port: 51820, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct", CredentialIDs: []string{client.ID}, Settings: desiredstate.ProtocolSettings{WireGuard: &desiredstate.WireGuardSettings{SecretKey: server.Value, Addresses: []string{"10.99.0.1/24"}, Peers: []desiredstate.WireGuardPeer{{PublicKey: client.PublicKey, AllowedIPs: []string{"10.99.0.2/32"}, CredentialID: client.ID}}, MTU: 1420}}}}}
+	sealed, e := f.users.Vault.Seal([]byte("{}"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = f.database.Exec("INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES('wg-in','WG',?,'wireguard','0.0.0.0',51820,1,1,0,'direct','[]',?,'now')", f.nodeIDs[0], sealed); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = f.database.Exec("INSERT INTO node_group_inbounds VALUES(?,'wg-in')", f.groups[0].ID); e != nil {
+		t.Fatal(e)
+	}
 	revision, err := f.deployments.Create(ctx, state, "owner", "WG subscription")
 	if err != nil {
 		t.Fatal(err)

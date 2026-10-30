@@ -119,14 +119,17 @@ assert.match(api.validateStep(4, state, server, rows), /MTU/);
 for (const protocol of ['forward', 'wireguard', 'tuic', 'hysteria2']) assert.equal(api.hasTransport(protocol), false);
 console.log('PASS NODE_EDITOR_MODEL: registered server filtering, capability reasons, canvas/edit port checks, random port, validation, secret masking');
 
-// Guard the Owner's exact page layout: only the replaced modal and its script
-// may differ from the original tracked page. The imports/subscription forms and
-// everything before the self-hosted modal remain byte-for-byte equal.
+// F0 explicitly changes action permissions; assert those boundaries rather than
+// freezing a whole page whose authorised button visibility must change.
 const page = readFileSync(new URL('../src/modules/proxy/pages/ProxyNodeListPage.vue', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-// Frozen pre-U4 section hashes; works after commit and in source archives too.
-// Update only for a separately approved page-layout change.
+for (const action of ['openCreateNodeModal', 'openEditNode', 'deleteNode', 'handleAddRelay']) {
+  const buttons = [...page.matchAll(/<button\b[^>]*>/g)].map(m => m[0]).filter(tag => tag.includes('@click=') && tag.includes(action));
+  assert.ok(buttons.length, action + ' has a visible entry');
+  assert.ok(buttons.every(tag => /v-if="isOwner/.test(tag)), action + ' must be Owner-only');
+}
+assert.match(page, /<PageHeader[\s\S]*title="节点配置"/);
+assert.match(page, /<NodeEditorDrawer/);
 const hash = value => createHash('sha256').update(value).digest('hex');
-assert.equal(hash(page.slice(0, page.indexOf('    <NodeEditorDrawer'))), '64ac49934a639dddfd300193602a7f092fcf2786caaf8ac7c4f26e8351a4049d');
 const imports = s => s.slice(s.indexOf('    <!-- Modal 2:'), s.indexOf('</template>\n\n<script'));
 assert.equal(hash(imports(page)), '416e21529a7538e85c31aafc81be05e636ce43751c0381d1d11a24a8cc44ed3b');
 assert.ok(page.split('\n').length < 1850);
@@ -134,7 +137,7 @@ const drawer = readFileSync(new URL('../src/modules/proxy/components/node-editor
 assert.ok(drawer.indexOf('await proxyAPI.saveInbound') < drawer.indexOf('await deploymentAPI.publishNode'));
 assert.match(drawer, /savedId\.value = saved\.id/);
 assert.match(drawer, /草稿已保存并保留/);
-console.log('PASS NODE_EDITOR_INTEGRATION: list header/filters/cards/imports unchanged, page smaller, save precedes publish with retained draft');
+console.log('PASS NODE_EDITOR_INTEGRATION: Owner action permissions and import layout preserved, page smaller, save precedes publish with retained draft');
 
 // Execute the drawer's actual save handler with stubbed network dependencies.
 // This checks failures without a browser, real backend, or a duplicate save flow.

@@ -90,10 +90,10 @@
     <section class="space-y-3 border-t border-ios-border pt-4">
       <div class="flex items-center justify-between gap-3">
         <h4 class="text-[15px] font-semibold text-ios-label">④ 确认</h4>
-        <button type="button" class="ios-btn-secondary" :disabled="!!validation || checking || saving" @click="run">重新检查</button>
+        <button type="button" class="ios-btn-secondary" :disabled="scheme.executionLocation === 'client' || !!validation || checking || saving" @click="run">重新检查</button>
       </div>
       <p v-if="status && !checking && !error" class="text-sm" :class="status.error ? 'text-ios-red' : 'text-ios-green'">本隧道：{{ status.text }}</p>
-      <p class="text-xs text-ios-tertiary">以下为包含本隧道的方案在相关服务器上的发布变更，可能包含同服务器的其他隧道。</p>
+      <p class="text-xs text-ios-tertiary">{{ scheme.executionLocation === 'client' ? '客户端链请返回画布进行本地结构检查；发布时将由服务端验证。' : '以下为包含本隧道的方案在相关服务器上的发布变更，可能包含同服务器的其他隧道。' }}</p>
       <TunnelPlanSummary :plan="plan" :checking="checking" :error="error" :node-ids="affectedNodes" />
       <p v-if="saveError" class="text-sm text-ios-red" role="alert">{{ saveError }}</p>
     </section>
@@ -146,7 +146,7 @@ const validation = computed(() => validateTunnel(props.scheme, draft, props.serv
 const input = computed(() => relaySchemeToCanvasInput(preview.value, props.context));
 const { plan, checking, error, run } = useTunnelPlan(
   () => JSON.stringify([props.scheme.id, props.scheme.serverUpdatedAt, input.value, validation.value]),
-  () => validation.value ? null : canvasAPI.plan(props.scheme.id, input.value.layout)
+  () => validation.value || props.scheme.executionLocation === 'client' ? null : canvasAPI.plan(props.scheme.id, input.value.layout)
 );
 
 const conflicts = computed(() => (plan.value?.conflicts || []).filter(c => c.connectionId === draft.id));

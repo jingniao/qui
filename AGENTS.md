@@ -549,7 +549,9 @@ NAT 下多端只算一个，双栈与切网可能多算；超限检测约有一�
 
 ## 10.1 节点组授权
 
-用户不直接绑定单个节点，而是绑定节点组。
+用户绑定节点分组；分组成员是具体自建入站或导入代理，不再是整台服务器。Owner 在分组页授权用户，原用户授权接口继续可用。自建入站使用 `node_group_inbounds`；导入成员使用 `node_group_imports`，`proxy_key=''` 表示整个来源，否则按来源内 `name|protocol` 稳定匹配，刷新不依赖内容哈希 ID。
+
+`node_group_members` 仅为成员入站所在服务器的去重派生索引，供节点策略、服务器筛选与批量操作使用，不作为入站授权依据。分组仓储保存时重建；入站移动、删除与外键级联通过同事务触发器维护。新增入站不会自动加入已有分组。
 
 ```text
 用户
@@ -602,12 +604,12 @@ Osaka-01
 2. 验证用户是否到期。
 3. 验证用户订阅 Token。
 4. 获取用户授权节点组。
-5. 展开组内节点。
+5. 展开启用、订阅可见且用途为 subscription/mixed 的授权分组，取得具体入站与导入成员。
 6. 去除重复节点。
 7. 过滤禁用节点。
 8. 过滤维护中节点。
 9. 过滤不允许订阅的节点。
-10. 获取节点可用入站。
+10. 仅保留组内可用入站；入站非空 `allowedUserIds` 仍须包含本人，订阅还须核对已发布凭据。凭据渲染按入站授权，同服务器其他入站不自动获得用户凭据。
 11. 过滤用户不允许使用的协议。
 12. 输出订阅内容。
 
@@ -1588,6 +1590,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0119 `tcp_probes` | `nodes.tcp_probe_supported`；`probe_targets`、`node_tcp_probes` 与历史索引；转发复用入站设置，不新增转发表 |
 | 0120 `latency_samples` | `probe_targets.scheduled`（默认关闭，触发器限制最多 5 个）；`node_tcp_probes.source/dispatched_at` 与单节点在途唯一索引；`node_latency_samples`（REAL 毫秒，含 median_ms；按节点/时间索引，保留 7 天） |
 | 0121 `node_latency_targets` | 每节点目标关联表（节点、目标外键级联删除，插入及移动触发器限制每节点最多 5 个）；`nodes.latency_targets_custom`（0/1，默认 0） |
+| 0122 `node_group_entries` | `node_group_inbounds`、`node_group_imports`；服务器成员转入站、旧来源授权转生成分组；`node_meta.port_range_start/end`（同时为空或 1–65535 的有序范围），迁移备注末尾有效 `[ports:A-B]` |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1646,6 +1649,12 @@ DELETE /api/v1/nodes/{id}
 `GET /install/ca.pem` 无需登录，返回面板 Web 证书链顶层的 PEM（`application/x-pem-file`，`Cache-Control: no-store`），供节点安装脚本建立对面板证书的信任（见第 11.3 节）；开发模式或证书不可读时返回 404。
 
 ## 27.5 节点组
+
+Owner 专用，写操作要求 CSRF。列表及保存响应保留原字段，新增 `inboundIds: string[]`、`imports: [{sourceId,proxyKey}]`、`grantedUserIds: string[]`；`nodeIds` 是只读派生服务器列表。POST/PUT 接受 `inboundIds`、`imports`（最多 500 个入站、200 个导入成员）；仅传 `nodeIds` 而未传 `inboundIds` 时，兼容展开服务器当前订阅可见、非中转的入站。显式空入站数组优先，未知字段仍拒绝。
+
+导入来源 API 继续接受但忽略 `userIds`；响应 `userIds` 为经有效分组可达该来源的去重用户集合（不代表其当前活跃或缓存可用）。`GET /imported-proxies` 项增加 `proxyKey: "name|protocol"`。`user_source_grants` 仅保留供旧备份兼容，不参与访问判断。
+
+节点元数据 GET/PUT 增加可空整数 `portRangeStart`、`portRangeEnd`，须同时设置或同时为空；无效输入返回 400 `invalid_request`。画布未指定中转监听端口时优先在服务器范围内分配，按 TCP/UDP 跳过已占用端口；范围耗尽拒绝发布，未设置范围沿用原默认端口。
 
 ```text
 GET    /api/v1/node-groups

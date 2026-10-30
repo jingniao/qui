@@ -426,9 +426,9 @@
           <div>
             <label class="block text-xs font-medium text-ios-secondary mb-1">新密码</label>
             <input
-              v-model="newPassword"
+              v-model="newPassword" minlength="12" maxlength="128"
               type="password"
-              placeholder="请输入新密码（至少 6 位）"
+              placeholder="请输入新密码（12–128 位）"
               class="form-input-base"
               autocomplete="new-password"
             />
@@ -540,8 +540,8 @@ async function submitPassword() {
     showToast('请输入当前密码和新密码', 'error');
     return;
   }
-  if (newPassword.value.length < 6) {
-    showToast('新密码长度不能少于 6 位', 'error');
+  if (newPassword.value.length < 12 || newPassword.value.length > 128) {
+    showToast('新密码长度必须为 12–128 位', 'error');
     return;
   }
   if (newPassword.value !== confirmPassword.value) {

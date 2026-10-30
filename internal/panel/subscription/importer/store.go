@@ -72,7 +72,7 @@ func (s *Store) List(ctx context.Context) ([]Source, error) {
 	}
 	for i := range items {
 		items[i].UserIDs = []string{}
-		r, e := s.reader().QueryContext(ctx, "SELECT user_id FROM user_source_grants WHERE source_id=? ORDER BY user_id", items[i].ID)
+		r, e := s.reader().QueryContext(ctx, "SELECT DISTINCT a.user_id FROM user_node_group_grants a JOIN node_groups g ON g.id=a.group_id JOIN node_group_imports e ON e.group_id=g.id WHERE e.source_id=? AND g.enabled=1 AND g.subscription_visible=1 AND g.purpose IN ('subscription','mixed') ORDER BY a.user_id", items[i].ID)
 		if e != nil {
 			return nil, e
 		}
@@ -104,7 +104,7 @@ func (s *Store) Save(ctx context.Context, key string, in Input) (string, error) 
 			return "", sql.ErrNoRows
 		}
 	}
-	if strings.TrimSpace(in.Name) == "" || len(in.Name) > 200 || in.Interval < 60 || in.Interval > 2592000 || len(in.UserIDs) > 100 {
+	if strings.TrimSpace(in.Name) == "" || len(in.Name) > 200 || in.Interval < 60 || in.Interval > 2592000 {
 		return "", ErrParse
 	}
 	if in.URL != "" && !ValidURL(in.URL) {
@@ -150,14 +150,7 @@ func (s *Store) Save(ctx context.Context, key string, in Input) (string, error) 
 			return "", err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM user_source_grants WHERE source_id=?", key); err != nil {
-		return "", err
-	}
-	for _, u := range in.UserIDs {
-		if _, err = tx.ExecContext(ctx, "INSERT INTO user_source_grants(user_id,source_id) VALUES(?,?)", u, key); err != nil {
-			return "", err
-		}
-	}
+	// userIds is accepted for wire compatibility; group grants alone authorize access.
 	if entries != nil {
 		if err = s.replace(ctx, tx, key, entries, stamp); err != nil {
 			return "", err
@@ -278,7 +271,11 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Proxy, []proxy.Warning, error) {
-	rows, err := s.reader().QueryContext(ctx, `SELECT COALESCE(p.id,''),s.id,p.payload_encrypted,s.last_status FROM subscription_sources s JOIN user_source_grants g ON g.source_id=s.id LEFT JOIN imported_proxies p ON p.source_id=s.id WHERE g.user_id=? ORDER BY s.created_at,s.id,p.id`, viewer.UserID)
+	rows, err := s.reader().QueryContext(ctx, `SELECT COALESCE(p.id,''),s.id,p.payload_encrypted,s.last_status,group_concat(DISTINCT g.id) FROM subscription_sources s
+ JOIN node_group_imports e ON e.source_id=s.id JOIN node_groups g ON g.id=e.group_id
+ JOIN user_node_group_grants a ON a.group_id=g.id
+ LEFT JOIN imported_proxies p ON p.source_id=s.id AND (e.proxy_key='' OR e.proxy_key=p.name||'|'||p.protocol)
+ WHERE a.user_id=? AND g.enabled=1 AND g.subscription_visible=1 AND g.purpose IN ('subscription','mixed') GROUP BY s.id,p.id ORDER BY s.created_at,s.id,p.id`, viewer.UserID)
 	if err != nil {
 		return nil, nil, errors.New("imported proxy cache unavailable")
 	}
@@ -288,9 +285,9 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 	failed := map[string]bool{}
 	notified := map[string]bool{}
 	for rows.Next() {
-		var key, src, status string
+		var key, src, status, groups string
 		var encrypted []byte
-		if err = rows.Scan(&key, &src, &encrypted, &status); err != nil {
+		if err = rows.Scan(&key, &src, &encrypted, &status, &groups); err != nil {
 			return nil, nil, errors.New("imported proxy cache unavailable")
 		}
 		if status != "ok" {
@@ -298,6 +295,9 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 				warnings = append(warnings, proxy.SourceWarning("import:"+src, "Import source unavailable"))
 				failed[src] = true
 			}
+			continue
+		}
+		if key == "" {
 			continue
 		}
 		if !notified[src] {
@@ -317,7 +317,11 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 		if !viewer.AllowsProtocol(p.Protocol) {
 			continue
 		}
-		p.Origin = proxy.Origin{Source: "import:" + src, Ref: key}
+		labels := []string{}
+		for _, id := range strings.Split(groups, ",") {
+			labels = append(labels, "nodeGroup:"+id)
+		}
+		p.Origin = proxy.Origin{Source: "import:" + src, Ref: key, Labels: labels}
 		entries = append(entries, p)
 	}
 	if err = rows.Err(); err != nil {
@@ -349,7 +353,7 @@ func (s *Store) Items(ctx context.Context) ([]map[string]any, error) {
 		if e != nil {
 			return nil, errors.New("import metadata unavailable")
 		}
-		items = append(items, map[string]any{"id": key, "sourceId": src, "name": name, "protocol": protocol, "server": p.Server, "port": p.Port})
+		items = append(items, map[string]any{"id": key, "sourceId": src, "proxyKey": name + "|" + protocol, "name": name, "protocol": protocol, "server": p.Server, "port": p.Port})
 	}
 	return items, rows.Err()
 }

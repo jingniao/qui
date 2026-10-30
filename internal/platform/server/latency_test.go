@@ -64,13 +64,14 @@ func TestLatencyAPIShapeBoundsTargetCapAndViewer(t *testing.T) {
 	got := owner.call("GET", path, nil)
 	var data struct {
 		IntervalSeconds int                `json:"intervalSeconds"`
+		SampleSeconds   int                `json:"sampleSeconds"`
 		Targets         []node.ProbeTarget `json:"targets"`
 		Series          []struct {
 			TargetID string           `json:"targetId"`
 			Points   []map[string]any `json:"points"`
 		} `json:"series"`
 	}
-	if err = json.Unmarshal(got.Body.Bytes(), &data); err != nil || data.IntervalSeconds != 300 || len(data.Targets) != 5 || len(data.Series) != 5 {
+	if err = json.Unmarshal(got.Body.Bytes(), &data); err != nil || data.IntervalSeconds != 120 || data.SampleSeconds != 60 || len(data.Targets) != 5 || len(data.Series) != 5 {
 		t.Fatal(data, err, got.Body.String())
 	}
 	for _, s := range data.Series {
@@ -82,7 +83,7 @@ func TestLatencyAPIShapeBoundsTargetCapAndViewer(t *testing.T) {
 				t.Fatal("points not ascending")
 			}
 			for _, p := range s.Points {
-				for _, key := range []string{"at", "avgMs", "minMs", "maxMs", "medianMs", "sent", "failed"} {
+				for _, key := range []string{"at", "avgMs", "minMs", "maxMs", "medianMs", "sent", "failed", "samples"} {
 					if _, ok := p[key]; !ok {
 						t.Fatal("missing", key)
 					}

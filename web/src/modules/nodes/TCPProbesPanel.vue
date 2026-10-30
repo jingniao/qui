@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <h2 class="font-semibold text-ios-label">线路检测</h2>
-    <p class="text-xs text-ios-secondary">手动检测接口未提供平均耗时与检测时间时显示“—”，中位数见历史。由服务器连接指定目标。TCP 失败比例不代表 ICMP 或 UDP 丢包；每目标保留最近 100 次手动检测记录。</p>
+    <p class="text-xs text-ios-secondary">手动检测接口未提供平均耗时与检测时间时显示“—” ，中位数见历史。由服务器连接指定目标。TCP 失败比例不代表 ICMP 或 UDP 丢包；每目标保留最近 100 次手动检测记录。</p>
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
     <p v-if="!isOwner" class="text-sm text-ios-secondary">当前权限无法读取或管理探测目标，请联系 Owner。</p>
     <template v-else>
@@ -48,25 +48,9 @@
       <p v-else-if="!busy && !error" class="text-sm text-ios-secondary">尚无探测目标。</p>
       <details class="text-sm text-ios-secondary">
         <summary class="cursor-pointer">添加探测目标</summary>
-        <form class="grid sm:grid-cols-2 gap-3 mt-3" @submit.prevent="add">
-          <label>
-            标签
-            <input v-model.trim="target.label" class="form-input-base" required maxlength="120" />
-          </label>
-          <label>
-            主机 / IP
-            <input v-model.trim="target.host" class="form-input-base" required />
-          </label>
-          <label>
-            端口
-            <input v-model.number="target.port" class="form-input-base" type="number" min="1" max="65535" required />
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input v-model="target.allowNonPublic" type="checkbox" />
-            明确允许非公网地址
-          </label>
-          <button class="ios-btn-secondary" :disabled="busy">添加目标</button>
-        </form>
+        <div class="mt-3 max-w-xl">
+          <ProbeTargetForm :busy="busy" inline @submit="add" />
+        </div>
       </details>
       <details v-if="historyTarget" open class="text-sm text-ios-secondary">
         <summary>检测历史 · {{ targets.find(t => t.id === historyTarget)?.label }}</summary>
@@ -77,17 +61,18 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, reactive, watch, onUnmounted } from 'vue';
+import { ref, watch, onUnmounted } from 'vue';
 import { request } from '../../app/apiClient';
 import { isOwner, formatTime } from '../../app/auth';
 import { nodeAPI, type ProbeTarget } from './api';
 import DataTable from '../../components/DataTable.vue';
 import ConfirmDialog from '../../components/ConfirmDialog.vue';
+import ProbeTargetForm from './components/ProbeTargetForm.vue';
+
 const props = defineProps<{ nodeId: string }>();
 interface Row { id: string; status: string; createdAt?: string; result?: { attempted?: number; lost?: number; median_ms?: number; avg_ms?: number; attempts?: { latency_ms?: number; success?: boolean }[] }; }
 const targets = ref<ProbeTarget[]>([]), history = ref<Record<string, Row[]>>({}), historyTarget = ref(''), deleting = ref<ProbeTarget | null>(null);
 const error = ref(''), busy = ref(false), attempts = ref(3), timeoutMs = ref(1000);
-const target = reactive({ label: '', host: '', port: 443, allowNonPublic: false, scheduled: false });
 const latest = (id: string) => history.value[id]?.[0];
 const rowLabel = (row?: Row) => row ? ({ queued: '等待检测', complete: '已完成', expired: '已过期', failed: '失败' }[row.status] || row.status) : '—';
 const lossLabel = (row?: Row) => row?.result?.attempted ? `${((row.result.lost ?? 0) / row.result.attempted * 100).toFixed(1)}%` : '—';
@@ -114,7 +99,9 @@ async function guard(action: () => Promise<void>) {
   catch (e) { error.value = (e as Error).message; }
   finally { busy.value = false; }
 }
-function add() { void guard(async () => { await request('/probe-targets', 'POST', target); target.label = ''; target.host = ''; }); }
+function add(targetData: { label: string; host: string; port: number; allowNonPublic: boolean }) {
+  void guard(async () => { await request('/probe-targets', 'POST', targetData); });
+}
 function remove() { const id = deleting.value?.id; if (id) void guard(async () => { await request(`/probe-targets/${encodeURIComponent(id)}`, 'DELETE'); deleting.value = null; historyTarget.value = ''; }); }
 function run(targetId: string) {
   if (!Number.isInteger(attempts.value) || attempts.value < 1 || attempts.value > 10 || !Number.isInteger(timeoutMs.value) || timeoutMs.value < 1 || timeoutMs.value > 3000) { error.value = '次数需为 1～10，超时需为 1～3000 ms 的整数'; return; }

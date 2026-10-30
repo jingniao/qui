@@ -58,12 +58,18 @@ export type DeletionMode = 'cancel' | 'delete' | 'deleted';
 export type DeletionBlockerKind = 'inbound' | 'outbound' | 'outbound_group' | 'outbound_target' | 'proxy_chain' | 'policy' | 'deployment_batch';
 export interface DeletionBlocker { kind: DeletionBlockerKind; id: string; name: string; }
 export interface DeletionPreview { mode: DeletionMode; blockers: DeletionBlocker[]; groups: string[]; lastHeartbeat: string; online: boolean; }
+export interface LatencyTargetsInput { custom: boolean; targetIds: string[]; }
+export interface LatencyTargetsSettings extends LatencyTargetsInput { defaultTargetIds: string[]; }
 export const nodeAPI = {
-  latency: (id: string) => request<LatencyResponse>(`/nodes/${encodeURIComponent(id)}/latency?hours=24`),
+  latencyTargets: (nodeId: string) => request<LatencyTargetsSettings>(`/nodes/${encodeURIComponent(nodeId)}/latency-targets`),
+  saveLatencyTargets: (nodeId: string, input: LatencyTargetsInput) => request<LatencyTargetsSettings>(`/nodes/${encodeURIComponent(nodeId)}/latency-targets`, 'PUT', input),
+  latency: (id: string, hours: number = 1) => request<LatencyResponse>(`/nodes/${encodeURIComponent(id)}/latency?hours=${hours}`),
   probeTargets: () => request<{ items: ProbeTarget[] }>('/probe-targets'),
+  createProbeTarget: (target: { label: string; host: string; port: number; allowNonPublic?: boolean; scheduled?: boolean }) => request<ProbeTarget>('/probe-targets', 'POST', target),
   saveProbeTarget: (target: ProbeTarget) => request<ProbeTarget>(`/probe-targets/${encodeURIComponent(target.id)}`, 'PUT', {
     label: target.label, host: target.host, port: target.port, allowNonPublic: target.allowNonPublic, scheduled: target.scheduled
   }),
+  deleteProbeTarget: (id: string) => request(`/probe-targets/${encodeURIComponent(id)}`, 'DELETE'),
 	enrollmentStatus:(id:string)=>request<EnrollmentStatus>(`/nodes/${encodeURIComponent(id)}/enrollment-status`),
 	certificateStatus:(id:string)=>request<CertificateStatus>(`/nodes/${encodeURIComponent(id)}/certificate-status`),
 restartTasks:(id:string)=>request<{items:RestartTask[]}>(`/nodes/${encodeURIComponent(id)}/restart-core`),
@@ -82,9 +88,10 @@ requestHealth:(id:string,expectedRevision:number)=>request<HealthCheck>(`/nodes/
 };
 
 export interface ProbeTarget { id: string; label: string; host: string; port: number; allowNonPublic: boolean; scheduled: boolean; }
-export interface LatencyPoint { at: string; medianMs?: number | null; avgMs: number | null; minMs: number | null; maxMs: number | null; sent: number; failed: number; }
+export interface LatencyPoint { at: string; medianMs?: number | null; avgMs: number | null; minMs: number | null; maxMs: number | null; sent: number; failed: number; samples?: number; }
 export interface LatencyResponse {
   intervalSeconds: number;
+  sampleSeconds?: number;
   targets: { id: string; label: string; host: string; port: number }[];
   series: { targetId: string; points: LatencyPoint[] }[];
 }

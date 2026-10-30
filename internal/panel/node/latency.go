@@ -9,11 +9,17 @@ import (
 	"proxycontrol/internal/platform/httpapi"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
-const LatencyInterval = 5 * time.Minute
+const LatencyInterval = time.Minute
+
+func latencyStepSeconds(hours int) int {
+	minutes := hours * 60
+	return ((minutes + 719) / 720) * 60
+}
 
 type LatencyScheduler struct {
 	Repository *Repository
@@ -58,7 +64,7 @@ func (r *Repository) scheduleLatency(ctx context.Context, now time.Time) error {
 	if _, err := r.Database.ExecContext(ctx, "DELETE FROM node_tcp_probes WHERE source='scheduled' AND (status<>'queued' OR deadline<=?)", timestamp(now)); err != nil {
 		return err
 	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT id,label,host,port,allow_non_public FROM probe_targets WHERE scheduled=1 ORDER BY id")
+	rows, err := r.Database.QueryContext(ctx, "SELECT id,label,host,port,allow_non_public FROM probe_targets t WHERE scheduled=1 OR EXISTS(SELECT 1 FROM node_latency_targets nt WHERE nt.target_id=t.id) ORDER BY id")
 	if err != nil {
 		return err
 	}
@@ -85,7 +91,7 @@ func (r *Repository) scheduleLatency(ctx context.Context, now time.Time) error {
 			}
 			continue
 		}
-		rows, err := r.Database.QueryContext(ctx, "SELECT id FROM nodes WHERE enabled=1 AND deleted_at IS NULL AND tcp_probe_supported=1 AND last_heartbeat>=?", timestamp(now.Add(-45*time.Second)))
+		rows, err := r.Database.QueryContext(ctx, "SELECT n.id FROM nodes n WHERE enabled=1 AND deleted_at IS NULL AND tcp_probe_supported=1 AND last_heartbeat>=? AND "+effectiveLatencyTarget, timestamp(now.Add(-45*time.Second)), t.ID)
 		if err != nil {
 			return err
 		}
@@ -117,8 +123,8 @@ func (r *Repository) scheduleLatency(ctx context.Context, now time.Time) error {
 			// One outstanding scheduled job per node/target; dispatch serializes nodes.
 			_, err = r.Database.ExecContext(ctx, `INSERT INTO node_tcp_probes(id,node_id,target_id,command_json,created_at,deadline,status,source)
     SELECT ?,?,?,?,?,?,'queued','scheduled'
-    WHERE EXISTS(SELECT 1 FROM probe_targets WHERE id=? AND scheduled=1)
-    AND NOT EXISTS(SELECT 1 FROM node_tcp_probes WHERE node_id=? AND target_id=? AND source='scheduled' AND status='queued')`, id, node, t.ID, string(raw), timestamp(now), timestamp(deadline), t.ID, node, t.ID)
+    WHERE EXISTS(SELECT 1 FROM nodes n WHERE n.id=? AND n.enabled=1 AND n.deleted_at IS NULL AND n.tcp_probe_supported=1 AND n.last_heartbeat>=? AND `+effectiveLatencyTarget+`)
+    AND NOT EXISTS(SELECT 1 FROM node_tcp_probes WHERE node_id=? AND target_id=? AND source='scheduled' AND status='queued')`, id, node, t.ID, string(raw), timestamp(now), timestamp(deadline), node, timestamp(now.Add(-45*time.Second)), t.ID, node, t.ID)
 			if err != nil {
 				return err
 			}
@@ -141,6 +147,7 @@ type latencyPoint struct {
 	MedianMs *float64 `json:"medianMs"`
 	Sent     int      `json:"sent"`
 	Failed   int      `json:"failed"`
+	Samples  int      `json:"samples"`
 }
 type latencySeries struct {
 	TargetID string         `json:"targetId"`
@@ -166,9 +173,10 @@ func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, ErrNotFound)
 		return
 	}
+	step := latencyStepSeconds(hours)
 	since := timestamp(time.Now().UTC().Add(-time.Duration(hours) * time.Hour))
-	rows, err := h.Repository.Database.QueryContext(r.Context(), `SELECT id,label,host,port FROM probe_targets t WHERE scheduled=1
-  OR EXISTS(SELECT 1 FROM node_latency_samples s WHERE s.target_id=t.id AND s.node_id=? AND s.at>=?) ORDER BY label,id`, r.PathValue("id"), since)
+	rows, err := h.Repository.Database.QueryContext(r.Context(), `SELECT id,label,host,port FROM probe_targets t WHERE EXISTS(SELECT 1 FROM nodes n WHERE n.id=? AND `+strings.ReplaceAll(effectiveLatencyTarget, "?", "t.id")+`)
+  OR EXISTS(SELECT 1 FROM node_latency_samples s WHERE s.target_id=t.id AND s.node_id=? AND s.at>=?) ORDER BY label,id`, r.PathValue("id"), r.PathValue("id"), since)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -192,14 +200,29 @@ func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
 	series := []latencySeries{}
 	for _, t := range targets {
 		item := latencySeries{TargetID: t.ID, Points: []latencyPoint{}}
-		rows, err = h.Repository.Database.QueryContext(r.Context(), "SELECT at,avg_ms,min_ms,max_ms,median_ms,sent,failed FROM node_latency_samples WHERE node_id=? AND target_id=? AND at>=? ORDER BY at", r.PathValue("id"), t.ID, since)
+		query := "SELECT at,avg_ms,min_ms,max_ms,median_ms,sent,failed,1 FROM node_latency_samples WHERE node_id=? AND target_id=? AND at>=? ORDER BY at"
+		args := []any{r.PathValue("id"), t.ID, since}
+		if step > int(LatencyInterval/time.Second) {
+			// timestamp() stores fixed-width UTC nanoseconds. Strip fractions to
+			// prevent SQLite rounding a sample into the next second or bucket.
+			query = `WITH samples AS (
+    SELECT target_id, CAST(strftime('%s',substr(at,1,19)||'Z') AS INTEGER)/?*? AS bucket,
+        sent,failed,CASE WHEN sent>failed THEN median_ms END AS usable_median
+    FROM node_latency_samples WHERE node_id=? AND target_id=? AND at>=?
+)
+SELECT strftime('%Y-%m-%dT%H:%M:%S',bucket,'unixepoch')||'.000000000Z',
+    NULL,MIN(usable_median),MAX(usable_median),AVG(usable_median),SUM(sent),SUM(failed),COUNT(*)
+FROM samples GROUP BY target_id,bucket ORDER BY bucket`
+			args = []any{step, step, r.PathValue("id"), t.ID, since}
+		}
+		rows, err = h.Repository.Database.QueryContext(r.Context(), query, args...)
 		if err != nil {
 			h.fail(w, err)
 			return
 		}
 		for rows.Next() {
 			var p latencyPoint
-			if err = rows.Scan(&p.At, &p.AvgMs, &p.MinMs, &p.MaxMs, &p.MedianMs, &p.Sent, &p.Failed); err != nil {
+			if err = rows.Scan(&p.At, &p.AvgMs, &p.MinMs, &p.MaxMs, &p.MedianMs, &p.Sent, &p.Failed, &p.Samples); err != nil {
 				rows.Close()
 				h.fail(w, err)
 				return
@@ -214,5 +237,5 @@ func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
 		}
 		series = append(series, item)
 	}
-	httpapi.JSON(w, 200, map[string]any{"intervalSeconds": int(LatencyInterval / time.Second), "targets": targets, "series": series})
+	httpapi.JSON(w, 200, map[string]any{"intervalSeconds": step, "sampleSeconds": int(LatencyInterval / time.Second), "targets": targets, "series": series})
 }

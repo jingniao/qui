@@ -51,6 +51,7 @@ GET /api/v1/nodes/{id}/deletion-preview
 GET /api/v1/nodes/{id}/enrollment-status
 GET /api/v1/nodes/{id}/health-checks
 GET /api/v1/nodes/{id}/latency
+GET /api/v1/nodes/{id}/latency-targets
 GET /api/v1/nodes/{id}/meta
 GET /api/v1/nodes/{id}/restart-core
 GET /api/v1/nodes/{id}/tcp-probes
@@ -172,6 +173,7 @@ PUT /api/v1/devices/{id}
 PUT /api/v1/inbounds/{id}
 PUT /api/v1/node-groups/{id}
 PUT /api/v1/nodes/{id}
+PUT /api/v1/nodes/{id}/latency-targets
 PUT /api/v1/nodes/{id}/meta
 PUT /api/v1/outbound-groups/{id}
 PUT /api/v1/outbounds/{id}

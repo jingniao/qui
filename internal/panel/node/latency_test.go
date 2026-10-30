@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"proxycontrol/internal/platform/db"
@@ -11,6 +12,141 @@ import (
 	"testing"
 	"time"
 )
+
+func TestLatencyStepSeconds(t *testing.T) {
+	for _, tt := range []struct{ hours, step int }{{1, 60}, {6, 60}, {12, 60}, {24, 120}, {168, 840}} {
+		t.Run(fmt.Sprint(tt.hours), func(t *testing.T) {
+			if got := latencyStepSeconds(tt.hours); got != tt.step {
+				t.Fatalf("step = %d, want %d", got, tt.step)
+			}
+		})
+	}
+}
+
+type latencyTestResponse struct {
+	IntervalSeconds int             `json:"intervalSeconds"`
+	SampleSeconds   int             `json:"sampleSeconds"`
+	Series          []latencySeries `json:"series"`
+}
+
+func readLatency(t *testing.T, r *Repository, id string, hours int) latencyTestResponse {
+	t.Helper()
+	req := httptest.NewRequest("GET", fmt.Sprintf("/?hours=%d", hours), nil)
+	req.SetPathValue("id", id)
+	w := httptest.NewRecorder()
+	(&Handler{Repository: r}).latency(w, req)
+	var result latencyTestResponse
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestLatencyBucketsAndRawPoints(t *testing.T) {
+	r, id := latencyFixture(t)
+	base := time.Now().UTC().Truncate(2 * time.Minute).Add(-10 * time.Minute)
+	inputs := []struct {
+		offset time.Duration
+		median any
+		failed int
+	}{
+		{0, 10.0, 0},
+		{time.Minute, 30.0, 1},
+		{2*time.Minute - time.Nanosecond, 999.0, 3},
+		{2 * time.Minute, 500.0, 3},
+		{3 * time.Minute, nil, 3},
+		{4 * time.Minute, nil, 1},
+	}
+	for _, in := range inputs {
+		if _, err := r.Database.Exec(`INSERT INTO node_latency_samples
+    (node_id,target_id,at,avg_ms,min_ms,max_ms,median_ms,sent,failed)
+    VALUES(?,'a',?,11,5,40,?,3,?)`, id, timestamp(base.Add(in.offset)), in.median, in.failed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A second target must not contribute to the first target's buckets.
+	if _, err := r.Database.Exec("INSERT INTO node_latency_samples(node_id,target_id,at,median_ms,sent,failed) VALUES(?,'b',?,80,3,0)", id, timestamp(base)); err != nil {
+		t.Fatal(err)
+	}
+	result := readLatency(t, r, id, 24)
+	if result.IntervalSeconds != 120 || result.SampleSeconds != 60 || len(result.Series) != 2 {
+		t.Fatal(result)
+	}
+	points := result.Series[0].Points
+	if result.Series[0].TargetID != "a" || len(points) != 3 {
+		t.Fatal(result)
+	}
+	p := points[0]
+	if p.At != timestamp(base) || p.Samples != 3 || p.Sent != 9 || p.Failed != 4 || p.AvgMs != nil || p.MedianMs == nil || *p.MedianMs != 20 || p.MinMs == nil || *p.MinMs != 10 || p.MaxMs == nil || *p.MaxMs != 30 {
+		t.Fatalf("mixed bucket: %+v", p)
+	}
+	for i, p := range points[1:] {
+		if p.At != timestamp(base.Add(time.Duration(i+1)*2*time.Minute)) || p.AvgMs != nil || p.MedianMs != nil || p.MinMs != nil || p.MaxMs != nil {
+			t.Fatalf("empty median bucket: %+v", p)
+		}
+	}
+	if points[1].Samples != 2 || points[1].Sent != 6 || points[1].Failed != 6 || points[2].Samples != 1 || points[2].Sent != 3 || points[2].Failed != 1 {
+		t.Fatal(points)
+	}
+	if p := result.Series[1].Points[0]; p.Samples != 1 || p.MedianMs == nil || *p.MedianMs != 80 {
+		t.Fatal(p)
+	}
+	for _, hours := range []int{1, 6, 12} {
+		raw := readLatency(t, r, id, hours)
+		if raw.IntervalSeconds != 60 || raw.SampleSeconds != 60 || len(raw.Series[0].Points) != len(inputs) {
+			t.Fatal(raw)
+		}
+		for i, p := range raw.Series[0].Points {
+			if p.At != timestamp(base.Add(inputs[i].offset)) || p.Samples != 1 || p.Sent != 3 || p.Failed != inputs[i].failed || p.AvgMs == nil || *p.AvgMs != 11 || p.MinMs == nil || *p.MinMs != 5 || p.MaxMs == nil || *p.MaxMs != 40 {
+				t.Fatalf("raw point changed: %+v", p)
+			}
+			if want, ok := inputs[i].median.(float64); ok {
+				if p.MedianMs == nil || *p.MedianMs != want {
+					t.Fatal(p)
+				}
+			} else if p.MedianMs != nil {
+				t.Fatal(p)
+			}
+		}
+	}
+}
+
+func TestLatencyFullWeekPointLimit(t *testing.T) {
+	r, id := latencyFixture(t)
+	// One statement populates a full week for both targets without per-row commits.
+	start := time.Now().UTC().Truncate(time.Minute).Add(-7*24*time.Hour + time.Minute)
+	if _, err := r.Database.Exec(`WITH RECURSIVE minutes(i) AS (
+    VALUES(0) UNION ALL SELECT i+1 FROM minutes WHERE i<10079
+)
+INSERT INTO node_latency_samples(node_id,target_id,at,median_ms,sent,failed)
+SELECT ?,t.id,strftime('%Y-%m-%dT%H:%M:%S',?+i*60,'unixepoch')||'.000000000Z',10,3,0
+FROM minutes CROSS JOIN probe_targets t WHERE t.id IN ('a','b')`, id, start.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	result := readLatency(t, r, id, 168)
+	if result.IntervalSeconds != 840 || result.SampleSeconds != 60 || len(result.Series) != 2 {
+		t.Fatal(result)
+	}
+	for _, s := range result.Series {
+		if len(s.Points) < 720 || len(s.Points) > 721 {
+			t.Fatalf("%s has %d points", s.TargetID, len(s.Points))
+		}
+		samples := 0
+		for i, p := range s.Points {
+			at, err := time.Parse(time.RFC3339Nano, p.At)
+			if err != nil || at.Unix()%840 != 0 || (i > 0 && p.At <= s.Points[i-1].At) {
+				t.Fatalf("unaligned or unordered bucket: %+v, %v", p, err)
+			}
+			samples += p.Samples
+		}
+		if samples != 10080 {
+			t.Fatalf("%s has %d raw samples", s.TargetID, samples)
+		}
+	}
+}
 
 func latencyFixture(t *testing.T) (*Repository, string) {
 	t.Helper()

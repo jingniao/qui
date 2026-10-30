@@ -84,5 +84,6 @@ async function reissue(node: NodeView) {
   catch (e) { showToast((e as Error).message, 'error'); }
   finally { reissuing.value = false; }
 }
-defineExpose({ open: () => { error.value = ''; createOpen.value = true; }, reissue });
+function installCode(id: string) { return enrollment.value?.node.id === id ? installAvailable.value ? command.value : enrollment.value.enrollmentToken : ''; }
+defineExpose({ installCode, open: () => { error.value = ''; createOpen.value = true; }, reissue });
 </script>

@@ -92,6 +92,22 @@ revoked_at=CASE WHEN node_identities.fingerprint=excluded.fingerprint THEN coale
 	}
 	// Current metadata stays authoritative during in-process recovery. In
 	// particular the daily alert claim cannot rewind to the backup's date.
+	// Keep current per-node monitoring settings too, including custom-empty.
+	// Targets created since the snapshot must accompany those references;
+	// they are not promoted into the snapshot's system defaults.
+	for _, query := range []string{
+		`INSERT INTO probe_targets(id,label,host,port,allow_non_public,scheduled)
+SELECT t.id,t.label,t.host,t.port,t.allow_non_public,0 FROM restore_source.probe_targets t
+WHERE EXISTS(SELECT 1 FROM restore_source.node_latency_targets nt WHERE nt.target_id=t.id)
+AND NOT EXISTS(SELECT 1 FROM probe_targets p WHERE p.id=t.id)`,
+		"DELETE FROM node_latency_targets WHERE node_id IN (SELECT id FROM restore_source.nodes)",
+		"UPDATE nodes SET latency_targets_custom=(SELECT c.latency_targets_custom FROM restore_source.nodes c WHERE c.id=nodes.id) WHERE id IN (SELECT id FROM restore_source.nodes)",
+		"INSERT INTO node_latency_targets(node_id,target_id) SELECT node_id,target_id FROM restore_source.node_latency_targets",
+	} {
+		if _, err := tx.ExecContext(ctx, query); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_meta(node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day)
 SELECT node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,last_alert_day FROM restore_source.node_meta WHERE 1
 ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,last_alert_day=max(node_meta.last_alert_day,excluded.last_alert_day)`); err != nil {

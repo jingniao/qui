@@ -54,3 +54,98 @@ assert.equal(api.latencyMs(median), 42);
 assert.equal(api.usable(median), true);
 assert.equal(api.usable({ ...median, medianMs: null }), false);
 console.log('PASS LATENCY median: medianMs is plotted when avg/min/max are null');
+
+// Stats: mean, loss %, 波动 (jitter) with gaps and fully failed points
+const p1 = point(0, { medianMs: 20, sent: 3, failed: 0 });
+const pFail = point(60, { medianMs: 50, sent: 3, failed: 3 }); // fully failed
+const p2 = point(120, { medianMs: 40, sent: 3, failed: 1 }); // loss 1/3
+const p3 = point(300, { medianMs: 30, sent: 3, failed: 0 }); // gap from 120 to 300
+const stats = api.seriesStats([p1, pFail, p2, p3]);
+assert.equal(stats.totalSent, 12);
+assert.equal(stats.totalFailed, 4);
+assert.equal(Number(stats.lossPercent.toFixed(2)), 33.33);
+assert.equal(api.formatStatsLoss(stats.lossPercent), '33.33%');
+assert.equal(stats.usableCount, 3);
+// Usable medians are 20, 40, 30. Mean is (20 + 40 + 30) / 3 = 30
+assert.equal(stats.meanMs, 30);
+assert.equal(api.formatStatsMean(stats.meanMs), '30ms');
+// Fluctuation (波动): consecutive usable differences |40 - 20| = 20, |30 - 40| = 10. Mean is 15.
+assert.equal(stats.jitterMs, 15);
+assert.equal(api.formatStatsJitter(stats.jitterMs), '15.00');
+// Empty points
+assert.deepEqual(api.seriesStats([]), { meanMs: null, lossPercent: null, jitterMs: null, totalSent: 0, totalFailed: 0, usableCount: 0 });
+assert.equal(api.formatStatsMean(null), '—');
+assert.equal(api.formatStatsLoss(null), '—');
+assert.equal(api.formatStatsJitter(null), '—');
+// Single usable point: jitter is null
+assert.equal(api.seriesStats([p1]).jitterMs, null);
+// All failed points: mean and jitter are null, loss is 100%
+const allFailedStats = api.seriesStats([pFail]);
+assert.equal(allFailedStats.meanMs, null);
+assert.equal(allFailedStats.jitterMs, null);
+assert.equal(allFailedStats.lossPercent, 100);
+console.log('PASS LATENCY stats: mean, loss %, 波动 with gaps and fully failed points');
+
+// Rolling median: 5 points window hides single spikes, preserves failures and unusable points
+const spikeSeries = [
+  point(0, { medianMs: 20 }),
+  point(60, { medianMs: 22 }),
+  point(120, { medianMs: 500 }), // spike
+  point(180, { medianMs: 21 }),
+  point(240, { medianMs: 23 }),
+];
+const smoothed = api.rollingMedian(spikeSeries, 5);
+assert.equal(smoothed[2].medianMs, 22); // median of [20, 21, 22, 23, 500] is 22
+// An unusable point in the series remains unusable and does not enter neighbors' medians
+const withFailedPoint = [
+  point(0, { medianMs: 20 }),
+  point(60, { medianMs: 22 }),
+  point(120, { medianMs: 500, sent: 3, failed: 3 }), // failed point
+  point(180, { medianMs: 24 }),
+  point(240, { medianMs: 26 }),
+];
+const smoothedWithFailed = api.rollingMedian(withFailedPoint, 5);
+assert.equal(api.usable(smoothedWithFailed[2]), false);
+console.log('PASS LATENCY rolling median: 5-point rolling window hides spikes, preserves gaps and failures');
+
+// Nearest point / timestamp lookup
+const timestamps = [at, at + 60000, at + 120000];
+assert.equal(api.nearestTimestamp(timestamps, at + 10000), at);
+assert.equal(api.nearestTimestamp(timestamps, at + 50000), at + 60000);
+assert.equal(api.nearestTimestamp(timestamps, at + 200000), at + 120000);
+assert.equal(api.nearestTimestamp([], at), null);
+const pts = [point(0), point(60), point(120)];
+assert.equal(api.nearestPoint(pts, at + 25000), pts[0]);
+assert.equal(api.nearestPoint(pts, at + 45000), pts[1]);
+assert.equal(api.nearestPoint([], at), null);
+console.log('PASS LATENCY nearest point: cursor time resolves to closest sample timestamp');
+
+// Tick generation for 1H and 7D
+const ticks1h = api.timeTicks(at, at + 3600000, 'UTC', 1);
+assert.equal(ticks1h.length, 13);
+assert.equal(ticks1h[0].label, '00:00');
+assert.equal(ticks1h[1].label, '00:05');
+assert.equal(ticks1h.at(-1).label, '01:00');
+
+const ticks7d = api.timeTicks(at, at + 168 * 3600000, 'UTC', 168);
+assert.equal(ticks7d.length, 8);
+assert.equal(ticks7d[0].label, '10/28');
+assert.equal(ticks7d[1].label, '10/29');
+assert.equal(ticks7d.at(-1).label, '11/04');
+console.log('PASS LATENCY ticks: 1H minute ticks and 7D day ticks adapt to range and timezone');
+
+// Bucket vs raw wording
+const rawSample = point(0, { medianMs: 25 });
+assert.equal(api.describePointLatency(rawSample, false), '中位 25 ms');
+const rawDecimal = point(0, { medianMs: 25.43 });
+assert.equal(api.describePointLatency(rawDecimal, false), '中位 25.43 ms');
+const bucketSample = point(0, { medianMs: 25, minMs: 10, maxMs: 30 });
+assert.equal(api.describePointLatency(bucketSample, true), '平均中位 25 ms（区间 10–30）');
+const bucketDecimal = point(0, { medianMs: 25.5, minMs: 10.2, maxMs: 30.8 });
+assert.equal(api.describePointLatency(bucketDecimal, true), '平均中位 25.50 ms（区间 10.20–30.80）');
+const nullSample = point(0, { medianMs: null, avgMs: null });
+assert.equal(api.describePointLatency(nullSample, false), '—');
+assert.equal(api.describePointLatency(nullSample, true), '—');
+console.log('PASS LATENCY wording: bucket shows interval range and raw shows median');
+
+console.log('All latency chart self-tests passed');

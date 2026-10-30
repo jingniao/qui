@@ -10,6 +10,7 @@ import (
 )
 
 type Totals struct {
+	NodeLatencyTargets    int64 `json:"nodeLatencyTargets"`
 	LatencySamples        int64 `json:"latencySamples"`
 	ProbeTargets          int64 `json:"probeTargets"`
 	TCPProbes             int64 `json:"tcpProbes"`
@@ -67,7 +68,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	for _, item := range []struct {
 		table string
 		count *int64
-	}{{"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
+	}{{"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
 		var present int
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&present); err != nil {
 			return Inventory{}, err

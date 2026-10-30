@@ -22,6 +22,7 @@
         <div class="flex flex-wrap justify-between items-center gap-3 text-sm"><span class="text-gray-500">{{ saved.revision ? `策略版本 ${saved.revision} · ${saved.updatedBy} · ${formatTime(saved.updatedAt)}` : '当前使用默认策略' }}</span><button class="ios-btn-primary" :disabled="loading || saving" @click="confirmSave">{{ saving ? '保存中…' : '保存访问记录策略' }}</button></div>
       </template>
     </section>
+    <LatencyTargetsPanel v-else-if="activeTab === 'latency'" />
     <BackupSchedulePanel v-else-if="activeTab === 'backup'" />
     <RuntimeSettingsPanel v-else :key="activeTab" :kind="runtimeTab" />
     <ConfirmDialog v-model="baseConfirmation" title="确认修改平台基础设置" :message="`平台名称：${baseConfirm.platformName}，系统时区：${baseConfirm.timezone}。`" warning-details="时区变化会影响页面时间与后续配置。已发布规则仍按原时区执行。" confirm-text="确认保存" :is-danger="false" @confirm="saveBase" />
@@ -42,6 +43,7 @@ import ErrorState from '../../../components/ErrorState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import BackupSchedulePanel from '../components/BackupSchedulePanel.vue';
+import LatencyTargetsPanel from '../components/LatencyTargetsPanel.vue';
 import RuntimeSettingsPanel from '../components/RuntimeSettingsPanel.vue';
 import RetentionJobPanel from '../components/RetentionJobPanel.vue';
 import StorageObservationPanel from '../components/StorageObservationPanel.vue';
@@ -52,6 +54,7 @@ const tabs = [
   { key: 'network', label: '网络设置' },
   { key: 'security', label: '安全设置' },
   { key: 'accessLog', label: '访问记录设置' },
+  { key: 'latency', label: '延迟监控' },
   { key: 'subscription', label: '订阅设置' },
   { key: 'backup', label: '备份设置' },
   { key: 'info', label: '系统信息' }

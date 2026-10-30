@@ -1378,7 +1378,7 @@ Node Agent 不允许提供：
 - TCP-connect 探测（已解析 IP、端口、次数、超时与截止时间；Agent 再校验，最多 10 次、每次 3 秒，无 shell）
 - 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override，按能力拒绝旧 Agent；经正常配置发布）
 
-TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 5 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统最多选择 5 个定时目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，avgMs/minMs/maxMs 返回 null。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优仍只读，新增特权操作未实现（L2）。
+TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。intervalSeconds 表示返回点的桶步长，sampleSeconds 固定为原始检测周期 60 秒。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优仍只读，新增特权操作未实现（L2）。
 
 ---
 
@@ -1587,6 +1587,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0118 `traffic_reset` | `users.traffic_reset_cycle/traffic_reset_anchor/traffic_reset_at`，从旧备注迁移周期并去除元数据前缀 |
 | 0119 `tcp_probes` | `nodes.tcp_probe_supported`；`probe_targets`、`node_tcp_probes` 与历史索引；转发复用入站设置，不新增转发表 |
 | 0120 `latency_samples` | `probe_targets.scheduled`（默认关闭，触发器限制最多 5 个）；`node_tcp_probes.source/dispatched_at` 与单节点在途唯一索引；`node_latency_samples`（REAL 毫秒，含 median_ms；按节点/时间索引，保留 7 天） |
+| 0121 `node_latency_targets` | 每节点目标关联表（节点、目标外键级联删除，插入及移动触发器限制每节点最多 5 个）；`nodes.latency_targets_custom`（0/1，默认 0） |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1713,6 +1714,10 @@ SSE 只推送：
 
 U5a 增加 `POST /api/v1/canvas-schemes/{id}/plan`（Owner，会话与 CSRF 同 publish）。无正文或 `{}` 规划已保存布局；`{"layout": <CanvasLayout>}` 规划未保存布局。返回 `ok`、按服务器的 `creates/updates/removes`、逐连接状态、监听端口冲突和警告；失败原因另有 `message`。接口仅读取，不写对象、方案、审计或 Revision。它复用发布的规划、生成对象识别、端口冲突与删除引用检查；客户端方案返回 `ok:false`，客户端已有 publish 路径不变。更新表示发布会执行同名对象的保存（不表示字段一定变化）；计划与执行之间状态变化仍可能导致发布失败。
 
+延迟目标 GET 允许 Owner/Viewer，返回 `{custom,targetIds,defaultTargetIds}`；PUT 仅 Owner + CSRF，事务保存并记审计。超过 5 个返回 409 `node_target_limit`，未知目标返回 400 `unknown_target`，重复 ID 返回 400 `invalid_request`，已删除节点返回 404。延迟查询目标包含当前有效目标与查询范围内仍有采样的历史目标。
+
+延迟查询返回 `{intervalSeconds,sampleSeconds,targets,series}`，series 项为 `{targetId,points}`，points 项为 `{at,avgMs,minMs,maxMs,medianMs,sent,failed,samples}`。sampleSeconds 为 60；intervalSeconds 在不超过 12 小时时为 60，超过时为分桶步长（24 小时 120 秒，168 小时 840 秒）。at 为 UTC 原始时间或桶起点；桶统计含义见 §23，目标选择逻辑不变。
+
 以下路径均以 `/api/v1` 为前缀；写操作需要相应 CSRF。Owner 接口与门户接口互相拒绝对方会话。
 
 ```text
@@ -1736,6 +1741,7 @@ GET/POST /probe-targets
 PUT/DELETE /probe-targets/{target}
 GET/POST /nodes/{id}/tcp-probes
 GET    /nodes/{id}/latency?hours=24
+GET/PUT /nodes/{id}/latency-targets
 POST   /inbounds/{id}/reachability
 POST   /nodes/{id}/publish
 GET    /nodes/{id}/revisions
@@ -1918,7 +1924,7 @@ Agent 上报消息包括：
 
 # 31. 备份与恢复
 
-延迟采样属于遥测，不进入便携备份：生成快照后清空 `node_latency_samples` 与定时探测队列，再压实快照；目标的 scheduled 设置保留。恢复时再次清空采样与定时任务，手动排队任务过期。调度循环随面板停机及进程内恢复停止并等待退出，新实例只启动一个循环。
+延迟采样属于遥测，不进入便携备份：生成快照后清空 `node_latency_samples` 与定时探测队列，再压实快照；目标的 scheduled 系统默认设置、node_latency_targets 与 nodes.latency_targets_custom 均属于配置，随备份保留；0121 之前的归档可恢复，迁移后默认继承系统目标。进程内恢复沿用当前节点自定义设置（含空列表），并补回这些设置引用的新增目标，但不把它们升级为系统默认。恢复时再次清空采样与定时任务，手动排队任务过期。调度循环随面板停机及进程内恢复停止并等待退出，新实例只启动一个循环。
 
 中央端需要备份：
 

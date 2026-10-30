@@ -59,6 +59,11 @@ export type DeletionBlockerKind = 'inbound' | 'outbound' | 'outbound_group' | 'o
 export interface DeletionBlocker { kind: DeletionBlockerKind; id: string; name: string; }
 export interface DeletionPreview { mode: DeletionMode; blockers: DeletionBlocker[]; groups: string[]; lastHeartbeat: string; online: boolean; }
 export const nodeAPI = {
+  latency: (id: string) => request<LatencyResponse>(`/nodes/${encodeURIComponent(id)}/latency?hours=24`),
+  probeTargets: () => request<{ items: ProbeTarget[] }>('/probe-targets'),
+  saveProbeTarget: (target: ProbeTarget) => request<ProbeTarget>(`/probe-targets/${encodeURIComponent(target.id)}`, 'PUT', {
+    label: target.label, host: target.host, port: target.port, allowNonPublic: target.allowNonPublic, scheduled: target.scheduled
+  }),
 	enrollmentStatus:(id:string)=>request<EnrollmentStatus>(`/nodes/${encodeURIComponent(id)}/enrollment-status`),
 	certificateStatus:(id:string)=>request<CertificateStatus>(`/nodes/${encodeURIComponent(id)}/certificate-status`),
 restartTasks:(id:string)=>request<{items:RestartTask[]}>(`/nodes/${encodeURIComponent(id)}/restart-core`),
@@ -76,3 +81,10 @@ requestHealth:(id:string,expectedRevision:number)=>request<HealthCheck>(`/nodes/
   deleteNode: (id: string) => request(`/nodes/${encodeURIComponent(id)}`, 'DELETE')
 };
 
+export interface ProbeTarget { id: string; label: string; host: string; port: number; allowNonPublic: boolean; scheduled: boolean; }
+export interface LatencyPoint { at: string; medianMs?: number | null; avgMs: number | null; minMs: number | null; maxMs: number | null; sent: number; failed: number; }
+export interface LatencyResponse {
+  intervalSeconds: number;
+  targets: { id: string; label: string; host: string; port: number }[];
+  series: { targetId: string; points: LatencyPoint[] }[];
+}

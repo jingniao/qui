@@ -97,7 +97,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'proxy/nodes',
         name: 'ProxyNodeList',
-        component: () => import('../modules/proxy/pages/ProxyNodeListPage.vue'),
+        component: () => import('../modules/proxy/pages/ProxyNodesEntryPage.vue'),
         meta: { title: '节点列表', parent: '节点配置' }
       },
       {

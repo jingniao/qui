@@ -43,6 +43,7 @@ jobs:
           node web/scripts/client-policy-selftest.mjs
           node web/scripts/portal-selftest.mjs
           node web/scripts/node-metrics-selftest.mjs
+          node web/scripts/latency-chart-selftest.mjs
       - run: go vet ./...
       # The Agent command-line and storage tests run against a real binary built
       # with a fixed version string. AGENT_CANDIDATE_BINARY, AGENT_RELEASE_BINARY

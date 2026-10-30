@@ -67,8 +67,16 @@ func validateTCPProbes(ctx context.Context, db *sql.DB) error {
 	if rows.Err() != nil {
 		return ErrArchive
 	}
+	var latencyApplied int
+	if db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0120_latency_samples.sql'").Scan(&latencyApplied) != nil {
+		return ErrArchive
+	}
+	filter := ""
+	if latencyApplied != 0 {
+		filter = " WHERE source='manual'"
+	}
 	var count int
-	if db.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT count(*) AS n FROM node_tcp_probes GROUP BY node_id,target_id HAVING n>100)").Scan(&count) != nil || count != 0 {
+	if db.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT count(*) AS n FROM node_tcp_probes"+filter+" GROUP BY node_id,target_id HAVING n>100)").Scan(&count) != nil || count != 0 {
 		return ErrArchive
 	}
 	return nil

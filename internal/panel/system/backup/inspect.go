@@ -366,6 +366,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateNodeMetaReset(ctx, database); err != nil {
 		return err
 	}
+	if err := validateLatency(ctx, database); err != nil {
+		return err
+	}
 	if err := validateTCPProbes(ctx, database); err != nil {
 		return err
 	}

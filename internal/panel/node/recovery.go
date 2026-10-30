@@ -7,6 +7,13 @@ import (
 )
 
 func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp string) error {
+	// Telemetry is intentionally absent from restored snapshots.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM node_latency_samples"); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM node_tcp_probes WHERE source='scheduled'"); err != nil {
+		return err
+	}
 	// Queued operations from a snapshot must never execute after restore.
 	if _, err := tx.ExecContext(ctx, "UPDATE node_tcp_probes SET status='expired' WHERE status='queued'"); err != nil {
 		return err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -24,6 +25,7 @@ type ProbeTarget struct {
 	Host           string `json:"host"`
 	Port           int    `json:"port"`
 	AllowNonPublic bool   `json:"allowNonPublic"`
+	Scheduled      bool   `json:"scheduled"`
 }
 
 func (t ProbeTarget) Validate() error {
@@ -73,7 +75,7 @@ func resolveProbe(ctx context.Context, t ProbeTarget) ([]string, error) {
 }
 
 func (h *Handler) probeTargets(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "POST" {
+	if r.Method == "POST" || r.Method == "PUT" {
 		var t ProbeTarget
 		if err := httpapi.Decode(w, r, &t); err != nil {
 			httpapi.Error(w, 400, "invalid_request", err.Error())
@@ -83,20 +85,43 @@ func (h *Handler) probeTargets(w http.ResponseWriter, r *http.Request) {
 			httpapi.Error(w, 400, "invalid_target", err.Error())
 			return
 		}
-		var err error
-		t.ID, err = RandomID()
+		if r.Method == "PUT" {
+			t.ID = r.PathValue("target")
+		} else {
+			var err error
+			t.ID, err = RandomID()
+			if err != nil {
+				h.fail(w, err)
+				return
+			}
+		}
+		query := "INSERT INTO probe_targets(id,label,host,port,allow_non_public,scheduled) VALUES(?,?,?,?,?,?)"
+		args := []any{t.ID, t.Label, t.Host, t.Port, t.AllowNonPublic, t.Scheduled}
+		if r.Method == "PUT" {
+			query = "UPDATE probe_targets SET label=?,host=?,port=?,allow_non_public=?,scheduled=? WHERE id=?"
+			args = []any{t.Label, t.Host, t.Port, t.AllowNonPublic, t.Scheduled, t.ID}
+		}
+		result, err := h.Repository.Database.ExecContext(r.Context(), query, args...)
 		if err != nil {
-			h.fail(w, err)
+			if strings.Contains(err.Error(), "at most 5 scheduled probe targets") {
+				httpapi.Error(w, 409, "scheduled_target_limit", "at most 5 scheduled probe targets are allowed system-wide")
+			} else {
+				h.fail(w, err)
+			}
 			return
 		}
-		if _, err := h.Repository.Database.ExecContext(r.Context(), "INSERT INTO probe_targets(id,label,host,port,allow_non_public) VALUES(?,?,?,?,?)", t.ID, t.Label, t.Host, t.Port, t.AllowNonPublic); err != nil {
-			h.fail(w, err)
+		if n, _ := result.RowsAffected(); n == 0 {
+			httpapi.Error(w, 404, "not_found", "probe target not found")
 			return
 		}
-		httpapi.JSON(w, 201, t)
+		status := 201
+		if r.Method == "PUT" {
+			status = 200
+		}
+		httpapi.JSON(w, status, t)
 		return
 	}
-	rows, err := h.Repository.Database.QueryContext(r.Context(), "SELECT id,label,host,port,allow_non_public FROM probe_targets ORDER BY label,id LIMIT 1000")
+	rows, err := h.Repository.Database.QueryContext(r.Context(), "SELECT id,label,host,port,allow_non_public,scheduled FROM probe_targets ORDER BY label,id LIMIT 1000")
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -105,7 +130,7 @@ func (h *Handler) probeTargets(w http.ResponseWriter, r *http.Request) {
 	items := []ProbeTarget{}
 	for rows.Next() {
 		var t ProbeTarget
-		if err := rows.Scan(&t.ID, &t.Label, &t.Host, &t.Port, &t.AllowNonPublic); err != nil {
+		if err := rows.Scan(&t.ID, &t.Label, &t.Host, &t.Port, &t.AllowNonPublic, &t.Scheduled); err != nil {
 			h.fail(w, err)
 			return
 		}
@@ -128,7 +153,7 @@ func (h *Handler) deleteProbeTarget(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) tcpProbes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		rows, err := h.Repository.Database.QueryContext(r.Context(), "SELECT id,target_id,status,result_json FROM node_tcp_probes WHERE node_id=? AND target_id=? ORDER BY created_at DESC,id DESC LIMIT 100", r.PathValue("id"), r.URL.Query().Get("targetId"))
+		rows, err := h.Repository.Database.QueryContext(r.Context(), "SELECT id,target_id,status,result_json FROM node_tcp_probes WHERE source='manual' AND node_id=? AND target_id=? ORDER BY created_at DESC,id DESC LIMIT 100", r.PathValue("id"), r.URL.Query().Get("targetId"))
 		if err != nil {
 			h.fail(w, err)
 			return
@@ -215,7 +240,7 @@ func (h *Handler) tcpProbes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var pending int
-	if err = tx.QueryRowContext(r.Context(), "SELECT count(*) FROM node_tcp_probes WHERE node_id=? AND status='queued'", r.PathValue("id")).Scan(&pending); err != nil {
+	if err = tx.QueryRowContext(r.Context(), "SELECT count(*) FROM node_tcp_probes WHERE node_id=? AND status='queued' AND source='manual'", r.PathValue("id")).Scan(&pending); err != nil {
 		h.fail(w, err)
 		return
 	}
@@ -224,7 +249,7 @@ func (h *Handler) tcpProbes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err = tx.ExecContext(r.Context(), "INSERT INTO node_tcp_probes(id,node_id,target_id,command_json,created_at,deadline,status) VALUES(?,?,?,?,?,?,'queued')", id, r.PathValue("id"), t.ID, string(raw), timestamp(now), timestamp(deadline)); err == nil {
-		_, err = tx.ExecContext(r.Context(), "DELETE FROM node_tcp_probes WHERE node_id=? AND target_id=? AND id NOT IN (SELECT id FROM node_tcp_probes WHERE node_id=? AND target_id=? ORDER BY created_at DESC,id DESC LIMIT 100)", r.PathValue("id"), t.ID, r.PathValue("id"), t.ID)
+		_, err = tx.ExecContext(r.Context(), "DELETE FROM node_tcp_probes WHERE source='manual' AND node_id=? AND target_id=? AND id NOT IN (SELECT id FROM node_tcp_probes WHERE source='manual' AND node_id=? AND target_id=? ORDER BY created_at DESC,id DESC LIMIT 100)", r.PathValue("id"), t.ID, r.PathValue("id"), t.ID)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -237,29 +262,36 @@ func (h *Handler) tcpProbes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (r *Repository) pendingTCPProbe(ctx context.Context, node string) (*pb.TCPProbeCommand, error) {
-	if _, err := r.Database.ExecContext(ctx, "UPDATE node_tcp_probes SET status='expired' WHERE node_id=? AND status='queued' AND deadline<=?", node, timestamp(time.Now().UTC())); err != nil {
-		return nil, err
-	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT command_json FROM node_tcp_probes WHERE node_id=? AND status='queued' LIMIT 1", node)
+	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		return nil, rows.Err()
+	defer tx.Rollback()
+	now := timestamp(time.Now().UTC())
+	if _, err = tx.ExecContext(ctx, "UPDATE node_tcp_probes SET status='expired' WHERE node_id=? AND status='queued' AND deadline<=?", node, now); err != nil {
+		return nil, err
 	}
-	var raw string
-	if err = rows.Scan(&raw); err != nil {
+	var raw, id string
+	err = tx.QueryRowContext(ctx, "SELECT id,command_json FROM node_tcp_probes WHERE node_id=? AND status='queued' ORDER BY (dispatched_at IS NOT NULL) DESC,(source='manual') DESC,created_at,id LIMIT 1", node).Scan(&id, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, tx.Commit()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE node_tcp_probes SET dispatched_at=COALESCE(dispatched_at,?) WHERE id=?", now, id); err != nil {
 		return nil, err
 	}
 	c := &pb.TCPProbeCommand{}
-	err = json.Unmarshal([]byte(raw), c)
-	return c, err
+	if err = json.Unmarshal([]byte(raw), c); err != nil {
+		return nil, err
+	}
+	return c, tx.Commit()
 }
 
 func (r *Repository) recordTCPProbe(ctx context.Context, node string, result *pb.TCPProbeResult) error {
-	var raw string
-	if err := r.Database.QueryRowContext(ctx, "SELECT command_json FROM node_tcp_probes WHERE id=? AND node_id=?", result.Id, node).Scan(&raw); err != nil {
+	var raw, source string
+	if err := r.Database.QueryRowContext(ctx, "SELECT command_json,source FROM node_tcp_probes WHERE id=? AND node_id=?", result.Id, node).Scan(&raw, &source); err != nil {
 		return err
 	}
 	var c pb.TCPProbeCommand
@@ -268,6 +300,22 @@ func (r *Repository) recordTCPProbe(ctx context.Context, node string, result *pb
 	}
 	if err := tcpprobe.ValidateResult(&c, result); err != nil {
 		return err
+	}
+	if source == "scheduled" {
+		tx, err := r.Database.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO node_latency_samples(node_id,target_id,at,sent,failed,median_ms) SELECT node_id,target_id,created_at,?,?,? FROM node_tcp_probes WHERE id=? AND status='queued' AND deadline>?", result.Attempted, result.Lost, result.MedianMs, result.Id, timestamp(time.Now().UTC()))
+		if err != nil {
+			return err
+		}
+		// Retain an expired receipt until the next tick for duplicate results.
+		if _, err = tx.ExecContext(ctx, "UPDATE node_tcp_probes SET status='expired' WHERE id=?", result.Id); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	data, err := json.Marshal(result)
 	if err != nil {

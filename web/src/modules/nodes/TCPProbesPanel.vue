@@ -1,41 +1,125 @@
 <template>
-  <div class="space-y-3">
-    <h3 class="font-semibold text-sm text-ios-label">TCP 出口延迟与丢包</h3>
-    <p class="text-xs text-ios-secondary">由节点连接指定目标；每个目标保留最近 100 次结果。此值不代表带宽或双向网络丢包。</p>
-    <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
-    <form class="flex flex-wrap gap-2" @submit.prevent="add">
-      <input v-model="target.label" class="ios-input" placeholder="目标标签" required maxlength="120" />
-      <input v-model="target.host" class="ios-input" placeholder="主机或 IP" required />
-      <input v-model.number="target.port" class="ios-input" type="number" min="1" max="65535" aria-label="目标端口" required />
-      <label class="text-xs"><input v-model="target.allowNonPublic" type="checkbox" />明确允许非公网地址</label>
-      <button class="ios-btn-secondary" :disabled="busy">添加目标</button>
-    </form>
-    <div class="flex flex-wrap gap-2">
-      <select v-model="selected" class="ios-input" @change="refresh"><option value="">选择目标</option><option v-for="t in targets" :key="t.id" :value="t.id">{{ t.label }} ({{ t.host }}:{{ t.port }})</option></select>
-      <label class="text-xs">次数 <input v-model.number="attempts" type="number" min="1" max="10" class="ios-input" /></label>
-      <label class="text-xs">每次超时 ms <input v-model.number="timeoutMs" type="number" min="1" max="3000" class="ios-input" /></label>
-      <button class="ios-btn-primary" :disabled="busy || !selected" @click="run">测试</button>
-      <button class="ios-btn-secondary" :disabled="busy" @click="refresh">刷新结果</button>
-      <button class="ios-btn-secondary" :disabled="busy || !selected" @click="remove">删除目标</button>
-    </div>
-    <p v-for="row in results" :key="row.id" class="text-xs text-ios-secondary">{{ row.status }} · 丢失 {{ row.result ? `${row.result.lost || 0}/${row.result.attempted || 0}` : '—' }} · 中位数 {{ row.result?.median_ms == null ? '—' : `${row.result.median_ms.toFixed(2)} ms` }}</p>
-    <p v-if="!results.length" class="text-xs text-ios-tertiary">暂无结果</p>
+  <div class="space-y-6">
+    <h2 class="font-semibold text-ios-label">线路检测</h2>
+    <p class="text-xs text-ios-secondary">手动检测接口未提供平均耗时与检测时间时显示“—”，中位数见历史。由服务器连接指定目标。TCP 失败比例不代表 ICMP 或 UDP 丢包；每目标保留最近 100 次手动检测记录。</p>
+    <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
+    <p v-if="!isOwner" class="text-sm text-ios-secondary">当前权限无法读取或管理探测目标，请联系 Owner。</p>
+    <template v-else>
+      <div class="flex flex-wrap gap-3">
+        <label class="text-xs text-ios-secondary">
+          次数
+          <input v-model.number="attempts" type="number" min="1" max="10" class="form-input-base" />
+        </label>
+        <label class="text-xs text-ios-secondary">
+          每次超时（ms）
+          <input v-model.number="timeoutMs" type="number" min="1" max="3000" class="form-input-base" />
+        </label>
+        <button class="ios-btn-secondary self-end" :disabled="busy" @click="refresh">刷新结果</button>
+      </div>
+      <DataTable v-if="targets.length">
+        <template #header>
+          <th>目标</th>
+          <th>最近结果</th>
+          <th>失败比例</th>
+          <th>平均耗时</th>
+          <th>时间</th>
+          <th>操作</th>
+        </template>
+        <template #body>
+          <tr v-for="target in targets" :key="target.id">
+            <td>
+              {{ target.label }}
+              <p class="text-xs font-mono text-ios-secondary">{{ target.host }}:{{ target.port }}</p>
+            </td>
+            <td>{{ rowLabel(latest(target.id)) }}</td>
+            <td class="font-mono tabular-nums">{{ lossLabel(latest(target.id)) }}</td>
+            <td class="font-mono tabular-nums">{{ avg(latest(target.id)) }}</td>
+            <td class="text-xs font-mono tabular-nums">{{ latest(target.id)?.createdAt ? formatTime(latest(target.id)!.createdAt!) : '—' }}</td>
+            <td>
+              <div class="flex gap-2">
+                <button class="ios-action-btn-primary" :disabled="busy" @click="run(target.id)">立即检测</button>
+                <button class="ios-action-btn-secondary" @click="historyTarget = target.id">历史</button>
+                <button class="ios-action-btn-danger" :disabled="busy" @click="deleting = target">删除</button>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </DataTable>
+      <p v-else-if="!busy && !error" class="text-sm text-ios-secondary">尚无探测目标。</p>
+      <details class="text-sm text-ios-secondary">
+        <summary class="cursor-pointer">添加探测目标</summary>
+        <form class="grid sm:grid-cols-2 gap-3 mt-3" @submit.prevent="add">
+          <label>
+            标签
+            <input v-model.trim="target.label" class="form-input-base" required maxlength="120" />
+          </label>
+          <label>
+            主机 / IP
+            <input v-model.trim="target.host" class="form-input-base" required />
+          </label>
+          <label>
+            端口
+            <input v-model.number="target.port" class="form-input-base" type="number" min="1" max="65535" required />
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input v-model="target.allowNonPublic" type="checkbox" />
+            明确允许非公网地址
+          </label>
+          <button class="ios-btn-secondary" :disabled="busy">添加目标</button>
+        </form>
+      </details>
+      <details v-if="historyTarget" open class="text-sm text-ios-secondary">
+        <summary>检测历史 · {{ targets.find(t => t.id === historyTarget)?.label }}</summary>
+        <p v-for="row in history[historyTarget]" :key="row.id" class="mt-2 text-xs font-mono tabular-nums">{{ row.createdAt ? formatTime(row.createdAt) : '—' }} · {{ rowLabel(row) }} · 失败 {{ lossLabel(row) }} · 平均 {{ avg(row) }} · 中位数 {{ row.result?.median_ms == null ? '—' : `${row.result.median_ms.toFixed(2)} ms` }}</p>
+      </details>
+      <ConfirmDialog :model-value="!!deleting" title="删除探测目标" :message="`删除 ${deleting?.label || ''}？目标为全部服务器共用。`" @update:model-value="value => { if (!value) deleting = null; }" @confirm="remove" />
+    </template>
   </div>
 </template>
-
 <script setup lang="ts">
-import {ref,reactive,watch} from 'vue';
-import {request} from '../../app/apiClient';
-const props=defineProps<{nodeId:string}>();
-interface Target {id:string;label:string;host:string;port:number;allowNonPublic:boolean}
-interface Row {id:string;status:string;result?:{attempted?:number;lost?:number;median_ms?:number}}
-const targets=ref<Target[]>([]),results=ref<Row[]>([]),selected=ref(''),error=ref(''),busy=ref(false);
-const target=reactive({label:'',host:'',port:443,allowNonPublic:false}),attempts=ref(3),timeoutMs=ref(1000);
-async function guard(action:()=>Promise<void>){busy.value=true;error.value='';try{await action()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
-async function history(){results.value=[];if(selected.value){const id=props.nodeId,key=selected.value;const r=await request<{items:Row[]}>(`/nodes/${encodeURIComponent(id)}/tcp-probes?targetId=${encodeURIComponent(key)}`);if(id===props.nodeId&&key===selected.value)results.value=r.items}}
-async function refresh(){await guard(async()=>{targets.value=(await request<{items:Target[]}>('/probe-targets')).items;await history()})}
-async function add(){await guard(async()=>{const t=await request<Target>('/probe-targets','POST',target);targets.value.push(t);selected.value=t.id;await history()})}
-async function remove(){await guard(async()=>{await request(`/probe-targets/${encodeURIComponent(selected.value)}`,'DELETE');targets.value=targets.value.filter(t=>t.id!==selected.value);selected.value='';results.value=[]})}
-async function run(){await guard(async()=>{await request(`/nodes/${encodeURIComponent(props.nodeId)}/tcp-probes`,'POST',{targetId:selected.value,attempts:attempts.value,timeoutMs:timeoutMs.value});await history()})}
-watch(()=>props.nodeId,()=>{results.value=[];void refresh()},{immediate:true});
+import { ref, reactive, watch, onUnmounted } from 'vue';
+import { request } from '../../app/apiClient';
+import { isOwner, formatTime } from '../../app/auth';
+import { nodeAPI, type ProbeTarget } from './api';
+import DataTable from '../../components/DataTable.vue';
+import ConfirmDialog from '../../components/ConfirmDialog.vue';
+const props = defineProps<{ nodeId: string }>();
+interface Row { id: string; status: string; createdAt?: string; result?: { attempted?: number; lost?: number; median_ms?: number; avg_ms?: number; attempts?: { latency_ms?: number; success?: boolean }[] }; }
+const targets = ref<ProbeTarget[]>([]), history = ref<Record<string, Row[]>>({}), historyTarget = ref(''), deleting = ref<ProbeTarget | null>(null);
+const error = ref(''), busy = ref(false), attempts = ref(3), timeoutMs = ref(1000);
+const target = reactive({ label: '', host: '', port: 443, allowNonPublic: false, scheduled: false });
+const latest = (id: string) => history.value[id]?.[0];
+const rowLabel = (row?: Row) => row ? ({ queued: '等待检测', complete: '已完成', expired: '已过期', failed: '失败' }[row.status] || row.status) : '—';
+const lossLabel = (row?: Row) => row?.result?.attempted ? `${((row.result.lost ?? 0) / row.result.attempted * 100).toFixed(1)}%` : '—';
+// Older probe results contain only a median; do not relabel it as an average.
+const avg = (row?: Row) => row?.result?.avg_ms == null ? '—' : `${row.result.avg_ms.toFixed(2)} ms`;
+let generation = 0;
+async function readHistory(id: string, nodeId: string) { return (await request<{ items: Row[] }>(`/nodes/${encodeURIComponent(nodeId)}/tcp-probes?targetId=${encodeURIComponent(id)}`)).items; }
+async function refresh() {
+  const current = ++generation, nodeId = props.nodeId;
+  if (!isOwner.value) return;
+  busy.value = true; error.value = '';
+  try {
+    const result = await nodeAPI.probeTargets();
+    const records = await Promise.all(result.items.map(async t => [t.id, await readHistory(t.id, nodeId)] as const));
+    if (current !== generation) return;
+    targets.value = result.items; history.value = Object.fromEntries(records);
+  } catch (e) { if (current === generation) error.value = (e as Error).message; }
+  finally { if (current === generation) busy.value = false; }
+}
+async function guard(action: () => Promise<void>) {
+  if (busy.value) return;
+  busy.value = true; error.value = '';
+  try { await action(); await refresh(); }
+  catch (e) { error.value = (e as Error).message; }
+  finally { busy.value = false; }
+}
+function add() { void guard(async () => { await request('/probe-targets', 'POST', target); target.label = ''; target.host = ''; }); }
+function remove() { const id = deleting.value?.id; if (id) void guard(async () => { await request(`/probe-targets/${encodeURIComponent(id)}`, 'DELETE'); deleting.value = null; historyTarget.value = ''; }); }
+function run(targetId: string) {
+  if (!Number.isInteger(attempts.value) || attempts.value < 1 || attempts.value > 10 || !Number.isInteger(timeoutMs.value) || timeoutMs.value < 1 || timeoutMs.value > 3000) { error.value = '次数需为 1～10，超时需为 1～3000 ms 的整数'; return; }
+  void guard(async () => { await request(`/nodes/${encodeURIComponent(props.nodeId)}/tcp-probes`, 'POST', { targetId, attempts: attempts.value, timeoutMs: timeoutMs.value }); historyTarget.value = targetId; });
+}
+watch(() => props.nodeId, () => { history.value = {}; targets.value = []; historyTarget.value = ''; void refresh(); }, { immediate: true });
+onUnmounted(() => { generation++; });
 </script>

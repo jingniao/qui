@@ -50,10 +50,10 @@ func TestTCPProbeFixedOperationOverAuthenticatedStream(t *testing.T) {
 	}
 	c := &pb.TCPProbeCommand{Id: "probe-stream", Addresses: []string{"1.1.1.1"}, Port: 443, Attempts: 3, TimeoutMs: 100, Deadline: timestamppb.New(time.Now().Add(time.Minute))}
 	raw, _ := json.Marshal(c)
-	if _, err = app.Database.Exec("INSERT INTO probe_targets VALUES('stream-target','label','1.1.1.1',443,0)"); err != nil {
+	if _, err = app.Database.Exec("INSERT INTO probe_targets(id,label,host,port,allow_non_public) VALUES('stream-target','label','1.1.1.1',443,0)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = app.Database.Exec("INSERT INTO node_tcp_probes VALUES(?,?,?, ?,NULL,?,?,'queued')", c.Id, n.ID, "stream-target", string(raw), time.Now().UTC().Format(time.RFC3339Nano), c.Deadline.AsTime().Format(time.RFC3339Nano)); err != nil {
+	if _, err = app.Database.Exec("INSERT INTO node_tcp_probes(id,node_id,target_id,command_json,result_json,created_at,deadline,status) VALUES(?,?,?, ?,NULL,?,?,'queued')", c.Id, n.ID, "stream-target", string(raw), time.Now().UTC().Format(time.RFC3339Nano), c.Deadline.AsTime().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	if err = stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "heartbeat", Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Heartbeat{Heartbeat: &pb.Heartbeat{}}}); err != nil {

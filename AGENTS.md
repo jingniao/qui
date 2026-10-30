@@ -1374,7 +1374,7 @@ Node Agent 不允许提供：
 - TCP-connect 探测（已解析 IP、端口、次数、超时与截止时间；Agent 再校验，最多 10 次、每次 3 秒，无 shell）
 - 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override，按能力拒绝旧 Agent；经正常配置发布）
 
-TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。探测结果每节点/目标最多保留 100 条。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优仍只读，新增特权操作未实现（L2）。
+TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 5 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统最多选择 5 个定时目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，avgMs/minMs/maxMs 返回 null。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优仍只读，新增特权操作未实现（L2）。
 
 ---
 
@@ -1582,6 +1582,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0117 `node_meta` | `node_meta`：地区、备注、续费日期/周期/价格/币种、提醒天数与每日提醒标记 |
 | 0118 `traffic_reset` | `users.traffic_reset_cycle/traffic_reset_anchor/traffic_reset_at`，从旧备注迁移周期并去除元数据前缀 |
 | 0119 `tcp_probes` | `nodes.tcp_probe_supported`；`probe_targets`、`node_tcp_probes` 与历史索引；转发复用入站设置，不新增转发表 |
+| 0120 `latency_samples` | `probe_targets.scheduled`（默认关闭，触发器限制最多 5 个）；`node_tcp_probes.source/dispatched_at` 与单节点在途唯一索引；`node_latency_samples`（REAL 毫秒，含 median_ms；按节点/时间索引，保留 7 天） |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1726,8 +1727,9 @@ POST   /subscription-sources/{id}/refresh
 GET    /imported-proxies
 GET/PUT /nodes/{id}/meta
 GET/POST /probe-targets
-DELETE /probe-targets/{target}
+PUT/DELETE /probe-targets/{target}
 GET/POST /nodes/{id}/tcp-probes
+GET    /nodes/{id}/latency?hours=24
 POST   /inbounds/{id}/reachability
 POST   /nodes/{id}/publish
 GET    /nodes/{id}/revisions
@@ -1909,6 +1911,8 @@ Agent 上报消息包括：
 ---
 
 # 31. 备份与恢复
+
+延迟采样属于遥测，不进入便携备份：生成快照后清空 `node_latency_samples` 与定时探测队列，再压实快照；目标的 scheduled 设置保留。恢复时再次清空采样与定时任务，手动排队任务过期。调度循环随面板停机及进程内恢复停止并等待退出，新实例只启动一个循环。
 
 中央端需要备份：
 

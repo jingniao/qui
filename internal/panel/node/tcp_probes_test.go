@@ -28,12 +28,12 @@ func TestTCPProbeDispatchResultBindingAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = database.Exec("INSERT INTO probe_targets VALUES('target','test','127.0.0.1',443,1)"); err != nil {
+	if _, err = database.Exec("INSERT INTO probe_targets(id,label,host,port,allow_non_public) VALUES('target','test','127.0.0.1',443,1)"); err != nil {
 		t.Fatal(err)
 	}
 	c := &pb.TCPProbeCommand{Id: "request", Addresses: []string{"127.0.0.1"}, Port: 443, Attempts: 3, TimeoutMs: 100, AllowNonPublic: true, Deadline: timestamppb.New(time.Now().Add(time.Minute))}
 	raw, _ := json.Marshal(c)
-	if _, err = database.Exec("INSERT INTO node_tcp_probes VALUES(?,?,?, ?,NULL,?,?,'queued')", c.Id, n.ID, "target", string(raw), timestamp(time.Now()), timestamp(c.Deadline.AsTime())); err != nil {
+	if _, err = database.Exec("INSERT INTO node_tcp_probes(id,node_id,target_id,command_json,result_json,created_at,deadline,status) VALUES(?,?,?, ?,NULL,?,?,'queued')", c.Id, n.ID, "target", string(raw), timestamp(time.Now()), timestamp(c.Deadline.AsTime())); err != nil {
 		t.Fatal(err)
 	}
 	command, err := r.pendingTCPProbe(ctx, n.ID)

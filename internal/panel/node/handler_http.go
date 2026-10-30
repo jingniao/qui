@@ -44,10 +44,12 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	mux.Handle("GET /api/v1/probe-targets", h.Auth.Require(http.HandlerFunc(h.probeTargets), true))
+	mux.Handle("GET /api/v1/nodes/{id}/latency", h.Auth.Require(http.HandlerFunc(h.latency), false))
+	mux.Handle("PUT /api/v1/probe-targets/{target}", h.Auth.Require(http.HandlerFunc(h.probeTargets), true))
+	mux.Handle("GET /api/v1/probe-targets", h.Auth.Require(http.HandlerFunc(h.probeTargets), false))
 	mux.Handle("POST /api/v1/probe-targets", h.Auth.Require(http.HandlerFunc(h.probeTargets), true))
 	mux.Handle("DELETE /api/v1/probe-targets/{target}", h.Auth.Require(http.HandlerFunc(h.deleteProbeTarget), true))
-	mux.Handle("GET /api/v1/nodes/{id}/tcp-probes", h.Auth.Require(http.HandlerFunc(h.tcpProbes), true))
+	mux.Handle("GET /api/v1/nodes/{id}/tcp-probes", h.Auth.Require(http.HandlerFunc(h.tcpProbes), false))
 	mux.Handle("POST /api/v1/nodes/{id}/tcp-probes", h.Auth.Require(http.HandlerFunc(h.tcpProbes), true))
 	mux.Handle("GET /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(h.getMeta), false))
 	mux.Handle("PUT /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(h.putMeta), true))

@@ -74,6 +74,7 @@ type Server struct {
 	systemHandler      *system.Handler
 	authService        *auth.Service
 	quotaDeployer      *quotaDeployer
+	latencyScheduler   *node.LatencyScheduler
 	cycleScheduler     *cycleScheduler
 	importStore        *importer.Store
 	connectionStore    *connections.Store
@@ -272,6 +273,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}
 	s.quotaDeployer = newQuotaDeployer(logger, users, quotaState, proxyService, nodeRepository, deployments, eventBus.Publish)
 	s.quotaDeployer.record = systemRepository.Record
+	s.latencyScheduler = &node.LatencyScheduler{Repository: nodeRepository, Logger: logger}
 	s.cycleScheduler = &cycleScheduler{users: users, nodes: nodeRepository, settings: systemRepository, quota: s.quotaDeployer, now: time.Now, publish: eventBus.Publish}
 	users.TrafficApplied = s.quotaDeployer.evaluate
 	// A deploy or rollback re-publishes a stored revision verbatim, so the node's
@@ -433,9 +435,10 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(6)
+	jobs.Add(7)
 	defer func() { stopBackground(); jobs.Wait() }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
+	go func() { defer jobs.Done(); s.latencyScheduler.Run(background) }()
 	go func() { defer jobs.Done(); s.importStore.Run(background) }()
 	go func() {
 		defer jobs.Done()

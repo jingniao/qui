@@ -1,0 +1,56 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+const source = readFileSync(new URL('../src/modules/nodes/components/latencySeries.ts', import.meta.url), 'utf8');
+const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+const api = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const at = Date.parse('2026-10-28T00:00:00Z');
+const point = (offset, change = {}) => ({ at: new Date(at + offset * 1000).toISOString(), avgMs: 20, minMs: 10, maxMs: 30, sent: 3, failed: 0, ...change });
+assert.deepEqual(api.segments([], 300, at, at + 86400000), []);
+assert.equal(api.segments([point(0), point(300), point(900)], 300, at, at + 86400000).length, 2);
+assert.equal(api.segments([point(0), point(450)], 300, at, at + 86400000).length, 1);
+assert.equal(api.segments([point(0), point(451)], 300, at, at + 86400000).length, 2);
+const failed = point(300, { sent: 3, failed: 3, avgMs: 10 });
+assert.equal(api.usable(failed), false);
+assert.deepEqual(api.segments([point(0), failed, point(600)], 300, at, at + 86400000).map(part => part.length), [1, 1]);
+assert.equal(api.segments([point(0), point(300, { avgMs: null }), point(600)], 300, at, at + 86400000).length, 2);
+assert.equal(api.segments([point(-1), point(86401)], 300, at, at + 86400000).length, 0);
+assert.deepEqual(api.segments([failed], 300, at, at + 86400000), []);
+assert.equal(api.loss(failed), 1);
+assert.equal(api.loss({ sent: 0, failed: 0 }), null);
+assert.equal(api.loss({ sent: 3, failed: 1 }), 1 / 3);
+assert.equal(api.loss({ sent: 3, failed: 8 }), 1);
+assert.equal(api.usable(point(0, { avgMs: NaN })), false);
+assert.equal(api.usable(point(0, { avgMs: -1 })), false);
+assert.equal(api.scale(50, 0, 100, 20, 220), 120);
+assert.equal(api.scale(0, 0, 0, 20, 220), 20);
+console.log('PASS LATENCY gaps: missing intervals, 1.5x boundary, null and fully failed samples break lines; loss and empty series');
+for (const max of [0, 0.003, 0.8, 1, 17, 99, 1000, NaN, Infinity]) {
+  const ticks = api.niceTicks(max);
+  assert.equal(ticks[0], 0);
+  assert.ok(ticks.length >= 2 && ticks.length <= 7);
+  assert.ok(ticks.every(Number.isFinite));
+  assert.ok(ticks.at(-1) >= (Number.isFinite(max) ? max : 1));
+  assert.ok(ticks.slice(1).every((value, index) => value > ticks[index]));
+}
+assert.deepEqual(api.niceTicks(99), [0, 25, 50, 75, 100]);
+console.log('PASS LATENCY scaling: nice ticks cover zero, tiny, large and nonfinite maxima');
+const utc = api.hourTicks(at, at + 86400000, 'UTC');
+const shanghai = api.hourTicks(at, at + 86400000, 'Asia/Shanghai');
+assert.equal(utc[0].label, '00:00');
+assert.equal(shanghai[0].label, '08:00');
+const kathmandu = api.hourTicks(at, at + 86400000, 'Asia/Kathmandu');
+assert.equal(kathmandu[0].label, '06:00');
+assert.equal(kathmandu[0].at, at + 15 * 60000);
+const dst = api.hourTicks(Date.parse('2026-11-01T07:00:00Z'), Date.parse('2026-11-02T07:00:00Z'), 'America/Los_Angeles', 1);
+assert.equal(dst.filter(tick => tick.label === '01:00').length, 2);
+assert.equal(dst.length, 25);
+assert.deepEqual(api.hourTicks(at + 1, at, 'UTC'), []);
+console.log('PASS LATENCY timezone: UTC, Asia/Shanghai, fractional offset and DST fallback hour ticks');
+
+// The Agent reports medians only; the chart must plot medianMs when avgMs is null.
+const median = { at: new Date(at).toISOString(), medianMs: 42, avgMs: null, minMs: null, maxMs: null, sent: 3, failed: 1 };
+assert.equal(api.latencyMs(median), 42);
+assert.equal(api.usable(median), true);
+assert.equal(api.usable({ ...median, medianMs: null }), false);
+console.log('PASS LATENCY median: medianMs is plotted when avg/min/max are null');

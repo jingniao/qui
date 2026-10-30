@@ -234,6 +234,9 @@ func (s Source) snapshot(ctx context.Context, work string) ([]fileSource, error)
 	if _, err := snapshotConnection.ExecContext(ctx, "VACUUM INTO ?", databasePath); err != nil {
 		return nil, errors.Join(errors.New("consistent database snapshot failed"), ctx.Err())
 	}
+	if err := stripLatencySnapshot(ctx, databasePath); err != nil {
+		return nil, err
+	}
 	if err := os.Chmod(databasePath, 0600); err != nil {
 		return nil, err
 	}

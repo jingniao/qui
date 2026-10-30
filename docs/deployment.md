@@ -268,7 +268,7 @@ qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sum
 ```
 
 - 它从 `https://github.com/jingniao/qui/releases` 下载 `proxy-control-<版本>-linux-<架构>.tar.gz` 和同一发布的 `SHA256SUMS`，按文件名核对归档的 SHA-256 后才解包，然后调用归档里的 `deploy/linux/install.sh` 原地替换程序、systemd 单元和脚本（`qui`、`qui-update`）；配置、节点身份与数据库都不动。**摘要只证明下载内容与仓库发布一致，信任仍建立在 GitHub 仓库本身**：它不下载也不执行别的东西。
-- 版本只接受 `X.Y.Z` 或 `X.Y.Z-rc.N`（三个版本段均无前导零，N 为无前导零的正整数），拒绝其他预发布标签与 build metadata。显式 `--version 1.1.0-rc.1` 在线下载使用标签 `v1.1.0-rc.1`，资产名为 `proxy-control-1.1.0-rc.1-linux-<架构>.tar.gz`；离线使用同名归档与配套 `SHA256SUMS`，摘要校验不变。未指定版本仍取 GitHub 最新正式发布，不自动选择 RC。
+- 版本只接受 `X.Y.Z` 或 `X.Y.Z-rc.N`（三个版本段均无前导零，N 为无前导零的正整数），拒绝其他预发布标签与 build metadata。显式 `--version 1.2.0-rc.1` 在线下载使用标签 `v1.2.0-rc.1`，资产名为 `proxy-control-1.2.0-rc.1-linux-<架构>.tar.gz`；离线使用同名归档与配套 `SHA256SUMS`，摘要校验不变。未指定版本仍取 GitHub 最新正式发布，不自动选择 RC：`vX.Y.Z-rc.N` 标签由发布任务标为 GitHub 预发布（pre-release），`releases/latest` 不会返回它。
 - 面板更新：先停止 `proxy-panel.service`，在停止状态下把数据库（以及存在的 `-wal`）复制到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<YYYYmmdd-HHMMSS>.db`（属主 `proxy-panel`、0600），再替换程序，最后按停止前的状态启动服务并打印状态。
 - 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，不指定组件仍从同一个归档更新两个组件，**先节点后面板**（保持历史行为）。指定 `--component panel` 或 `--component agent` 只更新该组件，未安装则报错；v1.1 必须先 `--component panel`，验收后再 `--component agent`。
 - `--bundle` 与 `--sums` 必须同时给出，并且必须用 `--version` 指定版本（`SHA256SUMS` 里核对的文件名带版本号）；核对方式与下载时完全相同。
@@ -296,7 +296,7 @@ qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sum
 旧版已安装的 `qui-update` 无法解析 RC 或组件参数。首次使用时，在 root shell 中从放有**已审核**归档与配套 SHA256SUMS 的目录执行下面的命令；先校验再解包，运行归档里的新版更新器（同目录的新版 service.sh 会被采用），仍由它执行备份、预检、快照、日志和回滚。不能只把 RC 改名为正式版本或直接运行 install.sh 绕过更新保护。以下为 amd64，其他架构须替换资产后缀；RC 编号由 Owner 指定。
 
 ```sh
-rc_version='1.1.0-rc.1'
+rc_version='1.2.0-rc.1'
 arch=amd64
 rc_dir="proxy-control-${rc_version}-linux-${arch}"
 bundle="${rc_dir}.tar.gz"
@@ -306,9 +306,9 @@ tar -xzf "$bundle" || exit 1
 bash "$rc_dir/deploy/linux/update.sh" --component panel --version "$rc_version" --bundle "$bundle" --sums SHA256SUMS
 ```
 
-校验或解包失败时停止，不执行下一行。RC1 到此为止，所有 Agent 保持 1.0.9。以后已安装新版更新器的组合主机可运行 `qui-update --component panel --version 1.1.0-rc.2 --bundle proxy-control-1.1.0-rc.2-linux-amd64.tar.gz --sums SHA256SUMS`；确认面板就绪后，再在每个节点主机（含组合主机）运行相同版本的 `--component agent`。仍为旧更新器的 Agent 主机须按上面的校验/解包方式运行归档内 update.sh，只把组件改为 agent。
+校验或解包失败时停止，不执行下一行。RC1 到此为止，所有 Agent 保持 1.0.9。以后已安装新版更新器的组合主机可运行 `qui-update --component panel --version 1.2.0-rc.2 --bundle proxy-control-1.2.0-rc.2-linux-amd64.tar.gz --sums SHA256SUMS`；确认面板就绪后，再在每个节点主机（含组合主机）运行相同版本的 `--component agent`。仍为旧更新器的 Agent 主机须按上面的校验/解包方式运行归档内 update.sh，只把组件改为 agent。
 
-版本比较使用 semver 优先级：`1.0.9 < 1.1.0-rc.1 < 1.1.0-rc.2 < 1.1.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。K3c 将安装记录升级为上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
+版本比较使用 semver 优先级：`1.0.9 < 1.2.0-rc.1 < 1.2.0-rc.2 < 1.2.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。K3c 将安装记录升级为上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
 
 ### 5.1 面板降级与数据库回退
 

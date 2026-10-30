@@ -1,5 +1,6 @@
 import type { Inbound, InboundInput, ProtocolSettings } from '../../api';
-import type { NodeView } from '../../../nodes/api';
+import type { CoreName, NodeView } from '../../../nodes/api';
+import { blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
 
 export type EditorOrigin = 'list' | 'server';
 export const forcedTLS = (protocol: string) => ['trojan', 'hysteria2', 'tuic'].includes(protocol);
@@ -20,11 +21,12 @@ export function createEditor(serverId = '', original: Inbound | null = null, ori
     name: original.name, nodeId: original.nodeId, protocol: original.protocol, listen: original.listen,
     port: original.port, enabled: original.enabled, subscriptionVisible: original.subscriptionVisible,
     internalRelay: original.internalRelay, defaultOutbound: original.defaultOutbound,
-    allowedUserIds: [...original.allowedUserIds], settings: clone(original.settings || {})
+    allowedUserIds: [...original.allowedUserIds], settings: clone(original.settings || {}),
+    core: original.core || ''
   } : {
     name: '', nodeId: serverId, protocol: 'vless', listen: '0.0.0.0', port: 443, enabled: true,
     subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
-    settings: { transport: 'tcp', security: 'none' }
+    settings: { transport: 'tcp', security: 'none' }, core: ''
   };
   if (origin === 'list') {
     form.settings.transport ||= 'tcp'; form.settings.security ||= 'none';
@@ -84,26 +86,63 @@ export function buildPayload(state: EditorState): InboundInput {
       peers: input.wireguard?.peers || [], mtu: state.mtu
     } };
   }
-  return clone({ name: state.origin === 'list' ? f.name.trim() : f.name, nodeId: f.nodeId, protocol: p, listen: f.listen, port: f.port,
+  const payload: InboundInput = { name: state.origin === 'list' ? f.name.trim() : f.name, nodeId: f.nodeId, protocol: p, listen: f.listen, port: f.port,
     enabled: f.enabled, subscriptionVisible: f.internalRelay ? false : f.subscriptionVisible,
-    internalRelay: f.internalRelay, defaultOutbound: f.defaultOutbound, allowedUserIds: f.allowedUserIds, settings });
+    internalRelay: f.internalRelay, defaultOutbound: f.defaultOutbound, allowedUserIds: f.allowedUserIds, settings };
+  // An empty core means "the node's current primary core" and is omitted from the
+  // request, exactly like the Agent contract; a concrete core is sent explicitly.
+  if (f.core) payload.core = f.core;
+  return clone(payload);
 }
 
 export function serverEligible(server: NodeView): boolean {
   // Agent version is reported only after registration; pending rows have none.
   return server.enabled && !server.deletedAt && server.status !== 'pending' && !!server.agentVersion;
 }
-export function protocolReason(server: NodeView | undefined, protocol: string): string {
+// The cores the server currently reports as enabled (K3b). A server without a
+// core list (old Agent) yields exactly its one reported core.
+export function coreOptions(server: NodeView | undefined): { name: CoreName; label: string; version: string; primary: boolean }[] {
+  if (!server) return [];
+  return nodeCores(server).map(core => ({ name: core.name, label: core.label, version: core.version, primary: core.primary }));
+}
+export function defaultCore(server: NodeView | undefined): CoreName | '' {
+  return primaryCoreName(server);
+}
+// Why a core cannot be selected for this inbound, or '' when it can. Mirrors the
+// panel's ValidateInboundCore so the editor refuses before the API does.
+export function coreReason(server: NodeView | undefined, core: CoreName | ''): string {
+  if (!server) return '请先选择服务器';
+  const cores = coreOptions(server);
+  if (!cores.length) return '尚未上报核心能力';
+  if (!core) {
+    const primary = cores.find(item => item.primary) || cores[0];
+    return primary ? '' : '主核心不可用';
+  }
+  if (!cores.some(item => item.name === core)) return `该服务器未上报启用 ${core} 核心`;
+  if (!multiCoreSupported(server) && core !== defaultCore(server)) return '该 Agent 未协商多核心支持，只能使用当前主核心';
+  if (blockedCores(server).includes(core)) return '该核心正在添加或移除中（core_pending），请等待 Agent 上报新的能力后再保存或发布';
+  return '';
+}
+export function protocolReason(server: NodeView | undefined, protocol: string, core: CoreName | '' = ''): string {
   if (!server) return '请先选择服务器';
   const caps = server.capabilities;
-  if (!caps?.core_name) return '尚未上报核心能力';
-  if (caps.protocols?.some(p => p.protocol === protocol && p.inbound)) return '';
-  if (caps.core_name === 'xray' && ['hysteria2', 'tuic'].includes(protocol)) return 'Xray 不支持此协议，需要支持 QUIC 的 sing-box';
-  if (caps.core_name === 'sing-box' && protocol === 'wireguard') return 'sing-box 不支持 WireGuard 入站';
-  return `${caps.core_name} 未报告支持 ${protocol} 入站（请检查核心版本与构建标签）`;
+  if (!caps?.core_name && !coreOptions(server).length) return '尚未上报核心能力';
+  const reason = coreReason(server, core);
+  if (reason) return reason;
+  const selected = findCore(server, core);
+  if (!selected) return '尚未上报核心能力';
+  if (protocol === 'forward') {
+    if (selected.forwardInboundSupported === false) return `${selected.label} 未报告支持端口转发入站`;
+    return '';
+  }
+  if (selected.protocols?.some(p => p.protocol === protocol && p.inbound)) return '';
+  if (selected.name === 'xray' && ['hysteria2', 'tuic'].includes(protocol)) return 'Xray 不支持此协议，需要支持 QUIC 的 sing-box';
+  if (selected.name === 'sing-box' && protocol === 'wireguard') return 'sing-box 不支持 WireGuard 入站';
+  return `${selected.label} 未报告支持 ${protocol} 入站（请检查核心版本与构建标签）`;
 }
-// A TCP and a UDP listener may share a port (e.g. VLESS on TCP 443 next to
-// Hysteria2 on UDP 443), so only overlapping transports conflict.
+// The Agent reserves every enabled inbound's numeric port node-wide, regardless
+// of TCP/UDP, transport or core, and the panel enforces the same rule. Keep this
+// list for display only; it is no longer used to decide port conflicts.
 export function listenNetworks(value: Pick<InboundInput, 'protocol' | 'settings'>): string[] {
   if (['hysteria2', 'tuic', 'wireguard'].includes(value.protocol)) return ['udp'];
   if (value.protocol === 'forward') return (value.settings?.forward?.network || 'tcp').split(',');
@@ -111,9 +150,10 @@ export function listenNetworks(value: Pick<InboundInput, 'protocol' | 'settings'
   return ['tcp'];
 }
 export function portConflict(form: InboundInput, inbounds: Inbound[], excludeId = ''): string {
-  const networks = listenNetworks(form);
-  const conflict = inbounds.find(i => i.nodeId === form.nodeId && i.id !== excludeId && i.port === form.port
-    && listenNetworks(i).some(network => networks.includes(network)));
+  // Node-wide numeric rule (K3b): a second listener on the same port fails at
+  // apply time even when one side is TCP and the other UDP, so the local check
+  // must not let a TCP/UDP pair through.
+  const conflict = inbounds.find(i => i.nodeId === form.nodeId && i.id !== excludeId && i.port === form.port);
   return conflict ? `端口 ${form.port} 已被「${conflict.name}」占用` : '';
 }
 export function randomPort(
@@ -138,7 +178,9 @@ export function validateStep(step: number, state: EditorState, server: NodeView 
   const f = state.form, s = f.settings;
   if (step === 1 && (!server || !serverEligible(server))) return '请选择可用服务器';
   if (step === 2) {
-    const reason = protocolReason(server, f.protocol);
+    const core = coreReason(server, f.core || '');
+    if (core) return core;
+    const reason = protocolReason(server, f.protocol, f.core || '');
     if (reason) return reason;
     if (!f.name.trim()) return '请输入节点名称';
     if (!Number.isInteger(f.port) || f.port < 1 || f.port > 65535) return '请输入有效的端口 (1-65535)';

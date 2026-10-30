@@ -65,6 +65,9 @@ export interface CanvasNodeInstance {
 
 export interface CanvasConnection {
   id: string;
+  // Set when the arrow references a shared server tunnel (K4). The tunnel resource
+  // owns the parameters for every scheme that uses it; the arrow only points at it.
+  tunnelId?: string;
   sourceInstanceId: string;
   targetInstanceId: string;
   type: ConnectionType;

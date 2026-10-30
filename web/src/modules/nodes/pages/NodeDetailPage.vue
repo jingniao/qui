@@ -24,7 +24,7 @@
     <ErrorState v-if="error" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="!node" />
     <template v-else>
-      <p v-if="node.heartbeat?.core_healthy === false" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : '最后心跳报告核心未通过健康检查，请检查程序与配置发布结果。' }}</p>
+      <p v-if="node.heartbeat?.core_healthy === false" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : `最后心跳报告核心 ${unhealthyCoreLabel(node) || node.capabilities?.core_name || '代理核心'} 未通过健康检查，请检查该核心的程序与配置发布结果。` }}</p>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
       <nav class="ios-segmented-container inline-flex overflow-x-auto max-w-full -mt-0.5" aria-label="服务器详情页签">
         <button v-for="tab in tabs" :key="tab.key" class="ios-segmented-item whitespace-nowrap" :class="activeTab === tab.key ? 'active' : ''" :aria-current="activeTab === tab.key ? 'page' : undefined" @click="selectTab(tab.key)">{{ tab.label }}</button>
@@ -67,6 +67,7 @@ import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import { serverStatus } from '../components/serverListModel';
+import { unhealthyCoreLabel } from '../coreSummary';
 import { detailState } from '../components/detail/serverDetailModel';
 import ServerSetupGuide from '../components/detail/ServerSetupGuide.vue';
 import NodeEditorDrawer from '../../proxy/components/node-editor/NodeEditorDrawer.vue';

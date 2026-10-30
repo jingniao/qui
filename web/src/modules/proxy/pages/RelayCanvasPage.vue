@@ -308,7 +308,7 @@
             <div class="flex items-center gap-1.5">
               <span class="font-bold text-xs text-ios-label">拓扑资源库</span>
               <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-black/[0.05] text-ios-secondary font-mono">
-                {{ filteredServers.length + selfHostedNodes.length + subscriptionNodes.length + manualNodes.length + filteredSharedTunnels.length }}
+                {{ filteredServers.length + selfHostedNodes.length + subscriptionNodes.length + manualNodes.length + filteredTunnels.length }}
               </span>
             </div>
             <div class="flex items-center gap-1">
@@ -511,8 +511,8 @@
             </div>
           </div>
 
-          <!-- Group 5: 隧道 (Shared Tunnels across schemes) -->
-          <div class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
+          <!-- Group 5: 隧道（K4 共享隧道资源，服务器方案复用） -->
+          <div v-if="canManageTunnels" class="rounded-xl border border-black/[0.04] overflow-hidden bg-neutral-50/50">
             <div class="w-full px-2.5 py-2 flex items-center justify-between hover:bg-black/[0.03] transition-colors select-none">
               <button
                 type="button"
@@ -527,51 +527,72 @@
               <div class="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
-                  @click.stop="openEditor()"
+                  @click.stop="openNewTunnelEditor"
                   class="text-[10px] text-ios-blue font-semibold hover:underline px-1 py-0.5 rounded hover:bg-blue-50"
-                  title="新建隧道"
+                  title="新建共享隧道资源"
                 >
                   + 新建
                 </button>
                 <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
-                  {{ filteredSharedTunnels.length }}
+                  {{ filteredTunnels.length }}
                 </span>
               </div>
             </div>
 
             <!-- Tunnel Items (Draggable to canvas or clickable to add) -->
             <div v-show="groupExpanded.tunnels" class="p-1 space-y-1.5 border-t border-black/[0.04] bg-white">
-              <div v-if="!filteredSharedTunnels.length" class="p-3 text-center text-ios-tertiary text-[11px] leading-relaxed">
+              <p class="px-1.5 pt-1 text-[10px] text-ios-tertiary leading-relaxed">
+                共享隧道是独立资源：拖入任意服务器方案即可复用同一对象，删除连线只移除引用。
+              </p>
+              <p v-if="currentScheme.executionLocation === 'client'" class="px-1.5 text-[10px] text-ios-orange leading-relaxed">
+                当前为客户端执行：客户端链只支持内嵌连线，隧道不可拖入。请切换到服务器方案，或直接在画布上连线。
+              </p>
+              <LoadingSkeleton v-if="tunnels.loading && !libraryTunnels.length" :rows="3" />
+              <ErrorState
+                v-else-if="tunnels.error"
+                title="共享隧道不可用"
+                :message="tunnels.error"
+                @retry="reloadTunnels"
+              />
+              <div v-else-if="!filteredTunnels.length" class="p-3 text-center text-ios-tertiary text-[11px] leading-relaxed">
                 暂无隧道<br/>
-                <button type="button" @click="openEditor()" class="text-ios-blue font-semibold hover:underline mt-1">
+                <button type="button" @click="openNewTunnelEditor" class="text-ios-blue font-semibold hover:underline mt-1">
                   + 新建第一条隧道
                 </button>
               </div>
 
               <div
-                v-for="tunnel in filteredSharedTunnels"
-                :key="tunnel.key"
-                draggable="true"
-                @dragstart="onDragStart($event, { type: 'tunnel', tunnel })"
-                @click="onSharedTunnelClick(tunnel)"
-                class="p-2 rounded-xl border transition-all select-none group cursor-grab active:cursor-grabbing relative"
+                v-for="item in filteredTunnels"
+                :key="item.id"
+                :draggable="currentScheme.executionLocation === 'server'"
+                @dragstart="onDragStart($event, { type: 'tunnel', tunnelId: item.id })"
+                @click="onLibraryTunnelClick(item)"
+                class="p-2 rounded-xl border transition-all select-none group relative"
                 :class="[
-                  isTunnelInCurrentScheme(tunnel)
+                  isTunnelInCurrentScheme(item.id)
                     ? 'border-blue-200 bg-blue-50/40 hover:border-ios-blue'
-                    : 'border-black/[0.04] hover:border-ios-blue/40 hover:bg-neutral-50'
+                    : 'border-black/[0.04] hover:border-ios-blue/40 hover:bg-neutral-50',
+                  currentScheme.executionLocation === 'server' ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed'
                 ]"
-                :title="isTunnelInCurrentScheme(tunnel) ? '已在当前方案中（点击聚焦）' : '拖拽到画布或点击加入方案'"
+                :title="isTunnelInCurrentScheme(item.id)
+                  ? '已在当前方案中（点击聚焦连线）'
+                  : currentScheme.executionLocation === 'server'
+                    ? '拖拽到画布或点击引用此共享隧道'
+                    : '客户端方案不支持共享隧道'"
               >
-                <!-- Title: Source → Target -->
+                <!-- Title: resource name and how many schemes reference it -->
                 <div class="flex items-center justify-between gap-1">
                   <div class="font-semibold text-ios-label truncate text-[11px] flex items-center gap-1 min-w-0">
-                    <span class="truncate max-w-[80px]" :title="tunnel.sourceName">{{ tunnel.sourceName }}</span>
-                    <span class="text-ios-tertiary shrink-0">→</span>
-                    <span class="truncate max-w-[80px]" :title="tunnel.targetName">{{ tunnel.targetName }}</span>
+                    <span class="truncate max-w-[110px]" :title="item.name">{{ item.name }}</span>
+                    <span
+                      v-if="item.schemeNames.length"
+                      class="shrink-0 text-[9px] text-ios-tertiary"
+                      :title="`引用方案：${item.schemeNames.join('、')}`"
+                    >{{ item.schemeNames.length }} 方案</span>
                   </div>
                   <div class="flex items-center gap-1 shrink-0">
                     <span
-                      v-if="isTunnelInCurrentScheme(tunnel)"
+                      v-if="isTunnelInCurrentScheme(item.id)"
                       class="text-[9px] font-medium text-ios-blue bg-blue-100/70 px-1 py-0.2 rounded"
                     >
                       已在方案
@@ -579,17 +600,28 @@
                     <button
                       v-else
                       type="button"
-                      @click.stop="applySharedTunnelToScheme(tunnel)"
-                      class="text-[9px] text-ios-blue font-semibold bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition-colors"
-                      title="加入当前方案"
+                      @click.stop="onLibraryTunnelClick(item)"
+                      class="text-[9px] text-ios-blue font-semibold bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition-colors disabled:opacity-40"
+                      :disabled="currentScheme.executionLocation === 'client'"
+                      title="引用到当前方案"
                     >
-                      + 加入
+                      + 引用
                     </button>
                     <button
                       type="button"
-                      @click.stop="deleteSharedTunnel(tunnel)"
+                      @click.stop="openTunnelResourceEditor(item.id)"
+                      class="text-neutral-300 hover:text-ios-blue p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="编辑共享隧道资源"
+                    >
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      @click.stop="askDeleteTunnel(item)"
                       class="text-neutral-300 hover:text-rose-600 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="从资源库删除此隧道"
+                      title="删除共享隧道资源"
                     >
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -598,18 +630,75 @@
                   </div>
                 </div>
 
-                <!-- Subtitle: Protocol, Port, Type -->
-                <div class="flex items-center justify-between text-[10px] text-ios-secondary mt-1 font-mono">
-                  <span class="truncate">{{ tunnel.subtitle }}</span>
-                  <span
-                    v-if="tunnel.statusText"
-                    :class="tunnel.hasError ? 'text-rose-500' : 'text-emerald-600'"
-                    class="shrink-0 font-sans text-[9px]"
-                  >
-                    {{ tunnel.statusText }}
-                  </span>
+                <!-- Subtitle: endpoints, protocol, ports and publish state -->
+                <div class="text-[10px] text-ios-secondary mt-1 space-y-0.5">
+                  <div class="truncate" :title="`${item.sourceName} → ${item.targetName}`">{{ item.title }}</div>
+                  <div class="flex items-center justify-between gap-1">
+                    <span class="truncate font-mono">{{ item.subtitle }}</span>
+                    <span
+                      class="shrink-0 font-sans text-[9px]"
+                      :class="item.publishStatus === 'published' ? 'text-emerald-600' : 'text-amber-600'"
+                      title="面板发布记录，不代表 Agent 运行状态"
+                    >
+                      {{ canvasTunnelPublishStatusLabel(item.publishStatus) }}
+                    </span>
+                  </div>
                 </div>
               </div>
+              <!-- Owner-only: objects an earlier publication created without a recorded owner -->
+              <div class="border-t border-black/[0.05] pt-1 mt-1">
+                <button
+                  type="button"
+                  @click="toggleLegacyPanel"
+                  class="w-full px-1.5 py-1 flex items-center justify-between text-[11px] font-semibold text-ios-secondary hover:text-ios-label transition-colors"
+                  title="查看并认领旧版本产生的无归属对象"
+                >
+                  <span>待认领的历史对象</span>
+                  <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px]">{{ tunnels.legacyObjects.length }}</span>
+                </button>
+                <div v-if="legacyPanelOpen" class="p-1 space-y-1.5">
+                  <p class="text-[10px] text-ios-tertiary leading-relaxed">
+                    这些对象由旧版本发布产生，没有记录归属。未认领的对象仍作为普通对象保留在服务器上，不会被删除，也不会被共享隧道发布清理；认领只登记归属，不改动服务器。
+                  </p>
+                  <LoadingSkeleton v-if="tunnels.legacyLoading" :rows="2" />
+                  <EmptyState
+                    v-else-if="!tunnels.legacyObjects.length"
+                    title="没有待认领的历史对象"
+                    description="当前由中转方案生成的对象都有明确归属。"
+                  />
+                  <div
+                    v-for="object in tunnels.legacyObjects"
+                    :key="legacyKey(object)"
+                    class="p-1.5 rounded-lg border border-black/[0.06] bg-neutral-50/70 space-y-1"
+                  >
+                    <div class="flex items-center justify-between gap-1">
+                      <span class="text-[10px] font-mono truncate" :title="object.name">{{ object.name }}</span>
+                      <span class="text-[9px] px-1 py-0.2 rounded bg-black/[0.05] text-ios-secondary shrink-0">{{ legacyKindLabel(object.kind) }}</span>
+                    </div>
+                    <div class="text-[10px] text-ios-tertiary font-mono truncate" :title="object.id">
+                      {{ legacyNodeName(object.nodeId) }}{{ object.port ? ` :${object.port}` : '' }} · {{ object.id }}
+                    </div>
+                    <div v-if="(object.candidateTunnels || []).length" class="flex items-center gap-1">
+                      <select v-model="legacyChoice[legacyKey(object)]" class="form-input-base !py-0.5 !text-[10px] flex-1">
+                        <option value="">选择目标隧道</option>
+                        <option v-for="candidate in object.candidateTunnels" :key="candidate" :value="candidate">
+                          {{ tunnels.nameOf(candidate) || candidate }}
+                        </option>
+                      </select>
+                      <button
+                        type="button"
+                        class="ios-action-btn-primary !px-1.5 !py-0.5 !text-[10px]"
+                        :disabled="!legacyChoice[legacyKey(object)]"
+                        @click="askAdoptObject(object)"
+                      >
+                        认领到隧道
+                      </button>
+                    </div>
+                    <p v-else class="text-[10px] text-ios-orange">没有唯一匹配的隧道：请先创建端点一致的隧道，再回来认领。</p>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -1017,10 +1106,25 @@
     </aside>
     </div>
 
-    <TunnelEditorDrawer v-if="editor" :key="editor.key" :scheme="currentScheme" :servers="servers" :context="canvasContext()"
-      :connection="editor.connection" :source="editor.source" :target="editor.target" :persist="persistTunnelResult" @close="closeEditor" />
+    <TunnelEditorDrawer
+      v-if="editor"
+      :key="editor.key"
+      :scheme="currentScheme"
+      :servers="servers"
+      :context="canvasContext()"
+      :connection="editor.connection"
+      :source="editor.source"
+      :target="editor.target"
+      :shared-tunnel="editor.sharedTunnel ?? null"
+      :create-tunnel="editor.createTunnel === true"
+      :shared-missing="editor.sharedMissing === true"
+      :persist="persistTunnelResult"
+      :save-resource="saveTunnelResource"
+      @resource-saved="onTunnelResourceSaved"
+      @close="closeEditor"
+    />
     <AppDialog v-model="openPlanSummary" title="方案发布检查" :show-confirm="false">
-      <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" />
+      <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" :tunnel-names="tunnelNames" />
     </AppDialog>
 
     <!-- Schemes / Modals -->
@@ -1028,9 +1132,7 @@
       v-model="openPublishModal"
       title="发布方案"
       description="选择方案执行位置并发布"
-      confirm-text="确认发布"
-      :loading="publishing"
-      @confirm="handleConfirmPublish"
+      max-width="lg"
     >
       <div class="space-y-4 text-xs">
         <div class="flex items-center gap-4">
@@ -1081,11 +1183,30 @@
           </p>
           <div class="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl space-y-1 text-ios-blue text-[11px]">
             <div>• 目标管理服务器: {{ currentScheme.nodes.filter(n => n.isManageable).length }} 台</div>
-            <div>• 计划建立隧道: {{ currentTunnels.length }} 条</div>
-            <div>• 状态: 发布时由服务端校验配置与冲突</div>
+            <div>• 本方案连线: {{ currentTunnels.length }} 条（共享隧道按资源统一生成）</div>
+          </div>
+          <div class="p-3 bg-[#F5F5F7] rounded-xl space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-ios-secondary font-medium">发布前检查</span>
+              <button type="button" class="ios-btn-secondary !py-0.5 !text-[11px]" :disabled="checking" @click="runPlan">
+                {{ checking ? '检查中…' : '重新检查' }}
+              </button>
+            </div>
+            <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" :tunnel-names="tunnelNames" />
           </div>
         </div>
       </div>
+      <template #footer>
+        <button type="button" class="ios-dialog-btn-secondary" :disabled="publishing" @click="openPublishModal = false">取消</button>
+        <button
+          type="button"
+          class="ios-dialog-btn-primary"
+          :disabled="publishing || (currentScheme.executionLocation === 'server' && planBlocked)"
+          @click="handleConfirmPublish"
+        >
+          {{ publishing ? '发布中…' : '确认发布' }}
+        </button>
+      </template>
     </AppDialog>
 
     <ConfirmDialog
@@ -1101,6 +1222,34 @@
       :message="`删除「${currentScheme.name}」？只删除画布方案，入站、出站与代理链不受影响。`"
       @confirm="removeScheme"
     />
+    <ConfirmDialog
+      v-model="confirmDeleteTunnel"
+      title="删除共享隧道"
+      :message="`删除隧道资源「${pendingTunnel?.name || ''}」？引用它的方案必须先移除引用，否则服务器会拒绝删除。`"
+      warning-details="删除资源不会删除服务器上已生成的对象；需要清理时请先在引用方案中移除引用并发布。"
+      confirm-text="删除隧道"
+      @confirm="confirmDeleteTunnelResource"
+    />
+    <AppDialog v-model="openTunnelInUse" title="隧道仍被引用" :show-confirm="false" max-width="md">
+      <p class="text-sm text-ios-secondary">
+        服务器拒绝删除「{{ tunnelInUse?.name || '' }}」：以下方案仍引用此隧道。请先在每个方案中移除该连线并发布，再删除资源。
+      </p>
+      <ul v-if="tunnelInUse?.schemes.length" class="space-y-1 text-sm text-ios-label">
+        <li v-for="scheme in tunnelInUse.schemes" :key="scheme.id" class="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#F5F5F7]">
+          <span class="truncate">{{ scheme.name }}</span>
+          <button type="button" class="ios-btn-secondary !py-0.5 !text-[11px]" @click="openSchemeById(scheme.id)">打开方案</button>
+        </li>
+      </ul>
+      <p v-else class="text-sm text-ios-tertiary">服务器没有返回引用方案列表，请刷新后重试。</p>
+    </AppDialog>
+    <ConfirmDialog
+      v-model="confirmAdopt"
+      title="认领历史对象"
+      :message="`将「${adoptingObject?.name || ''}」认领到隧道「${adoptTargetName}」？`"
+      warning-details="认领只登记归属，不改变服务器上的对象；此后由该隧道的发布管理这个对象。"
+      confirm-text="认领到隧道"
+      @confirm="confirmAdoptObject"
+    />
   </div>
 </template>
 
@@ -1109,17 +1258,42 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 import TunnelEditorDrawer from '../components/relay/TunnelEditorDrawer.vue';
 import TunnelPlanSummary from '../components/relay/TunnelPlanSummary.vue';
 import { useTunnelPlan } from '../components/relay/useTunnelPlan';
-import { tunnelSummary, type TunnelPlan } from '../components/relay/tunnelEditorModel';
+import { useCanvasTunnels } from '../components/relay/useCanvasTunnels';
+import { tunnelConflictText, type TunnelPlan } from '../components/relay/tunnelEditorModel';
 import { useRoute } from 'vue-router';
 import PageHeader from '../../../components/PageHeader.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
+import EmptyState from '../../../components/EmptyState.vue';
+import ErrorState from '../../../components/ErrorState.vue';
+import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
+import { isOwner } from '../../../app/auth';
 import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { loadNodeMeta, getNodePortRange, getRandomPortForNode } from '../../nodes/nodeMeta';
-import { proxyAPI, choices, canvasAPI, canvasSchemeToRelayScheme, relaySchemeToCanvasInput, type CanvasPublishResult, type CanvasSchemeContext, type Inbound } from '../api';
+import {
+  proxyAPI,
+  choices,
+  canvasAPI,
+  canvasDisplayStatus,
+  canvasSchemeToRelayScheme,
+  canvasTunnelAPI,
+  canvasTunnelLibraryItem,
+  canvasTunnelNodeId,
+  canvasTunnelPublishStatusLabel,
+  canvasTunnelReference,
+  relaySchemeToCanvasInput,
+  type CanvasPublishResult,
+  type CanvasSchemeContext,
+  type CanvasTunnel,
+  type CanvasTunnelInput,
+  type CanvasTunnelLibraryItem,
+  type CanvasTunnelObject,
+  type CanvasTunnelSchemeRef,
+  type Inbound
+} from '../api';
 import {
   proxyNodeStore,
   loadStoredData,
@@ -1131,7 +1305,6 @@ import {
   type ProxyNodeItem,
   type CanvasNodeInstance,
   type CanvasConnection,
-  type ConnectionType,
   type RelayScheme
 } from '../proxyNodes';
 
@@ -1206,7 +1379,16 @@ const connectingSource = ref<CanvasNodeInstance | null>(null);
 const connectingMousePos = reactive({ x: 0, y: 0 });
 
 // Modals
-const editor = ref<{ key: number; connection?: CanvasConnection; source?: string; target?: string } | null>(null);
+const editor = ref<{
+  key: number;
+  connection?: CanvasConnection;
+  source?: string;
+  target?: string;
+  // A shared-tunnel resource (edit) or a new one, instead of one drawing's arrow.
+  sharedTunnel?: CanvasTunnel | null;
+  createTunnel?: boolean;
+  sharedMissing?: boolean;
+} | null>(null);
 const openPlanSummary = ref(false);
 const openPublishModal = ref(false);
 // The last publication's per-node result, as the server reported it.
@@ -1243,6 +1425,9 @@ const { plan, checking, error: planError, run: runPlan } = useTunnelPlan(
   }
 );
 watch(() => currentScheme.value.id, () => { editor.value = null; });
+// A plan that reports a conflict blocks publishing: the server would refuse it too,
+// and the dialog says why instead of promising a check that will fail.
+const planBlocked = computed(() => !!plan.value && !checking.value && (!plan.value.ok || (plan.value.conflicts || []).length > 0));
 async function checkScheme() { openPlanSummary.value = true; await runPlan(); }
 function validateClientChain(): TunnelPlan {
   const { instances, connections } = planInput.value.layout;
@@ -1272,7 +1457,13 @@ function validateClientChain(): TunnelPlan {
 function openEditor(connection?: CanvasConnection, source?: string, target?: string) {
   selectedNode.value = null;
   selectedConnection.value = connection || null;
-  editor.value = { key: Date.now(), connection, source, target };
+  // An arrow that references a shared tunnel is edited through its resource. When
+  // the resource is not loaded the drawer refuses to save instead of writing local
+  // parameters the server would ignore.
+  const sharedTunnel = connection?.tunnelId ? tunnels.byId(connection.tunnelId) || null : null;
+  const sharedMissing = !!connection?.tunnelId && !sharedTunnel;
+  if (sharedMissing) showToast('共享隧道资源未载入，请刷新后重试', 'warning');
+  editor.value = { key: Date.now(), connection, source, target, sharedTunnel, sharedMissing };
 }
 function closeEditor() { editor.value = null; selectedConnection.value = null; }
 async function persistTunnelResult(result: RelayScheme) {
@@ -1281,288 +1472,254 @@ async function persistTunnelResult(result: RelayScheme) {
   const before = { nodes: scheme.nodes, connections: scheme.connections };
   scheme.nodes = result.nodes;
   scheme.connections = result.connections;
-  syncTunnelsFromScheme(scheme);
   try { await saveDraft(true); showToast('已保存到方案'); }
   catch (e) { Object.assign(scheme, before); throw e; }
 }
 
 
-export interface SharedTunnel {
-  key: string;
-  sourceResourceId: string;
-  sourceResourceType: 'server' | 'node';
-  sourceName: string;
-  sourceAddress: string;
-  sourceStatus?: string;
-  sourceIsManageable: boolean;
-  targetResourceId: string;
-  targetResourceType: 'server' | 'node';
-  targetName: string;
-  targetAddress: string;
-  targetStatus?: string;
-  targetIsManageable: boolean;
-  type: ConnectionType;
-  tunnelProtocol?: 'tls' | 'wireguard' | 'gost' | 'brook' | 'nftables';
-  tunnelPort?: number;
-  listenPort?: number;
-  targetHost?: string;
-  targetPort?: number;
-  supportTcp: boolean;
-  supportUdp: boolean;
-  title: string;
-  subtitle: string;
-  statusText?: string;
-  hasError?: boolean;
+// ----------------- Shared tunnels (K4) -----------------
+// A tunnel is a panel resource: the library never keeps a browser copy, and a
+// scheme connection stores only its id. Older builds kept a local pool; that key is
+// removed once, because the migration already created one tunnel per connection.
+const LEGACY_SHARED_TUNNELS_KEY = 'qui_shared_tunnels_v1';
+function dropLegacySharedTunnelStore() {
+  try { localStorage.removeItem(LEGACY_SHARED_TUNNELS_KEY); } catch {}
 }
 
-const SHARED_TUNNELS_KEY = 'qui_shared_tunnels_v1';
-
-function loadStoredSharedTunnels(): SharedTunnel[] {
-  try {
-    const raw = localStorage.getItem(SHARED_TUNNELS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return [];
+const tunnels = useCanvasTunnels();
+// The library and the legacy-adoption panel are Owner actions; a Viewer keeps the
+// read-only canvas and never calls these endpoints.
+const canManageTunnels = computed(() => isOwner.value);
+function nodeName(nodeId: string): string {
+  return servers.value.find(server => server.id === nodeId)?.name || '';
 }
-
-function saveStoredSharedTunnels(list: SharedTunnel[]) {
-  try {
-    localStorage.setItem(SHARED_TUNNELS_KEY, JSON.stringify(list));
-  } catch {}
-}
-
-const sharedTunnelPool = ref<SharedTunnel[]>(loadStoredSharedTunnels());
-
-function updateSharedTunnelPool(tunnel: SharedTunnel) {
-  const list = [...sharedTunnelPool.value];
-  const idx = list.findIndex(t => t.key === tunnel.key);
-  if (idx >= 0) {
-    list[idx] = tunnel;
-  } else {
-    list.push(tunnel);
-  }
-  sharedTunnelPool.value = list;
-  saveStoredSharedTunnels(list);
-}
-
-function syncTunnelsFromScheme(scheme: RelayScheme) {
-  for (const conn of scheme.connections) {
-    const src = scheme.nodes.find(n => n.instanceId === conn.sourceInstanceId);
-    const tgt = scheme.nodes.find(n => n.instanceId === conn.targetInstanceId);
-    if (!src || !tgt) continue;
-
-    const summary = tunnelSummary(scheme, conn);
-    const key = `${src.resourceType}:${src.resourceId}->${tgt.resourceType}:${tgt.resourceId}:${conn.type}:${conn.tunnelProtocol || ''}:${conn.tunnelPort || ''}:${conn.listenPort || ''}:${conn.targetPort || ''}`;
-    updateSharedTunnelPool({
-      key,
-      sourceResourceId: src.resourceId,
-      sourceResourceType: src.resourceType,
-      sourceName: src.name,
-      sourceAddress: src.serverAddress,
-      sourceStatus: src.status,
-      sourceIsManageable: src.isManageable,
-      targetResourceId: tgt.resourceId,
-      targetResourceType: tgt.resourceType,
-      targetName: tgt.name,
-      targetAddress: tgt.serverAddress,
-      targetStatus: tgt.status,
-      targetIsManageable: tgt.isManageable,
-      type: conn.type,
-      tunnelProtocol: conn.tunnelProtocol,
-      tunnelPort: conn.tunnelPort,
-      listenPort: conn.listenPort,
-      targetHost: conn.targetHost,
-      targetPort: conn.targetPort,
-      supportTcp: conn.supportTcp,
-      supportUdp: conn.supportUdp,
-      title: summary.title || `${src.name} → ${tgt.name}`,
-      subtitle: `${summary.kind} ${summary.network}`,
-      statusText: conn.invalidReason ? '异常' : '可用',
-      hasError: !!conn.invalidReason
-    });
-  }
-}
-
-watch(() => proxyNodeStore.schemes, (schemes) => {
-  schemes.forEach(s => syncTunnelsFromScheme(s));
-}, { immediate: true, deep: true });
-
-const allSharedTunnels = computed<SharedTunnel[]>(() => {
-  const map = new Map<string, SharedTunnel>();
-  for (const t of sharedTunnelPool.value) {
-    map.set(t.key, t);
-  }
-  for (const s of proxyNodeStore.schemes) {
-    for (const conn of s.connections) {
-      const src = s.nodes.find(n => n.instanceId === conn.sourceInstanceId);
-      const tgt = s.nodes.find(n => n.instanceId === conn.targetInstanceId);
-      if (!src || !tgt) continue;
-      const summary = tunnelSummary(s, conn);
-      const key = `${src.resourceType}:${src.resourceId}->${tgt.resourceType}:${tgt.resourceId}:${conn.type}:${conn.tunnelProtocol || ''}:${conn.tunnelPort || ''}:${conn.listenPort || ''}:${conn.targetPort || ''}`;
-      map.set(key, {
-        key,
-        sourceResourceId: src.resourceId,
-        sourceResourceType: src.resourceType,
-        sourceName: src.name,
-        sourceAddress: src.serverAddress,
-        sourceStatus: src.status,
-        sourceIsManageable: src.isManageable,
-        targetResourceId: tgt.resourceId,
-        targetResourceType: tgt.resourceType,
-        targetName: tgt.name,
-        targetAddress: tgt.serverAddress,
-        targetStatus: tgt.status,
-        targetIsManageable: tgt.isManageable,
-        type: conn.type,
-        tunnelProtocol: conn.tunnelProtocol,
-        tunnelPort: conn.tunnelPort,
-        listenPort: conn.listenPort,
-        targetHost: conn.targetHost,
-        targetPort: conn.targetPort,
-        supportTcp: conn.supportTcp,
-        supportUdp: conn.supportUdp,
-        title: summary.title || `${src.name} → ${tgt.name}`,
-        subtitle: `${summary.kind} ${summary.network}`,
-        statusText: conn.invalidReason ? '异常' : '可用',
-        hasError: !!conn.invalidReason
-      });
-    }
-  }
-  return Array.from(map.values());
+const libraryTunnels = computed<CanvasTunnelLibraryItem[]>(() =>
+  tunnels.tunnels.map(tunnel => canvasTunnelLibraryItem(tunnel, nodeName))
+);
+const tunnelNames = computed<Record<string, string>>(() =>
+  Object.fromEntries(libraryTunnels.value.map(item => [item.id, item.name]))
+);
+const filteredTunnels = computed(() => {
+  const query = resourceSearch.value.trim().toLowerCase();
+  if (!query) return libraryTunnels.value;
+  return libraryTunnels.value.filter(item => item.searchText.includes(query));
 });
+async function reloadTunnels() { await tunnels.reload(); }
 
-const filteredSharedTunnels = computed(() => {
-  if (!resourceSearch.value.trim()) return allSharedTunnels.value;
-  const q = resourceSearch.value.trim().toLowerCase();
-  return allSharedTunnels.value.filter(t =>
-    t.title.toLowerCase().includes(q) ||
-    t.sourceName.toLowerCase().includes(q) ||
-    t.targetName.toLowerCase().includes(q) ||
-    t.subtitle.toLowerCase().includes(q)
-  );
-});
-
-function getTunnelInCurrentScheme(tunnel: SharedTunnel): CanvasConnection | undefined {
-  const scheme = currentScheme.value;
-  return scheme.connections.find(c => {
-    const src = scheme.nodes.find(n => n.instanceId === c.sourceInstanceId);
-    const tgt = scheme.nodes.find(n => n.instanceId === c.targetInstanceId);
-    if (!src || !tgt) return false;
-    return src.resourceId === tunnel.sourceResourceId &&
-           src.resourceType === tunnel.sourceResourceType &&
-           tgt.resourceId === tunnel.targetResourceId &&
-           tgt.resourceType === tunnel.targetResourceType &&
-           c.type === tunnel.type;
-  });
+function tunnelConnection(tunnelId: string): CanvasConnection | undefined {
+  return currentScheme.value.connections.find(connection => connection.tunnelId === tunnelId);
 }
+function isTunnelInCurrentScheme(tunnelId: string): boolean { return !!tunnelConnection(tunnelId); }
 
-function isTunnelInCurrentScheme(tunnel: SharedTunnel): boolean {
-  return !!getTunnelInCurrentScheme(tunnel);
-}
-
-function onSharedTunnelClick(tunnel: SharedTunnel) {
-  const existingConn = getTunnelInCurrentScheme(tunnel);
-  if (existingConn) {
-    selectConnection(existingConn);
-    showToast(`已高亮当前方案中的隧道: ${tunnel.title}`);
-  } else {
-    applySharedTunnelToScheme(tunnel);
-  }
-}
-
-function deleteSharedTunnel(tunnel: SharedTunnel) {
-  sharedTunnelPool.value = sharedTunnelPool.value.filter(t => t.key !== tunnel.key);
-  saveStoredSharedTunnels(sharedTunnelPool.value);
-  const conn = getTunnelInCurrentScheme(tunnel);
-  if (conn) {
-    currentScheme.value.connections = currentScheme.value.connections.filter(c => c.id !== conn.id);
-    saveDraft();
-  }
-  showToast(`已删除隧道: ${tunnel.title}`);
-}
-
-function applySharedTunnelToScheme(tunnel: SharedTunnel, canvasX = 300, canvasY = 200) {
-  const scheme = currentScheme.value;
-
-  // 1. Locate or create source node instance
-  let sourceInst = scheme.nodes.find(
-    n => n.resourceType === tunnel.sourceResourceType && n.resourceId === tunnel.sourceResourceId
-  );
-  if (!sourceInst) {
-    const serverObj = servers.value.find(s => s.id === tunnel.sourceResourceId);
-    sourceInst = {
-      instanceId: `inst-${Date.now()}-src`,
-      resourceId: tunnel.sourceResourceId,
-      resourceType: tunnel.sourceResourceType,
-      name: tunnel.sourceName,
-      protocol: tunnel.sourceResourceType === 'server' ? 'server' : 'custom',
-      serverAddress: tunnel.sourceAddress || serverObj?.publicIp || '',
-      status: (serverObj?.status as any) || (tunnel.sourceStatus as any) || 'online',
-      isManageable: tunnel.sourceIsManageable,
-      x: Math.max(20, canvasX - 160),
-      y: Math.max(20, canvasY - 30),
-      role: 'entry',
-      listenPort: tunnel.listenPort
-    };
-    scheme.nodes.push(sourceInst);
-  }
-
-  // 2. Locate or create target node instance
-  let targetInst = scheme.nodes.find(
-    n => n.resourceType === tunnel.targetResourceType && n.resourceId === tunnel.targetResourceId
-  );
-  if (!targetInst) {
-    const serverObj = servers.value.find(s => s.id === tunnel.targetResourceId);
-    targetInst = {
-      instanceId: `inst-${Date.now()}-tgt`,
-      resourceId: tunnel.targetResourceId,
-      resourceType: tunnel.targetResourceType,
-      name: tunnel.targetName,
-      protocol: tunnel.targetResourceType === 'server' ? 'server' : 'custom',
-      serverAddress: tunnel.targetAddress || serverObj?.publicIp || '',
-      status: (serverObj?.status as any) || (tunnel.targetStatus as any) || 'online',
-      isManageable: tunnel.targetIsManageable,
-      x: Math.max(20, canvasX + 160),
-      y: Math.max(20, canvasY - 30),
-      role: scheme.executionLocation === 'client' ? 'exit' : 'relay',
-      targetPort: tunnel.targetPort
-    };
-    scheme.nodes.push(targetInst);
-  }
-
-  // 3. Check if connection exists
-  const existingConn = scheme.connections.find(
-    c => c.sourceInstanceId === sourceInst!.instanceId && c.targetInstanceId === targetInst!.instanceId
-  );
-  if (existingConn) {
-    selectedConnection.value = existingConn;
-    selectedNode.value = null;
-    showToast('当前方案中已存在该隧道连接', 'warning');
+function onLibraryTunnelClick(item: CanvasTunnelLibraryItem) {
+  const existing = tunnelConnection(item.id);
+  if (existing) { selectConnection(existing); showToast(`已定位当前方案中的共享隧道: ${item.name}`); return; }
+  if (!canManageTunnels.value) return;
+  if (currentScheme.value.executionLocation === 'client') {
+    showToast('客户端方案不支持共享隧道：请在画布上直接连线生成内联连接', 'warning');
     return;
   }
+  void applyTunnelToScheme(item.id);
+}
 
-  // 4. Create and link connection
-  const newConn: CanvasConnection = {
-    id: `conn-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    sourceInstanceId: sourceInst.instanceId,
-    targetInstanceId: targetInst.instanceId,
-    type: tunnel.type || 'tunnel',
-    tunnelProtocol: tunnel.tunnelProtocol,
-    tunnelPort: tunnel.tunnelPort,
-    listenPort: tunnel.listenPort,
-    targetHost: tunnel.targetHost,
-    targetPort: tunnel.targetPort,
-    supportTcp: tunnel.supportTcp ?? true,
-    supportUdp: tunnel.supportUdp ?? true,
+// An endpoint box is created from the tunnel's own node reference, so a reference
+// can never point at a different server than the resource does.
+function ensureTunnelEndpoint(ref: string, x: number, y: number, role: CanvasNodeInstance['role']): CanvasNodeInstance | null {
+  const nodeId = canvasTunnelNodeId(ref);
+  const scheme = currentScheme.value;
+  const existing = scheme.nodes.find(item => item.resourceType === 'server' && item.resourceId === nodeId);
+  if (existing) return existing;
+  const server = servers.value.find(item => item.id === nodeId);
+  if (!server) return null;
+  const instance: CanvasNodeInstance = {
+    instanceId: `inst-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+    resourceId: server.id,
+    resourceType: 'server',
+    name: server.name,
+    protocol: 'server',
+    serverAddress: server.publicIp || server.hostname || '',
+    status: canvasDisplayStatus(server.status),
+    isManageable: true,
+    x: Math.max(20, x),
+    y: Math.max(20, y),
+    role
+  };
+  scheme.nodes.push(instance);
+  return instance;
+}
+
+// Reusing a tunnel in a server scheme adds a reference connection. Parameters are
+// copied so the drawing reads correctly; the resource stays authoritative.
+async function applyTunnelToScheme(tunnelId: string, canvasX = 320, canvasY = 220): Promise<void> {
+  const scheme = currentScheme.value;
+  if (!scheme.id) { showToast('请先保存方案', 'error'); return; }
+  if (!canManageTunnels.value) return;
+  if (scheme.executionLocation === 'client') { showToast('客户端方案不支持共享隧道', 'warning'); return; }
+  const tunnel = tunnels.byId(tunnelId);
+  if (!tunnel) { showToast('共享隧道未载入，请刷新后重试', 'error'); return; }
+  const existing = tunnelConnection(tunnelId);
+  if (existing) { selectConnection(existing); showToast('当前方案已引用该共享隧道', 'warning'); return; }
+  const sourceInstance = ensureTunnelEndpoint(tunnel.source, canvasX - 200, canvasY - 30, 'entry');
+  const targetInstance = ensureTunnelEndpoint(tunnel.target, canvasX + 200, canvasY - 30, 'relay');
+  if (!sourceInstance || !targetInstance) { showToast('隧道端点服务器不存在，无法加入方案', 'error'); return; }
+  const reference = canvasTunnelReference(
+    tunnel,
+    `conn-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    sourceInstance.instanceId,
+    targetInstance.instanceId
+  );
+  const connection: CanvasConnection = {
+    id: reference.id,
+    tunnelId: reference.tunnelId,
+    sourceInstanceId: sourceInstance.instanceId,
+    targetInstanceId: targetInstance.instanceId,
+    type: reference.type || 'tunnel',
+    tunnelProtocol: reference.tunnelProtocol,
+    tunnelPort: reference.tunnelPort,
+    listenPort: reference.listenPort,
+    targetHost: reference.targetHost,
+    targetPort: reference.targetPort,
+    supportTcp: reference.supportTcp ?? true,
+    supportUdp: reference.supportUdp ?? true,
     status: 'valid'
   };
-
-  scheme.connections.push(newConn);
-  selectedConnection.value = newConn;
+  scheme.connections.push(connection);
+  selectedConnection.value = connection;
   selectedNode.value = null;
-  saveDraft();
-  showToast(`已将隧道「${tunnel.title}」添加到当前方案`, 'success');
+  showToast(`已引用共享隧道「${tunnel.name}」`, 'success');
+  await saveDraft(true);
 }
+
+function openTunnelResourceEditor(tunnelId: string) {
+  if (!canManageTunnels.value) return;
+  const tunnel = tunnels.byId(tunnelId);
+  if (!tunnel) { showToast('共享隧道未载入，请刷新后重试', 'error'); return; }
+  selectedNode.value = null;
+  selectedConnection.value = null;
+  editor.value = { key: Date.now(), sharedTunnel: tunnel };
+}
+
+function openNewTunnelEditor() {
+  if (!canManageTunnels.value) return;
+  selectedNode.value = null;
+  selectedConnection.value = null;
+  editor.value = { key: Date.now(), createTunnel: true };
+}
+
+// An endpoint edit re-targets every referencing scheme, so pending drawing writes go
+// first and both lists are read back: a stale version token would fail the next save.
+async function saveTunnelResource(id: string | null, input: CanvasTunnelInput): Promise<CanvasTunnel> {
+  await flushPendingSaves();
+  let saved: CanvasTunnel;
+  try {
+    saved = id
+      ? await canvasTunnelAPI.update(id, { ...input, updatedAt: input.updatedAt || tunnels.byId(id)?.updatedAt || '' })
+      : await canvasTunnelAPI.create(input);
+  } catch (error) {
+    if (error instanceof APIError && error.code === 'stale_scheme') {
+      await Promise.all([tunnels.reload(), reloadSchemes()]);
+      throw new Error('隧道或引用方案已在其他地方修改，已重新载入，请重试');
+    }
+    throw error;
+  }
+  await Promise.all([tunnels.reload(), reloadSchemes()]);
+  if (tunnels.legacyObjects.length) await tunnels.loadLegacyObjects();
+  return saved;
+}
+
+async function onTunnelResourceSaved(payload: { tunnel: CanvasTunnel; addToScheme: boolean }) {
+  closeEditor();
+  if (payload.addToScheme) await applyTunnelToScheme(payload.tunnel.id);
+  else showToast('共享隧道已保存');
+}
+
+const pendingTunnel = ref<CanvasTunnelLibraryItem | null>(null);
+const confirmDeleteTunnel = ref(false);
+const tunnelInUse = ref<{ name: string; schemes: CanvasTunnelSchemeRef[] } | null>(null);
+const openTunnelInUse = ref(false);
+
+function askDeleteTunnel(item: CanvasTunnelLibraryItem) {
+  if (!canManageTunnels.value) return;
+  pendingTunnel.value = item;
+  confirmDeleteTunnel.value = true;
+}
+
+// A tunnel that is still referenced cannot be deleted: the server answers 409
+// tunnel_in_use and names the schemes, which the dialog lists. Nothing is guessed.
+async function confirmDeleteTunnelResource() {
+  const item = pendingTunnel.value;
+  if (!item) return;
+  try {
+    await tunnels.remove(item.id);
+    await reloadSchemes();
+    showToast(`已删除隧道「${item.name}」`);
+  } catch (error) {
+    if (error instanceof APIError && error.code === 'tunnel_in_use') {
+      const details = error.details as { schemes?: CanvasTunnelSchemeRef[] };
+      tunnelInUse.value = { name: item.name, schemes: Array.isArray(details.schemes) ? details.schemes : [] };
+      openTunnelInUse.value = true;
+    } else {
+      showToast(`删除隧道失败: ${(error as Error).message}`, 'error');
+    }
+  } finally {
+    pendingTunnel.value = null;
+  }
+}
+
+function openSchemeById(id: string) {
+  openTunnelInUse.value = false;
+  if (!proxyNodeStore.schemes.some(scheme => scheme.id === id)) return;
+  activeSchemeId.value = id;
+  switchScheme();
+}
+
+// Legacy objects: an earlier publication created server objects without an owner.
+// They remain ordinary objects until the Owner claims one for a compatible tunnel.
+const legacyPanelOpen = ref(false);
+const legacyChoice = reactive<Record<string, string>>({});
+const adoptingObject = ref<CanvasTunnelObject | null>(null);
+const confirmAdopt = ref(false);
+const adoptTargetName = computed(() =>
+  adoptingObject.value ? tunnels.nameOf(legacyChoice[legacyKey(adoptingObject.value)]) : ''
+);
+
+function legacyKey(object: CanvasTunnelObject): string { return `${object.kind}:${object.id}`; }
+function legacyKindLabel(kind: string): string {
+  return ({ inbound: '入站', outbound: '出站', chain: '代理链' } as Record<string, string>)[kind] || kind;
+}
+function legacyNodeName(nodeId: string): string {
+  return servers.value.find(server => server.id === nodeId)?.name || nodeId || '—';
+}
+async function toggleLegacyPanel() {
+  legacyPanelOpen.value = !legacyPanelOpen.value;
+  if (legacyPanelOpen.value && canManageTunnels.value) await tunnels.loadLegacyObjects();
+}
+function askAdoptObject(object: CanvasTunnelObject) {
+  if (!canManageTunnels.value || !legacyChoice[legacyKey(object)]) return;
+  adoptingObject.value = object;
+  confirmAdopt.value = true;
+}
+async function confirmAdoptObject() {
+  const object = adoptingObject.value;
+  const target = object ? legacyChoice[legacyKey(object)] : '';
+  if (!object || !target) return;
+  try {
+    await tunnels.adopt(target, object);
+    delete legacyChoice[legacyKey(object)];
+    await reloadSchemes();
+    showToast(`已认领「${object.name}」到隧道「${tunnels.nameOf(target)}」`);
+  } catch (error) {
+    if (error instanceof APIError && error.code === 'object_owned') {
+      await tunnels.loadLegacyObjects();
+      showToast('认领失败: 该对象已被认领，不能重复分配', 'error');
+    } else {
+      showToast(`认领失败: ${(error as Error).message}`, 'error');
+    }
+  } finally {
+    adoptingObject.value = null;
+  }
+}
+
 
 // Filtered resources
 const filteredServers = computed(() => {
@@ -1687,8 +1844,9 @@ function onCanvasDrop(e: DragEvent) {
   const canvasY = Math.round((clientY - panY.value) / zoom.value);
 
   if (draggedPayload.type === 'tunnel') {
-    applySharedTunnelToScheme(draggedPayload.tunnel, canvasX, canvasY);
+    const tunnelId = String(draggedPayload.tunnelId || '');
     draggedPayload = null;
+    if (tunnelId) void applyTunnelToScheme(tunnelId, canvasX, canvasY);
     return;
   }
 
@@ -2060,6 +2218,11 @@ async function handleConfirmPublish() {
     showToast(`发布前请先修复: ${invalid.invalidReason}`, 'error');
     return;
   }
+  if (scheme.executionLocation === 'server' && planBlocked.value) {
+    const reasons = (plan.value?.conflicts || []).map(conflict => tunnelConflictText(conflict)).slice(0, 3).join('；');
+    showToast(`发布已阻止：${reasons || plan.value?.message || '存在未解决的冲突'}`, 'error');
+    return;
+  }
   publishing.value = true;
   try {
     // Flush the pending edit first, so the server publishes what is on screen.
@@ -2106,6 +2269,10 @@ onMounted(async () => {
   // Schemes are stored by the server now; the browser keeps no copy of them.
   await reloadSchemes();
   readLocalSchemes();
+  // The shared-tunnel pool that an earlier build kept in this browser is gone: K4
+  // stores tunnels on the panel, and the migration created one per old connection.
+  dropLegacySharedTunnelStore();
+  if (isOwner.value) await tunnels.reload();
 
   const qSchemeId = route.query.schemeId as string | undefined;
   const qFocusConnId = route.query.focusConnId as string | undefined;

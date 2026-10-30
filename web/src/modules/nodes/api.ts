@@ -17,8 +17,9 @@ export interface NodeView extends NodeNetworkSettings {
   enabled: boolean; allowSubscription: boolean; maintenance: boolean; hostname: string; os: string; agentVersion: string; publicIp: string; lastHeartbeat: string; createdAt: string;
   // Set once the node was logically deleted; an empty string means "live".
   deletedAt: string;
-  capabilities: { core_name?: string; core_version?: string; singbox_user_stats?: boolean; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
-  heartbeat: { traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
+  coreSelectionBlocked?:CoreName[];
+  capabilities: { multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
+  heartbeat: { cores?:CoreStatus[]; load1?: number; load5?: number; load15?: number; processCount?: string; tcpConnections?: string; udpSockets?: string; memoryUsedBytes?: string; swapUsedBytes?: string; diskUsedBytes?: string; tuningCurrent?: Record<string,string>; traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
 }
 // The panel publishes the release version, the gRPC port and the digest of the
 // certificate trust anchor so the register dialog can build the one-command
@@ -36,15 +37,20 @@ export const releaseRepository = 'jingniao/qui';
 // no-op on a host that already has them, and the trailing `;` keeps it valid in
 // busybox ash, dash and bash. --no-insecure overrides a -k that a curl wrapper
 // on the node may add, so the script is never fetched without verified TLS.
-export function installCommand(input: { version: string; host: string; httpPort: number; grpcPort: number; caSha256: string; token: string; core: string }): string {
+export function installCommand(input: { version: string; host: string; httpPort: number; grpcPort: number; caSha256: string; token: string; core?: string; cores?: CoreName[] }): string {
+  // `--core` is repeatable in the K3c installer: one flag per selected core. The
+  // selection is deduplicated and allowlisted; the default remains ["xray"].
+  const selected = [...new Set(input.cores ?? (input.core ? [input.core] : ["xray"]))];
+  if (!selected.length || selected.some(core => core !== 'xray' && core !== 'sing-box')) throw new Error('请至少选择一个运行内核（xray 或 sing-box）');
+  const coreFlags = selected.map(core => ` --core ${core}`).join("");
   const port = input.httpPort === 443 ? '' : ` --http-port ${input.httpPort}`;
   const bootstrap = 'if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; '
     + 'elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; ';
-  return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${port} --grpc-port ${input.grpcPort} --ca-sha256 ${input.caSha256} --token ${input.token} --core ${input.core}`;
+  return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${port} --grpc-port ${input.grpcPort} --ca-sha256 ${input.caSha256} --token ${input.token}${coreFlags}`;
 }
 
-export interface HealthCheck { id:string;nodeId:string;revision:number;status:"queued"|"complete"|"expired";createdAt:string;deadline:string;result?:{healthy?:boolean;code:string;observed_at?:{seconds?:number;nanos?:number}}; }
-export interface RestartTask {commandId:string;revision:number;status:"pending"|"success"|"failed";code:string;createdAt:string;}
+export interface HealthCheck { core?:CoreName|""; id:string;nodeId:string;revision:number;status:"queued"|"complete"|"expired";createdAt:string;deadline:string;result?:{healthy?:boolean;code:string;observed_at?:{seconds?:number;nanos?:number}}; }
+export interface RestartTask {core?:CoreName|"";commandId:string;revision:number;status:"pending"|"success"|"failed";code:string;createdAt:string;}
 export interface CertificateObservation {issuer?:string;fingerprint?:string;notBefore?:string;expiresAt?:string;status:string;integrity:'consistent'|'invalid';revokedAt?:string;}
 export interface CertificateStatus {identitySnapshotDigest:string;signingCAFingerprint?:string;currentSigningAvailable:boolean;nodeId:string;enabled:boolean;observedAt:string;active:CertificateObservation|null;pending:(CertificateObservation&{createdAt:string;purpose:'renewal'|'key_rotation'|'unknown';sourceMatches:boolean})|null;}
 export interface PublishedTopology {
@@ -61,6 +67,9 @@ export interface DeletionPreview { mode: DeletionMode; blockers: DeletionBlocker
 export interface LatencyTargetsInput { custom: boolean; targetIds: string[]; }
 export interface LatencyTargetsSettings extends LatencyTargetsInput { defaultTargetIds: string[]; }
 export const nodeAPI = {
+  metrics: (id: string, hours = 1) => request<NodeMetricsResponse>(`/nodes/${encodeURIComponent(id)}/metrics?hours=${hours}`),
+  tuning: (id: string) => request<NodeTuning>(`/nodes/${encodeURIComponent(id)}/tuning`),
+  saveTuning: (id: string, input: NodeTuningInput) => request<{requestId:string;status:'pending'}>(`/nodes/${encodeURIComponent(id)}/tuning`, 'PUT', input),
   latencyTargets: (nodeId: string) => request<LatencyTargetsSettings>(`/nodes/${encodeURIComponent(nodeId)}/latency-targets`),
   saveLatencyTargets: (nodeId: string, input: LatencyTargetsInput) => request<LatencyTargetsSettings>(`/nodes/${encodeURIComponent(nodeId)}/latency-targets`, 'PUT', input),
   latency: (id: string, hours: number = 1) => request<LatencyResponse>(`/nodes/${encodeURIComponent(id)}/latency?hours=${hours}`),
@@ -73,9 +82,9 @@ export const nodeAPI = {
 	enrollmentStatus:(id:string)=>request<EnrollmentStatus>(`/nodes/${encodeURIComponent(id)}/enrollment-status`),
 	certificateStatus:(id:string)=>request<CertificateStatus>(`/nodes/${encodeURIComponent(id)}/certificate-status`),
 restartTasks:(id:string)=>request<{items:RestartTask[]}>(`/nodes/${encodeURIComponent(id)}/restart-core`),
-restartCore:(id:string,expectedRevision:number)=>request<RestartTask>(`/nodes/${encodeURIComponent(id)}/restart-core`,"POST",{expectedRevision,confirmNodeId:id}),
+restartCore:(id:string,expectedRevision:number,core:CoreName|""="")=>request<RestartTask>(`/nodes/${encodeURIComponent(id)}/restart-core`,"POST",{expectedRevision,confirmNodeId:id,core}),
 healthChecks:(id:string)=>request<{items:HealthCheck[]}>(`/nodes/${encodeURIComponent(id)}/health-checks`),
-requestHealth:(id:string,expectedRevision:number)=>request<HealthCheck>(`/nodes/${encodeURIComponent(id)}/health-checks`,"POST",{expectedRevision}),
+requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<HealthCheck>(`/nodes/${encodeURIComponent(id)}/health-checks`,"POST",{expectedRevision,core}),
   list: (page: number, keyword: string, deleted = false) => request<Page<NodeView>>(`/nodes?page=${page}&pageSize=20&keyword=${encodeURIComponent(keyword)}${deleted ? '&deleted=1' : ''}`),
   get: (id: string) => request<NodeView>(`/nodes/${encodeURIComponent(id)}`),
   enroll: (name: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name }),
@@ -95,3 +104,14 @@ export interface LatencyResponse {
   targets: { id: string; label: string; host: string; port: number }[];
   series: { targetId: string; points: LatencyPoint[] }[];
 }
+
+// New camelCase observations use protobuf JSON: uint64 values are decimal strings.
+export interface HostInfo { cpuModel?:string; cpuCores?:number; architecture?:string; kernelVersion?:string; memoryTotalBytes?:string; swapTotalBytes?:string; diskTotalBytes?:string; osPrettyName?:string; }
+export interface NodeMetricPoint { at:string; cpuPercent:number|null; memoryPercent:number|null; diskPercent:number|null; memoryUsedBytes:number|null; swapUsedBytes:number|null; diskUsedBytes:number|null; load1:number|null; processCount:number|null; tcpConnections:number|null; udpSockets:number|null; activeConnections:number|null; rxBytesPerSecond:number|null; txBytesPerSecond:number|null; samples:number; }
+export interface NodeMetricsResponse { intervalSeconds:number; sampleSeconds:60; points:NodeMetricPoint[]; }
+export interface NodeTuningInput { settings:Record<string,string>; clear:boolean; confirmNodeId:string; }
+export interface NodeTuning { supported:boolean; desired:Record<string,string>; requestId:string|null; status:'pending'|'applied'|'cleared'|'failed'|'unconfirmed'; result:{requestId?:string;status?:string;keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null; requestedAt:string|null; updatedAt:string|null; current:Record<string,string>; }
+
+export type CoreName = 'xray' | 'sing-box';
+export interface CoreCapability { name:CoreName; version?:string; protocols?:{protocol:string;inbound?:boolean;outbound?:boolean;tcp?:boolean;udp?:boolean}[]; singbox_user_stats?:boolean; forward_inbound_supported?:boolean; device_gate_supported?:boolean; healthy?:boolean; observation_contract_version?:number; }
+export interface CoreStatus { name:CoreName; healthy:boolean; error?:string; started_at?:{seconds?:number;nanos?:number}; traffic_source_status?:TrafficSourceStatus; }

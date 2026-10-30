@@ -84,6 +84,42 @@ assert.deepEqual(m.planLines(plan), ['HK-01：新增入站 [方案] trojan :8443
 assert.deepEqual(m.planLines(plan, ['b']), []);
 assert.deepEqual(m.planLines({ ok: false, servers: null, conflicts: null, warnings: null, connections: null }), []);
 
+// K4: conflicts carry a reason, a shared tunnel lists affected schemes and a tunnel
+// resource is edited through the same draft without depending on one drawing.
+assert.equal(m.tunnelConflictText({ nodeId: 'a', port: 8443, with: '旧入口', connectionId: 'old', reason: 'legacy_object', objectId: 'OBJ-1' }), '历史对象未认领：旧入口（对象 OBJ-1）');
+assert.equal(m.tunnelConflictText({ nodeId: '', port: 0, with: '旧出站', connectionId: '', reason: 'object_name' }), '对象名称冲突：旧出站');
+assert.equal(m.tunnelConflictText({ nodeId: 'a', port: 8443, with: '现有入站', connectionId: 'old' }), '端口冲突 :8443（现有入站）');
+assert.equal(m.tunnelConflictText({ nodeId: 'a', port: 0, with: '线索', connectionId: '', reason: 'tunnel_object' }), '共享隧道对象冲突：线索');
+assert.deepEqual(m.tunnelPlanLines(
+  { ...plan, tunnels: [{ tunnelId: 't1', affectedSchemes: [{ id: 's1', name: '方案一' }, { id: 's2', name: '方案二' }] }] },
+  id => (id === 't1' ? 'A to B' : '')
+), ['共享隧道 A to B：影响 2 个方案（方案一、方案二）']);
+assert.deepEqual(m.tunnelPlanLines(plan, () => ''), []);
+const resource = {
+  id: 't1', name: 'A to B TLS', type: 'tunnel', source: 'server:a', target: 'server:b',
+  tunnelProtocol: 'wireguard', tunnelPort: 51820, supportTcp: true, supportUdp: true,
+  createdAt: 'then', updatedAt: 'now', schemes: [], objects: [], publishStatus: 'published'
+};
+const resourceDraft = m.createTunnelResourceDraft(resource);
+assert.equal(resourceDraft.source, 'server:a');
+assert.equal(resourceDraft.target, 'server:b');
+assert.equal(resourceDraft.protocol, 'wireguard');
+assert.equal(resourceDraft.port, 51820);
+assert.equal(resourceDraft.kind, 'encrypted');
+assert.equal(m.createTunnelResourceDraft({ ...resource, type: 'port_forward', listenPort: 10080, targetHost: 'example.com', targetPort: 443 }).kind, 'forward');
+assert.equal(m.validateTunnelResource(resourceDraft, servers), '');
+assert.match(m.validateTunnelResource({ ...resourceDraft, target: 'server:gone' }, servers), /不存在/);
+assert.match(m.validateTunnelResource({ ...resourceDraft, source: 'server:a', target: 'server:a' }, servers), /相同/);
+assert.match(m.validateTunnelResource({ ...resourceDraft, tcp: false, udp: false }, servers), /TCP/);
+assert.match(m.validateTunnelResource({ ...resourceDraft, protocol: 'gost' }, servers), /GOST/);
+assert.match(m.validateTunnelResource({ ...resourceDraft, port: 70000 }, servers), /端口/);
+assert.deepEqual(
+  m.tunnelResourceInput({ ...resourceDraft, kind: 'forward', listenPort: 10081, targetHost: ' a.example ', targetPort: 443 }, ' A to B forward ', 'tunnel'),
+  { name: 'A to B forward', source: 'server:a', target: 'server:b', type: 'port_forward', supportTcp: true, supportUdp: true, listenPort: 10081, targetHost: 'a.example', targetPort: 443 }
+);
+const tlsInput = m.tunnelResourceInput(resourceDraft, ' A to B TLS ', 'proxy_chain');
+assert.deepEqual(tlsInput, { name: 'A to B TLS', source: 'server:a', target: 'server:b', type: 'proxy_chain', supportTcp: true, supportUdp: true, tunnelProtocol: 'wireguard', tunnelPort: 51820 });
+
 // Exercise the real serialization functions without their HTTP/store imports.
 const apiSource = readFileSync(new URL('../src/modules/proxy/api.ts', import.meta.url), 'utf8');
 const inputFunction = apiSource.slice(apiSource.indexOf('export function relaySchemeToCanvasInput'), apiSource.indexOf('// The status a canvas box'));
@@ -98,7 +134,62 @@ const reloaded = api.canvasSchemeToRelayScheme({ id: 'saved', name: '方案', ex
 assert.equal(reloaded.connections.find(c => c.id === 'old').targetHost, 'custom.example');
 assert.equal(reloaded.connections.find(c => c.id === 'old').targetPort, 8080);
 
-console.log('PASS tunnel-editor self-test: defaults, migration, identity, validation, preview, summaries, statuses and API round-trip');
+// K4 references: tunnelId survives a save and a hydrated GET, and the client-format
+// fields the panel shows come back from the resource, not from the drawing.
+const reference = { id: 'edge', tunnelId: 'T1', sourceInstanceId: 'ia', targetInstanceId: 'ib', type: 'tunnel',
+  tunnelProtocol: 'tls', tunnelPort: 8443, supportTcp: true, supportUdp: true, status: 'valid' };
+const referenceWire = api.relaySchemeToCanvasInput({ ...base, connections: [reference] }, {});
+assert.equal(referenceWire.layout.connections[0].tunnelId, 'T1');
+assert.equal(referenceWire.layout.connections[0].source, 'ia');
+assert.equal(referenceWire.layout.connections[0].target, 'ib');
+assert.equal(referenceWire.layout.connections[0].tunnelPort, 8443);
+const hydrated = api.canvasSchemeToRelayScheme({
+  id: 'saved', name: '方案', execution: 'server', updatedAt: 'today', publishedAt: '',
+  layout: { instances: [], connections: [{ id: 'edge', source: 'a', target: 'b', tunnelId: 'T1', type: 'port_forward',
+    listenPort: 10080, targetHost: 'example.com', targetPort: 443, supportTcp: true, supportUdp: false }] }
+}, {});
+const hydratedEdge = hydrated.connections[0];
+assert.equal(hydratedEdge.tunnelId, 'T1');
+assert.equal(hydratedEdge.type, 'port_forward');
+assert.equal(hydratedEdge.listenPort, 10080);
+assert.equal(hydratedEdge.targetHost, 'example.com');
+assert.equal(hydratedEdge.targetPort, 443);
+assert.equal(hydratedEdge.supportUdp, false);
+assert.equal(api.relaySchemeToCanvasInput(hydrated, {}).layout.connections[0].tunnelId, 'T1', 'a hydration round-trip keeps the reference');
+
+// Library rows and reference builders are pure, so the page only resolves names.
+assert.equal(api.canvasTunnelNodeId('server:NODE_A'), 'NODE_A');
+assert.equal(api.canvasTunnelNodeId('inbound:x'), 'x');
+assert.equal(api.canvasTunnelRef('NODE_A'), 'server:NODE_A');
+assert.equal(api.canvasTunnelKindLabel('port_forward'), '端口转发');
+assert.equal(api.canvasTunnelKindLabel('proxy_chain'), '加密中转');
+assert.equal(api.canvasTunnelNetworkLabel(true, false), 'TCP');
+assert.equal(api.canvasTunnelNetworkLabel(false, true), 'UDP');
+assert.equal(api.canvasTunnelNetworkLabel(false, false), '—');
+const libraryTunnel = { ...resource, type: 'tunnel', tunnelProtocol: 'tls', tunnelPort: 8443,
+  schemes: [{ id: 's1', name: '方案一' }], objects: [{ kind: 'inbound', id: 'o1', nodeId: 'b', name: 'n', port: 8443 }], publishStatus: 'modified' };
+const libraryItem = api.canvasTunnelLibraryItem(libraryTunnel, id => (id === 'a' ? '源服务器' : '目标服务器'));
+assert.equal(libraryItem.title, '源服务器 → 目标服务器');
+assert.equal(libraryItem.subtitle, '加密隧道 TLS :8443 · TCP / UDP');
+assert.deepEqual(libraryItem.schemeNames, ['方案一']);
+assert.equal(libraryItem.objectCount, 1);
+assert.equal(libraryItem.publishStatus, 'modified');
+assert.equal(api.canvasTunnelLibraryItem({ ...libraryTunnel, source: 'server:gone' }, id => (id === 'b' ? '目标服务器' : '')).title, '已删除的服务器 → 目标服务器');
+assert.equal(api.canvasTunnelPublishStatusLabel('published'), '已发布');
+assert.equal(api.canvasTunnelPublishStatusLabel('draft'), '草稿');
+assert.equal(api.canvasTunnelAffectedText([{ id: 's1', name: '方案一' }, { id: 's2', name: '方案二' }]), '将影响 2 个方案：方案一、方案二');
+assert.equal(api.canvasTunnelAffectedText([]), '当前没有方案引用此隧道，保存只修改资源本身');
+const referenceBody = api.canvasTunnelReference(libraryTunnel, 'edge', 'ia', 'ib');
+assert.deepEqual(referenceBody, { id: 'edge', tunnelId: 't1', source: 'ia', target: 'ib', type: 'tunnel',
+  tunnelProtocol: 'tls', tunnelPort: 8443, supportTcp: true, supportUdp: true });
+const forwardBody = api.canvasTunnelReference({ ...libraryTunnel, type: 'port_forward', listenPort: 10080, targetHost: 'example.com', targetPort: 443, tunnelProtocol: undefined, tunnelPort: undefined }, 'edge', 'ia', 'ib');
+assert.equal(forwardBody.type, 'port_forward');
+assert.equal(forwardBody.listenPort, 10080);
+assert.equal(forwardBody.targetHost, 'example.com');
+assert.equal(forwardBody.targetPort, 443);
+assert.equal(forwardBody.tunnelProtocol, undefined, 'a forwarding reference sends no tunnel protocol');
+
+console.log('PASS tunnel-editor self-test: defaults, migration, identity, validation, preview, summaries, statuses, K4 shared-tunnel references (tunnelId round-trip/hydration, library rows, resource input) and API round-trip');
 
 // Run the actual request coordinator with deterministic timers and watch/ref stubs.
 const coordinatorSource = readFileSync(new URL('../src/modules/proxy/components/relay/useTunnelPlan.ts', import.meta.url), 'utf8');

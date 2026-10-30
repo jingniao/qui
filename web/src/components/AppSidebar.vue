@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <aside
     :class="[
       'h-full bg-[#F8F8FA]/95 backdrop-blur-xl text-ios-label flex flex-col border-r border-black/[0.06] transition-all duration-300 select-none w-full relative',

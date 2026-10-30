@@ -5,9 +5,24 @@ import ts from 'typescript';
 import { computed, reactive, ref } from 'vue';
 
 async function load(path) {
-  const source = readFileSync(new URL(path, import.meta.url), 'utf8');
-  const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  return import(await moduleUrl(new URL(path, import.meta.url)));
+}
+// The model now imports the shared per-core helper, so the harness resolves
+// relative imports to their own transpiled data: URLs instead of dropping them.
+async function moduleUrl(url, cache = new Map()) {
+  if (cache.has(url.href)) return cache.get(url.href);
+  const source = readFileSync(url, 'utf8');
+  let code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+  const specs = [...new Set([...code.matchAll(/from\s+'([^']+)'/g)].map(match => match[1]).filter(spec => spec.startsWith('.')))];
+  for (const spec of specs) {
+    const target = new URL(spec, url);
+    if (!/\.tsx?$/.test(target.pathname)) target.pathname += '.ts';
+    const child = await moduleUrl(target, cache);
+    code = code.split(`from '${spec}'`).join(`from '${child}'`);
+  }
+  const moduleUrlValue = `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
+  cache.set(url.href, moduleUrlValue);
+  return moduleUrlValue;
 }
 const api = await load('../src/modules/proxy/components/node-editor/nodeEditorModel.ts');
 const { legacyList } = await load('./fixtures/node-editor-legacy.ts');
@@ -16,6 +31,9 @@ const json = value => JSON.parse(JSON.stringify(value));
 // Frozen U3 protocolChanged/save logic, independent from the new builder.
 function legacyServer(form, addresses, mtu) {
   const value = json(form);
+  // K3b: an empty `core` means "follow the primary core" and is not sent, so the
+  // frozen pre-K3b payload never contains the field.
+  delete value.core;
   if (value.internalRelay) value.subscriptionVisible = false;
   if (value.protocol === 'wireguard') value.settings = {
     wireguard: { secret_key: '', addresses: addresses.split(/\r?\n/).map(value => value.trim()).filter(Boolean), peers: [], mtu }
@@ -82,6 +100,43 @@ assert.match(api.protocolReason({ ...server, capabilities: { core_name: 'sing-bo
 assert.match(api.protocolReason(undefined, 'vless'), /选择服务器/);
 assert.match(api.protocolReason({ ...server, capabilities: {} }, 'vless'), /尚未上报/);
 assert.match(api.protocolReason(server, 'socks5'), /未报告/);
+// K3b core selector: only the cores the Agent reports as enabled are offered, and
+// the protocol matrix follows the selected core.
+const multi = { ...server, capabilities: {
+  core_name: 'xray', core_version: '26.3.27', multi_core_supported: true,
+  protocols: [{ protocol: 'vless', inbound: true }],
+  cores: [
+    { name: 'xray', version: '26.3.27', protocols: [{ protocol: 'vless', inbound: true }], forward_inbound_supported: true, device_gate_supported: true },
+    { name: 'sing-box', version: '1.14.4', protocols: [{ protocol: 'vless', inbound: true }, { protocol: 'hysteria2', inbound: true }] }
+  ] } };
+assert.deepEqual(api.coreOptions(multi).map(core => core.name), ['xray', 'sing-box']);
+assert.deepEqual(api.coreOptions(multi).map(core => core.primary), [true, false]);
+assert.equal(api.defaultCore(multi), 'xray');
+assert.equal(api.coreReason(multi, ''), ''); // empty = follow the primary core
+assert.equal(api.coreReason(multi, 'sing-box'), '');
+assert.equal(api.protocolReason(multi, 'hysteria2', 'sing-box'), '');
+assert.match(api.protocolReason(multi, 'hysteria2', 'xray'), /Xray/);
+assert.match(api.coreReason({ ...multi, coreSelectionBlocked: ['sing-box'] }, 'sing-box'), /core_pending/);
+// An Agent that never negotiated multi-core keeps one core and cannot select the other.
+assert.match(api.coreReason({ ...multi, capabilities: { ...multi.capabilities, multi_core_supported: false } }, 'sing-box'), /未协商多核心支持/);
+assert.match(api.coreReason({ ...server, capabilities: { core_name: 'xray' } }, 'sing-box'), /未上报启用/);
+const stepState = api.createEditor('server');
+stepState.form.core = 'sing-box';
+assert.match(api.validateStep(2, stepState, { ...multi, capabilities: { ...multi.capabilities, multi_core_supported: false } }, []), /未协商多核心支持/);
+stepState.form.core = '';
+stepState.form.name = 'multi-core-443';
+assert.equal(api.validateStep(2, stepState, multi, []), '');
+// The core travels in the payload, and an empty core (= primary) is omitted.
+const coreState = api.createEditor('server', null, 'list');
+assert.equal('core' in api.buildPayload(coreState), false);
+coreState.form.core = 'sing-box';
+assert.equal(api.buildPayload(coreState).core, 'sing-box');
+const editCore = api.createEditor('server', { id: 'i1', nodeId: 'server', name: 'x', protocol: 'vless', core: 'sing-box', port: 443,
+  listen: '0.0.0.0', enabled: true, subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
+  settings: {}, hasTlsKey: false, hasWireGuardKey: false });
+assert.equal(editCore.form.core, 'sing-box');
+assert.equal(api.buildPayload(editCore).core, 'sing-box');
+console.log('PASS NODE_EDITOR_CORE: per-core selector uses reported cores, primary = empty core, protocol matrix per core, core_pending refused, payload keeps the core');
 const state = api.createEditor('server');
 state.form.name = 'Tokyo-vless-443';
 const rows = [{ id: 'current', nodeId: 'server', port: 443, name: 'Current' }, { id: 'canvas', nodeId: 'server', port: 10000, name: '[canvas] relay', enabled: false }, { id: 'other', nodeId: 'elsewhere', port: 1443 }];
@@ -92,13 +147,20 @@ assert.match(api.portConflict(state.form, rows), /canvas/);
 assert.equal(api.randomPort(state.form, rows, '', () => 0), 10001);
 state.form.port = 1443;
 assert.equal(api.portConflict(state.form, rows), '');
-// TCP and UDP listeners may share a port; only overlapping transports conflict.
+// K3b: the Agent reserves every enabled inbound's numeric port node-wide, so a
+// TCP and a UDP listener can NOT share a port number (an earlier change allowed
+// it, which the backend never accepted).
 const mixed = [{ id: 'vless', nodeId: 'server', port: 443, name: 'VLESS', protocol: 'vless', settings: {} }];
-assert.equal(api.portConflict({ ...state.form, port: 443, protocol: 'hysteria2', settings: {} }, mixed), '');
+assert.match(api.portConflict({ ...state.form, port: 443, protocol: 'hysteria2', settings: {} }, mixed), /VLESS/);
+assert.match(api.portConflict({ ...state.form, port: 443, protocol: 'tuic', settings: {} }, mixed), /VLESS/);
 assert.match(api.portConflict({ ...state.form, port: 443, protocol: 'shadowsocks', settings: {} }, mixed), /VLESS/);
-assert.equal(api.portConflict({ ...state.form, port: 443, protocol: 'forward', settings: { forward: { host: 'a', port: 1, network: 'udp' } } }, mixed), '');
+assert.match(api.portConflict({ ...state.form, port: 443, protocol: 'forward', settings: { forward: { host: 'a', port: 1, network: 'udp' } } }, mixed), /VLESS/);
 assert.match(api.portConflict({ ...state.form, port: 443, protocol: 'forward', settings: { forward: { host: 'a', port: 1, network: 'tcp,udp' } } }, mixed), /VLESS/);
-console.log('PASS NODE_EDITOR_PORTS: TCP and UDP listeners may share a port; overlapping transports conflict');
+assert.equal(api.portConflict({ ...state.form, port: 443, protocol: 'hysteria2', settings: {} }, mixed, 'vless'), '');
+// The random port picker follows the same rule: a UDP listener skips a TCP port.
+assert.equal(api.randomPort({ ...state.form, protocol: 'hysteria2', settings: {} },
+  [{ id: 'tcp', nodeId: 'server', port: 10000, name: 'TCP', protocol: 'vless', settings: {} }], '', () => 0), 10001);
+console.log('PASS NODE_EDITOR_PORTS: node-wide numeric port rule (TCP and UDP cannot share a port number), random port skips taken ports');
 assert.equal(api.validateStep(2, state, server, rows), '');
 for (const port of [0, 65536, 1.5, NaN]) { state.form.port = port; assert.match(api.validateStep(2, state, server, rows), /端口/); }
 state.form.settings.security = 'tls';

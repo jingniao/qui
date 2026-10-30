@@ -10,15 +10,27 @@
         <p v-if="state.original" class="text-xs text-ios-secondary">编辑时服务器已锁定。</p>
         <label v-for="server in eligibleServers" :key="server.id" class="block rounded-2xl border border-ios-border p-4 cursor-pointer">
           <span class="flex items-center gap-2 text-sm text-ios-label"><input v-model="f.nodeId" :value="server.id" type="radio" :disabled="!!state.original" />{{ server.name }}</span>
-          <span class="block mt-2 text-xs text-ios-secondary font-mono">{{ server.capabilities?.core_name || '—' }} {{ server.capabilities?.core_version || '—' }}</span>
+          <span class="block mt-2 text-xs text-ios-secondary font-mono">{{ coreSummaryLabel(server) }}</span>
           <span class="block mt-2 text-xs text-ios-secondary">{{ server.capabilities?.protocols?.filter(p => p.inbound).map(p => p.protocol).join(' · ') || '尚未上报支持的入站协议' }}</span>
         </label>
         <p v-if="!eligibleServers.length" class="text-sm text-ios-secondary">没有可用的已登记服务器，请先登记服务器。</p>
       </div>
       <div v-if="step === 2" class="space-y-4">
+        <div v-if="coreChoices.length > 1" class="space-y-1.5">
+          <label class="block text-xs text-ios-secondary">运行内核
+            <select v-model="f.core" class="form-input-base mt-1.5">
+              <option value="">跟随主核心（{{ primaryCoreLabel }}）</option>
+              <option v-for="core in coreChoices" :key="core.name" :value="core.name">{{ core.label }} {{ core.version }}{{ core.primary ? '（主核心）' : '' }}</option>
+            </select>
+          </label>
+          <p class="text-[11px] text-ios-secondary">只列出该服务器当前上报为启用的核心；协议选项按所选核心的能力过滤。</p>
+        </div>
+        <p v-else-if="coreChoices.length === 1" class="text-xs text-ios-secondary">运行内核：{{ coreChoices[0].label }} {{ coreChoices[0].version }}（该服务器只上报一个核心）</p>
+        <p v-else class="text-xs text-ios-orange">服务器尚未上报核心能力，运行内核未知；保存时由后端判定。</p>
+        <p v-if="coreError" role="alert" class="text-xs text-ios-red">{{ coreError }}</p>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <button v-for="protocol in protocols" :key="protocol" type="button" :disabled="!!state.original || !!protocolReason(selectedServer, protocol)" :title="protocolReason(selectedServer, protocol)" :class="['text-left rounded-2xl border p-3 active:scale-95 disabled:opacity-50', f.protocol === protocol ? 'border-ios-blue bg-ios-blue/10' : 'border-ios-border bg-ios-card']" @click="changeProtocol(state, protocol)">
-            <span class="block text-sm text-ios-label">{{ protocol }}</span><span v-if="protocolReason(selectedServer, protocol)" class="block mt-1 text-xs text-ios-secondary">{{ protocolReason(selectedServer, protocol) }}</span>
+          <button v-for="protocol in protocols" :key="protocol" type="button" :disabled="!!state.original || !!protocolReason(selectedServer, protocol, f.core)" :title="protocolReason(selectedServer, protocol, f.core)" :class="['text-left rounded-2xl border p-3 active:scale-95 disabled:opacity-50', f.protocol === protocol ? 'border-ios-blue bg-ios-blue/10' : 'border-ios-border bg-ios-card']" @click="changeProtocol(state, protocol)">
+            <span class="block text-sm text-ios-label">{{ protocol }}</span><span v-if="protocolReason(selectedServer, protocol, f.core)" class="block mt-1 text-xs text-ios-secondary">{{ protocolReason(selectedServer, protocol, f.core) }}</span>
           </button>
         </div>
         <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" class="form-input-base mt-2" @input="autoName = false" /></label>
@@ -47,7 +59,7 @@
       </section>
       <div v-if="step === 6" class="space-y-4 text-sm">
         <p class="text-ios-label">{{ selectedServer?.name || '—' }} · {{ f.name }} · {{ f.protocol.toUpperCase() }} :{{ f.port }}</p>
-        <p class="text-ios-secondary">{{ f.listen }} · {{ f.enabled ? '启用' : '停用' }} · {{ f.subscriptionVisible && !f.internalRelay ? '订阅可见' : '订阅隐藏' }} · {{ f.internalRelay ? '内部中转' : '用户接入' }}</p>
+        <p class="text-ios-secondary">{{ f.listen }} · 运行内核 {{ f.core ? coreChoices.find(c => c.name === f.core)?.label || f.core : `主核心（${primaryCoreLabel}）` }} · {{ f.enabled ? '启用' : '停用' }} · {{ f.subscriptionVisible && !f.internalRelay ? '订阅可见' : '订阅隐藏' }} · {{ f.internalRelay ? '内部中转' : '用户接入' }}</p>
         <p class="text-xs text-ios-secondary">默认出站：{{ f.defaultOutbound }}；用户范围：{{ f.allowedUserIds.length ? f.allowedUserIds.map(id => users.find(u => u.id === id)?.username || id).join('、') : '已获授权、且分组包含此入站的用户' }}</p>
         <p class="text-xs text-ios-secondary">所属分组：{{ selectedGroupIds.map(id => memberGroups.find(g => g.id === id)?.name || '—').join('、') || '—' }}。非空 allowedUserIds 只进一步缩小上述分组授权范围，不会单独授予接入权限。</p>
         <p class="text-xs text-ios-orange">保存草稿后运行配置不变。发布会包含该服务器的全部待发布修改；内部中转请先发布目标服务器。</p>
@@ -88,7 +100,8 @@ import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
-import { withInboundMembership, buildPayload, createEditor, changeProtocol, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
+import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
+import { coreSummaryLabel } from '../../../nodes/coreSummary';
 const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin }>(), { serverId: '', inbound: null, origin: 'list' });
 const emit = defineEmits<{ close: []; saved: [] }>();
 const route = useRoute();
@@ -104,6 +117,12 @@ const steps = ['服务器', '协议与端口', '传输与安全', '协议专属'
 const protocols = computed(() => [...new Set([...protocolOptions.inbound, 'forward'])]);
 const selectedServer = computed(() => servers.value.find(s => s.id === f.value.nodeId));
 const eligibleServers = computed(() => servers.value.filter(serverEligible));
+// Cores the selected server reports as enabled (K3b). One core = read-only text;
+// several = a selector whose empty value follows the node's primary core.
+const coreChoices = computed(() => coreOptions(selectedServer.value));
+const primaryCore = computed(() => coreChoices.value.find(item => item.primary) || coreChoices.value[0]);
+const primaryCoreLabel = computed(() => primaryCore.value ? `${primaryCore.value.label} ${primaryCore.value.version}` : '—');
+const coreError = computed(() => selectedServer.value ? coreReason(selectedServer.value, f.value.core) : '');
 const securityStep = computed(() => hasSecurity(f.value.protocol));
 const conflict = computed(() => portConflict(f.value, inbounds.value, state.original?.id));
 const serverPortRange = computed(() => getNodePortRange(f.value.nodeId));
@@ -116,6 +135,8 @@ watch(() => [f.value.nodeId, f.value.protocol, f.value.port, selectedServer.valu
   if (autoName.value && selectedServer.value) f.value.name = `${selectedServer.value.name}-${f.value.protocol}-${f.value.port}`;
 });
 watch(() => f.value.nodeId, async (newNodeId) => {
+  // The selected core belongs to the previous server; reset to its primary.
+  f.value.core = '';
   if (newNodeId) {
     try { await loadNodeMeta(newNodeId, isOwner.value); }
     catch (e) { error.value = `端口范围读取失败：${(e as Error).message}`; return; }

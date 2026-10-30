@@ -1,4 +1,5 @@
 import type { CanvasConnection, CanvasNodeInstance, RelayScheme } from '../../proxyNodes';
+import type { CanvasConnectionKind, CanvasTunnel, CanvasTunnelInput } from '../../api';
 
 export interface PlanObject {
   kind: string;
@@ -16,12 +17,31 @@ export interface PlanServer {
   removes: PlanObject[] | null;
 }
 
+export interface PlanConflict {
+  nodeId: string;
+  port: number;
+  with: string;
+  connectionId: string;
+  // reason/objectId identify conflicts that are not listener collisions, e.g. an
+  // unadopted legacy object (K4). objectId is the server object the Owner must adopt.
+  reason?: string;
+  objectId?: string;
+}
+
+export interface PlanTunnel {
+  tunnelId: string;
+  affectedSchemes: { id: string; name: string }[];
+}
+
 export interface TunnelPlan {
   ok: boolean;
   servers: PlanServer[] | null;
   connections: { id: string; status: string; message: string }[] | null;
-  conflicts: { nodeId: string; port: number; with: string; connectionId: string }[] | null;
+  conflicts: PlanConflict[] | null;
   warnings: string[] | null;
+  // Shared tunnels the publication would create or update, with every scheme that
+  // references them. Absent on plans produced before K4.
+  tunnels?: PlanTunnel[] | null;
   message?: string;
 }
 
@@ -208,13 +228,13 @@ export function tunnelStatus(
     }
     const msgs = [conn.message];
     for (const conf of conflicts) {
-      msgs.push(`端口冲突 :${conf.port} (${conf.with})`);
+      msgs.push(tunnelConflictText(conf));
     }
     return { error: true, text: msgs.filter(Boolean).join('；') };
   }
 
   if (conflicts.length > 0) {
-    const conflictMsgs = conflicts.map(c => `端口冲突 :${c.port} (${c.with})`).join('；');
+    const conflictMsgs = conflicts.map(c => tunnelConflictText(c)).join('；');
     return { error: true, text: conflictMsgs };
   }
 
@@ -249,4 +269,81 @@ export function planLines(plan: TunnelPlan | null | undefined, nodeIds?: string[
   }
 
   return lines;
+}
+
+// A conflict is not always a listener collision: an unadopted legacy object is
+// reported with the object id the Owner has to adopt, so the page can name it.
+export function tunnelConflictText(conflict: PlanConflict): string {
+  if (conflict.reason === 'legacy_object') {
+    const object = conflict.objectId ? `（对象 ${conflict.objectId}）` : '';
+    return `历史对象未认领：${conflict.with}${object}`;
+  }
+  if (conflict.reason === 'tunnel_object') return `共享隧道对象冲突：${conflict.with}`;
+  if (conflict.reason === 'object_name') return `对象名称冲突：${conflict.with}`;
+  if (conflict.reason && conflict.reason !== 'listener') return `${conflict.reason}：${conflict.with}`;
+  return `端口冲突 :${conflict.port}（${conflict.with}）`;
+}
+
+// The plan reports every shared tunnel a publication touches together with the
+// schemes that reference it, so the dialog can say what else changes.
+export function tunnelPlanLines(plan: TunnelPlan | null | undefined, nameOfTunnel: (id: string) => string): string[] {
+  return (plan?.tunnels || []).map(item => {
+    const name = nameOfTunnel(item.tunnelId) || item.tunnelId;
+    const schemes = item.affectedSchemes.map(scheme => scheme.name).join('、') || '无';
+    return `共享隧道 ${name}：影响 ${item.affectedSchemes.length} 个方案（${schemes}）`;
+  });
+}
+
+// A resource draft keeps `server:<nodeId>` endpoints: a shared tunnel belongs to
+// nodes, not to the instance ids of one drawing.
+export function createTunnelResourceDraft(tunnel: CanvasTunnel): TunnelDraft {
+  return {
+    id: tunnel.id,
+    source: tunnel.source,
+    target: tunnel.target,
+    kind: tunnel.type === 'port_forward' ? 'forward' : 'encrypted',
+    protocol: tunnel.tunnelProtocol || 'tls',
+    port: tunnel.tunnelPort ?? defaultPort(tunnel.tunnelProtocol || 'tls'),
+    listenPort: tunnel.listenPort ?? 10080,
+    targetHost: tunnel.targetHost || '',
+    targetPort: tunnel.targetPort ?? 443,
+    tcp: tunnel.supportTcp,
+    udp: tunnel.supportUdp
+  };
+}
+
+// Only fields of the tunnel resource are sent; the server derives its objects.
+export function tunnelResourceInput(draft: TunnelDraft, name: string, type?: CanvasConnectionKind): CanvasTunnelInput {
+  const base: CanvasTunnelInput = {
+    name: name.trim(),
+    source: draft.source,
+    target: draft.target,
+    type: type || (draft.kind === 'forward' ? 'port_forward' : 'tunnel'),
+    supportTcp: draft.tcp,
+    supportUdp: draft.udp
+  };
+  if (draft.kind === 'forward') {
+    return { ...base, type: 'port_forward', listenPort: draft.listenPort, targetHost: draft.targetHost.trim(), targetPort: draft.targetPort };
+  }
+  return { ...base, tunnelProtocol: draft.protocol, tunnelPort: draft.port };
+}
+
+// The same checks as a drawing-level tunnel, except that both endpoints are node
+// references: a server can be deleted while the tunnel still names it.
+export function validateTunnelResource(draft: TunnelDraft, servers: TunnelServer[]): string {
+  if (!draft.source) return '请选择起点服务器';
+  if (!draft.target) return '请选择终点服务器';
+  if (draft.source === draft.target) return '起点和终点不能是相同服务器';
+  for (const key of [draft.source, draft.target]) {
+    if (!servers.some(server => `server:${server.id}` === key)) return '所选服务器已不存在，请重新选择';
+  }
+  if (!draft.tcp && !draft.udp) return '至少启用 TCP 或 UDP';
+  if (draft.kind === 'encrypted') {
+    if (['gost', 'brook', 'nftables'].includes(draft.protocol)) return `协议 ${draft.protocol} 需要 GOST 核心，当前不可用`;
+    if (!Number.isInteger(draft.port) || draft.port < 1 || draft.port > 65535) return '端口必须为 1–65535';
+  } else {
+    if (!Number.isInteger(draft.listenPort) || draft.listenPort < 1 || draft.listenPort > 65535) return '端口必须为 1–65535';
+    if (!Number.isInteger(draft.targetPort) || draft.targetPort < 1 || draft.targetPort > 65535) return '端口必须为 1–65535';
+  }
+  return '';
 }

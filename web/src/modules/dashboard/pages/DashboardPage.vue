@@ -618,6 +618,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { dashboardAPI, type Dashboard, type Hour, type Recent } from '../api';
 import { accessAPI } from '../../access/api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { unhealthyCoreLabel } from '../../nodes/coreSummary';
 import { userAPI, type ProxyUser } from '../../users/api';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
 import { authState, isOwner, formatTime } from '../../../app/auth';
@@ -810,7 +811,7 @@ const pendingIssues = computed<PendingIssue[]>(() => {
       issues.push({
         title: `代理核心异常: ${n.name}`,
         desc: `核心状态未通过健康检查 (${n.heartbeat.core_error || '核心未运行'})。`,
-        tag: n.capabilities?.core_name || '代理核心',
+        tag: unhealthyCoreLabel(n) || n.capabilities?.core_name || '代理核心',
         level: 'danger',
         link: `/nodes/${n.id}`
       });

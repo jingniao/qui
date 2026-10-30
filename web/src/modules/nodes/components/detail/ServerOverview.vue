@@ -11,7 +11,7 @@
           <h2 class="font-semibold text-ios-label text-sm sm:text-base">基础信息</h2>
           <StatusBadge :status="status.tone" :label="status.label" />
           <span class="text-xs text-ios-secondary font-mono">
-            {{ connections === '—' ? '无活跃会话' : `${connections} 个活跃会话` }}
+            {{ connections === '—' ? '活跃会话 —' : `${connections} 个活跃会话` }}
           </span>
         </div>
 
@@ -74,8 +74,8 @@
         <!-- 操作系统 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
           <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">操作系统</div>
-          <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="node.os">
-            {{ node.os || '—' }}
+          <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="node.capabilities?.host?.osPrettyName || node.os">
+            {{ node.capabilities?.host?.osPrettyName || node.os || '—' }}
           </p>
         </div>
 
@@ -148,6 +148,23 @@
             </button>
             <span v-else-if="customNetwork" class="text-xs text-ios-secondary">出站网络已自定义</span>
           </div>
+          <div v-if="cores.length" class="space-y-1">
+            <div v-for="core in cores" :key="core.name" class="flex items-center justify-between gap-2 rounded-xl bg-ios-bg px-2.5 py-1.5">
+              <span class="text-xs font-semibold text-ios-label truncate">
+                {{ core.label }}<span class="ml-1.5 font-mono font-normal text-ios-secondary">{{ core.version }}</span>
+                <span v-if="core.primary" class="ml-1.5 text-[10px] font-semibold text-ios-blue">主核心</span>
+              </span>
+              <span
+                class="inline-flex items-center gap-1 text-[11px] shrink-0"
+                :class="core.healthy === false ? 'text-ios-red' : core.healthy === true ? 'text-ios-green' : 'text-ios-tertiary'"
+                :title="core.error || ''"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :class="core.healthy === false ? 'bg-ios-red' : core.healthy === true ? 'bg-ios-green' : 'bg-ios-tertiary'"></span>
+                {{ core.healthy === false ? '异常' : core.healthy === true ? '正常' : '—' }}
+              </span>
+            </div>
+          </div>
+          <p v-else class="text-xs text-ios-secondary">尚未上报运行内核</p>
           <div v-if="node.capabilities?.protocols?.length" class="flex flex-wrap gap-1.5">
             <span
               v-for="p in node.capabilities.protocols"
@@ -189,6 +206,7 @@ import { type NodeMeta, resolveCountryInfo, onGeoResolved, cleanRemark, formatPo
 import { hostMetrics, uptime } from '../../metrics';
 import { formatTime } from '../../../../app/auth';
 import { serverStatus, relativeHeartbeat } from '../serverListModel';
+import { nodeCores } from '../../coreSummary';
 import type { NodeGroup } from '../../groupsApi';
 import StatusBadge from '../../../../components/StatusBadge.vue';
 import ServerNodeSummary from './ServerNodeSummary.vue';
@@ -258,6 +276,9 @@ const connections = computed(() => {
 });
 
 const status = computed(() => serverStatus(props.node, props.now));
+// Per-core view (K3b): each reported core with its own version and health. A
+// legacy Agent reports one core; a missing health observation stays "—".
+const cores = computed(() => nodeCores(props.node));
 const customNetwork = computed(() => !!(props.node.outboundSourceIp || props.node.outboundInterface || props.node.hostSourceIpv4 || props.node.hostSourceIpv6));
 
 defineEmits<{ changed: []; tab: [value: string]; create: [] }>();

@@ -146,7 +146,7 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="font-medium text-neutral-600">核心:</span>
-              <span class="font-semibold text-neutral-800">{{ node.capabilities?.core_name || '—' }} {{ node.capabilities?.core_version || '' }}</span>
+              <span class="font-semibold text-neutral-800">{{ coreSummaryLabel(node) }}</span>
             </div>
           </div>
 
@@ -303,6 +303,7 @@ import NodeRestartPanel from '../NodeRestartPanel.vue';
 import CoreUpdatesPanel from '../../../system/components/CoreUpdatesPanel.vue';
 import ConfirmDialog from '../../../../components/ConfirmDialog.vue';
 import { isDirty } from './serverDetailModel';
+import { coreSummaryLabel } from '../../coreSummary';
 
 const coreDetails = ref<HTMLDetailsElement>();
 

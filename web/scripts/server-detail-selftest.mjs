@@ -38,3 +38,52 @@ assert.equal(isDirty({ ids: [1, 2] }, { ids: [2, 1] }), true);
 assert.equal(revisionResult('success'), '已应用且健康');
 assert.equal(revisionResult('future_code'), '其他结果');
 console.log('All server-detail self-tests passed');
+
+// F2: K2 host observations, nullable historical buckets and tuning contract.
+async function loadF2Model(path, transform = s => s) {
+  const input = transform(readFileSync(new URL('../src/modules/nodes/components/' + path, import.meta.url), 'utf8'));
+  const js = ts.transpileModule(input, {compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.ESNext}}).outputText;
+  return import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
+}
+const host = await loadF2Model('hostObservationModel.ts');
+assert.equal(host.uint64('18446744073709551615'), Number('18446744073709551615'));
+assert.equal(host.uint64('0'), 0);
+for (const value of ['', undefined, null, '-1', '1.5', 'abc']) assert.equal(host.uint64(value), null);
+assert.equal(host.storageDisplay('0','1024'), '0 B / 1.0 KiB');
+assert.equal(host.storageDisplay('12','0',0), '占用率 0.0%');
+assert.equal(host.storageDisplay(undefined,'1024',42.5), '占用率 42.5%');
+assert.equal(host.storageDisplay('0','0'), '—');
+assert.equal(host.observed('0'), '0'); assert.equal(host.observed(undefined), '—');
+const history = await loadF2Model('serverMetricsModel.ts', s => s.replace("import { hostMetrics } from '../metrics';", 'const hostMetrics = node => node.heartbeat;'));
+const point = (at, cpuPercent) => history.metricPoint({at:new Date(at).toISOString(),cpuPercent,processCount:0.5,rxBytesPerSecond:0});
+const minute = 60000;
+const samples = [point(0,1),point(minute,null),point(2*minute,2),point(3*minute,0),point(6*minute,3)];
+assert.equal(samples[1].cpu,null); assert.equal(samples[0].processes,0.5); assert.equal(samples[0].rxRate,0); assert.equal(samples[0].tcp,null);
+const pathF2 = history.metricPath(samples,'cpu',0,6*minute,60);
+assert.equal((pathF2.match(/M/g)||[]).length,3,'null and missing time buckets break the line');
+assert.equal((pathF2.match(/L/g)||[]).length,1);
+assert.equal(history.metricPath([point(0,null)],'cpu',0,minute,60).trim(),'');
+const tuning = await loadF2Model('detail/serverTuningModel.ts');
+for (const [status,label] of Object.entries({pending:'等待 Agent 执行',applied:'已应用',cleared:'已清除',failed:'执行失败',unconfirmed:'结果未确认'})) assert.equal(tuning.tuningStatus(status),label);
+assert.equal(tuning.tuningStatus('future'),'未知状态');
+assert.deepEqual(tuning.tuningRequest('node-a',{'net.core.somaxconn':'128','net.core.default_qdisc':''}),{settings:{'net.core.somaxconn':'128'},clear:false,confirmNodeId:'node-a'});
+assert.deepEqual(tuning.tuningRequest('node-a',{'ignored':'bad'},true),{settings:{},clear:true,confirmNodeId:'node-a'});
+for (const field of tuning.tuningFields) {
+  const valid = field.choices || [String(field.min),String(field.max)];
+  for (const value of valid) assert.equal(tuning.tuningRequest('n',{[field.key]:value}).settings[field.key],value);
+  for (const value of field.choices ? ['bbrv3','unknown'] : [String(field.min-1),String(field.max+1),'1.5','1e6','-1','1 2 3']) assert.throws(()=>tuning.tuningRequest('n',{[field.key]:value}));
+}
+assert.throws(()=>tuning.tuningRequest('n',{'net.ipv4.ip_forward':'1'}));
+assert.throws(()=>tuning.tuningRequest('n',{}));
+for (const preset of tuning.tuningPresets) tuning.tuningRequest('n',preset.settings);
+const apiSourceF2 = readFileSync(new URL('../src/modules/nodes/api.ts',import.meta.url),'utf8').replace("import { request, type Page } from '../../app/apiClient';",'const request = (...args) => globalThis.f2Request(...args);');
+const apiCodeF2 = ts.transpileModule(apiSourceF2,{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.ESNext}}).outputText;
+const nodeF2 = await import('data:text/javascript;base64,'+Buffer.from(apiCodeF2).toString('base64'));
+let calledF2;
+globalThis.f2Request = (...args) => {calledF2=args;return Promise.resolve({});};
+await nodeF2.nodeAPI.saveTuning('a/b',tuning.tuningRequest('a/b',{'net.core.somaxconn':'128'}));
+assert.deepEqual(calledF2,['/nodes/a%2Fb/tuning','PUT',{settings:{'net.core.somaxconn':'128'},clear:false,confirmNodeId:'a/b'}]);
+await nodeF2.nodeAPI.tuning('a/b'); assert.equal(calledF2[0],'/nodes/a%2Fb/tuning');
+for (const hours of [1,6,12,24,168]) {await nodeF2.nodeAPI.metrics('a/b',hours);assert.equal(calledF2[0],'/nodes/a%2Fb/metrics?hours='+hours);}
+delete globalThis.f2Request;
+console.log('PASS F2: uint64 strings/zero/unknown, storage fallback, null/time gaps, fractional averages, tuning bounds/statuses/request/API routes');

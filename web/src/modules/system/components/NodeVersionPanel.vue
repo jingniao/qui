@@ -4,7 +4,7 @@
       v-if="!embedded"
       :title="kind === 'agent' ? 'Agent 探针管理' : '代理核心版本'"
       parent="服务器"
-      :description="kind === 'agent' ? '统一管理与监控各服务器上部署的 Agent 探针运行状态、心跳上报与自动更新任务。' : '查看 Agent 上报的核心与版本，仅支持更新当前核心；多内核即将支持。'"
+      :description="kind === 'agent' ? '统一管理与监控各服务器上部署的 Agent 探针运行状态、心跳上报与自动更新任务。' : '按服务器上报的核心查看版本与健康状态，支持添加、升级与移除内核；结果以节点回执与能力上报为准。'"
     >
       <template #actions>
         <button v-if="isOwner"
@@ -35,8 +35,13 @@
             <span class="text-[10px] px-2 py-0.2 rounded-full bg-purple-100 text-purple-800 font-semibold">多核心协同共存</span>
           </div>
           <p class="text-[11px] text-ios-secondary mt-0.5 leading-relaxed">
-            支持 <strong>Xray-core</strong>（成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard）与 <strong>sing-box</strong>（新一代轻量 · Hysteria2 / TUIC / 自适应路由），当前每台服务器仅支持更新已上报的单一核心；多内核即将支持。
+            支持 <strong>Xray-core</strong>（成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard）与 <strong>sing-box</strong>（新一代轻量 · Hysteria2 / TUIC / 自适应路由）。一台服务器可同时运行多个已上报启用的核心，入站按所选核心归属；添加、升级与移除的结果以 Agent 回执和下一次能力上报为准。
           </p>
+          <div v-if="isOwner" class="flex flex-wrap items-center gap-1.5 mt-1.5">
+            <button v-for="item in CORE_ORDER" :key="item" type="button"
+              class="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-purple-200/70 text-purple-800 hover:bg-purple-50"
+              @click="upgradeAllComponent(item)">全部升级 {{ item }}</button>
+          </div>
         </div>
       </div>
       <div class="flex items-center gap-2 shrink-0">
@@ -227,9 +232,10 @@
             <td>
               <span
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-                :class="node.heartbeat?.core_healthy === false ? 'bg-red-50 text-red-600' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-50 text-emerald-600' : 'bg-neutral-100 text-neutral-500 font-normal')"
+                :class="coreHealthTone(node) === 'bad' ? 'bg-red-50 text-red-600' : (coreHealthTone(node) === 'ok' ? 'bg-emerald-50 text-emerald-600' : 'bg-neutral-100 text-neutral-500 font-normal')"
+                :title="getNodeInstalledCores(node).map(c => `${c.name} ${c.version}: ${c.healthy === false ? '异常' : c.healthy === true ? '正常' : '—'}`).join('；')"
               >
-                <span class="w-1.5 h-1.5 rounded-full" :class="node.heartbeat?.core_healthy === false ? 'bg-red-500' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-500' : 'bg-neutral-400')"></span>
+                <span class="w-1.5 h-1.5 rounded-full" :class="coreHealthTone(node) === 'bad' ? 'bg-red-500' : (coreHealthTone(node) === 'ok' ? 'bg-emerald-500' : 'bg-neutral-400')"></span>
                 <span>{{ coreHealth(node) }}</span>
               </span>
             </td>
@@ -244,9 +250,15 @@
                   :key="core.component"
                   class="text-xs px-2 py-0.5 rounded-md tabular-nums font-bold"
                   :class="core.component === 'xray' ? 'bg-blue-50 text-ios-blue' : 'bg-purple-50 text-purple-700'"
+                  :title="core.error || (core.primary ? '主核心' : '')"
                 >
                   {{ core.name }} {{ core.version }}
+                  <span v-if="core.primary" class="ml-1 text-[10px] font-semibold opacity-70">主</span>
                 </span>
+                <span
+                  v-if="corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1])"
+                  class="text-[10px] px-1.5 py-0.5 rounded-md bg-ios-blue/10 text-ios-blue font-semibold"
+                >{{ corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1]) }}</span>
               </div>
               <span v-else class="text-xs px-2 py-0.5 rounded-md text-amber-700 bg-amber-50 font-normal">
                 未安装内核
@@ -255,9 +267,10 @@
             <td>
               <span
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-                :class="node.heartbeat?.core_healthy === false ? 'bg-red-50 text-red-600' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-50 text-emerald-600' : 'bg-neutral-100 text-neutral-500 font-normal')"
+                :class="coreHealthTone(node) === 'bad' ? 'bg-red-50 text-red-600' : (coreHealthTone(node) === 'ok' ? 'bg-emerald-50 text-emerald-600' : 'bg-neutral-100 text-neutral-500 font-normal')"
+                :title="getNodeInstalledCores(node).map(c => `${c.name} ${c.version}: ${c.healthy === false ? '异常' : c.healthy === true ? '正常' : '—'}`).join('；')"
               >
-                <span class="w-1.5 h-1.5 rounded-full" :class="node.heartbeat?.core_healthy === false ? 'bg-red-500' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-500' : 'bg-neutral-400')"></span>
+                <span class="w-1.5 h-1.5 rounded-full" :class="coreHealthTone(node) === 'bad' ? 'bg-red-500' : (coreHealthTone(node) === 'ok' ? 'bg-emerald-500' : 'bg-neutral-400')"></span>
                 <span>{{ coreHealth(node) }}</span>
               </span>
             </td>
@@ -441,9 +454,14 @@
                       :key="c.component"
                       class="tabular-nums px-2 py-0.5 rounded-lg text-xs font-bold"
                       :class="c.component === 'xray' ? 'text-ios-blue bg-blue-50/90 border border-blue-200/70' : 'text-purple-700 bg-purple-50/90 border border-purple-200/70'"
+                      :title="c.error || ''"
                     >
-                      {{ c.name }} {{ c.version }}
+                      {{ c.name }} {{ c.version }}<span v-if="c.primary" class="ml-1 text-[9px] font-semibold opacity-70">主</span>
                     </span>
+                    <span
+                      v-if="corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1])"
+                      class="tabular-nums px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-ios-blue/10 text-ios-blue"
+                    >{{ corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1]) }}</span>
                   </div>
                 </div>
 
@@ -451,9 +469,10 @@
                   <span class="text-neutral-500 font-medium">健康运行状态</span>
                   <span
                     class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
-                    :class="node.heartbeat?.core_healthy === false ? 'bg-red-50 text-red-600 border border-red-100/70' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-50 text-emerald-600 border border-emerald-100/70' : 'bg-neutral-100 text-neutral-400 font-normal')"
+                    :class="coreHealthTone(node) === 'bad' ? 'bg-red-50 text-red-600 border border-red-100/70' : (coreHealthTone(node) === 'ok' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100/70' : 'bg-neutral-100 text-neutral-400 font-normal')"
+                    :title="getNodeInstalledCores(node).map(c => `${c.name} ${c.version}: ${c.healthy === false ? '异常' : c.healthy === true ? '正常' : '—'}`).join('；')"
                   >
-                    <span class="w-1.5 h-1.5 rounded-full" :class="node.heartbeat?.core_healthy === false ? 'bg-red-500' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-500' : 'bg-neutral-400')"></span>
+                    <span class="w-1.5 h-1.5 rounded-full" :class="coreHealthTone(node) === 'bad' ? 'bg-red-500' : (coreHealthTone(node) === 'ok' ? 'bg-emerald-500' : 'bg-neutral-400')"></span>
                     <span>{{ coreHealth(node) }}</span>
                   </span>
                 </div>
@@ -613,7 +632,7 @@
     <AppDialog
       v-model="coreManagementModalVisible"
       :title="`内核管理 - ${coreManagementTargetNode?.name || ''}`"
-      description="当前仅可更新节点上报的核心；多内核即将支持。"
+      description="按 Agent 上报的启用核心管理：升级、添加或移除内核。移除内核是让 Agent 禁用安装器持有的文件，重新安装会再次启用。"
       max-width="2xl"
       confirm-text="完成"
       :show-cancel="false"
@@ -659,7 +678,7 @@
               <span>已安装内核</span>
               <span class="text-xs font-normal text-neutral-400">({{ manageInstalledCores.length }})</span>
             </h4>
-            <span class="text-[11px] text-neutral-400">多内核即将支持 · 当前仅可更新已上报核心</span>
+            <span class="text-[11px] text-neutral-400">{{ coreFactsLoading ? '正在读取入站与任务…' : '版本、健康与任务状态均来自后端上报' }}</span>
           </div>
 
           <!-- Empty State when no cores installed -->
@@ -682,20 +701,25 @@
                 >
                   {{ core.component === 'xray' ? 'X' : 'S' }}
                 </div>
-                <div class="space-y-1">
-                  <div class="flex items-center gap-2">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
                     <span class="font-bold text-sm text-neutral-900">{{ core.name }}</span>
                     <span class="tabular-nums px-2 py-0.2 rounded-md bg-neutral-100 text-neutral-700 font-bold text-xs">
-                      v{{ core.version }}
+                      {{ core.version }}
                     </span>
+                    <span v-if="core.primary" class="text-[10px] px-1.5 py-0.2 rounded bg-blue-50 text-ios-blue font-semibold">主核心</span>
                     <span
                       class="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-semibold"
-                      :class="core.healthy ? 'bg-ios-green/10 text-ios-green' : core.healthy === false ? 'bg-ios-red/10 text-ios-red' : 'bg-ios-fill text-ios-tertiary'"
+                      :class="core.healthy === true ? 'bg-ios-green/10 text-ios-green' : core.healthy === false ? 'bg-ios-red/10 text-ios-red' : 'bg-ios-fill text-ios-tertiary'"
                     >
-                      <span class="w-1.5 h-1.5 rounded-full" :class="core.healthy ? 'bg-ios-green' : core.healthy === false ? 'bg-ios-red' : 'bg-ios-tertiary'"></span>
-                      <span>{{ core.healthy === undefined ? '—' : core.healthy ? '运行正常' : '异常' }}</span>
+                      <span class="w-1.5 h-1.5 rounded-full" :class="core.healthy === true ? 'bg-ios-green' : core.healthy === false ? 'bg-ios-red' : 'bg-ios-tertiary'"></span>
+                      <span>{{ core.healthy === null ? '—' : core.healthy ? '运行正常' : '异常' }}</span>
+                    </span>
+                    <span v-if="manageCorePendingLabel(core.component)" class="text-[10px] px-1.5 py-0.2 rounded bg-ios-blue/10 text-ios-blue font-semibold">
+                      {{ manageCorePendingLabel(core.component) }}
                     </span>
                   </div>
+                  <p v-if="core.error" class="text-[11px] text-ios-red">{{ core.error }}</p>
                   <div class="flex flex-wrap items-center gap-1 pt-0.5">
                     <span class="text-[10px] text-neutral-400 mr-0.5">协议:</span>
                     <span
@@ -705,7 +729,27 @@
                     >
                       {{ p }}
                     </span>
+                    <span v-if="!core.protocols.length" class="text-[10px] text-neutral-400">—</span>
                   </div>
+                  <p class="text-[11px] text-neutral-500">
+                    入站：<template v-if="coreFactsLoading">读取中…</template>
+                    <template v-else-if="manageCoreInbounds(core.component).length">
+                      <router-link v-for="item in manageCoreInbounds(core.component)" :key="item.id"
+                        :to="inboundLink(coreManagementTargetNode?.id || '')"
+                        class="text-ios-blue hover:underline mr-1.5">{{ item.name }}</router-link>
+                    </template>
+                    <template v-else>无（可安全移除）</template>
+                  </p>
+                  <p v-if="manageCoreTask(core.component)" class="text-[11px] text-neutral-500 flex flex-wrap items-center gap-1.5">
+                    <span>最近任务</span>
+                    <span class="px-1.5 py-0.2 rounded font-semibold" :class="coreTaskTone(manageCoreTask(core.component)?.status || '')">
+                      {{ coreTaskStatusText(manageCoreTask(core.component)?.status || '') }}
+                    </span>
+                    <span class="tabular-nums">{{ manageCoreTask(core.component)?.version }}</span>
+                    <span v-if="manageCoreTask(core.component)?.result?.code" class="font-mono text-[10px] text-neutral-400">
+                      {{ manageCoreTask(core.component)?.result?.code }}
+                    </span>
+                  </p>
                 </div>
               </div>
 
@@ -723,13 +767,38 @@
                   <span>升级</span>
                 </button>
 
-                <!-- Delete Kernel Action Button -->
+                <!-- Delete Kernel Action Button: hidden while an add/remove task is
+                     unsettled or when this is the only enabled core. -->
+                <button
+                  v-if="isOwner"
+                  type="button"
+                  :disabled="manageInstalledCores.length <= 1 || !!manageCorePendingLabel(core.component) || !multiCoreSupported(coreManagementTargetNode)"
+                  :title="manageInstalledCores.length <= 1 ? '不能移除最后一个已启用的内核'
+                    : manageCorePendingLabel(core.component) ? '该内核正在添加、升级或移除中'
+                    : !multiCoreSupported(coreManagementTargetNode) ? '该 Agent 未协商多核心支持' : '删除内核'"
+                  @click="requestRemoveCore(core)"
+                  class="py-1.5 px-3 rounded-xl bg-ios-red/[0.08] text-ios-red hover:bg-ios-red/[0.15] font-semibold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  删除内核
+                </button>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- SECTION 2: 添加内核 (支持多种内核兼容并存) -->
+        <!-- 移除被拒绝：后端仍报告这些入站使用该内核 -->
+        <div v-if="removeConflictInbounds.length" class="p-3 rounded-2xl bg-ios-red/[0.06] border border-ios-red/20 text-ios-red space-y-1.5">
+          <div class="font-bold text-xs">后端拒绝了移除请求（core_in_use）</div>
+          <p class="text-[11px] leading-relaxed">下列入站仍在当前草稿或已发布配置中使用该内核（含已禁用的入站）。请先删除或改派它们，再重新提交移除。</p>
+          <div class="flex flex-wrap gap-1.5">
+            <router-link v-for="item in removeConflictInbounds" :key="item.id" :to="inboundLink(coreManagementTargetNode?.id || '')"
+              class="text-[11px] px-2 py-0.5 rounded-lg bg-white border border-ios-red/20 hover:underline">
+              {{ item.name }}
+            </router-link>
+          </div>
+        </div>
+
+        <!-- SECTION 2: 添加内核 (需要 Agent 协商多核心支持) -->
         <div class="pt-4 border-t border-black/[0.06] space-y-3.5">
           <div class="flex items-center justify-between">
             <h4 class="font-bold text-sm text-neutral-900 flex items-center gap-2">
@@ -738,10 +807,16 @@
               </svg>
               <span>添加内核</span>
             </h4>
-            <span class="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-medium">
-              多内核即将支持
+            <span
+              class="text-[11px] px-2 py-0.5 rounded-full font-medium"
+              :class="multiCoreSupported(coreManagementTargetNode) ? 'text-emerald-700 bg-emerald-50' : 'text-ios-orange bg-ios-orange/10'"
+            >
+              {{ multiCoreSupported(coreManagementTargetNode) ? 'Agent 已协商多核心' : 'Agent 未协商多核心' }}
             </span>
           </div>
+          <p v-if="!multiCoreSupported(coreManagementTargetNode)" class="p-3 rounded-xl bg-ios-orange/10 border border-ios-orange/20 text-[11px] text-ios-orange leading-relaxed">
+            该服务器上报的 Agent 未协商多核心支持（旧版 Agent），只能升级当前核心。请先在「版本与更新 › Agent」升级 Agent，重连后再添加第二个内核。
+          </p>
 
           <!-- Pending Node Guidance if node is pending -->
           <div v-if="coreManagementTargetNode?.status === 'pending'" class="space-y-3">
@@ -753,13 +828,13 @@
                 <span>服务器尚未完成 Agent 注册</span>
               </div>
               <p class="text-[11px] leading-relaxed">
-                在终端运行一键部署命令，注册时安装单一核心。后续多内核即将支持。
+                在终端运行一键部署命令安装 Agent 与所选内核；注册完成后可在「内核管理」中添加其余内核。
               </p>
             </div>
 
             <!-- Core Selection Cards -->
             <div class="grid grid-cols-2 gap-2.5">
-              <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'xray'" type="button" @click="selectAddCoreComp('xray')"
+              <button type="button" @click="selectAddCoreComp('xray')"
                 class="p-3 rounded-xl border text-left transition-all space-y-1.5"
                 :class="addCoreForm.component === 'xray' ? 'border-ios-blue bg-blue-50/50 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
               >
@@ -770,7 +845,7 @@
                 <p class="text-[11px] text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / WireGuard</p>
               </button>
 
-              <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'sing-box'" type="button" @click="selectAddCoreComp('sing-box')"
+              <button type="button" @click="selectAddCoreComp('sing-box')"
                 class="p-3 rounded-xl border text-left transition-all space-y-1.5"
                 :class="addCoreForm.component === 'sing-box' ? 'border-ios-blue bg-blue-50/50 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
               >
@@ -792,14 +867,14 @@
             </div>
           </div>
 
-          <!-- Online Node: Add New Core Interactive Form -->
-          <div v-else class="space-y-3.5 bg-neutral-50/70 p-4 rounded-2xl border border-black/[0.04]">
+          <!-- Online Node: Add New Core Interactive Form (multi-core Agents only) -->
+          <div v-else-if="multiCoreSupported(coreManagementTargetNode)" class="space-y-3.5 bg-neutral-50/70 p-4 rounded-2xl border border-black/[0.04]">
             <!-- Core Choice Cards -->
             <div>
-              <label class="block text-neutral-700 font-bold mb-2">选择要添加的内核平台</label>
+              <label class="block text-neutral-700 font-bold mb-2">选择要添加的内核平台（仅可选择尚未上报启用的内核）</label>
               <div class="grid grid-cols-2 gap-2.5">
-                <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'xray'" type="button" @click="selectAddCoreComp('xray')"
-                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative"
+                <button type="button" :disabled="isCoreInstalled('xray')" @click="selectAddCoreComp('xray')"
+                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative disabled:opacity-50 disabled:cursor-not-allowed"
                   :class="addCoreForm.component === 'xray' ? 'border-ios-blue bg-blue-50/60 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
                 >
                   <div class="flex items-center justify-between">
@@ -808,14 +883,14 @@
                       class="text-[10px] px-1.5 py-0.2 rounded font-semibold"
                       :class="isCoreInstalled('xray') ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-ios-blue'"
                     >
-                      {{ isCoreInstalled('xray') ? '已部署 (可重新部署)' : '推荐添加' }}
+                      {{ isCoreInstalled('xray') ? '已上报启用' : '推荐添加' }}
                     </span>
                   </div>
                   <p class="text-[11px] text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard</p>
                 </button>
 
-                <button v-if="coreManagementTargetNode?.capabilities?.core_name === 'sing-box'" type="button" @click="selectAddCoreComp('sing-box')"
-                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative"
+                <button type="button" :disabled="isCoreInstalled('sing-box')" @click="selectAddCoreComp('sing-box')"
+                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative disabled:opacity-50 disabled:cursor-not-allowed"
                   :class="addCoreForm.component === 'sing-box' ? 'border-ios-blue bg-blue-50/60 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
                 >
                   <div class="flex items-center justify-between">
@@ -824,7 +899,7 @@
                       class="text-[10px] px-1.5 py-0.2 rounded font-semibold"
                       :class="isCoreInstalled('sing-box') ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-700'"
                     >
-                      {{ isCoreInstalled('sing-box') ? '已部署 (可重新部署)' : '新一代轻量' }}
+                      {{ isCoreInstalled('sing-box') ? '已上报启用' : '新一代轻量' }}
                     </span>
                   </div>
                   <p class="text-[11px] text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由分流</p>
@@ -853,7 +928,9 @@
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">内核平台</label>
-                <select v-model="addCoreForm.component" @change="onAddCoreCompChange" class="form-input-base"><option v-for="c in manageInstalledCores" :key="c.component" :value="c.component">{{ c.name }}</option></select>
+                <select v-model="addCoreForm.component" @change="onAddCoreCompChange" class="form-input-base">
+                  <option v-for="name in CORE_ORDER" :key="name" :value="name" :disabled="isCoreInstalled(name)">{{ name }}{{ isCoreInstalled(name) ? '（已启用）' : '' }}</option>
+                </select>
               </div>
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">目标版本号</label>
@@ -881,7 +958,7 @@
               <button
                 type="button"
                 @click="submitAddNewCore"
-                :disabled="addCoreBusy"
+                :disabled="addCoreBusy || !multiCoreSupported(coreManagementTargetNode) || isCoreInstalled(addCoreForm.component)"
                 class="ios-btn-primary inline-flex items-center gap-1.5 text-xs py-2 px-4 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
               >
                 <svg v-if="addCoreBusy" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -897,6 +974,17 @@
         </div>
       </div>
     </AppDialog>
+
+    <!-- Dialog 4b: 删除内核确认（真实 remove-core API） -->
+    <ConfirmDialog
+      v-model="removeConfirmVisible"
+      title="移除内核"
+      :message="removeConfirmMessage"
+      warning-details="只会禁用安装器持有的核心文件；如果当前草稿或已发布配置仍有入站使用该内核，后端会以 core_in_use 拒绝并列出这些入站。"
+      confirm-text="确认移除"
+      :is-danger="true"
+      @confirm="confirmRemoveCore"
+    />
 
     <!-- Dialog 5: Core Upgrade / Batch Upgrade Modal -->
     <AppDialog
@@ -953,9 +1041,11 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-neutral-600 font-medium mb-1.5">升级内核平台</label>
-              <select v-model="coreForm.component" @change="onCoreComponentChange" class="form-input-base w-full !text-xs !py-1.5">
-                <option v-if="!coreDialogTargetNode || coreDialogTargetNode.capabilities?.core_name === 'xray'" value="xray">Xray-core</option>
-                <option v-if="!coreDialogTargetNode || coreDialogTargetNode.capabilities?.core_name === 'sing-box'" value="sing-box">sing-box</option>
+              <select v-if="coreDialogTargetNode" v-model="coreForm.component" @change="onCoreComponentChange" class="form-input-base w-full !text-xs !py-1.5">
+                <option v-for="core in getNodeInstalledCores(coreDialogTargetNode)" :key="core.component" :value="core.component">{{ core.name }} {{ core.version }}</option>
+              </select>
+              <select v-else v-model="coreForm.component" @change="onCoreComponentChange" :disabled="coreBatchComponentLocked" class="form-input-base w-full !text-xs !py-1.5 disabled:opacity-60">
+                <option v-for="item in coreBatchComponents" :key="item.name" :value="item.name">{{ item.name }}（{{ item.count }} 台）</option>
               </select>
             </div>
             <div>
@@ -963,6 +1053,9 @@
               <input v-model.trim="coreForm.version" @input="onCoreVersionInput" placeholder="例如: 26.3.27" class="form-input-base w-full !text-xs !py-1.5 tabular-nums font-semibold" />
             </div>
           </div>
+          <p v-if="!coreDialogTargetNode" class="text-[11px] text-ios-secondary">
+            将只向已运行 {{ coreForm.component }} 的 {{ coreBatchTargets.length }} 台在线服务器下发同一个版本、地址与摘要；未运行该内核的服务器不会收到安装任务。
+          </p>
 
           <div>
             <div class="flex items-center justify-between mb-1.5">
@@ -1074,10 +1167,13 @@
 import { onMounted, onUnmounted, ref, reactive, computed } from 'vue';
 import { isOwner, formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
-import { nodeAPI, installCommand, type Enrollment, type NodeView } from '../../nodes/api';
+import { APIError } from '../../../app/apiClient';
+import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../../nodes/api';
+import { proxyAPI, type Inbound } from '../../proxy/api';
+import { blockedCores, coreSummaryLabel, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
 import { agentUpdatesAPI } from '../agentUpdatesApi';
-import { coreUpdatesAPI, type ReleaseEntry } from '../coreUpdatesApi';
+import { coreUpdatesAPI, type CoreRemoveTask, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
@@ -1195,20 +1291,25 @@ const batchAgentConfirmMessage = computed(() => {
 // ========================================================
 // CORE PRESETS & DATA STRUCTURES
 // ========================================================
+// A preset only fills the version and the official asset URL for the node's
+// architecture. The SHA-256 is never prefilled: the Owner must paste the digest
+// published by the vendor, otherwise the Agent refuses to install.
 interface CorePreset {
   version: string;
   label: string;
   amd64Url: string;
   arm64Url: string;
-  sha256: string;
 }
 
 export interface InstalledCoreInfo {
-  component: 'xray' | 'sing-box';
+  component: CoreName;
   name: string;
   version: string;
-  healthy: boolean | undefined;
+  // null = the Agent reported no health observation for this core.
+  healthy: boolean | null;
+  error: string;
   protocols: string[];
+  primary: boolean;
 }
 
 const CORE_PRESETS: Record<string, CorePreset[]> = {
@@ -1217,15 +1318,13 @@ const CORE_PRESETS: Record<string, CorePreset[]> = {
       version: '25.10.15',
       label: 'v25.10.15 (版本辅助)',
       amd64Url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
-      arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-arm64-v8a.zip',
-      sha256: ''
+      arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-arm64-v8a.zip'
     },
     {
       version: '26.3.27',
       label: 'v26.3.27 (版本辅助)',
       amd64Url: 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip',
-      arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-arm64-v8a.zip',
-      sha256: ''
+      arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-arm64-v8a.zip'
     }
   ],
   'sing-box': [
@@ -1233,15 +1332,13 @@ const CORE_PRESETS: Record<string, CorePreset[]> = {
       version: '1.10.7',
       label: 'v1.10.7 (版本辅助)',
       amd64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.10.7/sing-box-1.10.7-linux-amd64.tar.gz',
-      arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.10.7/sing-box-1.10.7-linux-arm64.tar.gz',
-      sha256: ''
+      arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.10.7/sing-box-1.10.7-linux-arm64.tar.gz'
     },
     {
       version: '1.11.0',
       label: 'v1.11.0 (版本辅助)',
       amd64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz',
-      arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-arm64.tar.gz',
-      sha256: 'b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef01'
+      arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-arm64.tar.gz'
     }
   ]
 };
@@ -1249,24 +1346,27 @@ const CORE_PRESETS: Record<string, CorePreset[]> = {
 // ========================================================
 // MULTI-CORE INSTALLED STATE MANAGEMENT
 // ========================================================
+const CORE_ORDER: CoreName[] = ['xray', 'sing-box'];
+// The list comes from the backend's per-core data (capabilities.cores with the
+// heartbeat's per-core health). An old Agent reports no core list and is shown as
+// exactly one core built from its scalar capability fields.
 function getNodeInstalledCores(node: NodeView): InstalledCoreInfo[] {
-  const component = node.capabilities?.core_name;
-  if (component !== 'xray' && component !== 'sing-box') return [];
-  return [{ component, name: component === 'xray' ? 'Xray-core' : 'sing-box',
-    version: node.capabilities?.core_version || '—', healthy: node.heartbeat?.core_healthy,
-    protocols: protocols(node) }];
+  return nodeCores(node).map(core => ({
+    component: core.name,
+    name: core.label,
+    version: core.version,
+    healthy: core.healthy,
+    error: core.error,
+    protocols: core.protocols.filter(item => item.inbound || item.outbound).map(item => item.protocol),
+    primary: core.primary
+  }));
 }
 
 function getNodeAllProtocols(node: NodeView): string[] {
-  const cores = getNodeInstalledCores(node);
-  if (cores.length) {
-    const set = new Set<string>();
-    for (const c of cores) {
-      for (const p of c.protocols) set.add(p);
-    }
-    return [...set].sort();
-  }
-  return protocols(node);
+  const set = new Set<string>();
+  for (const core of getNodeInstalledCores(node)) for (const proto of core.protocols) set.add(proto);
+  if (!set.size) for (const item of node.capabilities?.protocols || []) if (item.inbound || item.outbound) set.add(item.protocol);
+  return [...set].sort();
 }
 
 function detectArch(node?: NodeView | null): 'amd64' | 'arm64' | '' {
@@ -1284,35 +1384,204 @@ function nodePlatform(node: NodeView): string {
   const os = String(caps?.os || node.os || '');
   return detectArch(node) && os === 'linux' ? os + '/' + detectArch(node) : '';
 }
-function requireCoreTarget(node: NodeView, component: string) {
+function requireCoreTarget(node: NodeView, component: CoreName) {
+  if (!isOwner.value) throw new Error('只有 Owner 可以管理内核');
   const age = Date.now() - Date.parse(node.lastHeartbeat);
-  if (!isOwner.value || !Number.isFinite(age) || age < -5000 || node.status !== 'online' || !node.enabled || node.deletedAt || Date.now() - Date.parse(node.lastHeartbeat) >= 45000 || !node.heartbeat?.current_revision) throw new Error('服务器需在线并上报当前配置版本');
-  if (node.capabilities?.core_name !== component) throw new Error('只能更新节点当前上报的核心，多内核即将支持');
+  if (!Number.isFinite(age) || age < -5000 || node.status !== 'online' || !node.enabled || node.deletedAt || age >= 45000 || !node.heartbeat?.current_revision) throw new Error('服务器需在线并上报当前配置版本');
+  if (!multiCoreSupported(node) && node.capabilities?.core_name !== component) throw new Error('该节点 Agent 未协商多核心支持，只能更新当前上报的核心');
+  if (blockedCores(node).includes(component)) throw new Error('core_pending：该内核正在添加或移除中，请等待 Agent 上报新的能力后再操作');
+}
+// True while a removal of this component is queued or still unanswered by the
+// Agent. Only task rows count; nothing is assumed.
+function corePendingRemoval(node: NodeView, component: CoreName): boolean {
+  return (coreRemovals.value[node.id + ':' + component] || []).some(task => task.status === 'queued' || task.status === 'running');
 }
 
 // ========================================================
-// CORE MANAGEMENT MODAL (添加内核、删除内核、多内核共存)
+// CORE MANAGEMENT MODAL (添加内核 / 删除内核 / 每核心任务)
 // ========================================================
 const coreManagementModalVisible = ref(false);
 const coreManagementTargetNode = ref<NodeView | null>(null);
+// Per-(node, component) task rows read from GET /core-updates, the removal history
+// of the two components and the inbounds that use each core. None of it is kept
+// in browser storage: the dialog reloads it from the backend.
+const coreTasks = ref<CoreUpdateTask[]>([]);
+const coreRemovals = ref<Record<string, CoreRemoveTask[]>>({});
+const coreInbounds = ref<Inbound[]>([]);
+const coreFactsLoading = ref(false);
 
 const manageInstalledCores = computed(() => {
   if (!coreManagementTargetNode.value) return [];
   return getNodeInstalledCores(coreManagementTargetNode.value);
 });
 
-function isCoreInstalled(comp: 'xray' | 'sing-box'): boolean {
+function isCoreInstalled(comp: CoreName): boolean {
   if (!coreManagementTargetNode.value) return false;
   return getNodeInstalledCores(coreManagementTargetNode.value).some(c => c.component === comp);
+}
+
+function coreTasksOf(nodeId: string, component: string): CoreUpdateTask[] {
+  return coreTasks.value.filter(task => task.nodeId === nodeId && task.component === component)
+    .sort((a, b) => (b.sequence || 0) - (a.sequence || 0));
+}
+function latestCoreTask(nodeId: string, component: string): CoreUpdateTask | undefined {
+  return coreTasksOf(nodeId, component)[0];
+}
+const CORE_TASK_STATUS: Record<string, string> = {
+  queued: '排队中', running: '进行中', success: '成功', failed: '失败', failed_closed: '失败（已关闭）', cleared: '已清除',
+  rejected: '已拒绝', unconfirmed: '未确认'
+};
+function coreTaskStatusText(status: string): string {
+  return CORE_TASK_STATUS[status] || status || '—';
+}
+function coreTaskTone(status: string): string {
+  if (status === 'success') return 'bg-ios-green/10 text-ios-green';
+  if (status === 'failed' || status === 'failed_closed' || status === 'rejected') return 'bg-ios-red/10 text-ios-red';
+  if (status === 'queued' || status === 'running') return 'bg-ios-blue/10 text-ios-blue';
+  return 'bg-ios-fill text-ios-tertiary';
+}
+// Shown next to a core whose add/remove task is not confirmed yet. The core stays
+// visible until a capability report drops it, exactly like the backend.
+function corePendingLabel(node: NodeView, component: CoreName): string {
+  if (corePendingRemoval(node, component)) return '移除中';
+  const task = latestCoreTask(node.id, component);
+  if (task && (task.status === 'queued' || task.status === 'running')) return task.adding ? '安装中' : '升级中';
+  if (blockedCores(node).includes(component)) return '处理中';
+  return '';
+}
+// Inbounds of this node that run on the component. An empty core follows the
+// node's current primary core, so it belongs to whichever core is primary now.
+function inboundsOnCore(node: NodeView, component: CoreName): Inbound[] {
+  const primary = primaryCoreName(node);
+  return coreInbounds.value.filter(item => item.nodeId === node.id && (item.core || primary) === component);
+}
+function inboundLink(nodeId: string): string {
+  return '/nodes/' + nodeId + '?tab=nodes';
+}
+// Dialog-scoped helpers: they always read the node that is currently open.
+function manageCoreInbounds(component: CoreName): Inbound[] {
+  const node = coreManagementTargetNode.value;
+  return node ? inboundsOnCore(node, component) : [];
+}
+function manageCoreTask(component: CoreName): CoreUpdateTask | undefined {
+  const node = coreManagementTargetNode.value;
+  return node ? latestCoreTask(node.id, component) : undefined;
+}
+function manageCorePendingLabel(component: CoreName): string {
+  const node = coreManagementTargetNode.value;
+  return node ? corePendingLabel(node, component) : '';
+}
+
+async function readAllInbounds(nodeId: string): Promise<Inbound[]> {
+  const first = await proxyAPI.inbounds(nodeId, 1, 100);
+  const list = [...first.items];
+  for (let page = 2; list.length < first.total; page++) {
+    const next = await proxyAPI.inbounds(nodeId, page, 100);
+    if (!next.items.length) break;
+    list.push(...next.items);
+  }
+  return list.filter(item => item.nodeId === nodeId);
+}
+async function readAllCoreTasks(): Promise<CoreUpdateTask[]> {
+  const first = await coreUpdatesAPI.tasks(1, 100);
+  const list = [...first.items];
+  for (let page = 2; list.length < first.total; page++) {
+    const next = await coreUpdatesAPI.tasks(page, 100);
+    if (!next.items.length) break;
+    list.push(...next.items);
+  }
+  return list;
+}
+// Backend facts for the dialog: which inbounds use which core, the latest task per
+// component and the removal history. A read failure stays visible instead of
+// inventing a state; every number shown comes from one of these responses.
+async function loadCoreFacts(node: NodeView) {
+  coreFactsLoading.value = true;
+  removeConflictInbounds.value = [];
+  try {
+    const [inbounds, tasks] = await Promise.all([readAllInbounds(node.id), readAllCoreTasks()]);
+    coreInbounds.value = inbounds;
+    coreTasks.value = tasks;
+    const removals = await Promise.all([
+      coreUpdatesAPI.removals(node.id, 'xray').catch(() => ({ items: [] as CoreRemoveTask[] })),
+      coreUpdatesAPI.removals(node.id, 'sing-box').catch(() => ({ items: [] as CoreRemoveTask[] }))
+    ]);
+    coreRemovals.value = {
+      [node.id + ':xray']: removals[0].items,
+      [node.id + ':sing-box']: removals[1].items
+    };
+  } catch (e) {
+    showToast('内核任务与入站信息读取失败：' + (e as Error).message, 'error');
+  } finally {
+    coreFactsLoading.value = false;
+  }
+}
+
+// ========================================================
+// REMOVE CORE (删除内核): Owner + CSRF + confirmNodeId on the real API
+// ========================================================
+const removeConfirmVisible = ref(false);
+const removeTargetCore = ref<InstalledCoreInfo | null>(null);
+const removeBusy = ref(false);
+// Inbounds the backend reports as still using the component (409 core_in_use).
+const removeConflictInbounds = ref<{ id: string; name: string }[]>([]);
+const removeConfirmMessage = computed(() => {
+  const node = coreManagementTargetNode.value, core = removeTargetCore.value;
+  if (!node || !core) return '';
+  return `确认从「${node.name}」移除 ${core.name} 内核？Agent 只会禁用安装器持有的文件，之后重新安装同一内核会再次启用；移除后无法回滚到使用该内核的历史配置版本。`;
+});
+function requestRemoveCore(core: InstalledCoreInfo) {
+  if (!isOwner.value || !coreManagementTargetNode.value) return;
+  removeConflictInbounds.value = [];
+  removeTargetCore.value = core;
+  removeConfirmVisible.value = true;
+}
+const REMOVE_ERROR_TEXT: Record<string, string> = {
+  core_in_use: '该内核仍有入站使用（含已禁用的入站），请先删除或改派下列入站后再移除内核。',
+  core_pending: '该内核正在添加、移除或升级中，请等待 Agent 回报后再试。',
+  last_core: '这是该服务器最后一个已启用的内核，不能移除。',
+  revision_mismatch: '服务器确认的配置版本已经变化，面板已刷新，请重新确认后再移除。',
+  unsupported: '该 Agent 未协商多核心支持，或该内核未上报为启用，不能移除。',
+  invalid_request: '请求被后端拒绝，请刷新后重试。'
+};
+async function confirmRemoveCore() {
+  const node = coreManagementTargetNode.value, core = removeTargetCore.value;
+  if (!isOwner.value || !node || !core || removeBusy.value) return;
+  removeBusy.value = true;
+  removeConflictInbounds.value = [];
+  try {
+    requireCoreTarget(node, core.component);
+    await coreUpdatesAPI.remove(node.id, core.component, node.heartbeat!.current_revision!);
+    showToast(`已提交移除 ${core.name} 内核任务，等待 Agent 回报；内核会保留到能力上报确认移除为止。`);
+    await load();
+    const fresh = nodes.value.find(item => item.id === node.id);
+    if (fresh) { coreManagementTargetNode.value = fresh; void loadCoreFacts(fresh); }
+  } catch (e) {
+    const error = e as APIError;
+    const ids = Array.isArray(error.details?.inboundIds) ? error.details.inboundIds as string[] : [];
+    if (error.code === 'core_in_use' && ids.length) {
+      removeConflictInbounds.value = ids.map(id => {
+        const match = coreInbounds.value.find(item => item.id === id);
+        return { id, name: match ? `${match.name} (${match.protocol.toUpperCase()} :${match.port})` : id };
+      });
+    }
+    showToast(REMOVE_ERROR_TEXT[error.code] || error.message || '移除内核失败', 'error');
+    if (error.code === 'revision_mismatch') void load();
+  } finally {
+    removeBusy.value = false;
+  }
 }
 
 function openCoreManagementModal(node: NodeView) {
   if (!isOwner.value) return;
   addCoreForm.sha256 = ''; addCoreForm.url = '';
+  removeConflictInbounds.value = [];
+  coreInbounds.value = []; coreTasks.value = [];
   coreManagementTargetNode.value = node;
   const component = node.capabilities?.core_name;
   if (component === 'xray' || component === 'sing-box') selectAddCoreComp(component);
   coreManagementModalVisible.value = true;
+  void loadCoreFacts(node);
 
   if (node.status === 'pending') {
     pendingEnrollmentLoading.value = true;
@@ -1340,17 +1609,18 @@ const addCorePresets = computed(() => {
 
 const addCoreBusy = ref(false);
 
+// A preset only fills version + official URL for the node's architecture. The
+// digest stays empty on purpose: the Owner pastes the vendor-published SHA-256.
 function applyAddCorePreset(preset: CorePreset) {
-    addCoreForm.sha256 = ''; addCoreForm.url = '';
+  addCoreForm.sha256 = ''; addCoreForm.url = '';
   addCoreForm.version = preset.version;
   const arch = detectArch(coreManagementTargetNode.value);
   if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
   const isArm = arch === 'arm64';
   addCoreForm.url = isArm ? preset.arm64Url : preset.amd64Url;
-  addCoreForm.sha256 = preset.sha256;
 }
 
-function selectAddCoreComp(comp: 'xray' | 'sing-box') {
+function selectAddCoreComp(comp: CoreName) {
   addCoreForm.component = comp;
   const presets = CORE_PRESETS[comp] || [];
   if (presets.length > 0) {
@@ -1386,9 +1656,17 @@ async function submitAddNewCore() {
     showToast('该服务器等待 Agent 注册，请在终端执行一键命令即可完成安装', 'info');
     return;
   }
+  if (!multiCoreSupported(node)) {
+    showToast('该节点 Agent 未协商多核心支持（旧版 Agent），只能升级当前上报的核心；请先按「版本与更新 › Agent」升级 Agent。', 'warning');
+    return;
+  }
+  if (isCoreInstalled(addCoreForm.component)) {
+    showToast('该内核已经上报为启用，请使用「升级」而不是「添加内核」', 'warning');
+    return;
+  }
 
   if (!addCoreForm.version || !addCoreForm.url || !/^[a-f0-9]{64}$/i.test(addCoreForm.sha256)) {
-    showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和', 'warning');
+    showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和（摘要不会自动填充，请粘贴官方发布的摘要）', 'warning');
     return;
   }
 
@@ -1404,8 +1682,10 @@ async function submitAddNewCore() {
       sha256: addCoreForm.sha256
     });
 
-    showToast('核心更新任务已受理，等待 Agent 确认');
-    void load();
+    showToast(`已提交 ${addCoreForm.component} 安装任务，等待 Agent 校验、安装并回报能力；内核在选择列表中可用之前仍需一次能力上报。`);
+    await load();
+    const fresh = nodes.value.find(item => item.id === node.id);
+    if (fresh) { coreManagementTargetNode.value = fresh; void loadCoreFacts(fresh); }
   } catch (e) {
     showToast((e as Error).message, 'error');
   } finally {
@@ -1426,16 +1706,15 @@ const currentCorePresets = computed(() => {
 });
 
 function applyCorePreset(preset: CorePreset) {
-    coreForm.sha256 = ''; coreForm.url = '';
+  coreForm.sha256 = ''; coreForm.url = '';
   coreForm.version = preset.version;
   const arch = detectArch(coreDialogTargetNode.value);
   if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
   const isArm = arch === 'arm64';
   coreForm.url = isArm ? preset.arm64Url : preset.amd64Url;
-  coreForm.sha256 = preset.sha256;
 }
 
-function selectCoreComponent(comp: 'xray' | 'sing-box') {
+function selectCoreComponent(comp: CoreName) {
   coreForm.component = comp;
   const presets = CORE_PRESETS[comp] || [];
   if (presets.length > 0) {
@@ -1448,6 +1727,18 @@ function selectCoreComponent(comp: 'xray' | 'sing-box') {
 const coreDialogVisible = ref(false);
 const coreDialogTargetNode = ref<NodeView | null>(null);
 const coreBusy = ref(false);
+// Batch upgrades run per component: only servers that already run it are queued,
+// so "全部升级" can never install a core the Owner did not choose to install.
+const coreBatchComponentLocked = ref(false);
+const coreBatchComponents = computed(() => {
+  const counts = new Map<CoreName, number>();
+  for (const node of eligibleOnlineNodes.value) {
+    for (const core of getNodeInstalledCores(node)) counts.set(core.component, (counts.get(core.component) || 0) + 1);
+  }
+  return [...counts.entries()].map(([name, count]) => ({ name, count }));
+});
+const coreBatchTargets = computed(() => eligibleOnlineNodes.value.filter(node =>
+  getNodeInstalledCores(node).some(core => core.component === coreForm.component)));
 
 // Pending node enrollment state for 1-click install command
 const pendingEnrollment = ref<Enrollment | null>(null);
@@ -1465,18 +1756,18 @@ const pendingEnrollmentCommand = computed(() => {
     grpcPort: item.install.grpcPort,
     caSha256: item.install.caSha256,
     token: item.enrollmentToken,
-    core: addCoreForm.component
+    cores: [addCoreForm.component]
   });
 });
 
 const coreDialogTitle = computed(() => {
-  if (!coreDialogTargetNode.value) return '全部升级代理内核';
+  if (!coreDialogTargetNode.value) return `全部升级代理内核 - ${coreForm.component}`;
   return `升级代理内核 - ${coreDialogTargetNode.value.name}`;
 });
 
 const coreDialogDescription = computed(() => {
   if (!coreDialogTargetNode.value) {
-    return `将对全部符合条件的在线服务器（共 ${eligibleOnlineNodes.value.length} 台）执行代理内核升级。`;
+    return `按内核分别升级：将对 ${coreBatchTargets.value.length} 台已运行 ${coreForm.component} 的在线服务器下发同一个版本与摘要。`;
   }
   return '配置目标内核版本、官方下载地址与校验和。Agent 将进行 SHA-256 校验，切换可能中断连接，结果以节点回执为准。';
 });
@@ -1485,24 +1776,17 @@ const coreDialogConfirmText = computed(() => {
   return '确认升级';
 });
 
-const savedCoreTarget = (() => {
-  try {
-    const raw = localStorage.getItem('qui_core_target_v1');
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-})();
-
+// Nothing about cores is kept in browser storage: the form starts empty and the
+// digest is always pasted by the Owner.
 const coreForm = reactive({
-  component: savedCoreTarget?.component || 'xray',
-  version: savedCoreTarget?.version || '25.10.15',
-  url: savedCoreTarget?.url || 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
+  component: 'xray' as CoreName,
+  version: '25.10.15',
+  url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
   sha256: ''
 });
 
 function onCoreComponentChange() {
-  selectCoreComponent(coreForm.component as 'xray' | 'sing-box');
+  selectCoreComponent(coreForm.component);
 }
 
 function onCoreVersionInput() {
@@ -1524,20 +1808,21 @@ function autoFillCoreURL() {
   }
 }
 
-// Open Core Upgrade Modal for a specific node
+// Open Core Upgrade Modal for a specific node (defaults to its primary core)
 function openUpgradeCore(node: NodeView) {
   const installed = getNodeInstalledCores(node);
   if (!installed.length) {
     openCoreManagementModal(node);
     return;
   }
-  // Default to first installed core
-  openUpgradeCoreForComponent(node, installed[0].component);
+  const primary = installed.find(core => core.primary) || installed[0];
+  openUpgradeCoreForComponent(node, primary.component);
 }
 
-function openUpgradeCoreForComponent(node: NodeView, comp: 'xray' | 'sing-box') {
+function openUpgradeCoreForComponent(node: NodeView, comp: CoreName) {
   if (!isOwner.value) return;
   coreForm.url = ''; coreForm.sha256 = '';
+  coreBatchComponentLocked.value = true;
   coreDialogTargetNode.value = node;
   selectCoreComponent(comp);
   coreDialogVisible.value = true;
@@ -1566,7 +1851,9 @@ function handleUpgradeSingle(node: NodeView) {
   }
 }
 
-// Batch upgrade trigger (from top-right "全部升级")
+// Batch upgrade trigger (from the top-right "全部升级"). Core upgrades are per
+// component: the dialog picks one component and only servers that already run it
+// are queued.
 async function upgradeAll() {
   if (!isOwner.value) return;
   try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
@@ -1585,9 +1872,35 @@ async function upgradeAll() {
     }
     batchAgentConfirmVisible.value = true;
   } else {
-    coreDialogTargetNode.value = null; // null means all eligible online nodes
+    if (!coreBatchComponents.value.length) {
+      showToast('尚未有服务器上报已启用的内核，无法批量升级', 'warning');
+      return;
+    }
+    coreForm.url = ''; coreForm.sha256 = '';
+    coreBatchComponentLocked.value = false;
+    coreDialogTargetNode.value = null; // null means "all servers running the component"
+    coreForm.component = coreBatchComponents.value[0].name;
+    selectCoreComponent(coreForm.component);
     coreDialogVisible.value = true;
   }
+}
+
+// Per-component batch entry: upgrade only the servers that run this component.
+async function upgradeAllComponent(component: CoreName) {
+  if (!isOwner.value) return;
+  try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
+  catch (e) { showToast((e as Error).message, 'error'); return; }
+  const targeted = eligibleOnlineNodes.value.filter(node => getNodeInstalledCores(node).some(core => core.component === component));
+  if (!targeted.length) {
+    showToast(`当前没有在线服务器运行 ${component}`, 'warning');
+    return;
+  }
+  coreForm.url = ''; coreForm.sha256 = '';
+  coreBatchComponentLocked.value = true;
+  coreDialogTargetNode.value = null;
+  coreForm.component = component;
+  selectCoreComponent(component);
+  coreDialogVisible.value = true;
 }
 
 // Execute single Agent upgrade
@@ -1643,11 +1956,11 @@ async function executeBatchAgentUpgrade() {
   void loadUpgradeContext();
 }
 
-// Submit Core upgrade action (single node or batch)
+// Submit Core upgrade action (single node, or per-component batch)
 async function submitCoreAction() {
   if (!isOwner.value) return;
   if (!coreForm.version || !coreForm.url || !coreForm.sha256) {
-    showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和', 'warning');
+    showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和（摘要不会自动填充，请粘贴官方发布的摘要）', 'warning');
     return;
   }
   if (!/^[a-f0-9]{64}$/i.test(coreForm.sha256)) {
@@ -1657,10 +1970,6 @@ async function submitCoreAction() {
 
   coreBusy.value = true;
   try {
-    try {
-      localStorage.setItem('qui_core_target_v1', JSON.stringify(coreForm));
-    } catch {}
-
     if (coreDialogTargetNode.value) {
       const node = coreDialogTargetNode.value;
       requireCoreTarget(node, coreForm.component);
@@ -1674,19 +1983,17 @@ async function submitCoreAction() {
       });
 
       // Installed state changes only after the Agent reports capabilities.
-
-      showToast(`已向「${node.name}」下发内核升级任务 (${coreForm.component} ${coreForm.version})`);
+      showToast(`已向「${node.name}」下发内核升级任务 (${coreForm.component} ${coreForm.version})，结果以节点回执为准。`);
     } else {
-      const eligible = eligibleOnlineNodes.value;
-      if (!eligible.length) {
-        showToast(`当前没有在线服务器`, 'warning');
-        coreBusy.value = false;
+      const targets = coreBatchTargets.value;
+      if (!targets.length) {
+        showToast(`当前没有运行 ${coreForm.component} 的在线服务器`, 'warning');
         return;
       }
 
       let success = 0;
       let failed = 0;
-      for (const node of eligible) {
+      for (const node of targets) {
         try {
           requireCoreTarget(node, coreForm.component);
           await coreUpdatesAPI.queue({
@@ -1704,7 +2011,7 @@ async function submitCoreAction() {
         }
       }
 
-      showToast(`已向 ${success} 台服务器下发内核升级任务${failed ? ` (${failed} 台跳过/失败)` : ''}`);
+      showToast(`已向 ${success} 台运行 ${coreForm.component} 的服务器下发升级任务${failed ? `（${failed} 台跳过/失败）` : ''}，结果以各节点回执为准。`);
     }
 
     coreDialogVisible.value = false;
@@ -1719,6 +2026,7 @@ async function submitCoreAction() {
 
 defineExpose({
   upgradeAll,
+  upgradeAllComponent,
   handleUpgradeSingle,
   openCoreManagementModal,
   openUpgradeCore
@@ -1734,6 +2042,12 @@ async function load() {
     if (current === generation) {
       nodes.value = result.items;
       total.value = result.total;
+    }
+    // The per-(node, component) task rows make the "安装中 / 升级中" label possible
+    // in the list and cards; they are read from the backend, never cached locally.
+    if (isOwner.value && props.kind === 'core') {
+      const tasks = await readAllCoreTasks().catch(() => null);
+      if (current === generation && tasks) coreTasks.value = tasks;
     }
   } catch (e) {
     if (current === generation) error.value = (e as Error).message;
@@ -1762,22 +2076,26 @@ const filteredNodes = computed(() => {
 });
 
 function coreVersion(node: NodeView) {
-  const cores = getNodeInstalledCores(node);
-  if (cores.length) {
-    return cores.map(c => `${c.name} ${c.version}`).join(', ');
-  }
-  if (!node.capabilities?.core_name) return '尚未检测核心';
-  return `${node.capabilities.core_name} ${node.capabilities.core_version || '版本未上报'}`;
+  return coreSummaryLabel(node);
 }
 
+// Per-core health: a node-level "healthy" flag is the AND of the cores, so the
+// per-core rows are what the Owner needs to see. Unknown stays "尚未上报".
 function coreHealth(node: NodeView) {
-  if (node.heartbeat?.core_healthy === true) return '最近上报正常';
-  if (node.heartbeat?.core_healthy === false) return '最近上报异常';
+  const cores = getNodeInstalledCores(node);
+  if (!cores.length) return '尚未上报';
+  const unhealthy = cores.filter(core => core.healthy === false);
+  if (unhealthy.length) return `${unhealthy.map(core => core.name).join('、')} 异常`;
+  if (cores.every(core => core.healthy === true)) return cores.length > 1 ? '全部内核正常' : '最近上报正常';
+  if (cores.some(core => core.healthy === true)) return '部分内核正常';
   return '尚未上报';
 }
 
-function protocols(node: NodeView) {
-  return [...new Set((node.capabilities?.protocols || []).filter(item => item.inbound || item.outbound).map(item => item.protocol))].sort();
+function coreHealthTone(node: NodeView): 'ok' | 'bad' | 'unknown' {
+  const cores = getNodeInstalledCores(node);
+  if (cores.some(core => core.healthy === false)) return 'bad';
+  if (cores.length && cores.every(core => core.healthy === true)) return 'ok';
+  return 'unknown';
 }
 
 function getCountryInfo(node: NodeView): CountryInfo {

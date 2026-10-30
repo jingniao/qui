@@ -200,6 +200,23 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 
 ## 10. 核心与 Agent 更新
 
+K3c/MC4（本地实现，未发布）：新节点默认单 Xray，需要两核时传
+`--core xray --core sing-box`；两个安装器都支持重复参数。手工
+`--core-version/--core-url/--core-sha256` 跟在对应 `--core` 后，
+`--core-source` 全局选择 sing-box 来源。升级不传核心参数会保留全部安装核心，
+显式传入只替换/追加，省略不表示删除。新 Agent 配置使用 `cores: [{name, path}]`，
+旧 `core_name/core_path` 保留为第一个核心的兼容值；显式安装核心时会将核心路径规范化到
+`/usr/local/lib/proxy-agent/<name>`，其他设置保留；无核心参数的升级保留已有 config（包括兼容旧键）原样。首次迁移从校验过的新发布包
+运行新版 update.sh，旧 updater 不含多核心和 config 快照保护。
+
+记录 v2 继续读取 v1，第 10 行 init、第 11/12 行 K2a 调优摘要保持含义；
+第 13 行起每行 `core <name> <absolute-path> <sha256>`。新 qui-update 将全部
+核心、Agent config、记录、主服务、强制出站与调优文件一起快照/恢复，进度日志
+沿用原格式；v2 Agent 记录遇到不支持它的旧目标 installer 时，在停服务前拒绝。
+卸载逐一校验并移除所有记录核心，保留状态数据，仍先恢复 K2a sysctl 原值再删
+调优单元。完整格式、离线参数与回退边界见[部署说明 K3c](deployment.md#k3c--mc4-多核心安装本地实现未发布)。
+
+
 节点安装时，`--core sing-box` 默认使用与 Agent 同一 qui 发布的静态
 `sing-box-1.14.4-qui.1-linux-(amd64|arm64).tar.gz`，按发布的 `SHA256SUMS`
 校验；glibc 与 musl 使用同一个归档。`node-install.sh --core-source official`
@@ -322,9 +339,9 @@ K1（0122）：节点分组改为具体入站及导入代理。升级前备份�
 
 `node_group_members` 是入站所属服务器的派生索引，供服务器视图、节点策略及批量操作使用；订阅、门户可用服务器与凭据渲染按具体入站及其 `allowedUserIds` 过滤，服务器订阅开关继续生效。进程内恢复沿用当前分组、成员和用户授权，缺失入站不恢复引用，避免旧备份恢复已撤销访问；旧归档先迁移 0122。额度与删除用户仍覆盖已发布状态里持有其凭据的服务器。
 
-节点元数据增加 `portRangeStart/portRangeEnd`（同时设置或同时为空，1–65535）。升级提取备注末尾有效 `[ports:A-B]` 并移除该后缀，无效后缀原样保留。画布自动选择中转端口时在范围内按 TCP/UDP 检查所有入站与本次计划占用，范围耗尽报错；显式端口不受范围限制，未配置范围沿用旧默认端口。当前 UI 接线属于后续 F1。
+节点元数据增加 `portRangeStart/portRangeEnd`（同时设置或同时为空，1–65535）。升级提取备注末尾有效 `[ports:A-B]` 并移除该后缀，无效后缀原样保留。画布自动选择中转端口时在范围内按数字端口检查该节点所有入站（含禁用）与本次计划占用，不区分 TCP/UDP（Agent 的节点级规则是数字端口唯一），范围耗尽报错；显式端口不受范围限制，未配置范围沿用旧默认端口。当前 UI 接线属于后续 F1。
 
-服务器详情可保存地区、备注、续费日期、周期、价格、币种与提醒天数。首次 Owner 读取可导入本机旧元数据一次；服务器已有值优先，失败保留本机数据，Viewer 不导入。到期窗口内通过持久化每日标记发送 `system.alert`，不是支付或自动续费。宿主/核心 uptime、网卡速率和只读 sysctl 来自实际观测，旧 Agent、首个样本或过期心跳显示“—”；基础调优和恢复已获 Owner 批准，由固定白名单 helper 执行（K2a，变更 L2；K2b 面板接入待完成）。月节点流量标为保留记录，基于面板时区内的账户样本，清理后不能保证完整月（L9）。
+服务器详情可保存地区、备注、续费日期、周期、价格、币种与提醒天数。首次 Owner 读取可导入本机旧元数据一次；服务器已有值优先，失败保留本机数据，Viewer 不导入。到期窗口内通过持久化每日标记发送 `system.alert`，不是支付或自动续费。宿主/核心 uptime、网卡速率和只读 sysctl 来自实际观测，旧 Agent、首个样本或过期心跳显示“—”；基础调优和恢复已获 Owner 批准，由固定白名单 helper 执行（K2a，变更 L2；K2b 面板已接入）。月节点流量标为保留记录，基于面板时区内的账户样本，清理后不能保证完整月（L9）。
 
 在节点测试位置配置具名主机/端口并发起 TCP 探测；非公网目标必须 Owner 显式允许。面板解析并校验全部 IP，Agent 再校验字面量地址、次数与期限；最多 10 次、每次 3 秒，每节点同时一个待执行请求，历史每节点/目标最多 100 条。结果的丢失率指 TCP 建连失败比例，中位数只取成功尝试；全失败显示未知中位数。代理列表“连通性”从面板主机测自建入站首个解析地址的 TCP/已配置的可信 TLS，不关闭证书验证，不测带宽或 UDP/QUIC，也不改变节点可用状态（L10）。
 
@@ -334,13 +351,21 @@ K1（0122）：节点分组改为具体入站及导入代理。升级前备份�
 
 用户重置周期可选不重置、每月或每 30 个本地日，存储独立周期、锚点与已处理边界；每月保留原日号、短月夹紧，下月恢复原锚点，30 日按面板时区日历运算而非固定秒数。调度器清零使用量，恢复活跃通过原额度自动发布。0118 迁移闭合的旧 `[config:…]` 前缀并去除旧 up/down 限速元数据；每用户限速已移除（L1），普通备注保留。恢复保守保留当前重置边界，避免旧备份再次清零；停止/恢复取消并等待调度任务。月末、时区与重启边界有假时钟测试，Linux/浏览器观察仍待 Owner。
 
-## 18. K2a 主机观测、续证与调优 helper
+## 18. K2a / K2b 主机观测、续证与调优
+
+Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）。每节点每分钟保留最后一条新鲜心跳，7 天清理；≤12 小时原始点，>12 小时分桶步长 ceil(hours×60/720)×60 秒。响应 intervalSeconds 为桶步长、sampleSeconds 固定 60、points 缺测为 null；桶内只平均已测值，不补零。非 lo 接口速率合计是宿主流量，可能跨接口重复计数。HostInfo 和 heartbeat 可空指标随节点详情提供，缺测不得当作 0。
+
+`GET /api/v1/nodes/{id}/tuning` 返回期望 desired、操作 status、逐键 result 与末次心跳 current。Owner 通过带 CSRF 的 PUT 提交完整字符串 settings、clear 和匹配 confirmNodeId；新 profile 省略旧键会恢复其初始值。clear=true 只能带空 settings，空 profile 同样清除。只接受 13 个固定 sysctl 键和 Agent 相同边界；tcp_rmem/tcp_wmem 仅填最大整数。无能力返回 409 tuning_unsupported，离线/过期心跳返回 409 node_offline，同节点 pending 返回 409 tuning_busy。成功受理 202 仅表示排队，操作日志为“修改服务器调优”。
+
+等待结果期间其他心跳照常确认；断流后 pending 变为 unconfirmed，不自动换 ID 或重发。unconfirmed 时先查看后续 current、节点日志及 helper status.json，再由 Owner 明确提交新操作，不能根据本地期望宣称已成功或未应用。应用成功也要按实际读回值核对。
+
+便携备份排除 node_metric_samples，快照删除后压实；恢复再次清空采样。node_tuning 随备份保存，但恢复合并保留当前库的调优行，删除仅在归档存在的行，pending 变为 unconfirmed，不下发旧操作。恢复不会修改服务器 sysctl，恢复后重新核对观测。面板自动续证准入已与 K2a 对齐：证书满 30 天或剩余不超过 14 天，沿用原密钥与现有确认流程。
 
 主机信息随 Capabilities 重发刷新；磁盘总量/用量与 disk_percent 都取 Agent 状态目录所在文件系统。load、进程数、TCP 全状态套接字数、UDP 套接字数及内存/交换/磁盘字节来自 Linux 实际读取，失败不填。tuning_current 是完整当前值，tcp_rmem/tcp_wmem 含三个整数；下发这两个键时只填最大值，前两个值保持应用时的现值。
 
 自动续证使用原私钥，证书满 30 天或余期不超过 14 天即在连接内尝试；失败退避 1 小时，离线不执行。K2b 须同步面板自动续证准入，否则旧面板会返回 renewal is not due；90 天签发期不变。
 
-调优是 Owner 批准的固定特权操作（变更 L2）。Agent 将 request_id、settings、clear 写入 /var/lib/proxy-agent/tuning/desired.json（0600），helper 返回同目录 status.json。status 为 applied/cleared/failed，keys 为逐键读回值与错误；30 秒未等到匹配 request_id 只表示结果未确认，不能宣称没有应用。面板接入待 K2b；请求 ID 须唯一，不自动重试未确认的变更。
+调优是 Owner 批准的固定特权操作（变更 L2）。Agent 将 request_id、settings、clear 写入 /var/lib/proxy-agent/tuning/desired.json（0600），helper 返回同目录 status.json。status 为 applied/cleared/failed，keys 为逐键读回值与错误；30 秒未等到匹配 request_id 只表示结果未确认，不能宣称没有应用。面板 K2b 已接入；请求 ID 须唯一，不自动重试未确认的变更。
 
 - systemd：查看 `systemctl status proxy-agent-tuning.path proxy-agent-tuning.service`、`journalctl -u proxy-agent-tuning`；path 应保持运行，oneshot 执行完为 inactive 正常。反复失败后仍应接收新请求。
 - OpenRC：查看 `rc-service proxy-agent-tuning status`、syslog 的 proxy-agent-tuning；检查 `/usr/local/lib/proxy-agent/tuning-watch`、busybox inotifyd 与启动运行级。
@@ -348,3 +373,18 @@ K1（0122）：节点分组改为具体入站及导入代理。升级前备份�
 - `/etc/sysctl.d/99-proxy-tuning.conf` 保存成功配置；root 0600 的 `.proxy-tuning-snapshot.json` 保存首次应用前原值，不由 Agent 写。空 profile/clear 删除配置并恢复原值。卸载先停 watcher、恢复快照，恢复失败保留程序并中止卸载。不要手动删除快照来处理失败。
 
 systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者读取 Agent 的 0600 请求并写入其 0700 目录），fs.file-max 靠 root 文件权限；/proc/sys 默认只读，只开放 13 个固定键。OpenRC 同为 root/CAP_NET_ADMIN + CAP_DAC_OVERRIDE，但缺少 systemd 文件系统隔离。若宿主策略拒绝写入，保留失败结果；不扩权。Linux/root 集成及实际内核权限仍待主机验收，可运行 `sudo bash deploy/linux/tests/tuning-helper-test.sh` 验证隔离的触发/重放流程，Go tuning 测试用假 proc 验证应用/恢复，不改宿主。
+
+## 19. K3b 多核心运维（本地实现、未发布、待实机验收）
+
+**看节点到底有几个核心**：`GET /api/v1/nodes/{id}` 的 `capabilities.cores` 是 Agent 报告为**启用**的核心清单（`name/version/protocols/singbox_user_stats/forward_inbound_supported/device_gate_supported/observation_contract_version`），`heartbeat.cores` 是逐核心运行状态（`name/healthy/error/started_at/traffic_source_status`）。未上报 `multi_core_supported` 的旧 Agent 仍显示一个核心（`capabilities.core_name`），缺失的观测保持缺省而不是 `false`。`core_selectionBlocked` 列出当前**不可选**的组件（正在添加或移除）。
+
+**给入站指定核心**：入站表单的 `core` 留空表示“当前主核心”，不要为了跟主核心显式绑定而填值——主核心换人后空值会跟着走，显式值不会。保存与发布都会按该核心的能力拒绝不支持的协议、转发入站、WireGuard 与设备门控；同一节点的监听端口在所有核心与端口转发之间**唯一**（同一数字端口即使传输不同也不能复用）。
+
+**添加缺失核心**：系统 → 核心版本，`POST /api/v1/core-updates`，`component` 填 `xray` 或 `sing-box`，并带当前已确认修订、官方（或严格匹配的 qui）资源 URL 与归档 SHA-256。每个（节点、组件）同时只有一个活跃任务，两个组件可以同时排队。任务 `success` 只表示镜像切换成功；只有下一次能力上报里出现该组件，它才会从 `core_selectionBlocked` 消失并可选为入站核心。
+
+**移除核心**：先删掉该组件上的所有入站（包括禁用的），发布并确认该修订，然后 `POST /api/v1/nodes/{id}/cores/{component}/remove`（带 `confirmNodeId` 与当前已确认修订）。拒绝码：`core_in_use`（错误体 `inboundIds` 列出仍占用该组件的入站）、`core_pending`（该组件正在添加/移除或有部署占用）、`last_core`（最后一个启用核心不能移除）、`revision_mismatch`（提交的修订不是当前已确认修订）。断线后用同一 id 重发即可，回执幂等；在能力上报确认之前该组件仍然显示。安装器拥有的二进制不会被 Agent 删除，只会被禁用，重新安装同组件即重新启用。移除后要回滚到使用该组件的历史修订会被拒绝（`rollback refused: …`），必须先装回组件或发布一份显式指定核心的新修订。
+
+**逐核心重启/健康检查**：`POST /api/v1/nodes/{id}/restart-core` 与 `/health-checks` 的 `core` 留空是整节点操作，填 `xray`/`sing-box` 只作用于该核心；历史回滚始终是整节点。执行结果在 `GET` 同名路径的历史里带 `core`。
+
+**按核心计量**：协商了 `node_traffic_supported` 的 Agent 会额外上报每核心的节点累计计数。这些字节只进入节点/核心总量（`GET /api/v1/traffic/summary`、每月节点流量、总览），不进入用户额度；同一 epoch 已有 node 游标时账户样本不再重复计入。用户维度仍只看账户计数，官方 sing-box（无 `with_v2ray_api`）的用户字节依然未知。同一节点可以有多个活跃 epoch，一个核心上报不会淘汰另一个；节点重启后新旧 epoch 各自从零累计，不影响总量。
+

@@ -17,8 +17,16 @@
       <div class="grid gap-3 sm:grid-cols-3">
         <label class="text-xs text-ios-secondary">面板地址<input v-model.trim="host" maxlength="253" class="form-input-base mt-1.5" /></label>
         <label class="text-xs text-ios-secondary">HTTP 端口<input v-model.number="port" type="number" min="1" max="65535" class="form-input-base mt-1.5" /></label>
-        <label class="text-xs text-ios-secondary">核心<select v-model="core" class="form-input-base mt-1.5"><option value="xray">xray</option><option value="sing-box">sing-box</option></select></label>
+        <div class="text-xs text-ios-secondary">运行内核
+          <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-ios-bg px-3 py-2">
+            <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
+              <input v-model="cores" type="checkbox" :value="option.name" class="accent-ios-blue" />{{ option.label }}
+            </label>
+          </div>
+        </div>
       </div>
+      <p v-if="!cores.length" role="alert" class="text-xs text-ios-red">请至少选择一个运行内核（xray 或 sing-box）。</p>
+      <p class="text-xs text-ios-tertiary">命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
       <p v-else class="text-sm text-ios-red">请填写有效的面板地址与端口</p>
     </div>
@@ -33,30 +41,34 @@
 </template>
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { nodeAPI, installCommand, type Enrollment, type NodeView } from '../api';
+import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../api';
 import { CURRENCY_LIST, CYCLE_LIST, saveNodeMeta } from '../nodeMeta';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import CodePreview from '../../../components/CodePreview.vue';
 const emit = defineEmits<{ changed: [] }>();
+// A fresh node gets Xray by default; sing-box is optional. `--core` is repeatable
+// (K3c), so the dialog keeps the selection as a list and never sends an empty one.
+const CORE_OPTIONS: { name: CoreName; label: string }[] = [{ name: 'xray', label: 'Xray' }, { name: 'sing-box', label: 'sing-box' }];
 const createOpen = ref(false), installOpen = ref(false), creating = ref(false);
 const name = ref(''), renewDate = ref(''), currency = ref('CNY'), price = ref(''), cycle = ref('/年');
 const error = ref(''), metaWarning = ref('');
 const enrollment = ref<Enrollment | null>(null);
-const host = ref(''), port = ref(443), core = ref('xray');
+const host = ref(''), port = ref(443), cores = ref<CoreName[]>(['xray']);
 const installAvailable = computed(() => Boolean(enrollment.value?.install?.version && enrollment.value?.install?.caSha256));
 const command = computed(() => {
   const item = enrollment.value;
   if (!item || !installAvailable.value || !/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
+  if (!cores.value.length) return '';
   return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
-    grpcPort: item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, core: core.value });
+    grpcPort: item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
 });
 function showInstall(item: Enrollment) {
   enrollment.value = item;
   host.value = window.location.hostname;
   port.value = Number(window.location.port) || 443;
-  core.value = 'xray';
+  cores.value = ['xray'];
   installOpen.value = true;
 }
 async function create() {

@@ -14,7 +14,11 @@
 
 **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，发布说明仍为草稿。
 
-- K2a（2026-10-29）：Agent 增量上报主机信息、负载/进程/套接字/字节指标及实际 sysctl；证书满 30 天或余期不超过 14 天时在连接内用原密钥续证。Owner 批准调优白名单 root helper（变更 L2），支持事务恢复与清除；面板接入 K2b、Linux/root 实机验收待完成，未发布。
+- K3b（2026-10-29）：面板多核心支持：`Hello/Welcome` 协商 `multi_core_supported` 与独立的 `node_traffic_supported`；按核心保存能力/版本/标志与心跳健康、启动时间、统计源状态，旧 Agent 仍按一个核心建模，缺测保持未知。入站 `core` 进入草稿、DesiredState、自动额度版本、恢复与订阅，空值等于当前主核心，保存与发布按选中核心校验协议、转发、WireGuard、门控与跨核心端口唯一。核心更新任务改为每（节点、组件）一个（迁移 0125 回填既有行），缺失组件可用 schema-2 请求安装，结果按组件路由，成功且能力刷新后才可选。Owner 移除核心：`POST /nodes/{id}/cores/{component}/remove` 与 `removals`，幂等 `RemoveCoreCommand/Result`，断线后用同一身份重发，拒绝 `core_in_use`/`core_pending`/`last_core`/`revision_mismatch`，能力确认前组件仍可见。协商会话中的 node 计数器按（节点、epoch、凭据）增量计入每核心/节点总量，绝不进入额度或重复计入账户总量，同一节点可有多个活跃 epoch。连接观测按（节点、核心）合并活跃源地址后再做设备准入，保留掩码、易失存储、TTL 与放行行为；每个入站按所属核心显示 D5 覆盖。分区重启/健康检查带核心字段，移除核心后的历史回滚在面板侧直接拒绝并说明原因。备份、校验、清单与恢复覆盖新列/新表；未发布，Linux/root 实机验收待完成。
+
+- K2b（2026-10-29）：面板接入主机信息、可空指标、分钟采样/7 天保留及查询、Owner+CSRF+审计的白名单调优（变更 L2）；断流和恢复标为未确认且不重发，续证准入与 Agent 对齐。迁移 0123；Linux/root 实机验收待完成，未发布。
+
+- K2a（2026-10-29）：Agent 增量上报主机信息、负载/进程/套接字/字节指标及实际 sysctl；证书满 30 天或余期不超过 14 天时在连接内用原密钥续证。Owner 批准调优白名单 root helper（变更 L2），支持事务恢复与清除；面板已接入 K2b，Linux/root 实机验收待完成，未发布。
 
 - L4：qui-update 支持 `X.Y.Z-rc.N`、semver 优先级与 `--component panel|agent`；本地修复完成，Linux/root 与主机验收待执行，RC 未运行。
 
@@ -301,6 +305,10 @@ Internet
 - 中央端断线时本地缓存记录
 
 ## 4.4 代理核心
+
+K3a Agent 本地实现完成（2026-10-29，原生 Linux/root 验收待执行）：`cores: [{name, path}]` 支持 xray 与 sing-box，首项为兼容主核心；旧标量配置仍映射为一个核心。所有生产节点使用 MultiRuntime 与 `runtime/<core>/`。通过校验过的 component 核心更新可添加缺失核心；`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写。GOST 尚未实现；协议、存储兼容与 K3b 要求见 [K3a Agent 报告](docs/v1.2-k3a-agent-report.md)。
+
+K3b 面板侧（2026-10-29，本地实现、未发布）：面板把节点建模为“已上报启用的核心集合”。`Welcome.multi_core_supported` 只对声明支持的 Agent 为真；未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成，缺测字段保持 `null` 而不是 0/健康。入站归属的核心由 `inbounds.core` 保存（空串＝当前主核心），删除或添加核心任务未落定期间该组件不可选（`core_selectionBlocked`）。面板不接受未上报启用的核心，也不容忍跨核心/转发的端口重复。详见 [K3b 面板报告](docs/v1.2-k3b-panel-report.md)。
 
 第一阶段优先支持：
 
@@ -656,6 +664,8 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 ## 11.2 节点详情
 
+K3b：节点详情按核心展示 `capabilities.cores`（已上报启用的核心与各自版本、协议、用户统计、转发、门控能力）和 `heartbeat.cores`（逐核心健康、错误码、启动时间、统计源状态）；`core_selectionBlocked` 列出正在添加/移除、暂不可选的组件。入站列表的 `core` 与 `userTrafficSupported`/`deviceGateSupported` 说明每个入站由哪个核心承载、该核心是否支持用户字节与设备门控。旧 Agent 只有一个核心，缺测字段留空而不是显示 0 或“健康”。
+
 节点详情包含：
 
 - 基础信息
@@ -672,6 +682,10 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 - 发布记录
 - 节点事件
 - 出站网络（核心出站源 IP/网卡、服务器强制出站 IPv4/IPv6，未配置显示“—”）
+
+K2b 主机观测随 Capabilities.host 刷新：CPU 型号/逻辑核数、架构、内核、系统名称和内存/交换/状态目录文件系统总量。Heartbeat 的 load1/5/15、processCount、tcpConnections、udpSockets、memoryUsedBytes、swapUsedBytes、diskUsedBytes、tuningCurrent 进入节点视图；optional 缺测省略，实测 0 保留。新增 uint64 视图字段沿用 protobuf JSON 十进制字符串；HostInfo 普通标量 0 无法区分缺测。旧 snake_case 字段保留。
+
+资源曲线每节点每 UTC 分钟保存最后一条新鲜心跳（消息时间与接收时间差不超过 45 秒）；已确认序列重放与过期消息不采样。保留 7 天，随延迟调度循环清理。CPU/内存/磁盘百分比、字节、load1、进程/套接字/已测活跃连接数及非 lo 接口速率合计可查询；网卡合计可能跨接口重复计数，不等同用户代理流量。缺测为 null，不补 0。调优读取对 Owner/Viewer 开放，修改限 Owner、CSRF 与匹配 confirmNodeId；实际观测与期望配置分别提供，详见第 22.0 节。
 
 ## 11.3 节点注册
 
@@ -750,6 +764,7 @@ Shadowsocks :8388
 
 - 名称
 - 所属节点
+- 所属核心（`core`；留空表示该节点当前报告的主核心，填写值必须是该 Agent 报告为启用的核心）
 - 协议
 - 监听地址
 - 监听端口
@@ -761,6 +776,8 @@ Shadowsocks :8388
 - 默认出站
 
 用于节点间中转的内部入站，应设置为不在用户订阅中显示。
+
+K3b：同一节点上的入站监听端口按 Agent 的节点级规则在全部核心与端口转发之间唯一（同一数字端口即使传输不同也不能复用），协议、转发能力、WireGuard 与设备门控按入站所属核心的能力校验；组件正在被添加或移除（任务未落定）期间 `core` 不可选，保存草稿与发布都会拒绝，错误码 `core_pending`。
 
 ---
 
@@ -821,7 +838,9 @@ Shadowsocks :8388
 
 # 14. 协议转换中转
 
-中转搭建（U5a）统一展示“加密中转”和“端口转发”。端口转发的 `listenPort`、`targetHost`、`targetPort` 保存在连接上；旧布局按实例端口与目标服务器公网 IP 回退。新字段只允许 `port_forward`，主机校验复用 forward 入站规则，同服务器监听端口重复或被其他入站占用时计划与发布均拒绝。多条端口转发可以连接同一对服务器，按连接 ID 区分；旧布局的生成名称不变。
+K4（2026-10-29）：服务器方案连接引用独立 canvas_tunnels；canvas_tunnel_objects 以对象类型和 ID 显式记录唯一归属，计划、发布、端口复用与清理不再按名称前缀认领。0124 为每条旧服务器连接创建独立隧道，不跨方案自动合并；启动/恢复在 Go 事务中只认领已发布方案、当前名称精确匹配且无歧义的旧对象。未认领对象保留，Owner 可查看清单并显式认领；冲突返回 legacy_object 与对象 ID。改名后归属保持，共享隧道配置与必要链路依赖一起发布。具体接口、迁移边界和验证见 [K4 报告](docs/v1.2-k4-tunnels-report.md)；未发布、未操作真实服务器。
+
+中转搭建（U5a）统一展示“加密中转”和“端口转发”。端口转发的 `listenPort`、`targetHost`、`targetPort` 保存在连接上；旧布局按实例端口与目标服务器公网 IP 回退。新字段只允许 `port_forward`，主机校验复用 forward 入站规则。监听端口按数字在节点内唯一，不区分 TCP/UDP（与 Agent `desiredstate.Validate` 相同，含中转与转发入站）：计划与发布在端口被该节点其他**已启用**入站占用、或被本次计划的另一条监听重复使用时拒绝，禁用入站不占用；K4 的对象归属不变，同一对象自己的监听重发不与自己冲突。多条端口转发可以连接同一对服务器，按连接 ID 区分；旧布局的生成名称不变。
 
 系统必须支持以下场景：
 
@@ -906,6 +925,8 @@ US-Exit
 ---
 
 # 16. 代理链模块
+
+K4 共享范围覆盖服务器执行的 tunnel、proxy_chain 与 port_forward；客户端链继续自包含，拒绝 tunnelId。相同 tunnelId 只生成一组对象；已发布且未变的共享隧道可无操作发布。共享跳的链和入口是发布依赖；两个方案对同一入口声明不同隧道路径时拒绝计划/发布。删除方案不删除仍共享的对象；最后一个方案移除引用后，在其下一次发布中按原引用阻塞规则清理。删除仍在使用的隧道返回 409 tunnel_in_use 与方案列表。不同隧道不会自动接管对方的监听对象；历史链归属无法唯一证明时须 Owner 显式认领。
 
 中转搭建中的“代理链连接”并入“加密中转”；持久化类型 `proxy_chain` 与 `tunnel` 均保留，服务器规划语义相同。客户端方案也接受两者为同一条 mihomo dialer-proxy 路径的兼容类型，不创建服务器隧道，逐跳授权与单路径校验不变。
 
@@ -1221,9 +1242,13 @@ v1.1 内部身份字段继续用于流量归属与补传，界面隐藏设备维
 
 **每域名字节**：见第 20 节，官方核无法提供时列为空并显示“—”。
 
+K3b 节点/核心总量：声明 `node_traffic_supported` 的 Agent 额外上报每核心的累计节点计数（`traffic.Counter{kind:"node"}`）。面板只在协商成功的会话内接受这些批次，按（节点、epoch、`node`）保存游标并计算增量，写入 `core_traffic_samples` 作为每核心/每节点总量；重复批次幂等，同一节点可有多个活跃 epoch，一个核心上报不会淘汰另一个的 epoch。这些字节**不进入用户额度**，也不与账户派生的样本重复相加：`node_traffic_samples` 视图仅在同一 epoch 没有 node 游标时才使用账户样本。因此“今天流量”“每月节点流量”“访问审计的节点汇总”在两类节点上都成立，混合核心节点不会被计两遍；用户维度仍只来自账户计数，官方 sing-box 无 `with_v2ray_api` 时用户字节仍未知。
+
 ---
 
 # 22. 配置发布与回滚
+
+K3a：双核心节点一条 Revision 覆盖所有核心，`core.json.enc` 内保存按核心名分组的原生 JSON；恢复继续从经过校验的 DesiredState 重建运行时，兼容旧单核心修订。所有活跃核心先原生校验，再按配置顺序切换；失败逆序补偿回滚。每个核心使用 `runtime/<core>/` 下独立的运行标记、accounting key、访问日志和临时文件；无启用入站的核心保持停止。心跳新增逐核心状态，旧 `core_healthy` 为 AND；supervisor 仅恢复异常核心，并分别退避。
 
 后台配置修改后，不直接覆盖节点当前运行配置。
 
@@ -1266,6 +1291,12 @@ Agent 编译核心配置
 
 每个节点默认保留最近 3～5 个成功配置版本。
 
+## 22.0 服务器调优应用流程（K2b，变更 L2）
+
+Owner 提交完整 settings/clear 与匹配的 confirmNodeId → 面板校验固定白名单/边界 → 事务保存 node_tuning 的唯一 request_id、期望 profile、pending 与审计“修改服务器调优” → 现有 Connect 循环下发 TuningCommand。每节点最多一个 pending（409 tuning_busy）；未声明能力返回 409 tuning_unsupported，禁用、离线或心跳过期返回 409 node_offline。等待 helper 时仍接收其他消息并 Ack。TuningResult 必须匹配认证 node_id 与 request_id，事务保存逐键结果后 Ack；同结果幂等，冲突拒绝。
+
+断流和重连把 pending 改为 unconfirmed，不自动重发、不换新 ID 重试；未确认不等于没有应用。通过后续 tuningCurrent 与运维检查确认实际状态，再由 Owner 明确发起新操作。恢复数据库保留恢复前当前调优行，pending 改为 unconfirmed，绝不执行归档中的旧请求。自动续证准入与 Agent 一致：证书满 30 天或剩余不超过 14 天；仅在两个条件均未满足时拒绝自动申请，仍保留身份、原密钥、回执与确认检查。
+
 ## 22.1 自动额度版本
 
 除 Owner 手工发布外，面板还会自动发布一种**只调整用户访问面**的版本（D3）：
@@ -1292,8 +1323,11 @@ Agent 编译核心配置
 - 中央离线时节点继续运行旧配置，直到重新连接并收到版本。
 - 每次部署或回滚成功后，面板为该节点排队一次对账（同样受 60 秒合并窗口约束）：回滚或部署旧修订重新带回已禁用用户、或漏掉已重新启用用户时，由一个自动版本纠正；节点已一致时不产生版本。
 - 删除用户或设备后，面板为已发布状态里仍持有该用户凭据的节点排队一次（原因 `deleted` 或 `device deleted`，同样发出 `user_access` 告警），自动版本按当前数据渲染、不再含被删除的凭据；节点已一致时不产生版本。
+- K3b：自动版本渲染自同一份草稿快照，因此每个入站的 `core` 原样继承（空串仍跟着当前主核心走）；草稿里绑定的核心若正在添加/移除，或该核心已不再上报启用，渲染会以 `core selection pending` / 核心不可用失败并按上面的重试规则处理，不会把凭据悄悄搬到别的核心上。
 
 ## 22.2 核心更新流程
+
+K3a：xray/sing-box 各有更新 worker、staging 与认证 release hold，缺失组件可经相同 URL 白名单、SHA-256、归档及原生版本校验安装后启用；空闲核心不启动。清单原子提交为添加/移除的持久边界，中断移除在启动时确认退出并继续清理。安装器所有的文件仅在清单中禁用，保留记录摘要。移除成功回执持久保留到面板 Ack，重连/重启重发；操作后刷新 Capabilities.cores。主/次核心独立更新历史，重新添加使用新历史命名空间并保留原反回滚序号检查。面板须完成 K3b 的协商、任务及按核心计量后开放操作。
 
 核心升级与配置发布是两条独立路径：
 
@@ -1316,6 +1350,13 @@ Agent 校验 URL 前缀与重定向主机，校验归档 SHA-256
 - Agent 的核心更新结果在收到面板 Ack 前一直保留在 core-update worker 的内存队列里（先发最早的一个）：连接在等 Ack 时断开就在下一个会话重发，面板对相同结果幂等并确认；面板以 `FailedPrecondition` + `core update result rejected` 永久拒绝同一结果（例如任务已被 Owner 清除）连续 3 次后 Agent 丢弃并记 Warn，其他错误（网络、`Unavailable`、上下文取消）永不丢弃。该队列只在内存里，Agent 重启会丢失，由上面的重连关闭与 Owner 清理兜底。
 - **Agent 自身的更新仍使用签名清单**（Ed25519，公钥固定在配置里，按安装历史防重放），不使用 URL + SHA-256。
 - 早期版本中的 receipt/outcome 更新日志（journal）与受控核签名目录路径已删除；核心更新不再经过签名目录，签名目录只剩 Agent 自更新在用。
+
+K3b 面板侧（2026-10-29，本地实现、未发布）：
+
+- 任务粒度是**每（节点、组件）一个活跃任务**（迁移 0125 用唯一索引替换原“每节点一个”）。`sequence` 按（节点、组件）各自的更新历史累加；同一个节点可以同时排队 xray 与 sing-box 两个任务，`PendingCoreUpdate` 先派发排队中的任务，再重发运行中的同一身份（断线重连不换 ID）。`POST /api/v1/core-updates` 的 `component` 必填，缺失组件用同一 schema-2 `CoreUpdateRequest` 安装；`CoreUpdateResult` 的信封 `component` 必须与任务一致，否则拒绝，重复结果幂等，改动过的结果拒绝。
+- 成功只表示镜像切换成功：**组件可被选为入站核心**还要等下一次 `Capabilities.cores` 含该组件。任务进行中的组件在 `core_selectionBlocked` 里，入站保存、草稿渲染与发布都拒绝（`core_pending`），面板不会因为任务成功就伪造能力。
+- Owner 移除核心走独立任务表 `core_remove_tasks`：`POST /api/v1/nodes/{id}/cores/{component}/remove`（Owner + CSRF + `confirmNodeId` + 当前已确认修订 + 操作日志 `remove_core`）→ 连接内下发 `RemoveCoreCommand{id,component,revision}` → 回到 `RemoveCoreResult` 幂等保存并 Ack。断线后用同一 id/component/revision 重发；更晚的修订确认后仍接受同一回执的迟到重放。拒绝原因：`core_in_use`（当前草稿或已发布修订里仍有该组件的入站，含禁用入站，错误体带 `inboundIds`）、`core_pending`（该组件正在添加/移除或有部署占用）、`last_core`（不能移除最后一个启用核心）、`revision_mismatch`（提交的修订不是当前已确认修订）。移除成功后面板按后续能力上报判断生效；在能力确认之前该组件仍显示。安装器拥有的文件只会被 Agent 禁用，重新安装同组件会被更新任务重新启用。
+- 移除核心后回滚到使用该核心的历史修订会在面板侧被拒绝（`rollback refused: … core "sing-box" is unavailable`），必须先重新安装该组件，或发布一份显式指定核心的新修订。
 
 ---
 
@@ -1377,13 +1418,16 @@ Node Agent 不允许提供：
 - 轮换节点证书
 - 更新 Agent
 - 更新代理核心
+- 移除代理核心（K3a 已实现；拒绝当前/待定修订仍分配入站、最后核心或退出未确认的操作；安装器所有的核心仅持久禁用，Agent 只清理自管镜像）
 - 应用服务器强制出站源地址（固定 nft 规则，独立 oneshot 单元，仅 CAP_NET_ADMIN）
 - 应用/清除服务器调优（K2a，变更 L2）：只接受 13 个固定 sysctl 键及边界；root helper 直接写 procfs、读回核对并原子保存 99-proxy-tuning.conf，失败恢复原值，清除恢复首次应用前快照；无 shell、无任意 sysctl
 - 应用有 TTL 的设备门控（Xray 官方运行时规则 API / sing-box Clash 连接关闭），不走配置 Revision，不重启核心
 - TCP-connect 探测（已解析 IP、端口、次数、超时与截止时间；Agent 再校验，最多 10 次、每次 3 秒，无 shell）
 - 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override，按能力拒绝旧 Agent；经正常配置发布）
 
-TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。intervalSeconds 表示返回点的桶步长，sampleSeconds 固定为原始检测周期 60 秒。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优已按 Owner 决定增加固定白名单特权操作（K2a，变更 L2）；面板接入 K2b 与 Linux/root 验收仍待完成。
+TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。intervalSeconds 表示返回点的桶步长，sampleSeconds 固定为原始检测周期 60 秒。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优已按 Owner 决定增加固定白名单特权操作（K2a，变更 L2）；面板 K2b 已接入，Linux/root 验收仍待完成。
+
+K3b 计量与协商（面板侧已实现）：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志，会话内 `traffic.Counter{kind:"node"}` 才被接受，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为 `xray`/`sing-box`、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB；面板按（节点、epoch、凭据）保存累计游标并计算增量，重复批次幂等，同一节点可以有多个活跃 epoch（一个核心上报不淘汰另一个）。这些字节只进入 `core_traffic_samples`（每核心/节点总量），**不进入用户额度、也不重复计入账户派生的节点总量**：`node_traffic_samples` 视图对同一 epoch 已有 node 游标的账户样本做去重。`ConnectionStatus.cores` 只在协商会话接受，按（节点、核心）保存易失快照并合并凭证的活跃源地址后再做设备准入，部分核心缺测时该入站明确显示为部分执行；旧 `snapshot_json` 仍可用。
 
 ---
 
@@ -1581,7 +1625,14 @@ nodes.capabilities_json
 
 JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构透传。
 
-## 26.9 v1.1 新增迁移
+## 26.9 v1.1 / v1.2 新增迁移
+
+K4 新增迁移（仅在升级/恢复数据库时应用）：
+
+| 迁移 | 状态 |
+| --- | --- |
+| 0124 `canvas_tunnels` | canvas_tunnels（严格类型连接 JSON、端点引用、稳定端口、版本标记）、canvas_tunnel_objects（对象唯一归属）、canvas_tunnel_publications（待清理发布关联）、一次性 reconcile 标记；服务端布局增加 tunnelId，客户端保持内嵌；备份清单/验证与恢复覆盖，旧对象只按已发布、精确当前名称、无歧义规则认领 |
+| 0125 `multi_core_panel` | `core_update_tasks.adding`（0007/0107 已按签名目录回填 component，本迁移不动既有行）；唯一索引由“每节点一个活跃任务”改为 `(node_id,component)`；`inbounds.core`（`''|'xray'|'sing-box'`，空串＝当前主核心）并删除旧 `inbound_active_port`（端口唯一改由面板按 Agent 的节点级数字端口规则跨核心与转发校验）；`nodes.multi_core_supported/node_traffic_supported`；`node_health_checks.core`、`node_restart_requests.core`；`core_remove_tasks`（每（节点、组件）一个活跃移除任务、幂等回执）；`node_traffic_cursors`（每（节点、epoch、`node`）的累计游标）、`core_traffic_samples`（每核心观察增量）与去重视图 `node_traffic_samples` |
 
 | 迁移 | 实际存储变化 |
 | --- | --- |
@@ -1594,6 +1645,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0120 `latency_samples` | `probe_targets.scheduled`（默认关闭，触发器限制最多 5 个）；`node_tcp_probes.source/dispatched_at` 与单节点在途唯一索引；`node_latency_samples`（REAL 毫秒，含 median_ms；按节点/时间索引，保留 7 天） |
 | 0121 `node_latency_targets` | 每节点目标关联表（节点、目标外键级联删除，插入及移动触发器限制每节点最多 5 个）；`nodes.latency_targets_custom`（0/1，默认 0） |
 | 0122 `node_group_entries` | `node_group_inbounds`、`node_group_imports`；服务器成员转入站、旧来源授权转生成分组；`node_meta.port_range_start/end`（同时为空或 1–65535 的有序范围），迁移备注末尾有效 `[ports:A-B]` |
+| 0123 `node_metrics_tuning` | `node_metric_samples`：可空分钟遥测、7 天保留、不进便携备份；`node_tuning`：完整期望 profile、request_id、状态与逐键回执，随备份保留，恢复以当前状态为准且不重发 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1641,6 +1693,9 @@ DELETE /api/v1/users/{id}/node-groups/{groupId}
 GET    /api/v1/nodes
 GET    /api/v1/nodes?deleted=1
 GET    /api/v1/nodes/{id}
+GET    /api/v1/nodes/{id}/metrics?hours=1..168
+GET    /api/v1/nodes/{id}/tuning
+PUT    /api/v1/nodes/{id}/tuning
 GET    /api/v1/nodes/{id}/deletion-preview
 POST   /api/v1/nodes/enrollment-token
 PUT    /api/v1/nodes/{id}
@@ -1651,13 +1706,17 @@ DELETE /api/v1/nodes/{id}
 
 `GET /install/ca.pem` 无需登录，返回面板 Web 证书链顶层的 PEM（`application/x-pem-file`，`Cache-Control: no-store`），供节点安装脚本建立对面板证书的信任（见第 11.3 节）；开发模式或证书不可读时返回 404。
 
+K2b metrics 与 tuning GET 均允许 Owner/Viewer；逻辑删除节点返回 404。metrics 默认 hours=24，合法范围 1–168；≤12 小时原始分钟点，>12 小时 epoch 对齐，intervalSeconds=ceil(hours×60/720)×60，sampleSeconds=60。响应 {intervalSeconds,sampleSeconds,points}；空 points 为 []，无测量字段为 null。桶内各字段对非 null 值取算术平均，计数/字节可能为小数，samples 为桶内行数。完整 JSON 字段见 docs/v1.2-k2b-panel-report.md。
+
+tuning PUT 请求 {settings:对象,clear:布尔,confirmNodeId:节点ID}，拒绝未知 JSON 字段；202 返回 {requestId,status:"pending"}。settings 为完整字符串 profile，空 profile 等同 clear；clear=true 不得带非空 settings。GET 返回 supported、desired、requestId、status、result、requestedAt、updatedAt、current；未操作时 ID/结果/时间为 null、期望为空对象、status=unconfirmed。current 是最后心跳实际读数，可能过期。PUT 权限、并发和错误码见第 22.0 节。
+
 ## 27.5 节点组
 
 Owner 专用，写操作要求 CSRF。列表及保存响应保留原字段，新增 `inboundIds: string[]`、`imports: [{sourceId,proxyKey}]`、`grantedUserIds: string[]`；`nodeIds` 是只读派生服务器列表。POST/PUT 接受 `inboundIds`、`imports`（最多 500 个入站、200 个导入成员）；仅传 `nodeIds` 而未传 `inboundIds` 时，兼容展开服务器当前订阅可见、非中转的入站。显式空入站数组优先，未知字段仍拒绝。
 
 导入来源 API 继续接受但忽略 `userIds`；响应 `userIds` 为经有效分组可达该来源的去重用户集合（不代表其当前活跃或缓存可用）。`GET /imported-proxies` 项增加 `proxyKey: "name|protocol"`。`user_source_grants` 仅保留供旧备份兼容，不参与访问判断。
 
-节点元数据 GET/PUT 增加可空整数 `portRangeStart`、`portRangeEnd`，须同时设置或同时为空；无效输入返回 400 `invalid_request`。画布未指定中转监听端口时优先在服务器范围内分配，按 TCP/UDP 跳过已占用端口；范围耗尽拒绝发布，未设置范围沿用原默认端口。
+节点元数据 GET/PUT 增加可空整数 `portRangeStart`、`portRangeEnd`，须同时设置或同时为空；无效输入返回 400 `invalid_request`。画布未指定中转监听端口时优先在服务器范围内分配，按数字端口跳过该节点上任何已配置入站（含禁用）与本次计划已占用的端口，不区分 TCP/UDP（与 Agent 的节点级数字端口规则一致）；范围耗尽拒绝发布，未设置范围沿用原默认端口。
 
 ```text
 GET    /api/v1/node-groups
@@ -1701,6 +1760,21 @@ POST /api/v1/revisions/{id}/deploy
 POST /api/v1/nodes/{id}/rollback
 ```
 
+K3b 补充（每节点、每核心）：
+
+```text
+GET  /api/v1/nodes/{id}/restart-core            # 列表项含 core
+POST /api/v1/nodes/{id}/restart-core            # {expectedRevision,confirmNodeId,core?}；core 留空表示整节点
+GET  /api/v1/nodes/{id}/health-checks           # 列表项含 core
+GET  /api/v1/core-updates                       # 任务列表，含 component 与 adding
+POST /api/v1/core-updates                       # {nodeId,confirmNodeId,revision,component,version,url,sha256}
+POST /api/v1/core-updates/{id}/clear
+POST /api/v1/nodes/{id}/cores/{component}/remove    # Owner+CSRF；{confirmNodeId,revision}
+GET  /api/v1/nodes/{id}/cores/{component}/removals  # 最近 100 个移除任务
+```
+
+`restart-core` 的 `core` 必须属于 `Capabilities.cores`，否则 409 `restart_conflict`（核心不可用）；`core` 留空仍是整节点重启，历史回滚也仍是整节点操作。回滚到使用已移除核心的修订返回 409，消息以 `rollback refused:` 开头并指出缺少的核心。
+
 ## 27.10 用户订阅
 
 ```text
@@ -1723,6 +1797,8 @@ SSE 只推送：
 - 系统告警
 
 ## 27.12 v1.1 接口补充
+
+K4：Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /canvas-tunnels/legacy-objects、POST /canvas-tunnels/{id}/adopt；写入要求 CSRF 并记录审计。服务端连接接受 tunnelId 引用，其余配置由资源读取；客户端拒绝该字段。PUT 隧道要求 updatedAt；端点修改在同一事务中重定向所有引用方案并更新方案令牌。旧内嵌写法按方案 ID + 连接 ID 创建/更新该方案最初创建的隧道，显式引用不隐式修改资源。计划增加 tunnels:[{tunnelId,affectedSchemes:[{id,name}]}]，冲突增加 reason/objectId。完整且可供 F4 使用的 JSON 见 [K4 报告](docs/v1.2-k4-tunnels-report.md)。
 
 U5a 增加 `POST /api/v1/canvas-schemes/{id}/plan`（Owner，会话与 CSRF 同 publish）。无正文或 `{}` 规划已保存布局；`{"layout": <CanvasLayout>}` 规划未保存布局。返回 `ok`、按服务器的 `creates/updates/removes`、逐连接状态、监听端口冲突和警告；失败原因另有 `message`。接口仅读取，不写对象、方案、审计或 Revision。它复用发布的规划、生成对象识别、端口冲突与删除引用检查；客户端方案返回 `ok:false`，客户端已有 publish 路径不变。更新表示发布会执行同名对象的保存（不表示字段一定变化）；计划与执行之间状态变化仍可能导致发布失败。
 
@@ -1757,6 +1833,10 @@ GET/PUT /nodes/{id}/latency-targets
 POST   /inbounds/{id}/reachability
 POST   /nodes/{id}/publish
 GET    /nodes/{id}/revisions
+GET/POST /canvas-tunnels
+PUT/DELETE /canvas-tunnels/{id}
+GET    /canvas-tunnels/legacy-objects
+POST   /canvas-tunnels/{id}/adopt
 GET/POST /canvas-schemes
 PUT/DELETE /canvas-schemes/{id}
 POST   /canvas-schemes/{id}/publish
@@ -1938,11 +2018,39 @@ Agent 上报消息包括：
 
 两种初始化系统共用 `/usr/local/lib/proxycontrol/service.sh`，安装记录第 10 行为 `openrc` 时表示 OpenRC 安装。
 
+K3c / MC4（2026-10-29，本地实现、未发布）：install.sh 与 node-install.sh
+支持重复 `--core xray --core sing-box`；新节点不传参数仍只安装 Xray。
+Xray、sing-box 分别位于 `/usr/local/lib/proxy-agent/<name>`，保持原架构/libc
+校验、Alpine musl 归档与同版本 qui sing-box 选项。新装或显式安装核心时将 Agent 顶层配置
+规范化为 `cores: [{name, path}]`，并保留第一个核心的 `core_name/core_path`
+供旧 Agent 兼容，其余配置与身份数据保留；手工版本/URL/摘要参数紧跟对应核心。
+升级不传核心参数保留全部已记录核心和已有 config 原文（兼容旧键），显式参数只替换/追加，不用省略表示删除。
+
+安装记录写 v2：第 1 行 `proxycontrol-install-v2`，第 2–4 行组件/程序摘要/
+主服务摘要，第 5/6 行空，第 7 行 installed，第 8/9 行强制出站摘要，第 10 行
+init，第 11/12 行调优摘要，第 13 行起逐行 `core <name> <absolute-path> <sha256>`。
+面板同样写满 12 行，无核心条目；继续读取 v1 的第 5/6 行核心/摘要与可缺省的
+init、调优行，升级迁移为 v2。enroll、续证和 CA 脚本同步支持 v1/v2。
+
+新版 qui-update 将所有核心路径、Agent config、记录与既有主服务/强制出站/
+调优文件一起快照、回滚；恢复用固定核心路径集合，不依赖正在替换的记录，
+日志/锁/健康检查和开机恢复协议沿用原机制。首次迁移须运行已校验新包里的
+update.sh，旧 updater 尚无新增文件保护。v2 Agent 记录不允许用不支持 v2 的
+目标 installer 降级，失败升级仍可自动恢复原 v1 记录与 config。uninstall
+逐一校验并删除所有记录核心，继续保留配置、身份和运行状态目录，并先清除
+K2a 调优。Linux/root 故障、断电和实机验收待完成，见
+[安装器报告](docs/v1.2-k3c-installer-report.md)。
+
+
 ---
 
 # 31. 备份与恢复
 
 延迟采样属于遥测，不进入便携备份：生成快照后清空 `node_latency_samples` 与定时探测队列，再压实快照；目标的 scheduled 系统默认设置、node_latency_targets 与 nodes.latency_targets_custom 均属于配置，随备份保留；0121 之前的归档可恢复，迁移后默认继承系统目标。进程内恢复沿用当前节点自定义设置（含空列表），并补回这些设置引用的新增目标，但不把它们升级为系统默认。恢复时再次清空采样与定时任务，手动排队任务过期。调度循环随面板停机及进程内恢复停止并等待退出，新实例只启动一个循环。
+
+K2b 的 node_metric_samples 同延迟采样从快照删除并 VACUUM，恢复候选再次清空，不影响运行库样本。node_tuning 属于配置并纳入备份、校验和清单；恢复以当前库调优行为准，删除仅存在于归档的行，保留当前期望/结果，pending 改为 unconfirmed，且不重发请求；旧归档在迁移后按同一规则合并。恢复不会写宿主 sysctl，仍须核对后续 tuningCurrent。
+
+K3b：`inbounds.core`、`nodes.multi_core_supported/node_traffic_supported`、`node_health_checks.core`、`node_restart_requests.core`、`core_update_tasks.adding` 与 `core_remove_tasks` 都属于配置，随备份保留并由 `validateMultiCore` 校验（结果 JSON 必须与行内的 id/component/revision/code/status 一致，同一（节点、组件）不能同时有排队中的添加与移除）。恢复时清空 `core_remove_tasks` 后从归档复制，归档里 queued/running 的移除与核心更新任务一律改为 unconfirmed 且不重发（未确认不等于没执行）；`node_traffic_cursors` 与 `core_traffic_samples` 是累计游标与已观察增量，随访问数据一起恢复，避免恢复后把同一段字节再记一次。
 
 中央端需要备份：
 
@@ -2307,7 +2415,6 @@ v1.1 的本地测试与证据见验收矩阵新增部分；尚待原生核心 CI
 - 经销商
 - 动态插件市场
 - 无限多跳代理链
-- 一个节点同时常驻多个代理核心
 - 完整数据包记录
 - 网页内容审计
 - HTTPS 中间人解密

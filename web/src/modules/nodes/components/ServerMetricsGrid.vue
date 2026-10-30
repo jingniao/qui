@@ -6,60 +6,63 @@
         <button v-for="range in ranges" :key="range" type="button" class="ios-segmented-item" :class="{ active: hours === range }" @click="emit('update:hours', range)">{{ range === 168 ? '7D' : range + 'H' }}</button>
       </div>
     </div>
-    <p class="text-xs text-ios-secondary">仅显示打开本页后收到的心跳样本。所选范围超出本次采样窗口；持久化历史即将支持。</p>
+    <p class="text-xs text-ios-secondary">服务端历史 · 每分钟采样 · 保留 7 天 · 长范围为分桶平均值。网络速率为主机网卡流量，可能包含多接口重复计数；缺测处断线。</p>
+    <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }} <button class="ios-btn-secondary" @click="load">重试</button></p>
+    <p v-if="loading" class="text-xs text-ios-secondary">正在读取历史指标…</p>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <section v-for="metric in metrics" :key="metric.key" class="panel-card p-4 space-y-3">
-        <div class="flex justify-between text-sm"><h3 class="font-semibold">{{ metric.label }}</h3><span class="font-mono">{{ display(metric.key, current[metric.key]) }}</span></div>
-        <svg v-if="points.some(p => p[metric.key] !== null)" viewBox="0 0 320 100" class="w-full text-ios-blue" role="img" :aria-label="metric.label + '本次会话采样'">
-          <path :d="path(metric.key)" fill="none" stroke="currentColor" stroke-width="2" />
-          <circle v-for="p in chartPoints(metric.key)" :key="p.time" :cx="p.x" :cy="p.y" r="2" fill="currentColor" />
+        <div class="flex justify-between text-sm gap-2"><h3 class="font-semibold text-ios-label">{{ metric.label }}</h3><span class="font-mono text-ios-label">{{ display(metric.key, current[metric.key]) }}</span></div>
+        <svg v-if="points.some(p => p[metric.key] !== null)" viewBox="0 0 320 100" class="w-full text-ios-blue" role="img" :aria-label="metric.label + '历史采样'">
+          <path :d="metricPath(points, metric.key, start, end, intervalSeconds)" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <circle v-for="p in dots(metric.key)" :key="p.time" :cx="p.x" :cy="p.y" r="1.5" fill="currentColor" />
         </svg>
-        <p v-else class="text-xs text-ios-tertiary py-6">— · 等待 Agent 心跳采样</p>
-        <p class="text-xs text-ios-tertiary">{{ points.length ? formatTimeHMS(points[0].time) + ' – ' + formatTimeHMS(points[points.length - 1].time) : '尚无本次采样' }}</p>
-      </section>
-      <section v-for="label in ['负载', '进程数', 'TCP / UDP 连接分布', '内存 / 磁盘总量']" :key="label" class="panel-card p-4 space-y-2">
-        <h3 class="text-sm font-semibold">{{ label }}</h3><p>—</p><p class="text-xs text-ios-tertiary">需要 Agent 上报</p>
+        <p v-else class="text-xs text-ios-tertiary py-6">— · 暂无历史测量</p>
+        <p v-if="current[metric.key] === null" class="text-xs text-ios-secondary">— · 需要 Agent 1.2+ 上报</p>
+        <p class="text-xs text-ios-tertiary">{{ new Date(start).toLocaleString() }} – {{ new Date(end).toLocaleString() }}</p>
       </section>
     </div>
   </div>
 </template>
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import type { NodeView } from '../api';
-import { sampleHeartbeat, extractCurrentValues, formatRate, formatTimeHMS, type SystemMetricPoint } from './serverMetricsModel';
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { nodeAPI, type NodeView } from '../api';
+import { metricPoint, metricPath, extractCurrentValues, formatRate, type MetricKey, type SystemMetricPoint } from './serverMetricsModel';
 const props = defineProps<{ node: NodeView; now: number; hours: number }>();
 const emit = defineEmits<{ 'update:hours': [hours: number] }>();
 const ranges = [1, 6, 12, 24, 168];
-type MetricKey = Exclude<keyof SystemMetricPoint, 'time'>;
 const metrics: { key: MetricKey; label: string }[] = [
-  { key: 'cpu', label: 'CPU' }, { key: 'memory', label: '内存占用' }, { key: 'disk', label: '磁盘占用' },
-  { key: 'rxRate', label: '接收速率' }, { key: 'txRate', label: '发送速率' }, { key: 'connections', label: '连接数' }
+  {key:'cpu',label:'CPU'}, {key:'memory',label:'内存占用'}, {key:'disk',label:'磁盘占用'},
+  {key:'rxRate',label:'接收速率'}, {key:'txRate',label:'发送速率'}, {key:'connections',label:'代理活跃会话'},
+  {key:'tcp',label:'TCP 连接（全部状态）'}, {key:'udp',label:'UDP 套接字'}, {key:'processes',label:'进程数'}, {key:'load',label:'1 分钟负载'}
 ];
-const history = ref<SystemMetricPoint[]>([]);
-let lastHeartbeat = props.node.lastHeartbeat;
-watch(() => props.node.id, () => { history.value = []; lastHeartbeat = props.node.lastHeartbeat; });
-watch(() => props.node.lastHeartbeat, heartbeat => {
-  if (heartbeat === lastHeartbeat) return;
-  lastHeartbeat = heartbeat;
-  const point = sampleHeartbeat(props.node, props.now);
-  if (point) history.value = [...history.value, point].filter(p => p.time >= props.now - 168 * 3600000).slice(-50000);
-});
-const points = computed(() => history.value.filter(p => p.time >= props.now - props.hours * 3600000));
+const points = ref<SystemMetricPoint[]>([]), intervalSeconds = ref(60), loading = ref(false), error = ref('');
+const end = ref(Date.now());
+const start = computed(() => end.value - props.hours * 3600000);
 const current = computed(() => extractCurrentValues(props.node, props.now));
+let generation = 0, disposed = false;
+async function load() {
+  const ticket = ++generation, id = props.node.id, hours = props.hours;
+  loading.value = true; error.value = '';
+  const until = Date.now();
+  try {
+    const response = await nodeAPI.metrics(id, hours);
+    if (disposed || ticket !== generation) return;
+    end.value = until; intervalSeconds.value = response.intervalSeconds;
+    points.value = response.points.map(metricPoint).filter(p => Number.isFinite(p.time)).sort((a,b) => a.time-b.time);
+  } catch (e) { if (!disposed && ticket === generation) error.value = '历史指标读取失败：' + (e as Error).message; }
+  finally { if (!disposed && ticket === generation) loading.value = false; }
+}
+watch(() => [props.node.id, props.hours], () => { points.value = []; void load(); }, {immediate:true});
+let timer: ReturnType<typeof setInterval>;
+onMounted(() => { timer = setInterval(load, 60000); window.addEventListener('proxy-node-status', load); });
+onUnmounted(() => { disposed = true; generation++; clearInterval(timer); window.removeEventListener('proxy-node-status', load); });
 function display(key: MetricKey, value: number | null) {
   if (value === null) return '—';
   if (key === 'rxRate' || key === 'txRate') return formatRate(value);
-  return ['cpu', 'memory', 'disk'].includes(key) ? value.toFixed(1) + '%' : String(value);
+  return ['cpu','memory','disk'].includes(key) ? value.toFixed(1) + '%' : String(value);
 }
-function chartPoints(key: MetricKey) {
-  const list = points.value;
-  const max = ['cpu', 'memory', 'disk'].includes(key) ? 100 : Math.max(1, ...list.map(p => p[key] ?? 0));
-  const start = list[0]?.time ?? 0, span = Math.max(1, (list[list.length - 1]?.time ?? start) - start);
-  return list.filter(p => p[key] !== null).map(p => ({ time: p.time, x: 10 + (p.time - start) / span * 300, y: 90 - (p[key] as number) / max * 80 }));
-}
-function path(key: MetricKey) {
-  const coords = new Map(chartPoints(key).map(p => [p.time, p]));
-  let connected = false;
-  return points.value.map(p => { const c = coords.get(p.time); if (!c) { connected = false; return ''; } const command = connected ? 'L' : 'M'; connected = true; return command + c.x + ',' + c.y; }).join(' ');
+function dots(key: MetricKey) {
+  const max = ['cpu','memory','disk'].includes(key) ? 100 : Math.max(1,...points.value.map(p => p[key] ?? 0));
+  return points.value.filter(p => p[key] !== null).map(p => ({time:p.time,x:10+(p.time-start.value)/Math.max(1,end.value-start.value)*300,y:90-p[key]!/max*80}));
 }
 </script>

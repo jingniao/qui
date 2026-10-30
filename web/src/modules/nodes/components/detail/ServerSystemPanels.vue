@@ -63,6 +63,9 @@
           </p>
         </div>
       </div>
+      <dl class="space-y-1 text-xs">
+        <div v-for="[label, value] in observations" :key="label" class="flex justify-between gap-2"><dt class="text-ios-secondary">{{ label }}</dt><dd class="text-ios-label">{{ value }}</dd></div>
+      </dl>
     </section>
 
     <!-- 2. 存储信息 -->
@@ -200,6 +203,7 @@ import { computed } from 'vue';
 import type { NodeView } from '../../api';
 import type { HostMetrics } from '../../metrics';
 import { nicRate } from '../../metrics';
+import { storageDisplay, observed } from '../hostObservationModel';
 
 const props = defineProps<{
   node: NodeView;
@@ -209,10 +213,7 @@ const props = defineProps<{
   month?: number;
 }>();
 
-const nodeAny = computed(() => props.node as unknown as Record<string, unknown>);
-const hbAny = computed(() => (props.node.heartbeat || {}) as unknown as Record<string, unknown>);
-const capAny = computed(() => (props.node.capabilities || {}) as unknown as Record<string, unknown>);
-
+const host = computed(() => props.node.capabilities?.host);
 // 1. CPU & Hardware
 const cpuPercent = computed(() => {
   if (typeof props.node.heartbeat?.cpu_percent === 'number') {
@@ -235,30 +236,16 @@ const cpuPercentColor = computed(() => {
   return 'bg-emerald-500';
 });
 
-const cpuModelName = computed(() => {
-  const m = (nodeAny.value.cpuModel as string) || (hbAny.value.cpu_model as string);
-  return m || '—';
-});
-
-const architecture = computed(() => {
-  return (nodeAny.value.architecture as string)
-    || (capAny.value.architecture as string)
-    || (hbAny.value.architecture as string)
-    || '—';
-});
-
-const kernel = computed(() => {
-  return (nodeAny.value.kernelVersion as string)
-    || (hbAny.value.kernel_version as string)
-    || '—';
-});
-
-const gpu = computed(() => {
-  return (nodeAny.value.gpu as string)
-    || (hbAny.value.gpu as string)
-    || '—';
-});
-
+const cpuModelName = computed(() => host.value?.cpuModel || '—');
+const architecture = computed(() => host.value?.architecture || '—');
+const kernel = computed(() => host.value?.kernelVersion || '—');
+const gpu = '—';
+const observations = computed(() => [
+  ['CPU 核心', host.value?.cpuCores ? String(host.value.cpuCores) : '—'],
+  ['负载 1 / 5 / 15', [props.node.heartbeat?.load1, props.node.heartbeat?.load5, props.node.heartbeat?.load15].map(observed).join(' / ')],
+  ['进程数', observed(props.node.heartbeat?.processCount)],
+  ['TCP / UDP', [props.node.heartbeat?.tcpConnections, props.node.heartbeat?.udpSockets].map(observed).join(' / ')]
+]);
 // 2. Memory & Storage
 const memoryPercent = computed(() => {
   if (typeof props.node.heartbeat?.memory_percent === 'number') {
@@ -298,27 +285,9 @@ function formatCompactBytes(bytes?: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} G`;
 }
 
-const memoryDisplay = computed(() => {
-  if (typeof hbAny.value.memory_total_bytes === 'number') {
-    return formatBytes(hbAny.value.memory_total_bytes as number);
-  }
-  return '—';
-});
-
-const swapDisplay = computed(() => {
-  if (typeof hbAny.value.swap_total_bytes === 'number') {
-    return formatBytes(hbAny.value.swap_total_bytes as number);
-  }
-  return '—';
-});
-
-const diskDisplay = computed(() => {
-  if (typeof hbAny.value.disk_total_bytes === 'number') {
-    return formatBytes(hbAny.value.disk_total_bytes as number);
-  }
-  return '—';
-});
-
+const memoryDisplay = computed(() => storageDisplay(props.node.heartbeat?.memoryUsedBytes, host.value?.memoryTotalBytes, props.node.heartbeat?.memory_percent));
+const swapDisplay = computed(() => storageDisplay(props.node.heartbeat?.swapUsedBytes, host.value?.swapTotalBytes));
+const diskDisplay = computed(() => storageDisplay(props.node.heartbeat?.diskUsedBytes, host.value?.diskTotalBytes, props.node.heartbeat?.disk_percent));
 // 3. Network & Traffic
 const uploadBytes = computed(() => props.node.heartbeat?.upload_bytes);
 const downloadBytes = computed(() => props.node.heartbeat?.download_bytes);
@@ -330,7 +299,7 @@ const uploadRatioPercent = computed(() => {
 });
 
 const downloadRatioPercent = computed(() => {
-  if (totalBytes.value <= 0) return 50;
+  if (totalBytes.value === undefined || totalBytes.value <= 0) return 0;
   return 100 - uploadRatioPercent.value;
 });
 

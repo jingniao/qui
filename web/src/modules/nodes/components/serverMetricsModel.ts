@@ -1,7 +1,11 @@
-import type { NodeView } from '../api';
+import type { NodeMetricPoint, NodeView } from '../api';
 import { hostMetrics } from '../metrics';
 export interface SystemMetricPoint {
   time: number;
+  tcp: number | null;
+  udp: number | null;
+  processes: number | null;
+  load: number | null;
   cpu: number | null;
   memory: number | null;
   disk: number | null;
@@ -90,12 +94,30 @@ export function extractCurrentValues(node: NodeView, now = Date.now()): Omit<Sys
   };
   return { cpu: measured(hb?.cpu_percent), memory: measured(hb?.memory_percent), disk: measured(hb?.disk_percent),
     connections: hb?.active_connections_measured === true ? measured(hb.active_connections) : null,
-    rxRate: rates('receive'), txRate: rates('transmit') };
+    rxRate: rates('receive'), txRate: rates('transmit'), tcp: decimal(hb?.tcpConnections), udp: decimal(hb?.udpSockets), processes: decimal(hb?.processCount), load: measured(hb?.load1) };
 }
-// Adapter boundary: a future GET /api/v1/nodes/{id}/metrics can return these points.
+// Legacy live-heartbeat adapter retained for consumers.
 // Only append a fresh, distinct heartbeat observed while this component is open.
 export function sampleHeartbeat(node: NodeView, now: number): SystemMetricPoint | null {
   const time = Date.parse(node.lastHeartbeat);
   if (!Number.isFinite(time) || now - time < -5000 || now - time >= 45000) return null;
   return { time, ...extractCurrentValues(node, now) };
+}
+
+function decimal(value: unknown): number | null {
+  return typeof value === 'string' && /^\d+$/.test(value) ? measured(Number(value)) : null;
+}
+export function metricPoint(p: NodeMetricPoint): SystemMetricPoint {
+  return {time: Date.parse(p.at), cpu: measured(p.cpuPercent), memory: measured(p.memoryPercent), disk: measured(p.diskPercent), connections: measured(p.activeConnections), rxRate: measured(p.rxBytesPerSecond), txRate: measured(p.txBytesPerSecond), tcp: measured(p.tcpConnections), udp: measured(p.udpSockets), processes: measured(p.processCount), load: measured(p.load1)};
+}
+export type MetricKey = Exclude<keyof SystemMetricPoint, 'time'>;
+export function metricPath(points: SystemMetricPoint[], key: MetricKey, start: number, end: number, intervalSeconds: number): string {
+  const max = ['cpu', 'memory', 'disk'].includes(key) ? 100 : Math.max(1, ...points.map(p => p[key] ?? 0));
+  let previous: number | null = null;
+  return points.map(p => {
+    if (p[key] === null) { previous = null; return ''; }
+    const command = previous !== null && p.time - previous <= intervalSeconds * 1500 ? 'L' : 'M';
+    previous = p.time;
+    return command + (10 + (p.time - start) / Math.max(1, end - start) * 300).toFixed(1) + ',' + (90 - p[key]! / max * 80).toFixed(1);
+  }).join(' ');
 }

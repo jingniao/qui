@@ -23,6 +23,74 @@ RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。L4 �
 - `install.sh` 会检查它用到的命令是否存在，缺失即拒绝：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 上另加 `systemctl`，OpenRC 上另加 `rc-service rc-update openrc-run`。安装核心时还需要 `unzip`（Xray zip）或 `tar`（sing-box tar.gz），下载需要 `curl` 或 `wget`。最小化安装的 Debian/Ubuntu 没有 `unzip`：systemd 主机上缺少时，`install.sh` 像 `nftables` 一样用 apt / dnf / yum 安装它（实测：debootstrap minbase 的 Debian 13）。
 - 脚本里所有需要校验证书的 `curl` 调用都带 `--no-insecure`。它会覆盖 curl 包装脚本或别名加在前面的 `-k`：实测有一台 Alpine LXC 的 `/usr/bin/curl` 被换成了 `curl.orig -k "$@"`。
 
+### K3c / MC4 多核心安装（本地实现，未发布）
+
+`install.sh --node` 与 `node-install.sh` 接受重复的 `--core`，例如
+`--core xray --core sing-box`；不指定时，新节点只安装 Xray。重复同名核心或
+未知核心会被拒绝。此阶段支持 Xray、sing-box，GOST 不在安装合约内。
+
+```sh
+# 已解包并校验的同版本发布目录中；先停止已有 Agent 服务。
+deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <agent-sha256> \
+  --core xray --core sing-box --qui-version <qui-version>
+
+# 一键安装：原有面板地址、证书指纹、token、版本参数照常，追加两个核心。
+bash node-install.sh --version <qui-version> --panel <panel-host> \
+  --ca-sha256 <panel-cert-sha256> --token <registration-token> \
+  --core xray --core sing-box
+```
+
+`--core-source qui|official` 只决定 sing-box 来源，全局生效，默认 qui；Xray
+始终官方。默认版本为 Xray 26.3.27、qui sing-box 1.14.4-qui.1，官方 sing-box
+1.14.3。官方 sing-box 继续按架构/libc 固定摘要，Alpine 使用 musl 归档；qui
+静态构建按同一发布的 SHA256SUMS 校验。手工覆盖参数 `--core-version`、
+`--core-url`、`--core-sha256` 作用于它们前面最近的 `--core`，例如
+`--core xray --core-version 26.3.27 --core sing-box --core-source official`。
+离线 qui sing-box 仍需 `--core-bundle FILE --core-sums FILE`，一键脚本从
+Agent bundle 同目录选择对应架构的 sing-box 包；Xray 与官方 sing-box 保持原有
+下载路径，Agent 离线 bundle 不代表这些上游核心也能离线安装。
+
+核心分别安装到 `/usr/local/lib/proxy-agent/xray` 与
+`/usr/local/lib/proxy-agent/sing-box`。首次安装或显式传入核心时规范化 Agent 的三个
+顶层配置项，其余配置、身份与数据保留：
+
+```yaml
+core_name: xray
+core_path: /usr/local/lib/proxy-agent/xray
+cores:
+  - name: xray
+    path: /usr/local/lib/proxy-agent/xray
+  - name: sing-box
+    path: /usr/local/lib/proxy-agent/sing-box
+```
+
+`cores` 是新 Agent 的完整核心集合；两个旧键对应集合中的第一个核心，保留给
+旧 Agent 兼容。升级不传 `--core` 时保留所有记录的核心及其摘要，不重新下载，已有 config 保持原样（旧单核心配置继续由 Agent 兼容读取）；
+显式传入核心时替换/追加这些核心，未列出的已安装核心仍保留，不能用省略参数
+删除核心。显式安装核心时，已有自定义核心路径会规范化到安装器管理的上述路径；操作前检查配置。
+手工运行 install.sh 前自行备份；需要自动回滚时使用新版 qui-update。
+
+安装记录 v2 格式：第 1 行为 `proxycontrol-install-v2`；第 2–4 行仍为组件、
+程序摘要、主服务文件摘要；第 5/6 行留空；第 7 行为 `installed`；第 8/9 行
+为强制出站服务/触发器摘要；第 10 行始终为 `systemd` 或 `openrc`；第 11/12
+行为调优服务/触发器摘要（不适用时空行）。第 13 行起每核心一行：
+`core <name> /usr/local/lib/proxy-agent/<name> <sha256>`。面板也写 v2，保留全部
+12 行但没有核心条目。继续读取 v1 的第 5/6 行单核心和摘要，缺省 init 行视为
+systemd；升级写 v2，K2a 第 11/12 行的含义保持不变。
+
+新版 qui-update 的节点快照包含两个核心路径、Agent config、完整安装记录与
+原有 Agent/强制出站/调优文件。固定路径集合让失败或断电恢复不依赖正在替换的
+记录；新产生而快照中不存在的文件会被删除，已有文件和配置一起恢复。进度日志、
+锁、服务健康窗口和数据库回滚机制沿用原流程。卸载按 v1/v2 记录逐一校验并删除
+全部安装核心，继续保留配置、身份、revisions、spool、releases 等状态数据，
+并保留 K2a 的先清除调优再删除服务规则。
+
+**首次迁移必须从已审核、已校验的新发布包运行新版 update.sh**，方式与第 5.0
+节相同，选 `--component agent`。旧主机上的 updater 不具备新增核心/config
+快照保护。记录变为 v2 后，新 updater 在停止 Agent 前拒绝不支持 v2 的目标
+installer，防止降级丢失核心所有权；这不影响失败升级自动恢复到快照中的 v1
+记录、旧 Agent 与原配置。Linux/root 故障和断电回归尚待执行。
+
 ## 2. 构建发布包
 
 **构建工具链**：用官方安装的 Go（<https://go.dev/dl/>），版本按 `go.mod` 里的 `go` 指令（当前 `go 1.26.0`，即需要 Go 1.26 或更新；仓库最后一次完整验证用的是 **Go 1.27.1**）。CI 通过 `actions/setup-go` 的 `go-version-file: go.mod` 读取同一个要求，Node 用 22 加锁定的依赖（`npm --prefix web ci`）。
@@ -59,11 +127,11 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
   --sha256 DIGEST        lowercase SHA256 of that executable
   --config FILE          config template for a first install
                          (default: the packaged examples/<component>.yaml)
-  --core xray|sing-box   install a core with --node (sing-box defaults to qui)
+  --core xray|sing-box   repeatable; default xray on a new node
   --core-source qui|official  sing-box source (default: qui)
   --qui-version VERSION same qui release as the Agent, required for qui source
   --core-bundle FILE --core-sums FILE  local qui core archive and SHA256SUMS
-  --core-version VERSION release version to download, for example 26.3.27
+  --core-version VERSION version for the preceding --core (pinned default)
   --core-url URL         official release asset URL
                          (default: the official GitHub release asset)
   --core-sha256 DIGEST   lowercase SHA256 of the downloaded release archive
@@ -155,11 +223,11 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
   --core xray --core-version 26.3.27
 ```
 
-- `--core` 只允许 `xray` 或 `sing-box`。发布包内的 `VERSION` 自动确定 qui 来源版本；单独使用脚本时给出 `--core sing-box --qui-version X.Y.Z`，其中 X.Y.Z 必须与正在安装的 Agent 发布版本一致。显式版本与包内版本不符时拒绝；核心固定为 1.14.4-qui.1。官方来源仍要求 `--core-version`。
+- `--core` 只允许 `xray` 或 `sing-box`。发布包内的 `VERSION` 自动确定 qui 来源版本；单独使用脚本时给出 `--core sing-box --qui-version X.Y.Z`，其中 X.Y.Z 必须与正在安装的 Agent 发布版本一致。显式版本与包内版本不符时拒绝；核心固定为 1.14.4-qui.1。官方来源也有固定默认版本，手工覆盖版本时使用对应核心后的 `--core-version`。
 - qui 来源只下载 `jingniao/qui` 的同版本资源和 `SHA256SUMS`，不接受覆盖 URL 或摘要。`--core-source official` 保留官方 URL 前缀、`--core-url`、`--core-sha256` 和 Xray `.dgst` 路径；没有可信摘要就不安装。
 - qui 构建使用未修改的上游 v1.14.4、go1.26.10、上游 non-naive 标签加 `with_v2ray_api`，CGO=0；同一架构的静态归档同时用于 glibc 和 musl。官方来源在 musl 主机仍选单独的 `-musl.tar.gz` 与摘要。
-- 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径与首次 sing-box 配置模板改写保持原样。
-- 面板不能给已登记的节点换核心；手工换（停 Agent、改 `core_name`/`core_path`、再启动）之前，建议先删掉目标核心不支持的入站（例如 Xray 不支持 Hysteria2/TUIC），发布并确认成功。从 v1.0.6 起，如果新核心编译或启动不了上一修订，Agent 记一条错误日志，让核心保持停止，但照常连上面板（节点显示核心不健康），收到能用的新修订后正常应用；重试间隔从 3 秒倍增到 1 分钟。修订文件校验失败等完整性错误仍会让 Agent 退出。v1.0.5 及更早版本在这种情况下会反复退出、连不上面板（[验收矩阵](v1-acceptance.md) 9.13）。
+- 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径不变，配置按 K3c 写入完整 cores 集合和第一个核心的兼容旧键。
+- v1.2 多核心通过 Owner 的核心选择配合安装/更新步骤生效，安装器支持并存的 Xray 与 sing-box；新增核心用重复 `--core`，配置以 `cores` 为准。删除核心需另行核对配置与已发布入站，省略安装参数不会删除已有核心。切换前先处理目标核心不支持的入站（例如 Xray 不支持 Hysteria2/TUIC），发布并确认成功。从 v1.0.6 起，如果新核心编译或启动不了上一修订，Agent 记一条错误日志，让核心保持停止，但照常连上面板（节点显示核心不健康），收到能用的新修订后正常应用；重试间隔从 3 秒倍增到 1 分钟。修订文件校验失败等完整性错误仍会让 Agent 退出。v1.0.5 及更早版本在这种情况下会反复退出、连不上面板（[验收矩阵](v1-acceptance.md) 9.13）。
 - 脚本还会创建服务账号 `proxy-agent` 和目录 `/etc/proxy-agent`、`/etc/proxy-agent/tls`、`/var/lib/proxy-agent`，不启动服务。
 - 脚本还会创建 `/var/lib/proxy-agent/host-network`（0700，服务器强制出站的 helper 目录），安装并启用两个固定单元：`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）与监视 `desired.json` 的 `proxy-agent-host-network.path`。它们只维护一个 nft 表 `inet proxy_agent_source`，不改变主机上的其他规则。
 
@@ -207,7 +275,7 @@ qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sum
 - **组件隔离**：版本检查、停止/启动、快照、日志及回滚只针对选中组件的程序、服务、安装记录和附属文件；共享的 `qui-update`、`service.sh` 仍随该次更新快照/恢复，开机恢复 hook 仍按原机制共享。面板更新及其回滚不替换 Agent 程序、单元、强制出站文件或记录，也不停止/启动 Agent；Agent 更新及其回滚不触碰面板程序、单元、`qui`、记录或数据库。`--component agent` 不能与 `--database` 合用。启动前仍会恢复任何已有的未完成更新，这不受本次组件选择限制。
 - **数据库备份**：面板备份先写成 `.partial` 文件，同步到磁盘并与原文件逐字节比较后才改名为最终名字，所以 `pre-update-*.db` 要么完整、要么不存在；断电不会留下看起来可用的半截备份。
 - **数据库预检**（面板，1.0.3 起）：停止并备份后，脚本用**目标版本**的程序执行 `proxy-panel --check-database <备份>`（只读，在私有副本上检查完整性与迁移记录）。目标版本打不开这份数据库（数据库里有它不认识的迁移，即降级跨过了迁移）时，什么都不替换，删掉刚才的备份，重新启动面板，并列出可以一起回退的 `pre-update-<目标版本>-*.db` 备份（见 5.1）。目标版本早于 1.0.3、不认识这个参数，或程序在本机无法执行时，跳过预检：旧面板遇到更新的数据库会拒绝启动，由健康检查与回滚兜底。
-- **回滚快照与进度日志**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`service.sh`，面板加 `qui`，节点加强制出站的两个文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），再放入正在运行的 `qui-update` 与它的 `service.sh` 的副本，同步到磁盘后最后写进度日志 `journal`。日志记录组件、新旧版本、服务原来是否在运行、数据库备份路径和阶段：`prepared`（`install.sh` 运行前）→ `started`（新版本可能接触数据库之前）→ `committed`（健康检查通过）或 `restored`（回滚已放回文件与数据库）。每次写入都先写临时文件、同步、再改名，断电只会看到旧阶段或新阶段。保存不了快照或日志就不更新，并把服务启动回来。
+- **回滚快照与进度日志**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`service.sh`，面板加 `qui`，节点加全部核心路径、Agent config、强制出站与调优的服务/触发器文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），再放入正在运行的 `qui-update` 与它的 `service.sh` 的副本，同步到磁盘后最后写进度日志 `journal`。日志记录组件、新旧版本、服务原来是否在运行、数据库备份路径和阶段：`prepared`（`install.sh` 运行前）→ `started`（新版本可能接触数据库之前）→ `committed`（健康检查通过）或 `restored`（回滚已放回文件与数据库）。每次写入都先写临时文件、同步、再改名，断电只会看到旧阶段或新阶段。保存不了快照或日志就不更新，并把服务启动回来。
 - **健康检查**：原本在运行的服务更新后会被启动，并且要在 10 秒内保持运行、主进程 PID 不变才算成功（两种初始化系统都会在崩溃 5 秒后重启程序，崩溃循环在每次轮询时都可能显示为运行中，但 PID 会变）。成功时打印 `已更新到 X，服务运行正常（10 秒内无重启）`，记为 `committed` 并删除快照（先把目录改名为 `discard.*` 再删除，删到一半断电也不会被当成未完成的更新）。
 - **自动回滚**：`install.sh` 失败（即使已经替换了部分文件）、装上的程序版本不是目标版本、或新版本没有持续运行时，脚本停止服务，把快照里的文件放回（与快照相同的文件不动，所以导致失败的只读或 immutable 文件不会让恢复也失败），删除新版本多出的文件，再启动旧版本并做同样的健康检查，打印 `更新失败，已恢复到 <旧版本>`，退出码为 1。面板的数据库在阶段为 `started` 时（新面板可能已经迁移），或数据库与备份不一致时被恢复：先把当前数据库保留为 `failed-update-<目标版本>-<时间>.db`，再删除 `-wal`/`-shm` 并用更新前的备份原子替换。**回滚从不直接丢掉新版本写过的数据库**。
 - **中断后的自动恢复**：
@@ -240,7 +308,7 @@ bash "$rc_dir/deploy/linux/update.sh" --component panel --version "$rc_version" 
 
 校验或解包失败时停止，不执行下一行。RC1 到此为止，所有 Agent 保持 1.0.9。以后已安装新版更新器的组合主机可运行 `qui-update --component panel --version 1.1.0-rc.2 --bundle proxy-control-1.1.0-rc.2-linux-amd64.tar.gz --sums SHA256SUMS`；确认面板就绪后，再在每个节点主机（含组合主机）运行相同版本的 `--component agent`。仍为旧更新器的 Agent 主机须按上面的校验/解包方式运行归档内 update.sh，只把组件改为 agent。
 
-版本比较使用 semver 优先级：`1.0.9 < 1.1.0-rc.1 < 1.1.0-rc.2 < 1.1.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。安装记录继续使用原有 digest 格式和固定行号，不新增版本字段；实际版本仍读取程序的 `--version`，RC 不改变记录或恢复日志格式。
+版本比较使用 semver 优先级：`1.0.9 < 1.1.0-rc.1 < 1.1.0-rc.2 < 1.1.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。K3c 将安装记录升级为上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
 
 ### 5.1 面板降级与数据库回退
 
@@ -280,7 +348,7 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 
 `qui-update` 在 OpenRC 节点上同样可用：它通过 `/usr/local/lib/proxycontrol/service.sh` 停止和启动 `proxy-agent`，健康检查读取 supervise-daemon 记录的子进程 PID（`/run/openrc/options/proxy-agent/child_pid`）。
 
-节点升级同样保留 `config.yaml`、`identity/`、`revisions/`、`spool/`。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；Agent 自身升级要走面板的 Agent 更新任务（系统 → Agent），它按签名清单校验，并在失败时回滚。
+节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 K3c 安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；Agent 自身升级要走面板的 Agent 更新任务（系统 → Agent），它按签名清单校验，并在失败时回滚。
 
 **发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
 

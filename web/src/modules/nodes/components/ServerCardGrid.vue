@@ -50,9 +50,10 @@
           <div class="text-[12px] text-neutral-400 font-mono tracking-tight flex items-center gap-1.5 flex-wrap">
             <span class="text-neutral-500">{{ node.publicIp || node.hostname || '未分配 IP' }}</span>
             <span class="text-neutral-300">·</span>
-            <span>{{ node.capabilities?.core_version || '—' }}</span>
+            <span>{{ coreSummaryLabel(node) }}</span>
             <span class="text-neutral-300">·</span>
             <span>已运行 {{ calculateRunningTime(node) }}</span>
+            <span class="text-ios-secondary">{{ node.capabilities?.host?.osPrettyName || node.os || '—' }}</span>
           </div>
 
           <!-- Row 3: CPU / 内存 / 磁盘 3栏微型仪表 -->
@@ -257,6 +258,7 @@ import { useRouter } from 'vue-router';
 import type { NodeView } from '../api';
 import { isOwner } from '../../../app/auth';
 import { hostMetrics, nicRate } from '../metrics';
+import { coreSummaryLabel } from '../coreSummary';
 import TrafficValue from '../../../components/TrafficValue.vue';
 import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';

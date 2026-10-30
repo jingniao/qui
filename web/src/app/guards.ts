@@ -18,6 +18,6 @@ export async function setupNavigationGuards(to: RouteLocationNormalized, _from: 
   if (authState.isAuthenticated && to.path === '/login') return next('/dashboard');
   if (authState.currentUser?.role === 'Viewer' &&
       !['/dashboard', '/nodes', '/403', '/404'].includes(to.path) &&
-      !/^\/nodes\/[^/]+$/.test(to.path)) return next('/403');
+      !(to.path !== '/nodes/versions' && /^\/nodes\/[^/]+$/.test(to.path))) return next('/403');
   next();
 }

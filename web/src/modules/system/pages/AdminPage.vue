@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <PageHeader title="管理员" parent="系统" description="Owner 管理平台；Viewer 仅查看总览、节点基础状态和流量。">
+    <PageHeader title="管理员" parent="用户管理" description="Owner 管理平台；Viewer 仅查看总览、服务器基础状态和流量。">
       <template #actions><button @click="openCreate" class="ios-btn-primary">创建 Viewer</button></template>
     </PageHeader>
     <ErrorState v-if="error" :message="error" @retry="load" />
@@ -84,4 +84,3 @@ async function execute() {
 }
 onMounted(load);
 </script>
-

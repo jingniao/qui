@@ -1,9 +1,9 @@
 <template>
   <div class="space-y-6">
     <PageHeader
-      :title="pageHeaderTitle"
-      :parent="pageHeaderParent"
-      :description="pageHeaderDescription"
+      title="服务器列表"
+      parent="服务器"
+      description="以“列表看状态、详情做管理”为原则，保持简洁清晰。"
     >
       <template #actions>
         <!-- Admin Actions -->
@@ -25,7 +25,7 @@
 
     <!-- ================= VIEW 1: ADMIN (服务器主机管理) ================= -->
     <!-- Tab 1: 服务器列表视图 -->
-      <template v-if="currentAdminTab === 'servers'">
+
         <!-- Search & Filter Bar (Aligned with UserListPage) -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <form @submit.prevent="search" class="flex flex-wrap items-center gap-3 flex-1">
@@ -536,18 +536,6 @@
         </div>
       </div>
     </div>
-      </template>
-
-      <!-- Tab 2: Agent 探针管理面板 -->
-      <template v-else-if="currentAdminTab === 'agents'">
-        <NodeVersionPanel kind="agent" :embedded="true" />
-      </template>
-
-      <!-- Tab 3: 代理核心版本管理面板 -->
-      <template v-else-if="currentAdminTab === 'cores'">
-        <NodeVersionPanel kind="core" :embedded="true" />
-      </template>
-
       <!-- Drawer: Create Server -->
     <FormDrawer
       v-model="createDrawer"
@@ -777,7 +765,7 @@
           确认取消服务器 {{ deleteTarget?.name || '' }} 的登记？记录将直接移除。
         </p>
         <p v-else-if="deletePreview" class="text-sm text-neutral-600 leading-relaxed">
-          确认删除服务器 {{ deleteTarget?.name || '' }}？删除后该服务器证书将立即吊销，退出所有节点组，历史流量与访问记录保留。
+          确认删除服务器 {{ deleteTarget?.name || '' }}？删除后该服务器证书将立即吊销，退出所有线路组，历史流量与访问记录保留。
         </p>
         <p v-if="deleteError" role="alert" class="text-sm text-ios-red">{{ deleteError }}</p>
         <div class="flex items-center justify-end gap-2.5 pt-2">
@@ -803,7 +791,7 @@
 
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router';
-import NodeVersionPanel from '../../system/components/NodeVersionPanel.vue';
+
 import { isOwner as authIsOwner } from '../../../app/auth';
 
 
@@ -1141,7 +1129,7 @@ function openUpgradeDialog(node: NodeView) {
 
 function confirmUpgrade() {
   upgradeDialog.value = false;
-  switchAdminTab('agents');
+  router.push('/nodes/versions?tab=agents');
 }
 
 // Rollback
@@ -1405,61 +1393,6 @@ onUnmounted(() => {
 
 const serverInbounds = ref<Inbound[]>([]);
 
-// ==========================================
-// 后台服务器管理 Tab 分段切换 (servers / agents / cores)
-// ==========================================
 const route = useRoute();
 const router = useRouter();
-
-const currentAdminTab = ref<'servers' | 'agents' | 'cores'>('servers');
-
-function syncAdminTabFromRoute() {
-  const tab = route.query.tab as string;
-  if (tab === 'agents' || tab === 'cores') {
-    currentAdminTab.value = tab;
-  } else {
-    currentAdminTab.value = 'servers';
-  }
-}
-
-function switchAdminTab(tab: 'servers' | 'agents' | 'cores') {
-  currentAdminTab.value = tab;
-  const q = { ...route.query };
-  if (tab === 'servers') {
-    delete q.tab;
-  } else {
-    q.tab = tab;
-  }
-  router.replace({ query: q });
-}
-
-watch(
-  () => route.query.tab,
-  () => {
-    syncAdminTabFromRoute();
-  },
-  { immediate: true }
-);
-
-// Dynamic PageHeader Bindings
-const pageHeaderTitle = computed(() => {
-  if (currentAdminTab.value === 'agents') return 'Agent 探针管理';
-  if (currentAdminTab.value === 'cores') return '代理核心版本';
-  return '服务器';
-});
-
-const pageHeaderParent = computed(() => {
-  return '服务器';
-});
-
-const pageHeaderDescription = computed(() => {
-  if (currentAdminTab.value === 'agents') {
-    return '统一管理与监控各服务器上部署的 Agent 探针运行状态、心跳上报与自动更新任务。';
-  }
-  if (currentAdminTab.value === 'cores') {
-    return '检测各服务器代理核心运行状态、版本信息与健康状况，支持签名升级任务分发。';
-  }
-  return '以“列表看状态、详情做管理”为原则，保持简洁清晰。';
-});
-
 </script>

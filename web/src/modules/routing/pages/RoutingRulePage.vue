@@ -260,7 +260,7 @@ function scopeSummary(rule: PolicyRecord) {
   const parts = [
     [rule.scope.user_ids?.length, '用户'],
     [rule.scope.node_ids?.length, '节点'],
-    [rule.scope.group_ids?.length, '节点组']
+    [rule.scope.group_ids?.length, '线路组']
   ]
     .filter(item => item[0])
     .map(item => item[0] + ' ' + item[1]);

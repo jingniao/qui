@@ -53,7 +53,7 @@ const routes: RouteRecordRaw[] = [
         path: 'users',
         name: 'UserList',
         component: () => import('../modules/users/pages/UserListPage.vue'),
-        meta: { title: '用户管理', parent: '用户管理' }
+        meta: { title: '用户', parent: '用户管理' }
       },
       {
         path: 'users/:id',
@@ -70,31 +70,24 @@ const routes: RouteRecordRaw[] = [
         redirect: '/users'
       },
 
+      { path: 'system/admins', redirect: '/users/admins' },
+      { path: 'nodes/versions', component: () => import('../modules/nodes/pages/NodeVersionsPage.vue'), meta: { title: '版本与更新', parent: '服务器' } },
+      { path: 'proxy/groups', component: () => import('../modules/proxy/pages/LineGroupPage.vue'), meta: { title: '线路组', parent: '节点配置' } },
       // 3. Node Module
       {
         path: 'nodes',
         name: 'NodeList',
         component: () => import('../modules/nodes/pages/NodeListPage.vue'),
-        meta: { title: '服务器', description: '以“列表看状态、详情做管理”为原则，保持简洁清晰。', parent: '服务器' }
+        meta: { title: '服务器列表', description: '以“列表看状态、详情做管理”为原则，保持简洁清晰。', parent: '服务器' }
       },
       {
         path: 'nodes/:id',
         name: 'NodeDetail',
         component: () => import('../modules/nodes/pages/NodeDetailPage.vue'),
-        meta: { title: '节点详情', parent: '节点' }
+        meta: { title: '服务器详情', parent: '服务器' }
       },
-      {
-        path: 'node-groups',
-        name: 'NodeGroup',
-        component: () => import('../modules/nodes/pages/NodeGroupPage.vue'),
-        meta: { title: '节点组', parent: '节点' }
-      },
-      {
-        path: 'topology',
-        name: 'NodeTopology',
-        component: () => import('../modules/nodes/pages/NodeTopologyPage.vue'),
-        meta: { title: '节点拓扑', parent: '节点' }
-      },
+      { path: 'node-groups', redirect: '/proxy/groups' },
+      { path: 'topology', redirect: '/proxy/relay' },
 
       // 4. Proxy Module (Unified Node List & Relay Canvas)
       {
@@ -199,18 +192,18 @@ const routes: RouteRecordRaw[] = [
 
       // 7. System Module
       {
-        path: 'system/admins',
+        path: 'users/admins',
         name: 'AdminList',
         component: () => import('../modules/system/pages/AdminPage.vue'),
-        meta: { title: '管理员', parent: '系统' }
+        meta: { title: '管理员', parent: '用户管理' }
       },
       {
         path: 'system/agents',
-        redirect: '/nodes?tab=agents'
+        redirect: '/nodes/versions?tab=agents'
       },
       {
         path: 'system/cores',
-        redirect: '/nodes?tab=cores'
+        redirect: '/nodes/versions?tab=cores'
       },
       {
         path: 'system/revisions',
@@ -252,6 +245,11 @@ export const router = createRouter({
   }
 });
 
+router.beforeEach((to) => {
+  if (to.path === '/nodes' && (to.query.tab === 'agents' || to.query.tab === 'cores')) {
+    return { path: '/nodes/versions', query: { ...to.query }, hash: to.hash };
+  }
+});
 router.beforeEach(setupNavigationGuards);
 
 router.afterEach((to) => {

@@ -65,7 +65,7 @@
       <template #header>
         <th>用户名</th>
         <th>状态</th>
-        <th>授权节点组</th>
+        <th>授权线路组</th>
         <th>设备</th>
         <th>连接</th>
         <th>额度 / 已用</th>
@@ -248,11 +248,11 @@
           </div>
         </div>
 
-        <!-- 授权节点组 -->
+        <!-- 授权线路组 -->
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
-            <label class="text-xs font-medium text-ios-secondary">授权节点组</label>
-            <span v-if="groups.length" class="text-[11px] text-ios-tertiary">已选 {{ form.nodeGroupIds.length }} 个节点组</span>
+            <label class="text-xs font-medium text-ios-secondary">授权线路组</label>
+            <span v-if="groups.length" class="text-[11px] text-ios-tertiary">已选 {{ form.nodeGroupIds.length }} 个线路组</span>
           </div>
           <div class="rounded-2xl p-3 bg-[#F5F5F7] border border-black/[0.06]">
             <div v-if="groups.length" class="space-y-1.5 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
@@ -285,7 +285,7 @@
                 <input v-model="form.nodeGroupIds" type="checkbox" :value="group.id" class="sr-only" />
               </label>
             </div>
-            <p v-else class="text-xs text-ios-tertiary py-1">请先创建节点组。</p>
+            <p v-else class="text-xs text-ios-tertiary py-1">请先创建线路组。</p>
           </div>
         </div>
 

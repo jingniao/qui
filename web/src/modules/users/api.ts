@@ -55,6 +55,8 @@ export const protocols = ['http', 'socks5', 'shadowsocks', 'vless', 'trojan', 'w
 
 export interface DevicesOnline { items: { address: string; allowed: boolean; active: boolean; firstSeen: string; lastSeen: string; nodes: string[] }[]; onlineDevices: number | null; deviceLimit: number; deviceLimitEnforced: boolean; deviceLimitUnsupportedNodes: string[]; }
 export const userAPI = {
+  grantGroup: (userId: string, groupId: string) => request<void>(`/users/${encodeURIComponent(userId)}/node-groups/${encodeURIComponent(groupId)}`, 'POST'),
+  revokeGroup: (userId: string, groupId: string) => request<void>(`/users/${encodeURIComponent(userId)}/node-groups/${encodeURIComponent(groupId)}`, 'DELETE'),
  devicesOnline: (id: string) => request<DevicesOnline>(`/users/${id}/devices-online`),
  resetDevicesOnline: (id: string) => request<DevicesOnline>(`/users/${id}/devices-online/reset`, "POST"),
   list: (page: number, keyword = '', pageSize = 20) =>

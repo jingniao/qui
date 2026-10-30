@@ -166,7 +166,7 @@
             </div>
 
             <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-secondary">
-              <span>授权 {{ user.nodeGroupIds.length }} 个节点组</span>
+              <span>授权 {{ user.nodeGroupIds.length }} 个线路组</span>
               <span class="text-ios-tertiary">{{ user.allowedProtocols.length }} 种协议</span>
             </div>
           </div>
@@ -257,7 +257,7 @@
           </div>
         </section>
 
-        <!-- 右侧 (5列): 可用节点组与节点列表 -->
+        <!-- 右侧 (5列): 可用线路组与节点列表 -->
         <section class="lg:col-span-5 panel-card p-5 sm:p-6 bg-white flex flex-col justify-between space-y-4">
           <div>
             <div class="flex items-center justify-between">
@@ -270,7 +270,7 @@
               </router-link>
             </div>
 
-            <!-- 授权节点组标签 -->
+            <!-- 授权线路组标签 -->
             <div class="mt-3 flex flex-wrap gap-1.5">
               <template v-if="user.nodeGroupIds.length > 0">
                 <span
@@ -573,9 +573,9 @@
 
 
 
-        <!-- 授权节点组 -->
+        <!-- 授权线路组 -->
         <div class="space-y-1.5">
-          <label class="text-xs font-medium text-ios-secondary">授权节点组</label>
+          <label class="text-xs font-medium text-ios-secondary">授权线路组</label>
           <div class="rounded-2xl p-3 bg-[#F8F8FA] border border-black/[0.06]">
             <div class="grid sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
               <label

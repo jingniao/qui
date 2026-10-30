@@ -202,7 +202,7 @@
           </div>
         </section>
 
-        <!-- 关联入站与所属节点组 -->
+        <!-- 关联入站与所属线路组 -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <!-- 关联入站列表 -->
           <section class="panel-card p-6 flex flex-col justify-between">
@@ -228,28 +228,24 @@
             </div>
           </section>
 
-          <!-- 所属节点组 -->
+          <!-- 所属线路组 -->
           <section class="panel-card p-6 flex flex-col justify-between">
             <div>
               <div class="flex items-center justify-between mb-3">
-                <h2 class="font-semibold text-[17px] text-ios-label tracking-tight">所属节点组</h2>
-                <router-link v-if="isOwner" to="/node-groups" class="text-xs text-ios-blue hover:underline">管理节点组</router-link>
+                <h2 class="font-semibold text-[17px] text-ios-label tracking-tight">所属线路组</h2>
+                <router-link v-if="isOwner" to="/proxy/groups" class="text-xs text-ios-blue hover:underline">管理线路组</router-link>
               </div>
               <p class="text-xs text-ios-tertiary mb-3">服务器所在的逻辑分组与用途编排。</p>
-              <div v-if="associatedGroups.length" class="divide-y divide-black/[0.04]">
-                <div v-for="group in associatedGroups" :key="group.id" class="py-2.5 flex items-center justify-between text-xs">
-                  <div>
-                    <span class="font-semibold text-ios-label">{{ group.name }}</span>
-                    <span class="ml-2 px-1.5 py-0.5 rounded-full text-[10px] bg-black/[0.04] text-ios-secondary">
-                      {{ purposeText(group.purpose) }}
-                    </span>
-                  </div>
-                  <span class="text-[11px] font-medium" :class="group.enabled ? 'text-emerald-600' : 'text-ios-tertiary'">
-                    {{ group.enabled ? (group.subscriptionVisible ? '订阅可见' : '仅内部使用') : '已停用' }}
-                  </span>
-                </div>
+              <div v-if="associatedGroups.length" class="flex flex-wrap gap-2">
+                <template v-for="group in associatedGroups" :key="group.id">
+                  <router-link v-if="isOwner" :to="{ path: '/proxy/groups', query: { group: group.id } }"
+                    class="rounded-full bg-ios-blue/10 px-3 py-1 text-xs text-ios-blue active:scale-95 transition-transform" :class="{ 'opacity-50': !group.enabled }">
+                    {{ group.name }} · {{ purposeText(group.purpose) }} · {{ group.enabled ? '已启用' : '已停用' }}
+                  </router-link>
+                  <span v-else class="rounded-full bg-ios-bg px-3 py-1 text-xs text-ios-secondary">{{ group.name }}</span>
+                </template>
               </div>
-              <p v-else class="text-xs text-ios-tertiary py-4 text-center">当前未加入任何节点组（可前往“设置”分配）</p>
+              <p v-else class="text-xs text-ios-tertiary py-4 text-center">当前未加入任何线路组（可前往“设置”分配）</p>
             </div>
           </section>
         </div>
@@ -602,10 +598,10 @@
             </label>
           </div>
 
-          <!-- 关联节点组 -->
+          <!-- 关联线路组 -->
           <div class="border-t border-black/[0.06] pt-4 space-y-2.5">
-            <p class="text-xs font-semibold text-ios-secondary">所属节点组</p>
-            <p class="text-xs text-ios-tertiary">勾选服务器加入的节点组。修改后将自动更新对应节点组关联。</p>
+            <p class="text-xs font-semibold text-ios-secondary">所属线路组</p>
+            <p class="text-xs text-ios-tertiary">勾选服务器加入的线路组。修改后将自动更新对应线路组关联。</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1">
               <label
                 v-for="g in allGroups"

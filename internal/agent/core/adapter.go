@@ -10,6 +10,9 @@ import (
 )
 
 type RenderedConfig struct {
+	PrivatePorts            []int
+	DeviceCredentialIDs     []string
+	Cores                   map[string]RenderedConfig
 	RuntimeAccountsComplete bool
 	NodeID                  string
 	Revision                int64

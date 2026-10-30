@@ -25,6 +25,7 @@ import (
 )
 
 type Adapter struct {
+	Ports              *core.PortAllocator
 	startedAt          time.Time
 	connectionObserver observer.Store
 	deviceGate         gate.Lease
@@ -66,6 +67,11 @@ func (a *Adapter) DetectCapabilities(ctx context.Context) (*pb.Capabilities, err
 	return Detect(ctx, a.ExecutablePath())
 }
 func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.RenderedConfig, error) {
+	for _, in := range state.Inbounds {
+		if in.Core != "" && in.Core != "xray" {
+			return core.RenderedConfig{}, errors.New("inbound assigned to another core")
+		}
+	}
 	if err := state.Validate(); err != nil {
 		return core.RenderedConfig{}, err
 	}
@@ -93,16 +99,18 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	if a.EnableStats {
 		a.mu.Lock()
 		if a.statsPort == 0 {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			port, err := a.privatePortLocked(state)
 			if err != nil {
 				a.mu.Unlock()
 				return core.RenderedConfig{}, err
 			}
-			a.statsPort = listener.Addr().(*net.TCPAddr).Port
-			listener.Close()
+			a.statsPort = port
 		}
 		options.StatsPort = a.statsPort
 		a.mu.Unlock()
+	}
+	if a.Ports != nil {
+		options.PrivatePorts = a.Ports.Ports()
 	}
 	return renderWithOptions(ctx, state, at, options)
 }

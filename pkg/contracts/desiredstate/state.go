@@ -68,6 +68,7 @@ type Credential struct {
 	PublicKey string `json:"public_key,omitempty"`
 }
 type Inbound struct {
+	Core                string           `json:"core,omitempty"`
 	ID                  string           `json:"id"`
 	Protocol            string           `json:"protocol"`
 	Listen              string           `json:"listen"`
@@ -347,6 +348,9 @@ func (s State) Validate() error {
 	}
 	ports := map[string]bool{}
 	for _, inbound := range s.Inbounds {
+		if inbound.Core != "" && inbound.Core != "xray" && inbound.Core != "sing-box" {
+			return errors.New("unsupported inbound core")
+		}
 		if inbound.Protocol == "forward" && (inbound.SubscriptionVisible || len(inbound.CredentialIDs) != 0) {
 			return errors.New("forward inbounds cannot carry credentials or enter subscriptions")
 		}

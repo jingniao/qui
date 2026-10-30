@@ -35,7 +35,7 @@ func NewStatsSecret() (string, error) {
 	return hex.EncodeToString(data), nil
 }
 
-func configureStats(doc *document, state desiredstate.State, port int, secret string, result *core.RenderedConfig) error {
+func configureStats(doc *document, state desiredstate.State, port int, secret string, result *core.RenderedConfig, reserved ...int) error {
 	if port < 1 || port > 65535 {
 		return errors.New("invalid sing-box statistics port")
 	}
@@ -51,7 +51,14 @@ func configureStats(doc *document, state desiredstate.State, port int, secret st
 	doc.Experimental = &experimentalOptions{ClashAPI: &clashAPIOptions{ExternalController: endpoint, Secret: secret}}
 	// Block the reserved port before all business rules, for IPs and hostnames
 	// alike. The Agent's direct loopback connection never traverses this route.
-	doc.Route.Rules = append([]route{{Ports: []uint16{uint16(port)}, Action: "reject", origin: collector.Exit{Protocol: "block", LogDomain: false}}}, doc.Route.Rules...)
+	ports := []uint16{uint16(port)}
+	if len(reserved) > 0 {
+		ports = nil
+		for _, p := range reserved {
+			ports = append(ports, uint16(p))
+		}
+	}
+	doc.Route.Rules = append([]route{{Ports: ports, Action: "reject", origin: collector.Exit{Protocol: "block", LogDomain: false}}}, doc.Route.Rules...)
 	result.StatsEndpoint = endpoint
 	result.HealthEndpoints = append(result.HealthEndpoints, endpoint)
 	return nil
@@ -78,15 +85,26 @@ func (a *Adapter) SampleTraffic(ctx context.Context) error {
 }
 
 func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
-	if a.current.UserStatsEndpoint == "" {
-		return ErrTelemetryUnavailable
-	}
 	if a.process == nil || a.hooks.TrafficSink == nil {
 		return nil
+	}
+	if a.current.UserStatsEndpoint == "" {
+		if a.current.StatsEndpoint == "" || a.statsSecret == "" {
+			return ErrTelemetryUnavailable
+		}
+		totals, err := readClashTotals(ctx, a.current.StatsEndpoint, a.statsSecret)
+		if err != nil {
+			return err
+		}
+		node, err := core.NodeCounter("sing-box", a.statsEpoch, a.current.Revision, totals.UploadTotal, totals.DownloadTotal)
+		if err != nil {
+			return err
+		}
+		return a.hooks.TrafficSink(ctx, []traffic.Counter{node})
 	}
 	counters, err := readCounters(ctx, a.current, a.statsEpoch, &a.counterSources)
 	if err != nil {
 		return err
 	}
-	return a.hooks.TrafficSink(ctx, counters)
+	return core.SaveAccountAndNode(ctx, a.hooks.TrafficSink, "sing-box", a.statsEpoch, a.current.Revision, counters)
 }

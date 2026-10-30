@@ -15,6 +15,7 @@ import (
 )
 
 type RenderOptions struct {
+	PrivatePorts  []int
 	Health        map[string]scheduler.Health
 	ProbePorts    map[string]int
 	Access        bool
@@ -231,12 +232,11 @@ func (a *Adapter) options(ctx context.Context, state desiredstate.State) (Render
 			if a.probePorts[member.OutboundID] != 0 {
 				continue
 			}
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			port, err := a.privatePortLocked(state)
 			if err != nil {
 				return RenderOptions{}, err
 			}
-			a.probePorts[member.OutboundID] = listener.Addr().(*net.TCPAddr).Port
-			listener.Close()
+			a.probePorts[member.OutboundID] = port
 		}
 	}
 	health := map[string]scheduler.Health{}

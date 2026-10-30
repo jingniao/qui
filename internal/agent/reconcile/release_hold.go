@@ -94,5 +94,5 @@ func (r *Reconciler) releaseCoreUpdate() error {
 func (r *Reconciler) CoreUpdateHeld() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.coreUpdateHold || r.controlOnly
+	return r.anyCoreHold() || r.controlOnly
 }

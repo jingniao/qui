@@ -3,6 +3,7 @@ package singbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"proxycontrol/pkg/contracts/traffic"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,5 +176,27 @@ func TestRealClashApiNodeTrafficTotalsCountForwardedBytes(t *testing.T) {
 			t.Fatal("Clash API node totals did not count the forwarded traffic", upload, download, err)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestOfficialSingboxNodeSpoolLeavesUserTrafficUnknown(t *testing.T) {
+	secret := "0123456789abcdef0123456789abcdef"
+	fixture, endpoint := clashFixture(t, secret)
+	fixture.set(300, 400)
+	a := clashAdapter(endpoint, secret)
+	a.statsEpoch = "official-epoch"
+	var saved []traffic.Counter
+	a.hooks = core.RuntimeHooks{TrafficSink: func(_ context.Context, c []traffic.Counter) error { saved = append(saved, c...); return nil }}
+	if err := a.SampleTraffic(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || saved[0].Kind != "node" || saved[0].Core != "sing-box" || saved[0].UploadBytes != 300 {
+		t.Fatal(saved)
+	}
+	if _, err := a.TrafficCounters(context.Background()); !errors.Is(err, ErrTelemetryUnavailable) {
+		t.Fatal("official sing-box user traffic became measured", err)
+	}
+	if a.SupportsAccountTelemetry() {
+		t.Fatal("official sing-box fabricated user accounting")
 	}
 }

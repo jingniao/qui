@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/reconcile"
 	"proxycontrol/internal/agent/updater"
 	"proxycontrol/internal/platform/config"
@@ -35,6 +36,8 @@ func coreComponent(c config.Agent) string {
 	return c.CoreName
 }
 
+func coreComponentOriginal(c config.Agent) string { return configuration.Cores(c)[0].Name }
+
 func coreInstallationPending(state updater.Installation) bool {
 	return state.Phase == "switching" || state.Phase == "rolling_back" || state.Phase == "failed_closed"
 }
@@ -43,8 +46,7 @@ func coreInstallationPending(state updater.Installation) bool {
 // reports an error when only one of the two history anchors exists, because a
 // partially initialized history must not be replaced silently.
 func openCoreHistory(c config.Agent, nodeID string) (*updater.History, error) {
-	directory := filepath.Join(c.DataDirectory, "release-history")
-	checkpoint := filepath.Join(c.DataDirectory, "identity", "release-checkpoint.enc")
+	directory, checkpoint := coreHistoryPaths(c)
 	_, directoryErr := os.Lstat(directory)
 	_, checkpointErr := os.Lstat(checkpoint)
 	if errors.Is(directoryErr, os.ErrNotExist) && errors.Is(checkpointErr, os.ErrNotExist) {
@@ -62,11 +64,21 @@ func openCoreHistory(c config.Agent, nodeID string) (*updater.History, error) {
 // used to finish an interrupted switch. It returns nil when the node has never
 // recorded a core installation.
 func openCoreInstallation(ctx context.Context, c config.Agent, nodeID string) (*coreInstallation, error) {
-	directory := filepath.Join(c.DataDirectory, "release-history")
-	checkpoint := filepath.Join(c.DataDirectory, "identity", "release-checkpoint.enc")
+	directory, checkpoint := coreHistoryPaths(c)
 	_, directoryErr := os.Lstat(directory)
 	_, checkpointErr := os.Lstat(checkpoint)
 	if errors.Is(directoryErr, os.ErrNotExist) && errors.Is(checkpointErr, os.ErrNotExist) {
+		inventory, err := configuration.ReadInventory(c.DataDirectory, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		if entry := inventory.Entries[coreComponent(c)]; entry.Generation != "" && !entry.Disabled {
+			path, err := updater.ResolveImage(ctx, filepath.Join(c.DataDirectory, "releases", "installed"), coreComponent(c), updater.Image{SHA256: entry.InstalledDigest, Bytes: entry.ImageBytes, Version: entry.Version, Sequence: entry.Sequence})
+			if err != nil {
+				return nil, err
+			}
+			return &coreInstallation{path: path}, nil
+		}
 		return nil, nil
 	}
 	history, err := openCoreHistory(c, nodeID)
@@ -103,14 +115,14 @@ func repairCoreInstallation(ctx context.Context, c config.Agent, installation *c
 		return nil
 	}
 	pending := installation != nil && installation.state != nil && coreInstallationPending(*installation.state)
-	if !pending && !manager.CoreUpdateHeld() {
+	if !pending && !manager.CoreComponentHeld(coreComponent(c)) {
 		return nil
 	}
 	path := c.CorePath
 	if installation != nil && installation.path != "" {
 		path = installation.path
 	}
-	if err := manager.RepairCoreRollback(ctx, path); err != nil {
+	if err := manager.RepairCoreRollback(ctx, path, coreComponent(c)); err != nil {
 		return err
 	}
 	if !pending {
@@ -127,8 +139,7 @@ func repairCoreInstallation(ctx context.Context, c config.Agent, installation *c
 // core came from install.sh has no history yet, so its first update creates
 // one. The installer then records the running core as the rollback baseline.
 func openOrCreateCoreHistory(c config.Agent, nodeID string) (*updater.History, error) {
-	directory := filepath.Join(c.DataDirectory, "release-history")
-	checkpoint := filepath.Join(c.DataDirectory, "identity", "release-checkpoint.enc")
+	directory, checkpoint := coreHistoryPaths(c)
 	_, directoryErr := os.Lstat(directory)
 	_, checkpointErr := os.Lstat(checkpoint)
 	if !errors.Is(directoryErr, os.ErrNotExist) || !errors.Is(checkpointErr, os.ErrNotExist) {
@@ -140,4 +151,19 @@ func openOrCreateCoreHistory(c config.Agent, nodeID string) (*updater.History, e
 	}
 	defer clear(key)
 	return updater.CreateHistory(updater.HistoryOptions{Directory: directory, Checkpoint: checkpoint, NodeID: nodeID, Key: key})
+}
+
+func coreHistoryPaths(c config.Agent) (string, string) {
+	// Dynamic additions/re-additions start a new authenticated history namespace;
+	// old histories are retained as evidence and never select a removed image.
+	if inventory, err := configuration.ReadInventory(c.DataDirectory, ""); err == nil {
+		if entry := inventory.Entries[coreComponent(c)]; entry.Generation != "" {
+			return filepath.Join(c.DataDirectory, "core-release-history", coreComponent(c), entry.Generation), filepath.Join(c.DataDirectory, "identity", "core-release-"+coreComponent(c)+"-"+entry.Generation+".enc")
+		}
+	}
+	cores := configuration.Cores(c)
+	if coreComponent(c) != cores[0].Name {
+		return filepath.Join(c.DataDirectory, "core-release-history", coreComponent(c)), filepath.Join(c.DataDirectory, "identity", "core-release-"+coreComponent(c)+".enc")
+	}
+	return filepath.Join(c.DataDirectory, "release-history"), filepath.Join(c.DataDirectory, "identity", "release-checkpoint.enc")
 }

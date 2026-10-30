@@ -17,6 +17,12 @@ import (
 // to start after a control-only recovery. An independent Agent has no retained
 // image and is checked against its original authenticated storage floor.
 func CheckCoreAccountingActivation(ctx context.Context, directory, nodeID, version string) error {
+	return checkFormatActivation(ctx, directory, nodeID, version, false)
+}
+func CheckMultiCoreActivation(ctx context.Context, directory, nodeID, version string) error {
+	return checkFormatActivation(ctx, directory, nodeID, version, true)
+}
+func checkFormatActivation(ctx context.Context, directory, nodeID, version string, multi bool) error {
 	active, err := Active(directory)
 	if err != nil {
 		return err
@@ -35,7 +41,17 @@ func CheckCoreAccountingActivation(ctx context.Context, directory, nodeID, versi
 			return ErrState
 		}
 		raising.Formats.CoreAccounting.Write = agentstorage.CoreAccountingFormat
-		if raising.Validate() != nil || agentstorage.CheckReplacement(required, raising) != nil {
+		if multi {
+			raising.Formats.Configuration.Write = 4
+			raising.Formats.Spool.Write = 6
+			raising.Formats.DesiredState.Write = 3
+			raising.Formats.ReleaseHold.Write = 3
+		}
+		baseline := required
+		if multi {
+			baseline = running
+		}
+		if raising.Validate() != nil || agentstorage.CheckReplacement(baseline, raising) != nil {
 			return ErrState
 		}
 		return nil
@@ -67,6 +83,12 @@ func CheckCoreAccountingActivation(ctx context.Context, directory, nodeID, versi
 		return err
 	}
 	required.Formats.CoreAccounting.Write = agentstorage.CoreAccountingFormat
+	if multi {
+		required.Formats.Configuration.Write = 4
+		required.Formats.Spool.Write = 6
+		required.Formats.DesiredState.Write = 3
+		required.Formats.ReleaseHold.Write = 3
+	}
 	if required.Validate() != nil {
 		return ErrState
 	}

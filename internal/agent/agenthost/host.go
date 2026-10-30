@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"proxycontrol/internal/agent/configuration"
 	"time"
 
 	"proxycontrol/internal/agent/agentjobs"
@@ -16,7 +17,6 @@ import (
 	"proxycontrol/internal/agent/reconcile"
 	"proxycontrol/internal/agent/storage"
 	"proxycontrol/internal/agent/updater"
-	"proxycontrol/internal/platform/config"
 	"proxycontrol/pkg/contracts/agentstorage"
 )
 
@@ -30,7 +30,7 @@ func Run(ctx context.Context, configPath, version string, initialize bool, logge
 	if err != nil {
 		return err
 	}
-	c, err := config.LoadAgent(configPath)
+	c, err := configuration.LoadAgent(configPath)
 	if err != nil {
 		return err
 	}

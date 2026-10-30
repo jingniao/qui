@@ -61,12 +61,19 @@ func configureStats(document *configDocument, state desiredstate.State, port int
 		inbounds = append(inbounds, inbound.Tag)
 	}
 	if len(inbounds) > 0 {
+		privatePorts := []string{strconv.Itoa(port)}
+		if len(options.PrivatePorts) > 0 {
+			privatePorts = nil
+			for _, p := range options.PrivatePorts {
+				privatePorts = append(privatePorts, strconv.Itoa(p))
+			}
+		}
 		guard := "_stats_guard_block_"
 		document.Outbounds = append(document.Outbounds, outboundConfig{Tag: guard, Protocol: "blackhole", Settings: map[string]any{}})
 		if document.accessOrigins != nil {
 			document.accessOrigins[guard] = collector.Exit{Protocol: "block", LogDomain: true}
 		}
-		document.Routing.Rules = append([]route{{Type: "field", InboundTag: inbounds, Port: strconv.Itoa(port), Network: "tcp,udp", OutboundTag: guard}}, document.Routing.Rules...)
+		document.Routing.Rules = append([]route{{Type: "field", InboundTag: inbounds, Port: strings.Join(privatePorts, ","), Network: "tcp,udp", OutboundTag: guard}}, document.Routing.Rules...)
 	}
 	rendered.StatsEndpoint = endpoint
 	rendered.OnlineStats = options.OnlineStats
@@ -243,7 +250,7 @@ func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
 		}
 		return err
 	}
-	if err := a.TrafficSink(ctx, counters); err != nil {
+	if err := core.SaveAccountAndNode(ctx, a.TrafficSink, "xray", a.statsEpoch, a.current.Revision, counters); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

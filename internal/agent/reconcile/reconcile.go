@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -57,6 +58,8 @@ type Reconciler struct {
 	renderedDigest         string
 	coreUpdateHold         bool
 	coreUpdateHoldInvalid  bool
+	componentHolds         map[string]bool
+	componentHoldsInvalid  map[string]bool
 	controlOnly            bool
 }
 
@@ -87,6 +90,7 @@ func New(directory, nodeID string, adapter core.Adapter) (*Reconciler, error) {
 		result.manifest = *manifest
 	}
 	result.loadReleaseHold()
+	result.loadComponentHolds()
 	return result, nil
 }
 
@@ -107,7 +111,7 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	result := core.ApplyResult{Revision: state.Revision}
-	if r.coreUpdateHold || r.controlOnly {
+	if r.anyCoreHold() || r.controlOnly {
 		return result, core.ErrReleaseRecovery
 	}
 	if state.NodeID != r.NodeID {
@@ -421,7 +425,7 @@ func (r *Reconciler) restoreRevision(ctx context.Context, revision int64) error 
 func (r *Reconciler) Restore(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.coreUpdateHold || r.controlOnly {
+	if r.anyCoreHold() || r.controlOnly {
 		return core.ErrReleaseRecovery
 	}
 	if r.manifest.Revision == 0 {
@@ -444,7 +448,7 @@ func (r *Reconciler) Rollback(ctx context.Context, revision int64) error {
 }
 
 func (r *Reconciler) rollbackLocked(ctx context.Context, revision int64) error {
-	if r.coreUpdateHold || r.controlOnly {
+	if r.anyCoreHold() || r.controlOnly {
 		return core.ErrReleaseRecovery
 	}
 	allowed := false
@@ -459,6 +463,23 @@ func (r *Reconciler) rollbackLocked(ctx context.Context, revision int64) error {
 	data, err := r.readRevision(revision)
 	if err != nil {
 		return err
+	}
+	// Old empty-Core snapshots do not encode their original primary. Refuse an
+	// ambiguous historical rollback after a primary removal instead of silently
+	// routing that inbound through a different adapter. An explicit-core copy can
+	// be published as a new revision after the required component is enabled.
+	if inventory, err := configuration.ReadInventory(r.Directory, r.NodeID); err != nil {
+		return err
+	} else if inventory.PrimaryChangedRevision > 0 && revision <= inventory.PrimaryChangedRevision {
+		state, err := desiredstate.Decode(data)
+		if err != nil {
+			return err
+		}
+		for _, in := range state.Inbounds {
+			if in.Core == "" {
+				return errors.New("historical empty-core rollback crosses a primary change")
+			}
+		}
 	}
 	next := r.manifest
 	next.Revision = revision

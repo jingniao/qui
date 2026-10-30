@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"proxycontrol/internal/agent/configuration"
 	"syscall"
 
 	"proxycontrol/internal/agent/agenthost"
 	"proxycontrol/internal/agent/control"
 	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/internal/agent/tuning"
-	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/logging"
 	"proxycontrol/pkg/contracts/agentstorage"
 )
@@ -122,7 +122,7 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 		if !valid {
 			return fmt.Errorf("certificate operation requires only config and exactly one certificate operation flag")
 		}
-		c, err := config.LoadAgent(*f.path)
+		c, err := configuration.LoadAgent(*f.path)
 		if err != nil {
 			return err
 		}
@@ -156,7 +156,7 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 		if err != nil {
 			return err
 		}
-		c, err := config.LoadAgent(*f.path)
+		c, err := configuration.LoadAgent(*f.path)
 		if err != nil {
 			return err
 		}
@@ -241,7 +241,7 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 	}
 	logger := logging.New(logOutput)
 	slog.SetDefault(logger)
-	c, err := config.LoadAgent(*f.path)
+	c, err := configuration.LoadAgent(*f.path)
 	if err != nil {
 		return err
 	}

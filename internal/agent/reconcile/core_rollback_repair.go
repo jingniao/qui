@@ -13,13 +13,27 @@ import (
 // runtime is pointed back at the retained image, the current revision is
 // restored and the hold is released. An unreadable hold marker is preserved as
 // evidence first, so a restart never leaves the node permanently held.
-func (r *Reconciler) RepairCoreRollback(ctx context.Context, path string) error {
+func (r *Reconciler) RepairCoreRollback(ctx context.Context, path string, components ...string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.controlOnly {
 		return core.ErrReleaseRecovery
 	}
-	runtime, ok := r.Adapter.(core.BinaryRuntime)
+	component := ""
+	if len(components) > 0 {
+		component = components[0]
+	}
+	var adapter core.Adapter = r.Adapter
+	if multi, ok := adapter.(*core.MultiRuntime); ok {
+		adapter = multi.Component(component)
+		if adapter == nil {
+			return errors.New("unknown repair component")
+		}
+		component = adapter.Name()
+	} else {
+		component = ""
+	}
+	runtime, ok := adapter.(core.BinaryRuntime)
 	if !ok {
 		return errors.New("core adapter does not support fixed executable replacement")
 	}
@@ -28,6 +42,12 @@ func (r *Reconciler) RepairCoreRollback(ctx context.Context, path string) error 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if component != "" && r.componentHoldsInvalid[component] {
+		if err := preserveDamagedHold(r.componentHoldPath(component)); err != nil {
+			return err
+		}
+		r.componentHoldsInvalid[component] = false
 	}
 	if r.coreUpdateHoldInvalid {
 		if err := preserveDamagedHold(filepath.Join(r.Directory, releaseHoldName)); err != nil {
@@ -42,7 +62,18 @@ func (r *Reconciler) RepairCoreRollback(ctx context.Context, path string) error 
 		return err
 	}
 	if r.manifest.Revision > 0 {
-		if err := r.restoreRevision(ctx, r.manifest.Revision); err != nil {
+		var err error
+		if component != "" {
+			err = r.restoreCoreLocked(ctx, component)
+		} else {
+			err = r.restoreRevision(ctx, r.manifest.Revision)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if component != "" {
+		if err := r.releaseComponent(component); err != nil {
 			return err
 		}
 	}

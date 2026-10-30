@@ -125,6 +125,7 @@ type route struct {
 }
 
 type renderOptions struct {
+	privatePorts      []int
 	statsPort         int
 	userStatsPort     int
 	statsSecret       string
@@ -458,7 +459,7 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 		return result, err
 	}
 	if options.statsPort > 0 {
-		if err := configureStats(&doc, state, options.statsPort, options.statsSecret, &result); err != nil {
+		if err := configureStats(&doc, state, options.statsPort, options.statsSecret, &result, options.privatePorts...); err != nil {
 			return result, err
 		}
 	}

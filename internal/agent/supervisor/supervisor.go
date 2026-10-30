@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/reconcile"
+	pb "proxycontrol/pkg/contracts/agentpb"
 	"sync"
 	"time"
 )
@@ -97,10 +98,15 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					if reconciler.CoreUpdateHeld() {
-						continue
+					var gateErr error
+					if multi, ok := target.(interface {
+						TickDeviceGatesExcept(context.Context, map[string]bool) error
+					}); ok {
+						gateErr = multi.TickDeviceGatesExcept(ctx, map[string]bool{"xray": reconciler.CoreComponentHeld("xray"), "sing-box": reconciler.CoreComponentHeld("sing-box")})
+					} else if !reconciler.CoreUpdateHeld() {
+						gateErr = target.TickDeviceGates(ctx)
 					}
-					if target.TickDeviceGates(ctx) != nil {
+					if gateErr != nil {
 						logger.Warn("device gate failed open; routing recovery may be required")
 					}
 				}
@@ -122,10 +128,15 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				case <-ctx.Done():
 					return
 				case <-probeTicker.C:
-					if reconciler.CoreUpdateHeld() {
-						continue
+					var probeErr error
+					if multi, ok := prober.(interface {
+						ProbeExcept(context.Context, map[string]bool) error
+					}); ok {
+						probeErr = multi.ProbeExcept(ctx, map[string]bool{"xray": reconciler.CoreComponentHeld("xray"), "sing-box": reconciler.CoreComponentHeld("sing-box")})
+					} else if !reconciler.CoreUpdateHeld() {
+						probeErr = prober.Probe(ctx)
 					}
-					if err := prober.Probe(ctx); err != nil {
+					if err := probeErr; err != nil {
 						if !failing {
 							logger.Warn("outbound health probe failed", "error", err)
 							failing = true
@@ -141,6 +152,7 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	var backoff restoreBackoff
+	coreBackoffs := map[string]*restoreBackoff{}
 	// refreshFailure is the reason the last refresh failed, so the same transient
 	// failure is not logged on every tick.
 	refreshFailure := ""
@@ -149,7 +161,44 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if reconciler.Current() == 0 || reconciler.CoreUpdateHeld() {
+			if reconciler.Current() == 0 {
+				continue
+			}
+			if multi, ok := adapter.(interface {
+				CoreStatuses(context.Context) []*pb.CoreStatus
+			}); ok {
+				unhealthy := false
+				for _, status := range multi.CoreStatuses(ctx) {
+					if reconciler.CoreComponentHeld(status.Name) {
+						unhealthy = true
+						continue
+					}
+					b := coreBackoffs[status.Name]
+					if b == nil {
+						b = &restoreBackoff{}
+						coreBackoffs[status.Name] = b
+					}
+					if status.Healthy {
+						b.reset()
+						continue
+					}
+					unhealthy = true
+					if !b.ready(reconciler.Current(), time.Now()) {
+						continue
+					}
+					if err := reconciler.RestoreCore(ctx, status.Name); err != nil {
+						if b.failed(err, time.Now()) {
+							logger.Error("core recovery failed", "core", status.Name, "error", err, "retry_in", b.delay.String())
+						}
+					} else {
+						b.reset()
+					}
+				}
+				if unhealthy {
+					continue
+				}
+			}
+			if reconciler.CoreUpdateHeld() {
 				continue
 			}
 			// Health comes first: while the core cannot run the retained

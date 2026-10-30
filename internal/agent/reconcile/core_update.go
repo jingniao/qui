@@ -14,9 +14,13 @@ type CoreUpdateLease struct {
 	reconciler *Reconciler
 	runtime    core.BinaryRuntime
 	active     bool
+	component  string
 }
 
 func (r *Reconciler) WithCoreUpdate(ctx context.Context, expectedRevision int64, operation func(*CoreUpdateLease) error) error {
+	return r.WithCoreComponentUpdate(ctx, expectedRevision, "", operation)
+}
+func (r *Reconciler) WithCoreComponentUpdate(ctx context.Context, expectedRevision int64, component string, operation func(*CoreUpdateLease) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.controlOnly {
@@ -31,11 +35,23 @@ func (r *Reconciler) WithCoreUpdate(ctx context.Context, expectedRevision int64,
 	if err := r.verifyRequiredSuccessReceipt(r.manifest); err != nil {
 		return err
 	}
-	runtime, ok := r.Adapter.(core.BinaryRuntime)
+	var adapter core.Adapter = r.Adapter
+	if multi, ok := adapter.(*core.MultiRuntime); ok {
+		adapter = multi.Component(component)
+		if adapter == nil {
+			return errors.New("unknown update component")
+		}
+		component = adapter.Name()
+	} else if component != "" && component != adapter.Name() {
+		return errors.New("unknown update component")
+	} else {
+		component = ""
+	}
+	runtime, ok := adapter.(core.BinaryRuntime)
 	if !ok {
 		return errors.New("core adapter does not support fixed executable replacement")
 	}
-	lease := &CoreUpdateLease{reconciler: r, runtime: runtime, active: true}
+	lease := &CoreUpdateLease{reconciler: r, runtime: runtime, component: component, active: true}
 	defer func() { lease.active = false }()
 	return operation(lease)
 }
@@ -49,12 +65,18 @@ func (l *CoreUpdateLease) Revision() int64 {
 }
 func (l *CoreUpdateLease) Hold() error {
 	if l.active {
+		if l.component != "" {
+			return l.reconciler.holdComponent(l.component)
+		}
 		return l.reconciler.holdCoreUpdate()
 	}
 	return core.ErrReleaseRecovery
 }
 func (l *CoreUpdateLease) Release() error {
 	if l.active {
+		if l.component != "" {
+			return l.reconciler.releaseComponent(l.component)
+		}
 		return l.reconciler.releaseCoreUpdate()
 	}
 	return core.ErrReleaseRecovery
@@ -92,7 +114,28 @@ func (l *CoreUpdateLease) Check(ctx context.Context, path, expectedVersion strin
 	if err != nil || state.NodeID != r.NodeID {
 		return errors.New("core update desired configuration identity failed")
 	}
-	configuration, err := r.Adapter.Render(ctx, state)
+	adapter := r.Adapter
+	if l.component != "" {
+		state = state.ForCore(l.component, r.Adapter.Name())
+		adapter = l.runtime
+	}
+	if l.component != "" {
+		active := false
+		for _, in := range state.Inbounds {
+			active = active || in.Enabled
+		}
+		if !active {
+			version, err := l.runtime.DetectVersion(ctx, path)
+			if err != nil {
+				return err
+			}
+			if version != expectedVersion {
+				return errors.New("core version mismatch")
+			}
+			return nil
+		}
+	}
+	configuration, err := adapter.Render(ctx, state)
 	if err != nil {
 		return err
 	}
@@ -109,7 +152,7 @@ func (l *CoreUpdateLease) Activate(ctx context.Context, path string) error {
 	if !l.active {
 		return errors.New("core update lease expired")
 	}
-	if l.reconciler.coreUpdateHoldInvalid {
+	if l.reconciler.coreUpdateHoldInvalid || l.reconciler.componentHoldsInvalid[l.component] {
 		return core.ErrReleaseRecovery
 	}
 	if err := ctx.Err(); err != nil {
@@ -121,7 +164,14 @@ func (l *CoreUpdateLease) Activate(ctx context.Context, path string) error {
 	if err := l.runtime.SelectExecutable(ctx, path); err != nil {
 		return err
 	}
-	if err := l.reconciler.restoreRevision(ctx, l.reconciler.manifest.Revision); err != nil {
+	if l.component != "" {
+		if err := l.reconciler.restoreCoreLocked(ctx, l.component); err != nil {
+			return err
+		}
+		if multi, ok := l.reconciler.Adapter.(*core.MultiRuntime); ok && !multi.CoreActive(l.component) {
+			return nil
+		}
+	} else if err := l.reconciler.restoreRevision(ctx, l.reconciler.manifest.Revision); err != nil {
 		return err
 	}
 	health, err := l.runtime.Health(ctx)

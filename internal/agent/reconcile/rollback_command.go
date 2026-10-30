@@ -11,6 +11,7 @@ import (
 )
 
 type CommandReceipt struct {
+	Core           string `json:"core,omitempty"`
 	RestartCurrent bool   `json:"restart_current,omitempty"`
 	Revision       int64  `json:"revision"`
 	Success        bool   `json:"success"`
@@ -23,7 +24,14 @@ func (r *Reconciler) RollbackCommand(ctx context.Context, commandID string, revi
 func (r *Reconciler) RestartCommand(ctx context.Context, commandID string, revision int64) (bool, string, error) {
 	return r.rollbackOperation(ctx, commandID, revision, true)
 }
-func (r *Reconciler) rollbackOperation(ctx context.Context, commandID string, revision int64, restart bool) (bool, string, error) {
+func (r *Reconciler) rollbackOperation(ctx context.Context, commandID string, revision int64, restart bool, cores ...string) (bool, string, error) {
+	name := ""
+	if len(cores) > 0 {
+		name = cores[0]
+	}
+	if name != "" && name != "xray" && name != "sing-box" {
+		return false, "invalid_command", errors.New("invalid core")
+	}
 	if commandID == "" || len(commandID) > 128 || revision < 0 || (restart && revision == 0) || strings.ContainsAny(commandID, "/\\.") {
 		return false, "invalid_command", errors.New("invalid rollback command ID")
 	}
@@ -34,7 +42,7 @@ func (r *Reconciler) rollbackOperation(ctx context.Context, commandID string, re
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.coreUpdateHold || r.controlOnly {
+	if r.anyCoreHold() || r.controlOnly {
 		return false, "release_recovery_required", core.ErrReleaseRecovery
 	}
 	directory := filepath.Join(r.Directory, "commands")
@@ -47,7 +55,7 @@ func (r *Reconciler) rollbackOperation(ctx context.Context, commandID string, re
 		if err := json.Unmarshal(data, &receipt); err != nil {
 			return false, "persistence_failed", err
 		}
-		if receipt.Revision != revision || receipt.RestartCurrent != restart {
+		if receipt.Revision != revision || receipt.RestartCurrent != restart || receipt.Core != name {
 			return false, "invalid_command", errors.New("rollback command changed")
 		}
 		if receipt.Success {
@@ -61,6 +69,8 @@ func (r *Reconciler) rollbackOperation(ctx context.Context, commandID string, re
 	var err error
 	if restart && r.manifest.Revision != revision {
 		err = errors.New("restart revision is no longer current")
+	} else if name != "" {
+		err = r.restoreCoreLocked(ctx, name)
 	} else if revision == 0 {
 		err = r.resetLocked(ctx)
 	} else {
@@ -73,7 +83,7 @@ func (r *Reconciler) rollbackOperation(ctx context.Context, commandID string, re
 	if err != nil && r.stopUnconfirmed() {
 		return false, "stop_unconfirmed", err
 	}
-	receipt := CommandReceipt{Revision: revision, Success: err == nil, Code: "rollback_success"}
+	receipt := CommandReceipt{Core: name, Revision: revision, Success: err == nil, Code: "rollback_success"}
 	receipt.RestartCurrent = restart
 	if err != nil {
 		receipt.Code = "rollback_failed"
@@ -140,4 +150,8 @@ func (r *Reconciler) resetLocked(ctx context.Context) error {
 	r.manifest = next
 	r.renderedDigest = ""
 	return nil
+}
+
+func (r *Reconciler) RestartCoreCommand(ctx context.Context, id string, revision int64, name string) (bool, string, error) {
+	return r.rollbackOperation(ctx, id, revision, true, name)
 }

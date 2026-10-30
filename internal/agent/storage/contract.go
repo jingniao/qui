@@ -248,6 +248,13 @@ func activateStorageFormats(directory, nodeID string, reader agentstorage.Contra
 	}
 	if configuration > 0 {
 		next.Formats.Configuration.Write = configuration
+		if configuration >= 4 {
+			next.Formats.Spool.Write = 6
+		}
+		if configuration >= 3 {
+			next.Formats.DesiredState.Write = 3
+			next.Formats.ReleaseHold.Write = 3
+		}
 	} else if coreAccounting > 0 {
 		next.Formats.CoreAccounting.Write = coreAccounting
 	} else {
@@ -317,4 +324,15 @@ func activateStorageFormats(directory, nodeID string, reader agentstorage.Contra
 		return agentstorage.Contract{}, ErrStorage
 	}
 	return result, nil
+}
+
+// ActivateMultiCoreFormats records the configuration, revision map and component hold ABI.
+func ActivateMultiCoreFormats(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
+	return activateStorageFormats(directory, nodeID, reader, 3, 0)
+}
+
+// ActivateCoreInventoryFormats includes authenticated membership overlays and
+// per-core node aggregate counters, unreadable by checkpoint-only readers.
+func ActivateCoreInventoryFormats(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
+	return activateStorageFormats(directory, nodeID, reader, 4, 0)
 }

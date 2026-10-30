@@ -75,7 +75,7 @@ func TestStorageContractStrictDecodeRejectsMissingUnknownDuplicateAndTrailing(t 
 	if err != nil || parsed != original {
 		t.Fatal(parsed, err)
 	}
-	for _, bad := range [][]byte{append(append([]byte{}, data...), []byte("{}")...), bytes.Replace(data, []byte(`"schema_version":1`), []byte(`"schema_version":1,"schema_version":1`), 1), bytes.Replace(data, []byte(`"read_max":2`), []byte(`"read_max":2,"read_max":2`), 1), bytes.Replace(data, []byte(`"schema_version":1`), []byte(`"schema_version":1,"path":"anything"`), 1), bytes.Replace(data, []byte(`"release_hold":{"read_max":2,"write":2}`), []byte(`"release_hold":{}`), 1)} {
+	for _, bad := range [][]byte{append(append([]byte{}, data...), []byte("{}")...), bytes.Replace(data, []byte(`"schema_version":1`), []byte(`"schema_version":1,"schema_version":1`), 1), bytes.Replace(data, []byte(`"read_max":2`), []byte(`"read_max":2,"read_max":2`), 1), bytes.Replace(data, []byte(`"schema_version":1`), []byte(`"schema_version":1,"path":"anything"`), 1), bytes.Replace(data, []byte(`"release_hold":{"read_max":3,"write":2}`), []byte(`"release_hold":{}`), 1)} {
 		if _, err := Decode(bad); err == nil {
 			t.Fatal("ambiguous/incomplete contract accepted")
 		}
@@ -100,5 +100,23 @@ func TestManagedCapabilityDoesNotPretendLegacyBinaryCanBeSupervised(t *testing.T
 		if candidate.Validate() == nil {
 			t.Fatal("unknown managed protocol accepted")
 		}
+	}
+}
+
+func TestInventoryFormatsRefuseCheckpointOnlyFallback(t *testing.T) {
+	current := Current("inventory")
+	required := current
+	required.Formats.Configuration.Write = 4
+	required.Formats.Spool.Write = 6
+	required.Formats.DesiredState.Write = 3
+	required.Formats.ReleaseHold.Write = 3
+	checkpoint := current
+	checkpoint.Formats.Configuration.ReadMax = 3
+	checkpoint.Formats.Spool.ReadMax = 5
+	if CheckReplacement(required, checkpoint) == nil {
+		t.Fatal("checkpoint-only reader accepted inventory/node-counter writes")
+	}
+	if _, err := WithRequiredWriter(current, required); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -10,6 +10,10 @@ import (
 )
 
 type Counter struct {
+	// Kind=node is a per-core aggregate, never a user quota delta. It is sent
+	// only to peers negotiating multi_core_supported. Empty keeps the v1 shape.
+	Kind          string    `json:"kind,omitempty"`
+	Core          string    `json:"core,omitempty"`
 	CoreEpoch     string    `json:"core_epoch"`
 	Revision      int64     `json:"revision"`
 	CredentialID  string    `json:"credential_id"`
@@ -59,10 +63,20 @@ func validateCounters(counters []Counter) error {
 	seen := map[string]bool{}
 	for index := range counters {
 		counter := &counters[index]
+		if counter.Kind != "" && counter.Kind != "node" {
+			return errors.New("invalid traffic counter kind")
+		}
+		if counter.Kind == "node" {
+			if (counter.Core != "xray" && counter.Core != "sing-box") || counter.CredentialID != "node" || counter.UserID != "node" || counter.DeviceID != "node" || counter.Protocol != "" {
+				return errors.New("invalid node traffic counter")
+			}
+		} else if counter.Core != "" {
+			return errors.New("unexpected account core")
+		}
 		if !validID(counter.CoreEpoch) || !validID(counter.CredentialID) || !validID(counter.UserID) || !validID(counter.DeviceID) || counter.Revision < 1 || counter.UploadBytes < 0 || counter.DownloadBytes < 0 || counter.ObservedAt.IsZero() || counter.ObservedAt.Year() < 2000 || counter.ObservedAt.Year() > 9999 {
 			return errors.New("invalid cumulative traffic counter")
 		}
-		if !strings.Contains("|http|socks5|shadowsocks|vless|trojan|wireguard|hysteria2|tuic|tun|", "|"+counter.Protocol+"|") {
+		if counter.Kind != "node" && !strings.Contains("|http|socks5|shadowsocks|vless|trojan|wireguard|hysteria2|tuic|tun|", "|"+counter.Protocol+"|") {
 			return errors.New("invalid traffic protocol")
 		}
 		key := counter.CoreEpoch + ":" + counter.CredentialID

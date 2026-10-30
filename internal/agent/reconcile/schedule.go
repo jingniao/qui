@@ -11,7 +11,7 @@ import (
 func (r *Reconciler) Refresh(ctx context.Context) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.coreUpdateHold || r.controlOnly {
+	if r.anyCoreHold() || r.controlOnly {
 		return false, core.ErrReleaseRecovery
 	}
 	if r.manifest.Revision == 0 {

@@ -34,13 +34,15 @@ message EnrollResponse {
   bytes ca_pem = 3;
   google.protobuf.Timestamp expires_at = 4;
 }
-message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; bool device_gate_supported = 9; bool tcp_probe_supported = 10; }
+message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; bool device_gate_supported = 9; bool tcp_probe_supported = 10; bool multi_core_supported = 11; bool node_traffic_supported = 12; }
 message ProtocolCapability { string protocol = 1; bool inbound = 2; bool outbound = 3; bool tcp = 4; bool udp = 5; }
 // Fields 4-15 are former patched-core capabilities, except field 9 which v1.1
 // also uses for the additive address observation contract (version 2). Device
 // gates require the explicit field 17 and a negotiated Welcome; old peers
 // continue to see no admission or ledger capability.
-message Capabilities { string core_name = 1; string core_version = 2; repeated ProtocolCapability protocols = 3; bool connection_admission_supported = 4; bool connection_ledger_supported = 5; bool connection_generation_supported = 6; bool connection_fence_supported = 7; bool connection_observation_supported = 8; int32 observation_contract_version = 9; bool domain_bytes_supported = 10; bool egress_envelope_supported = 11; int32 egress_envelope_version = 12; bool udp_per_target_observed = 13; int32 max_egress_hops = 14; string observation_edition = 15; bool singbox_user_stats = 16; bool device_gate_supported = 17; bool forward_inbound_supported = 18; HostInfo host = 19; bool tuning_supported = 20; }
+message Capabilities { string core_name = 1; string core_version = 2; repeated ProtocolCapability protocols = 3; bool connection_admission_supported = 4; bool connection_ledger_supported = 5; bool connection_generation_supported = 6; bool connection_fence_supported = 7; bool connection_observation_supported = 8; int32 observation_contract_version = 9; bool domain_bytes_supported = 10; bool egress_envelope_supported = 11; int32 egress_envelope_version = 12; bool udp_per_target_observed = 13; int32 max_egress_hops = 14; string observation_edition = 15; bool singbox_user_stats = 16; bool device_gate_supported = 17; bool forward_inbound_supported = 18; HostInfo host = 19; bool tuning_supported = 20; repeated CoreCapability cores = 21; bool multi_core_supported = 22; }
+message CoreCapability { string name = 1; string version = 2; repeated ProtocolCapability protocols = 3; bool singbox_user_stats = 4; bool forward_inbound_supported = 5; bool device_gate_supported = 6; optional bool healthy = 7; int32 observation_contract_version = 8; }
+message CoreStatus { string name = 1; bool healthy = 2; string error = 3; google.protobuf.Timestamp started_at = 4; TrafficSourceStatus traffic_source_status = 5; }
 message HostInfo {
   string cpu_model = 1;
   int32 cpu_cores = 2;
@@ -84,6 +86,7 @@ message Heartbeat {
   optional uint64 swap_used_bytes = 30;
   optional uint64 disk_used_bytes = 31;
   map<string,string> tuning_current = 32;
+  repeated CoreStatus cores = 33;
 }
 message InterfaceCounters {
   string name = 1;
@@ -175,17 +178,18 @@ message AgentMessage {
   uint64 sequence = 3;
   google.protobuf.Timestamp timestamp = 4;
   int64 revision = 5;
-  oneof payload { Hello hello = 10; Heartbeat heartbeat = 11; Capabilities capabilities = 12; ApplyResult apply_result = 13; OutboundHealthBatch outbound_health = 14; AccessBatch access_batch = 15; TrafficBatch traffic_batch = 16; FinalUsageBatch final_usage_batch = 17; RuntimeSourceBatch runtime_source_batch = 18; BudgetRetirementResult budget_retirement_result = 19; CoreUpdateResult core_update_result = 20; AgentUpdateResult agent_update_result = 21; ConnectionStatus connection_status = 22; HealthCheckResult health_check_result = 23; ObservationBatch observation_batch = 24; EgressProofBatch egress_proof_batch = 25; TCPProbeResult tcp_probe_result = 26; TuningResult tuning_result = 27; }
+  oneof payload { Hello hello = 10; Heartbeat heartbeat = 11; Capabilities capabilities = 12; ApplyResult apply_result = 13; OutboundHealthBatch outbound_health = 14; AccessBatch access_batch = 15; TrafficBatch traffic_batch = 16; FinalUsageBatch final_usage_batch = 17; RuntimeSourceBatch runtime_source_batch = 18; BudgetRetirementResult budget_retirement_result = 19; CoreUpdateResult core_update_result = 20; AgentUpdateResult agent_update_result = 21; ConnectionStatus connection_status = 22; HealthCheckResult health_check_result = 23; ObservationBatch observation_batch = 24; EgressProofBatch egress_proof_batch = 25; TCPProbeResult tcp_probe_result = 26; TuningResult tuning_result = 27; RemoveCoreResult remove_core_result = 28; }
 }
 message ObservationBatch { bytes batch_json = 1; }
 message EgressProofBatch { bytes proof_json = 1; }
-message ConnectionStatus { bytes snapshot_json = 1; }
-message Welcome { uint64 last_accepted_sequence = 1; uint32 heartbeat_interval_seconds = 2; bool final_usage_supported = 3; bool runtime_source_supported = 4; bool budget_retirement_supported = 5; bool core_update_supported = 6; bool agent_update_supported = 7; bool agent_recovery_supported = 8; bool connection_observation_supported = 9; bool health_check_supported = 10; bool core_restart_supported = 11; string node_ca_migration_plan_digest = 12; string node_ca_reconfirmation_plan_digest = 13; bool connection_observation_bytes_supported = 14; bool egress_envelope_supported = 15; int32 observation_contract_version = 16; int32 egress_envelope_version = 17; int32 max_egress_hops = 18; bool device_gate_supported = 19; }
+message CoreConnectionStatus { string name = 1; bytes snapshot_json = 2; }
+message ConnectionStatus { bytes snapshot_json = 1; repeated CoreConnectionStatus cores = 2; }
+message Welcome { uint64 last_accepted_sequence = 1; uint32 heartbeat_interval_seconds = 2; bool final_usage_supported = 3; bool runtime_source_supported = 4; bool budget_retirement_supported = 5; bool core_update_supported = 6; bool agent_update_supported = 7; bool agent_recovery_supported = 8; bool connection_observation_supported = 9; bool health_check_supported = 10; bool core_restart_supported = 11; string node_ca_migration_plan_digest = 12; string node_ca_reconfirmation_plan_digest = 13; bool connection_observation_bytes_supported = 14; bool egress_envelope_supported = 15; int32 observation_contract_version = 16; int32 egress_envelope_version = 17; int32 max_egress_hops = 18; bool device_gate_supported = 19; bool multi_core_supported = 20; bool node_traffic_supported = 21; }
 message DeviceGateCommand { bytes request_json = 1; }
 message AgentUpdateCommand { bytes request_json = 1; }
 message AgentUpdateResult { bytes result_json = 1; }
-message CoreUpdateCommand { bytes request_json = 1; }
-message CoreUpdateResult { bytes result_json = 1; }
+message CoreUpdateCommand { bytes request_json = 1; string component = 2; }
+message CoreUpdateResult { bytes result_json = 1; string component = 2; }
 message BudgetRetirementCommand { bytes request_json = 1; }
 message BudgetRetirementResult { string request_id = 1; bool success = 2; string code = 3; bytes receipt_json = 4; }
 message Ack { uint64 agent_sequence = 1; string access_batch_id = 2; string traffic_batch_id = 3; string final_usage_epoch = 4; string runtime_source_epoch = 5; string observation_core_epoch = 6; uint64 observation_to_sequence = 7; string egress_proof_id = 8; }
@@ -194,18 +198,20 @@ message FinalUsageBatch { bytes usage_json = 1; }
 message AccessBatch { bytes batch_json = 1; }
 message TrafficBatch { bytes batch_json = 1; }
 message ApplyCommand { bytes desired_state_json = 1; }
-message ApplyResult { int64 revision = 1; bool success = 2; bool rolled_back = 3; string code = 4; string command_id = 5; bytes final_usage_json = 6; }
+message ApplyResult { int64 revision = 1; bool success = 2; bool rolled_back = 3; string code = 4; string command_id = 5; bytes final_usage_json = 6; string core = 7; }
 message OutboundHealth { string outbound_id = 1; bool healthy = 2; int64 latency_ms = 3; google.protobuf.Timestamp checked_at = 4; }
 message OutboundHealthBatch { repeated OutboundHealth items = 1; }
-message RollbackCommand { string command_id = 1; int64 revision = 2; bool restart_current = 3; }
+message RollbackCommand { string command_id = 1; int64 revision = 2; bool restart_current = 3; string core = 4; }
 message ServerMessage {
   string node_id = 1;
   string message_id = 2;
   uint64 sequence = 3;
   google.protobuf.Timestamp timestamp = 4;
   int64 revision = 5;
-  oneof payload { Welcome welcome = 10; Ack ack = 11; ApplyCommand apply_command = 12; RollbackCommand rollback_command = 13; BudgetRetirementCommand budget_retirement_command = 14; CoreUpdateCommand core_update_command = 15; AgentUpdateCommand agent_update_command = 16; HealthCheckCommand health_check_command = 17; DeviceGateCommand device_gate_command = 18; TCPProbeCommand tcp_probe_command = 19; TuningCommand tuning_command = 20; }
+  oneof payload { Welcome welcome = 10; Ack ack = 11; ApplyCommand apply_command = 12; RollbackCommand rollback_command = 13; BudgetRetirementCommand budget_retirement_command = 14; CoreUpdateCommand core_update_command = 15; AgentUpdateCommand agent_update_command = 16; HealthCheckCommand health_check_command = 17; DeviceGateCommand device_gate_command = 18; TCPProbeCommand tcp_probe_command = 19; TuningCommand tuning_command = 20; RemoveCoreCommand remove_core_command = 21; }
 }
+message RemoveCoreCommand { string id = 1; string component = 2; int64 revision = 3; }
+message RemoveCoreResult { string id = 1; string component = 2; int64 revision = 3; bool success = 4; string code = 5; }
 message TuningCommand { string request_id = 1; map<string,string> settings = 2; bool clear = 3; }
 message TuningKeyResult { string key = 1; string value = 2; bool applied = 3; string error = 4; }
 // status is applied, cleared, or failed. A failed transaction rolls back all keys.
@@ -218,5 +224,5 @@ message TCPProbeResult { string id = 1; uint32 attempted = 2; uint32 lost = 3; o
 
 
 
-message HealthCheckCommand { string id = 1; int64 revision = 2; google.protobuf.Timestamp deadline = 3; }
-message HealthCheckResult { string id = 1; int64 revision = 2; bool healthy = 3; string code = 4; google.protobuf.Timestamp observed_at = 5; }
+message HealthCheckCommand { string id = 1; int64 revision = 2; google.protobuf.Timestamp deadline = 3; string core = 4; }
+message HealthCheckResult { string id = 1; int64 revision = 2; bool healthy = 3; string code = 4; google.protobuf.Timestamp observed_at = 5; string core = 6; }

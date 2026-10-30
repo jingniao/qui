@@ -9,7 +9,7 @@ import (
 )
 
 func performHealthCheck(ctx context.Context, command *pb.HealthCheckCommand, revision int64, source any, supported bool) *pb.HealthCheckResult {
-	result := &pb.HealthCheckResult{Id: command.Id, Revision: command.Revision, Code: "unsupported", ObservedAt: timestamppb.Now()}
+	result := &pb.HealthCheckResult{Id: command.Id, Core: command.Core, Revision: command.Revision, Code: "unsupported", ObservedAt: timestamppb.Now()}
 	if !supported {
 		return result
 	}
@@ -20,6 +20,13 @@ func performHealthCheck(ctx context.Context, command *pb.HealthCheckCommand, rev
 	if command.Revision != revision {
 		result.Code = "revision_changed"
 		return result
+	}
+	if command.Core != "" {
+		selector, ok := source.(interface{ Component(string) core.Runtime })
+		if !ok || selector.Component(command.Core) == nil {
+			return result
+		}
+		source = selector.Component(command.Core)
 	}
 	health, ok := source.(interface {
 		Health(context.Context) (core.HealthStatus, error)

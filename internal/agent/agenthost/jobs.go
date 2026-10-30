@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"proxycontrol/internal/agent/configuration"
 	"runtime"
 	"time"
 
@@ -27,7 +28,7 @@ func jobsOptions(directory, nodeID string, key []byte) agentjobs.Options {
 }
 
 func openJobs(configPath string) (*agentjobs.Store, config.Agent, error) {
-	c, err := config.LoadAgent(configPath)
+	c, err := configuration.LoadAgent(configPath)
 	if err != nil {
 		return nil, c, err
 	}
@@ -272,7 +273,7 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	reject := func(code string) (release.UpdateResult, error) {
 		return jobResult(request, "rejected", code, updater.Image{}), nil
 	}
-	c, err := config.LoadAgent(r.configPath)
+	c, err := configuration.LoadAgent(r.configPath)
 	if err != nil {
 		return reject("trust_failed")
 	}

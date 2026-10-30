@@ -22,6 +22,7 @@ import (
 	"proxycontrol/internal/agent/agenthost"
 	"proxycontrol/internal/agent/capability"
 	"proxycontrol/internal/agent/collector"
+	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/core/singbox"
 	"proxycontrol/internal/agent/core/xray"
@@ -236,6 +237,16 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		return err
 	}
 	defer func() { connection.Close() }()
+	configuration.Remember(c)
+	inventory, err := configuration.ReadInventory(c.DataDirectory, state.NodeID)
+	if err != nil {
+		return err
+	}
+	configuredCores, err := inventory.Merge(c)
+	if err != nil {
+		return err
+	}
+	c.CoreName, c.CorePath = configuredCores[0].Name, configuredCores[0].Path
 	installation, err := openCoreInstallation(ctx, c, state.NodeID)
 	if err != nil {
 		return fmt.Errorf("load installed core release: %w", err)
@@ -245,12 +256,50 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		c.CorePath = installation.path
 	}
 	var adapter core.Runtime
+	if err := recoverCoreInventory(c.DataDirectory, state.NodeID, inventory, configuredCores, coreRuntime); err != nil {
+		return err
+	}
+	extraInstallations := map[string]*coreInstallation{}
+	extraConfigs := map[string]config.Agent{}
+	if NewRuntime == nil {
+
+		for i, entry := range configuredCores {
+			if i == 0 {
+				continue
+			}
+			cfg := c
+			cfg.CoreName, cfg.CorePath = entry.Name, entry.Path
+			installed, err := openCoreInstallation(ctx, cfg, state.NodeID)
+			if err != nil {
+				return err
+			}
+			extraInstallations[entry.Name] = installed
+			extraConfigs[entry.Name] = cfg
+			defer installed.Close()
+			if installed != nil && installed.path != "" {
+				configuredCores[i].Path = installed.path
+			}
+		}
+	}
 	if NewRuntime != nil {
 		adapter = NewRuntime(state.NodeID, filepath.Join(c.DataDirectory, "runtime"))
-	} else if c.CoreName == "sing-box" {
-		adapter = &singbox.Adapter{NodeID: state.NodeID, Path: c.CorePath, Directory: filepath.Join(c.DataDirectory, "runtime")}
 	} else {
-		adapter = &xray.Adapter{NodeID: state.NodeID, Path: c.CorePath, Directory: filepath.Join(c.DataDirectory, "runtime")}
+		runtimes := []core.Runtime{}
+		for _, entry := range configuredCores {
+			directory := filepath.Join(c.DataDirectory, "runtime", entry.Name)
+			if entry.Name == c.CoreName {
+				entry.Path = c.CorePath
+			}
+			if entry.Name == "sing-box" {
+				runtimes = append(runtimes, &singbox.Adapter{NodeID: state.NodeID, Path: entry.Path, Directory: directory})
+			} else {
+				runtimes = append(runtimes, &xray.Adapter{NodeID: state.NodeID, Path: entry.Path, Directory: directory})
+			}
+		}
+		adapter, err = core.NewMultiRuntime(runtimes...)
+		if err != nil {
+			return err
+		}
 	}
 	coreClosed := false
 	closeCore := func() {
@@ -289,6 +338,21 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	} else if _, err := storage.ActivateCoreAccountingFormat(c.DataDirectory, state.NodeID, storageContract); err != nil {
 		return err
 	}
+	if NewRuntime == nil && !controlOnly {
+		if requiredStorage.Formats.Configuration.Write < 4 {
+			if err := agenthost.CheckMultiCoreActivation(ctx, c.DataDirectory, state.NodeID, agentVersion); err != nil {
+				return fmt.Errorf("multi-core format cannot be raised safely: %w", err)
+			}
+			if _, err := storage.ActivateCoreInventoryFormats(c.DataDirectory, state.NodeID, storageContract); err != nil {
+				return err
+			}
+		}
+		if NewRuntime == nil {
+			if err := core.MigratePrimaryRuntime(filepath.Join(c.DataDirectory, "runtime"), configuredCores[0].Name); err != nil {
+				return err
+			}
+		}
+	}
 	newManager := reconcile.New
 	if controlOnly {
 		newManager = reconcile.NewControlOnly
@@ -310,6 +374,17 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		manager.PrepareStorage = func(ctx context.Context, desired desiredstate.State) error {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			for _, in := range desired.Inbounds {
+				if in.Core != "" {
+					if err := agenthost.CheckMultiCoreActivation(ctx, c.DataDirectory, state.NodeID, agentVersion); err != nil {
+						return err
+					}
+					if _, err := storage.ActivateCoreInventoryFormats(c.DataDirectory, state.NodeID, storageContract); err != nil {
+						return err
+					}
+					break
+				}
 			}
 			_, err := storage.ActivateSuccessReceiptFormat(c.DataDirectory, state.NodeID, storageContract)
 			return err
@@ -348,6 +423,12 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 			return fmt.Errorf("roll back interrupted core installation: %w", err)
 		}
 		logger.Error("proxy remains stopped pending core exit confirmation; control connection continues")
+	}
+	for name, installed := range extraInstallations {
+		if err := repairCoreInstallation(ctx, extraConfigs[name], installed, manager); err != nil {
+			return fmt.Errorf("repair %s installation: %w", name, err)
+		}
+		installed.Close()
 	}
 	if err := manager.Restore(ctx); err != nil {
 		if !startupRestoreNonFatal(err) {
@@ -501,7 +582,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: capabilities.Snapshot().GetDeviceGateSupported(), BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
+	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{NodeTrafficSupported: true, MultiCoreSupported: capabilities.Snapshot().GetMultiCoreSupported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: capabilities.Snapshot().GetDeviceGateSupported(), BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
 		return err
 	}
 	welcome, err := receive()
@@ -534,6 +615,13 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 	}
 	healthResults := []*pb.HealthCheckResult{}
+	removalResults := updates.pendingRemovals()
+	removeCore := func(message *pb.ServerMessage) {
+		command := message.GetRemoveCoreCommand()
+		if message.NodeId == state.NodeID && command != nil {
+			removalResults = append(removalResults, updates.removeCore(ctx, command))
+		}
+	}
 	tuningReplies := make(chan *pb.TuningResult, 1)
 	tuningBusy := false
 	tuningCommand := func(message *pb.ServerMessage) {
@@ -630,7 +718,13 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	rollback := func(command *pb.RollbackCommand) {
 		var success bool
 		var code string
-		if command.RestartCurrent {
+		if command.Core != "" {
+			if !welcome.GetWelcome().MultiCoreSupported || !command.RestartCurrent || command.Revision != manager.Current() {
+				code = "core_scope_unsupported"
+			} else {
+				success, code, _ = manager.RestartCoreCommand(ctx, command.CommandId, command.Revision, command.Core)
+			}
+		} else if command.RestartCurrent {
 			if welcome.GetWelcome().CoreRestartSupported {
 				success, code, _ = manager.RestartCommand(ctx, command.CommandId, command.Revision)
 			} else {
@@ -639,7 +733,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		} else {
 			success, code, _ = manager.RollbackCommand(ctx, command.CommandId, command.Revision)
 		}
-		results = append(results, &pb.ApplyResult{Revision: command.Revision, CommandId: command.CommandId, Success: success, Code: code})
+		results = append(results, &pb.ApplyResult{Revision: command.Revision, CommandId: command.CommandId, Core: command.Core, Success: success, Code: code})
 	}
 	send := func(message *pb.AgentMessage) error {
 		accessBatchID := ""
@@ -681,6 +775,10 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			}
 			if response.GetTcpProbeCommand() != nil {
 				probe(response)
+				continue
+			}
+			if response.GetRemoveCoreCommand() != nil {
+				removeCore(response)
 				continue
 			}
 			if response.GetTuningCommand() != nil {
@@ -762,6 +860,18 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		return errors.New("invalid heartbeat interval")
 	}
 	for ctx.Err() == nil {
+		for len(removalResults) > 0 {
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_RemoveCoreResult{RemoveCoreResult: removalResults[0]}}); err != nil {
+				return err
+			}
+			if err := updates.acknowledgeRemoval(removalResults[0]); err != nil {
+				return err
+			}
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
+				return err
+			}
+			removalResults = removalResults[1:]
+		}
 		for len(healthResults) > 0 {
 			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_HealthCheckResult{HealthCheckResult: healthResults[0]}}); err != nil {
 				return err
@@ -821,6 +931,11 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		heartbeat := sampler.Heartbeat()
 		heartbeat.SpoolStatus = sampleSpoolStatus(ctx, telemetryQueue)
+		if source, ok := healthSource.(interface {
+			CoreStatuses(context.Context) []*pb.CoreStatus
+		}); ok {
+			heartbeat.Cores = source.CoreStatuses(ctx)
+		}
 		heartbeat.CurrentRevision = manager.Current()
 		heartbeat.SuccessfulRevision = manager.Current()
 		if source, ok := healthSource.(interface {
@@ -837,6 +952,9 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 					}
 				}
 			}
+		}
+		if len(heartbeat.Cores) == 0 && capabilities.Snapshot().CoreName != "" {
+			heartbeat.Cores = []*pb.CoreStatus{{Name: capabilities.Snapshot().CoreName, Healthy: heartbeat.GetCoreHealthy(), Error: heartbeat.CoreError, TrafficSourceStatus: heartbeat.TrafficSourceStatus}}
 		}
 		var connectionSample []byte
 		// The panel keeps live counts for its in-memory connection view only; the
@@ -884,8 +1002,12 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Heartbeat{Heartbeat: heartbeat}}); err != nil {
 			return err
 		}
-		if len(connectionSample) > 0 {
-			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_ConnectionStatus{ConnectionStatus: &pb.ConnectionStatus{SnapshotJson: connectionSample}}}); err != nil {
+		connectionStatus := &pb.ConnectionStatus{SnapshotJson: connectionSample}
+		if welcome.GetWelcome().MultiCoreSupported {
+			connectionStatus.Cores = coreConnectionStatuses(ctx, healthSource, heartbeat.CurrentRevision, welcome.GetWelcome().DeviceGateSupported)
+		}
+		if len(connectionSample) > 0 || len(connectionStatus.Cores) > 0 {
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_ConnectionStatus{ConnectionStatus: connectionStatus}}); err != nil {
 				return err
 			}
 		}
@@ -901,7 +1023,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		if telemetryQueue != nil {
 			for count := 0; count < 8; count++ {
-				batch, retried, err := telemetryQueue.PendingTrafficRetry(ctx)
+				batch, retried, err := telemetryQueue.PendingTrafficForPeer(ctx, welcome.GetWelcome().NodeTrafficSupported)
 				if err != nil {
 					logger.Error("traffic queue read failed")
 					break
@@ -985,6 +1107,10 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			}
 			if received.message.GetTcpProbeCommand() != nil {
 				probe(received.message)
+				continue
+			}
+			if received.message.GetRemoveCoreCommand() != nil {
+				removeCore(received.message)
 				continue
 			}
 			if received.message.GetTuningCommand() != nil {

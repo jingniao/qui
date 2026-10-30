@@ -28,6 +28,7 @@ import (
 var ErrTelemetryUnavailable = errors.New("sing-box native account/connection telemetry has not been adapted for this build")
 
 type Adapter struct {
+	Ports                  *core.PortAllocator
 	startedAt              time.Time
 	connectionObserver     observer.Store
 	deviceGate             gate.Lease
@@ -95,6 +96,11 @@ func (a *Adapter) applyUpstreamCapabilities(capabilities *pb.Capabilities) {
 	a.nativeWireGuardInbound = hasWireGuardInbound(capabilities)
 }
 func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.RenderedConfig, error) {
+	for _, in := range state.Inbounds {
+		if in.Core != "" && in.Core != "sing-box" {
+			return core.RenderedConfig{}, errors.New("inbound assigned to another core")
+		}
+	}
 	if err := state.Validate(); err != nil {
 		return core.RenderedConfig{}, err
 	}
@@ -171,6 +177,9 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 			}
 		}
 	}
+	if a.Ports != nil {
+		options.privatePorts = a.Ports.Ports()
+	}
 	return renderWithOptions(ctx, state, at, options)
 }
 
@@ -178,6 +187,9 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 // reserved by this render but not yet started. Apply still validates and rolls
 // back if another process takes the port between rendering and core startup.
 func (a *Adapter) privatePortLocked(state desiredstate.State) (int, error) {
+	if a.Ports != nil {
+		return a.Ports.Allocate()
+	}
 	for attempt := 0; attempt < 32; attempt++ {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -433,7 +445,7 @@ func (a *Adapter) stopLocked() error {
 		return a.confirmCoreExitLocked()
 	default:
 	}
-	if a.hooks.TrafficSink != nil && a.current.UserStatsEndpoint != "" {
+	if a.hooks.TrafficSink != nil && (a.current.StatsEndpoint != "" || a.current.UserStatsEndpoint != "") {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		err := a.sampleTrafficLocked(ctx)
 		cancel()

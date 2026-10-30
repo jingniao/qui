@@ -12,6 +12,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"proxycontrol/internal/agent/configuration"
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/reconcile"
 	"proxycontrol/internal/agent/updater"
 	"proxycontrol/internal/platform/config"
@@ -25,11 +27,13 @@ import (
 // expected executable, checks its own version and switches under the existing
 // supervised rollback.
 type coreUpdates struct {
-	cfg       config.Agent
-	nodeID    string
-	component string
-	manager   *reconcile.Reconciler
-	source    *updater.CoreSource
+	makeRuntime func(string, string, string, string) core.Runtime
+	children    map[string]*coreUpdates
+	cfg         config.Agent
+	nodeID      string
+	component   string
+	manager     *reconcile.Reconciler
+	source      *updater.CoreSource
 	// capabilities is the node's shared capability holder and detect re-reads
 	// the installed core, so a committed or rolled-back image immediately
 	// replaces what every later session reports.
@@ -65,7 +69,27 @@ func newCoreUpdates(ctx context.Context, c config.Agent, nodeID string, manager 
 	}
 	workCtx, cancel := context.WithCancel(ctx)
 	w := &coreUpdates{cfg: c, nodeID: nodeID, component: coreComponent(c), manager: manager, source: updater.NewCoreSource(), capabilities: capabilities, detect: detect, requests: make(chan release.CoreUpdateRequest, 1), results: make(chan *pb.CoreUpdateResult, 1), cancel: cancel, done: make(chan struct{})}
+	w.makeRuntime = coreRuntime
 	go w.run(workCtx)
+	if multi, ok := manager.Adapter.(*core.MultiRuntime); ok {
+		w.children = map[string]*coreUpdates{}
+		for _, name := range []string{"xray", "sing-box"} {
+			entry := configuration.Core{Name: name}
+			if runtime, ok := multi.Component(name).(core.BinaryRuntime); ok {
+				entry.Path = runtime.ExecutablePath()
+			}
+			if entry.Name == w.component {
+				continue
+			}
+			childCfg := c
+			childCfg.CoreName, childCfg.CorePath = entry.Name, entry.Path
+			childCtx, childCancel := context.WithCancel(ctx)
+			child := &coreUpdates{cfg: childCfg, nodeID: nodeID, component: entry.Name, manager: manager, source: updater.NewCoreSource(), capabilities: capabilities, detect: detect, requests: make(chan release.CoreUpdateRequest, 1), results: make(chan *pb.CoreUpdateResult, 1), cancel: childCancel, done: make(chan struct{})}
+			child.makeRuntime = coreRuntime
+			w.children[entry.Name] = child
+			go child.run(childCtx)
+		}
+	}
 	return w, nil
 }
 
@@ -83,7 +107,7 @@ func (w *coreUpdates) run(ctx context.Context) {
 				}
 				data, _ := json.Marshal(result)
 				select {
-				case w.results <- &pb.CoreUpdateResult{ResultJson: data}:
+				case w.results <- &pb.CoreUpdateResult{ResultJson: data, Component: request.Component}:
 				case <-ctx.Done():
 				}
 			}
@@ -104,6 +128,17 @@ func coreUpdateChangedTheCore(status string) bool {
 // in which the updates completed. The list outlives the session that sends it,
 // so a result stays until the panel acknowledges it.
 func (w *coreUpdates) collect() {
+	for _, child := range w.children {
+		child.collect()
+		for {
+			r := child.next()
+			if r == nil {
+				break
+			}
+			w.push(r)
+			child.acknowledged()
+		}
+	}
 	for {
 		select {
 		case result := <-w.results:
@@ -200,6 +235,9 @@ func (w *coreUpdates) refreshCapabilities(ctx context.Context) {
 
 func (w *coreUpdates) Close() {
 	if w != nil {
+		for _, child := range w.children {
+			child.Close()
+		}
 		w.cancel()
 		<-w.done
 	}
@@ -209,6 +247,12 @@ func (w *coreUpdates) submit(command *pb.CoreUpdateCommand) error {
 	request, err := release.DecodeCoreUpdateRequest(command.RequestJson)
 	if err != nil || request.NodeID != w.nodeID {
 		return release.ErrUpdate
+	}
+	if command.Component != "" && command.Component != request.Component {
+		return release.ErrUpdate
+	}
+	if child := w.children[request.Component]; child != nil {
+		return child.submit(command)
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -244,10 +288,32 @@ func (w *coreUpdates) execute(parent context.Context, request release.CoreUpdate
 	if request.Validate() != nil || request.NodeID != w.nodeID {
 		return release.UpdateResult{}, release.ErrUpdate
 	}
+	if inventory, err := configuration.ReadInventory(w.cfg.DataDirectory, w.nodeID); err != nil {
+		return w.finish(request, "failed_closed", "history_invalid", updater.Installation{})
+	} else if entry := inventory.Entries[request.Component]; entry.RequestID == request.ID {
+		if entry.Disabled || entry.Revision != request.Revision || entry.Sequence != request.Sequence || entry.Digest != request.SHA256 || entry.Version != request.Version || entry.URL != request.URL {
+			return w.finish(request, "rejected", "scope_mismatch", updater.Installation{})
+		}
+		return w.finish(request, "success", "success", updater.Installation{Current: updater.Image{SHA256: entry.InstalledDigest, Version: entry.Version, Sequence: entry.Sequence}})
+	}
+	if multi, ok := w.manager.Adapter.(*core.MultiRuntime); ok && multi.Component(request.Component) == nil {
+		return w.addCore(ctx, request)
+	}
+	if request.Component != w.component {
+		cfg := w.cfg
+		cfg.CoreName = request.Component
+		if multi, ok := w.manager.Adapter.(*core.MultiRuntime); ok {
+			if b, ok := multi.Component(request.Component).(core.BinaryRuntime); ok {
+				cfg.CorePath = b.ExecutablePath()
+			}
+		}
+		worker := &coreUpdates{cfg: cfg, nodeID: w.nodeID, component: request.Component, manager: w.manager, source: w.source, makeRuntime: w.makeRuntime}
+		return worker.execute(ctx, request)
+	}
 	if request.Component != w.component || request.Revision != w.manager.Current() {
 		return w.finish(request, "rejected", "scope_mismatch", updater.Installation{})
 	}
-	if w.manager.CoreUpdateHeld() {
+	if w.manager.CoreComponentHeld(w.component) {
 		return w.finish(request, "failed_closed", "installation_failed", updater.Installation{})
 	}
 	history, err := openOrCreateCoreHistory(w.cfg, w.nodeID)
@@ -262,7 +328,12 @@ func (w *coreUpdates) execute(parent context.Context, request release.CoreUpdate
 	if exists && coreInstallationPending(state) {
 		return w.finish(request, "failed_closed", "installation_failed", state)
 	}
-	extracted, err := w.source.FetchCore(ctx, filepath.Join(w.cfg.DataDirectory, "releases", "core-staging"), w.component, request.URL, request.SHA256)
+	staging := filepath.Join(w.cfg.DataDirectory, "releases", "core-staging")
+	if _, ok := w.manager.Adapter.(*core.MultiRuntime); ok {
+		staging = filepath.Join(staging, w.component)
+		defer os.Remove(staging)
+	}
+	extracted, err := w.source.FetchCore(ctx, staging, w.component, request.URL, request.SHA256)
 	if err != nil {
 		return w.finish(request, "rejected", coreDownloadCode(err), updater.Installation{})
 	}
@@ -275,7 +346,7 @@ func (w *coreUpdates) execute(parent context.Context, request release.CoreUpdate
 	installer := &updater.Installer{History: history, Directory: filepath.Join(w.cfg.DataDirectory, "releases", "installed")}
 	var applied updater.Installation
 	rejected := ""
-	err = w.manager.WithCoreUpdate(ctx, request.Revision, func(lease *reconcile.CoreUpdateLease) error {
+	err = w.manager.WithCoreComponentUpdate(ctx, request.Revision, w.component, func(lease *reconcile.CoreUpdateLease) error {
 		detected, detectErr := lease.DetectVersion(ctx, extracted)
 		if detectErr != nil {
 			rejected = "preflight_failed"

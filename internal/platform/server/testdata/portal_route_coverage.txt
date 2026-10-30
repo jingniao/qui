@@ -120,6 +120,7 @@ POST /api/v1/backups/{id}/restore
 POST /api/v1/backups/{id}/restore-preview
 POST /api/v1/backups/{id}/verify
 POST /api/v1/canvas-schemes
+POST /api/v1/canvas-schemes/{id}/plan
 POST /api/v1/canvas-schemes/{id}/publish
 POST /api/v1/core-updates
 POST /api/v1/core-updates/{id}/clear

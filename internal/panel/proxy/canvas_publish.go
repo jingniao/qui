@@ -92,15 +92,16 @@ type canvasEntry struct {
 
 // canvasPlan is the complete translation of one drawing.
 type canvasPlan struct {
-	forwards  []InboundInput
-	prefix    string
-	edges     []*canvasEdge
-	chains    []canvasChain
-	entries   []canvasEntry
-	inbounds  map[string]bool
-	outbounds map[string]bool
-	chainName map[string]bool
-	nodes     []string
+	forwards           []InboundInput
+	forwardConnections []string
+	prefix             string
+	edges              []*canvasEdge
+	chains             []canvasChain
+	entries            []canvasEntry
+	inbounds           map[string]bool
+	outbounds          map[string]bool
+	chainName          map[string]bool
+	nodes              []string
 }
 
 func (p *canvasPlan) node(nodeID string) {
@@ -181,8 +182,15 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 		}
 		if connection.Type == "port_forward" {
 			source, target := instances[connection.Source], instances[connection.Target]
-			if source.ListenPort == nil || target.TargetPort == nil || (!connection.SupportTCP && !connection.SupportUDP) {
-				return nil, errors.New("端口转发需要源监听端口、目标端口和 TCP/UDP")
+			listenPort, targetPort := connection.ListenPort, connection.TargetPort
+			if listenPort == nil {
+				listenPort = source.ListenPort
+			}
+			if targetPort == nil {
+				targetPort = target.TargetPort
+			}
+			if listenPort == nil || targetPort == nil || (!connection.SupportTCP && !connection.SupportUDP) {
+				return nil, fmt.Errorf("连接 %q：端口转发需要源监听端口、目标端口和 TCP/UDP", connection.ID)
 			}
 			n, err := s.Nodes.Get(ctx, targetNode)
 			if err != nil {
@@ -197,11 +205,29 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 			}
 			digest := sha256.Sum256([]byte(connection.ID + ":" + sourceNode + ":" + targetNode))
 			name := fmt.Sprintf("%sforward %x%s", plan.prefix, digest[:8], canvasInboundSuffix)
-			input := InboundInput{Name: name, NodeID: sourceNode, Protocol: "forward", Listen: "0.0.0.0", Port: *source.ListenPort, Enabled: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: n.PublicIP, Port: *target.TargetPort, Network: network}}}
+			host := connection.TargetHost
+			if host == "" {
+				host = n.PublicIP
+			}
+			input := InboundInput{Name: name, NodeID: sourceNode, Protocol: "forward", Listen: "0.0.0.0", Port: *listenPort, Enabled: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: host, Port: *targetPort, Network: network}}}
 			if err := ValidateInbound(input); err != nil {
 				return nil, err
 			}
+			sourceInfo, err := s.Nodes.Get(ctx, sourceNode)
+			if err != nil {
+				return nil, err
+			}
+			if !sourceInfo.Enabled {
+				return nil, fmt.Errorf("连接 %q：node missing or disabled", connection.ID)
+			}
+			if !sourceInfo.Capabilities.GetForwardInboundSupported() {
+				return nil, fmt.Errorf("连接 %q：node Agent/core does not advertise forward inbound support; upgrade it first", connection.ID)
+			}
+			if err := ValidateCoreProtocol(sourceInfo.Capabilities.GetCoreName(), "forward", true); err != nil {
+				return nil, fmt.Errorf("连接 %q：%w", connection.ID, err)
+			}
 			plan.forwards = append(plan.forwards, input)
+			plan.forwardConnections = append(plan.forwardConnections, connection.ID)
 			plan.inbounds[name] = true
 			plan.node(sourceNode)
 			continue
@@ -212,7 +238,7 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 		}
 		protocol, ok := canvasTunnels[tunnel]
 		if !ok {
-			return nil, fmt.Errorf("隧道协议 %s 暂不支持", tunnel)
+			return nil, fmt.Errorf("连接 %q：隧道协议 %s 暂不支持", connection.ID, tunnel)
 		}
 		if !connection.SupportTCP && !connection.SupportUDP {
 			return nil, fmt.Errorf("连接 %q 至少需要支持 TCP 或 UDP", connection.ID)

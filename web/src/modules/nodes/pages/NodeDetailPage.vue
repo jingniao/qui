@@ -56,7 +56,7 @@ const latestRevision = computed(() => revisions.value.length ? Math.max(...revis
 const tabs = computed(() => [{ key: 'overview', label: '概况' }, { key: 'nodes', label: '节点' }, { key: 'monitoring', label: '监控' }, { key: 'revisions', label: '配置版本' }, ...(isOwner.value ? [{ key: 'settings', label: '设置' }] : [])]);
 const aliases: Record<string, string> = { testing: 'monitoring', tuning: 'settings', config: 'revisions' };
 const activeTab = computed(() => { const raw = typeof route.query.tab === 'string' ? route.query.tab : ''; const key = aliases[raw] || raw; return tabs.value.some(tab => tab.key === key) ? key : 'overview'; });
-function selectTab(tab: string) { void router.replace({ query: { ...route.query, tab } }); }
+function selectTab(tab: string) { if (route.name !== 'NodeDetail') return; void router.replace({ query: { ...route.query, tab } }); }
 const settingsPanel = ref<InstanceType<typeof ServerSettings>>();
 const revisionsPanel = ref<InstanceType<typeof ServerRevisions>>(), enrollment = ref<InstanceType<typeof ServerEnrollment>>(), deletion = ref<InstanceType<typeof ServerDeleteDialog>>();
 async function programs() { await router.replace({ query: { ...route.query, tab: 'settings' } }); await nextTick(); settingsPanel.value?.openCoreUpdates(); document.getElementById('server-programs')?.scrollIntoView({ behavior: 'smooth' }); }
@@ -90,7 +90,9 @@ async function load() {
   } catch (e) { if (current === generation) error.value = (e as Error).message; }
   finally { if (current === generation) loading.value = false; }
 }
-watch(() => route.params.id, () => { generation++; node.value = null; groups.value = []; revisions.value = []; today.value = undefined; month.value = undefined; warnings.value = []; void load(); });
+// The layout keeps a leaving page mounted during its out-in transition while
+// route already describes the next page; ignore routes that are not ours.
+watch(() => route.params.id, () => { if (route.name !== 'NodeDetail') return; generation++; node.value = null; groups.value = []; revisions.value = []; today.value = undefined; month.value = undefined; warnings.value = []; void load(); });
 onMounted(() => { void load(); timer = setInterval(() => { now.value = Date.now(); }, 5000); window.addEventListener('proxy-node-status', load); });
 onUnmounted(() => { generation++; if (timer) clearInterval(timer); window.removeEventListener('proxy-node-status', load); });
 </script>

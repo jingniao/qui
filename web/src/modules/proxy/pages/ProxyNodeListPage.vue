@@ -659,130 +659,7 @@
       </div>
     </AppDialog>
 
-    <!-- Modal 1: Create or Edit Self-Hosted Node -->
-    <AppDialog
-      v-model="openSelfHostedModal"
-      :title="selfHostedForm.inboundId ? '编辑自建节点' : '新建服务器自建节点'"
-      :show-confirm="true"
-      :confirm-text="savingSelfHosted ? '保存中…' : '保存入站配置'"
-      @confirm="saveSelfHostedNode"
-    >
-      <div class="space-y-4 text-sm">
-        <label class="block text-xs font-medium text-ios-label">
-          目标服务器
-          <select
-            v-model="selfHostedForm.serverId"
-            :disabled="!!selfHostedForm.inboundId"
-            class="form-input-base mt-1"
-          >
-            <option v-for="srv in availableServers" :key="srv.id" :value="srv.id">
-              {{ srv.name }} ({{ srv.publicIp || srv.hostname || '未分配 IP' }})
-            </option>
-          </select>
-        </label>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label class="block text-xs font-medium text-ios-label">
-            节点显示别名
-            <input
-              v-model="selfHostedForm.name"
-              placeholder="例如 香港 01 · VLESS 高速入站"
-              required
-              class="form-input-base mt-1"
-            />
-          </label>
-          <label class="block text-xs font-medium text-ios-label">
-            协议类型
-            <select v-model="selfHostedForm.protocol" :disabled="!!selfHostedForm.inboundId" @change="(e:any)=>{const p=e.target.value; if(['trojan','hysteria2','tuic'].includes(p)) selfHostedForm.security='tls'; if(p==='shadowsocks' && !selfHostedForm.method) selfHostedForm.method='chacha20-ietf-poly1305'; if(['wireguard','hysteria2','tuic'].includes(p)) { /* transport hidden */ } }" class="form-input-base mt-1">
-              <option v-for="p in protocolOptions.inbound" :key="p" :value="p">{{ p === 'vless' ? 'VLESS (推荐)' : p }}</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <label class="block text-xs font-medium text-ios-label">
-            监听端口
-            <input
-              v-model.number="selfHostedForm.port"
-              type="number"
-              min="1"
-              max="65535"
-              required
-              class="form-input-base mt-1 font-mono"
-            />
-          </label>
-          <label v-if="!['forward','wireguard','hysteria2','tuic'].includes(selfHostedForm.protocol)" class="block text-xs font-medium text-ios-label">
-            传输方式
-            <select v-model="selfHostedForm.transport" class="form-input-base mt-1">
-              <option value="tcp">TCP (标准)</option>
-              <option value="ws">WebSocket</option>
-              <option value="grpc">gRPC</option>
-            </select>
-          </label>
-          <label v-if="selfHostedForm.protocol !== 'forward'" class="block text-xs font-medium text-ios-label">
-            传输安全
-            <select v-model="selfHostedForm.security" :disabled="['trojan','hysteria2','tuic'].includes(selfHostedForm.protocol)" class="form-input-base mt-1">
-              <option v-if="!['trojan','hysteria2','tuic'].includes(selfHostedForm.protocol) && selfHostedForm.protocol !== 'wireguard'" value="none">None (无加密)</option>
-              <option value="tls">TLS 证书</option>
-            </select>
-          </label>
-        </div>
-
-        <label v-if="selfHostedForm.protocol !== 'forward' && selfHostedForm.transport === 'ws'" class="block text-xs font-medium text-ios-label">
-          WebSocket 路径
-          <input v-model="selfHostedForm.path" class="form-input-base mt-1" />
-        </label>
-        <label v-if="selfHostedForm.protocol !== 'forward' && selfHostedForm.transport === 'grpc'" class="block text-xs font-medium text-ios-label">
-          gRPC 服务名称
-          <input v-model="selfHostedForm.service_name" class="form-input-base mt-1" />
-        </label>
-        <div v-if="selfHostedForm.protocol === 'forward'" class="space-y-2">
-          <label class="block text-xs">转发目标主机<input v-model="forwardTarget.host" class="form-input-base" /></label>
-          <label class="block text-xs">目标端口<input v-model.number="forwardTarget.port" type="number" min="1" max="65535" class="form-input-base" /></label>
-          <label class="block text-xs">网络<select v-model="forwardTarget.network" class="form-input-base"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp,udp">TCP + UDP</option></select></label>
-          <p class="text-xs text-ios-secondary">不验证用户身份，不进入订阅；用户额度、设备限制与用户域名访问记录不适用。</p>
-        </div>
-        <label v-if="selfHostedForm.protocol === 'shadowsocks'" class="block text-xs font-medium text-ios-label">
-          加密方式
-          <select v-model="selfHostedForm.method" class="form-input-base mt-1">
-            <option value="aes-256-gcm">aes-256-gcm</option>
-            <option value="aes-128-gcm">aes-128-gcm</option>
-            <option value="chacha20-ietf-poly1305">chacha20-ietf-poly1305</option>
-            <option value="xchacha20-ietf-poly1305">xchacha20-ietf-poly1305</option>
-          </select>
-        </label>
-
-        <template v-if="selfHostedForm.protocol !== 'forward' && selfHostedForm.security === 'tls'">
-          <label class="block text-xs font-medium text-ios-label">
-            证书 SNI / server_name
-            <input v-model="selfHostedForm.server_name" class="form-input-base mt-1" />
-          </label>
-          <label class="block text-xs font-medium text-ios-label">
-            证书 PEM
-            <textarea v-model="selfHostedForm.certificate_pem" rows="3" :placeholder="selfHostedForm.inboundId ? '留空则保持已保存的证书' : ''" class="form-input-base mt-1 font-mono text-xs"></textarea>
-          </label>
-          <label class="block text-xs font-medium text-ios-label">
-            私钥 PEM
-            <textarea v-model="selfHostedForm.private_key_pem" rows="3" :placeholder="selfHostedForm.inboundId ? '留空则保持已保存的证书' : ''" class="form-input-base mt-1 font-mono text-xs"></textarea>
-          </label>
-          <label class="block text-xs font-medium text-ios-label">
-            CA PEM 可选
-            <textarea v-model="selfHostedForm.trusted_ca_pem" rows="2" class="form-input-base mt-1 font-mono text-xs"></textarea>
-          </label>
-        </template>
-
-        <div class="flex items-center gap-4 text-xs font-medium text-ios-label pt-1">
-          <label class="flex items-center gap-1.5">
-            <input :checked="selfHostedForm.supportTcp" type="checkbox" disabled class="rounded text-ios-blue border-black/20" />
-            <span>支持 TCP</span>
-          </label>
-          <label class="flex items-center gap-1.5">
-            <input :checked="selfHostedForm.supportUdp" type="checkbox" disabled class="rounded text-ios-blue border-black/20" />
-            <span>支持 UDP 转发</span>
-          </label>
-        </div>
-      </div>
-    </AppDialog>
+    <NodeEditorDrawer v-if="openSelfHostedModal" :inbound="editingInbound" @close="openSelfHostedModal = false" @saved="loadData" />
 
     <!-- Modal 2: Import External Node -->
     <AppDialog
@@ -914,7 +791,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, watch } from 'vue';
+import { ref, computed, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { authState } from '../../../app/auth';
 import { userAPI, type ProxyUser } from '../../users/api';
@@ -923,13 +800,14 @@ import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
 import AppDialog from '../../../components/AppDialog.vue';
+import NodeEditorDrawer from '../components/node-editor/NodeEditorDrawer.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import { showToast } from '../../../app/api';
 import { request } from '../../../app/apiClient';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { deploymentAPI } from '../../system/deploymentApi';
-import { proxyAPI, type Inbound, protocolOptions, loadProtocolSupport, choices } from '../api';
+import { proxyAPI, type Inbound, loadProtocolSupport, choices } from '../api';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
 import {
   proxyNodeStore,
@@ -1010,34 +888,6 @@ function openNodeDetail(node: ProxyNodeItem) {
 }
 
 const openSelfHostedModal = ref(false);
-const savingSelfHosted = ref(false);
-const selfHostedForm = reactive({
-  serverId: '',
-  serverName: '',
-  serverAddress: '',
-  inboundId: '',
-  name: '',
-  protocol: 'vless',
-  port: 443,
-  transport: 'tcp',
-  security: 'none',
-  server_name: '',
-  path: '',
-  service_name: '',
-  method: 'chacha20-ietf-poly1305',
-  certificate_pem: '',
-  private_key_pem: '',
-  trusted_ca_pem: '',
-  supportTcp: true,
-  supportUdp: true
-});
-const forwardTarget = reactive({host:'',port:443,network:'tcp'});
-function applyForwardSettings(settings:Record<string,unknown>,protocol:string){
-  if(protocol!=='forward')return;
-  for(const key of Object.keys(settings))delete settings[key];
-  settings.forward={...forwardTarget};
-}
-
 const openImportNodeModal = ref(false);
 const isOwner = computed(() => authState.currentUser?.role === 'Owner');
 const importUsers = ref<ProxyUser[]>([]);
@@ -1062,10 +912,6 @@ const newSubUrl = ref('');
 // Pagination
 const currentPage = ref(1);
 const pageSize = 12;
-
-const availableServers = computed(() => {
-  return servers.value.filter(s => s.enabled && !s.deletedAt);
-});
 
 // Load real data
 async function loadData() {
@@ -1267,25 +1113,6 @@ function copyNodeLink(node: ProxyNodeItem) {
 function openCreateNodeModal() {
   editingNode.value = null;
   editingInbound.value = null;
-  selfHostedForm.serverId = availableServers.value[0]?.id || '';
-  selfHostedForm.serverName = availableServers.value[0]?.name || '';
-  selfHostedForm.serverAddress = availableServers.value[0]?.publicIp || '';
-  selfHostedForm.inboundId = '';
-  selfHostedForm.name = '';
-  selfHostedForm.protocol = 'vless';
-  Object.assign(forwardTarget,{host:'',port:443,network:'tcp'});
-  selfHostedForm.port = 443;
-  selfHostedForm.transport = 'tcp';
-  selfHostedForm.security = 'none';
-  selfHostedForm.server_name = '';
-  selfHostedForm.path = '';
-  selfHostedForm.service_name = '';
-  selfHostedForm.method = 'chacha20-ietf-poly1305';
-  selfHostedForm.certificate_pem = '';
-  selfHostedForm.private_key_pem = '';
-  selfHostedForm.trusted_ca_pem = '';
-  selfHostedForm.supportTcp = true;
-  selfHostedForm.supportUdp = true;
   openSelfHostedModal.value = true;
 }
 
@@ -1302,27 +1129,6 @@ function openEditNode(node: ProxyNodeItem) {
       return;
     }
     editingInbound.value = ib;
-    selfHostedForm.serverId = node.sourceId || '';
-    selfHostedForm.serverName = node.sourceName;
-    selfHostedForm.serverAddress = node.server;
-    selfHostedForm.inboundId = node.inboundId || '';
-    selfHostedForm.name = node.name.replace(`${node.sourceName} · `, '').replace(' (已停用)', '').replace(' (内部中转)', '');
-    selfHostedForm.protocol = ib.protocol;
-    selfHostedForm.port = ib.port;
-    const s = ib.settings || {};
-    Object.assign(forwardTarget,s.forward || {host:'',port:443,network:'tcp'});
-    selfHostedForm.transport = (s.transport as string) || 'tcp';
-    selfHostedForm.security = (s.security as string) || 'none';
-    selfHostedForm.server_name = (s.server_name as string) || '';
-    selfHostedForm.path = (s.path as string) || '';
-    selfHostedForm.service_name = (s.service_name as string) || '';
-    selfHostedForm.method = (s.method as string) || 'chacha20-ietf-poly1305';
-    selfHostedForm.certificate_pem = '';
-    selfHostedForm.private_key_pem = '';
-    selfHostedForm.trusted_ca_pem = '';
-    const tu = getTcpUdpSupport(ib.protocol);
-    selfHostedForm.supportTcp = tu.supportTcp;
-    selfHostedForm.supportUdp = tu.supportUdp;
     openSelfHostedModal.value = true;
   } else {
     nodeForm.name = node.name;
@@ -1332,132 +1138,6 @@ function openEditNode(node: ProxyNodeItem) {
     nodeForm.supportTcp = node.supportTcp;
     nodeForm.supportUdp = node.supportUdp;
     openImportNodeModal.value = true;
-  }
-}
-
-async function saveSelfHostedNode() {
-  if (!selfHostedForm.name.trim()) {
-    showToast('请输入节点名称', 'error');
-    return;
-  }
-  if (!selfHostedForm.port || selfHostedForm.port < 1 || selfHostedForm.port > 65535) {
-    showToast('请输入有效的端口 (1-65535)', 'error');
-    return;
-  }
-  const srvId = selfHostedForm.serverId;
-  if (!srvId) {
-    showToast('请选择目标服务器', 'error');
-    return;
-  }
-
-  savingSelfHosted.value = true;
-  try {
-    let payload: any;
-    if (selfHostedForm.inboundId && editingInbound.value) {
-      const inb = editingInbound.value;
-      const settings: any = { ...(inb.settings || {}) };
-      const proto = inb.protocol;
-      if (proto === 'wireguard') {
-        settings.transport = '';
-      } else if (proto === 'hysteria2' || proto === 'tuic') {
-        // leave transport unset as per old page behavior
-      } else {
-        settings.transport = selfHostedForm.transport;
-      }
-      if (proto === 'trojan' || proto === 'hysteria2' || proto === 'tuic') {
-        settings.security = 'tls';
-      } else if (proto === 'wireguard') {
-        // keep as is
-      } else {
-        settings.security = selfHostedForm.security;
-      }
-      if (settings.security === 'tls') {
-        settings.server_name = selfHostedForm.server_name || undefined;
-        if (selfHostedForm.certificate_pem) settings.certificate_pem = selfHostedForm.certificate_pem;
-        if (selfHostedForm.private_key_pem) settings.private_key_pem = selfHostedForm.private_key_pem;
-        if (selfHostedForm.trusted_ca_pem) settings.trusted_ca_pem = selfHostedForm.trusted_ca_pem;
-      }
-      if (selfHostedForm.transport === 'ws') {
-        settings.path = selfHostedForm.path || undefined;
-      }
-      if (selfHostedForm.transport === 'grpc') {
-        settings.service_name = selfHostedForm.service_name || undefined;
-      }
-      if (proto === 'shadowsocks') {
-        settings.method = selfHostedForm.method;
-      }
-      applyForwardSettings(settings,proto);
-      payload = {
-        name: selfHostedForm.name.trim(),
-        nodeId: inb.nodeId,
-        protocol: inb.protocol,
-        listen: inb.listen,
-        port: selfHostedForm.port,
-        enabled: inb.enabled,
-        subscriptionVisible: inb.subscriptionVisible,
-        internalRelay: inb.internalRelay,
-        defaultOutbound: inb.defaultOutbound,
-        allowedUserIds: inb.allowedUserIds,
-        settings: settings
-      };
-      await proxyAPI.saveInbound(selfHostedForm.inboundId, payload);
-      try {
-        const r = await deploymentAPI.publishNode(srvId, `更新自建节点入站: ${selfHostedForm.name}`);
-        showToast(`已保存并发布配置 #${r.revision}，节点确认后生效`);
-      } catch (e: any) {
-        showToast(`已保存，但发布失败：${e?.message || e}（可在服务器详情的配置版本中重试）`, 'error');
-      }
-    } else {
-      const proto = selfHostedForm.protocol;
-      let security = selfHostedForm.security;
-      if (proto === 'trojan' || proto === 'hysteria2' || proto === 'tuic') security = 'tls';
-      const settings: any = {};
-      if (proto === 'wireguard') {
-        settings.transport = '';
-      } else if (proto === 'hysteria2' || proto === 'tuic') {
-        // leave unset
-      } else {
-        settings.transport = selfHostedForm.transport;
-      }
-      settings.security = proto === 'wireguard' ? undefined : security;
-      if (security === 'tls') {
-        settings.server_name = selfHostedForm.server_name || undefined;
-        if (selfHostedForm.certificate_pem) settings.certificate_pem = selfHostedForm.certificate_pem;
-        if (selfHostedForm.private_key_pem) settings.private_key_pem = selfHostedForm.private_key_pem;
-        if (selfHostedForm.trusted_ca_pem) settings.trusted_ca_pem = selfHostedForm.trusted_ca_pem;
-      }
-      if (selfHostedForm.transport === 'ws') settings.path = selfHostedForm.path || undefined;
-      if (selfHostedForm.transport === 'grpc') settings.service_name = selfHostedForm.service_name || undefined;
-      if (proto === 'shadowsocks') settings.method = selfHostedForm.method;
-      applyForwardSettings(settings,proto);
-      payload = {
-        name: selfHostedForm.name.trim(),
-        nodeId: srvId,
-        protocol: proto,
-        listen: '0.0.0.0',
-        port: selfHostedForm.port,
-        enabled: true,
-        subscriptionVisible: proto !== 'forward',
-        internalRelay: false,
-        defaultOutbound: 'direct',
-        allowedUserIds: [],
-        settings: settings
-      };
-      await proxyAPI.saveInbound(null, payload);
-      try {
-        const r = await deploymentAPI.publishNode(srvId, `新建自建节点入站: ${selfHostedForm.name}`);
-        showToast(`已保存并发布配置 #${r.revision}，节点确认后生效`);
-      } catch (e: any) {
-        showToast(`已保存，但发布失败：${e?.message || e}（可在服务器详情的配置版本中重试）`, 'error');
-      }
-    }
-
-    openSelfHostedModal.value = false;
-    await loadData();
-  } catch (e) {
-    showToast((e as Error).message, 'error');
-  } finally {
-    savingSelfHosted.value = false;
   }
 }
 

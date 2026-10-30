@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
@@ -17,6 +19,7 @@ func (h *Handler) registerCanvas(mux *http.ServeMux) {
 		"PUT /api/v1/canvas-schemes/{id}":          h.saveCanvasScheme,
 		"DELETE /api/v1/canvas-schemes/{id}":       h.deleteCanvasScheme,
 		"POST /api/v1/canvas-schemes/{id}/publish": h.publishCanvasScheme,
+		"POST /api/v1/canvas-schemes/{id}/plan":    h.planCanvasScheme,
 	} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
@@ -111,4 +114,29 @@ func (h *Handler) failCanvas(w http.ResponseWriter, err error) {
 	default:
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 	}
+}
+
+// Planning is Owner-only and CSRF-protected just like publication, but has no audit write.
+func (h *Handler) planCanvasScheme(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Layout *CanvasLayout `json:"layout"`
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, canvasMaxLayoutBytes))
+	if err != nil {
+		h.failCanvas(w, err)
+		return
+	}
+	if len(bytes.TrimSpace(data)) != 0 {
+		r.Body = io.NopCloser(bytes.NewReader(data))
+		if err := httpapi.Decode(w, r, &input); err != nil {
+			h.failCanvas(w, err)
+			return
+		}
+	}
+	result, err := h.Service.PlanCanvasScheme(r.Context(), r.PathValue("id"), input.Layout)
+	if err != nil {
+		h.failCanvas(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, result)
 }

@@ -139,4 +139,25 @@ const bare = files(path.resolve(root, '..')).filter(file => file.endsWith('.vue'
 assert.deepEqual(bare, []);
 assert.deepEqual(bareTemplates(parse('<template><div><template><b/></template></div></template>').descriptor.template.ast), [1]);
 console.log('PASS no Vue page wraps content in a directive-less <template>');
+
+// MainLayout renders pages inside <transition mode="out-in">. A routed page
+// whose template has several roots (or a root v-if) never finishes leaving,
+// so the next page never mounts and the screen stays blank until a refresh.
+function rootProblem(source) {
+  const ast = parse(source).descriptor.template?.ast;
+  if (!ast) return 'no template';
+  const kids = ast.children.filter(child => !(child.type === 2 && !child.content.trim()) && child.type !== 3);
+  if (kids.length !== 1 || kids[0].type !== 1 || kids[0].tag === 'template') return `${kids.length} root nodes`;
+  if (kids[0].props.some(prop => prop.type === 7 && ['if', 'else-if', 'else', 'for'].includes(prop.name))) return 'conditional root';
+  return '';
+}
+const src = path.resolve(root, '..');
+const routerSource = readFileSync(path.join(src, 'app/router.ts'), 'utf8');
+const routed = [...new Set([...routerSource.matchAll(/import\('\.\.\/([^']+\.vue)'\)/g)].map(match => match[1]))];
+assert.ok(routed.length > 20);
+const multiRoot = routed.map(file => [file, rootProblem(readFileSync(path.join(src, file), 'utf8'))]).filter(([, problem]) => problem);
+assert.deepEqual(multiRoot, []);
+assert.equal(rootProblem('<template><A /><B v-if="x" /></template>'), '2 root nodes');
+assert.equal(rootProblem('<!-- c --><template>\n  <div />\n</template>'), '');
+console.log('PASS every routed page has exactly one element root (out-in transitions)');
 console.log('All portal self-tests passed');

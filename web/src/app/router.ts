@@ -252,6 +252,18 @@ router.beforeEach((to) => {
 });
 router.beforeEach(setupNavigationGuards);
 
+// Pages are lazy chunks with hashed names. After the panel is upgraded, a tab
+// opened earlier asks for chunks that no longer exist and the navigation fails,
+// leaving a blank page. Load the target URL once from the server instead.
+router.onError((error, to) => {
+  if (!/dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(String(error?.message || error))) return;
+  const key = 'qui_chunk_reload';
+  if (sessionStorage.getItem(key) === to.fullPath) return;
+  sessionStorage.setItem(key, to.fullPath);
+  window.location.assign(to.fullPath);
+});
+router.afterEach(() => { sessionStorage.removeItem('qui_chunk_reload'); });
+
 router.afterEach((to) => {
   const baseTitle = 'Proxy Control';
   document.title = to.meta?.title ? `${to.meta.title} - ${baseTitle}` : baseTitle;

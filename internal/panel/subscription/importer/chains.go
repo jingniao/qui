@@ -57,7 +57,7 @@ func (s *Store) Chains(ctx context.Context, entries []proxy.Proxy) ([]proxy.Prox
 		for _, c := range layout.Connections {
 			a, aok := made[c.Source]
 			b, bok := made[c.Target]
-			if !aok || !bok || c.Type != "proxy_chain" || b.DialerProxy != "" {
+			if !aok || !bok || (c.Type != "proxy_chain" && c.Type != "tunnel") || b.DialerProxy != "" {
 				valid = false
 				break
 			}

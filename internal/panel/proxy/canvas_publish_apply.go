@@ -220,29 +220,12 @@ func (s *Service) canvasStaleObjects(ctx context.Context, plan *canvasPlan) (*ca
 // protocol it cannot be taken over before it is removed, which this order of
 // operations never does, so the publication is refused with a way out.
 func (s *Service) canvasCheckListeners(ctx context.Context, plan *canvasPlan, stale *canvasStale) error {
-	claimed := map[string]*canvasEdge{}
-	for _, edge := range plan.edges {
-		key := fmt.Sprintf("%s:%d", edge.targetNode, edge.port)
-		if other, taken := claimed[key]; taken {
-			return fmt.Errorf("连接 %q 与 %q 在同一台目标服务器上使用了同一端口 %d，请为其中一条换一个端口", other.connectionID, edge.connectionID, edge.port)
-		}
-		claimed[key] = edge
-		occupants, err := s.Repository.canvasInboundsAtPort(ctx, edge.targetNode, edge.port)
-		if err != nil {
-			return err
-		}
-		for _, occupant := range occupants {
-			switch {
-			case occupant.Name == edge.inboundName:
-			case stale.inbound[occupant.ID] && occupant.Protocol == edge.protocol:
-				edge.adopt = occupant
-				delete(stale.inbound, occupant.ID)
-			case stale.inbound[occupant.ID]:
-				return fmt.Errorf("目标服务器上端口 %d 仍由本方案旧的 %s 中转入口使用，协议不同无法直接替换：请先换一个端口发布，或先删掉这条连接发布一次", edge.port, occupant.Protocol)
-			default:
-				return fmt.Errorf("目标服务器上端口 %d 已被其他入站占用", edge.port)
-			}
-		}
+	conflicts, err := s.canvasListenerConflicts(ctx, plan, stale)
+	if err != nil {
+		return err
+	}
+	if len(conflicts) != 0 {
+		return fmt.Errorf("连接 %q：同一端口 %d 已被 %s 占用", conflicts[0].ConnectionID, conflicts[0].Port, conflicts[0].With)
 	}
 	return nil
 }

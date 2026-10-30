@@ -129,6 +129,16 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	if len(chained) != 4 || len(w) != 0 || chained[3].DialerProxy != chained[2].Name {
 		t.Fatal("published snapshot not rendered")
 	}
+	// The merged UI emits tunnel; it retains the exact client dialer-proxy semantics.
+	layout.Connections[0].Type = "tunnel"
+	raw, _ = json.Marshal(layout)
+	if _, err = s.Database.Exec("UPDATE canvas_schemes SET client_published_layout=? WHERE id='test-chain'", string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	tunnel, tunnelWarnings := s.Chains(ctx, p)
+	if len(tunnelWarnings) != 0 || len(tunnel) != len(chained) || tunnel[3].DialerProxy != chained[3].DialerProxy || tunnel[2].Name != chained[2].Name {
+		t.Fatal("tunnel alias changed client chain", tunnel, tunnelWarnings)
+	}
 	other, _, err := s.Proxies(ctx, source.Viewer{UserID: b, AllowedProtocols: []string{"socks5"}})
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,10 @@
+<!-- One root element: MainLayout wraps pages in <transition mode="out-in">,
+     and a multi-root page never finishes leaving, which blanks the screen. -->
 <template>
-  <ProxyNodeListPage :key="generation" />
-  <ServerNodeCreate v-if="isOwner && route.query.create === '1'" :key="String(route.query.server || '')" :server-id="typeof route.query.server === 'string' ? route.query.server : ''" @close="close" @saved="generation++" />
+  <div>
+    <ProxyNodeListPage :key="generation" />
+    <ServerNodeCreate v-if="isOwner && route.query.create === '1'" :key="String(route.query.server || '')" :server-id="typeof route.query.server === 'string' ? route.query.server : ''" @close="close" @saved="generation++" />
+  </div>
 </template>
 <script setup lang="ts">
 import { ref } from 'vue';

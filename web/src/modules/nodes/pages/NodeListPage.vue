@@ -90,7 +90,10 @@ function applyFilters() {
     status: status.value === 'all' ? undefined : status.value, group: group.value || undefined,
     deleted: deleted.value ? '1' : undefined, page: undefined } });
 }
-function changePage(value: number) { void router.replace({ query: { ...route.query, page: value > 1 ? String(value) : undefined } }); }
+// The layout keeps a leaving page mounted during its out-in transition while
+// route already describes the next page; ignore routes that are not ours.
+const ours = () => route.path === '/nodes';
+function changePage(value: number) { if (!ours()) return; void router.replace({ query: { ...route.query, page: value > 1 ? String(value) : undefined } }); }
 const filtered = computed(() => nodes.value.filter(node => {
   const q = scalar(route.query.keyword).trim().toLowerCase();
   const meta = getNodeMeta(node.id);
@@ -145,10 +148,11 @@ async function load() {
   finally { if (current === generation) loading.value = false; }
 }
 watch(() => route.query, () => {
+  if (!ours()) return;
   readQuery(); selected.value = [];
   if (page.value > Math.max(1, Math.ceil(filtered.value.length / 20))) changePage(1);
 });
-watch(() => route.query.deleted, () => { void load(); });
+watch(() => route.query.deleted, () => { if (ours()) void load(); });
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   timer = setInterval(() => { now.value = Date.now(); }, 5000);

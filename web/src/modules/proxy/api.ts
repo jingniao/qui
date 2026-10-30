@@ -86,7 +86,7 @@ export type CanvasInstanceRole = 'entry' | 'relay' | 'exit';
 export type CanvasConnectionKind = 'proxy_chain' | 'tunnel' | 'port_forward';
 export type CanvasTunnelProtocol = 'tls' | 'wireguard' | 'gost' | 'brook' | 'nftables';
 export interface CanvasSchemeInstance { instanceId: string; ref: string; x: number; y: number; role: CanvasInstanceRole; listenPort?: number; targetPort?: number; }
-export interface CanvasSchemeConnection { id: string; source: string; target: string; type: CanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol; tunnelPort?: number; supportTcp: boolean; supportUdp: boolean; }
+export interface CanvasSchemeConnection { id: string; source: string; target: string; type: CanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; }
 export interface CanvasSchemeLayout { instances: CanvasSchemeInstance[]; connections: CanvasSchemeConnection[]; }
 export interface CanvasScheme { id: string; name: string; execution: CanvasExecution; layout: CanvasSchemeLayout; createdAt: string; updatedAt: string; publishedAt: string; publishedBatchId: string; }
 export interface CanvasSchemeCreate { name: string; execution: CanvasExecution; layout: CanvasSchemeLayout; }
@@ -101,6 +101,7 @@ export interface CanvasPublishNode { nodeId: string; name: string; revision: num
 export interface CanvasPublishResult { batchId?: string; nodes: CanvasPublishNode[]; warnings: string[]; }
 
 export const canvasAPI = {
+  plan: (id: string, layout: CanvasSchemeLayout) => request<import('./components/relay/tunnelEditorModel').TunnelPlan>(`/canvas-schemes/${encodeURIComponent(id)}/plan`, 'POST', { layout }),
   list: (page = 1, pageSize = 50) => request<Page<CanvasScheme>>(`/canvas-schemes?page=${page}&pageSize=${pageSize}`),
   get: (id: string) => request<CanvasScheme>(`/canvas-schemes/${encodeURIComponent(id)}`),
   create: (value: CanvasSchemeCreate) => request<CanvasScheme>('/canvas-schemes', 'POST', value),
@@ -148,6 +149,9 @@ export function relaySchemeToCanvasInput(scheme: RelayScheme, context: CanvasSch
     type: connection.type || 'proxy_chain',
     ...(connection.tunnelProtocol ? { tunnelProtocol: connection.tunnelProtocol } : {}),
     ...(connection.tunnelPort ? { tunnelPort: connection.tunnelPort } : {}),
+    ...(connection.listenPort !== undefined ? { listenPort: connection.listenPort } : {}),
+    ...(connection.targetHost ? { targetHost: connection.targetHost } : {}),
+    ...(connection.targetPort !== undefined ? { targetPort: connection.targetPort } : {}),
     supportTcp: !!connection.supportTcp,
     supportUdp: !!connection.supportUdp
   }));
@@ -243,6 +247,9 @@ export function canvasSchemeToRelayScheme(scheme: CanvasScheme, context: CanvasS
     type: connection.type,
     tunnelProtocol: connection.tunnelProtocol,
     tunnelPort: connection.tunnelPort,
+    listenPort: connection.listenPort,
+    targetHost: connection.targetHost,
+    targetPort: connection.targetPort,
     supportTcp: connection.supportTcp,
     supportUdp: connection.supportUdp,
     status: 'valid'
@@ -261,4 +268,3 @@ export function canvasSchemeToRelayScheme(scheme: CanvasScheme, context: CanvasS
     serverUpdatedAt: scheme.updatedAt
   };
 }
-

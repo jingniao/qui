@@ -22,7 +22,7 @@ func ValidateClientLayout(layout CanvasLayout) error {
 		instances[i.InstanceID] = true
 	}
 	for _, c := range layout.Connections {
-		if c.Type != "proxy_chain" || parents[c.Target] || next[c.Source] != "" {
+		if (c.Type != "proxy_chain" && c.Type != "tunnel") || parents[c.Target] || next[c.Source] != "" {
 			return errors.New("客户端方案只支持单路径代理链")
 		}
 		parents[c.Target] = true

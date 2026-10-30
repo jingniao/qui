@@ -76,7 +76,7 @@
         <!-- Tunnel List Button -->
         <button
           type="button"
-          @click="openTunnelDrawer = true"
+          @click="focusTunnelList"
           class="ios-btn-secondary !py-1 text-xs inline-flex items-center gap-1"
         >
           <svg class="w-3.5 h-3.5 text-ios-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -108,6 +108,8 @@
           </svg>
           <span>保存草稿</span>
         </button>
+
+        <button type="button" class="ios-btn-secondary !py-1 text-xs" @click="checkScheme">检查</button>
 
         <!-- Primary Action: Generate Sub or Publish to Server -->
         <button
@@ -553,91 +555,6 @@
           </div>
         </div>
 
-        <!-- Panel 2: Selected Connection Inspector (Core Requirement 4) -->
-        <div v-else-if="selectedConnection" class="space-y-4">
-          <div class="flex items-center justify-between border-b border-black/[0.06] pb-2">
-            <h3 class="font-bold text-xs text-ios-label">连线与隧道属性</h3>
-            <button
-              type="button"
-              @click="selectedConnection = null"
-              class="text-xs text-ios-tertiary hover:text-ios-label"
-            >
-              关闭
-            </button>
-          </div>
-
-          <div class="space-y-3 text-xs">
-            <!-- Connection Type Selector -->
-            <div>
-              <span class="font-medium text-ios-secondary">连接类型</span>
-              <select
-                v-model="selectedConnection.type"
-                @change="onConnectionTypeChange(selectedConnection)"
-                class="form-input-base text-xs mt-1"
-              >
-                <option value="tunnel">隧道转发 (Tunnel)</option>
-                <option value="port_forward">端口转发 (Port Forward)</option>
-                <option value="proxy_chain">代理链连接 (Proxy Chain)</option>
-              </select>
-            </div>
-
-            <!-- Unsupported Reason Warning -->
-            <div
-              v-if="selectedConnection.invalidReason"
-              class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] leading-relaxed"
-            >
-              ❌ {{ selectedConnection.invalidReason }}
-            </div>
-
-            <!-- Tunnel Protocol Options -->
-            <p v-if="selectedConnection.type === 'port_forward'" class="text-xs text-ios-secondary">使用源服务器的监听端口和目标服务器的目标端口。由核心内置转发，不验证用户身份；用户额度、设备限制与用户域名访问记录不适用。</p>
-            <div v-if="selectedConnection.type === 'tunnel'" class="space-y-2">
-              <label class="block">
-                <span class="font-medium text-ios-secondary">隧道协议</span>
-                <select v-model="selectedConnection.tunnelProtocol" @change="saveDraft" class="form-input-base text-xs mt-1">
-                  <option value="tls">TLS 中转（核心内置）</option>
-                  <option value="gost" disabled>Gost (TLS 隧道) (不支持)</option>
-                  <!-- Port forwarding uses official core inbounds; no external tunnel binary. -->
-                  <option value="wireguard">WireGuard / Tailscale</option>
-                  <option value="brook" disabled>Brook 隧道 (不支持)</option>
-                  <option value="nftables" disabled>NFTables / iptables (不支持)</option>
-                </select>
-              </label>
-
-              <label class="block">
-                <span class="font-medium text-ios-secondary">中转隧道端口</span>
-                <input
-                  v-model.number="selectedConnection.tunnelPort"
-                  type="number"
-                  placeholder="例如 10081"
-                  class="form-input-base text-xs mt-1 font-mono"
-                />
-              </label>
-            </div>
-
-            <div class="flex items-center gap-4 pt-1">
-              <label class="flex items-center gap-1.5 cursor-pointer">
-                <input v-model="selectedConnection.supportTcp" type="checkbox" class="rounded text-ios-blue border-black/20" />
-                <span>支持 TCP</span>
-              </label>
-              <label class="flex items-center gap-1.5 cursor-pointer">
-                <input v-model="selectedConnection.supportUdp" type="checkbox" class="rounded text-ios-blue border-black/20" />
-                <span>支持 UDP</span>
-              </label>
-            </div>
-
-            <div class="pt-2">
-              <button
-                type="button"
-                @click="removeConnection(selectedConnection.id)"
-                class="w-full ios-action-btn-danger justify-center"
-              >
-                删除此连线
-              </button>
-            </div>
-          </div>
-        </div>
-
         <!-- Panel 3: Global Scheme Inspector -->
         <div v-else class="space-y-4">
           <div class="border-b border-black/[0.06] pb-2">
@@ -702,47 +619,15 @@
               </button>
             </div>
           </div>
+          <TunnelList ref="tunnelList" :scheme="currentScheme" :plan="plan" :checking="checking" :error="planError" @create="openEditor()" @edit="selectConnection" />
         </div>
       </div>
     </div>
 
-    <!-- 3. Drawer: Tunnel List (Core Requirement 4) -->
-    <AppDialog
-      v-model="openTunnelDrawer"
-      title="方案隧道列表"
-      :show-confirm="false"
-    >
-      <div class="space-y-3 text-xs">
-        <p class="text-ios-secondary">当前方案中配置的所有隧道转发连接：</p>
-        <div v-if="!currentTunnels.length" class="p-8 text-center text-ios-tertiary">
-          暂无已配置的隧道连线。连接两台服务器后可在属性栏选择“隧道转发”。
-        </div>
-        <div v-else class="space-y-2 max-h-[340px] overflow-y-auto">
-          <div
-            v-for="t in currentTunnels"
-            :key="t.id"
-            class="p-3 bg-white rounded-xl border border-black/[0.06] shadow-2xs flex items-center justify-between"
-          >
-            <div>
-              <div class="flex items-center gap-1.5 font-bold text-ios-label">
-                <span>{{ getNodeNameByInst(t.sourceInstanceId) }}</span>
-                <span class="text-ios-blue">➔</span>
-                <span>{{ getNodeNameByInst(t.targetInstanceId) }}</span>
-              </div>
-              <div class="text-[11px] text-ios-tertiary font-mono mt-0.5">
-                协议: {{ (t.tunnelProtocol || 'tls').toUpperCase() }} · 端口: {{ t.tunnelPort || 10080 }}
-              </div>
-            </div>
-            <button
-              type="button"
-              @click="focusConnection(t)"
-              class="ios-action-btn-primary"
-            >
-              定位画布
-            </button>
-          </div>
-        </div>
-      </div>
+    <TunnelEditorDrawer v-if="editor" :key="editor.key" :scheme="currentScheme" :servers="servers" :context="canvasContext()"
+      :connection="editor.connection" :source="editor.source" :target="editor.target" :persist="persistTunnelResult" @close="closeEditor" />
+    <AppDialog v-model="openPlanSummary" title="方案发布检查" :show-confirm="false">
+      <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" />
     </AppDialog>
 
     <!-- 4. Modal: Publish / Generate Subscription (Core Requirement 5) -->
@@ -779,7 +664,7 @@
           <div class="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl space-y-1 text-ios-blue text-[11px]">
             <div>• 目标管理服务器: {{ currentScheme.nodes.filter(n => n.isManageable).length }} 台</div>
             <div>• 计划建立隧道: {{ currentTunnels.length }} 条</div>
-            <div>• 状态: 校验通过，配置无环路冲突</div>
+            <div>• 状态: {{ checking ? '检查中…' : planError || (plan?.ok ? '计划检查通过' : plan?.message || '请先检查方案') }}</div>
           </div>
         </div>
       </div>
@@ -802,7 +687,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue';
+import TunnelList from '../components/relay/TunnelList.vue';
+import TunnelEditorDrawer from '../components/relay/TunnelEditorDrawer.vue';
+import TunnelPlanSummary from '../components/relay/TunnelPlanSummary.vue';
+import { useTunnelPlan } from '../components/relay/useTunnelPlan';
 import { useRoute } from 'vue-router';
 import PageHeader from '../../../components/PageHeader.vue';
 import AppDialog from '../../../components/AppDialog.vue';
@@ -811,7 +700,7 @@ import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
-import { proxyAPI, choices, canvasAPI, canvasSchemeToRelayScheme, type CanvasPublishResult, type CanvasSchemeContext, type Inbound } from '../api';
+import { proxyAPI, choices, canvasAPI, canvasSchemeToRelayScheme, relaySchemeToCanvasInput, type CanvasPublishResult, type CanvasSchemeContext, type Inbound } from '../api';
 import {
   proxyNodeStore,
   loadStoredData,
@@ -823,7 +712,6 @@ import {
   type ProxyNodeItem,
   type CanvasNodeInstance,
   type CanvasConnection,
-  type ConnectionType,
   type RelayScheme
 } from '../proxyNodes';
 
@@ -854,7 +742,9 @@ const connectingSource = ref<CanvasNodeInstance | null>(null);
 const connectingMousePos = reactive({ x: 0, y: 0 });
 
 // Modals
-const openTunnelDrawer = ref(false);
+const tunnelList = ref<InstanceType<typeof TunnelList>>();
+const editor = ref<{ key: number; connection?: CanvasConnection; source?: string; target?: string } | null>(null);
+const openPlanSummary = ref(false);
 const openPublishModal = ref(false);
 // The last publication's per-node result, as the server reported it.
 const publishResult = ref<CanvasPublishResult | null>(null);
@@ -898,9 +788,35 @@ const currentScheme = computed<RelayScheme>(() => {
 });
 
 // Tunnels in active scheme
-const currentTunnels = computed(() => {
-  return currentScheme.value.connections.filter(c => c.type === 'tunnel');
-});
+const currentTunnels = computed(() => currentScheme.value.connections);
+const planInput = computed(() => relaySchemeToCanvasInput(currentScheme.value, canvasContext()));
+const { plan, checking, error: planError, run: runPlan } = useTunnelPlan(
+  () => JSON.stringify([currentScheme.value.id, currentScheme.value.serverUpdatedAt, planInput.value]),
+  () => currentScheme.value.serverUpdatedAt ? canvasAPI.plan(currentScheme.value.id, planInput.value.layout) : null
+);
+watch(() => currentScheme.value.id, () => { editor.value = null; });
+async function checkScheme() { openPlanSummary.value = true; await runPlan(); }
+async function focusTunnelList() {
+  selectedNode.value = null;
+  closeEditor();
+  await nextTick();
+  tunnelList.value?.focus();
+}
+function openEditor(connection?: CanvasConnection, source?: string, target?: string) {
+  selectedNode.value = null;
+  selectedConnection.value = connection || null;
+  editor.value = { key: Date.now(), connection, source, target };
+}
+function closeEditor() { editor.value = null; selectedConnection.value = null; }
+async function persistTunnelResult(result: RelayScheme) {
+  const scheme = currentScheme.value;
+  if (result.id !== scheme.id) throw new Error('方案已切换，请重新编辑');
+  const before = { nodes: scheme.nodes, connections: scheme.connections };
+  scheme.nodes = result.nodes;
+  scheme.connections = result.connections;
+  try { await saveDraft(true); showToast('已保存到方案'); }
+  catch (e) { Object.assign(scheme, before); throw e; }
+}
 
 // Filtered resources
 const filteredServers = computed(() => {
@@ -1125,48 +1041,8 @@ function onPortMouseUp(target: CanvasNodeInstance, portType: 'input') {
   if (!connectingSource.value || connectingSource.value.instanceId === target.instanceId) return;
 
   const source = connectingSource.value;
-  // Check if connection already exists
-  const existing = currentScheme.value.connections.find(
-    c => c.sourceInstanceId === source.instanceId && c.targetInstanceId === target.instanceId
-  );
-  if (existing) {
-    showToast('该方向的连线已存在', 'error');
-    connectingSource.value = null;
-    return;
-  }
-
-  // Core Requirement 4: Connection constraints and reasons
-  let connType: ConnectionType = 'proxy_chain';
-  let reason: string | undefined = undefined;
-
-  if (source.isManageable && target.isManageable) {
-    connType = 'tunnel'; // Both manageable servers can form tunnel
-  } else if (!target.isManageable) {
-    connType = 'proxy_chain';
-    if (!source.isManageable) {
-      connType = 'proxy_chain'; // External to External
-    }
-  }
-
-  const newConn: CanvasConnection = {
-    id: `conn-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    sourceInstanceId: source.instanceId,
-    targetInstanceId: target.instanceId,
-    type: connType,
-    tunnelProtocol: connType === 'tunnel' ? 'tls' : undefined,
-    tunnelPort: 10080,
-    supportTcp: true,
-    supportUdp: true,
-    status: 'valid',
-    invalidReason: reason
-  };
-
-  currentScheme.value.connections.push(newConn);
-  selectedConnection.value = newConn;
-  selectedNode.value = null;
+  openEditor(undefined, source.instanceId, target.instanceId);
   connectingSource.value = null;
-  saveDraft();
-  showToast('连线创建成功');
 }
 
 // Compute smooth cubic bezier path for connections
@@ -1199,28 +1075,7 @@ function selectNode(item: CanvasNodeInstance) {
   selectedConnection.value = null;
 }
 
-function selectConnection(conn: CanvasConnection) {
-  selectedConnection.value = conn;
-  selectedNode.value = null;
-}
-
-function onConnectionTypeChange(conn: CanvasConnection) {
-  const source = currentScheme.value.nodes.find(n => n.instanceId === conn.sourceInstanceId);
-  const target = currentScheme.value.nodes.find(n => n.instanceId === conn.targetInstanceId);
-
-  // Core Requirement 4: Ineligible tunnel warning
-  if (conn.type === 'tunnel') {
-    if (!source?.isManageable || !target?.isManageable) {
-      conn.invalidReason = '隧道转发要求两端均为可管理服务器。导入节点不能部署 Agent 或安装服务器隧道。';
-      showToast(conn.invalidReason, 'error');
-    } else {
-      conn.invalidReason = undefined;
-    }
-  } else {
-    conn.invalidReason = undefined;
-  }
-  saveDraft();
-}
+function selectConnection(conn: CanvasConnection) { openEditor(conn); }
 
 function removeNodeInstance(instanceId: string) {
   currentScheme.value.nodes = currentScheme.value.nodes.filter(n => n.instanceId !== instanceId);
@@ -1233,22 +1088,8 @@ function removeNodeInstance(instanceId: string) {
   showToast('已从画布移除实例');
 }
 
-function removeConnection(connId: string) {
-  currentScheme.value.connections = currentScheme.value.connections.filter(c => c.id !== connId);
-  selectedConnection.value = null;
-  saveDraft();
-  showToast('已删除连线');
-}
-
 function getNodeNameByInst(instId: string): string {
   return currentScheme.value.nodes.find(n => n.instanceId === instId)?.name || '未知节点';
-}
-
-function focusConnection(conn: CanvasConnection) {
-  selectedConnection.value = conn;
-  selectedNode.value = null;
-  openTunnelDrawer.value = false;
-  showToast(`已高亮聚焦隧道: ${getNodeNameByInst(conn.sourceInstanceId)} ➔ ${getNodeNameByInst(conn.targetInstanceId)}`);
 }
 
 function roleBadgeClass(role: string): string {
@@ -1264,74 +1105,20 @@ function roleBadgeText(role: string): string {
 }
 
 // ----------------- Scheme Validation & Draft (Core Requirement 5) -----------------
-function validateScheme() {
-  const nodes = currentScheme.value.nodes;
-  const conns = currentScheme.value.connections;
-  const errors: string[] = [];
+function validateScheme() { void checkScheme(); }
 
-  if (nodes.length < 2) {
-    errors.push('画布至少需要包含 2 个节点实例才能搭建中转链路。');
-  }
-
-  // 1. Check loops
-  const visited = new Set<string>();
-  const recStack = new Set<string>();
-
-  function hasCycle(nodeId: string): boolean {
-    visited.add(nodeId);
-    recStack.add(nodeId);
-    const outConns = conns.filter(c => c.sourceInstanceId === nodeId);
-    for (const c of outConns) {
-      if (!visited.has(c.targetInstanceId)) {
-        if (hasCycle(c.targetInstanceId)) return true;
-      } else if (recStack.has(c.targetInstanceId)) {
-        return true;
-      }
-    }
-    recStack.delete(nodeId);
-    return false;
-  }
-
-  for (const n of nodes) {
-    if (!visited.has(n.instanceId)) {
-      if (hasCycle(n.instanceId)) {
-        errors.push('检测到拓扑中存在回环（循环死路），请检查连线方向。');
-        break;
-      }
-    }
-  }
-
-  // 2. Check port conflict
-  const portMap = new Map<number, string>();
-  for (const n of nodes) {
-    if (n.listenPort) {
-      if (portMap.has(n.listenPort)) {
-        errors.push(`端口冲突: 节点 [${n.name}] 与 [${portMap.get(n.listenPort)}] 同时使用了端口 ${n.listenPort}。`);
-      } else {
-        portMap.set(n.listenPort, n.name);
-      }
-    }
-  }
-
-  // 3. Check invalid connections
-  for (const c of conns) {
-    if (c.invalidReason) {
-      errors.push(c.invalidReason);
-    }
-  }
-
-  if (errors.length > 0) {
-    showToast(`校验未通过: ${errors[0]}`, 'error');
-  } else {
-    showToast('链路校验通过！无循环依赖与端口冲突', 'success');
-  }
-}
-
-function saveDraft() {
+function saveDraft(immediate: boolean | Event = false): Promise<void> | void {
   const scheme = currentScheme.value;
   scheme.updatedAt = new Date().toISOString();
   if (scheme.published) {
     scheme.hasUnpublishedChanges = true;
+  }
+  if (immediate === true) {
+    const pending = saveTimers.get(scheme);
+    if (pending) { clearTimeout(pending); saveTimers.delete(scheme); }
+    const flushed = saveQueue.then(() => persistCanvasScheme(scheme, canvasContext()));
+    saveQueue = flushed.catch(() => undefined);
+    return flushed;
   }
   scheduleSave(scheme);
 }
@@ -1526,8 +1313,7 @@ onMounted(async () => {
     if (qFocusConnId) {
       const conn = currentScheme.value.connections.find(c => c.id === qFocusConnId);
       if (conn) {
-        selectedConnection.value = conn;
-        selectedNode.value = null;
+        selectConnection(conn);
         const srcNode = currentScheme.value.nodes.find(n => n.instanceId === conn.sourceInstanceId);
         const tgtNode = currentScheme.value.nodes.find(n => n.instanceId === conn.targetInstanceId);
         if (srcNode && tgtNode) {

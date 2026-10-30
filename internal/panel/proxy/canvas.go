@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"proxycontrol/pkg/contracts/desiredstate"
 	"strings"
 )
 
@@ -66,6 +67,9 @@ type CanvasConnection struct {
 	TunnelPort     *int   `json:"tunnelPort,omitempty"`
 	SupportTCP     bool   `json:"supportTcp"`
 	SupportUDP     bool   `json:"supportUdp"`
+	ListenPort     *int   `json:"listenPort,omitempty"`
+	TargetHost     string `json:"targetHost,omitempty"`
+	TargetPort     *int   `json:"targetPort,omitempty"`
 }
 
 var (
@@ -168,6 +172,22 @@ func (layout CanvasLayout) validate() error {
 			return fmt.Errorf("duplicate canvas connection id %q", connection.ID)
 		}
 		connections[connection.ID] = true
+		// Connection-level forwarding settings are never silently discarded.
+		if connection.Type != "port_forward" && (connection.ListenPort != nil || connection.TargetPort != nil || connection.TargetHost != "") {
+			return fmt.Errorf("connection %q: forwarding settings require port_forward", connection.ID)
+		}
+		if err := canvasPort("listen port", connection.ListenPort); err != nil {
+			return fmt.Errorf("connection %q: %w", connection.ID, err)
+		}
+		if err := canvasPort("target port", connection.TargetPort); err != nil {
+			return fmt.Errorf("connection %q: %w", connection.ID, err)
+		}
+		if connection.TargetHost != "" {
+			settings := desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: connection.TargetHost, Port: 1, Network: "tcp"}}
+			if err := desiredstate.ValidateSettings("forward", settings, true); err != nil {
+				return fmt.Errorf("connection %q: %w", connection.ID, err)
+			}
+		}
 		if !canvasConnectionKinds[connection.Type] {
 			return errors.New("invalid canvas connection type")
 		}
@@ -181,6 +201,9 @@ func (layout CanvasLayout) validate() error {
 			return errors.New("canvas connection cannot start and end on the same instance")
 		}
 		edge := connection.Source + " -> " + connection.Target
+		if connection.Type == "port_forward" {
+			edge += ":forward:" + connection.ID
+		}
 		if edges[edge] {
 			return fmt.Errorf("duplicate canvas connection %q", edge)
 		}

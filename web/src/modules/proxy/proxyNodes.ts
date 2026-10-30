@@ -69,6 +69,9 @@ export interface CanvasConnection {
   type: ConnectionType;
   tunnelProtocol?: 'gost' | 'tls' | 'wireguard' | 'brook' | 'nftables';
   tunnelPort?: number;
+  listenPort?: number;
+  targetHost?: string;
+  targetPort?: number;
   supportTcp: boolean;
   supportUdp: boolean;
   status: 'valid' | 'invalid' | 'active';

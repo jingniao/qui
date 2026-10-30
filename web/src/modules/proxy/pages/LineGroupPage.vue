@@ -179,8 +179,12 @@ async function load() {
   } catch (e) { error.value = (e as Error).message; }
   finally { loading.value = false; }
 }
-function select(id: string) { router.replace({ query: { ...route.query, group: id } }); }
+// The layout keeps a leaving page mounted during its out-in transition while
+// route already describes the next page; ignore routes that are not ours.
+const ours = () => route.path === '/proxy/groups';
+function select(id: string) { if (!ours()) return; router.replace({ query: { ...route.query, group: id } }); }
 function syncSelection() {
+  if (!ours()) return;
   if (selected.value && selected.value.id !== route.query.group) select(selected.value.id);
   else if (!groups.value.length && route.query.group) {
     const query = { ...route.query }; delete query.group; router.replace({ query });

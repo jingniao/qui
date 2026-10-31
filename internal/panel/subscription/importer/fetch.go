@@ -135,7 +135,10 @@ func (f Fetcher) Fetch(ctx context.Context, raw string) ([]byte, error) {
 		body, err := io.ReadAll(io.LimitReader(response.Body, MaxBody+1))
 		response.Body.Close()
 		transport.CloseIdleConnections()
-		if err != nil || response.StatusCode != http.StatusOK || len(body) > MaxBody {
+		// The body read can end without an error once the deadline has cut the
+		// connection (seen in CI under -race), so a body read past the deadline
+		// is rejected rather than cached as the whole subscription.
+		if err != nil || ctx.Err() != nil || response.StatusCode != http.StatusOK || len(body) > MaxBody {
 			return nil, ErrFetch
 		}
 		return body, nil

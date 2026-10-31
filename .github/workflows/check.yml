@@ -217,14 +217,20 @@ jobs:
             ccec4d6fa69de3a79960a460c377ac9a23c1a90e5f9052dae3488921e56201df cores/mihomo-home/Country.mmdb | sha256sum --check --strict
           cores/mihomo/mihomo -v
           printf 'MIHOMO_BINARY=%s/cores/mihomo/mihomo\nMIHOMO_HOME=%s/cores/mihomo-home\n' "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      # Every test step runs even when an earlier one failed, so one dispatch
+      # reports all real-core failures instead of stopping at the first.
       - name: Phase 10 device gates (official Xray and sing-box)
+        if: ${{ !cancelled() }}
         run: go test -p 1 -count=1 -run 'TestRealDeviceGate' ./internal/agent/core/xray ./internal/agent/core/singbox
       - name: Real-core tests
+        if: ${{ !cancelled() }}
         # Includes U6 forward golden native validation and TCP/UDP echo tests.
         run: go test -p 1 -count=1 -timeout 60m ./...
       - name: Part I forward native config and TCP/UDP checks
+        if: ${{ !cancelled() }}
         run: go test -p 1 -count=1 -run 'TestForwardGolden|TestRealForward' ./internal/agent/core/xray ./internal/agent/core/singbox
       - name: Build qui sing-box twice and verify reproducibility
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           GOCACHE="$RUNNER_TEMP/singbox-cache-first" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-first" bash scripts/build-singbox.sh
@@ -241,8 +247,10 @@ jobs:
           grep -q go1.26.10 "$RUNNER_TEMP/qui-singbox-version.txt"
           printf 'SINGBOX_BINARY=%s\n' "$binary" >> "$GITHUB_ENV"
       - name: Qui sing-box real-core tests (including Phase 9 stats, Xray parity and Phase 10 gates)
+        if: ${{ !cancelled() }}
         run: go test -p 1 -count=1 -timeout 60m ./...
       - name: Release dry-run (no publication)
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           VERSION=1.1.0 SKIP_NPM_CI=1 OUTPUT_DIRECTORY="$RUNNER_TEMP/dry-release" bash scripts/build-release.sh

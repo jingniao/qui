@@ -45,7 +45,7 @@ func TestRealDeviceGateXrayScopeEstablishedBalancerAndFailedReload(t *testing.T)
 	doc.Routing.Rules[last].BalancerTag = "gate-pool"
 	rendered.Data, _ = json.Marshal(doc)
 	if result, err := a.Apply(ctx, rendered); err != nil || !result.Success {
-		t.Fatal(result, err)
+		t.Fatal(result, err, nativeTestOutput(t, binary, rendered.Data))
 	}
 	proxy := net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Inbounds[0].Port))
 	open := func(user, password string, ip net.IP) net.Conn {

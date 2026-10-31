@@ -53,7 +53,7 @@ func TestRealDeviceGateXrayUDPProtocolsAndSocksException(t *testing.T) {
 				t.Fatal(err)
 			}
 			if result, err := a.Apply(ctx, config); err != nil || !result.Success {
-				t.Fatal(result, err)
+				t.Fatal(result, err, nativeTestOutput(t, a.Path, config.Data))
 			}
 			client := testState(availablePort(t), 1)
 			client.Users = server.Users

@@ -1233,6 +1233,6 @@
 
 L1 限速已移除；L2 调优/内核转发未批准；L3 无 Agent 的导入隧道不可用；L4 RC 安装阻塞；L5 导入类型和仅 mihomo 客户端链；L6 原生链检查（2026-10-31 CI 通过）与恢复保留当前撤销状态；L7 构建/dry-run（2026-10-31 CI 通过，dry-run 版本号仍为 1.1.0）；L8 Hysteria2/TUIC UDP 数据报门控（其余原生门控 2026-10-31 CI 通过）；L9 样本保留月汇总；L10 TCP 测量范围与无身份转发。完整说明见计划 §12.3 与 [发布草稿](release-notes-1.1.0.md)。
 
-原生核心 CI（2026-10-31）：release/v1.2.0 上 `0628a5b` 的手动运行 41180456701（cores + check）与推送运行 41180455994（check）全部通过，固定版本 Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1。cores 作业此前从未通过。实核步骤未加 `-v`，日志只有逐包 `ok`：所有实核测试所需的 `XRAY_BINARY`/`SINGBOX_BINARY`/`MIHOMO_BINARY`/`MIHOMO_HOME` 均已设置，需要非回环 IPv4 的测试与必须有该地址的门控测试一同通过，因此推定未跳过，但没有逐测试记录。多核心（一个 Agent 同时运行 Xray 与 sing-box）只有假核心测试，没有原生 CI 覆盖。
+原生核心 CI（2026-10-31）：release/v1.2.0 上 `0628a5b` 的手动运行 41180456701（cores + check）与推送运行 41180455994（check）全部通过，固定版本 Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1。cores 作业此前从未通过。之后又修复两个只在 `-race` 下偶发的失败（`c8c293b` 延迟测试的分钟边界、`13cde0a` Agent 更新清单在截止时间后仍收到空 200 响应），最终代码 `13cde0a` 的手动运行 41191038044（cores + check）与推送运行 41191037262 再次全部通过。实核步骤未加 `-v`，日志只有逐包 `ok`：所有实核测试所需的 `XRAY_BINARY`/`SINGBOX_BINARY`/`MIHOMO_BINARY`/`MIHOMO_HOME` 均已设置，需要非回环 IPv4 的测试与必须有该地址的门控测试一同通过，因此推定未跳过，但没有逐测试记录。多核心（一个 Agent 同时运行 Xray 与 sing-box）只有假核心测试，没有原生 CI 覆盖。
 
 R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–F31、B1–B11 的实现与审查证据分别留在 U1/U2、Phases 1–10、U5 和 Part I 记录，不把 F29 的保留样本结果称为完整月统计。原生核心工作流虽已有双架构构建，现有 check.yml 无 qemu Agent 测试步骤，arm64 version/check 与 Agent/qemu 验收仍是待办，未改 CI 冒充完成。

@@ -1199,9 +1199,9 @@
 | A9.5 | 本地证据：Phase 9 sing-box-only 流量超额触发自动版本的面板测试 |
 | A10.1 | 本地证据：`TestAdmissionOrderStickyReleasePromotionLimitsResetAndIPv6`，假时钟顺序/窗口/升降限制/跨节点/中转排除 |
 | A10.2 | 本地证据：`TestLeaseTTLRefreshExpiryAndInvalidFailOpen`、`TestDeviceGateNegotiationOldAgentsAndReconnect`，租约与 mTLS 重连 |
-| A10.3 | 部分（L8 不通过）：2026-10-31 原生核心 CI（运行 41214032573，`89afe26`，官方 sing-box 1.14.3 与 qui 1.14.4-qui.1）实测：门控生效并按 2 秒重复执行时，同一用户经 Hysteria2/TUIC 的 UDP 在已建立与新建的 SOCKS UDP 关联上 79/79 次探测全部通过，即**这两种协议的 UDP 不受设备门控**；同协议的 TCP 流照常被关闭。原因在上游 sing-quic：服务端收到会话已关闭的数据报时用同一认证用户新建 UDP 会话，Clash API 关闭连接只能丢掉在途的包。其余：CI 运行 41180456701（`0628a5b`） “Phase 10 device gates” 与全量实核步骤通过 Xray scope/established/balancer/reload/UDP 与 sing-box source/close 套件（官方与 qui sing-box）；Hysteria2/TUIC UDP 数据报门控仍需专项实验（L8），Xray 本身无此入站 |
+| A10.3 | 通过（按方案 1 的口径）：原生核心测试在本地 Linux 测试机（2026-10-31，官方 Xray 26.3.27、sing-box 1.14.3）与 CI 上覆盖 Xray scope/established/balancer/reload/UDP、sing-box 七种协议的 TCP source/close 与 `TestRealDeviceGateSingboxUDP`。UDP 实测：VLESS/Trojan 受限（已建立流立即停止，新流在 2 秒间隔内约 25% 通过）；Shadowsocks、Hysteria2、TUIC 80/80 通过、SOCKS5 无法归属，按 Owner 2026-10-31 决定标为“不支持”，测试断言该行为以便上游变化时提醒更新标注。`TestRealSingboxSocksUDPDoesNotBreakTheGate` 证明修复前一个 SOCKS5 UDP 流会使整个 sing-box 核心的观测失败（`device observation join incomplete`），修复后通过 |
 | A10.4 | 本地证据：`TestDeviceLimitViewsResetPrivacyAndOldNodePartial` 与 mTLS 能力协商，旧 Agent 不收门控并显示节点名 |
-| A10.5 | 部分：GitHub runner 上 `go test -race -timeout 55m ./...` 在 CI 运行 41180456701（`0628a5b`） 与推送运行 41180455994 均通过，无 DATA RACE（最慢 platform/server 1425 s）；面板主机以 nobody 运行仍 awaiting Owner approval |
+| A10.5 | 以 CI 代替：GitHub runner 上的 `go test -race` 自 `0628a5b` 起每次运行均通过、无 DATA RACE；Owner 2026-10-31 决定不在面板主机上另跑 |
 | A10.6 | 本地证据：全表/备份/accepted-message 无源地址断言及 `TestAddressImplementationsHaveNoPersistenceOrLoggingCalls`，两视图掩码 |
 | A11.1 | 部分：CI 运行 41180456701（`0628a5b`）（cores + check）与推送运行 41180455994（check）在 release/v1.2.0 上全部通过，cores 作业首次通过；修复见进度“Native-core CI on release/v1.2.0”；arm64 qemu/实机、RC 与发布仍待 Owner |
 | A11.2 | awaiting Owner approval：RC2 未执行，进度 Phase 11 有三主机清单；先解决 L4 |

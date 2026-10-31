@@ -4,6 +4,10 @@
 
 **平台：** 本版本只验收 linux/amd64。发布仍附带 arm64 归档，但未在任何 arm64 主机或模拟器上验证（Owner 2026-10-31：暂不考虑 arm64）。
 
+## 安全：CVE-2026-98432
+
+Linux 内核 IPv4 TCP use-after-free（CVSS 9.8），公开的远程 root 利用需要一个 MPTCP 监听端口；Go 1.24 及以后在 Linux 上默认以 MPTCP 打开监听端口。1.0.9 的面板（443/9443）与 Agent 启动的 Xray、sing-box 入站在已检查的三台主机上都是 MPTCP 监听。1.2.0 起面板与 Agent 以 `//go:debug multipathtcp=0` 构建，代理核心以 `GODEBUG=multipathtcp=0` 启动，监听端口均为普通 TCP（真实 Linux 内核与真实核心测试确认）。这只去掉已公开的利用路径；内核缺陷本身仍在，主机仍须升级到已修复的内核（Debian 12：6.1.190-1，Debian 13：6.12.113-1）。主机上的其他 Go 服务不受本修复保护。
+
 ## 主要变化
 
 用户与订阅（原 v1.1）：
@@ -85,7 +89,7 @@
 | L5 | 导入类型/选项受限，旧浏览器导入需重导；客户端链只在 mihomo 中输出 |
 | L6 | 客户端链原生检查已在 CI 通过（mihomo 1.19.33）；恢复保留当前来源/撤销状态 |
 | L7 | 可复现构建、静态 ELF、归档/溯源/SHA256SUMS 与 1.2.0 dry-run 已在 CI 通过 |
-| L8 | **Hysteria2/TUIC 的 UDP 不受设备门控**（原生 CI 实测，见验收矩阵 A10.3）；这两种协议的 TCP 与其余协议的门控已在 CI 通过 |
+| L8 | 设备限制对以下入站的 **UDP 不支持**（TCP 仍受限）：Xray 与 sing-box 的 SOCKS5，sing-box 的 Shadowsocks、Hysteria2、TUIC；面板、门户与节点编辑器明确标注“不支持”。其余协议的 UDP 受限制。实测见验收矩阵 A10.3 |
 | L9 | 月流量仅为面板时区内保留的账户样本；样本清理后的完整历史月份尚无实现 |
 | L10 | TCP 探测不是带宽/ICMP/UDP 检测；端口转发没有用户额度、设备门控与用户域名归属 |
 | 多核心 | 只有假核心测试；Xray + sing-box 同节点的真实流量待实机验收 |

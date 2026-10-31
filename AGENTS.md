@@ -14,6 +14,8 @@
 
 **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，发布说明仍为草稿。
 
+- 安全（2026-10-31，CVE-2026-98432，见[发布说明草稿](docs/release-notes-1.2.0.md)）：面板与 Agent 以 `//go:debug multipathtcp=0` 构建（不改 go.mod），代理核心由 `core.CoreEnvironment` 以 `GODEBUG=multipathtcp=0` 启动，监听端口不再是 MPTCP；真实内核测试确认 Go 默认下核心会以 MPTCP 监听、Agent 启动后为普通 TCP。主机内核升级与临时缓解需 Owner 批准，未执行。设备限制 UDP 范围按 Owner 决定（方案 1）标注，见第 9.2 节；sing-box 观测不再因一个 SOCKS5 UDP 流整体失败。自 2026-10-31 起测试在 Owner 提供的本地 Linux 测试机上进行，GitHub Actions 只做最终确认与发布构建。
+
 - 原生核心 CI（2026-10-31，见[验收矩阵](docs/v1-acceptance.md) §10.4 与[进度记录](docs/v1.1-progress.md)“Native-core CI on release/v1.2.0”）：`0628a5b` 的 cores 作业（Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1 可复现构建与双架构 release dry-run）与 check 作业（`go test -race`）全部通过，cores 作业首次通过。产品修复两项，原因相同（请求被截止时间取消后 Go 客户端仍可能返回响应且读正文不报错）：外部订阅抓取不再把残缺正文当作完整订阅缓存（`07253f9`）；Agent 自更新的清单下载被截止时间切断时报告取消而不是“清单无效”（`13cde0a`）。另修一个分钟边界导致的偶发测试失败（`c8c293b`）；最终代码 `13cde0a` 两个工作流再次全部通过。其余为 v1.1 后过时的实核测试与 Xray 26.3.27 的配置要求（带 fallbackTag 的 balancer 需要 observatory，生产渲染一直会生成）。已知上游行为：Linux 上 Xray 对可 splice 的 TCP 路径在连接关闭后才计入用户下行字节，额度判定随之推迟（第 9.1 节）。未发布。
 
 - K3b（2026-10-29）：面板多核心支持：`Hello/Welcome` 协商 `multi_core_supported` 与独立的 `node_traffic_supported`；按核心保存能力/版本/标志与心跳健康、启动时间、统计源状态，旧 Agent 仍按一个核心建模，缺测保持未知。入站 `core` 进入草稿、DesiredState、自动额度版本、恢复与订阅，空值等于当前主核心，保存与发布按选中核心校验协议、转发、WireGuard、门控与跨核心端口唯一。核心更新任务改为每（节点、组件）一个（迁移 0125 回填既有行），缺失组件可用 schema-2 请求安装，结果按组件路由，成功且能力刷新后才可选。Owner 移除核心：`POST /nodes/{id}/cores/{component}/remove` 与 `removals`，幂等 `RemoveCoreCommand/Result`，断线后用同一身份重发，拒绝 `core_in_use`/`core_pending`/`last_core`/`revision_mismatch`，能力确认前组件仍可见。协商会话中的 node 计数器按（节点、epoch、凭据）增量计入每核心/节点总量，绝不进入额度或重复计入账户总量，同一节点可有多个活跃 epoch。连接观测按（节点、核心）合并活跃源地址后再做设备准入，保留掩码、易失存储、TTL 与放行行为；每个入站按所属核心显示 D5 覆盖。分区重启/健康检查带核心字段，移除核心后的历史回滚在面板侧直接拒绝并说明原因。备份、校验、清单与恢复覆盖新列/新表；未发布，Linux/root 实机验收待完成。
@@ -538,7 +540,7 @@ Viewer 默认不能：
 
 `device_limit` 为 0–100，0 表示不限。按跨入口节点的不同 IPv4、IPv6 /64 活跃源统计，按首次出现顺序保留名额；活跃窗口 60 秒，随后保留 120 秒，再提升最早等待的地址。Owner 可重置准入顺序。面板源地址只保存在内存中，两个视图均掩码，不入库、不写日志、不进备份；Xray 官方 CLI 所需的节点侧临时 JSON 为 0600，调用返回即删除。
 
-NAT 下多端只算一个，双栈与切网可能多算；超限检测约有一个上报周期与投递延迟。Xray 阻止后续新连接，既有连接继续；sing-box 每约 2 秒关闭匹配连接。断联 3 分钟后门控过期放行，旧 Agent 或观测失败明确显示部分执行。WireGuard 一次一个设备且不计入限制；Xray SOCKS5 UDP 无用户归属，不能门控。Hysteria2/TUIC 的 UDP 不受门控（L8，2026-10-31 原生核心 CI 实测：门控生效并按 2 秒重复执行时，同一用户经 Hysteria2/TUIC 的 UDP 在已建立与新建的 SOCKS UDP 关联上 79/79 次探测全部通过，即**这两种协议的 UDP 不受设备门控**；同协议的 TCP 流照常被关闭。原因在上游 sing-quic：服务端收到会话已关闭的数据报时用同一认证用户新建 UDP 会话，Clash API 关闭连接只能丢掉在途的包）；是否需要改进待 Owner 决定。
+NAT 下多端只算一个，双栈与切网可能多算；超限检测约有一个上报周期与投递延迟。Xray 阻止后续新连接，既有连接继续；sing-box 每约 2 秒关闭匹配连接。断联 3 分钟后门控过期放行，旧 Agent 或观测失败明确显示部分执行。WireGuard 一次一个设备且不计入限制。**UDP 的门控范围（L8，Owner 2026-10-31 选择方案 1：如实标注、不改机制）**按真实核心实测（2026-10-31，官方 Xray 26.3.27、官方 sing-box 1.14.3 与 qui 构建）：Xray 的 VLESS、Trojan、Shadowsocks 与 sing-box 的 VLESS、Trojan 的 UDP 受限制（sing-box 为约每 2 秒关闭）；Xray 与 sing-box 的 SOCKS5 UDP、sing-box 的 Shadowsocks、Hysteria2、TUIC 的 UDP **不支持**设备限制（SOCKS5 UDP 无法归属到用户；其余三种在会话关闭后由上游为同一用户重建 UDP 会话），这些入站的 TCP 仍受限制。面板按 `node.DeviceGateUDPUnsupported` 统一判定：入站 API 返回 `deviceGateCoverage`（`full`/`tcp_only`/`none`），用户与门户视图返回 `deviceLimitUdpUnsupportedProtocols` 并显示“不支持：… 的 UDP 不受设备限制”，与“部分执行”（节点缺能力）分开；节点编辑器选到这类协议时给出提示。sing-box 观测不再因无法归属的 SOCKS5 UDP 流整体失败（此前一个用户的 SOCKS5 UDP 会让该核心所有用户的设备限制失效）。
 
 ## 9.3 凭据管理
 

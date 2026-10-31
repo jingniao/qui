@@ -97,12 +97,13 @@ func TestRealFailedFinalTrafficPersistenceKeepsCoreAndExplicitCloseStopsIt(t *te
 	if result, err := adapter.Apply(ctx, rendered); err != nil || !result.Success {
 		t.Fatal(result, err)
 	}
-	// Only the read-only service is enabled; mutable management is absent.
+	// Statistics plus the routing rule API the R7 device gate uses; handler
+	// management (adding inbounds, outbounds or users) stays absent.
 	var configured configDocument
 	if err := json.Unmarshal(rendered.Data, &configured); err != nil {
 		t.Fatal(err)
 	}
-	if configured.API == nil || len(configured.API.Services) != 1 || configured.API.Services[0] != "StatsService" {
+	if configured.API == nil || strings.Join(configured.API.Services, ",") != "StatsService,RoutingService" {
 		t.Fatal("statistics enabled a mutable management service")
 	}
 	adapter.TrafficSink = func(context.Context, []traffic.Counter) error { return errors.New("disk full") }

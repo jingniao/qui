@@ -76,11 +76,11 @@ func TestRealPolicyPublicationToAgentMatchesDraftSimulator(t *testing.T) {
 	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{inbound.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	rule, err := policies.Save(ctx, "", policy.Input{Name: "Device example block", Priority: 10, Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{u.ID}, DeviceIDs: []string{device.ID}, GroupIDs: []string{group.ID}}, Match: desiredstate.Match{Suffixes: []string{"blocked.example"}, Network: "tcp"}, Action: desiredstate.Action{Type: "Block"}})
+	rule, err := policies.Save(ctx, "", policy.Input{Name: "User example block", Priority: 10, Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{u.ID}, GroupIDs: []string{group.ID}}, Match: desiredstate.Match{Suffixes: []string{"blocked.example"}, Network: "tcp"}, Action: desiredstate.Action{Type: "Block"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision, err := policies.Simulate(ctx, shared.Request{NodeID: n.ID, InboundID: inbound.ID, UserID: u.ID, DeviceID: device.ID, Domain: "api.blocked.example", Port: 80, Network: "tcp"})
+	decision, err := policies.Simulate(ctx, shared.Request{NodeID: n.ID, InboundID: inbound.ID, UserID: u.ID, Domain: "api.blocked.example", Port: 80, Network: "tcp"})
 	if err != nil || !decision.Matched || decision.PolicyID != rule.ID || decision.Action.Type != "Block" {
 		t.Fatal("draft simulation incorrect", err)
 	}
@@ -91,7 +91,7 @@ func TestRealPolicyPublicationToAgentMatchesDraftSimulator(t *testing.T) {
 	if len(state.Policies) != 1 {
 		t.Fatal("published snapshot omitted policy")
 	}
-	revision, err := deployments.Create(ctx, state, "owner", "device policy")
+	revision, err := deployments.Create(ctx, state, "owner", "user policy")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestRealPolicyPublicationToAgentMatchesDraftSimulator(t *testing.T) {
 		return err == nil && len(data) > 0 && strings.Contains(string(data), "published-policy-default-origin")
 	}
 	if forward("api.blocked.example") {
-		t.Fatal("published device policy allowed blocked domain")
+		t.Fatal("published user policy allowed blocked domain")
 	}
 	if !forward("127.0.0.1") {
 		t.Fatal("default direct rule no longer forwards")

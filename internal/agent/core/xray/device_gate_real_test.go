@@ -40,6 +40,9 @@ func TestRealDeviceGateXrayScopeEstablishedBalancerAndFailedReload(t *testing.T)
 		t.Fatal("invalid render")
 	}
 	doc.Routing.Balancers = []balancerConfig{{Tag: "gate-pool", Selector: []string{"direct"}, FallbackTag: "direct", Strategy: balancerStrategy{Type: "roundRobin"}}}
+	// A balancer with fallbackTag needs an observatory ("not all dependencies
+	// are resolved" otherwise), as the production renderer always emits.
+	doc.Observatory = &observatoryConfig{SubjectSelector: []string{"direct"}, ProbeInterval: "60s"}
 	last := len(doc.Routing.Rules) - 1
 	doc.Routing.Rules[last].OutboundTag = ""
 	doc.Routing.Rules[last].BalancerTag = "gate-pool"

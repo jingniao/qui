@@ -86,6 +86,11 @@ func TestRealTwoAgentVlessTrojanDeployment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Access comes from the group's inbound entries since v1.1 (0122), so the
+	// user must be granted the entry inbound before node A's revision renders.
+	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}}); err != nil {
+		t.Fatal(err)
+	}
 	directory := t.TempDir()
 	caPath := filepath.Join(directory, "ca.crt")
 	if err := os.WriteFile(caPath, app.Authority.PEM, 0600); err != nil {
@@ -157,9 +162,6 @@ func TestRealTwoAgentVlessTrojanDeployment(t *testing.T) {
 	}
 	localPort := port()
 	credential := device.Credentials[0]
-	if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}}); err != nil {
-		t.Fatal(err)
-	}
 	clientState := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: "client", Logging: desiredstate.Logging{DomainOnly: true}, Credentials: []desiredstate.Credential{{ID: credential.ID, Protocol: "vless", Secret: credential.Secret}}, Inbounds: []desiredstate.Inbound{{ID: "socks", Protocol: "socks5", Listen: "127.0.0.1", Port: localPort, Enabled: true, DefaultOutbound: "entry"}}, Outbounds: []desiredstate.Outbound{{ID: "entry", Protocol: "vless", Address: "127.0.0.1", Port: entry.Port, Enabled: true, CredentialID: credential.ID}}}
 	client := &xray.Adapter{Path: binaryPath, Directory: t.TempDir(), NodeID: clientState.NodeID}
 	defer client.Close()

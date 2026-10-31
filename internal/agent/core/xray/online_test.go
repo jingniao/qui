@@ -186,10 +186,14 @@ func TestRealOnlineStatisticsTrackAnAuthenticatedClient(t *testing.T) {
 	if err != nil || sample.Connections != expectedOnline || len(sample.Accounts) != 1 || sample.Accounts[0].CredentialID != "device-credential" || sample.Accounts[0].Connections != expectedOnline {
 		t.Fatal("open session was not counted as one online user", sample, err)
 	}
+	// On Linux Xray splices a plain TCP session (proxy.CopyRawConnIfExist) and
+	// adds the spliced downlink to the user counter only when the copy ends, so
+	// an open session may show upload bytes and zero download bytes.
 	counters, err := adapter.TrafficCounters(ctx)
-	if err != nil || len(counters) != 1 || counters[0].CredentialID != "device-credential" || counters[0].UploadBytes <= 0 || counters[0].DownloadBytes <= 0 {
+	if err != nil || len(counters) != 1 || counters[0].CredentialID != "device-credential" || counters[0].UploadBytes <= 0 {
 		t.Fatal("per-user delta missing next to the online count", counters, err)
 	}
+	download := counters[0].DownloadBytes
 	connection.Close()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -199,6 +203,17 @@ func TestRealOnlineStatisticsTrackAnAuthenticatedClient(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("closed session stayed online", sample, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for download <= 0 {
+		later, err := adapter.TrafficCounters(ctx)
+		if err == nil && len(later) == 1 && later[0].CredentialID == "device-credential" {
+			download += later[0].DownloadBytes
+		}
+		if download <= 0 && time.Now().After(deadline) {
+			t.Fatal("download bytes of the closed session never reached the user counter", later, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

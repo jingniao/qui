@@ -59,7 +59,18 @@ jobs:
           go build -trimpath -ldflags '-X main.version=1.0.0-storage-test' -o bin/proxy-agent-storage-test ./cmd/agent
       - name: Tests
         # platform/server took 34 min under -race at 141 tests (2026-10-28); there are 152 now.
-        run: go test -race -timeout 55m ./...
+        # Job logs need a signed-in viewer, so failing tests, panics and races
+        # are also raised as annotations (GitHub shows 10 per step), which the run
+        # page shows to anyone.
+        run: |
+          set -o pipefail
+          status=0
+          go test -race -timeout 55m ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log" || status=$?
+          if [ "$status" -ne 0 ]; then
+            grep -E -- '^(--- FAIL|FAIL|panic:|WARNING: DATA RACE)|_test\.go:[0-9]+:' "$RUNNER_TEMP/go-test.log" |
+              head -n 10 | while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit "$status"
         env:
           AGENT_BINARY: ${{ github.workspace }}/bin/proxy-agent-storage-test
       - name: Build the panel

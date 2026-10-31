@@ -100,6 +100,12 @@ func (d *Downloader) fetch(ctx context.Context, directory string, sequence int64
 	if err != nil {
 		return Candidate{}, err
 	}
+	// A response can still arrive, and its body read end without an error,
+	// after the deadline cancelled the request (seen in CI under -race), so
+	// that is reported as the cancellation rather than as a bad manifest.
+	if err := ctx.Err(); err != nil {
+		return Candidate{}, errors.Join(ErrDownload, err)
+	}
 	signed, err := release.Decode(data)
 	if err != nil {
 		return Candidate{}, err

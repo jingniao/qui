@@ -181,6 +181,36 @@ func TestCatalogueTrustAndCancellation(t *testing.T) {
 	}
 }
 
+// The CI failure of the test above: the deadline cancelled the request, yet an
+// empty 200 response was returned and read without an error.
+func TestFetchReportsCancellationWhenAResponseRacesTheDeadline(t *testing.T) {
+	server := httptest.NewTLSServer(http.NotFoundHandler())
+	defer server.Close()
+	d := trustedDownloader(t, server)
+	d.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+	})
+	options, _, policy, _ := historyFixture(t)
+	h, err := CreateHistory(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := d.Fetch(ctx, t.TempDir(), 1, policy, h); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("download cancellation lost", err)
+	}
+	if h.head.Number != 0 {
+		t.Fatal("cancellation advanced sequence")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestExpectedCommandManifestIsCheckedBeforeArtifactOrAcceptance(t *testing.T) {
 	options, signed, policy, _ := historyFixture(t)
 	manifest, _ := json.Marshal(signed)

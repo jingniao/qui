@@ -1163,9 +1163,9 @@
 | A2.3 | 本地证据：`TestClientRuleTemplateBackupRoundTrip`，真实备份/恢复候选 |
 | A2.4 | 本地证据：`TestExpandPerUser`，授权、空组 DIRECT 与警告 |
 | A3.1 | 本地证据：`TestGoldenProfiles`、`TestHostileNamesRoundTrip`，协议/传输/TLS 与恶意名字 |
-| A3.2 | awaiting CI/Owner：`TestMihomoAcceptsTheProfiles`，cores job 已固定核心与 geodata，未在本轮执行 |
+| A3.2 | CI 通过：CI 运行 41180456701（`0628a5b`） cores 作业全量实核步骤（mihomo 1.19.33 + 固定 geodata）运行 `TestMihomoAcceptsTheProfiles`；步骤未加 -v，逐测试未跳过由环境变量已设置推定 |
 | A3.3 | 本地证据：`TestLegacyExclusions`，排除类型与空组图 |
-| A3.4 | awaiting CI/Owner：`TestMihomoRoutesProxyDirectAndReject`，真实节点数据面不得以 golden 替代 |
+| A3.4 | CI 通过：CI 运行 41180456701（`0628a5b`） cores 作业全量实核步骤运行 `TestMihomoRoutesProxyDirectAndReject`（官方 Xray 26.3.27 作测试节点）；真实节点数据面仍属 RC |
 | A4.1 | 本地证据：web 构建、client-policy self-test，服务端模板；Phase 4 记录无浏览器 YAML 拼装 |
 | A4.2 | 本地证据：Phase 4 冲突处理/字段错误检查与 `TestRulesAPI`；完整浏览器走查另待 Owner |
 | A5.1 | 部分：`internal/panel/user/user_level_migration_test.go` 0/1/3 设备、策略与 WG fixtures；B3 副本实跑 awaiting Owner approval |
@@ -1188,22 +1188,22 @@
 
 | 编号 | 证据与状态 |
 | --- | --- |
-| A8.1 | awaiting CI/Owner：双次同 pin 构建比较、静态 ELF 与 provenance；本机缺 readelf（L7），不宣称可复现验收通过 |
-| A8.2 | awaiting CI/Owner：实际 release dry-run、两架构归档/溯源、SHA256SUMS、version/tag；脚本/工作流已有不等于产物已验收 |
+| A8.1 | CI 通过：CI 运行 41180456701（`0628a5b`） 两次独立 GOCACHE 构建 qui sing-box 1.14.4-qui.1，逐文件 cmp 一致；构建脚本 readelf 检查静态 ELF（无 PT_INTERP/DT_NEEDED）；version 含 with_v2ray_api 与 go1.26.10 |
+| A8.2 | 部分：CI 运行 41180456701（`0628a5b`） release dry-run 生成 amd64/arm64 面板+Agent 归档、qui sing-box 归档与 provenance，`sha256sum --check --strict` 通过、每项在 SHA256SUMS 中唯一、qui 归档与可复现构建逐字节一致；dry-run 仍用 `VERSION=1.1.0`，v1.2.0 的 version/tag 待改为 1.2.0 后复核 |
 | A8.3 | 本地证据：Phase 8 34 项 installer fixtures，qui/official、glibc/musl、篡改拒绝；root/Linux 服务级行为留 Owner |
 | A8.4 | 本地证据：Phase 8 严格来源 URL/lookalike/能力与队列拒绝测试 |
-| A9.1 | 部分：两套 tag/no-tag golden 本地证据；原生 `sing-box check` awaiting CI/Owner |
-| A9.2 | awaiting CI/Owner：两用户 VLESS/Trojan/Hysteria2/TUIC、载荷 5% 与 Xray parity 的 env-gated 实核套件 |
-| A9.3 | 本地证据：Phase 9 累计计数、spool/游标重启、重试和 epoch 假服务回归；实核重启路径另待 CI |
-| A9.4 | 部分：render/free-port/non-loopback 拒绝本地证据；原生启动的 loopback 观察 awaiting CI/Owner |
+| A9.1 | CI 通过：tag/no-tag golden 本地证据；原生 `sing-box check` 在 CI 运行 41180456701（`0628a5b`） 官方 1.14.3 与 qui 1.14.4-qui.1 两个实核步骤均通过 |
+| A9.2 | CI 通过：CI 运行 41180456701（`0628a5b`） “Qui sing-box real-core tests” 步骤（SINGBOX_BINARY 为 qui 构建，XRAY_BINARY 为官方 26.3.27）运行两用户多协议载荷与 Xray parity 套件 |
+| A9.3 | 本地证据：Phase 9 累计计数、spool/游标重启、重试和 epoch 假服务回归；实核重启路径在 CI 运行 41180456701（`0628a5b`） 两个 sing-box 实核步骤中通过 |
+| A9.4 | CI 通过：render/free-port/non-loopback 拒绝本地证据；原生启动的 loopback 观察在 CI 运行 41180456701（`0628a5b`） 实核步骤中通过 |
 | A9.5 | 本地证据：Phase 9 sing-box-only 流量超额触发自动版本的面板测试 |
 | A10.1 | 本地证据：`TestAdmissionOrderStickyReleasePromotionLimitsResetAndIPv6`，假时钟顺序/窗口/升降限制/跨节点/中转排除 |
 | A10.2 | 本地证据：`TestLeaseTTLRefreshExpiryAndInvalidFailOpen`、`TestDeviceGateNegotiationOldAgentsAndReconnect`，租约与 mTLS 重连 |
-| A10.3 | awaiting CI/Owner：Xray scope/established/balancer/reload/UDP 与 sing-box source/close 套件；Hysteria2/TUIC UDP 数据报还需专项实验（L8），Xray 本身无此入站 |
+| A10.3 | 部分：CI 运行 41180456701（`0628a5b`） “Phase 10 device gates” 与全量实核步骤通过 Xray scope/established/balancer/reload/UDP 与 sing-box source/close 套件（官方与 qui sing-box）；Hysteria2/TUIC UDP 数据报门控仍需专项实验（L8），Xray 本身无此入站 |
 | A10.4 | 本地证据：`TestDeviceLimitViewsResetPrivacyAndOldNodePartial` 与 mTLS 能力协商，旧 Agent 不收门控并显示节点名 |
-| A10.5 | awaiting Owner approval：面板主机 -race；先前 Windows 尝试退出 1（cgo/gcc 不可用），本轮不冒充运行 |
+| A10.5 | 部分：GitHub runner 上 `go test -race -timeout 55m ./...` 在 CI 运行 41180456701（`0628a5b`） 与推送运行 41180455994 均通过，无 DATA RACE（最慢 platform/server 1425 s）；面板主机以 nobody 运行仍 awaiting Owner approval |
 | A10.6 | 本地证据：全表/备份/accepted-message 无源地址断言及 `TestAddressImplementationsHaveNoPersistenceOrLoggingCalls`，两视图掩码 |
-| A11.1 | 部分：本轮完整本地 gate 与 A.7 的真实结果见进度 Phase 11；main CI（含 race/cores）awaiting Owner approval，无 push，不触发 |
+| A11.1 | 部分：CI 运行 41180456701（`0628a5b`）（cores + check）与推送运行 41180455994（check）在 release/v1.2.0 上全部通过，cores 作业首次通过；修复见进度“Native-core CI on release/v1.2.0”；arm64 qemu/实机、RC 与发布仍待 Owner |
 | A11.2 | awaiting Owner approval：RC2 未执行，进度 Phase 11 有三主机清单；先解决 L4 |
 | A11.3 | 未满足：仍有 P1/P2 发布阻塞/验收缺口，优先级见进度 Phase 11；arm64 version/check/qemu Agent 验证待安排，真实 arm64 主机未验证 |
 | A11.4 | awaiting Owner approval：未打 tag、未发布、未部署；进度 Phase 11 有发布清单 |
@@ -1224,13 +1224,15 @@
 | AU3.2 | 部分：Part I 本地月界/时区/retained samples 求和测试；清理后的完整历史月缺口 L9，待明确保留/聚合方案 |
 | AU4.1 | 本地证据：`TestTCPProbeAddressPolicyAndLimits`、`TestTCPProbeOwnerLimitsRetentionAndOldAgent`、`TestTCPProbeFixedOperationOverAuthenticatedStream`；特殊用途 IP 拒绝含审查修复 |
 | AU5.1 | 本地证据：U5 SSRF/逐跳解析固定 IP、大小/时间边界、parser fuzz seeds、失败来源/取消与缓存读取测试；未运行额外长时 fuzz campaign |
-| AU5.2 | awaiting CI/Owner：`TestMihomoAcceptsClientDialerProxyChain`，本机不运行下载的核心（L6） |
-| AU6.1 | 部分：两核 `TestForwardGolden` 与 `TestForwardCanvasPublishCapabilityAndIdentity` 本地证据；原生 check/TCP/UDP `TestRealForward` 及受管节点转发 awaiting CI/Owner（L10） |
-| AU7.1 | 部分：`TestRuleProviderEndpoint` 本地 Token/403/classical 文本证据；mihomo 原生接受 awaiting CI/Owner，与 A3.2 共用 cores 作业 |
+| AU5.2 | CI 通过：CI 运行 41180456701（`0628a5b`） cores 作业全量实核步骤运行 `TestMihomoAcceptsClientDialerProxyChain`（L6 的原生检查部分） |
+| AU6.1 | 部分：两核 `TestForwardGolden` 与 `TestForwardCanvasPublishCapabilityAndIdentity` 本地证据；原生 check/TCP/UDP `TestRealForward` 在 CI 运行 41180456701（`0628a5b`） 的 “Part I forward” 步骤通过；受管节点转发待实机（L10） |
+| AU7.1 | CI 通过：`TestRuleProviderEndpoint` 本地 Token/403/classical 文本证据；mihomo 原生接受与 A3.2 同在 CI 运行 41180456701（`0628a5b`） cores 作业通过 |
 | AU8.1 | 本地证据：`TestTrafficResetCalendarFakeClock`、`TestTrafficResetDueTimezoneIdempotentAndDisabled`、`TestCycleSchedulerReactivatesThroughAutomaticRevision`，短月/闰年/时区/清零再启用 |
 
 ### 10.4 限制和证据边界
 
-L1 限速已移除；L2 调优/内核转发未批准；L3 无 Agent 的导入隧道不可用；L4 RC 安装阻塞；L5 导入类型和仅 mihomo 客户端链；L6 原生链检查与恢复保留当前撤销状态；L7 构建/dry-run；L8 UDP 门控；L9 样本保留月汇总；L10 TCP 测量范围与无身份转发。完整说明见计划 §12.3 与 [发布草稿](release-notes-1.1.0.md)。
+L1 限速已移除；L2 调优/内核转发未批准；L3 无 Agent 的导入隧道不可用；L4 RC 安装阻塞；L5 导入类型和仅 mihomo 客户端链；L6 原生链检查（2026-10-31 CI 通过）与恢复保留当前撤销状态；L7 构建/dry-run（2026-10-31 CI 通过，dry-run 版本号仍为 1.1.0）；L8 Hysteria2/TUIC UDP 数据报门控（其余原生门控 2026-10-31 CI 通过）；L9 样本保留月汇总；L10 TCP 测量范围与无身份转发。完整说明见计划 §12.3 与 [发布草稿](release-notes-1.1.0.md)。
+
+原生核心 CI（2026-10-31）：release/v1.2.0 上 `0628a5b` 的手动运行 41180456701（cores + check）与推送运行 41180455994（check）全部通过，固定版本 Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1。cores 作业此前从未通过。实核步骤未加 `-v`，日志只有逐包 `ok`：所有实核测试所需的 `XRAY_BINARY`/`SINGBOX_BINARY`/`MIHOMO_BINARY`/`MIHOMO_HOME` 均已设置，需要非回环 IPv4 的测试与必须有该地址的门控测试一同通过，因此推定未跳过，但没有逐测试记录。多核心（一个 Agent 同时运行 Xray 与 sing-box）只有假核心测试，没有原生 CI 覆盖。
 
 R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–F31、B1–B11 的实现与审查证据分别留在 U1/U2、Phases 1–10、U5 和 Part I 记录，不把 F29 的保留样本结果称为完整月统计。原生核心工作流虽已有双架构构建，现有 check.yml 无 qemu Agent 测试步骤，arm64 version/check 与 Agent/qemu 验收仍是待办，未改 CI 冒充完成。

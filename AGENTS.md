@@ -8,11 +8,13 @@
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
 
-当前工作入口见 [v1.1 计划](docs/v1.1-plan.md) 与 [进度记录](docs/v1.1-progress.md)，历史轻量化决策见 [轻量重构计划](docs/lightweight-refactor-plan.md)。系统组成见 [架构总览](docs/architecture.md)，部署与运维见 [部署与升级](docs/deployment.md) 和 [运维手册](docs/operations.md)，完成标准见 [验收矩阵](docs/v1-acceptance.md)。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；实现已完成本地审查，原生核心 CI、面板主机 -race、RC 与发布仍待验收。v1.2 的范围与结果见 [v1.2 计划](docs/v1.2-plan.md) 与 [v1.2 变更报告](docs/v1.2-ui-change-report.md)；v1.1 与 v1.2 合并为 v1.2.0 发布（尚未发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
+当前工作入口见 [v1.1 计划](docs/v1.1-plan.md) 与 [进度记录](docs/v1.1-progress.md)，历史轻量化决策见 [轻量重构计划](docs/lightweight-refactor-plan.md)。系统组成见 [架构总览](docs/architecture.md)，部署与运维见 [部署与升级](docs/deployment.md) 和 [运维手册](docs/operations.md)，完成标准见 [验收矩阵](docs/v1-acceptance.md)。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；实现已完成本地审查；release/v1.2.0 的 CI（原生核心 cores 作业与 runner 上的 `-race`）已于 2026-10-31 通过，面板主机 -race、多核心原生验收、Hysteria2/TUIC UDP 门控（L8）、arm64、RC 与发布仍待验收。v1.2 的范围与结果见 [v1.2 计划](docs/v1.2-plan.md) 与 [v1.2 变更报告](docs/v1.2-ui-change-report.md)；v1.1 与 v1.2 合并为 v1.2.0 发布（尚未发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
 
 ## 变更记录
 
 **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，发布说明仍为草稿。
+
+- 原生核心 CI（2026-10-31，见[验收矩阵](docs/v1-acceptance.md) §10.4 与[进度记录](docs/v1.1-progress.md)“Native-core CI on release/v1.2.0”）：`0628a5b` 的 cores 作业（Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1 可复现构建与双架构 release dry-run）与 check 作业（`go test -race`）全部通过，cores 作业首次通过。产品修复一项：外部订阅抓取在截止时间切断连接后读到的残缺正文不再被当作完整订阅缓存（`07253f9`）。其余为 v1.1 后过时的实核测试与 Xray 26.3.27 的配置要求（带 fallbackTag 的 balancer 需要 observatory，生产渲染一直会生成）。已知上游行为：Linux 上 Xray 对可 splice 的 TCP 路径在连接关闭后才计入用户下行字节，额度判定随之推迟（第 9.1 节）。未发布。
 
 - K3b（2026-10-29）：面板多核心支持：`Hello/Welcome` 协商 `multi_core_supported` 与独立的 `node_traffic_supported`；按核心保存能力/版本/标志与心跳健康、启动时间、统计源状态，旧 Agent 仍按一个核心建模，缺测保持未知。入站 `core` 进入草稿、DesiredState、自动额度版本、恢复与订阅，空值等于当前主核心，保存与发布按选中核心校验协议、转发、WireGuard、门控与跨核心端口唯一。核心更新任务改为每（节点、组件）一个（迁移 0125 回填既有行），缺失组件可用 schema-2 请求安装，结果按组件路由，成功且能力刷新后才可选。Owner 移除核心：`POST /nodes/{id}/cores/{component}/remove` 与 `removals`，幂等 `RemoveCoreCommand/Result`，断线后用同一身份重发，拒绝 `core_in_use`/`core_pending`/`last_core`/`revision_mismatch`，能力确认前组件仍可见。协商会话中的 node 计数器按（节点、epoch、凭据）增量计入每核心/节点总量，绝不进入额度或重复计入账户总量，同一节点可有多个活跃 epoch。连接观测按（节点、核心）合并活跃源地址后再做设备准入，保留掩码、易失存储、TTL 与放行行为；每个入站按所属核心显示 D5 覆盖。分区重启/健康检查带核心字段，移除核心后的历史回滚在面板侧直接拒绝并说明原因。备份、校验、清单与恢复覆盖新列/新表；未发布，Linux/root 实机验收待完成。
 
@@ -527,7 +529,7 @@ Viewer 默认不能：
 1. Agent 每 5 秒采样账户计数写入本地队列，并在心跳中批量上报（面板当前指定 15 秒心跳）。
 2. 面板把增量累加到 `used_traffic`（凭据能对应到设备时同时累加到设备用量）。
 3. 用户处于超限、到期或禁用状态时，面板自动创建并部署一个**只调整用户访问面**的配置版本，把该用户的凭据从节点配置中移除；提额、清零、续期或启用同样触发一次自动版本；删除用户或设备同样自动移除其凭据，无需重新发布。自动版本以节点**已发布**状态为基线，除用户与入站的绑定外（见 22.1）不会带出未发布的 Owner 编辑。
-4. **超额窗口**：在**正常路径**上（节点在线、读取与发布都成功、没有其他部署占用该节点），从超限到被切断最多经过一个上报周期（当前 15 秒）＋最长 60 秒的合并窗口＋发布耗时；每次重试再加一个窗口。这段时间的流量仍会放行并计入用量。这是被接受的取舍。
+4. **超额窗口**：在**正常路径**上（节点在线、读取与发布都成功、没有其他部署占用该节点），从超限到被切断最多经过一个上报周期（当前 15 秒）＋最长 60 秒的合并窗口＋发布耗时；每次重试再加一个窗口。这段时间的流量仍会放行并计入用量。这是被接受的取舍。例外：Linux 上官方 Xray 对可 splice 的 TCP 路径（如 SOCKS5/HTTP/端口转发入站经 Direct 出站、识别出内层 TLS 后的 XTLS Vision）在 splice 结束（通常是连接关闭）后才把下行字节计入用户，长连接的下行用量与超额判定因此推迟到连接结束后（2026-10-31 原生核心 CI 确认）。
 5. **每用户额度统计有账户计数能力的节点**：Xray 及携带 `with_v2ray_api`、并上报 `singbox_user_stats` 的 sing-box。官方 sing-box 无此能力时仍只报节点总量，每用户未知，页面说明未计入范围；qui sing-box 的用户流量开始计入统一额度是升级行为变化。协议载荷对比与原生核心验收仍待 CI/Owner，不能以本地假服务测试代替。
 
 ## 9.2 用户接入身份与设备限制

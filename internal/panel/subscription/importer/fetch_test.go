@@ -115,15 +115,17 @@ func TestFetchSizeAndTotalTimeout(t *testing.T) {
 	f, _, _ := fetchFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		w.(http.Flusher).Flush()
+		// Without the total timeout the body arrives after 10 s and Fetch
+		// succeeds; the 5 s bound below leaves room for a slow -race runner.
 		select {
 		case <-r.Context().Done():
-		case <-time.After(time.Second):
+		case <-time.After(10 * time.Second):
 		}
 		fmt.Fprint(w, "late")
 	})
 	f.Timeout = 30 * time.Millisecond
 	start := time.Now()
-	if _, err := f.Fetch(context.Background(), "https://example.com"); err == nil || time.Since(start) > 500*time.Millisecond {
-		t.Fatal("total timeout not enforced")
+	if _, err := f.Fetch(context.Background(), "https://example.com"); err == nil || time.Since(start) > 5*time.Second {
+		t.Fatalf("total timeout not enforced: err=%v after %s", err, time.Since(start))
 	}
 }

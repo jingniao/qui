@@ -117,7 +117,10 @@ func TestLatencyBucketsAndRawPoints(t *testing.T) {
 func TestLatencyFullWeekPointLimit(t *testing.T) {
 	r, id := latencyFixture(t)
 	// One statement populates a full week for both targets without per-row commits.
-	start := time.Now().UTC().Truncate(time.Minute).Add(-7*24*time.Hour + time.Minute)
+	// The handler's window starts at its own time.Now() minus 168 h, so the week
+	// starts a few minutes late: a minute boundary passing before the read
+	// (CI under -race) must not push the oldest sample out of the window.
+	start := time.Now().UTC().Truncate(time.Minute).Add(-7*24*time.Hour + 5*time.Minute)
 	if _, err := r.Database.Exec(`WITH RECURSIVE minutes(i) AS (
     VALUES(0) UNION ALL SELECT i+1 FROM minutes WHERE i<10079
 )

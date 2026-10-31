@@ -39,6 +39,7 @@ func (s *Service) Me(ctx context.Context, id string) (Profile, error) {
 		p.OnlineDevices = view.OnlineDevices
 		p.DeviceLimitEnforced = view.Enforced
 		p.DeviceLimitUnsupportedNodes = view.UnsupportedNodes
+		p.DeviceLimitUDPUnsupported = view.UDPUnsupported
 	}
 	p.Reason = user.InactivityReason(u, time.Now())
 	for _, protocol := range u.AllowedProtocols {

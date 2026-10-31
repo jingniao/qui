@@ -11,6 +11,7 @@ import (
 	"proxycontrol/internal/testutil"
 	"proxycontrol/pkg/contracts/access"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -18,18 +19,20 @@ import (
 
 // L8: the TCP gate tests do not show that a gated user's UDP stops. This one
 // keeps one SOCKS UDP association open through a client core, gates the user's
-// source with the supervisor's 2 s re-apply, and records how much UDP still
-// passes. CI runs 41209714944 and 41214032573 found that Hysteria2 and TUIC UDP
-// is not gated at all: sing-quic recreates a closed UDP session for the same
-// user on the next datagram.
+// source with the supervisor's 2 s re-apply and checks the measured behaviour
+// the panel labels rely on (2026-10-31, official 1.14.3 and the qui build):
+// VLESS and Trojan carry UDP inside the gated stream, so it stops; Shadowsocks,
+// Hysteria2 and TUIC recreate a closed UDP session for the same user on the
+// next datagram (sing-quic for the QUIC two), so their UDP keeps passing and is
+// marked unsupported. SOCKS5 UDP cannot be attributed at all; see
+// TestRealSingboxSocksUDPDoesNotBreakTheGate.
 func TestRealDeviceGateSingboxUDP(t *testing.T) {
 	binary := os.Getenv("SINGBOX_BINARY")
 	if binary == "" {
 		t.Skip("awaiting CI/Owner run: SINGBOX_BINARY")
 	}
-	// Every sing-box inbound that carries UDP; the TCP-carried ones are measured
-	// too, so the panel marks exactly the protocols whose UDP escapes the gate.
-	for _, protocol := range []string{"socks5", "shadowsocks", "vless", "trojan", "hysteria2", "tuic"} {
+	gated := map[string]bool{"vless": true, "trojan": true, "shadowsocks": false, "hysteria2": false, "tuic": false}
+	for _, protocol := range []string{"shadowsocks", "vless", "trojan", "hysteria2", "tuic"} {
 		t.Run(protocol, func(t *testing.T) {
 			ctx := context.Background()
 			source := testutil.GateSource(t)
@@ -118,9 +121,8 @@ func TestRealDeviceGateSingboxUDP(t *testing.T) {
 					}
 				}
 			}()
-			// Measurement only, until the expected UDP behaviour is decided: how
-			// much UDP still passes on the established and on a fresh association
-			// while the gate is in force.
+			// How much UDP still passes on the established and on a fresh
+			// association while the gate is in force.
 			fresh := socksUDPAssociate(t, proxy, local.Username, local.Secret)
 			passedOld, passedFresh, probes := 0, 0, 0
 			firstOldFailure := time.Duration(-1)
@@ -138,10 +140,80 @@ func TestRealDeviceGateSingboxUDP(t *testing.T) {
 			}
 			stopTicks()
 			for err := range ticks {
-				t.Logf("L8 %s: gate tick failed: %v", protocol, err)
+				t.Errorf("gate tick failed: %v", err)
 			}
 			t.Logf("L8 %s: over 8 s with the gate in force and 2 s ticks, %d/%d probes passed on the established association (first failure after %v; -1 means none) and %d/%d on a fresh one", protocol, passedOld, probes, firstOldFailure, passedFresh, probes)
+			if gated[protocol] && (firstOldFailure < 0 || firstOldFailure > 3*time.Second) {
+				t.Fatalf("%s UDP is documented as gated, but the established flow kept passing", protocol)
+			}
+			if !gated[protocol] && passedOld*2 < probes {
+				t.Fatalf("%s UDP is documented as not gated, but it stopped; update the unsupported marking (node.DeviceGateUDPUnsupported)", protocol)
+			}
 		})
+	}
+}
+
+// One user's SOCKS5 UDP association cannot be tied to that user (its datagrams
+// come from another port than the control connection), so the observation
+// leaves it out instead of failing: before, a single open SOCKS5 UDP flow made
+// every snapshot fail ("device observation join incomplete") and switched the
+// device limit off for every user of the core.
+func TestRealSingboxSocksUDPDoesNotBreakTheGate(t *testing.T) {
+	binary := os.Getenv("SINGBOX_BINARY")
+	if binary == "" {
+		t.Skip("awaiting CI/Owner run: SINGBOX_BINARY")
+	}
+	ctx := context.Background()
+	source := testutil.GateSource(t)
+	target := testutil.GateEcho(t)
+	origin := udpEchoServer(t)
+	s := stateFixture(t, "http", freePort(t))
+	s.Users = append(s.Users, desiredstate.User{ID: "udp-user", Enabled: true})
+	s.Credentials = append(s.Credentials, desiredstate.Credential{ID: "udp-credential", UserID: "udp-user", DeviceID: "udp-device", Protocol: "socks5", Username: "udp-user", Secret: "udp-user-password"})
+	s.Inbounds = append(s.Inbounds, desiredstate.Inbound{ID: "socks-entry", Protocol: "socks5", Listen: "127.0.0.1", Port: freePort(t), Enabled: true, DefaultOutbound: "direct", CredentialIDs: []string{"udp-credential"}})
+	server := &Adapter{Path: binary, Directory: t.TempDir(), NodeID: s.NodeID}
+	defer server.Close()
+	server.ConfigureRuntime(core.RuntimeHooks{EnableStats: true, AccessSink: func(access.Rollup) error { return nil }})
+	config, err := server.Render(ctx, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := server.Apply(ctx, config); err != nil || !result.Success {
+		t.Fatal(result, err)
+	}
+	udp := socksUDPAssociate(t, net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Inbounds[1].Port)), "udp-user", "udp-user-password")
+	if !udp.exchange(origin) {
+		t.Fatal("baseline SOCKS5 UDP failed")
+	}
+	tunnel, err := testutil.GateTunnel(net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Inbounds[0].Port)), target, "sing-user", s.Credentials[0].Secret, source)
+	if err != nil {
+		t.Fatal("tunnel failed")
+	}
+	defer tunnel.Close()
+	if !testutil.GateRoundTrip(tunnel) {
+		t.Fatal("baseline HTTP tunnel failed")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		sample, err := server.ConnectionSnapshot(ctx)
+		if err == nil && len(sample.Accounts) > 0 && slices.Contains(sample.Accounts[0].AddressKeys, source.String()) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("an open SOCKS5 UDP flow still breaks the observation:", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	command, _ := json.Marshal(map[string]any{"ttl_seconds": 180, "entries": []map[string]any{{"credential_id": "credential", "keys": []string{source.String()}}}})
+	started := time.Now()
+	if err := server.SetDeviceGate(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	if testutil.GateRoundTrip(tunnel) || time.Since(started) > 3*time.Second {
+		t.Fatal("the gated HTTP user was not closed while a SOCKS5 UDP flow was open")
+	}
+	if !udp.exchange(origin) {
+		t.Fatal("the other user's SOCKS5 UDP stopped")
 	}
 }
 

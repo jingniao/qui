@@ -13,6 +13,7 @@
         <section class="panel-card p-6 space-y-3"><h2 class="font-semibold">在线设备 / 上限</h2><p>{{ data.me.onlineDevices ?? '未知' }} / {{ data.me.deviceLimit === 0 ? '不限' : data.me.deviceLimit ?? '—' }}</p>
           <p v-if="data.me.deviceLimit !== null && data.me.deviceLimit > 0 && data.me.onlineDevices !== null && data.me.onlineDevices >= data.me.deviceLimit" class="text-amber-700">设备数量已达上限</p>
           <p v-if="!data.me.deviceLimitEnforced" class="text-xs text-amber-700">部分执行：{{ data.me.deviceLimitUnsupportedNodes?.join('、') }}</p>
+          <p v-if="data.me.deviceLimitUdpUnsupportedProtocols?.length" class="text-xs text-ios-secondary">{{ udpUnsupportedText(data.me.deviceLimitUdpUnsupportedProtocols) }}</p>
           <p v-for="(item, index) in onlineAddresses" :key="index" class="text-xs font-mono">{{ item.address }} · {{ item.allowed ? '允许' : '受限' }} · {{ item.active ? '活跃' : '等待释放' }}</p>
           <details class="text-xs text-ios-secondary"><summary>设备上限的限制与隐私</summary><p v-for="help in deviceLimitHelp" :key="help" class="mt-2">{{ help }}</p></details>
           <p v-if="data.me.wireGuardNote" class="text-xs text-ios-secondary">{{ data.me.wireGuardNote }}</p>
@@ -58,7 +59,7 @@
 </template>
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { deviceLimitHelp } from '../app/deviceLimit';
+import { deviceLimitHelp, udpUnsupportedText } from '../app/deviceLimit';
 const onlineAddresses = ref<{ address: string; allowed: boolean; active: boolean }[]>([]);
 import { portalAPI, type Snapshot, type Traffic } from './api';
 import { generateQRCodeSVG } from '../app/qrcode';

@@ -8,6 +8,7 @@ import (
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/devicegate"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -36,6 +37,9 @@ type DevicesOnline struct {
 	DeviceLimit      int                      `json:"deviceLimit"`
 	Enforced         bool                     `json:"deviceLimitEnforced"`
 	UnsupportedNodes []string                 `json:"deviceLimitUnsupportedNodes"`
+	// UDPUnsupported lists the protocols of this user's inbounds whose UDP is
+	// not limited (node.DeviceGateUDPUnsupported); TCP on them still is.
+	UDPUnsupported []string `json:"deviceLimitUdpUnsupportedProtocols"`
 }
 
 func entryCredentials(state desiredstate.State) map[string]string {
@@ -118,7 +122,7 @@ func (o *DeviceObserver) Reset(ctx context.Context, userID string) {
 	o.Changed()
 }
 func (o *DeviceObserver) View(ctx context.Context, u User) (DevicesOnline, error) {
-	v := DevicesOnline{Items: []connections.DeviceView{}, DeviceLimit: u.DeviceLimit, UnsupportedNodes: []string{}}
+	v := DevicesOnline{Items: []connections.DeviceView{}, DeviceLimit: u.DeviceLimit, UnsupportedNodes: []string{}, UDPUnsupported: []string{}}
 	if o == nil {
 		return v, nil
 	}
@@ -173,6 +177,9 @@ func (o *DeviceObserver) View(ctx context.Context, u User) (DevicesOnline, error
 				supported = false
 				continue
 			}
+			if node.DeviceGateUDPUnsupported(core.Name, in.Protocol) && !slices.Contains(v.UDPUnsupported, in.Protocol) {
+				v.UDPUnsupported = append(v.UDPUnsupported, in.Protocol)
+			}
 			if n.Capabilities.MultiCoreSupported {
 				part, ok := o.Store.CoreSnapshots(n.ID)[core.Name]
 				if !ok || !part.DeviceGateSupported {
@@ -185,6 +192,7 @@ func (o *DeviceObserver) View(ctx context.Context, u User) (DevicesOnline, error
 		}
 	}
 	sort.Strings(v.UnsupportedNodes)
+	sort.Strings(v.UDPUnsupported)
 	v.Enforced = len(v.UnsupportedNodes) == 0
 	return v, nil
 }

@@ -46,6 +46,7 @@ func (h *Handler) observe(ctx context.Context, account *User) {
 			account.OnlineDevices = view.OnlineDevices
 			account.DeviceLimitEnforced = view.Enforced
 			account.DeviceLimitUnsupportedNodes = view.UnsupportedNodes
+			account.DeviceLimitUDPUnsupported = view.UDPUnsupported
 		}
 	}
 	if h.Observations == nil {

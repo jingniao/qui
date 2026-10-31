@@ -3,7 +3,7 @@ import { reactive } from 'vue';
 export interface Profile {
   id: string; username: string; displayName: string; status: string; reason: string;
   trafficLimit: number; usedTraffic: number; expiresAt: string; allowedProtocols: string[];
-  deviceLimitEnforced: boolean; deviceLimitUnsupportedNodes: string[];
+  deviceLimitEnforced: boolean; deviceLimitUnsupportedNodes: string[]; deviceLimitUdpUnsupportedProtocols?: string[] | null;
  deviceLimit: number | null; onlineDevices: number | null; wireGuardNote: string;
 }
 export interface PortalNode { id: string; name: string; region: string; online: boolean; }

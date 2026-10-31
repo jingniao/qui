@@ -15,6 +15,7 @@ type Profile struct {
 	AllowedProtocols            []string `json:"allowedProtocols"`
 	DeviceLimitEnforced         bool     `json:"deviceLimitEnforced"`
 	DeviceLimitUnsupportedNodes []string `json:"deviceLimitUnsupportedNodes"`
+	DeviceLimitUDPUnsupported   []string `json:"deviceLimitUdpUnsupportedProtocols"`
 	DeviceLimit                 *int     `json:"deviceLimit"`
 	OnlineDevices               *int     `json:"onlineDevices"`
 	WireGuardNote               string   `json:"wireGuardNote"`

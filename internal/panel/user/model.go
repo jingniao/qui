@@ -22,6 +22,7 @@ type User struct {
 	OnlineDevices               *int     `json:"onlineDevices"`
 	DeviceLimitEnforced         bool     `json:"deviceLimitEnforced"`
 	DeviceLimitUnsupportedNodes []string `json:"deviceLimitUnsupportedNodes"`
+	DeviceLimitUDPUnsupported   []string `json:"deviceLimitUdpUnsupportedProtocols"`
 	LoginEnabled                bool     `json:"loginEnabled"`
 	ID                          string   `json:"id"`
 	Username                    string   `json:"username"`

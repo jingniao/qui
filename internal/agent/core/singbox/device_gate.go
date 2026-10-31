@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"proxycontrol/pkg/contracts/traffic"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,8 @@ type sourceConnection struct {
 	Metadata struct {
 		SourceIP   string `json:"sourceIP"`
 		SourcePort string `json:"sourcePort"`
+		Network    string `json:"network"`
+		Type       string `json:"type"`
 	} `json:"metadata"`
 }
 
@@ -28,6 +31,20 @@ func sourceEndpoint(c sourceConnection) (string, bool) {
 		return "", false
 	}
 	return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port()).String(), true
+}
+
+// unattributable reports a flow the core cannot tie to a user by design: the
+// datagrams of a SOCKS5 UDP association come from another source port than its
+// authenticated control connection, so the user log never names them. They are
+// left out of the device observation, where SOCKS5 UDP is marked unsupported,
+// instead of failing the observation (and the gate) for every user of the core.
+func (a *Adapter) unattributable(c sourceConnection) bool {
+	if c.Metadata.Network != "udp" || a.current.AccessContext == nil {
+		return false
+	}
+	_, tag, ok := strings.Cut(c.Metadata.Type, "/")
+	inbound, found := a.current.AccessContext.Inbounds[tag]
+	return ok && found && inbound.Protocol == "socks5"
 }
 func (a *Adapter) clash(ctx context.Context, method, path string) ([]byte, error) {
 	host, _, err := net.SplitHostPort(a.current.StatsEndpoint)
@@ -71,18 +88,23 @@ func (a *Adapter) sourceConnections(ctx context.Context) ([]sourceConnection, ma
 		return nil, nil, errors.New("device observation API fields unavailable")
 	}
 	active := map[string]bool{}
+	list := []sourceConnection{}
 	for _, c := range *doc.Connections {
 		ep, ok := sourceEndpoint(c)
 		if !ok || c.ID == "" {
 			return nil, nil, errors.New("device observation API fields unavailable")
 		}
+		if a.unattributable(c) {
+			continue
+		}
 		active[ep] = true
+		list = append(list, c)
 	}
 	users, ok := a.sourceWriter.SourceUsers(active)
 	if !ok {
 		return nil, nil, errors.New("device observation source unavailable")
 	}
-	return *doc.Connections, users, nil
+	return list, users, nil
 }
 func (a *Adapter) ConnectionSnapshot(ctx context.Context) (traffic.ConnectionSnapshot, error) {
 	a.mu.Lock()

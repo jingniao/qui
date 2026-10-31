@@ -78,6 +78,8 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 		gate := core.DeviceGateSupported && inbound.Protocol != "wireguard" && inbound.Protocol != "forward"
 		inbound.UserTrafficSupported = &supported
 		inbound.DeviceGateSupported = &gate
+		coverage := node.DeviceGateCoverage(core, inbound.Protocol)
+		inbound.DeviceGateCoverage = &coverage
 	}
 	inbound.HasTLSKey = inbound.Settings.PrivateKeyPEM != ""
 	inbound.HasWireGuardKey = inbound.Settings.WireGuard != nil && inbound.Settings.WireGuard.SecretKey != ""

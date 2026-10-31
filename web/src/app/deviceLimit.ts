@@ -6,5 +6,20 @@ export const deviceLimitHelp = [
   '面板失联后 gate 在 3 分钟内过期，自动放行。旧 Agent、能力不足或观测失败的节点只能部分执行。',
   'WireGuard 一次只能在一台设备上使用，不计数、不限制。',
   '来源地址只在内存中处理，不存储、不记日志、不备份；管理员与用户界面统一掩码为 IPv4 /24、IPv6 /48。',
-  'Xray SOCKS5 UDP 不携带用户身份，无法按用户限制；其他协议的 UDP 能力仍待真实核心验收。'
+  '以下入站的 UDP 不受设备限制（TCP 仍受限制）：Xray 与 sing-box 的 SOCKS5，以及 sing-box 的 Shadowsocks、Hysteria2、TUIC。VLESS、Trojan 的 UDP 与 Xray 的 Shadowsocks UDP 受限制。'
 ];
+
+const protocolNames: Record<string, string> = { socks5: 'SOCKS5', shadowsocks: 'Shadowsocks', hysteria2: 'Hysteria2', tuic: 'TUIC' };
+
+/** Mirrors node.DeviceGateUDPUnsupported (internal/panel/node/multi_core.go). */
+export function deviceGateUdpUnsupported(core: string | null | undefined, protocol: string): boolean {
+  if (core === 'xray') return protocol === 'socks5';
+  if (core === 'sing-box') return ['socks5', 'shadowsocks', 'hysteria2', 'tuic'].includes(protocol);
+  return false;
+}
+
+/** The "不支持" line for protocols whose UDP the device limit cannot reach. */
+export function udpUnsupportedText(protocols: string[] | null | undefined): string {
+  if (!protocols?.length) return '';
+  return '不支持：' + protocols.map((p) => protocolNames[p] ?? p).join('、') + ' 的 UDP 不受设备限制';
+}

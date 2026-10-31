@@ -109,3 +109,32 @@ func validateRemoveResult(r *pb.RemoveCoreResult) error {
 	}
 	return nil
 }
+
+// DeviceGateUDPUnsupported reports whether a gated user's UDP on an inbound of
+// this protocol, served by this core, escapes the device limit. Measured with
+// the real cores (docs/v1.1-progress.md, L8): Xray SOCKS5 UDP carries no user
+// identity; sing-box SOCKS5 UDP cannot be tied to the user, and sing-box
+// Shadowsocks, Hysteria2 and TUIC recreate a closed UDP session for the same
+// user on the next datagram. TCP on these inbounds is still limited.
+func DeviceGateUDPUnsupported(core, protocol string) bool {
+	switch core {
+	case "xray":
+		return protocol == "socks5"
+	case "sing-box":
+		return protocol == "socks5" || protocol == "shadowsocks" || protocol == "hysteria2" || protocol == "tuic"
+	}
+	return false
+}
+
+// DeviceGateCoverage is how far the device limit reaches on an inbound: "full",
+// "tcp_only" (UDP is not limited, see DeviceGateUDPUnsupported) or "none"
+// (the core cannot gate, or the inbound has no user identity).
+func DeviceGateCoverage(core *pb.CoreCapability, protocol string) string {
+	switch {
+	case core == nil || !core.DeviceGateSupported || protocol == "wireguard" || protocol == "forward":
+		return "none"
+	case DeviceGateUDPUnsupported(core.Name, protocol):
+		return "tcp_only"
+	}
+	return "full"
+}

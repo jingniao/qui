@@ -14,6 +14,7 @@ var ErrNotFound = errors.New("proxy configuration not found")
 type Inbound struct {
 	UserTrafficSupported *bool                         `json:"userTrafficSupported"`
 	DeviceGateSupported  *bool                         `json:"deviceGateSupported"`
+	DeviceGateCoverage   *string                       `json:"deviceGateCoverage"`
 	Core                 string                        `json:"core"`
 	ID                   string                        `json:"id"`
 	Name                 string                        `json:"name"`

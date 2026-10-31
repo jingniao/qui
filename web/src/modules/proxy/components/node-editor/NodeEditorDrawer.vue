@@ -33,6 +33,7 @@
             <span class="block text-sm text-ios-label">{{ protocol }}</span><span v-if="protocolReason(selectedServer, protocol, f.core)" class="block mt-1 text-xs text-ios-secondary">{{ protocolReason(selectedServer, protocol, f.core) }}</span>
           </button>
         </div>
+        <p v-if="udpLimitNote" class="text-xs text-ios-secondary">{{ udpLimitNote }}</p>
         <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" class="form-input-base mt-2" @input="autoName = false" /></label>
         <div>
           <div class="flex items-center justify-between">
@@ -91,6 +92,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import FormDrawer from '../../../../components/FormDrawer.vue';
 import { isOwner } from '../../../../app/auth';
+import { deviceGateUdpUnsupported } from '../../../../app/deviceLimit';
 import { proxyAPI, choices, loadProtocolSupport, protocolOptions, type Inbound, type Outbound, type OutboundGroup, type ProxyChain } from '../../api';
 import { nodeAPI, type NodeView } from '../../../nodes/api';
 import { getNodePortRange, loadNodeMeta } from '../../../nodes/nodeMeta';
@@ -121,6 +123,10 @@ const eligibleServers = computed(() => servers.value.filter(serverEligible));
 // several = a selector whose empty value follows the node's primary core.
 const coreChoices = computed(() => coreOptions(selectedServer.value));
 const primaryCore = computed(() => coreChoices.value.find(item => item.primary) || coreChoices.value[0]);
+const udpLimitNote = computed(() => {
+  const core = f.value.core || primaryCore.value?.name;
+  return deviceGateUdpUnsupported(core, f.value.protocol) ? `设备限制不支持此入站的 UDP（${core} ${f.value.protocol}），TCP 仍受限制。` : '';
+});
 const primaryCoreLabel = computed(() => primaryCore.value ? `${primaryCore.value.label} ${primaryCore.value.version}` : '—');
 const coreError = computed(() => selectedServer.value ? coreReason(selectedServer.value, f.value.core) : '');
 const securityStep = computed(() => hasSecurity(f.value.protocol));

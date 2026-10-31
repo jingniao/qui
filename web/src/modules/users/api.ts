@@ -8,6 +8,7 @@ export interface ProxyUser {
  onlineDevices: number | null;
  deviceLimitEnforced: boolean;
  deviceLimitUnsupportedNodes: string[];
+ deviceLimitUdpUnsupportedProtocols?: string[] | null;
   loginEnabled: boolean;
   id: string;
   username: string;
@@ -53,7 +54,7 @@ export interface UserMeta {
 // The protocols a user may be granted.
 export const protocols = ['http', 'socks5', 'shadowsocks', 'vless', 'trojan', 'wireguard', 'hysteria2', 'tuic'];
 
-export interface DevicesOnline { items: { address: string; allowed: boolean; active: boolean; firstSeen: string; lastSeen: string; nodes: string[] }[]; onlineDevices: number | null; deviceLimit: number; deviceLimitEnforced: boolean; deviceLimitUnsupportedNodes: string[]; }
+export interface DevicesOnline { items: { address: string; allowed: boolean; active: boolean; firstSeen: string; lastSeen: string; nodes: string[] }[]; onlineDevices: number | null; deviceLimit: number; deviceLimitEnforced: boolean; deviceLimitUnsupportedNodes: string[]; deviceLimitUdpUnsupportedProtocols?: string[] | null; }
 export const userAPI = {
   grantGroup: (userId: string, groupId: string) => request<void>(`/users/${encodeURIComponent(userId)}/node-groups/${encodeURIComponent(groupId)}`, 'POST'),
   revokeGroup: (userId: string, groupId: string) => request<void>(`/users/${encodeURIComponent(userId)}/node-groups/${encodeURIComponent(groupId)}`, 'DELETE'),

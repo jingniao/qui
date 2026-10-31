@@ -129,6 +129,7 @@
           <td class="text-xs font-mono tabular-nums text-ios-tertiary">
             <button class="text-ios-blue" @click="showDevices(user)">{{ user.onlineDevices ?? '未知' }} / {{ user.deviceLimit || '不限' }}</button>
             <p v-if="!user.deviceLimitEnforced" class="text-amber-700" :title="user.deviceLimitUnsupportedNodes?.join('、')">部分执行 · {{ user.deviceLimitUnsupportedNodes?.join('、') }}</p>
+            <p v-if="user.deviceLimitUdpUnsupportedProtocols?.length" class="text-ios-secondary">{{ udpUnsupportedText(user.deviceLimitUdpUnsupportedProtocols) }}</p>
           </td>
           <td class="text-xs">
             <template v-if="user.onlineConnections === null">
@@ -162,6 +163,7 @@
       <div v-if="deviceView" class="space-y-3 text-sm">
         <p>{{ deviceView.onlineDevices ?? '未知' }} / {{ deviceView.deviceLimit || '不限' }}</p>
         <p v-if="!deviceView.deviceLimitEnforced" class="text-amber-700">部分执行：{{ deviceView.deviceLimitUnsupportedNodes.join('、') }}</p>
+        <p v-if="deviceView.deviceLimitUdpUnsupportedProtocols?.length" class="text-ios-secondary">{{ udpUnsupportedText(deviceView.deviceLimitUdpUnsupportedProtocols) }}</p>
         <div v-for="(item, index) in deviceView.items" :key="index" class="border-b py-2 font-mono text-xs">{{ item.address }} · {{ item.allowed ? '允许' : '受限' }} · {{ item.active ? '活跃' : '等待释放' }}</div>
         <button :disabled="devicesBusy" class="ios-btn-secondary" @click="resetDeviceOrder">重置准入顺序</button>
         <details><summary>限制与隐私</summary><p v-for="help in deviceLimitHelp" :key="help" class="text-xs mt-2">{{ help }}</p></details>
@@ -292,7 +294,7 @@
 </template>
 
 <script setup lang="ts">
-import { deviceLimitHelp } from "../../../app/deviceLimit";
+import { deviceLimitHelp, udpUnsupportedText } from "../../../app/deviceLimit";
 import type { DevicesOnline } from "../api";
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { userAPI, protocols, type ProxyUser, type UserInput } from '../api';

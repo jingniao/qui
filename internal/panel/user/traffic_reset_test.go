@@ -160,4 +160,16 @@ func TestTrafficResetAnchorFollowsOnlyAnEnabledCycle(t *testing.T) {
 	if got := save(t, without.ID, plain); got.TrafficResetAnchor == "" {
 		t.Fatal("enabling a reset cycle supplied no anchor")
 	}
+	idle := userInput()
+	idle.Username = "none_cycle_user"
+	idle.TrafficResetAnchor = "2024-03-01T00:00:00Z"
+	kept := save(t, "", idle)
+	if kept.TrafficResetAnchor == "" {
+		t.Fatal("an explicit anchor was not stored")
+	}
+	idle.TrafficResetAnchor = ""
+	idle.DeviceLimit = 1
+	if got := save(t, kept.ID, idle); got.TrafficResetAnchor != kept.TrafficResetAnchor {
+		t.Fatalf("an unrelated edit moved the stored anchor from %q to %q", kept.TrafficResetAnchor, got.TrafficResetAnchor)
+	}
 }

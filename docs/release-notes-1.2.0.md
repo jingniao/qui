@@ -99,7 +99,7 @@ Linux 内核 IPv4 TCP use-after-free（CVSS 9.8），公开的远程 root 利用
 | L7 | 可复现构建、静态 ELF、归档/溯源/SHA256SUMS 与 1.2.0 dry-run 已在 CI 通过 |
 | L8 | 设备限制对以下入站的 **UDP 不支持**（TCP 仍受限）：Xray 与 sing-box 的 SOCKS5，sing-box 的 Shadowsocks、Hysteria2、TUIC；面板、门户与节点编辑器明确标注“不支持”。其余协议的 UDP 受限制。实测见验收矩阵 A10.3 |
 | L9 | 月流量仅为面板时区内保留的账户样本；样本清理后的完整历史月份尚无实现 |
-| L10 | TCP 探测不是带宽/ICMP/UDP 检测；端口转发没有用户额度、设备门控与用户域名归属 |
+| L10 | TCP 探测不是带宽/ICMP/UDP 检测；端口转发没有用户额度、设备门控与用户域名归属；Xray 上的端口转发字节不计入节点流量（Xray 节点总量是账户计数之和），sing-box 上计入 |
 | 多核心 | 只有假核心测试；Xray + sing-box 同节点的真实流量待实机验收 |
 | arm64 | 归档随发布构建，未验证 |
 

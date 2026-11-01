@@ -10,11 +10,11 @@ log=$(mktemp)
 trap 'rm -f -- "$log"' EXIT
 go test -v "$@" >"$log" 2>&1
 status=$?
+# The whole -v log is the per-test evidence (passes, skips, t.Logf results).
+cat -- "$log"
 if ((status != 0)); then
-  cat -- "$log"
   exit "$status"
 fi
-grep -E '^(ok|FAIL|\?)[[:space:]]' -- "$log"
 # A -run pattern that matches nothing passes silently, e.g. after a rename.
 if grep -q '\[no tests to run\]' -- "$log"; then
   printf 'A package ran no tests for this -run pattern.\n' >&2

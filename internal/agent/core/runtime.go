@@ -20,6 +20,14 @@ const StopReapTimeout = 5 * time.Second
 // replacement is started and no consumption is written off.
 var ErrCoreStopUnconfirmed = errors.New("core process exit is unconfirmed; retain the original process and do not start a replacement")
 
+// ErrListenerUnavailable marks a health check that failed only because a core
+// listener did not answer. One unanswered dial is not evidence that a running
+// core is broken (a full conntrack table drops SYNs, for instance), so the
+// supervisor waits for consecutive listener failures before it restarts the
+// core, which would drop every live connection. Every other health failure
+// still restores at once.
+var ErrListenerUnavailable = errors.New("core listener did not answer")
+
 // ReapProcess waits up to timeout for a killed child's exit to be observed. It
 // returns nil when the exit was observed, or ErrCoreStopUnconfirmed otherwise.
 func ReapProcess(done <-chan error, timeout time.Duration) error {

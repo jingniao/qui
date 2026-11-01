@@ -508,7 +508,10 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	for _, endpoint := range a.current.HealthEndpoints {
 		connection, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", endpoint)
 		if err != nil {
-			return result, fmt.Errorf("core listener %s unavailable: %w", endpoint, err)
+			// Both the sentinel and the dial error stay in the chain: the
+			// supervisor restarts a core only after consecutive
+			// listener-only failures, and the log keeps the real reason.
+			return result, fmt.Errorf("core listener %s unavailable: %w: %w", endpoint, core.ErrListenerUnavailable, err)
 		}
 		connection.Close()
 	}

@@ -551,7 +551,10 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	}
 	status.Healthy = configurationHealthy(a.current, a.process.Process.Pid)
 	if !status.Healthy {
-		return status, errors.New("sing-box listener health failed")
+		// TCP and UDP listeners report the same branch: the supervisor waits
+		// for consecutive listener failures before it restarts a core that may
+		// still be serving.
+		return status, fmt.Errorf("sing-box listener health failed: %w", core.ErrListenerUnavailable)
 	}
 	return status, nil
 }

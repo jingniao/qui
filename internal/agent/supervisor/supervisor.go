@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"proxycontrol/internal/agent/core"
@@ -21,8 +22,10 @@ import (
 //
 // The unhealthy-core loop shares the refresh tick. A restore that keeps failing
 // the same way (a retained revision the installed core cannot run) must not be
-// retried every three seconds, so consecutive failures back off instead. They
-// are variables so a test can compress the schedule.
+// retried every three seconds, so consecutive failures back off instead. A core
+// whose listener did not answer is checked again on the next tick instead of
+// being restarted at once; see coreRecovery. The schedule is a variable so a
+// test can compress it.
 var (
 	tickInterval     = 3 * time.Second
 	restoreRetryBase = 3 * time.Second
@@ -66,6 +69,54 @@ func (b *restoreBackoff) failed(err error, now time.Time) bool {
 	log := message != b.message || capped && !b.capped
 	b.message, b.capped = message, capped
 	return log
+}
+
+// coreRecovery is one core's supervision state: the restore backoff plus the
+// streak of consecutive health checks that failed only because a listener did
+// not answer.
+//
+// A dial that does not answer says nothing about the core that is still serving:
+// a full conntrack table drops the SYN, and the restore itself restarts the core
+// and drops every live connection, which makes the overload worse. A
+// listener-only failure therefore has to repeat listenerFailureLimit times before
+// the core is restored. Any other failure, including an unhealthy result an
+// adapter reports without a reason, still restores on the first check.
+type coreRecovery struct {
+	backoff        restoreBackoff
+	listenerStreak int
+	revision       int64
+}
+
+// listenerFailureLimit is the number of consecutive listener-only health checks
+// that justify restarting a core.
+const listenerFailureLimit = 3
+
+// observe records one health result of revision and reports whether the core is
+// to be restored now. A failed restore keeps the streak, so the retries that
+// follow keep the backoff instead of waiting for three fresh failures.
+func (c *coreRecovery) observe(revision int64, healthy bool, err error) bool {
+	if c.revision != revision {
+		c.revision, c.listenerStreak = revision, 0
+	}
+	if healthy {
+		c.reset()
+		return false
+	}
+	if !errors.Is(err, core.ErrListenerUnavailable) {
+		c.listenerStreak = 0
+		return true
+	}
+	if c.listenerStreak < listenerFailureLimit {
+		c.listenerStreak++
+	}
+	return c.listenerStreak >= listenerFailureLimit
+}
+
+// reset starts the streak and the backoff over: the core answered its check, a
+// restore brought it back, or an update or revision the failures predate owns it.
+func (c *coreRecovery) reset() {
+	c.listenerStreak = 0
+	c.backoff.reset()
 }
 
 func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconciler, logger *slog.Logger) {
@@ -153,8 +204,17 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 	}
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
-	var backoff restoreBackoff
-	coreBackoffs := map[string]*restoreBackoff{}
+	// recoveries holds one state per core name a health check reports, or one for
+	// the adapter name of a single-core adapter.
+	recoveries := map[string]*coreRecovery{}
+	recovery := func(name string) *coreRecovery {
+		state := recoveries[name]
+		if state == nil {
+			state = &coreRecovery{}
+			recoveries[name] = state
+		}
+		return state
+	}
 	// refreshFailure is the reason the last refresh failed, so the same transient
 	// failure is not logged on every tick.
 	refreshFailure := ""
@@ -170,64 +230,81 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				CoreHealths(context.Context) []core.CoreHealth
 			}); ok {
 				unhealthy := false
+				reported := map[string]bool{}
 				for _, item := range multi.CoreHealths(ctx) {
 					status := item.Status
+					reported[status.Name] = true
+					state := recovery(status.Name)
 					if reconciler.CoreComponentHeld(status.Name) {
+						// An update owns this core: the checks after it must
+						// not count the failures from before it.
+						state.reset()
 						unhealthy = true
 						continue
 					}
-					b := coreBackoffs[status.Name]
-					if b == nil {
-						b = &restoreBackoff{}
-						coreBackoffs[status.Name] = b
-					}
 					if status.Healthy {
-						b.reset()
+						state.observe(reconciler.Current(), true, nil)
 						continue
 					}
+					// A listener that did not answer is still an unhealthy
+					// core: a refresh would re-apply a revision it cannot
+					// serve.
 					unhealthy = true
-					if !b.ready(reconciler.Current(), time.Now()) {
+					now := time.Now()
+					if !state.observe(reconciler.Current(), false, item.Err) || !state.backoff.ready(reconciler.Current(), now) {
 						continue
 					}
 					if err := reconciler.RestoreCore(ctx, status.Name); err != nil {
-						if b.failed(err, time.Now()) {
-							logger.Error("core recovery failed", "core", status.Name, "error", err, "retry_in", b.delay.String())
+						if state.backoff.failed(err, now) {
+							logger.Error("core recovery failed", "core", status.Name, "error", err, "retry_in", state.backoff.delay.String())
 						}
 					} else {
-						b.reset()
+						state.reset()
 						logger.Warn("core unhealthy; restored last successful configuration", "core", status.Name, "error", item.Err, "revision", reconciler.Current())
+					}
+				}
+				for name := range recoveries {
+					if !reported[name] {
+						delete(recoveries, name)
 					}
 				}
 				if unhealthy {
 					continue
 				}
-			}
-			if reconciler.CoreUpdateHeld() {
-				continue
-			}
-			// Health comes first: while the core cannot run the retained
-			// revision, a refresh would only re-render and re-apply it.
-			health, err := adapter.Health(ctx)
-			if err == nil && !health.Healthy {
-				// Every restore must name its reason, even when an adapter
-				// reports unhealthy without one.
-				err = fmt.Errorf("%s: unhealthy", adapter.Name())
-			}
-			if err != nil {
-				if !backoff.ready(reconciler.Current(), time.Now()) {
+				// Every core answered its own check. Sampling the aggregate
+				// health here would ask a second time, and a stale second
+				// sample would restore the whole runtime.
+			} else {
+				state := recovery(adapter.Name())
+				if reconciler.CoreUpdateHeld() {
+					state.reset()
 					continue
 				}
-				logger.Warn("core unhealthy; restoring last successful configuration", "error", err, "revision", reconciler.Current())
-				if err := reconciler.Restore(ctx); err != nil {
-					if backoff.failed(err, time.Now()) {
-						logger.Error("core recovery failed", "error", err, "retry_in", backoff.delay.String())
-					}
-				} else {
-					backoff.reset()
+				// Health comes first: while the core cannot run the retained
+				// revision, a refresh would only re-render and re-apply it.
+				health, err := adapter.Health(ctx)
+				if err == nil && !health.Healthy {
+					// Every restore must name its reason, even when an
+					// adapter reports unhealthy without one.
+					err = fmt.Errorf("%s: unhealthy", adapter.Name())
 				}
-				continue
+				if err != nil {
+					now := time.Now()
+					if !state.observe(reconciler.Current(), false, err) || !state.backoff.ready(reconciler.Current(), now) {
+						continue
+					}
+					logger.Warn("core unhealthy; restoring last successful configuration", "error", err, "revision", reconciler.Current())
+					if err := reconciler.Restore(ctx); err != nil {
+						if state.backoff.failed(err, now) {
+							logger.Error("core recovery failed", "error", err, "retry_in", state.backoff.delay.String())
+						}
+					} else {
+						state.reset()
+					}
+					continue
+				}
+				state.observe(reconciler.Current(), true, nil)
 			}
-			backoff.reset()
 			changed, err := reconciler.Refresh(ctx)
 			if err != nil {
 				// A normal stop cancels the refresh; that is not a failure.

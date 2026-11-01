@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -172,10 +173,23 @@ func TestMultiHealthKeepsTheAdapterReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.healthy = false
-	b.healthErr = errors.New("core listener 127.0.0.1:1080 unavailable")
+	b.healthErr = fmt.Errorf("core listener 127.0.0.1:1080 unavailable: %w", ErrListenerUnavailable)
 	health, err := m.Health(ctx)
 	if health.Healthy || err == nil || !strings.Contains(err.Error(), "sing-box") || !strings.Contains(err.Error(), "core listener 127.0.0.1:1080 unavailable") {
 		t.Fatalf("health lost the reason: %v", err)
+	}
+	// The supervisor tells a listener-only failure from every other one, so the
+	// branch has to survive both the per-core status and the aggregate.
+	if !errors.Is(err, ErrListenerUnavailable) {
+		t.Fatalf("aggregate health lost the listener branch: %v", err)
+	}
+	for _, item := range m.CoreHealths(ctx) {
+		if item.Status.Name != "sing-box" {
+			continue
+		}
+		if item.Status.Healthy || !errors.Is(item.Err, ErrListenerUnavailable) {
+			t.Fatalf("per-core health lost the listener branch: %v", item.Err)
+		}
 	}
 	if statuses := m.CoreStatuses(ctx); statuses[1].Error != "core_unhealthy" || strings.Contains(statuses[1].Error, "listener") {
 		t.Fatalf("status code changed: %v", statuses[1])

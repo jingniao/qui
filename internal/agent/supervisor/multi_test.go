@@ -3,7 +3,7 @@ package supervisor
 import (
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -12,6 +12,7 @@ import (
 
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/reconcile"
+	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/scheduler"
 )
@@ -59,11 +60,12 @@ func TestMultiSupervisorRestoresOnlyFailedCoreWithBackoff(t *testing.T) {
 }
 
 // A per-core restore logs the core, the reason its health check failed and the
-// revision it restored.
+// revision it restored. A listener that did not answer reaches the restore on the
+// third consecutive check.
 func TestMultiSupervisorLogsWhyACoreWasRestored(t *testing.T) {
 	compressSchedule(t, 10*time.Millisecond, 40*time.Millisecond, 80*time.Millisecond)
 	a := &multiTestAdapter{name: "xray", fakeAdapter: fakeAdapter{healthy: true}}
-	b := &multiTestAdapter{name: "sing-box", fakeAdapter: fakeAdapter{healthy: false, healthErr: errors.New("sing-box listener 127.0.0.1:1081 unavailable")}}
+	b := &multiTestAdapter{name: "sing-box", fakeAdapter: fakeAdapter{healthy: false, healthErr: fmt.Errorf("sing-box listener health failed: %w", core.ErrListenerUnavailable)}}
 	multi, err := core.NewMultiRuntime(a, b)
 	if err != nil {
 		t.Fatal(err)
@@ -81,8 +83,127 @@ func TestMultiSupervisorLogsWhyACoreWasRestored(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	Run(ctx, multi, m, slog.New(slog.NewTextHandler(&logs, nil)))
-	want := `msg="core unhealthy; restored last successful configuration" core=sing-box error="sing-box listener 127.0.0.1:1081 unavailable" revision=1`
+	want := `msg="core unhealthy; restored last successful configuration" core=sing-box error="sing-box listener health failed: core listener did not answer" revision=1`
 	if !strings.Contains(logs.String(), want) {
 		t.Fatalf("restored core logged no reason: %s", logs.String())
+	}
+}
+
+// A listener-only failure of one core also waits for its third check, and the
+// healthy peer is never restored.
+func TestMultiListenerFailureRestoresOnlyTheFailingCore(t *testing.T) {
+	compressSchedule(t, time.Millisecond, 2*time.Millisecond, 20*time.Millisecond)
+	a := &multiTestAdapter{name: "xray", fakeAdapter: fakeAdapter{healthy: true}}
+	b := &multiTestAdapter{name: "sing-box", fakeAdapter: fakeAdapter{healthy: true}}
+	multi, err := core.NewMultiRuntime(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := reconcile.New(t.TempDir(), "node-test", multi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := supervisorState(1)
+	s.Inbounds = append(s.Inbounds, desiredstate.Inbound{ID: "other", Core: "sing-box", Protocol: "socks5", Listen: "127.0.0.1", Port: 1081, Enabled: true, DefaultOutbound: "direct"})
+	if _, err := m.Apply(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	a.calls, b.calls = nil, nil
+	b.healthy, b.healthErr, b.healOnApply = false, fmt.Errorf("sing-box listener health failed: %w", core.ErrListenerUnavailable), true
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	Run(ctx, multi, m, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if want := []string{"health", "health", "health", "render", "apply"}; !callsStart(b.calls, want...) {
+		t.Fatalf("failing core calls: %v", b.calls)
+	}
+	for _, call := range a.calls {
+		if call == "apply" {
+			t.Fatalf("healthy core was restored: %v", a.calls)
+		}
+	}
+}
+
+// countingMulti counts the aggregate health samples of a multi-core runtime.
+type countingMulti struct {
+	*core.MultiRuntime
+	aggregate int
+}
+
+func (c *countingMulti) Health(ctx context.Context) (core.HealthStatus, error) {
+	c.aggregate++
+	return c.MultiRuntime.Health(ctx)
+}
+
+// A healthy multi-core node is sampled once per core and tick: a second,
+// aggregate sample could restore every core from a stale answer.
+func TestMultiTickSamplesEachCoreHealthOnce(t *testing.T) {
+	compressSchedule(t, time.Millisecond, 2*time.Millisecond, 20*time.Millisecond)
+	a := &multiTestAdapter{name: "xray", fakeAdapter: fakeAdapter{healthy: true}}
+	b := &multiTestAdapter{name: "sing-box", fakeAdapter: fakeAdapter{healthy: true}}
+	multi, err := core.NewMultiRuntime(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked := &countingMulti{MultiRuntime: multi}
+	m, err := reconcile.New(t.TempDir(), "node-test", tracked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := supervisorState(1)
+	s.Inbounds = append(s.Inbounds, desiredstate.Inbound{ID: "other", Core: "sing-box", Protocol: "socks5", Listen: "127.0.0.1", Port: 1081, Enabled: true, DefaultOutbound: "direct"})
+	if _, err := m.Apply(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	Run(ctx, tracked, m, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if tracked.aggregate != 0 {
+		t.Fatalf("aggregate health sampled %d times", tracked.aggregate)
+	}
+	if a.healthCalls == 0 || a.healthCalls != b.healthCalls {
+		t.Fatalf("core checks: xray %d, sing-box %d", a.healthCalls, b.healthCalls)
+	}
+}
+
+// togglingCores reports a failing core on every other tick, so a core that is not
+// reported in between must not keep the listener streak it had.
+type togglingCores struct {
+	fakeAdapter
+	checks   int
+	restores int
+}
+
+func (t *togglingCores) CoreHealths(context.Context) []core.CoreHealth {
+	t.checks++
+	if t.checks%2 == 0 {
+		return nil
+	}
+	return []core.CoreHealth{{Status: &pb.CoreStatus{Name: "sing-box", Healthy: false, Error: "core_unhealthy"}, Err: listenerFailure("127.0.0.1:1081")}}
+}
+func (t *togglingCores) RestoreCore(context.Context, string, desiredstate.State) error {
+	t.restores++
+	return nil
+}
+
+// A core that is no longer reported starts its listener streak over when it comes
+// back.
+func TestUnreportedCoreDoesNotKeepItsListenerStreak(t *testing.T) {
+	compressSchedule(t, time.Millisecond, 2*time.Millisecond, 20*time.Millisecond)
+	adapter := &togglingCores{}
+	m, err := reconcile.New(t.TempDir(), "node-test", adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Apply(context.Background(), supervisorState(1)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	Run(ctx, adapter, m, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if adapter.restores != 0 {
+		t.Fatalf("an unreported core kept its listener streak: %d restores", adapter.restores)
+	}
+	if adapter.checks < 6 {
+		t.Fatalf("the core was reported %d times", adapter.checks)
 	}
 }

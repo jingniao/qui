@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/reconcile"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +36,14 @@ type fakeAdapter struct {
 	// renderVariant changes the rendered bytes, which is what a refresh that has
 	// to apply looks like.
 	renderVariant string
+	// healthCalls counts the health checks.
+	healthCalls int
+	// calls records the supervision calls in order, so a test can tell which
+	// failure led to a render or an apply.
+	calls []string
+	// healOnApply recovers the scripted core on its next apply, so a test that
+	// waits for a restore does not depend on how many ticks a run gets.
+	healOnApply bool
 }
 
 func (a *fakeAdapter) Name() string { return "fake" }
@@ -41,6 +51,7 @@ func (a *fakeAdapter) DetectCapabilities(context.Context) (*pb.Capabilities, err
 	return &pb.Capabilities{}, nil
 }
 func (a *fakeAdapter) Render(_ context.Context, state desiredstate.State) (core.RenderedConfig, error) {
+	a.calls = append(a.calls, "render")
 	a.renderCalls++
 	if a.failRender {
 		return core.RenderedConfig{}, errors.New("render failed")
@@ -57,14 +68,20 @@ func (a *fakeAdapter) Render(_ context.Context, state desiredstate.State) (core.
 }
 func (a *fakeAdapter) Validate(context.Context, core.RenderedConfig) error { return nil }
 func (a *fakeAdapter) Apply(_ context.Context, configuration core.RenderedConfig) (core.ApplyResult, error) {
+	a.calls = append(a.calls, "apply")
 	a.applyCalls++
 	if a.failApply {
 		return core.ApplyResult{Revision: configuration.Revision, Code: "start_failed"}, errors.New("start_failed")
+	}
+	if a.healOnApply {
+		a.healthy, a.healthErr = true, nil
 	}
 	return core.ApplyResult{Revision: configuration.Revision, Success: true, Code: "success"}, nil
 }
 func (a *fakeAdapter) Rollback(context.Context, int64) error { return nil }
 func (a *fakeAdapter) Health(context.Context) (core.HealthStatus, error) {
+	a.calls = append(a.calls, "health")
+	a.healthCalls++
 	return core.HealthStatus{Healthy: a.healthy}, a.healthErr
 }
 func (a *fakeAdapter) CollectStats(context.Context) (core.StatsBatch, error) {
@@ -229,5 +246,121 @@ func TestRefreshFailureIsLoggedOnceAndRecoveryReported(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "approved runtime state applied") {
 		t.Fatalf("recovered refresh was not applied: %s", logs.String())
+	}
+}
+
+// listenerFailure is the health failure a core listener that did not answer
+// reports, the way both adapters wrap core.ErrListenerUnavailable.
+func listenerFailure(endpoint string) error {
+	return fmt.Errorf("core listener %s unavailable: %w: %w", endpoint, core.ErrListenerUnavailable, errors.New("dial tcp: i/o timeout"))
+}
+
+// callsStart reports whether the recorded supervision calls begin with want.
+func callsStart(calls []string, want ...string) bool {
+	return len(calls) >= len(want) && reflect.DeepEqual(calls[:len(want)], want)
+}
+
+// A listener that did not answer is not evidence that the core is broken, so the
+// first two checks only defer the refresh; the third restores. The endpoints may
+// differ per check: one core kept failing, so it is one streak.
+func TestListenerFailureNeedsThreeConsecutiveChecks(t *testing.T) {
+	var state coreRecovery
+	listener := listenerFailure("127.0.0.1:1080")
+	for check := 1; check < listenerFailureLimit; check++ {
+		if state.observe(1, false, listener) {
+			t.Fatalf("core restored after %d listener checks", check)
+		}
+	}
+	if !state.observe(1, false, listener) {
+		t.Fatal("third consecutive listener check did not restore the core")
+	}
+	var endpoints coreRecovery
+	endpoints.observe(1, false, listenerFailure("127.0.0.1:1080"))
+	endpoints.observe(1, false, listenerFailure("127.0.0.1:1081"))
+	if !endpoints.observe(1, false, listenerFailure("127.0.0.1:1082")) {
+		t.Fatal("three failing endpoints of one core were not one streak")
+	}
+}
+
+// Every other unhealthy result restores at once, including one reported without a
+// reason, and a healthy check starts the listener streak over.
+func TestOtherHealthFailuresRestoreImmediately(t *testing.T) {
+	for _, failure := range []error{fmt.Errorf("core exited: %w", errors.New("exit status 2")), errors.New("fake: unhealthy"), nil} {
+		var state coreRecovery
+		state.observe(1, false, listenerFailure("127.0.0.1:1080"))
+		state.observe(1, false, listenerFailure("127.0.0.1:1080"))
+		if !state.observe(1, false, failure) {
+			t.Fatalf("%v waited for three listener failures", failure)
+		}
+	}
+	var state coreRecovery
+	state.observe(1, false, listenerFailure("127.0.0.1:1080"))
+	state.observe(1, false, listenerFailure("127.0.0.1:1080"))
+	state.observe(1, true, nil)
+	if state.observe(1, false, listenerFailure("127.0.0.1:1080")) {
+		t.Fatal("a healthy check did not reset the listener streak")
+	}
+}
+
+// A new revision, a component update and a successful restore all end the run of
+// listener failures a streak counted.
+func TestRevisionUpdateAndRestoreResetTheListenerStreak(t *testing.T) {
+	listener := listenerFailure("127.0.0.1:1080")
+	var state coreRecovery
+	state.observe(1, false, listener)
+	state.observe(1, false, listener)
+	if state.observe(2, false, listener) {
+		t.Fatal("the revision change kept the listener streak")
+	}
+	state.observe(2, false, listener)
+	state.reset() // a component update owned the core
+	if state.observe(2, false, listener) {
+		t.Fatal("a held core kept the listener streak")
+	}
+	state.observe(2, false, listener)
+	state.reset() // the restore succeeded
+	if state.observe(2, false, listener) {
+		t.Fatal("a successful restore kept the listener streak")
+	}
+}
+
+// One failed listener check of a working core neither restarts it nor refreshes
+// the runtime state; the third restores it.
+func TestDeferredListenerFailureDoesNotRefresh(t *testing.T) {
+	compressSchedule(t, time.Millisecond, 2*time.Millisecond, 20*time.Millisecond)
+	adapter := &fakeAdapter{}
+	manager := committedManager(t, t.TempDir(), adapter)
+	adapter.calls, adapter.healthErr, adapter.healOnApply = nil, listenerFailure("127.0.0.1:1080"), true
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	Run(ctx, adapter, manager, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	// Two deferred checks, then the restore renders and applies the revision
+	// once: no refresh ran while the core was still serving.
+	if want := []string{"health", "health", "health", "render", "apply"}; !callsStart(adapter.calls, want...) {
+		t.Fatalf("calls: %v", adapter.calls)
+	}
+}
+
+// A restore that fails keeps the listener threshold, so the retries that follow
+// keep the backoff instead of waiting for three fresh failures.
+func TestFailedRestoreKeepsTheListenerThreshold(t *testing.T) {
+	var state coreRecovery
+	now := time.Now()
+	listener := listenerFailure("127.0.0.1:1080")
+	for check := 1; check < listenerFailureLimit; check++ {
+		state.observe(1, false, listener)
+	}
+	if !state.observe(1, false, listener) || !state.backoff.ready(1, now) {
+		t.Fatal("the third listener check was not eligible for a restore")
+	}
+	state.backoff.failed(errors.New("start failed"), now)
+	if !state.observe(1, false, listener) {
+		t.Fatal("a failed restore waited for three fresh listener failures")
+	}
+	if state.backoff.ready(1, now) {
+		t.Fatal("the retry ignored the restore backoff")
+	}
+	if !state.backoff.ready(1, now.Add(state.backoff.delay)) {
+		t.Fatal("the retry never became due")
 	}
 }

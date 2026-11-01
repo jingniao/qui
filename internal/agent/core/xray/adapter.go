@@ -242,6 +242,8 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 	}
 	// The process lifetime belongs to the Agent, never to a control connection.
 	command := exec.Command(absolute, "run", "-config", file.Name())
+	// Plain TCP listeners only (CVE-2026-98432 needs an MPTCP listener).
+	command.Env = core.CoreEnvironment()
 	// The core must also die with the Agent when the supervisor only signals the
 	// Agent PID (OpenRC supervise-daemon): the kernel kills the core with the
 	// starting thread.

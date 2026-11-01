@@ -1,3 +1,7 @@
+// Go 1.24 and later open listening sockets as MPTCP by default on Linux; the
+// remote root exploit for the kernel bug CVE-2026-98432 needs an MPTCP listener.
+
+//go:debug multipathtcp=0
 package main
 
 import (

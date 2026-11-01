@@ -340,6 +340,8 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 		return err
 	}
 	command := exec.Command(executable, "run", "--disable-color", "-c", path)
+	// Plain TCP listeners only (CVE-2026-98432 needs an MPTCP listener).
+	command.Env = core.CoreEnvironment()
 	// The core must also die with the Agent when the supervisor only signals the
 	// Agent PID (OpenRC supervise-daemon): the kernel kills the core with the
 	// starting thread.

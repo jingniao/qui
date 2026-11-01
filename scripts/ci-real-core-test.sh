@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run `go test -v` for a real-core CI step and fail when a test skipped because
-# a proxy core, its data or a usable local address was missing. The cores job
+# a proxy core, its data, a usable local address or kernel MPTCP was missing. The cores job
 # sets every core variable, so such a skip means the step did not test what it
 # claims; any other skip is listed but allowed.
 #
@@ -22,12 +22,12 @@ if grep -q '\[no tests to run\]' -- "$log"; then
 fi
 # A skip prints its reason on the line before "--- SKIP".
 skips=$(awk '/^=== |--- (PASS|FAIL): / {reason = ""} /_test\.go:[0-9]+: / {reason = $0; next} /--- SKIP: / {print $0 " <-" reason}' "$log")
-missing=$(printf '%s\n' "$skips" | grep -E 'XRAY_BINARY|SINGBOX_BINARY|MIHOMO_BINARY|MIHOMO_HOME|non-loopback|cannot listen' || true)
+missing=$(printf '%s\n' "$skips" | grep -E 'XRAY_BINARY|SINGBOX_BINARY|MIHOMO_BINARY|MIHOMO_HOME|non-loopback|cannot listen|MPTCP' || true)
 printf 'Passed real-core tests: %s\n' "$(grep -cE -- '--- PASS: TestReal' "$log")"
 if [[ -n $skips ]]; then
   printf 'Skipped tests:\n%s\n' "$skips"
 fi
 if [[ -n $missing ]]; then
-  printf 'Real-core tests skipped for a missing core, core data or local address:\n%s\n' "$missing" >&2
+  printf 'Real-core tests skipped for a missing core, core data, local address or kernel MPTCP:\n%s\n' "$missing" >&2
   exit 1
 fi

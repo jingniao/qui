@@ -183,7 +183,7 @@ func TestSourceCollisionKeepsTheFirstSource(t *testing.T) {
 // A1.3: `?format=` wins over the User-Agent, the Owner switch turns detection off,
 // an unknown User-Agent falls back to the default and an unknown format is 400.
 //
-// The shipped User-Agent table is empty (docs/v1.1-phase0-findings.md A.7), so the
+// The shipped User-Agent table is empty (docs/archive/v1.1-phase0-findings.md A.7), so the
 // mechanism is exercised with the test exporter's patterns instead of guessed
 // client strings.
 func TestFormatResolutionOrder(t *testing.T) {

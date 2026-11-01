@@ -73,7 +73,7 @@ type Exporter interface {
 	// FileName is the download name used in Content-Disposition.
 	FileName() string
 	// UserAgents lists the User-Agent patterns this format serves. No pattern is
-	// shipped in v1.1: see docs/v1.1-phase0-findings.md A.7 for the strings that
+	// shipped in v1.1: see docs/archive/v1.1-phase0-findings.md A.7 for the strings that
 	// still have to be verified from client sources. A pattern is matched as a
 	// case-insensitive substring; a "!" prefix makes it a guard that must not
 	// appear (for example "clashx/" guarded by "!meta").

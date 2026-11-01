@@ -52,7 +52,7 @@ qui assigns the quota to the proxy user. Devices carry independent protocol cred
 
 Subscription generation selects endpoints from published configurations and verifies that the published credentials match the requested device. Existing node-group authorization and configuration publishing can remain in place if device creation is hidden behind a simpler user workflow.
 
-Sources: [subscription service](../internal/panel/subscription/service.go) and [user/device models](../internal/panel/user/model.go).
+Sources: [subscription service](../../internal/panel/subscription/service.go) and [user/device models](../../internal/panel/user/model.go).
 
 **Recommendation:** provide one default subscription per user as the initial experience, while retaining qui's shared user quota. Multiple subscriptions, separate subscription quotas, and extensive template processing are optional features rather than prerequisites.
 
@@ -102,7 +102,7 @@ flyx's user subscription handlers derive the caller's identity on the backend, l
 
 At the reviewed qui baseline, `Session.CurrentUser` is an administrative account (`auth.Admin`, Owner or Viewer), separate from a proxy user (`user.User`). The new portal reads the proxy-user management list, tries to match the login name, and falls back to the first returned user. A similar selection appears during subscription generation. The node page also contains a path that treats an administrator ID as a proxy-user ID.
 
-Sources: [authentication models](../internal/panel/auth/model.go), [portal client page](../web/src/modules/portal/pages/ClientAccessPage.vue), and [node list page](../web/src/modules/nodes/pages/NodeListPage.vue).
+Sources: [authentication models](../../internal/panel/auth/model.go), [portal client page](../../web/src/modules/portal/pages/ClientAccessPage.vue), and [node list page](../../web/src/modules/nodes/pages/NodeListPage.vue).
 
 Matching names or selecting the first record is not a reliable ownership relationship. An Owner's permission to read management data does not make that data the Owner's personal subscription. A Viewer does not acquire user-management permissions by entering portal mode.
 

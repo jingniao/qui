@@ -140,7 +140,7 @@ func (r *Registry) Resolve(requested, userAgent string, policy Policy) (Exporter
 // longer matched pattern beats a shorter one, and a tie keeps the exporter that
 // was registered first, so `clashforwindows` beats a bare `clash`.
 //
-// No pattern ships in v1.1 (docs/v1.1-phase0-findings.md A.7); the resolver is
+// No pattern ships in v1.1 (docs/archive/v1.1-phase0-findings.md A.7); the resolver is
 // complete so that verified strings are added as data, not as code.
 func (r *Registry) Match(userAgent string) (Exporter, bool) {
 	if userAgent == "" {

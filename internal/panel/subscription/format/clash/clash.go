@@ -2,7 +2,7 @@
 // groups, rule providers and rules. Two capability sets share one renderer:
 //
 //   - clash (aliases mihomo, clash-meta): every protocol qui publishes, in
-//     mihomo's field names (docs/v1.1-phase0-findings.md item 1);
+//     mihomo's field names (docs/archive/v1.1-phase0-findings.md item 1);
 //   - clash-legacy (alias clash-premium): only what the archived open-source and
 //     Premium cores are documented to accept (item 2e): ss, socks5, http and
 //     trojan, and no GEOSITE, RULE-SET or rule providers.

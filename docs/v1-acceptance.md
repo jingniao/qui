@@ -1145,13 +1145,13 @@
 
 ## 10. v1.1 验收清单（2026-10-28，尚未发布）
 
-此节覆盖 [v1.1 计划](v1.1-plan.md) 全部 P/A/AU 验收编号。下表“本地证据”指既有阶段记录和本轮本地 gate；具体命令、测试名与审查修复见 [进度记录](v1.1-progress.md) 对应阶段，Phase 11 保留本轮真实退出码。未设置代理核心环境变量的跳过不算原生核心通过。历史第 3、4 节的设备、D1/D2/D5 标准不再适用于 v1.1 的对应部分，现按 R1–R9 与 D-a 至 D-e 验收；历史通过结论不自动延伸到新版本。
+此节覆盖 [v1.1 计划](archive/v1.1-plan.md) 全部 P/A/AU 验收编号。下表“本地证据”指既有阶段记录和本轮本地 gate；具体命令、测试名与审查修复见 [进度记录](archive/v1.1-progress.md) 对应阶段，Phase 11 保留本轮真实退出码。未设置代理核心环境变量的跳过不算原生核心通过。历史第 3、4 节的设备、D1/D2/D5 标准不再适用于 v1.1 的对应部分，现按 R1–R9 与 D-a 至 D-e 验收；历史通过结论不自动延伸到新版本。
 
 ### 10.1 Phase 0–7
 
 | 编号 | 证据与状态 |
 | --- | --- |
-| P0.1 | 部分：`v1.1-phase0-findings.md` A.1–A.6 记录上游命令/结果；数据审计与 Linux 探测 awaiting Owner；A.7 UA/导入 scheme 无可信数据，仍阻塞 |
+| P0.1 | 部分：`docs/archive/v1.1-phase0-findings.md` A.1–A.6 记录上游命令/结果；数据审计与 Linux 探测 awaiting Owner；A.7 UA/导入 scheme 无可信数据，仍阻塞 |
 | P0.2 | 已记录停止条件及调整：计划 §3、§7、§12.3，findings A.6/A.7；没有补丁核或替代系统；剩余批准仍待 Owner |
 | A1.1 | 本地证据：`TestSubscriptionFormatsMatchThePreRefactorFixture`，URI/Base64/sing-box 全 fixture 字节对比 |
 | A1.2 | 本地证据：`TestTestOnlySourceAndExporterWorkEndToEnd`、`TestFailingSourceKeepsTheRestAndWarns` |
@@ -1239,7 +1239,7 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 
 ## 11. v1.2.0 实机验收（2026-11-01，RC1–RC3）
 
-环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine 3.19 LXC，OpenRC），均为 amd64；内核按 CVE-2026-98432 升级（alpine-node 由服务商管理）。执行：Cline；独立核对：审查者；发现与决定见 [验收发现](v1.2-rc1-findings.md)，逐步记录见[进度记录](v1.1-progress.md)“H…”与“RC2 on the hosts”各节，步骤见[实机测试计划](v1.2-host-test-plan.md)。
+环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine 3.19 LXC，OpenRC），均为 amd64；内核按 CVE-2026-98432 升级（alpine-node 由服务商管理）。执行：Cline；独立核对：审查者；发现与决定见 [验收发现](v1.2-rc1-findings.md)，逐步记录见[进度记录](archive/v1.1-progress.md)“H…”与“RC2 on the hosts”各节，步骤见[实机测试计划](v1.2-host-test-plan.md)。
 
 | 阶段 | 内容 | 结果 |
 | --- | --- | --- |

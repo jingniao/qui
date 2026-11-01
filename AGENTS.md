@@ -8,7 +8,7 @@
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
 
-当前工作入口见 [v1.1 计划](docs/v1.1-plan.md) 与 [进度记录](docs/v1.1-progress.md)，历史轻量化决策见 [轻量重构计划](docs/lightweight-refactor-plan.md)。系统组成见 [架构总览](docs/architecture.md)，部署与运维见 [部署与升级](docs/deployment.md) 和 [运维手册](docs/operations.md)，完成标准见 [验收矩阵](docs/v1-acceptance.md)。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；实现已完成本地审查；release/v1.2.0 的 CI（原生核心 cores 作业与 runner 上的 `-race`）持续通过，本地 Linux 测试机复跑 111 个原生核心测试与 `-race`；面板主机 -race 按 Owner 决定以 CI 代替，L8 按方案 1 标注。实机验收计划与结果见 [实机测试计划](docs/v1.2-host-test-plan.md)、[验收发现](docs/v1.2-rc1-findings.md) 与验收矩阵 §11；下一版本的需求见 [v1.3 计划](docs/v1.3-plan.md)。v1.2 的范围与结果见 [v1.2 计划](docs/v1.2-plan.md) 与 [v1.2 变更报告](docs/v1.2-ui-change-report.md)；v1.1 与 v1.2 合并为 v1.2.0 发布（尚未发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
+当前工作入口见 [v1.1 计划](docs/archive/v1.1-plan.md) 与 [进度记录](docs/archive/v1.1-progress.md)，历史轻量化决策见 [轻量重构计划](docs/archive/lightweight-refactor-plan.md)。系统组成见 [架构总览](docs/architecture.md)，部署与运维见 [部署与升级](docs/deployment.md) 和 [运维手册](docs/operations.md)，完成标准见 [验收矩阵](docs/v1-acceptance.md)。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；实现已完成本地审查；release/v1.2.0 的 CI（原生核心 cores 作业与 runner 上的 `-race`）持续通过，本地 Linux 测试机复跑 111 个原生核心测试与 `-race`；面板主机 -race 按 Owner 决定以 CI 代替，L8 按方案 1 标注。实机验收计划与结果见 [实机测试计划](docs/v1.2-host-test-plan.md)、[验收发现](docs/v1.2-rc1-findings.md) 与验收矩阵 §11；下一版本的需求见 [v1.3 计划](docs/v1.3-plan.md)。v1.2 的范围与结果见 [v1.2 计划](docs/archive/v1.2-plan.md) 与 [v1.2 变更报告](docs/archive/v1.2-ui-change-report.md)；v1.1 与 v1.2 合并为 v1.2.0 发布（尚未发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
 
 ## 变更记录
 
@@ -20,7 +20,7 @@
 
 - 安全（2026-10-31，CVE-2026-98432，见[发布说明草稿](docs/release-notes-1.2.0.md)）：面板与 Agent 以 `//go:debug multipathtcp=0` 构建（不改 go.mod），代理核心由 `core.CoreEnvironment` 以 `GODEBUG=multipathtcp=0` 启动，监听端口不再是 MPTCP；真实内核测试确认 Go 默认下核心会以 MPTCP 监听、Agent 启动后为普通 TCP。Owner 批准直接升级主机内核：us2-node、uk-node 已升级到 6.12.113，alpine-node 的内核由服务商管理（2026-11-01）。设备限制 UDP 范围按 Owner 决定（方案 1）标注，见第 9.2 节；sing-box 观测不再因一个 SOCKS5 UDP 流整体失败。自 2026-10-31 起测试在 Owner 提供的本地 Linux 测试机上进行，GitHub Actions 只做最终确认与发布构建。
 
-- 原生核心 CI（2026-10-31，见[验收矩阵](docs/v1-acceptance.md) §10.4 与[进度记录](docs/v1.1-progress.md)“Native-core CI on release/v1.2.0”）：`0628a5b` 的 cores 作业（Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1 可复现构建与双架构 release dry-run）与 check 作业（`go test -race`）全部通过，cores 作业首次通过。产品修复两项，原因相同（请求被截止时间取消后 Go 客户端仍可能返回响应且读正文不报错）：外部订阅抓取不再把残缺正文当作完整订阅缓存（`07253f9`）；Agent 自更新的清单下载被截止时间切断时报告取消而不是“清单无效”（`13cde0a`）。另修一个分钟边界导致的偶发测试失败（`c8c293b`）；最终代码 `13cde0a` 两个工作流再次全部通过。其余为 v1.1 后过时的实核测试与 Xray 26.3.27 的配置要求（带 fallbackTag 的 balancer 需要 observatory，生产渲染一直会生成）。已知上游行为：Linux 上 Xray 对可 splice 的 TCP 路径在连接关闭后才计入用户下行字节，额度判定随之推迟（第 9.1 节）。未发布。
+- 原生核心 CI（2026-10-31，见[验收矩阵](docs/v1-acceptance.md) §10.4 与[进度记录](docs/archive/v1.1-progress.md)“Native-core CI on release/v1.2.0”）：`0628a5b` 的 cores 作业（Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1 可复现构建与双架构 release dry-run）与 check 作业（`go test -race`）全部通过，cores 作业首次通过。产品修复两项，原因相同（请求被截止时间取消后 Go 客户端仍可能返回响应且读正文不报错）：外部订阅抓取不再把残缺正文当作完整订阅缓存（`07253f9`）；Agent 自更新的清单下载被截止时间切断时报告取消而不是“清单无效”（`13cde0a`）。另修一个分钟边界导致的偶发测试失败（`c8c293b`）；最终代码 `13cde0a` 两个工作流再次全部通过。其余为 v1.1 后过时的实核测试与 Xray 26.3.27 的配置要求（带 fallbackTag 的 balancer 需要 observatory，生产渲染一直会生成）。已知上游行为：Linux 上 Xray 对可 splice 的 TCP 路径在连接关闭后才计入用户下行字节，额度判定随之推迟（第 9.1 节）。未发布。
 
 - K3b（2026-10-29）：面板多核心支持：`Hello/Welcome` 协商 `multi_core_supported` 与独立的 `node_traffic_supported`；按核心保存能力/版本/标志与心跳健康、启动时间、统计源状态，旧 Agent 仍按一个核心建模，缺测保持未知。入站 `core` 进入草稿、DesiredState、自动额度版本、恢复与订阅，空值等于当前主核心，保存与发布按选中核心校验协议、转发、WireGuard、门控与跨核心端口唯一。核心更新任务改为每（节点、组件）一个（迁移 0125 回填既有行），缺失组件可用 schema-2 请求安装，结果按组件路由，成功且能力刷新后才可选。Owner 移除核心：`POST /nodes/{id}/cores/{component}/remove` 与 `removals`，幂等 `RemoveCoreCommand/Result`，断线后用同一身份重发，拒绝 `core_in_use`/`core_pending`/`last_core`/`revision_mismatch`，能力确认前组件仍可见。协商会话中的 node 计数器按（节点、epoch、凭据）增量计入每核心/节点总量，绝不进入额度或重复计入账户总量，同一节点可有多个活跃 epoch。连接观测按（节点、核心）合并活跃源地址后再做设备准入，保留掩码、易失存储、TTL 与放行行为；每个入站按所属核心显示 D5 覆盖。分区重启/健康检查带核心字段，移除核心后的历史回滚在面板侧直接拒绝并说明原因。备份、校验、清单与恢复覆盖新列/新表；未发布，Linux/root 实机验收待完成。
 
@@ -314,9 +314,9 @@ Internet
 
 ## 4.4 代理核心
 
-K3a Agent 本地实现完成（2026-10-29，原生 Linux/root 验收待执行）：`cores: [{name, path}]` 支持 xray 与 sing-box，首项为兼容主核心；旧标量配置仍映射为一个核心。所有生产节点使用 MultiRuntime 与 `runtime/<core>/`。通过校验过的 component 核心更新可添加缺失核心；`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写。GOST 推迟，不在 v1.2.0 范围内；协议、存储兼容与 K3b 要求见 [K3a Agent 报告](docs/v1.2-k3a-agent-report.md)。
+K3a Agent 本地实现完成（2026-10-29，原生 Linux/root 验收待执行）：`cores: [{name, path}]` 支持 xray 与 sing-box，首项为兼容主核心；旧标量配置仍映射为一个核心。所有生产节点使用 MultiRuntime 与 `runtime/<core>/`。通过校验过的 component 核心更新可添加缺失核心；`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写。GOST 推迟，不在 v1.2.0 范围内；协议、存储兼容与 K3b 要求见 [K3a Agent 报告](docs/archive/v1.2-k3a-agent-report.md)。
 
-K3b 面板侧（2026-10-29，本地实现、未发布）：面板把节点建模为“已上报启用的核心集合”。`Welcome.multi_core_supported` 只对声明支持的 Agent 为真；未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成，缺测字段保持 `null` 而不是 0/健康。入站归属的核心由 `inbounds.core` 保存（空串＝当前主核心），删除或添加核心任务未落定期间该组件不可选（`core_selectionBlocked`）。面板不接受未上报启用的核心，也不容忍跨核心/转发的端口重复。详见 [K3b 面板报告](docs/v1.2-k3b-panel-report.md)。
+K3b 面板侧（2026-10-29，本地实现、未发布）：面板把节点建模为“已上报启用的核心集合”。`Welcome.multi_core_supported` 只对声明支持的 Agent 为真；未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成，缺测字段保持 `null` 而不是 0/健康。入站归属的核心由 `inbounds.core` 保存（空串＝当前主核心），删除或添加核心任务未落定期间该组件不可选（`core_selectionBlocked`）。面板不接受未上报启用的核心，也不容忍跨核心/转发的端口重复。详见 [K3b 面板报告](docs/archive/v1.2-k3b-panel-report.md)。
 
 第一阶段优先支持：
 
@@ -852,7 +852,7 @@ K3b：同一节点上的入站监听端口按 Agent 的节点级规则在全部�
 
 # 14. 协议转换中转
 
-K4（2026-10-29）：服务器方案连接引用独立 canvas_tunnels；canvas_tunnel_objects 以对象类型和 ID 显式记录唯一归属，计划、发布、端口复用与清理不再按名称前缀认领。0124 为每条旧服务器连接创建独立隧道，不跨方案自动合并；启动/恢复在 Go 事务中只认领已发布方案、当前名称精确匹配且无歧义的旧对象。未认领对象保留，Owner 可查看清单并显式认领；冲突返回 legacy_object 与对象 ID。改名后归属保持，共享隧道配置与必要链路依赖一起发布。具体接口、迁移边界和验证见 [K4 报告](docs/v1.2-k4-tunnels-report.md)；未发布、未操作真实服务器。
+K4（2026-10-29）：服务器方案连接引用独立 canvas_tunnels；canvas_tunnel_objects 以对象类型和 ID 显式记录唯一归属，计划、发布、端口复用与清理不再按名称前缀认领。0124 为每条旧服务器连接创建独立隧道，不跨方案自动合并；启动/恢复在 Go 事务中只认领已发布方案、当前名称精确匹配且无歧义的旧对象。未认领对象保留，Owner 可查看清单并显式认领；冲突返回 legacy_object 与对象 ID。改名后归属保持，共享隧道配置与必要链路依赖一起发布。具体接口、迁移边界和验证见 [K4 报告](docs/archive/v1.2-k4-tunnels-report.md)；未发布、未操作真实服务器。
 
 中转搭建（U5a）统一展示“加密中转”和“端口转发”。端口转发的 `listenPort`、`targetHost`、`targetPort` 保存在连接上；旧布局按实例端口与目标服务器公网 IP 回退。新字段只允许 `port_forward`，主机校验复用 forward 入站规则。监听端口按数字在节点内唯一，不区分 TCP/UDP（与 Agent `desiredstate.Validate` 相同，含中转与转发入站）：计划与发布在端口被该节点其他**已启用**入站占用、或被本次计划的另一条监听重复使用时拒绝，禁用入站不占用；K4 的对象归属不变，同一对象自己的监听重发不与自己冲突。多条端口转发可以连接同一对服务器，按连接 ID 区分；旧布局的生成名称不变。
 
@@ -1812,7 +1812,7 @@ SSE 只推送：
 
 ## 27.12 v1.1 接口补充
 
-K4：Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /canvas-tunnels/legacy-objects、POST /canvas-tunnels/{id}/adopt；写入要求 CSRF 并记录审计。服务端连接接受 tunnelId 引用，其余配置由资源读取；客户端拒绝该字段。PUT 隧道要求 updatedAt；端点修改在同一事务中重定向所有引用方案并更新方案令牌。旧内嵌写法按方案 ID + 连接 ID 创建/更新该方案最初创建的隧道，显式引用不隐式修改资源。计划增加 tunnels:[{tunnelId,affectedSchemes:[{id,name}]}]，冲突增加 reason/objectId。完整且可供 F4 使用的 JSON 见 [K4 报告](docs/v1.2-k4-tunnels-report.md)。
+K4：Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /canvas-tunnels/legacy-objects、POST /canvas-tunnels/{id}/adopt；写入要求 CSRF 并记录审计。服务端连接接受 tunnelId 引用，其余配置由资源读取；客户端拒绝该字段。PUT 隧道要求 updatedAt；端点修改在同一事务中重定向所有引用方案并更新方案令牌。旧内嵌写法按方案 ID + 连接 ID 创建/更新该方案最初创建的隧道，显式引用不隐式修改资源。计划增加 tunnels:[{tunnelId,affectedSchemes:[{id,name}]}]，冲突增加 reason/objectId。完整且可供 F4 使用的 JSON 见 [K4 报告](docs/archive/v1.2-k4-tunnels-report.md)。
 
 U5a 增加 `POST /api/v1/canvas-schemes/{id}/plan`（Owner，会话与 CSRF 同 publish）。无正文或 `{}` 规划已保存布局；`{"layout": <CanvasLayout>}` 规划未保存布局。返回 `ok`、按服务器的 `creates/updates/removes`、逐连接状态、监听端口冲突和警告；失败原因另有 `message`。接口仅读取，不写对象、方案、审计或 Revision。它复用发布的规划、生成对象识别、端口冲突与删除引用检查；客户端方案返回 `ok:false`，客户端已有 publish 路径不变。更新表示发布会执行同名对象的保存（不表示字段一定变化）；计划与执行之间状态变化仍可能导致发布失败。
 
@@ -2053,7 +2053,7 @@ update.sh，旧 updater 尚无新增文件保护。v2 Agent 记录不允许用�
 目标 installer 降级，失败升级仍可自动恢复原 v1 记录与 config。uninstall
 逐一校验并删除所有记录核心，继续保留配置、身份和运行状态目录，并先清除
 K2a 调优。Linux/root 故障、断电和实机验收待完成，见
-[安装器报告](docs/v1.2-k3c-installer-report.md)。
+[安装器报告](docs/archive/v1.2-k3c-installer-report.md)。
 
 
 ---

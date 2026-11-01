@@ -31,7 +31,7 @@ func (Exporter) FileName() string    { return "qui-sing-box.json" }
 
 // UserAgents returns the client patterns for this format. v1.1 ships none: no
 // client User-Agent could be verified from an official source
-// (docs/v1.1-phase0-findings.md A.7).
+// (docs/archive/v1.1-phase0-findings.md A.7).
 func (Exporter) UserAgents() []string { return nil }
 
 func (Exporter) UsesRules() bool { return false }

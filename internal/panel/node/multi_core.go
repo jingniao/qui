@@ -112,7 +112,7 @@ func validateRemoveResult(r *pb.RemoveCoreResult) error {
 
 // DeviceGateUDPUnsupported reports whether a gated user's UDP on an inbound of
 // this protocol, served by this core, escapes the device limit. Measured with
-// the real cores (docs/v1.1-progress.md, L8): Xray SOCKS5 UDP carries no user
+// the real cores (docs/archive/v1.1-progress.md, L8): Xray SOCKS5 UDP carries no user
 // identity; sing-box SOCKS5 UDP cannot be tied to the user, and sing-box
 // Shadowsocks, Hysteria2 and TUIC recreate a closed UDP session for the same
 // user on the next datagram. TCP on these inbounds is still limited.

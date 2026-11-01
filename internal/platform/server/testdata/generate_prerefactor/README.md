@@ -13,7 +13,7 @@ Those two migrations were rewritten with CRLF when the baseline was imported,
 which changed their SHA-256. `db.Open` and backup validation compare the
 embedded migration bytes against `schema_migrations.checksum`, so a baseline
 that still holds the CRLF bytes cannot produce a fixture that restores. See
-`docs/lightweight-refactor-plan.md`, "Finding during Phase 9: migration bytes
+`docs/archive/lightweight-refactor-plan.md`, "Finding during Phase 9: migration bytes
 changed at baseline import".
 
 ## Steps

@@ -2,7 +2,6 @@ node_modules/
 **/dist/*
 !web/dist/.gitkeep
 .tools/
-/docs/archive/
 .vite/
 bin/
 /panel.exe

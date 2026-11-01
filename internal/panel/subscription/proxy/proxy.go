@@ -5,7 +5,7 @@
 //
 // The package imports nothing from proxycontrol: `user`, `desiredstate`,
 // `system` and `net/http` must stay out of its dependency graph
-// (docs/v1.1-plan.md 4.3, acceptance A1.5 of Phase 1).
+// (docs/archive/v1.1-plan.md 4.3, acceptance A1.5 of Phase 1).
 package proxy
 
 import (

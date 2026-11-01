@@ -64,7 +64,7 @@
 | 独立配置版本页面 | 菜单退出主流程，旧 `/system/revisions` 重定向到服务器 |
 | 独立客户端接入入口 | 当前 `/portal/client` 重定向到总览，个人接入内容向前台总览集中 |
 
-依据：[路由](../web/src/app/router.ts)、[侧边栏](../web/src/components/AppSidebar.vue)。重定向不等于旧组件、接口或后端机制已删除。
+依据：[路由](../../web/src/app/router.ts)、[侧边栏](../../web/src/components/AppSidebar.vue)。重定向不等于旧组件、接口或后端机制已删除。
 
 ## 3. 前台整体调整
 
@@ -95,7 +95,7 @@
 
 **当前仍需衔接：** 模式切换使用 `viewMode`；这不是普通用户的独立认证体系。总览仍存在通过管理接口读取用户并按用户名匹配、失败取第一条的逻辑。真正的个人前台应由后端会话确定数据归属，不能依赖这种临时匹配。
 
-依据：[总览页面](../web/src/modules/dashboard/pages/DashboardPage.vue)、[节点页面](../web/src/modules/nodes/pages/NodeListPage.vue)、[模式状态](../web/src/app/viewMode.ts)、[导航守卫](../web/src/app/guards.ts)。
+依据：[总览页面](../../web/src/modules/dashboard/pages/DashboardPage.vue)、[节点页面](../../web/src/modules/nodes/pages/NodeListPage.vue)、[模式状态](../../web/src/app/viewMode.ts)、[导航守卫](../../web/src/app/guards.ts)。
 
 ## 4. 后台系统总览
 
@@ -142,7 +142,7 @@
 
 登录密码、订阅 Token、代理接入凭据必须明确区分。只修改登录密码或订阅链接，不应暗示旧代理配置已被撤销。
 
-依据：[用户列表](../web/src/modules/users/pages/UserListPage.vue)、[用户详情](../web/src/modules/users/pages/UserDetailPage.vue)、[用户 API 与扩展字段](../web/src/modules/users/api.ts)。
+依据：[用户列表](../../web/src/modules/users/pages/UserListPage.vue)、[用户详情](../../web/src/modules/users/pages/UserDetailPage.vue)、[用户 API 与扩展字段](../../web/src/modules/users/api.ts)。
 
 ## 6. 服务器
 
@@ -169,7 +169,7 @@
 
 服务器在线、核心健康、代理可连接是不同维度；测速结果也不能替代当前网速或用户实际延迟。
 
-依据：[服务器列表](../web/src/modules/nodes/pages/NodeListPage.vue)、[服务器元数据](../web/src/modules/nodes/nodeMeta.ts)、[版本展示组件](../web/src/modules/system/components/NodeVersionPanel.vue)。
+依据：[服务器列表](../../web/src/modules/nodes/pages/NodeListPage.vue)、[服务器元数据](../../web/src/modules/nodes/nodeMeta.ts)、[版本展示组件](../../web/src/modules/system/components/NodeVersionPanel.vue)。
 
 ## 7. 节点配置：节点列表与中转搭建
 
@@ -222,7 +222,7 @@
 
 自建入站保存会调用现有接口并尝试创建版本，但创建版本不等于部署成功，仍需补齐发布及结果确认。
 
-依据：[节点列表](../web/src/modules/proxy/pages/ProxyNodeListPage.vue)、[中转画布](../web/src/modules/proxy/pages/RelayCanvasPage.vue)、[资源与方案数据](../web/src/modules/proxy/proxyNodes.ts)。
+依据：[节点列表](../../web/src/modules/proxy/pages/ProxyNodeListPage.vue)、[中转画布](../../web/src/modules/proxy/pages/RelayCanvasPage.vue)、[资源与方案数据](../../web/src/modules/proxy/proxyNodes.ts)。
 
 ## 8. 分流控制
 
@@ -241,7 +241,7 @@
 
 **当前边界：** 客户端策略仍在 `localStorage` 保存。规则集页面生成的 provider 片段指向现有服务集 API，不能据此认定该 URL 已具备客户端可直接获取的格式、权限和更新机制。服务集管理接口、策略管理接口与实际订阅导出能力还需分别接通和验证。
 
-依据：[分流 API 与客户端本地配置](../web/src/modules/routing/api.ts)、[客户端策略](../web/src/modules/routing/pages/ClientPolicyPage.vue)、[节点策略](../web/src/modules/routing/pages/RoutingRulePage.vue)、[规则集](../web/src/modules/routing/pages/ServiceRulePage.vue)、[策略模拟](../web/src/modules/routing/pages/PolicySimulatorPage.vue)。
+依据：[分流 API 与客户端本地配置](../../web/src/modules/routing/api.ts)、[客户端策略](../../web/src/modules/routing/pages/ClientPolicyPage.vue)、[节点策略](../../web/src/modules/routing/pages/RoutingRulePage.vue)、[规则集](../../web/src/modules/routing/pages/ServiceRulePage.vue)、[策略模拟](../../web/src/modules/routing/pages/PolicySimulatorPage.vue)。
 
 ## 9. 系统管理与配置发布流程
 
@@ -266,7 +266,7 @@
 
 当前已调整菜单与旧路径重定向，但发布流程尚不能视为整体完成。不能把隐藏版本页面理解为删除底层版本机制，也不能在新入口未接通时丢失原发布能力。
 
-依据：[系统设置](../web/src/modules/system/pages/SettingsPage.vue)、[路由](../web/src/app/router.ts)。
+依据：[系统设置](../../web/src/modules/system/pages/SettingsPage.vue)、[路由](../../web/src/app/router.ts)。
 
 ## 10. 后续衔接与验收重点
 

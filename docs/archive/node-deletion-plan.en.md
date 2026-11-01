@@ -1,7 +1,7 @@
 # Node Deletion Implementation Plan
 
 **Date:** 2026-10-19  
-**Status:** Superseded. A reduced version is implemented; see [AGENTS.md](../AGENTS.md) §11.3 and [operations](operations.md) §15  
+**Status:** Superseded. A reduced version is implemented; see [AGENTS.md](../../AGENTS.md) §11.3 and [operations](../operations.md) §15  
 **Scope:** Deleting registered nodes from panel management while preserving historical records
 
 ## 1. Purpose
@@ -12,7 +12,7 @@ The current implementation supports cancelling an unused node registration. It r
 
 The recommended approach is logical deletion for registered nodes: retain the node identity record for historical references, mark it as deleted, revoke management access, and exclude it from operational queries. Physical deletion remains available for unused registrations that satisfy the existing checks.
 
-This document describes proposed behavior. It does not claim that these capabilities are currently available. Project constraints remain defined by [AGENTS.md](../AGENTS.md) and decisions D1–D5 in the [lightweight refactor plan](lightweight-refactor-plan.md).
+This document describes proposed behavior. It does not claim that these capabilities are currently available. Project constraints remain defined by [AGENTS.md](../../AGENTS.md) and decisions D1–D5 in the [lightweight refactor plan](lightweight-refactor-plan.md).
 
 ## 2. User-visible behavior
 

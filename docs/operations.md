@@ -1,6 +1,6 @@
 # 运维手册
 
-v1.1 补充日期：2026-10-28，尚未发布。升级顺序为面板先、Agent 后；RC 与实机操作仍待 Owner 批准，验收状态见 [v1.1 进度](v1.1-progress.md)。
+v1.1 补充日期：2026-10-28，尚未发布。升级顺序为面板先、Agent 后；RC 与实机操作仍待 Owner 批准，验收状态见 [v1.1 进度](archive/v1.1-progress.md)。
 
 更新时间：2026-10-22（节点 Agent 支持 Alpine / OpenRC）。性质：按当前源码整理的运维结论，不是运行证据。未在 Linux 实机执行；带 **[待实机]** 的操作属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。安装与目录约定见[部署与升级](deployment.md)。
 

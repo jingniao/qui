@@ -25,7 +25,7 @@ var ErrRuntimeInvalid = errors.New("session lifetime must be 15 to 1440 minutes,
 
 // Default subscription settings. User-Agent detection is on by default: the
 // resolver ships no pattern yet, so it changes nothing until a verified one is
-// added (docs/v1.1-phase0-findings.md A.7).
+// added (docs/archive/v1.1-phase0-findings.md A.7).
 const (
 	defaultUpdateHours     = 12
 	defaultUADetection     = true

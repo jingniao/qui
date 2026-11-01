@@ -60,7 +60,7 @@ Retained destinations such as access audit, backup, and operation logs are not a
 | Standalone Configuration Versions | Removed from the primary workflow; `/system/revisions` redirects to Servers |
 | Separate client-access destination | `/portal/client` redirects to the dashboard as personal access moves into the overview |
 
-Sources: [routes](../web/src/app/router.ts) and [sidebar](../web/src/components/AppSidebar.vue). Redirecting an entry does not remove its old component, API, or underlying backend mechanism.
+Sources: [routes](../../web/src/app/router.ts) and [sidebar](../../web/src/components/AppSidebar.vue). Redirecting an entry does not remove its old component, API, or underlying backend mechanism.
 
 ## 3. Portal changes
 
@@ -80,7 +80,7 @@ Show authorized entry points with names, regions/purposes, protocols, addresses,
 
 The current implementation uses `viewMode` to switch presentation. It is not an independent end-user authentication model. Dashboard code still reads management APIs, matches a proxy user by login name, and falls back to the first record. Personal data must eventually be resolved through backend session ownership.
 
-Sources: [dashboard](../web/src/modules/dashboard/pages/DashboardPage.vue), [node page](../web/src/modules/nodes/pages/NodeListPage.vue), [view mode](../web/src/app/viewMode.ts), and [guards](../web/src/app/guards.ts).
+Sources: [dashboard](../../web/src/modules/dashboard/pages/DashboardPage.vue), [node page](../../web/src/modules/nodes/pages/NodeListPage.vue), [view mode](../../web/src/app/viewMode.ts), and [guards](../../web/src/app/guards.ts).
 
 ## 4. Administrative dashboard
 
@@ -117,7 +117,7 @@ Administrator actions also appear in the current user-management code. Ordinary 
 
 Login passwords, subscription tokens, and proxy credentials must have distinct actions and descriptions. Changing a login password or link alone must not imply that an imported proxy configuration has been revoked.
 
-Sources: [user list](../web/src/modules/users/pages/UserListPage.vue), [user detail](../web/src/modules/users/pages/UserDetailPage.vue), and [user API/metadata](../web/src/modules/users/api.ts).
+Sources: [user list](../../web/src/modules/users/pages/UserListPage.vue), [user detail](../../web/src/modules/users/pages/UserDetailPage.vue), and [user API/metadata](../../web/src/modules/users/api.ts).
 
 ## 6. Servers
 
@@ -140,7 +140,7 @@ Additional server metadata such as renewal and region is currently stored in bro
 
 Agent connectivity, core health, and proxy reachability are separate. A benchmark is also different from current network rate or the user's experienced latency.
 
-Sources: [server list](../web/src/modules/nodes/pages/NodeListPage.vue), [server metadata](../web/src/modules/nodes/nodeMeta.ts), and [version panel](../web/src/modules/system/components/NodeVersionPanel.vue).
+Sources: [server list](../../web/src/modules/nodes/pages/NodeListPage.vue), [server metadata](../../web/src/modules/nodes/nodeMeta.ts), and [version panel](../../web/src/modules/system/components/NodeVersionPanel.vue).
 
 ## 7. Node configuration and relay builder
 
@@ -185,7 +185,7 @@ The examined `handleConfirmPublish()` only changes local publication flags and d
 
 Self-hosted inbound editing calls existing APIs and attempts revision creation. Creating a revision is not equivalent to deploying it; result confirmation remains necessary.
 
-Sources: [node list](../web/src/modules/proxy/pages/ProxyNodeListPage.vue), [canvas](../web/src/modules/proxy/pages/RelayCanvasPage.vue), and [resource/scheme state](../web/src/modules/proxy/proxyNodes.ts).
+Sources: [node list](../../web/src/modules/proxy/pages/ProxyNodeListPage.vue), [canvas](../../web/src/modules/proxy/pages/RelayCanvasPage.vue), and [resource/scheme state](../../web/src/modules/proxy/proxyNodes.ts).
 
 ## 8. Routing control
 
@@ -204,7 +204,7 @@ Client policy delivery requires a complete configuration subscription. Rule-set 
 
 **Current boundary:** client policies are stored in `localStorage`. Provider snippets point to an existing service-set API, which does not by itself establish compatible formatting, authorization, or updating for external clients. Management endpoints, policy storage, and subscription export must be integrated and checked separately.
 
-Sources: [routing API/state](../web/src/modules/routing/api.ts), [client policies](../web/src/modules/routing/pages/ClientPolicyPage.vue), [node policies](../web/src/modules/routing/pages/RoutingRulePage.vue), [rule sets](../web/src/modules/routing/pages/ServiceRulePage.vue), and [simulator](../web/src/modules/routing/pages/PolicySimulatorPage.vue).
+Sources: [routing API/state](../../web/src/modules/routing/api.ts), [client policies](../../web/src/modules/routing/pages/ClientPolicyPage.vue), [node policies](../../web/src/modules/routing/pages/RoutingRulePage.vue), [rule sets](../../web/src/modules/routing/pages/ServiceRulePage.vue), and [simulator](../../web/src/modules/routing/pages/PolicySimulatorPage.vue).
 
 ## 9. System management and publishing
 
@@ -222,7 +222,7 @@ Snapshots, dependency ordering, deployment batches, and rollback remain backend 
 
 Navigation changes are present, but complete business integration is not established. Removing the Configuration Versions menu must not remove revision machinery or strand publishing operations before replacement flows work.
 
-Sources: [settings](../web/src/modules/system/pages/SettingsPage.vue) and [routes](../web/src/app/router.ts).
+Sources: [settings](../../web/src/modules/system/pages/SettingsPage.vue) and [routes](../../web/src/app/router.ts).
 
 ## 10. Integration and acceptance priorities
 

@@ -1182,7 +1182,7 @@
 | A6.6 | 本地证据：Phase 6 新链接再查看、旧 NULL 加密副本不可恢复、重置撤销 |
 | A6.7 | 本地证据：Phase 6 与 Review fix round 2 的 backup/candidate coordinator，密码/登录开关/Token 保守合并、恢复清会话 |
 | A7.1 | 本地证据：web 构建、`portal-selftest.mjs`，独立路由/CSRF、只读预览、无 viewMode |
-| A7.2 | awaiting Owner approval：Phase 7 RC1 三主机清单未执行；L4 拒绝 RC 版本及组合主机组件顺序是阻塞 |
+| A7.2 | 通过：v1.2.0-rc.1（2026-11-01）面板升级、组合主机先面板后 Agent、1.0.9 Agent 兼容、发布与回滚均通过（§11）；L4 已解决 |
 
 ### 10.2 Phase 8–11
 
@@ -1203,10 +1203,10 @@
 | A10.4 | 本地证据：`TestDeviceLimitViewsResetPrivacyAndOldNodePartial` 与 mTLS 能力协商，旧 Agent 不收门控并显示节点名 |
 | A10.5 | 以 CI 代替：GitHub runner 上的 `go test -race` 自 `0628a5b` 起每次运行均通过、无 DATA RACE；Owner 2026-10-31 决定不在面板主机上另跑 |
 | A10.6 | 本地证据：全表/备份/accepted-message 无源地址断言及 `TestAddressImplementationsHaveNoPersistenceOrLoggingCalls`，两视图掩码 |
-| A11.1 | 部分：CI 运行 41180456701（`0628a5b`）（cores + check）与推送运行 41180455994（check）在 release/v1.2.0 上全部通过，cores 作业首次通过；修复见进度“Native-core CI on release/v1.2.0”；arm64 qemu/实机、RC 与发布仍待 Owner |
-| A11.2 | awaiting Owner approval：RC2 未执行，进度 Phase 11 有三主机清单；先解决 L4 |
-| A11.3 | 未满足：仍有 P1/P2 发布阻塞/验收缺口，优先级见进度 Phase 11；arm64 version/check/qemu Agent 验证待安排，真实 arm64 主机未验证 |
-| A11.4 | awaiting Owner approval：未打 tag、未发布、未部署；进度 Phase 11 有发布清单 |
+| A11.1 | 通过（amd64）：`8f6406e` 在本地 Linux 测试机门禁通过（`scripts/check.sh` 含 `-race` 28 分钟、原生核心 19 分钟）并在 GitHub 手动运行 41324210203（check + cores）通过；arm64 不在 v1.2.0 范围（Owner 2026-10-31） |
+| A11.2 | 通过：rc.1–rc.4 在三台主机验收（§11）；rc.4 上 F10 修复在 uk-node 复验通过 |
+| A11.3 | 通过（amd64）：F1–F13 已修复或按 Owner 决定记为限制（F11）；arm64 不验收 |
+| A11.4 | 通过：v1.2.0 于 2026-11-01 发布（tag `v1.2.0` = `8f6406e`，发布运行 41332690148），三台主机已升级（§11） |
 
 ### 10.3 UI 集成 U1–U8
 
@@ -1216,7 +1216,7 @@
 | AU1.2 | 本地阶段证据：U1 endpoint tests，已登记节点拒绝重发注册码、按节点版本查询、Viewer 权限 |
 | AU1.3 | 本地阶段证据：U1 入站全字段 edit round-trip，改名不扩大授权或丢 TLS 设置 |
 | AU1.4 | 本地证据：`qr-selftest.mjs` 参考解码器 round-trip，跨版本/纠错级别、长串与超长拒绝 |
-| AU1.5 | awaiting Owner approval：Owner/Viewer 全页浏览器走查和前后 Token/设备/版本行数；已有 API/静态证据不能替代点击 |
+| AU1.5 | 通过：2026-11-01 在本地 rc.3 面板（样例数据、假 Agent）走查 Owner 全部页面与门户，无控制台错误、布局不变；发现 F12、F13（rc.4 已修复） |
 | AU2.1 | 部分：单步发布及 deployer 单元测试已有；fake-Agent 一步发布集成证据仍缺（计划 §12.5 U2a/U2c） |
 | AU2.2 | 本地证据：`TestCanvasMatchesTheEditors`、single/two-hop publish 与拒绝/删除边界；复用 Deployment 批次 |
 | AU2.3 | 本地阶段证据：U2 回滚到选定成功版本与节点归属校验；真实节点回滚仍属 RC |
@@ -1245,15 +1245,15 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 | --- | --- | --- |
 | H0 | 备份、Agent 快照、迁移副本预演 | 通过 |
 | H1 | 面板 1.0.9 → rc.1（us2-node） | 通过 |
-| H1b | 浏览器走查 | 未执行（需 Owner 共享标签页）；面板主机 -race 以 CI 代替 |
+| H1b | 浏览器走查 | 通过（本地 rc.3 面板，样例数据；发现 F12、F13，rc.4 修复）；面板主机 -race 以 CI 代替 |
 | H2 | uk-node 强制失败后自动回滚到 1.0.9 | 通过 |
 | H3 / H5 | uk-node、us2-node Agent → rc.1，再 → rc.2 | 通过（v2 安装记录、配置不变、发布与回滚、监听不是 MPTCP） |
-| H4 | alpine-node Agent | rc.1 失败（F7，已修复）；rc.2 升级通过、调优服务启动；kill -9 与重启演练未执行（计划命令用了 BusyBox 没有的 `setsid -f`，已更正；同版本更新不建快照），随 rc.3 执行 |
+| H4 | alpine-node Agent | rc.1 失败（F7，已修复）；rc.2 升级通过；rc.3：rc.2→rc.3 更新中 `kill -9` 并重启，开机恢复回到 rc.2（哈希一致），随后正常升级通过 |
 | H6 | 调优 helper | uk-node 通过；alpine-node 通过（容器内不存在的键整体干净失败，单键应用与清除恢复原值） |
 | H7 | uk-node 多核心（Xray + sing-box） | 通过（F3、F4） |
 | H7b | 两个真实来源的设备限制 | rc.1 失败（F5，已修复）；rc.2 通过：第二个来源 4 秒内被观测、6 秒起被拒绝，60 + 120 秒后放行，Owner 重置立即生效 |
 | H7c | 受管节点端口转发 | 通过：TCP 转发 HTTPS 证书有效、UDP 转发 DNS 正常、用户不计费；Xray 节点总量不含转发字节（F11） |
-| H8 | 一次性容器内全新安装与卸载 | rc.2 失败（F9：登记拒绝 `tuning/` 目录，已修复），随 rc.3 复验 |
-| H9 | RC 与发布 | rc.1、rc.2、rc.3 已发布为预发布版；正式发布待 Owner |
+| H8 | 一次性容器内全新安装与卸载 | rc.2 失败（F9）；rc.3 通过：双核心安装、登记、上线、发布，卸载保留身份与数据，清理后主机包列表一致 |
+| H9 | RC 与发布 | rc.1–rc.4 预发布；rc.4 三台主机通过、F10 复验通过（conntrack 满 14 次丢包，0 次核心重启）；v1.2.0 于 2026-11-01 发布并部署到三台主机 |
 
-发现：F1–F7（RC1）、F8–F11（RC2）。RC3 待复验：F8 订阅名称、F9 全新安装、F10 核心重启原因（rc.3 只增加诊断日志）、H4 演练。限制：L8（按方案 1 标注）、L9、L10，以及 F11。
+发现：F1–F7（RC1）、F8–F11（RC2）、F12–F13（浏览器走查）；全部已修复或按决定记为限制（F11），F8–F10 在 rc.3/rc.4 实机复验通过。v1.2.0 于 2026-11-01 发布（tag 指向 `8f6406e`，与 rc.4 同一 commit）并部署到三台主机。限制：L8（按方案 1 标注）、L9、L10、F11；只验收 amd64。

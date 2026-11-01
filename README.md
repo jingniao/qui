@@ -2,7 +2,7 @@
 
 面向 1～10 名内部用户的自托管多节点代理控制平台。中央端是一个 Go 单体程序（SQLite + 嵌入式 Vue 前端），Node Agent 通过 gRPC + mTLS 主动接入并管理**官方** Xray 或 sing-box 二进制；用户代理流量不经过中央端。
 
-当前状态：**v1.0.9 是最新发布版**（GitHub Release，仓库 <https://github.com/jingniao/qui>）：v1.0.1 起节点 Agent 支持 Alpine/OpenRC，v1.0.2 起 `qui-update` 失败时自动回滚，v1.0.3 起更新中断（含断电）后自动恢复、面板可带数据库跨迁移降级，v1.0.4 修复强制出站 helper 连续失败后不再执行新配置，v1.0.5 让 Alpine 节点可用 musl sing-box，v1.0.6 起核心运行不了保留的修订时 Agent 保持连接、不再反复重启，v1.0.7–v1.0.9 修复删除用户或设备后的凭据与上传、恢复备份与核心更新回执等问题。**v1.2.0 尚未发布**：预发布版 rc.1–rc.3 已发布，rc.2 在三台主机通过面板与 Agent 升级、调优、多核心、设备限制与端口转发验收，RC3 复验与正式发布批准待完成；逐项结果见[验收矩阵](docs/v1-acceptance.md) §11。
+当前状态：**v1.2.0 是最新发布版**（2026-11-01）（GitHub Release，仓库 <https://github.com/jingniao/qui>）：v1.0.1 起节点 Agent 支持 Alpine/OpenRC，v1.0.2 起 `qui-update` 失败时自动回滚，v1.0.3 起更新中断（含断电）后自动恢复、面板可带数据库跨迁移降级，v1.0.4 修复强制出站 helper 连续失败后不再执行新配置，v1.0.5 让 Alpine 节点可用 musl sing-box，v1.0.6 起核心运行不了保留的修订时 Agent 保持连接、不再反复重启，v1.0.7–v1.0.9 修复删除用户或设备后的凭据与上传、恢复备份与核心更新回执等问题。v1.2.0 合并了 v1.1 与 v1.2 的功能（用户门户、设备限制、多核心、服务器调优、端口转发、更多订阅格式、主机监控）与 CVE-2026-98432 缓解，预发布版 rc.1–rc.4 已在三台主机验收；逐项结果见[验收矩阵](docs/v1-acceptance.md) §11，发布说明见 [docs/release-notes-1.2.0.md](docs/release-notes-1.2.0.md)。
 
 ## 快速开始
 

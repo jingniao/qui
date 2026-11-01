@@ -1836,7 +1836,7 @@ GET    /nodes/{id}/latency?hours=24
 GET/PUT /nodes/{id}/latency-targets
 POST   /inbounds/{id}/reachability
 POST   /nodes/{id}/publish
-GET    /nodes/{id}/revisions
+GET    /revisions?nodeId={id}            (a node's revisions; there is no /nodes/{id}/revisions route)
 GET/POST /canvas-tunnels
 PUT/DELETE /canvas-tunnels/{id}
 GET    /canvas-tunnels/legacy-objects

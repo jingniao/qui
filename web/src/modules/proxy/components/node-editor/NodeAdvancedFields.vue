@@ -11,6 +11,7 @@
       </select></label>
       <label class="block"><input v-model="form.internalRelay" :disabled="editing || form.protocol === 'forward'" @change="form.internalRelay && (form.subscriptionVisible = false)" type="checkbox" /> 内部中转入口</label>
       <label v-if="!form.internalRelay && form.protocol !== 'forward'" class="block"><input v-model="form.subscriptionVisible" type="checkbox" /> 显示在授权用户订阅中</label>
+      <p v-if="!form.internalRelay && form.protocol !== 'forward' && !form.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
       <div v-if="!form.internalRelay && form.protocol !== 'forward'" class="space-y-2">
         <p class="text-xs">允许用户（不勾选表示节点分组内全部授权用户）</p>
         <label v-for="user in users" :key="user.id" class="flex items-center gap-2"><input v-model="form.allowedUserIds" :value="user.id" type="checkbox" /> {{ user.displayName || user.username }}</label>

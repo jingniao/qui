@@ -29,7 +29,7 @@
 
 **v1.2.0（v1.1 与 v1.2 合并）尚未发布**：2026-11-01 发布预发布版 rc.1、rc.2、rc.3；rc.2 已在三台主机（us2-node、uk-node、alpine-node）通过面板与 Agent 升级（H1、H3、H5）、调优（H6）、多核心（H7）、设备限制（H7b）与端口转发（H7c）。未完成：RC3 复验（H4 `kill -9`/断电重启演练、H8 全新安装、F8 订阅名称、F10 核心重启原因）、浏览器走查 H1b、正式发布批准；只验收 amd64，arm64 与安装器的断电/故障恢复未实机验证。已知限制：L8（按方案 1 如实标注）、L9、L10、F11。下一版本：[v1.3.0 计划](docs/v1.3-plan.md)。
 
-CI：release/v1.2.0 的 cores 作业与 `-race` 通过，本地 Linux 测试机复跑 111 个原生核心测试与 `-race`；面板主机 -race 按 Owner 决定以 CI 代替。
+CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（release/v1.2.0 已复跑 111 个原生核心测试与 `-race`，面板主机 -race 按 Owner 决定以 CI 代替）；GitHub 只在手动与每周运行 `check`（同一脚本）与 `cores`，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
 
 ## 变更记录
 

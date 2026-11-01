@@ -18,7 +18,7 @@
 | 面板 | `deploy/linux/install.sh --panel ...`，配置 `deploy/examples/panel.yaml` |
 | 节点 | `deploy/linux/install.sh --node ... [--core xray|sing-box ...]`，登记 `deploy/linux/enroll.sh --token-file FILE` |
 | 官方核心 | Xray 26.3.27、sing-box 1.14.3 官方发布二进制（核心相关项必须使用） |
-| 自动门禁 | `.github/workflows/check.yml` 的 `check` 作业（web 构建、前端时间测试、`go vet`、Agent fixture、`go test -race`、两个构建）与可选的 `cores` 作业（真实核测试）；`release` 作业只在 `refs/tags/v*` 上运行，拒绝非 `vMAJOR.MINOR.PATCH` 标签，构建两个架构的归档与 `SHA256SUMS` 并用 `gh release create` 发布（v1.0.0 即由它发布）。CI 通过不等于验收通过 |
+| 自动门禁 | 每个变更在本地 Linux 测试机上过门禁：`bash scripts/check.sh`（web 构建、前端时间测试与自测、`go vet`、Agent fixture、`go test -race`、两个构建、部署脚本检查）＋真实核套件。GitHub 只在手动（`workflow_dispatch`）与每周（`schedule`）运行 `.github/workflows/check.yml` 的同一脚本与可选的 `cores` 作业（真实核测试）；`release` 作业只在 `refs/tags/v*` 上运行，**不重复门禁**：要求同一 commit 已有一次成功的 `check` 作业（先手动跑工作流、再打标签），拒绝非 `vMAJOR.MINOR.PATCH` 标签，构建两个架构的归档与 `SHA256SUMS` 并用 `gh release create` 发布（v1.0.0 即由它发布）。CI 通过不等于验收通过 |
 | 单元/集成测试 | `go test -count=1 ./...`；设置 `XRAY_BINARY` / `SINGBOX_BINARY` 后真实核用例不再跳过 |
 
 测试命令与参数见[部署与升级](deployment.md)，日常操作见[运维手册](operations.md)，能力范围见[协议支持矩阵](protocol-support-matrix.md)。

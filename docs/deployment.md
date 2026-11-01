@@ -97,8 +97,10 @@ installer，防止降级丢失核心所有权；这不影响失败升级自动�
 
 仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：发布构建从 `PATH` 读取工具。sing-box 构建另需 `git`、GNU `tar`、`gzip`、`sha256sum`、`readelf`，通过 `GOTOOLCHAIN=go1.26.10` 固定其工具链；它在临时目录克隆上游，不改本仓库的模块文件。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
 
+以下示例使用当前正式版 v1.0.9。
+
 ```sh
-VERSION=1.0.2 bash scripts/build-release.sh
+VERSION=1.0.9 bash scripts/build-release.sh
 ```
 
 - `SKIP_NPM_CI=1` 复用已安装的前端依赖；sing-box 构建仍需克隆固定上游标签及下载其所需模块/工具链。`OUTPUT_DIRECTORY=/abs/path` 改变输出目录，默认 `dist/`。
@@ -112,8 +114,8 @@ VERSION=1.0.2 bash scripts/build-release.sh
 在解包目录内执行（脚本要求同级的 `systemd/` 与 `examples/`）：
 
 ```sh
-tar -xzf proxy-control-1.0.2-linux-amd64.tar.gz
-cd proxy-control-1.0.2-linux-amd64
+tar -xzf proxy-control-1.0.9-linux-amd64.tar.gz
+cd proxy-control-1.0.9-linux-amd64
 sha256sum bin/proxy-panel
 deploy/linux/install.sh --panel --binary bin/proxy-panel --sha256 <sha256>
 ```
@@ -174,8 +176,8 @@ systemctl enable --now proxy-panel.service
 ```sh
 if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; \
 elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; \
-curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.2/node-install.sh | bash -s -- \
-  --version 1.0.2 --panel panel.example.com --grpc-port 9443 \
+curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.9/node-install.sh | bash -s -- \
+  --version 1.0.9 --panel panel.example.com --grpc-port 9443 \
   --ca-sha256 <面板显示的 64 位小写十六进制> --token <一次性注册码> --core xray
 ```
 
@@ -217,8 +219,8 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.
 **第 2 步（节点）**：安装 Agent，需要时同时安装官方核心。
 
 ```sh
-tar -xzf proxy-control-1.0.2-linux-amd64.tar.gz
-cd proxy-control-1.0.2-linux-amd64
+tar -xzf proxy-control-1.0.9-linux-amd64.tar.gz
+cd proxy-control-1.0.9-linux-amd64
 deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
   --core xray --core-version 26.3.27
 ```
@@ -263,7 +265,7 @@ systemctl enable --now proxy-agent.service
 qui-update                  # 安装 GitHub 上的最新发布
 qui-update --version 1.0.1  # 指定版本
 qui-update --yes            # 不询问确认
-qui-update --version 1.0.2 --bundle proxy-control-1.0.2-linux-amd64.tar.gz --sums SHA256SUMS
+qui-update --version 1.0.9 --bundle proxy-control-1.0.9-linux-amd64.tar.gz --sums SHA256SUMS
                             # 离线：用本地归档与其 SHA256SUMS，不访问 GitHub
 ```
 
@@ -411,7 +413,7 @@ grep -F proxy-agent /var/log/messages | tail -n 200
 - 更新被打断或开机后版本不对：看 `/var/lib/proxycontrol-install/update-recovery.log`、`interrupted-update.log`，以及 `journalctl -u proxycontrol-update-recovery`（OpenRC：`rc-service proxycontrol-update-recovery status` 与 `/var/log/messages`）。`/var/lib/proxycontrol-install/rollback.*` 仍在说明恢复没有完成，再运行一次 `qui-update` 会先重试恢复。
 - 面板起不来且怀疑数据库版本：`proxy-panel --check-database /var/lib/proxy-panel/backups/<文件>.db` 只读检查一份**停止状态**的数据库副本，输出 `database: compatible|newer|foreign|damaged`（退出码 0/3/4/5）；`newer` 表示数据库来自更新的面板，需按 5.1 带 `--database` 降级。
 
-## K2a Agent 安装增量（K2b 面板接入待完成）
+## K2a Agent 安装增量（K2b 面板已接入；v1.2.0 尚未发布）
 
 Agent 安装与一键安装新增 `/var/lib/proxy-agent/tuning/`（Agent 所有、0700），systemd 的 proxy-agent-tuning.service/.path 或 OpenRC 的 proxy-agent-tuning 与 tuning-watch；安装时启用并布防，开机重放保留请求。主程序仍无调优特权，独立 root helper 带 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者用于 Agent 的 0700/0600 文件协议），固定写入 13 个 sysctl；fs.file-max 使用 root 文件权限。systemd 将 /proc/sys 默认设为只读，仅开放白名单文件；OpenRC 没有对应的文件系统隔离。无需 sysctl 二进制或新依赖，不加载拥塞控制模块；容器/内核拒绝时失败并恢复，不补权限。
 

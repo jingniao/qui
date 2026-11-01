@@ -12,6 +12,10 @@
 
 - 原生核心 CI（2026-10-31，见[验收矩阵](v1-acceptance.md) §10.4 与[进度记录](archive/v1.1-progress.md)“Native-core CI on release/v1.2.0”）：`0628a5b` 的 cores 作业（Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1 可复现构建与双架构 release dry-run）与 check 作业（`go test -race`）全部通过，cores 作业首次通过。产品修复两项，原因相同（请求被截止时间取消后 Go 客户端仍可能返回响应且读正文不报错）：外部订阅抓取不再把残缺正文当作完整订阅缓存（`07253f9`）；Agent 自更新的清单下载被截止时间切断时报告取消而不是“清单无效”（`13cde0a`）。另修一个分钟边界导致的偶发测试失败（`c8c293b`）；最终代码 `13cde0a` 两个工作流再次全部通过。其余为 v1.1 后过时的实核测试与 Xray 26.3.27 的配置要求（带 fallbackTag 的 balancer 需要 observatory，生产渲染一直会生成）。已知上游行为：Linux 上 Xray 对可 splice 的 TCP 路径在连接关闭后才计入用户下行字节，额度判定随之推迟（第 9.1 节）。未发布。
 
+- K4（2026-10-29）：共享隧道改为显式对象归属（`canvas_tunnels` / `canvas_tunnel_objects`，迁移 0124）：计划、发布、端口复用与清理不再按名称前缀认领，旧对象只按已发布、当前名称精确匹配且无歧义认领，未认领对象保留并可显式认领，改名后归属保持，删除仍在使用的隧道返回 409 `tunnel_in_use`。见第 14、16 节。
+
+- K3c / MC4（2026-10-29）：多核心安装器：`install.sh` 与 `node-install.sh` 支持重复 `--core xray --core sing-box`，新节点不传参数仍只安装 Xray；安装记录升级为 v2（逐行记录核心名称、路径与摘要），继续读取 v1，目标 installer 不支持 v2 时拒绝降级；`qui-update` 快照并回滚全部核心路径、Agent config 与安装记录。见第 30.2 节。
+
 - K3b（2026-10-29）：面板多核心支持：`Hello/Welcome` 协商 `multi_core_supported` 与独立的 `node_traffic_supported`；按核心保存能力/版本/标志与心跳健康、启动时间、统计源状态，旧 Agent 仍按一个核心建模，缺测保持未知。入站 `core` 进入草稿、DesiredState、自动额度版本、恢复与订阅，空值等于当前主核心，保存与发布按选中核心校验协议、转发、WireGuard、门控与跨核心端口唯一。核心更新任务改为每（节点、组件）一个（迁移 0125 回填既有行），缺失组件可用 schema-2 请求安装，结果按组件路由，成功且能力刷新后才可选。Owner 移除核心：`POST /nodes/{id}/cores/{component}/remove` 与 `removals`，幂等 `RemoveCoreCommand/Result`，断线后用同一身份重发，拒绝 `core_in_use`/`core_pending`/`last_core`/`revision_mismatch`，能力确认前组件仍可见。协商会话中的 node 计数器按（节点、epoch、凭据）增量计入每核心/节点总量，绝不进入额度或重复计入账户总量，同一节点可有多个活跃 epoch。连接观测按（节点、核心）合并活跃源地址后再做设备准入，保留掩码、易失存储、TTL 与放行行为；每个入站按所属核心显示 D5 覆盖。分区重启/健康检查带核心字段，移除核心后的历史回滚在面板侧直接拒绝并说明原因。备份、校验、清单与恢复覆盖新列/新表；未发布，Linux/root 实机验收待完成。
 
 - K2b（2026-10-29）：面板接入主机信息、可空指标、分钟采样/7 天保留及查询、Owner+CSRF+审计的白名单调优（变更 L2）；断流和恢复标为未确认且不重发，续证准入与 Agent 对齐。迁移 0123；Linux/root 实机验收待完成，未发布。

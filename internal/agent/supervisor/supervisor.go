@@ -274,6 +274,14 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				// Every core answered its own check. Sampling the aggregate
 				// health here would ask a second time, and a stale second
 				// sample would restore the whole runtime.
+				//
+				// A hold no reported core owns, such as a core being added
+				// that CoreHealths does not report yet, still holds the
+				// runtime: the refresh refuses every hold, so asking it would
+				// log that refusal at Error on every tick.
+				if reconciler.CoreUpdateHeld() {
+					continue
+				}
 			} else {
 				state := recovery(adapter.Name())
 				if reconciler.CoreUpdateHeld() {

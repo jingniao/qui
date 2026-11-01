@@ -14,9 +14,12 @@ import (
 
 const enrollmentAttemptName = "enrollment-attempt.json"
 
-// hostNetworkDirectoryName is the helper directory install.sh creates in the
-// data directory (control.go joins the same name).
-const hostNetworkDirectoryName = "host-network"
+// enrollmentHelperDirectories are the helper directories install.sh creates in
+// the data directory before the first enrollment: host-network/ for the
+// enforced-source helper (control.go joins the same name) and tuning/ for the
+// tuning helper. Enrollment checks their names and types but not their
+// contents, which belong to the helpers.
+var enrollmentHelperDirectories = map[string]bool{"host-network": true, "tuning": true}
 
 type enrollmentAttempt struct {
 	Version       int    `json:"version"`
@@ -102,9 +105,10 @@ func requireEnrollmentDirectoryMode(ctx context.Context, directory string, attem
 			}
 			name := entry.Name()
 			root := folder == directory
-			// install.sh creates host-network/ for the enforced-source helper
-			// before the first enrollment.
-			allowed := name == ".agent-owner.lock" || name == ".agent-supervisor.lock" || root && (name == "identity" || name == hostNetworkDirectoryName) || root && attemptPresent && name == enrollmentAttemptName || !root && attemptPresent && name == "client.key"
+			// The install-time helper directories exist before the first
+			// enrollment and hold files the enrollment does not own.
+			helper := root && enrollmentHelperDirectories[name]
+			allowed := name == ".agent-owner.lock" || name == ".agent-supervisor.lock" || root && (name == "identity" || helper) || root && attemptPresent && name == enrollmentAttemptName || !root && attemptPresent && name == "client.key"
 			allowed = allowed || resultPresent && (root && name == enrollmentResultName || !root && (name == "client.crt" || name == "node-ca.crt" || name == "identity.json"))
 			allowed = allowed || root && ownTemporary != "" && name == ownTemporary
 			if !allowed {
@@ -120,9 +124,9 @@ func requireEnrollmentDirectoryMode(ctx context.Context, directory string, attem
 				}
 				continue
 			}
-			if root && name == hostNetworkDirectoryName {
+			if helper {
 				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-					return errors.New("登记目录中的 host-network 类型异常")
+					return errors.New("登记目录中的辅助目录类型异常")
 				}
 				continue
 			}

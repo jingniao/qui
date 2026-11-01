@@ -7,14 +7,14 @@
 ## 快速开始
 
 ```sh
-VERSION=1.0.2 bash scripts/build-release.sh      # 产出 Linux amd64/arm64 包与 SHA256SUMS
+VERSION=1.0.9 bash scripts/build-release.sh      # 产出 Linux amd64/arm64 包与 SHA256SUMS
 ```
 
 在目标 Linux 主机上（root、systemd）：
 
 ```sh
-tar -xzf proxy-control-1.0.2-linux-amd64.tar.gz
-cd proxy-control-1.0.2-linux-amd64
+tar -xzf proxy-control-1.0.9-linux-amd64.tar.gz
+cd proxy-control-1.0.9-linux-amd64
 deploy/linux/install.sh --panel --binary bin/proxy-panel --sha256 <sha256>
 # 放好 Web TLS 证书、改好 /etc/proxy-panel/config.yaml，然后
 systemctl enable --now proxy-panel.service       # 首次访问用日志/文件里的一次性令牌创建 Owner

@@ -23,7 +23,7 @@ RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。L4 �
 - `install.sh` 会检查它用到的命令是否存在，缺失即拒绝：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 上另加 `systemctl`，OpenRC 上另加 `rc-service rc-update openrc-run`。安装核心时还需要 `unzip`（Xray zip）或 `tar`（sing-box tar.gz），下载需要 `curl` 或 `wget`。最小化安装的 Debian/Ubuntu 没有 `unzip`：systemd 主机上缺少时，`install.sh` 像 `nftables` 一样用 apt / dnf / yum 安装它（实测：debootstrap minbase 的 Debian 13）。
 - 脚本里所有需要校验证书的 `curl` 调用都带 `--no-insecure`。它会覆盖 curl 包装脚本或别名加在前面的 `-k`：实测有一台 Alpine LXC 的 `/usr/bin/curl` 被换成了 `curl.orig -k "$@"`。
 
-### K3c / MC4 多核心安装（本地实现，未发布）
+### K3c / MC4 多核心安装（已实现，v1.2.0 尚未发布；实机见验收矩阵 §11）
 
 `install.sh --node` 与 `node-install.sh` 接受重复的 `--core`，例如
 `--core xray --core sing-box`；不指定时，新节点只安装 Xray。重复同名核心或

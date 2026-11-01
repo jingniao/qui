@@ -214,7 +214,7 @@ K3c/MC4（本地实现，未发布）：新节点默认单 Xray，需要两核�
 核心、Agent config、记录、主服务、强制出站与调优文件一起快照/恢复，进度日志
 沿用原格式；v2 Agent 记录遇到不支持它的旧目标 installer 时，在停服务前拒绝。
 卸载逐一校验并移除所有记录核心，保留状态数据，仍先恢复 K2a sysctl 原值再删
-调优单元。完整格式、离线参数与回退边界见[部署说明 K3c](deployment.md#k3c--mc4-多核心安装本地实现未发布)。
+调优单元。完整格式、离线参数与回退边界见[部署说明 K3c](deployment.md#k3c--mc4-多核心安装已实现v120-尚未发布实机见验收矩阵-11)。
 
 
 节点安装时，`--core sing-box` 默认使用与 Agent 同一 qui 发布的静态
@@ -374,7 +374,7 @@ Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）
 
 systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者读取 Agent 的 0600 请求并写入其 0700 目录），fs.file-max 靠 root 文件权限；/proc/sys 默认只读，只开放 13 个固定键。OpenRC 同为 root/CAP_NET_ADMIN + CAP_DAC_OVERRIDE，但缺少 systemd 文件系统隔离。若宿主策略拒绝写入，保留失败结果；不扩权。Linux/root 集成及实际内核权限仍待主机验收，可运行 `sudo bash deploy/linux/tests/tuning-helper-test.sh` 验证隔离的触发/重放流程，Go tuning 测试用假 proc 验证应用/恢复，不改宿主。
 
-## 19. K3b 多核心运维（本地实现、未发布、待实机验收）
+## 19. K3b 多核心运维（已实现，v1.2.0 尚未发布；实机见验收矩阵 §11）
 
 **看节点到底有几个核心**：`GET /api/v1/nodes/{id}` 的 `capabilities.cores` 是 Agent 报告为**启用**的核心清单（`name/version/protocols/singbox_user_stats/forward_inbound_supported/device_gate_supported/observation_contract_version`），`heartbeat.cores` 是逐核心运行状态（`name/healthy/error/started_at/traffic_source_status`）。未上报 `multi_core_supported` 的旧 Agent 仍显示一个核心（`capabilities.core_name`），缺失的观测保持缺省而不是 `false`。`core_selectionBlocked` 列出当前**不可选**的组件（正在添加或移除）。
 

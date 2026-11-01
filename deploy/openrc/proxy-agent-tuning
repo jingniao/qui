@@ -27,7 +27,9 @@ output_logger="logger -t proxy-agent-tuning -p daemon.info"
 error_logger="logger -t proxy-agent-tuning -p daemon.err"
 start_pre() {
   # A future capability must not silently broaden a root helper's bounding set.
-  read -r tuning_last_cap < /proc/sys/kernel/cap_last_cap || return 1
+  # cat, not read: BusyBox read is byte-wise and integer sysctls end at a
+  # non-zero offset, so read reports a failure here and the service never starts.
+  tuning_last_cap=$(cat /proc/sys/kernel/cap_last_cap) || return 1
   case $tuning_last_cap in ''|*[!0-9]*) return 1 ;; esac
   if [ "$tuning_last_cap" -gt 40 ]; then
     eerror "Unknown Linux capability set; tuning helper stays stopped"

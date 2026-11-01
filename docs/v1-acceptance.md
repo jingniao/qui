@@ -1239,7 +1239,7 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 
 ## 11. v1.2.0 实机验收（2026-11-01，RC1–RC3）
 
-环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine 3.19 LXC，OpenRC），均为 amd64；内核按 CVE-2026-98432 升级（alpine-node 由服务商管理）。执行：Cline；独立核对：审查者；发现与决定见 [验收发现](v1.2-rc1-findings.md)，逐步记录见[进度记录](archive/v1.1-progress.md)“H…”与“RC2 on the hosts”各节，步骤见[实机测试计划](v1.2-host-test-plan.md)。
+环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine 3.19 LXC，OpenRC），均为 amd64；内核按 CVE-2026-98432 升级（alpine-node 由服务商管理）。执行：Cline；独立核对：审查者；发现与决定见 [验收发现](v1.2-rc1-findings.md)；2026-11-01 之前的逐步记录见[进度记录](archive/v1.1-progress.md)“H…”与“RC2 on the hosts”各节，此后的实机结果直接记在本节与验收发现；步骤见[实机测试计划](v1.2-host-test-plan.md)。
 
 | 阶段 | 内容 | 结果 |
 | --- | --- | --- |

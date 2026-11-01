@@ -136,4 +136,4 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 ## 9. 不在本版范围
 
-微服务、外部消息队列、容器编排、HTTPS 中间人解密、网页内容审计、任意远程命令、无限多跳代理链等明确不做项见 AGENTS 第 35 节。当前进度和剩余阶段见[轻量重构计划](archive/lightweight-refactor-plan.md)。
+微服务、外部消息队列、容器编排、HTTPS 中间人解密、网页内容审计、任意远程命令、无限多跳代理链等明确不做项见 AGENTS 第 35 节。当前状态与进度见[项目说明书](../AGENTS.md) 的“当前状态”，历史阶段划分见历史文档[轻量重构计划](archive/lightweight-refactor-plan.md)。

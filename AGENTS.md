@@ -3,72 +3,41 @@
 **文档版本：** V1.2  
 **编制日期：** 2026 年 8 月 20 日  
 **本次修订：** 2026-11-01（v1.2.0 实机验收：RC1、RC2 已在三台主机上验收，RC3 修复 F8–F10 后待复验；整机月流量按 Owner 要求排入 v1.3.0；v1.2.0 尚未发布）  
-**项目状态：** 核心业务已实现，按轻量重构计划收敛完成；v1.0.0 已于 2026-10 作为 GitHub 发布出版，v1.0.1（节点 Agent 支持 Alpine/OpenRC 与实机验收修复）于 2026-10-23 发布，一键安装与 qui-update 的失败处理与自动回滚于 2026-10-23 作为 v1.0.2 发布，qui-update 的中断自动恢复（含断电）与面板跨迁移降级于 2026-10-23 作为 v1.0.3 发布，强制出站 helper 连续失败后不再执行新配置的问题于 2026-10-23 作为 v1.0.4 发布，Alpine 节点的 sing-box（musl 构建）与钉证书 QUIC 端点的 URI 订阅于 2026-10-24 作为 v1.0.5 发布，核心运行不了保留修订时 Agent 反复重启、连不上面板的问题于 2026-10-24 作为 v1.0.6 发布，删除用户后流量上传卡死、回滚恢复已禁用用户、快捷用户接入的凭据被自动修订删除、重连后核心更新结果丢失与 supervisor 绕过恢复退避等问题于 2026-10-25 作为 v1.0.7 发布，删除用户或设备后自动撤销凭据、恢复备份保留凭据墓碑、核心更新回执与结果重发、备份校验与入站启用意图等修复于 2026-10-26 作为 v1.0.8 发布，面板停止服务（含进程内恢复备份）时停掉自动额度版本的定时器、Agent 日志 `retry_after` 改为可读时长于 2026-10-26 作为 v1.0.9 发布；v1.1 与 v1.2 的工作合并为 v1.2.0（尚未发布）：2026-11-01 已发布预发布版 v1.2.0-rc.1、rc.2、rc.3，rc.2 已部署到三台主机并完成大部分实机验收，rc.3 的复验（崩溃与重启演练、全新安装、核心重启原因）与浏览器走查仍待完成（状态核对：2026-11-01；只验收 amd64，arm64 未验证）  
+**项目状态：** 核心功能已实现；v1.0.0–v1.0.9 已发布，v1.2.0（v1.1 与 v1.2 合并）尚未发布，预发布 rc.2 已在三台主机验收，RC3 复验与正式发布批准待完成；当前事实、未完成项与已知限制见下方[当前状态](#当前状态)。  
 **目标用户规模：** 1～10 名内部用户  
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
 
-当前工作入口见 [v1.1 计划](docs/archive/v1.1-plan.md) 与 [进度记录](docs/archive/v1.1-progress.md)，历史轻量化决策见 [轻量重构计划](docs/archive/lightweight-refactor-plan.md)。系统组成见 [架构总览](docs/architecture.md)，部署与运维见 [部署与升级](docs/deployment.md) 和 [运维手册](docs/operations.md)，完成标准见 [验收矩阵](docs/v1-acceptance.md)。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；实现已完成本地审查；release/v1.2.0 的 CI（原生核心 cores 作业与 runner 上的 `-race`）持续通过，本地 Linux 测试机复跑 111 个原生核心测试与 `-race`；面板主机 -race 按 Owner 决定以 CI 代替，L8 按方案 1 标注。实机验收计划与结果见 [实机测试计划](docs/v1.2-host-test-plan.md)、[验收发现](docs/v1.2-rc1-findings.md) 与验收矩阵 §11；下一版本的需求见 [v1.3 计划](docs/v1.3-plan.md)。v1.2 的范围与结果见 [v1.2 计划](docs/archive/v1.2-plan.md) 与 [v1.2 变更报告](docs/archive/v1.2-ui-change-report.md)；v1.1 与 v1.2 合并为 v1.2.0 发布（尚未发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
+当前文档入口见[文档导航](docs/README.md)：产品需求与架构约束即本文件，系统组成见[架构总览](docs/architecture.md)，部署与运维见[部署与升级](docs/deployment.md) 与[运维手册](docs/operations.md)，完成标准见[验收矩阵](docs/v1-acceptance.md)，实机验收过程见[实机测试计划](docs/v1.2-host-test-plan.md) 与[验收发现](docs/v1.2-rc1-findings.md)，协议与能力范围见[协议支持矩阵](docs/protocol-support-matrix.md)，下一版本需求见[v1.3 计划](docs/v1.3-plan.md)，版本修订见[变更记录](docs/changelog.md)。v1.1/v1.2 的计划、K 阶段报告与进度记录已归档到 [docs/archive](docs/archive/README.md)，只作追溯、不再维护。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；v1.1 与 v1.2 合并为 v1.2.0 发布（尚未发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
+
+## 当前状态
+
+状态核对：2026-11-01。逐项结果见[验收矩阵](docs/v1-acceptance.md) §11 与[验收发现](docs/v1.2-rc1-findings.md)。
+
+| 版本 | 日期 | 内容 |
+| --- | --- | --- |
+| v1.0.0 | 2026-10-18 | 首个 GitHub 发布版 |
+| v1.0.1 | 2026-10-23 | 节点 Agent 支持 Alpine/OpenRC 与实机验收修复 |
+| v1.0.2 | 2026-10-23 | 一键安装；`qui-update` 的失败处理与自动回滚 |
+| v1.0.3 | 2026-10-23 | `qui-update` 中断（含断电）自动恢复；面板跨迁移降级 |
+| v1.0.4 | 2026-10-23 | 强制出站 helper 连续失败后不再停用 path 单元 |
+| v1.0.5 | 2026-10-24 | Alpine 节点的 musl sing-box；钉证书 QUIC 端点不再让 URI 订阅整体失败 |
+| v1.0.6 | 2026-10-24 | 核心起不了保留修订时 Agent 保持连接、不再反复重启 |
+| v1.0.7 | 2026-10-25 | 删除用户后上传卡死、回滚恢复已禁用用户、重连丢失核心更新结果等修复 |
+| v1.0.8 | 2026-10-26 | 凭据墓碑自动撤销、恢复备份、核心更新回执重发、备份校验与入站启用意图 |
+| v1.0.9 | 2026-10-26 | 面板停服时停掉自动额度定时器；Agent 日志 `retry_after` 改为可读时长 |
+
+**v1.2.0（v1.1 与 v1.2 合并）尚未发布**：2026-11-01 发布预发布版 rc.1、rc.2、rc.3；rc.2 已在三台主机（us2-node、uk-node、alpine-node）通过面板与 Agent 升级（H1、H3、H5）、调优（H6）、多核心（H7）、设备限制（H7b）与端口转发（H7c）。未完成：RC3 复验（H4 `kill -9`/断电重启演练、H8 全新安装、F8 订阅名称、F10 核心重启原因）、浏览器走查 H1b、正式发布批准；只验收 amd64，arm64 与安装器的断电/故障恢复未实机验证。已知限制：L8（按方案 1 如实标注）、L9、L10、F11。下一版本：[v1.3.0 计划](docs/v1.3-plan.md)。
+
+CI：release/v1.2.0 的 cores 作业与 `-race` 通过，本地 Linux 测试机复跑 111 个原生核心测试与 `-race`；面板主机 -race 按 Owner 决定以 CI 代替。
 
 ## 变更记录
 
-**V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，发布说明仍为草稿。
+历次修订的完整条目见[变更记录](docs/changelog.md)，此处每个版本一行：
 
-- 实机验收（2026-11-01，见[验收发现](docs/v1.2-rc1-findings.md)与验收矩阵 §11）：v1.2.0-rc.1、rc.2、rc.3 作为 GitHub 预发布版发布。RC1 发现并修复 F1–F7（设备限制漏掉第二个来源、Alpine 上调优服务起不来等），RC2 在三台主机通过面板与 Agent 升级、设备限制、调优、多核心与端口转发验收，又发现 F8（同节点同协议的第二个入站从订阅中丢失）、F9（全新安装的节点登记被拒，发布阻塞）、F10（uk-node 上核心多次被判不健康而重启、日志无原因）与 F11（Xray 节点总量不含端口转发字节，已记为限制）。RC3 含 F8、F9 的修复与 F10 的诊断日志，待复验。Owner 要求的整机月流量（按服务器选择计量方式、网卡、可选额度与独立重置日）排入 v1.3.0，见 [v1.3 计划](docs/v1.3-plan.md)。
-
-- 节点登记（2026-11-01，F9）：全新安装的 1.2 节点登记被拒（`install.sh` 在登记前创建 `tuning/`，登记目录检查只允许 `host-network/`），已修复；升级不受影响。
-
-- 安全（2026-10-31，CVE-2026-98432，见[发布说明草稿](docs/release-notes-1.2.0.md)）：面板与 Agent 以 `//go:debug multipathtcp=0` 构建（不改 go.mod），代理核心由 `core.CoreEnvironment` 以 `GODEBUG=multipathtcp=0` 启动，监听端口不再是 MPTCP；真实内核测试确认 Go 默认下核心会以 MPTCP 监听、Agent 启动后为普通 TCP。Owner 批准直接升级主机内核：us2-node、uk-node 已升级到 6.12.113，alpine-node 的内核由服务商管理（2026-11-01）。设备限制 UDP 范围按 Owner 决定（方案 1）标注，见第 9.2 节；sing-box 观测不再因一个 SOCKS5 UDP 流整体失败。自 2026-10-31 起测试在 Owner 提供的本地 Linux 测试机上进行，GitHub Actions 只做最终确认与发布构建。
-
-- 原生核心 CI（2026-10-31，见[验收矩阵](docs/v1-acceptance.md) §10.4 与[进度记录](docs/archive/v1.1-progress.md)“Native-core CI on release/v1.2.0”）：`0628a5b` 的 cores 作业（Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1 可复现构建与双架构 release dry-run）与 check 作业（`go test -race`）全部通过，cores 作业首次通过。产品修复两项，原因相同（请求被截止时间取消后 Go 客户端仍可能返回响应且读正文不报错）：外部订阅抓取不再把残缺正文当作完整订阅缓存（`07253f9`）；Agent 自更新的清单下载被截止时间切断时报告取消而不是“清单无效”（`13cde0a`）。另修一个分钟边界导致的偶发测试失败（`c8c293b`）；最终代码 `13cde0a` 两个工作流再次全部通过。其余为 v1.1 后过时的实核测试与 Xray 26.3.27 的配置要求（带 fallbackTag 的 balancer 需要 observatory，生产渲染一直会生成）。已知上游行为：Linux 上 Xray 对可 splice 的 TCP 路径在连接关闭后才计入用户下行字节，额度判定随之推迟（第 9.1 节）。未发布。
-
-- K3b（2026-10-29）：面板多核心支持：`Hello/Welcome` 协商 `multi_core_supported` 与独立的 `node_traffic_supported`；按核心保存能力/版本/标志与心跳健康、启动时间、统计源状态，旧 Agent 仍按一个核心建模，缺测保持未知。入站 `core` 进入草稿、DesiredState、自动额度版本、恢复与订阅，空值等于当前主核心，保存与发布按选中核心校验协议、转发、WireGuard、门控与跨核心端口唯一。核心更新任务改为每（节点、组件）一个（迁移 0125 回填既有行），缺失组件可用 schema-2 请求安装，结果按组件路由，成功且能力刷新后才可选。Owner 移除核心：`POST /nodes/{id}/cores/{component}/remove` 与 `removals`，幂等 `RemoveCoreCommand/Result`，断线后用同一身份重发，拒绝 `core_in_use`/`core_pending`/`last_core`/`revision_mismatch`，能力确认前组件仍可见。协商会话中的 node 计数器按（节点、epoch、凭据）增量计入每核心/节点总量，绝不进入额度或重复计入账户总量，同一节点可有多个活跃 epoch。连接观测按（节点、核心）合并活跃源地址后再做设备准入，保留掩码、易失存储、TTL 与放行行为；每个入站按所属核心显示 D5 覆盖。分区重启/健康检查带核心字段，移除核心后的历史回滚在面板侧直接拒绝并说明原因。备份、校验、清单与恢复覆盖新列/新表；未发布，Linux/root 实机验收待完成。
-
-- K2b（2026-10-29）：面板接入主机信息、可空指标、分钟采样/7 天保留及查询、Owner+CSRF+审计的白名单调优（变更 L2）；断流和恢复标为未确认且不重发，续证准入与 Agent 对齐。迁移 0123；Linux/root 实机验收待完成，未发布。
-
-- K2a（2026-10-29）：Agent 增量上报主机信息、负载/进程/套接字/字节指标及实际 sysctl；证书满 30 天或余期不超过 14 天时在连接内用原密钥续证。Owner 批准调优白名单 root helper（变更 L2），支持事务恢复与清除；面板已接入 K2b，Linux/root 实机验收待完成，未发布。
-
-- L4：qui-update 支持 `X.Y.Z-rc.N`、semver 优先级与 `--component panel|agent`；本地修复完成，Linux/root 与主机验收待执行，RC 未运行。
-
-- R1：订阅拆为中立代理模型、来源与格式注册表；增加 mihomo、legacy Clash 及一个全局客户端规则模板。
-- R2：外部订阅导入已实现，按用户授权、加密缓存，仅用于客户端；客户端链仅 mihomo 输出。
-- R3：Xray 保持官方发布核；sing-box 可用未修改上游源码的 qui 可复现构建，增加上游 `with_v2ray_api` 标签，官方核仍可用。
-- R4、R5：独立终端用户账号和门户；每用户一条订阅，多端共享，新 Token 同时存哈希与加密副本，可再次查看；旧 Token 需重置后才能查看。
-- R6：权限、额度、到期和凭据统一按用户管理，取消设备管理；每用户保留一个隐藏接入身份兼容 Agent，设备 API 返回 410。
-- R7：并发设备限制以跨入口节点的源 IPv4 / IPv6 /64 估计，运行时门控；升级默认 0（不限），缺能力节点明确显示部分执行。
-- R8、R9：单一 v1.1.0 发布目标，先面板后 Agent；保留 Owner 的页面布局，补齐实际接口、元数据、提醒、探测、端口转发与流量重置周期，未知值显示“—”。
-- D-a：WireGuard 共享密钥只支持一次一个设备，不计入设备限制。D-b：活跃窗口 60 秒、释放窗口 120 秒、门控 TTL 3 分钟。
-- D-c：用户可主动重置自己的订阅链接并撤销旧链接，操作记审计。D-d：Owner 与门户均只显示掩码地址（IPv4 /24、IPv6 /48）。D-e：移除无法按用户执行的上下行限速与备注中的旧限速元数据。
-- 迁移 0114–0119 覆盖门户会话、设备限制、导入、节点元数据、重置周期和 TCP 探测。§34 与验收矩阵逐项记录待 CI/Owner 验收；不把跳过的原生核心测试、L8 UDP、L9 完整月流量或 RC 当作通过。
-
-**V1.1（2026-10-17）**：按轻量重构计划决策 D1–D5 修订。
-
-- 第 9.1 节：最大并发连接数改为观测软限制（D2），流量额度由面板软执行并自动发布（D3）。
-- 第 15 节：出口组选择方式改为上游能力口径，权重策略移除（D4）。
-- 第 20、21 节：每域名字节可空并显示“—”，出口记录为“配置出口”，补充上报周期与本地缓存上限的实际取值。
-- 第 22 节：增加自动额度版本与核心更新流程。
-- 第 23 节：更新方式明确为核心用官方 URL + SHA-256、Agent 用签名清单，并说明已删除的 receipt/journal 机制。
-- 第 30 节：补充身份目录与日志走 journald 的说明。
-- 第 11、13、23、30.2 节：节点可配置核心出站源 IP/网卡与服务器强制出站源地址（固定 nft 规则、独立 oneshot 单元）。
-- 第 32 节阶段 4：改为适配官方 Xray 发布二进制（D1）。
-- 第 34 节：验收标准按 D1–D5 补充观测口径。
-- 第 9.1、22.1 节：自动额度版本失败重试、启动对账与连接数口径修正。
-- 第 21、22.1 节：访问日志读后即清空；自动额度版本覆盖仍持有凭据的节点、启动对账失败重试、核心重启影响与草稿绑定例外。
-- 第 30.1 节：面板主机增加 root 终端菜单 `/usr/local/bin/qui`（改管理员凭据、改 Web 端口、重启/启动/停止）。
-- 第 30 节：面板与节点主机增加 `/usr/local/bin/qui-update`（从 GitHub Release 下载、校验 SHA256SUMS 后用 install.sh 原地升级，面板升级前备份数据库），`qui` 菜单增加“更新”。
-- 第 11.3 节：注册节点后面板显示一键安装命令（`node-install.sh`：从 GitHub Release 下载与面板同版本的归档并校验，按公网证书或固定 SHA-256 建立对面板证书的信任，登记并启动 Agent）；新增无需登录的 `GET /install/ca.pem`。
-- 文档版本号由 V1.0 升为 V1.1；文档中“第 5.5 步”的表述改为“Phase 14”。
-- 第 4.3、30.2 节（2026-10-22）：节点 Agent 除 systemd 外正式支持 OpenRC（Alpine 3.19+，OpenRC ≥ 0.45，含无 systemd 的 LXC 容器）。脚本自动识别初始化系统，服务定义在 `deploy/openrc/`。强制出站 helper 在 OpenRC 上由 `inotifyd` watcher 服务触发；代理核心以 `Pdeathsig` 启动，Agent 被杀时核心随之退出；缺少 `/etc/machine-id` 时由安装脚本创建。面板仍只支持 systemd。
-- 第 30 节（2026-10-23，v1.0.2）：`qui-update` 在替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，更新后要求服务 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照（面板还恢复更新前的数据库）并启动旧版本。新增离线选项 `--bundle/--sums`。`install.sh` 失败时不再留下 `.installing` 临时文件与暂存目录，systemd 主机缺少 `unzip` 时自动安装；面板的一键安装命令在 Debian/Ubuntu 缺少 curl 时先用 apt 安装。
-- 第 30 节（2026-10-23，v1.0.3）：`qui-update` 在快照里写入进度日志（`prepared`/`started`/`committed`/`restored`，原子写入并落盘）与它自己的副本；Ctrl-C、SIGTERM、SSH 断线时按日志自动回滚，`kill -9`、断电后由开机单元 `proxycontrol-update-recovery`（systemd oneshot / OpenRC 初始化脚本，排在 Agent、面板与强制出站单元之前）完成回滚，下一次运行 `qui-update` 也会先完成未结束的恢复；同时只允许一个 `qui-update`。面板数据库备份先写 `.partial`、校验后改名；回滚覆盖数据库前把新版本的数据库保留为 `failed-update-*.db`。面板新增只读的 `--check-database FILE`（退出码 0/3/4/5），`qui-update` 用目标版本预检数据库：降级跨过迁移时不做任何替换并列出可用备份；新增 `--database FILE`，把面板降级与对应的 `pre-update-*` 数据库一起安装（第 30.1、31 节）。
-- 第 30.2 节（2026-10-23，v1.0.4）：`proxy-agent-host-network.service` 设置 `StartLimitIntervalSec=0`，helper 连续失败不再让 systemd 停用 path 单元；Agent 只有在 `status.json` 确认同一请求成功后才把保留的“清除”请求视为已生效，否则重新发布；`install.sh` 发现 oneshot 单元处于 `failed` 时重放一次保留的请求。新增回归测试 `deploy/linux/tests/host-network-test.sh`。
-- 第 10.3、30.2 节（2026-10-24，v1.0.5）：`install.sh` 与 `node-install.sh` 在 musl 主机（Alpine）上安装 sing-box 的官方 `-musl` 归档，按架构与 libc 固定摘要；新增 `deploy/linux/tests/core-asset-test.sh`。通用 URI 与 Base64 订阅省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点，其余链接照常输出，不再整体返回 400。
-- 第 22 节（2026-10-24，v1.0.6）：Agent 启动时如果已安装的核心编译或启动不了保留的成功修订（例如手工换成不支持 Hysteria2/TUIC 的 Xray），不再退出并被反复重启，而是让核心保持停止、照常连上面板并上报核心不健康，收到新修订后正常应用；supervisor 的重试间隔从 3 秒倍增到 1 分钟。重新应用保留修订失败时不再删除或改写它的修订目录。修订完整性错误（校验和、身份、回执、解密）仍然退出；核心更新中断后的修复路径也仍然退出，由重启重试。
-- 第 9.3、21、22、22.1、22.2 节（2026-10-25，v1.0.7，见[验收矩阵](docs/v1-acceptance.md) 9.15、9.16）：删除用户或设备时记录凭据墓碑（迁移 `0110_credential_tombstones.sql`），删除前产生的流量按批次所属修订照常入账，不再让节点的流量与访问记录上传卡死；Agent 对同一流量批次连续被拒 3 次后隔离它（保留在磁盘上，1 小时后或重启时重试）。每次部署或回滚成功后为该节点排队一次额度对账，回滚到旧修订不再恢复已禁用用户的凭据。“用户接入”快捷功能改为写入真实入站并按正常路径渲染；原始配置版本不再接受用户凭据（`unmanaged_user_credentials`）。核心更新结果在重连后不再被静默丢弃，Agent 在核心更新后上报新的能力。supervisor 只在核心健康时刷新运行时状态，核心不健康时只走退避后的恢复。
-- 第 9.1、22.1 节（2026-10-26，v1.0.8，见[验收矩阵](docs/v1-acceptance.md) 9.17–9.19）：删除用户或设备后自动发布移除其凭据的版本（`auto: user <name> deleted` / `device deleted`），不再需要 Owner 重新发布；此前被删除的凭据在下一次发布前仍可使用（验收矩阵 9.16）。草稿渲染不了时退回已发布状态的自动版本同样移除已删除设备的凭据。恢复较旧的备份时合并当前数据库的凭据墓碑（第 21 节）；核心更新成功后重连、任务已按上报版本标为成功时，面板仍接受随后到达的成功回执，不再断开控制连接（第 22.2 节）。Owner 清除一个已保存节点结果的核心更新任务时不再改写其状态；此前这样的任务（状态 `cleared`、结果 `failed_closed`）会让之后的每次备份都校验失败，备份校验现在接受已存在的这类记录（第 31 节）。自动版本不再启用 Owner 手动禁用、但未发布启用的入站：每次发布额外记下 Owner 当时启用的入站集合（迁移 `0111_inbound_enabled_intent.sql`，`config_revisions.inbound_enabled_json`），自动版本原样继承基线版本的记录，凭据回到已禁用入站时只有记录说 Owner 曾启用它才重新启用；记录为 NULL（本列之前发布的版本）时保守保持禁用，等 Owner 下一次发布。Agent 发核心更新结果时如果控制连接在等 Ack 时断开，结果不再随会话丢失，而是留在 core-update worker 里由下一个会话重发，直到面板确认；面板以 `FailedPrecondition` + `core update result rejected` 永久拒绝同一结果（例如任务已被 Owner 清除）连续 3 次后 Agent 丢弃并记 Warn，其他错误永不丢弃（第 22.2 节）。
-- 第 22.1 节（2026-10-26，v1.0.9，见[验收矩阵](docs/v1-acceptance.md) 9.18 问题 C、9.20）：面板停止服务（包括进程内恢复备份前）时，自动额度版本的合并窗口定时器全部停止，进行中的对账被取消并在服务返回前结束；停止过程中被打断的对账不计入 3 次失败、不告警，由下一次启动对账重新处理。此前旧实例会在恢复后继续对已关闭的数据库重试并记 `database is closed`。Agent 日志的 `retry_after` 改为可读时长。
-
-**V1.0（2026-08-20）**：初版，完整需求与架构约束。
+- **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，并记入实机验收、CVE-2026-98432 与 K2a–K4 的多核心、隧道与调优变更。
+- **V1.1（2026-10-17）**：按轻量重构计划决策 D1–D5 修订额度、出口组、记录口径、更新方式与验收标准。
+- **V1.0（2026-08-20）**：初版，完整需求与架构约束。
 
 ---
 
@@ -314,9 +283,9 @@ Internet
 
 ## 4.4 代理核心
 
-K3a Agent 本地实现完成（2026-10-29，原生 Linux/root 验收待执行）：`cores: [{name, path}]` 支持 xray 与 sing-box，首项为兼容主核心；旧标量配置仍映射为一个核心。所有生产节点使用 MultiRuntime 与 `runtime/<core>/`。通过校验过的 component 核心更新可添加缺失核心；`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写。GOST 推迟，不在 v1.2.0 范围内；协议、存储兼容与 K3b 要求见 [K3a Agent 报告](docs/archive/v1.2-k3a-agent-report.md)。
+K3a Agent 已实现，随 v1.2.0 交付（尚未发布；uk-node 上的多核心运行实机通过 H7）：`cores: [{name, path}]` 支持 xray 与 sing-box，首项为兼容主核心；旧标量配置仍映射为一个核心。所有生产节点使用 MultiRuntime 与 `runtime/<core>/`。通过校验过的 component 核心更新可添加缺失核心；`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写。GOST 推迟，不在 v1.2.0 范围内；协议、存储兼容与 K3b 要求见历史报告 [K3a Agent 报告](docs/archive/v1.2-k3a-agent-report.md)。
 
-K3b 面板侧（2026-10-29，本地实现、未发布）：面板把节点建模为“已上报启用的核心集合”。`Welcome.multi_core_supported` 只对声明支持的 Agent 为真；未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成，缺测字段保持 `null` 而不是 0/健康。入站归属的核心由 `inbounds.core` 保存（空串＝当前主核心），删除或添加核心任务未落定期间该组件不可选（`core_selectionBlocked`）。面板不接受未上报启用的核心，也不容忍跨核心/转发的端口重复。详见 [K3b 面板报告](docs/archive/v1.2-k3b-panel-report.md)。
+K3b 面板侧（2026-10-29，已实现，随 v1.2.0 交付、尚未发布；多核心与每核心计量在 uk-node 实机通过 H7）：面板把节点建模为“已上报启用的核心集合”。`Welcome.multi_core_supported` 只对声明支持的 Agent 为真；未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成，缺测字段保持 `null` 而不是 0/健康。入站归属的核心由 `inbounds.core` 保存（空串＝当前主核心），删除或添加核心任务未落定期间该组件不可选（`core_selectionBlocked`）。面板不接受未上报启用的核心，也不容忍跨核心/转发的端口重复。详见历史报告 [K3b 面板报告](docs/archive/v1.2-k3b-panel-report.md)。
 
 第一阶段优先支持：
 
@@ -536,7 +505,7 @@ Viewer 默认不能：
 2. 面板把增量累加到 `used_traffic`（凭据能对应到设备时同时累加到设备用量）。
 3. 用户处于超限、到期或禁用状态时，面板自动创建并部署一个**只调整用户访问面**的配置版本，把该用户的凭据从节点配置中移除；提额、清零、续期或启用同样触发一次自动版本；删除用户或设备同样自动移除其凭据，无需重新发布。自动版本以节点**已发布**状态为基线，除用户与入站的绑定外（见 22.1）不会带出未发布的 Owner 编辑。
 4. **超额窗口**：在**正常路径**上（节点在线、读取与发布都成功、没有其他部署占用该节点），从超限到被切断最多经过一个上报周期（当前 15 秒）＋最长 60 秒的合并窗口＋发布耗时；每次重试再加一个窗口。这段时间的流量仍会放行并计入用量。这是被接受的取舍。例外：Linux 上官方 Xray 对可 splice 的 TCP 路径（如 SOCKS5/HTTP/端口转发入站经 Direct 出站、识别出内层 TLS 后的 XTLS Vision）在 splice 结束（通常是连接关闭）后才把下行字节计入用户，长连接的下行用量与超额判定因此推迟到连接结束后（2026-10-31 原生核心 CI 确认）。
-5. **每用户额度统计有账户计数能力的节点**：Xray 及携带 `with_v2ray_api`、并上报 `singbox_user_stats` 的 sing-box。官方 sing-box 无此能力时仍只报节点总量，每用户未知，页面说明未计入范围；qui sing-box 的用户流量开始计入统一额度是升级行为变化。协议载荷对比与原生核心验收仍待 CI/Owner，不能以本地假服务测试代替。
+5. **每用户额度统计有账户计数能力的节点**：Xray 及携带 `with_v2ray_api`、并上报 `singbox_user_stats` 的 sing-box。官方 sing-box 无此能力时仍只报节点总量，每用户未知，页面说明未计入范围；qui sing-box 的用户流量开始计入统一额度是升级行为变化。协议载荷对比与原生核心测试已于 2026-10-31 通过 CI 与本地 Linux 测试机（验收矩阵 §10.4），不再以本地假服务测试代替。
 
 ## 9.2 用户接入身份与设备限制
 
@@ -852,7 +821,7 @@ K3b：同一节点上的入站监听端口按 Agent 的节点级规则在全部�
 
 # 14. 协议转换中转
 
-K4（2026-10-29）：服务器方案连接引用独立 canvas_tunnels；canvas_tunnel_objects 以对象类型和 ID 显式记录唯一归属，计划、发布、端口复用与清理不再按名称前缀认领。0124 为每条旧服务器连接创建独立隧道，不跨方案自动合并；启动/恢复在 Go 事务中只认领已发布方案、当前名称精确匹配且无歧义的旧对象。未认领对象保留，Owner 可查看清单并显式认领；冲突返回 legacy_object 与对象 ID。改名后归属保持，共享隧道配置与必要链路依赖一起发布。具体接口、迁移边界和验证见 [K4 报告](docs/archive/v1.2-k4-tunnels-report.md)；未发布、未操作真实服务器。
+K4（2026-10-29）：服务器方案连接引用独立 canvas_tunnels；canvas_tunnel_objects 以对象类型和 ID 显式记录唯一归属，计划、发布、端口复用与清理不再按名称前缀认领。0124 为每条旧服务器连接创建独立隧道，不跨方案自动合并；启动/恢复在 Go 事务中只认领已发布方案、当前名称精确匹配且无歧义的旧对象。未认领对象保留，Owner 可查看清单并显式认领；冲突返回 legacy_object 与对象 ID。改名后归属保持，共享隧道配置与必要链路依赖一起发布。具体接口、迁移边界和验证见历史报告 [K4 报告](docs/archive/v1.2-k4-tunnels-report.md)；随 v1.2.0 交付（尚未发布），多个方案共享同一条隧道的场景未实机验证（H7c 只验收了受管节点的端口转发）。
 
 中转搭建（U5a）统一展示“加密中转”和“端口转发”。端口转发的 `listenPort`、`targetHost`、`targetPort` 保存在连接上；旧布局按实例端口与目标服务器公网 IP 回退。新字段只允许 `port_forward`，主机校验复用 forward 入站规则。监听端口按数字在节点内唯一，不区分 TCP/UDP（与 Agent `desiredstate.Validate` 相同，含中转与转发入站）：计划与发布在端口被该节点其他**已启用**入站占用、或被本次计划的另一条监听重复使用时拒绝，禁用入站不占用；K4 的对象归属不变，同一对象自己的监听重发不与自己冲突。多条端口转发可以连接同一对服务器，按连接 ID 区分；旧布局的生成名称不变。
 
@@ -1365,7 +1334,7 @@ Agent 校验 URL 前缀与重定向主机，校验归档 SHA-256
 - **Agent 自身的更新仍使用签名清单**（Ed25519，公钥固定在配置里，按安装历史防重放），不使用 URL + SHA-256。
 - 早期版本中的 receipt/outcome 更新日志（journal）与受控核签名目录路径已删除；核心更新不再经过签名目录，签名目录只剩 Agent 自更新在用。
 
-K3b 面板侧（2026-10-29，本地实现、未发布）：
+K3b 面板侧（2026-10-29，已实现，随 v1.2.0 交付、尚未发布；多核心与每核心计量在 uk-node 实机通过 H7）：
 
 - 任务粒度是**每（节点、组件）一个活跃任务**（迁移 0125 用唯一索引替换原“每节点一个”）。`sequence` 按（节点、组件）各自的更新历史累加；同一个节点可以同时排队 xray 与 sing-box 两个任务，`PendingCoreUpdate` 先派发排队中的任务，再重发运行中的同一身份（断线重连不换 ID）。`POST /api/v1/core-updates` 的 `component` 必填，缺失组件用同一 schema-2 `CoreUpdateRequest` 安装；`CoreUpdateResult` 的信封 `component` 必须与任务一致，否则拒绝，重复结果幂等，改动过的结果拒绝。
 - 成功只表示镜像切换成功：**组件可被选为入站核心**还要等下一次 `Capabilities.cores` 含该组件。任务进行中的组件在 `core_selectionBlocked` 里，入站保存、草稿渲染与发布都拒绝（`core_pending`），面板不会因为任务成功就伪造能力。
@@ -1439,7 +1408,7 @@ Node Agent 不允许提供：
 - TCP-connect 探测（已解析 IP、端口、次数、超时与截止时间；Agent 再校验，最多 10 次、每次 3 秒，无 shell）
 - 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override，按能力拒绝旧 Agent；经正常配置发布）
 
-TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。intervalSeconds 表示返回点的桶步长，sampleSeconds 固定为原始检测周期 60 秒。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优已按 Owner 决定增加固定白名单特权操作（K2a，变更 L2）；面板 K2b 已接入，Linux/root 验收仍待完成。
+TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。intervalSeconds 表示返回点的桶步长，sampleSeconds 固定为原始检测周期 60 秒。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。服务器调优已按 Owner 决定增加固定白名单特权操作（K2a，变更 L2）；面板 K2b 已接入，调优 helper 在 uk-node 与 alpine-node 实机通过（H6）。
 
 K3b 计量与协商（面板侧已实现）：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志，会话内 `traffic.Counter{kind:"node"}` 才被接受，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为 `xray`/`sing-box`、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB；面板按（节点、epoch、凭据）保存累计游标并计算增量，重复批次幂等，同一节点可以有多个活跃 epoch（一个核心上报不淘汰另一个）。这些字节只进入 `core_traffic_samples`（每核心/节点总量），**不进入用户额度、也不重复计入账户派生的节点总量**：`node_traffic_samples` 视图对同一 epoch 已有 node 游标的账户样本做去重。`ConnectionStatus.cores` 只在协商会话接受，按（节点、核心）保存易失快照并合并凭证的活跃源地址后再做设备准入，部分核心缺测时该入站明确显示为部分执行；旧 `snapshot_json` 仍可用。
 
@@ -1812,7 +1781,7 @@ SSE 只推送：
 
 ## 27.12 v1.1 接口补充
 
-K4：Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /canvas-tunnels/legacy-objects、POST /canvas-tunnels/{id}/adopt；写入要求 CSRF 并记录审计。服务端连接接受 tunnelId 引用，其余配置由资源读取；客户端拒绝该字段。PUT 隧道要求 updatedAt；端点修改在同一事务中重定向所有引用方案并更新方案令牌。旧内嵌写法按方案 ID + 连接 ID 创建/更新该方案最初创建的隧道，显式引用不隐式修改资源。计划增加 tunnels:[{tunnelId,affectedSchemes:[{id,name}]}]，冲突增加 reason/objectId。完整且可供 F4 使用的 JSON 见 [K4 报告](docs/archive/v1.2-k4-tunnels-report.md)。
+K4：Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /canvas-tunnels/legacy-objects、POST /canvas-tunnels/{id}/adopt；写入要求 CSRF 并记录审计。服务端连接接受 tunnelId 引用，其余配置由资源读取；客户端拒绝该字段。PUT 隧道要求 updatedAt；端点修改在同一事务中重定向所有引用方案并更新方案令牌。旧内嵌写法按方案 ID + 连接 ID 创建/更新该方案最初创建的隧道，显式引用不隐式修改资源。计划增加 tunnels:[{tunnelId,affectedSchemes:[{id,name}]}]，冲突增加 reason/objectId。完整且可供 F4 使用的 JSON 见历史报告 [K4 报告](docs/archive/v1.2-k4-tunnels-report.md)。
 
 U5a 增加 `POST /api/v1/canvas-schemes/{id}/plan`（Owner，会话与 CSRF 同 publish）。无正文或 `{}` 规划已保存布局；`{"layout": <CanvasLayout>}` 规划未保存布局。返回 `ok`、按服务器的 `creates/updates/removes`、逐连接状态、监听端口冲突和警告；失败原因另有 `message`。接口仅读取，不写对象、方案、审计或 Revision。它复用发布的规划、生成对象识别、端口冲突与删除引用检查；客户端方案返回 `ok:false`，客户端已有 publish 路径不变。更新表示发布会执行同名对象的保存（不表示字段一定变化）；计划与执行之间状态变化仍可能导致发布失败。
 
@@ -2032,7 +2001,7 @@ Agent 上报消息包括：
 
 两种初始化系统共用 `/usr/local/lib/proxycontrol/service.sh`，安装记录第 10 行为 `openrc` 时表示 OpenRC 安装。
 
-K3c / MC4（2026-10-29，本地实现、未发布）：install.sh 与 node-install.sh
+K3c / MC4（2026-10-29，已实现，随 v1.2.0 交付、尚未发布）：install.sh 与 node-install.sh
 支持重复 `--core xray --core sing-box`；新节点不传参数仍只安装 Xray。
 Xray、sing-box 分别位于 `/usr/local/lib/proxy-agent/<name>`，保持原架构/libc
 校验、Alpine musl 归档与同版本 qui sing-box 选项。新装或显式安装核心时将 Agent 顶层配置
@@ -2052,7 +2021,7 @@ init、调优行，升级迁移为 v2。enroll、续证和 CA 脚本同步支持
 update.sh，旧 updater 尚无新增文件保护。v2 Agent 记录不允许用不支持 v2 的
 目标 installer 降级，失败升级仍可自动恢复原 v1 记录与 config。uninstall
 逐一校验并删除所有记录核心，继续保留配置、身份和运行状态目录，并先清除
-K2a 调优。Linux/root 故障、断电和实机验收待完成，见
+K2a 调优。升级与多核心安装在 H3、H5、H4 实机通过；全新安装见 H8（rc.2 失败于 F9，rc.3 复验），断电与故障恢复演练未实机验证，见历史报告
 [安装器报告](docs/archive/v1.2-k3c-installer-report.md)。
 
 

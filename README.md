@@ -2,7 +2,7 @@
 
 面向 1～10 名内部用户的自托管多节点代理控制平台。中央端是一个 Go 单体程序（SQLite + 嵌入式 Vue 前端），Node Agent 通过 gRPC + mTLS 主动接入并管理**官方** Xray 或 sing-box 二进制；用户代理流量不经过中央端。
 
-当前状态：按[轻量重构计划](docs/archive/lightweight-refactor-plan.md)收敛完成，**v1.0.6 已发布**（GitHub Release；v1.0.1 起节点 Agent 支持 Alpine/OpenRC，v1.0.2 起 `qui-update` 失败时自动回滚；v1.0.3 起中断（含断电）后自动恢复、面板可带数据库跨迁移降级；v1.0.4 修复强制出站 helper 连续失败后不再执行新配置的问题；v1.0.5 让 Alpine 节点可用 sing-box，并且钉证书的 Hysteria2/TUIC 不再让 URI 订阅整体失败；v1.0.6 起核心运行不了保留的修订时 Agent 保持连接、不再反复重启，仓库 <https://github.com/jingniao/qui>）。**V1 仍未完成**：实机验收进行中，标准与实机清单见[验收矩阵](docs/v1-acceptance.md)。
+当前状态：**v1.0.9 是最新发布版**（GitHub Release，仓库 <https://github.com/jingniao/qui>）：v1.0.1 起节点 Agent 支持 Alpine/OpenRC，v1.0.2 起 `qui-update` 失败时自动回滚，v1.0.3 起更新中断（含断电）后自动恢复、面板可带数据库跨迁移降级，v1.0.4 修复强制出站 helper 连续失败后不再执行新配置，v1.0.5 让 Alpine 节点可用 musl sing-box，v1.0.6 起核心运行不了保留的修订时 Agent 保持连接、不再反复重启，v1.0.7–v1.0.9 修复删除用户或设备后的凭据与上传、恢复备份与核心更新回执等问题。**v1.2.0 尚未发布**：预发布版 rc.1–rc.3 已发布，rc.2 在三台主机通过面板与 Agent 升级、调优、多核心、设备限制与端口转发验收，RC3 复验与正式发布批准待完成；逐项结果见[验收矩阵](docs/v1-acceptance.md) §11。
 
 ## 快速开始
 
@@ -37,15 +37,15 @@ systemctl enable --now proxy-agent.service
 
 | 目的 | 文档 |
 | --- | --- |
-| 需求与架构约束 | [项目说明书](AGENTS.md) |
+| 需求与架构约束、当前状态 | [项目说明书](AGENTS.md) |
 | 系统组成与数据流 | [架构总览](docs/architecture.md) |
 | 前端设计系统与按钮、表单规范 | [设计系统规范](docs/design-system.md) |
 | 安装、接入节点、升级 | [部署与升级](docs/deployment.md) |
 | 备份恢复、证书、额度、故障 | [运维手册](docs/operations.md) |
 | 协议与能力范围 | [协议支持矩阵](docs/protocol-support-matrix.md) |
 | 验收标准与实机清单 | [验收矩阵](docs/v1-acceptance.md) |
-| 重构阶段与进度 | [轻量重构计划](docs/archive/lightweight-refactor-plan.md) |
-| 交接给下一位实现者的现状与规则 | [接手说明](docs/archive/agent-handoff.md) |
+| 下一版本需求 | [v1.3 计划](docs/v1.3-plan.md) |
+| 版本修订记录 | [变更记录](docs/changelog.md) |
 | 文档索引与历史归档 | [文档导航](docs/README.md) |
 
 ## 本地开发

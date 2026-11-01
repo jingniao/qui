@@ -740,9 +740,8 @@ publishing_started=false
 
 printf '%s installed at %s with unit %s.\n' "$name" "$target" "$unit"
 for core in "${cores[@]}"; do printf 'Core %s installed at /usr/local/lib/proxy-agent/%s.\n' "$core" "$core"; done
-printf 'Identity and data were retained. Review the Agent core settings before starting.\n'
-# qui-update starts the service itself, so its run of this script has no use for
-# the first-install hint below.
+# Both hints below are for a first install; qui-update starts the service itself.
+[[ -n ${QUI_UPDATE:-} ]] || printf 'Identity and data were retained. Review the Agent core settings before starting.\n'
 if [[ $init_system == systemd ]]; then
   [[ -n ${QUI_UPDATE:-} ]] || printf 'Next: review %s/config.yaml, then systemctl enable --now %s.service.\n' "$etc" "$name"
 else

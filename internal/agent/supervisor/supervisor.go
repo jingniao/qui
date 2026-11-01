@@ -223,6 +223,10 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			backoff.reset()
 			changed, err := reconciler.Refresh(ctx)
 			if err != nil {
+				// A normal stop cancels the refresh; that is not a failure.
+				if ctx.Err() != nil {
+					return
+				}
 				if message := err.Error(); message != refreshFailure {
 					logger.Error("approved runtime state reconciliation failed", "error", err)
 					refreshFailure = message

@@ -14,6 +14,8 @@
 
 **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，发布说明仍为草稿。
 
+- 节点登记（2026-11-01，F9）：全新安装的 1.2 节点登记被拒（`install.sh` 在登记前创建 `tuning/`，登记目录检查只允许 `host-network/`），已修复；升级不受影响。
+
 - 安全（2026-10-31，CVE-2026-98432，见[发布说明草稿](docs/release-notes-1.2.0.md)）：面板与 Agent 以 `//go:debug multipathtcp=0` 构建（不改 go.mod），代理核心由 `core.CoreEnvironment` 以 `GODEBUG=multipathtcp=0` 启动，监听端口不再是 MPTCP；真实内核测试确认 Go 默认下核心会以 MPTCP 监听、Agent 启动后为普通 TCP。主机内核升级与临时缓解需 Owner 批准，未执行。设备限制 UDP 范围按 Owner 决定（方案 1）标注，见第 9.2 节；sing-box 观测不再因一个 SOCKS5 UDP 流整体失败。自 2026-10-31 起测试在 Owner 提供的本地 Linux 测试机上进行，GitHub Actions 只做最终确认与发布构建。
 
 - 原生核心 CI（2026-10-31，见[验收矩阵](docs/v1-acceptance.md) §10.4 与[进度记录](docs/v1.1-progress.md)“Native-core CI on release/v1.2.0”）：`0628a5b` 的 cores 作业（Xray 26.3.27、sing-box 1.14.3、mihomo 1.19.33、qui sing-box 1.14.4-qui.1 可复现构建与双架构 release dry-run）与 check 作业（`go test -race`）全部通过，cores 作业首次通过。产品修复两项，原因相同（请求被截止时间取消后 Go 客户端仍可能返回响应且读正文不报错）：外部订阅抓取不再把残缺正文当作完整订阅缓存（`07253f9`）；Agent 自更新的清单下载被截止时间切断时报告取消而不是“清单无效”（`13cde0a`）。另修一个分钟边界导致的偶发测试失败（`c8c293b`）；最终代码 `13cde0a` 两个工作流再次全部通过。其余为 v1.1 后过时的实核测试与 Xray 26.3.27 的配置要求（带 fallbackTag 的 balancer 需要 observatory，生产渲染一直会生成）。已知上游行为：Linux 上 Xray 对可 splice 的 TCP 路径在连接关闭后才计入用户下行字节，额度判定随之推迟（第 9.1 节）。未发布。

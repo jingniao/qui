@@ -30,9 +30,10 @@ Linux 内核 IPv4 TCP use-after-free（CVSS 9.8），公开的远程 root 利用
 - **界面：** 沿用 Owner 的布局，移除顶栏、伪造数据、隐式 Token 重置与浏览器凭据缓存；版本与更新、任务记录、节点分组、中转画布重新整理。
 - **安装与更新：** `install.sh`/`node-install.sh` 可重复 `--core`；安装记录 v2；`qui-update` 支持 `X.Y.Z-rc.N`、semver 优先级与 `--component panel|agent`，所有核心一起快照与回滚。
 
-RC1 实机验收后的修复（rc.2）：
+实机验收后的修复（rc.2 起）：
 
 - **设备限制观测：** Agent 每 500 毫秒采样核心在线源，并按凭据保留 20 秒内看到的地址，短暂连接不再被下一个空采样覆盖，准入最多多保留 20 秒；sing-box 只列出正在打开的连接，短于一个采样间隔的连接仍可能观测不到（超限时 sing-box 约每 2 秒关闭匹配连接，因此仍会生效）。
+- **节点全新安装：** `install.sh` 在登记前创建 `host-network/` 与 `tuning/`，而 Agent 的登记目录检查只允许 `host-network/`，于是 1.2 的全新节点安装都会以“登记目录保留身份、配置、账本或未知材料”失败、`node-install.sh` 中止（RC2 F9）；检查现在同样接受 `tuning/`（两个目录的内容仍不检查），中断后继续保留的登记结果走同一检查。升级不受影响，因为升级不登记。
 - **Alpine/OpenRC 安装：** `proxy-agent-tuning` 的 `start_pre` 改用 `cat` 读 `cap_last_cap`；BusyBox `read` 在该文件上必然失败，会让 1.2 的 Agent 在 Alpine 上安装时报“调优服务启动失败”并整体回滚。
 - **同协议多入站的订阅名称：** 同一节点同一协议有多个入站时，每个名称追加端口（`节点 · 协议 · 端口`），不再因重名只保留第一个（RC2 F8）；只有一个入站时名称仍是 `节点 · 协议`。
 

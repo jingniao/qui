@@ -1,9 +1,12 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,5 +55,34 @@ func TestMultiSupervisorRestoresOnlyFailedCoreWithBackoff(t *testing.T) {
 	}
 	if b.applyCalls < 2 || b.applyCalls > 4 {
 		t.Fatalf("failed core ignored backoff: %d", b.applyCalls)
+	}
+}
+
+// A per-core restore logs the core, the reason its health check failed and the
+// revision it restored.
+func TestMultiSupervisorLogsWhyACoreWasRestored(t *testing.T) {
+	compressSchedule(t, 10*time.Millisecond, 40*time.Millisecond, 80*time.Millisecond)
+	a := &multiTestAdapter{name: "xray", fakeAdapter: fakeAdapter{healthy: true}}
+	b := &multiTestAdapter{name: "sing-box", fakeAdapter: fakeAdapter{healthy: false, healthErr: errors.New("sing-box listener 127.0.0.1:1081 unavailable")}}
+	multi, err := core.NewMultiRuntime(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := reconcile.New(t.TempDir(), "node-test", multi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := supervisorState(1)
+	s.Inbounds = append(s.Inbounds, desiredstate.Inbound{ID: "other", Core: "sing-box", Protocol: "socks5", Listen: "127.0.0.1", Port: 1081, Enabled: true, DefaultOutbound: "direct"})
+	if _, err := m.Apply(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	Run(ctx, multi, m, slog.New(slog.NewTextHandler(&logs, nil)))
+	want := `msg="core unhealthy; restored last successful configuration" core=sing-box error="sing-box listener 127.0.0.1:1081 unavailable" revision=1`
+	if !strings.Contains(logs.String(), want) {
+		t.Fatalf("restored core logged no reason: %s", logs.String())
 	}
 }

@@ -280,13 +280,26 @@ func (m *MultiRuntime) Close() error {
 	}
 	return err
 }
-func (m *MultiRuntime) CoreStatuses(ctx context.Context) []*pb.CoreStatus {
+
+// CoreHealth is one core's reported status together with the adapter error behind
+// an unhealthy result. The status carries the stable code the panel receives; the
+// error is the reason the Agent logs when it restores that core.
+type CoreHealth struct {
+	Status *pb.CoreStatus
+	Err    error
+}
+
+func (m *MultiRuntime) CoreHealths(ctx context.Context) []CoreHealth {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	items := []*pb.CoreStatus{}
+	return m.coreHealthsLocked(ctx)
+}
+func (m *MultiRuntime) coreHealthsLocked(ctx context.Context) []CoreHealth {
+	items := []CoreHealth{}
 	for _, name := range m.names {
 		r := m.runtimes[name]
 		status := &pb.CoreStatus{Name: name, Healthy: true}
+		var reason error
 		if m.expected[name] {
 			h, err := r.Health(ctx)
 			status.Healthy = err == nil && h.Healthy
@@ -294,6 +307,11 @@ func (m *MultiRuntime) CoreStatuses(ctx context.Context) []*pb.CoreStatus {
 				status.Error = "core_unhealthy"
 				if errors.Is(err, ErrCoreStopUnconfirmed) {
 					status.Error = "core_lifecycle_unconfirmed"
+				}
+				reason = err
+				// The panel receives the code above, never this text.
+				if reason == nil {
+					reason = errors.New("unhealthy")
 				}
 			}
 		}
@@ -307,17 +325,24 @@ func (m *MultiRuntime) CoreStatuses(ctx context.Context) []*pb.CoreStatus {
 		}); ok {
 			status.TrafficSourceStatus = source.TrafficSourceStatus()
 		}
-		items = append(items, status)
+		items = append(items, CoreHealth{Status: status, Err: reason})
 	}
 	return items
+}
+func (m *MultiRuntime) CoreStatuses(ctx context.Context) []*pb.CoreStatus {
+	statuses := []*pb.CoreStatus{}
+	for _, item := range m.CoreHealths(ctx) {
+		statuses = append(statuses, item.Status)
+	}
+	return statuses
 }
 func (m *MultiRuntime) Health(ctx context.Context) (HealthStatus, error) {
 	h := HealthStatus{Healthy: true, CheckedAt: time.Now()}
 	var err error
-	for _, s := range m.CoreStatuses(ctx) {
-		h.Healthy = h.Healthy && s.Healthy
-		if s.Error == "core_lifecycle_unconfirmed" {
-			err = ErrCoreStopUnconfirmed
+	for _, item := range m.CoreHealths(ctx) {
+		h.Healthy = h.Healthy && item.Status.Healthy
+		if item.Err != nil {
+			err = errors.Join(err, fmt.Errorf("%s: %w", item.Status.Name, item.Err))
 		}
 	}
 	return h, err

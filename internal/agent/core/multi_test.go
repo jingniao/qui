@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ type fakeMultiCore struct {
 	events                  *[]string
 	failValidate, failApply bool
 	healthy                 bool
+	healthErr               error
 	revision                int64
 	gate                    devicegate.Request
 	hooks                   RuntimeHooks
@@ -50,7 +52,7 @@ func (f *fakeMultiCore) Apply(_ context.Context, c RenderedConfig) (ApplyResult,
 }
 func (f *fakeMultiCore) Rollback(context.Context, int64) error { return nil }
 func (f *fakeMultiCore) Health(context.Context) (HealthStatus, error) {
-	return HealthStatus{Healthy: f.healthy}, nil
+	return HealthStatus{Healthy: f.healthy}, f.healthErr
 }
 func (f *fakeMultiCore) CollectStats(context.Context) (StatsBatch, error) {
 	return StatsBatch{Upload: 3}, nil
@@ -158,6 +160,42 @@ func TestMultiHealthIdleStatsAndGates(t *testing.T) {
 	h, _ = m.Health(ctx)
 	if !h.Healthy || b.healthy {
 		t.Fatal("idle core started or marked unhealthy")
+	}
+}
+
+// The aggregate health keeps the adapter's reason for every unhealthy core, so
+// the supervisor can log it, while the panel keeps receiving the stable code.
+func TestMultiHealthKeepsTheAdapterReason(t *testing.T) {
+	m, _, b, _ := multiFixture(t)
+	ctx := context.Background()
+	if _, err := m.Apply(ctx, multiConfig(1)); err != nil {
+		t.Fatal(err)
+	}
+	b.healthy = false
+	b.healthErr = errors.New("core listener 127.0.0.1:1080 unavailable")
+	health, err := m.Health(ctx)
+	if health.Healthy || err == nil || !strings.Contains(err.Error(), "sing-box") || !strings.Contains(err.Error(), "core listener 127.0.0.1:1080 unavailable") {
+		t.Fatalf("health lost the reason: %v", err)
+	}
+	if statuses := m.CoreStatuses(ctx); statuses[1].Error != "core_unhealthy" || strings.Contains(statuses[1].Error, "listener") {
+		t.Fatalf("status code changed: %v", statuses[1])
+	}
+	// An adapter that reports unhealthy without an error still names the core.
+	b.healthErr = nil
+	if _, err := m.Health(ctx); err == nil || err.Error() != "sing-box: unhealthy" {
+		t.Fatalf("generic reason: %v", err)
+	}
+	// An unconfirmed stop stays discoverable through the aggregate error.
+	b.healthErr = ErrCoreStopUnconfirmed
+	if _, err := m.Health(ctx); !errors.Is(err, ErrCoreStopUnconfirmed) {
+		t.Fatalf("unconfirmed stop lost: %v", err)
+	}
+	if statuses := m.CoreStatuses(ctx); statuses[1].Error != "core_lifecycle_unconfirmed" {
+		t.Fatalf("status code changed: %v", statuses[1])
+	}
+	b.healthy, b.healthErr = true, nil
+	if _, err := m.Health(ctx); err != nil {
+		t.Fatalf("healthy cores reported a reason: %v", err)
 	}
 }
 func TestRevisionCoreMapAndLegacy(t *testing.T) {

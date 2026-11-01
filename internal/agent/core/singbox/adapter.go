@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -534,13 +535,16 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 		return status, errors.New("sing-box core is stopped")
 	}
 	select {
-	case <-a.done:
+	case exit := <-a.done:
 		a.process = nil
 		a.done = nil
 		a.stopPending = false
 		confirmErr := a.confirmCoreExitLocked()
 		if confirmErr != nil {
 			return status, errors.Join(core.ErrCoreStopUnconfirmed, confirmErr)
+		}
+		if exit != nil {
+			return status, fmt.Errorf("sing-box core exited: %w", exit)
 		}
 		return status, errors.New("sing-box core exited")
 	default:

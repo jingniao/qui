@@ -18,7 +18,10 @@ import (
 // fakeAdapter runs no process: the retained revision renders, but every apply
 // after the first one fails, the way a core that cannot start the revision does.
 type fakeAdapter struct {
-	healthy     bool
+	healthy bool
+	// healthErr is the reason the next health check fails; a real adapter
+	// reports the branch it failed in.
+	healthErr   error
 	failApply   bool
 	applyCalls  int
 	renderCalls int
@@ -62,7 +65,7 @@ func (a *fakeAdapter) Apply(_ context.Context, configuration core.RenderedConfig
 }
 func (a *fakeAdapter) Rollback(context.Context, int64) error { return nil }
 func (a *fakeAdapter) Health(context.Context) (core.HealthStatus, error) {
-	return core.HealthStatus{Healthy: a.healthy}, nil
+	return core.HealthStatus{Healthy: a.healthy}, a.healthErr
 }
 func (a *fakeAdapter) CollectStats(context.Context) (core.StatsBatch, error) {
 	return core.StatsBatch{}, nil
@@ -170,6 +173,13 @@ func TestUnhealthyCoreIsNotReconciled(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "core recovery failed") {
 		t.Fatalf("failed restore was not logged: %s", logs.String())
+	}
+	// The restore warning carries the health reason and the revision it
+	// restored; an adapter that reports unhealthy without a reason still gets
+	// one that names it.
+	warning := `msg="core unhealthy; restoring last successful configuration" error="fake: unhealthy" revision=1`
+	if !strings.Contains(logs.String(), warning) {
+		t.Fatalf("restore warning has no reason: %s", logs.String())
 	}
 	// Only the restores render while the core is unhealthy; a refresh per tick
 	// would render a hundred times over.

@@ -21,6 +21,7 @@ import (
 	"proxycontrol/pkg/contracts/scheduler"
 	"proxycontrol/pkg/contracts/traffic"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,6 +33,7 @@ type Adapter struct {
 	gateDigest         string
 	gateRecovery       bool
 	gateFailed         bool
+	gateClearFailed    atomic.Bool
 	gateProbe          gateProbeCache
 	gateRunner         func(context.Context, []string, io.Writer) error
 	TrafficSink        func(context.Context, []traffic.Counter) error
@@ -487,7 +489,7 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 		return result, errors.New("core is not running")
 	}
 	select {
-	case <-a.done:
+	case exit := <-a.done:
 		a.process = nil
 		a.done = nil
 		a.stopPending = false
@@ -495,13 +497,18 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 		if confirmErr != nil {
 			return result, errors.Join(core.ErrCoreStopUnconfirmed, confirmErr)
 		}
+		// The child's own exit result is the only explanation of why it is
+		// gone.
+		if exit != nil {
+			return result, fmt.Errorf("core exited: %w", exit)
+		}
 		return result, errors.New("core exited")
 	default:
 	}
 	for _, endpoint := range a.current.HealthEndpoints {
 		connection, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", endpoint)
 		if err != nil {
-			return result, errors.New("core listener unavailable")
+			return result, fmt.Errorf("core listener %s unavailable: %w", endpoint, err)
 		}
 		connection.Close()
 	}

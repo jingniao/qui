@@ -2,10 +2,10 @@ package supervisor
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/reconcile"
-	pb "proxycontrol/pkg/contracts/agentpb"
 	"sync"
 	"time"
 )
@@ -167,10 +167,11 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				continue
 			}
 			if multi, ok := adapter.(interface {
-				CoreStatuses(context.Context) []*pb.CoreStatus
+				CoreHealths(context.Context) []core.CoreHealth
 			}); ok {
 				unhealthy := false
-				for _, status := range multi.CoreStatuses(ctx) {
+				for _, item := range multi.CoreHealths(ctx) {
+					status := item.Status
 					if reconciler.CoreComponentHeld(status.Name) {
 						unhealthy = true
 						continue
@@ -194,6 +195,7 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 						}
 					} else {
 						b.reset()
+						logger.Warn("core unhealthy; restored last successful configuration", "core", status.Name, "error", item.Err, "revision", reconciler.Current())
 					}
 				}
 				if unhealthy {
@@ -206,11 +208,16 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			// Health comes first: while the core cannot run the retained
 			// revision, a refresh would only re-render and re-apply it.
 			health, err := adapter.Health(ctx)
-			if err != nil || !health.Healthy {
+			if err == nil && !health.Healthy {
+				// Every restore must name its reason, even when an adapter
+				// reports unhealthy without one.
+				err = fmt.Errorf("%s: unhealthy", adapter.Name())
+			}
+			if err != nil {
 				if !backoff.ready(reconciler.Current(), time.Now()) {
 					continue
 				}
-				logger.Warn("core unhealthy; restoring last successful configuration")
+				logger.Warn("core unhealthy; restoring last successful configuration", "error", err, "revision", reconciler.Current())
 				if err := reconciler.Restore(ctx); err != nil {
 					if backoff.failed(err, time.Now()) {
 						logger.Error("core recovery failed", "error", err, "retry_in", backoff.delay.String())

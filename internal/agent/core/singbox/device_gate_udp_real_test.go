@@ -16,26 +16,30 @@ import (
 	"time"
 )
 
-// L8: Hysteria2 and TUIC carry UDP as QUIC datagrams/streams, so the TCP-stream
-// gate test does not show that a gated user's UDP stops. This one keeps one SOCKS
-// UDP association open through a client core, gates the user's source with the
-// supervisor's 2 s re-apply, and records how much UDP still passes. The first
-// CI run (2fe9a38, run 41209714944) found that a single gate apply does not stop
-// an established flow within 3 s on either protocol.
-func TestRealDeviceGateSingboxQUICUDPDatagrams(t *testing.T) {
+// L8: the TCP gate tests do not show that a gated user's UDP stops. This one
+// keeps one SOCKS UDP association open through a client core, gates the user's
+// source with the supervisor's 2 s re-apply, and records how much UDP still
+// passes. CI runs 41209714944 and 41214032573 found that Hysteria2 and TUIC UDP
+// is not gated at all: sing-quic recreates a closed UDP session for the same
+// user on the next datagram.
+func TestRealDeviceGateSingboxUDP(t *testing.T) {
 	binary := os.Getenv("SINGBOX_BINARY")
 	if binary == "" {
 		t.Skip("awaiting CI/Owner run: SINGBOX_BINARY")
 	}
-	for _, protocol := range []string{"hysteria2", "tuic"} {
+	// Every sing-box inbound that carries UDP; the TCP-carried ones are measured
+	// too, so the panel marks exactly the protocols whose UDP escapes the gate.
+	for _, protocol := range []string{"socks5", "shadowsocks", "vless", "trojan", "hysteria2", "tuic"} {
 		t.Run(protocol, func(t *testing.T) {
 			ctx := context.Background()
 			source := testutil.GateSource(t)
 			origin := udpEchoServer(t)
 			s := stateFixture(t, protocol, freePort(t))
-			s.Inbounds[0].Settings = localTLS(t)
-			s.Inbounds[0].Settings.Transport = "quic"
-			s.Inbounds[0].Settings.QUIC = &desiredstate.QUICSettings{UpMbps: 100, DownMbps: 100}
+			if protocol == "hysteria2" || protocol == "tuic" {
+				s.Inbounds[0].Settings = localTLS(t)
+				s.Inbounds[0].Settings.Transport = "quic"
+				s.Inbounds[0].Settings.QUIC = &desiredstate.QUICSettings{UpMbps: 100, DownMbps: 100}
+			}
 			if protocol == "tuic" {
 				s.Credentials[0].Username = "5ebcdcf2-4dbe-4a89-9b40-a63ab69aacef"
 				s.Inbounds[0].Settings.QUIC = &desiredstate.QUICSettings{CongestionControl: "bbr"}

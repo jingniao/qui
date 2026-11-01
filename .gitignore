@@ -48,3 +48,6 @@ Thumbs.db
 /go/
 .claude/
 !internal/platform/server/testdata/prerefactor_backup.pcb
+# Local pre-release working notes (dated folders) stay out of git; the tracked
+# historical documents live directly in docs/archive/.
+/docs/archive/20*/

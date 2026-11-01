@@ -196,7 +196,9 @@ func (p gateProbeCache) valid(process *exec.Cmd, epoch string, data [sha256.Size
 
 // probeDeviceGate reports whether the running core enforces the user and source
 // rules of the current configuration. A failed or recovering gate is unsupported
-// at once; the verification itself is reused for gateProbeWindow.
+// at once. The digest is checked before the document is parsed, so a sample that
+// hits the cache costs one hash, and the verification itself is reused for
+// gateProbeWindow.
 func (a *Adapter) probeDeviceGate(ctx context.Context) bool {
 	if a.gateFailed || a.gateRecovery {
 		return false
@@ -204,16 +206,16 @@ func (a *Adapter) probeDeviceGate(ctx context.Context) bool {
 	if len(a.current.Data) == 0 {
 		return true
 	}
+	digest := sha256.Sum256(a.current.Data)
+	now := a.gateNow()
+	if a.gateProbe.valid(a.process, a.statsEpoch, digest, now) {
+		return a.gateProbe.ok
+	}
 	var doc struct {
 		Routing routingConfig `json:"routing"`
 	}
 	if json.Unmarshal(a.current.Data, &doc) != nil {
 		return false
-	}
-	digest := sha256.Sum256(a.current.Data)
-	now := a.gateNow()
-	if a.gateProbe.valid(a.process, a.statsEpoch, digest, now) {
-		return a.gateProbe.ok
 	}
 	tags := []string{}
 	for _, rule := range doc.Routing.Rules {

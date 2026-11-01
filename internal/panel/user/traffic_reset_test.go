@@ -121,3 +121,43 @@ func TestTrafficResetDueTimezoneIdempotentAndDisabled(t *testing.T) {
 		t.Fatal("duplicate reset")
 	}
 }
+
+// An edit of one field must not start a reset schedule: the anchor is
+// synthesized only for a cycle that resets, and kept as stored otherwise.
+func TestTrafficResetAnchorFollowsOnlyAnEnabledCycle(t *testing.T) {
+	ctx := context.Background()
+	r := testRepository(t)
+	save := func(t *testing.T, id string, input Input) User {
+		t.Helper()
+		u, err := r.Save(ctx, id, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	plain := userInput()
+	plain.Username = "plain_user"
+	without := save(t, "", plain)
+	plain.DeviceLimit = 1
+	if got := save(t, without.ID, plain); got.TrafficResetAnchor != "" {
+		t.Fatalf("an unrelated edit set an anchor: %q", got.TrafficResetAnchor)
+	}
+	scheduled := userInput()
+	scheduled.Username = "scheduled_user"
+	scheduled.TrafficResetCycle = "monthly"
+	scheduled.TrafficResetAnchor = "2024-01-31T16:00:00Z"
+	known := save(t, "", scheduled)
+	if known.TrafficResetAnchor == "" {
+		t.Fatal("an explicit anchor was not stored")
+	}
+	scheduled.TrafficResetAnchor = ""
+	scheduled.DeviceLimit = 1
+	edited := save(t, known.ID, scheduled)
+	if edited.TrafficResetAnchor != known.TrafficResetAnchor {
+		t.Fatalf("an unrelated edit moved the anchor from %q to %q", known.TrafficResetAnchor, edited.TrafficResetAnchor)
+	}
+	plain.TrafficResetCycle = "30days"
+	if got := save(t, without.ID, plain); got.TrafficResetAnchor == "" {
+		t.Fatal("enabling a reset cycle supplied no anchor")
+	}
+}

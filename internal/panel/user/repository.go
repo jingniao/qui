@@ -183,8 +183,15 @@ func (r *Repository) Save(ctx context.Context, userID string, input Input) (User
 		return User{}, err
 	}
 	if input.TrafficResetAnchor == "" {
-		if err := tx.QueryRowContext(ctx, "SELECT CASE WHEN traffic_reset_anchor<>'' AND traffic_reset_cycle=? THEN traffic_reset_anchor ELSE ? END FROM users WHERE id=?", input.TrafficResetCycle, created, userID).Scan(&input.TrafficResetAnchor); err != nil {
+		var cycle, anchor string
+		if err := tx.QueryRowContext(ctx, "SELECT traffic_reset_cycle,traffic_reset_anchor FROM users WHERE id=?", userID).Scan(&cycle, &anchor); err != nil {
 			return User{}, err
+		}
+		// Only a cycle that resets needs an anchor. Without one, the stored value
+		// stays, so an unrelated edit does not start a reset schedule.
+		input.TrafficResetAnchor = anchor
+		if input.TrafficResetCycle != "none" && (anchor == "" || cycle != input.TrafficResetCycle) {
+			input.TrafficResetAnchor = created
 		}
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE users SET traffic_reset_at=CASE WHEN traffic_reset_cycle<>? OR traffic_reset_anchor<>? THEN '' ELSE traffic_reset_at END,traffic_reset_cycle=?,traffic_reset_anchor=? WHERE id=?", input.TrafficResetCycle, input.TrafficResetAnchor, input.TrafficResetCycle, input.TrafficResetAnchor, userID); err != nil {

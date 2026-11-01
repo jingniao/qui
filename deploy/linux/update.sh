@@ -909,7 +909,9 @@ update_component() {
     fail "[$name] 无法写入回滚快照的进度日志，更新没有开始。"
   fi
   digest=$(sha256sum -- "$binary"); digest=${digest%% *}
-  if ! "$source_dir/deploy/linux/install.sh" "$mode" --binary "$binary" --sha256 "$digest"; then
+  # QUI_UPDATE tells install.sh this is an update: it is run from an update that
+  # starts the service itself and skips its first-install hint.
+  if ! QUI_UPDATE=1 "$source_dir/deploy/linux/install.sh" "$mode" --binary "$binary" --sha256 "$digest"; then
     # The journal still says "prepared", so a panel rollback puts the files back and only
     # restores the database when the new panel got to it anyway.
     rollback_component "$component" "$previous" "$was_active" 'install.sh 失败' \

@@ -91,6 +91,28 @@ func TestRetainedAddressExpiresAfterTheWindow(t *testing.T) {
 	}
 }
 
+// Every source a credential showed keeps its own window: reading the snapshot is
+// the whole expiry check, while the snapshot itself stays fresh.
+func TestRetainedAddressesExpireOnTheirOwnLastSeenTime(t *testing.T) {
+	start := time.Unix(100, 0)
+	now := start
+	s := &Store{Now: func() time.Time { return now }}
+	s.Record(observed(now, measured("a", 1, "10.0.0.1")), nil)
+	now = start.Add(14 * time.Second)
+	s.Record(observed(now, measured("a", 1, "10.0.0.2")), nil)
+	now = now.Add(500 * time.Millisecond)
+	s.Record(observed(now, measured("a", 1)), nil)
+	got, err := s.Snapshot()
+	if err != nil || strings.Join(got.Accounts[0].AddressKeys, ",") != "10.0.0.1,10.0.0.2" {
+		t.Fatalf("both sources were not kept: %v %v", got, err)
+	}
+	now = start.Add(AddressRetentionWindow)
+	got, err = s.Snapshot()
+	if err != nil || strings.Join(got.Accounts[0].AddressKeys, ",") != "10.0.0.2" {
+		t.Fatalf("the first source did not expire on its own time: %v %v", got, err)
+	}
+}
+
 // A failed sample and a new process identity both start over: the sources the
 // previous one saw are not live any more.
 func TestFailedSampleAndIdentityChangeClearRetainedAddresses(t *testing.T) {

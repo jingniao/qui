@@ -19,11 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -129,11 +129,11 @@ jobs:
       MIHOMO_VERSION: '1.19.33'
       GEODATA_COMMIT: '02ae05ac06e8c9287916fbabfe61ef5c8591407f'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -219,16 +219,18 @@ jobs:
           printf 'MIHOMO_BINARY=%s/cores/mihomo/mihomo\nMIHOMO_HOME=%s/cores/mihomo-home\n' "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       # Every test step runs even when an earlier one failed, so one dispatch
       # reports all real-core failures instead of stopping at the first.
+      # ci-real-core-test.sh fails a step whose real-core tests skipped for a
+      # missing core, core data or local address, or whose -run matched nothing.
       - name: Phase 10 device gates (official Xray and sing-box)
         if: ${{ !cancelled() }}
-        run: go test -p 1 -count=1 -run 'TestRealDeviceGate' ./internal/agent/core/xray ./internal/agent/core/singbox
+        run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -run 'TestRealDeviceGate' ./internal/agent/core/xray ./internal/agent/core/singbox
       - name: Real-core tests
         if: ${{ !cancelled() }}
         # Includes U6 forward golden native validation and TCP/UDP echo tests.
-        run: go test -p 1 -count=1 -timeout 60m ./...
+        run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -timeout 60m ./...
       - name: Part I forward native config and TCP/UDP checks
         if: ${{ !cancelled() }}
-        run: go test -p 1 -count=1 -run 'TestForwardGolden|TestRealForward' ./internal/agent/core/xray ./internal/agent/core/singbox
+        run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -run 'TestForwardGolden|TestRealForward' ./internal/agent/core/xray ./internal/agent/core/singbox
       - name: Build qui sing-box twice and verify reproducibility
         if: ${{ !cancelled() }}
         run: |
@@ -248,14 +250,20 @@ jobs:
           printf 'SINGBOX_BINARY=%s\n' "$binary" >> "$GITHUB_ENV"
       - name: Qui sing-box real-core tests (including Phase 9 stats, Xray parity and Phase 10 gates)
         if: ${{ !cancelled() }}
-        run: go test -p 1 -count=1 -timeout 60m ./...
+        run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -timeout 60m ./...
       - name: Release dry-run (no publication)
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          VERSION=1.1.0 SKIP_NPM_CI=1 OUTPUT_DIRECTORY="$RUNNER_TEMP/dry-release" bash scripts/build-release.sh
+          VERSION=1.2.0 SKIP_NPM_CI=1 OUTPUT_DIRECTORY="$RUNNER_TEMP/dry-release" bash scripts/build-release.sh
           cd "$RUNNER_TEMP/dry-release"
           sha256sum --check --strict SHA256SUMS
+          # The amd64 archive runs here, so check the version both binaries report.
+          bundle=proxy-control-1.2.0-linux-amd64
+          tar -xzf "$bundle.tar.gz"
+          test "$(cat "$bundle/VERSION")" = 1.2.0
+          test "$("$bundle/bin/proxy-panel" -version)" = "proxy-panel 1.2.0"
+          test "$("$bundle/bin/proxy-agent" -version)" = "proxy-agent 1.2.0"
           for arch in amd64 arm64; do
             test -s "sing-box-1.14.4-qui.1-linux-$arch.tar.gz"
             test -s "sing-box-1.14.4-qui.1-linux-$arch.provenance.txt"
@@ -280,7 +288,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # vX.Y.Z-rc.N uses the grammar of qui-update/node-install.sh and is published
       # as a pre-release, so /releases/latest (plain qui-update) never selects it.
       - name: Reject a tag that is not vMAJOR.MINOR.PATCH[-rc.N]
@@ -291,10 +299,10 @@ jobs:
             printf 'Tag %s is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N.\n' "$GITHUB_REF_NAME" >&2
             exit 1
           }
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm

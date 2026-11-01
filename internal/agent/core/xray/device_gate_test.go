@@ -85,3 +85,51 @@ func TestDeviceGateOfficialCLIRecoveryVerificationTTLAndRestartRequest(t *testin
 		})
 	}
 }
+
+// The observation samples every 500 ms, so the routing CLI runs once per window
+// and once more after the running process or configuration changed. A failed or
+// recovering gate is unsupported at once and never reaches the CLI.
+func TestDeviceGateProbeReusesOneVerificationPerWindowAndProcess(t *testing.T) {
+	now := time.Unix(1000, 0)
+	a := &Adapter{Directory: t.TempDir(), Now: func() time.Time { return now }, process: &exec.Cmd{}, statsEpoch: "epoch", current: core.RenderedConfig{StatsEndpoint: "127.0.0.1:12345", Data: []byte(`{"routing":{"rules":[{"type":"field","ruleTag":"baseline"}]}}`)}}
+	listed := 0
+	a.gateRunner = func(_ context.Context, args []string, out io.Writer) error {
+		if args[1] != "lsrules" {
+			t.Fatalf("unexpected command %q", args)
+		}
+		listed++
+		io.WriteString(out, `{"rules":[{"ruleTag":"baseline"}]}`)
+		return nil
+	}
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if !a.probeDeviceGate(ctx) {
+			t.Fatal("a verified configuration reports the gate unsupported")
+		}
+	}
+	if listed != 1 {
+		t.Fatalf("%d samples within the window ran the CLI", listed)
+	}
+	now = now.Add(gateProbeWindow)
+	if !a.probeDeviceGate(ctx) || listed != 2 {
+		t.Fatalf("the window did not re-verify the routing: %d calls", listed)
+	}
+	for _, state := range []struct {
+		name string
+		set  func(bool)
+	}{{"failed", func(v bool) { a.gateFailed = v }}, {"recovering", func(v bool) { a.gateRecovery = v }}} {
+		state.set(true)
+		if a.probeDeviceGate(ctx) || listed != 2 {
+			t.Fatalf("a %s gate was reported as supported or probed", state.name)
+		}
+		state.set(false)
+	}
+	a.process = &exec.Cmd{}
+	if !a.probeDeviceGate(ctx) || listed != 3 {
+		t.Fatal("a new process reused the previous verification")
+	}
+	a.current.Data = []byte(`{"routing":{"domainStrategy":"AsIs","rules":[{"type":"field","ruleTag":"baseline"}]}}`)
+	if !a.probeDeviceGate(ctx) || listed != 4 {
+		t.Fatal("a new configuration reused the previous verification")
+	}
+}

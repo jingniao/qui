@@ -32,6 +32,7 @@ type Adapter struct {
 	gateDigest         string
 	gateRecovery       bool
 	gateFailed         bool
+	gateProbe          gateProbeCache
 	gateRunner         func(context.Context, []string, io.Writer) error
 	TrafficSink        func(context.Context, []traffic.Counter) error
 	EnableStats        bool

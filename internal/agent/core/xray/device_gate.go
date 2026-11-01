@@ -176,9 +176,33 @@ func (b *limitedGateOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// gateProbeWindow is how long one routing verification stands for: the
+// observation samples every 500 ms, while the CLI spawns a process.
+const gateProbeWindow = 5 * time.Second
+
+// gateProbeCache remembers the verification of one process and configuration.
+// A new process, stats epoch or configuration data is a different one.
+type gateProbeCache struct {
+	process *exec.Cmd
+	epoch   string
+	data    [sha256.Size]byte
+	at      time.Time
+	ok      bool
+}
+
+func (p gateProbeCache) valid(process *exec.Cmd, epoch string, data [sha256.Size]byte, now time.Time) bool {
+	return p.process == process && p.epoch == epoch && p.data == data && now.Sub(p.at) < gateProbeWindow
+}
+
+// probeDeviceGate reports whether the running core enforces the user and source
+// rules of the current configuration. A failed or recovering gate is unsupported
+// at once; the verification itself is reused for gateProbeWindow.
 func (a *Adapter) probeDeviceGate(ctx context.Context) bool {
+	if a.gateFailed || a.gateRecovery {
+		return false
+	}
 	if len(a.current.Data) == 0 {
-		return !a.gateFailed
+		return true
 	}
 	var doc struct {
 		Routing routingConfig `json:"routing"`
@@ -186,11 +210,18 @@ func (a *Adapter) probeDeviceGate(ctx context.Context) bool {
 	if json.Unmarshal(a.current.Data, &doc) != nil {
 		return false
 	}
+	digest := sha256.Sum256(a.current.Data)
+	now := a.gateNow()
+	if a.gateProbe.valid(a.process, a.statsEpoch, digest, now) {
+		return a.gateProbe.ok
+	}
 	tags := []string{}
 	for _, rule := range doc.Routing.Rules {
 		tags = append(tags, rule.RuleTag)
 	}
-	return !a.gateRecovery && a.verifyRouting(ctx, tags, false)
+	ok := a.verifyRouting(ctx, tags, false)
+	a.gateProbe = gateProbeCache{process: a.process, epoch: a.statsEpoch, data: digest, at: now, ok: ok}
+	return ok
 }
 func (a *Adapter) tickDeviceGateLocked(ctx context.Context) error {
 	if a.process == nil || a.current.StatsEndpoint == "" {

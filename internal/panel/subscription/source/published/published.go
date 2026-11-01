@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net"
+	"strconv"
 	"time"
 
 	"proxycontrol/internal/panel/node"
@@ -125,7 +126,24 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 			}
 		}
 	}
+	uniqueNames(endpoints)
 	return endpoints, nil, nil
+}
+
+// uniqueNames makes the names of one subscription's own endpoints distinct: a
+// client identifies a server by its name, and a node may hold several inbounds
+// of one protocol. A name that occurs once stays "<node> · <protocol>"; every
+// endpoint of a colliding group names its port, which is unique within a node.
+func uniqueNames(endpoints []proxy.Proxy) {
+	counts := map[string]int{}
+	for _, endpoint := range endpoints {
+		counts[endpoint.Name]++
+	}
+	for index, endpoint := range endpoints {
+		if counts[endpoint.Name] > 1 {
+			endpoints[index].Name = endpoint.Name + " · " + strconv.Itoa(endpoint.Port)
+		}
+	}
 }
 
 // labels reports the node groups this account was granted that contain the node.

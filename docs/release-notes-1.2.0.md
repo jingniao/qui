@@ -30,6 +30,11 @@ Linux 内核 IPv4 TCP use-after-free（CVSS 9.8），公开的远程 root 利用
 - **界面：** 沿用 Owner 的布局，移除顶栏、伪造数据、隐式 Token 重置与浏览器凭据缓存；版本与更新、任务记录、节点分组、中转画布重新整理。
 - **安装与更新：** `install.sh`/`node-install.sh` 可重复 `--core`；安装记录 v2；`qui-update` 支持 `X.Y.Z-rc.N`、semver 优先级与 `--component panel|agent`，所有核心一起快照与回滚。
 
+RC1 实机验收后的修复（rc.2）：
+
+- **设备限制观测：** Agent 每 500 毫秒采样核心在线源，并按凭据保留 20 秒内看到的地址，短暂连接不再被下一个空采样覆盖，准入最多多保留 20 秒；sing-box 只列出正在打开的连接，短于一个采样间隔的连接仍可能观测不到（超限时 sing-box 约每 2 秒关闭匹配连接，因此仍会生效）。
+- **Alpine/OpenRC 安装：** `proxy-agent-tuning` 的 `start_pre` 改用 `cat` 读 `cap_last_cap`；BusyBox `read` 在该文件上必然失败，会让 1.2 的 Agent 在 Alpine 上安装时报“调优服务启动失败”并整体回滚。
+
 ## 不兼容变化与升级前检查
 
 1. **设备管理 API 已移除。** 旧设备路由及带 `deviceId` 的订阅 Token 请求返回 410 `devices_removed`；`maxDevices`、`maxConnections` 退役，使用 `deviceLimit`（0–100，0 不限，升级默认 0）。策略的设备作用域与页面设备字段移除。

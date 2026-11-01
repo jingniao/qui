@@ -17,7 +17,7 @@ export interface SystemMetricPoint {
 export function formatBytes(bytes: number | null | undefined, decimals = 1): string {
   if (bytes == null) return '—';
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
   const k = 1024;
   const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
   const val = bytes / Math.pow(k, i);
@@ -27,7 +27,7 @@ export function formatBytes(bytes: number | null | undefined, decimals = 1): str
 export function formatRate(bytesPerSec: number | null | undefined, decimals = 1): string {
   if (bytesPerSec == null) return '—';
   if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '0 B/s';
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  const units = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'];
   const k = 1024;
   const i = Math.min(units.length - 1, Math.floor(Math.log(bytesPerSec) / Math.log(k)));
   const val = bytesPerSec / Math.pow(k, i);

@@ -448,7 +448,7 @@ assert.equal(metricsA.formatMetricRange(chartStartE, chartStartE + 3600000), '10
 assert.equal(metricsA.formatMetricRange(Date.parse('2026-10-29T15:00:00Z'), Date.parse('2026-10-29T20:05:00Z')), '10/29 23:00 – 10/30 04:05', 'a cross-day range keeps both dates');
 assert.equal(metricsA.formatMetricValue('cpu', 31.5), '31.5%');
 assert.equal(metricsA.formatMetricValue('processes', 111), '111');
-assert.equal(metricsA.formatMetricValue('rxRate', 1048576), '1.0 MB/s');
+assert.equal(metricsA.formatMetricValue('rxRate', 1048576), '1.0 MiB/s');
 assert.equal(metricsA.formatMetricValue('cpu', null), '—');
 assert.equal(metricsA.metricRangeLabel([{ time: 0, cpu: 18.24 }, { time: 1, cpu: null }, { time: 2, cpu: 31.46 }], 'cpu'), '最低 18.2% · 最高 31.5%');
 assert.equal(metricsA.metricRangeLabel([{ time: 0, cpu: null }], 'cpu'), '最低 — · 最高 —');

@@ -24,7 +24,7 @@ const formatted = computed(() => {
   if (b === 0) return { value: '0', unit: 'B' };
   if (!b) return { value: '0', unit: 'B' };
   const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
   const i = Math.floor(Math.log(b) / Math.log(k));
   const val = (b / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2);
   return { value: val, unit: sizes[i] };

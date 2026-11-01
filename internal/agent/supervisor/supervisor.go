@@ -75,7 +75,9 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			ticker := time.NewTicker(5 * time.Second)
+			// Fast enough to catch a source between a connection closing and the
+			// core forgetting it; the store keeps what one sample saw.
+			ticker := time.NewTicker(500 * time.Millisecond)
 			defer ticker.Stop()
 			for {
 				source.SampleConnections(ctx)

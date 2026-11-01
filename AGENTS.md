@@ -540,6 +540,8 @@ Viewer 默认不能：
 
 `device_limit` 为 0–100，0 表示不限。按跨入口节点的不同 IPv4、IPv6 /64 活跃源统计，按首次出现顺序保留名额；活跃窗口 60 秒，随后保留 120 秒，再提升最早等待的地址。Owner 可重置准入顺序。面板源地址只保存在内存中，两个视图均掩码，不入库、不写日志、不进备份；Xray 官方 CLI 所需的节点侧临时 JSON 为 0600，调用返回即删除。
 
+Agent 每 500 毫秒采样一次核心的在线源地址（计数只取最新一个采样），并按凭据保留最近 20 秒内看到过的源，因此一个采样看到的地址不会在下一个空采样里消失，短暂连接也能被抓住：Xray 在连接结束后还会列出该地址一小段时间，保留了这段重叠；sing-box 只列出正在打开的连接，短于一个采样间隔的连接可能观测不到（超限时 sing-box 约每 2 秒关闭匹配连接，仍会生效）。观测失败或节点、修订、核心纪元变化会清空保留的源；未测量地址的账户不继承保留的地址。
+
 NAT 下多端只算一个，双栈与切网可能多算；超限检测约有一个上报周期与投递延迟。Xray 阻止后续新连接，既有连接继续；sing-box 每约 2 秒关闭匹配连接。断联 3 分钟后门控过期放行，旧 Agent 或观测失败明确显示部分执行。WireGuard 一次一个设备且不计入限制。**UDP 的门控范围（L8，Owner 2026-10-31 选择方案 1：如实标注、不改机制）**按真实核心实测（2026-10-31，官方 Xray 26.3.27、官方 sing-box 1.14.3 与 qui 构建）：Xray 的 VLESS、Trojan、Shadowsocks 与 sing-box 的 VLESS、Trojan 的 UDP 受限制（sing-box 为约每 2 秒关闭）；Xray 与 sing-box 的 SOCKS5 UDP、sing-box 的 Shadowsocks、Hysteria2、TUIC 的 UDP **不支持**设备限制（SOCKS5 UDP 无法归属到用户；其余三种在会话关闭后由上游为同一用户重建 UDP 会话），这些入站的 TCP 仍受限制。面板按 `node.DeviceGateUDPUnsupported` 统一判定：入站 API 返回 `deviceGateCoverage`（`full`/`tcp_only`/`none`），用户与门户视图返回 `deviceLimitUdpUnsupportedProtocols` 并显示“不支持：… 的 UDP 不受设备限制”，与“部分执行”（节点缺能力）分开；节点编辑器选到这类协议时给出提示。sing-box 观测不再因无法归属的 SOCKS5 UDP 流整体失败（此前一个用户的 SOCKS5 UDP 会让该核心所有用户的设备限制失效）。
 
 ## 9.3 凭据管理

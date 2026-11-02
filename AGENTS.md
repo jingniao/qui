@@ -1228,7 +1228,7 @@ v1.1 内部身份字段继续用于流量归属与补传，界面隐藏设备维
 
 **每域名字节**：见第 20 节，官方核无法提供时列为空并显示“—”。
 
-节点/核心总量：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志；声明后 Agent 额外上报每核心的累计节点计数（`traffic.Counter{kind:"node"}`），面板只在协商成功的会话内接受这些批次，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为 `xray`/`sing-box`、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB。面板按（节点、epoch、`node`）保存游标并计算增量，写入 `core_traffic_samples` 作为每核心/每节点总量；重复批次幂等，同一节点可有多个活跃 epoch，一个核心上报不会淘汰另一个的 epoch。这些字节**不进入用户额度**，也不与账户派生的样本重复相加：`node_traffic_samples` 视图仅在同一 epoch 没有 node 游标时才使用账户样本。因此“今天流量”“每月节点流量”“访问审计的节点汇总”在两类节点上都成立，混合核心节点不会被计两遍；用户维度仍只来自账户计数，官方 sing-box 无 `with_v2ray_api` 时用户字节仍未知。Xray 的节点总量是账户计数之和，端口转发没有账户，其字节不计入 Xray 节点总量（sing-box 取核心自身总量，含转发；2026-11-01 实机 H7c 确认）。
+节点/核心总量：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志；声明后 Agent 额外上报每核心的累计节点计数（`traffic.Counter{kind:"node"}`），面板只在协商成功的会话内接受这些批次，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为 `xray`/`sing-box`、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB。面板按（节点、epoch、`node`）保存游标并计算增量，写入 `core_traffic_samples` 作为每核心/每节点总量；重复批次幂等，同一节点可有多个活跃 epoch，一个核心上报不会淘汰另一个的 epoch。这些字节**不进入用户额度**，也不与账户派生的样本重复相加：`node_traffic_samples` 视图仅在同一 epoch 没有 node 游标时才使用账户样本。因此“今天流量”“每月节点流量”“访问审计的节点汇总”在两类节点上都成立，混合核心节点不会被计两遍；用户维度仍只来自账户计数，官方 sing-box 无 `with_v2ray_api` 时用户字节仍未知。Xray 的节点总量是账户计数加上**已渲染端口转发入站**的原生入站计数：转发 tag 白名单随渲染确定，读取时多一次 `inbound>>>` 查询（`Reset_=false`），只接受白名单内精确的 `uplink`/`downlink` 键，用户入站、管理 API 与其他入站统计一律忽略，因此不会重复计算用户字节；sing-box 取核心自身总量（含转发）。端口转发没有账户，这些字节仍不进入用户额度、设备计数或域名归属；升级前启动的旧 Agent 只报账户之和，缺失字节不补记（v1.2.0 实机 H7c 只确认 sing-box 含转发，v1.3.0 P2 起 Xray 同样计入）。
 
 ---
 

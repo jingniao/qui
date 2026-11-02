@@ -13,5 +13,5 @@ func (a *Adapter) TrafficSourceStatus() *pb.TrafficSourceStatus {
 	if a.current.StatsEndpoint == "" || a.statsEpoch == "" {
 		return &pb.TrafficSourceStatus{Status: "unavailable", ObservedAt: timestamppb.Now()}
 	}
-	return a.counterSources.Status(a.statsEpoch, a.current.Revision, len(a.current.StatsAccounts), a.process != nil)
+	return a.counterSources.Status(a.statsEpoch, a.current.Revision, len(a.current.StatsAccounts)+len(a.current.StatsNodeInbounds), a.process != nil)
 }

@@ -122,7 +122,20 @@ func ValidateCoreProtocol(core, protocol string, inbound bool) error {
 	}
 	return nil
 }
-func ValidateInbound(input InboundInput) error {
+
+// ValidateInbound validates an inbound the Owner configured.
+func ValidateInbound(input InboundInput) error { return validateInboundInput(input, false) }
+
+// validateGeneratedInbound is the canvas rule: the same shape plus the relay
+// halves of a GOST tunnel, which the public API refuses.
+func validateGeneratedInbound(input InboundInput) error { return validateInboundInput(input, true) }
+
+func validateInboundInput(input InboundInput, generated bool) error {
+	// The public shape never carries a GOST tunnel's relay halves: they belong to
+	// the tunnel resource and are written only by the canvas.
+	if !generated && input.Settings.Forward.HasRelaySettings() {
+		return errors.New("GOST 中继证书由隧道资源管理，不能在入站中填写")
+	}
 	if input.Protocol == "forward" && (input.SubscriptionVisible || input.InternalRelay || len(input.AllowedUserIDs) > 0) {
 		return errors.New("forward inbounds have no user credentials and must be hidden from subscriptions")
 	}

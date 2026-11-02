@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // canvasEnsure creates or updates the objects the drawing describes, in
@@ -14,13 +16,29 @@ import (
 // an object the previous publication created.
 func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *canvasStale, undo *canvasUndo) ([]string, error) {
 	warnings := []string{}
-	for _, input := range plan.forwards {
+	for index, input := range plan.forwards {
 		existing, err := s.Repository.canvasInboundNamed(ctx, input.NodeID, input.Name)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return warnings, err
 		}
 		input.Core = existing.Core
-		saved, err := s.SaveInbound(ctx, existing.ID, input)
+		relay := plan.relayFor(plan.forwardConnections[index])
+		switch {
+		case relay != nil:
+			// The entry half keeps its configured targets and adds the ordered
+			// relay it dials them through.
+			host, err := s.gostRelayPublicHost(ctx, relay.exitNode)
+			if err != nil {
+				return warnings, err
+			}
+			input.Core = "gost"
+			input.Settings.Forward.Hops = []desiredstate.GostHop{relay.hopFor(host)}
+		case input.Settings.Forward != nil:
+			// A forward that no longer belongs to a GOST tunnel must not keep a
+			// chain to a listener the publication removes.
+			input.Settings.Forward.Hops = []desiredstate.GostHop{}
+		}
+		saved, err := s.saveGeneratedInbound(ctx, existing.ID, input)
 		if err != nil {
 			return warnings, err
 		}
@@ -32,11 +50,16 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 		} else {
 			previous := existing
 			undo.add(func(ctx context.Context) error {
-				_, err := s.SaveInbound(ctx, previous.ID, inboundInputOf(previous, previous.DefaultOutbound))
+				_, err := s.saveGeneratedInbound(ctx, previous.ID, inboundInputOf(previous, previous.DefaultOutbound))
 				return err
 			})
 		}
 		warnings = append(warnings, "端口转发不验证用户身份；用户额度、设备限制不适用，也不生成用户域名访问记录")
+	}
+	for _, relay := range plan.relays {
+		if err := s.canvasEnsureRelay(ctx, plan, relay, undo); err != nil {
+			return warnings, err
+		}
 	}
 	for _, edge := range plan.edges {
 		input := InboundInput{Name: edge.inboundName, NodeID: edge.targetNode, Protocol: edge.protocol, Listen: "0.0.0.0", Port: edge.port, Enabled: true, InternalRelay: true, SubscriptionVisible: false, AllowedUserIDs: []string{}, DefaultOutbound: "direct"}

@@ -1,0 +1,15 @@
+-- v1.3.0 G3: one credential set per GOST tunnel, sealed by the panel vault.
+--
+-- A server drawing may route a port_forward connection through a GOST relay on
+-- TLS with a client CA. The material is one CA plus one server leaf (the exit
+-- relay listener) and one client leaf (the entry forward), all ECDSA P-256 and
+-- valid for ten years; the CA private key is not kept after issuing. The panel
+-- stores the whole set as one vault-sealed JSON blob here, rewrites the material
+-- of both endpoints on the next publication, and never exposes it through the
+-- API, the plan or the operation log. NULL means the tunnel has no GOST material
+-- (every tunnel created before this column, and every non-GOST tunnel).
+--
+-- There is deliberately no generation table and no second migration: "rotate
+-- credentials" replaces this blob and marks the tunnel modified, and the next
+-- normal publication deploys the exit node first and the entry node second.
+ALTER TABLE canvas_tunnels ADD COLUMN gost_material BLOB;

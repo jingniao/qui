@@ -9,15 +9,17 @@ import (
 
 func TestForwardCanvasPublishCapabilityAndIdentity(t *testing.T) {
 	p := newPublishPanel(t)
-	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, "", []CanvasConnection{{ID: "forward-edge", Source: "i-a", Target: "i-b", Type: "port_forward", TunnelProtocol: "gost", SupportTCP: true, SupportUDP: true}})
+	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, "", []CanvasConnection{{ID: "forward-edge", Source: "i-a", Target: "i-b", Type: "port_forward", TunnelProtocol: "tls", SupportTCP: true, SupportUDP: true}})
 	layout.Instances[0].ListenPort = canvasTestPort(12345)
 	layout.Instances[1].TargetPort = canvasTestPort(8443)
+	// G3: a GOST relay needs the GOST core and settings contract 3 on both ends;
+	// a node that reports neither refuses it before anything is written.
+	if err := p.service.requireGostRelay(p.ctx, p.nodeA); err == nil || !strings.Contains(err.Error(), "advertise") {
+		t.Fatal("old Agent accepted a GOST relay", err)
+	}
 	scheme, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "forward", Execution: "server", Layout: layout})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, err = p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err == nil || !strings.Contains(err.Error(), "advertise") {
-		t.Fatal("old Agent accepted", err)
 	}
 	n, err := p.service.Nodes.Get(p.ctx, p.nodeA)
 	if err != nil {

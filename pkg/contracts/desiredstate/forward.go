@@ -31,11 +31,12 @@ const (
 	DefaultForwardFailTimeout = "5s"
 )
 
-// GostForwardContractVersion is the GOST settings contract that first carries
-// target pools, port ranges and bandwidth/connection limits (G2). A core that
-// reports less cannot render them, so the panel refuses the options instead of
-// publishing a configuration that silently ignores them.
-const GostForwardContractVersion = 2
+// GostForwardContractVersion is the GOST settings contract a node must report to
+// render these forwards: version 2 added target pools, port ranges and
+// bandwidth/connection limits (G2), version 3 added the encrypted relay halves
+// (G3). A core that reports less cannot render them, so the panel refuses the
+// options instead of publishing a configuration that silently ignores them.
+const GostForwardContractVersion = 3
 
 // ForwardTarget is one member of a forward's ordered target pool.
 type ForwardTarget struct {
@@ -70,12 +71,16 @@ func (f *ForwardSettings) UnmarshalJSON(data []byte) error {
 func (f *ForwardSettings) GostForwardPorts() bool { return f != nil && f.PortEnd != nil }
 
 // HasGostOptions reports whether the forward carries any option the GOST
-// settings contract version 2 added. Every layer asks this one function, so a
-// core that cannot render them refuses the inbound instead of silently dropping
-// the fields. Presence-based: an explicitly written zero or default counts.
+// settings contract version 2 or 3 added. Every layer asks this one function, so
+// a core that cannot render them refuses the inbound instead of silently
+// dropping the fields. Presence-based: an explicitly written zero or default
+// counts.
 func (f *ForwardSettings) HasGostOptions() bool {
 	if f == nil {
 		return false
+	}
+	if f.HasRelaySettings() {
+		return true
 	}
 	return len(f.Targets) > 0 || f.Strategy != nil || f.MaxFails != nil || f.FailTimeout != nil ||
 		f.PortEnd != nil || f.BandwidthInBps != nil || f.BandwidthOutBps != nil || f.MaxConnections != nil
@@ -172,6 +177,20 @@ func ValidateListenPorts(port int, settings ProtocolSettings) error {
 // Validate checks the typed forward settings. It never resolves a host: whether a
 // destination answers is decided on the node when the traffic is forwarded.
 func (f *ForwardSettings) Validate() error {
+	if f != nil && f.Mode != "" {
+		if f.Mode != GostForwardModeRelay {
+			return errors.New("forward mode must be relay")
+		}
+		return validateGostRelay(f)
+	}
+	if f != nil && f.Relay != nil {
+		return errors.New("relay TLS material requires the relay mode")
+	}
+	if f != nil && len(f.Hops) > 0 {
+		if err := validateGostHops(f.Hops); err != nil {
+			return err
+		}
+	}
 	if f == nil || (f.Network != "tcp" && f.Network != "udp" && f.Network != "tcp,udp") {
 		return errors.New("forward requires a target host, port and tcp/udp network")
 	}

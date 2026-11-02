@@ -1,0 +1,327 @@
+package proxy
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+
+	"proxycontrol/internal/panel/node"
+	"proxycontrol/pkg/contracts/desiredstate"
+)
+
+// A GOST tunnel is a port_forward connection whose end-to-end hop is a GOST relay
+// on TLS with a client CA: the entry node keeps forwarding to its configured
+// targets, but every service dials them through the exit node's relay listener.
+// It is the only way the canvas uses the GOST core for a tunnel; encrypted
+// user-proxy hops keep using the existing Trojan tunnel.
+type canvasRelay struct {
+	tunnelID     string
+	connectionID string
+	entryNode    string
+	exitNode     string
+	name         string
+	port         int
+	allocated    bool
+	inboundID    string
+	material     gostMaterial
+}
+
+// canvasGostRelay validates one GOST port_forward connection and prepares its
+// exit-side listener. Both endpoints must run the GOST core and report settings
+// contract 3, because both halves of the tunnel are rendered from it.
+func (s *Service) canvasGostRelay(ctx context.Context, connection CanvasConnection, sourceNode, targetNode, name, prefix string) (*canvasRelay, error) {
+	tunnel, err := s.Repository.canvasTunnel(ctx, connection.TunnelID)
+	if err != nil {
+		return nil, err
+	}
+	if !tunnel.gostRelay() {
+		return nil, fmt.Errorf("连接 %q：GOST 中继需要 GOST 类型的共享隧道", connection.ID)
+	}
+	if tunnel.material == nil {
+		// A tunnel created before G3 (or by a save that could not seal yet) gets its
+		// set now, without marking it modified: the publication version must not
+		// change just because the material was missing.
+		material, err := newGostMaterial(tunnel.ID, 1)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.Repository.saveGostMaterial(ctx, s.Repository.Database, tunnel.ID, &material, tunnel.UpdatedAt); err != nil {
+			return nil, err
+		}
+		tunnel.material = &material
+	}
+	for _, nodeID := range []string{sourceNode, targetNode} {
+		if err := s.requireGostRelay(ctx, nodeID); err != nil {
+			return nil, fmt.Errorf("连接 %q：%w", connection.ID, err)
+		}
+	}
+	digest := sha256.Sum256([]byte("gost-relay:" + connection.TunnelID))
+	relay := &canvasRelay{
+		tunnelID:     connection.TunnelID,
+		connectionID: connection.ID,
+		entryNode:    sourceNode,
+		exitNode:     targetNode,
+		name:         fmt.Sprintf("%srelay %x%s", prefix, digest[:8], canvasInboundSuffix),
+		material:     *tunnel.material,
+	}
+	if tunnel.allocatedPort != nil {
+		relay.port = *tunnel.allocatedPort
+	}
+	return relay, nil
+}
+
+// requireGostRelay refuses an endpoint that cannot render either half of a GOST
+// tunnel. The contract version is required from the capability report, never
+// inferred from an Agent version string.
+func (s *Service) requireGostRelay(ctx context.Context, nodeID string) error {
+	n, err := s.Nodes.Get(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if !n.Enabled || n.DeletedAt != "" {
+		return errors.New("服务器不可用")
+	}
+	for _, core := range node.EnabledCores(n.Capabilities) {
+		if core.Name != "gost" {
+			continue
+		}
+		if core.GostContractVersion < desiredstate.GostForwardContractVersion {
+			return errors.New("node does not advertise the gost relay contract (version 3); update it first")
+		}
+		if !core.ForwardInboundSupported {
+			return errors.New("node does not advertise forward inbound support for gost")
+		}
+		return nil
+	}
+	return errors.New("node does not advertise the gost core")
+}
+
+// gostRelayPublicHost is the address the entry node dials: the exit node's public
+// IP. A node without one cannot host a relay, because the other side would have
+// nothing to dial.
+func (s *Service) gostRelayPublicHost(ctx context.Context, nodeID string) (string, error) {
+	n, err := s.Nodes.Get(ctx, nodeID)
+	if err != nil {
+		return "", err
+	}
+	if n.PublicIP == "" {
+		return "", errors.New("中转服务器没有公网 IP，无法作为 GOST 中继")
+	}
+	return n.PublicIP, nil
+}
+
+// hopFor renders the entry half of the tunnel from the sealed material.
+func (r *canvasRelay) hopFor(host string) desiredstate.GostHop {
+	return desiredstate.GostHop{
+		Host:          host,
+		Port:          r.port,
+		ServerName:    r.material.ServerName,
+		CACertPEM:     r.material.CACertPEM,
+		ClientCertPEM: r.material.ClientCertPEM,
+		ClientKeyPEM:  r.material.ClientKeyPEM,
+	}
+}
+
+// relayInput is the exit listener: a relay handler on a TLS listener that requires
+// the client certificate of the entry node. It forwards nothing itself, so it has
+// no target pool and never enters the node's traffic totals.
+func (r *canvasRelay) relayInput() InboundInput {
+	return InboundInput{
+		Core:            "gost",
+		Name:            r.name,
+		NodeID:          r.exitNode,
+		Protocol:        "forward",
+		Listen:          "0.0.0.0",
+		Port:            r.port,
+		Enabled:         true,
+		DefaultOutbound: "direct",
+		AllowedUserIDs:  []string{},
+		Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{
+			Mode:  desiredstate.GostForwardModeRelay,
+			Relay: &desiredstate.GostRelayTLS{CertificatePEM: r.material.ServerCertPEM, PrivateKeyPEM: r.material.ServerKeyPEM, ClientCAPEM: r.material.CACertPEM},
+		}},
+	}
+}
+
+// relayPortTaken collects the numeric ports the exit node already reserves plus
+// every listener this plan adds on it. Ports are node-global, so a relay competes
+// with forwards and with the other cores exactly like any inbound.
+func (s *Service) relayPortTaken(ctx context.Context, plan *canvasPlan, relay *canvasRelay) (map[int]bool, error) {
+	taken := map[int]bool{}
+	inbounds, err := snapshotList(func(page, size int) ([]Inbound, int, error) {
+		return s.Repository.Inbounds(ctx, relay.exitNode, page, size, true)
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, inbound := range inbounds {
+		if inbound.Name == relay.name {
+			continue
+		}
+		for _, port := range desiredstate.ListenPorts(inbound.Port, inbound.Settings) {
+			taken[port] = true
+		}
+	}
+	for _, edge := range plan.edges {
+		if edge.targetNode == relay.exitNode {
+			taken[edge.port] = true
+		}
+	}
+	for _, forward := range plan.forwards {
+		if forward.NodeID == relay.exitNode {
+			for _, port := range desiredstate.ListenPorts(forward.Port, forward.Settings) {
+				taken[port] = true
+			}
+		}
+	}
+	for _, other := range plan.relays {
+		if other != relay && other.exitNode == relay.exitNode && other.port != 0 {
+			taken[other.port] = true
+		}
+	}
+	return taken, nil
+}
+
+// allocateRelayPort keeps the port a published tunnel already uses and otherwise
+// takes the first free number of the exit node's configured range.
+func (s *Service) allocateRelayPort(ctx context.Context, plan *canvasPlan, relay *canvasRelay) error {
+	if relay.port != 0 {
+		return nil
+	}
+	var start, end sql.NullInt64
+	err := s.Repository.Database.QueryRowContext(ctx, "SELECT port_range_start,port_range_end FROM node_meta WHERE node_id=?", relay.exitNode).Scan(&start, &end)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if !start.Valid {
+		return errors.New("中转服务器未设置端口分配范围，无法分配 GOST 中继端口")
+	}
+	taken, err := s.relayPortTaken(ctx, plan, relay)
+	if err != nil {
+		return err
+	}
+	for port := int(start.Int64); port <= int(end.Int64); port++ {
+		if !taken[port] {
+			relay.port, relay.allocated = port, true
+			return nil
+		}
+	}
+	return errors.New("服务器端口范围内没有可用的 GOST 中继端口")
+}
+
+// relayFor finds the GOST relay of one connection, or nil for a plain forward.
+func (p *canvasPlan) relayFor(connectionID string) *canvasRelay {
+	for _, relay := range p.relays {
+		if relay.connectionID == connectionID {
+			return relay
+		}
+	}
+	return nil
+}
+
+// canvasEnsureRelay creates or updates the exit listener of one GOST tunnel and
+// records the port it took, so the next publication of any drawing that shares
+// the tunnel keeps the same listener.
+func (s *Service) canvasEnsureRelay(ctx context.Context, plan *canvasPlan, relay *canvasRelay, undo *canvasUndo) error {
+	existing, err := s.Repository.canvasInboundNamed(ctx, relay.exitNode, relay.name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	saved, err := s.saveGeneratedInbound(ctx, existing.ID, relay.relayInput())
+	if err != nil {
+		return err
+	}
+	if err := s.ownCanvasObject(ctx, plan, "inbound", saved.ID, relay.name, undo); err != nil {
+		return err
+	}
+	if existing.ID == "" {
+		undo.add(func(ctx context.Context) error { return s.Repository.DeleteInbound(ctx, saved.ID) })
+	} else {
+		previous := existing
+		undo.add(func(ctx context.Context) error {
+			_, err := s.saveGeneratedInbound(ctx, previous.ID, inboundInputOf(previous, previous.DefaultOutbound))
+			return err
+		})
+	}
+	relay.inboundID = saved.ID
+	if !relay.allocated {
+		return nil
+	}
+	result, err := s.Repository.Database.ExecContext(ctx, "UPDATE canvas_tunnels SET allocated_port=? WHERE id=? AND updated_at=?", relay.port, relay.tunnelID, plan.tunnelVersions[relay.tunnelID])
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	tunnelID := relay.tunnelID
+	undo.add(func(ctx context.Context) error {
+		_, err := s.Repository.Database.ExecContext(ctx, "UPDATE canvas_tunnels SET allocated_port=NULL WHERE id=?", tunnelID)
+		return err
+	})
+	return nil
+}
+
+// gostOrder puts every GOST relay exit node before the entry node whose forward
+// dials it, so a publication installs the listener first and moves the entry onto
+// it second; the batch rollback then visits them in the opposite order. Nodes
+// without a GOST tunnel keep the order the drawing produced, which the existing
+// relay graph already sorted.
+func (s *Service) gostOrder(ctx context.Context, nodeIDs []string) ([]string, error) {
+	rows, err := s.Repository.Database.QueryContext(ctx, `SELECT source_ref,target_ref FROM canvas_tunnels WHERE json_extract(connection_json,'$.type')='port_forward' AND json_extract(connection_json,'$.tunnelProtocol')='gost'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	after := map[string][]string{}
+	selected := map[string]bool{}
+	for _, nodeID := range nodeIDs {
+		selected[nodeID] = true
+	}
+	for rows.Next() {
+		var source, target string
+		if err := rows.Scan(&source, &target); err != nil {
+			return nil, err
+		}
+		entry, exit := strings.TrimPrefix(source, "server:"), strings.TrimPrefix(target, "server:")
+		if selected[entry] && selected[exit] {
+			after[exit] = append(after[exit], entry)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ordered := make([]string, 0, len(nodeIDs))
+	state := map[string]int{}
+	var visit func(string) error
+	visit = func(nodeID string) error {
+		switch state[nodeID] {
+		case 1:
+			return errors.New("GOST 隧道形成了环路，无法确定发布顺序")
+		case 2:
+			return nil
+		}
+		state[nodeID] = 1
+		for _, next := range after[nodeID] {
+			if err := visit(next); err != nil {
+				return err
+			}
+		}
+		state[nodeID] = 2
+		ordered = append(ordered, nodeID)
+		return nil
+	}
+	for _, nodeID := range nodeIDs {
+		if err := visit(nodeID); err != nil {
+			return nil, err
+		}
+	}
+	return ordered, nil
+}

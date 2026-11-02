@@ -98,6 +98,10 @@ func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
 // first. RelaySnapshots already walks a node's whole relay component in that
 // order; a node without relay relationships is published on its own.
 func (s *Service) canvasSnapshots(ctx context.Context, nodeIDs []string, users AccessReader) ([]NodeSnapshot, error) {
+	nodeIDs, err := s.gostOrder(ctx, nodeIDs)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]bool{}
 	result := []NodeSnapshot{}
 	for _, nodeID := range nodeIDs {

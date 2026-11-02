@@ -125,7 +125,8 @@ export interface CanvasPublishResult { batchId?: string; nodes: CanvasPublishNod
 export interface CanvasTunnelSchemeRef { id: string; name: string; }
 export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; candidateTunnels?: string[]; }
 export interface CanvasTunnelInput { name: string; source: string; target: string; type: CanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; updatedAt?: string; }
-export interface CanvasTunnel extends CanvasTunnelInput { id: string; createdAt: string; updatedAt: string; schemes: CanvasTunnelSchemeRef[]; objects: CanvasTunnelObject[]; publishStatus: 'draft' | 'modified' | 'published'; }
+export interface CanvasTunnelCredentials { generation: number; serverName: string; notAfter: string; fingerprint: string; }
+export interface CanvasTunnel extends CanvasTunnelInput { id: string; createdAt: string; updatedAt: string; schemes: CanvasTunnelSchemeRef[]; objects: CanvasTunnelObject[]; publishStatus: 'draft' | 'modified' | 'published'; credentials?: CanvasTunnelCredentials | null; }
 export interface CanvasTunnelPlanObject { kind: string; name: string; protocol?: string; port?: number; target?: string; }
 export interface CanvasTunnelPlan { ok: boolean; message?: string; servers: { nodeId: string; name: string; creates: CanvasTunnelPlanObject[]; updates: CanvasTunnelPlanObject[]; removes: CanvasTunnelPlanObject[] }[]; connections: { id: string; status: string; message: string }[]; conflicts: { nodeId: string; port: number; with: string; connectionId: string; reason?: string; objectId?: string }[]; warnings: string[]; tunnels: { tunnelId: string; affectedSchemes: CanvasTunnelSchemeRef[] }[]; }
 export type CanvasTunnelReference = Pick<CanvasSchemeConnection, 'id' | 'source' | 'target'> & Partial<Omit<CanvasSchemeConnection, 'id' | 'source' | 'target' | 'tunnelId'>> & { tunnelId: string };
@@ -135,7 +136,10 @@ export const canvasTunnelAPI = {
  update: (id: string, value: CanvasTunnelInput & { updatedAt: string }) => request<CanvasTunnel>(`/canvas-tunnels/${encodeURIComponent(id)}`, 'PUT', value),
  delete: (id: string) => request<void>(`/canvas-tunnels/${encodeURIComponent(id)}`, 'DELETE'),
  legacyObjects: () => request<{ items: CanvasTunnelObject[]; total: number }>('/canvas-tunnels/legacy-objects'),
- adopt: (id: string, objects: Pick<CanvasTunnelObject, 'kind' | 'id'>[]) => request<void>(`/canvas-tunnels/${encodeURIComponent(id)}/adopt`, 'POST', { objects })
+ adopt: (id: string, objects: Pick<CanvasTunnelObject, 'kind' | 'id'>[]) => request<void>(`/canvas-tunnels/${encodeURIComponent(id)}/adopt`, 'POST', { objects }),
+ // G3: replace the credential set of a GOST tunnel; the next publication deploys
+ // the exit node first and the entry node second.
+ rotateCredentials: (id: string, updatedAt: string) => request<CanvasTunnel>(`/canvas-tunnels/${encodeURIComponent(id)}/rotate-credentials`, 'POST', { updatedAt })
 };
 
 export const canvasAPI = {

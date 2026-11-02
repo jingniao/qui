@@ -65,6 +65,10 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 			return core.RenderedConfig{}, fmt.Errorf("gost forward %s requires an enabled direct default outbound", inbound.ID)
 		}
 		total += len(desiredstate.ListenPorts(inbound.Port, inbound.Settings)) * len(networkTypes(inbound.Settings.Forward.Network))
+		if inbound.Settings.Forward.RelayMode() {
+			// A relay listener is one service regardless of its (absent) network.
+			total++
+		}
 	}
 	if total > maxServices {
 		return core.RenderedConfig{}, fmt.Errorf("a gost node renders at most %d services, this revision needs %d", maxServices, total)
@@ -83,8 +87,29 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 		// Ports are expanded here: GOST has no range syntax in `addr`, so a range
 		// is one service per port, each with the whole pool and its own limits.
 		for _, port := range desiredstate.ListenPorts(inbound.Port, inbound.Settings) {
+			if forward.RelayMode() {
+				// The exit half is one TLS relay listener; it forwards nothing
+				// itself, so there is no target and no traffic counter of it.
+				service, err := a.relayService(inbound, port)
+				if err != nil {
+					return core.RenderedConfig{}, err
+				}
+				config.Services = append(config.Services, service)
+				rendered.HealthEndpoints = append(rendered.HealthEndpoints, joinHostPort(dialHost(inbound.Listen), port))
+				continue
+			}
+			chain, err := a.chainFor(inbound, forward)
+			if err != nil {
+				return core.RenderedConfig{}, err
+			}
+			if chain != nil {
+				config.Chains = append(config.Chains, *chain)
+			}
 			for _, network := range networkTypes(forward.Network) {
 				service := forwardService(inbound, port, network)
+				if chain != nil {
+					service.Handler.Chain = chain.Name
+				}
 				if name, limit := bandwidthLimiter(service.Name, forward); name != "" {
 					service.Limiter = name
 					config.Limiters = append(config.Limiters, Limiter{Name: name, Limits: []string{limit}})
@@ -124,7 +149,7 @@ func forwardService(inbound desiredstate.Inbound, port int, network string) Serv
 		Addr:      joinHostPort(inbound.Listen, port),
 		Handler:   Handler{Type: network},
 		Listener:  Listener{Type: network},
-		Forwarder: Forwarder{Selector: &Selector{Strategy: strategy, MaxFails: maxFails, FailTimeout: failTimeout}, Nodes: targetNodes(forward)},
+		Forwarder: &Forwarder{Selector: &Selector{Strategy: strategy, MaxFails: maxFails, FailTimeout: failTimeout}, Nodes: targetNodes(forward)},
 	}
 }
 

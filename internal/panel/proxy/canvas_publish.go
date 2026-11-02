@@ -102,6 +102,7 @@ type canvasPlan struct {
 	forwardConnections []string
 	prefix             string
 	edges              []*canvasEdge
+	relays             []*canvasRelay
 	chains             []canvasChain
 	entries            []canvasEntry
 	inbounds           map[string]bool
@@ -246,6 +247,19 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 				host = n.PublicIP
 			}
 			input := InboundInput{Name: name, NodeID: sourceNode, Protocol: "forward", Listen: "0.0.0.0", Port: *listenPort, Enabled: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: host, Port: *targetPort, Network: network}}}
+			if connection.TunnelProtocol == "gost" {
+				relay, relayErr := s.canvasGostRelay(ctx, connection, sourceNode, targetNode, name, prefix)
+				if relayErr != nil {
+					return nil, relayErr
+				}
+				// Both halves of a GOST tunnel run on the GOST core; the hops are
+				// filled in once the relay listener has its port.
+				input.Core = "gost"
+				plan.relays = append(plan.relays, relay)
+				plan.inbounds[relay.name] = true
+				plan.owners[relay.name] = connection.TunnelID
+				plan.node(relay.exitNode)
+			}
 			if err := ValidateInbound(input); err != nil {
 				return nil, err
 			}

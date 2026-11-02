@@ -292,7 +292,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 	_ = os.Chmod(socket, 0600)
 	a.process, a.done = command, done
 	a.current = configuration
-	a.sources = serviceNames(config)
+	a.sources = forwardServiceNames(config)
 	a.metrics = metricsStatus{}
 	accepted = true
 	return nil
@@ -442,8 +442,8 @@ func (a *Adapter) TrafficSourceStatus() *pb.TrafficSourceStatus {
 	return status
 }
 
-// serviceNames is the set of rendered service names, which is what the metrics
-// filter and the traffic-source count use.
+// serviceNames is the set of every rendered service name, which the settle gate
+// uses to compare what the child actually bound.
 func serviceNames(config Config) map[string]bool {
 	names := map[string]bool{}
 	for _, service := range config.Services {

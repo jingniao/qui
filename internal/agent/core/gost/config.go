@@ -30,6 +30,7 @@ const (
 // rendered from typed settings; nothing is passed through from panel input.
 type Config struct {
 	Services  []Service `json:"services" yaml:"services"`
+	Chains    []Chain   `json:"chains,omitempty" yaml:"chains,omitempty"`
 	Limiters  []Limiter `json:"limiters,omitempty" yaml:"limiters,omitempty"`
 	Climiters []Limiter `json:"climiters,omitempty" yaml:"climiters,omitempty"`
 	Metrics   Metrics   `json:"metrics" yaml:"metrics"`
@@ -39,24 +40,71 @@ type Config struct {
 // Service is one GOST service: a listener, its handler, the target pool it
 // forwards to and the optional limiters that reference it.
 type Service struct {
-	Name      string    `json:"name" yaml:"name"`
-	Addr      string    `json:"addr" yaml:"addr"`
-	Handler   Handler   `json:"handler" yaml:"handler"`
-	Listener  Listener  `json:"listener" yaml:"listener"`
-	Limiter   string    `json:"limiter,omitempty" yaml:"limiter,omitempty"`
-	Climiter  string    `json:"climiter,omitempty" yaml:"climiter,omitempty"`
-	Forwarder Forwarder `json:"forwarder" yaml:"forwarder"`
+	Name      string     `json:"name" yaml:"name"`
+	Addr      string     `json:"addr" yaml:"addr"`
+	Handler   Handler    `json:"handler" yaml:"handler"`
+	Listener  Listener   `json:"listener" yaml:"listener"`
+	Limiter   string     `json:"limiter,omitempty" yaml:"limiter,omitempty"`
+	Climiter  string     `json:"climiter,omitempty" yaml:"climiter,omitempty"`
+	Forwarder *Forwarder `json:"forwarder,omitempty" yaml:"forwarder,omitempty"`
 }
 
-// Handler is the protocol a service terminates; `tcp` and `udp` are the forward
-// handlers of the pinned release.
+// Handler is the protocol a service terminates: `tcp` and `udp` are the forward
+// handlers of the pinned release, `relay` is the encrypted relay end. A chain is
+// always attached here and never at service level.
 type Handler struct {
-	Type string `json:"type" yaml:"type"`
+	Type  string `json:"type" yaml:"type"`
+	Chain string `json:"chain,omitempty" yaml:"chain,omitempty"`
 }
 
 // Listener is the transport a service binds.
 type Listener struct {
 	Type string `json:"type" yaml:"type"`
+	TLS  *TLS   `json:"tls,omitempty" yaml:"tls,omitempty"`
+}
+
+// TLS names the material files of one listener or dialer. GOST reads the files
+// itself, so the Agent writes them 0600 under its runtime directory; `caFile` on
+// a listener is what makes the peer certificate mandatory.
+type TLS struct {
+	CertFile   string `json:"certFile" yaml:"certFile"`
+	KeyFile    string `json:"keyFile" yaml:"keyFile"`
+	CAFile     string `json:"caFile,omitempty" yaml:"caFile,omitempty"`
+	ServerName string `json:"serverName,omitempty" yaml:"serverName,omitempty"`
+}
+
+// Chain is an ordered relay path. One hop per relay, each hop dialling the next
+// relay with the client certificate of this node.
+type Chain struct {
+	Name string `json:"name" yaml:"name"`
+	Hops []Hop  `json:"hops" yaml:"hops"`
+}
+
+// Hop is one relay of a chain: the relays of the same hop are alternatives.
+type Hop struct {
+	Name  string    `json:"name" yaml:"name"`
+	Nodes []HopNode `json:"nodes" yaml:"nodes"`
+}
+
+// HopNode is one relay address together with its connector and TLS dialer.
+type HopNode struct {
+	Name      string    `json:"name" yaml:"name"`
+	Addr      string    `json:"addr" yaml:"addr"`
+	Connector Connector `json:"connector" yaml:"connector"`
+	Dialer    Dialer    `json:"dialer" yaml:"dialer"`
+}
+
+// Connector is how a hop talks to the next relay; `relay` is the only connector
+// this Agent renders, so no forwarding protocol is silently substituted.
+type Connector struct {
+	Type string `json:"type" yaml:"type"`
+}
+
+// Dialer is the transport of a hop. TLS with a CA file is mandatory: a hop
+// without certificate verification is never rendered.
+type Dialer struct {
+	Type string `json:"type" yaml:"type"`
+	TLS  *TLS   `json:"tls,omitempty" yaml:"tls,omitempty"`
 }
 
 // Forwarder carries the ordered target pool of a forward service and the selector
@@ -119,16 +167,20 @@ type serviceKey struct {
 	Name     string
 	Addr     string
 	Handler  string
+	Chain    string
 	Listener string
+	TLS      bool
 	Nodes    []string
 }
 
 func (c Config) keys() []serviceKey {
 	keys := make([]serviceKey, 0, len(c.Services))
 	for _, service := range c.Services {
-		key := serviceKey{Name: service.Name, Addr: service.Addr, Handler: service.Handler.Type, Listener: service.Listener.Type}
-		for _, node := range service.Forwarder.Nodes {
-			key.Nodes = append(key.Nodes, node.Addr)
+		key := serviceKey{Name: service.Name, Addr: service.Addr, Handler: service.Handler.Type, Chain: service.Handler.Chain, Listener: service.Listener.Type, TLS: service.Listener.TLS != nil}
+		if service.Forwarder != nil {
+			for _, node := range service.Forwarder.Nodes {
+				key.Nodes = append(key.Nodes, node.Addr)
+			}
 		}
 		keys = append(keys, key)
 	}
@@ -143,10 +195,12 @@ func decodeKeys(data []byte) ([]serviceKey, error) {
 			Name    string `json:"name"`
 			Addr    string `json:"addr"`
 			Handler struct {
-				Type string `json:"type"`
+				Type  string `json:"type"`
+				Chain string `json:"chain"`
 			} `json:"handler"`
 			Listener struct {
-				Type string `json:"type"`
+				Type string          `json:"type"`
+				TLS  json.RawMessage `json:"tls"`
 			} `json:"listener"`
 			Forwarder struct {
 				Nodes []struct {
@@ -160,7 +214,7 @@ func decodeKeys(data []byte) ([]serviceKey, error) {
 	}
 	keys := make([]serviceKey, 0, len(document.Services))
 	for _, service := range document.Services {
-		key := serviceKey{Name: service.Name, Addr: service.Addr, Handler: service.Handler.Type, Listener: service.Listener.Type}
+		key := serviceKey{Name: service.Name, Addr: service.Addr, Handler: service.Handler.Type, Chain: service.Handler.Chain, Listener: service.Listener.Type, TLS: len(service.Listener.TLS) > 0 && string(service.Listener.TLS) != "null"}
 		for _, node := range service.Forwarder.Nodes {
 			key.Nodes = append(key.Nodes, node.Addr)
 		}
@@ -185,7 +239,14 @@ func compareKeys(rendered, normalized []serviceKey) error {
 }
 
 func (k serviceKey) String() string {
-	return k.Name + " " + k.Addr + " " + k.Handler + "/" + k.Listener + " -> " + strings.Join(k.Nodes, ",")
+	text := k.Name + " " + k.Addr + " " + k.Handler + "/" + k.Listener + " -> " + strings.Join(k.Nodes, ",")
+	if k.Chain != "" {
+		text += " chain=" + k.Chain
+	}
+	if k.TLS {
+		text += " tls"
+	}
+	return text
 }
 
 // networkTypes maps a forward network setting to the transports it renders.
@@ -242,10 +303,13 @@ func connectionLimiter(name, network string, forward *desiredstate.ForwardSettin
 	return "clim-" + name
 }
 
-// validateReferences refuses typed output whose limiter references do not
-// resolve. GOST silently ignores an unknown limiter name and then forwards
-// without the limit that was asked for, so this is checked before the process
-// ever sees the configuration.
+// validateReferences refuses typed output whose limiter or chain references do
+// not resolve. GOST silently ignores an unknown limiter name and then forwards
+// without the limit that was asked for, and it ignores an unknown chain name and
+// then forwards directly, so both are checked before the process ever sees the
+// configuration. It also asserts the chain shape G0 measured: the chain belongs
+// to the handler, a hop dials with mutual TLS, and a forward service has its
+// target pool while a relay service has none.
 func validateReferences(config Config) error {
 	limiters, climiters := map[string]bool{}, map[string]bool{}
 	for _, limiter := range config.Limiters {
@@ -254,15 +318,48 @@ func validateReferences(config Config) error {
 	for _, limiter := range config.Climiters {
 		climiters[limiter.Name] = true
 	}
-	for _, service := range config.Services {
-		if len(service.Forwarder.Nodes) == 0 {
-			return fmt.Errorf("gost service %s has no target", service.Name)
+	chains := map[string]*Chain{}
+	for index := range config.Chains {
+		chain := &config.Chains[index]
+		if chain.Name == "" || len(chain.Hops) == 0 || len(chain.Hops) > desiredstate.GostMaxRelayHops {
+			return fmt.Errorf("gost chain %q needs one or two hops", chain.Name)
 		}
+		if chains[chain.Name] != nil {
+			return fmt.Errorf("gost chain %q is rendered twice", chain.Name)
+		}
+		for _, hop := range chain.Hops {
+			if len(hop.Nodes) != 1 {
+				return fmt.Errorf("gost chain %s hop %s needs exactly one relay", chain.Name, hop.Name)
+			}
+			node := hop.Nodes[0]
+			if node.Connector.Type != "relay" || node.Dialer.Type != "tls" || node.Dialer.TLS == nil || node.Dialer.TLS.CAFile == "" || node.Dialer.TLS.ServerName == "" {
+				return fmt.Errorf("gost chain %s hop %s is not a relay over verified TLS", chain.Name, hop.Name)
+			}
+		}
+		chains[chain.Name] = chain
+	}
+	for _, service := range config.Services {
 		if service.Limiter != "" && !limiters[service.Limiter] {
 			return fmt.Errorf("gost service %s references an unknown limiter", service.Name)
 		}
 		if service.Climiter != "" && !climiters[service.Climiter] {
 			return fmt.Errorf("gost service %s references an unknown climiter", service.Name)
+		}
+		switch service.Handler.Type {
+		case "relay":
+			if service.Forwarder != nil || service.Handler.Chain != "" {
+				return fmt.Errorf("gost relay %s forwards no target and dials no chain", service.Name)
+			}
+			if service.Listener.Type != "tls" || service.Listener.TLS == nil || service.Listener.TLS.CAFile == "" {
+				return fmt.Errorf("gost relay %s requires a TLS listener with a client CA", service.Name)
+			}
+		default:
+			if service.Forwarder == nil || len(service.Forwarder.Nodes) == 0 {
+				return fmt.Errorf("gost service %s has no target", service.Name)
+			}
+			if service.Handler.Chain != "" && chains[service.Handler.Chain] == nil {
+				return fmt.Errorf("gost service %s references an unknown chain", service.Name)
+			}
 		}
 	}
 	return nil

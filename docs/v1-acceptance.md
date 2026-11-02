@@ -1310,3 +1310,11 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试），Web UI 与
 | G2.3 | 节点专属计量与面板/Web：范围展开出的每个服务都按服务名各计一次并求和为单一 `gost` 节点计数（input→上传、output→下载，`client`/`host` 标签丢弃），不进入用户额度；面板保存与发布只在核心契约 ≥2 时接受新设置；Web 编辑器只对 GOST 核心显示池/范围/限速字段，并有换核拒止、展开数量与行为说明 | 本地通过：`TestParseMetricsCountsEveryExpandedServiceOnce`、`TestRealApplySettleRollbackAndStats`（G1 节点计数仍为单一批）、`TestGostForwardOptionsRequireTheContractAndTheCore`；`cd web && npm run build`（含 `vue-tsc`）通过，`node web/scripts/node-editor-selftest.mjs`（新增 `PASS NODE_EDITOR_GOST`：范围展开、范围感知端口冲突、按出现判定的 GOST 选项、换核拒止、第 4 步边界）与 `node web/scripts/ui-regression-selftest.mjs` 通过；待实机（浏览器走查、真实 GOST 上的限速/上限/UDP 观察，以及 LXC/Alpine 上的资源与指标基数） |
 
 G2 的实机项（三台主机）：代理核心与转发范围之间的端口冲突、TCP/UDP 回显、IPv4/IPv6、`fifo` 故障切换、单向与双向限速、连接上限作用范围、重启/断线后的统计与不进入用户额度/域名/设备记录；代表性的范围与混合流量 soak 在 Alpine 上核对内存与指标基数。在此之前不声称 G2 已验收。
+
+### G3：GOST 加密中继（经出口服务器转发）
+
+| 编号 | 证据与状态 |
+| --- | --- |
+| G3.1 | 本地通过：`desiredstate` 契约版本 3（`GostForwardContractVersion`）、`ForwardSettings.mode/relay/gost_hops` 的类型化校验（中继无目标池、1–2 跳、CA 与双证书必须可用）；`internal/agent/core/gost` 渲染中继监听（`handler: relay` + `listener: tls` + `caFile`）与入口链（**链永远挂在 `handler.chain`**，结构断言 + 1/2 跳测试）、材料文件 0600（Windows 跳过权限位）、中继服务不计入节点流量；面板 `ValidateInbound` 拒绝公网提交中继字段，生成路径接受；证书生成/校验（SAN、EKU、跨隧道不受信）。实机待做 |
+| G3.2 | 本地通过：迁移 0128（`canvas_tunnels.gost_material` 单个可空密封列）与 checksum 固定；保存 GOST 隧道时签发一代材料（CA 私钥不保留，10 年、ECDSA P-256）；`POST /api/v1/canvas-tunnels/{id}/rotate-credentials` 生成新代并标记 modified；`gostOrder` 让出口服务器先于入口服务器发布（回滚按批次反向）；红冲（入站 API、隧道视图只有代数/到期/指纹）。实机待做 |
+| G3.3 | **待实机**：两台主机分别为出口/入口，TCP+UDP 回显经中继通过、目标只能经出口配置路径到达、无证书/异构 CA 客户端被拒；发布顺序与反向回滚、删除/最后一处引用清理、备份往返与 pre-0128 归档接受。需 `GOST_BINARY` 的真核心测试在 Linux 测试机上运行 |

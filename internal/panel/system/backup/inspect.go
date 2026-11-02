@@ -361,6 +361,12 @@ func validateContents(ctx context.Context, work string) error {
 	if err := proxy.ValidateCanvasTunnels(ctx, database); err != nil {
 		return ErrArchive
 	}
+	// G3: a GOST tunnel's sealed credential set belongs to the archive, so a
+	// candidate that cannot open it would restore a tunnel no publication can
+	// render. Archives from before 0128 have no column and are accepted.
+	if err := proxy.ValidateCanvasTunnelMaterial(ctx, database, configurationVault); err != nil {
+		return ErrArchive
+	}
 	if err := validatePortal(ctx, database, configurationVault); err != nil {
 		return err
 	}

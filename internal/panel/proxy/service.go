@@ -47,6 +47,19 @@ func mergeSettings(incoming, old desiredstate.ProtocolSettings) desiredstate.Pro
 	if incoming.WireGuard != nil && incoming.WireGuard.SecretKey == "" && old.WireGuard != nil {
 		incoming.WireGuard.SecretKey = old.WireGuard.SecretKey
 	}
+	// A GOST tunnel's relay halves are written by the canvas, so an Owner edit of
+	// the generated inbound keeps them; a nil hop list means "unchanged" and an
+	// explicit empty one clears the chain.
+	if incoming.Forward != nil && old.Forward != nil {
+		forward := *incoming.Forward
+		if forward.Mode == "" && old.Forward.Mode != "" {
+			forward.Mode, forward.Relay = old.Forward.Mode, old.Forward.Relay
+		}
+		if forward.Hops == nil && len(old.Forward.Hops) > 0 {
+			forward.Hops = old.Forward.Hops
+		}
+		incoming.Forward = &forward
+	}
 	return incoming
 }
 func publicKey(secret string) (string, error) {
@@ -61,6 +74,26 @@ func publicKey(secret string) (string, error) {
 	return base64.StdEncoding.EncodeToString(key.PublicKey().Bytes()), nil
 }
 func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput) (Inbound, error) {
+	return s.saveInbound(ctx, id, input, false)
+}
+
+// saveGeneratedInbound is the canvas path: it may set the GOST relay halves of a
+// tunnel, which the public inbound API never accepts.
+func (s *Service) saveGeneratedInbound(ctx context.Context, id string, input InboundInput) (Inbound, error) {
+	return s.saveInbound(ctx, id, input, true)
+}
+
+func (s *Service) saveInbound(ctx context.Context, id string, input InboundInput, generated bool) (Inbound, error) {
+	if generated {
+		return s.writeInbound(ctx, id, input, true)
+	}
+	if input.Settings.Forward.HasRelaySettings() {
+		return Inbound{}, errors.New("GOST 中继证书由隧道资源管理，不能在入站中填写")
+	}
+	return s.writeInbound(ctx, id, input, false)
+}
+
+func (s *Service) writeInbound(ctx context.Context, id string, input InboundInput, generated bool) (Inbound, error) {
 	n, err := s.Nodes.Get(ctx, input.NodeID)
 	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Inbound{}, errors.New("node missing or disabled")
@@ -133,6 +166,9 @@ func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput
 		if err != nil || outbound.NodeID != input.NodeID || !outbound.Enabled {
 			return Inbound{}, errors.New("default outbound unavailable on this node")
 		}
+	}
+	if generated {
+		return s.Repository.SaveGeneratedInbound(ctx, id, input)
 	}
 	return s.Repository.SaveInbound(ctx, id, input)
 }

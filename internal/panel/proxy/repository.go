@@ -45,6 +45,25 @@ func mask(settings desiredstate.ProtocolSettings) desiredstate.ProtocolSettings 
 		copy.SecretKey = ""
 		settings.WireGuard = &copy
 	}
+	// A GOST tunnel's material never leaves the panel: the relay key, the client
+	// key of every hop and the CA stay in the sealed column and in the revision.
+	if settings.Forward != nil && settings.Forward.HasRelaySettings() {
+		copy := *settings.Forward
+		if copy.Relay != nil {
+			relay := *copy.Relay
+			relay.PrivateKeyPEM = ""
+			copy.Relay = &relay
+		}
+		if len(copy.Hops) > 0 {
+			hops := make([]desiredstate.GostHop, len(copy.Hops))
+			for index, hop := range copy.Hops {
+				hop.ClientKeyPEM = ""
+				hops[index] = hop
+			}
+			copy.Hops = hops
+		}
+		settings.Forward = &copy
+	}
 	return settings
 }
 func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool) (Inbound, error) {
@@ -194,8 +213,21 @@ func (r *Repository) Outbounds(ctx context.Context, nodeID string, page, size in
 	}
 	return items, total, nil
 }
+
+// SaveInbound writes an inbound the Owner configured: the public shape, which
+// never carries GOST relay material.
 func (r *Repository) SaveInbound(ctx context.Context, inboundID string, input InboundInput) (Inbound, error) {
-	if err := ValidateInbound(input); err != nil {
+	return r.saveInbound(ctx, inboundID, input, ValidateInbound)
+}
+
+// SaveGeneratedInbound writes an inbound the panel generated for a GOST tunnel.
+// It applies the same rules plus the relay halves, which only the canvas may set.
+func (r *Repository) SaveGeneratedInbound(ctx context.Context, inboundID string, input InboundInput) (Inbound, error) {
+	return r.saveInbound(ctx, inboundID, input, validateGeneratedInbound)
+}
+
+func (r *Repository) saveInbound(ctx context.Context, inboundID string, input InboundInput, validate func(InboundInput) error) (Inbound, error) {
+	if err := validate(input); err != nil {
 		return Inbound{}, err
 	}
 	create := inboundID == ""

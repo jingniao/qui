@@ -92,6 +92,24 @@
           </label>
         </div>
         <p class="text-xs text-ios-secondary">L10：核心端口转发不验证用户身份，用户额度、设备限制、规则与用户访问审计不适用。</p>
+        <label class="inline-flex items-center gap-2 text-xs text-ios-secondary cursor-pointer">
+          <input type="checkbox" :checked="draft.protocol === 'gost'" :disabled="saving" data-testid="gost-relay-toggle"
+            @change="setGostRelay(($event.target as HTMLInputElement).checked)" />
+          经 GOST 中继（TLS 隧道 + 客户端证书）
+        </label>
+        <p v-if="draft.protocol === 'gost'" class="text-xs text-ios-tertiary">
+          源服务器的转发经加密隧道从目标服务器的 GOST 中继出去；两端服务器都必须启用 GOST 核心（契约版本 3）。隧道监听端口只在发布时分配，证书由平台签发。
+        </p>
+        <div v-if="sharedTunnel?.credentials" class="rounded-xl border border-ios-border bg-ios-card p-3 space-y-2">
+          <p class="text-xs text-ios-secondary">
+            凭据第 {{ sharedTunnel.credentials.generation }} 代 · 到期 {{ credentialExpiry }} · 指纹
+            <span class="font-mono tabular-nums break-all">{{ sharedTunnel.credentials.fingerprint.slice(0, 16) }}…</span>
+          </p>
+          <button type="button" class="ios-btn-secondary" :disabled="saving || rotating" @click="confirmRotate = true">
+            {{ rotating ? '轮换中…' : '轮换凭据' }}
+          </button>
+          <p class="text-xs text-ios-tertiary">轮换会替换整份证书，并在下次发布时先部署出口服务器、再部署入口服务器，期间隧道短暂中断。</p>
+        </div>
       </div>
       <div class="flex gap-4 text-sm text-ios-secondary">
         <label class="inline-flex items-center gap-2 cursor-pointer"><input v-model="draft.tcp" type="checkbox" :disabled="saving" />TCP</label>
@@ -145,13 +163,19 @@
       : '从方案草稿中删除此隧道？发布方案后才会移除服务器上的相关配置。'"
     @confirm="remove"
   />
+  <ConfirmDialog
+    v-model="confirmRotate"
+    title="轮换隧道凭据"
+    message="将生成新的 CA 与两端证书。下次发布会先部署出口服务器、再部署入口服务器，隧道在此期间短暂中断；已发布的旧配置仍可回滚。"
+    @confirm="rotateCredentials"
+  />
 </template>
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import FormDrawer from '../../../../components/FormDrawer.vue';
 import ConfirmDialog from '../../../../components/ConfirmDialog.vue';
 import type { CanvasConnection, RelayScheme } from '../../proxyNodes';
-import { canvasAPI, canvasTunnelAffectedText, relaySchemeToCanvasInput, type CanvasSchemeContext, type CanvasTunnel, type CanvasTunnelInput } from '../../api';
+import { canvasAPI, canvasTunnelAPI, canvasTunnelAffectedText, relaySchemeToCanvasInput, type CanvasSchemeContext, type CanvasTunnel, type CanvasTunnelInput } from '../../api';
 import {
   applyTunnel,
   createTunnelDraft,
@@ -196,6 +220,30 @@ const draft = reactive(props.sharedTunnel ? createTunnelResourceDraft(props.shar
 const resourceName = ref(props.sharedTunnel?.name || '');
 const addToScheme = ref(true);
 const saving = ref(false), saveError = ref(''), confirmDelete = ref(false);
+const rotating = ref(false), confirmRotate = ref(false);
+const credentialExpiry = computed(() => {
+  const notAfter = props.sharedTunnel?.credentials?.notAfter;
+  return notAfter ? new Date(notAfter).toLocaleDateString('zh-CN') : '—';
+});
+// A GOST relay is only offered for port forwards: an encrypted user-proxy hop
+// keeps using the Trojan tunnel, so nothing here silently swaps the engine.
+function setGostRelay(enabled: boolean) {
+  draft.protocol = enabled ? 'gost' : 'tls';
+  if (!enabled) draft.port = 8443;
+}
+async function rotateCredentials() {
+  if (!props.sharedTunnel) return;
+  rotating.value = true;
+  saveError.value = '';
+  try {
+    await canvasTunnelAPI.rotateCredentials(props.sharedTunnel.id, props.sharedTunnel.updatedAt);
+    emit('resource-saved', { tunnel: { ...props.sharedTunnel, credentials: null }, addToScheme: false });
+  } catch (error) {
+    saveError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    rotating.value = false;
+  }
+}
 const sides = [{ key: 'source', label: '起点' }, { key: 'target', label: '终点' }] as const;
 const kinds = [
   { value: 'encrypted', label: '加密中转', description: '保留用户身份，额度、规则与审计适用；A→B→C 形成多跳。' },

@@ -19,7 +19,7 @@ func canvasK4LegacyDatabase(t *testing.T, p *publishPanel, scheme CanvasScheme, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"DROP TRIGGER canvas_tunnel_inbound_deleted", "DROP TRIGGER canvas_tunnel_outbound_deleted", "DROP TRIGGER canvas_tunnel_chain_deleted", "DROP TABLE canvas_tunnel_objects", "DROP TABLE canvas_tunnel_publications", "DROP TABLE canvas_tunnels", "DROP TABLE canvas_tunnel_reconcile", "DELETE FROM schema_migrations WHERE version='0124_canvas_tunnels.sql'"} {
+	for _, q := range []string{"DROP TRIGGER canvas_tunnel_inbound_deleted", "DROP TRIGGER canvas_tunnel_outbound_deleted", "DROP TRIGGER canvas_tunnel_chain_deleted", "DROP TABLE canvas_tunnel_objects", "DROP TABLE canvas_tunnel_publications", "DROP TABLE canvas_tunnels", "DROP TABLE canvas_tunnel_reconcile", "DELETE FROM schema_migrations WHERE version='0124_canvas_tunnels.sql'", "DELETE FROM schema_migrations WHERE version='0128_gost_tunnels.sql'"} {
 		if _, err := p.database.Exec(q); err != nil {
 			t.Fatal(err)
 		}

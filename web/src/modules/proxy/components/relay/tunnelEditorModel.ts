@@ -154,6 +154,7 @@ export function applyTunnel(scheme: RelayScheme, draft: TunnelDraft, servers: Tu
     status: 'valid',
     ...(draft.kind === 'forward'
       ? {
+          ...(draft.protocol === 'gost' ? { tunnelProtocol: 'gost' as const } : {}),
           listenPort: draft.listenPort,
           targetPort: draft.targetPort,
           targetHost: draft.targetHost.trim()
@@ -183,6 +184,7 @@ export function validateTunnel(scheme: RelayScheme, draft: TunnelDraft, servers:
     const target = scheme.nodes.find(n => n.instanceId === draft.target);
     if (target && !target.isManageable && scheme.executionLocation !== 'client') return '加密隧道终点必须是可管理服务器（或客户端方案）';
   } else {
+    if (!['tls', 'gost'].includes(draft.protocol)) return `协议 ${draft.protocol} 不能用于端口转发`;
     if (!Number.isInteger(draft.listenPort) || draft.listenPort < 1 || draft.listenPort > 65535) return '端口必须为 1–65535';
     if (!Number.isInteger(draft.targetPort) || draft.targetPort < 1 || draft.targetPort > 65535) return '端口必须为 1–65535';
   }
@@ -323,7 +325,7 @@ export function tunnelResourceInput(draft: TunnelDraft, name: string, type?: Can
     supportUdp: draft.udp
   };
   if (draft.kind === 'forward') {
-    return { ...base, type: 'port_forward', listenPort: draft.listenPort, targetHost: draft.targetHost.trim(), targetPort: draft.targetPort };
+    return { ...base, type: 'port_forward', tunnelProtocol: draft.protocol === 'gost' ? 'gost' : undefined, listenPort: draft.listenPort, targetHost: draft.targetHost.trim(), targetPort: draft.targetPort };
   }
   return { ...base, tunnelProtocol: draft.protocol, tunnelPort: draft.port };
 }
@@ -339,9 +341,10 @@ export function validateTunnelResource(draft: TunnelDraft, servers: TunnelServer
   }
   if (!draft.tcp && !draft.udp) return '至少启用 TCP 或 UDP';
   if (draft.kind === 'encrypted') {
-    if (['gost', 'brook', 'nftables'].includes(draft.protocol)) return `协议 ${draft.protocol} 需要 GOST 核心，当前不可用`;
+    if (['gost', 'brook', 'nftables'].includes(draft.protocol)) return `协议 ${draft.protocol} 只能用于端口转发（GOST 加密中继，后续阶段）`;
     if (!Number.isInteger(draft.port) || draft.port < 1 || draft.port > 65535) return '端口必须为 1–65535';
   } else {
+    if (!['tls', 'gost'].includes(draft.protocol)) return `协议 ${draft.protocol} 不能用于端口转发`;
     if (!Number.isInteger(draft.listenPort) || draft.listenPort < 1 || draft.listenPort > 65535) return '端口必须为 1–65535';
     if (!Number.isInteger(draft.targetPort) || draft.targetPort < 1 || draft.targetPort > 65535) return '端口必须为 1–65535';
   }

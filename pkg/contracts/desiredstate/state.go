@@ -130,6 +130,14 @@ type ForwardSettings struct {
 	BandwidthOutBps *int64          `json:"bandwidth_out_bps,omitempty"`
 	MaxConnections  *int            `json:"max_connections,omitempty"`
 
+	// Mode, Relay and Hops are the encrypted-relay fields of settings contract
+	// version 3. The panel resolves them from a GOST tunnel's sealed material;
+	// proxy.ValidateInbound refuses them from the public inbound API and the
+	// renderer refuses a half-resolved state.
+	Mode  string        `json:"mode,omitempty"`
+	Relay *GostRelayTLS `json:"relay,omitempty"`
+	Hops  []GostHop     `json:"gost_hops,omitempty"`
+
 	// poolWritten records that a request carried an explicit `targets` key, so an
 	// empty pool is refused instead of being read as "no pool". Only
 	// UnmarshalJSON sets it and only Validate reads it.

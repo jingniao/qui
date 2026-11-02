@@ -4,7 +4,41 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"proxycontrol/internal/platform/vault"
 )
+
+// ValidateCanvasTunnelMaterial checks the sealed GOST credential sets of an
+// archive without changing it. A pre-0128 archive has no column and is accepted;
+// a column that exists must open with the configuration key and hold a set that
+// still verifies, so a restore never installs a tunnel no publication can render.
+// It never returns the material itself.
+func ValidateCanvasTunnelMaterial(ctx context.Context, database *sql.DB, configurationVault *vault.Vault) error {
+	var applied int
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0128_gost_tunnels.sql'").Scan(&applied); err != nil {
+		return err
+	}
+	if applied == 0 {
+		return nil
+	}
+	rows, err := database.QueryContext(ctx, "SELECT id,gost_material FROM canvas_tunnels WHERE gost_material IS NOT NULL")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	r := &Repository{Database: database, Vault: configurationVault}
+	for rows.Next() {
+		var tunnelID string
+		var sealed []byte
+		if err := rows.Scan(&tunnelID, &sealed); err != nil {
+			return err
+		}
+		if _, err := r.openGostMaterial(tunnelID, sealed); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
 
 // ValidateCanvasTunnels is read-only and also accepts pre-0124 archives. The
 // recovery coordinator migrates and reconciles those archives before serving.

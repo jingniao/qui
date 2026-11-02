@@ -100,5 +100,10 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 			return errors.New("服务器端口范围内没有可用的中转监听端口")
 		}
 	}
+	for _, relay := range plan.relays {
+		if err := s.allocateRelayPort(ctx, plan, relay); err != nil {
+			return err
+		}
+	}
 	return nil
 }

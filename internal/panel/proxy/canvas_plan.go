@@ -72,6 +72,9 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 			listeners = append(listeners, canvasListener{f.NodeID, f.Name, f.Protocol, plan.forwardConnections[i], port, nil})
 		}
 	}
+	for _, relay := range plan.relays {
+		listeners = append(listeners, canvasListener{relay.exitNode, relay.name, "forward", relay.connectionID, relay.port, nil})
+	}
 	owned, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {
 		return nil, err

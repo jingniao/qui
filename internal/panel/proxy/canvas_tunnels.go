@@ -44,16 +44,29 @@ type CanvasTunnelObject struct {
 }
 type CanvasTunnel struct {
 	CanvasTunnelInput
-	ID               string               `json:"id"`
-	CreatedAt        string               `json:"createdAt"`
-	Schemes          []CanvasSchemeRef    `json:"schemes"`
-	Objects          []CanvasTunnelObject `json:"objects"`
-	PublishStatus    string               `json:"publishStatus"`
+	ID               string                   `json:"id"`
+	CreatedAt        string                   `json:"createdAt"`
+	Schemes          []CanvasSchemeRef        `json:"schemes"`
+	Objects          []CanvasTunnelObject     `json:"objects"`
+	PublishStatus    string                   `json:"publishStatus"`
+	Credentials      *CanvasTunnelCredentials `json:"credentials"`
 	connection       CanvasConnection
 	prefix           string
 	inlineScheme     string
 	publishedVersion string
 	allocatedPort    *int
+	sealedMaterial   []byte
+	material         *gostMaterial
+}
+
+// CanvasTunnelCredentials is the redacted view of a GOST tunnel's credential set:
+// the generation, its expiry and the certificate fingerprint. The certificates,
+// the keys and the CA are never part of an API response, the plan or the log.
+type CanvasTunnelCredentials struct {
+	Generation  int64  `json:"generation"`
+	ServerName  string `json:"serverName"`
+	NotAfter    string `json:"notAfter"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 func tunnelInput(c CanvasConnection, name, source, target, stamp string) CanvasTunnelInput {
@@ -65,7 +78,7 @@ func (i CanvasTunnelInput) connectionValue(seed string) CanvasConnection {
 func scanTunnel(row interface{ Scan(...any) error }) (CanvasTunnel, error) {
 	var t CanvasTunnel
 	var raw, source, target, stamp, name string
-	err := row.Scan(&t.ID, &name, &raw, &source, &target, &t.inlineScheme, &t.prefix, &t.CreatedAt, &stamp, &t.publishedVersion, &t.allocatedPort)
+	err := row.Scan(&t.ID, &name, &raw, &source, &target, &t.inlineScheme, &t.prefix, &t.CreatedAt, &stamp, &t.publishedVersion, &t.allocatedPort, &t.sealedMaterial)
 	if errors.Is(err, sql.ErrNoRows) {
 		return t, ErrNotFound
 	}
@@ -92,10 +105,31 @@ func scanTunnel(row interface{ Scan(...any) error }) (CanvasTunnel, error) {
 	return t, nil
 }
 
-const tunnelColumns = "id,name,connection_json,source_ref,target_ref,inline_scheme_id,object_prefix,created_at,updated_at,published_version,allocated_port"
+const tunnelColumns = "id,name,connection_json,source_ref,target_ref,inline_scheme_id,object_prefix,created_at,updated_at,published_version,allocated_port,gost_material"
 
 func (r *Repository) canvasTunnel(ctx context.Context, tunnelID string) (CanvasTunnel, error) {
-	return scanTunnel(r.Database.QueryRowContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels WHERE id=?", tunnelID))
+	t, err := scanTunnel(r.Database.QueryRowContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels WHERE id=?", tunnelID))
+	if err != nil {
+		return t, err
+	}
+	r.attachCredentials(&t)
+	return t, nil
+}
+
+// attachCredentials resolves the redacted credential view of a tunnel. A set that
+// cannot be opened is left out instead of failing the read: the Owner still sees
+// the tunnel and can rotate it, while a publication refuses it.
+func (r *Repository) attachCredentials(t *CanvasTunnel) {
+	t.Credentials, t.material = nil, nil
+	if len(t.sealedMaterial) == 0 {
+		return
+	}
+	material, err := r.openGostMaterial(t.ID, t.sealedMaterial)
+	if err != nil {
+		return
+	}
+	t.material = &material
+	t.Credentials = &CanvasTunnelCredentials{Generation: material.Generation, ServerName: material.ServerName, NotAfter: material.NotAfter, Fingerprint: material.Fingerprint}
 }
 
 func (r *Repository) tunnelSchemes(ctx context.Context, tunnelID string) ([]CanvasSchemeRef, error) {
@@ -137,6 +171,7 @@ func (r *Repository) CanvasTunnels(ctx context.Context) ([]CanvasTunnel, error) 
 	}
 	for n := range items {
 		t := &items[n]
+		r.attachCredentials(t)
 		t.Schemes, err = r.tunnelSchemes(ctx, t.ID)
 		if err != nil {
 			return nil, err
@@ -160,6 +195,9 @@ func (s *Service) SaveCanvasTunnel(ctx context.Context, tunnelID string, input C
 		return CanvasTunnel{}, errors.New("tunnel name must be 1 to 80 bytes")
 	}
 	c := input.connectionValue("edge")
+	if c.TunnelProtocol == "gost" && c.Type != "port_forward" {
+		return CanvasTunnel{}, errors.New("gost tunnels carry port forwards only")
+	}
 	layout := CanvasLayout{Instances: []CanvasInstance{{InstanceID: "source", Ref: input.Source, Role: "entry"}, {InstanceID: "target", Ref: input.Target, Role: "exit"}}, Connections: []CanvasConnection{c}}
 	if err := layout.validate(); err != nil {
 		return CanvasTunnel{}, err
@@ -208,6 +246,9 @@ func (s *Service) SaveCanvasTunnel(ctx context.Context, tunnelID string, input C
 		_, err = tx.ExecContext(ctx, "UPDATE canvas_tunnels SET name=?,connection_json=?,source_ref=?,target_ref=?,updated_at=? WHERE id=?", input.Name, string(raw), input.Source, input.Target, stamp, tunnelID)
 	}
 	if err != nil {
+		return CanvasTunnel{}, err
+	}
+	if err := s.Repository.syncGostMaterial(ctx, tx, tunnelID, c.TunnelProtocol == "gost" && c.Type == "port_forward", stamp); err != nil {
 		return CanvasTunnel{}, err
 	}
 	if err = tx.Commit(); err != nil {

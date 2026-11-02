@@ -325,7 +325,7 @@ export function tunnelResourceInput(draft: TunnelDraft, name: string, type?: Can
     supportUdp: draft.udp
   };
   if (draft.kind === 'forward') {
-    return { ...base, type: 'port_forward', tunnelProtocol: draft.protocol === 'gost' ? 'gost' : undefined, listenPort: draft.listenPort, targetHost: draft.targetHost.trim(), targetPort: draft.targetPort };
+    return { ...base, type: 'port_forward', ...(draft.protocol === 'gost' ? { tunnelProtocol: 'gost' as const } : {}), listenPort: draft.listenPort, targetHost: draft.targetHost.trim(), targetPort: draft.targetPort };
   }
   return { ...base, tunnelProtocol: draft.protocol, tunnelPort: draft.port };
 }

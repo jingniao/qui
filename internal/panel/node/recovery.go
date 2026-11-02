@@ -116,6 +116,25 @@ SELECT node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,r
 ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,port_range_start=excluded.port_range_start,port_range_end=excluded.port_range_end,last_alert_day=max(node_meta.last_alert_day,excluded.last_alert_day)`); err != nil {
 		return err
 	}
+	// Machine traffic usage and cursors are current data: they follow the frozen
+	// running database, never the chosen snapshot, so a restore neither loses
+	// today's usage nor counts the same bytes twice. A source that predates 0126
+	// leaves the migrated candidate's archived rows untouched.
+	var machineTables int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name IN ('node_machine_traffic_settings','node_machine_traffic_daily','node_machine_traffic_cursors')").Scan(&machineTables); err != nil {
+		return err
+	}
+	if machineTables == 3 {
+		for _, item := range []struct{ table, columns string }{
+			{"node_machine_traffic_settings", "node_id,method,interface_name,allowance_bytes,reset_day"},
+			{"node_machine_traffic_daily", "node_id,interface_name,local_date,rx_bytes,tx_bytes"},
+			{"node_machine_traffic_cursors", "node_id,interface_name,boot_id,rx_bytes,tx_bytes,observed_at"},
+		} {
+			if err := db.CopyRecoveryTable(ctx, tx, item.table, item.columns); err != nil {
+				return err
+			}
+		}
+	}
 	// Preserve current tuning state even when the chosen archive predates it.
 	var tuningPresent int
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_tuning'").Scan(&tuningPresent); err != nil {

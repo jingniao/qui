@@ -43,6 +43,11 @@ type Totals struct {
 	PendingOperations     int64 `json:"pendingOperations"`
 	BackupFileOperations  int64 `json:"backupFileOperations"`
 	RunningBackupJobs     int64 `json:"runningBackupJobs"`
+
+	// Machine traffic is durable host accounting, separate from proxy traffic.
+	MachineTrafficSettings int64 `json:"machineTrafficSettings"`
+	MachineTrafficDays     int64 `json:"machineTrafficDays"`
+	MachineTrafficCursors  int64 `json:"machineTrafficCursors"`
 }
 type NodeRecord struct {
 	ID              string
@@ -78,7 +83,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	for _, item := range []struct {
 		table string
 		count *int64
-	}{{"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
+	}{{"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
 		var present int
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&present); err != nil {
 			return Inventory{}, err

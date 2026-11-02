@@ -51,3 +51,94 @@ func TestNICRatesUseElapsedClockAndCounterResetIsUnknown(t *testing.T) {
 		t.Fatal("reset counters fabricated a rate", h)
 	}
 }
+
+func procFixture(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for path, content := range files {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestHostBootIDIsCanonicalOrUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"canonical", "1c0b5a6e-7f6b-4f2f-9c3a-1b2c3d4e5f60\n", "1c0b5a6e-7f6b-4f2f-9c3a-1b2c3d4e5f60"},
+		{"no groups", "1c0b5a6e7f6b4f2f9c3a1b2c3d4e5f60\n", ""},
+		{"not hex", "zzzzzzzz-7f6b-4f2f-9c3a-1b2c3d4e5f60\n", ""},
+		{"too short", "1c0b5a6e-7f6b-4f2f-9c3a-1b2c3d4e5f6\n", ""},
+		{"empty", "\n", ""},
+	} {
+		h := &pb.Heartbeat{}
+		readHost(procFixture(t, map[string]string{"sys/kernel/random/boot_id": tc.content}), h)
+		if h.GetBootId() != tc.want || (h.BootId != nil) != (tc.want != "") {
+			t.Fatalf("%s: %q", tc.name, h.GetBootId())
+		}
+	}
+	h := &pb.Heartbeat{}
+	readHost(t.TempDir(), h)
+	if h.BootId != nil {
+		t.Fatal("a missing boot id was fabricated", h.GetBootId())
+	}
+}
+
+func TestHostDefaultRouteInterfaceHeuristic(t *testing.T) {
+	header := "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+	row := func(name, destination, gateway, flags, metric, mask string) string {
+		return name + "\t" + destination + "\t" + gateway + "\t" + flags + "\t0\t0\t" + metric + "\t" + mask + "\t0\t0\t0\n"
+	}
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"smallest metric", header + row("eth1", "00000000", "0102A8C0", "0003", "300", "00000000") + row("eth0", "00000000", "0102A8C0", "0003", "100", "00000000"), "eth0"},
+		{"name breaks the metric tie", header + row("ens18", "00000000", "0102A8C0", "0003", "100", "00000000") + row("eth0", "00000000", "0102A8C0", "0003", "100", "00000000"), "ens18"},
+		{"zero gateway is a default route", header + row("eth0", "00000000", "00000000", "0003", "100", "00000000"), "eth0"},
+		{"subnet route is not a default", header + row("eth0", "0000A8C0", "0102A8C0", "0003", "100", "00FFFFFF"), ""},
+		{"masked default is not a default", header + row("eth0", "00000000", "0102A8C0", "0003", "100", "00FFFFFF"), ""},
+		{"missing rtf_up", header + row("eth0", "00000000", "0102A8C0", "0002", "100", "00000000"), ""},
+		{"rtf_reject", header + row("eth0", "00000000", "0102A8C0", "0203", "100", "00000000"), ""},
+		{"loopback is never selected", header + row("lo", "00000000", "00000000", "0003", "0", "00000000"), ""},
+		{"malformed flags", header + row("eth0", "00000000", "0102A8C0", "zzzz", "100", "00000000"), ""},
+		{"malformed metric", header + row("eth0", "00000000", "0102A8C0", "0003", "one", "00000000"), ""},
+		{"short row", header + "eth0\t00000000\t0003\n", ""},
+		{"no ipv4 route", header, ""},
+		{"empty file", "", ""},
+	} {
+		got, ok := defaultRouteInterface(tc.content)
+		if got != tc.want || ok != (tc.want != "") {
+			t.Fatalf("%s: %q %v", tc.name, got, ok)
+		}
+	}
+}
+
+func TestHostIdentitySurvivesInterfaceReadFailure(t *testing.T) {
+	root := procFixture(t, map[string]string{
+		"sys/kernel/random/boot_id": "1c0b5a6e-7f6b-4f2f-9c3a-1b2c3d4e5f60\n",
+		"net/route":                 "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\neth0\t00000000\t0102A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n",
+	})
+	h := &pb.Heartbeat{}
+	readHost(root, h)
+	if h.GetBootId() != "1c0b5a6e-7f6b-4f2f-9c3a-1b2c3d4e5f60" || h.GetDefaultRouteInterface() != "eth0" {
+		t.Fatalf("a failed /proc/net/dev read erased the host identity: %v", h)
+	}
+	if len(h.Interfaces) != 0 {
+		t.Fatal("a missing /proc/net/dev fabricated interfaces", h.Interfaces)
+	}
+	h = &pb.Heartbeat{}
+	readHost(procFixture(t, map[string]string{"net/dev": "eth0: 100 0 0 0 0 0 0 0 200 0 0 0 0 0 0 0\n"}), h)
+	if h.BootId != nil || h.DefaultRouteInterface != nil || len(h.Interfaces) != 1 {
+		t.Fatalf("missing identity files fabricated values: %v", h)
+	}
+}

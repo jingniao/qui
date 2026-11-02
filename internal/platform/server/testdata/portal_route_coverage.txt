@@ -48,6 +48,7 @@ GET /api/v1/imported-proxies
 GET /api/v1/inbounds
 GET /api/v1/node-groups
 GET /api/v1/nodes
+GET /api/v1/nodes/machine-traffic
 GET /api/v1/nodes/{id}
 GET /api/v1/nodes/{id}/certificate-status
 GET /api/v1/nodes/{id}/cores/{component}/removals
@@ -56,6 +57,8 @@ GET /api/v1/nodes/{id}/enrollment-status
 GET /api/v1/nodes/{id}/health-checks
 GET /api/v1/nodes/{id}/latency
 GET /api/v1/nodes/{id}/latency-targets
+GET /api/v1/nodes/{id}/machine-traffic
+GET /api/v1/nodes/{id}/machine-traffic/settings
 GET /api/v1/nodes/{id}/meta
 GET /api/v1/nodes/{id}/metrics
 GET /api/v1/nodes/{id}/restart-core
@@ -184,6 +187,7 @@ PUT /api/v1/inbounds/{id}
 PUT /api/v1/node-groups/{id}
 PUT /api/v1/nodes/{id}
 PUT /api/v1/nodes/{id}/latency-targets
+PUT /api/v1/nodes/{id}/machine-traffic/settings
 PUT /api/v1/nodes/{id}/meta
 PUT /api/v1/nodes/{id}/tuning
 PUT /api/v1/outbound-groups/{id}

@@ -13,14 +13,32 @@ import (
 
 const metricColumns = "cpu_percent,memory_percent,disk_percent,memory_used_bytes,swap_used_bytes,disk_used_bytes,load1,process_count,tcp_connections,udp_sockets,active_connections,rx_bytes_per_second,tx_bytes_per_second"
 
+// heartbeatFreshness is the age at which a stored heartbeat stops counting as a
+// current measurement.
+const heartbeatFreshness = 45 * time.Second
+
+// freshObservationTime returns the Agent's own message time when it is valid and
+// inside the freshness window; a stale or invalid message is never sampled.
+func freshObservationTime(m *pb.AgentMessage, now time.Time) (time.Time, bool) {
+	if m.Timestamp == nil || m.Timestamp.CheckValid() != nil {
+		return time.Time{}, false
+	}
+	at := m.Timestamp.AsTime()
+	if at.Before(now.Add(-heartbeatFreshness)) || at.After(now.Add(heartbeatFreshness)) {
+		return time.Time{}, false
+	}
+	return at, true
+}
+
+// freshHeartbeat reports whether a stored heartbeat time still counts as a
+// current measurement.
+func freshHeartbeat(at, now time.Time) bool { return now.Sub(at) <= heartbeatFreshness }
+
 // recordMetricTx stores the last fresh heartbeat in a UTC minute. Replayed
 // sequence numbers never reach this function. Missing measurements stay NULL.
 func recordMetricTx(ctx context.Context, tx *sql.Tx, node string, m *pb.AgentMessage, now time.Time) error {
-	if m.Timestamp == nil || m.Timestamp.CheckValid() != nil {
-		return nil
-	}
-	at := m.Timestamp.AsTime()
-	if at.Before(now.Add(-45*time.Second)) || at.After(now.Add(45*time.Second)) {
+	at, fresh := freshObservationTime(m, now)
+	if !fresh {
 		return nil
 	}
 	h := m.GetHeartbeat()

@@ -19,7 +19,7 @@ export interface NodeView extends NodeNetworkSettings {
   deletedAt: string;
   coreSelectionBlocked?:CoreName[];
   capabilities: { multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
-  heartbeat: { cores?:CoreStatus[]; load1?: number; load5?: number; load15?: number; processCount?: string; tcpConnections?: string; udpSockets?: string; memoryUsedBytes?: string; swapUsedBytes?: string; diskUsedBytes?: string; tuningCurrent?: Record<string,string>; traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
+  heartbeat: { bootId?: string; defaultRouteInterface?: string; cores?:CoreStatus[]; load1?: number; load5?: number; load15?: number; processCount?: string; tcpConnections?: string; udpSockets?: string; memoryUsedBytes?: string; swapUsedBytes?: string; diskUsedBytes?: string; tuningCurrent?: Record<string,string>; traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
 }
 // The panel publishes the release version, the gRPC port and the digest of the
 // certificate trust anchor so the register dialog can build the one-command
@@ -93,6 +93,10 @@ requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<H
   save: (node: NodeSettingsInput) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled: node.enabled, publicIp: node.publicIp, allowSubscription: node.allowSubscription, maintenance: node.maintenance, outboundSourceIp: node.outboundSourceIp, outboundInterface: node.outboundInterface, hostSourceIpv4: node.hostSourceIpv4, hostSourceIpv6: node.hostSourceIpv6 }),
   revoke: (id: string) => request(`/nodes/${id}/revoke-certificate`, 'POST'),
   deletionPreview: (id: string) => request<DeletionPreview>(`/nodes/${encodeURIComponent(id)}/deletion-preview`),
+  machineTraffic: (id: string) => request<MachineTrafficSummary>(`/nodes/${encodeURIComponent(id)}/machine-traffic`),
+  machineTrafficBatch: () => request<MachineTrafficBatch>('/nodes/machine-traffic'),
+  machineTrafficSettings: (id: string) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`),
+  saveMachineTrafficSettings: (id: string, input: MachineTrafficSettings) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`, 'PUT', input),
   deleteNode: (id: string) => request(`/nodes/${encodeURIComponent(id)}`, 'DELETE')
 };
 
@@ -110,6 +114,20 @@ export interface HostInfo { cpuModel?:string; cpuCores?:number; architecture?:st
 export interface NodeMetricPoint { at:string; cpuPercent:number|null; memoryPercent:number|null; diskPercent:number|null; memoryUsedBytes:number|null; swapUsedBytes:number|null; diskUsedBytes:number|null; load1:number|null; processCount:number|null; tcpConnections:number|null; udpSockets:number|null; activeConnections:number|null; rxBytesPerSecond:number|null; txBytesPerSecond:number|null; samples:number; }
 export interface NodeMetricsResponse { intervalSeconds:number; sampleSeconds:60; points:NodeMetricPoint[]; }
 export interface NodeTuningInput { settings:Record<string,string>; clear:boolean; confirmNodeId:string; }
+// Machine traffic of one server: durable daily rows of one selected interface,
+// bucketed in the panel zone. Byte totals are decimal strings so an int64 never
+// passes through a rounded Number.
+export type MachineTrafficMethod = 'sum' | 'outbound' | 'max';
+export interface MachineTrafficSettings { method: MachineTrafficMethod; interfaceName: string; allowanceBytes: number | null; resetDay: number; }
+export interface MachineTrafficSummary {
+  nodeId: string; settings: MachineTrafficSettings;
+  // Empty/unknown values are null: no interface resolved, no period rows, no cursor.
+  interfaceName: string | null; timezone: string;
+  periodStart: string; periodEnd: string; nextResetAt: string;
+  rxBytes: string | null; txBytes: string | null; usedBytes: string | null;
+  status: 'measured' | 'stale' | 'unknown'; lastObservedAt: string | null;
+}
+export interface MachineTrafficBatch { items: MachineTrafficSummary[]; timezone: string; }
 export interface NodeTuning { supported:boolean; desired:Record<string,string>; requestId:string|null; status:'pending'|'applied'|'cleared'|'failed'|'unconfirmed'; result:{requestId?:string;status?:string;keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null; requestedAt:string|null; updatedAt:string|null; current:Record<string,string>; }
 
 export type CoreName = 'xray' | 'sing-box';

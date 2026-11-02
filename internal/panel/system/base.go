@@ -90,6 +90,15 @@ func readBase(ctx context.Context, tx *sql.Tx) (BaseSettings, error) {
 	}
 	return settings, nil
 }
+
+// ReadTimezoneTx returns the explicit panel time zone inside the caller's
+// transaction. Modules that must not import this package receive it as a
+// function value at composition time.
+func (r *Repository) ReadTimezoneTx(ctx context.Context, tx *sql.Tx) (string, error) {
+	settings, err := readBase(ctx, tx)
+	return settings.Timezone, err
+}
+
 func (r *Repository) ReadBase(ctx context.Context) (BaseSettings, error) {
 	tx, err := r.reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

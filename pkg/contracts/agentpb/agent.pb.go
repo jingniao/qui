@@ -1413,8 +1413,12 @@ type Heartbeat struct {
 	DiskUsedBytes               *uint64                `protobuf:"varint,31,opt,name=disk_used_bytes,json=diskUsedBytes,proto3,oneof" json:"disk_used_bytes,omitempty"`
 	TuningCurrent               map[string]string      `protobuf:"bytes,32,rep,name=tuning_current,json=tuningCurrent,proto3" json:"tuning_current,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Cores                       []*CoreStatus          `protobuf:"bytes,33,rep,name=cores,proto3" json:"cores,omitempty"`
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	// Host identity and routing facts for machine traffic accounting. Both are
+	// independent measurements: a failed read omits only its own field.
+	BootId                *string `protobuf:"bytes,34,opt,name=boot_id,json=bootId,proto3,oneof" json:"boot_id,omitempty"`
+	DefaultRouteInterface *string `protobuf:"bytes,35,opt,name=default_route_interface,json=defaultRouteInterface,proto3,oneof" json:"default_route_interface,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *Heartbeat) Reset() {
@@ -1676,6 +1680,20 @@ func (x *Heartbeat) GetCores() []*CoreStatus {
 		return x.Cores
 	}
 	return nil
+}
+
+func (x *Heartbeat) GetBootId() string {
+	if x != nil && x.BootId != nil {
+		return *x.BootId
+	}
+	return ""
+}
+
+func (x *Heartbeat) GetDefaultRouteInterface() string {
+	if x != nil && x.DefaultRouteInterface != nil {
+		return *x.DefaultRouteInterface
+	}
+	return ""
 }
 
 type InterfaceCounters struct {
@@ -5281,7 +5299,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x12memory_total_bytes\x18\x05 \x01(\x04R\x10memoryTotalBytes\x12(\n" +
 	"\x10swap_total_bytes\x18\x06 \x01(\x04R\x0eswapTotalBytes\x12(\n" +
 	"\x10disk_total_bytes\x18\a \x01(\x04R\x0ediskTotalBytes\x12$\n" +
-	"\x0eos_pretty_name\x18\b \x01(\tR\fosPrettyName\"\xb0\x10\n" +
+	"\x0eos_pretty_name\x18\b \x01(\tR\fosPrettyName\"\xb3\x11\n" +
 	"\tHeartbeat\x12$\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01H\x00R\n" +
 	"cpuPercent\x88\x01\x01\x12*\n" +
@@ -5322,7 +5340,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fswap_used_bytes\x18\x1e \x01(\x04H\x0fR\rswapUsedBytes\x88\x01\x01\x12+\n" +
 	"\x0fdisk_used_bytes\x18\x1f \x01(\x04H\x10R\rdiskUsedBytes\x88\x01\x01\x12Z\n" +
 	"\x0etuning_current\x18  \x03(\v23.proxycontrol.agent.v1.Heartbeat.TuningCurrentEntryR\rtuningCurrent\x127\n" +
-	"\x05cores\x18! \x03(\v2!.proxycontrol.agent.v1.CoreStatusR\x05cores\x1a@\n" +
+	"\x05cores\x18! \x03(\v2!.proxycontrol.agent.v1.CoreStatusR\x05cores\x12\x1c\n" +
+	"\aboot_id\x18\" \x01(\tH\x11R\x06bootId\x88\x01\x01\x12;\n" +
+	"\x17default_route_interface\x18# \x01(\tH\x12R\x15defaultRouteInterface\x88\x01\x01\x1a@\n" +
 	"\x12TuningCurrentEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x0e\n" +
@@ -5342,7 +5362,10 @@ const file_agent_proto_rawDesc = "" +
 	"\f_udp_socketsB\x14\n" +
 	"\x12_memory_used_bytesB\x12\n" +
 	"\x10_swap_used_bytesB\x12\n" +
-	"\x10_disk_used_bytes\"\xac\x02\n" +
+	"\x10_disk_used_bytesB\n" +
+	"\n" +
+	"\b_boot_idB\x1a\n" +
+	"\x18_default_route_interface\"\xac\x02\n" +
 	"\x11InterfaceCounters\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
 	"\rreceive_bytes\x18\x02 \x01(\x04R\freceiveBytes\x12%\n" +

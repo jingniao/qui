@@ -376,6 +376,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateMetricsTuning(ctx, database); err != nil {
 		return err
 	}
+	if err := validateMachineTraffic(ctx, database); err != nil {
+		return err
+	}
 	if err := validateLatency(ctx, database); err != nil {
 		return err
 	}

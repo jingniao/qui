@@ -87,6 +87,10 @@ message Heartbeat {
   optional uint64 disk_used_bytes = 31;
   map<string,string> tuning_current = 32;
   repeated CoreStatus cores = 33;
+  // Host identity and routing facts for machine traffic accounting. Both are
+  // independent measurements: a failed read omits only its own field.
+  optional string boot_id = 34;
+  optional string default_route_interface = 35;
 }
 message InterfaceCounters {
   string name = 1;

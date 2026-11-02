@@ -44,6 +44,10 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.Handle("GET /api/v1/nodes/machine-traffic", h.Auth.Require(http.HandlerFunc(h.machineTrafficBatch), false))
+	mux.Handle("GET /api/v1/nodes/{id}/machine-traffic", h.Auth.Require(http.HandlerFunc(h.machineTraffic), false))
+	mux.Handle("GET /api/v1/nodes/{id}/machine-traffic/settings", h.Auth.Require(http.HandlerFunc(h.machineTrafficSettings), false))
+	mux.Handle("PUT /api/v1/nodes/{id}/machine-traffic/settings", h.Auth.Require(http.HandlerFunc(h.putMachineTrafficSettings), true))
 	mux.Handle("GET /api/v1/nodes/{id}/metrics", h.Auth.Require(http.HandlerFunc(h.metrics), false))
 	mux.Handle("GET /api/v1/nodes/{id}/tuning", h.Auth.Require(http.HandlerFunc(h.tuning), false))
 	mux.Handle("PUT /api/v1/nodes/{id}/tuning", h.Auth.Require(http.HandlerFunc(h.tuning), true))

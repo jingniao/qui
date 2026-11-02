@@ -183,6 +183,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	mux := http.NewServeMux()
 	s.httpMux = mux
 	systemRepository := &system.Repository{Database: database, Reader: s.readPool}
+	// Machine traffic keeps its days in the panel zone, read inside the same
+	// transaction as the heartbeat; the node module never imports system.
+	nodeRepository.Timezone = systemRepository.ReadTimezoneTx
 	// One format registry per process: the subscription handler renders through it,
 	// the runtime policy validates the stored default against it, and it must be in
 	// place before the startup read below.

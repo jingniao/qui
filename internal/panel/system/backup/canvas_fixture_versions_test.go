@@ -9,6 +9,21 @@ import (
 // migration files and real databases are never changed by this helper.
 func rewindPostK4Fixture(t *testing.T, database *sql.DB) {
 	t.Helper()
+	// Machine traffic arrived after K4, so a fixture rewound to K4 cannot keep it.
+	var machine int
+	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0126_node_machine_traffic.sql'").Scan(&machine); err != nil {
+		t.Fatal(err)
+	}
+	if machine == 1 {
+		for _, query := range []string{
+			"DROP TABLE node_machine_traffic_settings", "DROP TABLE node_machine_traffic_daily", "DROP TABLE node_machine_traffic_cursors",
+			"DELETE FROM schema_migrations WHERE version='0126_node_machine_traffic.sql'",
+		} {
+			if _, err := database.Exec(query); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0125_multi_core_panel.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

@@ -36,6 +36,9 @@ type Repository struct {
 	CertificateAudit interface {
 		RecordNodeCertificate(context.Context, *sql.Tx, string, string) error
 	}
+	// Timezone reads the explicit panel zone inside a caller's transaction. It
+	// is injected at composition because this package must not import system.
+	Timezone func(context.Context, *sql.Tx) (string, error)
 }
 type Node struct {
 	CoreSelectionBlocked []string         `json:"coreSelectionBlocked"`
@@ -243,6 +246,7 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 	if message.Sequence != last+1 {
 		return 0, ErrSequence
 	}
+	now := time.Now().UTC()
 	expected := last
 	if heartbeat := message.GetHeartbeat(); heartbeat != nil {
 		data, err := protojson.Marshal(heartbeat)
@@ -256,7 +260,10 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 		if err := sequenceRowsChanged(tx.ExecContext(ctx, "UPDATE nodes SET status=?,last_heartbeat=?,heartbeat_json=?,public_ip=CASE WHEN ?<>'' THEN ? ELSE public_ip END,last_sequence=? WHERE id=? AND enabled=1 AND last_sequence=?", status, timestamp(time.Now()), string(data), heartbeat.PublicIp, heartbeat.PublicIp, message.Sequence, id, last)); err != nil {
 			return 0, err
 		}
-		if err := recordMetricTx(ctx, tx, id, message, time.Now().UTC()); err != nil {
+		if err := recordMetricTx(ctx, tx, id, message, now); err != nil {
+			return 0, err
+		}
+		if err := r.recordMachineTrafficTx(ctx, tx, id, message, now); err != nil {
 			return 0, err
 		}
 		expected = message.Sequence
@@ -343,7 +350,7 @@ func scan(row scanner) (Node, error) {
 	}
 	if n.Status == "online" || n.Status == "degraded" {
 		when, err := time.Parse(time.RFC3339Nano, n.LastHeartbeat)
-		if err != nil || time.Since(when) > 45*time.Second {
+		if err != nil || !freshHeartbeat(when, time.Now()) {
 			n.Status = "offline"
 		}
 	}

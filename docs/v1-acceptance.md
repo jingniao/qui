@@ -1,4 +1,4 @@
-| AU6.1 | 通过（Xray）：两核 golden 与原生 `TestRealForward` CI 通过；受管节点 uk-node 上 TCP 转发 HTTPS 证书有效、UDP 转发 DNS 正常、无用户计费（§11 H7c）；Xray 节点总量不含转发字节（F11，限制） || AU1.5 | 未执行：浏览器走查（H1b）需 Owner 登录并共享标签页；API/静态证据不能替代点击 || A11.4 | 部分：rc.1、rc.2、rc.3 已作为预发布版发布并部署 rc.2；正式 v1.2.0 tag 与发布待 Owner 批准 || A11.3 | 未满足：F10（核心不健康原因未知）待 RC3 日志确定；F9 已修复待 H8 复验；arm64 不验收 || A11.2 | 部分：RC1、RC2 已在三台主机验收（§11），RC3（`e2ab3cb`，2026-11-01）待复验 F8–F10、H4 崩溃与重启演练和 H8 全新安装 || A11.1 | 通过（amd64）：cores + check 在 release/v1.2.0 持续通过，最新 `2f68f86`（运行 41298676512，cores 一次重跑后通过，两个偶发测试见验收发现）；本地 Linux 测试机 111 个原生核心测试与 `-race` 通过；arm64 不在 v1.2.0 范围（Owner 2026-10-31） || A7.2 | 通过：v1.2.0-rc.1（2026-11-01）面板升级、组合主机先面板后 Agent、1.0.9 Agent 兼容、发布与回滚均通过（§11 H1–H5）；L4 已解决 |# V1 验收矩阵
+# V1 验收矩阵
 
 更新时间：2026-10-26（v1.0.8 发布与三台主机升级，9.19；此前为 v1.0.8 发布前复验：核心更新结果重发与入站启用意图两项修复及五项回归，9.18（`1663e4a`）；此前为 v1.0.7 发布、三台主机升级与四项修复的实机复测，9.16；其后为 v1.0.8 发布前验收与五项实机回归，9.17（`7b99d8e`、`8608678`）；此前为代码审查报告五个问题的核实与修复，9.15；此前为 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
@@ -1225,7 +1225,7 @@
 | AU4.1 | 本地证据：`TestTCPProbeAddressPolicyAndLimits`、`TestTCPProbeOwnerLimitsRetentionAndOldAgent`、`TestTCPProbeFixedOperationOverAuthenticatedStream`；特殊用途 IP 拒绝含审查修复 |
 | AU5.1 | 本地证据：U5 SSRF/逐跳解析固定 IP、大小/时间边界、parser fuzz seeds、失败来源/取消与缓存读取测试；未运行额外长时 fuzz campaign |
 | AU5.2 | CI 通过：CI 运行 41180456701（`0628a5b`） cores 作业全量实核步骤运行 `TestMihomoAcceptsClientDialerProxyChain`（L6 的原生检查部分） |
-| AU6.1 | 部分：两核 `TestForwardGolden` 与 `TestForwardCanvasPublishCapabilityAndIdentity` 本地证据；原生 check/TCP/UDP `TestRealForward` 在 CI 运行 41180456701（`0628a5b`） 的 “Part I forward” 步骤通过；受管节点转发待实机（L10） |
+| AU6.1 | 通过（Xray）：两核 golden 与原生 `TestRealForward` CI 通过；受管节点 uk-node 上 TCP 转发 HTTPS 证书有效、UDP 转发 DNS 正常、无用户计费（§11 H7c）；Xray 节点总量不含转发字节（F11，限制） |
 | AU7.1 | CI 通过：`TestRuleProviderEndpoint` 本地 Token/403/classical 文本证据；mihomo 原生接受与 A3.2 同在 CI 运行 41180456701（`0628a5b`） cores 作业通过 |
 | AU8.1 | 本地证据：`TestTrafficResetCalendarFakeClock`、`TestTrafficResetDueTimezoneIdempotentAndDisabled`、`TestCycleSchedulerReactivatesThroughAutomaticRevision`，短月/闰年/时区/清零再启用 |
 

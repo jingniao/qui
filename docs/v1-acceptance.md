@@ -1257,3 +1257,15 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 | H9 | RC 与发布 | rc.1–rc.4 预发布；rc.4 三台主机通过、F10 复验通过（conntrack 满 14 次丢包，0 次核心重启）；v1.2.0 于 2026-11-01 发布并部署到三台主机 |
 
 发现：F1–F7（RC1）、F8–F11（RC2）、F12–F13（浏览器走查）；全部已修复或按决定记为限制（F11），F8–F10 在 rc.3/rc.4 实机复验通过。v1.2.0 于 2026-11-01 发布（tag 指向 `8f6406e`，与 rc.4 同一 commit）并部署到三台主机。限制：L8（按方案 1 标注）、L9、L10、F11；只验收 amd64。
+
+## 12. v1.3.0 验收（进行中）
+
+状态：P2（F11，Xray 端口转发字节计入节点总量）已实现，**待门禁**。下列本地项已在实现分支上通过；`P2-native` 需要 Linux 测试机上的官方 amd64 Xray，未在此处运行。设计依据见[v1.3 设计（T1/P2）](v1.3-design-t1-p2.md)第 2 节。
+
+| 项 | 证据 | 状态 |
+| --- | --- | --- |
+| P2-render | `internal/agent/core/xray`：`TestForwardStatsAllowlistRendersOnlyForwardInbounds`（只收启用转发 tag、排序去重、禁用转发不入选、不产生账户）、`TestForwardStatsAllowlistStaysEmptyWithoutForwards`（`statsInboundUplink/Downlink` 保持开启、WireGuard 出站统计不变）、`TestForwardGolden` 新增的统计断言（golden JSON 未变） | 本地通过 |
+| P2-statistics | `stats_forward_reader_test.go` 的假 StatsService：仅账户、仅转发、账户+转发、懒计数、源覆盖计数；断言查询顺序 `user>>>` / `outbound>>>_access` / `inbound>>>`，夹具拒绝任何 `Reset_=true` | 本地通过 |
+| P2-no-double-count | 同一夹具：用户入站与管理 API 的 `inbound>>>` 统计被忽略，多个转发只计一次；重复、负数、单边、未知方向、溢出、查询错误与源消失都失败且不落盘；`internal/agent/core/node_traffic_test.go` 覆盖账户批在前、独立节点批、仅节点字节、溢出先于写入与节点批失败重试 | 本地通过 |
+| P2-quota-isolation | `internal/panel/access/node_traffic_test.go` 的 `TestNodeTrafficForwardIncrementCountsNodeTotalOnce`：账户+节点批次只按节点总量计一次、重复批次幂等、两个核心 epoch 独立、用户额度只随账户增量变化 | 本地通过 |
+| P2-native | `TestRealForwardNodeCountersCountForwardedBytes`（`XRAY_BINARY`）：真实 Xray 上发送确定性 TCP/UDP 负载并轮询到正的节点字节，断言无用户计数器、重复读取累积、混合用户/转发不重复计、重启换 `.node` epoch | 待门禁 |

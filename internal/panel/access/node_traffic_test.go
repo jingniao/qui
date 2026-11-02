@@ -2,7 +2,9 @@ package access
 
 import (
 	"context"
+	"path/filepath"
 	"proxycontrol/internal/panel/user"
+	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/traffic"
 	"testing"
 	"time"
@@ -64,5 +66,67 @@ func TestNodeTrafficIndependentEpochsReceiptsAndNoQuotaDebit(t *testing.T) {
 	b.Counters[0].CoreEpoch = "invalid"
 	if err := r.IngestTraffic(ctx, b, s.Now()); err == nil {
 		t.Fatal("invalid node epoch accepted")
+	}
+}
+
+// A forward increment arrives as an account batch plus a node batch in the same
+// epoch: the node total is counted once, repeats are idempotent, a second core
+// epoch stays independent, and quotas move only by the account delta.
+func TestNodeTrafficForwardIncrementCountsNodeTotalOnce(t *testing.T) {
+	r, s, record := fixture(t)
+	ctx := context.Background()
+	users := &user.Repository{Database: r.Database}
+	key, err := vault.Open(filepath.Join(t.TempDir(), "configuration.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	users.Vault = key
+	owner, err := users.Save(ctx, "", user.Input{Username: "forward-user", AllowedProtocols: []string{"vless"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := users.AccessIdentity(ctx, owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := s.Now()
+	account := traffic.Counter{CoreEpoch: "process", Revision: 1, CredentialID: "credential", UserID: owner.ID, DeviceID: identity.ID, Protocol: "vless", ObservedAt: now.Add(-time.Minute), UploadBytes: 10, DownloadBytes: 20}
+	accountBatch := traffic.Batch{ID: "account", NodeID: record.NodeID, Counters: []traffic.Counter{account}}
+	if err := r.IngestTraffic(ctx, accountBatch, now); err != nil {
+		t.Fatal(err)
+	}
+	// The Xray node counter is the account sum plus the forwarded bytes.
+	node := traffic.Counter{Kind: "node", Core: "xray", CoreEpoch: "process.node", Revision: 1, CredentialID: "node", UserID: "node", DeviceID: "node", ObservedAt: account.ObservedAt, UploadBytes: 15, DownloadBytes: 45}
+	nodeBatch := traffic.Batch{ID: "node", NodeID: record.NodeID, Counters: []traffic.Counter{node}}
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := r.IngestTraffic(ctx, nodeBatch, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	window := Filter{NodeID: record.NodeID, From: now.Add(-time.Hour), To: now}
+	summary, err := r.AccountSummary(ctx, window)
+	if err != nil || summary.UploadBytes != 15 || summary.DownloadBytes != 45 || summary.Observations != 1 {
+		t.Fatal("forward increment was not counted exactly once", summary, err)
+	}
+	peer := node
+	peer.Core, peer.CoreEpoch, peer.UploadBytes, peer.DownloadBytes = "sing-box", "peer.node", 100, 200
+	if err := r.IngestTraffic(ctx, traffic.Batch{ID: "peer", NodeID: record.NodeID, Counters: []traffic.Counter{peer}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if summary, err := r.AccountSummary(ctx, window); err != nil || summary.UploadBytes != 115 || summary.DownloadBytes != 245 {
+		t.Fatal("cores shared one node cursor", summary, err)
+	}
+	if err := users.ApplyTraffic(ctx, accountBatch); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.ApplyTraffic(ctx, nodeBatch); err != nil {
+		t.Fatal("node counter reached quotas", err)
+	}
+	if owner, err := users.Get(ctx, owner.ID); err != nil || owner.UsedTraffic != 30 {
+		t.Fatal("forwarded bytes were charged to the user", owner.UsedTraffic, err)
+	}
+	var cursors int
+	if err := r.Database.QueryRow("SELECT count(*) FROM user_traffic_cursors").Scan(&cursors); err != nil || cursors != 1 {
+		t.Fatal(cursors, err)
 	}
 }

@@ -41,6 +41,13 @@ export function forwardPool(forward: ForwardSettings | undefined): ForwardTarget
   if (!forward) return [];
   return forward.targets?.length ? forward.targets : [{ host: forward.host, port: forward.port }];
 }
+// A relay listener is the exit half of a GOST tunnel: the canvas generated it and
+// it carries no target, network or port of its own. The editor shows it read-only
+// apart from its name and state, and never validates the forward fields it cannot
+// have; only the entry half and plain forwards dial a target.
+export function relayMode(settings: ProtocolSettings | undefined): boolean {
+  return settings?.forward?.mode === 'relay';
+}
 
 export interface EditorState {
   form: InboundInput;
@@ -122,7 +129,7 @@ export function buildPayload(state: EditorState): InboundInput {
   }
   const payload: InboundInput = { name: state.origin === 'list' ? f.name.trim() : f.name, nodeId: f.nodeId, protocol: p, listen: f.listen, port: f.port,
     enabled: f.enabled, subscriptionVisible: f.internalRelay ? false : f.subscriptionVisible,
-    internalRelay: f.internalRelay, defaultOutbound: f.defaultOutbound, allowedUserIds: f.allowedUserIds, settings };
+    internalRelay: f.internalRelay, defaultOutbound: f.core === 'gost' ? 'direct' : f.defaultOutbound, allowedUserIds: f.allowedUserIds, settings };
   // An empty core means "the node's current primary core" and is omitted from the
   // request, exactly like the Agent contract; a concrete core is sent explicitly.
   if (f.core) payload.core = f.core;
@@ -239,7 +246,7 @@ export function validateStep(step: number, state: EditorState, server: NodeView 
     if (!s.private_key_pem?.trim() && !state.original?.hasTlsKey && !f.internalRelay) return '请输入 TLS 私钥 PEM';
   }
   if (step === 4) {
-    if (f.protocol === 'forward' && s.forward) {
+    if (f.protocol === 'forward' && s.forward && !relayMode(s)) {
       const forward = s.forward;
       const pool = forward.targets?.length ? forward.targets : [{ host: forward.host, port: forward.port }];
       if (!forward.targets?.length && !forward.host.trim()) return '请输入目标主机';

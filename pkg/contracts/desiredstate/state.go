@@ -272,6 +272,16 @@ func validID(id string) bool {
 // upstream cores carry relay traffic over ordinary protocol outbounds, so no
 // state needs an envelope capability and no publication is refused for it.
 
+// directOutbound reports whether id names an enabled direct outbound.
+func (s State) directOutbound(id string) bool {
+	for _, outbound := range s.Outbounds {
+		if outbound.ID == id {
+			return outbound.Enabled && outbound.Protocol == "direct"
+		}
+	}
+	return false
+}
+
 func (s State) Validate() error {
 	if s.SchemaVersion != 1 {
 		return errors.New("unsupported DesiredState schema version")
@@ -382,6 +392,11 @@ func (s State) Validate() error {
 		// validation, so the panel, the renderer and the Agent cannot disagree.
 		if inbound.Core == CoreGost && inbound.Protocol != "forward" {
 			return errors.New("gost core requires a forward inbound")
+		}
+		// A GOST forward leaves through its own targets (or its relay hops), so its
+		// only valid default is the direct outbound.
+		if inbound.Core == CoreGost && inbound.Enabled && !s.directOutbound(inbound.DefaultOutbound) {
+			return errors.New("gost forward requires the direct default outbound")
 		}
 		// The GOST-only forward options are refused by any other core. An inbound
 		// that leaves its core empty follows the node's primary core, which this

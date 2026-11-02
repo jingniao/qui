@@ -123,6 +123,24 @@ func reviewSettings(record *reviewRecord, settings desiredstate.ProtocolSettings
 	if settings.QUIC != nil {
 		publicFields(record, "settings.quic.", settings.QUIC, "up_mbps", "down_mbps", "congestion_control", "udp_relay_mode")
 	}
+	// A port forward carries its target pool, its limits and, for a GOST tunnel,
+	// the mode of each half. The material is compared through hiddenField, so a
+	// rotation shows up as a change without disclosing the certificates.
+	if settings.Forward != nil {
+		publicFields(record, "settings.forward.", settings.Forward, "host", "port", "network", "targets", "strategy", "max_fails", "fail_timeout", "port_end", "bandwidth_in_bps", "bandwidth_out_bps", "max_connections", "mode")
+		if relay := settings.Forward.Relay; relay != nil {
+			hiddenField(record, "settings.forward.relay.certificate_pem", relay.CertificatePEM)
+			hiddenField(record, "settings.forward.relay.private_key_pem", relay.PrivateKeyPEM)
+			hiddenField(record, "settings.forward.relay.client_ca_pem", relay.ClientCAPEM)
+		}
+		for index, hop := range settings.Forward.Hops {
+			prefix := "settings.forward.gost_hops[" + strconv.Itoa(index) + "]."
+			publicFields(record, prefix, hop, "host", "port", "server_name")
+			hiddenField(record, prefix+"ca_cert_pem", hop.CACertPEM)
+			hiddenField(record, prefix+"client_cert_pem", hop.ClientCertPEM)
+			hiddenField(record, prefix+"client_key_pem", hop.ClientKeyPEM)
+		}
+	}
 	hiddenField(record, "settings.certificate_pem", settings.CertificatePEM)
 	hiddenField(record, "settings.private_key_pem", settings.PrivateKeyPEM)
 	hiddenField(record, "settings.trusted_ca_pem", settings.TrustedCAPEM)
@@ -159,7 +177,7 @@ func reviewState(state desiredstate.State) map[string]reviewRecord {
 	}
 	for _, value := range state.Inbounds {
 		record := add("inbounds", value.ID)
-		publicFields(record, "", value, "protocol", "listen", "port", "enabled", "credential_ids", "default_outbound", "subscription_visible")
+		publicFields(record, "", value, "protocol", "core", "listen", "port", "enabled", "credential_ids", "default_outbound", "subscription_visible")
 		reviewSettings(record, value.Settings)
 		save(record)
 	}

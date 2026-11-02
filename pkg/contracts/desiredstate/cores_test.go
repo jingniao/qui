@@ -96,3 +96,19 @@ func TestGostCoreKeepsForwardsAndRefusesOtherFeatures(t *testing.T) {
 
 // gostInt is the smallest way to write an explicitly configured optional integer.
 func gostInt(value int) *int { return &value }
+
+// A GOST forward leaves through its own targets; any default other than the
+// enabled direct outbound is refused before the Agent renders it.
+func TestGostForwardRequiresTheDirectDefault(t *testing.T) {
+	s := State{SchemaVersion: 1, Revision: 1, NodeID: "n", Logging: Logging{DomainOnly: true},
+		Inbounds:  []Inbound{{ID: "forward", Core: CoreGost, Protocol: "forward", Listen: "127.0.0.1", Port: 20000, Enabled: true, DefaultOutbound: "block", Settings: ProtocolSettings{Forward: &ForwardSettings{Host: "203.0.113.10", Port: 8443, Network: "tcp"}}}},
+		Outbounds: []Outbound{{ID: "direct", Protocol: "direct", Enabled: true}, {ID: "block", Protocol: "block", Enabled: true}},
+	}
+	if err := s.Validate(); err == nil {
+		t.Fatal("a GOST forward accepted the block default")
+	}
+	s.Inbounds[0].DefaultOutbound = "direct"
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

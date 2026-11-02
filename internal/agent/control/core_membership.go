@@ -241,7 +241,15 @@ func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreComm
 		if runtime == nil {
 			return errors.New("core_not_found")
 		}
-		if len(m.Names()) == 1 {
+		// GOST only serves forwards, so the last core that carries users can never
+		// be removed: the node keeps Xray or sing-box as its first (primary) core.
+		userCore := false
+		for _, name := range m.Names() {
+			if name != command.Component && core.CarriesUsers(name) {
+				userCore = true
+			}
+		}
+		if !userCore {
 			return errors.New("last_core")
 		}
 		if err = runtime.Close(); err != nil {
@@ -262,7 +270,7 @@ func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreComm
 		if inventory.Primary == command.Component {
 			inventory.PrimaryChangedRevision = command.Revision
 			for _, name := range m.Names() {
-				if name != command.Component {
+				if name != command.Component && core.CarriesUsers(name) {
 					inventory.Primary = name
 					break
 				}

@@ -44,10 +44,6 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	if a.Directory == "" {
 		return core.RenderedConfig{}, errors.New("gost adapter requires a runtime directory")
 	}
-	outbounds := map[string]desiredstate.Outbound{}
-	for _, outbound := range state.Outbounds {
-		outbounds[outbound.ID] = outbound
-	}
 	total := 0
 	for _, inbound := range state.Inbounds {
 		if inbound.Core != "" && inbound.Core != CoreName {
@@ -58,11 +54,6 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 		}
 		if inbound.Protocol != "forward" || inbound.Settings.Forward == nil {
 			return core.RenderedConfig{}, fmt.Errorf("gost inbound %s is not a forward", inbound.ID)
-		}
-		// A forward leaves through its own target, so the only outbound it may
-		// name is the implicit direct one. G3 adds the relay route.
-		if outbound, ok := outbounds[inbound.DefaultOutbound]; !ok || !outbound.Enabled || outbound.Protocol != "direct" {
-			return core.RenderedConfig{}, fmt.Errorf("gost forward %s requires an enabled direct default outbound", inbound.ID)
 		}
 		total += len(desiredstate.ListenPorts(inbound.Port, inbound.Settings)) * len(networkTypes(inbound.Settings.Forward.Network))
 		if inbound.Settings.Forward.RelayMode() {
@@ -84,6 +75,15 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 			continue
 		}
 		forward := inbound.Settings.Forward
+		// The entry half of a GOST tunnel is one chain per inbound: every service
+		// a port range expands to dials through that same chain.
+		chain, err := a.chainFor(inbound, forward)
+		if err != nil {
+			return core.RenderedConfig{}, err
+		}
+		if chain != nil {
+			config.Chains = append(config.Chains, *chain)
+		}
 		// Ports are expanded here: GOST has no range syntax in `addr`, so a range
 		// is one service per port, each with the whole pool and its own limits.
 		for _, port := range desiredstate.ListenPorts(inbound.Port, inbound.Settings) {
@@ -97,13 +97,6 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 				config.Services = append(config.Services, service)
 				rendered.HealthEndpoints = append(rendered.HealthEndpoints, joinHostPort(dialHost(inbound.Listen), port))
 				continue
-			}
-			chain, err := a.chainFor(inbound, forward)
-			if err != nil {
-				return core.RenderedConfig{}, err
-			}
-			if chain != nil {
-				config.Chains = append(config.Chains, *chain)
 			}
 			for _, network := range networkTypes(forward.Network) {
 				service := forwardService(inbound, port, network)
@@ -203,13 +196,19 @@ func (a *Adapter) Validate(ctx context.Context, configuration core.RenderedConfi
 	deadline, cancel := context.WithTimeout(ctx, validateDeadline)
 	defer cancel()
 	command := exec.CommandContext(deadline, a.Path, "-C", path, "-O", "json")
-	output := &boundedOutput{}
-	command.Stdout = output
-	command.Stderr = output
+	// GOST re-prints the whole configuration on stdout, so that stream needs a
+	// limit of its own; a fatal line stays on stderr in the small buffer.
+	printed := &boundedOutput{limit: validateOutputLimit}
+	diagnostics := &boundedOutput{limit: diagnosticOutputLimit}
+	command.Stdout = printed
+	command.Stderr = diagnostics
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("gost rejected the rendered configuration: %w: %s", err, output.reason())
+		return fmt.Errorf("gost rejected the rendered configuration: %w: %s", err, diagnostics.reason())
 	}
-	keys, err := decodeKeys(output.Bytes())
+	if printed.cut {
+		return fmt.Errorf("gost re-printed more than %d bytes of configuration", validateOutputLimit)
+	}
+	keys, err := decodeKeys(printed.Bytes())
 	if err != nil {
 		return err
 	}
@@ -220,20 +219,36 @@ func (a *Adapter) Validate(ctx context.Context, configuration core.RenderedConfi
 }
 
 // boundedOutput keeps the first part of a core's output. A fatal message is short;
-// the cap keeps a runaway core from filling the Agent's memory.
+// the cap keeps a runaway core from filling the Agent's memory, and `cut` reports
+// that the tail was dropped rather than silently truncating it.
 type boundedOutput struct {
-	data []byte
+	data  []byte
+	limit int
+	cut   bool
 }
 
-const boundedOutputLimit = 8 << 10
+const (
+	diagnosticOutputLimit = 8 << 10
+	// validateOutputLimit holds the JSON GOST re-prints for the largest
+	// configuration a node renders: maxServices services, each carrying a full
+	// pool of desiredstate.MaxForwardTargets targets whose host may use every
+	// byte an address can take (1024 × 32 × 253 ≈ 8.3 MB of addresses alone,
+	// before the JSON around them), so 16 MiB covers it and a valid
+	// configuration is never reported as truncated.
+	validateOutputLimit = 16 << 20
+)
 
 func (o *boundedOutput) Write(data []byte) (int, error) {
-	if room := boundedOutputLimit - len(o.data); room > 0 {
-		if len(data) > room {
-			o.data = append(o.data, data[:room]...)
-		} else {
-			o.data = append(o.data, data...)
-		}
+	room := o.limit - len(o.data)
+	if room <= 0 {
+		o.cut = o.cut || len(data) > 0
+		return len(data), nil
+	}
+	if len(data) > room {
+		o.data = append(o.data, data[:room]...)
+		o.cut = true
+	} else {
+		o.data = append(o.data, data...)
 	}
 	return len(data), nil
 }

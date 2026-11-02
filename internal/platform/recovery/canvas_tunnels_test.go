@@ -12,6 +12,54 @@ import (
 	"testing"
 )
 
+// A v1.2.0 archive ends at 0124 and therefore has canvas tunnels without the
+// 0128 credential column. It must validate and migrate like any other archive:
+// the sealed material is simply absent, not a reason to refuse the restore.
+func TestPre0128CanvasArchiveWithSharedTunnelValidatesAndMigrates(t *testing.T) {
+	ctx := context.Background()
+	var schemeID, tunnelID string
+	f := listeningFixture(t, func(f *fixture) {
+		port := 8443
+		layout := proxy.CanvasLayout{Instances: []proxy.CanvasInstance{{InstanceID: "a", Ref: "server:" + f.node.ID, Role: "entry"}, {InstanceID: "b", Ref: "server:" + f.node.ID, Role: "exit"}}, Connections: []proxy.CanvasConnection{{ID: "relay", Source: "a", Target: "b", Type: "tunnel", TunnelProtocol: "tls", TunnelPort: &port}}}
+		repository := &proxy.Repository{Database: f.source.Database, Vault: f.source.ConfigurationVault}
+		scheme, err := repository.SaveCanvasScheme(ctx, "", proxy.CanvasSchemeInput{Name: "pre-0128 shared tunnel", Execution: "server", Layout: layout})
+		if err != nil {
+			t.Fatal(err)
+		}
+		schemeID, tunnelID = scheme.ID, scheme.Layout.Connections[0].TunnelID
+		if tunnelID == "" {
+			t.Fatalf("shared tunnel was not recorded: %+v", scheme.Layout)
+		}
+		rewindPostK4Fixture(t, f.source.Database)
+	})
+	// The archived snapshot stays at the v1.2.0 schema; the currently running
+	// panel has upgraded its own database before starting an offline restore.
+	if err := db.Migrate(ctx, f.source.Database, migrations.Files); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	repository := &proxy.Repository{Database: restored}
+	scheme, err := repository.CanvasScheme(ctx, schemeID)
+	if err != nil || len(scheme.Layout.Connections) != 1 || scheme.Layout.Connections[0].TunnelID != tunnelID {
+		t.Fatal(scheme, err)
+	}
+	var sealed []byte
+	if err := restored.QueryRow("SELECT gost_material FROM canvas_tunnels WHERE id=?", tunnelID).Scan(&sealed); err != nil || sealed != nil {
+		t.Fatalf("migrated tunnel credentials: %v %v", sealed, err)
+	}
+	if err := proxy.ValidateCanvasTunnels(ctx, restored); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPre0124CanvasArchiveMigratesAndAdoptsExactPublication(t *testing.T) {
 	ctx := context.Background()
 	var objectID = "legacy-forward"

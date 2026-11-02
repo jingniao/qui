@@ -42,7 +42,16 @@ func (m *MultiRuntime) RemoveIdle(name string) error {
 		}
 	}
 	if m.primary == name {
+		// GOST only serves forwards: the primary is the core that serves inbounds
+		// without an explicit core, so it is never handed to GOST. Removing the
+		// last core that carries users is refused before this point.
 		m.primary = m.names[0]
+		for _, remaining := range m.names {
+			if CarriesUsers(remaining) {
+				m.primary = remaining
+				break
+			}
+		}
 	}
 	return nil
 }

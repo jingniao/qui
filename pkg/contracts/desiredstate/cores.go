@@ -139,6 +139,11 @@ func KnownCore(name string) bool {
 	return name == CoreXray || name == CoreSingBox || name == CoreGost
 }
 
+// CarriesUsers reports whether a core kind serves user access. GOST only
+// terminates forward inbounds and relays, so a node always keeps Xray or sing-box
+// as its first (primary) core and that core can never be the last one removed.
+func CarriesUsers(name string) bool { return name != CoreGost }
+
 func coreTarget(id string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(id, "group:"), "chain:")
 }

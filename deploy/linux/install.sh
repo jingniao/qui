@@ -79,6 +79,9 @@ while (($#)); do
         --core)
           [[ $2 == xray || $2 == sing-box || $2 == gost ]] || fail 'Core must be xray, sing-box or gost.'
           [[ " ${cores[*]} " != *" $2 "* ]] || fail 'Duplicate --core.'
+          # GOST only serves port forwards, so it can never be the first (primary)
+          # core: a node always keeps Xray or sing-box there.
+          [[ ${#cores[@]} != 0 || $2 != gost ]] || fail 'GOST cannot be the first core; list --core xray or --core sing-box first.'
           core=$2; cores+=("$core");;
         --core-version) [[ -n $core ]] || fail 'Put --core before its options.'; core_versions[$core]=$2;;
         --core-sha256) [[ -n $core ]] || fail 'Put --core before its options.'; core_digests[$core]=${2,,};;

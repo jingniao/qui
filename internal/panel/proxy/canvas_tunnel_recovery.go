@@ -40,10 +40,11 @@ func ValidateCanvasTunnelMaterial(ctx context.Context, database *sql.DB, configu
 	return rows.Err()
 }
 
-// ValidateCanvasTunnels is read-only and also accepts pre-0124 archives. The
-// recovery coordinator migrates and reconciles those archives before serving.
+// ValidateCanvasTunnels is read-only and also accepts pre-0124 and pre-0128
+// archives. The recovery coordinator migrates and reconciles those archives
+// before serving.
 func ValidateCanvasTunnels(ctx context.Context, database *sql.DB) error {
-	var applied, present int
+	var applied, present, material int
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0124_canvas_tunnels.sql'").Scan(&applied); err != nil {
 		return err
 	}
@@ -56,8 +57,12 @@ func ValidateCanvasTunnels(ctx context.Context, database *sql.DB) error {
 	if applied == 0 {
 		return nil
 	}
-	r := &Repository{Database: database}
-	rows, err := database.QueryContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels")
+	// An archive from before 0128 has tunnels but no sealed credential column.
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0128_gost_tunnels.sql'").Scan(&material); err != nil {
+		return err
+	}
+	r := &Repository{Database: database, archiveBeforeGostMaterial: material == 0}
+	rows, err := database.QueryContext(ctx, "SELECT "+r.tunnelProjection()+" FROM canvas_tunnels")
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,8 @@
 package gost
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -78,13 +80,15 @@ func (a *Adapter) chainFor(inbound desiredstate.Inbound, forward *desiredstate.F
 // writeMaterial stores one certificate set under its own directory and returns
 // the file names GOST reads. The files are 0600 and the directory 0700: the core
 // runs as the Agent's user and nothing else needs to read them. Material is keyed
-// by the inbound and the half that produced it, so a rollback to a retained
-// revision finds its own files instead of the newest ones.
+// by the inbound, the half that produced it and a digest of the material itself,
+// so a rollback to a retained revision finds exactly the files that revision was
+// rendered with instead of the newest ones.
 func (a *Adapter) writeMaterial(inboundID, half, certificate, key, ca string) (*TLS, error) {
 	if !safeComponent(inboundID) || !safeComponent(half) {
 		return nil, errors.New("gost tunnel material needs a safe object name")
 	}
-	directory := filepath.Join(a.Directory, materialDir, inboundID, half)
+	digest := sha256.Sum256([]byte(certificate + "\x00" + key + "\x00" + ca))
+	directory := filepath.Join(a.Directory, materialDir, inboundID, half+"-"+hex.EncodeToString(digest[:8]))
 	if err := os.MkdirAll(directory, materialDirMode); err != nil {
 		return nil, err
 	}

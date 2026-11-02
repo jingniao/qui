@@ -149,5 +149,8 @@ func (i Inventory) Merge(c config.Agent) ([]Core, error) {
 			return nil, errors.New("inventory primary is not enabled")
 		}
 	}
+	if !core.CarriesUsers(result[0].Name) {
+		return nil, errGostPrimary
+	}
 	return result, nil
 }

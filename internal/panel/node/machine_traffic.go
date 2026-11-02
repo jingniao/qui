@@ -126,11 +126,23 @@ type MachineTrafficSummary struct {
 	LastObservedAt *string                `json:"lastObservedAt"`
 }
 
-// machineAnchor returns local midnight of the requested reset day in one month,
+// localDayStart returns the first instant of a local calendar day. Where a DST
+// change skips midnight (e.g. America/Santiago), time.Date normalizes 00:00 back
+// into the previous day; the day then starts at the first hour that exists.
+func localDayStart(year int, month time.Month, day int, loc *time.Location) time.Time {
+	noon := time.Date(year, month, day, 12, 0, 0, 0, loc)
+	start := time.Date(noon.Year(), noon.Month(), noon.Day(), 0, 0, 0, 0, loc)
+	for start.Day() != noon.Day() {
+		start = start.Add(time.Hour)
+	}
+	return start
+}
+
+// machineAnchor returns the start of the requested reset day in one month,
 // clamped to that month's last day.
 func machineAnchor(year int, month time.Month, day int, loc *time.Location) time.Time {
-	last := time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
-	return time.Date(year, month, min(day, last), 0, 0, 0, 0, loc)
+	last := time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
+	return localDayStart(year, month, min(day, last), loc)
 }
 
 // machinePeriod returns the half-open billing period containing now and its
@@ -160,7 +172,7 @@ func machineDayShares(delta uint64, from, to time.Time, loc *time.Location) map[
 	for at := from; ; {
 		local := at.In(loc)
 		day := local.Format(MachineDayLayout)
-		next := time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, loc)
+		next := localDayStart(local.Year(), local.Month(), local.Day()+1, loc)
 		if !next.Before(to) {
 			shares[day] += remaining
 			return shares

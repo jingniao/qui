@@ -91,8 +91,8 @@ async function toggle(item: Inbound) {
     const latest = (await choices((p, s) => proxyAPI.inbounds(props.node.id, p, s))).find(i => i.id === item.id);
     if (!latest) throw new Error('节点已删除，请重新读取');
     // The API rejects unknown fields, so send only the input fields of the record.
-    const { name, nodeId, protocol, listen, port, subscriptionVisible, internalRelay, defaultOutbound, allowedUserIds, settings } = latest;
-    await proxyAPI.saveInbound(latest.id, { name, nodeId, protocol, listen, port, enabled: !latest.enabled, subscriptionVisible, internalRelay, defaultOutbound, allowedUserIds, settings });
+    const { name, nodeId, protocol, core, listen, port, subscriptionVisible, internalRelay, defaultOutbound, allowedUserIds, settings } = latest;
+    await proxyAPI.saveInbound(latest.id, { name, nodeId, protocol, core, listen, port, enabled: !latest.enabled, subscriptionVisible, internalRelay, defaultOutbound, allowedUserIds, settings });
     emit('saved');
   } catch (e) { error.value = (e as Error).message; }
   finally { busy.value = false; }

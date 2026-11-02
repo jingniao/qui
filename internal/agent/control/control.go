@@ -577,7 +577,16 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{NodeTrafficSupported: true, MultiCoreSupported: capabilities.Snapshot().GetMultiCoreSupported(), GostCoreSupported: gost.Supported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: capabilities.Snapshot().GetDeviceGateSupported(), BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
+	detected := capabilities.Snapshot()
+	// Device gating is node-level: the Hello flag is set when any enabled core
+	// gates, not only when the primary one does. A GOST primary still limits
+	// devices on its Xray or sing-box inbounds, and only the per-core flags of
+	// the capability report stay per core.
+	deviceGates := detected.GetDeviceGateSupported()
+	for _, core := range detected.GetCores() {
+		deviceGates = deviceGates || core.GetDeviceGateSupported()
+	}
+	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{NodeTrafficSupported: true, MultiCoreSupported: detected.GetMultiCoreSupported(), GostCoreSupported: gost.Supported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: deviceGates, BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
 		return err
 	}
 	welcome, err := receive()

@@ -353,6 +353,25 @@ func TestRenderRejectsUnsupportedStates(t *testing.T) {
 	}
 }
 
+// TestBoundedOutputReportsTruncation keeps a stream that outgrows its buffer from
+// being silently cut: the syntax gate compares the whole re-printed configuration,
+// so it has to know when it only saw the beginning.
+func TestBoundedOutputReportsTruncation(t *testing.T) {
+	output := &boundedOutput{limit: 4}
+	if _, err := output.Write([]byte("abc")); err != nil {
+		t.Fatal(err)
+	}
+	if output.cut {
+		t.Fatal("a stream inside its limit was reported as cut")
+	}
+	if _, err := output.Write([]byte("de")); err != nil {
+		t.Fatal(err)
+	}
+	if string(output.Bytes()) != "abcd" || !output.cut {
+		t.Fatalf("bounded output %q cut=%v", output.Bytes(), output.cut)
+	}
+}
+
 // TestRenderRequiresARuntimeDirectory keeps the metrics socket inside the node's
 // private runtime directory instead of rendering a relative path.
 func TestRenderRequiresARuntimeDirectory(t *testing.T) {

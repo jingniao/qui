@@ -425,6 +425,7 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 **安装、更新与移除**：面板“系统 → 核心版本 → 添加内核”选 GOST 会预填 3.3.2、固定 URL 与归档摘要，其它版本/摘要一律拒绝；排队还要求该 Agent 上报了 `Hello.gost_core_supported` 且平台是 linux/amd64。移除走“内核管理 → 移除”，前置条件与其他核心相同（当前草稿与已发布修订都没有 GOST 入站、不是最后一个核心）。**把 Agent 降级到 1.3 以下之前必须先移除 GOST**。
 
+**它永远不是主核心**：GOST 不能作为节点的第一个（主）核心；节点始终保留 Xray 或 sing-box 作为主核心，`--core gost` 单独使用或排在 xray/sing-box 之前的安装参数会被拒绝，`cores` 首项为 gost 的配置也一样；移除最后一个 Xray/sing-box 会被拒绝（`last_core`），因为 `core` 留空的入站与设备门控等都跟随主核心。GOST 只能是附加核心。
 
 
 ### GOST 转发的池、端口范围与限流（v1.3 G2，待实机）

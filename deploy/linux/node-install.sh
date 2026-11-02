@@ -96,6 +96,8 @@ seen=' '
 for core in "${cores[@]}"; do
   [[ $core == xray || $core == sing-box || $core == gost ]] || fail 'Core must be xray, sing-box or gost.'
   [[ $seen != *" $core "* ]] || fail 'Duplicate --core.'
+  # GOST only serves port forwards, so it can never be the first (primary) core.
+  [[ $seen != ' ' || $core != gost ]] || fail 'GOST cannot be the first core; list --core xray or --core sing-box first.'
   seen+="$core "
 done
 # An offline installation supplies both files: the archive is checked against the

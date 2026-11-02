@@ -67,7 +67,7 @@ func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author stri
 	if err != nil {
 		return CanvasPublishResult{}, err
 	}
-	snapshots, err := s.canvasSnapshots(ctx, plan.nodes, users)
+	snapshots, err := s.canvasSnapshots(ctx, plan.nodes, plan.relays, users)
 	if err != nil {
 		return CanvasPublishResult{}, err
 	}
@@ -94,41 +94,69 @@ func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
 	return InboundInput{Core: inbound.Core, Name: inbound.Name, NodeID: inbound.NodeID, Protocol: inbound.Protocol, Listen: inbound.Listen, Port: inbound.Port, Enabled: inbound.Enabled, SubscriptionVisible: inbound.SubscriptionVisible, InternalRelay: inbound.InternalRelay, DefaultOutbound: defaultOutbound, AllowedUserIDs: inbound.AllowedUserIDs, Settings: inbound.Settings}
 }
 
-// canvasSnapshots collects every node the publication depends on, targets
-// first. RelaySnapshots already walks a node's whole relay component in that
-// order; a node without relay relationships is published on its own.
-func (s *Service) canvasSnapshots(ctx context.Context, nodeIDs []string, users AccessReader) ([]NodeSnapshot, error) {
-	nodeIDs, err := s.gostOrder(ctx, nodeIDs)
-	if err != nil {
-		return nil, err
-	}
-	seen := map[string]bool{}
-	result := []NodeSnapshot{}
+// canvasSnapshots collects every node the publication depends on, dependencies
+// first. The relay component of each planned node is expanded once, and the whole
+// expanded set is then ordered by both kinds of dependency, so a node reached
+// through an ordinary relay outbound cannot end up after a node only a GOST
+// tunnel put behind it.
+func (s *Service) canvasSnapshots(ctx context.Context, nodeIDs []string, relays []*canvasRelay, users AccessReader) ([]NodeSnapshot, error) {
+	expanded := make([]string, 0, len(nodeIDs))
+	snapshots := map[string]NodeSnapshot{}
 	for _, nodeID := range nodeIDs {
-		if seen[nodeID] {
+		if _, done := snapshots[nodeID]; done {
 			continue
 		}
-		snapshots, err := s.RelaySnapshots(ctx, nodeID, users)
+		component, err := s.RelaySnapshots(ctx, nodeID, users)
 		if errors.Is(err, ErrNoRelayRelationships) {
 			state, enabled, snapshotErr := s.SnapshotIntent(ctx, nodeID, users)
 			if snapshotErr != nil {
 				return nil, snapshotErr
 			}
-			snapshots, err = []NodeSnapshot{{State: state, InboundIntent: enabled}}, nil
+			component, err = []NodeSnapshot{{State: state, InboundIntent: enabled}}, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		for _, snapshot := range snapshots {
-			if seen[snapshot.State.NodeID] {
+		for _, snapshot := range component {
+			if _, done := snapshots[snapshot.State.NodeID]; done {
 				continue
 			}
-			seen[snapshot.State.NodeID] = true
-			result = append(result, snapshot)
+			snapshots[snapshot.State.NodeID] = snapshot
+			expanded = append(expanded, snapshot.State.NodeID)
 		}
 	}
-	if len(result) == 0 {
+	if len(expanded) == 0 {
 		return nil, errors.New("方案没有可发布的服务器")
+	}
+	// An enabled relay outbound publishes its target first; the GOST tunnels of
+	// this drawing add their exit-before-entry dependency on top of it. Only the
+	// tunnels being published count: a draft published from another drawing is
+	// not part of this batch and must not order - or cycle - it.
+	before := map[string][]string{}
+	for _, nodeID := range expanded {
+		for _, outbound := range snapshots[nodeID].State.Outbounds {
+			if !outbound.Enabled || outbound.TargetNodeID == "" {
+				continue
+			}
+			if _, known := snapshots[outbound.TargetNodeID]; known {
+				before[nodeID] = append(before[nodeID], outbound.TargetNodeID)
+			}
+		}
+	}
+	for _, relay := range relays {
+		if _, entry := snapshots[relay.entryNode]; entry {
+			if _, exit := snapshots[relay.exitNode]; exit {
+				before[relay.entryNode] = append(before[relay.entryNode], relay.exitNode)
+			}
+		}
+	}
+	ordered, err := canvasPublishOrder(expanded, before)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]NodeSnapshot, 0, len(ordered))
+	for _, nodeID := range ordered {
+		result = append(result, snapshots[nodeID])
 	}
 	return result, nil
 }

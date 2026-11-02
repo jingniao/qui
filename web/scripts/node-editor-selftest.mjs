@@ -236,6 +236,28 @@ assert.deepEqual(api.forwardPool({ targets: [{ host: 'a', port: 1 }], host: '', 
 assert.deepEqual(api.forwardPool({ host: 'legacy', port: 443, network: 'tcp' }), [{ host: 'legacy', port: 443 }]);
 console.log('PASS NODE_EDITOR_GOST: pool/range expansion, range-aware port conflicts, presence-based GOST options, core-switch refusal, step-4 bounds');
 
+// G3: a relay listener the canvas generated has no target, network or port of its
+// own, so a rename must save. Step 4 skips the forward fields it cannot have, and
+// the payload carries the sealed relay material back unchanged for the panel to
+// keep with the stored copy.
+const relayOriginal = { id: 'relay-1', nodeId: 'server', name: 'canvas relay', protocol: 'forward', core: 'gost', port: 23000,
+  listen: '0.0.0.0', enabled: true, subscriptionVisible: false, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
+  settings: { forward: { mode: 'relay', relay: { certificate_pem: 'CERT', private_key_pem: 'KEY', client_ca_pem: 'CA' } } },
+  hasTlsKey: false, hasWireGuardKey: false };
+const relayState = api.createEditor('server', relayOriginal);
+assert.equal(api.relayMode(relayState.form.settings), true);
+assert.equal(api.relayMode({ forward: { host: 'a', port: 1, network: 'tcp' } }), false);
+for (const step of [1, 2, 3, 4, 5]) assert.equal(api.validateStep(step, relayState, gostServer, []), '', `relay step ${step}`);
+// The same forward without the relay mode still needs its target.
+const plainForward = { ...relayOriginal, id: 'plain', settings: { forward: { host: '', port: 443, network: 'tcp' } } };
+assert.match(api.validateStep(4, api.createEditor('server', plainForward), gostServer, []), /目标主机/);
+relayState.form.name = 'renamed relay';
+const relayPayload = api.buildPayload(relayState);
+assert.equal(relayPayload.name, 'renamed relay');
+assert.equal(relayPayload.core, 'gost');
+assert.deepEqual(json(relayPayload.settings.forward), json(relayOriginal.settings.forward));
+console.log('PASS NODE_EDITOR_RELAY: relay listener skips target/network validation and keeps its sealed material on rename');
+
 
 // F0 explicitly changes action permissions; assert those boundaries rather than
 // freezing a whole page whose authorised button visibility must change.

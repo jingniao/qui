@@ -83,6 +83,26 @@ func TestCoreUpdatesUseIndependentComponentsAndExactResults(t *testing.T) {
 	}
 }
 
+// TestGostCannotBeTheLastUserCore pins the panel half of the rule: GOST only
+// serves forwards, so removing the node's only core that carries users is the
+// existing last-core refusal even though another (GOST) core is still enabled.
+func TestGostCannotBeTheLastUserCore(t *testing.T) {
+	r, audit, n, rev := coreNodeFixture(t, "linux/amd64", "xray")
+	c := &pb.Capabilities{CoreName: "xray", CoreVersion: "26.3.27", MultiCoreSupported: true, Cores: []*pb.CoreCapability{{Name: "xray", Version: "26.3.27"}, {Name: "gost", Version: "3.3.2"}}}
+	raw, err := protojson.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Database.Exec("UPDATE nodes SET capabilities_json=?,multi_core_supported=1 WHERE id=?", string(raw), n); err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.QueueRemoveCore(context.Background(), audit, n, "xray", "owner", "", rev.ID)
+	var conflict *CoreRemovalConflict
+	if !errors.As(err, &conflict) || conflict.Code != "last_core" {
+		t.Fatal(err)
+	}
+}
+
 func TestRemoveCoreTasksRefuseAssignmentsAndReplayAfterRevisionChanges(t *testing.T) {
 	r, audit, n, rev := coreNodeFixture(t, "linux/amd64", "xray")
 	setMultiCore(t, r, n, true)

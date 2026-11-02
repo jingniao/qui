@@ -507,7 +507,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		// an older peer. Reconnection starts a fresh refresh cycle.
 		if first.GetHello().DeviceGateSupported && c.DeviceGates != nil {
 			current, e := c.Repository.Get(ctx, id)
-			if e == nil && current.Capabilities.GetDeviceGateSupported() {
+			if e == nil && AnyGateSupported(current.Capabilities) {
 				command, e := c.DeviceGates(ctx, id)
 				if e == nil && command != nil {
 					if e = send(command); e != nil {

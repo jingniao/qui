@@ -103,7 +103,7 @@ import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
-import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
+import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, relayMode, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
 import { coreSummaryLabel } from '../../../nodes/coreSummary';
 const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin }>(), { serverId: '', inbound: null, origin: 'list' });
 const emit = defineEmits<{ close: []; saved: [] }>();
@@ -140,6 +140,8 @@ const conflict = computed(() => portConflict(f.value, inbounds.value, state.orig
 const forwardPreview = computed(() => {
   const forward = f.value.settings.forward;
   if (!forward) return '端口转发尚未设置目标';
+  // A relay listener is the GOST tunnel's exit half: one service, no pool.
+  if (relayMode(f.value.settings)) return `GOST 中继监听：${f.value.port} 端口由隧道资源管理，只计入节点总量`;
   const ports = forwardListenPorts(f.value.port, f.value.settings);
   const networks = forward.network === 'tcp,udp' ? 2 : 1;
   const pool = forwardPool(forward).map(target => `${target.host}:${target.port}`).join('、') || '—';

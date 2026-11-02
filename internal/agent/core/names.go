@@ -8,6 +8,11 @@ import "proxycontrol/pkg/contracts/desiredstate"
 // place instead of in every list.
 func KnownName(name string) bool { return desiredstate.KnownCore(name) }
 
+// CarriesUsers reports whether a core kind serves user access. GOST only serves
+// port forwards, so a node always keeps Xray or sing-box as its primary core; the
+// configuration loader and the membership checks ask this instead of naming GOST.
+func CarriesUsers(name string) bool { return desiredstate.CarriesUsers(name) }
+
 // CoreNames is every core kind this Agent runs, in the order the component
 // workers enumerate them.
 func CoreNames() []string {

@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
+	"net"
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -41,17 +41,11 @@ func (s *Service) canvasGostRelay(ctx context.Context, connection CanvasConnecti
 		return nil, fmt.Errorf("连接 %q：GOST 中继需要 GOST 类型的共享隧道", connection.ID)
 	}
 	if tunnel.material == nil {
-		// A tunnel created before G3 (or by a save that could not seal yet) gets its
-		// set now, without marking it modified: the publication version must not
-		// change just because the material was missing.
-		material, err := newGostMaterial(tunnel.ID, 1)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.Repository.saveGostMaterial(ctx, s.Repository.Database, tunnel.ID, &material, tunnel.UpdatedAt); err != nil {
-			return nil, err
-		}
-		tunnel.material = &material
+		// The set is issued when the tunnel is saved as gost. Planning never
+		// invents one: a publication that followed the preview would deploy
+		// credentials the Owner never saw, and a set that is unreadable or expired
+		// has to be replaced instead of silently regenerated.
+		return nil, fmt.Errorf("连接 %q：GOST 中继凭据不可用（%v），请先轮换隧道凭据再发布", connection.ID, ErrGostTunnelMaterial)
 	}
 	for _, nodeID := range []string{sourceNode, targetNode} {
 		if err := s.requireGostRelay(ctx, nodeID); err != nil {
@@ -127,14 +121,20 @@ func (r *canvasRelay) hopFor(host string) desiredstate.GostHop {
 
 // relayInput is the exit listener: a relay handler on a TLS listener that requires
 // the client certificate of the entry node. It forwards nothing itself, so it has
-// no target pool and never enters the node's traffic totals.
-func (r *canvasRelay) relayInput() InboundInput {
+// no target pool and never enters the node's traffic totals. It listens on the
+// wildcard address of the family the entry node dials, so an IPv6 endpoint is
+// reachable at all.
+func (r *canvasRelay) relayInput(host string) InboundInput {
+	listen := "0.0.0.0"
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		listen = "::"
+	}
 	return InboundInput{
 		Core:            "gost",
 		Name:            r.name,
 		NodeID:          r.exitNode,
 		Protocol:        "forward",
-		Listen:          "0.0.0.0",
+		Listen:          listen,
 		Port:            r.port,
 		Enabled:         true,
 		DefaultOutbound: "direct",
@@ -230,7 +230,11 @@ func (s *Service) canvasEnsureRelay(ctx context.Context, plan *canvasPlan, relay
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	saved, err := s.saveGeneratedInbound(ctx, existing.ID, relay.relayInput())
+	host, err := s.gostRelayPublicHost(ctx, relay.exitNode)
+	if err != nil {
+		return err
+	}
+	saved, err := s.saveGeneratedInbound(ctx, existing.ID, relay.relayInput(host))
 	if err != nil {
 		return err
 	}
@@ -269,44 +273,20 @@ func (s *Service) canvasEnsureRelay(ctx context.Context, plan *canvasPlan, relay
 	return nil
 }
 
-// gostOrder puts every GOST relay exit node before the entry node whose forward
-// dials it, so a publication installs the listener first and moves the entry onto
-// it second; the batch rollback then visits them in the opposite order. Nodes
-// without a GOST tunnel keep the order the drawing produced, which the existing
-// relay graph already sorted.
-func (s *Service) gostOrder(ctx context.Context, nodeIDs []string) ([]string, error) {
-	rows, err := s.Repository.Database.QueryContext(ctx, `SELECT source_ref,target_ref FROM canvas_tunnels WHERE json_extract(connection_json,'$.type')='port_forward' AND json_extract(connection_json,'$.tunnelProtocol')='gost'`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	// before[node] lists the nodes that must be published first: an entry forward
-	// depends on the relay listener its hop dials.
-	before := map[string][]string{}
-	selected := map[string]bool{}
-	for _, nodeID := range nodeIDs {
-		selected[nodeID] = true
-	}
-	for rows.Next() {
-		var source, target string
-		if err := rows.Scan(&source, &target); err != nil {
-			return nil, err
-		}
-		entry, exit := strings.TrimPrefix(source, "server:"), strings.TrimPrefix(target, "server:")
-		if selected[entry] && selected[exit] {
-			before[entry] = append(before[entry], exit)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
+// canvasPublishOrder sorts the nodes of one publication so that every dependency
+// is published before the node that dials it: a relay target an enabled outbound
+// names, and the GOST relay exit an entry forward hops through. before[node] lists
+// those dependencies, and the caller derives them from the snapshots being
+// published, so a draft stored elsewhere never orders or cycles a batch. Nodes
+// without dependencies keep the order the drawing produced.
+func canvasPublishOrder(nodeIDs []string, before map[string][]string) ([]string, error) {
 	ordered := make([]string, 0, len(nodeIDs))
 	state := map[string]int{}
 	var visit func(string) error
 	visit = func(nodeID string) error {
 		switch state[nodeID] {
 		case 1:
-			return errors.New("GOST 隧道形成了环路，无法确定发布顺序")
+			return errors.New("服务器之间的中转依赖形成了环路，无法确定发布顺序")
 		case 2:
 			return nil
 		}

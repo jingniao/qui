@@ -31,7 +31,7 @@ func Detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	deadline, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	command := exec.CommandContext(deadline, executable, "-V")
-	output := &boundedOutput{}
+	output := &boundedOutput{limit: diagnosticOutputLimit}
 	command.Stdout = output
 	command.Stderr = output
 	if err := command.Run(); err != nil {

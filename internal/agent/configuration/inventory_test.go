@@ -60,3 +60,17 @@ func TestInventoryKeepsPrimaryWhenOriginalCoreIsReenabled(t *testing.T) {
 		t.Fatal(cores, err)
 	}
 }
+
+// An inventory written before the rule existed can name GOST as primary, or leave
+// it first after disabling Xray; the merge refuses both.
+func TestInventoryNeverMakesGostThePrimary(t *testing.T) {
+	c := config.Agent{DataDirectory: t.TempDir(), CoreName: "xray", CorePath: "/installer/xray"}
+	for _, i := range []Inventory{
+		{NodeID: "node", Primary: "gost", Entries: map[string]InventoryCore{"gost": {Path: "/managed/gost"}}},
+		{NodeID: "node", Entries: map[string]InventoryCore{"xray": {Disabled: true}, "gost": {Path: "/managed/gost"}}},
+	} {
+		if _, err := i.Merge(c); err != errGostPrimary {
+			t.Fatalf("%+v merged: %v", i, err)
+		}
+	}
+}

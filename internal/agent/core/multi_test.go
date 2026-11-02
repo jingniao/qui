@@ -113,6 +113,23 @@ func TestMultiCapabilitiesCarryTheGostContract(t *testing.T) {
 	}
 }
 
+// TestRemoveIdleKeepsAUserCoreAsPrimary pins the primary takeover: the primary is
+// the core that serves inbounds without an explicit core, and GOST only serves
+// forwards, so a removal never hands that slot to GOST.
+func TestRemoveIdleKeepsAUserCoreAsPrimary(t *testing.T) {
+	events := []string{}
+	m, err := NewMultiRuntime(&fakeMultiCore{name: "xray", events: &events}, &fakeMultiCore{name: "gost", events: &events}, &fakeMultiCore{name: "sing-box", events: &events})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RemoveIdle("xray"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Name() != "sing-box" {
+		t.Fatalf("primary after removing the user core: %s", m.Name())
+	}
+}
+
 func multiConfig(revision int64) RenderedConfig {
 	r := RenderedConfig{NodeID: "n", Revision: revision, Cores: map[string]RenderedConfig{}}
 	for _, n := range []string{"xray", "sing-box"} {

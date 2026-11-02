@@ -299,6 +299,8 @@ GOST（v1.3 G1）：第三种核心类型 `gost`，固定官方 3.3.2，仅 linu
 
 G3 起 GOST 还承担节点间加密中继：画布的 `port_forward` 连接可以把跳设为 `gost` 隧道（见第 14 与 16 节），两端节点都必须运行 GOST 并上报设置契约 3，出口节点必须能提供公网地址。中继只搬运已在转发侧计入的字节，仍不引入用户身份、额度、设备门控与域名记录。
 
+**GOST 不能作为节点的第一个（主）核心**：节点始终保留 Xray 或 sing-box 作为主核心，`cores` 首项为 gost 的配置（以及 `--core gost` 单独使用或排在 xray/sing-box 之前的安装参数）会被拒绝，移除最后一个 Xray/sing-box 也会被拒绝（`last_core`）。
+
 第一阶段优先支持：
 
 - Xray
@@ -2060,6 +2062,9 @@ Xray、sing-box 与 GOST 分别位于 `/usr/local/lib/proxy-agent/<name>`（GOST
 供旧 Agent 兼容，其余配置与身份数据保留；手工版本/URL/摘要参数紧跟对应核心。
 升级不传核心参数保留全部已记录核心和已有 config 原文（兼容旧键），显式参数只替换/追加，不用省略表示删除。
 `--core-source qui|official` 只作用于 sing-box；GOST 始终取自官方固定版本。
+GOST 不能作为节点的第一个（主）核心：`--core gost` 单独使用或排在 xray/sing-box
+之前会被两个安装脚本拒绝，节点始终保留 Xray 或 sing-box 作为主核心，移除最后一个
+Xray/sing-box 会被拒绝（`last_core`）；按记录核心顺序升级不受影响。
 GOST 没有独立的 systemd/OpenRC 单元：它由 Agent 作为子进程托管（`runtime/gost/`），
 安装记录的行为 `core gost /usr/local/lib/proxy-agent/gost <二进制 sha256>`，
 `service.sh`、enroll/续证脚本、`update.sh`、`update-recovery.sh` 与卸载的固定路径集合都包含它。

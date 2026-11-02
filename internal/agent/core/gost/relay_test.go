@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"os"
 	"testing"
 	"time"
 
@@ -105,4 +106,67 @@ func renderState(t *testing.T, state desiredstate.State) (Config, core.RenderedC
 		t.Fatal(err)
 	}
 	return config, rendered
+}
+
+// TestRenderKeepsOneChainForAPortRange covers the entry half of a tunnel that
+// listens on a port range: every expanded service dials through one chain. A chain
+// built inside the port loop would repeat its name once per port, which GOST
+// refuses.
+func TestRenderKeepsOneChainForAPortRange(t *testing.T) {
+	state := entryState(t, 1)
+	end := 20061
+	state.Inbounds[0].Settings.Forward.PortEnd = &end
+	config, _ := renderState(t, state)
+	if len(config.Chains) != 1 || config.Chains[0].Name != chainName("fwd-entry") {
+		t.Fatalf("chains: %+v", config.Chains)
+	}
+	if len(config.Services) != 2 {
+		t.Fatalf("services: %+v", config.Services)
+	}
+	for _, service := range config.Services {
+		if service.Handler.Chain != config.Chains[0].Name {
+			t.Fatalf("service %s does not dial through the chain: %+v", service.Name, service.Handler)
+		}
+	}
+}
+
+// TestRotatedMaterialKeepsTheFilesOfTheOldRevision covers a rollback after a
+// credential rotation: the files one revision was rendered with are keyed by the
+// material itself, so rendering the next generation leaves the previous one intact
+// for the configuration that still points at it.
+func TestRotatedMaterialKeepsTheFilesOfTheOldRevision(t *testing.T) {
+	adapter := &Adapter{Directory: t.TempDir(), NodeID: "exit"}
+	first, second := relayState(t), relayState(t)
+	renderedFirst, err := adapter.Render(context.Background(), first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Render(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	material := func(rendered core.RenderedConfig) (string, string) {
+		t.Helper()
+		config := Config{}
+		if err := json.Unmarshal(rendered.Data, &config); err != nil {
+			t.Fatal(err)
+		}
+		paths := config.Services[0].Listener.TLS
+		if paths == nil {
+			t.Fatal("relay listener has no material")
+		}
+		certificate, err := os.ReadFile(paths.CertFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, err := os.ReadFile(paths.KeyFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(certificate), string(key)
+	}
+	certificate, key := material(renderedFirst)
+	relay := first.Inbounds[0].Settings.Forward.Relay
+	if certificate != relay.CertificatePEM || key != relay.PrivateKeyPEM {
+		t.Fatal("a rendered credential generation overwrote the files of the earlier revision")
+	}
 }

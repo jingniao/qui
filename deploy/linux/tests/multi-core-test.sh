@@ -95,6 +95,10 @@ check 'repeatable CLI accepts the third core' test "$(installer_args --node --co
 # Direct subshell call: fail exits the parser subshell without ending this test.
 if installer_args --core xray --core xray >/dev/null 2>&1; then exit 1; fi
 printf 'ok - duplicate CLI refused\n'; passes=$((passes+1))
+# GOST only serves port forwards, so it can never be the first (primary) core.
+if installer_args --node --core gost >/dev/null 2>&1; then exit 1; fi
+if installer_args --node --core gost --core xray >/dev/null 2>&1; then exit 1; fi
+printf 'ok - GOST as the first core refused\n'; passes=$((passes+1))
 
 node_args() (
   cores=(); core_source=qui
@@ -107,6 +111,10 @@ check 'one-click repeats core flags' test "$(node_args --core xray --core sing-b
 check 'one-click accepts the third core' test "$(node_args --core xray --core sing-box --core gost)" = 'xray sing-box gost'
 if node_args --core xray --core xray >/dev/null 2>&1; then exit 1; fi
 printf 'ok - one-click duplicate CLI refused\n'; passes=$((passes+1))
+# GOST only serves port forwards, so it can never be the first (primary) core.
+if node_args --core gost >/dev/null 2>&1; then exit 1; fi
+if node_args --core gost --core sing-box >/dev/null 2>&1; then exit 1; fi
+printf 'ok - one-click GOST as the first core refused\n'; passes=$((passes+1))
 
 eval "$(sed -n '/^component_files() {/,/^}/p' "$repo/deploy/linux/update.sh")"
 root=$T/root; program_directory=$root/usr/local/bin; registry=$root/var/lib/proxycontrol-install

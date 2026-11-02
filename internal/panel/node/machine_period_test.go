@@ -352,3 +352,19 @@ func TestMachineBatchMatchesSingleAndSkipsDeleted(t *testing.T) {
 		t.Fatalf("a soft delete removed %d daily rows", rows)
 	}
 }
+
+// In America/Santiago the clock jumps from 00:00 to 01:00 on 2026-09-06, so that
+// day has no midnight. The split and the period anchor must start the day at the
+// first hour that exists instead of looping on the normalized 23:00.
+func TestMachineSkippedMidnight(t *testing.T) {
+	santiago := machineLocation(t, "America/Santiago")
+	from, to := time.Date(2026, 9, 5, 22, 0, 0, 0, santiago), time.Date(2026, 9, 6, 2, 0, 0, 0, santiago)
+	shares := machineDayShares(3000, from, to, santiago)
+	if len(shares) != 2 || shares["2026-09-05"] != 2000 || shares["2026-09-06"] != 1000 {
+		t.Fatalf("shares %v", shares)
+	}
+	start, _ := machinePeriod(6, time.Date(2026, 9, 10, 12, 0, 0, 0, santiago), santiago)
+	if want := time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC); !start.Equal(want) {
+		t.Fatalf("period start %s, want %s", start.UTC(), want)
+	}
+}

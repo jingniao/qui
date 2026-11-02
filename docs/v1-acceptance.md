@@ -1316,5 +1316,5 @@ G2 的实机项（三台主机）：代理核心与转发范围之间的端口�
 | 编号 | 证据与状态 |
 | --- | --- |
 | G3.1 | 本地通过：`desiredstate` 契约版本 3（`GostRelayContractVersion`）、`ForwardSettings.mode/relay/gost_hops` 的类型化校验（中继无目标池、1–2 跳、CA 与双证书必须可用）；`internal/agent/core/gost` 渲染中继监听（`handler: relay` + `listener: tls` + `caFile`）与入口链（**链永远挂在 `handler.chain`**，结构断言 + 1/2 跳测试）、材料文件 0600（Windows 跳过权限位）、中继服务不计入节点流量；面板 `ValidateInbound` 拒绝公网提交中继字段，生成路径接受；证书生成/校验（SAN、EKU、跨隧道不受信）。实机待做 |
-| G3.2 | 本地通过：迁移 0128（`canvas_tunnels.gost_material` 单个可空密封列）与 checksum 固定；保存 GOST 隧道时签发一代材料（CA 私钥不保留，10 年、ECDSA P-256）；`POST /api/v1/canvas-tunnels/{id}/rotate-credentials` 生成新代并标记 modified；`gostOrder` 让出口服务器先于入口服务器发布（回滚按批次反向）；红冲（入站 API、隧道视图只有代数/到期/指纹）。实机待做 |
+| G3.2 | 本地通过：迁移 0128（`canvas_tunnels.gost_material` 单个可空密封列）与 checksum 固定；保存 GOST 隧道时签发一代材料（CA 私钥不保留，10 年、ECDSA P-256）；`POST /api/v1/canvas-tunnels/{id}/rotate-credentials` 生成新代并标记 modified；`canvasPublishOrder` 让出口服务器先于入口服务器发布（同时按普通中转依赖排序；回滚按批次反向）；红冲（入站 API、隧道视图只有代数/到期/指纹）。实机待做 |
 | G3.3 | **待实机**：两台主机分别为出口/入口，TCP+UDP 回显经中继通过、目标只能经出口配置路径到达、无证书/异构 CA 客户端被拒；发布顺序与反向回滚、删除/最后一处引用清理、备份往返与 pre-0128 归档接受。需 `GOST_BINARY` 的真核心测试在 Linux 测试机上运行 |

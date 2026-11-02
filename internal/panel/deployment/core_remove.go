@@ -15,6 +15,7 @@ import (
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 type CoreRemoveTask struct {
@@ -72,7 +73,15 @@ func (r *Repository) QueueRemoveCore(ctx context.Context, audit ReleaseAccess, n
 	if storedJSON.Unmarshal(caps, c) != nil || !supported || !c.MultiCoreSupported || node.SelectedCore(c, component) == nil {
 		return conflict("unsupported")
 	}
-	if len(node.EnabledCores(c)) <= 1 {
+	// GOST only serves forwards, so a node always keeps Xray or sing-box as its
+	// first (primary) core: the last one of those cannot be removed either.
+	userCores := 0
+	for _, enabled := range node.EnabledCores(c) {
+		if enabled.Name != component && desiredstate.CarriesUsers(enabled.Name) {
+			userCores++
+		}
+	}
+	if userCores == 0 {
 		return conflict("last_core")
 	}
 	if err := nodeAvailable(ctx, tx, nodeID, ""); err != nil {

@@ -190,6 +190,42 @@ func TestRevisionDiffIncludesTypedQUICOptions(t *testing.T) {
 	}
 }
 
+func TestComparisonReportsForwardAndCoreChangesWithoutMaterial(t *testing.T) {
+	portEnd, bandwidth := 20002, int64(1_000_000)
+	previous := desiredstate.State{Inbounds: []desiredstate.Inbound{{
+		ID: "fwd", Core: "gost", Protocol: "forward",
+		Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "203.0.113.10", Port: 443, Network: "tcp", PortEnd: &portEnd,
+			Hops: []desiredstate.GostHop{{Host: "198.51.100.1", Port: 23000, ServerName: "t-one.gost.qui.internal", CACertPEM: "old-ca", ClientCertPEM: "old-cert", ClientKeyPEM: "old-key"}}}},
+	}}}
+	next := desiredstate.State{Inbounds: []desiredstate.Inbound{{
+		ID: "fwd", Core: "sing-box", Protocol: "forward",
+		Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "203.0.113.10", Port: 443, Network: "tcp", PortEnd: &portEnd, BandwidthInBps: &bandwidth,
+			Hops: []desiredstate.GostHop{{Host: "198.51.100.2", Port: 23000, ServerName: "t-one.gost.qui.internal", CACertPEM: "new-ca", ClientCertPEM: "new-cert", ClientKeyPEM: "new-key"}}}},
+	}}}
+	changes := map[string]Change{}
+	for _, change := range compareStates(previous, next) {
+		changes[change.Field] = change
+	}
+	if change := changes["core"]; change.Before != `"gost"` || change.After != `"sing-box"` || change.Hidden {
+		t.Fatalf("core change missing: %+v", changes)
+	}
+	if change := changes["settings.forward.bandwidth_in_bps"]; change.After != "1000000" || change.Hidden {
+		t.Fatalf("forward limit change missing: %+v", changes)
+	}
+	if change := changes["settings.forward.gost_hops[0].host"]; change.Before != `"198.51.100.1"` || change.After != `"198.51.100.2"` || change.Hidden {
+		t.Fatalf("hop address change missing: %+v", changes)
+	}
+	for _, field := range []string{"settings.forward.gost_hops[0].ca_cert_pem", "settings.forward.gost_hops[0].client_cert_pem", "settings.forward.gost_hops[0].client_key_pem"} {
+		if change := changes[field]; !change.Hidden || change.Before != "[已隐藏]" || change.After != "[已隐藏]" {
+			t.Fatalf("hop material change missing or exposed: %s %+v", field, change)
+		}
+	}
+	data, err := json.Marshal(changes)
+	if err != nil || strings.Contains(string(data), "old-key") || strings.Contains(string(data), "new-cert") {
+		t.Fatalf("comparison disclosed tunnel material: %s %v", data, err)
+	}
+}
+
 func TestComparisonReportsNodeNetworkSettingsAddChangeClearAndUnchanged(t *testing.T) {
 	previous := desiredstate.State{Revision: 1, Logging: desiredstate.Logging{DomainOnly: true}}
 	// A node that never configured the settings has no record, so two states

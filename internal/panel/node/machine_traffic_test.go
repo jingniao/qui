@@ -116,10 +116,10 @@ func TestMachineSecondSampleCountsExactDeltas(t *testing.T) {
 	now := time.Now().UTC()
 	recordHeartbeat(t, r, id, 1, now, machineTestBoot, map[string][2]uint64{"eth0": {1000, 2000}, "eth1": {50, 60}})
 	recordHeartbeat(t, r, id, 2, now.Add(10*time.Second), machineTestBoot, map[string][2]uint64{"eth0": {1250, 2100}, "eth1": {50, 60}})
-	if rx, tx, rows := machineTotals(t, r, id, "eth0"); rx != 250 || tx != 100 || rows != 1 {
+	if rx, tx, rows := machineTotals(t, r, id, "eth0"); rx != 250 || tx != 100 || rows == 0 {
 		t.Fatalf("eth0: %d %d %d", rx, tx, rows)
 	}
-	if rx, tx, rows := machineTotals(t, r, id, "eth1"); rx != 0 || tx != 0 || rows != 1 {
+	if rx, tx, rows := machineTotals(t, r, id, "eth1"); rx != 0 || tx != 0 || rows == 0 {
 		t.Fatalf("a measured zero interval wrote %d %d %d", rx, tx, rows)
 	}
 	var rx int64
@@ -133,9 +133,11 @@ func TestMachineReplayStaleAndOlderSamples(t *testing.T) {
 	now := time.Now().UTC()
 	recordHeartbeat(t, r, id, 1, now, machineTestBoot, map[string][2]uint64{"eth0": {1000, 1000}})
 	recordHeartbeat(t, r, id, 2, now.Add(10*time.Second), machineTestBoot, map[string][2]uint64{"eth0": {1100, 1000}})
+	// An interval may cross local midnight and fill two day rows.
+	_, _, before := machineTotals(t, r, id, "eth0")
 	// The same sequence again is a replay and changes nothing.
 	recordHeartbeat(t, r, id, 2, now.Add(10*time.Second), machineTestBoot, map[string][2]uint64{"eth0": {1100, 1000}})
-	if rx, _, rows := machineTotals(t, r, id, "eth0"); rows != 1 || rx != 100 {
+	if rx, _, rows := machineTotals(t, r, id, "eth0"); rows != before || rx != 100 {
 		t.Fatalf("a replayed sequence changed the usage: %d %d", rx, rows)
 	}
 	// An older observation cannot be differenced.
@@ -237,7 +239,7 @@ func TestMachineSkipsDuplicateAndOutOfRangeCounters(t *testing.T) {
 }
 
 func TestMachineDailyOverflowRollsBackTheHeartbeat(t *testing.T) {
-	r, id := machineFixture(t)
+	r, id := machineFixtureInZone(t, "UTC")
 	now := time.Now().UTC()
 	day := now.In(time.UTC).Format(MachineDayLayout)
 	if _, err := r.Database.Exec("INSERT INTO node_machine_traffic_daily(node_id,interface_name,local_date,rx_bytes,tx_bytes) VALUES(?,?,?,?,0)", id, "eth0", day, int64(math.MaxInt64)); err != nil {

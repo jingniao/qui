@@ -400,6 +400,7 @@ const machineSnapshot = computed<MachineTrafficForm>(() => ({
   interfaceName: machineForm.interfaceName,
   allowanceValue: machineForm.allowanceValue,
   allowanceUnit: machineForm.allowanceUnit,
+  allowanceBytes: machineForm.allowanceBytes,
   resetDay: machineForm.resetDay
 }));
 const machineDirty = computed(() => isDirty(machineSnapshot.value, machineBaseline.value));

@@ -24,6 +24,10 @@ type Core struct {
 // loads the original YAML itself, including managed worker subprocesses.
 var lists sync.Map
 
+// errGostPrimary refuses a GOST primary: GOST serves only forwards, and inbounds
+// with an empty core follow the primary.
+var errGostPrimary = errors.New("GOST cannot be the first core; list xray or sing-box first")
+
 // Remember freezes the YAML primary before inventory overlays change scalar
 // compatibility fields. Update-history ownership must not move with a removal.
 func Remember(c config.Agent) {
@@ -88,6 +92,10 @@ func LoadAgent(path string) (config.Agent, error) {
 			seen[entry.Name] = true
 		}
 		c.CoreName, c.CorePath = doc.Cores[0].Name, doc.Cores[0].Path
+	}
+	// Covers both the cores list and the legacy scalar core_name.
+	if !core.CarriesUsers(c.CoreName) {
+		return c, errGostPrimary
 	}
 	if err := c.Validate(); err != nil {
 		return c, err

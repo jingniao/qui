@@ -241,6 +241,33 @@ func TestCoreRemovalRefusals(t *testing.T) {
 	}
 }
 
+// TestGostCannotBeTheLastUserCore pins the removal order: GOST only serves
+// forwards, so a node always keeps Xray or sing-box and removing the last one of
+// those is the existing last-core refusal, while removing GOST itself is allowed.
+func TestGostCannotBeTheLastUserCore(t *testing.T) {
+	w, multi, dir, original := membershipHarness(t)
+	ctx := context.Background()
+	if err := multi.AddIdle(&fakeCoreRuntime{name: "gost", version: "3.3.2", selected: original}); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_user_core", Component: "sing-box", Revision: 2}); r.Code != "last_core" {
+		t.Fatal(r)
+	}
+	if multi.Component("sing-box") == nil {
+		t.Fatal("refused removal detached the user core")
+	}
+	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_gost", Component: "gost", Revision: 2}); !r.Success {
+		t.Fatal(r)
+	}
+	inventory, err := configuration.ReadInventory(dir, w.nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if multi.Component("gost") != nil || inventory.Primary != "sing-box" {
+		t.Fatalf("gost removal left runtime %v and primary %q", multi.Component("gost"), inventory.Primary)
+	}
+}
+
 func TestInstallerCoreRemovalPreservesRecordAndBinary(t *testing.T) {
 	w, multi, dir, original := membershipHarness(t)
 	if err := multi.AddIdle(&fakeCoreRuntime{name: "xray", selected: original}); err != nil {

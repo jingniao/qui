@@ -2,6 +2,9 @@ import { reactive } from 'vue';
 // A forward target pool member (G2). The list is ordered: GOST dials it in that
 // order for `fifo` and alternates over it for `round`, whatever the listening port.
 export interface ForwardTarget { host: string; port: number; }
+// The TLS material of a GOST tunnel's exit listener. The panel seals it, masks it
+// on the way out and keeps the stored copy when the editor sends it back.
+export interface GostRelayTLS { certificate_pem?: string; private_key_pem?: string; client_ca_pem?: string; }
 // Port-forward settings. `host`/`port` are the original single-target form; the
 // remaining fields are the GOST-only options of settings contract 2 and stay
 // absent when unset, so an xray or sing-box forward never carries them.
@@ -15,6 +18,10 @@ export interface ForwardSettings {
   bandwidth_in_bps?: number;
   bandwidth_out_bps?: number;
   max_connections?: number;
+  // `mode: 'relay'` is the exit half of a GOST tunnel: a listener the canvas
+  // generated. It has no target, network or port of its own to edit.
+  mode?: 'relay';
+  relay?: GostRelayTLS;
 }
 import { request, type Page } from '../../app/apiClient';
 // Types only: the canvas module owns these shapes and imports this file for the

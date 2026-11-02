@@ -38,7 +38,8 @@
       </template>
       <template v-if="f.protocol === 'forward' && s.forward">
         <p class="text-xs">端口转发不验证用户身份，不进入订阅；用户额度、设备限制与用户域名访问记录不适用。</p>
-        <template v-if="gost">
+        <p v-if="relay" class="text-xs">这是 GOST 隧道的中继监听：目标、网络与限速由隧道资源管理，这里只能改名或启用/停用，保存时会沿用已存的隧道证书。</p>
+        <template v-if="gost && !relay">
           <div class="space-y-2">
             <div class="flex items-center justify-between">
               <span class="text-sm text-ios-label">目标池（按顺序）</span>
@@ -78,12 +79,12 @@
           <p class="text-xs">每个监听端口各自生效：范围中的每个端口都有独立的限速与连接上限，不会共享额度。主备（fifo）切换会让一个请求失败一次；超过连接上限的连接会被接受后立即关闭，而不是拒绝握手。发布配置会重启该服务器的全部核心，GOST 会话会短暂中断。</p>
           <p v-if="expanded > 1" class="text-xs">当前范围将展开为 {{ expanded }} 个服务（{{ portCount }} 个端口 × {{ networkCount }} 个协议），全部计入该节点的节点总量，不计入用户额度。</p>
         </template>
-        <template v-else>
+        <template v-else-if="!relay">
           <label class="block">目标主机<input v-model="s.forward.host" class="form-input-base mt-2" /></label>
           <label class="block">目标端口<input v-model.number="s.forward.port" type="number" min="1" max="65535" class="form-input-base mt-2" /></label>
         </template>
-        <label class="block">网络<select v-model="s.forward.network" class="form-input-base mt-2"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp,udp">TCP + UDP</option></select></label>
-        <p v-if="!gost" class="text-xs">目标池、端口范围与限速只支持 GOST 核心（设置契约 2）。</p>
+        <label v-if="!relay" class="block">网络<select v-model="s.forward.network" class="form-input-base mt-2"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp,udp">TCP + UDP</option></select></label>
+        <p v-if="!gost && !relay" class="text-xs">目标池、端口范围与限速只支持 GOST 核心（设置契约 2）。</p>
       </template>
       <p v-if="!['shadowsocks', 'wireguard', 'forward', 'hysteria2', 'tuic'].includes(f.protocol)" class="text-xs">此协议没有额外参数，可继续。</p>
     </template>
@@ -91,10 +92,12 @@
 </template>
 <script setup lang="ts">
 import { computed } from 'vue';
-import { forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, type EditorState } from './nodeEditorModel';
+import { forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type EditorState } from './nodeEditorModel';
 const props = defineProps<{ state: EditorState; step: number; gost?: boolean }>();
 const f = computed(() => props.state.form), s = computed(() => props.state.form.settings);
 const gost = computed(() => props.gost === true && f.value.protocol === 'forward');
+// A GOST tunnel's exit listener: no target, network or limit of its own to edit.
+const relay = computed(() => relayMode(s.value));
 const bandwidthFields = [{ key: 'up_mbps', label: '上传带宽' }, { key: 'down_mbps', label: '下载带宽' }] as const;
 const rateFields = [{ key: 'bandwidth_in_bps', label: '客户端 → 目标' }, { key: 'bandwidth_out_bps', label: '目标 → 客户端' }] as const;
 function setBandwidth(key: 'up_mbps' | 'down_mbps', event: Event) {

@@ -156,7 +156,7 @@ func (r *Repository) SaveCanvasScheme(ctx context.Context, schemeID string, inpu
 			return CanvasScheme{}, err
 		}
 	}
-	if err := saveInlineTunnels(ctx, tx, schemeID, &input); err != nil {
+	if err := r.saveInlineTunnels(ctx, tx, schemeID, &input); err != nil {
 		return CanvasScheme{}, err
 	}
 	data, err = json.Marshal(input.Layout)

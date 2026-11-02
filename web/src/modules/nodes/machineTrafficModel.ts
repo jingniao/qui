@@ -30,6 +30,11 @@ export interface MachineTrafficForm {
   interfaceName: string;
   allowanceValue: string;
   allowanceUnit: MachineTrafficUnit;
+  /**
+   * The stored allowance. The value above is only its rounded label, so an
+   * untouched field is written back byte for byte instead of the rounded number.
+   */
+  allowanceBytes: number | null;
   resetDay: number;
 }
 
@@ -97,6 +102,7 @@ export function formFromSettings(settings?: MachineTrafficSettings | null): Mach
     interfaceName: settings?.interfaceName ?? '',
     allowanceValue: allowance ? numberLabel(allowance / UNIT_BYTES[unit]) : '',
     allowanceUnit: unit,
+    allowanceBytes: allowance,
     resetDay: settings?.resetDay ?? 1
   };
 }
@@ -109,7 +115,12 @@ export function payloadFromForm(form: MachineTrafficForm): MachineTrafficSetting
   }
   const value = form.allowanceValue.trim();
   let allowanceBytes: number | null = null;
-  if (value) {
+  // The label of a very small allowance reads "0", and the label of a large one
+  // loses its last digits. While the inputs still describe the stored value, its
+  // exact bytes are kept, so saving an unrelated field cannot move the quota.
+  if (form.allowanceBytes !== null && value === numberLabel(form.allowanceBytes / UNIT_BYTES[form.allowanceUnit])) {
+    allowanceBytes = form.allowanceBytes;
+  } else if (value) {
     const amount = Number(value);
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('额度需为大于 0 的数值，留空表示不设置');
     const bytes = Math.round(amount * UNIT_BYTES[form.allowanceUnit]);

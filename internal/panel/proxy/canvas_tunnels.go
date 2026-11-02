@@ -107,8 +107,23 @@ func scanTunnel(row interface{ Scan(...any) error }) (CanvasTunnel, error) {
 
 const tunnelColumns = "id,name,connection_json,source_ref,target_ref,inline_scheme_id,object_prefix,created_at,updated_at,published_version,allocated_port,gost_material"
 
+// tunnelColumnsBefore0128 is the same projection for an archive that has not
+// applied 0128_gost_tunnels.sql yet (every v1.2.0 backup ends at 0124): the
+// sealed credential column does not exist there, so it reads as absent instead
+// of failing the whole archive.
+const tunnelColumnsBefore0128 = "id,name,connection_json,source_ref,target_ref,inline_scheme_id,object_prefix,created_at,updated_at,published_version,allocated_port,NULL AS gost_material"
+
+// tunnelProjection selects the columns a tunnel read may use. Only the archive
+// validation sets archiveBeforeGostMaterial; a live database is always migrated.
+func (r *Repository) tunnelProjection() string {
+	if r.archiveBeforeGostMaterial {
+		return tunnelColumnsBefore0128
+	}
+	return tunnelColumns
+}
+
 func (r *Repository) canvasTunnel(ctx context.Context, tunnelID string) (CanvasTunnel, error) {
-	t, err := scanTunnel(r.Database.QueryRowContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels WHERE id=?", tunnelID))
+	t, err := scanTunnel(r.Database.QueryRowContext(ctx, "SELECT "+r.tunnelProjection()+" FROM canvas_tunnels WHERE id=?", tunnelID))
 	if err != nil {
 		return t, err
 	}
@@ -152,7 +167,7 @@ func (r *Repository) CanvasTunnels(ctx context.Context) ([]CanvasTunnel, error) 
 	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels ORDER BY created_at,id")
+	rows, err := r.Database.QueryContext(ctx, "SELECT "+r.tunnelProjection()+" FROM canvas_tunnels ORDER BY created_at,id")
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +313,7 @@ func (r *Repository) resolveCanvasLayout(ctx context.Context, execution string, 
 // Convert inline compatibility requests inside the scheme transaction. Existing
 // inline edges are identified by (scheme ID, connection ID); shared references
 // never mutate their tunnel implicitly.
-func saveInlineTunnels(ctx context.Context, tx *sql.Tx, schemeID string, input *CanvasSchemeInput) error {
+func (r *Repository) saveInlineTunnels(ctx context.Context, tx *sql.Tx, schemeID string, input *CanvasSchemeInput) error {
 	if input.Execution != "server" {
 		return nil
 	}
@@ -378,6 +393,11 @@ func saveInlineTunnels(ctx context.Context, tx *sql.Tx, schemeID string, input *
 			_, err = tx.ExecContext(ctx, "UPDATE canvas_tunnels SET connection_json=?,source_ref=?,target_ref=?,updated_at=CASE WHEN connection_json<>? OR source_ref<>? OR target_ref<>? THEN ? ELSE updated_at END WHERE id=?", string(raw), refs[c.Source], refs[c.Target], string(raw), refs[c.Source], refs[c.Target], stamp, tunnelID)
 		}
 		if err != nil {
+			return err
+		}
+		// A GOST tunnel gets its credential set when it is created, exactly like
+		// the explicit save path, so a publication never has to issue one.
+		if err := r.syncGostMaterial(ctx, tx, tunnelID, stored.Type == "port_forward" && stored.TunnelProtocol == "gost", stamp); err != nil {
 			return err
 		}
 		c.TunnelID = tunnelID

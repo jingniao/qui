@@ -145,8 +145,19 @@ func TestMihomoRoutesProxyDirectAndReject(t *testing.T) {
 		}
 		return string(data), err
 	}
-	if body, err := get("127.0.0.2", proxied); err != nil || body != "proxied" {
-		t.Fatalf("PROXY request: %q %v", body, err)
+	// mihomo reports its mixed port before its proxy providers are ready and
+	// answers 502 until the SOCKS5 outbound to the test node serves, so wait for
+	// a real proxied response instead of the listener (CI 41298676512).
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		body, requestErr := get("127.0.0.2", proxied)
+		if requestErr == nil && body == "proxied" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("PROXY request: %q %v", body, requestErr)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if body, err := get("127.0.0.1", direct); err != nil || body != "direct" {
 		t.Fatalf("DIRECT request: %q %v", body, err)

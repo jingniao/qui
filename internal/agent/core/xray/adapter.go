@@ -14,7 +14,6 @@ import (
 	"proxycontrol/internal/agent/gate"
 	"proxycontrol/internal/agent/observer"
 	"proxycontrol/internal/platform/id"
-	"proxycontrol/internal/platform/vault"
 	access "proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -50,14 +49,7 @@ type Adapter struct {
 	process            *exec.Cmd
 	done               chan error
 	stopPending        bool
-	coreRun            *core.CoreRun
-	coreRunKey         *vault.Vault
-	coreRunPending     bool
-	runPID             int
-	runToken           string
-	runEpoch           string
-	runRevision        int64
-	runEnv             core.OSEnvironment
+	marker             core.RunMarker
 	current            core.RenderedConfig
 	accessTail         *accessLogTail
 	history            map[int64]core.RenderedConfig
@@ -253,7 +245,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 	command.SysProcAttr = core.CoreProcessAttributes()
 	// Record the pending child before it exists so no start-window crash can
 	// leave an orphan core without a durable marker.
-	if err := a.claimCoreRunLocked(epoch, configuration.Revision); err != nil {
+	if err := a.runMarker().Claim(epoch, configuration.Revision); err != nil {
 		return err
 	}
 	command.Stdout = io.Discard
@@ -271,7 +263,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 		}
 		tail, err := newAccessLogTail(configuration.AccessLogPath, accessSink, accessLogLimit)
 		if err != nil {
-			abandonErr := a.abandonCoreRunLocked()
+			abandonErr := a.runMarker().Abandon()
 			return errors.Join(err, abandonErr)
 		}
 		a.accessTail = tail
@@ -279,7 +271,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 	command.Stderr = io.Discard
 	if err := command.Start(); err != nil {
 		a.closeAccessLogLocked()
-		abandonErr := a.abandonCoreRunLocked()
+		abandonErr := a.runMarker().Abandon()
 		return errors.Join(err, abandonErr)
 	}
 	a.startedAt = time.Now()
@@ -288,7 +280,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 	// Bind the exact launched child's OS identity. Failure to record an
 	// authenticable identity keeps a marker that a later parent must treat as
 	// unknown rather than a clean exit.
-	if err := a.bindCoreRunLocked(command.Process.Pid); err != nil {
+	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
 		_ = command.Process.Kill()
 		if reapErr := core.ReapProcess(done, core.StopReapTimeout); reapErr != nil {
 			a.process = command
@@ -297,7 +289,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 			return errors.Join(err, reapErr)
 		}
 		a.closeAccessLogLocked()
-		confirmErr := a.confirmCoreExitLocked()
+		confirmErr := a.runMarker().ConfirmExit()
 		return errors.Join(err, confirmErr)
 	}
 	deadline := time.Now().Add(4 * time.Second)
@@ -309,7 +301,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 			}
 			return ctx.Err()
 		case err := <-done:
-			confirmErr := a.confirmCoreExitLocked()
+			confirmErr := a.runMarker().ConfirmExit()
 			if err == nil {
 				err = errors.New("Xray stopped during startup")
 			}
@@ -330,7 +322,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 			select {
 			case err := <-done:
 				timer.Stop()
-				confirmErr := a.confirmCoreExitLocked()
+				confirmErr := a.runMarker().ConfirmExit()
 				if err == nil {
 					err = errors.New("Xray stopped during health check")
 				}
@@ -381,8 +373,7 @@ func (a *Adapter) abortStartLocked(command *exec.Cmd, done chan error) error {
 		return err
 	}
 	a.closeAccessLogLocked()
-	confirmErr := a.confirmCoreExitLocked()
-	return confirmErr
+	return a.runMarker().ConfirmExit()
 }
 func (a *Adapter) stop() error {
 	if a.process == nil {
@@ -395,7 +386,7 @@ func (a *Adapter) stop() error {
 		a.done = nil
 		a.stopPending = false
 		a.closeAccessLogLocked()
-		return a.confirmCoreExitLocked()
+		return a.runMarker().ConfirmExit()
 	default:
 	}
 	if a.TrafficSink != nil {
@@ -448,7 +439,7 @@ func (a *Adapter) forceStopLocked() error {
 	a.done = nil
 	a.stopPending = false
 	a.closeAccessLogLocked()
-	return a.confirmCoreExitLocked()
+	return a.runMarker().ConfirmExit()
 }
 
 // UnconfirmedStop reports that the last forced stop could not confirm the exact
@@ -460,7 +451,7 @@ func (a *Adapter) UnconfirmedStop() bool {
 	if a.stopPending {
 		return true
 	}
-	observation, err := a.observeCoreRunLocked()
+	observation, err := a.runMarker().Observe(a.runningChildLocked())
 	return err != nil || observation == core.CoreRunBlocked
 }
 func (a *Adapter) Rollback(ctx context.Context, revision int64) error {
@@ -493,7 +484,7 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 		a.process = nil
 		a.done = nil
 		a.stopPending = false
-		confirmErr := a.confirmCoreExitLocked()
+		confirmErr := a.runMarker().ConfirmExit()
 		if confirmErr != nil {
 			return result, errors.Join(core.ErrCoreStopUnconfirmed, confirmErr)
 		}

@@ -85,7 +85,7 @@ func validateCoreRun(run *CoreRun) error {
 	// The core identity is a fixed, closed set. A marker that names another core
 	// is still exit material for the recorded child, never a marker this adapter
 	// may silently overwrite because the name differs.
-	if run.Core != "xray" && run.Core != "sing-box" {
+	if !KnownName(run.Core) {
 		return errors.New("invalid core run marker core identity")
 	}
 	if run.Process.PID < 0 {

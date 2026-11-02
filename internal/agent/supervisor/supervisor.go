@@ -140,6 +140,20 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			}
 		}()
 	}
+	// A per-component update holds that component out of the shared gate and
+	// probe ticks. The set comes from the runtime, so a third core kind needs no
+	// change here.
+	held := func() map[string]bool {
+		names := []string{}
+		if named, ok := adapter.(interface{ Names() []string }); ok {
+			names = named.Names()
+		}
+		result := map[string]bool{}
+		for _, name := range names {
+			result[name] = reconciler.CoreComponentHeld(name)
+		}
+		return result
+	}
 	if target, ok := adapter.(interface{ TickDeviceGates(context.Context) error }); ok {
 		workers.Add(1)
 		go func() {
@@ -155,7 +169,7 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 					if multi, ok := target.(interface {
 						TickDeviceGatesExcept(context.Context, map[string]bool) error
 					}); ok {
-						gateErr = multi.TickDeviceGatesExcept(ctx, map[string]bool{"xray": reconciler.CoreComponentHeld("xray"), "sing-box": reconciler.CoreComponentHeld("sing-box")})
+						gateErr = multi.TickDeviceGatesExcept(ctx, held())
 					} else if !reconciler.CoreUpdateHeld() {
 						gateErr = target.TickDeviceGates(ctx)
 					}
@@ -185,7 +199,7 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 					if multi, ok := prober.(interface {
 						ProbeExcept(context.Context, map[string]bool) error
 					}); ok {
-						probeErr = multi.ProbeExcept(ctx, map[string]bool{"xray": reconciler.CoreComponentHeld("xray"), "sing-box": reconciler.CoreComponentHeld("sing-box")})
+						probeErr = multi.ProbeExcept(ctx, held())
 					} else if !reconciler.CoreUpdateHeld() {
 						probeErr = prober.Probe(ctx)
 					}

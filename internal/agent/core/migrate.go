@@ -10,7 +10,7 @@ import (
 // the Agent owns the state directory. Each rename is restartable: a crash leaves
 // the remaining flat files to be moved by the next start. Conflicts are refused.
 func MigratePrimaryRuntime(directory, primary string) error {
-	if primary != "xray" && primary != "sing-box" {
+	if !KnownName(primary) {
 		return errors.New("invalid primary core")
 	}
 	entries, err := os.ReadDir(directory)

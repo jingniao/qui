@@ -256,7 +256,7 @@ qui_record_cores() {
   if [[ $format == proxycontrol-install-v1 ]]; then
     name=$(sed -n '5p' "$record"); digest=$(sed -n '6p' "$record")
     if [[ -n $name ]]; then
-      [[ $component == agent && ( $name == xray || $name == sing-box ) && $digest =~ ^[0-9a-f]{64}$ ]] || return 1
+      [[ $component == agent && ( $name == xray || $name == sing-box || $name == gost ) && $digest =~ ^[0-9a-f]{64}$ ]] || return 1
       record_cores+=("$name"); record_digests+=("$digest")
     else [[ -z $digest ]] || return 1; fi
     return 0
@@ -265,7 +265,7 @@ qui_record_cores() {
   [[ $(sed -n '$=' "$record") -ge 12 ]] || return 1
   while IFS= read -r line || [[ -n $line ]]; do
     read -r extra name path digest remainder <<< "$line"
-    [[ $extra == core && $component == agent && ( $name == xray || $name == sing-box ) && $path == /usr/local/lib/proxy-agent/"$name" && $digest =~ ^[0-9a-f]{64}$ && -z $remainder ]] || return 1
+    [[ $extra == core && $component == agent && ( $name == xray || $name == sing-box || $name == gost ) && $path == /usr/local/lib/proxy-agent/"$name" && $digest =~ ^[0-9a-f]{64}$ && -z $remainder ]] || return 1
     [[ " ${record_cores[*]} " != *" $name "* ]] || return 1
     record_cores+=("$name"); record_digests+=("$digest")
   done < <(sed -n '13,$p' "$record")

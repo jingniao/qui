@@ -34,12 +34,20 @@ qui_write_record "$T/multi"
 check 'read both cores' qui_record_cores "$T/multi" agent
 check 'core order retained' test "${record_cores[*]}" = 'xray sing-box'
 check 'both core digests retained' test "${#record_digests[@]}" = 2
+# The third core kind is an ordinary record entry: one line per core, its fixed
+# installer path and its own binary digest.
+record_cores+=(gost); record_digests+=("$tuning_service_digest")
+qui_write_record "$T/three"
+check 'read three cores' qui_record_cores "$T/three" agent
+check 'three core order retained' test "${record_cores[*]}" = 'xray sing-box gost'
+check 'gost record line' grep -qx "core gost /usr/local/lib/proxy-agent/gost $tuning_service_digest" "$T/three"
+qui_record_cores "$T/multi" agent
 for invalid in duplicate path name digest; do
   cp "$T/multi" "$T/invalid"
   case $invalid in
     duplicate) sed -n '13p' "$T/multi" >> "$T/invalid";;
     path) sed -i 's@/usr/local/lib/proxy-agent/xray@/tmp/xray@' "$T/invalid";;
-    name) sed -i 's/core xray/core gost/' "$T/invalid";;
+    name) sed -i 's/core xray/core sinbox/' "$T/invalid";;
     digest) printf 'core xray /usr/local/lib/proxy-agent/xray bad\n' >> "$T/invalid";;
   esac
   check "reject $invalid record" bash -c '. "$1"; ! qui_record_cores "$2" agent' _ "$repo/deploy/linux/service.sh" "$T/invalid"
@@ -83,6 +91,7 @@ installer_args() (
   printf '%s|%s|%s' "${cores[*]}" "${core_versions[xray]:-}" "${core_versions[sing-box]:-}"
 )
 check 'repeatable CLI with per-core versions' test "$(installer_args --node --core xray --core-version 26.3.27 --core sing-box --core-version 1.14.4)" = 'xray sing-box|26.3.27|1.14.4'
+check 'repeatable CLI accepts the third core' test "$(installer_args --node --core xray --core-version 26.3.27 --core gost --core-version 3.3.2)" = 'xray gost|26.3.27|'
 # Direct subshell call: fail exits the parser subshell without ending this test.
 if installer_args --core xray --core xray >/dev/null 2>&1; then exit 1; fi
 printf 'ok - duplicate CLI refused\n'; passes=$((passes+1))
@@ -95,6 +104,7 @@ node_args() (
 )
 check 'one-click default is only Xray' test "$(node_args)" = xray
 check 'one-click repeats core flags' test "$(node_args --core xray --core sing-box)" = 'xray sing-box'
+check 'one-click accepts the third core' test "$(node_args --core xray --core sing-box --core gost)" = 'xray sing-box gost'
 if node_args --core xray --core xray >/dev/null 2>&1; then exit 1; fi
 printf 'ok - one-click duplicate CLI refused\n'; passes=$((passes+1))
 
@@ -102,7 +112,7 @@ eval "$(sed -n '/^component_files() {/,/^}/p' "$repo/deploy/linux/update.sh")"
 root=$T/root; program_directory=$root/usr/local/bin; registry=$root/var/lib/proxycontrol-install
 for init_system in systemd openrc; do
   component_files agent > "$T/paths"
-  for suffix in usr/local/lib/proxy-agent/xray usr/local/lib/proxy-agent/sing-box etc/proxy-agent/config.yaml; do
+  for suffix in usr/local/lib/proxy-agent/xray usr/local/lib/proxy-agent/sing-box usr/local/lib/proxy-agent/gost etc/proxy-agent/config.yaml; do
     check "$init_system snapshot $suffix" grep -qx "$root/$suffix" "$T/paths"
   done
   check "$init_system tuning snapshot retained" grep -q 'proxy-agent-tuning' "$T/paths"
@@ -120,7 +130,8 @@ for init_system in systemd openrc; do
   mkdir -p "$root/usr/local/lib/proxy-agent" "$root/etc/proxy-agent" "$registry"
   printf original-xray > "$root/usr/local/lib/proxy-agent/xray"
   printf original-sing-box > "$root/usr/local/lib/proxy-agent/sing-box"
-  cp "$T/multi" "$registry/agent.manifest"
+  printf original-gost > "$root/usr/local/lib/proxy-agent/gost"
+  cp "$T/three" "$registry/agent.manifest"
   cp "$T/new" "$root/etc/proxy-agent/config.yaml"
   while IFS= read -r path; do
     [[ -f $path ]] || continue
@@ -129,13 +140,15 @@ for init_system in systemd openrc; do
   done < <(component_files agent)
   printf new-xray > "$root/usr/local/lib/proxy-agent/xray"
   printf new-sing-box > "$root/usr/local/lib/proxy-agent/sing-box"
+  printf new-gost > "$root/usr/local/lib/proxy-agent/gost"
   printf partial-record > "$registry/agent.manifest"
   printf changed-config > "$root/etc/proxy-agent/config.yaml"
   check "$init_system production restore loop" restore_snapshot agent
   check "$init_system Xray restored" test "$(cat "$root/usr/local/lib/proxy-agent/xray")" = original-xray
   check "$init_system sing-box restored" test "$(cat "$root/usr/local/lib/proxy-agent/sing-box")" = original-sing-box
+  check "$init_system gost restored" test "$(cat "$root/usr/local/lib/proxy-agent/gost")" = original-gost
   check "$init_system config restored" cmp -s "$T/new" "$root/etc/proxy-agent/config.yaml"
-  check "$init_system record restored" cmp -s "$T/multi" "$registry/agent.manifest"
+  check "$init_system record restored" cmp -s "$T/three" "$registry/agent.manifest"
   check "$init_system idempotent restore" restore_snapshot agent
 done
 printf 'multi-core-test: %s passed\n' "$passes"

@@ -149,11 +149,18 @@ func (r CoreUpdateRequest) Validate() error {
 	if _, _, err := CoreAssetURL(r.Component, r.URL); err != nil {
 		return ErrUpdate
 	}
+	// GOST is installed only from the reviewed pin: the version and the archive
+	// digest must be the reviewed pair, whatever the URL and the operator say.
+	if r.Component == "gost" && (r.Version != GostVersion || r.SHA256 != GostArchiveSHA256) {
+		return ErrUpdate
+	}
 	return nil
 }
 
 // CoreComponent reports whether a component is a managed proxy core.
-func CoreComponent(value string) bool { return value == "xray" || value == "sing-box" }
+func CoreComponent(value string) bool {
+	return value == "xray" || value == "sing-box" || value == "gost"
+}
 
 func DecodeCoreUpdateRequest(data []byte) (CoreUpdateRequest, error) {
 	var r CoreUpdateRequest

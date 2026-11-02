@@ -2,17 +2,10 @@
 
 package singbox
 
-import (
-	"errors"
-	"net"
-	"syscall"
-)
+import "proxycontrol/internal/agent/core"
 
-func udpEndpointHealthy(endpoint string, _ int) bool {
-	socket, err := net.ListenPacket("udp", endpoint)
-	if err == nil {
-		socket.Close()
-		return false
-	}
-	return errors.Is(err, syscall.EADDRINUSE)
+// udpEndpointHealthy keeps the adapter's own call site; the check itself is
+// shared with the GOST core, which owns UDP listeners the same way.
+func udpEndpointHealthy(endpoint string, pid int) bool {
+	return core.UDPEndpointHealthy(endpoint, pid)
 }

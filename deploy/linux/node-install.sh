@@ -44,7 +44,7 @@ usage() {
   --token TOKEN         一次性节点注册码
   --http-port N         面板 HTTPS 端口（默认 443）
   --grpc-port N         面板 gRPC 端口（默认 9443）
-  --core xray|sing-box  可重复，例如 --core xray --core sing-box（默认 xray）
+  --core xray|sing-box|gost  可重复，例如 --core xray --core sing-box（默认 xray）
   --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
   --bundle FILE --sums FILE
                         离线安装：用本地发布归档与其 SHA256SUMS，不访问 GitHub
@@ -94,7 +94,7 @@ done
 if [[ ${#cores[@]} == 0 ]]; then cores=(xray); fi
 seen=' '
 for core in "${cores[@]}"; do
-  [[ $core == xray || $core == sing-box ]] || fail 'Core must be xray or sing-box.'
+  [[ $core == xray || $core == sing-box || $core == gost ]] || fail 'Core must be xray, sing-box or gost.'
   [[ $seen != *" $core "* ]] || fail 'Duplicate --core.'
   seen+="$core "
 done
@@ -271,6 +271,12 @@ for core in "${cores[@]}"; do
         libc=$(host_libc)
         core_digest=$(singbox_digest "$architecture" "$libc")
       fi;;
+    gost)
+      # The reviewed official pin: install.sh owns the archive digest, so nothing is
+      # passed here, and only amd64 is accepted whatever upstream publishes.
+      [[ $architecture == amd64 ]] || fail '本机架构不支持 GOST：只接受 amd64。'
+      core_version=3.3.2
+      core_digest='';;
   esac
   core_arguments+=(--core "$core" --core-version "$core_version")
   if [[ $core == sing-box && $core_source == qui && -n $bundle_file ]]; then

@@ -21,7 +21,8 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
   --sha256 DIGEST        lowercase SHA256 of that executable
   --config FILE          config template for a first install
                          (default: the packaged examples/<component>.yaml)
-  --core xray|sing-box   repeatable; default xray on a new node
+  --core xray|sing-box|gost   repeatable; default xray on a new node (gost is
+                         amd64-only and always the official pinned release)
   --core-source qui|official  sing-box source (default: qui; Xray stays official)
   --qui-version VERSION same qui release as the Agent (required for qui source)
   --core-bundle FILE --core-sums FILE  local qui core archive and SHA256SUMS
@@ -76,7 +77,7 @@ while (($#)); do
       case $1 in
         --binary) binary=$2;; --sha256) digest=${2,,};; --config) config=$2;;
         --core)
-          [[ $2 == xray || $2 == sing-box ]] || fail 'Core must be xray or sing-box.'
+          [[ $2 == xray || $2 == sing-box || $2 == gost ]] || fail 'Core must be xray, sing-box or gost.'
           [[ " ${cores[*]} " != *" $2 "* ]] || fail 'Duplicate --core.'
           core=$2; cores+=("$core");;
         --core-version) [[ -n $core ]] || fail 'Put --core before its options.'; core_versions[$core]=$2;;
@@ -218,12 +219,24 @@ singbox_digest() {
     *) fail "不支持的架构与 libc 组合：$1:$2";;
   esac
 }
+# The reviewed official GOST pin. One statically linked amd64 archive serves glibc
+# and musl alike, no other architecture is accepted, and the digest below is the
+# archive digest of the pinned release rather than the digest of the executable
+# inside it.
+gost_version=3.3.2
+gost_asset=gost_3.3.2_linux_amd64.tar.gz
+gost_digest=162feb43b1c284dbea599cdfe898169931af875233060dedc19432c7a9d18274
 select_core() {
   core=$1
   core_version=${core_versions[$core]:-}
   core_digest=${core_digests[$core]:-}
   core_url=${core_urls[$core]:-}
-  if [[ $core == xray ]]; then core_version=${core_version:-26.3.27}
+  if [[ $core == gost ]]; then
+    core_version=${core_version:-$gost_version}
+    [[ $core_version == "$gost_version" ]] || fail 'This installer pins the official GOST release.'
+    [[ -z $core_digest || $core_digest == "$gost_digest" ]] || fail 'The GOST archive digest is pinned by this installer.'
+    [[ -z $core_url ]] || fail 'The GOST release URL is pinned by this installer.'
+  elif [[ $core == xray ]]; then core_version=${core_version:-26.3.27}
   elif [[ $core_source == qui ]]; then core_version=${core_version:-1.14.4}
   else
     core_version=${core_version:-1.14.3}
@@ -379,6 +392,13 @@ core_asset() {
   local architecture libc
   architecture=$(host_architecture)
   libc=${2:-$(host_libc)}
+  if [[ $1 == gost ]]; then
+    # One static archive for every libc, and no other architecture: upstream
+    # publishes more, this installer accepts only the reviewed amd64 one.
+    [[ $architecture == amd64 ]] || fail 'The pinned GOST release is installed on amd64 only.'
+    printf '%s' "$gost_asset"
+    return
+  fi
   if [[ $1 == sing-box && ${core_source:-qui} == qui ]]; then
     printf 'sing-box-%s-qui.1-linux-%s.tar.gz' "$core_version" "$architecture"
     return
@@ -402,6 +422,7 @@ core_prefix() {
   case $1 in
     xray) printf 'https://github.com/XTLS/Xray-core/releases/download/';;
     sing-box) printf 'https://github.com/SagerNet/sing-box/releases/download/';;
+    gost) printf 'https://github.com/go-gost/gost/releases/download/';;
   esac
 }
 download() {
@@ -425,6 +446,16 @@ download() {
 # release is not installed.
 core_archive_digest() {
   local asset=$1 digest_file value
+  if [[ $core == gost ]]; then
+    # The reviewed pin is the expected digest. checksums.txt of the same release has
+    # to agree with it, and exactly one entry may match the archive.
+    digest_file=$stage/SHA256SUMS
+    download "$(core_prefix gost)v$core_version/checksums.txt" "$digest_file"
+    value=$(awk -v asset="$asset" '$2 == asset && NF == 2 {n++; digest=$1} END {if(n==1) print digest}' "$digest_file")
+    [[ $value == "$gost_digest" ]] || fail 'The GOST release checksums.txt does not match the reviewed pin.'
+    printf '%s' "$gost_digest"
+    return
+  fi
   if [[ $core == sing-box && $core_source == qui ]]; then
     digest_file=$stage/SHA256SUMS
     if [[ -n $core_sums ]]; then cp -- "$core_sums" "$digest_file"
@@ -583,7 +614,7 @@ for core in "${cores[@]}"; do
       command -v unzip >/dev/null || fail 'unzip is required to extract the Xray release archive.'
       unzip -q -o -d "$stage/extract" -- "$stage/archive";;
     *.tar.gz)
-      command -v tar >/dev/null || fail 'tar is required to extract the sing-box release archive.'
+      command -v tar >/dev/null || fail 'tar is required to extract the core release archive.'
       tar --extract --gzip --file "$stage/archive" --directory "$stage/extract" --no-same-owner --no-same-permissions;;
     *) fail 'Unsupported core archive container.';;
   esac
@@ -594,6 +625,13 @@ for core in "${cores[@]}"; do
   verify_elf "$stage/core"
   core_binary_digest=$(sha256sum -- "$stage/core"); core_binary_digest=${core_binary_digest%% *}
   mv -- "$stage/core" "$stage/core-$core"
+  if [[ $core == gost ]]; then
+    # The pinned release identifies itself as `gost 3.3.2 (...)`. The word `version`
+    # is not a subcommand of GOST, so only -V is used, and a binary that does not
+    # report the pinned version is not installed.
+    gost_banner=$("$stage/core-$core" -V 2>/dev/null | head -n 1) || fail 'The GOST executable did not report its version.'
+    [[ $gost_banner == "gost $gost_version ("* ]] || fail 'The GOST executable does not report the pinned version.'
+  fi
   if [[ " ${record_cores[*]} " == *" $core "* ]]; then
     for i in "${!record_cores[@]}"; do
       if [[ ${record_cores[i]} == "$core" ]]; then record_digests[i]=$core_binary_digest; fi

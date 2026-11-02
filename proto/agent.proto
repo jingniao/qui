@@ -34,14 +34,14 @@ message EnrollResponse {
   bytes ca_pem = 3;
   google.protobuf.Timestamp expires_at = 4;
 }
-message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; bool device_gate_supported = 9; bool tcp_probe_supported = 10; bool multi_core_supported = 11; bool node_traffic_supported = 12; }
+message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; bool device_gate_supported = 9; bool tcp_probe_supported = 10; bool multi_core_supported = 11; bool node_traffic_supported = 12; bool gost_core_supported = 13; }
 message ProtocolCapability { string protocol = 1; bool inbound = 2; bool outbound = 3; bool tcp = 4; bool udp = 5; }
 // Fields 4-15 are former patched-core capabilities, except field 9 which v1.1
 // also uses for the additive address observation contract (version 2). Device
 // gates require the explicit field 17 and a negotiated Welcome; old peers
 // continue to see no admission or ledger capability.
 message Capabilities { string core_name = 1; string core_version = 2; repeated ProtocolCapability protocols = 3; bool connection_admission_supported = 4; bool connection_ledger_supported = 5; bool connection_generation_supported = 6; bool connection_fence_supported = 7; bool connection_observation_supported = 8; int32 observation_contract_version = 9; bool domain_bytes_supported = 10; bool egress_envelope_supported = 11; int32 egress_envelope_version = 12; bool udp_per_target_observed = 13; int32 max_egress_hops = 14; string observation_edition = 15; bool singbox_user_stats = 16; bool device_gate_supported = 17; bool forward_inbound_supported = 18; HostInfo host = 19; bool tuning_supported = 20; repeated CoreCapability cores = 21; bool multi_core_supported = 22; }
-message CoreCapability { string name = 1; string version = 2; repeated ProtocolCapability protocols = 3; bool singbox_user_stats = 4; bool forward_inbound_supported = 5; bool device_gate_supported = 6; optional bool healthy = 7; int32 observation_contract_version = 8; }
+message CoreCapability { string name = 1; string version = 2; repeated ProtocolCapability protocols = 3; bool singbox_user_stats = 4; bool forward_inbound_supported = 5; bool device_gate_supported = 6; optional bool healthy = 7; int32 observation_contract_version = 8; uint32 gost_contract_version = 9; }
 message CoreStatus { string name = 1; bool healthy = 2; string error = 3; google.protobuf.Timestamp started_at = 4; TrafficSourceStatus traffic_source_status = 5; }
 message HostInfo {
   string cpu_model = 1;

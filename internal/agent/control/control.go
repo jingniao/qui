@@ -24,8 +24,7 @@ import (
 	"proxycontrol/internal/agent/collector"
 	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
-	"proxycontrol/internal/agent/core/singbox"
-	"proxycontrol/internal/agent/core/xray"
+	"proxycontrol/internal/agent/core/gost"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/agent/lifecycle"
 	"proxycontrol/internal/agent/reconcile"
@@ -290,11 +289,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 			if entry.Name == c.CoreName {
 				entry.Path = c.CorePath
 			}
-			if entry.Name == "sing-box" {
-				runtimes = append(runtimes, &singbox.Adapter{NodeID: state.NodeID, Path: entry.Path, Directory: directory})
-			} else {
-				runtimes = append(runtimes, &xray.Adapter{NodeID: state.NodeID, Path: entry.Path, Directory: directory})
-			}
+			runtimes = append(runtimes, coreRuntime(state.NodeID, directory, entry.Name, entry.Path))
 		}
 		adapter, err = core.NewMultiRuntime(runtimes...)
 		if err != nil {
@@ -582,7 +577,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{NodeTrafficSupported: true, MultiCoreSupported: capabilities.Snapshot().GetMultiCoreSupported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: capabilities.Snapshot().GetDeviceGateSupported(), BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
+	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{NodeTrafficSupported: true, MultiCoreSupported: capabilities.Snapshot().GetMultiCoreSupported(), GostCoreSupported: gost.Supported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: capabilities.Snapshot().GetDeviceGateSupported(), BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
 		return err
 	}
 	welcome, err := receive()

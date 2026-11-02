@@ -57,13 +57,23 @@ const (
 const (
 	CoreXray    = "xray"
 	CoreSingBox = "sing-box"
+	// CoreGost is the third core kind. It terminates forward inbounds only: it
+	// carries no user credential, subscription, quota, device gate, source
+	// observation or domain record.
+	CoreGost = "gost"
 )
+
+// GostContractVersion is the settings contract an Agent's GOST core reports in
+// CoreCapability.gost_contract_version. G2 and G3 raise it as they add
+// settings, so the panel can refuse an option the selected core does not
+// implement instead of rendering a silently ignored key.
+const GostContractVersion = 1
 
 // CoreSupport is one official core's share of a protocol row: whether that core
 // can terminate an inbound, open an outbound, and carry TCP and UDP. Every row
-// carries one entry per core the matrix describes (CoreXray, CoreSingBox), so a
-// zero value means "that core cannot carry this protocol"; a core name that is
-// not a key of any row is not described by the matrix at all.
+// carries one entry per core the matrix describes (CoreXray, CoreSingBox,
+// CoreGost), so a zero value means "that core cannot carry this protocol"; a core
+// name that is not a key of any row is not described by the matrix at all.
 type CoreSupport struct {
 	Inbound  bool `json:"inbound"`
 	Outbound bool `json:"outbound"`
@@ -97,7 +107,7 @@ func ProtocolSupportTable() []ProtocolSupport {
 	identityQUIC := append([]string{}, append(identityUDP, DimTLS, DimQUIC)...)
 	both := map[string]CoreSupport{CoreXray: {Inbound: true, Outbound: true, TCP: true, UDP: true}, CoreSingBox: {Inbound: true, Outbound: true, TCP: true, UDP: true}}
 	return []ProtocolSupport{
-		{Protocol: "forward", Direction: "inbound", Transport: []string{"tcp", "udp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"none"}, Cores: map[string]CoreSupport{CoreXray: {Inbound: true, TCP: true, UDP: true}, CoreSingBox: {Inbound: true, TCP: true, UDP: true}}, Implemented: []string{DimUDP, DimIPv6}, Pending: []string{}, NotApplicable: []string{DimUserIdentity, DimAccountMeter, DimQuota, DimConcurrency, DimSubscription, DimTLS, DimQUIC, DimTransportWS, DimTransportGRPC}, Source: "Official Xray dokodemo-door and sing-box direct inbound override"},
+		{Protocol: "forward", Direction: "inbound", Transport: []string{"tcp", "udp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"none"}, Cores: map[string]CoreSupport{CoreXray: {Inbound: true, TCP: true, UDP: true}, CoreSingBox: {Inbound: true, TCP: true, UDP: true}, CoreGost: {Inbound: true, TCP: true, UDP: true}}, Implemented: []string{DimUDP, DimIPv6}, Pending: []string{}, NotApplicable: []string{DimUserIdentity, DimAccountMeter, DimQuota, DimConcurrency, DimSubscription, DimTLS, DimQUIC, DimTransportWS, DimTransportGRPC}, Source: "Official Xray dokodemo-door, sing-box direct inbound override and GOST tcp/udp forward services"},
 		{
 			Protocol: "http", Direction: "both", Transport: []string{"tcp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"none"},
 			Cores:         map[string]CoreSupport{CoreXray: {Inbound: true, Outbound: true, TCP: true}, CoreSingBox: {Inbound: true, Outbound: true, TCP: true}},

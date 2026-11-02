@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/vault"
 	"sort"
@@ -53,11 +54,11 @@ func ReadInventory(directory, nodeID string) (Inventory, error) {
 	if err = json.Unmarshal(data, &i); err != nil {
 		return i, err
 	}
-	if (nodeID != "" && i.NodeID != nodeID) || i.Entries == nil || len(i.Entries) > 2 {
+	if (nodeID != "" && i.NodeID != nodeID) || i.Entries == nil || len(i.Entries) > 3 {
 		return i, errors.New("invalid core inventory identity")
 	}
 	for name, e := range i.Entries {
-		if (name != "xray" && name != "sing-box") || e.Path == "" || (e.Generation != "" && (filepath.Base(e.Generation) != e.Generation || e.Generation == "." || e.Generation == "..")) {
+		if !core.KnownName(name) || e.Path == "" || (e.Generation != "" && (filepath.Base(e.Generation) != e.Generation || e.Generation == "." || e.Generation == "..")) {
 			return i, errors.New("invalid core inventory")
 		}
 	}

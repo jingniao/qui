@@ -9,6 +9,21 @@ import (
 // migration files and real databases are never changed by this helper.
 func rewindPostK4Fixture(t *testing.T, database *sql.DB) {
 	t.Helper()
+	// The GOST tunnel credentials (0128) came after K4 too.
+	var tunnels int
+	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0128_gost_tunnels.sql'").Scan(&tunnels); err != nil {
+		t.Fatal(err)
+	}
+	if tunnels > 0 {
+		for _, query := range []string{
+			"ALTER TABLE canvas_tunnels DROP COLUMN gost_material",
+			"DELETE FROM schema_migrations WHERE version='0128_gost_tunnels.sql'",
+		} {
+			if _, err := database.Exec(query); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	// The GOST core name and its Hello flag arrived after K4 as well, so a rewound
 	// fixture keeps neither the column nor the applied migration; migrating
 	// forward again re-applies 0127 after 0125 restored inbounds.core.

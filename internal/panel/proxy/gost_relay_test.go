@@ -145,3 +145,25 @@ func TestGostTunnelPublishesTheExitBeforeTheEntry(t *testing.T) {
 		t.Fatal("the entry hop kept the old client credentials")
 	}
 }
+
+// When the two servers already share an ordinary relay, publishing a GOST tunnel
+// validates the whole relay component, including the GOST halves. Each inbound
+// is judged by its own core: the GOST relay and forward are not in the primary
+// Xray core's protocol list (v1.3.0-rc.3 hosts: "associated node does not support
+// an enabled inbound protocol").
+func TestGostTunnelPublishesBesideAnExistingRelay(t *testing.T) {
+	p, scheme, _ := gostRelayPanel(t)
+	relayB, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "relay B", NodeID: p.nodeB, Protocol: "trojan", Listen: "0.0.0.0", Port: 8443, Enabled: true, InternalRelay: true, AllowedUserIDs: []string{}, DefaultOutbound: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.service.SaveOutbound(p.ctx, "", OutboundInput{Name: "to B", NodeID: p.nodeA, Protocol: "trojan", Enabled: true, TargetInboundID: relayB.ID, SupportTCP: true, SupportUDP: true, FailurePolicy: "Block"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.service.RelaySnapshots(p.ctx, p.nodeA, p.users); err != nil {
+		t.Fatal(err)
+	}
+}

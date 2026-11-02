@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 )
 
@@ -81,14 +82,10 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 			if !inbound.Enabled {
 				continue
 			}
-			supported := false
-			for _, ability := range n.Capabilities.Protocols {
-				if ability.Protocol == inbound.Protocol && ability.Inbound {
-					supported = true
-				}
-			}
-			if !supported {
-				return nil, errors.New("associated node does not support an enabled inbound protocol")
+			// The inbound's own core decides, as on save and publish: a GOST relay
+			// or forward is not in the primary core's protocol list.
+			if err := ValidateInboundCore(n.Capabilities, inbound.Core, inbound.Protocol); err != nil {
+				return nil, fmt.Errorf("associated node does not support an enabled inbound protocol: %w", err)
 			}
 		}
 		actual := map[string]bool{}

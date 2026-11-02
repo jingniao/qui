@@ -21,7 +21,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp str
 	if _, err := tx.ExecContext(ctx, "UPDATE node_tcp_probes SET status='expired' WHERE status='queued'"); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=0,multi_core_supported=0,node_traffic_supported=0"); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=0,multi_core_supported=0,node_traffic_supported=0,gost_core_supported=0"); err != nil {
 		return err
 	}
 	finishEnrollments, err := prepareEnrollmentReceiptRestore(ctx, tx)

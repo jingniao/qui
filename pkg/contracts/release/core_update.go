@@ -151,10 +151,21 @@ func (r CoreUpdateRequest) Validate() error {
 	}
 	// GOST is installed only from the reviewed pin: the version and the archive
 	// digest must be the reviewed pair, whatever the URL and the operator say.
-	if r.Component == "gost" && (r.Version != GostVersion || r.SHA256 != GostArchiveSHA256) {
+	if !CorePinnedTarget(r.Component, r.Version, r.SHA256) {
 		return ErrUpdate
 	}
 	return nil
+}
+
+// CorePinnedTarget reports whether a component whose release is a reviewed pin
+// accepts this version and archive digest. Components without a pin accept any
+// stable version the URL policy allows; every layer that queues or inspects a
+// GOST task asks this instead of repeating the pin.
+func CorePinnedTarget(component, version, digest string) bool {
+	if component != "gost" {
+		return true
+	}
+	return version == GostVersion && digest == GostArchiveSHA256
 }
 
 // CoreComponent reports whether a component is a managed proxy core.

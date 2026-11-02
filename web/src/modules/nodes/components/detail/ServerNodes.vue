@@ -71,6 +71,7 @@ import type { NodeView } from '../../api';
 import { proxyAPI, choices, strategyNames, type Inbound, type Outbound, type OutboundGroup } from '../../../proxy/api';
 import { isOwner } from '../../../../app/auth';
 import { listenNetworks } from '../../../proxy/components/node-editor/nodeEditorModel';
+import { coreLabel, isCoreName } from '../../coreSummary';
 import EmptyState from '../../../../components/EmptyState.vue';
 import StatusBadge from '../../../../components/StatusBadge.vue';
 import ProtocolBadge from '../../../../components/ProtocolBadge.vue';
@@ -80,7 +81,8 @@ const emit = defineEmits<{ edit: [item: Inbound | null]; publish: []; saved: [] 
 const busy = ref(false);
 function inboundCoreName(item: Inbound): string {
   const core = item.core || props.node.capabilities?.core_name || props.node.capabilities?.cores?.[0]?.name;
-  return core === 'xray' ? 'Xray' : core === 'sing-box' ? 'sing-box' : '';
+  // An unreported core stays blank; a stated one uses the shared label.
+  return isCoreName(core) ? coreLabel(core) : '';
 }
 async function toggle(item: Inbound) {
   if (busy.value || !isOwner.value || props.node.deletedAt) return;

@@ -101,9 +101,13 @@ export function serverEligible(server: NodeView): boolean {
 }
 // The cores the server currently reports as enabled (K3b). A server without a
 // core list (old Agent) yields exactly its one reported core.
-export function coreOptions(server: NodeView | undefined): { name: CoreName; label: string; version: string; primary: boolean }[] {
+export function coreOptions(server: NodeView | undefined, protocol?: string): { name: CoreName; label: string; version: string; primary: boolean }[] {
   if (!server) return [];
-  return nodeCores(server).map(core => ({ name: core.name, label: core.label, version: core.version, primary: core.primary }));
+  return nodeCores(server)
+    // GOST carries forward inbounds only, so it is offered for a forward and
+    // never for a user protocol; the panel refuses the same combination.
+    .filter(core => core.name !== 'gost' || protocol === undefined || protocol === 'forward')
+    .map(core => ({ name: core.name, label: core.label, version: core.version, primary: core.primary }));
 }
 export function defaultCore(server: NodeView | undefined): CoreName | '' {
   return primaryCoreName(server);

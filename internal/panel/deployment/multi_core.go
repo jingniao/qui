@@ -30,6 +30,12 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 		}
 	}
 	for _, core := range node.EnabledCores(c) {
+		// A GOST forward leaves through its own target and carries no outbound
+		// resources at all (desiredstate.Validate enforces its enabled direct
+		// default), so only cores that open outbounds are checked here.
+		if core.Name == desiredstate.CoreGost {
+			continue
+		}
 		part := state.ForCore(core.Name, c.CoreName)
 		for _, out := range part.Outbounds {
 			if out.Enabled {

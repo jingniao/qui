@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // The panel refuses a protocol the node's own official core cannot carry, from
@@ -59,5 +60,35 @@ func TestNodeCoreProtocolSupportRejectsUpstreamUnsupportedDirections(t *testing.
 	// runtime capability report.
 	if _, err := saveInbound(third.ID, "hysteria2", 24006, true); err != nil {
 		t.Fatal("unreported core rejected a protocol before its capabilities arrived", err)
+	}
+}
+
+// GOST carries forward inbounds only. The panel resolves the selected enabled
+// core and refuses every other protocol from the same matrix row, so adding a
+// forward row alone would not be enough (docs/v1.3-design-gost.md 3.4).
+func TestGostCoreIsForwardOnly(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if _, err := f.nodes.Record(ctx, f.nodeA, &pb.AgentMessage{NodeId: f.nodeA, MessageId: "capabilities", Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{CoreName: "xray", CoreVersion: "26.3.27", MultiCoreSupported: true, Cores: []*pb.CoreCapability{
+		{Name: "xray", Version: "26.3.27", Protocols: []*pb.ProtocolCapability{{Protocol: "vless", Inbound: true}}},
+		{Name: "gost", Version: "3.3.2", ForwardInboundSupported: true, Protocols: []*pb.ProtocolCapability{{Protocol: "forward", Inbound: true, Tcp: true, Udp: true}}},
+	}}}}); err != nil {
+		t.Fatal(err)
+	}
+	forward := func(port int) InboundInput {
+		return InboundInput{Name: "gost forward", NodeID: f.nodeA, Core: "gost", Protocol: "forward", Listen: "0.0.0.0", Port: port, Enabled: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "203.0.113.10", Port: 8443, Network: "tcp,udp"}}}
+	}
+	if _, err := f.service.SaveInbound(ctx, "", forward(24011)); err != nil {
+		t.Fatalf("gost forward refused: %v", err)
+	}
+	// This node's Agent does advertise VLESS, but not on GOST.
+	user := forward(24012)
+	user.Protocol, user.Settings = "vless", desiredstate.ProtocolSettings{}
+	if _, err := f.service.SaveInbound(ctx, "", user); err == nil || !strings.Contains(err.Error(), "gost core") {
+		t.Fatalf("gost accepted a vless inbound: %v", err)
+	}
+	// A forward is only selectable for a node that reports the GOST core.
+	if _, err := f.service.SaveInbound(ctx, "", InboundInput{Name: "unreported gost", NodeID: f.nodeB, Core: "gost", Protocol: "forward", Listen: "0.0.0.0", Port: 24013, Enabled: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "203.0.113.10", Port: 8443, Network: "tcp"}}}); err == nil || !strings.Contains(err.Error(), "does not advertise forward inbound") {
+		t.Fatalf("unreported gost core accepted a forward: %v", err)
 	}
 }

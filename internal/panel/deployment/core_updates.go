@@ -12,6 +12,7 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
 )
 
@@ -86,6 +87,11 @@ func ValidateCoreUpdateTarget(component, version, assetURL, digest, platform str
 	if err != nil {
 		return err
 	}
+	// A pinned component also fixes the version and the archive digest; the
+	// reviewed pair lives in pkg/contracts/release, so it is asked, not copied.
+	if !release.CorePinnedTarget(component, version, digest) {
+		return release.ErrUpdate
+	}
 	osName, architecture, ok := splitPlatform(platform)
 	if !ok || !release.CoreAssetMatches(component, osName, architecture, path.Base(u.Path)) {
 		return release.ErrPolicy
@@ -149,16 +155,22 @@ func (r *Repository) QueueCoreUpdate(ctx context.Context, audit ReleaseAccess, n
 	if err := coreComponentAvailable(ctx, tx, nodeID, input.Component); err != nil {
 		return CoreUpdateTask{}, err
 	}
-	var enabled, supported, multi bool
+	var enabled, supported, multi, gost bool
 	var platform string
 	var caps []byte
 	var revision int64
-	err = tx.QueryRowContext(ctx, "SELECT n.enabled,n.operating_system,n.capabilities_json,coalesce(c.core_supported,0),s.revision,n.multi_core_supported FROM nodes n LEFT JOIN node_update_capabilities c ON c.node_id=n.id JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=?", nodeID).Scan(&enabled, &platform, &caps, &supported, &revision, &multi)
+	err = tx.QueryRowContext(ctx, "SELECT n.enabled,n.operating_system,n.capabilities_json,coalesce(c.core_supported,0),s.revision,n.multi_core_supported,n.gost_core_supported FROM nodes n LEFT JOIN node_update_capabilities c ON c.node_id=n.id JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=?", nodeID).Scan(&enabled, &platform, &caps, &supported, &revision, &multi, &gost)
 	if err != nil {
 		return CoreUpdateTask{}, err
 	}
 	if !enabled || !supported || revision != expected {
 		return CoreUpdateTask{}, ErrNodeBusy
+	}
+	// Installing an absent GOST core requires the Agent's own Hello flag; an
+	// Agent that does not report it cannot receive GOST assignments at all. The
+	// platform half of the pin is checked by ValidateCoreUpdateTarget.
+	if input.Component == desiredstate.CoreGost && !gost {
+		return CoreUpdateTask{}, release.ErrPolicy
 	}
 	capabilities := &pb.Capabilities{}
 	if storedJSON.Unmarshal(caps, capabilities) != nil || !capabilities.MultiCoreSupported && capabilities.CoreName != input.Component {

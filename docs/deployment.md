@@ -26,8 +26,8 @@ RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。L4 �
 ### K3c / MC4 多核心安装（已实现，v1.2.0 尚未发布；实机见验收矩阵 §11）
 
 `install.sh --node` 与 `node-install.sh` 接受重复的 `--core`，例如
-`--core xray --core sing-box`；不指定时，新节点只安装 Xray。重复同名核心或
-未知核心会被拒绝。此阶段支持 Xray、sing-box，GOST 不在安装合约内。
+`--core xray --core sing-box`（v1.3 起还可以加 `--core gost`）；不指定时，新节点只安装 Xray。重复同名核心或
+未知核心会被拒绝。v1.2 支持 Xray、sing-box；GOST 自 v1.3 起加入安装合约，仅 linux/amd64。
 
 ```sh
 # 已解包并校验的同版本发布目录中；先停止已有 Agent 服务。
@@ -129,7 +129,7 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
   --sha256 DIGEST        lowercase SHA256 of that executable
   --config FILE          config template for a first install
                          (default: the packaged examples/<component>.yaml)
-  --core xray|sing-box   repeatable; default xray on a new node
+  --core xray|sing-box|gost  repeatable; default xray on a new node
   --core-source qui|official  sing-box source (default: qui)
   --qui-version VERSION same qui release as the Agent, required for qui source
   --core-bundle FILE --core-sums FILE  local qui core archive and SHA256SUMS
@@ -225,7 +225,8 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
   --core xray --core-version 26.3.27
 ```
 
-- `--core` 只允许 `xray` 或 `sing-box`。发布包内的 `VERSION` 自动确定 qui 来源版本；单独使用脚本时给出 `--core sing-box --qui-version X.Y.Z`，其中 X.Y.Z 必须与正在安装的 Agent 发布版本一致。显式版本与包内版本不符时拒绝；核心固定为 1.14.4-qui.1。官方来源也有固定默认版本，手工覆盖版本时使用对应核心后的 `--core-version`。
+- `--core` 允许 `xray`、`sing-box` 或 `gost`。发布包内的 `VERSION` 自动确定 qui 来源版本；单独使用脚本时给出 `--core sing-box --qui-version X.Y.Z`，其中 X.Y.Z 必须与正在安装的 Agent 发布版本一致。显式版本与包内版本不符时拒绝；核心固定为 1.14.4-qui.1。官方来源也有固定默认版本，手工覆盖版本时使用对应核心后的 `--core-version`。
+- **GOST（v1.3 G1）**：`--core gost` 安装固定官方 3.3.2。只有 linux/amd64：脚本从 `https://github.com/go-gost/gost/releases/download/v3.3.2/gost_3.3.2_linux_amd64.tar.gz` 下载，核对同发布 `checksums.txt` 中唯一匹配条目与面板内固定的归档摘要 `162feb43…a9d18274`，解包后只接受根目录 `gost`，要求 `gost -V` 首行 `gost 3.3.2 (...)`。这是静态链接的单一归档，**glibc 与 Alpine/musl 共用同一个资产**，不需要 musl 专用包；其他架构（含 arm64）明确拒绝，即使上游发布了对应归档。`--core-source` 仍只影响 sing-box，GOST 永远取自官方固定版本，也不接受 `--core-url`/`--core-sha256` 覆盖。安装位置为 `/usr/local/lib/proxy-agent/gost`，没有独立服务单元（由 Agent 托管子进程），v2 安装记录写成 `core gost /usr/local/lib/proxy-agent/gost <二进制 sha256>`。
 - qui 来源只下载 `jingniao/qui` 的同版本资源和 `SHA256SUMS`，不接受覆盖 URL 或摘要。`--core-source official` 保留官方 URL 前缀、`--core-url`、`--core-sha256` 和 Xray `.dgst` 路径；没有可信摘要就不安装。
 - qui 构建使用未修改的上游 v1.14.4、go1.26.10、上游 non-naive 标签加 `with_v2ray_api`，CGO=0；同一架构的静态归档同时用于 glibc 和 musl。官方来源在 musl 主机仍选单独的 `-musl.tar.gz` 与摘要。
 - 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径不变，配置按 K3c 写入完整 cores 集合和第一个核心的兼容旧键。
@@ -354,7 +355,7 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 
 **发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
 
-**代理核心**：不走 `install.sh`。在面板“系统 → 核心版本”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 只用于首装。
+**代理核心**：不走 `install.sh`。在面板“系统 → 核心版本”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 只用于首装。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。**降级 Agent 到 1.3 以下之前必须先移除 GOST 核心**（“内核管理 → 移除”，会先确认没有入站使用它），否则旧 Agent 无法读取三种核心类型。
 
 ## 6. 卸载
 

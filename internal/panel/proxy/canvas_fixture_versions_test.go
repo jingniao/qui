@@ -9,6 +9,23 @@ import (
 // migration files and real databases are never changed by this helper.
 func rewindPostK4Fixture(t *testing.T, database *sql.DB) {
 	t.Helper()
+	// The GOST core name and its Hello flag arrived after K4 as well, so a rewound
+	// fixture keeps neither the column nor the applied migration; migrating
+	// forward again re-applies 0127 after 0125 restored inbounds.core.
+	var gost int
+	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0127_gost_core.sql'").Scan(&gost); err != nil {
+		t.Fatal(err)
+	}
+	if gost > 0 {
+		for _, query := range []string{
+			"ALTER TABLE nodes DROP COLUMN gost_core_supported",
+			"DELETE FROM schema_migrations WHERE version='0127_gost_core.sql'",
+		} {
+			if _, err := database.Exec(query); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0125_multi_core_panel.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

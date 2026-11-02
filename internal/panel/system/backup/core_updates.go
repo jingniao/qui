@@ -121,6 +121,15 @@ func validateDirectCoreUpdates(ctx context.Context, database *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	// A GOST task can only exist in a schema that widened the component CHECK
+	// (0127) and it can only use the reviewed pin; an older archive carries none of
+	// these. The node's live Hello flag is not re-checked against the row: it is
+	// cleared by a restore while an unconfirmed task survives, so requiring it
+	// would make such an archive unvalidatable.
+	var gostSchema int
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0127_gost_core.sql'").Scan(&gostSchema); err != nil {
+		return ErrArchive
+	}
 	rows, err := database.QueryContext(ctx, "SELECT id,node_id,baseline_revision,release_id,component,version,url,sha256,sequence,status,command_id,result_json FROM core_update_tasks")
 	if err != nil {
 		return ErrArchive
@@ -136,6 +145,14 @@ func validateDirectCoreUpdates(ctx context.Context, database *sql.DB) error {
 		}
 		if !release.CoreComponent(component) || sequence < 1 || revision < 1 || !release.ValidUpdateID(commandID) {
 			return ErrArchive
+		}
+		if component == "gost" && (gostSchema == 0 || !release.CorePinnedTarget(component, version, digest)) {
+			return ErrArchive
+		}
+		if component == "gost" {
+			if _, _, err := release.CoreAssetURL(component, url); err != nil {
+				return ErrArchive
+			}
 		}
 		switch status {
 		case "queued", "running", "success", "rolled_back", "rejected", "failed_closed", "cleared":

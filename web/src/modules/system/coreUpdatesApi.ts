@@ -14,5 +14,5 @@ export const coreUpdatesAPI = {
   clear: (id: string) => request<CoreUpdateTask>(`/core-updates/${encodeURIComponent(id)}/clear`, 'POST', {})
 };
 
-export type CoreName = 'xray' | 'sing-box';
+export type CoreName = 'xray' | 'sing-box' | 'gost';
 export interface CoreRemoveTask { id:string;nodeId:string;component:CoreName;revision:number;status:'queued'|'running'|'success'|'rejected'|'unconfirmed';code:string;createdBy:string;createdAt:string;updatedAt:string;result?:{id:string;component:CoreName;revision:number;success?:boolean;code:string}; }

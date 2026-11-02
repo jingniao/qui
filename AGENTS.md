@@ -32,6 +32,8 @@
 
 **v1.3.0 进行中（2026-11-01）**：T1 整机月流量（每服务器单张网卡的整机用量、可选额度与重置日）后端与 Web UI 已实现（后端 `4cc9025`），契约见 [T1/P2 设计](docs/v1.3-design-t1-p2.md)；只在本地测试中验证，三台主机实机验收待做，限制见第 21 节。
 
+**v1.3.0 GOST G1 已实现（2026-11-01）**：GOST 3.3.2 作为第三种核心类型（仅 linux/amd64，只承载端口转发入站，从不承载用户接入）。G1a 交付 Agent 适配器、`--core gost` 安装器、`Hello.gost_core_supported=13` 与 `CoreCapability.gost_contract_version=9`、发布 allowlist 与固定归档摘要；G1b 交付迁移 0127、面板协商/校验/组件任务/备份校验、Web 核心选择与固定版本预填、文档。只在本机 Go 测试、迁移升级测试与 Web 构建中验证，三台主机实机验收待做；契约与限制见 [GOST 设计](docs/v1.3-design-gost.md)，功能范围见第 4.4 与 22.2 节。
+
 CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（release/v1.2.0 已复跑 111 个原生核心测试与 `-race`，面板主机 -race 按 Owner 决定以 CI 代替）；GitHub 只在手动与每周运行 `check`（同一脚本）与 `cores`，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
 
 ## 变更记录
@@ -289,6 +291,8 @@ Internet
 多核心模型（K3a/K3b，随 v1.2.0 交付；交付状态与实机结果见[当前状态](#当前状态)）：节点按 `cores: [{name, path}]` 运行 xray 与 sing-box，首项为兼容主核心，旧标量配置仍映射为一个核心；所有生产节点使用 MultiRuntime 与 `runtime/<core>/`，配置版本、逐核心切换与回滚见第 22 节。`cores.json.enc` 为节点绑定的认证清单，与 YAML 合并并持久覆盖禁用状态。通过校验过的 component 核心更新可添加缺失核心；移除须确认当前及中断待定修订均无入站分配且不是最后核心，先确认子进程退出，再持久禁用并清理 Agent 镜像（操作合同见第 23 节，任务与状态机见第 22.2 节）。安装器记录与外部二进制归 uninstall/qui-update，Agent 不删除或改写（见第 30.2 节）。GOST 推迟，不在 v1.2.0 范围内；协议、存储兼容与完整记录见历史报告 [K3a Agent 报告](docs/archive/v1.2-k3a-agent-report.md)。
 
 面板侧把节点建模为“已上报启用的核心集合”：协商、入站归属与逐核心显示见第 11.2 节，核心更新与移除任务见第 22.2 节，每核心计量见第 21 节；记录见历史报告 [K3b 面板报告](docs/archive/v1.2-k3b-panel-report.md)。
+
+GOST（v1.3 G1）：第三种核心类型 `gost`，固定官方 3.3.2，仅 linux/amd64。它只终止**端口转发入站**（`forward`，TCP/UDP），**从不承载用户接入**：没有用户凭据、订阅、额度、设备门控、源地址观测与域名记录，也没有出站资源、分流策略或出口组（转发按自身目标直连，唯一要求是启用中的 `direct` 默认出站）。显式把入站 `core` 设为 `gost` 只允许 `forward`，其他协议在共享校验（`desiredstate.Validate` 与面板 `ValidateCoreProtocol`）处被拒绝；`core` 留空仍跟随主核心，GOST-only 节点按同一规则判定。是否可安装 GOST 由 `Hello.gost_core_supported` 决定（不从 Agent 版本号推断），组件安装、移除与固定摘要见第 22.2 节，运行目录与安装选项见第 30.2 节，运维含义见[运维手册](docs/operations.md)。
 
 第一阶段优先支持：
 
@@ -651,7 +655,7 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 ## 11.2 节点详情
 
-节点详情按核心展示 `capabilities.cores`（已上报启用的核心与各自版本、协议、用户统计、转发、门控能力）和 `heartbeat.cores`（逐核心健康、错误码、启动时间、统计源状态）；`core_selectionBlocked` 列出正在添加/移除、暂不可选的组件。入站列表的 `core` 与 `userTrafficSupported`/`deviceGateSupported` 说明每个入站由哪个核心承载、该核心是否支持用户字节与设备门控。面板把节点建模为“已上报启用的核心集合”：`Welcome.multi_core_supported` 只对声明支持的 Agent 为真，未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成；面板不接受未上报启用的核心，也不容忍跨核心与端口转发之间的端口重复（见第 12 节）。旧 Agent 只有一个核心，缺测字段留空（`null`）而不是显示 0 或“健康”。
+节点详情按核心展示 `capabilities.cores`（已上报启用的核心与各自版本、协议、用户统计、转发、门控能力）和 `heartbeat.cores`（逐核心健康、错误码、启动时间、统计源状态）；`core_selectionBlocked` 列出正在添加/移除、暂不可选的组件。入站列表的 `core` 与 `userTrafficSupported`/`deviceGateSupported` 说明每个入站由哪个核心承载、该核心是否支持用户字节与设备门控。面板把节点建模为“已上报启用的核心集合”：`Welcome.multi_core_supported` 只对声明支持的 Agent 为真，未声明的 Agent 仍按一个核心（`core_name`）处理，`Capabilities.cores` 缺失时用旧标量字段合成；面板不接受未上报启用的核心，也不容忍跨核心与端口转发之间的端口重复（见第 12 节）。旧 Agent 只有一个核心，缺测字段留空（`null`）而不是显示 0 或“健康”。GOST 核心只上报 `forward` 协议与转发能力，没有用户统计、设备门控与连接快照，因此该核心的入站 `userTrafficSupported`/`deviceGateSupported` 为假、`deviceGateCoverage` 为 `none`；入站编辑器只为 `forward` 协议提供 GOST 选项，并按 `capabilities.cores` 判定是否可选。
 
 节点详情包含：
 
@@ -1232,7 +1236,7 @@ v1.1 内部身份字段继续用于流量归属与补传，界面隐藏设备维
 
 **每域名字节**：见第 20 节，官方核无法提供时列为空并显示“—”。
 
-节点/核心总量：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志；声明后 Agent 额外上报每核心的累计节点计数（`traffic.Counter{kind:"node"}`），面板只在协商成功的会话内接受这些批次，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为 `xray`/`sing-box`、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB。面板按（节点、epoch、`node`）保存游标并计算增量，写入 `core_traffic_samples` 作为每核心/每节点总量；重复批次幂等，同一节点可有多个活跃 epoch，一个核心上报不会淘汰另一个的 epoch。这些字节**不进入用户额度**，也不与账户派生的样本重复相加：`node_traffic_samples` 视图仅在同一 epoch 没有 node 游标时才使用账户样本。因此“今天流量”“每月节点流量”“访问审计的节点汇总”在两类节点上都成立，混合核心节点不会被计两遍；用户维度仍只来自账户计数，官方 sing-box 无 `with_v2ray_api` 时用户字节仍未知。Xray 的节点总量是账户计数加上**已渲染端口转发入站**的原生入站计数：转发 tag 白名单随渲染确定，读取时多一次 `inbound>>>` 查询（`Reset_=false`），只接受白名单内精确的 `uplink`/`downlink` 键，用户入站、管理 API 与其他入站统计一律忽略，因此不会重复计算用户字节；sing-box 取核心自身总量（含转发）。端口转发没有账户，这些字节仍不进入用户额度、设备计数或域名归属；升级前启动的旧 Agent 只报账户之和，缺失字节不补记（v1.2.0 实机 H7c 只确认 sing-box 含转发，v1.3.0 P2 起 Xray 同样计入）。
+节点/核心总量：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志；声明后 Agent 额外上报每核心的累计节点计数（`traffic.Counter{kind:"node"}`），面板只在协商成功的会话内接受这些批次，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为平台运行的任一核心类型（`xray`/`sing-box`/`gost`）、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB。面板按（节点、epoch、`node`）保存游标并计算增量，写入 `core_traffic_samples` 作为每核心/每节点总量；重复批次幂等，同一节点可有多个活跃 epoch，一个核心上报不会淘汰另一个的 epoch。这些字节**不进入用户额度**，也不与账户派生的样本重复相加：`node_traffic_samples` 视图仅在同一 epoch 没有 node 游标时才使用账户样本。因此“今天流量”“每月节点流量”“访问审计的节点汇总”在两类节点上都成立，混合核心节点不会被计两遍；用户维度仍只来自账户计数，官方 sing-box 无 `with_v2ray_api` 时用户字节仍未知。Xray 的节点总量是账户计数加上**已渲染端口转发入站**的原生入站计数：转发 tag 白名单随渲染确定，读取时多一次 `inbound>>>` 查询（`Reset_=false`），只接受白名单内精确的 `uplink`/`downlink` 键，用户入站、管理 API 与其他入站统计一律忽略，因此不会重复计算用户字节；sing-box 取核心自身总量（含转发）。端口转发没有账户，这些字节仍不进入用户额度、设备计数或域名归属；升级前启动的旧 Agent 只报账户之和，缺失字节不补记（v1.2.0 实机 H7c 只确认 sing-box 含转发，v1.3.0 P2 起 Xray 同样计入）。
 
 **整机流量（v1.3 T1，与上面的代理流量分开）**：不进入用户额度、订阅或任何派生的代理统计。Agent 在心跳里上报各非 lo 网卡的累计字节、`bootId` 和 IPv4 默认路由网卡；面板在同一心跳事务里按（服务器、网卡、本地日期）写入差值到 `node_machine_traffic_daily`（0126），首次采样、重启或计数回退只重建基线，同一次启动内的断线区间按时间比例分摊到跨过的日期。日行保留全部网卡，但摘要只汇总**一张**网卡：显式 `interfaceName`，否则最近新鲜心跳的默认路由网卡；不同网卡不求和、不拼接，切换网卡按所选网卡重算本期。周期是从重置日（1–31，短月份取该月最后一天，面板时区）起算的半开区间，方法为 `sum`（入站 + 出站）、`outbound`（仅出站）或 `max`（两个方向的较大值）。本期没有日行或解析不到网卡是用量未知（`null`，界面“—”）；已有日行但没有当前新鲜采样时为 `stale`（界面“截至上次采样”）。限制（[运维手册](docs/operations.md) §18 有全文）：整机流量按所选单张网卡统计，包含所有服务，不等于代理流量或供应商账单；LXC 只能看到容器自己的网卡，不能统计物理宿主机；首次采样仅建立基线；Agent 离线期间若主机重启，跨重启流量无法补计，同次启动的离线流量可由累计计数补计但跨日按时间比例估算；网卡计数重置会重新建立基线；自动网卡来自 IPv4 默认路由，策略路由或 IPv6-only 须手动选择；修改网卡会重算所选网卡的本期；修改面板时区后，之后的流量按新时区分日，已记录的日数据不重新分桶。额度只用于展示，不限速、不停用服务。
 
@@ -1240,7 +1244,7 @@ v1.1 内部身份字段继续用于流量归属与补传，界面隐藏设备维
 
 # 22. 配置发布与回滚
 
-双核心节点一条 Revision 覆盖所有核心，`core.json.enc` 内保存按核心名分组的原生 JSON；恢复继续从经过校验的 DesiredState 重建运行时，兼容旧单核心修订。所有活跃核心先原生校验，再按配置顺序切换；失败逆序补偿回滚。每个核心使用 `runtime/<core>/` 下独立的运行标记、accounting key、访问日志和临时文件；无启用入站的核心保持停止。心跳新增逐核心状态，旧 `core_healthy` 为 AND；supervisor 仅恢复异常核心，并分别退避。
+双核心节点一条 Revision 覆盖所有核心，`core.json.enc` 内保存按核心名分组的原生 JSON；恢复继续从经过校验的 DesiredState 重建运行时，兼容旧单核心修订。所有活跃核心先原生校验，再按配置顺序切换；失败逆序补偿回滚。每个核心使用 `runtime/<core>/` 下独立的运行标记、accounting key、访问日志和临时文件；无启用入站的核心保持停止。心跳新增逐核心状态，旧 `core_healthy` 为 AND；supervisor 仅恢复异常核心，并分别退避。三核心（含 GOST）同样是一条 Revision。**一次发布按当前实现重启该节点的全部核心**：GOST 的改动会一起重启同节点的 Xray 与 sing-box，反之亦然（即使某个核心的渲染配置没有变化），所以发布窗口内该节点所有用户的既有连接会短暂中断；GOST 崩溃的恢复仍是逐核心的 supervisor 恢复，不影响其他进程。
 
 后台配置修改后，不直接覆盖节点当前运行配置。
 
@@ -1338,6 +1342,7 @@ Agent 校验 URL 前缀与重定向主机，校验归档 SHA-256
 ```
 
 - Xray 只接受官方发布前缀；sing-box 还接受严格匹配的 qui 发布归档 `sing-box-<版本>-qui.<序号>-linux-<架构>.tar.gz`。面板与 Agent 都检查来源；只有声明新能力的 Agent 才能排队 qui 来源，旧 Agent 明确拒绝。没有可信摘要不安装。
+- **GOST 是固定版本（v1.3 G1）**：唯一接受 `v3.3.2` 标签、`gost_3.3.2_linux_amd64.tar.gz` 资产、版本 `3.3.2` 与归档摘要 `162feb43…a9d18274`（该摘要是**归档**摘要，不是安装后二进制的摘要）。前缀 `https://github.com/go-gost/gost/releases/download/`，资产名用下划线分隔，通用连字符平台匹配对它不适用；其他版本必须先更新这条经审阅的固定值并重跑 G0 回归。规则只在 `pkg/contracts/release` 定义（`CoreAssetURL`、`CoreAssetMatches`、`CorePinnedTarget`），面板与 Agent 复用同一处，不各自复制。排队安装缺失的 GOST 还要求当前会话的 `Hello.gost_core_supported` 为真（面板持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新），并且只支持 linux/amd64；只声明多核心不足以排队 GOST。
 - 卡住的任务在节点重连时关闭，Owner 也可以显式清理。
 - Agent 的核心更新结果在收到面板 Ack 前一直保留在 core-update worker 的内存队列里（先发最早的一个）：连接在等 Ack 时断开就在下一个会话重发，面板对相同结果幂等并确认；面板以 `FailedPrecondition` + `core update result rejected` 永久拒绝同一结果（例如任务已被 Owner 清除）连续 3 次后 Agent 丢弃并记 Warn，其他错误（网络、`Unavailable`、上下文取消）永不丢弃。该队列只在内存里，Agent 重启会丢失，由上面的重连关闭与 Owner 清理兜底。
 - **Agent 自身的更新仍使用签名清单**（Ed25519，公钥固定在配置里，按安装历史防重放），不使用 URL + SHA-256。
@@ -1371,7 +1376,8 @@ proxy-agent
 │
 ├─ Compiler
 │   ├─ Xray 配置编译器
-│   └─ sing-box 配置编译器
+│   ├─ sing-box 配置编译器
+│   └─ GOST 配置编译器（JSON 持久化，执行前生成 YAML）
 │
 ├─ Core Supervisor
 │   └─ 启动、停止、重载、健康检查
@@ -1411,13 +1417,13 @@ Node Agent 不允许提供：
 - 应用/清除服务器调优（K2a，变更 L2）：只接受 13 个固定 sysctl 键及边界；root helper 直接写 procfs、读回核对并原子保存 99-proxy-tuning.conf，失败恢复原值，清除恢复首次应用前快照；无 shell、无任意 sysctl（面板侧流程见第 22.0 节，helper 单元见第 30.2 节）
 - 应用有 TTL 的设备门控（Xray 官方运行时规则 API / sing-box Clash 连接关闭），不走配置 Revision，不重启核心
 - TCP-connect 探测（已解析 IP、端口、次数、超时与截止时间；Agent 再校验，最多 10 次、每次 3 秒，无 shell）
-- 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override，按能力拒绝旧 Agent；经正常配置发布）
+- 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override / GOST `tcp`、`udp` 转发服务，按能力拒绝旧 Agent；经正常配置发布）
 
 TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。
 
 K3b 计量与协商的结论：节点与核心总量的协商、校验与去重规则见第 21 节；多核心设备准入的源地址合并见第 9.2 节。
 
-核心健康检查按分支判定恢复：`Health` 每次调用仍即时检查监听端口（心跳、Owner 健康检查、启动就绪、应用后核对与核心更新激活的语义不变），但巡检把 `core.ErrListenerUnavailable` 的失败视为“监听未应答”，须连续 3 次（每 3 秒一次）才触发恢复，其他不健康（退出、未确认停止、路由恢复、无原因）仍立即恢复，恢复失败沿用原退避并在成功、修订变化或组件更新后重新计数；一次拨号失败不得重启仍在服务的核心，因为重启会断开该节点全部连接。多核心节点逐核心判定，全部健康时不再对聚合 `Health` 二次采样。
+核心健康检查按分支判定恢复：`Health` 每次调用仍即时检查监听端口（心跳、Owner 健康检查、启动就绪、应用后核对与核心更新激活的语义不变），但巡检把 `core.ErrListenerUnavailable` 的失败视为“监听未应答”，须连续 3 次（每 3 秒一次）才触发恢复，其他不健康（退出、未确认停止、路由恢复、无原因）仍立即恢复，恢复失败沿用原退避并在成功、修订变化或组件更新后重新计数；一次拨号失败不得重启仍在服务的核心，因为重启会断开该节点全部连接。多核心节点逐核心判定，全部健康时不再对聚合 `Health` 二次采样。GOST 的健康含义是**运行期转发可用**：确切子进程存活 ＋ 每个生产 TCP 监听可拨通 ＋ 每个生产 UDP socket 归该子进程所有，失败带 `core.ErrListenerUnavailable` 并指明监听；指标（本地 unix socket 上的 Prometheus 文本）读取失败只改统计源状态，不判核心不健康，目标 IP 是否可达也不属于核心健康（用现有 TCP 探测与实机验收判断）。
 
 ---
 
@@ -1637,6 +1643,7 @@ K4 新增迁移（仅在升级/恢复数据库时应用）：
 | 0122 `node_group_entries` | `node_group_inbounds`、`node_group_imports`；服务器成员转入站、旧来源授权转生成分组；`node_meta.port_range_start/end`（同时为空或 1–65535 的有序范围），迁移备注末尾有效 `[ports:A-B]` |
 | 0123 `node_metrics_tuning` | `node_metric_samples`：可空分钟遥测、7 天保留、不进便携备份；`node_tuning`：完整期望 profile、request_id、状态与逐键回执，随备份保留，恢复以当前状态为准且不重发 |
 | 0126 `node_machine_traffic` | `node_machine_traffic_settings`（每服务器 method/interface_name/可空 allowance_bytes 1–2^53-1/reset_day 1–31，默认 sum/''/NULL/1）、`node_machine_traffic_daily`（主键（服务器、网卡、本地日期），非负 rx/tx 字节，长期保留，非遥测）、`node_machine_traffic_cursors`（每（服务器、网卡）的 boot_id 与累计字节，用于增量）；无时区列，按写入时的面板时区分日（第 21 节） |
+| 0127 `gost_core` | 五个表的核心名 CHECK 接受 `gost`：`inbounds.core` 用「新增替代列＋复制＋删旧列＋改名」原地替换（最终 `core IN ('','xray','sing-box','gost')`，id、外键、中转变更与 K4 删除触发器不变）；`core_update_tasks`（含 `adding`，保留唯一活跃 `(node_id,component)` 索引）、`core_remove_tasks`（保留唯一活跃索引）、`node_traffic_cursors`、`core_traffic_samples`（保留 `core_traffic_time`）按显式列名事务重建，`node_traffic_samples` 视图删除后按原定义重建；新增 `nodes.gost_core_supported`（0/1，默认 0，恢复清零、重连刷新） |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1878,6 +1885,8 @@ Agent 上报消息包括：
 
 Heartbeat 省略即缺测，实测 0 保留。v1.3 增加 `boot_id`（字段 34）与 `default_route_interface`（字段 35）供整机流量记账（第 21 节）：两者各自独立，读取失败只省略自己的字段，旧面板忽略未知字段。整机网卡的累计字节沿用既有 `interfaces`（字段 20）。
 
+GOST（v1.3 G1）只增加两个字段，不新增消息：`Hello.gost_core_supported`（字段 13，bool）表示该 Agent 懂 GOST 组件的安装与移除——即使 GOST 尚未安装；`CoreCapability.gost_contract_version`（字段 9，uint32）表示 GOST 设置契约版本（1 = 基础转发，G2/G3 递增；0 = 不支持）。GOST 设置随既有 `ApplyCommand.desired_state_json` 下发，不占用独立字段；没有新的 Welcome 标志，多核心与节点流量协商照旧。面板把 Hello 标志持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新，不用 Agent 版本号文本推断；旧 Agent 无法收到 GOST 分配。
+
 中央端下发消息包括：
 
 - Welcome
@@ -2016,12 +2025,20 @@ Heartbeat 省略即缺测，实测 0 保留。v1.3 增加 `boot_id`（字段 34�
 两种初始化系统共用 `/usr/local/lib/proxycontrol/service.sh`，安装记录第 10 行为 `openrc` 时表示 OpenRC 安装。
 
 K3c / MC4：install.sh 与 node-install.sh
-支持重复 `--core xray --core sing-box`；新节点不传参数仍只安装 Xray。
-Xray、sing-box 分别位于 `/usr/local/lib/proxy-agent/<name>`，保持原架构/libc
+支持重复 `--core xray --core sing-box --core gost`；新节点不传参数仍只安装 Xray。
+Xray、sing-box 与 GOST 分别位于 `/usr/local/lib/proxy-agent/<name>`（GOST 为
+`/usr/local/lib/proxy-agent/gost`，固定官方 3.3.2、静态链接，glibc 与 Alpine/musl
+共用同一个 linux/amd64 归档，其他架构明确拒绝），保持原架构/libc
 校验、Alpine musl 归档与同版本 qui sing-box 选项。新装或显式安装核心时将 Agent 顶层配置
 规范化为 `cores: [{name, path}]`，并保留第一个核心的 `core_name/core_path`
 供旧 Agent 兼容，其余配置与身份数据保留；手工版本/URL/摘要参数紧跟对应核心。
 升级不传核心参数保留全部已记录核心和已有 config 原文（兼容旧键），显式参数只替换/追加，不用省略表示删除。
+`--core-source qui|official` 只作用于 sing-box；GOST 始终取自官方固定版本。
+GOST 没有独立的 systemd/OpenRC 单元：它由 Agent 作为子进程托管（`runtime/gost/`），
+安装记录的行为 `core gost /usr/local/lib/proxy-agent/gost <二进制 sha256>`，
+`service.sh`、enroll/续证脚本、`update.sh`、`update-recovery.sh` 与卸载的固定路径集合都包含它。
+**降级**：把 Agent 降到低于 1.3 之前必须先移除 GOST 核心（面板“内核管理 → 移除”），
+否则旧 Agent 不认第三种核心类型。
 
 安装记录写 v2：第 1 行 `proxycontrol-install-v2`，第 2–4 行组件/程序摘要/
 主服务摘要，第 5/6 行空，第 7 行 installed，第 8/9 行强制出站摘要，第 10 行
@@ -2047,7 +2064,7 @@ K2a 调优。升级与多核心安装在 H3、H5、H4 实机通过；全新安�
 
 K2b 的 node_metric_samples 同延迟采样从快照删除并 VACUUM，恢复候选再次清空，不影响运行库样本。node_tuning 属于配置并纳入备份、校验和清单；恢复以当前库调优行为准，删除仅存在于归档的行，保留当前期望/结果，pending 改为 unconfirmed，且不重发请求；旧归档在迁移后按同一规则合并。恢复不会写宿主 sysctl，仍须核对后续 tuningCurrent。
 
-K3b：`inbounds.core`、`nodes.multi_core_supported/node_traffic_supported`、`node_health_checks.core`、`node_restart_requests.core`、`core_update_tasks.adding` 与 `core_remove_tasks` 都属于配置，随备份保留并由 `validateMultiCore` 校验（结果 JSON 必须与行内的 id/component/revision/code/status 一致，同一（节点、组件）不能同时有排队中的添加与移除）。恢复时清空 `core_remove_tasks` 后从归档复制，归档里 queued/running 的移除与核心更新任务一律改为 unconfirmed 且不重发（未确认不等于没执行）；`node_traffic_cursors` 与 `core_traffic_samples` 是累计游标与已观察增量，随访问数据一起恢复，避免恢复后把同一段字节再记一次。
+K3b：`inbounds.core`、`nodes.multi_core_supported/node_traffic_supported/gost_core_supported`、`node_health_checks.core`、`node_restart_requests.core`、`core_update_tasks.adding` 与 `core_remove_tasks` 都属于配置，随备份保留并由 `validateMultiCore` 校验（结果 JSON 必须与行内的 id/component/revision/code/status 一致，同一（节点、组件）不能同时有排队中的添加与移除）。恢复时清空 `core_remove_tasks` 后从归档复制，归档里 queued/running 的移除与核心更新任务一律改为 unconfirmed 且不重发（未确认不等于没执行）；`node_traffic_cursors` 与 `core_traffic_samples` 是累计游标与已观察增量，随访问数据一起恢复，避免恢复后把同一段字节再记一次。
 
 T1 的 `node_machine_traffic_settings`、`node_machine_traffic_daily` 与 `node_machine_traffic_cursors` 是配置与持久整机用量，不是 7 天遥测：不清空、不随采样保留期删除，全部进入加密备份并由 `validateMachineTraffic` 校验（设置/日期/字节/外键/主键，0126 之前没有这三张表也算合法），清单新增三项计数。恢复以冻结的当前库为准：当前库已迁移到 0126 时整表（设置、日行、游标一起）复制当前数据，既不丢当前用量也不与归档重复计账；当前库早于 0126 时保留归档中的机器表。空表同样是权威结果，不因空而复活归档用量。
 

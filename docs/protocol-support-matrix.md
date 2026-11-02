@@ -47,6 +47,17 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 - **节点出站源地址（节点级，与协议无关）**：Xray 在每个拨号出站上渲染 `sendThrough` + `streamSettings.sockopt.interface`，地址族用 `freedom` 的 `settings.domainStrategy`、其他协议用 `sockopt.domainStrategy` 固定（`ForceIPv4`/`ForceIPv6`）；sing-box 渲染 `inet4/inet6_bind_address` + `bind_interface` 与限族的 `domain_resolver`（`ipv4_only`/`ipv6_only`）。`blackhole`/`block` 出站、sing-box 的 `selector`/`urltest` 组不渲染（组由上游在运行时选成员），sing-box 只固定出站 WireGuard 端点、入站端点仅监听。目标为另一族的字面量 IP 时连接失败。整机服务器强制出站是内核 SNAT，与协议无关，见[运维手册](operations.md)第 9 节。
 
 
+### GOST（v1.3 G1）
+
+`pkg/contracts/desiredstate/support.go` 只在 `forward` 行里加入 `gost` 条目；其他每一行都不含 `gost` 键，因此 `proxy.ValidateCoreProtocol` 对已知核心遇到没有该键的行直接拒绝。「GOST 仅承载转发」由这张共享表加 `desiredstate.State.Validate` 一处判定，不另加重复的 SQL 协议规则；Web 入站核心选择器同样只为 `forward` 提供 GOST，并要求 `Capabilities.cores` 已确认该核心启用。
+
+| 协议 | 方向 | 传输 | 安全 | GOST 3.3.2 | 依据 |
+| --- | --- | --- | --- | --- | --- |
+| forward（GOST） | 入站 | tcp+udp | none | `implemented_pending_acceptance` | 官方 GOST `tcp`/`udp` 转发服务直连目标；没有用户身份、账户计量、额度、设备门控、订阅、源地址观测或域名记录，也没有出站、分流与出口组（唯一要求是启用中的 `direct` 默认出站） |
+
+固定版本、安装方式与运行健康含义见[部署与升级](deployment.md)与[运维手册](operations.md)，契约见 [GOST 设计](v1.3-design-gost.md)。
+
+
 ## 3. 平台能力维度
 
 表内每行的 `implemented` / `pending` / `not_applicable` 描述协议本身携带的平台能力：

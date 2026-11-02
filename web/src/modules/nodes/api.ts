@@ -39,9 +39,11 @@ export const releaseRepository = 'jingniao/qui';
 // on the node may add, so the script is never fetched without verified TLS.
 export function installCommand(input: { version: string; host: string; httpPort: number; grpcPort: number; caSha256: string; token: string; core?: string; cores?: CoreName[] }): string {
   // `--core` is repeatable in the K3c installer: one flag per selected core. The
-  // selection is deduplicated and allowlisted; the default remains ["xray"].
+  // selection is deduplicated and allowlisted; the default remains ["xray"]. GOST
+  // ships one linux/amd64 archive, so the installer itself refuses that flag on
+  // any other platform.
   const selected = [...new Set(input.cores ?? (input.core ? [input.core] : ["xray"]))];
-  if (!selected.length || selected.some(core => core !== 'xray' && core !== 'sing-box')) throw new Error('请至少选择一个运行内核（xray 或 sing-box）');
+  if (!selected.length || selected.some(core => core !== 'xray' && core !== 'sing-box' && core !== 'gost')) throw new Error('请至少选择一个运行内核（xray、sing-box 或 gost）');
   const coreFlags = selected.map(core => ` --core ${core}`).join("");
   const port = input.httpPort === 443 ? '' : ` --http-port ${input.httpPort}`;
   const bootstrap = 'if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; '
@@ -130,6 +132,6 @@ export interface MachineTrafficSummary {
 export interface MachineTrafficBatch { items: MachineTrafficSummary[]; timezone: string; }
 export interface NodeTuning { supported:boolean; desired:Record<string,string>; requestId:string|null; status:'pending'|'applied'|'cleared'|'failed'|'unconfirmed'; result:{requestId?:string;status?:string;keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null; requestedAt:string|null; updatedAt:string|null; current:Record<string,string>; }
 
-export type CoreName = 'xray' | 'sing-box';
+export type CoreName = 'xray' | 'sing-box' | 'gost';
 export interface CoreCapability { name:CoreName; version?:string; protocols?:{protocol:string;inbound?:boolean;outbound?:boolean;tcp?:boolean;udp?:boolean}[]; singbox_user_stats?:boolean; forward_inbound_supported?:boolean; device_gate_supported?:boolean; healthy?:boolean; observation_contract_version?:number; }
 export interface CoreStatus { name:CoreName; healthy:boolean; error?:string; started_at?:{seconds?:number;nanos?:number}; traffic_source_status?:TrafficSourceStatus; }

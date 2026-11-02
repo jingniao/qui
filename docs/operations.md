@@ -404,11 +404,24 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 **给入站指定核心**：入站表单的 `core` 留空表示“当前主核心”，不要为了跟主核心显式绑定而填值——主核心换人后空值会跟着走，显式值不会。保存与发布都会按该核心的能力拒绝不支持的协议、转发入站、WireGuard 与设备门控；同一节点的监听端口在所有核心与端口转发之间**唯一**（同一数字端口即使传输不同也不能复用）。
 
-**添加缺失核心**：系统 → 核心版本，`POST /api/v1/core-updates`，`component` 填 `xray` 或 `sing-box`，并带当前已确认修订、官方（或严格匹配的 qui）资源 URL 与归档 SHA-256。每个（节点、组件）同时只有一个活跃任务，两个组件可以同时排队。任务 `success` 只表示镜像切换成功；只有下一次能力上报里出现该组件，它才会从 `core_selectionBlocked` 消失并可选为入站核心。
+**添加缺失核心**：系统 → 核心版本，`POST /api/v1/core-updates`，`component` 填 `xray`、`sing-box` 或 `gost`，并带当前已确认修订、官方（或严格匹配的 qui）资源 URL 与归档 SHA-256；GOST 的版本、URL 与摘要固定，见第 20 节。每个（节点、组件）同时只有一个活跃任务，不同组件可以同时排队。任务 `success` 只表示镜像切换成功；只有下一次能力上报里出现该组件，它才会从 `core_selectionBlocked` 消失并可选为入站核心。
 
 **移除核心**：先删掉该组件上的所有入站（包括禁用的），发布并确认该修订，然后 `POST /api/v1/nodes/{id}/cores/{component}/remove`（带 `confirmNodeId` 与当前已确认修订）。拒绝码：`core_in_use`（错误体 `inboundIds` 列出仍占用该组件的入站）、`core_pending`（该组件正在添加/移除或有部署占用）、`last_core`（最后一个启用核心不能移除）、`revision_mismatch`（提交的修订不是当前已确认修订）。断线后用同一 id 重发即可，回执幂等；在能力上报确认之前该组件仍然显示。安装器拥有的二进制不会被 Agent 删除，只会被禁用，重新安装同组件即重新启用。移除后要回滚到使用该组件的历史修订会被拒绝（`rollback refused: …`），必须先装回组件或发布一份显式指定核心的新修订。
 
-**逐核心重启/健康检查**：`POST /api/v1/nodes/{id}/restart-core` 与 `/health-checks` 的 `core` 留空是整节点操作，填 `xray`/`sing-box` 只作用于该核心；历史回滚始终是整节点。执行结果在 `GET` 同名路径的历史里带 `core`。
+**逐核心重启/健康检查**：`POST /api/v1/nodes/{id}/restart-core` 与 `/health-checks` 的 `core` 留空是整节点操作，填 `xray`/`sing-box`/`gost` 只作用于该核心；历史回滚始终是整节点。执行结果在 `GET` 同名路径的历史里带 `core`。
 
 **按核心计量**：协商了 `node_traffic_supported` 的 Agent 会额外上报每核心的节点累计计数。这些字节只进入节点/核心总量（`GET /api/v1/traffic/summary`、每月节点流量、总览），不进入用户额度；同一 epoch 已有 node 游标时账户样本不再重复计入。用户维度仍只看账户计数，官方 sing-box（无 `with_v2ray_api`）的用户字节依然未知。同一节点可以有多个活跃 epoch，一个核心上报不会淘汰另一个；节点重启后新旧 epoch 各自从零累计，不影响总量。Xray 的节点累计计数 = 账户计数 + 已渲染端口转发入站的原生入站计数：读取时多一次 `inbound>>>` 查询，只接受当前渲染的转发 tag，用户入站、管理 API 与其他入站统计忽略（v1.3.0 P2）。这些转发字节仍不归属用户或域名，也不进入订阅与设备限制；升级前启动的旧 Agent 只报账户之和，缺失的字节不补记。
+
+
+## 20. GOST 运维（v1.3 G1，待实机）
+
+**它是什么**：GOST 是第三种核心类型，只做端口转发（`forward` 入站，TCP/UDP），固定官方 3.3.2，只有 linux/amd64。它不承载用户：没有凭据、订阅、额度、设备门控与域名记录，凡是在页面上找不到“GOST 用户”的入口，都是设计如此，不是缺页。
+
+**装在哪里、怎么跑**：二进制 `/usr/local/lib/proxy-agent/gost`（安装器持有，Agent 只禁用不删除）；Agent 把该修订的原生 JSON 生成为 `<Agent 状态目录>/runtime/gost/config.yaml` 后启动子进程，没有独立的 systemd/OpenRC 单元。日志级别固定 `warn`、格式 `text`（默认级别会按连接刷屏并淹没 journald），子进程 stderr 只保留最近 4 KiB 作为失败原因。空闲常驻内存约 45 MB（G0 实测口径），远高于 Xray 与 sing-box，因此只在确实需要转发的节点上安装。指标只走运行时目录内私有 unix socket `runtime/gost/metrics.sock`（配置里写成 `unix://…`），不开放 HTTP、pprof 或任何公开监听；该 socket 提供节点累计字节，供节点总量使用。
+
+**健康怎么读**：GOST 的“健康”只表示**运行期转发可用**——确切子进程存活 ＋ 每个生产 TCP 监听可拨通 ＋ 每个生产 UDP socket 归属该子进程。失败会带 `core.ErrListenerUnavailable` 并在错误里点名监听地址，逐核心健康与错误码见节点详情与 `GET /api/v1/nodes/{id}/health-checks`。两点不要误读：指标读取失败只改统计源状态，不判核心不健康；**目标 IP 是否可达不属于核心健康**，`tcp-probes` 与手工验证才说明目标状态。
+
+**发布与重启**：配置改动走正常发布；当前实现一次发布会重启该节点的**全部**核心，所以新增/修改 GOST 转发会短暂中断同节点 Xray 与 sing-box 的连接，反之亦然。GOST 进程崩溃只由它自己的 supervisor 槽位按既有退避恢复，不会重启其他核心。发布失败按第 10 节的回滚规则回到上一镜像/上一修订。
+
+**安装、更新与移除**：面板“系统 → 核心版本 → 添加内核”选 GOST 会预填 3.3.2、固定 URL 与归档摘要，其它版本/摘要一律拒绝；排队还要求该 Agent 上报了 `Hello.gost_core_supported` 且平台是 linux/amd64。移除走“内核管理 → 移除”，前置条件与其他核心相同（当前草稿与已发布修订都没有 GOST 入站、不是最后一个核心）。**把 Agent 降级到 1.3 以下之前必须先移除 GOST**。
 

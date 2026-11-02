@@ -103,10 +103,15 @@ func protocol(value string, outbound bool) bool {
 // (desiredstate.CoreSupport, docs/protocol-support-matrix.md). A core the
 // matrix does not describe - including a node that has not reported one yet -
 // is left to the node's runtime capability report, which the Agent enforces
-// when it renders the configuration.
+// when it renders the configuration. A described core that is absent from a
+// protocol's row cannot carry it: GOST is forward-only, so every other row
+// refuses it here instead of falling through to the unknown-core branch.
 func ValidateCoreProtocol(core, protocol string, inbound bool) error {
 	support, ok := desiredstate.CoreSupportFor(core, protocol)
 	if !ok {
+		if desiredstate.KnownCore(core) && (desiredstate.SupportsInbound(protocol) || desiredstate.SupportsOutbound(protocol)) {
+			return fmt.Errorf("protocol %s is not supported by the node's %s core", protocol, core)
+		}
 		return nil
 	}
 	if inbound && !support.Inbound {

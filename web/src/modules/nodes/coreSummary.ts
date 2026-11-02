@@ -22,15 +22,16 @@ export interface NodeCore {
   primary: boolean;
 }
 
-export const CORE_NAMES: CoreName[] = ['xray', 'sing-box'];
+export const CORE_NAMES: CoreName[] = ['xray', 'sing-box', 'gost'];
 
 export function isCoreName(value: unknown): value is CoreName {
-  return value === 'xray' || value === 'sing-box';
+  return value === 'xray' || value === 'sing-box' || value === 'gost';
 }
 
 export function coreLabel(name: CoreName | string | undefined): string {
   if (name === 'xray') return 'Xray';
   if (name === 'sing-box') return 'sing-box';
+  if (name === 'gost') return 'GOST';
   return name || '—';
 }
 

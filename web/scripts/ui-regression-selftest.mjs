@@ -7,7 +7,15 @@ assert.doesNotMatch(read('modules/nodes/components/serverMetricsModel.ts'), /Mat
 const meta = read('modules/nodes/nodeMeta.ts');
 const saveMeta = meta.slice(meta.indexOf('export async function saveNodeMeta'));
 assert.doesNotMatch(saveMeta, /\.\.\.meta\b/, 'metadata request must whitelist API fields');
-assert.doesNotMatch(read('modules/system/components/NodeVersionPanel.vue'), /\b[a-f0-9]{64}\b/i, 'core hashes must be supplied by Owner');
+// The panel never invents a digest: the Owner pastes the vendor's published
+// checksums. The one exception is a reviewed pin, where the archive digest is
+// part of the contract (pkg/contracts/release GostArchiveSHA256), so exactly this
+// literal may appear in the UI and nowhere else.
+const reviewedPin = '162feb43b1c284dbea599cdfe898169931af875233060dedc19432c7a9d18274';
+const digestsOf = text => (text.match(/\b[a-f0-9]{64}\b/gi) || []).map(digest => digest.toLowerCase());
+for (const digest of digestsOf(read('modules/system/components/NodeVersionPanel.vue'))) {
+  assert.equal(digest, reviewedPin, 'core hashes must be supplied by Owner');
+}
 const proxy = read('modules/proxy/pages/ProxyNodeListPage.vue');
 const saveSub = proxy.slice(proxy.indexOf('async function saveEditSub'), proxy.indexOf('function formatInterval'));
 assert.doesNotMatch(saveSub, /userIds\s*:\s*\[\s*\]/, 'editing a source must preserve grants');
@@ -66,7 +74,7 @@ assert.match(versionPanel, /nodes\/coreSummary/, 'the cores page uses the shared
 assert.match(versionPanel, /capabilities\.cores|nodeCores\(/, 'installed cores come from capabilities.cores (old Agents: one core)');
 assert.match(read('modules/nodes/coreSummary.ts'), /heartbeat\?\.cores/, 'per-core health comes from the heartbeat');
 assert.doesNotMatch(versionPanel, /localStorage[^\n]*[Cc]ore/, 'cores must never be read from or written to browser storage');
-assert.doesNotMatch(versionPanel, /\b[a-f0-9]{64}\b/i, 'the Owner pastes the SHA-256; the panel ships no digest literal');
+assert.deepEqual(digestsOf(versionPanel).filter(digest => digest !== reviewedPin), [], 'the Owner pastes the SHA-256; only the reviewed GOST pin ships a digest literal');
 assert.match(versionPanel, /coreUpdatesAPI\.queue\(/, '添加/升级内核 uses POST /core-updates');
 assert.match(versionPanel, /coreUpdatesAPI\.remove\(/, '删除内核 uses the real remove-core API');
 assert.match(versionPanel, /coreUpdatesAPI\.removals\(/, 'removal tasks come from the removal history endpoint');
@@ -97,7 +105,8 @@ assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'sing-box'] }
 assert.match(nodesApi.installCommand({ ...install, cores: ['sing-box', 'sing-box'] }), /--core sing-box$/, 'the selection is deduplicated');
 assert.match(nodesApi.installCommand({ ...install, httpPort: 8443 }), /--http-port 8443/, 'a non-443 panel port is still passed');
 assert.throws(() => nodesApi.installCommand({ ...install, cores: [] }), /内核/, 'an empty selection is refused');
-assert.throws(() => nodesApi.installCommand({ ...install, cores: ['gost'] }), /内核/, 'an unknown core name is refused');
+assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'gost'] }), /--core xray --core gost$/, 'GOST joined the installer cores in v1.3');
+assert.throws(() => nodesApi.installCommand({ ...install, cores: ['v2ray'] }), /内核/, 'an unknown core name is refused');
 console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated allowlist, rest of the command unchanged');
 
 // The editor's local port check follows the Agent's node-wide numeric rule: a TCP
@@ -266,9 +275,13 @@ console.log('PASS review 1: online/degraded upgrades, enrollment and heartbeat b
 
 const reviewNodeProps = { node: { capabilities: { core_name: 'xray', cores: [{ name: 'sing-box' }] } } };
 const serverNodesPath = 'modules/nodes/components/detail/ServerNodes.vue';
-const reviewNodes = vueSubset(serverNodesPath, ['inboundCoreName'], { props: reviewNodeProps });
+// The badge text comes from the shared per-core view, so the run uses the real
+// helper instead of a copy of the labels.
+const coreSummary = await import(await tsModuleUrl(new URL('../src/modules/nodes/coreSummary.ts', import.meta.url)));
+const reviewNodes = vueSubset(serverNodesPath, ['inboundCoreName'], { props: reviewNodeProps, isCoreName: coreSummary.isCoreName, coreLabel: coreSummary.coreLabel });
 assert.equal(reviewNodes.inboundCoreName({ core: 'sing-box' }), 'sing-box');
 assert.equal(reviewNodes.inboundCoreName({ core: 'xray' }), 'Xray');
+assert.equal(reviewNodes.inboundCoreName({ core: 'gost' }), 'GOST');
 assert.equal(reviewNodes.inboundCoreName({ core: '' }), 'Xray');
 reviewNodeProps.node.capabilities.core_name = '';
 assert.equal(reviewNodes.inboundCoreName({ core: '' }), 'sing-box');

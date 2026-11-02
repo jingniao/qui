@@ -972,7 +972,7 @@
                 <svg v-else class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
-                <span>确认添加内核 ({{ addCoreForm.component === 'xray' ? 'Xray-core' : 'sing-box' }})</span>
+                <span>确认添加内核 ({{ addCoreForm.component === 'xray' ? 'Xray-core' : coreLabel(addCoreForm.component) }})</span>
               </button>
             </div>
           </div>
@@ -1175,7 +1175,7 @@ import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../../nodes/api';
 import { proxyAPI, type Inbound } from '../../proxy/api';
-import { blockedCores, coreSummaryLabel, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
+import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
 import { agentUpdatesAPI } from '../agentUpdatesApi';
 import { coreUpdatesAPI, type CoreRemoveTask, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
@@ -1303,7 +1303,11 @@ interface CorePreset {
   version: string;
   label: string;
   amd64Url: string;
+  // Empty when the release has no arm64 asset at all (the pinned GOST archive).
   arm64Url: string;
+  // Only a reviewed pin carries its own archive digest; every other core's digest
+  // is pasted by the Owner from the vendor's published checksums.
+  sha256?: string;
 }
 
 export interface InstalledCoreInfo {
@@ -1345,13 +1349,25 @@ const CORE_PRESETS: Record<string, CorePreset[]> = {
       amd64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz',
       arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-arm64.tar.gz'
     }
+  ],
+  // GOST is a reviewed pin (docs/v1.3-design-gost.md 3.1): exactly one official
+  // archive, one version and one archive digest. The panel and the Agent both
+  // refuse any other combination, so the digest travels with the preset.
+  gost: [
+    {
+      version: '3.3.2',
+      label: 'v3.3.2 (固定版本)',
+      amd64Url: 'https://github.com/go-gost/gost/releases/download/v3.3.2/gost_3.3.2_linux_amd64.tar.gz',
+      arm64Url: '',
+      sha256: '162feb43b1c284dbea599cdfe898169931af875233060dedc19432c7a9d18274'
+    }
   ]
 };
 
 // ========================================================
 // MULTI-CORE INSTALLED STATE MANAGEMENT
 // ========================================================
-const CORE_ORDER: CoreName[] = ['xray', 'sing-box'];
+const CORE_ORDER: CoreName[] = ['xray', 'sing-box', 'gost'];
 // The list comes from the backend's per-core data (capabilities.cores with the
 // heartbeat's per-core health). An old Agent reports no core list and is shown as
 // exactly one core built from its scalar capability fields.
@@ -1518,11 +1534,13 @@ async function loadCoreFacts(node: NodeView) {
     coreTasks.value = tasks;
     const removals = await Promise.all([
       coreUpdatesAPI.removals(node.id, 'xray').catch(() => ({ items: [] as CoreRemoveTask[] })),
-      coreUpdatesAPI.removals(node.id, 'sing-box').catch(() => ({ items: [] as CoreRemoveTask[] }))
+      coreUpdatesAPI.removals(node.id, 'sing-box').catch(() => ({ items: [] as CoreRemoveTask[] })),
+      coreUpdatesAPI.removals(node.id, 'gost').catch(() => ({ items: [] as CoreRemoveTask[] }))
     ]);
     coreRemovals.value = {
       [node.id + ':xray']: removals[0].items,
-      [node.id + ':sing-box']: removals[1].items
+      [node.id + ':sing-box']: removals[1].items,
+      [node.id + ':gost']: removals[2].items
     };
   } catch (e) {
     showToast('内核任务与入站信息读取失败：' + (e as Error).message, 'error');
@@ -1593,7 +1611,7 @@ function openCoreManagementModal(node: NodeView) {
   coreInbounds.value = []; coreTasks.value = [];
   coreManagementTargetNode.value = node;
   const component = node.capabilities?.core_name;
-  if (component === 'xray' || component === 'sing-box') selectAddCoreComp(component);
+  if (isCoreName(component)) selectAddCoreComp(component);
   coreManagementModalVisible.value = true;
   void loadCoreFacts(node);
 
@@ -1611,7 +1629,7 @@ function openCoreManagementModal(node: NodeView) {
 
 // Add Core Form State inside Management Modal
 const addCoreForm = reactive({
-  component: 'xray' as 'xray' | 'sing-box',
+  component: 'xray' as CoreName,
   version: '25.10.15',
   url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
   sha256: ''
@@ -1623,15 +1641,41 @@ const addCorePresets = computed(() => {
 
 const addCoreBusy = ref(false);
 
-// A preset only fills version + official URL for the node's architecture. The
-// digest stays empty on purpose: the Owner pastes the vendor-published SHA-256.
+// A preset fills version and official URL for the node's architecture, plus the
+// reviewed digest when the release is a pin (GOST). A release without an asset
+// for this architecture is refused instead of guessing one.
+function applyPreset(form: { version: string; url: string; sha256: string }, preset: CorePreset, node: NodeView | null) {
+  form.sha256 = preset.sha256 || ''; form.url = '';
+  form.version = preset.version;
+  const arch = detectArch(node);
+  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
+  const isArm = arch === 'arm64';
+  const url = isArm ? preset.arm64Url : preset.amd64Url;
+  if (!url) { showToast(`该版本只提供 linux/amd64 资产，不支持此服务器的 ${arch} 架构`, 'warning'); return; }
+  form.url = url;
+}
+
 function applyAddCorePreset(preset: CorePreset) {
-  addCoreForm.sha256 = ''; addCoreForm.url = '';
-  addCoreForm.version = preset.version;
+  applyPreset(addCoreForm, preset, coreManagementTargetNode.value);
+}
+
+function autoFillAddCoreURL() {
+  if (addCoreForm.component === 'gost') {
+    // One reviewed release: the pinned asset decides the version too.
+    applyAddCorePreset(CORE_PRESETS.gost[0]);
+    return;
+  }
+  const v = addCoreForm.version || (addCoreForm.component === 'xray' ? '25.10.15' : '1.10.7');
   const arch = detectArch(coreManagementTargetNode.value);
   if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
   const isArm = arch === 'arm64';
-  addCoreForm.url = isArm ? preset.arm64Url : preset.amd64Url;
+  if (addCoreForm.component === 'xray') {
+    const asset = isArm ? 'Xray-linux-arm64-v8a.zip' : 'Xray-linux-64.zip';
+    addCoreForm.url = `https://github.com/XTLS/Xray-core/releases/download/v${v}/${asset}`;
+  } else {
+    const asset = isArm ? `sing-box-${v}-linux-arm64.tar.gz` : `sing-box-${v}-linux-amd64.tar.gz`;
+    addCoreForm.url = `https://github.com/SagerNet/sing-box/releases/download/v${v}/${asset}`;
+  }
 }
 
 function selectAddCoreComp(comp: CoreName) {
@@ -1646,20 +1690,6 @@ function selectAddCoreComp(comp: CoreName) {
 
 function onAddCoreCompChange() {
   selectAddCoreComp(addCoreForm.component);
-}
-
-function autoFillAddCoreURL() {
-  const v = addCoreForm.version || (addCoreForm.component === 'xray' ? '25.10.15' : '1.10.7');
-  const arch = detectArch(coreManagementTargetNode.value);
-  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
-  const isArm = arch === 'arm64';
-  if (addCoreForm.component === 'xray') {
-    const asset = isArm ? 'Xray-linux-arm64-v8a.zip' : 'Xray-linux-64.zip';
-    addCoreForm.url = `https://github.com/XTLS/Xray-core/releases/download/v${v}/${asset}`;
-  } else {
-    const asset = isArm ? `sing-box-${v}-linux-arm64.tar.gz` : `sing-box-${v}-linux-amd64.tar.gz`;
-    addCoreForm.url = `https://github.com/SagerNet/sing-box/releases/download/v${v}/${asset}`;
-  }
 }
 
 async function submitAddNewCore() {
@@ -1720,12 +1750,7 @@ const currentCorePresets = computed(() => {
 });
 
 function applyCorePreset(preset: CorePreset) {
-  coreForm.sha256 = ''; coreForm.url = '';
-  coreForm.version = preset.version;
-  const arch = detectArch(coreDialogTargetNode.value);
-  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
-  const isArm = arch === 'arm64';
-  coreForm.url = isArm ? preset.arm64Url : preset.amd64Url;
+  applyPreset(coreForm, preset, coreDialogTargetNode.value);
 }
 
 function selectCoreComponent(comp: CoreName) {
@@ -1809,6 +1834,11 @@ function onCoreVersionInput() {
 }
 
 function autoFillCoreURL() {
+  if (coreForm.component === 'gost') {
+    // One reviewed release: the pinned asset decides the version too.
+    applyCorePreset(CORE_PRESETS.gost[0]);
+    return;
+  }
   const v = coreForm.version || '26.3.27';
   const arch = detectArch(coreDialogTargetNode.value);
   if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }

@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 type Counter struct {
@@ -67,7 +69,9 @@ func validateCounters(counters []Counter) error {
 			return errors.New("invalid traffic counter kind")
 		}
 		if counter.Kind == "node" {
-			if (counter.Core != "xray" && counter.Core != "sing-box") || counter.CredentialID != "node" || counter.UserID != "node" || counter.DeviceID != "node" || counter.Protocol != "" {
+			// A per-core aggregate may come from any core kind the platform runs,
+			// including GOST, whose forwards carry no account at all.
+			if !desiredstate.KnownCore(counter.Core) || counter.CredentialID != "node" || counter.UserID != "node" || counter.DeviceID != "node" || counter.Protocol != "" {
 				return errors.New("invalid node traffic counter")
 			}
 		} else if counter.Core != "" {

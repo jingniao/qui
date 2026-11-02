@@ -1285,3 +1285,15 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试），Web UI 与
 | P2-no-double-count | 同一夹具：用户入站与管理 API 的 `inbound>>>` 统计被忽略，多个转发只计一次；重复、负数、单边、未知方向、溢出、查询错误与源消失都失败且不落盘；`internal/agent/core/node_traffic_test.go` 覆盖账户批在前、独立节点批、仅节点字节、溢出先于写入与节点批失败重试 | 本地通过 |
 | P2-quota-isolation | `internal/panel/access/node_traffic_test.go` 的 `TestNodeTrafficForwardIncrementCountsNodeTotalOnce`：账户+节点批次只按节点总量计一次、重复批次幂等、两个核心 epoch 独立、用户额度只随账户增量变化 | 本地通过 |
 | P2-native | `TestRealForwardNodeCountersCountForwardedBytes`（`XRAY_BINARY`）：真实 Xray 上发送确定性 TCP/UDP 负载并轮询到正的节点字节，断言无用户计数器、重复读取累积、混合用户/转发不重复计、重启换 `.node` epoch | 待门禁 |
+
+### G1：GOST 作为第三种核心类型
+
+状态：G1a（Agent 适配器、契约字段、安装器、发布 allowlist）与 G1b（迁移 0127、面板协商与校验、组件任务、备份校验、Web、文档）已实现，**待门禁与实机验收**。设计依据见 [GOST 设计](v1.3-design-gost.md)；G2、G3 未开始。
+
+| 项 | 覆盖内容 | 证据与状态 |
+| --- | --- | --- |
+| G1.1 | 固定版本与摘要分离（标签 `v3.3.2`、资产 `gost_3.3.2_linux_amd64.tar.gz`、归档摘要、安装后二进制摘要另算）、`--core gost` 首装、组件更新/移除、v2 安装记录与开机恢复固定路径 | 本地通过（G1a）：`pkg/contracts/release` 的 `TestGostCoreUpdateRequestRequiresTheReviewedPin`，以及本次运行的 `bash deploy/linux/tests/core-asset-test.sh`（148/148，含 glibc/musl 同一资产、固定摘要、未固定版本/摘要/URL 拒绝）；待实机（systemd 与 Alpine/OpenRC 各一台，含 `-V`、卸载保留记录） |
+| G1.2 | 三核心能力上报、GOST 只允许 `forward`（`desiredstate.Validate` 与面板 `ValidateCoreProtocol` 双重判定）、组件安装排队要求 `Hello.gost_core_supported`、迁移 0127 从 0126 升级后行/索引/触发器/视图/外键完整 | 本地通过（G1b）：`TestGostCoreIsForwardOnly`、`TestGostCoreUpdateRequiresTheHelloFlagAndTheReviewedPin`、`TestGostCoreMigrationKeepsDeployedData`、`TestAppliedMigrationsAreImmutable`；待实机（含非 amd64 拒绝与三核心节点） |
+| G1.3 | 原生语法门禁、启动与约 2 秒收敛、失败应用/更新回滚；GOST 变更不重启未变的代理核心 | 设计评审已删除 MultiRuntime「跳过未变组件」修正（设计「Reviewers 决定」第 2 条）：v1.3 按现状记录**一次发布会重启该节点全部核心**，GOST 变更同时重启代理核心，反之亦然；GOST 崩溃仍由逐核心 supervisor 恢复。门禁与回滚的 Agent 侧证据随 G1a 提交；待实机（PID/epoch/长连接观测） |
+| G1.4 | 无公开管理端点与 pprof、指标只走本地 unix socket、空闲内存、备份与降级兼容 | 本地通过（G1b）：`validateMultiCore`/`validateCoreUpdates` 只在 0127 之后接受 `gost`，任务行还必须是固定版本与固定归档摘要，旧归档（含 0126 及更早、以及被回退到 0124 的夹具）仍合法；gost 适配器测试随 G1a 提交；待实机（RSS 约 45 MB、`ss` 无公开监听、降级 1.3 之前必须先移除 GOST） |
+

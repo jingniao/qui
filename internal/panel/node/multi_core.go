@@ -6,9 +6,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
-func CoreNameValid(name string) bool { return name == "xray" || name == "sing-box" }
+func CoreNameValid(name string) bool { return desiredstate.KnownCore(name) }
 
 // EnabledCores models legacy reports without inventing observations.
 func EnabledCores(c *pb.Capabilities) []*pb.CoreCapability {
@@ -52,7 +53,7 @@ func AnyGateSupported(c *pb.Capabilities) bool {
 // stays a one-core node and must not be rejected. Two cores or a contradictory
 // primary are refused.
 func validateMultiCapabilities(c *pb.Capabilities) error {
-	if len(c.Cores) > 2 || len(c.Cores) > 1 && !c.MultiCoreSupported {
+	if len(c.Cores) > 3 || len(c.Cores) > 1 && !c.MultiCoreSupported {
 		return errors.New("invalid multi-core capabilities")
 	}
 	seen := map[string]bool{}
@@ -76,7 +77,7 @@ func validateMultiCapabilities(c *pb.Capabilities) error {
 }
 
 func validateCoreStatuses(cores []*pb.CoreStatus) error {
-	if len(cores) > 2 {
+	if len(cores) > 3 {
 		return errors.New("too many core statuses")
 	}
 	seen := map[string]bool{}

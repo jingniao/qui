@@ -15,6 +15,7 @@
 | 实机验收发现的缺陷、修复与限制 | [验收发现](v1.2-rc1-findings.md) |
 | 1.2.0 发布说明 | [发布说明 1.2.0](release-notes-1.2.0.md) |
 | 下一版本（v1.3.0）的需求 | [v1.3 计划](v1.3-plan.md) |
+| v1.3.0 的 GOST 设计与 G0 实测 | [GOST 设计](v1.3-design-gost.md)、[G0 发现](v1.3-g0-gost-findings.md) |
 | 历次修订的完整条目 | [变更记录](changelog.md) |
 
 历史计划、阶段报告、走查记录与进度日志已归档到 [docs/archive](archive/README.md)，只作追溯、不再维护。当前事实、未完成项与已知限制见[项目说明书](../AGENTS.md) 的“当前状态”。

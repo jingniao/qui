@@ -16,17 +16,17 @@
         <p v-if="!eligibleServers.length" class="text-sm text-ios-secondary">没有可用的已登记服务器，请先登记服务器。</p>
       </div>
       <div v-if="step === 2" class="space-y-4">
-        <div v-if="coreChoices.length > 1" class="space-y-1.5">
+        <div v-if="coreSelectable.length > 1" class="space-y-1.5">
           <label class="block text-xs text-ios-secondary">运行内核
             <select v-model="f.core" class="form-input-base mt-1.5">
               <option value="">跟随主核心（{{ primaryCoreLabel }}）</option>
-              <option v-for="core in coreChoices" :key="core.name" :value="core.name">{{ core.label }} {{ core.version }}{{ core.primary ? '（主核心）' : '' }}</option>
+              <option v-for="core in coreSelectable" :key="core.name" :value="core.name">{{ core.label }} {{ core.version }}{{ core.primary ? '（主核心）' : '' }}</option>
             </select>
           </label>
-          <p class="text-[11px] text-ios-secondary">只列出该服务器当前上报为启用的核心；协议选项按所选核心的能力过滤。</p>
+          <p class="text-[11px] text-ios-secondary">只列出该服务器当前上报为启用、且能承载当前协议的核心；协议选项按所选核心的能力过滤。</p>
         </div>
-        <p v-else-if="coreChoices.length === 1" class="text-xs text-ios-secondary">运行内核：{{ coreChoices[0].label }} {{ coreChoices[0].version }}（该服务器只上报一个核心）</p>
-        <p v-else class="text-xs text-ios-orange">服务器尚未上报核心能力，运行内核未知；保存时由后端判定。</p>
+        <p v-else-if="coreSelectable.length === 1" class="text-xs text-ios-secondary">运行内核：{{ coreSelectable[0].label }} {{ coreSelectable[0].version }}（该服务器没有其他能承载当前协议的核心）</p>
+        <p v-else class="text-xs text-ios-orange">该服务器尚未上报能承载当前协议的核心，运行内核未知；保存时由后端判定。</p>
         <p v-if="coreError" role="alert" class="text-xs text-ios-red">{{ coreError }}</p>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <button v-for="protocol in protocols" :key="protocol" type="button" :disabled="!!state.original || !!protocolReason(selectedServer, protocol, f.core)" :title="protocolReason(selectedServer, protocol, f.core)" :class="['text-left rounded-2xl border p-3 active:scale-95 disabled:opacity-50', f.protocol === protocol ? 'border-ios-blue bg-ios-blue/10' : 'border-ios-border bg-ios-card']" @click="changeProtocol(state, protocol)">
@@ -122,6 +122,9 @@ const eligibleServers = computed(() => servers.value.filter(serverEligible));
 // Cores the selected server reports as enabled (K3b). One core = read-only text;
 // several = a selector whose empty value follows the node's primary core.
 const coreChoices = computed(() => coreOptions(selectedServer.value));
+// Cores offered for the protocol being edited: GOST terminates forwards only, so
+// it never appears for a user protocol.
+const coreSelectable = computed(() => coreOptions(selectedServer.value, f.value.protocol));
 const primaryCore = computed(() => coreChoices.value.find(item => item.primary) || coreChoices.value[0]);
 const udpLimitNote = computed(() => {
   const core = f.value.core || primaryCore.value?.name;

@@ -233,7 +233,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	}
 	multiSupported := first.GetHello().MultiCoreSupported
 	nodeTrafficSupported := first.GetHello().NodeTrafficSupported && c.AccessRecorder != nil
-	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET multi_core_supported=?,node_traffic_supported=? WHERE id=?", multiSupported, nodeTrafficSupported, id); err != nil {
+	// The GOST flag is the Agent's own statement that it can install and remove
+	// the GOST component, even while GOST is absent, so it is what gates a GOST
+	// install task; it is never inferred from the Agent version text.
+	gostSupported := first.GetHello().GostCoreSupported
+	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET multi_core_supported=?,node_traffic_supported=?,gost_core_supported=? WHERE id=?", multiSupported, nodeTrafficSupported, gostSupported, id); err != nil {
 		return status.Error(codes.Internal, "multi-core negotiation persistence failed")
 	}
 	updateSupported := first.GetHello().CoreUpdateSupported && c.CoreUpdates != nil

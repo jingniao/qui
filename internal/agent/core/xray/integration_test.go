@@ -3,6 +3,7 @@ package xray
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -45,42 +46,63 @@ func testState(port int, revision int64) desiredstate.State {
 }
 func socksRequest(t *testing.T, port int, target string) string {
 	t.Helper()
-	parsed, err := url.Parse(target)
+	response, err := socksExchange(port, target)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return response
+}
+
+// socksExchange performs one SOCKS5 request through the listener on port and
+// returns the origin response. It reports a failure instead of ending the test,
+// so a caller can wait for a freshly started chain to actually serve.
+func socksExchange(port int, target string) (string, error) {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return "", err
 	}
 	hostname := parsed.Hostname()
 	targetPort, err := strconv.Atoi(parsed.Port())
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
 	connection, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
 	defer connection.Close()
 	connection.SetDeadline(time.Now().Add(5 * time.Second))
-	connection.Write([]byte{5, 1, 0})
+	if _, err := connection.Write([]byte{5, 1, 0}); err != nil {
+		return "", fmt.Errorf("SOCKS5 negotiation failed: %w", err)
+	}
 	reply := make([]byte, 2)
-	if _, err := io.ReadFull(connection, reply); err != nil || reply[1] != 0 {
-		t.Fatal("SOCKS5 negotiation failed", err)
+	if _, err := io.ReadFull(connection, reply); err != nil {
+		return "", fmt.Errorf("SOCKS5 negotiation failed: %w", err)
+	}
+	if reply[1] != 0 {
+		return "", fmt.Errorf("SOCKS5 negotiation failed: reply %d", reply[1])
 	}
 	request := []byte{5, 1, 0, 1}
 	request = append(request, net.ParseIP(hostname).To4()...)
 	request = binary.BigEndian.AppendUint16(request, uint16(targetPort))
 	if _, err := connection.Write(request); err != nil {
-		t.Fatal(err)
+		return "", fmt.Errorf("SOCKS5 connect failed: %w", err)
 	}
 	reply = make([]byte, 10)
-	if _, err := io.ReadFull(connection, reply); err != nil || reply[1] != 0 {
-		t.Fatal("SOCKS5 connect failed", err)
+	if _, err := io.ReadFull(connection, reply); err != nil {
+		return "", fmt.Errorf("SOCKS5 connect failed: %w", err)
 	}
-	io.WriteString(connection, "GET / HTTP/1.0\r\nHost: test\r\n\r\n")
+	if reply[1] != 0 {
+		return "", fmt.Errorf("SOCKS5 connect failed: reply %d", reply[1])
+	}
+	if _, err := io.WriteString(connection, "GET / HTTP/1.0\r\nHost: test\r\n\r\n"); err != nil {
+		return "", err
+	}
 	response, err := io.ReadAll(connection)
 	if err != nil {
-		t.Fatal(err)
+		return string(response), err
 	}
-	return string(response)
+	return string(response), nil
 }
 
 func TestRealXrayForwardNativeValidationAndRollback(t *testing.T) {

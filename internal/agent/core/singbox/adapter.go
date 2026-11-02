@@ -397,7 +397,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if configurationHealthy(configuration, command.Process.Pid) {
+		if configurationHealth(configuration, command.Process.Pid) == nil {
 			timer := time.NewTimer(150 * time.Millisecond)
 			select {
 			case err := <-done:
@@ -549,39 +549,36 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 		return status, errors.New("sing-box core exited")
 	default:
 	}
-	status.Healthy = configurationHealthy(a.current, a.process.Process.Pid)
-	if !status.Healthy {
-		// TCP and UDP listeners report the same branch: the supervisor waits
-		// for consecutive listener failures before it restarts a core that may
-		// still be serving.
-		return status, fmt.Errorf("sing-box listener health failed: %w", core.ErrListenerUnavailable)
+	if err := configurationHealth(a.current, a.process.Process.Pid); err != nil {
+		return status, err
 	}
+	status.Healthy = true
 	return status, nil
 }
 func (a *Adapter) CollectStats(context.Context) (core.StatsBatch, error) {
 	return core.StatsBatch{}, ErrTelemetryUnavailable
 }
-func endpointsHealthy(endpoints []string) bool {
-	for _, endpoint := range endpoints {
+
+// configurationHealth names the first listener that did not answer, the way the
+// Xray adapter does, so a restore log says which one failed. TCP and UDP report
+// the same sentinel: the supervisor waits for consecutive listener failures
+// before it restarts a core that may still be serving.
+func configurationHealth(configuration core.RenderedConfig, pid int) error {
+	for _, endpoint := range configuration.HealthEndpoints {
 		connection, err := net.DialTimeout("tcp", endpoint, 100*time.Millisecond)
 		if err != nil {
-			return false
+			// The sentinel and the dial error both stay in the chain: the
+			// restart decision reads one, the log keeps the other.
+			return fmt.Errorf("sing-box tcp listener %s unavailable: %w: %w", endpoint, core.ErrListenerUnavailable, err)
 		}
 		connection.Close()
 	}
-	return true
-}
-
-func configurationHealthy(configuration core.RenderedConfig, pid int) bool {
-	if !endpointsHealthy(configuration.HealthEndpoints) {
-		return false
-	}
 	for _, endpoint := range configuration.UDPHealthEndpoints {
 		if !udpEndpointHealthy(endpoint, pid) {
-			return false
+			return fmt.Errorf("sing-box udp listener %s unavailable: %w", endpoint, core.ErrListenerUnavailable)
 		}
 	}
-	return true
+	return nil
 }
 func writeConfiguration(directory, prefix string, data []byte) (string, error) {
 	if err := os.MkdirAll(directory, 0700); err != nil {

@@ -12,6 +12,7 @@ import (
 	"proxycontrol/pkg/contracts/desiredstate"
 	"strings"
 	"testing"
+	"time"
 )
 
 func proxyCredentials(t *testing.T, protocol string) desiredstate.Credential {
@@ -58,6 +59,28 @@ func clientTLS(settings desiredstate.ProtocolSettings) desiredstate.ProtocolSett
 	settings.PrivateKeyPEM = ""
 	return settings
 }
+
+// socksRequestUntil retries the first request through a freshly started chain
+// until it is answered. Apply returns once every listener port accepts a dial,
+// which the kernel completes from the listen backlog before the core accepts and
+// serves it, so the very first request can still block in that window and the one
+// shared 5 s deadline then failed the whole run (CI 41298676512). A successful
+// request is the readiness check the dials do not provide.
+func socksRequestUntil(t *testing.T, port int, target, want string) string {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		response, err := socksExchange(port, target)
+		if err == nil && strings.Contains(response, want) {
+			return response
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the chain never answered %s: %q %v", target, response, err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func TestRealAllProtocolInboundOutboundAndConversion(t *testing.T) {
 	if os.Getenv("XRAY_BINARY") == "" {
 		t.Skip("set XRAY_BINARY for real protocol integration")
@@ -110,9 +133,7 @@ func TestRealAllProtocolInboundOutboundAndConversion(t *testing.T) {
 			client.Outbounds = append(client.Outbounds, desiredstate.Outbound{ID: "entry-out", Protocol: scenario.entry, Address: "127.0.0.1", Port: entryPort, Enabled: true, CredentialID: entryCredential.ID, Settings: clientTLS(settings)})
 			client.Inbounds[0].DefaultOutbound = "entry-out"
 			startState(t, client)
-			if !strings.Contains(socksRequest(t, localPort, origin.URL), "protocol-conversion-origin") {
-				t.Fatal("protocol conversion did not reach origin")
-			}
+			socksRequestUntil(t, localPort, origin.URL, "protocol-conversion-origin")
 			if _, err := Render(ctx, entry); err != nil {
 				t.Fatal(err)
 			}

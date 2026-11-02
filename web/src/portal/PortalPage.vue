@@ -6,7 +6,7 @@
     <template v-else-if="data">
       <div v-if="section === 'overview'" class="space-y-6">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">账号状态</div><StatusBadge :status="data.me.status" /><p>{{ reasons[data.me.reason] || data.me.reason || '正常服务' }}</p></div>
+          <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">账号状态</div><StatusBadge :status="data.me.reason || data.me.status" /><p>{{ reasons[data.me.reason] || data.me.reason || '正常服务' }}</p></div>
           <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">已用流量 / 额度</div><TrafficValue :bytes="data.me.usedTraffic" /> / {{ data.me.trafficLimit ? bytes(data.me.trafficLimit) : '不限额' }}<div class="h-1.5 bg-black/[0.05] rounded-full overflow-hidden"><div class="h-full bg-ios-blue" :style="{ width: quota + '%' }"></div></div></div>
           <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">到期时间</div><p>{{ data.me.expiresAt ? formatPortalTime(data.me.expiresAt) : '永不过期' }}</p></div>
         </div>
@@ -74,7 +74,7 @@ const data = ref<Snapshot>(), loading = ref(false), error = ref(''), notice = re
 const range = ref<'24h' | '7d' | '30d'>('7d'), traffic = ref<Traffic>({ items: [], granularity: 'daily' });
 const currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref(''), resetVisible = ref(false), qr = ref(''), qrError = ref('');
 const titles: Record<string, string> = { overview: '概览', subscription: '我的订阅', nodes: '我的节点', traffic: '流量统计', account: '我的账号' };
-const reasons: Record<string, string> = { disabled: '账号已禁用', expired: '账号已到期', over_quota: '流量额度已用完', quota_exceeded: '流量额度已用完', active: '正常服务' };
+const reasons: Record<string, string> = { disabled: '账号已禁用', expired: '账号已到期', quota_exceeded: '流量额度已用完', active: '正常服务' };
 const quota = computed(() => data.value?.me.trafficLimit ? Math.min(100, data.value.me.usedTraffic / data.value.me.trafficLimit * 100) : 0);
 const maxTraffic = computed(() => Math.max(1, ...traffic.value.items.map(i => i.uploadBytes + i.downloadBytes)));
 // Portal sessions do not expose a timezone; use zh-CN in the browser timezone.

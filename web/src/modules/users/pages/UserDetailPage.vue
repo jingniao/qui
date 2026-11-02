@@ -718,18 +718,21 @@ const expiryCountdownText = computed(() => {
 // nothing is clipped at desktop widths.
 const expiryParts = computed(() => formatMinuteParts(user.value?.expiresAt || ''));
 
-// Same rule as the user list: an active user past expiresAt shows as expired
-// before the backend's state machine has caught up.
+// Same rule as the user list: an active user past expiresAt shows as expired and
+// an over-quota one as quota_exceeded before the backend's state machine has
+// caught up.
 const effectiveStatus = computed(() => {
   const u = user.value;
   if (!u) return '';
-  return u.status === 'active' && u.expiresAt && Date.parse(u.expiresAt) <= Date.now() ? 'expired' : u.status;
+  if (u.status !== 'active') return u.status;
+  if (u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit) return 'quota_exceeded';
+  return u.expiresAt && Date.parse(u.expiresAt) <= Date.now() ? 'expired' : u.status;
 });
 
 const accountStatusText = computed(() => {
   const u = user.value;
   if (!u) return '—';
-  if (u.status !== 'active') return u.status === 'disabled' ? '账号已禁用' : u.status === 'expired' ? '账号已到期' : u.status === 'over_quota' ? '流量已用完' : u.status;
+  if (u.status !== 'active') return u.status === 'disabled' ? '账号已禁用' : u.status === 'expired' ? '账号已到期' : u.status;
   if (u.expiresAt && Date.parse(u.expiresAt) <= Date.now()) return '账号已到期';
   if (u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit) return '流量已用完';
   return '账号正常';

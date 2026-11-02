@@ -374,7 +374,10 @@ function defaults(): UserInput {
 const form = reactive<UserInput>(defaults());
 
 function effectiveStatus(user: ProxyUser) {
-  return user.status === 'active' && user.expiresAt && new Date(user.expiresAt).getTime() <= Date.now() ? 'expired' : user.status;
+  if (user.status !== 'active') return user.status;
+  // Same precedence as the backend's inactivity reason: quota before expiry.
+  if (user.trafficLimit > 0 && user.usedTraffic >= user.trafficLimit) return 'quota_exceeded';
+  return user.expiresAt && new Date(user.expiresAt).getTime() <= Date.now() ? 'expired' : user.status;
 }
 
 function quotaPercent(user: ProxyUser) {

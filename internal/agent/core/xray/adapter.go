@@ -518,17 +518,24 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	result.Healthy = true
 	return result, nil
 }
+
+// CollectStats reports the same node total the traffic sink persists: account
+// counters plus the forward inbound bytes that belong to no account.
 func (a *Adapter) CollectStats(ctx context.Context) (core.StatsBatch, error) {
-	counters, err := a.TrafficCounters(ctx)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.process == nil {
+		return core.StatsBatch{}, errors.New("core not running")
+	}
+	counters, forwards, err := readSample(ctx, a.current, a.statsEpoch, &a.counterSources)
 	if err != nil {
 		return core.StatsBatch{}, err
 	}
-	result := core.StatsBatch{}
-	for _, counter := range counters {
-		result.Upload += uint64(counter.UploadBytes)
-		result.Download += uint64(counter.DownloadBytes)
+	total, err := core.NodeTotal("xray", a.statsEpoch, a.current.Revision, counters, forwards)
+	if err != nil {
+		return core.StatsBatch{}, err
 	}
-	return result, nil
+	return core.StatsBatch{Upload: uint64(total.UploadBytes), Download: uint64(total.DownloadBytes)}, nil
 }
 
 var _ core.Adapter = (*Adapter)(nil)

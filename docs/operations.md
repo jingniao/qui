@@ -347,7 +347,7 @@ K1（0122）：节点分组改为具体入站及导入代理。升级前备份�
 
 定时 TCP 检测由面板每 1 分钟排队：目标开启 `scheduled` 表示系统默认（系统最多 5 个，超限保存返回 409 `scheduled_target_limit`）；节点默认继承，可用 `GET/PUT /api/v1/nodes/{id}/latency-targets` 配置每节点最多 5 个自定义目标，`custom=true,targetIds=[]` 停止该节点监测，`custom=false` 清除自定义目标并继承系统默认。GET 允许 Owner/Viewer，PUT 需要 Owner + CSRF，超过 5 个返回 409 `node_target_limit`，未知目标返回 400 `unknown_target`，重复 ID 返回 400 `invalid_request`。节点须启用、未删除、支持探测且 45 秒内有心跳。每次 3 次建连、每次 3000 ms，沿用公网地址校验及 Owner 的非公网许可。手动请求优先，等待已发出的单条探测完成或 2 分钟期限结束，不受定时队列的 `probe_pending` 阻挡。定时数据独立保存 7 天，不占手动的 100 条历史；`GET /api/v1/nodes/{id}/latency?hours=24` 支持 1–168 小时，Owner/Viewer 可读，目标写操作仅 Owner。现有 Agent 只上报 `medianMs`，均值和极值字段为 null；全部失败记录 sent=3、failed=3，耗时为 null。删除目标同时删除采样，已删除节点的采样不再提供查询。便携备份不含延迟采样和定时任务，保留系统默认、节点自定义目标与继承开关；0121 之前归档可恢复并迁移为继承默认。进程内恢复沿用当前节点目标设置及所需目标引用；恢复后等待新采样。查询目标包含当前有效目标和范围内有采样的历史目标。间隔固定，不提供设置项。
 
-端口转发在入站/画布设置源监听端口、目标地址/端口与 TCP/UDP，通过原发布路径部署。需 Agent 声明 forward 能力；Xray 使用 `dokodemo-door`，sing-box 使用 `direct` override。画布已有 gost 标签的转发边映射到原生核心功能，不安装 gost。转发无用户认证归属，不出现在订阅、不执行每用户额度与设备限制、不生成用户域名归属；自动额度版本保持其已发布状态。原生校验、TCP/UDP echo 与受管节点实测仍待 CI/Owner（AU6.1）。
+端口转发在入站/画布设置源监听端口、目标地址/端口与 TCP/UDP，通过原发布路径部署。需 Agent 声明 forward 能力；Xray 使用 `dokodemo-door`，sing-box 使用 `direct` override。画布已有 gost 标签的转发边映射到原生核心功能，不安装 gost。转发无用户认证归属，不出现在订阅、不执行每用户额度与设备限制、不生成用户域名归属；自动额度版本保持其已发布状态。转发字节的计量来源见第 19 节“按核心计量”：v1.3.0 起计入节点/核心总量，仍不归属用户或域名。原生校验、TCP/UDP echo 与受管节点实测仍待 CI/Owner（AU6.1）。
 
 用户重置周期可选不重置、每月或每 30 个本地日，存储独立周期、锚点与已处理边界；每月保留原日号、短月夹紧，下月恢复原锚点，30 日按面板时区日历运算而非固定秒数。调度器清零使用量，恢复活跃通过原额度自动发布。0118 迁移闭合的旧 `[config:…]` 前缀并去除旧 up/down 限速元数据；每用户限速已移除（L1），普通备注保留。恢复保守保留当前重置边界，避免旧备份再次清零；停止/恢复取消并等待调度任务。月末、时区与重启边界有假时钟测试，Linux/浏览器观察仍待 Owner。
 
@@ -410,5 +410,5 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 **逐核心重启/健康检查**：`POST /api/v1/nodes/{id}/restart-core` 与 `/health-checks` 的 `core` 留空是整节点操作，填 `xray`/`sing-box` 只作用于该核心；历史回滚始终是整节点。执行结果在 `GET` 同名路径的历史里带 `core`。
 
-**按核心计量**：协商了 `node_traffic_supported` 的 Agent 会额外上报每核心的节点累计计数。这些字节只进入节点/核心总量（`GET /api/v1/traffic/summary`、每月节点流量、总览），不进入用户额度；同一 epoch 已有 node 游标时账户样本不再重复计入。用户维度仍只看账户计数，官方 sing-box（无 `with_v2ray_api`）的用户字节依然未知。同一节点可以有多个活跃 epoch，一个核心上报不会淘汰另一个；节点重启后新旧 epoch 各自从零累计，不影响总量。
+**按核心计量**：协商了 `node_traffic_supported` 的 Agent 会额外上报每核心的节点累计计数。这些字节只进入节点/核心总量（`GET /api/v1/traffic/summary`、每月节点流量、总览），不进入用户额度；同一 epoch 已有 node 游标时账户样本不再重复计入。用户维度仍只看账户计数，官方 sing-box（无 `with_v2ray_api`）的用户字节依然未知。同一节点可以有多个活跃 epoch，一个核心上报不会淘汰另一个；节点重启后新旧 epoch 各自从零累计，不影响总量。Xray 的节点累计计数 = 账户计数 + 已渲染端口转发入站的原生入站计数：读取时多一次 `inbound>>>` 查询，只接受当前渲染的转发 tag，用户入站、管理 API 与其他入站统计忽略（v1.3.0 P2）。这些转发字节仍不归属用户或域名，也不进入订阅与设备限制；升级前启动的旧 Agent 只报账户之和，缺失的字节不补记。
 

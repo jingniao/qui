@@ -1273,3 +1273,15 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试），Web UI 与
 | T1-UI | 卡片与详情共用同一组件与纯模型、未知“—”与实测 0 B、进度条裁剪、重置日按面板时区、stale 标注、设置独立保存与 Viewer 只读 | `web/package.json` 没有测试运行器，格式化与设置换算集中在 `web/src/modules/nodes/machineTrafficModel.ts`，未加单测；本次 `cd web && npm run build`（含 vue-tsc）通过；浏览器走查由审查者执行，待实机 |
 
 三台主机（us2-node、uk-node、alpine-node，含 Alpine/LXC）的实机验收、时区变更后的分桶观察与 LXC 网卡范围核对均待执行；在此之前不声称 T1 已发布或已验收。
+
+### P2（F11）
+
+状态：P2（F11，Xray 端口转发字节计入节点总量）已实现，**待门禁**。下列本地项已在实现分支上通过；`P2-native` 需要 Linux 测试机上的官方 amd64 Xray，未在此处运行。设计依据见[v1.3 设计（T1/P2）](v1.3-design-t1-p2.md)第 2 节。
+
+| 项 | 证据 | 状态 |
+| --- | --- | --- |
+| P2-render | `internal/agent/core/xray`：`TestForwardStatsAllowlistRendersOnlyForwardInbounds`（只收启用转发 tag、排序去重、禁用转发不入选、不产生账户）、`TestForwardStatsAllowlistStaysEmptyWithoutForwards`（`statsInboundUplink/Downlink` 保持开启、WireGuard 出站统计不变）、`TestForwardGolden` 新增的统计断言（golden JSON 未变） | 本地通过 |
+| P2-statistics | `stats_forward_reader_test.go` 的假 StatsService：仅账户、仅转发、账户+转发、懒计数、源覆盖计数；断言查询顺序 `user>>>` / `outbound>>>_access` / `inbound>>>`，夹具拒绝任何 `Reset_=true` | 本地通过 |
+| P2-no-double-count | 同一夹具：用户入站与管理 API 的 `inbound>>>` 统计被忽略，多个转发只计一次；重复、负数、单边、未知方向、溢出、查询错误与源消失都失败且不落盘；`internal/agent/core/node_traffic_test.go` 覆盖账户批在前、独立节点批、仅节点字节、溢出先于写入与节点批失败重试 | 本地通过 |
+| P2-quota-isolation | `internal/panel/access/node_traffic_test.go` 的 `TestNodeTrafficForwardIncrementCountsNodeTotalOnce`：账户+节点批次只按节点总量计一次、重复批次幂等、两个核心 epoch 独立、用户额度只随账户增量变化 | 本地通过 |
+| P2-native | `TestRealForwardNodeCountersCountForwardedBytes`（`XRAY_BINARY`）：真实 Xray 上发送确定性 TCP/UDP 负载并轮询到正的节点字节，断言无用户计数器、重复读取累积、混合用户/转发不重复计、重启换 `.node` epoch | 待门禁 |

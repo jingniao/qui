@@ -79,6 +79,19 @@ func configureStats(document *configDocument, state desiredstate.State, port int
 	rendered.OnlineStats = options.OnlineStats
 	rendered.HealthEndpoints = append(rendered.HealthEndpoints, endpoint)
 	rendered.StatsAccounts = map[string]traffic.Counter{}
+	// Enabled forward inbounds render dokodemo-door listeners with native
+	// inbound counters but no account, so the node total adds them explicitly.
+	// Other dokodemo-door listeners (management, probe) must never qualify.
+	forwards := []string{}
+	seenForward := map[string]bool{}
+	for _, inbound := range state.Inbounds {
+		if inbound.Enabled && inbound.Protocol == "forward" && !seenForward[inbound.ID] {
+			seenForward[inbound.ID] = true
+			forwards = append(forwards, inbound.ID)
+		}
+	}
+	sort.Strings(forwards)
+	rendered.StatsNodeInbounds = forwards
 	// User counters are global to the core, including internal relay users.
 	// Reject aliases before excluding internal accounts from user accounting.
 	names := map[string]desiredstate.Credential{}
@@ -122,7 +135,17 @@ func configureStats(document *configDocument, state desiredstate.State, port int
 	return nil
 }
 
-func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch string, sources ...*core.CounterSources) (sample []traffic.Counter, sampleErr error) {
+// readCounters is the account-only view for callers that never persist node
+// totals (the adapter's TrafficCounters and account telemetry).
+func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch string, sources ...*core.CounterSources) ([]traffic.Counter, error) {
+	sample, _, err := readSample(ctx, configuration, epoch, sources...)
+	return sample, err
+}
+
+// readSample reads one cumulative set of native counters: the account counters
+// and, separately, the bytes of the allowlisted forward inbounds that belong to
+// the node total only.
+func readSample(ctx context.Context, configuration core.RenderedConfig, epoch string, sources ...*core.CounterSources) (sample []traffic.Counter, node core.StatsBatch, sampleErr error) {
 	defer func() {
 		if sampleErr != nil {
 			for _, source := range sources {
@@ -133,14 +156,14 @@ func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch 
 		}
 	}()
 	if configuration.StatsEndpoint == "" {
-		return nil, errors.New("core statistics endpoint unavailable")
+		return nil, core.StatsBatch{}, errors.New("core statistics endpoint unavailable")
 	}
 	if host, _, err := net.SplitHostPort(configuration.StatsEndpoint); err != nil || host != "127.0.0.1" || epoch == "" {
-		return nil, errors.New("statistics require loopback and a process epoch")
+		return nil, core.StatsBatch{}, errors.New("statistics require loopback and a process epoch")
 	}
 	connection, err := grpc.NewClient(configuration.StatsEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(1<<20)))
 	if err != nil {
-		return nil, err
+		return nil, core.StatsBatch{}, err
 	}
 	defer connection.Close()
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -152,14 +175,23 @@ func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch 
 			break
 		}
 	}
+	// One broad query covers every rendered inbound; stats of user, management
+	// and other inbounds are filtered out below.
+	forwards := map[string]bool{}
+	for _, tag := range configuration.StatsNodeInbounds {
+		forwards["inbound>>>"+tag] = true
+	}
+	if len(forwards) > 0 {
+		patterns = append(patterns, "inbound>>>")
+	}
 	values := []*stats.Stat{}
 	for _, pattern := range patterns {
 		response, err := stats.NewStatsServiceClient(connection).QueryStats(queryCtx, &stats.QueryStatsRequest{Pattern: pattern, Reset_: false})
 		if err != nil {
-			return nil, errors.New("core statistics query failed")
+			return nil, core.StatsBatch{}, errors.New("core statistics query failed")
 		}
 		if len(response.Stat) > 16384 {
-			return nil, errors.New("core statistics response exceeds account limit")
+			return nil, core.StatsBatch{}, errors.New("core statistics response exceeds account limit")
 		}
 		values = append(values, response.Stat...)
 	}
@@ -169,7 +201,7 @@ func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch 
 	observed := time.Now().UTC()
 	for _, stat := range values {
 		if stat == nil || stat.Value < 0 || seen[stat.Name] {
-			return nil, errors.New("invalid or duplicate core statistic")
+			return nil, core.StatsBatch{}, errors.New("invalid or duplicate core statistic")
 		}
 		seen[stat.Name] = true
 		position := strings.LastIndex(stat.Name, ">>>traffic>>>")
@@ -177,7 +209,7 @@ func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch 
 			continue
 		}
 		template, known := configuration.StatsAccounts[stat.Name[:position]]
-		if !known {
+		if !known && !forwards[stat.Name[:position]] {
 			continue
 		}
 		counter, exists := collected[template.CredentialID]
@@ -186,21 +218,36 @@ func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch 
 			counter.CoreEpoch = epoch
 			counter.ObservedAt = observed
 		}
+		source := stat.Name[:position]
 		switch stat.Name[position+len(">>>traffic>>>"):] {
 		case "uplink":
-			directions[stat.Name[:position]] |= 1
+			directions[source] |= 1
+			if !known {
+				if math.MaxInt64-node.Upload < uint64(stat.Value) {
+					return nil, core.StatsBatch{}, errors.New("core statistics overflow")
+				}
+				node.Upload += uint64(stat.Value)
+				continue
+			}
 			if math.MaxInt64-counter.UploadBytes < stat.Value {
-				return nil, errors.New("core statistics overflow")
+				return nil, core.StatsBatch{}, errors.New("core statistics overflow")
 			}
 			counter.UploadBytes += stat.Value
 		case "downlink":
-			directions[stat.Name[:position]] |= 2
+			directions[source] |= 2
+			if !known {
+				if math.MaxInt64-node.Download < uint64(stat.Value) {
+					return nil, core.StatsBatch{}, errors.New("core statistics overflow")
+				}
+				node.Download += uint64(stat.Value)
+				continue
+			}
 			if math.MaxInt64-counter.DownloadBytes < stat.Value {
-				return nil, errors.New("core statistics overflow")
+				return nil, core.StatsBatch{}, errors.New("core statistics overflow")
 			}
 			counter.DownloadBytes += stat.Value
 		default:
-			return nil, errors.New("unknown core account traffic direction")
+			return nil, core.StatsBatch{}, errors.New("unknown core account traffic direction")
 		}
 		collected[template.CredentialID] = counter
 	}
@@ -208,7 +255,7 @@ func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch 
 	// complete pair for each observed tag before summing those distinct sources.
 	for _, direction := range directions {
 		if direction != 3 {
-			return nil, errors.New("incomplete core account counter pair")
+			return nil, core.StatsBatch{}, errors.New("incomplete core account counter pair")
 		}
 	}
 	result := []traffic.Counter{}
@@ -218,17 +265,17 @@ func readCounters(ctx context.Context, configuration core.RenderedConfig, epoch 
 	sort.Slice(result, func(i, j int) bool { return result[i].CredentialID < result[j].CredentialID })
 	if len(result) > 0 {
 		if err := traffic.ValidateSample(configuration.NodeID, result); err != nil {
-			return nil, err
+			return nil, core.StatsBatch{}, err
 		}
 	}
 	for _, source := range sources {
 		if source != nil {
 			if err := source.Observe(epoch, directions); err != nil {
-				return nil, err
+				return nil, core.StatsBatch{}, err
 			}
 		}
 	}
-	return result, nil
+	return result, node, nil
 }
 
 func (a *Adapter) SampleTraffic(ctx context.Context) error {
@@ -243,14 +290,16 @@ func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
 	if a.TrafficSink == nil || a.current.StatsEndpoint == "" {
 		return nil
 	}
-	counters, err := readCounters(ctx, a.current, a.statsEpoch, &a.counterSources)
+	// Forward inbound bytes carry no account, so they reach the node total as a
+	// separate node-only batch after the account batch.
+	counters, node, err := readSample(ctx, a.current, a.statsEpoch, &a.counterSources)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		return err
 	}
-	if err := core.SaveAccountAndNode(ctx, a.TrafficSink, "xray", a.statsEpoch, a.current.Revision, counters); err != nil {
+	if err := core.SaveAccountAndNode(ctx, a.TrafficSink, "xray", a.statsEpoch, a.current.Revision, counters, node); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

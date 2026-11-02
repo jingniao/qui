@@ -375,7 +375,7 @@ component_files() {
       "$root/usr/local/lib/proxy-agent/tuning-watch"
   fi
   if [[ $component == agent ]]; then
-    printf '%s\n' "$root/usr/local/lib/proxy-agent/xray" "$root/usr/local/lib/proxy-agent/sing-box" "$root/etc/proxy-agent/config.yaml"
+    printf '%s\n' "$root/usr/local/lib/proxy-agent/xray" "$root/usr/local/lib/proxy-agent/sing-box" "$root/usr/local/lib/proxy-agent/gost" "$root/etc/proxy-agent/config.yaml"
   fi
   printf '%s\n' "$registry/$component.manifest"
 }

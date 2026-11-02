@@ -62,6 +62,11 @@ mkdir -p -- "$T/musl" "$T/glibc"
 eval "$(extract "$install_sh" host_libc)"
 eval "$(extract "$install_sh" host_architecture)"
 eval "$(extract "$install_sh" core_asset)"
+# The pin globals are file-scope variables of install.sh, so they are extracted by
+# their documented block instead of by function.
+eval "$(sed -n '/^# The reviewed official GOST pin\./,/^gost_digest=/p' "$install_sh")"
+[[ $gost_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $gost_asset == gost_"$gost_version"_linux_amd64.tar.gz && $gost_digest =~ ^[0-9a-f]{64}$ ]] \
+  || { printf 'core-asset-test: no complete GOST pin in install.sh\n' >&2; exit 1; }
 # The second copy, renamed, so both detections can be compared in one shell.
 node_libc_source=$(extract "$node_install_sh" host_libc)
 eval "${node_libc_source/host_libc/host_libc_node}"
@@ -83,6 +88,9 @@ core_source=official
 check 'sing-box keeps its glibc archive on amd64' "$(core_asset sing-box glibc)" "sing-box-$version-linux-amd64.tar.gz"
 check 'sing-box takes the -musl archive on amd64' "$(core_asset sing-box musl)" "sing-box-$version-linux-amd64-musl.tar.gz"
 check 'xray keeps its archive on amd64' "$(core_asset xray glibc)" 'Xray-linux-64.zip'
+# One GOST archive serves glibc and musl on amd64: the pin is a static binary.
+check 'gost keeps one archive on glibc' "$(core_asset gost glibc)" "$gost_asset"
+check 'gost keeps one archive on musl' "$(core_asset gost musl)" "$gost_asset"
 check 'xray keeps its archive on musl amd64' "$(core_asset xray musl)" 'Xray-linux-64.zip'
 
 machine=aarch64
@@ -90,6 +98,13 @@ check 'sing-box keeps its glibc archive on arm64' "$(core_asset sing-box glibc)"
 check 'sing-box takes the -musl archive on arm64' "$(core_asset sing-box musl)" "sing-box-$version-linux-arm64-musl.tar.gz"
 check 'xray keeps its archive on arm64' "$(core_asset xray glibc)" 'Xray-linux-arm64-v8a.zip'
 check 'xray keeps its archive on musl arm64' "$(core_asset xray musl)" 'Xray-linux-arm64-v8a.zip'
+# The pinned GOST release is one statically linked amd64 archive; on any other
+# architecture the installer refuses the core instead of choosing an upstream
+# archive it never reviewed.
+if (core_asset gost glibc) >/dev/null 2>&1; then
+  check 'gost refused on arm64' accepted refused
+else check 'gost refused on arm64' refused refused; fi
+machine=x86_64
 
 # node-install.sh hands install.sh the digest of exactly the archive install.sh
 # names for this host: one pinned digest per architecture and libc.
@@ -177,6 +192,54 @@ select_core xray
 check 'explicit version stays with its core' "$core_version" custom
 select_core sing-box
 check 'explicit Xray URL does not leak' "$core_url" ''
+
+# The GOST core is chosen the same way, from the reviewed pin: the version and the
+# archive digest cannot be overridden from the command line.
+for libc in glibc musl; do
+  host_architecture() { printf 'amd64'; }
+  host_libc() { printf '%s' "$libc"; }
+  select_core gost
+  check "gost $libc version" "$core_version" "$gost_version"
+  # The reviewed digest is read from the release checksums.txt by
+  # core_archive_digest, so the per-core options stay empty as they do for qui.
+  check "gost $libc archive digest comes from the release file" "$core_digest" ''
+  check "gost $libc destination" "$core_target" /usr/local/lib/proxy-agent/gost
+done
+core_versions[gost]=3.3.3
+if (select_core gost) >/dev/null 2>&1; then
+  check 'unpinned gost version refused' accepted refused
+else check 'unpinned gost version refused' refused refused; fi
+core_versions[gost]=; core_digests[gost]=$(printf '%064d' 7)
+if (select_core gost) >/dev/null 2>&1; then
+  check 'unpinned gost digest refused' accepted refused
+else check 'unpinned gost digest refused' refused refused; fi
+core_digests[gost]=
+core_urls[gost]=https://github.com/go-gost/gost/releases/download/v3.3.2/gost_3.3.2_linux_amd64.tar.gz
+if (select_core gost) >/dev/null 2>&1; then
+  check 'unpinned gost url refused' accepted refused
+else check 'unpinned gost url refused' refused refused; fi
+core_urls[gost]=
+
+# checksums.txt of the pinned release has to agree with the pin, and exactly one
+# entry may name the archive.
+check 'gost official release prefix' "$(core_prefix gost)" 'https://github.com/go-gost/gost/releases/download/'
+core=gost
+core_version=$gost_version
+core_digest=''
+stage=$T
+download() { cp -- "$T/checksums" "$2"; }
+printf '%s  %s\n' "$gost_digest" "$gost_asset" > "$T/checksums"
+check 'gost archive digest is the reviewed pin' "$(core_archive_digest "$gost_asset")" "$gost_digest"
+printf '%s  %s\n' "$(printf '%064d' 1)" "$gost_asset" > "$T/checksums"
+if (core_archive_digest "$gost_asset") >/dev/null 2>&1; then
+  check 'gost unpinned checksums.txt refused' accepted refused
+else check 'gost unpinned checksums.txt refused' refused refused; fi
+printf '%s  %s\n' "$gost_digest" "$gost_asset" > "$T/checksums"
+printf '%s  %s\n' "$gost_digest" "$gost_asset" >> "$T/checksums"
+if (core_archive_digest "$gost_asset") >/dev/null 2>&1; then
+  check 'gost ambiguous checksums.txt refused' accepted refused
+else check 'gost ambiguous checksums.txt refused' refused refused; fi
+
 
 printf '\ncore-asset-test: %s/%s passed\n' "$passes" "$((passes + failed))"
 if ((failed > 0)); then exit 1; fi

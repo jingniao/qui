@@ -20,7 +20,7 @@ func (r *Reconciler) componentHoldPath(name string) string {
 }
 func (r *Reconciler) loadComponentHolds() {
 	r.componentHolds, r.componentHoldsInvalid = map[string]bool{}, map[string]bool{}
-	for _, name := range []string{"xray", "sing-box"} {
+	for _, name := range core.CoreNames() {
 		data, err := readInspectionFile(r.componentHoldPath(name), 4096)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -49,7 +49,7 @@ func (r *Reconciler) anyCoreHold() bool {
 	return false
 }
 func (r *Reconciler) holdComponent(name string) error {
-	if name != "xray" && name != "sing-box" {
+	if !core.KnownName(name) {
 		return errors.New("unknown component")
 	}
 	r.componentHolds[name] = true

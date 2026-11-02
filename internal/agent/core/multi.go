@@ -33,7 +33,7 @@ type MultiRuntime struct {
 func NewMultiRuntime(runtimes ...Runtime) (*MultiRuntime, error) {
 	m := &MultiRuntime{runtimes: map[string]Runtime{}, current: map[string]RenderedConfig{}, history: map[int64]RenderedConfig{}, expected: map[string]bool{}, ports: &PortAllocator{}}
 	for _, r := range runtimes {
-		if r == nil || (r.Name() != "xray" && r.Name() != "sing-box") || m.runtimes[r.Name()] != nil {
+		if r == nil || !KnownName(r.Name()) || m.runtimes[r.Name()] != nil {
 			return nil, errors.New("invalid multi-core adapter set")
 		}
 		if m.primary == "" {
@@ -80,10 +80,20 @@ func (m *MultiRuntime) DetectCapabilities(ctx context.Context) (*pb.Capabilities
 		if name == m.primary {
 			result = proto.Clone(c).(*pb.Capabilities)
 		}
-		cores = append(cores, &pb.CoreCapability{Name: name, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion})
+		cores = append(cores, &pb.CoreCapability{Name: name, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, GostContractVersion: gostContract(name)})
 	}
 	result.Cores, result.MultiCoreSupported = cores, true
 	return result, nil
+}
+
+// gostContract is the settings contract the GOST entry carries. Every other core
+// keeps the zero value: the field describes GOST settings, not a second
+// capability scale for Xray or sing-box.
+func gostContract(name string) uint32 {
+	if name == desiredstate.CoreGost {
+		return desiredstate.GostContractVersion
+	}
+	return 0
 }
 
 func (m *MultiRuntime) Render(ctx context.Context, s desiredstate.State) (RenderedConfig, error) {
@@ -174,7 +184,7 @@ func DecodeCoreConfigs(data []byte, primary string) (map[string]json.RawMessage,
 	}
 	multi := true
 	for name := range object {
-		if name != "xray" && name != "sing-box" {
+		if !KnownName(name) {
 			multi = false
 		}
 	}

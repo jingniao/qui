@@ -16,7 +16,6 @@ import (
 	"proxycontrol/internal/agent/gate"
 	"proxycontrol/internal/agent/observer"
 	"proxycontrol/internal/platform/id"
-	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/scheduler"
@@ -58,14 +57,7 @@ type Adapter struct {
 	process                *exec.Cmd
 	done                   chan error
 	stopPending            bool
-	coreRun                *core.CoreRun
-	coreRunKey             *vault.Vault
-	coreRunPending         bool
-	runPID                 int
-	runToken               string
-	runEpoch               string
-	runRevision            int64
-	runEnv                 core.OSEnvironment
+	marker                 core.RunMarker
 	current                core.RenderedConfig
 	history                map[int64]core.RenderedConfig
 }
@@ -337,7 +329,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 	defer os.Remove(path)
 	// Record the pending child before it exists so no start-window crash can
 	// leave an orphan core without a durable marker.
-	if err := a.claimCoreRunLocked(epoch, configuration.Revision); err != nil {
+	if err := a.runMarker().Claim(epoch, configuration.Revision); err != nil {
 		return err
 	}
 	command := exec.Command(executable, "run", "--disable-color", "-c", path)
@@ -354,7 +346,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 	}
 	command.Stderr = io.Discard
 	if err := command.Start(); err != nil {
-		abandonErr := a.abandonCoreRunLocked()
+		abandonErr := a.runMarker().Abandon()
 		return errors.Join(err, abandonErr)
 	}
 	a.startedAt = time.Now()
@@ -373,13 +365,13 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 				resultErr = errors.Join(resultErr, reapErr)
 				return
 			}
-			confirmErr := a.confirmCoreExitLocked()
+			confirmErr := a.runMarker().ConfirmExit()
 			resultErr = errors.Join(resultErr, confirmErr)
 		}
 	}()
 	// Bind the exact launched child's OS identity. Failure keeps a marker that a
 	// later parent must treat as unknown rather than a clean exit.
-	if err := a.bindCoreRunLocked(command.Process.Pid); err != nil {
+	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(4 * time.Second)
@@ -387,7 +379,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 		select {
 		case err := <-done:
 			accepted = true
-			confirmErr := a.confirmCoreExitLocked()
+			confirmErr := a.runMarker().ConfirmExit()
 			if err == nil {
 				err = errors.New("sing-box stopped during startup")
 			}
@@ -403,7 +395,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 			case err := <-done:
 				timer.Stop()
 				accepted = true
-				confirmErr := a.confirmCoreExitLocked()
+				confirmErr := a.runMarker().ConfirmExit()
 				if err == nil {
 					err = errors.New("sing-box stopped during startup health")
 				}
@@ -445,7 +437,7 @@ func (a *Adapter) stopLocked() error {
 		a.process = nil
 		a.done = nil
 		a.stopPending = false
-		return a.confirmCoreExitLocked()
+		return a.runMarker().ConfirmExit()
 	default:
 	}
 	if a.hooks.TrafficSink != nil && (a.current.StatsEndpoint != "" || a.current.UserStatsEndpoint != "") {
@@ -483,7 +475,7 @@ func (a *Adapter) forceStopLocked() error {
 	a.process = nil
 	a.done = nil
 	a.stopPending = false
-	return a.confirmCoreExitLocked()
+	return a.runMarker().ConfirmExit()
 }
 
 // UnconfirmedStop reports that the last forced stop could not confirm the exact
@@ -495,7 +487,7 @@ func (a *Adapter) UnconfirmedStop() bool {
 	if a.stopPending {
 		return true
 	}
-	observation, err := a.observeCoreRunLocked()
+	observation, err := a.runMarker().Observe(a.runningChildLocked())
 	return err != nil || observation == core.CoreRunBlocked
 }
 func (a *Adapter) Close() error {
@@ -539,7 +531,7 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 		a.process = nil
 		a.done = nil
 		a.stopPending = false
-		confirmErr := a.confirmCoreExitLocked()
+		confirmErr := a.runMarker().ConfirmExit()
 		if confirmErr != nil {
 			return status, errors.Join(core.ErrCoreStopUnconfirmed, confirmErr)
 		}

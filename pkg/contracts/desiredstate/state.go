@@ -348,8 +348,13 @@ func (s State) Validate() error {
 	}
 	ports := map[string]bool{}
 	for _, inbound := range s.Inbounds {
-		if inbound.Core != "" && inbound.Core != "xray" && inbound.Core != "sing-box" {
+		if inbound.Core != "" && inbound.Core != CoreXray && inbound.Core != CoreSingBox && inbound.Core != CoreGost {
 			return errors.New("unsupported inbound core")
+		}
+		// GOST terminates forwards only. The rule lives here, in the shared
+		// validation, so the panel, the renderer and the Agent cannot disagree.
+		if inbound.Core == CoreGost && inbound.Protocol != "forward" {
+			return errors.New("gost core requires a forward inbound")
 		}
 		if inbound.Protocol == "forward" && (inbound.SubscriptionVisible || len(inbound.CredentialIDs) != 0) {
 			return errors.New("forward inbounds cannot carry credentials or enter subscriptions")

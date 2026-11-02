@@ -692,6 +692,7 @@ type Hello struct {
 	TcpProbeSupported         bool                   `protobuf:"varint,10,opt,name=tcp_probe_supported,json=tcpProbeSupported,proto3" json:"tcp_probe_supported,omitempty"`
 	MultiCoreSupported        bool                   `protobuf:"varint,11,opt,name=multi_core_supported,json=multiCoreSupported,proto3" json:"multi_core_supported,omitempty"`
 	NodeTrafficSupported      bool                   `protobuf:"varint,12,opt,name=node_traffic_supported,json=nodeTrafficSupported,proto3" json:"node_traffic_supported,omitempty"`
+	GostCoreSupported         bool                   `protobuf:"varint,13,opt,name=gost_core_supported,json=gostCoreSupported,proto3" json:"gost_core_supported,omitempty"`
 	unknownFields             protoimpl.UnknownFields
 	sizeCache                 protoimpl.SizeCache
 }
@@ -806,6 +807,13 @@ func (x *Hello) GetMultiCoreSupported() bool {
 func (x *Hello) GetNodeTrafficSupported() bool {
 	if x != nil {
 		return x.NodeTrafficSupported
+	}
+	return false
+}
+
+func (x *Hello) GetGostCoreSupported() bool {
+	if x != nil {
+		return x.GostCoreSupported
 	}
 	return false
 }
@@ -1112,6 +1120,7 @@ type CoreCapability struct {
 	DeviceGateSupported        bool                   `protobuf:"varint,6,opt,name=device_gate_supported,json=deviceGateSupported,proto3" json:"device_gate_supported,omitempty"`
 	Healthy                    *bool                  `protobuf:"varint,7,opt,name=healthy,proto3,oneof" json:"healthy,omitempty"`
 	ObservationContractVersion int32                  `protobuf:"varint,8,opt,name=observation_contract_version,json=observationContractVersion,proto3" json:"observation_contract_version,omitempty"`
+	GostContractVersion        uint32                 `protobuf:"varint,9,opt,name=gost_contract_version,json=gostContractVersion,proto3" json:"gost_contract_version,omitempty"`
 	unknownFields              protoimpl.UnknownFields
 	sizeCache                  protoimpl.SizeCache
 }
@@ -1198,6 +1207,13 @@ func (x *CoreCapability) GetHealthy() bool {
 func (x *CoreCapability) GetObservationContractVersion() int32 {
 	if x != nil {
 		return x.ObservationContractVersion
+	}
+	return 0
+}
+
+func (x *CoreCapability) GetGostContractVersion() uint32 {
+	if x != nil {
+		return x.GostContractVersion
 	}
 	return 0
 }
@@ -5227,7 +5243,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fcertificate_pem\x18\x02 \x01(\fR\x0ecertificatePem\x12\x15\n" +
 	"\x06ca_pem\x18\x03 \x01(\fR\x05caPem\x129\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xf8\x04\n" +
+	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xa8\x05\n" +
 	"\x05Hello\x12.\n" +
 	"\x13last_acked_sequence\x18\x01 \x01(\x04R\x11lastAckedSequence\x12#\n" +
 	"\ragent_version\x18\x02 \x01(\tR\fagentVersion\x12>\n" +
@@ -5241,7 +5257,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x13tcp_probe_supported\x18\n" +
 	" \x01(\bR\x11tcpProbeSupported\x120\n" +
 	"\x14multi_core_supported\x18\v \x01(\bR\x12multiCoreSupported\x124\n" +
-	"\x16node_traffic_supported\x18\f \x01(\bR\x14nodeTrafficSupported\"\x8a\x01\n" +
+	"\x16node_traffic_supported\x18\f \x01(\bR\x14nodeTrafficSupported\x12.\n" +
+	"\x13gost_core_supported\x18\r \x01(\bR\x11gostCoreSupported\"\x8a\x01\n" +
 	"\x12ProtocolCapability\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x18\n" +
 	"\ainbound\x18\x02 \x01(\bR\ainbound\x12\x1a\n" +
@@ -5271,7 +5288,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x04host\x18\x13 \x01(\v2\x1f.proxycontrol.agent.v1.HostInfoR\x04host\x12)\n" +
 	"\x10tuning_supported\x18\x14 \x01(\bR\x0ftuningSupported\x12;\n" +
 	"\x05cores\x18\x15 \x03(\v2%.proxycontrol.agent.v1.CoreCapabilityR\x05cores\x120\n" +
-	"\x14multi_core_supported\x18\x16 \x01(\bR\x12multiCoreSupported\"\x92\x03\n" +
+	"\x14multi_core_supported\x18\x16 \x01(\bR\x12multiCoreSupported\"\xc6\x03\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +
@@ -5280,7 +5297,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x19forward_inbound_supported\x18\x05 \x01(\bR\x17forwardInboundSupported\x122\n" +
 	"\x15device_gate_supported\x18\x06 \x01(\bR\x13deviceGateSupported\x12\x1d\n" +
 	"\ahealthy\x18\a \x01(\bH\x00R\ahealthy\x88\x01\x01\x12@\n" +
-	"\x1cobservation_contract_version\x18\b \x01(\x05R\x1aobservationContractVersionB\n" +
+	"\x1cobservation_contract_version\x18\b \x01(\x05R\x1aobservationContractVersion\x122\n" +
+	"\x15gost_contract_version\x18\t \x01(\rR\x13gostContractVersionB\n" +
 	"\n" +
 	"\b_healthy\"\xeb\x01\n" +
 	"\n" +

@@ -29,7 +29,7 @@ func (r *Reconciler) rollbackOperation(ctx context.Context, commandID string, re
 	if len(cores) > 0 {
 		name = cores[0]
 	}
-	if name != "" && name != "xray" && name != "sing-box" {
+	if name != "" && !core.KnownName(name) {
 		return false, "invalid_command", errors.New("invalid core")
 	}
 	if commandID == "" || len(commandID) > 128 || revision < 0 || (restart && revision == 0) || strings.ContainsAny(commandID, "/\\.") {

@@ -45,3 +45,45 @@ func TestInboundCoreJSONCompatibility(t *testing.T) {
 		t.Fatal(inbound, err)
 	}
 }
+
+// TestGostCoreKeepsForwardsAndRefusesOtherFeatures pins the two shared rules of the
+// third core kind: a global (unscoped) policy never attaches to a GOST forward,
+// because GOST has no routing surface, and a non-forward inbound may not be assigned
+// to it at all.
+func TestGostCoreKeepsForwardsAndRefusesOtherFeatures(t *testing.T) {
+	s := State{SchemaVersion: 1, Revision: 1, NodeID: "n", Logging: Logging{DomainOnly: true},
+		Inbounds: []Inbound{
+			{ID: "forward", Core: CoreGost, Protocol: "forward", Listen: "127.0.0.1", Port: 20000, Enabled: true, DefaultOutbound: "direct", Settings: ProtocolSettings{Forward: &ForwardSettings{Host: "203.0.113.10", Port: 8443, Network: "tcp,udp"}}},
+			{ID: "user", Core: CoreXray, Protocol: "socks5", Listen: "127.0.0.1", Port: 1080, Enabled: true, DefaultOutbound: "direct"},
+		},
+		Outbounds: []Outbound{{ID: "direct", Protocol: "direct", Enabled: true}},
+		Policies:  []Policy{{ID: "global", Enabled: true, Action: Action{Type: "direct"}}},
+	}
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	gost := s.ForCore(CoreGost, CoreXray)
+	if len(gost.Inbounds) != 1 || gost.Inbounds[0].ID != "forward" || len(gost.Policies) != 0 {
+		t.Fatalf("gost closure: %+v", gost)
+	}
+	// The same unscoped policy does reach a user-serving core.
+	if other := s.ForCore(CoreXray, CoreXray); len(other.Policies) != 1 {
+		t.Fatalf("xray closure lost the global policy: %+v", other.Policies)
+	}
+	broken := s
+	broken.Inbounds = []Inbound{{ID: "user", Core: CoreGost, Protocol: "socks5", Listen: "127.0.0.1", Port: 1080, Enabled: true, DefaultOutbound: "direct"}}
+	if err := broken.Validate(); err == nil {
+		t.Fatal("a GOST inbound accepted a user protocol")
+	}
+	unknown := s
+	unknown.Inbounds = []Inbound{{ID: "forward", Core: "shell", Protocol: "forward", Listen: "127.0.0.1", Port: 20000, Enabled: true, DefaultOutbound: "direct", Settings: ProtocolSettings{Forward: &ForwardSettings{Host: "203.0.113.10", Port: 8443, Network: "tcp"}}}}
+	if err := unknown.Validate(); err == nil {
+		t.Fatal("an unknown inbound core was accepted")
+	}
+	if !CoreSupportsInbound(CoreGost, "forward") || CoreSupportsOutbound(CoreGost, "forward") || CoreSupportsInbound(CoreGost, "socks5") {
+		t.Fatal("gost support row is not forward-only")
+	}
+	if GostContractVersion != 1 {
+		t.Fatalf("G1 reports contract version %d", GostContractVersion)
+	}
+}

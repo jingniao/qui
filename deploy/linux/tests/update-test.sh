@@ -513,7 +513,7 @@ component_files_list() {
       "$ROOT/usr/local/lib/proxy-agent/host-network-watch"
   fi
   if [[ $component == agent ]]; then
-    printf '%s\n' "$ROOT/usr/local/lib/proxy-agent/xray" "$ROOT/usr/local/lib/proxy-agent/sing-box" "$ROOT/etc/proxy-agent/config.yaml"
+    printf '%s\n' "$ROOT/usr/local/lib/proxy-agent/xray" "$ROOT/usr/local/lib/proxy-agent/sing-box" "$ROOT/usr/local/lib/proxy-agent/gost" "$ROOT/etc/proxy-agent/config.yaml"
   fi
   printf '%s\n' "$REGISTRY/$component.manifest"
 }

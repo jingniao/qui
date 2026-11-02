@@ -52,8 +52,11 @@ type Policy struct {
 	Keys                        map[string]TrustedKey
 }
 
+// Component reports whether a signed manifest may name this component. It is the
+// signed-Agent path's grammar and the core image inspection uses it for the
+// artifact it just derived, so it covers the managed cores as well.
 func Component(value string) bool {
-	return value == "proxy-agent" || value == "xray" || value == "sing-box"
+	return value == "proxy-agent" || CoreComponent(value)
 }
 func KeyID(public ed25519.PublicKey) string {
 	sum := sha256.Sum256(public)

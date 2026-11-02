@@ -35,23 +35,28 @@ func (s State) ForCore(name, primary string) State {
 			users[c.UserID] = true
 		}
 	}
-	for _, p := range s.Policies {
-		matches := len(p.Scope.UserIDs) == 0 && len(p.Scope.DeviceIDs) == 0
-		for _, id := range p.Scope.UserIDs {
-			matches = matches || users[id]
-		}
-		for _, c := range s.Credentials {
-			if !credentials[c.ID] {
-				continue
+	// GOST forwards route to their own single target and have no routing or
+	// policy surface, so no policy may attach to them: neither the unscoped ones
+	// that every user-serving core receives nor a scoped one.
+	if name != CoreGost {
+		for _, p := range s.Policies {
+			matches := len(p.Scope.UserIDs) == 0 && len(p.Scope.DeviceIDs) == 0
+			for _, id := range p.Scope.UserIDs {
+				matches = matches || users[id]
 			}
-			for _, id := range p.Scope.DeviceIDs {
-				matches = matches || c.DeviceID == id
+			for _, c := range s.Credentials {
+				if !credentials[c.ID] {
+					continue
+				}
+				for _, id := range p.Scope.DeviceIDs {
+					matches = matches || c.DeviceID == id
+				}
 			}
-		}
-		if matches && len(r.Inbounds) > 0 {
-			r.Policies = append(r.Policies, p)
-			if p.Enabled {
-				targets[coreTarget(p.Action.TargetID)], targets[coreTarget(p.Action.BackupID)] = true, true
+			if matches && len(r.Inbounds) > 0 {
+				r.Policies = append(r.Policies, p)
+				if p.Enabled {
+					targets[coreTarget(p.Action.TargetID)], targets[coreTarget(p.Action.BackupID)] = true, true
+				}
 			}
 		}
 	}
@@ -125,6 +130,13 @@ func (s State) ForCore(name, primary string) State {
 		}
 	}
 	return r
+}
+
+// KnownCore reports whether a name is one of the core kinds the platform runs. It
+// is the single list every layer asks: the Agent's loader and inventory, the
+// component holds, the DesiredState validation and the configuration check.
+func KnownCore(name string) bool {
+	return name == CoreXray || name == CoreSingBox || name == CoreGost
 }
 
 func coreTarget(id string) string {

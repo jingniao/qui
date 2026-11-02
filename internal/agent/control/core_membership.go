@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
+	"proxycontrol/internal/agent/core/gost"
 	"proxycontrol/internal/agent/core/singbox"
 	"proxycontrol/internal/agent/core/xray"
 	"proxycontrol/internal/agent/updater"
@@ -17,10 +18,14 @@ import (
 )
 
 func coreRuntime(nodeID, directory, name, path string) core.Runtime {
-	if name == "sing-box" {
+	switch name {
+	case "sing-box":
 		return &singbox.Adapter{NodeID: nodeID, Directory: directory, Path: path}
+	case "gost":
+		return &gost.Adapter{NodeID: nodeID, Directory: directory, Path: path}
+	default:
+		return &xray.Adapter{NodeID: nodeID, Directory: directory, Path: path}
 	}
-	return &xray.Adapter{NodeID: nodeID, Directory: directory, Path: path}
 }
 
 // New components are idle: the current authenticated revision must assign no
@@ -129,7 +134,7 @@ func (w *coreUpdates) addCore(ctx context.Context, request release.CoreUpdateReq
 // record v1/v2 paths (/usr/local/lib/proxy-agent/NAME) are never changed. A
 // disabled overlay survives qui-update carrying YAML and its record forward.
 func cleanupCoreImages(directory, name string) error {
-	if name != "xray" && name != "sing-box" {
+	if !core.KnownName(name) {
 		return errors.New("invalid core")
 	}
 	installed := filepath.Join(directory, "releases", "installed")
@@ -344,7 +349,7 @@ func recoverCoreInventory(directory, nodeID string, inventory configuration.Inve
 	for _, entry := range cores {
 		enabled[entry.Name] = true
 	}
-	for _, name := range []string{"xray", "sing-box"} {
+	for _, name := range core.CoreNames() {
 		if !enabled[name] {
 			if err := cleanupCoreImages(directory, name); err != nil {
 				return err

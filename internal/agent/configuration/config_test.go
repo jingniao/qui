@@ -15,6 +15,9 @@ func TestCoreConfigMapping(t *testing.T) {
 	}{
 		{"core_name: sing-box\ncore_path: /bin/sing-box\n", "sing-box", false},
 		{"cores:\n - name: xray\n   path: /bin/xray\n - name: sing-box\n   path: /bin/sing-box\n", "xray,sing-box", false},
+		{"cores:\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n", "gost", false},
+		{"cores:\n - name: sing-box\n   path: /bin/sing-box\n - name: xray\n   path: /bin/xray\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n", "sing-box,xray,gost", false},
+		{"cores:\n - name: xray\n   path: /bin/xray\n - name: sing-box\n   path: /bin/sing-box\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n - name: gost\n   path: /usr/local/lib/proxy-agent/other\n", "", true},
 		{"cores: []\n", "", true},
 		{"cores:\n - name: xray\n   path: /bin/xray\n - name: xray\n   path: /bin/other\n", "", true},
 		{"cores:\n - name: shell\n   path: /bin/sh\n", "", true},

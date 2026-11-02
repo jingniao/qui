@@ -24,7 +24,20 @@ func QuiCoreSource(value string) bool {
 var coreSourcePrefixes = map[string]string{
 	"xray":     "https://github.com/XTLS/Xray-core/releases/download/",
 	"sing-box": "https://github.com/SagerNet/sing-box/releases/download/",
+	"gost":     "https://github.com/go-gost/gost/releases/download/",
 }
+
+// The reviewed GOST pin. G1 accepts exactly this release, this asset and this
+// archive digest: an arbitrary official URL with an operator digest is not
+// enough for GOST, a different version needs a new reviewed pin and a rerun of
+// the G0 regressions. The digest is the archive digest, not the digest of the
+// installed binary.
+const (
+	GostTag           = "v3.3.2"
+	GostVersion       = "3.3.2"
+	GostAsset         = "gost_3.3.2_linux_amd64.tar.gz"
+	GostArchiveSHA256 = "162feb43b1c284dbea599cdfe898169931af875233060dedc19432c7a9d18274"
+)
 
 // CoreRedirectHosts are the only hosts an official asset download may be
 // redirected to. GitHub answers release-asset downloads with 302 responses.
@@ -57,6 +70,11 @@ func CoreAssetURL(component, value string) (*url.URL, string, error) {
 	}
 	tag, asset, _ := strings.Cut(remainder, "/")
 	if qui && (!quiCoreAsset.MatchString(asset) || strings.Contains(tag, "..")) {
+		return nil, "", ErrSourceURL
+	}
+	// GOST is pinned to one reviewed release: any other tag or asset name is
+	// refused here, before the digest check in the update request.
+	if component == "gost" && (tag != GostTag || asset != GostAsset) {
 		return nil, "", ErrSourceURL
 	}
 	if !validAssetPart(tag, 64) || !validAssetPart(asset, 128) || tag == "." || tag == ".." || asset == "." || asset == ".." {
@@ -102,11 +120,15 @@ func ArchiveKind(asset string) string {
 }
 
 // allowedArchive reports whether the asset's container is published by the
-// component: Xray ships zip archives only, sing-box ships zip and tar.gz.
+// component: Xray ships zip archives only, sing-box ships zip and tar.gz and the
+// pinned GOST release ships one tar.gz.
 func allowedArchive(component, asset string) bool {
 	kind := ArchiveKind(asset)
 	if component == "xray" {
 		return kind == "zip"
+	}
+	if component == "gost" {
+		return kind == "tar.gz" && strings.EqualFold(asset, GostAsset)
 	}
 	return component == "sing-box" && (kind == "zip" || kind == "tar.gz")
 }
@@ -115,6 +137,12 @@ func allowedArchive(component, asset string) bool {
 // and a node's operating system and architecture. It is a panel-side sanity
 // check; the Agent still validates the extracted executable natively.
 func CoreAssetMatches(component, osName, architecture, asset string) bool {
+	// The pinned GOST asset separates its platform fields with underscores, so
+	// the generic hyphen matcher below cannot describe it: one static archive
+	// serves glibc and musl, and no other architecture is accepted.
+	if component == "gost" {
+		return osName == "linux" && architecture == "amd64" && strings.EqualFold(asset, GostAsset)
+	}
 	lower := strings.ToLower(asset)
 	if !allowedArchive(component, lower) || !strings.Contains(lower, "-"+strings.ToLower(osName)+"-") {
 		return false

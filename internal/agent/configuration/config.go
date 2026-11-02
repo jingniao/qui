@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/platform/config"
 )
 
@@ -76,15 +77,15 @@ func LoadAgent(path string) (config.Agent, error) {
 	c.TLS.ClientCA = resolve(c.TLS.ClientCA)
 	c.Updates.CA = resolve(c.Updates.CA)
 	if doc.Cores != nil {
-		if len(doc.Cores) == 0 || len(doc.Cores) > 2 {
-			return c, errors.New("cores requires one or two cores")
+		if len(doc.Cores) == 0 || len(doc.Cores) > 3 {
+			return c, errors.New("cores requires one to three cores")
 		}
 		seen := map[string]bool{}
-		for _, core := range doc.Cores {
-			if (core.Name != "xray" && core.Name != "sing-box") || core.Path == "" || seen[core.Name] {
+		for _, entry := range doc.Cores {
+			if !core.KnownName(entry.Name) || entry.Path == "" || seen[entry.Name] {
 				return c, errors.New("invalid or duplicate core")
 			}
-			seen[core.Name] = true
+			seen[entry.Name] = true
 		}
 		c.CoreName, c.CorePath = doc.Cores[0].Name, doc.Cores[0].Path
 	}

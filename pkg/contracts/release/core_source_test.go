@@ -14,6 +14,7 @@ func TestCoreAssetURLAcceptsOfficialPrefixesOnly(t *testing.T) {
 		{"xray", "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip"},
 		{"sing-box", "https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz"},
 		{"sing-box", "https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-windows-amd64.zip"},
+		{"gost", "https://github.com/go-gost/gost/releases/download/" + GostTag + "/" + GostAsset},
 	}
 	for _, item := range accepted {
 		u, tag, err := CoreAssetURL(item.component, item.value)
@@ -36,6 +37,16 @@ func TestCoreAssetURLAcceptsOfficialPrefixesOnly(t *testing.T) {
 		{"sing-box", "https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz/extra"},
 		{"sing-box", "https://github.com/XTLS/Xray-core/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz"},
 		{"proxy-agent", "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip"},
+		// The GOST pin is exact: another tag, another asset name, an arm64 archive,
+		// a different repository and a bare asset without its tag are all refused.
+		{"gost", "https://github.com/go-gost/gost/releases/download/v3.3.3/" + GostAsset},
+		{"gost", "https://github.com/go-gost/gost/releases/download/" + GostTag + "/gost_3.3.2_linux_arm64.tar.gz"},
+		{"gost", "https://github.com/go-gost/gost/releases/download/" + GostTag + "/gost_3.3.2_linux_amd64.zip"},
+		{"gost", "https://github.com/go-gost/gost/releases/download/" + GostTag + "/gost"},
+		{"gost", "https://github.com/go-gost/gost/releases/download/" + GostTag},
+		{"gost", "https://github.com/XTLS/Xray-core/releases/download/" + GostTag + "/" + GostAsset},
+		{"gost", "https://github.com/go-gost/gost/releases/download/v3.3.2/../" + GostAsset},
+		{"gost", "http://github.com/go-gost/gost/releases/download/" + GostTag + "/" + GostAsset},
 	}
 	for _, item := range rejected {
 		if _, _, err := CoreAssetURL(item.component, item.value); err == nil {
@@ -127,6 +138,39 @@ func TestCoreUpdateRequestValidation(t *testing.T) {
 		if err := request.Validate(); err == nil {
 			t.Fatalf("invalid request %d accepted", index)
 		}
+	}
+}
+
+// TestGostCoreUpdateRequestRequiresTheReviewedPin proves the reviewed pair is part
+// of the request contract: the official URL alone is not enough, because "a
+// different GOST version needs a new reviewed pin", and an operator-chosen digest
+// must not slip through.
+func TestGostCoreUpdateRequestRequiresTheReviewedPin(t *testing.T) {
+	gost := CoreUpdateRequest{SchemaVersion: 2, ID: "upd_gost", NodeID: "node", Revision: 3, Sequence: 1, Component: "gost", Version: GostVersion, URL: "https://github.com/go-gost/gost/releases/download/" + GostTag + "/" + GostAsset, SHA256: GostArchiveSHA256}
+	if err := gost.Validate(); err != nil {
+		t.Fatalf("the pinned release was refused: %v", err)
+	}
+	for _, broken := range []CoreUpdateRequest{
+		func() CoreUpdateRequest { r := gost; r.Version = "3.3.3"; return r }(),
+		func() CoreUpdateRequest { r := gost; r.SHA256 = sampleDigest; return r }(),
+		func() CoreUpdateRequest { r := gost; r.URL = strings.Replace(r.URL, GostTag, "v3.3.3", 1); return r }(),
+		func() CoreUpdateRequest { r := gost; r.Component = "proxy-agent"; return r }(),
+	} {
+		if err := broken.Validate(); err == nil {
+			t.Fatalf("unreviewed gost request accepted: %+v", broken)
+		}
+	}
+	if !CoreComponent("gost") || CoreComponent("proxy-agent") {
+		t.Fatal("core component set is not xray/sing-box/gost")
+	}
+	if !Component("gost") || !Component("proxy-agent") || Component("shell") {
+		t.Fatal("the manifest grammar does not cover the managed cores")
+	}
+	if !CoreAssetMatches("gost", "linux", "amd64", GostAsset) || CoreAssetMatches("gost", "linux", "arm64", GostAsset) || CoreAssetMatches("gost", "windows", "amd64", GostAsset) {
+		t.Fatal("gost platform matching is not linux/amd64 only")
+	}
+	if CoreBinaryName("gost", "linux") != "gost" {
+		t.Fatal("gost archive target is not the single gost executable")
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
 )
 
@@ -255,8 +256,8 @@ func (c Agent) Validate() error {
 	if err := c.Updates.Validate(); err != nil {
 		return fmt.Errorf("updates: %w", err)
 	}
-	if c.CoreName != "" && c.CoreName != "xray" && c.CoreName != "sing-box" {
-		return errors.New("core_name must be xray or sing-box")
+	if c.CoreName != "" && !desiredstate.KnownCore(c.CoreName) {
+		return errors.New("core_name must be xray, sing-box or gost")
 	}
 	if err := validateAddress(c.ControlAddress, c.Development); err != nil {
 		return err

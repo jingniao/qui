@@ -7,7 +7,7 @@ import "errors"
 func (m *MultiRuntime) AddIdle(r Runtime) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if r == nil || (r.Name() != "xray" && r.Name() != "sing-box") || m.runtimes[r.Name()] != nil {
+	if r == nil || !KnownName(r.Name()) || m.runtimes[r.Name()] != nil {
 		return errors.New("invalid new core")
 	}
 	if a, ok := r.(interface{ SetPortAllocator(*PortAllocator) }); ok {

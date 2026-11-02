@@ -86,6 +86,33 @@ func multiFixture(t *testing.T) (*MultiRuntime, *fakeMultiCore, *fakeMultiCore, 
 	}
 	return m, a, b, &events
 }
+
+// TestMultiCapabilitiesCarryTheGostContract pins the third core kind in the
+// capability report: the node lists it like the others, and only its entry carries
+// the GOST settings contract version. The panel gates the G2 options on that field.
+func TestMultiCapabilitiesCarryTheGostContract(t *testing.T) {
+	events := []string{}
+	primary := &fakeMultiCore{name: "xray", events: &events}
+	third := &fakeMultiCore{name: "gost", events: &events}
+	m, err := NewMultiRuntime(primary, third)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := m.DetectCapabilities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !capabilities.GetMultiCoreSupported() || len(capabilities.Cores) != 2 {
+		t.Fatalf("capabilities: %+v", capabilities)
+	}
+	if capabilities.Cores[0].Name != "xray" || capabilities.Cores[0].GostContractVersion != 0 {
+		t.Fatalf("xray entry: %+v", capabilities.Cores[0])
+	}
+	if capabilities.Cores[1].Name != "gost" || capabilities.Cores[1].GostContractVersion != desiredstate.GostContractVersion {
+		t.Fatalf("gost entry: %+v", capabilities.Cores[1])
+	}
+}
+
 func multiConfig(revision int64) RenderedConfig {
 	r := RenderedConfig{NodeID: "n", Revision: revision, Cores: map[string]RenderedConfig{}}
 	for _, n := range []string{"xray", "sing-box"} {

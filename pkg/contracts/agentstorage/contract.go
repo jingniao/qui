@@ -50,8 +50,15 @@ type Contract struct {
 }
 
 func version(n int) Format { return Format{ReadMax: n, Write: n} }
+
+// Current is the storage ABI this build reads and writes. A ReadMax is raised
+// ahead of the first write: v1.3.0 declares that it understands a third core
+// name in the configuration and in the desired state (configuration 5, desired
+// state 4) while still writing format 4/3, so every retained fallback image of
+// the release keeps starting. The write is raised only after those images are
+// proven readable, as CheckMultiCoreActivation does for format 4.
 func Current(agentVersion string) Contract {
-	return Contract{SchemaVersion: 1, Component: "proxy-agent", AgentVersion: agentVersion, OS: runtime.GOOS, Architecture: runtime.GOARCH, ManagedProtocol: 1, AgentUpdateProtocol: 1, AgentRecoveryProtocol: 1, Formats: Formats{Configuration: Format{ReadMax: 4, Write: 1}, Identity: Format{ReadMax: 2, Write: 2}, DesiredState: Format{ReadMax: 3, Write: 1}, Spool: Format{ReadMax: 6, Write: 4}, CoreAccounting: Format{ReadMax: CoreAccountingFormat, Write: 2}, ReleaseHistory: version(3), UpdateJournal: version(2), ReleaseHold: Format{ReadMax: 3, Write: 2}}}
+	return Contract{SchemaVersion: 1, Component: "proxy-agent", AgentVersion: agentVersion, OS: runtime.GOOS, Architecture: runtime.GOARCH, ManagedProtocol: 1, AgentUpdateProtocol: 1, AgentRecoveryProtocol: 1, Formats: Formats{Configuration: Format{ReadMax: 5, Write: 1}, Identity: Format{ReadMax: 2, Write: 2}, DesiredState: Format{ReadMax: 4, Write: 1}, Spool: Format{ReadMax: 6, Write: 4}, CoreAccounting: Format{ReadMax: CoreAccountingFormat, Write: 2}, ReleaseHistory: version(3), UpdateJournal: version(2), ReleaseHold: Format{ReadMax: 3, Write: 2}}}
 }
 
 // Optional formats preserve legacy writes until connection protection or

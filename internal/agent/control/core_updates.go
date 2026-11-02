@@ -73,7 +73,7 @@ func newCoreUpdates(ctx context.Context, c config.Agent, nodeID string, manager 
 	go w.run(workCtx)
 	if multi, ok := manager.Adapter.(*core.MultiRuntime); ok {
 		w.children = map[string]*coreUpdates{}
-		for _, name := range []string{"xray", "sing-box"} {
+		for _, name := range core.CoreNames() {
 			entry := configuration.Core{Name: name}
 			if runtime, ok := multi.Component(name).(core.BinaryRuntime); ok {
 				entry.Path = runtime.ExecutablePath()

@@ -78,6 +78,66 @@
               </div>
               <p class="text-[10px] text-ios-tertiary">设置后，该服务器创建新节点、中转转发或加密隧道时，端口将自动从此区间内随机选取未被占用的端口。</p>
             </div>
+
+            <!-- 整机流量 (T1)：独立保存按钮与脏标记，不作为基本信息提交的一部分 -->
+            <div class="sm:col-span-2 pt-2 border-t border-black/[0.04] space-y-1.5" @keydown.enter.prevent>
+              <div class="flex flex-col gap-1 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
+                <span class="font-medium text-neutral-700 text-[11px] flex items-center gap-1.5 whitespace-nowrap">
+                  <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h10" />
+                  </svg>
+                  <span>整机流量</span>
+                  <span v-if="machineDirty" class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
+                  <span v-else class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-black/[0.03] text-neutral-400">已同步</span>
+                </span>
+                <button
+                  v-if="isOwner"
+                  type="button"
+                  class="ios-action-btn-primary text-xs px-3 py-1 flex items-center gap-1.5"
+                  :disabled="!!saving"
+                  @click="saveMachineTraffic"
+                >
+                  <span v-if="saving === 'machine'" class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  <span>保存整机流量</span>
+                </button>
+              </div>
+              <div class="grid grid-cols-2 gap-2.5">
+                <label class="space-y-1">
+                  <span class="text-neutral-500 text-[10px]">统计方式</span>
+                  <select v-model="machineForm.method" class="form-input-base text-xs">
+                    <option v-for="item in MACHINE_TRAFFIC_METHODS" :key="item.value" :value="item.value">{{ item.label }}</option>
+                  </select>
+                </label>
+                <label class="space-y-1">
+                  <span class="text-neutral-500 text-[10px]">流量重置日 (1 - 31)</span>
+                  <input v-model.number="machineForm.resetDay" type="number" min="1" max="31" class="form-input-base text-xs font-mono" />
+                </label>
+                <label class="space-y-1">
+                  <span class="text-neutral-500 text-[10px]">统计网卡</span>
+                  <input
+                    v-model.trim="machineForm.interfaceName"
+                    list="machine-traffic-interfaces"
+                    class="form-input-base text-xs font-mono"
+                    :placeholder="`留空自动（${autoInterface}）`"
+                  />
+                  <datalist id="machine-traffic-interfaces">
+                    <option v-for="name in interfaceOptions" :key="name" :value="name"></option>
+                  </datalist>
+                </label>
+                <div class="space-y-1">
+                  <span class="text-neutral-500 text-[10px] block">额度（留空不限）</span>
+                  <div class="flex items-center gap-1.5">
+                    <input v-model.trim="machineForm.allowanceValue" inputmode="decimal" class="form-input-base text-xs font-mono" placeholder="不设置" />
+                    <select v-model="machineForm.allowanceUnit" class="form-input-base text-xs font-mono !w-20">
+                      <option v-for="unit in MACHINE_TRAFFIC_UNITS" :key="unit" :value="unit">{{ unit }}</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <p class="text-[10px] text-ios-tertiary">网卡解析：自动（{{ autoInterface }}）。切换网卡会按所选网卡重新计算本期；自动模式使用最近上报的默认路由网卡。</p>
+              <p class="text-[10px] text-ios-tertiary">短月份按最后一天重置，使用面板时区。额度仅用于展示，不限速、不停用服务。</p>
+              <p v-if="errors.machine" role="alert" class="text-xs text-ios-red font-medium">{{ errors.machine }}</p>
+            </div>
           </div>
 
           <p v-if="errors.basic" role="alert" class="text-xs text-ios-red font-medium">{{ errors.basic }}</p>
@@ -304,6 +364,10 @@ import CoreUpdatesPanel from '../../../system/components/CoreUpdatesPanel.vue';
 import ConfirmDialog from '../../../../components/ConfirmDialog.vue';
 import { isDirty } from './serverDetailModel';
 import { coreSummaryLabel } from '../../coreSummary';
+import type { HostMetrics } from '../../metrics';
+import {
+  MACHINE_TRAFFIC_METHODS, MACHINE_TRAFFIC_UNITS, formFromSettings, payloadFromForm, type MachineTrafficForm
+} from '../../machineTrafficModel';
 
 const coreDetails = ref<HTMLDetailsElement>();
 
@@ -327,6 +391,24 @@ const saving = ref('');
 const revokeOpen = ref(false);
 const errors = reactive<Record<string, string>>({});
 
+// 整机流量 (T1): the settings are saved on their own, so they carry their own
+// form copy, baseline and dirty flag instead of the basic-information snapshot.
+const machineForm = reactive<MachineTrafficForm>(formFromSettings(null));
+const machineBaseline = ref<MachineTrafficForm>(formFromSettings(null));
+const machineSnapshot = computed<MachineTrafficForm>(() => ({
+  method: machineForm.method,
+  interfaceName: machineForm.interfaceName,
+  allowanceValue: machineForm.allowanceValue,
+  allowanceUnit: machineForm.allowanceUnit,
+  resetDay: machineForm.resetDay
+}));
+const machineDirty = computed(() => isDirty(machineSnapshot.value, machineBaseline.value));
+const autoInterface = computed(() => props.node.heartbeat?.defaultRouteInterface || '—');
+const interfaceOptions = computed(() => {
+  const names = (props.node.heartbeat as unknown as HostMetrics)?.interfaces?.map(nic => nic.name) || [];
+  return [...new Set(names)].sort();
+});
+
 const networkFields = [
   { key: 'outboundSourceIp', label: '核心出站源 IP' },
   { key: 'outboundInterface', label: '核心出站网卡' },
@@ -349,6 +431,7 @@ watch(() => props.node.id, () => {
     portRangeStart: meta.portRangeStart ?? undefined,
     portRangeEnd: meta.portRangeEnd ?? undefined
   });
+  void loadMachineTraffic();
 }, { immediate: true });
 
 const snapshots = computed(() => ({
@@ -373,7 +456,7 @@ const snapshots = computed(() => ({
 
 const baseline = reactive<Record<string, unknown>>(JSON.parse(JSON.stringify(snapshots.value)));
 const dirty = computed(() => Object.fromEntries(Object.entries(snapshots.value).map(([key, value]) => [key, isDirty(value, baseline[key])])));
-const hasUnsaved = computed(() => Object.values(dirty.value).some(Boolean));
+const hasUnsaved = computed(() => machineDirty.value || Object.values(dirty.value).some(Boolean));
 
 defineExpose({ hasUnsaved });
 
@@ -449,6 +532,34 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
     emit('changed');
   } finally {
     saving.value = '';
+  }
+}
+
+async function saveMachineTraffic() {
+  if (saving.value || !isOwner.value) return;
+  saving.value = 'machine';
+  errors.machine = '';
+  try {
+    const saved = await nodeAPI.saveMachineTrafficSettings(props.node.id, payloadFromForm(machineSnapshot.value));
+    Object.assign(machineForm, formFromSettings(saved));
+    machineBaseline.value = { ...machineSnapshot.value };
+    showToast('整机流量设置已保存');
+    emit('changed');
+  } catch (e) {
+    errors.machine = (e as Error).message;
+  } finally {
+    saving.value = '';
+  }
+}
+
+async function loadMachineTraffic() {
+  errors.machine = '';
+  try {
+    const settings = await nodeAPI.machineTrafficSettings(props.node.id);
+    Object.assign(machineForm, formFromSettings(settings));
+    machineBaseline.value = { ...machineSnapshot.value };
+  } catch (e) {
+    errors.machine = (e as Error).message;
   }
 }
 

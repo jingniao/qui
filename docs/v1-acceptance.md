@@ -1257,3 +1257,19 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 | H9 | RC 与发布 | rc.1–rc.4 预发布；rc.4 三台主机通过、F10 复验通过（conntrack 满 14 次丢包，0 次核心重启）；v1.2.0 于 2026-11-01 发布并部署到三台主机 |
 
 发现：F1–F7（RC1）、F8–F11（RC2）、F12–F13（浏览器走查）；全部已修复或按决定记为限制（F11），F8–F10 在 rc.3/rc.4 实机复验通过。v1.2.0 于 2026-11-01 发布（tag 指向 `8f6406e`，与 rc.4 同一 commit）并部署到三台主机。限制：L8（按方案 1 标注）、L9、L10、F11；只验收 amd64。
+
+## 12. v1.3.0
+
+T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试），Web UI 与文档在 release/v1.3.0 的后续提交中。**尚未实机验收**，本节只记录本地证据；口径见 AGENTS §21，操作与限制全文见[运维手册](operations.md) §18。
+
+| 项 | 覆盖内容 | 证据与状态 |
+| --- | --- | --- |
+| T1-report | Agent 上报 `bootId`、IPv4 默认路由网卡与各网卡累计字节；三处读取彼此独立，失败只省略自己的字段 | 已提交测试（`4cc9025`）：`TestHostBootIDIsCanonicalOrUnknown`、`TestHostDefaultRouteInterfaceHeuristic`、`TestHostIdentitySurvivesInterfaceReadFailure`、`TestHostMetricsProcReadOnlyAndMissing`；本次未在本机复跑（该环境无 Go），待实机 |
+| T1-delta | 首次采样只建基线、精确增量、重放与过期消息、同启动断线补计、重启与计数回退重建基线、跨日按比例分摊、溢出回滚心跳事务 | 已提交测试（`4cc9025`）：`TestMachineFirstSampleIsOnlyABaseline`、`TestMachineSecondSampleCountsExactDeltas`、`TestMachineReplayStaleAndOlderSamples`、`TestMachineOutageRecoveryAndContinuity`、`TestMachineRebaselinesNeverCountAsTraffic`、`TestMachineMissingIdentityOrInterfacesWritesNothing`、`TestMachineSkipsDuplicateAndOutOfRangeCounters`、`TestMachineDailyOverflowRollsBackTheHeartbeat`；同日分摊见 `TestMachineDayShares`；待实机 |
+| T1-period | 重置日锚点与短月份、半开区间边界、measured/stale/unknown、自动与显式网卡、切换网卡重算本期、`max` 取本期两个方向合计的较大值 | 已提交测试（`4cc9025`）：`TestMachinePeriodAnchors`、`TestMachineSummaryMeasuredStaleAndUnknown`、`TestMachineSummaryStalenessAndIdentity`、`TestMachineSummaryWithoutRouteIsUnknown`、`TestMachineSummaryMethodsAndResetSlices`；待实机 |
+| T1-settings | 设置默认值与边界校验、四字段整体替换、额度上限、批量与单节点摘要一致、已删除节点跳过 | 已提交测试（`4cc9025`）：`TestMachineSettingsDefaultsAndValidation`、`TestMachineBatchMatchesSingleAndSkipsDeleted`；Web 侧换算见 T1-UI；待实机 |
+| T1-permissions | Owner/Viewer/未登录/CSRF、写操作审计“服务器流量设置”、逻辑删除节点 404 | 已提交测试（`4cc9025`）：`TestMachineTrafficHTTPPermissionsAndAudit`；待实机 |
+| T1-backup | 三张机器表随加密备份与清单计数、校验拒绝畸形行且接受 0126 之前归档、恢复以当前库为准（同日重叠、空当前表、源早于 0126、已删除节点行）、迁移保留已部署数据 | 已提交测试（`4cc9025`）：`TestMachineTrafficArchiveKeepsDurableRows`、`TestMachineTrafficValidationRejectsMalformedRows`、`TestMachineTrafficValidationAcceptsPre0126`、`TestMachineTrafficRestoreKeepsCurrentUsage`、`TestMachineTrafficRestoreEmptyCurrentTableWins`、`TestMachineTrafficRestoreSourcePredatingTheMigration`、`TestMachineTrafficRestoreKeepsDeletedNodeRows`、`TestMachineTrafficMigrationKeepsDeployedData`；待实机 |
+| T1-UI | 卡片与详情共用同一组件与纯模型、未知“—”与实测 0 B、进度条裁剪、重置日按面板时区、stale 标注、设置独立保存与 Viewer 只读 | `web/package.json` 没有测试运行器，格式化与设置换算集中在 `web/src/modules/nodes/machineTrafficModel.ts`，未加单测；本次 `cd web && npm run build`（含 vue-tsc）通过；浏览器走查由审查者执行，待实机 |
+
+三台主机（us2-node、uk-node、alpine-node，含 Alpine/LXC）的实机验收、时区变更后的分桶观察与 LXC 网卡范围核对均待执行；在此之前不声称 T1 已发布或已验收。

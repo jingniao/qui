@@ -137,18 +137,9 @@
               </div>
             </div>
 
-            <!-- 本月流量 -->
+            <!-- 本月整机流量 (T1: 单张网卡的本期整机用量，已取代此处的代理流量读数) -->
             <div class="min-w-0">
-              <p class="text-[11px] text-neutral-400 font-medium truncate" title="面板时区内仍保留的账户流量样本合计；受保留策略影响">本月流量（保留记录）</p>
-              <div class="mt-0.5 flex items-baseline gap-x-1.5 gap-y-0.5 flex-wrap text-xs font-mono tabular-nums">
-                <div class="font-bold text-neutral-900 text-xs truncate leading-tight shrink-0">
-                  <TrafficValue :bytes="getNodeMonthTraffic(node)" />
-                </div>
-                <div class="text-[10px] text-neutral-400 font-normal truncate leading-tight flex items-center gap-1 shrink-0">
-                  <span class="text-emerald-700/80">↑{{ formatCompactBytes(nodeMonthTraffic[node.id]?.uploadBytes) }}</span>
-                  <span class="text-ios-blue/80">↓{{ formatCompactBytes(nodeMonthTraffic[node.id]?.downloadBytes) }}</span>
-                </div>
-              </div>
+              <MachineTrafficUsage compact :summary="machineTraffic[node.id]" />
             </div>
           </div>
 
@@ -255,21 +246,21 @@
 <script setup lang="ts">
 import { toRef } from 'vue';
 import { useRouter } from 'vue-router';
-import type { NodeView } from '../api';
+import type { MachineTrafficSummary, NodeView } from '../api';
 import { isOwner } from '../../../app/auth';
 import { hostMetrics, nicRate } from '../metrics';
 import { coreSummaryLabel } from '../coreSummary';
-import TrafficValue from '../../../components/TrafficValue.vue';
+import MachineTrafficUsage from './MachineTrafficUsage.vue';
 import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';
 
-const props = defineProps<{ nodes: NodeView[]; clockNow: number; nodeMonthTraffic: Record<string, { uploadBytes: number; downloadBytes: number }> }>();
+const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary> }>();
 const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView] }>();
 const router = useRouter();
 
 const { statusCapsuleClass, statusCapsuleText, statusDotClass, calculateRunningTime, formatPercent,
-  barColor, formatCompactBytes, formatSpeedParts, getNodeCountry, getNodeRegion, getRenewalDate,
-  getRenewalPriceDisplay, getRenewalInfo, getNodeMonthTraffic } = useServerCardValues(toRef(props, 'clockNow'), toRef(props, 'nodeMonthTraffic'));
+  barColor, formatSpeedParts, getNodeCountry, getNodeRegion, getRenewalDate,
+  getRenewalPriceDisplay, getRenewalInfo } = useServerCardValues(toRef(props, 'clockNow'));
 const { vVisible, latencyTile, latencyStatus } = useServerCardLatency();
 
 function handleCardClick(node: NodeView) {

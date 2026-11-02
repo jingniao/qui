@@ -65,7 +65,7 @@
     <template v-else>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
       <EmptyState v-if="!filtered.length" title="没有匹配的服务器" description="请调整筛选条件，或新增服务器并完成登记。" />
-      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :node-month-traffic="monthDetails" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" />
+      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :machine-traffic="machineTraffic" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" />
       <ServerInventory v-else :rows="pageRows" :columns="columns" :owner="isOwner" :selected="selected" @toggle="toggle" @install="enrollment?.reissue($event)" @delete="deletion?.prompt($event)" />
       <p v-if="displayMode === 'list' && filtered.length && hiddenColumns.length" class="text-xs text-ios-tertiary">当前筛选的服务器均无可用数据，已隐藏：{{ hiddenColumns.join('、') }}。</p>
       <Pagination v-if="displayMode === 'list' && filtered.length > 20" :total="filtered.length" :current-page="page" :page-size="20" @update:page="changePage" />
@@ -86,7 +86,7 @@ import { showToast } from '../../../app/api';
 import { authState, isOwner } from '../../../app/auth';
 import { localInput, utcInput } from '../../../app/time';
 import { request } from '../../../app/apiClient';
-import { nodeAPI, type NodeView } from '../api';
+import { nodeAPI, type MachineTrafficSummary, type NodeView } from '../api';
 import { groupAPI, type NodeGroup } from '../groupsApi';
 import { choices } from '../../proxy/api';
 import { accessAPI } from '../../access/api';
@@ -107,7 +107,7 @@ function setDisplayMode(mode: 'grid' | 'list') {
   localStorage.setItem('qui_server_display_mode', mode);
 }
 const quickEdit = ref<InstanceType<typeof ServerQuickEdit>>();
-const monthDetails = ref<Record<string, { uploadBytes: number; downloadBytes: number }>>({});
+const machineTraffic = ref<Record<string, MachineTrafficSummary>>({});
 function install(node: NodeView) {
   if (node.status === 'pending' && !node.deletedAt) void enrollment.value?.reissue(node);
   else showToast('该服务器已登记；如需重装或升级请使用 qui-update（见部署文档）', 'info');
@@ -158,15 +158,17 @@ async function load() {
   const current = ++generation;
   loading.value = true; error.value = '';
   try {
-    const [servers, groupResult, monthly] = await Promise.allSettled([
+    const [servers, groupResult, monthly, machine] = await Promise.allSettled([
       choices((index) => nodeAPI.list(index, '', deleted.value)),
       isOwner.value ? choices(groupAPI.list) : Promise.resolve([] as NodeGroup[]),
-      request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly')
+      request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly'),
+      nodeAPI.machineTrafficBatch()
     ]);
     if (servers.status === 'rejected') throw servers.reason;
     const notices: string[] = [];
     if (groupResult.status === 'rejected') notices.push(`节点分组读取失败：${(groupResult.reason as Error).message}`);
     if (monthly.status === 'rejected') notices.push(`本月流量读取失败：${(monthly.reason as Error).message}`);
+    if (machine.status === 'rejected') notices.push(`本月整机流量读取失败：${(machine.reason as Error).message}`);
     // Midnight can fall in a DST gap in a few zones; fall back to UTC midnight then.
     let dayStart: string;
     try { dayStart = utcInput(localInput(new Date().toISOString()).slice(0, 10) + 'T00:00'); }
@@ -185,7 +187,7 @@ async function load() {
     groups.value = groupResult.status === 'fulfilled' ? groupResult.value : [];
     today.value = Object.fromEntries(details.filter(item => item.bytes !== undefined).map(item => [item.id, item.bytes! ]));
     month.value = monthly.status === 'fulfilled' ? Object.fromEntries(monthly.value.items.map(item => [item.nodeId, item.uploadBytes + item.downloadBytes])) : {};
-    monthDetails.value = monthly.status === 'fulfilled' ? Object.fromEntries(monthly.value.items.map(item => [item.nodeId, item])) : {};
+    machineTraffic.value = machine.status === 'fulfilled' ? Object.fromEntries(machine.value.items.map(item => [item.nodeId, item])) : {};
     monthZone.value = monthly.status === 'fulfilled' ? monthly.value.timezone : '';
     warnings.value = notices;
     selected.value = selected.value.filter(id => nodes.value.some(node => node.id === id && !node.deletedAt));

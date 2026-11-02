@@ -4,7 +4,7 @@ import { ref, onMounted, onUnmounted, type Ref } from 'vue';
 import type { NodeView } from '../api';
 import { getNodeMeta, resolveCountryInfo, onGeoResolved, formatRenewPrice, calculateRemainingDays } from '../nodeMeta';
 
-export function useServerCardValues(clockNow: Ref<number>, nodeMonthTraffic: Ref<Record<string, { uploadBytes: number; downloadBytes: number }>>) {
+export function useServerCardValues(clockNow: Ref<number>) {
 function statusCapsuleText(node: NodeView): string { return serverStatus(node, clockNow.value).label; }
 function statusCapsuleClass(node: NodeView): string {
   const tone = serverStatus(node, clockNow.value).tone;
@@ -36,13 +36,6 @@ function barColor(val?: number): string {
   if (val >= 90) return 'bg-rose-500';
   if (val >= 75) return 'bg-amber-500';
   return 'bg-[#12B76A]';
-}
-
-function formatCompactBytes(bytes?: number): string {
-  if (bytes === undefined || bytes === null) return '—';
-  if (bytes === 0) return '0M';
-  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)}M`;
-  return `${Math.round(bytes / 1024 / 1024 / 1024)}G`;
 }
 
 function formatSpeedParts(rateStr: string): { value: string; unit: string } {
@@ -83,12 +76,7 @@ function getRenewalInfo(node: NodeView) {
   return { ...info, isNear: info.days !== null && info.days <= (meta.renewNoticeDays ?? 7) };
 }
 
-// Monthly traffic
-function getNodeMonthTraffic(node: NodeView): number | null {
-  const item = nodeMonthTraffic.value[node.id];
-  return item ? item.uploadBytes + item.downloadBytes : null;
-}
-
+// Monthly machine traffic lives in MachineTrafficUsage (T1), not in the card model.
 onMounted(() => { unsubGeo = onGeoResolved(() => { geoTick.value++; }); });
 onUnmounted(() => { unsubGeo?.(); });
 
@@ -99,13 +87,11 @@ return {
   calculateRunningTime,
   formatPercent,
   barColor,
-  formatCompactBytes,
   formatSpeedParts,
   getNodeCountry,
   getNodeRegion,
   getRenewalDate,
   getRenewalPriceDisplay,
-  getRenewalInfo,
-  getNodeMonthTraffic
+  getRenewalInfo
 };
 }

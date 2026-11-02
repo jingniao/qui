@@ -130,6 +130,7 @@
       :now="now"
       :today="today"
       :month="month"
+      :machine-traffic="machineTraffic"
     />
 
     <!-- Bottom Section: Services & Configurations (Balanced 2-Column Grid) -->
@@ -200,7 +201,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue';
-import type { NodeView } from '../../api';
+import type { MachineTrafficSummary, NodeView } from '../../api';
 import type { Revision } from '../../../system/deploymentApi';
 import { type NodeMeta, resolveCountryInfo, onGeoResolved, cleanRemark, formatPortRange } from '../../nodeMeta';
 import { hostMetrics, uptime } from '../../metrics';
@@ -222,6 +223,7 @@ const props = defineProps<{
   now: number;
   today?: number;
   month?: number;
+  machineTraffic?: MachineTrafficSummary | null;
   revisions: Revision[];
   groups?: NodeGroup[];
   latestRevision?: number;

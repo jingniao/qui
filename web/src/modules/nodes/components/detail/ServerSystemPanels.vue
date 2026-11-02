@@ -171,7 +171,11 @@
         </div>
       </div>
 
-      <!-- Lower 3-Column Sub-grid: 总流量 / 上行 / 下行 -->
+      <!-- 本月整机流量 (T1): 单张网卡的本期整机用量 -->
+      <MachineTrafficUsage :summary="machineTraffic" />
+
+      <!-- Lower 3-Column Sub-grid: 总流量 / 上行 / 下行（代理流量，非整机流量） -->
+      <p class="text-[10px] text-ios-tertiary font-medium">代理流量 · 本月（保留记录）</p>
       <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">总流量</div>
@@ -200,10 +204,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { NodeView } from '../../api';
+import type { MachineTrafficSummary, NodeView } from '../../api';
 import type { HostMetrics } from '../../metrics';
 import { nicRate } from '../../metrics';
 import { storageDisplay, observed } from '../hostObservationModel';
+import MachineTrafficUsage from '../MachineTrafficUsage.vue';
 
 const props = defineProps<{
   node: NodeView;
@@ -211,6 +216,7 @@ const props = defineProps<{
   now: number;
   today?: number;
   month?: number;
+  machineTraffic?: MachineTrafficSummary | null;
 }>();
 
 const host = computed(() => props.node.capabilities?.host);

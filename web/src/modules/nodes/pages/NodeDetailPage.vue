@@ -35,7 +35,7 @@
       </template>
       <template v-else>
         <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : '服务器离线' }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
-        <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :groups="groups" :meta="meta" :now="now" :today="today" :month="month" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
+        <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :groups="groups" :meta="meta" :now="now" :today="today" :month="month" :machine-traffic="machineTraffic" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
         <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id + ':' + nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
         <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :latest-revision="latestRevision" @changed="load" @published="published" />
@@ -52,7 +52,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
-import { nodeAPI, type NodeView } from '../api';
+import { nodeAPI, type MachineTrafficSummary, type NodeView } from '../api';
 import { groupAPI, type NodeGroup } from '../groupsApi';
 import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
@@ -137,7 +137,7 @@ onBeforeRouteUpdate((to, from) => {
   return to.params.id !== from.params.id || to.query.tab !== from.query.tab ? canLeave() : true;
 });
 
-const today = ref<number>(), month = ref<number>();
+const today = ref<number>(), month = ref<number>(), machineTraffic = ref<MachineTrafficSummary | null>(null);
 const meta = computed(() => node.value ? getNodeMeta(node.value.id) : {});
 const latestRevision = computed(() => revisions.value.length ? Math.max(...revisions.value.map(rev => rev.id)) : undefined);
 const tabs = computed(() => [
@@ -228,11 +228,12 @@ async function load() {
       utc.setUTCHours(0, 0, 0, 0);
       dayStart = utc.toISOString();
     }
-    const [groupResult, revisionResult, daily, monthly] = await Promise.all([
+    const [groupResult, revisionResult, daily, monthly, machine] = await Promise.all([
       isOwner.value ? optional('节点分组读取失败', choices(groupAPI.list), []) : Promise.resolve([]),
       isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), []) : Promise.resolve([]),
       optional('今日流量读取失败', accessAPI.accounts({ nodeId: id, from: dayStart, to: new Date().toISOString() }), null),
       optional('本月流量读取失败', request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly'), null),
+      optional('本月整机流量读取失败', nodeAPI.machineTraffic(id), null),
       optional('元数据读取失败', loadNodeMeta(id, isOwner.value), null)
     ]);
     if (current !== generation) return;
@@ -243,6 +244,7 @@ async function load() {
     today.value = daily && daily.observations > 0 ? daily.uploadBytes + daily.downloadBytes : undefined;
     const item = monthly?.items.find(item => item.nodeId === id);
     month.value = item ? item.uploadBytes + item.downloadBytes : undefined;
+    machineTraffic.value = machine;
     warnings.value = notices;
   } catch (e) {
     if (current === generation) error.value = (e as Error).message;
@@ -262,6 +264,7 @@ watch(() => route.params.id, () => {
   revisions.value = [];
   today.value = undefined;
   month.value = undefined;
+  machineTraffic.value = null;
   warnings.value = [];
   void load();
 });

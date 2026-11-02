@@ -374,6 +374,30 @@ Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）
 
 systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者读取 Agent 的 0600 请求并写入其 0700 目录），fs.file-max 靠 root 文件权限；/proc/sys 默认只读，只开放 13 个固定键。OpenRC 同为 root/CAP_NET_ADMIN + CAP_DAC_OVERRIDE，但缺少 systemd 文件系统隔离。若宿主策略拒绝写入，保留失败结果；不扩权。Linux/root 集成及实际内核权限仍待主机验收，可运行 `sudo bash deploy/linux/tests/tuning-helper-test.sh` 验证隔离的触发/重放流程，Go tuning 测试用假 proc 验证应用/恢复，不改宿主。
 
+### 整机月流量（v1.3 T1）
+
+每台服务器可以按所选单张网卡统计本期的整机网络用量，用来与供应商的月流量额度对照。它是整机流量，不等于代理流量，也不进入用户额度、订阅或计费。Agent 每个心跳上报各非 lo 网卡的累计字节、`bootId` 与 IPv4 默认路由网卡，面板在同一心跳事务里按（服务器、网卡、面板时区日期）写入日行并长期保留；首次采样、主机重启或网卡计数回退只重建基线。
+
+设置位于“服务器详情 → 设置 → 整机流量”，单独保存（操作日志“服务器流量设置”），不需要发布配置、不影响节点运行：
+
+- 统计方式：入站 + 出站（`sum`，默认）、仅出站（`outbound`）、入站与出站取较大值（`max`；取本期两个方向合计的较大值，不是每日最大值的合计）。
+- 统计网卡：留空为自动，即最近上报心跳的 IPv4 默认路由网卡，界面显示“自动（eth0）”或“自动（—）”；也可以填写明确网卡名，离线或尚未上报的网卡同样可以配置，统计到数据后才有数值。
+- 额度：可选，1 字节以上的整数，界面按 GiB/TiB 输入；只用于展示与进度条，不限速、不停用服务、不告警。
+- 流量重置日：1–31，默认 1；短月份按该月最后一天（1 月 31 日 → 2 月 28/29 日 → 3 月 31 日）。周期是半开区间，边界瞬间开始新周期；重置不清零计数、不删除日行，只改变汇总区间。
+
+查询：Owner/Viewer 都可读 `GET /api/v1/nodes/{id}/machine-traffic` 与批量 `GET /api/v1/nodes/machine-traffic`；设置用 `GET/PUT /api/v1/nodes/{id}/machine-traffic/settings`，PUT 仅 Owner 且要求 CSRF，四个字段整体替换（清除额度时显式传 `allowanceBytes: null`）。服务器列表的“本月整机流量”与详情页的系统卡片共用同一份摘要；详情页另一个“代理流量”是账户样本口径，两者不能互相替代。
+
+口径与限制（全文；界面提示只显示摘要）：
+
+> 整机流量按所选单张网卡统计，包含所有服务；不等于代理流量或供应商账单。
+> LXC 只能看到容器自己的网卡，不能统计物理宿主机。首次采样仅建立基线；
+> Agent 离线期间若主机重启，跨重启的流量无法补计。同次启动的离线流量可由
+> 累计计数补计，但跨日分配按时间比例估算。网卡计数重置会重新建立基线。
+> 自动网卡来自 IPv4 默认路由；策略路由或 IPv6-only 请手动选择。
+> 修改网卡会重新计算所选网卡的本期数据；修改面板时区不会重新分桶历史数据。
+
+同一次启动内中断的采集按时间比例分摊到跨过的日期，所以日行是估算，不保证与宿主或供应商逐日一致。没有本期日行或解析不到网卡时用量为未知，界面显示“—”，不显示为 0；已有日行但当前心跳过期时显示已测总量并标注“截至上次采样”。切换网卡或统计方式会按保留的日行重算本期，不删除数据；改额度只影响展示。修改面板时区后，之后的流量按新时区分日，已记录的日数据不重新分桶。三张机器表（`node_machine_traffic_settings`、`node_machine_traffic_daily`、`node_machine_traffic_cursors`）随加密备份保存，恢复以当前库的用量为准。
+
 ## 19. K3b 多核心运维（已实现，v1.2.0 尚未发布；实机见验收矩阵 §11）
 
 **看节点到底有几个核心**：`GET /api/v1/nodes/{id}` 的 `capabilities.cores` 是 Agent 报告为**启用**的核心清单（`name/version/protocols/singbox_user_stats/forward_inbound_supported/device_gate_supported/observation_contract_version`），`heartbeat.cores` 是逐核心运行状态（`name/healthy/error/started_at/traffic_source_status`）。未上报 `multi_core_supported` 的旧 Agent 仍显示一个核心（`capabilities.core_name`），缺失的观测保持缺省而不是 `false`。`core_selectionBlocked` 列出当前**不可选**的组件（正在添加或移除）。

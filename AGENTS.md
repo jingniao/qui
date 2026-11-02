@@ -30,6 +30,8 @@
 
 **v1.2.0 已发布（2026-11-01）**：预发布版 rc.1–rc.4 在三台主机（us2-node、uk-node、alpine-node）验收后，以 rc.4 的同一 commit（`8f6406e`）发布并部署；实机发现 F1–F13 已修复（F11 记为限制），见[验收矩阵](docs/v1-acceptance.md) §11。只验收 amd64，arm64 归档未验证；安装器的真实断电未实机验证（`kill -9` 与重启演练已通过）。已知限制：L8（按方案 1 如实标注）、L9、L10、F11。下一版本：[v1.3.0 计划](docs/v1.3-plan.md)。
 
+**v1.3.0 进行中（2026-11-01）**：T1 整机月流量（每服务器单张网卡的整机用量、可选额度与重置日）后端与 Web UI 已实现（后端 `4cc9025`），契约见 [T1/P2 设计](docs/v1.3-design-t1-p2.md)；只在本地测试中验证，三台主机实机验收待做，限制见第 21 节。
+
 CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（release/v1.2.0 已复跑 111 个原生核心测试与 `-race`，面板主机 -race 按 Owner 决定以 CI 代替）；GitHub 只在手动与每周运行 `check`（同一脚本）与 `cores`，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
 
 ## 变更记录
@@ -645,6 +647,7 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 - 核心版本
 - 当前配置版本
 - 最后心跳时间
+- 本月整机流量（单张网卡的本期整机用量与可选额度，见第 21 节）
 
 ## 11.2 节点详情
 
@@ -666,8 +669,9 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 - 发布记录
 - 节点事件
 - 出站网络（核心出站源 IP/网卡、服务器强制出站 IPv4/IPv6，未配置显示“—”）
+- 本月整机流量（与下面的代理流量分开显示，口径见第 21 节）
 
-主机观测随 `Capabilities.host` 刷新：CPU 型号/逻辑核数、架构、内核、系统名称和内存/交换/状态目录文件系统总量。Heartbeat 的 load1/5/15、processCount、tcpConnections、udpSockets、memoryUsedBytes、swapUsedBytes、diskUsedBytes、tuningCurrent 进入节点视图；optional 缺测省略，实测 0 保留。新增 uint64 视图字段沿用 protobuf JSON 十进制字符串；HostInfo 普通标量 0 无法区分缺测。旧 snake_case 字段保留。
+主机观测随 `Capabilities.host` 刷新：CPU 型号/逻辑核数、架构、内核、系统名称和内存/交换/状态目录文件系统总量。Heartbeat 的 load1/5/15、processCount、tcpConnections、udpSockets、memoryUsedBytes、swapUsedBytes、diskUsedBytes、tuningCurrent 进入节点视图；optional 缺测省略，实测 0 保留。新增 uint64 视图字段沿用 protobuf JSON 十进制字符串；HostInfo 普通标量 0 无法区分缺测。旧 snake_case 字段保留。Heartbeat 另有 `bootId` 与 `defaultRouteInterface`（v1.3 T1，见第 21 节），面板用它们判断重启与自动网卡；两者缺测只影响整机流量，不影响其他观测。
 
 资源曲线每节点每 UTC 分钟保存最后一条新鲜心跳（消息时间与接收时间差不超过 45 秒）；已确认序列重放与过期消息不采样。保留 7 天，随延迟调度循环清理。CPU/内存/磁盘百分比、字节、load1、进程/套接字/已测活跃连接数及非 lo 接口速率合计可查询；网卡合计可能跨接口重复计数，不等同用户代理流量。缺测为 null，不补 0。调优读取对 Owner/Viewer 开放，修改限 Owner、CSRF 与匹配 confirmNodeId；实际观测与期望配置分别提供，详见第 22.0 节。
 
@@ -1230,6 +1234,8 @@ v1.1 内部身份字段继续用于流量归属与补传，界面隐藏设备维
 
 节点/核心总量：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志；声明后 Agent 额外上报每核心的累计节点计数（`traffic.Counter{kind:"node"}`），面板只在协商成功的会话内接受这些批次，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为 `xray`/`sing-box`、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB。面板按（节点、epoch、`node`）保存游标并计算增量，写入 `core_traffic_samples` 作为每核心/每节点总量；重复批次幂等，同一节点可有多个活跃 epoch，一个核心上报不会淘汰另一个的 epoch。这些字节**不进入用户额度**，也不与账户派生的样本重复相加：`node_traffic_samples` 视图仅在同一 epoch 没有 node 游标时才使用账户样本。因此“今天流量”“每月节点流量”“访问审计的节点汇总”在两类节点上都成立，混合核心节点不会被计两遍；用户维度仍只来自账户计数，官方 sing-box 无 `with_v2ray_api` 时用户字节仍未知。Xray 的节点总量是账户计数之和，端口转发没有账户，其字节不计入 Xray 节点总量（sing-box 取核心自身总量，含转发；2026-11-01 实机 H7c 确认）。
 
+**整机流量（v1.3 T1，与上面的代理流量分开）**：不进入用户额度、订阅或任何派生的代理统计。Agent 在心跳里上报各非 lo 网卡的累计字节、`bootId` 和 IPv4 默认路由网卡；面板在同一心跳事务里按（服务器、网卡、本地日期）写入差值到 `node_machine_traffic_daily`（0126），首次采样、重启或计数回退只重建基线，同一次启动内的断线区间按时间比例分摊到跨过的日期。日行保留全部网卡，但摘要只汇总**一张**网卡：显式 `interfaceName`，否则最近新鲜心跳的默认路由网卡；不同网卡不求和、不拼接，切换网卡按所选网卡重算本期。周期是从重置日（1–31，短月份取该月最后一天，面板时区）起算的半开区间，方法为 `sum`（入站 + 出站）、`outbound`（仅出站）或 `max`（两个方向的较大值）。本期没有日行或解析不到网卡是用量未知（`null`，界面“—”）；已有日行但没有当前新鲜采样时为 `stale`（界面“截至上次采样”）。限制（[运维手册](docs/operations.md) §18 有全文）：整机流量按所选单张网卡统计，包含所有服务，不等于代理流量或供应商账单；LXC 只能看到容器自己的网卡，不能统计物理宿主机；首次采样仅建立基线；Agent 离线期间若主机重启，跨重启流量无法补计，同次启动的离线流量可由累计计数补计但跨日按时间比例估算；网卡计数重置会重新建立基线；自动网卡来自 IPv4 默认路由，策略路由或 IPv6-only 须手动选择；修改网卡会重算所选网卡的本期；修改面板时区后，之后的流量按新时区分日，已记录的日数据不重新分桶。额度只用于展示，不限速、不停用服务。
+
 ---
 
 # 22. 配置发布与回滚
@@ -1630,6 +1636,7 @@ K4 新增迁移（仅在升级/恢复数据库时应用）：
 | 0121 `node_latency_targets` | 每节点目标关联表（节点、目标外键级联删除，插入及移动触发器限制每节点最多 5 个）；`nodes.latency_targets_custom`（0/1，默认 0） |
 | 0122 `node_group_entries` | `node_group_inbounds`、`node_group_imports`；服务器成员转入站、旧来源授权转生成分组；`node_meta.port_range_start/end`（同时为空或 1–65535 的有序范围），迁移备注末尾有效 `[ports:A-B]` |
 | 0123 `node_metrics_tuning` | `node_metric_samples`：可空分钟遥测、7 天保留、不进便携备份；`node_tuning`：完整期望 profile、request_id、状态与逐键回执，随备份保留，恢复以当前状态为准且不重发 |
+| 0126 `node_machine_traffic` | `node_machine_traffic_settings`（每服务器 method/interface_name/可空 allowance_bytes 1–2^53-1/reset_day 1–31，默认 sum/''/NULL/1）、`node_machine_traffic_daily`（主键（服务器、网卡、本地日期），非负 rx/tx 字节，长期保留，非遥测）、`node_machine_traffic_cursors`（每（服务器、网卡）的 boot_id 与累计字节，用于增量）；无时区列，按写入时的面板时区分日（第 21 节） |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1680,6 +1687,10 @@ GET    /api/v1/nodes/{id}
 GET    /api/v1/nodes/{id}/metrics?hours=1..168
 GET    /api/v1/nodes/{id}/tuning
 PUT    /api/v1/nodes/{id}/tuning
+GET    /api/v1/nodes/machine-traffic
+GET    /api/v1/nodes/{id}/machine-traffic
+GET    /api/v1/nodes/{id}/machine-traffic/settings
+PUT    /api/v1/nodes/{id}/machine-traffic/settings
 GET    /api/v1/nodes/{id}/deletion-preview
 POST   /api/v1/nodes/enrollment-token
 PUT    /api/v1/nodes/{id}
@@ -1693,6 +1704,8 @@ DELETE /api/v1/nodes/{id}
 K2b metrics 与 tuning GET 均允许 Owner/Viewer；逻辑删除节点返回 404。metrics 默认 hours=24，合法范围 1–168；≤12 小时原始分钟点，>12 小时 epoch 对齐，intervalSeconds=ceil(hours×60/720)×60，sampleSeconds=60。响应 {intervalSeconds,sampleSeconds,points}；空 points 为 []，无测量字段为 null。桶内各字段对非 null 值取算术平均，计数/字节可能为小数，samples 为桶内行数。完整 JSON 字段见 docs/v1.2-k2b-panel-report.md。
 
 tuning PUT 请求 {settings:对象,clear:布尔,confirmNodeId:节点ID}，拒绝未知 JSON 字段；202 返回 {requestId,status:"pending"}。settings 为完整字符串 profile，空 profile 等同 clear；clear=true 不得带非空 settings。GET 返回 supported、desired、requestId、status、result、requestedAt、updatedAt、current；未操作时 ID/结果/时间为 null、期望为空对象、status=unconfirmed。current 是最后心跳实际读数，可能过期。PUT 权限、并发和错误码见第 22.0 节。
+
+整机流量（v1.3 T1）：GET/PUT settings 与两个摘要接口均允许 Owner/Viewer，只有 PUT settings 额外要求 CSRF 与 Owner；逻辑删除节点返回 404，字段/设置非法返回 400 `invalid_request`。settings 为 `{method:"sum"|"outbound"|"max", interfaceName, allowanceBytes, resetDay}` 的完整替换，PUT 必须带全部四个字段（含显式 nullable allowance，1–9007199254740991 的整数字节或 null），未知字段拒绝，并写入操作日志“服务器流量设置”。摘要 `{nodeId, settings, interfaceName, timezone, periodStart, periodEnd, nextResetAt, rxBytes, txBytes, usedBytes, status, lastObservedAt}`，字节为十进制字符串，未知为 null，status 为 measured/stale/unknown；批量接口 `{items:[摘要],timezone}` 一次返回全部未删除节点，服务器列表只用它，详情用单节点接口。口径与限制见第 21 节。
 
 ## 27.5 节点组
 
@@ -1862,6 +1875,8 @@ Agent 上报消息包括：
 - AccessBatch
 - UpdateResult
 - CertificateRequest
+
+Heartbeat 省略即缺测，实测 0 保留。v1.3 增加 `boot_id`（字段 34）与 `default_route_interface`（字段 35）供整机流量记账（第 21 节）：两者各自独立，读取失败只省略自己的字段，旧面板忽略未知字段。整机网卡的累计字节沿用既有 `interfaces`（字段 20）。
 
 中央端下发消息包括：
 
@@ -2033,6 +2048,8 @@ K2a 调优。升级与多核心安装在 H3、H5、H4 实机通过；全新安�
 K2b 的 node_metric_samples 同延迟采样从快照删除并 VACUUM，恢复候选再次清空，不影响运行库样本。node_tuning 属于配置并纳入备份、校验和清单；恢复以当前库调优行为准，删除仅存在于归档的行，保留当前期望/结果，pending 改为 unconfirmed，且不重发请求；旧归档在迁移后按同一规则合并。恢复不会写宿主 sysctl，仍须核对后续 tuningCurrent。
 
 K3b：`inbounds.core`、`nodes.multi_core_supported/node_traffic_supported`、`node_health_checks.core`、`node_restart_requests.core`、`core_update_tasks.adding` 与 `core_remove_tasks` 都属于配置，随备份保留并由 `validateMultiCore` 校验（结果 JSON 必须与行内的 id/component/revision/code/status 一致，同一（节点、组件）不能同时有排队中的添加与移除）。恢复时清空 `core_remove_tasks` 后从归档复制，归档里 queued/running 的移除与核心更新任务一律改为 unconfirmed 且不重发（未确认不等于没执行）；`node_traffic_cursors` 与 `core_traffic_samples` 是累计游标与已观察增量，随访问数据一起恢复，避免恢复后把同一段字节再记一次。
+
+T1 的 `node_machine_traffic_settings`、`node_machine_traffic_daily` 与 `node_machine_traffic_cursors` 是配置与持久整机用量，不是 7 天遥测：不清空、不随采样保留期删除，全部进入加密备份并由 `validateMachineTraffic` 校验（设置/日期/字节/外键/主键，0126 之前没有这三张表也算合法），清单新增三项计数。恢复以冻结的当前库为准：当前库已迁移到 0126 时整表（设置、日行、游标一起）复制当前数据，既不丢当前用量也不与归档重复计账；当前库早于 0126 时保留归档中的机器表。空表同样是权威结果，不因空而复活归档用量。
 
 中央端需要备份：
 

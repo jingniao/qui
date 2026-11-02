@@ -177,15 +177,24 @@ func udpEcho(t *testing.T, proxyPort int, authenticated ...bool) {
 		t.Fatal(err)
 	}
 	defer socket.Close()
-	socket.SetDeadline(time.Now().Add(5 * time.Second))
 	target := origin.LocalAddr().(*net.UDPAddr)
 	packet := append([]byte{0, 0, 0, 1, 127, 0, 0, 1, byte(target.Port >> 8), byte(target.Port)}, []byte("native-quic-udp")...)
-	if _, err := socket.Write(packet); err != nil {
-		t.Fatal(err)
-	}
+	// UDP may drop the first datagram while a freshly started chain sets up its
+	// upstream session (CI and the -race gate saw it once), so resend until an
+	// echo arrives or the overall deadline passes.
 	buffer := make([]byte, 1024)
-	n, err := socket.Read(buffer)
-	if err != nil || n < 10 || string(buffer[10:n]) != "native-quic-udp" {
-		t.Fatal("QUIC UDP forwarding failed", n, err)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := socket.Write(packet); err != nil {
+			t.Fatal(err)
+		}
+		socket.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		n, err := socket.Read(buffer)
+		if err == nil && n >= 10 && string(buffer[10:n]) == "native-quic-udp" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("QUIC UDP forwarding failed", n, err)
+		}
 	}
 }

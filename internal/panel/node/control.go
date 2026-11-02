@@ -795,12 +795,14 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		if len(capabilities.Protocols) > 16 || len(capabilities.CoreVersion) > 64 {
 			return errors.New("invalid core capabilities")
 		}
-		if capabilities.CoreName != "" && capabilities.CoreName != "xray" && capabilities.CoreName != "sing-box" {
+		if capabilities.CoreName != "" && !CoreNameValid(capabilities.CoreName) {
 			return errors.New("unsupported core")
 		}
 		seen := map[string]bool{}
 		for _, ability := range capabilities.Protocols {
-			if ability == nil || !strings.Contains("|http|socks5|shadowsocks|vless|trojan|wireguard|hysteria2|tuic|tun|", "|"+ability.Protocol+"|") || seen[ability.Protocol] {
+			// validateMultiCapabilities runs every Capabilities.cores entry through
+			// here, and the GOST entry advertises only "forward".
+			if ability == nil || !strings.Contains("|http|socks5|shadowsocks|vless|trojan|wireguard|hysteria2|tuic|tun|forward|", "|"+ability.Protocol+"|") || seen[ability.Protocol] {
 				return errors.New("invalid protocol capability")
 			}
 			seen[ability.Protocol] = true

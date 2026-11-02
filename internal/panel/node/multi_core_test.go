@@ -82,3 +82,17 @@ func TestSingleDecoratedCoreWithoutMultiCoreFlagIsAccepted(t *testing.T) {
 		t.Fatal("two cores without the multi-core flag accepted")
 	}
 }
+
+// A node that added GOST reports it as a second core with only the forward
+// protocol. Every core entry passes the legacy capability check, so that check
+// must know the GOST name and the forward protocol, or the whole control stream
+// is refused (v1.3.0-rc.1 on the three hosts: "unsupported core").
+func TestGostCoreEntryIsAcceptedNextToThePrimary(t *testing.T) {
+	caps := &pb.Capabilities{CoreName: "xray", MultiCoreSupported: true, Cores: []*pb.CoreCapability{
+		{Name: "xray", Version: "26.3.27", Protocols: []*pb.ProtocolCapability{{Protocol: "vless", Inbound: true, Outbound: true, Tcp: true}}},
+		{Name: "gost", Version: "3.3.2", ForwardInboundSupported: true, GostContractVersion: 3, Protocols: []*pb.ProtocolCapability{{Protocol: "forward", Inbound: true, Tcp: true, Udp: true}}},
+	}}
+	if err := validateMessage("node", &pb.AgentMessage{NodeId: "node", Sequence: 1, MessageId: "caps", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: caps}}); err != nil {
+		t.Fatal(err)
+	}
+}

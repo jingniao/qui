@@ -79,3 +79,12 @@ func TestHealthReportsAStoppedCore(t *testing.T) {
 		t.Fatalf("stopped core health: %v", err)
 	}
 }
+
+// An installed core that never ran has no epoch to attribute counters to; the
+// panel accepts only "unavailable" without one.
+func TestIdleCoreReportsUnavailableTrafficSource(t *testing.T) {
+	status := (&Adapter{Directory: t.TempDir(), NodeID: "node"}).TrafficSourceStatus()
+	if status.Status != "unavailable" || status.CoreEpoch != "" || status.Revision != 0 || status.CoreRunning || status.ConfiguredSources != 0 {
+		t.Fatalf("%+v", status)
+	}
+}

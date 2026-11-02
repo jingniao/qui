@@ -766,7 +766,7 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		if heartbeat.UploadBytes > 1<<50 || heartbeat.DownloadBytes > 1<<50 {
 			return errors.New("invalid node traffic total")
 		}
-		if heartbeat.CoreError != "" && heartbeat.CoreError != "core_unhealthy" && heartbeat.CoreError != "accounting_interrupted" {
+		if !validCoreError(heartbeat.CoreError) {
 			return errors.New("invalid core health code")
 		}
 		if heartbeat.CoreError != "" && (heartbeat.CoreHealthy == nil || heartbeat.GetCoreHealthy()) {

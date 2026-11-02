@@ -86,7 +86,7 @@ func validateCoreStatuses(cores []*pb.CoreStatus) error {
 			return errors.New("invalid core status")
 		}
 		seen[c.Name] = true
-		if c.Error != "" && c.Error != "core_unhealthy" && c.Error != "accounting_interrupted" {
+		if !validCoreError(c.Error) {
 			return errors.New("invalid core error")
 		}
 		if c.Error != "" && c.Healthy {
@@ -138,4 +138,11 @@ func DeviceGateCoverage(core *pb.CoreCapability, protocol string) string {
 		return "tcp_only"
 	}
 	return "full"
+}
+
+// validCoreError lists the health codes an Agent reports for a node or a core.
+// core_lifecycle_unconfirmed is sent while a stopped child's exit is unproven,
+// exactly when the Owner most needs the node to stay connected.
+func validCoreError(code string) bool {
+	return code == "" || code == "core_unhealthy" || code == "accounting_interrupted" || code == "core_lifecycle_unconfirmed"
 }

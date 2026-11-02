@@ -428,6 +428,12 @@ func (a *Adapter) TrafficSourceStatus() *pb.TrafficSourceStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	running := a.process != nil
+	// An idle core (installed, no forward assigned) or one whose run marker is
+	// gone has no process identity to attribute counters to; like Xray without a
+	// statistics epoch, that is "unavailable", which the panel accepts without one.
+	if a.marker.Epoch == "" || a.current.Revision < 1 {
+		return &pb.TrafficSourceStatus{Status: "unavailable", ObservedAt: timestamppb.Now()}
+	}
 	status := &pb.TrafficSourceStatus{Status: "unobserved", CoreEpoch: a.marker.Epoch, Revision: a.current.Revision, ConfiguredSources: uint64(len(a.sources)), CoreRunning: running, ObservedAt: timestamppb.Now()}
 	switch {
 	case a.metrics.failed:

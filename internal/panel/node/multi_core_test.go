@@ -96,3 +96,18 @@ func TestGostCoreEntryIsAcceptedNextToThePrimary(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An installed but idle GOST core has no process identity, so it reports its
+// traffic source as unavailable; and a core whose stopped child is unproven
+// reports core_lifecycle_unconfirmed. Both heartbeats must keep the stream.
+func TestHeartbeatWithIdleGostAndUnconfirmedLifecycleIsAccepted(t *testing.T) {
+	now := timestamppb.Now()
+	unhealthy := false
+	heartbeat := &pb.Heartbeat{CoreHealthy: &unhealthy, CoreError: "core_lifecycle_unconfirmed", Cores: []*pb.CoreStatus{
+		{Name: "xray", Healthy: false, Error: "core_lifecycle_unconfirmed"},
+		{Name: "gost", Healthy: true, TrafficSourceStatus: &pb.TrafficSourceStatus{Status: "unavailable", ObservedAt: now}},
+	}}
+	if err := validateMessage("node", &pb.AgentMessage{NodeId: "node", Sequence: 1, MessageId: "hb", Timestamp: now, Payload: &pb.AgentMessage_Heartbeat{Heartbeat: heartbeat}}); err != nil {
+		t.Fatal(err)
+	}
+}

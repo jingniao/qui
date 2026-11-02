@@ -121,11 +121,18 @@ func (m *MultiRuntime) render(ctx context.Context, s desiredstate.State) (Render
 		if m.runtimes[name] == nil {
 			return RenderedConfig{}, fmt.Errorf("inbound assigns unavailable core %s", name)
 		}
+		// The GOST-only forward options are checked against the resolved core, so
+		// an inbound that follows the primary is judged by the core that runs it.
+		if err := desiredstate.ValidateForwardCore(name, in.Settings); err != nil {
+			return RenderedConfig{}, fmt.Errorf("inbound %s: %w", in.ID, err)
+		}
 		if in.Enabled {
 			if initialize {
 				m.expected[name] = true
 			}
-			ports = append(ports, in.Port)
+			// A forward range reserves every number it listens on, exactly like a
+			// single-port inbound reserves its own.
+			ports = append(ports, desiredstate.ListenPorts(in.Port, in.Settings)...)
 		}
 	}
 	if err := m.ports.ReserveInbounds(ports); err != nil {
@@ -367,7 +374,7 @@ func (m *MultiRuntime) RestoreCore(ctx context.Context, name string, state desir
 	ports := []int{}
 	for _, in := range state.Inbounds {
 		if in.Enabled {
-			ports = append(ports, in.Port)
+			ports = append(ports, desiredstate.ListenPorts(in.Port, in.Settings)...)
 		}
 	}
 	if err := m.ports.ReserveInbounds(ports); err != nil {

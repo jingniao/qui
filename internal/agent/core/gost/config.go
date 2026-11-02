@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -28,18 +29,22 @@ const (
 // Config is the part of the GOST configuration this Agent owns. Every field is
 // rendered from typed settings; nothing is passed through from panel input.
 type Config struct {
-	Services []Service `json:"services" yaml:"services"`
-	Metrics  Metrics   `json:"metrics" yaml:"metrics"`
-	Log      Log       `json:"log" yaml:"log"`
+	Services  []Service `json:"services" yaml:"services"`
+	Limiters  []Limiter `json:"limiters,omitempty" yaml:"limiters,omitempty"`
+	Climiters []Limiter `json:"climiters,omitempty" yaml:"climiters,omitempty"`
+	Metrics   Metrics   `json:"metrics" yaml:"metrics"`
+	Log       Log       `json:"log" yaml:"log"`
 }
 
-// Service is one GOST service: a listener, its handler and the target it
-// forwards to.
+// Service is one GOST service: a listener, its handler, the target pool it
+// forwards to and the optional limiters that reference it.
 type Service struct {
 	Name      string    `json:"name" yaml:"name"`
 	Addr      string    `json:"addr" yaml:"addr"`
 	Handler   Handler   `json:"handler" yaml:"handler"`
 	Listener  Listener  `json:"listener" yaml:"listener"`
+	Limiter   string    `json:"limiter,omitempty" yaml:"limiter,omitempty"`
+	Climiter  string    `json:"climiter,omitempty" yaml:"climiter,omitempty"`
 	Forwarder Forwarder `json:"forwarder" yaml:"forwarder"`
 }
 
@@ -54,15 +59,33 @@ type Listener struct {
 	Type string `json:"type" yaml:"type"`
 }
 
-// Forwarder carries the target of a forward service.
+// Forwarder carries the ordered target pool of a forward service and the selector
+// that decides which member is dialled.
 type Forwarder struct {
-	Nodes []Node `json:"nodes" yaml:"nodes"`
+	Selector *Selector `json:"selector,omitempty" yaml:"selector,omitempty"`
+	Nodes    []Node    `json:"nodes" yaml:"nodes"`
 }
 
-// Node is one forward target. G2 adds pools and their selector.
+// Selector is the forwarder's member choice: `round` alternates, `fifo` stays on
+// the first reachable member. maxFails and failTimeout mark a member down and say
+// when it is tried again.
+type Selector struct {
+	Strategy    string `json:"strategy" yaml:"strategy"`
+	MaxFails    int    `json:"maxFails" yaml:"maxFails"`
+	FailTimeout string `json:"failTimeout" yaml:"failTimeout"`
+}
+
+// Node is one forward target.
 type Node struct {
 	Name string `json:"name" yaml:"name"`
 	Addr string `json:"addr" yaml:"addr"`
+}
+
+// Limiter is one entry of `limiters` (bytes per second) or `climiters` (concurrent
+// connections). Both share `{name, limits}` in the pinned release.
+type Limiter struct {
+	Name   string   `json:"name" yaml:"name"`
+	Limits []string `json:"limits" yaml:"limits"`
 }
 
 // Metrics is the Prometheus endpoint. GOST accepts a bare socket path only as
@@ -179,9 +202,68 @@ func networkTypes(network string) []string {
 	}
 }
 
-// forwardNodes is the single legacy target of one forward inbound. G2 replaces
-// it with the rendered pool, and raises the reported contract version with it.
-func forwardNodes(inbound desiredstate.Inbound) []Node {
-	forward := inbound.Settings.Forward
-	return []Node{{Name: inbound.ID, Addr: joinHostPort(forward.Host, forward.Port)}}
+// targetNodes renders the whole ordered pool. Names are positional and stable for
+// one rendered pool; the address is the only identity GOST needs.
+func targetNodes(forward *desiredstate.ForwardSettings) []Node {
+	pool := forward.TargetPool()
+	nodes := make([]Node, 0, len(pool))
+	for index, target := range pool {
+		nodes = append(nodes, Node{Name: "target-" + strconv.Itoa(index), Addr: joinHostPort(target.Host, target.Port)})
+	}
+	return nodes
+}
+
+// bandwidthLimiter renders the byte-rate limit of one service. GOST parses each
+// value with a base-2 byte-unit parser that rejects a bare integer, so the one
+// canonical encoding is the integer byte count with the `B` suffix; 0 is the value
+// the parser special-cases and means "no limit in this direction".
+func bandwidthLimiter(name string, forward *desiredstate.ForwardSettings) (string, string) {
+	in, out := byteLimit(forward.BandwidthInBps), byteLimit(forward.BandwidthOutBps)
+	if in == "0" && out == "0" {
+		return "", ""
+	}
+	return "lim-" + name, "$ " + in + " " + out
+}
+
+func byteLimit(rate *int64) string {
+	if rate == nil || *rate == 0 {
+		return "0"
+	}
+	return strconv.FormatInt(*rate, 10) + "B"
+}
+
+// connectionLimiter renders the concurrent connection cap of one service. G0
+// measured TCP concurrency only, so a tcp,udp forward caps its TCP service and
+// validation refuses the field on a UDP-only forward.
+func connectionLimiter(name, network string, forward *desiredstate.ForwardSettings) string {
+	if forward.MaxConnections == nil || *forward.MaxConnections == 0 || network != "tcp" {
+		return ""
+	}
+	return "clim-" + name
+}
+
+// validateReferences refuses typed output whose limiter references do not
+// resolve. GOST silently ignores an unknown limiter name and then forwards
+// without the limit that was asked for, so this is checked before the process
+// ever sees the configuration.
+func validateReferences(config Config) error {
+	limiters, climiters := map[string]bool{}, map[string]bool{}
+	for _, limiter := range config.Limiters {
+		limiters[limiter.Name] = true
+	}
+	for _, limiter := range config.Climiters {
+		climiters[limiter.Name] = true
+	}
+	for _, service := range config.Services {
+		if len(service.Forwarder.Nodes) == 0 {
+			return fmt.Errorf("gost service %s has no target", service.Name)
+		}
+		if service.Limiter != "" && !limiters[service.Limiter] {
+			return fmt.Errorf("gost service %s references an unknown limiter", service.Name)
+		}
+		if service.Climiter != "" && !climiters[service.Climiter] {
+			return fmt.Errorf("gost service %s references an unknown climiter", service.Name)
+		}
+	}
+	return nil
 }

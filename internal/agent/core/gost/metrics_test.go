@@ -1,6 +1,8 @@
 package gost
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -41,6 +43,38 @@ func TestParseMetricsMatchesAnUnescapedLabelValue(t *testing.T) {
 	upload, _, err := parseMetrics(strings.NewReader(line), map[string]bool{"odd\"name": true})
 	if err != nil || upload != 7 {
 		t.Fatalf("upload=%d err=%v", upload, err)
+	}
+}
+
+// TestParseMetricsCountsEveryExpandedServiceOnce derives the counter filter from a
+// rendered range and proves each expanded service is summed exactly once. A range
+// becomes several services, and the node counter must not lose or double any of
+// them; a series this node did not render is ignored.
+func TestParseMetricsCountsEveryExpandedServiceOnce(t *testing.T) {
+	rendered, err := (&Adapter{Directory: goldenDirectory}).Render(context.Background(), poolState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config Config
+	if err := json.Unmarshal(rendered.Data, &config); err != nil {
+		t.Fatal(err)
+	}
+	services := serviceNames(config)
+	if len(services) != 4 {
+		t.Fatalf("rendered services: %v", services)
+	}
+	lines := ""
+	for name := range services {
+		lines += `gost_service_transfer_input_bytes_total{client="127.0.0.1",host="192",service="` + name + `"} 10` + "\n"
+		lines += `gost_service_transfer_output_bytes_total{client="127.0.0.1",host="192",service="` + name + `"} 20` + "\n"
+	}
+	lines += `gost_service_transfer_input_bytes_total{client="127.0.0.1",host="192",service="fwd-pool-forward-20402-tcp"} 4096` + "\n"
+	upload, download, err := parseMetrics(strings.NewReader(lines), services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upload != 40 || download != 80 {
+		t.Fatalf("upload=%d download=%d", upload, download)
 	}
 }
 

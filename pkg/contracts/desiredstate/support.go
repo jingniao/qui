@@ -64,10 +64,11 @@ const (
 )
 
 // GostContractVersion is the settings contract an Agent's GOST core reports in
-// CoreCapability.gost_contract_version. G2 and G3 raise it as they add
+// CoreCapability.gost_contract_version. G2 raised it to 2 (target pools, port
+// ranges, bandwidth and connection limits) and G3 raises it again as it adds
 // settings, so the panel can refuse an option the selected core does not
 // implement instead of rendering a silently ignored key.
-const GostContractVersion = 1
+const GostContractVersion = 2
 
 // CoreSupport is one official core's share of a protocol row: whether that core
 // can terminate an inbound, open an outbound, and carry TCP and UDP. Every row

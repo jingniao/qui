@@ -71,6 +71,9 @@ func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput
 	if err := ValidateInboundCore(n.Capabilities, input.Core, input.Protocol); err != nil {
 		return Inbound{}, err
 	}
+	if err := ValidateInboundForwardOptions(n.Capabilities, input.Core, input.Settings); err != nil {
+		return Inbound{}, err
+	}
 	if id != "" {
 		old, err := s.Repository.Inbound(ctx, id, true)
 		if err != nil {

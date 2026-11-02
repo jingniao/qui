@@ -133,5 +133,5 @@ export interface MachineTrafficBatch { items: MachineTrafficSummary[]; timezone:
 export interface NodeTuning { supported:boolean; desired:Record<string,string>; requestId:string|null; status:'pending'|'applied'|'cleared'|'failed'|'unconfirmed'; result:{requestId?:string;status?:string;keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null; requestedAt:string|null; updatedAt:string|null; current:Record<string,string>; }
 
 export type CoreName = 'xray' | 'sing-box' | 'gost';
-export interface CoreCapability { name:CoreName; version?:string; protocols?:{protocol:string;inbound?:boolean;outbound?:boolean;tcp?:boolean;udp?:boolean}[]; singbox_user_stats?:boolean; forward_inbound_supported?:boolean; device_gate_supported?:boolean; healthy?:boolean; observation_contract_version?:number; }
+export interface CoreCapability { name:CoreName; version?:string; protocols?:{protocol:string;inbound?:boolean;outbound?:boolean;tcp?:boolean;udp?:boolean}[]; singbox_user_stats?:boolean; forward_inbound_supported?:boolean; device_gate_supported?:boolean; healthy?:boolean; observation_contract_version?:number; gost_contract_version?:number; }
 export interface CoreStatus { name:CoreName; healthy:boolean; error?:string; started_at?:{seconds?:number;nanos?:number}; traffic_source_status?:TrafficSourceStatus; }

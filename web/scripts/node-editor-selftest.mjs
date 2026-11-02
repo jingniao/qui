@@ -181,6 +181,62 @@ assert.match(api.validateStep(4, state, server, rows), /MTU/);
 for (const protocol of ['forward', 'wireguard', 'tuic', 'hysteria2']) assert.equal(api.hasTransport(protocol), false);
 console.log('PASS NODE_EDITOR_MODEL: registered server filtering, capability reasons, canvas/edit port checks, random port, validation, secret masking');
 
+// G2: GOST forward pools, ranges and limits. The editor offers them only for a
+// GOST core that reports settings contract 2, and every conflict hint expands the
+// range exactly like the backend does.
+const gostServer = { ...server, capabilities: {
+  core_name: 'xray', multi_core_supported: true,
+  cores: [
+    { name: 'xray', protocols: [{ protocol: 'vless', inbound: true }], forward_inbound_supported: true },
+    { name: 'gost', version: '3.3.2', forward_inbound_supported: true, gost_contract_version: 2, protocols: [{ protocol: 'forward', inbound: true }] }
+  ] } };
+assert.equal(api.gostForwardReady(gostServer, 'gost'), true);
+assert.equal(api.gostForwardReady(gostServer, ''), false); // the primary core is xray
+const oldGost = { ...gostServer, capabilities: { ...gostServer.capabilities,
+  cores: [gostServer.capabilities.cores[0], { ...gostServer.capabilities.cores[1], gost_contract_version: 1 }] } };
+assert.equal(api.gostForwardReady(oldGost, 'gost'), false);
+assert.deepEqual(api.forwardListenPorts(20000, { forward: { host: 'a', port: 1, network: 'tcp', port_end: 20002 } }), [20000, 20001, 20002]);
+assert.deepEqual(api.forwardListenPorts(20000, { forward: { host: 'a', port: 1, network: 'tcp' } }), [20000]);
+assert.equal(api.forwardListenPorts(20000, { forward: { host: 'a', port: 1, network: 'tcp', port_end: 30000 } }).length, 256);
+const ranged = [{ id: 'fwd', nodeId: 'server', port: 20000, name: 'GOST range', protocol: 'forward', settings: { forward: { host: 'a', port: 1, network: 'tcp', port_end: 20002 } } }];
+const gostState = api.createEditor('server');
+gostState.form.protocol = 'forward'; gostState.form.port = 20001;
+assert.match(api.portConflict(gostState.form, ranged), /GOST range/);
+assert.equal(api.portConflict(gostState.form, ranged, 'fwd'), '');
+gostState.form.port = 20003;
+assert.equal(api.portConflict(gostState.form, ranged), '');
+const single = [{ id: 'one', nodeId: 'server', port: 21000, name: 'single', protocol: 'forward', settings: { forward: { host: 'a', port: 1, network: 'tcp' } } }];
+const wide = api.createEditor('server');
+wide.form.protocol = 'forward'; wide.form.port = 20998;
+wide.form.settings.forward = { host: 'a', port: 1, network: 'tcp', port_end: 21002 };
+assert.match(api.portConflict(wide.form, single), /21000/);
+// Options are presence-based: a zero the Owner typed still counts.
+const optionState = api.createEditor('server');
+optionState.form.protocol = 'forward'; optionState.form.name = 'gost-forward'; optionState.form.port = 20500;
+optionState.form.settings.forward = { host: 'a', port: 1, network: 'tcp', max_connections: 0 };
+assert.deepEqual(api.gostOptions(optionState.form.settings), ['max_connections']);
+// Moving the forward back onto a core without the contract is refused, not
+// silently stripped.
+assert.match(api.validateStep(2, optionState, gostServer, []), /GOST/);
+optionState.form.core = 'gost';
+assert.equal(api.validateStep(2, optionState, gostServer, []), '');
+optionState.form.core = 'xray';
+assert.match(api.validateStep(2, optionState, gostServer, []), /GOST/);
+// Step 4 bounds: a range is 1-256 ports and a connection cap needs a TCP service.
+optionState.form.core = 'gost';
+optionState.form.settings.forward = { host: 'a', port: 1, network: 'tcp', port_end: 20500 + 256 };
+assert.match(api.validateStep(4, optionState, gostServer, []), /256/);
+optionState.form.settings.forward = { host: 'a', port: 1, network: 'tcp', port_end: 20502 };
+assert.equal(api.validateStep(4, optionState, gostServer, []), '');
+optionState.form.settings.forward = { host: 'a', port: 1, network: 'udp', max_connections: 5 };
+assert.match(api.validateStep(4, optionState, gostServer, []), /TCP/);
+optionState.form.settings.forward = { targets: [{ host: 'a', port: 1 }, { host: 'b', port: 2 }], network: 'tcp', max_connections: 5 };
+assert.equal(api.validateStep(4, optionState, gostServer, []), '');
+assert.deepEqual(api.forwardPool({ targets: [{ host: 'a', port: 1 }], host: '', port: 0, network: 'tcp' }), [{ host: 'a', port: 1 }]);
+assert.deepEqual(api.forwardPool({ host: 'legacy', port: 443, network: 'tcp' }), [{ host: 'legacy', port: 443 }]);
+console.log('PASS NODE_EDITOR_GOST: pool/range expansion, range-aware port conflicts, presence-based GOST options, core-switch refusal, step-4 bounds');
+
+
 // F0 explicitly changes action permissions; assert those boundaries rather than
 // freezing a whole page whose authorised button visibility must change.
 const page = readFileSync(new URL('../src/modules/proxy/pages/ProxyNodeListPage.vue', import.meta.url), 'utf8').replace(/\r\n/g, '\n');

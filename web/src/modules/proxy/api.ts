@@ -1,12 +1,28 @@
 import { reactive } from 'vue';
-export interface ProtocolSettings { forward?: {host:string;port:number;network:string}; }
+// A forward target pool member (G2). The list is ordered: GOST dials it in that
+// order for `fifo` and alternates over it for `round`, whatever the listening port.
+export interface ForwardTarget { host: string; port: number; }
+// Port-forward settings. `host`/`port` are the original single-target form; the
+// remaining fields are the GOST-only options of settings contract 2 and stay
+// absent when unset, so an xray or sing-box forward never carries them.
+export interface ForwardSettings {
+  host: string; port: number; network: string;
+  targets?: ForwardTarget[];
+  strategy?: 'round' | 'fifo';
+  max_fails?: number;
+  fail_timeout?: string;
+  port_end?: number;
+  bandwidth_in_bps?: number;
+  bandwidth_out_bps?: number;
+  max_connections?: number;
+}
 import { request, type Page } from '../../app/apiClient';
 // Types only: the canvas module owns these shapes and imports this file for the
 // API, so a type-only import keeps the runtime dependency one-way.
 import type { CanvasConnection, CanvasNodeInstance, ExecutionLocation, ProxyNodeItem, RelayScheme } from './proxyNodes';
 import type { CoreName } from '../nodes/api';
 export interface WireGuardPeer { public_key: string; endpoint?: string; allowed_ips: string[]; keep_alive?: number; credential_id?: string; }
-export interface ProtocolSettings { quic?: { up_mbps?: number; down_mbps?: number; congestion_control?: string; udp_relay_mode?: string }; transport?: string; security?: string; server_name?: string; method?: string; flow?: string; certificate_pem?: string; private_key_pem?: string; trusted_ca_pem?: string; path?: string; service_name?: string; wireguard?: { secret_key: string; addresses: string[]; peers: WireGuardPeer[]; mtu?: number }; }
+export interface ProtocolSettings { forward?: ForwardSettings; quic?: { up_mbps?: number; down_mbps?: number; congestion_control?: string; udp_relay_mode?: string }; transport?: string; security?: string; server_name?: string; method?: string; flow?: string; certificate_pem?: string; private_key_pem?: string; trusted_ca_pem?: string; path?: string; service_name?: string; wireguard?: { secret_key: string; addresses: string[]; peers: WireGuardPeer[]; mtu?: number }; }
 // `core` is the core that runs this inbound (K3b); an empty string follows the
 // node's current primary core and is never rewritten to a concrete name. The
 // last two flags are derived from that core and are null while it is not

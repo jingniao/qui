@@ -19,6 +19,9 @@ export interface NodeCore {
   singboxUserStats: boolean | null;
   forwardInboundSupported: boolean | null;
   deviceGateSupported: boolean | null;
+  // The GOST settings contract the core reports (0 when it reports none). G2
+  // forward pools, ranges and limits need contract 2 or newer.
+  gostContractVersion: number;
   primary: boolean;
 }
 
@@ -58,7 +61,7 @@ export function nodeCores(node?: NodeView | null): NodeCore[] {
       name: primaryName, label: coreLabel(primaryName), version: caps.core_version || '—', healthy,
       error: status?.error || '', protocols: protocolsOf(null, caps.protocols),
       singboxUserStats: typeof caps.singbox_user_stats === 'boolean' ? caps.singbox_user_stats : null,
-      forwardInboundSupported: null, deviceGateSupported: null, primary: true
+      forwardInboundSupported: null, deviceGateSupported: null, gostContractVersion: 0, primary: true
     }];
   }
   return listed.map(core => {
@@ -71,6 +74,7 @@ export function nodeCores(node?: NodeView | null): NodeCore[] {
       singboxUserStats: typeof core.singbox_user_stats === 'boolean' ? core.singbox_user_stats : null,
       forwardInboundSupported: typeof core.forward_inbound_supported === 'boolean' ? core.forward_inbound_supported : null,
       deviceGateSupported: typeof core.device_gate_supported === 'boolean' ? core.device_gate_supported : null,
+      gostContractVersion: typeof core.gost_contract_version === 'number' ? core.gost_contract_version : 0,
       primary: core.name === primaryName
     };
   });

@@ -37,10 +37,53 @@
         <p class="text-xs">服务端密钥由系统生成。共享密钥一次只支持一个设备，不计入设备限制。内部中转需先发布目标服务器，再发布源服务器。</p>
       </template>
       <template v-if="f.protocol === 'forward' && s.forward">
-        <label class="block">目标主机<input v-model="s.forward.host" class="form-input-base mt-2" /></label>
-        <label class="block">目标端口<input v-model.number="s.forward.port" type="number" min="1" max="65535" class="form-input-base mt-2" /></label>
-        <label class="block">网络<select v-model="s.forward.network" class="form-input-base mt-2"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp,udp">TCP + UDP</option></select></label>
         <p class="text-xs">端口转发不验证用户身份，不进入订阅；用户额度、设备限制与用户域名访问记录不适用。</p>
+        <template v-if="gost">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-ios-label">目标池（按顺序）</span>
+              <button type="button" class="text-xs text-ios-blue" @click="addTarget">添加目标</button>
+            </div>
+            <div v-for="(target, index) in pool" :key="index" class="flex items-center gap-2">
+              <input :value="target.host" @input="setTargetHost(index, $event)" class="form-input-base flex-1" placeholder="目标主机" />
+              <input :value="target.port || ''" @input="setTargetPort(index, $event)" type="number" min="1" max="65535" class="form-input-base w-24" />
+              <button v-if="pool.length > 1" type="button" class="text-xs text-ios-secondary" @click="removeTarget(index)">删除</button>
+            </div>
+          </div>
+          <label class="block">负载策略
+            <select :value="s.forward.strategy || 'round'" @change="setStrategy" class="form-input-base mt-2">
+              <option value="round">轮询（round）</option>
+              <option value="fifo">主备（fifo）</option>
+            </select>
+          </label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block">失败次数
+              <input :value="s.forward.max_fails ?? ''" @input="setMaxFails" type="number" min="1" max="100" placeholder="1" class="form-input-base mt-2" />
+            </label>
+            <label class="block">失败等待（秒）
+              <input :value="s.forward.fail_timeout || ''" @input="setFailTimeout" placeholder="5s" class="form-input-base mt-2" />
+            </label>
+          </div>
+          <label class="block">结束端口（可选，含）
+            <input :value="s.forward.port_end ?? ''" @input="setPortEnd" type="number" min="1" max="65535" class="form-input-base mt-2" />
+          </label>
+          <div class="grid grid-cols-2 gap-2">
+            <label v-for="field in rateFields" :key="field.key" class="block">{{ field.label }} KiB/s
+              <input :value="rateKib(field.key)" @input="setRate(field.key, $event)" type="number" min="0" class="form-input-base mt-2" placeholder="0（不限）" />
+            </label>
+          </div>
+          <label class="block">TCP 连接上限（可选）
+            <input :value="s.forward.max_connections ?? ''" @input="setMaxConnections" type="number" min="0" max="100000" class="form-input-base mt-2" placeholder="0（不限）" />
+          </label>
+          <p class="text-xs">每个监听端口各自生效：范围中的每个端口都有独立的限速与连接上限，不会共享额度。主备（fifo）切换会让一个请求失败一次；超过连接上限的连接会被接受后立即关闭，而不是拒绝握手。发布配置会重启该服务器的全部核心，GOST 会话会短暂中断。</p>
+          <p v-if="expanded > 1" class="text-xs">当前范围将展开为 {{ expanded }} 个服务（{{ portCount }} 个端口 × {{ networkCount }} 个协议），全部计入该节点的节点总量，不计入用户额度。</p>
+        </template>
+        <template v-else>
+          <label class="block">目标主机<input v-model="s.forward.host" class="form-input-base mt-2" /></label>
+          <label class="block">目标端口<input v-model.number="s.forward.port" type="number" min="1" max="65535" class="form-input-base mt-2" /></label>
+        </template>
+        <label class="block">网络<select v-model="s.forward.network" class="form-input-base mt-2"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp,udp">TCP + UDP</option></select></label>
+        <p v-if="!gost" class="text-xs">目标池、端口范围与限速只支持 GOST 核心（设置契约 2）。</p>
       </template>
       <p v-if="!['shadowsocks', 'wireguard', 'forward', 'hysteria2', 'tuic'].includes(f.protocol)" class="text-xs">此协议没有额外参数，可继续。</p>
     </template>
@@ -48,13 +91,76 @@
 </template>
 <script setup lang="ts">
 import { computed } from 'vue';
-import { forcedTLS, hasSecurity, hasTransport, type EditorState } from './nodeEditorModel';
-const props = defineProps<{ state: EditorState; step: number }>();
+import { forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, type EditorState } from './nodeEditorModel';
+const props = defineProps<{ state: EditorState; step: number; gost?: boolean }>();
 const f = computed(() => props.state.form), s = computed(() => props.state.form.settings);
+const gost = computed(() => props.gost === true && f.value.protocol === 'forward');
 const bandwidthFields = [{ key: 'up_mbps', label: '上传带宽' }, { key: 'down_mbps', label: '下载带宽' }] as const;
+const rateFields = [{ key: 'bandwidth_in_bps', label: '客户端 → 目标' }, { key: 'bandwidth_out_bps', label: '目标 → 客户端' }] as const;
 function setBandwidth(key: 'up_mbps' | 'down_mbps', event: Event) {
   const value = (event.target as HTMLInputElement).value;
   (s.value.quic ||= {})[key] = value === '' ? undefined : Number(value);
 }
 function setCongestion(event: Event) { (s.value.quic ||= {}).congestion_control = (event.target as HTMLSelectElement).value; }
+
+// The pool is edited in place. A legacy single-target forward becomes an explicit
+// pool only when the Owner touches a row, and collapsing back to one target
+// restores the legacy shape, so an old row is never rewritten needlessly.
+const pool = computed(() => forwardPool(s.value.forward));
+function editablePool() {
+  const forward = s.value.forward!;
+  if (!forward.targets?.length) {
+    forward.targets = forwardPool(forward);
+    forward.host = '';
+    forward.port = 0;
+  }
+  return forward.targets;
+}
+function setTargetHost(index: number, event: Event) { editablePool()[index].host = (event.target as HTMLInputElement).value; }
+function setTargetPort(index: number, event: Event) {
+  const value = (event.target as HTMLInputElement).value;
+  editablePool()[index].port = value === '' ? 0 : Number(value);
+}
+function addTarget() { editablePool().push({ host: '', port: 443 }); }
+function removeTarget(index: number) {
+  const forward = s.value.forward!;
+  const targets = editablePool();
+  targets.splice(index, 1);
+  if (targets.length === 1) {
+    forward.host = targets[0].host;
+    forward.port = targets[0].port;
+    delete forward.targets;
+  }
+}
+function setStrategy(event: Event) { s.value.forward!.strategy = (event.target as HTMLSelectElement).value as 'round' | 'fifo'; }
+function setOptionalNumber(key: 'max_fails' | 'port_end' | 'max_connections', event: Event) {
+  const value = (event.target as HTMLInputElement).value;
+  const forward = s.value.forward!;
+  if (value === '') delete forward[key];
+  else forward[key] = Number(value);
+}
+const setMaxFails = (event: Event) => setOptionalNumber('max_fails', event);
+const setPortEnd = (event: Event) => setOptionalNumber('port_end', event);
+const setMaxConnections = (event: Event) => setOptionalNumber('max_connections', event);
+function setFailTimeout(event: Event) {
+  const value = (event.target as HTMLInputElement).value.trim();
+  const forward = s.value.forward!;
+  if (value === '') delete forward.fail_timeout;
+  else forward.fail_timeout = value;
+}
+// Rates are entered in KiB/s, which is the smallest unit the panel accepts, and
+// stored as the bytes per second the Agent renders.
+function rateKib(key: 'bandwidth_in_bps' | 'bandwidth_out_bps'): number | '' {
+  const bytes = s.value.forward?.[key];
+  return bytes === undefined ? '' : bytes / 1024;
+}
+function setRate(key: 'bandwidth_in_bps' | 'bandwidth_out_bps', event: Event) {
+  const value = (event.target as HTMLInputElement).value;
+  const forward = s.value.forward!;
+  if (value === '') delete forward[key];
+  else forward[key] = Math.round(Number(value)) * 1024;
+}
+const portCount = computed(() => forwardListenPorts(f.value.port, s.value).length);
+const networkCount = computed(() => (s.value.forward?.network === 'tcp,udp' ? 2 : 1));
+const expanded = computed(() => portCount.value * networkCount.value);
 </script>

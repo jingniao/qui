@@ -69,6 +69,37 @@ func TestNodeTrafficIndependentEpochsReceiptsAndNoQuotaDebit(t *testing.T) {
 	}
 }
 
+// A GOST node reports the same cumulative shape as the other cores. The third core
+// kind is a known core for node counters (the shared traffic contract), its epoch is
+// independent of the proxy cores' epochs, and its bytes still never reach a quota.
+func TestNodeTrafficGostCounterIsANodeTotalOnly(t *testing.T) {
+	r, s, record := fixture(t)
+	ctx := context.Background()
+	gost := traffic.Counter{Kind: "node", Core: "gost", CoreEpoch: "gost-process.node", Revision: 1, CredentialID: "node", UserID: "node", DeviceID: "node", ObservedAt: s.Now().Add(-time.Minute), UploadBytes: 4096, DownloadBytes: 8192}
+	batch := traffic.Batch{ID: "gost-node", NodeID: record.NodeID, Counters: []traffic.Counter{gost}}
+	if err := r.IngestTraffic(ctx, batch, s.Now()); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := r.AccountSummary(ctx, Filter{NodeID: record.NodeID, From: s.Now().Add(-time.Hour), To: s.Now()})
+	if err != nil || summary.UploadBytes != 4096 || summary.DownloadBytes != 8192 {
+		t.Fatalf("gost node total: %+v %v", summary, err)
+	}
+	users := &user.Repository{Database: r.Database}
+	if err := users.ApplyTraffic(ctx, batch); err != nil {
+		t.Fatal("gost node counter reached quotas", err)
+	}
+	var count int
+	if err := r.Database.QueryRow("SELECT count(*) FROM user_traffic_cursors").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("user cursors from a node total: %d %v", count, err)
+	}
+	// A core kind the platform does not run is still refused.
+	forged := gost
+	forged.Core, forged.CoreEpoch = "brook", "brook.node"
+	if err := r.IngestTraffic(ctx, traffic.Batch{ID: "brook", NodeID: record.NodeID, Counters: []traffic.Counter{forged}}, s.Now()); err == nil {
+		t.Fatal("an unknown core kind was accepted")
+	}
+}
+
 // A forward increment arrives as an account batch plus a node batch in the same
 // epoch: the node total is counted once, repeats are idempotent, a second core
 // epoch stays independent, and quotas move only by the account delta.

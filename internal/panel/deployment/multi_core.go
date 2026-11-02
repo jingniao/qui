@@ -28,6 +28,11 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 			}
 			return fmt.Errorf("inbound %s: core %q is unavailable: %w", in.ID, name, err)
 		}
+		// The GOST-only forward options are checked against the resolved core, so
+		// a publish cannot carry them onto a core that cannot render them.
+		if err := proxy.ValidateInboundForwardOptions(c, in.Core, in.Settings); err != nil {
+			return fmt.Errorf("inbound %s: %w", in.ID, err)
+		}
 	}
 	for _, core := range node.EnabledCores(c) {
 		// A GOST forward leaves through its own target and carries no outbound

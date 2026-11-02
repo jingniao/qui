@@ -34,9 +34,32 @@ func TestCanvasImplicitPortRangeAndRepeatPublish(t *testing.T) {
 	}
 }
 
-// The allocator works on numbers, not transports: a listener of either transport
-// keeps it away from that port, so an implicit TCP relay never lands on a number a
-// UDP listener already uses.
+// A GOST forward range occupies every number it listens on, so an implicit relay
+// listener has to skip the whole interval, not just the forward's base port.
+func TestCanvasPortRangeSkipsAGostForwardRange(t *testing.T) {
+	p := newPublishPanel(t)
+	if _, err := p.database.Exec("INSERT INTO node_meta(node_id,port_range_start,port_range_end) VALUES(?,20000,20002)", p.nodeB); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := p.service.Repository.Vault.Seal([]byte(`{"forward":{"host":"203.0.113.10","port":8443,"network":"tcp","port_end":20001}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.database.Exec("INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES('fwd','fwd range',?,'forward','0.0.0.0',20000,1,0,0,'direct','[]',?,'now')", p.nodeB, sealed); err != nil {
+		t.Fatal(err)
+	}
+	c := canvasTestHop("i-a", "i-b", 0)
+	c.TunnelPort = nil
+	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, p.inbound.ID, []CanvasConnection{c})
+	scheme, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "forward range", Execution: "server", Layout: layout})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := p.service.canvasBuildPlan(p.ctx, scheme)
+	if err != nil || plan.edges[0].port != 20002 {
+		t.Fatalf("allocator reused a port inside the forward range: %+v %v", plan, err)
+	}
+}
 func TestCanvasPortRangeSkipsOccupiedNumbers(t *testing.T) {
 	p := newPublishPanel(t)
 	if _, err := p.database.Exec("INSERT INTO node_meta(node_id,port_range_start,port_range_end) VALUES(?,20000,20001)", p.nodeB); err != nil {

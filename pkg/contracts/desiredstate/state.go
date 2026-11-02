@@ -111,10 +111,29 @@ type ProtocolSettings struct {
 	QUIC           *QUICSettings      `json:"quic,omitempty"`
 }
 
+// ForwardSettings describes a port forward. Host, Port and Network are the
+// original single-target form; the remaining fields are the GOST-only options of
+// settings contract version 2 and are pointers so an explicitly written zero or
+// default stays distinguishable from an omitted field (a core that cannot render
+// them must refuse them, not silently drop them).
 type ForwardSettings struct {
 	Host    string `json:"host"`
 	Port    int    `json:"port"`
 	Network string `json:"network"`
+
+	Targets         []ForwardTarget `json:"targets,omitempty"`
+	Strategy        *string         `json:"strategy,omitempty"`
+	MaxFails        *int            `json:"max_fails,omitempty"`
+	FailTimeout     *string         `json:"fail_timeout,omitempty"`
+	PortEnd         *int            `json:"port_end,omitempty"`
+	BandwidthInBps  *int64          `json:"bandwidth_in_bps,omitempty"`
+	BandwidthOutBps *int64          `json:"bandwidth_out_bps,omitempty"`
+	MaxConnections  *int            `json:"max_connections,omitempty"`
+
+	// poolWritten records that a request carried an explicit `targets` key, so an
+	// empty pool is refused instead of being read as "no pool". Only
+	// UnmarshalJSON sets it and only Validate reads it.
+	poolWritten bool
 }
 
 type QUICSettings struct {
@@ -356,6 +375,14 @@ func (s State) Validate() error {
 		if inbound.Core == CoreGost && inbound.Protocol != "forward" {
 			return errors.New("gost core requires a forward inbound")
 		}
+		// The GOST-only forward options are refused by any other core. An inbound
+		// that leaves its core empty follows the node's primary core, which this
+		// state does not know, so the multi-core runtime checks it after resolution.
+		if inbound.Core != "" {
+			if err := ValidateForwardCore(inbound.Core, inbound.Settings); err != nil {
+				return err
+			}
+		}
 		if inbound.Protocol == "forward" && (inbound.SubscriptionVisible || len(inbound.CredentialIDs) != 0) {
 			return errors.New("forward inbounds cannot carry credentials or enter subscriptions")
 		}
@@ -370,11 +397,18 @@ func (s State) Validate() error {
 			return errors.New("invalid inbound listener")
 		}
 		if inbound.Enabled {
-			port := fmt.Sprint(inbound.Port)
-			if ports[port] {
-				return errors.New("inbound port conflict")
+			if err := ValidateListenPorts(inbound.Port, inbound.Settings); err != nil {
+				return err
 			}
-			ports[port] = true
+			// A range reserves every number it listens on: the whole node competes
+			// by port number, across listen address, protocol and core.
+			for _, value := range ListenPorts(inbound.Port, inbound.Settings) {
+				port := fmt.Sprint(value)
+				if ports[port] {
+					return errors.New("inbound port conflict")
+				}
+				ports[port] = true
+			}
 			if !targetExists(inbound.DefaultOutbound, outbounds) {
 				return errors.New("every inbound needs an enabled default outbound")
 			}

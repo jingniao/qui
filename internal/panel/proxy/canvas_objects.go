@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // Named lookups require explicit ownership; matching a legacy name never adopts it.
@@ -45,23 +47,40 @@ func (r *Repository) canvasChainNamed(ctx context.Context, name string) (Chain, 
 	return r.Chain(ctx, id)
 }
 
-// canvasInboundsAtPort lists every inbound of a node on that port, enabled or
-// not, so publishing can tell its own listener from somebody else's.
+// canvasInboundsAtPort lists every inbound of a node whose expanded listener set
+// contains that port, enabled or not, so publishing can tell its own listener
+// from somebody else's. A GOST forward range occupies every number it listens on,
+// not just its base port.
 func (r *Repository) canvasInboundsAtPort(ctx context.Context, nodeID string, port int) ([]Inbound, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT id FROM inbounds WHERE node_id=? AND port=? ORDER BY id", nodeID, port)
+	rows, err := r.Database.QueryContext(ctx, "SELECT id,port,encrypted_settings FROM inbounds WHERE node_id=? ORDER BY id", nodeID)
 	if err != nil {
 		return nil, err
 	}
 	ids := []string{}
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var base int
+		var encoded []byte
+		if err := rows.Scan(&id, &base, &encoded); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		ids = append(ids, id)
+		settings, err := r.decode(encoded)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		for _, occupied := range desiredstate.ListenPorts(base, settings) {
+			if occupied == port {
+				ids = append(ids, id)
+				break
+			}
+		}
 	}
 	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	items := []Inbound{}

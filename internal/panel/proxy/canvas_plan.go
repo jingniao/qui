@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // CanvasPlanObject describes a write publication would attempt, without secrets
@@ -56,16 +58,19 @@ type canvasListener struct {
 // relay adoption. Listener ports are reserved node-wide by number: the Agent's
 // DesiredState validation rejects a second enabled inbound on the same port
 // whatever its transport or core, so a TCP and a UDP listener (VLESS on TCP 443
-// next to Hysteria2 on UDP 443) cannot share one either. The node editor applies
-// the same numeric rule. Disabled inbounds reserve nothing, because the Agent
-// only validates enabled listeners.
+// next to Hysteria2 on UDP 443) cannot share one either. A GOST forward range
+// reserves every number it listens on. The node editor applies the same numeric
+// rule. Disabled inbounds reserve nothing, because the Agent only validates
+// enabled listeners.
 func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan, stale *canvasStale) ([]CanvasPlanConflict, error) {
 	listeners := []canvasListener{}
 	for _, e := range plan.edges {
 		listeners = append(listeners, canvasListener{e.targetNode, e.inboundName, e.protocol, e.connectionID, e.port, e})
 	}
 	for i, f := range plan.forwards {
-		listeners = append(listeners, canvasListener{f.NodeID, f.Name, f.Protocol, plan.forwardConnections[i], f.Port, nil})
+		for _, port := range desiredstate.ListenPorts(f.Port, f.Settings) {
+			listeners = append(listeners, canvasListener{f.NodeID, f.Name, f.Protocol, plan.forwardConnections[i], port, nil})
+		}
 	}
 	owned, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {

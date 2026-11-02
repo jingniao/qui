@@ -22,15 +22,16 @@ import (
 // render and nothing semantic.
 const validateDeadline = 10 * time.Second
 
+// maxServices bounds the production services one node renders. A port range
+// multiplies every forward by its ports and by its transports, so the bound is
+// applied to the typed settings before anything is expanded.
+const maxServices = 1024
+
 // Render builds the native configuration and the runtime metadata of one desired
-// state. Only forward inbounds can be assigned to this core, and each one renders
-// one TCP and/or UDP service with its single target.
+// state. Only forward inbounds can be assigned to this core. Each enabled forward
+// renders one TCP and/or UDP service per listening port, named deterministically,
+// with its whole ordered target pool.
 func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.RenderedConfig, error) {
-	for _, inbound := range state.Inbounds {
-		if inbound.Core != "" && inbound.Core != CoreName {
-			return core.RenderedConfig{}, errors.New("inbound assigned to another core")
-		}
-	}
 	if err := state.Validate(); err != nil {
 		return core.RenderedConfig{}, err
 	}
@@ -43,17 +44,15 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	if a.Directory == "" {
 		return core.RenderedConfig{}, errors.New("gost adapter requires a runtime directory")
 	}
-	config := Config{
-		Services: []Service{},
-		Metrics:  Metrics{Addr: "unix://" + filepath.Join(a.Directory, MetricsSocket)},
-		Log:      Log{Level: "warn", Format: "text"},
-	}
-	rendered := core.RenderedConfig{NodeID: state.NodeID, Revision: state.Revision}
 	outbounds := map[string]desiredstate.Outbound{}
 	for _, outbound := range state.Outbounds {
 		outbounds[outbound.ID] = outbound
 	}
+	total := 0
 	for _, inbound := range state.Inbounds {
+		if inbound.Core != "" && inbound.Core != CoreName {
+			return core.RenderedConfig{}, errors.New("inbound assigned to another core")
+		}
 		if !inbound.Enabled {
 			continue
 		}
@@ -65,22 +64,47 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 		if outbound, ok := outbounds[inbound.DefaultOutbound]; !ok || !outbound.Enabled || outbound.Protocol != "direct" {
 			return core.RenderedConfig{}, fmt.Errorf("gost forward %s requires an enabled direct default outbound", inbound.ID)
 		}
-		address := joinHostPort(inbound.Listen, inbound.Port)
-		dial := joinHostPort(dialHost(inbound.Listen), inbound.Port)
-		for _, network := range networkTypes(inbound.Settings.Forward.Network) {
-			config.Services = append(config.Services, Service{
-				Name:      serviceName(inbound.ID, network),
-				Addr:      address,
-				Handler:   Handler{Type: network},
-				Listener:  Listener{Type: network},
-				Forwarder: Forwarder{Nodes: forwardNodes(inbound)},
-			})
-			if network == "udp" {
-				rendered.UDPHealthEndpoints = append(rendered.UDPHealthEndpoints, dial)
-			} else {
-				rendered.HealthEndpoints = append(rendered.HealthEndpoints, dial)
+		total += len(desiredstate.ListenPorts(inbound.Port, inbound.Settings)) * len(networkTypes(inbound.Settings.Forward.Network))
+	}
+	if total > maxServices {
+		return core.RenderedConfig{}, fmt.Errorf("a gost node renders at most %d services, this revision needs %d", maxServices, total)
+	}
+	config := Config{
+		Services: []Service{},
+		Metrics:  Metrics{Addr: "unix://" + filepath.Join(a.Directory, MetricsSocket)},
+		Log:      Log{Level: "warn", Format: "text"},
+	}
+	rendered := core.RenderedConfig{NodeID: state.NodeID, Revision: state.Revision}
+	for _, inbound := range state.Inbounds {
+		if !inbound.Enabled {
+			continue
+		}
+		forward := inbound.Settings.Forward
+		// Ports are expanded here: GOST has no range syntax in `addr`, so a range
+		// is one service per port, each with the whole pool and its own limits.
+		for _, port := range desiredstate.ListenPorts(inbound.Port, inbound.Settings) {
+			for _, network := range networkTypes(forward.Network) {
+				service := forwardService(inbound, port, network)
+				if name, limit := bandwidthLimiter(service.Name, forward); name != "" {
+					service.Limiter = name
+					config.Limiters = append(config.Limiters, Limiter{Name: name, Limits: []string{limit}})
+				}
+				if name := connectionLimiter(service.Name, network, forward); name != "" {
+					service.Climiter = name
+					config.Climiters = append(config.Climiters, Limiter{Name: name, Limits: []string{"$ " + strconv.Itoa(*forward.MaxConnections)}})
+				}
+				config.Services = append(config.Services, service)
+				dial := joinHostPort(dialHost(inbound.Listen), port)
+				if network == "udp" {
+					rendered.UDPHealthEndpoints = append(rendered.UDPHealthEndpoints, dial)
+				} else {
+					rendered.HealthEndpoints = append(rendered.HealthEndpoints, dial)
+				}
 			}
 		}
+	}
+	if err := validateReferences(config); err != nil {
+		return core.RenderedConfig{}, err
 	}
 	data, err := json.Marshal(config)
 	if err != nil {
@@ -90,10 +114,27 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	return rendered, nil
 }
 
-// serviceName is the GOST registry name of one forward inbound and transport. It
-// is also the metrics `service` label, so the counter filter and the panel's
-// error messages name the same object.
-func serviceName(inboundID, network string) string { return inboundID + "-" + network }
+// forwardService is one native service of a forward: one listener, its transport
+// and the pool the forwarder dials.
+func forwardService(inbound desiredstate.Inbound, port int, network string) Service {
+	forward := inbound.Settings.Forward
+	strategy, maxFails, failTimeout := forward.Selector()
+	return Service{
+		Name:      serviceName(inbound.ID, port, network),
+		Addr:      joinHostPort(inbound.Listen, port),
+		Handler:   Handler{Type: network},
+		Listener:  Listener{Type: network},
+		Forwarder: Forwarder{Selector: &Selector{Strategy: strategy, MaxFails: maxFails, FailTimeout: failTimeout}, Nodes: targetNodes(forward)},
+	}
+}
+
+// serviceName is the GOST registry name of one forward service. It is also the
+// metrics `service` label, so the counter filter and the panel's error messages
+// name the same object. The inbound ID is already a safe component
+// ([A-Za-z0-9-_.], never a path), so the name is deterministic and stable.
+func serviceName(inboundID string, port int, network string) string {
+	return "fwd-" + inboundID + "-" + strconv.Itoa(port) + "-" + network
+}
 
 // joinHostPort renders an address the way GOST and net.Listen expect, including
 // the brackets an IPv6 literal needs.

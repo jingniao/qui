@@ -1,4 +1,4 @@
-import type { Inbound, InboundInput, ProtocolSettings } from '../../api';
+import type { ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings } from '../../api';
 import type { CoreName, NodeView } from '../../../nodes/api';
 import { blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
 
@@ -7,6 +7,40 @@ export const forcedTLS = (protocol: string) => ['trojan', 'hysteria2', 'tuic'].i
 export const hasTransport = (protocol: string) => !['forward', 'wireguard', 'hysteria2', 'tuic'].includes(protocol);
 export const hasSecurity = (protocol: string) => !['forward', 'wireguard'].includes(protocol);
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+// GOST forwards can carry a target pool, a port range and bandwidth/connection
+// limits (G2). Those settings belong to the GOST settings contract 2, so the editor
+// offers them only for a GOST core that reports it and refuses to move such a
+// forward onto a core that cannot render them.
+export const GOST_FORWARD_CONTRACT = 2;
+export const GOST_FORWARD_LIMITS = { targets: 32, ports: 256, connections: 100000, fails: 100, failTimeout: 3600, bandwidth: 1_000_000_000_000 };
+const GOST_FORWARD_KEYS: (keyof ForwardSettings)[] = ['targets', 'strategy', 'max_fails', 'fail_timeout', 'port_end', 'bandwidth_in_bps', 'bandwidth_out_bps', 'max_connections'];
+// The GOST-only options that are actually set. Presence-based on purpose: a zero or
+// a default the Owner typed is still a setting this core cannot render.
+export function gostOptions(settings: ProtocolSettings | undefined): (keyof ForwardSettings)[] {
+  const forward = settings?.forward;
+  if (!forward) return [];
+  return GOST_FORWARD_KEYS.filter(key => forward[key] !== undefined);
+}
+export function gostForwardReady(server: NodeView | undefined, core: CoreName | ''): boolean {
+  const selected = findCore(server, core);
+  return !!selected && selected.name === 'gost' && selected.gostContractVersion >= GOST_FORWARD_CONTRACT;
+}
+// The inclusive listener ports of one inbound. A GOST forward range reserves every
+// number it listens on, exactly like the backend expands it.
+export function forwardListenPorts(port: number, settings?: ProtocolSettings): number[] {
+  const ports = [port];
+  const end = settings?.forward?.port_end;
+  if (end === undefined || !Number.isInteger(end) || end <= port) return ports;
+  for (let value = port + 1; value <= end && value <= 65535 && ports.length < GOST_FORWARD_LIMITS.ports; value++) ports.push(value);
+  return ports;
+}
+// The ordered pool the editor and the preview show: the explicit pool when one is
+// configured, otherwise the single legacy target.
+export function forwardPool(forward: ForwardSettings | undefined): ForwardTarget[] {
+  if (!forward) return [];
+  return forward.targets?.length ? forward.targets : [{ host: forward.host, port: forward.port }];
+}
 
 export interface EditorState {
   form: InboundInput;
@@ -156,9 +190,14 @@ export function listenNetworks(value: Pick<InboundInput, 'protocol' | 'settings'
 export function portConflict(form: InboundInput, inbounds: Inbound[], excludeId = ''): string {
   // Node-wide numeric rule (K3b): a second listener on the same port fails at
   // apply time even when one side is TCP and the other UDP, so the local check
-  // must not let a TCP/UDP pair through.
-  const conflict = inbounds.find(i => i.nodeId === form.nodeId && i.id !== excludeId && i.port === form.port);
-  return conflict ? `端口 ${form.port} 已被「${conflict.name}」占用` : '';
+  // must not let a TCP/UDP pair through. A GOST forward range reserves every
+  // number it listens on, so both sides are expanded the way the backend does.
+  const mine = forwardListenPorts(form.port, form.settings);
+  const conflict = inbounds.find(i => i.nodeId === form.nodeId && i.id !== excludeId
+    && forwardListenPorts(i.port, i.settings).some(port => mine.includes(port)));
+  if (!conflict) return '';
+  const taken = forwardListenPorts(conflict.port, conflict.settings).find(port => mine.includes(port));
+  return `端口 ${taken ?? form.port} 已被「${conflict.name}」占用`;
 }
 export function randomPort(
   form: InboundInput,
@@ -186,6 +225,11 @@ export function validateStep(step: number, state: EditorState, server: NodeView 
     if (core) return core;
     const reason = protocolReason(server, f.protocol, f.core || '');
     if (reason) return reason;
+    // A GOST-only option is never dropped silently: the selected core must be able
+    // to render it, and moving the inbound to another core needs an explicit clear.
+    if (f.protocol === 'forward' && gostOptions(s).length && !gostForwardReady(server, f.core || '')) {
+      return '目标池、端口范围与限速只支持 GOST 核心（设置契约 2）；请先清除这些设置，或选择 GOST 核心';
+    }
     if (!f.name.trim()) return '请输入节点名称';
     if (!Number.isInteger(f.port) || f.port < 1 || f.port > 65535) return '请输入有效的端口 (1-65535)';
     return portConflict(f, inbounds, state.original?.id);
@@ -195,10 +239,27 @@ export function validateStep(step: number, state: EditorState, server: NodeView 
     if (!s.private_key_pem?.trim() && !state.original?.hasTlsKey && !f.internalRelay) return '请输入 TLS 私钥 PEM';
   }
   if (step === 4) {
-    if (f.protocol === 'forward') {
-      if (!s.forward?.host.trim()) return '请输入目标主机';
-      if (!Number.isInteger(s.forward.port) || s.forward.port < 1 || s.forward.port > 65535) return '请输入有效的目标端口 (1-65535)';
-      if (!['tcp', 'udp', 'tcp,udp'].includes(s.forward.network)) return '请选择有效的转发网络';
+    if (f.protocol === 'forward' && s.forward) {
+      const forward = s.forward;
+      const pool = forward.targets?.length ? forward.targets : [{ host: forward.host, port: forward.port }];
+      if (!forward.targets?.length && !forward.host.trim()) return '请输入目标主机';
+      for (const target of pool) {
+        if (!target.host?.trim()) return '请输入目标主机';
+        if (!Number.isInteger(target.port) || target.port < 1 || target.port > 65535) return '请输入有效的目标端口 (1-65535)';
+      }
+      if (!['tcp', 'udp', 'tcp,udp'].includes(forward.network)) return '请选择有效的转发网络';
+      if (forward.port_end !== undefined && (!Number.isInteger(forward.port_end) || forward.port_end < f.port || forward.port_end > 65535)) return '结束端口必须不小于监听端口且不超过 65535';
+      if (forward.port_end !== undefined && forward.port_end - f.port + 1 > GOST_FORWARD_LIMITS.ports) return `端口范围最多 ${GOST_FORWARD_LIMITS.ports} 个端口`;
+      for (const rate of [forward.bandwidth_in_bps, forward.bandwidth_out_bps]) {
+        if (rate !== undefined && rate !== 0 && (!Number.isInteger(rate) || rate < 1024 || rate > GOST_FORWARD_LIMITS.bandwidth)) return '限速必须为 0 或 1024–1000000000000 字节/秒';
+      }
+      if (forward.max_connections !== undefined) {
+        if (!Number.isInteger(forward.max_connections) || forward.max_connections < 0 || forward.max_connections > GOST_FORWARD_LIMITS.connections) return `连接上限必须为 0–${GOST_FORWARD_LIMITS.connections}`;
+        if (forward.network === 'udp') return '连接上限只统计 TCP 连接，请改用在 TCP 或 TCP + UDP 转发';
+      }
+      if (forward.strategy !== undefined && !['round', 'fifo'].includes(forward.strategy)) return '请选择轮询或主备策略';
+      if (forward.max_fails !== undefined && (!Number.isInteger(forward.max_fails) || forward.max_fails < 1 || forward.max_fails > GOST_FORWARD_LIMITS.fails)) return `失败次数必须为 1–${GOST_FORWARD_LIMITS.fails}`;
+      if (forward.fail_timeout !== undefined && !/^[1-9][0-9]{0,3}s$/.test(forward.fail_timeout)) return '失败等待时间必须是 1s–3600s 的整数秒';
     }
     if (f.protocol === 'wireguard') {
       if (!state.addresses.trim()) return '请输入 WireGuard 隧道地址';

@@ -83,7 +83,16 @@ func TestGostCoreKeepsForwardsAndRefusesOtherFeatures(t *testing.T) {
 	if !CoreSupportsInbound(CoreGost, "forward") || CoreSupportsOutbound(CoreGost, "forward") || CoreSupportsInbound(CoreGost, "socks5") {
 		t.Fatal("gost support row is not forward-only")
 	}
-	if GostContractVersion != 1 {
-		t.Fatalf("G1 reports contract version %d", GostContractVersion)
+	if GostContractVersion != 2 {
+		t.Fatalf("G2 reports contract version %d", GostContractVersion)
+	}
+	if err := ValidateForwardCore(CoreXray, ProtocolSettings{Forward: &ForwardSettings{Host: "203.0.113.10", Port: 8443, Network: "tcp", MaxFails: gostInt(1)}}); err == nil {
+		t.Fatal("an xray forward accepted a GOST-only option")
+	}
+	if err := ValidateForwardCore(CoreGost, ProtocolSettings{Forward: &ForwardSettings{Host: "203.0.113.10", Port: 8443, Network: "tcp", MaxFails: gostInt(1)}}); err != nil {
+		t.Fatal(err)
 	}
 }
+
+// gostInt is the smallest way to write an explicitly configured optional integer.
+func gostInt(value int) *int { return &value }

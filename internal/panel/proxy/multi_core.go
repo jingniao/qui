@@ -8,6 +8,7 @@ import (
 
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // ErrCoreSelectionPending reports an inbound bound to a component whose add or
@@ -66,25 +67,76 @@ func ValidateOutboundCores(c *pb.Capabilities, protocol string) error {
 }
 
 // Inbound listener ports are node-global: the Agent's DesiredState validation
-// reserves every enabled inbound's numeric port across all cores and forwards,
-// independent of transport. The panel rejects early with a clear conflict.
+// reserves every enabled inbound's numeric ports across all cores and forwards,
+// independent of transport. A GOST forward can expand to a range, so the check
+// reads the node's enabled inbounds with their decrypted settings and intersects
+// the expanded intervals instead of comparing base ports.
 func (r *Repository) validateInboundPorts(ctx context.Context, tx *sql.Tx, id string, in InboundInput) error {
 	if !in.Enabled {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT id FROM inbounds WHERE node_id=? AND port=? AND enabled=1 AND id<>?", in.NodeID, in.Port, id)
+	rows, err := tx.QueryContext(ctx, "SELECT id,port,encrypted_settings FROM inbounds WHERE node_id=? AND enabled=1 AND id<>?", in.NodeID, id)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	type occupant struct {
+		id       string
+		port     int
+		settings desiredstate.ProtocolSettings
+	}
+	items := []occupant{}
 	for rows.Next() {
-		var other string
-		if err := rows.Scan(&other); err != nil {
+		var item occupant
+		var encoded []byte
+		if err := rows.Scan(&item.id, &item.port, &encoded); err != nil {
+			rows.Close()
 			return err
 		}
-		// Same numeric port on a node is reserved by the Agent contract, so a
-		// second listener fails at apply time; refuse it here instead.
-		return fmt.Errorf("inbound port %d is already used by %s on this node", in.Port, other)
+		if item.settings, err = r.decode(encoded); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
 	}
-	return rows.Err()
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	ports := map[int]bool{}
+	for _, port := range desiredstate.ListenPorts(in.Port, in.Settings) {
+		ports[port] = true
+	}
+	for _, item := range items {
+		for _, occupied := range desiredstate.ListenPorts(item.port, item.settings) {
+			// Same numeric port on a node is reserved by the Agent contract, so a
+			// second listener fails at apply time; refuse it here instead.
+			if ports[occupied] {
+				return fmt.Errorf("inbound port %d is already used by %s on this node", occupied, item.id)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateInboundForwardOptions refuses the GOST-only forward options unless the
+// selected core is a GOST core that reports the settings contract they belong to.
+// The option rules themselves live in desiredstate, so the panel and the Agent
+// cannot disagree about what is a GOST-only option.
+func ValidateInboundForwardOptions(c *pb.Capabilities, name string, settings desiredstate.ProtocolSettings) error {
+	if settings.Forward == nil || !settings.Forward.HasGostOptions() {
+		return nil
+	}
+	core := node.SelectedCore(c, name)
+	if core == nil {
+		return errors.New("node Agent/core does not advertise forward inbound support")
+	}
+	if err := desiredstate.ValidateForwardCore(core.Name, settings); err != nil {
+		return err
+	}
+	if core.GostContractVersion < desiredstate.GostForwardContractVersion {
+		return errors.New("gost core does not report forward targets, ranges or limits yet")
+	}
+	return nil
 }

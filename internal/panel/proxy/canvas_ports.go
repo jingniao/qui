@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // Allocate only implicit relay listeners. Ports are reserved by number on a node:
@@ -63,28 +65,31 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 			return err
 		}
 		found := false
+		// A number used by any expanded listener of this node is unavailable; the
+		// edge's own generated listener stays reusable by name.
+		taken := map[int]bool{}
+		for _, i := range inbounds {
+			for _, occupied := range desiredstate.ListenPorts(i.Port, i.Settings) {
+				name, _ := canvasEdgeNames(edge.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, occupied)
+				if !(ownedIDs[i.ID] && i.Name == name) {
+					taken[occupied] = true
+				}
+			}
+		}
+		for _, other := range plan.edges {
+			if other != edge && other.targetNode == edge.targetNode && (!other.autoPort || other.portAllocated) {
+				taken[other.port] = true
+			}
+		}
+		for _, f := range plan.forwards {
+			if f.NodeID == edge.targetNode {
+				for _, occupied := range desiredstate.ListenPorts(f.Port, f.Settings) {
+					taken[occupied] = true
+				}
+			}
+		}
 		for port := int(start.Int64); port <= int(end.Int64); port++ {
-			name, _ := canvasEdgeNames(edge.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, port)
-			busy := false
-			for _, i := range inbounds {
-				// A number used by either transport is unavailable; the edge's own
-				// generated listener stays reusable by name.
-				if i.Port == port && !(ownedIDs[i.ID] && i.Name == name) {
-					busy = true
-					break
-				}
-			}
-			for _, other := range plan.edges {
-				if other != edge && other.targetNode == edge.targetNode && other.port == port && (!other.autoPort || other.portAllocated) {
-					busy = true
-				}
-			}
-			for _, f := range plan.forwards {
-				if f.NodeID == edge.targetNode && f.Port == port {
-					busy = true
-				}
-			}
-			if !busy {
+			if !taken[port] {
 				edge.port = port
 				edge.portAllocated = true
 				found = true

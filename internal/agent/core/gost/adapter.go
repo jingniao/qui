@@ -177,8 +177,8 @@ func (a *Adapter) Apply(ctx context.Context, configuration core.RenderedConfig) 
 			cancel()
 			if rollbackErr != nil {
 				result.Code = "rollback_failed"
-				result.Message = "gost failed and the previous revision could not restart"
-				return result, errors.New("gost startup and rollback failed")
+				result.Message = fmt.Sprintf("gost failed and the previous revision could not restart: %v", rollbackErr)
+				return result, errors.Join(err, rollbackErr)
 			}
 			result.RolledBack = true
 		}
@@ -246,7 +246,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 	}
 	// Record the pending child before it exists, so a crash in the start window
 	// cannot leave an orphan core without a durable marker.
-	if err := a.marker.Claim(epoch, configuration.Revision); err != nil {
+	if err := a.runMarker().Claim(epoch, configuration.Revision); err != nil {
 		return err
 	}
 	a.log.reset()
@@ -260,7 +260,7 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 	// refused start and nothing else.
 	command.Stderr = &a.log
 	if err := command.Start(); err != nil {
-		return errors.Join(err, a.marker.Abandon())
+		return errors.Join(err, a.runMarker().Abandon())
 	}
 	a.startedAt = time.Now()
 	done := make(chan error, 1)
@@ -278,9 +278,9 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 			resultErr = errors.Join(resultErr, reapErr)
 			return
 		}
-		resultErr = errors.Join(resultErr, a.marker.ConfirmExit())
+		resultErr = errors.Join(resultErr, a.runMarker().ConfirmExit())
 	}()
-	if err := a.marker.Bind(command.Process.Pid); err != nil {
+	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
 		return err
 	}
 	if err := settle(ctx, command.Process.Pid, done, configuration, socket, a.log.tail); err != nil {
@@ -310,7 +310,7 @@ func (a *Adapter) stopLocked() error {
 	case <-a.done:
 		a.process, a.done, a.stopPending = nil, nil, false
 		a.sources = nil
-		return a.marker.ConfirmExit()
+		return a.runMarker().ConfirmExit()
 	default:
 	}
 	if a.hooks.TrafficSink != nil && len(a.sources) > 0 {
@@ -338,7 +338,7 @@ func (a *Adapter) forceStopLocked() error {
 	}
 	a.process, a.done, a.stopPending = nil, nil, false
 	a.sources = nil
-	return a.marker.ConfirmExit()
+	return a.runMarker().ConfirmExit()
 }
 
 func (a *Adapter) Close() error {
@@ -361,7 +361,7 @@ func (a *Adapter) UnconfirmedStop() bool {
 	if a.stopPending {
 		return true
 	}
-	observation, err := a.marker.Observe(a.process != nil)
+	observation, err := a.runMarker().Observe(a.process != nil)
 	return err != nil || observation == core.CoreRunBlocked
 }
 
@@ -376,7 +376,7 @@ func (a *Adapter) CoreStartedAt() time.Time {
 	return a.startedAt
 }
 
-func (a *Adapter) lifecycleReadyLocked() error { return a.marker.Ready(a.process != nil) }
+func (a *Adapter) lifecycleReadyLocked() error { return a.runMarker().Ready(a.process != nil) }
 
 // SampleTraffic reports the cumulative node counters of the running process to the
 // existing traffic sink. GOST has no account counter, so this is the node total and
@@ -504,3 +504,12 @@ var (
 	_ core.Runtime       = (*Adapter)(nil)
 	_ core.BinaryRuntime = (*Adapter)(nil)
 )
+
+// runMarker binds the shared core-run marker to this adapter's runtime
+// directory, node and core name. Adapters are plain values built by the node
+// wiring and by tests, so the binding is resolved on use, as in the Xray and
+// sing-box adapters.
+func (a *Adapter) runMarker() *core.RunMarker {
+	a.marker.Directory, a.marker.NodeID, a.marker.Core = a.Directory, a.NodeID, CoreName
+	return &a.marker
+}

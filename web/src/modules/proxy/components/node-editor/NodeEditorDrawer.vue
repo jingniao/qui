@@ -48,7 +48,7 @@
         <button type="button" class="ios-btn-secondary" @click="pickPort">随机端口</button>
         <p aria-live="polite" :class="['text-xs', conflict ? 'text-ios-red' : 'text-ios-secondary']">{{ conflict || '入站列表中无端口冲突（含画布方案入站）；不检测主机其他进程。' }}</p>
       </div>
-      <NodeProtocolFields v-if="step === 3 || step === 4" :state="state" :step="step" />
+      <NodeProtocolFields v-if="step === 3 || step === 4" :state="state" :step="step" :gost="gostForwardReady(selectedServer, f.core)" />
       <NodeAdvancedFields v-if="step === 5" :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" />
       <section v-if="step === 5 && isOwner" class="panel-card p-4 space-y-3">
         <h3 class="text-sm font-semibold text-ios-label">所属分组</h3>
@@ -63,6 +63,7 @@
         <p class="text-ios-secondary">{{ f.listen }} · 运行内核 {{ f.core ? coreChoices.find(c => c.name === f.core)?.label || f.core : `主核心（${primaryCoreLabel}）` }} · {{ f.enabled ? '启用' : '停用' }} · {{ f.subscriptionVisible && !f.internalRelay ? '订阅可见' : '订阅隐藏' }} · {{ f.internalRelay ? '内部中转' : '用户接入' }}</p>
         <p class="text-xs text-ios-secondary">默认出站：{{ f.defaultOutbound }}；用户范围：{{ f.allowedUserIds.length ? f.allowedUserIds.map(id => users.find(u => u.id === id)?.username || id).join('、') : '已获授权、且分组包含此入站的用户' }}</p>
         <p class="text-xs text-ios-secondary">所属分组：{{ selectedGroupIds.map(id => memberGroups.find(g => g.id === id)?.name || '—').join('、') || '—' }}。非空 allowedUserIds 只进一步缩小上述分组授权范围，不会单独授予接入权限。</p>
+        <p v-if="f.protocol === 'forward'" class="text-xs text-ios-secondary">{{ forwardPreview }}</p>
         <p class="text-xs text-ios-orange">保存草稿后运行配置不变。发布会包含该服务器的全部待发布修改；内部中转请先发布目标服务器。</p>
         <div class="overflow-x-auto rounded-2xl border border-ios-border">
           <table class="w-full text-xs text-left"><thead class="bg-ios-bg text-ios-secondary"><tr><th class="p-3">字段</th><th class="p-3">保存前</th><th class="p-3">保存后</th></tr></thead>
@@ -102,7 +103,7 @@ import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
-import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
+import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
 import { coreSummaryLabel } from '../../../nodes/coreSummary';
 const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin }>(), { serverId: '', inbound: null, origin: 'list' });
 const emit = defineEmits<{ close: []; saved: [] }>();
@@ -134,6 +135,22 @@ const primaryCoreLabel = computed(() => primaryCore.value ? `${primaryCore.value
 const coreError = computed(() => selectedServer.value ? coreReason(selectedServer.value, f.value.core) : '');
 const securityStep = computed(() => hasSecurity(f.value.protocol));
 const conflict = computed(() => portConflict(f.value, inbounds.value, state.original?.id));
+// The preview states what publishing this forward will actually create: one
+// service per (port, transport), each with the whole pool and its own limits.
+const forwardPreview = computed(() => {
+  const forward = f.value.settings.forward;
+  if (!forward) return '端口转发尚未设置目标';
+  const ports = forwardListenPorts(f.value.port, f.value.settings);
+  const networks = forward.network === 'tcp,udp' ? 2 : 1;
+  const pool = forwardPool(forward).map(target => `${target.host}:${target.port}`).join('、') || '—';
+  const limits = [
+    forward.bandwidth_in_bps ? `入 ${forward.bandwidth_in_bps / 1024} KiB/s` : '',
+    forward.bandwidth_out_bps ? `出 ${forward.bandwidth_out_bps / 1024} KiB/s` : '',
+    forward.max_connections !== undefined ? `连接上限 ${forward.max_connections}` : ''
+  ].filter(Boolean).join('、');
+  const end = ports[ports.length - 1];
+  return `目标池：${pool}；策略 ${forward.strategy || 'round'}；监听 ${ports.length > 1 ? `${ports[0]}–${end} 共 ${ports.length} 个端口` : `${ports[0]} 端口`} × ${networks} 协议 = ${ports.length * networks} 个服务${limits ? `；${limits}（每个服务各自生效）` : ''}；只计入节点总量`;
+});
 const serverPortRange = computed(() => getNodePortRange(f.value.nodeId));
 const diff = computed(() => {
   const after = previewPayload(buildPayload(state));

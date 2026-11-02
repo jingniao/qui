@@ -396,15 +396,22 @@ func validateContents(ctx context.Context, work string) error {
 		limit              int
 	}{{"credentials", "encrypted_secret", "credential", 16384}, {"relay_credentials", "encrypted_secret", "relay", 16384}, {"inbounds", "encrypted_settings", "settings", (2 << 20) + 64}, {"outbounds", "encrypted_settings", "settings", (2 << 20) + 64}, {"config_revisions", "encrypted_state", "state", (2 << 20) + 64}} {
 		// CASE refuses an oversized stored blob before the driver allocates it.
-		query := "SELECT id,CASE WHEN length(" + item.field + ")<=" + strconv.Itoa(item.limit) + " THEN " + item.field + " END FROM " + item.table
+		// An inbound also carries its base listener port, so the archive's forward
+		// range can be checked against the same expansion helper the Agent uses.
+		port := "0"
+		if item.table == "inbounds" {
+			port = "port"
+		}
+		query := "SELECT id," + port + ",CASE WHEN length(" + item.field + ")<=" + strconv.Itoa(item.limit) + " THEN " + item.field + " END FROM " + item.table
 		rows, err := database.QueryContext(ctx, query)
 		if err != nil {
 			return ErrArchive
 		}
 		for rows.Next() {
 			var recordID string
+			var listenPort int
 			var encrypted []byte
-			if err := rows.Scan(&recordID, &encrypted); err != nil {
+			if err := rows.Scan(&recordID, &listenPort, &encrypted); err != nil {
 				rows.Close()
 				return ErrArchive
 			}
@@ -425,6 +432,9 @@ func validateContents(ctx context.Context, work string) error {
 				decoder.DisallowUnknownFields()
 				if err = decoder.Decode(&settings); err == nil && decoder.Decode(&struct{}{}) != io.EOF {
 					err = ErrArchive
+				}
+				if err == nil && item.table == "inbounds" {
+					err = desiredstate.ValidateListenPorts(listenPort, settings)
 				}
 			} else if item.kind == "credential" {
 				var secret credential.Secret

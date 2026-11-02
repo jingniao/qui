@@ -57,6 +57,20 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 
 固定版本、安装方式与运行健康含义见[部署与升级](deployment.md)与[运维手册](operations.md)，契约见 [GOST 设计](v1.3-design-gost.md)。
 
+### GOST 转发的池、范围与限流（v1.3 G2）
+
+`ForwardSettings` 的目标池、`strategy`/`max_fails`/`fail_timeout`、端口范围 `port_end`、双向字节限速与 TCP 连接上限属于 GOST 设置契约**版本 2**（`CoreCapability.gost_contract_version >= 2`，当前 Agent 上报 2）。它们按“是否出现”判定：Xray 与 sing-box 转发携带任一字段时，`desiredstate.ValidateForwardCore`、面板保存/发布（`proxy.ValidateInboundForwardOptions`）与 Agent 解析主核心后的校验三处一致拒绝，不会静默丢弃；`State.Validate` 只对显式指定核心的入站判定，留空跟随主核心的入站在 `MultiRuntime` 解析后再判。
+
+| 能力 | GOST 3.3.2 | 依据与边界 |
+| --- | --- | --- |
+| 目标池 `round`（轮询） | 支持 | `forwarder.nodes[]` + `selector.strategy=round`；每连接轮换，单个坏目标在该失败窗口内先失败一次 |
+| 目标池 `fifo`（主备） | 支持 | `selector={strategy:fifo,maxFails,failTimeout}`；停在一个目标上，失败后切换，切换代价是该窗口内一次失败请求 |
+| 端口范围 | 由 qui 展开 | GOST 配置的 `addr` **不支持范围**（`:20000-20003` 报 `unknown port`）；Agent 渲染为每个端口一个服务，每服务带完整池 |
+| 字节限速（入/出） | 支持 | `limiters[{name,limits:["$ <in> <out>"]}]` + `service.limiter`；上游用 `ParseBase2Bytes` 解析，裸整数被拒绝，故写 `<整数字节>B`，`0` 表示该方向不限 |
+| TCP 连接上限 | 支持 | `climiters[{name,limits:["$ <n>"]}]` + `service.climiter`；超限连接被接受后关闭；G0 未测量 UDP 并发，v1.3 拒绝 UDP-only 转发设置该字段 |
+| UDP 限速 | 支持（待实机） | `tcp,udp` 转发的 UDP 服务同样渲染 limiter，真实 UDP 执行需实机门禁确认；UDP 目标失效后的故障切换不承诺（G0 未确认缺失 UDP 响应会产生拨号错误，`fifo` 的切换实测只在 TCP 上验证） |
+| 每转发字节 | 节点总量 | 只进入 `gost` 节点计数（AGENTS §21），没有用户额度、设备门控或域名归属，也不提供每转发的历史表/接口 |
+
 
 ## 3. 平台能力维度
 

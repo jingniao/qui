@@ -13,8 +13,11 @@ import (
 func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) error {
 	if protocol == "forward" {
 		f := settings.Forward
-		if !inbound || f == nil || !validForwardHost(f.Host) || f.Port < 1 || f.Port > 65535 || (f.Network != "tcp" && f.Network != "udp" && f.Network != "tcp,udp") {
+		if !inbound || f == nil {
 			return errors.New("forward requires a target host, port and tcp/udp network")
+		}
+		if err := f.Validate(); err != nil {
+			return err
 		}
 		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" {
 			return errors.New("forward cannot carry proxy security or transport settings")

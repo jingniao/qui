@@ -1,33 +1,45 @@
 services:
-    - name: tcp-forward-tcp
+    - name: fwd-tcp-forward-20000-tcp
       addr: 0.0.0.0:20000
       handler:
         type: tcp
       listener:
         type: tcp
       forwarder:
+        selector:
+            strategy: round
+            maxFails: 1
+            failTimeout: 5s
         nodes:
-            - name: tcp-forward
+            - name: target-0
               addr: 203.0.113.10:8443
-    - name: both-forward-tcp
+    - name: fwd-both-forward-20100-tcp
       addr: '[::]:20100'
       handler:
         type: tcp
       listener:
         type: tcp
       forwarder:
+        selector:
+            strategy: round
+            maxFails: 1
+            failTimeout: 5s
         nodes:
-            - name: both-forward
+            - name: target-0
               addr: target.example.net:53
-    - name: both-forward-udp
+    - name: fwd-both-forward-20100-udp
       addr: '[::]:20100'
       handler:
         type: udp
       listener:
         type: udp
       forwarder:
+        selector:
+            strategy: round
+            maxFails: 1
+            failTimeout: 5s
         nodes:
-            - name: both-forward
+            - name: target-0
               addr: target.example.net:53
 metrics:
     addr: unix:///var/lib/proxy-agent/runtime/gost/metrics.sock

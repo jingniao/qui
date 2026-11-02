@@ -23,12 +23,16 @@ const settleWindow = 2 * time.Second
 // process serves, and the failure is one fatal line plus exit status 1. The child
 // itself is therefore the semantic validator, and it has to survive the window with
 // its own TCP listeners answering and its UDP sockets bound.
-func settle(ctx context.Context, pid int, done <-chan error, configuration core.RenderedConfig, metricsSocket string, childLog func() string) error {
+func settle(ctx context.Context, pid int, done chan error, configuration core.RenderedConfig, metricsSocket string, childLog func() string) error {
 	deadline := time.Now().Add(settleWindow)
 	var last error
 	for {
 		select {
 		case exit := <-done:
+			// Hand the exit back: the caller's reaper proves the exit from the same
+			// one-slot channel, and an emptied channel would read as an unconfirmed
+			// stop that blocks the rollback start.
+			done <- exit
 			reason := childLog()
 			if exit == nil {
 				exit = errors.New("exited during startup")
@@ -116,7 +120,7 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	select {
 	case exit := <-a.done:
 		a.process, a.done, a.stopPending = nil, nil, false
-		if err := a.marker.ConfirmExit(); err != nil {
+		if err := a.runMarker().ConfirmExit(); err != nil {
 			return result, errors.Join(core.ErrCoreStopUnconfirmed, err)
 		}
 		// The child's own exit result is the only explanation of why it is gone.

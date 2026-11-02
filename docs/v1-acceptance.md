@@ -1297,3 +1297,16 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试），Web UI 与
 | G1.3 | 原生语法门禁、启动与约 2 秒收敛、失败应用/更新回滚；GOST 变更不重启未变的代理核心 | 设计评审已删除 MultiRuntime「跳过未变组件」修正（设计「Reviewers 决定」第 2 条）：v1.3 按现状记录**一次发布会重启该节点全部核心**，GOST 变更同时重启代理核心，反之亦然；GOST 崩溃仍由逐核心 supervisor 恢复。门禁与回滚的 Agent 侧证据随 G1a 提交；待实机（PID/epoch/长连接观测） |
 | G1.4 | 无公开管理端点与 pprof、指标只走本地 unix socket、空闲内存、备份与降级兼容 | 本地通过（G1b）：`validateMultiCore`/`validateCoreUpdates` 只在 0127 之后接受 `gost`，任务行还必须是固定版本与固定归档摘要，旧归档（含 0126 及更早、以及被回退到 0124 的夹具）仍合法；gost 适配器测试随 G1a 提交；待实机（RSS 约 45 MB、`ss` 无公开监听、降级 1.3 之前必须先移除 GOST） |
 
+
+
+### G2：GOST 转发的目标池、端口范围与限流
+
+状态：G2 已实现，**待门禁与实机验收**。设计依据见 [GOST 设计](v1.3-design-gost.md) §4 与“Reviewer decisions”；实测依据见 [G0 发现](v1.3-g0-gost-findings.md) §3–§5。G2 不需要新迁移：设置保存在 `inbounds.encrypted_settings`（`Repository.Vault` 密封），GOST 设置契约版本由 1 升到 2，没有新增 proto 字段。
+
+| 项 | 覆盖内容 | 证据与状态 |
+| --- | --- | --- |
+| G2.1 | 类型化设置与共享校验：`targets`/`strategy`/`max_fails`/`fail_timeout`/`port_end`/双向字节限速/`max_connections` 的全部边界；一个 `desiredstate.ListenPorts` 端口展开助手（`State.Validate`、MultiRuntime 预留、面板冲突检查、画布分配、备份校验共用）；GOST-only 字段按“是否出现”判定并在非 GOST 核心上拒绝 | 本地通过：`TestForwardOptionBoundaries`、`TestForwardListenPorts`、`TestForwardOptionsArePresenceBased`、`TestForwardSelectorAndPoolDefaults`、`TestStateRefusesGostForwardOptionsOnAnotherCore`、`TestGostCoreKeepsForwardsAndRefusesOtherFeatures`（契约版本 2）；`TestGostForwardOptionsRequireTheContractAndTheCore`（面板保存：契约 1 拒绝、xray 拒绝、范围与单端口双向冲突、自身范围不冲突）、`TestCanvasPortRangeSkipsAGostForwardRange`（分配跳过整个区间）；待实机（面板 + Agent 端到端拒绝路径与备份校验的实际恢复演练） |
+| G2.2 | 原生渲染：每个（入站、端口、传输）一个服务、名字 `fwd-<入站ID>-<端口>-<tcp\|udp>`、`addr` 永不写范围、每个服务带完整有序池与自己的 `selector`、`limiters`/`climiters` 与 `$ <in> <out>`（速率编码为 `<整数字节>B`，因为上游字节解析器拒绝裸整数）、引用与目标在交给进程前先自检、每节点最多 1024 个服务 | 本地通过：`TestRenderGolden`（G1 单目标金标文件已随新命名与 selector 更新）、`TestRenderPoolRangeAndLimits`（IPv6 + 域名池、范围展开、每服务独立限速与仅 TCP 的连接上限）、`TestRenderRangeExpandsTheSamePool`（默认 selector、无设置不限速）、`TestRenderRefusesTooManyServices`、`TestRenderHealthEndpointsFollowTheTransport`、`TestConfigRoundTripsThroughJSONAndYAML`；原生套件 `TestRealForwardPoolsFailoverAndLimits`（round 两个目标都命中 + UDP 回显、fifo 停掉首个目标后一次失败内切换、连接上限“接受后关闭”）与 `TestRealForwardRateLimitsAndNodeCounter`（双向 3 MiB 平均速率、节点计数方向）需要 `GOST_BINARY`，本机跳过；**待门禁**（Linux 测试机与 CI 显式提供 3.3.2 二进制，跳过不算通过） |
+| G2.3 | 节点专属计量与面板/Web：范围展开出的每个服务都按服务名各计一次并求和为单一 `gost` 节点计数（input→上传、output→下载，`client`/`host` 标签丢弃），不进入用户额度；面板保存与发布只在核心契约 ≥2 时接受新设置；Web 编辑器只对 GOST 核心显示池/范围/限速字段，并有换核拒止、展开数量与行为说明 | 本地通过：`TestParseMetricsCountsEveryExpandedServiceOnce`、`TestRealApplySettleRollbackAndStats`（G1 节点计数仍为单一批）、`TestGostForwardOptionsRequireTheContractAndTheCore`；`cd web && npm run build`（含 `vue-tsc`）通过，`node web/scripts/node-editor-selftest.mjs`（新增 `PASS NODE_EDITOR_GOST`：范围展开、范围感知端口冲突、按出现判定的 GOST 选项、换核拒止、第 4 步边界）与 `node web/scripts/ui-regression-selftest.mjs` 通过；待实机（浏览器走查、真实 GOST 上的限速/上限/UDP 观察，以及 LXC/Alpine 上的资源与指标基数） |
+
+G2 的实机项（三台主机）：代理核心与转发范围之间的端口冲突、TCP/UDP 回显、IPv4/IPv6、`fifo` 故障切换、单向与双向限速、连接上限作用范围、重启/断线后的统计与不进入用户额度/域名/设备记录；代表性的范围与混合流量 soak 在 Alpine 上核对内存与指标基数。在此之前不声称 G2 已验收。

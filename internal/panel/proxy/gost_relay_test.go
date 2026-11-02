@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -165,5 +166,19 @@ func TestGostTunnelPublishesBesideAnExistingRelay(t *testing.T) {
 	}
 	if _, err := p.service.RelaySnapshots(p.ctx, p.nodeA, p.users); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Chain and relay checks ask every core of a node, not only the primary's list.
+func TestSupportsAsksEveryCore(t *testing.T) {
+	n := node.Node{Capabilities: &pb.Capabilities{CoreName: "xray", MultiCoreSupported: true, Cores: []*pb.CoreCapability{
+		{Name: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "trojan", Inbound: true, Outbound: true, Tcp: true}}},
+		{Name: "sing-box", Protocols: []*pb.ProtocolCapability{{Protocol: "hysteria2", Inbound: true, Outbound: true, Udp: true}}},
+	}}}
+	if !supports(n, "hysteria2", false, false, true) || !supports(n, "trojan", true, true, false) {
+		t.Fatal("a protocol of one of the node's cores was refused")
+	}
+	if supports(n, "hysteria2", false, true, false) || supports(n, "vless", true, true, false) {
+		t.Fatal("a capability no core reports was accepted")
 	}
 }

@@ -93,16 +93,8 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 			if !outbound.Enabled {
 				continue
 			}
-			if outbound.Protocol != "direct" && outbound.Protocol != "block" {
-				supported := false
-				for _, ability := range n.Capabilities.Protocols {
-					if ability.Protocol == outbound.Protocol && ability.Outbound && (!outbound.SupportTCP || ability.Tcp) && (!outbound.SupportUDP || ability.Udp) {
-						supported = true
-					}
-				}
-				if !supported {
-					return nil, errors.New("associated node does not support an enabled outbound capability")
-				}
+			if outbound.Protocol != "direct" && outbound.Protocol != "block" && !supports(n, outbound.Protocol, false, outbound.SupportTCP, outbound.SupportUDP) {
+				return nil, errors.New("associated node does not support an enabled outbound capability")
 			}
 			if outbound.TargetNodeID != "" {
 				actual[outbound.TargetNodeID] = true

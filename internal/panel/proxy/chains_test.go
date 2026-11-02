@@ -193,7 +193,7 @@ func TestBackupChainsPlanCompleteDependencyGraph(t *testing.T) {
 		ids = append(ids, n.ID)
 	}
 	for _, nodeID := range ids {
-		if _, err := f.nodes.Record(ctx, nodeID, &pb.AgentMessage{Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{Protocols: []*pb.ProtocolCapability{{Protocol: "socks5", Inbound: true, Outbound: true, Tcp: true, Udp: true}}}}}); err != nil {
+		if _, err := f.nodes.Record(ctx, nodeID, &pb.AgentMessage{Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: &pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "socks5", Inbound: true, Outbound: true, Tcp: true, Udp: true}}}}}); err != nil {
 			t.Fatal(err)
 		}
 	}

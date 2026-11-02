@@ -118,10 +118,15 @@ func (r *Repository) Chains(ctx context.Context, nodeID string, page, size int) 
 	}
 	return chains, count, nil
 }
+
+// supports reports whether any core the node runs carries the protocol in this
+// direction: on a multi-core node the primary core's list is only part of it.
 func supports(n node.Node, protocol string, inbound, tcp, udp bool) bool {
-	for _, ability := range n.Capabilities.Protocols {
-		if ability.Protocol == protocol && (!inbound || ability.Inbound) && (inbound || ability.Outbound) && (!tcp || ability.Tcp) && (!udp || ability.Udp) {
-			return true
+	for _, core := range node.EnabledCores(n.Capabilities) {
+		for _, ability := range core.Protocols {
+			if ability.Protocol == protocol && (!inbound || ability.Inbound) && (inbound || ability.Outbound) && (!tcp || ability.Tcp) && (!udp || ability.Udp) {
+				return true
+			}
 		}
 	}
 	return false

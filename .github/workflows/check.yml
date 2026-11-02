@@ -105,6 +105,18 @@ jobs:
           tar -xzf "cores/${asset}" -C cores/singbox
           test -x "cores/singbox/sing-box-${SINGBOX_VERSION}-linux-amd64/sing-box"
           printf 'SINGBOX_BINARY=%s/cores/singbox/sing-box-%s-linux-amd64/sing-box\n' "$GITHUB_WORKSPACE" "$SINGBOX_VERSION" >> "$GITHUB_ENV"
+      # GOST is pinned to the reviewed release and archive digest the Agent's
+      # core-update allowlist accepts (pkg/contracts/release).
+      - name: Download and verify GOST
+        run: |
+          set -euo pipefail
+          asset="gost_3.3.2_linux_amd64.tar.gz"
+          mkdir -p cores/gost
+          curl --fail --silent --show-error --location --max-redirs 3 --proto '=https' --tlsv1.2 -o "cores/${asset}" "https://github.com/go-gost/gost/releases/download/v3.3.2/${asset}"
+          printf '%s  %s\n' 162feb43b1c284dbea599cdfe898169931af875233060dedc19432c7a9d18274 "cores/${asset}" | sha256sum --check --strict
+          tar -xzf "cores/${asset}" -C cores/gost gost
+          test -x cores/gost/gost
+          printf 'GOST_BINARY=%s/cores/gost/gost\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       # mihomo checks every generated Clash profile with `mihomo -t`. `-t` loads
       # GeoIP, GeoSite and the MMDB and downloads them on first use, so the home
       # directory is seeded with files from a pinned meta-rules-dat commit whose

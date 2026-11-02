@@ -22,7 +22,7 @@ if grep -q '\[no tests to run\]' -- "$log"; then
 fi
 # A skip prints its reason on the line before "--- SKIP".
 skips=$(awk '/^=== |--- (PASS|FAIL): / {reason = ""} /_test\.go:[0-9]+: / {reason = $0; next} /--- SKIP: / {print $0 " <-" reason}' "$log")
-missing=$(printf '%s\n' "$skips" | grep -E 'XRAY_BINARY|SINGBOX_BINARY|MIHOMO_BINARY|MIHOMO_HOME|non-loopback|cannot listen|MPTCP' || true)
+missing=$(printf '%s\n' "$skips" | grep -E 'XRAY_BINARY|SINGBOX_BINARY|MIHOMO_BINARY|MIHOMO_HOME|GOST_BINARY|non-loopback|cannot listen|MPTCP' || true)
 printf 'Passed real-core tests: %s\n' "$(grep -cE -- '--- PASS: TestReal' "$log")"
 if [[ -n $skips ]]; then
   printf 'Skipped tests:\n%s\n' "$skips"

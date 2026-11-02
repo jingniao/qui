@@ -85,7 +85,7 @@ func previewService() *Service {
 		{ID: "quic-credential", UserID: account.ID, DeviceID: device.ID, Protocol: "hysteria2", Secret: "quic-secret", Status: "active"},
 	}
 	users := previewUsers{account: account, device: device, credentials: credentials}
-	n := node.Node{ID: "preview-node", Name: "Preview", Status: "online", Enabled: true, AllowSubscription: true, PublicIP: "node.example", Capabilities: &pb.Capabilities{Protocols: []*pb.ProtocolCapability{{Protocol: "vless", Inbound: true, Tcp: true}, {Protocol: "hysteria2", Inbound: true, Udp: true}}}}
+	n := node.Node{ID: "preview-node", Name: "Preview", Status: "online", Enabled: true, AllowSubscription: true, PublicIP: "node.example", Capabilities: &pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "vless", Inbound: true, Tcp: true}, {Protocol: "hysteria2", Inbound: true, Udp: true}}}}
 	state := desiredstate.State{
 		SchemaVersion: 1, Revision: 1, NodeID: n.ID, Logging: desiredstate.Logging{DomainOnly: true},
 		Credentials: []desiredstate.Credential{

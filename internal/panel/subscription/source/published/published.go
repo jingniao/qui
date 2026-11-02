@@ -100,7 +100,7 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 			if listen := net.ParseIP(inbound.Listen); listen == nil || listen.IsLoopback() {
 				continue
 			}
-			if !supportsInbound(n, inbound.Protocol) {
+			if !supportsInbound(n, inbound.Core, inbound.Protocol) {
 				continue
 			}
 			for _, credentialID := range inbound.CredentialIDs {
@@ -163,11 +163,15 @@ func (s *Source) labels(ctx context.Context, nodeID string, viewer source.Viewer
 	return labels, nil
 }
 
-func supportsInbound(n node.Node, protocol string) bool {
-	if n.Capabilities == nil {
+// supportsInbound asks the core that runs the inbound (empty means the primary),
+// so a user inbound on a second core is not dropped for being absent from the
+// primary core's protocol list.
+func supportsInbound(n node.Node, core, protocol string) bool {
+	selected := node.SelectedCore(n.Capabilities, core)
+	if selected == nil {
 		return false
 	}
-	for _, capability := range n.Capabilities.Protocols {
+	for _, capability := range selected.Protocols {
 		if capability.Protocol == protocol && capability.Inbound {
 			return true
 		}

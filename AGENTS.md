@@ -34,6 +34,9 @@
 
 **v1.3.0 GOST G1 已实现（2026-11-01）**：GOST 3.3.2 作为第三种核心类型（仅 linux/amd64，只承载端口转发入站，从不承载用户接入）。G1a 交付 Agent 适配器、`--core gost` 安装器、`Hello.gost_core_supported=13` 与 `CoreCapability.gost_contract_version=9`、发布 allowlist 与固定归档摘要；G1b 交付迁移 0127、面板协商/校验/组件任务/备份校验、Web 核心选择与固定版本预填、文档。只在本机 Go 测试、迁移升级测试与 Web 构建中验证，三台主机实机验收待做；契约与限制见 [GOST 设计](docs/v1.3-design-gost.md)，功能范围见第 4.4 与 22.2 节。
 
+**v1.3.0 GOST G3 已实现（2026-11-02）**：GOST 中继加密：画布上一条 `port_forward` 连接选 `gost` 隧道协议后，入口节点的 GOST 转发经出口节点的 `relay` 监听（TLS ＋ 客户端 CA）访问自己的目标池，最多沿用现有两跳。迁移 0128 新增 `canvas_tunnels.gost_material`（Vault 密封；一套 CA ＋ 出口服务端证书 ＋ 入口客户端证书，CA 私钥签发后丢弃、10 年有效）；`POST /api/v1/canvas-tunnels/{id}/rotate-credentials` 换整套凭据并把隧道标记为 modified；发布固定先出口后入口，批次回滚反向。只在本机 Go 测试、面板测试与 Web 构建中验证，三台主机实机验收待做；契约见 [GOST 设计](docs/v1.3-design-gost.md)，运维含义见[运维手册](docs/operations.md)，限制见第 21 节。
+
+
 CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（release/v1.2.0 已复跑 111 个原生核心测试与 `-race`，面板主机 -race 按 Owner 决定以 CI 代替）；GitHub 只在手动与每周运行 `check`（同一脚本）与 `cores`，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
 
 ## 变更记录
@@ -293,6 +296,8 @@ Internet
 面板侧把节点建模为“已上报启用的核心集合”：协商、入站归属与逐核心显示见第 11.2 节，核心更新与移除任务见第 22.2 节，每核心计量见第 21 节；记录见历史报告 [K3b 面板报告](docs/archive/v1.2-k3b-panel-report.md)。
 
 GOST（v1.3 G1）：第三种核心类型 `gost`，固定官方 3.3.2，仅 linux/amd64。它只终止**端口转发入站**（`forward`，TCP/UDP），**从不承载用户接入**：没有用户凭据、订阅、额度、设备门控、源地址观测与域名记录，也没有出站资源、分流策略或出口组（转发按自身目标直连，唯一要求是启用中的 `direct` 默认出站）。显式把入站 `core` 设为 `gost` 只允许 `forward`，其他协议在共享校验（`desiredstate.Validate` 与面板 `ValidateCoreProtocol`）处被拒绝；`core` 留空仍跟随主核心，GOST-only 节点按同一规则判定。是否可安装 GOST 由 `Hello.gost_core_supported` 决定（不从 Agent 版本号推断），组件安装、移除与固定摘要见第 22.2 节，运行目录与安装选项见第 30.2 节，运维含义见[运维手册](docs/operations.md)。
+
+G3 起 GOST 还承担节点间加密中继：画布的 `port_forward` 连接可以把跳设为 `gost` 隧道（见第 14 与 16 节），两端节点都必须运行 GOST 并上报设置契约 3，出口节点必须能提供公网地址。中继只搬运已在转发侧计入的字节，仍不引入用户身份、额度、设备门控与域名记录。
 
 第一阶段优先支持：
 
@@ -842,6 +847,8 @@ Shadowsocks :8388
 
 GOST 转发（v1.3 G2）的语义要点：目标池与选择器、端口范围展开、限速/连接上限按每个展开后的服务各自生效，见第 12 节；主备（`fifo`）切换会让一个请求失败一次；超过连接上限的连接被**接受后立即关闭**，不是拒绝握手；这些转发只计入节点总量（第 21 节），不进入用户额度、设备限制或域名记录。
 
+GOST 隧道（v1.3 G3）：`port_forward` 连接的 `tunnelProtocol` 可选 `gost`，表示入口节点的 GOST 转发经出口节点的 GOST `relay` 监听（TLS ＋ 客户端 CA，凭据由面板按隧道生成并密封）访问自己的目标池，最多两跳；`tunnel` 与 `proxy_chain` 仍用原 Trojan 实现，客户端方案不接受 `gost`。两端都须上报 GOST 核心与设置契约 3，中继监听端口从出口节点的端口范围分配并参与第 12 节的节点级唯一性规则，出口节点没有公网 IP 时拒绝发布。凭据规则见第 29 节，发布顺序与轮换见第 16 节。
+
 系统必须支持以下场景：
 
 > 用户使用协议 A 连接节点 A，节点 A 再使用协议 B 将流量转发到节点 B。
@@ -927,6 +934,8 @@ US-Exit
 # 16. 代理链模块
 
 共享范围（K4）覆盖服务器执行的 tunnel、proxy_chain 与 port_forward；对象归属、旧对象认领与改名规则见第 14 节。客户端链继续自包含，拒绝 tunnelId。相同 tunnelId 只生成一组对象；已发布且未变的共享隧道可无操作发布。共享跳的链和入口是发布依赖；两个方案对同一入口声明不同隧道路径时拒绝计划/发布。删除方案不删除仍共享的对象；最后一个方案移除引用后，在其下一次发布中按原引用阻塞规则清理。删除仍在使用的隧道返回 409 tunnel_in_use 与方案列表。不同隧道不会自动接管对方的监听对象。
+
+GOST 中继的发布顺序（v1.3 G3）：含 GOST 隧道的方案固定先发布出口节点（中继监听），再发布入口节点（拨它的链），批次回滚按相反顺序；轮换凭据由下一次普通发布完成切换，出口与入口两次部署之间隧道短暂中断（见第 29 节）。没有 GOST 隧道的节点保持原有顺序。
 
 中转搭建中的“代理链连接”并入“加密中转”；持久化类型 `proxy_chain` 与 `tunnel` 均保留，服务器规划语义相同。客户端方案也接受两者为同一条 mihomo dialer-proxy 路径的兼容类型，不创建服务器隧道，逐跳授权与单路径校验不变。
 
@@ -1243,7 +1252,10 @@ v1.1 内部身份字段继续用于流量归属与补传，界面隐藏设备维
 **每域名字节**：见第 20 节，官方核无法提供时列为空并显示“—”。
 
 节点/核心总量：Agent 在 `Hello` 里声明 `node_traffic_supported`，面板只有在自己也支持（`AccessRecorder` 可用）时才在 `Welcome` 里回同一标志；声明后 Agent 额外上报每核心的累计节点计数（`traffic.Counter{kind:"node"}`），面板只在协商成功的会话内接受这些批次，否则整批以 `FailedPrecondition` 拒绝。node 计数器要求 `core` 为平台运行的任一核心类型（`xray`/`sing-box`/`gost`）、`credential_id` 为 `node`、`core_epoch` 以 `.node` 结尾、修订为当前已确认修订、字节非负且不超过 1 PiB。面板按（节点、epoch、`node`）保存游标并计算增量，写入 `core_traffic_samples` 作为每核心/每节点总量；重复批次幂等，同一节点可有多个活跃 epoch，一个核心上报不会淘汰另一个的 epoch。这些字节**不进入用户额度**，也不与账户派生的样本重复相加：`node_traffic_samples` 视图仅在同一 epoch 没有 node 游标时才使用账户样本。因此“今天流量”“每月节点流量”“访问审计的节点汇总”在两类节点上都成立，混合核心节点不会被计两遍；用户维度仍只来自账户计数，官方 sing-box 无 `with_v2ray_api` 时用户字节仍未知。Xray 的节点总量是账户计数加上**已渲染端口转发入站**的原生入站计数：转发 tag 白名单随渲染确定，读取时多一次 `inbound>>>` 查询（`Reset_=false`），只接受白名单内精确的 `uplink`/`downlink` 键，用户入站、管理 API 与其他入站统计一律忽略，因此不会重复计算用户字节；sing-box 取核心自身总量（含转发）。端口转发没有账户，这些字节仍不进入用户额度、设备计数或域名归属；升级前启动的旧 Agent 只报账户之和，缺失字节不补记（v1.2.0 实机 H7c 只确认 sing-box 含转发，v1.3.0 P2 起 Xray 同样计入）。
+
 **GOST 节点总量（v1.3 G2）**：GOST 节点的节点总量来自其本地 unix socket 上的 Prometheus 文本（`runtime/gost/metrics.sock`，用 `http.Transport` 的 Unix `DialContext` 读取，沿用既有采集周期与停止前取样）。Agent 只按**已渲染的转发服务名**（`fwd-<入站ID>-<端口>-<tcp|udp>`）求和 `gost_service_transfer_input_bytes_total` 与 `gost_service_transfer_output_bytes_total`：input 计为上传、output 计为下载，端口范围展开出的每个服务各计一次、不重不漏，TCP 与 UDP 一并计入；GOST 自带的 `client`/`host` 标签一律丢弃（G0 观测到标签值可能被截断，不能当作身份）。解析失败（负数、非有限、溢出、标签或行损坏）让整次取样失败并把统计源标为失败，绝不当作 0；计数随进程累积、每次应用都从零开始，面板仍按（节点、epoch、`node`）游标取增量，GOST 重启后得到新的 epoch。这些字节只进入节点总量，不进入用户额度、设备限制或域名归属，也不提供每转发的历史表或接口。
+
+**GOST 中继服务（v1.3 G3）**：`relay-<入站ID>-<端口>` 只把已经计过的转发载荷再加一层 TLS 帧搬运一次，因此**不计入**节点总量；计入的是入口节点的转发服务（G0 实测中继开销约 0.3%，不做计费级数字）。中继字节同样不进入用户额度、设备限制或域名归属。
 
 **整机流量（v1.3 T1，与上面的代理流量分开）**：不进入用户额度、订阅或任何派生的代理统计。Agent 在心跳里上报各非 lo 网卡的累计字节、`bootId` 和 IPv4 默认路由网卡；面板在同一心跳事务里按（服务器、网卡、本地日期）写入差值到 `node_machine_traffic_daily`（0126），首次采样、重启或计数回退只重建基线，同一次启动内的断线区间按时间比例分摊到跨过的日期。日行保留全部网卡，但摘要只汇总**一张**网卡：显式 `interfaceName`，否则最近新鲜心跳的默认路由网卡；不同网卡不求和、不拼接，切换网卡按所选网卡重算本期。周期是从重置日（1–31，短月份取该月最后一天，面板时区）起算的半开区间，方法为 `sum`（入站 + 出站）、`outbound`（仅出站）或 `max`（两个方向的较大值）。本期没有日行或解析不到网卡是用量未知（`null`，界面“—”）；已有日行但没有当前新鲜采样时为 `stale`（界面“截至上次采样”）。限制（[运维手册](docs/operations.md) §18 有全文）：整机流量按所选单张网卡统计，包含所有服务，不等于代理流量或供应商账单；LXC 只能看到容器自己的网卡，不能统计物理宿主机；首次采样仅建立基线；Agent 离线期间若主机重启，跨重启流量无法补计，同次启动的离线流量可由累计计数补计但跨日按时间比例估算；网卡计数重置会重新建立基线；自动网卡来自 IPv4 默认路由，策略路由或 IPv6-only 须手动选择；修改网卡会重算所选网卡的本期；修改面板时区后，之后的流量按新时区分日，已记录的日数据不重新分桶。额度只用于展示，不限速、不停用服务。
 
@@ -1425,6 +1437,7 @@ Node Agent 不允许提供：
 - 应用有 TTL 的设备门控（Xray 官方运行时规则 API / sing-box Clash 连接关闭），不走配置 Revision，不重启核心
 - TCP-connect 探测（已解析 IP、端口、次数、超时与截止时间；Agent 再校验，最多 10 次、每次 3 秒，无 shell）
 - 应用端口转发入站（Xray `dokodemo-door` / sing-box `direct` override / GOST `tcp`、`udp` 转发服务，按能力拒绝旧 Agent；经正常配置发布）
+- 应用 GOST 中继入站与入口链（v1.3 G3）：出口渲染 `handler: relay` ＋ `listener: tls` ＋ 客户端 CA 的证书，入口把链挂在 `handler.chain` 上（`connector: relay` ＋ `dialer: tls`，带 CA 与服务器名）；材料写入 `runtime/gost/tls/<入站>/<半边>/`（目录 0700、文件 0600），按入站与半边分开保存，回滚到旧修订不会覆盖正在用的证书。
 - 端口转发的渲染细节（v1.3 G2）：目标池按顺序原样写入 `forwarder.nodes[]`（`target-0`、`target-1`…），选择器写 `{strategy,maxFails,failTimeout}`；端口范围由 Agent 自己展开为每个（端口、传输）一个服务，`addr` 里永远不出现范围；限速写 `limiters[{name,limits:["$ <in> <out>"]}]` 并挂到 `service.limiter`，连接上限写 `climiters[{name,limits:["$ <n>"]}]` 并挂到 `service.climiter`。GOST 用 `alecthomas/units` 的 `ParseBase2Bytes` 解析速率，**裸整数会被拒绝**，因此速率一律渲染为 `<整数字节>B`（`0` 是它唯一特殊处理的“该方向不限”）；引用与目标在 typed 输出里先自检再交给进程，未知 limiter 名会让 GOST 静默不限速。
 
 TCP 探测只测建连耗时与失败比例，不是带宽、ICMP 或 UDP 测试。手动历史每节点/目标最多保留 100 条。定时检测每 1 分钟针对启用、未删除、45 秒内有心跳且支持探测的节点执行，每目标 3 次、每次 3000 ms，系统默认目标使用 probe_targets.scheduled，仍最多 5 个；每节点可改用最多 5 个自定义目标，custom=true 且空列表表示不监测，custom=false 清除自定义列表并继承默认目标。队列按 source 隔离，手动优先，已发出的探测结束或 2 分钟期限到达后才派发下一条。定时结果经 ValidateResult 校验后写入独立采样表，保留 7 天；当前 Agent 只提供 medianMs，原始点的 avgMs/minMs/maxMs 返回 null。查询范围不超过 12 小时返回原始点；超过 12 小时按 Unix epoch 对齐分桶，步长为 ceil(小时数×60/720)×60 秒，每目标约 720 点（边界可多 1 点）。桶内 medianMs 为 sent>failed 且 median_ms 非 NULL 的采样中位数的算术平均，minMs/maxMs 为这些中位数的最小值/最大值，无可用值时均为 null，avgMs 始终为 null；sent/failed 求和，samples 为原始采样数（原始点为 1）。删除目标级联删除采样；逻辑删除节点不再提供采样查询，记录等待保留期清理。端口转发没有用户身份，不进入订阅、用户额度、设备限制或用户域名归属。
@@ -1652,6 +1665,7 @@ K4 新增迁移（仅在升级/恢复数据库时应用）：
 | 0123 `node_metrics_tuning` | `node_metric_samples`：可空分钟遥测、7 天保留、不进便携备份；`node_tuning`：完整期望 profile、request_id、状态与逐键回执，随备份保留，恢复以当前状态为准且不重发 |
 | 0126 `node_machine_traffic` | `node_machine_traffic_settings`（每服务器 method/interface_name/可空 allowance_bytes 1–2^53-1/reset_day 1–31，默认 sum/''/NULL/1）、`node_machine_traffic_daily`（主键（服务器、网卡、本地日期），非负 rx/tx 字节，长期保留，非遥测）、`node_machine_traffic_cursors`（每（服务器、网卡）的 boot_id 与累计字节，用于增量）；无时区列，按写入时的面板时区分日（第 21 节） |
 | 0127 `gost_core` | 五个表的核心名 CHECK 接受 `gost`：`inbounds.core` 用「新增替代列＋复制＋删旧列＋改名」原地替换（最终 `core IN ('','xray','sing-box','gost')`，id、外键、中转变更与 K4 删除触发器不变）；`core_update_tasks`（含 `adding`，保留唯一活跃 `(node_id,component)` 索引）、`core_remove_tasks`（保留唯一活跃索引）、`node_traffic_cursors`、`core_traffic_samples`（保留 `core_traffic_time`）按显式列名事务重建，`node_traffic_samples` 视图删除后按原定义重建；新增 `nodes.gost_core_supported`（0/1，默认 0，恢复清零、重连刷新） |
+| 0128 `gost_tunnels` | `canvas_tunnels.gost_material`（可空密封列；每条隧道一套 CA ＋ 服务端/客户端叶子证书，CA 私钥签发后丢弃、有效期 10 年；轮换替换整列并更新 `updated_at`）。不新增表，K4 的归属表、外键与触发器不变 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1812,6 +1826,8 @@ SSE 只推送：
 
 K4：Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /canvas-tunnels/legacy-objects、POST /canvas-tunnels/{id}/adopt；写入要求 CSRF 并记录审计。服务端连接接受 tunnelId 引用，其余配置由资源读取；客户端拒绝该字段。PUT 隧道要求 updatedAt；端点修改在同一事务中重定向所有引用方案并更新方案令牌。旧内嵌写法按方案 ID + 连接 ID 创建/更新该方案最初创建的隧道，显式引用不隐式修改资源。计划增加 tunnels:[{tunnelId,affectedSchemes:[{id,name}]}]，冲突增加 reason/objectId。完整且可供 F4 使用的 JSON 见历史报告 [K4 报告](docs/archive/v1.2-k4-tunnels-report.md)。
 
+G3：`POST /api/v1/canvas-tunnels/{id}/rotate-credentials`（Owner ＋ CSRF，体为 `{updatedAt}`，操作日志“轮换隧道凭据”）为 GOST 隧道签发新一代凭据并把它标记为 modified；只读视图只给代数、服务器名、到期与指纹。
+
 U5a 增加 `POST /api/v1/canvas-schemes/{id}/plan`（Owner，会话与 CSRF 同 publish）。无正文或 `{}` 规划已保存布局；`{"layout": <CanvasLayout>}` 规划未保存布局。返回 `ok`、按服务器的 `creates/updates/removes`、逐连接状态、监听端口冲突和警告；失败原因另有 `message`。接口仅读取，不写对象、方案、审计或 Revision。它复用发布的规划、生成对象识别、端口冲突与删除引用检查；客户端方案返回 `ok:false`，客户端已有 publish 路径不变。更新表示发布会执行同名对象的保存（不表示字段一定变化）；计划与执行之间状态变化仍可能导致发布失败。
 
 延迟目标 GET 允许 Owner/Viewer，返回 `{custom,targetIds,defaultTargetIds}`；PUT 仅 Owner + CSRF，事务保存并记审计。超过 5 个返回 409 `node_target_limit`，未知目标返回 400 `unknown_target`，重复 ID 返回 400 `invalid_request`，已删除节点返回 404。延迟查询目标包含当前有效目标与查询范围内仍有采样的历史目标。
@@ -1849,6 +1865,7 @@ GET/POST /canvas-tunnels
 PUT/DELETE /canvas-tunnels/{id}
 GET    /canvas-tunnels/legacy-objects
 POST   /canvas-tunnels/{id}/adopt
+POST   /canvas-tunnels/{id}/rotate-credentials
 GET/POST /canvas-schemes
 PUT/DELETE /canvas-schemes/{id}
 POST   /canvas-schemes/{id}/publish
@@ -1951,6 +1968,7 @@ GOST（v1.3 G1）只增加两个字段，不新增消息：`Hello.gost_core_supp
 ## 29.3 凭据安全
 
 - 用户凭据与节点间凭据分离、订阅 Token 的哈希查找与加密副本规则、节点私钥不上传中央端：见第 9.3 与 11.3 节。
+- 节点间 GOST 中继凭据（G3）与用户凭据完全分离：每条隧道一套 CA、出口服务端证书与入口客户端证书，存为 `canvas_tunnels.gost_material` 的 Vault 密封列；CA 私钥签发后不保留（没有别的东西用它签名），有效期 10 年；API、计划与日志只暴露代数、服务器名、到期与指纹。轮换即换整套；删除隧道不会撤销离线节点上仍生效的凭据（见[运维手册](docs/operations.md)第 20 节）。
 - 敏感配置写入节点时限制文件权限
 - 配置和备份中的敏感字段加密保存
 
@@ -2073,6 +2091,8 @@ K2a 调优。升级与多核心安装在 H3、H5、H4 实机通过；全新安�
 K2b 的 node_metric_samples 同延迟采样从快照删除并 VACUUM，恢复候选再次清空，不影响运行库样本。node_tuning 属于配置并纳入备份、校验和清单；恢复以当前库调优行为准，删除仅存在于归档的行，保留当前期望/结果，pending 改为 unconfirmed，且不重发请求；旧归档在迁移后按同一规则合并。恢复不会写宿主 sysctl，仍须核对后续 tuningCurrent。
 
 K3b：`inbounds.core`、`nodes.multi_core_supported/node_traffic_supported/gost_core_supported`、`node_health_checks.core`、`node_restart_requests.core`、`core_update_tasks.adding` 与 `core_remove_tasks` 都属于配置，随备份保留并由 `validateMultiCore` 校验（结果 JSON 必须与行内的 id/component/revision/code/status 一致，同一（节点、组件）不能同时有排队中的添加与移除）。恢复时清空 `core_remove_tasks` 后从归档复制，归档里 queued/running 的移除与核心更新任务一律改为 unconfirmed 且不重发（未确认不等于没执行）；`node_traffic_cursors` 与 `core_traffic_samples` 是累计游标与已观察增量，随访问数据一起恢复，避免恢复后把同一段字节再记一次。
+
+G3 的 `canvas_tunnels.gost_material` 属于配置：随加密备份保留，恢复后原样可用（不重新签发），隧道校验覆盖这一列。恢复**不自动发布**，要等 Owner 下一次发布才把凭据下发到节点，在此之前隧道界面显示 modified。
 
 T1 的 `node_machine_traffic_settings`、`node_machine_traffic_daily` 与 `node_machine_traffic_cursors` 是配置与持久整机用量，不是 7 天遥测：不清空、不随采样保留期删除，全部进入加密备份并由 `validateMachineTraffic` 校验（设置/日期/字节/外键/主键，0126 之前没有这三张表也算合法），清单新增三项计数。恢复以冻结的当前库为准：当前库已迁移到 0126 时整表（设置、日行、游标一起）复制当前数据，既不丢当前用量也不与归档重复计账；当前库早于 0126 时保留归档中的机器表。空表同样是权威结果，不因空而复活归档用量。
 

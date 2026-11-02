@@ -59,7 +59,7 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 
 ### GOST 转发的池、范围与限流（v1.3 G2）
 
-`ForwardSettings` 的目标池、`strategy`/`max_fails`/`fail_timeout`、端口范围 `port_end`、双向字节限速与 TCP 连接上限属于 GOST 设置契约**版本 2**（`CoreCapability.gost_contract_version >= 2`，当前 Agent 上报 2）。它们按“是否出现”判定：Xray 与 sing-box 转发携带任一字段时，`desiredstate.ValidateForwardCore`、面板保存/发布（`proxy.ValidateInboundForwardOptions`）与 Agent 解析主核心后的校验三处一致拒绝，不会静默丢弃；`State.Validate` 只对显式指定核心的入站判定，留空跟随主核心的入站在 `MultiRuntime` 解析后再判。
+`ForwardSettings` 的目标池、`strategy`/`max_fails`/`fail_timeout`、端口范围 `port_end`、双向字节限速与 TCP 连接上限属于 GOST 设置契约**版本 2**（`CoreCapability.gost_contract_version >= 2`，当前 Agent 上报 3）。它们按“是否出现”判定：Xray 与 sing-box 转发携带任一字段时，`desiredstate.ValidateForwardCore`、面板保存/发布（`proxy.ValidateInboundForwardOptions`）与 Agent 解析主核心后的校验三处一致拒绝，不会静默丢弃；`State.Validate` 只对显式指定核心的入站判定，留空跟随主核心的入站在 `MultiRuntime` 解析后再判。
 
 | 能力 | GOST 3.3.2 | 依据与边界 |
 | --- | --- | --- |
@@ -70,6 +70,20 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 | TCP 连接上限 | 支持 | `climiters[{name,limits:["$ <n>"]}]` + `service.climiter`；超限连接被接受后关闭；G0 未测量 UDP 并发，v1.3 拒绝 UDP-only 转发设置该字段 |
 | UDP 限速 | 支持（待实机） | `tcp,udp` 转发的 UDP 服务同样渲染 limiter，真实 UDP 执行需实机门禁确认；UDP 目标失效后的故障切换不承诺（G0 未确认缺失 UDP 响应会产生拨号错误，`fifo` 的切换实测只在 TCP 上验证） |
 | 每转发字节 | 节点总量 | 只进入 `gost` 节点计数（AGENTS §21），没有用户额度、设备门控或域名归属，也不提供每转发的历史表/接口 |
+
+### GOST 中继隧道（v1.3 G3）
+
+画布的 `port_forward` 连接可以把 `tunnelProtocol` 设为 `gost`：入口节点的 GOST 转发经出口节点的 `relay` 监听访问自己的目标池（仍是最多两跳），凭据由面板按隧道生成并密封，`tunnel` 与 `proxy_chain` 继续走原 Trojan 实现，客户端方案不接受 `gost`。两侧节点都必须上报 GOST 核心与设置契约**版本 3**（`CoreCapability.gost_contract_version >= 3`，当前 Agent 上报 3）。
+
+| 能力 | GOST 3.3.2 | 依据与边界 |
+| --- | --- | --- |
+| 中继认证（mTLS） | 支持 | `handler: relay` + `listener: {type: tls, tls: {certFile,keyFile,caFile}}`，`caFile` 让客户端证书成为必需；监听类型 `mtls` 是**多路复用** TLS，不用于双向认证 |
+| 入口链 | 支持 | 链挂在 `handler.chain`（不是 service 级）：`connector: relay` + `dialer: {type: tls, tls: {certFile,keyFile,caFile,serverName}}`；未知链名会被静默直连，所以 Agent 渲染后自检引用 |
+| 客户端证书要求 | 强制 | 无证书或异构 CA 的客户端被拒；G0 §6.3 实测表现为“接受后空回复”，不是拒绝握手 |
+| TCP/UDP 经中继 | 支持（待实机） | 转发服务照旧带目标池；UDP 经中继的真实执行需 Linux 测试机与实机门禁确认 |
+| 凭据轮换 | 有损 | 一次普通发布先出口后入口，两次部署之间隧道短暂中断；删除隧道不撤销离线节点上的旧凭据 |
+| 计量 | 节点总量 | 中继服务不计入节点总量（只重复搬运已计字节），计入的是入口节点的转发服务；仍无用户额度、设备门控与域名归属 |
+
 
 
 ## 3. 平台能力维度

@@ -135,7 +135,7 @@ func ValidateInboundForwardOptions(c *pb.Capabilities, name string, settings des
 	if err := desiredstate.ValidateForwardCore(core.Name, settings); err != nil {
 		return err
 	}
-	if core.GostContractVersion < desiredstate.GostForwardContractVersion {
+	if core.GostContractVersion < desiredstate.GostPoolContractVersion {
 		return errors.New("gost core does not report forward targets, ranges or limits yet")
 	}
 	return nil

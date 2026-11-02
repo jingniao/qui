@@ -88,7 +88,7 @@ func (s *Service) requireGostRelay(ctx context.Context, nodeID string) error {
 		if core.Name != "gost" {
 			continue
 		}
-		if core.GostContractVersion < desiredstate.GostForwardContractVersion {
+		if core.GostContractVersion < desiredstate.GostRelayContractVersion {
 			return errors.New("node does not advertise the gost relay contract (version 3); update it first")
 		}
 		if !core.ForwardInboundSupported {
@@ -280,7 +280,9 @@ func (s *Service) gostOrder(ctx context.Context, nodeIDs []string) ([]string, er
 		return nil, err
 	}
 	defer rows.Close()
-	after := map[string][]string{}
+	// before[node] lists the nodes that must be published first: an entry forward
+	// depends on the relay listener its hop dials.
+	before := map[string][]string{}
 	selected := map[string]bool{}
 	for _, nodeID := range nodeIDs {
 		selected[nodeID] = true
@@ -292,7 +294,7 @@ func (s *Service) gostOrder(ctx context.Context, nodeIDs []string) ([]string, er
 		}
 		entry, exit := strings.TrimPrefix(source, "server:"), strings.TrimPrefix(target, "server:")
 		if selected[entry] && selected[exit] {
-			after[exit] = append(after[exit], entry)
+			before[entry] = append(before[entry], exit)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -309,7 +311,7 @@ func (s *Service) gostOrder(ctx context.Context, nodeIDs []string) ([]string, er
 			return nil
 		}
 		state[nodeID] = 1
-		for _, next := range after[nodeID] {
+		for _, next := range before[nodeID] {
 			if err := visit(next); err != nil {
 				return err
 			}

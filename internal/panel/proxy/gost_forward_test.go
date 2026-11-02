@@ -46,7 +46,7 @@ func TestGostForwardOptionsRequireTheContractAndTheCore(t *testing.T) {
 		}
 	}
 	record(f.nodeA, 1)
-	record(f.nodeB, desiredstate.GostForwardContractVersion)
+	record(f.nodeB, desiredstate.GostPoolContractVersion)
 	// An Agent that only reports the G1 contract cannot render a pool or a range.
 	if _, err := f.service.SaveInbound(ctx, "", gostForwardInput(f.nodeA, 24100, 24102)); err == nil || !strings.Contains(err.Error(), "does not report forward") {
 		t.Fatalf("gost contract 1 accepted the G2 options: %v", err)

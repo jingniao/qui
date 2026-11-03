@@ -2,17 +2,17 @@
 
 **文档版本：** V1.2  
 **编制日期：** 2026 年 8 月 20 日  
-**本次修订：** 2026-11-01（v1.2.0 发布并部署到三台主机；整机月流量按 Owner 要求排入 v1.3.0）  
-**项目状态：** 核心功能已实现；v1.0.0–v1.0.9 与 v1.2.0（v1.1 与 v1.2 合并）已发布，三台主机运行 v1.2.0；当前事实与已知限制见下方[当前状态](#当前状态)。  
+**本次修订：** 2026-11-03（v1.3.0 发布并部署到三台主机）  
+**项目状态：** 核心功能已实现；v1.0.0–v1.0.9、v1.2.0（v1.1 与 v1.2 合并）与 v1.3.0 已发布，三台主机运行 v1.3.0；当前事实与已知限制见下方[当前状态](#当前状态)。  
 **目标用户规模：** 1～10 名内部用户  
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
 
-当前文档入口见[文档导航](docs/README.md)：产品需求与架构约束即本文件，系统组成见[架构总览](docs/architecture.md)，部署与运维见[部署与升级](docs/deployment.md) 与[运维手册](docs/operations.md)，完成标准见[验收矩阵](docs/v1-acceptance.md)，实机验收过程见[实机测试计划](docs/v1.2-host-test-plan.md) 与[验收发现](docs/v1.2-rc1-findings.md)，协议与能力范围见[协议支持矩阵](docs/protocol-support-matrix.md)，下一版本需求见[v1.3 计划](docs/v1.3-plan.md)，版本修订见[变更记录](docs/changelog.md)。v1.1/v1.2 的计划、K 阶段报告与进度记录已归档到 [docs/archive](docs/archive/README.md)，只作追溯、不再维护。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；v1.1 与 v1.2 合并为 v1.2.0 发布（2026-11-01 已发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
+当前文档入口见[文档导航](docs/README.md)：产品需求与架构约束即本文件，系统组成见[架构总览](docs/architecture.md)，部署与运维见[部署与升级](docs/deployment.md) 与[运维手册](docs/operations.md)，完成标准见[验收矩阵](docs/v1-acceptance.md)，实机验收过程见[实机测试计划](docs/v1.2-host-test-plan.md) 与[验收发现](docs/v1.2-rc1-findings.md)，协议与能力范围见[协议支持矩阵](docs/protocol-support-matrix.md)，v1.3.0 的计划与设计见[v1.3 计划](docs/v1.3-plan.md)、发布说明见[发布说明 1.3.0](docs/release-notes-1.3.0.md)，版本修订见[变更记录](docs/changelog.md)。v1.1/v1.2 的计划、K 阶段报告与进度记录已归档到 [docs/archive](docs/archive/README.md)，只作追溯、不再维护。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；v1.1 与 v1.2 合并为 v1.2.0 发布（2026-11-01 已发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
 
 ## 当前状态
 
-状态核对：2026-11-01（v1.2.0 发布后）。逐项结果见[验收矩阵](docs/v1-acceptance.md) §11 与[验收发现](docs/v1.2-rc1-findings.md)。
+状态核对：2026-11-03（v1.3.0 发布后）。v1.2.0 的逐项结果见[验收矩阵](docs/v1-acceptance.md) §11 与[验收发现](docs/v1.2-rc1-findings.md)，v1.3.0 见同文件 §12。
 
 | 版本 | 日期 | 内容 |
 | --- | --- | --- |
@@ -27,17 +27,13 @@
 | v1.0.8 | 2026-10-26 | 凭据墓碑自动撤销、恢复备份、核心更新回执重发、备份校验与入站启用意图 |
 | v1.0.9 | 2026-10-26 | 面板停服时停掉自动额度定时器；Agent 日志 `retry_after` 改为可读时长 |
 | v1.2.0 | 2026-11-01 | v1.1 与 v1.2 合并：用户门户、设备限制、多核心（Xray + sing-box）、服务器调优、端口转发、更多订阅格式与导入、主机监控与延迟、共享隧道；CVE-2026-98432 缓解 |
+| v1.3.0 | 2026-11-03 | 整机月流量（T1）；Xray 端口转发字节计入节点总量（P2，修复 F11）；GOST 3.3.2 作为第三种核心，含转发目标池/端口范围/限流（G1、G2）与节点间加密中继（G3） |
 
-**v1.2.0 已发布（2026-11-01）**：预发布版 rc.1–rc.4 在三台主机（us2-node、uk-node、alpine-node）验收后，以 rc.4 的同一 commit（`8f6406e`）发布并部署；实机发现 F1–F13 已修复（F11 记为限制），见[验收矩阵](docs/v1-acceptance.md) §11。只验收 amd64，arm64 归档未验证；安装器的真实断电未实机验证（`kill -9` 与重启演练已通过）。已知限制：L8（按方案 1 如实标注）、L9、L10、F11。下一版本：[v1.3.0 计划](docs/v1.3-plan.md)。
+**v1.2.0 已发布（2026-11-01）**：预发布版 rc.1–rc.4 在三台主机（us2-node、uk-node、alpine-node）验收后，以 rc.4 的同一 commit（`8f6406e`）发布并部署；实机发现 F1–F13 已修复（F11 记为限制），见[验收矩阵](docs/v1-acceptance.md) §11。只验收 amd64，arm64 归档未验证；安装器的真实断电未实机验证（`kill -9` 与重启演练已通过）。已知限制：L8（按方案 1 如实标注）、L9、L10、F11（v1.3.0 的 P2 已修复）。
 
-**v1.3.0 进行中（2026-11-01）**：T1 整机月流量（每服务器单张网卡的整机用量、可选额度与重置日）后端与 Web UI 已实现（后端 `4cc9025`），契约见 [T1/P2 设计](docs/v1.3-design-t1-p2.md)；只在本地测试中验证，三台主机实机验收待做，限制见第 21 节。
+**v1.3.0 已发布（2026-11-03）**：预发布版 rc.1–rc.6 与最终版在三台主机（us2-node、uk-node、alpine-node）验收后，以 rc.6 的同一 commit（`f849f01`）发布并按面板、Agent 顺序部署。内容：整机月流量（T1，迁移 0126）、Xray 端口转发字节计入节点总量（P2，修复 F11）、GOST 3.3.2 作为第三种核心（G1/G2，迁移 0127）与节点间加密中继（G3，迁移 0128）。只验收 amd64；未验证项与已知限制见[发布说明](docs/release-notes-1.3.0.md)与[验收矩阵](docs/v1-acceptance.md) §12，字段口径见第 21、22.2 节。
 
-**v1.3.0 GOST G1 已实现（2026-11-01）**：GOST 3.3.2 作为第三种核心类型（仅 linux/amd64，只承载端口转发入站，从不承载用户接入）。G1a 交付 Agent 适配器、`--core gost` 安装器、`Hello.gost_core_supported=13` 与 `CoreCapability.gost_contract_version=9`、发布 allowlist 与固定归档摘要；G1b 交付迁移 0127、面板协商/校验/组件任务/备份校验、Web 核心选择与固定版本预填、文档。只在本机 Go 测试、迁移升级测试与 Web 构建中验证，三台主机实机验收待做；契约与限制见 [GOST 设计](docs/v1.3-design-gost.md)，功能范围见第 4.4 与 22.2 节。
-
-**v1.3.0 GOST G3 已实现（2026-11-02）**：GOST 中继加密：画布上一条 `port_forward` 连接选 `gost` 隧道协议后，入口节点的 GOST 转发经出口节点的 `relay` 监听（TLS ＋ 客户端 CA）访问自己的目标池，最多沿用现有两跳。迁移 0128 新增 `canvas_tunnels.gost_material`（Vault 密封；一套 CA ＋ 出口服务端证书 ＋ 入口客户端证书，CA 私钥签发后丢弃、10 年有效）；`POST /api/v1/canvas-tunnels/{id}/rotate-credentials` 换整套凭据并把隧道标记为 modified；发布固定先出口后入口，批次回滚反向。只在本机 Go 测试、面板测试与 Web 构建中验证，三台主机实机验收待做；契约见 [GOST 设计](docs/v1.3-design-gost.md)，运维含义见[运维手册](docs/operations.md)，限制见第 21 节。
-
-
-CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（release/v1.2.0 已复跑 111 个原生核心测试与 `-race`，面板主机 -race 按 Owner 决定以 CI 代替）；GitHub 只在手动与每周运行 `check`（同一脚本）与 `cores`，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
+CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（release/v1.3.0 的 `f849f01` 已复跑门禁与真实核套件，含 Xray 26.3.27、sing-box 1.14.3、mihomo 与 GOST 3.3.2，合计 3090 秒，面板主机 -race 按 Owner 决定以 CI 代替）；GitHub 只在手动与每周运行 `check`（同一脚本）与 `cores`，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
 
 ## 变更记录
 

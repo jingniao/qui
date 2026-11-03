@@ -1258,25 +1258,27 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 
 发现：F1–F7（RC1）、F8–F11（RC2）、F12–F13（浏览器走查）；全部已修复或按决定记为限制（F11），F8–F10 在 rc.3/rc.4 实机复验通过。v1.2.0 于 2026-11-01 发布（tag 指向 `8f6406e`，与 rc.4 同一 commit）并部署到三台主机。限制：L8（按方案 1 标注）、L9、L10、F11；只验收 amd64。
 
-## 12. v1.3.0
+## 12. v1.3.0 实机验收（2026-11-03，rc.1–rc.6）
 
-T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试），Web UI 与文档在 release/v1.3.0 的后续提交中。**尚未实机验收**，本节只记录本地证据；口径见 AGENTS §21，操作与限制全文见[运维手册](operations.md) §18。
+环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine LXC，OpenRC），均为 amd64。代码审查：Codex 11 轮；门禁：`f849f01` 在本地 Linux 测试机上通过 `scripts/check.sh`（1823 秒）与真实核套件（Xray 26.3.27、sing-box 1.14.3、mihomo、GOST 3.3.2，合计 3090 秒）。实机结果按“证据与状态”列追加，未在主机上执行的项照旧注明。口径见 AGENTS §21。
+
+T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试）。本地证据见下表，实机项在三台主机升级到 1.3.0 后逐项核对。
 
 | 项 | 覆盖内容 | 证据与状态 |
 | --- | --- | --- |
-| T1-report | Agent 上报 `bootId`、IPv4 默认路由网卡与各网卡累计字节；三处读取彼此独立，失败只省略自己的字段 | 已提交测试（`4cc9025`）：`TestHostBootIDIsCanonicalOrUnknown`、`TestHostDefaultRouteInterfaceHeuristic`、`TestHostIdentitySurvivesInterfaceReadFailure`、`TestHostMetricsProcReadOnlyAndMissing`；本次未在本机复跑（该环境无 Go），待实机 |
-| T1-delta | 首次采样只建基线、精确增量、重放与过期消息、同启动断线补计、重启与计数回退重建基线、跨日按比例分摊、溢出回滚心跳事务 | 已提交测试（`4cc9025`）：`TestMachineFirstSampleIsOnlyABaseline`、`TestMachineSecondSampleCountsExactDeltas`、`TestMachineReplayStaleAndOlderSamples`、`TestMachineOutageRecoveryAndContinuity`、`TestMachineRebaselinesNeverCountAsTraffic`、`TestMachineMissingIdentityOrInterfacesWritesNothing`、`TestMachineSkipsDuplicateAndOutOfRangeCounters`、`TestMachineDailyOverflowRollsBackTheHeartbeat`；同日分摊见 `TestMachineDayShares`；待实机 |
-| T1-period | 重置日锚点与短月份、半开区间边界、measured/stale/unknown、自动与显式网卡、切换网卡重算本期、`max` 取本期两个方向合计的较大值 | 已提交测试（`4cc9025`）：`TestMachinePeriodAnchors`、`TestMachineSummaryMeasuredStaleAndUnknown`、`TestMachineSummaryStalenessAndIdentity`、`TestMachineSummaryWithoutRouteIsUnknown`、`TestMachineSummaryMethodsAndResetSlices`；待实机 |
-| T1-settings | 设置默认值与边界校验、四字段整体替换、额度上限、批量与单节点摘要一致、已删除节点跳过 | 已提交测试（`4cc9025`）：`TestMachineSettingsDefaultsAndValidation`、`TestMachineBatchMatchesSingleAndSkipsDeleted`；Web 侧换算见 T1-UI；待实机 |
-| T1-permissions | Owner/Viewer/未登录/CSRF、写操作审计“服务器流量设置”、逻辑删除节点 404 | 已提交测试（`4cc9025`）：`TestMachineTrafficHTTPPermissionsAndAudit`；待实机 |
-| T1-backup | 三张机器表随加密备份与清单计数、校验拒绝畸形行且接受 0126 之前归档、恢复以当前库为准（同日重叠、空当前表、源早于 0126、已删除节点行）、迁移保留已部署数据 | 已提交测试（`4cc9025`）：`TestMachineTrafficArchiveKeepsDurableRows`、`TestMachineTrafficValidationRejectsMalformedRows`、`TestMachineTrafficValidationAcceptsPre0126`、`TestMachineTrafficRestoreKeepsCurrentUsage`、`TestMachineTrafficRestoreEmptyCurrentTableWins`、`TestMachineTrafficRestoreSourcePredatingTheMigration`、`TestMachineTrafficRestoreKeepsDeletedNodeRows`、`TestMachineTrafficMigrationKeepsDeployedData`；待实机 |
-| T1-UI | 卡片与详情共用同一组件与纯模型、未知“—”与实测 0 B、进度条裁剪、重置日按面板时区、stale 标注、设置独立保存与 Viewer 只读 | `web/package.json` 没有测试运行器，格式化与设置换算集中在 `web/src/modules/nodes/machineTrafficModel.ts`，未加单测；本次 `cd web && npm run build`（含 vue-tsc）通过；浏览器走查由审查者执行，待实机 |
+| T1-report | Agent 上报 `bootId`、IPv4 默认路由网卡与各网卡累计字节；三处读取彼此独立，失败只省略自己的字段 | 已提交测试（`4cc9025`）：`TestHostBootIDIsCanonicalOrUnknown`、`TestHostDefaultRouteInterfaceHeuristic`、`TestHostIdentitySurvivesInterfaceReadFailure`、`TestHostMetricsProcReadOnlyAndMissing`；本次未在本机复跑（该环境无 Go）；实机通过：三台主机上报的 `bootId` 与主机 `/proc/sys/kernel/random/boot_id` 一致，默认路由网卡均为 `eth0`，alpine LXC 只看到 `eth0` 与 `lo` |
+| T1-delta | 首次采样只建基线、精确增量、重放与过期消息、同启动断线补计、重启与计数回退重建基线、跨日按比例分摊、溢出回滚心跳事务 | 已提交测试（`4cc9025`）：`TestMachineFirstSampleIsOnlyABaseline`、`TestMachineSecondSampleCountsExactDeltas`、`TestMachineReplayStaleAndOlderSamples`、`TestMachineOutageRecoveryAndContinuity`、`TestMachineRebaselinesNeverCountAsTraffic`、`TestMachineMissingIdentityOrInterfacesWritesNothing`、`TestMachineSkipsDuplicateAndOutOfRangeCounters`、`TestMachineDailyOverflowRollsBackTheHeartbeat`；同日分摊见 `TestMachineDayShares`；实机通过：面板增量与 `/proc/net/dev` 同 5 分钟对比，uk rx −0.39%／tx −0.17%、alpine rx −0.14%／tx −0.21%、us2 rx −0.05%／tx +0.03% |
+| T1-period | 重置日锚点与短月份、半开区间边界、measured/stale/unknown、自动与显式网卡、切换网卡重算本期、`max` 取本期两个方向合计的较大值 | 已提交测试（`4cc9025`）：`TestMachinePeriodAnchors`、`TestMachineSummaryMeasuredStaleAndUnknown`、`TestMachineSummaryStalenessAndIdentity`、`TestMachineSummaryWithoutRouteIsUnknown`、`TestMachineSummaryMethodsAndResetSlices`；实机通过（重置日 31、`max` 方式的摘要与期段）；时区变更后的分桶未在主机上执行 |
+| T1-settings | 设置默认值与边界校验、四字段整体替换、额度上限、批量与单节点摘要一致、已删除节点跳过 | 已提交测试（`4cc9025`）：`TestMachineSettingsDefaultsAndValidation`、`TestMachineBatchMatchesSingleAndSkipsDeleted`；Web 侧换算见 T1-UI；实机通过：PUT `max`／1 TiB／重置日 31 后摘要随之变化 |
+| T1-permissions | Owner/Viewer/未登录/CSRF、写操作审计“服务器流量设置”、逻辑删除节点 404 | 已提交测试（`4cc9025`）：`TestMachineTrafficHTTPPermissionsAndAudit`；实机通过：设置保存写入操作日志“服务器流量设置” |
+| T1-backup | 三张机器表随加密备份与清单计数、校验拒绝畸形行且接受 0126 之前归档、恢复以当前库为准（同日重叠、空当前表、源早于 0126、已删除节点行）、迁移保留已部署数据 | 已提交测试（`4cc9025`）：`TestMachineTrafficArchiveKeepsDurableRows`、`TestMachineTrafficValidationRejectsMalformedRows`、`TestMachineTrafficValidationAcceptsPre0126`、`TestMachineTrafficRestoreKeepsCurrentUsage`、`TestMachineTrafficRestoreEmptyCurrentTableWins`、`TestMachineTrafficRestoreSourcePredatingTheMigration`、`TestMachineTrafficRestoreKeepsDeletedNodeRows`、`TestMachineTrafficMigrationKeepsDeployedData`；实机通过：升级前 `qui-update` 备份、迁移 0126 执行后 `quick_check` 正常；恢复演练未在主机上执行 |
+| T1-UI | 卡片与详情共用同一组件与纯模型、未知“—”与实测 0 B、进度条裁剪、重置日按面板时区、stale 标注、设置独立保存与 Viewer 只读 | `web/package.json` 没有测试运行器，格式化与设置换算集中在 `web/src/modules/nodes/machineTrafficModel.ts`，未加单测；本次 `cd web && npm run build`（含 vue-tsc）通过；浏览器走查由审查者执行；实机只核对摘要数值与设置保存，未做正式浏览器走查 |
 
-三台主机（us2-node、uk-node、alpine-node，含 Alpine/LXC）的实机验收、时区变更后的分桶观察与 LXC 网卡范围核对均待执行；在此之前不声称 T1 已发布或已验收。
+三台主机（us2-node、uk-node、alpine-node，含 Alpine/LXC）已通过实机验收，LXC 只看到容器自己的网卡；时区变更后的分桶观察与正式浏览器走查仍未执行。
 
 ### P2（F11）
 
-状态：P2（F11，Xray 端口转发字节计入节点总量）已实现，**待门禁**。下列本地项已在实现分支上通过；`P2-native` 需要 Linux 测试机上的官方 amd64 Xray，未在此处运行。设计依据见[v1.3 设计（T1/P2）](v1.3-design-t1-p2.md)第 2 节。
+状态：P2（F11，Xray 端口转发字节计入节点总量）门禁与实机均通过：`f849f01` 的真实核套件带 Xray 26.3.27；实机在 uk-node 上用临时 Xray 转发传输 2 × 10,000,000 B，节点总量 +20,000,522 B、用户 `usedTraffic` 不变。设计依据见[v1.3 设计（T1/P2）](v1.3-design-t1-p2.md)第 2 节。
 
 | 项 | 证据 | 状态 |
 | --- | --- | --- |
@@ -1284,37 +1286,42 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试），Web UI 与
 | P2-statistics | `stats_forward_reader_test.go` 的假 StatsService：仅账户、仅转发、账户+转发、懒计数、源覆盖计数；断言查询顺序 `user>>>` / `outbound>>>_access` / `inbound>>>`，夹具拒绝任何 `Reset_=true` | 本地通过 |
 | P2-no-double-count | 同一夹具：用户入站与管理 API 的 `inbound>>>` 统计被忽略，多个转发只计一次；重复、负数、单边、未知方向、溢出、查询错误与源消失都失败且不落盘；`internal/agent/core/node_traffic_test.go` 覆盖账户批在前、独立节点批、仅节点字节、溢出先于写入与节点批失败重试 | 本地通过 |
 | P2-quota-isolation | `internal/panel/access/node_traffic_test.go` 的 `TestNodeTrafficForwardIncrementCountsNodeTotalOnce`：账户+节点批次只按节点总量计一次、重复批次幂等、两个核心 epoch 独立、用户额度只随账户增量变化 | 本地通过 |
-| P2-native | `TestRealForwardNodeCountersCountForwardedBytes`（`XRAY_BINARY`）：真实 Xray 上发送确定性 TCP/UDP 负载并轮询到正的节点字节，断言无用户计数器、重复读取累积、混合用户/转发不重复计、重启换 `.node` epoch | 待门禁 |
+| P2-native | `TestRealForwardNodeCountersCountForwardedBytes`（`XRAY_BINARY`）：真实 Xray 上发送确定性 TCP/UDP 负载并轮询到正的节点字节，断言无用户计数器、重复读取累积、混合用户/转发不重复计、重启换 `.node` epoch | 门禁通过（Linux 测试机）；实机通过（uk-node：2 × 10,000,000 B → +20,000,522 B，用户额度不变） |
 
 ### G1：GOST 作为第三种核心类型
 
-状态：G1a（Agent 适配器、契约字段、安装器、发布 allowlist）与 G1b（迁移 0127、面板协商与校验、组件任务、备份校验、Web、文档）已实现，**待门禁与实机验收**。设计依据见 [GOST 设计](v1.3-design-gost.md)；G2、G3 未开始。
+状态：G1（Agent 适配器、契约字段、安装器、迁移 0127、面板协商与校验、组件任务、备份校验、Web）门禁与实机均通过：三个节点从面板安装固定 3.3.2（契约 3），空闲核心不启动。设计依据见 [GOST 设计](v1.3-design-gost.md)。
 
 | 项 | 覆盖内容 | 证据与状态 |
 | --- | --- | --- |
-| G1.1 | 固定版本与摘要分离（标签 `v3.3.2`、资产 `gost_3.3.2_linux_amd64.tar.gz`、归档摘要、安装后二进制摘要另算）、`--core gost` 首装、组件更新/移除、v2 安装记录与开机恢复固定路径 | 本地通过（G1a）：`pkg/contracts/release` 的 `TestGostCoreUpdateRequestRequiresTheReviewedPin`，以及本次运行的 `bash deploy/linux/tests/core-asset-test.sh`（148/148，含 glibc/musl 同一资产、固定摘要、未固定版本/摘要/URL 拒绝）；待实机（systemd 与 Alpine/OpenRC 各一台，含 `-V`、卸载保留记录） |
-| G1.2 | 三核心能力上报、GOST 只允许 `forward`（`desiredstate.Validate` 与面板 `ValidateCoreProtocol` 双重判定）、组件安装排队要求 `Hello.gost_core_supported`、迁移 0127 从 0126 升级后行/索引/触发器/视图/外键完整 | 本地通过（G1b）：`TestGostCoreIsForwardOnly`、`TestGostCoreUpdateRequiresTheHelloFlagAndTheReviewedPin`、`TestGostCoreMigrationKeepsDeployedData`、`TestAppliedMigrationsAreImmutable`；待实机（含非 amd64 拒绝与三核心节点） |
-| G1.3 | 原生语法门禁、启动与约 2 秒收敛、失败应用/更新回滚；GOST 变更不重启未变的代理核心 | 设计评审已删除 MultiRuntime「跳过未变组件」修正（设计「Reviewers 决定」第 2 条）：v1.3 按现状记录**一次发布会重启该节点全部核心**，GOST 变更同时重启代理核心，反之亦然；GOST 崩溃仍由逐核心 supervisor 恢复。门禁与回滚的 Agent 侧证据随 G1a 提交；待实机（PID/epoch/长连接观测） |
-| G1.4 | 无公开管理端点与 pprof、指标只走本地 unix socket、空闲内存、备份与降级兼容 | 本地通过（G1b）：`validateMultiCore`/`validateCoreUpdates` 只在 0127 之后接受 `gost`，任务行还必须是固定版本与固定归档摘要，旧归档（含 0126 及更早、以及被回退到 0124 的夹具）仍合法；gost 适配器测试随 G1a 提交；待实机（RSS 约 45 MB、`ss` 无公开监听、降级 1.3 之前必须先移除 GOST） |
+| G1.1 | 固定版本与摘要分离（标签 `v3.3.2`、资产 `gost_3.3.2_linux_amd64.tar.gz`、归档摘要、安装后二进制摘要另算）、`--core gost` 首装、组件更新/移除、v2 安装记录与开机恢复固定路径 | 本地通过（G1a）：`pkg/contracts/release` 的 `TestGostCoreUpdateRequestRequiresTheReviewedPin`，以及本次运行的 `bash deploy/linux/tests/core-asset-test.sh`（148/148，含 glibc/musl 同一资产、固定摘要、未固定版本/摘要/URL 拒绝）；实机通过：三个节点（Debian systemd 与 Alpine/OpenRC）经面板安装固定 3.3.2，`-V` 与安装记录一致，移除核心后回到原状（主机上未做整机卸载） |
+| G1.2 | 三核心能力上报、GOST 只允许 `forward`（`desiredstate.Validate` 与面板 `ValidateCoreProtocol` 双重判定）、组件安装排队要求 `Hello.gost_core_supported`、迁移 0127 从 0126 升级后行/索引/触发器/视图/外键完整 | 本地通过（G1b）：`TestGostCoreIsForwardOnly`、`TestGostCoreUpdateRequiresTheHelloFlagAndTheReviewedPin`、`TestGostCoreMigrationKeepsDeployedData`、`TestAppliedMigrationsAreImmutable`；实机通过：三个节点协商后上报 GOST 能力与契约 3，入站只在 `forward` 上接受 GOST；非 amd64 拒绝仍只有本地证据 |
+| G1.3 | 原生语法门禁、启动与约 2 秒收敛、失败应用/更新回滚；GOST 变更不重启未变的代理核心 | 设计评审已删除 MultiRuntime「跳过未变组件」修正（设计「Reviewers 决定」第 2 条）：v1.3 按现状记录**一次发布会重启该节点全部核心**，GOST 变更同时重启代理核心，反之亦然；GOST 崩溃仍由逐核心 supervisor 恢复。门禁通过；实机通过：GOST 转发与中继的应用与移除按预期完成，发布仍重启该节点全部核心（与设计一致） |
+| G1.4 | 无公开管理端点与 pprof、指标只走本地 unix socket、空闲内存、备份与降级兼容 | 本地通过（G1b）：`validateMultiCore`/`validateCoreUpdates` 只在 0127 之后接受 `gost`，任务行还必须是固定版本与固定归档摘要，旧归档（含 0126 及更早、以及被回退到 0124 的夹具）仍合法；gost 适配器测试随 G1a 提交；实机通过：GOST 空闲不启动，运行期 RSS 约 58–61 MB，`ss` 无公开监听、指标只在 `runtime/gost/metrics.sock`；降级 1.3 之前必须先移除 GOST |
 
 
 
 ### G2：GOST 转发的目标池、端口范围与限流
 
-状态：G2 已实现，**待门禁与实机验收**。设计依据见 [GOST 设计](v1.3-design-gost.md) §4 与“Reviewer decisions”；实测依据见 [G0 发现](v1.3-g0-gost-findings.md) §3–§5。G2 不需要新迁移：设置保存在 `inbounds.encrypted_settings`（`Repository.Vault` 密封），GOST 设置契约版本由 1 升到 2，没有新增 proto 字段。
+状态：G2 门禁与实机均通过（实机覆盖 `fifo` 故障切换、端口范围、节点计数与用户额度隔离）。设计依据见 [GOST 设计](v1.3-design-gost.md) §4 与“Reviewer decisions”；实测依据见 [G0 发现](v1.3-g0-gost-findings.md) §3–§5。G2 不需要新迁移：设置保存在 `inbounds.encrypted_settings`（`Repository.Vault` 密封），GOST 设置契约版本由 1 升到 2，没有新增 proto 字段。
 
 | 项 | 覆盖内容 | 证据与状态 |
 | --- | --- | --- |
-| G2.1 | 类型化设置与共享校验：`targets`/`strategy`/`max_fails`/`fail_timeout`/`port_end`/双向字节限速/`max_connections` 的全部边界；一个 `desiredstate.ListenPorts` 端口展开助手（`State.Validate`、MultiRuntime 预留、面板冲突检查、画布分配、备份校验共用）；GOST-only 字段按“是否出现”判定并在非 GOST 核心上拒绝 | 本地通过：`TestForwardOptionBoundaries`、`TestForwardListenPorts`、`TestForwardOptionsArePresenceBased`、`TestForwardSelectorAndPoolDefaults`、`TestStateRefusesGostForwardOptionsOnAnotherCore`、`TestGostCoreKeepsForwardsAndRefusesOtherFeatures`（契约版本 2）；`TestGostForwardOptionsRequireTheContractAndTheCore`（面板保存：契约 1 拒绝、xray 拒绝、范围与单端口双向冲突、自身范围不冲突）、`TestCanvasPortRangeSkipsAGostForwardRange`（分配跳过整个区间）；待实机（面板 + Agent 端到端拒绝路径与备份校验的实际恢复演练） |
-| G2.2 | 原生渲染：每个（入站、端口、传输）一个服务、名字 `fwd-<入站ID>-<端口>-<tcp\|udp>`、`addr` 永不写范围、每个服务带完整有序池与自己的 `selector`、`limiters`/`climiters` 与 `$ <in> <out>`（速率编码为 `<整数字节>B`，因为上游字节解析器拒绝裸整数）、引用与目标在交给进程前先自检、每节点最多 1024 个服务 | 本地通过：`TestRenderGolden`（G1 单目标金标文件已随新命名与 selector 更新）、`TestRenderPoolRangeAndLimits`（IPv6 + 域名池、范围展开、每服务独立限速与仅 TCP 的连接上限）、`TestRenderRangeExpandsTheSamePool`（默认 selector、无设置不限速）、`TestRenderRefusesTooManyServices`、`TestRenderHealthEndpointsFollowTheTransport`、`TestConfigRoundTripsThroughJSONAndYAML`；原生套件 `TestRealForwardPoolsFailoverAndLimits`（round 两个目标都命中 + UDP 回显、fifo 停掉首个目标后一次失败内切换、连接上限“接受后关闭”）与 `TestRealForwardRateLimitsAndNodeCounter`（双向 3 MiB 平均速率、节点计数方向）需要 `GOST_BINARY`，本机跳过；**待门禁**（Linux 测试机与 CI 显式提供 3.3.2 二进制，跳过不算通过） |
-| G2.3 | 节点专属计量与面板/Web：范围展开出的每个服务都按服务名各计一次并求和为单一 `gost` 节点计数（input→上传、output→下载，`client`/`host` 标签丢弃），不进入用户额度；面板保存与发布只在核心契约 ≥2 时接受新设置；Web 编辑器只对 GOST 核心显示池/范围/限速字段，并有换核拒止、展开数量与行为说明 | 本地通过：`TestParseMetricsCountsEveryExpandedServiceOnce`、`TestRealApplySettleRollbackAndStats`（G1 节点计数仍为单一批）、`TestGostForwardOptionsRequireTheContractAndTheCore`；`cd web && npm run build`（含 `vue-tsc`）通过，`node web/scripts/node-editor-selftest.mjs`（新增 `PASS NODE_EDITOR_GOST`：范围展开、范围感知端口冲突、按出现判定的 GOST 选项、换核拒止、第 4 步边界）与 `node web/scripts/ui-regression-selftest.mjs` 通过；待实机（浏览器走查、真实 GOST 上的限速/上限/UDP 观察，以及 LXC/Alpine 上的资源与指标基数） |
+| G2.1 | 类型化设置与共享校验：`targets`/`strategy`/`max_fails`/`fail_timeout`/`port_end`/双向字节限速/`max_connections` 的全部边界；一个 `desiredstate.ListenPorts` 端口展开助手（`State.Validate`、MultiRuntime 预留、面板冲突检查、画布分配、备份校验共用）；GOST-only 字段按“是否出现”判定并在非 GOST 核心上拒绝 | 本地通过：`TestForwardOptionBoundaries`、`TestForwardListenPorts`、`TestForwardOptionsArePresenceBased`、`TestForwardSelectorAndPoolDefaults`、`TestStateRefusesGostForwardOptionsOnAnotherCore`、`TestGostCoreKeepsForwardsAndRefusesOtherFeatures`（契约版本 2）；`TestGostForwardOptionsRequireTheContractAndTheCore`（面板保存：契约 1 拒绝、xray 拒绝、范围与单端口双向冲突、自身范围不冲突）、`TestCanvasPortRangeSkipsAGostForwardRange`（分配跳过整个区间）；实机通过接受路径（`fifo` 池 + 2 端口范围）；拒绝路径与备份恢复仍只有本地证据 |
+| G2.2 | 原生渲染：每个（入站、端口、传输）一个服务、名字 `fwd-<入站ID>-<端口>-<tcp\|udp>`、`addr` 永不写范围、每个服务带完整有序池与自己的 `selector`、`limiters`/`climiters` 与 `$ <in> <out>`（速率编码为 `<整数字节>B`，因为上游字节解析器拒绝裸整数）、引用与目标在交给进程前先自检、每节点最多 1024 个服务 | 本地通过：`TestRenderGolden`（G1 单目标金标文件已随新命名与 selector 更新）、`TestRenderPoolRangeAndLimits`（IPv6 + 域名池、范围展开、每服务独立限速与仅 TCP 的连接上限）、`TestRenderRangeExpandsTheSamePool`（默认 selector、无设置不限速）、`TestRenderRefusesTooManyServices`、`TestRenderHealthEndpointsFollowTheTransport`、`TestConfigRoundTripsThroughJSONAndYAML`；原生套件 `TestRealForwardPoolsFailoverAndLimits`（round 两个目标都命中 + UDP 回显、fifo 停掉首个目标后一次失败内切换、连接上限“接受后关闭”）与 `TestRealForwardRateLimitsAndNodeCounter`（双向 3 MiB 平均速率、节点计数方向）需要 `GOST_BINARY`，本机跳过；门禁通过（`f849f01` 的真实核套件已带 GOST 3.3.2，不再跳过）；实机通过：`fifo` 池首个目标不可用时第一次请求失败后切换，1 MB 传输 200 |
+| G2.3 | 节点专属计量与面板/Web：范围展开出的每个服务都按服务名各计一次并求和为单一 `gost` 节点计数（input→上传、output→下载，`client`/`host` 标签丢弃），不进入用户额度；面板保存与发布只在核心契约 ≥2 时接受新设置；Web 编辑器只对 GOST 核心显示池/范围/限速字段，并有换核拒止、展开数量与行为说明 | 本地通过：`TestParseMetricsCountsEveryExpandedServiceOnce`、`TestRealApplySettleRollbackAndStats`（G1 节点计数仍为单一批）、`TestGostForwardOptionsRequireTheContractAndTheCore`；`cd web && npm run build`（含 `vue-tsc`）通过，`node web/scripts/node-editor-selftest.mjs`（新增 `PASS NODE_EDITOR_GOST`：范围展开、范围感知端口冲突、按出现判定的 GOST 选项、换核拒止、第 4 步边界）与 `node web/scripts/ui-regression-selftest.mjs` 通过；实机通过：节点总量 +3,000,777 B 且用户额度不变、指标只在 unix socket，Alpine 节点同样工作；限速与连接上限的主机观测本次未记录 |
 
-G2 的实机项（三台主机）：代理核心与转发范围之间的端口冲突、TCP/UDP 回显、IPv4/IPv6、`fifo` 故障切换、单向与双向限速、连接上限作用范围、重启/断线后的统计与不进入用户额度/域名/设备记录；代表性的范围与混合流量 soak 在 Alpine 上核对内存与指标基数。在此之前不声称 G2 已验收。
+G2 的实机项（三台主机）：本次覆盖 `fifo` 故障切换（首个目标不可用）、2 端口范围、节点计数与用户额度隔离，并在 Alpine 节点确认资源与指标基数；IPv6 目标、单向/双向限速、连接上限作用范围与混合流量 soak 未在主机上单独记录。
 
 ### G3：GOST 加密中继（经出口服务器转发）
 
 | 编号 | 证据与状态 |
 | --- | --- |
-| G3.1 | 本地通过：`desiredstate` 契约版本 3（`GostRelayContractVersion`）、`ForwardSettings.mode/relay/gost_hops` 的类型化校验（中继无目标池、1–2 跳、CA 与双证书必须可用）；`internal/agent/core/gost` 渲染中继监听（`handler: relay` + `listener: tls` + `caFile`）与入口链（**链永远挂在 `handler.chain`**，结构断言 + 1/2 跳测试）、材料文件 0600（Windows 跳过权限位）、中继服务不计入节点流量；面板 `ValidateInbound` 拒绝公网提交中继字段，生成路径接受；证书生成/校验（SAN、EKU、跨隧道不受信）。实机待做 |
-| G3.2 | 本地通过：迁移 0128（`canvas_tunnels.gost_material` 单个可空密封列）与 checksum 固定；保存 GOST 隧道时签发一代材料（CA 私钥不保留，10 年、ECDSA P-256）；`POST /api/v1/canvas-tunnels/{id}/rotate-credentials` 生成新代并标记 modified；`canvasPublishOrder` 让出口服务器先于入口服务器发布（同时按普通中转依赖排序；回滚按批次反向）；红冲（入站 API、隧道视图只有代数/到期/指纹）。实机待做 |
-| G3.3 | **待实机**：两台主机分别为出口/入口，TCP+UDP 回显经中继通过、目标只能经出口配置路径到达、无证书/异构 CA 客户端被拒；发布顺序与反向回滚、删除/最后一处引用清理、备份往返与 pre-0128 归档接受。需 `GOST_BINARY` 的真核心测试在 Linux 测试机上运行 |
+| G3.1 | 本地通过：`desiredstate` 契约版本 3（`GostRelayContractVersion`）、`ForwardSettings.mode/relay/gost_hops` 的类型化校验（中继无目标池、1–2 跳、CA 与双证书必须可用）；`internal/agent/core/gost` 渲染中继监听（`handler: relay` + `listener: tls` + `caFile`）与入口链（**链永远挂在 `handler.chain`**，结构断言 + 1/2 跳测试）、材料文件 0600（Windows 跳过权限位）、中继服务不计入节点流量；面板 `ValidateInbound` 拒绝公网提交中继字段，生成路径接受；证书生成/校验（SAN、EKU、跨隧道不受信）。实机通过：us2→uk 中继的预览列出入口转发与出口 `relay`，3/3 × 1 MB HTTP 200 经隧道成功，无证书客户端被拒（TLS alert 116）、异构 CA 被拒（48） |
+| G3.2 | 本地通过：迁移 0128（`canvas_tunnels.gost_material` 单个可空密封列）与 checksum 固定；保存 GOST 隧道时签发一代材料（CA 私钥不保留，10 年、ECDSA P-256）；`POST /api/v1/canvas-tunnels/{id}/rotate-credentials` 生成新代并标记 modified；`canvasPublishOrder` 让出口服务器先于入口服务器发布（同时按普通中转依赖排序；回滚按批次反向）；红冲（入站 API、隧道视图只有代数/到期/指纹）。实机通过：发布顺序为 uk（出口）、us2（入口）、alpine；轮换凭据代数 1→2、指纹变化，再次按出口—入口顺序发布且流量 3/3 通过 |
+| G3.3 | **实机通过**：us2 为入口、uk 为出口，3/3 × 1 MB HTTP 200 只经出口的配置路径到达目标，无证书客户端被拒（TLS alert 116）、异构 CA 被拒（48）；入口转发计入节点总量（+3,000,777 B），中继不计入；发布顺序与反向回滚、移除后回到原状，既有中继（alpine→uk、uk→us2）与链路 ALP-UK-US2 不受影响。需 `GOST_BINARY` 的真核心测试已在 Linux 测试机门禁通过。**未在主机上执行**：经过中继的 UDP（主机测试只用 TCP/HTTP）、备份往返与 pre-0128 归档的恢复演练 |
+
+### v1.3.0 发布
+
+v1.3.0 于 2026-11-03 发布：tag 指向 `f849f01`（与 rc.6 同一 commit），GitHub 正式发布（非预发布），发布作业 41566922164；门禁为 `f849f01` 上的 `scripts/check.sh` 与真实核套件（合计 3090 秒），GitHub 手动作业 41556983475 的 `check` 与 `cores` 通过；代码审查 Codex 11 轮，最后一轮无发现。实机：三台主机经 `qui-update` 从 1.2.0 逐版升级到 1.3.0（面板先、Agent 后），T1、P2、G1–G3 按下表通过；rc.2–rc.6 只由实机发现的问题均已修复，见[发布说明](release-notes-1.3.0.md)。未验证或未执行：arm64；整机流量的时区分桶变更；GOST 限速、连接上限、IPv6 与经过中继的 UDP 的主机观测；备份恢复演练；正式浏览器走查。已知限制见[发布说明](release-notes-1.3.0.md)与 AGENTS 第 21 节。
+

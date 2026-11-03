@@ -16,6 +16,7 @@ import (
 // 0128 credential column. It must validate and migrate like any other archive:
 // the sealed material is simply absent, not a reason to refuse the restore.
 func TestPre0128CanvasArchiveWithSharedTunnelValidatesAndMigrates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var schemeID, tunnelID string
 	f := listeningFixture(t, func(f *fixture) {
@@ -61,6 +62,7 @@ func TestPre0128CanvasArchiveWithSharedTunnelValidatesAndMigrates(t *testing.T) 
 }
 
 func TestPre0124CanvasArchiveMigratesAndAdoptsExactPublication(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var objectID = "legacy-forward"
 	f := listeningFixture(t, func(f *fixture) {

@@ -9,6 +9,7 @@ import (
 )
 
 func TestRestoreLatencyTargetsCurrentSettingsAndOldArchive(t *testing.T) {
+	t.Parallel()
 	for _, old := range []bool{false, true} {
 		t.Run(map[bool]string{false: "current", true: "pre0121"}[old], func(t *testing.T) {
 			ctx := context.Background()

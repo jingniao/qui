@@ -32,6 +32,7 @@ import (
 )
 
 func TestRealXrayContinuesOfflineAndReplaysTrafficAfterCentralRestore(t *testing.T) {
+	t.Parallel()
 	binary := os.Getenv("XRAY_BINARY")
 	if binary == "" {
 		t.Skip("set XRAY_BINARY for actual recovery data plane verification")

@@ -10,6 +10,7 @@ import (
 )
 
 func TestK2bRestorePreservesCurrentTuningWithoutResend(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	f := listeningFixture(t, func(f *fixture) {
@@ -34,6 +35,7 @@ func TestK2bRestorePreservesCurrentTuningWithoutResend(t *testing.T) {
 }
 
 func TestK2bRestoreDoesNotReviveSnapshotOnlyTuning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := listeningFixture(t, func(f *fixture) {
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -57,6 +59,7 @@ func TestK2bRestoreDoesNotReviveSnapshotOnlyTuning(t *testing.T) {
 }
 
 func TestK2bRestorePre0123KeepsCurrentAppliedTuning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := listeningFixture(t, func(f *fixture) {
 		rewindPostK4Fixture(t, f.source.Database)

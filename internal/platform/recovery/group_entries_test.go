@@ -11,6 +11,7 @@ import (
 )
 
 func TestRecoveryKeepsCurrentGroupEntriesAndPortRange(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var sourceID, groupID string
 	f := listeningFixture(t, func(f *fixture) {

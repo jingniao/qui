@@ -1,18 +1,25 @@
 name: Check
 
-# The per-change gate runs on the local Linux test machine (scripts/check.sh plus
-# the real-core suite), not here. GitHub runs this workflow on demand
-# (workflow_dispatch) and weekly (schedule): those runs execute `check`, the same
-# script on a clean runner, and the optional `cores` job, which downloads the
-# official Xray, sing-box and mihomo releases, verifies their SHA-256 and runs the
-# real-core integration tests (including `mihomo -t` on every generated Clash
-# profile). A push of a v* tag runs only `release`: it does not repeat the gate but
-# requires that an earlier manual or weekly run already passed `check` on exactly
+# The per-commit evidence, real cores included, is the local gate on the Linux
+# test machine: scripts/check.sh followed by the real-core suite. GitHub is the
+# second opinion, not the per-change gate: `check` runs the same script on a
+# clean runner, and it runs per release commit (a manual dispatch) and weekly.
+# `cores` downloads the official Xray, sing-box and mihomo releases, verifies
+# their SHA-256 and runs the real-core integration tests (including `mihomo -t`
+# on every generated Clash profile); it runs weekly (schedule) or when a manual
+# dispatch sets the `cores` input, and stays off by default because the local
+# gate already ran it. A push of a v* tag runs only `release`: it does not repeat
+# the gate but requires that an earlier run already passed `check` on exactly
 # that commit, then builds the archives and publishes them as a GitHub release.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      cores:
+        description: 'Also run `cores` (official Xray, sing-box, mihomo and the qui sing-box build)'
+        type: boolean
+        default: false
   schedule:
     - cron: '17 3 * * 0'
 permissions:
@@ -42,10 +49,11 @@ jobs:
 
 
 
-  # Optional real-core job. Both releases are stable upstream releases and every
-  # archive is checked against its published SHA-256 before it is extracted.
+  # Real-core job: weekly, or on a manual dispatch with `cores` set. Both
+  # releases are stable upstream releases and every archive is checked against
+  # its published SHA-256 before it is extracted.
   cores:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.cores == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
@@ -158,18 +166,37 @@ jobs:
       # reports all real-core failures instead of stopping at the first.
       # ci-real-core-test.sh fails a step whose real-core tests skipped for a
       # missing core, core data or local address, or whose -run matched nothing.
+      - name: Real-core packages under test
+        if: ${{ !cancelled() }}
+        run: bash scripts/real-core-packages.sh
       - name: Phase 10 device gates (official Xray and sing-box)
         if: ${{ !cancelled() }}
         run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -run 'TestRealDeviceGate' ./internal/agent/core/xray ./internal/agent/core/singbox
       - name: Real-core tests
         if: ${{ !cancelled() }}
         # Includes U6 forward golden native validation and TCP/UDP echo tests.
-        run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -timeout 60m ./...
+        # Only the packages that name a core variable run here, and -p 4 runs
+        # those packages side by side: none of them binds a fixed port or a
+        # shared path (the cores themselves live in separate temporary
+        # directories), so they do not wait for each other.
+        run: bash scripts/ci-real-core-test.sh -p 4 -count=1 -timeout 60m $(bash scripts/real-core-packages.sh)
       - name: Part I forward native config and TCP/UDP checks
         if: ${{ !cancelled() }}
         run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -run 'TestForwardGolden|TestRealForward' ./internal/agent/core/xray ./internal/agent/core/singbox
+      # The qui build is reproducible and changes only with the pinned inputs in
+      # scripts/build-singbox.sh (tag, commit, toolchain, revision), so the two
+      # builds and their output are cached under that file's hash. A miss runs
+      # both builds and compares them - that comparison is the reproducibility
+      # evidence; a hit skips both and reuses the cached archives, which the
+      # release dry-run below compares its own build against.
+      - name: Cache the qui sing-box builds
+        id: qui-singbox
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/singbox-first
+          key: qui-singbox-${{ hashFiles('scripts/build-singbox.sh') }}
       - name: Build qui sing-box twice and verify reproducibility
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.qui-singbox.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           GOCACHE="$RUNNER_TEMP/singbox-cache-first" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-first" bash scripts/build-singbox.sh
@@ -177,8 +204,14 @@ jobs:
           for file in "$RUNNER_TEMP"/singbox-first/*; do
             cmp "$file" "$RUNNER_TEMP/singbox-second/${file##*/}"
           done
+      - name: Use the qui sing-box build, cached or fresh
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/singbox-first/sing-box-1.14.4-qui.1-linux-amd64.tar.gz"
+          test -s "$archive"
           mkdir -p cores/qui-singbox
-          tar -xzf "$RUNNER_TEMP/singbox-first/sing-box-1.14.4-qui.1-linux-amd64.tar.gz" -C cores/qui-singbox
+          tar -xzf "$archive" -C cores/qui-singbox
           binary="$GITHUB_WORKSPACE/cores/qui-singbox/sing-box-1.14.4-qui.1-linux-amd64/sing-box"
           "$binary" version | tee "$RUNNER_TEMP/qui-singbox-version.txt"
           grep -q 'sing-box version 1.14.4' "$RUNNER_TEMP/qui-singbox-version.txt"
@@ -187,7 +220,7 @@ jobs:
           printf 'SINGBOX_BINARY=%s\n' "$binary" >> "$GITHUB_ENV"
       - name: Qui sing-box real-core tests (including Phase 9 stats, Xray parity and Phase 10 gates)
         if: ${{ !cancelled() }}
-        run: bash scripts/ci-real-core-test.sh -p 1 -count=1 -timeout 60m ./...
+        run: bash scripts/ci-real-core-test.sh -p 4 -count=1 -timeout 60m $(bash scripts/real-core-packages.sh)
       - name: Release dry-run (no publication)
         if: ${{ !cancelled() }}
         run: |
@@ -212,11 +245,12 @@ jobs:
           done
 
 
-  # Publishing a release is a tag push, and a tag does not repeat the ~45-minute
-  # gate. This job only accepts vMAJOR.MINOR.PATCH[-rc.N] tags whose commit already
-  # has a `check` job that concluded success in a manual or weekly run of this
+  # Publishing a release is a tag push, and a tag does not repeat the gate. This
+  # job only accepts vMAJOR.MINOR.PATCH[-rc.N] tags whose commit already has a
+  # `check` job that concluded success in a manual or weekly run of this
   # workflow, so the release process is: dispatch the workflow on the release
-  # commit (cores included; that run is the final confirmation), then tag it.
+  # commit and let it run `check` only (`cores` stays off by default, because the
+  # local gate already ran the real cores on that commit), then tag it.
   # build-release.sh produces one archive per architecture plus SHA256SUMS, and
   # both are attached to the release that qui-update and the manual upgrade path
   # download from. node-install.sh is attached as well, because the register dialog

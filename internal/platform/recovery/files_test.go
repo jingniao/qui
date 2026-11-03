@@ -71,6 +71,7 @@ func simpleFiles(t *testing.T, root string) ([]archive.RestoreFile, map[string]s
 }
 
 func TestFileTransactionCommitAndValidationFailureRollback(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []bool{false, true} {
 		t.Run(map[bool]string{false: "commit", true: "rollback"}[failure], func(t *testing.T) {
 			owner, files, sources := fileFixture(t)
@@ -109,6 +110,7 @@ func TestFileTransactionCommitAndValidationFailureRollback(t *testing.T) {
 }
 
 func TestActualProcessExitDuringFileReplacementRecoversOriginalsOrCommittedFiles(t *testing.T) {
+	t.Parallel()
 	for _, point := range []string{"published", "installed-0", "installed-1", "installed-2", "installed-3", "validated", "committed"} {
 		t.Run(point, func(t *testing.T) {
 			owner, files, _ := fileFixture(t)
@@ -157,6 +159,7 @@ func TestActualProcessExitDuringFileReplacementRecoversOriginalsOrCommittedFiles
 }
 
 func TestFileTransactionChild(t *testing.T) {
+	t.Parallel()
 	root := os.Getenv("PROXY_FILE_TX_ROOT")
 	if root == "" {
 		t.Skip("subprocess only")
@@ -207,6 +210,7 @@ func stopFileTransaction(t *testing.T, point string, writeAfterCommit bool) (*pa
 }
 
 func TestFileRecoveryRefusesDamagedEvidenceAndForeignDestinationWithoutPartialRollback(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"journal", "original", "replacement", "unexpected-file", "foreign-destination", "commit"} {
 		t.Run(fault, func(t *testing.T) {
 			point := "installed-1"
@@ -252,6 +256,7 @@ func TestFileRecoveryRefusesDamagedEvidenceAndForeignDestinationWithoutPartialRo
 }
 
 func TestCommittedRecoveryDoesNotDiscardLaterWrites(t *testing.T) {
+	t.Parallel()
 	owner, files := stopFileTransaction(t, "committed", true)
 	if err := RecoverFiles(context.Background(), owner); err != nil {
 		t.Fatal(err)
@@ -263,6 +268,7 @@ func TestCommittedRecoveryDoesNotDiscardLaterWrites(t *testing.T) {
 }
 
 func TestPreparedRecoverySidecarCleanupRefusesNonemptyWALBeforeRemovingIndex(t *testing.T) {
+	t.Parallel()
 	owner, _, _ := fileFixture(t)
 	wal := owner.Database + "-wal"
 	index := owner.Database + "-shm"
@@ -285,6 +291,7 @@ func TestPreparedRecoverySidecarCleanupRefusesNonemptyWALBeforeRemovingIndex(t *
 }
 
 func TestRealCandidateInstallsWithoutResettingUsageOrLeavingOldWAL(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	f.record(t, "install-later", 200, 400)
@@ -312,6 +319,7 @@ func TestRealCandidateInstallsWithoutResettingUsageOrLeavingOldWAL(t *testing.T)
 }
 
 func TestCandidateMustMatchCurrentEvidenceBeforeFilesCanChange(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
@@ -329,6 +337,7 @@ func TestCandidateMustMatchCurrentEvidenceBeforeFilesCanChange(t *testing.T) {
 }
 
 func TestInstalledCandidateStartsActualPanelBinary(t *testing.T) {
+	t.Parallel()
 	binary := os.Getenv("PANEL_BINARY")
 	if binary == "" {
 		t.Skip("set PANEL_BINARY for actual binary restart verification")
@@ -443,6 +452,7 @@ func TestInstalledCandidateStartsActualPanelBinary(t *testing.T) {
 }
 
 func TestCandidateInstallChild(t *testing.T) {
+	t.Parallel()
 	path := os.Getenv("PROXY_CANDIDATE_CONFIG")
 	if path == "" {
 		t.Skip("subprocess only")

@@ -196,6 +196,7 @@ func (f *fixture) record(t *testing.T, id string, upload, download int64) {
 }
 
 func TestDatabaseRecoveryPreservesNewUsageReceiptsRevocationsAndDraftSnapshot(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	database := f.source.Database
@@ -286,6 +287,7 @@ func TestDatabaseRecoveryPreservesNewUsageReceiptsRevocationsAndDraftSnapshot(t 
 // The real candidate coordinator must revoke backup sessions while preserving
 // current authentication decisions and the encrypted copy of a rotated link.
 func TestDatabaseRecoveryPreservesPortalLoginAndRecoverableSubscription(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var accounts []user.User
 	var sharedToken subscription.Token
@@ -426,6 +428,7 @@ func TestDatabaseRecoveryPreservesPortalLoginAndRecoverableSubscription(t *testi
 }
 
 func TestDatabaseRecoveryRefusesMissingOwnershipForeignMaterialsAndRegressions(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"closed-owner", "foreign-key", "usage-regression", "sequence-regression", "cursor-regression", "pending-deployment", "current-file-journal", "ownerless", "copy-cancel"} {
 		t.Run(fault, func(t *testing.T) {
 			f := recoveryFixture(t)
@@ -508,6 +511,7 @@ func mutatePreparedSnapshot(t *testing.T, f *fixture, query string) {
 }
 
 func TestDatabaseRecoveryRetainsLaterAllocationsAndCredentialRotation(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	database := f.source.Database
@@ -600,6 +604,7 @@ func TestDatabaseRecoveryRetainsLaterAllocationsAndCredentialRotation(t *testing
 }
 
 func TestRecoveryFailureAfterCandidateWritesLeavesSourceAndStageUnchanged(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	// A trigger inherited from the snapshot aborts the final module. Earlier
@@ -642,6 +647,7 @@ func TestRecoveryFailureAfterCandidateWritesLeavesSourceAndStageUnchanged(t *tes
 }
 
 func TestCandidateVerificationRejectsEditedDatabaseManifestAndExtraFiles(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
@@ -695,6 +701,7 @@ func TestCandidateVerificationRejectsEditedDatabaseManifestAndExtraFiles(t *test
 }
 
 func TestOldPendingSnapshotUsesCompletedCurrentDeploymentWithoutReplayingCommand(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	revision, err := f.deployments.Create(ctx, f.state, "owner", "pending when backed up")
@@ -736,6 +743,7 @@ func TestOldPendingSnapshotUsesCompletedCurrentDeploymentWithoutReplayingCommand
 }
 
 func TestRecoveryRejectsLostIssuedAllowanceRatherThanCreatingFreshUserBudget(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	if err := f.users.Delete(ctx, f.user.ID); err != nil {

@@ -9,6 +9,7 @@ import (
 )
 
 func TestEvidenceAlreadyPublishedCanFinalizeWithoutLinkedCandidate(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)

@@ -13,6 +13,7 @@ import (
 )
 
 func TestDatabaseRecoveryPreservesImportsWithoutResurrectingGrants(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var kept, removed string
 	f := listeningFixture(t, func(f *fixture) {

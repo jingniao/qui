@@ -48,6 +48,7 @@ func listeningFixture(t *testing.T, mutateSnapshot func(*fixture)) *fixture {
 }
 
 func TestServicePreparationFailureRollsBackBeforeCommit(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"http-port", "grpc-port", "invalid-settings", "expired-server", "canceled-after-prepare"} {
 		t.Run(fault, func(t *testing.T) {
 			var blocker net.Listener
@@ -155,6 +156,7 @@ func TestServicePreparationFailureRollsBackBeforeCommit(t *testing.T) {
 }
 
 func TestCommittedReservationServesAndRealAgentRejoinsPreservedIdentity(t *testing.T) {
+	t.Parallel()
 	var firstGRPC net.Listener
 	f := listeningFixture(t, func(f *fixture) {
 		var err error

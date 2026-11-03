@@ -78,6 +78,9 @@ go build -trimpath -ldflags '-X main.version=1.0.0-storage-test' -o bin/proxy-ag
 # now. Job logs need a signed-in viewer, so failing tests, panics and races are
 # also raised as annotations (GitHub shows 10 per step), which the run page shows
 # to anyone; locally the log stays in the temporary directory.
+# go test already runs up to GOMAXPROCS packages at a time, and every package
+# here keeps its own temporary directory and its own ephemeral ports, so do not
+# add -p 1: it would serialise the ~26-minute race run.
 step 'go test -race ./...'
 test_log=$work/go-test.log
 status=0
@@ -106,7 +109,8 @@ go build -o bin/proxy-agent ./cmd/agent
 # core-asset-test.sh extracts the architecture and libc helpers of install.sh and
 # node-install.sh and needs no privileges, so it runs without sudo.
 step 'deploy script checks'
-for script in scripts/build-singbox.sh scripts/build-release.sh deploy/linux/*.sh; do bash -n -- "$script"; done
+for script in scripts/build-singbox.sh scripts/build-release.sh scripts/real-core-packages.sh \
+  scripts/ci-real-core-test.sh deploy/linux/*.sh; do bash -n -- "$script"; done
 for script in deploy/linux/update-recovery.sh deploy/openrc/host-network-watch \
   deploy/openrc/tuning-watch deploy/openrc/proxycontrol-update-recovery; do
   sh -n -- "$script"

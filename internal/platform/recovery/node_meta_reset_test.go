@@ -8,6 +8,7 @@ import (
 )
 
 func TestRestoreKeepsCurrentResetBoundaryAndRenewalClaim(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := listeningFixture(t, func(f *fixture) {
 		if _, err := f.source.Database.Exec("INSERT INTO node_meta(node_id,region,last_alert_day) VALUES(?,'JP','2026-10-27')", f.node.ID); err != nil {

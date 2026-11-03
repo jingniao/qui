@@ -15,6 +15,7 @@ import (
 )
 
 func TestRecoveryPreservesUnconfirmedCertificateRenewal(t *testing.T) {
+	t.Parallel()
 	f := recoveryFixture(t)
 	ctx := context.Background()
 	authority, err := pki.LoadExisting(f.source.Config.NodeIdentityDirectory)

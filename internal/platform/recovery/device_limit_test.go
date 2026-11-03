@@ -8,6 +8,7 @@ import (
 )
 
 func TestDeviceLimitRestorePreservesConservativeLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := listeningFixture(t, func(f *fixture) {
 		if _, err := f.source.Database.Exec("UPDATE users SET device_limit=7 WHERE id=?", f.user.ID); err != nil {

@@ -12,6 +12,7 @@ import (
 )
 
 func TestRestoreTCPProbeDefinitionsExpiresRequests(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := listeningFixture(t, func(f *fixture) {
 		now := time.Now().UTC()

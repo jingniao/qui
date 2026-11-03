@@ -109,6 +109,8 @@ VERSION=1.0.9 bash scripts/build-release.sh
 - 归档可复现：成员按名称排序、所有时间戳取源码提交时间（可用 `SOURCE_DATE_EPOCH` 覆盖）、属主统一为 root，gzip 不带时间戳，所以同一提交两次构建得到相同的 `SHA256SUMS`。
 - 脚本不运行测试、不部署。
 
+**门禁**：每个变更的完整证据是本地 Linux 测试机上的门禁——`bash scripts/check.sh` 加真实核套件（Xray、sing-box、mihomo 与 GOST）。真实核套件只跑含真实核测试的包：`scripts/real-core-packages.sh` 从测试源码里出现的 `XRAY_BINARY`／`SINGBOX_BINARY`／`MIHOMO_BINARY`／`MIHOMO_HOME`／`GOST_BINARY` 自动列出这些包（新增真实核测试只要按同一方式读取变量就会被收进来，不需要维护清单），并让它们并行执行（`-p 4`；这些包各用自己的临时目录与端口）。`check.sh` 里的 `go test -race ./...` 本来就按 CPU 数并行跑包，不要再加 `-p 1`。GitHub 只做二次确认：发布提交手动派发工作流运行 `check`；`cores` 作业默认关闭，每周（`schedule`）或手动派发时勾选 `cores` 才跑；`v*` 标签只构建发布，并要求同一提交已有成功的 `check`。
+
 ## 3. 安装面板
 
 在解包目录内执行（脚本要求同级的 `systemd/` 与 `examples/`）：

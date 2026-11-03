@@ -276,12 +276,45 @@ K3c/MC4（本地实现，未发布）：新节点默认单 Xray，需要两核�
 | --- | --- |
 | 节点显示离线 | `systemctl status proxy-agent`、`journalctl -u proxy-agent`、节点到面板 9443 的连通性、`/etc/proxy-agent/tls/ca.crt` 是否是签发面板 Web 证书的 CA 且与 `server_name` 匹配 |
 | 节点连上就断开 | 节点是否被禁用、证书是否过期或被吊销、Agent 版本是否低于面板要求 |
+| 节点突然离线，Agent 每 30 秒重复 `invalid spool capacity observation` | 本地队列的容量观测被面板拒绝（1.3.1 之前是 spool pragma 只对一条连接生效的缺陷），见下面“节点因 spool 容量观测离线”；临时处置是重启 Agent |
 | 发布后节点回滚 | 系统 → 配置版本看差异与失败原因；核心原生校验失败、端口冲突、健康检查失败都会自动回滚并保留上一成功版本 |
 | 出站源地址未生效或发布失败 | 是否已发布配置（字段改动只在下一次发布生效）；`nft list table inet proxy_agent_source`；`systemctl status proxy-agent-host-network`、`journalctl -u proxy-agent-host-network`；失败码 `network_unavailable` / `host_network_failed` 见第 9 节 |
 | 用户仍能上网但已超限 | 自动版本尚未完成（最长一个上报周期＋60 秒＋发布耗时），或节点离线未收到版本 |
+| 核心反复重启，日志有 `core listener did not answer … i/o timeout` | 宿主 conntrack 表是否已满（内核日志 `nf_conntrack: table full`），见下面“conntrack 表满”；这是主机设置，不是面板或 Agent 的缺陷 |
 | 访问记录为空 | Agent 是否上报（`journalctl -u proxy-agent` 里的遥测错误）、核心是否在跑、保留策略是否已清理该时间范围 |
 | 额度/在线数显示“未知” | sing-box 节点没有 `singbox_user_stats` 能力时仅提供节点流量（D5）；每用户在线数仍为未知，或核心不支持/未启用对应统计（D2），或该用户在 Xray 节点上没有在线条目（例如只用 WireGuard） |
 | 备份恢复失败 | 口令是否正确、备份是否完整（先 `verify`）、当前库是否被其他进程占用（恢复要求面板停止写入） |
+
+**conntrack 表满（主机设置，不是面板或 Agent 的缺陷）**
+
+- 症状：内核日志反复出现 `nf_conntrack: table full, dropping packet`，Agent 日志出现 `core unhealthy; restored last successful configuration`，同一行带 `core listener did not answer ... i/o timeout`；表现为核心被反复重启、连接偶发失败。uk-node 在 v1.3.0 的 RC-D 里因此 5 分钟内重启 Xray 10 次（见[发布说明 1.3.0](release-notes-1.3.0.md) 的已知限制）。
+- 检查（root）：
+
+```sh
+cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max
+dmesg | grep -c 'table full'
+journalctl -u proxy-agent | grep -c 'core unhealthy'
+```
+
+- 处理：提高上限与桶数，然后让 sysctl 生效。两个值要一致（桶数决定哈希表分片），写进 `/etc/modprobe.d` 的 `hashsize` 只在模块加载时生效，已加载时以 sysctl 为准：
+
+```sh
+cat >/etc/sysctl.d/90-conntrack.conf <<'EOF'
+net.netfilter.nf_conntrack_max = 131072
+net.netfilter.nf_conntrack_buckets = 32768
+EOF
+printf 'options nf_conntrack hashsize=32768\n' >/etc/modprobe.d/nf_conntrack.conf
+sysctl --system
+```
+
+- 结果（2026-11-03，uk-node，Owner 批准）：`nf_conntrack_max` 7680 → 131072、`nf_conntrack_buckets` 32768 后，此前累计的 920 条 `table full` 不再增长，负载下 count 稳定在约 4.6k–7.4k，核心重启归零（v1.3.0 主机 RC-E 期间 0 次 `core unhealthy; restored`）。逐项见[验收矩阵](v1-acceptance.md) §12。
+- 注意：LXC/容器内改的是**宿主机**的设置，容器里可能只读或被宿主策略拒绝。conntrack 不在服务器调优 helper 的 13 个固定键里，因此不由面板下发，也不随 `qui-update` 或恢复备份改变。
+
+**节点因 spool 容量观测离线（v1.3.1 已修复）**
+
+- 症状：Agent 日志每 30 秒重复一对 `node control connected` 与 `WARN control channel disconnected … invalid spool capacity observation`（`journalctl -u proxy-agent`），面板上该节点一直离线。2026-11-03 的 alpine-node 即此现象（约 05:07Z 起离线，06:50Z 重启 Agent 后恢复）。
+- 原因：本地队列（SQLite）的 `journal_mode`／`journal_size_limit`／`max_page_count` 属于**单条连接**，1.3.1 之前只在打开时设过一次；`database/sql` 在语句被中断（spool 取样有 1 秒截止时间，负载下可能触发）后换一条连接，新连接带着 SQLite 默认页上限，Agent 上报的数据库容量变成 17,592,186,036,224 B，面板按 `spool.DiskLimit`／`DatabaseLimit` 校验时拒绝**每一次**控制会话。队列容量上限同时也没有真正生效。
+- 处置：升级到 v1.3.1 或更高（pragma 写进每条连接的 DSN）。**1.3.1 之前**的版本临时重启 Agent（`systemctl restart proxy-agent`；Alpine 为 `rc-service proxy-agent restart`）即可恢复连接，但只是缓解，负载下可能再次发生。队列里的记录不会因此丢失，恢复后照常补传。
 
 ## 14. 终端菜单 qui
 

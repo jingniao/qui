@@ -1260,7 +1260,7 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 
 ## 12. v1.3.0 实机验收（2026-11-03，rc.1–rc.6）
 
-环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine LXC，OpenRC），均为 amd64。代码审查：Codex 11 轮；门禁：`f849f01` 在本地 Linux 测试机上通过 `scripts/check.sh`（1823 秒）与真实核套件（Xray 26.3.27、sing-box 1.14.3、mihomo、GOST 3.3.2，合计 3090 秒）。实机结果按“证据与状态”列追加，未在主机上执行的项照旧注明。口径见 AGENTS §21。
+环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine LXC，OpenRC），均为 amd64。代码审查：Codex 11 轮；门禁：`f849f01` 在本地 Linux 测试机上通过 `scripts/check.sh`（1823 秒）与真实核套件（Xray 26.3.27、sing-box 1.14.3、mihomo、GOST 3.3.2，合计 3090 秒）。实机结果按“证据与状态”列追加，未在主机上执行的项照旧注明。口径见 AGENTS §21。发布后追加的三节：RC-E（补 v1.3.0 未验证的 GOST UDP、限流、连接上限与 IPv6）、测试机演练（时区分桶、备份恢复与 arm64 模拟）与 v1.3.1（RC-F 与 RC-G 均通过）。
 
 T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试）。本地证据见下表，实机项在三台主机升级到 1.3.0 后逐项核对。
 
@@ -1324,4 +1324,58 @@ G2 的实机项（三台主机）：本次覆盖 `fifo` 故障切换（首个目
 ### v1.3.0 发布
 
 v1.3.0 于 2026-11-03 发布：tag 指向 `f849f01`（与 rc.6 同一 commit），GitHub 正式发布（非预发布），发布作业 41566922164；门禁为 `f849f01` 上的 `scripts/check.sh` 与真实核套件（合计 3090 秒），GitHub 手动作业 41556983475 的 `check` 与 `cores` 通过；代码审查 Codex 11 轮，最后一轮无发现。实机：三台主机经 `qui-update` 从 1.2.0 逐版升级到 1.3.0（面板先、Agent 后），T1、P2、G1–G3 按下表通过；rc.2–rc.6 只由实机发现的问题均已修复，见[发布说明](release-notes-1.3.0.md)。未验证或未执行：arm64；整机流量的时区分桶变更；GOST 限速、连接上限、IPv6 与经过中继的 UDP 的主机观测；备份恢复演练；正式浏览器走查。已知限制见[发布说明](release-notes-1.3.0.md)与 AGENTS 第 21 节。
+
+### RC-E：经过中继的 UDP、GOST 限流与连接上限、IPv6（2026-11-03）
+
+环境与 §12 相同（us2-node 面板 + Agent、uk-node、alpine-node，均 amd64），被测版本 **v1.3.0**（面板与三个 Agent 均为 1.3.0）。跑窗 03:59:59Z → 04:14:27Z（约 14.5 分钟），Owner 批准主机操作；脚本、日志与逐项记录在 `~/.qui-accept/rc13/gost-e`（`SUMMARY-RCE.md`）。收尾回到基线：入站 8 行、方案 0、隧道 0、出站/出口组/策略与跑前一致，35291 与 35191 的 TCP、UDP 均释放，三节点在线；只有 us2 与 uk 上的 GOST 3.3.2 按计划保留安装（空闲：0 进程、0 监听）。
+
+| 项 | 结果 |
+| --- | --- |
+| RC-E/G3-UDP | **通过**：us2→uk 的 `port_forward` 选 GOST 隧道，入站 `supportUdp=true`/`supportTcp=false`（UDP-only），目标 `1.1.1.1:53`。10/10 查询 NOERROR：经公网 IPv4 452–460 ms、本机 456–468 ms，直连 0–4 ms。入口是 UDP 监听（`0.0.0.0:35291`）；出口的中继是 **TLS/TCP**（`0.0.0.0:35191`，同 4 个采样为 established，出口没有 UDP socket）。节点总量：入口 +520 B 上 / +720 B 下，出口 0/0（中继不计入）；用户额度本轮未测（转发按设计不带用户身份）。发布顺序 uk(rev 204) → us2(205) → alpine(206) |
+| RC-E/G2-limits | **通过**：10,000,000 B 下载，直连 0.334 / 0.367 / 0.383 s（26–30 MB/s）；`bandwidth_out_bps=1048576` 的转发 8.577 s（1.17 MB/s）与 9.522 s（1.05 MB/s）；`bandwidth_in_bps=1048576` 的转发 0.316 / 0.361 s（全速）。即**下载方向由 `bandwidth_out_bps` 限制**，`bandwidth_in_bps` 不影响下载。**上传方向未测**：唯一目标 `51.158.1.21:80` 对 `POST` 返回 405 且读取 0 字节，没有上传路径；可用证据是渲染出的 `$ <in> <out>` 与下载耗时 |
+| RC-E/G2-connlimit | **通过**：`max_connections=2` 时第 1、2 条连接保持打开，**第 3 条被立即接受（0.00 s）后 reset（`ConnectionResetError(104)`）**，与“先接受再关闭”的设计一致 |
+| RC-E/G2-ipv6 | **通过**：GOST 转发监听 IPv6 字面量 `2607:9d00:2000:1ba::6143:123f:35292` 到 `[2606:4700:4700::1111]:80`，本机 curl 3/3 为 `301 / 167 B / Server: cloudflare`；只在该字面量上应答（`[::1]` 与 `127.0.0.1` 均为 `000`）。同一条转发改用 **Xray 核心** + 监听 `"::"` 也通过（通配绑定，`[::1]` 同样应答）；把 GOST 的池字段提交给 Xray 返回 400 `invalid_request: forward targets, ranges and limits require the gost core` |
+| RC-E/conntrack | **通过（主机设置，非代码）**：uk-node 调整后 `nf_conntrack_max` 131072，count 在 4.6k–6.4k 之间，dmesg 的 `table full` 停在跑前的 920 条、没有新增，Agent `core unhealthy; restored` 0 次，三台主机本轮 0 WARN / 0 ERROR。检查与做法见[运维手册](operations.md) 第 13 节 |
+| RC-E/cleanup | **通过**：删除方案与隧道、按需还原 `node_meta` 端口范围；发布批次按加入的逆序（us2 rev 212 → uk 213 → alpine 214），生成入站与监听全部消失 |
+
+仍未在主机上观测：转发与中继的混合流量 soak（GOST 上传方向限速已由 v1.3.1 的 RC-F 补测）。
+
+### 测试机演练：时区分桶、备份恢复与 arm64（v1.3.0 发布后）
+
+环境：`192.168.5.36`（Debian 12 / amd64，10 vCPU，root）Owner 提供的本地 Linux 测试机，被测版本为官方 **v1.3.0**（`f849f01`）；日志与逐项记录在 `~/.qui-accept/drill`（`REPORT.md`）。演练只在该机器上运行，没有改动仓库。
+
+| 项 | 结果 |
+| --- | --- |
+| D-TZ | **通过**：面板时区 Asia/Shanghai → America/Los_Angeles 后，新样本记到 `2026-11-02`（LA 日期），切换前写下的 `2026-11-03` 日行冻结、不再增长；`periodStart` 由 `+08:00` 变 `-07:00`；摘要等于日行之和；切回 `+08:00` 不重新分桶、无错误。与 AGENTS 第 21 节“修改时区只影响之后的流量、已记录的日数据不重新分桶”一致 |
+| D-BACKUP | **通过（两次）**：在线 API 备份 39,667 B（`eb0d5660…`，`verify` 通过、下载摘要与面板一致）→ 恢复 202 并到达阶段 `serving`；管理员会话被清除（恢复后首个请求 401，需重新登录）；整机流量的设置、日行与游标保留当前数据（既不被归档覆盖也不重复计账）；节点约 4 s 重新上线、journal 干净。`node_meta` 按设计与 AGENTS §31 保持当前库的值（恢复合并当前库），因此第二轮改用归档确实覆盖的 `platformName`/`timezone` 证明备份真的生效 |
+| D-ARM64 | **通过（模拟）**：release arm64 归档 `sha256sum --check --strict` OK；`proxy-panel` 与 `proxy-agent` 的 `--version` 均为 1.3.0；`--check-database` 输出 `database: compatible`（applied 128、pending 0、integrity ok），临时面板 18443/19443 起服务且 `GET /api/v1/auth/session` 返回 200；GOST 3.3.2 arm64 归档（`10cabc39…`）`-V` 输出 `gost 3.3.2 (go1.27.3 linux/arm64)`；`go test` 子集（`./pkg/...`、`internal/agent/core/gost/...`、`internal/panel/node/...`）11 个包通过，115 s |
+
+口径：D-ARM64 全部在 **amd64 主机上用 qemu-user（user-mode）模拟 arm64** 执行，只能说明 arm64 归档能加载、启动并通过所选取测试；时序（例如 `internal/panel/node` 的 102 s）与架构相关的内核行为不代表真实 arm64 主机，**arm64 仍未经真实主机验收**。
+
+这些结果补上了 v1.3.0 标为“未验证”的多数项：经过中继的 UDP、GOST 限速（下载方向）、连接上限、IPv6 目标、整机流量的时区分桶变更与备份恢复演练。仍未在主机上测量的是 GOST 上传方向限速，已由 v1.3.1 的 RC-F 补测（见下）；arm64 的结论只到“模拟下可用”。
+
+### v1.3.1（RC-F 与 RC-G 通过）
+
+候选代码 `4889cf3`，三处修复见[发布说明](release-notes-1.3.1.md)；另有 spool 修复 `27b5171` 与门禁提速 `ebe8301`。只改程序与文档，**没有迁移**。预发布版：`v1.3.1-rc.1` → `4889cf3`（GitHub 发布 432337602）、`v1.3.1-rc.2` → `ebe8301`（432510161）。
+
+- 门禁（本地 Linux 测试机，`scripts/check.sh` + 真实核套件）：`4889cf3` 3137 秒、`27b5171` 3147 秒、`ebe8301` 2366 秒，均通过。GitHub：`4889cf3` 的 `check` 作业 41576853903 成功（先重跑了一次与本改动无关的偶发真实 Xray 测试 `TestRealOnlineStatisticsRetainASourceBetweenSamples`），`ebe8301` 的 41607097068 成功（`cores` 按设计跳过），`27b5171` 的作业按 Owner 要求取消。
+- 代码审查：`4889cf3` 3 轮（末轮无发现），修凭据顺序与 nil/空集合两项；中继依赖检查不比较传输方式一项不修改（既有行为）。spool 修复与门禁改动各 1 轮，均无发现。
+- 实机 RC-F（2026-11-03 06:41–07:21Z，`v1.3.1-rc.1`，三台主机，Owner 批准主机操作；脚本与日志在 `~/.qui-accept/rc13/rcf/SUMMARY-RCF.md`）：
+
+| 项 | 结果 |
+| --- | --- |
+| RC-F/升级 | **通过**：面板 06:47Z、Agent 依次 uk（06:48Z）/us2（06:49Z）/alpine（06:50Z）经 `qui-update` 升到 1.3.1-rc.1（`update-exit=0`、无回滚目录）；迁移头仍是 `0128_gost_tunnels.sql`（128 行），`pragma quick_check` ok、89 张表，升级前备份 `pre-update-1.3.0-20261103-144730.db`；三节点在线，修订 212/213/214 不变，入站与基线一致 |
+| RC-F/Fix2 画布发布 | **通过**：`rcf-gost-tunnel`（us2 入口 → uk 出口，`port_forward`，`tunnelProtocol "gost"`，监听 35291 → uk 中继 35191 到 `51.158.1.21:80`）。创建、轮换凭据（代数 1 → 2、指纹 `270bce05…` → `656910b9…`）与删除三次发布都是 **uk → us2**，**alpine 不在批次**（修订 214 → 214、核心进程 0 → 0），数据路径 3/3 HTTP 200（每次 1,000,000 B） |
+| RC-F/Fix3 改名 | **通过**：`PUT /api/v1/inbounds/{id}` 只改名字，在 us2 的转发入站与 uk 的中继入站上都返回 **HTTP 400** 与“该入站由画布隧道管理，不能在入站编辑器中修改名称。”；同样的记录原样保存返回 200，入站仍是 10 行、`names_changed=0`，画布仍能规划（`ok:true`） |
+| RC-F/Fix1 移除核心 | **通过**：`POST /nodes/{id}/cores/gost/remove` 返回 202，任务约 1 秒内 success，能力降为 `xray@26.3.27`；us2 与 uk 的 `runtime/` 只剩 `xray`，`runtime/gost` 消失（基线里还有 `accounting.key`/`config.yaml`/`metrics.sock`/`tls`），`runtime/xray` 完好，GOST 镜像也从 `releases/installed` 消失 |
+| RC-F/GOST 上传限速 | **通过（补 v1.3.0 的未测项）**：`bandwidth_in_bps=1048576` 的转发上传 10,000,000 B 用 8.555 s（本机回环）与 9.249 / 9.211 s（从 us2 经公网，1.08–1.17 MB/s），直连 0.022–0.024 s；下载复测直连 0.322 / 0.372 s 对 `bandwidth_out_bps` 限制的 8.580 / 9.522 s |
+| RC-F/收尾 | **通过**：删除方案与隧道、还原 uk 的端口范围；入站 8 行、方案 0、隧道 0，出站/出口组/策略与基线一致；GOST 在三台主机上都不再安装（`installer-path=absent`、0 进程、0 监听）；uk conntrack 6233/131072，`table full` 停在 920 条，`core unhealthy; restored` 0 次（us2 WARN 3 / ERROR 0，uk WARN 2 / ERROR 0）；07:21Z 复查核心 PID 未再变化 |
+
+口径与例外：
+
+- alpine-node 的 Xray 是**按设计空闲**：它唯一的入站 `alpine-socks-990` 没有绑定用户，渲染为禁用，而核心没有启用的入站就保持停止；因此“健康”对一个空闲核心是正确状态。Fix 2 在 alpine 上的证据是“没有新修订、没有核心进程”，不是“核心没被重启过”。
+- 画布自己的服务器在发布时总会重新发布（只有仅为依赖纳入的服务器被跳过），所以隧道两端的核心仍会重启；RC-F 里一次无改动的重新发布（修订 217/218）即此行为，没有 alpine。
+- 升级 Agent 会短暂重启该节点的核心（核心是 Agent 的子进程；uk 与 us2 的 Xray 都换了 PID），没有新修订、没有回滚。
+- 仍未验证：真实 arm64 主机；正式浏览器走查；转发与中继的混合流量 soak。
+- 实机 RC-G（rc.2，2026-11-03 09:54–10:20Z，证据 `~/.qui-accept/rc13/rcg`）：三台主机升级到 1.3.1-rc.2，迁移头仍为 0128、`quick_check` ok、0 个回滚目录、修订不变；10 分钟每分钟采样三个节点 10/10 在线，spool 观测 measured，`database_limit` 34,906,112 B ≤ `disk_limit` 104,857,600 B，`invalid spool capacity observation` 0 次；Agent 日志只有面板升级重启时的 3 条重连 WARN（us2）与 2 条（uk），0 条 ERROR、0 次核心恢复；uk conntrack 6131/131072，`table full` 920 未增加；安装包已从主机删除。
 

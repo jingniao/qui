@@ -2,17 +2,17 @@
 
 **文档版本：** V1.2  
 **编制日期：** 2026 年 8 月 20 日  
-**本次修订：** 2026-11-03（v1.3.0 发布并部署到三台主机）  
-**项目状态：** 核心功能已实现；v1.0.0–v1.0.9、v1.2.0（v1.1 与 v1.2 合并）与 v1.3.0 已发布，三台主机运行 v1.3.0；当前事实与已知限制见下方[当前状态](#当前状态)。  
+**本次修订：** 2026-11-03（v1.3.0 发布并部署到三台主机；v1.3.1 缺陷修复版进行中）  
+**项目状态：** 核心功能已实现；v1.0.0–v1.0.9、v1.2.0（v1.1 与 v1.2 合并）与 v1.3.0 已发布；v1.3.1 缺陷修复版进行中（最终候选 `ebe8301`，预发布版 rc.2 已在三台主机上运行，RC-F 与 RC-G 均通过，待正式发布），当前事实与已知限制见下方[当前状态](#当前状态)。  
 **目标用户规模：** 1～10 名内部用户  
 **部署方式：** 自托管、轻量化部署  
 **适用场景：** 自有或明确授权网络中的代理接入、节点管理、访问分流与域名级访问控制
 
-当前文档入口见[文档导航](docs/README.md)：产品需求与架构约束即本文件，系统组成见[架构总览](docs/architecture.md)，部署与运维见[部署与升级](docs/deployment.md) 与[运维手册](docs/operations.md)，完成标准见[验收矩阵](docs/v1-acceptance.md)，实机验收过程见[实机测试计划](docs/v1.2-host-test-plan.md) 与[验收发现](docs/v1.2-rc1-findings.md)，协议与能力范围见[协议支持矩阵](docs/protocol-support-matrix.md)，v1.3.0 的计划与设计见[v1.3 计划](docs/v1.3-plan.md)、发布说明见[发布说明 1.3.0](docs/release-notes-1.3.0.md)，版本修订见[变更记录](docs/changelog.md)。v1.1/v1.2 的计划、K 阶段报告与进度记录已归档到 [docs/archive](docs/archive/README.md)，只作追溯、不再维护。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；v1.1 与 v1.2 合并为 v1.2.0 发布（2026-11-01 已发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
+当前文档入口见[文档导航](docs/README.md)：产品需求与架构约束即本文件，系统组成见[架构总览](docs/architecture.md)，部署与运维见[部署与升级](docs/deployment.md) 与[运维手册](docs/operations.md)，完成标准见[验收矩阵](docs/v1-acceptance.md)，实机验收过程见[实机测试计划](docs/v1.2-host-test-plan.md) 与[验收发现](docs/v1.2-rc1-findings.md)，协议与能力范围见[协议支持矩阵](docs/protocol-support-matrix.md)，v1.3.0 的计划与设计见[v1.3 计划](docs/v1.3-plan.md)、发布说明见[发布说明 1.3.0](docs/release-notes-1.3.0.md) 与 [1.3.1](docs/release-notes-1.3.1.md)，版本修订见[变更记录](docs/changelog.md)。v1.1/v1.2 的计划、K 阶段报告与进度记录已归档到 [docs/archive](docs/archive/README.md)，只作追溯、不再维护。v1.1 的 R1–R9 与 D-a 至 D-e 优先于历史 D1、D2、D5 的对应口径；v1.1 与 v1.2 合并为 v1.2.0 发布（2026-11-01 已发布），按节点分组授权取代按方案授权（S1 取消），GOST 推迟。
 
 ## 当前状态
 
-状态核对：2026-11-03（v1.3.0 发布后）。v1.2.0 的逐项结果见[验收矩阵](docs/v1-acceptance.md) §11 与[验收发现](docs/v1.2-rc1-findings.md)，v1.3.0 见同文件 §12。
+状态核对：2026-11-03（v1.3.0 发布后；v1.3.1 的 RC-F 已通过）。v1.2.0 的逐项结果见[验收矩阵](docs/v1-acceptance.md) §11 与[验收发现](docs/v1.2-rc1-findings.md)，v1.3.0 与 v1.3.1 见同文件 §12。
 
 | 版本 | 日期 | 内容 |
 | --- | --- | --- |
@@ -33,12 +33,15 @@
 
 **v1.3.0 已发布（2026-11-03）**：预发布版 rc.1–rc.6 与最终版在三台主机（us2-node、uk-node、alpine-node）验收后，以 rc.6 的同一 commit（`f849f01`）发布并按面板、Agent 顺序部署。内容：整机月流量（T1，迁移 0126）、Xray 端口转发字节计入节点总量（P2，修复 F11）、GOST 3.3.2 作为第三种核心（G1/G2，迁移 0127）与节点间加密中继（G3，迁移 0128）。只验收 amd64；未验证项与已知限制见[发布说明](docs/release-notes-1.3.0.md)与[验收矩阵](docs/v1-acceptance.md) §12，字段口径见第 21、22.2 节。
 
-CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（release/v1.3.0 的 `f849f01` 已复跑门禁与真实核套件，含 Xray 26.3.27、sing-box 1.14.3、mihomo 与 GOST 3.3.2，合计 3090 秒，面板主机 -race 按 Owner 决定以 CI 代替）；GitHub 只在手动与每周运行 `check`（同一脚本）与 `cores`，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
+**v1.3.1 进行中（未发布）**：三处画布/运行时修复（`4889cf3`）、Agent 本地队列的 pragma 修复（`27b5171`）与门禁提速（`ebe8301`），无迁移、无新功能。预发布版 rc.1 → `4889cf3`、rc.2 → `ebe8301`，三台主机现运行 rc.2。RC-F（rc.1）通过：升级无迁移、隧道发布不重发 alpine、画布生成入站改名被拒绝、移除 GOST 后 `runtime/gost` 消失、GOST 双向限速实测；RC-G（rc.2）通过：三台主机升级无迁移，10 分钟内每个节点每次心跳都报告正确的 spool 上限（34,906,112 B ≤ 104,857,600 B），0 次 `invalid spool capacity observation`。见[发布说明](docs/release-notes-1.3.1.md)与[验收矩阵](docs/v1-acceptance.md) §12。
+
+CI：每个变更在本地 Linux 测试机上用 `scripts/check.sh` 与真实核套件过门禁（含 Xray 26.3.27、sing-box 1.14.3、mihomo 与 GOST 3.3.2；v1.3.1 起真实核套件只跑 `scripts/real-core-packages.sh` 列出的 8 个包并 `-p 4`，本地门禁约 2366 秒，此前约 3140 秒，见[部署与升级](docs/deployment.md)第 2 节）；GitHub 只在手动与每周运行 `check`（同一脚本），`cores` 每周或派发时勾选才跑，`v*` 标签只构建发布、且要求同一 commit 已有成功的 `check`。
 
 ## 变更记录
 
 历次修订的完整条目见[变更记录](docs/changelog.md)，此处每个版本一行：
 
+- **v1.3.1（进行中）**：v1.3.0 的缺陷修复，无迁移、无新功能：移除核心后清理 `runtime/<组件>/`、画布发布不再重启未改动的服务器（画布自己的服务器仍会重新发布）、画布隧道管理的入站不能改名；Agent 本地队列的容量设置改为每条连接都生效（此前会让节点因 `invalid spool capacity observation` 一直离线）；门禁提速（真实核套件只跑相关包、恢复测试并行、`cores` 改为每周或按需）。另记入 uk-node 的 conntrack 主机设置、v1.3.0 未验证项的补充证据与 RC-F 结果；rc.2 已通过 RC-G。见[发布说明 1.3.1](docs/release-notes-1.3.1.md)。
 - **V1.2（2026-10-28）**：按 v1.1 计划同步已实现功能，并记入实机验收、CVE-2026-98432 与 K2a–K4 的多核心、隧道与调优变更。
 - **V1.1（2026-10-17）**：按轻量重构计划决策 D1–D5 修订额度、出口组、记录口径、更新方式与验收标准。
 - **V1.0（2026-08-20）**：初版，完整需求与架构约束。

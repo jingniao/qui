@@ -15,6 +15,7 @@
 | 实机验收发现的缺陷、修复与限制 | [验收发现](v1.2-rc1-findings.md) |
 | 1.2.0 发布说明 | [发布说明 1.2.0](release-notes-1.2.0.md) |
 | 1.3.0 发布说明 | [发布说明 1.3.0](release-notes-1.3.0.md) |
+| 1.3.1 发布说明（缺陷修复，进行中） | [发布说明 1.3.1](release-notes-1.3.1.md) |
 | v1.3.0 的计划与设计（2026-11-03 已发布） | [v1.3 计划](v1.3-plan.md) |
 | v1.3.0 的 GOST 设计与 G0 实测 | [GOST 设计](v1.3-design-gost.md)、[G0 发现](v1.3-g0-gost-findings.md) |
 | 历次修订的完整条目 | [变更记录](changelog.md) |

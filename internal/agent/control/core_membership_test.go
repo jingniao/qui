@@ -192,6 +192,122 @@ func TestAbsentCoreFailureDoesNotEnable(t *testing.T) {
 type refusingClose struct{ *fakeCoreRuntime }
 
 func (r *refusingClose) Close() error { return core.ErrCoreStopUnconfirmed }
+
+// coreRuntimeMaterial writes what a running core leaves in runtime/<core>: the
+// run marker and the accounting key, which are the evidence that no process of
+// it is left.
+func coreRuntimeMaterial(t *testing.T, directory, name string) (string, string) {
+	t.Helper()
+	runtimeDir := filepath.Join(directory, "runtime", name)
+	if err := os.MkdirAll(filepath.Join(runtimeDir, "tmp"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(runtimeDir, "core-run.json")
+	for _, path := range []string{marker, filepath.Join(runtimeDir, "accounting.key"), filepath.Join(runtimeDir, "tmp", "access.log")} {
+		if err := os.WriteFile(path, []byte("evidence"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return runtimeDir, marker
+}
+
+// addFixtureCore enables the absent Xray component with the dynamic zip fixture
+// and reports the digest, so a removal test starts from a node running two cores.
+func addFixtureCore(t *testing.T, w *coreUpdates, original string) string {
+	t.Helper()
+	archive, digest, _ := updateArchive(t, original, "dynamic")
+	server := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { rw.Write(archive) }))
+	t.Cleanup(server.Close)
+	w.source = updateSource(t, server)
+	if result, err := w.execute(context.Background(), addRequest(digest)); err != nil || result.Status != "success" {
+		t.Fatal(result, err)
+	}
+	return digest
+}
+
+// A removed core takes its runtime directory with it: the run marker, the
+// accounting key and the rest of runtime/<core> are leftovers of a process that
+// exited. Another core's directory, the installer's own binary, the inventory and
+// the update history stay, and a core added again starts from fresh material.
+func TestCoreRemovalCleansItsRuntimeDirectory(t *testing.T) {
+	ctx := context.Background()
+	w, multi, dir, original := membershipHarness(t)
+	digest := addFixtureCore(t, w, original)
+	runtimeDir, marker := coreRuntimeMaterial(t, dir, "xray")
+	otherCore := filepath.Join(dir, "runtime", "sing-box")
+	if err := os.MkdirAll(otherCore, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_runtime", Component: "xray", Revision: 2}); !r.Success {
+		t.Fatal(r)
+	}
+	if multi.Component("xray") != nil {
+		t.Fatal("removed core still attached")
+	}
+	if _, err := os.Stat(runtimeDir); !os.IsNotExist(err) {
+		t.Fatalf("the removed core kept its runtime directory: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("the removed core kept its run marker: %v", err)
+	}
+	if _, err := os.Stat(otherCore); err != nil {
+		t.Fatal("removing one core removed another core's runtime directory", err)
+	}
+	if _, err := os.Stat(original); err != nil {
+		t.Fatal("removing a core touched the installer's binary", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cores.json.enc")); err != nil {
+		t.Fatal("removing a core removed the inventory", err)
+	}
+	inventory, err := configuration.ReadInventory(dir, w.nodeID)
+	if err != nil || !inventory.Entries["xray"].Disabled || inventory.Entries["xray"].RequestID != "remove_runtime" {
+		t.Fatalf("inventory %+v %v", inventory, err)
+	}
+	// The duplicate request finishes the same cleanup and stays idempotent.
+	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_runtime", Component: "xray", Revision: 2}); !r.Success {
+		t.Fatal("duplicate removal", r)
+	}
+	req := addRequest(digest)
+	req.ID, req.Sequence = "readd_xray", 2
+	if result, err := w.execute(ctx, req); err != nil || result.Status != "success" {
+		t.Fatal("re-add", result, err)
+	}
+	if multi.Component("xray") == nil {
+		t.Fatal("re-added core unavailable")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("the re-added core reused stale runtime material: %v", err)
+	}
+}
+
+// An unconfirmed exit is the one case that keeps the runtime directory: the
+// marker and the key are the evidence that the process is still there, so the
+// inventory stays enabled and nothing is deleted.
+func TestCoreRemovalKeepsRuntimeUntilExitIsConfirmed(t *testing.T) {
+	ctx := context.Background()
+	w, multi, dir, original := membershipHarness(t)
+	w.makeRuntime = func(node, directory, name, path string) core.Runtime {
+		return &refusingClose{&fakeCoreRuntime{name: name, version: "26.3.27", selected: path}}
+	}
+	addFixtureCore(t, w, original)
+	runtimeDir, marker := coreRuntimeMaterial(t, dir, "xray")
+	removed := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_unconfirmed", Component: "xray", Revision: 2})
+	if removed.Success || removed.Code != core.ErrCoreStopUnconfirmed.Error() {
+		t.Fatal(removed)
+	}
+	for _, path := range []string{runtimeDir, marker, filepath.Join(runtimeDir, "accounting.key")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s removed before the exit was confirmed: %v", path, err)
+		}
+	}
+	inventory, err := configuration.ReadInventory(dir, w.nodeID)
+	if err != nil || inventory.Entries["xray"].Disabled || inventory.Entries["xray"].RequestID != "add_xray" {
+		t.Fatalf("inventory %+v %v", inventory, err)
+	}
+	if multi.Component("xray") == nil {
+		t.Fatal("unconfirmed removal detached the core")
+	}
+}
 func TestCoreRemovalRefusals(t *testing.T) {
 	w, multi, dir, original := membershipHarness(t)
 	ctx := context.Background()
@@ -347,6 +463,7 @@ func TestRemovalStartupRecoveryWaitsForConfirmedExit(t *testing.T) {
 	if err := configuration.WriteInventory(dir, inventory); err != nil {
 		t.Fatal(err)
 	}
+	runtimeDir, marker := coreRuntimeMaterial(t, dir, "xray")
 	enabled := []configuration.Core{{Name: "sing-box", Path: original}}
 	refusing := func(node, directory, name, path string) core.Runtime {
 		return &refusingClose{&fakeCoreRuntime{name: name, selected: path}}
@@ -357,6 +474,9 @@ func TestRemovalStartupRecoveryWaitsForConfirmedExit(t *testing.T) {
 	if _, err := os.Stat(image); err != nil {
 		t.Fatal("image removed before exact exit", err)
 	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("runtime material removed before exact exit", err)
+	}
 	stopped := func(node, directory, name, path string) core.Runtime {
 		return &fakeCoreRuntime{name: name, selected: path}
 	}
@@ -365,6 +485,9 @@ func TestRemovalStartupRecoveryWaitsForConfirmedExit(t *testing.T) {
 	}
 	if _, err := os.Stat(image); !os.IsNotExist(err) {
 		t.Fatal("interrupted cleanup not finished", err)
+	}
+	if _, err := os.Stat(runtimeDir); !os.IsNotExist(err) {
+		t.Fatalf("interrupted cleanup left the runtime directory: %v", err)
 	}
 	if err := recoverCoreInventory(dir, w.nodeID, inventory, enabled, stopped); err != nil {
 		t.Fatal("recovery not idempotent", err)

@@ -232,7 +232,9 @@ func TestUnusableGostMaterialIsRefusedInsteadOfRegenerated(t *testing.T) {
 }
 
 // An inbound the canvas generated for a GOST tunnel is still editable through the
-// ordinary API - rename, disable - but only with the material the tunnel wrote.
+// ordinary API - disable it, change its settings - but only with the material the
+// tunnel wrote, and it cannot be renamed: a drawing knows its objects by the names
+// it generated.
 func TestGeneratedRelayInboundKeepsItsTunnelMaterial(t *testing.T) {
 	p, scheme, _ := gostRelayPanel(t)
 	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err != nil {
@@ -242,15 +244,20 @@ func TestGeneratedRelayInboundKeepsItsTunnelMaterial(t *testing.T) {
 	stored := exit.Settings.Forward.Relay
 	// The API returns the record with the private halves masked, and the editor
 	// sends it back unchanged.
-	renamed := inboundInputOf(exit, exit.DefaultOutbound)
-	renamed.Name, renamed.Enabled = "renamed relay", false
-	renamed.Settings = mask(exit.Settings)
-	saved, err := p.service.SaveInbound(p.ctx, exit.ID, renamed)
+	disabled := inboundInputOf(exit, exit.DefaultOutbound)
+	disabled.Enabled = false
+	disabled.Settings = mask(exit.Settings)
+	saved, err := p.service.SaveInbound(p.ctx, exit.ID, disabled)
 	if err != nil {
 		t.Fatalf("an ordinary save of a generated relay was refused: %v", err)
 	}
-	if saved.Name != "renamed relay" || saved.Enabled {
+	if saved.Enabled || saved.Name != exit.Name {
 		t.Fatalf("the save was not applied: %+v", saved)
+	}
+	renamed := inboundInputOf(exit, exit.DefaultOutbound)
+	renamed.Name = "renamed relay"
+	if _, err := p.service.SaveInbound(p.ctx, exit.ID, renamed); err == nil {
+		t.Fatal("the ordinary API renamed a canvas-owned relay")
 	}
 	storedRelay, err := p.service.Repository.Inbound(p.ctx, exit.ID, true)
 	if err != nil {
@@ -344,5 +351,70 @@ func TestCanvasPublishOrderKeepsTheBaseOrderOfUnrelatedTargets(t *testing.T) {
 	}
 	if _, err := canvasPublishOrder([]string{"A", "B"}, map[string][]string{"A": {"B"}, "B": {"A"}}); err == nil {
 		t.Fatal("a dependency cycle was ordered")
+	}
+}
+
+// renameOf is the stored record under another name, as the inbound editor sends
+// it.
+func renameOf(inbound Inbound, name string) InboundInput {
+	input := inboundInputOf(inbound, inbound.DefaultOutbound)
+	input.Name = name
+	return input
+}
+
+// A drawing owns its inbounds by identity, so renaming one in the inbound editor
+// would detach it from the canvas. The editor refuses that rename, and the stored
+// name, the ownership and the tunnel material stay as they are.
+func TestCanvasOwnedInboundNameIsReadOnlyInTheEditor(t *testing.T) {
+	p, scheme, _ := gostRelayPanel(t)
+	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err != nil {
+		t.Fatal(err)
+	}
+	exit, entry := generatedRelay(t, p, scheme.Name)
+	for _, inbound := range []Inbound{exit, entry} {
+		owner, err := p.service.Repository.objectOwner(p.ctx, "inbound", inbound.ID)
+		if err != nil || owner == "" {
+			t.Fatalf("inbound %q has no owner: %q %v", inbound.Name, owner, err)
+		}
+		if _, err := p.service.SaveInbound(p.ctx, inbound.ID, renameOf(inbound, inbound.Name+" 改")); err == nil {
+			t.Fatalf("the editor renamed the canvas-owned inbound %q", inbound.Name)
+		}
+		stored, err := p.service.Repository.Inbound(p.ctx, inbound.ID, true)
+		if err != nil || stored.Name != inbound.Name {
+			t.Fatalf("stored name %q, expected %q (%v)", stored.Name, inbound.Name, err)
+		}
+		if owner, err = p.service.Repository.objectOwner(p.ctx, "inbound", inbound.ID); err != nil || owner == "" {
+			t.Fatalf("the refused rename dropped the ownership of %q: %q %v", inbound.Name, owner, err)
+		}
+		// The same record without a new name is still the Owner's to save, and it
+		// keeps the material the tunnel owns.
+		before, err := p.service.Repository.Inbound(p.ctx, inbound.ID, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved, err := p.service.SaveInbound(p.ctx, inbound.ID, renameOf(inbound, inbound.Name))
+		if err != nil {
+			t.Fatalf("an unchanged save of %q was refused: %v", inbound.Name, err)
+		}
+		after, err := p.service.Repository.Inbound(p.ctx, saved.ID, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.Name != before.Name {
+			t.Fatalf("an unchanged save renamed %q to %q", before.Name, after.Name)
+		}
+		if !sameRelayMaterial(after.Settings.Forward, before.Settings.Forward) {
+			t.Fatalf("an unchanged save of %q changed the tunnel material: mode %q, %d hops", before.Name, after.Settings.Forward.Mode, len(after.Settings.Forward.Hops))
+		}
+	}
+	// Nothing looks stale to the next plan of the same drawing.
+	plan, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, nil)
+	if err != nil || !plan.OK {
+		t.Fatalf("plan %+v %v", plan, err)
+	}
+	for _, server := range plan.Servers {
+		if len(server.Removes) != 0 {
+			t.Fatalf("the plan removes %+v", server.Removes)
+		}
 	}
 }

@@ -392,3 +392,63 @@ func TestCanvasK4ArchiveValidationRejectsDanglingOwnershipAndUnknownJSON(t *test
 		t.Fatal("unknown tunnel JSON accepted")
 	}
 }
+
+// A drawing knows its objects by identity, so the canvas itself can still write
+// one under another name - and put the previous record back when a later step of
+// the publication fails. Only the inbound editor is refused.
+func TestCanvasKeepsWritingWhatItAdopted(t *testing.T) {
+	p := newPublishPanel(t)
+	scheme, _, err := p.publishScheme(t, "adopt-rename", canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, "", []CanvasConnection{canvasTestHop("i-a", "i-b", 8443)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbounds, _, _ := p.publishedObjects(t, "adopt-rename")
+	if len(inbounds) != 1 {
+		t.Fatalf("generated %d inbounds", len(inbounds))
+	}
+	original := inbounds[0]
+	if _, err := p.service.SaveInbound(p.ctx, original.ID, renameOf(original, "手工改名")); err == nil {
+		t.Fatal("the editor renamed a canvas-owned inbound")
+	}
+	renamed := renameOf(original, original.Name+" 改名")
+	if _, err := p.service.saveGeneratedInbound(p.ctx, original.ID, renamed); err != nil {
+		t.Fatalf("the canvas could not rename the inbound it adopted: %v", err)
+	}
+	stored, err := p.service.Repository.Inbound(p.ctx, original.ID, true)
+	if err != nil || stored.Name != renamed.Name {
+		t.Fatalf("stored name %q, expected %q (%v)", stored.Name, renamed.Name, err)
+	}
+	if owner, err := p.service.Repository.objectOwner(p.ctx, "inbound", original.ID); err != nil || owner == "" {
+		t.Fatalf("the renamed inbound lost its ownership: %q %v", owner, err)
+	}
+	// The publication recognises it by identity: it keeps the renamed object and
+	// does not create a second one on the same listener.
+	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err != nil {
+		t.Fatalf("the drawing no longer recognises its own inbound: %v", err)
+	}
+	if after, err := p.service.Repository.Inbound(p.ctx, original.ID, true); err != nil || after.Name != renamed.Name || after.Port != original.Port {
+		t.Fatalf("the renamed inbound was not kept: %+v %v", after, err)
+	}
+	if all, total, err := p.service.Repository.Inbounds(p.ctx, original.NodeID, 1, 100, true); err != nil || total != 1 {
+		t.Fatalf("the publication created another inbound: %d/%d %v", len(all), total, err)
+	}
+	// Undoing a publication step restores the previous record the same way.
+	if _, err := p.service.saveGeneratedInbound(p.ctx, original.ID, renameOf(stored, original.Name)); err != nil {
+		t.Fatalf("the canvas could not restore the record it adopted: %v", err)
+	}
+	if restored, err := p.service.Repository.Inbound(p.ctx, original.ID, true); err != nil || restored.Name != original.Name {
+		t.Fatalf("restored name %q (%v)", restored.Name, err)
+	}
+	// An inbound the Owner made under a generated-looking name is not owned and
+	// stays renameable.
+	manual, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "[手工] Node A → Node B (trojan:8443) 中转入口", NodeID: p.nodeC, Protocol: "trojan", Listen: "0.0.0.0", Port: 9444, Enabled: true, InternalRelay: true, DefaultOutbound: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner, err := p.service.Repository.objectOwner(p.ctx, "inbound", manual.ID); err != nil || owner != "" {
+		t.Fatalf("a hand-made inbound has an owner: %q %v", owner, err)
+	}
+	if _, err := p.service.SaveInbound(p.ctx, manual.ID, renameOf(manual, "手工改名的入站")); err != nil {
+		t.Fatalf("an unowned inbound could not be renamed: %v", err)
+	}
+}

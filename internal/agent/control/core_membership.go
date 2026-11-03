@@ -186,6 +186,18 @@ func cleanupCoreImages(directory, name string) error {
 	}
 	return nil
 }
+
+// removeCoreRuntime finishes a removed core on disk: its runtime directory holds
+// the run marker and the accounting key, which are the evidence that no process
+// of it is left, so it is only deleted once the exit is confirmed. The managed
+// images are removed with it; cores.json.enc, the update history and the
+// installer's own binaries stay.
+func removeCoreRuntime(directory, name string) error {
+	if err := os.RemoveAll(filepath.Join(directory, "runtime", name)); err != nil {
+		return err
+	}
+	return cleanupCoreImages(directory, name)
+}
 func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreCommand) *pb.RemoveCoreResult {
 	result := &pb.RemoveCoreResult{Id: command.Id, Component: command.Component, Revision: command.Revision, Code: "invalid_request"}
 	if w == nil || w.manager == nil {
@@ -207,7 +219,7 @@ func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreComm
 		entry := i.Entries[command.Component]
 		if m, ok := w.manager.Adapter.(*core.MultiRuntime); ok && entry.Disabled && entry.RequestID == command.Id && entry.Revision == command.Revision && m.Component(command.Component) == nil {
 			duplicate = true
-			return cleanupCoreImages(w.cfg.DataDirectory, command.Component)
+			return removeCoreRuntime(w.cfg.DataDirectory, command.Component)
 		}
 		return nil
 	})
@@ -232,7 +244,7 @@ func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreComm
 					return err
 				}
 			}
-			return cleanupCoreImages(w.cfg.DataDirectory, command.Component)
+			return removeCoreRuntime(w.cfg.DataDirectory, command.Component)
 		}
 		if entry.RequestID == command.Id {
 			return errors.New("request_conflict")
@@ -285,7 +297,7 @@ func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreComm
 		if err = m.RemoveIdle(command.Component); err != nil {
 			return err
 		}
-		return cleanupCoreImages(w.cfg.DataDirectory, command.Component)
+		return removeCoreRuntime(w.cfg.DataDirectory, command.Component)
 	})
 	if err != nil {
 		result.Code = err.Error()
@@ -343,12 +355,17 @@ func (w *coreUpdates) discardUnpublishedCore(name string) {
 
 // recoverCoreInventory is run before constructing any enabled adapters. Disabled
 // marker owners must confirm exact-child exit before their images are removed.
+// Their runtime directory is deleted only after that confirmation, because the
+// marker and the accounting key inside it are the exit evidence.
 // Uncommitted additions are idle and only leave unreachable staged images.
 func recoverCoreInventory(directory, nodeID string, inventory configuration.Inventory, cores []configuration.Core, makeRuntime func(string, string, string, string) core.Runtime) error {
 	for name, entry := range inventory.Entries {
 		if entry.Disabled {
 			stopped := makeRuntime(nodeID, filepath.Join(directory, "runtime", name), name, entry.Path)
 			if err := stopped.Close(); err != nil {
+				return err
+			}
+			if err := removeCoreRuntime(directory, name); err != nil {
 				return err
 			}
 		}

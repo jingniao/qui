@@ -57,7 +57,9 @@ func (h *Handler) createRelayBatch(w http.ResponseWriter, r *http.Request) {
 // target listed after its source is allowed only when it already published the
 // exact state that source dials: a drawing orders a GOST tunnel's exit first,
 // which can put an ordinary relay's target last, and the queue's own
-// relayTargetsInTransaction check stays authoritative for what is running.
+// relayTargetsInTransaction check stays authoritative for what is running. A
+// target that is not part of the batch at all - a canvas publication leaves an
+// unchanged expansion node out - is judged the same way, by its published state.
 func (r *Repository) validateBatchDependencies(ctx context.Context, tx *sql.Tx, snapshots []proxy.NodeSnapshot) error {
 	positions := map[string]int{}
 	for position, snapshot := range snapshots {
@@ -73,9 +75,22 @@ func (r *Repository) validateBatchDependencies(ctx context.Context, tx *sql.Tx, 
 				continue
 			}
 			targetPosition, exists := positions[outbound.TargetNodeID]
-			if !exists || targetPosition == position {
-				// The target must be another node of this batch.
+			if exists && targetPosition == position {
+				// The target must be another node.
 				return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
+			}
+			if !exists {
+				published, err := r.publishedStateInTransaction(ctx, tx, outbound.TargetNodeID)
+				if errors.Is(err, ErrDependency) {
+					return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
+				}
+				if err != nil {
+					return err
+				}
+				if reason := relayDependency(outbound, published); reason != "matched" {
+					return fmt.Errorf("%w: published relay target mismatch (%s)", ErrDependency, reason)
+				}
+				continue
 			}
 			if reason := relayDependency(outbound, snapshots[targetPosition].State); reason != "matched" {
 				return fmt.Errorf("%w: captured batch relay mismatch (%s)", ErrDependency, reason)

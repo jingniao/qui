@@ -85,12 +85,14 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 		}
 		previous := existing
 		input.Core = existing.Core
-		inbound, err := s.SaveInbound(ctx, existing.ID, input)
+		// The canvas may rename an object it adopted, so its own writes use the
+		// generated-inbound path; the ordinary inbound API refuses that rename.
+		inbound, err := s.saveGeneratedInbound(ctx, existing.ID, input)
 		if err != nil {
 			return warnings, err
 		}
 		undo.add(func(ctx context.Context) error {
-			_, err := s.SaveInbound(ctx, previous.ID, inboundInputOf(previous, previous.DefaultOutbound))
+			_, err := s.saveGeneratedInbound(ctx, previous.ID, inboundInputOf(previous, previous.DefaultOutbound))
 			return err
 		})
 		edge.inboundID = inbound.ID

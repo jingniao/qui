@@ -124,6 +124,18 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 		if err != nil {
 			return Inbound{}, err
 		}
+		// A drawing owns its objects by identity, not by name: an ordinary rename
+		// here would detach the inbound from the canvas, which knows it under the
+		// name it generated. The canvas may still rename it (adoption).
+		if !generated && input.Name != old.Name {
+			owner, err := s.Repository.objectOwner(ctx, "inbound", id)
+			if err != nil {
+				return Inbound{}, err
+			}
+			if owner != "" {
+				return Inbound{}, errors.New("该入站由画布隧道管理，不能在入站编辑器中修改名称。")
+			}
+		}
 		// The relay halves of the inbound a GOST tunnel generated belong to the
 		// tunnel: an ordinary save keeps the stored material and refuses a record
 		// that brings different material of its own. The merged record is written

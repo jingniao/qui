@@ -100,6 +100,13 @@ func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
 func (s *Service) canvasSnapshots(ctx context.Context, plan *canvasPlan, users AccessReader) ([]NodeSnapshot, error) {
 	expanded := make([]string, 0, len(plan.nodes))
 	snapshots := map[string]NodeSnapshot{}
+	// The nodes the drawing itself names - including the ones it only loses
+	// objects on - are published; the rest of the relay component it captured is
+	// only redeployed when its configuration actually changed.
+	touched := map[string]bool{}
+	for _, nodeID := range plan.nodes {
+		touched[nodeID] = true
+	}
 	for _, nodeID := range plan.nodes {
 		if _, done := snapshots[nodeID]; done {
 			continue
@@ -144,7 +151,9 @@ func (s *Service) canvasSnapshots(ctx context.Context, plan *canvasPlan, users A
 	}
 	result := make([]NodeSnapshot, 0, len(ordered))
 	for _, nodeID := range ordered {
-		result = append(result, snapshots[nodeID])
+		snapshot := snapshots[nodeID]
+		snapshot.ExpandedOnly = !touched[nodeID]
+		result = append(result, snapshot)
 	}
 	return result, nil
 }

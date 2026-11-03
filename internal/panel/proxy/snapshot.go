@@ -45,6 +45,11 @@ func snapshotList[T any](read func(int, int) ([]T, int, error)) ([]T, error) {
 type NodeSnapshot struct {
 	State         desiredstate.State
 	InboundIntent []string
+	// ExpandedOnly marks a node a drawing captured only because a relay
+	// relationship reaches it, not because the drawing itself touches it. A
+	// publication may leave such a node alone when it already runs exactly this
+	// configuration; a node the drawing touches is always published.
+	ExpandedOnly bool
 }
 
 // Snapshot renders the node's configuration.

@@ -102,7 +102,7 @@ flyx's user subscription handlers derive the caller's identity on the backend, l
 
 At the reviewed qui baseline, `Session.CurrentUser` is an administrative account (`auth.Admin`, Owner or Viewer), separate from a proxy user (`user.User`). The new portal reads the proxy-user management list, tries to match the login name, and falls back to the first returned user. A similar selection appears during subscription generation. The node page also contains a path that treats an administrator ID as a proxy-user ID.
 
-Sources: [authentication models](../../internal/panel/auth/model.go), [portal client page](../../web/src/modules/portal/pages/ClientAccessPage.vue), and [node list page](../../web/src/modules/nodes/pages/NodeListPage.vue).
+Sources: [authentication models](../../internal/panel/auth/model.go), portal client page (`web/src/modules/portal/pages/ClientAccessPage.vue`, since removed), and [node list page](../../web/src/modules/nodes/pages/NodeListPage.vue).
 
 Matching names or selecting the first record is not a reliable ownership relationship. An Owner's permission to read management data does not make that data the Owner's personal subscription. A Viewer does not acquire user-management permissions by entering portal mode.
 

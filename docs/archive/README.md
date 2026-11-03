@@ -36,3 +36,9 @@
 | [node-deletion-plan.en.md](node-deletion-plan.en.md) | 节点删除功能的实现规划（英文） |
 | [user-level-access-plan.md](user-level-access-plan.md) | 用户级接入计划草案（取代按方案授权的推导过程） |
 | [subscription-formats-plan.md](subscription-formats-plan.md) | 订阅格式计划草案：中立代理模型、mihomo 与 legacy Clash |
+| [v1.3-plan.md](v1.3-plan.md) | v1.3.0 已完成的 T1、P2、G1–G3 计划与发布过程 |
+| [v1.3-design-gost.md](v1.3-design-gost.md) | GOST 转发、契约和中继的设计决策；当前规则见说明书与协议矩阵 |
+| [v1.3-design-t1-p2.md](v1.3-design-t1-p2.md) | 整机月流量与 Xray 转发计量的已实施设计 |
+| [v1.3-g0-gost-findings.md](v1.3-g0-gost-findings.md) | 官方 GOST 3.3.2 的探测与实验记录 |
+| [v1.2-host-test-plan.md](v1.2-host-test-plan.md) | v1.2.0 三台主机的验收步骤与环境记录 |
+| [v1.2-rc1-findings.md](v1.2-rc1-findings.md) | v1.2.0 实机发现 F1–F13、修复与复验记录 |

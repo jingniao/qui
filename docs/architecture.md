@@ -1,8 +1,6 @@
 # 架构总览
 
-v1.1 同步：2026-10-28，尚未发布；下述历史 v1.0 描述中的 D1/D2/D5、设备管理与订阅路径由本次说明替代，运行证据见 [验收矩阵](v1-acceptance.md) 的 v1.1 部分。
-
-更新时间：2026-10-28（v1.1 文档同步）。性质：从当前源码提取的现状说明，不是验收报告。Phase 11 本地回归见进度记录；本轮未运行代理核心、远端节点或浏览器，结论可按源码复核。
+本文描述当前实现的模块与数据流；运行证据见[验收矩阵](v1-acceptance.md) §11–12，已完成设计见[归档](archive/README.md)。
 
 产品定位与完整需求见 [项目说明书](../AGENTS.md)；本节只写“代码里现在是什么”。与源码冲突时以源码为准。
 
@@ -12,9 +10,9 @@ v1.1 同步：2026-10-28，尚未发布；下述历史 v1.0 描述中的 D1/D2/D
 | --- | --- | --- | --- |
 | 中央面板 | `proxy-panel` | `cmd/panel`、`internal/panel/*`、`internal/platform/*`、`web/` | 管理、策略、订阅、发布、访问记录、备份 |
 | 节点 Agent | `proxy-agent` | `cmd/agent`、`internal/agent/*` | 注册、连接、编译、应用、采集、缓存、更新 |
-| 代理核心 | 官方 Xray；官方或 qui 的未修改上游 sing-box 构建 | 节点本地 `/usr/local/lib/proxy-agent/<core>` | 入站接入、分流、出站、中转、代理链、原生端口转发 |
+| 代理核心 | 官方 Xray；官方或 qui 的未修改上游 sing-box 构建；固定 GOST 3.3.2 | 节点本地 `/usr/local/lib/proxy-agent/<core>` | 入站接入、分流、出站、中转、代理链、原生端口转发（GOST 仅转发/中继） |
 
-中央端是一个 Go 程序加本地 SQLite，前端构建产物通过 `web.Files()` 嵌入同一程序（`cmd/panel/main.go:180`）。代理流量不经过中央端。
+中央端是一个 Go 程序加本地 SQLite，前端构建产物通过 `web.Files()` 嵌入同一程序（`cmd/panel/main.go`）。代理流量不经过中央端。
 
 ## 2. 监听与数据面
 
@@ -23,7 +21,7 @@ v1.1 同步：2026-10-28，尚未发布；下述历史 v1.0 描述中的 D1/D2/D
 | `http_address`（示例 `0.0.0.0:443`） | Web 页面、REST `/api/v1`、SSE `/api/v1/events`、订阅 `/sub/{token}` | HTTPS |
 | `grpc_address`（示例 `0.0.0.0:9443`） | 节点控制通道 | gRPC + 节点 mTLS |
 
-节点侧没有入站端口约定：入站由配置版本决定，节点按渲染结果监听（`internal/agent/core/xray/render.go`、`internal/agent/core/singbox/render.go`）。
+节点侧没有入站端口约定：入站由配置版本决定，节点按渲染结果监听（`internal/agent/core/xray/render.go`、`internal/agent/core/singbox/render.go`、`internal/agent/core/gost`）。
 
 ## 3. 面板模块
 
@@ -55,6 +53,8 @@ v1.1 同步：2026-10-28，尚未发布；下述历史 v1.0 描述中的 D1/D2/D
 | supervisor | `internal/agent/supervisor` | 每 3 秒探测出站健康；核心不健康时恢复上一成功配置 |
 | core/xray | `internal/agent/core/xray` | 官方 Xray 探测、渲染、启动、健康、账户统计、在线数、访问日志 |
 | core/singbox | `internal/agent/core/singbox` | 探测、渲染、启动、健康；有标签时 v2ray API 每用户计数；Clash 源连接观测与关闭 |
+| core/gost | `internal/agent/core/gost` | 固定 GOST 的转发/中继、监听健康与节点总量；不承载用户身份 |
+| tuning | `internal/agent/tuning` | 白名单 sysctl 请求、独立 root helper 与结果确认 |
 | collector | `internal/agent/collector` | 访问行解析、分钟桶聚合、隐私白名单 |
 | spool | `internal/agent/spool` | 断线缓存、批量上传、ACK 删除、容量上限 |
 | capability | `internal/agent/capability` | 系统资源采样（CPU、内存、磁盘）与心跳负载、采集/流量源状态 |
@@ -63,11 +63,11 @@ v1.1 同步：2026-10-28，尚未发布；下述历史 v1.0 描述中的 D1/D2/D
 | lifecycle / storage / agentprocess | `internal/agent/lifecycle` 等 | 共享状态进程锁与属主、存储格式下限检查、受管 Agent 进程的安装事务 |
 | identity | `internal/agent/identity` | 节点私钥、证书、ACK 位置、密钥轮换 |
 
-Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查、证书与更新、TTL 设备门控、受限 TCP-connect 探测）。端口转发使用正常发布路径和两核原生入站；没有任意命令执行或替代转发器。门控和 observer 在 supervisor 生命周期内运行，不写配置 Revision；Xray 使用官方 adrules/lsrules 并在非原子替换失败后恢复规则，sing-box 仅关闭用户与源都匹配的连接。
+Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查、证书与更新、TTL 设备门控、受限 TCP-connect 探测）。端口转发使用正常发布路径和各核心原生入站；没有任意命令执行或替代转发器。门控和 observer 在 supervisor 生命周期内运行，不写配置 Revision；Xray 使用官方 adrules/lsrules 并在非原子替换失败后恢复规则，sing-box 仅关闭用户与源都匹配的连接。
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。迁移在 `migrations/`，按顺序执行到 `0119`；新结构见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。迁移在 `migrations/`，按顺序执行到 `0128`；新结构见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |
@@ -80,7 +80,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 | 访问与流量 | `access_rollups`、`traffic_hourly`、`traffic_daily`、`node_status_snapshots` |
 | 系统 | `system_settings`、`backups` |
 
-协议特有字段保存在 JSON 列（如 `inbounds.settings_json`、`policies.match_json`、`nodes.capabilities_json`），Go 侧必须解析为明确结构，不做无结构透传（AGENTS 第 26 节）。
+协议特有字段保存在 JSON 列（如密封 JSON `inbounds.encrypted_settings`、`policies.match_json`、`nodes.capabilities_json`），Go 侧必须解析为明确结构，不做无结构透传（AGENTS 第 26 节）。
 
 ## 6. 关键流程
 
@@ -88,7 +88,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **配置发布与回滚**：Owner 保存业务配置 → 生成 Revision（`POST /api/v1/revisions`）→ 部署（`POST /api/v1/revisions/{id}/deploy`）→ Agent 渲染并校验核心原生配置 → 切换核心 → 健康检查 → 失败自动回滚到上一成功版本。代理链按“先出口、后中转、最后入口”发布，回滚反向（`internal/panel/deployment/relay_batches.go`）。
 
-**自动额度版本**：流量入库后由 `internal/panel/user` 的额度状态机判断，`internal/platform/server/quota.go` 按节点合并（60 秒窗口）后创建并部署只调整用户访问面的自动 Revision；目标节点是该用户当前授权的节点加上**已发布**状态里仍持有其凭据的节点。自动版本以节点**已发布**状态为基线，除用户与入站的绑定取自当前草稿（这类未发布编辑可能被带出）外，不会带出未发布的 Owner 编辑。入站的启用状态也不取自草稿：每个版本另行记录 Owner 当时启用的入站集合（`config_revisions.inbound_enabled_json`，迁移 `0111_inbound_enabled_intent.sql`），自动版本原样继承，凭据回到已发布状态下被禁用的入站时只有该记录说 Owner 曾启用才重新启用；记录为 NULL 时保守保持禁用。单节点发布、用户接入以及代理链/关联节点批次都会记录这份意图（`internal/panel/proxy/snapshot.go` 的 `SnapshotIntent`、`ChainSnapshots`、`RelaySnapshots` 与 `internal/panel/deployment/batches.go` 的 `CreateBatch`），只有调用方直接提交 state 的原始版本（`POST /api/v1/revisions`）留为 NULL。
+**自动额度版本**：`internal/platform/server/quota.go` 将用户访问变化按节点合并（60 秒），以已发布状态为基线替换用户凭据并创建 Revision。当前草稿的用户/入站绑定可以被带出；入站启用意图继承基线，不自动启用 Owner 禁用的入站。目标包括当前授权节点与已发布状态仍持有凭据的节点。完整重试、恢复和对账规则见[项目说明书](../AGENTS.md) §22.1。
 
 **订阅**：Token → 用户 → 来源（已发布节点、授权导入缓存）→ 中立代理模型 → 注册导出器（uri/base64/sing-box/clash/clash-legacy）。一个用户一个隐藏身份与共享链接，新 Token 以哈希查找、vault 加密副本供再次查看；旧 Token 无副本需重置。显式 format 优先，其次已验证 UA 表（当前为空），最后系统默认。sing-box 仍是片段；固定证书的 QUIC 在 URI/Base64 中省略，在 sing-box 中带证书、mihomo 中带指纹。全局规则模板按授权展开，不改节点策略；导入仅用于客户端，定时 HTTPS 固定公网 IP 抓取并加密缓存，不在订阅请求中联网。只有 mihomo 输出客户端链。
 
@@ -96,9 +96,15 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **节点删除**：`DELETE /api/v1/nodes/{id}` 先查引用（入站、出站、其他节点指向它的中转出站、出口组、代理链、分流规则、进行中的批量发布），有阻塞项时返回 409 `node_delete_blocked` 并带上 `blockers`（预览接口是 `GET /api/v1/nodes/{id}/deletion-preview`）。未登记且无身份的节点走“取消登记”，记录直接移除；已登记节点在同一事务里逻辑删除：写 `nodes.deleted_at`、`enabled=0`、`allow_subscription=0`、`status='disabled'`，把 `node_identities.revoked_at` 置位，删除注册码/续期/节点组成员，并用 `deployment.CloseNodeTasks` 关闭该节点自己的待发布配置、核心/Agent 更新任务与排队健康检查（`internal/panel/node/deletion.go`、`internal/panel/deployment/node_tasks.go`）。列表与选择器按 `deleted_at IS NULL` 过滤（`internal/panel/node/repository.go:300`），`?deleted=1` 只返回已删除节点；历史流量与访问记录保留。
 
-**遥测与访问记录**：Agent 每 5 秒采样账户计数写入本地 spool；心跳（面板指定 15 秒）里上传流量与访问批次，收到 ACK 才删除。Xray 的访问行来自 Agent 运行时目录下的 `access.log`（Agent 自己 tail，读到即清空，20 MiB 兜底上限），sing-box 的访问行来自核心日志（`internal/agent/collector/singbox.go`）。面板把域名级记录按分钟桶聚合入库，不保存正文、路径或凭据。
+**遥测与访问记录**：Agent 每 5 秒采样账户计数写入本地 spool；心跳（面板指定 15 秒）里上传流量与访问批次，收到 ACK 才删除。Xray 的访问行来自 `runtime/xray/access.log`（Agent 自己 tail，读到即清空，20 MiB 兜底上限），sing-box 的访问行来自核心日志（`internal/agent/collector/singbox.go`）。面板把域名级记录按分钟桶聚合入库，不保存正文、路径或凭据。
 
 **证书**：节点证书默认 90 天，到期前由 Agent 自动续期（`internal/agent/control/renewal.go`）；轮换与续期也可在节点停机时手工执行（见[运维手册](operations.md)）。
+
+**多核心运行**：`cores: [{name,path}]` 的首项是主核心，必须为 Xray 或 sing-box；GOST 不能是主核心。`cores.json.enc` 持久记录启用/禁用；每核使用 `runtime/<core>/`。一条 Revision 覆盖所有核心，先全部校验再依序切换，失败逆序补偿；发布仍重启该节点全部核心，supervisor 只恢复异常核心。移除须确认退出才删除运行目录与 Agent 自管镜像，安装器二进制与记录保留。
+
+**画布与 GOST**：共享隧道由 `canvas_tunnels` 与 `canvas_tunnel_objects` 显式归属，不按名称前缀认领。画布发布跳过配置与启用意图未变的依赖服务器，画布自身服务器仍发布。GOST 设置契约 1 为基础转发、2 为目标池/范围/限流、3 为加密中继；当前上报 3。中继仅用于服务器 `port_forward`，按隧道密封独立 CA 与两端证书，先出口后入口发布。凭据、备份与轮换规则见说明书 §14、§16、§29、§31。
+
+**三类流量**：账户字节进入用户额度；核心/节点总量含无身份转发（GOST relay 搬运不重复计入）；整机月流量来自单张网卡累计差值，含其他服务、只展示额度、不停止服务。整机日行与游标长期保留，资源/延迟遥测只保留 7 天。字段与未知值规则见说明书 §21，操作见[运维手册](operations.md) §18–20。
 
 ## 7. 部署路径
 
@@ -113,26 +119,26 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 | 节点 | `/etc/proxy-agent/config.yaml`、`/etc/proxy-agent/tls/ca.crt` | 配置与受信中央 CA（校验面板控制连接证书，即面板 Web 证书） |
 | 节点 | `/var/lib/proxy-agent/` | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/` |
 | 节点 | `/var/lib/proxy-agent/host-network/` | `desired.json`、`status.json`：服务器强制出站的 helper 目录 |
-| 节点 | `/usr/local/lib/proxy-agent/<core>` | 安装脚本放置的官方核心 |
+| 节点 | `/usr/local/lib/proxy-agent/<core>` | 安装脚本放置的核心（sing-box 可为 qui 构建） |
 | 两端 | `/var/lib/proxycontrol-install/` | 安装记录与操作锁 |
 
-日志：两个程序都写 stdout，由 systemd 收集到 journald（`internal/platform/logging`），不写 `/var/log` 下的文件。
+日志：两个程序都写 stdout，由 systemd 收集到 journald（`internal/platform/logging`），不写 `/var/log` 下的文件；OpenRC 经 `logger` 写 syslog。
 
-## 8. 决策的架构后果（D1–D5）
+## 8. 能力边界
 
 | 决策 | 架构后果 |
 | --- | --- |
-| D1 被 R3 部分取代 | Xray 官方；sing-box 官方或 qui 的未修改上游构建加上游标签，运行时探测 |
-| D2 被 R6/R7 取代 | 取消设备管理；跨入口源地址估计与内存准入，TTL 门控，缺能力或租约过期放行 |
-| D3 无每节点预算 | 只有一个用户额度；超限/到期/禁用由面板自动发布移除凭据的版本 |
-| D4 上游缺失能力 | 每域名字节可空、只记录“配置出口”、UDP 按上游、权重策略删除 |
-| D5 被 R3 条件取代 | `singbox_user_stats` 节点读取累计账户计数进入既有 spool/游标/额度；无能力的官方核仍节点总量、用户未知 |
+| 核心来源 | Xray 官方；sing-box 官方或 qui 的未修改上游构建加上游标签，运行时探测 |
+| 设备限制 | 取消设备管理；跨入口源地址估计与内存准入，TTL 门控，缺能力或租约过期放行 |
+| 用户额度 | 只有一个用户额度；超限/到期/禁用由面板自动发布移除凭据的版本 |
+| 上游边界 | 每域名字节可空、只记录“配置出口”、UDP 按上游、权重策略删除 |
+| 账户计数 | `singbox_user_stats` 节点读取累计账户计数进入既有 spool/游标/额度；无能力的官方核仍节点总量、用户未知 |
 
-## 8.1 v1.1 存储与生命周期
+## 8.1 存储与生命周期
 
-迁移现至 0119；0113 合并设备为隐藏身份。0114 增加用户登录、独立 `user_sessions` 与加密 Token；0115 增加 `device_limit`；0116 增加导入源、缓存、授权与客户端方案快照；0117 增加 `node_meta`；0118 增加流量重置周期/锚点/边界；0119 增加探测支持位、`probe_targets`、`node_tcp_probes`。备份校验与模块保守恢复覆盖新结构，恢复结束门户会话并使探测排队任务过期。完整表名见 AGENTS §26.9。
+迁移头为 0128。用户隐藏身份、门户、导入与设备限制之外，数据库还保存节点目标/指标/调优、多核心任务与计量、共享隧道及归属、整机流量和 GOST 密封材料。表结构与升级兼容规则由[项目说明书](../AGENTS.md) §26、§31 维护；各版本迁移变更见[变更记录](changelog.md)。恢复结束门户会话，探测任务过期，未确认的调优/组件操作不自动重发。
 
-定时导入、续费提醒、重置周期和额度对账均随面板停止/进程内恢复取消并等待结束。重置以面板时区本地日运算保留月锚点、夹紧短月；恢复保留当前重置边界。可选心跳增加宿主/核心 uptime、网卡计数及只读 sysctl，旧 Agent 缺字段显示未知。月节点流量只汇总本地月界内保留账户样本，`retained_account_samples` 不是清理后的完整月流量（L9）。原生核心、race、arm64 与实机证据仍待 CI/Owner；UDP 门控及无用户身份转发限制见 L8/L10。
+定时导入、续费提醒、重置周期和额度对账均随面板停止/进程内恢复取消并等待结束。重置以面板时区本地日运算保留月锚点、夹紧短月；恢复保留当前重置边界。可选心跳增加宿主/核心 uptime、网卡计数及只读 sysctl，旧 Agent 缺字段显示未知。月节点流量汇总本地月界内的 node_traffic_samples 去重视图，`retained_account_samples` 不是清理后的完整月流量（L9）。该代理样本口径与整机月流量不同；UDP 门控及无用户身份转发限制见[设备限制](device-limit.md)和[协议矩阵](protocol-support-matrix.md)。
 
 ## 9. 不在本版范围
 

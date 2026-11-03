@@ -12,8 +12,14 @@
 新地址超限后，通常要等约一个上报周期加投递时间（约 5–20 秒）才受限。
 Xray 拒绝匹配用户与来源的新连接，既有连接继续使用；sing-box 每 2 秒
 通过 Clash API 关闭匹配的活连接，因此是事后执行。Xray SOCKS5 UDP 没有
-用户身份，不受此限制。其他 UDP 协议的实测结果仍待 CI/Owner 验收；官方
-Xray 没有 Hysteria2/TUIC 入站，这两种协议只适用于 sing-box。
+用户身份，不受此限制。UDP 执行范围已由真实核心验证（[验收矩阵](v1-acceptance.md) §10.4、§11）：
+
+| 核心 | UDP 受设备限制 | UDP 不支持设备限制（TCP 仍受限） |
+| --- | --- | --- |
+| Xray | VLESS、Trojan、Shadowsocks | SOCKS5 |
+| sing-box | VLESS、Trojan | SOCKS5、Shadowsocks、Hysteria2、TUIC |
+
+官方 Xray 没有 Hysteria2/TUIC 入站。页面将协议自身的“不支持”与缺能力节点的“部分执行”分开显示；实现依据为 `node.DeviceGateUDPUnsupported`。
 
 gate 是有 3 分钟有效期的内存命令，不创建配置版本。面板失联后自动过期
 放行；能力不足、旧 Agent、API 字段缺失或观测失败时也放行。管理页面与
@@ -28,3 +34,5 @@ Xray 仅通过安装的官方核心的 `api adrules` 与 `api lsrules` 管理临
 失败后立即恢复已渲染的无 gate 路由并核对标签；验证失败则由 supervisor
 从当前成功修订重启。RoutingService 只在已有回环 API 上启用：该 API 没有
 认证，节点本地进程属于信任边界，不能把它暴露到主机外。
+
+Agent 每 500 ms 观测一次，按凭据保留最近 20 秒的来源；失败或节点/修订/核心纪元改变即清空。sing-box 短于采样间隔的连接可能漏观测，不能把估计数量当作物理设备数。

@@ -95,7 +95,7 @@
 
 **当前仍需衔接：** 模式切换使用 `viewMode`；这不是普通用户的独立认证体系。总览仍存在通过管理接口读取用户并按用户名匹配、失败取第一条的逻辑。真正的个人前台应由后端会话确定数据归属，不能依赖这种临时匹配。
 
-依据：[总览页面](../../web/src/modules/dashboard/pages/DashboardPage.vue)、[节点页面](../../web/src/modules/nodes/pages/NodeListPage.vue)、[模式状态](../../web/src/app/viewMode.ts)、[导航守卫](../../web/src/app/guards.ts)。
+依据：[总览页面](../../web/src/modules/dashboard/pages/DashboardPage.vue)、[节点页面](../../web/src/modules/nodes/pages/NodeListPage.vue)、模式状态（`web/src/app/viewMode.ts`，现已移除）、[导航守卫](../../web/src/app/guards.ts)。
 
 ## 4. 后台系统总览
 

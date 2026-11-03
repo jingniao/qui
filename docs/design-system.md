@@ -36,7 +36,7 @@
 
 ## 二、色彩体系 (Color Tokens)
 
-系统全面集成于 `web/tailwind.config.js` 的 `colors.ios` 配置中。**严禁在业务代码中硬编码 Hex 颜色或混用 Tailwind 默认的 slate/gray/blue/red 调色板。**
+语义色定义于 `web/tailwind.config.js` 的 `colors.ios`，共享控件样式在 `web/src/styles/main.css`。**严禁在业务代码中硬编码 Hex 颜色或混用 Tailwind 默认的 slate/gray/blue/red 调色板。**
 
 ### 1. 中性文字阶梯 (Neutral Typography Colors)
 

@@ -1,6 +1,6 @@
 # 部署与升级
 
-v1.1 补充（2026-10-28，尚未发布）：先升级面板，再逐台升级 Agent。1.1 面板兼容 1.0.9 Agent 的发布、回滚与 Xray 流量；旧 Agent 不接收设备门控，也不能排队 qui sing-box 核心更新，界面显示部分执行。升级前备份数据库与身份目录，核对 0113 合并设备对旧链接的影响；0112–0125 的内容见 [v1.2.0 发布说明草稿](release-notes-1.2.0.md)。降级跨迁移必须带匹配的升级前数据库，不能直接用 1.0.x 打开新库。
+当前发布状态见[项目说明书](../AGENTS.md#当前状态)。先升级面板，再逐台升级 Agent。旧 1.0.9 Agent 保持发布、回滚与 Xray 流量兼容，但不接收设备门控或 qui sing-box 更新，界面显示部分执行。升级前备份数据库与身份目录；从 1.0.x 升级须核对 0113 合并设备对旧链接的影响，见[v1.2.0 发布说明](release-notes-1.2.0.md)。v1.3.0 增加 0126–0128，v1.3.1 无迁移；跨迁移降级必须使用匹配的升级前数据库，不能用旧程序直接打开新库。
 
 核心来源显式参数为 `--core-source qui|official`：sing-box 默认 qui，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各自架构归档）；`official` 保留官方版本与 musl 专用归档及摘要。Xray 保持官方。qui 构建仅添加上游 `with_v2ray_api` 标签，其逐用户流量开始计入额度；切换前告知用户并核对额度。构建可复现性、原生核检查、Linux/arm64 实跑仍待 CI/Owner，不以脚本存在作为通过。
 
@@ -23,7 +23,7 @@ RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。L4 �
 - `install.sh` 会检查它用到的命令是否存在，缺失即拒绝：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 上另加 `systemctl`，OpenRC 上另加 `rc-service rc-update openrc-run`。安装核心时还需要 `unzip`（Xray zip）或 `tar`（sing-box tar.gz），下载需要 `curl` 或 `wget`。最小化安装的 Debian/Ubuntu 没有 `unzip`：systemd 主机上缺少时，`install.sh` 像 `nftables` 一样用 apt / dnf / yum 安装它（实测：debootstrap minbase 的 Debian 13）。
 - 脚本里所有需要校验证书的 `curl` 调用都带 `--no-insecure`。它会覆盖 curl 包装脚本或别名加在前面的 `-k`：实测有一台 Alpine LXC 的 `/usr/bin/curl` 被换成了 `curl.orig -k "$@"`。
 
-### K3c / MC4 多核心安装（已实现，v1.2.0 尚未发布；实机见验收矩阵 §11）
+### 多核心安装
 
 `install.sh --node` 与 `node-install.sh` 接受重复的 `--core`，例如
 `--core xray --core sing-box`（v1.3 起还可以加 `--core gost`）；不指定时，新节点只安装 Xray。重复同名核心或
@@ -76,20 +76,20 @@ cores:
 行为调优服务/触发器摘要（不适用时空行）。第 13 行起每核心一行：
 `core <name> /usr/local/lib/proxy-agent/<name> <sha256>`。面板也写 v2，保留全部
 12 行但没有核心条目。继续读取 v1 的第 5/6 行单核心和摘要，缺省 init 行视为
-systemd；升级写 v2，K2a 第 11/12 行的含义保持不变。
+systemd；升级写 v2，第 11/12 行的含义保持不变。
 
 新版 qui-update 的节点快照包含两个核心路径、Agent config、完整安装记录与
 原有 Agent/强制出站/调优文件。固定路径集合让失败或断电恢复不依赖正在替换的
 记录；新产生而快照中不存在的文件会被删除，已有文件和配置一起恢复。进度日志、
 锁、服务健康窗口和数据库回滚机制沿用原流程。卸载按 v1/v2 记录逐一校验并删除
 全部安装核心，继续保留配置、身份、revisions、spool、releases 等状态数据，
-并保留 K2a 的先清除调优再删除服务规则。
+并保留 的先清除调优再删除服务规则。
 
 **首次迁移必须从已审核、已校验的新发布包运行新版 update.sh**，方式与第 5.0
 节相同，选 `--component agent`。旧主机上的 updater 不具备新增核心/config
 快照保护。记录变为 v2 后，新 updater 在停止 Agent 前拒绝不支持 v2 的目标
 installer，防止降级丢失核心所有权；这不影响失败升级自动恢复到快照中的 v1
-记录、旧 Agent 与原配置。Linux/root 故障和断电回归尚待执行。
+记录、旧 Agent 与原配置。故障、中断与重启演练见[验收矩阵](v1-acceptance.md) §9、§11；真实断电未验证。
 
 ## 2. 构建发布包
 
@@ -97,10 +97,10 @@ installer，防止降级丢失核心所有权；这不影响失败升级自动�
 
 仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：发布构建从 `PATH` 读取工具。sing-box 构建另需 `git`、GNU `tar`、`gzip`、`sha256sum`、`readelf`，通过 `GOTOOLCHAIN=go1.26.10` 固定其工具链；它在临时目录克隆上游，不改本仓库的模块文件。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
 
-以下示例使用当前正式版 v1.0.9。
+以下命令以 v1.3.1 为例，执行时替换为目标版本。
 
 ```sh
-VERSION=1.0.9 bash scripts/build-release.sh
+VERSION=1.3.1 bash scripts/build-release.sh
 ```
 
 - `SKIP_NPM_CI=1` 复用已安装的前端依赖；sing-box 构建仍需克隆固定上游标签及下载其所需模块/工具链。`OUTPUT_DIRECTORY=/abs/path` 改变输出目录，默认 `dist/`。
@@ -109,15 +109,35 @@ VERSION=1.0.9 bash scripts/build-release.sh
 - 归档可复现：成员按名称排序、所有时间戳取源码提交时间（可用 `SOURCE_DATE_EPOCH` 覆盖）、属主统一为 root，gzip 不带时间戳，所以同一提交两次构建得到相同的 `SHA256SUMS`。
 - 脚本不运行测试、不部署。
 
-**门禁**：每个变更的完整证据是本地 Linux 测试机上的门禁——`bash scripts/check.sh` 加真实核套件（Xray、sing-box、mihomo 与 GOST）。真实核套件只跑含真实核测试的包：`scripts/real-core-packages.sh` 从测试源码里出现的 `XRAY_BINARY`／`SINGBOX_BINARY`／`MIHOMO_BINARY`／`MIHOMO_HOME`／`GOST_BINARY` 自动列出这些包（新增真实核测试只要按同一方式读取变量就会被收进来，不需要维护清单），并让它们并行执行（`-p 4`；这些包各用自己的临时目录与端口）。`check.sh` 里的 `go test -race ./...` 本来就按 CPU 数并行跑包，不要再加 `-p 1`。GitHub 只做二次确认：发布提交手动派发工作流运行 `check`；`cores` 作业默认关闭，每周（`schedule`）或手动派发时勾选 `cores` 才跑；`v*` 标签只构建发布，并要求同一提交已有成功的 `check`。qui sing-box 的两个可复现构建按 `scripts/build-singbox.sh` 的摘要缓存，同一版本只构建一次。实测（v1.3.1）：真实核套件 511–527 秒（原 1274 秒，同样是 119 项通过）、恢复测试单独约 330 秒（原 1133 秒），本地门禁合计 2366 秒（原约 3140 秒）；`check` 部分仍约 31 分钟，最长的包是 `internal/platform/server`（152 个串行测试，`-race` 下约 1580 秒），把它并行化是后续可选工作。
+**门禁**：每个变更在 Linux 测试机执行 `bash scripts/check.sh`（约 31 分钟）与真实核套件（约 9 分钟）。前者包含前端构建/自测、`go vet`、`go test -race`、程序构建和部署脚本检查，需要 root 或 sudo。后者使用已校验的 Xray 26.3.27、sing-box 1.14.3、qui sing-box、mihomo 与 GOST 3.3.2，设置对应二进制/数据环境变量后执行：
+
+```sh
+bash scripts/check.sh
+bash scripts/ci-real-core-test.sh -p 4 -count=1 -timeout 60m $(scripts/real-core-packages.sh)
+```
+
+选包脚本从测试源码中的 `XRAY_BINARY`、`SINGBOX_BINARY`、`MIHOMO_BINARY`、`MIHOMO_HOME`、`GOST_BINARY` 自动选出当前 8 个包；缺核心导致的跳过不算通过。不要给全量 race 门禁加 `-p 1`。
+
+GitHub Actions `check` 对每个发布提交手动派发（约 21 分钟），另每周运行；`cores` 只在每周或手动输入 `cores=true` 时运行。`v*` 标签只构建发布，并要求同 SHA 已有成功 `check`。qui sing-box 可复现构建按构建脚本摘要缓存。入口以 `.github/workflows/check.yml` 和 `scripts/` 为准，历史耗时见[变更记录](changelog.md)。
+
+本地开发（仅开发环境）：
+
+```sh
+npm --prefix web ci
+npm --prefix web run build
+go run ./cmd/panel --config deploy/examples/panel.dev.yaml
+go run ./cmd/agent --config deploy/examples/agent.dev.yaml
+```
+
+Web 为 `http://127.0.0.1:8080`，gRPC 为 `127.0.0.1:9443`，状态在 `state/`。前端热更新用 `npm --prefix web run dev`（`http://localhost:3000`，API 转发到面板）。
 
 ## 3. 安装面板
 
 在解包目录内执行（脚本要求同级的 `systemd/` 与 `examples/`）：
 
 ```sh
-tar -xzf proxy-control-1.0.9-linux-amd64.tar.gz
-cd proxy-control-1.0.9-linux-amd64
+tar -xzf proxy-control-1.3.1-linux-amd64.tar.gz
+cd proxy-control-1.3.1-linux-amd64
 sha256sum bin/proxy-panel
 deploy/linux/install.sh --panel --binary bin/proxy-panel --sha256 <sha256>
 ```
@@ -178,7 +198,7 @@ systemctl enable --now proxy-panel.service
 ```sh
 if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; \
 elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; \
-curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.9/node-install.sh | bash -s -- \
+curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.3.1/node-install.sh | bash -s -- \
   --version 1.0.9 --panel panel.example.com --grpc-port 9443 \
   --ca-sha256 <面板显示的 64 位小写十六进制> --token <一次性注册码> --core xray
 ```
@@ -221,8 +241,8 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.0.
 **第 2 步（节点）**：安装 Agent，需要时同时安装官方核心。
 
 ```sh
-tar -xzf proxy-control-1.0.9-linux-amd64.tar.gz
-cd proxy-control-1.0.9-linux-amd64
+tar -xzf proxy-control-1.3.1-linux-amd64.tar.gz
+cd proxy-control-1.3.1-linux-amd64
 deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
   --core xray --core-version 26.3.27
 ```
@@ -231,7 +251,7 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
 - **GOST（v1.3 G1）**：`--core gost` 安装固定官方 3.3.2。只有 linux/amd64：脚本从 `https://github.com/go-gost/gost/releases/download/v3.3.2/gost_3.3.2_linux_amd64.tar.gz` 下载，核对同发布 `checksums.txt` 中唯一匹配条目与面板内固定的归档摘要 `162feb43…a9d18274`，解包后只接受根目录 `gost`，要求 `gost -V` 首行 `gost 3.3.2 (...)`。这是静态链接的单一归档，**glibc 与 Alpine/musl 共用同一个资产**，不需要 musl 专用包；其他架构（含 arm64）明确拒绝，即使上游发布了对应归档。`--core-source` 仍只影响 sing-box，GOST 永远取自官方固定版本，也不接受 `--core-url`/`--core-sha256` 覆盖。安装位置为 `/usr/local/lib/proxy-agent/gost`，没有独立服务单元（由 Agent 托管子进程），v2 安装记录写成 `core gost /usr/local/lib/proxy-agent/gost <二进制 sha256>`。
 - qui 来源只下载 `jingniao/qui` 的同版本资源和 `SHA256SUMS`，不接受覆盖 URL 或摘要。`--core-source official` 保留官方 URL 前缀、`--core-url`、`--core-sha256` 和 Xray `.dgst` 路径；没有可信摘要就不安装。
 - qui 构建使用未修改的上游 v1.14.4、go1.26.10、上游 non-naive 标签加 `with_v2ray_api`，CGO=0；同一架构的静态归档同时用于 glibc 和 musl。官方来源在 musl 主机仍选单独的 `-musl.tar.gz` 与摘要。
-- 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径不变，配置按 K3c 写入完整 cores 集合和第一个核心的兼容旧键。
+- 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径不变，配置按多核心安装约定 写入完整 cores 集合和第一个核心的兼容旧键。
 - v1.2 多核心通过 Owner 的核心选择配合安装/更新步骤生效，安装器支持并存的 Xray 与 sing-box；新增核心用重复 `--core`，配置以 `cores` 为准。删除核心需另行核对配置与已发布入站，省略安装参数不会删除已有核心。切换前先处理目标核心不支持的入站（例如 Xray 不支持 Hysteria2/TUIC），发布并确认成功。从 v1.0.6 起，如果新核心编译或启动不了上一修订，Agent 记一条错误日志，让核心保持停止，但照常连上面板（节点显示核心不健康），收到能用的新修订后正常应用；重试间隔从 3 秒倍增到 1 分钟。修订文件校验失败等完整性错误仍会让 Agent 退出。v1.0.5 及更早版本在这种情况下会反复退出、连不上面板（[验收矩阵](v1-acceptance.md) 9.13）。
 - 脚本还会创建服务账号 `proxy-agent` 和目录 `/etc/proxy-agent`、`/etc/proxy-agent/tls`、`/var/lib/proxy-agent`，不启动服务。
 - 脚本还会创建 `/var/lib/proxy-agent/host-network`（0700，服务器强制出站的 helper 目录），安装并启用两个固定单元：`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）与监视 `desired.json` 的 `proxy-agent-host-network.path`。它们只维护一个 nft 表 `inet proxy_agent_source`，不改变主机上的其他规则。
@@ -268,7 +288,7 @@ systemctl enable --now proxy-agent.service
 qui-update                  # 安装 GitHub 上的最新发布
 qui-update --version 1.0.1  # 指定版本
 qui-update --yes            # 不询问确认
-qui-update --version 1.0.9 --bundle proxy-control-1.0.9-linux-amd64.tar.gz --sums SHA256SUMS
+qui-update --version 1.0.9 --bundle proxy-control-1.3.1-linux-amd64.tar.gz --sums SHA256SUMS
                             # 离线：用本地归档与其 SHA256SUMS，不访问 GitHub
 ```
 
@@ -296,7 +316,7 @@ qui-update --version 1.0.9 --bundle proxy-control-1.0.9-linux-amd64.tar.gz --sum
 - 更新前备份（`pre-update-*`）与回滚保留的数据库（`failed-update-*`）不会自动清理，确认不再需要后可手工删除。
 - **先更新面板，再更新节点**；面板升级期间节点继续用旧配置运行。
 
-### 5.0 RC 与旧更新器的首次升级（待 Owner/主机验收）
+### 5.0 RC 与旧更新器的首次升级
 
 旧版已安装的 `qui-update` 无法解析 RC 或组件参数。首次使用时，在 root shell 中从放有**已审核**归档与配套 SHA256SUMS 的目录执行下面的命令；先校验再解包，运行归档里的新版更新器（同目录的新版 service.sh 会被采用），仍由它执行备份、预检、快照、日志和回滚。不能只把 RC 改名为正式版本或直接运行 install.sh 绕过更新保护。以下为 amd64，其他架构须替换资产后缀；RC 编号由 Owner 指定。
 
@@ -313,7 +333,7 @@ bash "$rc_dir/deploy/linux/update.sh" --component panel --version "$rc_version" 
 
 校验或解包失败时停止，不执行下一行。RC1 到此为止，所有 Agent 保持 1.0.9。以后已安装新版更新器的组合主机可运行 `qui-update --component panel --version 1.2.0-rc.2 --bundle proxy-control-1.2.0-rc.2-linux-amd64.tar.gz --sums SHA256SUMS`；确认面板就绪后，再在每个节点主机（含组合主机）运行相同版本的 `--component agent`。仍为旧更新器的 Agent 主机须按上面的校验/解包方式运行归档内 update.sh，只把组件改为 agent。
 
-版本比较使用 semver 优先级：`1.0.9 < 1.2.0-rc.1 < 1.2.0-rc.2 < 1.2.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。K3c 将安装记录升级为上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
+版本比较使用 semver 优先级：`1.0.9 < 1.2.0-rc.1 < 1.2.0-rc.2 < 1.2.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。安装记录使用上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
 
 ### 5.1 面板降级与数据库回退
 
@@ -353,11 +373,11 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 
 `qui-update` 在 OpenRC 节点上同样可用：它通过 `/usr/local/lib/proxycontrol/service.sh` 停止和启动 `proxy-agent`，健康检查读取 supervise-daemon 记录的子进程 PID（`/run/openrc/options/proxy-agent/child_pid`）。
 
-节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 K3c 安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；Agent 自身升级要走面板的 Agent 更新任务（系统 → Agent），它按签名清单校验，并在失败时回滚。
+节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 多核心安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；Agent 自身升级要走面板的 Agent 更新任务（服务器 → Agent 管理），它按签名清单校验，并在失败时回滚。
 
 **发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
 
-**代理核心**：不走 `install.sh`。在面板“系统 → 核心版本”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 只用于首装。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。**降级 Agent 到 1.3 以下之前必须先移除 GOST 核心**（“内核管理 → 移除”，会先确认没有入站使用它），否则旧 Agent 无法读取三种核心类型。
+**代理核心**：不走 `install.sh`。在面板“服务器 → 代理核心”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 可用于安装或显式替换/追加核心；省略不删除核心。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。**降级 Agent 到 1.3 以下之前必须先移除 GOST 核心**（“内核管理 → 移除”，会先确认没有入站使用它），否则旧 Agent 无法读取三种核心类型。
 
 ## 6. 卸载
 
@@ -416,10 +436,10 @@ grep -F proxy-agent /var/log/messages | tail -n 200
 - 更新被打断或开机后版本不对：看 `/var/lib/proxycontrol-install/update-recovery.log`、`interrupted-update.log`，以及 `journalctl -u proxycontrol-update-recovery`（OpenRC：`rc-service proxycontrol-update-recovery status` 与 `/var/log/messages`）。`/var/lib/proxycontrol-install/rollback.*` 仍在说明恢复没有完成，再运行一次 `qui-update` 会先重试恢复。
 - 面板起不来且怀疑数据库版本：`proxy-panel --check-database /var/lib/proxy-panel/backups/<文件>.db` 只读检查一份**停止状态**的数据库副本，输出 `database: compatible|newer|foreign|damaged`（退出码 0/3/4/5）；`newer` 表示数据库来自更新的面板，需按 5.1 带 `--database` 降级。
 
-## K2a Agent 安装增量（K2b 面板已接入；v1.2.0 尚未发布）
+## 调优 helper 与自动续证
 
 Agent 安装与一键安装新增 `/var/lib/proxy-agent/tuning/`（Agent 所有、0700），systemd 的 proxy-agent-tuning.service/.path 或 OpenRC 的 proxy-agent-tuning 与 tuning-watch；安装时启用并布防，开机重放保留请求。主程序仍无调优特权，独立 root helper 带 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者用于 Agent 的 0700/0600 文件协议），固定写入 13 个 sysctl；fs.file-max 使用 root 文件权限。systemd 将 /proc/sys 默认设为只读，仅开放白名单文件；OpenRC 没有对应的文件系统隔离。无需 sysctl 二进制或新依赖，不加载拥塞控制模块；容器/内核拒绝时失败并恢复，不补权限。
 
-成功配置为 `/etc/sysctl.d/99-proxy-tuning.conf`，原值快照为 root 0600 的 `.proxy-tuning-snapshot.json`。不要把该快照放进 Agent 可写目录。卸载使用安装记录第 11/12 行校验新增单元，停止触发器后先恢复快照；失败中止卸载。qui-update 文件快照覆盖新增单元和 watcher，回滚到旧版本时恢复/移除对应文件。具体排障及 Linux/root 待验收范围见[运维手册第 18 节](operations.md#18-k2a-主机观测续证与调优-helper)。
+成功配置为 `/etc/sysctl.d/99-proxy-tuning.conf`，原值快照为 root 0600 的 `.proxy-tuning-snapshot.json`。不要把该快照放进 Agent 可写目录。卸载使用安装记录第 11/12 行校验新增单元，停止触发器后先恢复快照；失败中止卸载。qui-update 文件快照覆盖新增单元和 watcher，回滚到旧版本时恢复/移除对应文件。具体排障见[运维手册第 18 节](operations.md#18-主机观测续证与调优-helper)。
 
-证书改为满 30 天或余期不超过 14 天时在控制连接内用原密钥续证；面板仍签发 90 天证书。先发布支持该准入条件的 K2b 面板，再升级 Agent，旧面板会拒绝过早的自动续证。HostInfo 与新增心跳字段均为增量协议，旧 Agent 的未知数据由面板显示“—”。
+证书改为满 30 天或余期不超过 14 天时在控制连接内用原密钥续证；面板仍签发 90 天证书。先升级支持该准入条件的面板，再升级 Agent，旧面板会拒绝过早的自动续证。HostInfo 与新增心跳字段均为增量协议，旧 Agent 的未知数据由面板显示“—”。

@@ -1,10 +1,8 @@
-# 协议与能力支持表（W12）
+# 协议与能力支持表
 
-v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列第 7 节为准；真实核心 CI 与实机证据仍待 CI/Owner，源码支持不等于通过。
+本表描述当前源码支持与上游边界，不替代运行证据。基础协议证据见[验收矩阵](v1-acceptance.md) §9.12、§10.4，v1.2 与 v1.3 实机结果见 §11–12。真实主机范围为 linux/amd64；arm64 仅做 qemu-user 模拟，正式浏览器走查未执行。
 
-更新：2026-10-17（Phase 14 复核，原表 Phase 6.5）。性质：从当前源码与官方上游核提取的**结构化支持表**，不是验收报告，不含运行证据。本轮只做源码、必要编译和文档；未运行测试、核心、节点、浏览器或真实迁移。
-
-本表描述未修改的官方上游能力：Xray 26.x 官方发布核、sing-box 1.14.x 官方核及加上游标签的 qui 构建。fork 专有维度（`egress_proof`、`inbound_bytes`）已删除，v1.1 不恢复补丁核；账户统计和门控的新能力单独协商。
+本表描述未修改的官方上游能力：Xray 26.x 官方发布核、sing-box 1.14.x 官方核及加上游标签的 qui 构建。fork 专有维度（`egress_proof`、`inbound_bytes`）已删除，不使用补丁核；账户统计和门控的新能力单独协商。
 
 ## 1. 依据与用法
 
@@ -14,11 +12,11 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 - `desiredstate.State.Validate`（`state.go`）、`proxy.ValidateInbound`/`ValidateOutbound`（`internal/panel/proxy/model.go`）、`proxy.Service.SaveInbound`/`SaveOutbound`（`internal/panel/proxy/service.go`）调用该表：协议方向按 `SupportsInbound`/`SupportsOutbound` 判定；节点已上报核心名时再按 `CoreSupportsInbound`/`CoreSupportsOutbound` 拒绝该核不支持的方向。
 - `GET /api/v1/protocol-support`（`internal/panel/proxy/handler_http.go`，Owner 与 Viewer 均可读）返回同一张表；前端 `web/src/modules/proxy/api.ts` 的 `loadProtocolSupport()` 读取后替换入站/出站协议下拉选项，失败时退回与表完全一致的静态清单。
 
-状态标记沿用计划口径：
+API 保留以下兼容状态字符串，表示源码能力；运行验收状态另看验收矩阵：
 
 | 标记 | 含义 |
 | --- | --- |
-| `implemented_pending_acceptance` | 源码已实现，待本版运行验收；不等于运行通过 |
+| `implemented_pending_acceptance` | 源码已实现；这是保留的 API 值，不表示当前发布尚未验收，也不单独证明运行通过 |
 | `pending` | 尚未实现 |
 | `not_applicable` | 协议定义之外，不构成缺口 |
 
@@ -55,7 +53,7 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 | --- | --- | --- | --- | --- | --- |
 | forward（GOST） | 入站 | tcp+udp | none | `implemented_pending_acceptance` | 官方 GOST `tcp`/`udp` 转发服务直连目标；没有用户身份、账户计量、额度、设备门控、订阅、源地址观测或域名记录，也没有出站、分流与出口组（唯一要求是启用中的 `direct` 默认出站） |
 
-固定版本、安装方式与运行健康含义见[部署与升级](deployment.md)与[运维手册](operations.md)，契约见 [GOST 设计](v1.3-design-gost.md)。
+固定版本、安装方式与运行健康含义见[部署与升级](deployment.md)与[运维手册](operations.md)，契约与凭据规则见[项目说明书](../AGENTS.md) §12、§14、§28–29。
 
 ### GOST 转发的池、范围与限流（v1.3 G2）
 
@@ -80,7 +78,7 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 | 中继认证（mTLS） | 支持 | `handler: relay` + `listener: {type: tls, tls: {certFile,keyFile,caFile}}`，`caFile` 让客户端证书成为必需；监听类型 `mtls` 是**多路复用** TLS，不用于双向认证 |
 | 入口链 | 支持 | 链挂在 `handler.chain`（不是 service 级）：`connector: relay` + `dialer: {type: tls, tls: {certFile,keyFile,caFile,serverName}}`；未知链名会被静默直连，所以 Agent 渲染后自检引用 |
 | 客户端证书要求 | 强制 | 无证书或异构 CA 的客户端被拒；G0 §6.3 实测表现为“接受后空回复”，不是拒绝握手 |
-| TCP/UDP 经中继 | 支持（待实机） | 转发服务照旧带目标池；UDP 经中继的真实执行需 Linux 测试机与实机门禁确认 |
+| TCP/UDP 经中继 | 支持 | 转发服务照旧带目标池；TCP 与 UDP 主机证据见验收矩阵 §12（RC-E 补测 UDP） |
 | 凭据轮换 | 有损 | 一次普通发布先出口后入口，两次部署之间隧道短暂中断；删除隧道不撤销离线节点上的旧凭据 |
 | 计量 | 节点总量 | 中继服务不计入节点总量（只重复搬运已计字节），计入的是入口节点的转发服务；仍无用户额度、设备门控与域名归属 |
 
@@ -99,7 +97,7 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 | `subscription` | 可进入用户订阅 |
 | `udp` / `ipv6` / `tls` / `quic` / `transport_ws` / `transport_grpc` | 协议/传输族能力 |
 
-已删除的 fork 维度：`egress_proof`（跨节点认证出口证明）与 `inbound_bytes`（入口逐连接 payload 字节）。两者只由受控核上报，官方核无法提供；Phase 7.3 已删除 `pkg/contracts/observation` 的关联/观测契约、面板的观测读侧与 `GET /access-records/egress-proofs` 页面（迁移 `0105_drop_fork_observation.sql`）。代码中剩余的 `observation` 字样属于无关命名（存储观测 `internal/panel/access/storage_observation.go`、账户流量采样）；`pkg/contracts/agentpb` 里仍留有 fork 时代的死字段，因为本机没有 `protoc`，它们既不被设置也不被读取。
+已删除的 fork 维度：`egress_proof`（跨节点认证出口证明）与 `inbound_bytes`（入口逐连接 payload 字节）。两者只由受控核上报，官方核无法提供；Phase 7.3 已删除 `pkg/contracts/observation` 的关联/观测契约、面板的观测读侧与 `GET /access-records/egress-proofs` 页面（迁移 `0105_drop_fork_observation.sql`）。代码中剩余的 `observation` 字样属于无关命名（存储观测 `internal/panel/access/storage_observation.go`、账户流量采样）；历史移除过程见[变更记录](changelog.md)。
 
 ## 4. 官方上游无法提供的部分（D4/D5）
 
@@ -112,27 +110,19 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 - **SOCKS5 作用域 UDP 策略无法匹配身份**：sing-box 渲染直接拒绝该组合（`internal/agent/core/singbox/render.go` 的 `sing-box scoped SOCKS5 UDP identity requires native validation before publication`）。
 - **WireGuard 每 peer 用户归属**：sing-box 官方核没有入站；能归属到用户的入站按上游能力提供，无法归属的入站不报每用户流量，UI 明示。
 
-## 5. 仍未实现/待验收（不缩减）
+## 5. 验收范围与剩余边界
 
-- 规则真实匹配（用户/设备/节点/组、域名精确/后缀/通配、服务集、IP/CIDR、端口、TCP/UDP、时间范围）、默认优先级与 DST 边界：源码已有，运行待验收。
-- 出口组主备/轮询/延迟优先与递归备用、健康失败不隐式 Direct：源码已有，运行待验收。
-- A→B、A→B→C 环路/跳数/缺内部入口/协议-UDP 不匹配/端口冲突校验、先出口后入口发布、回滚反向：源码已有，运行待验收。
-- 订阅授权组动态展开、隐藏中转、撤销凭据、未成功发布过滤与三种导出格式：源码已有，运行待验收。
-- ~~Xray WireGuard TUN 入站 UDP 端到端、A→B/A→B→C 数据面：受控环境实测待做。~~ 已实测：全部协议的入站、出站、认证、UDP、分流与两条 A→B→C 链见[验收矩阵](v1-acceptance.md) 9.12（Xray 与 sing-box 都覆盖）。
-- 完整系统 TUN 按 AGENTS 第 36 节延后，不冒充已交付。
-- 域名级访问记录已改由上游输出生成（Xray access log、sing-box 核心日志）：Phase 7 完成，运行验收仍待做。
-
-以上实测项需要 owner 的 Linux VM（含官方 Xray/sing-box 二进制）执行，属于[验收矩阵](v1-acceptance.md)的范围；本表不因源码存在而记为通过。
+规则、出口组、链路、订阅与域名记录均有运行证据，逐项见[验收矩阵](v1-acceptance.md) §9–12；不能把“源码已实现”直接等同所有环境通过。完整系统 TUN 不在当前交付范围。GOST UDP 限速与 UDP 目标失效切换未找到专项主机证据，保留上表限制；已验证的 TCP 双向限速、连接上限、IPv6 与中继 UDP 见 §12。
 
 ## 6. 核心版本与更新方式
 
-- 节点运行官方发布二进制，路径由 Agent 配置的 `core_path` 指定（示例 `/usr/local/lib/proxy-agent/xray`）；`install.sh --core` 负责首装并校验归档摘要。
+- 节点通过 `cores: [{name,path}]` 配置核心，旧 `core_path` 映射为单核心。Xray 使用官方发布，sing-box 可选官方或 qui 未修改上游构建，GOST 固定 3.3.2；安装器校验归档摘要，面板添加的镜像位于 Agent 状态目录，详见[部署与升级](deployment.md)。
 - 核心能力随版本不同：Agent 在运行时探测（Xray 读 `version` 并探测统计/在线统计；sing-box 读 `version` 的 `Tags:` 并探测 Clash API），缺失能力上报为不可用而不是拒绝运行（D1）。
-- 后续升级由面板“系统 → 核心版本”录入 `组件 / 稳定版本号 / 官方 GitHub 资源 URL / 归档 SHA-256`（Phase 8，`CoreUpdateRequest` schema 2），节点侧再次校验摘要后切换，健康失败回滚；核心不再使用签名目录，签名目录只服务 Agent 自更新。
+- 后续升级由面板“服务器 → 代理核心”录入 `组件 / 稳定版本号 / 官方 GitHub 资源 URL / 归档 SHA-256`（Phase 8，`CoreUpdateRequest` schema 2），节点侧再次校验摘要后切换，健康失败回滚；核心不再使用签名目录，签名目录只服务 Agent 自更新。
 - 本表以 Xray 26.3.27 与 sing-box 1.14.3 为基准版本；换成其他稳定版本时需重新核对本表。
 - Alpine（musl）节点装 sing-box 时 `install.sh` 与 `node-install.sh` 取官方的 `-musl` 归档（glibc 归档在那里起不来），摘要按架构与 libc 各自固定；Xray 只发静态二进制，不分 libc。
 
-## 7. v1.1 格式、账户计数与门控
+## 7. 订阅格式、账户计数与门控
 
 | 协议/功能 | URI / Base64 | sing-box 片段 | mihomo（clash） | legacy Clash |
 | --- | --- | --- | --- | --- |
@@ -155,6 +145,6 @@ v1.1 同步：2026-10-28，尚未发布。历史 D1/D2/D5 的对应行以下列�
 | WireGuard | 按原核心可归属能力；共享密钥一次一端 | 不计入限制 |
 | 原生 forward | 无用户身份，不计用户额度 | 不计入限制，无用户访问归属 |
 
-设备限制是 IPv4 / IPv6 /64 跨入口去重估计，NAT/双栈/切网有误差，TTL 过期放行。Xray SOCKS5 UDP 无用户归属不能门控；Xray 无 Hysteria2/TUIC 入站。sing-box 的 Hysteria2/TUIC UDP 数据报门控尚待专项实验（L8），不以 QUIC TCP 流关闭替代。每域名字节仍可空，账户统计不改变 D4。
+设备限制是 IPv4 / IPv6 /64 跨入口去重估计，NAT/双栈/切网有误差，TTL 过期放行。Xray SOCKS5 UDP 无用户归属不能门控；Xray 无 Hysteria2/TUIC 入站。sing-box 的 SOCKS5、Shadowsocks、Hysteria2、TUIC UDP 均不支持设备限制，TCP 仍受限制；完整实测范围见[设备限制](device-limit.md)。每域名字节仍可空，账户统计不改变 D4。
 
-默认 sing-box 来源改为同发布的 qui 静态归档（未修改上游 v1.14.4 加上游标签，架构内 glibc/musl 共用）；显式 `--core-source official` 才用历史官方/musl 路径。两核原生 forward 支持 TCP/UDP，必须声明独立能力。A8/A9/A10/AU6 的原生、构建与实机证据状态见验收矩阵；本轮没有执行代理核心。
+默认 sing-box 来源改为同发布的 qui 静态归档（未修改上游 v1.14.4 加上游标签，架构内 glibc/musl 共用）；显式 `--core-source official` 才用历史官方/musl 路径。两核原生 forward 支持 TCP/UDP，必须声明独立能力。A8/A9/A10/AU6 的原生、构建与实机证据状态见验收矩阵。

@@ -1,8 +1,20 @@
 # V1 验收矩阵
 
+## 当前验收摘要（2026-11-03）
+
+最新正式版 **v1.3.1**（tag → `ebe8301`），三台验收主机均运行该版：us2-node 面板＋Agent、uk-node Agent、alpine-node Alpine LXC/OpenRC Agent。v1.3.1 无迁移，迁移头仍为 0128。
+
+- 已验收：v1.2 用户门户、设备限制、多核心、调优、转发与订阅等见 §11；v1.3 整机月流量、Xray 转发计量、GOST 转发/加密中继见 §12。v1.3.1 RC-F 覆盖移除运行目录、画布依赖裁剪、受管入站改名拒绝与双向限速；RC-G 覆盖每连接 spool 容量设置与三节点持续在线，正式版升级结果也在 §12。
+- 未验证或受限：真实 arm64 主机（只有 qemu-user 模拟）、正式浏览器走查、真实断电（kill -9/重启演练不等同掉电）。协议自身限制、GOST 健康探测、LXC 网卡范围与发布重启全部核心等见[发布说明 1.3.1](release-notes-1.3.1.md)和 §12；本摘要不把未执行项改为通过。
+- 证据导航：§1–7 为规则/标准；§8–9 为 v1.0.x 实机记录；§10 为合并入 v1.2.0 的 v1.1 清单与原生核心 CI；§11 为 v1.2.0；§12 为 v1.3.0、v1.3.1 及补充验证。已完成的步骤与缺陷报告见[归档](archive/README.md)。
+
+以下带日期的旧判定保留作证据，不代表当前发布状态。
+
+### 历史摘要（截至 2026-10-26）
+
 更新时间：2026-10-26（v1.0.8 发布与三台主机升级，9.19；此前为 v1.0.8 发布前复验：核心更新结果重发与入站启用意图两项修复及五项回归，9.18（`1663e4a`）；此前为 v1.0.7 发布、三台主机升级与四项修复的实机复测，9.16；其后为 v1.0.8 发布前验收与五项实机回归，9.17（`7b99d8e`、`8608678`）；此前为代码审查报告五个问题的核实与修复，9.15；此前为 v1.0.6 发布与 Agent 启动恢复失败不再反复重启的实机复测，9.14；此前为 v1.0.5 发布与两项修复的实机复测，9.13）。标准来自 [项目说明书](../AGENTS.md) 第 34 节的 25 条，以及第 33 节的测试要求与第 35 节的边界；本轮按轻量重构计划的决策 D1–D5 更新验收动作。
 
-**当前总判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
+**2026-10-26 时的阶段判定：V1 未完成。** 2026-10-22 在两台 Linux 主机上做了第一轮实机验收（结果见第 8 节）：大部分项通过，同时发现并修复了 10 个缺陷，三节点项（V01、A→B→C）与 arm64 因环境缺失跳过。同日第二轮接入第三台主机（Alpine LXC，第 9 节），节点 Agent 的 OpenRC 安装、服务管理、崩溃恢复与强制出站实机通过（9.4）。2026-10-23 两轮的修复作为 **v1.0.1** 发布，第三轮（9.5）用发布版完成了 V01（三节点）、A→B→C、原版 Alpine 引导、从 GitHub 一键安装、真实 `qui-update` 与真实 LXC 重启。第四轮（9.6）修复并实测了一键安装与 `qui-update` 的失败处理和自动回滚，作为 **v1.0.2** 发布后在 systemd 与 OpenRC 上复测了从 GitHub 安装与更新（9.7）。arm64 仍未验证，其余 [实机] 项以第 8 节为准。带 **[实机]** 的项必须在 owner 的 Linux VM 上执行；面板与节点两侧都要有真实进程、真实核心和真实流量。
 
 ## 1. 状态与证据规则
 
@@ -18,8 +30,8 @@
 | 面板 | `deploy/linux/install.sh --panel ...`，配置 `deploy/examples/panel.yaml` |
 | 节点 | `deploy/linux/install.sh --node ... [--core xray|sing-box ...]`，登记 `deploy/linux/enroll.sh --token-file FILE` |
 | 官方核心 | Xray 26.3.27、sing-box 1.14.3 官方发布二进制（核心相关项必须使用） |
-| 自动门禁 | 每个变更在本地 Linux 测试机上过门禁：`bash scripts/check.sh`（web 构建、前端时间测试与自测、`go vet`、Agent fixture、`go test -race`、两个构建、部署脚本检查）＋真实核套件。GitHub 只在手动（`workflow_dispatch`）与每周（`schedule`）运行 `.github/workflows/check.yml` 的同一脚本与可选的 `cores` 作业（真实核测试）；`release` 作业只在 `refs/tags/v*` 上运行，**不重复门禁**：要求同一 commit 已有一次成功的 `check` 作业（先手动跑工作流、再打标签），拒绝非 `vMAJOR.MINOR.PATCH` 标签，构建两个架构的归档与 `SHA256SUMS` 并用 `gh release create` 发布（v1.0.0 即由它发布）。CI 通过不等于验收通过 |
-| 单元/集成测试 | `go test -count=1 ./...`；设置 `XRAY_BINARY` / `SINGBOX_BINARY` 后真实核用例不再跳过 |
+| 自动门禁 | 每个变更在本地 Linux 测试机上过门禁：`bash scripts/check.sh`（web 构建、前端时间测试与自测、`go vet`、Agent fixture、`go test -race`、两个构建、部署脚本检查）＋真实核套件。GitHub 只在手动（`workflow_dispatch`）与每周（`schedule`）运行 `.github/workflows/check.yml` 的同一脚本与可选的 `cores` 作业（真实核测试）；`release` 作业只在 `refs/tags/v*` 上运行，**不重复门禁**：要求同一 commit 已有一次成功的 `check` 作业（先手动跑工作流、再打标签），接受 `vMAJOR.MINOR.PATCH` 与 `vMAJOR.MINOR.PATCH-rc.N` 标签，构建两个架构的归档与 `SHA256SUMS` 并用 `gh release create` 发布（v1.0.0 即由它发布）。CI 通过不等于验收通过 |
+| 单元/集成测试 | `go test -count=1 ./...`；设置 各真实核环境变量后用 `scripts/real-core-packages.sh` 选包并以 `-p 4` 执行，详见部署文档 |
 
 测试命令与参数见[部署与升级](deployment.md)，日常操作见[运维手册](operations.md)，能力范围见[协议支持矩阵](protocol-support-matrix.md)。
 
@@ -1143,7 +1155,7 @@
 
 **结论。** v1.0.9 已发布，三台主机已升级到面板/Agent 1.0.9，两项修复实机通过，回归通过，没有未解决的 P1/P2。arm64 仍未实机验证。
 
-## 10. v1.1 验收清单（2026-10-28，尚未发布）
+## 10. v1.1 验收清单（并入 v1.2.0；含原生核心 CI）
 
 此节覆盖 [v1.1 计划](archive/v1.1-plan.md) 全部 P/A/AU 验收编号。下表“本地证据”指既有阶段记录和本轮本地 gate；具体命令、测试名与审查修复见 [进度记录](archive/v1.1-progress.md) 对应阶段，Phase 11 保留本轮真实退出码。未设置代理核心环境变量的跳过不算原生核心通过。历史第 3、4 节的设备、D1/D2/D5 标准不再适用于 v1.1 的对应部分，现按 R1–R9 与 D-a 至 D-e 验收；历史通过结论不自动延伸到新版本。
 
@@ -1237,9 +1249,9 @@ L1 限速已移除；L2 调优/内核转发未批准；L3 无 Agent 的导入隧
 
 R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–F31、B1–B11 的实现与审查证据分别留在 U1/U2、Phases 1–10、U5 和 Part I 记录，不把 F29 的保留样本结果称为完整月统计。原生核心工作流虽已有双架构构建，现有 check.yml 无 qemu Agent 测试步骤，arm64 version/check 与 Agent/qemu 验收仍是待办，未改 CI 冒充完成。
 
-## 11. v1.2.0 实机验收（2026-11-01，RC1–RC3）
+## 11. v1.2.0 实机验收（2026-11-01，RC 与正式版）
 
-环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine 3.19 LXC，OpenRC），均为 amd64；内核按 CVE-2026-98432 升级（alpine-node 由服务商管理）。执行：Cline；独立核对：审查者；发现与决定见 [验收发现](v1.2-rc1-findings.md)；2026-11-01 之前的逐步记录见[进度记录](archive/v1.1-progress.md)“H…”与“RC2 on the hosts”各节，此后的实机结果直接记在本节与验收发现；步骤见[实机测试计划](v1.2-host-test-plan.md)。
+环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine 3.19 LXC，OpenRC），均为 amd64；内核按 CVE-2026-98432 升级（alpine-node 由服务商管理）。执行：Cline；独立核对：审查者；发现与决定见 [验收发现](archive/v1.2-rc1-findings.md)；2026-11-01 之前的逐步记录见[进度记录](archive/v1.1-progress.md)“H…”与“RC2 on the hosts”各节，此后的实机结果直接记在本节与验收发现；步骤见[实机测试计划](archive/v1.2-host-test-plan.md)。
 
 | 阶段 | 内容 | 结果 |
 | --- | --- | --- |
@@ -1258,7 +1270,7 @@ R1–R9、D-a 至 D-e 的文档映射见 AGENTS V1.2 变更记录；所有 F1–
 
 发现：F1–F7（RC1）、F8–F11（RC2）、F12–F13（浏览器走查）；全部已修复或按决定记为限制（F11），F8–F10 在 rc.3/rc.4 实机复验通过。v1.2.0 于 2026-11-01 发布（tag 指向 `8f6406e`，与 rc.4 同一 commit）并部署到三台主机。限制：L8（按方案 1 标注）、L9、L10、F11；只验收 amd64。
 
-## 12. v1.3.0 实机验收（2026-11-03，rc.1–rc.6）
+## 12. v1.3.0 / v1.3.1 实机验收（2026-11-03）
 
 环境：us2-node（面板 + Agent，Debian，systemd）、uk-node（Agent，Debian，systemd）、alpine-node（Agent，Alpine LXC，OpenRC），均为 amd64。代码审查：Codex 11 轮；门禁：`f849f01` 在本地 Linux 测试机上通过 `scripts/check.sh`（1823 秒）与真实核套件（Xray 26.3.27、sing-box 1.14.3、mihomo、GOST 3.3.2，合计 3090 秒）。实机结果按“证据与状态”列追加，未在主机上执行的项照旧注明。口径见 AGENTS §21。发布后追加的三节：RC-E（补 v1.3.0 未验证的 GOST UDP、限流、连接上限与 IPv6）、测试机演练（时区分桶、备份恢复与 arm64 模拟）与 v1.3.1（RC-F 与 RC-G 均通过）。
 
@@ -1278,7 +1290,7 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试）。本地证�
 
 ### P2（F11）
 
-状态：P2（F11，Xray 端口转发字节计入节点总量）门禁与实机均通过：`f849f01` 的真实核套件带 Xray 26.3.27；实机在 uk-node 上用临时 Xray 转发传输 2 × 10,000,000 B，节点总量 +20,000,522 B、用户 `usedTraffic` 不变。设计依据见[v1.3 设计（T1/P2）](v1.3-design-t1-p2.md)第 2 节。
+状态：P2（F11，Xray 端口转发字节计入节点总量）门禁与实机均通过：`f849f01` 的真实核套件带 Xray 26.3.27；实机在 uk-node 上用临时 Xray 转发传输 2 × 10,000,000 B，节点总量 +20,000,522 B、用户 `usedTraffic` 不变。设计依据见[v1.3 设计（T1/P2）](archive/v1.3-design-t1-p2.md)第 2 节。
 
 | 项 | 证据 | 状态 |
 | --- | --- | --- |
@@ -1290,7 +1302,7 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试）。本地证�
 
 ### G1：GOST 作为第三种核心类型
 
-状态：G1（Agent 适配器、契约字段、安装器、迁移 0127、面板协商与校验、组件任务、备份校验、Web）门禁与实机均通过：三个节点从面板安装固定 3.3.2（契约 3），空闲核心不启动。设计依据见 [GOST 设计](v1.3-design-gost.md)。
+状态：G1（Agent 适配器、契约字段、安装器、迁移 0127、面板协商与校验、组件任务、备份校验、Web）门禁与实机均通过：三个节点从面板安装固定 3.3.2（契约 3），空闲核心不启动。设计依据见 [GOST 设计](archive/v1.3-design-gost.md)。
 
 | 项 | 覆盖内容 | 证据与状态 |
 | --- | --- | --- |
@@ -1303,7 +1315,7 @@ T1 整机月流量：后端 `4cc9025`（含迁移 0126 与测试）。本地证�
 
 ### G2：GOST 转发的目标池、端口范围与限流
 
-状态：G2 门禁与实机均通过（实机覆盖 `fifo` 故障切换、端口范围、节点计数与用户额度隔离）。设计依据见 [GOST 设计](v1.3-design-gost.md) §4 与“Reviewer decisions”；实测依据见 [G0 发现](v1.3-g0-gost-findings.md) §3–§5。G2 不需要新迁移：设置保存在 `inbounds.encrypted_settings`（`Repository.Vault` 密封），GOST 设置契约版本由 1 升到 2，没有新增 proto 字段。
+状态：G2 门禁与实机均通过（实机覆盖 `fifo` 故障切换、端口范围、节点计数与用户额度隔离）。设计依据见 [GOST 设计](archive/v1.3-design-gost.md) §4 与“Reviewer decisions”；实测依据见 [G0 发现](archive/v1.3-g0-gost-findings.md) §3–§5。G2 不需要新迁移：设置保存在 `inbounds.encrypted_settings`（`Repository.Vault` 密封），GOST 设置契约版本由 1 升到 2，没有新增 proto 字段。
 
 | 项 | 覆盖内容 | 证据与状态 |
 | --- | --- | --- |
@@ -1378,4 +1390,3 @@ v1.3.0 于 2026-11-03 发布：tag 指向 `f849f01`（与 rc.6 同一 commit）�
 - 升级 Agent 会短暂重启该节点的核心（核心是 Agent 的子进程；uk 与 us2 的 Xray 都换了 PID），没有新修订、没有回滚。
 - 仍未验证：真实 arm64 主机；正式浏览器走查；转发与中继的混合流量 soak。
 - 实机 RC-G（rc.2，2026-11-03 09:54–10:20Z，证据 `~/.qui-accept/rc13/rcg`）：三台主机升级到 1.3.1-rc.2，迁移头仍为 0128、`quick_check` ok、0 个回滚目录、修订不变；10 分钟每分钟采样三个节点 10/10 在线，spool 观测 measured，`database_limit` 34,906,112 B ≤ `disk_limit` 104,857,600 B，`invalid spool capacity observation` 0 次；Agent 日志只有面板升级重启时的 3 条重连 WARN（us2）与 2 条（uk），0 条 ERROR、0 次核心恢复；uk conntrack 6131/131072，`table full` 920 未增加；安装包已从主机删除。
-

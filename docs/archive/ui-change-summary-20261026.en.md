@@ -80,7 +80,7 @@ Show authorized entry points with names, regions/purposes, protocols, addresses,
 
 The current implementation uses `viewMode` to switch presentation. It is not an independent end-user authentication model. Dashboard code still reads management APIs, matches a proxy user by login name, and falls back to the first record. Personal data must eventually be resolved through backend session ownership.
 
-Sources: [dashboard](../../web/src/modules/dashboard/pages/DashboardPage.vue), [node page](../../web/src/modules/nodes/pages/NodeListPage.vue), [view mode](../../web/src/app/viewMode.ts), and [guards](../../web/src/app/guards.ts).
+Sources: [dashboard](../../web/src/modules/dashboard/pages/DashboardPage.vue), [node page](../../web/src/modules/nodes/pages/NodeListPage.vue), view mode (`web/src/app/viewMode.ts`, since removed), and [guards](../../web/src/app/guards.ts).
 
 ## 4. Administrative dashboard
 

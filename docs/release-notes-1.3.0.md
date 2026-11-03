@@ -1,6 +1,6 @@
 # v1.3.0 发布说明
 
-发布日期：2026-11-03（tag `v1.3.0` 指向 `f849f01`，与 rc.6 同一 commit；GitHub 正式发布，非预发布）。预发布版 rc.1–rc.6 与最终版在三台主机（us2-node、uk-node、alpine-node）验收，结果见[验收矩阵](v1-acceptance.md) §12。计划与设计见 [v1.3 计划](v1.3-plan.md)、[T1/P2 设计](v1.3-design-t1-p2.md)、[GOST 设计](v1.3-design-gost.md) 与 [G0 实测](v1.3-g0-gost-findings.md)。
+发布日期：2026-11-03（tag `v1.3.0` 指向 `f849f01`，与 rc.6 同一 commit；GitHub 正式发布，非预发布）。预发布版 rc.1–rc.6 与最终版在三台主机（us2-node、uk-node、alpine-node）验收，结果见[验收矩阵](v1-acceptance.md) §12。计划与设计见 [v1.3 计划](archive/v1.3-plan.md)、[T1/P2 设计](archive/v1.3-design-t1-p2.md)、[GOST 设计](archive/v1.3-design-gost.md) 与 [G0 实测](archive/v1.3-g0-gost-findings.md)。
 
 **平台：** 只验收 linux/amd64。GOST 只支持 linux/amd64（同一个静态二进制用于 Debian 与 Alpine）。
 

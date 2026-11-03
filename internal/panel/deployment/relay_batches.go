@@ -2,8 +2,11 @@ package deployment
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"proxycontrol/internal/panel/auth"
@@ -50,8 +53,12 @@ func (h *Handler) createRelayBatch(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 201, batch)
 }
 
-// Validate all captured dependencies before creating any batch revisions.
-func validateBatchDependencies(snapshots []proxy.NodeSnapshot) error {
+// Validate all captured dependencies before creating any batch revisions. A
+// target listed after its source is allowed only when it already published the
+// exact state that source dials: a drawing orders a GOST tunnel's exit first,
+// which can put an ordinary relay's target last, and the queue's own
+// relayTargetsInTransaction check stays authoritative for what is running.
+func (r *Repository) validateBatchDependencies(ctx context.Context, tx *sql.Tx, snapshots []proxy.NodeSnapshot) error {
 	positions := map[string]int{}
 	for position, snapshot := range snapshots {
 		nodeID := snapshot.State.NodeID
@@ -66,11 +73,28 @@ func validateBatchDependencies(snapshots []proxy.NodeSnapshot) error {
 				continue
 			}
 			targetPosition, exists := positions[outbound.TargetNodeID]
-			if !exists || targetPosition >= position {
+			if !exists || targetPosition == position {
+				// The target must be another node of this batch.
 				return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
 			}
 			if reason := relayDependency(outbound, snapshots[targetPosition].State); reason != "matched" {
 				return fmt.Errorf("%w: captured batch relay mismatch (%s)", ErrDependency, reason)
+			}
+			if targetPosition < position {
+				continue
+			}
+			published, err := r.publishedStateInTransaction(ctx, tx, outbound.TargetNodeID)
+			if errors.Is(err, ErrDependency) {
+				return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
+			}
+			if err != nil {
+				return err
+			}
+			// The listener this batch captured must also be the one already running:
+			// relayDependency does not compare transport settings, and the source
+			// switches before the target is published.
+			if reason := relayDependency(outbound, published); reason != "matched" || !reflect.DeepEqual(relayListener(outbound, published), relayListener(outbound, snapshots[targetPosition].State)) {
+				return fmt.Errorf("%w: published relay target mismatch (%s)", ErrDependency, reason)
 			}
 		}
 	}

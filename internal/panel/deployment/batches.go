@@ -96,9 +96,6 @@ func (r *Repository) Batches(ctx context.Context, page, size int) ([]Batch, int,
 // automatic quota revision can re-enable an inbound the Owner wants enabled even
 // when this batch was the node's last publication.
 func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author string, snapshots []proxy.NodeSnapshot) (Batch, error) {
-	if err := validateBatchDependencies(snapshots); err != nil {
-		return Batch{}, err
-	}
 	if len(snapshots) < 2 || len(snapshots) > 64 {
 		return Batch{}, errors.New("batch must contain two to 64 dependency node snapshots")
 	}
@@ -111,6 +108,9 @@ func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author stri
 		return Batch{}, err
 	}
 	defer tx.Rollback()
+	if err := r.validateBatchDependencies(ctx, tx, snapshots); err != nil {
+		return Batch{}, err
+	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO deployment_batches(id,chain_id,name,author,status,created_at) VALUES(?,?,?,?,'draft',?)", batchID, chainID, name, author, now()); err != nil {
 		return Batch{}, err
 	}
@@ -193,11 +193,21 @@ func (r *Repository) StartBatch(ctx context.Context, batchID string) error {
 		}
 		return errors.New("batch cannot be redeployed")
 	}
+	stored := make([]proxy.NodeSnapshot, 0, len(batch.Items))
 	for _, item := range batch.Items {
 		state, err := r.stateInTransaction(ctx, tx, item.Revision)
 		if err != nil {
 			return err
 		}
+		stored = append(stored, proxy.NodeSnapshot{State: state})
+	}
+	// What a later target is running may have changed since the batch was
+	// created; check the stored states against it again before anything is queued.
+	if err := r.validateBatchDependencies(ctx, tx, stored); err != nil {
+		return err
+	}
+	for i, item := range batch.Items {
+		state := stored[i].State
 		if err := validateStateCoresTx(ctx, tx, state); err != nil {
 			return err
 		}

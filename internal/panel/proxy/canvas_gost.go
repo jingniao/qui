@@ -274,35 +274,35 @@ func (s *Service) canvasEnsureRelay(ctx context.Context, plan *canvasPlan, relay
 }
 
 // canvasPublishOrder sorts the nodes of one publication so that every dependency
-// is published before the node that dials it: a relay target an enabled outbound
-// names, and the GOST relay exit an entry forward hops through. before[node] lists
-// those dependencies, and the caller derives them from the snapshots being
-// published, so a draft stored elsewhere never orders or cycles a batch. Nodes
-// without dependencies keep the order the drawing produced.
+// is published before the node that dials it: the target of a relay edge this
+// drawing publishes, and the GOST relay exit an entry forward hops through.
+// before[node] lists those dependencies, and the caller derives them from the
+// plan, so an outbound stored elsewhere never orders or cycles a batch. Each step
+// takes the earliest node, in the order RelaySnapshots produced, whose
+// dependencies are already placed, so satisfying one dependency never pulls an
+// unrelated node ahead of the relay target that order put before it.
 func canvasPublishOrder(nodeIDs []string, before map[string][]string) ([]string, error) {
 	ordered := make([]string, 0, len(nodeIDs))
-	state := map[string]int{}
-	var visit func(string) error
-	visit = func(nodeID string) error {
-		switch state[nodeID] {
-		case 1:
-			return errors.New("服务器之间的中转依赖形成了环路，无法确定发布顺序")
-		case 2:
-			return nil
-		}
-		state[nodeID] = 1
-		for _, next := range before[nodeID] {
-			if err := visit(next); err != nil {
-				return err
+	placed := map[string]bool{}
+	for len(ordered) < len(nodeIDs) {
+		progressed := false
+		for _, nodeID := range nodeIDs {
+			if placed[nodeID] {
+				continue
+			}
+			ready := true
+			for _, dependency := range before[nodeID] {
+				ready = ready && placed[dependency]
+			}
+			if ready {
+				placed[nodeID] = true
+				ordered = append(ordered, nodeID)
+				progressed = true
+				break
 			}
 		}
-		state[nodeID] = 2
-		ordered = append(ordered, nodeID)
-		return nil
-	}
-	for _, nodeID := range nodeIDs {
-		if err := visit(nodeID); err != nil {
-			return nil, err
+		if !progressed {
+			return nil, errors.New("服务器之间的中转依赖形成了环路，无法确定发布顺序")
 		}
 	}
 	return ordered, nil

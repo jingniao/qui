@@ -58,6 +58,21 @@ func (r *Repository) stateInTransaction(ctx context.Context, tx *sql.Tx, revisio
 	return desiredstate.Decode(data)
 }
 
+// publishedStateInTransaction reads the state a node currently runs, so both the
+// batch validation and the dispatch below judge a relay target by the same
+// published revision. A node that published nothing is a dependency error.
+func (r *Repository) publishedStateInTransaction(ctx context.Context, tx *sql.Tx, nodeID string) (desiredstate.State, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, "SELECT revision FROM node_runtime_state WHERE node_id=?", nodeID).Scan(&revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return desiredstate.State{}, fmt.Errorf("%w: target node must be published first", ErrDependency)
+	}
+	if err != nil {
+		return desiredstate.State{}, err
+	}
+	return r.stateInTransaction(ctx, tx, revision)
+}
+
 func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, state desiredstate.State) error {
 	var enabled bool
 	if err := tx.QueryRowContext(ctx, "SELECT enabled FROM nodes WHERE id=?", state.NodeID).Scan(&enabled); err != nil {
@@ -76,15 +91,7 @@ func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, 
 		if !enabled {
 			return fmt.Errorf("%w: target node is disabled", ErrDependency)
 		}
-		var revision int64
-		err := tx.QueryRowContext(ctx, "SELECT revision FROM node_runtime_state WHERE node_id=?", outbound.TargetNodeID).Scan(&revision)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("%w: target node must be published first", ErrDependency)
-		}
-		if err != nil {
-			return err
-		}
-		target, err := r.stateInTransaction(ctx, tx, revision)
+		target, err := r.publishedStateInTransaction(ctx, tx, outbound.TargetNodeID)
 		if err != nil {
 			return err
 		}

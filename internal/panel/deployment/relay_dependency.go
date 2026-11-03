@@ -160,3 +160,14 @@ func relayHostMatches(left, right string) bool {
 	}
 	return strings.EqualFold(strings.TrimSuffix(left, "."), strings.TrimSuffix(right, "."))
 }
+
+// relayListener returns the enabled internal listener an outbound dials on its
+// target, or nil.
+func relayListener(outbound desiredstate.Outbound, target desiredstate.State) *desiredstate.Inbound {
+	for i, inbound := range target.Inbounds {
+		if inbound.Enabled && inbound.Protocol == outbound.Protocol && inbound.Port == outbound.Port && !inbound.SubscriptionVisible {
+			return &target.Inbounds[i]
+		}
+	}
+	return nil
+}

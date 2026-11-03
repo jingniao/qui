@@ -84,7 +84,7 @@ func TestGostTunnelPublishesTheExitBeforeTheEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshots, err := p.service.canvasSnapshots(p.ctx, plan.nodes, plan.relays, p.users)
+	snapshots, err := p.service.canvasSnapshots(p.ctx, plan, p.users)
 	if err != nil || len(snapshots) != 2 || snapshots[0].State.NodeID != p.nodeB || snapshots[1].State.NodeID != p.nodeA {
 		t.Fatalf("gost order %+v %v", snapshots, err)
 	}
@@ -193,7 +193,7 @@ func TestCanvasSnapshotsOrdersBothDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshots, err := p.service.canvasSnapshots(p.ctx, plan.nodes, plan.relays, p.users)
+	snapshots, err := p.service.canvasSnapshots(p.ctx, plan, p.users)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,5 +331,18 @@ func TestGostRelayIPv6ExitListensOnTheSameFamily(t *testing.T) {
 	}
 	if entry.Settings.Forward.Hops[0].Host != "2001:db8::11" {
 		t.Fatalf("entry hop dials %q", entry.Settings.Forward.Hops[0].Host)
+	}
+}
+
+// GOST A→B and B→C in one drawing, plus an ordinary relay C→D outside it whose
+// target RelaySnapshots placed before C: resolving B's dependency must not pull
+// C ahead of D. A dependency cycle is still refused.
+func TestCanvasPublishOrderKeepsTheBaseOrderOfUnrelatedTargets(t *testing.T) {
+	ordered, err := canvasPublishOrder([]string{"B", "A", "D", "C"}, map[string][]string{"A": {"B"}, "B": {"C"}})
+	if err != nil || strings.Join(ordered, ",") != "D,C,B,A" {
+		t.Fatalf("order %v %v", ordered, err)
+	}
+	if _, err := canvasPublishOrder([]string{"A", "B"}, map[string][]string{"A": {"B"}, "B": {"A"}}); err == nil {
+		t.Fatal("a dependency cycle was ordered")
 	}
 }

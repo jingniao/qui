@@ -67,7 +67,7 @@ func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author stri
 	if err != nil {
 		return CanvasPublishResult{}, err
 	}
-	snapshots, err := s.canvasSnapshots(ctx, plan.nodes, plan.relays, users)
+	snapshots, err := s.canvasSnapshots(ctx, plan, users)
 	if err != nil {
 		return CanvasPublishResult{}, err
 	}
@@ -95,14 +95,12 @@ func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
 }
 
 // canvasSnapshots collects every node the publication depends on, dependencies
-// first. The relay component of each planned node is expanded once, and the whole
-// expanded set is then ordered by both kinds of dependency, so a node reached
-// through an ordinary relay outbound cannot end up after a node only a GOST
-// tunnel put behind it.
-func (s *Service) canvasSnapshots(ctx context.Context, nodeIDs []string, relays []*canvasRelay, users AccessReader) ([]NodeSnapshot, error) {
-	expanded := make([]string, 0, len(nodeIDs))
+// first. The relay component of each planned node is expanded once and keeps the
+// order RelaySnapshots produced; only the dependencies of this drawing order it.
+func (s *Service) canvasSnapshots(ctx context.Context, plan *canvasPlan, users AccessReader) ([]NodeSnapshot, error) {
+	expanded := make([]string, 0, len(plan.nodes))
 	snapshots := map[string]NodeSnapshot{}
-	for _, nodeID := range nodeIDs {
+	for _, nodeID := range plan.nodes {
 		if _, done := snapshots[nodeID]; done {
 			continue
 		}
@@ -128,27 +126,17 @@ func (s *Service) canvasSnapshots(ctx context.Context, nodeIDs []string, relays 
 	if len(expanded) == 0 {
 		return nil, errors.New("方案没有可发布的服务器")
 	}
-	// An enabled relay outbound publishes its target first; the GOST tunnels of
-	// this drawing add their exit-before-entry dependency on top of it. Only the
-	// tunnels being published count: a draft published from another drawing is
-	// not part of this batch and must not order - or cycle - it.
+	// Only this drawing's own dependencies order the batch: the relay edges it
+	// publishes (target before source) and its GOST tunnels (exit before entry).
+	// An enabled relay outbound that merely exists on a node - an ordinary relay
+	// the hosts already share, or a draft from another drawing - is not part of
+	// this batch's order and must not cycle it.
 	before := map[string][]string{}
-	for _, nodeID := range expanded {
-		for _, outbound := range snapshots[nodeID].State.Outbounds {
-			if !outbound.Enabled || outbound.TargetNodeID == "" {
-				continue
-			}
-			if _, known := snapshots[outbound.TargetNodeID]; known {
-				before[nodeID] = append(before[nodeID], outbound.TargetNodeID)
-			}
-		}
+	for _, edge := range plan.edges {
+		before[edge.sourceNode] = append(before[edge.sourceNode], edge.targetNode)
 	}
-	for _, relay := range relays {
-		if _, entry := snapshots[relay.entryNode]; entry {
-			if _, exit := snapshots[relay.exitNode]; exit {
-				before[relay.entryNode] = append(before[relay.entryNode], relay.exitNode)
-			}
-		}
+	for _, relay := range plan.relays {
+		before[relay.entryNode] = append(before[relay.entryNode], relay.exitNode)
 	}
 	ordered, err := canvasPublishOrder(expanded, before)
 	if err != nil {

@@ -96,24 +96,26 @@ func Open(ctx context.Context, directory, nodeID string, limit int64) (*Spool, e
 		uriPath = "/" + uriPath
 	}
 	uri := url.URL{Scheme: "file", Path: uriPath}
-	query := url.Values{}
-	for _, pragma := range []string{"busy_timeout(5000)", "synchronous(FULL)", "wal_autocheckpoint(256)"} {
-		query.Add("_pragma", pragma)
+	// Every physical connection needs the capacity pragmas, so they travel in
+	// the DSN. The page ceiling depends on this store's page size, hence the
+	// probe first; it also keeps the geometry and budget checks in one place.
+	pages, err := planDiskCapacity(ctx, capacityDSN(uri, 0), limit)
+	if err != nil {
+		return nil, err
 	}
-	uri.RawQuery = query.Encode()
-	database, err := sql.Open("sqlite", uri.String())
+	database, err := sql.Open("sqlite", capacityDSN(uri, pages))
 	if err != nil {
 		return nil, err
 	}
 	database.SetMaxOpenConns(1)
 	database.SetMaxIdleConns(1)
 	closeError := func(err error) (*Spool, error) { database.Close(); return nil, err }
-	// Set the rollback journal mode before enabling incremental auto-vacuum.
-	// Enabling auto-vacuum first leaves a rollback journal that a second
-	// concurrent handle cannot reopen on Windows (SQLITE_IOERR_DELETE).
-	if err := configureDiskCapacity(ctx, database, limit); err != nil {
+	if err := verifyDiskCapacity(ctx, database, pages); err != nil {
 		return closeError(err)
 	}
+	// Enabling auto-vacuum before the rollback journal mode leaves a journal
+	// that a second concurrent handle cannot reopen on Windows
+	// (SQLITE_IOERR_DELETE); the DSN above has already set the journal mode.
 	if _, err := database.ExecContext(ctx, "PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
 		return closeError(err)
 	}

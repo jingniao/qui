@@ -1,6 +1,8 @@
 # 协议支持补齐规划：外部订阅、自建节点与失败诊断
 
-状态：2026-11-05 已审阅，按[英文版 §14](subscription-import-compatibility-plan.en.md#14-review-decisions-2026-11-05)的修订批准；其中 §14.5 的刷新误报修复已在 `feat/v1.4-tunnels` 实现，待该提交的 Linux 门禁，其余尚未实施；§14 与本文冲突时以 §14 为准，开工前须 Owner 决定 §14.3 的 R1–R4。编写时间：2026-11-04，America/Los_Angeles。
+状态：2026-11-05 已审阅，按[英文版 §14](subscription-import-compatibility-plan.en.md#14-review-decisions-2026-11-05)的修订批准；其中 §14.5 的刷新误报修复已在 `feat/v1.4-tunnels` 以 `650b349` 提交，该提交的 Linux 门禁经独立核对通过（`check` 1980s、`cores` 572s，合计 2552s，END 2026-11-05T09:30:12Z），其余尚未实施；§14 与本文冲突时以 §14 为准，开工前须 Owner 决定 §14.3 的 R1–R4。编写时间：2026-11-04，America/Los_Angeles。
+
+S0 状态（2026-11-05，rev 3）：证据与净化夹具清单已采集；首轮与第二轮审阅均未通过，已按意见修正（rev 2：补跑两格、能力按客户端逐格、URI 编码按 SIP002/SIP022 原文；rev 3：`S0-GR-02` 改为第二条**有效**的 no-flow gRPC 代表条目，Vision+grpc 只作为负例 `S0-NEG-VISION-GRPC`；两处 mihomo 改为“首次失败、后续成功、原因未确定”；sing-box xhttp 明确为原生配置拒绝且未发起 HTTP）。**已通过独立审阅（仅证据与夹具范围，不是完整协议验收）、已本地提交，该提交自身的 Linux 门禁待执行**；16 条代表性条目（3 SS2022 AES-256 + 11 Reality+xhttp + 2 Reality+grpc）全部有效。详见[英文版 §10 的 S0 状态段](subscription-import-compatibility-plan.en.md#10-implementation-sequence-and-deliverables)、[S0 证据](v1.4-s0-evidence.md)、[S0 夹具](v1.4-s0-fixtures.md)与[开发记录](subscription-import-compatibility-change-log.md)末两条。要点：SS2022 的规范导出是百分号编码的明文 userinfo（SIP002 规定 AEAD-2022 禁 Base64URL），Base64URL 仅作输入兼容，且无任何探测把 URI 文本交给客户端；能力结论按（组合、客户端）逐格给出——mihomo 只测过 xhttp `auto`，Reality+TCP 无 Vision 与 Reality+grpc 没有 mihomo/sing-box 实测，AES-128 身份形态只有 sing-box，chacha 单钥只有 mihomo；首次遗留的两格已补跑并入 35 条矩阵；mihomo Reality 首次拨号失败原因**未确定**，其正例标为“后续尝试成功”；Vision+grpc/xhttp 的失败发生在客户端 VLESS 出站且源站命中为 0。S0 只改文档与采集证据，不改生产代码、迁移、API、UI；S2–S4、M1–M4 未开始，S1 已在独立 worktree 进行中，本文不声称 S1 完成。
 
 本次更新：2026-11-04T23:15:43-08:00。自建节点 xhttp / Reality 已纳入正文范围、实施阶段与验收，不再仅作为文末补充。保留当前文件路径，避免已有链接失效。
 
@@ -128,8 +130,8 @@ Reality 和 xhttp 结构的字段边界由阶段 0 的目标格式映射确定�
 - 优先实现本次出现的 `2022-blake3-aes-256-gcm`，同时补齐可共享验证逻辑的 AES-128；ChaCha20 依版本证据开放。
 - 密钥按实际算法校验 Base64 编码和解码长度：AES-128 为 16 字节，AES-256 为 32 字节；其他算法按其规范处理，不能仅检查密码非空。
 - 如支持多用户 identity-key 链，逐段校验结构和长度；未完成该能力时返回明确诊断，不能截取最后一段冒充完整支持。
-- URI 输入兼容已验证的 Base64 userinfo 与明文/百分号编码形式；特别处理密码内 `:`、`+`、`/`、`=` 和 URL 转义。
-- 导出采用该算法与目标客户端接受的 SIP002 形式，核对 SS2022 对 userinfo 的编码约定，不照搬旧 AEAD 的编码方式后宣称可用。
+- URI 输入兼容已验证的 Base64 userinfo 与明文/百分号编码形式；特别处理密码内 `:`、`+`、`/`、`=` 和 URL 转义。Base64URL userinfo 仅作为**输入**兼容路径，SS2022 不得据此输出。
+- SS2022 导出采用 SIP002 的**明文**形式：`ss://` + 百分号编码的 `method:password` + `@host:port`（tag 单独转义）。SIP002 规定 AEAD-2022 的 userinfo *“MUST NOT be encoded with Base64URL”*，且*“method and password MUST be percent encoded”*；password 本身是 SIP022 规定的标准带填充 Base64 PSK。S0 已固定该条文并抄录在[证据报告](v1.4-s0-evidence.md) §7；identity 分隔符的百分号编码是 S2 须用会解析 URI 的客户端确认的决定。非 SS2022 条目保持既有 SIP002 形式。
 - 标准化后仍保留正确算法名，不降级为普通 Shadowsocks 算法。
 
 ### 4.5 严格且可解释的未知字段策略

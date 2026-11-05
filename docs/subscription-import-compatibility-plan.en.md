@@ -1,6 +1,6 @@
 # Protocol Support Completion Plan: External Subscriptions, Self-Hosted Nodes, and Failure Diagnostics
 
-Status: **reviewed 2026-11-05 — approved with the amendments in [§14](#14-review-decisions-2026-11-05). The §14.5 refresh fix is implemented and awaiting its Linux gate; everything else is still not implemented.** §14 overrides earlier sections where they differ. Owner decisions (§14.3): both tracks in parallel; **all of this plan ships in v1.4.0** (both tracks and the refresh fix, see §14.7); duplicate `name|protocol` entries keep the first and reject the rest (§14.6). Prepared on November 4, 2026, America/Los_Angeles.
+Status: **reviewed 2026-11-05 — approved with the amendments in [§14](#14-review-decisions-2026-11-05). The §14.5 refresh fix is implemented, and its commit `650b349` passed the Linux gate (`check` 1980 s, `cores` 572 s, total 2552 s, END 2026-11-05T09:30:12Z), independently verified from the gate log; everything else is still not implemented. S0 changed no production code; S1 is now in progress in a separate worktree, and no S1 completion is claimed.** §14 overrides earlier sections where they differ. Owner decisions (§14.3): both tracks in parallel; **all of this plan ships in v1.4.0** (both tracks and the refresh fix, see §14.7); duplicate `name|protocol` entries keep the first and reject the rest (§14.6). Prepared on November 4, 2026, America/Los_Angeles.
 
 This is the English version of [the Chinese plan](subscription-import-compatibility-plan.md), including its update dated `2026-11-04T23:15:43-08:00`. Self-hosted xhttp / Reality support is integrated into the scope, implementation phases, and acceptance criteria. The translation preserves the source document's scope and technical identifiers.
 
@@ -132,8 +132,8 @@ Phase 0 determines the exact Reality/xhttp field mappings. Preserve all recogniz
 - Prioritize the observed `2022-blake3-aes-256-gcm`, alongside AES-128 where validation can be shared. Enable ChaCha20 according to version evidence.
 - Validate Base64 encoding and decoded key length by cipher: 16 bytes for AES-128, 32 bytes for AES-256, and the relevant specification for other methods. A nonempty password check is insufficient.
 - If multi-user identity-key chains are supported, validate every segment's structure and length. Otherwise report that limitation explicitly; do not take the final segment and claim full support.
-- Accept verified Base64-userinfo and plaintext/percent-encoded URI variants, including correct handling of `:`, `+`, `/`, `=`, and escaping in passwords.
-- Export using the SIP002 representation accepted for that cipher and client. Verify SS2022 userinfo encoding requirements rather than assuming the old AEAD encoding is interchangeable.
+- Accept verified Base64-userinfo and plaintext/percent-encoded URI variants, including correct handling of `:`, `+`, `/`, `=`, and escaping in passwords. Base64URL userinfo stays an **input** compatibility path, never an output form for SS2022.
+- Export SS2022 in the SIP002 **plain** form: `ss://` + percent-encoded `method:password` + `@host:port` (+ escaped tag). SIP002 says that for AEAD-2022 the userinfo *"MUST NOT be encoded with Base64URL"* and that *"method and password MUST be percent encoded"*; the password itself is the standard padded Base64 PSK defined by SIP022. S0 pinned that wording and quoted it in [the evidence report](v1.4-s0-evidence.md) §7; percent-encoding the identity separator is a decision S2 must confirm with a URI-consuming client. Non-SS2022 entries keep their existing SIP002 form.
 - Preserve the cipher name after normalization; never downgrade it to an ordinary Shadowsocks method.
 
 ### 4.5 Strict, Explainable Unknown-Field Handling
@@ -340,6 +340,54 @@ Dependencies: S0 precedes all protocol implementation; S1 can ship independently
 
 Append development records for each phase: request, files, before/after behavior, field/migration changes, verification commands/results, remaining work, and rework. Update the supported-capability matrix only after the corresponding feature passes.
 
+S0 status (2026-11-05, revision 3): evidence collected; review rounds 1 and 2 did
+not pass — those rounds stay on record as historical failures — and their
+corrections are applied — revision 2 re-ran the two dropped
+cells and replaced remembered SIP002 wording with the quoted specification;
+revision 3 makes `S0-GR-02` a **second valid no-flow gRPC representative entry**
+(Vision + gRPC stays only as `S0-NEG-VISION-GRPC`), states the two mihomo cells as
+"first attempt failed, later attempt succeeded, cause undetermined", and describes
+the sing-box xhttp cell as a native config rejection with no HTTP attempted.
+**An independent review passed on 2026-11-05 for the evidence and manifest scope
+only — not full protocol acceptance. The documentation commit is local on
+`feat/v1.4-import-s0`, and the Linux gate on that commit was still pending when it
+was created.** The report is
+[v1.4 S0 evidence](v1.4-s0-evidence.md) and the sanitized fixture manifest is
+[v1.4 S0 fixtures](v1.4-s0-fixtures.md) (16 **valid** representative entries — 3
+SS2022 AES-256, 11 Reality+xhttp, 2 Reality+grpc — with negative, compatibility
+and duplicate fixtures named separately); the development record is the last entry
+of the [change log](subscription-import-compatibility-change-log.md). The
+measurements pin Xray 26.3.27, sing-box 1.14.3 and mihomo 1.19.33 and establish
+support **per (combination, client) cell**, never per protocol: 35 matrix records
+in `20261105T090351Z`, two of them re-executed because the first pass printed but
+did not persist them.
+
+What rounds 1 and 2 corrected, and what S1–S4 must now assume:
+
+- the canonical SS2022 export is `ss://` + percent-encoded plain
+  `method:password`; SIP002 forbids Base64URL userinfo for AEAD-2022, so
+  Base64URL is an input compatibility path only. No probe exercised URI text, so
+  the encoding rule rests on the quoted specification (evidence §7);
+- the capability table is a per-client grid: mihomo was measured with xhttp
+  `auto` only, Reality+TCP without Vision and Reality+gRPC have no mihomo or
+  sing-box cell, gRPC and the xhttp modes other than `auto` are Xray-only,
+  AES-128 identity is sing-box-only, chacha20 single-key is mihomo-only;
+- the two representative gRPC rows are **valid no-flow entries**, and the only
+  Vision + gRPC case is the negative fixture `S0-NEG-VISION-GRPC`; a `serviceName`
+  that must be percent-encoded in the URI (`S0-GR-02`) is a codec decision, like
+  the SS2022 identity separator, not a measured result;
+- the Vision + gRPC/xhttp failures are the **client's** VLESS outbound rejecting
+  the flow, with zero origin hits — not a server rejection; the sing-box xhttp cell
+  is a different case (native client-configuration rejection, no HTTP attempted);
+- the first mihomo Reality dial failed and its cause is **undetermined**, so mihomo
+  positives are labelled later-attempt positives (first attempt failed, second
+  succeeded) and no first-attempt guarantee exists.
+
+Still open before S0 can be called complete: a passing independent review of this
+revision, then a Linux gate on the commit that carries it. S0 changed no production
+code, migration, API or UI — its output is documentation and measurements only. S1
+is now in progress in a separate worktree, and no S1 completion is claimed here.
+
 ## 11. Acceptance Criteria
 
 1. Use synthetic equivalents of 3 SS2022 AES-256, 11 Reality+xhttp, and 2 Reality+grpc entries. Record parsing, persistence, output, and target-core results individually. Valid combinations preserve required parameters; invalid ones receive accurate explanations.
@@ -525,7 +573,7 @@ This replaces the "M2 starts only after S3" ordering in 14.1 item 1.
 
 ### 14.5 v1.4.0 Refresh Fix (R2)
 
-This is the first step of the v1.4.0 work, ahead of S1. **Status: implemented on `feat/v1.4-tunnels`, pending its Linux gate — not verified.** Minimal scope:
+This is the first step of the v1.4.0 work, ahead of S1. **Status: implemented on `feat/v1.4-tunnels` as `650b349`; the Linux gate on that commit passed and was independently verified — `check` 1980 s, `cores` 572 s, `GATE 650b349 PASS total=2552s`, END 2026-11-05T09:30:12Z.** Minimal scope:
 
 1. `Store.Refresh`: after recording `last_status='failed'`, return the fetch or parse error, not the result of the status write.
 2. Refresh handler: map `ErrFetch`/`ErrParse` to a distinct code, `import_refresh_failed`, with a message saying the fetch or parse failed and the source's nodes are excluded from subscriptions. Other errors keep `import_unavailable`.
@@ -535,7 +583,7 @@ This is the first step of the v1.4.0 work, ahead of S1. **Status: implemented on
 
 Everything else (typed causes, counts, partial success, 502/504/422, persisted diagnostics) follows in S1, also for v1.4.0. Record the fix in the change log, and run a Linux gate on its commit.
 
-Implementation status (2026-11-05): items 1–5 are implemented as written — `Store.Refresh` returns the fetch or parse error after recording the failure, the handler answers `import_refresh_failed`, the three page callers reload the source list on failure, and the store test now expects the error. New coverage: `internal/panel/subscription/importer/refresh_test.go` and `web/scripts/import-refresh-selftest.mjs`, the latter invoked from `scripts/check.sh`. The Linux gate on the commit is still outstanding, so this status is "implemented, pending gate", not verified.
+Implementation status (2026-11-05): items 1–5 are implemented as written — `Store.Refresh` returns the fetch or parse error after recording the failure, the handler answers `import_refresh_failed`, the three page callers reload the source list on failure, and the store test now expects the error. New coverage: `internal/panel/subscription/importer/refresh_test.go` and `web/scripts/import-refresh-selftest.mjs`, the latter invoked from `scripts/check.sh`. The Linux gate ran on `650b349` and passed (numbers above), so this status is "implemented and gate-verified". It is still **not** an A1 result: the browser walkthrough of the source page against a real failing source remains outstanding, and item 3 is covered in the gate only by the injected-state frontend self-test.
 
 ### 14.6 Duplicate Keys: Keep the First (R3, Confirmed)
 
@@ -560,7 +608,7 @@ The Owner moved all remaining work into v1.4.0: the refresh fix (14.5), the impo
   - The tunnel work already passed its Linux gate (A1a `8134314`). Every later commit needs its own gate, and the RC is built from the final gated commit.
 - **Branches.**
   - Each track works on a short-lived branch off `feat/v1.4-tunnels` and merges back after its phase passes review and the Linux gate. Gates run one at a time, alternating between the tracks.
-  - The 14.5 fix goes directly on `feat/v1.4-tunnels`.
+  - The 14.5 fix goes directly on `feat/v1.4-tunnels`; it is committed as `650b349` and its Linux gate passed.
 - **Migrations.** Numbers continue after 0132 in merge order. A track that needs a migration takes the next free number when it merges, and renumbers if the other track merged first. Applied migrations are never edited.
 - **Agent compatibility.** v1.4.0 Agents report the new self-hosted capability, while v1.3.1 Agents cannot receive the new settings (14.1 and §13.3 item 3). The upgrade order stays panel first, then Agents.
 - **Docs to update at release.**

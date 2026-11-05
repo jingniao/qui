@@ -124,3 +124,67 @@
 - 提交信息：`fix(subscription): report failed source refreshes accurately`，结尾为 `Co-Authored-By: Claude Code <noreply@anthropic.com>`；未推送、未打标签、未发布。
 - 验证：沿用上一轮 Windows 本机结果（importer 包测试、新增前端自测、UI 回归自测、typecheck/build 均通过）。Linux 门禁在该提交上运行 `scripts/check.sh` 与真实核心套件，结果另记；门禁通过前不声称已验证。
 - 未完成与限制：Linux 门禁与真实核心结果、浏览器走查仍未完成；S1 及后续阶段未开始；未抓取真实订阅，未改生产。
+
+## 2026-11-05：S0 版本/字段/格式证据（未提交、未审阅、未跑门禁）
+
+- 请求：只实施计划 §3、§10、§14 的 S0（版本与夹具证据），在 `feat/v1.4-tunnels` 的短生命周期分支与独立 worktree 中产出证据报告与净化夹具清单；不改生产解析/模型，不提交，不跑 Linux 门禁，不推送/打标签/发布，不开始 S1 或 M1。另一任务负责的主干刷新修复与其串行门禁不触碰（未改 `scripts/check.sh`、`web/scripts/*`、等待器或门禁脚本）。
+- 基线：worktree `C:/Users/luanf/qui-wt/s0-import`，分支 `feat/v1.4-import-s0`，取自 `feat/v1.4-tunnels` HEAD `650b349`；主检出未切换，工作树干净。
+- 新增文件（仅文档）：
+  - `docs/v1.4-s0-evidence.md`：S0 证据报告（固定二进制与摘要、隔离方法、逐格结果与按客户端的 35 条 manifest、原生校验与真实连接的区别、首次尝试限制、xhttp 参数处理、`ss://` 导出编码、未验证项与限制、证据位置与复现/清理命令）。
+  - `docs/v1.4-s0-fixtures.md`：净化合成夹具清单，**16 条代表条目**（3 个 SS2022 AES-256、11 个 Reality+xhttp、2 个 Reality+grpc），逐条按客户端给出实测状态与各格式语义；否定、输入兼容、替代与重复键用例在独立小节单列，不占代表条目名额。
+- 固定二进制（实测，非推断）：Xray 26.3.27 `8255dd93…c46845ed`；sing-box 1.14.3 `768d31fa…23815f93`（`with_quic/with_utls/with_clash_api`，**无** `with_v2ray_api`）；mihomo 1.19.33 `817f50b3…632b620f`（`vcs.modified=true`，不是可复现的干净构建）。
+- 探测方法：每次运行新建网络命名空间（仅 `lo`，非 `lo` 链路即中止）、回环 HTTP 源站（随机 nonce 路径回显）、回环 TLS 伪装目标（`openssl` 自签，ALPN h2）、逐格临时凭据、`ss -ltnH` 判就绪（不建连）、以服务端 accepted/inbound 日志相对基线的增量作为“真实认证”证据、结束与异常都清理命名空间并复核；脚本置于运行目录之外，`python3 -I` 运行，输出脱敏。证据保存在测试机 `/root/s0-import/evidence/20261105T090351Z`（**35 条记录**：首轮 33 条，加 rev 2 补跑后追加的 2 条；补跑运行根为 `20261105T093755Z-recovery`），权限 0700/0600。
+- 主要结论（按客户端逐格，rev 2 已按审阅意见收紧）：SS2022 AES-256 单钥与身份形态在 mihomo、sing-box 均通过原生校验与认证连接；AES-128 单钥两客户端均通过，身份形态只有 sing-box；chacha20 只有单钥 mihomo 可用，身份形态被 sing-box 拒绝（`initialize inbound[0]: invalid argument`）；PSK 必须为标准带填充 Base64 且长度精确（未填充、Base64URL、错误长度均被拒）。Reality+TCP 无 flow 仅 Xray 实测；TCP+Vision 三客户端均通过（mihomo 为第二次尝试成功）；Reality+grpc 无 flow 仅 Xray 实测，sing-box 的 grpc 仍属未验证线索；Reality+xhttp 四种模式只有 Xray 全部实测通过，mihomo 只测过 `auto`（`alpn: [h2]`）；Reality 与 grpc/xhttp 搭配 Vision 时原生校验通过、由**客户端 VLESS 出站**在请求时拒绝（`XTLS only supports TLS and REALITY directly for now.`），服务端 Freedom 从未建连、源站命中为 0；sing-box 无 xhttp 传输（`unknown transport type: xhttp`）；`mode=invalid` 原生拒绝，未知 `extra` 与 `xmux` 被原生**接受**但运行时效果未测，故严格子集须由面板校验。
+- 对既有线索的核对与更正：早前 Codex 结论整体可复现，但有两点更正——(1) chacha 拒绝属服务端身份形态限制而非“链式”本身；(2) 早前“Mihomo Reality 通过”的失败样本只说明**后续尝试能成功**，首次拨号失败的原因**未确定**（无隔离实验），现矩阵只重试一次并记录 `http_attempt_count`，mihomo 正例一律标为“后续尝试成功”，不提供首次即成功的保证。`/tmp/qui-s0-*` 旧目录仅作线索：其保存配置缺少访问日志且 Reality 键写作 `target`，重放无法证明任一结论。
+- 未复现项：早前“整条 URI Base64 经 DIRECT 回落仍 HTTP 200”的具体现象未复现（三个固定客户端都不消费 URI 文本），改用显式对照格 `net-control-direct`：HTTP 200 但服务端认证连接数为 0，证明“HTTP 成功≠支持”。
+- 验证：本节所有数字均来自测试机实测运行（`/root/s0-import/probe/s0probe.py`、`extra.py`、`extra2.py`、`extra3.py`、`extra-cells.py` 与 `summary.jsonl`）；Windows 本机未运行任何 Go/前端测试，因为本轮不涉及源码改动。
+- 未完成与限制：未做独立审阅（首轮审阅随后未通过，见下条），未提交/暂存，未跑 Linux 门禁（门禁由另一任务串行占用），未推送/打标签/发布；未开始 S1、M1；未改生产代码、迁移、API、UI；不含 UDP、计量、设备门控、Agent 验收；legacy Clash 输出与 xhttp 的 H3/高级 tuning 未验证；无任何探测把 URI 文本交给客户端，URI 编码结论随后改为按 SIP002/SIP022 原文引用（见下条）。
+
+## 2026-11-05：S0 审阅第一轮意见修正（未提交、未审阅通过、未跑门禁）
+
+- 请求：只修正首轮审阅提出的 8 项问题；不实施 S1 或任何协议代码，不提交、不跑门禁、不合并；保留全部安全边界（不接触真实订阅/生产、不打印或复制密钥、Python-I 探测脚本留在产物目录之外、命名空间隔离并清理、不放宽 TLS）。
+- 基线：同一 worktree `C:/Users/luanf/qui-wt/s0-import`，分支 `feat/v1.4-import-s0`，HEAD 仍为 `650b349`；本轮只改 5 份文档，未暂存、未提交、未切换分支。
+- 修改文件：`docs/v1.4-s0-evidence.md`（rev 2）、`docs/v1.4-s0-fixtures.md`（重写为 16 条代表条目 + 独立否定小节）、`docs/subscription-import-compatibility-plan.md`、`docs/subscription-import-compatibility-plan.en.md`（§4.4、§10 S0 状态段）、本记录。
+- 逐项对应：
+  1. **SS2022 导出编码**：抓取并引用 <https://shadowsocks.org/doc/sip002.html> 与 <https://shadowsocks.org/doc/sip022.html> 原文——AEAD-2022 的 userinfo *“MUST NOT be encoded with Base64URL”*，未编码时 *“method and password MUST be percent encoded”*。规范导出改为 `ss://` + 百分号编码的明文 `method:password`；Base64URL 降为**输入兼容**（`S0-COMPAT-SS-B64URL`）；同时撤回“两种客户端都接受百分号形”的说法：没有任何探测把 URI 文本交给客户端，探测写入的是已解码凭据。§7、夹具 §1、计划 §4.4、本条与上条记录同步修正。
+  2. **代表性 manifest**：11 条 xhttp 全部改为有效 Reality 条目（auto×4、packet-up×3、stream-up×2、stream-one×2），不再用 TLS/非法/重复用例占位；`S0-ALT-TLS-XHTTP`、`S0-NEG-*`、`S0-COMPAT-SS-B64URL` 与 `S0-DUP-01` 移入独立小节并使用唯一名称，重复键测试单独一条，避免去重掩盖校验结果。
+  3. **能力结论按客户端**：证据 §8 改为（组合 × 客户端）矩阵——AES-256 单钥与身份两客户端、AES-128 单钥两客户端但身份仅 sing-box、chacha 单钥仅 mihomo、Reality TCP 无 flow 仅 Xray、TCP Vision 三客户端、grpc 无 flow 仅 Xray、xhttp auto 为 Xray + mihomo（H2）且其余模式仅 Xray；夹具 `S0-GR-01` 的 sing-box 由“支持”改为未验证。
+  4. **两格补跑**：stream-up 与 packet-up+Vision 在独立回环命名空间（`qui-s0-recovery-*`，仅 `lo`）单独重跑，结果写入新运行根 `20261105T093755Z-recovery` 并追加进 `20261105T090351Z/summary.jsonl`（33 → 35 条）；首轮遗留目录移入 `.attempt1/` 且注明不是证据；证据 §9 增补 manifest 表、驱动脚本摘要（含新 `extra-cells.py` `005ea82f…6a738e`）与清理命令，时间线注明补跑时刻 2026-11-05T09:38Z。stream-up 首发起效（1 次源站命中）但客户端在响应后记录 `failed to transfer response payload > unexpected EOF`；packet-up+Vision 两次均只到传输层、源站命中 0。
+  5. **Mihomo 首次拨号**：删除“探测伪影/竞态”因果结论与“No verdict rests on retry”；改为“原因未确定”，明确重试只可能把失败变成功、mihomo 正例一律为后续尝试成功、首次即成功无保证；并说明 `http_probe()` 内联注释的竞态说法不是本报告结论。计划 §10 与上条记录同步删除竞态表述。
+  6. **Vision 失败归属**：三处 Vision 负例统一表述为“原生校验通过、HTTP 检查失败（源站命中 0）、**客户端 `proxy/vless/outbound` 拒绝**、服务端 Freedom 从未建连”，不再写成服务端拒绝；面板文案要求说明是客户端侧限制。
+  7. **复现完整性**：复现块补 `extra3.py` 与 `extra-cells.py`，注明 `s0probe.py` 截断而各驱动追加的顺序要求；新增独立清理命令（`ip netns pids|kill -9`、`ip netns del`、`ip netns list | grep -c qui-s0`、`pgrep -af`）与 35 条精确 manifest（§9.1）。
+  8. **§8 过度概括**：删除“Xray 与 mihomo 四种 xhttp 模式”和“三客户端 TCP 含 Vision/无 flow”等宽表述，改为逐客户端组合并列明未测项（mihomo 其它 xhttp 模式、mihomo/sing-box 的 TCP 无 flow 与 grpc、sing-box grpc、Xray 的 SS2022、AES-128 身份 mihomo）。
+- 额外更正（审阅未提但影响证据）：矩阵中 `native-xhttp-mode-invalid` 与 `native-xhttp-extra-unknown-params` 两格因使用占位 Reality 私钥而失败（`invalid "privateKey"`），§6 与 manifest 标为 void，结论只依据 `native2-*`；`xmux`/未知 `extra` 的表述由“静默忽略”改为“解析器接受、运行时效果未测”。
+- 验证：本轮仅有文档改动，未运行 Go/前端测试（无需重跑）。远端复核使用只读命令：读取 `summary.jsonl` 计数与字段、`sha256sum` 驱动脚本、检查 `ip netns list` 与残留进程；补跑结束后命名空间已删除、无 `s0probe.py`/`extra-cells.py` 残留。
+- 门禁状态：另一任务在 `650b349` 上的门禁已于 2026-11-05T09:30:12Z 完成——`check` 1980s、`cores` 572s，`GATE 650b349 PASS total=2552s`（本轮只读查看日志，**没有新起门禁**）；该结果属于刷新修复提交，S0 文档仍未提交，因此不据此声称 S0 已验证。
+- 未完成与限制：仍**未通过审阅**、未提交、未跑门禁；未开始 S1/M1；未改生产代码、迁移、API、UI；无 URI 文本级探测，identity 分隔符的百分号编码仍待 S2 用会解析 URI 的客户端确认；未新增 mihomo/sing-box 的 grpc、TCP 无 flow、其它 xhttp 模式等单元格（本轮只被授权补跑两格）。
+- 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`；本轮无提交。
+
+## 2026-11-05：S0 最终审阅意见修正（rev 3，未提交、未审阅通过、未跑门禁）
+
+- 请求：按最终 S0 审阅意见只改文档；不提交、不暂存、不跑门禁，不改生产代码/迁移/API/UI，不做生产或网络测试，不新起门禁，不在本轮声称 S1 完成。
+- 基线：同一 worktree `C:/Users/luanf/qui-wt/s0-import`，分支 `feat/v1.4-import-s0`，HEAD 仍为 `650b349`；本轮只改 5 份文档。
+- 修改文件：`docs/v1.4-s0-fixtures.md`、`docs/v1.4-s0-evidence.md`（rev 3）、`docs/subscription-import-compatibility-plan.en.md`、`docs/subscription-import-compatibility-plan.md`、本记录。
+- 逐项对应：
+  1. **GR02 改为第二条有效代表条目**：夹具 §3 现明确两条都是无 `flow` 的有效 Reality+grpc 代表条目；`S0-GR-02` 使用独立 UUID、独立端口 `127.0.0.1:22002` 与需要转义的 `serviceName=s0 grpc`（URI 写 `serviceName=s0%20grpc`），Mihomo/sing-box 一侧保持未转义字面量，作为后续 S3/S4 codec 的转义用例；Vision+grpc 的无效用例只保留为 §4 的 `S0-NEG-VISION-GRPC`。16 条代表条目仍为 3 SS2022 AES-256 + 11 Reality+xhttp + 2 Reality+grpc，且全部有效。
+  2. **形状级实测与实例级未实测分开**：夹具 §3 区分 `vless-reality-grpc-empty-xray` 提供的“形状级、仅 Xray 客户端”支持，与本轮两条合成实例（各自 UUID、SNI、端口与 `serviceName` 转义）未被重放；`serviceName` 的百分号编码按“待 S2/S3 用会解析 URI 的客户端确认”处理，与 SS2022 identity 分隔符同级，不写成实测结果。
+  3. **证据两处 mihomo 行（原 156/164 行）**：改为“首次尝试失败、后续尝试成功、原因未确定”，与证据 §5 一致；§9 manifest 第 10、18 行同步注明首次失败。
+  4. **证据 sing-box xhttp 表述（原 235 行）**：不再与三处 Vision 负例并列为“两次都失败”。三处 Vision 是运行时负例（两次都只到传输层、源站命中 0、由客户端 VLESS 出站拒绝）；sing-box xhttp 是**原生配置拒绝**（`decode config at …: outbounds[0].transport: unknown transport type: xhttp`），未发起任何 HTTP 请求，也不是重试用例。§4 增补区分段，§5 拆成两条，§8 的 `a2` 定义改为“首次失败、第二次成功、原因未确定”。
+  5. **状态刷新（5 份文档）**：删除“S1/M1 未开始”的现行口径，统一为“S0 只改文档与采集证据、不改生产代码；S1 已在独立 worktree 进行中，本轮不声称 S1 完成；S2–S4、M1–M4 未开始”。更早的条目保留各自日期的历史口径（其“未开始 S1/M1”不是现状），现行口径以本条和 5 份文档的状态段为准。
+  6. **刷新修复门禁状态**：英文版顶部与 §14.5（以及中文版顶部、英文版 §14.7 分支说明）改为 `650b349` 已提交并通过 Linux 门禁，且经独立核对：`check` 1980s、`cores` 572s、`GATE 650b349 PASS total=2552s`，END `2026-11-05T09:30:12Z`；本轮只读核对日志，**没有新起门禁**；仍不据此声称 S0 已验证或 A1 完成（真实失败来源的浏览器走查仍缺）。
+- 校验：本轮无源码改动，未运行 Go/前端/真实核心测试。`git diff --check` 按基线对比处理：改动前的基线输出只涉及本记录文件——该文件全篇 CRLF 且 `core.autocrlf=false`，因此其每条新增行都会报 `trailing whitespace`，并另有既存的行尾空行提示；改动后再次运行，违规仍只出现在该文件，其余 4 份 LF 文档没有新增空白问题，新增行除 CRLF 外没有行尾空格或制表符。未用“CRLF 错误既存”作未经基线比对的结论。
+- 未完成与限制：仍未通过独立审阅、未提交/暂存、未推送/打标签/发布；S0 文档未跑 Linux 门禁；能力矩阵仍按（组合、客户端）逐格保守给出，未新增 mihomo/sing-box 的 grpc、TCP 无 flow、其它 xhttp 模式单元格。
+- 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`；本轮无提交。
+
+## 2026-11-05：S0 交付（已审阅通过，提交与自身 Linux 门禁）
+
+- 请求：S0 的证据与夹具范围已通过独立审阅（**仅证据/清单范围，不是完整协议验收**）；本轮只做 S0 交付——把状态刷新为“已审阅通过、待自身提交门禁”，把发布说明的刷新修复行对齐到 `650b349` 的门禁结论，然后只在 `feat/v1.4-import-s0` 上做本地提交，并对**该提交本身**串行运行 `scripts/check.sh` 与真实核心套件。不推送、不打标签、不发布、不碰生产，不合并主干或其他 worktree，不编辑 S1 文件（S1 在自己的 worktree 继续），不新增任何协议支持结论。
+- 基线：同一 worktree `C:/Users/luanf/qui-wt/s0-import`，分支 `feat/v1.4-import-s0`，HEAD `650b349`；主检出 `C:/Users/luanf/qui` 未切换分支。
+- 审阅确认项（本轮新增）：代表性 manifest 的 16 条**全部有效**（含 `S0-GR-02` 为第二条无 `flow` 的 gRPC 有效条目）；按（组合、客户端）的限制成立；SS2022 规范导出按 SIP002 原文经独立讨论核对；final 汇总的恢复单元格复现一致——stream-up 认证成功、源站命中 1、`attempt_count=1`；packet-up+Vision `http=false`、源站命中 0、`attempt_count=2`。
+- 修改文件（6 份，全部文档）：`docs/v1.4-s0-evidence.md`、`docs/v1.4-s0-fixtures.md`、`docs/subscription-import-compatibility-plan.md`、`docs/subscription-import-compatibility-plan.en.md`、`docs/release-notes-1.4.0.md`、本记录。
+- 状态口径：4 份 S0 文档的状态段由“未通过审阅、未提交、未跑门禁”改为“已通过独立审阅（证据/夹具范围）、已本地提交、该提交的 Linux 门禁待执行”。首轮与第二轮审阅未通过的记录**按原日期保留**，只作历史，不是现状；本条与 4 份文档的状态段为现行口径。不声称整体计划完成：S1 在独立 worktree 进行中（本轮不声称完成），S2–S4、M1–M4 未开始，其他协议工作线未验收。
+- 发布说明对齐：`docs/release-notes-1.4.0.md` 的刷新误报行改为“已实施、`650b349` 门禁通过（`check` 1980s、`cores` 572s、`GATE 650b349 PASS total=2552s`、END 2026-11-05T09:30:12Z）”；外部订阅导入行标注 S0 已审阅通过但该提交门禁待执行，并注明独立审阅通过不等于任何协议支持被验收。
+- 提交与门禁流程：本地提交只含上述 6 份文档；门禁使用 `~/.qui-local/gate.sh` 并传**显式提交 SHA**（辅助脚本默认从主检出 `/c/Users/luanf/qui` 归档，S0 提交对象经共享对象库可达，不能误门禁 `650b349`）；启动前核对没有其他门禁运行器在跑（锚定计数），只跑一次，不重启、不删除匹配日志，不用 `nohup`；结果与日志路径另记，不预写结论。
+- 空白与行尾校验：`git -c core.whitespace=cr-at-eol diff --check` 无输出；本记录与夹具全篇 CRLF 保持不变，新增行同为 CRLF，其余文档保持 LF；没有新增只含空白的行。
+- 未完成与限制：S0 的 Linux 门禁结果与来源管理/格式预览的浏览器走查仍缺；S1–S4、M1–M4 未完成；本轮不新增协议支持或验收结论。
+- 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`。

@@ -411,10 +411,14 @@ func validateContents(ctx context.Context, work string) error {
 		// An inbound also carries its base listener port, so the archive's forward
 		// range can be checked against the same expansion helper the Agent uses.
 		port := "0"
+		protocol := "''"
 		if item.table == "inbounds" {
 			port = "port"
 		}
-		query := "SELECT id," + port + ",CASE WHEN length(" + item.field + ")<=" + strconv.Itoa(item.limit) + " THEN " + item.field + " END FROM " + item.table
+		if item.kind == "settings" {
+			protocol = "protocol"
+		}
+		query := "SELECT id," + port + "," + protocol + ",CASE WHEN length(" + item.field + ")<=" + strconv.Itoa(item.limit) + " THEN " + item.field + " END FROM " + item.table
 		rows, err := database.QueryContext(ctx, query)
 		if err != nil {
 			return ErrArchive
@@ -422,8 +426,9 @@ func validateContents(ctx context.Context, work string) error {
 		for rows.Next() {
 			var recordID string
 			var listenPort int
+			var protocol string
 			var encrypted []byte
-			if err := rows.Scan(&recordID, &listenPort, &encrypted); err != nil {
+			if err := rows.Scan(&recordID, &listenPort, &protocol, &encrypted); err != nil {
 				rows.Close()
 				return ErrArchive
 			}
@@ -447,6 +452,11 @@ func validateContents(ctx context.Context, work string) error {
 				}
 				if err == nil && item.table == "inbounds" {
 					err = desiredstate.ValidateListenPorts(listenPort, settings)
+				}
+				// Preserve legacy draft validation, but newly recognized settings must
+				// satisfy their typed contract and server/client role before restore.
+				if err == nil && (settings.HasServerSettings() || settings.Security == desiredstate.SecurityReality || settings.Transport == desiredstate.TransportXHTTP) {
+					err = desiredstate.ValidateSettings(protocol, settings, item.table == "inbounds")
 				}
 			} else if item.kind == "credential" {
 				var secret credential.Secret

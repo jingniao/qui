@@ -109,6 +109,7 @@ func TestRealitySettingsFieldBounds(t *testing.T) {
 		{"too many short ids", func(r *RealityServerSettings) { r.ShortIDs = tooManyIDs }, "reality requires between one and sixteen short ids"},
 		{"no server name", func(r *RealityServerSettings) { r.ServerNames = nil }, "reality requires between one and sixteen server names"},
 		{"empty server name", func(r *RealityServerSettings) { r.ServerNames = []string{""} }, "invalid reality server name"},
+		{"wildcard server name", func(r *RealityServerSettings) { r.ServerNames = []string{"*.example.com"} }, "invalid reality server name"},
 		{"server name with control character", func(r *RealityServerSettings) { r.ServerNames = []string{"site\n.example"} }, "invalid reality server name"},
 		{"server name with space", func(r *RealityServerSettings) { r.ServerNames = []string{"site example"} }, "invalid reality server name"},
 		{"too many server names", func(r *RealityServerSettings) { r.ServerNames = tooManyNames }, "reality requires between one and sixteen server names"},
@@ -127,10 +128,9 @@ func TestRealitySettingsFieldBounds(t *testing.T) {
 			t.Fatalf("%s: %v", test.name, err)
 		}
 	}
-	// A wildcard server name, an IPv6 handshake target and a literal IPv4 target
-	// are all legal spellings.
+	// Concrete server names, an IPv6 target and a literal IPv4 target are legal.
 	for _, mutate := range []func(*RealityServerSettings){
-		func(r *RealityServerSettings) { r.ServerNames = []string{"*.example.com", "www.example.com"} },
+		func(r *RealityServerSettings) { r.ServerNames = []string{"www.example.com", "edge.example.com"} },
 		func(r *RealityServerSettings) { r.HandshakeTarget = "[2001:db8::1]:443" },
 		func(r *RealityServerSettings) { r.HandshakeTarget = "203.0.113.5:8443" },
 		func(r *RealityServerSettings) { r.ShortIDs = []string{"a1B2"} },

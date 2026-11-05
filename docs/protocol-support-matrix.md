@@ -62,6 +62,7 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 - 上报经 `agentpb` 的加法字段传输：`CoreCapability.server_settings_contract_version`／`server_settings_combinations`（10／11）为逐核声明，`Capabilities` 同名字段（23／24）供单核 Agent 使用，`scripts/generate-proto.sh` 生成。Agent 的 `MultiRuntime` 与旧标量装饰按各适配器上报复制，面板 `node.SettingsContractCapability` 只转换不推断，单核回退保留这些字段；`validateMultiCapabilities` 用共享组合校验拒绝畸形上报，未知版本接受但不授权。面板保存、快照与发布三处一致失败关闭。
 - 生产 Agent 的 Xray／sing-box 适配器尚无渲染器，因此上报版本 0 与空列表：契约可以完整传输并由合成上报验证，但真实组合要等渲染器（M2／M4）才会被声明。渲染入口对携带这些设置的入站/出站直接报错，不会静默丢弃；这不是客户端映射完成的证明。
 - 真实核证据（S0 §4）：mihomo 只测过 xhttp `auto`，sing-box 1.14.3 原生拒绝 xhttp，Vision + gRPC/xhttp 被客户端 VLESS 出站拒绝；M1 不据此声明任何组合可用。
+- M1 复核：Reality SNI 只接受具体名称，固定版核心精确匹配、不展开通配符。未知设置契约版本仅做资源边界检查并覆盖旧报告，始终不授权；新设置的排队应用／回滚投递还要求本次连接已接受新序号报告并匹配当前能力，已接受消息重放与撤回支持均不能放行。备份对新设置草稿按协议与角色校验，旧草稿校验语义不变。
 
 
 ### GOST（v1.3 G1）

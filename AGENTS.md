@@ -357,6 +357,8 @@ Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥�
 
 M1 不提供渲染：Xray 与 sing-box 适配器都没有 Reality／xhttp 渲染器，渲染入口（`desiredstate.ValidateServerSettingsRenderer`）对携带这些设置的入站或出站一律失败，避免结构校验通过后静默丢弃设置；已发布状态若意外带这些字段，`subscription/source/published` 也跳过该端点而不是导出缺公钥与 Short ID 的客户端条目，这只是渲染器缺席期间的临时保护，不代表客户端映射已完成。`/api/v1/protocol-support` 的 VLESS 行把 `security_reality`、`transport_xhttp` 列为 `pending`，选项、订阅映射与 sing-box 适配留待 M2–M4。
 
+M1 复核修正：Reality server names 只接受具体主机名或 IP，不接受通配符（固定版 Reality 按 ClientHello SNI 精确匹配）。未知非零设置契约版本只检查数量、空对象与字段长度，不按当前版本解释枚举；接收后覆盖旧报告且始终不授权。排队的应用与回滚在投递时再次检查当前报告，携带新设置的命令还须本次连接已持久接收一条新序号能力报告；旧连接报告及已接受消息的原样重放均不能开门。支持撤回时保留命令、继续确认消息，不断开健康控制流；普通旧配置不要求此报告。备份检查对携带 Reality／xhttp 或对应安全／传输标志的草稿按协议与入站／出站角色复用 `ValidateSettings`，保留旧草稿的既有校验语义；加密修订继续走完整 `desiredstate.Decode`。
+
 # 13. 出站代理模块
 
 出站表示节点收到用户流量后，以什么方式继续访问。

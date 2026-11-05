@@ -22,6 +22,7 @@ import (
 	"proxycontrol/internal/panel/connections"
 	"proxycontrol/internal/platform/pki"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
 	"proxycontrol/pkg/contracts/traffic"
 )
@@ -59,6 +60,7 @@ type Control struct {
 	ConnectionsRecorded func(context.Context, string)
 	DeploymentNotify    func(int64)
 	Deployment          interface {
+		State(context.Context, int64) (desiredstate.State, error)
 		Pending(context.Context, string) (*pb.ApplyCommand, error)
 		Result(context.Context, string, *pb.ApplyResult) error
 		PendingRollback(context.Context, string) (*pb.RollbackCommand, error)
@@ -252,6 +254,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	// Closing a stale update waits until this connection stored fresh
 	// capabilities; see coreUpdateCapabilitiesStored.
 	coreUpdates := &coreUpdateSession{}
+	settingsSession := &settingsContractSession{}
 	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=? WHERE id=?", first.GetHello().TcpProbeSupported, id); err != nil {
 		return status.Error(codes.Internal, "probe capability persistence failed")
 	}
@@ -485,6 +488,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if err != nil {
 			return status.Error(codes.Internal, "message persistence failed")
 		}
+		settingsSession.record(message, message.Sequence > lastSequence)
 		if updateSupported {
 			if err := c.coreUpdateCapabilitiesStored(ctx, id, message, coreUpdates); err != nil {
 				return status.Error(codes.Internal, "stale core update closure failed")
@@ -615,6 +619,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.Internal, "pending rollback unavailable")
 			}
 			if rollback != nil {
+				allowed, err := c.canDispatchRollback(ctx, id, rollback, settingsSession)
+				if err != nil {
+					return status.Error(codes.Internal, "rollback settings unavailable")
+				}
+				if !allowed {
+					continue
+				}
 				if rollback.RestartCurrent && !restartSupported {
 					if err := c.Deployment.Result(ctx, id, &pb.ApplyResult{CommandId: rollback.CommandId, Revision: rollback.Revision, Code: "restart_unsupported"}); err != nil {
 						return status.Error(codes.FailedPrecondition, "unsupported restart receipt failed")
@@ -631,6 +642,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.Internal, "pending deployment unavailable")
 			}
 			if command != nil {
+				allowed, err := c.canDispatchApply(ctx, id, command, settingsSession)
+				if err != nil {
+					return status.Error(codes.Internal, "deployment settings unavailable")
+				}
+				if !allowed {
+					continue
+				}
 				if err := send(command); err != nil {
 					return err
 				}

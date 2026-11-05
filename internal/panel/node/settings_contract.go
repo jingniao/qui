@@ -46,9 +46,9 @@ func SettingsContractCapability(core *pb.CoreCapability) desiredstate.CoreSettin
 }
 
 // validateSettingsContract checks one report with the shared combination
-// validator, so the panel and the gate cannot disagree about what a combination
-// is. An unknown version is accepted and authorizes nothing; a combination
-// without a version is contradictory and refused.
+// validator for understood reports. Unknown versions receive only resource and
+// shape checks: accepting them replaces stale grants without interpreting a
+// future version's enums. They authorize nothing in RequireSettingsCapability.
 func validateSettingsContract(version uint32, combinations []*pb.SettingsCombination) error {
 	if len(combinations) > maxSettingsCombinations {
 		return errors.New("invalid settings contract")
@@ -58,8 +58,11 @@ func validateSettingsContract(version uint32, combinations []*pb.SettingsCombina
 	}
 	seen := map[desiredstate.SettingsCombination]bool{}
 	for _, combination := range combinations {
-		if combination == nil {
+		if combination == nil || len(combination.Protocol) > 64 || len(combination.Direction) > 64 || len(combination.Security) > 64 || len(combination.Transport) > 64 || len(combination.Flow) > 64 {
 			return errors.New("invalid settings combination")
+		}
+		if version != desiredstate.SettingsContractVersion {
+			continue
 		}
 		shared := settingsCombination(combination)
 		if !shared.Valid() || seen[shared] {

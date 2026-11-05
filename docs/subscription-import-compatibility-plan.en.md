@@ -429,6 +429,19 @@ these settings, and the protocol matrix lists them as pending.
 - Not in M1: key generation/rotation, Xray or sing-box rendering, editor options
   (M3), subscription client mapping (M2), any migration, and any change to the
   import track or the shared client model.
+
+M1 review corrections (2026-11-05, local corrections; Linux gate still pending):
+Reality server names are concrete names/IPs only, because the pinned Reality
+source matches SNI exactly. Unknown nonzero contract versions receive generic
+resource bounds without interpreting version-1 enums; storing them replaces old
+grants and authorizes nothing. Apply/rollback dispatch checks the current report
+again and requires a newly accepted capability envelope in this connection for
+new settings, so an accepted-message replay cannot authorize reconnect delivery.
+Unsupported queued commands stay withheld while the stream continues. Backup
+validation checks new draft settings with the shared protocol/direction validator
+while retaining historical validation for legacy drafts. Local targeted tests do
+not establish real-core acceptance or M2 completion. Revision-zero rollback clears
+runtime without transmitting settings and remains available without a new report.
 - Verification: `gofmt`, focused `go vet`/`go test` on the touched packages
   (Windows, Go 1.26.0). No Linux `scripts/check.sh` or real-core run was made
   for this change; per §14.1 item 9 the phase commit gets its own Linux gate

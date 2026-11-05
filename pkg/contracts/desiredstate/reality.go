@@ -180,8 +180,8 @@ func decodeRealityKey(value string) ([]byte, error) {
 	return key, nil
 }
 
-// validServerName accepts a DNS name, an optional "*." wildcard prefix or a
-// literal IP, without control characters or whitespace.
+// validServerName accepts a concrete DNS name or literal IP. The pinned Reality
+// implementation matches ClientHello SNI by exact map lookup, not a wildcard.
 func validServerName(name string) bool {
 	if name == "" || len(name) > MaxRealityServerNameLen {
 		return false
@@ -190,9 +190,6 @@ func validServerName(name string) bool {
 		if char < 0x21 || char == 0x7f {
 			return false
 		}
-	}
-	if strings.HasPrefix(name, "*.") {
-		name = name[2:]
 	}
 	return validForwardHost(name)
 }

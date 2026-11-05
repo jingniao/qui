@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/netip"
 	"path/filepath"
 	"testing"
@@ -107,8 +108,8 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 		t.Fatal("URL not encrypted")
 	}
 	s.Fetcher.Resolver = &fakeResolver{answers: [][]netip.Addr{addresses("127.0.0.1")}}
-	if err = s.Refresh(ctx, key); err != nil {
-		t.Fatal(err)
+	if err = s.Refresh(ctx, key); !errors.Is(err, ErrFetch) {
+		t.Fatalf("refresh error = %v, want ErrFetch", err)
 	}
 	items, err := s.List(ctx)
 	if err != nil || items[0].Status != "failed" {

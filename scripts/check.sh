@@ -51,7 +51,9 @@ step 'npm run test:time'
 npm run test:time
 
 # The QR encoder is decoded again with jsQR, and the client policy simulator's
-# address math is checked; both transpile the TypeScript sources in memory.
+# address math is checked; both transpile the TypeScript sources in memory. The
+# import refresh self-test runs the subscription page's real refresh actions
+# against injected API and reactive-state fixtures.
 step 'frontend self-tests'
 node web/scripts/qr-selftest.mjs
 node web/scripts/client-policy-selftest.mjs
@@ -59,6 +61,7 @@ node web/scripts/portal-selftest.mjs
 node web/scripts/node-metrics-selftest.mjs
 node web/scripts/latency-chart-selftest.mjs
 node web/scripts/node-editor-selftest.mjs
+node web/scripts/import-refresh-selftest.mjs
 node web/scripts/tunnel-editor-selftest.mjs
 node web/scripts/tunnels-selftest.mjs
 node web/scripts/u1b-selftest.mjs

@@ -262,7 +262,10 @@ func (s *Store) Refresh(ctx context.Context, key string) error {
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	if err != nil {
 		_, writeErr := s.Database.ExecContext(ctx, "UPDATE subscription_sources SET last_fetch_at=?,last_status='failed',last_error='刷新失败；已停用该来源的缓存节点' WHERE id=?", stamp, key)
-		return writeErr
+		if writeErr != nil {
+			return writeErr
+		}
+		return err
 	}
 	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {

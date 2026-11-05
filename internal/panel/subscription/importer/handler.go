@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"errors"
 	"net/http"
 
 	"proxycontrol/internal/panel/auth"
@@ -75,7 +76,11 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	if err := h.Store.Refresh(r.Context(), r.PathValue("id")); err != nil {
-		h.fail(w)
+		if errors.Is(err, ErrFetch) || errors.Is(err, ErrParse) {
+			httpapi.Error(w, 400, "import_refresh_failed", "订阅来源抓取或解析失败，该来源的节点已从订阅中排除")
+		} else {
+			h.fail(w)
+		}
 		return
 	}
 	if !h.record(w, r, "刷新订阅来源", r.PathValue("id")) {

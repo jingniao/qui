@@ -1496,6 +1496,17 @@ function cancelEditSub() {
   editingSubId.value = null;
 }
 
+async function refreshSubscriptionSource(id: string) {
+  try {
+    await importAPI.refresh(id);
+  } catch (e) {
+    // Refresh may have saved a failed status. Keep its error if reloading also fails.
+    await loadImports().catch(() => {});
+    throw e;
+  }
+  await loadImports();
+}
+
 async function saveEditSub(sub: SubscriptionItem) {
   if (!editSubForm.name.trim()) {
     showToast('订阅备注不能为空', 'error');
@@ -1514,9 +1525,10 @@ async function saveEditSub(sub: SubscriptionItem) {
     }
     await importAPI.update(sub.id, payload);
     if (hasNewUrl) {
-      await importAPI.refresh(sub.id);
+      await refreshSubscriptionSource(sub.id);
+    } else {
+      await loadImports();
     }
-    await loadImports();
     showToast(hasNewUrl ? '订阅已更新并完成重新拉取' : '订阅配置已更新', 'success');
     editingSubId.value = null;
   } catch (e) {
@@ -1537,6 +1549,7 @@ function formatInterval(seconds?: number) {
 async function addNewSubscription() {
   if (!isOwner.value || !newSubUrl.value.trim() || submittingSub.value) return;
   submittingSub.value = true;
+  let savedId: string | undefined;
   try {
     const result = await importAPI.create({
       name: newSubName.value.trim() || '机场订阅',
@@ -1544,12 +1557,14 @@ async function addNewSubscription() {
       intervalSeconds: refreshSeconds.value || 3600,
       userIds: []
     });
+    savedId = result.id;
     newSubUrl.value = '';
     newSubName.value = '';
-    await importAPI.refresh(result.id);
-    await loadImports();
+    await refreshSubscriptionSource(result.id);
     showToast('来源已保存并完成首次拉取', 'success');
   } catch (e) {
+    const saved = proxyNodeStore.subscriptions.find(s => s.id === savedId);
+    if (saved) startEditSub(saved);
     showToast((e as Error).message, 'error');
   } finally {
     submittingSub.value = false;
@@ -1560,8 +1575,7 @@ async function updateSubscription(sub: SubscriptionItem) {
   if (updatingSubId.value) return;
   updatingSubId.value = sub.id;
   try {
-    await importAPI.refresh(sub.id);
-    await loadImports();
+    await refreshSubscriptionSource(sub.id);
     showToast(`订阅 ${sub.name} 刷新完成`);
   } catch (e) {
     showToast((e as Error).message, 'error');

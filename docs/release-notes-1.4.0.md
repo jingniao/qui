@@ -41,13 +41,14 @@
 
 | 项目 | 结果 / 证据 |
 | --- | --- |
-| A1a：真实 Xray/sing-box/GOST 路径、TCP/UDP、异常及重启恢复 | 待填命令、核心版本、日期、原始结果与证据路径 |
+| A1a：真实 Xray/sing-box/GOST 路径、TCP/UDP、异常及重启恢复 | 通过（Linux 测试机门禁，提交 `8134314`，2026-11-05T05:44Z–06:26Z）：`scripts/check.sh` 与真实核心套件均通过；`TestV14PathPanelFixtures`、`TestRealV14CompletionPaths` 全部子用例 PASS、无 SKIP。日志在测试机 `/root/qui-gate/8134314.log`。仅为本地真实核心回环，不替代下方实客户端与主机验收 |
 | P1：直接用户入站 | 待实客户端验收 |
 | P2：代理入口 → 代理出口（qui 入站 / 外部出站） | 待实客户端验收 |
 | P3：代理入口 → 中间代理 → 代理出口 | 待实客户端验收 |
 | P4：入口隧道 → 目标用户入站及中转订阅 | 待实客户端验收 |
 | 单次迁移/遗留报告、备份恢复、轮换、删除及无操作重发 | 待 A1 综合验收 |
-| RC 三台主机、平台覆盖、正式浏览器走查 | 待单独执行与记录 |
+| RC 三台主机、平台覆盖、正式浏览器走查 | 待单独执行与记录；须 Owner 批准推送分支/预发布并确认主机角色（见 [v1.4 计划](v1.4-plan.md) A1 状态） |
+| 客户端策略配置库（0132） | Phase A Linux 门禁通过（`42491ab`）；B–D 门禁、真实 mihomo 分流行为、登录浏览器走查与待定产品决定见[客户端策略计划 §14](../web/docs/client-policy-backend-plan.en.md#14-implementation-status-and-remaining-items) |
 | A1b：文档与源码核对 | 本草稿及说明书/架构/运维/协议/部署/索引已同步；不替代上述验收 |
 
 最终 A1 结果应写入[验收矩阵](v1-acceptance.md)，再回填本表与发布信息。

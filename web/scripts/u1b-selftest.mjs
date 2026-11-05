@@ -78,6 +78,47 @@ await connection.submit(false);
 assert.equal(newCalls[0].type, 'tunnel');
 assert.equal(newCalls[0].tunnelProtocol, 'wireguard');
 
+// External exits use the API capabilities for both new and existing connections.
+for (const [protocol, supportTcp, supportUdp, expectedTcp, expectedUdp] of [
+  ['http', true, false, true, false],
+  ['http', true, true, true, false], // HTTP never carries UDP, even with stale capability data.
+  ['trojan', true, true, true, true],
+  ['trojan', true, false, true, false],
+  ['wireguard', false, true, false, true],
+  ['trojan', false, false, false, false],
+]) {
+  for (const existing of [false, true]) {
+    const calls = [];
+    const dialog = await component('modules/proxy/components/relay/CanvasConnectionDialog.vue', {
+      source: { instanceId: 'a', resourceType: 'server' },
+      target: { instanceId: 'exit', resourceId: 'outbound:external', resourceType: 'node' },
+      outbounds: [{ id: 'unrelated', supportTcp: true, supportUdp: true }, { id: 'external', protocol, supportTcp, supportUdp }],
+      client: false,
+      connection: existing ? { id: 'edit', type: 'proxy_chain', supportTcp: true, supportUdp: true } : undefined,
+      persist: async value => calls.push(value),
+    }, `// ${protocol}/${supportTcp}/${supportUdp}/${existing}`, 'submit, tcp, udp, supportsTcp, supportsUdp, error');
+    assert.equal(dialog.supportsTcp.value, expectedTcp);
+    assert.equal(dialog.supportsUdp.value, expectedUdp);
+    assert.equal(dialog.tcp.value, expectedTcp);
+    assert.equal(dialog.udp.value, expectedUdp);
+    dialog.tcp.value = true; dialog.udp.value = true;
+    await dialog.submit(false);
+    if (expectedTcp || expectedUdp) {
+      assert.equal(calls[0].supportTcp, expectedTcp);
+      assert.equal(calls[0].supportUdp, expectedUdp);
+    } else {
+      assert.equal(calls.length, 0);
+      assert.equal(dialog.error.value, '请至少选择 TCP 或 UDP');
+    }
+  }
+}
+const connectionTemplate = read('modules/proxy/components/relay/CanvasConnectionDialog.vue').split('<script setup')[0];
+assert.match(connectionTemplate, /v-model="tcp"[^>]*:disabled="!supportsTcp"/);
+assert.match(connectionTemplate, /v-model="udp"[^>]*:disabled="!supportsUdp"/);
+assert.ok(connectionTemplate.includes('此外部出站不支持 TCP'));
+assert.ok(connectionTemplate.includes('此外部出站不支持 UDP'));
+assert.match(read('modules/proxy/pages/RelayCanvasPage.vue'), /<CanvasConnectionDialog[^>]*:outbounds="outbounds"/);
+
 const external = await component('modules/proxy/components/relay/ExternalProxyDialog.vue', {
   initialNodeId: '', nodes: [{ id: 'hk' }, { id: 'jp' }],
 }, `export const calls = [];
@@ -117,6 +158,33 @@ assert.ok(!Object.hasOwn(roundTrip.instances[1], 'relayPort'));
 assert.equal(roundTrip.instances[4].relayPortMode, 'manual');
 assert.equal(roundTrip.instances[4].relayPort, 31000);
 
+// Stale relay ports must never reach the backend on entries or non-server exits.
+for (const index of [0, 2, 3]) {
+  scheme.nodes[index].relayPortMode = 'manual';
+  scheme.nodes[index].relayPort = 32000;
+}
+const sanitized = api.relaySchemeToCanvasInput(scheme, context).layout;
+for (const index of [0, 2, 3]) {
+  assert.ok(!Object.hasOwn(sanitized.instances[index], 'relayPortMode'));
+  assert.ok(!Object.hasOwn(sanitized.instances[index], 'relayPort'));
+}
+// Exercise the role-change save handler without running the entire canvas page.
+const draftSaver = await load(`
+  export const scheme = ${JSON.stringify(scheme)};
+  const currentScheme = { value: scheme };
+  export const saved = [];
+  const scheduleSave = value => saved.push(structuredClone(value));
+  ${read('modules/proxy/pages/RelayCanvasPage.vue').split('function saveDraft(')[1].split('// Canvas edits arrive')[0].replace(/^/, 'export function saveDraft(')}
+`);
+draftSaver.scheme.nodes[1].role = 'entry';
+draftSaver.saveDraft();
+for (const index of [0, 1, 2, 3]) {
+  assert.ok(!Object.hasOwn(draftSaver.scheme.nodes[index], 'relayPortMode'));
+  assert.ok(!Object.hasOwn(draftSaver.saved[0].nodes[index], 'relayPort'));
+}
+assert.equal(draftSaver.saved[0].nodes[4].relayPortMode, 'manual');
+assert.equal(draftSaver.saved[0].nodes[4].relayPort, 31000);
+
 // Exercise the real entry-draft helper with the canvas API boundary replaced.
 const store = await load(`${reactivity}
   export const payloads = [];
@@ -128,4 +196,4 @@ const store = await load(`${reactivity}
 const draft = await store.createDraftSchemeForEntryNode({ id: 'self-hk-vless', name: '香港', sourceType: 'self_hosted', protocol: 'vless', port: 443 }, {});
 assert.equal(store.payloads[0].nodes[0].role, 'entry');
 assert.equal(draft.entryInstanceId, store.payloads[0].nodes[0].instanceId);
-console.log('PASS U1b: Add Relay filtering/save, auto-empty payload, legacy read-only/delete, new connections, external outbound create/ownership, exit and relay-port round trips, entry draft');
+console.log('PASS U1b: Add Relay filtering/save, auto-empty payload, legacy read-only/delete, new connections, external outbound create/ownership and TCP/UDP capabilities, exit and relay-port round trips/role cleanup, entry draft');

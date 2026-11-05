@@ -192,8 +192,10 @@ export function relaySchemeToCanvasInput(scheme: RelayScheme, context: CanvasSch
     x: Math.round(node.x) || 0,
     y: Math.round(node.y) || 0,
     role: node.role || 'relay',
-    ...(node.relayPortMode ? { relayPortMode: node.relayPortMode } : {}),
-    ...(node.relayPort !== undefined ? { relayPort: node.relayPort } : {}),
+    ...(node.resourceType === 'server' && (node.role === 'relay' || node.role === 'exit') ? {
+      ...(node.relayPortMode ? { relayPortMode: node.relayPortMode } : {}),
+      ...(node.relayPort !== undefined ? { relayPort: node.relayPort } : {})
+    } : {}),
     ...(node.listenPort ? { listenPort: node.listenPort } : {}),
     ...(node.targetPort ? { targetPort: node.targetPort } : {})
   }));

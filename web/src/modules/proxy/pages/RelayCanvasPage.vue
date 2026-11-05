@@ -978,7 +978,7 @@
     </aside>
     </div>
 
-    <CanvasConnectionDialog v-if="editor" :key="editor.key" :connection="editor.connection" :source="editor.source" :target="editor.target" :client="currentScheme.executionLocation === 'client'" :persist="persistConnection" @close="closeEditor" />
+    <CanvasConnectionDialog v-if="editor" :key="editor.key" :connection="editor.connection" :source="editor.source" :target="editor.target" :outbounds="outbounds" :client="currentScheme.executionLocation === 'client'" :persist="persistConnection" @close="closeEditor" />
     <ExternalProxyDialog v-if="externalProxyOpen" :nodes="externalOwnerNodes" :initial-node-id="externalOwnerId" @close="externalProxyOpen = false" @created="placeExternalProxy" />
     <AppDialog v-model="openPlanSummary" title="方案发布检查" :show-confirm="false">
       <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" :tunnel-names="tunnelNames" />
@@ -1722,6 +1722,12 @@ function validateScheme() { void checkScheme(); }
 function saveDraft(immediate: boolean | Event = false): Promise<void> | void {
   const scheme = currentScheme.value;
   if (!scheme.id) return;
+  for (const node of scheme.nodes) {
+    if (node.resourceType !== 'server' || (node.role !== 'relay' && node.role !== 'exit')) {
+      delete node.relayPortMode;
+      delete node.relayPort;
+    }
+  }
   scheme.updatedAt = new Date().toISOString();
   if (scheme.published) {
     scheme.hasUnpublishedChanges = true;

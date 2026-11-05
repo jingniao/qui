@@ -1,5 +1,14 @@
 <template>
   <div class="space-y-6 pb-16">
+    <div v-if="conflictVersion" role="alert" class="panel-card p-4 text-sm text-amber-800">{{ conflictVersion }}</div>
+    <div v-if="legacyCards.length" class="panel-card p-4 space-y-3">
+      <p class="text-sm font-semibold">导入本地配置预览（{{ legacyCards.length }} 个，均作为未启用配置导入）</p>
+      <ul class="text-xs space-y-1">
+        <li v-for="card in legacyCards" :key="card.id">{{ card.name }} · {{ card.config.proxyGroups.length }} 个代理组 · {{ card.config.rules.length }} 条规则 · {{ importResults[card.id] || '等待导入' }}</li>
+      </ul>
+      <button class="ios-btn-secondary" :disabled="importing" @click="importLegacyCards">{{ importing ? '正在导入' : '导入本地配置' }}</button>
+      <p class="text-xs text-neutral-500">全部成功后清除本地副本；本地启用选择不会改变服务器订阅模板。</p>
+    </div>
     <!-- Header -->
     <PageHeader
       title="客户端策略"
@@ -121,7 +130,7 @@
             @click="enablePolicy(policy)"
             :disabled="saving"
             class="ios-btn-primary text-xs h-8 px-2 rounded-xl font-medium inline-flex items-center justify-center gap-1.5 shadow-2xs transition-all"
-            title="设为当前生效策略并下发订阅"
+            title="设为订阅模板，客户端更新订阅后生效"
           >
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
@@ -184,7 +193,7 @@
     <AppDialog
       v-model="configModalVisible"
       :title="modalTitle"
-      description="左侧选择配置模块，右侧修改模块内容。右上角可保存并生效、查看版本信息或关闭。"
+      description="左侧选择配置模块，右侧修改模块内容。订阅模板保存后，客户端更新订阅后生效。"
       maxWidth="full"
       maxWidthClass="max-w-[1400px] xl:max-w-[1520px] 2xl:max-w-[1640px] w-full"
       heightClass="h-[88vh] max-h-[900px] min-h-[640px]"
@@ -235,6 +244,7 @@
         </div>
       </template>
 
+      <div v-if="conflictVersion" role="alert" class="mb-3 text-sm text-amber-800">{{ conflictVersion }}</div>
       <!-- 弹窗内部：左边选择模块，右边设置对应模块内容 -->
       <div @click="activeRuleMenuId = null" class="flex flex-col md:flex-row gap-6 flex-1 min-h-0 h-full overflow-hidden">
         <!-- 左侧导航：模块选择（紧凑缩窄，悬停浮窗查看详细描述） -->
@@ -341,7 +351,7 @@
               <div v-if="modalMode === 'create'" class="pt-1">
                 <label class="inline-flex items-center gap-2 text-xs text-neutral-700 cursor-pointer">
                   <input v-model="setAsActiveOnSave" type="checkbox" />
-                  <span>保存后立即设为当前生效策略并下发生效</span>
+                  <span>设为订阅模板，客户端更新订阅后生效</span>
                 </label>
               </div>
             </div>
@@ -414,7 +424,7 @@
                   </span>
                 </div>
                 <p class="text-xs text-neutral-500 mt-0.5">
-                  用途组决定业务流量选哪个出口，地区组在区域内优选低延迟落地节点。
+                  地区名称不限制节点来源；地区筛选待接入，当前以成员表达式为准。客户端延迟与实际出口未知。
                 </p>
               </div>
 
@@ -422,21 +432,19 @@
               <div class="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  @click="refreshDelays"
-                  :disabled="isRefreshingDelays"
+                  disabled
                   class="ios-btn-secondary text-xs px-2.5 py-1.5 inline-flex items-center gap-1.5"
-                  title="刷新各节点测速延迟"
+                  title="客户端延迟测量未接入"
                 >
                   <svg
                     class="w-3.5 h-3.5 text-neutral-600"
-                    :class="{ 'animate-spin': isRefreshingDelays }"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
                   >
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
-                  <span>{{ isRefreshingDelays ? '测速中...' : '刷新延迟' }}</span>
+                  <span>延迟未知</span>
                 </button>
 
                 <button
@@ -633,7 +641,7 @@
                       <div class="flex items-center gap-2">
                         <span class="font-semibold text-neutral-800">可选出口清单</span>
                         <span class="text-[11px] text-neutral-400 font-normal">
-                          (点击任意卡片立即设为当前生效出口，客户端自主切换)
+                          (点击卡片调整配置首选，客户端可能保留本地选择)
                         </span>
                       </div>
                       <span class="text-[11px] text-neutral-400 font-mono">
@@ -677,13 +685,12 @@
                         <!-- 第二行：最终落地节点与延迟 -->
                         <div class="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-black/[0.03] text-[10px]">
                           <span class="text-neutral-500 truncate font-mono">
-                            {{ getFinalNodeForGroup(member).name.split('·')[0].trim() }}
+                            客户端运行时决定
                           </span>
                           <span
-                            class="font-mono font-bold shrink-0"
-                            :class="getFinalNodeForGroup(member).status === 'ok' ? 'text-emerald-600' : 'text-neutral-400'"
+                            class="font-mono font-bold shrink-0 text-neutral-400"
                           >
-                            {{ getFinalNodeForGroup(member).latency }}ms
+                            延迟未知
                           </span>
                         </div>
 
@@ -692,7 +699,7 @@
                           v-if="mIdx === 0"
                           class="absolute -top-1.5 -right-1 text-[9px] bg-ios-blue text-white font-bold px-1.5 py-0.2 rounded-full shadow-2xs uppercase tracking-wider"
                         >
-                          生效中
+                          配置首选
                         </span>
                       </div>
 
@@ -787,7 +794,7 @@
                         </span>
                       </div>
                       <div class="text-[11px] text-neutral-400 font-mono">
-                        {{ getRegionNodeStats(item.group).total }} 个节点 ({{ getRegionNodeStats(item.group).ok }} 在线 · {{ getRegionNodeStats(item.group).timeout }} 超时)
+                        授权候选与运行状态待接入
                       </div>
                     </div>
 
@@ -799,18 +806,18 @@
                           <div class="flex items-center gap-1.5 min-w-0">
                             <span class="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-200 shrink-0"></span>
                             <span class="text-xs font-bold truncate">
-                              {{ getFinalNodeForGroup(item.group.name).name }}
+                              客户端运行时决定
                             </span>
                           </div>
                         </div>
                         <div class="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-emerald-200/60 text-[10px]">
-                          <span class="text-emerald-700 font-medium">当前优选落地</span>
+                          <span class="text-emerald-700 font-medium">实际出口未知</span>
                           <span class="font-mono font-bold text-emerald-700">
-                            {{ getFinalNodeForGroup(item.group.name).latency }}ms · 优选在线
+                            延迟未知
                           </span>
                         </div>
                         <span class="absolute -top-1.5 -right-1 text-[9px] bg-emerald-600 text-white font-bold px-1.5 py-0.2 rounded-full shadow-2xs">
-                          当前胜出
+                          运行时决定
                         </span>
                       </div>
 
@@ -842,16 +849,16 @@
                   <!-- 关键词筛选单行轻量条 -->
                   <div class="p-2.5 bg-neutral-50/80 rounded-xl border border-black/[0.04] flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div class="flex items-center gap-2 flex-1 min-w-0">
-                      <span class="text-[11px] font-bold text-neutral-500 shrink-0">关键词自动匹配:</span>
+                      <span class="text-[11px] font-bold text-neutral-500 shrink-0">地区筛选待接入:</span>
                       <input
-                        v-model="getGroupKeywordFilter(item.index, item.group).include"
+                        v-model="getGroupKeywordFilter(item.index, item.group).include" disabled
                         type="text"
                         :placeholder="getDefaultIncludeKeywords(item.group.name)"
                         class="form-input-base text-xs font-mono py-1 px-2 flex-1 min-w-[130px] bg-white"
                         title="包含关键词"
                       />
                       <input
-                        v-model="getGroupKeywordFilter(item.index, item.group).exclude"
+                        v-model="getGroupKeywordFilter(item.index, item.group).exclude" disabled
                         type="text"
                         placeholder="排除关键词 (如维护)"
                         class="form-input-base text-xs font-mono py-1 px-2 w-28 bg-white hidden lg:inline"
@@ -861,14 +868,14 @@
 
                     <div class="flex items-center gap-2 shrink-0">
                       <span class="text-[11px] text-neutral-500">
-                        匹配到 <strong class="text-neutral-900 font-mono">{{ getMatchedNodesForGroup(item.index, item.group).length }}</strong> 个
+                        授权成员待接入
                       </span>
                       <button
                         type="button"
-                        @click="applyMatchedNodesToGroup(item.index, item.group)"
+                        disabled title="地区成员筛选将在后续阶段接入"
                         class="ios-btn-secondary text-[11px] px-2 py-0.5 text-ios-blue font-semibold hover:border-ios-blue"
                       >
-                        同步至本组
+                        待接入
                       </button>
                     </div>
                   </div>
@@ -1722,8 +1729,8 @@
           <div v-else-if="activeModule === 'preview'" class="space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
               <div>
-                <h3 class="text-base font-bold text-neutral-900">订阅实际生成的配置 YAML 预览</h3>
-                <p class="text-xs text-neutral-500 mt-0.5">预览根据当前客户端策略生成的完整订阅配置，支持一键复制完整配置。</p>
+                <h3 class="text-base font-bold text-neutral-900">当前订阅模板 YAML 预览（不包含未保存草稿）</h3>
+                <p class="text-xs text-neutral-500 mt-0.5">仅预览服务器当前订阅模板；未启用配置与草稿预览待后续接入。</p>
               </div>
               <div class="flex items-center gap-2">
                 <button
@@ -1756,7 +1763,7 @@
                 />
               </div>
               <div class="text-[11px] text-neutral-400">
-                根据当前客户端策略实时合成，用于客户端订阅配置测试与复制
+                根据服务器当前订阅模板合成，用于订阅配置测试与复制
               </div>
             </div>
 
@@ -2185,7 +2192,7 @@
     <ConfirmDialog
       v-model="showVersionDialog"
       title="策略版本与修订信息"
-      :message="'当前修订版本：#' + clientConfig.version + '\n最后更新时间：' + formatDateTime(clientConfig.updatedAt) + '\n最后操作人：' + (clientConfig.updatedBy || 'Owner') + '\n\n每次保存策略配置时，服务端版本号将自动递增。客户端刷新订阅后即刻加载生效最新的版本。'"
+      :message="'配置修订版本：#' + clientConfig.version + '\n订阅模板版本：#' + activeRevision + '\n最后更新时间：' + formatDateTime(clientConfig.updatedAt) + '\n最后操作人：' + (clientConfig.updatedBy || 'Owner') + '\n\n配置有修改时推进配置版本；设为订阅模板时推进订阅模板版本。客户端更新订阅后生效。'"
       confirmText="知道了"
       :showCancel="false"
       @confirm="showVersionDialog = false"
@@ -2207,6 +2214,11 @@
 import { ref, reactive, computed, onMounted, h, watch } from 'vue';
 import {
   clientPolicyAPI,
+  clientPolicyProfilesAPI,
+  toConfig,
+  fromConfig,
+  type ClientPolicyProfile,
+  type ClientPolicyResult,
   clientPresets,
   policyAPI,
   type ClientPolicyConfig,
@@ -2237,6 +2249,8 @@ export interface SavedClientPolicy {
   createdAt: string;
   updatedAt: string;
   config: ClientPolicyConfig;
+  revision: number;
+  uiMetadata: Record<string, unknown>;
 }
 
 const SAVED_POLICIES_KEY = 'qui_client_saved_policies_v2';
@@ -2244,6 +2258,12 @@ const ACTIVE_POLICY_ID_KEY = 'qui_client_active_policy_id_v2';
 
 const savedPolicies = ref<SavedClientPolicy[]>([]);
 const activePolicyId = ref<string>('');
+const activeRevision = ref(0);
+const editingActiveRevision = ref<number | undefined>();
+const conflictVersion = ref('');
+const legacyCards = ref<SavedClientPolicy[]>([]);
+const importResults = ref<Record<string, string>>({});
+const importing = ref(false);
 const editingPolicyId = ref<string | null>(null);
 const policyNameInput = ref('');
 const policyDescInput = ref('');
@@ -2343,61 +2363,79 @@ const modulesList = [
     id: 'preview' as const,
     name: 'YAML 预览',
     en: 'preview',
-    desc: '订阅实际生成的配置 YAML 预览与诊断警告检查。',
+    desc: '预览服务器当前订阅模板；当前编辑的未启用配置与草稿预览待后续接入。',
     icon: PreviewIcon
   }
 ];
 
-function loadSavedPolicies() {
-  try {
-    const raw = localStorage.getItem(SAVED_POLICIES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        savedPolicies.value = parsed;
-        const storedActiveId = localStorage.getItem(ACTIVE_POLICY_ID_KEY);
-        if (storedActiveId && savedPolicies.value.some(p => p.id === storedActiveId)) {
-          activePolicyId.value = storedActiveId;
-        } else {
-          activePolicyId.value = savedPolicies.value[0].id;
-        }
-        return;
-      }
-    }
-  } catch (e) {
-    console.error('Failed to parse saved client policies from localStorage:', e);
-  }
-
-  // 初次加载时，以当前服务端已生效的策略为初始配置卡片
-  const defaultPreset = clientPresets.find(p => p.id === clientConfig.value.activePreset);
-  const initialName = defaultPreset ? defaultPreset.name : '标准分流策略';
-  const initialDesc = defaultPreset ? defaultPreset.desc : '当前下发至客户端的订阅分流策略配置';
-
-  savedPolicies.value = [
-    {
-      id: 'policy-default',
-      name: initialName,
-      description: initialDesc,
-      createdAt: clientConfig.value.updatedAt || new Date().toISOString(),
-      updatedAt: clientConfig.value.updatedAt || new Date().toISOString(),
-      config: JSON.parse(JSON.stringify(clientConfig.value))
-    }
-  ];
-  activePolicyId.value = 'policy-default';
-  saveSavedPolicies();
+function policyCard(profile: ClientPolicyProfile): SavedClientPolicy {
+  return { ...profile, config: toConfig(profile) };
 }
 
-function saveSavedPolicies() {
-  try {
-    localStorage.setItem(SAVED_POLICIES_KEY, JSON.stringify(savedPolicies.value));
-    localStorage.setItem(ACTIVE_POLICY_ID_KEY, activePolicyId.value);
-  } catch (e) {
-    console.error('Failed to save client policies to localStorage:', e);
+async function loadSavedPolicies() {
+  const list = await clientPolicyProfilesAPI.list();
+  const profiles = await Promise.all(list.items.map(item => clientPolicyProfilesAPI.get(item.id)));
+  savedPolicies.value = profiles.map(item => policyCard(item.profile));
+  activePolicyId.value = list.activeProfileId;
+  activeRevision.value = list.activeRevision;
+}
+
+function acceptProfile(result: ClientPolicyResult) {
+  const card = policyCard(result.profile);
+  const index = savedPolicies.value.findIndex(item => item.id === card.id);
+  if (index === -1) savedPolicies.value.push(card);
+  else savedPolicies.value[index] = card;
+  activePolicyId.value = result.activeProfileId;
+  activeRevision.value = result.activeRevision;
+  return card;
+}
+
+function profileFailure(error: unknown) {
+  if (error instanceof APIError && (error.code === 'stale_rules' || error.code === 'stale_client_policy')) {
+    const version = error.details.activeRevision ?? error.details.revision;
+    conflictVersion.value = (error.code === 'stale_rules' ? '服务器订阅模板版本：' : '服务器配置版本：') + version + '。草稿已保留，请核对后重新编辑。';
+    showToast(conflictVersion.value, 'error');
+  } else if (error instanceof APIError && error.code === 'invalid_rules') {
+    showToast(fieldLabel(String(error.details.field || '')) + '：' + error.message, 'error');
+  } else {
+    showToast((error as Error).message, 'error');
   }
+}
+
+function previewLegacyCards() {
+  try {
+    const raw = localStorage.getItem(SAVED_POLICIES_KEY);
+    if (raw) legacyCards.value = JSON.parse(raw);
+  } catch {
+    showToast('本地配置无法解析，请检查浏览器保存的数据', 'error');
+  }
+}
+
+async function importLegacyCards() {
+  importing.value = true;
+  for (const card of legacyCards.value) {
+    try {
+      const content = { name: card.name, description: card.description, template: fromConfig(card.config), uiMetadata: card.uiMetadata || {} };
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(content)));
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+      acceptProfile(await clientPolicyProfilesAPI.create({ ...content, importKey: card.id + ':' + hash }));
+      importResults.value[card.id] = '导入成功';
+    } catch (error) {
+      importResults.value[card.id] = '导入失败：' + (error as Error).message;
+    }
+  }
+  if (legacyCards.value.every(card => importResults.value[card.id] === '导入成功')) {
+    localStorage.removeItem(SAVED_POLICIES_KEY);
+    localStorage.removeItem(ACTIVE_POLICY_ID_KEY);
+    showToast('全部本地配置已导入，服务器订阅模板保持原选择');
+  }
+  importing.value = false;
 }
 
 function editPolicy(policy: SavedClientPolicy) {
   editingPolicyId.value = policy.id;
+  editingActiveRevision.value = policy.id === activePolicyId.value ? activeRevision.value : undefined;
+  conflictVersion.value = '';
   policyNameInput.value = policy.name;
   policyDescInput.value = policy.description;
   setAsActiveOnSave.value = policy.id === activePolicyId.value;
@@ -2413,20 +2451,10 @@ async function enablePolicy(policy: SavedClientPolicy) {
   if (activePolicyId.value === policy.id) return;
   saving.value = true;
   try {
-    clientConfig.value = await clientPolicyAPI.save(policy.config);
-    activePolicyId.value = policy.id;
-    originalSnapshot.value = JSON.stringify(clientConfig.value);
-    isDirty.value = false;
-
-    const idx = savedPolicies.value.findIndex(p => p.id === policy.id);
-    if (idx !== -1) {
-      savedPolicies.value[idx].updatedAt = clientConfig.value.updatedAt || new Date().toISOString();
-      savedPolicies.value[idx].config = JSON.parse(JSON.stringify(clientConfig.value));
-      saveSavedPolicies();
-    }
-    showToast('已启用策略「' + policy.name + '」，已下发至客户端订阅配置');
-  } catch (e) {
-    showToast('启用策略失败: ' + (e as Error).message, 'error');
+    acceptProfile(await clientPolicyProfilesAPI.activate(policy.id, policy.revision, activeRevision.value));
+    showToast('设为订阅模板，客户端更新订阅后生效');
+  } catch (error) {
+    profileFailure(error);
   } finally {
     saving.value = false;
   }
@@ -2445,14 +2473,18 @@ function promptDeletePolicy(policy: SavedClientPolicy) {
   confirmDeletePolicyVisible.value = true;
 }
 
-function executeDeletePolicy() {
+async function executeDeletePolicy() {
   if (!deletingPolicy.value) return;
-  const name = deletingPolicy.value.name;
-  savedPolicies.value = savedPolicies.value.filter(p => p.id !== deletingPolicy.value?.id);
-  saveSavedPolicies();
-  confirmDeletePolicyVisible.value = false;
-  deletingPolicy.value = null;
-  showToast('策略配置「' + name + '」已删除');
+  const policy = deletingPolicy.value;
+  try {
+    await clientPolicyProfilesAPI.delete(policy.id, policy.revision);
+    savedPolicies.value = savedPolicies.value.filter(item => item.id !== policy.id);
+    confirmDeletePolicyVisible.value = false;
+    deletingPolicy.value = null;
+    showToast('策略配置「' + policy.name + '」已删除');
+  } catch (error) {
+    profileFailure(error);
+  }
 }
 
 function openNewConfigModal() {
@@ -2462,25 +2494,14 @@ function openNewConfigModal() {
   setAsActiveOnSave.value = false;
 
   const standard = presetTemplates.value.find(p => p.id === 'standard');
-  if (standard) {
-    clientConfig.value = {
-      version: 0,
-      updatedAt: '',
-      activePreset: 'standard',
-      settings: { ...standard.template.client },
-      proxyGroups: standard.template.groups.map(g => ({
-        name: g.name,
-        type: g.type,
-        proxies: g.members.join(', '),
-        url: g.testUrl || undefined,
-        interval: g.intervalSeconds || undefined
-      })),
-      rules: standard.template.rules.map(r => ({ ...r, type: r.type as ClientRuleType })),
-      extra: { ipv6: false, dns: { enable: false, enhancedMode: 'fake-ip', nameservers: ['223.5.5.5', '119.29.29.29'], fallback: ['https://1.1.1.1/dns-query'] }, providers: [] }
-    };
-  } else {
-    clientConfig.value = emptyConfig();
+  if (!standard) {
+    showToast('服务器预设尚未加载，请稍后重试', 'error');
+    return;
   }
+  clientConfig.value = toConfig({ template: JSON.parse(JSON.stringify(standard.template)), revision: 0, updatedAt: '', updatedBy: '' });
+  editingActiveRevision.value = undefined;
+  conflictVersion.value = '';
+
   originalSnapshot.value = JSON.stringify(clientConfig.value);
   isDirty.value = false;
   modalMode.value = 'create';
@@ -2701,44 +2722,8 @@ let deletingGroupIndex = -1;
 // 分类与视图状态
 const groupCategoryTab = ref<'service' | 'region' | 'all'>('service');
 const groupSearchQuery = ref('');
-const isRefreshingDelays = ref(false);
 const groupExpandedNodes = ref<Record<number, boolean>>({});
 const groupKeywordFilters = ref<Record<number, { include: string; exclude: string }>>({});
-
-// 延迟模拟数据
-const simulatedLatencyCache = ref<Record<string, number>>({});
-
-function getNodeSimulatedLatency(name: string): number {
-  if (simulatedLatencyCache.value[name]) return simulatedLatencyCache.value[name];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash << 5) - hash + name.charCodeAt(i);
-    hash |= 0;
-  }
-  const base = Math.abs(hash) % 80;
-  let lat = 120;
-  const n = name.toLowerCase();
-  if (n.includes('港') || n.includes('hk') || n.includes('hong')) lat = 32 + (base % 25);
-  else if (n.includes('台') || n.includes('tw') || n.includes('taiwan')) lat = 45 + (base % 30);
-  else if (n.includes('日') || n.includes('jp') || n.includes('tokyo')) lat = 68 + (base % 35);
-  else if (n.includes('新') || n.includes('sg') || n.includes('singapore')) lat = 78 + (base % 40);
-  else if (n.includes('韩') || n.includes('kr') || n.includes('seoul')) lat = 55 + (base % 30);
-  else if (n.includes('美') || n.includes('us') || n.includes('united')) lat = 148 + (base % 45);
-  else if (n.includes('英') || n.includes('uk') || n.includes('德') || n.includes('de')) lat = 175 + (base % 40);
-  else lat = 95 + (base % 50);
-
-  simulatedLatencyCache.value[name] = lat;
-  return lat;
-}
-
-function refreshDelays() {
-  isRefreshingDelays.value = true;
-  simulatedLatencyCache.value = {};
-  setTimeout(() => {
-    isRefreshingDelays.value = false;
-    showToast('已完成全节点延迟测速刷新', 'success');
-  }, 600);
-}
 
 function formatExitLabel(name: string): { icon: string; title: string } {
   if (name === 'DIRECT') return { icon: '🚀', title: 'DIRECT (本地直连)' };
@@ -2841,112 +2826,6 @@ function getGroupPrimaryExit(group: ClientProxyGroup): string {
   return members[0] || 'DIRECT';
 }
 
-// 递归追踪最终出口节点
-function getFinalNodeForGroup(
-  groupOrNodeName: string,
-  visited: Set<string> = new Set()
-): { name: string; latency: number; status: 'ok' | 'timeout' } {
-  if (visited.has(groupOrNodeName)) {
-    return { name: '循环引用节点', latency: 999, status: 'timeout' };
-  }
-  visited.add(groupOrNodeName);
-
-  if (groupOrNodeName === 'DIRECT') {
-    return { name: '本地直连 (DIRECT)', latency: 5, status: 'ok' };
-  }
-  if (groupOrNodeName === 'REJECT') {
-    return { name: '客户端拦截 (REJECT)', latency: 0, status: 'ok' };
-  }
-
-  const foundGroup = clientConfig.value.proxyGroups.find(g => g.name === groupOrNodeName);
-  if (foundGroup) {
-    const members = getGroupMembers(foundGroup);
-    if (members.length === 0) {
-      return { name: '暂无可用节点', latency: 999, status: 'timeout' };
-    }
-    const firstMember = members[0];
-    const isNextGroup = clientConfig.value.proxyGroups.some(g => g.name === firstMember);
-    if (isNextGroup) {
-      return getFinalNodeForGroup(firstMember, visited);
-    }
-    // 是具体节点或者符号成员
-    return resolveSymbolicNode(foundGroup, firstMember);
-  }
-
-  // 不是代理组，可能是具体节点名称
-  const node = availableNodes.value.find(n => n.name === groupOrNodeName || n.id === groupOrNodeName || ('node:' + n.id) === groupOrNodeName);
-  if (node) {
-    return { name: node.name, latency: getNodeSimulatedLatency(node.name), status: node.status === 'online' ? 'ok' : 'timeout' };
-  }
-
-  return { name: groupOrNodeName, latency: getNodeSimulatedLatency(groupOrNodeName), status: 'ok' };
-}
-
-function resolveSymbolicNode(group: ClientProxyGroup, member: string): { name: string; latency: number; status: 'ok' | 'timeout' } {
-  if (member === '@all' || member.startsWith('@nodeGroup:')) {
-    const lowerG = group.name.toLowerCase();
-
-    const isUS = lowerG.includes('美') || lowerG.includes('us') || lowerG.includes('united');
-    const isJP = lowerG.includes('日') || lowerG.includes('jp') || lowerG.includes('japan');
-    const isHK = lowerG.includes('港') || lowerG.includes('hk') || lowerG.includes('hong');
-    const isSG = lowerG.includes('新') || lowerG.includes('sg') || lowerG.includes('singapore');
-    const isTW = lowerG.includes('台') || lowerG.includes('tw') || lowerG.includes('taiwan');
-    const isKR = lowerG.includes('韩') || lowerG.includes('kr') || lowerG.includes('korea');
-
-    // 1. 如果组名识别为特定地区，优先严格查找匹配该地区的真实节点
-    if (isUS || isJP || isHK || isSG || isTW || isKR) {
-      const matchedNode = availableNodes.value.find(n => {
-        const lowerN = n.name.toLowerCase();
-        if (isUS && (lowerN.includes('美') || lowerN.includes('us') || lowerN.includes('united') || lowerN.includes('america'))) return true;
-        if (isJP && (lowerN.includes('日') || lowerN.includes('jp') || lowerN.includes('japan') || lowerN.includes('tokyo') || lowerN.includes('osaka'))) return true;
-        if (isHK && (lowerN.includes('港') || lowerN.includes('hk') || lowerN.includes('hong'))) return true;
-        if (isSG && (lowerN.includes('新') || lowerN.includes('sg') || lowerN.includes('singapore'))) return true;
-        if (isTW && (lowerN.includes('台') || lowerN.includes('tw') || lowerN.includes('taiwan') || lowerN.includes('taipei'))) return true;
-        if (isKR && (lowerN.includes('韩') || lowerN.includes('kr') || lowerN.includes('korea') || lowerN.includes('seoul'))) return true;
-        return false;
-      });
-
-      if (matchedNode) {
-        return { name: matchedNode.name, latency: getNodeSimulatedLatency(matchedNode.name), status: 'ok' };
-      }
-
-      // 系统内暂无该地区节点时，返回匹配该区域的真实测速落地预览
-      if (isUS) return { name: '🇺🇸 美国 01 · 圣何塞 BGP', latency: 148, status: 'ok' };
-      if (isJP) return { name: '🇯🇵 日本 01 · 东京 SoftBank', latency: 68, status: 'ok' };
-      if (isHK) return { name: '🇭🇰 香港 01 · 唯思 CN2', latency: 32, status: 'ok' };
-      if (isSG) return { name: '🇸🇬 新加坡 01 · AWS 节点', latency: 76, status: 'ok' };
-      if (isTW) return { name: '🇹🇼 台湾 01 · 中华电信', latency: 45, status: 'ok' };
-      if (isKR) return { name: '🇰🇷 韩国 01 · 首尔 KT', latency: 58, status: 'ok' };
-    }
-
-    // 2. 通用组（如 PROXY、AUTO 等）：取系统首个在线节点
-    if (availableNodes.value.length > 0) {
-      const first = availableNodes.value[0];
-      return { name: first.name, latency: getNodeSimulatedLatency(first.name), status: 'ok' };
-    }
-
-    return { name: group.name + ' · 优选节点', latency: 85, status: 'ok' };
-  }
-
-  const directNode = availableNodes.value.find(n => n.name === member);
-  if (directNode) {
-    return { name: directNode.name, latency: getNodeSimulatedLatency(directNode.name), status: 'ok' };
-  }
-
-  return { name: member, latency: getNodeSimulatedLatency(member), status: 'ok' };
-}
-
-// 统计地区组内节点数量
-function getRegionNodeStats(group: ClientProxyGroup) {
-  const matched = getMatchedNodesForGroup(0, group);
-  const total = matched.length > 0 ? matched.length : (availableNodes.value.length > 0 ? Math.min(3, availableNodes.value.length) : 3);
-  return {
-    total,
-    ok: Math.max(1, total - 1),
-    timeout: 1
-  };
-}
-
 // 循环引用检测
 const cycleWarning = computed(() => {
   const groups = clientConfig.value.proxyGroups;
@@ -3018,34 +2897,6 @@ function getGroupKeywordFilter(index: number, group: ClientProxyGroup) {
   return groupKeywordFilters.value[index];
 }
 
-function getMatchedNodesForGroup(index: number, group: ClientProxyGroup): NodeView[] {
-  const filter = getGroupKeywordFilter(index, group);
-  const incWords = (filter.include || '').split(/[,，s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
-  const excWords = (filter.exclude || '').split(/[,，s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
-
-  if (incWords.length === 0) return availableNodes.value;
-
-  return availableNodes.value.filter(n => {
-    const name = n.name.toLowerCase();
-    const isInc = incWords.some(w => name.includes(w));
-    const isExc = excWords.some(w => name.includes(w));
-    return isInc && !isExc;
-  });
-}
-
-function applyMatchedNodesToGroup(index: number, group: ClientProxyGroup) {
-  const matched = getMatchedNodesForGroup(index, group);
-  if (matched.length === 0) {
-    showToast('当前未匹配到节点，已保留原成员配置', 'info');
-    return;
-  }
-  const nodeNames = matched.map(n => n.name);
-  group.proxies = nodeNames.join(', ');
-  markDirty();
-  showToast('已同步 ' + matched.length + ' 个匹配节点到【' + group.name + '】');
-}
-
-// 设置用途组的首选出口
 function setGroupPrimaryExit(group: ClientProxyGroup, exitName: string) {
   const members = getGroupMembers(group);
   const idx = members.indexOf(exitName);
@@ -4273,36 +4124,7 @@ function executeDiscardChanges() {
   }
 }
 
-// 统一持久化逻辑
-async function persist(successMsg: string): Promise<boolean> {
-  if (!loaded.value) return false;
-  if (!isOwner.value) {
-    showToast('只有 Owner 可以修改客户端策略', 'error');
-    return false;
-  }
 
-  saving.value = true;
-  try {
-    clientConfig.value = await clientPolicyAPI.save(clientConfig.value);
-    originalSnapshot.value = JSON.stringify(clientConfig.value);
-    isDirty.value = false;
-    showToast(successMsg);
-    if (previewUserId.value) loadPreview();
-    return true;
-  } catch (e) {
-    if (e instanceof APIError && e.code === 'stale_rules') {
-      showToast('客户端策略已在其他地方修改，已重新载入最新版本', 'error');
-      await load();
-    } else if (e instanceof APIError && e.code === 'invalid_rules') {
-      showToast(fieldLabel(String(e.details.field || '')) + '：' + e.message, 'error');
-    } else {
-      showToast((e as Error).message, 'error');
-    }
-    return false;
-  } finally {
-    saving.value = false;
-  }
-}
 
 function fieldLabel(field: string): string {
   const rule = /^rules\[(\d+)\]\.?(\w*)/.exec(field);
@@ -4335,50 +4157,27 @@ async function saveAll() {
     return;
   }
 
-  const now = new Date().toISOString();
-
-  if (editingPolicyId.value) {
-    const idx = savedPolicies.value.findIndex(p => p.id === editingPolicyId.value);
-    if (idx !== -1) {
-      savedPolicies.value[idx].name = policyNameInput.value.trim();
-      savedPolicies.value[idx].description = policyDescInput.value.trim();
-      savedPolicies.value[idx].updatedAt = now;
-      savedPolicies.value[idx].config = JSON.parse(JSON.stringify(clientConfig.value));
-
-      if (editingPolicyId.value === activePolicyId.value) {
-        const ok = await persist('客户端策略配置已全部保存，用户更新订阅后即刻生效');
-        if (!ok) return;
-      } else {
-        showToast('已保存策略配置「' + savedPolicies.value[idx].name + '」');
-      }
-    }
-  } else {
-    const newId = 'policy-' + Date.now();
-    const newPolicy: SavedClientPolicy = {
-      id: newId,
-      name: policyNameInput.value.trim(),
-      description: policyDescInput.value.trim(),
-      createdAt: now,
-      updatedAt: now,
-      config: JSON.parse(JSON.stringify(clientConfig.value))
-    };
-    savedPolicies.value.push(newPolicy);
-
-    if (savedPolicies.value.length === 1 || setAsActiveOnSave.value) {
-      const ok = await persist('新策略配置已创建并设为当前生效，用户更新订阅后生效');
-      if (ok) {
-        activePolicyId.value = newId;
-      } else {
-        return;
-      }
-    } else {
-      showToast('已创建策略配置「' + newPolicy.name + '」');
-    }
+  saving.value = true;
+  try {
+    const existing = savedPolicies.value.find(item => item.id === editingPolicyId.value);
+    const input = { name: policyNameInput.value.trim(), description: policyDescInput.value.trim(), template: fromConfig(clientConfig.value), uiMetadata: existing?.uiMetadata || {} };
+    const result = editingPolicyId.value
+      ? await clientPolicyProfilesAPI.update(editingPolicyId.value, { ...input, expectedRevision: clientConfig.value.version, expectedActiveRevision: editingActiveRevision.value })
+      : await clientPolicyProfilesAPI.create({ ...input, activate: setAsActiveOnSave.value, expectedActiveRevision: setAsActiveOnSave.value ? activeRevision.value : undefined });
+    const card = acceptProfile(result);
+    clientConfig.value = JSON.parse(JSON.stringify(card.config));
+    originalSnapshot.value = JSON.stringify(clientConfig.value);
+    isDirty.value = false;
+    conflictVersion.value = '';
+    configModalVisible.value = false;
+    showToast(card.id === activePolicyId.value ? '设为订阅模板，客户端更新订阅后生效' : '配置已保存');
+  } catch (error) {
+    profileFailure(error);
+  } finally {
+    saving.value = false;
   }
-
-  saveSavedPolicies();
-  configModalVisible.value = false;
 }
+
 
 function getRuleSetName(payload: string): string {
   const id = payload.startsWith('service:') ? payload.slice('service:'.length) : '';
@@ -4499,18 +4298,18 @@ function copyConfig() {
 // 加载初始数据
 async function load() {
   try {
-    const config = await clientPolicyAPI.get();
-    clientConfig.value = config;
-    originalSnapshot.value = JSON.stringify(config);
+    if (isOwner.value) {
+      await loadSavedPolicies();
+      const active = savedPolicies.value.find(item => item.id === activePolicyId.value)!;
+      clientConfig.value = JSON.parse(JSON.stringify(active.config));
+      previewLegacyCards();
+    } else {
+      clientConfig.value = await clientPolicyAPI.get();
+    }
+    originalSnapshot.value = JSON.stringify(clientConfig.value);
     isDirty.value = false;
     loaded.value = true;
-    loadSavedPolicies();
-    const activePolicy = savedPolicies.value.find(p => p.id === activePolicyId.value);
-    if (activePolicy) {
-      activePolicy.config = JSON.parse(JSON.stringify(config));
-      activePolicy.updatedAt = config.updatedAt || activePolicy.updatedAt;
-      saveSavedPolicies();
-    }
+
   } catch (e) {
     showToast('载入客户端策略失败: ' + (e as Error).message, 'error');
   }

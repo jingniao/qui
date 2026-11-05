@@ -31,7 +31,7 @@ type Stored struct {
 	UpdatedBy string   `json:"updatedBy"`
 }
 
-// Store reads and writes the template row. It touches no other row.
+// Store owns client templates, profiles and their active pointer.
 type Store struct {
 	Database *sql.DB
 	// Lookup checks references when the Owner saves; a stored template is only
@@ -134,6 +134,34 @@ func (s *Store) Save(ctx context.Context, template Template, expected int64, act
 		return Stored{}, false, err
 	}
 	defer tx.Rollback()
+	next, changed, err := s.saveTx(ctx, tx, template, expected, actor, false)
+	if err != nil {
+		return next, false, err
+	}
+	if changed {
+		active, err := activeID(ctx, tx)
+		if err != nil {
+			return Stored{}, false, err
+		}
+		profile, err := profileRead(ctx, tx, active)
+		if err != nil {
+			return Stored{}, false, err
+		}
+		updated := profile
+		updated.Template = next.Template
+		if _, _, err := updateProfile(ctx, tx, profile, updated, actor); err != nil {
+			return Stored{}, false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Stored{}, false, err
+	}
+	return next, changed, nil
+}
+
+// saveTx is the only snapshot compare/write path. Callers validate before
+// acquiring the writer, since reference lookups belong to other repositories.
+func (s *Store) saveTx(ctx context.Context, tx *sql.Tx, template Template, expected int64, actor string, force bool) (Stored, bool, error) {
 	current, err := read(ctx, tx)
 	if err != nil {
 		return Stored{}, false, err
@@ -141,11 +169,11 @@ func (s *Store) Save(ctx context.Context, template Template, expected int64, act
 	if current.Revision != expected || current.Revision == math.MaxInt64 {
 		return current, false, ErrConflict
 	}
-	same, err := equal(current.Template, template)
+	same, err := Equal(current.Template, template)
 	if err != nil {
 		return Stored{}, false, err
 	}
-	if same && current.Revision > 0 {
+	if same && !force {
 		return current, false, nil
 	}
 	next := Stored{Template: template, Revision: current.Revision + 1, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano), UpdatedBy: actor}
@@ -156,13 +184,11 @@ func (s *Store) Save(ctx context.Context, template Template, expected int64, act
 	if _, err := tx.ExecContext(ctx, "INSERT INTO system_settings(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json", settingsKey, string(data)); err != nil {
 		return Stored{}, false, err
 	}
-	if err := tx.Commit(); err != nil {
-		return Stored{}, false, err
-	}
 	return next, true, nil
 }
 
-func equal(left, right Template) (bool, error) {
+// Equal compares normalized templates for saves and archive consistency checks.
+func Equal(left, right Template) (bool, error) {
 	a, err := json.Marshal(normalize(left))
 	if err != nil {
 		return false, err

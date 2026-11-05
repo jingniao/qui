@@ -10,6 +10,8 @@ import (
 )
 
 type Totals struct {
+	ClientPolicyProfiles   int64 `json:"clientPolicyProfiles"`
+	ClientPolicyActive     int64 `json:"clientPolicyActive"`
 	CanvasForwardReconcile int64 `json:"canvasForwardReconcile"`
 	TunnelMigrationReport  int64 `json:"tunnelMigrationReport"`
 	Tunnels                int64 `json:"tunnels"`
@@ -87,10 +89,13 @@ type Reader interface {
 
 func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	result := Inventory{Nodes: map[string]NodeRecord{}, Identities: map[string]IdentityRecord{}, Users: map[string]UserRecord{}}
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM system_settings WHERE key='client_policy_active'").Scan(&result.Totals.ClientPolicyActive); err != nil {
+		return Inventory{}, err
+	}
 	for _, item := range []struct {
 		table string
 		count *int64
-	}{{"canvas_forward_reconcile", &result.Totals.CanvasForwardReconcile}, {"tunnel_migration_report", &result.Totals.TunnelMigrationReport}, {"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
+	}{{"client_policy_profiles", &result.Totals.ClientPolicyProfiles}, {"canvas_forward_reconcile", &result.Totals.CanvasForwardReconcile}, {"tunnel_migration_report", &result.Totals.TunnelMigrationReport}, {"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
 		var present int
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&present); err != nil {
 			return Inventory{}, err

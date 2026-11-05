@@ -17,9 +17,12 @@ const source = readFileSync(path.resolve(here, '..', 'src', 'modules', 'routing'
 const outDir = mkdtempSync(path.join(tmpdir(), 'client-policy-selftest-'));
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext }, fileName: 'api.ts' }).outputText
   .replace("from '../../app/apiClient'", "from './apiClient.mjs'");
-writeFileSync(path.join(outDir, 'apiClient.mjs'), 'export function request() { throw new Error("no network in the self-test"); }\n');
+writeFileSync(path.join(outDir, 'apiClient.mjs'), `export const calls = [];
+export function request(path, method = 'GET', body) { calls.push({ path, method, body }); return Promise.resolve({}); }
+`);
 writeFileSync(path.join(outDir, 'api.mjs'), js);
 const api = await import(pathToFileURL(path.join(outDir, 'api.mjs')).href);
+const client = await import(pathToFileURL(path.join(outDir, 'apiClient.mjs')).href);
 
 let failures = 0;
 function check(name, condition) {
@@ -76,6 +79,27 @@ check('an external rule provider is decided at runtime', external.runtime);
 
 const template = api.fromConfig(api.toConfig({ revision: 3, updatedAt: '', updatedBy: 'owner', template: { preset: 'standard', client: { mode: 'rule', mixedPort: 7890, allowLan: true, logLevel: 'info', ipv6: true }, dns: { enable: true, enhancedMode: 'fake-ip', nameservers: ['223.5.5.5'], fallback: [] }, groups: [{ name: 'PROXY', type: 'select', members: ['AUTO', '@all', 'DIRECT'], testUrl: '', intervalSeconds: 0 }, { name: 'AUTO', type: 'url-test', members: ['@all'], testUrl: 'http://t.example/204', intervalSeconds: 60 }], providers: [{ name: 'ads', behavior: 'domain', format: 'text', url: 'https://r.example/a', intervalSeconds: 3600 }], rules: [{ id: 'm', type: 'MATCH', payload: '', target: 'PROXY', noResolve: false, enabled: true, priority: 999, description: '' }] } }));
 check('the page view model round-trips the server template', template.client.ipv6 === true && template.dns.enable === true && template.providers.length === 1 && template.groups[0].members.join('|') === 'AUTO|@all|DIRECT' && template.groups[1].testUrl === 'http://t.example/204' && template.groups[1].intervalSeconds === 60);
+
+const input = { name: 'profile', description: '', template, uiMetadata: { category: 'region' } };
+await api.clientPolicyProfilesAPI.list(2, 20);
+await api.clientPolicyProfilesAPI.get('profile/id');
+await api.clientPolicyProfilesAPI.create({ ...input, importKey: 'legacy:hash' });
+await api.clientPolicyProfilesAPI.create({ ...input, activate: true, expectedActiveRevision: 9 });
+await api.clientPolicyProfilesAPI.update('profile/id', { ...input, expectedRevision: 3, expectedActiveRevision: 9 });
+await api.clientPolicyProfilesAPI.activate('profile/id', 3, 9);
+await api.clientPolicyProfilesAPI.delete('profile/id', 3);
+check('profile listing paginates and detail escapes the ID', client.calls[0].path === '/client-policy-profiles?page=2&pageSize=20' && client.calls[1].path.endsWith('/profile%2Fid'));
+check('legacy imports are idempotent and inactive', client.calls[2].method === 'POST' && client.calls[2].body.importKey === 'legacy:hash' && !client.calls[2].body.activate);
+check('create-and-activate is a single API call', client.calls[3].body.activate && client.calls[3].body.expectedActiveRevision === 9);
+check('profile save sends both independent versions and opaque metadata', client.calls[4].method === 'PUT' && client.calls[4].body.expectedRevision === 3 && client.calls[4].body.expectedActiveRevision === 9 && client.calls[4].body.uiMetadata.category === 'region');
+check('activation uses its CAS endpoint without resending a template', client.calls[5].path.endsWith('/activate') && client.calls[5].body.expectedRevision === 3 && client.calls[5].body.expectedActiveRevision === 9 && !('template' in client.calls[5].body));
+check('delete carries the profile version', client.calls[6].method === 'DELETE' && client.calls[6].path.endsWith('?expectedRevision=3'));
+const page = readFileSync(path.resolve(here, '..', 'src', 'modules', 'routing', 'pages', 'ClientPolicyPage.vue'), 'utf8');
+const conflictHandler = page.slice(page.indexOf('function profileFailure('), page.indexOf('function previewLegacyCards('));
+check('conflicts retain drafts and display the current server version', conflictHandler.includes('error.details.activeRevision') && conflictHandler.includes('草稿已保留') && !conflictHandler.includes('load(') && !conflictHandler.includes('clientConfig.value ='));
+check('cards no longer write localStorage and imports hash content', !page.includes('localStorage.setItem(') && page.includes("crypto.subtle.digest('SHA-256'") && page.includes('legacyCards.value.every'));
+check('new profiles use the complete server preset', page.includes('template: JSON.parse(JSON.stringify(standard.template))') && page.includes('设为订阅模板，客户端更新订阅后生效'));
+check('unintegrated controls disclose unknown runtime state', !page.includes('simulatedLatencyCache') && !page.includes('圣何塞 BGP') && page.includes('地区筛选待接入') && page.includes('实际出口未知'));
 
 if (failures) {
   console.log(`\n${failures} client policy self-test(s) failed`);

@@ -19,6 +19,7 @@ type Handler struct {
 	// Rules keeps the client rule template; ServiceRules serves panel service
 	// rules to clients as rule providers.
 	Rules        RulesStore
+	Profiles     ProfileStore
 	ServiceRules ServiceRules
 }
 
@@ -31,6 +32,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/users/{id}/subscription-link", h.Auth.Require(http.HandlerFunc(h.link), true))
 	mux.Handle("GET /api/v1/subscription-formats", h.Auth.Require(http.HandlerFunc(h.formats), false))
 	h.registerRules(mux)
+	h.registerProfiles(mux)
 }
 
 // content renders a subscription. The format comes from `?format=`, then from the

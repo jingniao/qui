@@ -54,12 +54,16 @@ func newRulesPanel(t *testing.T) *rulesPanel {
 	f := setup(t)
 	audit := &rulesAudit{}
 	store := &rules.Store{Database: f.database, Lookup: acceptAll{}}
+	if err := store.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	f.service.Rules = store
 	handler := &Handler{
 		Service:      f.service,
 		Auth:         &auth.Handler{Service: &auth.Service{Repository: &auth.Repository{Database: f.database}, Settings: previewSettings{}, SessionDuration: time.Hour}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
 		Audit:        audit,
 		Rules:        store,
+		Profiles:     store,
 		ServiceRules: stubServiceRules{"svc-on": {Enabled: true, Domains: []string{"api.example.com", "bad,entry"}, Suffixes: []string{".example.org"}, CIDRs: []string{"203.0.113.0/24", "2001:db8::/32", "198.51.100.7", "nonsense"}}, "svc-off": {Enabled: false, Domains: []string{"x.example"}}},
 	}
 	mux := http.NewServeMux()

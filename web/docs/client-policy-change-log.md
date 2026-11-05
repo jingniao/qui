@@ -1411,3 +1411,63 @@
 - **Changes**: Translated all 12 sections of the Chinese plan, including findings, code reuse, profile storage and activation, group membership, rule sets, preview behavior, proposed APIs, implementation phases, compatibility, and acceptance criteria. Preserved the distinction between existing behavior and proposed work.
 - **Behavior/API changes**: None. This is a documentation-only translation; no implementation scope was added.
 - **Verification**: Checked section coverage and technical identifiers against the Chinese document. Tests were not rerun; test results in the English plan are explicitly attributed to the original review.
+
+---
+
+## 轮次 35：Client Policy 后端 Phase A——服务端配置库与订阅模板启用
+
+- **日期和时间**：2026-11-04T22:31:00-08:00（America/Los_Angeles）。
+- **本轮原始需求**：按批准的英文后端计划 §9 Phase A 与 §13 审查决定，实现配置库、双版本 CAS、原子启用、旧接口兼容、本地配置导入、初始化与备份恢复；不提交、不推送。
+- **涉及的全部文件路径**：
+  - `AGENTS.md`
+  - `migrations/0132_client_policy_profiles.sql`
+  - `migrations/checksums_test.go`
+  - `internal/panel/subscription/rules/store.go`
+  - `internal/panel/subscription/rules/profiles.go`
+  - `internal/panel/subscription/rules/profiles_test.go`
+  - `internal/panel/subscription/rules/rules_test.go`
+  - `internal/panel/subscription/handler_http.go`
+  - `internal/panel/subscription/profiles_handler.go`
+  - `internal/panel/subscription/profiles_handler_test.go`
+  - `internal/panel/subscription/rules_handler_test.go`
+  - `internal/panel/system/backup/client_policy.go`
+  - `internal/panel/system/backup/client_policy_test.go`
+  - `internal/panel/system/backup/inspect.go`
+  - `internal/panel/system/backup/inventory.go`
+  - `internal/panel/system/backup/tunnels_test.go`
+  - `internal/platform/recovery/database.go`
+  - `internal/platform/recovery/tunnels_test.go`
+  - `internal/platform/server/server.go`
+  - `internal/platform/server/subscription_rules_test.go`
+  - `internal/platform/server/testdata/portal_route_coverage.txt`
+  - `web/src/modules/routing/api.ts`
+  - `web/src/modules/routing/pages/ClientPolicyPage.vue`
+  - `web/scripts/client-policy-selftest.mjs`
+  - `web/docs/client-policy-change-log.md`
+- **修改前后行为**：
+  - 原卡片与启用选择存在浏览器 localStorage，卡片保存前先改本地状态，并把配置版本当作全局版本。现在通过服务端配置 API 读取与修改，成功后才采用响应中的配置、时间与两种版本。
+  - 配置 revision 与 `client_rules.revision`（activeRevision）独立；活动配置保存、启用及旧 PUT 共用事务快照保存路径。普通未修改保存保持版本，首次默认模板未修改保存也不生成修订；启用相同内容仍推进 activeRevision。
+  - 编辑活动配置时保留开始编辑所读的 activeRevision；其他管理员切走该配置后仍返回冲突。409 保留草稿并显示服务器当前版本，不调用 load 覆盖编辑。
+  - 新配置使用完整服务端预设；本地卡片先展示名称、组数和规则数，再逐张以 `legacyId:SHA-256(content)` 导入未启用配置，显示每张结果；全部成功才清除本地卡片与旧启用键。重试不重复创建，旧浏览器启用选择不覆盖服务器。
+  - 启动和恢复钩子在配置库为空时从原快照或 Default 初始化，保留 activeRevision。恢复沿用模块自己的事务钩子，不在事务中另开事务。
+  - 备份保留配置表、活动指针与快照，清单统计配置和指针；校验缺表、无效模板/元数据、缺失目标及活动模板与快照不一致。旧归档迁移后初始化。旧版本测试夹具同步回退 0132，避免制造迁移序列缺口；已应用迁移未修改。
+  - 保留页面结构；依计划 §9 将地区筛选标为待接入并禁用服务器名称同步，删除模拟延迟、虚构地区节点与在线统计，显示运行状态未知。明确现有 YAML 预览只预览服务器订阅模板，草稿预览留给 Phase C。
+- **接口与迁移变化**：
+  - 新增 0132 `client_policy_profiles`，含 nullable unique `import_key`；活动指针只含 `{profileId}`，不修改 `rules.Stored`。
+  - 新增 Owner-only GET/POST `/api/v1/client-policy-profiles`、GET/PUT/DELETE `/api/v1/client-policy-profiles/{id}`、POST `/api/v1/client-policy-profiles/{id}/activate`；写操作复用 CSRF 与审计。
+  - 列表沿用分页信封且不带模板；详情与写入返回 `{profile, activeProfileId, activeRevision}`。保留 `stale_rules` 与旧 GET/PUT 响应，新增 `stale_client_policy`、`client_policy_active` 和配置数量限制错误。未增加 `/validate` 或 `/resolve`。
+  - 限制为 50 个配置、名称 64 字符、描述 500 字符、JSON 对象元数据 64 KiB；元数据不进入订阅。
+- **设计选择及计划差异**：
+  - 无功能范围偏离。引用校验在进入写事务前复用 `rules.Validate`，因为节点/策略仓储使用自身连接；事务内统一比较并写快照，避免持有单写连接时跨模块查询死锁。
+  - 归档为完整 SQLite 快照，新增持久表无需另建导出格式；增加对应 inventory 与独立 per-feature 校验文件，沿用已有恢复机制。
+- **实际执行的验证及结果**：
+  - 使用仓库固定工具链，设置 `GOPATH=.tools/gopath`、`GOCACHE=.tools/gocache`、`GOTOOLCHAIN=local`。
+  - `.tools/go/bin/go.exe vet ./...`：通过。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription/... ./internal/panel/system/backup/... ./internal/platform/... ./migrations/...`：通过；备份约 94 秒，恢复约 64 秒，服务器约 223 秒。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription/... ./internal/panel/system/backup/... ./internal/platform/server/... -run 'TestProfile|TestClientPolicy|TestPre0132|TestClientRuleTemplateBackupRoundTrip|TestEveryAdminRouteRefusesAPortalSession'`：通过；最终定向复核覆盖新增数量限制测试、接口、归档和恢复。
+  - `npm.cmd --prefix web run typecheck`：通过。
+  - `node web/scripts/client-policy-selftest.mjs`：30 项通过。
+  - `node web/scripts/ui-regression-selftest.mjs`：全部通过。
+  - `git diff --check`：通过。
+  - 首轮沙箱运行的恢复/Agent 测试出现 Windows `Access is denied`，旧版本归档夹具还存在 0132 回退遗漏；修正夹具后，获准在沙箱外运行上述完整 Go 检查并全部通过。一次经 `.tools/gow.cmd` 传递带 `|` 的 `-run` 正则被 cmd 拆分，改用直接 Go 可执行文件后通过。
+- **剩余工作与验证边界**：Phase B 的稳定端点、实际成员筛选、分类元数据和空组策略，Phase C 的草稿预览/用户上下文，以及 Phase D 的共享引用保护仍按计划后续实施。本轮未执行 Linux 门禁、真实核心套件、生产构建或已登录浏览器走查；不把 Windows 测试成功当作这些验收的证据。所有更改留在工作区，未提交或推送。

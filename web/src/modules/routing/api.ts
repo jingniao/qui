@@ -237,6 +237,44 @@ export interface StoredRuleTemplate {
   updatedBy: string;
 }
 
+export interface ClientPolicySummary {
+  id: string;
+  name: string;
+  description: string;
+  revision: number;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface ClientPolicyProfile extends ClientPolicySummary {
+  template: RuleTemplate;
+  uiMetadata: Record<string, unknown>;
+}
+
+export interface ClientPolicyResult {
+  profile: ClientPolicyProfile;
+  activeProfileId: string;
+  activeRevision: number;
+}
+
+export interface ClientPolicyInput {
+  name: string;
+  description: string;
+  template: RuleTemplate;
+  uiMetadata: Record<string, unknown>;
+}
+
+export const clientPolicyProfilesAPI = {
+  list: (page = 1, pageSize = 100) => request<{ items: ClientPolicySummary[]; total: number; page: number; pageSize: number; activeProfileId: string; activeRevision: number }>(`/client-policy-profiles?page=${page}&pageSize=${pageSize}`),
+  get: (id: string) => request<ClientPolicyResult>('/client-policy-profiles/' + encodeURIComponent(id)),
+  create: (input: ClientPolicyInput & { importKey?: string; activate?: boolean; expectedActiveRevision?: number }) => request<ClientPolicyResult>('/client-policy-profiles', 'POST', input),
+  update: (id: string, input: ClientPolicyInput & { expectedRevision: number; expectedActiveRevision?: number }) => request<ClientPolicyResult>('/client-policy-profiles/' + encodeURIComponent(id), 'PUT', input),
+  activate: (id: string, expectedRevision: number, expectedActiveRevision: number) => request<ClientPolicyResult>('/client-policy-profiles/' + encodeURIComponent(id) + '/activate', 'POST', { expectedRevision, expectedActiveRevision }),
+  delete: (id: string, expectedRevision: number) => request<void>('/client-policy-profiles/' + encodeURIComponent(id) + '?expectedRevision=' + expectedRevision, 'DELETE')
+};
+
 export interface ClientPreset {
   id: string;
   name: string;

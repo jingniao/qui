@@ -325,8 +325,11 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// The client rule template is written through the writer connection and
 	// checked against the node and policy modules, which own what it refers to.
 	ruleStore := &rules.Store{Database: database, Lookup: ruleLookup{nodes: nodeRepository, policies: policyService.Repository}}
+	if err := ruleStore.Initialize(context.Background()); err != nil {
+		return nil, err
+	}
 	proxyHandler.RelayProxies = subscriptionService
-	(&subscription.Handler{Service: subscriptionService, Auth: authHandler, Audit: systemRepository, Rules: ruleStore, ServiceRules: serviceRules{policies: policyService.Repository}}).Register(mux)
+	(&subscription.Handler{Service: subscriptionService, Auth: authHandler, Audit: systemRepository, Rules: ruleStore, Profiles: ruleStore, ServiceRules: serviceRules{policies: policyService.Repository}}).Register(mux)
 	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux)
 	mux.Handle("GET /api/v1/events", eventBus.Handler(authHandler))
 	mux.Handle("GET /api/v1/operations", authHandler.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

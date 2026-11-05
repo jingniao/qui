@@ -141,7 +141,11 @@ func openStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close() })
-	return &Store{Database: database, Lookup: fakeLookup{}}
+	store := &Store{Database: database, Lookup: fakeLookup{}}
+	if err := store.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return store
 }
 
 // A2.2: a save built on a stale revision is refused, an unchanged template is

@@ -1,0 +1,140 @@
+package backup
+
+import (
+	"context"
+	"encoding/json"
+	"path/filepath"
+	"testing"
+
+	"proxycontrol/internal/panel/subscription/rules"
+	"proxycontrol/internal/platform/db"
+)
+
+func TestClientPolicyArchiveRoundTrip(t *testing.T) {
+	source, directory, _ := sourceFixture(t)
+	ctx := context.Background()
+	store := &rules.Store{Database: source.Database}
+	if err := store.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	activeRevision := int64(0)
+	input := rules.ProfileInput{Name: "归档模板", Description: "description", Template: rules.Presets()[1].Template, UIMetadata: json.RawMessage(`{"opaque":{"value":7}}`), Activate: true, ExpectedActiveRevision: &activeRevision}
+	saved, _, err := store.WriteProfile(ctx, "", input, false, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := source.Create(ctx, directory, "client_policy_archive", "owner", testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Examine(ctx, directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword, func(_ Result, path string) error {
+		database, err := readonlyDatabase(filepath.Join(path, "database", "panel.db"))
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+		if err := validateClientPolicies(ctx, database); err != nil {
+			return err
+		}
+		inventory, err := ReadInventory(ctx, database)
+		if err != nil {
+			return err
+		}
+		if inventory.Totals.ClientPolicyProfiles != 2 || inventory.Totals.ClientPolicyActive != 1 {
+			t.Fatal(inventory.Totals)
+		}
+		archived, err := (&rules.Store{Database: database}).Profile(ctx, saved.Profile.ID)
+		if err != nil {
+			return err
+		}
+		if archived.ActiveRevision != saved.ActiveRevision || archived.ActiveProfileID != saved.Profile.ID || string(archived.Profile.UIMetadata) != string(saved.Profile.UIMetadata) {
+			t.Fatal(archived)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientPolicyArchiveValidation(t *testing.T) {
+	for _, query := range []string{
+		`UPDATE system_settings SET value_json='{"profileId":"missing"}' WHERE key='client_policy_active'`,
+		`DELETE FROM system_settings WHERE key='client_policy_active'`,
+		`UPDATE client_policy_profiles SET template_json=replace(template_json,'"mixedPort":7890','"mixedPort":7891')`,
+		`UPDATE client_policy_profiles SET ui_metadata_json='[]'`,
+		`UPDATE client_policy_profiles SET revision=0`,
+		`DROP TABLE client_policy_profiles`,
+	} {
+		t.Run(query, func(t *testing.T) {
+			source, _, _ := sourceFixture(t)
+			ctx := context.Background()
+			store := &rules.Store{Database: source.Database}
+			if err := store.Initialize(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := validateClientPolicies(ctx, source.Database); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.Database.Exec("PRAGMA ignore_check_constraints=ON"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.Database.Exec(query); err != nil {
+				t.Fatal(err)
+			}
+			if validateClientPolicies(ctx, source.Database) == nil {
+				t.Fatal("invalid client policy archive accepted")
+			}
+		})
+	}
+}
+
+func TestPre0132ClientPolicyArchiveInitialization(t *testing.T) {
+	source, directory, _ := sourceFixture(t)
+	ctx := context.Background()
+	for _, query := range []string{"DROP TABLE client_policy_profiles", "DELETE FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'"} {
+		if _, err := source.Database.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := validateClientPolicies(ctx, source.Database); err != nil {
+		t.Fatal(err)
+	}
+	created, err := source.Create(ctx, directory, "pre0132_client_policy", "owner", testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Examine(ctx, directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword, func(_ Result, path string) error {
+		database, err := db.Open(ctx, filepath.Join(path, "database", "panel.db"))
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+		store := &rules.Store{Database: database}
+		tx, err := database.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := store.PrepareRestoreTx(ctx, tx); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		if err := store.Initialize(ctx); err != nil {
+			return err
+		}
+		list, err := store.Profiles(ctx, 1, 100)
+		if err != nil {
+			return err
+		}
+		if list.Total != 1 || list.ActiveRevision != 0 {
+			t.Fatal(list)
+		}
+		return validateClientPolicies(ctx, database)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

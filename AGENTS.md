@@ -6,7 +6,7 @@
 
 最新正式版 **v1.3.1**（2026-11-03，tag → `ebe8301`），无新增迁移。us2-node（面板＋Agent）、uk-node（Agent）、alpine-node（Alpine LXC/OpenRC Agent）均运行 1.3.1；迁移头为 0128。
 
-v1.4 在 `feat/v1.4-tunnels` 开发，未发布；分支迁移头为 0131，正式版仍为 0128。范围见[v1.4 计划](docs/v1.4-plan.md)，发布说明见[1.4.0 草稿](docs/release-notes-1.4.0.md)。
+v1.4 在 `feat/v1.4-tunnels` 开发，未发布；分支迁移头为 0132，正式版仍为 0128。范围见[v1.4 计划](docs/v1.4-plan.md)，发布说明见[1.4.0 草稿](docs/release-notes-1.4.0.md)。
 
 正式版实机只验收 linux/amd64；arm64 只做 qemu-user 模拟，正式浏览器走查未执行。已验收内容、未验证项与限制见[验收矩阵](docs/v1-acceptance.md) §12 和[发布说明 1.3.1](docs/release-notes-1.3.1.md)。v1.4 的 A1 验收另行记录，不沿用正式版结论。
 
@@ -270,6 +270,8 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 订阅路径是 Token → 用户 → 已发布节点及授权导入源 → 中立代理模型 → 格式导出器。`?format=` 优先，未知格式返回 400；其次为已验证 UA 表，再回退系统默认。UA 开关已实现，当前已验证 UA 匹配表为空，不能宣称自动识别已验收；一键导入协议也待核实，现提供复制与二维码。响应包含流量、到期、更新间隔与下载文件名等订阅头。
 
 全局模板存在 `system_settings.client_rules`，有版本冲突检查与预设，按用户授权展开 `@all`、`@nodeGroup:<id>`、`@source:<id>`；服务端生成 YAML。客户端规则不替代节点策略。外部源仅 HTTPS，逐跳解析并固定经校验的公网 IP，限制 2 MiB / 15 秒；定时抓取加密缓存，订阅请求不抓取。导入节点仅用于客户端，不参与 Agent 发布、用户额度或设备门控。客户端链与格式边界见[协议矩阵](docs/protocol-support-matrix.md)。
+
+0132 增加 `client_policy_profiles` 服务端配置库，最多 50 个配置；Owner 通过 `/api/v1/client-policy-profiles` 管理，名称最多 64 字符、描述最多 500 字符，`uiMetadata` 为最多 64 KiB 的 JSON 对象且不进入订阅。`system_settings.client_policy_active` 只保存 `{profileId}`，`client_rules` 继续是订阅读取的活动快照，其 revision 为独立的 activeRevision。编辑使用配置 revision，编辑活动配置与启用还须匹配 activeRevision；启用即使内容相同也推进 activeRevision，未修改保存不推进版本。旧 PUT 同步活动配置与快照，旧 GET 继续允许 Viewer。初始化与恢复在无配置时复制既有快照或服务端默认模板，保留 activeRevision；备份校验指针与模板一致性。浏览器旧卡片经预览后按内容摘要幂等导入为未启用配置，全部成功才清除本地副本，不采用浏览器旧启用选择。设为订阅模板，客户端更新订阅后生效。Phase B 的地区筛选与成员解析、Phase C 的草稿预览尚待接入。
 
 # 11. 节点管理模块
 

@@ -19,6 +19,7 @@ import (
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription"
 	"proxycontrol/internal/panel/subscription/importer"
+	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/panel/system"
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/panel/user"
@@ -208,6 +209,7 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 			func() error { return (&user.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&portal.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&subscription.Repository{}).PrepareRestoreTx(ctx, tx, stamp) },
+			func() error { return (&rules.Store{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&importer.Store{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&node.Repository{}).PrepareGroupRestoreTx(ctx, tx) },
 			func() error { return (&user.Repository{}).PrepareGroupGrantsRestoreTx(ctx, tx) },

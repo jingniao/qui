@@ -63,4 +63,16 @@ func TestClientRuleTemplateBackupRoundTrip(t *testing.T) {
 	if stored.Revision != 1 || stored.Template.Preset != "whitelist" || len(stored.Template.Rules) != len(saved.Rules) {
 		t.Fatalf("restored template: revision %d preset %q", stored.Revision, stored.Template.Preset)
 	}
+	profiles := &rules.Store{Database: restored}
+	list, err := profiles.Profiles(ctx, 1, 100)
+	if err != nil || list.Total != 1 || list.ActiveRevision != stored.Revision {
+		t.Fatal(list, err)
+	}
+	active, err := profiles.Profile(ctx, list.ActiveProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same, err := rules.Equal(active.Profile.Template, stored.Template); err != nil || !same {
+		t.Fatal("restored profile differs from active snapshot", err)
+	}
 }

@@ -75,7 +75,7 @@ func renderList(exporterID string, proxies []proxy.Proxy) (format.Output, error)
 			// token holder then lost every other link as well. Skipping it keeps
 			// the rest, and the sing-box format still lists it with its
 			// certificate.
-			output.Warnings = append(output.Warnings, proxy.FormatWarning(exporterID, endpoint.Protocol+" endpoint with a pinned CA is left out of the URI list"))
+			output.Warnings = append(output.Warnings, proxy.FormatWarning(exporterID, "Endpoint omitted: URI cannot represent its certificate or transport settings"))
 			continue
 		}
 		if err != nil {
@@ -93,6 +93,12 @@ func renderList(exporterID string, proxies []proxy.Proxy) (format.Output, error)
 
 // Link renders one proxy as a share URI.
 func Link(endpoint proxy.Proxy) (string, error) {
+	if code, _ := proxy.ValidateClientSettings(endpoint); code != "" {
+		return "", errors.New("invalid subscription client settings")
+	}
+	if !proxy.ClientFormatSupportsSettings(endpoint, "uri") || (endpoint.TLS != nil && endpoint.TLS.Fingerprint != "") {
+		return "", ErrUnrepresentable
+	}
 	if endpoint.DialerProxy != "" || endpoint.ClientChain != "" {
 		return "", ErrUnrepresentable
 	}
@@ -121,8 +127,35 @@ func Link(endpoint proxy.Proxy) (string, error) {
 		if transport == "grpc" && endpoint.Transport != nil {
 			query.Set("serviceName", endpoint.Transport.ServiceName)
 		}
+		if transport == "xhttp" && endpoint.Transport.XHTTP != nil {
+			x := endpoint.Transport.XHTTP
+			query.Set("path", x.Path)
+			if x.Host != "" {
+				query.Set("host", x.Host)
+			}
+			if x.Mode != "" {
+				query.Set("mode", x.Mode)
+			}
+		}
 		if serverName := tlsServerName(endpoint); serverName != "" {
 			query.Set("sni", serverName)
+		}
+		if endpoint.TLS != nil {
+			if endpoint.TLS.ClientFingerprint != "" {
+				query.Set("fp", endpoint.TLS.ClientFingerprint)
+			}
+			if len(endpoint.TLS.ALPN) > 0 {
+				query.Set("alpn", strings.Join(endpoint.TLS.ALPN, ","))
+			}
+		}
+		if endpoint.Reality != nil {
+			query.Set("pbk", endpoint.Reality.PublicKey)
+			if endpoint.Reality.ShortID != nil {
+				query.Set("sid", *endpoint.Reality.ShortID)
+			}
+			if endpoint.Reality.SpiderX != nil {
+				query.Set("spx", *endpoint.Reality.SpiderX)
+			}
 		}
 		if endpoint.Protocol == "vless" {
 			query.Set("encryption", "none")
@@ -130,10 +163,10 @@ func Link(endpoint proxy.Proxy) (string, error) {
 				query.Set("flow", endpoint.Flow)
 			}
 		}
-		if security != "none" && security != "tls" {
+		if security != "none" && security != "tls" && security != "reality" {
 			return "", errors.New("unsupported subscription TLS settings")
 		}
-		u.RawQuery = query.Encode()
+		u.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
 		return u.String(), nil
 	case "shadowsocks":
 		method := endpoint.Method

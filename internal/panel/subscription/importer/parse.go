@@ -251,6 +251,9 @@ func ValidateProxy(p proxy.Proxy) error {
 // and the field it concerns. valid() is the same check without the reason, so the
 // three parsers share one allowlist.
 func validation(p proxy.Proxy) (string, string) {
+	if code, field := proxy.ValidateClientSettings(p); code != "" {
+		return code, field
+	}
 	// YAML escapes and aliases can expand during typed decoding. Bound the
 	// canonical cache representation too, so every accepted import is backupable.
 	encoded, err := json.Marshal(p)
@@ -377,7 +380,25 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 		p.Credential.Username = u.User.Username()
 		p.Credential.Password, _ = u.User.Password()
 	}
-	q := u.Query()
+	q, queryErr := url.ParseQuery(u.RawQuery)
+	if queryErr != nil {
+		return p, "invalid_entry", fieldQuery
+	}
+	for key, values := range q {
+		for _, value := range values[1:] {
+			if value != values[0] {
+				return p, "conflicting_alias", queryField(key)
+			}
+		}
+	}
+	for _, alias := range []string{"servername", "peer"} {
+		if values, present := q[alias]; present {
+			if sni, exists := q["sni"]; exists && sni[0] != values[0] {
+				return p, "conflicting_alias", "tls.serverName"
+			}
+			q.Set("sni", values[0])
+		}
+	}
 	switch p.Protocol {
 	case "vless", "trojan", "hysteria2", "tuic":
 		if u.User == nil {
@@ -416,34 +437,82 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 	}
 	for key := range q {
 		switch key {
-		case "security", "sni", "peer", "alpn", "type", "path", "serviceName", "flow":
+		case "extra":
+			if len(q.Get(key)) > 4096 {
+				return p, "oversized_entry", "transport.xhttp.extra"
+			}
+			return p, "unsupported_option", "transport.xhttp.extra"
+		case "security", "sni", "peer", "servername", "alpn", "type", "path", "serviceName", "flow", "encryption", "pbk", "sid", "spx", "fp", "host", "mode":
 		default:
 			return p, "unsupported_transport", queryField(key)
 		}
 	}
 	p.Flow = q.Get("flow")
+	if encryption, present := q["encryption"]; present && (p.Protocol != "vless" || encryption[0] != "none") {
+		return p, "invalid_encryption", "query.encryption"
+	}
 	p.Security = q.Get("security")
 	if p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
 		p.Security = "tls"
 	}
-	if p.Security != "" && p.Security != "none" && p.Security != "tls" {
+	if p.Security != "" && p.Security != "none" && p.Security != "tls" && p.Security != "reality" {
 		return p, "unsupported_security", fieldSecurity
 	}
-	if p.Security == "tls" {
+	if p.Security == "tls" || p.Security == "reality" {
 		sni := q.Get("sni")
 		if sni == "" {
 			sni = q.Get("peer")
 		}
-		p.TLS = &proxy.TLS{ServerName: sni}
+		p.TLS = &proxy.TLS{ServerName: sni, ClientFingerprint: q.Get("fp")}
 		if q.Get("alpn") != "" {
 			p.TLS.ALPN = strings.Split(q.Get("alpn"), ",")
 		}
 	}
+	if p.Security == "reality" {
+		p.Reality = &proxy.RealityOptions{PublicKey: q.Get("pbk")}
+		if values, present := q["sid"]; present {
+			value := strings.ToLower(values[0])
+			p.Reality.ShortID = &value
+		}
+		if values, present := q["spx"]; present {
+			value := values[0]
+			p.Reality.SpiderX = &value
+		}
+	} else {
+		for _, field := range []string{"pbk", "sid", "spx"} {
+			if _, present := q[field]; present {
+				return p, "invalid_protocol_combination", queryField(field)
+			}
+		}
+		if _, present := q["fp"]; present && p.TLS == nil {
+			return p, "invalid_protocol_combination", "tls.clientFingerprint"
+		}
+	}
 	if transport := q.Get("type"); transport != "" && transport != "tcp" {
-		if transport != "ws" && transport != "grpc" {
+		if transport != "ws" && transport != "grpc" && transport != "xhttp" {
 			return p, "unsupported_transport", fieldType
 		}
 		p.Transport = &proxy.Transport{Type: transport, Path: q.Get("path"), ServiceName: q.Get("serviceName")}
+		if transport == "xhttp" {
+			p.Transport.Path = ""
+			p.Transport.XHTTP = &proxy.XHTTPOptions{Host: q.Get("host"), Path: q.Get("path"), Mode: q.Get("mode")}
+		}
+	}
+	if q.Get("type") != "xhttp" {
+		for _, field := range []string{"host", "mode"} {
+			if _, present := q[field]; present {
+				return p, "invalid_protocol_combination", queryField(field)
+			}
+		}
+	}
+	if p.Security == "reality" {
+		transport := q.Get("type")
+		if _, present := q["path"]; present && transport != "xhttp" {
+			return p, "invalid_protocol_combination", "query.path"
+		}
+		if _, present := q["serviceName"]; present && transport != "grpc" {
+			return p, "invalid_protocol_combination", "query.servicename"
+		}
 	}
 	code, field := validation(p)
 	if code != "" {
@@ -472,6 +541,18 @@ func (Base64) analyze(content []byte, c *collector) {
 }
 
 type clashEntry struct {
+	XHTTP *struct {
+		Extra yaml.Node `yaml:"extra"`
+		Host  string    `yaml:"host"`
+		Path  string    `yaml:"path"`
+		Mode  string    `yaml:"mode"`
+	} `yaml:"xhttp-opts"`
+	ClientFingerprint string `yaml:"client-fingerprint"`
+	Fingerprint       string `yaml:"fingerprint"`
+	Reality           *struct {
+		PublicKey string  `yaml:"public-key"`
+		ShortID   *string `yaml:"short-id"`
+	} `yaml:"reality-opts"`
 	Name       string   `yaml:"name"`
 	Type       string   `yaml:"type"`
 	Server     string   `yaml:"server"`
@@ -535,6 +616,13 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 	if decoder.Decode(&entry) != nil {
 		return proxy.Proxy{}, "unsupported_option", fieldEntry
 	}
+	if entry.XHTTP != nil && entry.XHTTP.Extra.Kind != 0 {
+		encoded, _ := yaml.Marshal(&entry.XHTTP.Extra)
+		if len(encoded) > 4096 {
+			return proxy.Proxy{}, "oversized_entry", "transport.xhttp.extra"
+		}
+		return proxy.Proxy{}, "unsupported_option", "transport.xhttp.extra"
+	}
 	p := proxy.Proxy{Name: entry.Name, Protocol: entry.Type, Server: entry.Server, Port: entry.Port, Method: entry.Cipher, Flow: entry.Flow, Credential: proxy.Credential{Username: entry.Username, Password: entry.Password}}
 	if p.Protocol == "ss" {
 		p.Protocol = "shadowsocks"
@@ -548,13 +636,30 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 	if p.Protocol == "tuic" {
 		p.Credential.Username = entry.UUID
 	}
-	if entry.TLS || p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
+	if entry.TLS || entry.Reality != nil || p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
 		p.Security = "tls"
 		sni := entry.SNI
 		if sni == "" {
 			sni = entry.ServerName
 		}
-		p.TLS = &proxy.TLS{ServerName: sni, ALPN: entry.ALPN, Insecure: entry.Insecure}
+		p.TLS = &proxy.TLS{ServerName: sni, ALPN: entry.ALPN, Insecure: entry.Insecure, ClientFingerprint: entry.ClientFingerprint, Fingerprint: entry.Fingerprint}
+	}
+	if entry.SNI != "" && entry.ServerName != "" && entry.SNI != entry.ServerName {
+		return p, "conflicting_alias", "tls.serverName"
+	}
+	if entry.Reality != nil {
+		if !entry.TLS {
+			return p, "invalid_protocol_combination", "reality"
+		}
+		p.Security = "reality"
+		p.Reality = &proxy.RealityOptions{PublicKey: entry.Reality.PublicKey, ShortID: entry.Reality.ShortID}
+		if p.Reality.ShortID != nil {
+			value := strings.ToLower(*p.Reality.ShortID)
+			p.Reality.ShortID = &value
+		}
+	}
+	if p.TLS == nil && (entry.ClientFingerprint != "" || entry.Fingerprint != "") {
+		return p, "invalid_protocol_combination", "tls.clientFingerprint"
 	}
 	switch entry.Network {
 	case "", "tcp":
@@ -568,8 +673,16 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 			return p, "unsupported_transport", fieldGRPCOpts
 		}
 		p.Transport = &proxy.Transport{Type: "grpc", ServiceName: entry.GRPC.Service}
+	case "xhttp":
+		if entry.XHTTP == nil {
+			return p, "invalid_xhttp_settings", "transport.xhttp"
+		}
+		p.Transport = &proxy.Transport{Type: "xhttp", XHTTP: &proxy.XHTTPOptions{Host: entry.XHTTP.Host, Path: entry.XHTTP.Path, Mode: entry.XHTTP.Mode}}
 	default:
 		return p, "unsupported_transport", fieldNetwork
+	}
+	if entry.XHTTP != nil && entry.Network != "xhttp" {
+		return p, "invalid_protocol_combination", "transport.xhttp"
 	}
 	code, field := validation(p)
 	if code != "" {

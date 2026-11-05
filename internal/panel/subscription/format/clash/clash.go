@@ -125,36 +125,48 @@ type grpcOptions struct {
 
 // clashProxy is one proxy in mihomo's field names; zero fields are omitted.
 type clashProxy struct {
-	DialerProxy          string       `yaml:"dialer-proxy,omitempty"`
-	Name                 string       `yaml:"name"`
-	Type                 string       `yaml:"type"`
-	Server               string       `yaml:"server"`
-	Port                 int          `yaml:"port"`
-	Username             string       `yaml:"username,omitempty"`
-	Password             string       `yaml:"password,omitempty"`
-	UUID                 string       `yaml:"uuid,omitempty"`
-	Cipher               string       `yaml:"cipher,omitempty"`
-	Flow                 string       `yaml:"flow,omitempty"`
-	UDP                  bool         `yaml:"udp,omitempty"`
-	TLS                  bool         `yaml:"tls,omitempty"`
-	ServerName           string       `yaml:"servername,omitempty"`
-	SNI                  string       `yaml:"sni,omitempty"`
-	ALPN                 []string     `yaml:"alpn,omitempty"`
-	Fingerprint          string       `yaml:"fingerprint,omitempty"`
-	Network              string       `yaml:"network,omitempty"`
-	WSOptions            *wsOptions   `yaml:"ws-opts,omitempty"`
-	GRPCOptions          *grpcOptions `yaml:"grpc-opts,omitempty"`
-	Up                   string       `yaml:"up,omitempty"`
-	Down                 string       `yaml:"down,omitempty"`
-	CongestionController string       `yaml:"congestion-controller,omitempty"`
-	UDPRelayMode         string       `yaml:"udp-relay-mode,omitempty"`
-	PrivateKey           string       `yaml:"private-key,omitempty"`
-	PublicKey            string       `yaml:"public-key,omitempty"`
-	IP                   string       `yaml:"ip,omitempty"`
-	IPv6                 string       `yaml:"ipv6,omitempty"`
-	AllowedIPs           []string     `yaml:"allowed-ips,omitempty"`
-	MTU                  int          `yaml:"mtu,omitempty"`
-	PersistentKeepalive  int          `yaml:"persistent-keepalive,omitempty"`
+	XHTTPOptions         *xhttpOptions   `yaml:"xhttp-opts,omitempty"`
+	ClientFingerprint    string          `yaml:"client-fingerprint,omitempty"`
+	Reality              *realityOptions `yaml:"reality-opts,omitempty"`
+	DialerProxy          string          `yaml:"dialer-proxy,omitempty"`
+	Name                 string          `yaml:"name"`
+	Type                 string          `yaml:"type"`
+	Server               string          `yaml:"server"`
+	Port                 int             `yaml:"port"`
+	Username             string          `yaml:"username,omitempty"`
+	Password             string          `yaml:"password,omitempty"`
+	UUID                 string          `yaml:"uuid,omitempty"`
+	Cipher               string          `yaml:"cipher,omitempty"`
+	Flow                 string          `yaml:"flow,omitempty"`
+	UDP                  bool            `yaml:"udp,omitempty"`
+	TLS                  bool            `yaml:"tls,omitempty"`
+	ServerName           string          `yaml:"servername,omitempty"`
+	SNI                  string          `yaml:"sni,omitempty"`
+	ALPN                 []string        `yaml:"alpn,omitempty"`
+	Fingerprint          string          `yaml:"fingerprint,omitempty"`
+	Network              string          `yaml:"network,omitempty"`
+	WSOptions            *wsOptions      `yaml:"ws-opts,omitempty"`
+	GRPCOptions          *grpcOptions    `yaml:"grpc-opts,omitempty"`
+	Up                   string          `yaml:"up,omitempty"`
+	Down                 string          `yaml:"down,omitempty"`
+	CongestionController string          `yaml:"congestion-controller,omitempty"`
+	UDPRelayMode         string          `yaml:"udp-relay-mode,omitempty"`
+	PrivateKey           string          `yaml:"private-key,omitempty"`
+	PublicKey            string          `yaml:"public-key,omitempty"`
+	IP                   string          `yaml:"ip,omitempty"`
+	IPv6                 string          `yaml:"ipv6,omitempty"`
+	AllowedIPs           []string        `yaml:"allowed-ips,omitempty"`
+	MTU                  int             `yaml:"mtu,omitempty"`
+	PersistentKeepalive  int             `yaml:"persistent-keepalive,omitempty"`
+}
+type xhttpOptions struct {
+	Host string `yaml:"host,omitempty"`
+	Path string `yaml:"path"`
+	Mode string `yaml:"mode,omitempty"`
+}
+type realityOptions struct {
+	PublicKey string  `yaml:"public-key"`
+	ShortID   *string `yaml:"short-id,omitempty"`
 }
 
 // reserved are names Clash gives a meaning of its own; a proxy may not take one.
@@ -181,6 +193,13 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 	used := map[string]bool{}
 	doc := document{Mode: resolved.Client.Mode, MixedPort: resolved.Client.MixedPort, AllowLAN: resolved.Client.AllowLAN, LogLevel: resolved.Client.LogLevel, IPv6: resolved.Client.IPv6, Proxies: []clashProxy{}, ProxyGroups: []group{}, Rules: []string{}}
 	for _, endpoint := range profile.Proxies {
+		if code, _ := proxy.ValidateClientSettings(endpoint); code != "" {
+			return format.Output{}, fmt.Errorf("invalid subscription client settings")
+		}
+		if !proxy.ClientFormatSupportsSettings(endpoint, set.id) {
+			warn("Endpoint omitted: client format cannot represent its security or transport settings; use a compatible URI client")
+			continue
+		}
 		if (endpoint.DialerProxy != "" || endpoint.ClientChain != "") && set.id != "clash" {
 			warn("Client chain omitted: format does not support dialer-proxy")
 			continue
@@ -372,10 +391,18 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 	tls := false
 	switch endpoint.Security {
 	case "", "none":
-	case "tls":
+	case "tls", "reality":
 		tls = true
 	default:
 		return value, fmt.Errorf("不支持的 TLS 设置 %q", endpoint.Security)
+	}
+	if endpoint.TLS != nil {
+		value.ClientFingerprint = endpoint.TLS.ClientFingerprint
+		value.Fingerprint = endpoint.TLS.Fingerprint
+		value.ALPN = endpoint.TLS.ALPN
+	}
+	if endpoint.Reality != nil {
+		value.Reality = &realityOptions{PublicKey: endpoint.Reality.PublicKey, ShortID: endpoint.Reality.ShortID}
 	}
 	transport := ""
 	if endpoint.Transport != nil {
@@ -390,6 +417,10 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 		case "grpc":
 			value.Network = "grpc"
 			value.GRPCOptions = &grpcOptions{ServiceName: endpoint.Transport.ServiceName}
+		case "xhttp":
+			value.Network = "xhttp"
+			x := endpoint.Transport.XHTTP
+			value.XHTTPOptions = &xhttpOptions{Host: x.Host, Path: x.Path, Mode: x.Mode}
 		default:
 			return fmt.Errorf("不支持的传输方式 %q", transport)
 		}

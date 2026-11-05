@@ -98,6 +98,12 @@ func validateImports(ctx context.Context, db *sql.DB, v *vault.Vault) error {
 					if e == nil && p.Protocol == "shadowsocks" && proxy.SS2022(p.Method) {
 						e = importer.ValidateProxy(p)
 					}
+
+					if e == nil {
+						if code, _ := proxy.ValidateClientSettings(p); code != "" {
+							e = ErrArchive
+						}
+					}
 					if e == nil && (p.Name == "" || p.Protocol == "" || p.Port < 1 || p.Port > 65535 || p.DialerProxy != "" || p.ClientChain != "") {
 						e = ErrArchive
 					}

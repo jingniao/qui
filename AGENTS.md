@@ -359,6 +359,8 @@ M1 不提供渲染：Xray 与 sing-box 适配器都没有 Reality／xhttp 渲染
 
 M1 复核修正：Reality server names 只接受具体主机名或 IP，不接受通配符（固定版 Reality 按 ClientHello SNI 精确匹配）。未知非零设置契约版本只检查数量、空对象与字段长度，不按当前版本解释枚举；接收后覆盖旧报告且始终不授权。排队的应用与回滚在投递时再次检查当前报告，携带新设置的命令还须本次连接已持久接收一条新序号能力报告；旧连接报告及已接受消息的原样重放均不能开门。支持撤回时保留命令、继续确认消息，不断开健康控制流；普通旧配置不要求此报告。备份检查对携带 Reality／xhttp 或对应安全／传输标志的草稿按协议与入站／出站角色复用 `ValidateSettings`，保留旧草稿的既有校验语义；加密修订继续走完整 `desiredstate.Decode`。
 
+M4（sing-box Reality 适配，待复核与 Linux 门禁）覆盖前述 M1 的 sing-box 渲染器缺席状态：Agent 实现 VLESS Reality + TCP 的无 flow 与 Vision，先用自身类型化渲染器和安装核心的原生 `check` 逐项探测，成功才上报对应契约。仅单个具体 server name，ShortID 列表完整映射；多名称、冲突的旧 server name、Reality+gRPC 与 xhttp 显式拒绝。Windows/amd64 固定官方 1.14.3 已独立验证回环认证连接、错误凭据和密钥回滚；官方无用户统计构建仍显示未知，不因 Reality 能力推断计量。此处只是 Agent 适配器能力，订阅映射、UI、Linux／统计构建／设备门控验收另行记录，见 [M4 报告](docs/v1.4-m4-singbox-reality.md)。
+
 # 13. 出站代理模块
 
 出站表示节点收到用户流量后，以什么方式继续访问。

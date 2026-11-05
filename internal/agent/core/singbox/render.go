@@ -43,11 +43,24 @@ type logOptions struct {
 	Timestamp bool   `json:"timestamp,omitempty"`
 }
 type tlsOptions struct {
-	Enabled     bool     `json:"enabled"`
-	ServerName  string   `json:"server_name,omitempty"`
-	Certificate []string `json:"certificate,omitempty"`
-	Key         []string `json:"key,omitempty"`
-	ALPN        []string `json:"alpn,omitempty"`
+	Enabled     bool            `json:"enabled"`
+	ServerName  string          `json:"server_name,omitempty"`
+	Certificate []string        `json:"certificate,omitempty"`
+	Key         []string        `json:"key,omitempty"`
+	ALPN        []string        `json:"alpn,omitempty"`
+	Reality     *realityOptions `json:"reality,omitempty"`
+}
+
+type realityOptions struct {
+	Enabled    bool             `json:"enabled"`
+	Handshake  realityHandshake `json:"handshake"`
+	PrivateKey string           `json:"private_key"`
+	ShortID    []string         `json:"short_id"`
+}
+
+type realityHandshake struct {
+	Server string `json:"server"`
+	Port   int    `json:"server_port"`
 }
 type transportOptions struct {
 	Type        string `json:"type"`
@@ -148,11 +161,10 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 	if err := state.Validate(); err != nil {
 		return core.RenderedConfig{}, err
 	}
-	// M1 stores and validates the server-private xhttp/Reality settings, but this
-	// build has no renderer for them yet (M4). Refuse instead of applying a
-	// listener with those fields silently dropped.
-	if err := desiredstate.ValidateServerSettingsRenderer(state); err != nil {
-		return core.RenderedConfig{}, err
+	for _, inbound := range state.Inbounds {
+		if err := desiredstate.ValidateCoreServerSettings(desiredstate.CoreSingBox, inbound.Settings); err != nil {
+			return core.RenderedConfig{}, err
+		}
 	}
 	original := state
 	state, err := state.RuntimeAt(at)
@@ -537,6 +549,26 @@ func security(protocol string, settings desiredstate.ProtocolSettings, inbound b
 		return nil, nil, errors.New("unexpected WireGuard settings")
 	}
 	var tls *tlsOptions
+	if settings.Reality != nil {
+		if !inbound || protocol != "vless" {
+			return nil, nil, errors.New("sing-box Reality server settings require a VLESS inbound")
+		}
+		if err := desiredstate.ValidateCoreServerSettings(desiredstate.CoreSingBox, settings); err != nil {
+			return nil, nil, err
+		}
+		reality := settings.Reality
+		host, port, err := net.SplitHostPort(reality.HandshakeTarget)
+		if err != nil {
+			return nil, nil, errors.New("invalid Reality handshake target")
+		}
+		portNumber, err := strconv.Atoi(port)
+		if err != nil {
+			return nil, nil, errors.New("invalid Reality handshake port")
+		}
+		tls = &tlsOptions{Enabled: true, ServerName: reality.ServerNames[0], Reality: &realityOptions{
+			Enabled: true, Handshake: realityHandshake{Server: host, Port: portNumber}, PrivateKey: reality.PrivateKey, ShortID: append([]string(nil), reality.ShortIDs...),
+		}}
+	}
 	if settings.Security == "tls" {
 		if protocol == "socks5" || protocol == "shadowsocks" {
 			return nil, nil, errors.New("sing-box protocol does not support configured TLS layer")

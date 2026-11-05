@@ -137,12 +137,38 @@ func ServerSettingsCombination(protocol string, settings ProtocolSettings) (Sett
 // settings: no report is needed for a legacy combination, and otherwise the
 // resolved core must have declared exactly this combination.
 func RequireInboundServerSettings(core string, capability CoreSettingsCapability, protocol string, settings ProtocolSettings) error {
+	if err := ValidateCoreServerSettings(core, settings); err != nil {
+		return err
+	}
 	combination, required := ServerSettingsCombination(protocol, settings)
 	if !required {
 		return nil
 	}
 	if err := RequireSettingsCapability(core, capability, combination); err != nil {
 		return errors.New("xhttp/Reality settings are not available on this node yet: " + err.Error())
+	}
+	return nil
+}
+
+// ValidateCoreServerSettings preserves field semantics where a core has a
+// narrower server model. Capabilities authorize combinations, not lossy mapping.
+func ValidateCoreServerSettings(core string, settings ProtocolSettings) error {
+	if core != CoreSingBox || !settings.HasServerSettings() {
+		return nil
+	}
+	if settings.XHTTP != nil {
+		return errors.New("sing-box does not support xhttp")
+	}
+	if reality := settings.Reality; reality != nil {
+		if settings.Transport != "" && settings.Transport != "tcp" {
+			return errors.New("sing-box Reality currently requires TCP")
+		}
+		if len(reality.ServerNames) != 1 {
+			return errors.New("sing-box Reality requires exactly one server name")
+		}
+		if settings.ServerName != "" && settings.ServerName != reality.ServerNames[0] {
+			return errors.New("sing-box Reality server name conflicts with its permitted server name")
+		}
 	}
 	return nil
 }

@@ -65,6 +65,10 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 - M1 复核：Reality SNI 只接受具体名称，固定版核心精确匹配、不展开通配符。未知设置契约版本仅做资源边界检查并覆盖旧报告，始终不授权；新设置的排队应用／回滚投递还要求本次连接已接受新序号报告并匹配当前能力，已接受消息重放与撤回支持均不能放行。备份对新设置草稿按协议与角色校验，旧草稿校验语义不变。
 
 
+### sing-box Reality 适配（M4，本地复核通过，门禁待执行）
+
+M4 的 Agent 适配器已实现 VLESS Reality + TCP（无 flow／Vision），按生产渲染器与已安装核心逐组合原生 `check` 后上报契约，不按版本文本推断。仅单个具体 SNI，完整保留 ShortID 列表；多 SNI、冲突的旧 server name、Reality+gRPC 与 xhttp 显式拒绝。固定 Windows/amd64 官方 sing-box 1.14.3 的原生校验、回环认证 nonce HTTP、错误凭据、失败应用和密钥回滚独立通过；无 `with_v2ray_api` 的官方构建用户流量仍未知。Linux、带用户统计构建与设备门控在本轮未验收；客户端映射与 UI 仍待其他阶段，故全局协议表继续保留 pending。完整版本、摘要、命令、结果与限制见 [M4 报告](v1.4-m4-singbox-reality.md)。
+
 ### GOST（v1.3 G1）
 
 `pkg/contracts/desiredstate/support.go` 只在 `forward` 行里加入 `gost` 条目；其他每一行都不含 `gost` 键，因此 `proxy.ValidateCoreProtocol` 对已知核心遇到没有该键的行直接拒绝。「GOST 仅承载转发」由这张共享表加 `desiredstate.State.Validate` 一处判定，不另加重复的 SQL 协议规则；Web 入站核心选择器同样只为 `forward` 提供 GOST，并要求 `Capabilities.cores` 已确认该核心启用。

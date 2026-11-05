@@ -361,6 +361,24 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 	return entries, warnings, nil
 }
 
+// Names supplies metadata for the client-policy editor without opening payloads.
+func (s *Store) Names(ctx context.Context) (map[string]string, error) {
+	rows, err := s.reader().QueryContext(ctx, "SELECT id,name FROM subscription_sources ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := map[string]string{}
+	for rows.Next() {
+		var key, name string
+		if err := rows.Scan(&key, &name); err != nil {
+			return nil, err
+		}
+		names[key] = name
+	}
+	return names, rows.Err()
+}
+
 // Items exposes metadata only to the canvas, never credentials or source URLs.
 func (s *Store) Items(ctx context.Context) ([]map[string]any, error) {
 	rows, err := s.reader().QueryContext(ctx, "SELECT id,source_id,name,protocol,payload_encrypted FROM imported_proxies ORDER BY source_id,id")

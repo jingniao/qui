@@ -37,6 +37,7 @@ const (
 
 // ResolvedGroup is a group of proxies, groups, DIRECT or REJECT.
 type ResolvedGroup struct {
+	EmptyPolicy     string
 	Name            string
 	Type            string
 	Members         []Member
@@ -78,14 +79,19 @@ func warning(message string) proxy.Warning {
 
 // Expand resolves the template against the proxies of one user. Expansion
 // never fails: whatever cannot apply to this user is dropped or replaced by
-// DIRECT, with a warning for the Owner's preview.
+// the group's empty policy, with a warning for the Owner's preview.
 func Expand(template Template, proxies []proxy.Proxy) Resolved {
 	resolved := Resolved{Client: template.Client, DNS: template.DNS}
 	names := make([]string, 0, len(proxies))
 	byGroup := map[string][]string{}
 	byNode := map[string]string{}
+	byEndpoint := map[string][]string{}
 	for _, endpoint := range proxies {
 		names = append(names, endpoint.Name)
+		if endpoint.ClientChain == "" {
+			ref := EndpointRef(endpoint)
+			byEndpoint[ref] = append(byEndpoint[ref], endpoint.Name)
+		}
 		for _, label := range endpoint.Origin.Labels {
 			if group, ok := strings.CutPrefix(label, "nodeGroup:"); ok {
 				byGroup[group] = append(byGroup[group], endpoint.Name)
@@ -103,6 +109,9 @@ func Expand(template Template, proxies []proxy.Proxy) Resolved {
 		members := []Member{}
 		seen := map[Member]bool{}
 		add := func(member Member) {
+			if member.Kind == KindProxy && !matchesKeywords(member.Name, group) {
+				return
+			}
 			if !seen[member] {
 				seen[member] = true
 				members = append(members, member)
@@ -120,6 +129,10 @@ func Expand(template Template, proxies []proxy.Proxy) Resolved {
 				for _, name := range byGroup[strings.TrimPrefix(member, MemberNodeGroup)] {
 					add(Member{Kind: KindProxy, Name: name})
 				}
+			case strings.HasPrefix(member, MemberEndpoint):
+				for _, name := range byEndpoint[strings.TrimPrefix(member, MemberEndpoint)] {
+					add(Member{Kind: KindProxy, Name: name})
+				}
 			case strings.HasPrefix(member, MemberSource):
 				for _, endpoint := range proxies {
 					if endpoint.Origin.Source == "import:"+strings.TrimPrefix(member, MemberSource) {
@@ -133,10 +146,11 @@ func Expand(template Template, proxies []proxy.Proxy) Resolved {
 			}
 		}
 		if len(members) == 0 {
-			members = []Member{{Kind: KindBuiltin, Name: TargetDirect}}
-			resolved.Warnings = append(resolved.Warnings, warning("策略组 "+group.Name+" 对该用户没有可用节点，已改为 DIRECT"))
+			fallback, raised := EmptyGroup(group.Name, group.EmptyPolicy)
+			members = []Member{fallback}
+			resolved.Warnings = append(resolved.Warnings, raised)
 		}
-		resolved.Groups = append(resolved.Groups, ResolvedGroup{Name: group.Name, Type: group.Type, Members: members, TestURL: group.TestURL, IntervalSeconds: group.IntervalSeconds})
+		resolved.Groups = append(resolved.Groups, ResolvedGroup{EmptyPolicy: group.EmptyPolicy, Name: group.Name, Type: group.Type, Members: members, TestURL: group.TestURL, IntervalSeconds: group.IntervalSeconds})
 	}
 	providers := map[string]bool{}
 	for _, provider := range template.Providers {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"proxycontrol/internal/panel/subscription/rules"
@@ -19,6 +20,10 @@ func TestClientPolicyArchiveRoundTrip(t *testing.T) {
 	}
 	activeRevision := int64(0)
 	input := rules.ProfileInput{Name: "归档模板", Description: "description", Template: rules.Presets()[1].Template, UIMetadata: json.RawMessage(`{"opaque":{"value":7}}`), Activate: true, ExpectedActiveRevision: &activeRevision}
+	input.Template.Groups[0].IncludeKeywords = []string{"US", "美国"}
+	input.Template.Groups[0].ExcludeKeywords = []string{"维护"}
+	input.Template.Groups[0].EmptyPolicy = "reject"
+	input.Template.Groups[0].Members = []string{"@endpoint:inbound:one", "@endpoint:relay:rule", "@endpoint:import:source:name|socks5"}
 	saved, _, err := store.WriteProfile(ctx, "", input, false, "owner")
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +54,9 @@ func TestClientPolicyArchiveRoundTrip(t *testing.T) {
 		}
 		if archived.ActiveRevision != saved.ActiveRevision || archived.ActiveProfileID != saved.Profile.ID || string(archived.Profile.UIMetadata) != string(saved.Profile.UIMetadata) {
 			t.Fatal(archived)
+		}
+		if !reflect.DeepEqual(archived.Profile.Template, saved.Profile.Template) {
+			t.Fatal("membership fields changed in archive", archived.Profile.Template)
 		}
 		return nil
 	})

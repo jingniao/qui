@@ -40,6 +40,7 @@ GET /api/v1/canvas-schemes
 GET /api/v1/canvas-schemes/{id}
 GET /api/v1/canvas-tunnels
 GET /api/v1/canvas-tunnels/legacy-objects
+GET /api/v1/client-policy-candidates
 GET /api/v1/client-policy-profiles
 GET /api/v1/client-policy-profiles/{id}
 GET /api/v1/core-updates

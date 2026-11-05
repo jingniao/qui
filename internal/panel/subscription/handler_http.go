@@ -24,6 +24,7 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.Handle("GET /api/v1/client-policy-candidates", h.Auth.Require(http.HandlerFunc(h.candidates), true))
 	mux.HandleFunc("GET /sub/{token}", h.content)
 	mux.Handle("GET /api/v1/subscriptions", h.Auth.Require(http.HandlerFunc(h.list), true))
 	mux.Handle("POST /api/v1/users/{id}/subscription-token", h.Auth.Require(http.HandlerFunc(h.rotate), true))

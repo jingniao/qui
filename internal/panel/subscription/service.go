@@ -75,12 +75,18 @@ func DefaultFormats() *format.Registry {
 
 // Service renders subscriptions.
 type Service struct {
-	Repository *Repository
-	Users      Users
-	Sources    *source.Registry
-	Formats    *format.Registry
-	Settings   Settings
-	Traffic    Traffic
+	Repository     *Repository
+	Users          Users
+	Sources        *source.Registry
+	Formats        *format.Registry
+	Settings       Settings
+	Traffic        Traffic
+	CandidateUsers interface {
+		List(context.Context, string, int, int) ([]user.User, int, error)
+	}
+	ImportNames interface {
+		Names(context.Context) (map[string]string, error)
+	}
 	// Rules supplies the client rule template exporters with rules render.
 	Rules        RuleTemplates
 	ClientChains interface {

@@ -248,8 +248,9 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 			// A proxy this dialect left out is simply not a member here.
 		}
 		if len(members) == 0 {
-			members = []string{rules.TargetDirect}
-			warn("策略组 " + source.Name + " 在该格式下没有可用节点，已改为 DIRECT")
+			fallback, raised := rules.EmptyGroup(source.Name, source.EmptyPolicy)
+			members = []string{fallback.Name}
+			warn(raised.Message)
 		}
 		value := group{Name: source.Name, Type: source.Type, Proxies: members}
 		if source.Type != "select" {

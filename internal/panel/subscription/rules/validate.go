@@ -131,6 +131,22 @@ func Validate(ctx context.Context, template Template, lookup Lookup) error {
 		if !groupTypes[group.Type] {
 			return fieldError(field+".type", "策略组类型必须是 select、url-test 或 fallback")
 		}
+		for _, list := range []struct {
+			name   string
+			values []string
+		}{{"includeKeywords", group.IncludeKeywords}, {"excludeKeywords", group.ExcludeKeywords}} {
+			if len(list.values) > 32 {
+				return fieldError(field+"."+list.name, "关键词最多 32 个")
+			}
+			for _, keyword := range list.values {
+				if strings.TrimSpace(keyword) == "" || utf8.RuneCountInString(keyword) > 64 || !printable(keyword) {
+					return fieldError(field+"."+list.name, "关键词须为 1–64 个字符且不含控制字符")
+				}
+			}
+		}
+		if group.EmptyPolicy != "" && group.EmptyPolicy != "direct" && group.EmptyPolicy != "reject" {
+			return fieldError(field+".emptyPolicy", "空组策略必须是 direct 或 reject")
+		}
 		if len(group.Members) == 0 || len(group.Members) > MaxMembers {
 			return fieldError(field+".members", "策略组需要 1 到 %d 个成员", MaxMembers)
 		}
@@ -289,6 +305,25 @@ func validateMember(ctx context.Context, member, self string, groups map[string]
 	switch {
 	case member == TargetDirect || member == TargetReject || member == MemberAll:
 		return nil
+	case strings.HasPrefix(member, MemberEndpoint):
+		ref := strings.TrimPrefix(member, MemberEndpoint)
+		kind, rest, _ := strings.Cut(ref, ":")
+		validID := func(value string) bool {
+			return value != "" && len(value) <= 128 && printable(value) && !strings.ContainsAny(value, " :/\\")
+		}
+		switch kind {
+		case "inbound", "relay":
+			if validID(rest) {
+				return nil
+			}
+		case "import":
+			source, key, _ := strings.Cut(rest, ":")
+			name, protocol, found := strings.Cut(key, "|")
+			if validID(source) && found && name != "" && protocol != "" && len(key) <= 1024 && printable(key) {
+				return nil
+			}
+		}
+		return fmt.Errorf("无效的端点引用")
 	case strings.HasPrefix(member, MemberSource):
 		id := strings.TrimPrefix(member, MemberSource)
 		if id == "" || len(id) > 128 || strings.ContainsAny(id, " /\\\r\n\t:") {

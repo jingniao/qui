@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import { isDeepStrictEqual } from 'node:util';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.resolve(here, '..', 'src', 'modules', 'routing', 'api.ts'), 'utf8');
@@ -99,7 +100,21 @@ const conflictHandler = page.slice(page.indexOf('function profileFailure('), pag
 check('conflicts retain drafts and display the current server version', conflictHandler.includes('error.details.activeRevision') && conflictHandler.includes('草稿已保留') && !conflictHandler.includes('load(') && !conflictHandler.includes('clientConfig.value ='));
 check('cards no longer write localStorage and imports hash content', !page.includes('localStorage.setItem(') && page.includes("crypto.subtle.digest('SHA-256'") && page.includes('legacyCards.value.every'));
 check('new profiles use the complete server preset', page.includes('template: JSON.parse(JSON.stringify(standard.template))') && page.includes('设为订阅模板，客户端更新订阅后生效'));
-check('unintegrated controls disclose unknown runtime state', !page.includes('simulatedLatencyCache') && !page.includes('圣何塞 BGP') && page.includes('地区筛选待接入') && page.includes('实际出口未知'));
+check('membership controls persist filters and display server authority', page.includes('setGroupKeywords') && page.includes('最终成员以服务器展开为准') && page.includes('实际出口未知'));
+check('region matching is not duplicated in the page', !page.includes('groupKeywordFilters') && !page.includes('getMatchedNodesForGroup') && !page.includes('applyMatchedNodesToGroup'));
+check('endpoint selection writes stable references', page.includes("addGroupMemberDirect(group, '@endpoint:' + ref)"));
+check('group category metadata follows renames', page.includes('delete groupCategories.value[previous]') && page.includes('groupCategories.value[name] = category') && page.includes('uiMetadata: { ...draftMetadata.value, groupCategories:'));
+check('region creation has persisted constraints and rejects empty sets', page.includes("includeKeywords: target.inc.split(',')") && page.includes("emptyPolicy: 'reject'"));
+const membershipTemplate = structuredClone(template);
+membershipTemplate.groups[0].includeKeywords = ['United States', 'US'];
+membershipTemplate.groups[0].excludeKeywords = ['维护'];
+membershipTemplate.groups[0].emptyPolicy = 'reject';
+membershipTemplate.groups[0].members = ['@endpoint:inbound:one', '@endpoint:relay:rule', '@endpoint:import:src:US, \"quoted\" name|socks5'];
+const roundTrip = api.fromConfig(api.toConfig({ template: membershipTemplate, revision: 1, updatedAt: '', updatedBy: '' }));
+check('membership fields round-trip through the editor DTO', isDeepStrictEqual(roundTrip, membershipTemplate));
+await api.clientPolicyProfilesAPI.candidates();
+await api.clientPolicyProfilesAPI.candidates('user/id');
+check('candidate API supports reported auto-selection and explicit users', client.calls.at(-2).path === '/client-policy-candidates' && client.calls.at(-1).path === '/client-policy-candidates?userId=user%2Fid');
 
 if (failures) {
   console.log(`\n${failures} client policy self-test(s) failed`);

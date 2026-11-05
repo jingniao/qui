@@ -1471,3 +1471,57 @@
   - `git diff --check`：通过。
   - 首轮沙箱运行的恢复/Agent 测试出现 Windows `Access is denied`，旧版本归档夹具还存在 0132 回退遗漏；修正夹具后，获准在沙箱外运行上述完整 Go 检查并全部通过。一次经 `.tools/gow.cmd` 传递带 `|` 的 `-run` 正则被 cmd 拆分，改用直接 Go 可执行文件后通过。
 - **剩余工作与验证边界**：Phase B 的稳定端点、实际成员筛选、分类元数据和空组策略，Phase C 的草稿预览/用户上下文，以及 Phase D 的共享引用保护仍按计划后续实施。本轮未执行 Linux 门禁、真实核心套件、生产构建或已登录浏览器走查；不把 Windows 测试成功当作这些验收的证据。所有更改留在工作区，未提交或推送。
+
+---
+
+## 轮次 36：Client Policy 后端 Phase B——实际成员、筛选与候选端点
+
+- **日期和时间**：2026-11-04T22:54:00-08:00（America/Los_Angeles）。
+- **本轮原始需求**：按英文计划 §9 Phase B 与 §13.4/5/6/10 实现稳定端点成员、服务端关键词筛选、统一空组策略、Owner 候选接口和页面接入；保持布局，不提交、不推送。
+- **涉及的全部文件路径**：
+  - `AGENTS.md`
+  - `internal/panel/subscription/rules/model.go`
+  - `internal/panel/subscription/rules/validate.go`
+  - `internal/panel/subscription/rules/expand.go`
+  - 新增 `internal/panel/subscription/rules/membership.go`
+  - 新增 `internal/panel/subscription/rules/membership_test.go`
+  - `internal/panel/subscription/format/clash/clash.go`
+  - 新增 `internal/panel/subscription/format/clash/membership_test.go`
+  - `internal/panel/subscription/importer/store.go`（仅新增来源名称查询 `Names`）
+  - `internal/panel/subscription/service.go`
+  - `internal/panel/subscription/handler_http.go`
+  - 新增 `internal/panel/subscription/candidates.go`
+  - 新增 `internal/panel/subscription/candidates_test.go`
+  - `internal/panel/system/backup/client_policy_test.go`
+  - `internal/platform/server/server.go`
+  - `internal/platform/server/testdata/portal_route_coverage.txt`
+  - `web/src/modules/routing/api.ts`
+  - `web/src/modules/routing/pages/ClientPolicyPage.vue`
+  - `web/scripts/client-policy-selftest.mjs`
+  - `web/docs/client-policy-change-log.md`
+- **修改前后行为**：
+  - 原成员只支持来源表达式与其他组；现在新增 `@endpoint:<ref>`，由唯一 `rules.EndpointRef` 生成入站、中转和导入端点引用。展开只匹配授权来源已提供的端点，缺失引用不产生代理成员；客户端链克隆跳不进入候选或精确引用索引，同服多个入站保持独立。
+  - 原地区关键词为按数组下标存储的临时状态且禁用；现在 `includeKeywords/excludeKeywords` 随模板持久化，唯一筛选实现位于 rules.Expand：NFKC 规范化、去首尾空白、不区分大小写的字面子串匹配，任意包含命中即可，排除优先，空包含列表不限；只筛选代理，不筛选内置动作或组成员。保持输入顺序并去重。
+  - 原授权展开和格式过滤分别补 DIRECT；现在两处共用 `rules.EmptyGroup` 返回成员和警告，`emptyPolicy` 随 ResolvedGroup 传递。省略兼容 direct，reject 生成 REJECT。新增字段均 omitempty，旧模板及空关键词数组不引起旧快照内容变化。
+  - 页面重新启用关键词编辑、候选刷新、端点勾选及添加，保存 `@endpoint:` 引用；删除临时关键词状态，不在 TypeScript 里执行代理筛选。展示自动选择的授权用户和完整候选列表，并明确“最终成员以服务器展开为准，预览见 YAML 预览”。未知延迟/实际出口仍保持未知。
+  - 新地区组和标准拓扑使用 `@all` 加持久化包含关键词，空组默认 reject；选择此方案以沿用按地区名称快速创建的现有交互，无需假设已有同名节点组。Owner 仍可编辑来源表达式和关键词。类别按组名写入 `uiMetadata.groupCategories`，旧模板首次保存时推断，重命名移动类别键并更新组/规则引用。
+  - 成员编辑器共用带引号的成员解析/格式化函数，导入名称内的逗号、引号不会破坏精确引用。
+- **接口与迁移变化**：
+  - 唯一新增 HTTP 接口为 Owner-only `GET /api/v1/client-policy-candidates?userId=<id>`。通过 Service.account/collect 复用订阅授权，不新增授权 SQL；返回 ref/name/protocol/originKind/originName/nodeGroupIds 和用户上下文，不返回凭据、地址、URI 或 Token。
+  - 省略 userId 时通过注入的用户仓储分页选择首个有效且有节点组授权的用户，标记 autoSelected；无合格用户返回 items:[] 与中文诊断。
+  - 无新增迁移；严格解码、保存、备份校验继续共用 rules 模型与验证。备份回环测试增加成员、关键词、空组字段保真检查。
+- **设计选择及计划差异**：
+  - 功能范围遵循 Phase B。实际源码中的导入 Origin.Ref 原为内容哈希 ID，与计划中“已是稳定 name|protocol”的描述不同：审查后不改动 Origin.Ref（它还用于 sing-box 标签、预览项与客户端链），由 `rules.EndpointRef(proxy.Proxy)` 对导入端点用代理名称与协议组成 name|protocol，与节点分组导入键一致；importer 与客户端链保持原样，不新增 Origin 字段或额外查询。
+  - 审查修正：分组改名改为输入提交（change）时一次性同步组与规则引用，拒绝与其他组重名；逐键同步会在中间名称与其他组相同时永久合并两组引用。
+  - 草稿预览、成员解析预览接口和额外客户端测量均未加入；当前 YAML 预览仍为活动订阅模板，Phase C 再接入草稿。没有 Linux 或真实核心验收结论。
+- **实际执行的验证及结果**：
+  - Go 使用仓库工具链，并设置 `$env:GOPATH="$PWD/.tools/gopath"; $env:GOCACHE="$PWD/.tools/gocache"; $env:GOTOOLCHAIN='local'`。
+  - `.tools/go/bin/go.exe vet ./...`：通过。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription/...`：通过，含新增引用、筛选、空组、候选权限/元数据/自动选择测试。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription/... ./internal/panel/system/backup/... ./internal/platform/server/...`：通过（沙箱外完整重跑，exit code 0；备份 102.717 秒，服务器 231.679 秒）。
+  - `npm.cmd --prefix web run typecheck`：通过。
+  - `node web/scripts/client-policy-selftest.mjs`：36 项通过，含新字段及带逗号/引号的端点成员回环。
+  - `node web/scripts/ui-regression-selftest.mjs`：全部通过。
+  - `git diff --check`：通过。
+  - 过程中修正了客户端链测试仍用旧 Origin.Ref 构造画布引用、JavaScript 对象属性顺序影响字符串相等断言、项目目标不支持 String.replaceAll 三项问题。沙箱完整 Go 测试中的备份恢复与 Agent 子进程遇到 Windows Access is denied，获准在沙箱外重跑；不把沙箱失败当成功。
+- **剩余工作与验证边界**：Phase C 草稿预览和 Phase D 共享引用保护仍待后续实施。本轮未执行 Linux scripts/check.sh、真实 Mihomo 核心套件、生产构建或登录浏览器走查。全部改动保留工作区，未提交或推送。

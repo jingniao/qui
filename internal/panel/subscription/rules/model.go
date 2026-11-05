@@ -45,8 +45,12 @@ type DNS struct {
 // Group is a client proxy group. A member is DIRECT, REJECT, another group's
 // name, @all (every proxy of the user) or @nodeGroup:<id> (the user's proxies
 // on that granted node group). @source:<id> expands only that user's granted
-// imported proxies; it cannot grant access by itself.
+// imported proxies; @endpoint:<ref> selects an exact authorized endpoint.
+// Neither expression grants access by itself. Keywords filter proxy names only.
 type Group struct {
+	IncludeKeywords []string `json:"includeKeywords,omitempty"`
+	ExcludeKeywords []string `json:"excludeKeywords,omitempty"`
+	EmptyPolicy     string   `json:"emptyPolicy,omitempty"`
 	Name            string   `json:"name"`
 	Type            string   `json:"type"`
 	Members         []string `json:"members"`
@@ -104,6 +108,7 @@ const (
 	MemberAll        = "@all"
 	MemberNodeGroup  = "@nodeGroup:"
 	MemberSource     = "@source:"
+	MemberEndpoint   = "@endpoint:"
 	TargetNodePrefix = "node:"
 	ServicePrefix    = "service:"
 )

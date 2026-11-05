@@ -306,17 +306,19 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	subscriptionPublished := *deployments
 	subscriptionPublished.Database = subscriptionReads
 	subscriptionService := &subscription.Service{
-		Repository: &subscription.Repository{Database: database, Reader: s.readPool, Vault: configurationVault},
-		Users:      &subscriptionUsers,
-		Sources:    source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished, Relays: &published.RelayStore{Database: subscriptionReads}}),
-		Formats:    subscriptionFormats,
-		Settings:   systemRepository,
-		Traffic:    s.accessRepository,
-		Rules:      &rules.Store{Database: subscriptionReads},
+		Repository:     &subscription.Repository{Database: database, Reader: s.readPool, Vault: configurationVault},
+		Users:          &subscriptionUsers,
+		CandidateUsers: &subscriptionUsers,
+		Sources:        source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished, Relays: &published.RelayStore{Database: subscriptionReads}}),
+		Formats:        subscriptionFormats,
+		Settings:       systemRepository,
+		Traffic:        s.accessRepository,
+		Rules:          &rules.Store{Database: subscriptionReads},
 	}
 	s.importStore = &importer.Store{Database: database, Reader: s.readPool, Vault: configurationVault}
 	subscriptionService.Sources.Register(s.importStore)
 	subscriptionService.ClientChains = s.importStore
+	subscriptionService.ImportNames = s.importStore
 	(&importer.Handler{Store: s.importStore, Auth: authHandler, Audit: systemRepository}).Register(mux)
 	portalRepository := &portal.Repository{Database: database}
 	(&portal.Handler{Repository: portalRepository, Auth: authHandler, Audit: systemRepository,

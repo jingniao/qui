@@ -175,6 +175,9 @@ export interface ClientSettings {
 }
 
 export interface ClientProxyGroup {
+  includeKeywords?: string[];
+  excludeKeywords?: string[];
+  emptyPolicy?: "direct" | "reject";
   name: string;
   type: string;
   proxies: string;
@@ -225,7 +228,7 @@ export interface RuleTemplate {
   preset: string;
   client: ClientSettings & { ipv6: boolean };
   dns: RuleTemplateDNS;
-  groups: { name: string; type: string; members: string[]; testUrl: string; intervalSeconds: number }[];
+  groups: { includeKeywords?: string[]; excludeKeywords?: string[]; emptyPolicy?: "direct" | "reject"; name: string; type: string; members: string[]; testUrl: string; intervalSeconds: number }[];
   providers: RuleTemplateProvider[];
   rules: { id: string; type: string; payload: string; target: string; noResolve: boolean; enabled: boolean; priority: number; description: string }[];
 }
@@ -266,7 +269,24 @@ export interface ClientPolicyInput {
   uiMetadata: Record<string, unknown>;
 }
 
+export interface ClientPolicyCandidate {
+  ref: string;
+  name: string;
+  protocol: string;
+  originKind: 'inbound' | 'relay' | 'import';
+  originName: string;
+  nodeGroupIds: string[];
+}
+
+export interface ClientPolicyCandidates {
+  items: ClientPolicyCandidate[];
+  user?: { id: string; name: string };
+  autoSelected: boolean;
+  diagnostic?: string;
+}
+
 export const clientPolicyProfilesAPI = {
+  candidates: (userId?: string) => request<ClientPolicyCandidates>('/client-policy-candidates' + (userId ? '?userId=' + encodeURIComponent(userId) : '')),
   list: (page = 1, pageSize = 100) => request<{ items: ClientPolicySummary[]; total: number; page: number; pageSize: number; activeProfileId: string; activeRevision: number }>(`/client-policy-profiles?page=${page}&pageSize=${pageSize}`),
   get: (id: string) => request<ClientPolicyResult>('/client-policy-profiles/' + encodeURIComponent(id)),
   create: (input: ClientPolicyInput & { importKey?: string; activate?: boolean; expectedActiveRevision?: number }) => request<ClientPolicyResult>('/client-policy-profiles', 'POST', input),
@@ -302,6 +322,35 @@ export const clientPresets: ClientPreset[] = [
 
 const DEFAULT_TEST_URL = 'http://www.gstatic.com/generate_204';
 
+// Quote members whose imported stable key contains the editor's separator.
+export function formatGroupMembers(members: string[]): string {
+  return members.map(member => /[,"\n]/.test(member) ? '"' + member.replace(/"/g, '""') + '"' : member).join(', ');
+}
+
+export function parseGroupMembers(value: string): string[] {
+  const members: string[] = [];
+  let member = '';
+  let quoted = false;
+  for (let index = 0; index < value.length; index++) {
+    const char = value[index];
+    if (char === '"') {
+      if (quoted && value[index + 1] === '"') {
+        member += '"';
+        index++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === ',' && !quoted) {
+      if (member.trim()) members.push(member.trim());
+      member = '';
+    } else {
+      member += char;
+    }
+  }
+  if (member.trim()) members.push(member.trim());
+  return members;
+}
+
 export function toConfig(stored: StoredRuleTemplate): ClientPolicyConfig {
   const template = stored.template;
   return {
@@ -311,9 +360,12 @@ export function toConfig(stored: StoredRuleTemplate): ClientPolicyConfig {
     activePreset: template.preset,
     settings: { mode: template.client.mode, mixedPort: template.client.mixedPort, allowLan: template.client.allowLan, logLevel: template.client.logLevel },
     proxyGroups: template.groups.map(group => ({
+      includeKeywords: group.includeKeywords,
+      excludeKeywords: group.excludeKeywords,
+      emptyPolicy: group.emptyPolicy,
       name: group.name,
       type: group.type,
-      proxies: group.members.join(', '),
+      proxies: formatGroupMembers(group.members),
       url: group.testUrl || undefined,
       interval: group.intervalSeconds || undefined
     })),
@@ -330,9 +382,12 @@ export function fromConfig(config: ClientPolicyConfig): RuleTemplate {
     groups: config.proxyGroups.map(group => {
       const testing = group.type !== 'select';
       return {
+        ...(group.includeKeywords?.length ? { includeKeywords: group.includeKeywords } : {}),
+        ...(group.excludeKeywords?.length ? { excludeKeywords: group.excludeKeywords } : {}),
+        ...(group.emptyPolicy ? { emptyPolicy: group.emptyPolicy } : {}),
         name: group.name.trim(),
         type: group.type,
-        members: String(group.proxies || '').split(',').map(item => item.trim()).filter(Boolean),
+        members: parseGroupMembers(group.proxies),
         testUrl: testing ? group.url || DEFAULT_TEST_URL : '',
         intervalSeconds: testing ? Number(group.interval) || 300 : 0
       };

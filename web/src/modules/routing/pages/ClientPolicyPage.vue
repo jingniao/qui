@@ -424,7 +424,7 @@
                   </span>
                 </div>
                 <p class="text-xs text-neutral-500 mt-0.5">
-                  地区名称不限制节点来源；地区筛选待接入，当前以成员表达式为准。客户端延迟与实际出口未知。
+                  地区组按已保存的来源与关键词筛选。最终成员以服务器展开为准，预览见 YAML 预览；客户端延迟与实际出口未知。
                 </p>
               </div>
 
@@ -572,11 +572,11 @@
                       #{{ item.index + 1 }}
                     </span>
                     <input
-                      v-model="item.group.name"
+                      :value="item.group.name"
                       type="text"
                       placeholder="分组名称"
                       class="text-sm font-bold text-neutral-900 bg-transparent hover:bg-black/[0.03] focus:bg-white focus:ring-1 focus:ring-ios-blue/40 px-2 py-0.5 rounded-lg border border-transparent hover:border-black/[0.08] focus:border-ios-blue transition-all w-40 sm:w-52"
-                      @input="markDirty"
+                      @change="renameGroup(item.group, $event.target as HTMLInputElement)"
                     />
                     <span
                       class="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0 border"
@@ -794,7 +794,7 @@
                         </span>
                       </div>
                       <div class="text-[11px] text-neutral-400 font-mono">
-                        授权候选与运行状态待接入
+                        {{ candidates.user ? `候选用户：${candidates.user.name}${candidates.autoSelected ? '（自动选择）' : ''}` : candidates.diagnostic }}
                       </div>
                     </div>
 
@@ -849,16 +849,18 @@
                   <!-- 关键词筛选单行轻量条 -->
                   <div class="p-2.5 bg-neutral-50/80 rounded-xl border border-black/[0.04] flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div class="flex items-center gap-2 flex-1 min-w-0">
-                      <span class="text-[11px] font-bold text-neutral-500 shrink-0">地区筛选待接入:</span>
+                      <span class="text-[11px] font-bold text-neutral-500 shrink-0">地区筛选:</span>
                       <input
-                        v-model="getGroupKeywordFilter(item.index, item.group).include" disabled
+                        :value="(item.group.includeKeywords || []).join('，')"
+                        @change="setGroupKeywords(item.group, 'includeKeywords', ($event.target as HTMLInputElement).value)"
                         type="text"
                         :placeholder="getDefaultIncludeKeywords(item.group.name)"
                         class="form-input-base text-xs font-mono py-1 px-2 flex-1 min-w-[130px] bg-white"
                         title="包含关键词"
                       />
                       <input
-                        v-model="getGroupKeywordFilter(item.index, item.group).exclude" disabled
+                        :value="(item.group.excludeKeywords || []).join('，')"
+                        @change="setGroupKeywords(item.group, 'excludeKeywords', ($event.target as HTMLInputElement).value)"
                         type="text"
                         placeholder="排除关键词 (如维护)"
                         class="form-input-base text-xs font-mono py-1 px-2 w-28 bg-white hidden lg:inline"
@@ -868,19 +870,38 @@
 
                     <div class="flex items-center gap-2 shrink-0">
                       <span class="text-[11px] text-neutral-500">
-                        授权成员待接入
+                        {{ candidates.items.length }} 个授权候选
                       </span>
                       <button
                         type="button"
-                        disabled title="地区成员筛选将在后续阶段接入"
+                        @click="addSelectedEndpoints(item.group)"
                         class="ios-btn-secondary text-[11px] px-2 py-0.5 text-ios-blue font-semibold hover:border-ios-blue"
                       >
-                        待接入
+                        添加所选端点
                       </button>
                     </div>
                   </div>
 
                   <!-- 地区组 Footer -->
+                  <div class="space-y-2 text-xs text-neutral-500">
+                    <div class="flex items-center gap-2">
+                      <span>无可用成员时</span>
+                      <AppSelect
+                        v-model="item.group.emptyPolicy"
+                        :options="[{ value: '', label: 'DIRECT（兼容默认）' }, { value: 'direct', label: 'DIRECT' }, { value: 'reject', label: 'REJECT' }]"
+                        class="w-44" size="sm" @change="markDirty"
+                      />
+                      <button type="button" class="ios-btn-secondary text-xs" @click="loadCandidates">刷新候选</button>
+                    </div>
+                    <p>最终成员以服务器展开为准，预览见 YAML 预览。此列表为该用户的全部授权候选，不代表当前组的筛选结果。</p>
+                    <p v-if="candidateError" class="text-red-600">{{ candidateError }}</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-auto">
+                      <label v-for="endpoint in candidates.items" :key="endpoint.ref" class="flex items-center gap-2 p-2 rounded-lg border border-black/[0.06]">
+                        <input v-model="selectedEndpoints" type="checkbox" :value="endpoint.ref" />
+                        <span>{{ endpoint.name }} · {{ endpoint.protocol }} · {{ { inbound: '自建入站', relay: '中转', import: '导入' }[endpoint.originKind] }} · {{ endpoint.originName }}</span>
+                      </label>
+                    </div>
+                  </div>
                   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-3 border-t border-black/[0.05] text-xs text-neutral-500">
                     <div class="flex items-center gap-2">
                       <span class="text-neutral-400 font-medium">被引用情况:</span>
@@ -2215,6 +2236,9 @@ import { ref, reactive, computed, onMounted, h, watch } from 'vue';
 import {
   clientPolicyAPI,
   clientPolicyProfilesAPI,
+  type ClientPolicyCandidates,
+  formatGroupMembers,
+  parseGroupMembers,
   toConfig,
   fromConfig,
   type ClientPolicyProfile,
@@ -2440,6 +2464,8 @@ function editPolicy(policy: SavedClientPolicy) {
   policyDescInput.value = policy.description;
   setAsActiveOnSave.value = policy.id === activePolicyId.value;
   clientConfig.value = JSON.parse(JSON.stringify(policy.config));
+  draftMetadata.value = JSON.parse(JSON.stringify(policy.uiMetadata));
+  groupCategories.value = { ...(draftMetadata.value.groupCategories as typeof groupCategories.value || {}) };
   originalSnapshot.value = JSON.stringify(policy.config);
   isDirty.value = false;
   modalMode.value = 'edit';
@@ -2489,6 +2515,8 @@ async function executeDeletePolicy() {
 
 function openNewConfigModal() {
   editingPolicyId.value = null;
+  draftMetadata.value = {};
+  groupCategories.value = {};
   policyNameInput.value = '自定义策略 #' + (savedPolicies.value.length + 1);
   policyDescInput.value = '';
   setAsActiveOnSave.value = false;
@@ -2524,12 +2552,13 @@ function applyPresetTemplate(presetId: string) {
     showToast('预设模板尚未加载，请稍候重试', 'error');
     return;
   }
+  groupCategories.value = {};
   clientConfig.value.activePreset = presetId;
   clientConfig.value.settings = { ...preset.template.client };
   clientConfig.value.proxyGroups = preset.template.groups.map(group => ({
     name: group.name,
     type: group.type,
-    proxies: group.members.join(', '),
+    proxies: formatGroupMembers(group.members),
     url: group.testUrl || undefined,
     interval: group.intervalSeconds || undefined
   }));
@@ -2723,7 +2752,53 @@ let deletingGroupIndex = -1;
 const groupCategoryTab = ref<'service' | 'region' | 'all'>('service');
 const groupSearchQuery = ref('');
 const groupExpandedNodes = ref<Record<number, boolean>>({});
-const groupKeywordFilters = ref<Record<number, { include: string; exclude: string }>>({});
+const candidates = ref<ClientPolicyCandidates>({ items: [], autoSelected: true });
+const selectedEndpoints = ref<string[]>([]);
+const candidateError = ref('');
+const draftMetadata = ref<Record<string, unknown>>({});
+const groupCategories = ref<Record<string, 'service' | 'region' | 'other'>>({});
+
+async function loadCandidates() {
+  candidateError.value = '';
+  try {
+    candidates.value = await clientPolicyProfilesAPI.candidates();
+    selectedEndpoints.value = [];
+  } catch (error) {
+    candidateError.value = '加载授权候选失败：' + (error as Error).message;
+  }
+}
+
+function setGroupKeywords(group: ClientProxyGroup, field: 'includeKeywords' | 'excludeKeywords', value: string) {
+  group[field] = value.split(/[,，]+/).map(keyword => keyword.trim()).filter(Boolean);
+  markDirty();
+}
+
+function addSelectedEndpoints(group: ClientProxyGroup) {
+  for (const ref of selectedEndpoints.value) addGroupMemberDirect(group, '@endpoint:' + ref);
+}
+
+// Renames apply on commit, not per keystroke: an intermediate name equal to
+// another group would otherwise merge both groups' references for good.
+function renameGroup(group: ClientProxyGroup, input: HTMLInputElement) {
+  const previous = group.name;
+  const name = input.value.trim();
+  if (!name || name === previous || clientConfig.value.proxyGroups.some(other => other.name === name)) {
+    if (name && name !== previous) showToast('分组名称「' + name + '」已存在', 'error');
+    input.value = previous;
+    return;
+  }
+  const category = getGroupCategory(group);
+  group.name = name;
+  delete groupCategories.value[previous];
+  groupCategories.value[name] = category;
+  for (const other of clientConfig.value.proxyGroups) {
+    other.proxies = formatGroupMembers(getGroupMembers(other).map(member => member === previous ? name : member));
+  }
+  for (const rule of clientConfig.value.rules) {
+    if (rule.target === previous) rule.target = name;
+  }
+  markDirty();
+}
 
 function formatExitLabel(name: string): { icon: string; title: string } {
   if (name === 'DIRECT') return { icon: '🚀', title: 'DIRECT (本地直连)' };
@@ -2732,6 +2807,10 @@ function formatExitLabel(name: string): { icon: string; title: string } {
   if (name === 'AUTO') return { icon: '⚡', title: 'AUTO (自动测速)' };
   if (name === 'FALLBACK') return { icon: '🛡️', title: 'FALLBACK (故障转移)' };
   if (name === 'PROXY') return { icon: '🎯', title: 'PROXY (自选总控)' };
+  if (name.startsWith('@endpoint:')) {
+    const endpoint = candidates.value.items.find(item => '@endpoint:' + item.ref === name);
+    return { icon: '🔗', title: endpoint?.name || name };
+  }
   if (name.startsWith('@nodeGroup:')) {
     const id = name.replace('@nodeGroup:', '');
     const ng = systemNodeGroups.value.find(g => g.id === id);
@@ -2742,6 +2821,7 @@ function formatExitLabel(name: string): { icon: string; title: string } {
 
 // 判定组别类型（用途组、地区组、其他）
 function getGroupCategory(group: ClientProxyGroup): 'service' | 'region' | 'other' {
+  if (groupCategories.value[group.name]) return groupCategories.value[group.name];
   const name = (group.name || '').toLowerCase();
   const members = getGroupMembers(group);
 
@@ -2887,16 +2967,6 @@ function getDefaultIncludeKeywords(groupName: string): string {
   return '节点关键词, 地区';
 }
 
-function getGroupKeywordFilter(index: number, group: ClientProxyGroup) {
-  if (!groupKeywordFilters.value[index]) {
-    groupKeywordFilters.value[index] = {
-      include: getDefaultIncludeKeywords(group.name),
-      exclude: '过期, 维护, 流量'
-    };
-  }
-  return groupKeywordFilters.value[index];
-}
-
 function setGroupPrimaryExit(group: ClientProxyGroup, exitName: string) {
   const members = getGroupMembers(group);
   const idx = members.indexOf(exitName);
@@ -2904,7 +2974,7 @@ function setGroupPrimaryExit(group: ClientProxyGroup, exitName: string) {
     members.splice(idx, 1);
   }
   members.unshift(exitName);
-  group.proxies = members.join(', ');
+  group.proxies = formatGroupMembers(members);
   markDirty();
   showToast('已将【' + exitName + '】设为【' + group.name + '】的首选出口');
 }
@@ -2988,6 +3058,7 @@ function addNewServiceGroup() {
     type: 'select',
     proxies: defaultProxies
   });
+  groupCategories.value[newName] = 'service';
   groupCategoryTab.value = 'service';
   markDirty();
   showToast('已创建新用途分组「' + newName + '」');
@@ -3010,12 +3081,15 @@ function addNewRegionGroup() {
 
   clientConfig.value.proxyGroups.push({
     name: target.name,
+    includeKeywords: target.inc.split(',').map(keyword => keyword.trim()),
+    emptyPolicy: 'reject',
     type: 'url-test',
     proxies: '@all',
     url: 'http://www.gstatic.com/generate_204',
     interval: 300
   });
 
+  groupCategories.value[target.name] = 'region';
   groupCategoryTab.value = 'region';
   markDirty();
   showToast('已创建新地区分组「' + target.name + '」');
@@ -3048,6 +3122,8 @@ function applyStandardTopology() {
     // 2. 地区组
     {
       name: '🇺🇸 美国节点',
+      includeKeywords: getDefaultIncludeKeywords('🇺🇸 美国节点').split(',').map(keyword => keyword.trim()),
+      emptyPolicy: 'reject',
       type: 'url-test',
       proxies: '@all',
       url: 'http://www.gstatic.com/generate_204',
@@ -3055,6 +3131,8 @@ function applyStandardTopology() {
     },
     {
       name: '🇯🇵 日本节点',
+      includeKeywords: getDefaultIncludeKeywords('🇯🇵 日本节点').split(',').map(keyword => keyword.trim()),
+      emptyPolicy: 'reject',
       type: 'url-test',
       proxies: '@all',
       url: 'http://www.gstatic.com/generate_204',
@@ -3062,6 +3140,8 @@ function applyStandardTopology() {
     },
     {
       name: '🇭🇰 香港节点',
+      includeKeywords: getDefaultIncludeKeywords('🇭🇰 香港节点').split(',').map(keyword => keyword.trim()),
+      emptyPolicy: 'reject',
       type: 'url-test',
       proxies: '@all',
       url: 'http://www.gstatic.com/generate_204',
@@ -3069,6 +3149,8 @@ function applyStandardTopology() {
     },
     {
       name: '🇸🇬 新加坡节点',
+      includeKeywords: getDefaultIncludeKeywords('🇸🇬 新加坡节点').split(',').map(keyword => keyword.trim()),
+      emptyPolicy: 'reject',
       type: 'url-test',
       proxies: '@all',
       url: 'http://www.gstatic.com/generate_204',
@@ -3076,6 +3158,7 @@ function applyStandardTopology() {
     }
   ];
 
+  groupCategories.value = {};
   clientConfig.value.proxyGroups = standardGroups;
 
   // 联动优化分流规则中的目标
@@ -3146,13 +3229,13 @@ function executeDeleteGroup() {
 }
 
 function getGroupMembers(group: { proxies?: string }): string[] {
-  return String(group.proxies || '').split(',').map(s => s.trim()).filter(Boolean);
+  return parseGroupMembers(group.proxies || '');
 }
 
 function removeGroupMember(group: { proxies?: string }, memberIndex: number) {
   const current = getGroupMembers(group);
   current.splice(memberIndex, 1);
-  group.proxies = current.join(', ');
+  group.proxies = formatGroupMembers(current);
   markDirty();
 }
 
@@ -3271,6 +3354,8 @@ function addRegionGroup(regionName: string, flag: string) {
     name: groupName,
     type: 'url-test',
     proxies: '@all',
+    includeKeywords: getDefaultIncludeKeywords(regionName).split(',').map(keyword => keyword.trim()),
+    emptyPolicy: 'reject',
     url: 'http://www.gstatic.com/generate_204',
     interval: 300
   });
@@ -4159,8 +4244,7 @@ async function saveAll() {
 
   saving.value = true;
   try {
-    const existing = savedPolicies.value.find(item => item.id === editingPolicyId.value);
-    const input = { name: policyNameInput.value.trim(), description: policyDescInput.value.trim(), template: fromConfig(clientConfig.value), uiMetadata: existing?.uiMetadata || {} };
+    const input = { name: policyNameInput.value.trim(), description: policyDescInput.value.trim(), template: fromConfig(clientConfig.value), uiMetadata: { ...draftMetadata.value, groupCategories: Object.fromEntries(clientConfig.value.proxyGroups.map(group => [group.name, getGroupCategory(group)])) } };
     const result = editingPolicyId.value
       ? await clientPolicyProfilesAPI.update(editingPolicyId.value, { ...input, expectedRevision: clientConfig.value.version, expectedActiveRevision: editingActiveRevision.value })
       : await clientPolicyProfilesAPI.create({ ...input, activate: setAsActiveOnSave.value, expectedActiveRevision: setAsActiveOnSave.value ? activeRevision.value : undefined });
@@ -4328,6 +4412,7 @@ async function load() {
     console.error('Failed to load auxiliary data for client policies:', e);
   }
   if (isOwner.value) {
+    await loadCandidates();
     try {
       previewUsers.value = (await userAPI.list(1, '', 100)).items;
       if (!previewUserId.value && previewUsers.value.length > 0) {

@@ -52,6 +52,7 @@ type Adapter struct {
 	nativeClashAPI         bool
 	nativeWireGuard        bool
 	nativeWireGuardInbound bool
+	nativeServerSettings   desiredstate.CoreSettingsCapability
 	probePorts             map[string]int
 	outboundHealth         map[string]scheduler.Health
 	process                *exec.Cmd
@@ -87,6 +88,10 @@ func (a *Adapter) applyUpstreamCapabilities(capabilities *pb.Capabilities) {
 	a.v2rayAPI = SupportsV2rayAPI(capabilities)
 	a.nativeWireGuard = hasWireGuardOutbound(capabilities)
 	a.nativeWireGuardInbound = hasWireGuardInbound(capabilities)
+	a.nativeServerSettings = desiredstate.CoreSettingsCapability{Core: "sing-box", Version: capabilities.ServerSettingsContractVersion}
+	for _, combination := range capabilities.ServerSettingsCombinations {
+		a.nativeServerSettings.Combinations = append(a.nativeServerSettings.Combinations, desiredstate.SettingsCombination{Protocol: combination.Protocol, Direction: combination.Direction, Security: combination.Security, Transport: combination.Transport, Flow: combination.Flow})
+	}
 }
 func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.RenderedConfig, error) {
 	for _, in := range state.Inbounds {
@@ -102,6 +107,11 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	options := renderOptions{access: a.hooks.AccessSink != nil}
 	if err := a.detectStatsLocked(ctx); err != nil {
 		return core.RenderedConfig{}, err
+	}
+	for _, inbound := range state.Inbounds {
+		if err := desiredstate.RequireInboundServerSettings("sing-box", a.nativeServerSettings, inbound.Protocol, inbound.Settings); err != nil {
+			return core.RenderedConfig{}, err
+		}
 	}
 	options.wireGuardOutbound = a.nativeWireGuard
 	options.wireGuardInbound = a.nativeWireGuardInbound
@@ -643,8 +653,6 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	if match == nil {
 		return &pb.Capabilities{}, errors.New("configured core does not identify as sing-box")
 	}
-	// This build has no xhttp/Reality renderer (M4), so it reports no settings
-	// contract at all; the fields stay zero and the panel gate stays closed.
 	capabilities := &pb.Capabilities{CoreName: "sing-box", CoreVersion: match[1], ForwardInboundSupported: true}
 	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
 	if capabilities.DeviceGateSupported {
@@ -664,6 +672,10 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 		// Upstream has no WireGuard inbound that names a user per peer (plan D4),
 		// so only the outbound side is reported.
 		capabilities.Protocols = append(capabilities.Protocols, &pb.ProtocolCapability{Protocol: "wireguard", Inbound: false, Outbound: true, Tcp: true, Udp: true})
+	}
+	capabilities.ServerSettingsCombinations = probeRealitySettings(ctx, executable)
+	if len(capabilities.ServerSettingsCombinations) > 0 {
+		capabilities.ServerSettingsContractVersion = desiredstate.SettingsContractVersion
 	}
 	return capabilities, nil
 }

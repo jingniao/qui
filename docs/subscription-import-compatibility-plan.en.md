@@ -435,6 +435,12 @@ these settings, and the protocol matrix lists them as pending.
 - Not in M1: key generation/rotation, Xray or sing-box rendering, editor options
   (M3), subscription client mapping (M2), any migration, and any change to the
   import track or the shared client model.
+- Verification: `gofmt`, focused `go vet`/`go test` on the touched packages
+  (Windows, Go 1.26.0). No Linux `scripts/check.sh` or real-core run was made
+  for this M1 change; per §14.1 item 9 the phase commit gets its own Linux gate
+  after review. Synthetic reports exercise the transport round trip and the
+  save/snapshot/deploy allow path, while production wiring stays closed until a
+  renderer reports a combination.
 
 M1 review corrections (2026-11-05, local corrections; Linux gate still pending):
 Reality server names are concrete names/IPs only, because the pinned Reality
@@ -448,12 +454,17 @@ validation checks new draft settings with the shared protocol/direction validato
 while retaining historical validation for legacy drafts. Local targeted tests do
 not establish real-core acceptance or M2 completion. Revision-zero rollback clears
 runtime without transmitting settings and remains available without a new report.
-- Verification: `gofmt`, focused `go vet`/`go test` on the touched packages
-  (Windows, Go 1.26.0). No Linux `scripts/check.sh` or real-core run was made
-  for this change; per §14.1 item 9 the phase commit gets its own Linux gate
-  after review. Synthetic reports exercise the transport round trip and the
-  save/snapshot/deploy allow path, while production wiring stays closed until a
-  renderer reports a combination.
+
+M4 adapter status (2026-11-05, root review approved, local phase commit;
+Linux gate pending): sing-box renders Reality over TCP with no flow or Vision,
+authorizing each only after its installed executable accepts the production
+renderer output. Single concrete SNI and the complete ShortID list are supported;
+multiple/conflicting names, gRPC and xhttp stay refused. Independent native and
+authenticated loopback HTTP tests passed on the pinned Windows/amd64 official
+1.14.3 binary, including wrong credentials, failed apply and key rollback. Its
+missing `with_v2ray_api` keeps account traffic unknown. This does not complete
+public subscription mapping, UI, Linux/statistics/device-gate acceptance or S5.
+See [the M4 report](v1.4-m4-singbox-reality.md) for exact evidence and limits.
 
 ## 11. Acceptance Criteria
 

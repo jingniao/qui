@@ -24,6 +24,13 @@ func ValidateClientSettings(p Proxy) (string, string) {
 		return "invalid_protocol_combination", "transport"
 	}
 	if p.Transport != nil && p.Transport.Type == "xhttp" {
+		if p.TLS != nil {
+			for _, alpn := range p.TLS.ALPN {
+				if alpn != "h2" && alpn != "http/1.1" {
+					return "invalid_protocol_combination", "tls.alpn"
+				}
+			}
+		}
 		x := p.Transport.XHTTP
 		if p.Protocol != "vless" || (p.Security != "tls" && p.Security != "reality") || x == nil || p.Transport.Path != "" || p.Transport.ServiceName != "" {
 			return "invalid_xhttp_settings", "transport.xhttp"

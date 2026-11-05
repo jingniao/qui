@@ -335,6 +335,7 @@ var diagnosticStages = map[string]string{
 // Each entry is the named constant the parser itself passes (see parse.go), so a
 // parser reason can never be stored with a path this verifier would refuse.
 var diagnosticFields = map[string]bool{
+	"tls.alpn":              true,
 	"transport.xhttp.extra": true,
 	"transport.xhttp":       true, "transport.xhttp.host": true, "transport.xhttp.path": true, "transport.xhttp.mode": true,
 	"reality": true, "reality.publicKey": true, "reality.shortId": true, "reality.spiderX": true,

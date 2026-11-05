@@ -190,3 +190,61 @@ func TestVisionRejectedForTLSGRPCAndXHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestXHTTPRejectsNonTCPALPNAcrossImportAndExport(t *testing.T) {
+	p := xhttpFixtures(t)[0]
+	for _, alpn := range []string{"h3", "h3-29", "private-fixture-secret", ""} {
+		t.Run(alpn, func(t *testing.T) {
+			q := p
+			tls := *p.TLS
+			tls.ALPN = []string{alpn}
+			q.TLS = &tls
+			for _, exporter := range []format.Exporter{uri.URI{}, uri.Base64{}, clash.Meta{}, singbox.Exporter{}} {
+				if _, err := exporter.Render(format.Profile{Proxies: []proxy.Proxy{q}}); err == nil {
+					t.Fatalf("%s accepted non-TCP xhttp ALPN", exporter.ID())
+				}
+			}
+			link, err := uri.Link(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, _ := url.Parse(link)
+			query := u.Query()
+			query.Set("alpn", alpn)
+			u.RawQuery = query.Encode()
+			// Explicit empty query is normalized to an absent list by URI parsing;
+			// a nonempty unknown value must be refused without echoing it.
+			if alpn != "" {
+				result, entries := Analyze([]byte(u.String()))
+				if len(entries) != 0 || len(result.Diagnostics) != 1 || result.Diagnostics[0].Field != "tls.alpn" {
+					t.Fatal("URI did not reject non-TCP ALPN")
+				}
+				raw, _ := json.Marshal(result)
+				if strings.Contains(string(raw), "private-fixture-secret") {
+					t.Fatal("ALPN value leaked into diagnostics")
+				}
+			}
+			out, err := (clash.Meta{}).Render(format.Profile{Proxies: []proxy.Proxy{p}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := strings.Replace(string(out.Body), "- h2", "- "+fmt.Sprintf("%q", alpn), 1)
+			result, entries := Analyze([]byte(input))
+			if len(entries) != 0 || len(result.Diagnostics) != 1 || result.Diagnostics[0].Field != "tls.alpn" {
+				t.Fatalf("Clash did not reject non-TCP ALPN: %+v", result)
+			}
+		})
+	}
+	for _, list := range [][]string{nil, {"h2"}, {"http/1.1"}, {"h2", "http/1.1"}} {
+		q := p
+		tls := *p.TLS
+		tls.ALPN = list
+		q.TLS = &tls
+		if code, _ := proxy.ValidateClientSettings(q); code != "" {
+			t.Fatalf("TCP ALPN rejected: %s", code)
+		}
+		if _, err := uri.Link(q); err != nil {
+			t.Fatal("valid TCP ALPN URI refused", err)
+		}
+	}
+}

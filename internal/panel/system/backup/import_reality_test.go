@@ -117,4 +117,30 @@ func TestXHTTPImportArchivePreservesHostAndEmptyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var sealed []byte
+	if err = s.Database.QueryRow("SELECT payload_encrypted FROM imported_proxies").Scan(&sealed); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := s.ConfigurationVault.Open(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p proxy.Proxy
+	if err = json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	for _, alpn := range []string{"h3", "h3-29", "private-fixture-secret"} {
+		p.TLS.ALPN = []string{alpn}
+		raw, _ = json.Marshal(p)
+		sealed, err = s.ConfigurationVault.Seal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.Database.Exec("UPDATE imported_proxies SET payload_encrypted=?", sealed); err != nil {
+			t.Fatal(err)
+		}
+		if err = validateImports(ctx, s.Database, s.ConfigurationVault); !errors.Is(err, ErrArchive) {
+			t.Fatal("archive accepted non-TCP xhttp ALPN")
+		}
+	}
 }

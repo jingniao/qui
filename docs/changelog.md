@@ -12,6 +12,12 @@
 - C1：画布仅新建代理中转，qui 入站出口使用独立内部凭据，外部出站可成为最终出口；relayPort 优先旧字段，旧 forward/gost 只读保留至迁移。见 [C1 报告](v1.4-c1-report.md)。
 - M1：0131 启动/恢复一次性迁移合格已发布画布转发，保留对象 ID、端口、运行修订与 GOST 材料；遗留项由 Owner 查询持久迁移报告，不自动重试。备份/恢复覆盖新表、快照、声明、标记与报告，恢复须显式发布。见 [M1 报告](v1.4-m1-report.md)。
 - A1b：同步说明书、架构、运维、协议/部署、文档索引及发布说明草稿；A1 测试、RC/主机与四路径客户端验收结果待补，不构成发布结论。
+- 范围变更（2026-11-05，Owner 决定，**未实施**）：[协议支持补齐计划](subscription-import-compatibility-plan.en.md#14-review-decisions-2026-11-05)全部并入 v1.4.0，原定 v1.5.0。
+  - 来源刷新失败误报成功的修复。
+  - 外部订阅导入 SS2022/Reality/xhttp，附结构化刷新诊断。
+  - 自建 Xray VLESS Reality/xhttp；sing-box 仅在固定版本支持时提供 Reality。
+  - 两条工作线并行，各自通过 S5；RC 与 A1 等待两线完成。
+  - 同一来源内 `name|protocol` 重复时保留首条、拒绝其余（`duplicate_endpoint_key`）。
 
 **v1.3.0（2026-11-03）**：发布并部署到三台主机；说明见[发布说明](release-notes-1.3.0.md)，逐项证据见[验收矩阵](v1-acceptance.md) §12。
 

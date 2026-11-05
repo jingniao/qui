@@ -17,7 +17,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
   - `docs/release-notes-1.4.0.md`: the release-notes draft with the acceptance table.
   - `web/docs/client-policy-backend-plan.en.md`: the client-policy plan. §13 holds the review decisions and §14 the status and remaining items.
   - `web/docs/client-policy-change-log.md`: a per-iteration change log, appended to for every client-policy change.
-  - `docs/subscription-import-compatibility-plan.en.md` (untracked): a separate proposal; see §4.4.
+  - `docs/subscription-import-compatibility-plan.en.md` (untracked): the protocol-support plan, now part of v1.4.0. §14 holds the review and Owner decisions, which override earlier sections. See §4.4.
 
 ## 2. How to Work in This Repo
 
@@ -33,18 +33,18 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
   - No duplicated logic and no defensive code: validate at the API boundary and reuse existing helpers.
   - Never edit applied migrations; add the next number instead.
   - Report in plain language. Say plainly what was and wasn't verified, and don't present a Windows test run as Linux or host evidence.
-- **Files to leave alone:** the three untracked `docs/subscription-import-compatibility-*.md` files belong to separate work (§4.4). Don't stage them unless the Owner says so.
+- **Untracked plan files:** the three `docs/subscription-import-compatibility-*.md` files are the protocol-support plan (§4.4). They are still uncommitted. Don't stage them unless the Owner says so.
 
 ## 3. Needs the Owner's Confirmation
 
 | # | Question | Context and current proposal |
 | --- | --- | --- |
-| C1 | **Approve pushing `feat/v1.4-tunnels` and publishing a 1.4.0 RC pre-release?** | Nothing is pushed. GitHub `check` must pass on the same SHA before a `v*` tag (see `docs/deployment.md` §2). |
+| C1 | **Approve pushing `feat/v1.4-tunnels` and publishing a 1.4.0 RC pre-release?** | Nothing is pushed. GitHub `check` must pass on the same SHA before a `v*` tag (see `docs/deployment.md` §2). Since 2026-11-05 the RC also waits for the protocol-support work (§4.4), so don't ask for C1 until both of its tracks pass S5. |
 | C2 | **Host role mapping for the RC.** | Proposal: us2-node = US destination + panel, uk-node = HK entry. The JP relay hop needs a third GOST-capable linux/amd64 host, because alpine-node (Alpine LXC) cannot run GOST. Without one, the RC tests only the two-server tunnel (entry → exit). |
 | C3 | **Client policy: should the preview let the Owner pick a user?** | The preview currently always auto-selects a user and labels the choice as automatic. The API already accepts `userId`; only the UI is missing. (Plan §14.2 item 1.) |
 | C4 | **Client policy: batch input when editing a rule.** | Pasting several domains creates multiple rules only when *creating* a rule; editing an existing rule keeps it as one rule. Confirm this, then document it. (§14.2 item 2.) |
 | C5 | **Client policy: disabled rule sets.** | Saving a profile is refused when an *enabled* RULE-SET rule points at a *disabled* service set. So disabling a set the active profile uses blocks re-saving that profile until the rule is disabled or the set is re-enabled. Keep this, or relax it to a warning? (§14.2 item 3.) |
-| C6 | **Subscription-import compatibility plan: decisions R1–R4.** | Reviewed 2026-11-05 and approved with amendments (plan `.en.md` §14). Before work starts, the Owner decides R1–R4 in §14.3: self-hosted track now or later; minimal v1.4 fix for the refresh false-success bug; duplicate `name\|protocol` handling; target version. Nothing is implemented (§4.4). |
+| C6 | ~~Protocol-support plan decisions R1–R4~~ **Decided 2026-11-05.** | Plan `.en.md` §14.3–§14.7:<br>• both tracks run in parallel;<br>• the refresh fix ships in v1.4.0;<br>• duplicate `name\|protocol` keeps the first and rejects the rest;<br>• everything ships in v1.4.0.<br>The Owner said to edit docs only, so nothing is implemented yet. Implementation needs the Owner's go-ahead (§4.4). |
 
 ## 4. Outstanding Tasks
 
@@ -52,7 +52,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 
 1. **Linux gates for the client-policy phases.**
    - Phase A `42491ab`: **passed**.
-   - Phases B+C `6cfc6c5`: was running when this handoff was written.
+   - Phases B+C `6cfc6c5`: **passed** (check 1960 s, cores 558 s, total 2518 s).
    - Final commit `1bbb836` (covers B–D and the mihomo case): queued after `6cfc6c5`.
    - Check with `gate-status.sh 6cfc6c5` and `gate-status.sh 1bbb836`. If either is missing or was killed, rerun `gate.sh 1bbb836`.
    - Then record the result in client-policy plan §14.1 item 1 and in the release-notes row.
@@ -72,7 +72,9 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
    - the filtered "Edit rules" view
    - rule-set references and delete blocking
 
-### 4.2 v1.4 Acceptance and Release (A1), Blocked on C1 and C2
+### 4.2 v1.4 Acceptance and Release (A1), Blocked on C1, C2 and the §4.4 Work
+
+A1 must also cover the protocol-support work once it lands (plan `.en.md` §14.7). That means real clients using imported SS2022, Reality and xhttp entries, plus a self-hosted Xray Reality/xhttp node and its relayed subscription entries.
 
 5. RC deployment on the hosts (after C1 and C2), following `docs/deployment.md`: panel first, then each Agent. Back up the database and the identity directory first.
 6. P1–P4 with real clients (mihomo or sing-box) on the hosts. Check the subscription address, port and credentials, traffic, publish results, that republishing changes nothing, and recovery after a node restart. Record the results in `docs/v1-acceptance.md` §13.
@@ -87,9 +89,22 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 12. `docs/v1-acceptance.md` has no entries yet for the client-policy items in §4.1.
 13. After C3–C5 are decided, update `AGENTS.md` (the client-policy paragraph in §10.3) and plan §14.
 
-### 4.4 Separate Proposal (Not Started)
+### 4.4 Protocol-Support Work for v1.4.0 (Not Started)
 
-14. `docs/subscription-import-compatibility-plan.md` / `.en.md` / `-change-log.md` (untracked): a "protocol support completion" plan. It covers external subscriptions, self-hosted nodes including xhttp/Reality, and failure diagnostics. Status: reviewed against `5387802` and approved with amendments (`.en.md` §14); not implemented. Work waits on the Owner's R1–R4 decisions (C6) and, per §14.1 item 8, on v1.4.0 shipping.
+14. The plan files are `docs/subscription-import-compatibility-plan.en.md` (authoritative; §14 overrides earlier sections), the Chinese `.md`, and `-change-log.md`. All are untracked. Implementation needs the Owner's go-ahead; on 2026-11-05 the Owner asked for doc updates only. Once approved, the order is:
+    1. **The refresh false-success fix** (§14.5), directly on `feat/v1.4-tunnels`, with a Linux gate.
+       - `Store.Refresh` returns the error after recording the failure.
+       - The handler returns `import_refresh_failed`.
+       - The page reloads the source list on failure.
+       - The store test expects the error.
+    2. **The import track and the self-hosted track in parallel** (§14.4, §14.7).
+       - The import track runs S0 → S1 → S2–S4; the self-hosted track runs M1 → M2–M4.
+       - Each track has its own S5 acceptance.
+       - Each works on a short-lived branch off `feat/v1.4-tunnels` and merges back after review and a Linux gate. Gates run one at a time.
+       - The client-side Reality/xhttp fields and codecs are defined once, in S3/S4. M2 reuses them.
+       - Migrations take numbers after 0132 in merge order.
+    3. **Duplicate `name|protocol` within a source** (confirmed): keep the first entry in document order and reject the rest with `duplicate_endpoint_key`, from S1 on.
+    4. **At release**, update AGENTS.md (§14.2 of the plan), the protocol matrix and the 1.4.0 release notes. The release notes already list these items as planned. Then run the A1 checks in §4.2.
 
 ## 5. Known Limitations (Accepted; No Action Unless the Owner Asks)
 

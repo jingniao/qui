@@ -68,19 +68,34 @@ type Credential struct {
 
 // TLS carries the certificate settings a client needs to accept the node.
 type TLS struct {
-	ServerName  string
-	ALPN        []string
-	PinnedCA    string
-	Fingerprint string
-	Insecure    bool
+	// ClientFingerprint selects a TLS ClientHello; Fingerprint pins a certificate.
+	ClientFingerprint string `json:",omitempty"`
+	ServerName        string
+	ALPN              []string
+	PinnedCA          string
+	Fingerprint       string
+	Insecure          bool
 }
 
 // Transport is the stream transport a client dials through.
 type Transport struct {
+	XHTTP       *XHTTPOptions `json:",omitempty"`
 	Type        string
 	Path        string
 	ServiceName string
 }
+
+// RealityOptions contains only public client material. Optional values preserve
+// omission separately from an explicitly empty short ID or spider path.
+type RealityOptions struct {
+	PublicKey string
+	ShortID   *string
+	SpiderX   *string
+}
+
+// XHTTPOptions is shared with the self-hosted public subscription mapping.
+// Import and export support is enabled by the independently verified transport.
+type XHTTPOptions struct{ Host, Path, Mode string }
 
 // QUIC is the QUIC tuning a Hysteria2 or TUIC client can carry.
 type QUIC struct {
@@ -100,7 +115,7 @@ type WireGuard struct {
 
 // Proxy is one endpoint a client can dial.
 //
-// Security keeps the raw setting the panel published ("", "none" or "tls") so
+// Security keeps the raw setting the panel published ("", "none", "tls" or "reality") so
 // every exporter can reject a value it does not understand instead of guessing.
 // TLS is set whenever the published settings carry certificate material (a "tls"
 // security mode, a server name or a pinned CA); Security stays authoritative for
@@ -122,6 +137,7 @@ type Proxy struct {
 	Method      string
 	Security    string
 	TLS         *TLS
+	Reality     *RealityOptions `json:",omitempty"`
 	Transport   *Transport
 	QUIC        *QUIC
 	WireGuard   *WireGuard

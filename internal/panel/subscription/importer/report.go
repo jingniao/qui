@@ -49,20 +49,27 @@ const (
 // the text here means a diagnostic can never carry input data: the archive
 // verifier rejects a message that is not exactly the text of its code.
 var diagnosticMessages = map[string]string{
-	"invalid_entry":              "该行不是可识别的节点链接",
-	"invalid_endpoint":           "节点名称、地址或端口无效",
-	"missing_credential":         "缺少该协议必需的凭据",
-	"invalid_uuid":               "凭据中的 UUID 格式无效",
-	"invalid_credential":         "凭据格式无效",
-	"unsupported_protocol":       "暂不支持该协议",
-	"unsupported_cipher":         "暂不支持该加密方式",
-	"unsupported_transport":      "暂不支持该传输方式",
-	"unsupported_security":       "暂不支持该安全方式",
-	"insecure_tls":               "已拒绝跳过证书校验的设置",
-	"oversized_entry":            "该条目超出大小上限",
-	"unsupported_option":         "该条目包含暂不支持的字段",
-	"duplicate_endpoint_content": "与前面的条目完全相同，已跳过",
-	"duplicate_endpoint_key":     "同一来源内名称与协议重复，只保留第一条",
+	"invalid_reality_settings":     "Reality 设置不完整或无效",
+	"invalid_reality_key":          "Reality 公钥格式无效",
+	"invalid_reality_short_id":     "Reality Short ID 格式无效",
+	"invalid_fingerprint":          "客户端 TLS 指纹无效",
+	"invalid_protocol_combination": "协议、安全与传输设置组合无效",
+	"conflicting_alias":            "同一字段的别名或重复参数值冲突",
+	"invalid_encryption":           "VLESS encryption 必须为 none",
+	"invalid_entry":                "该行不是可识别的节点链接",
+	"invalid_endpoint":             "节点名称、地址或端口无效",
+	"missing_credential":           "缺少该协议必需的凭据",
+	"invalid_uuid":                 "凭据中的 UUID 格式无效",
+	"invalid_credential":           "凭据格式无效",
+	"unsupported_protocol":         "暂不支持该协议",
+	"unsupported_cipher":           "暂不支持该加密方式",
+	"unsupported_transport":        "暂不支持该传输方式",
+	"unsupported_security":         "暂不支持该安全方式",
+	"insecure_tls":                 "已拒绝跳过证书校验的设置",
+	"oversized_entry":              "该条目超出大小上限",
+	"unsupported_option":           "该条目包含暂不支持的字段",
+	"duplicate_endpoint_content":   "与前面的条目完全相同，已跳过",
+	"duplicate_endpoint_key":       "同一来源内名称与协议重复，只保留第一条",
 }
 
 // diagnosticMessage returns the fixed text of a per-entry code.
@@ -304,7 +311,7 @@ func ValidateResult(raw []byte) error {
 	if !validCounts(result) {
 		return ErrParse
 	}
-	if len(result.Diagnostics) > MaxDiagnostics {
+	if result.Diagnostics == nil || len(result.Diagnostics) > MaxDiagnostics {
 		return ErrParse
 	}
 	for _, item := range result.Diagnostics {
@@ -326,6 +333,8 @@ var diagnosticStages = map[string]string{
 // Each entry is the named constant the parser itself passes (see parse.go), so a
 // parser reason can never be stored with a path this verifier would refuse.
 var diagnosticFields = map[string]bool{
+	"reality": true, "reality.publicKey": true, "reality.shortId": true, "reality.spiderX": true,
+	"tls.clientFingerprint": true, "tls.certificateFingerprint": true, "tls.serverName": true, "transport": true, "flow": true,
 	fieldNone: true, fieldCredential: true, fieldTLSInsecure: true, fieldMethod: true,
 	fieldSecurity: true, fieldType: true, fieldQuery: true,
 	fieldEntry: true, fieldWSOpts: true, fieldGRPCOpts: true, fieldNetwork: true,

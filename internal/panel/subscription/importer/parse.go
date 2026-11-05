@@ -241,6 +241,9 @@ func valid(p proxy.Proxy) bool {
 // and the field it concerns. valid() is the same check without the reason, so the
 // three parsers share one allowlist.
 func validation(p proxy.Proxy) (string, string) {
+	if code, field := proxy.ValidateClientSettings(p); code != "" {
+		return code, field
+	}
 	// YAML escapes and aliases can expand during typed decoding. Bound the
 	// canonical cache representation too, so every accepted import is backupable.
 	encoded, err := json.Marshal(p)
@@ -349,7 +352,25 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 		p.Credential.Username = u.User.Username()
 		p.Credential.Password, _ = u.User.Password()
 	}
-	q := u.Query()
+	q, queryErr := url.ParseQuery(u.RawQuery)
+	if queryErr != nil {
+		return p, "invalid_entry", fieldQuery
+	}
+	for key, values := range q {
+		for _, value := range values[1:] {
+			if value != values[0] {
+				return p, "conflicting_alias", queryField(key)
+			}
+		}
+	}
+	for _, alias := range []string{"servername", "peer"} {
+		if values, present := q[alias]; present {
+			if sni, exists := q["sni"]; exists && sni[0] != values[0] {
+				return p, "conflicting_alias", "tls.serverName"
+			}
+			q.Set("sni", values[0])
+		}
+	}
 	switch p.Protocol {
 	case "vless", "trojan", "hysteria2", "tuic":
 		if u.User == nil {
@@ -375,27 +396,50 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 	}
 	for key := range q {
 		switch key {
-		case "security", "sni", "peer", "alpn", "type", "path", "serviceName", "flow":
+		case "security", "sni", "peer", "servername", "alpn", "type", "path", "serviceName", "flow", "encryption", "pbk", "sid", "spx", "fp":
 		default:
 			return p, "unsupported_transport", queryField(key)
 		}
 	}
 	p.Flow = q.Get("flow")
+	if encryption, present := q["encryption"]; present && (p.Protocol != "vless" || encryption[0] != "none") {
+		return p, "invalid_encryption", "query.encryption"
+	}
 	p.Security = q.Get("security")
 	if p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
 		p.Security = "tls"
 	}
-	if p.Security != "" && p.Security != "none" && p.Security != "tls" {
+	if p.Security != "" && p.Security != "none" && p.Security != "tls" && p.Security != "reality" {
 		return p, "unsupported_security", fieldSecurity
 	}
-	if p.Security == "tls" {
+	if p.Security == "tls" || p.Security == "reality" {
 		sni := q.Get("sni")
 		if sni == "" {
 			sni = q.Get("peer")
 		}
-		p.TLS = &proxy.TLS{ServerName: sni}
+		p.TLS = &proxy.TLS{ServerName: sni, ClientFingerprint: q.Get("fp")}
 		if q.Get("alpn") != "" {
 			p.TLS.ALPN = strings.Split(q.Get("alpn"), ",")
+		}
+	}
+	if p.Security == "reality" {
+		p.Reality = &proxy.RealityOptions{PublicKey: q.Get("pbk")}
+		if values, present := q["sid"]; present {
+			value := strings.ToLower(values[0])
+			p.Reality.ShortID = &value
+		}
+		if values, present := q["spx"]; present {
+			value := values[0]
+			p.Reality.SpiderX = &value
+		}
+	} else {
+		for _, field := range []string{"pbk", "sid", "spx"} {
+			if _, present := q[field]; present {
+				return p, "invalid_protocol_combination", queryField(field)
+			}
+		}
+		if _, present := q["fp"]; present && p.TLS == nil {
+			return p, "invalid_protocol_combination", "tls.clientFingerprint"
 		}
 	}
 	if transport := q.Get("type"); transport != "" && transport != "tcp" {
@@ -403,6 +447,15 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 			return p, "unsupported_transport", fieldType
 		}
 		p.Transport = &proxy.Transport{Type: transport, Path: q.Get("path"), ServiceName: q.Get("serviceName")}
+	}
+	if p.Security == "reality" {
+		transport := q.Get("type")
+		if _, present := q["path"]; present {
+			return p, "invalid_protocol_combination", "query.path"
+		}
+		if _, present := q["serviceName"]; present && transport != "grpc" {
+			return p, "invalid_protocol_combination", "query.servicename"
+		}
 	}
 	code, field := validation(p)
 	if code != "" {
@@ -431,6 +484,12 @@ func (Base64) analyze(content []byte, c *collector) {
 }
 
 type clashEntry struct {
+	ClientFingerprint string `yaml:"client-fingerprint"`
+	Fingerprint       string `yaml:"fingerprint"`
+	Reality           *struct {
+		PublicKey string  `yaml:"public-key"`
+		ShortID   *string `yaml:"short-id"`
+	} `yaml:"reality-opts"`
 	Name       string   `yaml:"name"`
 	Type       string   `yaml:"type"`
 	Server     string   `yaml:"server"`
@@ -504,13 +563,30 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 	if p.Protocol == "tuic" {
 		p.Credential.Username = entry.UUID
 	}
-	if entry.TLS || p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
+	if entry.TLS || entry.Reality != nil || p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
 		p.Security = "tls"
 		sni := entry.SNI
 		if sni == "" {
 			sni = entry.ServerName
 		}
-		p.TLS = &proxy.TLS{ServerName: sni, ALPN: entry.ALPN, Insecure: entry.Insecure}
+		p.TLS = &proxy.TLS{ServerName: sni, ALPN: entry.ALPN, Insecure: entry.Insecure, ClientFingerprint: entry.ClientFingerprint, Fingerprint: entry.Fingerprint}
+	}
+	if entry.SNI != "" && entry.ServerName != "" && entry.SNI != entry.ServerName {
+		return p, "conflicting_alias", "tls.serverName"
+	}
+	if entry.Reality != nil {
+		if !entry.TLS {
+			return p, "invalid_protocol_combination", "reality"
+		}
+		p.Security = "reality"
+		p.Reality = &proxy.RealityOptions{PublicKey: entry.Reality.PublicKey, ShortID: entry.Reality.ShortID}
+		if p.Reality.ShortID != nil {
+			value := strings.ToLower(*p.Reality.ShortID)
+			p.Reality.ShortID = &value
+		}
+	}
+	if p.TLS == nil && (entry.ClientFingerprint != "" || entry.Fingerprint != "") {
+		return p, "invalid_protocol_combination", "tls.clientFingerprint"
 	}
 	switch entry.Network {
 	case "", "tcp":

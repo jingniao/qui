@@ -62,11 +62,24 @@ type transport struct {
 }
 
 type tls struct {
+	UTLS        *utls    `json:"utls,omitempty"`
+	Reality     *reality `json:"reality,omitempty"`
 	Enabled     bool     `json:"enabled"`
 	ServerName  string   `json:"server_name,omitempty"`
 	Certificate []string `json:"certificate,omitempty"`
 	ALPN        []string `json:"alpn,omitempty"`
 }
+type utls struct {
+	Enabled     bool   `json:"enabled"`
+	Fingerprint string `json:"fingerprint"`
+}
+type reality struct {
+	Enabled   bool    `json:"enabled"`
+	PublicKey string  `json:"public_key"`
+	ShortID   *string `json:"short_id,omitempty"`
+}
+
+var errUnrepresentable = errors.New("subscription settings are not supported by this client format")
 
 type wireguardEndpoint struct {
 	Type       string          `json:"type"`
@@ -107,6 +120,10 @@ func (Exporter) Render(profile format.Profile) (format.Output, error) {
 			continue
 		}
 		value, err := renderOutbound(endpoint)
+		if errors.Is(err, errUnrepresentable) {
+			output.Warnings = append(output.Warnings, proxy.FormatWarning("sing-box", "Endpoint omitted: client format cannot represent its security or transport settings; use a compatible URI client"))
+			continue
+		}
 		if err != nil {
 			return format.Output{}, err
 		}
@@ -124,6 +141,12 @@ func (Exporter) Render(profile format.Profile) (format.Output, error) {
 }
 
 func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
+	if code, _ := proxy.ValidateClientSettings(endpoint); code != "" {
+		return outbound{}, errors.New("invalid subscription client settings")
+	}
+	if !proxy.ClientFormatSupportsSettings(endpoint, "sing-box") || (endpoint.TLS != nil && endpoint.TLS.Fingerprint != "") {
+		return outbound{}, errUnrepresentable
+	}
 	value := outbound{Type: endpoint.Protocol, Tag: fmt.Sprintf("%s-%s-%s", endpoint.Origin.Node.Name, endpoint.Origin.Ref, endpoint.Protocol), Server: endpoint.Server, ServerPort: endpoint.Port}
 	switch endpoint.Protocol {
 	case "http":
@@ -157,8 +180,17 @@ func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
 		value.CongestionControl = q.CongestionControl
 		value.UDPRelayMode = q.UDPRelayMode
 	}
-	if endpoint.Security == "tls" {
+	if endpoint.Security == "tls" || endpoint.Security == "reality" {
 		value.TLS = &tls{Enabled: true, ServerName: serverName(endpoint)}
+		if endpoint.TLS != nil {
+			value.TLS.ALPN = endpoint.TLS.ALPN
+			if endpoint.TLS.ClientFingerprint != "" {
+				value.TLS.UTLS = &utls{Enabled: true, Fingerprint: endpoint.TLS.ClientFingerprint}
+			}
+		}
+		if endpoint.Reality != nil {
+			value.TLS.Reality = &reality{Enabled: true, PublicKey: endpoint.Reality.PublicKey, ShortID: endpoint.Reality.ShortID}
+		}
 		if endpoint.Protocol == "hysteria2" || endpoint.Protocol == "tuic" {
 			value.TLS.ALPN = []string{"h3"}
 		}
@@ -171,7 +203,7 @@ func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
 	if endpoint.Transport != nil {
 		if kind := endpoint.Transport.Type; kind != "" && kind != "tcp" && kind != "quic" {
 			if kind != "ws" && kind != "grpc" {
-				return outbound{}, errors.New("subscription transport is not configured")
+				return outbound{}, errUnrepresentable
 			}
 			value.Transport = &transport{Type: kind, Path: endpoint.Transport.Path, ServiceName: endpoint.Transport.ServiceName}
 		}

@@ -111,10 +111,13 @@ export function healthLabel(outbound?: Outbound, interval = 30) {
 // page loads.
 export type CanvasExecution = 'server' | 'client';
 export type CanvasInstanceRole = 'entry' | 'relay' | 'exit';
-export type CanvasConnectionKind = 'proxy_chain' | 'tunnel' | 'port_forward';
-export type CanvasTunnelProtocol = 'tls' | 'wireguard' | 'gost' | 'brook' | 'nftables';
-export interface CanvasSchemeInstance { instanceId: string; ref: string; x: number; y: number; role: CanvasInstanceRole; listenPort?: number; targetPort?: number; }
-export interface CanvasSchemeConnection { tunnelId?: string; id: string; source: string; target: string; type: CanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; }
+export type CanvasConnectionKind = 'proxy_chain' | 'tunnel';
+export type LegacyCanvasConnectionKind = 'port_forward';
+export type CanvasTunnelProtocol = 'tls' | 'wireguard';
+export type LegacyCanvasTunnelProtocol = 'gost' | 'brook' | 'nftables';
+export type CanvasInstanceRef = `server:${string}` | `inbound:${string}` | `import:${string}` | `outbound:${string}`;
+export interface CanvasSchemeInstance { instanceId: string; ref: CanvasInstanceRef; x: number; y: number; role: CanvasInstanceRole; relayPortMode?: 'auto' | 'manual'; relayPort?: number; listenPort?: number; targetPort?: number; }
+export interface CanvasSchemeConnection { tunnelId?: string; id: string; source: string; target: string; type: CanvasConnectionKind | LegacyCanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol | LegacyCanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; }
 export interface CanvasSchemeLayout { instances: CanvasSchemeInstance[]; connections: CanvasSchemeConnection[]; }
 export interface CanvasScheme { id: string; name: string; execution: CanvasExecution; layout: CanvasSchemeLayout; createdAt: string; updatedAt: string; publishedAt: string; publishedBatchId: string; }
 export interface CanvasSchemeWriteLayout { instances: CanvasSchemeInstance[]; connections: (CanvasSchemeConnection | CanvasTunnelReference)[]; }
@@ -131,7 +134,7 @@ export interface CanvasPublishResult { batchId?: string; nodes: CanvasPublishNod
 
 export interface CanvasTunnelSchemeRef { id: string; name: string; }
 export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; candidateTunnels?: string[]; }
-export interface CanvasTunnelInput { name: string; source: string; target: string; type: CanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; updatedAt?: string; }
+export interface CanvasTunnelInput { name: string; source: string; target: string; type: CanvasConnectionKind | LegacyCanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol | LegacyCanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; updatedAt?: string; }
 export interface CanvasTunnelCredentials { generation: number; serverName: string; notAfter: string; fingerprint: string; }
 export interface CanvasTunnel extends CanvasTunnelInput { id: string; createdAt: string; updatedAt: string; schemes: CanvasTunnelSchemeRef[]; objects: CanvasTunnelObject[]; publishStatus: 'draft' | 'modified' | 'published'; credentials?: CanvasTunnelCredentials | null; }
 export interface CanvasTunnelPlanObject { kind: string; name: string; protocol?: string; port?: number; target?: string; }
@@ -163,7 +166,7 @@ export const canvasAPI = {
 // Display data the canvas page has already loaded. Schemas stay loose so the
 // node list and the canvas can both pass what they hold.
 export interface CanvasServerRef { id: string; name: string; publicIp?: string; hostname?: string; status?: string; }
-export interface CanvasSchemeContext { servers: CanvasServerRef[]; inbounds: Inbound[]; imported: ProxyNodeItem[]; }
+export interface CanvasSchemeContext { servers: CanvasServerRef[]; inbounds: Inbound[]; imported: ProxyNodeItem[]; outbounds?: Outbound[]; }
 
 // A self-hosted node is identified as self-<nodeId>-<inboundId>. Base64url ids
 // contain '-', so the string cannot be split reliably; matching the inbound the
@@ -172,7 +175,8 @@ export function selfHostedResourceId(inbound: Pick<Inbound, 'nodeId' | 'id'>): s
   return `self-${inbound.nodeId}-${inbound.id}`;
 }
 
-export function canvasInstanceRef(instance: CanvasNodeInstance, context: CanvasSchemeContext): string {
+export function canvasInstanceRef(instance: CanvasNodeInstance, context: CanvasSchemeContext): CanvasInstanceRef {
+  if (instance.resourceId.startsWith('outbound:')) return instance.resourceId as CanvasInstanceRef;
   if (instance.resourceType === 'server') return `server:${instance.resourceId}`;
   const inbound = context.inbounds.find(item => selfHostedResourceId(item) === instance.resourceId);
   if (inbound) return `inbound:${inbound.id}`;
@@ -188,6 +192,8 @@ export function relaySchemeToCanvasInput(scheme: RelayScheme, context: CanvasSch
     x: Math.round(node.x) || 0,
     y: Math.round(node.y) || 0,
     role: node.role || 'relay',
+    ...(node.relayPortMode ? { relayPortMode: node.relayPortMode } : {}),
+    ...(node.relayPort !== undefined ? { relayPort: node.relayPort } : {}),
     ...(node.listenPort ? { listenPort: node.listenPort } : {}),
     ...(node.targetPort ? { targetPort: node.targetPort } : {})
   }));
@@ -243,6 +249,10 @@ function canvasReferenceDisplay(ref: string, context: CanvasSchemeContext): Canv
       isManageable: true
     };
   }
+  if (kind === 'outbound') {
+    const outbound = context.outbounds?.find(item => item.id === identifier);
+    return { resourceId: ref, resourceType: 'node', name: outbound?.name || '已删除的出站', protocol: outbound?.protocol || '', serverAddress: outbound ? `${outbound.address}:${outbound.port}` : '', status: outbound?.enabled ? 'untested' : 'offline', isManageable: false };
+  }
   if (kind === 'inbound') {
     const inbound = context.inbounds.find(item => item.id === identifier);
     const server = inbound ? context.servers.find(item => item.id === inbound.nodeId) : undefined;
@@ -286,6 +296,8 @@ export function canvasSchemeToRelayScheme(scheme: CanvasScheme, context: CanvasS
       x: instance.x,
       y: instance.y,
       role: instance.role,
+      relayPortMode: instance.relayPortMode,
+      relayPort: instance.relayPort,
       listenPort: instance.listenPort,
       targetPort: instance.targetPort
     };
@@ -333,7 +345,7 @@ export function canvasTunnelRef(nodeId: string): string {
   return `server:${nodeId}`;
 }
 
-export function canvasTunnelKindLabel(type: CanvasConnectionKind): string {
+export function canvasTunnelKindLabel(type: CanvasConnectionKind | LegacyCanvasConnectionKind): string {
   if (type === 'port_forward') return '端口转发';
   if (type === 'proxy_chain') return '加密中转';
   return '加密隧道';
@@ -364,7 +376,7 @@ export interface CanvasTunnelLibraryItem {
   targetName: string;
   sourceRef: string;
   targetRef: string;
-  type: CanvasConnectionKind;
+  type: CanvasConnectionKind | LegacyCanvasConnectionKind;
   publishStatus: CanvasTunnel['publishStatus'];
   schemeNames: string[];
   objectCount: number;

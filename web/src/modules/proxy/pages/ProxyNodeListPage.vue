@@ -258,7 +258,7 @@
 
           <!-- 4. Relay Routes Summary Column -->
           <td class="text-xs">
-            <div v-if="!getNodeRoutes(node).length" class="text-neutral-400">
+            <div v-if="!relayCount(node)" class="text-neutral-400">
               无中转 (直连)
             </div>
             <div v-else class="space-y-1">
@@ -278,6 +278,7 @@
                 </span>
               </div>
             </div>
+            <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" />
           </td>
 
           <!-- 5. Real Status & Latency (Same as Server Page) -->
@@ -422,11 +423,11 @@
           <!-- Row 4: Relay Routes (Accordion Style, Same as Server Latency Test Point Cards) -->
           <div class="space-y-1.5 pt-0.5">
             <div
-              @click="toggleRelayCollapse(node.id, getNodeRoutes(node).length)"
+              @click="toggleRelayCollapse(node.id, relayCount(node))"
               class="flex items-center justify-between text-[11px] cursor-pointer hover:bg-black/[0.02] p-1 rounded-lg transition-colors select-none"
             >
               <div class="flex items-center gap-1.5">
-                <span class="text-neutral-500 font-bold">中转线路 ({{ getNodeRoutes(node).length }})</span>
+                <span class="text-neutral-500 font-bold">中转线路 ({{ relayCount(node) }})</span>
                 <span
                   v-if="getNodeRoutes(node).some(r => r.hasUnpublishedChanges)"
                   class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"
@@ -434,10 +435,10 @@
                 ></span>
               </div>
               <div class="flex items-center gap-1 text-neutral-400 font-mono text-[10px]">
-                <span>{{ isRelayCollapsed(node.id, getNodeRoutes(node).length) ? '展开' : '收起' }}</span>
+                <span>{{ isRelayCollapsed(node.id, relayCount(node)) ? '展开' : '收起' }}</span>
                 <svg
                   class="w-3 h-3 transition-transform duration-200"
-                  :class="isRelayCollapsed(node.id, getNodeRoutes(node).length) ? '' : 'rotate-180'"
+                  :class="isRelayCollapsed(node.id, relayCount(node)) ? '' : 'rotate-180'"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -448,8 +449,8 @@
             </div>
 
             <!-- Expanded Routes Content -->
-            <div v-show="!isRelayCollapsed(node.id, getNodeRoutes(node).length)" class="space-y-1.5">
-              <div v-if="!getNodeRoutes(node).length" class="bg-[#F8F9FA] rounded-xl p-2 text-center text-[11px] text-neutral-400 border border-black/[0.03]">
+            <div v-show="!isRelayCollapsed(node.id, relayCount(node))" class="space-y-1.5">
+              <div v-if="!relayCount(node)" class="bg-[#F8F9FA] rounded-xl p-2 text-center text-[11px] text-neutral-400 border border-black/[0.03]">
                 无中转线路 · 支持直连接入
               </div>
               <div
@@ -487,6 +488,7 @@
                   编辑
                 </button>
               </div>
+              <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" />
             </div>
           </div>
         </div>
@@ -498,7 +500,7 @@
             type="button"
             @click="handleAddRelay(node)"
             class="py-1.5 rounded-xl bg-[#EFF8FF] text-[#175CD3] hover:bg-[#D1E9FF] font-semibold text-xs text-center transition-colors flex items-center justify-center gap-1"
-            title="自动创建草稿方案并将当前节点设为落地出口"
+            title="添加中转"
           >
             <span>+ 中转</span>
           </button>
@@ -652,6 +654,7 @@
       </div>
     </AppDialog>
 
+    <AddRelayDialog v-if="relayNode" :node-id="relayNode.sourceId || ''" :node-name="relayNode.name" :inbounds="serverInbounds" :initial-inbound-id="relayNode.inboundId" :create-scheme="createRelayScheme" :copy="copyAddress" @close="relayNode = null" @saved="loadNodeRelays" />
     <NodeEditorDrawer v-if="openSelfHostedModal" :inbound="editingInbound" @close="openSelfHostedModal = false" @saved="loadData" />
 
     <!-- Modal 2: Import External Node -->
@@ -1041,6 +1044,9 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue';
+import AddRelayDialog from '../../tunnels/components/AddRelayDialog.vue';
+import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
+import { nodeRelayAPI, type NodeRelay } from '../../tunnels/api';
 import { useRouter } from 'vue-router';
 import { authState } from '../../../app/auth';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
@@ -1066,7 +1072,7 @@ import {
   saveSubscriptions,
   parseProxyLink,
   getNodeRelayRoutes,
-  createDraftSchemeForTargetNode,
+  createDraftSchemeForEntryNode,
   loadCanvasSchemes,
   buildProxyLink,
   type ProxyNodeItem,
@@ -1194,6 +1200,7 @@ async function loadData() {
     ]);
     servers.value = nodeRes;
     serverInbounds.value = inboundRes;
+    await loadNodeRelays();
     // Relay routes shown on this page come from the schemes the canvas stores on
     // the server, so they must be loaded here too.
     if (isOwner.value) { await loadImports(); nodeGroups.value = await choices(groupAPI.list); }
@@ -1307,21 +1314,22 @@ function goToEditRelayRoute(route: NodeRelayRoute) {
   });
 }
 
-async function handleAddRelay(node: ProxyNodeItem) {
-  if (!isOwner.value) return;
-  try {
-    const { scheme, exitInstanceId } = await createDraftSchemeForTargetNode(node, { servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes });
-    showToast(`已创建草稿，自动将 [${node.name}] 设为落地出口`, 'success');
-    router.push({
-      path: '/proxy/relay',
-      query: {
-        schemeId: scheme.id,
-        focusInstId: exitInstanceId
-      }
-    });
-  } catch (error) {
-    showToast(`创建中转草稿失败: ${(error as Error).message}`, 'error');
-  }
+const relayNode = ref<ProxyNodeItem | null>(null);
+const nodeRelays = ref<Record<string, NodeRelay[]>>({});
+const relayErrors = ref<Record<string, string>>({});
+function relayCount(node: ProxyNodeItem) { return getNodeRoutes(node).length + linkedRelays(node).length; }
+function linkedRelays(node: ProxyNodeItem) { return node.sourceType === 'self_hosted' ? (nodeRelays.value[node.sourceId || ''] || []).filter(r => !node.inboundId || (r.rule.target.mode === 'linked' && r.rule.target.inboundId === node.inboundId)) : []; }
+async function loadNodeRelays() {
+  await Promise.all(servers.value.map(async node => {
+    try { nodeRelays.value[node.id] = (await nodeRelayAPI.list(node.id)).items; delete relayErrors.value[node.id]; }
+    catch (e) { relayErrors.value[node.id] = (e as Error).message; }
+  }));
+}
+function handleAddRelay(node: ProxyNodeItem) { if (isOwner.value) relayNode.value = node; }
+async function createRelayScheme() {
+  const node = relayNode.value!;
+  const { scheme, entryInstanceId } = await createDraftSchemeForEntryNode(node, { servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes });
+  await router.push({ path: '/proxy/relay', query: { schemeId: scheme.id, focusInstId: entryInstanceId } });
 }
 
 // Flag resolution helper

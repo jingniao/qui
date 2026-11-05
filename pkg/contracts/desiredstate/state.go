@@ -133,7 +133,8 @@ type ForwardSettings struct {
 	// Mode, Relay and Hops are the encrypted-relay fields of settings contract
 	// version 3. The panel resolves them from a GOST tunnel's sealed material;
 	// proxy.ValidateInbound refuses them from the public inbound API and the
-	// renderer refuses a half-resolved state.
+	// renderer refuses a half-resolved state. Contract 4 permits a relay listener
+	// to carry one next hop, with separate listener and dialer TLS material.
 	Mode  string        `json:"mode,omitempty"`
 	Relay *GostRelayTLS `json:"relay,omitempty"`
 	Hops  []GostHop     `json:"gost_hops,omitempty"`

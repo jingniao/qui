@@ -60,6 +60,8 @@ node web/scripts/node-metrics-selftest.mjs
 node web/scripts/latency-chart-selftest.mjs
 node web/scripts/node-editor-selftest.mjs
 node web/scripts/tunnel-editor-selftest.mjs
+node web/scripts/tunnels-selftest.mjs
+node web/scripts/u1b-selftest.mjs
 node web/scripts/server-detail-selftest.mjs
 node web/scripts/ui-regression-selftest.mjs
 node web/scripts/canvas-library-selftest.mjs

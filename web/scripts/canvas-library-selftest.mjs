@@ -115,7 +115,7 @@ assert.equal(canvas.includes(".filter(n => n.sourceType === 'self_hosted')"), fa
 assert.ok(canvas.includes('entryBound: true'));
 assert.ok(canvas.includes('const entryBound = draggedPayload.entryBound === true && currentScheme.value.executionLocation === \'server\';'));
 assert.ok(canvas.includes(':draggable="node.enabled"'));
-assert.ok(canvas.includes("role = entryBound || currentScheme.value.nodes.length === 0 ? 'entry' : 'relay'"));
+assert.ok(canvas.includes("role = currentScheme.value.nodes.length === 0 ? 'entry' : entryBound ? 'exit' : 'relay'"));
 // An inbound-bound box is not a hop in a server scheme: connecting it would be
 // refused on publish. A client chain is a path of inbound boxes and must stay
 // connectable, which is why the guard checks the execution location.

@@ -74,7 +74,7 @@
         <div
           v-for="sec in navSections"
           :key="sec.id"
-          v-show="!isViewer || sec.id === 'servers'"
+          v-show="!isViewer || sec.id === 'servers' || sec.id === 'proxy'"
           :class="['relative group/popover', isCollapsed ? 'flex justify-center w-full' : 'w-full']"
         >
           <!-- Direct Link Section (When section has direct path without sub-items, e.g. 用户管理) -->
@@ -659,9 +659,10 @@ const navSections: NavSection[] = [
     label: '节点配置',
     iconPath: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4',
     items: [
-      { label: '节点列表', path: '/proxy/nodes', iconPath: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
-      { label: '节点分组', path: '/proxy/groups', iconPath: 'M4 6h16M4 12h16M4 18h16' },
-      { label: '中转搭建', path: '/proxy/relay', iconPath: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' }
+      { label: '节点列表', path: '/proxy/nodes', ownerOnly: true, iconPath: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
+      { label: '节点分组', path: '/proxy/groups', ownerOnly: true, iconPath: 'M4 6h16M4 12h16M4 18h16' },
+      { label: '隧道管理', path: '/proxy/tunnels', iconPath: 'M4 6h16M4 12h16M4 18h16' },
+      { label: '中转方案', path: '/proxy/relay', ownerOnly: true, iconPath: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' }
     ]
   },
   {
@@ -706,6 +707,7 @@ watch(
 );
 
 function isCurrentPath(targetPath: string) {
+  if (targetPath === '/proxy/tunnels') return ['/proxy/tunnels', '/proxy/tunnel-rules'].includes(route.path);
   if (targetPath === '/dashboard') return route.path === '/dashboard';
   if (targetPath === '/nodes/versions') return route.path === targetPath;
   if (targetPath === '/users') return route.path === '/users' || route.path.startsWith('/users/');
@@ -739,7 +741,7 @@ function isSectionActive(sectionId: string) {
       const [base] = item.path.split('?');
       return route.path === base;
     }
-    return route.path.startsWith(item.path);
+    return isCurrentPath(item.path);
   }) ?? false;
 }
 

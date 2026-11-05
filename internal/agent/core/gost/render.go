@@ -55,6 +55,9 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 		if inbound.Protocol != "forward" || inbound.Settings.Forward == nil {
 			return core.RenderedConfig{}, fmt.Errorf("gost inbound %s is not a forward", inbound.ID)
 		}
+		if err := inbound.Settings.Forward.ValidateGostContract(desiredstate.GostContractVersion); err != nil {
+			return core.RenderedConfig{}, err
+		}
 		total += len(desiredstate.ListenPorts(inbound.Port, inbound.Settings)) * len(networkTypes(inbound.Settings.Forward.Network))
 		if inbound.Settings.Forward.RelayMode() {
 			// A relay listener is one service regardless of its (absent) network.
@@ -88,11 +91,14 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 		// is one service per port, each with the whole pool and its own limits.
 		for _, port := range desiredstate.ListenPorts(inbound.Port, inbound.Settings) {
 			if forward.RelayMode() {
-				// The exit half is one TLS relay listener; it forwards nothing
-				// itself, so there is no target and no traffic counter of it.
+				// Middle and exit halves are TLS relay listeners. Neither has
+				// a target pool or a traffic counter of its own.
 				service, err := a.relayService(inbound, port)
 				if err != nil {
 					return core.RenderedConfig{}, err
+				}
+				if chain != nil {
+					service.Handler.Chain = chain.Name
 				}
 				config.Services = append(config.Services, service)
 				rendered.HealthEndpoints = append(rendered.HealthEndpoints, joinHostPort(dialHost(inbound.Listen), port))

@@ -10,18 +10,18 @@ import (
 	"strings"
 )
 
-// GostForwardModeRelay marks a forward inbound as the exit half of a GOST
+// GostForwardModeRelay marks a forward inbound as a receiving half of a GOST
 // encrypted relay instead of a port forward. The node renders a `relay` handler
 // on a TLS listener that requires a client certificate; the entry node renders
 // the same tunnel as an ordered hop chain under its forward service's
 // `handler.chain`.
 const GostForwardModeRelay = "relay"
 
-// GostMaxRelayHops bounds a native forward path. It mirrors the two hops the
-// proxy chain model already allows, so no unlimited chain is introduced.
+// GostMaxRelayHops preserves the contract-3 entry-chain limit. Contract 4 adds
+// a middle listener with just one next hop, not a longer native entry chain.
 const GostMaxRelayHops = 2
 
-// GostRelayTLS is the exit half of a GOST tunnel: the certificate the relay
+// GostRelayTLS is a receiving half of a GOST tunnel: the certificate the relay
 // listener presents and the CA that must have issued the peer certificate. The
 // panel resolves it from the tunnel's sealed material; the public inbound API
 // never accepts it.
@@ -85,8 +85,9 @@ func validCertificatePEM(data string) error {
 	return nil
 }
 
-// validateGostRelay validates the exit half: a TLS relay with no target pool. An
-// entry forward keeps its pool and is validated by Validate plus validateGostHops.
+// validateGostRelay validates a receiving half: a TLS relay with no target pool,
+// optionally dialing one next relay. An entry forward keeps its pool and is
+// validated by Validate plus validateGostHops.
 func validateGostRelay(f *ForwardSettings) error {
 	if f.Host != "" || f.Port != 0 || len(f.Targets) > 0 || f.Network != "" {
 		return errors.New("a relay listener has no target pool and no network")
@@ -94,8 +95,13 @@ func validateGostRelay(f *ForwardSettings) error {
 	if f.PortEnd != nil || f.BandwidthInBps != nil || f.BandwidthOutBps != nil || f.MaxConnections != nil || f.Strategy != nil || f.MaxFails != nil || f.FailTimeout != nil {
 		return errors.New("a relay listener has no forward pool options")
 	}
-	if len(f.Hops) > 0 {
-		return errors.New("a relay listener cannot hop through another relay")
+	if len(f.Hops) > 1 {
+		return errors.New("a middle relay listener dials exactly one next relay")
+	}
+	if len(f.Hops) == 1 {
+		if err := validateGostHops(f.Hops); err != nil {
+			return err
+		}
 	}
 	if f.Relay == nil {
 		return errors.New("a relay listener requires its TLS material")
@@ -124,8 +130,24 @@ func validateGostHops(hops []GostHop) error {
 	return nil
 }
 
-// RelayMode reports whether the settings are the exit half of a GOST tunnel.
+// RelayMode reports whether the settings are a middle or exit relay listener.
 func (f *ForwardSettings) RelayMode() bool { return f != nil && f.Mode == GostForwardModeRelay }
+
+// ValidateGostContract checks a reported Agent capability before delivery. X1's
+// tunnel planner must check every receiving node with this shared guard; a core
+// version string is not a substitute for the negotiated contract.
+func (f *ForwardSettings) ValidateGostContract(version uint32) error {
+	if f.RelayMode() && len(f.Hops) > 0 && version < GostMiddleContractVersion {
+		return errors.New("gost middle relay requires Agent gost_contract_version >= 4")
+	}
+	if f.HasRelaySettings() && version < GostRelayContractVersion {
+		return errors.New("gost relay requires Agent gost_contract_version >= 3")
+	}
+	if f.HasGostOptions() && version < GostPoolContractVersion {
+		return errors.New("gost forward options require Agent gost_contract_version >= 2")
+	}
+	return nil
+}
 
 // HasRelaySettings reports whether any field of the version 3 contract is set.
 // Every layer that refuses relay material from an untrusted source asks this.

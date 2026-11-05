@@ -38,33 +38,19 @@ assert.match(read('modules/nodes/components/detail/ServerMonitoring.vue'),/v-mod
 for (const path of ['modules/nodes/components/detail/ServerTuning.vue','modules/nodes/components/detail/serverTuningModel.ts','modules/nodes/components/ServerMetricsGrid.vue','modules/nodes/components/hostObservationModel.ts']) assert.doesNotMatch(read(path), /\?{3,}/, 'F2 Chinese labels must survive UTF-8: '+path);
 console.log('PASS F2 UI: backend tuning/metrics wiring, no local applied state, linked range retained, UTF-8 labels');
 
-// F4: shared tunnels are panel resources (K4), not a browser pool.
+// U1b keeps canvas plans and legacy references while removing the shared library.
 const canvasPage = read('modules/proxy/pages/RelayCanvasPage.vue');
 const canvasStore = read('modules/proxy/proxyNodes.ts');
-const tunnelLibrary = read('modules/proxy/components/relay/useCanvasTunnels.ts');
 const proxyApi = read('modules/proxy/api.ts');
-assert.equal((canvasPage.match(/qui_shared_tunnels_v1/g) || []).length, 1, 'the old local tunnel key may appear once, only for its removal');
-assert.match(canvasPage, /localStorage\.removeItem\(LEGACY_SHARED_TUNNELS_KEY\)/, 'the old local tunnel pool must be removed once');
-assert.doesNotMatch(canvasPage, /localStorage\.(getItem|setItem)\(LEGACY_SHARED_TUNNELS_KEY/, 'shared tunnels must never be read from or written to browser storage');
-assert.doesNotMatch(canvasPage, /sharedTunnelPool|syncTunnelsFromScheme|applySharedTunnelToScheme|filteredSharedTunnels/, 'the browser-only tunnel pool must be gone');
-assert.doesNotMatch(canvasStore, /qui_shared_tunnels_v1|sharedTunnelPool/, 'the canvas store must not keep tunnels locally');
-for (const call of ['list(', 'delete(', 'legacyObjects(', 'adopt(']) {
-  assert.ok(tunnelLibrary.includes('canvasTunnelAPI.' + call), 'the tunnel library must call canvasTunnelAPI.' + call);
-}
-assert.match(proxyApi, /'\/canvas-tunnels'/, 'canvas tunnel CRUD paths must come from the K4 API');
-assert.match(proxyApi, /\/canvas-tunnels\/\$\{encodeURIComponent\(id\)\}\/adopt/, 'adoption must call the K4 adopt route');
-assert.match(canvasPage, /canvasTunnelAPI\.(create|update)\(/, 'resource writes must go through canvasTunnelAPI');
-assert.match(canvasPage, /tunnelId/, 'scheme connections must carry the tunnel reference');
-assert.match(canvasPage, /v-if="canManageTunnels"/, 'tunnel library and legacy panel are Owner-only');
-assert.match(canvasPage, /:draggable="currentScheme\.executionLocation === 'server'"/, 'client schemes must not accept shared tunnels');
-assert.match(canvasPage, /客户端方案不支持共享隧道/, 'client schemes keep inline connections and say so');
-assert.match(canvasPage, /planBlocked/, 'publish must be blocked while the plan reports conflicts');
-assert.match(canvasPage, /planBlocked\)/, 'the publish button must use the blocked state');
-assert.equal((canvasPage.match(/<TunnelPlanSummary/g) || []).length, 2, 'the plan summary is shown in the check dialog and in the publish dialog');
-assert.match(read('modules/proxy/components/relay/TunnelEditorDrawer.vue'), /<TunnelPlanSummary/, 'the tunnel drawer keeps its plan summary');
-assert.match(read('modules/proxy/components/relay/TunnelEditorDrawer.vue'), /saveResource/, 'shared tunnel edits are written through the K4 resource API');
-
-console.log('PASS F4 UI: shared tunnels read from GET /canvas-tunnels, reference-only connections, Owner-only adoption, publish blocked on conflicts');
+assert.doesNotMatch(canvasPage, /useCanvasTunnels|TunnelEditorDrawer|canManageTunnels|legacyChoice/);
+assert.doesNotMatch(canvasStore, /qui_shared_tunnels_v1|sharedTunnelPool/);
+assert.match(canvasPage, /tunnelId/);
+assert.match(canvasPage, /planBlocked/);
+assert.match(canvasPage, /planBlocked\)/);
+assert.equal((canvasPage.match(/<TunnelPlanSummary/g) || []).length, 2);
+assert.match(canvasPage, /将迁移到隧道管理/);
+assert.match(read('modules/proxy/components/relay/CanvasConnectionDialog.vue'), /删除连线/);
+console.log('PASS U1b canvas: library removed, legacy display, references and plan summaries retained');
 
 // F3: multi-core wiring (K3b panel + K3c installer flags). The page reads the
 // per-core capability data, keeps no core state in the browser, never ships a
@@ -299,10 +285,11 @@ assert.match(read('portal/PortalLayout.vue'), /<button v-else[^>]*@click="logout
 console.log('PASS review 3: preview-only duplicate header link hidden, toolbar and portal logout retained');
 
 const clientActionsReview = read('modules/routing/pages/ClientPolicyPage.vue').split('<template #actions>')[1].split('</template>')[0];
-assert.match(clientActionsReview, /<div class="flex flex-wrap sm:flex-nowrap items-center gap-2.5 min-w-0 w-full sm:w-auto">/);
-for (const action of ['resetToDefault', 'openCreateRuleDrawer', 'saveAll', '/routing/simulator?tab=client']) assert.ok(clientActionsReview.includes(action));
-assert.match(clientActionsReview, /<\/router-link>\s*<\/div>/);
-console.log('PASS review 4: header actions wrap on small screens, desktop row and all actions retained');
+assert.match(clientActionsReview, /新建配置/, 'header action provides new configuration trigger');
+const clientPageFull = read('modules/routing/pages/ClientPolicyPage.vue');
+assert.ok(clientPageFull.includes('saveAll'), 'save action retained in configuration dialog');
+assert.ok(clientPageFull.includes('openCreateRuleDrawer'), 'rule creation retained in rules section');
+console.log('PASS review 4: header action updated to new config, save and rule editor retained in dialog');
 
 // Third round: execute the shared message mapping and API error path.
 const apiReview3 = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(read('app/apiClient.ts'), {
@@ -525,4 +512,3 @@ const rankedE = vueSubset('modules/dashboard/pages/DashboardPage.vue', ['userAtt
 assert.deepEqual(rankedE.topAttentionUsers.value.map(user => user.id), ['over', 'expired', 'soon', 'heavy'], 'expired/expiring users outrank plain usage, disabled users last');
 assert.equal(rankedE.userAttentionRank({ status: 'disabled', trafficLimit: 0, usedTraffic: 0 }, Date.now()), 4);
 console.log('PASS walkthrough E dashboard: panel-timezone date chip, compact ranking rows, attention ordering');
-

@@ -345,10 +345,16 @@ func validateReferences(config Config) error {
 		if service.Climiter != "" && !climiters[service.Climiter] {
 			return fmt.Errorf("gost service %s references an unknown climiter", service.Name)
 		}
+		if service.Handler.Chain != "" && chains[service.Handler.Chain] == nil {
+			return fmt.Errorf("gost service %s references an unknown chain", service.Name)
+		}
 		switch service.Handler.Type {
 		case "relay":
-			if service.Forwarder != nil || service.Handler.Chain != "" {
-				return fmt.Errorf("gost relay %s forwards no target and dials no chain", service.Name)
+			if service.Forwarder != nil {
+				return fmt.Errorf("gost relay %s forwards no target pool", service.Name)
+			}
+			if chain := chains[service.Handler.Chain]; chain != nil && len(chain.Hops) != 1 {
+				return fmt.Errorf("gost middle relay %s needs exactly one next hop", service.Name)
 			}
 			if service.Listener.Type != "tls" || service.Listener.TLS == nil || service.Listener.TLS.CAFile == "" {
 				return fmt.Errorf("gost relay %s requires a TLS listener with a client CA", service.Name)
@@ -356,9 +362,6 @@ func validateReferences(config Config) error {
 		default:
 			if service.Forwarder == nil || len(service.Forwarder.Nodes) == 0 {
 				return fmt.Errorf("gost service %s has no target", service.Name)
-			}
-			if service.Handler.Chain != "" && chains[service.Handler.Chain] == nil {
-				return fmt.Errorf("gost service %s references an unknown chain", service.Name)
 			}
 		}
 	}

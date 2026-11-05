@@ -77,6 +77,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'system/admins', redirect: '/users' },
       { path: 'nodes/versions', component: () => import('../modules/nodes/pages/NodeVersionsPage.vue'), meta: { title: '版本与更新', parent: '服务器' } },
       { path: 'proxy/groups', component: () => import('../modules/proxy/pages/LineGroupPage.vue'), meta: { title: '节点分组', parent: '节点配置' } },
+      { path: 'proxy/tunnels', component: () => import('../modules/tunnels/pages/TunnelsPage.vue'), meta: { title: '隧道管理', parent: '节点配置' } },
+      { path: 'proxy/tunnel-rules', component: () => import('../modules/tunnels/pages/TunnelsPage.vue'), meta: { title: '隧道规则', parent: '节点配置' } },
       // 3. Node Module
       {
         path: 'nodes',
@@ -108,7 +110,7 @@ const routes: RouteRecordRaw[] = [
         path: 'proxy/relay',
         name: 'RelayCanvas',
         component: () => import('../modules/proxy/pages/RelayCanvasPage.vue'),
-        meta: { title: '中转搭建', parent: '节点配置', fluid: true }
+        meta: { title: '中转方案', parent: '节点配置', fluid: true }
       },
       // Backward Compatibility Redirects
       {

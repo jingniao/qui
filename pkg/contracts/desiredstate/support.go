@@ -66,9 +66,10 @@ const (
 // GostContractVersion is the settings contract an Agent's GOST core reports in
 // CoreCapability.gost_contract_version. G2 raised it to 2 (target pools, port
 // ranges, bandwidth and connection limits) and G3 raised it to 3 (the encrypted
-// relay halves), so the panel can refuse an option the selected core does not
+// relay halves). X0 raises it to 4 (a middle relay's next-hop chain), so the
+// panel can refuse an option the selected core does not
 // implement instead of rendering a silently ignored key.
-const GostContractVersion = 3
+const GostContractVersion = GostMiddleContractVersion
 
 // CoreSupport is one official core's share of a protocol row: whether that core
 // can terminate an inbound, open an outbound, and carry TCP and UDP. Every row

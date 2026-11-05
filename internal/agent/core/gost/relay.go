@@ -26,9 +26,10 @@ const (
 	materialDirMode = 0700
 )
 
-// relayService renders the exit half of one GOST tunnel: a relay handler on a TLS
-// listener that requires the client certificate of the entry node, with no target
-// pool. Its bytes repeat the forwarded payload with TLS framing on top, so the
+// relayService renders a receiving half of one GOST tunnel: a relay handler on a
+// TLS listener that requires the previous leg's client certificate, with no target
+// pool. Render attaches a next-hop chain for a middle service. Its bytes repeat
+// the forwarded payload with TLS framing on top, so the
 // service is excluded from the node's traffic totals (see forwardServiceNames).
 func (a *Adapter) relayService(inbound desiredstate.Inbound, port int) (Service, error) {
 	forward := inbound.Settings.Forward

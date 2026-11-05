@@ -1,0 +1,13 @@
+{
+  "services": [
+    {"name":"fwd-fwd-entry-20060-tcp","addr":"0.0.0.0:20060","handler":{"type":"tcp","chain":"chain-fwd-entry"},"listener":{"type":"tcp"},"forwarder":{"selector":{"strategy":"round","maxFails":1,"failTimeout":"5s"},"nodes":[{"name":"target-0","addr":"192.0.2.10:443"}]}},
+    {"name":"fwd-fwd-entry-20060-udp","addr":"0.0.0.0:20060","handler":{"type":"udp","chain":"chain-fwd-entry"},"listener":{"type":"udp"},"forwarder":{"selector":{"strategy":"round","maxFails":1,"failTimeout":"5s"},"nodes":[{"name":"target-0","addr":"192.0.2.10:443"}]}},
+    {"name":"relay-relay-exit-22000","addr":"0.0.0.0:22000","handler":{"type":"relay"},"listener":{"type":"tls","tls":{"certFile":"cert.pem","keyFile":"key.pem","caFile":"ca.pem"}}}
+  ],
+  "chains": [{"name":"chain-fwd-entry","hops":[
+    {"name":"hop-0","nodes":[{"name":"relay-0","addr":"198.51.100.1:20000","connector":{"type":"relay"},"dialer":{"type":"tls","tls":{"certFile":"cert.pem","keyFile":"key.pem","caFile":"ca.pem","serverName":"t-test.gost.qui.internal"}}}]},
+    {"name":"hop-1","nodes":[{"name":"relay-1","addr":"198.51.100.2:20001","connector":{"type":"relay"},"dialer":{"type":"tls","tls":{"certFile":"cert.pem","keyFile":"key.pem","caFile":"ca.pem","serverName":"t-test.gost.qui.internal"}}}]}
+  ]}],
+  "metrics":{"addr":"unix:///var/lib/proxy-agent/runtime/gost/metrics.sock"},
+  "log":{"level":"warn","format":"text"}
+}

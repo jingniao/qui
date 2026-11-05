@@ -17,7 +17,7 @@ export async function setupNavigationGuards(to: RouteLocationNormalized, _from: 
   if (!authState.isAuthenticated && !publicPaths.includes(to.path)) return next({ path: '/login', query: { redirect: to.fullPath } });
   if (authState.isAuthenticated && to.path === '/login') return next('/dashboard');
   if (authState.currentUser?.role === 'Viewer' &&
-      !['/dashboard', '/nodes', '/403', '/404'].includes(to.path) &&
+      !['/dashboard', '/nodes', '/proxy/tunnels', '/proxy/tunnel-rules', '/403', '/404'].includes(to.path) &&
       !(to.path !== '/nodes/versions' && /^\/nodes\/[^/]+$/.test(to.path))) return next('/403');
   next();
 }

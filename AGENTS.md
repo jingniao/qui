@@ -597,6 +597,8 @@ GOST 目标按序写 forwarder.nodes（target-0…），selector={strategy,maxFa
 
 GOST 出口为 handler:relay＋listener:tls＋客户端 CA；入口链挂 handler.chain，connector:relay＋dialer:tls（CA/服务器名）。证书材料按入站/半边写 `runtime/gost/tls/<入站>/<半边>/`，目录 0700、文件 0600，旧修订回滚不覆盖在用证书。
 
+v1.4 X0 的契约 4 允许中间 relay listener 携带一个 `gost_hops` 下一跳，链仍挂 handler.chain；前一段监听与后一段拨号的证书分别保存，中间 relay 同出口 relay 一样不计节点总量。旧契约 3 的入口链（最多两个原生 hop）和出口渲染保持兼容。新隧道限定入口→可选单个中间→出口（最多三台不同服务器），全局拓扑及按上报契约拒绝旧 Agent 由 X1 发布端接入共享校验；X0 不改面板。实核验收待 Linux，见 [X0 记录](docs/v1.4-x0-findings.md)。
+
 **TCP 探测**只测建连耗时/失败率，不是带宽、ICMP、UDP/QUIC 可用性。手动历史每节点/目标最多 100 条；定时每分钟测启用未删除、心跳 ≤45 秒且支持的节点，每目标 3×3000 ms。默认目标用 probe_targets.scheduled（最多 5）；节点可自定义最多 5 个，custom=true＋空表=不测，false=清空自定义并继承。队列按 source 隔离、手动优先，在途结束或 2 分钟到期才派下一条。
 
 定时结果 ValidateResult 后入独立采样表，保留 7 天。当前 Agent 仅 medianMs；原始 avg/min/max 为 null。≤12 小时返回原点，>12 小时按 Unix epoch 分桶，步长 ceil(小时×60/720)×60 秒，每目标约 720 点（边界可多 1）。桶 medianMs 为 sent>failed 且非 NULL 中位数的算术平均，min/max 是这些中位数极值，无值均 null，avgMs 恒 null；sent/failed 求和，samples 为样本数（原点 1）。删目标级联样本，逻辑删节点停止查询、等保留清理。API 见第 27.12 节。
@@ -1033,7 +1035,7 @@ Hello；Heartbeat；Capabilities；ApplyResult；HealthResult；TrafficBatch；A
 
 Heartbeat 省略即缺测，实测 0 保留。v1.3 增加 `boot_id`（字段 34）与 `default_route_interface`（字段 35）供整机流量记账（第 21 节）：两者各自独立，读取失败只省略自己的字段，旧面板忽略未知字段。整机网卡的累计字节沿用既有 `interfaces`（字段 20）。
 
-GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool）表示该 Agent 懂 GOST 组件的安装与移除——即使 GOST 尚未安装；`CoreCapability.gost_contract_version`（字段 9，uint32）表示 GOST 设置契约版本（0 = 不支持，1 = 基础转发，2 = 池/范围/限流，3 = 加密中继；当前为 3）。GOST 设置随既有 `ApplyCommand.desired_state_json` 下发，不占用独立字段；没有新的 Welcome 标志，多核心与节点流量协商照旧。面板把 Hello 标志持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新，不用 Agent 版本号文本推断；旧 Agent 无法收到 GOST 分配。
+GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool）表示该 Agent 懂 GOST 组件的安装与移除——即使 GOST 尚未安装；`CoreCapability.gost_contract_version`（字段 9，uint32）表示 GOST 设置契约版本（0 = 不支持，1 = 基础转发，2 = 池/范围/限流，3 = 加密中继，4 = 中间 relay 的下一跳链；v1.4 X0 源码报告 4，正式版 1.3.1 为 3）。GOST 设置随既有 `ApplyCommand.desired_state_json` 下发，不占用独立字段；没有新的 Welcome 标志，多核心与节点流量协商照旧。面板把 Hello 标志持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新，不用 Agent 版本号文本推断；旧 Agent 无法收到 GOST 分配。
 
 中央端下发消息包括：
 

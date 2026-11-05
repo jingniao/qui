@@ -34,11 +34,13 @@ const (
 // The GOST settings contract a node must report (GostContractVersion is what this
 // build reports) to render these forwards: version 2 added target pools, port
 // ranges and bandwidth/connection limits (G2), version 3 the encrypted relay
-// halves (G3). A core that reports less cannot render them, so the panel refuses
+// halves (G3), version 4 a middle relay's next-hop chain (X0). A core that reports
+// less cannot render them, so the panel refuses
 // the options instead of publishing a configuration that silently ignores them.
 const (
-	GostPoolContractVersion  = 2
-	GostRelayContractVersion = 3
+	GostPoolContractVersion   = 2
+	GostRelayContractVersion  = 3
+	GostMiddleContractVersion = 4
 )
 
 // ForwardTarget is one member of a forward's ordered target pool.

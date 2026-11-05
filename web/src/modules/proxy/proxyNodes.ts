@@ -66,6 +66,8 @@ export interface CanvasNodeInstance {
   x: number;
   y: number;
   role: 'entry' | 'relay' | 'exit';
+  relayPortMode?: 'auto' | 'manual';
+  relayPort?: number;
   listenPort?: number;
   targetPort?: number;
 }
@@ -306,24 +308,24 @@ function traceBackwardPaths(scheme: RelayScheme, currentInstId: string, visited:
 }
 
 /**
- * Creates or retrieves a draft scheme targeting the node as exit target. The
+ * Creates or retrieves a draft scheme with the node as entry. The
  * scheme is created on the server first: the canvas loads nothing else, so a
  * draft that only existed here would be lost on the next page load.
  */
-export async function createDraftSchemeForTargetNode(node: ProxyNodeItem, context: CanvasSchemeContext): Promise<{ scheme: RelayScheme; exitInstanceId: string }> {
-  // Check if there is already an existing draft targeting this node
+export async function createDraftSchemeForEntryNode(node: ProxyNodeItem, context: CanvasSchemeContext): Promise<{ scheme: RelayScheme; entryInstanceId: string }> {
+  // Reuse only a server draft with this node already assigned as entry.
   const existingDraft = proxyNodeStore.schemes.find(
-    s => !s.published && s.nodes.some(n => n.resourceId === node.id)
+    s => s.executionLocation === 'server' && !s.published && s.nodes.some(n => n.resourceId === node.id && n.role === 'entry')
   );
 
   if (existingDraft) {
-    const exitInst = existingDraft.nodes.find(n => n.resourceId === node.id)!;
-    return { scheme: existingDraft, exitInstanceId: exitInst.instanceId };
+    const entryInst = existingDraft.nodes.find(n => n.resourceId === node.id && n.role === 'entry')!;
+    return { scheme: existingDraft, entryInstanceId: entryInst.instanceId };
   }
 
-  const exitInstId = `inst-exit-${Date.now()}`;
-  const exitNodeInstance: CanvasNodeInstance = {
-    instanceId: exitInstId,
+  const entryInstId = `inst-entry-${Date.now()}`;
+  const entryNodeInstance: CanvasNodeInstance = {
+    instanceId: entryInstId,
     resourceId: node.id,
     resourceType: 'node',
     name: node.name,
@@ -331,18 +333,18 @@ export async function createDraftSchemeForTargetNode(node: ProxyNodeItem, contex
     serverAddress: `${node.server}:${node.port}`,
     status: node.status,
     isManageable: node.sourceType === 'self_hosted',
-    x: 680,
+    x: 100,
     y: 200,
-    role: 'exit',
+    role: 'entry',
     targetPort: node.port
   };
 
   const newScheme = await createCanvasScheme(`${node.name} 中转方案 (草稿)`, 'server', context);
-  newScheme.nodes = [exitNodeInstance];
+  newScheme.nodes = [entryNodeInstance];
   newScheme.hasUnpublishedChanges = true;
   await persistCanvasScheme(newScheme, context);
 
-  return { scheme: newScheme, exitInstanceId: exitInstId };
+  return { scheme: newScheme, entryInstanceId: entryInstId };
 }
 
 // Imported proxies carry no inbound record, so the only thing the panel knows

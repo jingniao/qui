@@ -367,6 +367,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := proxy.ValidateCanvasTunnelMaterial(ctx, database, configurationVault); err != nil {
 		return ErrArchive
 	}
+	if err := proxy.ValidateTunnels(ctx, database, configurationVault); err != nil {
+		return ErrArchive
+	}
 	if err := validatePortal(ctx, database, configurationVault); err != nil {
 		return err
 	}

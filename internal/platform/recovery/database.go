@@ -209,6 +209,7 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 			func() error { return (&node.Repository{}).PrepareGroupRestoreTx(ctx, tx) },
 			func() error { return (&user.Repository{}).PrepareGroupGrantsRestoreTx(ctx, tx) },
 			func() error { return (&proxy.Repository{}).PrepareClientRestoreTx(ctx, tx) },
+			func() error { return (&proxy.Repository{}).PrepareTunnelsRestoreTx(ctx, tx) },
 			func() error { return (&access.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&deployment.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&system.Repository{}).PrepareRestoreTx(ctx, tx, stamp, plan.Source.ID) },

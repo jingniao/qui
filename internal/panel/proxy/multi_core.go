@@ -66,55 +66,28 @@ func ValidateOutboundCores(c *pb.Capabilities, protocol string) error {
 	return fmt.Errorf("protocol %s is not supported by the node's %s core", protocol, c.GetCoreName())
 }
 
-// Inbound listener ports are node-global: the Agent's DesiredState validation
-// reserves every enabled inbound's numeric ports across all cores and forwards,
-// independent of transport. A GOST forward can expand to a range, so the check
-// reads the node's enabled inbounds with their decrypted settings and intersects
-// the expanded intervals instead of comparing base ports.
+// Enabled saves conflict with enabled inbounds; disabled saves only with claims.
 func (r *Repository) validateInboundPorts(ctx context.Context, tx *sql.Tx, id string, in InboundInput) error {
-	if !in.Enabled {
-		return nil
+	mode := "none"
+	if in.Enabled {
+		mode = "enabled"
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT id,port,encrypted_settings FROM inbounds WHERE node_id=? AND enabled=1 AND id<>?", in.NodeID, id)
+	exclude := []PortOwner{{Kind: "inbound", ID: id}}
+	var kind, owner string
+	err := tx.QueryRowContext(ctx, "SELECT owner_kind,owner_id FROM tunnel_objects WHERE object_kind='inbound' AND object_id=?", id).Scan(&kind, &owner)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if owner != "" {
+		exclude = append(exclude, PortOwner{Kind: kind, ID: owner})
+	}
+	occupied, err := r.portOccupants(ctx, tx, in.NodeID, exclude, mode)
 	if err != nil {
 		return err
 	}
-	type occupant struct {
-		id       string
-		port     int
-		settings desiredstate.ProtocolSettings
-	}
-	items := []occupant{}
-	for rows.Next() {
-		var item occupant
-		var encoded []byte
-		if err := rows.Scan(&item.id, &item.port, &encoded); err != nil {
-			rows.Close()
-			return err
-		}
-		if item.settings, err = r.decode(encoded); err != nil {
-			rows.Close()
-			return err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	ports := map[int]bool{}
 	for _, port := range desiredstate.ListenPorts(in.Port, in.Settings) {
-		ports[port] = true
-	}
-	for _, item := range items {
-		for _, occupied := range desiredstate.ListenPorts(item.port, item.settings) {
-			// Same numeric port on a node is reserved by the Agent contract, so a
-			// second listener fails at apply time; refuse it here instead.
-			if ports[occupied] {
-				return fmt.Errorf("inbound port %d is already used by %s on this node", occupied, item.id)
-			}
+		if owners := occupied[port]; len(owners) > 0 {
+			return fmt.Errorf("inbound port %d is already used by %s on this node", port, owners[0].ID)
 		}
 	}
 	return nil

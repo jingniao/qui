@@ -403,8 +403,7 @@ func TestCanvasPlanReservesListenerPortNumber(t *testing.T) {
 	if conflict.Connections[0].Status != "error" || conflict.Connections[0].Message == "" {
 		t.Fatalf("connection row %+v", conflict.Connections[0])
 	}
-	// The Agent validates enabled listeners only, so a disabled inbound on that
-	// port reserves nothing.
+	// An explicit listener may reuse a disabled inbound's port.
 	if _, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "off", NodeID: p.nodeA, Protocol: "forward", Listen: "0.0.0.0", Port: 12349, Enabled: false, DefaultOutbound: "direct",
 		Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "1.1.1.1", Port: 53, Network: "udp"}}}); err != nil {
 		t.Fatal(err)
@@ -412,7 +411,7 @@ func TestCanvasPlanReservesListenerPortNumber(t *testing.T) {
 	layout.Connections[0].ListenPort = canvasTestPort(12349)
 	free, err := p.service.PlanCanvasScheme(p.ctx, scheme.ID, &layout)
 	if err != nil || !free.OK || len(free.Conflicts) != 0 {
-		t.Fatalf("disabled inbound reserved a port: %+v %v", free, err)
+		t.Fatalf("disabled inbound reserved its port: %+v %v", free, err)
 	}
 }
 

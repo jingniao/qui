@@ -109,6 +109,10 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 	if !reveal {
 		inbound.Settings = mask(inbound.Settings)
 	}
+	inbound.ManagedBy, err = r.managedBy(ctx, inboundID)
+	if err != nil {
+		return inbound, err
+	}
 	return inbound, nil
 }
 
@@ -221,6 +225,9 @@ func (r *Repository) Outbounds(ctx context.Context, nodeID string, page, size in
 // SaveInbound writes an inbound the Owner configured: the public shape, which
 // never carries GOST relay material.
 func (r *Repository) SaveInbound(ctx context.Context, inboundID string, input InboundInput) (Inbound, error) {
+	if err := r.refuseManagedInbound(ctx, inboundID); err != nil {
+		return Inbound{}, err
+	}
 	return r.saveInbound(ctx, inboundID, input, ValidateInbound)
 }
 
@@ -490,6 +497,9 @@ func (r *Repository) Bindings(ctx context.Context, inboundID string) ([]Binding,
 	return items, rows.Err()
 }
 func (r *Repository) DeleteInbound(ctx context.Context, id string) error {
+	if err := r.refuseManagedInbound(ctx, id); err != nil {
+		return err
+	}
 	if _, err := r.Inbound(ctx, id, false); err != nil {
 		return err
 	}

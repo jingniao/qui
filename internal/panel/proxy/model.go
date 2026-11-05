@@ -12,6 +12,7 @@ import (
 var ErrNotFound = errors.New("proxy configuration not found")
 
 type Inbound struct {
+	ManagedBy            *PortOwner                    `json:"managedBy,omitempty"`
 	UserTrafficSupported *bool                         `json:"userTrafficSupported"`
 	DeviceGateSupported  *bool                         `json:"deviceGateSupported"`
 	DeviceGateCoverage   *string                       `json:"deviceGateCoverage"`

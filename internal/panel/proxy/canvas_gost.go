@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -151,19 +150,22 @@ func (r *canvasRelay) relayInput(host string) InboundInput {
 // with forwards and with the other cores exactly like any inbound.
 func (s *Service) relayPortTaken(ctx context.Context, plan *canvasPlan, relay *canvasRelay) (map[int]bool, error) {
 	taken := map[int]bool{}
-	inbounds, err := snapshotList(func(page, size int) ([]Inbound, int, error) {
-		return s.Repository.Inbounds(ctx, relay.exitNode, page, size, true)
-	})
+	owned, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
-	for _, inbound := range inbounds {
+	exclude := []PortOwner{}
+	for _, inbound := range owned {
 		if inbound.Name == relay.name {
-			continue
+			exclude = append(exclude, PortOwner{Kind: "inbound", ID: inbound.ID})
 		}
-		for _, port := range desiredstate.ListenPorts(inbound.Port, inbound.Settings) {
-			taken[port] = true
-		}
+	}
+	occupied, err := s.Repository.portOccupants(ctx, s.Repository.Database, relay.exitNode, exclude)
+	if err != nil {
+		return nil, err
+	}
+	for port := range occupied {
+		taken[port] = true
 	}
 	for _, edge := range plan.edges {
 		if edge.targetNode == relay.exitNode {
@@ -191,25 +193,16 @@ func (s *Service) allocateRelayPort(ctx context.Context, plan *canvasPlan, relay
 	if relay.port != 0 {
 		return nil
 	}
-	var start, end sql.NullInt64
-	err := s.Repository.Database.QueryRowContext(ctx, "SELECT port_range_start,port_range_end FROM node_meta WHERE node_id=?", relay.exitNode).Scan(&start, &end)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if !start.Valid {
-		return errors.New("中转服务器未设置端口分配范围，无法分配 GOST 中继端口")
-	}
 	taken, err := s.relayPortTaken(ctx, plan, relay)
 	if err != nil {
 		return err
 	}
-	for port := int(start.Int64); port <= int(end.Int64); port++ {
-		if !taken[port] {
-			relay.port, relay.allocated = port, true
-			return nil
-		}
+	ports, err := allocatePorts(ctx, s.Repository.Database, relay.exitNode, 1, nil, taken)
+	if err != nil {
+		return fmt.Errorf("服务器端口范围内没有可用的 GOST 中继端口: %w", err)
 	}
-	return errors.New("服务器端口范围内没有可用的 GOST 中继端口")
+	relay.port, relay.allocated = ports[0], true
+	return nil
 }
 
 // relayFor finds the GOST relay of one connection, or nil for a plain forward.

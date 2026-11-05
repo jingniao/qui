@@ -75,6 +75,9 @@ func publicKey(secret string) (string, error) {
 	return base64.StdEncoding.EncodeToString(key.PublicKey().Bytes()), nil
 }
 func (s *Service) SaveInbound(ctx context.Context, id string, input InboundInput) (Inbound, error) {
+	if err := s.Repository.refuseManagedInbound(ctx, id); err != nil {
+		return Inbound{}, err
+	}
 	return s.writeInbound(ctx, id, input, false)
 }
 

@@ -17,6 +17,8 @@ DELETE /api/v1/probe-targets/{target}
 DELETE /api/v1/proxy-chains/{id}
 DELETE /api/v1/service-sets/{id}
 DELETE /api/v1/subscription-sources/{id}
+DELETE /api/v1/tunnel-rules/{id}
+DELETE /api/v1/tunnels/{id}
 DELETE /api/v1/users/{id}
 DELETE /api/v1/users/{id}/node-groups/{groupId}
 DELETE /api/v1/users/{id}/sessions
@@ -61,6 +63,7 @@ GET /api/v1/nodes/{id}/machine-traffic
 GET /api/v1/nodes/{id}/machine-traffic/settings
 GET /api/v1/nodes/{id}/meta
 GET /api/v1/nodes/{id}/metrics
+GET /api/v1/nodes/{id}/ports/check
 GET /api/v1/nodes/{id}/restart-core
 GET /api/v1/nodes/{id}/tcp-probes
 GET /api/v1/nodes/{id}/tuning
@@ -105,6 +108,8 @@ GET /api/v1/traffic/hourly
 GET /api/v1/traffic/nodes/monthly
 GET /api/v1/traffic/reconciliation
 GET /api/v1/traffic/summary
+GET /api/v1/tunnel-rules
+GET /api/v1/tunnels
 GET /api/v1/users
 GET /api/v1/users/{id}
 GET /api/v1/users/{id}/devices
@@ -149,6 +154,7 @@ POST /api/v1/nodes/enrollment-token
 POST /api/v1/nodes/{id}/cores/{component}/remove
 POST /api/v1/nodes/{id}/enrollment-token
 POST /api/v1/nodes/{id}/health-checks
+POST /api/v1/nodes/{id}/ports/allocate
 POST /api/v1/nodes/{id}/publish
 POST /api/v1/nodes/{id}/restart-core
 POST /api/v1/nodes/{id}/revoke-certificate
@@ -172,6 +178,11 @@ POST /api/v1/service-sets
 POST /api/v1/subscription-sources
 POST /api/v1/subscription-sources/{id}/refresh
 POST /api/v1/system/backup-retention-preview
+POST /api/v1/tunnel-rules
+POST /api/v1/tunnels
+POST /api/v1/tunnels/plan
+POST /api/v1/tunnels/publish
+POST /api/v1/tunnels/{id}/rotate-credentials
 POST /api/v1/users
 POST /api/v1/users/{id}/credentials/reset
 POST /api/v1/users/{id}/devices
@@ -205,5 +216,7 @@ PUT /api/v1/system/backup-schedule
 PUT /api/v1/system/base
 PUT /api/v1/system/runtime-policy
 PUT /api/v1/system/storage-thresholds
+PUT /api/v1/tunnel-rules/{id}
+PUT /api/v1/tunnels/{id}
 PUT /api/v1/users/{id}
 PUT /api/v1/users/{id}/login

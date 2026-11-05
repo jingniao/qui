@@ -9,6 +9,7 @@ import (
 // migration files and real databases are never changed by this helper.
 func rewindPostK4Fixture(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindTunnelFixture(t, database)
 	// The GOST tunnel credentials (0128) came after K4 too.
 	var tunnels int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0128_gost_tunnels.sql'").Scan(&tunnels); err != nil {

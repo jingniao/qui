@@ -32,15 +32,28 @@ const gostMaterialLifetime = 10 * 365 * 24 * time.Hour
 // forward. The CA private key is not kept after issuing, because nothing else is
 // ever signed with it.
 type gostMaterial struct {
-	Generation    int64  `json:"generation"`
-	ServerName    string `json:"server_name"`
-	CACertPEM     string `json:"ca_cert_pem"`
-	ServerCertPEM string `json:"server_cert_pem"`
-	ServerKeyPEM  string `json:"server_key_pem"`
-	ClientCertPEM string `json:"client_cert_pem"`
-	ClientKeyPEM  string `json:"client_key_pem"`
-	NotAfter      string `json:"not_after"`
-	Fingerprint   string `json:"fingerprint"`
+	Next          *gostMaterial `json:"next,omitempty"`
+	Generation    int64         `json:"generation"`
+	ServerName    string        `json:"server_name"`
+	CACertPEM     string        `json:"ca_cert_pem"`
+	ServerCertPEM string        `json:"server_cert_pem"`
+	ServerKeyPEM  string        `json:"server_key_pem"`
+	ClientCertPEM string        `json:"client_cert_pem"`
+	ClientKeyPEM  string        `json:"client_key_pem"`
+	NotAfter      string        `json:"not_after"`
+	Fingerprint   string        `json:"fingerprint"`
+}
+
+// New managed tunnels seal both legs at save/rotation time. Each leg has
+// separate leaves and CA; planning never issues or changes credentials.
+func newManagedGostMaterial(tunnelID string, generation int64) (gostMaterial, error) {
+	m, err := newGostMaterial(tunnelID, generation)
+	if err != nil {
+		return m, err
+	}
+	next, err := newGostMaterial(tunnelID+":leg2", generation)
+	m.Next = &next
+	return m, err
 }
 
 // gostServerName is the synthetic DNS name the exit relay certificate carries and
@@ -152,6 +165,11 @@ func encodePEM(kind string, data []byte) string {
 // still verify against their own CA and carry the EKUs and name the two halves
 // need. A set that fails here is refused rather than deployed.
 func (m gostMaterial) valid(tunnelID string) error {
+	if m.Next != nil {
+		if err := m.Next.valid(tunnelID + ":leg2"); err != nil {
+			return err
+		}
+	}
 	if m.Generation < 1 || m.ServerName != gostServerName(tunnelID) {
 		return ErrGostTunnelMaterial
 	}
@@ -241,22 +259,26 @@ func (r *Repository) saveGostMaterial(ctx context.Context, e tunnelDatabase, tun
 		_, err := e.ExecContext(ctx, "UPDATE canvas_tunnels SET gost_material=NULL,updated_at=? WHERE id=?", stamp, tunnelID)
 		return err
 	}
-	if err := material.valid(tunnelID); err != nil {
-		return err
-	}
-	if r.Vault == nil {
-		return errors.New("configuration key unavailable")
-	}
-	data, err := json.Marshal(material)
-	if err != nil {
-		return err
-	}
-	sealed, err := r.Vault.Seal(data)
+	sealed, err := r.sealGostMaterial(tunnelID, *material)
 	if err != nil {
 		return err
 	}
 	_, err = e.ExecContext(ctx, "UPDATE canvas_tunnels SET gost_material=?,updated_at=? WHERE id=?", sealed, stamp, tunnelID)
 	return err
+}
+
+func (r *Repository) sealGostMaterial(tunnelID string, material gostMaterial) ([]byte, error) {
+	if err := material.valid(tunnelID); err != nil {
+		return nil, err
+	}
+	if r.Vault == nil {
+		return nil, errors.New("configuration key unavailable")
+	}
+	data, err := json.Marshal(material)
+	if err != nil {
+		return nil, err
+	}
+	return r.Vault.Seal(data)
 }
 
 // RotateCanvasTunnelCredentials replaces the credential set of one GOST tunnel and

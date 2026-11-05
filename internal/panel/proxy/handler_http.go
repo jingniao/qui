@@ -28,6 +28,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// and Viewer may read it. It is the same table the server validates against.
 	mux.Handle("GET /api/v1/protocol-support", h.Auth.Require(http.HandlerFunc(h.protocolSupport), false))
 	h.registerCanvas(mux)
+	h.registerTunnels(mux)
 }
 
 func (h *Handler) reachability(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +143,11 @@ func (h *Handler) deleteOutbound(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (h *Handler) fail(w http.ResponseWriter, err error) {
+	var managed *tunnelError
+	if errors.As(err, &managed) {
+		h.failTunnel(w, err)
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		httpapi.Error(w, 404, "not_found", err.Error())
 		return

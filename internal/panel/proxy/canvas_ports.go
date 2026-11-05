@@ -47,35 +47,18 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 		if !edge.autoPort {
 			continue
 		}
-		var start, end sql.NullInt64
-		err := s.Repository.Database.QueryRowContext(ctx, "SELECT port_range_start,port_range_end FROM node_meta WHERE node_id=?", edge.targetNode).Scan(&start, &end)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if !start.Valid {
-			continue
-		}
-		inbounds, err := snapshotList(func(page, size int) ([]Inbound, int, error) {
-			return s.Repository.Inbounds(ctx, edge.targetNode, page, size, true)
-		})
-		if err != nil {
-			return err
-		}
-		found := false
-		// A number used by any expanded listener of this node is unavailable; the
-		// edge's own generated listener stays reusable by name.
-		taken := map[int]bool{}
-		for _, i := range inbounds {
-			for _, occupied := range desiredstate.ListenPorts(i.Port, i.Settings) {
-				name, _ := canvasEdgeNames(edge.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, occupied)
-				if !(ownedIDs[i.ID] && i.Name == name) {
-					taken[occupied] = true
-				}
+		exclude := []PortOwner{}
+		for _, i := range owned {
+			name, _ := canvasEdgeNames(edge.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, i.Port)
+			if ownedIDs[i.ID] && i.Name == name {
+				exclude = append(exclude, PortOwner{Kind: "inbound", ID: i.ID})
 			}
 		}
+		occupied, err := s.Repository.portOccupants(ctx, s.Repository.Database, edge.targetNode, exclude)
+		if err != nil {
+			return err
+		}
+		taken := map[int]bool{}
 		for _, other := range plan.edges {
 			if other != edge && other.targetNode == edge.targetNode && (!other.autoPort || other.portAllocated) {
 				taken[other.port] = true
@@ -88,17 +71,19 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 				}
 			}
 		}
-		for port := int(start.Int64); port <= int(end.Int64); port++ {
-			if !taken[port] {
-				edge.port = port
-				edge.portAllocated = true
-				found = true
-				break
+		ports, err := allocatePorts(ctx, s.Repository.Database, edge.targetNode, 1, occupied, taken)
+		if err != nil {
+			var start *int
+			e := s.Repository.Database.QueryRowContext(ctx, "SELECT port_range_start FROM node_meta WHERE node_id=?", edge.targetNode).Scan(&start)
+			if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return e
 			}
+			if (e == nil && start != nil) || len(occupied[edge.port]) > 0 || taken[edge.port] {
+				return errors.New("服务器端口范围内没有可用的中转监听端口")
+			}
+			ports = []int{edge.port} // Legacy canvas default: TLS 8443 / WireGuard 51820.
 		}
-		if !found {
-			return errors.New("服务器端口范围内没有可用的中转监听端口")
-		}
+		edge.port, edge.portAllocated = ports[0], true
 	}
 	for _, relay := range plan.relays {
 		if err := s.allocateRelayPort(ctx, plan, relay); err != nil {

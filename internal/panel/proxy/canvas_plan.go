@@ -60,8 +60,8 @@ type canvasListener struct {
 // whatever its transport or core, so a TCP and a UDP listener (VLESS on TCP 443
 // next to Hysteria2 on UDP 443) cannot share one either. A GOST forward range
 // reserves every number it listens on. The node editor applies the same numeric
-// rule. Disabled inbounds reserve nothing, because the Agent only validates
-// enabled listeners.
+// rule. Explicit checks ignore disabled inbounds; automatic allocation skips
+// every configured inbound. Persisted tunnel/rule claims always reserve.
 func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan, stale *canvasStale) ([]CanvasPlanConflict, error) {
 	listeners := []canvasListener{}
 	for _, e := range plan.edges {
@@ -92,6 +92,19 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 		if err != nil {
 			return nil, err
 		}
+		// The shared reservation check also sees tunnel/rule drafts, which have
+		// no generated inbound until they are published.
+		exclude := []PortOwner{}
+		for _, o := range occupants {
+			exclude = append(exclude, PortOwner{Kind: "inbound", ID: o.ID})
+		}
+		reservations, err := s.Repository.portOccupants(ctx, s.Repository.Database, l.node, exclude, "enabled")
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range reservations[l.port] {
+			conflicts = append(conflicts, CanvasPlanConflict{NodeID: l.node, Port: l.port, With: o.Name, ConnectionID: l.connection, Reason: "listener", ObjectID: o.ID})
+		}
 		for _, o := range occupants {
 			// Exact names alone do not establish ownership: the same prefix/shape
 			// recognition used for pruning must also recognise this inbound.
@@ -120,11 +133,6 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 			if stale.inbound[o.ID] && o.Protocol == l.protocol && l.edge != nil && owner == l.edge.tunnelID {
 				l.edge.adopt = o
 				delete(stale.inbound, o.ID)
-				continue
-			}
-			// The Agent rejects a duplicate port only among enabled inbounds, so a
-			// disabled occupant reserves nothing for the node-wide number.
-			if !o.Enabled {
 				continue
 			}
 			reason := "listener"

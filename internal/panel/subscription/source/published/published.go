@@ -209,6 +209,15 @@ func publishedCredential(state desiredstate.State, credential user.Credential, v
 
 func build(n node.Node, inbound desiredstate.Inbound, credential user.Credential, labels []string) (proxy.Proxy, bool, error) {
 	settings := inbound.Settings
+	// The server-private xhttp/Reality settings have no client mapping yet (M2).
+	// Every save, snapshot and deployment gate refuses them in M1, so no published
+	// revision can carry them; this guard keeps that true for an archive restored
+	// from elsewhere. Withholding the endpoint is the only honest answer — exporting
+	// it without the public key and Short ID would hand out a client entry that
+	// cannot connect.
+	if settings.HasServerSettings() {
+		return proxy.Proxy{}, false, nil
+	}
 	endpoint := proxy.Proxy{
 		Origin:     proxy.Origin{Source: "published", Ref: inbound.ID, Node: proxy.Ref{ID: n.ID, Name: n.Name}, Labels: labels},
 		Name:       n.Name + " · " + inbound.Protocol,

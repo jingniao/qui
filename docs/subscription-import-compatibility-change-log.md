@@ -188,3 +188,16 @@
 - 空白与行尾校验：`git -c core.whitespace=cr-at-eol diff --check` 无输出；本记录与夹具全篇 CRLF 保持不变，新增行同为 CRLF，其余文档保持 LF；没有新增只含空白的行。
 - 未完成与限制：S0 的 Linux 门禁结果与来源管理/格式预览的浏览器走查仍缺；S1–S4、M1–M4 未完成；本轮不新增协议支持或验收结论。
 - 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`。
+
+## 2026-11-05：M1 自建契约接入真实能力上报（未提交，待个人复核与 Linux 门禁）
+
+- 请求：主检阅认为 M1 不能以“能力契约留到 M2”结项——原 `pkg/contracts/desiredstate/settings_contract.go` 与 `internal/panel/node/settings_contract.go` 明写 M1 不加字段、`SettingsContractCapability` 恒为零报告，而计划 §10 M1 与 §13.3 第 3 条要求现在就具备逐核／方向／版本／精确组合契约。本轮只补这一缺口：不提交、不合并、不跑完整 Linux 门禁、不推送／打标签／发布、不碰生产与真实源；评审仍由主检阅负责。
+- 基线：worktree `C:/Users/luanf/qui-wt/m1-contracts`，分支 `feat/v1.4-selfhost-m1`，HEAD `9045e1b`，保留原有未提交改动。
+- proto 变化（只做加法，无迁移）：新增 `message SettingsCombination {protocol,direction,security,transport,flow}`；`CoreCapability.server_settings_contract_version = 10`、`server_settings_combinations = 11`（逐核）；`Capabilities` 同名字段 23／24 作为单核标量形式。先核对 schema 再取下一未用编号，未改任何既有字段编号；用 `.tools` 的 protoc 36.2、protoc-gen-go v1.36.11 与 protoc-gen-go-grpc v1.6.2 重新生成 `pkg/contracts/agentpb`（与仓库既有生成版本一致），未手写生成代码。
+- 接线：`MultiRuntime.DetectCapabilities` 按各适配器上报复制到对应 `CoreCapability`；`control.reportCapabilities` 的单核装饰与面板 `node.EnabledCores` 的单核回退同样保留这两个字段；面板 `node.SettingsContractCapability` 只把上报转换为共享 `CoreSettingsCapability`（空安全／传输按 `ServerSettingsCombination` 相同口径归一），不推断来源；`validateMultiCapabilities` 用共享 `SettingsCombination.Valid()` 校验一次上报结构——组合缺版本、方向／传输非法、重复或超过 64 条都拒绝整条上报，未知版本仍接受（不断连）但不授权。
+- 生产行为不变：Xray／sing-box 适配器尚无渲染器，`detect` 构造能力时不写这些字段，因此生产 Agent 上报版本 0 与空组合，保存／快照／发布三处门禁一致关闭；未启用或宣传任何 Reality／xhttp 组合，也未声称渲染或客户端映射完成。
+- 测试：新增 `pkg/contracts/agentpb/settings_contract_wire_test.go`（二进制与 protojson 往返、旧 peer 以未知字段保留并在重新序列化后值不变）；`internal/panel/node/settings_contract_test.go` 覆盖零报告、精确正例、他核／未知版本／错方向／未列组合失败关闭与畸形上报被拒；`internal/agent/core/multi_test.go` 与 `internal/agent/control/settings_contract_test.go` 覆盖 Agent 侧复制与旧标量装饰；`internal/panel/proxy`、`internal/panel/deployment` 的 settings_contract 测试用合成上报走通保存／快照／发布放行路径（部署用单核标量回退）；`pkg/contracts/desiredstate/reality_test.go` 补“Reality 指针 + xhttp 传输但缺 xhttp 设置”的拒绝用例，保留 TLS+xhttp 真实证书的有效覆盖。
+- 整理：`reality.go` 删除自写 `equalBytes` 改用 `bytes.Equal`，压缩与仓库风格不符的重复说明文字；保留此前对独立 Reality／XHTTP 半边与 TLS+xhttp 证书互斥的修正。
+- 验证（Windows，Go 1.26.0，`.tools` 工具链，`-p 1`）：`go build ./...` exit 0；`go vet ./pkg/... ./internal/panel/... ./internal/agent/...` exit 0；`gofmt -l pkg internal cmd migrations` 无输出；`go test -count=1` 通过 agentpb、desiredstate、node、proxy（整包）、deployment（整包）、agent/core、agent/core/xray、agent/core/singbox、agent/control。
+- 未完成与限制：没有 Linux `scripts/check.sh`、没有真实核连接与浏览器走查；契约真实启用仍待 M2（Xray）与 M4（sing-box）渲染器；公开客户端模型与编解码仍属 S3／S4；无迁移（0133 留给 S1）。
+- 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`；本轮未提交。

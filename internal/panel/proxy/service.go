@@ -48,6 +48,14 @@ func mergeSettings(incoming, old desiredstate.ProtocolSettings) desiredstate.Pro
 	if incoming.WireGuard != nil && incoming.WireGuard.SecretKey == "" && old.WireGuard != nil {
 		incoming.WireGuard.SecretKey = old.WireGuard.SecretKey
 	}
+	// A Reality listener keeps its stored private key when an ordinary edit omits
+	// it, exactly like TLS material: the API never returns that half. The public
+	// key, handshake target and names are ordinary values and are taken as sent.
+	if incoming.Reality != nil && incoming.Reality.PrivateKey == "" && old.Reality != nil {
+		reality := *incoming.Reality
+		reality.PrivateKey = old.Reality.PrivateKey
+		incoming.Reality = &reality
+	}
 	// A GOST tunnel's relay halves are written by the canvas, so an Owner edit of
 	// the generated inbound keeps them; a nil hop list means "unchanged" and an
 	// explicit empty one clears the chain.
@@ -115,6 +123,12 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 		return Inbound{}, err
 	}
 	if err := ValidateInboundForwardOptions(n.Capabilities, input.Core, input.Settings); err != nil {
+		return Inbound{}, err
+	}
+	// The xhttp/Reality contract gate sits beside the forward one: the settings
+	// are stored in the encrypted column as validated, but only for a core that
+	// has explicitly reported the combination.
+	if err := ValidateInboundServerSettings(n.Capabilities, input.Core, input.Protocol, input.Settings); err != nil {
 		return Inbound{}, err
 	}
 	// The same rule desiredstate.Validate applies at publication, reported here

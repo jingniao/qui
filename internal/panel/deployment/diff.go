@@ -141,6 +141,16 @@ func reviewSettings(record *reviewRecord, settings desiredstate.ProtocolSettings
 			hiddenField(record, prefix+"client_key_pem", hop.ClientKeyPEM)
 		}
 	}
+	// A self-hosted xhttp/Reality listener is compared through its public values.
+	// The Reality private key is compared in memory only, as a hidden value, so a
+	// rotation shows up as a change without disclosing the key.
+	if settings.XHTTP != nil {
+		publicFields(record, "settings.xhttp.", settings.XHTTP, "host", "path", "mode")
+	}
+	if settings.Reality != nil {
+		publicFields(record, "settings.reality.", settings.Reality, "public_key", "handshake_target", "server_names", "short_ids")
+		hiddenField(record, "settings.reality.private_key", settings.Reality.PrivateKey)
+	}
 	hiddenField(record, "settings.certificate_pem", settings.CertificatePEM)
 	hiddenField(record, "settings.private_key_pem", settings.PrivateKeyPEM)
 	hiddenField(record, "settings.trusted_ca_pem", settings.TrustedCAPEM)

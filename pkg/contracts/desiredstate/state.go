@@ -109,6 +109,13 @@ type ProtocolSettings struct {
 	ServiceName    string             `json:"service_name,omitempty"`
 	WireGuard      *WireGuardSettings `json:"wireguard,omitempty"`
 	QUIC           *QUICSettings      `json:"quic,omitempty"`
+
+	// Reality and XHTTP are the server-private halves of a self-hosted VLESS
+	// listener (phase M1, reality.go). They are inbound-only typed structures —
+	// never opaque passthrough — so the client-facing parameters stay in the
+	// shared subscription/proxy model and the two halves cannot be confused.
+	Reality *RealityServerSettings `json:"reality,omitempty"`
+	XHTTP   *XHTTPSettings         `json:"xhttp,omitempty"`
 }
 
 // ForwardSettings describes a port forward. Host, Port and Network are the

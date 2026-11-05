@@ -49,6 +49,14 @@ func mask(settings desiredstate.ProtocolSettings) desiredstate.ProtocolSettings 
 		copy.SecretKey = ""
 		settings.WireGuard = &copy
 	}
+	// A Reality listener's private key is the server-private half: it stays in the
+	// sealed column and the encrypted revision. The public key, handshake target,
+	// server names and Short IDs are ordinary values and stay readable.
+	if settings.Reality != nil {
+		copy := *settings.Reality
+		copy.PrivateKey = ""
+		settings.Reality = &copy
+	}
 	// A GOST tunnel's material never leaves the panel: the relay key, the client
 	// key of every hop and the CA stay in the sealed column and in the revision.
 	if settings.Forward != nil && settings.Forward.HasRelaySettings() {
@@ -114,6 +122,7 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 	}
 	inbound.HasTLSKey = inbound.Settings.PrivateKeyPEM != ""
 	inbound.HasWireGuardKey = inbound.Settings.WireGuard != nil && inbound.Settings.WireGuard.SecretKey != ""
+	inbound.HasRealityKey = inbound.Settings.Reality != nil && inbound.Settings.Reality.PrivateKey != ""
 	if !reveal {
 		inbound.Settings = mask(inbound.Settings)
 	}

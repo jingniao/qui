@@ -1,6 +1,6 @@
 # Protocol Support Completion Plan: External Subscriptions, Self-Hosted Nodes, and Failure Diagnostics
 
-Status: **reviewed 2026-11-05 — approved with the amendments in [§14](#14-review-decisions-2026-11-05). The §14.5 refresh fix is implemented, and its commit `650b349` passed the Linux gate (`check` 1980 s, `cores` 572 s, total 2552 s, END 2026-11-05T09:30:12Z), independently verified from the gate log; everything else is still not implemented. S0 changed no production code; S1 is now in progress in a separate worktree, and no S1 completion is claimed.** §14 overrides earlier sections where they differ. Owner decisions (§14.3): both tracks in parallel; **all of this plan ships in v1.4.0** (both tracks and the refresh fix, see §14.7); duplicate `name|protocol` entries keep the first and reject the rest (§14.6). Prepared on November 4, 2026, America/Los_Angeles.
+Status: **reviewed 2026-11-05 — approved with the amendments in [§14](#14-review-decisions-2026-11-05). The §14.5 refresh fix is implemented, and its commit `650b349` passed the Linux gate (`check` 1980 s, `cores` 572 s, total 2552 s, END 2026-11-05T09:30:12Z), independently verified from the gate log; everything else is still not implemented, except the self-hosted **M1** contracts and capability gates (see the M1 status in §10 — contracts only, nothing renders or is exposed). S0 changed no production code; S1 is now in progress in a separate worktree, and no S1 completion is claimed.** §14 overrides earlier sections where they differ. Owner decisions (§14.3): both tracks in parallel; **all of this plan ships in v1.4.0** (both tracks and the refresh fix, see §14.7); duplicate `name|protocol` entries keep the first and reject the rest (§14.6). Prepared on November 4, 2026, America/Los_Angeles.
 
 This is the English version of [the Chinese plan](subscription-import-compatibility-plan.md), including its update dated `2026-11-04T23:15:43-08:00`. Self-hosted xhttp / Reality support is integrated into the scope, implementation phases, and acceptance criteria. The translation preserves the source document's scope and technical identifiers.
 
@@ -387,6 +387,54 @@ Still open before S0 can be called complete: a passing independent review of thi
 revision, then a Linux gate on the commit that carries it. S0 changed no production
 code, migration, API or UI — its output is documentation and measurements only. S1
 is now in progress in a separate worktree, and no S1 completion is claimed here.
+
+M1 status (2026-11-05, **contracts only — no self-hosted xhttp/Reality support
+yet; the phase still awaits main's personal review and the Linux gate**): the
+server-side half of the self-hosted track is implemented as typed contracts,
+capability reporting, validation and gates, on branch `feat/v1.4-selfhost-m1`
+(worktree base `9045e1b`). Nothing renders, generates keys, edits or exports
+these settings, and the protocol matrix lists them as pending.
+
+- Added: `desiredstate` server-private `reality` and `xhttp` settings on
+  `ProtocolSettings` (inbound-only, typed, no opaque passthrough or unknown
+  fields), structural validation (X25519 base64url-32 role-correct key pair,
+  bounded server names, even-hex Short IDs ≤16, Owner-required `host:port`
+  target with syntax-only checks, Reality/TLS-material exclusivity, TCP/H2 xhttp
+  mode subset, Vision limited to TCP+`tls`/`reality`), the
+  `CoreSettingsCapability` settings-contract model with per-combination
+  authorization, its additive `agentpb` transport (`SettingsCombination`, fields
+  10/11 on `CoreCapability` and 23/24 on `Capabilities`), and a fail-closed
+  renderer guard.
+- Gates: panel save (`proxy.ValidateInboundServerSettings`), configuration
+  snapshot (`SnapshotIntent`) and the pre-deployment check
+  (`deployment.validateStateCoresTx`) share one gate. The contract itself now
+  travels over additive `agentpb` fields — `CoreCapability.server_settings_contract_version`
+  (10) and `server_settings_combinations` (11) per core, and the same pair on
+  `Capabilities` (23/24) as the single-core scalar form — regenerated with
+  `scripts/generate-proto.sh`. The Agent's `MultiRuntime.DetectCapabilities` and
+  the legacy `reportCapabilities` decoration copy what each adapter reports, the
+  panel's `node.SettingsContractCapability` only converts (no inference) and
+  `node.EnabledCores` keeps the fields in the single-core fallback;
+  `validateMultiCapabilities` checks the report shape once with the shared
+  combination validator. Production Xray/sing-box adapters ship no renderer yet,
+  so they report version 0 with no combinations and every xhttp/Reality listener
+  stays refused; unknown versions are accepted (no disconnect) but authorize
+  nothing. Version text, the VLESS inbound flag, `multi_core_supported` and the
+  GOST contract are explicitly not evidence. The Xray and sing-box render entries
+  refuse such a state rather than dropping the fields, and the published
+  subscription source withholds such an endpoint — a temporary guard while no
+  renderer exists, not evidence that client mapping is complete. A masked read
+  keeps the Reality private key out of API responses, and the revision comparison
+  hides it as `[已隐藏]`.
+- Not in M1: key generation/rotation, Xray or sing-box rendering, editor options
+  (M3), subscription client mapping (M2), any migration, and any change to the
+  import track or the shared client model.
+- Verification: `gofmt`, focused `go vet`/`go test` on the touched packages
+  (Windows, Go 1.26.0). No Linux `scripts/check.sh` or real-core run was made
+  for this change; per §14.1 item 9 the phase commit gets its own Linux gate
+  after review. Synthetic reports exercise the transport round trip and the
+  save/snapshot/deploy allow path, while production wiring stays closed until a
+  renderer reports a combination.
 
 ## 11. Acceptance Criteria
 

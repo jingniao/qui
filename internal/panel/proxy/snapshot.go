@@ -140,6 +140,13 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		if err := ValidateInboundCore(n.Capabilities, record.Core, record.Protocol); err != nil {
 			return state, enabled, err
 		}
+		// A stored inbound is published only to a core that has declared the
+		// xhttp/Reality settings contract: a revision restored from a backup, or
+		// one older than the capability report, must not reach an Agent that would
+		// silently ignore the settings.
+		if err := ValidateInboundServerSettings(n.Capabilities, record.Core, record.Protocol, record.Settings); err != nil {
+			return state, enabled, fmt.Errorf("inbound %s: %w", record.ID, err)
+		}
 		// The intent is taken before the auto-disable below: an inbound the
 		// Owner enabled stays in it even while it has no users.
 		if record.Enabled {

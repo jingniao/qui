@@ -6,72 +6,224 @@
       description="按代理节点灵活管理分组，支持在分流策略与规则中引用。"
     >
       <template #actions>
-        <button class="ios-btn-secondary" :disabled="loading || busy" @click="load">刷新</button>
-        <button v-if="isOwner" class="ios-btn-primary" :disabled="loading || !!error || busy" @click="edit(null)">新建节点组</button>
+        <button class="ios-btn-secondary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || busy" @click="load">
+          <svg class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>刷新</span>
+        </button>
+        <button v-if="isOwner" class="ios-btn-primary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || !!error || busy" @click="edit(null)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          <span>新建节点组</span>
+        </button>
       </template>
     </PageHeader>
 
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <p v-else-if="loading" role="status" class="text-sm text-ios-tertiary">正在加载节点分组…</p>
+    <div v-else-if="loading" role="status" class="flex items-center justify-center p-12 text-sm text-neutral-400 gap-2">
+      <svg class="w-4 h-4 animate-spin text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+      <span>正在加载节点分组…</span>
+    </div>
     <EmptyState
       v-else-if="!groups.length"
       title="暂无节点分组"
       description="将代理节点加入分组，可在分流控制与策略中统一引用。"
     />
     <div v-else class="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-      <!-- Left sidebar list -->
-      <aside class="panel-card p-4 space-y-4 lg:col-span-1" aria-label="节点分组列表">
-        <input v-model="keyword" class="form-input-base" placeholder="搜索节点分组" aria-label="搜索节点分组" />
-        <section class="space-y-2">
+      <!-- 左侧主导分组列表 (Left Master Sidebar) -->
+      <aside class="panel-card p-4 space-y-3.5 lg:col-span-1 lg:sticky lg:top-6" aria-label="节点分组列表">
+        <div class="flex items-center justify-between px-1">
+          <span class="text-xs font-bold text-neutral-500 uppercase tracking-wider">节点分组</span>
+          <span class="text-[11px] font-mono font-medium text-neutral-400 tabular-nums">共 {{ groups.length }} 组</span>
+        </div>
+
+        <!-- 搜索框 (Apple iOS Inset Search Bar) -->
+        <div class="relative flex items-center">
+          <svg
+            class="w-3.5 h-3.5 text-neutral-400 absolute left-3 pointer-events-none shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            v-model="keyword"
+            type="text"
+            style="padding-left: 2.25rem !important; padding-right: 2rem !important;"
+            class="w-full text-xs h-9 bg-black/[0.04] hover:bg-black/[0.06] focus:bg-white rounded-xl border border-black/[0.06] focus:border-ios-blue focus:ring-2 focus:ring-ios-blue/20 text-neutral-800 placeholder:text-neutral-400 transition-all outline-none"
+            placeholder="搜索节点分组…"
+            aria-label="搜索节点分组"
+          />
+          <button
+            v-if="keyword"
+            type="button"
+            class="absolute right-2.5 w-4 h-4 rounded-full bg-neutral-300 hover:bg-neutral-400 text-white flex items-center justify-center text-[10px] transition-colors cursor-pointer select-none"
+            title="清空搜索"
+            @click="keyword = ''"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- 分组列表项 -->
+        <section class="space-y-2 max-h-[calc(100vh-22rem)] overflow-y-auto pr-0.5">
           <button
             v-for="group in filteredGroups"
             :key="group.id"
             type="button"
             :aria-current="selected?.id === group.id ? 'true' : undefined"
-            class="w-full rounded-xl p-3 text-left transition-all active:scale-95"
+            class="w-full rounded-2xl p-3 text-left transition-all cursor-pointer border select-none group text-xs"
             :class="[
-              selected?.id === group.id ? 'bg-ios-blue/10 ring-1 ring-ios-blue/20' : 'hover:bg-ios-bg',
-              { 'opacity-50': !group.enabled }
+              selected?.id === group.id
+                ? 'bg-blue-50/70 border-blue-200/90 shadow-2xs ring-1 ring-ios-blue/20'
+                : 'bg-white hover:bg-neutral-50/80 border-black/[0.06] hover:border-black/[0.12]',
+              { 'opacity-60': !group.enabled }
             ]"
             @click="selectGroup(group.id)"
           >
-            <span class="block text-sm font-semibold text-ios-label break-words">{{ group.name }}</span>
-            <span class="text-xs text-ios-secondary font-mono tabular-nums">
-              {{ groupNodesFor(group.id).length }} 个节点
-            </span>
+            <div class="flex items-start justify-between gap-2 mb-1.5">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :class="group.enabled ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.35)]' : 'bg-neutral-300'"
+                  :title="group.enabled ? '正常启用' : '已停用'"
+                />
+                <span
+                  class="text-sm font-semibold truncate"
+                  :class="selected?.id === group.id ? 'text-ios-blue' : 'text-neutral-800'"
+                >
+                  {{ group.name }}
+                </span>
+              </div>
+              <span
+                class="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 border"
+                :class="group.purpose === 'subscription' ? 'bg-blue-50 text-ios-blue border-blue-200/60' : (group.purpose === 'mixed' ? 'bg-purple-50 text-purple-700 border-purple-200/60' : 'bg-amber-50 text-amber-700 border-amber-200/60')"
+              >
+                {{ groupPurposeNames[group.purpose] || '分组' }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between text-neutral-400 pl-3.5">
+              <span class="font-mono tabular-nums">
+                {{ groupNodesFor(group.id).length }} 个节点
+              </span>
+              <span v-if="group.grantedUserIds?.length" class="text-[11px] font-mono tabular-nums">
+                {{ group.grantedUserIds.length }} 位用户
+              </span>
+            </div>
           </button>
         </section>
-        <p v-if="!filteredGroups.length" class="text-sm text-ios-tertiary">没有符合条件的节点分组</p>
+        <p v-if="!filteredGroups.length" class="text-xs text-neutral-400 text-center py-4">没有符合条件的节点分组</p>
       </aside>
 
-      <!-- Right main content -->
+      <!-- 右侧详细工作区 (Right Detail Workspace) -->
       <div v-if="selected" class="lg:col-span-3 space-y-6 min-w-0">
-        <!-- 1. Group info card -->
-        <section class="panel-card p-6 space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-[17px] sm:text-lg font-semibold text-ios-label break-words">{{ selected.name }}</h2>
-            <div v-if="isOwner" class="flex gap-2">
-              <button class="ios-btn-secondary" :disabled="busy" @click="edit(selected)">编辑</button>
-              <button class="ios-btn-danger" :disabled="busy" @click="askDelete">删除</button>
+        <!-- 1. 分组概要信息卡片 (Group Overview Card) -->
+        <section class="panel-card p-6 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2 mb-2">
+                <h2 class="text-xl font-bold text-neutral-900 tracking-tight break-words">
+                  {{ selected.name }}
+                </h2>
+                <span
+                  class="text-xs px-2.5 py-0.5 rounded-full font-semibold border"
+                  :class="selected.purpose === 'subscription' ? 'bg-blue-50 text-ios-blue border-blue-200/80' : 'bg-amber-50 text-amber-700 border-amber-200/80'"
+                >
+                  {{ groupPurposeNames[selected.purpose] || '节点分组' }}
+                </span>
+                <StatusBadge :status="selected.enabled ? 'active' : 'disabled'" />
+                <span
+                  v-if="!selected.subscriptionVisible"
+                  class="text-xs px-2 py-0.5 rounded-full font-medium bg-neutral-100 text-neutral-600 border border-neutral-200"
+                >
+                  订阅隐藏
+                </span>
+              </div>
+              <p v-if="selected.remark" class="text-xs text-neutral-500 whitespace-pre-wrap break-words leading-relaxed">
+                {{ selected.remark }}
+              </p>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div v-if="isOwner" class="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+              <button
+                type="button"
+                class="ios-btn-secondary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
+                :disabled="busy"
+                @click="edit(selected)"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                <span>编辑</span>
+              </button>
+              <button
+                type="button"
+                class="h-8 px-3 rounded-xl border border-red-200 bg-red-50/60 hover:bg-red-100/80 text-red-600 text-xs font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:pointer-events-none shadow-2xs"
+                :disabled="busy"
+                @click="askDelete"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                <span>删除</span>
+              </button>
             </div>
           </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs text-ios-secondary">
-            <span>{{ groupPurposeNames[selected.purpose] || '节点分组' }}</span>
-            <StatusBadge :status="selected.enabled ? 'active' : 'disabled'" />
+
+          <!-- 核心统计概览行 -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-black/[0.04]">
+            <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
+              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">组内节点</span>
+              <span class="text-base font-bold text-neutral-800 font-mono tabular-nums">{{ currentGroupNodes.length }}</span>
+            </div>
+            <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
+              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">授权用户</span>
+              <span class="text-base font-bold text-neutral-800 font-mono tabular-nums">{{ selected.grantedUserIds?.length || 0 }}</span>
+            </div>
+            <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
+              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">策略引用</span>
+              <span class="text-base font-bold text-neutral-800 font-mono tabular-nums">{{ references.length }}</span>
+            </div>
+            <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
+              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">运行状态</span>
+              <span class="text-xs font-semibold inline-flex items-center gap-1.5" :class="selected.enabled ? 'text-emerald-600' : 'text-neutral-500'">
+                <span class="w-1.5 h-1.5 rounded-full" :class="selected.enabled ? 'bg-emerald-500' : 'bg-neutral-400'"></span>
+                {{ selected.enabled ? '正常生效' : '已停用' }}
+              </span>
+            </div>
           </div>
-          <p v-if="selected.remark" class="text-sm text-ios-secondary whitespace-pre-wrap break-words">{{ selected.remark }}</p>
         </section>
 
-        <!-- 2. Nodes in group (Group Nodes Table) -->
-        <section class="space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-[17px] font-semibold text-ios-label">
-              组内节点 <span class="font-mono tabular-nums">（{{ currentGroupNodes.length }}）</span>
-            </h2>
-            <button v-if="isOwner" class="ios-btn-secondary" :disabled="busy" @click="openPicker">+ 添加节点</button>
+        <!-- 2. 组内节点表格卡片 (Group Nodes Table) -->
+        <section class="panel-card overflow-hidden">
+          <div class="p-5 flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] bg-neutral-50/50">
+            <div class="flex items-center gap-2">
+              <h3 class="text-base font-bold text-neutral-900">组内节点</h3>
+              <span class="px-2 py-0.5 rounded-full text-xs font-mono font-semibold bg-neutral-200/70 text-neutral-700 tabular-nums">
+                {{ currentGroupNodes.length }}
+              </span>
+            </div>
+            <button
+              v-if="isOwner"
+              type="button"
+              class="ios-btn-primary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
+              :disabled="busy"
+              @click="openPicker"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              <span>添加节点</span>
+            </button>
           </div>
 
-          <DataTable v-if="currentGroupNodes.length">
+          <DataTable v-if="currentGroupNodes.length" class="border-0 shadow-none rounded-none">
             <template #header>
               <th>节点名称</th>
               <th>来源类型</th>
@@ -82,12 +234,12 @@
               <th v-if="isOwner">操作</th>
             </template>
             <template #body>
-              <tr v-for="node in currentGroupNodes" :key="node.id">
+              <tr v-for="node in currentGroupNodes" :key="node.id" class="hover:bg-neutral-50/60 transition-colors">
                 <td>
-                  <span class="block text-[15px] font-semibold text-ios-label">
+                  <span class="block text-sm font-semibold text-neutral-800">
                     {{ node.name }}
                   </span>
-                  <span class="block text-[11px] text-ios-tertiary truncate max-w-[220px]" :title="memberServerLabel(node)">
+                  <span class="block text-[11px] text-neutral-400 truncate max-w-[220px]" :title="memberServerLabel(node)">
                     {{ memberServerLabel(node) }}
                   </span>
                 </td>
@@ -100,11 +252,11 @@
                   </span>
                 </td>
                 <td>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono font-bold uppercase bg-ios-blue/10 text-ios-blue">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono font-bold uppercase bg-blue-50 text-ios-blue border border-blue-200/50">
                     {{ node.protocol }}
                   </span>
                 </td>
-                <td class="font-mono tabular-nums text-xs text-ios-secondary">
+                <td class="font-mono tabular-nums text-xs text-neutral-600">
                   {{ node.port }}
                 </td>
                 <td>
@@ -113,73 +265,159 @@
                     :to="`/nodes/${node.serverId}`"
                     class="text-xs text-ios-blue hover:underline inline-flex items-center gap-1.5"
                   >
-                    <span>{{ serverMap[node.serverId].name }}</span>
+                    <!-- 状态指示圆点置于服务器名称左侧，符合排版规范 -->
                     <span
-                      class="w-1.5 h-1.5 rounded-full inline-block"
-                      :class="serverMap[node.serverId].status === 'online' ? 'bg-ios-green' : 'bg-ios-tertiary'"
+                      class="w-1.5 h-1.5 rounded-full inline-block shrink-0"
+                      :class="serverMap[node.serverId].status === 'online' ? 'bg-emerald-500' : 'bg-neutral-300'"
                     />
+                    <span class="truncate max-w-[160px]">{{ serverMap[node.serverId].name }}</span>
                   </router-link>
-                  <span v-else class="text-xs text-ios-secondary font-medium">
+                  <span v-else class="text-xs text-neutral-500 font-medium">
                     {{ node.sourceName }}
                   </span>
                 </td>
                 <td>
-                  <StatusBadge v-if="node.sourceType === 'self_hosted'" :status="node.enabled ? 'active' : 'disabled'" /><span v-else class="text-xs text-ios-secondary">—</span>
+                  <StatusBadge v-if="node.sourceType === 'self_hosted'" :status="node.enabled ? 'active' : 'disabled'" />
+                  <span v-else class="text-xs text-neutral-400">—</span>
                 </td>
                 <td v-if="isOwner">
-                  <button class="ios-action-btn-danger" :disabled="busy" @click="removeNode(node.id)">移出</button>
+                  <button
+                    type="button"
+                    class="h-7 px-2.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs font-medium transition-colors"
+                    :disabled="busy"
+                    @click="removeNode(node.id)"
+                  >
+                    移出
+                  </button>
                 </td>
               </tr>
             </template>
           </DataTable>
-          <EmptyState
-            v-else
-            title="暂无组内节点"
-            description="添加自建代理节点或导入节点后，可在此查看已加入该组的具体节点。"
-          />
-        </section>
-
-        <section v-if="!isUserGroup(selected)" class="panel-card p-6 space-y-3">
-          <p class="text-sm text-ios-secondary">中转 / 出口分组不授予用户接入权限。</p>
-          <template v-if="selected.serverIds !== undefined">
-            <h2 class="text-[17px] font-semibold text-ios-label">显式服务器成员</h2>
-            <label v-for="server in servers" :key="server.id" class="flex items-center gap-2 text-sm text-ios-label">
-              <input v-model="serverSelection" type="checkbox" :value="server.id" :disabled="!isOwner || busy" class="accent-ios-blue" />{{ server.name }}
-            </label>
-            <button v-if="isOwner" class="ios-btn-secondary" :disabled="busy" @click="saveServers">保存服务器成员</button>
-          </template>
-        </section>
-        <section class="panel-card p-6 space-y-3">
-          <h2 class="text-[17px] font-semibold text-ios-label">授权用户</h2>
-          <p v-if="!selected.enabled || !selected.subscriptionVisible" class="text-xs text-ios-secondary">分组停用或订阅隐藏时，授权不提供用户接入。</p>
-          <ul class="space-y-2">
-            <li v-for="id in selected.grantedUserIds || []" :key="id" class="flex items-center justify-between gap-3 text-sm text-ios-label">
-              <span>{{ users.find(user => user.id === id)?.displayName || users.find(user => user.id === id)?.username || '—' }}</span>
-              <button v-if="isOwner" class="ios-action-btn-danger" :disabled="busy" @click="askRevoke(id)">撤销授权</button>
-            </li>
-          </ul>
-          <p v-if="!selected.grantedUserIds?.length" class="text-xs text-ios-tertiary">暂无授权用户</p>
-          <div v-if="isOwner && isUserGroup(selected)" class="flex gap-2">
-            <select v-model="grantUserId" class="form-input-base" aria-label="选择授权用户">
-              <option value="">选择用户</option><option v-for="user in grantCandidates" :key="user.id" :value="user.id">{{ user.displayName || user.username }}</option>
-            </select>
-            <button class="ios-btn-primary shrink-0" :disabled="busy || !grantUserId" @click="grantUser">添加授权</button>
+          <div v-else class="p-8">
+            <EmptyState
+              title="暂无组内节点"
+              description="点击右上角「+ 添加节点」将自建入站或导入节点加入此分组。"
+            />
           </div>
         </section>
-        <!-- 3. Policy References -->
-        <section class="panel-card p-6 space-y-3">
-          <h2 class="text-[17px] font-semibold text-ios-label">被引用</h2>
-          <ul v-if="references.length" class="space-y-2 text-sm">
-            <li v-for="reference in references" :key="reference.key">
-              <router-link :to="reference.path" class="text-ios-blue hover:underline">{{ reference.label }}</router-link>
-            </li>
-          </ul>
-          <p v-else class="text-sm text-ios-tertiary">暂无引用</p>
+
+        <!-- 中转 / 出口分组显式服务器成员配置 -->
+        <section v-if="!isUserGroup(selected)" class="panel-card p-6 space-y-3">
+          <p class="text-xs text-neutral-500">中转 / 出口分组不授予用户接入权限。</p>
+          <template v-if="selected.serverIds !== undefined">
+            <h3 class="text-sm font-bold text-neutral-800">显式服务器成员</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1">
+              <label v-for="server in servers" :key="server.id" class="flex items-center gap-2 text-xs text-neutral-700 p-2 rounded-lg border border-black/[0.06] hover:bg-black/[0.01]">
+                <input v-model="serverSelection" type="checkbox" :value="server.id" :disabled="!isOwner || busy" class="accent-ios-blue" />
+                <span class="truncate">{{ server.name }}</span>
+              </label>
+            </div>
+            <button v-if="isOwner" class="ios-btn-secondary text-xs px-3 py-1.5 h-8 font-medium mt-2" :disabled="busy" @click="saveServers">保存服务器成员</button>
+          </template>
+        </section>
+
+        <!-- 3. 授权用户卡片 (Authorized Users Card) -->
+        <section class="panel-card p-6 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-black/[0.04]">
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-base font-bold text-neutral-900">授权用户</h3>
+                <span class="px-2 py-0.5 rounded-full text-xs font-mono font-semibold bg-neutral-200/70 text-neutral-700 tabular-nums">
+                  {{ selected.grantedUserIds?.length || 0 }}
+                </span>
+              </div>
+              <p v-if="!selected.enabled || !selected.subscriptionVisible" class="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <span>⚠️ 分组停用或订阅隐藏时，已授权用户无法通过订阅拉取接入此组节点。</span>
+              </p>
+              <p v-else class="text-xs text-neutral-400 mt-0.5">
+                已授权用户可在其订阅客户端中获取并使用该分组下的所有节点。
+              </p>
+            </div>
+
+            <!-- 顶部快捷添加授权工具条 (采用统一的 AppSelect 组件) -->
+            <div v-if="isOwner && isUserGroup(selected)" class="flex items-center gap-2 shrink-0">
+              <AppSelect
+                v-model="grantUserId"
+                :options="grantCandidateOptions"
+                size="sm"
+                class="w-48 sm:w-56"
+                placeholder="选择待授权用户…"
+              />
+              <button
+                type="button"
+                class="ios-btn-primary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1 shrink-0 shadow-2xs"
+                :disabled="busy || !grantUserId"
+                @click="grantUser"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>添加授权</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 响应式用户卡片网格布局，彻底消除横向空白过大问题 -->
+          <div v-if="grantedUsers.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div
+              v-for="user in grantedUsers"
+              :key="user.id"
+              class="flex items-center justify-between p-3 rounded-xl border border-black/[0.06] bg-neutral-50/50 hover:bg-white hover:border-black/[0.12] hover:shadow-2xs transition-all"
+            >
+              <div class="flex items-center gap-2.5 min-w-0 pr-2">
+                <div class="w-8 h-8 rounded-full bg-blue-50 text-ios-blue font-bold text-xs flex items-center justify-center shrink-0 border border-blue-100">
+                  {{ (user.displayName || user.username || '?').charAt(0).toUpperCase() }}
+                </div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-semibold text-neutral-800 truncate" :title="user.displayName || user.username">
+                      {{ user.displayName || user.username }}
+                    </span>
+                    <span
+                      v-if="user.status === 'expired'"
+                      class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60 shrink-0"
+                    >
+                      已到期
+                    </span>
+                    <span
+                      v-else-if="user.status === 'disabled'"
+                      class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-neutral-100 text-neutral-500 shrink-0"
+                    >
+                      已禁用
+                    </span>
+                    <span
+                      v-else
+                      class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60 shrink-0"
+                    >
+                      正常
+                    </span>
+                  </div>
+                  <span v-if="user.displayName && user.displayName !== user.username" class="text-[11px] text-neutral-400 font-mono truncate block mt-0.5">
+                    @{{ user.username }}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                v-if="isOwner"
+                type="button"
+                class="h-7 px-2.5 rounded-lg border border-red-200/70 text-red-500 hover:text-red-700 hover:bg-red-50 text-xs font-medium transition-colors shrink-0"
+                :disabled="busy"
+                title="撤销该用户的分组授权"
+                @click="askRevoke(user.id)"
+              >
+                撤销
+              </button>
+            </div>
+          </div>
+          <div v-else class="py-6 text-center text-xs text-neutral-400 bg-black/[0.01] rounded-xl border border-dashed border-black/[0.08]">
+            暂无授权用户。请在上方选择用户并点击「添加授权」。
+          </div>
         </section>
       </div>
     </div>
 
-    <!-- Modals -->
+    <!-- 弹窗组件群 (Modals) -->
     <LineGroupEditor v-model="editorOpen" :group="editing" @saved="saved" />
     <LineGroupPicker
       v-if="pickerGroup"
@@ -208,6 +446,7 @@ import StatusBadge from '../../../components/StatusBadge.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
+import AppSelect, { type SelectOption } from '../../../components/AppSelect.vue';
 import LineGroupEditor from '../components/LineGroupEditor.vue';
 import LineGroupPicker, { type GroupPickerNode } from '../components/LineGroupPicker.vue';
 import { groupAPI, freshGroup, type NodeGroup } from '../../nodes/groupsApi';
@@ -242,7 +481,6 @@ const pickerOpen = ref(false);
 const pickerGroup = ref<NodeGroup | null>(null);
 const pickerError = ref('');
 
-
 const serverMap = computed(() => {
   const map: Record<string, NodeView> = {};
   for (const s of servers.value) {
@@ -252,9 +490,9 @@ const serverMap = computed(() => {
 });
 
 function sourceBadgeClass(type: string) {
-  if (type === 'self_hosted') return 'bg-ios-green/10 text-ios-green';
-  if (type === 'subscription') return 'bg-ios-purple/10 text-ios-purple';
-  return 'bg-ios-blue/10 text-ios-blue';
+  if (type === 'self_hosted') return 'bg-emerald-50 text-emerald-700 border border-emerald-200/60';
+  if (type === 'subscription') return 'bg-purple-50 text-purple-700 border border-purple-200/60';
+  return 'bg-blue-50 text-ios-blue border border-blue-200/60';
 }
 
 // Member names can repeat across servers, so the server (or import source) is shown
@@ -320,8 +558,38 @@ function groupNodesFor(groupId: string): GroupPickerNode[] {
 }
 const currentGroupNodes = computed(() => selected.value ? groupNodesFor(selected.value.id) : []);
 const pickerNodeIds = computed(() => pickerGroup.value ? memberIds(pickerGroup.value) : []);
+
 const grantCandidates = computed(() => users.value.filter(user => !selected.value?.grantedUserIds?.includes(user.id)));
-watch(() => selected.value, group => { serverSelection.value = [...(group?.serverIds || [])]; grantUserId.value = ''; });
+
+const grantCandidateOptions = computed<SelectOption[]>(() => {
+  return [
+    { value: '', label: '选择待授权用户…' },
+    ...grantCandidates.value.map(user => ({
+      value: user.id,
+      label: user.displayName ? `${user.displayName} (${user.username})` : user.username,
+      desc: user.status ? `用户状态: ${user.status}` : undefined
+    }))
+  ];
+});
+
+const grantedUsers = computed(() => {
+  const ids = selected.value?.grantedUserIds || [];
+  return ids.map(id => {
+    const user = users.value.find(u => u.id === id);
+    return {
+      id,
+      username: user?.username || '—',
+      displayName: user?.displayName,
+      status: user?.status,
+      expiresAt: user?.expiresAt
+    };
+  });
+});
+
+watch(() => selected.value, group => {
+  serverSelection.value = [...(group?.serverIds || [])];
+  grantUserId.value = '';
+});
 
 const filteredGroups = computed(() => {
   const q = keyword.value.trim().toLowerCase();
@@ -485,12 +753,15 @@ async function grantUser() {
   const group = selected.value, userId = grantUserId.value;
   if (!group || !userId) return;
   await mutate(() => userAPI.grantGroup(userId, group.id));
+  grantUserId.value = '';
 }
 function askRevoke(userId: string) {
   const group = selected.value;
   if (!group) return;
+  const user = users.value.find(u => u.id === userId);
+  const name = user?.displayName || user?.username || '该用户';
   confirmTitle.value = '撤销分组授权';
-  confirmMessage.value = '确认撤销该用户的分组授权？用户仍可通过其他已授权分组访问相同节点。';
+  confirmMessage.value = `确认撤销对“${name}”的分组授权？用户仍可通过其他已授权分组访问相同节点。`;
   confirmedAction = () => userAPI.revokeGroup(userId, group.id);
   confirmOpen.value = true;
 }

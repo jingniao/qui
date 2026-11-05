@@ -3,13 +3,14 @@
     <Transition name="ios-modal">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-50 bg-black/45 backdrop-blur-md flex items-center justify-center p-6 sm:p-8 lg:p-12 overflow-hidden"
+        class="fixed inset-0 z-[60] bg-black/45 backdrop-blur-md flex items-center justify-center p-6 sm:p-8 lg:p-12 overflow-hidden"
         @click.self="handleClose"
       >
         <div
           :class="[
-            'ios-modal-panel w-full bg-white rounded-3xl shadow-ios-lg border border-black/[0.08] overflow-hidden flex flex-col max-h-[85vh] my-auto',
-            widthClass
+            'ios-modal-panel w-full bg-white rounded-3xl shadow-ios-lg border border-black/[0.08] overflow-hidden flex flex-col my-auto',
+            resolvedWidthClass,
+            resolvedHeightClass
           ]"
         >
           <!-- Modal Header (Symmetrical with Footer) -->
@@ -73,13 +74,17 @@ const props = withDefaults(
     modelValue: boolean;
     title: string;
     description?: string;
-    width?: 'md' | 'lg' | 'xl' | '2xl';
+    width?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
+    widthClass?: string;
+    height?: 'auto' | 'md' | 'lg' | 'xl' | 'full';
+    heightClass?: string;
     confirmText?: string;
     loading?: boolean;
     showFooter?: boolean;
   }>(),
   {
     width: 'md',
+    height: 'auto',
     confirmText: '保存并应用',
     loading: false,
     showFooter: true
@@ -92,7 +97,8 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-const widthClass = computed(() => {
+const resolvedWidthClass = computed(() => {
+  if (props.widthClass) return props.widthClass;
   switch (props.width) {
     case 'lg':
       return 'max-w-lg';
@@ -100,8 +106,29 @@ const widthClass = computed(() => {
       return 'max-w-xl';
     case '2xl':
       return 'max-w-2xl';
+    case '3xl':
+      return 'max-w-3xl';
+    case '4xl':
+      return 'max-w-4xl';
     default:
       return 'max-w-md';
+  }
+});
+
+const resolvedHeightClass = computed(() => {
+  if (props.heightClass) return props.heightClass;
+  switch (props.height) {
+    case 'md':
+      return 'h-[65vh] min-h-[480px] max-h-[680px]';
+    case 'lg':
+      return 'h-[75vh] min-h-[580px] max-h-[780px]';
+    case 'xl':
+      return 'h-[82vh] min-h-[660px] max-h-[860px]';
+    case 'full':
+      return 'h-[90vh] min-h-[720px] max-h-[940px]';
+    case 'auto':
+    default:
+      return 'max-h-[85vh]';
   }
 });
 

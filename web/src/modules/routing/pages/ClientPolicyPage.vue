@@ -793,9 +793,13 @@
                           (自动测速并优选延迟最低节点转发)
                         </span>
                       </div>
-                      <div class="text-[11px] text-neutral-400 font-mono">
-                        {{ candidates.user ? `候选用户：${candidates.user.name}${candidates.autoSelected ? '（自动选择）' : ''}` : candidates.diagnostic }}
-                      </div>
+                    </div>
+                    <div v-if="resolvedGroupName === item.group.name" class="text-xs text-neutral-500 space-y-1">
+                      <p v-if="previewError" class="text-red-600">{{ previewError }}</p>
+                      <p v-if="previewResult?.context.user">使用用户 {{ previewResult.context.user.name }} 的授权生成{{ previewResult.context.autoSelected ? '（自动选择）' : '' }}</p>
+                      <p v-if="previewResult?.diagnostic">{{ previewResult.diagnostic }}</p>
+                      <p v-for="(warning, index) in previewResult?.warnings" :key="index">{{ warning.stage }} · {{ warning.ref }}：{{ warning.message }}</p>
+                      <p v-for="member in previewResult?.groups.find(group => group.name === item.group.name)?.members" :key="member.kind + member.name">{{ member.kind }} · {{ member.name }}</p>
                     </div>
 
                     <!-- 节点网格 -->
@@ -893,7 +897,7 @@
                       />
                       <button type="button" class="ios-btn-secondary text-xs" @click="loadCandidates">刷新候选</button>
                     </div>
-                    <p>最终成员以服务器展开为准，预览见 YAML 预览。此列表为该用户的全部授权候选，不代表当前组的筛选结果。</p>
+                    <button type="button" class="text-xs text-ios-blue" @click="resolveGroupMembers(item.group.name)">解析成员</button>
                     <p v-if="candidateError" class="text-red-600">{{ candidateError }}</p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-auto">
                       <label v-for="endpoint in candidates.items" :key="endpoint.ref" class="flex items-center gap-2 p-2 rounded-lg border border-black/[0.06]">
@@ -1102,7 +1106,7 @@
                   @click="resetRuleFilters"
                   class="text-xs text-neutral-400 hover:text-neutral-600 underline shrink-0 whitespace-nowrap ml-1"
                 >
-                  重置
+                  查看全部
                 </button>
 
                 <!-- 统计数量 -->
@@ -1259,7 +1263,7 @@
                             >
                               <button
                                 type="button"
-                                :disabled="isRuleAtBound(rule, -1)"
+                                :disabled="isFiltered || isRuleAtBound(rule, -1)"
                                 @click.stop="moveRuleInList(rule, -1)"
                                 class="w-full text-left px-3 py-1.5 text-neutral-700 hover:bg-neutral-50 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-between"
                               >
@@ -1268,7 +1272,7 @@
                               </button>
                               <button
                                 type="button"
-                                :disabled="isRuleAtBound(rule, 1)"
+                                :disabled="isFiltered || isRuleAtBound(rule, 1)"
                                 @click.stop="moveRuleInList(rule, 1)"
                                 class="w-full text-left px-3 py-1.5 text-neutral-700 hover:bg-neutral-50 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-between"
                               >
@@ -1301,6 +1305,7 @@
                       <td colspan="4" class="py-8 text-center text-xs text-neutral-400">
                         <div class="space-y-2">
                           <p>没有找到符合条件的分流规则</p>
+                          <button type="button" class="ios-btn-primary text-xs px-2.5 py-1" @click="openCreateRuleDrawer">添加规则</button>
                           <button
                             v-if="isFiltered"
                             type="button"
@@ -1317,7 +1322,7 @@
               </div>
 
               <!-- 3. 卡片底栏：MATCH 兜底规则 (固定在卡片最底端，4 列严格对齐！) -->
-              <div v-if="matchRule" class="bg-[#F8F9FA] border-t-2 border-black/[0.06] shrink-0 font-normal">
+              <div v-if="matchRule && (!ruleTargetFilter || matchRule.target === ruleTargetFilter)" class="bg-[#F8F9FA] border-t-2 border-black/[0.06] shrink-0 font-normal">
                 <table class="w-full text-left text-xs table-fixed">
                   <tbody>
                     <tr class="hover:bg-neutral-100/60 transition-colors">
@@ -1750,10 +1755,11 @@
           <div v-else-if="activeModule === 'preview'" class="space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
               <div>
-                <h3 class="text-base font-bold text-neutral-900">当前订阅模板 YAML 预览（不包含未保存草稿）</h3>
-                <p class="text-xs text-neutral-500 mt-0.5">仅预览服务器当前订阅模板；未启用配置与草稿预览待后续接入。</p>
+                <h3 class="text-base font-bold text-neutral-900">当前配置 YAML 预览</h3>
+                <p class="text-xs text-neutral-500 mt-0.5">预览正在编辑的配置；有未保存修改时使用草稿。</p>
               </div>
               <div class="flex items-center gap-2">
+                <button type="button" class="ios-btn-secondary text-xs px-3 py-1.5" @click="loadPreview">刷新预览</button>
                 <button
                   type="button"
                   @click="copyConfig"
@@ -1784,13 +1790,24 @@
                 />
               </div>
               <div class="text-[11px] text-neutral-400">
-                根据服务器当前订阅模板合成，用于订阅配置测试与复制
+                {{ previewResult?.previewSource === 'draft' ? '使用未保存草稿' : '使用已保存配置' }}，用于订阅配置测试与复制
+              </div>
+            </div>
+
+            <div class="text-xs text-neutral-600 space-y-2">
+              <p v-if="previewError" class="text-red-600">预览失败：{{ previewError }}；草稿已保留</p>
+              <p v-if="previewResult?.context.user">使用用户 {{ previewResult.context.user.name }} 的授权生成{{ previewResult.context.autoSelected ? '（自动选择）' : '' }}</p>
+              <p v-if="previewResult?.diagnostic">{{ previewResult.diagnostic }}</p>
+              <p v-for="(warning, index) in previewResult?.warnings" :key="index">{{ warning.stage }} · {{ warning.ref }}：{{ warning.message }}</p>
+              <div v-for="group in previewResult?.groups" :key="group.name">
+                <strong>{{ group.name }}</strong>
+                <span v-for="member in group.members" :key="member.kind + member.name" class="ml-2">{{ member.kind }} · {{ member.name }}</span>
               </div>
             </div>
 
             <!-- 渲染代码预览框 -->
             <div class="relative rounded-2xl bg-neutral-900 text-neutral-100 p-4 font-mono text-xs overflow-x-auto max-h-[460px] leading-relaxed shadow-inner">
-              <pre>{{ previewBody || '# 正在生成客户端完整订阅 YAML 配置预览…' }}</pre>
+              <pre>{{ previewBody }}</pre>
             </div>
           </div>
         </div>
@@ -2239,6 +2256,7 @@ import {
   type ClientPolicyCandidates,
   formatGroupMembers,
   parseGroupMembers,
+  type ClientPolicyPreview,
   toConfig,
   fromConfig,
   type ClientPolicyProfile,
@@ -2255,9 +2273,8 @@ import {
 } from '../api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
-import { userAPI, type ProxyUser } from '../../users/api';
 import { showToast } from '../../../app/api';
-import { APIError, request } from '../../../app/apiClient';
+import { APIError } from '../../../app/apiClient';
 import { authState, formatTime } from '../../../app/auth';
 import PageHeader from '../../../components/PageHeader.vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
@@ -2387,7 +2404,7 @@ const modulesList = [
     id: 'preview' as const,
     name: 'YAML 预览',
     en: 'preview',
-    desc: '预览服务器当前订阅模板；当前编辑的未启用配置与草稿预览待后续接入。',
+    desc: '预览正在编辑的配置与草稿，查看授权用户、解析成员及完整诊断。',
     icon: PreviewIcon
   }
 ];
@@ -2981,57 +2998,10 @@ function setGroupPrimaryExit(group: ClientProxyGroup, exitName: string) {
 
 // 代理组卡片底栏“编辑规则”动作
 function handleGroupRuleAction(groupName: string) {
-  const rules = getRulesTargetingGroup(groupName);
-  if (rules.length === 1) {
-    // 恰好有一条规则：直接呼出抽屉编辑该规则
-    openEditDrawer(rules[0]);
-  } else if (rules.length > 1) {
-    // 多条规则：跳转到分流规则列表并自动过滤该组规则，方便集中调整与排序
-    activeModule.value = 'rules';
-    ruleSearchKeyword.value = '';
-    ruleTargetFilter.value = groupName;
-    ruleTypeFilter.value = '';
-    showToast('已跳转至分流规则列表，已为您筛选「' + groupName + '」的关联规则');
-  } else {
-    // 暂无规则：呼出抽屉为该组创建首条规则
-    quickCreateRuleForGroup(groupName);
-  }
-}
-
-// 快速为代理组创建分流规则 (保留在代理组页面不跳出)
-function quickCreateRuleForGroup(groupName: string) {
-  ruleTargetGroupContext.value = groupName;
-  editingRule.value = null;
-  const maxPriority = clientConfig.value.rules
-    .filter(r => r.type !== 'MATCH')
-    .reduce((max, r) => Math.max(max, r.priority), 0);
-
-  form.value = {
-    type: 'DOMAIN-SUFFIX',
-    payload: '',
-    target: groupName,
-    noResolve: false,
-    enabled: true,
-    priority: maxPriority + 10,
-    description: ''
-  };
-
-  if (groupName.includes('AI') || groupName.includes('OpenAI') || groupName.includes('GPT')) {
-    form.value.type = 'DOMAIN-SUFFIX';
-    form.value.payload = 'openai.com';
-    form.value.description = 'AI 常用智能助手服务分流';
-  } else if (groupName.includes('YouTube') || groupName.includes('视频')) {
-    form.value.type = 'DOMAIN-SUFFIX';
-    form.value.payload = 'youtube.com';
-    form.value.description = 'YouTube 视频流媒体分流';
-  } else if (groupName.includes('Telegram') || groupName.includes('电报')) {
-    form.value.type = 'DOMAIN-SUFFIX';
-    form.value.payload = 'telegram.org';
-    form.value.description = 'Telegram 社交分流';
-  }
-
-  showAdvancedRuleSettings.value = false;
-  drawerVisible.value = true;
+  activeModule.value = 'rules';
+  ruleSearchKeyword.value = '';
+  ruleTargetFilter.value = groupName;
+  ruleTypeFilter.value = '';
 }
 
 // 增删移动分组
@@ -3570,7 +3540,7 @@ function getPayloadHelpText(type: ClientRuleType, payload: string): string {
 }
 
 function openCreateRuleDrawer() {
-  ruleTargetGroupContext.value = null;
+  ruleTargetGroupContext.value = ruleTargetFilter.value || null;
   editingRule.value = null;
   const maxPriority = clientConfig.value.rules
     .filter(r => r.type !== 'MATCH')
@@ -3578,7 +3548,7 @@ function openCreateRuleDrawer() {
   form.value = {
     type: 'DOMAIN-SUFFIX',
     payload: '',
-    target: clientConfig.value.proxyGroups[0]?.name || 'PROXY',
+    target: ruleTargetFilter.value || clientConfig.value.proxyGroups[0]?.name || 'PROXY',
     noResolve: false,
     enabled: true,
     priority: maxPriority + 10,
@@ -4323,44 +4293,42 @@ function getPayloadPlaceholder(type: ClientRuleType): string {
 }
 
 // 预览渲染
-const previewUsers = ref<ProxyUser[]>([]);
-
 const previewFormatOptions: SelectOption[] = [
   { value: 'clash', label: 'Clash / Mihomo', badge: 'YAML', desc: '标准 Clash Meta / Mihomo 配置文件' }
 ];
-const previewUserId = ref('');
 const previewFormat = ref('clash');
-const previewBody = ref('');
+const previewResult = ref<ClientPolicyPreview | null>(null);
+const previewError = ref('');
+const previewBody = computed(() => previewResult.value?.body || '');
+const resolvedGroupName = ref('');
 const copied = ref(false);
+let previewGeneration = 0;
+
+watch(clientConfig, () => {
+  previewGeneration++;
+  previewResult.value = null;
+  previewError.value = '';
+  resolvedGroupName.value = '';
+}, { deep: true, flush: 'sync' });
 
 async function loadPreview() {
-  previewBody.value = '';
-  if (!previewUserId.value && previewUsers.value.length > 0) {
-    previewUserId.value = previewUsers.value[0].id;
-  }
-  if (!previewUserId.value && isOwner.value) {
-    try {
-      const res = await userAPI.list(1, '', 100);
-      previewUsers.value = res.items;
-      if (res.items.length > 0) {
-        previewUserId.value = res.items[0].id;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  if (!previewUserId.value) {
-    previewBody.value = '# 暂无可用的测试用户或无权限读取用户列表';
-    return;
-  }
+  const generation = ++previewGeneration;
+  previewResult.value = null;
+  previewError.value = '';
   try {
-    const result = await request<{ body: string; warnings: { stage: string; ref: string; message: string }[] }>(
-      '/users/' + encodeURIComponent(previewUserId.value) + '/subscription-preview?format=' + encodeURIComponent(previewFormat.value)
-    );
-    previewBody.value = result.body;
+    const input = isDirty.value || !editingPolicyId.value
+      ? { template: fromConfig(clientConfig.value) }
+      : { profileId: editingPolicyId.value, profileRevision: clientConfig.value.version };
+    const result = await clientPolicyProfilesAPI.preview({ ...input, format: previewFormat.value });
+    if (generation === previewGeneration) previewResult.value = result;
   } catch (e) {
-    previewBody.value = '# 预览失败: ' + (e as Error).message;
+    if (generation === previewGeneration) previewError.value = (e as Error).message;
   }
+}
+
+async function resolveGroupMembers(name: string) {
+  resolvedGroupName.value = name;
+  await loadPreview();
 }
 
 watch(activeModule, (mod) => {
@@ -4413,14 +4381,6 @@ async function load() {
   }
   if (isOwner.value) {
     await loadCandidates();
-    try {
-      previewUsers.value = (await userAPI.list(1, '', 100)).items;
-      if (!previewUserId.value && previewUsers.value.length > 0) {
-        previewUserId.value = previewUsers.value[0].id;
-      }
-    } catch {
-      previewUsers.value = [];
-    }
   }
 }
 

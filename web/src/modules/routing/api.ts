@@ -285,7 +285,25 @@ export interface ClientPolicyCandidates {
   diagnostic?: string;
 }
 
+export interface ClientPolicyPreview {
+  body: string;
+  contentType: string;
+  format: string;
+  previewSource: 'draft' | 'saved';
+  profileId?: string;
+  profileRevision?: number;
+  templateDigest: string;
+  activeRevision: number;
+  context: { user?: { id: string; name: string }; autoSelected: boolean };
+  groups: { name: string; members: { kind: string; name: string }[] }[];
+  warnings: { stage: string; ref: string; message: string }[];
+  diagnostic?: string;
+}
+
+export type ClientPolicyPreviewInput = ({ template: RuleTemplate } | { profileId: string; profileRevision: number }) & { userId?: string; format?: string };
+
 export const clientPolicyProfilesAPI = {
+  preview: (input: ClientPolicyPreviewInput) => request<ClientPolicyPreview>('/client-policy-profiles/preview', 'POST', input),
   candidates: (userId?: string) => request<ClientPolicyCandidates>('/client-policy-candidates' + (userId ? '?userId=' + encodeURIComponent(userId) : '')),
   list: (page = 1, pageSize = 100) => request<{ items: ClientPolicySummary[]; total: number; page: number; pageSize: number; activeProfileId: string; activeRevision: number }>(`/client-policy-profiles?page=${page}&pageSize=${pageSize}`),
   get: (id: string) => request<ClientPolicyResult>('/client-policy-profiles/' + encodeURIComponent(id)),

@@ -271,7 +271,7 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 全局模板存在 `system_settings.client_rules`，有版本冲突检查与预设，按用户授权展开 `@all`、`@nodeGroup:<id>`、`@source:<id>`；服务端生成 YAML。客户端规则不替代节点策略。外部源仅 HTTPS，逐跳解析并固定经校验的公网 IP，限制 2 MiB / 15 秒；定时抓取加密缓存，订阅请求不抓取。导入节点仅用于客户端，不参与 Agent 发布、用户额度或设备门控。客户端链与格式边界见[协议矩阵](docs/protocol-support-matrix.md)。
 
-0132 增加 `client_policy_profiles` 服务端配置库，最多 50 个配置；Owner 通过 `/api/v1/client-policy-profiles` 管理，名称最多 64 字符、描述最多 500 字符，`uiMetadata` 为最多 64 KiB 的 JSON 对象且不进入订阅。`system_settings.client_policy_active` 只保存 `{profileId}`，`client_rules` 继续是订阅读取的活动快照，其 revision 为独立的 activeRevision。编辑使用配置 revision，编辑活动配置与启用还须匹配 activeRevision；启用即使内容相同也推进 activeRevision，未修改保存不推进版本。旧 PUT 同步活动配置与快照，旧 GET 继续允许 Viewer。初始化与恢复在无配置时复制既有快照或服务端默认模板，保留 activeRevision；备份校验指针与模板一致性。浏览器旧卡片经预览后按内容摘要幂等导入为未启用配置，全部成功才清除本地副本，不采用浏览器旧启用选择。设为订阅模板，客户端更新订阅后生效。成员支持 `@endpoint:inbound:<id>`、`@endpoint:relay:<rule id>` 和 `@endpoint:import:<source id>:<name|protocol>`，只从该用户授权且已通过订阅来源检查的端点解析，客户端链克隆跳不可精确选择。`includeKeywords/excludeKeywords` 由服务器展开时对代理名称做 NFKC 规范化、不区分大小写的字面子串筛选，空包含列表不限制，排除优先，不过滤内置动作或其他组。`emptyPolicy=direct/reject` 统一作用于授权展开和格式过滤后的空组，省略兼容 DIRECT；新地区组使用 `@all` 加包含关键词并默认 REJECT。Owner-only `GET /api/v1/client-policy-candidates?userId=<id>` 复用订阅授权管线，只返回端点引用、名称、协议、来源种类/名称和节点组 ID；省略用户时按仓储顺序选择首个有节点组授权的有效用户并标明 autoSelected，无合格用户返回空列表与诊断。页面仅展示授权候选，不在浏览器重复执行筛选；分组类别按名称存入 `uiMetadata.groupCategories`，重命名同步移动类别键与组/规则引用。Phase C 的草稿预览尚待接入，当前 YAML 预览仍使用服务端活动订阅模板。
+0132 增加 `client_policy_profiles` 服务端配置库，最多 50 个配置；Owner 通过 `/api/v1/client-policy-profiles` 管理，名称最多 64 字符、描述最多 500 字符，`uiMetadata` 为最多 64 KiB 的 JSON 对象且不进入订阅。`system_settings.client_policy_active` 只保存 `{profileId}`，`client_rules` 继续是订阅读取的活动快照，其 revision 为独立的 activeRevision。编辑使用配置 revision，编辑活动配置与启用还须匹配 activeRevision；启用即使内容相同也推进 activeRevision，未修改保存不推进版本。旧 PUT 同步活动配置与快照，旧 GET 继续允许 Viewer。初始化与恢复在无配置时复制既有快照或服务端默认模板，保留 activeRevision；备份校验指针与模板一致性。浏览器旧卡片经预览后按内容摘要幂等导入为未启用配置，全部成功才清除本地副本，不采用浏览器旧启用选择。设为订阅模板，客户端更新订阅后生效。成员支持 `@endpoint:inbound:<id>`、`@endpoint:relay:<rule id>` 和 `@endpoint:import:<source id>:<name|protocol>`，只从该用户授权且已通过订阅来源检查的端点解析，客户端链克隆跳不可精确选择。`includeKeywords/excludeKeywords` 由服务器展开时对代理名称做 NFKC 规范化、不区分大小写的字面子串筛选，空包含列表不限制，排除优先，不过滤内置动作或其他组。`emptyPolicy=direct/reject` 统一作用于授权展开和格式过滤后的空组，省略兼容 DIRECT；新地区组使用 `@all` 加包含关键词并默认 REJECT。Owner-only `GET /api/v1/client-policy-candidates?userId=<id>` 复用订阅授权管线，只返回端点引用、名称、协议、来源种类/名称和节点组 ID；省略用户时按仓储顺序选择首个有节点组授权的有效用户并标明 autoSelected，无合格用户返回空列表与诊断。页面仅展示授权候选，不在浏览器重复执行筛选；分组类别按名称存入 `uiMetadata.groupCategories`，重命名同步移动类别键与组/规则引用。Owner-only `POST /api/v1/client-policy-profiles/preview` 预览草稿 template 或已保存配置（profileId + profileRevision），两者互斥；要求 CSRF，只读且不记审计。草稿复用保存校验，失败返回 invalid_rules 及字段路径；已保存版本过期返回 409 stale_client_policy 及当前 revision。与候选接口共享自动选用户，无合格用户仍校验并返回空正文与诊断。预览与真实订阅共用渲染和单次 Expand，返回用户上下文、解析分组、全部警告、规范化模板 SHA-256 和 activeRevision；不签发 Token、不标记抓取，provider URL 为占位。旧用户 GET 预览仍用活动模板。页面未保存时预览草稿，否则预览当前配置；地区组解析成员使用同一接口。分组编辑规则始终打开目标筛选列表，空状态可新增并预选该组，筛选时禁用全局拖拽排序；保存、启用或预览失败均保留草稿。
 
 # 11. 节点管理模块
 
@@ -1021,6 +1021,11 @@ POST   /users/{id}/devices-online/reset
 GET    /subscription-formats
 GET/PUT /subscription-rules
 GET    /subscription-rules/presets
+GET/POST /client-policy-profiles
+GET/PUT/DELETE /client-policy-profiles/{id}
+POST   /client-policy-profiles/{id}/activate
+POST   /client-policy-profiles/preview
+GET    /client-policy-candidates?userId={id}
 GET/POST /subscription-sources
 PUT/DELETE /subscription-sources/{id}
 POST   /subscription-sources/{id}/refresh

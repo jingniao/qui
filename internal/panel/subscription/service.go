@@ -108,6 +108,8 @@ type Rendered struct {
 	Usage       format.Usage
 	UpdateHours int
 	Warnings    []proxy.Warning
+	Resolved    *rules.Resolved
+	User        candidateUser
 	Token       Token
 }
 
@@ -221,7 +223,11 @@ func (s *Service) Render(ctx context.Context, plaintext, requested, userAgent st
 	if err != nil {
 		return Rendered{}, err
 	}
-	rendered, err := s.render(ctx, token.UserID, token.DeviceID, requested, userAgent, providerURL)
+	template, err := s.template(ctx)
+	if err != nil {
+		return Rendered{}, fmt.Errorf("%w: %v", ErrSettings, err)
+	}
+	rendered, err := s.render(ctx, token.UserID, token.DeviceID, requested, userAgent, providerURL, template)
 	if err != nil {
 		return Rendered{}, err
 	}
@@ -235,10 +241,14 @@ func (s *Service) Render(ctx context.Context, plaintext, requested, userAgent st
 // Panel service rules are listed without a fetchable link, because a link
 // would need the user's token.
 func (s *Service) Preview(ctx context.Context, userID, deviceID, requested string) (Rendered, error) {
-	return s.render(ctx, userID, deviceID, requested, "", nil)
+	template, err := s.template(ctx)
+	if err != nil {
+		return Rendered{}, fmt.Errorf("%w: %v", ErrSettings, err)
+	}
+	return s.render(ctx, userID, deviceID, requested, "", nil, template)
 }
 
-func (s *Service) render(ctx context.Context, userID, deviceID, requested, userAgent string, providerURL func(string) string) (Rendered, error) {
+func (s *Service) render(ctx context.Context, userID, deviceID, requested, userAgent string, providerURL func(string) string, template rules.Template) (Rendered, error) {
 	account, viewer, err := s.account(ctx, userID, deviceID)
 	if err != nil {
 		return Rendered{}, err
@@ -260,10 +270,6 @@ func (s *Service) render(ctx context.Context, userID, deviceID, requested, userA
 	profile := format.Profile{Proxies: proxies, Usage: usage, ProviderURL: providerURL}
 	warnings := append(sourceWarnings, resolveWarnings...)
 	if exporter.UsesRules() {
-		template, err := s.template(ctx)
-		if err != nil {
-			return Rendered{}, fmt.Errorf("%w: %v", ErrSettings, err)
-		}
 		resolved := rules.Expand(template, proxies)
 		profile.Rules = &resolved
 		warnings = append(warnings, resolved.Warnings...)
@@ -273,7 +279,7 @@ func (s *Service) render(ctx context.Context, userID, deviceID, requested, userA
 		return Rendered{}, err
 	}
 	warnings = append(warnings, output.Warnings...)
-	return Rendered{Body: output.Body, ContentType: exporter.ContentType(), FileName: exporter.FileName(), Usage: usage, UpdateHours: policy.UpdateHours, Warnings: warnings}, nil
+	return Rendered{Body: output.Body, ContentType: exporter.ContentType(), FileName: exporter.FileName(), Usage: usage, UpdateHours: policy.UpdateHours, Warnings: warnings, Resolved: profile.Rules, User: candidateUser{ID: account.ID, Name: account.Username}}, nil
 }
 
 // template reads the client rule template, or the default preset when the

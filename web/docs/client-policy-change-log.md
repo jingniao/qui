@@ -1525,3 +1525,47 @@
   - `git diff --check`：通过。
   - 过程中修正了客户端链测试仍用旧 Origin.Ref 构造画布引用、JavaScript 对象属性顺序影响字符串相等断言、项目目标不支持 String.replaceAll 三项问题。沙箱完整 Go 测试中的备份恢复与 Agent 子进程遇到 Windows Access is denied，获准在沙箱外重跑；不把沙箱失败当成功。
 - **剩余工作与验证边界**：Phase C 草稿预览和 Phase D 共享引用保护仍待后续实施。本轮未执行 Linux scripts/check.sh、真实 Mihomo 核心套件、生产构建或登录浏览器走查。全部改动保留工作区，未提交或推送。
+
+---
+
+## 轮次 37：Client Policy 后端 Phase C——草稿预览与一致导航
+
+- **日期和时间**：2026-11-04T23:15:00-08:00（America/Los_Angeles）。
+- **本轮原始需求**：按英文计划 §9 Phase C、§6.1/7 和 §13.7/8/10，实现当前编辑配置的只读预览、解析成员、完整诊断、授权用户上下文及一致的“编辑规则”导航；不提交、不推送。
+- **涉及的全部文件路径**：
+  - `AGENTS.md`
+  - `internal/panel/subscription/service.go`
+  - `internal/panel/subscription/candidates.go`
+  - `internal/panel/subscription/profiles_handler.go`
+  - 新增 `internal/panel/subscription/profile_preview.go`
+  - 新增 `internal/panel/subscription/profile_preview_test.go`
+  - `internal/panel/subscription/rules/store.go`
+  - `internal/platform/server/testdata/portal_route_coverage.txt`
+  - `web/src/modules/routing/api.ts`
+  - `web/src/modules/routing/pages/ClientPolicyPage.vue`
+  - `web/scripts/client-policy-selftest.mjs`
+  - `web/docs/client-policy-change-log.md`
+- **修改前后行为**：
+  - 原 YAML 模块只预览活动订阅模板；现在已编辑未保存时提交完整草稿，否则提交当前配置 ID 与 revision。新建未保存的配置同样使用草稿，不要求先保存或启用。页面展示“使用用户 X 的授权生成”、自动选择标记、无用户诊断、所有 stage/ref/message 警告及各组解析成员，移除旧的待接入说明。
+  - 原 render 在内部读取活动模板；现在 render 显式接收模板，真实订阅、旧用户 GET 预览与新预览共享 account → collect → Expand → exporter.Render。Rendered 返回已有的 Resolved 和用户摘要，响应成员直接取自这次展开，不重新 Expand，也不改变 Service.Rules 或执行保存回滚。
+  - Candidates 原有分页自动选用户逻辑提取为共享 previewUser，预览不再由浏览器加载首批用户后随意选择。无有效授权用户仍校验草稿并返回空正文与中文诊断，不生成节点。
+  - 地区卡片的候选说明替换为“解析成员”，调用同一预览接口展示该组服务端结果，不增加接口或浏览器筛选实现。
+  - 分组“编辑规则”从按零/一/多条规则分别打开不同界面，改为始终进入按目标筛选的规则模块；显示目标标签和“查看全部”，空状态可新增并预选目标组。筛选时禁用拖拽及上移/下移。删除旧的按组名猜首条规则实现；规则集“用于分流”继续预选 RULE-SET 与 payload，并新增行为验证。
+  - 保存与启用错误继续通过 Phase A 的 profileFailure 保留草稿；预览只更新预览状态，失败清除旧结果并展示错误，不改编辑内容。配置变更时清除旧预览并使在途请求失效，请求代次保证旧响应不会覆盖较新的预览。
+- **接口与迁移变化**：
+  - 唯一新增接口为 Owner + CSRF 的 `POST /api/v1/client-policy-profiles/preview`。请求互斥选择 `{profileId,profileRevision}` 或 `{template}`，可选 userId、format（默认 clash）。草稿使用 Store 的 Lookup 调用 rules.Validate，返回 invalid_rules 与字段路径；已保存 revision 不匹配返回 409 stale_client_policy 与当前 revision。
+  - 返回 body/contentType/format、previewSource、可选 profileId/profileRevision、规范化模板 JSON 的 SHA-256 templateDigest、activeRevision、用户上下文、groups 与完整 warnings；无合格用户增加 diagnostic。成功响应 no-store。无审计、Token 签发、抓取时间标记或配置写入，面板 provider URL 保持占位。
+  - 旧 `GET /users/{id}/subscription-preview` 仍预览活动模板。AGENTS.md §10.3 与 §27.12 同步语义及 profiles CRUD/activate/preview、candidates 清单。无新增迁移。
+- **设计选择及计划差异**：遵循 §13 合并校验/解析到 preview，不新增 validate/resolve 接口；仅修改本阶段涉及的页面行为，不拆分整页。新建配置没有 ID，使用草稿输入。没有功能范围偏离。
+- **实际执行的验证及结果**：
+  - Go 使用仓库工具链：`$env:GOPATH="$PWD/.tools/gopath"; $env:GOCACHE="$PWD/.tools/gocache"; $env:GOTOOLCHAIN='local'`。
+  - `.tools/go/bin/go.exe vet ./...`：通过。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription/...`：通过。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription/... -run TestProfilesOwnerCSRFAndLegacyCompatibility`：通过。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription -run TestProfilePreview -count=1`：通过。覆盖草稿/未启用配置、默认格式、指定/自动用户、stale_client_policy、invalid_rules 字段路径、互斥/严格输入、Owner/Viewer/CSRF、无用户诊断、规范化摘要、无 Token/抓取/审计副作用和旧活动预览语义。包含面板服务规则及普通规则的预览与真实 /sub YAML 除 provider URL 外一致，响应 groups 与 YAML 成员逐项一致。
+  - `.tools/go/bin/go.exe test ./internal/panel/subscription/... ./internal/platform/server/...`：通过（沙箱外完整重跑 exit code 0；订阅包 6.409 秒，服务器 220.168 秒，包含路由清单及门户会话拒绝验证）。首轮订阅包通过，服务器的 Agent 子进程与备份恢复等测试遇到 Windows Access is denied，未把该轮失败记为通过。
+  - `npm.cmd --prefix web run typecheck`：通过。
+  - `node web/scripts/client-policy-selftest.mjs`：50 项通过；执行页面函数验证草稿/保存版请求选择、预览错误保留草稿、乱序响应不会覆盖新结果、地区解析、零/一/多条规则的一致导航及 RULE-SET 预选，补充 API 请求与展示/拖拽约束断言。
+  - `node web/scripts/ui-regression-selftest.mjs`：全部通过。
+  - `git diff --check`：通过。
+- **剩余工作与验证边界**：Phase D 共享规则集引用保护等仍待后续实施。本轮未执行 Linux scripts/check.sh、真实 Mihomo 核心套件、生产构建或已登录浏览器走查，不以 Windows 检查替代这些验收。改动保留工作区，未提交或推送；工作期间出现的两份订阅导入兼容性文档未作修改。

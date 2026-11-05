@@ -147,6 +147,7 @@ POST /api/v1/canvas-tunnels
 POST /api/v1/canvas-tunnels/{id}/adopt
 POST /api/v1/canvas-tunnels/{id}/rotate-credentials
 POST /api/v1/client-policy-profiles
+POST /api/v1/client-policy-profiles/preview
 POST /api/v1/client-policy-profiles/{id}/activate
 POST /api/v1/core-updates
 POST /api/v1/core-updates/{id}/clear

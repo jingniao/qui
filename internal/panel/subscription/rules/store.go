@@ -3,9 +3,11 @@ package rules
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"time"
@@ -198,4 +200,18 @@ func Equal(left, right Template) (bool, error) {
 		return false, err
 	}
 	return bytes.Equal(a, b), nil
+}
+
+// Digest identifies the normalized template, independent of omitted empty lists.
+func Digest(template Template) (string, error) {
+	data, err := json.Marshal(normalize(template))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+}
+
+// ValidateTemplate uses the same reference lookup as profile saves.
+func (s *Store) ValidateTemplate(ctx context.Context, template Template) error {
+	return Validate(ctx, template, s.Lookup)
 }

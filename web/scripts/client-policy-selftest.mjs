@@ -116,6 +116,65 @@ await api.clientPolicyProfilesAPI.candidates();
 await api.clientPolicyProfilesAPI.candidates('user/id');
 check('candidate API supports reported auto-selection and explicit users', client.calls.at(-2).path === '/client-policy-candidates' && client.calls.at(-1).path === '/client-policy-candidates?userId=user%2Fid');
 
+await api.clientPolicyProfilesAPI.preview({ template: membershipTemplate, format: 'clash' });
+await api.clientPolicyProfilesAPI.preview({ profileId: 'inactive', profileRevision: 4, userId: 'user' });
+check('draft preview posts the full template without saving', client.calls.at(-2).path === '/client-policy-profiles/preview' && client.calls.at(-2).method === 'POST' && isDeepStrictEqual(client.calls.at(-2).body.template, membershipTemplate));
+check('saved preview posts the profile revision and optional user', isDeepStrictEqual(client.calls.at(-1).body, { profileId: 'inactive', profileRevision: 4, userId: 'user' }));
+
+// Execute the page's changed actions with reactive values and API boundaries
+// replaced by small stubs. These tests check behavior, including draft retention.
+const script = page.slice(page.indexOf('<script setup lang="ts">') + '<script setup lang="ts">'.length, page.indexOf('</script>'));
+const ast = ts.createSourceFile('ClientPolicyPage.ts', script, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+function pageAction(name) {
+  return ast.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name).getText(ast);
+}
+const actions = ['loadPreview', 'resolveGroupMembers', 'handleGroupRuleAction', 'openCreateRuleDrawer', 'quickCreateRuleForService'].map(pageAction).join('\n');
+const compiledActions = ts.transpileModule(actions, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
+const ref = value => ({ value });
+const state = {
+  previewGeneration: 0,
+  isDirty: ref(true), editingPolicyId: ref('inactive'), clientConfig: ref(api.toConfig({ template: membershipTemplate, revision: 4, updatedAt: '', updatedBy: '' })),
+  previewResult: ref(null), previewError: ref(''), previewFormat: ref('clash'), resolvedGroupName: ref(''),
+  activeModule: ref('groups'), ruleSearchKeyword: ref('search'), ruleTargetFilter: ref(''), ruleTypeFilter: ref('DOMAIN'),
+  ruleTargetGroupContext: ref(null), editingRule: ref(null), form: ref({}), showAdvancedRuleSettings: ref(true), drawerVisible: ref(false),
+  fromConfig: api.fromConfig, clientPolicyProfilesAPI: { preview: async input => { client.calls.push(input); return { groups: [{ name: 'PROXY', members: [{ kind: 'builtin', name: 'REJECT' }] }] }; } }
+};
+const actionNames = ['loadPreview', 'resolveGroupMembers', 'handleGroupRuleAction', 'openCreateRuleDrawer', 'quickCreateRuleForService'];
+const run = new Function(...Object.keys(state), compiledActions + '\nreturn {' + actionNames.join(',') + '};')(...Object.values(state));
+await run.loadPreview();
+check('dirty page previews its draft and keeps the profile untouched', isDeepStrictEqual(client.calls.at(-1).template, membershipTemplate) && !('profileId' in client.calls.at(-1)) && state.isDirty.value);
+state.isDirty.value = false;
+await run.loadPreview();
+check('clean page previews its saved profile revision', isDeepStrictEqual(client.calls.at(-1), { profileId: 'inactive', profileRevision: 4, format: 'clash' }));
+await run.resolveGroupMembers('PROXY');
+check('region resolve uses the same preview and server members', state.resolvedGroupName.value === 'PROXY' && state.previewResult.value.groups[0].members[0].name === 'REJECT');
+state.isDirty.value = true;
+const retained = structuredClone(state.clientConfig.value);
+state.clientPolicyProfilesAPI.preview = async () => { throw new Error('stale_client_policy'); };
+await run.loadPreview();
+check('preview failures retain the draft and clear old results', isDeepStrictEqual(state.clientConfig.value, retained) && state.isDirty.value && state.previewResult.value === null && state.previewError.value === 'stale_client_policy');
+const pendingPreviews = [];
+state.clientPolicyProfilesAPI.preview = () => new Promise(resolve => pendingPreviews.push(resolve));
+const oldRequest = run.loadPreview();
+const newRequest = run.loadPreview();
+pendingPreviews[1]({ body: 'new draft' });
+await newRequest;
+pendingPreviews[0]({ body: 'old draft' });
+await oldRequest;
+check('a late preview response cannot replace the latest preview', state.previewResult.value.body === 'new draft');
+for (const count of [0, 1, 3]) {
+  state.clientConfig.value.rules = Array.from({ length: count }, (_, index) => rule(index, 'DOMAIN', 'example.com', 'PROXY'));
+  state.drawerVisible.value = false;
+  run.handleGroupRuleAction('PROXY');
+  check(`group edit with ${count} rules always opens the filtered module`, state.activeModule.value === 'rules' && state.ruleTargetFilter.value === 'PROXY' && state.ruleSearchKeyword.value === '' && state.ruleTypeFilter.value === '' && !state.drawerVisible.value);
+}
+run.openCreateRuleDrawer();
+check('add in a filtered empty state preselects the target group', state.form.value.target === 'PROXY' && state.ruleTargetGroupContext.value === 'PROXY' && state.drawerVisible.value);
+run.quickCreateRuleForService({ id: 'svc', name: '服务' });
+check('use rule set in routing preselects RULE-SET and its payload', state.form.value.type === 'RULE-SET' && state.form.value.payload === 'service:svc' && state.drawerVisible.value);
+check('preview displays context, all warnings and resolved groups', page.includes('previewResult.context.autoSelected') && page.includes('warning.stage') && page.includes('warning.ref') && page.includes('warning.message') && page.includes('group in previewResult?.groups') && page.includes('previewResult?.diagnostic'));
+check('filtered rules disable drag and offer view all', page.includes(':draggable="!isFiltered"') && page.includes('if (isFiltered.value) return;') && page.includes('查看全部'));
+
 if (failures) {
   console.log(`\n${failures} client policy self-test(s) failed`);
   process.exit(1);

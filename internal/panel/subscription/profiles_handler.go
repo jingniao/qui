@@ -13,6 +13,7 @@ import (
 )
 
 type ProfileStore interface {
+	ValidateTemplate(context.Context, rules.Template) error
 	Profiles(context.Context, int, int) (rules.ProfileList, error)
 	Profile(context.Context, string) (rules.ProfileResult, error)
 	WriteProfile(context.Context, string, rules.ProfileInput, bool, string) (rules.ProfileResult, bool, error)
@@ -21,6 +22,7 @@ type ProfileStore interface {
 
 func (h *Handler) registerProfiles(mux *http.ServeMux) {
 	for pattern, handler := range map[string]http.HandlerFunc{
+		"POST /api/v1/client-policy-profiles/preview":       h.profilePreview,
 		"GET /api/v1/client-policy-profiles":                h.profilesList,
 		"POST /api/v1/client-policy-profiles":               h.profileWrite,
 		"GET /api/v1/client-policy-profiles/{id}":           h.profileGet,

@@ -34,26 +34,13 @@ type candidateUser struct {
 
 func (s *Service) Candidates(ctx context.Context, userID string) (Candidates, error) {
 	result := Candidates{Items: []Candidate{}, AutoSelected: userID == ""}
+	userID, err := s.previewUser(ctx, userID)
+	if err != nil {
+		return result, err
+	}
 	if userID == "" {
-		for page := 1; ; page++ {
-			users, total, err := s.CandidateUsers.List(ctx, "", page, 100)
-			if err != nil {
-				return result, err
-			}
-			for _, account := range users {
-				if account.Active(time.Now()) && len(account.NodeGroupIDs) > 0 {
-					userID = account.ID
-					break
-				}
-			}
-			if userID != "" || page*100 >= total {
-				break
-			}
-		}
-		if userID == "" {
-			result.Diagnostic = "没有已授权节点组的有效用户"
-			return result, nil
-		}
+		result.Diagnostic = noPreviewUser
+		return result, nil
 	}
 	account, viewer, err := s.account(ctx, userID, "")
 	if err != nil {
@@ -106,4 +93,28 @@ func (h *Handler) candidates(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpapi.JSON(w, http.StatusOK, result)
+}
+
+const noPreviewUser = "没有已授权节点组的有效用户"
+
+// previewUser selects the same authorized account for candidates and previews.
+func (s *Service) previewUser(ctx context.Context, userID string) (string, error) {
+	if userID == "" {
+		for page := 1; ; page++ {
+			users, total, err := s.CandidateUsers.List(ctx, "", page, 100)
+			if err != nil {
+				return "", err
+			}
+			for _, account := range users {
+				if account.Active(time.Now()) && len(account.NodeGroupIDs) > 0 {
+					userID = account.ID
+					break
+				}
+			}
+			if userID != "" || page*100 >= total {
+				break
+			}
+		}
+	}
+	return userID, nil
 }

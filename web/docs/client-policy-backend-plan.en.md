@@ -1,6 +1,6 @@
 # Backend Development Plan for the Client Policy UI
 
-Status: proposed; not implemented. Review date: November 4, 2026, America/Los_Angeles.
+Status: approved with the amendments in §13 (November 4, 2026); implementation in progress. Review date: November 4, 2026, America/Los_Angeles.
 
 English translation of [the Chinese plan](client-policy-backend-plan.md). This translation preserves the original scope and recommendations; it does not introduce additional implementation commitments.
 
@@ -324,3 +324,20 @@ After implementation, run the project's Linux `scripts/check.sh` and the applica
 - These results establish that existing type checks and self-tests passed. They do not establish that the new UI already has backend persistence, telemetry, or draft-preview support.
 
 The English translation is a documentation-only change. The checks above were performed during the original review and were not rerun for translation.
+
+## 13. Review Decisions (Approved With Amendments)
+
+Reviewed against `258c1c7` (the UI baseline committed on `feat/v1.4-tunnels`). The plan is approved. Where this section differs from §§1–12, this section wins. The amendments remove duplicate logic and endpoints; they do not add scope.
+
+1. **Active pointer.** Store only `{profileId}` under a new `system_settings` key (`client_policy_active`). Drop `profileRevision`: every write goes through one service, so the `client_rules` snapshot always equals the active profile's template, and restore validation compares the two directly. Keep the pointer out of `rules.Stored`, because older binaries decode that row strictly and would reject an unknown field after a downgrade.
+2. **One save path.** Refactor `rules.Store.Save` into a transaction-aware function that profile saves, activation and the legacy PUT all call. Activation passes a flag that advances the revision even when the template is unchanged (§4.2). No second copy of validate-compare-write.
+3. **Local import.** Add a nullable unique `import_key` column (legacy local ID plus content digest). `POST /client-policy-profiles` accepts an optional `importKey`; a repeat returns the existing profile instead of creating a duplicate.
+4. **Endpoint references need no new Origin field.** `proxy.Origin` already carries stable identity: published inbounds have `Source=published, Ref=<inbound id>`; relay endpoints have `Relayed=true, Ref=<rule id>`; imports have `Source=import:<source id>, Ref=<name|protocol key>`. A single `rules` helper derives `@endpoint:inbound:<id>`, `@endpoint:relay:<id>` and `@endpoint:import:<source id>:<key>` from an Origin, and both Expand and the candidate listing use that helper. Cloned client-chain hops are not candidates.
+5. **Filtering lives only in Expand.** `includeKeywords`/`excludeKeywords` are evaluated by the backend alone. The page stops filtering names itself and shows the members the server resolves, which also fixes the separator bug that split on the letter `s`.
+6. **One empty-group rule.** Expand and the Clash exporter both call one `rules` helper that applies `emptyPolicy` and produces the warning. They do not each keep their own fallback.
+7. **Fewer endpoints.** Drop `POST /client-policy-profiles/validate` and `/resolve`. Preview already validates (it returns `invalid_rules` with field paths) and returns the resolved members of each group alongside the YAML, warnings and preview context. Save validates as it does today. With no eligible preview user, preview still validates the structure and returns the no-user diagnostic.
+8. **One render path.** `render` takes the template as an argument. `Render`, `Preview` and the new draft/profile preview all call it, so draft preview and real subscription output cannot drift apart.
+9. **No wholesale page split.** `ClientPolicyPage.vue` is restructured only where a phase changes behavior. Unrelated extraction is not part of this work.
+10. **Code style.** No defensive re-checks of state that a single code path already guarantees. Validation stays at the API boundary (strict decode plus `rules.Validate`).
+
+Implementation runs phase by phase (A → D). Each phase is reviewed, committed locally and gated on the Linux test machine (`scripts/check.sh` plus the real-core suite) before the next phase starts.

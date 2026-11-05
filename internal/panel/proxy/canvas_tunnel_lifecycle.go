@@ -28,12 +28,15 @@ func (s *Service) canvasEntryRoutingConflict(ctx context.Context, scheme CanvasS
 		}
 		result := map[string]string{}
 		for _, entry := range layout.Instances {
-			if !strings.HasPrefix(entry.Ref, "inbound:") {
+			if !strings.HasPrefix(entry.Ref, "inbound:") || entry.Role != "entry" {
 				continue
 			}
 			var node string
 			_ = s.Repository.Database.QueryRowContext(ctx, "SELECT node_id FROM inbounds WHERE id=?", strings.TrimPrefix(entry.Ref, "inbound:")).Scan(&node)
 			ref := "server:" + node
+			if len(outgoing[entry.Ref]) > 0 {
+				ref = entry.Ref
+			}
 			path := []string{}
 			seen := map[string]bool{}
 			for !seen[ref] {
@@ -151,7 +154,9 @@ func (s *Service) canvasPublicationUnchanged(ctx context.Context, p *canvasPlan)
 	}
 	for _, entry := range p.entries {
 		target := entry.existing.DefaultOutbound
-		if entry.chain != nil {
+		if entry.finalOutbound != "" {
+			target = entry.finalOutbound
+		} else if entry.chain != nil {
 			c, err := s.Repository.canvasChainNamed(ctx, entry.chain.name)
 			if err != nil {
 				return false, nil
@@ -163,6 +168,8 @@ func (s *Service) canvasPublicationUnchanged(ctx context.Context, p *canvasPlan)
 				return false, nil
 			}
 			target = o.ID
+		} else if stale.outbound[target] {
+			return false, nil
 		}
 		if target != entry.existing.DefaultOutbound {
 			return false, nil

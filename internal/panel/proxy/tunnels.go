@@ -475,6 +475,10 @@ func managedSQLError(err error) error {
 func (s *Service) SaveTunnelRule(ctx context.Context, ruleID string, input TunnelRuleInput) (TunnelRule, error) {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
+	return s.saveTunnelRule(ctx, ruleID, input, nil)
+}
+
+func (s *Service) saveTunnelRule(ctx context.Context, ruleID string, input TunnelRuleInput, ownerNodeID *string) (TunnelRule, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	if !managedName(input.Name) || !validPortMode(input.PortMode) || (input.Network != "tcp" && input.Network != "udp" && input.Network != "both") {
 		return TunnelRule{}, tunnelFail("invalid", 400, "规则名称、网络或端口模式无效")
@@ -534,8 +538,14 @@ func (s *Service) SaveTunnelRule(ctx context.Context, ruleID string, input Tunne
 			return TunnelRule{}, tunnelFail("invalid", 400, "规则入口必须与隧道入口一致")
 		}
 	}
-	if _, err = deriveTunnelTarget(ctx, tx, input.Target, input.TunnelID); err != nil {
+	target, err := deriveTunnelTarget(ctx, tx, input.Target, input.TunnelID)
+	if err != nil {
 		return TunnelRule{}, err
+	}
+	if ownerNodeID != nil {
+		if target.NodeID != *ownerNodeID || input.EntryNodeID == *ownerNodeID {
+			return TunnelRule{}, tunnelFail("invalid", 400, "目标入站必须属于本节点，隧道入口不能是本节点")
+		}
 	}
 	if err = releaseDraftClaims(ctx, tx, "rule", ruleID, old.PublishedAt); err != nil {
 		return TunnelRule{}, err
@@ -574,6 +584,11 @@ func (s *Service) SaveTunnelRule(ctx context.Context, ruleID string, input Tunne
 	}
 	if err != nil {
 		return TunnelRule{}, err
+	}
+	if ownerNodeID != nil {
+		if _, err = tx.ExecContext(ctx, "UPDATE tunnel_rules SET owner_node_id=? WHERE id=?", *ownerNodeID, ruleID); err != nil {
+			return TunnelRule{}, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return TunnelRule{}, err

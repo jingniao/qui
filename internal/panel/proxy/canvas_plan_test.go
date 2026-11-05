@@ -31,7 +31,8 @@ func forwardCanvasLayout(p *publishPanel) CanvasLayout {
 }
 func savePlanScheme(t *testing.T, p *publishPanel, layout CanvasLayout) CanvasScheme {
 	t.Helper()
-	scheme, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "plan", Execution: "server", Layout: layout})
+	// Seed stored layouts, including legacy forwards which C1 no longer creates.
+	scheme, err := p.service.Repository.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "plan", Execution: "server", Layout: layout})
 	if err != nil {
 		t.Fatal(err)
 	}

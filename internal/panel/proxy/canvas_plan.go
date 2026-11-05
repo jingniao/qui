@@ -396,6 +396,8 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 	for _, e := range plan.entries {
 		target := e.existing.DefaultOutbound
 		switch {
+		case e.finalOutbound != "":
+			target = e.finalOutbound
 		case e.chain != nil:
 			target = e.chain.name
 			if existing, err := s.Repository.canvasChainNamed(ctx, e.chain.name); err == nil {

@@ -40,10 +40,11 @@ type Ref struct {
 // ID). Labels are the attributes rule templates expand on; the published source
 // emits "nodeGroup:<id>" for every granted node group that contains the node.
 type Origin struct {
-	Source string
-	Ref    string
-	Node   Ref
-	Labels []string
+	Relayed bool
+	Source  string
+	Ref     string
+	Node    Ref
+	Labels  []string
 }
 
 // HasLabel reports whether the origin carries the given label.

@@ -53,6 +53,7 @@ type CanvasDeployer interface {
 // canvasEdge is one directed connection between two managed nodes together with
 // the objects it needs.
 type canvasEdge struct {
+	core          string
 	tunnelID      string
 	prefix        string
 	autoPort      bool
@@ -73,21 +74,24 @@ type canvasEdge struct {
 	adopt Inbound
 }
 
-// canvasChain is a path of two edges that becomes one proxy chain.
+// canvasChain is a managed path with two relay edges or an external final exit.
 type canvasChain struct {
-	name      string
-	nodes     []string
-	outbounds []*canvasEdge
-	id        string
+	finalOutbound string
+	supportTCP    bool
+	supportUDP    bool
+	name          string
+	nodes         []string
+	outbounds     []*canvasEdge
+	id            string
 }
 
 // canvasEntry is a self-hosted inbound the scheme routes: its default outbound
-// becomes the outbound or chain the drawing names. Exactly one of edge and chain
-// is set; with neither, the inbound keeps its current default outbound.
+// becomes the edge, chain or external final outbound the drawing names.
 type canvasEntry struct {
-	existing Inbound
-	edge     *canvasEdge
-	chain    *canvasChain
+	finalOutbound string
+	existing      Inbound
+	edge          *canvasEdge
+	chain         *canvasChain
 }
 
 // canvasPlan is the complete translation of one drawing.
@@ -150,18 +154,9 @@ func canvasDefaultPort(protocol string) int {
 	return 8443
 }
 
-func canvasInstanceNode(instance CanvasInstance) string {
-	ref, err := parseCanvasRef(instance.Ref)
-	if err != nil || ref.kind != "server" {
-		return ""
-	}
-	return ref.id
-}
-
 // canvasBuildPlan turns the drawing into the objects and the publication order.
 // This is the server execution path. Client schemes use a separate client-only
-// snapshot; imported nodes, port forwarding and unsupported tunnel protocols
-// cannot enter a managed-node publication here.
+// snapshot. Stored legacy forwards remain publishable until their migration.
 func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*canvasPlan, error) {
 	p, err := s.canvasBuildPlanInternal(ctx, scheme, true)
 	if err != nil {
@@ -189,6 +184,9 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 	if err := s.validateRefs(ctx, layout); err != nil {
 		return nil, err
 	}
+	if err := s.validateCanvasExits(ctx, layout); err != nil {
+		return nil, err
+	}
 	if err := s.Repository.attachInlineTunnelIDs(ctx, scheme.ID, &layout); err != nil {
 		return nil, err
 	}
@@ -198,6 +196,8 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 	}
 	plan := &canvasPlan{schemeStamp: scheme.UpdatedAt, schemeTunnelIDs: map[string]bool{}, tunnelVersions: map[string]string{}, schemeID: scheme.ID, tunnelIDs: map[string]bool{}, owners: map[string]string{}, prefix: canvasObjectPrefix(scheme.Name), inbounds: map[string]bool{}, outbounds: map[string]bool{}, chainName: map[string]bool{}}
 	incoming, outgoing := map[string][]*canvasEdge{}, map[string][]*canvasEdge{}
+	finals := map[string]string{}
+	finalTransports := map[string][2]bool{}
 	for _, connection := range layout.Connections {
 		prefix := plan.prefix
 		seed := connection.ID
@@ -212,8 +212,25 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			plan.schemeTunnelIDs[t.ID] = true
 			plan.tunnelVersions[t.ID] = t.UpdatedAt
 		}
-		sourceNode := canvasInstanceNode(instances[connection.Source])
-		targetNode := canvasInstanceNode(instances[connection.Target])
+		sourceNode, err := s.canvasManagedNode(ctx, instances[connection.Source])
+		if err != nil {
+			return nil, err
+		}
+		targetInstance := instances[connection.Target]
+		targetRef, _ := parseCanvasRef(targetInstance.Ref)
+		if targetRef.kind == "outbound" {
+			if finals[sourceNode] != "" {
+				return nil, errors.New("每个节点只能配置一个外部出口")
+			}
+			finals[sourceNode] = targetRef.id
+			finalTransports[sourceNode] = [2]bool{connection.SupportTCP, connection.SupportUDP}
+			plan.node(sourceNode)
+			continue
+		}
+		targetNode, err := s.canvasManagedNode(ctx, targetInstance)
+		if err != nil {
+			return nil, err
+		}
 		if sourceNode == "" || targetNode == "" {
 			return nil, fmt.Errorf("连接 %q 只能在两个受管服务器之间发布（客户端方案与导入节点在 U5 支持）", connection.ID)
 		}
@@ -294,11 +311,27 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 		if !connection.SupportTCP && !connection.SupportUDP {
 			return nil, fmt.Errorf("连接 %q 至少需要支持 TCP 或 UDP", connection.ID)
 		}
-		port := canvasDefaultPort(protocol)
-		if connection.TunnelPort != nil {
-			port = *connection.TunnelPort
+		core := ""
+		if targetRef.kind == "inbound" && targetInstance.Role == "exit" {
+			in, err := s.Repository.Inbound(ctx, targetRef.id, true)
+			if err != nil {
+				return nil, err
+			}
+			if !in.Enabled || in.Protocol == "forward" {
+				return nil, errors.New("出口入站已停用或不是代理协议")
+			}
+			protocol = in.Protocol
+			core = in.Core
 		}
-		edge := &canvasEdge{tunnelID: connection.TunnelID, prefix: prefix, autoPort: connection.TunnelPort == nil, connectionID: connection.ID, sourceNode: sourceNode, targetNode: targetNode, protocol: protocol, port: port, tcp: connection.SupportTCP, udp: connection.SupportUDP}
+		port := canvasDefaultPort(protocol)
+		explicitPort := connection.TunnelPort
+		if targetInstance.RelayPortMode != "" || targetInstance.RelayPort != nil {
+			explicitPort = targetInstance.RelayPort
+		}
+		if explicitPort != nil {
+			port = *explicitPort
+		}
+		edge := &canvasEdge{core: core, tunnelID: connection.TunnelID, prefix: prefix, autoPort: explicitPort == nil, connectionID: connection.ID, sourceNode: sourceNode, targetNode: targetNode, protocol: protocol, port: port, tcp: connection.SupportTCP, udp: connection.SupportUDP}
 		plan.edges = append(plan.edges, edge)
 		incoming[targetNode] = append(incoming[targetNode], edge)
 		outgoing[sourceNode] = append(outgoing[sourceNode], edge)
@@ -307,6 +340,11 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 	}
 	if cycle := canvasCycle(plan.edges); cycle != "" {
 		return nil, fmt.Errorf("方案中的中转连接形成了环路（经过连接 %q），请删除其中一条", cycle)
+	}
+	for nodeID := range finals {
+		if len(outgoing[nodeID]) != 0 {
+			return nil, errors.New("外部代理出口不能与其他后继并用")
+		}
 	}
 	names, err := s.canvasNodeNames(ctx, plan.nodes)
 	if err != nil {
@@ -325,7 +363,8 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 	if err := s.canvasReuseOwnedNames(ctx, plan); err != nil {
 		return nil, err
 	}
-	// A path of two edges becomes a proxy chain on its entry node. A node that
+	// A two-edge path (or one ending in an external outbound) becomes a proxy
+	// chain on its entry node. A node that
 	// starts a path has no incoming edge; a path is at most three nodes and never
 	// revisits a node, which is what the chain validator accepts.
 	for _, start := range plan.sources(incoming) {
@@ -334,10 +373,18 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			if !ok {
 				return nil, errors.New("方案中的中转路径必须是线性链路（每个节点至多一个后继，最多三跳）")
 			}
-			if len(path) < 2 {
+			final := finals[path[len(path)-1].targetNode]
+			if len(path) < 2 && final == "" {
 				continue
 			}
-			chain := canvasChain{outbounds: path}
+			if final == "" {
+				final = "direct"
+			}
+			transports := [2]bool{true, true}
+			if final != "direct" {
+				transports = finalTransports[path[len(path)-1].targetNode]
+			}
+			chain := canvasChain{outbounds: path, finalOutbound: final, supportTCP: transports[0], supportUDP: transports[1]}
 			chain.nodes = append(chain.nodes, path[0].sourceNode)
 			labels := make([]string, 0, len(path))
 			for _, edge := range path {
@@ -358,7 +405,7 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 	// starts from.
 	for _, instance := range layout.Instances {
 		ref, err := parseCanvasRef(instance.Ref)
-		if err != nil || ref.kind != "inbound" {
+		if err != nil || ref.kind != "inbound" || instance.Role != "entry" {
 			continue
 		}
 		// Revealed on purpose: publishing rewrites the inbound through
@@ -368,7 +415,7 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			return nil, err
 		}
 		plan.node(inbound.NodeID)
-		entry := canvasEntry{existing: inbound}
+		entry := canvasEntry{existing: inbound, finalOutbound: finals[inbound.NodeID]}
 		if chain, ok := plan.chainFor(inbound.NodeID); ok {
 			entry.chain = chain
 		} else if edges := plan.edgesFrom(inbound.NodeID); len(edges) > 1 {

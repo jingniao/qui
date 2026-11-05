@@ -354,7 +354,7 @@ func TestCanvasK4SharedPublishLeavesDisconnectedDraftAlone(t *testing.T) {
 	}
 	stored.Layout.Instances = append(stored.Layout.Instances, CanvasInstance{InstanceID: "c", Ref: "server:" + p.nodeC, Role: "entry"}, CanvasInstance{InstanceID: "d", Ref: "server:" + p.nodeC, Role: "exit"})
 	stored.Layout.Connections = append(stored.Layout.Connections, CanvasConnection{ID: "incomplete-forward", Source: "c", Target: "d", Type: "port_forward", SupportTCP: true})
-	if _, err := p.service.SaveCanvasScheme(p.ctx, a.ID, CanvasSchemeInput{Name: a.Name, Execution: "server", Layout: stored.Layout, UpdatedAt: stored.UpdatedAt}); err != nil {
+	if _, err := p.service.Repository.SaveCanvasScheme(p.ctx, a.ID, CanvasSchemeInput{Name: a.Name, Execution: "server", Layout: stored.Layout, UpdatedAt: stored.UpdatedAt}); err != nil {
 		t.Fatal(err)
 	}
 	before := p.deployer.calls

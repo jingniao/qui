@@ -257,6 +257,31 @@ func (s *Service) canvasStaleObjects(ctx context.Context, plan *canvasPlan) (*ca
 		}
 	}
 	stale := &canvasStale{chainID: map[string]bool{}, outbound: map[string]bool{}, inbound: map[string]bool{}}
+	// Reused external exits are never canvas-owned and must not be deleted.
+	// Remember detached routes from this scheme's previous publication solely
+	// so its entry can fall back to Direct when its last arrow is removed.
+	rows, err := s.Repository.Database.QueryContext(ctx, "SELECT t.id,t.target_ref FROM canvas_tunnels t JOIN canvas_tunnel_publications p ON p.tunnel_id=t.id WHERE p.scheme_id=?", plan.schemeID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var tunnelID, target string
+		if err := rows.Scan(&tunnelID, &target); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ref, _ := parseCanvasRef(target)
+		if ref.kind == "outbound" && !plan.schemeTunnelIDs[tunnelID] {
+			stale.outbound[ref.id] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	chains, err := s.canvasOwnedChains(ctx, plan)
 	if err != nil {
 		return nil, err

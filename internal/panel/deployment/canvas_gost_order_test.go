@@ -166,7 +166,8 @@ func (h *gostHosts) gostTunnelScheme(name string, targetPort int) proxy.CanvasSc
 		Connections: []proxy.CanvasConnection{{ID: "gost-hop", Source: "i-entry", Target: "i-exit", Type: "port_forward", TunnelProtocol: "gost",
 			ListenPort: portValue(23200), TargetHost: "192.0.2.99", TargetPort: portValue(targetPort), SupportTCP: true, SupportUDP: true}},
 	}
-	scheme, err := h.service.SaveCanvasScheme(h.ctx, "", proxy.CanvasSchemeInput{Name: name, Execution: "server", Layout: layout})
+	// Seed the stored legacy drawing; C1 only publishes existing GOST forwards.
+	scheme, err := h.service.Repository.SaveCanvasScheme(h.ctx, "", proxy.CanvasSchemeInput{Name: name, Execution: "server", Layout: layout})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -249,7 +250,7 @@ func TestGostTunnelPublishesOverExistingOrdinaryRelays(t *testing.T) {
 		Connections: []proxy.CanvasConnection{{ID: "gost-hop", Source: "i-entry", Target: "i-exit", Type: "port_forward", TunnelProtocol: "gost",
 			ListenPort: portValue(23200), TargetHost: "192.0.2.99", TargetPort: portValue(8443), SupportTCP: true, SupportUDP: true}},
 	}
-	scheme, err := hosts.service.SaveCanvasScheme(hosts.ctx, "", proxy.CanvasSchemeInput{Name: "gost us2 uk", Execution: "server", Layout: layout})
+	scheme, err := hosts.service.Repository.SaveCanvasScheme(hosts.ctx, "", proxy.CanvasSchemeInput{Name: "gost us2 uk", Execution: "server", Layout: layout})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,8 @@ type Handler struct {
 	// Users reads the user credentials a node snapshot needs. Publishing a
 	// canvas scheme snapshots the nodes it touches, exactly like a publish from
 	// the node page.
-	Users AccessReader
+	Users        AccessReader
+	RelayProxies RelayProxies
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -122,7 +123,7 @@ func (h *Handler) saveOutbound(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) deleteInbound(w http.ResponseWriter, r *http.Request) {
 	if err := h.Service.Repository.DeleteInbound(r.Context(), r.PathValue("id")); err != nil {
-		h.fail(w, err)
+		h.failTunnel(w, err)
 		return
 	}
 	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "删除入站配置", r.PathValue("id"), "成功", r.RemoteAddr); err != nil {

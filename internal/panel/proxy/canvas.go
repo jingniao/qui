@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"reflect"
 	"strings"
 )
 
@@ -62,17 +63,19 @@ func (layout CanvasLayout) MarshalJSON() ([]byte, error) {
 }
 
 // CanvasInstance is one box on the canvas. Ref is server:<nodeId>,
-// inbound:<inboundId> or import:<opaque id>. The display fields the canvas
+// inbound:<inboundId>, outbound:<outboundId> or import:<opaque id>. The display fields the canvas
 // shows (name, protocol, address, status) are derived from that reference when
 // it loads, so they are deliberately not stored here.
 type CanvasInstance struct {
-	InstanceID string  `json:"instanceId"`
-	Ref        string  `json:"ref"`
-	X          float64 `json:"x"`
-	Y          float64 `json:"y"`
-	Role       string  `json:"role"`
-	ListenPort *int    `json:"listenPort,omitempty"`
-	TargetPort *int    `json:"targetPort,omitempty"`
+	InstanceID    string  `json:"instanceId"`
+	Ref           string  `json:"ref"`
+	X             float64 `json:"x"`
+	Y             float64 `json:"y"`
+	Role          string  `json:"role"`
+	ListenPort    *int    `json:"listenPort,omitempty"`
+	TargetPort    *int    `json:"targetPort,omitempty"`
+	RelayPortMode string  `json:"relayPortMode,omitempty"`
+	RelayPort     *int    `json:"relayPort,omitempty"`
 }
 
 // CanvasConnection is one directed arrow between two instances. TunnelProtocol
@@ -109,10 +112,10 @@ type canvasRef struct{ kind, id string }
 func parseCanvasRef(value string) (canvasRef, error) {
 	kind, target, found := strings.Cut(value, ":")
 	if !found {
-		return canvasRef{}, errors.New("canvas instance ref must be server:<id>, inbound:<id> or import:<id>")
+		return canvasRef{}, errors.New("canvas instance ref must be server:<id>, inbound:<id>, outbound:<id> or import:<id>")
 	}
 	switch kind {
-	case "server", "inbound", "import":
+	case "server", "inbound", "import", "outbound":
 	default:
 		return canvasRef{}, fmt.Errorf("unsupported canvas instance ref %q", kind)
 	}
@@ -172,6 +175,24 @@ func (layout CanvasLayout) validate() error {
 		}
 		if !canvasRoles[instance.Role] {
 			return errors.New("invalid canvas instance role")
+		}
+		ref, _ := parseCanvasRef(instance.Ref)
+		if ref.kind == "outbound" && instance.Role != "exit" {
+			return errors.New("outbound references require exit role")
+		}
+		if instance.RelayPortMode != "" && instance.RelayPortMode != "auto" && instance.RelayPortMode != "manual" {
+			return errors.New("invalid relay port mode")
+		}
+		if instance.RelayPortMode != "" || instance.RelayPort != nil {
+			if ref.kind != "server" || instance.Role == "entry" {
+				return errors.New("relay port requires a relay or exit server")
+			}
+			if instance.RelayPortMode == "manual" && instance.RelayPort == nil {
+				return errors.New("manual relay port is required")
+			}
+			if err := canvasPort("relay port", instance.RelayPort); err != nil {
+				return err
+			}
 		}
 		if math.IsNaN(instance.X) || math.IsInf(instance.X, 0) || math.IsNaN(instance.Y) || math.IsInf(instance.Y, 0) {
 			return errors.New("invalid canvas instance coordinates")
@@ -251,6 +272,16 @@ func (s *Service) validateRefs(ctx context.Context, layout CanvasLayout) error {
 			present, err = s.Repository.canvasNodePresent(ctx, ref.id)
 		case "inbound":
 			present, err = s.Repository.canvasInboundPresent(ctx, ref.id)
+		case "outbound":
+			var outbound Outbound
+			outbound, err = s.Repository.Outbound(ctx, ref.id, false)
+			present = err == nil
+			if errors.Is(err, ErrNotFound) {
+				err = nil
+			}
+			if present {
+				present, err = s.Repository.canvasNodePresent(ctx, outbound.NodeID)
+			}
 		default:
 			continue
 		}
@@ -285,6 +316,11 @@ func (s *Service) SaveCanvasScheme(ctx context.Context, schemeID string, input C
 	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
 		return CanvasScheme{}, err
 	}
+	if input.Execution == canvasExecutionServer {
+		if err := s.validateCanvasLegacyConnections(ctx, schemeID, input.Layout); err != nil {
+			return CanvasScheme{}, err
+		}
+	}
 	var resolveErr error
 	input.Layout, resolveErr = s.Repository.resolveCanvasLayout(ctx, input.Execution, input.Layout)
 	if resolveErr != nil {
@@ -296,6 +332,14 @@ func (s *Service) SaveCanvasScheme(ctx context.Context, schemeID string, input C
 	if err := s.validateRefs(ctx, input.Layout); err != nil {
 		return CanvasScheme{}, err
 	}
+	if input.Execution == canvasExecutionServer {
+		if err := s.validateCanvasLegacyConnections(ctx, schemeID, input.Layout); err != nil {
+			return CanvasScheme{}, err
+		}
+		if err := s.validateCanvasExits(ctx, input.Layout); err != nil {
+			return CanvasScheme{}, err
+		}
+	}
 	if taken, err := s.Repository.canvasSchemeNameTaken(ctx, name, schemeID); err != nil {
 		return CanvasScheme{}, err
 	} else if taken {
@@ -303,4 +347,33 @@ func (s *Service) SaveCanvasScheme(ctx context.Context, schemeID string, input C
 	}
 	input.Name = name
 	return s.Repository.SaveCanvasScheme(ctx, schemeID, input)
+}
+
+func (s *Service) validateCanvasLegacyConnections(ctx context.Context, schemeID string, layout CanvasLayout) error {
+	var previous CanvasLayout
+	if schemeID != "" {
+		stored, err := s.Repository.CanvasScheme(ctx, schemeID)
+		if err != nil {
+			return err
+		}
+		if stored.Execution == canvasExecutionServer {
+			previous = stored.Layout
+		}
+	}
+	for _, connection := range layout.Connections {
+		if connection.Type != "port_forward" && connection.TunnelProtocol != "gost" {
+			continue
+		}
+		kept := false
+		for _, old := range previous.Connections {
+			if reflect.DeepEqual(old, connection) {
+				kept = true
+				break
+			}
+		}
+		if !kept {
+			return errors.New("端口转发与 GOST 隧道已移至隧道管理")
+		}
+	}
+	return nil
 }

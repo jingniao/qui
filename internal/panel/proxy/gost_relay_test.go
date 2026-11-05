@@ -43,7 +43,8 @@ func gostRelayPanel(t *testing.T) (*publishPanel, CanvasScheme, CanvasTunnel) {
 	connection := CanvasConnection{ID: "relay-edge", Source: "i-a", Target: "i-b", Type: "port_forward", TunnelProtocol: "gost",
 		ListenPort: canvasTestPort(23200), TargetHost: "192.0.2.99", TargetPort: canvasTestPort(8443), SupportTCP: true, SupportUDP: true}
 	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, "", []CanvasConnection{connection})
-	scheme, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "gost relay", Execution: "server", Layout: layout})
+	// Existing GOST drawings remain publishable until M1 migrates them.
+	scheme, err := p.service.Repository.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "gost relay", Execution: "server", Layout: layout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func TestUnusedReverseGostDraftDoesNotBlockPublication(t *testing.T) {
 	p, scheme, _ := gostRelayPanel(t)
 	reverse := CanvasConnection{ID: "relay-back", Source: "i-b", Target: "i-a", Type: "port_forward", TunnelProtocol: "gost",
 		ListenPort: canvasTestPort(23300), TargetHost: "192.0.2.99", TargetPort: canvasTestPort(8443), SupportTCP: true, SupportUDP: true}
-	if _, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "reverse draft", Execution: "server",
+	if _, err := p.service.Repository.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "reverse draft", Execution: "server",
 		Layout: canvasTestLayout(p, canvasTestSet{A: p.nodeB, B: p.nodeA}, "", []CanvasConnection{reverse})}); err != nil {
 		t.Fatal(err)
 	}

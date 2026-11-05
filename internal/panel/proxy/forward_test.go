@@ -17,7 +17,8 @@ func TestForwardCanvasPublishCapabilityAndIdentity(t *testing.T) {
 	if err := p.service.requireGostRelay(p.ctx, p.nodeA); err == nil || !strings.Contains(err.Error(), "advertise") {
 		t.Fatal("old Agent accepted a GOST relay", err)
 	}
-	scheme, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "forward", Execution: "server", Layout: layout})
+	// Seed a pre-C1 forward drawing; the service now rejects new forwards.
+	scheme, err := p.service.Repository.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "forward", Execution: "server", Layout: layout})
 	if err != nil {
 		t.Fatal(err)
 	}

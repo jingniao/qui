@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -72,6 +73,7 @@ type managedInbound struct {
 	id    string
 }
 type tunnelPublication struct {
+	relays   map[string]published.Relay
 	view     PublishPlan
 	tunnels  []Tunnel
 	rules    []TunnelRule
@@ -221,6 +223,17 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 	}
 	if len(selectedR) > 0 {
 		return p, ErrNotFound
+	}
+	p.relays = map[string]published.Relay{}
+	for _, rule := range p.rules {
+		if rule.Status == "pending_delete" {
+			continue
+		}
+		relay, e := r.relaySnapshot(ctx, r.Database, rule)
+		if e != nil {
+			return p, e
+		}
+		p.relays[rule.ID] = relay
 	}
 	servers := map[string]*PublishServer{}
 	nodes := []string{}
@@ -588,6 +601,11 @@ func (r *Repository) finishTunnelPublication(ctx context.Context, p tunnelPublic
 	for _, rule := range p.rules {
 		if err = finish("tunnel_rules", "rule", rule.ID, rule.Status, rule.DraftVersion); err != nil {
 			return err
+		}
+		if rule.Status != "pending_delete" {
+			if err = r.saveRelaySnapshot(ctx, tx, p.relays[rule.ID]); err != nil {
+				return err
+			}
 		}
 	}
 	for _, t := range p.tunnels {

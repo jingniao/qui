@@ -23,7 +23,7 @@ func rewindTunnelFixture(t *testing.T, database *sql.DB) {
 	if applied == 0 {
 		return
 	}
-	for _, q := range []string{"DROP TRIGGER tunnel_rule_node_address_changed", "DROP TRIGGER tunnel_rule_inbound_port_changed", "DROP TABLE tunnel_objects", "DROP TABLE port_claims", "DROP TABLE tunnel_rules", "DROP TABLE tunnel_hops", "DROP TABLE tunnels", "DELETE FROM schema_migrations WHERE version='0129_tunnels.sql'"} {
+	for _, q := range []string{"DROP TRIGGER tunnel_rule_node_address_changed", "DROP TRIGGER tunnel_rule_inbound_port_changed", "DROP TABLE tunnel_objects", "DROP TABLE port_claims", "DROP TABLE tunnel_rules", "DROP TABLE tunnel_hops", "DROP TABLE tunnels", "DELETE FROM schema_migrations WHERE version IN ('0129_tunnels.sql','0130_relay_subscription_snapshot.sql')"} {
 		if _, err := database.Exec(q); err != nil {
 			t.Fatal(err)
 		}

@@ -305,7 +305,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	subscriptionService := &subscription.Service{
 		Repository: &subscription.Repository{Database: database, Reader: s.readPool, Vault: configurationVault},
 		Users:      &subscriptionUsers,
-		Sources:    source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished}),
+		Sources:    source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished, Relays: &published.RelayStore{Database: subscriptionReads}}),
 		Formats:    subscriptionFormats,
 		Settings:   systemRepository,
 		Traffic:    s.accessRepository,
@@ -322,6 +322,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// The client rule template is written through the writer connection and
 	// checked against the node and policy modules, which own what it refers to.
 	ruleStore := &rules.Store{Database: database, Lookup: ruleLookup{nodes: nodeRepository, policies: policyService.Repository}}
+	proxyHandler.RelayProxies = subscriptionService
 	(&subscription.Handler{Service: subscriptionService, Auth: authHandler, Audit: systemRepository, Rules: ruleStore, ServiceRules: serviceRules{policies: policyService.Repository}}).Register(mux)
 	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux)
 	mux.Handle("GET /api/v1/events", eventBus.Handler(authHandler))

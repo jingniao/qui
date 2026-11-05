@@ -150,5 +150,24 @@ func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 		}
 		items = append(items, Node{ID: n.ID, Name: n.Name, Region: meta.Region, Online: n.Status == "online"})
 	}
+	if s.Subscriptions != nil {
+		endpoints, _, err := s.Subscriptions.Proxies(ctx, id, "")
+		if errors.Is(err, user.ErrInactive) || errors.Is(err, user.ErrCredential) {
+			return items, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, endpoint := range endpoints {
+			if !endpoint.Origin.Relayed {
+				continue
+			}
+			entry, err := s.Nodes.Get(ctx, endpoint.Origin.Node.ID)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, Node{ID: endpoint.Origin.Ref, Name: endpoint.Name, Online: entry.Status == "online"})
+		}
+	}
 	return items, nil
 }

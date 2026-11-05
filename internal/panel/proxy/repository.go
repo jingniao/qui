@@ -415,6 +415,14 @@ func (r *Repository) SaveOutbound(ctx context.Context, outboundID string, input 
 	if _, err := tx.ExecContext(ctx, "UPDATE outbounds SET failure_policy_v2=? WHERE id=?", input.FailurePolicy, outboundID); err != nil {
 		return Outbound{}, err
 	}
+	// An external canvas exit is reused rather than regenerated. Its edits must
+	// invalidate the tunnel stamp, otherwise the canvas no-op check would skip
+	// deploying the changed address, settings or credentials.
+	if !create && input.TargetInboundID == "" {
+		if _, err := tx.ExecContext(ctx, "UPDATE canvas_tunnels SET updated_at=? WHERE target_ref=?", timestamp(), "outbound:"+outboundID); err != nil {
+			return Outbound{}, err
+		}
+	}
 	if create && input.TargetInboundID != "" {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO relay_bindings(outbound_id,inbound_id,credential_id,tunnel_address,additional_address) VALUES(?,?,?,?,?)", outboundID, input.TargetInboundID, credentialID, tunnelAddress, additionalAddress); err != nil {
 			return Outbound{}, err
@@ -497,13 +505,34 @@ func (r *Repository) Bindings(ctx context.Context, inboundID string) ([]Binding,
 	return items, rows.Err()
 }
 func (r *Repository) DeleteInbound(ctx context.Context, id string) error {
+	rows, err := r.Database.QueryContext(ctx, "SELECT id,name FROM tunnel_rules WHERE target_inbound_id=? ORDER BY id", id)
+	if err != nil {
+		return err
+	}
+	rules := []map[string]string{}
+	for rows.Next() {
+		var ruleID, name string
+		if err = rows.Scan(&ruleID, &name); err != nil {
+			rows.Close()
+			return err
+		}
+		rules = append(rules, map[string]string{"id": ruleID, "name": name})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(rules) > 0 {
+		return &tunnelError{Code: "inbound_has_relays", Status: 409, Message: "入站仍被中转规则使用", Details: map[string]any{"rules": rules}}
+	}
 	if err := r.refuseManagedInbound(ctx, id); err != nil {
 		return err
 	}
 	if _, err := r.Inbound(ctx, id, false); err != nil {
 		return err
 	}
-	_, err := r.Database.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", id)
+	_, err = r.Database.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", id)
 	if err != nil {
 		return errors.New("inbound is referenced by a relay outbound")
 	}

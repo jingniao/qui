@@ -62,7 +62,7 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 		}
 	}
 	for _, edge := range plan.edges {
-		input := InboundInput{Name: edge.inboundName, NodeID: edge.targetNode, Protocol: edge.protocol, Listen: "0.0.0.0", Port: edge.port, Enabled: true, InternalRelay: true, SubscriptionVisible: false, AllowedUserIDs: []string{}, DefaultOutbound: "direct"}
+		input := InboundInput{Core: edge.core, Name: edge.inboundName, NodeID: edge.targetNode, Protocol: edge.protocol, Listen: "0.0.0.0", Port: edge.port, Enabled: true, InternalRelay: true, SubscriptionVisible: false, AllowedUserIDs: []string{}, DefaultOutbound: "direct"}
 		existing, err := s.Repository.canvasInboundNamed(ctx, edge.targetNode, edge.inboundName)
 		switch {
 		case errors.Is(err, ErrNotFound) && edge.adopt.ID != "":
@@ -84,7 +84,9 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 			continue
 		}
 		previous := existing
-		input.Core = existing.Core
+		if input.Core == "" {
+			input.Core = existing.Core
+		}
 		// The canvas may rename an object it adopted, so its own writes use the
 		// generated-inbound path; the ordinary inbound API refuses that rename.
 		inbound, err := s.saveGeneratedInbound(ctx, existing.ID, input)
@@ -134,7 +136,7 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 	}
 	for index := range plan.chains {
 		chain := &plan.chains[index]
-		input := ChainInput{Name: chain.name, NodeIDs: chain.nodes, OutboundIDs: []string{}, FinalOutboundID: "direct", SupportTCP: true, SupportUDP: true, Enabled: true, FailurePolicy: "Block"}
+		input := ChainInput{Name: chain.name, NodeIDs: chain.nodes, OutboundIDs: []string{}, FinalOutboundID: chain.finalOutbound, SupportTCP: chain.supportTCP, SupportUDP: chain.supportUDP, Enabled: true, FailurePolicy: "Block"}
 		for _, edge := range chain.outbounds {
 			input.OutboundIDs = append(input.OutboundIDs, edge.outboundID)
 			input.SupportTCP = input.SupportTCP && edge.tcp
@@ -172,6 +174,8 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 		current := entry.existing.DefaultOutbound
 		target := current
 		switch {
+		case entry.finalOutbound != "":
+			target = entry.finalOutbound
 		case entry.chain != nil:
 			target = "chain:" + entry.chain.id
 		case entry.edge != nil:

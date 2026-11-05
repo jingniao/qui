@@ -53,7 +53,7 @@ func (s *Service) canvasDependencyLayout(ctx context.Context, layout CanvasLayou
 	}
 	for _, i := range layout.Instances {
 		include := instances[i.InstanceID]
-		if strings.HasPrefix(i.Ref, "inbound:") {
+		if strings.HasPrefix(i.Ref, "inbound:") && i.Role == "entry" {
 			var nodeID string
 			if err := s.Repository.Database.QueryRowContext(ctx, "SELECT node_id FROM inbounds WHERE id=?", strings.TrimPrefix(i.Ref, "inbound:")).Scan(&nodeID); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -61,7 +61,7 @@ func (s *Service) canvasDependencyLayout(ctx context.Context, layout CanvasLayou
 				}
 				return result, err
 			}
-			include = nodes["server:"+nodeID]
+			include = include || nodes["server:"+nodeID]
 		}
 		if include {
 			result.Instances = append(result.Instances, i)

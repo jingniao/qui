@@ -207,7 +207,8 @@ func TestCanvasPublishRefusesWhatItCannotExpress(t *testing.T) {
 			connection.TunnelProtocol = test.tunnel
 			connection.Type = test.kind
 			layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, p.inbound.ID, []CanvasConnection{connection})
-			scheme, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "拒绝 " + test.name, Execution: test.execution, Layout: layout})
+			// Exercise publication of stored legacy/unsupported drawings.
+			scheme, err := p.service.Repository.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "拒绝 " + test.name, Execution: test.execution, Layout: layout})
 			if err != nil {
 				t.Fatal(err)
 			}

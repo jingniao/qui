@@ -14,7 +14,7 @@ func (s *Service) canvasObjectsUnchanged(ctx context.Context, p *canvasPlan) (bo
 		if err != nil {
 			return false, nil
 		}
-		if in.NodeID != edge.targetNode || in.Protocol != edge.protocol || in.Port != edge.port || in.Listen != "0.0.0.0" || !in.Enabled || !in.InternalRelay || in.DefaultOutbound != "direct" {
+		if in.NodeID != edge.targetNode || in.Protocol != edge.protocol || in.Port != edge.port || in.Listen != "0.0.0.0" || !in.Enabled || !in.InternalRelay || in.SubscriptionVisible || in.DefaultOutbound != "direct" || edge.core != "" && in.Core != edge.core {
 			return false, nil
 		}
 		out, err := s.Repository.canvasOutboundNamed(ctx, edge.sourceNode, edge.outboundName)
@@ -41,13 +41,13 @@ func (s *Service) canvasObjectsUnchanged(ctx context.Context, p *canvasPlan) (bo
 			return false, nil
 		}
 		desired := []string{}
-		tcp, udp := true, true
+		tcp, udp := chain.supportTCP, chain.supportUDP
 		for _, edge := range chain.outbounds {
 			desired = append(desired, outboundIDs[edge.outboundName])
 			tcp = tcp && edge.tcp
 			udp = udp && edge.udp
 		}
-		if !existing.Enabled || existing.FinalOutboundID != "direct" || existing.SupportTCP != tcp || existing.SupportUDP != udp || !reflect.DeepEqual(existing.NodeIDs, chain.nodes) || !reflect.DeepEqual(existing.OutboundIDs, desired) {
+		if !existing.Enabled || existing.FinalOutboundID != chain.finalOutbound || existing.SupportTCP != tcp || existing.SupportUDP != udp || !reflect.DeepEqual(existing.NodeIDs, chain.nodes) || !reflect.DeepEqual(existing.OutboundIDs, desired) {
 			return false, nil
 		}
 	}

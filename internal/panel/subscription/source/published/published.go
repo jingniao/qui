@@ -44,6 +44,7 @@ type Source struct {
 	Users     Users
 	Nodes     Nodes
 	Published Published
+	Relays    Relays
 }
 
 // ID names the source in warnings, logs and origin fields.
@@ -71,6 +72,13 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 		return nil, nil, err
 	}
 	endpoints := []proxy.Proxy{}
+	var relays []Relay
+	if s.Relays != nil {
+		relays, err = s.Relays.Relays(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, n := range nodes {
 		state, err := s.Published.Published(ctx, n.ID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -122,6 +130,14 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 					continue
 				}
 				endpoints = append(endpoints, endpoint)
+				for _, relay := range relays {
+					if relay.InboundID != inbound.ID || !relay.Enabled || !relay.Visible {
+						continue
+					}
+					if relayed, ok := RelayEndpoint(endpoint, relay); ok {
+						endpoints = append(endpoints, relayed)
+					}
+				}
 				break
 			}
 		}

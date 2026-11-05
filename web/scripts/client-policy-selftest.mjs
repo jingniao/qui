@@ -175,6 +175,45 @@ check('use rule set in routing preselects RULE-SET and its payload', state.form.
 check('preview displays context, all warnings and resolved groups', page.includes('previewResult.context.autoSelected') && page.includes('warning.stage') && page.includes('warning.ref') && page.includes('warning.message') && page.includes('group in previewResult?.groups') && page.includes('previewResult?.diagnostic'));
 check('filtered rules disable drag and offer view all', page.includes(':draggable="!isFiltered"') && page.includes('if (isFiltered.value) return;') && page.includes('查看全部'));
 
+
+await api.policyAPI.serviceReferences('shared');
+check('shared reference query uses the service-set endpoint', client.calls.at(-1).path === '/service-sets/shared/references');
+const paginationSource = readFileSync(path.resolve(here, '..', 'src', 'app', 'pagination.ts'), 'utf8');
+const paginationJS = ts.transpileModule(paginationSource.replace('export ', ''), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText.replace('export ', '');
+const allPages = new Function(paginationJS + '\nreturn allPages;')();
+const visitedPages = [];
+const everyItem = await allPages(async page => {
+  visitedPages.push(page);
+  return { items: Array.from({ length: page === 3 ? 5 : 100 }, (_, index) => (page - 1) * 100 + index), total: 205 };
+});
+check('selectors load all 205 results through existing pagination', everyItem.items.length === 205 && isDeepStrictEqual(visitedPages, [1, 2, 3]));
+let incomplete = false;
+try { await allPages(async page => ({ items: page === 1 ? [1] : [], total: 2 })); } catch { incomplete = true; }
+check('incomplete pagination reports an error', incomplete);
+check('node, group and rule-set selectors use complete pagination', page.includes("allPages(page => nodeAPI.list(page, ''))") && page.includes('allPages(page => groupAPI.list(page, 100))') && !page.includes('policyAPI.services(1, 100)'));
+class TestAPIError extends Error { constructor(status, details) { super('规则集仍被引用'); this.status = status; this.details = details; } }
+const sharedRefs = { nodePolicies: [{ id: 'node', name: '节点策略', enabled: false }], clientProfiles: [{ id: 'profile', name: '配置', active: false, rules: [{ id: 'off', enabled: false }] }] };
+const shared = {
+  editingService: ref(null), serviceReferences: ref(null), serviceReferencesError: ref(''), serviceNotice: ref(''), deletingService: ref(false),
+  savingService: ref(false), serviceDrawerVisible: ref(false), serviceForm: {}, serviceDomainsText: ref(''), serviceSuffixesText: ref(''), serviceCidrsText: ref(''), serviceSets: ref([]),
+  APIError: TestAPIError, allPages, showToast: () => {},
+  policyAPI: { serviceReferences: async () => sharedRefs, deleteService: async () => { throw new TestAPIError(409, sharedRefs); }, saveService: async () => ({ name: '共享规则', references: sharedRefs, warning: '404；客户端可能继续使用缓存或报告错误' }), services: async () => ({ items: [], total: 0 }) }
+};
+const sharedActions = ['openEditService', 'cloneService', 'deleteService', 'saveService', 'lines'];
+const sharedJS = ts.transpileModule(sharedActions.map(pageAction).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
+const sharedRun = new Function(...Object.keys(shared), sharedJS + '\nreturn {' + sharedActions.join(',') + '};')(...Object.values(shared));
+const set = { id: 'shared', name: '共享规则', enabled: true, domains: ['example.org'], suffixes: [], cidrs: [] };
+await sharedRun.openEditService(set);
+check('shared editor loads inactive profiles, disabled rules and node references', shared.serviceReferences.value === sharedRefs && shared.editingService.value.id === 'shared');
+await sharedRun.deleteService();
+check('delete 409 displays references and retains the shared editor', shared.serviceReferences.value === sharedRefs && shared.serviceReferencesError.value && shared.serviceDrawerVisible.value);
+shared.serviceForm.enabled = false;
+await sharedRun.saveService();
+check('shared save immediately displays the returned disable warning', shared.serviceNotice.value.includes('缓存') && !shared.serviceDrawerVisible.value);
+await sharedRun.openEditService(set, true);
+check('clone creates an independent shared set without old references', shared.editingService.value === null && shared.serviceForm.name === '共享规则-副本' && shared.serviceReferences.value.clientProfiles.length === 0);
+check('shared editor explains immediate save and cached-rule semantics', page.includes('放弃配置草稿不会撤销这里的保存') && page.includes('客户端可能继续使用缓存或报告错误') && page.includes('profile.active') && page.includes('rule.enabled') && page.includes('policy.enabled'));
+
 if (failures) {
   console.log(`\n${failures} client policy self-test(s) failed`);
   process.exit(1);

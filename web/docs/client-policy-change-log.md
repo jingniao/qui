@@ -1569,3 +1569,59 @@
   - `node web/scripts/ui-regression-selftest.mjs`：全部通过。
   - `git diff --check`：通过。
 - **剩余工作与验证边界**：Phase D 共享规则集引用保护等仍待后续实施。本轮未执行 Linux scripts/check.sh、真实 Mihomo 核心套件、生产构建或已登录浏览器走查，不以 Windows 检查替代这些验收。改动保留工作区，未提交或推送；工作期间出现的两份订阅导入兼容性文档未作修改。
+
+
+---
+
+## 轮次 38：Client Policy 后端 Phase D——共享规则集引用保护与收尾
+
+- **日期和时间**：2026-11-04T23:33:00-08:00（America/Los_Angeles）。
+- **本轮原始需求**：完成英文计划 §9 Phase D，遵循 §13，补齐共享规则集引用、删除保护与禁用提示、完整模板校验、选择项分页、文档及回归；不提交、不推送，不修改两份订阅导入兼容性未跟踪文档。
+- **涉及的全部文件路径**：
+  - `AGENTS.md`
+  - `docs/changelog.md`
+  - `docs/release-notes-1.4.0.md`
+  - `internal/panel/policy/handler_http.go`
+  - `internal/panel/policy/repository.go`
+  - `internal/panel/subscription/format/clash/clash.go`
+  - `internal/panel/subscription/format/format.go`
+  - `internal/panel/subscription/profile_preview_test.go`
+  - `internal/panel/subscription/rules/profiles.go`
+  - `internal/panel/subscription/rules/rules_test.go`
+  - `internal/panel/subscription/rules/validate.go`
+  - `internal/panel/subscription/rules_handler_test.go`
+  - `internal/panel/subscription/service.go`
+  - `internal/platform/server/server.go`
+  - `internal/platform/server/subscription_rules.go`
+  - `internal/platform/server/subscription_rules_test.go`
+  - `internal/platform/server/testdata/portal_route_coverage.txt`
+  - `web/scripts/client-policy-selftest.mjs`
+  - `web/src/modules/routing/api.ts`
+  - `web/src/modules/routing/pages/ClientPolicyPage.vue`
+  - `web/src/modules/system/pages/TaskRecordPage.vue`
+  - `internal/platform/server/service_set_references_test.go`
+  - `web/src/app/pagination.ts`
+  - `web/docs/client-policy-change-log.md`
+- **修改前后行为**：
+  - 原 DeleteService 只遍历启用节点策略并返回通用 400；现在该遍历提取为唯一事务内节点引用查询，供引用接口、保存响应和删除共用，包含启用与禁用策略。subscription/rules 提供唯一 ServiceSetReferences 扫描全部已保存配置及启用/禁用规则，按 RULE-SET + service:<id> 精确匹配；platform/server 通过接口适配注入 policy，不跨模块访问对方表。
+  - 有任一已保存引用时拒绝删除；错误沿用 httpapi 的 error 信封，409 service_set_in_use，error 内附 nodePolicies/clientProfiles。原源码没有专用的节点引用 409 结构，故将原通用错误显式映射为这一扩展结构。内置集原有不可删除限制保留。
+  - policy 的事务覆盖引用检查与删除，禁用保存也在同一事务读取引用并返回 references/warning；注入的配置扫描使用传入事务。模块间模板验证与随后写入仍可能与删除竞态，仅以一行代码注释记录，不加重试或防御分支。
+  - Lookup.ServiceSetExists 增加 requireEnabled 参数，一次查询保留所有规则的缺失校验，并让启用 RULE-SET 同时拒绝禁用集。禁用规则仍可引用已有禁用集。读取已保存模板仍只做结构校验，不增加第二遍 Validate；共享存在/启用查询沿既有 exporter warning 路径报告缺失/禁用，保留 provider URL 及缓存语义。
+  - 共享编辑器展示节点策略、活动/未启用配置与启用/禁用规则，保存前提示立即写入并影响全部引用，放弃配置草稿不会撤销；保存后显示两类引用数量与禁用警告。删除 409 留在编辑器并展示服务端引用。克隆不继承源引用；“用于分流”仍预选 RULE-SET，既有行为测试继续通过。
+  - 禁用集下载仍为 404。文案说明客户端可能继续使用缓存或报告错误，不声称缓存规则立即停用。
+  - 将 TaskRecordPage 已有 allPages 原样提取为 app/pagination.ts 并复用，节点、节点组及规则集选择项读完全部分页（含保存/删除后刷新），不静默截断。当前页面已无用户列表选择器，预览用户仍复用 Phase C 的服务端分页选择。
+  - AGENTS.md §10.3、§27.12 与 §31 同步；changelog/release notes 补齐服务端配置库、启用、端点成员与关键词、emptyPolicy、草稿预览和引用保护，并将发布草稿迁移说明更新至 0132。无新增迁移。
+- **测试覆盖**：Owner/匿名/Viewer、门户路由拒绝清单；客户端单独引用、节点单独引用与两者同时引用的 409；活动/未启用配置及禁用规则/策略；禁用保存响应；缺失与禁用的整模板校验矩阵；保存后禁用/缺失集的预览警告和下载 404；带禁用共享规则引用的真实加密备份恢复、活动指针及快照一致性。前端自测新增完整分页（205 条）、引用查询、编辑/克隆、409 引用展示、立即保存及缓存警告，合计 59 项。
+- **实际执行的验证及结果**：
+  - Go 环境：$env:GOPATH="$PWD/.tools/gopath"; $env:GOCACHE="$PWD/.tools/gocache"; $env:GOTOOLCHAIN='local'。
+  - .tools/go/bin/go.exe vet ./...：通过（最终代码重跑通过）。
+  - .tools/go/bin/go.exe test ./internal/panel/policy/... ./internal/panel/subscription/...：通过。
+  - .tools/go/bin/go.exe test ./internal/platform/server -run TestServiceSetReferencesAndProtection -count=1：通过。
+  - .tools/go/bin/go.exe test ./internal/panel/policy/... ./internal/panel/subscription/... ./internal/panel/system/backup/... ./internal/platform/server/...：首轮 policy/subscription 通过，backup/server 子进程与恢复遇到 Windows 沙箱 Access is denied；最终获准在沙箱外完整重跑通过（exit code 0；backup 114.596 秒，server 248.946 秒，包含增强的备份回环和门户路由清单验证）。
+  - npm.cmd --prefix web run typecheck：通过。
+  - npm.cmd --prefix web run build：首轮 esbuild 读取目录 Access is denied；获准沙箱外重跑通过，最终代码再次构建通过（282 modules）。
+  - node web/scripts/client-policy-selftest.mjs：59 项全部通过。首次新增分页测试的转译保留了 CommonJS exports 导致测试夹具失败，改为转译前去除 export 后通过。
+  - node web/scripts/ui-regression-selftest.mjs：全部通过。
+  - git diff --check：通过。
+- **设计选择及计划差异**：复用原有节点策略扫描，没有第二份节点引用查询；新增引用扫描限于 rules 包，跨模块组合只在 server。旧代码并不存在所述节点 409 结构，采用标准 ErrorDetails 明确映射。除提取已有分页工具供两页共用外，不拆分整页、不引入新组件或服务。
+- **验证边界**：未执行 Linux scripts/check.sh、真实 Mihomo/其他核心套件或登录浏览器走查；Windows 结果不替代这些验收。Phase D 改动留在工作区，无提交或推送；两份订阅导入兼容性文档未读取或修改。

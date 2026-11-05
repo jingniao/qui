@@ -284,6 +284,9 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 			}
 			value := ruleProvider{Type: "http", Behavior: provider.Behavior, Format: provider.Format, URL: provider.URL, Path: "./ruleset/" + providerFile(provider.Name), Interval: provider.IntervalSeconds}
 			if provider.ServiceSetID != "" {
+				if profile.ServiceSetEnabled != nil && !profile.ServiceSetEnabled(provider.ServiceSetID) {
+					warn("服务规则 " + provider.ServiceSetID + " 不存在或已禁用，下载返回 404；客户端可能继续使用缓存或报告错误")
+				}
 				if profile.ProviderURL != nil {
 					value.URL = profile.ProviderURL(provider.ServiceSetID)
 				} else {

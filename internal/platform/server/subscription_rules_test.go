@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"proxycontrol/internal/panel/policy"
 	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/panel/system"
 	archive "proxycontrol/internal/panel/system/backup"
@@ -22,8 +23,19 @@ func TestClientRuleTemplateBackupRoundTrip(t *testing.T) {
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	saved := rules.Presets()[3].Template
+	sets := &policy.Repository{Database: app.Database, ClientReferences: clientServiceReferences{}}
+	input := policy.ServiceInput{Name: "备份共享规则", Enabled: true, Domains: []string{"example.org"}}
+	set, err := sets.SaveService(ctx, "", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Rules = append([]rules.Rule{{ID: "shared", Type: rules.RuleSet, Payload: "service:" + set.ID, Target: "DIRECT", Enabled: true, Priority: 1}}, saved.Rules...)
 	if response := owner.call("PUT", "/api/v1/subscription-rules", map[string]any{"template": saved, "expectedRevision": 0}); response.Code != 200 {
 		t.Fatalf("save template: %d %s", response.Code, response.Body.String())
+	}
+	input.Enabled = false
+	if _, err := sets.SaveService(ctx, set.ID, input); err != nil {
+		t.Fatal(err)
 	}
 	const password = "rules-backup-password"
 	created := owner.call("POST", "/api/v1/backups", map[string]any{"password": password})
@@ -74,5 +86,9 @@ func TestClientRuleTemplateBackupRoundTrip(t *testing.T) {
 	}
 	if same, err := rules.Equal(active.Profile.Template, stored.Template); err != nil || !same {
 		t.Fatal("restored profile differs from active snapshot", err)
+	}
+	refs, err := (&policy.Repository{Database: restored, ClientReferences: clientServiceReferences{}}).ServiceReferences(ctx, set.ID)
+	if err != nil || len(refs.ClientProfiles) != 1 || !refs.ClientProfiles[0].Active || len(refs.ClientProfiles[0].Rules) != 1 || refs.ClientProfiles[0].Rules[0].ID != "shared" {
+		t.Fatal(refs, err)
 	}
 }

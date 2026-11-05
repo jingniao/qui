@@ -294,6 +294,7 @@
 </template>
 
 <script setup lang="ts">
+import { allPages } from '../../../app/pagination';
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
@@ -353,16 +354,6 @@ const recoveryTarget = ref<AgentUpdateTask | null>(null);
 const attemptTaskId = ref(''), attemptPage = ref(1), attemptTotal = ref(0), attemptError = ref(''), attemptLoading = ref(false);
 const attempts = ref<AgentUpdateAttempt[]>([]);
 let attemptGeneration = 0;
-async function allPages<T extends { items: unknown[]; total: number }>(fetchPage: (page: number) => Promise<T>): Promise<T> {
-  const first = await fetchPage(1);
-  const items = [...first.items];
-  for (let page = 2; items.length < first.total; page++) {
-    const next = await fetchPage(page);
-    if (!next.items.length) throw new Error('分页读取不完整，请重试');
-    items.push(...next.items);
-  }
-  return { ...first, items } as T;
-}
 async function registerRelease() {
   if (!isOwner.value || registerBusy.value) return;
   registerBusy.value = true;

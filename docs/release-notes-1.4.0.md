@@ -6,6 +6,8 @@
 
 ## 主要变化
 
+- **客户端策略配置库：** 0132 新增服务端配置库与独立编辑/活动版本，启用后由客户端更新订阅生效；支持授权端点成员、关键词包含/排除、emptyPolicy 与只读草稿/已保存配置预览。共享规则集可查询全部客户端配置/规则及节点策略引用，有引用时禁止删除；禁用允许并提示下载 404、客户端可能继续使用缓存或报错。
+
 - **隧道管理：** 新增“隧道 / 规则”。隧道为 entry → [mid] → exit，最多三台不同服务器，GOST relay over TLS＋mTLS；各接收跳只有一个共享监听，多个规则复用。两节点各跳要求契约 ≥3，三节点 ≥4；Agent 当前上报 4，按能力校验，不按 GOST 二进制版本猜测。
 - **独立转发规则：** 规则配置入口监听、TCP/UDP、可选隧道与最终目标。无隧道时直接转发，有 GOST 优先，否则主 Xray/sing-box；linked 目标跟随用户入站，出口即目标时用 loopback，manual 保持手填且不进订阅。保存只写草稿，目标公网地址/入站端口变化使已发布规则 needs_publish。
 - **节点添加中转与订阅：** 目标节点可选择已有隧道创建 linked 规则，或新建以当前节点为入口的代理中转方案。成功发布且启用/可见的规则追加 `<目标节点> · <协议> · 经 <入口节点>` 端点，保留原端口消歧、凭据、传输和 TLS，仅换入口地址/规则端口，并显式保留原 TLS server name。订阅使用成功发布快照，草稿不会提前改地址；Owner shareLink 可预览合格用户真实凭据，Viewer 恒 null。
@@ -16,7 +18,7 @@
 ## 升级注意
 
 - 面板先升级，再逐台升级 Agent；升级前备份数据库、身份目录及必要配置密钥。发布/升级 Agent 会短暂重启受影响节点核心，须安排窗口。本版未发布，具体 RC/部署仍待单独执行。
-- 新迁移 **0129–0131**：0129 新增 tunnels、tunnel_hops、tunnel_rules、port_claims、tunnel_objects；0130 增加规则 published_snapshot；0131 增加 canvas_forward_reconcile 与 tunnel_migration_report。正式版迁移头仍为 0128；跨迁移降级须恢复匹配的升级前数据库，不能让旧程序打开新库。
+- 新迁移 **0129–0132**：0129 新增 tunnels、tunnel_hops、tunnel_rules、port_claims、tunnel_objects；0130 增加规则 published_snapshot；0131 增加 canvas_forward_reconcile 与 tunnel_migration_report。0132 增加 client_policy_profiles，活动指针为 system_settings.client_policy_active，备份恢复核对活动模板快照；正式版迁移头仍为 0128；跨迁移降级须恢复匹配的升级前数据库，不能让旧程序打开新库。
 - 启动/恢复在旧 0124 归属核对后，**自动单次**转换合格已发布画布转发：普通转发变直接规则，GOST 转发变两节点隧道＋规则。保留 ID、端口、原运行入站/修订与密封材料，不重签、不下发；规则默认订阅隐藏。目标公网地址与成功运行版本中的用户入站端口唯一匹配才 linked，否则 manual。迁移连接从画布布局移除；首次无修改发布复用旧物化输入。
 - Owner 必须查看 `GET /api/v1/tunnels/migration-report` 的 `{items:[{tunnelId,name,reason}]}`：核对未发布连接、缺失/重复归属、共享路径不一致、缺失服务器、目标池/范围、端口冲突、材料或运行设置不一致。无法确定的连接留在画布只读，可删除，不可新增/改动。报告记录单次尝试，处理后不自动消项/重试；事务失败可重试。按原路径与所有权明确重建及发布，不猜测接管。
 - GOST 隧道每跳必须已安装并上报启用 GOST、所需契约且无组件操作占用；接收跳须公网地址或 connectHost。按规则 network 放通入口监听，按每段放通 TCP 中继端口。新隧道/规则无默认端口回退。

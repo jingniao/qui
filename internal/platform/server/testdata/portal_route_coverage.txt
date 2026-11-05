@@ -94,6 +94,7 @@ GET /api/v1/revisions/{id}/diff
 GET /api/v1/runtime-topology
 GET /api/v1/service-sets
 GET /api/v1/service-sets/{id}
+GET /api/v1/service-sets/{id}/references
 GET /api/v1/subscription-formats
 GET /api/v1/subscription-rules
 GET /api/v1/subscription-rules/presets

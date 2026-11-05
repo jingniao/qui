@@ -15,7 +15,7 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/policies": h.list, "GET /api/v1/policies/{id}": h.get, "POST /api/v1/policies": h.save, "PUT /api/v1/policies/{id}": h.save, "DELETE /api/v1/policies/{id}": h.delete, "POST /api/v1/policies/simulate": h.simulate, "GET /api/v1/service-sets": h.services, "GET /api/v1/service-sets/{id}": h.getService, "POST /api/v1/service-sets": h.saveService, "PUT /api/v1/service-sets/{id}": h.saveService, "DELETE /api/v1/service-sets/{id}": h.deleteService} {
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/policies": h.list, "GET /api/v1/policies/{id}": h.get, "POST /api/v1/policies": h.save, "PUT /api/v1/policies/{id}": h.save, "DELETE /api/v1/policies/{id}": h.delete, "POST /api/v1/policies/simulate": h.simulate, "GET /api/v1/service-sets": h.services, "GET /api/v1/service-sets/{id}": h.getService, "GET /api/v1/service-sets/{id}/references": h.serviceReferences, "POST /api/v1/service-sets": h.saveService, "PUT /api/v1/service-sets/{id}": h.saveService, "DELETE /api/v1/service-sets/{id}": h.deleteService} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
 }
@@ -109,6 +109,14 @@ func (h *Handler) getService(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.JSON(w, 200, service)
 }
+func (h *Handler) serviceReferences(w http.ResponseWriter, r *http.Request) {
+	refs, err := h.Service.Repository.ServiceReferences(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, refs)
+}
 func (h *Handler) saveService(w http.ResponseWriter, r *http.Request) {
 	var input ServiceInput
 	if err := httpapi.Decode(w, r, &input); err != nil {
@@ -142,6 +150,11 @@ func (h *Handler) deleteService(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (h *Handler) fail(w http.ResponseWriter, err error) {
+	var referenced *ServiceReferencedError
+	if errors.As(err, &referenced) {
+		httpapi.ErrorDetails(w, 409, "service_set_in_use", err.Error(), map[string]any{"nodePolicies": referenced.References.NodePolicies, "clientProfiles": referenced.References.ClientProfiles})
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		httpapi.Error(w, 404, "not_found", err.Error())
 		return

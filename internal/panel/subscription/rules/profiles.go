@@ -369,3 +369,49 @@ func (s *Store) DeleteProfile(ctx context.Context, key string, expected int64) (
 	}
 	return state, tx.Commit()
 }
+
+// ServiceSetReferences scans all saved profiles, including disabled rules and the active profile.
+func ServiceSetReferences(ctx context.Context, tx *sql.Tx, serviceID string) ([]ServiceProfileReference, error) {
+	active, err := activeID(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT id,name,template_json FROM client_policy_profiles ORDER BY created_at,id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := []ServiceProfileReference{}
+	for rows.Next() {
+		ref := ServiceProfileReference{Rules: []ServiceRuleReference{}}
+		var data string
+		if err := rows.Scan(&ref.ID, &ref.Name, &data); err != nil {
+			return nil, err
+		}
+		var template Template
+		if err := Decode([]byte(data), &template); err != nil {
+			return nil, err
+		}
+		ref.Active = ref.ID == active
+		for _, rule := range template.Rules {
+			if rule.Type == RuleSet && rule.Payload == ServicePrefix+serviceID {
+				ref.Rules = append(ref.Rules, ServiceRuleReference{ID: rule.ID, Enabled: rule.Enabled})
+			}
+		}
+		if len(ref.Rules) > 0 {
+			refs = append(refs, ref)
+		}
+	}
+	return refs, rows.Err()
+}
+
+type ServiceRuleReference struct {
+	ID      string
+	Enabled bool
+}
+type ServiceProfileReference struct {
+	ID     string
+	Name   string
+	Active bool
+	Rules  []ServiceRuleReference
+}

@@ -14,7 +14,41 @@ import (
 
 var ErrNotFound = errors.New("policy or service set not found")
 
-type Repository struct{ Database *sql.DB }
+type Repository struct {
+	Database         *sql.DB
+	ClientReferences ClientReferenceReader
+}
+
+type ClientReferenceReader interface {
+	ServiceSetReferences(context.Context, *sql.Tx, string) ([]ClientProfileReference, error)
+}
+type RuleReference struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+type ClientProfileReference struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Active bool            `json:"active"`
+	Rules  []RuleReference `json:"rules"`
+}
+type NodePolicyReference struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+type ServiceReferences struct {
+	NodePolicies   []NodePolicyReference    `json:"nodePolicies"`
+	ClientProfiles []ClientProfileReference `json:"clientProfiles"`
+}
+type ServiceReferencedError struct{ References ServiceReferences }
+
+func (e *ServiceReferencedError) Error() string {
+	return "规则集仍被引用，请先移除引用后再删除"
+}
+
+const DisabledServiceWarning = "禁用后规则集下载返回 404；客户端可能继续使用缓存或报告错误，不会立即停止使用缓存规则。"
+
 type Record struct {
 	desiredstate.Policy
 	Remark    string `json:"remark"`
@@ -33,17 +67,19 @@ type Input struct {
 	Remark   string                      `json:"remark"`
 }
 type ServiceSet struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Builtin     bool     `json:"builtin"`
-	Version     int      `json:"version"`
-	Enabled     bool     `json:"enabled"`
-	Description string   `json:"description"`
-	Domains     []string `json:"domains"`
-	Suffixes    []string `json:"suffixes"`
-	CIDRs       []string `json:"cidrs"`
-	CreatedAt   string   `json:"createdAt"`
-	UpdatedAt   string   `json:"updatedAt"`
+	References  *ServiceReferences `json:"references,omitempty"`
+	Warning     string             `json:"warning,omitempty"`
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Builtin     bool               `json:"builtin"`
+	Version     int                `json:"version"`
+	Enabled     bool               `json:"enabled"`
+	Description string             `json:"description"`
+	Domains     []string           `json:"domains"`
+	Suffixes    []string           `json:"suffixes"`
+	CIDRs       []string           `json:"cidrs"`
+	CreatedAt   string             `json:"createdAt"`
+	UpdatedAt   string             `json:"updatedAt"`
 }
 type ServiceInput struct {
 	Name        string   `json:"name"`
@@ -294,30 +330,88 @@ func (r *Repository) SaveService(ctx context.Context, serviceID string, input Se
 			}
 		}
 	}
+	refs, err := r.serviceReferences(ctx, tx, serviceID)
+	if err != nil {
+		return ServiceSet{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return ServiceSet{}, err
 	}
-	return r.Service(ctx, serviceID)
-}
-func (r *Repository) DeleteService(ctx context.Context, serviceID string) error {
 	service, err := r.Service(ctx, serviceID)
+	service.References = &refs
+	if !service.Enabled && (len(refs.NodePolicies) > 0 || len(refs.ClientProfiles) > 0) {
+		service.Warning = DisabledServiceWarning
+	}
+	return service, err
+}
+func (r *Repository) ServiceReferences(ctx context.Context, serviceID string) (ServiceReferences, error) {
+	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return ServiceReferences{}, err
 	}
-	if service.Builtin {
-		return errors.New("builtin service sets cannot be deleted")
+	defer tx.Rollback()
+	var exists string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM service_sets WHERE id=?", serviceID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+		return ServiceReferences{}, ErrNotFound
+	} else if err != nil {
+		return ServiceReferences{}, err
 	}
-	rules, err := r.Rules(ctx)
+	return r.serviceReferences(ctx, tx, serviceID)
+}
+func (r *Repository) serviceReferences(ctx context.Context, tx *sql.Tx, serviceID string) (ServiceReferences, error) {
+	refs := ServiceReferences{NodePolicies: []NodePolicyReference{}, ClientProfiles: []ClientProfileReference{}}
+	rows, err := tx.QueryContext(ctx, "SELECT "+columns+" FROM policies ORDER BY priority,id")
 	if err != nil {
-		return err
+		return refs, err
 	}
-	for _, rule := range rules {
+	for rows.Next() {
+		rule, err := scan(rows)
+		if err != nil {
+			rows.Close()
+			return refs, err
+		}
 		for _, id := range rule.Match.ServiceIDs {
 			if id == serviceID {
-				return errors.New("service set is referenced by an active policy")
+				refs.NodePolicies = append(refs.NodePolicies, NodePolicyReference{ID: rule.ID, Name: rule.Name, Enabled: rule.Enabled})
+				break
 			}
 		}
 	}
-	_, err = r.Database.ExecContext(ctx, "DELETE FROM service_sets WHERE id=?", serviceID)
-	return err
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return refs, err
+	}
+	if r.ClientReferences != nil {
+		refs.ClientProfiles, err = r.ClientReferences.ServiceSetReferences(ctx, tx, serviceID)
+	}
+	return refs, err
+}
+func (r *Repository) DeleteService(ctx context.Context, serviceID string) error {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var builtin bool
+	if err := tx.QueryRowContext(ctx, "SELECT builtin FROM service_sets WHERE id=?", serviceID).Scan(&builtin); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if builtin {
+		return errors.New("builtin service sets cannot be deleted")
+	}
+	refs, err := r.serviceReferences(ctx, tx, serviceID)
+	if err != nil {
+		return err
+	}
+	if len(refs.NodePolicies) > 0 || len(refs.ClientProfiles) > 0 {
+		return &ServiceReferencedError{References: refs}
+	}
+	// Concurrent profile saves validate through a separate module read and can race with deletion.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM service_sets WHERE id=?", serviceID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

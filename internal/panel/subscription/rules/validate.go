@@ -28,7 +28,7 @@ func fieldError(field, format string, args ...any) *FieldError {
 // Lookup reports whether the panel objects a template refers to exist. A nil
 // Lookup accepts every reference; the store validates with a real one.
 type Lookup interface {
-	ServiceSetExists(ctx context.Context, id string) bool
+	ServiceSetExists(ctx context.Context, id string, requireEnabled bool) bool
 	NodeGroupExists(ctx context.Context, id string) bool
 	NodeExists(ctx context.Context, id string) bool
 }
@@ -404,8 +404,8 @@ func validatePayload(ctx context.Context, rule Rule, providers map[string]bool, 
 	case RuleSet:
 		if strings.HasPrefix(payload, ServicePrefix) {
 			id := strings.TrimPrefix(payload, ServicePrefix)
-			if id == "" || (lookup != nil && !lookup.ServiceSetExists(ctx, id)) {
-				return fmt.Errorf("服务规则 %q 不存在", id)
+			if id == "" || (lookup != nil && !lookup.ServiceSetExists(ctx, id, rule.Enabled)) {
+				return fmt.Errorf("服务规则 %q 不存在或已禁用", id)
 			}
 			return nil
 		}

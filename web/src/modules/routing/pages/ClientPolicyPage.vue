@@ -1589,6 +1589,7 @@
               </div>
             </div>
 
+            <p v-if="serviceNotice" role="status" class="text-xs text-amber-700">{{ serviceNotice }}</p>
             <!-- 规则集定位与两端更新生效机制提示 (与图2保持一致) -->
             <div class="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-100 text-xs text-neutral-600 leading-relaxed">
               <div class="flex items-center gap-2 font-bold text-neutral-800 mb-1">
@@ -2109,6 +2110,18 @@
       @confirm="saveService"
     >
       <div class="space-y-4 text-sm">
+        <p class="text-xs text-amber-700">这是共享规则集，修改会影响下列全部引用。保存立即写入，独立于配置草稿；放弃配置草稿不会撤销这里的保存。客户端更新规则集、节点发布配置后生效。</p>
+        <div v-if="editingService" class="space-y-2 text-xs">
+          <p v-if="serviceReferencesError" role="alert" class="text-red-600">{{ serviceReferencesError }}</p>
+          <p class="font-semibold">共享引用</p>
+          <p v-for="policy in serviceReferences.nodePolicies" :key="policy.id">节点策略：{{ policy.name }}（{{ policy.enabled ? '启用' : '禁用' }}）</p>
+          <div v-for="profile in serviceReferences.clientProfiles" :key="profile.id">
+            <p>客户端配置：{{ profile.name }}（{{ profile.active ? '活动' : '未启用' }}）</p>
+            <p v-for="rule in profile.rules" :key="rule.id" class="pl-3">规则 {{ rule.id }}（{{ rule.enabled ? '启用' : '禁用' }}）</p>
+          </div>
+          <p v-if="!serviceReferencesError && !serviceReferences.nodePolicies.length && !serviceReferences.clientProfiles.length">暂无已保存引用</p>
+        </div>
+        <p v-if="!serviceForm.enabled" class="text-xs text-amber-700">禁用后规则集下载返回 404；客户端可能继续使用缓存或报告错误，不会立即停止使用缓存规则。启用的 RULE-SET 规则将无法通过配置保存校验。</p>
         <label class="block">
           <span class="text-xs font-medium text-neutral-600">规则集名称</span>
           <input
@@ -2164,8 +2177,10 @@
           <input type="checkbox" v-model="serviceForm.enabled" class="rounded text-ios-blue focus:ring-ios-blue" />
           <span class="text-xs font-medium text-neutral-700">启用此规则集</span>
         </label>
+        <button v-if="editingService && !editingService.builtin" type="button" class="ios-action-btn-secondary text-red-600" :disabled="savingService" @click="deletingService = true">删除规则集</button>
       </div>
     </FormDrawer>
+    <ConfirmDialog v-model="deletingService" title="删除共享规则集" message="确定删除此规则集？有已保存引用时将拒绝删除并显示引用。" confirm-text="删除规则集" :loading="savingService" @confirm="deleteService" />
     <!-- Provider Create Drawer -->
     <FormDrawer
       v-model="providerDrawerVisible"
@@ -2249,6 +2264,7 @@
 </template>
 
 <script setup lang="ts">
+import { allPages } from '../../../app/pagination';
 import { ref, reactive, computed, onMounted, h, watch } from 'vue';
 import {
   clientPolicyAPI,
@@ -2269,6 +2285,7 @@ import {
   type ClientRuleType,
   type RulePreset,
   type ServiceSet,
+  type ServiceReferences,
   type ServiceInput
 } from '../api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
@@ -4007,6 +4024,10 @@ function copyUrl() {
 // 规则集编辑 / 创建 Drawer
 const serviceDrawerVisible = ref(false);
 const editingService = ref<ServiceSet | null>(null);
+const serviceReferences = ref<ServiceReferences>({ nodePolicies: [], clientProfiles: [] });
+const serviceReferencesError = ref('');
+const serviceNotice = ref('');
+const deletingService = ref(false);
 const savingService = ref(false);
 const serviceDomainsText = ref('');
 const serviceSuffixesText = ref('');
@@ -4029,6 +4050,8 @@ function lines(value: string) {
 
 function openCreateService() {
   editingService.value = null;
+  serviceReferences.value = { nodePolicies: [], clientProfiles: [] };
+  serviceReferencesError.value = '';
   Object.assign(serviceForm, {
     name: '',
     enabled: true,
@@ -4043,10 +4066,12 @@ function openCreateService() {
   serviceDrawerVisible.value = true;
 }
 
-function openEditService(service: ServiceSet) {
-  editingService.value = service;
+async function openEditService(service: ServiceSet, clone = false) {
+  editingService.value = clone ? null : service;
+  serviceReferences.value = { nodePolicies: [], clientProfiles: [] };
+  serviceReferencesError.value = '';
   Object.assign(serviceForm, {
-    name: service.name,
+    name: service.name + (clone ? '-副本' : ''),
     enabled: service.enabled !== false,
     description: service.description || '',
     domains: [...(service.domains || [])],
@@ -4057,12 +4082,36 @@ function openEditService(service: ServiceSet) {
   serviceSuffixesText.value = (service.suffixes || []).join('\n');
   serviceCidrsText.value = (service.cidrs || []).join('\n');
   serviceDrawerVisible.value = true;
+  if (!clone) {
+    try {
+      const refs = await policyAPI.serviceReferences(service.id);
+      if (editingService.value?.id === service.id) serviceReferences.value = refs;
+    } catch (e) {
+      if (editingService.value?.id === service.id) serviceReferencesError.value = '读取引用失败: ' + (e as Error).message;
+    }
+  }
 }
 
 function cloneService(service: ServiceSet) {
-  openEditService(service);
-  editingService.value = null;
-  serviceForm.name = service.name + '-副本';
+  void openEditService(service, true);
+}
+
+async function deleteService() {
+  const service = editingService.value!;
+  savingService.value = true;
+  try {
+    await policyAPI.deleteService(service.id);
+    deletingService.value = false;
+    serviceDrawerVisible.value = false;
+    serviceSets.value = (await allPages(page => policyAPI.services(page, 100))).items;
+    showToast('规则集已删除');
+  } catch (e) {
+    deletingService.value = false;
+    if (e instanceof APIError && e.status === 409) {
+      serviceReferences.value = e.details as unknown as ServiceReferences;
+      serviceReferencesError.value = e.message;
+    } else { showToast('删除规则集失败: ' + (e as Error).message, 'error'); }
+  } finally { savingService.value = false; }
 }
 
 async function saveService() {
@@ -4073,7 +4122,7 @@ async function saveService() {
   }
   savingService.value = true;
   try {
-    await policyAPI.saveService(editingService.value?.id || null, {
+    const saved = await policyAPI.saveService(editingService.value?.id || null, {
       name: serviceForm.name.trim(),
       enabled: serviceForm.enabled,
       description: serviceForm.description.trim(),
@@ -4081,9 +4130,10 @@ async function saveService() {
       suffixes: lines(serviceSuffixesText.value),
       cidrs: lines(serviceCidrsText.value)
     });
-    showToast('规则集已保存（需按两端机制触发更新生效）');
+    serviceNotice.value = '规则集「' + saved.name + '」已立即保存，引用：' + saved.references.nodePolicies.length + ' 个节点策略、' + saved.references.clientProfiles.length + ' 个客户端配置。' + (saved.warning || '客户端更新规则集、节点发布配置后生效。');
+    showToast('规则集已保存');
     serviceDrawerVisible.value = false;
-    const res = await policyAPI.services(1, 100);
+    const res = await allPages(page => policyAPI.services(page, 100));
     serviceSets.value = res.items;
   } catch (e) {
     showToast('保存规则集失败: ' + (e as Error).message, 'error');
@@ -4368,16 +4418,16 @@ async function load() {
   try {
     const [presetsResult, setsResult, nodesResult, groupsResult] = await Promise.all([
       clientPolicyAPI.presets(),
-      policyAPI.services(1, 100),
-      nodeAPI.list(1, ''),
-      groupAPI.list(1, 100).catch(() => ({ items: [], total: 0 }))
+      allPages(page => policyAPI.services(page, 100)),
+      allPages(page => nodeAPI.list(page, '')),
+      allPages(page => groupAPI.list(page, 100))
     ]);
     presetTemplates.value = presetsResult.items;
     serviceSets.value = setsResult.items;
     availableNodes.value = nodesResult.items;
-    systemNodeGroups.value = groupsResult?.items || [];
+    systemNodeGroups.value = groupsResult.items;
   } catch (e) {
-    console.error('Failed to load auxiliary data for client policies:', e);
+    showToast('载入规则集与节点选择项失败: ' + (e as Error).message, 'error');
   }
   if (isOwner.value) {
     await loadCandidates();

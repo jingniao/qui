@@ -37,9 +37,9 @@ func (s stubServiceRules) ServiceRule(_ context.Context, id string) (ServiceRule
 
 type acceptAll struct{}
 
-func (acceptAll) ServiceSetExists(context.Context, string) bool { return true }
-func (acceptAll) NodeGroupExists(context.Context, string) bool  { return true }
-func (acceptAll) NodeExists(context.Context, string) bool       { return true }
+func (acceptAll) ServiceSetExists(context.Context, string, bool) bool { return true }
+func (acceptAll) NodeGroupExists(context.Context, string) bool        { return true }
+func (acceptAll) NodeExists(context.Context, string) bool             { return true }
 
 // rulesPanel is the subscription handler on a real session middleware.
 type rulesPanel struct {

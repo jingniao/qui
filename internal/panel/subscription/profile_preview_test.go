@@ -183,6 +183,28 @@ func TestProfilePreview(t *testing.T) {
 	if err != nil || string(legacy.Body) != draft.Body {
 		t.Fatal("legacy active preview", err)
 	}
+	// A saved template remains readable when its shared provider is disabled later.
+	sets := p.handler.ServiceRules.(stubServiceRules)
+	p.service.ServiceSetEnabled = func(_ context.Context, id string) bool { return sets[id].Enabled }
+	sets["svc-on"] = ServiceRule{Enabled: false}
+	disabled := preview(map[string]any{"profileId": saved.Profile.ID, "profileRevision": saved.Profile.Revision})
+	found := false
+	for _, warning := range disabled.Warnings {
+		if strings.Contains(warning.Message, "svc-on") && strings.Contains(warning.Message, "404") && strings.Contains(warning.Message, "缓存") {
+			found = true
+		}
+	}
+	if !found || !strings.Contains(disabled.Body, rules.ServiceProviderName("svc-on")) {
+		t.Fatal(disabled)
+	}
+	if response := p.do(t, "GET", "/sub/"+token+"/rules/svc-on", "", nil, ""); response.Code != 404 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	delete(sets, "svc-on")
+	missing := preview(map[string]any{"profileId": saved.Profile.ID, "profileRevision": saved.Profile.Revision})
+	if !reflect.DeepEqual(disabled.Warnings, missing.Warnings) {
+		t.Fatal(missing.Warnings)
+	}
 	if _, err := p.database.Exec("UPDATE users SET status='disabled'"); err != nil {
 		t.Fatal(err)
 	}

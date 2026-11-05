@@ -56,7 +56,14 @@ export interface ServiceInput {
   cidrs: string[];
 }
 
+export interface ServiceReferences {
+  nodePolicies: { id: string; name: string; enabled: boolean }[];
+  clientProfiles: { id: string; name: string; active: boolean; rules: { id: string; enabled: boolean }[] }[];
+}
+
 export interface ServiceSet extends ServiceInput {
+  references?: ServiceReferences;
+  warning?: string;
   id: string;
   builtin: boolean;
   version: number;
@@ -98,8 +105,9 @@ export const policyAPI = {
     request<PolicyRecord>(id ? `/policies/${id}` : '/policies', id ? 'PUT' : 'POST', value),
   delete: (id: string) => request(`/policies/${id}`, 'DELETE'),
   services: (page = 1, size = 20) => request<Page<ServiceSet>>(`/service-sets?page=${page}&pageSize=${size}`),
+  serviceReferences: (id: string) => request<ServiceReferences>(`/service-sets/${id}/references`),
   saveService: (id: string | null, value: ServiceInput) =>
-    request<ServiceSet>(id ? `/service-sets/${id}` : '/service-sets', id ? 'PUT' : 'POST', value),
+    request<ServiceSet & { references: ServiceReferences }>(id ? `/service-sets/${id}` : '/service-sets', id ? 'PUT' : 'POST', value),
   deleteService: (id: string) => request(`/service-sets/${id}`, 'DELETE'),
   simulate: (value: SimulationRequest) => request<Decision>('/policies/simulate', 'POST', value)
 };

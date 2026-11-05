@@ -258,7 +258,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		return nil, err
 	}
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
-	policyService := &policy.Service{Repository: &policy.Repository{Database: database}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository}
+	policyService := &policy.Service{Repository: &policy.Repository{Database: database, ClientReferences: clientServiceReferences{}}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository}
 	proxyService.Policies = policyService
 	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: database, Connections: s.connectionStore}, Nodes: nodeRepository, Deployments: deployments, Proxies: proxyService.Repository, Settings: systemRepository}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
@@ -327,6 +327,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// The client rule template is written through the writer connection and
 	// checked against the node and policy modules, which own what it refers to.
 	ruleStore := &rules.Store{Database: database, Lookup: ruleLookup{nodes: nodeRepository, policies: policyService.Repository}}
+	subscriptionService.ServiceSetEnabled = func(ctx context.Context, id string) bool { return ruleStore.Lookup.ServiceSetExists(ctx, id, true) }
 	if err := ruleStore.Initialize(context.Background()); err != nil {
 		return nil, err
 	}

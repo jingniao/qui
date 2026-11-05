@@ -14,9 +14,27 @@ import (
 // fakeLookup knows one service rule, one node group and one node.
 type fakeLookup struct{}
 
-func (fakeLookup) ServiceSetExists(_ context.Context, id string) bool { return id == "svc-1" }
-func (fakeLookup) NodeGroupExists(_ context.Context, id string) bool  { return id == "group-1" }
-func (fakeLookup) NodeExists(_ context.Context, id string) bool       { return id == "node-1" }
+func (fakeLookup) ServiceSetExists(_ context.Context, id string, requireEnabled bool) bool {
+	return id == "svc-1" || id == "svc-disabled" && !requireEnabled
+}
+func (fakeLookup) NodeGroupExists(_ context.Context, id string) bool { return id == "group-1" }
+func (fakeLookup) NodeExists(_ context.Context, id string) bool      { return id == "node-1" }
+
+func TestServiceSetAvailabilityValidation(t *testing.T) {
+	for _, test := range []struct {
+		id             string
+		enabled, valid bool
+	}{
+		{"svc-1", true, true}, {"svc-disabled", true, false}, {"svc-disabled", false, true}, {"missing", true, false}, {"missing", false, false},
+	} {
+		template := Default()
+		template.Rules = append([]Rule{{ID: "shared", Type: RuleSet, Payload: ServicePrefix + test.id, Target: TargetDirect, Enabled: test.enabled, Priority: 1}}, template.Rules...)
+		err := Validate(context.Background(), template, fakeLookup{})
+		if (err == nil) != test.valid {
+			t.Fatalf("%s enabled=%v: %v", test.id, test.enabled, err)
+		}
+	}
+}
 
 func TestPresetsAreValid(t *testing.T) {
 	for _, preset := range Presets() {

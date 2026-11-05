@@ -34,8 +34,9 @@ func (u Usage) Header() string {
 
 // Profile is everything an exporter renders.
 type Profile struct {
-	Proxies []proxy.Proxy
-	Usage   Usage
+	ServiceSetEnabled func(string) bool
+	Proxies           []proxy.Proxy
+	Usage             Usage
 	// Rules is the client rule template expanded for this user. It is set only
 	// for exporters whose UsesRules reports true.
 	Rules *rules.Resolved

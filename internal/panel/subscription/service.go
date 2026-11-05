@@ -75,13 +75,14 @@ func DefaultFormats() *format.Registry {
 
 // Service renders subscriptions.
 type Service struct {
-	Repository     *Repository
-	Users          Users
-	Sources        *source.Registry
-	Formats        *format.Registry
-	Settings       Settings
-	Traffic        Traffic
-	CandidateUsers interface {
+	ServiceSetEnabled func(context.Context, string) bool
+	Repository        *Repository
+	Users             Users
+	Sources           *source.Registry
+	Formats           *format.Registry
+	Settings          Settings
+	Traffic           Traffic
+	CandidateUsers    interface {
 		List(context.Context, string, int, int) ([]user.User, int, error)
 	}
 	ImportNames interface {
@@ -268,6 +269,9 @@ func (s *Service) render(ctx context.Context, userID, deviceID, requested, userA
 	}
 	usage := s.usage(ctx, account)
 	profile := format.Profile{Proxies: proxies, Usage: usage, ProviderURL: providerURL}
+	if s.ServiceSetEnabled != nil {
+		profile.ServiceSetEnabled = func(id string) bool { return s.ServiceSetEnabled(ctx, id) }
+	}
 	warnings := append(sourceWarnings, resolveWarnings...)
 	if exporter.UsesRules() {
 		resolved := rules.Expand(template, proxies)

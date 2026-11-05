@@ -326,3 +326,10 @@
 - 当前边界：外部 SS2022、Reality TCP/gRPC、xhttp 四模式保留类型化公开参数；Mihomo 限已测 Reality TCP Vision 与 Reality xhttp-auto/[h2]，sing-box 限 Reality TCP Vision 且无 xhttp。xhttp 拒绝 H3/未知 ALPN 与未建模 extra，其他有效格式差异逐条省略。
 - 自建用户入站：Xray Reality TCP 无 flow/Vision、gRPC 无 flow、Reality/TLS xhttp 四模式；sing-box 仅 Reality TCP 无 flow/Vision、单具体 DNS SNI。核心原生探测与精确契约控制可用性；内部代理中转仍 TCP/TLS。私钥加密/隐藏，明确轮换先保存再发布，客户端更新订阅；CDN 影响源地址设备估计。
 - 本次仅文档更新，无代码测试、门禁启动、真实来源抓取、生产操作或提交；最终提交与证据核对由主助手完成。
+
+## 2026-11-05: integrated verification and loader-only correction
+
+- Integrated production implementation is `9e48fcf`; the final gate started at 2026-11-05T15:48:18Z. Its `check` stopped after 16 s in the existing canvas-library self-test loader because it did not resolve the new `serverSettingsModel` import. Frontend build passed; this is a test-loader failure, not a production module-resolution failure.
+- The loader now imports the same transpiled helper through its existing data-module path. Local `node web/scripts/canvas-library-selftest.mjs` passed. No production code changed for this correction. The real-core part of `9e48fcf` remains running; its eventual results can be retained for the identical production source rather than repeating unaffected tests.
+- The standalone S1 correction `4ded28f` passed `check` in 1993 s; its core part was stopped at 15:47:47Z and superseded by integrated verification, so no standalone gate PASS is claimed.
+- Browser checks on the isolated loopback test panel verified mixed pasted import (one accepted, one rejected), the result reasons dialog, cached/usable counts, and saved-source editing context on failure. Backend readback confirmed `source_address_rejected`, failed state and usable=0 for the synthetic private-address source. The browser tool later reported that sharing was revoked; remaining editor/preview walkthroughs are pending unless the user re-shares, and no attempt was made to bypass sharing. No real source or production host was accessed.

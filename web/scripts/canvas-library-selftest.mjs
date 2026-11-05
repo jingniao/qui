@@ -26,8 +26,11 @@ const load = code => import('data:text/javascript;base64,' + Buffer.from(code).t
 // ---------------------------------------------------------------- 1. transports
 // The server detail page and the node list must agree on one inbound's
 // transports; both now ask nodeEditorModel.listenNetworks.
+const serverSettingsCode = transpile(read('components/node-editor/serverSettingsModel.ts'), source =>
+  source.replace(/import \{[^}]*\} from '\.\.\/\.\.\/\.\.\/nodes\/coreSummary';/, 'const blockedCores = () => []; const findCore = () => undefined;'));
+const serverSettingsURL = 'data:text/javascript;base64,' + Buffer.from(serverSettingsCode).toString('base64');
 const nodeEditor = await load(transpile(read('components/node-editor/nodeEditorModel.ts'), source =>
-  source.replace(
+  source.replaceAll("'./serverSettingsModel'", JSON.stringify(serverSettingsURL)).replace(
     /import \{[^}]*\} from '\.\.\/\.\.\/\.\.\/nodes\/coreSummary';/,
     'const blockedCores = () => []; const findCore = () => undefined; const multiCoreSupported = () => false; const nodeCores = () => []; const primaryCoreName = () => "";'
   )));

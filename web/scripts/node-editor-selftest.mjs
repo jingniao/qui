@@ -137,6 +137,121 @@ const editCore = api.createEditor('server', { id: 'i1', nodeId: 'server', name: 
 assert.equal(editCore.form.core, 'sing-box');
 assert.equal(api.buildPayload(editCore).core, 'sing-box');
 console.log('PASS NODE_EDITOR_CORE: per-core selector uses reported cores, primary = empty core, protocol matrix per core, core_pending refused, payload keeps the core');
+
+// M3: exact reported security/transport/flow combinations, including scalar
+// compatibility reports. Neither a version string nor another core authorizes
+// the selected listener. Unsupported stored selections stay visible and fail.
+const combinations = [
+  ['reality', 'tcp', ''], ['reality', 'tcp', 'xtls-rprx-vision'], ['reality', 'grpc', ''],
+  ['reality', 'xhttp', ''], ['tls', 'xhttp', '']
+].map(([security, transport, flow]) => ({ protocol: 'vless', direction: 'inbound', security, transport, flow }));
+const reported = { ...server, capabilities: { ...server.capabilities, server_settings_contract_version: 1, server_settings_combinations: combinations } };
+const serverSettings = { security: 'reality', transport: 'tcp', flow: '' };
+assert.equal(api.serverSettingsReason(reported, '', 'vless', serverSettings), '');
+assert.match(api.serverSettingsReason(server, '', 'vless', serverSettings), /尚未上报/);
+assert.match(api.serverSettingsReason({ ...reported, capabilities: { ...reported.capabilities, server_settings_contract_version: 2 } }, '', 'vless', serverSettings), /尚未上报/);
+assert.match(api.serverSettingsReason({ ...reported, capabilities: { ...reported.capabilities, server_settings_combinations: combinations.map(c => ({ ...c, direction: 'outbound' })) } }, '', 'vless', serverSettings), /未上报支持/);
+assert.match(api.serverSettingsReason(reported, '', 'vless', { ...serverSettings, transport: 'ws' }), /未上报支持/);
+assert.match(api.serverSettingsReason(reported, '', 'vless', { ...serverSettings, transport: 'grpc', flow: 'xtls-rprx-vision' }), /Vision/);
+assert.match(api.serverSettingsReason(reported, '', 'trojan', serverSettings), /VLESS/);
+assert.match(api.serverSettingsReason({ ...reported, coreSelectionBlocked: ['xray'] }, '', 'vless', serverSettings), /core_pending/);
+assert.match(api.coreReason({ ...reported, coreSelectionBlocked: ['xray'] }, ''), /core_pending/);
+const reportedMulti = { ...multi, capabilities: { ...multi.capabilities,
+  server_settings_contract_version: 1, server_settings_combinations: combinations,
+  cores: [{ ...multi.capabilities.cores[0], server_settings_contract_version: 1, server_settings_combinations: combinations }, multi.capabilities.cores[1]] } };
+assert.equal(api.serverSettingsReason(reportedMulti, 'xray', 'vless', serverSettings), '');
+assert.match(api.serverSettingsReason(reportedMulti, 'sing-box', 'vless', serverSettings), /尚未上报/);
+assert.match(api.serverSettingsReason({ ...reportedMulti, capabilities: { ...reportedMulti.capabilities,
+  cores: [{ ...multi.capabilities.cores[0] }, multi.capabilities.cores[1]] } }, '', 'vless', serverSettings), /尚未上报/); // no scalar fallback when cores[] exists
+assert.equal(api.transportChoices(reported, '', 'vless', { security: 'tls', transport: 'tcp' }).find(c => c.value === 'xhttp').reason, '');
+assert.match(api.transportChoices(server, '', 'vless', { security: 'tls', transport: 'tcp' }).find(c => c.value === 'xhttp').reason, /尚未上报/);
+assert.equal(api.securityChoices(reported, '', 'vless', { transport: 'tcp' }).find(c => c.value === 'reality').reason, '');
+assert.equal(api.securityChoices(reported, '', 'shadowsocks', {}).some(c => c.value === 'reality'), false);
+assert.match(api.flowChoices(reported, '', 'vless', { security: 'reality', transport: 'grpc' }).find(c => c.value === 'xtls-rprx-vision').reason, /Vision/);
+console.log('PASS NODE_EDITOR_SERVER_CAPABILITIES: exact scalar/per-core report, unknown version/absent/foreign/partial report refused, pending primary blocked, choices preserve unsupported selections');
+
+const realityOriginal = { id: 'reality-edit', nodeId: 'server', name: 'Reality', protocol: 'vless', port: 24443,
+  listen: '0.0.0.0', enabled: true, subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
+  settings: { ...serverSettings, reality: { public_key: 'A'.repeat(43), handshake_target: 'target.invalid:443', server_names: ['sni.invalid'], short_ids: ['0123abcd'] } }, hasRealityKey: true, hasTlsKey: false, hasWireGuardKey: false };
+// M4's public combination flag does not remove the selected core's shape limit:
+// sing-box represents one server_name, while Xray supports the bounded list.
+const singboxReported = { ...reportedMulti, capabilities: { ...reportedMulti.capabilities,
+  cores: [reportedMulti.capabilities.cores[0], { ...multi.capabilities.cores[1], server_settings_contract_version: 1,
+    server_settings_combinations: combinations.filter(c => c.security === 'reality' && c.transport === 'tcp') }] } };
+const singboxEditor = api.createEditor('server', realityOriginal);
+singboxEditor.form.core = 'sing-box';
+assert.equal(api.validateStep(3, singboxEditor, singboxReported, []), '');
+singboxEditor.form.settings.reality.server_names = ['one.invalid', 'two.invalid'];
+const singboxDraft = json(singboxEditor.form);
+assert.match(api.validateStep(3, singboxEditor, singboxReported, []), /sing-box.*只支持一个/);
+assert.deepEqual(singboxEditor.form, singboxDraft);
+assert.deepEqual(api.buildPayload(singboxEditor).settings.reality.server_names, ['one.invalid', 'two.invalid']);
+singboxEditor.form.core = 'xray';
+assert.equal(api.validateStep(3, singboxEditor, singboxReported, []), '');
+const singboxScalar = { ...reported, capabilities: { ...reported.capabilities, core_name: 'sing-box' } };
+assert.match(api.serverSettingsReason(singboxScalar, '', 'vless', singboxDraft.settings), /sing-box.*只支持一个/);
+assert.match(api.serverSettingsReason(singboxScalar, '', 'vless', { ...singboxDraft.settings, reality: { ...singboxDraft.settings.reality, server_names: [] } }), /sing-box.*只支持一个/);
+console.log('PASS NODE_EDITOR_SINGBOX_SHAPE: actual selected core enforces exactly one Reality SNI, scalar/per-core reports agree, rejected multi-name draft remains intact, Xray list remains supported');
+for (const origin of ['list', 'server']) {
+  const editor = api.createEditor('server', realityOriginal, origin);
+  const savedReality = json(editor.form.settings.reality);
+  assert.equal(api.validateStep(3, editor, reported, []), ''); // no TLS certificate for Reality
+  api.changeTransport(editor, 'xhttp'); editor.form.settings.xhttp.path = '/draft + path';
+  const savedXHTTP = json(editor.form.settings.xhttp);
+  assert.equal(api.validateStep(3, editor, reported, []), '');
+  api.changeSecurity(editor, 'tls');
+  assert.match(api.validateStep(3, editor, reported, []), /证书/);
+  editor.form.settings.certificate_pem = 'DRAFT-CERT'; editor.form.settings.private_key_pem = 'DRAFT-PRIVATE';
+  editor.form.settings.server_name = 'tls.invalid';
+  api.changeTransport(editor, 'ws'); editor.form.settings.path = '/ws-draft';
+  const tlsPayload = api.buildPayload(editor);
+  assert.equal('reality' in tlsPayload.settings, false); assert.equal('xhttp' in tlsPayload.settings, false);
+  api.changeTransport(editor, 'grpc'); editor.form.settings.service_name = 'grpc draft';
+  api.changeSecurity(editor, 'reality'); api.changeTransport(editor, 'xhttp');
+  editor.form.rotateRealityKey = true;
+  assert.deepEqual(editor.form.settings.reality, savedReality); assert.deepEqual(editor.form.settings.xhttp, savedXHTTP);
+  const beforeBuild = json(editor.form);
+  const payload = api.buildPayload(editor);
+  assert.equal(payload.rotateRealityKey, true);
+  assert.deepEqual(payload.settings.reality, savedReality); assert.deepEqual(payload.settings.xhttp, savedXHTTP);
+  for (const key of ['certificate_pem', 'private_key_pem', 'trusted_ca_pem', 'server_name', 'path', 'service_name', 'method', 'quic', 'wireguard']) assert.equal(key in payload.settings, false, key + ' incompatible with active settings');
+  assert.deepEqual(editor.form, beforeBuild); // sanitation never destroys the form
+  assert.equal(JSON.stringify(api.previewPayload(payload)).includes('DRAFT-PRIVATE'), false);
+  api.changeSecurity(editor, 'none'); api.changeTransport(editor, 'tcp');
+  assert.equal('rotateRealityKey' in api.buildPayload(editor), false);
+  assert.equal('reality' in api.buildPayload(editor).settings, false);
+  api.changeSecurity(editor, 'reality'); api.changeTransport(editor, 'xhttp');
+  assert.deepEqual(editor.form.settings.reality, savedReality); assert.deepEqual(editor.form.settings.xhttp, savedXHTTP);
+  api.changeProtocol(editor, 'trojan'); api.changeProtocol(editor, 'vless');
+  assert.deepEqual(editor.form.settings.reality, savedReality); assert.deepEqual(editor.form.settings.xhttp, savedXHTTP);
+  assert.match(api.validateStep(3, editor, server, []), /尚未上报/);
+  assert.equal(editor.form.settings.security, 'reality'); assert.equal(editor.form.settings.transport, 'xhttp');
+}
+const freshReality = api.createEditor('server'); freshReality.form.name = 'new Reality';
+api.changeSecurity(freshReality, 'reality');
+assert.equal(freshReality.form.settings.reality.handshake_target, '');
+assert.match(api.validateStep(3, freshReality, reported, []), /握手目标/);
+freshReality.form.settings.reality = json(realityOriginal.settings.reality);
+freshReality.form.settings.reality.public_key = '';
+assert.equal(api.validateStep(3, freshReality, reported, []), '');
+assert.equal('rotateRealityKey' in api.buildPayload(freshReality), false);
+assert.match(JSON.stringify(api.previewPayload(api.buildPayload(freshReality))), /保存时生成/);
+for (const patch of [{ handshake_target: 'https://invalid/' }, { handshake_target: 'target.invalid:65536' }, { server_names: [] }, { server_names: ['bad name'] }, { server_names: ['*.example.com'] }, { server_names: ['127.0.0.1'] }, { server_names: ['::1'] }, { short_ids: ['1'] }, { short_ids: ['gg'] }]) {
+  assert.notEqual(api.validateServerFields({ ...serverSettings, reality: { ...realityOriginal.settings.reality, ...patch } }), '');
+}
+assert.equal(api.validateServerFields({ ...serverSettings, reality: { ...realityOriginal.settings.reality, handshake_target: '[::1]:443' } }), '');
+for (const xhttp of [{ path: 'relative', mode: 'auto' }, { path: '/', mode: 'unknown' }, { path: '/', mode: 'auto', host: 'https://invalid' }]) assert.notEqual(api.validateServerFields({ security: 'tls', transport: 'xhttp', xhttp }), '');
+const foreignPrivate = { ...api.buildPayload(freshReality), settings: { security: 'reality', reality: { ...realityOriginal.settings.reality, private_key: 'SERVER-PRIVATE-MUST-NOT-APPEAR' } } };
+assert.equal(JSON.stringify(api.previewPayload(foreignPrivate)).includes('SERVER-PRIVATE-MUST-NOT-APPEAR'), false);
+assert.equal(JSON.stringify(api.buildPayload(api.createEditor('server', { ...realityOriginal, settings: foreignPrivate.settings }))).includes('SERVER-PRIVATE-MUST-NOT-APPEAR'), false);
+freshReality.form.internalRelay = true;
+const internalRealityDraft = json(freshReality.form);
+assert.match(api.validateStep(3, freshReality, reported, []), /内部中转暂不支持/);
+assert.match(api.validateStep(5, freshReality, reported, []), /内部中转暂不支持/);
+assert.deepEqual(freshReality.form, internalRealityDraft);
+assert.equal(api.internalRelaySettingsReason(true, { security: 'tls', transport: 'tcp' }), '');
+assert.match(api.internalRelaySettingsReason(true, { security: 'tls', transport: 'xhttp' }), /内部中转暂不支持/);
+console.log('PASS NODE_EDITOR_SERVER_DRAFTS: creation/rotation, no private key in payload/preview, Reality never requires TLS upload, inactive fields removed only from payload, transport/security/protocol switches restore drafts, bounded validation');
 const state = api.createEditor('server');
 state.form.name = 'Tokyo-vless-443';
 const rows = [{ id: 'current', nodeId: 'server', port: 443, name: 'Current' }, { id: 'canvas', nodeId: 'server', port: 10000, name: '[canvas] relay', enabled: false }, { id: 'other', nodeId: 'elsewhere', port: 1443 }];
@@ -300,7 +415,12 @@ function saveHarness(mode) {
     choices: async read => (await read(1, 100)).items,
     proxyAPI: {
       inbounds: async () => ({ items: [], total: 0 }),
-      saveInbound: async (id, value) => { calls.push(['save', id, value]); if (mode === 'save-error') throw Error('save refused'); return { id: 'saved-id' }; }
+      saveInbound: async (id, value) => {
+        calls.push(['save', id, value]); if (mode === 'save-error') throw Error('save refused');
+        const settings = json(value.settings);
+        if (settings.reality) settings.reality.public_key = 'B'.repeat(43);
+        return { id: 'saved-id', settings, hasRealityKey: !!settings.reality };
+      }
     },
     deploymentAPI: { publishNode: async (id, summary) => {
       calls.push(['publish', id, summary]);
@@ -308,7 +428,7 @@ function saveHarness(mode) {
       return { revision: 42, status: 'queued' };
     } }
   };
-  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { save, state, servers, savedId, result, error, busy, selectedGroupIds, initialGroupIds };`);
+  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { save, state, servers, savedId, savedInbound, result, error, busy, selectedGroupIds, initialGroupIds };`);
   const view = run(deps);
   view.servers.value = [server]; view.state.form.name = 'Tokyo-vless-1443'; view.state.form.port = 1443;
   return { ...view, calls, events };
@@ -339,3 +459,30 @@ assert.deepEqual(unsaved.calls.map(c => c[0]), ['save']);
 assert.equal(unsaved.savedId.value, ''); assert.equal(unsaved.busy.value, false);
 assert.match(unsaved.error.value, /save refused/);
 console.log('PASS NODE_EDITOR_SAVE: actual drawer handler covers draft-only, save-then-publish, retained draft on publish failure, no duplicate creation, no publish after save failure; group delta preserves other members, partial failure blocks publish');
+
+const realityFailure = saveHarness('save-error');
+realityFailure.servers.value = [reported];
+realityFailure.state.original = json(realityOriginal);
+realityFailure.state.form.settings = json(realityOriginal.settings);
+realityFailure.state.form.rotateRealityKey = true;
+const retainedRealityDraft = json(realityFailure.state.form);
+await realityFailure.save(true);
+assert.deepEqual(realityFailure.state.form, retainedRealityDraft);
+assert.equal(realityFailure.savedId.value, '');
+assert.equal(realityFailure.calls[0][2].rotateRealityKey, true);
+assert.match(realityFailure.error.value, /保存草稿失败，输入已保留/);
+const realityPublishedFailure = saveHarness('publish-error');
+realityPublishedFailure.servers.value = [reported];
+realityPublishedFailure.state.original = json(realityOriginal);
+realityPublishedFailure.state.form.settings = json(realityOriginal.settings);
+realityPublishedFailure.state.form.rotateRealityKey = true;
+await realityPublishedFailure.save(true);
+assert.deepEqual(realityPublishedFailure.calls.map(c => c[0]), ['save', 'publish']);
+assert.equal(realityPublishedFailure.savedId.value, 'saved-id');
+assert.equal(realityPublishedFailure.savedInbound.value.settings.reality.public_key, 'B'.repeat(43));
+assert.equal(realityPublishedFailure.state.form.settings.reality.public_key, 'A'.repeat(43));
+assert.match(realityPublishedFailure.error.value, /草稿已保存并保留/);
+assert.equal(JSON.stringify(api.previewPayload(realityPublishedFailure.calls[0][2])).includes('private_key'), false);
+assert.match(drawer, /savedInbound\.value = saved/);
+assert.match(drawer, /savedInbound\?\.settings\.reality\?\.public_key/);
+console.log('PASS NODE_EDITOR_REALITY_SAVE: explicit rotation sent only on save, rejected save retains form, publish failure retains persisted draft without duplicate save, returned public key has a separate readback view');

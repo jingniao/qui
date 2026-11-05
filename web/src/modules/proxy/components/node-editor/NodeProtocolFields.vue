@@ -2,13 +2,44 @@
   <div class="space-y-4 text-sm text-ios-secondary">
     <template v-if="step === 3 && hasSecurity(f.protocol)">
       <label v-if="hasTransport(f.protocol)" class="block">传输
-        <select v-model="s.transport" class="form-input-base mt-2"><option value="tcp">TCP</option><option value="ws">WebSocket</option><option value="grpc">gRPC</option></select>
+        <select :value="s.transport || 'tcp'" @change="setTransport" class="form-input-base mt-2"><option v-for="choice in transports" :key="choice.value" :value="choice.value" :disabled="!!choice.reason" :title="choice.reason">{{ choice.label }}{{ choice.reason ? '（不可用）' : '' }}</option></select>
       </label>
       <label class="block">安全方式
-        <select v-model="s.security" :disabled="forcedTLS(f.protocol)" class="form-input-base mt-2"><option v-if="!forcedTLS(f.protocol)" value="none">None</option><option value="tls">TLS</option></select>
+        <select :value="s.security || 'none'" @change="setSecurity" :disabled="forcedTLS(f.protocol)" class="form-input-base mt-2"><option v-for="choice in securities.filter(c => !forcedTLS(f.protocol) || c.value === 'tls')" :key="choice.value" :value="choice.value" :disabled="!!choice.reason" :title="choice.reason">{{ choice.label }}{{ choice.reason ? '（不可用）' : '' }}</option></select>
+      </label>
+      <p v-if="f.protocol === 'vless'" class="text-xs">Reality / xhttp 按所选核心实际报告的组合开放；未报告时需升级 Agent 并等待能力上报。切换选项会保留输入，保存时只提交当前组合。</p>
+      <details v-if="unavailableChoices.length" class="text-xs space-y-2">
+        <summary class="cursor-pointer">不可用选项与原因</summary>
+        <p v-for="choice in unavailableChoices" :key="choice.label">{{ choice.label }}：{{ choice.reason }}</p>
+      </details>
+      <div v-if="supportError" role="alert" class="space-y-2 text-xs text-ios-orange">
+        <p>{{ supportError }}</p>
+        <button v-if="f.protocol === 'vless'" type="button" class="ios-btn-secondary" @click="useLegacy">改用 TCP + None（保留已填字段）</button>
+      </div>
+      <label v-if="f.protocol === 'vless'" class="block">Flow
+        <select :value="s.flow || ''" @change="s.flow = ($event.target as HTMLSelectElement).value" class="form-input-base mt-2"><option v-for="choice in flows" :key="choice.value" :value="choice.value" :disabled="!!choice.reason" :title="choice.reason">{{ choice.label }}{{ choice.reason ? '（不可用）' : '' }}</option></select>
       </label>
       <label v-if="hasTransport(f.protocol) && s.transport === 'ws'" class="block">WebSocket 路径<input v-model="s.path" class="form-input-base mt-2" /></label>
       <label v-if="hasTransport(f.protocol) && s.transport === 'grpc'" class="block">gRPC 服务名称<input v-model="s.service_name" class="form-input-base mt-2" /></label>
+      <template v-if="f.protocol === 'vless' && s.transport === 'xhttp' && s.xhttp">
+        <label class="block">xhttp Host（可选）<input v-model="s.xhttp.host" maxlength="253" placeholder="不带端口的主机名，与 TLS 服务器名称分开" class="form-input-base mt-2" /></label>
+        <label class="block">xhttp 路径<input v-model="s.xhttp.path" maxlength="256" class="form-input-base mt-2" /></label>
+        <label class="block">xhttp 模式<select v-model="s.xhttp.mode" class="form-input-base mt-2"><option v-if="!XHTTP_MODES.includes(s.xhttp.mode as typeof XHTTP_MODES[number])" :value="s.xhttp.mode" disabled>{{ s.xhttp.mode }}（不可用）</option><option v-for="mode in XHTTP_MODES" :key="mode">{{ mode }}</option></select></label>
+        <p class="text-xs">当前支持 TCP / HTTP/2，不提供 HTTP/3 或高级调优参数。经 CDN 接入时，设备数量估计可能合并或分散客户端。</p>
+      </template>
+      <template v-if="f.protocol === 'vless' && s.security === 'reality' && s.reality">
+        <label class="block">Reality 握手目标<input v-model="s.reality.handshake_target" placeholder="主机:端口（必须自行指定）" class="form-input-base mt-2" /></label>
+        <p class="text-xs">节点会连接这个目标处理未通过认证的握手。面板检查格式，实际连接和配置由 Agent 校验。</p>
+        <label class="block">服务器名称 / SNI（每行一个）<textarea :value="s.reality.server_names.join('\n')" @input="setRealityLines('server_names', $event)" rows="3" class="form-input-base mt-2 font-mono" /></label>
+        <label class="block">Short ID（每行一个）<textarea :value="s.reality.short_ids.join('\n')" @input="setRealityLines('short_ids', $event)" rows="2" placeholder="2–16 位偶数长度十六进制" class="form-input-base mt-2 font-mono" /></label>
+        <p class="text-xs">订阅使用保存列表中的第一个 SNI 与 Short ID。</p>
+        <label class="block">Reality 公钥<input :value="s.reality.public_key || ''" readonly :placeholder="f.rotateRealityKey ? '保存时轮换，保存后返回新公钥' : '首次保存时由服务器生成'" class="form-input-base mt-2 font-mono text-xs" /></label>
+        <button v-if="s.reality.public_key" type="button" class="ios-btn-secondary" @click="copyPublicKey">复制当前公钥</button>
+        <p v-if="copyStatus" role="status" class="text-xs">{{ copyStatus }}</p>
+        <p class="text-xs">密钥对在服务器首次保存 Reality 时生成。私钥由服务器加密保管，页面不读取或填写。普通保存保留当前密钥。</p>
+        <label v-if="state.original?.hasRealityKey" class="block text-xs"><input v-model="f.rotateRealityKey" type="checkbox" /> 保存时轮换 Reality 密钥</label>
+        <p v-if="f.rotateRealityKey" class="text-xs text-ios-orange">保存会生成新密钥对；发布成功后，客户端须更新订阅以取得新公钥，旧公钥将不能连接。</p>
+      </template>
       <template v-if="forcedTLS(f.protocol) || s.security === 'tls'">
         <label class="block">服务器名称<input v-model="s.server_name" class="form-input-base mt-2" /></label>
         <label v-if="!state.original" class="block text-xs"><input v-model="f.internalRelay" @change="f.internalRelay && (f.subscriptionVisible = false)" type="checkbox" /> 内部中转（使用自动证书；也可在高级设置中修改）</label>
@@ -91,10 +122,25 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed } from 'vue';
-import { forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type EditorState } from './nodeEditorModel';
-const props = defineProps<{ state: EditorState; step: number; gost?: boolean }>();
+import { computed, ref } from 'vue';
+import type { NodeView } from '../../../nodes/api';
+import { changeSecurity, changeTransport, flowChoices, internalRelaySettingsReason, securityChoices, serverSettingsReason, transportChoices, XHTTP_MODES, forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type EditorState } from './nodeEditorModel';
+const props = defineProps<{ state: EditorState; step: number; gost?: boolean; server?: NodeView }>();
 const f = computed(() => props.state.form), s = computed(() => props.state.form.settings);
+const transports = computed(() => transportChoices(props.server, f.value.core || '', f.value.protocol, s.value));
+const securities = computed(() => securityChoices(props.server, f.value.core || '', f.value.protocol, s.value));
+const flows = computed(() => flowChoices(props.server, f.value.core || '', f.value.protocol, s.value));
+const supportError = computed(() => internalRelaySettingsReason(f.value.internalRelay, s.value) || serverSettingsReason(props.server, f.value.core || '', f.value.protocol, s.value));
+const unavailableChoices = computed(() => [...transports.value, ...securities.value, ...(f.value.protocol === 'vless' ? flows.value : [])].filter(c => c.reason));
+function setTransport(event: Event) { changeTransport(props.state, (event.target as HTMLSelectElement).value); }
+function setSecurity(event: Event) { changeSecurity(props.state, (event.target as HTMLSelectElement).value); }
+function useLegacy() { changeTransport(props.state, 'tcp'); changeSecurity(props.state, 'none'); s.value.flow = ''; }
+function setRealityLines(key: 'server_names' | 'short_ids', event: Event) { s.value.reality![key] = (event.target as HTMLTextAreaElement).value.split(/\r?\n/); }
+const copyStatus = ref('');
+async function copyPublicKey() {
+  try { await navigator.clipboard.writeText(s.value.reality?.public_key || ''); copyStatus.value = '公钥已复制'; }
+  catch { copyStatus.value = '未能复制，请在公钥框中选择并手动复制'; }
+}
 const gost = computed(() => props.gost === true && f.value.protocol === 'forward');
 // A GOST tunnel's exit listener: no target, network or limit of its own to edit.
 const relay = computed(() => relayMode(s.value));

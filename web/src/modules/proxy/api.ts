@@ -29,12 +29,15 @@ import { request, type Page } from '../../app/apiClient';
 import type { CanvasConnection, CanvasNodeInstance, ExecutionLocation, ProxyNodeItem, RelayScheme } from './proxyNodes';
 import type { CoreName } from '../nodes/api';
 export interface WireGuardPeer { public_key: string; endpoint?: string; allowed_ips: string[]; keep_alive?: number; credential_id?: string; }
-export interface ProtocolSettings { forward?: ForwardSettings; quic?: { up_mbps?: number; down_mbps?: number; congestion_control?: string; udp_relay_mode?: string }; transport?: string; security?: string; server_name?: string; method?: string; flow?: string; certificate_pem?: string; private_key_pem?: string; trusted_ca_pem?: string; path?: string; service_name?: string; wireguard?: { secret_key: string; addresses: string[]; peers: WireGuardPeer[]; mtu?: number }; }
+// Reality private keys stay on the server; this editor accepts only public data.
+export interface RealitySettings { public_key?: string; handshake_target: string; server_names: string[]; short_ids: string[]; }
+export interface XHTTPSettings { host?: string; path: string; mode: string; }
+export interface ProtocolSettings { reality?: RealitySettings; xhttp?: XHTTPSettings; forward?: ForwardSettings; quic?: { up_mbps?: number; down_mbps?: number; congestion_control?: string; udp_relay_mode?: string }; transport?: string; security?: string; server_name?: string; method?: string; flow?: string; certificate_pem?: string; private_key_pem?: string; trusted_ca_pem?: string; path?: string; service_name?: string; wireguard?: { secret_key: string; addresses: string[]; peers: WireGuardPeer[]; mtu?: number }; }
 // `core` is the core that runs this inbound (K3b); an empty string follows the
 // node's current primary core and is never rewritten to a concrete name. The
 // last two flags are derived from that core and are null while it is not
 // reported (an official sing-box build without with_v2ray_api, for example).
-export interface Inbound { id: string; name: string; nodeId: string; protocol: string; core?: CoreName | ''; listen: string; port: number; enabled: boolean; subscriptionVisible: boolean; internalRelay: boolean; defaultOutbound: string; allowedUserIds: string[]; settings: ProtocolSettings; relayCredentialId?: string; hasTlsKey: boolean; hasWireGuardKey: boolean; wireGuardPublicKey?: string; userTrafficSupported?: boolean | null; deviceGateSupported?: boolean | null; createdAt: string; }
+export interface Inbound { id: string; name: string; nodeId: string; protocol: string; core?: CoreName | ''; listen: string; port: number; enabled: boolean; subscriptionVisible: boolean; internalRelay: boolean; defaultOutbound: string; allowedUserIds: string[]; settings: ProtocolSettings; relayCredentialId?: string; hasTlsKey: boolean; hasRealityKey?: boolean; hasWireGuardKey: boolean; wireGuardPublicKey?: string; userTrafficSupported?: boolean | null; deviceGateSupported?: boolean | null; createdAt: string; }
 export interface Outbound { id: string; name: string; nodeId: string; protocol: string; address: string; port: number; enabled: boolean; targetNodeId: string; targetInboundId: string; settings: ProtocolSettings; supportTcp: boolean; supportUdp: boolean; failurePolicy: string; backupOutboundId: string; hasCredential: boolean; hasWireGuardKey: boolean; wireGuardPublicKey?: string; createdAt: string; }
 export interface OutboundHealth { healthy: boolean; latencyMs: number; checkedAt: string; }
 export interface Outbound { probeUrl: string; probeInterval: number; health?: OutboundHealth; }
@@ -44,7 +47,7 @@ export type GroupInput = Omit<OutboundGroup, 'id' | 'createdAt'>;
 export interface ChainHop { position: number; sourceNodeId: string; targetNodeId: string; outboundId: string; targetInboundId: string; credentialId: string; protocol: string; failurePolicy: string; }
 export interface ProxyChain { id: string; name: string; nodeIds: string[]; outboundIds: string[]; hops: ChainHop[]; finalOutboundId: string; supportTcp: boolean; supportUdp: boolean; enabled: boolean; failurePolicy: string; backupTargetId: string; createdAt: string; }
 export type ChainInput = Omit<ProxyChain, 'id' | 'createdAt' | 'hops'>;
-export type InboundInput = Pick<Inbound, 'name' | 'nodeId' | 'protocol' | 'listen' | 'port' | 'enabled' | 'subscriptionVisible' | 'internalRelay' | 'defaultOutbound' | 'allowedUserIds' | 'settings'> & { core?: CoreName | '' };
+export type InboundInput = Pick<Inbound, 'name' | 'nodeId' | 'protocol' | 'listen' | 'port' | 'enabled' | 'subscriptionVisible' | 'internalRelay' | 'defaultOutbound' | 'allowedUserIds' | 'settings'> & { core?: CoreName | ''; rotateRealityKey?: boolean };
 export type OutboundInput = Pick<Outbound, 'name' | 'nodeId' | 'protocol' | 'address' | 'port' | 'enabled' | 'targetNodeId' | 'targetInboundId' | 'settings' | 'supportTcp' | 'supportUdp' | 'failurePolicy' | 'backupOutboundId' | 'probeUrl' | 'probeInterval'> & { username: string; secret: string; };
 export const inboundProtocols = ['http', 'socks5', 'shadowsocks', 'vless', 'trojan', 'wireguard', 'hysteria2', 'tuic'];
 export const outboundProtocols = ['direct', 'block', ...inboundProtocols];

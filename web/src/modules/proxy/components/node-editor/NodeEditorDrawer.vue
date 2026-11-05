@@ -48,7 +48,7 @@
         <button type="button" class="ios-btn-secondary" @click="pickPort">随机端口</button>
         <p aria-live="polite" :class="['text-xs', conflict ? 'text-ios-red' : 'text-ios-secondary']">{{ conflict || '入站列表中无端口冲突（含画布方案入站）；不检测主机其他进程。' }}</p>
       </div>
-      <NodeProtocolFields v-if="step === 3 || step === 4" :state="state" :step="step" :gost="gostForwardReady(selectedServer, f.core)" />
+      <NodeProtocolFields v-if="step === 3 || step === 4" :state="state" :step="step" :server="selectedServer" :gost="gostForwardReady(selectedServer, f.core)" />
       <NodeAdvancedFields v-if="step === 5" :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" />
       <section v-if="step === 5 && isOwner" class="panel-card p-4 space-y-3">
         <h3 class="text-sm font-semibold text-ios-label">所属分组</h3>
@@ -64,6 +64,7 @@
         <p class="text-xs text-ios-secondary">默认出站：{{ f.defaultOutbound }}；用户范围：{{ f.allowedUserIds.length ? f.allowedUserIds.map(id => users.find(u => u.id === id)?.username || id).join('、') : '已获授权、且分组包含此入站的用户' }}</p>
         <p class="text-xs text-ios-secondary">所属分组：{{ selectedGroupIds.map(id => memberGroups.find(g => g.id === id)?.name || '—').join('、') || '—' }}。非空 allowedUserIds 只进一步缩小上述分组授权范围，不会单独授予接入权限。</p>
         <p v-if="f.protocol === 'forward'" class="text-xs text-ios-secondary">{{ forwardPreview }}</p>
+        <p v-if="f.settings.security === 'reality'" class="text-xs text-ios-secondary">Reality：{{ f.settings.reality?.handshake_target || '尚未填写握手目标' }}；订阅使用第一个 SNI / Short ID。{{ f.rotateRealityKey ? '本次保存将轮换密钥；发布成功后客户端须更新订阅。' : state.original?.hasRealityKey ? '保留现有密钥。' : '首次保存时生成密钥，保存后返回公钥。' }}</p>
         <p class="text-xs text-ios-orange">保存草稿后运行配置不变。发布会包含该服务器的全部待发布修改；内部中转请先发布目标服务器。</p>
         <div class="overflow-x-auto rounded-2xl border border-ios-border">
           <table class="w-full text-xs text-left"><thead class="bg-ios-bg text-ios-secondary"><tr><th class="p-3">字段</th><th class="p-3">保存前</th><th class="p-3">保存后</th></tr></thead>
@@ -75,6 +76,12 @@
     </fieldset>
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
     <p v-if="result" role="status" class="text-sm text-ios-secondary">{{ result }}</p>
+    <div v-if="savedInbound?.settings.reality?.public_key" class="space-y-2 text-xs text-ios-secondary">
+      <label class="block">已保存的 Reality 公钥<input :value="savedInbound.settings.reality.public_key" readonly class="form-input-base mt-2 font-mono text-xs" /></label>
+      <button type="button" class="ios-btn-secondary" @click="copySavedPublicKey">复制已保存公钥</button>
+      <p v-if="keyCopyStatus" role="status">{{ keyCopyStatus }}</p>
+      <p>公钥来自保存后的服务器读回；运行配置与客户端连接仍以成功发布为准。</p>
+    </div>
     <template #footer>
       <button v-if="savedId" class="ios-dialog-btn-secondary" @click="emit('close')">关闭</button>
       <template v-else>
@@ -116,6 +123,7 @@ const memberGroups = ref<NodeGroup[]>([]), selectedGroupIds = ref<string[]>([]);
 const initialGroupIds = ref<string[]>([]);
 const step = ref(props.inbound ? 6 : 1), reached = ref(props.inbound ? 6 : 1), autoName = ref(!props.inbound);
 const loading = ref(true), busy = ref(false), error = ref(''), loadError = ref(''), result = ref(''), savedId = ref('');
+const savedInbound = ref<Inbound | null>(null), keyCopyStatus = ref('');
 const steps = ['服务器', '协议与端口', '传输与安全', '协议专属', '高级', '确认'].map((label, i) => ({ label, number: i + 1, symbol: '①②③④⑤⑥'[i] }));
 const protocols = computed(() => [...new Set([...protocolOptions.inbound, 'forward'])]);
 const selectedServer = computed(() => servers.value.find(s => s.id === f.value.nodeId));
@@ -225,6 +233,10 @@ function pickPort() {
   }
 }
 function close() { if (!busy.value) emit('close'); }
+async function copySavedPublicKey() {
+  try { await navigator.clipboard.writeText(savedInbound.value?.settings.reality?.public_key || ''); keyCopyStatus.value = '公钥已复制'; }
+  catch { keyCopyStatus.value = '未能复制，请在公钥框中选择并手动复制'; }
+}
 async function save(publish: boolean) {
   if (busy.value || !isOwner.value || savedId.value) return;
   busy.value = true; error.value = ''; result.value = '';
@@ -234,6 +246,7 @@ async function save(publish: boolean) {
     for (let n = 1; n <= 5; n++) if (!check(n)) { step.value = n; return; }
     const value = buildPayload(state);
     const saved = await proxyAPI.saveInbound(state.original?.id || null, value);
+    savedInbound.value = saved;
     savedId.value = saved.id; step.value = 6;
     result.value = '节点草稿已保存，运行配置未改变。';
     try {
@@ -255,7 +268,7 @@ async function save(publish: boolean) {
       } catch (e) { error.value = `发布失败：${(e as Error).message}。草稿已保存并保留，可在服务器详情的配置版本中重试发布。`; }
     }
     emit('saved');
-  } catch (e) { error.value = (e as Error).message; }
+  } catch (e) { error.value = '保存草稿失败，输入已保留：' + (e as Error).message; }
   finally { busy.value = false; }
 }
 onMounted(load);

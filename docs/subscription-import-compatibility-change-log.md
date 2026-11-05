@@ -340,3 +340,9 @@
 - Linux real-core suite on production commit `9e48fcf` passed in 592s, END 2026-11-05T15:58:26Z, including SS2022 URI/YAML/JSON, generated Reality clients, Xray account/gate/key rollback and independent sing-box cases.
 - Loader correction `ca970a4` has identical production code. Its Linux frontend build/self-tests, vet, fixture build and focused checks passed; remaining broad race was stopped under the reduced scope. Do not describe the final overall gate as PASS.
 - Partial browser results and remaining limits are in `docs/v1.4-protocol-verification.md`. Development work is complete; formal release/host acceptance and remaining browser checks are separate. Nothing was pushed, tagged, published or applied to production.
+
+## 2026-11-05: follow-up live format-preview verification
+
+- Owner requested the remaining browser/editor and format-preview checks. Restored the isolated loopback panel; its existing browser tab is not shared, so UI actions await the Owner's “Share with agents” permission.
+- Prepared 18 synthetic authorized endpoints and exercised both real preview APIs in all five formats. URI/Base64 exported 18, sing-box 5, Mihomo 9 and legacy Clash 1, with expected per-format warnings. Verified field fidelity, identical preview bodies/warnings, no dangling members, format-filtered empty-group REJECT and no token/settings/profile writes.
+- Detailed evidence and remaining browser boundary are in `docs/v1.4-protocol-verification.md`. No production code changed and no broad regression suite was repeated.

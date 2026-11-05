@@ -285,11 +285,10 @@ assert.match(read('portal/PortalLayout.vue'), /<button v-else[^>]*@click="logout
 console.log('PASS review 3: preview-only duplicate header link hidden, toolbar and portal logout retained');
 
 const clientActionsReview = read('modules/routing/pages/ClientPolicyPage.vue').split('<template #actions>')[1].split('</template>')[0];
-assert.match(clientActionsReview, /新建配置/, 'header action provides new configuration trigger');
-const clientPageFull = read('modules/routing/pages/ClientPolicyPage.vue');
-assert.ok(clientPageFull.includes('saveAll'), 'save action retained in configuration dialog');
-assert.ok(clientPageFull.includes('openCreateRuleDrawer'), 'rule creation retained in rules section');
-console.log('PASS review 4: header action updated to new config, save and rule editor retained in dialog');
+assert.match(clientActionsReview, /<div class="flex flex-wrap sm:flex-nowrap items-center gap-2.5 min-w-0 w-full sm:w-auto">/);
+for (const action of ['resetToDefault', 'openCreateRuleDrawer', 'saveAll', '/routing/simulator?tab=client']) assert.ok(clientActionsReview.includes(action));
+assert.match(clientActionsReview, /<\/router-link>\s*<\/div>/);
+console.log('PASS review 4: header actions wrap on small screens, desktop row and all actions retained');
 
 // Third round: execute the shared message mapping and API error path.
 const apiReview3 = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(read('app/apiClient.ts'), {

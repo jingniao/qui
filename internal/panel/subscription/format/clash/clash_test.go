@@ -265,6 +265,17 @@ func TestMihomoAcceptsTheProfiles(t *testing.T) {
 	for _, preset := range rules.Presets() {
 		cases["preset-"+preset.ID+".yaml"] = renderWith(t, Meta{}, fixtures(t), preset.Template).Body
 	}
+	// A purpose group over region groups: keyword-filtered, empty with REJECT
+	// and an exact endpoint member.
+	membership := richTemplate()
+	membership.Groups = append(membership.Groups,
+		rules.Group{Name: "SS 地区", Type: "url-test", Members: []string{rules.MemberAll}, IncludeKeywords: []string{"ss"}, ExcludeKeywords: []string{"128"}, EmptyPolicy: "reject", TestURL: "https://www.gstatic.com/generate_204", IntervalSeconds: 300},
+		rules.Group{Name: "无匹配地区", Type: "select", Members: []string{rules.MemberAll}, IncludeKeywords: []string{"no-such-region"}, EmptyPolicy: "reject"},
+		rules.Group{Name: "精确端点", Type: "select", Members: []string{rules.MemberEndpoint + "inbound:socks"}, EmptyPolicy: "reject"},
+		rules.Group{Name: "用途", Type: "select", Members: []string{"SS 地区", "无匹配地区", "精确端点", rules.TargetDirect}},
+	)
+	membership.Rules = append(membership.Rules, rules.Rule{ID: "purpose", Type: rules.RuleDomainSuffix, Payload: "purpose.example", Target: "用途", Enabled: true, Priority: 10})
+	cases["membership.yaml"] = renderWith(t, Meta{}, fixtures(t), membership).Body
 	directory := t.TempDir()
 	for name, body := range cases {
 		path := filepath.Join(directory, name)

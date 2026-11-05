@@ -9,6 +9,7 @@
 - U1a/U1b：导航、隧道/规则与计划发布交互、节点添加中转、画布出口/监听字段；阶段范围见计划，浏览器验收待 A1。
 - X1a/X1b：0129 的五张表、ID 归属和统一端口检查、草稿/删除/轮换与批次发布；手动保存按启用入站冲突，声明始终占用，自动分配含禁用入站；保留画布无范围默认，新隧道/规则不回退端口。见 [X1 报告](v1.4-x1a-report.md)。
 - N1：节点 relays API、目标变化 needs_publish、删除引用保护、订阅/门户中转端点；0130 成功发布快照隔离草稿变化，Owner 专享真实凭据分享预览。Reality 未实现，未声称计划中的 Reality golden 已完成。
+- **M1（自建 Reality／xhttp 契约，未发布，`feat/v1.4-selfhost-m1`）：** 仅服务端契约、上报与门禁，无渲染、无密钥生成、无编辑器选项、无订阅映射；阶段仍待个人复核与完整 Linux 门禁。新增 VLESS 入站的类型化服务端私有设置 `desiredstate.ProtocolSettings.reality`／`xhttp`（只接受 VLESS 入站，无 JSON 透传/未知字段），结构校验覆盖 X25519 base64url-32 且公钥须由私钥导出、Short ID 偶数位十六进制 ≤16、server names 上限与控制字符、Owner 必填 `host:port` 握手目标（仅语法）、Reality 与 TLS 材料互斥、xhttp 的 TCP/H2 模式子集，以及 Vision 仅限 TCP＋TLS/Reality。新增 `CoreSettingsCapability{core,settings_contract_version,combinations[]}` 与统一门禁：面板保存、配置快照与发布前检查一致失败关闭；契约经 `agentpb` 加法字段传输（`CoreCapability.server_settings_contract_version`／`server_settings_combinations` 为 10／11，单核标量形式在 `Capabilities` 的 23／24，`scripts/generate-proto.sh` 生成），Agent 多核心与旧标量装饰按各适配器上报复制，面板只转换不推断，单核回退保留字段，畸形上报由共享组合校验拒绝、未知版本接受但不授权。当前 Xray／sing-box 适配器尚无渲染器，生产 Agent 上报零，版本文本/VLESS 标志/他核上报都不授权；两个渲染入口对这类状态失败关闭。Reality 私钥只进加密设置与加密修订，读取与修订差异只暴露公开值。无迁移；无 Linux 门禁与实机证据，未声明可用。
 - C1：画布仅新建代理中转，qui 入站出口使用独立内部凭据，外部出站可成为最终出口；relayPort 优先旧字段，旧 forward/gost 只读保留至迁移。见 [C1 报告](v1.4-c1-report.md)。
 - M1：0131 启动/恢复一次性迁移合格已发布画布转发，保留对象 ID、端口、运行修订与 GOST 材料；遗留项由 Owner 查询持久迁移报告，不自动重试。备份/恢复覆盖新表、快照、声明、标记与报告，恢复须显式发布。见 [M1 报告](v1.4-m1-report.md)。
 - A1b：同步说明书、架构、运维、协议/部署、文档索引及发布说明草稿；A1 测试、RC/主机与四路径客户端验收结果待补，不构成发布结论。

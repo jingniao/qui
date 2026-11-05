@@ -50,6 +50,13 @@ const (
 	DimQUIC          = "quic"
 	DimTransportWS   = "transport_ws"
 	DimTransportGRPC = "transport_grpc"
+	// DimSecurityReality and DimTransportXHTTP are the self-hosted Reality and
+	// xhttp settings of the v1.4 compatibility plan (phase M1). They are listed as
+	// pending on the VLESS row: the typed contracts, the per-core capability
+	// report and the gates exist, but no adapter renders them yet, so nothing can
+	// declare a combination and the option lists do not offer them.
+	DimSecurityReality = "security_reality"
+	DimTransportXHTTP  = "transport_xhttp"
 )
 
 // Core names of the per-core rows. They match the core name an Agent reports in
@@ -138,9 +145,9 @@ func ProtocolSupportTable() []ProtocolSupport {
 			Protocol: "vless", Direction: "both", Transport: []string{"tcp", "udp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"none", "tls"},
 			Cores:         both,
 			Implemented:   identityStream,
-			Pending:       []string{},
+			Pending:       []string{DimSecurityReality, DimTransportXHTTP},
 			NotApplicable: []string{DimQUIC},
-			Source:        "ValidateSettings transport/flow/security; both official cores render VLESS with ws and grpc transports",
+			Source:        "ValidateSettings transport/flow/security; both official cores render VLESS with ws and grpc transports; Reality and xhttp are contract-only until the self-hosted renderers ship",
 		},
 		{
 			Protocol: "trojan", Direction: "both", Transport: []string{"tcp", "udp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"tls"},

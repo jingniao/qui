@@ -33,6 +33,7 @@ type Inbound struct {
 	CreatedAt            string                        `json:"createdAt"`
 	HasTLSKey            bool                          `json:"hasTlsKey"`
 	HasWireGuardKey      bool                          `json:"hasWireGuardKey"`
+	HasRealityKey        bool                          `json:"hasRealityKey"`
 }
 type InboundInput struct {
 	Core                string                        `json:"core"`

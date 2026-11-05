@@ -26,11 +26,16 @@ type fakeMultiCore struct {
 	revision                int64
 	gate                    devicegate.Request
 	hooks                   RuntimeHooks
+	settings                []*pb.SettingsCombination
 }
 
 func (f *fakeMultiCore) Name() string { return f.name }
 func (f *fakeMultiCore) DetectCapabilities(context.Context) (*pb.Capabilities, error) {
-	return &pb.Capabilities{CoreName: f.name, CoreVersion: "1.2.3"}, nil
+	capabilities := &pb.Capabilities{CoreName: f.name, CoreVersion: "1.2.3"}
+	if len(f.settings) > 0 {
+		capabilities.ServerSettingsContractVersion, capabilities.ServerSettingsCombinations = 1, f.settings
+	}
+	return capabilities, nil
 }
 func (f *fakeMultiCore) Render(_ context.Context, s desiredstate.State) (RenderedConfig, error) {
 	return RenderedConfig{NodeID: s.NodeID, Revision: s.Revision, Data: []byte(`{"inbounds":[]}`), StatsAccounts: map[string]traffic.Counter{"user": {CredentialID: f.name}}}, nil
@@ -115,6 +120,37 @@ func TestMultiCapabilitiesCarryTheGostContract(t *testing.T) {
 
 // TestRemoveIdleKeepsAUserCoreAsPrimary pins the primary takeover: the primary is
 // the core that serves inbounds without an explicit core, and GOST only serves
+
+// The settings contract is copied per core from that adapter's own report, which
+// is how the panel learns which xhttp/Reality combinations a build can apply. An
+// adapter that reports nothing keeps a zero contract here instead of gaining one.
+func TestMultiCapabilitiesCarryTheSettingsContract(t *testing.T) {
+	events := []string{}
+	declared := &fakeMultiCore{name: "xray", events: &events, settings: []*pb.SettingsCombination{
+		{Protocol: "vless", Direction: desiredstate.DirectionInbound, Security: desiredstate.SecurityReality, Transport: "tcp"},
+	}}
+	plain := &fakeMultiCore{name: "sing-box", events: &events}
+	m, err := NewMultiRuntime(declared, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := m.DetectCapabilities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capabilities.Cores) != 2 {
+		t.Fatalf("capabilities: %+v", capabilities)
+	}
+	// The primary's report also travels in the scalar fields a legacy panel reads.
+	if capabilities.ServerSettingsContractVersion != 1 || len(capabilities.ServerSettingsCombinations) != 1 ||
+		capabilities.Cores[0].ServerSettingsContractVersion != 1 || len(capabilities.Cores[0].ServerSettingsCombinations) != 1 {
+		t.Fatalf("the declared contract was not reported: %+v", capabilities)
+	}
+	if capabilities.Cores[1].ServerSettingsContractVersion != 0 || len(capabilities.Cores[1].ServerSettingsCombinations) != 0 {
+		t.Fatalf("a core that declares nothing gained a contract: %+v", capabilities.Cores[1])
+	}
+}
+
 // forwards, so a removal never hands that slot to GOST.
 func TestRemoveIdleKeepsAUserCoreAsPrimary(t *testing.T) {
 	events := []string{}

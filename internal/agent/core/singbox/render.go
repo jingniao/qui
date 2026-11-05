@@ -148,6 +148,12 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 	if err := state.Validate(); err != nil {
 		return core.RenderedConfig{}, err
 	}
+	// M1 stores and validates the server-private xhttp/Reality settings, but this
+	// build has no renderer for them yet (M4). Refuse instead of applying a
+	// listener with those fields silently dropped.
+	if err := desiredstate.ValidateServerSettingsRenderer(state); err != nil {
+		return core.RenderedConfig{}, err
+	}
 	original := state
 	state, err := state.RuntimeAt(at)
 	if err != nil {

@@ -62,6 +62,8 @@ func Detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	}
 	major, _ := strconv.Atoi(strings.Split(match[1], ".")[0])
 	protocols = append(protocols, &pb.ProtocolCapability{Protocol: "wireguard", Inbound: major >= 25, Outbound: true, Tcp: true, Udp: true})
+	// This build has no xhttp/Reality renderer (M2), so it reports no settings
+	// contract at all; the fields stay zero and the panel gate stays closed.
 	caps := &pb.Capabilities{CoreName: "xray", CoreVersion: match[1], Protocols: protocols, ForwardInboundSupported: true}
 	caps.DeviceGateSupported = SupportsOnlineStats(caps)
 	if caps.DeviceGateSupported {

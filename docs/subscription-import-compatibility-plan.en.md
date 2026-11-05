@@ -394,6 +394,67 @@ measurements only. S1 has since been implemented and passed the main assistant's
 personal review, and is delivered in a phase commit whose Linux gate is pending;
 no S1 completion is claimed here.
 
+M1 status (2026-11-05, **contracts only — no self-hosted xhttp/Reality support
+yet; the phase still awaits main's personal review and the Linux gate**): the
+server-side half of the self-hosted track is implemented as typed contracts,
+capability reporting, validation and gates, on branch `feat/v1.4-selfhost-m1`
+(worktree base `9045e1b`). Nothing renders, generates keys, edits or exports
+these settings, and the protocol matrix lists them as pending.
+
+- Added: `desiredstate` server-private `reality` and `xhttp` settings on
+  `ProtocolSettings` (inbound-only, typed, no opaque passthrough or unknown
+  fields), structural validation (X25519 base64url-32 role-correct key pair,
+  bounded server names, even-hex Short IDs ≤16, Owner-required `host:port`
+  target with syntax-only checks, Reality/TLS-material exclusivity, TCP/H2 xhttp
+  mode subset, Vision limited to TCP+`tls`/`reality`), the
+  `CoreSettingsCapability` settings-contract model with per-combination
+  authorization, its additive `agentpb` transport (`SettingsCombination`, fields
+  10/11 on `CoreCapability` and 23/24 on `Capabilities`), and a fail-closed
+  renderer guard.
+- Gates: panel save (`proxy.ValidateInboundServerSettings`), configuration
+  snapshot (`SnapshotIntent`) and the pre-deployment check
+  (`deployment.validateStateCoresTx`) share one gate. The contract itself now
+  travels over additive `agentpb` fields — `CoreCapability.server_settings_contract_version`
+  (10) and `server_settings_combinations` (11) per core, and the same pair on
+  `Capabilities` (23/24) as the single-core scalar form — regenerated with
+  `scripts/generate-proto.sh`. The Agent's `MultiRuntime.DetectCapabilities` and
+  the legacy `reportCapabilities` decoration copy what each adapter reports, the
+  panel's `node.SettingsContractCapability` only converts (no inference) and
+  `node.EnabledCores` keeps the fields in the single-core fallback;
+  `validateMultiCapabilities` checks the report shape once with the shared
+  combination validator. Production Xray/sing-box adapters ship no renderer yet,
+  so they report version 0 with no combinations and every xhttp/Reality listener
+  stays refused; unknown versions are accepted (no disconnect) but authorize
+  nothing. Version text, the VLESS inbound flag, `multi_core_supported` and the
+  GOST contract are explicitly not evidence. The Xray and sing-box render entries
+  refuse such a state rather than dropping the fields, and the published
+  subscription source withholds such an endpoint — a temporary guard while no
+  renderer exists, not evidence that client mapping is complete. A masked read
+  keeps the Reality private key out of API responses, and the revision comparison
+  hides it as `[已隐藏]`.
+- Not in M1: key generation/rotation, Xray or sing-box rendering, editor options
+  (M3), subscription client mapping (M2), any migration, and any change to the
+  import track or the shared client model.
+
+M1 review corrections (2026-11-05, local corrections; Linux gate still pending):
+Reality server names are concrete names/IPs only, because the pinned Reality
+source matches SNI exactly. Unknown nonzero contract versions receive generic
+resource bounds without interpreting version-1 enums; storing them replaces old
+grants and authorizes nothing. Apply/rollback dispatch checks the current report
+again and requires a newly accepted capability envelope in this connection for
+new settings, so an accepted-message replay cannot authorize reconnect delivery.
+Unsupported queued commands stay withheld while the stream continues. Backup
+validation checks new draft settings with the shared protocol/direction validator
+while retaining historical validation for legacy drafts. Local targeted tests do
+not establish real-core acceptance or M2 completion. Revision-zero rollback clears
+runtime without transmitting settings and remains available without a new report.
+- Verification: `gofmt`, focused `go vet`/`go test` on the touched packages
+  (Windows, Go 1.26.0). No Linux `scripts/check.sh` or real-core run was made
+  for this change; per §14.1 item 9 the phase commit gets its own Linux gate
+  after review. Synthetic reports exercise the transport round trip and the
+  save/snapshot/deploy allow path, while production wiring stays closed until a
+  renderer reports a combination.
+
 ## 11. Acceptance Criteria
 
 1. Use synthetic equivalents of 3 SS2022 AES-256, 11 Reality+xhttp, and 2 Reality+grpc entries. Record parsing, persistence, output, and target-core results individually. Valid combinations preserve required parameters; invalid ones receive accurate explanations.

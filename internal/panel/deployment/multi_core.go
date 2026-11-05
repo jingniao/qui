@@ -33,6 +33,13 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 		if err := proxy.ValidateInboundForwardOptions(c, in.Core, in.Settings); err != nil {
 			return fmt.Errorf("inbound %s: %w", in.ID, err)
 		}
+		// The xhttp/Reality settings are published only to a core that reported the
+		// settings contract for this combination. An older Agent never declared it,
+		// so a deployment carrying these settings fails here instead of applying a
+		// configuration with the fields dropped.
+		if err := proxy.ValidateInboundServerSettings(c, in.Core, in.Protocol, in.Settings); err != nil {
+			return fmt.Errorf("inbound %s: %w", in.ID, err)
+		}
 	}
 	for _, core := range node.EnabledCores(c) {
 		// A GOST forward leaves through its own target and carries no outbound

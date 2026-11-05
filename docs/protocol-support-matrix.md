@@ -46,6 +46,24 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 - HTTP、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard 为原承诺基础协议，已接入的 Hysteria2/TUIC 保持；本表不静默减少任何已支持协议。
 - **节点出站源地址（节点级，与协议无关）**：Xray 在每个拨号出站上渲染 `sendThrough` + `streamSettings.sockopt.interface`，地址族用 `freedom` 的 `settings.domainStrategy`、其他协议用 `sockopt.domainStrategy` 固定（`ForceIPv4`/`ForceIPv6`）；sing-box 渲染 `inet4/inet6_bind_address` + `bind_interface` 与限族的 `domain_resolver`（`ipv4_only`/`ipv6_only`）。`blackhole`/`block` 出站、sing-box 的 `selector`/`urltest` 组不渲染（组由上游在运行时选成员），sing-box 只固定出站 WireGuard 端点、入站端点仅监听。目标为另一族的字面量 IP 时连接失败。整机服务器强制出站是内核 SNAT，与协议无关，见[运维手册](operations.md)第 9 节。
 
+### 自建 VLESS Reality / xhttp（v1.4 M1：仅契约，未渲染）
+
+上表的 `vless` 行仍只声明 `none`/`tls` 与 tcp/ws/grpc，因为 M1 只交付**契约与门禁**，没有渲染器：`GET /api/v1/protocol-support` 在该行的 `pending` 里新增 `security_reality` 与 `transport_xhttp`，编辑器因此不提供这两个选项，订阅也不映射。
+
+| 组合（VLESS 入站） | 结构校验（M1） | 能力门禁（M1） | 渲染与订阅 |
+| --- | --- | --- | --- |
+| Reality + TCP（可选 Vision） | 接受 | 按上报逐组合授权；生产 Agent 目前报零 → 拒绝 | M2（Xray）、M4（sing-box） |
+| Reality + xhttp | 接受 | 同上 | M2 |
+| TLS/无 + xhttp | 接受 | 同上 | M2；M4 取决于固定版 sing-box 是否支持 xhttp |
+| Vision + xhttp / Vision + gRPC | 拒绝（保存前） | — | 不计划 |
+
+- 服务端私有字段在 `desiredstate.ProtocolSettings` 的 `reality`（私钥、公钥、握手目标、server names、Short IDs）与 `xhttp`（host、path、mode）里；客户端公有部分（公钥、Short ID、SNI、指纹）留给共享的订阅/代理模型（S3/S4），不在这里重复定义。
+- 设置契约是独立上报：`CoreSettingsCapability{core,settings_contract_version,combinations[]}`，按（协议、方向、安全、传输、flow）逐项列出。版本 0、缺失、未知版本、其他核心的上报和未列出的组合都不授权；Agent 版本文本、VLESS 入站标志和 GOST 契约位都不能代替。
+- 上报经 `agentpb` 的加法字段传输：`CoreCapability.server_settings_contract_version`／`server_settings_combinations`（10／11）为逐核声明，`Capabilities` 同名字段（23／24）供单核 Agent 使用，`scripts/generate-proto.sh` 生成。Agent 的 `MultiRuntime` 与旧标量装饰按各适配器上报复制，面板 `node.SettingsContractCapability` 只转换不推断，单核回退保留这些字段；`validateMultiCapabilities` 用共享组合校验拒绝畸形上报，未知版本接受但不授权。面板保存、快照与发布三处一致失败关闭。
+- 生产 Agent 的 Xray／sing-box 适配器尚无渲染器，因此上报版本 0 与空列表：契约可以完整传输并由合成上报验证，但真实组合要等渲染器（M2／M4）才会被声明。渲染入口对携带这些设置的入站/出站直接报错，不会静默丢弃；这不是客户端映射完成的证明。
+- 真实核证据（S0 §4）：mihomo 只测过 xhttp `auto`，sing-box 1.14.3 原生拒绝 xhttp，Vision + gRPC/xhttp 被客户端 VLESS 出站拒绝；M1 不据此声明任何组合可用。
+- M1 复核：Reality SNI 只接受具体名称，固定版核心精确匹配、不展开通配符。未知设置契约版本仅做资源边界检查并覆盖旧报告，始终不授权；新设置的排队应用／回滚投递还要求本次连接已接受新序号报告并匹配当前能力，已接受消息重放与撤回支持均不能放行。备份对新设置草稿按协议与角色校验，旧草稿校验语义不变。
+
 
 ### GOST（v1.3 G1）
 
@@ -101,6 +119,7 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 | `concurrency` | v1.1 源地址估计与运行时设备门控，按协商能力执行，见第 7 节 |
 | `subscription` | 可进入用户订阅 |
 | `udp` / `ipv6` / `tls` / `quic` / `transport_ws` / `transport_grpc` | 协议/传输族能力 |
+| `security_reality` / `transport_xhttp` | 自建 VLESS 的 Reality 与 xhttp（v1.4 M1 契约阶段），当前只出现在 `vless` 行的 `pending` |
 
 已删除的 fork 维度：`egress_proof`（跨节点认证出口证明）与 `inbound_bytes`（入口逐连接 payload 字节）。两者只由受控核上报，官方核无法提供；Phase 7.3 已删除 `pkg/contracts/observation` 的关联/观测契约、面板的观测读侧与 `GET /access-records/egress-proofs` 页面（迁移 `0105_drop_fork_observation.sql`）。代码中剩余的 `observation` 字样属于无关命名（存储观测 `internal/panel/access/storage_observation.go`、账户流量采样）；历史移除过程见[变更记录](changelog.md)。
 

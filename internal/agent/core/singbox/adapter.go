@@ -643,6 +643,8 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	if match == nil {
 		return &pb.Capabilities{}, errors.New("configured core does not identify as sing-box")
 	}
+	// This build has no xhttp/Reality renderer (M4), so it reports no settings
+	// contract at all; the fields stay zero and the panel gate stays closed.
 	capabilities := &pb.Capabilities{CoreName: "sing-box", CoreVersion: match[1], ForwardInboundSupported: true}
 	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
 	if capabilities.DeviceGateSupported {

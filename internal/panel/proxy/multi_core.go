@@ -113,3 +113,23 @@ func ValidateInboundForwardOptions(c *pb.Capabilities, name string, settings des
 	}
 	return nil
 }
+
+// ValidateInboundServerSettings refuses the self-hosted xhttp/Reality settings
+// unless the selected core has explicitly reported the settings contract for that
+// combination (compatibility plan §13.3 item 3). Legacy combinations need no
+// report, so every existing inbound keeps saving exactly as before.
+//
+// The previous report is the only evidence accepted: an Agent that has not
+// reported the core, an uninstalled core, version text, the VLESS protocol flag
+// and another core's report all leave the gate closed. Its counterpart on the
+// publish path is the same call in deployment.validateStateCoresTx.
+func ValidateInboundServerSettings(c *pb.Capabilities, name, protocol string, settings desiredstate.ProtocolSettings) error {
+	if !settings.HasServerSettings() {
+		return nil
+	}
+	core := node.SelectedCore(c, name)
+	if core == nil {
+		return errors.New("the selected core is not reported enabled, so it cannot apply xhttp/Reality settings")
+	}
+	return desiredstate.RequireInboundServerSettings(core.Name, node.SettingsContractCapability(core), protocol, settings)
+}

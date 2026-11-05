@@ -353,6 +353,14 @@ Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥�
 
 协议、转发能力、WireGuard 与设备门控按入站所属核心的能力校验；组件正在被添加或移除（任务未落定）期间 `core` 不可选，保存草稿与发布都会拒绝，错误码 `core_pending`。
 
+自建 VLESS 的 xhttp／Reality（v1.4 M1，仅契约，尚未渲染）已加入 `desiredstate.ProtocolSettings` 的类型化服务端私有字段：`reality{private_key,public_key,handshake_target,server_names[],short_ids[]}` 与 `xhttp{host,path,mode}`。两者只接受 VLESS 入站；不接受 JSON 透传、`extra`／`xmux` 或未知键（API 与 `desiredstate.Decode` 均拒绝未知字段）。Reality 私钥只进加密的 `encrypted_settings` 与加密修订，普通读取（`mask`）、修订差异和预览只暴露公钥、握手目标、server names 与 Short ID；省略私钥的编辑沿用已存值，普通保存不轮换密钥。校验口径：两把 X25519 键均为无填充 base64url、32 字节，且公钥必须由私钥导出（角色正确）；Short ID 为 1–16 个字符的偶数位十六进制；server names 1–16 个、每个 ≤253 且无控制字符；握手目标由 Owner 必填 `host:port`，面板只校验语法，不做默认站点或网络可达检查（Agent 原生校验是最终门禁）；Reality 与普通 TLS 证书材料互斥。xhttp 只接受 `auto`／`packet-up`／`stream-up`／`stream-one` 这一 TCP/H2 承载子集，`path` 归 xhttp 自己，`service_name` 必须为空；Vision（`xtls-rprx-vision`）只允许 TCP 上的 TLS 或 Reality，xhttp／gRPC 上的 Vision 在保存前拒绝。
+
+能力门禁独立于协议标志与版本号：`desiredstate.CoreSettingsCapability{core,settings_contract_version,combinations[]}` 按（协议、方向、安全、传输、flow）逐项声明。版本 0、缺失、未知版本、其他核心的上报以及未列出的组合一律不授权；Agent 版本文本、VLESS 入站标志、`multi_core_supported` 与 GOST 契约位都不能替代它。M1 已把该上报落到 `agentpb`：`CoreCapability.server_settings_contract_version`（字段 10）与 `server_settings_combinations`（字段 11）为逐核声明，`Capabilities` 的同名字段（23／24）是单核 Agent 的标量形式，均由 `scripts/generate-proto.sh` 生成、只做加法，旧 Agent／旧面板各自忽略或保留未知字段。Agent 的 `MultiRuntime.DetectCapabilities` 按各适配器上报复制到对应核心，`control.reportCapabilities` 的旧标量装饰同样保留；面板 `node.SettingsContractCapability` 只把上报转换为共享契约、不推断来源，`node.EnabledCores` 的单核回退也保留这些字段。上报结构在 `validateMultiCapabilities` 里用共享组合校验一次：组合缺版本、方向／传输非法、重复项或超上限都拒绝整条上报；未知版本仍被接受（不因未来版本断连）但不授权。当前 Xray／sing-box 适配器都没有渲染器，因此生产 Agent 上报版本 0 与空列表，面板保存（`proxy.ValidateInboundServerSettings`）、配置快照（`SnapshotIntent`）与发布前（`deployment.validateStateCoresTx`）三处一致拒绝 Reality／xhttp 设置；合成上报可完整传输并放行对应组合，真实启用仍待渲染器（M2／M4）。
+
+M1 不提供渲染：Xray 与 sing-box 适配器都没有 Reality／xhttp 渲染器，渲染入口（`desiredstate.ValidateServerSettingsRenderer`）对携带这些设置的入站或出站一律失败，避免结构校验通过后静默丢弃设置；已发布状态若意外带这些字段，`subscription/source/published` 也跳过该端点而不是导出缺公钥与 Short ID 的客户端条目，这只是渲染器缺席期间的临时保护，不代表客户端映射已完成。`/api/v1/protocol-support` 的 VLESS 行把 `security_reality`、`transport_xhttp` 列为 `pending`，选项、订阅映射与 sing-box 适配留待 M2–M4。
+
+M1 复核修正：Reality server names 只接受具体主机名或 IP，不接受通配符（固定版 Reality 按 ClientHello SNI 精确匹配）。未知非零设置契约版本只检查数量、空对象与字段长度，不按当前版本解释枚举；接收后覆盖旧报告且始终不授权。排队的应用与回滚在投递时再次检查当前报告，携带新设置的命令还须本次连接已持久接收一条新序号能力报告；旧连接报告及已接受消息的原样重放均不能开门。支持撤回时保留命令、继续确认消息，不断开健康控制流；普通旧配置不要求此报告。备份检查对携带 Reality／xhttp 或对应安全／传输标志的草稿按协议与入站／出站角色复用 `ValidateSettings`，保留旧草稿的既有校验语义；加密修订继续走完整 `desiredstate.Decode`。
+
 # 13. 出站代理模块
 
 出站表示节点收到用户流量后，以什么方式继续访问。

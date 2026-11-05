@@ -22,7 +22,7 @@ func EnabledCores(c *pb.Capabilities) []*pb.CoreCapability {
 	if c.CoreName == "" {
 		return nil
 	}
-	return []*pb.CoreCapability{{Name: c.CoreName, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion}}
+	return []*pb.CoreCapability{{Name: c.CoreName, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations}}
 }
 func SelectedCore(c *pb.Capabilities, name string) *pb.CoreCapability {
 	if c == nil {
@@ -53,6 +53,9 @@ func AnyGateSupported(c *pb.Capabilities) bool {
 // stays a one-core node and must not be rejected. Two cores or a contradictory
 // primary are refused.
 func validateMultiCapabilities(c *pb.Capabilities) error {
+	if err := validateSettingsContract(c.ServerSettingsContractVersion, c.ServerSettingsCombinations); err != nil {
+		return err
+	}
 	if len(c.Cores) > 3 || len(c.Cores) > 1 && !c.MultiCoreSupported {
 		return errors.New("invalid multi-core capabilities")
 	}
@@ -63,6 +66,9 @@ func validateMultiCapabilities(c *pb.Capabilities) error {
 		}
 		seen[core.Name] = true
 		legacy := &pb.Capabilities{CoreName: core.Name, CoreVersion: core.Version, Protocols: core.Protocols}
+		if err := validateSettingsContract(core.ServerSettingsContractVersion, core.ServerSettingsCombinations); err != nil {
+			return err
+		}
 		if err := validateMessage("node", &pb.AgentMessage{NodeId: "node", Sequence: 1, MessageId: "validate", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: legacy}}); err != nil {
 			return err
 		}

@@ -19,7 +19,7 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		if err := f.Validate(); err != nil {
 			return err
 		}
-		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" {
+		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" || settings.HasServerSettings() {
 			return errors.New("forward cannot carry proxy security or transport settings")
 		}
 		return nil
@@ -32,7 +32,7 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		return errors.New("QUIC settings require Hysteria2 or TUIC")
 	}
 	if quic {
-		if settings.Security != "tls" || settings.Transport != "" && settings.Transport != "quic" || settings.WireGuard != nil || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" {
+		if settings.Security != "tls" || settings.Transport != "" && settings.Transport != "quic" || settings.WireGuard != nil || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.HasServerSettings() {
 			return errors.New("Hysteria2/TUIC require native QUIC and TLS without legacy transport fields")
 		}
 		if q := settings.QUIC; q != nil {
@@ -59,15 +59,15 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		}
 	}
 	if protocol == "direct" || protocol == "block" {
-		if settings.Security != "" || settings.Transport != "" || settings.WireGuard != nil {
+		if settings.Security != "" || settings.Transport != "" || settings.WireGuard != nil || settings.HasServerSettings() {
 			return errors.New("direct/block cannot use transport security")
 		}
 		return nil
 	}
-	if settings.Transport != "" && settings.Transport != "tcp" && settings.Transport != "ws" && settings.Transport != "grpc" && !(quic && settings.Transport == "quic") {
+	if settings.Transport != "" && settings.Transport != "tcp" && settings.Transport != "ws" && settings.Transport != "grpc" && settings.Transport != TransportXHTTP && !(quic && settings.Transport == "quic") {
 		return errors.New("unsupported proxy transport")
 	}
-	if settings.Security != "" && settings.Security != "none" && settings.Security != "tls" {
+	if settings.Security != "" && settings.Security != "none" && settings.Security != "tls" && settings.Security != SecurityReality {
 		return errors.New("unsupported transport security")
 	}
 	if len(settings.Path) > 256 || len(settings.ServiceName) > 128 || len(settings.ServerName) > 253 {
@@ -76,8 +76,11 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 	if settings.Path != "" && !strings.HasPrefix(settings.Path, "/") {
 		return errors.New("WebSocket path must begin with slash")
 	}
-	if settings.Flow != "" && (protocol != "vless" || settings.Flow != "xtls-rprx-vision" || settings.Security != "tls" || settings.Transport != "" && settings.Transport != "tcp") {
-		return errors.New("VLESS flow requires TCP TLS vision")
+	if err := validateVision(protocol, settings); err != nil {
+		return err
+	}
+	if err := validateServerSettings(protocol, settings, inbound); err != nil {
+		return err
 	}
 	if protocol == "trojan" && settings.Security != "tls" {
 		return errors.New("Trojan requires TLS")

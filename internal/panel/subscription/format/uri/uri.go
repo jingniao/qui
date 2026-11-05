@@ -140,6 +140,12 @@ func Link(endpoint proxy.Proxy) (string, error) {
 		if method == "" {
 			method = "chacha20-ietf-poly1305"
 		}
+		if proxy.SS2022(method) {
+			if _, err := endpoint.Shadowsocks(); err != nil {
+				return "", err
+			}
+			return "ss://" + percentEncode(method) + ":" + percentEncode(endpoint.Credential.Password) + "@" + target + "#" + percentEncode(name), nil
+		}
 		userinfo := base64.RawURLEncoding.EncodeToString([]byte(method + ":" + endpoint.Credential.Password))
 		return "ss://" + userinfo + "@" + target + "#" + url.PathEscape(name), nil
 	case "hysteria2", "tuic":
@@ -190,6 +196,24 @@ func Link(endpoint proxy.Proxy) (string, error) {
 	default:
 		return "", errors.New("unsupported subscription protocol")
 	}
+}
+
+// percentEncode uses only RFC3986 unreserved bytes. PathEscape leaves '+' and
+// ':' literal, which is unsuitable for the SIP002 AEAD-2022 password contract.
+func percentEncode(value string) string {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_' || c == '~' {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&15])
+		}
+	}
+	return b.String()
 }
 
 func tlsServerName(endpoint proxy.Proxy) string {

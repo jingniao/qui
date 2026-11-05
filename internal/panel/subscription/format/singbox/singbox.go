@@ -106,6 +106,16 @@ func (Exporter) Render(profile format.Profile) (format.Output, error) {
 			endpoints = append(endpoints, wireguardEndpoint{Type: "wireguard", Tag: endpoint.Origin.Node.Name + "-" + endpoint.Origin.Ref, Address: addresses, PrivateKey: endpoint.Credential.Password, MTU: peer.MTU, Peers: []wireguardPeer{{Address: endpoint.Server, Port: endpoint.Port, PublicKey: peer.ServerPublicKey, AllowedIPs: []string{"0.0.0.0/0", "::/0"}, KeepAlive: keepAlive}}})
 			continue
 		}
+		if endpoint.Protocol == "shadowsocks" && proxy.SS2022(endpoint.Method) {
+			credential, err := endpoint.Shadowsocks()
+			if err != nil {
+				return format.Output{}, err
+			}
+			if reason := credential.Omission("sing-box"); reason != "" {
+				output.Warnings = append(output.Warnings, proxy.FormatWarning("sing-box", endpoint.Name+": "+reason))
+				continue
+			}
+		}
 		value, err := renderOutbound(endpoint)
 		if err != nil {
 			return format.Output{}, err

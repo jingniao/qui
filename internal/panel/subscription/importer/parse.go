@@ -237,6 +237,16 @@ func valid(p proxy.Proxy) bool {
 	return code == ""
 }
 
+// ValidateProxy applies the same semantic rules used before encrypted import
+// persistence. Archive verification reuses it for newly supported endpoint
+// settings instead of maintaining another cipher or key allowlist.
+func ValidateProxy(p proxy.Proxy) error {
+	if !valid(p) {
+		return ErrParse
+	}
+	return nil
+}
+
 // validation reports the first rule that keeps a parsed proxy out of the cache,
 // and the field it concerns. valid() is the same check without the reason, so the
 // three parsers share one allowlist.
@@ -260,10 +270,19 @@ func validation(p proxy.Proxy) (string, string) {
 		return "invalid_uuid", fieldCredential
 	}
 	if p.Protocol == "shadowsocks" {
-		switch p.Method {
-		case "aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305":
-		default:
-			return "unsupported_cipher", fieldMethod
+		if _, err := p.Shadowsocks(); err != nil {
+			field := fieldCredential
+			switch err {
+			case proxy.ErrSSCipher:
+				field = fieldMethod
+			case proxy.ErrSSSecurity:
+				field = fieldSecurity
+			case proxy.ErrSSTransport:
+				field = fieldType
+			case proxy.ErrSSOption:
+				field = fieldEntry
+			}
+			return err.Error(), field
 		}
 	}
 	if p.Name == "" || len(p.Name) > 200 || p.Server == "" || len(p.Server) > 253 || p.Port < 1 || p.Port > 65535 {
@@ -336,6 +355,15 @@ func queryField(key string) string {
 // be cached, so the caller can report a precise diagnostic instead of dropping
 // the line silently.
 func uriProxy(line string) (proxy.Proxy, string, string) {
+	// Tolerate a plain standard-Base64 SS password containing '/' on input.
+	// net/url would otherwise interpret that byte as a path delimiter before it
+	// sees '@'. Escaped input stays untouched; output always escapes this byte.
+	if strings.HasPrefix(line, "ss://") {
+		authority := strings.SplitN(strings.SplitN(line[5:], "#", 2)[0], "?", 2)[0]
+		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+			line = "ss://" + strings.ReplaceAll(authority[:at], "/", "%2F") + line[5+at:]
+		}
+	}
 	u, err := url.Parse(line)
 	if err != nil || u.Hostname() == "" {
 		return proxy.Proxy{}, "invalid_entry", ""
@@ -362,13 +390,26 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 		}
 	case "ss":
 		p.Protocol = "shadowsocks"
+		if u.User == nil {
+			return p, "missing_credential", fieldCredential
+		}
 		p.Method = p.Credential.Username
-		if p.Credential.Password == "" {
+		if _, plain := u.User.Password(); !plain {
 			decoded, e := decode64(p.Method)
 			if e != nil {
 				return p, "invalid_credential", fieldCredential
 			}
 			p.Method, p.Credential.Password, _ = strings.Cut(string(decoded), ":")
+		}
+		p.Method = strings.ToLower(p.Method)
+		// The SS2022 userinfo's username is the cipher or its Base64 wrapper, not
+		// an independent credential. Normalize it away so input encodings have
+		// identical content identities in the encrypted cache.
+		if proxy.SS2022(p.Method) {
+			p.Credential.Username = ""
+		}
+		if proxy.SS2022(p.Method) && (u.RawQuery != "" || u.Path != "" && u.Path != "/") {
+			return p, "unsupported_option", fieldEntry
 		}
 	case "socks":
 		p.Protocol = "socks5"
@@ -497,6 +538,9 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 	p := proxy.Proxy{Name: entry.Name, Protocol: entry.Type, Server: entry.Server, Port: entry.Port, Method: entry.Cipher, Flow: entry.Flow, Credential: proxy.Credential{Username: entry.Username, Password: entry.Password}}
 	if p.Protocol == "ss" {
 		p.Protocol = "shadowsocks"
+	}
+	if p.Protocol == "shadowsocks" {
+		p.Method = strings.ToLower(p.Method)
 	}
 	if p.Protocol == "vless" {
 		p.Credential.Password = entry.UUID

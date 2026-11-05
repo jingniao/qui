@@ -2,7 +2,7 @@
 
 本表描述当前源码支持与上游边界，不替代运行证据。基础协议证据见[验收矩阵](v1-acceptance.md) §9.12、§10.4，v1.2 与 v1.3 实机结果见 §11–12。真实主机范围为 linux/amd64；arm64 仅做 qemu-user 模拟，正式浏览器走查未执行。
 
-v1.4 开发分支未发布，迁移头 0131（正式版 0128）。画布转发迁移不增加协议能力：普通转发保留原核心，两节点 GOST 保留单段材料，三节点须独立第二段材料及契约 4。规则默认订阅隐藏，目标公网地址及已发布用户入站端口唯一匹配才 linked，否则 manual。转换不改运行修订；遗留项由 Owner 读 migration-report，详见 [M1 报告](v1.4-m1-report.md)。A1 验收待补，不把旧两节点实机结论推广到新三节点路径。
+v1.4 开发分支未发布，迁移头 0133（正式版 0128）。画布转发迁移不增加协议能力：普通转发保留原核心，两节点 GOST 保留单段材料，三节点须独立第二段材料及契约 4。规则默认订阅隐藏，目标公网地址及已发布用户入站端口唯一匹配才 linked，否则 manual。转换不改运行修订；遗留项由 Owner 读 migration-report，详见 [M1 报告](v1.4-m1-report.md)。A1 验收待补，不把旧两节点实机结论推广到新三节点路径。
 
 本表描述未修改的官方上游能力：Xray 26.x 官方发布核、sing-box 1.14.x 官方核及加上游标签的 qui 构建。fork 专有维度（`egress_proof`、`inbound_bytes`）已删除，不使用补丁核；账户统计和门控的新能力单独协商。
 
@@ -19,7 +19,7 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 | 标记 | 含义 |
 | --- | --- |
 | `implemented_pending_acceptance` | 源码已实现；这是保留的 API 值，不表示当前发布尚未验收，也不单独证明运行通过 |
-| `pending` | 尚未实现 |
+| `pending` | 全局行尚未声明；Reality/xhttp 的可用性另由逐核心设置契约判定 |
 | `not_applicable` | 协议定义之外，不构成缺口 |
 
 节点侧实际可用能力仍以 `pkg/contracts/agentpb` 的 `ProtocolCapability`（`protocol/inbound/outbound/tcp/udp`）为准：Agent 按官方核的 `version` 输出与运行时探测上报（Xray `Detect`；sing-box `version` 的 `Tags:`），节点未报告的能力在发布、订阅、出口组和代理链校验处拒绝，不静默忽略。
@@ -46,28 +46,20 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 - HTTP、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard 为原承诺基础协议，已接入的 Hysteria2/TUIC 保持；本表不静默减少任何已支持协议。
 - **节点出站源地址（节点级，与协议无关）**：Xray 在每个拨号出站上渲染 `sendThrough` + `streamSettings.sockopt.interface`，地址族用 `freedom` 的 `settings.domainStrategy`、其他协议用 `sockopt.domainStrategy` 固定（`ForceIPv4`/`ForceIPv6`）；sing-box 渲染 `inet4/inet6_bind_address` + `bind_interface` 与限族的 `domain_resolver`（`ipv4_only`/`ipv6_only`）。`blackhole`/`block` 出站、sing-box 的 `selector`/`urltest` 组不渲染（组由上游在运行时选成员），sing-box 只固定出站 WireGuard 端点、入站端点仅监听。目标为另一族的字面量 IP 时连接失败。整机服务器强制出站是内核 SNAT，与协议无关，见[运维手册](operations.md)第 9 节。
 
-### 自建 VLESS Reality / xhttp（v1.4 M1：仅契约，未渲染）
+### 自建 VLESS Reality / xhttp（v1.4 已整合，最终验收待执行）
 
-上表的 `vless` 行仍只声明 `none`/`tls` 与 tcp/ws/grpc，因为 M1 只交付**契约与门禁**，没有渲染器：`GET /api/v1/protocol-support` 在该行的 `pending` 里新增 `security_reality` 与 `transport_xhttp`，编辑器因此不提供这两个选项，订阅也不映射。
+| 用户入站组合 | Xray | sing-box |
+| --- | --- | --- |
+| Reality + TCP，无 flow / Vision | 已实现 | 已实现；单个具体 DNS SNI |
+| Reality + gRPC，无 flow | 已实现 | 拒绝 |
+| Reality / TLS + xhttp，auto / packet-up / stream-up / stream-one | 已实现 | 拒绝（固定版无 xhttp） |
+| Vision + xhttp / gRPC | 拒绝 | 拒绝 |
 
-| 组合（VLESS 入站） | 结构校验（M1） | 能力门禁（M1） | 渲染与订阅 |
-| --- | --- | --- | --- |
-| Reality + TCP（可选 Vision） | 接受 | 按上报逐组合授权；生产 Agent 目前报零 → 拒绝 | M2（Xray）、M4（sing-box） |
-| Reality + xhttp | 接受 | 同上 | M2 |
-| TLS/无 + xhttp | 接受 | 同上 | M2；M4 取决于固定版 sing-box 是否支持 xhttp |
-| Vision + xhttp / Vision + gRPC | 拒绝（保存前） | — | 不计划 |
+设置契约按核心、方向、安全、传输、flow 精确上报；已安装核心的逐组合原生探测通过才声明支持。旧/未知契约、其他核心或未列组合不能授权，保存/快照/发布与投递均复核，本次连接须接受新的能力报告。通用 VLESS 标志或版本文本不能代替。全局协议行的 pending 标识表示仍需该独立契约与最终验收，不表示没有渲染器。
 
-- 服务端私有字段在 `desiredstate.ProtocolSettings` 的 `reality`（私钥、公钥、握手目标、server names、Short IDs）与 `xhttp`（host、path、mode）里；客户端公有部分（公钥、Short ID、SNI、指纹）留给共享的订阅/代理模型（S3/S4），不在这里重复定义。
-- 设置契约是独立上报：`CoreSettingsCapability{core,settings_contract_version,combinations[]}`，按（协议、方向、安全、传输、flow）逐项列出。版本 0、缺失、未知版本、其他核心的上报和未列出的组合都不授权；Agent 版本文本、VLESS 入站标志和 GOST 契约位都不能代替。
-- 上报经 `agentpb` 的加法字段传输：`CoreCapability.server_settings_contract_version`／`server_settings_combinations`（10／11）为逐核声明，`Capabilities` 同名字段（23／24）供单核 Agent 使用，`scripts/generate-proto.sh` 生成。Agent 的 `MultiRuntime` 与旧标量装饰按各适配器上报复制，面板 `node.SettingsContractCapability` 只转换不推断，单核回退保留这些字段；`validateMultiCapabilities` 用共享组合校验拒绝畸形上报，未知版本接受但不授权。面板保存、快照与发布三处一致失败关闭。
-- 生产 Agent 的 Xray／sing-box 适配器尚无渲染器，因此上报版本 0 与空列表：契约可以完整传输并由合成上报验证，但真实组合要等渲染器（M2／M4）才会被声明。渲染入口对携带这些设置的入站/出站直接报错，不会静默丢弃；这不是客户端映射完成的证明。
-- 真实核证据（S0 §4）：mihomo 只测过 xhttp `auto`，sing-box 1.14.3 原生拒绝 xhttp，Vision + gRPC/xhttp 被客户端 VLESS 出站拒绝；M1 不据此声明任何组合可用。
-- M1 复核：Reality SNI 只接受具体名称，固定版核心精确匹配、不展开通配符。未知设置契约版本仅做资源边界检查并覆盖旧报告，始终不授权；新设置的排队应用／回滚投递还要求本次连接已接受新序号报告并匹配当前能力，已接受消息重放与撤回支持均不能放行。备份对新设置草稿按协议与角色校验，旧草稿校验语义不变。
+Reality 的 X25519 私钥只进入加密设置/修订与安全 Agent 配置，普通查询、预览与差异隐藏。普通编辑保持密钥，明确轮换先保存草稿，成功发布后客户端更新订阅；历史修订与回滚保持对应密钥。公开模型只映射成功修订的公钥、Short ID、具体 SNI 与客户端指纹；证书指纹是另一字段。内部代理中转创建继续使用 TCP/TLS。
 
-
-### sing-box Reality 适配（M4，本地复核通过，门禁待执行）
-
-M4 的 Agent 适配器已实现 VLESS Reality + TCP（无 flow／Vision），按生产渲染器与已安装核心逐组合原生 `check` 后上报契约，不按版本文本推断。仅单个具体 SNI，完整保留 ShortID 列表；多 SNI、冲突的旧 server name、Reality+gRPC 与 xhttp 显式拒绝。固定 Windows/amd64 官方 sing-box 1.14.3 的原生校验、回环认证 nonce HTTP、错误凭据、失败应用和密钥回滚独立通过；无 `with_v2ray_api` 的官方构建用户流量仍未知。Linux、带用户统计构建与设备门控在本轮未验收；客户端映射与 UI 仍待其他阶段，故全局协议表继续保留 pending。完整版本、摘要、命令、结果与限制见 [M4 报告](v1.4-m4-singbox-reality.md)。
+Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组合及用户统计，TCP/auto 另有门控、轮换和回滚检查。官方 sing-box 1.14.3 的 TCP 无 flow/Vision 通过原生、认证 HTTP、错误凭据及密钥回滚；无 with_v2ray_api 的用户流量仍未知。最终整合 Linux 门禁、浏览器与主机验收未完成；客户端每格式边界见 §7。阶段报告保留各次实际验证范围，不把 Windows 结果视为 Linux 结论。
 
 ### GOST（v1.3 G1）
 
@@ -123,7 +115,7 @@ M4 的 Agent 适配器已实现 VLESS Reality + TCP（无 flow／Vision），按
 | `concurrency` | v1.1 源地址估计与运行时设备门控，按协商能力执行，见第 7 节 |
 | `subscription` | 可进入用户订阅 |
 | `udp` / `ipv6` / `tls` / `quic` / `transport_ws` / `transport_grpc` | 协议/传输族能力 |
-| `security_reality` / `transport_xhttp` | 自建 VLESS 的 Reality 与 xhttp（v1.4 M1 契约阶段），当前只出现在 `vless` 行的 `pending` |
+| `security_reality` / `transport_xhttp` | 自建 VLESS 的 Reality 与 xhttp 独立设置契约；全局行保留 pending，实际选择与发布依赖已安装核心原生探测后的精确组合报告 |
 
 已删除的 fork 维度：`egress_proof`（跨节点认证出口证明）与 `inbound_bytes`（入口逐连接 payload 字节）。两者只由受控核上报，官方核无法提供；Phase 7.3 已删除 `pkg/contracts/observation` 的关联/观测契约、面板的观测读侧与 `GET /access-records/egress-proofs` 页面（迁移 `0105_drop_fork_observation.sql`）。代码中剩余的 `observation` 字样属于无关命名（存储观测 `internal/panel/access/storage_observation.go`、账户流量采样）；历史移除过程见[变更记录](changelog.md)。
 
@@ -156,6 +148,10 @@ M4 的 Agent 适配器已实现 VLESS Reality + TCP（无 flow／Vision），按
 | --- | --- | --- | --- | --- |
 | HTTP、SOCKS5、Shadowsocks、Trojan | 支持 | 支持 | 支持 | 支持 |
 | VLESS | 支持 | 支持 | 支持 | 省略并警告 |
+| 导入 SS2022 | 支持；规范明文百分号编码 userinfo | AES-128/256 单钥或双段身份；不输出 chacha | AES-256 单钥/双段、AES-128 单钥、chacha 单钥；省略 AES-128 双段 | 省略并警告 |
+| VLESS Reality TCP | 支持，无 flow / Vision | 仅已测 Vision | 仅已测 Vision | 省略并警告 |
+| VLESS Reality gRPC，无 flow | 支持 | 省略并警告 | 省略并警告 | 省略并警告 |
+| VLESS xhttp 四种模式 | 支持；空或 TCP ALPN，仅 h2/http/1.1 | 省略并警告 | 仅 Reality auto 且 ALPN 恰为 [h2] | 省略并警告 |
 | Hysteria2、TUIC | 支持；固定 CA 时省略 | 支持，含固定证书 | 支持，固定证书转指纹 | 省略并警告 |
 | WireGuard | 支持既有导出 | 支持既有导出 | 支持 | 省略并警告 |
 | 全局规则模板 | 不适用 | 不适用（不是完整配置） | 支持规则与 provider | 受限，无 GEOSITE/RULE-SET/provider |
@@ -164,9 +160,9 @@ M4 的 Agent 适配器已实现 VLESS Reality + TCP（无 flow／Vision），按
 
 格式别名、预览警告与显式 `?format=` 优先规则见 AGENTS §10.3；UA 表仍为空，不能宣称客户端自动识别通过。每格式按自己能力过滤，不把不支持协议改写为另一协议。
 
-linked 中转端点来自规则成功发布快照，且须启用/对用户可见并通过目标入站授权与凭据检查；保留协议字段，仅换入口地址/端口，补显式原 TLS server name。命名为目标端点名追加 ` · 经 <入口节点>`，原端口消歧保留。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality 当前未实现，不因中转新增支持。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
+linked 中转端点来自规则成功发布快照，且须启用/对用户可见并通过目标入站授权与凭据检查；保留协议字段，仅换入口地址/端口，补显式原 TLS server name。命名为目标端点名追加 ` · 经 <入口节点>`，原端口消歧保留。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality/xhttp 中转保留目标公开参数与原 SNI；xhttp 限 TCP，并继续执行各格式省略边界。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
 
-目标看到中继源地址，设备限制把同一中继后的客户端合为一个来源；账户额度仍在目标计量，规则转发只计节点总量，中间/出口 relay 服务排除。
+xhttp 前置 CDN 时节点看到边缘地址，源地址设备估计可能合并或分散客户端。目标看到中继源地址，设备限制把同一中继后的客户端合为一个来源；账户额度仍在目标计量，规则转发只计节点总量，中间/出口 relay 服务排除。
 
 | 核心/能力 | 每用户字节与额度 | 在线设备估计/门控 |
 | --- | --- | --- |

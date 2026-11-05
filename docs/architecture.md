@@ -92,6 +92,8 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **订阅**：Token → 用户 → 来源（已发布节点、授权导入缓存）→ 中立代理模型 → 注册导出器（uri/base64/sing-box/clash/clash-legacy）。一个用户一个隐藏身份与共享链接，新 Token 以哈希查找、vault 加密副本供再次查看；旧 Token 无副本需重置。显式 format 优先，其次已验证 UA 表（当前为空），最后系统默认。sing-box 仍是片段；固定证书的 QUIC 在 URI/Base64 中省略，在 sing-box 中带证书、mihomo 中带指纹。全局规则模板按授权展开，不改节点策略；导入仅用于客户端，定时 HTTPS 固定公网 IP 抓取并加密缓存，不在订阅请求中联网。只有 mihomo 输出客户端链。
 
+外部导入使用有界结构化结果与加密缓存，订阅请求不抓取来源。公开模型统一承载 Reality 公钥/Short ID、独立客户端 TLS 指纹与 xhttp host/path/mode；证书指纹不复用为客户端指纹。导出器按格式逐端点省略，复用链依赖清理与 emptyPolicy。自建服务端 Reality 私钥留在加密设置/修订中，经已安装核心原生探测和 Agent 精确能力契约进入发布；订阅只从成功修订映射公开字段，中转保留目标 SNI。
+
 **节点出站网络**：Owner 在节点设置里填核心出站源 IP / 网卡和服务器强制出站 IPv4 / IPv6（迁移 `0108_node_outbound_network.sql` 的四个 `nodes` 列），改动在**发布配置后**生效。核心出站源在渲染时写入拨号出站（Xray `sendThrough` + `streamSettings.sockopt.interface`，sing-box `inet4/inet6_bind_address` + `bind_interface`）；整机强制出站走 helper：Agent 写 `/var/lib/proxy-agent/host-network/desired.json`，`proxy-agent-host-network.service`（oneshot，只带 `CAP_NET_ADMIN`）执行 `proxy-agent --apply-host-network`，由 `internal/agent/hostnet` 渲染并应用 nft 表 `inet proxy_agent_source`，结果写回 `status.json`。缺失网卡/源地址或 helper 失败是临时失败码，节点保留上一成功配置。
 
 **节点删除**：`DELETE /api/v1/nodes/{id}` 先查引用（入站、出站、其他节点指向它的中转出站、出口组、代理链、分流规则、进行中的批量发布），有阻塞项时返回 409 `node_delete_blocked` 并带上 `blockers`（预览接口是 `GET /api/v1/nodes/{id}/deletion-preview`）。未登记且无身份的节点走“取消登记”，记录直接移除；已登记节点在同一事务里逻辑删除：写 `nodes.deleted_at`、`enabled=0`、`allow_subscription=0`、`status='disabled'`，把 `node_identities.revoked_at` 置位，删除注册码/续期/节点组成员，并用 `deployment.CloseNodeTasks` 关闭该节点自己的待发布配置、核心/Agent 更新任务与排队健康检查（`internal/panel/node/deletion.go`、`internal/panel/deployment/node_tasks.go`）。列表与选择器按 `deleted_at IS NULL` 过滤（`internal/panel/node/repository.go:300`），`?deleted=1` 只返回已删除节点；历史流量与访问记录保留。
@@ -143,6 +145,8 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 ## 8.1 存储与生命周期
 
 v1.4 的 0129 新增五张隧道/规则/归属/声明表，0130 增加规则发布快照。0131 的启动/恢复一次性事务将已发布且有明确 ID 归属的画布转发迁移为规则及可选两节点 GOST 隧道，只转移归属和声明，不写入站、运行修订或证书；规则默认订阅隐藏。目标公网地址与已发布用户入站端口唯一匹配才 linked，否则 manual。标记保留已迁移 ID，首次无修改发布复用旧物化输入；不确定连接留在画布，Owner 专用 migration-report 返回持久原因。完成后不自动重试，事务失败可重试。备份/恢复共用验证并保留声明、材料、报告与标记，恢复已发布对象标 modified，不自动下发；详见 [M1 报告](v1.4-m1-report.md)。
+
+0132 保存客户端策略配置库与活动快照；0133 为 `subscription_sources` 增加有界 `latest_result_json` 与 `last_success_at`，最近尝试与最近成功分开。部分成功提交可用缓存；失败保留旧行但排除该来源，写入失败保留原状态。旧归档缺这些列仍可恢复，不编造原因、不抓取或自动发布。协议公开字段与服务端私钥沿用既有加密备份/修订路径。
 
 用户隐藏身份、门户、导入与设备限制之外，数据库还保存节点目标/指标/调优、多核心任务与计量、共享隧道及归属、整机流量和 GOST 密封材料。表结构与升级兼容规则由[项目说明书](../AGENTS.md) §26、§31 维护；各版本迁移变更见[变更记录](changelog.md)。恢复结束门户会话，探测任务过期，未确认的调优/组件操作不自动重发。
 

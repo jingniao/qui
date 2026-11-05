@@ -316,3 +316,13 @@
 - Official build has no `with_v2ray_api`; measured test behavior is unavailable/unknown user traffic, never invented zero. Conditional stats-enabled assertions exist but that branch was not run. Linux/arm64, user-metered builds and new device-gate coverage remain unverified. Detailed reproduction and limits: `docs/v1.4-m4-singbox-reality.md`.
 - Rework: initial compile used the wrong counter member names (`Upload`/`Download`); corrected to the actual `UploadBytes`/`DownloadBytes`. No native/connection conclusion rests on that failed compile. Later native rerun was required by added failed-apply/history assertions; old and final results are distinguished in the report.
 - Local regression passed (real-core variables unset): entire desiredstate 0.486s, sing-box 0.445s, node 13.720s, proxy 29.386s and deployment 18.524s packages; configured whitespace check is clean. Existing private-key masking/diff gates are included; skipped real-core tests are not counted as measurements.
+
+
+## 2026-11-05：协议兼容性整合与精简验证决策（最终验收待执行）
+
+- 本地整合基线 `3e449e7`（`compat-integration`）：S1–S4 与 M1–M4 已并入同一工作树，迁移头 0133。同步英文计划当前状态、中文顶部、交接、发布说明、架构、协议矩阵与 AGENTS 行为；阶段报告保留各次历史证据，不追写为 Linux/主机验收。
+- 最新用户指令优先于早先逐阶段门禁流程：省去不必要的测试、复杂逻辑与重复门禁；复用针对性实核回归并做一次最终整合 Linux 门禁。此前建议的广泛 S5 新测试不实施。浏览器走查仍待执行，不能据 Windows 检查声明完整 S5。
+- 门禁事实：S0 与原 M1 阶段门禁已通过；S1 `ccf23e4` 仅因 0133 未固定校验和失败，check 1972s、cores 560s、总计 2533s，END `2026-11-05T15:01:31Z`。迁移内容未变，修正 `4ded28f` 门禁运行中，不记通过。后续修正/新阶段通过针对性 Windows 检查，尚无最终整合 Linux 结论。
+- 当前边界：外部 SS2022、Reality TCP/gRPC、xhttp 四模式保留类型化公开参数；Mihomo 限已测 Reality TCP Vision 与 Reality xhttp-auto/[h2]，sing-box 限 Reality TCP Vision 且无 xhttp。xhttp 拒绝 H3/未知 ALPN 与未建模 extra，其他有效格式差异逐条省略。
+- 自建用户入站：Xray Reality TCP 无 flow/Vision、gRPC 无 flow、Reality/TLS xhttp 四模式；sing-box 仅 Reality TCP 无 flow/Vision、单具体 DNS SNI。核心原生探测与精确契约控制可用性；内部代理中转仍 TCP/TLS。私钥加密/隐藏，明确轮换先保存再发布，客户端更新订阅；CDN 影响源地址设备估计。
+- 本次仅文档更新，无代码测试、门禁启动、真实来源抓取、生产操作或提交；最终提交与证据核对由主助手完成。

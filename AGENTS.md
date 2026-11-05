@@ -6,7 +6,7 @@
 
 最新正式版 **v1.3.1**（2026-11-03，tag → `ebe8301`），无新增迁移。us2-node（面板＋Agent）、uk-node（Agent）、alpine-node（Alpine LXC/OpenRC Agent）均运行 1.3.1；迁移头为 0128。
 
-v1.4 在 `feat/v1.4-tunnels` 开发，未发布；分支迁移头为 0132，正式版仍为 0128。范围见[v1.4 计划](docs/v1.4-plan.md)，发布说明见[1.4.0 草稿](docs/release-notes-1.4.0.md)。
+v1.4 在 `feat/v1.4-tunnels` 开发，未发布；本地兼容性整合迁移头为 0133，正式版仍为 0128。导入与自建 Reality/xhttp 已实现并整合，最终 Linux 门禁与浏览器验收未完成。范围见[v1.4 计划](docs/v1.4-plan.md)，发布说明见[1.4.0 草稿](docs/release-notes-1.4.0.md)。
 
 正式版实机只验收 linux/amd64；arm64 只做 qemu-user 模拟，正式浏览器走查未执行。已验收内容、未验证项与限制见[验收矩阵](docs/v1-acceptance.md) §12 和[发布说明 1.3.1](docs/release-notes-1.3.1.md)。v1.4 的 A1 验收另行记录，不沿用正式版结论。
 
@@ -197,6 +197,8 @@ SOCKS5 UDP 无用户归属；sing-box 其余三种会为同一用户重建关闭
 
 面板完整源地址仅存内存，不入库/日志/备份；Owner/门户均掩码 IPv4 /24、IPv6 /48。Xray CLI 临时 JSON 权限 0600，调用返回即删除。
 
+Reality/xhttp 直连的 Xray Windows 针对性检查覆盖认证、用户流量与 TCP/auto 门控；这不是 Linux/UDP 全范围验收。xhttp 前置 CDN 时，节点看到边缘地址，源地址设备估计可能合并或分散客户端。sing-box 官方无用户统计标签时继续显示未知，不由新协议推断计量或门控支持。
+
 隧道/规则后的目标看到中继源地址，目标设备限制把同一中继后的客户端合为一个来源，不透传原始源地址。账户流量仍在目标用户入站计量；GOST 及隧道仅 linux/amd64（D10）。
 
 ## 9.3 凭据管理
@@ -251,7 +253,7 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 
 输出名称按节点与协议命名：同一节点同一协议有多个入站时追加端口（`节点 · 协议 · 端口`），只有一个时保持 `节点 · 协议`。
 
-关联目标入站的中转规则按成功发布快照追加订阅端点；仅纳入已发布、启用且对用户可见的规则，仍须通过目标入站的授权、可用性、协议与已发布凭据检查。保留目标协议、凭据、传输与 TLS 等协议字段，仅把连接地址/端口换为入口地址/规则端口；原隐含 TLS server name 显式写为目标地址。名称为 `<目标节点> · <协议> · 经 <入口节点>`（目标协议原有端口消歧保留），直接端点保持自身可见性。Hysteria2/TUIC/WireGuard 按 UDP、其余按 TCP 与规则 network 过滤，各格式继续执行自身省略规则；不承诺额外 Reality 支持。
+关联目标入站的中转规则按成功发布快照追加订阅端点；仅纳入已发布、启用且对用户可见的规则，仍须通过目标入站的授权、可用性、协议与已发布凭据检查。保留目标协议、凭据、传输与 TLS 等协议字段，仅把连接地址/端口换为入口地址/规则端口；原隐含 TLS server name 显式写为目标地址。名称为 `<目标节点> · <协议> · 经 <入口节点>`（目标协议原有端口消歧保留），直接端点保持自身可见性。Hysteria2/TUIC/WireGuard 按 UDP、其余按 TCP 与规则 network 过滤；Reality/xhttp 保留目标公开参数与原 SNI，xhttp 限 TCP，格式继续按各自能力省略。
 
 草稿修改与 D8 目标变化不推进订阅快照，pending_delete 仍保留上次快照，成功发布移除后才消失。0130 前无快照的规则须再次成功发布才进入订阅。节点中转 API 的 `shareLink` 仅 Owner 可得，使用首个有合格已发布凭据的用户生成预览；Viewer、无合格凭据或 URI 无法表达时为 null，草稿预览不代表已进入订阅。
 
@@ -272,6 +274,8 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 全局模板存在 `system_settings.client_rules`，有版本冲突检查与预设，按用户授权展开 `@all`、`@nodeGroup:<id>`、`@source:<id>`；服务端生成 YAML。客户端规则不替代节点策略。外部源仅 HTTPS，逐跳解析并固定经校验的公网 IP，限制 2 MiB / 15 秒；抓取失败按类型（input、dns、address、redirect、tls、connect、deadline、http、size）返回固定代码与固定中文说明，不回显链接、Location、响应体或凭据。定时抓取加密缓存，订阅请求不抓取。导入节点仅用于客户端，不参与 Agent 发布、用户额度或设备门控。客户端链与格式边界见[协议矩阵](docs/protocol-support-matrix.md)。
 
 刷新返回结构化结果（S1）：`outcome` 为 `ok`/`partial`/`failed`，`counts` 含 `total`（= `accepted` + `rejected` + `duplicates`）、`accepted`、`rejected`、`duplicates`、`cached`、`usable`，未确定值为 null；每条目只计一次，多因条目按第一个原因计数。逐条原因最多 50 条且结果最多 32 KiB，超出置 `diagnosticsTruncated`。完整成功 200 `ok`；部分成功 200 `partial`，仍提交缓存且 `last_status=ok`、`last_error` 为空；抓取失败 502（超时 504）、内容无效或无可导入条目 422、输入错误 400、持久化失败 500、来源不存在 404，错误体 `details.result` 携带同一结果（仅限已完成的已分类结果）；请求在抓取进行中被取消时返回 503 固定文案“刷新已取消，来源状态保持不变”且不带结果，来源行、状态、缓存与订阅端点均不变。失败保留旧缓存行但 `last_status=failed`，该来源不进入订阅；`cached` 为现有行数，失败时 `usable=0`。`last_fetch_at` 是最近尝试，`last_success_at` 只在提交成功时更新；更换 URL 清空结果并回到 `pending`，不把旧结果当作新来源的结果。同一来源内 `name|protocol` 重复时保留文档顺序第一条，其余以 `duplicate_endpoint_key` 拒绝并附保留条目序号；完全相同的条目以 `duplicate_endpoint_content` 计为重复。诊断只含条目序号、协议、阶段、固定代码与固定文本，不含名称、UUID、密码或链接；手工刷新、定时刷新与粘贴导入共用同一分析路径。
+
+外部导入支持 SS2022、VLESS Reality TCP/gRPC 与 xhttp，仍只用于客户端，不进入 Agent 发布/账户额度/设备门控。统一公开模型区分证书指纹 `TLS.Fingerprint` 与客户端指纹 `TLS.ClientFingerprint`；Reality 只携带公钥、Short ID、SNI 与可表达的 SpiderX，xhttp 为独立 host/path/mode。URI/Base64 保留公开字段；mihomo 仅输出已测 Reality TCP Vision、Reality xhttp-auto 且 ALPN 恰为 [h2]；sing-box 仅输出已测 Reality TCP Vision、无 xhttp。其他有效组合逐条省略并警告，保留链依赖与 emptyPolicy。xhttp 模式必须明确为 auto/packet-up/stream-up/stream-one，ALPN 只允许空列表或 h2/http/1.1；未知 extra、H3 与未建模参数拒绝，不保存原始配置透传。新模型与最近结果受加密备份校验覆盖。
 
 0132 增加 `client_policy_profiles` 服务端配置库，最多 50 个配置；Owner 通过 `/api/v1/client-policy-profiles` 管理，名称最多 64 字符、描述最多 500 字符，`uiMetadata` 为最多 64 KiB 的 JSON 对象且不进入订阅。`system_settings.client_policy_active` 只保存 `{profileId}`，`client_rules` 继续是订阅读取的活动快照，其 revision 为独立的 activeRevision。编辑使用配置 revision，编辑活动配置与启用还须匹配 activeRevision；启用即使内容相同也推进 activeRevision，未修改保存不推进版本。旧 PUT 同步活动配置与快照，旧 GET 继续允许 Viewer。初始化与恢复在无配置时复制既有快照或服务端默认模板，保留 activeRevision；备份校验指针与模板一致性。浏览器旧卡片经预览后按内容摘要幂等导入为未启用配置，全部成功才清除本地副本，不采用浏览器旧启用选择。设为订阅模板，客户端更新订阅后生效。成员支持 `@endpoint:inbound:<id>`、`@endpoint:relay:<rule id>` 和 `@endpoint:import:<source id>:<name|protocol>`，只从该用户授权且已通过订阅来源检查的端点解析，客户端链克隆跳不可精确选择。`includeKeywords/excludeKeywords` 由服务器展开时对代理名称做 NFKC 规范化、不区分大小写的字面子串筛选，空包含列表不限制，排除优先，不过滤内置动作或其他组。`emptyPolicy=direct/reject` 统一作用于授权展开和格式过滤后的空组，省略兼容 DIRECT；新地区组使用 `@all` 加包含关键词并默认 REJECT。Owner-only `GET /api/v1/client-policy-candidates?userId=<id>` 复用订阅授权管线，只返回端点引用、名称、协议、来源种类/名称和节点组 ID；省略用户时按仓储顺序选择首个有节点组授权的有效用户并标明 autoSelected，无合格用户返回空列表与诊断。页面仅展示授权候选，不在浏览器重复执行筛选；分组类别按名称存入 `uiMetadata.groupCategories`，重命名同步移动类别键与组/规则引用。Owner-only `POST /api/v1/client-policy-profiles/preview` 预览草稿 template 或已保存配置（profileId + profileRevision），两者互斥；要求 CSRF，只读且不记审计。草稿复用保存校验，失败返回 invalid_rules 及字段路径；已保存版本过期返回 409 stale_client_policy 及当前 revision。与候选接口共享自动选用户，无合格用户仍校验并返回空正文与诊断。预览与真实订阅共用渲染和单次 Expand，返回用户上下文、解析分组、全部警告、规范化模板 SHA-256 和 activeRevision；不签发 Token、不标记抓取，provider URL 为占位。旧用户 GET 预览仍用活动模板。页面未保存时预览草稿，否则预览当前配置；地区组解析成员使用同一接口。分组编辑规则始终打开目标筛选列表，空状态可新增并预选该组，筛选时禁用全局拖拽排序；保存、启用或预览失败均保留草稿。共享规则集由 policy 模块持有，subscription/rules 唯一扫描全部已保存配置（含活动/未启用配置及启用/禁用规则），通过 platform/server 注入事务内读取。Owner-only `GET /api/v1/service-sets/{id}/references` 返回 nodePolicies 与 clientProfiles/rules；任何已保存引用均阻止删除（409 service_set_in_use，error 内附两类引用）。保存共享规则集立即写入，独立于配置草稿；禁用允许，保存响应附 references 与 warning。禁用后 `/sub/{token}/rules/{id}` 返回 404，客户端可能继续使用缓存或报告错误，不保证缓存规则立即停用。带 Lookup 保存时，启用的 RULE-SET 规则不能引用缺失或禁用的面板规则集；已保存模板读取只做结构校验，预览通过导出器警告路径提示缺失/禁用。节点、节点组和规则集选择项读取全部分页；预览用户仍由服务端分页选择。
 
@@ -321,6 +325,8 @@ Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥�
 入站表示用户连接节点时使用的协议。
 
 支持 HTTP CONNECT、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard（仅 Xray 入站）、Hysteria2/TUIC（仅 sing-box，需 QUIC 能力）与端口转发。VMess 与完整系统 TUN 不在当前支持表内；每核心范围以能力上报及[协议矩阵](docs/protocol-support-matrix.md)为准。
+
+v1.4 自建 VLESS 用户入站：Xray 支持 Reality TCP（无 flow/Vision）、Reality gRPC（无 flow）及 Reality/TLS xhttp 四种模式；sing-box 仅 Reality TCP（无 flow/Vision），须单个具体 DNS SNI。必须由所属核心原生探测并上报设置契约与精确组合，旧 Agent、未知版本或未列组合不能保存/发布。内部代理中转暂保留 TCP/TLS。Reality 私钥加密保存并在普通查询/预览/差异中隐藏，普通编辑不轮换；显式轮换先保存草稿，再发布并让客户端更新订阅，失败/回滚保留成功版本的密钥。
 
 一个节点可同时有多个入站。
 

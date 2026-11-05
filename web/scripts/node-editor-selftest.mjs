@@ -178,6 +178,16 @@ const realityOriginal = { id: 'reality-edit', nodeId: 'server', name: 'Reality',
 const singboxReported = { ...reportedMulti, capabilities: { ...reportedMulti.capabilities,
   cores: [reportedMulti.capabilities.cores[0], { ...multi.capabilities.cores[1], server_settings_contract_version: 1,
     server_settings_combinations: combinations.filter(c => c.security === 'reality' && c.transport === 'tcp') }] } };
+const freshSingboxEditor = api.createEditor('server');
+freshSingboxEditor.form.core = 'sing-box';
+assert.equal(api.securityChoices(singboxReported, 'sing-box', 'vless', freshSingboxEditor.form.settings).find(c => c.value === 'reality').reason, '');
+api.changeSecurity(freshSingboxEditor, 'reality');
+assert.match(api.validateStep(3, freshSingboxEditor, singboxReported, []), /sing-box.*只支持一个/);
+freshSingboxEditor.form.settings.reality = { ...json(realityOriginal.settings.reality), server_names: ['one.invalid', 'two.invalid'] };
+assert.equal(api.securityChoices(singboxReported, 'sing-box', 'vless', freshSingboxEditor.form.settings).find(c => c.value === 'reality').reason, '');
+assert.match(api.validateStep(3, freshSingboxEditor, singboxReported, []), /sing-box.*只支持一个/);
+freshSingboxEditor.form.settings.reality.server_names = ['one.invalid'];
+assert.equal(api.validateStep(3, freshSingboxEditor, singboxReported, []), '');
 const singboxEditor = api.createEditor('server', realityOriginal);
 singboxEditor.form.core = 'sing-box';
 assert.equal(api.validateStep(3, singboxEditor, singboxReported, []), '');

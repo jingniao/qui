@@ -1,10 +1,10 @@
 # Protocol Support Completion Plan: External Subscriptions, Self-Hosted Nodes, and Failure Diagnostics
 
-Status: **reviewed 2026-11-05 — approved with the amendments in [§14](#14-review-decisions-2026-11-05). The §14.5 refresh fix is implemented, and its commit `650b349` passed the Linux gate (`check` 1980 s, `cores` 572 s, total 2552 s, END 2026-11-05T09:30:12Z), verified from the gate log by the main assistant. S0 changed no production code, and its commit `9045e1b` passed the Linux gate (`check` 1995 s, `cores` 574 s, `GATE 9045e1b PASS total=2569s`, START 2026-11-05T10:00:34Z, END 10:43:23Z), which the main assistant checked personally. S1 diagnostics are implemented on `feat/v1.4-import-s1` on top of `9045e1b`, corrected across the main assistant's three review rounds (first five blockers, then five more, then the cancelled-refresh regression), and have passed that personal review; they are delivered in this phase commit, whose own Linux gate is still pending (§14.8 covers the status). S2–S4 and M2–M4 are still unimplemented; M1 has phase commit `3565153` on the sibling branch `feat/v1.4-selfhost-m1` with its Linux gate running, so it is neither integrated nor gate-passed nor feature-complete. No S1 completion is claimed.** §14 overrides earlier sections where they differ. Owner decisions (§14.3): both tracks in parallel; **all of this plan ships in v1.4.0** (both tracks and the refresh fix, see §14.7); duplicate `name|protocol` entries keep the first and reject the rest (§14.6). Prepared on November 4, 2026, America/Los_Angeles.
+Status (2026-11-05): **S1–S4 and M1–M4 are implemented and locally integrated at `3e449e7` in `compat-integration`; migration head 0133. Reviewed corrections and focused Windows checks passed. This is not S5, Linux, browser or host acceptance.** The original S0 and M1 gates passed. S1 commit `ccf23e4` failed its gate solely because migration 0133 lacked a checksum pin (`check` 1972 s, `cores` 560 s, total 2533 s, END `2026-11-05T15:01:31Z`); correction `4ded28f` was stopped after its check passed and superseded by the final integrated gate; no standalone passing gate is claimed. The latest user instruction replaces per-phase gates with focused verification and **one final integrated Linux gate**, retaining required browser checks; avoid broad additional tests or defensive logic. §14.8 records current scope. All work remains in v1.4.0, and duplicate `name|protocol` keeps the first (§14.6).
 
 This is the English version of [the Chinese plan](subscription-import-compatibility-plan.md), including its update dated `2026-11-04T23:15:43-08:00`. Self-hosted xhttp / Reality support is integrated into the scope, implementation phases, and acceptance criteria. The translation preserves the source document's scope and technical identifiers.
 
-Review baseline: `feat/v1.4-tunnels`, HEAD `c708c35`, database migration head `0132`. This document describes planned work, not delivered protocol support. It does not change functionality, refresh sources, or reconfigure running nodes or clients.
+Original review baseline: `feat/v1.4-tunnels`, HEAD `c708c35`, migration head `0132`. Earlier gap descriptions are historical planning context; current implementation is in §14.8. Updating this document does not refresh sources or reconfigure nodes/clients.
 
 ## 1. Objectives and Scope
 
@@ -385,17 +385,9 @@ What rounds 1 and 2 corrected, and what S1–S4 must now assume:
   positives are labelled later-attempt positives (first attempt failed, second
   succeeded) and no first-attempt guarantee exists.
 
-S0's review and commit gate are now closed: the main assistant's personal review
-passed for the evidence and manifest scope, and `9045e1b` passed the Linux gate.
-What stays open is the A1 browser walkthrough of source management and format
-previews, plus the protocol acceptance that S1–S4 and M1–M4 still owe. S0 changed
-no production code, migration, API or UI — its output is documentation and
-measurements only. S1 has since been implemented and passed the main assistant's
-personal review, and is delivered in a phase commit whose Linux gate is pending;
-no S1 completion is claimed here.
+S0's evidence/manifest review and original gate are closed. Its measurements remain historical evidence; current S1–S4/M1–M4 implementation and remaining final verification are recorded in §14.8.
 
-M1 status (2026-11-05, **contracts only — no self-hosted xhttp/Reality support
-yet; the phase still awaits main's personal review and the Linux gate**): the
+Historical M1 phase scope (2026-11-05; the original phase gate later passed, and renderers/client mapping are now integrated per §14.8): the
 server-side half of the self-hosted track is implemented as typed contracts,
 capability reporting, validation and gates, on branch `feat/v1.4-selfhost-m1`
 (worktree base `9045e1b`). Nothing renders, generates keys, edits or exports
@@ -437,13 +429,13 @@ these settings, and the protocol matrix lists them as pending.
   import track or the shared client model.
 - Verification: `gofmt`, focused `go vet`/`go test` on the touched packages
   (Windows, Go 1.26.0). No Linux `scripts/check.sh` or real-core run was made
-  for this M1 change; per §14.1 item 9 the phase commit gets its own Linux gate
-  after review. Synthetic reports exercise the transport round trip and the
+  at that initial M1 checkpoint; its original gate later passed. The latest
+  instruction now requires one final integrated gate (§14.8). Synthetic reports exercise the transport round trip and the
   save/snapshot/deploy allow path, while production wiring stays closed until a
   renderer reports a combination.
 
-M1 review corrections (2026-11-05, local corrections; Linux gate still pending):
-Reality server names are concrete names/IPs only, because the pinned Reality
+M1 review corrections (2026-11-05, integrated with focused Windows checks; final integrated gate pending):
+Reality server names are concrete DNS names only, because the pinned Reality
 source matches SNI exactly. Unknown nonzero contract versions receive generic
 resource bounds without interpreting version-1 enums; storing them replaces old
 grants and authorizes nothing. Apply/rollback dispatch checks the current report
@@ -455,8 +447,7 @@ while retaining historical validation for legacy drafts. Local targeted tests do
 not establish real-core acceptance or M2 completion. Revision-zero rollback clears
 runtime without transmitting settings and remains available without a new report.
 
-M4 adapter status (2026-11-05, root review approved, local phase commit;
-Linux gate pending): sing-box renders Reality over TCP with no flow or Vision,
+M4 adapter phase evidence (2026-11-05, reviewed and now integrated; final integrated Linux gate pending): sing-box renders Reality over TCP with no flow or Vision,
 authorizing each only after its installed executable accepts the production
 renderer output. Single concrete SNI and the complete ShortID list are supported;
 multiple/conflicting names, gRPC and xhttp stay refused. Independent native and
@@ -502,7 +493,7 @@ This section retains the original review scope. The overall scope is now defined
 
 ## 13. Self-Hosted xhttp / Reality Implementation Design
 
-Self-hosted support is included in M1–M4 and joins external-import phases S0–S4 for S5 acceptance. This section details server models, capability gates, private material, and deployment paths. All capabilities remain proposed.
+Self-hosted support is included in M1–M4 and joins external-import phases S0–S4 for S5 acceptance. This section retains the original server-model design. Implemented combinations and verification limits are recorded in §14.8.
 
 ### 13.1 Current Gaps
 
@@ -609,7 +600,7 @@ The plan is approved with the amendments below. Where they conflict with earlier
 9. **Process.** Same as the client-policy work:
    - one phase per delegation;
    - review before each local commit;
-   - a Linux gate per phase commit;
+   - focused phase checks and one final integrated Linux gate (latest user instruction, §14.8);
    - change-log entries per phase;
    - no live refetch of the real source without Owner approval;
    - sanitized fixtures only.
@@ -683,9 +674,9 @@ The Owner moved all remaining work into v1.4.0: the refresh fix (14.5), the impo
 - **The release waits for the work.**
   - The v1.4.0 RC (handoff C1) and A1 acceptance start only after both tracks pass S5.
   - A1 covers them on the hosts: real clients using imported SS2022/Reality/xhttp entries, and a self-hosted Xray Reality/xhttp node with relayed subscription entries (14.1 item 4).
-  - The tunnel work already passed its Linux gate (A1a `8134314`). Every later commit needs its own gate, and the RC is built from the final gated commit.
+  - The tunnel work already passed its Linux gate (A1a `8134314`). Under the latest user instruction, the RC waits for the final integrated gate instead of repeating a gate per phase.
 - **Branches.**
-  - Each track works on a short-lived branch off `feat/v1.4-tunnels` and merges back after its phase passes review and the Linux gate. Gates run one at a time, alternating between the tracks.
+  - Reviewed phases are locally integrated in `compat-integration`. Focused checks precede one final integrated gate; gates still run one at a time.
   - The 14.5 fix goes directly on `feat/v1.4-tunnels`; it is committed as `650b349` and its Linux gate passed.
 - **Migrations.** Numbers continue after 0133 in merge order: 0133 (`subscription_source_results`) belongs to S1 in this phase commit, and M1 needs none. A track that needs a migration takes the next free number when it merges, and renumbers if the other track merged first. Applied migrations are never edited.
 - **Agent compatibility.** v1.4.0 Agents report the new self-hosted capability, while v1.3.1 Agents cannot receive the new settings (14.1 and §13.3 item 3). The upgrade order stays panel first, then Agents.
@@ -701,9 +692,15 @@ The Owner moved all remaining work into v1.4.0: the refresh fix (14.5), the impo
 | --- | --- | --- |
 | §14.5 refresh fix | Implemented, **Linux gate passed** | `650b349`, `GATE 650b349 PASS total=2552s` (check and cores both EXIT 0, ended `2026-11-05T09:30:12Z`) |
 | S0 evidence (documentation) | Reviewed and **Linux gate passed** | `9045e1b`, `GATE 9045e1b PASS total=2569s` (check 1995 s, cores 574 s, START `2026-11-05T10:00:34Z`, END `2026-11-05T10:43:23Z`); the S0 documents and fixtures are byte-identical to that commit |
-| S1 diagnostics | Implemented; corrected across the main assistant's three review rounds — five blockers, then five more, then the cancelled-refresh regression (a fetch cancelled mid-flight no longer carries a provisional result in the error body) — and **passed that personal review. Delivered in this phase commit; its own Linux gate is still pending, nothing is integrated or pushed. No real-source fetch, no browser walkthrough** | Windows unit tests (importer, backup, recovery, server), frontend self-test, `typecheck` (`EXIT=0`) |
-| M1 self-hosted contracts | Phase commit `3565153` on `feat/v1.4-selfhost-m1`; **its Linux gate is running, so it is neither integrated, nor gate-passed, nor feature-complete** | — |
-| S2–S4, M2–M4, and S5 for either track | Not implemented | — |
+| S1 diagnostics | Implemented and integrated; original gate failed only the missing 0133 checksum pin | `ccf23e4`: check 1972 s, cores 560 s, total 2533 s, END `2026-11-05T15:01:31Z`; correction `4ded28f` gate running, not passed |
+| M1 self-hosted contracts | Original phase gate passed; reviewed corrections integrated | `3565153` original gate; later corrections have focused Windows evidence |
+| S2–S4 imports/codecs | Implemented and integrated | SS2022, public Reality/xhttp model, typed parsing/export, fixed diagnostics and archive checks; focused Windows tests |
+| M2–M4 self-hosted | Implemented and integrated | Xray renderer/public mapping, editor and sing-box Reality adapter; focused Windows native/authenticated checks and UI self-tests |
+| S5 / final verification | Pending | One final integrated Linux gate, configured real-core checks and browser walkthrough; no production/real-source acceptance claimed |
+
+Current protocol boundaries: imports preserve SS2022 and VLESS Reality TCP/gRPC or xhttp (`auto`, `packet-up`, `stream-up`, `stream-one`). URI/Base64 preserves supported public fields; Mihomo permits measured Reality TCP Vision and Reality xhttp-auto with exactly `[h2]`, while sing-box permits Reality TCP Vision and omits xhttp. xhttp ALPN is absent or TCP-only (`h2`/`http/1.1`); unknown/H3 values reject. Unrepresentable endpoints are omitted individually with warnings and existing chain/emptyPolicy handling.
+
+Self-hosted Xray VLESS supports Reality TCP (no flow/Vision), Reality gRPC (no flow), and Reality/TLS xhttp in all four modes. sing-box supports Reality TCP (no flow/Vision) with exactly one concrete DNS SNI, and no xhttp. Installed-core native probes and exact reported combinations gate selection/save/deployment; old/unknown Agents cannot authorize them. These options are for user inbounds; internal relay creation stays TCP/TLS. Keys are encrypted and masked, ordinary edits preserve them, and explicit rotation saves a draft before publication and client subscription updates. Published/relayed endpoints carry public settings only. CDN fronts alter source-address device estimates. Focused Windows evidence does not establish Linux or browser acceptance.
 
 S1 as implemented, on short-lived branch `feat/v1.4-import-s1` based on `9045e1b`:
 
@@ -715,4 +712,4 @@ S1 as implemented, on short-lived branch `feat/v1.4-import-s1` based on `9045e1b
 - **Migration 0133** (`subscription_source_results`) adds `latest_result_json` and `last_success_at`; it never fetches, and old rows and old archives read as "failed previously; reason was not recorded".
 - **Backup and restore.** The verifier accepts only a result this panel could have written and that agrees with its own row: a known code with the stage and outcome it can have, the fixed message of that code and status, RFC 3339 stamps equal to `last_fetch_at`/`last_success_at`, the row's source ID and status, counts where `total` is the sum of its parts, a committed attempt's `cached`/`usable` equal to what it accepted, a failed attempt retaining nothing new, and diagnostics whose text, stage, field path (a fixed path or a bounded `query.<token>`), indices and kept index the parser can emit. Unknown JSON fields are refused, and the bounds (≤50 reasons, ≤32 KiB) still apply. An archive from before 0133 has no such columns and remains valid; restore copies the column set the archive has, so it neither invents a cause nor fetches.
 - **Frontend.** The source card shows the attempt outcome, imported/skipped/duplicate, cached and usable counts, the last attempt and the last success, and a bounded dialog lists the reasons. All three refresh callers and the pasted import use one outcome helper: success only for `ok`, a warning for a partial import, and for a failure the panel's own message plus the counts of the state that remains. A refused paste keeps the draft and the import dialog and opens the bounded reasons directly (a content source has no card of its own); a save whose reload fails is neither repeated nor reported as an error.
-- **Not verified.** No Linux gate, no real-source fetch and no browser walkthrough. `vue-tsc`/`vite build`, the focused Go suites and the frontend self-test were re-run on Windows after the base integration onto `9045e1b` (see the change log); a Windows run is not Linux, host or browser evidence. No SS2022, Reality or xhttp support and no exporter changes.
+- **Verification scope.** The S1 phase originally had Windows checks only; its later checksum-gate failure/correction and the integrated protocol implementation are recorded above. Final integrated Linux and browser checks remain pending. No real-source fetch or production acceptance is claimed.

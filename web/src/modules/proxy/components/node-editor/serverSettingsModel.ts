@@ -12,7 +12,7 @@ export function internalRelaySettingsReason(internalRelay: boolean, settings: Pr
 
 // Only the selected core's report authorizes a server combination. Version text,
 // the scalar VLESS flag and a neighbouring core's report grant nothing.
-export function serverSettingsReason(server: NodeView | undefined, core: CoreName | '', protocol: string, settings: ProtocolSettings): string {
+export function serverSettingsReason(server: NodeView | undefined, core: CoreName | '', protocol: string, settings: ProtocolSettings, checkFields = true): string {
   const security = settings.security || 'none', transport = settings.transport || 'tcp', flow = settings.flow || '';
   if (!['none', 'tls', 'reality'].includes(security)) return '当前安全方式暂不支持，草稿已保留，请明确选择其他方式';
   if (!['tcp', 'ws', 'grpc', 'xhttp', 'quic'].includes(transport)) return '当前传输方式暂不支持，草稿已保留，请明确选择其他方式';
@@ -27,7 +27,7 @@ export function serverSettingsReason(server: NodeView | undefined, core: CoreNam
   if (!selected.serverSettingsCombinations.some(c => c.protocol === protocol && c.direction === 'inbound' && c.security === security && c.transport === transport && (c.flow || '') === flow)) {
     return `${selected.label} 未上报支持 ${security} + ${transport}${flow ? ' + Vision' : ''} 入站；草稿已保留，请明确选择支持的组合`;
   }
-  if (selected.name === 'sing-box' && security === 'reality' && nonemptyLines(settings.reality?.server_names).length !== 1) {
+  if (checkFields && selected.name === 'sing-box' && security === 'reality' && nonemptyLines(settings.reality?.server_names).length !== 1) {
     return 'sing-box 的 Reality 入站只支持一个服务器名称 / SNI；草稿已保留，请明确调整名称列表';
   }
   return '';
@@ -37,18 +37,18 @@ export function transportChoices(server: NodeView | undefined, core: CoreName | 
   const items = [{ value: 'tcp', label: 'TCP' }, { value: 'ws', label: 'WebSocket' }, { value: 'grpc', label: 'gRPC' }];
   if (protocol === 'vless' || settings.transport === 'xhttp') items.push({ value: 'xhttp', label: 'xhttp（TCP / H2）' });
   if (settings.transport && !items.some(c => c.value === settings.transport)) items.push({ value: settings.transport, label: `${settings.transport}（现有值）` });
-  return items.map(c => ({ ...c, reason: serverSettingsReason(server, core, protocol, { ...settings, transport: c.value }) }));
+  return items.map(c => ({ ...c, reason: serverSettingsReason(server, core, protocol, { ...settings, transport: c.value }, false) }));
 }
 export function securityChoices(server: NodeView | undefined, core: CoreName | '', protocol: string, settings: ProtocolSettings): SettingChoice[] {
   const items = [{ value: 'none', label: 'None' }, { value: 'tls', label: 'TLS' }];
   if (protocol === 'vless' || settings.security === 'reality') items.push({ value: 'reality', label: 'Reality' });
   if (settings.security && !items.some(c => c.value === settings.security)) items.push({ value: settings.security, label: `${settings.security}（现有值）` });
-  return items.map(c => ({ ...c, reason: serverSettingsReason(server, core, protocol, { ...settings, security: c.value }) }));
+  return items.map(c => ({ ...c, reason: serverSettingsReason(server, core, protocol, { ...settings, security: c.value }, false) }));
 }
 export function flowChoices(server: NodeView | undefined, core: CoreName | '', protocol: string, settings: ProtocolSettings): SettingChoice[] {
   const items = [{ value: '', label: '无' }, { value: 'xtls-rprx-vision', label: 'XTLS Vision' }];
   if (settings.flow && !items.some(c => c.value === settings.flow)) items.push({ value: settings.flow, label: `${settings.flow}（现有值）` });
-  return items.map(c => ({ ...c, reason: serverSettingsReason(server, core, protocol, { ...settings, flow: c.value }) }));
+  return items.map(c => ({ ...c, reason: serverSettingsReason(server, core, protocol, { ...settings, flow: c.value }, false) }));
 }
 
 export const nonemptyLines = (values: string[] | undefined): string[] => (values || []).map(s => s.trim()).filter(Boolean);

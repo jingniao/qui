@@ -276,3 +276,9 @@
 - 阶段提交：只包含 S1 交付的 36 个文件（31 个已跟踪修改 + 5 个新增：`fields_test.go`、`report.go`、`report_test.go`、`save_test.go`、`migrations/0133_subscription_source_results.sql`）；没有临时备份或草稿文件入库，没有实现改动，未合并主干。
 - 未完成与限制：阶段提交自身的 Linux 门禁尚未执行；M1 的阶段门禁仍在测试机上运行，S1 门禁按串行规则等其结束后再用同一脚本跑一次；真实订阅抓取、浏览器走查与协议支持（S2–S4、M2–M4）仍未执行或未实现，Windows 结果不替代 Linux/主机/浏览器证据。
 - 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`。
+
+## 2026-11-05: S1 Linux gate correction — migration checksum
+
+- The gate for `ccf23e4` failed `TestAppliedMigrationsAreImmutable`: the new `0133_subscription_source_results.sql` was not pinned in the checksum map. The migration itself is unchanged.
+- Added its SHA-256 (`5745d8bfd47ddf9fe905434598c389650eb6941a0076b5b53945b01dec3c2d50`) to `migrations/checksums_test.go`.
+- Windows targeted `go test ./migrations -run TestAppliedMigrationsAreImmutable -count=1` passed. A Linux gate on this correction commit is required; no passing result is claimed here. The original gate's real-core part was still running when this correction was prepared.

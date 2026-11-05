@@ -145,6 +145,7 @@ var applied = map[string]string{
 	"0127_gost_core.sql":                                "de1ed94c8c0373876700fcad76f233429e2ecb3c692c9afc8b4cbd165faa1451",
 	"0128_gost_tunnels.sql":                             "6b057b2ad59f870d4a60467c9b45f9640aa0a2e580dc75045bafdaa756a4a750",
 	"0129_tunnels.sql":                                  "7d39f8d1fbc2d61654091628207516815dd2f157ee2283067b157ff8b4848976",
+	"0133_subscription_source_results.sql":              "5745d8bfd47ddf9fe905434598c389650eb6941a0076b5b53945b01dec3c2d50",
 }
 
 func TestAppliedMigrationsAreImmutable(t *testing.T) {

@@ -188,3 +188,91 @@
 - 空白与行尾校验：`git -c core.whitespace=cr-at-eol diff --check` 无输出；本记录与夹具全篇 CRLF 保持不变，新增行同为 CRLF，其余文档保持 LF；没有新增只含空白的行。
 - 未完成与限制：S0 的 Linux 门禁结果与来源管理/格式预览的浏览器走查仍缺；S1–S4、M1–M4 未完成；本轮不新增协议支持或验收结论。
 - 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`。
+
+## 2026-11-05：S1 结构化诊断实现（当时待主助手本人审阅）
+
+- 请求：在前置提交 `650b349`（Linux 门禁 `GATE 650b349 PASS total=2552s`，check/cores 均 EXIT 0，结束 `2026-11-05T09:30:12Z`）之上，按计划 §6–§10 与 §14 修正实现 S1：类型化抓取失败、逐条诊断与计数、结构化刷新结果与 HTTP 映射、缓存/状态语义、前端业务提示，并保持既有 SSRF、事务、取消与并发约束。工作分支 `feat/v1.4-import-s1`，工作树 `C:/Users/luanf/qui-wt/s1-diagnostics`，基于 `650b349`。
+- 修改前（S0/前置状态）：`Fetcher` 把所有失败折叠为 `ErrFetch`；解析器静默跳过不支持条目且 `replace` 只按内容哈希去重；刷新只返回 error，部分成功无法表达；`subscription_sources` 无结果列；页面提示基于错误文本，无计数与原因。
+- 修改后：
+  - 抓取：新增 `FetchError{stage,code,status}`，覆盖 input/dns/address/redirect/tls/connect/deadline/http/size，`errors.Is(err, ErrFetch)` 保持兼容；错误文本只含固定代码，`Message()` 为固定中文，不含链接、Location、响应体或凭据。HTTPS、逐跳公网 IP 固定、2 MiB、15 秒上限与重定向重校验未放宽。
+  - 解析：`Parse` 改为 `Analyze` 的兼容适配（同一实现两种入口）；逐条记录 `parse`/`duplicate` 原因，`total = accepted + rejected + duplicates`，条目多问题时只计一次；完全相同条目为 `duplicate_endpoint_content`，同 `name|protocol` 但参数不同为 `duplicate_endpoint_key`（附保留条目序号），保留文档顺序第一条；文档级失败（空、无法识别、Base64 失败）计数为 null。
+  - 存储：`Store.Refresh` 返回 `(Result, error)`；部分成功提交缓存且 `last_status=ok`/空 `last_error`，失败保留旧行但置 `failed` 并写固定 `last_error`；提交失败回滚且不改状态（返回 `import_commit_failed` 与持久化错误）；取消不写失败。新增 `last_success_at` 与 `latest_result_json`（迁移 `0133_subscription_source_results`），更换 URL 清空结果回 `pending`；`List` 返回 `lastSuccessAt`/`latestResult`，历史失败无结果显示“未记录原因”。
+  - API：刷新 200（ok/partial）、422、502、504、500、404、400（内容来源无链接）分别映射，错误体 `details.result` 携带同一结果；`GET /subscription-sources` 附带最近结果。
+  - 备份/恢复：`validateImports` 在应用 0133 时校验结果 JSON（固定阶段/代码、counts 一致、诊断文本必须等于代码固定文本），0133 前归档无该列仍合法；`PrepareRestoreTx` 按归档列集复制，旧归档保留“未记录原因”，不自动抓取。
+  - 前端：`importApi.ts`/`proxyNodes.ts` 增加结果类型、`describeImportResult`、`importCountsLine`、`failedImportResult`；来源卡片显示状态（正常/部分导入/拉取异常/等待抓取）、本次导入/跳过/重复/缓存/可用于订阅、上次尝试与上次成功；新增有界“导入结果”对话框；三个刷新入口与粘贴导入按业务结果显示成功/警告/错误；失败保留已保存 ID 与编辑内容。
+- 新增/修改测试：`fetch_test.go`（九类抓取错误与既有 SSRF 用例）、`report_test.go`（计数、两类重复、边界、文档级失败、结果校验、固定文案）、`refresh_test.go`（HTTP 映射、失败保留缓存、提交失败回滚、URL 变更清空）、`store_test.go`（适配新签名）、`imports_test.go`（结果校验与 0133 前归档）、`recovery/imports_test.go`（恢复保留结果）、`web/scripts/import-refresh-selftest.mjs`（三入口 + 粘贴导入的业务提示与失败保留）。
+- 验证：见本轮交付说明中的命令与结果；Linux 门禁、真实来源抓取、浏览器走查均未执行。
+- 未完成与限制：SS2022/Reality/xhttp（S2–S4、M1–M4）仍未实现；未抓取真实订阅、未改生产、未提交/推送/打标签。
+
+## 2026-11-05：S1 首轮审查阻塞项修正（当时待主助手本人审阅）
+
+- 请求：只修正既有未提交 S1 分支上的 5 项审查阻塞项，不提交、不跑完整门禁、不合并、不推送；由执行者实现，审阅由主助手本人完成（不委派）。不新增 SS2022/Reality/xhttp，不改动安全边界与 SSRF 限制，不改已应用迁移（0133 仍为最新）。
+- 基线：`feat/v1.4-import-s1` 未提交工作树；S0 提交 `9045e1b` 的门禁仍在运行，本轮未启动竞争门禁、未触碰 S0。
+- 逐项修正：
+  1. 粘贴导入结果（对应阻塞 1）：`Store.Save` 改为返回 `(id, Result, error)`，粘贴内容走与抓取相同的 `Analyze` 管线——200 返回 `{id, result}`，无条目可导入 422（`details.result` 携带同一结果），输入无效 400（未发生尝试、无结果），持久化失败 500，来源不存在 404。`saveManualNodeModal` 改用共享 `showImportResult`：`ok` 成功、部分导入警告、失败用面板固定文案；被拒的粘贴保留草稿与对话框，并直接打开有界原因对话框（内容来源没有卡片可点）。
+  2. 上游状态（阻塞 2）：`Result.Status`（`upstreamStatus`）持久化上游 HTTP 状态，`resultMessage(code, status)` 成为唯一固定文案格式化入口（`FetchError.Message`、API、卡片、对话框共用）；仅 `source_http_status` 可带状态且必须在 100–599，其余代码带状态即被校验拒绝；`handler.refresh` 不再传 `0`，403 显示为“HTTP 403”，永不出现“HTTP 0”。
+  3. 持久化失败（阻塞 3）：`Save`/`Refresh` 在尝试前一次性捕获已提交状态（`last_status`、`last_success_at`、缓存条数）；任何持久化分支（封存、开始事务、替换缓存、写状态、提交、写失败记录本身）都返回 `stage=commit`、`outcome=failed`、`code=import_commit_failed`，并报告回滚后仍保留的上次成功时间与 `cached`/`usable`（原先可用则仍可用）；不再把本次分析的条目说成已保留的 `accepted`；响应体不含存储错误文本。
+  4. 归档校验（阻塞 4）：`ValidateResult` 增加语义校验（代码→阶段/结果关系、固定文案、RFC3339 时间、counts 不变式、诊断阶段/字段/索引/保留索引、未知 JSON 字段拒绝），新增 `ValidateStoredResult` 在备份边界把结果与其行核对（来源 ID、`last_fetch_at`/`last_success_at`、`last_status` 一致）；迁移 0133 之前的归档与 null 未知计数仍兼容。
+  5. Base64 可达性（阻塞 5）：`Analyze` 在没有任何格式命中时，仅对“像 Base64 但无法解码”的文档走 `Base64` 分析器（阶段 `decode`、代码 `invalid_base64`），文本/HTML/普通单词仍为 `import_unrecognized`；解码失败分支因此可达且仍只有一份实现。
+- 新增/修改测试：
+  - `internal/panel/subscription/importer/save_test.go`（新增）：混合粘贴返回 200+结果、干净粘贴、仅链接无结果、全不支持粘贴 422+结果且不落库、Base64 粘贴分类、输入无效 400（无结果）、未知来源 404、粘贴持久化失败 500（保留旧数据、无存储文本泄漏）。
+  - `refresh_test.go`：403 全链路（结果/落库行/路由响应均含 403，无 “HTTP 0”）、提交失败保持上次成功与可用缓存（旧状态 ok、可用 1，新抓取 2 条）、替换缓存失败回滚、失败记录写入失败保持可用、开始事务失败（占住唯一写连接、经读池读取）报告 commit 状态。
+  - `report_test.go`：Base64 可达性、全部结果类型 round trip、18 项伪造结果逐项拒绝（阶段/结果/代码/文案/时间/状态/计数/诊断字段与索引/保留索引/未知字段/尾随 JSON/非法 JSON）、`ValidateStoredResult` 行匹配。
+  - `internal/panel/system/backup/imports_test.go`：ok/partial/failed 三类结果均通过，逐项篡改（来源、时间、成功时间、计数、诊断字段与文案、状态矛盾）均被拒，恢复原值后再次通过。
+  - `web/scripts/import-refresh-selftest.mjs`：三入口失败显示真实 403、混合粘贴为警告并打开原因、全不支持粘贴保留草稿并显示逐条原因、保存成功但重载失败不重复保存也不报错、未知计数显示“—”。
+- 本地验证（Windows，仅针对性测试，未跑 Linux 门禁）：`go test -count=1 ./internal/panel/subscription/importer`（ok）、`./internal/panel/subscription/...`（全部 ok）、`./internal/panel/system/backup`（ok 88.6s）、`./internal/platform/recovery`（ok 61.3s）、`./internal/platform/server -run TestImport|TestSubscription|TestSources`（ok）、`node web/scripts/import-refresh-selftest.mjs`（PASS）、`vue-tsc --noEmit`（`EXIT=0`）、`vite build`（built）、`gofmt -l`（无输出）。
+- 未完成与限制：Linux 门禁、真实订阅抓取、浏览器走查均未执行；未提交、未推送、未打标签；SS2022/Reality/xhttp 仍未实现。审查结论以主助手本人复核为准。
+
+## 2026-11-05：S1 第二轮审查阻塞项修正（当时待主助手本人审阅）
+
+- 请求：只修正主助手本人第二轮审查发现的 5 项具体阻塞项；不提交、不合并不跑完整门禁，由执行者实现、主助手本人审阅（不委派）。不改迁移（0133 仍为最新）、不新增协议、不放宽 SSRF 与加密边界。
+- 基线：`feat/v1.4-import-s1` 未提交工作树。S0 `9045e1b` 门禁 PASS（total=2569s）已合入 `feat/v1.4-tunnels`，M1 契约分支另开；本轮未 rebase、未触碰其他工作树、未暂存任何文件。
+- 逐项修正：
+  1. 诊断字段白名单（阻塞 1）：`parse.go` 为每个实际发出的字段路径定义常量（新增 `entry`、`ws-opts`、`grpc-opts`、`network`，原有 `""`/`credential`/`tls.insecure`/`method`/`security`/`type`/`query` 同样常量化，解析处只传常量），`report.go` 的 `diagnosticFields` 由同一组常量构成。此前 Clash 的 `unsupported_option` 与传输类原因会让 `ValidateResult` 拒绝面板自己写入的结果：`List` 读回 nil、备份拒绝自身数据库。
+  2. 尾随 JSON（阻塞 2）：`ValidateResult` 的第二次 `Decode` 要求 `io.EOF`，因此 `validJSON + " !garbage"` 这类以语法错误出现的尾随内容不再被接受；只有空白尾随通过。
+  3. 粘贴拒绝语义（阻塞 3）：`Store.Save` 在写入前失败时返回 disposition 代码——新来源 `import_paste_rejected`（未创建来源）、已有来源 `import_paste_unchanged`（未保存任何更改，现有来源状态保持不变）。两者保留逐条原因与 `total/rejected/duplicates`；已有来源沿用上次成功时间与旧 `cached`/`usable`（原先可用则仍可用），不再声称“已抓取”或“已从订阅中排除”。`unchangedCounts` 成为“未改变状态”的唯一计数来源，与提交失败、存储失败共用。
+  4. 可达性不变式（阻塞 4）：共享校验边界新增「成功（`ok`/`partial`）结果的 `lastSuccessAt` 必须等于 `attemptedAt`」「`ok` 不得带 rejected/duplicates」「`partial` 必须有跳过」；`ValidateStoredResult` 只接受面板实际落库的代码（存储失败 `import_commit_failed`、粘贴拒绝两码、`invalid_source_url` 永不落库），并要求已提交缓存计数已知（`cached`/`usable` 非 null）。
+  5. 本地存储失败（阻塞 5）：`Refresh` 打开来源自身密封数据失败不再是 `ErrFetch`，改为 `ErrStore` + 新代码 `import_source_unreadable`（阶段 `store`）：HTTP 500、固定文案、状态不变、报告旧 `cached`/`usable`、不写失败记录、不回显 Vault 错误或凭据。
+- 新增/修改测试：
+  - `internal/panel/subscription/importer/fields_test.go`（新增）：字段常量全部被 `validField` 接受、任意路径被拒绝；Clash 部分文档（未知选项、缺 `ws-opts`、缺 `grpc-opts`、非法 `network`）经粘贴与抓取两条路径后，`List` 仍带 `latestResult` 且 `ValidateStoredResult` 通过。
+  - `report_test.go`：尾随垃圾 / 第二个 JSON / 纯空白尾随；8 项不可达状态（缺成功时间、成功时间不符、`ok` 带跳过、`partial` 无跳过、存储失败落库、粘贴拒绝落库、失败缺缓存）与自身结果通过。
+  - `save_test.go`：全不支持粘贴 → 422 `import_paste_rejected`（无来源创建、消息不含“已抓取/已排除”）；已有内容来源与 URL 来源（各 1 条已缓存且可用）→ 422 `import_paste_unchanged`、`cached`/`usable`=1、行/缓存/订阅端点与上次成功时间不变。
+  - `refresh_test.go`：合成密封数据损坏（`url_encrypted=x'00'`，不打印任何密钥或明文）→ `ErrStore`、`import_source_unreadable`、500 固定文案、旧计数与状态不变、响应不含 vault/加密错误与来源机密。
+  - `internal/panel/system/backup/imports_test.go`：失败行改用真实 `Refresh` 记录（连接被拒）以获得可落库结果；新增 Clash 未知选项来源的真实备份创建与 `Examine` 往返。
+  - `web/scripts/import-refresh-selftest.mjs`：粘贴拒绝固定文案改为“未保存任何来源”，计数、原因与草稿保留断言不变。
+- 本地验证（Windows，仅针对性测试，未跑 Linux 门禁）：`go test -count=1 ./internal/panel/subscription/importer/`（ok）、`./internal/panel/system/backup/`（ok 89.2s）、`./internal/platform/recovery/`（ok 56.0s）、`./internal/panel/subscription/...`、`go build ./...`、`go vet`（importer、backup）、`node web/scripts/import-refresh-selftest.mjs`（PASS）、`gofmt -l`（无输出）。
+- 未完成与限制：Linux 门禁、真实订阅抓取、浏览器走查均未执行；未提交、未推送、未打标签；SS2022/Reality/xhttp 仍未实现。审查结论以主助手本人复核为准。
+
+## 2026-11-05：S1 取消请求的错误体修正（主助手本人第三轮审查，当时仍未提交）
+
+- 请求：上一轮 5 项修正经主助手本人复核通过；仅修正随后发现的取消语义回归，不提交、不合并不跑完整门禁，审阅仍由主助手本人执行（不委派）。不改迁移（0133 仍为最新）、不改存储的状态/结果/缓存语义、不新增取消阶段或通用结果框架、不推送/打标签/改生产/抓取真实来源。
+- 缺陷：`Store.Refresh` 在抓取前先建立临时结果（`Result{SourceID, LastSuccessAt}` 并在 `Fetch` 前填入 `AttemptedAt`），请求在抓取期间被取消（`ctx.Err() != nil`）时原样返回；`Handler.failure` 仅按 `AttemptedAt != ""` 判断就挂上 `details.result`。于是 503 携带一个未完成结果：`outcome`/`stage`/`code`/`message` 为空、`counts` 全 null、`diagnostics` 为 `null`。页面 `failedImportResult` 接受任意 `attemptedAt`，`describeImportResult` 随即读取 `result.diagnostics.length` 抛 `TypeError`；即使不崩溃，也会用空摘要替换真实的中文取消提示。来源行、缓存与已发布端点原本就未被写入（行为正确，保持不变）。
+- 修正（仅 `handler.go`）：新增 `classified(result)`——结果必须同时带 `outcome`、`stage`、`code` 与固定 `message`（面板所有业务结果的实际形态）才作为 `details.result` 携带；未完成的尝试改为返回原有 503 固定外层文案“刷新已取消，来源状态保持不变”，不带任何部分细节。同一判定顺带覆盖“内容来源没有链接”（`ErrContentSource`）此前会携带空结果的相同缺陷。`store.go` 的取消路径、`last_status`/`latest_result_json`/缓存写入逻辑与 `RecordFailure` 语义均未改动。
+- 新增/修改测试：
+  - `refresh_test.go` 新增 `TestRefreshCancelledDuringFetchKeepsTheSourceAndSendsNoResult`：先成功抓取一次（缓存 1 条、`import_ok`）并记录整行，然后把 `Fetcher.DialContext` 换成阻塞到调用方 context 结束的假拨号，经真实刷新路由在**抓取进行中**取消请求。断言 HTTP 503、`code=import_unavailable` 与固定文案、错误体不含 `result`/`attemptedAt`/`diagnostics`/`counts`、不含来源机密；并逐字段比对状态、`lastFetchAt`、`lastSuccessAt`、`latestResult.code` 与缓存行、订阅可用端点均未变化。已验证该用例在旧实现（`AttemptedAt != ""`）下失败、在新实现下通过。
+  - `web/scripts/import-refresh-selftest.mjs` 新增“503 无 `details.result`”fixture：三个刷新入口都显示“刷新已取消，来源状态保持不变”（error），不打开原因对话框、不产生空计数摘要，并保留草稿与可编辑状态；既有“无结果失败保留面板文案”用例不变。
+- 本地验证（Windows，仅针对性测试，未跑 Linux 门禁）：`go test -count=1 ./internal/panel/subscription/importer/`（ok）、新增用例单独 `-run`（PASS；旧实现下 FAIL）、`go vet ./internal/panel/subscription/importer/`（通过）、`node web/scripts/import-refresh-selftest.mjs`（PASS）、`gofmt -l`（无输出）。前端类型检查与构建未在本轮重跑。
+- 未完成与限制：Linux 门禁、真实订阅抓取、浏览器走查、`vue-tsc`/`vite build` 本轮均未执行；工作树仍未提交、未暂存、未推送、未打标签；SS2022/Reality/xhttp 仍未实现。审查结论以主助手本人复核为准。
+
+## 2026-11-05：S1 基线整合到 `9045e1b` 与 flaky 断言修正（当时未提交）
+
+- 请求：主助手本人已复核并接受两轮修正与取消回归的代码修改；进入阶段提交前，把未提交的 S1 工作整合到主开发线当前提交 `9045e1b`（S0 已门禁/已整合）。须保留 S0 的审阅证据、夹具与状态、`650b349` 与 `9045e1b` 的门禁记录，以及 S1 的实现与修正记录；不提交、不合并主干、不跑完整 Linux 门禁，S1 当时仍待最终审阅与阶段提交门禁；不改已应用迁移（0133 仍为 S1 保留），不改 Owner 既有页面布局。
+- 基线：worktree `C:/Users/luanf/qui-wt/s1-diagnostics`，分支 `feat/v1.4-import-s1` 由 `650b349` 快进到 `9045e1b`；主检出 `C:/Users/luanf/qui` 保持干净并仍指向 `9045e1b`；M1 worktree 未触碰。
+- 做法：先把已跟踪改动导出为补丁、另存 `git stash create` 提交对象（引用 `refs/s1-backup/pre-rebase`）并复制全部未跟踪文件，再清理已跟踪改动、快进分支，最后以 `git apply --3way` 重新应用补丁。未跟踪文件（`fields_test.go`、`report.go`、`report_test.go`、`save_test.go`、`migrations/0133_subscription_source_results.sql`）全程保留。没有 `reset --hard`、`stash drop` 或其他数据删除。
+- 冲突与解决（4 份共享文档，均为 S0 与 S1 同时修改）：`docs/release-notes-1.4.0.md`（保留 S0 的刷新修复行、S0 两行与 S0 声明，插入 S1 行并更新 S1/S0 行的现状）、`docs/subscription-import-compatibility-plan.md` 与 `.en.md`（保留 S0 状态段原文，只在状态行追加 S1 现状；§14.5 补 `PART check EXIT 0`/`PART cores EXIT 0` 原文）、`docs/subscription-import-compatibility-change-log.md`（整文件冲突源于行尾：库内该文件为 CRLF，S1 副本为 LF；按“S0 全文 + S1 追加 65 行”重建并以 CRLF 写回，diff 变为纯新增、无行尾噪声）。S0 的文档内容与 S1 的实现记录均未回退，未新增任何 S1 Linux 门禁、浏览器走查或协议支持结论。
+- flaky 测试修正（`save_test.go`）：原断言要求 `result.AttemptedAt != before.LastSuccess`，即“本次尝试时间必须不同于上次成功时间”；两次正确的调用可以落在同一时钟分辨率内，该不等式不是拒绝粘贴的有效判据。改为 `lastSuccessAt` 逐字符不变 + `attemptedAt` 通过 `validStamp`，不加 sleep、不改生产逻辑，行、缓存与订阅可用端点断言不变。`-run TestSaveRejectedPasteKeepsExistingSource -count=20`（40 个子用例）在整合前（`650b349` 基线）与整合后（`9045e1b` 基线）各跑一次，均全部通过。
+- 本地验证（Windows，仅针对性测试，未跑 Linux 门禁）：`go test -count=1 ./internal/panel/subscription/...`（ok）、`./internal/panel/system/backup/...`（ok 98.6s）、`./internal/platform/recovery/...`（ok 65.3s）、`./internal/platform/server/...`（ok 225.5s）；`npm.cmd --prefix web run typecheck`（exit 0）与 `run build`（exit 0，vite 6.14s）；`node web/scripts/import-refresh-selftest.mjs`（PASS）；`gofmt -l`（24 个改动 Go 文件无输出）；`go vet`（importer、backup 通过）；`git -c core.whitespace=cr-at-eol diff --check`（无输出）。
+- 未完成与限制：工作树仍未提交、未暂存、未推送、未打标签、未发布；Linux 门禁、真实订阅抓取与浏览器走查仍未执行，Windows 结果不替代 Linux/主机/浏览器证据；S1 待主助手本人最终审阅与阶段提交门禁；S2–S4、M2–M4 未开始（M1 在并列分支单独进行）。
+- 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`。
+
+## 2026-11-05：S1 审查归属与状态更正、阶段提交（本地，Linux 门禁待执行）
+
+- 请求：主助手本人最终审查已通过 S1 的代码与测试（基线 `9045e1b`），本轮只做窄范围文档更正后提交阶段工作：更正审查归属（所有审查一直由主助手本人完成，Owner 不承担验收工作）、把 S0 提交 `9045e1b` 的门禁记为已通过、把计划 §14.8 的基线改为 `9045e1b` 并补上 M1 状态、把措辞改为提交就绪；不新增实现改动、不合并主干、不推送、不打标签、不发布。
+- 更正内容：
+  - 审查归属：本记录此前把主助手的审查写成“Owner 本人审阅/复核”，现统一改为“主助手本人审查/复核”；Owner 对产品范围的决策、授权与真实操作仍记为 Owner。历史顺序更正为：主助手本人首轮 5 项阻塞 → 第二轮 5 项阻塞 → 1 项取消回归（此前“5 项 + 1 项”的表述不准确）。更早的 S0 与刷新修复条目中的“独立审阅/审阅方独立核对”指的同是主助手本人的审查，那些条目按原日期保留原措辞，不重写历史。
+  - S0 门禁：`9045e1b` 的 Linux 门禁已由主助手本人核对通过（`check` 1995s、`cores` 574s，`GATE 9045e1b PASS total=2569s`，START 2026-11-05T10:00:34Z，END 10:43:23Z）；文档中“该提交门禁待执行”的说法已全部替换，S0 文档与夹具仍与 `9045e1b` 逐字节一致。
+  - 计划与状态：英文版 §14.8 的 “based on `650b349`” 改为 `9045e1b`，状态行去掉“其余全部未实施”的错误表述（刷新修复与 S0 已交付、S1 已实现）；M1 记为并列分支 `feat/v1.4-selfhost-m1` 的阶段提交 `3565153`，其 Linux 门禁运行中（未整合、未门禁通过、未完成功能验收）；迁移编号起点改为 0133 之后（0133 属 S1，M1 无需迁移）。
+  - 交接文档：三份计划文件自 `84e8725` 起已跟踪，不再写作“untracked”；C6 记为 Owner 已批准实施、工作正在进行。
+- 阶段提交：只包含 S1 交付的 36 个文件（31 个已跟踪修改 + 5 个新增：`fields_test.go`、`report.go`、`report_test.go`、`save_test.go`、`migrations/0133_subscription_source_results.sql`）；没有临时备份或草稿文件入库，没有实现改动，未合并主干。
+- 未完成与限制：阶段提交自身的 Linux 门禁尚未执行；M1 的阶段门禁仍在测试机上运行，S1 门禁按串行规则等其结束后再用同一脚本跑一次；真实订阅抓取、浏览器走查与协议支持（S2–S4、M2–M4）仍未执行或未实现，Windows 结果不替代 Linux/主机/浏览器证据。
+- 后续提交约定：提交信息结尾使用 `Co-Authored-By: Claude Code <noreply@anthropic.com>`。

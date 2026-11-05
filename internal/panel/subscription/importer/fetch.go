@@ -19,6 +19,70 @@ const MaxBody = 2 << 20
 
 var ErrFetch = errors.New("subscription fetch refused or failed")
 
+// FetchError is the typed cause of a refused or failed fetch.
+//
+// Its text is the fixed code only. The source URL, a redirect target, a TLS error
+// string and a response body may each carry a token, so typing the cause keeps
+// them out of Owner errors, logs, audits and the persisted result.
+type FetchError struct {
+	Stage string
+	Code  string
+	// Status is the response status for Stage "http" and zero otherwise.
+	Status int
+}
+
+func (e *FetchError) Error() string { return e.Code }
+
+// Is keeps errors.Is(err, ErrFetch) true for every typed cause, so a caller that
+// only classifies "the fetch failed" keeps working.
+func (e *FetchError) Is(target error) bool { return target == ErrFetch }
+
+// Message is the fixed Owner-facing explanation of the cause, formatted by the one
+// shared catalogue, so a real HTTP status is stated and never replaced by zero. It
+// never echoes the URL, a redirect target or a response body.
+func (e *FetchError) Message() string { return resultMessage(e.Code, statusPointer(e.Status)) }
+
+func fetchFailure(stage string, status int) *FetchError {
+	codes := map[string]string{
+		stageInput:    "invalid_source_url",
+		stageDNS:      "source_dns_failed",
+		stageAddress:  "source_address_rejected",
+		stageRedirect: "source_redirect_rejected",
+		stageTLS:      "source_tls_failed",
+		stageConnect:  "source_connect_failed",
+		stageDeadline: "source_timeout",
+		stageHTTP:     "source_http_status",
+		stageSize:     "source_too_large",
+	}
+	return &FetchError{Stage: stage, Code: codes[stage], Status: status}
+}
+
+// networkFailure classifies a transport error without copying its text. A
+// deadline is checked first, because every error wrapped after it then carries
+// the dial deadline too.
+func networkFailure(ctx context.Context, err error) *FetchError {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return fetchFailure(stageDeadline, 0)
+	}
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return fetchFailure(stageDeadline, 0)
+	}
+	var verification *tls.CertificateVerificationError
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	var record tls.RecordHeaderError
+	if errors.As(err, &verification) || errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid) || errors.As(err, &record) {
+		return fetchFailure(stageTLS, 0)
+	}
+	var dns *net.DNSError
+	if errors.As(err, &dns) {
+		return fetchFailure(stageDNS, 0)
+	}
+	return fetchFailure(stageConnect, 0)
+}
+
 type Resolver interface {
 	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
 }
@@ -82,7 +146,10 @@ func (f Fetcher) Fetch(ctx context.Context, raw string) ([]byte, error) {
 	// so neither connection reuse nor a second resolver call can bypass validation.
 	for hop := 0; hop < 10; hop++ {
 		if !ValidURL(raw) {
-			return nil, ErrFetch
+			if hop == 0 {
+				return nil, fetchFailure(stageInput, 0)
+			}
+			return nil, fetchFailure(stageRedirect, 0)
 		}
 		u, _ := url.Parse(raw)
 		host := u.Hostname()
@@ -93,15 +160,15 @@ func (f Fetcher) Fetch(ctx context.Context, raw string) ([]byte, error) {
 			var err error
 			ips, err = resolver.LookupNetIP(ctx, "ip", host)
 			if err != nil {
-				return nil, ErrFetch
+				return nil, networkFailure(ctx, err)
 			}
 		}
 		if len(ips) == 0 {
-			return nil, ErrFetch
+			return nil, fetchFailure(stageDNS, 0)
 		}
 		for _, ip := range ips {
 			if !Public(ip) {
-				return nil, ErrFetch
+				return nil, fetchFailure(stageAddress, 0)
 			}
 		}
 		port := u.Port()
@@ -115,19 +182,19 @@ func (f Fetcher) Fetch(ctx context.Context, raw string) ([]byte, error) {
 		client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 		if err != nil {
-			return nil, ErrFetch
+			return nil, fetchFailure(stageInput, 0)
 		}
 		response, err := client.Do(request)
 		if err != nil {
 			transport.CloseIdleConnections()
-			return nil, ErrFetch
+			return nil, networkFailure(ctx, err)
 		}
 		if response.StatusCode >= 300 && response.StatusCode <= 399 {
 			next, err := response.Location()
 			response.Body.Close()
 			transport.CloseIdleConnections()
 			if err != nil {
-				return nil, ErrFetch
+				return nil, fetchFailure(stageRedirect, 0)
 			}
 			raw = next.String()
 			continue
@@ -138,10 +205,19 @@ func (f Fetcher) Fetch(ctx context.Context, raw string) ([]byte, error) {
 		// The body read can end without an error once the deadline has cut the
 		// connection (seen in CI under -race), so a body read past the deadline
 		// is rejected rather than cached as the whole subscription.
-		if err != nil || ctx.Err() != nil || response.StatusCode != http.StatusOK || len(body) > MaxBody {
-			return nil, ErrFetch
+		if ctx.Err() != nil {
+			return nil, fetchFailure(stageDeadline, 0)
+		}
+		if len(body) > MaxBody {
+			return nil, fetchFailure(stageSize, 0)
+		}
+		if err != nil {
+			return nil, fetchFailure(stageConnect, 0)
+		}
+		if response.StatusCode != http.StatusOK {
+			return nil, fetchFailure(stageHTTP, response.StatusCode)
 		}
 		return body, nil
 	}
-	return nil, ErrFetch
+	return nil, fetchFailure(stageRedirect, 0)
 }

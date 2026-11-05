@@ -9,6 +9,46 @@ export type NodeSourceType = 'self_hosted' | 'subscription' | 'manual';
 // "机场订阅" from "单独导入".
 export type ImportSourceKind = 'url' | 'content';
 
+// One bounded reason an imported entry was not imported. The panel writes fixed
+// text per code, so this never carries a URL, a credential or a response body.
+export interface ImportDiagnostic {
+  entryIndex: number;
+  protocol?: string;
+  stage: 'parse' | 'duplicate';
+  code: string;
+  field?: string;
+  message: string;
+  // keptEntryIndex names the entry that was kept for a duplicate key.
+  keptEntryIndex?: number;
+}
+
+// The structured outcome of one import attempt (S1). A null count means the panel
+// could not determine it, which is different from zero. `message` is the panel's
+// fixed text for the attempt, so the page never invents a cause and never states
+// an upstream status the panel did not record.
+export interface ImportResult {
+  sourceId: string;
+  outcome: 'ok' | 'partial' | 'failed';
+  stage: string;
+  code: string;
+  // Only a source_http_status attempt carries the upstream status.
+  upstreamStatus?: number;
+  message: string;
+  counts: {
+    total: number | null;
+    accepted: number;
+    rejected: number | null;
+    duplicates: number | null;
+    // Unknown (null) when the panel could not read the cache after a failure.
+    cached: number | null;
+    usable: number | null;
+  };
+  attemptedAt: string;
+  lastSuccessAt: string | null;
+  diagnostics: ImportDiagnostic[];
+  diagnosticsTruncated: boolean;
+}
+
 export interface ProxyNodeItem {
   id: string;
   name: string;
@@ -37,6 +77,11 @@ export interface SubscriptionItem {
 	intervalSeconds?: number;
 	lastStatus?: string;
 	lastError?: string;
+  lastFetchAt?: string;
+  lastSuccessAt?: string;
+  // Absent until the panel records a result (sources written before migration
+  // 0133, and a source whose URL just changed).
+  latestResult?: ImportResult | null;
   id: string;
   name: string;
   url: string;

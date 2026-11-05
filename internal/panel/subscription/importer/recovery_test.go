@@ -15,7 +15,7 @@ func TestRestoreKeepsCurrentSourcesAndRevokedGrants(t *testing.T) {
 	current, a, b := storeFixture(t)
 	ctx := context.Background()
 	input := Input{Name: "recover fixture", Content: "socks5://fixture:fixture@example.com:1080#external", Interval: 60, UserIDs: []string{a}}
-	key, err := current.Save(ctx, "", input)
+	key, _, err := current.Save(ctx, "", input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestRestoreKeepsCurrentSourcesAndRevokedGrants(t *testing.T) {
 	prepare()
 	input.Content = ""
 	input.UserIDs = []string{b}
-	if _, err = current.Save(ctx, key, input); err != nil {
+	if _, _, err = current.Save(ctx, key, input); err != nil {
 		t.Fatal(err)
 	}
 	if err = (&user.Repository{Database: current.Database, Vault: current.Vault}).Grant(ctx, a, groupID, true); err != nil {

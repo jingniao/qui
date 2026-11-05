@@ -24,9 +24,41 @@ func validateImports(ctx context.Context, db *sql.DB, v *vault.Vault) error {
 	if applied == 0 {
 		return nil
 	}
-	for _, q := range []string{"SELECT id,name,interval_seconds,last_fetch_at,last_status,last_error,created_at,updated_at FROM subscription_sources LIMIT 0", "SELECT user_id,source_id FROM user_source_grants LIMIT 0", "SELECT client_published_layout FROM canvas_schemes LIMIT 0"} {
+	// 0133 added the last result and the last success. An archive from before it
+	// has neither column and is still a valid input; when it does have them, each
+	// result must be one this panel could have written and must agree with its own
+	// row: same source, same attempt and success time, and the status that result
+	// implies.
+	var results int64
+	if db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0133_subscription_source_results.sql'").Scan(&results) != nil {
+		return ErrArchive
+	}
+	queries := []string{"SELECT id,name,interval_seconds,last_fetch_at,last_status,last_error,created_at,updated_at FROM subscription_sources LIMIT 0", "SELECT user_id,source_id FROM user_source_grants LIMIT 0", "SELECT client_published_layout FROM canvas_schemes LIMIT 0"}
+	if results == 1 {
+		queries = append(queries, "SELECT last_success_at,latest_result_json FROM subscription_sources LIMIT 0")
+	}
+	for _, q := range queries {
 		rows, err := db.QueryContext(ctx, q)
 		if err != nil {
+			return ErrArchive
+		}
+		rows.Close()
+	}
+	if results == 1 {
+		rows, err := db.QueryContext(ctx, "SELECT id,last_fetch_at,last_success_at,last_status,latest_result_json FROM subscription_sources WHERE latest_result_json<>'' ORDER BY id")
+		if err != nil {
+			return ErrArchive
+		}
+		for rows.Next() {
+			var sourceID, lastFetch, lastSuccess, status, stored string
+			if rows.Scan(&sourceID, &lastFetch, &lastSuccess, &status, &stored) != nil ||
+				importer.ValidateStoredResult(sourceID, lastFetch, lastSuccess, status, []byte(stored)) != nil {
+				rows.Close()
+				return ErrArchive
+			}
+		}
+		if rows.Err() != nil {
+			rows.Close()
 			return ErrArchive
 		}
 		rows.Close()

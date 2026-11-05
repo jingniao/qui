@@ -18,6 +18,7 @@
   - 自建 Xray VLESS Reality/xhttp；sing-box 仅在固定版本支持时提供 Reality。
   - 两条工作线并行，各自通过 S5；RC 与 A1 等待两线完成。
   - 同一来源内 `name|protocol` 重复时保留首条、拒绝其余（`duplicate_endpoint_key`）。
+- S1 订阅导入诊断（分支 `feat/v1.4-import-s1`，基线 `9045e1b`，随本阶段提交落地；主助手本人三轮审查依次给出首轮 5 项、第二轮 5 项阻塞与 1 项取消回归，均已在同一份改动中修正，代码已通过该审查；阶段提交自身的 Linux 门禁待执行）：抓取失败按 input/dns/address/redirect/tls/connect/deadline/http/size 分类且不回显链接/响应体；解析逐条给出原因与计数（`total = accepted + rejected + duplicates`），同键保留首条、完全相同条目单列重复，仅像 Base64 且无法解码的文档才报 `invalid_base64`；刷新与粘贴导入共用同一管线（`Save` 返回 `id + result`，200/400/422/500/404），上游 HTTP 状态（如 403）持久化并由同一固定文案格式化，不再出现“HTTP 0”；所有持久化失败一律返回 `commit`/`failed`/`import_commit_failed`，报告回滚后仍保留的上次成功时间与缓存/可用数量，不把本次解析结果说成已写入；迁移 0133 新增 `latest_result_json`/`last_success_at`，更换 URL 清空结果；备份校验结果与本行一致（来源、时间、状态、计数、诊断字段与索引，未知字段拒绝），旧归档仍可恢复；页面显示业务结果、计数、原因对话框，粘贴失败保留草稿并可直接查看原因。SS2022/Reality/xhttp 仍未实现。
 
 **v1.3.0（2026-11-03）**：发布并部署到三台主机；说明见[发布说明](release-notes-1.3.0.md)，逐项证据见[验收矩阵](v1-acceptance.md) §12。
 

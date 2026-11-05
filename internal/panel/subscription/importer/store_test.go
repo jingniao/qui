@@ -22,11 +22,19 @@ import (
 func storeFixture(t *testing.T) (*Store, string, string) {
 	t.Helper()
 	ctx := context.Background()
-	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	path := filepath.Join(t.TempDir(), "panel.db")
+	d, err := db.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
+	// The panel gives the store a separate read pool; the fixture does the same, so a
+	// test can hold the only writer connection while reads keep working.
+	reader, err := db.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reader.Close() })
 	v, err := vault.FromKey(bytes.Repeat([]byte{7}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +48,7 @@ func storeFixture(t *testing.T) (*Store, string, string) {
 		}
 		ids = append(ids, u.ID)
 	}
-	return &Store{Database: d, Vault: v}, ids[0], ids[1]
+	return &Store{Database: d, Reader: reader, Vault: v}, ids[0], ids[1]
 }
 func grantImport(t *testing.T, s *Store, userID, sourceID, proxyKey string) string {
 	t.Helper()
@@ -59,7 +67,7 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 	s, a, b := storeFixture(t)
 	ctx := context.Background()
 	const content = "socks5://fixture:private-fixture@example.com:1080#external"
-	key, err := s.Save(ctx, "", Input{Name: "test import", Content: content, Interval: 60, UserIDs: []string{a}})
+	key, _, err := s.Save(ctx, "", Input{Name: "test import", Content: content, Interval: 60, UserIDs: []string{a}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,14 +109,14 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 	if err != nil || len(w) == 0 {
 		t.Fatal("failed first fetch lost warning")
 	}
-	if _, err = s.Save(ctx, key, Input{Name: "test import", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}}); err != nil {
+	if _, _, err = s.Save(ctx, key, Input{Name: "test import", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Database.QueryRow("SELECT url_encrypted FROM subscription_sources").Scan(&sealed); err != nil || bytes.Contains(sealed, []byte("example.com")) {
 		t.Fatal("URL not encrypted")
 	}
 	s.Fetcher.Resolver = &fakeResolver{answers: [][]netip.Addr{addresses("127.0.0.1")}}
-	if err = s.Refresh(ctx, key); !errors.Is(err, ErrFetch) {
+	if _, err = s.Refresh(ctx, key); !errors.Is(err, ErrFetch) {
 		t.Fatalf("refresh error = %v, want ErrFetch", err)
 	}
 	items, err := s.List(ctx)
@@ -130,11 +138,11 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 func TestSourceKindDistinguishesSubscriptionFromContent(t *testing.T) {
 	s, a, _ := storeFixture(t)
 	ctx := context.Background()
-	urlKey, err := s.Save(ctx, "", Input{Name: "airport", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}})
+	urlKey, _, err := s.Save(ctx, "", Input{Name: "airport", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	contentKey, err := s.Save(ctx, "", Input{Name: "manual", Content: "socks5://fixture:fixture@example.com:1080#manual", Interval: 60})
+	contentKey, _, err := s.Save(ctx, "", Input{Name: "manual", Content: "socks5://fixture:fixture@example.com:1080#manual", Interval: 60})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,10 +162,10 @@ func TestSourceKindDistinguishesSubscriptionFromContent(t *testing.T) {
 		t.Fatalf("kind not derived from the stored payload: %v", got)
 	}
 	// Renaming keeps url_encrypted untouched, so neither kind may flip.
-	if _, err = s.Save(ctx, contentKey, Input{Name: "manual renamed", Interval: 120}); err != nil {
+	if _, _, err = s.Save(ctx, contentKey, Input{Name: "manual renamed", Interval: 120}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Save(ctx, urlKey, Input{Name: "airport renamed", URL: "https://example.com/other", Interval: 120}); err != nil {
+	if _, _, err = s.Save(ctx, urlKey, Input{Name: "airport renamed", URL: "https://example.com/other", Interval: 120}); err != nil {
 		t.Fatal(err)
 	}
 	if got := kinds(); got[urlKey] != sourceKindURL || got[contentKey] != sourceKindContent {
@@ -176,7 +184,7 @@ func TestSourceKindDistinguishesSubscriptionFromContent(t *testing.T) {
 func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	s, a, b := storeFixture(t)
 	ctx := context.Background()
-	key, err := s.Save(ctx, "", Input{Name: "chain inputs", Content: "socks5://fixture:fixture@a.example.com:1080#A\nsocks5://fixture:fixture@b.example.com:1080#B", Interval: 60, UserIDs: []string{a}})
+	key, _, err := s.Save(ctx, "", Input{Name: "chain inputs", Content: "socks5://fixture:fixture@a.example.com:1080#A\nsocks5://fixture:fixture@b.example.com:1080#B", Interval: 60, UserIDs: []string{a}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +222,7 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 		t.Fatal("chain leaked across grants")
 	}
 	// Reorder does not retarget opaque canvas references.
-	if _, err = s.Save(ctx, key, Input{Name: "chain inputs", Content: "socks5://fixture:fixture@b.example.com:1080#B\nsocks5://fixture:fixture@a.example.com:1080#A", Interval: 60, UserIDs: []string{a}}); err != nil {
+	if _, _, err = s.Save(ctx, key, Input{Name: "chain inputs", Content: "socks5://fixture:fixture@b.example.com:1080#B\nsocks5://fixture:fixture@a.example.com:1080#A", Interval: 60, UserIDs: []string{a}}); err != nil {
 		t.Fatal(err)
 	}
 	reordered, _, _ := s.Proxies(ctx, viewer)
@@ -225,7 +233,7 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 
 func TestImportSchedulerStopsAndCancelsFetch(t *testing.T) {
 	s, a, _ := storeFixture(t)
-	key, err := s.Save(context.Background(), "", Input{Name: "scheduled", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}})
+	key, _, err := s.Save(context.Background(), "", Input{Name: "scheduled", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}})
 	if err != nil || key == "" {
 		t.Fatal(err)
 	}

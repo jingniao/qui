@@ -46,12 +46,19 @@ type Source struct {
 	// Kind is read-only: "url" for a fetched HTTPS subscription, "content" for
 	// content pasted into the panel once (the node list's 导入节点 action). The
 	// node list uses it to tell 机场订阅 from 单独导入.
-	Kind      string   `json:"kind"`
-	Interval  int      `json:"intervalSeconds"`
-	LastFetch string   `json:"lastFetchAt"`
-	Status    string   `json:"lastStatus"`
-	Error     string   `json:"lastError"`
-	UserIDs   []string `json:"userIds"`
+	Kind      string `json:"kind"`
+	Interval  int    `json:"intervalSeconds"`
+	LastFetch string `json:"lastFetchAt"`
+	// LastSuccess is the latest attempt that committed endpoints; it stays empty
+	// for a source that never succeeded.
+	LastSuccess string `json:"lastSuccessAt"`
+	Status      string `json:"lastStatus"`
+	Error       string `json:"lastError"`
+	// LatestResult is the bounded result of the latest attempt. It is nil for a
+	// source written before migration 0133 and for a source whose URL just
+	// changed, so an old failure is never explained with an invented cause.
+	LatestResult *Result  `json:"latestResult,omitempty"`
+	UserIDs      []string `json:"userIds"`
 }
 type Input struct {
 	Name     string   `json:"name"`
@@ -81,19 +88,21 @@ func (s *Store) sourceKind(sealed []byte) string {
 }
 
 func (s *Store) List(ctx context.Context) ([]Source, error) {
-	rows, err := s.reader().QueryContext(ctx, "SELECT id,name,interval_seconds,last_fetch_at,last_status,last_error,url_encrypted FROM subscription_sources ORDER BY created_at,id")
+	rows, err := s.reader().QueryContext(ctx, "SELECT id,name,interval_seconds,last_fetch_at,last_success_at,last_status,last_error,latest_result_json,url_encrypted FROM subscription_sources ORDER BY created_at,id")
 	if err != nil {
 		return nil, err
 	}
 	items := []Source{}
 	for rows.Next() {
 		var p Source
+		var stored string
 		var sealed []byte
-		if err := rows.Scan(&p.ID, &p.Name, &p.Interval, &p.LastFetch, &p.Status, &p.Error, &sealed); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Interval, &p.LastFetch, &p.LastSuccess, &p.Status, &p.Error, &stored, &sealed); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		p.Kind = s.sourceKind(sealed)
+		p.LatestResult = readResult(stored)
 		items = append(items, p)
 	}
 	err = rows.Err()
@@ -123,74 +132,98 @@ func (s *Store) List(ctx context.Context) ([]Source, error) {
 	}
 	return items, nil
 }
-func (s *Store) Save(ctx context.Context, key string, in Input) (string, error) {
+
+// Save stores one source. A pasted import is analysed by the same pipeline a fetch
+// uses, so the attempt's bounded result is returned with the stored source: the
+// caller answers 400 for invalid input, 422 when nothing was importable and 500
+// when the write failed, and none of those answers is a bare message.
+func (s *Store) Save(ctx context.Context, key string, in Input) (string, Result, error) {
 	s.refresh.Lock()
 	defer s.refresh.Unlock()
+	prior := committedSource{}
 	if key != "" {
-		var exists int
-		if err := s.Database.QueryRowContext(ctx, "SELECT count(*) FROM subscription_sources WHERE id=?", key).Scan(&exists); err != nil {
-			return "", err
+		state, _, err := s.sourceState(ctx, key)
+		if err != nil {
+			return "", Result{}, err
 		}
-		if exists != 1 {
-			return "", sql.ErrNoRows
-		}
+		prior = state
 	}
 	if strings.TrimSpace(in.Name) == "" || len(in.Name) > 200 || in.Interval < 60 || in.Interval > 2592000 {
-		return "", ErrParse
-	}
-	if in.URL != "" && !ValidURL(in.URL) {
-		return "", ErrFetch
+		return "", Result{}, ErrInput
 	}
 	if in.URL != "" && in.Content != "" {
-		return "", ErrParse
-	}
-	var entries []proxy.Proxy
-	var err error
-	if in.Content != "" {
-		entries, _, err = Parse([]byte(in.Content))
-		if err != nil {
-			return "", err
-		}
+		return "", Result{}, ErrInput
 	}
 	if key == "" && in.URL == "" && in.Content == "" {
-		return "", ErrParse
+		return "", Result{}, ErrInput
 	}
-	if key == "" {
-		key, err = id.New()
-		if err != nil {
-			return "", err
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if in.URL != "" && !ValidURL(in.URL) {
+		return "", failureResult(stamp, key, prior, stageInput, "invalid_source_url"), ErrInput
+	}
+	var entries []proxy.Proxy
+	attempt := Result{SourceID: key, Stage: stageParse}
+	if in.Content != "" {
+		attempt, entries = Analyze([]byte(in.Content))
+		if attempt.Outcome == "failed" {
+			// The paste was refused before any write, so its result must not read
+			// like a fetch that excluded a source. It keeps the analysed entries'
+			// reasons and reports the state the source keeps.
+			return "", rejectedPaste(stamp, key, prior, attempt), ErrParse
 		}
+	}
+	var err error
+	if key == "" {
+		if key, err = id.New(); err != nil {
+			return "", Result{}, err
+		}
+	}
+	// fail reports a storage failure with the state the source keeps.
+	fail := func(reason error) (string, Result, error) {
+		result, cause := commitFailure(key, stamp, prior, reason)
+		return "", result, cause
 	}
 	sealed, err := s.Vault.Seal([]byte(in.URL))
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
-	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO subscription_sources(id,name,url_encrypted,interval_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?)
  ON CONFLICT(id) DO UPDATE SET name=excluded.name, interval_seconds=excluded.interval_seconds,updated_at=excluded.updated_at`, key, in.Name, sealed, in.Interval, stamp, stamp)
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	if in.URL != "" {
-		if _, err = tx.ExecContext(ctx, "UPDATE subscription_sources SET url_encrypted=?,last_fetch_at='',last_status='pending',last_error='' WHERE id=?", sealed, key); err != nil {
-			return "", err
+		if _, err = tx.ExecContext(ctx, "UPDATE subscription_sources SET url_encrypted=?,last_fetch_at='',last_success_at='',last_status='pending',last_error='',latest_result_json='' WHERE id=?", sealed, key); err != nil {
+			return fail(err)
 		}
 	}
 	// userIds is accepted for wire compatibility; group grants alone authorize access.
 	if entries != nil {
 		if err = s.replace(ctx, tx, key, entries, stamp); err != nil {
-			return "", err
+			return fail(err)
 		}
-		if _, err = tx.ExecContext(ctx, "UPDATE subscription_sources SET url_encrypted=?,last_status='ok',last_fetch_at=?,last_error='' WHERE id=?", sealed, stamp, key); err != nil {
-			return "", err
+		// A pasted import commits at once, so its attempt time is also its success
+		// time and its counts describe what the panel just stored.
+		attempt.SourceID, attempt.AttemptedAt, attempt.LastSuccessAt = key, stamp, &stamp
+		attempt.Counts.Cached, attempt.Counts.Usable = pointer(len(entries)), pointer(len(entries))
+		attempt.Message = resultMessage(attempt.Code, attempt.Status)
+		stored, marshalErr := json.Marshal(attempt)
+		if marshalErr != nil {
+			return fail(marshalErr)
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE subscription_sources SET url_encrypted=?,last_status='ok',last_fetch_at=?,last_success_at=?,last_error='',latest_result_json=? WHERE id=?", sealed, stamp, stamp, stored, key); err != nil {
+			return fail(err)
 		}
 	}
-	return key, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return fail(err)
+	}
+	return key, attempt, nil
 }
 func (s *Store) replace(ctx context.Context, tx *sql.Tx, key string, entries []proxy.Proxy, stamp string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM imported_proxies WHERE source_id=?", key); err != nil {
@@ -235,51 +268,213 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	}
 	return nil
 }
-func (s *Store) Refresh(ctx context.Context, key string) error {
+
+// Refresh fetches and parses one source and records the attempt. It returns the
+// attempt's result with any error, so a caller answers with a status code and the
+// bounded reasons instead of a bare message. Recording a failure is not a
+// successful refresh: the typed fetch or parse error is returned with it.
+func (s *Store) Refresh(ctx context.Context, key string) (Result, error) {
 	s.refresh.Lock()
 	defer s.refresh.Unlock()
-	var sealed []byte
-	if err := s.Database.QueryRowContext(ctx, "SELECT url_encrypted FROM subscription_sources WHERE id=?", key).Scan(&sealed); err != nil {
-		return err
+	prior, sealed, err := s.sourceState(ctx, key)
+	if err != nil {
+		return Result{SourceID: key}, err
 	}
+	result := Result{SourceID: key, LastSuccessAt: prior.lastSuccess}
+	// The attempt time is fixed before the payload is opened: an attempt that fails
+	// on the panel's own storage still reports when it happened.
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	raw, err := s.Vault.Open(sealed)
 	if err != nil {
-		return ErrFetch
+		// The row exists but its own sealed payload cannot be opened. That is a
+		// storage failure, not a fetch: nothing was written, so the result reports
+		// the state the source keeps and never echoes the vault error.
+		failure := failureResult(stamp, key, prior, stageStore, "import_source_unreadable")
+		failure.Counts = unchangedCounts(prior)
+		return failure, ErrStore
 	}
 	defer clear(raw)
 	if len(raw) == 0 {
-		return nil
+		// A pasted import has no link to fetch; the panel refuses rather than
+		// reporting an attempt that never happened.
+		return result, ErrContentSource
 	}
+	result.AttemptedAt = stamp
 	body, err := s.Fetcher.Fetch(ctx, string(raw))
 	defer clear(body)
-	var entries []proxy.Proxy
-	if err == nil {
-		entries, _, err = Parse(body)
-	}
+	// The caller cancelled or the request ended: keep whatever the last committed
+	// attempt recorded instead of writing a failure for an unfinished task.
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return result, ctx.Err()
 	}
-	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	if err != nil {
-		_, writeErr := s.Database.ExecContext(ctx, "UPDATE subscription_sources SET last_fetch_at=?,last_status='failed',last_error='刷新失败；已停用该来源的缓存节点' WHERE id=?", stamp, key)
-		if writeErr != nil {
-			return writeErr
+		failure := failureResult(stamp, key, prior, stageConnect, "source_connect_failed")
+		var typed *FetchError
+		if errors.As(err, &typed) {
+			failure.Stage, failure.Code, failure.Status = typed.Stage, typed.Code, statusPointer(typed.Status)
+			failure.Message = resultMessage(failure.Code, failure.Status)
 		}
-		return err
+		return s.recordFailure(ctx, key, failure, prior, err)
+	}
+	parsed, entries := Analyze(body)
+	parsed.SourceID, parsed.AttemptedAt, parsed.LastSuccessAt = key, stamp, prior.lastSuccess
+	if parsed.Outcome == "failed" {
+		return s.recordFailure(ctx, key, parsed, prior, ErrParse)
 	}
 	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return commitFailure(key, stamp, prior, err)
 	}
 	defer tx.Rollback()
 	if err = s.replace(ctx, tx, key, entries, stamp); err != nil {
-		return err
+		return commitFailure(key, stamp, prior, err)
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE subscription_sources SET last_fetch_at=?,last_status='ok',last_error='' WHERE id=?", stamp, key); err != nil {
-		return err
+	// A partial attempt still committed endpoints, so the source keeps last_status
+	// ok and the outcome carries the warning; only a failure disables it.
+	parsed.LastSuccessAt = &stamp
+	parsed.Counts.Cached, parsed.Counts.Usable = pointer(len(entries)), pointer(len(entries))
+	stored, err := json.Marshal(parsed)
+	if err != nil {
+		return commitFailure(key, stamp, prior, err)
 	}
-	return tx.Commit()
+	if _, err = tx.ExecContext(ctx, "UPDATE subscription_sources SET last_fetch_at=?,last_success_at=?,last_status='ok',last_error='',latest_result_json=? WHERE id=?", stamp, stamp, stored, key); err != nil {
+		return commitFailure(key, stamp, prior, err)
+	}
+	if err = tx.Commit(); err != nil {
+		return commitFailure(key, stamp, prior, err)
+	}
+	return parsed, nil
 }
+
+// ErrContentSource reports a pasted import, which has no link to fetch.
+var ErrContentSource = errors.New("import source has no subscription link")
+
+// ErrInput reports a request the panel refused before any attempt: a missing or
+// oversized name, an out-of-range interval, no content at all, or both a link and
+// pasted content. Nothing was stored and no attempt happened.
+var ErrInput = errors.New("import source input is invalid")
+
+// ErrStore reports a failure of the panel's own storage: the source row exists but
+// its sealed payload cannot be opened. That is corruption or a wrong key, not a
+// failed fetch, so a caller must not present it as one.
+var ErrStore = errors.New("import source storage is unreadable")
+
+// committedSource is what a source has stored right now. It is captured once per
+// attempt, so a storage failure reports the state the transaction rolled back to
+// instead of the state the attempt hoped for.
+type committedSource struct {
+	known       bool
+	status      string
+	cached      int
+	lastSuccess *string
+}
+
+// sourceState reads the committed state of one source and its sealed payload. Reads
+// use the read pool, so an attempt never waits for the write connection to read.
+func (s *Store) sourceState(ctx context.Context, key string) (committedSource, []byte, error) {
+	var sealed []byte
+	var status, lastSuccess string
+	var cached int
+	err := s.reader().QueryRowContext(ctx, "SELECT url_encrypted,last_status,last_success_at,(SELECT count(*) FROM imported_proxies WHERE source_id=subscription_sources.id) FROM subscription_sources WHERE id=?", key).Scan(&sealed, &status, &lastSuccess, &cached)
+	if err != nil {
+		return committedSource{}, nil, err
+	}
+	return committedSource{known: true, status: status, cached: cached, lastSuccess: optionalStamp(lastSuccess)}, sealed, nil
+}
+
+// commitFailure reports a storage failure. Nothing was written, so the result
+// describes the state the source keeps: the previous success time and the previous
+// committed cache, which stays usable when the source was usable before. The
+// analysed endpoints are never presented as retained.
+func commitFailure(key, attemptedAt string, prior committedSource, reason error) (Result, error) {
+	result := Result{
+		SourceID: key, Outcome: "failed", Stage: stageCommit, Code: "import_commit_failed",
+		AttemptedAt: attemptedAt, LastSuccessAt: prior.lastSuccess,
+		Counts: unchangedCounts(prior), Diagnostics: []Diagnostic{},
+	}
+	result.Message = resultMessage(result.Code, nil)
+	return result, reason
+}
+
+// unchangedCounts reports what a source still holds after an attempt that changed
+// nothing: the previous cache, usable only while the source is still ok. A source
+// the panel never read keeps both counts unknown instead of claiming zero.
+func unchangedCounts(prior committedSource) Counts {
+	if !prior.known {
+		return Counts{}
+	}
+	counts := Counts{Cached: pointer(prior.cached)}
+	if prior.status == "ok" {
+		counts.Usable = pointer(prior.cached)
+	} else {
+		counts.Usable = pointer(0)
+	}
+	return counts
+}
+
+// rejectedPaste reports a pasted document refused before any write. The analysis
+// keeps its per-entry reasons and counts, but the source state did not change: no
+// source was created, or the existing source keeps the status, success time and
+// cache it had.
+func rejectedPaste(stamp, key string, prior committedSource, analyzed Result) Result {
+	analyzed.Outcome, analyzed.SourceID, analyzed.AttemptedAt = "failed", key, stamp
+	analyzed.LastSuccessAt, analyzed.Code = prior.lastSuccess, "import_paste_rejected"
+	if prior.known {
+		analyzed.Code = "import_paste_unchanged"
+	}
+	counts := unchangedCounts(prior)
+	analyzed.Counts.Cached, analyzed.Counts.Usable = counts.Cached, counts.Usable
+	analyzed.Message = resultMessage(analyzed.Code, nil)
+	return analyzed
+}
+
+// failureResult starts a failed attempt. Its counts stay unknown until the store
+// knows how many endpoints the source keeps.
+func failureResult(stamp, key string, prior committedSource, stage, code string) Result {
+	return Result{
+		SourceID: key, Outcome: "failed", Stage: stage, Code: code, Message: resultMessage(code, nil),
+		AttemptedAt: stamp, LastSuccessAt: prior.lastSuccess, Diagnostics: []Diagnostic{},
+	}
+}
+
+// recordFailure stores a failed attempt. The previous cache is kept so the Owner
+// can still see what the source used to provide, but a failed source contributes
+// nothing to subscriptions, so its usable count is zero. A write that fails changes
+// nothing, and the result then reports the state the source still has.
+func (s *Store) recordFailure(ctx context.Context, key string, result Result, prior committedSource, reason error) (Result, error) {
+	result.Counts.Cached, result.Counts.Usable = pointer(prior.cached), pointer(0)
+	stored, err := json.Marshal(result)
+	if err != nil {
+		return commitFailure(key, result.AttemptedAt, prior, err)
+	}
+	if _, err = s.Database.ExecContext(ctx, "UPDATE subscription_sources SET last_fetch_at=?,last_status='failed',last_error=?,latest_result_json=? WHERE id=?", result.AttemptedAt, result.Message, stored, key); err != nil {
+		return commitFailure(key, result.AttemptedAt, prior, err)
+	}
+	return result, reason
+}
+
+// readResult parses a stored result. An unreadable or out-of-bounds payload is
+// reported as "no recorded cause" rather than as a guess.
+func readResult(stored string) *Result {
+	if stored == "" || ValidateResult([]byte(stored)) != nil {
+		return nil
+	}
+	var result Result
+	if json.Unmarshal([]byte(stored), &result) != nil {
+		return nil
+	}
+	return &result
+}
+
+func optionalStamp(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+// pointer returns a count the JSON reports, where nil means "not determined".
+func pointer(value int) *int { return &value }
 func (s *Store) Run(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -292,7 +487,9 @@ func (s *Store) Run(ctx context.Context) {
 				}
 				last, _ := time.Parse(time.RFC3339Nano, p.LastFetch)
 				if time.Since(last) >= time.Duration(p.Interval)*time.Second {
-					_ = s.Refresh(ctx, p.ID)
+					// A scheduled refresh records its outcome and reports the same
+					// result the manual action returns; nothing else depends on it.
+					_, _ = s.Refresh(ctx, p.ID)
 				}
 			}
 		}

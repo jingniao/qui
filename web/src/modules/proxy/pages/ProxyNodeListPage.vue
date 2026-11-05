@@ -967,6 +967,18 @@
                       拉取异常
                     </span>
                     <span
+                      v-else-if="sub.latestResult?.outcome === 'partial'"
+                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-500/10 text-sky-600 border border-sky-500/20"
+                    >
+                      部分导入
+                    </span>
+                    <span
+                      v-else-if="sub.lastStatus === 'pending'"
+                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.08]"
+                    >
+                      等待抓取
+                    </span>
+                    <span
                       v-else
                       class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
                     >
@@ -1019,8 +1031,23 @@
                   <span class="font-mono text-ios-tertiary truncate max-w-[280px]" :title="sub.url">
                     {{ sub.kind === 'content' ? '内容导入（无订阅链接）' : sub.url }}
                   </span>
-                  <span v-if="sub.lastUpdated && sub.kind !== 'content'">最后拉取：{{ sub.lastUpdated }}</span>
+                  <span v-if="sub.lastFetchAt && sub.kind !== 'content'">上次尝试：{{ formatImportTime(sub.lastFetchAt) }}</span>
+                  <span v-if="sub.lastSuccessAt">上次成功：{{ formatImportTime(sub.lastSuccessAt) }}</span>
                   <span v-if="sub.kind !== 'content'">刷新间隔：{{ formatInterval(sub.intervalSeconds) }}</span>
+                </div>
+
+                <!-- Attempt counts: what this attempt imported and what a
+                     subscription can use right now. -->
+                <div v-if="sub.latestResult" class="flex flex-wrap items-center gap-2 text-xs text-ios-secondary">
+                  <span class="font-mono text-[11px]">{{ importCountsLine(sub.latestResult) }}</span>
+                  <button
+                    type="button"
+                    @click="openImportDetails(sub)"
+                    class="px-2 py-0.5 rounded-md text-[11px] font-medium text-ios-blue bg-ios-blue/10 hover:bg-ios-blue/15"
+                    title="查看本次导入的逐条原因"
+                  >
+                    查看原因<span v-if="sub.latestResult.diagnosticsTruncated">（已截断）</span>
+                  </button>
                 </div>
 
                 <!-- Error Banner -->
@@ -1030,13 +1057,53 @@
                   </svg>
                   <div class="space-y-0.5">
                     <p class="font-medium text-amber-900">拉取状态说明</p>
-                    <p class="text-[11px] leading-relaxed break-all">{{ sub.lastError }}</p>
+                    <p class="text-[11px] leading-relaxed break-all">{{ sourceFailureText(sub) }}</p>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
+    </AppDialog>
+    <!-- Import result details: the bounded reasons of the last attempt. Rendered
+         from the stored result, so a failure with no recorded cause says so. -->
+    <AppDialog
+      v-if="importDetails"
+      :model-value="true"
+      :title="`导入结果 · ${importDetails.name}`"
+      :show-confirm="false"
+      @update:model-value="importDetails = null"
+    >
+      <div class="space-y-3 text-xs">
+        <p class="text-ios-secondary">{{ describeImportResult(importDetails.result) }}</p>
+        <p class="font-mono text-[11px] text-ios-tertiary">{{ importCountsLine(importDetails.result) }}</p>
+        <div v-if="importDetails.result.diagnostics.length" class="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
+          <div
+            v-for="(item, index) in importDetails.result.diagnostics"
+            :key="index"
+            class="p-2 rounded-xl bg-black/[0.02] border border-black/[0.06] space-y-0.5"
+          >
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="px-1.5 py-0.5 rounded-md bg-black/[0.04] text-[11px] font-mono">#{{ item.entryIndex + 1 }}</span>
+              <span v-if="item.protocol" class="text-[11px] text-ios-secondary font-mono">{{ item.protocol }}</span>
+              <span
+                class="px-1.5 py-0.5 rounded-md text-[11px]"
+                :class="item.stage === 'duplicate' ? 'bg-sky-500/10 text-sky-700' : 'bg-amber-500/10 text-amber-700'"
+              >
+                {{ item.stage === 'duplicate' ? '重复' : '解析' }}
+              </span>
+              <span class="text-[11px] text-ios-tertiary font-mono">{{ item.code }}</span>
+            </div>
+            <p class="text-[11px] leading-relaxed text-ios-label">{{ item.message }}</p>
+            <p v-if="item.field" class="text-[11px] text-ios-tertiary">字段：{{ item.field }}</p>
+            <p v-if="item.keptEntryIndex !== undefined" class="text-[11px] text-ios-tertiary">保留第 {{ item.keptEntryIndex + 1 }} 条</p>
+          </div>
+        </div>
+        <p v-else class="text-[11px] text-ios-tertiary">该次尝试没有逐条原因。</p>
+        <p v-if="importDetails.result.diagnosticsTruncated" class="text-[11px] text-amber-700">
+          原因过多，仅保留前 {{ importDetails.result.diagnostics.length }} 条。
+        </p>
       </div>
     </AppDialog>
   </div>
@@ -1050,7 +1117,8 @@ import { nodeRelayAPI, type NodeRelay } from '../../tunnels/api';
 import { useRouter } from 'vue-router';
 import { authState } from '../../../app/auth';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
-import { importAPI, loadImports, airportSources, importSourceKind } from '../importApi';
+import { importAPI, loadImports, airportSources, importSourceKind, describeImportResult, importCountsLine, failedImportResult } from '../importApi';
+import type { ImportResult } from '../importApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
@@ -1161,6 +1229,12 @@ const nodeForm = reactive({
 });
 
 const openSubModal = ref(false);
+// The bounded reasons of one attempt, opened from the source card. The dialog
+// shows what the panel recorded; it never re-runs a fetch.
+const importDetails = ref<{ name: string; result: ImportResult } | null>(null);
+function openImportDetails(source: SubscriptionItem) {
+  if (source.latestResult) importDetails.value = { name: source.name, result: source.latestResult };
+}
 // The panel stores every import source in one table; only the sources it derived
 // as "url" are airport subscriptions, so the header count and the airport list
 // must not include content imports (which are 单独导入 and live in manualNodes).
@@ -1448,11 +1522,35 @@ function handleQuickParse() {
 async function saveManualNodeModal() {
   if (!isOwner.value) return;
   if (!quickLinkInput.value.trim()) { showToast('请粘贴包含凭据的 URI、Base64 或 Clash 内容', 'error'); return; }
+  const name = nodeForm.name || '手动导入';
   try {
-    await importAPI.create({name:nodeForm.name || '手动导入', content:quickLinkInput.value.trim(), intervalSeconds:refreshSeconds.value, userIds:[]});
-    quickLinkInput.value=''; await loadImports(); openImportNodeModal.value=false;
-    showToast('节点已保存，可在「节点分组」中分配');
-  } catch(e) {showToast((e as Error).message,'error');}
+    const created = await importAPI.create({name, content:quickLinkInput.value.trim(), intervalSeconds:refreshSeconds.value, userIds:[]});
+    quickLinkInput.value='';
+    openImportNodeModal.value=false;
+    // A reload failure cannot undo a saved import, so it never becomes an error and
+    // never causes a second save.
+    await loadImports().catch(() => {});
+    // A pasted import runs through the same analyzer as a fetch, so its result is
+    // the toast; a partial or failed paste opens the bounded reasons directly,
+    // because a content source has no card of its own.
+    showImportResult(name, created.result);
+  } catch(e) {
+    // The draft and the dialog survive a rejection, and the panel's own result
+    // explains every rejected entry.
+    const result = failedImportResult(e);
+    if (result) importDetails.value = { name, result };
+    showToast(importFailureMessage(e), 'error');
+  }
+}
+
+// showImportResult reports one attempt the same way everywhere a save returns a
+// result: the toast follows the business outcome, and the reasons open when there
+// are any.
+function showImportResult(name: string, result?: ImportResult) {
+  if (!result) { showToast('节点已保存，可在「节点分组」中分配'); return; }
+  const outcome = importOutcomeMessage(result);
+  showToast(outcome.message, outcome.kind);
+  if (result.outcome !== 'ok' || result.diagnostics.length) importDetails.value = { name, result };
 }
 
 async function deleteNode(node: ProxyNodeItem) {
@@ -1498,13 +1596,27 @@ function cancelEditSub() {
 
 async function refreshSubscriptionSource(id: string) {
   try {
-    await importAPI.refresh(id);
+    const result = await importAPI.refresh(id);
+    await loadImports();
+    return result;
   } catch (e) {
-    // Refresh may have saved a failed status. Keep its error if reloading also fails.
+    // Refresh may have saved a failed result. Keep its error if reloading also fails.
     await loadImports().catch(() => {});
     throw e;
   }
-  await loadImports();
+}
+
+// The toast follows the business outcome, not the HTTP status: only a complete
+// import is a success, a partial import is a warning, and a failure names what
+// happened to the cached endpoints. A failure without a recorded result shows the
+// panel's message only.
+function importOutcomeMessage(result: ImportResult) {
+  return { message: describeImportResult(result), kind: result.outcome === 'ok' ? 'success' as const : 'warning' as const };
+}
+
+function importFailureMessage(error: unknown) {
+  const result = failedImportResult(error);
+  return result ? describeImportResult(result) : (error as Error).message;
 }
 
 async function saveEditSub(sub: SubscriptionItem) {
@@ -1525,14 +1637,15 @@ async function saveEditSub(sub: SubscriptionItem) {
     }
     await importAPI.update(sub.id, payload);
     if (hasNewUrl) {
-      await refreshSubscriptionSource(sub.id);
+      const outcome = importOutcomeMessage(await refreshSubscriptionSource(sub.id));
+      showToast(outcome.message, outcome.kind);
     } else {
       await loadImports();
+      showToast('订阅配置已更新', 'success');
     }
-    showToast(hasNewUrl ? '订阅已更新并完成重新拉取' : '订阅配置已更新', 'success');
     editingSubId.value = null;
   } catch (e) {
-    showToast((e as Error).message, 'error');
+    showToast(importFailureMessage(e), 'error');
   } finally {
     savingSub.value = false;
   }
@@ -1543,6 +1656,19 @@ function formatInterval(seconds?: number) {
   if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`;
   if (seconds < 86400) return `${(seconds / 3600).toFixed(seconds % 3600 ? 1 : 0)} 小时`;
   return `${(seconds / 86400).toFixed(seconds % 86400 ? 1 : 0)} 天`;
+}
+
+// Attempt and success stamps arrive as RFC3339 UTC strings.
+function formatImportTime(value?: string) {
+  if (!value) return '—';
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
+}
+
+// A failure recorded before results existed cannot name a cause; say so instead
+// of presenting the old generic text as a diagnosis.
+function sourceFailureText(sub: SubscriptionItem): string {
+  return sub.latestResult ? sub.lastError : '上次刷新失败；未记录原因';
 }
 
 // Subscriptions
@@ -1560,12 +1686,12 @@ async function addNewSubscription() {
     savedId = result.id;
     newSubUrl.value = '';
     newSubName.value = '';
-    await refreshSubscriptionSource(result.id);
-    showToast('来源已保存并完成首次拉取', 'success');
+    const outcome = importOutcomeMessage(await refreshSubscriptionSource(result.id));
+    showToast(outcome.message, outcome.kind);
   } catch (e) {
     const saved = proxyNodeStore.subscriptions.find(s => s.id === savedId);
     if (saved) startEditSub(saved);
-    showToast((e as Error).message, 'error');
+    showToast(importFailureMessage(e), 'error');
   } finally {
     submittingSub.value = false;
   }
@@ -1575,10 +1701,10 @@ async function updateSubscription(sub: SubscriptionItem) {
   if (updatingSubId.value) return;
   updatingSubId.value = sub.id;
   try {
-    await refreshSubscriptionSource(sub.id);
-    showToast(`订阅 ${sub.name} 刷新完成`);
+    const outcome = importOutcomeMessage(await refreshSubscriptionSource(sub.id));
+    showToast(outcome.message, outcome.kind);
   } catch (e) {
-    showToast((e as Error).message, 'error');
+    showToast(importFailureMessage(e), 'error');
   } finally {
     updatingSubId.value = null;
   }

@@ -100,7 +100,15 @@ func TestClientPolicyArchiveValidation(t *testing.T) {
 func TestPre0132ClientPolicyArchiveInitialization(t *testing.T) {
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
-	for _, query := range []string{"DROP TABLE client_policy_profiles", "DELETE FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'"} {
+	for _, query := range []string{
+		"DROP TABLE client_policy_profiles",
+		"DELETE FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'",
+		// 0133 came after the client-policy library, so an archive rewound to
+		// pre-0132 cannot keep its result columns either.
+		"ALTER TABLE subscription_sources DROP COLUMN latest_result_json",
+		"ALTER TABLE subscription_sources DROP COLUMN last_success_at",
+		"DELETE FROM schema_migrations WHERE version='0133_subscription_source_results.sql'",
+	} {
 		if _, err := source.Database.Exec(query); err != nil {
 			t.Fatal(err)
 		}

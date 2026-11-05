@@ -17,7 +17,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
   - `docs/release-notes-1.4.0.md`: the release-notes draft with the acceptance table.
   - `web/docs/client-policy-backend-plan.en.md`: the client-policy plan. §13 holds the review decisions and §14 the status and remaining items.
   - `web/docs/client-policy-change-log.md`: a per-iteration change log, appended to for every client-policy change.
-  - `docs/subscription-import-compatibility-plan.en.md` (untracked): the protocol-support plan, now part of v1.4.0. §14 holds the review and Owner decisions, which override earlier sections. See §4.4.
+  - `docs/subscription-import-compatibility-plan.en.md`: the protocol-support plan, now part of v1.4.0. §14 holds the review and Owner decisions, which override earlier sections. See §4.4.
 
 ## 2. How to Work in This Repo
 
@@ -33,7 +33,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
   - No duplicated logic and no defensive code: validate at the API boundary and reuse existing helpers.
   - Never edit applied migrations; add the next number instead.
   - Report in plain language. Say plainly what was and wasn't verified, and don't present a Windows test run as Linux or host evidence.
-- **Untracked plan files:** the three `docs/subscription-import-compatibility-*.md` files are the protocol-support plan (§4.4). They are still uncommitted. Don't stage them unless the Owner says so.
+- **Tracked plan files:** the three `docs/subscription-import-compatibility-*.md` files are the protocol-support plan (§4.4). They have been tracked since `84e8725`, so they belong to the normal document tree rather than to local scratch work.
 
 ## 3. Needs the Owner's Confirmation
 
@@ -44,7 +44,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 | C3 | **Client policy: should the preview let the Owner pick a user?** | The preview currently always auto-selects a user and labels the choice as automatic. The API already accepts `userId`; only the UI is missing. (Plan §14.2 item 1.) |
 | C4 | **Client policy: batch input when editing a rule.** | Pasting several domains creates multiple rules only when *creating* a rule; editing an existing rule keeps it as one rule. Confirm this, then document it. (§14.2 item 2.) |
 | C5 | **Client policy: disabled rule sets.** | Saving a profile is refused when an *enabled* RULE-SET rule points at a *disabled* service set. So disabling a set the active profile uses blocks re-saving that profile until the rule is disabled or the set is re-enabled. Keep this, or relax it to a warning? (§14.2 item 3.) |
-| C6 | ~~Protocol-support plan decisions R1–R4~~ **Decided 2026-11-05.** | Plan `.en.md` §14.3–§14.7:<br>• both tracks run in parallel;<br>• the refresh fix ships in v1.4.0;<br>• duplicate `name\|protocol` keeps the first and rejects the rest;<br>• everything ships in v1.4.0.<br>The Owner said to edit docs only, so nothing is implemented yet. Implementation needs the Owner's go-ahead (§4.4). |
+| C6 | ~~Protocol-support plan decisions R1–R4~~ **Decided 2026-11-05.** | Plan `.en.md` §14.3–§14.7:<br>• both tracks run in parallel;<br>• the refresh fix ships in v1.4.0;<br>• duplicate `name\|protocol` keeps the first and rejects the rest;<br>• everything ships in v1.4.0.<br>The Owner then approved implementation and it is proceeding (§4.4): the refresh fix (`650b349`) and S0 (`9045e1b`) are gated, S1 passed the main assistant's personal review and sits in its local phase commit awaiting its own gate, and M1 has a phase commit with its gate running. |
 
 ## 4. Outstanding Tasks
 
@@ -89,22 +89,25 @@ A1 must also cover the protocol-support work once it lands (plan `.en.md` §14.7
 12. `docs/v1-acceptance.md` has no entries yet for the client-policy items in §4.1.
 13. After C3–C5 are decided, update `AGENTS.md` (the client-policy paragraph in §10.3) and plan §14.
 
-### 4.4 Protocol-Support Work for v1.4.0 (Not Started)
+### 4.4 Protocol-Support Work for v1.4.0 (Refresh Fix and S0 Gated; S1 Reviewed, Phase-Commit Gate Pending; M1 Gate Running)
 
-14. The plan files are `docs/subscription-import-compatibility-plan.en.md` (authoritative; §14 overrides earlier sections), the Chinese `.md`, and `-change-log.md`. All are untracked. Implementation needs the Owner's go-ahead; on 2026-11-05 the Owner asked for doc updates only. Once approved, the order is:
-    1. **The refresh false-success fix** (§14.5), directly on `feat/v1.4-tunnels`, with a Linux gate.
-       - `Store.Refresh` returns the error after recording the failure.
-       - The handler returns `import_refresh_failed`.
-       - The page reloads the source list on failure.
-       - The store test expects the error.
+14. The plan files are `docs/subscription-import-compatibility-plan.en.md` (authoritative; §14 overrides earlier sections), the Chinese `.md`, and `-change-log.md`. All three are tracked. Two gates are recorded: the §14.5 refresh fix (`650b349`, `GATE 650b349 PASS`, check 1980 s + cores 572 s, END 2026-11-05T09:30:12Z) and S0 (`9045e1b`, `GATE 9045e1b PASS total=2569s`, check 1995 s + cores 574 s, START 2026-11-05T10:00:34Z, END 10:43:23Z); the S0 documents and fixtures stay byte-identical to `9045e1b`.
+
+    S1 diagnostics are implemented in worktree `C:/Users/luanf/qui-wt/s1-diagnostics` on `feat/v1.4-import-s1`, based on `9045e1b`, with every S1 change and the S0 documents kept; a flaky `save_test.go` assertion was also corrected (it compared the attempt stamp against the last success, which two correct calls can share inside one clock resolution). The main assistant reviewed the work personally in three rounds: first five blockers (pasted-import result, lost upstream status, untruthful persistence results, thin archive validation, unreachable `invalid_base64`), then five more (diagnostic field allowlist, trailing JSON, paste-rejection semantics, reachability invariants, local-storage failure), then the cancellation regression (a refresh cancelled mid-fetch attached a provisional result to the 503 body, which crashed the page's reason list). All of them were corrected, and the code has passed that personal review. It is delivered in the local phase commit; that commit's own Linux gate is still pending, and nothing is integrated or pushed. See plan §14.8.
+
+    M1 has phase commit `3565153` on the sibling branch `feat/v1.4-selfhost-m1`; its Linux gate is running, so it is neither integrated, nor gate-passed, nor feature-complete. When it lands, update this paragraph instead of adding a second M1 status block.
+
+    The remaining order is:
+
+    1. **S1 phase-commit Linux gate** (import track), serialized after the M1 gate that is running now.
     2. **The import track and the self-hosted track in parallel** (§14.4, §14.7).
-       - The import track runs S0 → S1 → S2–S4; the self-hosted track runs M1 → M2–M4.
-       - Each track has its own S5 acceptance.
-       - Each works on a short-lived branch off `feat/v1.4-tunnels` and merges back after review and a Linux gate. Gates run one at a time.
-       - The client-side Reality/xhttp fields and codecs are defined once, in S3/S4. M2 reuses them.
-       - Migrations take numbers after 0132 in merge order.
-    3. **Duplicate `name|protocol` within a source** (confirmed): keep the first entry in document order and reject the rest with `duplicate_endpoint_key`, from S1 on.
-    4. **At release**, update AGENTS.md (§14.2 of the plan), the protocol matrix and the 1.4.0 release notes. The release notes already list these items as planned. Then run the A1 checks in §4.2.
+        - The import track runs S2–S4; the self-hosted track runs M1 (phase commit in flight, gate running) and then M2–M4.
+        - Each track has its own S5 acceptance.
+        - Each works on a short-lived branch off `feat/v1.4-tunnels` and merges back after review and a Linux gate. Gates run one at a time.
+        - The client-side Reality/xhttp fields and codecs are defined once, in S3/S4. M2 reuses them.
+        - Migrations take numbers after 0133 in merge order (0133 is taken by S1).
+    3. **Duplicate `name|protocol` within a source** (confirmed): S1 keeps the first entry in document order and rejects the rest with `duplicate_endpoint_key`.
+    4. **At release**, update AGENTS.md (§14.2 of the plan), the protocol matrix and the 1.4.0 release notes. Then run the A1 checks in §4.2.
 
 ## 5. Known Limitations (Accepted; No Action Unless the Owner Asks)
 

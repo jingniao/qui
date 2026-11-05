@@ -23,7 +23,11 @@ func rewindTunnelFixture(t *testing.T, database *sql.DB) {
 	if applied == 0 {
 		return
 	}
-	for _, q := range []string{"DROP TABLE client_policy_profiles", "DELETE FROM system_settings WHERE key='client_policy_active'", "DELETE FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'", "DROP TABLE canvas_forward_reconcile", "DROP TABLE tunnel_migration_report", "DROP TRIGGER tunnel_rule_node_address_changed", "DROP TRIGGER tunnel_rule_inbound_port_changed", "DROP TABLE tunnel_objects", "DROP TABLE port_claims", "DROP TABLE tunnel_rules", "DROP TABLE tunnel_hops", "DROP TABLE tunnels", "DELETE FROM schema_migrations WHERE version IN ('0129_tunnels.sql','0130_relay_subscription_snapshot.sql','0131_canvas_forward_migration.sql')"} {
+	for _, q := range []string{"DROP TABLE client_policy_profiles", "DELETE FROM system_settings WHERE key='client_policy_active'", "DELETE FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'",
+		// S1 added the last refresh result after the tunnels work, so an archive
+		// rewound before 0129 cannot keep it either.
+		"ALTER TABLE subscription_sources DROP COLUMN latest_result_json", "ALTER TABLE subscription_sources DROP COLUMN last_success_at", "DELETE FROM schema_migrations WHERE version='0133_subscription_source_results.sql'",
+		"DROP TABLE canvas_forward_reconcile", "DROP TABLE tunnel_migration_report", "DROP TRIGGER tunnel_rule_node_address_changed", "DROP TRIGGER tunnel_rule_inbound_port_changed", "DROP TABLE tunnel_objects", "DROP TABLE port_claims", "DROP TABLE tunnel_rules", "DROP TABLE tunnel_hops", "DROP TABLE tunnels", "DELETE FROM schema_migrations WHERE version IN ('0129_tunnels.sql','0130_relay_subscription_snapshot.sql','0131_canvas_forward_migration.sql')"} {
 		if _, err := database.Exec(q); err != nil {
 			t.Fatal(err)
 		}

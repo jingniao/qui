@@ -1,6 +1,6 @@
 # Protocol Support Completion Plan: External Subscriptions, Self-Hosted Nodes, and Failure Diagnostics
 
-Status: **reviewed 2026-11-05 — approved with the amendments in [§14](#14-review-decisions-2026-11-05). The §14.5 refresh fix is implemented, and its commit `650b349` passed the Linux gate (`check` 1980 s, `cores` 572 s, total 2552 s, END 2026-11-05T09:30:12Z), independently verified from the gate log; everything else is still not implemented. S0 changed no production code; S1 is now in progress in a separate worktree, and no S1 completion is claimed.** §14 overrides earlier sections where they differ. Owner decisions (§14.3): both tracks in parallel; **all of this plan ships in v1.4.0** (both tracks and the refresh fix, see §14.7); duplicate `name|protocol` entries keep the first and reject the rest (§14.6). Prepared on November 4, 2026, America/Los_Angeles.
+Status: **reviewed 2026-11-05 — approved with the amendments in [§14](#14-review-decisions-2026-11-05). The §14.5 refresh fix is implemented, and its commit `650b349` passed the Linux gate (`check` 1980 s, `cores` 572 s, total 2552 s, END 2026-11-05T09:30:12Z), verified from the gate log by the main assistant. S0 changed no production code, and its commit `9045e1b` passed the Linux gate (`check` 1995 s, `cores` 574 s, `GATE 9045e1b PASS total=2569s`, START 2026-11-05T10:00:34Z, END 10:43:23Z), which the main assistant checked personally. S1 diagnostics are implemented on `feat/v1.4-import-s1` on top of `9045e1b`, corrected across the main assistant's three review rounds (first five blockers, then five more, then the cancelled-refresh regression), and have passed that personal review; they are delivered in this phase commit, whose own Linux gate is still pending (§14.8 covers the status). S2–S4 and M2–M4 are still unimplemented; M1 has phase commit `3565153` on the sibling branch `feat/v1.4-selfhost-m1` with its Linux gate running, so it is neither integrated nor gate-passed nor feature-complete. No S1 completion is claimed.** §14 overrides earlier sections where they differ. Owner decisions (§14.3): both tracks in parallel; **all of this plan ships in v1.4.0** (both tracks and the refresh fix, see §14.7); duplicate `name|protocol` entries keep the first and reject the rest (§14.6). Prepared on November 4, 2026, America/Los_Angeles.
 
 This is the English version of [the Chinese plan](subscription-import-compatibility-plan.md), including its update dated `2026-11-04T23:15:43-08:00`. Self-hosted xhttp / Reality support is integrated into the scope, implementation phases, and acceptance criteria. The translation preserves the source document's scope and technical identifiers.
 
@@ -348,10 +348,12 @@ revision 3 makes `S0-GR-02` a **second valid no-flow gRPC representative entry**
 (Vision + gRPC stays only as `S0-NEG-VISION-GRPC`), states the two mihomo cells as
 "first attempt failed, later attempt succeeded, cause undetermined", and describes
 the sing-box xhttp cell as a native config rejection with no HTTP attempted.
-**An independent review passed on 2026-11-05 for the evidence and manifest scope
-only — not full protocol acceptance. The documentation commit is local on
-`feat/v1.4-import-s0`, and the Linux gate on that commit was still pending when it
-was created.** The report is
+**The main assistant's personal review passed on 2026-11-05 for the evidence and
+manifest scope only — not full protocol acceptance. The documentation commit
+`9045e1b` passed the Linux gate (`check` 1995 s, `cores` 574 s,
+`GATE 9045e1b PASS total=2569s`, START 2026-11-05T10:00:34Z, END 10:43:23Z), which
+the main assistant checked personally; the S0 documents and fixtures themselves
+stay byte-identical to that commit.** The report is
 [v1.4 S0 evidence](v1.4-s0-evidence.md) and the sanitized fixture manifest is
 [v1.4 S0 fixtures](v1.4-s0-fixtures.md) (16 **valid** representative entries — 3
 SS2022 AES-256, 11 Reality+xhttp, 2 Reality+grpc — with negative, compatibility
@@ -383,10 +385,14 @@ What rounds 1 and 2 corrected, and what S1–S4 must now assume:
   positives are labelled later-attempt positives (first attempt failed, second
   succeeded) and no first-attempt guarantee exists.
 
-Still open before S0 can be called complete: a passing independent review of this
-revision, then a Linux gate on the commit that carries it. S0 changed no production
-code, migration, API or UI — its output is documentation and measurements only. S1
-is now in progress in a separate worktree, and no S1 completion is claimed here.
+S0's review and commit gate are now closed: the main assistant's personal review
+passed for the evidence and manifest scope, and `9045e1b` passed the Linux gate.
+What stays open is the A1 browser walkthrough of source management and format
+previews, plus the protocol acceptance that S1–S4 and M1–M4 still owe. S0 changed
+no production code, migration, API or UI — its output is documentation and
+measurements only. S1 has since been implemented and passed the main assistant's
+personal review, and is delivered in a phase commit whose Linux gate is pending;
+no S1 completion is claimed here.
 
 ## 11. Acceptance Criteria
 
@@ -573,7 +579,7 @@ This replaces the "M2 starts only after S3" ordering in 14.1 item 1.
 
 ### 14.5 v1.4.0 Refresh Fix (R2)
 
-This is the first step of the v1.4.0 work, ahead of S1. **Status: implemented on `feat/v1.4-tunnels` as `650b349`; the Linux gate on that commit passed and was independently verified — `check` 1980 s, `cores` 572 s, `GATE 650b349 PASS total=2552s`, END 2026-11-05T09:30:12Z.** Minimal scope:
+This is the first step of the v1.4.0 work, ahead of S1. **Status: implemented on `feat/v1.4-tunnels` as `650b349`; the Linux gate on that commit passed and was verified from the gate log by the main assistant — `check` 1980 s, `cores` 572 s, `GATE 650b349 PASS total=2552s`, END 2026-11-05T09:30:12Z.** Minimal scope:
 
 1. `Store.Refresh`: after recording `last_status='failed'`, return the fetch or parse error, not the result of the status write.
 2. Refresh handler: map `ErrFetch`/`ErrParse` to a distinct code, `import_refresh_failed`, with a message saying the fetch or parse failed and the source's nodes are excluded from subscriptions. Other errors keep `import_unavailable`.
@@ -583,7 +589,7 @@ This is the first step of the v1.4.0 work, ahead of S1. **Status: implemented on
 
 Everything else (typed causes, counts, partial success, 502/504/422, persisted diagnostics) follows in S1, also for v1.4.0. Record the fix in the change log, and run a Linux gate on its commit.
 
-Implementation status (2026-11-05): items 1–5 are implemented as written — `Store.Refresh` returns the fetch or parse error after recording the failure, the handler answers `import_refresh_failed`, the three page callers reload the source list on failure, and the store test now expects the error. New coverage: `internal/panel/subscription/importer/refresh_test.go` and `web/scripts/import-refresh-selftest.mjs`, the latter invoked from `scripts/check.sh`. The Linux gate ran on `650b349` and passed (numbers above), so this status is "implemented and gate-verified". It is still **not** an A1 result: the browser walkthrough of the source page against a real failing source remains outstanding, and item 3 is covered in the gate only by the injected-state frontend self-test.
+Implementation status (2026-11-05): items 1–5 are implemented as written — `Store.Refresh` returns the fetch or parse error after recording the failure, the handler answers `import_refresh_failed`, the three page callers reload the source list on failure, and the store test now expects the error. New coverage: `internal/panel/subscription/importer/refresh_test.go` and `web/scripts/import-refresh-selftest.mjs`, the latter invoked from `scripts/check.sh`. The Linux gate ran on `650b349` and passed (`PART check EXIT 0`, `PART cores EXIT 0`, `GATE 650b349 PASS total=2552s`; numbers above), so this status is "implemented and gate-verified". It is still **not** an A1 result: the browser walkthrough of the source page against a real failing source remains outstanding, and item 3 is covered in the gate only by the injected-state frontend self-test.
 
 ### 14.6 Duplicate Keys: Keep the First (R3, Confirmed)
 
@@ -609,10 +615,32 @@ The Owner moved all remaining work into v1.4.0: the refresh fix (14.5), the impo
 - **Branches.**
   - Each track works on a short-lived branch off `feat/v1.4-tunnels` and merges back after its phase passes review and the Linux gate. Gates run one at a time, alternating between the tracks.
   - The 14.5 fix goes directly on `feat/v1.4-tunnels`; it is committed as `650b349` and its Linux gate passed.
-- **Migrations.** Numbers continue after 0132 in merge order. A track that needs a migration takes the next free number when it merges, and renumbers if the other track merged first. Applied migrations are never edited.
+- **Migrations.** Numbers continue after 0133 in merge order: 0133 (`subscription_source_results`) belongs to S1 in this phase commit, and M1 needs none. A track that needs a migration takes the next free number when it merges, and renumbers if the other track merged first. Applied migrations are never edited.
 - **Agent compatibility.** v1.4.0 Agents report the new self-hosted capability, while v1.3.1 Agents cannot receive the new settings (14.1 and §13.3 item 3). The upgrade order stays panel first, then Agents.
 - **Docs to update at release.**
   - The v1.4.0 release notes: new protocols, the refresh fix, duplicate-key behavior, the CDN device-limit limitation, and removal of "Reality is not implemented".
   - AGENTS.md "当前状态" and the sections in 14.2.
   - The v1.4 plan.
   - `docs/handoff.md` (C1 and §4.2 now wait on this work).
+
+### 14.8 Implementation Status (2026-11-05)
+
+| Part | Status | Evidence |
+| --- | --- | --- |
+| §14.5 refresh fix | Implemented, **Linux gate passed** | `650b349`, `GATE 650b349 PASS total=2552s` (check and cores both EXIT 0, ended `2026-11-05T09:30:12Z`) |
+| S0 evidence (documentation) | Reviewed and **Linux gate passed** | `9045e1b`, `GATE 9045e1b PASS total=2569s` (check 1995 s, cores 574 s, START `2026-11-05T10:00:34Z`, END `2026-11-05T10:43:23Z`); the S0 documents and fixtures are byte-identical to that commit |
+| S1 diagnostics | Implemented; corrected across the main assistant's three review rounds — five blockers, then five more, then the cancelled-refresh regression (a fetch cancelled mid-flight no longer carries a provisional result in the error body) — and **passed that personal review. Delivered in this phase commit; its own Linux gate is still pending, nothing is integrated or pushed. No real-source fetch, no browser walkthrough** | Windows unit tests (importer, backup, recovery, server), frontend self-test, `typecheck` (`EXIT=0`) |
+| M1 self-hosted contracts | Phase commit `3565153` on `feat/v1.4-selfhost-m1`; **its Linux gate is running, so it is neither integrated, nor gate-passed, nor feature-complete** | — |
+| S2–S4, M2–M4, and S5 for either track | Not implemented | — |
+
+S1 as implemented, on short-lived branch `feat/v1.4-import-s1` based on `9045e1b`:
+
+- **Typed fetch causes and the real status.** `FetchError{stage, code, status}` covers input, dns, address, redirect, tls, connect, deadline, http and size. The upstream status of an HTTP failure is stored in the result as `upstreamStatus` and rendered by one fixed catalogue (`resultMessage`), so the API, the card and the dialog name the actual 403 instead of "HTTP 0"; a status is accepted only on `source_http_status` and only within 100–599. `errors.Is(err, ErrFetch)` stays true, the error text is the fixed code, and no URL, redirect target, response body or credential reaches the Owner, the log or the audit trail. HTTPS only, per-hop public-IP pinning, a fresh transport per redirect, 2 MiB and 15 seconds are unchanged.
+- **One analyzer, honest format detection.** `Analyze` is the single parser implementation (`Parse` is its `format.Parser` adapter) and every result carries the fixed message of its code. Counts are `total = accepted + rejected + duplicates`, an entry with several problems counts once, an identical entry is `duplicate_endpoint_content`, and the same `name|protocol` with different parameters is `duplicate_endpoint_key` naming the kept entry (§14.6). A document that is only a Base64 block no decoder accepts is `invalid_base64` (stage `decode`); text, markup or a plain word stays `import_unrecognized`, so no category is invented for arbitrary input and the decode branch is reachable in production through that same parser.
+- **Fetch and paste share the pipeline.** `Store.Save` returns `(id, Result, error)` and the route answers 200 `{id, result}`, 422 when nothing is importable, 400 for invalid input (no attempt, no result), 500 when the write fails and 404 for an unknown source. A pasted import therefore reports the same counts and per-entry reasons as a refresh, with no second analyzer.
+- **Storage failures tell the truth.** Every persistence branch (seal, begin, cache replace, status write, commit, and the failure record itself) reports stage `commit`, outcome `failed` and code `import_commit_failed`, with the previous success time and the previous committed `cached`/`usable` counts captured once before the attempt. A rolled back attempt never presents the endpoints it analysed as accepted, and a source that was usable before stays usable; the storage error text never reaches the response.
+- **Refresh result and HTTP mapping.** 200 `ok`/`partial`, 502 fetch failure (504 timeout), 422 fetched but nothing importable, 400 input (including a content source without a link), 500 persistence, 404 missing source. `details.result` in the error body carries the same result whenever the attempt finished and was classified (outcome, stage, code and the fixed text of that code); a request cancelled while the fetch was still running answers 503 with the panel's fixed message and no `details.result`, because no attempt finished and the source keeps its row, status and cache untouched. A partial attempt commits and keeps `last_status=ok` with an empty `last_error`; a recorded failure keeps the old rows but marks the source failed, so its `usable` count is zero. `last_fetch_at` is the latest attempt and `last_success_at` the latest commit; a URL change clears both the result and the success time and returns the source to `pending`.
+- **Migration 0133** (`subscription_source_results`) adds `latest_result_json` and `last_success_at`; it never fetches, and old rows and old archives read as "failed previously; reason was not recorded".
+- **Backup and restore.** The verifier accepts only a result this panel could have written and that agrees with its own row: a known code with the stage and outcome it can have, the fixed message of that code and status, RFC 3339 stamps equal to `last_fetch_at`/`last_success_at`, the row's source ID and status, counts where `total` is the sum of its parts, a committed attempt's `cached`/`usable` equal to what it accepted, a failed attempt retaining nothing new, and diagnostics whose text, stage, field path (a fixed path or a bounded `query.<token>`), indices and kept index the parser can emit. Unknown JSON fields are refused, and the bounds (≤50 reasons, ≤32 KiB) still apply. An archive from before 0133 has no such columns and remains valid; restore copies the column set the archive has, so it neither invents a cause nor fetches.
+- **Frontend.** The source card shows the attempt outcome, imported/skipped/duplicate, cached and usable counts, the last attempt and the last success, and a bounded dialog lists the reasons. All three refresh callers and the pasted import use one outcome helper: success only for `ok`, a warning for a partial import, and for a failure the panel's own message plus the counts of the state that remains. A refused paste keeps the draft and the import dialog and opens the bounded reasons directly (a content source has no card of its own); a save whose reload fails is neither repeated nor reported as an error.
+- **Not verified.** No Linux gate, no real-source fetch and no browser walkthrough. `vue-tsc`/`vite build`, the focused Go suites and the frontend self-test were re-run on Windows after the base integration onto `9045e1b` (see the change log); a Windows run is not Linux, host or browser evidence. No SS2022, Reality or xhttp support and no exporter changes.

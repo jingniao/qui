@@ -32,7 +32,7 @@ func TestImportAPIOwnerOnlyEncryptedAndSubscriptionReadsCache(t *testing.T) {
 	}
 	// An unreachable URL is saved without fetching. Reading the subscription
 	// uses the cache and produces a warning, never a network request or revision.
-	pending, err := app.importStore.Save(t.Context(), "", importer.Input{Name: "pending fixture", URL: "https://127.0.0.1/fixture", Interval: 60, UserIDs: []string{u.ID}})
+	pending, _, err := app.importStore.Save(t.Context(), "", importer.Input{Name: "pending fixture", URL: "https://127.0.0.1/fixture", Interval: 60, UserIDs: []string{u.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ func TestRecoveryKeepsCurrentGroupEntriesAndPortRange(t *testing.T) {
 	var sourceID, groupID string
 	f := listeningFixture(t, func(f *fixture) {
 		var err error
-		sourceID, err = (&importer.Store{Database: f.source.Database, Vault: f.source.ConfigurationVault}).Save(ctx, "", importer.Input{Name: "group import", Content: "http://user:pass@a.example.com:8080#A\nhttp://user:pass@b.example.com:8080#B", Interval: 60})
+		sourceID, _, err = (&importer.Store{Database: f.source.Database, Vault: f.source.ConfigurationVault}).Save(ctx, "", importer.Input{Name: "group import", Content: "http://user:pass@a.example.com:8080#A\nhttp://user:pass@b.example.com:8080#B", Interval: 60})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -19,6 +19,23 @@ import (
 
 var ErrParse = errors.New("subscription has no supported valid proxies")
 
+// Diagnostic field paths are named once here. The parsers pass these constants and
+// the archive verifier accepts exactly this finite set (report.go), so a reason can
+// never be stored with a path the verifier would refuse.
+const (
+	fieldNone        = ""
+	fieldEntry       = "entry"
+	fieldCredential  = "credential"
+	fieldTLSInsecure = "tls.insecure"
+	fieldMethod      = "method"
+	fieldSecurity    = "security"
+	fieldType        = "type"
+	fieldNetwork     = "network"
+	fieldWSOpts      = "ws-opts"
+	fieldGRPCOpts    = "grpc-opts"
+	fieldQuery       = "query"
+)
+
 type URI struct{}
 type Base64 struct{}
 type Clash struct{}
@@ -37,157 +54,380 @@ func decode64(s string) ([]byte, error) {
 	}
 	return nil, ErrParse
 }
+
+// looksLikeBase64 reports whether a document is a Base64 block that no decoder
+// accepts. It is deliberately narrow: a document with markup, spaces, commas, a
+// URI scheme or any other non-alphabet character is not Base64, and an alphabet-
+// only run without a padding or a Base64-only character is more likely a word or a
+// token than a subscription, so both stay "unrecognized" rather than gaining an
+// invented cause.
+func looksLikeBase64(b []byte) bool {
+	trimmed := strings.TrimSpace(string(b))
+	if len(trimmed) < 16 || strings.Contains(trimmed, "://") {
+		return false
+	}
+	signal, compact := false, 0
+	for _, char := range trimmed {
+		switch {
+		case char == '\r' || char == '\n' || char == ' ' || char == '\t':
+			continue
+		case char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char >= '0' && char <= '9':
+		case char == '=' || char == '+' || char == '/' || char == '-' || char == '_':
+			signal = true
+		default:
+			return false
+		}
+		compact++
+	}
+	return signal && compact >= 16
+}
 func Parsers() []format.Parser { return []format.Parser{Clash{}, URI{}, Base64{}} }
 
+// analyzer is the report-bearing half of every parser in this package, so a
+// format has one implementation and not two: Parse is derived from analyze.
+type analyzer interface {
+	format.Parser
+	analyze(content []byte, c *collector)
+}
+
+func analyzers() []analyzer {
+	items := Parsers()
+	out := make([]analyzer, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.(analyzer))
+	}
+	return out
+}
+
 // Parse reports a generic diagnostic without echoing untrusted input, which may
-// include a password, a token or the source's private subscription URL.
+// include a password, a token or the source's private subscription URL. It is
+// Analyze without the report, kept for the format.Parser contract.
 func Parse(b []byte) ([]proxy.Proxy, []proxy.Warning, error) {
-	if len(b) > MaxBody {
+	result, entries := Analyze(b)
+	if result.Outcome == "failed" || len(entries) == 0 {
 		return nil, nil, ErrParse
 	}
-	for _, parser := range Parsers() {
-		if parser.Detect(b) {
-			p, err := parser.Parse(b)
-			return p, []proxy.Warning{proxy.SourceWarning("imported", "Only supported valid proxy entries are imported; unsupported fields and entries are omitted.")}, err
-		}
+	return entries, []proxy.Warning{proxy.SourceWarning("imported", "Only supported valid proxy entries are imported; unsupported fields and entries are omitted.")}, nil
+}
+
+// Analyze reads one fetched or pasted document and returns its accepted endpoints
+// plus a bounded per-entry report. Counts are always determined once the document
+// was read: total = accepted + rejected + duplicates, and an entry with several
+// problems is counted once, under its first reason. The result's Message is always
+// the fixed text of its code.
+func Analyze(b []byte) (Result, []proxy.Proxy) {
+	result, entries := analyze(b)
+	result.Message = resultMessage(result.Code, result.Status)
+	return result, entries
+}
+
+func analyze(b []byte) (Result, []proxy.Proxy) {
+	result := Result{Diagnostics: []Diagnostic{}}
+	if len(b) > MaxBody {
+		result.Outcome, result.Stage, result.Code = "failed", stageDetect, "source_too_large"
+		return result, nil
 	}
-	return nil, nil, ErrParse
+	if len(bytes.TrimSpace(b)) == 0 {
+		result.Outcome, result.Stage, result.Code = "failed", stageDetect, "import_empty"
+		return result, nil
+	}
+	for _, parser := range analyzers() {
+		if !parser.Detect(b) {
+			continue
+		}
+		return runCollector(result, parser, b)
+	}
+	// No format claimed the document. A Base64 payload that no decoder accepts is
+	// reported as an undecodable document instead of as an unknown format; text,
+	// markup and anything that is not Base64 stays "unrecognized", so no category
+	// is invented for it. The Base64 analyzer is the same one as above, so the
+	// decode branch has one implementation.
+	if looksLikeBase64(b) {
+		return runCollector(result, Base64{}, b)
+	}
+	result.Outcome, result.Stage, result.Code = "failed", stageDetect, "import_unrecognized"
+	return result, nil
+}
+
+// runCollector runs one parser's analysis and returns its report.
+func runCollector(result Result, parser analyzer, content []byte) (Result, []proxy.Proxy) {
+	c := &collector{result: &result, byContent: map[string]int{}, byKey: map[string]int{}}
+	parser.analyze(content, c)
+	c.finish()
+	return result, c.proxies
+}
+
+// collector turns one document into accepted endpoints and reasons.
+type collector struct {
+	result     *Result
+	proxies    []proxy.Proxy
+	rejected   int
+	duplicates int
+	byContent  map[string]int
+	byKey      map[string]int
+	decided    bool
+}
+
+// documentFailure records a reason that belongs to the whole document, such as a
+// Base64 payload that does not decode: no entry was read, so no count is set.
+func (c *collector) documentFailure(stage, code string) {
+	c.result.Outcome, c.result.Stage, c.result.Code, c.decided = "failed", stage, code, true
+}
+
+func (c *collector) reject(index int, protocol, code, field string) {
+	c.rejected++
+	c.result.add(entryDiagnostic(index, protocol, diagParse, code, field))
+}
+
+func (c *collector) duplicate(index int, protocol, code string, kept int) {
+	c.duplicates++
+	diagnostic := entryDiagnostic(index, protocol, diagDuplicate, code, fieldNone)
+	diagnostic.KeptIndex = &kept
+	c.result.add(diagnostic)
+}
+
+// entry counts one parsed entry exactly once. A later entry that repeats the
+// content of an accepted one is reported as a content duplicate; the same
+// name|protocol with different parameters keeps the first entry, because node
+// groups and client policies address an imported endpoint by that key.
+func (c *collector) entry(index int, protocol string, p proxy.Proxy, code, field string) {
+	if code != "" {
+		c.reject(index, protocol, code, field)
+		return
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		c.reject(index, protocol, "oversized_entry", fieldNone)
+		return
+	}
+	if kept, seen := c.byContent[string(raw)]; seen {
+		c.duplicate(index, protocol, "duplicate_endpoint_content", kept)
+		return
+	}
+	if kept, seen := c.byKey[p.Name+"|"+p.Protocol]; seen {
+		c.duplicate(index, protocol, "duplicate_endpoint_key", kept)
+		return
+	}
+	c.byContent[string(raw)] = index
+	c.byKey[p.Name+"|"+p.Protocol] = index
+	c.proxies = append(c.proxies, p)
+}
+
+// finish publishes the counts and the business outcome of the attempt.
+func (c *collector) finish() {
+	if c.decided {
+		return
+	}
+	accepted, rejected, duplicates := len(c.proxies), c.rejected, c.duplicates
+	total := accepted + rejected + duplicates
+	c.result.Counts.Accepted = accepted
+	c.result.Counts.Total, c.result.Counts.Rejected, c.result.Counts.Duplicates = &total, &rejected, &duplicates
+	c.result.Stage = stageParse
+	switch {
+	case accepted == 0:
+		c.result.Outcome, c.result.Code = "failed", "import_no_entries"
+	case rejected+duplicates == 0:
+		c.result.Outcome, c.result.Code = "ok", "import_ok"
+	default:
+		c.result.Outcome, c.result.Code = "partial", "import_partial"
+	}
 }
 func valid(p proxy.Proxy) bool {
+	code, _ := validation(p)
+	return code == ""
+}
+
+// validation reports the first rule that keeps a parsed proxy out of the cache,
+// and the field it concerns. valid() is the same check without the reason, so the
+// three parsers share one allowlist.
+func validation(p proxy.Proxy) (string, string) {
 	// YAML escapes and aliases can expand during typed decoding. Bound the
 	// canonical cache representation too, so every accepted import is backupable.
 	encoded, err := json.Marshal(p)
 	if err != nil || len(encoded) > MaxBody {
-		return false
+		return "oversized_entry", ""
 	}
-	if len(p.Credential.Password) > 4096 || p.TLS != nil && p.TLS.Insecure {
-		return false
+	if len(p.Credential.Password) > 4096 {
+		return "invalid_credential", fieldCredential
+	}
+	if p.TLS != nil && p.TLS.Insecure {
+		return "insecure_tls", fieldTLSInsecure
 	}
 	if p.Protocol == "vless" && desiredstate.ValidateUUID(p.Credential.Password) != nil {
-		return false
+		return "invalid_uuid", fieldCredential
 	}
 	if p.Protocol == "tuic" && desiredstate.ValidateUUID(p.Credential.Username) != nil {
-		return false
+		return "invalid_uuid", fieldCredential
 	}
 	if p.Protocol == "shadowsocks" {
 		switch p.Method {
 		case "aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305":
 		default:
-			return false
+			return "unsupported_cipher", fieldMethod
 		}
 	}
 	if p.Name == "" || len(p.Name) > 200 || p.Server == "" || len(p.Server) > 253 || p.Port < 1 || p.Port > 65535 {
-		return false
+		return "invalid_endpoint", fieldNone
 	}
 	if strings.ContainsAny(p.Server, " /\\\r\n\t@") || strings.IndexFunc(p.Name, unicode.IsControl) >= 0 {
-		return false
+		return "invalid_endpoint", fieldNone
 	}
 	switch p.Protocol {
 	case "socks5", "http":
-		return true
+		return "", fieldNone
 	case "vless", "trojan", "shadowsocks", "hysteria2", "tuic":
-		return p.Credential.Password != ""
+		if p.Credential.Password == "" {
+			return "missing_credential", fieldCredential
+		}
+		return "", fieldNone
 	}
-	return false
+	return "unsupported_protocol", fieldNone
 }
+
+// Parse keeps the format.Parser contract: the accepted endpoints of a document,
+// or ErrParse when none survive.
 func (URI) Parse(b []byte) ([]proxy.Proxy, error) {
-	if len(b) > MaxBody {
-		return nil, ErrParse
+	_, entries, err := parseWith(b, URI{})
+	return entries, err
+}
+
+func (uri URI) analyze(content []byte, c *collector) {
+	if len(content) > MaxBody {
+		c.reject(0, fieldNone, "oversized_entry", fieldNone)
+		return
 	}
-	result := []proxy.Proxy{}
-	for _, line := range strings.Split(string(b), "\n") {
-		u, err := url.Parse(strings.TrimSpace(line))
-		if err != nil || u.Hostname() == "" {
+	index := 0
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		p := proxy.Proxy{Name: u.Fragment, Server: u.Hostname(), Protocol: u.Scheme}
-		p.Port, _ = strconv.Atoi(u.Port())
-		if p.Name == "" {
-			p.Name = net.JoinHostPort(p.Server, u.Port())
+		p, code, field := uriProxy(line)
+		c.entry(index, p.Protocol, p, code, field)
+		index++
+	}
+}
+
+// parseWith runs one parser's analysis and reports ErrParse when nothing was
+// accepted, so Parse and Analyze never disagree about a document.
+func parseWith(content []byte, parser format.Parser) (Result, []proxy.Proxy, error) {
+	result, entries := Analyze(content)
+	if !parser.Detect(content) || result.Outcome == "failed" || len(entries) == 0 {
+		return result, nil, ErrParse
+	}
+	return result, entries, nil
+}
+
+// queryField names a rejected unknown query parameter only when it is a short
+// safe token, so untrusted text never reaches the Owner's page.
+func queryField(key string) string {
+	if key == "" || len(key) > 32 {
+		return fieldQuery
+	}
+	for _, char := range key {
+		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '-') {
+			return fieldQuery
 		}
-		if u.User != nil {
+	}
+	return "query." + strings.ToLower(key)
+}
+
+// uriProxy parses one URI line. It returns the proxy plus the reason it may not
+// be cached, so the caller can report a precise diagnostic instead of dropping
+// the line silently.
+func uriProxy(line string) (proxy.Proxy, string, string) {
+	u, err := url.Parse(line)
+	if err != nil || u.Hostname() == "" {
+		return proxy.Proxy{}, "invalid_entry", ""
+	}
+	p := proxy.Proxy{Name: u.Fragment, Server: u.Hostname(), Protocol: u.Scheme}
+	p.Port, _ = strconv.Atoi(u.Port())
+	if p.Name == "" {
+		p.Name = net.JoinHostPort(p.Server, u.Port())
+	}
+	if u.User != nil {
+		p.Credential.Username = u.User.Username()
+		p.Credential.Password, _ = u.User.Password()
+	}
+	q := u.Query()
+	switch p.Protocol {
+	case "vless", "trojan", "hysteria2", "tuic":
+		if u.User == nil {
+			return p, "missing_credential", fieldCredential
+		}
+		p.Credential.Password = u.User.Username()
+		if p.Protocol == "tuic" {
 			p.Credential.Username = u.User.Username()
 			p.Credential.Password, _ = u.User.Password()
 		}
-		q := u.Query()
-		switch p.Protocol {
-		case "vless", "trojan", "hysteria2", "tuic":
-			if u.User == nil {
-				continue
+	case "ss":
+		p.Protocol = "shadowsocks"
+		p.Method = p.Credential.Username
+		if p.Credential.Password == "" {
+			decoded, e := decode64(p.Method)
+			if e != nil {
+				return p, "invalid_credential", fieldCredential
 			}
-			p.Credential.Password = u.User.Username()
-			if p.Protocol == "tuic" {
-				p.Credential.Username = u.User.Username()
-				p.Credential.Password, _ = u.User.Password()
-			}
-		case "ss":
-			p.Protocol = "shadowsocks"
-			p.Method = p.Credential.Username
-			if p.Credential.Password == "" {
-				decoded, e := decode64(p.Method)
-				if e != nil {
-					continue
-				}
-				p.Method, p.Credential.Password, _ = strings.Cut(string(decoded), ":")
-			}
-		case "socks":
-			p.Protocol = "socks5"
+			p.Method, p.Credential.Password, _ = strings.Cut(string(decoded), ":")
 		}
-		if len(q) > 0 {
-			known := true
-			for key := range q {
-				switch key {
-				case "security", "sni", "peer", "alpn", "type", "path", "serviceName", "flow":
-				default:
-					known = false
-				}
-			}
-			if !known {
-				continue
-			}
-		}
-		p.Flow = q.Get("flow")
-		p.Security = q.Get("security")
-		if p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
-			p.Security = "tls"
-		}
-		if p.Security != "" && p.Security != "none" && p.Security != "tls" {
-			continue
-		}
-		if p.Security == "tls" {
-			sni := q.Get("sni")
-			if sni == "" {
-				sni = q.Get("peer")
-			}
-			p.TLS = &proxy.TLS{ServerName: sni}
-			if q.Get("alpn") != "" {
-				p.TLS.ALPN = strings.Split(q.Get("alpn"), ",")
-			}
-		}
-		if transport := q.Get("type"); transport != "" && transport != "tcp" {
-			if transport != "ws" && transport != "grpc" {
-				continue
-			}
-			p.Transport = &proxy.Transport{Type: transport, Path: q.Get("path"), ServiceName: q.Get("serviceName")}
-		}
-		if valid(p) {
-			result = append(result, p)
+	case "socks":
+		p.Protocol = "socks5"
+	}
+	for key := range q {
+		switch key {
+		case "security", "sni", "peer", "alpn", "type", "path", "serviceName", "flow":
+		default:
+			return p, "unsupported_transport", queryField(key)
 		}
 	}
-	if len(result) == 0 {
-		return nil, ErrParse
+	p.Flow = q.Get("flow")
+	p.Security = q.Get("security")
+	if p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
+		p.Security = "tls"
 	}
-	return result, nil
+	if p.Security != "" && p.Security != "none" && p.Security != "tls" {
+		return p, "unsupported_security", fieldSecurity
+	}
+	if p.Security == "tls" {
+		sni := q.Get("sni")
+		if sni == "" {
+			sni = q.Get("peer")
+		}
+		p.TLS = &proxy.TLS{ServerName: sni}
+		if q.Get("alpn") != "" {
+			p.TLS.ALPN = strings.Split(q.Get("alpn"), ",")
+		}
+	}
+	if transport := q.Get("type"); transport != "" && transport != "tcp" {
+		if transport != "ws" && transport != "grpc" {
+			return p, "unsupported_transport", fieldType
+		}
+		p.Transport = &proxy.Transport{Type: transport, Path: q.Get("path"), ServiceName: q.Get("serviceName")}
+	}
+	code, field := validation(p)
+	if code != "" {
+		return p, code, field
+	}
+	return p, "", ""
 }
 func (Base64) Parse(b []byte) ([]proxy.Proxy, error) {
-	if len(b) > MaxBody {
-		return nil, ErrParse
+	_, entries, err := parseWith(b, Base64{})
+	return entries, err
+}
+
+// analyze decodes the document and then reads it as a URI list, so the two
+// entry points cannot disagree about a single payload.
+func (Base64) analyze(content []byte, c *collector) {
+	if len(content) > MaxBody {
+		c.reject(0, fieldNone, "oversized_entry", fieldNone)
+		return
 	}
-	d, e := decode64(string(bytes.TrimSpace(b)))
-	if e != nil {
-		return nil, ErrParse
+	decoded, err := decode64(string(bytes.TrimSpace(content)))
+	if err != nil {
+		c.documentFailure(stageDecode, "invalid_base64")
+		return
 	}
-	return (URI{}).Parse(d)
+	(URI{}).analyze(decoded, c)
 }
 
 type clashEntry struct {
@@ -216,66 +456,80 @@ type clashEntry struct {
 }
 
 func (Clash) Parse(b []byte) ([]proxy.Proxy, error) {
-	if len(b) > MaxBody {
-		return nil, ErrParse
+	_, entries, err := parseWith(b, Clash{})
+	return entries, err
+}
+
+func (Clash) analyze(content []byte, c *collector) {
+	if len(content) > MaxBody {
+		c.reject(0, fieldNone, "oversized_entry", fieldNone)
+		return
 	}
 	var document struct {
 		Proxies []yaml.Node `yaml:"proxies"`
 	}
-	if yaml.Unmarshal(b, &document) != nil {
-		return nil, ErrParse
+	if yaml.Unmarshal(content, &document) != nil {
+		c.documentFailure(stageDecode, "import_unrecognized")
+		return
 	}
-	result := []proxy.Proxy{}
+	index := 0
 	for _, node := range document.Proxies {
-		raw, err := yaml.Marshal(&node)
-		if err != nil {
-			continue
-		}
-		var entry clashEntry
-		decoder := yaml.NewDecoder(bytes.NewReader(raw))
-		decoder.KnownFields(true)
-		if decoder.Decode(&entry) != nil {
-			continue
-		}
-		p := proxy.Proxy{Name: entry.Name, Protocol: entry.Type, Server: entry.Server, Port: entry.Port, Method: entry.Cipher, Flow: entry.Flow, Credential: proxy.Credential{Username: entry.Username, Password: entry.Password}}
-		if p.Protocol == "ss" {
-			p.Protocol = "shadowsocks"
-		}
-		if p.Protocol == "vless" {
-			p.Credential.Password = entry.UUID
-		}
-		if p.Protocol == "tuic" {
-			p.Credential.Username = entry.UUID
-		}
-		if entry.TLS || p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
-			p.Security = "tls"
-			sni := entry.SNI
-			if sni == "" {
-				sni = entry.ServerName
-			}
-			p.TLS = &proxy.TLS{ServerName: sni, ALPN: entry.ALPN, Insecure: entry.Insecure}
-		}
-		switch entry.Network {
-		case "", "tcp":
-		case "ws":
-			if entry.WS == nil {
-				continue
-			}
-			p.Transport = &proxy.Transport{Type: "ws", Path: entry.WS.Path}
-		case "grpc":
-			if entry.GRPC == nil {
-				continue
-			}
-			p.Transport = &proxy.Transport{Type: "grpc", ServiceName: entry.GRPC.Service}
-		default:
-			continue
-		}
-		if valid(p) {
-			result = append(result, p)
-		}
+		p, code, field := clashProxy(node)
+		c.entry(index, p.Protocol, p, code, field)
+		index++
 	}
-	if len(result) == 0 {
-		return nil, ErrParse
+}
+
+// clashProxy decodes one `proxies` entry. Known-fields decoding keeps the
+// allowlist strict: an option this build cannot represent rejects the entry with
+// a named reason instead of being dropped silently.
+func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
+	raw, err := yaml.Marshal(&node)
+	if err != nil {
+		return proxy.Proxy{}, "invalid_entry", fieldNone
 	}
-	return result, nil
+	var entry clashEntry
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if decoder.Decode(&entry) != nil {
+		return proxy.Proxy{}, "unsupported_option", fieldEntry
+	}
+	p := proxy.Proxy{Name: entry.Name, Protocol: entry.Type, Server: entry.Server, Port: entry.Port, Method: entry.Cipher, Flow: entry.Flow, Credential: proxy.Credential{Username: entry.Username, Password: entry.Password}}
+	if p.Protocol == "ss" {
+		p.Protocol = "shadowsocks"
+	}
+	if p.Protocol == "vless" {
+		p.Credential.Password = entry.UUID
+	}
+	if p.Protocol == "tuic" {
+		p.Credential.Username = entry.UUID
+	}
+	if entry.TLS || p.Protocol == "trojan" || p.Protocol == "hysteria2" || p.Protocol == "tuic" {
+		p.Security = "tls"
+		sni := entry.SNI
+		if sni == "" {
+			sni = entry.ServerName
+		}
+		p.TLS = &proxy.TLS{ServerName: sni, ALPN: entry.ALPN, Insecure: entry.Insecure}
+	}
+	switch entry.Network {
+	case "", "tcp":
+	case "ws":
+		if entry.WS == nil {
+			return p, "unsupported_transport", fieldWSOpts
+		}
+		p.Transport = &proxy.Transport{Type: "ws", Path: entry.WS.Path}
+	case "grpc":
+		if entry.GRPC == nil {
+			return p, "unsupported_transport", fieldGRPCOpts
+		}
+		p.Transport = &proxy.Transport{Type: "grpc", ServiceName: entry.GRPC.Service}
+	default:
+		return p, "unsupported_transport", fieldNetwork
+	}
+	code, field := validation(p)
+	if code != "" {
+		return p, code, field
+	}
+	return p, "", fieldNone
 }

@@ -21,7 +21,7 @@ func TestGroupEntriesBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, err := (&importer.Store{Database: s.Database, Vault: s.ConfigurationVault}).Save(ctx, "", importer.Input{Name: "source", Content: "http://user:pass@example.com:8080#A", Interval: 60})
+	src, _, err := (&importer.Store{Database: s.Database, Vault: s.ConfigurationVault}).Save(ctx, "", importer.Input{Name: "source", Content: "http://user:pass@example.com:8080#A", Interval: 60})
 	if err != nil {
 		t.Fatal(err)
 	}

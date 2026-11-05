@@ -42,7 +42,7 @@ func TestCandidatesOwnerMetadataAndSelection(t *testing.T) {
 	p.service.ClientChains = candidateClones{}
 	p.service.Sources.Register(imports)
 	p.service.Sources.Register(candidateRelay{userID: p.u.ID, groupID: p.groups[0].ID})
-	sourceID, err := imports.Save(ctx, "", importer.Input{Name: "导入来源", Content: "socks5://secret-user:secret-password@private-server.example:1000#US-import", Interval: 60})
+	sourceID, _, err := imports.Save(ctx, "", importer.Input{Name: "导入来源", Content: "socks5://secret-user:secret-password@private-server.example:1000#US-import", Interval: 60})
 	if err != nil {
 		t.Fatal(err)
 	}

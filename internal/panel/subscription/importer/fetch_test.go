@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -128,4 +129,108 @@ func TestFetchSizeAndTotalTimeout(t *testing.T) {
 	if _, err := f.Fetch(context.Background(), "https://example.com"); err == nil || time.Since(start) > 5*time.Second {
 		t.Fatalf("total timeout not enforced: err=%v after %s", err, time.Since(start))
 	}
+}
+
+// Every fetch failure is typed: the Owner gets a safe category instead of a
+// generic refusal, and no error text carries the URL, the redirect target or a
+// response body.
+func TestFetchErrorCategories(t *testing.T) {
+	code := func(t *testing.T, err error) *FetchError {
+		t.Helper()
+		var typed *FetchError
+		if !errors.As(err, &typed) || !errors.Is(err, ErrFetch) {
+			t.Fatalf("untyped fetch error: %v", err)
+		}
+		return typed
+	}
+	t.Run("dns", func(t *testing.T) {
+		f := Fetcher{Resolver: failingResolver{}, DialContext: func(context.Context, string, string) (net.Conn, error) {
+			t.Error("dialled after a failed lookup")
+			return nil, ErrFetch
+		}}
+		typed := code(t, fetchErr(f, "https://example.com"))
+		if typed.Stage != stageDNS || typed.Code != "source_dns_failed" {
+			t.Fatalf("dns: %+v", typed)
+		}
+	})
+	t.Run("address", func(t *testing.T) {
+		f, _, _ := fetchFixture(t, func(http.ResponseWriter, *http.Request) {})
+		r := &fakeResolver{answers: [][]netip.Addr{addresses("10.0.0.5")}}
+		f.Resolver = r
+		typed := code(t, fetchErr(f, "https://example.com"))
+		if typed.Stage != stageAddress || typed.Code != "source_address_rejected" {
+			t.Fatalf("address: %+v", typed)
+		}
+	})
+	t.Run("redirect scheme", func(t *testing.T) {
+		f, _, _ := fetchFixture(t, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "http://example.com/next", 302) })
+		typed := code(t, fetchErr(f, "https://example.com"))
+		if typed.Stage != stageRedirect || typed.Code != "source_redirect_rejected" {
+			t.Fatalf("redirect: %+v", typed)
+		}
+	})
+	t.Run("tls", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
+		defer server.Close()
+		f := Fetcher{Resolver: &fakeResolver{answers: [][]netip.Addr{addresses("8.8.8.8")}}, roots: x509.NewCertPool(),
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}}
+		typed := code(t, fetchErr(f, "https://example.com"))
+		if typed.Stage != stageTLS || typed.Code != "source_tls_failed" {
+			t.Fatalf("tls: %+v", typed)
+		}
+	})
+	t.Run("connect", func(t *testing.T) {
+		f := Fetcher{Resolver: &fakeResolver{answers: [][]netip.Addr{addresses("8.8.8.8")}}, DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("connection refused")
+		}}
+		typed := code(t, fetchErr(f, "https://example.com"))
+		if typed.Stage != stageConnect || typed.Code != "source_connect_failed" {
+			t.Fatalf("connect: %+v", typed)
+		}
+	})
+	t.Run("http status", func(t *testing.T) {
+		f, _, _ := fetchFixture(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) })
+		typed := code(t, fetchErr(f, "https://example.com/fixture?token=private-fixture"))
+		if typed.Stage != stageHTTP || typed.Code != "source_http_status" || typed.Status != http.StatusForbidden {
+			t.Fatalf("http: %+v", typed)
+		}
+		if message := typed.Message(); !strings.Contains(message, "403") || strings.Contains(message, "private-fixture") {
+			t.Fatalf("http message: %q", message)
+		}
+	})
+	t.Run("size", func(t *testing.T) {
+		f, _, _ := fetchFixture(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, strings.Repeat("a", MaxBody+1)) })
+		typed := code(t, fetchErr(f, "https://example.com"))
+		if typed.Stage != stageSize || typed.Code != "source_too_large" {
+			t.Fatalf("size: %+v", typed)
+		}
+	})
+	t.Run("deadline", func(t *testing.T) {
+		f, _, _ := fetchFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+		})
+		f.Timeout = 20 * time.Millisecond
+		typed := code(t, fetchErr(f, "https://example.com"))
+		if typed.Stage != stageDeadline || typed.Code != "source_timeout" {
+			t.Fatalf("deadline: %+v", typed)
+		}
+	})
+}
+
+func fetchErr(f Fetcher, raw string) error {
+	_, err := f.Fetch(context.Background(), raw)
+	return err
+}
+
+type failingResolver struct{}
+
+func (failingResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return nil, &net.DNSError{Err: "no such host", Name: "example.com", IsNotFound: true}
 }

@@ -209,15 +209,6 @@ func publishedCredential(state desiredstate.State, credential user.Credential, v
 
 func build(n node.Node, inbound desiredstate.Inbound, credential user.Credential, labels []string) (proxy.Proxy, bool, error) {
 	settings := inbound.Settings
-	// The server-private xhttp/Reality settings have no client mapping yet (M2).
-	// Every save, snapshot and deployment gate refuses them in M1, so no published
-	// revision can carry them; this guard keeps that true for an archive restored
-	// from elsewhere. Withholding the endpoint is the only honest answer — exporting
-	// it without the public key and Short ID would hand out a client entry that
-	// cannot connect.
-	if settings.HasServerSettings() {
-		return proxy.Proxy{}, false, nil
-	}
 	endpoint := proxy.Proxy{
 		Origin:     proxy.Origin{Source: "published", Ref: inbound.ID, Node: proxy.Ref{ID: n.ID, Name: n.Name}, Labels: labels},
 		Name:       n.Name + " · " + inbound.Protocol,
@@ -234,6 +225,27 @@ func build(n node.Node, inbound desiredstate.Inbound, credential user.Credential
 	}
 	if settings.Transport != "" {
 		endpoint.Transport = &proxy.Transport{Type: settings.Transport, Path: settings.Path, ServiceName: settings.ServiceName}
+	}
+	if settings.Reality != nil {
+		r := settings.Reality
+		// Map only the public half of the successful revision. No server struct
+		// is marshalled into the neutral client model.
+		if len(r.ServerNames) == 0 || len(r.ShortIDs) == 0 {
+			return proxy.Proxy{}, false, errors.New("published Reality settings are incomplete")
+		}
+		sid := r.ShortIDs[0]
+		endpoint.TLS = &proxy.TLS{ServerName: r.ServerNames[0], ClientFingerprint: "chrome"}
+		endpoint.Reality = &proxy.RealityOptions{PublicKey: r.PublicKey, ShortID: &sid}
+	}
+	if settings.XHTTP != nil {
+		x := settings.XHTTP
+		endpoint.Transport = &proxy.Transport{Type: "xhttp", XHTTP: &proxy.XHTTPOptions{Host: x.Host, Path: x.Path, Mode: x.Mode}}
+		if endpoint.TLS != nil {
+			endpoint.TLS.ALPN = []string{"h2"}
+		}
+	}
+	if code, _ := proxy.ValidateClientSettings(endpoint); code != "" {
+		return proxy.Proxy{}, false, errors.New("published client settings are invalid")
 	}
 	if settings.QUIC != nil {
 		endpoint.QUIC = &proxy.QUIC{UpMbps: settings.QUIC.UpMbps, DownMbps: settings.QUIC.DownMbps, CongestionControl: settings.QUIC.CongestionControl, UDPRelayMode: settings.QUIC.UDPRelayMode}

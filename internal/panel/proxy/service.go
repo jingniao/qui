@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -172,6 +173,22 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	// the tunnel resource and are written only by the canvas.
 	if !generated && input.Settings.Forward.HasRelaySettings() {
 		return Inbound{}, errors.New("GOST 中继证书由隧道资源管理，不能在入站中填写")
+	}
+	if input.RotateRealityKey && (input.Settings.Security != desiredstate.SecurityReality || input.Settings.Reality == nil) {
+		return Inbound{}, errors.New("Reality key rotation requires a Reality inbound")
+	}
+	if input.InternalRelay && input.Settings.HasServerSettings() {
+		return Inbound{}, errors.New("Reality/xhttp currently require a user inbound; internal relay outbound mapping is unavailable")
+	}
+	if r := input.Settings.Reality; r != nil && (input.RotateRealityKey || r.PrivateKey == "" && r.PublicKey == "") {
+		key, err := ecdh.X25519().GenerateKey(rand.Reader)
+		if err != nil {
+			return Inbound{}, err
+		}
+		copy := *r
+		copy.PrivateKey = base64.RawURLEncoding.EncodeToString(key.Bytes())
+		copy.PublicKey = base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes())
+		input.Settings.Reality = &copy
 	}
 	if input.InternalRelay {
 		input.SubscriptionVisible = false

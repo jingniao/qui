@@ -71,6 +71,20 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 		return core.RenderedConfig{}, err
 	}
 	capabilities, detectErr := a.DetectCapabilities(ctx)
+	for _, inbound := range state.Inbounds {
+		if inbound.Settings.HasServerSettings() {
+			if detectErr != nil || capabilities.ServerSettingsContractVersion != desiredstate.SettingsContractVersion {
+				return core.RenderedConfig{}, errServerSettingsUnavailable
+			}
+			capability := desiredstate.CoreSettingsCapability{Core: "xray", Version: capabilities.ServerSettingsContractVersion}
+			for _, c := range capabilities.ServerSettingsCombinations {
+				capability.Combinations = append(capability.Combinations, desiredstate.SettingsCombination{Protocol: c.Protocol, Direction: c.Direction, Security: c.Security, Transport: c.Transport, Flow: c.Flow})
+			}
+			if err := desiredstate.RequireInboundServerSettings("xray", capability, inbound.Protocol, inbound.Settings); err != nil {
+				return core.RenderedConfig{}, errServerSettingsUnavailable
+			}
+		}
+	}
 	at := time.Now().UTC()
 	if a.Now != nil {
 		at = a.Now()

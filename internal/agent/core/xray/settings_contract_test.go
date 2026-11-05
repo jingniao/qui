@@ -5,16 +5,13 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
+	"encoding/json"
 	"testing"
 
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
-// M1 stores and structurally validates the server-private xhttp/Reality settings
-// but ships no renderer for them: the render entry must refuse such a state instead
-// of producing a listener with the fields silently dropped.
-func TestRenderRefusesServerSettingsPendingTheM2Renderer(t *testing.T) {
+func TestRenderServerSettingsUsesTypedPrivateMaterial(t *testing.T) {
 	key, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +30,7 @@ func TestRenderRefusesServerSettingsPendingTheM2Renderer(t *testing.T) {
 	}{
 		{"reality", desiredstate.ProtocolSettings{Security: desiredstate.SecurityReality, Reality: reality}},
 		{"reality vision", desiredstate.ProtocolSettings{Security: desiredstate.SecurityReality, Reality: reality, Flow: "xtls-rprx-vision"}},
-		{"xhttp", desiredstate.ProtocolSettings{Transport: desiredstate.TransportXHTTP, XHTTP: xhttp}},
+		{"reality grpc", desiredstate.ProtocolSettings{Security: desiredstate.SecurityReality, Reality: reality, Transport: "grpc", ServiceName: "s0 grpc"}},
 		{"reality xhttp", desiredstate.ProtocolSettings{Security: desiredstate.SecurityReality, Reality: reality, Transport: desiredstate.TransportXHTTP, XHTTP: xhttp}},
 	}
 	for _, test := range cases {
@@ -45,8 +42,20 @@ func TestRenderRefusesServerSettingsPendingTheM2Renderer(t *testing.T) {
 		if err := state.Validate(); err != nil {
 			t.Fatalf("%s: the typed settings are structurally invalid: %v", test.name, err)
 		}
-		if _, err := RenderAt(context.Background(), state, goldenAt); !errors.Is(err, desiredstate.ErrServerSettingsRendererPending) {
-			t.Fatalf("%s: the renderer accepted settings it cannot apply: %v", test.name, err)
+		rendered, err := RenderAt(context.Background(), state, goldenAt)
+		if err != nil {
+			t.Fatalf("%s: render: %v", test.name, err)
+		}
+		var document configDocument
+		if err := json.Unmarshal(rendered.Data, &document); err != nil {
+			t.Fatal(err)
+		}
+		stream := document.Inbounds[0].Stream
+		if stream == nil || stream.Reality == nil || stream.Reality.PrivateKey != reality.PrivateKey || stream.Reality.Target != reality.HandshakeTarget {
+			t.Fatalf("%s: missing server material", test.name)
+		}
+		if test.settings.XHTTP != nil && (stream.XHTTP == nil || *stream.XHTTP != *xhttp) {
+			t.Fatal("xhttp options changed")
 		}
 	}
 	if _, err := RenderAt(context.Background(), goldenScenarios()[0].state, goldenAt); err != nil {

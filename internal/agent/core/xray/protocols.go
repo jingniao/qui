@@ -11,12 +11,14 @@ import (
 )
 
 type streamSettings struct {
-	Network  string           `json:"network"`
-	Security string           `json:"security"`
-	TLS      *tlsSettings     `json:"tlsSettings,omitempty"`
-	WS       *wsSettings      `json:"wsSettings,omitempty"`
-	GRPC     *grpcSettings    `json:"grpcSettings,omitempty"`
-	Sockopt  *sockoptSettings `json:"sockopt,omitempty"`
+	Network  string                      `json:"network"`
+	Security string                      `json:"security"`
+	TLS      *tlsSettings                `json:"tlsSettings,omitempty"`
+	WS       *wsSettings                 `json:"wsSettings,omitempty"`
+	GRPC     *grpcSettings               `json:"grpcSettings,omitempty"`
+	Reality  *realitySettings            `json:"realitySettings,omitempty"`
+	XHTTP    *desiredstate.XHTTPSettings `json:"xhttpSettings,omitempty"`
+	Sockopt  *sockoptSettings            `json:"sockopt,omitempty"`
 }
 type sockoptSettings struct {
 	Interface      string `json:"interface,omitempty"`
@@ -38,6 +40,12 @@ type wsSettings struct {
 }
 type grpcSettings struct {
 	ServiceName string `json:"serviceName"`
+}
+type realitySettings struct {
+	Target      string   `json:"target"`
+	ServerNames []string `json:"serverNames"`
+	PrivateKey  string   `json:"privateKey"`
+	ShortIDs    []string `json:"shortIds"`
 }
 type vlessAccount struct {
 	ID         string `json:"id"`
@@ -119,7 +127,10 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 	if settings.Transport == "" && settings.Security == "" {
 		return nil, nil
 	}
-	if err := desiredstate.ValidateSettings("vless", settings, false); err != nil {
+	// Legacy transports were checked without server certificate material here.
+	// New server settings must keep their direction, including their private key.
+	validateInbound := inbound && settings.HasServerSettings()
+	if err := desiredstate.ValidateSettings("vless", settings, validateInbound); err != nil {
 		return nil, err
 	}
 	network := settings.Transport
@@ -131,6 +142,10 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 		security = "none"
 	}
 	result := &streamSettings{Network: network, Security: security}
+	if security == desiredstate.SecurityReality {
+		r := settings.Reality
+		result.Reality = &realitySettings{Target: r.HandshakeTarget, ServerNames: r.ServerNames, PrivateKey: r.PrivateKey, ShortIDs: r.ShortIDs}
+	}
 	if security == "tls" {
 		result.TLS = &tlsSettings{ServerName: settings.ServerName}
 		if inbound {
@@ -141,6 +156,9 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 		}
 	}
 	switch network {
+	case desiredstate.TransportXHTTP:
+		copy := *settings.XHTTP
+		result.XHTTP = &copy
 	case "ws":
 		result.WS = &wsSettings{Path: settings.Path}
 		if result.WS.Path == "" {

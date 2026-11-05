@@ -36,6 +36,7 @@ type Inbound struct {
 	HasRealityKey        bool                          `json:"hasRealityKey"`
 }
 type InboundInput struct {
+	RotateRealityKey    bool                          `json:"rotateRealityKey,omitempty"`
 	Core                string                        `json:"core"`
 	Name                string                        `json:"name"`
 	NodeID              string                        `json:"nodeId"`

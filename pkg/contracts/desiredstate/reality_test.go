@@ -110,6 +110,8 @@ func TestRealitySettingsFieldBounds(t *testing.T) {
 		{"no server name", func(r *RealityServerSettings) { r.ServerNames = nil }, "reality requires between one and sixteen server names"},
 		{"empty server name", func(r *RealityServerSettings) { r.ServerNames = []string{""} }, "invalid reality server name"},
 		{"wildcard server name", func(r *RealityServerSettings) { r.ServerNames = []string{"*.example.com"} }, "invalid reality server name"},
+		{"IPv4 server name", func(r *RealityServerSettings) { r.ServerNames = []string{"192.0.2.1"} }, "invalid reality server name"},
+		{"IPv6 server name", func(r *RealityServerSettings) { r.ServerNames = []string{"2001:db8::1"} }, "invalid reality server name"},
 		{"server name with control character", func(r *RealityServerSettings) { r.ServerNames = []string{"site\n.example"} }, "invalid reality server name"},
 		{"server name with space", func(r *RealityServerSettings) { r.ServerNames = []string{"site example"} }, "invalid reality server name"},
 		{"too many server names", func(r *RealityServerSettings) { r.ServerNames = tooManyNames }, "reality requires between one and sixteen server names"},

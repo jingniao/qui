@@ -180,10 +180,15 @@ func decodeRealityKey(value string) ([]byte, error) {
 	return key, nil
 }
 
-// validServerName accepts a concrete DNS name or literal IP. The pinned Reality
+// validServerName accepts a concrete DNS name. TLS clients do not send literal
+// IP addresses as SNI, and every saved name must be usable in a subscription.
+// The pinned Reality
 // implementation matches ClientHello SNI by exact map lookup, not a wildcard.
 func validServerName(name string) bool {
 	if name == "" || len(name) > MaxRealityServerNameLen {
+		return false
+	}
+	if net.ParseIP(name) != nil {
 		return false
 	}
 	for _, char := range name {

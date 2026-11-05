@@ -1,6 +1,8 @@
 import type { ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings } from '../../api';
 import type { CoreName, NodeView } from '../../../nodes/api';
 import { blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
+import { internalRelaySettingsReason, publicReality, serverSettingsReason, validateServerFields } from './serverSettingsModel';
+export { transportChoices, securityChoices, flowChoices, internalRelaySettingsReason, serverSettingsReason, validateServerFields, XHTTP_MODES } from './serverSettingsModel';
 
 export type EditorOrigin = 'list' | 'server';
 export const forcedTLS = (protocol: string) => ['trojan', 'hysteria2', 'tuic'].includes(protocol);
@@ -56,6 +58,7 @@ export interface EditorState {
   addresses: string;
   mtu: number;
   wireguardChanged: boolean;
+  protocolDrafts: Record<string, ProtocolSettings>;
 }
 export function createEditor(serverId = '', original: Inbound | null = null, origin: EditorOrigin = 'list'): EditorState {
   const form: InboundInput = original ? {
@@ -74,13 +77,20 @@ export function createEditor(serverId = '', original: Inbound | null = null, ori
     form.settings.method ||= 'chacha20-ietf-poly1305';
     form.settings.certificate_pem = ''; form.settings.private_key_pem = ''; form.settings.trusted_ca_pem = '';
   }
+  if (form.settings.security === 'reality') {
+    const r = form.settings.reality;
+    form.settings.reality = { public_key: r?.public_key || '', handshake_target: r?.handshake_target || '', server_names: r?.server_names || [], short_ids: r?.short_ids || [] };
+  }
+  if (form.settings.transport === 'xhttp' && !form.settings.xhttp) form.settings.xhttp = { host: '', path: '', mode: '' };
   return { form, origin, original, addresses: original?.settings.wireguard?.addresses.join('\n') || '10.77.0.1/24',
-    mtu: original?.settings.wireguard?.mtu || 1420, wireguardChanged: false };
+    mtu: original?.settings.wireguard?.mtu || 1420, wireguardChanged: false, protocolDrafts: {} };
 }
 export function changeProtocol(state: EditorState, protocol: string) {
   const f = state.form;
+  if (f.protocol !== protocol) state.protocolDrafts[f.protocol] = clone(f.settings);
   f.protocol = protocol;
-  if (state.origin === 'server') {
+  if (state.protocolDrafts[protocol]) f.settings = clone(state.protocolDrafts[protocol]);
+  else if (state.origin === 'server') {
     f.settings = protocol === 'wireguard' ? {} : {
       transport: ['hysteria2', 'tuic'].includes(protocol) ? 'quic' : 'tcp',
       quic: ['hysteria2', 'tuic'].includes(protocol) ? {} : undefined,
@@ -94,6 +104,17 @@ export function changeProtocol(state: EditorState, protocol: string) {
     else f.settings.forward ||= { host: '', port: 443, network: 'tcp' };
     f.subscriptionVisible = false; f.internalRelay = false; f.allowedUserIds = [];
   } else if (state.origin === 'list' && !state.original) f.subscriptionVisible = true;
+}
+
+// Switching fields preserves their inactive drafts. The payload builder alone
+// removes mutually exclusive settings, so switching back restores entered data.
+export function changeTransport(state: EditorState, transport: string) {
+  state.form.settings.transport = transport;
+  if (transport === 'xhttp') state.form.settings.xhttp ||= { host: '', path: '/', mode: 'auto' };
+}
+export function changeSecurity(state: EditorState, security: string) {
+  state.form.settings.security = security;
+  if (security === 'reality') state.form.settings.reality ||= { public_key: '', handshake_target: '', server_names: [], short_ids: [] };
 }
 
 // Match the old list's merge rules, including absent QUIC transport, optional
@@ -127,12 +148,30 @@ export function buildPayload(state: EditorState): InboundInput {
       peers: input.wireguard?.peers || [], mtu: state.mtu
     } };
   }
+  if (p === 'vless') {
+    settings.flow = input.flow || undefined;
+    if (input.security === 'reality' && input.reality) settings.reality = publicReality(input.reality);
+    else delete settings.reality;
+    if (input.transport === 'xhttp' && input.xhttp) settings.xhttp = { host: input.xhttp.host || '', path: input.xhttp.path, mode: input.xhttp.mode };
+    else delete settings.xhttp;
+    if (settings.security === 'reality' || settings.xhttp) {
+      delete settings.method; delete settings.quic; delete settings.wireguard; delete settings.forward;
+    }
+    if (settings.security !== 'tls') {
+      delete settings.certificate_pem; delete settings.private_key_pem; delete settings.trusted_ca_pem; delete settings.server_name;
+    }
+    if (settings.transport !== 'ws') delete settings.path;
+    if (settings.transport !== 'grpc') delete settings.service_name;
+  } else {
+    delete settings.reality; delete settings.xhttp;
+  }
   const payload: InboundInput = { name: state.origin === 'list' ? f.name.trim() : f.name, nodeId: f.nodeId, protocol: p, listen: f.listen, port: f.port,
     enabled: f.enabled, subscriptionVisible: f.internalRelay ? false : f.subscriptionVisible,
     internalRelay: f.internalRelay, defaultOutbound: f.core === 'gost' ? 'direct' : f.defaultOutbound, allowedUserIds: f.allowedUserIds, settings };
   // An empty core means "the node's current primary core" and is omitted from the
   // request, exactly like the Agent contract; a concrete core is sent explicitly.
   if (f.core) payload.core = f.core;
+  if (p === 'vless' && settings.security === 'reality' && f.rotateRealityKey) payload.rotateRealityKey = true;
   return clone(payload);
 }
 
@@ -161,6 +200,7 @@ export function coreReason(server: NodeView | undefined, core: CoreName | ''): s
   if (!cores.length) return '尚未上报核心能力';
   if (!core) {
     const primary = cores.find(item => item.primary) || cores[0];
+    if (primary && blockedCores(server).includes(primary.name)) return '主核心正在添加或移除中（core_pending），请等待新的能力上报';
     return primary ? '' : '主核心不可用';
   }
   if (!cores.some(item => item.name === core)) return `该服务器未上报启用 ${core} 核心`;
@@ -226,6 +266,10 @@ export function randomPort(
 }
 export function validateStep(step: number, state: EditorState, server: NodeView | undefined, inbounds: Inbound[]): string {
   const f = state.form, s = f.settings;
+  if (step === 3 || step === 5) {
+    const role = internalRelaySettingsReason(f.internalRelay, s);
+    if (role) return role;
+  }
   if (step === 1 && (!server || !serverEligible(server))) return '请选择可用服务器';
   if (step === 2) {
     const core = coreReason(server, f.core || '');
@@ -240,6 +284,12 @@ export function validateStep(step: number, state: EditorState, server: NodeView 
     if (!f.name.trim()) return '请输入节点名称';
     if (!Number.isInteger(f.port) || f.port < 1 || f.port > 65535) return '请输入有效的端口 (1-65535)';
     return portConflict(f, inbounds, state.original?.id);
+  }
+  if (step === 3 && hasSecurity(f.protocol)) {
+    const support = serverSettingsReason(server, f.core || '', f.protocol, s);
+    if (support) return support;
+    const fields = validateServerFields(s);
+    if (fields) return fields;
   }
   if (step === 3 && hasSecurity(f.protocol) && (forcedTLS(f.protocol) || s.security === 'tls')) {
     if (!s.certificate_pem?.trim() && !state.original?.settings.certificate_pem && !f.internalRelay) return '请输入 TLS 证书 PEM';
@@ -285,6 +335,11 @@ export function previewPayload(value: InboundInput): Record<string, unknown> {
   if (safe.settings.wireguard) {
     safe.settings.wireguard.secret_key = '（由系统保管）';
     safe.settings.wireguard.peers = [];
+  }
+  if (safe.settings.reality) {
+    const reality = safe.settings.reality as typeof safe.settings.reality & { private_key?: string };
+    delete reality.private_key;
+    if (!reality.public_key || safe.rotateRealityKey) reality.public_key = safe.rotateRealityKey ? '（保存时轮换，公钥将在保存后返回）' : '（保存时生成）';
   }
   return safe;
 }

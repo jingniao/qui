@@ -10,6 +10,7 @@
         <option v-for="item in chains.filter(o => o.nodeIds[0] === form.nodeId && o.enabled)" :key="item.id" :value="'chain:' + item.id">代理链 · {{ item.name }}</option>
       </select></label>
       <label class="block"><input v-model="form.internalRelay" :disabled="editing || form.protocol === 'forward'" @change="form.internalRelay && (form.subscriptionVisible = false)" type="checkbox" /> 内部中转入口</label>
+      <p v-if="internalRelaySettingsReason(form.internalRelay, form.settings)" role="alert" class="text-xs text-ios-orange">{{ internalRelaySettingsReason(form.internalRelay, form.settings) }}</p>
       <label v-if="!form.internalRelay && form.protocol !== 'forward'" class="block"><input v-model="form.subscriptionVisible" type="checkbox" /> 显示在授权用户订阅中</label>
       <p v-if="!form.internalRelay && form.protocol !== 'forward' && !form.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
       <div v-if="!form.internalRelay && form.protocol !== 'forward'" class="space-y-2">
@@ -24,5 +25,6 @@
 <script setup lang="ts">
 import type { InboundInput, Outbound, OutboundGroup, ProxyChain } from '../../api';
 import type { ProxyUser } from '../../../users/api';
+import { internalRelaySettingsReason } from './nodeEditorModel';
 defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: ProxyUser[] }>();
 </script>

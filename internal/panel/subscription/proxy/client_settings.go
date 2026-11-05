@@ -11,6 +11,9 @@ import (
 // ValidateClientSettings validates public connection settings without depending
 // on panel or Agent models. It returns only fixed safe codes and field paths.
 func ValidateClientSettings(p Proxy) (string, string) {
+	if p.Protocol == "vless" && p.Flow != "" && p.Transport != nil && (p.Transport.Type == "grpc" || p.Transport.Type == "xhttp") {
+		return "invalid_protocol_combination", "flow"
+	}
 	if p.TLS != nil && p.TLS.Fingerprint != "" {
 		pin, err := hex.DecodeString(strings.ReplaceAll(p.TLS.Fingerprint, ":", ""))
 		if err != nil || len(pin) != 32 {
@@ -19,6 +22,26 @@ func ValidateClientSettings(p Proxy) (string, string) {
 	}
 	if p.Transport != nil && p.Transport.XHTTP != nil && p.Transport.Type != "xhttp" {
 		return "invalid_protocol_combination", "transport"
+	}
+	if p.Transport != nil && p.Transport.Type == "xhttp" {
+		x := p.Transport.XHTTP
+		if p.Protocol != "vless" || (p.Security != "tls" && p.Security != "reality") || x == nil || p.Transport.Path != "" || p.Transport.ServiceName != "" {
+			return "invalid_xhttp_settings", "transport.xhttp"
+		}
+		if p.Flow != "" {
+			return "invalid_protocol_combination", "flow"
+		}
+		switch x.Mode {
+		case "auto", "packet-up", "stream-up", "stream-one":
+		default:
+			return "unsupported_xhttp_mode", "transport.xhttp.mode"
+		}
+		if len(x.Host) > 253 || strings.ContainsAny(x.Host, " /\\\r\n\t@") || strings.IndexFunc(x.Host, unicode.IsControl) >= 0 {
+			return "invalid_xhttp_settings", "transport.xhttp.host"
+		}
+		if len(x.Path) > 2048 || (x.Path != "" && !strings.HasPrefix(x.Path, "/")) || strings.IndexFunc(x.Path, unicode.IsControl) >= 0 {
+			return "invalid_xhttp_settings", "transport.xhttp.path"
+		}
 	}
 	if p.TLS != nil && p.TLS.ClientFingerprint != "" {
 		if (p.Security != "tls" && p.Security != "reality") || (p.Protocol != "vless" && p.Protocol != "trojan") {
@@ -104,6 +127,16 @@ func ValidateClientSettings(p Proxy) (string, string) {
 // ClientFormatSupportsSettings is the measured capability boundary. Valid public
 // settings may still be unrepresentable in a selected client format.
 func ClientFormatSupportsSettings(p Proxy, format string) bool {
+	if p.Transport != nil && p.Transport.Type == "xhttp" {
+		if format == "uri" || format == "base64" {
+			return true
+		}
+		if format != "clash" || p.Security != "reality" || p.Reality == nil || p.Reality.SpiderX != nil || p.Transport.XHTTP == nil {
+			return false
+		}
+		mode := p.Transport.XHTTP.Mode
+		return mode == "auto" && p.TLS != nil && len(p.TLS.ALPN) == 1 && p.TLS.ALPN[0] == "h2"
+	}
 	if p.Security != "reality" {
 		return true
 	}

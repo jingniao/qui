@@ -49,6 +49,8 @@ const (
 // the text here means a diagnostic can never carry input data: the archive
 // verifier rejects a message that is not exactly the text of its code.
 var diagnosticMessages = map[string]string{
+	"invalid_xhttp_settings":       "xhttp 设置不完整或无效",
+	"unsupported_xhttp_mode":       "暂不支持该 xhttp 模式",
 	"invalid_reality_settings":     "Reality 设置不完整或无效",
 	"invalid_reality_key":          "Reality 公钥格式无效",
 	"invalid_reality_short_id":     "Reality Short ID 格式无效",
@@ -333,6 +335,8 @@ var diagnosticStages = map[string]string{
 // Each entry is the named constant the parser itself passes (see parse.go), so a
 // parser reason can never be stored with a path this verifier would refuse.
 var diagnosticFields = map[string]bool{
+	"transport.xhttp.extra": true,
+	"transport.xhttp":       true, "transport.xhttp.host": true, "transport.xhttp.path": true, "transport.xhttp.mode": true,
 	"reality": true, "reality.publicKey": true, "reality.shortId": true, "reality.spiderX": true,
 	"tls.clientFingerprint": true, "tls.certificateFingerprint": true, "tls.serverName": true, "transport": true, "flow": true,
 	fieldNone: true, fieldCredential: true, fieldTLSInsecure: true, fieldMethod: true,

@@ -396,7 +396,12 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 	}
 	for key := range q {
 		switch key {
-		case "security", "sni", "peer", "servername", "alpn", "type", "path", "serviceName", "flow", "encryption", "pbk", "sid", "spx", "fp":
+		case "extra":
+			if len(q.Get(key)) > 4096 {
+				return p, "oversized_entry", "transport.xhttp.extra"
+			}
+			return p, "unsupported_option", "transport.xhttp.extra"
+		case "security", "sni", "peer", "servername", "alpn", "type", "path", "serviceName", "flow", "encryption", "pbk", "sid", "spx", "fp", "host", "mode":
 		default:
 			return p, "unsupported_transport", queryField(key)
 		}
@@ -443,14 +448,25 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 		}
 	}
 	if transport := q.Get("type"); transport != "" && transport != "tcp" {
-		if transport != "ws" && transport != "grpc" {
+		if transport != "ws" && transport != "grpc" && transport != "xhttp" {
 			return p, "unsupported_transport", fieldType
 		}
 		p.Transport = &proxy.Transport{Type: transport, Path: q.Get("path"), ServiceName: q.Get("serviceName")}
+		if transport == "xhttp" {
+			p.Transport.Path = ""
+			p.Transport.XHTTP = &proxy.XHTTPOptions{Host: q.Get("host"), Path: q.Get("path"), Mode: q.Get("mode")}
+		}
+	}
+	if q.Get("type") != "xhttp" {
+		for _, field := range []string{"host", "mode"} {
+			if _, present := q[field]; present {
+				return p, "invalid_protocol_combination", queryField(field)
+			}
+		}
 	}
 	if p.Security == "reality" {
 		transport := q.Get("type")
-		if _, present := q["path"]; present {
+		if _, present := q["path"]; present && transport != "xhttp" {
 			return p, "invalid_protocol_combination", "query.path"
 		}
 		if _, present := q["serviceName"]; present && transport != "grpc" {
@@ -484,6 +500,12 @@ func (Base64) analyze(content []byte, c *collector) {
 }
 
 type clashEntry struct {
+	XHTTP *struct {
+		Extra yaml.Node `yaml:"extra"`
+		Host  string    `yaml:"host"`
+		Path  string    `yaml:"path"`
+		Mode  string    `yaml:"mode"`
+	} `yaml:"xhttp-opts"`
 	ClientFingerprint string `yaml:"client-fingerprint"`
 	Fingerprint       string `yaml:"fingerprint"`
 	Reality           *struct {
@@ -553,6 +575,13 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 	if decoder.Decode(&entry) != nil {
 		return proxy.Proxy{}, "unsupported_option", fieldEntry
 	}
+	if entry.XHTTP != nil && entry.XHTTP.Extra.Kind != 0 {
+		encoded, _ := yaml.Marshal(&entry.XHTTP.Extra)
+		if len(encoded) > 4096 {
+			return proxy.Proxy{}, "oversized_entry", "transport.xhttp.extra"
+		}
+		return proxy.Proxy{}, "unsupported_option", "transport.xhttp.extra"
+	}
 	p := proxy.Proxy{Name: entry.Name, Protocol: entry.Type, Server: entry.Server, Port: entry.Port, Method: entry.Cipher, Flow: entry.Flow, Credential: proxy.Credential{Username: entry.Username, Password: entry.Password}}
 	if p.Protocol == "ss" {
 		p.Protocol = "shadowsocks"
@@ -600,8 +629,16 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 			return p, "unsupported_transport", fieldGRPCOpts
 		}
 		p.Transport = &proxy.Transport{Type: "grpc", ServiceName: entry.GRPC.Service}
+	case "xhttp":
+		if entry.XHTTP == nil {
+			return p, "invalid_xhttp_settings", "transport.xhttp"
+		}
+		p.Transport = &proxy.Transport{Type: "xhttp", XHTTP: &proxy.XHTTPOptions{Host: entry.XHTTP.Host, Path: entry.XHTTP.Path, Mode: entry.XHTTP.Mode}}
 	default:
 		return p, "unsupported_transport", fieldNetwork
+	}
+	if entry.XHTTP != nil && entry.Network != "xhttp" {
+		return p, "invalid_protocol_combination", "transport.xhttp"
 	}
 	code, field := validation(p)
 	if code != "" {

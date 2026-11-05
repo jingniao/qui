@@ -127,6 +127,16 @@ func Link(endpoint proxy.Proxy) (string, error) {
 		if transport == "grpc" && endpoint.Transport != nil {
 			query.Set("serviceName", endpoint.Transport.ServiceName)
 		}
+		if transport == "xhttp" && endpoint.Transport.XHTTP != nil {
+			x := endpoint.Transport.XHTTP
+			query.Set("path", x.Path)
+			if x.Host != "" {
+				query.Set("host", x.Host)
+			}
+			if x.Mode != "" {
+				query.Set("mode", x.Mode)
+			}
+		}
 		if serverName := tlsServerName(endpoint); serverName != "" {
 			query.Set("sni", serverName)
 		}

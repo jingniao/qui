@@ -125,6 +125,7 @@ type grpcOptions struct {
 
 // clashProxy is one proxy in mihomo's field names; zero fields are omitted.
 type clashProxy struct {
+	XHTTPOptions         *xhttpOptions   `yaml:"xhttp-opts,omitempty"`
 	ClientFingerprint    string          `yaml:"client-fingerprint,omitempty"`
 	Reality              *realityOptions `yaml:"reality-opts,omitempty"`
 	DialerProxy          string          `yaml:"dialer-proxy,omitempty"`
@@ -157,6 +158,11 @@ type clashProxy struct {
 	AllowedIPs           []string        `yaml:"allowed-ips,omitempty"`
 	MTU                  int             `yaml:"mtu,omitempty"`
 	PersistentKeepalive  int             `yaml:"persistent-keepalive,omitempty"`
+}
+type xhttpOptions struct {
+	Host string `yaml:"host,omitempty"`
+	Path string `yaml:"path"`
+	Mode string `yaml:"mode,omitempty"`
 }
 type realityOptions struct {
 	PublicKey string  `yaml:"public-key"`
@@ -401,6 +407,10 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 		case "grpc":
 			value.Network = "grpc"
 			value.GRPCOptions = &grpcOptions{ServiceName: endpoint.Transport.ServiceName}
+		case "xhttp":
+			value.Network = "xhttp"
+			x := endpoint.Transport.XHTTP
+			value.XHTTPOptions = &xhttpOptions{Host: x.Host, Path: x.Path, Mode: x.Mode}
 		default:
 			return fmt.Errorf("不支持的传输方式 %q", transport)
 		}

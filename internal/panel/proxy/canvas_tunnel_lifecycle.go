@@ -107,7 +107,19 @@ func (r *Repository) markTunnelPublication(ctx context.Context, schemeID, batchI
 
 func (s *Service) canvasPublicationUnchanged(ctx context.Context, p *canvasPlan) (bool, error) {
 	if len(p.tunnelIDs) == 0 {
-		return false, nil
+		// A migrated drawing can keep its boxes with no arrows left. It has
+		// no work once its previous publication ownership has been removed.
+		var published string
+		var previous int
+		if err := s.Repository.Database.QueryRowContext(ctx, "SELECT published_at FROM canvas_schemes WHERE id=?", p.schemeID).Scan(&published); err != nil {
+			return false, err
+		}
+		if err := s.Repository.Database.QueryRowContext(ctx, "SELECT count(*) FROM canvas_tunnel_publications WHERE scheme_id=?", p.schemeID).Scan(&previous); err != nil {
+			return false, err
+		}
+		if published == "" || previous != 0 {
+			return false, nil
+		}
 	}
 	for tunnelID := range p.tunnelIDs {
 		t, err := s.Repository.canvasTunnel(ctx, tunnelID)

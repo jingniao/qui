@@ -10,44 +10,46 @@ import (
 )
 
 type Totals struct {
-	Tunnels               int64 `json:"tunnels"`
-	TunnelHops            int64 `json:"tunnelHops"`
-	TunnelObjects         int64 `json:"tunnelObjects"`
-	TunnelRules           int64 `json:"tunnelRules"`
-	PortClaims            int64 `json:"portClaims"`
-	CoreRemoveTasks       int64 `json:"coreRemoveTasks"`
-	NodeTrafficCursors    int64 `json:"nodeTrafficCursors"`
-	CoreTrafficSamples    int64 `json:"coreTrafficSamples"`
-	CanvasTunnels         int64 `json:"canvasTunnels"`
-	CanvasTunnelObjects   int64 `json:"canvasTunnelObjects"`
-	MetricSamples         int64 `json:"metricSamples"`
-	NodeTuning            int64 `json:"nodeTuning"`
-	NodeGroupServers      int64 `json:"nodeGroupServers"`
-	NodeGroupInbounds     int64 `json:"nodeGroupInbounds"`
-	NodeGroupImports      int64 `json:"nodeGroupImports"`
-	NodeLatencyTargets    int64 `json:"nodeLatencyTargets"`
-	LatencySamples        int64 `json:"latencySamples"`
-	ProbeTargets          int64 `json:"probeTargets"`
-	TCPProbes             int64 `json:"tcpProbes"`
-	NodeMeta              int64 `json:"nodeMeta"`
-	PendingTrafficBatches int64 `json:"pendingTrafficBatches,omitempty"`
-	Admins                int64 `json:"admins"`
-	ActiveOwners          int64 `json:"activeOwners"`
-	Sessions              int64 `json:"sessions"`
-	PortalSessions        int64 `json:"portalSessions"`
-	SubscriptionSources   int64 `json:"subscriptionSources"`
-	ImportedProxies       int64 `json:"importedProxies"`
-	SourceGrants          int64 `json:"sourceGrants"`
-	Users                 int64 `json:"users"`
-	Devices               int64 `json:"devices"`
-	Nodes                 int64 `json:"nodes"`
-	NodeGroups            int64 `json:"nodeGroups"`
-	Policies              int64 `json:"policies"`
-	Revisions             int64 `json:"revisions"`
-	CanvasSchemes         int64 `json:"canvasSchemes"`
-	PendingOperations     int64 `json:"pendingOperations"`
-	BackupFileOperations  int64 `json:"backupFileOperations"`
-	RunningBackupJobs     int64 `json:"runningBackupJobs"`
+	CanvasForwardReconcile int64 `json:"canvasForwardReconcile"`
+	TunnelMigrationReport  int64 `json:"tunnelMigrationReport"`
+	Tunnels                int64 `json:"tunnels"`
+	TunnelHops             int64 `json:"tunnelHops"`
+	TunnelObjects          int64 `json:"tunnelObjects"`
+	TunnelRules            int64 `json:"tunnelRules"`
+	PortClaims             int64 `json:"portClaims"`
+	CoreRemoveTasks        int64 `json:"coreRemoveTasks"`
+	NodeTrafficCursors     int64 `json:"nodeTrafficCursors"`
+	CoreTrafficSamples     int64 `json:"coreTrafficSamples"`
+	CanvasTunnels          int64 `json:"canvasTunnels"`
+	CanvasTunnelObjects    int64 `json:"canvasTunnelObjects"`
+	MetricSamples          int64 `json:"metricSamples"`
+	NodeTuning             int64 `json:"nodeTuning"`
+	NodeGroupServers       int64 `json:"nodeGroupServers"`
+	NodeGroupInbounds      int64 `json:"nodeGroupInbounds"`
+	NodeGroupImports       int64 `json:"nodeGroupImports"`
+	NodeLatencyTargets     int64 `json:"nodeLatencyTargets"`
+	LatencySamples         int64 `json:"latencySamples"`
+	ProbeTargets           int64 `json:"probeTargets"`
+	TCPProbes              int64 `json:"tcpProbes"`
+	NodeMeta               int64 `json:"nodeMeta"`
+	PendingTrafficBatches  int64 `json:"pendingTrafficBatches,omitempty"`
+	Admins                 int64 `json:"admins"`
+	ActiveOwners           int64 `json:"activeOwners"`
+	Sessions               int64 `json:"sessions"`
+	PortalSessions         int64 `json:"portalSessions"`
+	SubscriptionSources    int64 `json:"subscriptionSources"`
+	ImportedProxies        int64 `json:"importedProxies"`
+	SourceGrants           int64 `json:"sourceGrants"`
+	Users                  int64 `json:"users"`
+	Devices                int64 `json:"devices"`
+	Nodes                  int64 `json:"nodes"`
+	NodeGroups             int64 `json:"nodeGroups"`
+	Policies               int64 `json:"policies"`
+	Revisions              int64 `json:"revisions"`
+	CanvasSchemes          int64 `json:"canvasSchemes"`
+	PendingOperations      int64 `json:"pendingOperations"`
+	BackupFileOperations   int64 `json:"backupFileOperations"`
+	RunningBackupJobs      int64 `json:"runningBackupJobs"`
 
 	// Machine traffic is durable host accounting, separate from proxy traffic.
 	MachineTrafficSettings int64 `json:"machineTrafficSettings"`
@@ -88,7 +90,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	for _, item := range []struct {
 		table string
 		count *int64
-	}{{"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
+	}{{"canvas_forward_reconcile", &result.Totals.CanvasForwardReconcile}, {"tunnel_migration_report", &result.Totals.TunnelMigrationReport}, {"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}} {
 		var present int
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&present); err != nil {
 			return Inventory{}, err

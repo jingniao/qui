@@ -14,6 +14,7 @@ import (
 // restore. Add new migrations here; never change an existing entry.
 var applied = map[string]string{
 	"0130_relay_subscription_snapshot.sql":              "ee92e7f1577aee972f8f5dbc3f4a236a362c48c96e9d424fd939851550dbd122",
+	"0131_canvas_forward_migration.sql":                 "857e463e8db5a0ec9e538e3ecff8bbb6c76fc2fd73d99308a8af18458b620c5a",
 	"0123_node_metrics_tuning.sql":                      "567ce275bb026da13bfc44209ba04b25f2933d22f4258643085005f51910dd8b",
 	"0001_bootstrap.sql":                                "c76cde72c30e69b3427f5c1f445dd5851ba1612bd998d5d08a5a423c5236d42b",
 	"0002_auth.sql":                                     "d8759fd5eb5cfd836991dc655e44c4dfbcba9168d34ab12556c037734b809dc1",

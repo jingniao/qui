@@ -111,6 +111,7 @@ GET /api/v1/traffic/reconciliation
 GET /api/v1/traffic/summary
 GET /api/v1/tunnel-rules
 GET /api/v1/tunnels
+GET /api/v1/tunnels/migration-report
 GET /api/v1/users
 GET /api/v1/users/{id}
 GET /api/v1/users/{id}/devices

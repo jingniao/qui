@@ -254,6 +254,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	if err := proxyService.Repository.ReconcileCanvasTunnels(context.Background()); err != nil {
 		return nil, err
 	}
+	if err := proxyService.Repository.ReconcileCanvasForwards(context.Background()); err != nil {
+		return nil, err
+	}
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
 	policyService := &policy.Service{Repository: &policy.Repository{Database: database}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository}
 	proxyService.Policies = policyService

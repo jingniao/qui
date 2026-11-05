@@ -68,9 +68,10 @@ type TunnelDeployer interface {
 	PublishTunnels(context.Context, string, string, []NodeSnapshot) (CanvasPublishResult, error)
 }
 type managedInbound struct {
-	owner PortOwner
-	input InboundInput
-	id    string
+	legacy bool
+	owner  PortOwner
+	input  InboundInput
+	id     string
 }
 type tunnelPublication struct {
 	relays   map[string]published.Relay
@@ -111,18 +112,21 @@ func (r *Repository) refuseManagedInbound(ctx context.Context, inboundID string)
 	return nil
 }
 func (r *Repository) managedInbounds(ctx context.Context, owner PortOwner) ([]managedInbound, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT object_id FROM tunnel_objects WHERE owner_kind=? AND owner_id=? ORDER BY object_id", owner.Kind, owner.ID)
+	rows, err := r.Database.QueryContext(ctx, "SELECT object_id,EXISTS(SELECT 1 FROM canvas_forward_reconcile,json_each(migrated_ids) m WHERE m.value=owner_id) FROM tunnel_objects WHERE owner_kind=? AND owner_id=? ORDER BY object_id", owner.Kind, owner.ID)
 	if err != nil {
 		return nil, err
 	}
 	ids := []string{}
+	legacy := map[string]bool{}
 	for rows.Next() {
 		var objectID string
-		if err = rows.Scan(&objectID); err != nil {
+		var migrated bool
+		if err = rows.Scan(&objectID, &migrated); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		ids = append(ids, objectID)
+		legacy[objectID] = migrated
 	}
 	err = rows.Err()
 	rows.Close()
@@ -135,7 +139,7 @@ func (r *Repository) managedInbounds(ctx context.Context, owner PortOwner) ([]ma
 		if e != nil {
 			return nil, e
 		}
-		result = append(result, managedInbound{owner: owner, id: objectID, input: inboundInputOf(in, in.DefaultOutbound)})
+		result = append(result, managedInbound{legacy: legacy[objectID], owner: owner, id: objectID, input: inboundInputOf(in, in.DefaultOutbound)})
 	}
 	return result, nil
 }
@@ -397,6 +401,9 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 		for _, old := range p.previous {
 			if old.owner.Kind == in.owner.Kind && old.owner.ID == in.owner.ID && old.input.NodeID == in.input.NodeID {
 				in.id = old.id
+				if old.legacy && migrationOwnerCurrent(p, in.owner) {
+					in.input = old.input
+				}
 				used[old.id] = true
 				break
 			}

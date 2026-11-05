@@ -3,14 +3,19 @@ package proxy
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
+	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/platform/vault"
 )
 
 // ValidateTunnels accepts pre-0129 archives and validates every persisted draft,
 // sealed credential set and claim before recovery migrates or serves a backup.
 func ValidateTunnels(ctx context.Context, database *sql.DB, key *vault.Vault) error {
+	if err := validateTunnelMigrationSchema(ctx, database); err != nil {
+		return err
+	}
 	var applied, present int
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0129_tunnels.sql'").Scan(&applied); err != nil {
 		return err
@@ -120,6 +125,97 @@ func ValidateTunnels(ctx context.Context, database *sql.DB, key *vault.Vault) er
 	}
 	if invalid != 0 {
 		return errors.New("invalid tunnel object ownership or claim")
+	}
+	if err = database.QueryRowContext(ctx, `SELECT count(*) FROM tunnel_objects o JOIN canvas_tunnel_objects c ON c.object_kind=o.object_kind AND c.object_id=o.object_id`).Scan(&invalid); err != nil {
+		return err
+	}
+	if invalid != 0 {
+		return errors.New("duplicate tunnel object ownership")
+	}
+	// Retained claims must describe a draft or a still running owned listener.
+	if err = database.QueryRowContext(ctx, `SELECT count(*) FROM port_claims c WHERE NOT EXISTS(
+	 SELECT 1 FROM tunnel_hops h WHERE c.owner_kind='tunnel_hop' AND h.tunnel_id=c.owner_id AND h.node_id=c.node_id AND h.listen_port=c.port
+	 UNION ALL SELECT 1 FROM tunnel_rules r WHERE c.owner_kind='rule' AND r.id=c.owner_id AND r.entry_node_id=c.node_id AND r.listen_port=c.port
+	 UNION ALL SELECT 1 FROM tunnel_objects o JOIN inbounds i ON i.id=o.object_id WHERE c.owner_kind=CASE o.owner_kind WHEN 'tunnel' THEN 'tunnel_hop' ELSE 'rule' END AND o.owner_id=c.owner_id AND i.node_id=c.node_id AND i.port=c.port
+	 UNION ALL SELECT 1 FROM canvas_tunnel_objects o JOIN inbounds i ON o.object_kind='inbound' AND i.id=o.object_id WHERE c.owner_kind='canvas' AND o.tunnel_id=c.owner_id AND i.node_id=c.node_id AND i.port=c.port
+	 UNION ALL SELECT 1 FROM tunnels t WHERE c.owner_kind='tunnel_hop' AND t.id=c.owner_id AND t.published_at IS NOT NULL AND t.status<>'published' AND NOT EXISTS(SELECT 1 FROM tunnel_objects o WHERE o.owner_kind='tunnel' AND o.owner_id=t.id)
+	 UNION ALL SELECT 1 FROM tunnel_rules r WHERE c.owner_kind='rule' AND r.id=c.owner_id AND r.published_at IS NOT NULL AND r.status<>'published' AND NOT EXISTS(SELECT 1 FROM tunnel_objects o WHERE o.owner_kind='rule' AND o.owner_id=r.id)
+	)`).Scan(&invalid); err != nil {
+		return err
+	}
+	if invalid != 0 {
+		return errors.New("port claim does not match owner listener")
+	}
+	var snapshots int
+	if err = database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0130_relay_subscription_snapshot.sql'").Scan(&snapshots); err != nil {
+		return err
+	}
+	if snapshots != 0 {
+		rows, err := database.QueryContext(ctx, "SELECT id,published_snapshot FROM tunnel_rules WHERE published_snapshot IS NOT NULL")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, raw string
+			if err = rows.Scan(&id, &raw); err != nil {
+				return err
+			}
+			var snapshot published.Relay
+			if err = json.Unmarshal([]byte(raw), &snapshot); err != nil || snapshot.ID != id || snapshot.Port < 1 || snapshot.Port > 65535 || (snapshot.Network != "tcp" && snapshot.Network != "udp" && snapshot.Network != "both") {
+				return errors.New("invalid published tunnel snapshot")
+			}
+		}
+		return rows.Err()
+	}
+	return nil
+}
+
+func validateTunnelMigrationSchema(ctx context.Context, database *sql.DB) error {
+	var snapshotApplied, snapshotColumn int
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0130_relay_subscription_snapshot.sql'").Scan(&snapshotApplied); err != nil {
+		return err
+	}
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('tunnel_rules') WHERE name='published_snapshot'").Scan(&snapshotColumn); err != nil {
+		return err
+	}
+	if snapshotApplied != snapshotColumn {
+		return errors.New("tunnel publication snapshot schema mismatch")
+	}
+	var applied, present int
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0131_canvas_forward_migration.sql'").Scan(&applied); err != nil {
+		return err
+	}
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('canvas_forward_reconcile','tunnel_migration_report')").Scan(&present); err != nil {
+		return err
+	}
+	if present != applied*2 {
+		return errors.New("canvas forward migration schema mismatch")
+	}
+	if applied == 0 {
+		return nil
+	}
+	if snapshotApplied == 0 {
+		return errors.New("canvas forward migration requires tunnel snapshot schema")
+	}
+	var count int
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM canvas_forward_reconcile WHERE id=1 AND done IN (0,1) AND json_valid(migrated_ids) AND json_type(migrated_ids)='array' AND (done=1 OR json_array_length(migrated_ids)=0)").Scan(&count); err != nil {
+		return err
+	}
+	if count != 1 {
+		return errors.New("invalid canvas forward migration marker")
+	}
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM canvas_forward_reconcile,json_each(migrated_ids) WHERE type<>'text' OR length(value)=0").Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return errors.New("invalid migrated tunnel identity")
+	}
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM tunnel_migration_report WHERE length(tunnel_id)=0 OR length(trim(name))=0 OR length(trim(reason))=0").Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return errors.New("invalid tunnel migration report")
 	}
 	return nil
 }

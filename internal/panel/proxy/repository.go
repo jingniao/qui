@@ -70,11 +70,14 @@ func mask(settings desiredstate.ProtocolSettings) desiredstate.ProtocolSettings 
 	}
 	return settings
 }
-func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool) (Inbound, error) {
+
+// storedInbound reads the persisted input without capability or ownership views,
+// including when migration already holds the writer transaction.
+func (r *Repository) storedInbound(ctx context.Context, q tunnelDatabase, inboundID string) (Inbound, error) {
 	var inbound Inbound
 	var encoded []byte
 	var users string
-	err := r.Database.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt, &inbound.Core)
+	err := q.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt, &inbound.Core)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inbound, ErrNotFound
 	}
@@ -85,6 +88,11 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 		return inbound, err
 	}
 	inbound.Settings, err = r.decode(encoded)
+	return inbound, err
+}
+
+func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool) (Inbound, error) {
+	inbound, err := r.storedInbound(ctx, r.Database, inboundID)
 	if err != nil {
 		return inbound, err
 	}

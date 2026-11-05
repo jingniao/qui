@@ -169,6 +169,9 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 	if err := (&proxy.Repository{Database: candidateDatabase}).ReconcileCanvasTunnels(ctx); err != nil {
 		return candidate, err
 	}
+	if err := (&proxy.Repository{Database: candidateDatabase, Vault: current.ConfigurationVault}).ReconcileCanvasForwards(ctx); err != nil {
+		return candidate, err
+	}
 	manifest := CandidateManifest{Version: 1, PreparedAt: time.Now().UTC().Format(time.RFC3339Nano), SourcePlanSHA256: prepared.ManifestSHA256, SnapshotID: plan.Source.ID, ArchiveSHA256: plan.ArchiveSHA256, EvidenceID: evidenceID, EvidenceSHA256: evidence.SHA256, Target: plan.Target}
 	_, err = archive.Examine(ctx, evidenceDirectory, filepath.Join(evidenceDirectory, evidenceID+".pcb"), password, func(result archive.Result, evidenceWork string) error {
 		if result.SHA256 != evidence.SHA256 {

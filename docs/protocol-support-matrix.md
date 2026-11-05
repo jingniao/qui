@@ -2,7 +2,7 @@
 
 本表描述当前源码支持与上游边界，不替代运行证据。基础协议证据见[验收矩阵](v1-acceptance.md) §9.12、§10.4，v1.2 与 v1.3 实机结果见 §11–12。真实主机范围为 linux/amd64；arm64 仅做 qemu-user 模拟，正式浏览器走查未执行。
 
-v1.4 开发分支 M1 的画布迁移不增加协议能力：普通转发保留原核心，旧 GOST 两节点隧道保留契约 3 与单段密封凭据；三节点路径仍须 X1b 的独立第二段凭据与契约 4。迁移规则订阅默认隐藏，linked 判定要求目标公网地址及已发布用户入站端口唯一匹配，其他目标保持 manual。迁移与备份验证见 [M1 报告](v1.4-m1-report.md)，实机验收留给 A1。
+v1.4 开发分支未发布，迁移头 0131（正式版 0128）。画布转发迁移不增加协议能力：普通转发保留原核心，两节点 GOST 保留单段材料，三节点须独立第二段材料及契约 4。规则默认订阅隐藏，目标公网地址及已发布用户入站端口唯一匹配才 linked，否则 manual。转换不改运行修订；遗留项由 Owner 读 migration-report，详见 [M1 报告](v1.4-m1-report.md)。A1 验收待补，不把旧两节点实机结论推广到新三节点路径。
 
 本表描述未修改的官方上游能力：Xray 26.x 官方发布核、sing-box 1.14.x 官方核及加上游标签的 qui 构建。fork 专有维度（`egress_proof`、`inbound_bytes`）已删除，不使用补丁核；账户统计和门控的新能力单独协商。
 
@@ -59,7 +59,7 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 
 ### GOST 转发的池、范围与限流（v1.3 G2）
 
-`ForwardSettings` 的目标池、`strategy`/`max_fails`/`fail_timeout`、端口范围 `port_end`、双向字节限速与 TCP 连接上限属于 GOST 设置契约**版本 2**（`CoreCapability.gost_contract_version >= 2`，当前 Agent 上报 3）。它们按“是否出现”判定：Xray 与 sing-box 转发携带任一字段时，`desiredstate.ValidateForwardCore`、面板保存/发布（`proxy.ValidateInboundForwardOptions`）与 Agent 解析主核心后的校验三处一致拒绝，不会静默丢弃；`State.Validate` 只对显式指定核心的入站判定，留空跟随主核心的入站在 `MultiRuntime` 解析后再判。
+`ForwardSettings` 的目标池、`strategy`/`max_fails`/`fail_timeout`、端口范围 `port_end`、双向字节限速与 TCP 连接上限属于 GOST 设置契约**版本 2**（`CoreCapability.gost_contract_version >= 2`，开发分支 Agent 上报 4，正式版 1.3.1 为 3）。它们按“是否出现”判定：Xray 与 sing-box 转发携带任一字段时，`desiredstate.ValidateForwardCore`、面板保存/发布（`proxy.ValidateInboundForwardOptions`）与 Agent 解析主核心后的校验三处一致拒绝，不会静默丢弃；`State.Validate` 只对显式指定核心的入站判定，留空跟随主核心的入站在 `MultiRuntime` 解析后再判。
 
 | 能力 | GOST 3.3.2 | 依据与边界 |
 | --- | --- | --- |
@@ -71,16 +71,19 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 | UDP 限速 | 支持（待实机） | `tcp,udp` 转发的 UDP 服务同样渲染 limiter，真实 UDP 执行需实机门禁确认；UDP 目标失效后的故障切换不承诺（G0 未确认缺失 UDP 响应会产生拨号错误，`fifo` 的切换实测只在 TCP 上验证） |
 | 每转发字节 | 节点总量 | 只进入 `gost` 节点计数（AGENTS §21），没有用户额度、设备门控或域名归属，也不提供每转发的历史表/接口 |
 
-### GOST 中继隧道（v1.3 G3）
+### GOST 隧道与规则（v1.4 未发布）
 
-画布的 `port_forward` 连接可以把 `tunnelProtocol` 设为 `gost`：入口节点的 GOST 转发经出口节点的 `relay` 监听访问自己的目标池（仍是最多两跳），凭据由面板按隧道生成并密封，`tunnel` 与 `proxy_chain` 继续走原 Trojan 实现，客户端方案不接受 `gost`。两侧节点都必须上报 GOST 核心与设置契约**版本 3**（`CoreCapability.gost_contract_version >= 3`，当前 Agent 上报 3）。
+隧道管理提供 GOST TLS＋mTLS 的 entry → [mid] → exit（最多三台不同服务器）；两节点各跳契约 ≥3，三节点各跳 ≥4。每接收跳一个共享监听，中间监听只有一个下一跳，分段材料独立密封。不选隧道的规则是直接转发，有 GOST 优先，否则主 Xray/sing-box。GOST 固定 3.3.2、仅 linux/amd64，能力从 Agent 上报契约判断。规则只支持单目标/单端口；目标池/范围/限流仍在普通 GOST forward 入站中配置。
+
+画布只新增 proxy_chain/tunnel 的 tls/wireguard 代理中转，出口可为 qui 入站（独立内部凭据）或前一跳上的外部 SOCKS5/HTTP/Shadowsocks/Trojan/VLESS 出站，按 TCP/UDP 能力过滤；旧 port_forward/gost 连接只读至迁移。仅画布无范围时保留 8443/51820，新隧道/规则无默认端口回退。
 
 | 能力 | GOST 3.3.2 | 依据与边界 |
 | --- | --- | --- |
 | 中继认证（mTLS） | 支持 | `handler: relay` + `listener: {type: tls, tls: {certFile,keyFile,caFile}}`，`caFile` 让客户端证书成为必需；监听类型 `mtls` 是**多路复用** TLS，不用于双向认证 |
 | 入口链 | 支持 | 链挂在 `handler.chain`（不是 service 级）：`connector: relay` + `dialer: {type: tls, tls: {certFile,keyFile,caFile,serverName}}`；未知链名会被静默直连，所以 Agent 渲染后自检引用 |
+| 中间 relay | 契约 4 | 监听认证前段，handler.chain 拨下一段；旧契约 3 不接受中间设置；运行结果见 [X0 记录](v1.4-x0-findings.md)，A1 待补 |
 | 客户端证书要求 | 强制 | 无证书或异构 CA 的客户端被拒；G0 §6.3 实测表现为“接受后空回复”，不是拒绝握手 |
-| TCP/UDP 经中继 | 支持 | 转发服务照旧带目标池；TCP 与 UDP 主机证据见验收矩阵 §12（RC-E 补测 UDP） |
+| TCP/UDP 经中继 | 已实现 | UDP 经 TLS/TCP 到出口再发 UDP，可能队头阻塞；旧两节点主机证据见验收矩阵 §12，新三节点及恢复验收待 A1 |
 | 凭据轮换 | 有损 | 一次普通发布先出口后入口，两次部署之间隧道短暂中断；删除隧道不撤销离线节点上的旧凭据 |
 | 计量 | 节点总量 | 中继服务不计入节点总量（只重复搬运已计字节），计入的是入口节点的转发服务；仍无用户额度、设备门控与域名归属 |
 
@@ -137,6 +140,10 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 | forward 入站 | 不进入订阅 | 不进入订阅 | 不进入订阅 | 不进入订阅 |
 
 格式别名、预览警告与显式 `?format=` 优先规则见 AGENTS §10.3；UA 表仍为空，不能宣称客户端自动识别通过。每格式按自己能力过滤，不把不支持协议改写为另一协议。
+
+linked 中转端点来自规则成功发布快照，且须启用/对用户可见并通过目标入站授权与凭据检查；保留协议字段，仅换入口地址/端口，补显式原 TLS server name。命名为目标端点名追加 ` · 经 <入口节点>`，原端口消歧保留。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality 当前未实现，不因中转新增支持。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
+
+目标看到中继源地址，设备限制把同一中继后的客户端合为一个来源；账户额度仍在目标计量，规则转发只计节点总量，中间/出口 relay 服务排除。
 
 | 核心/能力 | 每用户字节与额度 | 在线设备估计/门控 |
 | --- | --- | --- |

@@ -6,7 +6,9 @@
 
 最新正式版 **v1.3.1**（2026-11-03，tag → `ebe8301`），无新增迁移。us2-node（面板＋Agent）、uk-node（Agent）、alpine-node（Alpine LXC/OpenRC Agent）均运行 1.3.1；迁移头为 0128。
 
-实机只验收 linux/amd64；arm64 只做 qemu-user 模拟，正式浏览器走查未执行。已验收内容、未验证项与限制见[验收矩阵](docs/v1-acceptance.md) §12 和[发布说明 1.3.1](docs/release-notes-1.3.1.md)。当前没有下一版本计划。
+v1.4 在 `feat/v1.4-tunnels` 开发，未发布；分支迁移头为 0131，正式版仍为 0128。范围见[v1.4 计划](docs/v1.4-plan.md)，发布说明见[1.4.0 草稿](docs/release-notes-1.4.0.md)。
+
+正式版实机只验收 linux/amd64；arm64 只做 qemu-user 模拟，正式浏览器走查未执行。已验收内容、未验证项与限制见[验收矩阵](docs/v1-acceptance.md) §12 和[发布说明 1.3.1](docs/release-notes-1.3.1.md)。v1.4 的 A1 验收另行记录，不沿用正式版结论。
 
 入口：[文档导航](docs/README.md)、[架构](docs/architecture.md)、[部署与开发门禁](docs/deployment.md)、[运维](docs/operations.md)、[协议矩阵](docs/protocol-support-matrix.md)。版本历史集中在[变更记录](docs/changelog.md)，完成的计划与报告在[归档](docs/archive/README.md)。
 
@@ -66,7 +68,7 @@ Go 单文件程序，由 systemd 或 Alpine/OpenRC（含 LXC）管理；通过 g
 
 Xray、sing-box 承载用户接入、身份、分流、Direct/Block、代理出站、中转/链与统计；协议按能力上报（第 11–13 节）。GOST 固定官方 3.3.2、仅 linux/amd64，只承载 forward（TCP/UDP）与加密中继，不承载用户身份、凭据、订阅、额度、门控、源观测、域名记录、出站资源、策略或出口组；转发按自身目标直连，仅要求启用的 direct 默认出站。
 
-`desiredstate.Validate` 与 `ValidateCoreProtocol` 拒绝 GOST 的非 forward 入站；空 core 随主核心，是否可安装由 Hello.gost_core_supported 决定，不推断版本号。GOST 不可排 cores 首项，安装参数同样限制；必须保留至少一个 Xray/sing-box（last_core）。画布 GOST 中继要求两端已启用 GOST、契约 3、出口公网地址，见第 14 节。
+`desiredstate.Validate` 与 `ValidateCoreProtocol` 拒绝 GOST 的非 forward 入站；空 core 随主核心，是否可安装由 Hello.gost_core_supported 决定，不推断版本号。GOST 不可排 cores 首项，安装参数同样限制；必须保留至少一个 Xray/sing-box（last_core）。隧道管理要求各跳已启用 GOST，两节点契约至少 3，三节点至少 4；接收跳须公网地址或连接地址覆盖，见第 14 节。
 
 # 5. 总体架构
 
@@ -117,8 +119,12 @@ Viewer 默认不能：
 └─ 节点拓扑
 
 节点配置
-├─ 节点列表（入站、出站、出口组）
-└─ 中转搭建（服务端与客户端方案）
+├─ 节点列表（入站、出站、出口组；添加中转）
+├─ 节点分组
+├─ 隧道管理
+│  ├─ 隧道
+│  └─ 规则
+└─ 中转方案（代理中转画布）
 
 分流控制
 ├─ 客户端策略（全局订阅规则模板）
@@ -191,6 +197,8 @@ SOCKS5 UDP 无用户归属；sing-box 其余三种会为同一用户重建关闭
 
 面板完整源地址仅存内存，不入库/日志/备份；Owner/门户均掩码 IPv4 /24、IPv6 /48。Xray CLI 临时 JSON 权限 0600，调用返回即删除。
 
+隧道/规则后的目标看到中继源地址，目标设备限制把同一中继后的客户端合为一个来源，不透传原始源地址。账户流量仍在目标用户入站计量；GOST 及隧道仅 linux/amd64（D10）。
+
 ## 9.3 凭据管理
 
 凭据类型根据协议确定，包括：
@@ -242,6 +250,10 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 12. 输出订阅内容。
 
 输出名称按节点与协议命名：同一节点同一协议有多个入站时追加端口（`节点 · 协议 · 端口`），只有一个时保持 `节点 · 协议`。
+
+关联目标入站的中转规则按成功发布快照追加订阅端点；仅纳入已发布、启用且对用户可见的规则，仍须通过目标入站的授权、可用性、协议与已发布凭据检查。保留目标协议、凭据、传输与 TLS 等协议字段，仅把连接地址/端口换为入口地址/规则端口；原隐含 TLS server name 显式写为目标地址。名称为 `<目标节点> · <协议> · 经 <入口节点>`（目标协议原有端口消歧保留），直接端点保持自身可见性。Hysteria2/TUIC/WireGuard 按 UDP、其余按 TCP 与规则 network 过滤，各格式继续执行自身省略规则；不承诺额外 Reality 支持。
+
+草稿修改与 D8 目标变化不推进订阅快照，pending_delete 仍保留上次快照，成功发布移除后才消失。0130 前无快照的规则须再次成功发布才进入订阅。节点中转 API 的 `shareLink` 仅 Owner 可得，使用首个有合格已发布凭据的用户生成预览；Viewer、无合格凭据或 URI 无法表达时为 null，草稿预览不代表已进入订阅。
 
 订阅格式支持：
 
@@ -327,11 +339,15 @@ Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥�
 
 订阅隐藏（`subscriptionVisible=false`）的用户入站不会获得用户凭据，发布后渲染为停用，编辑器对这种组合给出提示。
 
-由画布创建或接管的入站不能在入站编辑器中改名：面板按 `canvas_tunnel_objects` 的归属行判定（不按名称前缀），普通保存若改了名字会被拒绝（“该入站由画布隧道管理，不能在入站编辑器中修改名称。”），画布自身的生成路径仍可改名并由回滚撤销。未归属的入站可以自由改名，即使名字看起来像生成的。入站接口不暴露归属，页面因此不额外提示。
+隧道/规则生成入站返回 `managedBy:{kind,id,name}`，按 `tunnel_objects` 的 ID 归属管理；普通入站 PUT/DELETE 返回 409 `managed_by_tunnel`，须在隧道管理修改/删除并发布。目标入站被关联规则引用时，删除返回 409 `inbound_has_relays` 与 `rules:[{id,name}]`，包括尚待发布删除的规则。
+
+由画布创建或接管的入站不能在入站编辑器中改名：面板按 `canvas_tunnel_objects` 的归属行判定（不按名称前缀），普通保存若改了名字会被拒绝（“该入站由画布隧道管理，不能在入站编辑器中修改名称。”），画布自身的生成路径仍可改名并由回滚撤销。未归属的入站可以自由改名，即使名字看起来像生成的。入站接口不额外暴露画布归属，页面因此不额外提示。
 
 端口转发（`forward`）在 GOST 核心上另有可选字段（设置契约版本 2）：`targets[]`（1–32 个有序 `{host,port}`，与旧 `host`/`port` 互斥）、`strategy`（`round` 轮询／`fifo` 主备，默认 `round`）、`max_fails`（1–100，默认 1）、`fail_timeout`（1–3600 秒的整数秒，默认 `5s`）、`port_end`（含尾端，`Inbound.Port` 为起端，最多 256 个端口）、`bandwidth_in_bps`／`bandwidth_out_bps`（0 或 1024–1000000000000 字节/秒，0 为不限）与 `max_connections`（0–100000，仅 TCP 服务；UDP-only 转发拒绝该字段）。这些字段按“是否出现”判定：显式写 0 或默认值也算已设置，Xray／sing-box 转发携带它们会被共同校验、面板保存/发布与 Agent 渲染三处一致拒绝，不会被静默丢弃；选择非 GOST 核心前必须先清除。渲染时 qui 自己展开端口（GOST 的 `addr` 不支持范围），每个（端口、传输）一个服务，名字为 `fwd-<入站ID>-<端口>-<tcp|udp>`，每个服务都带完整有序目标池与独立的选择器与限速/连接限值，不会把第 n 个目标映射到第 n 个端口。每节点最多渲染 1024 个生产服务。
 
-同一节点上的入站监听端口按 Agent 的节点级规则在全部核心与端口转发之间唯一（同一数字端口即使传输不同也不能复用），转发范围占用的每个数字都算已占用；协议、转发能力、WireGuard 与设备门控按入站所属核心的能力校验；组件正在被添加或移除（任务未落定）期间 `core` 不可选，保存草稿与发布都会拒绝，错误码 `core_pending`。
+同一节点按数字端口跨核心检查，不区分 TCP/UDP，转发范围每个端口均占用。手动保存检查启用入站对启用入站的冲突；禁用入站保存只检查持久声明。`port_claims` 无论启停始终保留，发布变更/删除成功前旧声明也保留。自动分配跳过所有入站（含禁用及范围）与声明；`ports/check` 同样报告禁用入站供提示，故其占用提示不等于手动保存必然失败。共享检查按 ID 排除自身，Agent 校验为最终门禁。
+
+协议、转发能力、WireGuard 与设备门控按入站所属核心的能力校验；组件正在被添加或移除（任务未落定）期间 `core` 不可选，保存草稿与发布都会拒绝，错误码 `core_pending`。
 
 # 13. 出站代理模块
 
@@ -362,17 +378,21 @@ Block；Direct；备用出站；备用出口组；备用代理链。
 
 # 14. 协议转换中转
 
-节点终止协议 A，识别用户/目标、匹配规则后建立协议 B 下一跳；用户不需中转节点地址/凭据，节点间凭据由中央维护并与用户隔离。
+中转分为隧道管理、节点“添加中转”和代理中转画布。隧道转发字节，不终止目标用户协议；画布由节点终止协议 A、按策略以协议 B 建立下一跳，用户凭据与节点间凭据隔离。
 
-服务器方案引用 `canvas_tunnels`，`canvas_tunnel_objects` 按对象类型/ID 唯一归属，计划/发布/端口复用/清理不按名称前缀认领。0124 为每条旧连接建独立隧道，不跨方案合并；启动/恢复事务只认领已发布、当前名精确且无歧义的旧对象。未认领对象保留并可 Owner 显式认领，冲突返回 legacy_object/objectId；改名不失归属。共享依赖一起发布（接口见第 27.12 节）。
+隧道为 entry → [mid] → exit，最多三台不同服务器、两段中继；仅 GOST relay over TLS＋mTLS。两节点要求各跳契约 ≥3，三节点各跳 ≥4；接收跳使用公网地址或 `connectHost`。每个接收跳为同一隧道的规则共享一个监听，中间只知道一个下一跳。分段独立密封 CA/叶子证书，私钥不进 API、计划或日志。
 
-中转搭建展示“加密中转”“端口转发”。连接上的 listenPort/targetHost/targetPort 仅适用于 port_forward，主机复用 forward 校验；旧布局回退实例端口与目标服务器公网 IP，生成名不变。多条转发可连同一对服务器，以连接 ID 区分。显式监听与其他启用入站/本计划监听冲突则拒绝，自身重发不冲突；自动分配跳过全部已配置入站（含禁用）及范围，见第 27.5 节。画布只生成单目标/单端口，池/范围/限流/连接上限由节点编辑器配置。
+规则指定入口监听、network=tcp/udp/both、可选隧道及最终目标；不选隧道即直接转发，优先用 GOST，否则主 Xray/sing-box。linked 关联用户入站，由目标服务器地址与入站端口派生，隧道出口就是目标服务器时用 127.0.0.1；manual 固定 host/port，不生成用户订阅。D8：目标公网地址或入站端口变化在同一事务递增草稿版本，已发布规则标为 needs_publish；读取派生新目标，上次成功发布快照保持不动。删除目标前须先发布移除关联规则。
 
-画布发布先整体校验捕获的依赖，跳过仅作为依赖且运行状态与启用意图相同的服务器；忽略修订号、用户访问集按集合比较、空等于缺失，但历史 NULL 启用意图不等于空集合。跳过者无修订/批次/回滚项；画布自身服务器仍发布，依赖有变才发布。裁剪后按批外中继目标当前发布状态校验；显式 POST /api/v1/deployment-batches/relay 仍发布全体。
+节点“添加中转”可选择已有隧道，为本节点用户入站创建 linked 规则（隧道入口须为其他节点，ownerNodeId 为目标节点）；也可新建中转方案，以当前节点预选为代理入口。订阅与分享见第 10.3 节。
 
-GOST 的 fifo 主备切换在失败窗口内先失败一次，超连接上限也是接受后立即关闭，目标失效不等于监听不健康。参数按每个展开服务独立生效，统计只进节点总量（第 12、21 节）。
+隧道/规则保存只写草稿；draft 从未发布，modified 为手动修改，needs_publish 为目标变化，published 为成功发布，pending_delete 为待发布移除且只读。未发布对象可直接删除；已发布对象保留行、旧监听声明及快照直到成功移除。隧道有规则引用时返回 tunnel_in_use（包括待删除规则）。
 
-`port_forward.tunnelProtocol=gost` 使入口转发经出口 relay（TLS＋客户端 CA）访问自身目标池，最多两跳；tunnel/proxy_chain 保留 Trojan，客户端方案拒绝 gost。两端须 GOST＋契约 3，出口须公网 IP，中继端口从出口范围分配并参与节点级唯一性。密封凭据见第 29 节，顺序/轮换见第 16 节。
+生成对象按 `tunnel_objects` 的 owner kind/ID 归属，不按名称认领；`port_claims` 保存节点级数字端口，改端口保留新旧声明直到成功发布。隧道和规则必须手填端口或从 `node_meta.port_range_start/end` 分配，无默认端口回退。自动建议不预留，保存时再查并声明，重发复用已保存端口；冲突语义见第 12 节。
+
+中转方案画布只创建代理中转（proxy_chain/tunnel，tls 或 wireguard）；出口可为 qui 用户入站或外部 SOCKS5/HTTP/Shadowsocks/Trojan/VLESS 出站。qui 入站出口生成专用内部监听和独立中转凭据，不改变原用户入站；外部出站属于前一跳服务器，作为最终出站且按 TCP/UDP 能力校验。relay/exit 实例的 relayPortMode/relayPort 优先于旧 tunnelPort；自动分配复用稳定端口，无范围时画布仍保留 TLS 8443 / WireGuard 51820，范围耗尽则失败。
+
+画布内部资源仍用 `canvas_tunnels/canvas_tunnel_objects` 的 ID 归属与共享依赖。旧 port_forward/gost 连接在迁移前只读保留，可删除，不可新增或改动；一次性转换及遗留原因见第 26.9、31 节。GOST 目标池、范围、限流与连接上限仍属普通 forward 入站（第 12 节），不由新画布创建。
 
 # 15. 出口组模块
 
@@ -398,11 +418,13 @@ GOST 的 fifo 主备切换在失败窗口内先失败一次，超连接上限也
 
 # 16. 代理链模块
 
-共享范围覆盖服务器执行的 tunnel、proxy_chain 与 port_forward；对象归属、旧对象认领与改名规则见第 14 节。客户端链继续自包含，拒绝 tunnelId。相同 tunnelId 只生成一组对象；已发布且未变的共享隧道可无操作发布。共享跳的链和入口是发布依赖；两个方案对同一入口声明不同隧道路径时拒绝计划/发布。删除方案不删除仍共享的对象；最后一个方案移除引用后，在其下一次发布中按原引用阻塞规则清理。删除仍在使用的隧道返回 409 tunnel_in_use 与方案列表。不同隧道不会自动接管对方的监听对象。
+隧道管理计划/发布接受 tunnelIds/ruleIds；选隧道纳入其规则，选规则纳入隧道，隧道有改动时一并纳入其他拨号规则。计划只读，展示服务器、监听、路由、变更、冲突和依赖；发布重新规划，复用部署批次按 exit → mid → entry 执行，失败反向回滚。仅全部成功推进版本及订阅快照；失败恢复生成对象、保留草稿与声明。未变发布为 unchanged，无修订或批次。
 
-GOST 中继的发布顺序：含 GOST 隧道的方案固定先发布出口节点（中继监听），再发布入口节点（拨它的链），批次回滚按相反顺序；轮换凭据由下一次普通发布完成切换，出口与入口两次部署之间隧道短暂中断（见第 29 节）。没有 GOST 隧道的节点保持原有顺序。
+轮换隧道凭据仅生成新草稿，须再计划/发布才切换；接收监听先于拨号方，切换期间可短暂中断，不保留既有 TCP/UDP 会话。中间/出口 relay 健康仅指进程与监听，不代表目标可达。
 
-中转搭建中的“代理链连接”并入“加密中转”；持久化类型 `proxy_chain` 与 `tunnel` 均保留，服务器规划语义相同。客户端方案也接受两者为同一条 mihomo dialer-proxy 路径的兼容类型，不创建服务器隧道，逐跳授权与单路径校验不变。
+画布代理中转仍按 `canvas_tunnels` 共享对象与依赖：相同 tunnelId 只生成一组对象，未变可无操作发布；不同方案对同一入口声明冲突路径则拒绝。删除方案不删仍共享对象，最后引用移除后须发布清理；在用画布隧道删除返回 409 tunnel_in_use 与方案列表。不同资源不自动接管监听。客户端方案自包含，拒绝 tunnelId，proxy_chain/tunnel 均表达 mihomo dialer-proxy 单路径。
+
+画布发布先整体校验依赖，跳过仅为依赖且运行配置、启用意图未变的服务器（忽略修订号、用户访问按集合比较、空等于缺失，历史 NULL 启用意图不等于空集合）；跳过者无修订或回滚项。裁剪后按批外目标当前已发布状态校验；显式中继批次仍发布全体。新画布不接受端口转发/GOST 隧道连接。
 
 代理链支持 A→B、A→B→C，各跳协议可不同，不支持无限多跳。
 
@@ -520,6 +542,8 @@ Xray 总量=账户计数＋已渲染 forward 的原生入站计数。渲染生�
 
 `relay-<入站ID>-<端口>` 重复搬运入口已计的转发载荷，**不计节点总量**；无用户额度、设备限制、域名归属。
 
+隧道规则入口/直接规则的转发字节只进核心/节点总量；中间与出口 relay 服务继续排除，避免重复计量。中转用户的账户字节在目标用户入站计入原额度，不从隧道或规则字节推算用户用量。
+
 **整机月流量**：独立于代理统计、用户额度和订阅。心跳上报非 lo 网卡累计字节、bootId、IPv4 默认路由网卡，面板在同一事务按（服务器、网卡、本地日期）写差值到 `node_machine_traffic_daily`。首次采样、重启、计数回退只建基线；同次启动断线量可补，跨日按时间比例分摊，跨重启缺口不能补。
 
 长期保留各网卡日行，摘要只选一张：显式 interfaceName，否则最近新鲜心跳的默认路由网卡；不同网卡不合并/拼接，改网卡重算所选网卡本期。周期按面板时区重置日 1–31 起算半开区间，短月夹到月末；sum=入＋出，outbound=出，max=本期两方向合计较大者。无本期日行/无法解析网卡为 null（“—”）；有日行而缺新鲜采样为 stale（“截至上次采样”）。
@@ -597,7 +621,7 @@ GOST 目标按序写 forwarder.nodes（target-0…），selector={strategy,maxFa
 
 GOST 出口为 handler:relay＋listener:tls＋客户端 CA；入口链挂 handler.chain，connector:relay＋dialer:tls（CA/服务器名）。证书材料按入站/半边写 `runtime/gost/tls/<入站>/<半边>/`，目录 0700、文件 0600，旧修订回滚不覆盖在用证书。
 
-v1.4 X0 的契约 4 允许中间 relay listener 携带一个 `gost_hops` 下一跳，链仍挂 handler.chain；前一段监听与后一段拨号的证书分别保存，中间 relay 同出口 relay 一样不计节点总量。旧契约 3 的入口链（最多两个原生 hop）和出口渲染保持兼容。新隧道限定入口→可选单个中间→出口（最多三台不同服务器），全局拓扑及按上报契约拒绝旧 Agent 由 X1 发布端接入共享校验；X0 不改面板。实核验收待 Linux，见 [X0 记录](docs/v1.4-x0-findings.md)。
+GOST 当前上报契约 4，允许中间 relay listener 携带一个 `gost_hops` 下一跳，链挂 handler.chain；前段监听与后段拨号证书分别保存，中间与出口 relay 不计节点总量。旧契约 3 的入口链（最多两个原生 hop）和出口渲染兼容。隧道管理限定入口→可选单个中间→出口（最多三台不同服务器），发布前按每跳上报能力校验两节点 ≥3、三节点 ≥4，不从二进制版本推断。TLS relay 无生产 UDP 监听，UDP 由 TLS/TCP 封装至出口再发往目标；健康只测进程与监听，不代表握手/目标可达。运行证据见 [X0 记录](docs/v1.4-x0-findings.md)，A1 结果待补。
 
 **TCP 探测**只测建连耗时/失败率，不是带宽、ICMP、UDP/QUIC 可用性。手动历史每节点/目标最多 100 条；定时每分钟测启用未删除、心跳 ≤45 秒且支持的节点，每目标 3×3000 ms。默认目标用 probe_targets.scheduled（最多 5）；节点可自定义最多 5 个，custom=true＋空表=不测，false=清空自定义并继承。队列按 source 隔离、手动优先，在途结束或 2 分钟到期才派下一条。
 
@@ -791,7 +815,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 
 ## 26.9 迁移与兼容规则
 
-v1.4 开发分支的 M1 使用新增 0131（0130 已用于订阅发布快照）：启动及恢复在 0124 认领后运行一次性 `ReconcileCanvasForwards`，同一事务迁移已发布且归属完整的画布端口转发。普通转发变规则，GOST 转发变两节点隧道及规则；原入站 ID、端口、设置与密封凭据不改，监听为 manual，订阅默认隐藏。已发布目标入站与目标服务器公网地址、端口唯一匹配时才关联，否则保留手动目标。迁移连接从布局移除；无法确定的连接保留，Owner 可读 `GET /api/v1/tunnels/migration-report` 的中文原因。标记保存已迁移 ID，用于首次无修改发布保留旧物化形态；不重新按名称认领。
+启动及恢复在 0124 认领后运行 0131 的一次性 `ReconcileCanvasForwards`，同一事务转换已发布且归属完整的画布端口转发。普通转发变规则，GOST 转发变两节点隧道及规则；原入站 ID、端口、设置与密封凭据不改，监听为 manual，订阅默认隐藏。目标公网地址与成功运行修订中的用户入站端口唯一匹配且与当前行一致才 linked，否则保留 manual。转换连接从布局移除；无法确定的连接保留，Owner 可读 migration-report 的中文原因。标记保存已迁移 ID，首次无修改发布保留旧物化形态；完成后不自动重试，事务失败可重试，不重新按名称认领。
 
 共享隧道迁移（仅在升级/恢复数据库时应用）：
 
@@ -815,6 +839,9 @@ v1.4 开发分支的 M1 使用新增 0131（0130 已用于订阅发布快照）�
 | 0126 `node_machine_traffic` | `node_machine_traffic_settings`（每服务器 method/interface_name/可空 allowance_bytes 1–2^53-1/reset_day 1–31，默认 sum/''/NULL/1）、`node_machine_traffic_daily`（主键（服务器、网卡、本地日期），非负 rx/tx 字节，长期保留，非遥测）、`node_machine_traffic_cursors`（每（服务器、网卡）的 boot_id 与累计字节，用于增量）；无时区列，按写入时的面板时区分日（第 21 节） |
 | 0127 `gost_core` | 五表核心 CHECK 接受 gost：inbounds.core（空/xray/sing-box/gost），core_update_tasks、core_remove_tasks、node_traffic_cursors、core_traffic_samples；保留 ID/外键/归属触发器、adding、活跃任务唯一索引和 core_traffic_time，node_traffic_samples 视图语义不变。nodes.gost_core_supported 为 0/1，默认 0，恢复清零/重连刷新 |
 | 0128 `gost_tunnels` | `canvas_tunnels.gost_material`（可空密封列；每条隧道一套 CA ＋ 服务端/客户端叶子证书，CA 私钥签发后丢弃、有效期 10 年；轮换替换整列并更新 `updated_at`）。不新增表，隧道归属表、外键与触发器不变 |
+| 0129 `tunnels` | `tunnels`（密封材料、草稿/发布标记）、有序 `tunnel_hops`、`tunnel_rules`、节点数字端口唯一的 `port_claims`、ID 归属 `tunnel_objects`；目标公网地址/入站端口变化触发关联规则草稿失效 |
+| 0130 `relay_subscription_snapshot` | `tunnel_rules.published_snapshot`：无凭据的成功发布端点快照；旧发布不回填猜测地址，须再次成功发布 |
+| 0131 `canvas_forward_migration` | `canvas_forward_reconcile` 单次标记及 migrated_ids、`tunnel_migration_report` 持久原因；启动/恢复事务转换合格画布转发，保留运行对象与凭据 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -970,7 +997,7 @@ SSE 只推送：
 
 Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /canvas-tunnels/legacy-objects、POST /canvas-tunnels/{id}/adopt；写入要求 CSRF 并记录审计。服务端连接接受 tunnelId 引用，其余配置由资源读取；客户端拒绝该字段。PUT 隧道要求 updatedAt；端点修改在同一事务中重定向所有引用方案并更新方案令牌。旧内嵌写法按方案 ID + 连接 ID 创建/更新该方案最初创建的隧道，显式引用不隐式修改资源。规划响应含 tunnels:[{tunnelId,affectedSchemes:[{id,name}]}]，冲突增加 reason/objectId。
 
-`POST /api/v1/canvas-tunnels/{id}/rotate-credentials`（Owner ＋ CSRF，体为 `{updatedAt}`，操作日志“轮换隧道凭据”）为 GOST 隧道签发新一代凭据并把它标记为 modified；只读视图只给代数、服务器名、到期与指纹。
+`POST /api/v1/canvas-tunnels/{id}/rotate-credentials`（Owner ＋ CSRF，体为 `{updatedAt}`，操作日志“轮换隧道凭据”）仅用于仍属旧画布的 GOST 资源，签发新一代材料并标 modified；只读视图只给代数、服务器名、到期与指纹。已迁移对象使用第 27.13 节隧道管理接口。
 
 画布规划接口 `POST /api/v1/canvas-schemes/{id}/plan`（Owner，会话与 CSRF 同 publish）。无正文或 `{}` 规划已保存布局；`{"layout": <CanvasLayout>}` 规划未保存布局。返回 `ok`、按服务器的 `creates/updates/removes`、逐连接状态、监听端口冲突和警告；失败原因另有 `message`。接口仅读取，不写对象、方案、审计或 Revision。它复用发布的规划、生成对象识别、端口冲突与删除引用检查；客户端方案返回 `ok:false`，客户端已有 publish 路径不变。更新表示发布会执行同名对象的保存（不表示字段一定变化）；计划与执行之间状态变化仍可能导致发布失败。
 
@@ -1027,6 +1054,24 @@ POST   /portal/subscription/reset
 
 `GET /sub/{token}/rules/{id}` 用订阅 Token 授权，输出客户端 classical provider 文本，撤销 Token 后返回 403；不使用管理员 Cookie。格式与协议矩阵见相应文档。
 
+## 27.13 隧道管理与节点中转
+
+以下路径均以 `/api/v1` 为前缀。GET 允许 Owner/Viewer，唯 migration-report 仅 Owner；全部 POST/PUT/DELETE（含只读 plan 和端口建议）要求 Owner＋CSRF，实际写操作记审计。门户会话不能访问。PUT 与轮换须带上次读取的 updatedAt，不匹配为 409 stale；DELETE 无该请求字段。请求/响应字段详见[v1.4 API 合同](docs/v1.4-plan.md#5-api-contract-fixed-before-u1a-backend-must-match)。
+
+| 接口 | 合同 |
+| --- | --- |
+| `GET/POST /tunnels`、`PUT/DELETE /tunnels/{id}` | 列表 `{items,total}`；保存返回 Tunnel；删除 204，在用返回 409 tunnel_in_use 与 rules，已发布则 pending_delete |
+| `POST /tunnels/{id}/rotate-credentials` | `{updatedAt}` → Tunnel，仅轮换草稿 |
+| `GET/POST /tunnel-rules`、`PUT/DELETE /tunnel-rules/{id}` | GET 可按 tunnelId/nodeId 筛选；保存返回 TunnelRule；已发布删除待成功发布移除 |
+| `GET /nodes/{id}/ports/check?port=` | `{nodeId,port,free,usedBy?}`，含禁用入站占用提示 |
+| `POST /nodes/{id}/ports/allocate` | `{count?}` → `{ports:[]}`，只建议不预留；保存时重新查冲突 |
+| `POST /tunnels/plan` | `{tunnelIds:[],ruleIds:[]}` → `{ok,servers,conflicts,warnings,message?}`，仅读取 |
+| `POST /tunnels/publish` | 同一选择体 → `{batchId?,servers}`；逐节点 revision 可空，status 为 applied/unchanged/failed/rolled_back/skipped |
+| `GET /tunnels/migration-report` | Owner 专用，`{items:[{tunnelId,name,reason}]}`；单次转换记录，不是实时问题列表 |
+| `GET/POST /nodes/{id}/relays` | GET 返回 `{items:[{rule,shareLink}]}`；POST `{tunnelId,inboundId,portMode,listenPort?,subscriptionVisible,name?}` 创建本目标节点的 linked 规则，network=both；shareLink 权限见第 10.3 节 |
+
+端口错误：409 port_in_use（含 usedBy）、400 port_out_of_range、409 no_free_port（无范围或耗尽）。auto 无 listenPort 则保存时分配；带建议端口则空闲时保留，后续重发固定。pending_delete 只读并继续保留声明/引用。
+
 # 28. gRPC 节点通信
 
 节点通信使用 Enroll 与双向流 Connect。
@@ -1037,7 +1082,7 @@ Hello；Heartbeat；Capabilities；ApplyResult；HealthResult；TrafficBatch；A
 
 Heartbeat 省略即缺测，实测 0 保留。v1.3 增加 `boot_id`（字段 34）与 `default_route_interface`（字段 35）供整机流量记账（第 21 节）：两者各自独立，读取失败只省略自己的字段，旧面板忽略未知字段。整机网卡的累计字节沿用既有 `interfaces`（字段 20）。
 
-GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool）表示该 Agent 懂 GOST 组件的安装与移除——即使 GOST 尚未安装；`CoreCapability.gost_contract_version`（字段 9，uint32）表示 GOST 设置契约版本（0 = 不支持，1 = 基础转发，2 = 池/范围/限流，3 = 加密中继，4 = 中间 relay 的下一跳链；v1.4 X0 源码报告 4，正式版 1.3.1 为 3）。GOST 设置随既有 `ApplyCommand.desired_state_json` 下发，不占用独立字段；没有新的 Welcome 标志，多核心与节点流量协商照旧。面板把 Hello 标志持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新，不用 Agent 版本号文本推断；旧 Agent 无法收到 GOST 分配。
+GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool）表示该 Agent 懂 GOST 组件的安装与移除——即使 GOST 尚未安装；`CoreCapability.gost_contract_version`（字段 9，uint32）表示 GOST 设置契约版本（0 = 不支持，1 = 基础转发，2 = 池/范围/限流，3 = 加密中继，4 = 中间 relay 的下一跳链；开发分支 Agent 报告 4，正式版 1.3.1 为 3）。隧道发布按各跳能力要求两节点 ≥3、三节点 ≥4。GOST 设置随既有 `ApplyCommand.desired_state_json` 下发，不占用独立字段；没有新的 Welcome 标志，多核心与节点流量协商照旧。面板把 Hello 标志持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新，不用 Agent 版本号文本推断；旧 Agent 无法收到 GOST 分配。
 
 中央端下发消息包括：
 
@@ -1072,7 +1117,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 ## 29.3 凭据安全
 
 - 用户凭据与节点间凭据分离、订阅 Token 的哈希查找与加密副本规则、节点私钥不上传中央端：见第 9.3 与 11.3 节。
-- 节点间 GOST 中继凭据与用户凭据完全分离：每条隧道一套 CA、出口服务端证书与入口客户端证书，存为 `canvas_tunnels.gost_material` 的 Vault 密封列；CA 私钥签发后不保留（没有别的东西用它签名），有效期 10 年；API、计划与日志只暴露代数、服务器名、到期与指纹。轮换即换整套；删除隧道不会撤销离线节点上仍生效的凭据（见[运维手册](docs/operations.md)第 20 节）。
+- 节点间 GOST 凭据与用户凭据隔离，隧道管理存 `tunnels.gost_material`，旧画布材料存 `canvas_tunnels.gost_material`；三节点按段独立 CA 与服务端/客户端叶子证书。Vault 密封、CA 私钥签发后丢弃、有效期 10 年；API/计划/日志只露代数、服务器名、到期与指纹。轮换换整套草稿，发布才生效；删除不会撤销离线节点仍生效的凭据（见[运维手册](docs/operations.md)第 20–21 节）。
 - 敏感配置写入节点时限制文件权限
 - 配置和备份中的敏感字段加密保存
 
@@ -1135,6 +1180,9 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | 多核心配置/任务 | inbounds.core、nodes 的 multi_core_supported/node_traffic_supported/gost_core_supported、health_checks/restart_requests.core、core_update_tasks.adding、core_remove_tasks 纳入备份；validateMultiCore 要求结果 JSON 与 id/component/revision/code/status 一致，不能同组件同时排添加/移除。移除表清空后复制归档，queued/running 更新/移除均变 unconfirmed、不重发；能力位待重连刷新 |
 | node_traffic_cursors、core_traffic_samples | 随访问数据恢复，避免同段字节重复计量 |
 | canvas_tunnels.gost_material | 随加密备份且纳入校验，原样恢复不重签；不自动发布，界面 modified，Owner 下次发布才下发 |
+| tunnels、tunnel_hops、tunnel_rules（含 published_snapshot） | 加密备份/清单/校验覆盖；保留端口、版本与密封材料，不重签；恢复已发布对象标 modified，须 Owner 显式发布 |
+| port_claims、tunnel_objects | 保留 ID 归属与历史声明；拒绝孤立/重复归属、缺失或冲突声明，不自动重分配 |
+| canvas_forward_reconcile、tunnel_migration_report | 保留单次完成标记、已迁移 ID 与原因；0129 前归档先升级再转换，已完成的不自动重试；事务失败可重试，转换不改运行修订/入站/证书 |
 | node_machine_traffic_settings/daily/cursors | 三表长期保留、全部加密备份，非 7 天遥测；validateMachineTraffic 校验设置/日期/字节/主外键，0126 前无表合法，清单有三项计数。冻结当前库已到 0126 则整组复制当前表（空表也权威），否则保留归档；不丢当前量、不重复/复活旧量 |
 
 调度随停机/进程内恢复取消并等待退出，新实例仅一个循环。其他模块的会话结束、安全状态与撤销访问保守合并规则见第 26.9、29 节。

@@ -1,6 +1,6 @@
 # 客户端策略 UI 对应后端开发规划
 
-状态：已批准，按[英文版 §13 审查决定](client-policy-backend-plan.en.md#13-review-decisions-approved-with-amendments)修订后实施中。日期：2026-11-04（America/Los_Angeles）。
+状态：已批准，按[英文版 §13 审查决定](client-policy-backend-plan.en.md#13-review-decisions-approved-with-amendments)修订；Phase A–D 已实施，剩余事项见[英文版 §14](client-policy-backend-plan.en.md#14-implementation-status-and-remaining-items)。日期：2026-11-04（America/Los_Angeles）。
 
 审查基线：`feat/v1.4-tunnels`，HEAD `8134314`，数据库迁移头 `0131`，包含本机尚未提交的客户端策略 UI 调整。以下描述区分现有实现和建议实现，不作为已交付能力说明。
 

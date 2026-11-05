@@ -1,6 +1,6 @@
 # Backend Development Plan for the Client Policy UI
 
-Status: approved with the amendments in §13 (November 4, 2026); implementation in progress. Review date: November 4, 2026, America/Los_Angeles.
+Status: approved with the amendments in §13 (November 4, 2026); Phases A–D implemented, remaining items in §14. Review date: November 4, 2026, America/Los_Angeles.
 
 English translation of [the Chinese plan](client-policy-backend-plan.md). This translation preserves the original scope and recommendations; it does not introduce additional implementation commitments.
 
@@ -341,3 +341,54 @@ Reviewed against `258c1c7` (the UI baseline committed on `feat/v1.4-tunnels`). T
 10. **Code style.** No defensive re-checks of state that a single code path already guarantees. Validation stays at the API boundary (strict decode plus `rules.Validate`).
 
 Implementation runs phase by phase (A → D). Each phase is reviewed, committed locally and gated on the Linux test machine (`scripts/check.sh` plus the real-core suite) before the next phase starts.
+
+## 14. Implementation Status and Remaining Items
+
+Status on November 5, 2026: Phases A–D are implemented and committed locally on `feat/v1.4-tunnels`; nothing is pushed.
+
+| Commit | Content |
+| --- | --- |
+| `42491ab` | Phase A: profile store, activation, legacy API sync, local import, backup (Linux gate passed) |
+| `c708c35` | Phase B: `@endpoint` members, keyword filters, `emptyPolicy`, candidate listing |
+| `6cfc6c5` | Phase C: draft and saved-profile preview through the one render path; rule navigation |
+| `33d893c` | Phase D: service-set references and delete protection, paginated selectors, release notes |
+| `1bbb836` | `mihomo -t` case for nested, filtered, endpoint and empty-REJECT groups |
+
+### 14.1 Verification Still Open
+
+1. **Linux gate for Phases B–D.** `scripts/check.sh` plus the real-core suite on `1bbb836` is still running. Only Phase A (`42491ab`) has passed so far.
+2. **Mihomo routing behavior (§11 item 10).** The real mihomo check only covers config acceptance (`mihomo -t`). No real-core test sends traffic through a purpose group → region group → endpoint path or confirms that an empty REJECT group actually blocks. Extend `routing_test.go` (`TestMihomoRoutesProxyDirectAndReject`) with a nested-group and empty-REJECT case.
+3. **Authenticated browser walkthrough.** Not performed. Walk through the following in a browser:
+   - profile cards: create, edit, activate and delete
+   - a 409 conflict that keeps the draft
+   - the import preview for localStorage cards
+   - region-group keywords and "Add selected endpoints"
+   - "Resolve members" and the YAML preview context
+   - the filtered "Edit rules" view
+   - rule-set references and delete blocking
+4. **Two-Owner and restore scenarios (§11 items 1, 2, 13).** These are covered by Go tests only. Check them by hand:
+   - two browsers seeing the same activation
+   - repeating the localStorage import
+   - restoring an archive from before 0132 and an archive that includes it
+
+### 14.2 Open Product Decisions
+
+1. **Preview user choice.** The API accepts `userId`, but the page only uses automatic selection, which it labels as automatic. §7's "advanced preview context" for picking another user is not built yet. Decide whether it is needed.
+2. **Batch input when editing a rule (§6.1).** Today batch expansion happens only when creating rules; editing an existing rule replaces it as a single rule. Confirm that this is the intended behavior, then document it.
+3. **Disabling a referenced rule set.** Since Phase D, saving a profile that has an *enabled* RULE-SET rule pointing at a *disabled* service set is rejected. Disabling a set used by the active profile therefore blocks re-saving that profile until the rule is disabled or the set is re-enabled. Confirm this, or relax it to a warning.
+
+### 14.3 Known Limitations (Accepted, Documented)
+
+1. A profile save validates service-set references through another module's read, so it can race with a concurrent service-set delete (one-line comment in `policy.Repository.DeleteService`). A rendering warning covers the effect.
+2. The page loads profile details with one GET per profile (at most 50). The list endpoint deliberately omits templates.
+3. When no preview user exists, the preview returns only the diagnostic. It does not check whether the requested format is known.
+4. Every subscription render that includes panel service rules looks up each set's enabled state, so that previews can warn.
+
+### 14.4 Documentation Still Open
+
+- `docs/architecture.md` and `docs/protocol-support-matrix.md` do not describe the profile library, `@endpoint` members, keyword filters or `emptyPolicy` yet (§10 last item). AGENTS.md, `docs/changelog.md` and `docs/release-notes-1.4.0.md` are updated.
+- `docs/v1-acceptance.md` has no entry for the items in §14.1 yet.
+
+### 14.5 Out of Scope (Unchanged From §9)
+
+Client telemetry and remote control, per-user profile assignment, arbitrary YAML-field editing, and panel-side fetching of remote rule content.

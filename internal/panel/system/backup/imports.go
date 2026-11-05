@@ -1,9 +1,11 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/proxy"
@@ -84,7 +86,18 @@ func validateImports(ctx context.Context, db *sql.DB, v *vault.Vault) error {
 			if e == nil {
 				if item.payload {
 					var p proxy.Proxy
-					e = json.Unmarshal(raw, &p)
+					decoder := json.NewDecoder(bytes.NewReader(raw))
+					decoder.DisallowUnknownFields()
+					e = decoder.Decode(&p)
+					if e == nil {
+						var extra any
+						if decoder.Decode(&extra) != io.EOF {
+							e = ErrArchive
+						}
+					}
+					if e == nil && p.Protocol == "shadowsocks" && proxy.SS2022(p.Method) {
+						e = importer.ValidateProxy(p)
+					}
 					if e == nil && (p.Name == "" || p.Protocol == "" || p.Port < 1 || p.Port > 65535 || p.DialerProxy != "" || p.ClientChain != "") {
 						e = ErrArchive
 					}

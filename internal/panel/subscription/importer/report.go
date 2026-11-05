@@ -49,20 +49,23 @@ const (
 // the text here means a diagnostic can never carry input data: the archive
 // verifier rejects a message that is not exactly the text of its code.
 var diagnosticMessages = map[string]string{
-	"invalid_entry":              "该行不是可识别的节点链接",
-	"invalid_endpoint":           "节点名称、地址或端口无效",
-	"missing_credential":         "缺少该协议必需的凭据",
-	"invalid_uuid":               "凭据中的 UUID 格式无效",
-	"invalid_credential":         "凭据格式无效",
-	"unsupported_protocol":       "暂不支持该协议",
-	"unsupported_cipher":         "暂不支持该加密方式",
-	"unsupported_transport":      "暂不支持该传输方式",
-	"unsupported_security":       "暂不支持该安全方式",
-	"insecure_tls":               "已拒绝跳过证书校验的设置",
-	"oversized_entry":            "该条目超出大小上限",
-	"unsupported_option":         "该条目包含暂不支持的字段",
-	"duplicate_endpoint_content": "与前面的条目完全相同，已跳过",
-	"duplicate_endpoint_key":     "同一来源内名称与协议重复，只保留第一条",
+	"invalid_ss2022_key_encoding": "SS2022 每段密钥必须使用标准带填充的 Base64 编码",
+	"invalid_ss2022_key_length":   "SS2022 密钥长度无效：AES-128 需要 16 字节，AES-256 和 ChaCha20 需要 32 字节",
+	"unsupported_ss2022_identity": "SS2022 仅支持单密钥或 AES 的两段身份密钥，不支持 ChaCha20 身份或更多密钥段",
+	"invalid_entry":               "该行不是可识别的节点链接",
+	"invalid_endpoint":            "节点名称、地址或端口无效",
+	"missing_credential":          "缺少该协议必需的凭据",
+	"invalid_uuid":                "凭据中的 UUID 格式无效",
+	"invalid_credential":          "凭据格式无效",
+	"unsupported_protocol":        "暂不支持该协议",
+	"unsupported_cipher":          "暂不支持该加密方式",
+	"unsupported_transport":       "暂不支持该传输方式",
+	"unsupported_security":        "暂不支持该安全方式",
+	"insecure_tls":                "已拒绝跳过证书校验的设置",
+	"oversized_entry":             "该条目超出大小上限",
+	"unsupported_option":          "该条目包含暂不支持的字段",
+	"duplicate_endpoint_content":  "与前面的条目完全相同，已跳过",
+	"duplicate_endpoint_key":      "同一来源内名称与协议重复，只保留第一条",
 }
 
 // diagnosticMessage returns the fixed text of a per-entry code.

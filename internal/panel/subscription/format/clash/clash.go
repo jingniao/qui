@@ -189,6 +189,16 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 			warn(endpoint.Name + "：" + endpoint.Protocol + " 不在该格式支持的协议中，已省略")
 			continue
 		}
+		if endpoint.Protocol == "shadowsocks" && proxy.SS2022(endpoint.Method) {
+			credential, err := endpoint.Shadowsocks()
+			if err != nil {
+				return format.Output{}, err
+			}
+			if reason := credential.Omission(set.id); reason != "" {
+				warn(endpoint.Name + ": " + reason)
+				continue
+			}
+		}
 		value, err := convert(endpoint)
 		if err != nil {
 			warn(endpoint.Name + "：" + err.Error() + "，已省略")

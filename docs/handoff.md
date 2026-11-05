@@ -44,7 +44,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 | C3 | **Client policy: should the preview let the Owner pick a user?** | The preview currently always auto-selects a user and labels the choice as automatic. The API already accepts `userId`; only the UI is missing. (Plan §14.2 item 1.) |
 | C4 | **Client policy: batch input when editing a rule.** | Pasting several domains creates multiple rules only when *creating* a rule; editing an existing rule keeps it as one rule. Confirm this, then document it. (§14.2 item 2.) |
 | C5 | **Client policy: disabled rule sets.** | Saving a profile is refused when an *enabled* RULE-SET rule points at a *disabled* service set. So disabling a set the active profile uses blocks re-saving that profile until the rule is disabled or the set is re-enabled. Keep this, or relax it to a warning? (§14.2 item 3.) |
-| C6 | **Subscription-import compatibility plan: approve or revise?** | It is a proposal written from another session (baseline `c708c35`). Nothing is implemented. Review it before any work starts (§4.4). |
+| C6 | **Subscription-import compatibility plan: decisions R1–R4.** | Reviewed 2026-11-05 and approved with amendments (plan `.en.md` §14). Before work starts, the Owner decides R1–R4 in §14.3: self-hosted track now or later; minimal v1.4 fix for the refresh false-success bug; duplicate `name\|protocol` handling; target version. Nothing is implemented (§4.4). |
 
 ## 4. Outstanding Tasks
 
@@ -89,7 +89,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 
 ### 4.4 Separate Proposal (Not Started)
 
-14. `docs/subscription-import-compatibility-plan.md` / `.en.md` / `-change-log.md` (untracked): a "protocol support completion" plan. It covers external subscriptions, self-hosted nodes including xhttp/Reality, and failure diagnostics. Status: proposed and not implemented. It needs Owner review (C6) before any implementation. Its baseline (`c708c35`) predates Phases C and D, so recheck its references against the current HEAD.
+14. `docs/subscription-import-compatibility-plan.md` / `.en.md` / `-change-log.md` (untracked): a "protocol support completion" plan. It covers external subscriptions, self-hosted nodes including xhttp/Reality, and failure diagnostics. Status: reviewed against `5387802` and approved with amendments (`.en.md` §14); not implemented. Work waits on the Owner's R1–R4 decisions (C6) and, per §14.1 item 8, on v1.4.0 shipping.
 
 ## 5. Known Limitations (Accepted; No Action Unless the Owner Asks)
 

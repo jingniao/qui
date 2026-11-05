@@ -8,9 +8,9 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
   - Everything below is **committed locally only; nothing has been pushed.**
   - `main` = `origin/main` = `a15da45` (v1.3.1 plus docs).
   - The last released version is **v1.3.1** (tag → `ebe8301`). All three hosts run it, and their migration head is 0128.
-- **Locally reviewed work (integration worktree `compat-integration`, baseline `3e449e7`):**
+- **Locally reviewed work (integrated through `ca970a4`, plus final documentation):**
   - **v1.4 tunnels:** tunnel management (Tunnels/Rules pages), "Add Relay" on nodes, relayed subscription entries, the canvas narrowed to proxy relaying, and migration of old canvas forwards. Migrations 0129–0131. Commits `d4fad8c` … `8134314`.
-  - **Protocol compatibility:** S1–S4 and M1–M4 locally integrated, migration 0133; final Linux/browser acceptance pending (§4.4).
+  - **Protocol compatibility:** S1–S4 and M1–M4 locally integrated, migration 0133; streamlined Linux verification complete; remaining browser/host acceptance open (§4.4).
   - **Client policy profile library:** server-side profiles, activation, endpoint members, keyword filters, `emptyPolicy`, draft preview, and rule-set references. Migration 0132. Commits `258c1c7` … `1bbb836`, plus docs `aff8153` and `49358db`.
 - **Specs and plans to read first:**
   - `AGENTS.md`: the product spec, in Chinese. It is the authoritative description of behavior.
@@ -23,7 +23,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 ## 2. How to Work in This Repo
 
 - **Toolchain on Windows:** `.tools/go/bin/go.exe` with `GOPATH=.tools/gopath`, `GOCACHE=.tools/gocache` and `GOTOOLCHAIN=local`. For the web app: `npm.cmd --prefix web run typecheck|build`, and the selftests in `web/scripts/*.mjs`.
-- **Linux gate (one final integrated run under the latest user instruction):** the local test machine at 192.168.5.36 runs `scripts/check.sh` plus the real-core suite on one commit.
+- **Linux gate tooling:** the local test machine at 192.168.5.36 runs `scripts/check.sh` plus the real-core suite on one commit. Protocol development verification is complete to the Owner's reduced scope (§4.4); do not restart broad testing merely to finish this handoff.
   - Start it with `sh ~/.qui-local/gate.sh <commit>`.
   - Check it with `sh ~/.qui-local/gate-status.sh <shortsha>`.
   - It takes about 40 minutes and gates a *commit*, so commit locally first. Run only one gate at a time, because they share ports.
@@ -45,7 +45,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 | C3 | **Client policy: should the preview let the Owner pick a user?** | The preview currently always auto-selects a user and labels the choice as automatic. The API already accepts `userId`; only the UI is missing. (Plan §14.2 item 1.) |
 | C4 | **Client policy: batch input when editing a rule.** | Pasting several domains creates multiple rules only when *creating* a rule; editing an existing rule keeps it as one rule. Confirm this, then document it. (§14.2 item 2.) |
 | C5 | **Client policy: disabled rule sets.** | Saving a profile is refused when an *enabled* RULE-SET rule points at a *disabled* service set. So disabling a set the active profile uses blocks re-saving that profile until the rule is disabled or the set is re-enabled. Keep this, or relax it to a warning? (§14.2 item 3.) |
-| C6 | ~~Protocol-support plan decisions R1–R4~~ **Decided 2026-11-05.** | Plan `.en.md` §14.3–§14.7:<br>• both tracks run in parallel;<br>• the refresh fix ships in v1.4.0;<br>• duplicate `name\|protocol` keeps the first and rejects the rest;<br>• everything ships in v1.4.0.<br>The implementation is locally integrated (§4.4). S0 and original M1 gates passed; S1 checksum correction is running; final integrated verification and browser checks remain pending. |
+| C6 | ~~Protocol-support plan decisions R1–R4~~ **Decided 2026-11-05.** | Plan `.en.md` §14.3–§14.7:<br>• both tracks run in parallel;<br>• the refresh fix ships in v1.4.0;<br>• duplicate `name\|protocol` keeps the first and rejects the rest;<br>• everything ships in v1.4.0.<br>Implementation and streamlined development verification are complete (§4.4); remaining browser and formal host acceptance are open. |
 
 ## 4. Outstanding Tasks
 
@@ -90,13 +90,13 @@ A1 must also cover the protocol-support work once it lands (plan `.en.md` §14.7
 12. `docs/v1-acceptance.md` has no entries yet for the client-policy items in §4.1.
 13. After C3–C5 are decided, update `AGENTS.md` (the client-policy paragraph in §10.3) and plan §14.
 
-### 4.4 Protocol Support: Integrated, Final Verification Pending
+### 4.4 Protocol Support: Development Complete, Release Acceptance Open
 
-14. S1–S4 and M1–M4 are locally integrated in `compat-integration` at `3e449e7`, migration head 0133. Imports/codecs, self-hosted renderers, public subscription mapping and editor are implemented; see the protocol-support plan §14.8 and phase reports for precise combinations and omissions.
+14. S1–S4 and M1–M4 are locally integrated through `ca970a4`, migration head 0133. Imports/codecs, self-hosted renderers, public subscription mapping and editor are implemented; see the protocol-support plan §14.8 and phase reports for precise combinations and omissions.
 
-    S0 and original M1 gates passed. S1 `ccf23e4` failed solely because 0133 was absent from the migration checksum map (check 1972 s, cores 560 s, total 2533 s, END `2026-11-05T15:01:31Z`); correction `4ded28f` has a gate running, not a passing result. Corrections/new phases have focused Windows evidence, including native/authenticated tests, rather than Linux acceptance.
+    S0 and original M1 gates passed. S1 `ccf23e4` failed solely because 0133 was absent from the migration checksum map; correction `4ded28f` passed check (1993s), and its repeated cores were stopped and superseded. The integrated Linux real-core suite passed on `9e48fcf` (592s). `ca970a4` fixes only the canvas self-test loader/docs and has byte-identical production sources; Linux frontend build/self-tests, vet, fixture build and focused checks passed.
 
-    The latest user instruction replaces repeated per-phase gates with focused checks and **one final integrated Linux gate**. Keep verification lean; do not add the broad S5 test expansion previously proposed. Still complete the focused configured real-core regressions and browser walkthrough of source diagnostics, format previews and the node editor before claiming S5. No real-source fetch or production action is implied. C1/A1 remain later release work.
+    Under the latest Owner instruction, remaining broad race testing was stopped; no final complete gate PASS is claimed. The isolated browser checked mixed pasted-import results, reasons, counts and saved-source failure context. Sharing was then revoked; editor and format-preview walkthroughs remain unverified. See [final verification evidence](v1.4-protocol-verification.md). No further development tests are required for this docs-only handoff. No real-source fetch or production action is implied. C1/A1 remain later release work.
 
     Duplicate `name|protocol` keys keep the first. User-inbound Reality/xhttp settings reuse one public client model; private keys stay encrypted/masked, rotation is explicit, and clients update subscriptions after successful publication. Internal proxy-relay creation stays TCP/TLS. Detailed format/core restrictions are in `docs/protocol-support-matrix.md`.
 

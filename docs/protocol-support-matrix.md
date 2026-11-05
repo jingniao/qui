@@ -59,7 +59,7 @@ API 保留以下兼容状态字符串，表示源码能力；运行验收状态�
 
 Reality 的 X25519 私钥只进入加密设置/修订与安全 Agent 配置，普通查询、预览与差异隐藏。普通编辑保持密钥，明确轮换先保存草稿，成功发布后客户端更新订阅；历史修订与回滚保持对应密钥。公开模型只映射成功修订的公钥、Short ID、具体 SNI 与客户端指纹；证书指纹是另一字段。内部代理中转创建继续使用 TCP/TLS。
 
-Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组合及用户统计，TCP/auto 另有门控、轮换和回滚检查。官方 sing-box 1.14.3 的 TCP 无 flow/Vision 通过原生、认证 HTTP、错误凭据及密钥回滚；无 with_v2ray_api 的用户流量仍未知。最终整合 Linux 门禁、浏览器与主机验收未完成；客户端每格式边界见 §7。阶段报告保留各次实际验证范围，不把 Windows 结果视为 Linux 结论。
+Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组合及用户统计，TCP/auto 另有门控、轮换和回滚检查。官方 sing-box 1.14.3 的 TCP 无 flow/Vision 通过原生、认证 HTTP、错误凭据及密钥回滚；无 with_v2ray_api 的用户流量仍未知。Linux 实核和精简开发验证通过；完整 race、剩余浏览器与主机验收未完成，见[验证记录](v1.4-protocol-verification.md)；客户端每格式边界见 §7。阶段报告保留各次实际验证范围，不把 Windows 结果视为 Linux 结论。
 
 ### GOST（v1.3 G1）
 

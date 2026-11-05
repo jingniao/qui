@@ -333,3 +333,10 @@
 - The loader now imports the same transpiled helper through its existing data-module path. Local `node web/scripts/canvas-library-selftest.mjs` passed. No production code changed for this correction. The real-core part of `9e48fcf` remains running; its eventual results can be retained for the identical production source rather than repeating unaffected tests.
 - The standalone S1 correction `4ded28f` passed `check` in 1993 s; its core part was stopped at 15:47:47Z and superseded by integrated verification, so no standalone gate PASS is claimed.
 - Browser checks on the isolated loopback test panel verified mixed pasted import (one accepted, one rejected), the result reasons dialog, cached/usable counts, and saved-source editing context on failure. Backend readback confirmed `source_address_rejected`, failed state and usable=0 for the synthetic private-address source. The browser tool later reported that sharing was revoked; remaining editor/preview walkthroughs are pending unless the user re-shares, and no attempt was made to bypass sharing. No real source or production host was accessed.
+
+## 2026-11-05: final streamlined development verification
+
+- The Owner requested omitting unnecessary tests, complex logic and defensive code. No further feature scope or broad test expansion was added.
+- Linux real-core suite on production commit `9e48fcf` passed in 592s, END 2026-11-05T15:58:26Z, including SS2022 URI/YAML/JSON, generated Reality clients, Xray account/gate/key rollback and independent sing-box cases.
+- Loader correction `ca970a4` has identical production code. Its Linux frontend build/self-tests, vet, fixture build and focused checks passed; remaining broad race was stopped under the reduced scope. Do not describe the final overall gate as PASS.
+- Partial browser results and remaining limits are in `docs/v1.4-protocol-verification.md`. Development work is complete; formal release/host acceptance and remaining browser checks are separate. Nothing was pushed, tagged, published or applied to production.

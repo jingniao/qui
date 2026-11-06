@@ -346,3 +346,9 @@
 - Owner requested the remaining browser/editor and format-preview checks. Restored the isolated loopback panel; its existing browser tab is not shared, so UI actions await the Owner's “Share with agents” permission.
 - Prepared 18 synthetic authorized endpoints and exercised both real preview APIs in all five formats. URI/Base64 exported 18, sing-box 5, Mihomo 9 and legacy Clash 1, with expected per-format warnings. Verified field fidelity, identical preview bodies/warnings, no dangling members, format-filtered empty-group REJECT and no token/settings/profile writes.
 - Detailed evidence and remaining browser boundary are in `docs/v1.4-protocol-verification.md`. No production code changed and no broad regression suite was repeated.
+
+## 2026-11-05: shared-browser editor checks and preview selector correction
+
+- Browser verified Xray Reality/xhttp creation, public-key readback, ordinary-save key preservation, sing-box xhttp refusal with retained draft, single-SNI refusal, explicit key rotation and queued publication wording. Opened Mihomo preview and inspected user context, warnings and supported output. The local node has no Agent; pending publication is not runtime acceptance.
+- Found the preview UI still hard-coded a single Mihomo format. Added the four other already-supported formats and accurate output descriptions; renamed YAML-only preview/copy labels without changing the layout or backend. No migration or contract change.
+- Frontend build/typecheck and existing client-policy self-tests passed. Updating the isolated embedded panel invalidated sharing; final per-format UI checks await renewed sharing. See the verification report for exact limits.

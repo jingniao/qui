@@ -424,7 +424,7 @@
                   </span>
                 </div>
                 <p class="text-xs text-neutral-500 mt-0.5">
-                  地区组按已保存的来源与关键词筛选。最终成员以服务器展开为准，预览见 YAML 预览；客户端延迟与实际出口未知。
+                  地区组按已保存的来源与关键词筛选。最终成员以服务器展开为准，预览见订阅预览；客户端延迟与实际出口未知。
                 </p>
               </div>
 
@@ -1752,11 +1752,11 @@
             </div>
           </div>
 
-          <!-- 模块 6：YAML 实时预览 (YAML Preview) -->
+          <!-- 模块 6：订阅格式预览 -->
           <div v-else-if="activeModule === 'preview'" class="space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
               <div>
-                <h3 class="text-base font-bold text-neutral-900">当前配置 YAML 预览</h3>
+                <h3 class="text-base font-bold text-neutral-900">当前配置预览</h3>
                 <p class="text-xs text-neutral-500 mt-0.5">预览正在编辑的配置；有未保存修改时使用草稿。</p>
               </div>
               <div class="flex items-center gap-2">
@@ -1773,7 +1773,7 @@
                   <svg v-else class="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                   </svg>
-                  <span>{{ copied ? '已复制到剪贴板' : '复制完整 YAML' }}</span>
+                  <span>{{ copied ? '已复制到剪贴板' : '复制预览内容' }}</span>
                 </button>
               </div>
             </div>
@@ -2419,9 +2419,9 @@ const modulesList = [
   },
   {
     id: 'preview' as const,
-    name: 'YAML 预览',
+    name: '订阅预览',
     en: 'preview',
-    desc: '预览正在编辑的配置与草稿，查看授权用户、解析成员及完整诊断。',
+    desc: '按订阅格式预览配置与草稿，查看授权用户、解析成员及完整诊断。',
     icon: PreviewIcon
   }
 ];
@@ -4344,7 +4344,11 @@ function getPayloadPlaceholder(type: ClientRuleType): string {
 
 // 预览渲染
 const previewFormatOptions: SelectOption[] = [
-  { value: 'clash', label: 'Clash / Mihomo', badge: 'YAML', desc: '标准 Clash Meta / Mihomo 配置文件' }
+  { value: 'clash', label: 'Clash / Mihomo', badge: 'YAML', desc: '完整客户端配置，包含客户端策略' },
+  { value: 'clash-legacy', label: 'Legacy Clash', badge: 'YAML', desc: '省略不支持的协议与规则，并显示原因' },
+  { value: 'sing-box', label: 'sing-box', badge: 'JSON', desc: '出站片段，不包含完整客户端策略' },
+  { value: 'uri', label: '通用 URI', badge: '文本', desc: '逐行节点链接，不包含客户端策略' },
+  { value: 'base64', label: 'Base64 URI', badge: '文本', desc: 'URI 列表的 Base64 编码，不包含客户端策略' }
 ];
 const previewFormat = ref('clash');
 const previewResult = ref<ClientPolicyPreview | null>(null);
@@ -4391,7 +4395,7 @@ function copyConfig() {
   if (!previewBody.value) return;
   navigator.clipboard.writeText(previewBody.value);
   copied.value = true;
-  showToast('完整配置 YAML 已复制到剪贴板');
+  showToast('预览内容已复制到剪贴板');
   setTimeout(() => {
     copied.value = false;
   }, 2500);

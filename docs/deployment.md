@@ -131,7 +131,7 @@ go run ./cmd/panel --config deploy/examples/panel.dev.yaml
 go run ./cmd/agent --config deploy/examples/agent.dev.yaml
 ```
 
-Web 为 `http://127.0.0.1:8080`，gRPC 为 `127.0.0.1:9443`，状态在 `state/`。前端热更新用 `npm --prefix web run dev`（`http://localhost:3000`，API 转发到面板）。
+本地开发统一访问 `http://127.0.0.1:8080`：运行 `npm --prefix web run dev` 启动 Vite，页面与热更新 WebSocket 共用 8080；API、订阅与健康检查转发到 `panel.dev.yaml` 的后端 `127.0.0.1:8081`。Vite 固定端口，8080 被占用时直接报错，不自动切换。gRPC 为 `127.0.0.1:9443`，状态在 `state/`。
 
 ## 3. 安装面板
 

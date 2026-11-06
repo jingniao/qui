@@ -22,15 +22,14 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
+    host: '127.0.0.1',
+    port: 8080,
+    strictPort: true,
     open: false,
-    hmr: {
-      clientPort: 8080
-    },
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8080', changeOrigin: false },
-      '/healthz': { target: 'http://127.0.0.1:8080', changeOrigin: false },
-      '/sub': { target: 'http://127.0.0.1:8080', changeOrigin: false }
+      '/api': { target: 'http://127.0.0.1:8081', changeOrigin: false },
+      '/healthz': { target: 'http://127.0.0.1:8081', changeOrigin: false },
+      '/sub': { target: 'http://127.0.0.1:8081', changeOrigin: false }
     }
   }
 })

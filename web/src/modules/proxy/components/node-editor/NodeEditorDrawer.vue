@@ -20,6 +20,17 @@
             </select>
           </label>
         </div>
+        <div role="group" aria-labelledby="node-editor-groups" class="space-y-2">
+          <p id="node-editor-groups" class="text-xs text-ios-secondary">所属节点组（可多选）</p>
+          <div v-if="memberGroups.length" class="grid max-h-36 gap-2 overflow-y-auto sm:grid-cols-2">
+            <label v-for="group in memberGroups" :key="group.id" class="flex items-start gap-2 rounded-xl border p-3 text-sm text-ios-label cursor-pointer" :class="selectedGroupIds.includes(group.id) ? 'border-ios-blue bg-ios-blue/5' : 'border-ios-border'">
+              <input v-model="selectedGroupIds" :value="group.id" type="checkbox" class="mt-0.5 shrink-0 accent-ios-blue" />
+              <span class="min-w-0 break-words">{{ group.name }}<span v-if="group.purpose === 'relay' || group.purpose === 'egress'" class="block text-xs text-ios-secondary">不授予用户接入</span></span>
+            </label>
+          </div>
+          <p v-else class="text-xs text-ios-secondary">暂无节点组，请先在节点分组页面创建。</p>
+          <p class="text-xs text-ios-secondary">保存时加入所选节点组；不选择则不加入任何组。订阅仍按节点组授权、用途和发布状态筛选。</p>
+        </div>
         <p v-if="state.original" class="text-xs text-ios-secondary">编辑时所属服务器和协议保持不变。</p>
         <p v-if="!eligibleServers.length" class="text-sm text-ios-secondary">没有可用的已登记服务器，请先登记服务器。</p>
         <div v-if="coreSelectable.length > 1" class="space-y-1.5">
@@ -62,13 +73,6 @@
           <label v-if="!f.internalRelay && f.protocol !== 'forward'" class="inline-flex items-center gap-2"><input v-model="f.subscriptionVisible" type="checkbox" />显示在授权用户订阅中</label>
         </div>
         <p v-if="!f.internalRelay && f.protocol !== 'forward' && !f.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
-        <p class="text-xs font-medium text-ios-secondary">所属分组</p>
-        <label v-for="group in memberGroups" :key="group.id" class="flex items-center gap-2 text-sm text-ios-label">
-          <input v-model="selectedGroupIds" type="checkbox" :value="group.id" class="accent-ios-blue" />{{ group.name }}
-          <span v-if="group.purpose === 'relay' || group.purpose === 'egress'" class="text-xs text-ios-secondary">（不授予用户接入）</span>
-        </label>
-        <p v-if="!memberGroups.length" class="text-xs text-ios-secondary">暂无节点分组，可在节点分组页面创建后添加。</p>
-        <p class="text-xs text-ios-secondary">新入站不会自动加入分组。分组保存后影响订阅筛选；运行配置需发布后由服务器确认生效。</p>
       </section>
       <NodeAdvancedFields :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" :open="!!error" />
       <details :open="!!savedId" class="rounded-2xl border border-ios-border p-4 text-sm">
@@ -77,7 +81,7 @@
         <p class="text-ios-label">{{ selectedServer?.name || '—' }} · {{ f.name }} · {{ f.protocol.toUpperCase() }} :{{ f.port }}</p>
         <p class="text-ios-secondary">{{ f.listen }} · 运行内核 {{ f.core ? coreChoices.find(c => c.name === f.core)?.label || f.core : `主核心（${primaryCoreLabel}）` }} · {{ f.enabled ? '启用' : '停用' }} · {{ f.subscriptionVisible && !f.internalRelay ? '订阅可见' : '订阅隐藏' }} · {{ f.internalRelay ? '内部中转' : '用户接入' }}</p>
         <p class="text-xs text-ios-secondary">默认出站：{{ f.defaultOutbound }}；用户范围：{{ f.allowedUserIds.length ? f.allowedUserIds.map(id => users.find(u => u.id === id)?.username || id).join('、') : '已获授权、且分组包含此入站的用户' }}</p>
-        <p class="text-xs text-ios-secondary">所属分组：{{ selectedGroupIds.map(id => memberGroups.find(g => g.id === id)?.name || '—').join('、') || '—' }}。非空 allowedUserIds 只进一步缩小上述分组授权范围，不会单独授予接入权限。</p>
+        <p class="text-xs text-ios-secondary">所属节点组：{{ selectedGroupIds.map(id => memberGroups.find(g => g.id === id)?.name || '—').join('、') || '—' }}。非空 allowedUserIds 只进一步缩小上述分组授权范围，不会单独授予接入权限。</p>
         <p v-if="f.protocol === 'forward'" class="text-xs text-ios-secondary">{{ forwardPreview }}</p>
         <p v-if="f.settings.security === 'reality'" class="text-xs text-ios-secondary">Reality：{{ f.settings.reality?.handshake_target || '尚未填写握手目标' }}；订阅使用第一个 SNI / Short ID。{{ f.rotateRealityKey ? '本次保存将轮换密钥；发布成功后客户端须更新订阅。' : state.original?.hasRealityKey ? '保留现有密钥。' : '首次保存时生成密钥，保存后返回公钥。' }}</p>
         <div class="overflow-x-auto rounded-2xl border border-ios-border">

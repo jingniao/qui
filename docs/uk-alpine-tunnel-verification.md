@@ -1,5 +1,7 @@
 # UK → Alpine NAT 隧道配置与实流验证
 
+后续 DDNS 核对：Owner 提供 `wap-tw-1.999848.xyz`，本机及 UK 解析均为 **61.228.81.155**，无 AAAA；UK 对域名 21411 连接被拒绝。域名 34251 可达，但返回 OpenSSH_9.2p1 Debian，ED25519 指纹为 `SHA256:aHNV6WLKN5JdJbOCaEdth2B5UotSAiVZQUBD0yfVynA`；当前受信 Alpine 的 ED25519 指纹为 `SHA256:acEzqKKWjjp1upsBEYlWbUpVDxGG9BodjDyEYpBq7d8`。这只证明两端 SSH 身份不同，可能是另一实例或 NAT 宿主服务；不能直接把该域名等同当前 Alpine。域名 34252、10141 也拒绝连接。没有向域名 SSH 提交凭据，没有改动已发布的 113.29.231.218:21411；已询问 Owner 是调整 DDNS 对应关系还是接入该域名对应的新节点。
+
 2026-11-06 UTC。Owner 要求确认空闲映射端口并配置 UK 连接 Alpine；已完成，隧道保留在生产面板，临时验证资源清理。
 
 ## 实际映射与所选端口

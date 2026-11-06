@@ -93,7 +93,7 @@
           <td class="p-4">
             <div class="flex items-center gap-2">
               <span class="font-mono tabular-nums text-xs font-bold text-neutral-400">#{{ rule.priority }}</span>
-              <router-link :to="`/routing/rules/${rule.id}/edit`" class="text-ios-blue font-semibold hover:underline text-[15px] truncate">
+              <router-link :to="`/routing/rules/${rule.id}/edit`" class="text-ios-blue font-semibold hover:underline text-base truncate">
                 {{ rule.name }}
               </router-link>
             </div>
@@ -137,7 +137,7 @@
               <div class="flex items-center gap-1.5">
                 <StatusBadge :status="rule.enabled ? 'active' : 'disabled'" />
               </div>
-              <span class="text-[11px] text-neutral-400 font-sans">
+              <span class="text-xs text-neutral-400 font-sans">
                 保存后需发布生效
               </span>
             </div>

@@ -4,8 +4,8 @@
     <p class="p-3 rounded-xl bg-amber-50 text-amber-800">当前为只读预览，没有替换数据库或节点配置。托管服务可另行确认执行；执行前会重新停写并核对账本。</p>
     <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-gray-500"><th class="py-2">数据范围</th><th>当前系统</th><th>备份快照</th></tr></thead><tbody><tr v-for="item in totals" :key="item.key" class="border-t"><td class="py-2">{{ item.label }}</td><td>{{ result.current[item.key] ?? 0 }}</td><td>{{ result.snapshot[item.key] ?? 0 }}</td></tr></tbody></table></div>
     <dl class="grid md:grid-cols-2 gap-3"><div><dt class="text-gray-500">配置密钥材料</dt><dd>{{ result.sameKeyMaterial ? '与当前文件匹配' : '与当前文件不同，需要匹配替换' }}</dd></div><div><dt class="text-gray-500">节点 CA</dt><dd>{{ result.sameNodeCA ? '与当前文件匹配' : '与当前文件不同，需要重新核对节点信任' }}</dd></div></dl>
-    <section class="space-y-2"><h3 class="font-semibold">已观测的恢复影响</h3><p v-if="!changes.length" class="text-gray-500 text-xs">这些检查项未观测到差异；不代表草稿、凭据或所有业务字段相同，也不代表节点账本已核对。</p><div v-for="item in changes" :key="item.key" class="flex justify-between gap-4 border-b py-2"><span>{{ item.label }}</span><strong>{{ result.impact[item.key] }}</strong></div></section>
-    <section class="space-y-2"><h3 class="font-semibold">恢复流程需要处理</h3><ul class="list-disc pl-5 space-y-2 text-xs text-gray-600"><li v-for="issue in result.issues" :key="issue">{{ issueLabel(issue) }}</li></ul></section>
+    <section class="space-y-2"><h3 class="text-base font-semibold leading-normal">已观测的恢复影响</h3><p v-if="!changes.length" class="text-gray-500 text-xs">这些检查项未观测到差异；不代表草稿、凭据或所有业务字段相同，也不代表节点账本已核对。</p><div v-for="item in changes" :key="item.key" class="flex justify-between gap-4 border-b py-2"><span>{{ item.label }}</span><strong>{{ result.impact[item.key] }}</strong></div></section>
+    <section class="space-y-2"><h3 class="text-base font-semibold leading-normal">恢复流程需要处理</h3><ul class="list-disc pl-5 space-y-2 text-xs text-gray-600"><li v-for="issue in result.issues" :key="issue">{{ issueLabel(issue) }}</li></ul></section>
   </div>
 </template>
 <script setup lang="ts">

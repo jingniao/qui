@@ -87,9 +87,9 @@
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-1.5">
-                  <span class="font-semibold text-ios-label text-[14px] truncate">{{ admin.displayName || admin.username }}</span>
+                  <span class="font-semibold text-ios-label text-sm truncate">{{ admin.displayName || admin.username }}</span>
                   <span
-                    class="px-1.5 py-0.2 rounded text-[10px] font-bold tracking-wide uppercase shrink-0"
+                    class="px-1.5 py-0.2 rounded text-xs font-bold tracking-wide uppercase shrink-0"
                     :class="admin.role === 'Owner' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-ios-blue'"
                   >
                     {{ admin.role === 'Owner' ? '系统管理员' : '审计管理员' }}
@@ -120,10 +120,10 @@
         <!-- 2. Proxy Users -->
         <tr v-for="user in users" :key="'user-' + user.id" class="hover:bg-black/[0.015] transition-colors">
           <td>
-            <router-link :to="`/users/${user.id}`" class="font-semibold text-ios-blue hover:underline text-[15px]">
+            <router-link :to="`/users/${user.id}`" class="font-semibold text-ios-blue hover:underline text-base">
               {{ user.displayName || user.username }}
             </router-link>
-            <p class="text-[13px] text-ios-secondary font-normal mt-0.5 font-mono">@{{ user.username }}</p>
+            <p class="text-sm text-ios-secondary font-normal mt-0.5 font-mono">@{{ user.username }}</p>
           </td>
           <td><StatusBadge :status="effectiveStatus(user)" /></td>
           <td class="text-xs font-mono tabular-nums text-ios-tertiary">
@@ -212,7 +212,7 @@
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
             <label class="text-xs font-medium text-ios-secondary">允许协议</label>
-            <span class="text-[11px] text-ios-tertiary">已选 {{ form.allowedProtocols.length }} / {{ protocols.length }}</span>
+            <span class="text-xs text-ios-tertiary">已选 {{ form.allowedProtocols.length }} / {{ protocols.length }}</span>
           </div>
           <div class="rounded-2xl p-3 bg-[#F5F5F7] border border-black/[0.06] flex flex-wrap gap-2">
             <label

@@ -1,6 +1,6 @@
 <template>
  <section class="panel-card p-5 space-y-3">
-  <div class="flex justify-between gap-3"><h3 class="font-semibold">保留清理进度</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新状态</button></div>
+  <div class="flex justify-between gap-3"><h3 class="text-base font-semibold leading-normal">保留清理进度</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新状态</button></div>
   <ErrorState v-if="error" :message="error" @retry="load" />
   <p v-if="loading" class="text-xs text-gray-500">正在读取持久清理记录…</p>
   <div v-if="job" class="space-y-2 text-xs">

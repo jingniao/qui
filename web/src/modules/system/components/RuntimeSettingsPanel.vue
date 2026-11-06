@@ -1,6 +1,6 @@
 <template>
  <section class="panel-card p-6 max-w-3xl space-y-5 text-sm">
-  <div class="flex justify-between items-center gap-3"><h2 class="font-semibold">{{ title }}</h2><button class="ios-btn-secondary" :disabled="loading || saving" @click="load">刷新</button></div>
+  <div class="flex justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">{{ title }}</h2><button class="ios-btn-secondary" :disabled="loading || saving" @click="load">刷新</button></div>
   <ErrorState v-if="error" :message="error" @retry="load" /><LoadingSkeleton v-else-if="!info || !saved" />
   <template v-else>
    <template v-if="kind==='network'">

@@ -9,9 +9,9 @@
         <form id="server-basic" class="panel-card p-3.5 sm:p-4 bg-white space-y-3" @submit.prevent="save('basic')">
           <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5">
             <div class="flex items-center gap-2">
-              <h2 class="font-semibold text-ios-label text-sm sm:text-base">基本信息</h2>
-              <span v-if="dirty.basic" class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
-              <span v-else class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/[0.03] text-neutral-400">已同步</span>
+              <h2 class="text-ios-label text-base font-semibold leading-normal">基本信息</h2>
+              <span v-if="dirty.basic" class="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
+              <span v-else class="px-1.5 py-0.5 rounded text-xs font-medium bg-black/[0.03] text-neutral-400">已同步</span>
             </div>
             <button
               type="submit"
@@ -25,70 +25,70 @@
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-ios-secondary">
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">服务器名称 <span class="text-rose-500">*</span></span>
-              <input v-model.trim="form.name" required maxlength="40" class="form-input-base text-xs" />
+              <span class="font-medium text-neutral-600 text-xs">服务器名称 <span class="text-rose-500">*</span></span>
+              <input v-model.trim="form.name" required maxlength="40" class="form-input-base" />
             </label>
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">订阅接入 IP</span>
-              <input v-model.trim="form.publicIp" class="form-input-base text-xs font-mono" placeholder="留空默认使用服务器公网 IP" />
+              <span class="font-medium text-neutral-600 text-xs">订阅接入 IP</span>
+              <input v-model.trim="form.publicIp" class="form-input-base font-mono" placeholder="留空默认使用服务器公网 IP" />
             </label>
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">地区 / 位置</span>
-              <input v-model.trim="metaForm.region" class="form-input-base text-xs" placeholder="例如：🇯🇵 东京" />
+              <span class="font-medium text-neutral-600 text-xs">地区 / 位置</span>
+              <input v-model.trim="metaForm.region" class="form-input-base" placeholder="例如：🇯🇵 东京" />
             </label>
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">备注说明</span>
-              <input v-model.trim="metaForm.remark" class="form-input-base text-xs" placeholder="管理员自定备注" />
+              <span class="font-medium text-neutral-600 text-xs">备注说明</span>
+              <input v-model.trim="metaForm.remark" class="form-input-base" placeholder="管理员自定备注" />
             </label>
 
             <!-- 默认端口分配范围 -->
             <div class="sm:col-span-2 pt-2 border-t border-black/[0.04] space-y-1.5">
               <div class="flex flex-col gap-1 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
-                <span class="font-medium text-neutral-700 text-[11px] flex items-center gap-1.5 whitespace-nowrap">
+                <span class="font-medium text-neutral-700 text-xs flex items-center gap-1.5 whitespace-nowrap">
                   <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                   </svg>
                   <span>默认端口分配范围</span>
                 </span>
-                <span class="text-[10px] text-neutral-400 leading-relaxed">新入站随机端口使用此范围；未指定中转端口时由后端分配。留空表示未设置。</span>
+                <span class="text-xs text-neutral-400 leading-relaxed">新入站随机端口使用此范围；未指定中转端口时由后端分配。留空表示未设置。</span>
               </div>
               <div class="grid grid-cols-2 gap-2.5">
                 <label class="space-y-1">
-                  <span class="text-neutral-500 text-[10px]">起始端口 (1 - 65535)</span>
+                  <span class="text-neutral-500 text-xs">起始端口 (1 - 65535)</span>
                   <input
                     v-model.number="metaForm.portRangeStart"
                     type="number"
                     min="1"
                     max="65535"
-                    class="form-input-base text-xs font-mono"
+                    class="form-input-base font-mono"
                     placeholder="留空不设置"
                   />
                 </label>
                 <label class="space-y-1">
-                  <span class="text-neutral-500 text-[10px]">结束端口 (1 - 65535)</span>
+                  <span class="text-neutral-500 text-xs">结束端口 (1 - 65535)</span>
                   <input
                     v-model.number="metaForm.portRangeEnd"
                     type="number"
                     min="1"
                     max="65535"
-                    class="form-input-base text-xs font-mono"
+                    class="form-input-base font-mono"
                     placeholder="留空不设置"
                   />
                 </label>
               </div>
-              <p class="text-[10px] text-ios-tertiary">设置后，该服务器创建新节点、中转转发或加密隧道时，端口将自动从此区间内随机选取未被占用的端口。</p>
+              <p class="text-xs text-ios-tertiary">设置后，该服务器创建新节点、中转转发或加密隧道时，端口将自动从此区间内随机选取未被占用的端口。</p>
             </div>
 
             <!-- 整机流量 (T1)：独立保存按钮与脏标记，不作为基本信息提交的一部分 -->
             <div class="sm:col-span-2 pt-2 border-t border-black/[0.04] space-y-1.5" @keydown.enter.prevent>
               <div class="flex flex-col gap-1 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
-                <span class="font-medium text-neutral-700 text-[11px] flex items-center gap-1.5 whitespace-nowrap">
+                <span class="font-medium text-neutral-700 text-xs flex items-center gap-1.5 whitespace-nowrap">
                   <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h10" />
                   </svg>
                   <span>整机流量</span>
-                  <span v-if="machineDirty" class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
-                  <span v-else class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-black/[0.03] text-neutral-400">已同步</span>
+                  <span v-if="machineDirty" class="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
+                  <span v-else class="px-1.5 py-0.5 rounded text-xs font-medium bg-black/[0.03] text-neutral-400">已同步</span>
                 </span>
                 <button
                   v-if="isOwner"
@@ -103,21 +103,21 @@
               </div>
               <div class="grid grid-cols-2 gap-2.5">
                 <label class="space-y-1">
-                  <span class="text-neutral-500 text-[10px]">统计方式</span>
-                  <select v-model="machineForm.method" class="form-input-base text-xs">
+                  <span class="text-neutral-500 text-xs">统计方式</span>
+                  <select v-model="machineForm.method" class="form-input-base">
                     <option v-for="item in MACHINE_TRAFFIC_METHODS" :key="item.value" :value="item.value">{{ item.label }}</option>
                   </select>
                 </label>
                 <label class="space-y-1">
-                  <span class="text-neutral-500 text-[10px]">流量重置日 (1 - 31)</span>
-                  <input v-model.number="machineForm.resetDay" type="number" min="1" max="31" class="form-input-base text-xs font-mono" />
+                  <span class="text-neutral-500 text-xs">流量重置日 (1 - 31)</span>
+                  <input v-model.number="machineForm.resetDay" type="number" min="1" max="31" class="form-input-base font-mono" />
                 </label>
                 <label class="space-y-1">
-                  <span class="text-neutral-500 text-[10px]">统计网卡</span>
+                  <span class="text-neutral-500 text-xs">统计网卡</span>
                   <input
                     v-model.trim="machineForm.interfaceName"
                     list="machine-traffic-interfaces"
-                    class="form-input-base text-xs font-mono"
+                    class="form-input-base font-mono"
                     :placeholder="`留空自动（${autoInterface}）`"
                   />
                   <datalist id="machine-traffic-interfaces">
@@ -125,17 +125,17 @@
                   </datalist>
                 </label>
                 <div class="space-y-1">
-                  <span class="text-neutral-500 text-[10px] block">额度（留空不限）</span>
+                  <span class="text-neutral-500 text-xs block">额度（留空不限）</span>
                   <div class="flex items-center gap-1.5">
-                    <input v-model.trim="machineForm.allowanceValue" inputmode="decimal" class="form-input-base text-xs font-mono" placeholder="不设置" />
-                    <select v-model="machineForm.allowanceUnit" class="form-input-base text-xs font-mono !w-20">
+                    <input v-model.trim="machineForm.allowanceValue" inputmode="decimal" class="form-input-base font-mono" placeholder="不设置" />
+                    <select v-model="machineForm.allowanceUnit" class="form-input-base font-mono !w-20">
                       <option v-for="unit in MACHINE_TRAFFIC_UNITS" :key="unit" :value="unit">{{ unit }}</option>
                     </select>
                   </div>
                 </div>
               </div>
-              <p class="text-[10px] text-ios-tertiary">网卡解析：自动（{{ autoInterface }}）。切换网卡会按所选网卡重新计算本期；自动模式使用最近上报的默认路由网卡。</p>
-              <p class="text-[10px] text-ios-tertiary">短月份按最后一天重置，使用面板时区。额度仅用于展示，不限速、不停用服务。</p>
+              <p class="text-xs text-ios-tertiary">网卡解析：自动（{{ autoInterface }}）。切换网卡会按所选网卡重新计算本期；自动模式使用最近上报的默认路由网卡。</p>
+              <p class="text-xs text-ios-tertiary">短月份按最后一天重置，使用面板时区。额度仅用于展示，不限速、不停用服务。</p>
               <p v-if="errors.machine" role="alert" class="text-xs text-ios-red font-medium">{{ errors.machine }}</p>
             </div>
           </div>
@@ -147,9 +147,9 @@
         <form id="server-access" class="panel-card p-3.5 sm:p-4 bg-white space-y-3" @submit.prevent="save('access')">
           <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5">
             <div class="flex items-center gap-2">
-              <h2 class="font-semibold text-ios-label text-sm sm:text-base">订阅与维护</h2>
-              <span v-if="dirty.access" class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
-              <span v-else class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/[0.03] text-neutral-400">已同步</span>
+              <h2 class="text-ios-label text-base font-semibold leading-normal">订阅与维护</h2>
+              <span v-if="dirty.access" class="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
+              <span v-else class="px-1.5 py-0.5 rounded text-xs font-medium bg-black/[0.03] text-neutral-400">已同步</span>
             </div>
             <button
               type="submit"
@@ -165,21 +165,21 @@
             <label class="flex items-start justify-between gap-3 p-2.5 rounded-xl bg-black/[0.02] border border-black/[0.04] cursor-pointer hover:bg-black/[0.03] transition-colors">
               <div class="space-y-0.5">
                 <div class="text-xs font-semibold text-ios-label">启用服务器控制连接</div>
-                <p class="text-[11px] text-ios-secondary">停用后将拒绝该服务器 Agent 的心跳上报与配置下发指令</p>
+                <p class="text-xs text-ios-secondary">停用后将拒绝该服务器 Agent 的心跳上报与配置下发指令</p>
               </div>
               <input v-model="form.enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-ios-blue focus:ring-ios-blue" />
             </label>
             <label class="flex items-start justify-between gap-3 p-2.5 rounded-xl bg-black/[0.02] border border-black/[0.04] cursor-pointer hover:bg-black/[0.03] transition-colors">
               <div class="space-y-0.5">
                 <div class="text-xs font-semibold text-ios-label">允许用户订阅</div>
-                <p class="text-[11px] text-ios-secondary">开启后该服务器绑定的节点将正常分发至前台用户订阅</p>
+                <p class="text-xs text-ios-secondary">开启后该服务器绑定的节点将正常分发至前台用户订阅</p>
               </div>
               <input v-model="form.allowSubscription" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-ios-blue focus:ring-ios-blue" />
             </label>
             <label class="flex items-start justify-between gap-3 p-2.5 rounded-xl bg-black/[0.02] border border-black/[0.04] cursor-pointer hover:bg-black/[0.03] transition-colors">
               <div class="space-y-0.5">
                 <div class="text-xs font-semibold text-ios-label">维护模式</div>
-                <p class="text-[11px] text-ios-secondary">处于维护状态时将临时从用户订阅中排除，不影响节点已有配置</p>
+                <p class="text-xs text-ios-secondary">处于维护状态时将临时从用户订阅中排除，不影响节点已有配置</p>
               </div>
               <input v-model="form.maintenance" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-300 text-ios-blue focus:ring-ios-blue" />
             </label>
@@ -191,7 +191,7 @@
         <!-- 5. 程序与运维管理 Section -->
         <section id="server-programs" class="panel-card p-3.5 sm:p-4 bg-white space-y-3">
           <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5">
-            <h2 class="font-semibold text-ios-label text-sm sm:text-base">程序与运维</h2>
+            <h2 class="text-ios-label text-base font-semibold leading-normal">程序与运维</h2>
             <div class="flex items-center gap-2">
               <router-link to="/nodes/versions" class="ios-action-btn-secondary text-xs px-2.5 py-1">版本管理</router-link>
               <button v-if="isOwner && node.status === 'pending'" class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="$emit('install')">安装命令</button>
@@ -231,9 +231,9 @@
         <form id="server-renewal" class="panel-card p-3.5 sm:p-4 bg-white space-y-3" @submit.prevent="save('renewal')">
           <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5">
             <div class="flex items-center gap-2">
-              <h2 class="font-semibold text-ios-label text-sm sm:text-base">续费</h2>
-              <span v-if="dirty.renewal" class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
-              <span v-else class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/[0.03] text-neutral-400">已同步</span>
+              <h2 class="text-ios-label text-base font-semibold leading-normal">续费</h2>
+              <span v-if="dirty.renewal" class="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
+              <span v-else class="px-1.5 py-0.5 rounded text-xs font-medium bg-black/[0.03] text-neutral-400">已同步</span>
             </div>
             <button
               type="submit"
@@ -247,27 +247,27 @@
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-ios-secondary">
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">续费日期</span>
-              <input v-model="metaForm.renewDate" type="date" class="form-input-base text-xs font-mono" />
+              <span class="font-medium text-neutral-600 text-xs">续费日期</span>
+              <input v-model="metaForm.renewDate" type="date" class="form-input-base font-mono" />
             </label>
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">提前提醒天数</span>
-              <input v-model.number="metaForm.renewNoticeDays" type="number" min="0" max="60" class="form-input-base text-xs font-mono" />
+              <span class="font-medium text-neutral-600 text-xs">提前提醒天数</span>
+              <input v-model.number="metaForm.renewNoticeDays" type="number" min="0" max="60" class="form-input-base font-mono" />
             </label>
             <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">币种</span>
-              <select v-model="metaForm.renewCurrency" class="form-input-base text-xs">
+              <span class="font-medium text-neutral-600 text-xs">币种</span>
+              <select v-model="metaForm.renewCurrency" class="form-input-base">
                 <option v-for="c in CURRENCY_LIST" :key="c.code" :value="c.code">{{ c.label }}</option>
               </select>
             </label>
             <div class="grid grid-cols-2 gap-1.5">
               <label class="space-y-1">
-                <span class="font-medium text-neutral-600 text-[11px]">续费价格</span>
-                <input v-model="metaForm.renewPrice" type="number" min="0" step="any" class="form-input-base text-xs font-mono" placeholder="0.00" />
+                <span class="font-medium text-neutral-600 text-xs">续费价格</span>
+                <input v-model="metaForm.renewPrice" type="number" min="0" step="any" class="form-input-base font-mono" placeholder="0.00" />
               </label>
               <label class="space-y-1">
-                <span class="font-medium text-neutral-600 text-[11px]">周期</span>
-                <select v-model="metaForm.renewCycle" class="form-input-base text-xs">
+                <span class="font-medium text-neutral-600 text-xs">周期</span>
+                <select v-model="metaForm.renewCycle" class="form-input-base">
                   <option v-for="cycle in CYCLE_LIST" :key="cycle">{{ cycle }}</option>
                 </select>
               </label>
@@ -275,7 +275,7 @@
           </div>
 
           <div v-if="metaForm.renewDate" class="bg-black/[0.02] border border-black/[0.04] rounded-lg p-2 text-xs flex items-center justify-between">
-            <span class="text-neutral-500 text-[11px]">到期状态：</span>
+            <span class="text-neutral-500 text-xs">到期状态：</span>
             <span class="font-semibold text-neutral-800">{{ calculateRemainingDays(metaForm.renewDate).label }}</span>
           </div>
 
@@ -286,9 +286,9 @@
         <form id="server-network" class="panel-card p-3.5 sm:p-4 bg-white space-y-3" @submit.prevent="save('network')">
           <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5">
             <div class="flex items-center gap-2">
-              <h2 class="font-semibold text-ios-label text-sm sm:text-base">出站网络</h2>
-              <span v-if="dirty.network" class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
-              <span v-else class="px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/[0.03] text-neutral-400">已同步</span>
+              <h2 class="text-ios-label text-base font-semibold leading-normal">出站网络</h2>
+              <span v-if="dirty.network" class="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60">未保存更改</span>
+              <span v-else class="px-1.5 py-0.5 rounded text-xs font-medium bg-black/[0.03] text-neutral-400">已同步</span>
             </div>
             <button
               type="submit"
@@ -300,14 +300,14 @@
             </button>
           </div>
 
-          <p class="text-[11px] text-ios-secondary leading-relaxed">
+          <p class="text-xs text-ios-secondary leading-relaxed">
             核心源 IP / 网卡仅影响代理核心流量；服务器强制出站作用于整机新建连接。保存后需发布配置生效，留空表示清除。
           </p>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-ios-secondary">
             <label v-for="field in networkFields" :key="field.key" class="space-y-1">
-              <span class="font-medium text-neutral-600 text-[11px]">{{ field.label }}</span>
-              <input v-model.trim="form[field.key]" class="form-input-base text-xs font-mono" placeholder="留空清除" />
+              <span class="font-medium text-neutral-600 text-xs">{{ field.label }}</span>
+              <input v-model.trim="form[field.key]" class="form-input-base font-mono" placeholder="留空清除" />
             </label>
           </div>
 
@@ -317,7 +317,7 @@
         <!-- 6. 危险区域 Section Card -->
         <section id="server-danger" class="panel-card p-3.5 sm:p-4 bg-rose-50/20 border border-rose-200/80 space-y-3">
           <div class="flex items-center justify-between border-b border-rose-200/50 pb-2.5">
-            <h2 class="font-semibold text-rose-600 text-sm sm:text-base flex items-center gap-1.5">
+            <h2 class="text-rose-600 flex items-center gap-1.5 text-base font-semibold leading-normal">
               <svg class="w-4 h-4 text-rose-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
@@ -325,15 +325,15 @@
             </h2>
           </div>
 
-          <p class="text-[11px] text-ios-secondary leading-relaxed">
+          <p class="text-xs text-ios-secondary leading-relaxed">
             删除前请检查配置引用与发布状态；删除后吊销节点身份，历史流量和访问记录保留。吊销证书后该服务器不能再使用当前证书建立连接。
           </p>
 
           <div class="flex flex-wrap gap-2.5 pt-1">
-            <button type="button" class="ios-btn-danger text-xs px-3.5 py-1.5" @click="$emit('delete')">
+            <button type="button" class="ios-btn-danger px-3.5 py-1.5" @click="$emit('delete')">
               删除服务器
             </button>
-            <button type="button" class="ios-btn-danger text-xs px-3.5 py-1.5" @click="revokeOpen = true">
+            <button type="button" class="ios-btn-danger px-3.5 py-1.5" @click="revokeOpen = true">
               吊销证书
             </button>
           </div>

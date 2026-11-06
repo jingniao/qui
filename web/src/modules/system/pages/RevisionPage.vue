@@ -10,7 +10,7 @@
       <template #footer><Pagination :total="total" :page-size="20" :current-page="page" @update:page="changePage" /></template>
     </DataTable>
     <section id="deployment-batches" class="space-y-4">
-      <h2 class="text-lg font-semibold">节点发布批次</h2>
+      <h2 class="text-lg font-semibold leading-snug">节点发布批次</h2>
       <p class="text-sm text-gray-500">按出口 → 中转 → 入口发布；失败或手动回滚时按相反顺序恢复发布前版本。正在执行的批次会预留全部节点。</p>
       <EmptyState v-if="!batches.length" title="尚无发布批次" description="选择代理链或发生变更的节点，生成包含依赖节点配置的批次草稿。" />
       <DataTable v-else>

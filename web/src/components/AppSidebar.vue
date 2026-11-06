@@ -18,8 +18,8 @@
           </svg>
         </div>
         <div v-if="!isCollapsed" class="flex flex-col min-w-0 truncate">
-          <span class="font-semibold text-ios-label text-sm tracking-tight truncate leading-snug">{{ authState.platformName || 'Proxy Control' }}</span>
-          <span class="text-[11px] text-ios-tertiary font-normal leading-none truncate">轻量代理控制平台</span>
+          <span class="font-semibold text-ios-label text-sm tracking-normal truncate leading-snug">{{ authState.platformName || 'Proxy Control' }}</span>
+          <span class="text-xs text-ios-tertiary font-normal leading-normal truncate">轻量代理控制平台</span>
         </div>
       </router-link>
 
@@ -185,7 +185,7 @@
               <div class="absolute -left-2 top-0 w-2 h-full"></div>
 
               <!-- Header -->
-              <div class="px-2.5 py-1 text-[11px] font-semibold text-ios-tertiary uppercase tracking-wider border-b border-black/[0.05] mb-1">
+              <div class="px-2.5 py-1 text-xs font-semibold text-ios-tertiary uppercase tracking-wider border-b border-black/[0.05] mb-1">
                 {{ sec.label }}
               </div>
 
@@ -196,7 +196,7 @@
                     v-if="!item.ownerOnly || isOwner"
                     :to="item.path"
                     :class="[
-                      'flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[13px] transition-all',
+                      'flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-sm transition-all',
                       isCurrentPath(item.path)
                         ? 'bg-ios-blue text-white font-medium shadow-[0_2px_6px_rgba(0,113,227,0.25)]'
                         : 'text-ios-label hover:bg-black/[0.05]'
@@ -229,7 +229,7 @@
                     >
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="item.iconPath" />
                     </svg>
-                    <span v-if="!isCollapsed" class="truncate text-[13px]">{{ item.label }}</span>
+                    <span v-if="!isCollapsed" class="truncate text-sm">{{ item.label }}</span>
                   </router-link>
                 </template>
               </div>
@@ -269,10 +269,10 @@
               {{ authState.currentUser?.displayName || authState.currentUser?.username || '用户' }}
             </div>
             <div class="flex items-center gap-1.5 mt-0.5">
-              <span class="text-[10px] px-1.5 py-0.2 rounded-full bg-ios-blue/10 text-ios-blue font-medium leading-tight">
+              <span class="text-xs px-1.5 py-0.2 rounded-full bg-ios-blue/10 text-ios-blue font-medium leading-tight">
                 {{ authState.currentUser?.role }}
               </span>
-              <span class="text-[11px] text-ios-tertiary group-hover:text-ios-blue transition-colors">用户中心 &rsaquo;</span>
+              <span class="text-xs text-ios-tertiary group-hover:text-ios-blue transition-colors">用户中心 &rsaquo;</span>
             </div>
           </div>
         </button>
@@ -328,7 +328,7 @@
 
     <!-- Sidebar Footer Toggle -->
     <div :class="['border-t border-black/[0.05] flex items-center shrink-0 transition-all', isCollapsed ? 'justify-center p-2.5' : 'justify-between p-3 text-xs text-ios-tertiary']">
-      <span v-if="!isCollapsed" class="font-mono text-[11px] text-ios-quaternary">开发版本</span>
+      <span v-if="!isCollapsed" class="font-mono text-xs text-ios-quaternary">开发版本</span>
       <div :class="['relative group/expand', isCollapsed ? 'flex justify-center' : '']">
         <button
           type="button"
@@ -385,7 +385,7 @@
           <div>
             <div class="flex items-center gap-2">
               <span class="text-sm font-semibold text-ios-label">{{ authState.currentUser?.displayName || authState.currentUser?.username }}</span>
-              <span class="text-[11px] px-2 py-0.5 rounded-full bg-ios-blue/15 text-ios-blue font-medium border border-ios-blue/20">
+              <span class="text-xs px-2 py-0.5 rounded-full bg-ios-blue/15 text-ios-blue font-medium border border-ios-blue/20">
                 {{ authState.currentUser?.role }}
               </span>
             </div>
@@ -409,7 +409,7 @@
       <div class="p-4 rounded-2xl bg-white border border-black/[0.08] shadow-2xs space-y-4">
         <div class="border-b border-black/[0.06] pb-2.5">
           <h4 class="text-xs font-semibold text-ios-label uppercase tracking-wider">修改登录密码</h4>
-          <p class="text-[11px] text-ios-tertiary mt-0.5">修改后所有设备的活跃会话将失效，需使用新密码重新登录。</p>
+          <p class="text-xs text-ios-tertiary mt-0.5">修改后所有设备的活跃会话将失效，需使用新密码重新登录。</p>
         </div>
 
         <form @submit.prevent="submitPassword" class="space-y-3">
@@ -748,7 +748,7 @@ function isSectionActive(sectionId: string) {
 function navItemClass(targetPath: string) {
   const active = isCurrentPath(targetPath);
   return [
-    'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-all group select-none',
+    'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-all group select-none',
     active
       ? 'bg-ios-blue text-white font-semibold shadow-[0_2px_8px_rgba(0,113,227,0.25)]'
       : 'text-ios-secondary font-normal hover:text-ios-label hover:bg-black/[0.04]'

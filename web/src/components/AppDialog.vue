@@ -17,7 +17,7 @@
           <!-- Header -->
           <div class="px-6 py-[1.125rem] border-b border-black/[0.06] flex items-center justify-between gap-4 bg-[#F5F5F7] shrink-0">
             <div class="min-w-0 flex-1">
-              <h3 class="text-lg font-semibold text-ios-label tracking-tight truncate">{{ title }}</h3>
+              <h3 class="text-ios-label tracking-normal truncate text-lg font-semibold leading-snug">{{ title }}</h3>
               <p v-if="description" class="text-xs text-ios-tertiary mt-1 truncate">{{ description }}</p>
             </div>
             <div class="flex items-center gap-2.5 shrink-0">

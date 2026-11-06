@@ -10,7 +10,7 @@
           <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">已用流量 / 额度</div><TrafficValue :bytes="data.me.usedTraffic" /> / {{ data.me.trafficLimit ? bytes(data.me.trafficLimit) : '不限额' }}<div class="h-1.5 bg-black/[0.05] rounded-full overflow-hidden"><div class="h-full bg-ios-blue" :style="{ width: quota + '%' }"></div></div></div>
           <div class="panel-card p-5 space-y-2"><div class="text-xs text-ios-tertiary">到期时间</div><p>{{ data.me.expiresAt ? formatPortalTime(data.me.expiresAt) : '永不过期' }}</p></div>
         </div>
-        <section class="panel-card p-6 space-y-3"><h2 class="font-semibold">在线设备 / 上限</h2><p>{{ data.me.onlineDevices ?? '未知' }} / {{ data.me.deviceLimit === 0 ? '不限' : data.me.deviceLimit ?? '—' }}</p>
+        <section class="panel-card p-6 space-y-3"><h2 class="text-base font-semibold leading-normal">在线设备 / 上限</h2><p>{{ data.me.onlineDevices ?? '未知' }} / {{ data.me.deviceLimit === 0 ? '不限' : data.me.deviceLimit ?? '—' }}</p>
           <p v-if="data.me.deviceLimit !== null && data.me.deviceLimit > 0 && data.me.onlineDevices !== null && data.me.onlineDevices >= data.me.deviceLimit" class="text-amber-700">设备数量已达上限</p>
           <p v-if="!data.me.deviceLimitEnforced" class="text-xs text-amber-700">部分执行：{{ data.me.deviceLimitUnsupportedNodes?.join('、') }}</p>
           <p v-if="data.me.deviceLimitUdpUnsupportedProtocols?.length" class="text-xs text-ios-secondary">{{ udpUnsupportedText(data.me.deviceLimitUdpUnsupportedProtocols) }}</p>
@@ -20,22 +20,22 @@
         </section>
       </div>
       <section v-else-if="section === 'subscription'" class="panel-card p-6 space-y-4">
-        <div class="flex justify-between items-center"><h2 class="font-semibold">专属订阅与配置</h2><button :disabled="preview || busy" class="ios-btn-secondary" @click="resetVisible = true">重置订阅链接</button></div>
+        <div class="flex justify-between items-center"><h2 class="text-base font-semibold leading-normal">专属订阅与配置</h2><button :disabled="preview || busy" class="ios-btn-secondary" @click="resetVisible = true">重置订阅链接</button></div>
         <p v-if="data.subscription.state === 'not_recoverable'" class="text-ios-secondary">重置后可查看：旧订阅链接无法恢复，原链接仍可使用。</p>
         <p v-else-if="data.subscription.state === 'missing'" class="text-ios-secondary">尚无订阅链接，请重置以创建。</p>
         <div v-for="format in data.subscription.formats || []" :key="format.id" class="space-y-2">
           <label class="text-xs font-semibold">{{ format.id }}</label>
-          <div class="flex gap-2"><input readonly :value="absolute(format.url)" class="form-input-base text-xs font-mono select-all" /><button class="ios-btn-secondary" @click="copy(format.url)">复制</button><button class="ios-btn-secondary" @click="showQR(format.url)">二维码</button></div>
+          <div class="flex gap-2"><input readonly :value="absolute(format.url)" class="form-input-base font-mono select-all" /><button class="ios-btn-secondary" @click="copy(format.url)">复制</button><button class="ios-btn-secondary" @click="showQR(format.url)">二维码</button></div>
         </div>
         <p class="text-xs text-ios-tertiary">订阅链接包含接入凭据，请妥善保存。</p>
         <p v-if="qrError" role="alert" class="text-ios-red">{{ qrError }}</p><div v-if="qr" class="p-4 bg-white w-fit rounded-xl border" v-html="qr"></div>
       </section>
       <section v-else-if="section === 'nodes'" class="panel-card p-6 space-y-4">
-        <h2 class="font-semibold">可用节点</h2><p v-if="!data.nodes.items.length" class="text-ios-tertiary">暂无授权节点</p>
+        <h2 class="text-base font-semibold leading-normal">可用节点</h2><p v-if="!data.nodes.items.length" class="text-ios-tertiary">暂无授权节点</p>
         <div v-for="node in data.nodes.items" :key="node.id" class="flex justify-between border-b border-black/[0.05] py-3"><span>{{ node.name }} <small class="text-ios-tertiary">{{ node.region || '—' }}</small></span><StatusBadge :status="node.online ? 'online' : 'offline'" /></div>
       </section>
       <section v-else-if="section === 'traffic'" class="panel-card p-6 space-y-4">
-        <div class="flex justify-between"><h2 class="font-semibold">流量趋势</h2><select v-model="range" :disabled="preview" class="form-input-base max-w-40"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></div>
+        <div class="flex justify-between"><h2 class="text-base font-semibold leading-normal">流量趋势</h2><select v-model="range" :disabled="preview" class="form-input-base max-w-40"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></div>
         <p v-if="preview" class="text-ios-secondary">只读预览仅提供账号、订阅和节点；流量历史请在用户详情查看。</p>
         <p v-else-if="!traffic.items.length" class="text-ios-tertiary">暂无流量记录</p>
         <div v-else class="space-y-3" role="img" :aria-label="range === '24h' ? '每小时上传和下载流量' : '每日上传和下载流量'">
@@ -46,7 +46,7 @@
         </div>
       </section>
       <form v-else-if="section === 'account'" class="panel-card p-6 space-y-4" @submit.prevent="changePassword">
-        <h2 class="font-semibold">修改登录密码</h2><p class="text-sm">{{ data.me.displayName || data.me.username }}</p>
+        <h2 class="text-base font-semibold leading-normal">修改登录密码</h2><p class="text-sm">{{ data.me.displayName || data.me.username }}</p>
         <label class="block text-xs">当前密码<input v-model="currentPassword" :disabled="preview" type="password" autocomplete="current-password" required class="form-input-base mt-2" /></label>
         <label class="block text-xs">新密码<input v-model="newPassword" :disabled="preview" type="password" autocomplete="new-password" required class="form-input-base mt-2" /></label>
         <label class="block text-xs">确认新密码<input v-model="confirmPassword" :disabled="preview" type="password" autocomplete="new-password" required class="form-input-base mt-2" /></label>

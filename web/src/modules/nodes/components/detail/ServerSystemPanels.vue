@@ -13,10 +13,10 @@
               <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" stroke-width="1.8"></path>
             </svg>
           </div>
-          <h3 class="font-bold text-ios-label text-sm tracking-tight">硬件信息</h3>
+          <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">硬件信息</h3>
         </div>
         <span
-          class="text-[11px] px-2 py-0.5 rounded-full font-semibold tabular-nums"
+          class="text-xs px-2 py-0.5 rounded-full font-semibold tabular-nums"
           :class="cpuPercent >= 85 ? 'bg-rose-50 text-ios-red' : (cpuPercent >= 65 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700')"
         >
           CPU {{ cpuPercentDisplay }}
@@ -43,21 +43,21 @@
       <!-- Lower 3-Column Sub-grid: 架构 / 内核 / GPU -->
       <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">架构</div>
+          <div class="text-xs text-ios-tertiary font-medium">架构</div>
           <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="architecture">
             {{ architecture }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">内核</div>
+          <div class="text-xs text-ios-tertiary font-medium">内核</div>
           <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="kernel">
             {{ kernel }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">GPU</div>
+          <div class="text-xs text-ios-tertiary font-medium">GPU</div>
           <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="gpu">
             {{ gpu }}
           </p>
@@ -82,10 +82,10 @@
               <line x1="17" y1="20" x2="17" y2="22" stroke-width="1.8"></line>
             </svg>
           </div>
-          <h3 class="font-bold text-ios-label text-sm tracking-tight">存储信息</h3>
+          <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">存储信息</h3>
         </div>
         <span
-          class="text-[11px] px-2 py-0.5 rounded-full font-semibold tabular-nums"
+          class="text-xs px-2 py-0.5 rounded-full font-semibold tabular-nums"
           :class="memoryPercent >= 90 ? 'bg-rose-50 text-ios-red' : (memoryPercent >= 75 ? 'bg-amber-50 text-amber-700' : 'bg-purple-50 text-purple-700')"
         >
           内存 {{ memoryPercentDisplay }}
@@ -110,21 +110,21 @@
       <!-- Lower 3-Column Sub-grid: 内存 / 内存交换 / 硬盘 -->
       <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">内存</div>
+          <div class="text-xs text-ios-tertiary font-medium">内存</div>
           <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="memoryDisplay">
             {{ memoryDisplay }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">内存交换</div>
+          <div class="text-xs text-ios-tertiary font-medium">内存交换</div>
           <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="swapDisplay">
             {{ swapDisplay }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">硬盘</div>
+          <div class="text-xs text-ios-tertiary font-medium">硬盘</div>
           <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="diskDisplay">
             {{ diskDisplay }}
           </p>
@@ -142,7 +142,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
             </svg>
           </div>
-          <h3 class="font-bold text-ios-label text-sm tracking-tight">网络信息</h3>
+          <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">网络信息</h3>
         </div>
 
       </div>
@@ -175,24 +175,24 @@
       <MachineTrafficUsage :summary="machineTraffic" />
 
       <!-- Lower 3-Column Sub-grid: 总流量 / 上行 / 下行（代理流量，非整机流量） -->
-      <p class="text-[10px] text-ios-tertiary font-medium">代理流量 · 本月（保留记录）</p>
+      <p class="text-xs text-ios-tertiary font-medium">代理流量 · 本月（保留记录）</p>
       <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">总流量</div>
+          <div class="text-xs text-ios-tertiary font-medium">总流量</div>
           <p class="text-xs font-semibold text-ios-label tabular-nums break-words" :title="totalTrafficDisplay">
             {{ totalTrafficDisplay }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">上行</div>
+          <div class="text-xs text-ios-tertiary font-medium">上行</div>
           <p class="text-xs font-semibold text-emerald-600 tabular-nums break-words" :title="formatCompactBytes(uploadBytes)">
             ↑ {{ formatCompactBytes(uploadBytes) }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
-          <div class="text-[10px] sm:text-[11px] text-ios-tertiary font-medium">下行</div>
+          <div class="text-xs text-ios-tertiary font-medium">下行</div>
           <p class="text-xs font-semibold text-ios-blue tabular-nums break-words" :title="formatCompactBytes(downloadBytes)">
             ↓ {{ formatCompactBytes(downloadBytes) }}
           </p>

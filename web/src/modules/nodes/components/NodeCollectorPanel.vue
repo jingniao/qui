@@ -1,6 +1,6 @@
 <template>
  <section class="panel-card p-6 space-y-3">
-  <h2 class="font-semibold">域名记录采集状态</h2>
+  <h2 class="text-base font-semibold leading-normal">域名记录采集状态</h2>
   <p class="text-sm" :class="fresh && sample?.status !== 'ok' ? 'text-amber-700' : 'text-gray-500'">{{ label }}</p>
   <dl v-if="fresh && sample" class="grid sm:grid-cols-2 gap-4 text-sm">
    <div><dt class="text-gray-500">待聚合观察 / 内存聚合记录</dt><dd>{{ sample.pending_observations ?? 0 }} / {{ sample.aggregated_rollups ?? 0 }}</dd></div>

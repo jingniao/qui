@@ -1,7 +1,7 @@
 <template>
   <span
     :class="[
-      'inline-flex items-center gap-1.5 px-2.5 h-[22px] rounded-full text-[11px] font-medium leading-none border tracking-tight select-none shrink-0 whitespace-nowrap transition-colors',
+      'inline-flex items-center gap-1.5 px-2.5 min-h-[24px] rounded-full text-xs font-medium leading-normal border tracking-normal select-none shrink-0 whitespace-nowrap transition-colors',
       classes[tone]
     ]"
   >

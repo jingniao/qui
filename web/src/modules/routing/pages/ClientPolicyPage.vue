@@ -38,7 +38,7 @@
           <button
             type="button"
             @click="openNewConfigModal"
-            class="ios-btn-primary inline-flex items-center gap-1.5 shadow-sm text-xs sm:text-sm font-semibold"
+            class="ios-btn-primary inline-flex items-center gap-1.5 shadow-sm font-semibold"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -60,21 +60,21 @@
           <!-- 头部：标题与启用状态 -->
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
-              <h4 class="text-sm font-bold text-neutral-900 truncate" :title="policy.name">{{ policy.name }}</h4>
+              <h4 class="text-neutral-900 truncate text-lg font-bold leading-snug" :title="policy.name">{{ policy.name }}</h4>
               <p class="text-xs text-neutral-500 mt-1 line-clamp-2 leading-relaxed">
                 {{ policy.description || '自定义客户端分流策略配置' }}
               </p>
             </div>
             <span
               v-if="activePolicyId === policy.id"
-              class="shrink-0 text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+              class="shrink-0 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1"
             >
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               已启用
             </span>
             <span
               v-else
-              class="shrink-0 text-[11px] bg-neutral-100 text-neutral-500 font-medium px-2 py-0.5 rounded-full"
+              class="shrink-0 text-xs bg-neutral-100 text-neutral-500 font-medium px-2 py-0.5 rounded-full"
             >
               未启用
             </span>
@@ -83,26 +83,26 @@
           <!-- 核心指标摘要 -->
           <div class="grid grid-cols-3 gap-2 py-2 border-y border-black/[0.05] text-center bg-black/[0.015] rounded-xl px-2">
             <div>
-              <span class="text-[10px] text-neutral-400 block">模式</span>
+              <span class="text-xs text-neutral-400 block">模式</span>
               <span class="text-xs font-bold text-neutral-800 uppercase mt-0.5 block truncate">
                 {{ formatModeName(policy.config.settings.mode) }}
               </span>
             </div>
             <div>
-              <span class="text-[10px] text-neutral-400 block">策略组</span>
+              <span class="text-xs text-neutral-400 block">策略组</span>
               <span class="text-xs font-bold text-neutral-800 mt-0.5 block">
                 {{ policy.config.proxyGroups.length }} 个
               </span>
             </div>
             <div>
-              <span class="text-[10px] text-neutral-400 block">规则数</span>
+              <span class="text-xs text-neutral-400 block">规则数</span>
               <span class="text-xs font-bold text-neutral-800 mt-0.5 block">
                 {{ policy.config.rules.filter(r => r.enabled).length }} 条
               </span>
             </div>
           </div>
 
-          <div class="flex items-center justify-between text-[11px] text-neutral-400 pt-0.5 font-mono">
+          <div class="flex items-center justify-between text-xs text-neutral-400 pt-0.5 font-mono">
             <span>端口: {{ policy.config.settings.mixedPort }}</span>
             <span>{{ formatDateTime(policy.updatedAt) }}</span>
           </div>
@@ -114,7 +114,7 @@
           <button
             type="button"
             @click="editPolicy(policy)"
-            class="ios-btn-secondary text-xs h-8 px-2 rounded-xl font-medium inline-flex items-center justify-center gap-1.5 transition-all shadow-2xs"
+            class="ios-btn-secondary h-8 px-2 rounded-xl font-medium inline-flex items-center justify-center gap-1.5 transition-all shadow-2xs"
             title="编辑该策略的分流规则与配置"
           >
             <svg class="w-3.5 h-3.5 text-neutral-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -129,7 +129,7 @@
             type="button"
             @click="enablePolicy(policy)"
             :disabled="saving"
-            class="ios-btn-primary text-xs h-8 px-2 rounded-xl font-medium inline-flex items-center justify-center gap-1.5 shadow-2xs transition-all"
+            class="ios-btn-primary h-8 px-2 rounded-xl font-medium inline-flex items-center justify-center gap-1.5 shadow-2xs transition-all"
             title="设为订阅模板，客户端更新订阅后生效"
           >
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -141,7 +141,7 @@
             v-else
             type="button"
             disabled
-            class="ios-btn-secondary text-xs h-8 px-2 rounded-xl font-semibold inline-flex items-center justify-center gap-1.5 bg-emerald-50 text-emerald-700 border-emerald-200/90 cursor-default opacity-100 shadow-2xs"
+            class="ios-btn-secondary h-8 px-2 rounded-xl font-semibold inline-flex items-center justify-center gap-1.5 bg-emerald-50 text-emerald-700 border-emerald-200/90 cursor-default opacity-100 shadow-2xs"
             title="该策略当前正在生效中"
           >
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
@@ -157,7 +157,7 @@
                 ? 'opacity-40 cursor-not-allowed text-neutral-400 border-black/[0.08] hover:bg-white hover:text-neutral-400'
                 : 'text-neutral-600 hover:text-red-600 hover:bg-red-50 hover:border-red-200 border-black/[0.08]'
             ]"
-            class="ios-btn-secondary text-xs h-8 px-2 rounded-xl font-medium inline-flex items-center justify-center gap-1.5 transition-all shadow-2xs"
+            class="ios-btn-secondary h-8 px-2 rounded-xl font-medium inline-flex items-center justify-center gap-1.5 transition-all shadow-2xs"
             :title="activePolicyId === policy.id ? '当前生效中的策略不可删除' : '删除此策略配置'"
           >
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -177,13 +177,13 @@
         </svg>
       </div>
       <div>
-        <h3 class="text-sm font-bold text-neutral-900">暂无客户端策略配置</h3>
+        <h3 class="text-neutral-900 text-sm font-semibold leading-normal">暂无客户端策略配置</h3>
         <p class="text-xs text-neutral-500 mt-1">点击右上角「新建配置」创建首个分流策略</p>
       </div>
       <button
         type="button"
         @click="openNewConfigModal"
-        class="ios-btn-primary text-xs inline-flex items-center gap-1.5"
+        class="ios-btn-primary inline-flex items-center gap-1.5"
       >
         <span>新建配置</span>
       </button>
@@ -207,7 +207,7 @@
           <button
             type="button"
             @click="showVersionDialog = true"
-            class="ios-btn-secondary text-xs px-2.5 py-1.5 inline-flex items-center gap-1 font-mono"
+            class="ios-btn-secondary px-2.5 py-1.5 inline-flex items-center gap-1 font-mono"
             title="查看策略修订版本与更新记录"
           >
             <svg class="w-3.5 h-3.5 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -221,7 +221,7 @@
             type="button"
             @click="saveAll"
             :disabled="saving"
-            class="ios-btn-primary text-xs px-3.5 py-1.5 inline-flex items-center gap-1.5 font-semibold shadow-xs"
+            class="ios-btn-primary px-3.5 py-1.5 inline-flex items-center gap-1.5 font-semibold shadow-xs"
           >
             <svg v-if="!saving" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
@@ -237,7 +237,7 @@
           <button
             type="button"
             @click="handleCloseModal"
-            class="ios-btn-secondary text-xs px-3 py-1.5 inline-flex items-center gap-1"
+            class="ios-btn-secondary px-3 py-1.5 inline-flex items-center gap-1"
           >
             <span>关闭</span>
           </button>
@@ -249,7 +249,7 @@
       <div @click="activeRuleMenuId = null" class="flex flex-col md:flex-row gap-6 flex-1 min-h-0 h-full overflow-hidden">
         <!-- 左侧导航：模块选择（紧凑缩窄，悬停浮窗查看详细描述） -->
         <div class="w-full md:w-56 lg:w-60 shrink-0 space-y-2 border-b md:border-b-0 md:border-r border-black/[0.06] pb-4 md:pb-0 md:pr-4 overflow-y-auto h-full pr-1">
-          <div class="px-2 py-1 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+          <div class="px-2 py-1 text-xs font-semibold text-neutral-400 uppercase tracking-wider">
             配置模块清单
           </div>
 
@@ -279,33 +279,33 @@
               </div>
               <div class="min-w-0">
                 <span class="text-xs font-bold block truncate">{{ mod.name }}</span>
-                <span class="text-[9px] font-mono opacity-60 block uppercase truncate">{{ mod.en }}</span>
+                <span class="text-xs font-mono opacity-60 block uppercase truncate">{{ mod.en }}</span>
               </div>
             </div>
 
             <!-- 状态徽标 -->
             <span
               v-if="mod.id === 'groups'"
-              class="text-[10px] px-1.5 py-0.5 rounded-md font-mono bg-black/[0.04] text-neutral-600 shrink-0"
+              class="text-xs px-1.5 py-0.5 rounded-md font-mono bg-black/[0.04] text-neutral-600 shrink-0"
             >
               {{ clientConfig.proxyGroups.length }} 组
             </span>
             <span
               v-else-if="mod.id === 'rules'"
-              class="text-[10px] px-1.5 py-0.5 rounded-md font-mono bg-black/[0.04] text-neutral-600 shrink-0"
+              class="text-xs px-1.5 py-0.5 rounded-md font-mono bg-black/[0.04] text-neutral-600 shrink-0"
             >
               {{ clientConfig.rules.length }} 条
             </span>
             <span
               v-else-if="mod.id === 'dns'"
-              class="text-[9px] px-1.5 py-0.5 rounded-md font-medium shrink-0"
+              class="text-xs px-1.5 py-0.5 rounded-md font-medium shrink-0"
               :class="clientConfig.extra.dns.enable ? 'bg-emerald-50 text-emerald-700' : 'bg-neutral-100 text-neutral-500'"
             >
               {{ clientConfig.extra.dns.enable ? '已启用' : '关闭' }}
             </span>
             <span
               v-else-if="mod.id === 'providers'"
-              class="text-[10px] px-1.5 py-0.5 rounded-md font-mono bg-black/[0.04] text-neutral-600 shrink-0"
+              class="text-xs px-1.5 py-0.5 rounded-md font-mono bg-black/[0.04] text-neutral-600 shrink-0"
             >
               {{ clientConfig.extra.providers.length + serviceSets.length }}
             </span>
@@ -320,7 +320,7 @@
           <!-- 模块 1：基础设置 (Settings) -->
           <div v-if="activeModule === 'settings'" class="space-y-6">
             <div class="border-b border-black/[0.06] pb-3">
-              <h3 class="text-base font-bold text-neutral-900">基础设置 (Settings)</h3>
+              <h3 class="text-neutral-900 text-base font-semibold leading-normal">基础设置 (Settings)</h3>
               <p class="text-xs text-neutral-500 mt-0.5">Clash 如何运行 比如监听端口、运行模式、是否允许局域网设备连接等。</p>
             </div>
 
@@ -335,7 +335,7 @@
                     v-model="policyNameInput"
                     type="text"
                     placeholder="例如: 常用分流策略 / 基础直连"
-                    class="form-input-base text-xs"
+                    class="form-input-base"
                   />
                 </div>
                 <div>
@@ -344,7 +344,7 @@
                     v-model="policyDescInput"
                     type="text"
                     placeholder="简短描述该策略的适用场景"
-                    class="form-input-base text-xs"
+                    class="form-input-base"
                   />
                 </div>
               </div>
@@ -369,12 +369,12 @@
                     type="number"
                     min="1024"
                     max="65535"
-                    class="form-input-base text-xs font-mono"
+                    class="form-input-base font-mono"
                     placeholder="7890"
                     @input="markDirty"
                   />
-                  <span v-if="mixedPortError" class="text-[11px] text-red-500 mt-1 block">{{ mixedPortError }}</span>
-                  <span v-else class="text-[11px] text-neutral-400 mt-1 block">同时支持 HTTP / SOCKS5 (1024~65535)</span>
+                  <span v-if="mixedPortError" class="text-xs text-red-500 mt-1 block">{{ mixedPortError }}</span>
+                  <span v-else class="text-xs text-neutral-400 mt-1 block">同时支持 HTTP / SOCKS5 (1024~65535)</span>
                 </div>
 
                 <div>
@@ -386,7 +386,7 @@
                     :options="allowLanOptions"
                     @change="markDirty"
                   />
-                  <span class="text-[11px] text-neutral-400 mt-1 block">绑定 0.0.0.0 提供代理服务</span>
+                  <span class="text-xs text-neutral-400 mt-1 block">绑定 0.0.0.0 提供代理服务</span>
                 </div>
 
                 <div>
@@ -398,7 +398,7 @@
                     :options="logLevelOptions"
                     @change="markDirty"
                   />
-                  <span class="text-[11px] text-neutral-400 mt-1 block">客户端本地控制台输出等级</span>
+                  <span class="text-xs text-neutral-400 mt-1 block">客户端本地控制台输出等级</span>
                 </div>
               </div>
 
@@ -418,8 +418,8 @@
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
               <div>
                 <div class="flex items-center gap-2">
-                  <h3 class="text-base font-bold text-neutral-900">代理组编排 (Proxy Groups)</h3>
-                  <span class="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-ios-blue font-semibold border border-blue-100">
+                  <h3 class="text-neutral-900 text-base font-semibold leading-normal">代理组编排 (Proxy Groups)</h3>
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-ios-blue font-semibold border border-blue-100">
                     双层拓扑
                   </span>
                 </div>
@@ -433,7 +433,7 @@
                 <button
                   type="button"
                   disabled
-                  class="ios-btn-secondary text-xs px-2.5 py-1.5 inline-flex items-center gap-1.5"
+                  class="ios-btn-secondary px-2.5 py-1.5 inline-flex items-center gap-1.5"
                   title="客户端延迟测量未接入"
                 >
                   <svg
@@ -450,7 +450,7 @@
                 <button
                   type="button"
                   @click="addNewServiceGroup"
-                  class="ios-btn-primary text-xs px-2.5 py-1.5 inline-flex items-center gap-1 shadow-2xs font-semibold"
+                  class="ios-btn-primary px-2.5 py-1.5 inline-flex items-center gap-1 shadow-2xs font-semibold"
                 >
                   <span>＋ 新建用途组</span>
                 </button>
@@ -458,7 +458,7 @@
                 <button
                   type="button"
                   @click="addNewRegionGroup"
-                  class="ios-btn-secondary text-xs px-2.5 py-1.5 inline-flex items-center gap-1 font-semibold text-neutral-800 hover:border-ios-blue"
+                  class="ios-btn-secondary px-2.5 py-1.5 inline-flex items-center gap-1 font-semibold text-neutral-800 hover:border-ios-blue"
                 >
                   <span>＋ 新建地区组</span>
                 </button>
@@ -473,7 +473,7 @@
               <span class="text-base leading-none">⚠️</span>
               <div class="space-y-0.5">
                 <span class="font-bold">严重错误：代理组之间形成了闭环循环引用！</span>
-                <p class="text-[11px] text-red-700">
+                <p class="text-xs text-red-700">
                   环路路径：<code class="font-mono font-bold bg-white/80 px-1.5 py-0.5 rounded border border-red-200">{{ cycleWarning }}</code>。请调整对应组的可选出口以解除循环。
                 </p>
               </div>
@@ -494,7 +494,7 @@
                   ]"
                 >
                   <span>🎯 用途分组</span>
-                  <span class="text-[10px] px-1.5 py-0.2 rounded-full font-mono" :class="groupCategoryTab === 'service' ? 'bg-blue-100 text-blue-800 font-bold' : 'bg-neutral-200 text-neutral-600'">
+                  <span class="text-xs px-1.5 py-0.2 rounded-full font-mono" :class="groupCategoryTab === 'service' ? 'bg-blue-100 text-blue-800 font-bold' : 'bg-neutral-200 text-neutral-600'">
                     {{ serviceGroupsCount }}
                   </span>
                 </button>
@@ -510,7 +510,7 @@
                   ]"
                 >
                   <span>🌏 地区分组</span>
-                  <span class="text-[10px] px-1.5 py-0.2 rounded-full font-mono" :class="groupCategoryTab === 'region' ? 'bg-amber-100 text-amber-800 font-bold' : 'bg-neutral-200 text-neutral-600'">
+                  <span class="text-xs px-1.5 py-0.2 rounded-full font-mono" :class="groupCategoryTab === 'region' ? 'bg-amber-100 text-amber-800 font-bold' : 'bg-neutral-200 text-neutral-600'">
                     {{ regionGroupsCount }}
                   </span>
                 </button>
@@ -526,7 +526,7 @@
                   ]"
                 >
                   <span>🔀 全部 / 其他</span>
-                  <span class="text-[10px] px-1.5 py-0.2 rounded-full font-mono" :class="groupCategoryTab === 'all' ? 'bg-neutral-800 text-white font-bold' : 'bg-neutral-200 text-neutral-600'">
+                  <span class="text-xs px-1.5 py-0.2 rounded-full font-mono" :class="groupCategoryTab === 'all' ? 'bg-neutral-800 text-white font-bold' : 'bg-neutral-200 text-neutral-600'">
                     {{ classifiedGroups.length }}
                   </span>
                 </button>
@@ -539,7 +539,7 @@
                   type="text"
                   placeholder="搜索分组名称、出口或节点..."
                   style="padding-left: 2.25rem !important;"
-                  class="form-input-base text-xs py-1.5 pr-3 w-full"
+                  class="form-input-base py-1.5 pr-3 w-full"
                 />
                 <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -568,18 +568,18 @@
                 <!-- ============================================== -->
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-black/[0.05]">
                   <div class="flex items-center gap-2.5 flex-1 min-w-0">
-                    <span class="w-6 h-6 rounded-lg bg-black/[0.04] text-[11px] font-mono font-bold flex items-center justify-center text-neutral-500 shrink-0">
+                    <span class="w-6 h-6 rounded-lg bg-black/[0.04] text-xs font-mono font-bold flex items-center justify-center text-neutral-500 shrink-0">
                       #{{ item.index + 1 }}
                     </span>
                     <input
                       :value="item.group.name"
                       type="text"
                       placeholder="分组名称"
-                      class="text-sm font-bold text-neutral-900 bg-transparent hover:bg-black/[0.03] focus:bg-white focus:ring-1 focus:ring-ios-blue/40 px-2 py-0.5 rounded-lg border border-transparent hover:border-black/[0.08] focus:border-ios-blue transition-all w-40 sm:w-52"
+                      class="font-bold text-neutral-900 bg-transparent hover:bg-black/[0.03] focus:bg-white focus:ring-1 focus:ring-ios-blue/40 px-2 py-0.5 rounded-lg border border-transparent hover:border-black/[0.08] focus:border-ios-blue transition-all w-40 sm:w-52 text-sm"
                       @change="renameGroup(item.group, $event.target as HTMLInputElement)"
                     />
                     <span
-                      class="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0 border"
+                      class="text-xs px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0 border"
                       :class="item.category === 'service' ? 'bg-blue-50 text-ios-blue border-blue-200/80' : (item.category === 'region' ? 'bg-amber-50 text-amber-800 border-amber-200/80' : 'bg-purple-50 text-purple-700 border-purple-200/80')"
                     >
                       {{ item.category === 'service' ? '用途分组' : (item.category === 'region' ? '地区分组' : '其他分组') }}
@@ -640,11 +640,11 @@
                     <div class="flex items-center justify-between text-xs">
                       <div class="flex items-center gap-2">
                         <span class="font-semibold text-neutral-800">可选出口清单</span>
-                        <span class="text-[11px] text-neutral-400 font-normal">
+                        <span class="text-xs text-neutral-400 font-normal">
                           (点击卡片调整配置首选，客户端可能保留本地选择)
                         </span>
                       </div>
-                      <span class="text-[11px] text-neutral-400 font-mono">
+                      <span class="text-xs text-neutral-400 font-mono">
                         {{ getGroupMembers(item.group).length }} 个出口
                       </span>
                     </div>
@@ -675,7 +675,7 @@
                           <button
                             type="button"
                             @click.stop="removeGroupMember(item.group, mIdx)"
-                            class="opacity-0 group-hover/card:opacity-100 hover:text-red-500 p-0.5 rounded text-[11px] text-neutral-400 transition-opacity"
+                            class="opacity-0 group-hover/card:opacity-100 hover:text-red-500 p-0.5 rounded text-xs text-neutral-400 transition-opacity"
                             title="移除此出口"
                           >
                             ✕
@@ -683,7 +683,7 @@
                         </div>
 
                         <!-- 第二行：最终落地节点与延迟 -->
-                        <div class="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-black/[0.03] text-[10px]">
+                        <div class="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-black/[0.03] text-xs">
                           <span class="text-neutral-500 truncate font-mono">
                             客户端运行时决定
                           </span>
@@ -697,7 +697,7 @@
                         <!-- 当前生效角标 -->
                         <span
                           v-if="mIdx === 0"
-                          class="absolute -top-1.5 -right-1 text-[9px] bg-ios-blue text-white font-bold px-1.5 py-0.2 rounded-full shadow-2xs uppercase tracking-wider"
+                          class="absolute -top-1.5 -right-1 text-xs bg-ios-blue text-white font-bold px-1.5 py-0.2 rounded-full shadow-2xs uppercase tracking-wider"
                         >
                           配置首选
                         </span>
@@ -738,7 +738,7 @@
                           <span class="text-xs font-bold flex items-center gap-1">
                             <span>＋</span> <span>添加出口</span>
                           </span>
-                          <span class="text-[10px] opacity-75">下拉选择候选</span>
+                          <span class="text-xs opacity-75">下拉选择候选</span>
                         </div>
                       </div>
                     </div>
@@ -759,13 +759,13 @@
                           v-for="r in getRulesTargetingGroup(item.group.name)"
                           :key="r.id"
                           @click="openEditDrawer(r)"
-                          class="px-2 py-0.5 rounded bg-black/[0.03] hover:bg-blue-50 hover:text-ios-blue hover:border-blue-200 text-neutral-700 border border-black/[0.06] text-[11px] font-medium font-mono cursor-pointer transition-colors"
+                          class="px-2 py-0.5 rounded bg-black/[0.03] hover:bg-blue-50 hover:text-ios-blue hover:border-blue-200 text-neutral-700 border border-black/[0.06] text-xs font-medium font-mono cursor-pointer transition-colors"
                           title="点击编辑此条规则"
                         >
                           {{ r.type }}: {{ r.payload || '兜底全部' }}
                         </span>
                       </div>
-                      <span v-else class="text-amber-600/90 text-[11px] font-medium flex items-center gap-1">
+                      <span v-else class="text-amber-600/90 text-xs font-medium flex items-center gap-1">
                         <span>⚠️ 暂无分流规则将流量派发给此组</span>
                       </span>
                     </div>
@@ -773,7 +773,7 @@
                     <button
                       type="button"
                       @click="handleGroupRuleAction(item.group.name)"
-                      class="text-[11px] text-ios-blue hover:underline font-semibold shrink-0"
+                      class="text-xs text-ios-blue hover:underline font-semibold shrink-0"
                     >
                       编辑规则
                     </button>
@@ -789,7 +789,7 @@
                     <div class="flex items-center justify-between text-xs">
                       <div class="flex items-center gap-2">
                         <span class="font-semibold text-neutral-800">组内节点优选池</span>
-                        <span class="text-[11px] text-neutral-400 font-normal">
+                        <span class="text-xs text-neutral-400 font-normal">
                           (自动测速并优选延迟最低节点转发)
                         </span>
                       </div>
@@ -814,13 +814,13 @@
                             </span>
                           </div>
                         </div>
-                        <div class="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-emerald-200/60 text-[10px]">
+                        <div class="flex items-center justify-between gap-1 pt-1 mt-1 border-t border-emerald-200/60 text-xs">
                           <span class="text-emerald-700 font-medium">实际出口未知</span>
                           <span class="font-mono font-bold text-emerald-700">
                             延迟未知
                           </span>
                         </div>
-                        <span class="absolute -top-1.5 -right-1 text-[9px] bg-emerald-600 text-white font-bold px-1.5 py-0.2 rounded-full shadow-2xs">
+                        <span class="absolute -top-1.5 -right-1 text-xs bg-emerald-600 text-white font-bold px-1.5 py-0.2 rounded-full shadow-2xs">
                           运行时决定
                         </span>
                       </div>
@@ -834,14 +834,14 @@
                           <button
                             type="button"
                             @click="addGroupMemberDirect(item.group, '@all')"
-                            class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium text-[10px] hover:bg-blue-100"
+                            class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium text-xs hover:bg-blue-100"
                           >
                             ＋ @all 全部
                           </button>
                           <button
                             type="button"
                             @click="addGroupMemberDirect(item.group, 'DIRECT')"
-                            class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium text-[10px] hover:bg-emerald-100"
+                            class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium text-xs hover:bg-emerald-100"
                           >
                             ＋ 直连
                           </button>
@@ -853,13 +853,13 @@
                   <!-- 关键词筛选单行轻量条 -->
                   <div class="p-2.5 bg-neutral-50/80 rounded-xl border border-black/[0.04] flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div class="flex items-center gap-2 flex-1 min-w-0">
-                      <span class="text-[11px] font-bold text-neutral-500 shrink-0">地区筛选:</span>
+                      <span class="text-xs font-bold text-neutral-500 shrink-0">地区筛选:</span>
                       <input
                         :value="(item.group.includeKeywords || []).join('，')"
                         @change="setGroupKeywords(item.group, 'includeKeywords', ($event.target as HTMLInputElement).value)"
                         type="text"
                         :placeholder="getDefaultIncludeKeywords(item.group.name)"
-                        class="form-input-base text-xs font-mono py-1 px-2 flex-1 min-w-[130px] bg-white"
+                        class="form-input-base font-mono py-1 px-2 flex-1 min-w-[130px] bg-white"
                         title="包含关键词"
                       />
                       <input
@@ -867,19 +867,19 @@
                         @change="setGroupKeywords(item.group, 'excludeKeywords', ($event.target as HTMLInputElement).value)"
                         type="text"
                         placeholder="排除关键词 (如维护)"
-                        class="form-input-base text-xs font-mono py-1 px-2 w-28 bg-white hidden lg:inline"
+                        class="form-input-base font-mono py-1 px-2 w-28 bg-white hidden lg:inline"
                         title="排除关键词"
                       />
                     </div>
 
                     <div class="flex items-center gap-2 shrink-0">
-                      <span class="text-[11px] text-neutral-500">
+                      <span class="text-xs text-neutral-500">
                         {{ candidates.items.length }} 个授权候选
                       </span>
                       <button
                         type="button"
                         @click="addSelectedEndpoints(item.group)"
-                        class="ios-btn-secondary text-[11px] px-2 py-0.5 text-ios-blue font-semibold hover:border-ios-blue"
+                        class="ios-btn-secondary px-2 py-0.5 text-ios-blue font-semibold hover:border-ios-blue"
                       >
                         添加所选端点
                       </button>
@@ -895,7 +895,7 @@
                         :options="[{ value: '', label: 'DIRECT（兼容默认）' }, { value: 'direct', label: 'DIRECT' }, { value: 'reject', label: 'REJECT' }]"
                         class="w-44" size="sm" @change="markDirty"
                       />
-                      <button type="button" class="ios-btn-secondary text-xs" @click="loadCandidates">刷新候选</button>
+                      <button type="button" class="ios-btn-secondary" @click="loadCandidates">刷新候选</button>
                     </div>
                     <button type="button" class="text-xs text-ios-blue" @click="resolveGroupMembers(item.group.name)">解析成员</button>
                     <p v-if="candidateError" class="text-red-600">{{ candidateError }}</p>
@@ -913,7 +913,7 @@
                         <span
                           v-for="rg in getGroupsReferencingGroup(item.group.name)"
                           :key="rg.name"
-                          class="px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200/80 font-bold text-[11px]"
+                          class="px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200/80 font-bold text-xs"
                         >
                           🎯 {{ rg.name }}
                         </span>
@@ -923,7 +923,7 @@
                       </span>
                     </div>
 
-                    <div class="text-[11px] text-neutral-400 font-mono">
+                    <div class="text-xs text-neutral-400 font-mono">
                       测速周期: {{ item.group.interval || 300 }}s
                     </div>
                   </div>
@@ -988,14 +988,14 @@
                 <button
                   type="button"
                   @click="groupSearchQuery = ''; groupCategoryTab = 'all'"
-                  class="ios-btn-secondary text-xs px-3 py-1.5"
+                  class="ios-btn-secondary px-3 py-1.5"
                 >
                   清除搜索筛选
                 </button>
                 <button
                   type="button"
                   @click="applyStandardTopology"
-                  class="ios-btn-primary text-xs px-3 py-1.5"
+                  class="ios-btn-primary px-3 py-1.5"
                 >
                   ⚡ 应用推荐拓扑
                 </button>
@@ -1009,8 +1009,8 @@
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3 shrink-0">
               <div>
                 <div class="flex items-center gap-2">
-                  <h3 class="text-base font-bold text-neutral-900">分流规则列表 (Rules)</h3>
-                  <span class="text-[11px] px-2 py-0.5 rounded-full font-mono bg-neutral-100 text-neutral-600 font-medium">
+                  <h3 class="text-neutral-900 text-base font-semibold leading-normal">分流规则列表 (Rules)</h3>
+                  <span class="text-xs px-2 py-0.5 rounded-full font-mono bg-neutral-100 text-neutral-600 font-medium">
                     共 {{ clientConfig.rules.length }} 条
                   </span>
                 </div>
@@ -1022,7 +1022,7 @@
                 <button
                   type="button"
                   @click="openCreateRuleDrawer"
-                  class="ios-btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1 font-semibold shadow-2xs"
+                  class="ios-btn-primary px-3 py-1.5 inline-flex items-center gap-1 font-semibold shadow-2xs"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -1047,7 +1047,7 @@
                       v-model="ruleSearchKeyword"
                       type="text"
                       placeholder="搜索规则…"
-                      class="w-full text-xs pl-8 pr-6 py-2 bg-transparent border-0 focus:outline-none text-neutral-800 placeholder-neutral-400"
+                      class="w-full pl-8 pr-6 py-2 bg-transparent border-0 focus:outline-none text-neutral-800 placeholder-neutral-400 text-sm"
                     />
                     <button
                       v-if="ruleSearchKeyword"
@@ -1164,7 +1164,7 @@
                           </span>
                           <div class="flex items-baseline gap-1 font-mono">
                             <span class="text-xs font-bold text-neutral-800">{{ index + 1 }}</span>
-                            <span class="text-[10px] text-neutral-400" :title="'排序权重: #' + rule.priority">#{{ rule.priority }}</span>
+                            <span class="text-xs text-neutral-400" :title="'排序权重: #' + rule.priority">#{{ rule.priority }}</span>
                           </div>
                         </div>
                       </td>
@@ -1173,7 +1173,7 @@
                       <td class="py-2.5 px-3">
                         <div class="flex items-center gap-1.5 flex-wrap">
                           <span
-                            :class="['px-2 py-0.5 rounded text-[11px] font-medium shrink-0', getRuleTypeBadgeClass(rule.type)]"
+                            :class="['px-2 py-0.5 rounded text-xs font-medium shrink-0', getRuleTypeBadgeClass(rule.type)]"
                             :title="'技术标识: ' + rule.type"
                           >
                             {{ getRuleTypeChineseName(rule.type) }}
@@ -1187,16 +1187,16 @@
                             title="点击查看此规则集"
                           >
                             <span>{{ getRuleSetName(rule.payload) }}</span>
-                            <span class="text-[10px]">↗</span>
+                            <span class="text-xs">↗</span>
                           </button>
                           <span v-else class="font-mono text-neutral-800 font-medium break-all">
                             {{ rule.payload }}
                           </span>
-                          <span v-if="rule.noResolve" class="text-[9px] bg-neutral-100 text-neutral-600 px-1 py-0.2 rounded font-mono" title="跳过 DNS 解析">
+                          <span v-if="rule.noResolve" class="text-xs bg-neutral-100 text-neutral-600 px-1 py-0.2 rounded font-mono" title="跳过 DNS 解析">
                             no-resolve
                           </span>
                         </div>
-                        <p v-if="rule.description" class="text-[11px] text-neutral-400 mt-0.5 truncate" :title="rule.description">
+                        <p v-if="rule.description" class="text-xs text-neutral-400 mt-0.5 truncate" :title="rule.description">
                           {{ rule.description }}
                         </p>
                       </td>
@@ -1212,7 +1212,7 @@
                         >
                           <span :class="['w-1.5 h-1.5 rounded-full shrink-0', getActionDotClass(rule.target)]"></span>
                           <span class="group-hover:underline">{{ formatActionLabel(rule.target) }}</span>
-                          <span class="text-neutral-300 group-hover:text-ios-blue text-[10px]">↗</span>
+                          <span class="text-neutral-300 group-hover:text-ios-blue text-xs">↗</span>
                         </button>
                         <span v-else class="inline-flex items-center gap-1.5 text-xs font-semibold text-neutral-800">
                           <span :class="['w-1.5 h-1.5 rounded-full shrink-0', getActionDotClass(rule.target)]"></span>
@@ -1305,12 +1305,12 @@
                       <td colspan="4" class="py-8 text-center text-xs text-neutral-400">
                         <div class="space-y-2">
                           <p>没有找到符合条件的分流规则</p>
-                          <button type="button" class="ios-btn-primary text-xs px-2.5 py-1" @click="openCreateRuleDrawer">添加规则</button>
+                          <button type="button" class="ios-btn-primary px-2.5 py-1" @click="openCreateRuleDrawer">添加规则</button>
                           <button
                             v-if="isFiltered"
                             type="button"
                             @click="resetRuleFilters"
-                            class="ios-btn-secondary text-xs px-2.5 py-1"
+                            class="ios-btn-secondary px-2.5 py-1"
                           >
                             清除筛选条件
                           </button>
@@ -1330,7 +1330,7 @@
                       <td class="py-2.5 px-3.5 w-20 align-middle">
                         <div class="flex items-center gap-1.5">
                           <span class="text-xs" title="兜底规则，始终固定在列表末尾">🛡️</span>
-                          <span class="text-[10px] font-bold text-neutral-600 bg-black/[0.05] px-1.5 py-0.5 rounded">兜底</span>
+                          <span class="text-xs font-bold text-neutral-600 bg-black/[0.05] px-1.5 py-0.5 rounded">兜底</span>
                         </div>
                       </td>
 
@@ -1339,11 +1339,11 @@
                         <div class="flex items-center gap-2 flex-wrap">
                           <span class="text-xs font-bold text-neutral-900">其他未匹配流量</span>
                           <span class="text-neutral-300">·</span>
-                          <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-white border border-black/[0.08] text-neutral-600 font-semibold" title="Clash MATCH 兜底规则">
+                          <span class="px-1.5 py-0.5 rounded text-xs font-mono bg-white border border-black/[0.08] text-neutral-600 font-semibold" title="Clash MATCH 兜底规则">
                             MATCH
                           </span>
                         </div>
-                        <p class="text-[11px] text-neutral-400 mt-0.5 truncate" :title="matchRule.description || '未命中上方任何具体规则的访问请求将强制交由此目标处理'">
+                        <p class="text-xs text-neutral-400 mt-0.5 truncate" :title="matchRule.description || '未命中上方任何具体规则的访问请求将强制交由此目标处理'">
                           {{ matchRule.description || '漏网请求默认走此目标' }}
                         </p>
                       </td>
@@ -1359,7 +1359,7 @@
                         >
                           <span :class="['w-1.5 h-1.5 rounded-full shrink-0', getActionDotClass(matchRule.target)]"></span>
                           <span class="group-hover:underline">{{ formatActionLabel(matchRule.target) }}</span>
-                          <span class="text-neutral-300 group-hover:text-ios-blue text-[10px]">↗</span>
+                          <span class="text-neutral-300 group-hover:text-ios-blue text-xs">↗</span>
                         </button>
                         <span v-else class="inline-flex items-center gap-1.5 text-xs font-semibold text-neutral-800">
                           <span :class="['w-1.5 h-1.5 rounded-full shrink-0', getActionDotClass(matchRule.target)]"></span>
@@ -1401,7 +1401,7 @@
           <!-- 模块 4：DNS 设置 (DNS) -->
           <div v-else-if="activeModule === 'dns'" class="space-y-6">
             <div class="border-b border-black/[0.06] pb-3">
-              <h3 class="text-base font-bold text-neutral-900">DNS 设置 (DNS Resolvers)</h3>
+              <h3 class="text-neutral-900 text-base font-semibold leading-normal">DNS 设置 (DNS Resolvers)</h3>
               <p class="text-xs text-neutral-500 mt-0.5">dns 控制域名如何解析，例如使用哪些 DNS 服务器、是否启用 Fake-IP，以及是否为不同域名指定不同解析方式。</p>
             </div>
 
@@ -1409,8 +1409,8 @@
             <div class="panel-card p-5 space-y-4 border border-black/[0.06]">
               <div class="flex items-center justify-between">
                 <div>
-                  <h4 class="text-xs font-bold text-neutral-900">启用客户端内部 DNS 解析 (dns.enable)</h4>
-                  <p class="text-[11px] text-neutral-400 mt-0.5">由 Clash / Mihomo 内部接管 DNS 查询，避免本地 DNS 污染与泄露。</p>
+                  <h4 class="text-neutral-900 text-base font-semibold leading-normal">启用客户端内部 DNS 解析 (dns.enable)</h4>
+                  <p class="text-xs text-neutral-400 mt-0.5">由 Clash / Mihomo 内部接管 DNS 查询，避免本地 DNS 污染与泄露。</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
                   <input
@@ -1439,8 +1439,8 @@
             <div class="panel-card p-5 space-y-4 border border-black/[0.06]">
               <div class="flex items-center justify-between">
                 <div>
-                  <h4 class="text-xs font-bold text-neutral-900">常规上游 DNS 服务器 (Nameservers)</h4>
-                  <p class="text-[11px] text-neutral-400 mt-0.5">首选国内与直连查询服务器，支持 UDP、TCP 及 DoH 地址。</p>
+                  <h4 class="text-neutral-900 text-base font-semibold leading-normal">常规上游 DNS 服务器 (Nameservers)</h4>
+                  <p class="text-xs text-neutral-400 mt-0.5">首选国内与直连查询服务器，支持 UDP、TCP 及 DoH 地址。</p>
                 </div>
               </div>
 
@@ -1449,13 +1449,13 @@
                   v-model="dnsNameserverInput"
                   type="text"
                   placeholder="例如: 223.5.5.5 或 https://dns.alidns.com/dns-query"
-                  class="form-input-base text-xs font-mono flex-1"
+                  class="form-input-base font-mono flex-1"
                   @keyup.enter="addDnsNameserver"
                 />
                 <button
                   type="button"
                   @click="addDnsNameserver"
-                  class="ios-btn-secondary text-xs px-3 py-2 font-medium"
+                  class="ios-btn-secondary px-3 py-2 font-medium"
                 >
                   添加服务器
                 </button>
@@ -1480,13 +1480,13 @@
                     </svg>
                   </button>
                 </div>
-                <div v-if="!clientConfig.extra.dns.nameservers || clientConfig.extra.dns.nameservers.length === 0" class="text-[11px] text-neutral-400 py-1">
+                <div v-if="!clientConfig.extra.dns.nameservers || clientConfig.extra.dns.nameservers.length === 0" class="text-xs text-neutral-400 py-1">
                   暂未配置，将默认回退到客户端系统 DNS。
                 </div>
               </div>
 
               <!-- 快捷公共 DNS -->
-              <div class="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] text-neutral-400 border-t border-black/[0.04]">
+              <div class="flex flex-wrap items-center gap-1.5 pt-1 text-xs text-neutral-400 border-t border-black/[0.04]">
                 <span>快捷填充:</span>
                 <button
                   type="button"
@@ -1515,8 +1515,8 @@
             <!-- Fallback 回退服务器列表 -->
             <div class="panel-card p-5 space-y-4 border border-black/[0.06]">
               <div>
-                <h4 class="text-xs font-bold text-neutral-900">回退防污染 DNS 服务器 (Fallback)</h4>
-                <p class="text-[11px] text-neutral-400 mt-0.5">当常规解析判定为境外或受污染 IP 时作为权威比对与回退解析源。</p>
+                <h4 class="text-neutral-900 text-base font-semibold leading-normal">回退防污染 DNS 服务器 (Fallback)</h4>
+                <p class="text-xs text-neutral-400 mt-0.5">当常规解析判定为境外或受污染 IP 时作为权威比对与回退解析源。</p>
               </div>
 
               <div class="flex items-center gap-2">
@@ -1524,13 +1524,13 @@
                   v-model="dnsFallbackInput"
                   type="text"
                   placeholder="例如: https://1.1.1.1/dns-query 或 8.8.4.4"
-                  class="form-input-base text-xs font-mono flex-1"
+                  class="form-input-base font-mono flex-1"
                   @keyup.enter="addDnsFallback"
                 />
                 <button
                   type="button"
                   @click="addDnsFallback"
-                  class="ios-btn-secondary text-xs px-3 py-2 font-medium"
+                  class="ios-btn-secondary px-3 py-2 font-medium"
                 >
                   添加回退源
                 </button>
@@ -1562,14 +1562,14 @@
           <div v-else-if="activeModule === 'providers'" class="space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
               <div>
-                <h3 class="text-base font-bold text-neutral-900">规则集 (RULE-PROVIDERS)</h3>
+                <h3 class="text-neutral-900 text-base font-semibold leading-normal">规则集 (RULE-PROVIDERS)</h3>
                 <p class="text-xs text-neutral-500 mt-0.5">统一维护可复用的域名、域名后缀、IP 与 CIDR 集合。只定义匹配目标，不包含转发动作，供客户端策略与节点策略共同引用。</p>
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   @click="openCreateService"
-                  class="ios-btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1.5"
+                  class="ios-btn-primary px-3 py-1.5 inline-flex items-center gap-1.5"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -1579,7 +1579,7 @@
                 <button
                   type="button"
                   @click="openAddProviderDrawer"
-                  class="ios-btn-secondary text-xs px-3 py-1.5 inline-flex items-center gap-1.5"
+                  class="ios-btn-secondary px-3 py-1.5 inline-flex items-center gap-1.5"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -1598,7 +1598,7 @@
                 </svg>
                 <span>规则集定位与两端更新生效机制</span>
               </div>
-              <div class="text-[11px] text-neutral-500 space-y-1">
+              <div class="text-xs text-neutral-500 space-y-1">
                 <div>• <strong>纯目标定义</strong>：规则集仅定义域名、IP 或网段的匹配目标（如 OpenAI、常见广告黑名单、内网私有地址），<strong>不包含任何转发或阻断动作</strong>。动作在“客户端策略”与“节点策略”中自由绑定。</div>
                 <div>• <strong>两端更新方式（保存不承诺立即生效）</strong>：<br />
                   &nbsp;&nbsp;1. <strong>客户端端</strong>：Clash / Mihomo 需等待其 rule-providers 的定时拉取周期（默认 24h）或在客户端中手动点击“刷新规则集”；<br />
@@ -1611,7 +1611,7 @@
             <div class="overflow-x-auto rounded-2xl border border-black/[0.06] bg-white">
               <table class="w-full text-left border-collapse text-xs min-w-[760px]">
                 <thead>
-                  <tr class="border-b border-black/[0.06] bg-neutral-50/75 text-neutral-500 font-semibold text-[11px]">
+                  <tr class="border-b border-black/[0.06] bg-neutral-50/75 text-neutral-500 font-semibold text-xs">
                     <th class="py-3 px-4">规则集名称</th>
                     <th class="py-3 px-3">来源 / 版本</th>
                     <th class="py-3 px-3">匹配规模 (域名 / IP)</th>
@@ -1627,16 +1627,16 @@
                     <td class="py-3.5 px-4">
                       <div class="flex items-center gap-2">
                         <span class="font-bold text-neutral-900 text-xs">{{ set.name }}</span>
-                        <span v-if="set.builtin" class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-50 text-ios-blue uppercase">
+                        <span v-if="set.builtin" class="px-1.5 py-0.2 rounded text-xs font-bold bg-blue-50 text-ios-blue uppercase">
                           内置
                         </span>
                       </div>
-                      <p class="text-[11px] text-neutral-400 mt-0.5 line-clamp-1 max-w-xs">{{ set.description || '内置基础域名集合' }}</p>
+                      <p class="text-xs text-neutral-400 mt-0.5 line-clamp-1 max-w-xs">{{ set.description || '内置基础域名集合' }}</p>
                     </td>
 
                     <!-- 2. 来源 / 版本 -->
                     <td class="py-3.5 px-3">
-                      <span class="font-mono font-bold text-neutral-700 bg-neutral-100 px-2 py-0.5 rounded-md text-[11px]">
+                      <span class="font-mono font-bold text-neutral-700 bg-neutral-100 px-2 py-0.5 rounded-md text-xs">
                         v{{ set.version || 1 }}
                       </span>
                     </td>
@@ -1653,7 +1653,7 @@
                       <button
                         type="button"
                         @click="openProviderModal(set)"
-                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-mono text-[11px] transition-colors"
+                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-mono text-xs transition-colors"
                         title="查看 rule-providers 配置片段"
                       >
                         <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1665,14 +1665,14 @@
 
                     <!-- 5. 状态 -->
                     <td class="py-3.5 px-3">
-                      <span class="inline-flex items-center gap-1.5 text-[11px] font-medium" :class="set.enabled !== false ? 'text-emerald-600' : 'text-neutral-400'">
+                      <span class="inline-flex items-center gap-1.5 text-xs font-medium" :class="set.enabled !== false ? 'text-emerald-600' : 'text-neutral-400'">
                         <span class="w-1.5 h-1.5 rounded-full" :class="set.enabled !== false ? 'bg-emerald-500' : 'bg-neutral-400'"></span>
                         <span>{{ set.enabled !== false ? '正常启用' : '已停用' }}</span>
                       </span>
                     </td>
 
                     <!-- 6. 更新时间 -->
-                    <td class="py-3.5 px-3 text-[11px] font-mono text-neutral-400">
+                    <td class="py-3.5 px-3 text-xs font-mono text-neutral-400">
                       {{ formatTime(set.updatedAt) }}
                     </td>
 
@@ -1715,7 +1715,7 @@
             <div class="space-y-3 pt-3 border-t border-black/[0.06]">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-bold text-neutral-800">外部订阅规则集 (External Rule Providers)</span>
-                <span class="text-[11px] text-neutral-400">客户端定期自远端更新</span>
+                <span class="text-xs text-neutral-400">客户端定期自远端更新</span>
               </div>
               <div v-if="clientConfig.extra.providers.length > 0" class="space-y-2">
                 <div
@@ -1726,13 +1726,13 @@
                   <div class="min-w-0 pr-3">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-bold text-neutral-900 font-mono">{{ prov.name }}</span>
-                      <span class="text-[10px] px-1.5 py-0.2 rounded bg-black/[0.04] text-neutral-600 font-mono">{{ prov.behavior }}</span>
-                      <span class="text-[10px] px-1.5 py-0.2 rounded bg-black/[0.04] text-neutral-600 font-mono">{{ prov.format }}</span>
+                      <span class="text-xs px-1.5 py-0.2 rounded bg-black/[0.04] text-neutral-600 font-mono">{{ prov.behavior }}</span>
+                      <span class="text-xs px-1.5 py-0.2 rounded bg-black/[0.04] text-neutral-600 font-mono">{{ prov.format }}</span>
                     </div>
-                    <p class="text-[11px] text-neutral-400 truncate mt-0.5 font-mono">{{ prov.url }}</p>
+                    <p class="text-xs text-neutral-400 truncate mt-0.5 font-mono">{{ prov.url }}</p>
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
-                    <span class="text-[11px] text-neutral-400 font-mono">{{ prov.intervalSeconds }}s</span>
+                    <span class="text-xs text-neutral-400 font-mono">{{ prov.intervalSeconds }}s</span>
                     <button
                       type="button"
                       @click="removeProvider(idx)"
@@ -1756,16 +1756,16 @@
           <div v-else-if="activeModule === 'preview'" class="space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
               <div>
-                <h3 class="text-base font-bold text-neutral-900">当前配置预览</h3>
+                <h3 class="text-neutral-900 text-base font-semibold leading-normal">当前配置预览</h3>
                 <p class="text-xs text-neutral-500 mt-0.5">预览正在编辑的配置；有未保存修改时使用草稿。</p>
               </div>
               <div class="flex items-center gap-2">
-                <button type="button" class="ios-btn-secondary text-xs px-3 py-1.5" @click="loadPreview">刷新预览</button>
+                <button type="button" class="ios-btn-secondary px-3 py-1.5" @click="loadPreview">刷新预览</button>
                 <button
                   type="button"
                   @click="copyConfig"
                   :disabled="!previewBody"
-                  class="ios-btn-secondary text-xs px-3 py-1.5 inline-flex items-center gap-1.5"
+                  class="ios-btn-secondary px-3 py-1.5 inline-flex items-center gap-1.5"
                 >
                   <svg v-if="!copied" class="w-3.5 h-3.5 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
@@ -1790,7 +1790,7 @@
                   @change="loadPreview"
                 />
               </div>
-              <div class="text-[11px] text-neutral-400">
+              <div class="text-xs text-neutral-400">
                 {{ previewResult?.previewSource === 'draft' ? '使用未保存草稿' : '使用已保存配置' }}，用于订阅配置测试与复制
               </div>
             </div>
@@ -1836,7 +1836,7 @@
               <div class="font-bold text-neutral-900 truncate">
                 匹配目标: <span class="text-ios-blue font-mono font-semibold">{{ form.payload || (form.type === 'MATCH' ? '全部流量兜底' : '（请输入目标值）') }}</span>
               </div>
-              <div class="text-[11px] text-neutral-500 mt-0.5 flex items-center gap-1.5">
+              <div class="text-xs text-neutral-500 mt-0.5 flex items-center gap-1.5">
                 <span>类型: <strong class="text-neutral-700 font-mono">{{ form.type }}</strong></span>
                 <span class="text-neutral-300">·</span>
                 <span>优先级: <strong class="text-neutral-700 font-mono">#{{ form.priority }}</strong></span>
@@ -1858,7 +1858,7 @@
             <span class="font-semibold text-neutral-700 flex items-center gap-1">
               <span>📦</span> <span>可用规则集 (点击一键填入分流):</span>
             </span>
-            <span class="text-[11px] text-neutral-400">共 {{ availableServiceRulePresets.length }} 个规则集</span>
+            <span class="text-xs text-neutral-400">共 {{ availableServiceRulePresets.length }} 个规则集</span>
           </div>
           <div class="flex flex-wrap items-center gap-1.5">
             <button
@@ -1874,7 +1874,7 @@
             >
               <span class="text-neutral-500">📦</span>
               <span>{{ preset.name }}</span>
-              <span v-if="preset.count" class="text-[10px] text-neutral-400 font-mono">({{ preset.count }})</span>
+              <span v-if="preset.count" class="text-xs text-neutral-400 font-mono">({{ preset.count }})</span>
             </button>
           </div>
         </div>
@@ -1906,12 +1906,12 @@
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-neutral-900">{{ selectedRuleSetDetail.name }}</span>
-                <span v-if="selectedRuleSetDetail.builtin" class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-50 text-ios-blue uppercase">内置</span>
+                <span v-if="selectedRuleSetDetail.builtin" class="px-1.5 py-0.2 rounded text-xs font-bold bg-blue-50 text-ios-blue uppercase">内置</span>
               </div>
-              <span class="text-[11px] font-mono font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded">v{{ selectedRuleSetDetail.version || 1 }}</span>
+              <span class="text-xs font-mono font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded">v{{ selectedRuleSetDetail.version || 1 }}</span>
             </div>
-            <p class="text-[11px] text-neutral-500">{{ selectedRuleSetDetail.description || '面板统一维护的服务分流规则集合' }}</p>
-            <div class="text-[11px] text-neutral-600 flex items-center gap-2 font-mono">
+            <p class="text-xs text-neutral-500">{{ selectedRuleSetDetail.description || '面板统一维护的服务分流规则集合' }}</p>
+            <div class="text-xs text-neutral-600 flex items-center gap-2 font-mono">
               <span>匹配规模: {{ (selectedRuleSetDetail.domains?.length || 0) + (selectedRuleSetDetail.suffixes?.length || 0) }} 域名</span>
               <span class="text-neutral-300">/</span>
               <span>{{ selectedRuleSetDetail.cidrs?.length || 0 }} IP 网段</span>
@@ -1920,20 +1920,20 @@
               <span
                 v-for="d in [...(selectedRuleSetDetail.domains || []), ...(selectedRuleSetDetail.suffixes || [])].slice(0, 8)"
                 :key="d"
-                class="px-1.5 py-0.5 rounded bg-white border border-purple-200/80 text-[10px] font-mono text-neutral-600"
+                class="px-1.5 py-0.5 rounded bg-white border border-purple-200/80 text-xs font-mono text-neutral-600"
               >
                 {{ d }}
               </span>
               <span
                 v-if="((selectedRuleSetDetail.domains?.length || 0) + (selectedRuleSetDetail.suffixes?.length || 0)) > 8"
-                class="text-[10px] text-neutral-400 self-center font-mono"
+                class="text-xs text-neutral-400 self-center font-mono"
               >
                 +{{ ((selectedRuleSetDetail.domains?.length || 0) + (selectedRuleSetDetail.suffixes?.length || 0)) - 8 }} 更多...
               </span>
             </div>
           </div>
 
-          <p class="text-[11px] text-neutral-400 mt-1">
+          <p class="text-xs text-neutral-400 mt-1">
             选择规则集后，命中此规则集内全部域名与 IP 的流量均将派发给指定出口目标。
           </p>
         </div>
@@ -1941,7 +1941,7 @@
         <div v-else-if="form.type !== 'MATCH'">
           <label class="block text-xs font-semibold text-neutral-700 mb-1">
             匹配内容 (Payload)
-            <span v-if="['DOMAIN-SUFFIX', 'DOMAIN'].includes(form.type)" class="text-[11px] font-normal text-neutral-400 ml-1">
+            <span v-if="['DOMAIN-SUFFIX', 'DOMAIN'].includes(form.type)" class="text-xs font-normal text-neutral-400 ml-1">
               (支持输入单个或多个域名，多个用逗号/换行分隔)
             </span>
           </label>
@@ -1958,7 +1958,7 @@
             v-else
             v-model="form.payload"
             :placeholder="getPayloadPlaceholder(form.type)"
-            class="form-input-base text-xs font-mono"
+            class="form-input-base font-mono"
             required
           />
 
@@ -1968,14 +1968,14 @@
             <span>已识别出 <strong>{{ parsedPayloadItemsCount }}</strong> 个目标，保存时将自动批量创建 {{ parsedPayloadItemsCount }} 条分流规则。</span>
           </div>
 
-          <p v-else class="text-[11px] text-neutral-400 mt-1">
+          <p v-else class="text-xs text-neutral-400 mt-1">
             {{ getPayloadHelpText(form.type, form.payload) }}
           </p>
         </div>
 
         <div v-else class="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-xs text-amber-800">
           <p class="font-bold">兜底规则提示</p>
-          <p class="mt-0.5 text-[11px]">MATCH 类型规则无需填写目标值，用于拦截上述所有规则均未命中的流量，始终排在列表末尾生效。</p>
+          <p class="mt-0.5 text-xs">MATCH 类型规则无需填写目标值，用于拦截上述所有规则均未命中的流量，始终排在列表末尾生效。</p>
         </div>
 
         <!-- 命中后执行动作 (Target) -->
@@ -1996,7 +1996,7 @@
             v-model="form.description"
             placeholder="例如: AI 常用智能助手服务分流"
             maxlength="60"
-            class="form-input-base text-xs"
+            class="form-input-base"
           />
         </div>
 
@@ -2024,10 +2024,10 @@
                   type="number"
                   min="1"
                   max="9999"
-                  class="form-input-base text-xs font-mono"
+                  class="form-input-base font-mono"
                   required
                 />
-                <span class="text-[10px] text-neutral-400 mt-0.5 block">数值越小越先匹配，兜底在末尾</span>
+                <span class="text-xs text-neutral-400 mt-0.5 block">数值越小越先匹配，兜底在末尾</span>
               </div>
 
               <div>
@@ -2084,9 +2084,9 @@
             <input
               readonly
               :value="providerDirectUrl"
-              class="form-input-base text-xs font-mono text-neutral-700 bg-neutral-50"
+              class="form-input-base font-mono text-neutral-700 bg-neutral-50"
             />
-            <button type="button" @click="copyUrl" class="ios-btn-secondary shrink-0 text-xs py-2">
+            <button type="button" @click="copyUrl" class="ios-btn-secondary shrink-0 py-2">
               复制 URL
             </button>
           </div>

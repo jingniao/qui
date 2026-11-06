@@ -16,7 +16,7 @@
           <!-- Modal Header (Symmetrical with Footer) -->
           <div class="px-7 py-[1.125rem] min-h-[4rem] border-b border-black/[0.08] flex items-center justify-between bg-[#F5F5F7] shrink-0">
             <div>
-              <h3 class="text-lg font-semibold text-ios-label tracking-tight leading-none">{{ title }}</h3>
+              <h3 class="text-ios-label tracking-normal text-lg font-semibold leading-snug">{{ title }}</h3>
               <p v-if="description" class="text-xs text-ios-tertiary mt-1.5 leading-normal">{{ description }}</p>
             </div>
             <button

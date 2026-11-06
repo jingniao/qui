@@ -1,6 +1,6 @@
 <template>
  <section class="panel-card p-5 space-y-3">
-  <div class="flex justify-between gap-3"><h3 class="font-semibold">访问存储增长观察</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">读取规模</button></div>
+  <div class="flex justify-between gap-3"><h3 class="text-base font-semibold leading-normal">访问存储增长观察</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">读取规模</button></div>
   <p class="text-xs text-gray-500">按需读取有界行数，不持续扫描全部历史数据。</p>
   <ErrorState v-if="error" :message="error" @retry="load" />
   <p v-if="loading" class="text-xs text-gray-500">正在读取存储规模…</p>

@@ -5,7 +5,7 @@
     <p v-if="error" ref="errorMessage" tabindex="-1" role="alert" class="text-sm text-ios-red outline-none">{{ error }}</p>
     <fieldset v-if="!loading && !loadError" :disabled="busy || !!savedId" class="space-y-6">
       <section class="space-y-4">
-        <h4 class="text-sm font-semibold text-ios-label">基础信息</h4>
+        <h4 class="text-ios-label text-base font-semibold leading-normal">基础信息</h4>
         <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" class="form-input-base mt-1.5" @input="autoName = false" /></label>
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="block text-xs text-ios-secondary">所属服务器
@@ -40,7 +40,7 @@
               <option v-for="core in coreSelectable" :key="core.name" :value="core.name">{{ core.label }} {{ core.version }}{{ core.primary ? '（主核心）' : '' }}</option>
             </select>
           </label>
-          <p class="text-[11px] text-ios-secondary">只列出该服务器当前上报为启用、且能承载当前协议的核心；协议选项按所选核心的能力过滤。</p>
+          <p class="text-xs text-ios-secondary">只列出该服务器当前上报为启用、且能承载当前协议的核心；协议选项按所选核心的能力过滤。</p>
         </div>
         <p v-else-if="coreSelectable.length === 1" class="text-xs text-ios-secondary">运行内核：{{ coreSelectable[0].label }} {{ coreSelectable[0].version }}（该服务器没有其他能承载当前协议的核心）</p>
         <p v-else class="text-xs text-ios-orange">该服务器尚未上报能承载当前协议的核心，运行内核未知；保存时由后端判定。</p>
@@ -49,7 +49,7 @@
         <p v-if="udpLimitNote" class="text-xs text-ios-secondary">{{ udpLimitNote }}</p>
       </section>
       <section class="space-y-3 border-t border-ios-border pt-5">
-        <h4 class="text-sm font-semibold text-ios-label">连接设置</h4>
+        <h4 class="text-ios-label text-base font-semibold leading-normal">连接设置</h4>
         <p class="text-xs text-ios-secondary">服务器地址：<span class="font-mono">{{ selectedServer?.publicIp || selectedServer?.hostname || '未上报' }}</span></p>
         <div class="text-xs text-ios-secondary">
           <label for="node-editor-port" class="block">监听端口</label>
@@ -58,16 +58,16 @@
             <button type="button" class="ios-btn-secondary shrink-0" @click="pickPort">随机端口</button>
           </div>
         </div>
-        <p v-if="serverPortRange" class="text-[11px] text-ios-blue font-mono">服务器分配范围：{{ serverPortRange.start }}–{{ serverPortRange.end }}</p>
-        <p v-else class="text-[11px] text-ios-secondary">未设置服务器范围；随机端口使用编辑器默认范围 10000–65535。</p>
+        <p v-if="serverPortRange" class="text-xs text-ios-blue font-mono">服务器分配范围：{{ serverPortRange.start }}–{{ serverPortRange.end }}</p>
+        <p v-else class="text-xs text-ios-secondary">未设置服务器范围；随机端口使用编辑器默认范围 10000–65535。</p>
         <p aria-live="polite" :class="['text-xs', conflict ? 'text-ios-red' : 'text-ios-secondary']">{{ conflict || '入站列表中无端口冲突（含画布方案入站）；不检测主机其他进程。' }}</p>
       </section>
       <section class="space-y-4 border-t border-ios-border pt-5">
-        <h4 class="text-sm font-semibold text-ios-label">协议设置</h4>
+        <h4 class="text-ios-label text-base font-semibold leading-normal">协议设置</h4>
         <NodeProtocolFields :state="state" :server="selectedServer" :gost="gostForwardReady(selectedServer, f.core)" />
       </section>
       <section class="space-y-3 border-t border-ios-border pt-5">
-        <h4 class="text-sm font-semibold text-ios-label">授权与订阅</h4>
+        <h4 class="text-ios-label text-base font-semibold leading-normal">授权与订阅</h4>
         <div class="flex flex-wrap gap-x-5 gap-y-2 text-sm text-ios-label">
           <label class="inline-flex items-center gap-2"><input v-model="f.enabled" type="checkbox" />启用节点</label>
           <label v-if="!f.internalRelay && f.protocol !== 'forward'" class="inline-flex items-center gap-2"><input v-model="f.subscriptionVisible" type="checkbox" />显示在授权用户订阅中</label>
@@ -96,7 +96,7 @@
     </fieldset>
     <p v-if="result" role="status" class="text-sm text-ios-secondary">{{ result }}</p>
     <div v-if="savedInbound?.settings.reality?.public_key" class="space-y-2 text-xs text-ios-secondary">
-      <label class="block">已保存的 Reality 公钥<input :value="savedInbound.settings.reality.public_key" readonly class="form-input-base mt-2 font-mono text-xs" /></label>
+      <label class="block">已保存的 Reality 公钥<input :value="savedInbound.settings.reality.public_key" readonly class="form-input-base mt-2 font-mono" /></label>
       <button type="button" class="ios-btn-secondary" @click="copySavedPublicKey">复制已保存公钥</button>
       <p v-if="keyCopyStatus" role="status">{{ keyCopyStatus }}</p>
       <p>公钥来自保存后的服务器读回；运行配置与客户端连接仍以成功发布为准。</p>

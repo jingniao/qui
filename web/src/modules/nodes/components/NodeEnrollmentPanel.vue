@@ -1,6 +1,6 @@
 <template>
   <section class="rounded-xl border border-gray-200 p-4 space-y-3 text-xs">
-    <div class="flex items-center justify-between"><h3 class="font-semibold">原登记阶段</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新登记阶段</button></div>
+    <div class="flex items-center justify-between"><h3 class="text-base font-semibold leading-normal">原登记阶段</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新登记阶段</button></div>
     <p v-if="loading" class="text-gray-500">正在核对原回执和当前中央状态…</p>
     <ErrorState v-if="error" :message="error" @retry="load" />
     <template v-if="status && !loading">

@@ -5,8 +5,8 @@
       <fieldset :disabled="busy || !!result" class="space-y-3" @change="plan = null">
         <p class="text-xs text-ios-tertiary">选择需要发布的草稿；服务端会计算依赖及出口到入口的发布顺序。</p>
         <div class="grid sm:grid-cols-2 gap-4">
-          <section class="space-y-2"><h4 class="text-[15px] font-semibold text-ios-label">隧道</h4><label v-for="t in tunnels" :key="t.id" class="flex gap-2 items-center text-sm text-ios-label"><input v-model="selection.tunnelIds" type="checkbox" :value="t.id" />{{ t.name }}<PublishBadge :status="t.status" /></label></section>
-          <section class="space-y-2"><h4 class="text-[15px] font-semibold text-ios-label">规则</h4><label v-for="r in rules" :key="r.id" class="flex gap-2 items-center text-sm text-ios-label"><input v-model="selection.ruleIds" type="checkbox" :value="r.id" />{{ r.name }}<PublishBadge :status="r.status" /></label></section>
+          <section class="space-y-2"><h4 class="text-ios-label text-base font-semibold leading-normal">隧道</h4><label v-for="t in tunnels" :key="t.id" class="flex gap-2 items-center text-sm text-ios-label"><input v-model="selection.tunnelIds" type="checkbox" :value="t.id" />{{ t.name }}<PublishBadge :status="t.status" /></label></section>
+          <section class="space-y-2"><h4 class="text-ios-label text-base font-semibold leading-normal">规则</h4><label v-for="r in rules" :key="r.id" class="flex gap-2 items-center text-sm text-ios-label"><input v-model="selection.ruleIds" type="checkbox" :value="r.id" />{{ r.name }}<PublishBadge :status="r.status" /></label></section>
         </div>
         
       </fieldset>
@@ -17,7 +17,7 @@
         <p v-for="(c, i) in plan.conflicts" :key="i" class="text-sm text-ios-red font-mono tabular-nums">{{ nodeName(c.nodeId) }}:{{ c.port }} 已被 {{ c.usedBy }} 占用</p>
         <p v-for="(w, i) in plan.warnings" :key="i" class="text-sm text-ios-orange">{{ w }}</p>
       </section>
-      <section v-if="result" class="space-y-3" aria-live="polite"><h4 class="text-[15px] font-semibold text-ios-label">发布结果</h4><DataTable><template #header><th>服务器</th><th>版本</th><th>状态</th><th>说明</th></template><template #body><tr v-for="s in result.servers" :key="s.nodeId"><td class="p-4">{{ s.nodeName }}</td><td class="font-mono tabular-nums">{{ s.revision ?? '—' }}</td><td><StatusBadge :status="s.status === 'applied' || s.status === 'unchanged' ? 'success' : s.status === 'rolled_back' ? 'rollback' : s.status === 'failed' ? 'failed' : 'disabled'" :label="resultLabels[s.status]" /></td><td>{{ s.message || '—' }}</td></tr></template></DataTable></section>
+      <section v-if="result" class="space-y-3" aria-live="polite"><h4 class="text-ios-label text-base font-semibold leading-normal">发布结果</h4><DataTable><template #header><th>服务器</th><th>版本</th><th>状态</th><th>说明</th></template><template #body><tr v-for="s in result.servers" :key="s.nodeId"><td class="p-4">{{ s.nodeName }}</td><td class="font-mono tabular-nums">{{ s.revision ?? '—' }}</td><td><StatusBadge :status="s.status === 'applied' || s.status === 'unchanged' ? 'success' : s.status === 'rolled_back' ? 'rollback' : s.status === 'failed' ? 'failed' : 'disabled'" :label="resultLabels[s.status]" /></td><td>{{ s.message || '—' }}</td></tr></template></DataTable></section>
       <div class="flex justify-end gap-3 pt-3">
         <button class="ios-dialog-btn-secondary" :disabled="busy" @click="visible = false">{{ result ? '关闭' : '取消' }}</button>
         <button v-if="!result" class="ios-dialog-btn-secondary" :disabled="busy || !hasSelection" @click="check">检查发布计划</button>

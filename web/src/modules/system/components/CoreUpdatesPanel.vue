@@ -1,14 +1,14 @@
 <template>
   <section class="panel-card p-5 space-y-5">
-    <div class="flex justify-between items-center gap-3"><h2 class="font-semibold">核心更新</h2><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新任务</button></div>
+    <div class="flex justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">核心更新</h2><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新任务</button></div>
     <p class="text-sm text-gray-600">填写官方 Xray-core 或 sing-box 发布版本的版本号、GitHub 发布资产地址和压缩包 SHA-256。支持的 Agent 也可使用 qui 发布中的 sing-box 构建。节点会校验压缩包摘要、解压唯一的可执行文件、运行版本命令并在健康检查失败时自动回滚到上一核心。</p>
     <ErrorState v-if="error" :message="error" @retry="load" />
     <div class="grid md:grid-cols-2 gap-3 text-sm">
       <label v-if="!fixedNodeId">目标节点<select v-model="nodeId" class="form-input-base mt-2"><option value="">选择节点</option><option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
       <label>核心<select v-model="component" class="form-input-base mt-2"><option value="xray">Xray</option><option value="sing-box">sing-box</option></select></label>
       <label>版本<input v-model.trim="version" class="form-input-base mt-2" placeholder="26.3.27" /></label>
-      <label>SHA-256<input v-model.trim="sha256" class="form-input-base mt-2 font-mono text-xs" placeholder="64 位十六进制摘要" /></label>
-      <label class="md:col-span-2">发布资产地址<input v-model.trim="assetURL" class="form-input-base mt-2 font-mono text-xs" placeholder="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" /></label>
+      <label>SHA-256<input v-model.trim="sha256" class="form-input-base mt-2 font-mono" placeholder="64 位十六进制摘要" /></label>
+      <label class="md:col-span-2">发布资产地址<input v-model.trim="assetURL" class="form-input-base mt-2 font-mono" placeholder="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" /></label>
       <p v-if="quiSourceBlocked" class="text-xs text-gray-500 md:col-span-2">该 Agent 尚未上报 qui sing-box 更新能力，请使用官方来源。</p>
       <p v-else-if="supportsQuiCore && component === 'sing-box'" class="text-xs text-gray-500 md:col-span-2">该 Agent 支持 qui sing-box 构建；请填写对应发布资产的地址及 SHA256SUMS 中的摘要。</p>
       <div class="flex items-end"><button class="ios-btn-primary" :disabled="busy || !selected || !revision || !version || !sha256 || !assetURL || quiSourceBlocked" @click="confirmation = true">创建升级任务</button></div>

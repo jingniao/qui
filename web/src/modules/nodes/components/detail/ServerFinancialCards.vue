@@ -9,7 +9,7 @@
           <line x1="2" y1="10" x2="22" y2="10" stroke-width="1.5"></line>
         </svg>
       </div>
-      <div class="text-xl sm:text-2xl font-bold font-mono tracking-tight text-ios-label tabular-nums">
+      <div class="text-xl sm:text-2xl font-bold font-mono tracking-normal text-ios-label tabular-nums">
         <template v-if="priceInfo">
           <span>{{ priceInfo.symbol }}{{ priceInfo.price }}</span>
           <span v-if="priceInfo.cycle" class="text-xs text-ios-secondary font-normal font-sans ml-1">/ {{ priceInfo.cycle }}</span>
@@ -26,7 +26,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"></path>
         </svg>
       </div>
-      <div class="text-xl sm:text-2xl font-bold font-mono tracking-tight text-ios-label tabular-nums">
+      <div class="text-xl sm:text-2xl font-bold font-mono tracking-normal text-ios-label tabular-nums">
         <template v-if="monthly">
           <span>{{ monthly.symbol }}{{ monthly.value }} {{ monthly.currency }}</span>
           <span class="text-xs text-ios-secondary font-normal font-sans ml-1">/ 月</span>
@@ -46,7 +46,7 @@
           <line x1="3" y1="10" x2="21" y2="10" stroke-width="1.5"></line>
         </svg>
       </div>
-      <div class="text-xl sm:text-2xl font-bold font-mono tracking-tight tabular-nums">
+      <div class="text-xl sm:text-2xl font-bold font-mono tracking-normal tabular-nums">
         <template v-if="remaining.days !== null">
           <span v-if="remaining.days > 0" class="text-emerald-500 font-bold">{{ remaining.days }}</span>
           <span v-else-if="remaining.days === 0" class="text-amber-500 font-bold">今日到期</span>
@@ -66,7 +66,7 @@
           <path d="M18 12a6 6 0 0 1-6 6" stroke-width="1.5"></path>
         </svg>
       </div>
-      <div class="text-xl sm:text-2xl font-bold font-mono tracking-tight text-ios-label tabular-nums">
+      <div class="text-xl sm:text-2xl font-bold font-mono tracking-normal text-ios-label tabular-nums">
         <template v-if="residual">
           <span>{{ residual.symbol }}{{ residual.value }}</span>
           <span class="text-xs text-ios-secondary font-normal font-sans ml-1">{{ residual.currency }}</span>

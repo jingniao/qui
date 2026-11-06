@@ -6,13 +6,13 @@
       description="按代理节点灵活管理分组，支持在分流策略与规则中引用。"
     >
       <template #actions>
-        <button class="ios-btn-secondary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || busy" @click="load">
+        <button class="ios-btn-secondary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || busy" @click="load">
           <svg class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
           <span>刷新</span>
         </button>
-        <button v-if="isOwner" class="ios-btn-primary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || !!error || busy" @click="edit(null)">
+        <button v-if="isOwner" class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || !!error || busy" @click="edit(null)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
@@ -38,7 +38,7 @@
       <aside class="panel-card p-4 space-y-3.5 lg:col-span-1 lg:sticky lg:top-6" aria-label="节点分组列表">
         <div class="flex items-center justify-between px-1">
           <span class="text-xs font-bold text-neutral-500 uppercase tracking-wider">节点分组</span>
-          <span class="text-[11px] font-mono font-medium text-neutral-400 tabular-nums">共 {{ groups.length }} 组</span>
+          <span class="text-xs font-mono font-medium text-neutral-400 tabular-nums">共 {{ groups.length }} 组</span>
         </div>
 
         <!-- 搜索框 (Apple iOS Inset Search Bar) -->
@@ -55,14 +55,14 @@
             v-model="keyword"
             type="text"
             style="padding-left: 2.25rem !important; padding-right: 2rem !important;"
-            class="w-full text-xs h-9 bg-black/[0.04] hover:bg-black/[0.06] focus:bg-white rounded-xl border border-black/[0.06] focus:border-ios-blue focus:ring-2 focus:ring-ios-blue/20 text-neutral-800 placeholder:text-neutral-400 transition-all outline-none"
+            class="w-full h-9 bg-black/[0.04] hover:bg-black/[0.06] focus:bg-white rounded-xl border border-black/[0.06] focus:border-ios-blue focus:ring-2 focus:ring-ios-blue/20 text-neutral-800 placeholder:text-neutral-400 transition-all outline-none text-sm"
             placeholder="搜索节点分组…"
             aria-label="搜索节点分组"
           />
           <button
             v-if="keyword"
             type="button"
-            class="absolute right-2.5 w-4 h-4 rounded-full bg-neutral-300 hover:bg-neutral-400 text-white flex items-center justify-center text-[10px] transition-colors cursor-pointer select-none"
+            class="absolute right-2.5 w-4 h-4 rounded-full bg-neutral-300 hover:bg-neutral-400 text-white flex items-center justify-center text-xs transition-colors cursor-pointer select-none"
             title="清空搜索"
             @click="keyword = ''"
           >
@@ -101,7 +101,7 @@
                 </span>
               </div>
               <span
-                class="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 border"
+                class="text-xs px-1.5 py-0.5 rounded font-medium shrink-0 border"
                 :class="group.purpose === 'subscription' ? 'bg-blue-50 text-ios-blue border-blue-200/60' : (group.purpose === 'mixed' ? 'bg-purple-50 text-purple-700 border-purple-200/60' : 'bg-amber-50 text-amber-700 border-amber-200/60')"
               >
                 {{ groupPurposeNames[group.purpose] || '分组' }}
@@ -111,7 +111,7 @@
               <span class="font-mono tabular-nums">
                 {{ groupNodesFor(group.id).length }} 个节点
               </span>
-              <span v-if="group.grantedUserIds?.length" class="text-[11px] font-mono tabular-nums">
+              <span v-if="group.grantedUserIds?.length" class="text-xs font-mono tabular-nums">
                 {{ group.grantedUserIds.length }} 位用户
               </span>
             </div>
@@ -127,7 +127,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2 mb-2">
-                <h2 class="text-xl font-bold text-neutral-900 tracking-tight break-words">
+                <h2 class="text-neutral-900 tracking-normal break-words text-base font-semibold leading-normal">
                   {{ selected.name }}
                 </h2>
                 <span
@@ -153,7 +153,7 @@
             <div v-if="isOwner" class="flex items-center gap-2 shrink-0 self-start sm:self-auto">
               <button
                 type="button"
-                class="ios-btn-secondary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
+                class="ios-btn-secondary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
                 :disabled="busy"
                 @click="edit(selected)"
               >
@@ -179,19 +179,19 @@
           <!-- 核心统计概览行 -->
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-black/[0.04]">
             <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
-              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">组内节点</span>
+              <span class="text-xs font-medium text-neutral-400 block mb-0.5">组内节点</span>
               <span class="text-base font-bold text-neutral-800 font-mono tabular-nums">{{ currentGroupNodes.length }}</span>
             </div>
             <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
-              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">授权用户</span>
+              <span class="text-xs font-medium text-neutral-400 block mb-0.5">授权用户</span>
               <span class="text-base font-bold text-neutral-800 font-mono tabular-nums">{{ selected.grantedUserIds?.length || 0 }}</span>
             </div>
             <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
-              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">策略引用</span>
+              <span class="text-xs font-medium text-neutral-400 block mb-0.5">策略引用</span>
               <span class="text-base font-bold text-neutral-800 font-mono tabular-nums">{{ references.length }}</span>
             </div>
             <div class="bg-black/[0.015] rounded-xl p-3 border border-black/[0.04]">
-              <span class="text-[11px] font-medium text-neutral-400 block mb-0.5">运行状态</span>
+              <span class="text-xs font-medium text-neutral-400 block mb-0.5">运行状态</span>
               <span class="text-xs font-semibold inline-flex items-center gap-1.5" :class="selected.enabled ? 'text-emerald-600' : 'text-neutral-500'">
                 <span class="w-1.5 h-1.5 rounded-full" :class="selected.enabled ? 'bg-emerald-500' : 'bg-neutral-400'"></span>
                 {{ selected.enabled ? '正常生效' : '已停用' }}
@@ -204,7 +204,7 @@
         <section class="panel-card overflow-hidden">
           <div class="p-5 flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] bg-neutral-50/50">
             <div class="flex items-center gap-2">
-              <h3 class="text-base font-bold text-neutral-900">组内节点</h3>
+              <h3 class="text-neutral-900 text-base font-semibold leading-normal">组内节点</h3>
               <span class="px-2 py-0.5 rounded-full text-xs font-mono font-semibold bg-neutral-200/70 text-neutral-700 tabular-nums">
                 {{ currentGroupNodes.length }}
               </span>
@@ -212,7 +212,7 @@
             <button
               v-if="isOwner"
               type="button"
-              class="ios-btn-primary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
+              class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
               :disabled="busy"
               @click="openPicker"
             >
@@ -239,7 +239,7 @@
                   <span class="block text-sm font-semibold text-neutral-800">
                     {{ node.name }}
                   </span>
-                  <span class="block text-[11px] text-neutral-400 truncate max-w-[220px]" :title="memberServerLabel(node)">
+                  <span class="block text-xs text-neutral-400 truncate max-w-[220px]" :title="memberServerLabel(node)">
                     {{ memberServerLabel(node) }}
                   </span>
                 </td>
@@ -305,14 +305,14 @@
         <section v-if="!isUserGroup(selected)" class="panel-card p-6 space-y-3">
           <p class="text-xs text-neutral-500">中转 / 出口分组不授予用户接入权限。</p>
           <template v-if="selected.serverIds !== undefined">
-            <h3 class="text-sm font-bold text-neutral-800">显式服务器成员</h3>
+            <h3 class="text-neutral-800 text-base font-semibold leading-normal">显式服务器成员</h3>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1">
               <label v-for="server in servers" :key="server.id" class="flex items-center gap-2 text-xs text-neutral-700 p-2 rounded-lg border border-black/[0.06] hover:bg-black/[0.01]">
                 <input v-model="serverSelection" type="checkbox" :value="server.id" :disabled="!isOwner || busy" class="accent-ios-blue" />
                 <span class="truncate">{{ server.name }}</span>
               </label>
             </div>
-            <button v-if="isOwner" class="ios-btn-secondary text-xs px-3 py-1.5 h-8 font-medium mt-2" :disabled="busy" @click="saveServers">保存服务器成员</button>
+            <button v-if="isOwner" class="ios-btn-secondary px-3 py-1.5 h-8 font-medium mt-2" :disabled="busy" @click="saveServers">保存服务器成员</button>
           </template>
         </section>
 
@@ -321,7 +321,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-black/[0.04]">
             <div>
               <div class="flex items-center gap-2">
-                <h3 class="text-base font-bold text-neutral-900">授权用户</h3>
+                <h3 class="text-neutral-900 text-base font-semibold leading-normal">授权用户</h3>
                 <span class="px-2 py-0.5 rounded-full text-xs font-mono font-semibold bg-neutral-200/70 text-neutral-700 tabular-nums">
                   {{ selected.grantedUserIds?.length || 0 }}
                 </span>
@@ -345,7 +345,7 @@
               />
               <button
                 type="button"
-                class="ios-btn-primary text-xs px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1 shrink-0 shadow-2xs"
+                class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1 shrink-0 shadow-2xs"
                 :disabled="busy || !grantUserId"
                 @click="grantUser"
               >
@@ -375,24 +375,24 @@
                     </span>
                     <span
                       v-if="user.status === 'expired'"
-                      class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60 shrink-0"
+                      class="px-1.5 py-0.2 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60 shrink-0"
                     >
                       已到期
                     </span>
                     <span
                       v-else-if="user.status === 'disabled'"
-                      class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-neutral-100 text-neutral-500 shrink-0"
+                      class="px-1.5 py-0.2 rounded text-xs font-medium bg-neutral-100 text-neutral-500 shrink-0"
                     >
                       已禁用
                     </span>
                     <span
                       v-else
-                      class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60 shrink-0"
+                      class="px-1.5 py-0.2 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60 shrink-0"
                     >
                       正常
                     </span>
                   </div>
-                  <span v-if="user.displayName && user.displayName !== user.username" class="text-[11px] text-neutral-400 font-mono truncate block mt-0.5">
+                  <span v-if="user.displayName && user.displayName !== user.username" class="text-xs text-neutral-400 font-mono truncate block mt-0.5">
                     @{{ user.username }}
                   </span>
                 </div>

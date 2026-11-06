@@ -57,8 +57,8 @@
           <!-- 1. Name & Description -->
           <td class="p-4">
             <div class="flex items-center gap-2">
-              <span class="font-bold text-neutral-900 text-[15px]">{{ service.name }}</span>
-              <span v-if="service.builtin" class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-50 text-ios-blue uppercase">
+              <span class="font-bold text-neutral-900 text-base">{{ service.name }}</span>
+              <span v-if="service.builtin" class="px-1.5 py-0.2 rounded text-xs font-bold bg-blue-50 text-ios-blue uppercase">
                 内置
               </span>
             </div>
@@ -84,7 +84,7 @@
             <button
               type="button"
               @click="openProviderModal(service)"
-              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-mono text-[11px] transition-colors"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-mono text-xs transition-colors"
               title="查看 rule-providers 配置片段"
             >
               <svg class="w-3.5 h-3.5 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -152,9 +152,9 @@
             <input
               readonly
               :value="providerDirectUrl"
-              class="form-input-base text-xs font-mono text-neutral-700 bg-neutral-50"
+              class="form-input-base font-mono text-neutral-700 bg-neutral-50"
             />
-            <button type="button" @click="copyUrl" class="ios-btn-secondary shrink-0 text-xs py-2">
+            <button type="button" @click="copyUrl" class="ios-btn-secondary shrink-0 py-2">
               复制 URL
             </button>
           </div>
@@ -228,7 +228,7 @@
           </label>
         </label>
 
-        <div class="p-3 rounded-xl bg-neutral-100 text-[11px] text-neutral-500 leading-relaxed">
+        <div class="p-3 rounded-xl bg-neutral-100 text-xs text-neutral-500 leading-relaxed">
           <strong>生效机制提示</strong>：保存修改后系统将递增该规则集的版本号并记录更新时间。客户端与节点端均需按照各自更新流程同步最新内容，保存操作本身不保证流量即刻按新规则路由。
         </div>
       </div>

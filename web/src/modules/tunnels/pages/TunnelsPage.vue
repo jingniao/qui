@@ -17,7 +17,7 @@
       <EmptyState v-if="!tunnels.length" title="暂无隧道" description="创建入口到出口的加密隧道，再添加转发规则。" />
       <DataTable v-else><template #header><th>名称 / 路径</th><th>传输</th><th>接收端口</th><th>规则数</th><th>状态</th><th v-if="isOwner">操作</th></template>
         <template #body><tr v-for="t in tunnels" :key="t.id">
-          <td class="p-4"><p class="text-[15px] font-semibold text-ios-label">{{ t.name }}</p><p class="text-[13px] text-ios-secondary mt-0.5">{{ routeLabel(t) }}</p></td><td>TLS</td>
+          <td class="p-4"><p class="text-base font-semibold text-ios-label">{{ t.name }}</p><p class="text-sm text-ios-secondary mt-0.5">{{ routeLabel(t) }}</p></td><td>TLS</td>
           <td class="font-mono tabular-nums text-xs"><p v-for="h in t.hops.filter(h => h.role !== 'entry')" :key="h.role">{{ h.nodeName }}:{{ h.listenPort }}</p></td><td class="font-mono tabular-nums">{{ t.ruleCount }}</td><td><PublishBadge :status="t.status" /></td>
           <td v-if="isOwner"><div class="flex gap-2"><button class="ios-action-btn-primary" :disabled="mutating || t.status === 'pending_delete'" @click="editingTunnel = t; editor = true">编辑</button><button class="ios-action-btn-secondary" :disabled="mutating || t.status === 'pending_delete'" @click="ask({ kind: 'rotate', tunnel: t })">轮换凭据</button><button class="ios-action-btn-danger" :disabled="mutating || t.status === 'pending_delete'" @click="ask({ kind: 'tunnel', tunnel: t })">删除</button></div></td>
         </tr></template>
@@ -26,10 +26,10 @@
     <div v-else class="space-y-5">
       <EmptyState v-if="!groups.length" title="暂无规则" description="创建转发规则，或调整筛选条件。" />
       <section v-for="group in groups" :key="group.id || 'direct'" class="space-y-3">
-        <h3 class="text-[17px] sm:text-lg font-semibold text-ios-label">{{ group.name }} <span class="text-sm font-normal text-ios-secondary">{{ group.route }}</span></h3>
+        <h3 class="text-ios-label text-lg font-semibold leading-snug">{{ group.name }} <span class="text-sm font-normal text-ios-secondary">{{ group.route }}</span></h3>
         <DataTable><template #header><th>规则 / 转发路径</th><th>所属节点</th><th>对用户可见</th><th>启用</th><th>状态</th><th v-if="isOwner">操作</th></template>
           <template #body><tr v-for="r in group.rules" :key="r.id">
-            <td class="p-4"><p class="text-[15px] font-semibold text-ios-label">{{ r.name }}</p><p class="text-[13px] text-ios-secondary mt-0.5"><span class="font-mono tabular-nums">{{ r.entryNodeName }}:{{ r.listenPort }}</span> → {{ r.tunnelName ? `经 ${r.tunnelName}` : '直接转发' }} → <span v-if="r.target.mode === 'linked'">{{ r.target.nodeName }} · {{ r.target.inboundName }} · {{ r.target.protocol.toUpperCase() }} · </span><span class="font-mono tabular-nums">{{ endpoint(r.target.host, r.target.port) }}</span></p><p class="text-xs text-ios-tertiary">{{ r.network.toUpperCase() }}</p></td>
+            <td class="p-4"><p class="text-base font-semibold text-ios-label">{{ r.name }}</p><p class="text-sm text-ios-secondary mt-0.5"><span class="font-mono tabular-nums">{{ r.entryNodeName }}:{{ r.listenPort }}</span> → {{ r.tunnelName ? `经 ${r.tunnelName}` : '直接转发' }} → <span v-if="r.target.mode === 'linked'">{{ r.target.nodeName }} · {{ r.target.inboundName }} · {{ r.target.protocol.toUpperCase() }} · </span><span class="font-mono tabular-nums">{{ endpoint(r.target.host, r.target.port) }}</span></p><p class="text-xs text-ios-tertiary">{{ r.network.toUpperCase() }}</p></td>
             <td>{{ nodes.find(n => n.id === r.ownerNodeId)?.name || r.ownerNodeId || '—' }}</td><td>{{ r.subscriptionVisible ? '可见' : '隐藏' }}</td><td><StatusBadge :status="r.enabled ? 'active' : 'disabled'" /></td><td><PublishBadge :status="r.status" /></td>
             <td v-if="isOwner"><div class="flex gap-2"><button class="ios-action-btn-primary" :disabled="mutating || r.status === 'pending_delete'" @click="editingRule = r; editor = true">编辑</button><button class="ios-action-btn-danger" :disabled="mutating || r.status === 'pending_delete'" @click="ask({ kind: 'rule', rule: r })">删除</button></div></td>
           </tr></template>

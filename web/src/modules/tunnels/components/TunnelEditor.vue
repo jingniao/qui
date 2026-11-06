@@ -10,7 +10,7 @@
       </div>
       <button v-if="form.hops.length === 2" type="button" class="ios-dialog-btn-secondary" @click="form.hops.splice(1, 0, { role: 'mid', nodeId: '', portMode: 'auto' })">添加中间服务器</button>
     </fieldset>
-    <section v-if="linkedRules.length" class="space-y-2"><h4 class="text-[15px] font-semibold text-ios-label">关联规则</h4><p v-for="rule in linkedRules" :key="rule.id" class="text-sm text-ios-secondary">{{ rule.name }} · <span class="font-mono tabular-nums">{{ rule.entryNodeName }}:{{ rule.listenPort }}</span></p></section>
+    <section v-if="linkedRules.length" class="space-y-2"><h4 class="text-ios-label text-base font-semibold leading-normal">关联规则</h4><p v-for="rule in linkedRules" :key="rule.id" class="text-sm text-ios-secondary">{{ rule.name }} · <span class="font-mono tabular-nums">{{ rule.entryNodeName }}:{{ rule.listenPort }}</span></p></section>
     <p v-if="error" class="text-sm text-ios-red" role="alert">{{ error }}</p>
     <p class="text-xs text-ios-tertiary">保存只更新草稿。隧道服务器需要 GOST 核心，发布时会校验能力与端口。</p>
   </FormDrawer>

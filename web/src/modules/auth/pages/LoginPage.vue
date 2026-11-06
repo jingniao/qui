@@ -1,7 +1,7 @@
 <template>
   <main class="min-h-screen bg-[#F2F2F7] flex items-center justify-center p-4">
     <section class="panel-card w-full max-w-md p-8 space-y-6">
-      <div class="text-center"><h1 class="text-2xl font-bold">Proxy Control</h1><p class="text-sm text-[#8E8E93] mt-2">登录代理控制平台</p></div>
+      <div class="text-center"><h1 class="text-xl font-bold leading-snug">Proxy Control</h1><p class="text-sm text-[#8E8E93] mt-2">登录代理控制平台</p></div>
       <p v-if="errorMessage || authState.error" role="alert" class="rounded-xl bg-red-50 text-red-700 p-3 text-sm">{{ errorMessage || authState.error }}</p>
       <form @submit.prevent="handleLogin" class="space-y-4">
         <label class="block text-sm">用户名<input v-model="username" autocomplete="username" required maxlength="64" class="form-input-base mt-2" /></label>

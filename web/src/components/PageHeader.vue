@@ -1,7 +1,7 @@
 <template>
   <div class="mb-4 sm:mb-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
     <div>
-      <h1 class="text-lg sm:text-xl font-bold text-ios-label tracking-tight flex items-center gap-2.5">
+      <h1 class="text-ios-label tracking-normal flex items-center gap-2.5 text-xl font-bold leading-snug">
         <span>{{ title }}</span>
         <slot name="badge"></slot>
       </h1>

@@ -14,7 +14,7 @@
           </svg>
         </router-link>
 
-        <h1 class="text-lg sm:text-xl font-bold text-ios-label tracking-tight truncate">
+        <h1 class="text-ios-label tracking-normal truncate text-xl font-bold leading-snug">
           {{ node?.name || '服务器详情' }}
         </h1>
         <StatusBadge v-if="node" :status="status.tone" :label="status.label" class="shrink-0" />

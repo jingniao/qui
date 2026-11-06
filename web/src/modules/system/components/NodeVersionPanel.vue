@@ -10,7 +10,7 @@
         <button v-if="isOwner"
           type="button"
           @click="upgradeAll"
-          class="ios-btn-primary inline-flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,113,227,0.28)] text-xs py-2 px-3.5"
+          class="ios-btn-primary inline-flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,113,227,0.28)] py-2 px-3.5"
           :title="kind === 'core' ? '全部升级在线服务器的代理核心' : '全部升级在线服务器的 Agent 到最新版本'"
         >
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -32,14 +32,14 @@
         <div>
           <div class="font-bold text-ios-label flex items-center gap-2">
             <span>支持的代理核心平台与生态</span>
-            <span class="text-[10px] px-2 py-0.2 rounded-full bg-purple-100 text-purple-800 font-semibold">多核心协同共存</span>
+            <span class="text-xs px-2 py-0.2 rounded-full bg-purple-100 text-purple-800 font-semibold">多核心协同共存</span>
           </div>
-          <p class="text-[11px] text-ios-secondary mt-0.5 leading-relaxed">
+          <p class="text-xs text-ios-secondary mt-0.5 leading-relaxed">
             支持 <strong>Xray-core</strong>（成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard）与 <strong>sing-box</strong>（新一代轻量 · Hysteria2 / TUIC / 自适应路由）。一台服务器可同时运行多个已上报启用的核心，入站按所选核心归属；添加、升级与移除的结果以 Agent 回执和下一次能力上报为准。
           </p>
           <div v-if="isOwner" class="flex flex-wrap items-center gap-1.5 mt-1.5">
             <button v-for="item in CORE_ORDER" :key="item" type="button"
-              class="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-purple-200/70 text-purple-800 hover:bg-purple-50"
+              class="text-xs px-2 py-0.5 rounded-full bg-white/80 border border-purple-200/70 text-purple-800 hover:bg-purple-50"
               @click="upgradeAllComponent(item)">全部升级 {{ item }}</button>
           </div>
         </div>
@@ -48,7 +48,7 @@
         <button
           type="button"
           @click="showCoreCatalogModal = true"
-          class="ios-btn-secondary !text-xs !py-1.5 !px-3 inline-flex items-center gap-1.5 bg-white/80"
+          class="ios-btn-secondary !py-1.5 !px-3 inline-flex items-center gap-1.5 bg-white/80"
         >
           <svg class="w-3.5 h-3.5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -66,7 +66,7 @@
           <button
             role="tab"
             :aria-selected="currentTab === 'agents'"
-            class="ios-segmented-item whitespace-nowrap text-xs py-1.5 px-3.5"
+            class="ios-segmented-item whitespace-nowrap py-1.5 px-3.5"
             :class="{ active: currentTab === 'agents' }"
             @click="$emit('change-tab', 'agents')"
           >
@@ -75,7 +75,7 @@
           <button
             role="tab"
             :aria-selected="currentTab === 'cores'"
-            class="ios-segmented-item whitespace-nowrap text-xs py-1.5 px-3.5"
+            class="ios-segmented-item whitespace-nowrap py-1.5 px-3.5"
             :class="{ active: currentTab === 'cores' }"
             @click="$emit('change-tab', 'cores')"
           >
@@ -93,7 +93,7 @@
             <input
               v-model="keyword"
               :placeholder="kind === 'agent' ? '搜索名称、IP、Agent 版本或系统…' : '搜索名称、IP、核心名称或版本…'"
-              class="ios-search-input !py-1.5 !text-xs"
+              class="ios-search-input !py-1.5"
             />
             <button
               v-if="keyword"
@@ -109,7 +109,7 @@
           </div>
 
           <!-- Status Filter Dropdown -->
-          <select v-model="statusFilter" @change="search" class="ios-filter-select !w-auto !py-1.5 !text-xs">
+          <select v-model="statusFilter" @change="search" class="ios-filter-select !w-auto !py-1.5">
             <option value="all">全部状态</option>
             <option value="online">在线</option>
             <option value="degraded">核心异常</option>
@@ -122,13 +122,13 @@
           </select>
 
           <!-- Query Button -->
-          <button class="ios-search-btn shrink-0 !py-1.5 !text-xs">查询</button>
+          <button class="ios-search-btn shrink-0 !py-1.5">查询</button>
 
           <!-- Refresh Button -->
           <button
             type="button"
             @click="load"
-            class="ios-search-btn shrink-0 !py-1.5 !text-xs"
+            class="ios-search-btn shrink-0 !py-1.5"
             :disabled="loading"
             title="刷新数据"
           >
@@ -187,14 +187,14 @@
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-1.5">
-                  <router-link :to="`/nodes/${node.id}`" class="font-semibold text-ios-blue hover:underline text-[15px] truncate">
+                  <router-link :to="`/nodes/${node.id}`" class="font-semibold text-ios-blue hover:underline text-base truncate">
                     {{ node.name }}
                   </router-link>
-                  <span v-if="node.deletedAt" class="px-1.5 py-0.2 rounded text-[10px] font-bold tracking-wide uppercase shrink-0 bg-black/[0.05] text-neutral-400">
+                  <span v-if="node.deletedAt" class="px-1.5 py-0.2 rounded text-xs font-bold tracking-wide uppercase shrink-0 bg-black/[0.05] text-neutral-400">
                     已删除
                   </span>
                 </div>
-                <p class="text-[13px] text-ios-secondary tabular-nums truncate mt-0.5">
+                <p class="text-sm text-ios-secondary tabular-nums truncate mt-0.5">
                   {{ node.publicIp || node.hostname || '等待 Agent 注册' }}
                 </p>
               </div>
@@ -253,11 +253,11 @@
                   :title="core.error || (core.primary ? '主核心' : '')"
                 >
                   {{ core.name }} {{ core.version }}
-                  <span v-if="core.primary" class="ml-1 text-[10px] font-semibold opacity-70">主</span>
+                  <span v-if="core.primary" class="ml-1 text-xs font-semibold opacity-70">主</span>
                 </span>
                 <span
                   v-if="corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1])"
-                  class="text-[10px] px-1.5 py-0.5 rounded-md bg-ios-blue/10 text-ios-blue font-semibold"
+                  class="text-xs px-1.5 py-0.5 rounded-md bg-ios-blue/10 text-ios-blue font-semibold"
                 >{{ corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1]) }}</span>
               </div>
               <span v-else class="text-xs px-2 py-0.5 rounded-md text-amber-700 bg-amber-50 font-normal">
@@ -279,7 +279,7 @@
                 <span
                   v-for="proto in getNodeAllProtocols(node)"
                   :key="proto"
-                  class="rounded bg-black/[0.04] px-1.5 py-0.2 text-[10px] font-bold uppercase text-neutral-700"
+                  class="rounded bg-black/[0.04] px-1.5 py-0.2 text-xs font-bold uppercase text-neutral-700"
                 >
                   {{ proto }}
                 </span>
@@ -370,13 +370,13 @@
               </div>
               <router-link
                 :to="`/nodes/${node.id}`"
-                class="min-w-0 max-w-full font-bold text-[16px] text-neutral-900 truncate tracking-tight hover:text-ios-blue transition-colors"
+                class="min-w-0 max-w-full font-bold text-lg text-neutral-900 truncate tracking-normal hover:text-ios-blue transition-colors"
                 :title="node.name"
               >
                 {{ node.name }}
               </router-link>
               <span
-                class="rounded bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-bold uppercase text-neutral-600 shrink-0 border border-black/[0.04] truncate max-w-[90px]"
+                class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-semibold uppercase text-neutral-600 shrink-0 border border-black/[0.04] truncate max-w-[90px]"
                 :title="node.os || 'Linux'"
               >
                 {{ formatOS(node.os) }}
@@ -394,14 +394,14 @@
           </div>
 
           <!-- Row 2: Sub-info (IP & Last Heartbeat) -->
-          <div class="text-[12px] text-neutral-400 tracking-tight flex items-center justify-between pt-0.5">
+          <div class="text-xs font-mono tabular-nums text-neutral-400 tracking-normal flex flex-wrap gap-x-2 gap-y-1 items-center justify-between pt-0.5">
             <span class="flex items-center gap-1.5 text-neutral-600 truncate tabular-nums" :title="node.publicIp">
               <svg class="w-3.5 h-3.5 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
               </svg>
               <span class="truncate">{{ node.publicIp || node.hostname || '未分配 IP' }}</span>
             </span>
-            <span class="shrink-0 text-neutral-400 flex items-center gap-1 text-[11px] tabular-nums" :title="'最近心跳: ' + formatTime(node.lastHeartbeat)">
+            <span class="shrink-0 text-neutral-400 flex items-center gap-1 text-xs tabular-nums" :title="'最近心跳: ' + formatTime(node.lastHeartbeat)">
               <svg class="w-3 h-3 text-neutral-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -417,7 +417,7 @@
                 <span class="text-neutral-500 font-medium">Agent 探针版本</span>
                 <span
                   class="tabular-nums px-2 py-0.5 rounded-lg text-xs"
-                  :class="node.agentVersion ? 'font-bold text-ios-blue bg-blue-50/90 border border-blue-100/70' : 'font-medium text-neutral-400 bg-neutral-100'"
+                  :class="node.agentVersion ? 'font-mono font-semibold text-ios-blue bg-blue-50/90 border border-blue-100/70' : 'font-normal text-neutral-400 bg-neutral-100'"
                 >
                   {{ node.agentVersion || '等待上报' }}
                 </span>
@@ -426,7 +426,7 @@
                 <span class="text-neutral-500 font-medium">协同代理核心</span>
                 <span
                   class="tabular-nums text-xs truncate max-w-[150px] px-2 py-0.5 rounded-lg"
-                  :class="node.capabilities?.core_name ? 'font-semibold text-purple-700 bg-purple-50/90 border border-purple-100/70' : 'text-neutral-400 font-normal bg-neutral-100'"
+                  :class="node.capabilities?.core_name ? 'font-mono font-semibold text-purple-700 bg-purple-50/90 border border-purple-100/70' : 'text-neutral-400 font-normal bg-neutral-100'"
                   :title="coreVersion(node)"
                 >
                   {{ coreVersion(node) }}
@@ -435,7 +435,7 @@
               <div class="flex items-center justify-between text-xs">
                 <span class="text-neutral-500 font-medium">核心健康状况</span>
                 <span
-                  class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold"
                   :class="node.heartbeat?.core_healthy === false ? 'bg-red-50 text-red-600 border border-red-100/70' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-50 text-emerald-600 border border-emerald-100/70' : 'bg-neutral-100 text-neutral-400 font-normal')"
                 >
                   <span class="w-1.5 h-1.5 rounded-full" :class="node.heartbeat?.core_healthy === false ? 'bg-red-500' : (node.heartbeat?.core_healthy === true ? 'bg-emerald-500' : 'bg-neutral-400')"></span>
@@ -454,15 +454,15 @@
                     <span
                       v-for="c in getNodeInstalledCores(node)"
                       :key="c.component"
-                      class="tabular-nums px-2 py-0.5 rounded-lg text-xs font-bold"
+                      class="font-mono tabular-nums px-2 py-0.5 rounded-lg text-xs font-semibold"
                       :class="c.component === 'xray' ? 'text-ios-blue bg-blue-50/90 border border-blue-200/70' : 'text-purple-700 bg-purple-50/90 border border-purple-200/70'"
                       :title="c.error || ''"
                     >
-                      {{ c.name }} {{ c.version }}<span v-if="c.primary" class="ml-1 text-[9px] font-semibold opacity-70">主</span>
+                      {{ c.name }} {{ c.version }}<span v-if="c.primary" class="ml-1 text-xs font-semibold opacity-70">主</span>
                     </span>
                     <span
                       v-if="corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1])"
-                      class="tabular-nums px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-ios-blue/10 text-ios-blue"
+                      class="tabular-nums px-2 py-0.5 rounded-lg text-xs font-semibold bg-ios-blue/10 text-ios-blue"
                     >{{ corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1]) }}</span>
                   </div>
                 </div>
@@ -470,7 +470,7 @@
                 <div class="flex items-center justify-between text-xs">
                   <span class="text-neutral-500 font-medium">健康运行状态</span>
                   <span
-                    class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold"
                     :class="coreHealthTone(node) === 'bad' ? 'bg-red-50 text-red-600 border border-red-100/70' : (coreHealthTone(node) === 'ok' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100/70' : 'bg-neutral-100 text-neutral-400 font-normal')"
                     :title="getNodeInstalledCores(node).map(c => `${c.name} ${c.version}: ${c.healthy === false ? '异常' : c.healthy === true ? '正常' : '—'}`).join('；')"
                   >
@@ -480,12 +480,12 @@
                 </div>
 
                 <div class="space-y-1 pt-0.5">
-                  <div class="text-[11px] text-neutral-400 font-medium">支持网络协议:</div>
+                  <div class="text-xs text-neutral-400 font-medium">支持网络协议:</div>
                   <div v-if="getNodeAllProtocols(node).length" class="flex flex-wrap gap-1">
                     <span
                       v-for="proto in getNodeAllProtocols(node)"
                       :key="proto"
-                      class="rounded bg-black/[0.04] px-1.5 py-0.2 text-[10px] font-bold uppercase text-neutral-700"
+                      class="rounded bg-black/[0.04] px-1.5 py-0.2 text-xs font-bold uppercase text-neutral-700"
                     >
                       {{ proto }}
                     </span>
@@ -502,7 +502,7 @@
                     尚未上报核心
                   </span>
                 </div>
-                <div class="p-2 rounded-xl bg-amber-50/50 border border-amber-100 text-amber-900 text-[11px] leading-relaxed">
+                <div class="p-2 rounded-xl bg-amber-50/50 border border-amber-100 text-amber-900 text-xs leading-relaxed">
                   当前服务器尚未部署代理内核。支持一键安装 <strong>Xray-core</strong> 与 <strong>sing-box</strong> 核心协同运行以开启转发。
                 </div>
               </template>
@@ -652,11 +652,11 @@
             <div>
               <div class="font-bold text-sm text-neutral-900 flex items-center gap-2">
                 <span>{{ coreManagementTargetNode.name }}</span>
-                <span class="text-[10px] px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-600 font-medium">
+                <span class="text-xs px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-600 font-medium">
                   {{ formatOS(coreManagementTargetNode.os) }} ({{ detectArch(coreManagementTargetNode) || '—' }})
                 </span>
               </div>
-              <p class="text-[11px] text-neutral-500 tabular-nums mt-0.5">
+              <p class="text-xs text-neutral-500 tabular-nums mt-0.5">
                 {{ coreManagementTargetNode.publicIp || coreManagementTargetNode.hostname || '未分配公网 IP' }}
               </p>
             </div>
@@ -675,20 +675,20 @@
         <!-- SECTION 1: 已安装内核列表 (支持删除内核与升级) -->
         <div class="space-y-2.5">
           <div class="flex items-center justify-between">
-            <h4 class="font-bold text-sm text-neutral-900 flex items-center gap-2">
+            <h4 class="text-neutral-900 flex items-center gap-2 text-base font-semibold leading-normal">
               <svg class="w-4 h-4 text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
               <span>已安装内核</span>
               <span class="text-xs font-normal text-neutral-400">({{ manageInstalledCores.length }})</span>
             </h4>
-            <span class="text-[11px] text-neutral-400">{{ coreFactsLoading ? '正在读取入站与任务…' : '版本、健康与任务状态均来自后端上报' }}</span>
+            <span class="text-xs text-neutral-400">{{ coreFactsLoading ? '正在读取入站与任务…' : '版本、健康与任务状态均来自后端上报' }}</span>
           </div>
 
           <!-- Empty State when no cores installed -->
           <div v-if="!manageInstalledCores.length" class="p-5 rounded-2xl bg-neutral-50/80 border border-dashed border-neutral-200 text-center space-y-1">
             <div class="text-neutral-500 font-medium text-xs">当前服务器尚未安装任何代理内核</div>
-            <p class="text-[11px] text-neutral-400">请在下方「添加内核」区域选择需要的代理核心进行部署。</p>
+            <p class="text-xs text-neutral-400">请在下方「添加内核」区域选择需要的代理核心进行部署。</p>
           </div>
 
           <!-- Installed Core Cards -->
@@ -711,31 +711,31 @@
                     <span class="tabular-nums px-2 py-0.2 rounded-md bg-neutral-100 text-neutral-700 font-bold text-xs">
                       {{ core.version }}
                     </span>
-                    <span v-if="core.primary" class="text-[10px] px-1.5 py-0.2 rounded bg-blue-50 text-ios-blue font-semibold">主核心</span>
+                    <span v-if="core.primary" class="text-xs px-1.5 py-0.2 rounded bg-blue-50 text-ios-blue font-semibold">主核心</span>
                     <span
-                      class="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-semibold"
+                      class="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-xs font-semibold"
                       :class="core.healthy === true ? 'bg-ios-green/10 text-ios-green' : core.healthy === false ? 'bg-ios-red/10 text-ios-red' : 'bg-ios-fill text-ios-tertiary'"
                     >
                       <span class="w-1.5 h-1.5 rounded-full" :class="core.healthy === true ? 'bg-ios-green' : core.healthy === false ? 'bg-ios-red' : 'bg-ios-tertiary'"></span>
                       <span>{{ core.healthy === null ? '—' : core.healthy ? '运行正常' : '异常' }}</span>
                     </span>
-                    <span v-if="manageCorePendingLabel(core.component)" class="text-[10px] px-1.5 py-0.2 rounded bg-ios-blue/10 text-ios-blue font-semibold">
+                    <span v-if="manageCorePendingLabel(core.component)" class="text-xs px-1.5 py-0.2 rounded bg-ios-blue/10 text-ios-blue font-semibold">
                       {{ manageCorePendingLabel(core.component) }}
                     </span>
                   </div>
-                  <p v-if="core.error" class="text-[11px] text-ios-red">{{ core.error }}</p>
+                  <p v-if="core.error" class="text-xs text-ios-red">{{ core.error }}</p>
                   <div class="flex flex-wrap items-center gap-1 pt-0.5">
-                    <span class="text-[10px] text-neutral-400 mr-0.5">协议:</span>
+                    <span class="text-xs text-neutral-400 mr-0.5">协议:</span>
                     <span
                       v-for="p in core.protocols"
                       :key="p"
-                      class="px-1.5 py-0.2 rounded bg-black/[0.04] text-neutral-700 font-bold text-[9px] uppercase"
+                      class="px-1.5 py-0.2 rounded bg-black/[0.04] text-neutral-700 font-bold text-xs uppercase"
                     >
                       {{ p }}
                     </span>
-                    <span v-if="!core.protocols.length" class="text-[10px] text-neutral-400">—</span>
+                    <span v-if="!core.protocols.length" class="text-xs text-neutral-400">—</span>
                   </div>
-                  <p class="text-[11px] text-neutral-500">
+                  <p class="text-xs text-neutral-500">
                     入站：<template v-if="coreFactsLoading">读取中…</template>
                     <template v-else-if="manageCoreInbounds(core.component).length">
                       <router-link v-for="item in manageCoreInbounds(core.component)" :key="item.id"
@@ -744,13 +744,13 @@
                     </template>
                     <template v-else>无（可安全移除）</template>
                   </p>
-                  <p v-if="manageCoreTask(core.component)" class="text-[11px] text-neutral-500 flex flex-wrap items-center gap-1.5">
+                  <p v-if="manageCoreTask(core.component)" class="text-xs text-neutral-500 flex flex-wrap items-center gap-1.5">
                     <span>最近任务</span>
                     <span class="px-1.5 py-0.2 rounded font-semibold" :class="coreTaskTone(manageCoreTask(core.component)?.status || '')">
                       {{ coreTaskStatusText(manageCoreTask(core.component)?.status || '') }}
                     </span>
                     <span class="tabular-nums">{{ manageCoreTask(core.component)?.version }}</span>
-                    <span v-if="manageCoreTask(core.component)?.result?.code" class="font-mono text-[10px] text-neutral-400">
+                    <span v-if="manageCoreTask(core.component)?.result?.code" class="font-mono text-xs text-neutral-400">
                       {{ manageCoreTask(core.component)?.result?.code }}
                     </span>
                   </p>
@@ -794,10 +794,10 @@
         <!-- 移除被拒绝：后端仍报告这些入站使用该内核 -->
         <div v-if="removeConflictInbounds.length" class="p-3 rounded-2xl bg-ios-red/[0.06] border border-ios-red/20 text-ios-red space-y-1.5">
           <div class="font-bold text-xs">后端拒绝了移除请求（core_in_use）</div>
-          <p class="text-[11px] leading-relaxed">下列入站仍在当前草稿或已发布配置中使用该内核（含已禁用的入站）。请先删除或改派它们，再重新提交移除。</p>
+          <p class="text-xs leading-relaxed">下列入站仍在当前草稿或已发布配置中使用该内核（含已禁用的入站）。请先删除或改派它们，再重新提交移除。</p>
           <div class="flex flex-wrap gap-1.5">
             <router-link v-for="item in removeConflictInbounds" :key="item.id" :to="inboundLink(coreManagementTargetNode?.id || '')"
-              class="text-[11px] px-2 py-0.5 rounded-lg bg-white border border-ios-red/20 hover:underline">
+              class="text-xs px-2 py-0.5 rounded-lg bg-white border border-ios-red/20 hover:underline">
               {{ item.name }}
             </router-link>
           </div>
@@ -806,20 +806,20 @@
         <!-- SECTION 2: 添加内核 (需要 Agent 协商多核心支持) -->
         <div class="pt-4 border-t border-black/[0.06] space-y-3.5">
           <div class="flex items-center justify-between">
-            <h4 class="font-bold text-sm text-neutral-900 flex items-center gap-2">
+            <h4 class="text-neutral-900 flex items-center gap-2 text-base font-semibold leading-normal">
               <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
               </svg>
               <span>添加内核</span>
             </h4>
             <span
-              class="text-[11px] px-2 py-0.5 rounded-full font-medium"
+              class="text-xs px-2 py-0.5 rounded-full font-medium"
               :class="multiCoreSupported(coreManagementTargetNode) ? 'text-emerald-700 bg-emerald-50' : 'text-ios-orange bg-ios-orange/10'"
             >
               {{ multiCoreSupported(coreManagementTargetNode) ? 'Agent 已协商多核心' : 'Agent 未协商多核心' }}
             </span>
           </div>
-          <p v-if="!multiCoreSupported(coreManagementTargetNode)" class="p-3 rounded-xl bg-ios-orange/10 border border-ios-orange/20 text-[11px] text-ios-orange leading-relaxed">
+          <p v-if="!multiCoreSupported(coreManagementTargetNode)" class="p-3 rounded-xl bg-ios-orange/10 border border-ios-orange/20 text-xs text-ios-orange leading-relaxed">
             该服务器上报的 Agent 未协商多核心支持（旧版 Agent），只能升级当前核心。请先在「版本与更新 › Agent」升级 Agent，重连后再添加第二个内核。
           </p>
 
@@ -832,7 +832,7 @@
                 </svg>
                 <span>服务器尚未完成 Agent 注册</span>
               </div>
-              <p class="text-[11px] leading-relaxed">
+              <p class="text-xs leading-relaxed">
                 在终端运行一键部署命令安装 Agent 与所选内核；注册完成后可在「内核管理」中添加其余内核。
               </p>
             </div>
@@ -845,9 +845,9 @@
               >
                 <div class="flex items-center justify-between">
                   <span class="font-bold text-sm text-ios-label">Xray-core</span>
-                  <span class="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-ios-blue font-semibold">推荐</span>
+                  <span class="text-xs px-1.5 py-0.2 rounded bg-blue-100 text-ios-blue font-semibold">推荐</span>
                 </div>
-                <p class="text-[11px] text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / WireGuard</p>
+                <p class="text-xs text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / WireGuard</p>
               </button>
 
               <button type="button" @click="selectAddCoreComp('sing-box')"
@@ -856,16 +856,16 @@
               >
                 <div class="flex items-center justify-between">
                   <span class="font-bold text-sm text-ios-label">sing-box</span>
-                  <span class="text-[10px] px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 font-semibold">轻量新代</span>
+                  <span class="text-xs px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 font-semibold">轻量新代</span>
                 </div>
-                <p class="text-[11px] text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由</p>
+                <p class="text-xs text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由</p>
               </button>
             </div>
 
             <div class="space-y-1.5">
               <div class="flex items-center justify-between text-xs">
                 <span class="text-neutral-700 font-bold">一键安装命令</span>
-                <span class="text-[11px] text-ios-tertiary">指定默认核心 --core {{ addCoreForm.component }}</span>
+                <span class="text-xs text-ios-tertiary">指定默认核心 --core {{ addCoreForm.component }}</span>
               </div>
               <div v-if="pendingEnrollmentLoading" class="p-4 text-center text-ios-tertiary">正在生成注册命令…</div>
               <CodePreview v-else-if="pendingEnrollmentCommand" :code="pendingEnrollmentCommand" title="一键安装命令" />
@@ -885,13 +885,13 @@
                   <div class="flex items-center justify-between">
                     <span class="font-bold text-sm text-ios-label">Xray-core</span>
                     <span
-                      class="text-[10px] px-1.5 py-0.2 rounded font-semibold"
+                      class="text-xs px-1.5 py-0.2 rounded font-semibold"
                       :class="isCoreInstalled('xray') ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-ios-blue'"
                     >
                       {{ isCoreInstalled('xray') ? '已上报启用' : '推荐添加' }}
                     </span>
                   </div>
-                  <p class="text-[11px] text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard</p>
+                  <p class="text-xs text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard</p>
                 </button>
 
                 <button type="button" :disabled="isCoreInstalled('sing-box')" @click="selectAddCoreComp('sing-box')"
@@ -901,13 +901,13 @@
                   <div class="flex items-center justify-between">
                     <span class="font-bold text-sm text-ios-label">sing-box</span>
                     <span
-                      class="text-[10px] px-1.5 py-0.2 rounded font-semibold"
+                      class="text-xs px-1.5 py-0.2 rounded font-semibold"
                       :class="isCoreInstalled('sing-box') ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-700'"
                     >
                       {{ isCoreInstalled('sing-box') ? '已上报启用' : '新一代轻量' }}
                     </span>
                   </div>
-                  <p class="text-[11px] text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由分流</p>
+                  <p class="text-xs text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由分流</p>
                 </button>
               </div>
             </div>
@@ -939,7 +939,7 @@
               </div>
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">目标版本号</label>
-                <input v-model.trim="addCoreForm.version" @input="autoFillAddCoreURL" placeholder="例如: 26.3.27" class="form-input-base w-full !text-xs !py-1.5 tabular-nums font-semibold" />
+                <input v-model.trim="addCoreForm.version" @input="autoFillAddCoreURL" placeholder="例如: 26.3.27" class="form-input-base w-full !py-1.5 tabular-nums font-semibold" />
               </div>
             </div>
 
@@ -947,15 +947,15 @@
             <div>
               <div class="flex items-center justify-between mb-1.5">
                 <label class="text-neutral-600 font-medium">官方发布资产地址 (Asset URL)</label>
-                <button type="button" @click="autoFillAddCoreURL" class="text-ios-blue hover:underline text-[11px] font-medium">生成默认地址</button>
+                <button type="button" @click="autoFillAddCoreURL" class="text-ios-blue hover:underline text-xs font-medium">生成默认地址</button>
               </div>
-              <input v-model.trim="addCoreForm.url" class="form-input-base w-full !text-xs !py-1.5 font-mono text-[11px]" />
+              <input v-model.trim="addCoreForm.url" class="form-input-base w-full !py-1.5 font-mono" />
             </div>
 
             <!-- SHA-256 -->
             <div>
               <label class="block text-neutral-600 font-medium mb-1.5">SHA-256 校验和 (64位十六进制)</label>
-              <input v-model.trim="addCoreForm.sha256" placeholder="输入 64 位 SHA-256 摘要" class="form-input-base w-full !text-xs !py-1.5 font-mono text-[11px]" />
+              <input v-model.trim="addCoreForm.sha256" placeholder="输入 64 位 SHA-256 摘要" class="form-input-base w-full !py-1.5 font-mono" />
             </div>
 
             <!-- Submit Button: 确认添加内核 -->
@@ -964,7 +964,7 @@
                 type="button"
                 @click="submitAddNewCore"
                 :disabled="addCoreBusy || !multiCoreSupported(coreManagementTargetNode) || isCoreInstalled(addCoreForm.component)"
-                class="ios-btn-primary inline-flex items-center gap-1.5 text-xs py-2 px-4 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
+                class="ios-btn-primary inline-flex items-center gap-1.5 py-2 px-4 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
               >
                 <svg v-if="addCoreBusy" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1046,34 +1046,34 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-neutral-600 font-medium mb-1.5">升级内核平台</label>
-              <select v-if="coreDialogTargetNode" v-model="coreForm.component" @change="onCoreComponentChange" class="form-input-base w-full !text-xs !py-1.5">
+              <select v-if="coreDialogTargetNode" v-model="coreForm.component" @change="onCoreComponentChange" class="form-input-base w-full !py-1.5">
                 <option v-for="core in getNodeInstalledCores(coreDialogTargetNode)" :key="core.component" :value="core.component">{{ core.name }} {{ core.version }}</option>
               </select>
-              <select v-else v-model="coreForm.component" @change="onCoreComponentChange" :disabled="coreBatchComponentLocked" class="form-input-base w-full !text-xs !py-1.5 disabled:opacity-60">
+              <select v-else v-model="coreForm.component" @change="onCoreComponentChange" :disabled="coreBatchComponentLocked" class="form-input-base w-full !py-1.5 disabled:opacity-60">
                 <option v-for="item in coreBatchComponents" :key="item.name" :value="item.name">{{ item.name }}（{{ item.count }} 台）</option>
               </select>
             </div>
             <div>
               <label class="block text-neutral-600 font-medium mb-1.5">目标版本号</label>
-              <input v-model.trim="coreForm.version" @input="onCoreVersionInput" placeholder="例如: 26.3.27" class="form-input-base w-full !text-xs !py-1.5 tabular-nums font-semibold" />
+              <input v-model.trim="coreForm.version" @input="onCoreVersionInput" placeholder="例如: 26.3.27" class="form-input-base w-full !py-1.5 tabular-nums font-semibold" />
             </div>
           </div>
-          <p v-if="!coreDialogTargetNode" class="text-[11px] text-ios-secondary">
+          <p v-if="!coreDialogTargetNode" class="text-xs text-ios-secondary">
             将只向已运行 {{ coreForm.component }} 的 {{ coreBatchTargets.length }} 台在线服务器下发同一个版本、地址与摘要；未运行该内核的服务器不会收到安装任务。
           </p>
 
           <div>
             <div class="flex items-center justify-between mb-1.5">
               <label class="text-neutral-600 font-medium">官方发布资产地址 (Asset URL)</label>
-              <button type="button" @click="autoFillCoreURL" class="text-ios-blue hover:underline text-[11px] font-medium">生成默认地址</button>
+              <button type="button" @click="autoFillCoreURL" class="text-ios-blue hover:underline text-xs font-medium">生成默认地址</button>
             </div>
-            <input v-model.trim="coreForm.url" placeholder="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" class="form-input-base w-full !text-xs !py-1.5 font-mono text-[11px]" />
-            <p class="text-[10px] text-neutral-400 mt-1">必须为官方 releases 下载地址，节点下载后将比对文件指纹。</p>
+            <input v-model.trim="coreForm.url" placeholder="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" class="form-input-base w-full !py-1.5 font-mono" />
+            <p class="text-xs text-neutral-400 mt-1">必须为官方 releases 下载地址，节点下载后将比对文件指纹。</p>
           </div>
 
           <div>
             <label class="block text-neutral-600 font-medium mb-1.5">SHA-256 校验和 (64位十六进制)</label>
-            <input v-model.trim="coreForm.sha256" placeholder="输入 64 位 SHA-256 摘要" class="form-input-base w-full !text-xs !py-1.5 font-mono text-[11px]" />
+            <input v-model.trim="coreForm.sha256" placeholder="输入 64 位 SHA-256 摘要" class="form-input-base w-full !py-1.5 font-mono" />
           </div>
         </div>
       </div>
@@ -1099,29 +1099,29 @@
                   X
                 </div>
                 <div>
-                  <h4 class="font-bold text-sm text-ios-label">Xray-core</h4>
-                  <span class="text-[10px] text-ios-tertiary">XTLS 官方团队</span>
+                  <h4 class="text-ios-label text-base font-semibold leading-normal">Xray-core</h4>
+                  <span class="text-xs text-ios-tertiary">XTLS 官方团队</span>
                 </div>
               </div>
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-ios-blue font-semibold border border-blue-200/60">
+              <span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-ios-blue font-semibold border border-blue-200/60">
                 稳定成熟
               </span>
             </div>
 
-            <p class="text-ios-secondary leading-relaxed text-[11px]">
+            <p class="text-ios-secondary leading-relaxed text-xs">
               功能完备的高性能网络代理核心，深度优化 TLS/XTLS 协议栈与 Reality 伪装技术，兼容性极高。
             </p>
 
             <div class="space-y-1.5 pt-1 border-t border-black/[0.04]">
-              <span class="text-neutral-500 font-medium block text-[11px]">支持协议矩阵:</span>
+              <span class="text-neutral-500 font-medium block text-xs">支持协议矩阵:</span>
               <div class="flex flex-wrap gap-1">
-                <span v-for="p in ['VLESS', 'VMess', 'Trojan', 'Shadowsocks', 'SOCKS5', 'HTTP', 'WireGuard']" :key="p" class="px-1.5 py-0.5 rounded bg-blue-50 text-ios-blue font-bold text-[10px]">
+                <span v-for="p in ['VLESS', 'VMess', 'Trojan', 'Shadowsocks', 'SOCKS5', 'HTTP', 'WireGuard']" :key="p" class="px-1.5 py-0.5 rounded bg-blue-50 text-ios-blue font-bold text-xs">
                   {{ p }}
                 </span>
               </div>
             </div>
 
-            <div class="text-[11px] text-ios-tertiary space-y-0.5 pt-1">
+            <div class="text-xs text-ios-tertiary space-y-0.5 pt-1">
               <div><strong>推荐版本:</strong> v25.10.15 (版本辅助) / v26.3.27</div>
               <div><strong>适用场景:</strong> 常规出入站、多用户订阅、抗封锁伪装</div>
             </div>
@@ -1135,29 +1135,29 @@
                   S
                 </div>
                 <div>
-                  <h4 class="font-bold text-sm text-ios-label">sing-box</h4>
-                  <span class="text-[10px] text-ios-tertiary">SagerNet 官方团队</span>
+                  <h4 class="text-ios-label text-base font-semibold leading-normal">sing-box</h4>
+                  <span class="text-xs text-ios-tertiary">SagerNet 官方团队</span>
                 </div>
               </div>
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-semibold border border-purple-200/60">
+              <span class="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-semibold border border-purple-200/60">
                 新一代轻量
               </span>
             </div>
 
-            <p class="text-ios-secondary leading-relaxed text-[11px]">
+            <p class="text-ios-secondary leading-relaxed text-xs">
               新一代通用代理平台框架，占用内存与 CPU 极低，原生支持 Hysteria2 等下一代基于 QUIC 的高速协议。
             </p>
 
             <div class="space-y-1.5 pt-1 border-t border-black/[0.04]">
-              <span class="text-neutral-500 font-medium block text-[11px]">支持协议矩阵:</span>
+              <span class="text-neutral-500 font-medium block text-xs">支持协议矩阵:</span>
               <div class="flex flex-wrap gap-1">
-                <span v-for="p in ['Hysteria2', 'TUIC', 'Shadowsocks', 'VLESS', 'Trojan', 'Direct']" :key="p" class="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-bold text-[10px]">
+                <span v-for="p in ['Hysteria2', 'TUIC', 'Shadowsocks', 'VLESS', 'Trojan', 'Direct']" :key="p" class="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-bold text-xs">
                   {{ p }}
                 </span>
               </div>
             </div>
 
-            <div class="text-[11px] text-ios-tertiary space-y-0.5 pt-1">
+            <div class="text-xs text-ios-tertiary space-y-0.5 pt-1">
               <div><strong>推荐版本:</strong> v1.10.7 (版本辅助) / v1.11.0</div>
               <div><strong>适用场景:</strong> 弱网加速、UDP 直连加速、极小内存 VPS</div>
             </div>

@@ -58,7 +58,7 @@
           <div class="relative">
             <select
               v-model="filterType"
-              class="form-input-base text-xs py-1.5 pl-3 pr-8 rounded-lg appearance-none bg-white cursor-pointer"
+              class="form-input-base py-1.5 pl-3 pr-8 rounded-lg appearance-none bg-white cursor-pointer"
             >
               <option value="all">全部类型</option>
               <option value="agent">Agent 探针</option>
@@ -76,7 +76,7 @@
           <div class="relative">
             <select
               v-model="filterStatus"
-              class="form-input-base text-xs py-1.5 pl-3 pr-8 rounded-lg appearance-none bg-white cursor-pointer"
+              class="form-input-base py-1.5 pl-3 pr-8 rounded-lg appearance-none bg-white cursor-pointer"
             >
               <option value="all">全部状态</option>
               <option value="running">执行中 / 待确认</option>
@@ -98,7 +98,7 @@
               v-model.trim="searchKeyword"
               type="text"
               placeholder="搜索服务器名称或版本..."
-              class="form-input-base text-xs py-1.5 pl-8 pr-3 w-full rounded-lg"
+              class="form-input-base py-1.5 pl-8 pr-3 w-full rounded-lg"
             />
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-gray-400">
               <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -114,7 +114,7 @@
       </div>
 
     <section v-if="isOwner" class="panel-card p-5 space-y-4">
-      <h2 class="font-semibold text-ios-label">Agent 签名发布目录</h2>
+      <h2 class="text-ios-label text-base font-semibold leading-normal">Agent 签名发布目录</h2>
       <p v-if="!configured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
       <details class="space-y-3"><summary class="text-sm cursor-pointer">登记签名 Agent 版本</summary>
         <p class="text-xs text-ios-secondary">粘贴离线签名工具生成的完整 proxy-agent 清单。</p>
@@ -197,7 +197,7 @@
               >
                 {{ task.nodeName }}
               </router-link>
-              <p class="text-[11px] text-gray-400 mt-0.5">
+              <p class="text-xs text-gray-400 mt-0.5">
                 配置版本 #{{ task.revision || '—' }}
               </p>
             </td>
@@ -237,14 +237,14 @@
                   </span>
                   <span
                     v-if="task.installedVersion"
-                    class="text-[11px] font-mono text-gray-500 bg-gray-50 px-1.5 py-0.2 rounded border border-gray-200"
+                    class="text-xs font-mono text-gray-500 bg-gray-50 px-1.5 py-0.2 rounded border border-gray-200"
                   >
                     已装 {{ task.installedVersion }}
                   </span>
                 </div>
                 <p
                   v-if="task.resultGuidance"
-                  class="text-[11px] text-amber-700 leading-relaxed"
+                  class="text-xs text-amber-700 leading-relaxed"
                 >
                   {{ task.resultGuidance }}
                 </p>

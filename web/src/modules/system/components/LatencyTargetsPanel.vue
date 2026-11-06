@@ -2,7 +2,7 @@
   <section class="panel-card p-6 space-y-5">
     <div class="flex flex-wrap justify-between items-center gap-3">
       <div>
-        <h2 class="font-semibold text-ios-label">延迟监控目标库</h2>
+        <h2 class="text-ios-label text-base font-semibold leading-normal">延迟监控目标库</h2>
         <p class="text-xs text-ios-secondary mt-1">
           管理系统探针目标库，并设置全局默认延迟检测目标（最多 5 个）。自定义服务器检测目标可在各服务器详情中单独指定。
         </p>
@@ -20,7 +20,7 @@
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
 
     <div v-if="showingForm && isOwner" class="p-4 rounded-xl border border-ios-separator bg-ios-bg/40 max-w-2xl space-y-3">
-      <h3 class="text-sm font-semibold text-ios-label">
+      <h3 class="text-ios-label text-base font-semibold leading-normal">
         {{ editingTarget ? '编辑探测目标' : '添加探测目标' }}
       </h3>
       <ProbeTargetForm

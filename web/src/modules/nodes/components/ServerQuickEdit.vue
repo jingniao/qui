@@ -14,7 +14,7 @@
         <label class="block">
           <div class="flex items-center justify-between">
             <span class="text-xs font-medium text-neutral-600">地区</span>
-            <span class="text-[11px] text-neutral-400">优先采用此地区展示国旗，留空则根据 IP 归属自动识别</span>
+            <span class="text-xs text-neutral-400">优先采用此地区展示国旗，留空则根据 IP 归属自动识别</span>
           </div>
           <input v-model="editForm.region" placeholder="例如 香港、日本东京、美国洛杉矶" class="form-input-base mt-1" />
         </label>
@@ -42,7 +42,7 @@
               <div class="flex items-center mt-1 rounded-xl border border-black/15 bg-white overflow-hidden shadow-2xs focus-within:ring-2 focus-within:ring-ios-blue/20 focus-within:border-ios-blue transition-all">
                 <select
                   v-model="editForm.renewCurrency"
-                  class="bg-neutral-50 hover:bg-neutral-100 text-neutral-800 font-semibold text-xs px-3 py-2.5 border-r border-black/10 focus:outline-none shrink-0 cursor-pointer transition-colors"
+                  class="bg-neutral-50 hover:bg-neutral-100 text-neutral-800 font-semibold px-3 py-2.5 border-r border-black/10 focus:outline-none shrink-0 cursor-pointer transition-colors text-sm"
                 >
                   <option v-for="c in CURRENCY_LIST" :key="c.code" :value="c.code">{{ c.label }}</option>
                 </select>
@@ -52,11 +52,11 @@
                   step="any"
                   min="0"
                   placeholder="输入续费金额，例如 120"
-                  class="flex-1 min-w-0 px-3 py-2 text-xs font-mono font-medium text-neutral-900 placeholder:text-neutral-400 focus:outline-none bg-transparent"
+                  class="flex-1 min-w-0 px-3 py-2 font-mono font-medium text-neutral-900 placeholder:text-neutral-400 focus:outline-none bg-transparent text-sm"
                 />
                 <select
                   v-model="editForm.renewCycle"
-                  class="bg-neutral-50 hover:bg-neutral-100 text-neutral-700 font-semibold text-xs px-3 py-2.5 border-l border-black/10 focus:outline-none shrink-0 cursor-pointer transition-colors"
+                  class="bg-neutral-50 hover:bg-neutral-100 text-neutral-700 font-semibold px-3 py-2.5 border-l border-black/10 focus:outline-none shrink-0 cursor-pointer transition-colors text-sm"
                 >
                   <option v-for="cycle in CYCLE_LIST" :key="cycle" :value="cycle">{{ cycle }}</option>
                 </select>

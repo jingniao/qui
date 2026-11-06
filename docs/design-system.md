@@ -1,6 +1,6 @@
 # qui 前端设计系统与视觉交互规范 (Design System Specification)
 
-> **版本**：v1.2 (Apple iOS / HIG Modern Aesthetic)  
+> **版本**：v1.3（2026-11-05，统一字号与可读性）
 > **适用范围**：qui 管理平台所有前端页面 (`web/src`)、基础组件、表单与对话框  
 > **设计基调**：轻量、克制、层级分明、触控与桌面融合的现代化 Apple iOS 视觉风格
 
@@ -25,7 +25,7 @@
    - 固定框架（侧边栏、表头、字段标签、边框）必须保持适度灰度，严禁比业务真实数据（名称、IP、流量、状态）更深更粗。
    - 页面背景采用浅冷灰 `#F5F5F7`，内容容器采用纯白 `#FFFFFF`，通过 20px 圆角（iOS Inset Grouped Squircle）和极微弱柔和阴影构建层次感。
 2. **严苛的尺寸收敛**：
-   - 杜绝任意随意出现的 `11px`、`13px`、`15px` 混杂，所有字阶与控件严格归一到规范比例尺中。
+   - 常规界面只使用 12、14、16、18、20px；统计数值另用 24、30px，错误页编号可用 36px。任何可见文字不得小于 12px，空间不足时换行、滚动或调整布局，不缩小字体。
 3. **触感反馈与平滑动效**：
    - 所有按钮必须具备按压缩放反馈 (`:active { transform: scale(0.98); }`)。
    - 弹窗与过渡必须遵循 Apple 弹簧曲线 `cubic-bezier(0.16, 1, 0.3, 1)`。
@@ -71,19 +71,35 @@
 
 ### 1. 字体家族 (Font Stack)
 - **无衬线字体 (通用界面)**：`-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", sans-serif`
-- **等宽字体 (数据/编码)**：`"SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, "Cascadia Mono", monospace`
+- **等宽字体 (数据/编码)**：`"SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Cascadia Mono", "Segoe UI Mono", monospace`
+- 字体栈统一维护于 `web/tailwind.config.js`；全局正文通过 `font-sans` 引用，不在业务页面重复声明。使用本机系统字体，无需下载字体文件。
 
-### 2. 标准 7 级字阶表 (The 7-Tier Scale)
+### 2. 标准字阶表
 
 | 级别 | 字号 (px) | Tailwind 类名 | 默认字重 | 行高 | 典型应用组件/位置 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Page Title** | 24px (桌面 28px) | `text-2xl sm:text-[28px]` | `font-bold` (700) | `leading-tight` | `PageHeader.vue` 页面主标题 |
-| **Card Title** | 17px (桌面 18px) | `text-[17px] sm:text-lg` | `font-semibold` (600) | `leading-snug` | 卡片区域大标题、`FormDrawer`/`ConfirmDialog` 模态标题 |
-| **Section Title** | 15px | `text-[15px]` | `font-semibold` (600) | `leading-normal`| 数据表格首列重点对象名、分组小标题、侧栏活动导航 |
-| **Body (正文)** | 14px | `text-sm` | `font-normal` (400) | `leading-normal`| 表格正文列、输入框文字、卡片说明段落、36px 按钮 |
-| **Subhead** | 13px | `text-[13px]` | `font-normal` (400) | `leading-normal`| 表格对象首列下方的第二行说明（如别名、公网 IP、创建人） |
-| **Caption / TH** | 12px | `text-xs` | 表头用 `font-medium`<br>时间用 `font-normal` | `leading-normal`| **`DataTable` 表头 (`th`)**、时间戳、表单底部说明、分页条 |
-| **Micro / Badge** | 11px | `text-[11px]` | `font-semibold` (600) | `leading-none` | `StatusBadge.vue`、`ProtocolBadge.vue`、侧栏分类大写标 |
+| **Page Title** | 20px | `text-xl` | `font-bold` (700) | `leading-snug` | `PageHeader.vue`、节点详情页主标题，移动端同字号 |
+| **Card / Dialog Title** | 18px | `text-lg` | `font-semibold` (600) | `leading-snug` | 主要卡片标题、`FormDrawer` / `AppDialog` / `ConfirmDialog` 标题 |
+| **Entity Card Name** | 18px | `text-lg` | `font-bold` (700) | `leading-snug` 或默认行高 | 服务器、节点、节点组、客户端配置卡片的主名称；各页面同类卡片保持一致 |
+| **Section Title** | 16px | `text-base` | `font-semibold` (600) | `leading-normal` | 分区标题、表格首列重点对象名 |
+| **Body / Control** | 14px | `text-sm` | `font-normal` (400)，按钮 500–600 | `leading-normal` | 正文、输入框、标准按钮、筛选、导航、重要说明 |
+| **Caption / Badge / TH** | 12px | `text-xs` | 400–500，协议标签可用 600 | `leading-normal` | 辅助信息、表头、徽标、图表刻度、分页、行内操作 |
+| **Secondary Metric** | 24px | `text-2xl` | 600–700 | 默认行高 | 次级统计数值 |
+| **Primary Metric** | 30px | `text-3xl` | `font-bold` (700) | 默认行高 | 总览主要统计数值 |
+| **Error Code** | 36px | `text-4xl` | `font-extrabold` (800) | 默认行高 | 仅 403 / 404 等错误页编号 |
+
+### 3. 渲染与可读性约束
+
+- 根字号 16px，正文默认 14px，正文行高 1.5；字号使用上表的 Tailwind 类，禁止任意字号和按 `em` 缩小辅助文字。流量单位固定为 12px，避免嵌入小号文本后继续缩小。
+- 默认字距为 `normal`，不对中文正文、标签和数据施加负字距。短英文分类可保留正字距。
+- 保留浏览器和操作系统的原生字体平滑，不全局强制 `antialiased`、`-webkit-font-smoothing` 或 `text-rendering: optimizeLegibility`。字体清晰度仍受系统缩放、浏览器缩放及屏幕像素密度影响，CSS 不保证消除所有锯齿。
+- 侧栏恢复原有半透明毛玻璃背景；导航 14px，普通项字重 400、选中项 600，一级分类保留 `tracking-wide` 字距。
+- 标题使用 1.375 行高，正文和说明采用 1.5；带文字徽标不使用 `leading-none` 压缩行高，状态徽标最小高度 24px。固定大小图标可以使用独立行高。
+- 常用字重为 400 / 500 / 600 / 700；不使用细字重或文字描边来补偿小字号。不要通过长期 `transform: scale(...)` 缩小普通界面文字；代理画布的用户缩放属于画布交互。
+- 新增页面优先复用公共标题、表格、表单和徽标组件；浏览器检查至少覆盖中文长名称、弹窗、紧凑标签和窄屏，确认文字不裁切。
+- 分区标题显式使用 `text-base font-semibold leading-normal`，不可仅写 `font-semibold` 后从父容器继承为 12/14px。弹窗与主要区域标题使用 18px / 600；空状态及错误提示的小标题可用 14px / 600。
+- 标准按钮、搜索、筛选、分段控制器及普通表单输入遵循公共样式 14px，页面不得用 `text-xs`、`!text-xs` 或响应式字号覆盖。`AppSelect` 默认触发器及选项为 14px，显式 `size="sm"` 紧凑触发器可为 12px；说明及徽标仍为 12px。配置代码、证书 PEM 等等宽多行编辑区可用 12px，普通输入保持 14px。
+- 带文字刻度的延迟 SVG 图表保留至少 800px 绘图区，窄屏在图表容器内横向滚动，避免 `viewBox` 整体缩放将 12px 刻度再次缩小。
 
 ---
 
@@ -112,7 +128,7 @@
   min-width: 4.5rem;     /* 72px 基础防坍缩，防止两个汉字缩为圆形 */
   padding: 0 1.25rem;    /* 文本自适应缩放 */
   border-radius: 0.75rem;/* 12px rounded-xl */
-  font-size: 0.8125rem;  /* 13px */
+  font-size: 0.875rem;   /* 14px */
   ```
 - **状态行为**：
   - Hover: 轻微提亮与增加投影。
@@ -189,9 +205,9 @@
 
 ### 1. 展开态 (Expanded State)
 - **宽度**：`17rem` (272px)，`web/src/layouts/MainLayout.vue` 使用 `w-[17rem]` 固定展开宽度。Tailwind 3.4 默认间距表没有 `68`，因此不能用 `w-68`。
-- **分组标题**：`text-[11px] font-semibold tracking-wider uppercase text-ios-tertiary px-3.5 pt-4 pb-1.5`。
-- **一级折叠菜单项**：未激活为常规灰色文本；展开/激活时为 `text-ios-blue bg-ios-blue/10 font-semibold`，右侧 Chevron 箭头平滑旋转 90 度。
-- **二级子路由项**：缩进 `pl-9`，字号收窄为 `text-[13px]`，形成明晰树形梯级。
+- **分组标题**：`text-xs font-semibold tracking-wider uppercase text-ios-tertiary px-3.5 pt-4 pb-1.5`。
+- **一级折叠菜单项**：14px，普通字重 400、选中项 600，分类标题保留 `tracking-wide`；展开/激活通过 `text-ios-blue bg-ios-blue/10` 等颜色与背景区分，右侧 Chevron 箭头平滑旋转 90 度。
+- **二级子路由项**：缩进 `pl-9`，字号使用 `text-sm`（14px），通过缩进表达树形层级。
 
 ### 2. 折叠态 (Collapsed State)
 - **宽度**：`w-20` (80px)。
@@ -207,13 +223,13 @@
 - **样式规范**：共享 `DataTable.vue` 的 `thead` 为 `text-xs font-medium text-ios-tertiary tracking-wider uppercase bg-[#F5F5F7] border-b border-black/[0.08]`。
 
 ### 2. 数据单元格与首列重点
-- **首列重点实体**：`text-[15px] font-semibold text-ios-label`（若可点击则为 `text-ios-blue hover:underline`），副说明文字为 `text-[13px] text-ios-secondary mt-0.5`。
+- **首列重点实体**：`text-base font-semibold text-ios-label`（若可点击则为 `text-ios-blue hover:underline`），副说明文字为 `text-sm text-ios-secondary mt-0.5`。
 - **常规数据列**：`text-sm text-ios-label`。
 - **数值与指标列**：`text-xs font-mono tabular-nums text-ios-secondary`，保证上下垂直严格对齐。
 
 ### 3. 微型状态与度量组件
 - **状态徽章 (`StatusBadge.vue`)**：
-  - 规格：`text-[11px] font-semibold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5`。
+  - 规格：`text-xs font-medium leading-normal px-2.5 min-h-[24px] rounded-full inline-flex items-center gap-1.5`。
   - 内置圆点：`w-1.5 h-1.5 rounded-full shrink-0`。
   - 配色方案：浅色半透明背景 + 对应语义色文字与边框（如绿色 `bg-ios-green/10 text-ios-green border border-ios-green/20`）。
 - **流量数值展示 (`TrafficValue.vue`)**：
@@ -233,5 +249,5 @@
 | **危险按钮禁用态** | 保证 `:disabled` 时具有 `opacity: 0.4` 与 `pointer-events: none` | ❌ 禁用时依然保持鲜红且可被 hover 触发变色 |
 | **下拉选择器** | 统一采用 `select.form-input-base`，保留 `padding-right: 2.25rem` | ❌ 使用浏览器原生未美化 select，导致箭头紧贴右侧或遮挡文字 |
 | **动态数值展示** | 所有数字、IP、时间戳、UUID 添加 `tabular-nums` | ❌ 使用非等宽普通字体导致数值跳动与列表对齐错乱 |
-| **色彩与字阶** | 严格使用 `text-ios-*` 语义 Token 与 7 级标准字阶 | ❌ 随意写入 `text-slate-600`、`#007AFF`、`text-[15px]` 等非标样式 |
+| **色彩与字阶** | 使用语义颜色与标准字阶，最小 12px，正文 14px | ❌ 9～11px 小字、任意字号、负字距、按比例缩小单位文字 |
 | **弹窗与交互动效**| 统一引入 Apple 弹簧曲线 `cubic-bezier(0.16, 1, 0.3, 1)` | ❌ 缺少按压反馈 (`active:scale(0.98)`) 或生硬无动画闪现 |

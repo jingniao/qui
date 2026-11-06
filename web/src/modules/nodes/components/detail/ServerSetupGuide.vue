@@ -1,6 +1,6 @@
 <template>
   <section class="panel-card p-6 space-y-5">
-    <h2 class="font-semibold text-ios-label">待登记 · 安装 Agent</h2>
+    <h2 class="text-ios-label text-base font-semibold leading-normal">待登记 · 安装 Agent</h2>
     <ol class="list-decimal pl-5 space-y-3 text-sm text-ios-secondary"><li>生成一次性安装命令。</li><li>在目标服务器终端以 root 用户运行命令，完成 Agent 安装与证书登记。</li><li>等待首次心跳，服务器上线后继续创建节点。</li></ol>
     <button v-if="isOwner && !node.deletedAt" class="ios-btn-primary" @click="$emit('install')">生成安装命令</button>
     <CodePreview v-if="command" :code="command" title="安装命令 / 登记码" />

@@ -7,7 +7,7 @@
     >
       <template #actions>
         <!-- Auto-refresh status indicator -->
-        <div class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/[0.04] text-[11px] text-ios-tertiary font-medium">
+        <div class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/[0.04] text-xs text-ios-tertiary font-medium">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
           <span>{{ dateRefreshText }}</span>
         </div>
@@ -51,7 +51,7 @@
                 </div>
 
                 <div class="mt-3 flex items-baseline gap-1.5">
-                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-tight">{{ adminOnlineNodesCount }}</span>
+                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-normal">{{ adminOnlineNodesCount }}</span>
                   <span class="text-xs text-ios-tertiary font-medium">/ {{ allNodes.length }} 在线</span>
                 </div>
               </div>
@@ -66,7 +66,7 @@
                   <span :class="['w-1.5 h-1.5 rounded-full shrink-0', offlineNodesCount === 0 && pendingNodesCount === 0 && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-ios-red']"></span>
                   {{ nodeStatusSubtitle }}
                 </span>
-                <span class="text-ios-tertiary tabular-nums text-[11px] font-medium">{{ allNodes.length > 0 ? Math.round((adminOnlineNodesCount / allNodes.length) * 100) : 0 }}%</span>
+                <span class="text-ios-tertiary tabular-nums text-xs font-medium">{{ allNodes.length > 0 ? Math.round((adminOnlineNodesCount / allNodes.length) * 100) : 0 }}%</span>
               </div>
             </div>
 
@@ -83,7 +83,7 @@
                 </div>
 
                 <div class="mt-3 flex items-baseline gap-1.5">
-                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-tight">{{ healthyNodesCount }}</span>
+                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-normal">{{ healthyNodesCount }}</span>
                   <span class="text-xs text-ios-tertiary font-medium">/ {{ allNodes.length }} 正常</span>
                 </div>
               </div>
@@ -98,7 +98,7 @@
                   <span :class="['w-1.5 h-1.5 rounded-full shrink-0', healthyNodesCount === allNodes.length && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-amber-500']"></span>
                   {{ healthyNodesCount === allNodes.length && allNodes.length > 0 ? '状态健康' : `${allNodes.length - healthyNodesCount} 核心待检` }}
                 </span>
-                <span class="text-ios-tertiary tabular-nums text-[11px] font-medium">{{ allNodes.length > 0 ? Math.round((healthyNodesCount / allNodes.length) * 100) : 0 }}%</span>
+                <span class="text-ios-tertiary tabular-nums text-xs font-medium">{{ allNodes.length > 0 ? Math.round((healthyNodesCount / allNodes.length) * 100) : 0 }}%</span>
               </div>
             </div>
 
@@ -115,7 +115,7 @@
                 </div>
 
                 <div class="mt-3 flex items-baseline gap-1.5">
-                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-tight">{{ activeUsersCount }}</span>
+                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-normal">{{ activeUsersCount }}</span>
                   <span class="text-xs text-ios-tertiary font-medium">/ {{ allUsers.length }} 活跃</span>
                 </div>
               </div>
@@ -130,7 +130,7 @@
                   <span :class="['w-1.5 h-1.5 rounded-full shrink-0', warningUsersCount > 0 ? 'bg-amber-500' : 'bg-emerald-500']"></span>
                   {{ warningUsersCount > 0 ? `${warningUsersCount} 位待关注` : '账号正常' }}
                 </span>
-                <span class="text-ios-tertiary tabular-nums text-[11px] font-medium">{{ allUsers.length > 0 ? Math.round((activeUsersCount / allUsers.length) * 100) : 0 }}%</span>
+                <span class="text-ios-tertiary tabular-nums text-xs font-medium">{{ allUsers.length > 0 ? Math.round((activeUsersCount / allUsers.length) * 100) : 0 }}%</span>
               </div>
             </div>
 
@@ -147,13 +147,13 @@
                 </div>
 
                 <div class="mt-3 flex items-baseline gap-1.5">
-                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-tight">
+                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-normal">
                     <TrafficValue :bytes="todayTrafficTotal" />
                   </span>
                 </div>
               </div>
 
-              <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-secondary">
+              <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
                 <span>↑ <TrafficValue :bytes="todayUpload" /></span>
                 <span>↓ <TrafficValue :bytes="todayDownload" /></span>
               </div>
@@ -170,7 +170,7 @@
                 <div class="flex items-center justify-between">
                   <div>
                     <div class="flex items-center gap-2">
-                      <h2 class="text-base font-bold text-ios-label tracking-tight">待处理问题</h2>
+                      <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">待处理问题</h2>
                       <span
                         v-if="pendingIssues.length > 0"
                         class="text-xs px-2 py-0.5 rounded-full font-semibold bg-rose-50 text-ios-red border border-rose-200/80"
@@ -213,7 +213,7 @@
                         <div class="font-semibold text-sm text-ios-label truncate">{{ issue.title }}</div>
                         <p class="text-xs text-ios-secondary leading-relaxed">{{ issue.desc }}</p>
                         <div v-if="issue.tag" class="pt-0.5">
-                          <span class="inline-block px-2 py-0.5 rounded-md text-[11px] font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.04]">
+                          <span class="inline-block px-2 py-0.5 rounded-md text-xs font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.04]">
                             {{ issue.tag }}
                           </span>
                         </div>
@@ -222,7 +222,7 @@
 
                     <router-link
                       :to="issue.link"
-                      class="ios-btn-secondary text-xs h-7 px-2.5 shrink-0 self-center"
+                      class="ios-btn-secondary h-7 px-2.5 shrink-0 self-center"
                     >
                       去处理 &rarr;
                     </router-link>
@@ -235,7 +235,7 @@
                     ✓
                   </div>
                   <p class="text-xs font-semibold text-ios-label">运行健康，暂无待处理告警</p>
-                  <p class="text-[11px] text-ios-tertiary">所有节点连接活跃、代理核心运行正常。</p>
+                  <p class="text-xs text-ios-tertiary">所有节点连接活跃、代理核心运行正常。</p>
                 </div>
               </section>
 
@@ -243,7 +243,7 @@
               <section class="panel-card p-5 sm:p-6 bg-white flex-1 flex flex-col justify-between space-y-4">
                 <div class="flex items-center justify-between">
                   <div>
-                    <h2 class="text-base font-bold text-ios-label tracking-tight">节点列表</h2>
+                    <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">节点列表</h2>
                     <p class="text-xs text-ios-tertiary mt-0.5">实时心跳与网络可用性监控</p>
                   </div>
                   <router-link to="/nodes" class="text-xs font-semibold text-ios-blue hover:underline">
@@ -276,7 +276,7 @@
                       <!-- Status Badge -->
                       <span
                         :class="[
-                          'text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border inline-flex items-center gap-1',
+                          'text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 border inline-flex items-center gap-1',
                           isNodeOnline(node)
                             ? 'bg-emerald-50 text-emerald-600 border-emerald-200/80'
                             : 'bg-rose-50 text-ios-red border-rose-200/80'
@@ -288,10 +288,10 @@
                     </div>
 
                     <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
-                      <span class="tabular-nums text-[11px] text-ios-tertiary truncate">
+                      <span class="tabular-nums text-xs text-ios-tertiary truncate">
                         {{ node.publicIp || node.hostname || '未分配IP' }}
                       </span>
-                      <span class="tabular-nums text-[11px] text-ios-tertiary shrink-0">
+                      <span class="tabular-nums text-xs text-ios-tertiary shrink-0">
                         {{ node.lastHeartbeat ? formatTime(node.lastHeartbeat).slice(11, 19) : '未同步' }}
                       </span>
                     </div>
@@ -306,11 +306,11 @@
                 <!-- 头部：标题与时间维度切换 (累计 / 今日) -->
                 <div class="flex items-center justify-between">
                   <div>
-                    <h2 class="text-base font-bold text-ios-label tracking-tight">节点流量</h2>
+                    <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">节点流量</h2>
                     <p class="text-xs text-ios-tertiary mt-0.5">节点吞吐与用量分布</p>
                   </div>
                   <!-- 维度切换药丸按钮 -->
-                  <div class="inline-flex rounded-lg bg-black/[0.05] p-0.5 text-[11px] font-medium select-none">
+                  <div class="inline-flex rounded-lg bg-black/[0.05] p-0.5 text-xs font-medium select-none">
                     <button
                       type="button"
                       @click="nodeTrafficPeriod = 'total'"
@@ -342,21 +342,21 @@
                 <div class="p-3.5 sm:p-4 rounded-2xl bg-[#F8F8FA] border border-black/[0.04] space-y-3">
                   <div class="flex items-center justify-between">
                     <div>
-                      <div class="text-[11px] text-ios-tertiary font-medium">
+                      <div class="text-xs text-ios-tertiary font-medium">
                         {{ nodeTrafficPeriod === 'today' ? '今日吞吐总量' : '累计吞吐总量' }}
                       </div>
-                      <div class="text-lg sm:text-xl font-bold text-ios-label tabular-nums tracking-tight mt-0.5">
+                      <div class="text-lg sm:text-xl font-bold text-ios-label tabular-nums tracking-normal mt-0.5">
                         <TrafficValue :bytes="displayTotalBytes" />
                       </div>
                     </div>
                     <div class="flex items-center gap-3 text-xs">
                       <div class="text-right">
-                        <span class="text-[10px] text-ios-tertiary block font-medium">↑ 上行</span>
+                        <span class="text-xs text-ios-tertiary block font-medium">↑ 上行</span>
                         <span class="font-semibold text-ios-label tabular-nums"><TrafficValue :bytes="displayUploadBytes" /></span>
                       </div>
                       <div class="w-px h-6 bg-black/[0.08]"></div>
                       <div class="text-right">
-                        <span class="text-[10px] text-ios-tertiary block font-medium">↓ 下行</span>
+                        <span class="text-xs text-ios-tertiary block font-medium">↓ 下行</span>
                         <span class="font-semibold text-ios-label tabular-nums"><TrafficValue :bytes="displayDownloadBytes" /></span>
                       </div>
                     </div>
@@ -379,7 +379,7 @@
                       </template>
                       <div v-else class="w-full h-full bg-black/[0.04]"></div>
                     </div>
-                    <div class="flex justify-between text-[10px] text-ios-tertiary">
+                    <div class="flex justify-between text-xs text-ios-tertiary">
                       <span class="flex items-center gap-1.5">
                         <span class="w-1.5 h-1.5 rounded-full" :class="displayTotalBytes > 0 ? 'bg-[#0071E3]' : 'bg-black/20'"></span>
                         上行 {{ displayTotalBytes > 0 ? `${uploadRatioPercent}%` : '0%' }}
@@ -396,7 +396,7 @@
                 <div class="flex-1 flex flex-col space-y-2.5">
                   <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary px-0.5">
                     <span>各节点用量排行</span>
-                    <span class="text-[11px] text-ios-tertiary font-normal">实时监控</span>
+                    <span class="text-xs text-ios-tertiary font-normal">实时监控</span>
                   </div>
 
                   <EmptyState
@@ -415,7 +415,7 @@
                         <div class="flex items-center gap-2 min-w-0">
                           <span
                             :class="[
-                              'w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center shrink-0',
+                              'w-4 h-4 rounded text-xs font-bold flex items-center justify-center shrink-0',
                               index === 0 ? 'bg-amber-100 text-amber-800' :
                               index === 1 ? 'bg-slate-200 text-slate-700' :
                               index === 2 ? 'bg-amber-50 text-amber-900 border border-amber-200/50' :
@@ -438,7 +438,7 @@
                             {{ item.node.name }}
                           </router-link>
 
-                          <span class="tabular-nums text-[10px] text-ios-tertiary truncate hidden sm:inline">
+                          <span class="tabular-nums text-xs text-ios-tertiary truncate hidden sm:inline">
                             {{ item.node.publicIp || item.node.hostname || '' }}
                           </span>
                         </div>
@@ -447,7 +447,7 @@
                           <span class="text-ios-label text-xs font-semibold tabular-nums">
                             <TrafficValue :bytes="item.traffic" />
                           </span>
-                          <span class="tabular-nums text-ios-tertiary text-[10px] w-8 text-right font-medium">
+                          <span class="tabular-nums text-ios-tertiary text-xs w-8 text-right font-medium">
                             {{ item.percent }}%
                           </span>
                         </div>
@@ -463,7 +463,7 @@
                   </div>
 
                   <!-- 底端辅助栏 -->
-                  <div class="pt-2.5 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-tertiary">
+                  <div class="pt-2.5 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-tertiary">
                     <span class="flex items-center gap-1.5">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                       已接入 {{ allNodes.length }} 个节点
@@ -489,7 +489,7 @@
             >
               <div class="flex items-center justify-between">
                 <div>
-                  <h2 class="text-base font-bold text-ios-label tracking-tight">用户用量与到期</h2>
+                  <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">用户用量与到期</h2>
                   <p class="text-xs text-ios-tertiary mt-0.5">额度使用进度与续约提醒</p>
                 </div>
                 <router-link to="/users" class="text-xs font-semibold text-ios-blue hover:underline">
@@ -509,7 +509,7 @@
                 >
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex items-center gap-2 truncate">
-                      <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-50 text-ios-blue border border-blue-200/60 shrink-0">
+                      <span class="text-xs font-semibold px-1.5 py-0.5 rounded-md bg-blue-50 text-ios-blue border border-blue-200/60 shrink-0">
                         账户
                       </span>
                       <span class="font-semibold text-ios-label truncate">
@@ -519,7 +519,7 @@
 
                     <span
                       :class="[
-                        'text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0',
+                        'text-xs font-medium px-2 py-0.5 rounded-full shrink-0',
                         getUserExpiryBadgeClass(u)
                       ]"
                     >
@@ -529,7 +529,7 @@
 
                   <!-- Quota progress bar -->
                   <div class="space-y-1">
-                    <div class="flex items-center justify-between text-[11px] text-ios-tertiary">
+                    <div class="flex items-center justify-between text-xs text-ios-tertiary">
                       <span>已用: <TrafficValue :bytes="u.usedTraffic" /></span>
                       <span>{{ u.trafficLimit > 0 ? `配额: ${formatGiB(u.trafficLimit)}` : '不限限额' }}</span>
                     </div>
@@ -549,7 +549,7 @@
             <section v-if="isOwner" class="panel-card p-5 sm:p-6 bg-white h-full flex flex-col justify-between space-y-4">
               <div class="flex items-center justify-between">
                 <div>
-                  <h2 class="text-base font-bold text-ios-label tracking-tight">近期访问审计</h2>
+                  <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">近期访问审计</h2>
                   <p class="text-xs text-ios-tertiary mt-0.5">最近转发请求与拦截事件</p>
                 </div>
                 <router-link to="/access" class="text-xs font-semibold text-ios-blue hover:underline">
@@ -584,21 +584,21 @@
                     <div class="flex items-center gap-1.5">
                       <span
                         :class="[
-                          'text-[9px] font-semibold px-1 py-0.2 rounded shrink-0',
+                          'text-xs font-semibold px-1 py-0.2 rounded shrink-0',
                           item.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-ios-red font-bold'
                         ]"
                       >
                         {{ item.allowed ? '通过' : '阻断' }}
                       </span>
-                      <p class="tabular-nums text-ios-label truncate font-medium text-[11px]">
+                      <p class="tabular-nums text-ios-label truncate font-medium text-xs">
                         {{ item.domain || item.targetIp }}
                       </p>
                     </div>
-                    <p class="text-[10px] text-ios-tertiary truncate mt-0.5">
+                    <p class="text-xs text-ios-tertiary truncate mt-0.5">
                       {{ item.userName || '匿名' }} · {{ item.nodeName }}
                     </p>
                   </div>
-                  <span class="text-[10px] tabular-nums text-ios-quaternary shrink-0">
+                  <span class="text-xs tabular-nums text-ios-quaternary shrink-0">
                     {{ formatTime(item.time).slice(11, 19) }}
                   </span>
                 </div>

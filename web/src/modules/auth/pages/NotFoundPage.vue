@@ -6,8 +6,8 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       </div>
-      <h1 class="text-4xl font-extrabold text-[#1C1C1E] tracking-tight font-mono">404</h1>
-      <h2 class="text-base font-bold text-[#1C1C1E]">目标页面不存在</h2>
+      <h1 class="text-4xl font-extrabold text-[#1C1C1E] tracking-normal font-mono">404</h1>
+      <h2 class="text-[#1C1C1E] text-base font-semibold leading-normal">目标页面不存在</h2>
       <p class="text-xs text-[#8E8E93] leading-relaxed">
         您所请求的页面路径可能已被移动、更名或暂时下线。
       </p>

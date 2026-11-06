@@ -92,7 +92,7 @@
 
             <!-- Live Status Indicator -->
             <div
-              class="px-1.5 py-0.5 flex items-center gap-1.5 text-[11px] font-medium shrink-0 cursor-default"
+              class="px-1.5 py-0.5 flex items-center gap-1.5 text-xs font-medium shrink-0 cursor-default"
               :title="!currentScheme.published ? '当前方案为草稿（未发布）' : (currentScheme.hasUnpublishedChanges ? '当前方案有未发布的修改' : '当前方案已发布生效')"
             >
               <span
@@ -137,7 +137,7 @@
             >
               <!-- Popover Header -->
               <div class="px-3 py-2 flex items-center justify-between">
-                <span class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+                <span class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
                   中转方案 ({{ proxyNodeStore.schemes.length }})
                 </span>
                 <button
@@ -168,10 +168,10 @@
                         {{ s.name }}
                       </span>
                     </div>
-                    <div class="text-[11px] text-neutral-400 flex items-center gap-2 mt-0.5 font-normal">
+                    <div class="text-xs text-neutral-400 flex items-center gap-2 mt-0.5 font-normal">
                       <span>{{ s.nodes?.length || 0 }} 节点 · {{ s.connections?.length || 0 }} 连接</span>
                       <span>·</span>
-                      <span class="px-1 py-0.2 rounded bg-black/[0.04] text-[10px] text-neutral-500">
+                      <span class="px-1 py-0.2 rounded bg-black/[0.04] text-xs text-neutral-500">
                         {{ s.executionLocation === 'client' ? '客户端' : '服务端' }}
                       </span>
                     </div>
@@ -180,7 +180,7 @@
                   <!-- Right: Status Pill & Checkmark -->
                   <div class="flex items-center gap-2 shrink-0">
                     <span
-                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium"
                       :class="!s.published ? 'bg-neutral-100 text-neutral-500' : (s.hasUnpublishedChanges ? 'bg-amber-50 text-amber-700 border border-amber-200/50' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/50')"
                     >
                       <span
@@ -257,7 +257,7 @@
         <!-- Local migration notice -->
         <div
           v-if="pendingLocalSchemes.length"
-          class="hidden 2xl:flex items-center gap-1.5 px-2 py-0.5 rounded-xl bg-amber-50 border border-amber-200/70 text-[11px] text-amber-800 shrink-0"
+          class="hidden 2xl:flex items-center gap-1.5 px-2 py-0.5 rounded-xl bg-amber-50 border border-amber-200/70 text-xs text-amber-800 shrink-0"
         >
           <span>发现本地方案 {{ pendingLocalSchemes.length }} 个</span>
           <button type="button" @click="importLocalSchemes" class="font-bold text-amber-900 hover:underline">导入</button>
@@ -272,7 +272,7 @@
         <button
           type="button"
           @click="validateScheme"
-          class="ios-btn-secondary !py-1 !min-w-0 !px-2 sm:!min-w-[4.5rem] sm:!px-5 text-xs inline-flex items-center gap-1"
+          class="ios-btn-secondary !py-1 !min-w-0 !px-2 sm:!min-w-[4.5rem] sm:!px-5 inline-flex items-center gap-1"
           title="校验链路"
           aria-label="校验链路"
         >
@@ -286,7 +286,7 @@
         <button
           type="button"
           @click="saveDraft"
-          class="ios-btn-secondary !py-1 !min-w-0 !px-2 sm:!min-w-[4.5rem] sm:!px-5 text-xs inline-flex items-center gap-1"
+          class="ios-btn-secondary !py-1 !min-w-0 !px-2 sm:!min-w-[4.5rem] sm:!px-5 inline-flex items-center gap-1"
           title="保存草稿"
           aria-label="保存草稿"
         >
@@ -301,7 +301,7 @@
              room for the scheme name. The plain wrapper decides the visibility, because
              the global .ios-btn-secondary display rule outranks Tailwind's .hidden. -->
         <span class="hidden 2xl:inline">
-          <button type="button" class="ios-btn-secondary !py-1 text-xs" @click="checkScheme">检查</button>
+          <button type="button" class="ios-btn-secondary !py-1" @click="checkScheme">检查</button>
         </span>
 
         <!-- Primary Action: Generate Sub or Publish to Server -->
@@ -309,7 +309,7 @@
           v-if="currentScheme.executionLocation === 'client'"
           type="button"
           @click="openPublishModal = true"
-          class="ios-btn-primary !py-1 text-xs inline-flex items-center gap-1 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
+          class="ios-btn-primary !py-1 inline-flex items-center gap-1 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
         >
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -320,7 +320,7 @@
           v-else
           type="button"
           @click="openPublishModal = true"
-          class="ios-btn-primary !py-1 text-xs inline-flex items-center gap-1 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
+          class="ios-btn-primary !py-1 inline-flex items-center gap-1 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
         >
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -375,12 +375,12 @@
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1.5">
               <span class="font-bold text-xs text-ios-label">拓扑资源库</span>
-              <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-black/[0.05] text-ios-secondary font-mono">
+              <span class="px-1.5 py-0.2 rounded-full text-xs bg-black/[0.05] text-ios-secondary font-mono">
                 {{ filteredServers.length + selfHostedNodes.length + subscriptionNodes.length + manualNodes.length }}
               </span>
             </div>
             <div class="flex items-center gap-1">
-              <span class="text-[10px] text-ios-tertiary">拖拽上画布</span>
+              <span class="text-xs text-ios-tertiary">拖拽上画布</span>
               <button
                 type="button"
                 @click="leftPanelOpen = false"
@@ -400,7 +400,7 @@
             <input
               v-model="resourceSearch"
               placeholder="搜索服务器或代理节点…"
-              class="w-full pl-8 pr-2.5 py-1.5 bg-[#F5F5F7] rounded-xl text-xs text-ios-label placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-ios-blue"
+              class="w-full pl-8 pr-2.5 py-1.5 bg-[#F5F5F7] rounded-xl text-ios-label placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-ios-blue text-sm"
             />
           </div>
         </div>
@@ -420,7 +420,7 @@
                 </svg>
                 <span>我的服务器</span>
               </div>
-              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
+              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-xs text-ios-secondary">
                 {{ filteredServers.length }}
               </span>
             </button>
@@ -439,7 +439,7 @@
                   <span class="font-semibold text-ios-label truncate max-w-[150px]">{{ srv.name }}</span>
                   <span class="w-1.5 h-1.5 rounded-full" :class="srv.status === 'online' ? 'bg-emerald-500' : 'bg-neutral-400'"></span>
                 </div>
-                <div class="flex items-center justify-between text-[10px] text-ios-tertiary mt-0.5">
+                <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate">{{ srv.publicIp || srv.hostname || '未分配 IP' }}</span>
                   <span class="text-ios-blue font-medium">Agent 部署</span>
                 </div>
@@ -460,17 +460,17 @@
                 </svg>
                 <span>我的自建节点</span>
               </div>
-              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
+              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-xs text-ios-secondary">
                 {{ selfHostedNodes.length }}
               </span>
             </button>
 
             <div v-show="groupExpanded.selfHosted" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
-              <div v-if="!selfHostedNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary leading-relaxed">
+              <div v-if="!selfHostedNodes.length" class="p-2.5 text-center text-xs text-ios-tertiary leading-relaxed">
                 暂无自建节点<br/>
                 请先在「节点配置」中为服务器添加入站
               </div>
-              <p v-else class="px-1.5 pt-1 text-[10px] text-ios-tertiary leading-relaxed">
+              <p v-else class="px-1.5 pt-1 text-xs text-ios-tertiary leading-relaxed">
                 {{ currentScheme.executionLocation === 'server'
                   ? '自建入站是所在服务器的入口入站：拖入后会绑定该入站，连线仍需使用「我的服务器」中的服务器节点。'
                   : '自建入站作为客户端链的一跳：拖入后可与其他入站或导入节点依次连线。' }}
@@ -486,9 +486,9 @@
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[140px]">{{ node.name }}</span>
-                  <span class="px-1 py-0.2 rounded text-[9px] font-mono uppercase bg-black/[0.05]">{{ node.protocol }}</span>
+                  <span class="px-1 py-0.2 rounded text-xs font-mono uppercase bg-black/[0.05]">{{ node.protocol }}</span>
                 </div>
-                <div class="flex items-center justify-between text-[10px] text-ios-tertiary mt-0.5">
+                <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate">{{ node.server }}:{{ node.port }}</span>
                   <span :class="node.status === 'online' ? 'text-emerald-600' : 'text-neutral-400'">
                     {{ node.status === 'online' ? '在线' : (node.enabled ? '未检测' : '已停用') }}
@@ -511,13 +511,13 @@
                 </svg>
                 <span>机场导入节点</span>
               </div>
-              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
+              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-xs text-ios-secondary">
                 {{ subscriptionNodes.length }}
               </span>
             </button>
 
             <div v-show="groupExpanded.subscription" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
-              <div v-if="!subscriptionNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary">
+              <div v-if="!subscriptionNodes.length" class="p-2.5 text-center text-xs text-ios-tertiary">
                 暂无机场订阅节点
               </div>
               <div
@@ -530,9 +530,9 @@
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[140px]">{{ node.name }}</span>
-                  <span class="px-1 py-0.2 rounded text-[9px] font-mono uppercase bg-purple-100 text-purple-700">{{ node.protocol }}</span>
+                  <span class="px-1 py-0.2 rounded text-xs font-mono uppercase bg-purple-100 text-purple-700">{{ node.protocol }}</span>
                 </div>
-                <div class="flex items-center justify-between text-[10px] text-ios-tertiary mt-0.5">
+                <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="truncate">{{ node.sourceName }}</span>
                   <span :class="node.status === 'online' ? 'text-emerald-600' : 'text-neutral-400'">
                     {{ node.status === 'online' ? '在线' : '未检测' }}
@@ -555,13 +555,13 @@
                 </svg>
                 <span>单独导入节点</span>
               </div>
-              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-[10px] text-ios-secondary">
+              <span class="px-1.5 py-0.2 rounded-full bg-black/[0.05] text-xs text-ios-secondary">
                 {{ manualNodes.length }}
               </span>
             </button>
 
             <div v-show="groupExpanded.manual" class="p-1 space-y-1 border-t border-black/[0.04] bg-white">
-              <div v-if="!manualNodes.length" class="p-2.5 text-center text-[10px] text-ios-tertiary">
+              <div v-if="!manualNodes.length" class="p-2.5 text-center text-xs text-ios-tertiary">
                 暂无单独导入节点
               </div>
               <div
@@ -574,9 +574,9 @@
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[140px]">{{ node.name }}</span>
-                  <span class="px-1 py-0.2 rounded text-[9px] font-mono uppercase bg-blue-100 text-ios-blue">{{ node.protocol }}</span>
+                  <span class="px-1 py-0.2 rounded text-xs font-mono uppercase bg-blue-100 text-ios-blue">{{ node.protocol }}</span>
                 </div>
-                <div class="flex items-center justify-between text-[10px] text-ios-tertiary mt-0.5">
+                <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate">{{ node.server }}:{{ node.port }}</span>
                   <span :class="node.status === 'online' ? 'text-emerald-600' : 'text-neutral-400'">
                     {{ node.status === 'online' ? '在线' : '未检测' }}
@@ -715,13 +715,13 @@
             <!-- Card Header -->
             <div class="flex items-center justify-between gap-1 mb-1.5">
               <span
-                class="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider"
+                class="px-1.5 py-0.2 rounded text-xs font-bold uppercase tracking-wider"
                 :class="item.isManageable ? 'bg-blue-100 text-ios-blue' : 'bg-purple-100 text-purple-700'"
               >
                 {{ item.isManageable ? '服务器' : '代理节点' }}
               </span>
               <span
-                class="px-1.5 py-0.2 rounded-full text-[10px] font-bold"
+                class="px-1.5 py-0.2 rounded-full text-xs font-bold"
                 :class="roleBadgeClass(item.role)"
               >
                 {{ roleBadgeText(item.role) }}
@@ -733,10 +733,10 @@
               <div class="font-bold text-xs text-ios-label truncate" :title="item.name">
                 {{ item.name }}
               </div>
-              <div class="text-[10px] font-mono text-ios-secondary truncate">
+              <div class="text-xs font-mono text-ios-secondary truncate">
                 {{ item.serverAddress }}
               </div>
-              <div v-if="item.listenPort" class="text-[10px] font-mono text-ios-blue">
+              <div v-if="item.listenPort" class="text-xs font-mono text-ios-blue">
                 监听端口: {{ item.listenPort }}
               </div>
             </div>
@@ -786,7 +786,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
             </svg>
           </button>
-          <span class="text-[11px] font-mono font-bold text-ios-label px-1">
+          <span class="text-xs font-mono font-bold text-ios-label px-1">
             {{ Math.round(zoom * 100) }}%
           </span>
           <button
@@ -802,7 +802,7 @@
           <button
             type="button"
             @click="resetView"
-            class="px-2 py-1 rounded-xl hover:bg-black/5 text-[11px] font-medium text-ios-secondary hover:text-ios-label transition-colors"
+            class="px-2 py-1 rounded-xl hover:bg-black/5 text-xs font-medium text-ios-secondary hover:text-ios-label transition-colors"
             title="重置视角"
           >
             居中
@@ -815,7 +815,7 @@
              full studio width again (from sm up); at xl–2xl both panels are docked and
              a ~400 px canvas cannot fit both, so the hint stays away and the zoom
              controls are never covered. max-w keeps the last line clear of the pill. -->
-        <div class="hidden sm:flex xl:hidden 2xl:flex absolute bottom-4 left-4 max-w-[calc(100%-12rem)] bg-black/70 backdrop-blur-md text-white text-[11px] px-3 py-1.5 rounded-xl pointer-events-none z-10 items-center gap-2">
+        <div class="hidden sm:flex xl:hidden 2xl:flex absolute bottom-4 left-4 max-w-[calc(100%-12rem)] bg-black/70 backdrop-blur-md text-white text-xs px-3 py-1.5 rounded-xl pointer-events-none z-10 items-center gap-2">
           <span>💡 提示：从绿色右锚点拖出连线连接到蓝色左锚点，箭头表示流量流动方向。</span>
         </div>
 
@@ -835,11 +835,11 @@
             <span class="w-5 h-5 rounded-md flex items-center justify-center text-xs" :class="selectedNode ? 'bg-ios-blue/10 text-ios-blue' : 'bg-black/[0.05] text-ios-secondary'">
               {{ selectedNode ? '⚙️' : '📋' }}
             </span>
-            <h3 class="font-bold text-xs text-ios-label">
+            <h3 class="text-ios-label text-base font-semibold leading-normal">
               {{ selectedNode ? '节点属性配置' : '方案全局概况' }}
             </h3>
             <span
-              class="px-1.5 py-0.2 rounded-full text-[10px] font-semibold"
+              class="px-1.5 py-0.2 rounded-full text-xs font-semibold"
               :class="selectedNode ? 'bg-blue-100 text-ios-blue' : 'bg-black/[0.05] text-ios-secondary'"
             >
               {{ selectedNode ? (selectedNode.isManageable ? '服务器' : '代理节点') : '全局' }}
@@ -864,7 +864,7 @@
           <div class="space-y-3 text-xs">
             <label class="block">
               <span class="font-medium text-ios-secondary">实例名称（来自节点，只读）</span>
-              <input :value="selectedNode.name" readonly class="form-input-base text-xs mt-1" />
+              <input :value="selectedNode.name" readonly class="form-input-base mt-1" />
             </label>
 
             <div class="p-2.5 bg-[#F5F5F7] rounded-xl space-y-1">
@@ -880,7 +880,7 @@
 
             <label class="block">
               <span class="font-medium text-ios-secondary">链路角色</span>
-              <select v-model="selectedNode.role" :disabled="selectedNode.resourceId.startsWith('outbound:')" @change="saveDraft" class="form-input-base text-xs mt-1">
+              <select v-model="selectedNode.role" :disabled="selectedNode.resourceId.startsWith('outbound:')" @change="saveDraft" class="form-input-base mt-1">
                 <option value="entry">入口节点 (Entry)</option>
                 <option value="relay">中转跳点 (Relay)</option>
                 <option value="exit">出口节点 (Exit)</option>
@@ -890,7 +890,7 @@
             <div v-if="selectedNode.resourceType === 'server' && selectedNode.role !== 'entry'" class="space-y-2 pt-2 border-t border-ios-separator">
               <PortControl :key="selectedNode.instanceId" :node-id="selectedNode.resourceId" :mode="selectedNode.relayPortMode || 'auto'" :port="selectedNode.relayPort" label="内部中转端口" page :owner="{ kind: 'canvas', id: currentScheme.id }" @update:mode="value => { selectedNode!.relayPortMode = value; saveDraft(); }" @update:port="value => { selectedNode!.relayPort = value; saveDraft(); }" />
             </div>
-            <div v-else-if="!selectedNode.isManageable" class="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/60 text-amber-800 text-[11px] leading-relaxed">
+            <div v-else-if="!selectedNode.isManageable" class="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/60 text-amber-800 text-xs leading-relaxed">
               ⚠️ 提示：外部导入节点只能作为代理链终点或出站跳，无法部署 Agent 安装转发服务。
             </div>
 
@@ -911,14 +911,14 @@
           <div v-else-if="schemesLoading || schemesLoadError" role="status">
             {{ schemesLoadError || '正在载入中转方案…' }}
           </div>
-          <div v-else-if="!currentScheme.id" class="p-4 rounded-xl bg-black/[0.02] border border-dashed border-black/[0.08] text-[11px] text-ios-tertiary leading-relaxed">
+          <div v-else-if="!currentScheme.id" class="p-4 rounded-xl bg-black/[0.02] border border-dashed border-black/[0.08] text-xs text-ios-tertiary leading-relaxed">
             暂无中转方案：请先点击「新建方案」。方案名称、发布状态与删除操作只对已存在的方案生效。
           </div>
           <div v-else class="space-y-4">
           <div class="space-y-3 text-xs">
             <label class="block">
               <span class="font-medium text-ios-secondary">方案名称</span>
-              <input v-model="currentScheme.name" @change="saveDraft" class="form-input-base text-xs mt-1" />
+              <input v-model="currentScheme.name" @change="saveDraft" class="form-input-base mt-1" />
             </label>
 
             <div class="p-3 bg-[#F5F5F7] rounded-xl space-y-2">
@@ -948,18 +948,18 @@
             </div>
 
             <div v-if="publishResult && publishResult.nodes.length" class="p-2.5 rounded-xl bg-neutral-50 border border-black/[0.06] space-y-1">
-              <div class="flex justify-between text-[11px] text-ios-tertiary">
+              <div class="flex justify-between text-xs text-ios-tertiary">
                 <span>最近一次发布</span>
                 <span class="font-mono">{{ publishResult.batchId ? `批次 ${publishResult.batchId.slice(0, 8)}` : '单节点修订' }}</span>
               </div>
-              <div v-for="node in publishResult.nodes" :key="node.nodeId" class="flex justify-between text-[11px]">
+              <div v-for="node in publishResult.nodes" :key="node.nodeId" class="flex justify-between text-xs">
                 <span class="text-ios-label font-medium">{{ node.name || node.nodeId }}</span>
                 <span class="font-mono text-ios-secondary">#{{ node.revision }} · {{ publishStatusLabel(node.status) }}</span>
               </div>
-              <div v-if="publishResult.warnings.length" class="text-amber-600 text-[11px]">{{ publishResult.warnings.join('；') }}</div>
+              <div v-if="publishResult.warnings.length" class="text-amber-600 text-xs">{{ publishResult.warnings.join('；') }}</div>
             </div>
 
-            <div class="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200/60 text-ios-blue text-[11px] leading-relaxed">
+            <div class="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200/60 text-ios-blue text-xs leading-relaxed">
               💡 提示：点击画布中的任意节点或连线可在本面板编辑详细属性；从左侧将服务器或代理节点拖入即可快速扩展链路。
             </div>
 
@@ -1020,12 +1020,12 @@
         <div v-if="currentScheme.executionLocation === 'client'" class="space-y-3">
           <div class="flex items-center gap-2">
             <span class="text-ios-tertiary font-medium">客户端格式:</span>
-            <select v-model="currentScheme.clientType" class="form-input-base text-xs !w-auto">
+            <select v-model="currentScheme.clientType" class="form-input-base !w-auto">
               <option value="clash">Clash / Clash Verge (Meta / Mihomo)</option>
             </select>
           </div>
 
-          <div class="p-3 bg-[#F5F5F7] rounded-xl font-mono text-[11px] break-all border border-black/[0.04]">
+          <div class="p-3 bg-[#F5F5F7] rounded-xl font-mono text-xs break-all border border-black/[0.04]">
             发布后加入已授权用户的 mihomo 订阅，其他格式会省略客户端链。
           </div>
 
@@ -1038,14 +1038,14 @@
           <p class="text-ios-label font-medium">
             即将通过各节点部署的 Agent 自动编译下发 Sing-box / WireGuard 隧道与中转核心配置。
           </p>
-          <div class="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl space-y-1 text-ios-blue text-[11px]">
+          <div class="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl space-y-1 text-ios-blue text-xs">
             <div>• 目标管理服务器: {{ currentScheme.nodes.filter(n => n.isManageable).length }} 台</div>
             <div>• 本方案连线: {{ currentTunnels.length }} 条</div>
           </div>
           <div class="p-3 bg-[#F5F5F7] rounded-xl space-y-1.5">
             <div class="flex items-center justify-between">
               <span class="text-ios-secondary font-medium">发布前检查</span>
-              <button type="button" class="ios-btn-secondary !py-0.5 !text-[11px]" :disabled="checking" @click="runPlan">
+              <button type="button" class="ios-btn-secondary !py-0.5" :disabled="checking" @click="runPlan">
                 {{ checking ? '检查中…' : '重新检查' }}
               </button>
             </div>

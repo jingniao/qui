@@ -2,7 +2,7 @@
   <div
     ref="containerRef"
     :class="[
-      'relative text-xs',
+      'relative text-sm',
       isOpen ? 'z-40' : 'z-auto',
       disabled ? 'opacity-50 pointer-events-none' : ''
     ]"
@@ -18,7 +18,7 @@
       @keydown.esc.prevent="closeDropdown"
       :class="[
         'w-full text-left rounded-xl border bg-white font-medium text-neutral-800 flex items-center justify-between cursor-pointer transition-all focus:outline-none shadow-2xs select-none',
-        size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3 py-2 text-xs',
+        size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3 py-2 text-sm',
         isOpen
           ? 'border-ios-blue ring-2 ring-ios-blue/20 bg-white'
           : 'border-black/[0.12] hover:border-black/[0.22] hover:bg-black/[0.01]',
@@ -32,7 +32,7 @@
         </span>
         <span
           v-if="selectedOption?.badge"
-          class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-ios-blue border border-blue-100/60 shrink-0"
+          class="px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-50 text-ios-blue border border-blue-100/60 shrink-0"
         >
           {{ selectedOption.badge }}
         </span>
@@ -74,7 +74,7 @@
           <!-- 分组标题 (Group Header) -->
           <div
             v-if="option.group && (idx === 0 || normalizedOptions[idx - 1].group !== option.group)"
-            class="px-3 pt-2 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider select-none border-t border-black/[0.04] first:border-0 first:pt-1"
+            class="px-3 pt-2 pb-1 text-xs font-bold text-neutral-400 uppercase tracking-wider select-none border-t border-black/[0.04] first:border-0 first:pt-1"
           >
             {{ option.group }}
           </div>
@@ -98,12 +98,12 @@
                 <span class="font-medium truncate">{{ option.label }}</span>
                 <span
                   v-if="option.badge"
-                  class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100/60 text-ios-blue shrink-0"
+                  class="px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100/60 text-ios-blue shrink-0"
                 >
                   {{ option.badge }}
                 </span>
               </div>
-              <p v-if="option.desc" class="text-[11px] text-neutral-400 mt-0.5 font-normal leading-relaxed">
+              <p v-if="option.desc" class="text-xs text-neutral-400 mt-0.5 font-normal leading-relaxed">
                 {{ option.desc }}
               </p>
             </div>

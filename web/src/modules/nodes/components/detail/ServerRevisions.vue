@@ -1,6 +1,6 @@
 <template>
   <section class="panel-card p-6 space-y-4">
-    <h2 class="font-semibold text-ios-label">配置版本</h2>
+    <h2 class="text-ios-label text-base font-semibold leading-normal">配置版本</h2>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="text-sm text-ios-label">运行中 {{ strip.running ? '#' + strip.running : '—' }} · 最新 {{ strip.latest ? '#' + strip.latest : '—' }} {{ strip.state === 'latest' ? '✓' : strip.state === 'unapplied' ? '⚠ 未应用' : '（尚无版本信息）' }}</p>
       <button v-if="isOwner && !node.deletedAt" class="ios-btn-primary" :disabled="busy" @click="publishCurrent">发布配置</button>

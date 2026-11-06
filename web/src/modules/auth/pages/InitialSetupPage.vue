@@ -1,7 +1,7 @@
 <template>
   <main class="min-h-screen bg-[#F2F2F7] flex items-center justify-center p-4">
     <section class="panel-card w-full max-w-lg p-8 space-y-6">
-      <div><h1 class="text-xl font-bold">初始化 Proxy Control</h1><p class="text-sm text-[#8E8E93] mt-2">创建唯一的 Owner，并设置平台名称与时区。</p></div>
+      <div><h1 class="text-xl font-bold leading-snug">初始化 Proxy Control</h1><p class="text-sm text-[#8E8E93] mt-2">创建唯一的 Owner，并设置平台名称与时区。</p></div>
       <p class="text-xs text-[#8E8E93]">首次启动时，面板会在日志中打印一次性安装令牌，并写入数据目录下的 setup-token 文件。请粘贴该令牌以完成初始化。</p>
       <p v-if="error" role="alert" class="p-3 rounded-xl bg-red-50 text-red-700 text-sm">{{ error }}</p>
       <form @submit.prevent="submit" class="space-y-4">

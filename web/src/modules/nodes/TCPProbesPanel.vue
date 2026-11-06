@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <h2 class="font-semibold text-ios-label">线路检测</h2>
+    <h2 class="text-ios-label text-base font-semibold leading-normal">线路检测</h2>
     <p class="text-xs text-ios-secondary">手动检测接口未提供平均耗时与检测时间时显示“—” ，中位数见历史。由服务器连接指定目标。TCP 失败比例不代表 ICMP 或 UDP 丢包；每目标保留最近 100 次手动检测记录。</p>
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
     <p v-if="!isOwner" class="text-sm text-ios-secondary">当前权限无法读取或管理探测目标，请联系 Owner。</p>

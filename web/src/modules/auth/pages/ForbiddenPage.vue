@@ -6,8 +6,8 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
         </svg>
       </div>
-      <h1 class="text-4xl font-extrabold text-[#1C1C1E] tracking-tight font-mono">403</h1>
-      <h2 class="text-base font-bold text-[#1C1C1E]">访问权限受限</h2>
+      <h1 class="text-4xl font-extrabold text-[#1C1C1E] tracking-normal font-mono">403</h1>
+      <h2 class="text-[#1C1C1E] text-base font-semibold leading-normal">访问权限受限</h2>
       <p class="text-xs text-[#8E8E93] leading-relaxed">
         您当前的身份角色没有权限访问此模块或执行该敏感操作。请联系系统所有者 (Owner) 获取更高管理权限。
       </p>

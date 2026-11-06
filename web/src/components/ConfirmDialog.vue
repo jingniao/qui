@@ -22,7 +22,7 @@
               </svg>
             </div>
             <div class="flex-1">
-              <h3 class="text-base font-semibold text-ios-label tracking-tight">{{ title }}</h3>
+              <h3 class="text-ios-label tracking-normal text-lg font-semibold leading-snug">{{ title }}</h3>
               <p class="text-sm text-ios-secondary mt-1 leading-relaxed">{{ message }}</p>
               <div v-if="warningDetails" class="mt-2.5 p-2.5 rounded-xl bg-ios-red/[0.08] text-ios-red text-xs border border-ios-red/15">
                 {{ warningDetails }}

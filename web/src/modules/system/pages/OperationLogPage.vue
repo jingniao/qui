@@ -52,7 +52,7 @@
           <td>
             <span
               :class="[
-                'px-2 py-0.5 rounded-full text-[11px] font-semibold border',
+                'px-2 py-0.5 rounded-full text-xs font-semibold border',
                 operation.result === 'success' || operation.result === '成功'
                   ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                   : 'bg-rose-50 text-rose-800 border-rose-200'

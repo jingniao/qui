@@ -1,6 +1,6 @@
 <template>
   <div class="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950 font-mono text-xs text-slate-200">
-    <div class="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800 text-[11px] text-slate-400">
+    <div class="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs text-slate-400">
       <span>{{ title || '配置内容' }}</span>
       <button
         @click="copyCode"

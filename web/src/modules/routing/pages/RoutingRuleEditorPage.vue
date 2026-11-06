@@ -18,7 +18,7 @@
     <form v-else @submit.prevent="save" class="space-y-6">
       <!-- 1. 基础信息 -->
       <section class="panel-card p-6">
-        <h2 class="font-semibold mb-4">基础信息</h2>
+        <h2 class="mb-4 text-base font-semibold leading-normal">基础信息</h2>
         <div class="grid md:grid-cols-2 gap-4">
           <label class="text-sm">
             策略名称
@@ -37,7 +37,7 @@
 
       <!-- 2. 生效范围 -->
       <section class="panel-card p-6">
-        <h2 class="font-semibold mb-1">生效范围 (Scope)</h2>
+        <h2 class="mb-1 text-base font-semibold leading-normal">生效范围 (Scope)</h2>
         <p class="text-xs text-neutral-500 mb-4">未勾选的项目表示适用于全部；多类别共同约束入站流量。</p>
         <div class="grid md:grid-cols-2 gap-6">
           <fieldset>
@@ -77,7 +77,7 @@
 
       <!-- 3. 地址与服务规则集匹配 -->
       <section class="panel-card p-6">
-        <h2 class="font-semibold mb-1">地址与规则集匹配 (Match)</h2>
+        <h2 class="mb-1 text-base font-semibold leading-normal">地址与规则集匹配 (Match)</h2>
         <p class="text-xs text-neutral-500 mb-4">
           域名、后缀、IP/CIDR 与引用的统一规则集作为目标匹配条件，任一命中即可触发。<br />
           注意：IP / CIDR 仅匹配流量中的字面 IP 地址，不发起 DNS 解析，也不将域名解析为 IP 后二次匹配。
@@ -129,7 +129,7 @@
 
       <!-- 4. 端口、网络与时间 -->
       <section class="panel-card p-6">
-        <h2 class="font-semibold mb-4">端口、网络与生效时间</h2>
+        <h2 class="mb-4 text-base font-semibold leading-normal">端口、网络与生效时间</h2>
         <div class="grid md:grid-cols-2 gap-4">
           <label class="text-sm">
             端口或范围（逗号分隔）
@@ -157,7 +157,7 @@
 
       <!-- 5. 服务器端执行动作 (Action) -->
       <section class="panel-card p-6">
-        <h2 class="font-semibold mb-1">服务器端执行动作 (Action)</h2>
+        <h2 class="mb-1 text-base font-semibold leading-normal">服务器端执行动作 (Action)</h2>
         <p class="text-xs text-neutral-500 mb-4">
           注意：<strong>服务器直连 (Direct)</strong> 指由服务器端出口直接发起访问，不等于用户设备本地直连。
         </p>
@@ -207,7 +207,7 @@
 
       <!-- 6. 失败容灾处理 -->
       <section v-if="!['Direct', 'Block'].includes(form.action.type)" class="panel-card p-6 space-y-4">
-        <h2 class="font-semibold">失败容灾处理</h2>
+        <h2 class="text-base font-semibold leading-normal">失败容灾处理</h2>
         <div class="grid md:grid-cols-2 gap-4">
           <label class="block text-sm">
             目标不可用时
@@ -233,7 +233,7 @@
 
       <!-- 7. 审计与备注 -->
       <section class="panel-card p-6">
-        <h2 class="font-semibold mb-4">记录与备注</h2>
+        <h2 class="mb-4 text-base font-semibold leading-normal">记录与备注</h2>
         <div class="flex flex-wrap gap-5 text-sm">
           <label class="inline-flex items-center gap-2">
             <input v-model="form.logging.log_domain" type="checkbox" />

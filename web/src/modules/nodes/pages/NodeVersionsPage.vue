@@ -10,7 +10,7 @@
           v-if="isOwner"
           type="button"
           @click="triggerUpgradeAll"
-          class="ios-btn-primary inline-flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,113,227,0.28)] text-xs py-2 px-3.5"
+          class="ios-btn-primary inline-flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,113,227,0.28)] py-2 px-3.5"
           :title="currentTab === 'cores' ? '全部升级在线服务器的代理核心' : '全部升级在线服务器的 Agent 到最新版本'"
         >
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

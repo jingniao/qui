@@ -1,7 +1,7 @@
 <template>
   <main class="min-h-screen bg-[#F8F8FA] flex items-center justify-center p-6">
     <form class="panel-card p-6 space-y-5 w-full max-w-sm" @submit.prevent="login">
-      <h1 class="text-xl font-semibold text-ios-label">用户登录</h1>
+      <h1 class="text-ios-label text-xl font-bold leading-snug">用户登录</h1>
       <label class="block text-sm">用户名<input v-model="username" autocomplete="username" required class="form-input-base mt-2" /></label>
       <label class="block text-sm">密码<input v-model="password" type="password" autocomplete="current-password" required class="form-input-base mt-2" /></label>
       <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>

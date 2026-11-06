@@ -13,23 +13,23 @@
       <div class="space-y-2">
         <input
           v-model="keyword"
-          class="form-input-base text-xs"
+          class="form-input-base"
           placeholder="搜索节点名称、协议、端口或所属服务器/来源"
           aria-label="搜索"
         />
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <select v-model="selectedSourceType" class="form-input-base text-xs" aria-label="来源类型筛选">
+          <select v-model="selectedSourceType" class="form-input-base" aria-label="来源类型筛选">
             <option value="">全部来源类型</option>
             <option value="self_hosted">自建节点</option>
             <option value="subscription">机场导入节点</option>
             <option value="manual">单独导入节点</option>
           </select>
-          <select v-model="selectedProtocol" class="form-input-base text-xs" aria-label="协议筛选">
+          <select v-model="selectedProtocol" class="form-input-base" aria-label="协议筛选">
             <option value="">全部协议</option>
             <option v-for="proto in protocols" :key="proto" :value="proto">{{ proto.toUpperCase() }}</option>
           </select>
-          <select v-model="selectedSourceKey" class="form-input-base text-xs" aria-label="来源名称筛选">
+          <select v-model="selectedSourceKey" class="form-input-base" aria-label="来源名称筛选">
             <option value="">全部服务器/来源</option>
             <option v-for="src in availableSources" :key="src" :value="src">{{ src }}</option>
           </select>
@@ -80,12 +80,12 @@
                 {{ node.name }}
               </span>
               <span
-                class="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                class="px-1.5 py-0.5 rounded text-xs font-semibold"
                 :class="sourceBadgeClass(node.sourceType)"
               >
                 {{ node.sourceTypeName }}
               </span>
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-mono font-bold uppercase bg-ios-blue/10 text-ios-blue">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono font-bold uppercase bg-ios-blue/10 text-ios-blue">
                 {{ node.protocol }}
               </span>
               <span class="text-xs font-mono text-ios-secondary">

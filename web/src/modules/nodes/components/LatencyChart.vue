@@ -4,7 +4,7 @@
     <div v-if="compact" class="flex flex-wrap items-center justify-between gap-3 px-1">
       <div class="flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-        <h2 class="font-bold text-sm text-ios-label">网络质量与延迟</h2>
+        <h2 class="text-ios-label text-base font-semibold leading-normal">网络质量与延迟</h2>
         <span class="text-xs text-ios-tertiary">TCP 建连耗时中位数 · 最近 {{ currentRangeLabel }} 趋势</span>
       </div>
     </div>
@@ -13,7 +13,7 @@
     <div v-else class="flex flex-wrap items-center justify-between gap-3 px-1">
       <div class="flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-        <h2 class="font-bold text-sm text-ios-label">网络质量与延迟</h2>
+        <h2 class="text-ios-label text-base font-semibold leading-normal">网络质量与延迟</h2>
         <span class="text-xs text-ios-tertiary">全国多线 TCP 建连耗时 (非 ICMP ping) · 最近 {{ currentRangeLabel }} 趋势</span>
       </div>
 
@@ -71,7 +71,7 @@
     <template v-else>
       <div v-if="error" class="panel-card p-4 bg-white flex items-center justify-between gap-2 shadow-2xs">
         <p role="alert" class="text-sm text-ios-red">{{ error }}</p>
-        <button class="ios-btn-secondary text-xs" @click="load">重试</button>
+        <button class="ios-btn-secondary" @click="load">重试</button>
       </div>
 
       <div v-if="loading && !hasPoints" class="panel-card p-5 bg-white text-sm text-ios-secondary shadow-2xs">
@@ -117,7 +117,7 @@
                 ⓘ
               </span>
             </div>
-            <div class="flex items-center justify-between text-[10px] text-ios-tertiary px-0.5">
+            <div class="flex items-center justify-between text-xs text-ios-tertiary px-0.5">
               <span>平均延迟 · 丢包率 · 抖动</span>
             </div>
             <p class="text-xs sm:text-sm font-mono font-semibold text-ios-label tabular-nums pl-2">
@@ -169,7 +169,8 @@
           </div>
 
           <!-- SVG Chart Container matching top cards visual style -->
-          <div ref="chartContainer" class="relative w-full pt-1">
+          <div class="overflow-x-auto">
+          <div ref="chartContainer" class="relative w-full min-w-[800px] pt-1">
             <svg
               ref="svgRef"
               viewBox="0 0 800 270"
@@ -213,7 +214,7 @@
                   x="46"
                   :y="y(tick) + 3"
                   text-anchor="end"
-                  class="text-[9px] font-mono tabular-nums fill-neutral-400"
+                  class="text-xs font-mono tabular-nums fill-neutral-400"
                 >
                   {{ tick }}
                 </text>
@@ -225,7 +226,7 @@
                   :x="x(tick.at)"
                   y="260"
                   text-anchor="middle"
-                  class="text-[9px] font-mono tabular-nums fill-neutral-400"
+                  class="text-xs font-mono tabular-nums fill-neutral-400"
                 >
                   {{ tick.label }}
                 </text>
@@ -338,6 +339,8 @@
                 </div>
               </div>
             </div>
+          </div>
+
           </div>
 
           <!-- Legend at bottom: Centered ■ 上海电信 ■ 北京联通 ■ 广州移动 -->

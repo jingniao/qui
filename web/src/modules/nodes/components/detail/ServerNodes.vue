@@ -2,7 +2,7 @@
   <div class="space-y-6">
     <section class="panel-card p-6 space-y-4">
       <div class="flex justify-between gap-3">
-        <h2 class="font-semibold text-ios-label">节点（入站）</h2>
+        <h2 class="text-ios-label text-base font-semibold leading-normal">节点（入站）</h2>
         <button v-if="isOwner && !node.deletedAt" class="ios-btn-primary" @click="$emit('edit', null)">+ 新建节点</button>
       </div>
       <p v-if="unpublished && isOwner" class="text-sm text-ios-orange">有未发布的更改 · <button class="text-ios-blue" @click="$emit('publish')">发布配置</button></p>

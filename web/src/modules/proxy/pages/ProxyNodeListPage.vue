@@ -76,7 +76,7 @@
         <button class="ios-search-btn shrink-0">查询</button>
 
         <!-- Filter 1: Source -->
-        <select v-model="filterSource" @change="applyFilter" class="form-input-base !w-auto text-xs py-2">
+        <select v-model="filterSource" @change="applyFilter" class="form-input-base !w-auto py-2">
           <option value="all">全部来源</option>
           <option value="self_hosted">服务器自建</option>
           <option value="subscription">机场订阅</option>
@@ -84,7 +84,7 @@
         </select>
 
         <!-- Filter 2: Protocol -->
-        <select v-model="filterProtocol" @change="applyFilter" class="form-input-base !w-auto text-xs py-2">
+        <select v-model="filterProtocol" @change="applyFilter" class="form-input-base !w-auto py-2">
           <option value="all">全部协议</option>
           <option value="vless">VLESS</option>
           <option value="vmess">VMess</option>
@@ -98,7 +98,7 @@
         </select>
 
         <!-- Filter 3: Status -->
-        <select v-model="filterStatus" @change="applyFilter" class="form-input-base !w-auto text-xs py-2">
+        <select v-model="filterStatus" @change="applyFilter" class="form-input-base !w-auto py-2">
           <option value="all">全部状态</option>
           <option value="online">在线</option>
           <option value="untested">未检测</option>
@@ -206,11 +206,11 @@
               </span>
               <div class="min-w-0">
                 <div class="flex items-center gap-1.5">
-                  <span class="font-bold text-[15px] text-neutral-900 truncate tracking-tight" :title="node.name">
+                  <span class="font-bold text-base text-neutral-900 truncate tracking-normal" :title="node.name">
                     {{ node.name }}
                   </span>
                   <!-- Source Capsule -->
-                  <span class="px-1.5 py-0.2 rounded text-[10px] font-semibold shrink-0" :class="sourceCapsuleColor(node.sourceType)">
+                  <span class="px-1.5 py-0.2 rounded text-xs font-semibold shrink-0" :class="sourceCapsuleColor(node.sourceType)">
                     {{ node.sourceName }}
                   </span>
                 </div>
@@ -228,7 +228,7 @@
               <span class="px-2 py-0.5 rounded-lg text-xs font-mono font-semibold uppercase bg-black/[0.05] text-neutral-800">
                 {{ node.protocol }}
               </span>
-              <div class="text-[11px] text-neutral-400 font-mono">
+              <div class="text-xs text-neutral-400 font-mono">
                 {{ node.settings?.transport || 'tcp' }}{{ node.settings?.security ? ' + ' + node.settings.security : '' }}
               </div>
             </div>
@@ -271,7 +271,7 @@
               >
                 <span class="font-semibold truncate max-w-[150px]">{{ r.pathDisplay }}</span>
                 <span
-                  class="px-1 py-0.2 rounded text-[9px] font-bold shrink-0"
+                  class="px-1 py-0.2 rounded text-xs font-bold shrink-0"
                   :class="!r.published ? 'bg-neutral-100 text-neutral-600' : (r.hasUnpublishedChanges ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')"
                 >
                   {{ !r.published ? '草稿' : (r.hasUnpublishedChanges ? '未发布修改' : '已发布') }}
@@ -362,12 +362,12 @@
                 {{ getCountryInfo(node).flag }}
               </span>
               <span
-                class="font-bold text-[17px] text-neutral-900 truncate tracking-tight"
+                class="font-bold text-lg text-neutral-900 truncate tracking-normal"
                 :title="node.name"
               >
                 {{ node.name }}
               </span>
-              <span class="rounded bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase text-neutral-700 shrink-0">
+              <span class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-mono font-bold uppercase text-neutral-700 shrink-0">
                 {{ node.protocol }}
               </span>
             </div>
@@ -383,8 +383,8 @@
           </div>
 
           <!-- Row 2: Sub-info (Source · Transport · Latency) -->
-          <div class="text-[12px] text-neutral-400 font-mono tracking-tight flex items-center gap-1.5 flex-wrap">
-            <span class="px-1.5 py-0.2 rounded text-[10px] font-semibold" :class="sourceCapsuleColor(node.sourceType)">
+          <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap">
+            <span class="px-1.5 py-0.2 rounded text-xs font-semibold" :class="sourceCapsuleColor(node.sourceType)">
               {{ node.sourceName }}
             </span>
             <span class="text-neutral-300">·</span>
@@ -402,7 +402,7 @@
             </div>
             <div v-else class="bg-[#F8F9FA] rounded-xl px-3 py-1.5 border border-black/[0.03] flex items-center justify-between text-xs font-mono">
               <div class="flex items-center gap-1.5 min-w-0 truncate text-neutral-700">
-                <span class="text-neutral-400 font-sans text-[11px] shrink-0 font-medium">直连:</span>
+                <span class="text-neutral-400 font-sans text-xs shrink-0 font-medium">直连:</span>
                 <span class="truncate font-medium select-all" :title="node.server + ':' + node.port">
                   {{ node.server }}:{{ node.port }}
                 </span>
@@ -424,7 +424,7 @@
           <div class="space-y-1.5 pt-0.5">
             <div
               @click="toggleRelayCollapse(node.id, relayCount(node))"
-              class="flex items-center justify-between text-[11px] cursor-pointer hover:bg-black/[0.02] p-1 rounded-lg transition-colors select-none"
+              class="flex items-center justify-between text-xs cursor-pointer hover:bg-black/[0.02] p-1 rounded-lg transition-colors select-none"
             >
               <div class="flex items-center gap-1.5">
                 <span class="text-neutral-500 font-bold">中转线路 ({{ relayCount(node) }})</span>
@@ -434,7 +434,7 @@
                   title="方案存在未发布修改"
                 ></span>
               </div>
-              <div class="flex items-center gap-1 text-neutral-400 font-mono text-[10px]">
+              <div class="flex items-center gap-1 text-neutral-400 font-mono text-xs">
                 <span>{{ isRelayCollapsed(node.id, relayCount(node)) ? '展开' : '收起' }}</span>
                 <svg
                   class="w-3 h-3 transition-transform duration-200"
@@ -450,7 +450,7 @@
 
             <!-- Expanded Routes Content -->
             <div v-show="!isRelayCollapsed(node.id, relayCount(node))" class="space-y-1.5">
-              <div v-if="!relayCount(node)" class="bg-[#F8F9FA] rounded-xl p-2 text-center text-[11px] text-neutral-400 border border-black/[0.03]">
+              <div v-if="!relayCount(node)" class="bg-[#F8F9FA] rounded-xl p-2 text-center text-xs text-neutral-400 border border-black/[0.03]">
                 无中转线路 · 支持直连接入
               </div>
               <div
@@ -464,14 +464,14 @@
                   </div>
                   <div class="flex items-center gap-1.5 mt-0.5">
                     <span
-                      class="px-1.5 py-0.2 rounded text-[10px] font-semibold"
+                      class="px-1.5 py-0.2 rounded text-xs font-semibold"
                       :class="r.executionLocation === 'client' ? 'bg-blue-50 text-ios-blue' : 'bg-purple-50 text-purple-700'"
                     >
                       {{ r.executionLocation === 'client' ? '客户端代理链' : '服务器执行' }}
                     </span>
                     <span class="text-neutral-300">·</span>
                     <span
-                      class="px-1.5 py-0.2 rounded text-[10px] font-semibold"
+                      class="px-1.5 py-0.2 rounded text-xs font-semibold"
                       :class="!r.published ? 'bg-neutral-200 text-neutral-700' : (r.hasUnpublishedChanges ? 'bg-amber-100 text-amber-800' : 'bg-[#E8F8F0] text-[#12B76A]')"
                     >
                       {{ !r.published ? '草稿' : (r.hasUnpublishedChanges ? '有未发布修改' : '已发布') }}
@@ -597,7 +597,7 @@
 
         <!-- Relay Routes Restorability Section -->
         <div class="space-y-2.5">
-          <h4 class="font-bold text-xs text-neutral-900 flex items-center gap-1.5">
+          <h4 class="text-neutral-900 flex items-center gap-1.5 text-base font-semibold leading-normal">
             <span>关联中转线路还原评估</span>
             <span class="text-neutral-400 font-normal">({{ getNodeRoutes(selectedDetailNode).length }} 条线路)</span>
           </h4>
@@ -614,7 +614,7 @@
               <div class="flex items-center justify-between">
                 <span class="font-bold text-neutral-900 text-xs">{{ r.pathDisplay }}</span>
                 <span
-                  class="px-2 py-0.5 rounded text-[10px] font-semibold"
+                  class="px-2 py-0.5 rounded text-xs font-semibold"
                   :class="!r.published ? 'bg-neutral-100 text-neutral-600' : (r.hasUnpublishedChanges ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')"
                 >
                   {{ !r.published ? '草稿' : (r.hasUnpublishedChanges ? '有未发布修改' : '已发布') }}
@@ -622,7 +622,7 @@
               </div>
 
               <!-- Restorable Info -->
-              <div v-if="r.canRestoreToCanvas" class="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200/60 text-emerald-800 text-[11px] flex items-center justify-between">
+              <div v-if="r.canRestoreToCanvas" class="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200/60 text-emerald-800 text-xs flex items-center justify-between">
                 <div class="flex items-center gap-1.5">
                   <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
@@ -637,7 +637,7 @@
                   去画布编辑
                 </button>
               </div>
-              <div v-else class="p-2 rounded-lg bg-amber-50/80 border border-amber-200/80 text-amber-800 text-[11px] space-y-1">
+              <div v-else class="p-2 rounded-lg bg-amber-50/80 border border-amber-200/80 text-amber-800 text-xs space-y-1">
                 <div class="flex items-center gap-1.5 font-bold">
                   <svg class="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -675,7 +675,7 @@
               placeholder="粘贴包含凭据的分享链接或订阅内容；不支持的条目会省略"
               class="form-input-base text-xs flex-1 font-mono"
             ></textarea>
-            <button type="button" @click="handleQuickParse" class="ios-btn-primary !py-1 text-xs shrink-0">
+            <button type="button" @click="handleQuickParse" class="ios-btn-primary !py-1 shrink-0">
               解析
             </button>
           </div>
@@ -743,7 +743,7 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
               </span>
-              <h4 class="text-sm font-semibold text-ios-label">添加新的机场订阅</h4>
+              <h4 class="text-ios-label text-base font-semibold leading-normal">添加新的机场订阅</h4>
             </div>
             <span class="text-xs text-ios-tertiary">凭据加密保存 · 支持 HTTPS</span>
           </div>
@@ -755,7 +755,7 @@
               <input
                 v-model="newSubName"
                 placeholder="例如：主力香港中转"
-                class="form-input-base mt-1 text-xs"
+                class="form-input-base mt-1"
               />
             </label>
             <label class="block text-xs font-medium text-ios-secondary sm:col-span-2">
@@ -765,7 +765,7 @@
                 placeholder="https://airport.example.com/api/v1/client/subscribe?token=..."
                 type="password"
                 autocomplete="off"
-                class="form-input-base mt-1 text-xs font-mono"
+                class="form-input-base mt-1 font-mono"
               />
             </label>
           </div>
@@ -799,7 +799,7 @@
                   type="number"
                   min="60"
                   max="2592000"
-                  class="form-input-base !w-20 !py-1 text-xs font-mono text-center"
+                  class="form-input-base !w-20 !py-1 font-mono text-center"
                 />
                 <span>秒</span>
               </div>
@@ -812,7 +812,7 @@
               type="button"
               :disabled="submittingSub || !newSubUrl.trim()"
               @click="addNewSubscription"
-              class="ios-btn-primary inline-flex items-center gap-1.5 text-xs !py-1.5 px-4 disabled:opacity-40"
+              class="ios-btn-primary inline-flex items-center gap-1.5 !py-1.5 px-4 disabled:opacity-40"
             >
               <svg v-if="submittingSub" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -868,7 +868,7 @@
                       type="button"
                       @click="saveEditSub(sub)"
                       :disabled="savingSub"
-                      class="ios-btn-primary !py-1 text-xs inline-flex items-center gap-1.5"
+                      class="ios-btn-primary !py-1 inline-flex items-center gap-1.5"
                     >
                       <svg v-if="savingSub" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -886,7 +886,7 @@
                     <input
                       v-model="editSubForm.name"
                       placeholder="例如：主力香港中转"
-                      class="form-input-base mt-1 text-xs"
+                      class="form-input-base mt-1"
                     />
                   </label>
                   <label class="block text-xs font-medium text-ios-secondary sm:col-span-2" v-if="sub.kind !== 'content'">
@@ -896,7 +896,7 @@
                       placeholder="留空保持原有加密链接，或填入新 HTTPS 链接"
                       type="password"
                       autocomplete="off"
-                      class="form-input-base mt-1 text-xs font-mono"
+                      class="form-input-base mt-1 font-mono"
                     />
                   </label>
                   <div v-else class="block text-xs text-ios-secondary sm:col-span-2 p-2.5 rounded-xl bg-black/[0.02] border border-black/[0.06]">
@@ -933,7 +933,7 @@
                         type="number"
                         min="60"
                         max="2592000"
-                        class="form-input-base !w-20 !py-1 text-xs font-mono text-center"
+                        class="form-input-base !w-20 !py-1 font-mono text-center"
                       />
                       <span>秒</span>
                     </div>
@@ -948,7 +948,7 @@
                   <div class="flex items-center gap-2 min-w-0">
                     <span class="font-bold text-sm text-ios-label truncate" :title="sub.name">{{ sub.name }}</span>
                     <span
-                      class="px-2 py-0.5 rounded-full text-[11px] font-medium"
+                      class="px-2 py-0.5 rounded-full text-xs font-medium"
                       :class="sub.kind === 'content' ? 'bg-blue-100 text-ios-blue' : 'bg-purple-100 text-purple-700'"
                     >
                       {{ sub.kind === 'content' ? '单独导入' : '机场订阅' }}
@@ -956,35 +956,35 @@
                     <span class="text-xs text-ios-secondary">通过节点分组可用：{{ sub.userIds?.length ?? 0 }} 个用户</span>
                     <span
                       v-if="sub.kind === 'content'"
-                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.06]"
+                      class="px-2 py-0.5 rounded-full text-xs font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.06]"
                     >
                       内容导入
                     </span>
                     <span
                       v-else-if="sub.lastStatus === 'failed' || sub.lastError"
-                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                      class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20"
                     >
                       拉取异常
                     </span>
                     <span
                       v-else-if="sub.latestResult?.outcome === 'partial'"
-                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-500/10 text-sky-600 border border-sky-500/20"
+                      class="px-2 py-0.5 rounded-full text-xs font-medium bg-sky-500/10 text-sky-600 border border-sky-500/20"
                     >
                       部分导入
                     </span>
                     <span
                       v-else-if="sub.lastStatus === 'pending'"
-                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.08]"
+                      class="px-2 py-0.5 rounded-full text-xs font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.08]"
                     >
                       等待抓取
                     </span>
                     <span
                       v-else
-                      class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                      class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
                     >
                       正常运行
                     </span>
-                    <span class="px-2 py-0.5 rounded-md text-[11px] font-mono bg-black/[0.04] text-ios-secondary">
+                    <span class="px-2 py-0.5 rounded-md text-xs font-mono bg-black/[0.04] text-ios-secondary">
                       {{ sub.nodeCount }} 个节点
                     </span>
                   </div>
@@ -1039,11 +1039,11 @@
                 <!-- Attempt counts: what this attempt imported and what a
                      subscription can use right now. -->
                 <div v-if="sub.latestResult" class="flex flex-wrap items-center gap-2 text-xs text-ios-secondary">
-                  <span class="font-mono text-[11px]">{{ importCountsLine(sub.latestResult) }}</span>
+                  <span class="font-mono text-xs">{{ importCountsLine(sub.latestResult) }}</span>
                   <button
                     type="button"
                     @click="openImportDetails(sub)"
-                    class="px-2 py-0.5 rounded-md text-[11px] font-medium text-ios-blue bg-ios-blue/10 hover:bg-ios-blue/15"
+                    class="px-2 py-0.5 rounded-md text-xs font-medium text-ios-blue bg-ios-blue/10 hover:bg-ios-blue/15"
                     title="查看本次导入的逐条原因"
                   >
                     查看原因<span v-if="sub.latestResult.diagnosticsTruncated">（已截断）</span>
@@ -1057,7 +1057,7 @@
                   </svg>
                   <div class="space-y-0.5">
                     <p class="font-medium text-amber-900">拉取状态说明</p>
-                    <p class="text-[11px] leading-relaxed break-all">{{ sourceFailureText(sub) }}</p>
+                    <p class="text-xs leading-relaxed break-all">{{ sourceFailureText(sub) }}</p>
                   </div>
                 </div>
               </div>
@@ -1077,7 +1077,7 @@
     >
       <div class="space-y-3 text-xs">
         <p class="text-ios-secondary">{{ describeImportResult(importDetails.result) }}</p>
-        <p class="font-mono text-[11px] text-ios-tertiary">{{ importCountsLine(importDetails.result) }}</p>
+        <p class="font-mono text-xs text-ios-tertiary">{{ importCountsLine(importDetails.result) }}</p>
         <div v-if="importDetails.result.diagnostics.length" class="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
           <div
             v-for="(item, index) in importDetails.result.diagnostics"
@@ -1085,23 +1085,23 @@
             class="p-2 rounded-xl bg-black/[0.02] border border-black/[0.06] space-y-0.5"
           >
             <div class="flex flex-wrap items-center gap-1.5">
-              <span class="px-1.5 py-0.5 rounded-md bg-black/[0.04] text-[11px] font-mono">#{{ item.entryIndex + 1 }}</span>
-              <span v-if="item.protocol" class="text-[11px] text-ios-secondary font-mono">{{ item.protocol }}</span>
+              <span class="px-1.5 py-0.5 rounded-md bg-black/[0.04] text-xs font-mono">#{{ item.entryIndex + 1 }}</span>
+              <span v-if="item.protocol" class="text-xs text-ios-secondary font-mono">{{ item.protocol }}</span>
               <span
-                class="px-1.5 py-0.5 rounded-md text-[11px]"
+                class="px-1.5 py-0.5 rounded-md text-xs"
                 :class="item.stage === 'duplicate' ? 'bg-sky-500/10 text-sky-700' : 'bg-amber-500/10 text-amber-700'"
               >
                 {{ item.stage === 'duplicate' ? '重复' : '解析' }}
               </span>
-              <span class="text-[11px] text-ios-tertiary font-mono">{{ item.code }}</span>
+              <span class="text-xs text-ios-tertiary font-mono">{{ item.code }}</span>
             </div>
-            <p class="text-[11px] leading-relaxed text-ios-label">{{ item.message }}</p>
-            <p v-if="item.field" class="text-[11px] text-ios-tertiary">字段：{{ item.field }}</p>
-            <p v-if="item.keptEntryIndex !== undefined" class="text-[11px] text-ios-tertiary">保留第 {{ item.keptEntryIndex + 1 }} 条</p>
+            <p class="text-xs leading-relaxed text-ios-label">{{ item.message }}</p>
+            <p v-if="item.field" class="text-xs text-ios-tertiary">字段：{{ item.field }}</p>
+            <p v-if="item.keptEntryIndex !== undefined" class="text-xs text-ios-tertiary">保留第 {{ item.keptEntryIndex + 1 }} 条</p>
           </div>
         </div>
-        <p v-else class="text-[11px] text-ios-tertiary">该次尝试没有逐条原因。</p>
-        <p v-if="importDetails.result.diagnosticsTruncated" class="text-[11px] text-amber-700">
+        <p v-else class="text-xs text-ios-tertiary">该次尝试没有逐条原因。</p>
+        <p v-if="importDetails.result.diagnosticsTruncated" class="text-xs text-amber-700">
           原因过多，仅保留前 {{ importDetails.result.diagnostics.length }} 条。
         </p>
       </div>

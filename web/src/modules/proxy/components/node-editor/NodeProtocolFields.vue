@@ -33,7 +33,7 @@
         <label class="block">服务器名称 / SNI（每行一个）<textarea :value="s.reality.server_names.join('\n')" @input="setRealityLines('server_names', $event)" rows="3" class="form-input-base mt-2 font-mono" /></label>
         <label class="block">Short ID（每行一个）<textarea :value="s.reality.short_ids.join('\n')" @input="setRealityLines('short_ids', $event)" rows="2" placeholder="2–16 位偶数长度十六进制" class="form-input-base mt-2 font-mono" /></label>
         <p class="text-xs">订阅使用保存列表中的第一个 SNI 与 Short ID。</p>
-        <label class="block">Reality 公钥<input :value="s.reality.public_key || ''" readonly :placeholder="f.rotateRealityKey ? '保存时轮换，保存后返回新公钥' : '首次保存时由服务器生成'" class="form-input-base mt-2 font-mono text-xs" /></label>
+        <label class="block">Reality 公钥<input :value="s.reality.public_key || ''" readonly :placeholder="f.rotateRealityKey ? '保存时轮换，保存后返回新公钥' : '首次保存时由服务器生成'" class="form-input-base mt-2 font-mono" /></label>
         <button v-if="s.reality.public_key" type="button" class="ios-btn-secondary" @click="copyPublicKey">复制当前公钥</button>
         <p v-if="copyStatus" role="status" class="text-xs">{{ copyStatus }}</p>
         <p class="text-xs">密钥对在服务器首次保存 Reality 时生成。私钥由服务器加密保管，页面不读取或填写。普通保存保留当前密钥。</p>

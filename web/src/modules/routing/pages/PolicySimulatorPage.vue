@@ -55,7 +55,7 @@
       <!-- Input Panel -->
       <form @submit.prevent="runClientSimulation" class="panel-card p-6 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="font-semibold text-neutral-900">客户端访问请求条件</h2>
+          <h2 class="text-neutral-900 text-base font-semibold leading-normal">客户端访问请求条件</h2>
           <span class="text-xs text-neutral-400 font-mono">Clash 路由内核仿真</span>
         </div>
 
@@ -65,7 +65,7 @@
             v-model="clientForm.address"
             required
             placeholder="例如: api.openai.com 或 1.1.1.1 或 192.168.1.1"
-            class="form-input-base mt-1.5 font-mono text-xs"
+            class="form-input-base mt-1.5 font-mono"
           />
         </label>
 
@@ -78,7 +78,7 @@
               min="1"
               max="65535"
               required
-              class="form-input-base mt-1.5 font-mono text-xs"
+              class="form-input-base mt-1.5 font-mono"
             />
           </label>
           <label class="text-sm">
@@ -108,7 +108,7 @@
       <!-- Output Panel -->
       <section class="panel-card p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold text-neutral-900">客户端裁决结果</h2>
+          <h2 class="text-neutral-900 text-base font-semibold leading-normal">客户端裁决结果</h2>
           <span v-if="clientDecision" class="text-xs font-mono text-neutral-400">Match First 裁决</span>
         </div>
 
@@ -134,11 +134,11 @@
               <span class="text-xs font-bold uppercase tracking-wider font-mono">
                 {{ clientDecision.runtime ? `第 #${clientDecision.matchedRule?.priority} 优先级规则需客户端运行时判断` : clientDecision.matched ? `命中第 #${clientDecision.matchedRule?.priority} 优先级规则` : '未命中规则' }}
               </span>
-              <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/70 shadow-sm">
+              <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-white/70 shadow-sm">
                 {{ clientDecision.target }}
               </span>
             </div>
-            <h3 class="text-base font-bold tracking-tight">
+            <h3 class="tracking-normal text-base font-semibold leading-normal">
               {{ clientDecision.actionLabel }}
             </h3>
             <p class="text-xs opacity-90 leading-relaxed pt-1">
@@ -150,7 +150,7 @@
           <dl class="space-y-4 text-xs">
             <div>
               <dt class="text-neutral-400 font-medium">命中原因说明</dt>
-              <dd class="mt-1 font-semibold text-neutral-800 text-[13px] leading-relaxed">
+              <dd class="mt-1 font-semibold text-neutral-800 text-sm leading-relaxed">
                 {{ clientDecision.reason }}
               </dd>
             </div>
@@ -177,7 +177,7 @@
       <!-- Input Panel -->
       <form @submit.prevent="runNodeSimulation" class="panel-card p-6 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="font-semibold text-neutral-900">服务器请求条件</h2>
+          <h2 class="text-neutral-900 text-base font-semibold leading-normal">服务器请求条件</h2>
           <span class="text-xs text-neutral-400 font-mono">Xray / Sing-box 内核仿真</span>
         </div>
 
@@ -213,18 +213,18 @@
 
         <label class="block text-sm">
           <span class="text-xs font-medium text-neutral-600">请求域名</span>
-          <input v-model="nodeForm.domain" placeholder="api.example.com (不含 http:// 或路径)" class="form-input-base mt-1.5 font-mono text-xs" />
+          <input v-model="nodeForm.domain" placeholder="api.example.com (不含 http:// 或路径)" class="form-input-base mt-1.5 font-mono" />
         </label>
 
         <label class="block text-sm">
           <span class="text-xs font-medium text-neutral-600">目标 IP (可选)</span>
-          <input v-model="nodeForm.targetIp" placeholder="192.0.2.10" class="form-input-base mt-1.5 font-mono text-xs" />
+          <input v-model="nodeForm.targetIp" placeholder="192.0.2.10" class="form-input-base mt-1.5 font-mono" />
         </label>
 
         <div class="grid sm:grid-cols-2 gap-4">
           <label class="text-sm">
             <span class="text-xs font-medium text-neutral-600">端口</span>
-            <input v-model.number="nodeForm.port" type="number" min="1" max="65535" required class="form-input-base mt-1.5 font-mono text-xs" />
+            <input v-model.number="nodeForm.port" type="number" min="1" max="65535" required class="form-input-base mt-1.5 font-mono" />
           </label>
           <label class="text-sm">
             <span class="text-xs font-medium text-neutral-600">网络</span>
@@ -237,7 +237,7 @@
 
         <label class="block text-sm">
           <span class="text-xs font-medium text-neutral-600">请求时间 ({{ authState.timezone }})</span>
-          <input v-model="timeLocal" type="datetime-local" class="form-input-base mt-1.5 text-xs" />
+          <input v-model="timeLocal" type="datetime-local" class="form-input-base mt-1.5" />
         </label>
 
         <p v-if="nodeSimulationError" role="alert" class="text-xs text-red-600">{{ nodeSimulationError }}</p>
@@ -250,7 +250,7 @@
       <!-- Output Panel -->
       <section class="panel-card p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold text-neutral-900">节点端裁决结果</h2>
+          <h2 class="text-neutral-900 text-base font-semibold leading-normal">节点端裁决结果</h2>
           <span v-if="nodeDecision" class="text-xs font-mono text-neutral-400">Agent 真实仿真</span>
         </div>
 
@@ -274,11 +274,11 @@
               <span class="text-xs font-bold uppercase tracking-wider font-mono">
                 {{ nodeDecision.matched ? `策略: ${nodeDecision.policyName || nodeDecision.policyId}` : '入站默认路由' }}
               </span>
-              <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/70 shadow-sm">
+              <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-white/70 shadow-sm">
                 {{ nodeDecision.matched ? `优先级 #${nodeDecision.priority}` : 'Default' }}
               </span>
             </div>
-            <h3 class="text-base font-bold tracking-tight">
+            <h3 class="tracking-normal text-base font-semibold leading-normal">
               {{ actionNames[nodeDecision.action.type] || nodeDecision.action.type }}
             </h3>
             <p class="text-xs opacity-90 leading-relaxed pt-1">

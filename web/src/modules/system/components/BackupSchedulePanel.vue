@@ -1,6 +1,6 @@
 <template>
   <section class="panel-card p-6 max-w-3xl space-y-5 text-sm">
-    <div class="flex flex-wrap justify-between items-center gap-3"><h2 class="font-semibold">自动备份与保留轮换</h2><button :disabled="loading || saving" class="ios-btn-secondary" @click="load">刷新已保存策略</button></div>
+    <div class="flex flex-wrap justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">自动备份与保留轮换</h2><button :disabled="loading || saving" class="ios-btn-secondary" @click="load">刷新已保存策略</button></div>
     <ErrorState v-if="error" :message="error" @retry="load" /><LoadingSkeleton v-else-if="!saved" />
     <template v-else>
       <label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" /> 启用自动加密备份</label>

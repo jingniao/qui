@@ -1,6 +1,6 @@
 <template>
  <section class="panel-card p-6 space-y-3">
-  <h2 class="font-semibold">账户字节采样来源</h2>
+  <h2 class="text-base font-semibold leading-normal">账户字节采样来源</h2>
   <p class="text-sm text-gray-500">{{ label }}</p>
   <dl v-if="fresh && sample && sample.core_epoch" class="grid sm:grid-cols-2 gap-4 text-sm">
    <div><dt class="text-gray-500">配置来源 / 本进程曾完整观察来源</dt><dd>{{ sample.configured_sources ?? 0 }} / {{ sample.observed_sources ?? 0 }}</dd></div>

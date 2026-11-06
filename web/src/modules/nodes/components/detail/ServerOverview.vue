@@ -8,7 +8,7 @@
       <!-- Header: Title, Status Badge, Heartbeat & Subscriptions -->
       <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5 flex-wrap gap-2">
         <div class="flex items-center gap-2">
-          <h2 class="font-semibold text-ios-label text-sm sm:text-base">基础信息</h2>
+          <h2 class="text-ios-label text-base font-semibold leading-normal">基础信息</h2>
           <StatusBadge :status="status.tone" :label="status.label" />
           <span class="text-xs text-ios-secondary font-mono">
             {{ connections === '—' ? '活跃会话 —' : `${connections} 个活跃会话` }}
@@ -26,7 +26,7 @@
           </span>
           <span class="text-black/[0.15]">|</span>
           <button
-            class="text-[11px] text-ios-blue hover:underline inline-flex items-center gap-0.5 font-medium transition-colors"
+            class="text-xs text-ios-blue hover:underline inline-flex items-center gap-0.5 font-medium transition-colors"
             :title="'复制完整服务器 ID: ' + node.id"
             @click="copyId"
           >
@@ -39,7 +39,7 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
         <!-- 主机名 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">主机名</div>
+          <div class="text-xs text-ios-secondary font-medium">主机名</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="node.hostname">
             {{ node.hostname || '—' }}
           </p>
@@ -48,10 +48,10 @@
         <!-- 公网 IP -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] sm:text-xs text-ios-secondary font-medium">公网 IP</span>
+            <span class="text-xs text-ios-secondary font-medium">公网 IP</span>
             <button
               v-if="node.publicIp"
-              class="text-[11px] text-ios-blue hover:underline inline-flex items-center gap-0.5 font-medium transition-colors"
+              class="text-xs text-ios-blue hover:underline inline-flex items-center gap-0.5 font-medium transition-colors"
               title="复制公网 IP"
               @click="copyIp"
             >
@@ -65,7 +65,7 @@
 
         <!-- 地区 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">地区</div>
+          <div class="text-xs text-ios-secondary font-medium">地区</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="regionDisplay">
             {{ regionDisplay }}
           </p>
@@ -73,7 +73,7 @@
 
         <!-- 操作系统 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">操作系统</div>
+          <div class="text-xs text-ios-secondary font-medium">操作系统</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="node.capabilities?.host?.osPrettyName || node.os">
             {{ node.capabilities?.host?.osPrettyName || node.os || '—' }}
           </p>
@@ -81,7 +81,7 @@
 
         <!-- 运行时间 (来自系统信息) -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">运行时间</div>
+          <div class="text-xs text-ios-secondary font-medium">运行时间</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono tabular-nums truncate">
             {{ uptimeDisplay }}
           </p>
@@ -89,7 +89,7 @@
 
         <!-- 启动时间 (来自系统信息) -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">启动时间</div>
+          <div class="text-xs text-ios-secondary font-medium">启动时间</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono tabular-nums truncate">
             {{ bootTime }}
           </p>
@@ -97,7 +97,7 @@
 
         <!-- 服务器端口范围 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">服务器端口范围</div>
+          <div class="text-xs text-ios-secondary font-medium">服务器端口范围</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="formatPortRange(meta)">
             {{ formatPortRange(meta) }}
           </p>
@@ -105,7 +105,7 @@
 
         <!-- 创建时间 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <div class="text-[11px] sm:text-xs text-ios-secondary font-medium">创建时间</div>
+          <div class="text-xs text-ios-secondary font-medium">创建时间</div>
           <p class="text-xs sm:text-sm font-semibold text-ios-label truncate">
             {{ node.createdAt ? formatTime(node.createdAt) : '—' }}
           </p>
@@ -115,7 +115,7 @@
       <!-- 备注说明 -->
       <div v-if="cleanRemark(meta.remark)" class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 flex items-center justify-between">
         <div class="flex items-center gap-2 min-w-0">
-          <span class="text-[11px] sm:text-xs text-ios-secondary font-medium shrink-0">备注说明</span>
+          <span class="text-xs text-ios-secondary font-medium shrink-0">备注说明</span>
           <span class="text-xs sm:text-sm font-medium text-ios-label truncate" :title="cleanRemark(meta.remark)">
             {{ cleanRemark(meta.remark) }}
           </span>
@@ -143,7 +143,7 @@
         <!-- 协议能力 -->
         <section class="panel-card p-3.5 sm:p-4 space-y-2.5 bg-white">
           <div class="flex items-center justify-between">
-            <h2 class="font-semibold text-ios-label text-sm sm:text-base">协议能力</h2>
+            <h2 class="text-ios-label text-base font-semibold leading-normal">协议能力</h2>
             <button v-if="customNetwork && isOwner" class="text-xs text-ios-blue hover:underline" @click="$emit('tab', 'settings')">
               出站网络设置 →
             </button>
@@ -153,10 +153,10 @@
             <div v-for="core in cores" :key="core.name" class="flex items-center justify-between gap-2 rounded-xl bg-ios-bg px-2.5 py-1.5">
               <span class="text-xs font-semibold text-ios-label truncate">
                 {{ core.label }}<span class="ml-1.5 font-mono font-normal text-ios-secondary">{{ core.version }}</span>
-                <span v-if="core.primary" class="ml-1.5 text-[10px] font-semibold text-ios-blue">主核心</span>
+                <span v-if="core.primary" class="ml-1.5 text-xs font-semibold text-ios-blue">主核心</span>
               </span>
               <span
-                class="inline-flex items-center gap-1 text-[11px] shrink-0"
+                class="inline-flex items-center gap-1 text-xs shrink-0"
                 :class="core.healthy === false ? 'text-ios-red' : core.healthy === true ? 'text-ios-green' : 'text-ios-tertiary'"
                 :title="core.error || ''"
               >
@@ -174,7 +174,7 @@
               :class="p.inbound && p.outbound ? 'bg-blue-50 text-ios-blue border border-blue-100/70' : (p.inbound ? 'bg-emerald-50 text-emerald-700 border border-emerald-100/70' : 'bg-neutral-100 text-neutral-600')"
             >
               {{ p.protocol }}
-              <span class="text-[10px] opacity-75 font-sans ml-0.5">{{ p.inbound && p.outbound ? '双向' : (p.inbound ? '入站' : '出站') }}</span>
+              <span class="text-xs opacity-75 font-sans ml-0.5">{{ p.inbound && p.outbound ? '双向' : (p.inbound ? '入站' : '出站') }}</span>
             </span>
           </div>
           <p v-else class="text-xs text-ios-secondary">尚未上报协议能力</p>
@@ -184,12 +184,12 @@
       <!-- Right: 最近事件（配置版本记录） -->
       <section class="panel-card p-3.5 sm:p-4 space-y-2.5 bg-white">
         <div class="flex items-center justify-between">
-          <h2 class="font-semibold text-ios-label text-sm sm:text-base">最近事件</h2>
+          <h2 class="text-ios-label text-base font-semibold leading-normal">最近事件</h2>
           <span class="text-xs text-ios-tertiary">配置版本记录</span>
         </div>
         <ol v-if="events.length" class="space-y-2">
           <li v-for="event in events" :key="event.id" class="border-l-2 border-ios-blue/40 pl-2.5 text-xs text-ios-secondary">
-            <time class="text-[11px] font-mono text-ios-tertiary">{{ formatTime(event.at) }}</time>
+            <time class="text-xs font-mono text-ios-tertiary">{{ formatTime(event.at) }}</time>
             <p class="text-ios-label font-medium text-xs mt-0.5">{{ event.text }}</p>
           </li>
         </ol>

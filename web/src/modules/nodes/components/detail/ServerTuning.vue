@@ -2,7 +2,7 @@
   <div class="space-y-4">
     <section class="panel-card p-4 space-y-3">
       <div class="flex flex-wrap justify-between items-center gap-2">
-        <h2 class="font-semibold text-ios-label">网络与内核调优</h2>
+        <h2 class="text-ios-label text-base font-semibold leading-normal">网络与内核调优</h2>
         <button type="button" class="ios-btn-secondary" :disabled="loading" @click="refresh">刷新状态</button>
       </div>
       <p v-if="loading" class="text-sm text-ios-secondary">正在读取调优状态…</p>
@@ -16,7 +16,7 @@
       </template>
     </section>
     <section v-if="state" class="panel-card p-4 space-y-3">
-      <h3 class="font-semibold text-ios-label">白名单参数</h3>
+      <h3 class="text-ios-label text-base font-semibold leading-normal">白名单参数</h3>
       <p class="text-xs text-ios-secondary">草稿尚未应用。提交会替换整个期望配置，留空的旧参数将恢复初始值。算法是否可用由服务器校验；tcp_rmem / tcp_wmem 只提交最大值，Agent 保留前两项。</p>
       <div v-if="canEdit" class="flex flex-wrap gap-2">
         <button v-for="preset in tuningPresets" :key="preset.name" type="button" class="ios-btn-secondary" @click="draft = tuningDraft(preset.settings)">{{ preset.name }}</button>
@@ -45,7 +45,7 @@
       <p v-else class="text-xs text-ios-secondary">Viewer 只读</p>
     </section>
     <section v-if="state?.result" class="panel-card p-4 space-y-3">
-      <h3 class="font-semibold text-ios-label">最近执行回执 · {{ tuningStatus(state.result.status || state.status) }}</h3>
+      <h3 class="text-ios-label text-base font-semibold leading-normal">最近执行回执 · {{ tuningStatus(state.result.status || state.status) }}</h3>
       <p v-for="(result, index) in state.result.keys || []" :key="index" class="text-xs text-ios-label break-words">
         {{ result.key || '全局错误' }} · {{ result.applied ? '已应用' : '失败' }} · 读回值：{{ result.value || '—' }} <span v-if="result.error" class="text-ios-red">{{ result.error }}</span>
       </p>

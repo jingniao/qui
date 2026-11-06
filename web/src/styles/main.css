@@ -11,9 +11,9 @@
   body {
     background-color: #F5F5F7;
     color: #1D1D1F;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", sans-serif;
-    letter-spacing: -0.012em;
-    text-rendering: optimizeLegibility;
+    @apply font-sans;
+    font-size: 0.875rem; /* 14px body */
+    letter-spacing: normal;
     line-height: 1.5;
   }
 
@@ -120,7 +120,7 @@ select.form-input-base:disabled {
 
 .ios-segmented-item {
   padding: 0.35rem 1rem;
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 500;
   border-radius: 9999px;
   color: #48484A;
@@ -148,7 +148,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1.25rem; /* 内容自适应缩放 */
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 600;
   color: #FFFFFF;
   background-color: #0071E3;
@@ -186,7 +186,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1.25rem; /* 内容自适应缩放 */
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 500;
   color: #1D1D1F;
   background-color: #FFFFFF;
@@ -223,7 +223,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1.25rem; /* 内容自适应缩放 */
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 500;
   color: #FF3B30;
   background-color: rgba(255, 59, 48, 0.08);
@@ -256,7 +256,7 @@ select.form-input-base:disabled {
   height: 2.25rem; /* 36px */
   padding-left: 2.25rem;
   padding-right: 2rem;
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   border-radius: 0.75rem; /* 12px rounded-xl */
   background-color: rgba(0, 0, 0, 0.04);
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -288,7 +288,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1rem;
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 500;
   color: #1D1D1F;
   background-color: #FFFFFF;
@@ -311,7 +311,7 @@ select.form-input-base:disabled {
   width: 100%;
   height: 2.25rem; /* 36px */
   padding: 0 0.85rem 0 2.25rem;
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   border-radius: 0.75rem; /* 12px rounded-xl */
   background-color: rgba(0, 0, 0, 0.04);
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -335,7 +335,7 @@ select.form-input-base:disabled {
 .ios-filter-select {
   height: 2.25rem; /* 36px */
   padding: 0 2.25rem 0 0.85rem;
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 500;
   border-radius: 0.75rem; /* 12px rounded-xl */
   background-color: #FFFFFF;
@@ -411,7 +411,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1.25rem; /* 根据文字长度自由弹性缩放 */
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 500;
   color: #1D1D1F;
   background-color: #FFFFFF;
@@ -448,7 +448,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1.25rem; /* 根据文字长度自由弹性缩放 */
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 600;
   color: #FFFFFF;
   background-color: #0071E3;
@@ -486,7 +486,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1.25rem; /* 根据文字长度自由弹性缩放 */
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 600;
   color: #FFFFFF;
   background-color: #FF3B30;
@@ -524,7 +524,7 @@ select.form-input-base:disabled {
   flex-shrink: 0;
   white-space: nowrap;
   padding: 0 1.25rem; /* 根据文字长度自由弹性缩放 */
-  font-size: 0.8125rem; /* 13px */
+  font-size: 0.875rem; /* 14px */
   font-weight: 600;
   color: #FFFFFF;
   background-color: #FF9500;

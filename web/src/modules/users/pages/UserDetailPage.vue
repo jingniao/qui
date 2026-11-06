@@ -53,7 +53,7 @@
       <!-- 1. 用量概况 (4 KPI Cards) -->
       <section class="space-y-3">
         <div class="flex items-center justify-between">
-          <h2 class="text-base font-bold text-ios-label tracking-tight">用量概况</h2>
+          <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">用量概况</h2>
           <span class="text-xs text-ios-tertiary">统一监控流量、连接与账号生命周期</span>
         </div>
 
@@ -65,7 +65,7 @@
                 <span class="text-xs font-semibold text-ios-tertiary">流量用量与额度</span>
                 <span
                   :class="[
-                    'text-[10px] font-semibold px-2 py-0.5 rounded-full border',
+                    'text-xs font-semibold px-2 py-0.5 rounded-full border',
                     user.trafficLimit > 0 && user.usedTraffic >= user.trafficLimit
                       ? 'bg-rose-50 text-ios-red border-rose-200'
                       : 'bg-blue-50 text-ios-blue border-blue-200'
@@ -76,7 +76,7 @@
               </div>
 
               <div class="mt-3 flex items-baseline gap-1.5">
-                <span class="text-2xl font-bold text-ios-label tabular-nums tracking-tight">
+                <span class="text-2xl font-bold text-ios-label tabular-nums tracking-normal">
                   <TrafficValue :bytes="user.usedTraffic" />
                 </span>
                 <span class="text-xs text-ios-tertiary font-medium">
@@ -93,7 +93,7 @@
                   :style="{ width: `${quotaPercent}%` }"
                 ></div>
               </div>
-              <div class="flex items-center justify-between text-[11px] text-ios-secondary">
+              <div class="flex items-center justify-between text-xs text-ios-secondary">
                 <span>{{ user.trafficLimit > 0 ? `已消耗 ${quotaPercent}%` : '自由使用' }}</span>
                 <span v-if="user.trafficLimit > 0" class="text-ios-tertiary font-mono">
                   剩余 <TrafficValue :bytes="Math.max(0, user.trafficLimit - user.usedTraffic)" />
@@ -109,7 +109,7 @@
                 <span class="text-xs font-semibold text-ios-tertiary">服务有效期限</span>
                 <span
                   :class="[
-                    'text-[10px] font-semibold px-2 py-0.5 rounded-full border',
+                    'text-xs font-semibold px-2 py-0.5 rounded-full border',
                     isExpired ? 'bg-rose-50 text-ios-red border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'
                   ]"
                 >
@@ -117,7 +117,7 @@
                 </span>
               </div>
 
-              <div class="mt-3 tracking-tight">
+              <div class="mt-3 tracking-normal">
                 <div class="text-lg font-bold text-ios-label tabular-nums whitespace-nowrap">
                   {{ user.expiresAt ? (expiryParts.date || '—') : '永不过期' }}
                 </div>
@@ -127,7 +127,7 @@
               </div>
             </div>
 
-            <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-secondary">
+            <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
               <span>{{ user.expiresAt ? expiryCountdownText : '无需续期' }}</span>
               <span class="text-ios-tertiary font-mono">{{ formatResetCycle(meta) }}</span>
             </div>
@@ -138,20 +138,20 @@
             <div>
               <div class="flex items-center justify-between">
                 <span class="text-xs font-semibold text-ios-tertiary">连接控制</span>
-                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/[0.04] text-ios-secondary border border-black/[0.05]">
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-black/[0.04] text-ios-secondary border border-black/[0.05]">
                   {{ user.deviceLimit === 0 ? '不限设备' : `最多 ${user.deviceLimit} 个地址` }}
                 </span>
               </div>
 
               <div class="mt-3 flex items-baseline gap-1.5">
-                <span class="text-2xl font-bold text-ios-label tabular-nums tracking-tight">
+                <span class="text-2xl font-bold text-ios-label tabular-nums tracking-normal">
                   {{ user.onlineConnections == null ? '未知' : user.onlineConnections }}
                 </span>
                 <span class="text-xs text-ios-tertiary font-medium">当前连接</span>
               </div>
             </div>
 
-            <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-secondary">
+            <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
               <span>一个用户一条订阅，可在多台设备上使用</span>
               <span class="text-ios-tertiary">{{ user.onlineConnections == null ? '暂无节点上报' : '节点已上报' }}</span>
             </div>
@@ -170,7 +170,7 @@
               </div>
             </div>
 
-            <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-[11px] text-ios-secondary">
+            <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
               <span>{{ accountStatusText }}</span>
               <span class="text-ios-tertiary">{{ user.allowedProtocols.length }} 种协议</span>
             </div>
@@ -185,7 +185,7 @@
           <div>
             <div class="flex items-center justify-between">
               <div>
-                <h3 class="text-base font-bold text-ios-label tracking-tight">专属订阅与配置</h3>
+                <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">专属订阅与配置</h3>
                 <p class="text-xs text-ios-tertiary mt-0.5">一个用户对应一条订阅链接，自动下发所有已授权节点</p>
               </div>
 
@@ -193,7 +193,7 @@
                 type="button"
                 :disabled="subRotating"
                 @click="rotateConfirmVisible = true"
-                class="ios-btn-secondary text-xs h-7 px-2.5 inline-flex items-center gap-1"
+                class="ios-btn-secondary h-7 px-2.5 inline-flex items-center gap-1"
                 title="重置后旧订阅链接立即失效"
               >
                 <svg :class="['w-3 h-3', subRotating ? 'animate-spin' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -207,20 +207,20 @@
             <div class="mt-4 p-3.5 rounded-2xl bg-[#F8F8FA] border border-black/[0.05] space-y-2">
               <div class="flex items-center justify-between text-xs text-ios-tertiary font-medium">
                 <span>通用订阅 URL</span>
-                <span class="font-mono text-[11px]">{{ subUrl ? '可直接复制或导入' : '重置后可查看' }}</span>
+                <span class="font-mono text-xs">{{ subUrl ? '可直接复制或导入' : '重置后可查看' }}</span>
               </div>
               <div class="flex items-center gap-2">
                 <input
                   :value="subUrl"
                   readonly
-                  class="form-input-base text-xs font-mono select-all bg-white"
+                  class="form-input-base font-mono select-all bg-white"
                   placeholder="重置后可查看"
                 />
                 <button
                   type="button"
                   @click="copyText(subUrl)"
                   :disabled="!subUrl"
-                  class="ios-btn-primary text-xs shrink-0 px-3 h-9 disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="ios-btn-primary shrink-0 px-3 h-9 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   复制
                 </button>
@@ -231,15 +231,15 @@
             <div v-for="format in subFormats" :key="format.id" class="mt-3 space-y-2">
               <label class="text-xs font-semibold">{{ format.id }}</label>
               <div class="flex gap-2">
-                <input readonly :value="absoluteLink(format.url)" class="form-input-base text-xs font-mono select-all" />
-                <button class="ios-btn-secondary text-xs" @click="copyText(absoluteLink(format.url))">复制</button>
-                <button class="ios-btn-secondary text-xs" @click="formatQR(format.url)">二维码</button>
+                <input readonly :value="absoluteLink(format.url)" class="form-input-base font-mono select-all" />
+                <button class="ios-btn-secondary" @click="copyText(absoluteLink(format.url))">复制</button>
+                <button class="ios-btn-secondary" @click="formatQR(format.url)">二维码</button>
               </div>
             </div>
           </div>
 
           <div class="space-y-4 border-t border-black/[0.04] pt-4">
-            <div class="flex justify-between items-center"><h2 class="text-base font-semibold">用户门户登录</h2><router-link :to="{ path: '/portal-preview', query: { user: userId } }" class="ios-btn-secondary">只读预览</router-link></div>
+            <div class="flex justify-between items-center"><h2 class="text-base font-semibold leading-normal">用户门户登录</h2><router-link :to="{ path: '/portal-preview', query: { user: userId } }" class="ios-btn-secondary">只读预览</router-link></div>
             <div class="flex flex-wrap items-center gap-3">
               <label class="text-sm"><input v-model="loginEnabled" type="checkbox" /> 允许登录用户门户</label>
               <input v-model="loginPassword" type="password" autocomplete="new-password" placeholder="设置 / 重置登录密码（留空保留）" class="form-input-base max-w-sm" />
@@ -255,7 +255,7 @@
             <div v-if="subQrSvg" v-html="subQrSvg" class="p-2 bg-white rounded-xl shadow-xs border border-black/[0.06] shrink-0"></div>
             <div class="space-y-1 text-xs">
               <p class="font-semibold text-ios-label">扫码快速导入客户端</p>
-              <p class="text-ios-tertiary leading-relaxed text-[11px]">
+              <p class="text-ios-tertiary leading-relaxed text-xs">
                 支持 Shadowrocket、v2rayNG、sing-box 等扫码一键配置。账号凭证信息内置于订阅内。
               </p>
             </div>
@@ -267,7 +267,7 @@
           <div>
             <div class="flex items-center justify-between">
               <div>
-                <h3 class="text-base font-bold text-ios-label tracking-tight">可用节点</h3>
+                <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">可用节点</h3>
                 <p class="text-xs text-ios-tertiary mt-0.5">该用户有权接入的网络节点</p>
               </div>
               <router-link to="/nodes" class="text-xs font-semibold text-ios-blue hover:underline">
@@ -287,13 +287,13 @@
                     <span :class="['w-1.5 h-1.5 rounded-full shrink-0', node.status === 'online' ? 'bg-emerald-500' : 'bg-ios-red']"></span>
                     <span class="font-semibold text-ios-label truncate">{{ node.name }}</span>
                   </div>
-                  <p class="font-mono text-[10px] text-ios-tertiary truncate mt-0.5">
+                  <p class="font-mono text-xs text-ios-tertiary truncate mt-0.5">
                     {{ node.publicIp || node.hostname || '—' }}
                   </p>
                 </div>
 
                 <div class="text-right shrink-0">
-                  <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-black/[0.04] text-ios-secondary">
+                  <span class="text-xs font-medium px-1.5 py-0.5 rounded bg-black/[0.04] text-ios-secondary">
                     {{ node.capabilities?.core_name || '—' }}
                   </span>
                 </div>
@@ -309,7 +309,7 @@
             </div>
           </div>
 
-          <div class="pt-3 border-t border-black/[0.04] text-[11px] text-ios-tertiary flex items-center justify-between">
+          <div class="pt-3 border-t border-black/[0.04] text-xs text-ios-tertiary flex items-center justify-between">
             <span>共 {{ availableNodes.length }} 台服务器、{{ availableSources.length }} 个导入来源</span>
             <span class="font-mono">协议: {{ user.allowedProtocols.join(' · ') }}</span>
           </div>
@@ -320,7 +320,7 @@
       <section class="panel-card p-5 sm:p-6 bg-white space-y-4">
         <div class="flex items-center justify-between">
           <div>
-            <h3 class="text-base font-bold text-ios-label tracking-tight">流量历史与访问</h3>
+            <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">流量历史与访问</h3>
             <p class="text-xs text-ios-tertiary mt-0.5">记录该账号的流量吞吐分布与近期请求明细</p>
             <p v-if="availableNodes.some(node => node.capabilities?.core_name === 'sing-box' && !node.capabilities?.singbox_user_stats)" class="text-xs text-ios-tertiary mt-0.5">部分 sing-box 节点仅上报节点总量，其流量不计入用户额度。</p>
           </div>
@@ -332,19 +332,19 @@
         <!-- 流量统计指标 -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-[#F8F8FA] border border-black/[0.04]">
           <div>
-            <span class="text-[11px] text-ios-tertiary font-medium">↑ 今日上行</span>
+            <span class="text-xs text-ios-tertiary font-medium">↑ 今日上行</span>
             <div class="text-lg font-bold text-ios-label tabular-nums mt-0.5">
               <TrafficValue :bytes="trafficSummary.uploadBytes" />
             </div>
           </div>
           <div>
-            <span class="text-[11px] text-ios-tertiary font-medium">↓ 今日下行</span>
+            <span class="text-xs text-ios-tertiary font-medium">↓ 今日下行</span>
             <div class="text-lg font-bold text-ios-label tabular-nums mt-0.5">
               <TrafficValue :bytes="trafficSummary.downloadBytes" />
             </div>
           </div>
           <div>
-            <span class="text-[11px] text-ios-tertiary font-medium">采样次数（每 5 秒）</span>
+            <span class="text-xs text-ios-tertiary font-medium">采样次数（每 5 秒）</span>
             <div class="text-lg font-bold text-ios-label tabular-nums mt-0.5">
               {{ trafficSummary.observations }} 次
             </div>
@@ -368,14 +368,14 @@
                   {{ rec.domain || rec.target_ip }}
                 </td>
                 <td class="py-2.5 text-ios-secondary">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] bg-black/[0.04] font-mono">
+                  <span class="px-1.5 py-0.5 rounded text-xs bg-black/[0.04] font-mono">
                     {{ rec.inbound_protocol }}
                   </span>
                 </td>
                 <td class="py-2.5">
                   <span
                     :class="[
-                      'text-[10px] font-semibold px-1.5 py-0.2 rounded shrink-0',
+                      'text-xs font-semibold px-1.5 py-0.2 rounded shrink-0',
                       rec.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-ios-red'
                     ]"
                   >
@@ -398,7 +398,7 @@
       <section class="panel-card p-5 sm:p-6 bg-white space-y-4">
         <div class="flex items-center justify-between">
           <div>
-            <h3 class="text-base font-bold text-ios-label tracking-tight">管理记录</h3>
+            <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">管理记录</h3>
             <p class="text-xs text-ios-tertiary mt-0.5">管理员对该用户账号的配置变更与安全审计日志</p>
           </div>
           <router-link to="/system/operations" class="text-xs font-semibold text-ios-blue hover:underline">
@@ -426,14 +426,14 @@
                   {{ op.operator }}
                 </td>
                 <td class="py-2.5">
-                  <span class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-black/[0.04] text-ios-secondary">
+                  <span class="px-2 py-0.5 rounded-md text-xs font-medium bg-black/[0.04] text-ios-secondary">
                     {{ op.action }}
                   </span>
                 </td>
                 <td class="py-2.5">
                   <span
                     :class="[
-                      'text-[10px] font-semibold px-2 py-0.5 rounded-full border',
+                      'text-xs font-semibold px-2 py-0.5 rounded-full border',
                       op.result === 'success' || op.result === '成功'
                         ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                         : 'bg-rose-50 text-rose-800 border-rose-200'
@@ -506,7 +506,7 @@
     >
       <div class="space-y-4 pt-1">
         <div class="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/60 text-xs text-amber-800 space-y-1">
-          <p class="leading-relaxed text-[11px]">重置会为该用户的所有协议签发新凭证，并自动发布到其授权节点；节点应用后旧凭证失效，客户端更新订阅即可获得新凭证。</p>
+          <p class="leading-relaxed text-xs">重置会为该用户的所有协议签发新凭证，并自动发布到其授权节点；节点应用后旧凭证失效，客户端更新订阅即可获得新凭证。</p>
         </div>
       </div>
     </AppDialog>

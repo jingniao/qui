@@ -1,6 +1,6 @@
 <template>
   <section class="panel-card p-6 space-y-4 text-sm">
-    <div class="flex justify-between gap-3"><h2 class="font-semibold">节点证书</h2><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新证书状态</button></div>
+    <div class="flex justify-between gap-3"><h2 class="text-base font-semibold leading-normal">节点证书</h2><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新证书状态</button></div>
     <p v-if="error" class="text-red-600">{{ error }}</p>
     <template v-if="status">
       <p v-if="!status.currentSigningAvailable" class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">当前CA不能签发新身份或续期。请保留原材料并核对有效期与时钟；历史认证通过不表示当前可签发，刷新状态不会修复CA。</p>

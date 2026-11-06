@@ -128,18 +128,27 @@ const ast = ts.createSourceFile('ClientPolicyPage.ts', script, ts.ScriptTarget.L
 function pageAction(name) {
   return ast.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name).getText(ast);
 }
-const actions = ['loadPreview', 'resolveGroupMembers', 'handleGroupRuleAction', 'openCreateRuleDrawer', 'quickCreateRuleForService'].map(pageAction).join('\n');
+const actionNames = ['loadPreview', 'resolveGroupMembers', 'handleGroupRuleAction', 'openCreateRuleDrawer', 'quickCreateRuleForService', 'eligiblePreviewUser', 'loadPreviewUsers', 'changePreviewUser', 'loadCandidates'];
+const actions = actionNames.map(pageAction).join('\n');
 const compiledActions = ts.transpileModule(actions, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
 const ref = value => ({ value });
+const paginationSource = readFileSync(path.resolve(here, '..', 'src', 'app', 'pagination.ts'), 'utf8');
+const paginationJS = ts.transpileModule(paginationSource.replace('export ', ''), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText.replace('export ', '');
+const allPages = new Function(paginationJS + '\nreturn allPages;')();
 const state = {
-  previewGeneration: 0,
+  previewGeneration: 0, candidateGeneration: 0,
+  previewUserId: ref(''), previewUsers: ref([]), previewUsersLoaded: ref(false), loadingPreviewUsers: ref(false), previewUsersError: ref(''),
+  candidates: ref({ items: [], autoSelected: true }), candidateError: ref(''), selectedEndpoints: ref([]), allPages,
+  userAPI: { list: async () => ({ items: [], total: 0 }) },
   isDirty: ref(true), editingPolicyId: ref('inactive'), clientConfig: ref(api.toConfig({ template: membershipTemplate, revision: 4, updatedAt: '', updatedBy: '' })),
   previewResult: ref(null), previewError: ref(''), previewFormat: ref('clash'), resolvedGroupName: ref(''),
   activeModule: ref('groups'), ruleSearchKeyword: ref('search'), ruleTargetFilter: ref(''), ruleTypeFilter: ref('DOMAIN'),
   ruleTargetGroupContext: ref(null), editingRule: ref(null), form: ref({}), showAdvancedRuleSettings: ref(true), drawerVisible: ref(false),
-  fromConfig: api.fromConfig, clientPolicyProfilesAPI: { preview: async input => { client.calls.push(input); return { groups: [{ name: 'PROXY', members: [{ kind: 'builtin', name: 'REJECT' }] }] }; } }
+  fromConfig: api.fromConfig, clientPolicyProfilesAPI: {
+    preview: async input => { client.calls.push(input); return { groups: [{ name: 'PROXY', members: [{ kind: 'builtin', name: 'REJECT' }] }] }; },
+    candidates: async userId => { client.calls.push({ candidatesUserId: userId }); return { items: [{ ref: userId || 'automatic' }], autoSelected: !userId }; }
+  }
 };
-const actionNames = ['loadPreview', 'resolveGroupMembers', 'handleGroupRuleAction', 'openCreateRuleDrawer', 'quickCreateRuleForService'];
 const run = new Function(...Object.keys(state), compiledActions + '\nreturn {' + actionNames.join(',') + '};')(...Object.values(state));
 await run.loadPreview();
 check('dirty page previews its draft and keeps the profile untouched', isDeepStrictEqual(client.calls.at(-1).template, membershipTemplate) && !('profileId' in client.calls.at(-1)) && state.isDirty.value);
@@ -148,7 +157,12 @@ await run.loadPreview();
 check('clean page previews its saved profile revision', isDeepStrictEqual(client.calls.at(-1), { profileId: 'inactive', profileRevision: 4, format: 'clash' }));
 await run.resolveGroupMembers('PROXY');
 check('region resolve uses the same preview and server members', state.resolvedGroupName.value === 'PROXY' && state.previewResult.value.groups[0].members[0].name === 'REJECT');
+state.previewUserId.value = 'selected-user';
+await run.loadPreview();
+check('saved preview uses the explicitly selected authorization context', client.calls.at(-1).userId === 'selected-user' && client.calls.at(-1).profileId === 'inactive');
 state.isDirty.value = true;
+await run.resolveGroupMembers('PROXY');
+check('draft member resolution uses the explicitly selected context without saving', client.calls.at(-1).userId === 'selected-user' && isDeepStrictEqual(client.calls.at(-1).template, membershipTemplate) && state.isDirty.value);
 const retained = structuredClone(state.clientConfig.value);
 state.clientPolicyProfilesAPI.preview = async () => { throw new Error('stale_client_policy'); };
 await run.loadPreview();
@@ -162,6 +176,36 @@ await newRequest;
 pendingPreviews[0]({ body: 'old draft' });
 await oldRequest;
 check('a late preview response cannot replace the latest preview', state.previewResult.value.body === 'new draft');
+const eligibleUser = { id: 'selected-user', username: 'eligible', status: 'active', expiresAt: '', nodeGroupIds: ['group'], trafficLimit: 0, usedTraffic: 0 };
+check('preview choices exclude disabled, expired, over-quota and ungranted accounts', run.eligiblePreviewUser(eligibleUser) && [
+  { status: 'disabled' }, { expiresAt: '2000-01-01T00:00:00Z' }, { expiresAt: 'invalid' }, { trafficLimit: 1, usedTraffic: 1 }, { nodeGroupIds: [] }
+].every(change => !run.eligiblePreviewUser({ ...eligibleUser, ...change })));
+const previewUserPages = [];
+state.userAPI.list = async (page, keyword, size) => {
+  previewUserPages.push([page, keyword, size]);
+  return { items: page === 1 ? Array.from({ length: 100 }, () => ({ ...eligibleUser, status: 'disabled' })) : [eligibleUser], total: 101 };
+};
+await run.loadPreviewUsers();
+check('advanced user choices load every page and keep an eligible selection', isDeepStrictEqual(previewUserPages, [[1, '', 100], [2, '', 100]]) && state.previewUsers.value.length === 1 && state.previewUserId.value === 'selected-user');
+state.clientPolicyProfilesAPI.preview = async input => { client.calls.push(input); return { body: input.userId || 'automatic' }; };
+const userDraft = structuredClone(state.clientConfig.value);
+await run.changePreviewUser();
+check('changing preview context refreshes candidates and resolved members without changing the draft', state.candidates.value.items[0].ref === 'selected-user' && state.previewResult.value.body === 'selected-user' && isDeepStrictEqual(state.clientConfig.value, userDraft) && state.isDirty.value);
+state.userAPI.list = async () => ({ items: [], total: 0 });
+await run.loadPreviewUsers();
+check('a user that is no longer eligible returns to automatic context consistently', state.previewUserId.value === '' && state.candidates.value.autoSelected && state.previewResult.value.body === 'automatic');
+state.userAPI.list = async () => { throw new Error('user-list-failed'); };
+await run.loadPreviewUsers();
+check('user-list failure reports the error and keeps the draft', state.previewUsersError.value.includes('user-list-failed') && !state.loadingPreviewUsers.value && isDeepStrictEqual(state.clientConfig.value, userDraft));
+const pendingCandidates = [];
+state.clientPolicyProfilesAPI.candidates = () => new Promise(resolve => pendingCandidates.push(resolve));
+const oldCandidates = run.loadCandidates();
+const newCandidates = run.loadCandidates();
+pendingCandidates[1]({ items: [{ ref: 'latest-user' }] });
+await newCandidates;
+pendingCandidates[0]({ items: [{ ref: 'old-user' }] });
+await oldCandidates;
+check('a late candidate response cannot replace the current context', state.candidates.value.items[0].ref === 'latest-user');
 for (const count of [0, 1, 3]) {
   state.clientConfig.value.rules = Array.from({ length: count }, (_, index) => rule(index, 'DOMAIN', 'example.com', 'PROXY'));
   state.drawerVisible.value = false;
@@ -178,9 +222,6 @@ check('filtered rules disable drag and offer view all', page.includes(':draggabl
 
 await api.policyAPI.serviceReferences('shared');
 check('shared reference query uses the service-set endpoint', client.calls.at(-1).path === '/service-sets/shared/references');
-const paginationSource = readFileSync(path.resolve(here, '..', 'src', 'app', 'pagination.ts'), 'utf8');
-const paginationJS = ts.transpileModule(paginationSource.replace('export ', ''), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText.replace('export ', '');
-const allPages = new Function(paginationJS + '\nreturn allPages;')();
 const visitedPages = [];
 const everyItem = await allPages(async page => {
   visitedPages.push(page);
@@ -213,6 +254,7 @@ check('shared save immediately displays the returned disable warning', shared.se
 await sharedRun.openEditService(set, true);
 check('clone creates an independent shared set without old references', shared.editingService.value === null && shared.serviceForm.name === '共享规则-副本' && shared.serviceReferences.value.clientProfiles.length === 0);
 check('shared editor explains immediate save and cached-rule semantics', page.includes('放弃配置草稿不会撤销这里的保存') && page.includes('客户端可能继续使用缓存或报告错误') && page.includes('profile.active') && page.includes('rule.enabled') && page.includes('policy.enabled'));
+check('shared deletion confirmation temporarily hides its higher-layer drawer without clearing the draft', page.includes('v-if="!deletingService"\n      v-model="serviceDrawerVisible"'));
 
 if (failures) {
   console.log(`\n${failures} client policy self-test(s) failed`);

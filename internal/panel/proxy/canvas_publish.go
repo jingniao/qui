@@ -165,6 +165,9 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 	if err := s.canvasSharedDependencies(ctx, p); err != nil {
 		return nil, err
 	}
+	if err := s.canvasCheckRelayCycles(ctx, p); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasScheme, checkRoutes bool) (*canvasPlan, error) {

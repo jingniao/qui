@@ -356,26 +356,16 @@ Status on November 5, 2026: Phases A–D are implemented and committed locally o
 
 ### 14.1 Verification Still Open
 
-1. **Linux gate for Phases B–D.** `scripts/check.sh` plus the real-core suite on `1bbb836` is still running. Only Phase A (`42491ab`) has passed so far.
+1. **Final Linux gate.** Earlier phase statements are historical. The Owner now requests full repository race and long mixed traffic. Current integrated snapshots run serially; final results are recorded in [final acceptance](../../docs/final-v1.4-acceptance.md). A running gate is not a pass.
 2. **Mihomo routing behavior (§11 item 10): completed in the closeout follow-up.** `TestMihomoRoutesProxyDirectAndReject` now sends actual HTTP through purpose group → keyword-filtered region group → exact inbound endpoint and verifies an empty keyword-filtered REJECT group fails. Xray access logs distinguish proxy from direct/rejected traffic. The targeted Linux real-core run passed (0.713s); this is local real-core routing evidence, not production client acceptance.
-3. **Authenticated browser walkthrough.** Not performed. Walk through the following in a browser:
-   - profile cards: create, edit, activate and delete
-   - a 409 conflict that keeps the draft
-   - the import preview for localStorage cards
-   - region-group keywords and "Add selected endpoints"
-   - "Resolve members" and the YAML preview context
-   - the filtered "Edit rules" view
-   - rule-set references and delete blocking
-4. **Two-Owner and restore scenarios (§11 items 1, 2, 13).** These are covered by Go tests only. Check them by hand:
-   - two browsers seeing the same activation
-   - repeating the localStorage import
-   - restoring an archive from before 0132 and an archive that includes it
+3. **Authenticated browser walkthrough: completed November 6 in the isolated current-source fixture.** Headless Chrome with two independent Owner sessions exercised profile create/edit/save/activate/delete; stale-save 409 with retained draft; repeated localStorage import without duplicate profiles or activation changes; explicit preview users, keyword exclusions, empty REJECT, exact endpoint additions, member resolution and YAML context; filtered empty "Edit rules" and preselected creation; shared references/delete 409, disable warnings and profile-save blocking. A real source-card refresh against a synthetic nonexistent `.invalid` hostname returned 502 and displayed failure diagnostics with the source retained. The walkthrough found and fixed a local confirmation-layering defect: the higher-layer service editor is temporarily hidden while its deletion confirmation is open, preserving its draft on cancel/409. Evidence is under `.tools/final-browser/qa/`; the runner is `.tools/final-browser-walkthrough.cjs`. This verifies disposable local behavior, not production acceptance, restore, or all browser/platform combinations.
+4. **Independent Owner sessions and restore scenarios (§11 items 1, 2, 13): completed within the recorded scope.** The product allows one Owner account. Two independent sessions passed activation visibility and stale-revision API409; two isolated browser contexts passed actual conflicting edits/draft retention and repeated localStorage import. Real v1.3.1/rc.2 binaries created and restored pre0132/new-format encrypted archives, preserving templates, profiles, metadata and revisions. Matched preupgrade binary/database/config/identity downgrade also passed on the isolated Linux test host. See the final report for evidence and limits; no production downgrade or multiple Owner records were used.
 
-### 14.2 Open Product Decisions
+### 14.2 Product Decisions (Completed November 6, 2026)
 
-1. **Preview user choice.** The API accepts `userId`, but the page only uses automatic selection, which it labels as automatic. §7's "advanced preview context" for picking another user is not built yet. Decide whether it is needed.
-2. **Batch input when editing a rule (§6.1).** Today batch expansion happens only when creating rules; editing an existing rule replaces it as a single rule. Confirm that this is the intended behavior, then document it.
-3. **Disabling a referenced rule set.** Since Phase D, saving a profile that has an *enabled* RULE-SET rule pointing at a *disabled* service set is rejected. Disabling a set used by the active profile therefore blocks re-saving that profile until the rule is disabled or the set is re-enabled. Confirm this, or relax it to a warning.
+1. **Preview user choice.** The editor now has a collapsed Owner-only "Advanced preview context" section. Automatic selection remains the default; an alternative user applies consistently to saved/draft YAML previews, resolved members and authorized endpoint candidates. The selector reads all user pages and offers active, unexpired, below-quota accounts with node-group authorization; the server remains authoritative and revalidates the account on every request. Refreshing the list resets a no-longer-eligible selection to automatic. Context changes and failures preserve the configuration draft, and late preview/candidate responses cannot replace the latest context.
+2. **Batch input when editing a rule (§6.1).** Retain the existing behavior: batch expansion applies only when creating rules. Editing replaces the selected rule as one rule and preserves its identity; it does not expand the input into multiple rules. Use creation for batch additions.
+3. **Disabling a referenced rule set.** Retain the existing blocking validation: saving a profile with an *enabled* RULE-SET rule that refers to a *disabled* panel service set is rejected. After disabling such a shared set, disable/remove the referencing rule or re-enable the set before re-saving that profile. Disabling the shared set still takes effect immediately, and previews report rendering warnings; clients may retain cached contents or report an error. Any saved reference continues to block deletion.
 
 ### 14.3 Known Limitations (Accepted, Documented)
 
@@ -384,11 +374,20 @@ Status on November 5, 2026: Phases A–D are implemented and committed locally o
 3. When no preview user exists, the preview returns only the diagnostic. It does not check whether the requested format is known.
 4. Every subscription render that includes panel service rules looks up each set's enabled state, so that previews can warn.
 
-### 14.4 Documentation Still Open
+### 14.4 Documentation
 
 - `docs/architecture.md` and `docs/protocol-support-matrix.md` now describe the profile library, `@endpoint` members, keyword filters and `emptyPolicy` (§10 last item). AGENTS.md, `docs/changelog.md` and `docs/release-notes-1.4.0.md` are updated.
-- `docs/v1-acceptance.md` has no entry for the items in §14.1 yet.
+- Current browser/restore evidence and final gate/soak progress are consolidated in `docs/final-v1.4-acceptance.md`; the acceptance/release tables are synchronized during final closeout rather than treating historical pending notes as current results.
 
 ### 14.5 Out of Scope (Unchanged From §9)
 
 Client telemetry and remote control, per-user profile assignment, arbitrary YAML-field editing, and panel-side fetching of remote rule content.
+
+### 14.6 November 6 Frontend Closeout Record
+
+- **Request:** complete the optional advanced preview user context and resolve the two remaining rule-edit/shared-set decisions without a broader redesign.
+- **Files:** `web/src/modules/routing/pages/ClientPolicyPage.vue`, `web/scripts/client-policy-selftest.mjs`, and this plan.
+- **Before/after:** the page previously always requested the automatic preview user. The collapsed context selector now sends the chosen `userId` through the existing preview and candidate APIs, including group member resolution. The user list is loaded on demand with complete pagination. Drafts are retained on failures; stale context responses are ignored. Browser testing also found the service deletion confirmation behind its editor; the editor now hides temporarily while confirming, and cancel/409 restores the same draft.
+- **API/migrations:** no changes. Existing `POST /client-policy-profiles/preview`, `GET /client-policy-candidates?userId=...` and paginated `GET /users` are reused. Existing rule editing and service-set validation behavior are unchanged and are specified in §14.2.
+- **Verification:** `node web/scripts/client-policy-selftest.mjs` passes all 68 checks, including explicit saved/draft context, pagination, eligibility, removed-user fallback, draft retention, stale candidate responses and the service-confirmation visibility guard. `npm.cmd --prefix web run typecheck` passes after the layering fix. The earlier `npm.cmd --prefix web run build` passed after a sandbox escalation for Windows esbuild configuration loading (5.43s after typechecking); final build validation also belongs to the final Linux gate. All eight actual browser scenario groups above pass, with zero uncaught page errors.
+- **Acceptance closeout:** isolated old/new restore, matched downgrade and final Linux check/race/real-core gates are now complete; the two-hour soak completed with four transient request errors. These are separate evidence from the frontend checks; see `docs/final-v1.4-acceptance.md` for results and limits.

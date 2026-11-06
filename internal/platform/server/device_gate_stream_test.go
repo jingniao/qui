@@ -83,28 +83,81 @@ func TestDeviceGateNegotiationOldAgentsAndReconnect(t *testing.T) {
 				}
 			}
 			caps(1)
-			gate := func() {
-				command, err := stream.Recv()
-				if err != nil || command.GetDeviceGateCommand() == nil {
-					t.Fatal("missing gate refresh", err)
+			checkGate := func(command *pb.ServerMessage, wantKeys int) {
+				if command.GetDeviceGateCommand() == nil {
+					t.Fatal("missing gate refresh")
 				}
 				r, err := devicegate.Decode(command.GetDeviceGateCommand().RequestJson)
-				if err != nil || len(r.Entries) != 1 || len(r.Entries[0].Keys) != 1 {
+				if err != nil || r.TTLSeconds != 180 {
 					t.Fatal("wrong gate payload")
 				}
+				if wantKeys == 0 {
+					if len(r.Entries) != 0 {
+						t.Fatal("gate removal still contains restrictions")
+					}
+				} else if len(r.Entries) != 1 || r.Entries[0].CredentialID != c.ID || len(r.Entries[0].Keys) != wantKeys {
+					t.Fatal("wrong gate restrictions")
+				}
+			}
+			gate := func(wantKeys int) {
+				command, err := stream.Recv()
+				if err != nil {
+					t.Fatal("missing gate refresh", err)
+				}
+				checkGate(command, wantKeys)
 			}
 			if mode.hello && mode.capability {
-				gate()
+				gate(1)
 			}
-			if err := stream.Send(&pb.AgentMessage{NodeId: f.nodeID, MessageId: "heartbeat", Sequence: 2, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Heartbeat{Heartbeat: &pb.Heartbeat{CurrentRevision: revision, SuccessfulRevision: revision}}}); err != nil {
-				t.Fatal(err)
+			sendHeartbeat := func(sequence uint64) {
+				if err := stream.Send(&pb.AgentMessage{NodeId: f.nodeID, MessageId: "heartbeat", Sequence: sequence, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Heartbeat{Heartbeat: &pb.Heartbeat{CurrentRevision: revision, SuccessfulRevision: revision}}}); err != nil {
+					t.Fatal(err)
+				}
 			}
-			ack, err := stream.Recv()
-			if err != nil || ack.GetAck() == nil {
-				t.Fatal("old Agent received a gate or lost its heartbeat", err)
+			heartbeat := func(sequence uint64) {
+				sendHeartbeat(sequence)
+				ack, err := stream.Recv()
+				if err != nil || ack.GetAck() == nil || ack.GetAck().AgentSequence != sequence {
+					t.Fatal("unexpected gate or missing heartbeat ack", sequence, err)
+				}
 			}
+			heartbeat(2)
+			// An identical gate does not accompany every report. The next ACK is
+			// a stream-order barrier: a duplicate sent after heartbeat 2 would
+			// arrive before this ACK and fail immediately, without a timed read.
+			// Fake-clock delivery tests cover the one-minute lease renewal.
+			heartbeat(3)
 			if mode.hello && mode.capability {
-				gate()
+				// A changed restriction still takes effect on the very next report.
+				if _, err := f.app.Database.Exec("UPDATE users SET device_limit=2 WHERE id=?", u.ID); err != nil {
+					t.Fatal(err)
+				}
+				sendHeartbeat(4)
+				// The server may observe the database change after ACK 3 but
+				// before its subsequent gate check. Accept either ordering of the
+				// changed gate and ACK 4, while requiring exactly one of each.
+				gotAck, gotGate := false, false
+				for range 2 {
+					message, err := stream.Recv()
+					if err != nil {
+						t.Fatal("missing changed gate or heartbeat ack", err)
+					}
+					if ack := message.GetAck(); ack != nil {
+						if gotAck || ack.AgentSequence != 4 {
+							t.Fatal("unexpected heartbeat ack", ack.AgentSequence)
+						}
+						gotAck = true
+					} else {
+						if gotGate {
+							t.Fatal("duplicate changed gate")
+						}
+						checkGate(message, 0)
+						gotGate = true
+					}
+				}
+				if _, err := f.app.Database.Exec("UPDATE users SET device_limit=1 WHERE id=?", u.ID); err != nil {
+					t.Fatal(err)
+				}
 				sessionCancel()
 				deadline := time.Now().Add(2 * time.Second)
 				for {
@@ -121,9 +174,9 @@ func TestDeviceGateNegotiationOldAgentsAndReconnect(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				hello(2)
-				caps(3)
-				gate()
+				hello(4)
+				caps(5)
+				gate(1)
 			}
 		})
 	}

@@ -164,13 +164,15 @@ func TestCommittedReservationServesAndRealAgentRejoinsPreservedIdentity(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.source.Config.GRPCAddress = firstGRPC.Addr().String()
+		// Keep the restore target on :0. The original server owns this socket
+		// only until shutdown; its assigned port may be reused by parallel tests
+		// during database preparation. Recovery reserves its own fresh socket.
 	})
 	ctx := context.Background()
 	f.record(t, "newer-runtime-count", 200, 300)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	agentConfig := config.DefaultAgent()
-	agentConfig.ControlAddress = f.source.Config.GRPCAddress
+	agentConfig.ControlAddress = firstGRPC.Addr().String()
 	agentConfig.DataDirectory = filepath.Dir(f.agentDirectory)
 	agentConfig.CorePath = filepath.Join(t.TempDir(), "missing-xray")
 	agentConfig.TLS.ClientCA = filepath.Join(f.agentDirectory, "node-ca.crt")

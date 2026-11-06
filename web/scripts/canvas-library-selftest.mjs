@@ -284,9 +284,10 @@ assert.ok(execSwitcher.includes('hidden xl:inline 2xl:hidden">服务器<'));
 // that is the room the scheme name gets back at exactly 1280 px. The <span> decides
 // it (a bare hidden on the control would lose to the global .ios-btn-secondary
 // display rule, which is what made the old md:inline duplicate always visible).
-assert.ok(header.includes('<span class="hidden 2xl:inline">'));
-assert.ok(header.includes('<button type="button" class="ios-btn-secondary !py-1 text-xs" @click="checkScheme">检查</button>'));
-assert.equal(header.includes('ios-btn-secondary !py-1 text-xs hidden'), false);
+const duplicateCheck = header.match(/<span class="hidden 2xl:inline">\s*(<button\b[^>]*@click="checkScheme"[^>]*>检查<\/button>)\s*<\/span>/)?.[1];
+assert.ok(duplicateCheck, 'the duplicate check action must stay in its responsive wrapper');
+assert.match(duplicateCheck, /\btype="button"/);
+assert.doesNotMatch(duplicateCheck, /class="[^"]*\bhidden\b/);
 // Every toggle goes through the helpers that keep only one drawer open below xl.
 assert.ok(header.includes('@click="toggleLeftPanel()"'));
 assert.ok(header.includes('@click="toggleRightPanel()"'));

@@ -310,6 +310,20 @@
               {{ clientConfig.extra.providers.length + serviceSets.length }}
             </span>
           </button>
+          <details v-if="isOwner" class="pt-3 text-sm space-y-3" @toggle="handlePreviewContextToggle">
+            <summary class="cursor-pointer font-medium text-neutral-700">高级预览上下文</summary>
+            <div class="space-y-2 px-1">
+              <label for="client-policy-preview-user" class="block text-sm text-neutral-700">预览用户</label>
+              <select id="client-policy-preview-user" v-model="previewUserId" class="form-input-base" @change="changePreviewUser">
+                <option value="">自动选择有效用户</option>
+                <option v-for="user in previewUsers" :key="user.id" :value="user.id">{{ user.displayName || user.username }} ({{ user.username }})</option>
+              </select>
+              <p class="text-xs text-neutral-500">按所选用户的授权生成预览、解析成员与端点候选；仅影响本次查看。</p>
+              <button type="button" class="ios-btn-secondary" :disabled="loadingPreviewUsers" @click="loadPreviewUsers">{{ loadingPreviewUsers ? '加载中…' : '刷新用户' }}</button>
+              <p v-if="previewUsersError" role="alert" class="text-xs text-red-600">{{ previewUsersError }}</p>
+              <p v-else-if="previewUsersLoaded && !previewUsers.length" class="text-xs text-neutral-500">没有已授权节点组的有效用户。</p>
+            </div>
+          </details>
         </div>
 
         <!-- 右侧区域：对应模块设置内容 -->
@@ -2102,6 +2116,7 @@
 
     <!-- Form Drawer: Edit / Create Service Rule Set -->
     <FormDrawer
+      v-if="!deletingService"
       v-model="serviceDrawerVisible"
       :title="editingService ? `编辑规则集 · v${editingService.version || 1}` : '创建自定义规则集'"
       description="统一维护目标域名、后缀与 IP/CIDR。保存后版本号自动增加，客户端与节点端均可引用。"
@@ -2290,6 +2305,7 @@ import {
 } from '../api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
+import { userAPI, type ProxyUser } from '../../users/api';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { authState, formatTime } from '../../../app/auth';
@@ -2791,14 +2807,67 @@ const selectedEndpoints = ref<string[]>([]);
 const candidateError = ref('');
 const draftMetadata = ref<Record<string, unknown>>({});
 const groupCategories = ref<Record<string, 'service' | 'region' | 'other'>>({});
+const previewUserId = ref('');
+const previewUsers = ref<ProxyUser[]>([]);
+const previewUsersLoaded = ref(false);
+const loadingPreviewUsers = ref(false);
+const previewUsersError = ref('');
+let candidateGeneration = 0;
+
+function eligiblePreviewUser(user: ProxyUser) {
+  return user.status === 'active' && user.nodeGroupIds.length > 0
+    && (!user.expiresAt || Date.parse(user.expiresAt) > Date.now())
+    && !(user.trafficLimit > 0 && user.usedTraffic >= user.trafficLimit);
+}
+
+async function loadPreviewUsers() {
+  loadingPreviewUsers.value = true;
+  previewUsersError.value = '';
+  try {
+    const result = await allPages(page => userAPI.list(page, '', 100));
+    previewUsers.value = result.items.filter(eligiblePreviewUser);
+    previewUsersLoaded.value = true;
+    if (previewUserId.value && !previewUsers.value.some(user => user.id === previewUserId.value)) {
+      previewUserId.value = '';
+      await changePreviewUser();
+    }
+  } catch (error) {
+    previewUsersError.value = '加载预览用户失败：' + (error as Error).message;
+  } finally {
+    loadingPreviewUsers.value = false;
+  }
+}
+
+function handlePreviewContextToggle(event: Event) {
+  if ((event.target as HTMLDetailsElement).open && !previewUsersLoaded.value) loadPreviewUsers();
+}
+
+async function changePreviewUser() {
+  previewGeneration++;
+  previewResult.value = null;
+  previewError.value = '';
+  candidates.value = { items: [], autoSelected: !previewUserId.value };
+  selectedEndpoints.value = [];
+  await Promise.all([
+    loadCandidates(),
+    activeModule.value === 'preview' || resolvedGroupName.value ? loadPreview() : Promise.resolve()
+  ]);
+}
 
 async function loadCandidates() {
+  const generation = ++candidateGeneration;
   candidateError.value = '';
   try {
-    candidates.value = await clientPolicyProfilesAPI.candidates();
-    selectedEndpoints.value = [];
+    const result = await clientPolicyProfilesAPI.candidates(previewUserId.value || undefined);
+    if (generation === candidateGeneration) {
+      candidates.value = result;
+      selectedEndpoints.value = [];
+    }
   } catch (error) {
-    candidateError.value = '加载授权候选失败：' + (error as Error).message;
+    if (generation === candidateGeneration) {
+      candidates.value = { items: [], autoSelected: !previewUserId.value };
+      candidateError.value = '加载授权候选失败：' + (error as Error).message;
+    }
   }
 }
 
@@ -4373,7 +4442,7 @@ async function loadPreview() {
     const input = isDirty.value || !editingPolicyId.value
       ? { template: fromConfig(clientConfig.value) }
       : { profileId: editingPolicyId.value, profileRevision: clientConfig.value.version };
-    const result = await clientPolicyProfilesAPI.preview({ ...input, format: previewFormat.value });
+    const result = await clientPolicyProfilesAPI.preview({ ...input, format: previewFormat.value, ...(previewUserId.value ? { userId: previewUserId.value } : {}) });
     if (generation === previewGeneration) previewResult.value = result;
   } catch (e) {
     if (generation === previewGeneration) previewError.value = (e as Error).message;

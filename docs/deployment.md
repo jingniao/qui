@@ -133,6 +133,8 @@ go run ./cmd/agent --config deploy/examples/agent.dev.yaml
 
 本地开发统一访问 `http://127.0.0.1:8080`：运行 `npm --prefix web run dev` 启动 Vite，页面与热更新 WebSocket 共用 8080；API、订阅与健康检查转发到 `panel.dev.yaml` 的后端 `127.0.0.1:8081`。Vite 固定端口，8080 被占用时直接报错，不自动切换。gRPC 为 `127.0.0.1:9443`，状态在 `state/`。
 
+Vite 开发入口监听 `0.0.0.0:8080`，同一局域网可通过 `http://<开发机局域网 IP>:8080` 访问，页面、API 与热更新保持同一地址。Windows 防火墙须允许相应局域网访问 TCP 8080；后端 8081 仍只监听本机回环。
+
 ## 3. 安装面板
 
 在解包目录内执行（脚本要求同级的 `systemd/` 与 `examples/`）：

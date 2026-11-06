@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-4 text-sm text-ios-secondary">
-    <template v-if="step === 3 && hasSecurity(f.protocol)">
+    <template v-if="hasSecurity(f.protocol)">
       <label v-if="hasTransport(f.protocol)" class="block">传输
         <select :value="s.transport || 'tcp'" @change="setTransport" class="form-input-base mt-2"><option v-for="choice in transports" :key="choice.value" :value="choice.value" :disabled="!!choice.reason" :title="choice.reason">{{ choice.label }}{{ choice.reason ? '（不可用）' : '' }}</option></select>
       </label>
@@ -49,7 +49,6 @@
         <label class="block">信任 CA PEM（可选）<textarea v-model="s.trusted_ca_pem" rows="3" class="form-input-base mt-2 font-mono text-xs" /></label>
       </template>
     </template>
-    <template v-if="step === 4">
       <label v-if="f.protocol === 'shadowsocks'" class="block">加密方式
         <select v-model="s.method" class="form-input-base mt-2"><option>chacha20-ietf-poly1305</option><option>aes-256-gcm</option><option>aes-128-gcm</option></select>
       </label>
@@ -117,15 +116,13 @@
         <label v-if="!relay" class="block">网络<select v-model="s.forward.network" class="form-input-base mt-2"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp,udp">TCP + UDP</option></select></label>
         <p v-if="!gost && !relay" class="text-xs">目标池、端口范围与限速只支持 GOST 核心（设置契约 2）。</p>
       </template>
-      <p v-if="!['shadowsocks', 'wireguard', 'forward', 'hysteria2', 'tuic'].includes(f.protocol)" class="text-xs">此协议没有额外参数，可继续。</p>
-    </template>
   </div>
 </template>
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { NodeView } from '../../../nodes/api';
 import { changeSecurity, changeTransport, flowChoices, internalRelaySettingsReason, securityChoices, serverSettingsReason, transportChoices, XHTTP_MODES, forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type EditorState } from './nodeEditorModel';
-const props = defineProps<{ state: EditorState; step: number; gost?: boolean; server?: NodeView }>();
+const props = defineProps<{ state: EditorState; gost?: boolean; server?: NodeView }>();
 const f = computed(() => props.state.form), s = computed(() => props.state.form.settings);
 const transports = computed(() => transportChoices(props.server, f.value.core || '', f.value.protocol, s.value));
 const securities = computed(() => securityChoices(props.server, f.value.core || '', f.value.protocol, s.value));

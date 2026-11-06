@@ -1,21 +1,27 @@
 <template>
-  <FormDrawer :model-value="true" :title="state.original ? '编辑节点' : '新建节点'" width="2xl" @update:model-value="close">
-    <nav aria-label="节点编辑步骤" class="grid grid-cols-3 sm:grid-cols-6 gap-2">
-      <button v-for="item in steps" :key="item.number" type="button" :disabled="busy || (!state.original && item.number > reached) || (item.number === 3 && !securityStep)" :aria-current="step === item.number ? 'step' : undefined" :class="['rounded-xl p-2 text-xs transition-colors active:scale-95 disabled:opacity-40', step === item.number ? 'bg-ios-blue text-white' : 'bg-ios-bg text-ios-secondary']" @click="go(item.number)">{{ item.symbol }} {{ item.label }}</button>
-    </nav>
+  <FormDrawer :model-value="true" :title="state.original ? '编辑节点' : '新建节点'" description="填写节点信息与协议设置，保存草稿或发布到服务器。" width="2xl" @update:model-value="close">
     <p v-if="loading" role="status" class="text-sm text-ios-secondary">正在读取服务器与入站…</p>
     <div v-else-if="loadError" class="space-y-2"><p role="alert" class="text-ios-red text-sm">{{ loadError }}</p><button class="ios-btn-secondary" @click="load">重试</button></div>
-    <fieldset v-else :disabled="busy || !!savedId" class="space-y-4">
-      <div v-if="step === 1" class="space-y-3">
-        <p v-if="state.original" class="text-xs text-ios-secondary">编辑时服务器已锁定。</p>
-        <label v-for="server in eligibleServers" :key="server.id" class="block rounded-2xl border border-ios-border p-4 cursor-pointer">
-          <span class="flex items-center gap-2 text-sm text-ios-label"><input v-model="f.nodeId" :value="server.id" type="radio" :disabled="!!state.original" />{{ server.name }}</span>
-          <span class="block mt-2 text-xs text-ios-secondary font-mono">{{ coreSummaryLabel(server) }}</span>
-          <span class="block mt-2 text-xs text-ios-secondary">{{ server.capabilities?.protocols?.filter(p => p.inbound).map(p => p.protocol).join(' · ') || '尚未上报支持的入站协议' }}</span>
-        </label>
+    <p v-if="error" ref="errorMessage" tabindex="-1" role="alert" class="text-sm text-ios-red outline-none">{{ error }}</p>
+    <fieldset v-if="!loading && !loadError" :disabled="busy || !!savedId" class="space-y-6">
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-ios-label">基础信息</h4>
+        <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" class="form-input-base mt-1.5" @input="autoName = false" /></label>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label class="block text-xs text-ios-secondary">所属服务器
+            <select v-model="f.nodeId" :disabled="!!state.original" class="form-input-base mt-1.5">
+              <option value="" disabled>请选择服务器</option>
+              <option v-for="server in eligibleServers" :key="server.id" :value="server.id">{{ server.name }}</option>
+            </select>
+          </label>
+          <label class="block text-xs text-ios-secondary">协议
+            <select :value="f.protocol" :disabled="!!state.original" class="form-input-base mt-1.5" @change="changeProtocol(state, ($event.target as HTMLSelectElement).value)">
+              <option v-for="protocol in protocols" :key="protocol" :value="protocol" :disabled="!!protocolReason(selectedServer, protocol, f.core)">{{ protocol.toUpperCase() }}{{ protocolReason(selectedServer, protocol, f.core) ? '（不可用）' : '' }}</option>
+            </select>
+          </label>
+        </div>
+        <p v-if="state.original" class="text-xs text-ios-secondary">编辑时所属服务器和协议保持不变。</p>
         <p v-if="!eligibleServers.length" class="text-sm text-ios-secondary">没有可用的已登记服务器，请先登记服务器。</p>
-      </div>
-      <div v-if="step === 2" class="space-y-4">
         <div v-if="coreSelectable.length > 1" class="space-y-1.5">
           <label class="block text-xs text-ios-secondary">运行内核
             <select v-model="f.core" class="form-input-base mt-1.5">
@@ -28,53 +34,62 @@
         <p v-else-if="coreSelectable.length === 1" class="text-xs text-ios-secondary">运行内核：{{ coreSelectable[0].label }} {{ coreSelectable[0].version }}（该服务器没有其他能承载当前协议的核心）</p>
         <p v-else class="text-xs text-ios-orange">该服务器尚未上报能承载当前协议的核心，运行内核未知；保存时由后端判定。</p>
         <p v-if="coreError" role="alert" class="text-xs text-ios-red">{{ coreError }}</p>
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <button v-for="protocol in protocols" :key="protocol" type="button" :disabled="!!state.original || !!protocolReason(selectedServer, protocol, f.core)" :title="protocolReason(selectedServer, protocol, f.core)" :class="['text-left rounded-2xl border p-3 active:scale-95 disabled:opacity-50', f.protocol === protocol ? 'border-ios-blue bg-ios-blue/10' : 'border-ios-border bg-ios-card']" @click="changeProtocol(state, protocol)">
-            <span class="block text-sm text-ios-label">{{ protocol }}</span><span v-if="protocolReason(selectedServer, protocol, f.core)" class="block mt-1 text-xs text-ios-secondary">{{ protocolReason(selectedServer, protocol, f.core) }}</span>
-          </button>
-        </div>
+        <p v-if="protocolReason(selectedServer, f.protocol, f.core)" role="alert" class="text-xs text-ios-orange">{{ protocolReason(selectedServer, f.protocol, f.core) }}</p>
         <p v-if="udpLimitNote" class="text-xs text-ios-secondary">{{ udpLimitNote }}</p>
-        <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" class="form-input-base mt-2" @input="autoName = false" /></label>
-        <div>
-          <div class="flex items-center justify-between">
-            <label class="block text-xs text-ios-secondary">监听端口</label>
-            <span v-if="serverPortRange" class="text-[11px] text-ios-blue font-mono font-medium">
-              服务器分配范围: {{ serverPortRange.start }} - {{ serverPortRange.end }}
-            </span>
+      </section>
+      <section class="space-y-3 border-t border-ios-border pt-5">
+        <h4 class="text-sm font-semibold text-ios-label">连接设置</h4>
+        <p class="text-xs text-ios-secondary">服务器地址：<span class="font-mono">{{ selectedServer?.publicIp || selectedServer?.hostname || '未上报' }}</span></p>
+        <div class="text-xs text-ios-secondary">
+          <label for="node-editor-port" class="block">监听端口</label>
+          <div class="flex items-center gap-2 mt-1.5">
+            <input id="node-editor-port" v-model.number="f.port" type="number" min="1" max="65535" class="form-input-base min-w-0 flex-1 font-mono" />
+            <button type="button" class="ios-btn-secondary shrink-0" @click="pickPort">随机端口</button>
           </div>
-          <p v-if="!serverPortRange" class="text-[11px] text-ios-secondary">未设置服务器范围；随机端口使用编辑器默认范围 10000–65535。</p>
-          <input v-model.number="f.port" type="number" min="1" max="65535" class="form-input-base mt-1.5 font-mono" />
         </div>
-        <button type="button" class="ios-btn-secondary" @click="pickPort">随机端口</button>
+        <p v-if="serverPortRange" class="text-[11px] text-ios-blue font-mono">服务器分配范围：{{ serverPortRange.start }}–{{ serverPortRange.end }}</p>
+        <p v-else class="text-[11px] text-ios-secondary">未设置服务器范围；随机端口使用编辑器默认范围 10000–65535。</p>
         <p aria-live="polite" :class="['text-xs', conflict ? 'text-ios-red' : 'text-ios-secondary']">{{ conflict || '入站列表中无端口冲突（含画布方案入站）；不检测主机其他进程。' }}</p>
-      </div>
-      <NodeProtocolFields v-if="step === 3 || step === 4" :state="state" :step="step" :server="selectedServer" :gost="gostForwardReady(selectedServer, f.core)" />
-      <NodeAdvancedFields v-if="step === 5" :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" />
-      <section v-if="step === 5 && isOwner" class="panel-card p-4 space-y-3">
-        <h3 class="text-sm font-semibold text-ios-label">所属分组</h3>
+      </section>
+      <section class="space-y-4 border-t border-ios-border pt-5">
+        <h4 class="text-sm font-semibold text-ios-label">协议设置</h4>
+        <NodeProtocolFields :state="state" :server="selectedServer" :gost="gostForwardReady(selectedServer, f.core)" />
+      </section>
+      <section class="space-y-3 border-t border-ios-border pt-5">
+        <h4 class="text-sm font-semibold text-ios-label">授权与订阅</h4>
+        <div class="flex flex-wrap gap-x-5 gap-y-2 text-sm text-ios-label">
+          <label class="inline-flex items-center gap-2"><input v-model="f.enabled" type="checkbox" />启用节点</label>
+          <label v-if="!f.internalRelay && f.protocol !== 'forward'" class="inline-flex items-center gap-2"><input v-model="f.subscriptionVisible" type="checkbox" />显示在授权用户订阅中</label>
+        </div>
+        <p v-if="!f.internalRelay && f.protocol !== 'forward' && !f.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
+        <p class="text-xs font-medium text-ios-secondary">所属分组</p>
         <label v-for="group in memberGroups" :key="group.id" class="flex items-center gap-2 text-sm text-ios-label">
           <input v-model="selectedGroupIds" type="checkbox" :value="group.id" class="accent-ios-blue" />{{ group.name }}
           <span v-if="group.purpose === 'relay' || group.purpose === 'egress'" class="text-xs text-ios-secondary">（不授予用户接入）</span>
         </label>
+        <p v-if="!memberGroups.length" class="text-xs text-ios-secondary">暂无节点分组，可在节点分组页面创建后添加。</p>
         <p class="text-xs text-ios-secondary">新入站不会自动加入分组。分组保存后影响订阅筛选；运行配置需发布后由服务器确认生效。</p>
       </section>
-      <div v-if="step === 6" class="space-y-4 text-sm">
+      <NodeAdvancedFields :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" :open="!!error" />
+      <details :open="!!savedId" class="rounded-2xl border border-ios-border p-4 text-sm">
+        <summary class="cursor-pointer font-medium text-ios-label">配置预览与变更</summary>
+        <div class="space-y-4 mt-4">
         <p class="text-ios-label">{{ selectedServer?.name || '—' }} · {{ f.name }} · {{ f.protocol.toUpperCase() }} :{{ f.port }}</p>
         <p class="text-ios-secondary">{{ f.listen }} · 运行内核 {{ f.core ? coreChoices.find(c => c.name === f.core)?.label || f.core : `主核心（${primaryCoreLabel}）` }} · {{ f.enabled ? '启用' : '停用' }} · {{ f.subscriptionVisible && !f.internalRelay ? '订阅可见' : '订阅隐藏' }} · {{ f.internalRelay ? '内部中转' : '用户接入' }}</p>
         <p class="text-xs text-ios-secondary">默认出站：{{ f.defaultOutbound }}；用户范围：{{ f.allowedUserIds.length ? f.allowedUserIds.map(id => users.find(u => u.id === id)?.username || id).join('、') : '已获授权、且分组包含此入站的用户' }}</p>
         <p class="text-xs text-ios-secondary">所属分组：{{ selectedGroupIds.map(id => memberGroups.find(g => g.id === id)?.name || '—').join('、') || '—' }}。非空 allowedUserIds 只进一步缩小上述分组授权范围，不会单独授予接入权限。</p>
         <p v-if="f.protocol === 'forward'" class="text-xs text-ios-secondary">{{ forwardPreview }}</p>
         <p v-if="f.settings.security === 'reality'" class="text-xs text-ios-secondary">Reality：{{ f.settings.reality?.handshake_target || '尚未填写握手目标' }}；订阅使用第一个 SNI / Short ID。{{ f.rotateRealityKey ? '本次保存将轮换密钥；发布成功后客户端须更新订阅。' : state.original?.hasRealityKey ? '保留现有密钥。' : '首次保存时生成密钥，保存后返回公钥。' }}</p>
-        <p class="text-xs text-ios-orange">保存草稿后运行配置不变。发布会包含该服务器的全部待发布修改；内部中转请先发布目标服务器。</p>
         <div class="overflow-x-auto rounded-2xl border border-ios-border">
           <table class="w-full text-xs text-left"><thead class="bg-ios-bg text-ios-secondary"><tr><th class="p-3">字段</th><th class="p-3">保存前</th><th class="p-3">保存后</th></tr></thead>
             <tbody><tr v-for="row in diff" :key="row.field" :class="row.changed ? 'bg-ios-blue/10' : ''"><td class="p-3 text-ios-secondary">{{ row.field }}</td><td class="p-3 font-mono whitespace-pre-wrap break-all">{{ row.before }}</td><td class="p-3 font-mono whitespace-pre-wrap break-all">{{ row.after }}</td></tr></tbody>
           </table>
         </div>
         <p class="text-xs text-ios-secondary">证书与密钥仅显示是否设置。</p>
-      </div>
+        </div>
+      </details>
+      <p class="text-xs text-ios-orange">保存草稿后运行配置不变。发布会包含该服务器的全部待发布修改；内部中转请先发布目标服务器。</p>
     </fieldset>
-    <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
     <p v-if="result" role="status" class="text-sm text-ios-secondary">{{ result }}</p>
     <div v-if="savedInbound?.settings.reality?.public_key" class="space-y-2 text-xs text-ios-secondary">
       <label class="block">已保存的 Reality 公钥<input :value="savedInbound.settings.reality.public_key" readonly class="form-input-base mt-2 font-mono text-xs" /></label>
@@ -83,20 +98,19 @@
       <p>公钥来自保存后的服务器读回；运行配置与客户端连接仍以成功发布为准。</p>
     </div>
     <template #footer>
+      <div class="flex w-full flex-wrap items-center justify-end gap-2">
       <button v-if="savedId" class="ios-dialog-btn-secondary" @click="emit('close')">关闭</button>
       <template v-else>
-        <button :disabled="busy || step === 1 || loading" class="ios-dialog-btn-secondary" @click="back">上一步</button>
-        <button v-if="step < 6" :disabled="busy || loading || !!loadError" class="ios-dialog-btn-primary" @click="next">下一步</button>
-        <template v-else>
-          <button :disabled="busy || loading || !!loadError" class="ios-dialog-btn-secondary" @click="save(false)">保存草稿</button>
-          <button :disabled="busy || loading || !!loadError" class="ios-dialog-btn-primary" @click="save(true)">{{ busy ? '处理中…' : '保存并发布' }}</button>
-        </template>
+        <button :disabled="busy" class="ios-dialog-btn-secondary" @click="close">取消</button>
+        <button :disabled="busy || loading || !!loadError" class="ios-dialog-btn-secondary" @click="save(false)">保存草稿</button>
+        <button :disabled="busy || loading || !!loadError" class="ios-dialog-btn-primary" @click="save(true)">{{ busy ? '处理中…' : '保存并发布' }}</button>
       </template>
+      </div>
     </template>
   </FormDrawer>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import FormDrawer from '../../../../components/FormDrawer.vue';
 import { isOwner } from '../../../../app/auth';
@@ -110,8 +124,7 @@ import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
-import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, hasSecurity, portConflict, previewPayload, protocolReason, randomPort, relayMode, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
-import { coreSummaryLabel } from '../../../nodes/coreSummary';
+import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, portConflict, previewPayload, protocolReason, randomPort, relayMode, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
 const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin }>(), { serverId: '', inbound: null, origin: 'list' });
 const emit = defineEmits<{ close: []; saved: [] }>();
 const route = useRoute();
@@ -121,10 +134,11 @@ const servers = ref<NodeView[]>([]), inbounds = ref<Inbound[]>([]), users = ref<
 const outbounds = ref<Outbound[]>([]), groups = ref<OutboundGroup[]>([]), chains = ref<ProxyChain[]>([]);
 const memberGroups = ref<NodeGroup[]>([]), selectedGroupIds = ref<string[]>([]);
 const initialGroupIds = ref<string[]>([]);
-const step = ref(props.inbound ? 6 : 1), reached = ref(props.inbound ? 6 : 1), autoName = ref(!props.inbound);
+const autoName = ref(!props.inbound);
 const loading = ref(true), busy = ref(false), error = ref(''), loadError = ref(''), result = ref(''), savedId = ref('');
 const savedInbound = ref<Inbound | null>(null), keyCopyStatus = ref('');
-const steps = ['服务器', '协议与端口', '传输与安全', '协议专属', '高级', '确认'].map((label, i) => ({ label, number: i + 1, symbol: '①②③④⑤⑥'[i] }));
+const errorMessage = ref<HTMLElement | null>(null);
+watch(error, async message => { if (message) { await nextTick(); errorMessage.value?.focus(); } });
 const protocols = computed(() => [...new Set([...protocolOptions.inbound, 'forward'])]);
 const selectedServer = computed(() => servers.value.find(s => s.id === f.value.nodeId));
 const eligibleServers = computed(() => servers.value.filter(serverEligible));
@@ -141,7 +155,6 @@ const udpLimitNote = computed(() => {
 });
 const primaryCoreLabel = computed(() => primaryCore.value ? `${primaryCore.value.label} ${primaryCore.value.version}` : '—');
 const coreError = computed(() => selectedServer.value ? coreReason(selectedServer.value, f.value.core) : '');
-const securityStep = computed(() => hasSecurity(f.value.protocol));
 const conflict = computed(() => portConflict(f.value, inbounds.value, state.original?.id));
 // The preview states what publishing this forward will actually create: one
 // service per (port, transport), each with the whole pool and its own limits.
@@ -193,7 +206,7 @@ async function load() {
   loading.value = true; loadError.value = '';
   try {
     await loadProtocolSupport();
-    const data = await Promise.all([choices(p => nodeAPI.list(p, '')), choices((p, s) => proxyAPI.inbounds('', p, s)), choices((p, s) => userAPI.list(p, '', s)), choices((p, s) => proxyAPI.outbounds('', p, s)), choices((p, s) => proxyAPI.groups('', p, s)), choices((p, s) => proxyAPI.chains('', p, s)), choices(groupAPI.list)]);
+    const data = await Promise.all([choices((p, s) => nodeAPI.list(p, '', false, s)), choices((p, s) => proxyAPI.inbounds('', p, s)), choices((p, s) => userAPI.list(p, '', s)), choices((p, s) => proxyAPI.outbounds('', p, s)), choices((p, s) => proxyAPI.groups('', p, s)), choices((p, s) => proxyAPI.chains('', p, s)), choices(groupAPI.list)]);
     if (disposed) return;
     [servers.value, inbounds.value, users.value, outbounds.value, groups.value, chains.value] = data;
     memberGroups.value = data[6];
@@ -214,17 +227,6 @@ async function load() {
   finally { if (!disposed) loading.value = false; }
 }
 function check(n: number) { error.value = validateStep(n, state, selectedServer.value, inbounds.value); return !error.value; }
-function go(n: number) {
-  if (busy.value || loading.value || savedId.value) return;
-  if (n > step.value && !check(step.value)) return;
-  error.value = ''; step.value = n;
-}
-function next() {
-  if (!check(step.value)) return;
-  const n = step.value === 2 && !securityStep.value ? 4 : step.value + 1;
-  reached.value = Math.max(reached.value, n); step.value = n;
-}
-function back() { error.value = ''; step.value = step.value === 4 && !securityStep.value ? 2 : step.value - 1; }
 function pickPort() {
   try {
     f.value.port = randomPort(f.value, inbounds.value, state.original?.id, Math.random, serverPortRange.value);
@@ -243,11 +245,11 @@ async function save(publish: boolean) {
   try {
     // Re-read before save; the live check is advisory and the API remains authoritative.
     inbounds.value = await choices((p, s) => proxyAPI.inbounds('', p, s));
-    for (let n = 1; n <= 5; n++) if (!check(n)) { step.value = n; return; }
+    for (let n = 1; n <= 5; n++) if (!check(n)) return;
     const value = buildPayload(state);
     const saved = await proxyAPI.saveInbound(state.original?.id || null, value);
     savedInbound.value = saved;
-    savedId.value = saved.id; step.value = 6;
+    savedId.value = saved.id;
     result.value = '节点草稿已保存，运行配置未改变。';
     try {
       const changed = [...new Set([...initialGroupIds.value, ...selectedGroupIds.value])]

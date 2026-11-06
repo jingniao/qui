@@ -1,5 +1,5 @@
 <template>
-  <details class="rounded-2xl border border-ios-border p-4 text-sm text-ios-secondary">
+  <details :open="open" class="rounded-2xl border border-ios-border p-4 text-sm text-ios-secondary">
     <summary class="cursor-pointer font-medium">高级选项</summary>
     <div class="space-y-4 mt-4">
       <label class="block">监听地址<input v-model="form.listen" class="form-input-base mt-2 font-mono" /></label>
@@ -11,14 +11,11 @@
       </select></label>
       <label class="block"><input v-model="form.internalRelay" :disabled="editing || form.protocol === 'forward'" @change="form.internalRelay && (form.subscriptionVisible = false)" type="checkbox" /> 内部中转入口</label>
       <p v-if="internalRelaySettingsReason(form.internalRelay, form.settings)" role="alert" class="text-xs text-ios-orange">{{ internalRelaySettingsReason(form.internalRelay, form.settings) }}</p>
-      <label v-if="!form.internalRelay && form.protocol !== 'forward'" class="block"><input v-model="form.subscriptionVisible" type="checkbox" /> 显示在授权用户订阅中</label>
-      <p v-if="!form.internalRelay && form.protocol !== 'forward' && !form.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
       <div v-if="!form.internalRelay && form.protocol !== 'forward'" class="space-y-2">
         <p class="text-xs">允许用户（不勾选表示节点分组内全部授权用户）</p>
         <label v-for="user in users" :key="user.id" class="flex items-center gap-2"><input v-model="form.allowedUserIds" :value="user.id" type="checkbox" /> {{ user.displayName || user.username }}</label>
         <p v-if="!users.length" class="text-xs">暂无用户</p>
       </div>
-      <label class="block"><input v-model="form.enabled" type="checkbox" /> 启用</label>
     </div>
   </details>
 </template>
@@ -26,5 +23,5 @@
 import type { InboundInput, Outbound, OutboundGroup, ProxyChain } from '../../api';
 import type { ProxyUser } from '../../../users/api';
 import { internalRelaySettingsReason } from './nodeEditorModel';
-defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: ProxyUser[] }>();
+defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: ProxyUser[]; open?: boolean }>();
 </script>

@@ -357,7 +357,7 @@ Status on November 5, 2026: Phases A–D are implemented and committed locally o
 ### 14.1 Verification Still Open
 
 1. **Linux gate for Phases B–D.** `scripts/check.sh` plus the real-core suite on `1bbb836` is still running. Only Phase A (`42491ab`) has passed so far.
-2. **Mihomo routing behavior (§11 item 10).** The real mihomo check only covers config acceptance (`mihomo -t`). No real-core test sends traffic through a purpose group → region group → endpoint path or confirms that an empty REJECT group actually blocks. Extend `routing_test.go` (`TestMihomoRoutesProxyDirectAndReject`) with a nested-group and empty-REJECT case.
+2. **Mihomo routing behavior (§11 item 10): completed in the closeout follow-up.** `TestMihomoRoutesProxyDirectAndReject` now sends actual HTTP through purpose group → keyword-filtered region group → exact inbound endpoint and verifies an empty keyword-filtered REJECT group fails. Xray access logs distinguish proxy from direct/rejected traffic. The targeted Linux real-core run passed (0.713s); this is local real-core routing evidence, not production client acceptance.
 3. **Authenticated browser walkthrough.** Not performed. Walk through the following in a browser:
    - profile cards: create, edit, activate and delete
    - a 409 conflict that keeps the draft
@@ -386,7 +386,7 @@ Status on November 5, 2026: Phases A–D are implemented and committed locally o
 
 ### 14.4 Documentation Still Open
 
-- `docs/architecture.md` and `docs/protocol-support-matrix.md` do not describe the profile library, `@endpoint` members, keyword filters or `emptyPolicy` yet (§10 last item). AGENTS.md, `docs/changelog.md` and `docs/release-notes-1.4.0.md` are updated.
+- `docs/architecture.md` and `docs/protocol-support-matrix.md` now describe the profile library, `@endpoint` members, keyword filters and `emptyPolicy` (§10 last item). AGENTS.md, `docs/changelog.md` and `docs/release-notes-1.4.0.md` are updated.
 - `docs/v1-acceptance.md` has no entry for the items in §14.1 yet.
 
 ### 14.5 Out of Scope (Unchanged From §9)

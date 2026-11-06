@@ -91,6 +91,7 @@ func TestMihomoRoutesProxyDirectAndReject(t *testing.T) {
 	proxied := serve(t, "127.0.0.2", "proxied")
 	direct := serve(t, "127.0.0.1", "direct")
 	rejected := serve(t, "127.0.0.3", "rejected")
+	emptyRejected := serve(t, "127.0.0.4", "empty group must not reach origin")
 
 	directory := t.TempDir()
 	accessLog := filepath.Join(directory, "access.log")
@@ -116,9 +117,14 @@ func TestMihomoRoutesProxyDirectAndReject(t *testing.T) {
 	template.Rules = []rules.Rule{
 		{ID: "proxy", Type: rules.RuleIPCIDR, Payload: "127.0.0.2/32", Target: "PROXY", NoResolve: true, Enabled: true, Priority: 1},
 		{ID: "reject", Type: rules.RuleIPCIDR, Payload: "127.0.0.3/32", Target: rules.TargetReject, NoResolve: true, Enabled: true, Priority: 2},
-		{ID: "final", Type: rules.RuleMatch, Target: rules.TargetDirect, Enabled: true, Priority: 3},
+		{ID: "empty", Type: rules.RuleIPCIDR, Payload: "127.0.0.4/32", Target: "Empty region", NoResolve: true, Enabled: true, Priority: 3},
+		{ID: "final", Type: rules.RuleMatch, Target: rules.TargetDirect, Enabled: true, Priority: 4},
 	}
-	template.Groups = []rules.Group{{Name: "PROXY", Type: "select", Members: []string{rules.MemberAll}}}
+	template.Groups = []rules.Group{
+		{Name: "PROXY", Type: "select", Members: []string{"Test region"}},
+		{Name: "Test region", Type: "select", Members: []string{rules.MemberEndpoint + "inbound:socks"}, IncludeKeywords: []string{"test node"}, EmptyPolicy: "reject"},
+		{Name: "Empty region", Type: "select", Members: []string{rules.MemberAll}, IncludeKeywords: []string{"no matching endpoint"}, EmptyPolicy: "reject"},
+	}
 	node := proxy.Proxy{Origin: proxy.Origin{Source: "published", Ref: "socks", Node: proxy.Ref{ID: "node-1", Name: "test node"}}, Name: "test node · socks5", Server: "127.0.0.1", Port: socksPort, Protocol: "socks5", Credential: proxy.Credential{Username: "alice", Password: "pw"}}
 	resolved := rules.Expand(template, []proxy.Proxy{node})
 	output, err := Meta{}.Render(format.Profile{Proxies: []proxy.Proxy{node}, Rules: &resolved})
@@ -165,12 +171,15 @@ func TestMihomoRoutesProxyDirectAndReject(t *testing.T) {
 	if body, err := get("127.0.0.3", rejected); err == nil {
 		t.Fatalf("REJECT request was answered: %q", body)
 	}
+	if body, err := get("127.0.0.4", emptyRejected); err == nil {
+		t.Fatalf("empty REJECT group request was answered: %q", body)
+	}
 	time.Sleep(500 * time.Millisecond)
 	log, _ := os.ReadFile(accessLog)
 	if !strings.Contains(string(log), fmt.Sprintf("127.0.0.2:%d", proxied)) {
 		t.Fatalf("the PROXY request did not pass the test node:\n%s", log)
 	}
-	if strings.Contains(string(log), fmt.Sprintf(":%d", direct)) || strings.Contains(string(log), fmt.Sprintf(":%d", rejected)) {
+	if strings.Contains(string(log), fmt.Sprintf(":%d", direct)) || strings.Contains(string(log), fmt.Sprintf(":%d", rejected)) || strings.Contains(string(log), fmt.Sprintf(":%d", emptyRejected)) {
 		t.Fatalf("a DIRECT or REJECT request passed the test node:\n%s", log)
 	}
 }

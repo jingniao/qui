@@ -1126,6 +1126,8 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 ## 29.1 后台安全
 
+新登录会话默认有效期为 1 天（1440 分钟），Owner 可在系统设置的“认证与会话安全”中调整为 15～1440 分钟；管理员和门户共用此时长策略。已保存的自定义时长继续使用，修改只对之后的新登录生效，已有会话保持原到期时间。
+
 终端用户认证与管理员认证隔离：门户 Cookie 为 `qui_portal_session`（Secure 时使用 `__Host-` 前缀），HttpOnly、SameSite=Strict、Path=/；会话表只存 Token 哈希。复用密码哈希、限流、同源 CSRF 与会话时长策略。禁用登录、改密码、撤销会话和删除用户立即结束相应会话；恢复备份结束门户会话。门户仅从会话取用户 ID，不接受请求指定其他用户；不展示域名访问记录。订阅链接不存浏览器 localStorage。
 
 管理员密码安全哈希存储；HTTPS；安全 Cookie；登录失败限制；会话超时；CSRF 防护；API 请求大小限制；Owner 与 Viewer 权限隔离；敏感数据默认隐藏；管理操作日志。

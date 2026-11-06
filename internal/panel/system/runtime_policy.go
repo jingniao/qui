@@ -30,7 +30,7 @@ const (
 	defaultUpdateHours     = 12
 	defaultUADetection     = true
 	defaultSubscriptFormat = "uri"
-	defaultSessionMinutes  = 120
+	defaultSessionMinutes  = 1440
 )
 
 type RuntimeSettings struct {

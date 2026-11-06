@@ -10,7 +10,7 @@
    </template>
    <template v-else-if="kind==='security'">
     <label class="block">新登录会话有效时间（分钟）<input v-model.number="form.sessionMinutes" type="number" min="15" max="1440" step="1" class="form-input-base mt-2" /></label>
-    <p class="text-xs text-gray-500">可设置 15～1440 分钟，保存后对之后的新登录生效。已有会话保持原到期时间，修改密码会撤销该管理员的已有会话。</p>
+    <p class="text-xs text-gray-500">默认 1 天（1440 分钟），可设置 15～1440 分钟，保存后对之后的新登录生效。已有会话保持原到期时间，修改密码会撤销该管理员的已有会话。</p>
     <dl class="grid sm:grid-cols-2 gap-4"><div><dt class="text-gray-500">登录限制</dt><dd class="mt-1">每个来源 {{ info.security.loginWindowMinutes }} 分钟内 {{ info.security.loginAttempts }} 次尝试</dd></div><div><dt class="text-gray-500">密码长度</dt><dd class="mt-1">{{ info.security.passwordMinCharacters }}～{{ info.security.passwordMaxCharacters }} 字符</dd></div><div><dt class="text-gray-500">Cookie</dt><dd class="mt-1">HttpOnly · {{ info.security.sameSite }}{{ info.security.secureCookies ? ' · Secure' : ' · 开发模式' }}</dd></div><div><dt class="text-gray-500">请求保护</dt><dd class="mt-1">同源 / CSRF；普通 JSON 最大 {{ bytes(info.security.requestBytes) }}</dd></div></dl>
    </template>
    <template v-else-if="kind==='subscription'">
@@ -42,7 +42,7 @@ const info=ref<RuntimeInfo|null>(null),saved=ref<RuntimeSettings|null>(null),loa
 // The format list comes from the server registry, so a new format needs no change here.
 const formats=ref<SubscriptionFormatInfo[]>([{id:'uri',aliases:[],contentType:'',fileName:'',usesRules:false}]);
 const formatNames:Record<string,string>={uri:'通用 URI 列表',base64:'Base64 URI 列表','sing-box':'sing-box JSON（出站片段）',clash:'Clash / mihomo 完整配置','clash-legacy':'旧版 Clash / Clash Premium'};
-const form=reactive({sessionMinutes:120,subscriptionFormat:'uri',subscriptionUpdateHours:12,subscriptionUaDetection:true});
+const form=reactive({sessionMinutes:1440,subscriptionFormat:'uri',subscriptionUpdateHours:12,subscriptionUaDetection:true});
 function bytes(value:number){return value<1024*1024 ? `${(value/1024).toFixed(1)} KiB` : `${(value/1024/1024).toFixed(1)} MiB`;}
 async function load(){if(loading.value||saving.value)return;loading.value=true;try{const [runtime,settings,registry]=await Promise.all([settingsAPI.runtime(),settingsAPI.runtimePolicy(),settingsAPI.subscriptionFormats()]);info.value=runtime;formats.value=registry.items;saved.value=settings;Object.assign(form,settings.policy);error.value='';}catch(e){error.value=(e as Error).message;}finally{loading.value=false;}}
 async function save(){if(saving.value||!saved.value)return;if(!Number.isInteger(form.sessionMinutes)||form.sessionMinutes<15||form.sessionMinutes>1440){showToast('会话时间须为 15～1440 的整数','error');return;}if(props.kind==='subscription'&&(!Number.isInteger(form.subscriptionUpdateHours)||form.subscriptionUpdateHours<1||form.subscriptionUpdateHours>168)){showToast('刷新间隔须为 1～168 的整数','error');return;}saving.value=true;try{const policy={...saved.value.policy,...(props.kind==='security'?{sessionMinutes:form.sessionMinutes}:{subscriptionFormat:form.subscriptionFormat,subscriptionUpdateHours:form.subscriptionUpdateHours,subscriptionUaDetection:form.subscriptionUaDetection})};const result=await settingsAPI.saveRuntimePolicy(policy,saved.value.revision);saved.value=result;Object.assign(form,result.policy);error.value='';showToast('设置已保存');}catch(e){error.value=(e as Error).message;}finally{saving.value=false;}}

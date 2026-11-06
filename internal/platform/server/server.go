@@ -205,7 +205,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.backupService = &system.BackupService{Repository: systemRepository, Source: backupArchive.Source{Database: database, Config: c, ConfigurationVault: configurationVault}, Directory: filepath.Join(filepath.Dir(c.Database), "backups"), Notify: func() { eventBus.Publish("backup_status", map[string]bool{"changed": true}) }}
 	s.accessRepository.Settings = systemRepository
 	s.accessRepository.StorageThresholds = systemRepository
-	authService := &auth.Service{Repository: &auth.Repository{Database: database, Reader: s.readPool}, Audit: systemRepository, Settings: systemRepository, SessionDuration: 2 * time.Hour}
+	authService := &auth.Service{Repository: &auth.Repository{Database: database, Reader: s.readPool}, Audit: systemRepository, Settings: systemRepository, SessionDuration: 24 * time.Hour}
 	s.authService = authService
 	// Warm the cached first-run and base-setting state, so requests never pay
 	// for the lookup that prepareSetupToken has already done.

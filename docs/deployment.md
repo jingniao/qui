@@ -6,11 +6,11 @@ v1.4 在 `feat/v1.4-tunnels` 开发，**未发布**，不以本文授权部署�
 
 核心来源显式参数为 `--core-source qui|official`：sing-box 默认 qui，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各自架构归档）；`official` 保留官方版本与 musl 专用归档及摘要。Xray 保持官方。qui 构建仅添加上游 `with_v2ray_api` 标签，其逐用户流量开始计入额度；切换前告知用户并核对额度。构建可复现性、原生核检查、Linux/arm64 实跑仍待 CI/Owner，不以脚本存在作为通过。
 
-RC1/RC2 与发布均 **awaiting Owner approval**，本文不授权执行。L4 已按 Owner 批准的扩展方案本地修复：新版 `qui-update` 支持 `X.Y.Z-rc.N` 与 `--component`；Linux/root 回归与主机验收仍待执行。旧安装上的更新器仍不支持这些参数，首次 RC 更新须从审核过的归档运行新版更新器，见第 5 节。
+Owner 已授权并执行 v1.4 离线 RC 验收：先面板后 Agent 升级到 rc.1，随后面板单独升级至 rc.2，记录见[主机报告](v1.4-a1-host-report.md)与[rc.2 收尾](v1.4-rc2-closeout.md)。新版 `qui-update` 的 `X.Y.Z-rc.N` 与 `--component panel` 已在实际 Linux/root 更新中通过健康窗口；旧安装上的更新器不支持这些参数时，首次 RC 更新须从审核过的归档运行新版更新器，见第 5 节。此为已授权执行记录，不代表正式版发布完成。
 
 更新时间：2026-10-22（节点 Agent 支持 Alpine / OpenRC）。本文命令取自 `deploy/linux/*.sh`、`deploy/systemd/*.service`、`deploy/openrc/*`、`cmd/panel` 和 `cmd/agent` 的实际参数（`go run ./cmd/panel -h`、`go run ./cmd/agent -h`），文件名与路径取自 `deploy/examples/*.yaml` 和安装脚本。
 
-**未在 Linux 实机执行。** 端到端安装、升级和服务运行属于 owner 的 Linux VM 验收范围（见[验收矩阵](v1-acceptance.md)）。日常运维见[运维手册](operations.md)。
+Linux/amd64 的 systemd 与 Alpine/OpenRC 主机安装、更新和运行已有分版本实机证据，具体范围及限制见[验收矩阵](v1-acceptance.md)。arm64 不能沿用 amd64 结论。日常运维见[运维手册](operations.md)。
 
 ## 1. 前置条件
 

@@ -6,6 +6,8 @@
 
 最新正式版 **v1.3.1**（2026-11-03，tag → `ebe8301`），正式版迁移头为 0128。Owner 授权生产 A1 后，us2-node（面板＋Agent）、uk-node（Agent）、alpine-node（Alpine LXC/OpenRC Agent）已升级至未公开发布的离线验收版 **1.4.0-rc.1**（源码 `f11fe4e`）；当前面板迁移头为 0133，三台 Agent 在线。
 
+收尾更新（2026-11-06 UTC）：Owner 要求完成剩余工作后，仅生产面板升级至离线 **1.4.0-rc.2**（`bcdf16a`），三台 Agent 保持 rc.1 和原成功修订。慢加载修复已在生产复测：四页面有缓存导航抽样 216–565ms，版本页请求排队由约 15 秒降至个位数毫秒。节点组卡片／编辑弹窗、字体规范和一天默认会话已随面板更新。恢复点、包摘要与仍未完成的发布条件见[rc.2 收尾报告](docs/v1.4-rc2-closeout.md)。
+
 v1.4 在 `feat/v1.4-tunnels` 开发，未正式发布。导入与自建 Reality/xhttp 已实现并整合，Linux 实核和精简开发验证已通过，本地协议编辑器及五格式预览走查完成。生产 A1 部分完成：升级、mTLS 重连、配置/失败批次回滚、同版本备份恢复与清理通过；实际客户端流量待临时凭据传输获准，P3/三跳 GOST 缺可达中转主机，首次隧道应用失败首因未定，见[主机验收记录](docs/v1.4-a1-host-report.md)。完整 race 与其他 v1.4 浏览器验收未完成，见[验证记录](docs/v1.4-protocol-verification.md)。范围见[v1.4 计划](docs/v1.4-plan.md)，发布说明见[1.4.0 草稿](docs/release-notes-1.4.0.md)。
 
 正式版实机只验收 linux/amd64；arm64 只做 qemu-user 模拟，正式浏览器走查未执行。已验收内容、未验证项与限制见[验收矩阵](docs/v1-acceptance.md) §12 和[发布说明 1.3.1](docs/release-notes-1.3.1.md)。v1.4 的 A1 验收另行记录，不沿用正式版结论。

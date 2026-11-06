@@ -17,7 +17,7 @@
       <p v-if="schemesLoading" class="text-sm font-semibold text-ios-label">正在载入中转方案…</p>
       <template v-else-if="schemesLoadError">
         <p role="alert" class="text-sm font-semibold text-ios-label">{{ schemesLoadError }}</p>
-        <button type="button" class="ios-btn-primary mt-1" @click="reloadSchemes">重试</button>
+        <button type="button" class="ios-btn-primary mt-1" @click="loadWorkspace">重试</button>
       </template>
       <template v-else>
       <p class="text-sm font-semibold text-ios-label">暂无中转方案</p>
@@ -1109,6 +1109,7 @@ import {
   relaySchemeToCanvasInput,
   selfHostedResourceId,
   type CanvasPublishResult,
+  type CanvasScheme,
   type CanvasSchemeContext,
   type Outbound,
   type Inbound
@@ -1795,11 +1796,11 @@ async function persistScheme(scheme: RelayScheme) {
   }
 }
 
-async function reloadSchemes() {
+async function reloadSchemes(prefetched?: CanvasScheme[]) {
   schemesLoading.value = true;
   schemesLoadError.value = '';
   try {
-    await loadCanvasSchemes(canvasContext());
+    await loadCanvasSchemes(canvasContext(), prefetched);
   } catch (error) {
     schemesLoadError.value = `载入中转方案失败: ${(error as Error).message}`;
     showToast(schemesLoadError.value, 'error');
@@ -1925,25 +1926,38 @@ async function handleConfirmPublish() {
   }
 }
 
-onMounted(async () => {
+async function loadWorkspace() {
+  schemesLoading.value = true;
+  schemesLoadError.value = '';
   // U5 reads the granted source metadata from the panel, not browser records.
   proxyNodeStore.manualNodes = [];
   proxyNodeStore.subscriptions = [];
   try {
-    await loadImports();
-    const [nodeRes, inboundRes, outboundRes] = await Promise.all([
-      choices(page => nodeAPI.list(page, '')),
+    // Read independent resources in one round; metadata is not needed to draw.
+    const [nodeRes, inboundRes, outboundRes, schemes] = await Promise.all([
+      choices((page, size) => nodeAPI.list(page, '', false, size)),
       choices((page, size) => proxyAPI.inbounds('', page, size)),
-      choices((page, size) => proxyAPI.outbounds('', page, size))
+      choices((page, size) => proxyAPI.outbounds('', page, size)),
+      choices((page, size) => canvasAPI.list(page, size)),
+      loadImports()
     ]);
     servers.value = nodeRes;
-    await Promise.all(nodeRes.map(node => loadNodeMeta(node.id, true)));
     inbounds.value = inboundRes;
     outbounds.value = outboundRes;
-  } catch (e) { showToast(`载入画布资源失败: ${(e as Error).message}`, 'error'); }
+    await reloadSchemes(schemes);
+    void Promise.all(nodeRes.map(node => loadNodeMeta(node.id, true))).catch(e => {
+      showToast(`载入服务器元数据失败: ${(e as Error).message}`, 'error');
+    });
+  } catch (e) {
+    schemesLoadError.value = `载入画布资源失败: ${(e as Error).message}`;
+    schemesLoading.value = false;
+    showToast(schemesLoadError.value, 'error');
+  }
+}
 
+onMounted(async () => {
+  await loadWorkspace();
   // Schemes are stored by the server now; the browser keeps no copy of them.
-  await reloadSchemes();
   readLocalSchemes();
 
   const qSchemeId = route.query.schemeId as string | undefined;

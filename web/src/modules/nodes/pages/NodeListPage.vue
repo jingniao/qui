@@ -158,23 +158,23 @@ async function load() {
   const current = ++generation;
   loading.value = true; error.value = '';
   try {
-    const [servers, groupResult, monthly, machine] = await Promise.allSettled([
-      choices((index) => nodeAPI.list(index, '', deleted.value)),
+    const supplements = Promise.allSettled([
       isOwner.value ? choices(groupAPI.list) : Promise.resolve([] as NodeGroup[]),
       request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly'),
       nodeAPI.machineTrafficBatch()
     ]);
-    if (servers.status === 'rejected') throw servers.reason;
+    const servers = await choices((index, size) => nodeAPI.list(index, '', deleted.value, size));
+    if (current !== generation) return;
+    // Show the inventory immediately; optional traffic and metadata fill in later.
+    nodes.value = servers;
+    selected.value = selected.value.filter(id => servers.some(node => node.id === id && !node.deletedAt));
     const notices: string[] = [];
-    if (groupResult.status === 'rejected') notices.push(`节点分组读取失败：${(groupResult.reason as Error).message}`);
-    if (monthly.status === 'rejected') notices.push(`本月流量读取失败：${(monthly.reason as Error).message}`);
-    if (machine.status === 'rejected') notices.push(`本月整机流量读取失败：${(machine.reason as Error).message}`);
     // Midnight can fall in a DST gap in a few zones; fall back to UTC midnight then.
     let dayStart: string;
     try { dayStart = utcInput(localInput(new Date().toISOString()).slice(0, 10) + 'T00:00'); }
     catch { const utc = new Date(); utc.setUTCHours(0, 0, 0, 0); dayStart = utc.toISOString(); }
     const dayEnd = new Date().toISOString();
-    const details = await Promise.all(servers.value.map(async node => {
+    const details = await Promise.all(servers.map(async node => {
       const [meta, traffic] = await Promise.allSettled([
         loadNodeMeta(node.id, isOwner.value), accessAPI.accounts({ nodeId: node.id, from: dayStart, to: dayEnd })
       ]);
@@ -182,15 +182,17 @@ async function load() {
       if (traffic.status === 'rejected') notices.push(`${node.name} 今日流量读取失败`);
       return { id: node.id, bytes: traffic.status === 'fulfilled' && traffic.value.observations > 0 ? traffic.value.uploadBytes + traffic.value.downloadBytes : undefined };
     }));
+    const [groupResult, monthly, machine] = await supplements;
     if (current !== generation) return;
-    nodes.value = servers.value;
+    if (groupResult.status === 'rejected') notices.push(`节点分组读取失败：${(groupResult.reason as Error).message}`);
+    if (monthly.status === 'rejected') notices.push(`本月流量读取失败：${(monthly.reason as Error).message}`);
+    if (machine.status === 'rejected') notices.push(`本月整机流量读取失败：${(machine.reason as Error).message}`);
     groups.value = groupResult.status === 'fulfilled' ? groupResult.value : [];
     today.value = Object.fromEntries(details.filter(item => item.bytes !== undefined).map(item => [item.id, item.bytes! ]));
     month.value = monthly.status === 'fulfilled' ? Object.fromEntries(monthly.value.items.map(item => [item.nodeId, item.uploadBytes + item.downloadBytes])) : {};
     machineTraffic.value = machine.status === 'fulfilled' ? Object.fromEntries(machine.value.items.map(item => [item.nodeId, item])) : {};
     monthZone.value = monthly.status === 'fulfilled' ? monthly.value.timezone : '';
     warnings.value = notices;
-    selected.value = selected.value.filter(id => nodes.value.some(node => node.id === id && !node.deletedAt));
     if (page.value > Math.max(1, Math.ceil(filtered.value.length / 20))) changePage(1);
   } catch (e) { if (current === generation) error.value = (e as Error).message; }
   finally { if (current === generation) loading.value = false; }

@@ -154,11 +154,11 @@ assert.equal(nullableMetadata.id, 'populated');
 assert.equal(nullableMetadata.nodes.length, 1);
 assert.deepEqual(nullableMetadata.connections, []);
 assert.match(proxyNodesSource, /canvasAPI\.create\(\{ name, execution: executionLocation, layout: \{ instances: \[\], connections: \[\] \}/);
-assert.match(canvas, /v-else-if="schemesLoadError"[\s\S]*?@click="reloadSchemes">重试<\/button>[\s\S]*?<template v-else>[\s\S]*?暂无中转方案/);
+assert.match(canvas, /v-else-if="schemesLoadError"[\s\S]*?@click="loadWorkspace">重试<\/button>[\s\S]*?<template v-else>[\s\S]*?暂无中转方案/);
 assert.match(canvas, /async function createNewScheme\(\) \{\s*if \(schemesLoading\.value \|\| schemesLoadError\.value\) return;/);
 // Exercise the real reload function: failure persists until a successful retry,
 // including when an older populated store is still present behind the overlay.
-const reloadSource = canvas.slice(canvas.indexOf('async function reloadSchemes()'), canvas.indexOf('// An earlier build kept schemes in this browser. Offer them once;'));
+const reloadSource = canvas.slice(canvas.indexOf('async function reloadSchemes('), canvas.indexOf('// An earlier build kept schemes in this browser. Offer them once;'));
 const reloadHarness = await load(transpile(`
   export const schemesLoading = { value: true }, schemesLoadError = { value: '' };
   export let fail = true;

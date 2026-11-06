@@ -87,7 +87,7 @@ restartTasks:(id:string)=>request<{items:RestartTask[]}>(`/nodes/${encodeURIComp
 restartCore:(id:string,expectedRevision:number,core:CoreName|""="")=>request<RestartTask>(`/nodes/${encodeURIComponent(id)}/restart-core`,"POST",{expectedRevision,confirmNodeId:id,core}),
 healthChecks:(id:string)=>request<{items:HealthCheck[]}>(`/nodes/${encodeURIComponent(id)}/health-checks`),
 requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<HealthCheck>(`/nodes/${encodeURIComponent(id)}/health-checks`,"POST",{expectedRevision,core}),
-  list: (page: number, keyword: string, deleted = false) => request<Page<NodeView>>(`/nodes?page=${page}&pageSize=20&keyword=${encodeURIComponent(keyword)}${deleted ? '&deleted=1' : ''}`),
+  list: (page: number, keyword: string, deleted = false, pageSize = 20) => request<Page<NodeView>>(`/nodes?page=${page}&pageSize=${pageSize}&keyword=${encodeURIComponent(keyword)}${deleted ? '&deleted=1' : ''}`),
   get: (id: string) => request<NodeView>(`/nodes/${encodeURIComponent(id)}`),
   enroll: (name: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name }),
   reissueEnrollment: (id: string) => request<Enrollment>(`/nodes/${encodeURIComponent(id)}/enrollment-token`, 'POST', {}),

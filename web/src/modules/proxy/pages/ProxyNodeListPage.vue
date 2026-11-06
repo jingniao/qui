@@ -1131,7 +1131,7 @@ import { showToast } from '../../../app/api';
 import { request } from '../../../app/apiClient';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { deploymentAPI } from '../../system/deploymentApi';
-import { proxyAPI, type Inbound, loadProtocolSupport, choices } from '../api';
+import { proxyAPI, canvasAPI, type Inbound, loadProtocolSupport, choices } from '../api';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
 import {
   proxyNodeStore,
@@ -1268,17 +1268,23 @@ async function loadData() {
     // the server-owned U5 list.
     proxyNodeStore.manualNodes = [];
     proxyNodeStore.subscriptions = [];
-    const [nodeRes, inboundRes] = await Promise.all([
-      choices((page, size) => nodeAPI.list(page, '')),
+    const resources = Promise.all([
+      choices((page, size) => nodeAPI.list(page, '', false, size)),
       choices((page, size) => proxyAPI.inbounds('', page, size))
-    ]);
-    servers.value = nodeRes;
-    serverInbounds.value = inboundRes;
-    await loadNodeRelays();
+    ]).then(([nodeRes, inboundRes]) => {
+      servers.value = nodeRes;
+      serverInbounds.value = inboundRes;
+      void loadNodeRelays();
+    });
     // Relay routes shown on this page come from the schemes the canvas stores on
-    // the server, so they must be loaded here too.
-    if (isOwner.value) { await loadImports(); nodeGroups.value = await choices(groupAPI.list); }
-    await loadCanvasSchemes({ servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes });
+    // the server. Fetch them alongside the resources, then resolve references.
+    const [schemes] = await Promise.all([
+      choices((page, size) => canvasAPI.list(page, size)),
+      resources,
+      isOwner.value ? loadImports() : Promise.resolve(),
+      isOwner.value ? choices(groupAPI.list).then(items => { nodeGroups.value = items; }) : Promise.resolve()
+    ]);
+    await loadCanvasSchemes({ servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes }, schemes);
   } catch (e) {
     showToast((e as Error).message, 'error');
   } finally {

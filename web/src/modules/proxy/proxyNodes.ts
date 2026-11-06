@@ -1,6 +1,6 @@
 // proxyNodes.ts: Data management for unified proxy nodes & relay canvas schemas
 import { reactive } from 'vue';
-import { canvasAPI, canvasSchemeToRelayScheme, choices, relaySchemeToCanvasInput, type CanvasSchemeContext } from './api';
+import { canvasAPI, canvasSchemeToRelayScheme, choices, relaySchemeToCanvasInput, type CanvasScheme, type CanvasSchemeContext } from './api';
 
 export type NodeSourceType = 'self_hosted' | 'subscription' | 'manual';
 // How an import source was stored by the panel: a fetched HTTPS subscription
@@ -236,8 +236,8 @@ export function saveManualNodes() {
 // only path from the running canvas to that storage, so a page can never leave
 // a scheme behind in one browser only.
 
-export async function loadCanvasSchemes(context: CanvasSchemeContext): Promise<void> {
-  const schemes = await choices((page, size) => canvasAPI.list(page, size));
+export async function loadCanvasSchemes(context: CanvasSchemeContext, prefetched?: CanvasScheme[]): Promise<void> {
+  const schemes = prefetched ?? await choices((page, size) => canvasAPI.list(page, size));
   proxyNodeStore.schemes = schemes.map(item => canvasSchemeToRelayScheme(item, context));
 }
 

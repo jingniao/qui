@@ -10,7 +10,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
   - The last released version is **v1.3.1** (tag → `ebe8301`). All three hosts run it, and their migration head is 0128.
 - **Locally reviewed work (integrated through `ca970a4`, plus final documentation):**
   - **v1.4 tunnels:** tunnel management (Tunnels/Rules pages), "Add Relay" on nodes, relayed subscription entries, the canvas narrowed to proxy relaying, and migration of old canvas forwards. Migrations 0129–0131. Commits `d4fad8c` … `8134314`.
-  - **Protocol compatibility:** S1–S4 and M1–M4 locally integrated, migration 0133; streamlined Linux verification complete; remaining browser/host acceptance open (§4.4).
+  - **Protocol compatibility:** S1–S4 and M1–M4 locally integrated, migration 0133; streamlined Linux verification and requested local editor/five-format browser checks complete; wider release/host acceptance open (§4.4).
   - **Client policy profile library:** server-side profiles, activation, endpoint members, keyword filters, `emptyPolicy`, draft preview, and rule-set references. Migration 0132. Commits `258c1c7` … `1bbb836`, plus docs `aff8153` and `49358db`.
 - **Specs and plans to read first:**
   - `AGENTS.md`: the product spec, in Chinese. It is the authoritative description of behavior.
@@ -45,7 +45,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 | C3 | **Client policy: should the preview let the Owner pick a user?** | The preview currently always auto-selects a user and labels the choice as automatic. The API already accepts `userId`; only the UI is missing. (Plan §14.2 item 1.) |
 | C4 | **Client policy: batch input when editing a rule.** | Pasting several domains creates multiple rules only when *creating* a rule; editing an existing rule keeps it as one rule. Confirm this, then document it. (§14.2 item 2.) |
 | C5 | **Client policy: disabled rule sets.** | Saving a profile is refused when an *enabled* RULE-SET rule points at a *disabled* service set. So disabling a set the active profile uses blocks re-saving that profile until the rule is disabled or the set is re-enabled. Keep this, or relax it to a warning? (§14.2 item 3.) |
-| C6 | ~~Protocol-support plan decisions R1–R4~~ **Decided 2026-11-05.** | Plan `.en.md` §14.3–§14.7:<br>• both tracks run in parallel;<br>• the refresh fix ships in v1.4.0;<br>• duplicate `name\|protocol` keeps the first and rejects the rest;<br>• everything ships in v1.4.0.<br>Implementation and streamlined development verification are complete (§4.4); remaining browser and formal host acceptance are open. |
+| C6 | ~~Protocol-support plan decisions R1–R4~~ **Decided 2026-11-05.** | Plan `.en.md` §14.3–§14.7:<br>• both tracks run in parallel;<br>• the refresh fix ships in v1.4.0;<br>• duplicate `name\|protocol` keeps the first and rejects the rest;<br>• everything ships in v1.4.0.<br>Implementation, streamlined development verification and requested local editor/five-format browser checks are complete (§4.4); wider release and formal host acceptance are open. |
 
 ## 4. Outstanding Tasks
 
@@ -96,7 +96,7 @@ A1 must also cover the protocol-support work once it lands (plan `.en.md` §14.7
 
     S0 and original M1 gates passed. S1 `ccf23e4` failed solely because 0133 was absent from the migration checksum map; correction `4ded28f` passed check (1993s), and its repeated cores were stopped and superseded. The integrated Linux real-core suite passed on `9e48fcf` (592s). `ca970a4` fixes only the canvas self-test loader/docs and has byte-identical production sources; Linux frontend build/self-tests, vet, fixture build and focused checks passed.
 
-    Under the latest Owner instruction, remaining broad race testing was stopped; no final complete gate PASS is claimed. The isolated browser checked mixed pasted-import results, reasons, counts and saved-source failure context. Sharing was then revoked; editor and format-preview walkthroughs remain unverified. See [final verification evidence](v1.4-protocol-verification.md). No further development tests are required for this docs-only handoff. No real-source fetch or production action is implied. C1/A1 remain later release work.
+    Under the latest Owner instruction, remaining broad race testing was stopped; no final complete gate PASS is claimed. The isolated browser checked mixed pasted-import results, reasons, counts and saved-source failure context, then completed protocol-editor save/key/capability checks and all five preview formats after sharing was restored. `87fcccd` fixes the preview selector that previously offered only Mihomo. Pending publication on a disconnected fixture is not runtime apply evidence. See [final verification evidence](v1.4-protocol-verification.md). No further development tests are required for this docs-only handoff. No real-source fetch or production action is implied. C1/A1 remain later release work.
 
     Duplicate `name|protocol` keys keep the first. User-inbound Reality/xhttp settings reuse one public client model; private keys stay encrypted/masked, rotation is explicit, and clients update subscriptions after successful publication. Internal proxy-relay creation stays TCP/TLS. Detailed format/core restrictions are in `docs/protocol-support-matrix.md`.
 

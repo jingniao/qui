@@ -352,3 +352,9 @@
 - Browser verified Xray Reality/xhttp creation, public-key readback, ordinary-save key preservation, sing-box xhttp refusal with retained draft, single-SNI refusal, explicit key rotation and queued publication wording. Opened Mihomo preview and inspected user context, warnings and supported output. The local node has no Agent; pending publication is not runtime acceptance.
 - Found the preview UI still hard-coded a single Mihomo format. Added the four other already-supported formats and accurate output descriptions; renamed YAML-only preview/copy labels without changing the layout or backend. No migration or contract change.
 - Frontend build/typecheck and existing client-policy self-tests passed. Updating the isolated embedded panel invalidated sharing; final per-format UI checks await renewed sharing. See the verification report for exact limits.
+
+## 2026-11-05: completed requested browser walkthrough
+
+- Owner restored action permission. Loaded the rebuilt preview UI and selected all five visible formats. Observed the matching body, selected label, authorized user context and warning list: Mihomo 9 format warnings, legacy Clash 17 with HTTP-only output, sing-box 13 with five outbounds, URI/Base64 zero format warnings with 18 links.
+- Decoded the Base64 body read from the browser snapshot and matched it exactly to the live API URI fixture and to the normalized URI-page body. No page console errors; screenshot inspection confirmed the existing layout and format-neutral labels.
+- The requested local editor/source/format walkthrough is complete. No further code change or repeated broad tests; formal production A1, connected-Agent browser apply/rollback and other v1.4 pages remain separate.

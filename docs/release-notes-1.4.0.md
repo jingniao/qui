@@ -2,7 +2,7 @@
 
 状态：`feat/v1.4-tunnels` 开发中，尚无正式发布日期或发布 tag。最新正式版仍为 [v1.3.1](release-notes-1.3.1.md)。本文描述分支实现，**不代表 A1、RC、主机或浏览器验收通过，也不授权部署**。范围与 API 见[v1.4 计划](v1.4-plan.md)，实现报告见[文档导航](README.md)。
 
-**范围与状态（2026-11-05）：** [协议支持补齐计划](subscription-import-compatibility-plan.en.md#148-implementation-status-2026-11-05)的全部工作并入 v1.4.0。S1–S4、M1–M4 已在本地整合，迁移头 0133；针对性 Windows 检查通过，最终整合 Linux 门禁与浏览器走查待执行，未完成 S5。最新用户指令以一次最终整合门禁替代逐阶段重复门禁；RC 与 A1 仍在 S5 之后。
+**范围与状态（2026-11-05）：** [协议支持补齐计划](subscription-import-compatibility-plan.en.md#148-implementation-status-2026-11-05)的全部工作并入 v1.4.0。S1–S4、M1–M4 已在本地整合，迁移头 0133；Linux 实核和精简开发验证通过，本地来源诊断、协议编辑器及五格式预览走查完成；完整 race 按用户要求省略，不声称最终完整门禁通过。正式 RC/A1 验收仍待执行，证据见[验证记录](v1.4-protocol-verification.md)。
 
 **平台：** GOST 固定官方 3.3.2、仅 linux/amd64，因此 GOST 隧道也仅 linux/amd64。此前正式版的 amd64 主机和 arm64 qemu-user 证据不能代替本版验收。
 
@@ -75,9 +75,9 @@
 | 客户端策略配置库（0132） | Linux 门禁：Phase A（`42491ab`）、Phase B+C（`6cfc6c5`，2518 秒）通过；Phase D 与最终提交 `1bbb836` 运行中；真实 mihomo 分流行为、登录浏览器走查与待定产品决定见[客户端策略计划 §14](../web/docs/client-policy-backend-plan.en.md#14-implementation-status-and-remaining-items) |
 | A1b：文档与源码核对 | 本草稿及说明书/架构/运维/协议/部署/索引已同步；不替代上述验收 |
 | 刷新误报修复 | 已实施；提交 `650b349` 的 Linux 门禁通过：`check` 1980s、`cores` 572s、`GATE 650b349 PASS total=2552s`，END 2026-11-05T09:30:12Z（主助手本人核对门禁日志）。真实失败来源的页面走查仍待 A1 |
-| 订阅导入诊断（S1） | 已实现并整合；`ccf23e4` Linux 门禁仅缺 0133 校验和固定而失败（check 1972s、cores 560s、合计 2533s，END 2026-11-05T15:01:31Z）；修正 `4ded28f` 的 check 通过（1993s）；最终整合实核通过（592s），前端/自测/vet/定向检查通过，完整 race 省略、浏览器部分完成，见[验证记录](v1.4-protocol-verification.md) |
-| 外部订阅导入补齐（S0–S4） | 已实现并整合；S0 `9045e1b` 原门禁通过，S2–S4 有针对性 Windows 单元/归档及配置的实核证据，范围见阶段报告。Linux 实核和精简开发验证通过，来源页面部分走查完成，剩余浏览器未完成；见[验证记录](v1.4-protocol-verification.md) |
-| 自建 Reality / xhttp（M1–M4） | 已实现并整合；原 M1 `3565153` 门禁通过，后续修正及 M2–M4 以针对性 Windows 原生/认证/编辑器检查为证据。Linux 实核和定向检查通过；剩余浏览器与 A1 主机检查未执行，见[验证记录](v1.4-protocol-verification.md) |
+| 订阅导入诊断（S1） | 已实现并整合；`ccf23e4` Linux 门禁仅缺 0133 校验和固定而失败（check 1972s、cores 560s、合计 2533s，END 2026-11-05T15:01:31Z）；修正 `4ded28f` 的 check 通过（1993s）；最终整合实核通过（592s），前端/自测/vet/定向检查通过，完整 race 省略、本地来源诊断及编辑器/五格式走查完成，见[验证记录](v1.4-protocol-verification.md) |
+| 外部订阅导入补齐（S0–S4） | 已实现并整合；S0 `9045e1b` 原门禁通过，S2–S4 有针对性 Windows 单元/归档及配置的实核证据，范围见阶段报告。Linux 实核和精简开发验证通过，本地来源诊断与五格式预览走查完成，其他正式浏览器验收未完成；见[验证记录](v1.4-protocol-verification.md) |
+| 自建 Reality / xhttp（M1–M4） | 已实现并整合；原 M1 `3565153` 门禁通过，后续修正及 M2–M4 以针对性 Windows 原生/认证/编辑器检查为证据。Linux 实核和定向检查通过；本地协议编辑器保存、密钥及能力限制走查完成，A1 主机与连接 Agent 的浏览器运行验收未执行，见[验证记录](v1.4-protocol-verification.md) |
 
 S0 的主助手本人审查通过只覆盖证据报告与净化夹具清单；S1–S4、M1–M4 的精简开发验证已完成；完整正式 A1 验收尚未执行，实际证据以[验证记录](v1.4-protocol-verification.md)为准。
 

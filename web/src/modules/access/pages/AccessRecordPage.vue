@@ -1,9 +1,6 @@
 <template>
   <div class="space-y-6">
     <PageHeader title="访问记录" description="查看节点上报的分钟聚合记录。仅保存域名级元数据，不记录正文、完整 URL 或凭据。"><template #actions><button @click="load" class="ios-btn-secondary">刷新</button></template></PageHeader>
-    <div class="p-3.5 rounded-2xl bg-ios-blue/[0.08] border border-ios-blue/15 text-ios-blue text-xs leading-relaxed">记录来自节点实际采集和批量上报。只展示域名级结果；未精确测量的流量和未确认的最终出口明确标示。内部中转和健康探测不计入用户访问。</div>
-    <p class="text-xs text-ios-tertiary leading-relaxed">配置出口来自该版本核心日志的路由标签或出口组所选成员：它表示该节点按策略解析出的出口，不代表跨节点实际到达的出口节点。代理链表示配置关联，不证明流量抵达链尾。只有本节点直连路由能确认出口节点，也不代表已测量公网出口 IP 或目标响应成功。</p>
-    <p class="text-xs text-ios-tertiary leading-relaxed">时间按 Agent 观察进入分钟桶；多行连接记录使用首次有效入站观察时间。配置版本、规则、实际出站和未知状态不同会分开记录。跨分钟仍存活的连接不会每分钟重复记为新连接；连接观察数不等于实时并发或请求次数。</p>
     <div class="ios-segmented-container inline-flex"><button v-for="tab in tabs" :key="tab.key" @click="switchTab(tab.key)" :class="['ios-segmented-item',activeTab===tab.key?'active':'']">{{ tab.label }}</button></div>
     <form @submit.prevent="search" class="panel-card p-5 grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
       <label class="block text-xs font-medium text-ios-secondary">域名<input v-model="filters.domain" placeholder="example.com，不包含 URL" class="form-input-base mt-1.5" /></label>

@@ -17,6 +17,7 @@
 | 1.4.0 发布说明草稿（未发布） | [发布说明 1.4.0 草稿](release-notes-1.4.0.md) |
 | v1.4 当前工作计划、决策与 API 合同 | [v1.4 计划](v1.4-plan.md) |
 | v1.4 订阅导入与 Reality/xhttp 开发验证、未验收边界 | [协议兼容验证记录](v1.4-protocol-verification.md) |
+| v1.4 离线 RC 生产部署、Agent 重连及回滚验收（部分完成） | [A1 主机记录](v1.4-a1-host-report.md) |
 | v1.4 GOST 中间跳契约与运行待测项 | [X0 记录](v1.4-x0-findings.md) |
 | v1.4 隧道后端、发布、节点集成与订阅 | [X1a/X1b/N1 报告](v1.4-x1a-report.md) |
 | v1.4 代理中转画布收敛 | [C1 报告](v1.4-c1-report.md) |

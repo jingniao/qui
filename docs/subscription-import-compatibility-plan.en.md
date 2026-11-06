@@ -688,6 +688,8 @@ The Owner moved all remaining work into v1.4.0: the refresh fix (14.5), the impo
 
 ### 14.8 Implementation Status (2026-11-05)
 
+Production follow-up: the Owner subsequently authorized host A1, Agent connections and rollback. Offline `1.4.0-rc.1` from `f11fe4e` now runs on the panel and all three Agents, migration 0133. Deployment, mTLS reconnects, configuration/failed-batch rollback, same-version backup restore and cleanup were exercised. **A1 remains partial:** real-client traffic awaits explicit approval to transfer the dedicated temporary configuration to `192.168.5.36`; P3/three-hop GOST needs a reachable third relay. First tunnel apply failed, retry succeeded, root cause undetermined. See the [host report](v1.4-a1-host-report.md). Earlier phase/checkpoint statements below retain their original scope; no public release or complete final gate is claimed.
+
 | Part | Status | Evidence |
 | --- | --- | --- |
 | §14.5 refresh fix | Implemented, **Linux gate passed** | `650b349`, `GATE 650b349 PASS total=2552s` (check and cores both EXIT 0, ended `2026-11-05T09:30:12Z`) |

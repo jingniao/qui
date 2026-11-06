@@ -7,7 +7,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 - **Repository:** `C:\Users\luanf\qui`, branch `feat/v1.4-tunnels`.
   - Everything below is **committed locally only; nothing has been pushed.**
   - `main` = `origin/main` = `a15da45` (v1.3.1 plus docs).
-  - The last released version is **v1.3.1** (tag → `ebe8301`). All three hosts run it, and their migration head is 0128.
+  - The last released version is **v1.3.1** (tag → `ebe8301`, migration 0128). Under the Owner's later explicit production A1 request, all three hosts now run offline, unpublished **1.4.0-rc.1** from `f11fe4e`; the panel migration head is 0133. A1 is partial; see [host evidence](v1.4-a1-host-report.md).
 - **Locally reviewed work (integrated through `ca970a4`, plus final documentation):**
   - **v1.4 tunnels:** tunnel management (Tunnels/Rules pages), "Add Relay" on nodes, relayed subscription entries, the canvas narrowed to proxy relaying, and migration of old canvas forwards. Migrations 0129–0131. Commits `d4fad8c` … `8134314`.
   - **Protocol compatibility:** S1–S4 and M1–M4 locally integrated, migration 0133; streamlined Linux verification and requested local editor/five-format browser checks complete; wider release/host acceptance open (§4.4).
@@ -29,7 +29,7 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
   - It takes about 40 minutes and gates a *commit*, so commit locally first. Run only one gate at a time, because they share ports.
   - Remote access goes through `~/.qui-local/r.sh`. **Never copy the machine's credentials into docs, commits or messages.**
 - **Rules the Owner set:**
-  - Do not push, tag, publish a pre-release or touch the production hosts without the Owner's explicit approval for that specific step.
+  - Push, tags and public pre-releases still require explicit approval. The Owner explicitly authorized production A1, Agent connections and rollback; the offline RC deployment and documented acceptance operations were performed under that authorization.
   - Keep the Owner's existing page layouts. Ask before replacing one.
   - No duplicated logic and no defensive code: validate at the API boundary and reuse existing helpers.
   - Never edit applied migrations; add the next number instead.
@@ -41,7 +41,8 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
 | # | Question | Context and current proposal |
 | --- | --- | --- |
 | C1 | **Approve pushing `feat/v1.4-tunnels` and publishing a 1.4.0 RC pre-release?** | Nothing is pushed. GitHub `check` must pass on the same SHA before a `v*` tag (see `docs/deployment.md` §2). Since 2026-11-05 the RC also waits for the protocol-support work (§4.4), so don't ask for C1 until both of its tracks pass S5. |
-| C2 | **Host role mapping for the RC.** | Proposal: us2-node = US destination + panel, uk-node = HK entry. The JP relay hop needs a third GOST-capable linux/amd64 host, because alpine-node (Alpine LXC) cannot run GOST. Without one, the RC tests only the two-server tunnel (entry → exit). |
+| C2 | **Reachable third relay host for P3/three-hop GOST.** | The run used us2-node = destination + panel and uk-node = entry. Alpine has only a private address, no public IPv6/connection override and no reported GOST installation support. Another reachable relay is needed; GOST additionally requires supported linux/amd64. Two-node control/apply evidence is already recorded. |
+| C7 | **Allow temporary client configuration transfer to `192.168.5.36`?** | Automatic approval twice rejected this action and requires explicit confirmation of the dedicated temporary user's UUID/public key/test endpoints and destination. No existing-user credentials were included; no transfer occurred. Temporary fixtures are already deleted and must be recreated after approval. |
 | C3 | **Client policy: should the preview let the Owner pick a user?** | The preview currently always auto-selects a user and labels the choice as automatic. The API already accepts `userId`; only the UI is missing. (Plan §14.2 item 1.) |
 | C4 | **Client policy: batch input when editing a rule.** | Pasting several domains creates multiple rules only when *creating* a rule; editing an existing rule keeps it as one rule. Confirm this, then document it. (§14.2 item 2.) |
 | C5 | **Client policy: disabled rule sets.** | Saving a profile is refused when an *enabled* RULE-SET rule points at a *disabled* service set. So disabling a set the active profile uses blocks re-saving that profile until the rule is disabled or the set is re-enabled. Keep this, or relax it to a warning? (§14.2 item 3.) |
@@ -73,15 +74,15 @@ Prepared 2026-11-05 (America/Los_Angeles) for the next agent. This is the single
    - the filtered "Edit rules" view
    - rule-set references and delete blocking
 
-### 4.2 v1.4 Acceptance and Release (A1), Blocked on C1, C2 and the §4.4 Work
+### 4.2 v1.4 Acceptance and Release (A1), Partially Completed on Hosts
 
 A1 must also cover the protocol-support work once it lands (plan `.en.md` §14.7). That means real clients using imported SS2022, Reality and xhttp entries, plus a self-hosted Xray Reality/xhttp node and its relayed subscription entries.
 
-5. RC deployment on the hosts (after C1 and C2), following `docs/deployment.md`: panel first, then each Agent. Back up the database and the identity directory first.
-6. P1–P4 with real clients (mihomo or sing-box) on the hosts. Check the subscription address, port and credentials, traffic, publish results, that republishing changes nothing, and recovery after a node restart. Record the results in `docs/v1-acceptance.md` §13.
-7. A1 combined checks: the one-time migration and its report, backup and restore, credential rotation, deletion, and republishing with no changes.
+5. **Done under later production authorization:** offline RC deployment (`f11fe4e`), panel first then each Agent, with encrypted backups and stopped-state identity/configuration snapshots. No GitHub publication was needed or performed. All three Agents online; migration 0133, final us2/uk/Alpine revisions 243/242/214.
+6. **Open:** P1–P4 with real clients (mihomo or sing-box). Actual HTTP/authentication was not performed because C7 remains unanswered. P3/three-hop GOST also needs C2: Alpine has only a private address and lacks reported GOST installation support. Configuration apply alone is not a traffic result.
+7. **Exercised:** one-time migration/report, same-version encrypted backup restore, credential rotation, deletion, no-op republish, explicit configuration rollback and failed-batch automatic rollback. The first tunnel apply failed; retry succeeded, root cause undetermined. No binary/database downgrade or mixed-traffic soak. Temporary fixtures/GOST removed and original eight inbounds/three schemes preserved. See [report](v1.4-a1-host-report.md) and acceptance §13.
 8. A formal browser walkthrough of the v1.4 pages: Tunnels, Rules, Add Relay and the canvas.
-9. Fill in the acceptance table in `docs/release-notes-1.4.0.md`. Only the A1a row is filled so far: gate `8134314` passed, with every P1–P4 sub-case passing and none skipped.
+9. Complete the acceptance table in `docs/release-notes-1.4.0.md`; A1a and partial host results are recorded. Do not mark P1–P4 real-client acceptance complete.
 10. Final release: tag the release, deploy to the hosts and update `AGENTS.md` "当前状态" (current status). This needs separate approval.
 
 ### 4.3 Documentation Still Open
@@ -96,7 +97,7 @@ A1 must also cover the protocol-support work once it lands (plan `.en.md` §14.7
 
     S0 and original M1 gates passed. S1 `ccf23e4` failed solely because 0133 was absent from the migration checksum map; correction `4ded28f` passed check (1993s), and its repeated cores were stopped and superseded. The integrated Linux real-core suite passed on `9e48fcf` (592s). `ca970a4` fixes only the canvas self-test loader/docs and has byte-identical production sources; Linux frontend build/self-tests, vet, fixture build and focused checks passed.
 
-    Under the latest Owner instruction, remaining broad race testing was stopped; no final complete gate PASS is claimed. The isolated browser checked mixed pasted-import results, reasons, counts and saved-source failure context, then completed protocol-editor save/key/capability checks and all five preview formats after sharing was restored. `87fcccd` fixes the preview selector that previously offered only Mihomo. Pending publication on a disconnected fixture is not runtime apply evidence. See [final verification evidence](v1.4-protocol-verification.md). No further development tests are required for this docs-only handoff. No real-source fetch or production action is implied. C1/A1 remain later release work.
+    Under the latest Owner instruction, remaining broad race testing was stopped; no final complete gate PASS is claimed. The isolated browser checked mixed pasted-import results, reasons, counts and saved-source failure context, then completed protocol-editor save/key/capability checks and all five preview formats after sharing was restored. `87fcccd` fixes the preview selector that previously offered only Mihomo. Pending publication on a disconnected fixture is not runtime apply evidence. See [final verification evidence](v1.4-protocol-verification.md). The later authorized production A1 run is recorded separately in §4.2 and the host report; it does not establish real-client traffic success. No further development tests are required for this docs-only handoff. C1 remains publication work; C2/C7 limit remaining A1 paths.
 
     Duplicate `name|protocol` keys keep the first. User-inbound Reality/xhttp settings reuse one public client model; private keys stay encrypted/masked, rotation is explicit, and clients update subscriptions after successful publication. Internal proxy-relay creation stays TCP/TLS. Detailed format/core restrictions are in `docs/protocol-support-matrix.md`.
 

@@ -1635,3 +1635,37 @@
 ### 后续浏览器验收完成
 
 用户恢复操作权限后，已在重建的隔离面板中逐项选择五种预览格式，确认标题、选项、正文、授权用户与警告同步更新。Mihomo/legacy/sing-box 分别显示 9/17/13 条格式警告；URI 与 Base64 无格式警告，浏览器 Base64 解码后与 18 条 URI 和 API 结果一致。页面控制台无错误，截图确认原布局与新文案正常。本次未验证剪贴板集成，不替代正式生产主机或其他客户端策略场景验收。
+
+
+---
+
+## 2026-11-05：节点分组卡片式设计重构与弹窗式管理（对齐客户端策略布局）
+
+- **日期和时间**：2026-11-05T22:18:00-08:00（America/Los_Angeles）
+- **本轮原始需求**：
+  用户要求：“节点分组也使用卡片式设计，一个分组就是一个卡片，下面有编辑和删除，点击编辑按钮跳出弹窗，页面和客户端策略的弹窗布局类似，左边有账号和节点，点击对应的菜单显示对应的内容”。
+- **涉及的全部文件路径**：
+  - 修改：[`web/src/modules/proxy/pages/LineGroupPage.vue`](file:///C:/Users/luanf/qui/web/src/modules/proxy/pages/LineGroupPage.vue)
+  - 修改：[`web/docs/client-policy-change-log.md`](file:///C:/Users/luanf/qui/web/docs/client-policy-change-log.md)
+- **每个文件的具体修改点**：
+  1. [`web/src/modules/proxy/pages/LineGroupPage.vue`](file:///C:/Users/luanf/qui/web/src/modules/proxy/pages/LineGroupPage.vue)：
+     - **主页面卡片式布局（Card Grid）**：
+       - 将原有的“左侧搜索侧栏 + 右侧详情堆叠”结构全面重构为响应式卡片网格布局（`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4`）；
+       - 每个节点分组展示为一个独立卡片，包含分组名称、启用脉冲小圆点、备注说明、用途类型标签（`subscription` / `mixed` / `relay` / `egress`）及订阅隐藏标识；
+       - 卡片中心包含关键指标小网格（组内节点数、授权用户数、运行状态），直观对齐客户端策略卡片的高级感；
+       - 卡片底部设立等分网格按钮：**编辑**（带图标次级按钮）与 **删除**（红色危险操作按钮，带二次确认弹窗），布局规范统一。
+     - **卡片编辑弹出式管理（对齐客户端策略 AppDialog 布局）**：
+       - 点击卡片下方的“编辑”按钮，弹出全屏响应式模态弹窗（`AppDialog`，高 88vh，大圆角磨砂背景）；
+       - 弹窗采用与客户端策略弹窗完全一致的左右分栏双列架构：
+         - **左侧管理菜单**：提供「授权账号 (ACCOUNTS)」与「组内节点 (NODES)」双导航项，包含对应图标、中英文名称和实时数量徽标（X 位 / Y 个），点击即时切换；
+         - **右侧工作区**：根据左侧选中的菜单分别展示：
+           - **授权账号**：包含顶部快捷添加授权条（`AppSelect` +「添加授权」按钮）与用户卡片响应式网格（用户名、显示名、到期/禁用/正常状态、以及撤销授权按钮）；
+           - **组内节点**：包含「添加节点」按钮、节点表格（`DataTable`，展示名称、来源类型、协议、端口、所属服务器、状态及移出操作）以及中转/出口分组的显式服务器成员勾选区；
+         - **顶部 Header 动作条**：右侧提供「分组设置」与「关闭」按钮，兼顾快速修改分组名称/用途/备注与安全退出。
+- **实际执行的验证及结果**：
+  1. `npm.cmd --prefix web run typecheck`：通过（exit code 0，`vue-tsc --noEmit` 0 错误）。
+  2. `node web/scripts/client-policy-selftest.mjs`：通过（exit code 0，59/59 PASS）。
+  3. `node web/scripts/ui-regression-selftest.mjs`：通过（exit code 0，全部回归用例通过）。
+  4. `npm.cmd --prefix web run build`：通过（exit code 0，Vite 4.54s 生产构建成功）。
+- **是否涉及接口契约变化**：
+  - 无。完全基于既有前端组件与后端 API。

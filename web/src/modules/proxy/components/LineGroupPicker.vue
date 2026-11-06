@@ -4,13 +4,14 @@
     title="添加代理节点"
     :loading="saving"
     width="xl"
+    height-class="h-[calc(100dvh-6rem)] max-h-[960px]"
     :confirm-text="selected.length ? `添加节点（已选 ${selected.length} 个）` : '添加'"
     @update:model-value="$emit('update:modelValue', $event)"
     @confirm="$emit('save', selected)"
   >
-    <div class="space-y-4">
+    <div class="h-full min-h-0 flex flex-col gap-4">
       <!-- Search & Filters -->
-      <div class="space-y-2">
+      <div class="space-y-2 shrink-0">
         <input
           v-model="keyword"
           class="form-input-base"
@@ -37,7 +38,7 @@
       </div>
 
       <!-- Quick Select Helpers -->
-      <div class="flex items-center justify-between text-xs text-ios-secondary px-1">
+      <div class="flex items-center justify-between text-xs text-ios-secondary px-1 shrink-0">
         <span>可选节点：{{ filteredNodes.length }} 个</span>
         <div class="flex items-center gap-2">
           <button
@@ -61,7 +62,7 @@
       </div>
 
       <!-- Item selection list -->
-      <div class="space-y-2 max-h-96 overflow-y-auto pr-1">
+      <div class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
         <label
           v-for="node in filteredNodes"
           :key="node.id"
@@ -105,7 +106,7 @@
         </p>
       </div>
 
-      <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
+      <p v-if="error" role="alert" class="text-sm text-ios-red shrink-0">{{ error }}</p>
     </div>
   </FormDrawer>
 </template>

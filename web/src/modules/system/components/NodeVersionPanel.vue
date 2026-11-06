@@ -2077,6 +2077,9 @@ defineExpose({
 });
 
 let generation = 0;
+function nodeStatusChanged() {
+  if (!loading.value) void load();
+}
 async function load() {
   const current = ++generation;
   loading.value = true;
@@ -2203,11 +2206,11 @@ function statusCapsuleText(node: NodeView): string {
 onMounted(() => {
   void load();
   void loadUpgradeContext();
-  window.addEventListener('proxy-node-status', load);
+  window.addEventListener('proxy-node-status', nodeStatusChanged);
 });
 
 onUnmounted(() => {
   generation++;
-  window.removeEventListener('proxy-node-status', load);
+  window.removeEventListener('proxy-node-status', nodeStatusChanged);
 });
 </script>

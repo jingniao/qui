@@ -319,8 +319,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		changes, cancel = c.GateChanges()
 		defer cancel()
 	}
-	refresh := time.NewTicker(time.Minute)
+	refresh := time.NewTicker(deviceGateRefreshInterval)
 	defer refresh.Stop()
+	var gateDelivery deviceGateDelivery
 	sendGates := func() error {
 		if !first.GetHello().DeviceGateSupported || c.DeviceGates == nil {
 			return nil
@@ -336,7 +337,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if e != nil || command == nil {
 			return nil
 		}
-		return send(command)
+		return gateDelivery.send(command, time.Now(), send)
 	}
 	for {
 		var packet gatePacket
@@ -509,16 +510,8 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		// Gates are volatile, refreshed on the live stream, and never queued for
 		// an older peer. Reconnection starts a fresh refresh cycle.
-		if first.GetHello().DeviceGateSupported && c.DeviceGates != nil {
-			current, e := c.Repository.Get(ctx, id)
-			if e == nil && AnyGateSupported(current.Capabilities) {
-				command, e := c.DeviceGates(ctx, id)
-				if e == nil && command != nil {
-					if e = send(command); e != nil {
-						return e
-					}
-				}
-			}
+		if err := sendGates(); err != nil {
+			return err
 		}
 		// Agent requests reserve the node before other executable commands.
 		if agentUpdateSupported && message.GetAgentUpdateResult() == nil {

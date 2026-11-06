@@ -232,6 +232,16 @@ assert.match(coreUpdatesA, /v-if="!fixedNodeId"/);
 assert.match(coreUpdatesA, /nodeId = ref\(props.fixedNodeId \|\| ''\)/);
 assert.doesNotMatch(read('modules/nodes/components/NodeRestartPanel.vue'), /授权账本|未知消费保护|剩余额度重新编译/);
 const versionPathA = 'modules/system/components/NodeVersionPanel.vue';
+const versionLoading = { value: true };
+let versionStatusReads = 0;
+const versionStatus = vueSubset(versionPathA, ['nodeStatusChanged'], {
+  loading: versionLoading, load: () => { versionStatusReads++; }
+});
+for (let i = 0; i < 1000; i++) versionStatus.nodeStatusChanged();
+assert.equal(versionStatusReads, 0, 'SSE bursts must not supersede an in-flight version read');
+versionLoading.value = false;
+versionStatus.nodeStatusChanged();
+assert.equal(versionStatusReads, 1, 'the next status event refreshes the idle version list');
 const versionsA = vueSubset(versionPathA, ['detectArch', 'upgradeUnavailableReason']);
 assert.equal(versionsA.detectArch({ capabilities: { host: { architecture: 'arm64' }, architecture: 'amd64' } }), 'arm64');
 assert.equal(versionsA.detectArch({ capabilities: { architecture: 'amd64' } }), 'amd64');

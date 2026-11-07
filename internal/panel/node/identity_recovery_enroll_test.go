@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"proxycontrol/internal/platform/pki"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"strings"
@@ -196,5 +198,33 @@ func TestDisconnectEndsLiveStreamAndAllowsReconnect(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Disconnect did not end the reconnected stream")
+	}
+}
+
+// A stale Agent that reconnects with the certificate an in-place recovery
+// replaced is still refused, and the panel writes one warning per refusal so the
+// operator can find it.
+func TestConnectLogsRefusedRetiredCertificate(t *testing.T) {
+	p := newRecoveryPanel(t)
+	n, leaf := enrolledAgentNode(t, p)
+	var output bytes.Buffer
+	control := &Control{Repository: p.Repository, Authority: p.authority, Logger: slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelWarn}))}
+	_, token, _, err := p.IssueRecovery(p.ctx, n.ID, "owner", 15*time.Minute, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.attempt(t, token, n.ID, "reinstalled").consume(t, n.ID, "recover"); err != nil {
+		t.Fatalf("recovery consumption failed: %v", err)
+	}
+	retired := pki.Fingerprint(leaf)
+	if err := control.Connect(newFakeAgentStream(t, leaf, n.ID, "hello-retired")); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("retired certificate: %v", err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(output.String()), &record); err != nil {
+		t.Fatalf("refused certificate was not logged: %q %v", output.String(), err)
+	}
+	if record["level"] != "WARN" || record["msg"] != "node certificate refused" || record["node"] != n.ID || record["fingerprint"] != retired || record["error"] == "" {
+		t.Fatalf("refused certificate record: %v", record)
 	}
 }

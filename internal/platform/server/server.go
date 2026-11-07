@@ -143,7 +143,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.accessRepository = &access.Repository{Database: database, Vault: configurationVault}
 	eventBus := &events.Bus{}
 	notify := func(id string) { eventBus.Publish("node_status", map[string]string{"nodeId": id}) }
-	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
+	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Logger: s.Logger, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
 	control.RecoveryRedeploy = func(ctx context.Context, id string) error {
 		revision, err := deployments.RedeployPublished(ctx, id, "recovery")
 		if err != nil {

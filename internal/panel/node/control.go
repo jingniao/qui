@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"strings"
@@ -51,6 +52,12 @@ type Control struct {
 	RecoveryRedeploy func(context.Context, string) error
 	Notify           func(string)
 	DashboardNotify  func()
+
+	// Logger receives one warning per refused node certificate, so an operator
+	// can see an old Agent still presenting a replaced certificate. Optional;
+	// when nil nothing is logged.
+	Logger *slog.Logger
+
 	// Connections holds the live per-node connection snapshots. Optional; when
 	// nil connection status messages are accepted and ignored.
 	Connections *connections.Store
@@ -193,6 +200,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	}
 	fingerprint := pki.Fingerprint(cert)
 	if err := c.Repository.ValidateIdentity(ctx, id, fingerprint); err != nil {
+		if c.Logger != nil {
+			attributes := []any{"node", id, "fingerprint", fingerprint}
+			if remote, ok := peer.FromContext(ctx); ok && remote.Addr != nil {
+				attributes = append(attributes, "peer", remote.Addr.String())
+			}
+			c.Logger.Warn("node certificate refused", append(attributes, "error", err)...)
+		}
 		return status.Error(codes.Unauthenticated, "node certificate revoked or unknown")
 	}
 	first, err := stream.Recv()

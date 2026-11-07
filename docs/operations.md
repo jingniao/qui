@@ -126,7 +126,7 @@ systemctl start proxy-agent.service
 2. 点“签发恢复码”并在确认弹窗核对风险，复制一次性恢复码与下方生成的 `node-install.sh` 安装命令（选择与原节点一致的运行内核）。
 3. 在重装的主机上以 root 运行该命令，它就是[部署与升级](deployment.md)第 4 节的安装＋登记，只是令牌换成恢复码。主机若仍留有旧的 `/var/lib/proxy-agent`，先按第 5 节「复用同一台机器重新登记」把整个目录移作备份，否则 Agent 会以已有身份或受管状态拒绝登记。**若重装前对主机跑过 `deploy/linux/uninstall.sh agent`，这条命令不会成功，而且不是恢复码的问题**：卸载会在 `/var/lib/proxycontrol-install/` 留下 `agent.removed`（旧安装记录的副本），`install.sh` 因此以 `The component was uninstalled; use --reinstall after inspecting the retained record.` 拒绝，而 `node-install.sh` 不能传 `--reinstall`。最小处理是先核对 `/var/lib/proxycontrol-install/agent.removed`（目录 `/var/lib/proxycontrol-install` 须仍是 root 属主、权限 `0700`），用 `mv /var/lib/proxycontrol-install/agent.removed /root/agent.removed.bak` 把它移出该目录，再原样重跑同一条命令；也可改用同一发布包的 `deploy/linux/install.sh --node … --reinstall`。因此原位恢复前不要跑 `uninstall.sh`：真正的系统重装，或按上面那样把 `/var/lib/proxy-agent` 整个移作备份，都不会留下这个标记。
 4. 回到本页确认结果：节点重新上线、恢复状态变为“已核销”，重新下发显示“等待节点上线”→“重新下发中”→“重新下发成功”（`r<版本>` 为新生效版本；从未成功部署过的节点显示“无需下发”）。失败时先看 `redeploy_code` 与发布记录，再用现有流程手工发布；原版本历史不会被改写。
-5. 旧证书在核销时作废，指纹写入永久作废表，用旧证书连接会被 mTLS 拒绝；备份恢复也不会复活它。
+5. 旧证书在核销时作废，指纹写入永久作废表，用旧证书连接会被 mTLS 拒绝；备份恢复也不会复活它。面板为每次拒绝记一条 WARN 日志 `node certificate refused`（含节点 ID、证书指纹与来源地址），旧 Agent 仍在重连时可直接在日志里发现。
 
 节点存在未完成的发布、待执行的节点操作、进行中的批量发布、Agent／核心更新或移除、暂停/恢复任务时，签发返回 409 `node_recovery_blocked`，界面按类列出阻断项，处理后可重新签发（旧码随之作废）。节点未登记、已禁用或已删除时返回 409 `node_not_enrolled`。
 

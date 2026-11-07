@@ -46,10 +46,13 @@ export function installCommand(input: { version: string; host: string; httpPort:
   const selected = [...new Set(input.cores ?? (input.core ? [input.core] : ["xray"]))];
   if (!selected.length || selected.some(core => core !== 'xray' && core !== 'sing-box' && core !== 'gost')) throw new Error('请至少选择一个运行内核（xray、sing-box 或 gost）');
   const coreFlags = selected.map(core => ` --core ${core}`).join("");
-  const port = input.httpPort === 443 ? '' : ` --http-port ${input.httpPort}`;
+  // Both ports are always passed explicitly so the command never depends on
+  // node-install.sh's own defaults (22550 / 18880): a panel that keeps a different
+  // port pair still installs a node that connects to the port it actually serves.
+  const portFlags = ` --http-port ${input.httpPort} --grpc-port ${input.grpcPort}`;
   const bootstrap = 'if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; '
     + 'elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; ';
-  return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${port} --grpc-port ${input.grpcPort} --ca-sha256 ${input.caSha256} --token ${input.token}${coreFlags}`;
+  return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${portFlags} --ca-sha256 ${input.caSha256} --token ${input.token}${coreFlags}`;
 }
 
 export interface HealthCheck { core?:CoreName|""; id:string;nodeId:string;revision:number;status:"queued"|"complete"|"expired";createdAt:string;deadline:string;result?:{healthy?:boolean;code:string;observed_at?:{seconds?:number;nanos?:number}}; }

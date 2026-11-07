@@ -10,7 +10,7 @@
 # the node. That install.sh upgrades in place, so this script may be re-run until
 # the node is enrolled: a first run whose enrollment failed (expired or used
 # token, unreachable gRPC port, wrong --panel) is retried with a fresh
-# registration, and the panel's gRPC port (9443 by default) has to be reachable
+# registration, and the panel's gRPC port (18880 by default) has to be reachable
 # from this host for enrollment to succeed. Only a host that is already enrolled,
 # or that still runs the Agent service, is refused.
 #
@@ -42,8 +42,8 @@ usage() {
   --panel HOST          面板地址：域名或 IPv4
   --ca-sha256 HEX       面板证书信任锚的 SHA-256（64 位小写十六进制，面板显示）
   --token TOKEN         一次性节点注册码
-  --http-port N         面板 HTTPS 端口（默认 443）
-  --grpc-port N         面板 gRPC 端口（默认 9443）
+  --http-port N         面板 HTTPS 端口（默认 22550）
+  --grpc-port N         面板 gRPC 端口（默认 18880）
   --core xray|sing-box|gost  可重复，例如 --core xray --core sing-box（默认 xray）
   --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
   --bundle FILE --sums FILE
@@ -60,8 +60,8 @@ USAGE
 
 version=''
 panel=''
-http_port=443
-grpc_port=9443
+http_port=22550
+grpc_port=18880
 ca_sha256=''
 token=''
 cores=(); core=''
@@ -292,6 +292,8 @@ printf '\nInstalling Agent and cores: %s ...\n' "${cores[*]}"
 
 config=/etc/proxy-agent/config.yaml
 ca_file=/etc/proxy-agent/tls/ca.crt
+# 443 is the implicit HTTPS port of a URL, not the default: the default 22550 and
+# every other port has to be spelled out in the URL that fetches the CA.
 authority=$panel
 [[ $http_port == 443 ]] || authority=$panel:$http_port
 ca_url=https://$authority/install/ca.pem
@@ -376,7 +378,7 @@ printf '\n登记节点 ...\n'
 if ! "$source_dir/deploy/linux/enroll.sh" --token-file "$token_file"; then
   rm -f -- "$token_file"
   rmdir -- "$token_directory" 2>/dev/null || true
-  fail "节点登记失败；注册码可能已过期或已被使用。请确认本机能访问面板的 gRPC 端口（$panel:$grpc_port，默认 9443），且 --panel 与 --grpc-port 填写正确，然后在面板里新建节点注册，用新的安装命令重跑本脚本（本机尚未登记，可以重跑）。"
+  fail "节点登记失败；注册码可能已过期或已被使用。请确认本机能访问面板的 gRPC 端口（$panel:$grpc_port，默认 18880），且 --panel 与 --grpc-port 填写正确，然后在面板里新建节点注册，用新的安装命令重跑本脚本（本机尚未登记，可以重跑）。"
 fi
 rm -f -- "$token_file"
 rmdir -- "$token_directory" 2>/dev/null || true

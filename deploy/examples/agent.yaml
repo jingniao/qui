@@ -1,5 +1,5 @@
 development: false
-control_address: panel.example.com:9443
+control_address: panel.example.com:18880
 server_name: panel.example.com
 data_directory: /var/lib/proxy-agent
 core_name: xray
@@ -16,4 +16,4 @@ tls:
   # 注册/续期在 data_directory/identity 中保存；注册前只需可信中央 CA。
   certificate: /var/lib/proxy-agent/identity/client.crt
   key: /var/lib/proxy-agent/identity/client.key
-  client_ca: /etc/proxy-agent/tls/ca.crt  # 校验面板 Web 证书（gRPC 9443 同用）的 CA，不是面板节点 CA
+  client_ca: /etc/proxy-agent/tls/ca.crt  # 校验面板 Web 证书（gRPC 18880 同用）的 CA，不是面板节点 CA

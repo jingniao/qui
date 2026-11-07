@@ -286,6 +286,119 @@ assert.equal(api.portConflict({ ...state.form, port: 443, protocol: 'hysteria2',
 assert.equal(api.randomPort({ ...state.form, protocol: 'hysteria2', settings: {} },
   [{ id: 'tcp', nodeId: 'server', port: 10000, name: 'TCP', protocol: 'vless', settings: {} }], '', () => 0), 10001);
 console.log('PASS NODE_EDITOR_PORTS: node-wide numeric port rule (TCP and UDP cannot share a port number), random port skips taken ports');
+
+// UX: the editor derives what it can instead of asking the Owner to guess. The
+// generators take the byte source as an argument, and every value they produce has
+// to pass the same validateServerFields rules the panel and the API apply.
+const fixedBytes = values => size => Uint8Array.from({ length: size }, (_, index) => values[index % values.length]);
+const hexShortId = api.generateShortId(fixedBytes([0x01, 0xab, 0x7f, 0xff, 0x10, 0x00, 0x5c, 0x9e]));
+assert.equal(hexShortId, '01ab7fff10005c9e');
+assert.match(api.generateShortId(), /^[0-9a-f]{16}$/);
+assert.equal(api.validateServerFields({ ...serverSettings, reality: { ...realityOriginal.settings.reality, short_ids: [api.generateShortId()] } }), '');
+assert.deepEqual(api.appendShortId([], hexShortId), [hexShortId]);
+assert.deepEqual(api.appendShortId(['0123abcd'], hexShortId), ['0123abcd', hexShortId]); // appended as a new line
+assert.deepEqual(api.appendShortId(['0123abcd', ' '], hexShortId), ['0123abcd', hexShortId]);
+assert.equal(api.sniFromTarget('www.amd.com:443'), 'www.amd.com');
+assert.equal(api.sniFromTarget(' www.amd.com:443 '), 'www.amd.com');
+assert.equal(api.sniFromTarget('www.amd.com'), 'www.amd.com');
+for (const target of ['203.0.113.9:443', '[2001:db8::1]:443', 'https://invalid/', '', 'bad name:443']) {
+  assert.equal(api.sniFromTarget(target), '', JSON.stringify(target) + ' is not a DNS name');
+}
+const randomPath = api.randomXhttpPath(fixedBytes([0, 1, 25, 26, 35, 36, 10, 11, 12, 13, 14, 15]));
+assert.equal(randomPath, '/abz09aklmnop');
+assert.match(api.randomXhttpPath(), /^\/[a-z0-9]{12}$/);
+assert.equal(api.validateServerFields({ security: 'tls', transport: 'xhttp', xhttp: { path: api.randomXhttpPath(), mode: 'auto' } }), '');
+// A preset handshake target and the SNI derived from it are a valid pair.
+assert.deepEqual([...api.REALITY_HANDSHAKE_PRESETS],
+  ['www.microsoft.com:443', 'www.apple.com:443', 'www.amd.com:443', 'www.nvidia.com:443', 'dl.google.com:443', 'www.cloudflare.com:443']);
+for (const preset of api.REALITY_HANDSHAKE_PRESETS) {
+  const sni = api.sniFromTarget(preset);
+  assert.ok(sni, preset + ' yields a server name');
+  assert.equal(api.validateServerFields({ security: 'reality', transport: 'tcp',
+    reality: { public_key: '', handshake_target: preset, server_names: [sni], short_ids: ['0123abcd'] } }), '');
+}
+// The derivation fills an empty list only: an existing draft is never overwritten.
+const emptyNames = { public_key: '', handshake_target: 'www.amd.com:443', server_names: [], short_ids: [] };
+assert.equal(api.fillServerNamesFromTarget(emptyNames), true);
+assert.deepEqual(emptyNames.server_names, ['www.amd.com']);
+assert.equal(api.fillServerNamesFromTarget(emptyNames), false);
+const pinnedNames = { public_key: '', handshake_target: 'www.apple.com:443', server_names: ['own.example.com'], short_ids: [] };
+assert.equal(api.fillServerNamesFromTarget(pinnedNames), false);
+assert.deepEqual(pinnedNames.server_names, ['own.example.com']);
+const ipNames = { public_key: '', handshake_target: '203.0.113.9:443', server_names: [], short_ids: [] };
+assert.equal(api.fillServerNamesFromTarget(ipNames), false);
+assert.deepEqual(ipNames.server_names, []);
+// Switching to Reality prefills exactly one Short ID, and a filled list is kept.
+const freshRealitySwitch = api.createEditor('server');
+api.changeSecurity(freshRealitySwitch, 'reality');
+assert.equal(freshRealitySwitch.form.settings.reality.short_ids.length, 1);
+assert.match(freshRealitySwitch.form.settings.reality.short_ids[0], /^[0-9a-f]{16}$/);
+assert.equal(freshRealitySwitch.form.settings.reality.handshake_target, ''); // the target stays Owner-chosen
+const keptRealityIds = api.createEditor('server', realityOriginal);
+api.changeSecurity(keptRealityIds, 'reality');
+assert.deepEqual(keptRealityIds.form.settings.reality.short_ids, ['0123abcd']);
+// xhttp is offered whenever the core reports it with Reality or TLS, and picking it
+// while security is None switches the security instead of blocking the option.
+assert.equal(api.transportChoices(reported, '', 'vless', { security: 'none', transport: 'tcp' }).find(c => c.value === 'xhttp').reason, '');
+assert.match(api.serverSettingsReason(reported, '', 'vless', { security: 'none', transport: 'xhttp' }), /Reality 或 TLS/);
+const xhttpEditor = api.createEditor('server');
+api.changeTransport(xhttpEditor, 'xhttp');
+assert.match(api.applyXhttpSecurity(xhttpEditor, reported), /Reality/);
+assert.equal(xhttpEditor.form.settings.security, 'reality');
+assert.equal(xhttpEditor.form.settings.reality.short_ids.length, 1);
+assert.equal(api.applyXhttpSecurity(xhttpEditor, reported), ''); // already switched
+const tlsOnlyReport = { ...reported, capabilities: { ...reported.capabilities,
+  server_settings_combinations: combinations.filter(c => !(c.security === 'reality' && c.transport === 'xhttp')) } };
+assert.equal(api.transportChoices(tlsOnlyReport, '', 'vless', { security: 'reality', transport: 'tcp' }).find(c => c.value === 'xhttp').reason, '');
+const tlsEditor = api.createEditor('server');
+api.changeTransport(tlsEditor, 'xhttp');
+assert.match(api.applyXhttpSecurity(tlsEditor, tlsOnlyReport), /TLS/);
+assert.equal(tlsEditor.form.settings.security, 'tls');
+assert.equal(api.applyXhttpSecurity(tlsEditor, server), ''); // no report: nothing is switched silently
+// The `reported` fixture lists tls+xhttp and reality+xhttp. A security that already
+// runs xhttp here is the Owner's choice: picking xhttp keeps TLS instead of moving to
+// the Reality fallback, and the xhttp option itself stays selectable without a reason.
+assert.equal(api.transportChoices(reported, '', 'vless', { security: 'tls', transport: 'tcp' }).find(c => c.value === 'xhttp').reason, '');
+const keptTlsEditor = api.createEditor('server');
+api.changeSecurity(keptTlsEditor, 'tls');
+api.changeTransport(keptTlsEditor, 'xhttp');
+assert.equal(api.applyXhttpSecurity(keptTlsEditor, reported), '');
+assert.equal(keptTlsEditor.form.settings.security, 'tls');
+assert.equal(api.serverSettingsReason(reported, '', 'vless', { security: 'tls', transport: 'xhttp' }), '');
+// Unavailable options are hidden, not greyed out: the reason still exists in the
+// model, but the template renders only the choices the core reports and keeps the
+// value the draft already holds.
+const protocolFields = readFileSync(new URL('../src/modules/proxy/components/node-editor/NodeProtocolFields.vue', import.meta.url), 'utf8');
+const visibleFor = (choices, current) => api.visibleChoices(choices, current).map(c => c.value);
+assert.deepEqual(visibleFor(api.transportChoices(server, '', 'vless', { security: 'tls', transport: 'tcp' }), 'tcp'), ['tcp', 'ws', 'grpc']);
+assert.deepEqual(visibleFor(api.transportChoices(reported, '', 'vless', { security: 'tls', transport: 'tcp' }), 'tcp'), ['tcp', 'ws', 'grpc', 'xhttp']);
+// The stored xhttp value stays listed for an edit, and no other unavailable value does.
+assert.deepEqual(visibleFor(api.transportChoices(server, '', 'vless', { security: 'tls', transport: 'xhttp' }), 'xhttp'), ['tcp', 'ws', 'grpc', 'xhttp']);
+assert.deepEqual(visibleFor(api.securityChoices(server, '', 'vless', { transport: 'tcp' }), 'none'), ['none', 'tls']);
+assert.deepEqual(visibleFor(api.securityChoices(reported, '', 'vless', { transport: 'tcp' }), 'none'), ['none', 'tls', 'reality']);
+assert.deepEqual(visibleFor(api.flowChoices(reported, '', 'vless', { security: 'reality', transport: 'grpc' }), ''), ['']);
+assert.deepEqual(visibleFor(api.flowChoices(reported, '', 'vless', { security: 'reality', transport: 'tcp' }), 'xtls-rprx-vision'), ['', 'xtls-rprx-vision']);
+assert.deepEqual(api.protocolChoices(server, '', ['vless', 'trojan', 'socks5'], 'vless'), ['vless']);
+assert.deepEqual(api.protocolChoices(server, '', ['vless', 'socks5'], 'socks5'), ['vless'], 'a new inbound never keeps an unavailable protocol');
+assert.deepEqual(api.protocolChoices(server, '', ['vless', 'socks5'], 'socks5', true), ['vless', 'socks5'], 'an edited inbound keeps its stored protocol');
+assert.doesNotMatch(protocolFields, /（不可用）/, 'no option is labelled unavailable');
+assert.doesNotMatch(protocolFields, /:disabled="!!choice.reason"/, 'unavailable transport/security/flow options are hidden, not disabled');
+assert.match(protocolFields, /v-for="choice in transports"/);
+assert.match(protocolFields, /v-if="shortIdCount < 16"/, 'the generate button disappears at 16 Short IDs');
+assert.match(protocolFields, /v-if="targetSni"/, 'the SNI helper only exists when the target has a DNS host');
+// The protocol select lists only the protocols the selected core reports.
+const drawerFields = readFileSync(new URL('../src/modules/proxy/components/node-editor/NodeEditorDrawer.vue', import.meta.url), 'utf8');
+assert.match(drawerFields, /v-for="protocol in availableProtocols"/);
+assert.match(drawerFields, /v-if="availableProtocols.length"/);
+assert.doesNotMatch(drawerFields, /（不可用）/, 'an unavailable protocol is not listed as a disabled option');
+// The buttons and the 12px helper lines are wired to those helpers.
+for (const wiring of ['@click="addShortId"', '@click="fillSni"', '@click="setRandomPath"', '@change="pickPreset"', 'appendShortId(', 'randomXhttpPath(', 'fillServerNamesFromTarget(', 'applyXhttpSecurity(', 'REALITY_HANDSHAKE_PRESETS']) {
+  assert.ok(protocolFields.includes(wiring), wiring + ' is wired in the protocol fields');
+}
+assert.ok(protocolFields.indexOf('@click="addShortId"') > protocolFields.indexOf('Short ID'), 'the generate button sits next to the Short ID field');
+assert.match(protocolFields, /class="block text-xs mt-1"/, 'field help stays at 12px');
+console.log('PASS NODE_EDITOR_AUTOFILL: Short ID/SNI/xhttp path generators are pure and valid, SNI only fills an empty list, Reality switch prefills one Short ID, xhttp offered for Reality or TLS with an explained security switch');
+
 assert.equal(api.validateStep(2, state, server, rows), '');
 for (const port of [0, 65536, 1.5, NaN]) { state.form.port = port; assert.match(api.validateStep(2, state, server, rows), /端口/); }
 state.form.settings.security = 'tls';

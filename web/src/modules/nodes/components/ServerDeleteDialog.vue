@@ -11,7 +11,7 @@
       <p v-if="error" role="alert" class="text-ios-red">{{ error }}</p>
       <div class="flex justify-end gap-3">
         <button class="ios-dialog-btn-secondary" :disabled="deleting" @click="open = false">关闭</button>
-        <button v-if="preview" class="ios-dialog-btn-danger" :disabled="loading || deleting || preview.blockers.length > 0 || preview.mode === 'deleted'" @click="remove">{{ deleting ? '处理中…' : preview.mode === 'cancel' ? '确认取消登记' : '确认删除' }}</button>
+        <button v-if="preview && !preview.blockers.length && preview.mode !== 'deleted'" class="ios-dialog-btn-danger" :disabled="loading || deleting" @click="remove">{{ deleting ? '处理中…' : preview.mode === 'cancel' ? '确认取消登记' : '确认删除' }}</button>
       </div>
     </div>
   </AppDialog>

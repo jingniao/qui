@@ -76,24 +76,25 @@ assert.match(versionPanel, /result\?\.code|result\?\.installed_version|result\?\
 assert.match(versionPanel, /coreBatchComponentLocked/, 'the per-component batch keeps its component fixed');
 console.log('PASS F3 CORES: per-core data, no local core state, real add/upgrade/remove APIs, refusals explained, per-component batch');
 
-// The install command emits one repeatable --core flag per selected core (K3c)
-// and keeps every other part of the command unchanged.
+// The install command emits one repeatable --core flag per selected core (K3c) and
+// always passes both ports explicitly, so the command never depends on
+// node-install.sh's own defaults (22550 / 18880).
 const nodesApiSource = read('modules/nodes/api.ts').replace(/^import .*;$/gm, '');
 const nodesApiCode = ts.transpileModule(nodesApiSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const nodesApi = await import(`data:text/javascript;base64,${Buffer.from(nodesApiCode).toString('base64')}`);
-const install = { version: '1.2.0', host: 'panel.example.com', httpPort: 443, grpcPort: 9443, caSha256: 'abcd', token: 'tok' };
+const install = { version: '1.2.0', host: 'panel.example.com', httpPort: 22550, grpcPort: 18880, caSha256: 'abcd', token: 'tok' };
 const defaultCommand = nodesApi.installCommand(install);
 assert.match(defaultCommand, / --core xray$/, 'the default selection stays xray');
 assert.equal((defaultCommand.match(/--core /g) || []).length, 1);
-assert.match(defaultCommand, /--version 1\.2\.0 --panel panel\.example\.com --grpc-port 9443 --ca-sha256 abcd --token tok/, 'the rest of the command is unchanged');
-assert.doesNotMatch(defaultCommand, /--http-port/, '--http-port is still omitted for 443');
+assert.match(defaultCommand, /--version 1\.2\.0 --panel panel\.example\.com --http-port 22550 --grpc-port 18880 --ca-sha256 abcd --token tok/, 'both ports are always passed explicitly');
+assert.match(nodesApi.installCommand({ ...install, httpPort: 443 }), /--http-port 443/, '443 is passed too: the command never relies on the installer default');
 assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'sing-box'] }), /--core xray --core sing-box$/, 'one --core flag per selected core');
 assert.match(nodesApi.installCommand({ ...install, cores: ['sing-box', 'sing-box'] }), /--core sing-box$/, 'the selection is deduplicated');
-assert.match(nodesApi.installCommand({ ...install, httpPort: 8443 }), /--http-port 8443/, 'a non-443 panel port is still passed');
+assert.match(nodesApi.installCommand({ ...install, httpPort: 8443 }), /--http-port 8443/, 'a custom panel port is passed');
 assert.throws(() => nodesApi.installCommand({ ...install, cores: [] }), /内核/, 'an empty selection is refused');
 assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'gost'] }), /--core xray --core gost$/, 'GOST joined the installer cores in v1.3');
 assert.throws(() => nodesApi.installCommand({ ...install, cores: ['v2ray'] }), /内核/, 'an unknown core name is refused');
-console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated allowlist, rest of the command unchanged');
+console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated allowlist, both ports always explicit');
 
 // The editor's local port check follows the Agent's node-wide numeric rule: a TCP
 // and a UDP inbound can NOT share a port number (an earlier change allowed it).
@@ -248,7 +249,7 @@ assert.equal(versionsA.detectArch({ capabilities: { architecture: 'amd64' } }), 
 assert.equal(versionsA.detectArch({ capabilities: {} }), '');
 assert.match(versionsA.upgradeUnavailableReason(pendingA), /登记/);
 assert.match(versionsA.upgradeUnavailableReason({ ...onlineA, agentVersion: '1.0.9', lastHeartbeat: '' }), /心跳/);
-assert.equal((read(versionPathA).match(/:disabled="!!upgradeUnavailableReason\(node\)"/g) || []).length, 4, 'table and card upgrade actions are disabled before enrollment');
+assert.equal((read(versionPathA).match(/v-if="(isOwner && )?!upgradeUnavailableReason\(node\)"/g) || []).length, 4, 'table and card upgrade actions are hidden before enrollment instead of disabled');
 const tasksA = read('modules/system/pages/TaskRecordPage.vue');
 assert.ok(tasksA.indexOf('Agent 签名发布目录') > tasksA.indexOf('共 <span'), 'release directory follows the header and filters');
 assert.match(read('layouts/MainLayout.vue'), /pt-16 lg:pt-0/);
@@ -419,9 +420,12 @@ console.log('PASS walkthrough E tables: sticky last column with opaque/hover sur
 assert.match(read('modules/nodes/components/ServerCardGrid.vue'), /grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5/);
 assert.match(read('modules/nodes/components/ServerCardGrid.vue'), /flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0/);
 assert.match(read('modules/system/components/NodeVersionPanel.vue'), /grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5/);
-// (10) Disabled 升级 buttons are visually disabled.
-for (const button of read('modules/system/components/NodeVersionPanel.vue').match(/class="[^"]*bg-ios-blue\/\[0\.08\][^"]*"/g) || []) assert.match(button, /disabled:opacity-50/);
-assert.match(read('modules/system/components/NodeVersionPanel.vue'), /ios-action-btn-secondary disabled:opacity-50 disabled:cursor-not-allowed/);
+// (10) An unavailable 升级 action is hidden, never a greyed-out button.
+const versionPanelE = read('modules/system/components/NodeVersionPanel.vue');
+assert.doesNotMatch(versionPanelE, /:disabled="!!upgradeUnavailableReason/, 'upgrade buttons are hidden rather than disabled');
+assert.doesNotMatch(versionPanelE, /（已启用）|（不可用）/, 'unavailable core options are removed from the lists');
+assert.match(versionPanelE, /v-for="name in addCoreOptions"/, 'only cores the server does not run yet are offered');
+assert.match(versionPanelE, /v-if="!isCoreInstalled\('xray'\)"/);
 // (5) The three 概况 panels use 2 columns below xl and readable values.
 const systemPanelsE = read('modules/nodes/components/detail/ServerSystemPanels.vue');
 assert.match(systemPanelsE, /grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3\.5 sm:gap-4 items-stretch/);
@@ -434,7 +438,7 @@ assert.doesNotMatch(read('modules/system/pages/BackupPage.vue'), /节点账本/)
 assert.match(read('modules/system/pages/BackupPage.vue'), /完整恢复后请核对用户额度与节点运行配置/);
 assert.doesNotMatch(read('modules/access/pages/AccessRecordPage.vue'), /按凭据归属用户和设备/);
 assert.match(read('modules/access/pages/AccessRecordPage.vue'), /按凭据归属用户/);
-console.log('PASS walkthrough E layout: card columns, disabled buttons, panel width, member server line, refreshed wording');
+console.log('PASS walkthrough E layout: card columns, hidden unavailable actions, panel width, member server line, refreshed wording');
 
 
 // (6) 最近事件 drops a code that repeats the status and translates known failures.

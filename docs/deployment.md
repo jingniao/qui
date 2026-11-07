@@ -19,7 +19,7 @@ Linux/amd64 的 systemd 与 Alpine/OpenRC 主机安装、更新和运行已有�
   - **面板**需要 systemd（Debian、Ubuntu 等）；在 OpenRC 主机上 `install.sh --panel` 会被拒绝。
   - **节点 Agent** 支持 systemd，也支持 **OpenRC**（Alpine 3.19+，OpenRC ≥ 0.45，含没有 systemd 的 LXC 容器）。脚本按 `/run/systemd/system` 或 `/run/openrc` 自动判断，两者都没有就拒绝；对应的服务定义分别是 `deploy/systemd/` 与 `deploy/openrc/`，细节见第 4.1 节。
 - 面板需要一对 Web TLS 证书：非开发模式下 `tls.certificate` 与 `tls.key` 是必填项（`internal/platform/config/config.go`）。证书不由本项目签发，用你自己的 PKI 或 ACME 工具生成。
-- 节点需要签发面板 Web 证书的 CA 文件（第 1 条的 `tls.certificate`；面板的 gRPC 9443 也用同一张证书），默认放在 `/etc/proxy-agent/tls/ca.crt`，`server_name` 必须与该证书匹配。
+- 节点需要签发面板 Web 证书的 CA 文件（第 1 条的 `tls.certificate`；面板的 gRPC 端口 18880 默认也用同一张证书），默认放在 `/etc/proxy-agent/tls/ca.crt`，`server_name` 必须与该证书匹配。
 - 节点若要使用服务器强制出站源地址，需要 nftables（Linux ≥ 5.2）。`install.sh --node` 在 systemd 主机上缺少 `nft` 时用发行版的包管理器（apt / dnf / yum）安装 `nftables`，装不上就拒绝安装；在 Alpine 上它随下一条的 apk 依赖一起安装。
 - 在 Alpine（OpenRC 且有 `apk`）上，`install.sh --node` 先执行 `apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables`（已装的包不变），因此后面的命令与 Debian 上相同。
 - `install.sh` 会检查它用到的命令是否存在，缺失即拒绝：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 上另加 `systemctl`，OpenRC 上另加 `rc-service rc-update openrc-run`。安装核心时还需要 `unzip`（Xray zip）或 `tar`（sing-box tar.gz），下载需要 `curl` 或 `wget`。最小化安装的 Debian/Ubuntu 没有 `unzip`：systemd 主机上缺少时，`install.sh` 像 `nftables` 一样用 apt / dnf / yum 安装它（实测：debootstrap minbase 的 Debian 13）。
@@ -203,7 +203,7 @@ systemctl enable --now proxy-panel.service
 if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; \
 elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; \
 curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.3.1/node-install.sh | bash -s -- \
-  --version 1.0.9 --panel panel.example.com --grpc-port 9443 \
+  --version 1.0.9 --panel panel.example.com --http-port 22550 --grpc-port 18880 \
   --ca-sha256 <面板显示的 64 位小写十六进制> --token <一次性注册码> --core xray
 ```
 
@@ -214,7 +214,7 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.3.
 - `node-install.sh` 从 `https://github.com/jingniao/qui/releases/download/v<版本>/` 下载与面板**同版本**的归档和 `SHA256SUMS`，核对摘要后安装 Agent。Xray 仍用官方 26.3.27；`--core sing-box` 默认取同一 qui 发布的 `sing-box-1.14.4-qui.1-linux-<架构>.tar.gz`，用该发布的 `SHA256SUMS` 校验。必须先有与面板一致的发布。`--core-source official` 保留官方 sing-box 1.14.3 和按架构、libc 固定摘要的行为。
 - 面板证书信任按两种情况之一建立：先尝试用系统 CA 包（即随后会被安装为节点 CA 的那个文件，`--cacert` 指定，并带 `--no-insecure`）验证 `https://<面板>/install/ca.pem`，成功说明面板证书由公网 CA 签发（例如 Let's Encrypt，其中间证书会轮换），此时把系统 CA 包（`/etc/ssl/certs/ca-certificates.crt` 或 `/etc/pki/tls/certs/ca-bundle.crt`）安装为 `/etc/proxy-agent/tls/ca.crt`；失败则改用 `curl -k` 取回该文件，并要求它的 SHA-256 等于 `--ca-sha256`，不一致立即中止（可能中间人攻击，或面板地址/端口填错）。
 - 之后脚本把 `control_address` 与 `server_name` 写入 `/etc/proxy-agent/config.yaml`（保持原属主与权限），用一次性注册码登记，最后启用并启动 Agent：systemd 上是 `systemctl enable` + `start proxy-agent.service`，OpenRC 上是 `rc-update add proxy-agent default` + `rc-service proxy-agent start`。
-- 注册码只能用一次且会过期；它出现在新服务器的 shell 历史里，登记成功后请清理该历史。节点**登记成功前**可以重跑这条命令：会原地升级 Agent 并用新的注册码重新登记，登记要求本机能访问面板的 gRPC 端口（默认 9443）；已登记的主机再跑会被拒绝，升级用 `qui-update`。
+- 注册码只能用一次且会过期；它出现在新服务器的 shell 历史里，登记成功后请清理该历史。节点**登记成功前**可以重跑这条命令：会原地升级 Agent 并用新的注册码重新登记，登记要求本机能访问面板的 gRPC 端口（默认 18880）；已登记的主机再跑会被拒绝，升级用 `qui-update`。
 - 安装失败（例如缺少依赖）时脚本报告 `Agent 安装失败（原因见上面 install.sh 的输出）`：`install.sh` 可能已经替换了部分文件，但本机尚未登记，修正原因后直接重跑同一条命令即可。`install.sh` 不会留下暂存目录或 `.installing` 临时文件。
 - 失败的登记会留下重试标记 `/var/lib/proxy-agent/enrollment-attempt.json` 和它生成的私钥。Agent 把这两个文件绑定到原注册码与面板，不允许换绑。所以重跑时，只要本机既没有证书也没有 `enrollment-result.json`，脚本就把它们移到 `/var/lib/proxy-agent-enrollment-retired.XXXXXXXX/`（root 0700，**不删除**），再用新注册码登记；新登记成功后可以删除该目录。存在 `enrollment-result.json` 时，面板可能已经签发过证书，脚本拒绝继续，处理方法见运维手册第 5 节。
 

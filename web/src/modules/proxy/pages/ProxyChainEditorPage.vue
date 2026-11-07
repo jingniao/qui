@@ -19,7 +19,7 @@
         <p v-if="form.failurePolicy === 'Direct'" class="text-xs text-amber-700">失败时从入口节点直接访问；要求固定出口的网站建议使用阻断或备用出口。</p>
       <label v-if="form.failurePolicy === 'BackupOutboundGroup'" class="block text-sm">备用出口组<select v-model="form.backupTargetId" class="form-input-base mt-2"><option value="">请选择</option><option v-for="group in groups.filter(item => item.enabled && item.nodeId === form.nodeIds[0])" :key="group.id" :value="group.id">{{ group.name }}</option></select></label></section>
       <section class="panel-card p-6"><h2 class="mb-3 text-base font-semibold leading-normal">配置路径与校验</h2><p class="text-sm">{{ form.nodeIds.map(nodeName).join(' → ') }} → {{ finalName }}</p><ul v-if="problems.length" class="mt-3 space-y-1 text-sm text-amber-700"><li v-for="problem in problems" :key="problem">{{ problem }}</li></ul><p v-else class="mt-3 text-sm text-green-700">本地结构检查通过；保存时继续校验服务器协议能力、端口和独立绑定。</p><p class="text-xs text-gray-500 mt-3">路径来自草稿，不能代替连通性测试。保存后可在代理链列表创建发布批次。</p></section>
-      <div class="flex justify-end gap-3"><router-link to="/proxy/chains" class="ios-btn-secondary">取消</router-link><button :disabled="saving || problems.length > 0" class="ios-btn-primary disabled:opacity-40">{{ saving ? '保存中…' : '保存代理链草稿' }}</button></div>
+      <div class="flex justify-end gap-3"><router-link to="/proxy/chains" class="ios-btn-secondary">取消</router-link><button :disabled="saving" class="ios-btn-primary">{{ saving ? '保存中…' : '保存代理链草稿' }}</button></div>
     </form>
   </div>
 </template>

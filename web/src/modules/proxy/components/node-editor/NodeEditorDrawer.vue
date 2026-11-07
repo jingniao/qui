@@ -6,18 +6,20 @@
     <fieldset v-if="!loading && !loadError" :disabled="busy || !!savedId" class="space-y-6">
       <section class="space-y-4">
         <h4 class="text-ios-label text-base font-semibold leading-normal">基础信息</h4>
-        <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" class="form-input-base mt-1.5" @input="autoName = false" /></label>
+        <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" placeholder="例如 Tokyo-vless-443" class="form-input-base mt-1.5" @input="autoName = false" /><span class="block text-xs mt-1">显示在入站列表、订阅名称与访问记录中；默认按「服务器-协议-端口」自动生成，手动修改后不再自动更新。</span></label>
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="block text-xs text-ios-secondary">所属服务器
             <select v-model="f.nodeId" :disabled="!!state.original" class="form-input-base mt-1.5">
               <option value="" disabled>请选择服务器</option>
               <option v-for="server in eligibleServers" :key="server.id" :value="server.id">{{ server.name }}</option>
             </select>
+            <span class="block text-xs mt-1">运行此入站的已登记服务器；编辑时不能更换。</span>
           </label>
-          <label class="block text-xs text-ios-secondary">协议
+          <label v-if="availableProtocols.length" class="block text-xs text-ios-secondary">协议
             <select :value="f.protocol" :disabled="!!state.original" class="form-input-base mt-1.5" @change="changeProtocol(state, ($event.target as HTMLSelectElement).value)">
-              <option v-for="protocol in protocols" :key="protocol" :value="protocol" :disabled="!!protocolReason(selectedServer, protocol, f.core)">{{ protocol.toUpperCase() }}{{ protocolReason(selectedServer, protocol, f.core) ? '（不可用）' : '' }}</option>
+              <option v-for="protocol in availableProtocols" :key="protocol" :value="protocol">{{ protocol.toUpperCase() }}</option>
             </select>
+            <span class="block text-xs mt-1">用户接入使用的协议；只列出所选服务器当前核心实际报告支持的协议。</span>
           </label>
         </div>
         <div role="group" aria-labelledby="node-editor-groups" class="space-y-2">
@@ -29,7 +31,8 @@
             </label>
           </div>
           <p v-else class="text-xs text-ios-secondary">暂无节点组，请先在节点分组页面创建。</p>
-          <p class="text-xs text-ios-secondary">保存时加入所选节点组；不选择则不加入任何组。订阅仍按节点组授权、用途和发布状态筛选。</p>
+          <p class="text-xs text-ios-secondary">保存时加入所选节点组；不选择则不加入任何组，用户订阅也就看不到此入站。</p>
+          <p class="text-xs text-ios-secondary">例如把入口入站加入「日本入口」组，再在节点分组页授权用户；组内新增可用入站后用户刷新订阅即可获得。</p>
         </div>
         <p v-if="state.original" class="text-xs text-ios-secondary">编辑时所属服务器和协议保持不变。</p>
         <p v-if="!eligibleServers.length" class="text-sm text-ios-secondary">没有可用的已登记服务器，请先登记服务器。</p>
@@ -54,9 +57,10 @@
         <div class="text-xs text-ios-secondary">
           <label for="node-editor-port" class="block">监听端口</label>
           <div class="flex items-center gap-2 mt-1.5">
-            <input id="node-editor-port" v-model.number="f.port" type="number" min="1" max="65535" class="form-input-base min-w-0 flex-1 font-mono" />
+            <input id="node-editor-port" v-model.number="f.port" type="number" min="1" max="65535" placeholder="例如 443" class="form-input-base min-w-0 flex-1 font-mono" />
             <button type="button" class="ios-btn-secondary shrink-0" @click="pickPort">随机端口</button>
           </div>
+          <p class="mt-1">客户端连接此入站时使用的端口；同一服务器上不能与其他入站（含禁用）重复，不分 TCP/UDP。</p>
         </div>
         <p v-if="serverPortRange" class="text-xs text-ios-blue font-mono">服务器分配范围：{{ serverPortRange.start }}–{{ serverPortRange.end }}</p>
         <p v-else class="text-xs text-ios-secondary">未设置服务器范围；随机端口使用编辑器默认范围 10000–65535。</p>
@@ -72,6 +76,7 @@
           <label class="inline-flex items-center gap-2"><input v-model="f.enabled" type="checkbox" />启用节点</label>
           <label v-if="!f.internalRelay && f.protocol !== 'forward'" class="inline-flex items-center gap-2"><input v-model="f.subscriptionVisible" type="checkbox" />显示在授权用户订阅中</label>
         </div>
+        <p class="text-xs text-ios-secondary">启用节点：取消勾选后此入站不参与发布，已发布配置里的用户凭据随之移除。显示在授权用户订阅中：取消后仅供节点间中转使用，用户订阅与凭据都不再包含它。</p>
         <p v-if="!f.internalRelay && f.protocol !== 'forward' && !f.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
       </section>
       <NodeAdvancedFields :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" :open="!!error" />
@@ -128,7 +133,7 @@ import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
-import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, portConflict, previewPayload, protocolReason, randomPort, relayMode, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
+import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, portConflict, previewPayload, protocolChoices, protocolReason, randomPort, relayMode, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
 const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin }>(), { serverId: '', inbound: null, origin: 'list' });
 const emit = defineEmits<{ close: []; saved: [] }>();
 const route = useRoute();
@@ -146,6 +151,9 @@ watch(error, async message => { if (message) { await nextTick(); errorMessage.va
 const protocols = computed(() => [...new Set([...protocolOptions.inbound, 'forward'])]);
 const selectedServer = computed(() => servers.value.find(s => s.id === f.value.nodeId));
 const eligibleServers = computed(() => servers.value.filter(serverEligible));
+// Only the protocols the selected server's core reports are offered; an edited
+// inbound keeps its stored protocol listed so the select never shows another value.
+const availableProtocols = computed(() => protocolChoices(selectedServer.value, f.value.core, protocols.value, f.value.protocol, !!state.original));
 // Cores the selected server reports as enabled (K3b). One core = read-only text;
 // several = a selector whose empty value follows the node's primary core.
 const coreChoices = computed(() => coreOptions(selectedServer.value));
@@ -196,6 +204,10 @@ watch(() => f.value.nodeId, async (newNodeId) => {
     if (disposed || f.value.nodeId !== newNodeId) return;
   }
   if (!state.original && newNodeId) {
+    // Creation: the draft protocol falls back to a reported one, so an option that
+    // is no longer offered is never kept selected.
+    const offered = protocolChoices(selectedServer.value, f.value.core, protocols.value, f.value.protocol);
+    if (offered.length && !offered.includes(f.value.protocol)) changeProtocol(state, offered[0]);
     const range = getNodePortRange(newNodeId);
     if (range) {
       try {

@@ -37,17 +37,17 @@
         <!-- Select All / Deselect All / Settings -->
         <div class="flex items-center gap-2 text-xs">
           <button
+            v-if="data.targets.length && hidden.length"
             type="button"
-            class="text-emerald-600 hover:text-emerald-700 font-medium cursor-pointer select-none disabled:opacity-40"
-            :disabled="!data.targets.length || hidden.length === 0"
+            class="text-emerald-600 hover:text-emerald-700 font-medium cursor-pointer select-none"
             @click="selectAll"
           >
             全选
           </button>
           <button
+            v-if="data.targets.length && hidden.length < data.targets.length"
             type="button"
-            class="text-ios-secondary hover:text-ios-label font-medium cursor-pointer select-none disabled:opacity-40"
-            :disabled="!data.targets.length || hidden.length === data.targets.length"
+            class="text-ios-secondary hover:text-ios-label font-medium cursor-pointer select-none"
             @click="deselectAll"
           >
             全不选

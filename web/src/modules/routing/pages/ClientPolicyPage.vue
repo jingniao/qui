@@ -612,10 +612,10 @@
                     <div class="h-3.5 w-px bg-black/[0.08] mx-1"></div>
 
                     <button
+                      v-if="item.index > 0"
                       type="button"
-                      :disabled="item.index === 0"
                       @click="moveGroup(item.index, -1)"
-                      class="p-1 rounded-lg hover:bg-black/[0.04] text-neutral-400 hover:text-neutral-700 disabled:opacity-20 transition-colors"
+                      class="p-1 rounded-lg hover:bg-black/[0.04] text-neutral-400 hover:text-neutral-700 transition-colors"
                       title="上移此组"
                     >
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -623,10 +623,10 @@
                       </svg>
                     </button>
                     <button
+                      v-if="item.index < clientConfig.proxyGroups.length - 1"
                       type="button"
-                      :disabled="item.index === clientConfig.proxyGroups.length - 1"
                       @click="moveGroup(item.index, 1)"
-                      class="p-1 rounded-lg hover:bg-black/[0.04] text-neutral-400 hover:text-neutral-700 disabled:opacity-20 transition-colors"
+                      class="p-1 rounded-lg hover:bg-black/[0.04] text-neutral-400 hover:text-neutral-700 transition-colors"
                       title="下移此组"
                     >
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1276,19 +1276,19 @@
                               class="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-lg border border-black/[0.08] py-1 z-30 text-xs text-left"
                             >
                               <button
+                                v-if="!isFiltered && !isRuleAtBound(rule, -1)"
                                 type="button"
-                                :disabled="isFiltered || isRuleAtBound(rule, -1)"
                                 @click.stop="moveRuleInList(rule, -1)"
-                                class="w-full text-left px-3 py-1.5 text-neutral-700 hover:bg-neutral-50 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-between"
+                                class="w-full text-left px-3 py-1.5 text-neutral-700 hover:bg-neutral-50 flex items-center justify-between"
                               >
                                 <span>上移一位</span>
                                 <span class="text-neutral-400">↑</span>
                               </button>
                               <button
+                                v-if="!isFiltered && !isRuleAtBound(rule, 1)"
                                 type="button"
-                                :disabled="isFiltered || isRuleAtBound(rule, 1)"
                                 @click.stop="moveRuleInList(rule, 1)"
-                                class="w-full text-left px-3 py-1.5 text-neutral-700 hover:bg-neutral-50 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-between"
+                                class="w-full text-left px-3 py-1.5 text-neutral-700 hover:bg-neutral-50 flex items-center justify-between"
                               >
                                 <span>下移一位</span>
                                 <span class="text-neutral-400">↓</span>
@@ -1776,9 +1776,9 @@
               <div class="flex items-center gap-2">
                 <button type="button" class="ios-btn-secondary px-3 py-1.5" @click="loadPreview">刷新预览</button>
                 <button
+                  v-if="previewBody"
                   type="button"
                   @click="copyConfig"
-                  :disabled="!previewBody"
                   class="ios-btn-secondary px-3 py-1.5 inline-flex items-center gap-1.5"
                 >
                   <svg v-if="!copied" class="w-3.5 h-3.5 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

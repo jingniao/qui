@@ -42,19 +42,19 @@
         <span>可选节点：{{ filteredNodes.length }} 个</span>
         <div class="flex items-center gap-2">
           <button
+            v-if="filteredNodes.length"
             type="button"
             @click="selectAllFiltered"
             class="text-ios-blue hover:underline"
-            :disabled="!filteredNodes.length"
           >
             全选当前筛选
           </button>
-          <span class="text-black/20">|</span>
+          <span v-if="filteredNodes.length && selected.length" class="text-black/20">|</span>
           <button
+            v-if="selected.length"
             type="button"
             @click="selected = []"
             class="text-ios-tertiary hover:text-ios-label"
-            :disabled="!selected.length"
           >
             清空已选
           </button>
@@ -72,7 +72,7 @@
             v-model="selected"
             type="checkbox"
             :value="node.id"
-            :disabled="!!disabledReason(node) || saving"
+            :disabled="saving"
             class="mt-1 accent-ios-blue shrink-0 w-4 h-4 rounded"
           />
           <div class="flex-1 min-w-0 space-y-1">
@@ -98,7 +98,6 @@
               <span v-if="node.subscriptionVisible" class="text-ios-green">· 订阅可见</span>
             </div>
           </div>
-          <span v-if="disabledReason(node)" class="text-xs text-ios-orange">{{ disabledReason(node) }}</span>
           <StatusBadge v-if="node.sourceType === 'self_hosted'" :status="node.enabled ? 'active' : 'disabled'" />
         </label>
         <p v-if="!filteredNodes.length" class="text-sm text-ios-tertiary text-center py-6">
@@ -233,7 +232,9 @@ const filteredNodes = computed(() => {
 
   return allCandidateNodes.value.filter(node => {
     if (assigned.includes(node.id)) return false;
-
+    // A group grants user access, so an inbound that can never provide it is not
+    // offered at all instead of being shown greyed out (Owner rule).
+    if (disabledReason(node)) return false;
     if (selectedSourceType.value && node.sourceType !== selectedSourceType.value) {
       return false;
     }
@@ -261,7 +262,7 @@ function disabledReason(node: GroupPickerNode): string {
   return '';
 }
 function selectAllFiltered() {
-  const toAdd = filteredNodes.value.filter(n => !disabledReason(n)).map(n => n.id);
+  const toAdd = filteredNodes.value.map(n => n.id);
   selected.value = Array.from(new Set([...selected.value, ...toAdd]));
 }
 </script>

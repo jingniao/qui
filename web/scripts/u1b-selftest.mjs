@@ -113,10 +113,12 @@ for (const [protocol, supportTcp, supportUdp, expectedTcp, expectedUdp] of [
   }
 }
 const connectionTemplate = read('modules/proxy/components/relay/CanvasConnectionDialog.vue').split('<script setup')[0];
-assert.match(connectionTemplate, /v-model="tcp"[^>]*:disabled="!supportsTcp"/);
-assert.match(connectionTemplate, /v-model="udp"[^>]*:disabled="!supportsUdp"/);
-assert.ok(connectionTemplate.includes('此外部出站不支持 TCP'));
-assert.ok(connectionTemplate.includes('此外部出站不支持 UDP'));
+// An unsupported transport is hidden instead of offered greyed out (Owner rule); the
+// payload still forces the flag off in the script.
+assert.match(connectionTemplate, /v-if="supportsTcp"[^>]*>\s*<input v-model="tcp"[^>]*\/>TCP/);
+assert.match(connectionTemplate, /v-if="supportsUdp"[^>]*>\s*<input v-model="udp"[^>]*\/>UDP/);
+assert.doesNotMatch(connectionTemplate, /:disabled="!supports(Tcp|Udp)"/);
+assert.ok(!connectionTemplate.includes('此外部出站不支持 TCP'));
 assert.match(read('modules/proxy/pages/RelayCanvasPage.vue'), /<CanvasConnectionDialog[^>]*:outbounds="outbounds"/);
 
 const external = await component('modules/proxy/components/relay/ExternalProxyDialog.vue', {

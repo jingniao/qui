@@ -116,10 +116,10 @@
     <section v-if="isOwner" class="panel-card p-5 space-y-4">
       <h2 class="text-ios-label text-base font-semibold leading-normal">Agent 签名发布目录</h2>
       <p v-if="!configured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
-      <details class="space-y-3"><summary class="text-sm cursor-pointer">登记签名 Agent 版本</summary>
+      <details v-if="configured" class="space-y-3"><summary class="text-sm cursor-pointer">登记签名 Agent 版本</summary>
         <p class="text-xs text-ios-secondary">粘贴离线签名工具生成的完整 proxy-agent 清单。</p>
         <textarea v-model="manifest" maxlength="16384" rows="6" class="form-input-base w-full font-mono text-xs" aria-label="签名 Agent 清单" />
-        <button class="ios-btn-primary" :disabled="registerBusy || !configured || !manifest.trim()" @click="registerRelease">验证并登记</button>
+        <button class="ios-btn-primary" :disabled="registerBusy" @click="registerRelease">验证并登记</button>
       </details>
       <DataTable v-if="releasePageItems.length"><template #header><th>版本</th><th>平台</th><th>序列</th></template><template #body><tr v-for="r in releasePageItems" :key="r.id"><td>{{ r.signed.manifest.version }}</td><td>{{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</td><td>{{ r.signed.manifest.sequence }}</td></tr></template></DataTable>
       <Pagination :total="releases.length" :current-page="releasePage" :page-size="20" @update:page="releasePage = $event" />

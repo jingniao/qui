@@ -61,11 +61,11 @@
               />
             </td>
             <td>
-              <label v-if="isOwner" class="inline-flex items-center gap-2 cursor-pointer">
+              <label v-if="isOwner && (target.scheduled || scheduledCount < 5)" class="inline-flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   :checked="target.scheduled"
-                  :disabled="saving || (!target.scheduled && scheduledCount >= 5)"
+                  :disabled="saving"
                   @change="toggleScheduled(target, $event)"
                 />
                 <span class="text-xs" :class="target.scheduled ? 'text-ios-blue font-medium' : 'text-ios-secondary'">

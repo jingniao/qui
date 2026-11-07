@@ -9,10 +9,22 @@
 | 任务 | 入口 |
 | --- | --- |
 | 下载、安装、接入节点与升级 | [GitHub Releases](https://github.com/jingniao/qui/releases/latest)、[部署与升级](docs/deployment.md) |
+| 从零安装：一键脚本、加节点、日常操作 | [安装与使用指南](docs/install-guide.md) |
 | 备份恢复、证书、流量与排错 | [运维手册](docs/operations.md) |
 | 理解模块、数据流与开发边界 | [架构总览](docs/architecture.md)、[项目说明书](AGENTS.md) |
 | 查询协议与执行范围 | [协议矩阵](docs/protocol-support-matrix.md)、[设备限制](docs/device-limit.md) |
 | 查找全部现行文档与历史 | [文档导航](docs/README.md) |
+
+## 快速开始
+
+在 Debian/Ubuntu 面板服务器上以 root 执行（交互式，逐项可回车用默认值，汇总确认后才动手；已安装的主机上同一脚本变成更新／状态／重启／卸载菜单）。默认监听 **22550**（Web/API/订阅）与 **18880**（节点 Agent gRPC），安装时都可以改；已有安装保持自己的端口。
+
+```sh
+wget -O panel-install.sh https://raw.githubusercontent.com/jingniao/qui/main/deploy/linux/panel-install.sh
+bash panel-install.sh
+```
+
+首次登录、添加节点、创建入站、节点组与订阅、日常运维与常见问题见[项目安装与使用指南](docs/install-guide.md)；手工安装与升级细节见[部署与升级](docs/deployment.md)。
 
 开发要求 Go（版本以 `go.mod` 为准）和 Node.js 22。构建、开发启动与 Linux 门禁命令统一见[部署与升级 §2](docs/deployment.md#2-构建发布包)。每个变更的证据来自 Linux 测试机的 `scripts/check.sh` 与真实核套件；GitHub 对发布提交再运行 `check`，标签构建要求同 SHA 已通过。
 

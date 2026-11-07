@@ -286,7 +286,7 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 
 | 现象 | 检查 |
 | --- | --- |
-| 节点显示离线 | `systemctl status proxy-agent`、`journalctl -u proxy-agent`、节点到面板 9443 的连通性、`/etc/proxy-agent/tls/ca.crt` 是否是签发面板 Web 证书的 CA 且与 `server_name` 匹配 |
+| 节点显示离线 | `systemctl status proxy-agent`、`journalctl -u proxy-agent`、节点到面板 gRPC 端口（默认 18880）的连通性、`/etc/proxy-agent/tls/ca.crt` 是否是签发面板 Web 证书的 CA 且与 `server_name` 匹配 |
 | 节点连上就断开 | 节点是否被禁用、证书是否过期或被吊销、Agent 版本是否低于面板要求 |
 | 节点突然离线，Agent 每 30 秒重复 `invalid spool capacity observation` | 本地队列的容量观测被面板拒绝（1.3.1 之前是 spool pragma 只对一条连接生效的缺陷），见下面“节点因 spool 容量观测离线”；临时处置是重启 Agent |
 | 发布后节点回滚 | 系统 → 配置版本看差异与失败原因；核心原生校验失败、端口冲突、健康检查失败都会自动回滚并保留上一成功版本 |
@@ -492,7 +492,7 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 在画布上把一条 `port_forward` 连接的协议选成 `gost`，按普通端口转发填源监听端口、目标地址/端口与 TCP/UDP，再发布即可。**两端服务器都必须装了 GOST 核心**（两侧都上报 GOST 核心与设置契约 3），出口服务器的端口范围里要有空闲端口给中继监听；端口由面板分配，规则与入站一致（AGENTS §12）。入口节点把这条转发的目标经出口节点的 `relay` 监听访问，中继用面板按隧道生成的双向 TLS 证书认证；证书存在面板库的密封列里，CA 私钥签发后即丢弃、有效期 10 年，界面只显示代数、服务器名、到期与指纹。
 
-**防火墙**：出口节点必须让入口节点能访问**中继监听端口**（TCP，端口范围里分配出的那个数字）。入口节点不需要对出口开放任何入站，也不需要放开 9443 之类管理端口。
+**防火墙**：出口节点必须让入口节点能访问**中继监听端口**（TCP，端口范围里分配出的那个数字）。入口节点不需要对出口开放任何入站，也不需要放开 18880 之类的面板管理端口。
 
 **发布顺序与轮换**：GOST 隧道固定先发布出口（中继监听），再发布入口（拨它的链），批次回滚反向。隧道页面的“轮换凭据”（`POST /api/v1/canvas-tunnels/{id}/rotate-credentials`，带 `updatedAt`，Owner＋CSRF，记操作日志“轮换隧道凭据”）换掉整套 CA 与两张证书并把隧道标成 modified，由**下一次普通发布**完成切换；出口与入口两次部署之间隧道会中断几十秒到一分钟，这是可接受的代价。旧画布数据里没有凭据的隧道在第一次发布时自动补发一代，不改变发布状态。
 

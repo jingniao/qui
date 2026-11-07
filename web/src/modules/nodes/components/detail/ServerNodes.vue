@@ -28,7 +28,7 @@
               <td class="font-mono tabular-nums">{{ item.listen }}:{{ item.port }} · {{ listenNetworks(item).join('/').toUpperCase() }}</td>
               <td>{{ item.internalRelay ? '内部中转' : item.allowedUserIds.length ? `${item.allowedUserIds.length} 位指定用户` : '全部授权用户' }}</td>
               <td>{{ item.subscriptionVisible ? '是' : '否' }}</td>
-              <td><StatusBadge :status="item.enabled ? 'active' : 'disabled'" /></td><td v-if="isOwner"><div class="flex gap-2"><button class="ios-action-btn-secondary" @click="$emit('edit', item)">编辑</button><button class="ios-action-btn-secondary" :disabled="busy || !!node.deletedAt" @click="toggle(item)">{{ item.enabled ? '停用' : '启用' }}</button></div></td>
+              <td><StatusBadge :status="item.enabled ? 'active' : 'disabled'" /></td><td v-if="isOwner"><div class="flex gap-2"><button class="ios-action-btn-secondary" @click="$emit('edit', item)">编辑</button><button v-if="!node.deletedAt" class="ios-action-btn-secondary" :disabled="busy" @click="toggle(item)">{{ item.enabled ? '停用' : '启用' }}</button></div></td>
             </tr>
           </template>
         </DataTable>

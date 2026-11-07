@@ -1,8 +1,8 @@
 import type { ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings } from '../../api';
 import type { CoreName, NodeView } from '../../../nodes/api';
 import { blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
-import { internalRelaySettingsReason, publicReality, serverSettingsReason, validateServerFields } from './serverSettingsModel';
-export { transportChoices, securityChoices, flowChoices, internalRelaySettingsReason, serverSettingsReason, validateServerFields, XHTTP_MODES } from './serverSettingsModel';
+import { generateShortId, internalRelaySettingsReason, nonemptyLines, publicReality, serverSettingsReason, validateServerFields, xhttpSecurityFallback, xhttpSecurityNote } from './serverSettingsModel';
+export { transportChoices, securityChoices, flowChoices, visibleChoices, internalRelaySettingsReason, serverSettingsReason, validateServerFields, XHTTP_MODES, generateShortId, appendShortId, sniFromTarget, fillServerNamesFromTarget, randomXhttpPath, REALITY_HANDSHAKE_PRESETS, xhttpSecurityFallback } from './serverSettingsModel';
 
 export type EditorOrigin = 'list' | 'server';
 export const forcedTLS = (protocol: string) => ['trojan', 'hysteria2', 'tuic'].includes(protocol);
@@ -114,7 +114,28 @@ export function changeTransport(state: EditorState, transport: string) {
 }
 export function changeSecurity(state: EditorState, security: string) {
   state.form.settings.security = security;
-  if (security === 'reality') state.form.settings.reality ||= { public_key: '', handshake_target: '', server_names: [], short_ids: [] };
+  if (security !== 'reality') return;
+  const settings = state.form.settings;
+  settings.reality ||= { public_key: '', handshake_target: '', server_names: [], short_ids: [] };
+  // First switch to Reality: one ready-to-use Short ID saves the Owner a guess. A
+  // list that already has values is never replaced.
+  if (!nonemptyLines(settings.reality.short_ids).length) settings.reality.short_ids = [generateShortId()];
+}
+// xhttp only runs on Reality or TLS. Picking it while the current security cannot
+// carry xhttp on the selected core (None, or a security the core does not report with
+// xhttp) switches to the security the core reports and returns the note the editor
+// shows, so the selection never ends in an unroutable pair. A security that already
+// runs xhttp here is the Owner's decision and is never replaced: a core that reports
+// both TLS and Reality must not move a deliberately chosen TLS listener to Reality.
+export function applyXhttpSecurity(state: EditorState, server: NodeView | undefined, core: CoreName | '' = state.form.core || ''): string {
+  const f = state.form, s = f.settings;
+  if (f.protocol !== 'vless' || s.transport !== 'xhttp') return '';
+  // Flow is reported on its own and never justifies rewriting the security.
+  if (!serverSettingsReason(server, core, f.protocol, { ...s, transport: 'xhttp', flow: '' }, false)) return '';
+  const reported = xhttpSecurityFallback(server, core, f.protocol);
+  if (!reported) return '';
+  changeSecurity(state, reported);
+  return xhttpSecurityNote(reported);
 }
 
 // Match the old list's merge rules, including absent QUIC transport, optional
@@ -224,6 +245,12 @@ export function protocolReason(server: NodeView | undefined, protocol: string, c
   if (selected.name === 'xray' && ['hysteria2', 'tuic'].includes(protocol)) return 'Xray 不支持此协议，需要支持 QUIC 的 sing-box';
   if (selected.name === 'sing-box' && protocol === 'wireguard') return 'sing-box 不支持 WireGuard 入站';
   return `${selected.label} 未报告支持 ${protocol} 入站（请检查核心版本与构建标签）`;
+}
+// The protocols the selected core actually reports for this inbound. An unavailable
+// protocol is not offered at all; the stored protocol of an edited inbound stays
+// listed (keepCurrent) so the select shows the real value instead of another one.
+export function protocolChoices(server: NodeView | undefined, core: CoreName | '', protocols: string[], current: string, keepCurrent = false): string[] {
+  return protocols.filter(protocol => !protocolReason(server, protocol, core) || (keepCurrent && protocol === current));
 }
 // The Agent reserves every enabled inbound's numeric port node-wide, regardless
 // of TCP/UDP, transport or core, and the panel enforces the same rule. Keep this

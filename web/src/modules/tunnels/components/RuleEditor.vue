@@ -16,7 +16,7 @@
         <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">目标主机</span><input v-model="manualHost" class="form-input-base font-mono tabular-nums" /></label>
         <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">目标端口</span><input v-model.number="manualPort" type="number" min="1" max="65535" class="form-input-base font-mono tabular-nums" /></label>
       </div>
-      <label class="flex items-center gap-2 text-sm text-ios-secondary"><input v-model="form.subscriptionVisible" type="checkbox" :disabled="targetMode !== 'linked'" /> 对用户可见（仅关联入站）</label>
+      <label v-if="targetMode === 'linked'" class="flex items-center gap-2 text-sm text-ios-secondary"><input v-model="form.subscriptionVisible" type="checkbox" /> 对用户可见（仅关联入站）</label>
       <label class="flex items-center gap-2 text-sm text-ios-secondary"><input v-model="form.enabled" type="checkbox" /> 启用</label>
     </fieldset>
     <p v-if="error" class="text-sm text-ios-red" role="alert">{{ error }}</p>

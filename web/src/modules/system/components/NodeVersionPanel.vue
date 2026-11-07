@@ -296,12 +296,11 @@
           <!-- 7. 操作 -->
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
             <template v-if="kind === 'agent'">
-              <button v-if="isOwner"
+              <button v-if="isOwner && !upgradeUnavailableReason(node)"
                 type="button"
                 @click="handleUpgradeSingle(node)"
-                class="ios-action-btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-                :disabled="!!upgradeUnavailableReason(node)"
-                :title="upgradeUnavailableReason(node) || '升级 Agent 到最新版本'"
+                class="ios-action-btn-secondary"
+                title="升级 Agent 到最新版本"
               >
                 升级
               </button>
@@ -319,11 +318,11 @@
               </button>
               <template v-else>
                 <button
+                  v-if="!upgradeUnavailableReason(node)"
                   type="button"
                   @click="openUpgradeCore(node)"
-                  class="ios-action-btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-                  :disabled="!!upgradeUnavailableReason(node)"
-                :title="upgradeUnavailableReason(node) || '升级代理内核版本'"
+                  class="ios-action-btn-secondary"
+                  title="升级代理内核版本"
                 >
                   升级
                 </button>
@@ -513,12 +512,11 @@
         <!-- Row 4: Action Buttons (Apple HIG Precision) -->
         <template v-if="kind === 'agent'">
           <div class="pt-2 border-t border-black/[0.04] grid grid-cols-2 gap-2.5">
-            <button v-if="isOwner"
+            <button v-if="isOwner && !upgradeUnavailableReason(node)"
               type="button"
               @click="handleUpgradeSingle(node)"
-              class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-ios-blue/[0.08] disabled:active:scale-100"
-              :disabled="!!upgradeUnavailableReason(node)"
-                :title="upgradeUnavailableReason(node) || '升级 Agent 到最新版本'"
+              class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
+              title="升级 Agent 到最新版本"
             >
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -564,11 +562,11 @@
           <!-- When installed: [升级] (flex-1) + [编辑] (Click opens modal for Add/Delete cores) + [详情] -->
           <div v-else class="pt-2 border-t border-black/[0.04] flex items-center gap-2">
             <button
+              v-if="!upgradeUnavailableReason(node)"
               type="button"
               @click="openUpgradeCore(node)"
-              class="flex-1 py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-ios-blue/[0.08]"
-              :disabled="!!upgradeUnavailableReason(node)"
-                :title="upgradeUnavailableReason(node) || '升级代理内核版本'"
+              class="flex-1 py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
+              title="升级代理内核版本"
             >
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -760,11 +758,11 @@
               <!-- Actions for this specific core: [升级] & [删除内核] -->
               <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
                 <button
+                  v-if="coreManagementTargetNode && !upgradeUnavailableReason(coreManagementTargetNode)"
                   type="button"
                   @click="triggerCoreUpgradeFromModal(core)"
-                  class="py-1.5 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-ios-blue/[0.08]"
-                  :disabled="!coreManagementTargetNode || !!upgradeUnavailableReason(coreManagementTargetNode)"
-                  :title="coreManagementTargetNode ? upgradeUnavailableReason(coreManagementTargetNode) || '升级该内核版本' : '请选择服务器'"
+                  class="py-1.5 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs transition-all flex items-center gap-1"
+                  title="升级该内核版本"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -775,14 +773,11 @@
                 <!-- Delete Kernel Action Button: hidden while an add/remove task is
                      unsettled or when this is the only enabled core. -->
                 <button
-                  v-if="isOwner"
+                  v-if="isOwner && manageInstalledCores.length > 1 && !manageCorePendingLabel(core.component) && multiCoreSupported(coreManagementTargetNode)"
                   type="button"
-                  :disabled="manageInstalledCores.length <= 1 || !!manageCorePendingLabel(core.component) || !multiCoreSupported(coreManagementTargetNode)"
-                  :title="manageInstalledCores.length <= 1 ? '不能移除最后一个已启用的内核'
-                    : manageCorePendingLabel(core.component) ? '该内核正在添加、升级或移除中'
-                    : !multiCoreSupported(coreManagementTargetNode) ? '该 Agent 未协商多核心支持' : '删除内核'"
+                  title="删除内核"
                   @click="requestRemoveCore(core)"
-                  class="py-1.5 px-3 rounded-xl bg-ios-red/[0.08] text-ios-red hover:bg-ios-red/[0.15] font-semibold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  class="py-1.5 px-3 rounded-xl bg-ios-red/[0.08] text-ios-red hover:bg-ios-red/[0.15] font-semibold text-xs transition-all"
                 >
                   删除内核
                 </button>
@@ -873,39 +868,29 @@
           </div>
 
           <!-- Online Node: Add New Core Interactive Form (multi-core Agents only) -->
-          <div v-else-if="multiCoreSupported(coreManagementTargetNode)" class="space-y-3.5 bg-neutral-50/70 p-4 rounded-2xl border border-black/[0.04]">
+          <div v-else-if="multiCoreSupported(coreManagementTargetNode) && addCoreOptions.length" class="space-y-3.5 bg-neutral-50/70 p-4 rounded-2xl border border-black/[0.04]">
             <!-- Core Choice Cards -->
             <div>
               <label class="block text-neutral-700 font-bold mb-2">选择要添加的内核平台（仅可选择尚未上报启用的内核）</label>
               <div class="grid grid-cols-2 gap-2.5">
-                <button type="button" :disabled="isCoreInstalled('xray')" @click="selectAddCoreComp('xray')"
-                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative disabled:opacity-50 disabled:cursor-not-allowed"
+                <button v-if="!isCoreInstalled('xray')" type="button" @click="selectAddCoreComp('xray')"
+                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative"
                   :class="addCoreForm.component === 'xray' ? 'border-ios-blue bg-blue-50/60 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
                 >
                   <div class="flex items-center justify-between">
                     <span class="font-bold text-sm text-ios-label">Xray-core</span>
-                    <span
-                      class="text-xs px-1.5 py-0.2 rounded font-semibold"
-                      :class="isCoreInstalled('xray') ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-ios-blue'"
-                    >
-                      {{ isCoreInstalled('xray') ? '已上报启用' : '推荐添加' }}
-                    </span>
+                    <span class="text-xs px-1.5 py-0.2 rounded font-semibold bg-blue-100 text-ios-blue">推荐添加</span>
                   </div>
                   <p class="text-xs text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard</p>
                 </button>
 
-                <button type="button" :disabled="isCoreInstalled('sing-box')" @click="selectAddCoreComp('sing-box')"
-                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative disabled:opacity-50 disabled:cursor-not-allowed"
+                <button v-if="!isCoreInstalled('sing-box')" type="button" @click="selectAddCoreComp('sing-box')"
+                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative"
                   :class="addCoreForm.component === 'sing-box' ? 'border-ios-blue bg-blue-50/60 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
                 >
                   <div class="flex items-center justify-between">
                     <span class="font-bold text-sm text-ios-label">sing-box</span>
-                    <span
-                      class="text-xs px-1.5 py-0.2 rounded font-semibold"
-                      :class="isCoreInstalled('sing-box') ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-700'"
-                    >
-                      {{ isCoreInstalled('sing-box') ? '已上报启用' : '新一代轻量' }}
-                    </span>
+                    <span class="text-xs px-1.5 py-0.2 rounded font-semibold bg-purple-100 text-purple-700">新一代轻量</span>
                   </div>
                   <p class="text-xs text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由分流</p>
                 </button>
@@ -934,7 +919,7 @@
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">内核平台</label>
                 <select v-model="addCoreForm.component" @change="onAddCoreCompChange" class="form-input-base">
-                  <option v-for="name in CORE_ORDER" :key="name" :value="name" :disabled="isCoreInstalled(name)">{{ name }}{{ isCoreInstalled(name) ? '（已启用）' : '' }}</option>
+                  <option v-for="name in addCoreOptions" :key="name" :value="name">{{ name }}</option>
                 </select>
               </div>
               <div>
@@ -963,7 +948,7 @@
               <button
                 type="button"
                 @click="submitAddNewCore"
-                :disabled="addCoreBusy || !multiCoreSupported(coreManagementTargetNode) || isCoreInstalled(addCoreForm.component)"
+                :disabled="addCoreBusy"
                 class="ios-btn-primary inline-flex items-center gap-1.5 py-2 px-4 shadow-[0_2px_8px_rgba(0,113,227,0.28)]"
               >
                 <svg v-if="addCoreBusy" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1450,6 +1435,10 @@ function isCoreInstalled(comp: CoreName): boolean {
   return getNodeInstalledCores(coreManagementTargetNode.value).some(c => c.component === comp);
 }
 
+// An already enabled core is not offered again: the option is hidden instead of
+// shown greyed out (Owner rule).
+const addCoreOptions = computed(() => CORE_ORDER.filter(name => !isCoreInstalled(name)));
+
 function coreTasksOf(nodeId: string, component: string): CoreUpdateTask[] {
   return coreTasks.value.filter(task => task.nodeId === nodeId && task.component === component)
     .sort((a, b) => (b.sequence || 0) - (a.sequence || 0));
@@ -1610,8 +1599,12 @@ function openCoreManagementModal(node: NodeView) {
   removeConflictInbounds.value = [];
   coreInbounds.value = []; coreTasks.value = [];
   coreManagementTargetNode.value = node;
+  // This dialog adds a core, so a core the server already reports is never
+  // preselected: the first still-missing platform is offered instead.
   const component = node.capabilities?.core_name;
-  if (isCoreName(component)) selectAddCoreComp(component);
+  const offered = addCoreOptions.value;
+  if (isCoreName(component) && offered.includes(component)) selectAddCoreComp(component);
+  else if (offered.length) selectAddCoreComp(offered[0]);
   coreManagementModalVisible.value = true;
   void loadCoreFacts(node);
 

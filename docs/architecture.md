@@ -18,8 +18,8 @@
 
 | 端口 | 用途 | 协议 |
 | --- | --- | --- |
-| `http_address`（示例 `0.0.0.0:443`） | Web 页面、REST `/api/v1`、SSE `/api/v1/events`、订阅 `/sub/{token}` | HTTPS |
-| `grpc_address`（示例 `0.0.0.0:9443`） | 节点控制通道 | gRPC + 节点 mTLS |
+| `http_address`（默认 `0.0.0.0:22550`，示例配置同此值） | Web 页面、REST `/api/v1`、SSE `/api/v1/events`、订阅 `/sub/{token}` | HTTPS |
+| `grpc_address`（默认 `0.0.0.0:18880`，示例配置同此值） | 节点控制通道 | gRPC + 节点 mTLS |
 
 节点侧没有入站端口约定：入站由配置版本决定，节点按渲染结果监听（`internal/agent/core/xray/render.go`、`internal/agent/core/singbox/render.go`、`internal/agent/core/gost`）。
 

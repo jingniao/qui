@@ -254,7 +254,9 @@ jobs:
   # build-release.sh produces one archive per architecture plus SHA256SUMS, and
   # both are attached to the release that qui-update and the manual upgrade path
   # download from. node-install.sh is attached as well, because the register dialog
-  # pipes it straight from the release URL into bash on a fresh node.
+  # pipes it straight from the release URL into bash on a fresh node, and so is
+  # panel-install.sh, the one-command panel installer the installation guide tells
+  # a new operator to run.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -308,6 +310,6 @@ jobs:
           set -euo pipefail
           prerelease=()
           [[ $GITHUB_REF_NAME == *-rc.* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/proxy-control-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.provenance.txt "$RUNNER_TEMP/dist/SHA256SUMS" deploy/linux/node-install.sh --title "$GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/proxy-control-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.provenance.txt "$RUNNER_TEMP/dist/SHA256SUMS" deploy/linux/node-install.sh deploy/linux/panel-install.sh --title "$GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"
         env:
           GH_TOKEN: ${{ github.token }}

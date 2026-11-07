@@ -9,12 +9,14 @@
 | 并发设备限制的判定方式与执行范围 | [设备限制](device-limit.md) |
 | 协议与能力支持范围 | [协议支持矩阵](protocol-support-matrix.md) |
 | 安装面板、接入节点、升级 | [部署与升级](deployment.md) |
+| 从零开始：一键安装面板、加节点、日常操作与常见问题 | [项目安装与使用指南](install-guide.md) |
 | 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
 | 完成标准、证据要求与实机验收结果 | [验收矩阵](v1-acceptance.md) |
 | 1.2.0 发布说明 | [发布说明 1.2.0](release-notes-1.2.0.md) |
 | 1.3.0 发布说明 | [发布说明 1.3.0](release-notes-1.3.0.md) |
 | 1.3.1 发布说明（缺陷修复，2026-11-03） | [发布说明 1.3.1](release-notes-1.3.1.md) |
 | 1.4.0 发布说明（2026-11-07） | [发布说明 1.4.0](release-notes-1.4.0.md) |
+| 1.4.1 发布说明（补丁版，发布日期待定） | [发布说明 1.4.1](release-notes-1.4.1.md) |
 | v1.4 当前工作计划、决策与 API 合同 | [v1.4 计划](v1.4-plan.md) |
 | v1.4 订阅导入与 Reality/xhttp 开发验证、未验收边界 | [协议兼容验证记录](v1.4-protocol-verification.md) |
 | v1.4 离线 RC 生产部署、Agent 重连及回滚验收（部分完成） | [A1 主机记录](v1.4-a1-host-report.md) |

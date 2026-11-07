@@ -19,7 +19,7 @@
         <template #body><tr v-for="t in tunnels" :key="t.id">
           <td class="p-4"><p class="text-base font-semibold text-ios-label">{{ t.name }}</p><p class="text-sm text-ios-secondary mt-0.5">{{ routeLabel(t) }}</p></td><td>TLS</td>
           <td class="font-mono tabular-nums text-xs"><p v-for="h in t.hops.filter(h => h.role !== 'entry')" :key="h.role">{{ h.nodeName }}:{{ h.listenPort }}</p></td><td class="font-mono tabular-nums">{{ t.ruleCount }}</td><td><PublishBadge :status="t.status" /></td>
-          <td v-if="isOwner"><div class="flex gap-2"><button class="ios-action-btn-primary" :disabled="mutating || t.status === 'pending_delete'" @click="editingTunnel = t; editor = true">编辑</button><button class="ios-action-btn-secondary" :disabled="mutating || t.status === 'pending_delete'" @click="ask({ kind: 'rotate', tunnel: t })">轮换凭据</button><button class="ios-action-btn-danger" :disabled="mutating || t.status === 'pending_delete'" @click="ask({ kind: 'tunnel', tunnel: t })">删除</button></div></td>
+          <td v-if="isOwner"><div class="flex gap-2"><template v-if="t.status !== 'pending_delete'"><button class="ios-action-btn-primary" :disabled="mutating" @click="editingTunnel = t; editor = true">编辑</button><button class="ios-action-btn-secondary" :disabled="mutating" @click="ask({ kind: 'rotate', tunnel: t })">轮换凭据</button><button class="ios-action-btn-danger" :disabled="mutating" @click="ask({ kind: 'tunnel', tunnel: t })">删除</button></template></div></td>
         </tr></template>
       </DataTable>
     </div>
@@ -31,7 +31,7 @@
           <template #body><tr v-for="r in group.rules" :key="r.id">
             <td class="p-4"><p class="text-base font-semibold text-ios-label">{{ r.name }}</p><p class="text-sm text-ios-secondary mt-0.5"><span class="font-mono tabular-nums">{{ r.entryNodeName }}:{{ r.listenPort }}</span> → {{ r.tunnelName ? `经 ${r.tunnelName}` : '直接转发' }} → <span v-if="r.target.mode === 'linked'">{{ r.target.nodeName }} · {{ r.target.inboundName }} · {{ r.target.protocol.toUpperCase() }} · </span><span class="font-mono tabular-nums">{{ endpoint(r.target.host, r.target.port) }}</span></p><p class="text-xs text-ios-tertiary">{{ r.network.toUpperCase() }}</p></td>
             <td>{{ nodes.find(n => n.id === r.ownerNodeId)?.name || r.ownerNodeId || '—' }}</td><td>{{ r.subscriptionVisible ? '可见' : '隐藏' }}</td><td><StatusBadge :status="r.enabled ? 'active' : 'disabled'" /></td><td><PublishBadge :status="r.status" /></td>
-            <td v-if="isOwner"><div class="flex gap-2"><button class="ios-action-btn-primary" :disabled="mutating || r.status === 'pending_delete'" @click="editingRule = r; editor = true">编辑</button><button class="ios-action-btn-danger" :disabled="mutating || r.status === 'pending_delete'" @click="ask({ kind: 'rule', rule: r })">删除</button></div></td>
+            <td v-if="isOwner"><div class="flex gap-2"><template v-if="r.status !== 'pending_delete'"><button class="ios-action-btn-primary" :disabled="mutating" @click="editingRule = r; editor = true">编辑</button><button class="ios-action-btn-danger" :disabled="mutating" @click="ask({ kind: 'rule', rule: r })">删除</button></template></div></td>
           </tr></template>
         </DataTable>
       </section>

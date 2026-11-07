@@ -217,10 +217,10 @@
                   placeholder="重置后可查看"
                 />
                 <button
+                  v-if="subUrl"
                   type="button"
                   @click="copyText(subUrl)"
-                  :disabled="!subUrl"
-                  class="ios-btn-primary shrink-0 px-3 h-9 disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="ios-btn-primary shrink-0 px-3 h-9"
                 >
                   复制
                 </button>

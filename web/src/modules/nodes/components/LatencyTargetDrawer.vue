@@ -91,9 +91,9 @@
             </button>
           </div>
 
-          <div v-if="libraryTargets.length" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+          <div v-if="selectableTargets.length" class="space-y-2 max-h-60 overflow-y-auto pr-1">
             <label
-              v-for="target in libraryTargets"
+              v-for="target in selectableTargets"
               :key="target.id"
               class="flex items-center gap-2 p-2 rounded-lg border border-ios-separator hover:bg-ios-bg/40 cursor-pointer text-xs"
             >
@@ -101,7 +101,6 @@
                 v-model="selectedIds"
                 type="checkbox"
                 :value="target.id"
-                :disabled="!selectedIds.includes(target.id) && selectedIds.length >= 5"
               />
               <span class="font-medium text-ios-label">{{ target.label }}</span>
               <span class="font-mono text-ios-secondary">{{ target.host }}:{{ target.port }}</span>
@@ -167,6 +166,9 @@ const showingNewTarget = ref(false);
 
 const isCustom = computed(() => customMode.value === 'custom');
 const defaultTargets = computed(() => libraryTargets.value.filter(t => defaultTargetIds.value.includes(t.id)));
+// At the five-target limit only the already chosen rows stay listed: an option that
+// cannot be selected any more is hidden instead of greyed out (Owner rule).
+const selectableTargets = computed(() => libraryTargets.value.filter(t => selectedIds.value.includes(t.id) || selectedIds.value.length < 5));
 const effectiveTargets = computed(() => {
   if (isCustom.value) {
     return libraryTargets.value.filter(t => selectedIds.value.includes(t.id));

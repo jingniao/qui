@@ -82,7 +82,7 @@ Xray、sing-box 承载用户接入、身份、分流、Direct/Block、代理出�
 
 管理员浏览器 → HTTPS/SSE → proxy-panel（嵌入 Web、REST、SQLite、管理与发布）→ gRPC/mTLS → 多台 Node Agent → 各节点核心（接入、中转、链与出口）。控制面只运行一个中央程序。
 
-建议监听 443（Web/REST/SSE/订阅）、9443（Agent gRPC/mTLS）。用户数据不经过中央端。
+建议监听 22550（Web/REST/SSE/订阅）、18880（Agent gRPC/mTLS），两者均可修改；已有安装保持原端口。用户数据不经过中央端。
 
 # 6. 用户角色
 

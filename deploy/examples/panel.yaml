@@ -4,8 +4,8 @@ development: false
 #   - public_key: "替换为真实 Base64 Ed25519 公钥"
 #     components: [xray, sing-box]
 #     revoked: false
-http_address: 0.0.0.0:443
-grpc_address: 0.0.0.0:9443
+http_address: 0.0.0.0:22550
+grpc_address: 0.0.0.0:18880
 database: /var/lib/proxy-panel/panel.db
 node_identity_directory: /var/lib/proxy-panel/identity
 shutdown_timeout: 10s

@@ -4,7 +4,7 @@
       <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">名称</span><input v-model="form.name" class="form-input-base" /></label>
       <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">传输协议</span><input value="TLS（GOST 双向认证）" readonly class="form-input-base text-ios-secondary" /></label>
       <div v-for="(hop, i) in form.hops" :key="hop.role" class="space-y-3 rounded-xl border border-ios-border p-4">
-        <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">{{ roleNames[hop.role] }}</span><select v-model="hop.nodeId" class="form-input-base"><option value="">请选择服务器</option><option v-for="node in nodes" :key="node.id" :value="node.id" :disabled="form.hops.some((h, index) => index !== i && h.nodeId === node.id)">{{ node.name }}</option></select></label>
+        <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">{{ roleNames[hop.role] }}</span><select v-model="hop.nodeId" class="form-input-base"><option value="">请选择服务器</option><option v-for="node in hopNodeOptions(i)" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
         <PortControl v-if="hop.role !== 'entry'" :ref="el => setPortRef(hop.role, el)" v-model:mode="hop.portMode" v-model:port="hop.listenPort" :node-id="hop.nodeId" :owner="tunnel ? { kind: 'tunnel', id: tunnel.id } : undefined" :disabled="saving" />
         <button v-if="hop.role === 'mid'" type="button" class="ios-dialog-btn-secondary" @click="form.hops.splice(i, 1)">移除中间服务器</button>
       </div>
@@ -29,6 +29,11 @@ const form = reactive<TunnelInput>({ name: props.tunnel?.name || '', transport: 
 const ports = new Map<string, InstanceType<typeof PortControl>>();
 function setPortRef(role: string, el: unknown) { if (el) ports.set(role, el as InstanceType<typeof PortControl>); else ports.delete(role); }
 const saving = ref(false), error = ref('');
+// A tunnel runs on distinct servers, so a server another hop already uses is not
+// offered in this hop's list at all (Owner rule) instead of being greyed out.
+function hopNodeOptions(index: number) {
+  return props.nodes.filter(node => !form.hops.some((hop, i) => i !== index && hop.nodeId === node.id));
+}
 async function save() {
   if (saving.value) return;
   error.value = '';

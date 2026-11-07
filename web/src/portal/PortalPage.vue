@@ -20,7 +20,7 @@
         </section>
       </div>
       <section v-else-if="section === 'subscription'" class="panel-card p-6 space-y-4">
-        <div class="flex justify-between items-center"><h2 class="text-base font-semibold leading-normal">专属订阅与配置</h2><button :disabled="preview || busy" class="ios-btn-secondary" @click="resetVisible = true">重置订阅链接</button></div>
+        <div class="flex justify-between items-center"><h2 class="text-base font-semibold leading-normal">专属订阅与配置</h2><button v-if="!preview" :disabled="busy" class="ios-btn-secondary" @click="resetVisible = true">重置订阅链接</button></div>
         <p v-if="data.subscription.state === 'not_recoverable'" class="text-ios-secondary">重置后可查看：旧订阅链接无法恢复，原链接仍可使用。</p>
         <p v-else-if="data.subscription.state === 'missing'" class="text-ios-secondary">尚无订阅链接，请重置以创建。</p>
         <div v-for="format in data.subscription.formats || []" :key="format.id" class="space-y-2">
@@ -35,7 +35,7 @@
         <div v-for="node in data.nodes.items" :key="node.id" class="flex justify-between border-b border-black/[0.05] py-3"><span>{{ node.name }} <small class="text-ios-tertiary">{{ node.region || '—' }}</small></span><StatusBadge :status="node.online ? 'online' : 'offline'" /></div>
       </section>
       <section v-else-if="section === 'traffic'" class="panel-card p-6 space-y-4">
-        <div class="flex justify-between"><h2 class="text-base font-semibold leading-normal">流量趋势</h2><select v-model="range" :disabled="preview" class="form-input-base max-w-40"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></div>
+        <div class="flex justify-between"><h2 class="text-base font-semibold leading-normal">流量趋势</h2><select v-if="!preview" v-model="range" class="form-input-base max-w-40"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></div>
         <p v-if="preview" class="text-ios-secondary">只读预览仅提供账号、订阅和节点；流量历史请在用户详情查看。</p>
         <p v-else-if="!traffic.items.length" class="text-ios-tertiary">暂无流量记录</p>
         <div v-else class="space-y-3" role="img" :aria-label="range === '24h' ? '每小时上传和下载流量' : '每日上传和下载流量'">
@@ -47,10 +47,10 @@
       </section>
       <form v-else-if="section === 'account'" class="panel-card p-6 space-y-4" @submit.prevent="changePassword">
         <h2 class="text-base font-semibold leading-normal">修改登录密码</h2><p class="text-sm">{{ data.me.displayName || data.me.username }}</p>
-        <label class="block text-xs">当前密码<input v-model="currentPassword" :disabled="preview" type="password" autocomplete="current-password" required class="form-input-base mt-2" /></label>
-        <label class="block text-xs">新密码<input v-model="newPassword" :disabled="preview" type="password" autocomplete="new-password" required class="form-input-base mt-2" /></label>
-        <label class="block text-xs">确认新密码<input v-model="confirmPassword" :disabled="preview" type="password" autocomplete="new-password" required class="form-input-base mt-2" /></label>
-        <p class="text-xs text-ios-tertiary">修改后其他登录会话立即退出。</p><button :disabled="preview || busy" class="ios-btn-primary">保存密码</button>
+        <label class="block text-xs">当前密码<input v-model="currentPassword" :readonly="preview" type="password" autocomplete="current-password" required class="form-input-base mt-2" /></label>
+        <label class="block text-xs">新密码<input v-model="newPassword" :readonly="preview" type="password" autocomplete="new-password" required class="form-input-base mt-2" /></label>
+        <label class="block text-xs">确认新密码<input v-model="confirmPassword" :readonly="preview" type="password" autocomplete="new-password" required class="form-input-base mt-2" /></label>
+        <p class="text-xs text-ios-tertiary">修改后其他登录会话立即退出。</p><button v-if="!preview" :disabled="busy" class="ios-btn-primary">保存密码</button>
       </form>
     </template>
     <p v-if="notice" role="status" class="text-ios-blue text-sm">{{ notice }}</p>

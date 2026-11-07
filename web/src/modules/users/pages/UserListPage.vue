@@ -149,6 +149,7 @@
           </td>
           <td class="text-xs font-mono tabular-nums text-ios-tertiary whitespace-nowrap" :title="user.expiresAt ? formatTime(user.expiresAt) : ''">{{ user.expiresAt ? (formatMinute(user.expiresAt) || '—') : '不过期' }}</td>
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
+            <router-link :to="`/users/${user.id}`" class="ios-action-btn-secondary">详情</router-link>
             <button @click="openEdit(user)" class="ios-action-btn-primary">编辑</button>
             <button @click="removeTarget = user; confirmVisible = true" class="ios-action-btn-danger">删除</button>
           </td>
@@ -175,7 +176,7 @@
         <div class="grid sm:grid-cols-2 gap-4">
           <label class="block text-xs font-medium text-ios-secondary">
             用户名
-            <input v-model="form.username" :disabled="!!editing" maxlength="64" class="form-input-base mt-1.5" placeholder="用于身份凭据登录" />
+            <input v-model="form.username" :readonly="!!editing" maxlength="64" class="form-input-base mt-1.5" placeholder="用于身份凭据登录" />
           </label>
           <label class="block text-xs font-medium text-ios-secondary">
             显示名称

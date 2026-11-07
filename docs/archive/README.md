@@ -42,3 +42,4 @@
 | [v1.3-g0-gost-findings.md](v1.3-g0-gost-findings.md) | 官方 GOST 3.3.2 的探测与实验记录 |
 | [v1.2-host-test-plan.md](v1.2-host-test-plan.md) | v1.2.0 三台主机的验收步骤与环境记录 |
 | [v1.2-rc1-findings.md](v1.2-rc1-findings.md) | v1.2.0 实机发现 F1–F13、修复与复验记录 |
+| [handoff.md](handoff.md) | 2026-11-05 写给接任者的 v1.4 未完成事项与待 Owner 确认清单（英文），已被 v1.4.0 发布与生产升级取代 |

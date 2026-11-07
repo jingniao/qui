@@ -447,3 +447,7 @@ Agent 安装与一键安装新增 `/var/lib/proxy-agent/tuning/`（Agent 所有�
 成功配置为 `/etc/sysctl.d/99-proxy-tuning.conf`，原值快照为 root 0600 的 `.proxy-tuning-snapshot.json`。不要把该快照放进 Agent 可写目录。卸载使用安装记录第 11/12 行校验新增单元，停止触发器后先恢复快照；失败中止卸载。qui-update 文件快照覆盖新增单元和 watcher，回滚到旧版本时恢复/移除对应文件。具体排障见[运维手册第 18 节](operations.md#18-主机观测续证与调优-helper)。
 
 证书改为满 30 天或余期不超过 14 天时在控制连接内用原密钥续证；面板仍签发 90 天证书。先升级支持该准入条件的面板，再升级 Agent，旧面板会拒绝过早的自动续证。HostInfo 与新增心跳字段均为增量协议，旧 Agent 的未知数据由面板显示“—”。
+
+## 0134 Agent 原位身份恢复
+
+v1.4 新增恢复 enrollment token、旧指纹永久作废表、恢复审计状态和已发布配置自动重发。旧 Agent 通过现有 Enroll RPC 直接兼容；跨迁移降级仍需匹配备份。

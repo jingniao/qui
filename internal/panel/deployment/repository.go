@@ -305,6 +305,15 @@ func (r *Repository) Result(ctx context.Context, nodeID string, result *pb.Apply
 	if err := r.advanceBatch(ctx, tx, result.Revision, result.Success); err != nil {
 		return err
 	}
+	if result.Success {
+		if _, err := tx.ExecContext(ctx, "UPDATE node_identity_recoveries SET redeploy_state='success',redeploy_revision=?,redeploy_code='' WHERE node_id=? AND redeploy_revision=? AND redeploy_state IN ('queued','pending')", result.Revision, nodeID, result.Revision); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, "UPDATE node_identity_recoveries SET redeploy_state='failed',redeploy_revision=?,redeploy_code=? WHERE node_id=? AND redeploy_revision=? AND redeploy_state IN ('queued','pending')", result.Revision, result.Code, nodeID, result.Revision); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}

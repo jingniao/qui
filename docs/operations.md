@@ -90,23 +90,25 @@ systemctl start proxy-agent.service
 5. 逐节点恢复：按第 5 节「复用同一台机器重新登记」的完整步骤处理（只清空 `identity/` 不够）。**不需要**替换 `/etc/proxy-agent/tls/ca.crt`：它校验的是面板 Web 证书，而轮换节点 CA 不改 Web 证书。只有面板 Web 证书换了签发 CA 时才用 `deploy/linux/node-ca.sh --trust <new-ca.crt>` 替换它（该脚本只替换这个文件、把旧文件保留为 `ca.crt.previous` 并用 openssl 校验新 CA，不动节点身份）。
 6. 全部节点回来后，再删除第 2 步备份的旧 CA 文件。
 
-**重新登记必须新建节点记录**：
+**普通注册码不能复用到已登记的节点记录**：
 
 - 注册码只在节点记录**启用**时可用（`internal/panel/node/repository.go:106` 的查询与 `repository.go:126` 的核销更新都要求 `nodes.enabled=1`），被禁用的节点不能登记；
-- `node_identities.node_id` 是主键，登记时是普通 `INSERT`（`repository.go:137`），所以**同一个节点 ID 无法二次登记**；
+- `node_identities.node_id` 是主键，普通登记时是 `INSERT`（`repository.go:137`），所以**同一个节点 ID 无法用注册码二次登记**（恢复码走的是替换路径，见第 5.1 节）；
 - 面板只支持逻辑删除节点（见第 15 节）；被删除的节点记录仍保留，但不能再登记。
 
-因此 CA 轮换后，节点必须以**新的节点记录**回来：在面板新建节点、生成注册码，节点侧按第 5 节「复用同一台机器重新登记」的步骤处理（只清空 `/var/lib/proxy-agent/identity` 不够：其中的 `identity.json` 会让 Agent 以 `node is already enrolled` 拒绝登记，受管状态与 spool 也会拒绝）。旧节点记录请禁用，避免它继续计入在线节点；新节点需要重新加入原节点组并重新发布配置。
+因此只有两种情况仍需新建节点记录：**面板节点 CA 轮换**（第 4 节，旧证书全部失效）或**主机失陷**（旧身份不可信）。主机只是重装、身份仍属原节点时请改用第 5.1 节的原位恢复，不要新建记录。确实需要新建记录时按下面的步骤操作：在面板新建节点、生成注册码，节点侧按第 5 节「复用同一台机器重新登记」的步骤处理（只清空 `/var/lib/proxy-agent/identity` 不够：其中的 `identity.json` 会让 Agent 以 `node is already enrolled` 拒绝登记，受管状态与 spool 也会拒绝）。旧节点记录请禁用，避免它继续计入在线节点；新节点需要重新加入原节点组并重新发布配置。
 
 仓库里的 `deploy/linux/panel-ca.sh` 执行与上面第 2–3 步等价的备份与删除：`--inspect` 只打印现状，`--rotate BACKUP_DIRECTORY` 备份 `ca.crt`、`ca.key`、`configuration.key` 并用 SHA256 校验后删除 CA 文件。它要求身份目录不是符号链接、权限恰好 `0700`、属主是 root 或面板服务账号 `proxy-panel`（打包安装在 `/var/lib/proxy-panel/identity` 上是后者），三个材料文件的属主必须与身份目录一致；服务必须已停止。它的用法文本和结尾提示都写明轮换后节点要以新记录回来。
 
 ## 5. 替换丢失或失陷的节点 **[待实机]**
 
+主机只是重装、节点身份仍归原节点时，不要新建记录：按第 5.1 节的原位恢复处理，节点 ID 与全部业务配置都会保留。以下流程用于主机失陷、旧身份不可信，或面板节点 CA 轮换后必须换记录的情况。
+
 1. 面板里**禁用**旧节点：这会让它的证书在 mTLS 上被拒绝（`internal/panel/node/repository.go:151` 的 `ValidateIdentity` 要求节点启用；`TestDisabledNodeIsRefusedAtMTLS` 覆盖该行为）。
 2. 新建节点记录并生成一次性注册码。
 3. 按[部署与升级](deployment.md)第 4 节安装并登记新节点，然后把它加入原节点组并重新发布配置。
 
-**复用同一台机器重新登记**（替换丢失/失陷节点、CA 轮换后都按此做）：只清空 `/var/lib/proxy-agent/identity` 不够 —— 受管 Agent 状态（`agent-release-history`、`releases/agent-installed`、`agent-jobs` 等，见 `internal/agent/agenthost/state.go:30`）会让登记以 `cannot enroll over supervised Agent state` 被拒绝，spool 队列也绑定旧节点 ID（`spool identity or schema mismatch`，`internal/agent/spool/spool.go:129`）。步骤：
+**复用同一台机器重新登记**（主机失陷、CA 轮换后按此做；只是重装则用第 5.1 节）：只清空 `/var/lib/proxy-agent/identity` 不够 —— 受管 Agent 状态（`agent-release-history`、`releases/agent-installed`、`agent-jobs` 等，见 `internal/agent/agenthost/state.go:30`）会让登记以 `cannot enroll over supervised Agent state` 被拒绝，spool 队列也绑定旧节点 ID（`spool identity or schema mismatch`，`internal/agent/spool/spool.go:129`）。步骤：
 
 1. `systemctl stop proxy-agent`；
 2. 把整个数据目录移作备份：`mv /var/lib/proxy-agent /var/lib/proxy-agent.old-$(date +%Y%m%d)` —— 旧节点尚未上传的遥测与访问记录会随目录一起丢弃；备份只用于排查，确认无误后删除；
@@ -115,6 +117,18 @@ systemctl start proxy-agent.service
 5. 在面板把新节点加回原节点组，并把引用旧节点的出站 / 出口组成员 / 代理链改指新节点，然后发布配置。
 
 不要把旧节点的私钥或数据目录拷到新节点上；`identity/` 里保存的是旧节点身份。
+
+## 5.1 原位恢复（推荐）
+
+主机重装、但节点记录与业务配置仍要保留时走这条路：不新建节点记录，节点 ID、入站、出站、节点组、隧道、代理链与历史配置都不变。恢复码等同该节点的接管凭据——持有者可以领取该节点全部已下发配置，包括 Reality 私钥与用户凭据——默认 15 分钟（可选 15／30／60 分钟），只显示一次，面板只保存它的 SHA-256 并绑定当时证书指纹。
+
+1. 面板进入该节点详情 → 节点证书 → **原位身份恢复**，选择有效期。旧 Agent 仍在线且不希望它继续连接时勾选“立即吊销当前证书”：签发即吊销证书并断开当前连接，节点在重新登记前保持离线；不勾选则旧证书在核销时才作废。
+2. 点“签发恢复码”并在确认弹窗核对风险，复制一次性恢复码与下方生成的 `node-install.sh` 安装命令（选择与原节点一致的运行内核）。
+3. 在重装的主机上以 root 运行该命令，它就是[部署与升级](deployment.md)第 4 节的安装＋登记，只是令牌换成恢复码。主机若仍留有旧的 `/var/lib/proxy-agent`，先按第 5 节「复用同一台机器重新登记」把整个目录移作备份，否则 Agent 会以已有身份或受管状态拒绝登记。**若重装前对主机跑过 `deploy/linux/uninstall.sh agent`，这条命令不会成功，而且不是恢复码的问题**：卸载会在 `/var/lib/proxycontrol-install/` 留下 `agent.removed`（旧安装记录的副本），`install.sh` 因此以 `The component was uninstalled; use --reinstall after inspecting the retained record.` 拒绝，而 `node-install.sh` 不能传 `--reinstall`。最小处理是先核对 `/var/lib/proxycontrol-install/agent.removed`（目录 `/var/lib/proxycontrol-install` 须仍是 root 属主、权限 `0700`），用 `mv /var/lib/proxycontrol-install/agent.removed /root/agent.removed.bak` 把它移出该目录，再原样重跑同一条命令；也可改用同一发布包的 `deploy/linux/install.sh --node … --reinstall`。因此原位恢复前不要跑 `uninstall.sh`：真正的系统重装，或按上面那样把 `/var/lib/proxy-agent` 整个移作备份，都不会留下这个标记。
+4. 回到本页确认结果：节点重新上线、恢复状态变为“已核销”，重新下发显示“等待节点上线”→“重新下发中”→“重新下发成功”（`r<版本>` 为新生效版本；从未成功部署过的节点显示“无需下发”）。失败时先看 `redeploy_code` 与发布记录，再用现有流程手工发布；原版本历史不会被改写。
+5. 旧证书在核销时作废，指纹写入永久作废表，用旧证书连接会被 mTLS 拒绝；备份恢复也不会复活它。
+
+节点存在未完成的发布、待执行的节点操作、进行中的批量发布、Agent／核心更新或移除、暂停/恢复任务时，签发返回 409 `node_recovery_blocked`，界面按类列出阻断项，处理后可重新签发（旧码随之作废）。节点未登记、已禁用或已删除时返回 409 `node_not_enrolled`。
 
 ## 6. 额度与连接限制（软执行）
 

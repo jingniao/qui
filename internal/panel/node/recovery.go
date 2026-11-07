@@ -61,13 +61,27 @@ FROM restore_source.nodes c WHERE NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=c.
 			return err
 		}
 	}
+	if _, err := tx.ExecContext(ctx, "UPDATE node_identity_recoveries SET status='expired' WHERE status='issued'"); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, "UPDATE node_identities SET revoked_at=coalesce(revoked_at,?) WHERE NOT EXISTS(SELECT 1 FROM restore_source.node_identities c WHERE c.node_id=node_identities.node_id)", stamp); err != nil {
 		return err
 	}
+	var retirementsPresent int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_identity_retirements'").Scan(&retirementsPresent); err != nil {
+		return err
+	}
+	if retirementsPresent == 1 {
+		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO node_identity_retirements(fingerprint,node_id,recovery_id,retired_at) SELECT fingerprint,node_id,recovery_id,retired_at FROM restore_source.node_identity_retirements"); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_identities(node_id,certificate_pem,fingerprint,expires_at,revoked_at)
 SELECT node_id,certificate_pem,fingerprint,expires_at,revoked_at FROM restore_source.node_identities WHERE 1
+AND fingerprint NOT IN (SELECT fingerprint FROM node_identity_retirements)
 ON CONFLICT(node_id) DO UPDATE SET certificate_pem=excluded.certificate_pem,fingerprint=excluded.fingerprint,expires_at=excluded.expires_at,
-revoked_at=CASE WHEN node_identities.fingerprint=excluded.fingerprint THEN coalesce(node_identities.revoked_at,excluded.revoked_at) ELSE excluded.revoked_at END`); err != nil {
+revoked_at=CASE WHEN node_identities.fingerprint=excluded.fingerprint THEN coalesce(node_identities.revoked_at,excluded.revoked_at) ELSE excluded.revoked_at END
+WHERE excluded.fingerprint NOT IN (SELECT fingerprint FROM node_identity_retirements)`); err != nil {
 		return err
 	}
 	for _, query := range []string{

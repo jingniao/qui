@@ -72,9 +72,9 @@ func readEnrollmentStatusTx(ctx context.Context, tx *sql.Tx, nodeID string, item
 	result.OriginalCreatedAt = item.CreatedAt
 	result.OriginalExpiresAt = item.ExpiresAt
 	result.CurrentIdentityMatches = certificate == item.CertificatePEM && fingerprint == item.Fingerprint && expiry == item.ExpiresAt
-	var tokenNode, tokenExpiry string
+	var tokenNode, tokenExpiry, tokenPurpose string
 	var consumed sql.NullString
-	err = tx.QueryRowContext(ctx, "SELECT node_id,expires_at,consumed_at FROM node_enrollment_tokens WHERE token_hash=?", item.TokenHash).Scan(&tokenNode, &tokenExpiry, &consumed)
+	err = tx.QueryRowContext(ctx, "SELECT node_id,expires_at,consumed_at,purpose FROM node_enrollment_tokens WHERE token_hash=?", item.TokenHash).Scan(&tokenNode, &tokenExpiry, &consumed, &tokenPurpose)
 	if errors.Is(err, sql.ErrNoRows) {
 		result.TokenState = "missing"
 	} else if err != nil {
@@ -94,7 +94,15 @@ func readEnrollmentStatusTx(ctx context.Context, tx *sql.Tx, nodeID string, item
 			result.TokenExpiresAt = timestamp(deadline)
 		}
 	}
-	result.CentralReplayConditionsMatch = result.TokenState == "consumed_window_current" && result.Enabled && !result.IdentityRevoked && result.LastSequence == 0 && !result.PendingRenewal && result.CurrentIdentityMatches && result.CurrentCertificateValid
+	result.CentralReplayConditionsMatch = result.TokenState == "consumed_window_current" && result.Enabled && !result.IdentityRevoked && !result.PendingRenewal && result.CurrentIdentityMatches && result.CurrentCertificateValid
+	if tokenPurpose != "recover" {
+		result.CentralReplayConditionsMatch = result.CentralReplayConditionsMatch && result.LastSequence == 0
+	}
+	if tokenPurpose == "recover" {
+		var recoveryStatus, newFingerprint string
+		_ = tx.QueryRowContext(ctx, "SELECT status,new_fingerprint FROM node_identity_recoveries WHERE token_hash=?", item.TokenHash).Scan(&recoveryStatus, &newFingerprint)
+		result.CentralReplayConditionsMatch = result.CentralReplayConditionsMatch && recoveryStatus == "consumed" && newFingerprint == item.Fingerprint
+	}
 	result.Code = "original_receipt_retained_requires_review"
 	result.Summary = "原登记回执可核对；当前条件不支持重放原登记结果，历史回执继续保留。"
 	if result.CentralReplayConditionsMatch {

@@ -125,7 +125,10 @@ func (r *Repository) ReplayEnrollment(ctx context.Context, request *pb.EnrollReq
 	return &pb.EnrollResponse{NodeId: item.NodeID, CertificatePem: []byte(item.CertificatePEM), CaPem: []byte(item.CAPEM), ExpiresAt: timestamppb.New(leaf.NotAfter)}, true, nil
 }
 
-func (r *Repository) ConsumeEnrollmentOriginal(ctx context.Context, hash, id string, request *pb.EnrollRequest, csr *x509.CertificateRequest, certificate, ca []byte, leaf *x509.Certificate) error {
+func (r *Repository) ConsumeEnrollmentOriginal(ctx context.Context, hash, id, purpose string, request *pb.EnrollRequest, csr *x509.CertificateRequest, certificate, ca []byte, leaf *x509.Certificate) error {
+	if purpose != "enroll" && purpose != "recover" {
+		return ErrToken
+	}
 	digest, public, err := enrollmentRequestDigest(request, csr)
 	if err != nil {
 		return err

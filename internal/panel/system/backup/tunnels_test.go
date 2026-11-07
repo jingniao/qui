@@ -21,6 +21,9 @@ func rewindTunnelFixture(t *testing.T, database *sql.DB) {
 	if applied == 0 {
 		return
 	}
+	// 0134 added node identity recovery after the tunnels work as well, so an
+	// archive rewound before 0129 drops it first.
+	rewindIdentityRecovery(t, database)
 	for _, q := range []string{"DROP TABLE client_policy_profiles", "DELETE FROM system_settings WHERE key='client_policy_active'", "DELETE FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'",
 		// S1 added the last refresh result after the tunnels work, so an archive
 		// rewound before 0129 cannot keep it either.

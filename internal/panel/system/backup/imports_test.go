@@ -93,6 +93,9 @@ func TestImportBackupVerifierValidatesResults(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// 0134 postdates the archive as well, so the fixture drops its recovery
+	// objects too: a pre-0133 archive has neither them nor the new columns.
+	rewindIdentityRecovery(t, s.Database)
 	if err = validateImports(ctx, s.Database, s.ConfigurationVault); err != nil {
 		t.Fatalf("pre-0133 archive rejected: %v", err)
 	}

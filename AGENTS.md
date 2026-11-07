@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-最新正式版 **v1.3.1**（2026-11-03，tag → `ebe8301`），正式版迁移头 0128。v1.4 在 `feat/v1.4-tunnels` 开发，未正式发布。Owner 已授权生产验收：面板运行离线 **1.4.0-rc.3**（最终内容快照 `0506a085ad5fd783`，非 Git commit），us2/uk/Alpine 三台 Agent 为 **1.4.0-rc.1**（`f11fe4e`），面板迁移头 0133。Alpine 使用 LXC/OpenRC，其余使用 systemd。
+最新正式版 **v1.3.1**（2026-11-03，tag → `ebe8301`），正式版迁移头 0128。v1.4 在 `feat/v1.4-tunnels` 开发，未正式发布。Owner 已授权生产验收：面板运行离线 **1.4.0-rc.3**（最终内容快照 `0506a085ad5fd783`，非 Git commit），us2/uk/Alpine 三台 Agent 为 **1.4.0-rc.1**（`f11fe4e`），面板迁移头 0133。Alpine 使用 LXC/OpenRC，其余使用 systemd。开发分支现含迁移 0134（Agent 原位身份恢复），尚未部署到生产。
 
 生产已完成升级、mTLS 重连、配置回滚、失败批次回滚和同版本加密备份恢复。rc.2 的字体规范、节点组卡片／编辑弹窗及一天默认会话已部署；慢加载修复生产有缓存导航抽样 216–565ms，版本页排队降至个位数毫秒，见[收尾报告](docs/v1.4-rc2-closeout.md)与[耗时记录](docs/page-loading-verification.md)。
 
@@ -312,6 +312,8 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥并提交注册码/公钥/机器信息 → 中央签证并核销注册码 → mTLS 长连接。私钥不上传。
 
 注册对话框提供 `deploy/linux/node-install.sh` 一键命令：下载面板同版本 GitHub Release、核对 SHA256SUMS，以公网证书或面板提供的固定 SHA-256 建立证书信任，再登记启动，操作见[部署](docs/deployment.md) §4。
+
+原位身份恢复（迁移 0134）：主机重装但身份仍属原节点时，Owner 在节点证书区签发一次性恢复码（默认 900 秒，允许 300–3600 秒，可勾选立即吊销现有证书），响应只返回一次，数据库只保存 SHA-256 并绑定当时的证书指纹。签发与核销都检查未完成任务，存在时返回 409 `node_recovery_blocked` 与 `blockers`。新 Agent 通过现有 `Enroll` RPC 核销恢复码，节点 ID、入站、出站、节点组、隧道、代理链与历史配置均保留，旧指纹随后永久作废（备份恢复也不复活），当前已发布配置在新 Agent 首次能力上报后自动重新下发。Agent 二进制与安装脚本不变，操作见[运维](docs/operations.md) §5.1。
 
 未登记且无身份的节点取消登记时直接删除；已登记节点逻辑删除（`deleted_at`）、吊销证书、退出分组并从订阅/列表/选择器消失，保留流量与访问记录，不可重新启用，同服务器须新建节点登记。删除不停止远端 Agent/代理。
 
@@ -875,6 +877,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0130 `relay_subscription_snapshot` | `tunnel_rules.published_snapshot`：无凭据的成功发布端点快照；旧发布不回填猜测地址，须再次成功发布 |
 | 0131 `canvas_forward_migration` | `canvas_forward_reconcile` 单次标记及 migrated_ids、`tunnel_migration_report` 持久原因；启动/恢复事务转换合格画布转发，保留运行对象与凭据 |
 | 0133 `subscription_source_results` | `subscription_sources.latest_result_json`（有界刷新结果）与 `last_success_at`；默认空串，旧来源与旧归档读出“未记录原因”，迁移不抓取订阅 |
+| 0134 `node_identity_recovery` | `node_enrollment_tokens.purpose`（`enroll`/`recover`，默认 `enroll`）与 `bound_fingerprint`；`node_identity_recoveries`：每次恢复一行（token 哈希、旧/新指纹、签发人、状态、`redeploy_state`/`redeploy_revision`/`redeploy_code`，每节点最多一条 `issued`）；`node_identity_retirements`：被恢复替换的指纹永久拒绝，签发不重签证书，核销由 Enroll 完成 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -929,11 +932,15 @@ GET    /api/v1/nodes/{id}/machine-traffic/settings
 PUT    /api/v1/nodes/{id}/machine-traffic/settings
 GET    /api/v1/nodes/{id}/deletion-preview
 POST   /api/v1/nodes/enrollment-token
+POST   /api/v1/nodes/{id}/recovery-token
+GET    /api/v1/nodes/{id}/recovery-status
 PUT    /api/v1/nodes/{id}
 DELETE /api/v1/nodes/{id}
 ```
 
 `GET /api/v1/nodes` 默认只返回未删除的节点；`?deleted=1` 只返回已删除的节点（Owner 与 Viewer 都可读）。`DELETE` 需要 Owner：未登记节点等同取消登记（记录移除），已登记节点执行逻辑删除，被引用时返回 409 `node_delete_blocked`，阻塞项（`blockers: [{kind,id,name}]`）位于错误体中（见第 11.3 节）。
+
+原位身份恢复：`POST /api/v1/nodes/{id}/recovery-token`（Owner＋CSRF，体 `{expiresInSeconds,revokeNow}`，0 或省略为 900 秒、范围 300–3600）201 返回只出现一次的 `enrollmentToken`、`expiresAt`、`install` 与 `purpose:"recover"`；`GET /api/v1/nodes/{id}/recovery-status`（Owner）返回最近一条恢复记录，无记录为 404。未登记、禁用或已删除节点返回 409 `node_not_enrolled`，存在未完成任务返回 409 `node_recovery_blocked`，`blockers:[{kind,id,name}]` 在错误体中（见第 11.3 节）。
 
 `GET /install/ca.pem` 无需登录，返回面板 Web 证书链顶层的 PEM（`application/x-pem-file`，`Cache-Control: no-store`），供节点安装脚本建立对面板证书的信任（见第 11.3 节）；开发模式或证书不可读时返回 404。
 
@@ -1228,6 +1235,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | canvas_forward_reconcile、tunnel_migration_report | 保留单次完成标记、已迁移 ID 与原因；0129 前归档先升级再转换，已完成的不自动重试；事务失败可重试，转换不改运行修订/入站/证书 |
 | node_machine_traffic_settings/daily/cursors | 三表长期保留、全部加密备份，非 7 天遥测；validateMachineTraffic 校验设置/日期/字节/主外键，0126 前无表合法，清单有三项计数。冻结当前库已到 0126 则整组复制当前表（空表也权威），否则保留归档；不丢当前量、不重复/复活旧量 |
 | subscription_sources 的 latest_result_json/last_success_at | 加密备份与校验覆盖：结果必须是固定阶段/代码、counts 一致且诊断文本等于代码固定文本，超界或夹带任意文本拒绝整份归档；0133 前归档无该列仍合法，恢复按旧列复制，保留“未记录原因”，不自动抓取、不编造原因 |
+| node_identity_retirements、node_identity_recoveries | 作废指纹在恢复时并入当前库，只注册不复活：已作废的指纹既不能覆盖也不能写入当前身份；恢复记录以当前库为准，`issued` 统一改为已过期，不重发恢复码、不重签证书 |
 
 调度随停机/进程内恢复取消并等待退出，新实例仅一个循环。其他模块的会话结束、安全状态与撤销访问保守合并规则见第 26.9、29 节。
 

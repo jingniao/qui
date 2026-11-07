@@ -153,12 +153,18 @@ func (r *Repository) ReissueEnrollment(ctx context.Context, nodeID string, durat
 }
 
 func (r *Repository) EnrollmentNode(ctx context.Context, hash string) (string, error) {
+	id, _, err := r.EnrollmentNodePurpose(ctx, hash)
+	return id, err
+}
+
+func (r *Repository) EnrollmentNodePurpose(ctx context.Context, hash string) (string, string, error) {
 	var id string
-	err := r.Database.QueryRowContext(ctx, "SELECT t.node_id FROM node_enrollment_tokens t JOIN nodes n ON n.id=t.node_id WHERE t.token_hash=? AND t.consumed_at IS NULL AND t.expires_at>? AND n.enabled=1", hash, timestamp(time.Now())).Scan(&id)
+	var purpose string
+	err := r.Database.QueryRowContext(ctx, "SELECT t.node_id,t.purpose FROM node_enrollment_tokens t JOIN nodes n ON n.id=t.node_id WHERE t.token_hash=? AND t.consumed_at IS NULL AND t.expires_at>? AND n.enabled=1 AND coalesce(n.deleted_at,'')=''", hash, timestamp(time.Now())).Scan(&id, &purpose)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrToken
 	}
-	return id, err
+	return id, purpose, err
 }
 
 func (r *Repository) ConsumeEnrollment(ctx context.Context, hash, id, hostname, os, version, certificate, fingerprint string, expiry time.Time) error {
@@ -174,7 +180,22 @@ func (r *Repository) consumeEnrollment(ctx context.Context, hash, id, hostname, 
 	if receipt != nil {
 		consumedAt = receipt.CreatedAt
 	}
-	result, err := tx.ExecContext(ctx, "UPDATE node_enrollment_tokens SET consumed_at=? WHERE token_hash=? AND node_id=? AND consumed_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM nodes WHERE nodes.id=node_id AND enabled=1)", consumedAt, hash, id, timestamp(time.Now()))
+	var purpose string
+	if err := tx.QueryRowContext(ctx, "SELECT purpose FROM node_enrollment_tokens WHERE token_hash=?", hash).Scan(&purpose); errors.Is(err, sql.ErrNoRows) {
+		return ErrToken
+	} else if err != nil {
+		return err
+	}
+	if purpose == "recover" {
+		if receipt == nil {
+			return ErrToken
+		}
+		if err := r.consumeRecoveryTx(ctx, tx, hash, id, receipt); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	result, err := tx.ExecContext(ctx, "UPDATE node_enrollment_tokens SET consumed_at=? WHERE token_hash=? AND node_id=? AND purpose='enroll' AND consumed_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM nodes WHERE nodes.id=node_id AND enabled=1)", consumedAt, hash, id, timestamp(time.Now()))
 	if err != nil {
 		return err
 	}
@@ -200,6 +221,10 @@ func (r *Repository) consumeEnrollment(ctx context.Context, hash, id, hostname, 
 }
 
 func (r *Repository) ValidateIdentity(ctx context.Context, id, fingerprint string) error {
+	var retired int
+	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM node_identity_retirements WHERE fingerprint=? AND node_id=?", fingerprint, id).Scan(&retired); err == nil && retired != 0 {
+		return ErrIdentity
+	}
 	var enabled int
 	err := r.Database.QueryRowContext(ctx, "SELECT n.enabled FROM node_identities i JOIN nodes n ON n.id=i.node_id WHERE i.node_id=? AND i.fingerprint=? AND i.revoked_at IS NULL AND i.expires_at>?", id, fingerprint, timestamp(time.Now())).Scan(&enabled)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && enabled != 1 {

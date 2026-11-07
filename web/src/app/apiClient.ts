@@ -58,6 +58,8 @@ const messages: Record<string, string> = {
   node_delete_not_allowed: '节点已登记，不能按取消登记处理。',
   node_in_use: '节点已被入站、出站、代理链、分流规则或发布记录引用，请先移除这些配置。',
   node_delete_blocked: '节点仍被配置引用或有进行中的发布，请先处理下列项目。',
+  node_recovery_blocked: '节点存在未完成任务，请先处理下列项目。',
+  node_not_enrolled: '节点尚未登记或已禁用，不能签发恢复码。',
   node_deleted: '节点已删除，不能修改。',
   unmanaged_user_credentials: '配置版本不能直接携带用户凭据，请在入站或用户接入中配置',
   node_offline: '服务器当前离线或心跳过期，请等待其重新上线后重试。',

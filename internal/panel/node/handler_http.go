@@ -35,6 +35,7 @@ type Handler struct {
 	Audit      auditLog
 	Auth       *auth.Handler
 	Notify     func(string)
+	Disconnect func(string)
 	// Tasks closes a deleted node's own coordination rows; the deployment module
 	// owns those tables. A nil field leaves them as they are.
 	Tasks Tasks
@@ -73,6 +74,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/nodes/{id}/enrollment-token", h.Auth.Require(http.HandlerFunc(h.reissueEnrollment), true))
 	mux.Handle("PUT /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.update), true))
 	mux.Handle("POST /api/v1/nodes/{id}/revoke-certificate", h.Auth.Require(http.HandlerFunc(h.revoke), true))
+	mux.Handle("POST /api/v1/nodes/{id}/recovery-token", h.Auth.Require(http.HandlerFunc(h.issueRecovery), true))
+	mux.Handle("GET /api/v1/nodes/{id}/recovery-status", h.Auth.Require(http.HandlerFunc(h.recoveryStatus), true))
 	mux.Handle("DELETE /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.delete), true))
 }
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +220,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if h.Notify != nil {
 		h.Notify(r.PathValue("id"))
 	}
+	if !*body.Enabled && h.Disconnect != nil {
+		h.Disconnect(r.PathValue("id"))
+	}
 }
 func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 	n, err := h.Repository.Get(r.Context(), r.PathValue("id"))
@@ -233,6 +239,61 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+	if h.Disconnect != nil {
+		h.Disconnect(n.ID)
+	}
+}
+
+func (h *Handler) issueRecovery(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExpiresInSeconds int  `json:"expiresInSeconds"`
+		RevokeNow        bool `json:"revokeNow"`
+	}
+	if err := httpapi.Decode(w, r, &body); err != nil {
+		httpapi.Error(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if body.ExpiresInSeconds == 0 {
+		body.ExpiresInSeconds = 900
+	}
+	if body.ExpiresInSeconds < 300 || body.ExpiresInSeconds > 3600 {
+		httpapi.Error(w, 400, "invalid_request", "Recovery expiry must be between 300 and 3600 seconds")
+		return
+	}
+	actor := auth.Actor(r.Context()).Username
+	n, token, expires, err := h.Repository.IssueRecovery(r.Context(), r.PathValue("id"), actor, time.Duration(body.ExpiresInSeconds)*time.Second, body.RevokeNow)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	action := "签发节点恢复码"
+	if body.RevokeNow {
+		action = "签发节点恢复码并吊销证书"
+	}
+	if err := h.Audit.Record(r.Context(), actor, action, n.Name, "成功", r.RemoteAddr); err != nil {
+		h.fail(w, err)
+		return
+	}
+	install := InstallInfo{}
+	if h.Install != nil {
+		install = h.Install()
+	}
+	httpapi.JSON(w, 201, map[string]any{"node": n, "enrollmentToken": token, "expiresAt": expires, "install": install, "purpose": "recover"})
+	if body.RevokeNow && h.Disconnect != nil {
+		h.Disconnect(n.ID)
+	}
+	if h.Notify != nil {
+		h.Notify(n.ID)
+	}
+}
+
+func (h *Handler) recoveryStatus(w http.ResponseWriter, r *http.Request) {
+	x, err := h.Repository.RecoveryStatus(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, x)
 }
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -283,13 +344,25 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 		httpapi.Error(w, 409, "node_not_pending", err.Error())
 		return
 	}
+	if errors.Is(err, ErrNodeNotEnrolled) {
+		httpapi.Error(w, 409, "node_not_enrolled", err.Error())
+		return
+	}
 	if errors.Is(err, ErrNodeDeleted) {
 		httpapi.Error(w, 409, "node_deleted", "节点已删除，不能修改。")
 		return
 	}
 	var blocked *BlockedError
 	if errors.As(err, &blocked) {
-		httpapi.ErrorDetails(w, 409, "node_delete_blocked", "节点仍被配置引用或有进行中的发布，请先处理下列项目。", map[string]any{"blockers": blocked.Items})
+		code := blocked.Code
+		if code == "" {
+			code = "node_delete_blocked"
+		}
+		message := "节点仍被配置引用或有进行中的发布，请先处理下列项目。"
+		if code == "node_recovery_blocked" {
+			message = "节点存在未完成任务，请先处理下列项目。"
+		}
+		httpapi.ErrorDetails(w, 409, code, message, map[string]any{"blockers": blocked.Items})
 		return
 	}
 	if errors.Is(err, ErrNodeEnrolled) {

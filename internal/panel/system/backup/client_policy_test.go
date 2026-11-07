@@ -100,6 +100,9 @@ func TestClientPolicyArchiveValidation(t *testing.T) {
 func TestPre0132ClientPolicyArchiveInitialization(t *testing.T) {
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
+	// 0134 came after the client-policy library, so a pre-0132 archive cannot
+	// keep its recovery objects either.
+	rewindIdentityRecovery(t, source.Database)
 	for _, query := range []string{
 		"DROP TABLE client_policy_profiles",
 		"DELETE FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'",

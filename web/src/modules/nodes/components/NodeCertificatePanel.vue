@@ -25,6 +25,7 @@
     </template>
     <p v-else-if="loading" class="text-gray-500">正在读取证书状态…</p>
     <p class="text-xs text-gray-500">Agent 自动续期沿用原私钥。普通主动续期或私钥轮换使用停止节点后的固定操作；过期证书可按上方Owner流程签发，再在节点导入和确认。</p>
+    <NodeRecoveryPanel :node="props.node" />
   </section>
 </template>
 <script setup lang="ts">
@@ -32,6 +33,7 @@ import {ref,onMounted,onUnmounted,watch} from 'vue';
 import {nodeAPI,type NodeView,type CertificateStatus,type CertificateObservation} from '../api';
 import {formatTime} from '../../../app/auth';
 import NodeEnrollmentPanel from './NodeEnrollmentPanel.vue';
+import NodeRecoveryPanel from './NodeRecoveryPanel.vue';
 const props=defineProps<{node:NodeView}>();
 const status=ref<CertificateStatus|null>(null),error=ref(''),loading=ref(false);
 let generation=0,stopped=false;

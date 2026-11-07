@@ -339,6 +339,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateMigrations(ctx, database); err != nil {
 		return err
 	}
+	if err := validateIdentityRetirements(ctx, database); err != nil {
+		return err
+	}
 	for _, table := range []string{"admins", "users", "nodes", "node_groups", "policies", "service_sets", "config_revisions"} {
 		var count int64
 		if err := database.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil {

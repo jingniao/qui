@@ -27,6 +27,7 @@ export interface NodeView extends NodeNetworkSettings {
 // no release version, development mode has no certificate to trust.
 export interface InstallInfo { version: string; grpcPort: number; caSha256: string; }
 export interface Enrollment { node: NodeView; enrollmentToken: string; expiresAt: string; install: InstallInfo; }
+export interface RecoveryStatus { id:string; nodeId:string; previousFingerprint:string; newFingerprint?:string; owner:string; revokedOnIssue:boolean; status:string; redeployState:string; redeployRevision:number; redeployCode?:string; createdAt:string; expiresAt:string; consumedAt?:string; }
 // The public repository the release archives and node-install.sh come from.
 export const releaseRepository = 'jingniao/qui';
 // The single line the register dialog shows: it installs the agent and the core,
@@ -83,6 +84,8 @@ export const nodeAPI = {
   deleteProbeTarget: (id: string) => request(`/probe-targets/${encodeURIComponent(id)}`, 'DELETE'),
 	enrollmentStatus:(id:string)=>request<EnrollmentStatus>(`/nodes/${encodeURIComponent(id)}/enrollment-status`),
 	certificateStatus:(id:string)=>request<CertificateStatus>(`/nodes/${encodeURIComponent(id)}/certificate-status`),
+	issueRecovery:(id:string,body:{expiresInSeconds?:number;revokeNow?:boolean})=>request<Enrollment & {purpose:string}>(`/nodes/${encodeURIComponent(id)}/recovery-token`,'POST',body),
+	recoveryStatus:(id:string)=>request<RecoveryStatus>(`/nodes/${encodeURIComponent(id)}/recovery-status`),
 restartTasks:(id:string)=>request<{items:RestartTask[]}>(`/nodes/${encodeURIComponent(id)}/restart-core`),
 restartCore:(id:string,expectedRevision:number,core:CoreName|""="")=>request<RestartTask>(`/nodes/${encodeURIComponent(id)}/restart-core`,"POST",{expectedRevision,confirmNodeId:id,core}),
 healthChecks:(id:string)=>request<{items:HealthCheck[]}>(`/nodes/${encodeURIComponent(id)}/health-checks`),

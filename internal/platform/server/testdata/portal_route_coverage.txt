@@ -68,6 +68,7 @@ GET /api/v1/nodes/{id}/machine-traffic/settings
 GET /api/v1/nodes/{id}/meta
 GET /api/v1/nodes/{id}/metrics
 GET /api/v1/nodes/{id}/ports/check
+GET /api/v1/nodes/{id}/recovery-status
 GET /api/v1/nodes/{id}/relays
 GET /api/v1/nodes/{id}/restart-core
 GET /api/v1/nodes/{id}/tcp-probes
@@ -166,6 +167,7 @@ POST /api/v1/nodes/{id}/enrollment-token
 POST /api/v1/nodes/{id}/health-checks
 POST /api/v1/nodes/{id}/ports/allocate
 POST /api/v1/nodes/{id}/publish
+POST /api/v1/nodes/{id}/recovery-token
 POST /api/v1/nodes/{id}/relays
 POST /api/v1/nodes/{id}/restart-core
 POST /api/v1/nodes/{id}/revoke-certificate

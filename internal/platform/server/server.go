@@ -144,6 +144,26 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	eventBus := &events.Bus{}
 	notify := func(id string) { eventBus.Publish("node_status", map[string]string{"nodeId": id}) }
 	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
+	control.RecoveryRedeploy = func(ctx context.Context, id string) error {
+		revision, err := deployments.RedeployPublished(ctx, id, "recovery")
+		if err != nil {
+			// redeploy_code is a short bounded column: the outcome is a fixed
+			// code and the full error only reaches the log.
+			switch {
+			case errors.Is(err, deployment.ErrNodeBusy):
+				return nodeRepository.FinishRecoveryRedeploy(ctx, id, 0, "pending", "")
+			case errors.Is(err, deployment.ErrNothingPublished):
+				return nodeRepository.FinishRecoveryRedeploy(ctx, id, 0, "not_needed", "")
+			}
+			s.Logger.Error("identity recovery redeploy failed", "node", id, "error", err)
+			return nodeRepository.FinishRecoveryRedeploy(ctx, id, 0, "failed", "redeploy_failed")
+		}
+		if err := nodeRepository.FinishRecoveryRedeploy(ctx, id, revision, "queued", ""); err != nil {
+			return err
+		}
+		eventBus.Publish("deployment_status", map[string]int64{"revision": revision})
+		return nil
+	}
 	control.DashboardNotify = func() { eventBus.Publish("dashboard_status", map[string]bool{"changed": true}) }
 	s.connectionStore = connections.NewStore(3 * node.HeartbeatInterval)
 	s.connectionObserver = &user.ConnectionObserver{Repository: users, Nodes: nodeRepository, Store: s.connectionStore, Publish: eventBus.Publish}
@@ -246,7 +266,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.systemHandler.Runtime = s.runtimeInfo
 	s.systemHandler.Register(mux)
 	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository, BaseSettings: systemRepository}).Register(mux)
-	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments}
+	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments, Disconnect: control.Disconnect}
 	nodeHandler.Install = s.installInfo
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)

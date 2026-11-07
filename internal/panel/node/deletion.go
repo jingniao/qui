@@ -18,8 +18,12 @@ type Blocker struct {
 	Name string `json:"name"`
 }
 
-// BlockedError carries the blockers to the HTTP layer, which answers with them.
-type BlockedError struct{ Items []Blocker }
+// Code lets node operations reuse the same blocker payload while selecting the
+// operation-specific HTTP error code.
+type BlockedError struct {
+	Items []Blocker
+	Code  string
+}
 
 func (e *BlockedError) Error() string { return ErrNodeInUse.Error() }
 func (e *BlockedError) Unwrap() error { return ErrNodeInUse }

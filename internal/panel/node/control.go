@@ -45,11 +45,12 @@ type Control struct {
 		AgentUpdateResult(context.Context, string, *pb.AgentUpdateResult) error
 		AgentUpdateReserved(context.Context, string) (bool, error)
 	}
-	Authority       *pki.Authority
-	mu              sync.Mutex
-	connected       map[string]bool
-	Notify          func(string)
-	DashboardNotify func()
+	Authority        *pki.Authority
+	mu               sync.Mutex
+	connected        map[string]*liveStream
+	RecoveryRedeploy func(context.Context, string) error
+	Notify           func(string)
+	DashboardNotify  func()
 	// Connections holds the live per-node connection snapshots. Optional; when
 	// nil connection status messages are accepted and ignored.
 	Connections *connections.Store
@@ -71,6 +72,20 @@ type Control struct {
 	AccessRecorder interface {
 		RecordAccess(context.Context, string, *pb.AccessBatch, bool) (string, error)
 		RecordTraffic(context.Context, string, *pb.TrafficBatch, bool) (string, error)
+	}
+}
+
+type liveStream struct {
+	cancel      context.CancelFunc
+	fingerprint string
+}
+
+func (c *Control) Disconnect(nodeID string) {
+	c.mu.Lock()
+	s := c.connected[nodeID]
+	c.mu.Unlock()
+	if s != nil {
+		s.cancel()
 	}
 }
 
@@ -137,7 +152,7 @@ func (c *Control) Enroll(ctx context.Context, request *pb.EnrollRequest) (*pb.En
 		}
 		return original, nil
 	}
-	id, err := c.Repository.EnrollmentNode(ctx, Hash(request.EnrollmentToken))
+	id, purpose, err := c.Repository.EnrollmentNodePurpose(ctx, Hash(request.EnrollmentToken))
 	if errors.Is(err, ErrToken) {
 		return nil, status.Error(codes.Unauthenticated, ErrToken.Error())
 	}
@@ -148,7 +163,7 @@ func (c *Control) Enroll(ctx context.Context, request *pb.EnrollRequest) (*pb.En
 	if err != nil {
 		return nil, status.Error(codes.Internal, "certificate issuance failed")
 	}
-	if err := c.Repository.ConsumeEnrollmentOriginal(ctx, Hash(request.EnrollmentToken), id, request, csr, encoded, c.Authority.PEM, cert); err != nil {
+	if err := c.Repository.ConsumeEnrollmentOriginal(ctx, Hash(request.EnrollmentToken), id, purpose, request, csr, encoded, c.Authority.PEM, cert); err != nil {
 		if errors.Is(err, ErrToken) {
 			// A concurrent identical request may have committed the original.
 			if original, found, replayErr := c.Repository.ReplayEnrollment(ctx, request, csr, c.Authority); found && replayErr == nil {
@@ -158,11 +173,15 @@ func (c *Control) Enroll(ctx context.Context, request *pb.EnrollRequest) (*pb.En
 		}
 		return nil, status.Error(codes.Internal, "enrollment failed")
 	}
+	if purpose == "recover" {
+		c.Disconnect(id)
+	}
 	return &pb.EnrollResponse{NodeId: id, CertificatePem: encoded, CaPem: c.Authority.PEM, ExpiresAt: timestamppb.New(cert.NotAfter)}, nil
 }
 
 func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.ServerMessage]) error {
-	ctx := stream.Context()
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
 	info, err := certificate(ctx)
 	if err != nil {
 		return status.Error(codes.Unauthenticated, "node certificate required")
@@ -185,13 +204,14 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	}
 	c.mu.Lock()
 	if c.connected == nil {
-		c.connected = map[string]bool{}
+		c.connected = map[string]*liveStream{}
 	}
-	if c.connected[id] {
+	if c.connected[id] != nil {
 		c.mu.Unlock()
 		return status.Error(codes.AlreadyExists, "node already connected")
 	}
-	c.connected[id] = true
+	entry := &liveStream{cancel: cancel, fingerprint: fingerprint}
+	c.connected[id] = entry
 	c.mu.Unlock()
 	if c.Connections != nil {
 		c.Connections.SetGateSupport(id, first.GetHello().DeviceGateSupported && c.DeviceGates != nil)
@@ -208,7 +228,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			c.Notify(id)
 		}
 		c.mu.Lock()
-		delete(c.connected, id)
+		if current := c.connected[id]; current == entry {
+			delete(c.connected, id)
+		}
 		c.mu.Unlock()
 	}()
 	if err := c.Repository.unconfirmTuning(ctx, id); err != nil {
@@ -488,6 +510,14 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		if err != nil {
 			return status.Error(codes.Internal, "message persistence failed")
+		}
+		if message.GetCapabilities() != nil && c.RecoveryRedeploy != nil {
+			if claimed, claimErr := c.Repository.ClaimRecoveryRedeploy(ctx, id); claimErr == nil && claimed {
+				// The redeploy records its own outcome (success, pending,
+				// not_needed or a fixed failure code), so a failure here must
+				// not write a second, unbounded code.
+				_ = c.RecoveryRedeploy(ctx, id)
+			}
 		}
 		settingsSession.record(message, message.Sequence > lastSequence)
 		if updateSupported {

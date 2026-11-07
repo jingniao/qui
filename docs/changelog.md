@@ -2,8 +2,9 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
-**v1.4（未发布，开发分支 `feat/v1.4-tunnels`）**：中转拆为隧道管理（隧道/规则）、节点“添加中转”和代理中转方案。说明见[1.4.0 发布说明草稿](release-notes-1.4.0.md)，阶段任务见[计划](v1.4-plan.md)。
+**v1.4.0（2026-11-07，tag `v1.4.0` → `6a5a821`）**：中转拆为隧道管理（隧道/规则）、节点“添加中转”和代理中转方案。说明见[1.4.0 发布说明](release-notes-1.4.0.md)，阶段任务见[计划](v1.4-plan.md)。生产尚未升级（面板离线 rc.3／迁移头 0133，Agent rc.1），0134 未在生产执行。
 
+- 正式发布（2026-11-07 UTC）：`v1.4.0` 打 tag → `6a5a821`（迁移头 0134），经 GitHub 发布工作流发布、发布说明自动生成。发布前本地 Linux 门禁（快照 `b24faa1`，与 `6a5a821` 的树相同，仅差一行文档）通过：`check` 2069 秒、实核 680 秒、合计 2750 秒、无 DATA RACE；GitHub run 42351659212 `check` success，run 42365483798 `check` success 而 `cores` 第 1 次尝试出现一次偶发失败（`TestRealV14CompletionPaths/sing-box/P2-external`，qui sing-box 应用阶段报 `sing-box startup or health check failed`，同一次运行中官方 sing-box 的同一子测试通过），重跑该作业后官方与 qui sing-box 两步骤均通过，原因未定。新增迁移 0134（Agent 原位身份恢复）：主机重装但身份仍属原节点时，Owner 签发一次性恢复码，新 Agent 经 `Enroll` 核销后保留节点 ID 与业务配置、旧证书与指纹永久作废、已发布版本自动重新下发；systemd 与 Alpine/OpenRC 隔离主机测试通过（同一节点 ID、恢复记录核销、自动重新下发 `身份恢复：重新下发 r1`／`r3`、恢复后 SOCKS 200 且订阅 Token 不变、旧证书被拒且指纹进入 `node_identity_retirements`，`revokeNow`／supersede 与容器重启同样通过），已知缺口为恢复前跑 `uninstall.sh` 会使生成的安装命令失败（[运维 §5.1](operations.md#51-原位恢复推荐)）以及面板不为被拒的已作废证书记录日志。
 - 最终收尾（2026-11-06 UTC）：生产面板已单独更新至离线 **1.4.0-rc.3**（最终内容快照 `0506a085ad5fd783`，非 Git commit），三台 Agent 保持 rc.1，UK/Alpine/US 修订 295/296/291，迁移 0133。全仓库 check／race 和实核均退出 0，浏览器 8 组场景及真实旧／新恢复、匹配降级完成。7202 秒混合流量 4028 次中成功 4024、瞬时失败 4，根因未定，不能判定零错误完整 A1 通过；临时资源和凭据清理、原资源基线及数据库检查通过。原生 arm64 已按 Owner 要求跳过；最新证据与恢复点见[最终验收记录](final-v1.4-acceptance.md)。
 - 画布 P2/P3 与关联规则 P4 生产实流（2026-11-06 UTC）：四入口 12/12 次请求成功、4/4 次错误 UUID 拒绝，含 Reality TCP Vision/xhttp-auto 经现有 GOST 隧道；逐跳来源及无操作重发通过。P3 按 Alpine→UK→US 验收，保留原业务出站；临时资源清理、原配置保持，三台在线（UK/Alpine/US 274/276/273）。原拟反向 P3 的计划/发布环路校验差异已记录，见[报告](canvas-p2-p3-p4-client-verification.md)。
 - VLESS / Reality 生产客户端验收（2026-11-06 UTC）：自建 TCP、Reality TCP Vision/xhttp-auto 的有效请求 21/21、错误凭据及失效公钥拒绝 11/11；草稿隔离、轮换发布和历史回滚均通过。临时资源清理，原配置不变，三台在线（UK/Alpine/US 253/255/258）。测试机使用既有 SOCKS 出口，直达网络仍有断连；完整 A1 未通过，见[报告](vless-reality-client-verification.md)。

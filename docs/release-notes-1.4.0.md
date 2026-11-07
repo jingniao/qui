@@ -1,12 +1,12 @@
-# v1.4.0 发布说明（草稿 / 未发布）
+# v1.4.0 发布说明
 
-状态：`feat/v1.4-tunnels` 开发中，尚无正式发布日期或发布 tag。最新正式版仍为 [v1.3.1](release-notes-1.3.1.md)。本文描述分支实现和已执行的部分主机验收，**不代表完整 A1 通过或正式发布批准**。范围与 API 见[v1.4 计划](v1.4-plan.md)，实现报告见[文档导航](README.md)。
+发布日期：2026-11-07（UTC）（tag `v1.4.0` 指向 `6a5a821`，即 `feat(node): in-place Agent identity recovery (migration 0134)`；经 GitHub 发布工作流的 tag 推送发布，GitHub 发布说明为自动生成）。本版迁移头 **0134**。**生产尚未升级到本版：** 面板仍是离线 `1.4.0-rc.3`（迁移头 0133），三台 Agent 仍是 `1.4.0-rc.1`，0134 未在生产执行。本文描述本版实现和已执行的部分主机验收，**不代表完整 A1 通过**。范围与 API 见[v1.4 计划](v1.4-plan.md)，门禁与 CI 见下方“发布验证”，实现报告见[文档导航](README.md)。
 
 **范围与状态（2026-11-06 UTC）：** [协议支持补齐计划](subscription-import-compatibility-plan.en.md#148-implementation-status-2026-11-05)的全部工作已并入 v1.4.0，迁移头 0133。最终源码快照 `0506a085ad5fd783` 的全仓库 check／race 与实核门禁均通过，浏览器 8 组场景、指定协议生产客户端、三节点 GOST TCP/UDP、实际旧／新备份恢复和匹配降级已完成。2 小时混合流量 4028 次中成功 4024、失败 4，后续恢复，不能判定零错误完整 A1 通过。最新状态和证据见[最终验收记录](final-v1.4-acceptance.md)。
 
 **平台：** GOST 固定官方 3.3.2、仅 linux/amd64，因此 GOST 隧道也仅 linux/amd64。此前正式版的 amd64 主机和 arm64 qemu-user 证据不能代替本版验收。
 
-**rc.2 收尾更新（2026-11-06 UTC）：** 生产面板已从 rc.1 单独升级至离线 `1.4.0-rc.2`（`bcdf16a`），三台 Agent 保持 rc.1、原成功修订及 8 个入站不变。节点组卡片／账号与成员弹窗、统一排版和一天默认会话随面板更新；门控反馈循环修复已通过生产浏览器复测。当前仍无正式 tag／公开 Release，详见[收尾报告](v1.4-rc2-closeout.md)。
+**rc.2 收尾更新（2026-11-06 UTC）：** 生产面板已从 rc.1 单独升级至离线 `1.4.0-rc.2`（`bcdf16a`），三台 Agent 保持 rc.1、原成功修订及 8 个入站不变。节点组卡片／账号与成员弹窗、统一排版和一天默认会话随面板更新；门控反馈循环修复已通过生产浏览器复测。当时仍无正式 tag／公开 Release；2026-11-07 发布 `v1.4.0`（见文首），详见[收尾报告](v1.4-rc2-closeout.md)。
 
 **三节点后续（2026-11-06 UTC）：** 已解决 Alpine NAT 接入并完成 UK→Alpine→US 的 GOST TLS/mTLS 真实 TCP/UDP 两轮 12/12 检查、受控失败批次自动回滚和中间 Agent 重启恢复。测试资源及 US 临时 GOST 清理，原两节点隧道保留；最终 UK/Alpine/US 修订 253/255/254。下方早期 A1 表格中的“缺第三台／三跳 GOST 待验收”为当时记录，最新结果见[三节点报告](three-hop-host-verification.md)；画布 P3 和终端用户认证仍未由本项覆盖。
 
@@ -53,10 +53,16 @@
 - **端口与归属：** tunnel_objects 按 ID 管理生成入站，普通编辑/删除返回 409 managed_by_tunnel；被 linked 规则引用的目标删除返回 inbound_has_relays。port_claims 始终预留端口；自动分配跳过所有入站（含禁用/范围），ports/check 也报告禁用入站。手动保存仅检查启用入站间冲突及持久声明。新隧道/规则必须手填或配置端口范围；仅画布无范围时保留 8443/51820。
 - **计划与发布：** 先展示服务器、监听、路由、变更与冲突，再按 exit → mid → entry 发布，失败反向回滚。选隧道纳入规则，选规则纳入隧道和必要拨号依赖；未变返回 unchanged，不生成修订/批次。已发布对象删除进入 pending_delete，成功发布移除前保留声明、引用及订阅快照。
 
+## Agent 原位身份恢复（迁移 0134）
+
+- 主机重装但身份仍属原节点时，Owner 在节点证书区签发一次性恢复码（默认 900 秒，可勾选立即吊销现有证书）；新 Agent 用现有安装脚本经 `Enroll` 核销该码，节点 ID、入站、出站、节点组、隧道、代理链与历史配置全部保留，旧证书与指纹永久作废。Agent 二进制与安装脚本不变，操作见[运维 §5.1](operations.md#51-原位恢复推荐)。
+- 主机测试（2026-11-07，用本版快照构建的隔离测试面板、临时节点，生产未触碰）：systemd 节点与 Alpine 3.24／OpenRC 0.63 容器均通过——同一节点 ID、恢复记录核销、自动重新下发成功（版本 `身份恢复：重新下发 r1`／`r3`）、恢复后 SOCKS 流量 200 且订阅 Token 不变；旧证书被拒（`Unauthenticated: node certificate revoked or unknown`），旧指纹写入 `node_identity_retirements`。`revokeNow`、supersede 路径与 OpenRC 容器重启同样通过，临时资源已清理。
+- 已知缺口：恢复前对主机跑过 `uninstall.sh` 会让面板生成的安装命令失败（处理见[运维 §5.1](operations.md#51-原位恢复推荐)第 3 步）；面板不为被拒的已作废证书记录日志。
+
 ## 升级注意
 
-- 面板先升级，再逐台升级 Agent；升级前备份数据库、身份目录及必要配置密钥。发布/升级 Agent 会短暂重启受影响节点核心，须安排窗口。本轮已按此顺序完成离线 RC 部署并保留恢复点，尚未正式发布。
-- 新迁移 **0129–0132**：0129 新增 tunnels、tunnel_hops、tunnel_rules、port_claims、tunnel_objects；0130 增加规则 published_snapshot；0131 增加 canvas_forward_reconcile 与 tunnel_migration_report。0132 增加 client_policy_profiles，活动指针为 system_settings.client_policy_active，备份恢复核对活动模板快照；正式版迁移头仍为 0128；跨迁移降级须恢复匹配的升级前数据库，不能让旧程序打开新库。
+- 面板先升级，再逐台升级 Agent；升级前备份数据库、身份目录及必要配置密钥。发布/升级 Agent 会短暂重启受影响节点核心，须安排窗口。本轮已按此顺序完成离线 RC 部署并保留恢复点；本版已按 tag 发布（见文首），生产升级另行安排。
+- 新迁移 **0129–0134**：0129 新增 tunnels、tunnel_hops、tunnel_rules、port_claims、tunnel_objects；0130 增加规则 published_snapshot；0131 增加 canvas_forward_reconcile 与 tunnel_migration_report。0132 增加 client_policy_profiles，活动指针为 system_settings.client_policy_active，备份恢复核对活动模板快照；0133 保存来源最近结果与最近成功时间（见 S1 条目）；0134 增加 Agent 原位身份恢复（见上节）。v1.3.1 的迁移头为 0128，本版为 0134；跨迁移降级须恢复匹配的升级前数据库，不能让旧程序打开新库。
 - 启动/恢复在旧 0124 归属核对后，**自动单次**转换合格已发布画布转发：普通转发变直接规则，GOST 转发变两节点隧道＋规则。保留 ID、端口、原运行入站/修订与密封材料，不重签、不下发；规则默认订阅隐藏。目标公网地址与成功运行版本中的用户入站端口唯一匹配才 linked，否则 manual。迁移连接从画布布局移除；首次无修改发布复用旧物化输入。
 - Owner 必须查看 `GET /api/v1/tunnels/migration-report` 的 `{items:[{tunnelId,name,reason}]}`：核对未发布连接、缺失/重复归属、共享路径不一致、缺失服务器、目标池/范围、端口冲突、材料或运行设置不一致。无法确定的连接留在画布只读，可删除，不可新增/改动。报告记录单次尝试，处理后不自动消项/重试；事务失败可重试。按原路径与所有权明确重建及发布，不猜测接管。
 - GOST 隧道每跳必须已安装并上报启用 GOST、所需契约且无组件操作占用；接收跳须公网地址或 connectHost。按规则 network 放通入口监听，按每段放通 TCP 中继端口。新隧道/规则无默认端口回退。
@@ -66,6 +72,11 @@
 - 自建 Reality / xhttp 设置只下发给上报相应精确能力的 v1.4.0 Agent；仍按先面板、后 Agent 升级，v1.3.1 Agent 不能保存或接收这些设置。
 
 具体操作见[运维 §21](operations.md#21-隧道管理与中转方案v14-草稿未发布)，转换边界与恢复验证见 [M1 报告](v1.4-m1-report.md)。
+
+## 发布验证（门禁与 CI）
+
+- 本地 Linux 门禁（快照 `b24faa1`，与 `6a5a821` 的树相同，仅差一行文档）通过：`check` 2069 秒、实核 680 秒、合计 2750 秒，无 DATA RACE 告警。
+- GitHub Check：`6a5a821` 的 run 42351659212 `check` success；run 42365483798 `check` success，`cores` 第 1 次尝试出现一次偶发失败——`TestRealV14CompletionPaths/sing-box/P2-external` 在 qui sing-box 构建的应用阶段报 `sing-box startup or health check failed`，同一次运行中官方 sing-box 的同一子测试通过；第 2 次尝试（重跑失败作业）在官方与 qui sing-box 两个步骤均通过。原因未确定；若再现，先查该路径的启动时序。
 
 ## 已知限制
 
@@ -80,7 +91,7 @@
 
 最新补充结果与全仓库 race／长测进度见[最终验收记录](final-v1.4-acceptance.md)。下表当前项已按后续实流更新，历史原始失败继续保留在各轮报告中。
 
-以下按实际执行范围记录，尚未作发布结论；阶段报告中的 Windows 单元/集成检查和模拟回执不等于 Linux 实核或主机验收。生产操作详见[主机记录](v1.4-a1-host-report.md)。
+以下按实际执行范围记录；阶段报告中的 Windows 单元/集成检查和模拟回执不等于 Linux 实核或主机验收。生产操作详见[主机记录](v1.4-a1-host-report.md)。
 
 | 项目 | 结果 / 证据 |
 | --- | --- |
@@ -90,7 +101,7 @@
 | P3：代理入口 → 中间代理 → 代理出口 | Alpine VLESS→UK Trojan/TLS→US SOCKS5 实客户端3/3、错误UUID拒绝通过；原拟相反方向的环路保护已记录并补源码规划前置检查 |
 | P4：入口隧道 → 目标用户入站及中转订阅 | 经UK→Alpine GOST隧道至US Reality TCP Vision/xhttp-auto 实客户端6/6、错误UUID拒绝通过；历史首次apply_failed首因仍未确定 |
 | 单次迁移/遗留报告、备份恢复、轮换、删除及无操作重发 | 本轮实际 0128→0133、空迁移报告、同版本加密备份恢复、Reality 密钥/隧道凭据轮换、配置回滚、删除清理与无修改重发均已执行；本轮另已隔离验证匹配旧库的跨版本降级，见最终报告 |
-| RC 三台主机、平台覆盖、正式浏览器走查 | 离线 RC `f11fe4e` 的 amd64 部署及 systemd/OpenRC mTLS 重连通过，三台在线；不含真实 arm64、整机重启或正式 v1.4 全页面浏览器验收。未推送/打 tag/公开发布 |
+| RC 三台主机、平台覆盖、正式浏览器走查 | 离线 RC `f11fe4e` 的 amd64 部署及 systemd/OpenRC mTLS 重连通过，三台在线；不含真实 arm64、整机重启或正式 v1.4 全页面浏览器验收。该轮未推送/打 tag；正式发行为 tag `v1.4.0`（见文首） |
 | 客户端策略配置库（0132） | 最终完整 check／race／实核门禁通过；真实 mihomo 分流、8 组浏览器交互、双会话草稿保留、旧／新恢复及匹配降级已完成。可选预览用户和弹窗层级修复见[最终记录](final-v1.4-acceptance.md) |
 | A1b：文档与源码核对 | 本草稿及说明书/架构/运维/协议/部署/索引已同步；不替代上述验收 |
 | 刷新误报修复 | 已实施；提交 `650b349` 的 Linux 门禁通过：`check` 1980s、`cores` 572s、`GATE 650b349 PASS total=2552s`，END 2026-11-05T09:30:12Z（主助手本人核对门禁日志）。隔离浏览器真实 DNS 失败场景通过，见最终验收记录 |
@@ -100,8 +111,4 @@
 
 S0 的主助手本人审查通过只覆盖证据报告与净化夹具清单；S1–S4、M1–M4 的精简开发验证已完成；生产 A1 已部分执行，尚未完整通过。实际证据以[验证记录](v1.4-protocol-verification.md)及[主机记录](v1.4-a1-host-report.md)为准。
 
-最新结果已同步[验收矩阵](v1-acceptance.md)。长测 4 次瞬时错误根因未定、历史首次隧道失败首因缺材料，均保留为限制；本轮未执行公开发布。
-
-### Agent 原位身份恢复
-
-v1.4 支持 Owner 为重装主机签发短期恢复注册码。新 Agent 使用现有安装脚本登记，节点 ID 和业务配置保留，旧证书永久作废，已发布版本自动重新下发。
+最新结果已同步[验收矩阵](v1-acceptance.md)。长测 4 次瞬时错误根因未定、历史首次隧道失败首因缺材料，均保留为限制，不因正式发布而改变。

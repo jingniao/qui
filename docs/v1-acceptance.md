@@ -83,7 +83,7 @@
 | --- | --- | --- |
 | P01 | 节点出站网络 | **核心出站源**：在节点设置里填源 IP 或网卡并发布后，渲染结果出现 Xray `sendThrough` + `streamSettings.sockopt.interface`（或 sing-box `inet4/inet6_bind_address` + `bind_interface`），实际出站源地址就是所填值；目标是另一族的字面量 IP 时连接失败。**服务器强制出站**：填 IPv4/IPv6 并发布后 `nft list table inet proxy_agent_source` 出现规则，经该网卡新建的连接源地址被改写，核心出站源地址被豁免，其他网卡不被改写；只填一个地址族时不改写另一族。**失败路径**：源地址或网卡在节点上不存在（`network_unavailable`）、helper 未安装或执行失败（`host_network_failed`）时保留上一成功配置并重试；B 失败时发布回滚且规则还原；四个字段留空再发布后表被删除 |
 | P02 | 终端菜单 `qui` 与升级工具 `qui-update` | `qui` 第 1 项改管理员口令后旧 Owner 会话全部失效、口令不进 argv；第 2 项改 Web 端口时 `--check-config` 失败会保留原配置（备份为 `config.yaml.bak`），成功重启后新端口可用；重启/启动/停止只作用于 `proxy-panel.service`。`qui-update` 从 GitHub Release 取归档与 `SHA256SUMS` 并核对摘要，面板升级前把数据库（含 `-wal`）备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，失败时服务回到停止前状态并打印降级命令；**迁移不可逆**，降级前必须用该备份恢复数据库 |
-| P03 | 一键节点安装与证书信任 | 用面板显示的 `node-install.sh` 命令装出的 Agent 与核心版本与面板一致，登记后节点在线；面板证书由公网 CA 签发时信任系统 CA 包，自签时要求 `GET /install/ca.pem` 的 SHA-256 等于 `--ca-sha256`（不一致立即中止）；`GET /install/ca.pem` 无需登录返回 PEM、开发模式下返回 404；登记成功前可重跑同一条命令，已登记主机被拒绝 |
+| P03 | 一键节点安装与证书信任 | 用面板显示的 `node-install.sh` 命令装出的 Agent 与核心版本与面板一致，登记后节点在线；面板证书由公网 CA 签发时信任系统 CA 包，自签或 Web 一侧为 CDN／终止 TLS 的反向代理时安装取回的面板证书，两种情况都要求 `GET /install/ca.pem` 的 SHA-256 等于 `--ca-sha256`（不一致立即中止）；`GET /install/ca.pem` 无需登录返回 PEM、开发模式下返回 404；登记成功前可重跑同一条命令，已登记主机被拒绝 |
 | P04 | 节点逻辑删除 | 有引用时 `DELETE /api/v1/nodes/{id}` 返回 409 `node_delete_blocked` 并列出 `blockers`，`GET /api/v1/nodes/{id}/deletion-preview` 给出同样的阻塞项；无引用时删除成功：证书立即吊销（旧证书的 mTLS 连接被拒）、节点从列表/选择器/订阅消失、`GET /api/v1/nodes?deleted=1` 可见、历史流量与访问记录保留、不能再次启用或重新登记；同一事务关闭该节点的待发布配置、核心/Agent 更新任务与排队健康检查；未登记节点走“取消登记”；删掉的服务器要作为新节点重新接入 |
 
 这些项目与第 6 节的清单一起执行；缺少任何一项证据都不能判定 V1 完成。

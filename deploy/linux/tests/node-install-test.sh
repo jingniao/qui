@@ -170,11 +170,18 @@ if (($# >= 2)); then
   cp -- "$source" "$destination"
 fi
 STUB
-chmod 0755 -- "$TOP/bin/curl" "$TOP/bin/install"
+cat > "$TOP/bin/openssl" <<'STUB'
+#!/usr/bin/env bash
+# openssl(1) stub: the fixtures are not real certificates, so the answer to
+# "does this file chain to the system bundle" is chosen by the scenario.
+exit "${STUB_OPENSSL_EXIT-0}"
+STUB
+chmod 0755 -- "$TOP/bin/curl" "$TOP/bin/install" "$TOP/bin/openssl"
 export PATH=$TOP/bin:$PATH
 
 # --- Certificate download ---------------------------------------------------------
 eval "$(extract ca_download_diagnosis)"
+eval "$(extract panel_ca_is_public)"
 eval "$(extract install_panel_ca)"
 
 panel=panel.example.com
@@ -227,6 +234,23 @@ check 'public-CA download with a matching digest accepted' 0 \
   install_ca "$panel_digest" "$system_bundle_file"
 check 'the public branch installs the system CA bundle' 0 \
   cmp -s -- "$TOP/ca-work/tls/ca.crt" "$system_bundle_file"
+
+# The field failure behind Cloudflare: the edge certificate is public, so the
+# download with --cacert succeeds, but /install/ca.pem returns the panel's own
+# self-signed certificate and the gRPC port presents that one. The trust decision
+# has to read the fetched file, not the connection; otherwise the Agent gets a
+# system bundle that cannot verify the panel and enrollment fails with exit 60.
+export STUB_OPENSSL_EXIT=1
+stub_ca 200 0 0 "$panel_cert"
+check 'a public edge with a private panel certificate is pinned' 0 \
+  install_ca "$panel_digest" "$system_bundle_file"
+check 'the fallback installs the fetched panel certificate, not the system bundle' 0 \
+  cmp -s -- "$TOP/ca-work/tls/ca.crt" "$panel_cert"
+check 'the fallback names the reverse proxy or CDN case' 0 \
+  grep -q '反向代理／CDN' <<<"$(install_ca "$panel_digest" "$system_bundle_file" 2>&1)"
+check 'the fallback still enforces the pinned digest' 1 \
+  install_ca "$wrong_digest" "$system_bundle_file"
+unset STUB_OPENSSL_EXIT
 
 # The field failure: --http-port pointed at the gRPC listener, which answers a plain
 # GET with 415.

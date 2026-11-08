@@ -350,22 +350,42 @@ ca_download_diagnosis() {
   esac
 }
 
+# True when the downloaded file itself chains to the system trust store. The
+# connection test in install_panel_ca cannot answer this: behind Cloudflare or a
+# TLS-terminating reverse proxy the edge certificate is publicly trusted even when
+# the panel's own certificate — what /install/ca.pem returns and what the gRPC port
+# presents — is self-signed. openssl verify reads the file, not the transport. A
+# host without openssl falls through to pinning the fetched certificate, which is
+# still a correct trust anchor for the Agent.
+panel_ca_is_public() {
+  local file=$1
+  command -v openssl >/dev/null 2>&1 || return 1
+  openssl verify -CAfile "$system_bundle" "$file" >/dev/null 2>&1
+}
+
 # Establish trust in the panel certificate and install it as $ca_file. Two ways,
 # one check: the bytes served by /install/ca.pem have to hash to --ca-sha256 in
 # both, because that digest is what the panel showed the operator, and a proxy or
 # another web server on the same name would otherwise pass unnoticed.
 install_panel_ca() {
   local actual http_status status
-  # The panel certificate counts as publicly trusted only when it verifies against
-  # the very bundle that would become the node CA: --cacert names that bundle and
-  # --no-insecure overrides a -k that a curl wrapper may add, so a host whose curl
-  # skips verification falls through to the pinned SHA-256 instead of installing a
-  # bundle the Agent's gRPC handshake would then reject.
+  # --cacert and --no-insecure make the download itself validated; a host whose
+  # curl skips verification falls through to the pinned SHA-256 instead. What the
+  # download proves is the transport, so the branch below still asks whether the
+  # fetched certificate is public (panel_ca_is_public) before installing the whole
+  # system bundle.
   if [[ -n $system_bundle ]] && curl --no-insecure --cacert "$system_bundle" -fs --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 3 --output "$fetched" -- "$ca_url"; then
     actual=$(sha256sum -- "$fetched"); actual=${actual%% *}
     [[ $actual == "$ca_sha256" ]] || fail "https://$authority/install/ca.pem 提供的证书能被系统信任链验证，但它的 SHA-256 是 $actual，与面板显示的 $ca_sha256 不一致：这个地址取到的不是本面板的证书，而是别的面板、别的 Web 服务，或一个返回自己证书的反向代理／CDN。请核对 --panel 与 --http-port；$retry_note"
-    install -o root -g proxy-agent -m 0644 -- "$system_bundle" "$ca_file" || fail "无法安装 $ca_file。"
-    printf '面板证书由公网 CA 签发并已核对 SHA-256：已把系统 CA 包 %s 安装为 %s。\n' "$system_bundle" "$ca_file"
+    if panel_ca_is_public "$fetched"; then
+      install -o root -g proxy-agent -m 0644 -- "$system_bundle" "$ca_file" || fail "无法安装 $ca_file。"
+      printf '面板证书由公网 CA 签发并已核对 SHA-256：已把系统 CA 包 %s 安装为 %s。\n' "$system_bundle" "$ca_file"
+    else
+      # Public edge certificate, private panel certificate: the Agent connects to the
+      # panel's gRPC port directly, so the pinned panel certificate is its anchor.
+      install -o root -g proxy-agent -m 0644 -- "$fetched" "$ca_file" || fail "无法安装 $ca_file。"
+      printf '面板证书无法用系统信任链验证（自签、私有 CA，或 Web 一侧是终止 TLS 的反向代理／CDN），但已按面板显示的 SHA-256 核对：已安装 %s。\n' "$ca_file"
+    fi
     return 0
   fi
   printf '面板证书无法用系统信任链验证（自签、私有 CA，或 Web 一侧是终止 TLS 的反向代理／CDN）：改用固定 SHA-256 校验。\n'

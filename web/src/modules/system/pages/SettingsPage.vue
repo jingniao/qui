@@ -32,9 +32,12 @@
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label>面板地址<input v-model.trim="endpointForm.host" maxlength="253" placeholder="panel.example.com 或 203.0.113.10" class="form-input-base mt-2" /></label>
           <label>面板 Web 端口<input v-model.number="endpointForm.httpPort" type="number" min="1" max="65535" placeholder="22550" class="form-input-base mt-2" /></label>
+          <label>Agent gRPC 地址<input v-model.trim="endpointForm.grpcHost" maxlength="253" placeholder="留空表示与面板地址相同" class="form-input-base mt-2" /></label>
+          <label>Agent gRPC 端口<input v-model.number="endpointForm.grpcPort" type="number" min="1" max="65535" placeholder="留空表示用面板实际监听端口" class="form-input-base mt-2" /></label>
         </div>
-        <p class="text-xs text-gray-500 leading-relaxed">节点安装 Agent 时用它下载面板证书并登记：填写节点能访问到的公网域名或 IPv4，以及面板 Web（HTTPS）端口。这里不是 Agent gRPC 端口 18880，gRPC 端口自动取面板实际监听端口。</p>
-        <p class="text-xs text-gray-500">留空则使用当前浏览器访问面板的地址。修改只影响之后生成的安装命令，不改动已有节点。</p>
+        <p class="text-xs text-gray-500 leading-relaxed">节点安装 Agent 时用面板地址和面板 Web（HTTPS）端口下载面板证书并登记；Agent 随后用 Agent gRPC 地址和端口建立 mTLS 连接。地址填节点能访问到的公网域名或 IPv4（不含协议和端口）。</p>
+        <p class="text-xs text-gray-500">Agent gRPC 地址留空表示与面板地址相同；端口留空表示用面板实际监听端口。只有面板 Web 位于 CDN 或反向代理后面、gRPC 单独暴露时才需要另填 gRPC 地址；该地址必须被面板证书覆盖，且不能经过终止 TLS 的代理。</p>
+        <p class="text-xs text-gray-500">面板地址留空则使用当前浏览器访问面板的地址。修改只影响之后生成的安装命令，不改动已有节点。</p>
         <p v-if="endpointFormError" role="alert" class="text-sm text-ios-red">{{ endpointFormError }}</p>
         <div class="flex flex-wrap justify-between items-center gap-3">
           <span class="text-xs text-gray-500">{{ endpointSaved.revision ? `地址版本 ${endpointSaved.revision} · ${endpointSaved.updatedBy} · ${formatTime(endpointSaved.updatedAt)}` : '当前未设置，安装命令使用浏览器地址' }}</span>
@@ -131,12 +134,15 @@ function settingsChanged() { if (baseSaved.value && (baseForm.platformName !== b
 const endpointSaved = ref<InstallEndpoint | null>(null), endpointLoading = ref(false), endpointSaving = ref(false);
 const endpointError = ref(''), endpointFormError = ref('');
 // The API uses 0 for "no port saved" and the input has to show that as an empty
-// field with the 22550 placeholder: a 0 in a number input reads as a real port
-// that fails validation. The form therefore keeps '' and the two helpers below
-// translate at the API boundary.
-const endpointForm = reactive<{ host: string; httpPort: number | '' }>({ host: '', httpPort: '' });
+// field with its placeholder: a 0 in a number input reads as a real port that
+// fails validation. The form therefore keeps '' and the helpers below translate
+// at the API boundary.
+const endpointForm = reactive<{ host: string; httpPort: number | ''; grpcHost: string; grpcPort: number | '' }>({ host: '', httpPort: '', grpcHost: '', grpcPort: '' });
 let endpointGeneration = 0;
-function endpointPortInput(httpPort: number): number | '' { return httpPort >= 1 ? httpPort : ''; }
+function endpointPortInput(port: number): number | '' { return port >= 1 ? port : ''; }
+function fillEndpointForm(result: InstallEndpoint) {
+  Object.assign(endpointForm, { host: result.host, httpPort: endpointPortInput(result.httpPort), grpcHost: result.grpcHost ?? '', grpcPort: endpointPortInput(result.grpcPort ?? 0) });
+}
 async function loadEndpoint() {
   if (endpointSaving.value) return;
   const generation = ++endpointGeneration; endpointLoading.value = true;
@@ -144,7 +150,7 @@ async function loadEndpoint() {
     const result = await settingsAPI.installEndpoint();
     if (generation !== endpointGeneration) return;
     endpointSaved.value = result;
-    Object.assign(endpointForm, { host: result.host, httpPort: endpointPortInput(result.httpPort) });
+    fillEndpointForm(result);
     endpointError.value = ''; endpointFormError.value = '';
   } catch (e) {
     if (generation === endpointGeneration) endpointError.value = (e as Error).message;
@@ -154,19 +160,23 @@ async function loadEndpoint() {
 }
 async function saveEndpoint() {
   if (endpointSaving.value || !endpointSaved.value) return;
-  const host = endpointForm.host.trim();
+  const host = endpointForm.host.trim(), grpcHost = endpointForm.grpcHost.trim();
   // An empty field and a cleared number input both mean "未设置" (0 on the wire).
-  const rawPort = endpointForm.httpPort === '' ? 0 : Math.trunc(Number(endpointForm.httpPort));
-  const httpPort = Number.isFinite(rawPort) ? rawPort : 0;
+  const port = (value: number | '') => value === '' ? 0 : Math.trunc(Number(value));
+  const rawHTTP = port(endpointForm.httpPort), rawGRPC = port(endpointForm.grpcPort);
+  const httpPort = Number.isFinite(rawHTTP) ? rawHTTP : 0, grpcPort = Number.isFinite(rawGRPC) ? rawGRPC : 0;
   // Mirrors the server's and the installer's rule: a DNS name or IPv4 literal
-  // without scheme or port, and the panel Web port or nothing.
+  // without scheme or port, and each port or nothing.
   if (host && !/^[A-Za-z0-9.-]+$/.test(host)) { endpointFormError.value = '面板地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口或协议）。'; return; }
+  if (grpcHost && !/^[A-Za-z0-9.-]+$/.test(grpcHost)) { endpointFormError.value = 'Agent gRPC 地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口或协议）。'; return; }
   if (httpPort !== 0 && (httpPort < 1 || httpPort > 65535)) { endpointFormError.value = '面板 Web 端口须为 1～65535 的整数；留空表示未设置。'; return; }
+  if (grpcPort !== 0 && (grpcPort < 1 || grpcPort > 65535)) { endpointFormError.value = 'Agent gRPC 端口须为 1～65535 的整数；留空表示用面板实际监听端口。'; return; }
+  if (httpPort !== 0 && httpPort === grpcPort) { endpointFormError.value = '面板 Web 端口与 Agent gRPC 端口不能相同：面板的两个监听不能共用一个端口。'; return; }
   endpointSaving.value = true; endpointFormError.value = '';
   try {
-    const result = await settingsAPI.saveInstallEndpoint(host, httpPort, endpointSaved.value.revision);
+    const result = await settingsAPI.saveInstallEndpoint(host, httpPort, grpcHost, grpcPort, endpointSaved.value.revision);
     endpointSaved.value = result;
-    Object.assign(endpointForm, { host: result.host, httpPort: endpointPortInput(result.httpPort) });
+    fillEndpointForm(result);
     // Other install dialogs read this once per page load; drop that copy so the
     // next dialog uses the value just saved.
     clearInstallEndpointCache();

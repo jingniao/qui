@@ -864,7 +864,7 @@
               </div>
               <div v-if="pendingEnrollmentLoading" class="p-4 text-center text-ios-tertiary">正在生成注册命令…</div>
               <template v-else-if="pendingEnrollmentCommand">
-                <p v-if="installEndpointFromSettings" class="text-xs text-ios-tertiary">面板地址与面板 Web 端口默认取自 系统设置 → 节点安装连接地址。</p>
+                <p v-if="installEndpointFromSettings" class="text-xs text-ios-tertiary">安装连接地址默认取自 系统设置 → 节点安装连接地址；未填写的项使用浏览器地址或面板实际端口。</p>
                 <CodePreview :code="pendingEnrollmentCommand" title="一键安装命令" />
               </template>
             </div>
@@ -1619,10 +1619,14 @@ function openCoreManagementModal(node: NodeView) {
     const fallback = browserInstallEndpoint();
     installEndpointHost.value = fallback.host;
     installEndpointPort.value = fallback.port;
+    installEndpointGrpcHost.value = '';
+    installEndpointGrpcPort.value = null;
     installEndpointFromSettings.value = false;
     void resolveInstallEndpoint().then(endpoint => {
       installEndpointHost.value = endpoint.host;
       installEndpointPort.value = endpoint.port;
+      installEndpointGrpcHost.value = endpoint.grpcHost;
+      installEndpointGrpcPort.value = endpoint.grpcPort;
       installEndpointFromSettings.value = endpoint.fromSettings;
     });
     void nodeAPI.reissueEnrollment(node.id).then(res => {
@@ -1794,6 +1798,10 @@ const pendingEnrollmentLoading = ref(false);
 // one, otherwise to the address this browser reached the panel on.
 const installEndpointHost = ref(browserInstallEndpoint().host);
 const installEndpointPort = ref(browserInstallEndpoint().port);
+// '' keeps the panel address and null keeps the port the panel listens on; both
+// are overridden only by the saved 节点安装连接地址 setting.
+const installEndpointGrpcHost = ref('');
+const installEndpointGrpcPort = ref<number | null>(null);
 const installEndpointFromSettings = ref(false);
 
 const pendingEnrollmentCommand = computed(() => {
@@ -1805,7 +1813,8 @@ const pendingEnrollmentCommand = computed(() => {
     version: item.install.version,
     host,
     httpPort: port,
-    grpcPort: item.install.grpcPort,
+    grpcHost: installEndpointGrpcHost.value,
+    grpcPort: installEndpointGrpcPort.value ?? item.install.grpcPort,
     caSha256: item.install.caSha256,
     token: item.enrollmentToken,
     cores: [addCoreForm.component]

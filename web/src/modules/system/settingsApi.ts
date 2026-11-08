@@ -11,8 +11,10 @@ export interface BackupRetentionPreview {
 }
 export interface RuntimePolicy { sessionMinutes:number; subscriptionFormat:string; subscriptionUpdateHours:number; subscriptionUaDetection:boolean; }
 // The panel address one-click Agent installation defaults to. An unset value is
-// host '' with httpPort 0; the dialogs then keep the browser address.
-export interface InstallEndpoint { host:string; httpPort:number; revision:number; updatedAt:string; updatedBy:string; }
+// host '' and port 0 for each port; the dialogs then keep the browser address
+// and the Agent gRPC port the panel actually listens on. The gRPC host '' means
+// "same as the panel address" and its port 0 means "the port in use".
+export interface InstallEndpoint { host:string; httpPort:number; grpcHost:string; grpcPort:number; revision:number; updatedAt:string; updatedBy:string; }
 export interface RuntimeSettings { policy:RuntimePolicy; revision:number; updatedAt:string; updatedBy:string; }
 export interface RuntimeInfo {
  generatedAt:string; startedAt:string; uptimeSeconds:number; goVersion:string; buildVersion:string; os:string; arch:string; goroutines:number; heapBytes:number; databaseBytes:number; sqliteVersion:string; journalMode:string; migration:string;
@@ -31,7 +33,7 @@ export const settingsAPI = {
   base: () => request<BaseSettings>('/system/base'),
   saveBase: (platformName: string, timezone: string, expectedRevision: number) => request<BaseSettings>('/system/base', 'PUT', { platformName, timezone, expectedRevision }),
   installEndpoint: () => request<InstallEndpoint>('/system/install-endpoint'),
-  saveInstallEndpoint: (host: string, httpPort: number, expectedRevision: number) => request<InstallEndpoint>('/system/install-endpoint', 'PUT', { host, httpPort, expectedRevision }),
+  saveInstallEndpoint: (host: string, httpPort: number, grpcHost: string, grpcPort: number, expectedRevision: number) => request<InstallEndpoint>('/system/install-endpoint', 'PUT', { host, httpPort, grpcHost, grpcPort, expectedRevision }),
   retention: () => request<RetentionSettings>('/system/access-retention'),
   saveRetention: (policy: RetentionPolicy, expectedRevision: number) => request<RetentionSettings>('/system/access-retention', 'PUT', { policy, expectedRevision })
 };

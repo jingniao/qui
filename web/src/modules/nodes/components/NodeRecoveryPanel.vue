@@ -84,7 +84,7 @@ const statusLabels: Record<string, string> = { issued: '已签发', consumed: '�
 const redeployLabels: Record<string, string> = { none: '—', pending: '等待节点上线', queued: '重新下发中', success: '重新下发成功', failed: '重新下发失败', not_needed: '无需下发' };
 const blockerLabels: Record<string, string> = { deployment_target: '待完成的发布', deployment_command: '待执行的节点操作', deployment_batch: '进行中的批量发布', agent_update: 'Agent 更新任务', core_update: '核心更新任务', core_remove: '核心移除任务', node_pause: '暂停/恢复任务' };
 const ttl = ref(900), revokeNow = ref(false), loading = ref(false), statusLoading = ref(false), confirm = ref(false);
-const host = ref(''), port = ref(443), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
+const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
 const error = ref(''), statusError = ref(''), noRecovery = ref(false);
 const result = ref<(Enrollment & { purpose: string }) | null>(null), status = ref<RecoveryStatus | null>(null);
 const blockers = ref<{ kind: string; id: string; name: string }[]>([]);
@@ -100,7 +100,7 @@ const command = computed(() => {
   if (!/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
   try {
     return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
-      grpcPort: item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
+      grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
   } catch { return ''; }
 });
 function blockerDetail(item: { kind: string; id: string; name: string }) {
@@ -141,6 +141,8 @@ async function issue() {
     const fallback = browserInstallEndpoint();
     host.value = fallback.host;
     port.value = fallback.port;
+    grpcHost.value = '';
+    grpcPort.value = 0;
     fromSettings.value = false;
     cores.value = defaultCores();
     showToast('恢复码已签发，请立即复制');
@@ -148,6 +150,8 @@ async function issue() {
     const nodeId = props.node.id;
     void resolveInstallEndpoint().then(endpoint => {
       if (props.node.id !== nodeId) return;
+      grpcHost.value = endpoint.grpcHost;
+      grpcPort.value = endpoint.grpcPort ?? 0;
       if (host.value !== fallback.host || port.value !== fallback.port) return;
       host.value = endpoint.host;
       port.value = endpoint.port;

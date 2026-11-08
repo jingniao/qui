@@ -311,7 +311,7 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥并提交注册码/公钥/机器信息 → 中央签证并核销注册码 → mTLS 长连接。私钥不上传。
 
-注册对话框提供 `deploy/linux/node-install.sh` 一键命令：下载面板同版本 GitHub Release、核对 SHA256SUMS，以公网证书或面板提供的固定 SHA-256 建立证书信任，再登记启动，操作见[部署](docs/deployment.md) §4。命令里的面板地址与面板 Web 端口默认取系统设置里的“节点安装连接地址”（第 27.14 节），未设置或读取失败时回落到当前浏览器访问面板的地址；Agent gRPC 端口始终取面板实际监听端口。三个生成该命令的对话框（新建服务器、原位身份恢复、版本页“添加内核”）共用这一默认值，对话框内改动只影响本次命令，不回写设置。
+注册对话框提供 `deploy/linux/node-install.sh` 一键命令：下载面板同版本 GitHub Release、核对 SHA256SUMS，以公网证书或面板提供的固定 SHA-256 建立证书信任，再登记启动，操作见[部署](docs/deployment.md) §4。命令里的面板地址、面板 Web 端口以及 Agent gRPC 地址与端口默认取系统设置里的“节点安装连接地址”（第 27.14 节），未设置或读取失败时回落到当前浏览器访问面板的地址，gRPC 端口回落到注册响应里的实际监听端口。三个生成该命令的对话框（新建服务器、原位身份恢复、版本页“添加内核”）共用这一默认值，对话框内改动只影响本次命令，不回写设置；gRPC 地址与面板地址相同时不写 `--grpc-host`。
 
 原位身份恢复（迁移 0134）：主机重装但身份仍属原节点时，Owner 在节点证书区签发一次性恢复码（默认 900 秒，允许 300–3600 秒，可勾选立即吊销现有证书），响应只返回一次，数据库只保存 SHA-256 并绑定当时的证书指纹。签发与核销都检查未完成任务，存在时返回 409 `node_recovery_blocked` 与 `blockers`。新 Agent 通过现有 `Enroll` RPC 核销恢复码，节点 ID、入站、出站、节点组、隧道、代理链与历史配置均保留，旧指纹随后永久作废（备份恢复也不复活），用它连接会被拒并记一条 WARN 日志 `node certificate refused`，当前已发布配置在新 Agent 首次能力上报后自动重新下发。Agent 二进制与安装脚本不变，操作见[运维](docs/operations.md) §5.1。
 
@@ -1121,14 +1121,16 @@ POST   /portal/subscription/reset
 
 ## 27.14 系统设置：节点安装连接地址
 
-一键安装命令用的面板地址与面板 Web 端口只需在 Owner 的系统设置里保存一次。值存于既有 `system_settings` 表的单一键 `install_endpoint`（`{"host","httpPort","revision","updatedAt","updatedBy"}`，无迁移；键缺失即未设置，读出 `host` 为空、`httpPort` 为 0），随加密备份的整库快照保存与恢复。
+一键安装命令用的面板地址、面板 Web 端口以及 Agent gRPC 地址与端口只需在 Owner 的系统设置里保存一次。值存于既有 `system_settings` 表的单一键 `install_endpoint`（`{"host","httpPort","grpcHost","grpcPort","revision","updatedAt","updatedBy"}`，无迁移；键缺失即未设置，读出 `host`/`grpcHost` 为空、`httpPort`/`grpcPort` 为 0），随加密备份的整库快照保存与恢复。旧归档缺 `grpcHost`/`grpcPort` 时读作未设置。
 
 | 接口 | 合同 |
 | --- | --- |
-| `GET /api/v1/system/install-endpoint` | Owner 专用（只有 Owner 看得到安装对话框）；返回 `{host,httpPort,revision,updatedAt,updatedBy}` |
-| `PUT /api/v1/system/install-endpoint` | Owner＋CSRF，体 `{host,httpPort,expectedRevision}`，未知字段拒绝；`expectedRevision` 不匹配返回 409 `settings_conflict`，内容未变化返回当前值且不推进 `revision`，写成功记操作日志“修改节点安装连接地址”（target `install_endpoint`） |
+| `GET /api/v1/system/install-endpoint` | Owner 专用（只有 Owner 看得到安装对话框）；返回 `{host,httpPort,grpcHost,grpcPort,revision,updatedAt,updatedBy}` |
+| `PUT /api/v1/system/install-endpoint` | Owner＋CSRF，体 `{host,httpPort,grpcHost,grpcPort,expectedRevision}`，未知字段拒绝；`expectedRevision` 不匹配返回 409 `settings_conflict`，内容未变化返回当前值且不推进 `revision`，写成功记操作日志“修改节点安装连接地址”（target `install_endpoint`） |
 
-`host` 为空或匹配 `^[A-Za-z0-9.-]+$` 的域名／IPv4（长度 1–253，标签不以 `.` 或 `-` 开头结尾，且每段 ≤63）；**不接受裸 IPv6** 与其他写法（协议、端口、括号），与 `node-install.sh` 对 `--panel` 的校验一致，存下装不上节点的值没有意义。`httpPort` 为 0（未设置）或 1–65535；两项可独立留空，只存端口时对话框保留浏览器主机名并采用保存的端口。安装命令的 Agent gRPC 端口不在此设置内，仍取注册响应里的实际监听端口。
+`host` 与 `grpcHost` 为空或匹配 `^[A-Za-z0-9.-]+$` 的域名／IPv4（长度 1–253，标签不以 `.` 或 `-` 开头结尾，且每段 ≤63）；**不接受裸 IPv6** 与其他写法（协议、端口、括号），与 `node-install.sh` 对 `--panel`/`--grpc-host` 的校验一致，存下装不上节点的值没有意义。两个端口各为 0（未设置）或 1–65535；面板 Web 端口非 0 时不得与 Agent gRPC 端口相同（面板两个监听不能共用一个端口，安装器同样拒绝）。四项可独立留空：`host` 为空时对话框保留浏览器主机名；`grpcHost` 为空表示与 `host` 相同（命令不写 `--grpc-host`）；`grpcPort` 为 0 表示沿用注册响应里的实际监听端口。
+
+三个安装命令对话框（新建服务器、原位身份恢复、版本页“添加内核”）共用该默认值；只有在面板 Web 位于 CDN 或终止 TLS 的反向代理后面、gRPC 单独暴露时才需要设置 `grpcHost`，且该名字必须被面板证书覆盖并直达面板。修改只影响之后生成的命令，不改动已有节点。
 
 # 28. gRPC 节点通信
 

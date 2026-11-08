@@ -48,6 +48,8 @@ usage() {
   --token TOKEN         一次性节点注册码
   --http-port N         面板 HTTPS 端口（默认 22550）
   --grpc-port N         面板 gRPC 端口（默认 18880）
+  --grpc-host HOST      Agent 连接的 gRPC 地址（默认与 --panel 相同；必须是
+                        面板证书覆盖、且不经终止 TLS 的反向代理／CDN 的地址）
   --core xray|sing-box|gost  可重复，例如 --core xray --core sing-box（默认 xray）
   --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
   --bundle FILE --sums FILE
@@ -64,6 +66,7 @@ USAGE
 
 version=''
 panel=''
+grpc_host=''
 http_port=22550
 grpc_port=18880
 ca_sha256=''
@@ -74,10 +77,10 @@ bundle_file=''
 sums_file=''
 while (($#)); do
   case $1 in
-    --version|--panel|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums|--core-source)
+    --version|--panel|--grpc-host|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums|--core-source)
       (($# >= 2)) || fail "缺少 $1 的值。"
       case $1 in
-        --version) version=$2;; --panel) panel=$2;; --http-port) http_port=$2;;
+        --version) version=$2;; --panel) panel=$2;; --grpc-host) grpc_host=$2;; --http-port) http_port=$2;;
         --grpc-port) grpc_port=$2;; --ca-sha256) ca_sha256=${2,,};; --token) token=$2;;
         --core) cores+=("$2");; --bundle) bundle_file=$2;; --sums) sums_file=$2;;
         --core-source) core_source=$2;;
@@ -91,6 +94,11 @@ done
 [[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
 [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ ]] || fail '版本号必须是 X.Y.Z 或 X.Y.Z-rc.N（N 为无前导零的正整数）。'
 [[ $panel =~ ^[A-Za-z0-9.-]+$ ]] || fail '面板地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口）。'
+# The gRPC address defaults to the panel address; saving a different one is for a
+# panel whose Web side is reached through another name. It is used verbatim as
+# control_address and as the TLS server name, so it has to pass the same check.
+[[ -n $grpc_host ]] || grpc_host=$panel
+[[ $grpc_host =~ ^[A-Za-z0-9.-]+$ ]] || fail 'Agent gRPC 地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口）。'
 [[ $http_port =~ ^[0-9]{1,5}$ && $http_port -ge 1 && $http_port -le 65535 ]] || fail 'HTTPS 端口必须在 1-65535 之间。'
 [[ $grpc_port =~ ^[0-9]{1,5}$ && $grpc_port -ge 1 && $grpc_port -le 65535 ]] || fail 'gRPC 端口必须在 1-65535 之间。'
 # --http-port and --grpc-port are two listeners of the same panel, so one value
@@ -402,18 +410,18 @@ read_value() {
 # rewrite: the Agent runs as proxy-agent and reads this file itself.
 [[ -f $config && ! -L $config ]] || fail "缺少配置文件：$config（Agent 安装未完成）。"
 metadata=$(stat -c '%u:%g:%a' "$config")
-sed -i -e "s/^control_address:.*/control_address: $panel:$grpc_port/" -e "s/^server_name:.*/server_name: $panel/" "$config" \
+sed -i -e "s/^control_address:.*/control_address: $grpc_host:$grpc_port/" -e "s/^server_name:.*/server_name: $grpc_host/" "$config" \
   || fail "无法更新 $config。"
 uid=${metadata%%:*}; rest=${metadata#*:}; gid=${rest%%:*}; mode=${rest#*:}
 chown "$uid:$gid" -- "$config" || fail "无法恢复 $config 的属主。"
 chmod "$mode" -- "$config" || fail "无法恢复 $config 的权限。"
 [[ $(stat -c '%u:%g:%a' "$config") == "$metadata" ]] || fail "配置文件属主或权限在更新后发生变化：$config"
-[[ $(read_value "$config" control_address) == "$panel:$grpc_port" ]] || fail "配置里的 control_address 不是 $panel:$grpc_port：$config"
-[[ $(read_value "$config" server_name) == "$panel" ]] || fail "配置里的 server_name 不是 $panel：$config"
-printf '已写入 control_address: %s 与 server_name: %s。\n' "$panel:$grpc_port" "$panel"
+[[ $(read_value "$config" control_address) == "$grpc_host:$grpc_port" ]] || fail "配置里的 control_address 不是 $grpc_host:$grpc_port：$config"
+[[ $(read_value "$config" server_name) == "$grpc_host" ]] || fail "配置里的 server_name 不是 $grpc_host：$config"
+printf '已写入 control_address: %s 与 server_name: %s。\n' "$grpc_host:$grpc_port" "$grpc_host"
 
 # The enrollment that follows is the Agent's first real gRPC handshake: config.yaml
-# now names $panel:$grpc_port and $ca_file is its trust anchor. Behind Cloudflare or
+# now names $grpc_host:$grpc_port and $ca_file is its trust anchor. Behind Cloudflare or
 # a TLS-terminating reverse proxy the Web side served the proxy's certificate, so
 # the branch above could look right while this port is the panel itself; enrollment
 # then fails late inside enroll.sh with a generic message. Probing costs one
@@ -462,7 +470,7 @@ grpc_preflight_verdict() {
   esac
 }
 
-# Probe https://$panel:$grpc_port/ with the trust the Agent itself will use:
+# Probe https://$grpc_host:$grpc_port/ with the trust the Agent itself will use:
 # --cacert "$ca_file" (the anchor just installed), no -k, no redirects, HTTP/2 when
 # this curl has it. A failure here is cheap to fix and its cause is known; the same
 # failure inside enroll.sh only produces the generic enrollment message. A curl
@@ -473,33 +481,33 @@ check_grpc_endpoint() {
   if curl_supports_http2; then
     curl --no-insecure --cacert "$ca_file" --http2 -sS --output /dev/null \
       --proto '=https' --proto-redir '=https' --max-redirs 0 --connect-timeout 10 --max-time 10 \
-      -- "https://$panel:$grpc_port/" || status=$?
+      -- "https://$grpc_host:$grpc_port/" || status=$?
     verdict=$(grpc_preflight_verdict "$status")
   else
     tls_checked=false
-    if tcp_reachable "$panel" "$grpc_port"; then verdict=ok; else verdict=unreachable; fi
+    if tcp_reachable "$grpc_host" "$grpc_port"; then verdict=ok; else verdict=unreachable; fi
   fi
   case $verdict in
     ok)
       if $tls_checked; then
-        printf 'Agent gRPC 端点的 TLS 握手验证通过：%s:%s 出示的证书由刚安装的信任锚签发并覆盖 %s。\n' "$panel" "$grpc_port" "$panel"
+        printf 'Agent gRPC 端点的 TLS 握手验证通过：%s:%s 出示的证书由刚安装的信任锚签发并覆盖 %s。\n' "$grpc_host" "$grpc_port" "$grpc_host"
       else
-        printf '本机 curl 没有 HTTP/2 支持：只确认了 %s:%s 的 TCP 端口可达，未校验 TLS 证书。\n' "$panel" "$grpc_port"
+        printf '本机 curl 没有 HTTP/2 支持：只确认了 %s:%s 的 TCP 端口可达，未校验 TLS 证书。\n' "$grpc_host" "$grpc_port"
       fi
       ;;
     untrusted)
-      fail "Agent 的 gRPC 端点在 TLS 校验上失败（curl 退出码 $status）：https://$panel:$grpc_port/ 出示的证书不被刚安装的信任锚验证，或者证书不覆盖 $panel 这个名字。最常见的原因是面板在 Cloudflare 或一个终止 TLS 的反向代理后面——Web 一侧返回的是 CDN／代理的公网证书，而 Agent 直连 gRPC 看到的是面板自己的（多为私有 CA 签发的）证书，两者不是同一张证书，mTLS 的 gRPC 也无法经过 Cloudflare。请把 --panel 换成直达面板、且被面板自己的证书覆盖的地址（DNS-only 的灰云域名或面板的 IPv4），--http-port 填面板自己的 Web 端口而不是代理的 443，并在防火墙放行这两个端口；也可以在 系统管理 → 系统设置 → 基础设置 → 节点安装连接地址 里保存该地址，之后生成的安装命令都用它。$retry_note"
+      fail "Agent 的 gRPC 端点在 TLS 校验上失败（curl 退出码 $status）：https://$grpc_host:$grpc_port/ 出示的证书不被刚安装的信任锚验证，或者证书不覆盖 $grpc_host 这个名字。最常见的原因是面板在 Cloudflare 或一个终止 TLS 的反向代理后面——Web 一侧返回的是 CDN／代理的公网证书，而 Agent 直连 gRPC 看到的是面板自己的（多为私有 CA 签发的）证书，两者不是同一张证书，mTLS 的 gRPC 也无法经过 Cloudflare。请把 --grpc-host 换成直达面板、且被面板自己的证书覆盖的地址（DNS-only 的灰云域名或面板的 IPv4，默认与 --panel 相同），--http-port 填面板自己的 Web 端口而不是代理的 443，并在防火墙放行这两个端口；也可以在 系统管理 → 系统设置 → 基础设置 → 节点安装连接地址 里保存这些地址与端口，之后生成的安装命令都用它。$retry_note"
       ;;
     unreachable)
       if $tls_checked; then note="curl 退出码 $status"; else note='TCP 连接被拒绝或超时'; fi
-      fail "无法连接面板的 gRPC 端口 $panel:$grpc_port（$note）：本机到该端口没有通路——防火墙未放行、--grpc-port 填错，或者这个主机名走的是不转发该端口的 CDN。登记要求 Agent 直连这个端口。$retry_note"
+      fail "无法连接面板的 gRPC 端口 $grpc_host:$grpc_port（$note）：本机到该端口没有通路——防火墙未放行、--grpc-host／--grpc-port 填错，或者这个主机名走的是不转发该端口的 CDN。登记要求 Agent 直连这个端口。$retry_note"
       ;;
     *)
-      printf '警告：无法判断 Agent gRPC 端点 %s:%s 的状态（curl 退出码 %s），继续登记；若登记失败请核对 --panel、--grpc-port 与面板证书。\n' "$panel" "$grpc_port" "$status" >&2
+      printf '警告：无法判断 Agent gRPC 端点 %s:%s 的状态（curl 退出码 %s），继续登记；若登记失败请核对 --grpc-host、--grpc-port 与面板证书。\n' "$grpc_host" "$grpc_port" "$status" >&2
       ;;
   esac
 }
-printf '\n检查 Agent gRPC 端点：https://%s:%s/\n' "$panel" "$grpc_port"
+printf '\n检查 Agent gRPC 端点：https://%s:%s/\n' "$grpc_host" "$grpc_port"
 check_grpc_endpoint
 
 # A run whose enrollment failed leaves its retry marker (enrollment-attempt.json)
@@ -530,7 +538,7 @@ printf '\n登记节点 ...\n'
 if ! "$source_dir/deploy/linux/enroll.sh" --token-file "$token_file"; then
   rm -f -- "$token_file"
   rmdir -- "$token_directory" 2>/dev/null || true
-  fail "节点登记失败；注册码可能已过期或已被使用。请确认本机能访问面板的 gRPC 端口（$panel:$grpc_port，默认 18880），且 --panel 与 --grpc-port 填写正确，然后在面板里新建节点注册，用新的安装命令重跑本脚本（本机尚未登记，可以重跑）。"
+  fail "节点登记失败；注册码可能已过期或已被使用。请确认本机能访问面板的 gRPC 端口（$grpc_host:$grpc_port，默认 18880），且 --grpc-host 与 --grpc-port 填写正确，然后在面板里新建节点注册，用新的安装命令重跑本脚本（本机尚未登记，可以重跑）。"
 fi
 rm -f -- "$token_file"
 rmdir -- "$token_directory" 2>/dev/null || true

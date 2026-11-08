@@ -8,6 +8,11 @@ import { settingsAPI, type InstallEndpoint } from '../system/settingsApi';
 export interface ResolvedInstallEndpoint {
   host: string;
   port: number;
+  // '' means "same as the panel address": the command then omits --grpc-host.
+  grpcHost: string;
+  // null means "not saved": the dialog keeps the Agent gRPC port the panel
+  // actually listens on, which the enrollment response carries.
+  grpcPort: number | null;
   // True when at least one field came from the saved setting, so the dialog can
   // say where the default came from. A one-off edit in the dialog never writes
   // back to the setting.
@@ -46,8 +51,11 @@ export function clearInstallEndpointCache() {
 export async function resolveInstallEndpoint(): Promise<ResolvedInstallEndpoint> {
   const fallback = browserInstallEndpoint();
   const saved = await loadInstallEndpoint();
-  if (!saved) return { ...fallback, fromSettings: false };
+  if (!saved) return { ...fallback, grpcHost: '', grpcPort: null, fromSettings: false };
   const host = /^[A-Za-z0-9.-]+$/.test(saved.host) ? saved.host : '';
   const port = Number.isInteger(saved.httpPort) && saved.httpPort >= 1 && saved.httpPort <= 65535 ? saved.httpPort : 0;
-  return { host: host || fallback.host, port: port || fallback.port, fromSettings: Boolean(host || port) };
+  const grpcHost = /^[A-Za-z0-9.-]+$/.test(saved.grpcHost ?? '') ? saved.grpcHost : '';
+  const grpcPort = Number.isInteger(saved.grpcPort) && saved.grpcPort >= 1 && saved.grpcPort <= 65535 ? saved.grpcPort : null;
+  return { host: host || fallback.host, port: port || fallback.port, grpcHost, grpcPort,
+    fromSettings: Boolean(host || port || grpcHost || grpcPort) };
 }

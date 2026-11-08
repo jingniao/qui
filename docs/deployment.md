@@ -195,7 +195,7 @@ systemctl enable --now proxy-panel.service
 
 ## 4. 接入节点
 
-**第 1 步（面板）**：在“节点”页创建节点记录，生成一次性注册码。注册码只能使用一次；节点记录被禁用时注册码不可用。创建成功后对话框同时给出**一键安装命令**，把它粘贴到新服务器的 root shell 里执行即可完成安装、登记与启动。命令里的面板地址与面板 Web 端口默认取「系统设置 → 基础设置 → 节点安装连接地址」（Owner 保存一次即可复用；未设置时用当前浏览器地址），Agent gRPC 端口取面板实际监听端口。
+**第 1 步（面板）**：在“节点”页创建节点记录，生成一次性注册码。注册码只能使用一次；节点记录被禁用时注册码不可用。创建成功后对话框同时给出**一键安装命令**，把它粘贴到新服务器的 root shell 里执行即可完成安装、登记与启动。命令里的面板地址与面板 Web 端口默认取「系统设置 → 基础设置 → 节点安装连接地址」（Owner 保存一次即可复用；未设置时用当前浏览器地址），Agent gRPC 地址与端口默认取面板地址与面板实际监听端口，也可在同一处单独设置。
 
 ### 一键安装（推荐）
 
@@ -216,7 +216,7 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.3.
 - 之后脚本把 `control_address` 与 `server_name` 写入 `/etc/proxy-agent/config.yaml`（保持原属主与权限），用一次性注册码登记，最后启用并启动 Agent：systemd 上是 `systemctl enable` + `start proxy-agent.service`，OpenRC 上是 `rc-update add proxy-agent default` + `rc-service proxy-agent start`。
 - 注册码只能用一次且会过期；它出现在新服务器的 shell 历史里，登记成功后请清理该历史。节点**登记成功前**可以重跑这条命令：会原地升级 Agent 并用新的注册码重新登记，登记要求本机能访问面板的 gRPC 端口（默认 18880）；已登记的主机再跑会被拒绝，升级用 `qui-update`。
 - 安装失败（例如缺少依赖）时脚本报告 `Agent 安装失败（原因见上面 install.sh 的输出）`：`install.sh` 可能已经替换了部分文件，但本机尚未登记，修正原因后直接重跑同一条命令即可。`install.sh` 不会留下暂存目录或 `.installing` 临时文件。
-- **面板在反向代理／Cloudflare 后面时**：Agent 的 gRPC 必须直连面板，mTLS 无法经过 Cloudflare 或终止 TLS 的反向代理。`--panel` 要用 DNS-only（灰云）主机名或面板的 IPv4，直达面板且被面板**自己的**证书覆盖；`--http-port` 是面板自己的 Web 端口（默认 22550），不是代理的 443；两个端口都要放行。脚本会先按 `--ca-sha256` 核对 `GET /install/ca.pem` 的字节（公网 CA 分支也核对，防止代理或别的面板冒充），装好信任锚后再用它与 `--panel` 预检 gRPC 端点：证书不被该信任锚验证或不覆盖该名字（curl 60/51/58 等）就在登记前中止并说明；端口不可达（6/7/28）单独报告；`--http-port` 指向 gRPC 端口时下载阶段会以 HTTP 415 说明；`--http-port` 与 `--grpc-port` 相同则直接拒绝。该地址可在「系统设置 → 节点安装连接地址」保存一次。
+- **面板在反向代理／Cloudflare 后面时**：Agent 的 gRPC 必须直连面板，mTLS 无法经过 Cloudflare 或终止 TLS 的反向代理。`--panel` 要用 DNS-only（灰云）主机名或面板的 IPv4，直达面板且被面板**自己的**证书覆盖；`--http-port` 是面板自己的 Web 端口（默认 22550），不是代理的 443；两个端口都要放行。脚本会先按 `--ca-sha256` 核对 `GET /install/ca.pem` 的字节（公网 CA 分支也核对，防止代理或别的面板冒充），装好信任锚后再用它与 `--panel` 预检 gRPC 端点：证书不被该信任锚验证或不覆盖该名字（curl 60/51/58 等）就在登记前中止并说明；端口不可达（6/7/28）单独报告；`--http-port` 指向 gRPC 端口时下载阶段会以 HTTP 415 说明；`--http-port` 与 `--grpc-port` 相同则直接拒绝。面板地址与 gRPC 地址/端口可在「系统设置 → 节点安装连接地址」保存一次；Web 走 CDN、gRPC 单独暴露时，在设置里另填 `Agent gRPC 地址`（命令写 `--grpc-host`），该名字同样要被面板自己的证书覆盖并直达面板。
 - 失败的登记会留下重试标记 `/var/lib/proxy-agent/enrollment-attempt.json` 和它生成的私钥。Agent 把这两个文件绑定到原注册码与面板，不允许换绑。所以重跑时，只要本机既没有证书也没有 `enrollment-result.json`，脚本就把它们移到 `/var/lib/proxy-agent-enrollment-retired.XXXXXXXX/`（root 0700，**不删除**），再用新注册码登记；新登记成功后可以删除该目录。存在 `enrollment-result.json` 时，面板可能已经签发过证书，脚本拒绝继续，处理方法见运维手册第 5 节。
 
 ### 4.1 Alpine / OpenRC 节点

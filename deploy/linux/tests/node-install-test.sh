@@ -95,6 +95,31 @@ case $(different_ports || true) in
   *'不能是同一个端口'*) check 'two different ports pass the port check' 1 true;;
   *) check 'two different ports pass the port check' 0 true;;
 esac
+# The gRPC address may differ from the panel address (a panel whose Web side is a
+# CDN or reverse proxy); it has to pass the same host check and is otherwise used
+# verbatim as control_address and server_name.
+bad_grpc_host() {
+  bash "$installer" --version 1.4.1 --panel panel.example.com --grpc-host https://grpc.example.com \
+    --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
+}
+check 'a gRPC address with a scheme is refused' 1 refuse bad_grpc_host
+case $(bad_grpc_host || true) in
+  *'Agent gRPC 地址只能是域名或 IPv4'*) check 'the refusal names --grpc-host' 0 true;;
+  *) check 'the refusal names --grpc-host' 1 true;;
+esac
+port_in_grpc_host() {
+  bash "$installer" --version 1.4.1 --panel panel.example.com --grpc-host grpc.example.com:443 \
+    --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
+}
+check 'a gRPC address with a port is refused' 1 refuse port_in_grpc_host
+different_grpc_host() {
+  bash "$installer" --version 1.4.1 --panel panel.example.com --grpc-host grpc.example.com \
+    --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
+}
+case $(different_grpc_host || true) in
+  *'Agent gRPC 地址只能是域名或 IPv4'*) check 'a valid gRPC host passes the host check' 1 true;;
+  *) check 'a valid gRPC host passes the host check' 0 true;;
+esac
 
 # --- curl and install stubs -------------------------------------------------------
 # Every network call of the functions under test goes through $TOP/bin/curl, and the
@@ -262,10 +287,10 @@ stub_grpc() {
   export STUB_CURL_BODY=''
   export STUB_CURL_FEATURES=${2-HTTP2}
 }
-# preflight <panel> <grpc port>
+# preflight <grpc host> <grpc port>
 preflight() (
   fail() { printf '安装被拒绝：%s\n' "$*" >&2; exit 1; }
-  panel=$1
+  grpc_host=$1
   grpc_port=$2
   ca_file=$TOP/ca-work/tls/ca.crt
   retry_note='本机尚未登记：注册码未过期时可以原样重跑本脚本。'
@@ -301,6 +326,11 @@ check 'a refused gRPC port stops before enrollment' 1 preflight "$panel" 18880
 check 'the refusal reports the unreachable port' 0 \
   grep -q '无法连接面板的 gRPC 端口 panel.example.com:18880' \
   <<<"$(preflight "$panel" 18880 2>&1 || true)"
+# A saved gRPC address that differs from --panel is what the preflight probes and
+# what the refusal names; the Web certificate download still uses --panel.
+check 'a separate gRPC host is probed and named' 0 \
+  grep -q '无法连接面板的 gRPC 端口 grpc.example.com:18880' \
+  <<<"$(preflight grpc.example.com 18880 2>&1 || true)"
 
 # Anything else may be an ALPN or HTTP/2 quirk of this curl: warn and let enrollment
 # decide instead of blocking a run that could work.

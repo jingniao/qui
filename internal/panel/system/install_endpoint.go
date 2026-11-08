@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var ErrInstallEndpointInvalid = errors.New("invalid node install endpoint (host must be a DNS name or IPv4 literal without a scheme, port 1 to 65535 or 0 for unset)")
+var ErrInstallEndpointInvalid = errors.New("invalid node install endpoint (hosts must be DNS names or IPv4 literals without a scheme, ports 1 to 65535 or 0 for unset, and the Web and gRPC ports must differ)")
 var ErrInstallEndpointConflict = errors.New("node install endpoint changed; refresh before saving")
 
 // installEndpointKey is the single system_settings row this feature owns. An
@@ -29,46 +29,69 @@ var hostPattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
 
 // InstallEndpoint is the panel address one-click Agent installation defaults to:
 // the domain or IPv4 literal a new node can reach plus the panel Web (HTTPS)
-// port. The Agent gRPC port is not part of it — the enrollment response carries
-// the port the panel actually listens on.
+// port and, optionally, the Agent gRPC address and port. The gRPC values can be
+// saved for a panel whose gRPC listener is reached through a different name or a
+// port forward; empty and 0 keep the earlier behaviour and use the panel address
+// and the port the panel actually listens on.
 type InstallEndpoint struct {
 	Host      string `json:"host"`
 	HTTPPort  int    `json:"httpPort"`
+	GRPCHost  string `json:"grpcHost"`
+	GRPCPort  int    `json:"grpcPort"`
 	Revision  int64  `json:"revision"`
 	UpdatedAt string `json:"updatedAt"`
 	UpdatedBy string `json:"updatedBy"`
 }
 
-// InstallEndpointInput is the write shape. Host and HTTPPort are independently
-// optional: an Owner who only knows the port can leave the host empty and the
-// dialogs keep the browser hostname while using the saved port.
+// InstallEndpointInput is the write shape. All four values are independently
+// optional: an Owner who only knows one value can save it alone and the dialogs
+// keep the browser/server default for the rest.
 type InstallEndpointInput struct {
 	Host             string `json:"host"`
 	HTTPPort         int    `json:"httpPort"`
+	GRPCHost         string `json:"grpcHost"`
+	GRPCPort         int    `json:"grpcPort"`
 	ExpectedRevision int64  `json:"expectedRevision"`
 }
 
-// validateInstallEndpoint accepts an empty host (unset) and otherwise a DNS name
-// or IPv4 literal that the installer's `--panel` check accepts. Label rules are
-// stricter than node-install.sh's single regular expression on purpose: a value
-// that fails here could never install a node, so refusing it early is the only
-// honest answer. 0 means "no saved port".
-func validateInstallEndpoint(host string, port int) error {
-	if port < 0 || port > 65535 {
+// validateInstallEndpoint accepts empty hosts (unset) and otherwise DNS names
+// or IPv4 literals that the installer's `--panel`/`--grpc-host` checks accept.
+// Label rules are stricter than node-install.sh's single regular expression on
+// purpose: a value that fails here could never install a node, so refusing it
+// early is the only honest answer. 0 means "no saved port" for each port, and
+// an empty gRPC host means "same as the panel host". Two saved ports that are
+// equal are refused for the same reason node-install.sh refuses them: the Web
+// listener and the gRPC listener cannot share one port, so such a command could
+// never install a node.
+func validateInstallEndpoint(host string, httpPort, grpcPort int, grpcHost string) error {
+	if httpPort < 0 || httpPort > 65535 || grpcPort < 0 || grpcPort > 65535 {
 		return ErrInstallEndpointInvalid
 	}
+	if httpPort != 0 && httpPort == grpcPort {
+		return ErrInstallEndpointInvalid
+	}
+	if !validInstallHost(host) || !validInstallHost(grpcHost) {
+		return ErrInstallEndpointInvalid
+	}
+	return nil
+}
+
+// validInstallHost reports whether one saved host can be used verbatim in the
+// install command: empty (unset) or a DNS name / IPv4 literal without scheme,
+// port or brackets.
+func validInstallHost(host string) bool {
 	if host == "" {
-		return nil
+		return true
 	}
 	if len(host) > 253 || !hostPattern.MatchString(host) {
-		return ErrInstallEndpointInvalid
+		return false
 	}
 	for _, label := range strings.Split(host, ".") {
 		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
-			return ErrInstallEndpointInvalid
+			return false
 		}
 	}
-	return nil
+	return true
 }
 
 func readInstallEndpoint(ctx context.Context, tx *sql.Tx) (InstallEndpoint, error) {
@@ -89,7 +112,7 @@ func readInstallEndpoint(ctx context.Context, tx *sql.Tx) (InstallEndpoint, erro
 	if decoder.Decode(&struct{}{}) != io.EOF || endpoint.Revision < 1 {
 		return InstallEndpoint{}, ErrInstallEndpointInvalid
 	}
-	if validateInstallEndpoint(endpoint.Host, endpoint.HTTPPort) != nil {
+	if validateInstallEndpoint(endpoint.Host, endpoint.HTTPPort, endpoint.GRPCPort, endpoint.GRPCHost) != nil {
 		return InstallEndpoint{}, ErrInstallEndpointInvalid
 	}
 	if _, err := time.Parse(time.RFC3339Nano, endpoint.UpdatedAt); err != nil {
@@ -114,10 +137,10 @@ func (r *Repository) ReadInstallEndpoint(ctx context.Context) (InstallEndpoint, 
 // SaveInstallEndpoint writes the endpoint under one revision, like SaveBase and
 // SaveStorageThresholds: an unchanged save keeps the stored revision and writes
 // no audit row, a stale expectedRevision is a conflict, and clearing a saved
-// value (host empty, port 0) is a real change worth an audit row.
+// value (host empty, ports 0) is a real change worth an audit row.
 func (r *Repository) SaveInstallEndpoint(ctx context.Context, input InstallEndpointInput, actor, ip string) (InstallEndpoint, bool, error) {
-	host := strings.TrimSpace(input.Host)
-	if validateInstallEndpoint(host, input.HTTPPort) != nil || input.ExpectedRevision < 0 || actor == "" {
+	host, grpcHost := strings.TrimSpace(input.Host), strings.TrimSpace(input.GRPCHost)
+	if validateInstallEndpoint(host, input.HTTPPort, input.GRPCPort, grpcHost) != nil || input.ExpectedRevision < 0 || actor == "" {
 		return InstallEndpoint{}, false, ErrInstallEndpointInvalid
 	}
 	tx, err := r.Database.BeginTx(ctx, nil)
@@ -129,14 +152,14 @@ func (r *Repository) SaveInstallEndpoint(ctx context.Context, input InstallEndpo
 	if err != nil {
 		return current, false, err
 	}
-	if host == current.Host && input.HTTPPort == current.HTTPPort {
+	if host == current.Host && input.HTTPPort == current.HTTPPort && grpcHost == current.GRPCHost && input.GRPCPort == current.GRPCPort {
 		return current, false, nil
 	}
 	if input.ExpectedRevision != current.Revision || current.Revision == math.MaxInt64 {
 		return current, false, ErrInstallEndpointConflict
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	next := InstallEndpoint{Host: host, HTTPPort: input.HTTPPort, Revision: current.Revision + 1, UpdatedAt: stamp, UpdatedBy: actor}
+	next := InstallEndpoint{Host: host, HTTPPort: input.HTTPPort, GRPCHost: grpcHost, GRPCPort: input.GRPCPort, Revision: current.Revision + 1, UpdatedAt: stamp, UpdatedBy: actor}
 	data, err := json.Marshal(next)
 	if err != nil {
 		return next, false, err

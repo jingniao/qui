@@ -27,7 +27,7 @@
       </div>
       <p v-if="!cores.length" role="alert" class="text-xs text-ios-red">请至少选择一个运行内核（xray 或 sing-box）。</p>
       <p v-if="fromSettings" class="text-xs text-ios-tertiary">默认取自 系统设置 → 节点安装连接地址；在此修改只影响本次命令，不写回设置。</p>
-      <p class="text-xs text-ios-tertiary">面板 Web 端口是节点下载面板证书与登记用的 HTTPS 端口；Agent gRPC 端口由面板自动取实际监听端口。命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
+      <p class="text-xs text-ios-tertiary">面板 Web 端口是节点下载面板证书与登记用的 HTTPS 端口；Agent gRPC 地址与端口默认取面板地址与面板实际监听端口，可在 系统设置 → 节点安装连接地址 里覆盖。命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
       <p v-else class="text-sm text-ios-red">请填写有效的面板地址与端口</p>
     </div>
@@ -57,14 +57,16 @@ const createOpen = ref(false), installOpen = ref(false), creating = ref(false);
 const name = ref(''), renewDate = ref(''), currency = ref('CNY'), price = ref(''), cycle = ref('/年');
 const error = ref(''), metaWarning = ref('');
 const enrollment = ref<Enrollment | null>(null);
-const host = ref(''), port = ref(443), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
+const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
 const installAvailable = computed(() => Boolean(enrollment.value?.install?.version && enrollment.value?.install?.caSha256));
 const command = computed(() => {
   const item = enrollment.value;
   if (!item || !installAvailable.value || !/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
   if (!cores.value.length) return '';
+  // grpcHost '' keeps the panel address; grpcPort 0 keeps the listening port the
+  // enrollment response reported. Both are overridden only by the saved setting.
   return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
-    grpcPort: item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
+    grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
 });
 function showInstall(item: Enrollment) {
   enrollment.value = item;
@@ -74,11 +76,18 @@ function showInstall(item: Enrollment) {
   const fallback = browserInstallEndpoint();
   host.value = fallback.host;
   port.value = fallback.port;
+  grpcHost.value = '';
+  grpcPort.value = 0;
   fromSettings.value = false;
   cores.value = ['xray'];
   installOpen.value = true;
   void resolveInstallEndpoint().then(endpoint => {
-    if (enrollment.value !== item || host.value !== fallback.host || port.value !== fallback.port) return;
+    if (enrollment.value !== item) return;
+    // The gRPC overrides are independent of the Web host/port fields, so they
+    // apply even when the Owner already edited those two.
+    grpcHost.value = endpoint.grpcHost;
+    grpcPort.value = endpoint.grpcPort ?? 0;
+    if (host.value !== fallback.host || port.value !== fallback.port) return;
     host.value = endpoint.host;
     port.value = endpoint.port;
     fromSettings.value = endpoint.fromSettings;

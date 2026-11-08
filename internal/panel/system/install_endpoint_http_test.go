@@ -92,7 +92,7 @@ func TestInstallEndpointHTTPOwnerOnlyCSRFAndConflict(t *testing.T) {
 		t.Helper()
 		return f.do(t, method, body, cookie, csrf).Code
 	}
-	const valid = `{"host":"panel.example.com","httpPort":22550,"expectedRevision":0}`
+	const valid = `{"host":"panel.example.com","httpPort":22550,"grpcHost":"grpc.example.com","grpcPort":18880,"expectedRevision":0}`
 	if code := status("GET", "", "", ""); code != 401 {
 		t.Fatalf("unauthenticated GET: %d", code)
 	}
@@ -110,6 +110,9 @@ func TestInstallEndpointHTTPOwnerOnlyCSRFAndConflict(t *testing.T) {
 		`{"host":"2001:db8::1","httpPort":22550,"expectedRevision":0}`,
 		`{"host":"panel.example.com","httpPort":18880,"expectedRevision":0,"extra":1}`,
 		`{"host":"panel.example.com","httpPort":70000,"expectedRevision":0}`,
+		`{"host":"panel.example.com","httpPort":22550,"grpcPort":70000,"expectedRevision":0}`,
+		`{"host":"panel.example.com","httpPort":22550,"grpcPort":22550,"expectedRevision":0}`,
+		`{"host":"panel.example.com","grpcHost":"https://grpc.example.com","expectedRevision":0}`,
 		`{"host":"https://panel.example.com","httpPort":22550,"expectedRevision":0}`,
 	} {
 		// A rejected request must be a 400 and must never store a value.
@@ -127,7 +130,7 @@ func TestInstallEndpointHTTPOwnerOnlyCSRFAndConflict(t *testing.T) {
 		t.Fatalf("unchanged empty PUT: %d %s", empty.Code, empty.Body.String())
 	}
 	var unset InstallEndpoint
-	if err := json.Unmarshal(empty.Body.Bytes(), &unset); err != nil || unset.Revision != 0 || unset.Host != "" || unset.HTTPPort != 0 {
+	if err := json.Unmarshal(empty.Body.Bytes(), &unset); err != nil || unset.Revision != 0 || unset.Host != "" || unset.HTTPPort != 0 || unset.GRPCPort != 0 {
 		t.Fatalf("unchanged empty PUT answered %+v %v", unset, err)
 	}
 	response := f.do(t, "PUT", valid, f.owner, f.ownerCSRF)
@@ -135,7 +138,7 @@ func TestInstallEndpointHTTPOwnerOnlyCSRFAndConflict(t *testing.T) {
 		t.Fatalf("owner PUT: %d %s", response.Code, response.Body.String())
 	}
 	var saved InstallEndpoint
-	if err := json.Unmarshal(response.Body.Bytes(), &saved); err != nil || saved.Host != "panel.example.com" || saved.HTTPPort != 22550 || saved.Revision != 1 || saved.UpdatedBy != "owner" {
+	if err := json.Unmarshal(response.Body.Bytes(), &saved); err != nil || saved.Host != "panel.example.com" || saved.HTTPPort != 22550 || saved.GRPCHost != "grpc.example.com" || saved.GRPCPort != 18880 || saved.Revision != 1 || saved.UpdatedBy != "owner" {
 		t.Fatalf("saved endpoint: %+v %v", saved, err)
 	}
 	read := f.do(t, "GET", "", f.owner, "")
@@ -147,7 +150,7 @@ func TestInstallEndpointHTTPOwnerOnlyCSRFAndConflict(t *testing.T) {
 		t.Fatalf("read back: %+v %v", current, err)
 	}
 	// An unchanged save answers 200 with the stored revision and writes no audit.
-	unchanged := f.do(t, "PUT", `{"host":"panel.example.com","httpPort":22550,"expectedRevision":1}`, f.owner, f.ownerCSRF)
+	unchanged := f.do(t, "PUT", `{"host":"panel.example.com","httpPort":22550,"grpcHost":"grpc.example.com","grpcPort":18880,"expectedRevision":1}`, f.owner, f.ownerCSRF)
 	if unchanged.Code != 200 {
 		t.Fatalf("unchanged PUT: %d %s", unchanged.Code, unchanged.Body.String())
 	}

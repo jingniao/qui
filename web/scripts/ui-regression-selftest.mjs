@@ -78,7 +78,9 @@ console.log('PASS F3 CORES: per-core data, no local core state, real add/upgrade
 
 // The install command emits one repeatable --core flag per selected core (K3c) and
 // always passes both ports explicitly, so the command never depends on
-// node-install.sh's own defaults (22550 / 18880).
+// node-install.sh's own defaults (22550 / 18880). --grpc-host appears only when
+// the Agent gRPC address differs from the panel address, which the installer
+// otherwise reuses.
 const nodesApiSource = read('modules/nodes/api.ts').replace(/^import .*;$/gm, '');
 const nodesApiCode = ts.transpileModule(nodesApiSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const nodesApi = await import(`data:text/javascript;base64,${Buffer.from(nodesApiCode).toString('base64')}`);
@@ -94,6 +96,9 @@ assert.match(nodesApi.installCommand({ ...install, httpPort: 8443 }), /--http-po
 assert.throws(() => nodesApi.installCommand({ ...install, cores: [] }), /内核/, 'an empty selection is refused');
 assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'gost'] }), /--core xray --core gost$/, 'GOST joined the installer cores in v1.3');
 assert.throws(() => nodesApi.installCommand({ ...install, cores: ['v2ray'] }), /内核/, 'an unknown core name is refused');
+assert.match(nodesApi.installCommand({ ...install, grpcHost: 'grpc.example.com' }), /--panel panel\.example\.com --grpc-host grpc\.example\.com --http-port 22550 --grpc-port 18880/, 'a separate gRPC address is passed as --grpc-host');
+assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: 'panel.example.com' }), /--grpc-host/, 'the installer already defaults --grpc-host to --panel, so an equal value is omitted');
+assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: '' }), /--grpc-host/, 'an unset gRPC address keeps the panel address');
 console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated allowlist, both ports always explicit');
 
 // The panel address of the install command is saved once in 系统设置 → 节点安装
@@ -102,12 +107,16 @@ console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated 
 // browser address when it is unset.
 assert.match(read('modules/nodes/installEndpoint.ts'), /settingsAPI\.installEndpoint\(/, 'the install endpoint comes from the settings API');
 assert.match(read('modules/nodes/installEndpoint.ts'), /window\.location\.hostname/, 'the fallback stays the browser address');
+assert.match(read('modules/nodes/installEndpoint.ts'), /saved\.grpcHost/, 'the saved Agent gRPC address is resolved too');
 for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/nodes/components/NodeRecoveryPanel.vue', 'modules/system/components/NodeVersionPanel.vue']) {
   const source = read(file);
   assert.match(source, /resolveInstallEndpoint\(/, file + ' must default to the saved install endpoint');
+  assert.match(source, /grpcHost: /, file + ' must pass the resolved Agent gRPC address into the command');
   assert.doesNotMatch(source, /window\.location\.hostname/, file + ' must not read the browser address directly');
 }
 assert.match(read('modules/system/pages/SettingsPage.vue'), /saveInstallEndpoint\(/, '系统设置 saves the install endpoint');
+assert.match(read('modules/system/pages/SettingsPage.vue'), /Agent gRPC 地址/, '系统设置 edits the Agent gRPC address');
+assert.match(read('modules/system/pages/SettingsPage.vue'), /Agent gRPC 端口/, '系统设置 edits the Agent gRPC port');
 console.log('PASS F3 ENDPOINT: one saved panel address feeds all three install dialogs, browser address only as fallback');
 
 // The editor's local port check follows the Agent's node-wide numeric rule: a TCP

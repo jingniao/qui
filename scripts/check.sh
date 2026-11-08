@@ -140,6 +140,15 @@ if [ -f deploy/linux/tests/panel-install-test.sh ]; then
   bash -n -- deploy/linux/tests/panel-install-test.sh
   bash deploy/linux/tests/panel-install-test.sh
 fi
+# node-install-test.sh covers the one-command node installer's argument checks and
+# the two network checks that used to fail late and vaguely: the panel certificate
+# download (classified by curl's HTTP status and exit code) and the gRPC preflight
+# before enrollment. It stubs curl and install below a temporary directory and needs
+# no privileges.
+if [ -f deploy/linux/tests/node-install-test.sh ]; then
+  bash -n -- deploy/linux/tests/node-install-test.sh
+  bash deploy/linux/tests/node-install-test.sh
+fi
 # tuning-helper-test.sh activates the packaged tuning units against a fake helper
 # below /run and never writes host sysctls; the other two are rootless.
 "${as_root[@]}" bash deploy/linux/tests/tuning-helper-test.sh

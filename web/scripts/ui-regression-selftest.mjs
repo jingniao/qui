@@ -96,6 +96,20 @@ assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'gost'] }), /
 assert.throws(() => nodesApi.installCommand({ ...install, cores: ['v2ray'] }), /内核/, 'an unknown core name is refused');
 console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated allowlist, both ports always explicit');
 
+// The panel address of the install command is saved once in 系统设置 → 节点安装
+// 连接地址 (system_settings key install_endpoint) instead of being edited per
+// server; all three dialogs resolve it through one helper and fall back to the
+// browser address when it is unset.
+assert.match(read('modules/nodes/installEndpoint.ts'), /settingsAPI\.installEndpoint\(/, 'the install endpoint comes from the settings API');
+assert.match(read('modules/nodes/installEndpoint.ts'), /window\.location\.hostname/, 'the fallback stays the browser address');
+for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/nodes/components/NodeRecoveryPanel.vue', 'modules/system/components/NodeVersionPanel.vue']) {
+  const source = read(file);
+  assert.match(source, /resolveInstallEndpoint\(/, file + ' must default to the saved install endpoint');
+  assert.doesNotMatch(source, /window\.location\.hostname/, file + ' must not read the browser address directly');
+}
+assert.match(read('modules/system/pages/SettingsPage.vue'), /saveInstallEndpoint\(/, '系统设置 saves the install endpoint');
+console.log('PASS F3 ENDPOINT: one saved panel address feeds all three install dialogs, browser address only as fallback');
+
 // The editor's local port check follows the Agent's node-wide numeric rule: a TCP
 // and a UDP inbound can NOT share a port number (an earlier change allowed it).
 async function tsModuleUrl(url, cache = new Map()) {

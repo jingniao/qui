@@ -15,8 +15,8 @@
   <FormDrawer v-model="installOpen" title="一键安装命令" description="② 在服务器终端以 root 用户运行命令，完成 Agent 部署与证书信任配置。" :show-footer="false" width="2xl">
     <div v-if="installAvailable" class="space-y-3">
       <div class="grid gap-3 sm:grid-cols-3">
-        <label class="text-xs text-ios-secondary">面板地址<input v-model.trim="host" maxlength="253" class="form-input-base mt-1.5" /></label>
-        <label class="text-xs text-ios-secondary">HTTP 端口<input v-model.number="port" type="number" min="1" max="65535" class="form-input-base mt-1.5" /></label>
+        <label class="text-xs text-ios-secondary">面板地址<input v-model.trim="host" maxlength="253" placeholder="panel.example.com 或 203.0.113.10" class="form-input-base mt-1.5" /></label>
+        <label class="text-xs text-ios-secondary">面板 Web 端口<input v-model.number="port" type="number" min="1" max="65535" placeholder="22550" title="面板 Web（HTTPS）端口，不是 Agent gRPC 端口" class="form-input-base mt-1.5" /></label>
         <div class="text-xs text-ios-secondary">运行内核
           <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-ios-bg px-3 py-2">
             <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
@@ -26,7 +26,8 @@
         </div>
       </div>
       <p v-if="!cores.length" role="alert" class="text-xs text-ios-red">请至少选择一个运行内核（xray 或 sing-box）。</p>
-      <p class="text-xs text-ios-tertiary">命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
+      <p v-if="fromSettings" class="text-xs text-ios-tertiary">默认取自 系统设置 → 节点安装连接地址；在此修改只影响本次命令，不写回设置。</p>
+      <p class="text-xs text-ios-tertiary">面板 Web 端口是节点下载面板证书与登记用的 HTTPS 端口；Agent gRPC 端口由面板自动取实际监听端口。命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
       <p v-else class="text-sm text-ios-red">请填写有效的面板地址与端口</p>
     </div>
@@ -42,6 +43,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../api';
+import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
 import { CURRENCY_LIST, CYCLE_LIST, saveNodeMeta } from '../nodeMeta';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
@@ -55,7 +57,7 @@ const createOpen = ref(false), installOpen = ref(false), creating = ref(false);
 const name = ref(''), renewDate = ref(''), currency = ref('CNY'), price = ref(''), cycle = ref('/年');
 const error = ref(''), metaWarning = ref('');
 const enrollment = ref<Enrollment | null>(null);
-const host = ref(''), port = ref(443), cores = ref<CoreName[]>(['xray']);
+const host = ref(''), port = ref(443), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
 const installAvailable = computed(() => Boolean(enrollment.value?.install?.version && enrollment.value?.install?.caSha256));
 const command = computed(() => {
   const item = enrollment.value;
@@ -66,10 +68,21 @@ const command = computed(() => {
 });
 function showInstall(item: Enrollment) {
   enrollment.value = item;
-  host.value = window.location.hostname;
-  port.value = Number(window.location.port) || 443;
+  // The dialog opens with the browser address immediately, so the command is
+  // usable even before the saved endpoint arrives; a saved address then replaces
+  // it unless the Owner already typed a one-off value.
+  const fallback = browserInstallEndpoint();
+  host.value = fallback.host;
+  port.value = fallback.port;
+  fromSettings.value = false;
   cores.value = ['xray'];
   installOpen.value = true;
+  void resolveInstallEndpoint().then(endpoint => {
+    if (enrollment.value !== item || host.value !== fallback.host || port.value !== fallback.port) return;
+    host.value = endpoint.host;
+    port.value = endpoint.port;
+    fromSettings.value = endpoint.fromSettings;
+  });
 }
 async function create() {
   if (creating.value) return;

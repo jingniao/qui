@@ -14,7 +14,7 @@
 
 Owner于2026-11-06明确决定本轮跳过原生arm64主机验收，早前qemu-user只作为模拟证据，不声称原生实机通过。首次历史隧道应用失败首因因材料缺失无法确定，保留失败／自动回滚／后续成功事实。正式版证据及限制见[验收矩阵](docs/v1-acceptance.md) §12；v1.4 使用独立验收结论，范围见[v1.4 计划](docs/v1.4-plan.md)及[发布说明](docs/release-notes-1.4.0.md)。
 
-入口：[文档导航](docs/README.md)、[架构](docs/architecture.md)、[部署与开发门禁](docs/deployment.md)、[运维](docs/operations.md)、[协议矩阵](docs/protocol-support-matrix.md)。版本历史集中在[变更记录](docs/changelog.md)，完成的计划与报告在[归档](docs/archive/README.md)。
+入口：[文档导航](docs/README.md)、[架构](docs/architecture.md)、[部署与开发门禁](docs/deployment.md)、[运维](docs/operations.md)、[协议矩阵](docs/protocol-support-matrix.md)、[发布流程手册](docs/release-runbook.md)。版本历史集中在[变更记录](docs/changelog.md)，完成的计划与报告在[归档](docs/archive/README.md)。
 
 ## 1. 文档目的
 
@@ -311,7 +311,7 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥并提交注册码/公钥/机器信息 → 中央签证并核销注册码 → mTLS 长连接。私钥不上传。
 
-注册对话框提供 `deploy/linux/node-install.sh` 一键命令：下载面板同版本 GitHub Release、核对 SHA256SUMS，以公网证书或面板提供的固定 SHA-256 建立证书信任，再登记启动，操作见[部署](docs/deployment.md) §4。
+注册对话框提供 `deploy/linux/node-install.sh` 一键命令：下载面板同版本 GitHub Release、核对 SHA256SUMS，以公网证书或面板提供的固定 SHA-256 建立证书信任，再登记启动，操作见[部署](docs/deployment.md) §4。命令里的面板地址与面板 Web 端口默认取系统设置里的“节点安装连接地址”（第 27.14 节），未设置或读取失败时回落到当前浏览器访问面板的地址；Agent gRPC 端口始终取面板实际监听端口。三个生成该命令的对话框（新建服务器、原位身份恢复、版本页“添加内核”）共用这一默认值，对话框内改动只影响本次命令，不回写设置。
 
 原位身份恢复（迁移 0134）：主机重装但身份仍属原节点时，Owner 在节点证书区签发一次性恢复码（默认 900 秒，允许 300–3600 秒，可勾选立即吊销现有证书），响应只返回一次，数据库只保存 SHA-256 并绑定当时的证书指纹。签发与核销都检查未完成任务，存在时返回 409 `node_recovery_blocked` 与 `blockers`。新 Agent 通过现有 `Enroll` RPC 核销恢复码，节点 ID、入站、出站、节点组、隧道、代理链与历史配置均保留，旧指纹随后永久作废（备份恢复也不复活），用它连接会被拒并记一条 WARN 日志 `node certificate refused`，当前已发布配置在新 Agent 首次能力上报后自动重新下发。Agent 二进制与安装脚本不变，操作见[运维](docs/operations.md) §5.1。
 
@@ -1119,6 +1119,17 @@ POST   /portal/subscription/reset
 
 端口错误：409 port_in_use（含 usedBy）、400 port_out_of_range、409 no_free_port（无范围或耗尽）。auto 无 listenPort 则保存时分配；带建议端口则空闲时保留，后续重发固定。pending_delete 只读并继续保留声明/引用。
 
+## 27.14 系统设置：节点安装连接地址
+
+一键安装命令用的面板地址与面板 Web 端口只需在 Owner 的系统设置里保存一次。值存于既有 `system_settings` 表的单一键 `install_endpoint`（`{"host","httpPort","revision","updatedAt","updatedBy"}`，无迁移；键缺失即未设置，读出 `host` 为空、`httpPort` 为 0），随加密备份的整库快照保存与恢复。
+
+| 接口 | 合同 |
+| --- | --- |
+| `GET /api/v1/system/install-endpoint` | Owner 专用（只有 Owner 看得到安装对话框）；返回 `{host,httpPort,revision,updatedAt,updatedBy}` |
+| `PUT /api/v1/system/install-endpoint` | Owner＋CSRF，体 `{host,httpPort,expectedRevision}`，未知字段拒绝；`expectedRevision` 不匹配返回 409 `settings_conflict`，内容未变化返回当前值且不推进 `revision`，写成功记操作日志“修改节点安装连接地址”（target `install_endpoint`） |
+
+`host` 为空或匹配 `^[A-Za-z0-9.-]+$` 的域名／IPv4（长度 1–253，标签不以 `.` 或 `-` 开头结尾，且每段 ≤63）；**不接受裸 IPv6** 与其他写法（协议、端口、括号），与 `node-install.sh` 对 `--panel` 的校验一致，存下装不上节点的值没有意义。`httpPort` 为 0（未设置）或 1–65535；两项可独立留空，只存端口时对话框保留浏览器主机名并采用保存的端口。安装命令的 Agent gRPC 端口不在此设置内，仍取注册响应里的实际监听端口。
+
 # 28. gRPC 节点通信
 
 节点通信使用 Enroll 与双向流 Connect。
@@ -1224,6 +1235,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | 数据 | 备份/恢复合同 |
 | --- | --- |
 | client_policy_profiles、system_settings.client_policy_active/client_rules | 加密备份与恢复校验覆盖配置库、活动指针和模板快照；旧归档初始化配置库并保留 activeRevision，新归档校验指针与活动模板一致性 |
+| system_settings.install_endpoint | 随整库快照整体备份，无键白名单，不单独校验；恢复按归档值（该键无校验步骤，损坏值读出即报 invalid_settings），旧归档缺该键读作未设置、安装命令回落到浏览器地址 |
 | node_latency_samples、定时探测队列、node_metric_samples | 不进便携备份：快照清空再 VACUUM，恢复候选再清空，不影响运行库样本；手动排队探测过期 |
 | scheduled 默认目标、node_latency_targets、latency_targets_custom | 属配置；兼容 0121 前归档并默认继承。进程内恢复保留当前自定义（含空表），补其新目标但不提升为系统默认 |
 | node_tuning | 备份/校验/清单包含；恢复以当前库为准，删归档独有行、保留当前期望/结果，pending→unconfirmed，不重发、不写宿主 sysctl；旧归档迁移后同处理，需核对 tuningCurrent |

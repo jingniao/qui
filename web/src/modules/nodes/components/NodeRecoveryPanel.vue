@@ -33,8 +33,8 @@
       <p>有效期至 {{ formatTime(result.expiresAt) }}。离开本页后无法再次查看；需要新码只能重新签发，重新签发会作废此码。</p>
       <CodePreview :code="result.enrollmentToken" title="一次性恢复码" />
       <div v-if="installAvailable" class="grid gap-3 sm:grid-cols-3">
-        <label class="text-xs text-amber-900">面板地址<input v-model.trim="host" maxlength="253" class="form-input-base mt-1.5" /></label>
-        <label class="text-xs text-amber-900">HTTP 端口<input v-model.number="port" type="number" min="1" max="65535" class="form-input-base mt-1.5" /></label>
+        <label class="text-xs text-amber-900">面板地址<input v-model.trim="host" maxlength="253" placeholder="panel.example.com 或 203.0.113.10" class="form-input-base mt-1.5" /></label>
+        <label class="text-xs text-amber-900">面板 Web 端口<input v-model.number="port" type="number" min="1" max="65535" placeholder="22550" title="面板 Web（HTTPS）端口，不是 Agent gRPC 端口" class="form-input-base mt-1.5" /></label>
         <div class="text-xs text-amber-900">运行内核
           <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-white px-3 py-2">
             <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
@@ -43,6 +43,7 @@
           </div>
         </div>
       </div>
+      <p v-if="fromSettings" class="text-xs">默认取自 系统设置 → 节点安装连接地址；在此修改只影响本次命令，不写回设置。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
       <p v-else-if="!installAvailable" class="text-sm">本地或开发构建无法生成一键命令，请在重装的主机上用恢复码手动登记。</p>
       <p v-else-if="!cores.length" role="alert" class="text-sm text-ios-red">请至少选择一个运行内核。</p>
@@ -69,6 +70,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type RecoveryStatus } from '../api';
+import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
 import { formatTime, isOwner } from '../../../app/auth';
 import { APIError } from '../../../app/apiClient';
 import { showToast } from '../../../app/api';
@@ -82,7 +84,7 @@ const statusLabels: Record<string, string> = { issued: '已签发', consumed: '�
 const redeployLabels: Record<string, string> = { none: '—', pending: '等待节点上线', queued: '重新下发中', success: '重新下发成功', failed: '重新下发失败', not_needed: '无需下发' };
 const blockerLabels: Record<string, string> = { deployment_target: '待完成的发布', deployment_command: '待执行的节点操作', deployment_batch: '进行中的批量发布', agent_update: 'Agent 更新任务', core_update: '核心更新任务', core_remove: '核心移除任务', node_pause: '暂停/恢复任务' };
 const ttl = ref(900), revokeNow = ref(false), loading = ref(false), statusLoading = ref(false), confirm = ref(false);
-const host = ref(''), port = ref(443), cores = ref<CoreName[]>(['xray']);
+const host = ref(''), port = ref(443), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
 const error = ref(''), statusError = ref(''), noRecovery = ref(false);
 const result = ref<(Enrollment & { purpose: string }) | null>(null), status = ref<RecoveryStatus | null>(null);
 const blockers = ref<{ kind: string; id: string; name: string }[]>([]);
@@ -134,11 +136,23 @@ async function issue() {
   loading.value = true; error.value = ''; blockers.value = [];
   try {
     result.value = await nodeAPI.issueRecovery(props.node.id, { expiresInSeconds: ttl.value, revokeNow: revokeNow.value });
-    host.value = window.location.hostname;
-    port.value = Number(window.location.port) || 443;
+    // Same defaults as the enrollment dialog: the saved panel address if any,
+    // otherwise the browser address. Both stay editable for a one-off override.
+    const fallback = browserInstallEndpoint();
+    host.value = fallback.host;
+    port.value = fallback.port;
+    fromSettings.value = false;
     cores.value = defaultCores();
     showToast('恢复码已签发，请立即复制');
     await refresh();
+    const nodeId = props.node.id;
+    void resolveInstallEndpoint().then(endpoint => {
+      if (props.node.id !== nodeId) return;
+      if (host.value !== fallback.host || port.value !== fallback.port) return;
+      host.value = endpoint.host;
+      port.value = endpoint.port;
+      fromSettings.value = endpoint.fromSettings;
+    });
   } catch (e) {
     error.value = (e as Error).message;
     const items = e instanceof APIError ? e.details?.blockers : undefined;

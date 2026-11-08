@@ -25,6 +25,23 @@
     <LatencyTargetsPanel v-else-if="activeTab === 'latency'" />
     <BackupSchedulePanel v-else-if="activeTab === 'backup'" />
     <RuntimeSettingsPanel v-else :key="activeTab" :kind="runtimeTab" />
+    <section v-if="isOwner && activeTab === 'base'" class="panel-card p-6 max-w-3xl space-y-5 text-sm">
+      <div class="flex flex-wrap justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">节点安装连接地址</h2><button class="ios-btn-secondary" :disabled="endpointLoading || endpointSaving" @click="loadEndpoint">刷新已保存地址</button></div>
+      <ErrorState v-if="endpointError" :message="endpointError" @retry="loadEndpoint" /><LoadingSkeleton v-else-if="!endpointSaved" />
+      <template v-else>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label>面板地址<input v-model.trim="endpointForm.host" maxlength="253" placeholder="panel.example.com 或 203.0.113.10" class="form-input-base mt-2" /></label>
+          <label>面板 Web 端口<input v-model.number="endpointForm.httpPort" type="number" min="1" max="65535" placeholder="22550" class="form-input-base mt-2" /></label>
+        </div>
+        <p class="text-xs text-gray-500 leading-relaxed">节点安装 Agent 时用它下载面板证书并登记：填写节点能访问到的公网域名或 IPv4，以及面板 Web（HTTPS）端口。这里不是 Agent gRPC 端口 18880，gRPC 端口自动取面板实际监听端口。</p>
+        <p class="text-xs text-gray-500">留空则使用当前浏览器访问面板的地址。修改只影响之后生成的安装命令，不改动已有节点。</p>
+        <p v-if="endpointFormError" role="alert" class="text-sm text-ios-red">{{ endpointFormError }}</p>
+        <div class="flex flex-wrap justify-between items-center gap-3">
+          <span class="text-xs text-gray-500">{{ endpointSaved.revision ? `地址版本 ${endpointSaved.revision} · ${endpointSaved.updatedBy} · ${formatTime(endpointSaved.updatedAt)}` : '当前未设置，安装命令使用浏览器地址' }}</span>
+          <button class="ios-btn-primary" :disabled="endpointSaving" @click="saveEndpoint">{{ endpointSaving ? '保存中…' : '保存安装连接地址' }}</button>
+        </div>
+      </template>
+    </section>
     <ConfirmDialog v-model="baseConfirmation" title="确认修改平台基础设置" :message="`平台名称：${baseConfirm.platformName}，系统时区：${baseConfirm.timezone}。`" warning-details="时区变化会影响页面时间与后续配置。已发布规则仍按原时区执行。" confirm-text="确认保存" :is-danger="false" @confirm="saveBase" />
     <RetentionJobPanel v-if="isOwner && activeTab === 'accessLog'" />
     <StorageObservationPanel v-if="isOwner && activeTab === 'accessLog'" />
@@ -36,8 +53,10 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { formatTime, isOwner } from '../../../app/auth';
 import { showToast } from '../../../app/api';
+import { APIError } from '../../../app/apiClient';
 import { refreshSettingsView } from '../../../app/events';
-import { settingsAPI, type BaseSettings, type RetentionSettings } from '../settingsApi';
+import { clearInstallEndpointCache } from '../../nodes/installEndpoint';
+import { settingsAPI, type BaseSettings, type InstallEndpoint, type RetentionSettings } from '../settingsApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
@@ -106,6 +125,67 @@ async function saveBase() {
   finally { baseSaving.value = false; }
 }
 function settingsChanged() { if (baseSaved.value && (baseForm.platformName !== baseSaved.value.platformName || baseForm.timezone !== baseSaved.value.timezone)) { showToast('其他页面已更新基础设置。请核对时区并刷新后再提交', 'warning'); return; } void loadBase(); }
-onUnmounted(() => { baseRefreshGeneration++; window.removeEventListener('proxy-system-settings', settingsChanged); });
-onMounted(() => { void load(); void loadBase(); window.addEventListener('proxy-system-settings', settingsChanged); });
+
+// The panel address a new node uses for one-click Agent installation. It is
+// edited once here instead of per server in the install dialogs.
+const endpointSaved = ref<InstallEndpoint | null>(null), endpointLoading = ref(false), endpointSaving = ref(false);
+const endpointError = ref(''), endpointFormError = ref('');
+// The API uses 0 for "no port saved" and the input has to show that as an empty
+// field with the 22550 placeholder: a 0 in a number input reads as a real port
+// that fails validation. The form therefore keeps '' and the two helpers below
+// translate at the API boundary.
+const endpointForm = reactive<{ host: string; httpPort: number | '' }>({ host: '', httpPort: '' });
+let endpointGeneration = 0;
+function endpointPortInput(httpPort: number): number | '' { return httpPort >= 1 ? httpPort : ''; }
+async function loadEndpoint() {
+  if (endpointSaving.value) return;
+  const generation = ++endpointGeneration; endpointLoading.value = true;
+  try {
+    const result = await settingsAPI.installEndpoint();
+    if (generation !== endpointGeneration) return;
+    endpointSaved.value = result;
+    Object.assign(endpointForm, { host: result.host, httpPort: endpointPortInput(result.httpPort) });
+    endpointError.value = ''; endpointFormError.value = '';
+  } catch (e) {
+    if (generation === endpointGeneration) endpointError.value = (e as Error).message;
+  } finally {
+    if (generation === endpointGeneration) endpointLoading.value = false;
+  }
+}
+async function saveEndpoint() {
+  if (endpointSaving.value || !endpointSaved.value) return;
+  const host = endpointForm.host.trim();
+  // An empty field and a cleared number input both mean "未设置" (0 on the wire).
+  const rawPort = endpointForm.httpPort === '' ? 0 : Math.trunc(Number(endpointForm.httpPort));
+  const httpPort = Number.isFinite(rawPort) ? rawPort : 0;
+  // Mirrors the server's and the installer's rule: a DNS name or IPv4 literal
+  // without scheme or port, and the panel Web port or nothing.
+  if (host && !/^[A-Za-z0-9.-]+$/.test(host)) { endpointFormError.value = '面板地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口或协议）。'; return; }
+  if (httpPort !== 0 && (httpPort < 1 || httpPort > 65535)) { endpointFormError.value = '面板 Web 端口须为 1～65535 的整数；留空表示未设置。'; return; }
+  endpointSaving.value = true; endpointFormError.value = '';
+  try {
+    const result = await settingsAPI.saveInstallEndpoint(host, httpPort, endpointSaved.value.revision);
+    endpointSaved.value = result;
+    Object.assign(endpointForm, { host: result.host, httpPort: endpointPortInput(result.httpPort) });
+    // Other install dialogs read this once per page load; drop that copy so the
+    // next dialog uses the value just saved.
+    clearInstallEndpointCache();
+    endpointError.value = '';
+    showToast('安装连接地址已保存');
+  } catch (e) {
+    // A stale revision means another session saved meanwhile: re-read and let
+    // the Owner confirm against the current value.
+    if (e instanceof APIError && e.status === 409) {
+      showToast('安装连接地址已在其他页面修改，已刷新为最新值，请核对后重试', 'error');
+      endpointSaving.value = false;
+      void loadEndpoint();
+    } else {
+      endpointFormError.value = (e as Error).message;
+    }
+  } finally {
+    endpointSaving.value = false;
+  }
+}
+onUnmounted(() => { baseRefreshGeneration++; endpointGeneration++; window.removeEventListener('proxy-system-settings', settingsChanged); });
+onMounted(() => { void load(); void loadBase(); if (isOwner.value) void loadEndpoint(); window.addEventListener('proxy-system-settings', settingsChanged); });
 </script>

@@ -24,9 +24,13 @@
 # certificate at /install/ca.pem verifies against the system CA bundle the bundle
 # itself becomes the node CA (a publicly trusted certificate, for example Let's
 # Encrypt, whose intermediates rotate), otherwise the certificate fetched over
-# HTTPS has to match --ca-sha256 as shown by the panel. The enrollment token is
-# single use and expires; it is visible in the shell history of this host until
-# that history is cleared.
+# HTTPS has to match --ca-sha256 as shown by the panel. Both ways check the fetched
+# bytes against --ca-sha256, because behind a reverse proxy or Cloudflare the Web
+# side serves the proxy's certificate while the Agent talks to the panel's gRPC
+# port directly; the script therefore also probes that port with the anchor it just
+# installed before it enrolls, and names the cause when the certificate there
+# belongs to something else. The enrollment token is single use and expires; it is
+# visible in the shell history of this host until that history is cleared.
 set -euo pipefail
 umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -89,6 +93,11 @@ done
 [[ $panel =~ ^[A-Za-z0-9.-]+$ ]] || fail '面板地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口）。'
 [[ $http_port =~ ^[0-9]{1,5}$ && $http_port -ge 1 && $http_port -le 65535 ]] || fail 'HTTPS 端口必须在 1-65535 之间。'
 [[ $grpc_port =~ ^[0-9]{1,5}$ && $grpc_port -ge 1 && $grpc_port -le 65535 ]] || fail 'gRPC 端口必须在 1-65535 之间。'
+# --http-port and --grpc-port are two listeners of the same panel, so one value
+# cannot be both. A command that repeats one of them (a typo, or the habit of
+# pasting the CDN port into both) used to fail much later, at the certificate
+# download or inside enrollment, with a message that named neither flag.
+((10#$http_port != 10#$grpc_port)) || fail '--http-port 与 --grpc-port 不能是同一个端口：--http-port 是面板 Web（HTTPS）端口，本脚本用它下载 /install/ca.pem 并登记，也就是面板 config.yaml 里 http_address 的端口（默认 22550）；--grpc-port 是 Agent 的 gRPC 端口（默认 18880）。同一块面板上这两个端口不同，请照面板注册对话框给出的命令原样执行。'
 [[ $ca_sha256 =~ ^[0-9a-f]{64}$ ]] || fail '面板证书 SHA-256 必须是 64 位小写十六进制。'
 [[ $token =~ ^[A-Za-z0-9_-]{16,128}$ ]] || fail '注册码必须是 16-128 位 URL 安全字符。'
 if [[ ${#cores[@]} == 0 ]]; then cores=(xray); fi
@@ -300,26 +309,79 @@ ca_url=https://$authority/install/ca.pem
 fetched=$directory/panel-ca.pem
 
 printf '\n获取面板证书信任锚：%s\n' "$ca_url"
-# The panel certificate counts as publicly trusted only when it verifies against
-# the very bundle that would become the node CA: --cacert names that bundle and
-# --no-insecure overrides a -k that a curl wrapper may add, so a host whose curl
-# skips verification falls through to the pinned SHA-256 instead of installing a
-# bundle the Agent's gRPC handshake would then reject.
+# Everything below can still fail on a host that is not enrolled yet: the trust
+# anchor is not installed, or enrollment never ran. Rerunning this script with the
+# same registration token works until it expires, so every failure here says so.
+retry_note='本机尚未登记：注册码未过期时可以原样重跑本脚本。'
+
+# Explain a failed GET /install/ca.pem from curl's HTTP status ("000" when the
+# server never answered at all) and its exit code, so the operator reads which of
+# the two panel ports or which name is wrong instead of only "download failed".
+# Kept a pure function of those two arguments, because
+# deploy/linux/tests/node-install-test.sh calls it with chosen values.
+ca_download_diagnosis() {
+  local http_status=$1 curl_status=$2
+  case $http_status in
+    415|426)
+      printf '%s' "这个 HTTPS 端口回了 HTTP $http_status，这是 gRPC 监听对普通 HTTP 请求的答复：--http-port 指向的是 gRPC 端口，不是面板 Web 端口。--http-port 只能填面板 config.yaml 里 http_address 的端口（默认 22550，Web、API 与订阅都在这里），--grpc-port 才是 Agent 的 gRPC 端口（默认 18880）；同一块面板上这两个端口不会相同。"
+      ;;
+    404)
+      printf '%s' "面板 Web 端口上的 $ca_url 返回 404：面板可能以开发模式运行（开发模式不提供 /install/ca.pem），或者 $http_port 端口上是别的 Web 服务／反向代理，并没有把 /install/ca.pem 转发给面板。请核对 --panel 与 --http-port（面板 config.yaml 的 http_address，默认 22550）。"
+      ;;
+    000)
+      case $curl_status in
+        6) printf '%s' "无法解析面板地址 $panel（DNS 查询失败）：请确认这个域名在本机能解析出来，或改用面板可直达的 IPv4。" ;;
+        7) printf '%s' "无法连接 $authority（连接被拒绝或不可达）：请确认本机能访问 $panel 的这个 HTTPS 端口——防火墙是否放行、--http-port 是否为面板 Web 端口。" ;;
+        28) printf '%s' "连接 $authority 超时：请确认本机到 $panel:$http_port 的网络与防火墙放行情况，以及 --http-port 是否正确。" ;;
+        *) printf '%s' "无法与 $authority 建立 HTTPS 连接（curl 退出码 $curl_status）：请确认 $panel:$http_port 可达（DNS、防火墙、--http-port）。" ;;
+      esac
+      ;;
+    *)
+      printf '%s' "$ca_url 返回 HTTP $http_status（curl 退出码 $curl_status）：请核对 --panel 与 --http-port，并确认这个端口就是面板 Web（HTTPS）端口。"
+      ;;
+  esac
+}
+
+# Establish trust in the panel certificate and install it as $ca_file. Two ways,
+# one check: the bytes served by /install/ca.pem have to hash to --ca-sha256 in
+# both, because that digest is what the panel showed the operator, and a proxy or
+# another web server on the same name would otherwise pass unnoticed.
+install_panel_ca() {
+  local actual http_status status
+  # The panel certificate counts as publicly trusted only when it verifies against
+  # the very bundle that would become the node CA: --cacert names that bundle and
+  # --no-insecure overrides a -k that a curl wrapper may add, so a host whose curl
+  # skips verification falls through to the pinned SHA-256 instead of installing a
+  # bundle the Agent's gRPC handshake would then reject.
+  if [[ -n $system_bundle ]] && curl --no-insecure --cacert "$system_bundle" -fs --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 3 --output "$fetched" -- "$ca_url"; then
+    actual=$(sha256sum -- "$fetched"); actual=${actual%% *}
+    [[ $actual == "$ca_sha256" ]] || fail "https://$authority/install/ca.pem 提供的证书能被系统信任链验证，但它的 SHA-256 是 $actual，与面板显示的 $ca_sha256 不一致：这个地址取到的不是本面板的证书，而是别的面板、别的 Web 服务，或一个返回自己证书的反向代理／CDN。请核对 --panel 与 --http-port；$retry_note"
+    install -o root -g proxy-agent -m 0644 -- "$system_bundle" "$ca_file" || fail "无法安装 $ca_file。"
+    printf '面板证书由公网 CA 签发并已核对 SHA-256：已把系统 CA 包 %s 安装为 %s。\n' "$system_bundle" "$ca_file"
+    return 0
+  fi
+  printf '面板证书无法用系统信任链验证（自签、私有 CA，或 Web 一侧是终止 TLS 的反向代理／CDN）：改用固定 SHA-256 校验。\n'
+  # -k is deliberate here: the peer certificate is the file being fetched, so it
+  # cannot be trusted in advance and --ca-sha256 is the check. The HTTP status is
+  # read apart from the exit code so that a failure can name its cause (gRPC port,
+  # wrong web port, 404 from a development panel) instead of only "download
+  # failed". --no-insecure still overrides a -k-adding wrapper.
+  status=0
+  http_status=$(curl --no-insecure -k -sS --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 3 --connect-timeout 15 --max-time 60 --output "$fetched" --write-out '%{http_code}' -- "$ca_url") || status=$?
+  if ((status != 0)) || [[ $http_status != 200 ]]; then
+    fail "无法从 $ca_url 下载面板证书：$(ca_download_diagnosis "$http_status" "$status") $retry_note"
+  fi
+  actual=$(sha256sum -- "$fetched"); actual=${actual%% *}
+  [[ $actual == "$ca_sha256" ]] || fail "面板证书 SHA-256 与面板显示的不一致（期望 $ca_sha256，实际 $actual）：可能是中间人攻击，或 --panel/--http-port 指向了别的面板。 $retry_note"
+  install -o root -g proxy-agent -m 0644 -- "$fetched" "$ca_file" || fail "无法安装 $ca_file。"
+  printf '面板证书 SHA-256 与面板显示的一致：已安装 %s。\n' "$ca_file"
+}
+
 system_bundle=''
 for candidate in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
   if [[ -f $candidate && ! -L $candidate ]]; then system_bundle=$candidate; break; fi
 done
-if [[ -n $system_bundle ]] && curl --no-insecure --cacert "$system_bundle" -fs --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 3 --output "$fetched" -- "$ca_url"; then
-  install -o root -g proxy-agent -m 0644 -- "$system_bundle" "$ca_file" || fail "无法安装 $ca_file。"
-  printf '面板证书由公网 CA 签发：已把系统 CA 包 %s 安装为 %s。\n' "$system_bundle" "$ca_file"
-else
-  printf '面板证书无法用系统信任链验证（自签或私有 CA）：改用固定 SHA-256 校验。\n'
-  curl -fsS -k --proto '=https' --proto-redir '=https' --max-redirs 3 --output "$fetched" -- "$ca_url" || fail "无法从 $ca_url 下载面板证书。"
-  actual=$(sha256sum -- "$fetched"); actual=${actual%% *}
-  [[ $actual == "$ca_sha256" ]] || fail "面板证书 SHA-256 与面板显示的不一致（期望 $ca_sha256，实际 $actual）：可能是中间人攻击，或 --panel/--http-port 指向了别的面板。"
-  install -o root -g proxy-agent -m 0644 -- "$fetched" "$ca_file" || fail "无法安装 $ca_file。"
-  printf '面板证书 SHA-256 与面板显示的一致：已安装 %s。\n' "$ca_file"
-fi
+install_panel_ca
 
 # Print the raw value of the first top-level "key: value" line of a file, with a
 # trailing carriage return removed; the same simple parsing qui.sh uses. Returns
@@ -349,6 +411,96 @@ chmod "$mode" -- "$config" || fail "无法恢复 $config 的权限。"
 [[ $(read_value "$config" control_address) == "$panel:$grpc_port" ]] || fail "配置里的 control_address 不是 $panel:$grpc_port：$config"
 [[ $(read_value "$config" server_name) == "$panel" ]] || fail "配置里的 server_name 不是 $panel：$config"
 printf '已写入 control_address: %s 与 server_name: %s。\n' "$panel:$grpc_port" "$panel"
+
+# The enrollment that follows is the Agent's first real gRPC handshake: config.yaml
+# now names $panel:$grpc_port and $ca_file is its trust anchor. Behind Cloudflare or
+# a TLS-terminating reverse proxy the Web side served the proxy's certificate, so
+# the branch above could look right while this port is the panel itself; enrollment
+# then fails late inside enroll.sh with a generic message. Probing costs one
+# connection and names the cause; nothing is enrolled yet either way.
+
+# Does this host's curl speak HTTP/2? grpc-go answers over h2 only, and a curl built
+# without nghttp2 rejects --http2 with exit code 2, which would read as an ambiguous
+# result instead of a verdict.
+curl_supports_http2() {
+  curl -V 2>/dev/null | grep -q 'HTTP2'
+}
+
+# TCP-only reachability of host:port, for a curl without HTTP/2. bash cannot time
+# out its own /dev/tcp redirection, so the attempt runs under timeout(1) when the
+# host has it (coreutils and busybox both ship it); without it a killer process
+# bounds the wait instead.
+tcp_reachable() {
+  local host=$1 port=$2 pid killer
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 10 "${BASH:-bash}" -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$host" "$port" 2>/dev/null
+    return
+  fi
+  ( exec 3<>"/dev/tcp/$host/$port" ) 2>/dev/null &
+  pid=$!
+  ( sleep 10; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  killer=$!
+  if wait "$pid" 2>/dev/null; then
+    kill -TERM "$killer" 2>/dev/null || true
+    return 0
+  fi
+  kill -TERM "$killer" 2>/dev/null || true
+  return 1
+}
+
+# Read the preflight's curl exit code. 0 and 22 are a verified handshake: gRPC
+# answers a plain GET with an HTTP error (415), which curl turns into 22 only with
+# -f, so both mean the TLS handshake succeeded and the certificate covers the name.
+# The certificate verdicts mean a trust anchor or a name that does not fit; the
+# network ones mean nothing answers on that path.
+grpc_preflight_verdict() {
+  case $1 in
+    0|22) printf 'ok' ;;
+    51|58|60|77|90|91) printf 'untrusted' ;;
+    6|7|28) printf 'unreachable' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+# Probe https://$panel:$grpc_port/ with the trust the Agent itself will use:
+# --cacert "$ca_file" (the anchor just installed), no -k, no redirects, HTTP/2 when
+# this curl has it. A failure here is cheap to fix and its cause is known; the same
+# failure inside enroll.sh only produces the generic enrollment message. A curl
+# without HTTP/2 can prove reachability only, so its result is never read as a
+# certificate verdict.
+check_grpc_endpoint() {
+  local status=0 verdict tls_checked=true note
+  if curl_supports_http2; then
+    curl --no-insecure --cacert "$ca_file" --http2 -sS --output /dev/null \
+      --proto '=https' --proto-redir '=https' --max-redirs 0 --connect-timeout 10 --max-time 10 \
+      -- "https://$panel:$grpc_port/" || status=$?
+    verdict=$(grpc_preflight_verdict "$status")
+  else
+    tls_checked=false
+    if tcp_reachable "$panel" "$grpc_port"; then verdict=ok; else verdict=unreachable; fi
+  fi
+  case $verdict in
+    ok)
+      if $tls_checked; then
+        printf 'Agent gRPC 端点的 TLS 握手验证通过：%s:%s 出示的证书由刚安装的信任锚签发并覆盖 %s。\n' "$panel" "$grpc_port" "$panel"
+      else
+        printf '本机 curl 没有 HTTP/2 支持：只确认了 %s:%s 的 TCP 端口可达，未校验 TLS 证书。\n' "$panel" "$grpc_port"
+      fi
+      ;;
+    untrusted)
+      fail "Agent 的 gRPC 端点在 TLS 校验上失败（curl 退出码 $status）：https://$panel:$grpc_port/ 出示的证书不被刚安装的信任锚验证，或者证书不覆盖 $panel 这个名字。最常见的原因是面板在 Cloudflare 或一个终止 TLS 的反向代理后面——Web 一侧返回的是 CDN／代理的公网证书，而 Agent 直连 gRPC 看到的是面板自己的（多为私有 CA 签发的）证书，两者不是同一张证书，mTLS 的 gRPC 也无法经过 Cloudflare。请把 --panel 换成直达面板、且被面板自己的证书覆盖的地址（DNS-only 的灰云域名或面板的 IPv4），--http-port 填面板自己的 Web 端口而不是代理的 443，并在防火墙放行这两个端口；也可以在 系统管理 → 系统设置 → 基础设置 → 节点安装连接地址 里保存该地址，之后生成的安装命令都用它。$retry_note"
+      ;;
+    unreachable)
+      if $tls_checked; then note="curl 退出码 $status"; else note='TCP 连接被拒绝或超时'; fi
+      fail "无法连接面板的 gRPC 端口 $panel:$grpc_port（$note）：本机到该端口没有通路——防火墙未放行、--grpc-port 填错，或者这个主机名走的是不转发该端口的 CDN。登记要求 Agent 直连这个端口。$retry_note"
+      ;;
+    *)
+      printf '警告：无法判断 Agent gRPC 端点 %s:%s 的状态（curl 退出码 %s），继续登记；若登记失败请核对 --panel、--grpc-port 与面板证书。\n' "$panel" "$grpc_port" "$status" >&2
+      ;;
+  esac
+}
+printf '\n检查 Agent gRPC 端点：https://%s:%s/\n' "$panel" "$grpc_port"
+check_grpc_endpoint
 
 # A run whose enrollment failed leaves its retry marker (enrollment-attempt.json)
 # and the private key it generated. The Agent binds both to that token and panel

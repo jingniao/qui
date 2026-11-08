@@ -863,7 +863,10 @@
                 <span class="text-xs text-ios-tertiary">指定默认核心 --core {{ addCoreForm.component }}</span>
               </div>
               <div v-if="pendingEnrollmentLoading" class="p-4 text-center text-ios-tertiary">正在生成注册命令…</div>
-              <CodePreview v-else-if="pendingEnrollmentCommand" :code="pendingEnrollmentCommand" title="一键安装命令" />
+              <template v-else-if="pendingEnrollmentCommand">
+                <p v-if="installEndpointFromSettings" class="text-xs text-ios-tertiary">面板地址与面板 Web 端口默认取自 系统设置 → 节点安装连接地址。</p>
+                <CodePreview :code="pendingEnrollmentCommand" title="一键安装命令" />
+              </template>
             </div>
           </div>
 
@@ -1159,6 +1162,7 @@ import { isOwner, formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../../nodes/api';
+import { browserInstallEndpoint, resolveInstallEndpoint } from '../../nodes/installEndpoint';
 import { proxyAPI, type Inbound } from '../../proxy/api';
 import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
@@ -1610,6 +1614,17 @@ function openCoreManagementModal(node: NodeView) {
 
   if (node.status === 'pending') {
     pendingEnrollmentLoading.value = true;
+    // Show the browser address at once and swap in the saved one when it
+    // arrives, so the command never waits on the settings request.
+    const fallback = browserInstallEndpoint();
+    installEndpointHost.value = fallback.host;
+    installEndpointPort.value = fallback.port;
+    installEndpointFromSettings.value = false;
+    void resolveInstallEndpoint().then(endpoint => {
+      installEndpointHost.value = endpoint.host;
+      installEndpointPort.value = endpoint.port;
+      installEndpointFromSettings.value = endpoint.fromSettings;
+    });
     void nodeAPI.reissueEnrollment(node.id).then(res => {
       pendingEnrollment.value = res;
     }).catch(e => {
@@ -1775,12 +1790,17 @@ const coreBatchTargets = computed(() => eligibleOnlineNodes.value.filter(node =>
 // Pending node enrollment state for 1-click install command
 const pendingEnrollment = ref<Enrollment | null>(null);
 const pendingEnrollmentLoading = ref(false);
+// The install command defaults to 系统设置 → 节点安装连接地址 when the Owner saved
+// one, otherwise to the address this browser reached the panel on.
+const installEndpointHost = ref(browserInstallEndpoint().host);
+const installEndpointPort = ref(browserInstallEndpoint().port);
+const installEndpointFromSettings = ref(false);
 
 const pendingEnrollmentCommand = computed(() => {
   const item = pendingEnrollment.value;
   if (!item || !item.install?.version || !item.install?.caSha256) return '';
-  const host = window.location.hostname;
-  const port = Number(window.location.port) || 443;
+  const host = installEndpointHost.value;
+  const port = installEndpointPort.value;
   return installCommand({
     version: item.install.version,
     host,

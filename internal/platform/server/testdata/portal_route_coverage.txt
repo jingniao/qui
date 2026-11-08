@@ -104,6 +104,7 @@ GET /api/v1/subscriptions
 GET /api/v1/system/access-retention
 GET /api/v1/system/backup-schedule
 GET /api/v1/system/base
+GET /api/v1/system/install-endpoint
 GET /api/v1/system/runtime
 GET /api/v1/system/runtime-policy
 GET /api/v1/system/storage-thresholds
@@ -228,6 +229,7 @@ PUT /api/v1/subscription-sources/{id}
 PUT /api/v1/system/access-retention
 PUT /api/v1/system/backup-schedule
 PUT /api/v1/system/base
+PUT /api/v1/system/install-endpoint
 PUT /api/v1/system/runtime-policy
 PUT /api/v1/system/storage-thresholds
 PUT /api/v1/tunnel-rules/{id}

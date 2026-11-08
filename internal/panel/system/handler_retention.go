@@ -43,6 +43,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/backups/{id}", h.Auth.Require(http.HandlerFunc(h.deleteBackup), true))
 	mux.Handle("GET /api/v1/system/base", h.Auth.Require(http.HandlerFunc(h.base), true))
 	mux.Handle("PUT /api/v1/system/base", h.Auth.Require(http.HandlerFunc(h.saveBase), true))
+	mux.Handle("GET /api/v1/system/install-endpoint", h.Auth.Require(http.HandlerFunc(h.installEndpoint), true))
+	mux.Handle("PUT /api/v1/system/install-endpoint", h.Auth.Require(http.HandlerFunc(h.saveInstallEndpoint), true))
 	mux.Handle("GET /api/v1/system/access-retention", h.Auth.Require(http.HandlerFunc(h.retention), true))
 	mux.Handle("PUT /api/v1/system/access-retention", h.Auth.Require(http.HandlerFunc(h.saveRetention), true))
 	mux.Handle("GET /api/v1/system/storage-thresholds", h.Auth.Require(http.HandlerFunc(h.storageThresholds), true))
@@ -123,6 +125,14 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 		return
 	}
 	if errors.Is(err, ErrStorageThresholdInvalid) {
+		httpapi.Error(w, 400, "invalid_settings", err.Error())
+		return
+	}
+	if errors.Is(err, ErrInstallEndpointConflict) {
+		httpapi.Error(w, 409, "settings_conflict", err.Error())
+		return
+	}
+	if errors.Is(err, ErrInstallEndpointInvalid) {
 		httpapi.Error(w, 400, "invalid_settings", err.Error())
 		return
 	}

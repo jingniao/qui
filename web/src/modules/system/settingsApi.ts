@@ -10,6 +10,9 @@ export interface BackupRetentionPreview {
   categories:{kind:'daily'|'weekly'|'monthly';keep:number;existing:number;retained:number;candidates:number;candidateBytes:number;sample:{id:string;createdAt:string;fileBytes:number}[];sampleTruncated:boolean}[];
 }
 export interface RuntimePolicy { sessionMinutes:number; subscriptionFormat:string; subscriptionUpdateHours:number; subscriptionUaDetection:boolean; }
+// The panel address one-click Agent installation defaults to. An unset value is
+// host '' with httpPort 0; the dialogs then keep the browser address.
+export interface InstallEndpoint { host:string; httpPort:number; revision:number; updatedAt:string; updatedBy:string; }
 export interface RuntimeSettings { policy:RuntimePolicy; revision:number; updatedAt:string; updatedBy:string; }
 export interface RuntimeInfo {
  generatedAt:string; startedAt:string; uptimeSeconds:number; goVersion:string; buildVersion:string; os:string; arch:string; goroutines:number; heapBytes:number; databaseBytes:number; sqliteVersion:string; journalMode:string; migration:string;
@@ -27,6 +30,8 @@ export const settingsAPI = {
   saveBackupSchedule: (policy: BackupPolicy, expectedRevision: number, password: string) => request<BackupSchedule>('/system/backup-schedule', 'PUT', { policy, expectedRevision, password }),
   base: () => request<BaseSettings>('/system/base'),
   saveBase: (platformName: string, timezone: string, expectedRevision: number) => request<BaseSettings>('/system/base', 'PUT', { platformName, timezone, expectedRevision }),
+  installEndpoint: () => request<InstallEndpoint>('/system/install-endpoint'),
+  saveInstallEndpoint: (host: string, httpPort: number, expectedRevision: number) => request<InstallEndpoint>('/system/install-endpoint', 'PUT', { host, httpPort, expectedRevision }),
   retention: () => request<RetentionSettings>('/system/access-retention'),
   saveRetention: (policy: RetentionPolicy, expectedRevision: number) => request<RetentionSettings>('/system/access-retention', 'PUT', { policy, expectedRevision })
 };

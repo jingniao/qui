@@ -46,6 +46,12 @@ if [[ $init_system == systemd ]]; then
   host_network_path=/etc/systemd/system/proxy-agent-host-network.path
   tuning_service=/etc/systemd/system/proxy-agent-tuning.service
   tuning_path=/etc/systemd/system/proxy-agent-tuning.path
+  # The panel's web-UI update bridge: a path unit arms a root oneshot unit that runs the
+  # installed updater. Both are systemd definitions, like the panel itself, so the OpenRC
+  # branch below has no counterpart to name.
+  panel_update_service=/etc/systemd/system/proxy-panel-update.service
+  panel_update_path=/etc/systemd/system/proxy-panel-update.path
+  panel_update_helper=/usr/local/lib/proxycontrol/panel-update-request
   recovery_service=/etc/systemd/system/proxycontrol-update-recovery.service
   init_directories=(/etc/systemd /etc/systemd/system)
 else
@@ -54,6 +60,9 @@ else
   host_network_path=/usr/local/lib/proxy-agent/host-network-watch
   tuning_service=/etc/init.d/proxy-agent-tuning
   tuning_path=/usr/local/lib/proxy-agent/tuning-watch
+  panel_update_service=''
+  panel_update_path=''
+  panel_update_helper=''
   recovery_service=/etc/init.d/proxycontrol-update-recovery
   init_directories=(/etc/init.d)
 fi
@@ -166,6 +175,18 @@ if $tuning_units; then
   mv -T -- "$tuning_clear/status.json" /var/lib/proxy-agent/tuning/status.json
   rmdir -- "$tuning_clear"
   rm -- "$tuning_service" "$tuning_path"
+fi
+# The panel's update bridge has no digest either: it is a packaged script and two units
+# published like the terminal menu, and nothing is left for them to run once the panel is
+# gone. The watcher is disarmed before anything is removed, so no request that the still
+# running panel wrote can arm the oneshot unit mid-uninstall. A request directory that is
+# not there, a unit that was never enabled and a unit removed by hand are all not a failed
+# uninstall, which is why the disable calls tolerate an error.
+if [[ $component == panel && -n $panel_update_helper ]]; then
+  systemctl disable --now "${panel_update_path##*/}" 2>/dev/null || true
+  systemctl stop "${panel_update_service##*/}" 2>/dev/null || true
+  systemctl disable "${panel_update_service##*/}" 2>/dev/null || true
+  rm -f -- "$panel_update_service" "$panel_update_path" "$panel_update_helper"
 fi
 install -o root -g root -m 0600 -- "$record" "$removed"
 rm -- "$unit" "$target"

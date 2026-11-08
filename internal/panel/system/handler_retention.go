@@ -22,9 +22,16 @@ type Handler struct {
 	BackupChanged    func()
 	Restore          *OnlineRestore
 	Runtime          RuntimeProvider
+	// PanelUpdate writes the update request for the root helper of the panel
+	// updater. An unset value means the production wiring (see
+	// PanelUpdateService); the server only overrides CurrentVersion.
+	PanelUpdate *PanelUpdateService
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	if h.PanelUpdate == nil {
+		h.PanelUpdate = &PanelUpdateService{}
+	}
 	mux.Handle("GET /api/v1/system/runtime", h.Auth.Require(http.HandlerFunc(h.runtime), true))
 	mux.Handle("GET /api/v1/system/runtime-policy", h.Auth.Require(http.HandlerFunc(h.runtimePolicy), true))
 	mux.Handle("PUT /api/v1/system/runtime-policy", h.Auth.Require(http.HandlerFunc(h.saveRuntimePolicy), true))
@@ -45,6 +52,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/v1/system/base", h.Auth.Require(http.HandlerFunc(h.saveBase), true))
 	mux.Handle("GET /api/v1/system/install-endpoint", h.Auth.Require(http.HandlerFunc(h.installEndpoint), true))
 	mux.Handle("PUT /api/v1/system/install-endpoint", h.Auth.Require(http.HandlerFunc(h.saveInstallEndpoint), true))
+	mux.Handle("GET /api/v1/system/panel-update", h.Auth.Require(http.HandlerFunc(h.panelUpdateStatus), true))
+	mux.Handle("POST /api/v1/system/panel-update", h.Auth.Require(http.HandlerFunc(h.startPanelUpdate), true))
 	mux.Handle("GET /api/v1/system/access-retention", h.Auth.Require(http.HandlerFunc(h.retention), true))
 	mux.Handle("PUT /api/v1/system/access-retention", h.Auth.Require(http.HandlerFunc(h.saveRetention), true))
 	mux.Handle("GET /api/v1/system/storage-thresholds", h.Auth.Require(http.HandlerFunc(h.storageThresholds), true))

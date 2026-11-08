@@ -1,0 +1,31 @@
+# Apply the panel update the web UI requested. The panel runs as the unprivileged account
+# proxy-panel under ProtectSystem=strict and cannot replace its own program, so it writes
+# /var/lib/proxy-panel/panel-update/request.json and proxy-panel-update.path arms this
+# unit, which runs /usr/local/lib/proxycontrol/panel-update-request as root.
+#
+# This unit is deliberately not sandboxed: the updater it runs has to write
+# /usr/local/bin, /etc/systemd/system and the panel database, and has to stop and start
+# proxy-panel.service. Nothing but the version is taken from the request either: the
+# helper accepts only a regular request file owned by the panel account and runs the
+# installed /usr/local/bin/qui-update with a validated official X.Y.Z version, so the
+# trust boundary is that one program and not this unit.
+#
+# It also has no PartOf/BindsTo/Requires on proxy-panel.service on purpose: qui-update
+# stops the panel while this runs, and an ordering dependency would take this unit down
+# halfway through the update. Ordering after the boot recovery keeps a second update from
+# starting while an interrupted one is still being restored.
+[Unit]
+Description=Proxy Control: apply the panel update requested in the web UI
+After=proxycontrol-update-recovery.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/lib/proxycontrol/panel-update-request
+UMask=0077
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

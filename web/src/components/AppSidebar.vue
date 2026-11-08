@@ -593,22 +593,16 @@ function handleSectionClick(secId: string) {
   }
 
   // 展开模式下的交互：
-  const isInside = isSectionActive(secId);
-  if (!openSections.value[secId]) {
-    // 若当前未展开：展开二级菜单；若当前不在该模块下，同时导航到该模块首个可访问子页面
-    openSections.value[secId] = true;
-    if (!isInside && accessible) {
-      router.push(accessible.path);
-    }
-  } else {
-    // 若当前已展开：
-    // 若当前路由处于其他模块，点击该分栏标题直接导航至该分栏
-    if (!isInside && accessible) {
-      router.push(accessible.path);
-    } else {
-      // 若当前已处于该模块内，再次点击标题折叠二级菜单
-      openSections.value[secId] = false;
-    }
+  if (openSections.value[secId]) {
+    // 已展开的分栏再次点击标题总是折叠二级菜单，无论当前页面是否属于该分栏，都不做导航
+    openSections.value[secId] = false;
+    return;
+  }
+
+  // 未展开的分栏：展开二级菜单；若当前页面不在该分栏内，同时导航到该分栏首个可访问子页面
+  openSections.value[secId] = true;
+  if (!isSectionActive(secId) && accessible) {
+    router.push(accessible.path);
   }
 }
 

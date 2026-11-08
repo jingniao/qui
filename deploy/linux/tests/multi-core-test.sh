@@ -126,6 +126,9 @@ for init_system in systemd openrc; do
   check "$init_system tuning snapshot retained" grep -q 'proxy-agent-tuning' "$T/paths"
   component_files panel > "$T/panel-paths"
   if grep -q '/proxy-agent/' "$T/panel-paths"; then exit 1; fi
+  for suffix in usr/local/lib/proxycontrol/panel-update-request etc/systemd/system/proxy-panel-update.service etc/systemd/system/proxy-panel-update.path; do
+    check "$init_system panel snapshot $suffix" grep -qx "$root/$suffix" "$T/panel-paths"
+  done
 done
 eval "$(sed -n '/^restore_snapshot() {/,/^}/p' "$repo/deploy/linux/update.sh")"
 # Exercise the production restore loop on fixture paths. Service calls and fsync
@@ -159,4 +162,50 @@ for init_system in systemd openrc; do
   check "$init_system record restored" cmp -s "$T/three" "$registry/agent.manifest"
   check "$init_system idempotent restore" restore_snapshot agent
 done
+
+# The panel's web-UI update bridge is part of the panel snapshot, and a bridge that a failed
+# update published onto a host whose previous version had none has to be removed again
+# rather than left behind at the new version. The restore loop is the same one the agent
+# cases above use; only the file list differs.
+systemctl_calls=$T/systemctl-calls
+: > "$systemctl_calls"
+systemctl() { printf '%s\n' "$*" >> "$systemctl_calls"; return 0; }
+init_system=systemd
+snapshot=$T/snapshot-panel
+mkdir -p "$root/usr/local/bin" "$root/usr/local/lib/proxycontrol" "$root/etc/systemd/system" "$registry"
+printf original-panel > "$root/usr/local/bin/proxy-panel"
+printf original-menu > "$root/usr/local/bin/qui"
+while IFS= read -r path; do
+  [[ -f $path ]] || continue
+  mkdir -p "${snapshot}/files${path%/*}"
+  cp -p "$path" "$snapshot/files$path"
+done < <(component_files panel)
+printf new-panel > "$root/usr/local/bin/proxy-panel"
+printf '#!/bin/sh\n' > "$root/usr/local/lib/proxycontrol/panel-update-request"
+printf '# new service unit\n' > "$root/etc/systemd/system/proxy-panel-update.service"
+printf '# new path unit\n' > "$root/etc/systemd/system/proxy-panel-update.path"
+check 'panel production restore loop' restore_snapshot panel
+check 'panel binary restored' test "$(cat "$root/usr/local/bin/proxy-panel")" = original-panel
+check 'new update helper removed' test ! -e "$root/usr/local/lib/proxycontrol/panel-update-request"
+check 'new update service unit removed' test ! -e "$root/etc/systemd/system/proxy-panel-update.service"
+check 'new update path unit removed' test ! -e "$root/etc/systemd/system/proxy-panel-update.path"
+check 'path unit of the rolled-back release disabled' grep -qx -- 'disable --now proxy-panel-update.path' "$systemctl_calls"
+
+# A rollback while a web-triggered update is running must not stop the service that runs
+# the rollback: the snapshot has the bridge, so the path unit is left alone.
+snapshot=$T/snapshot-panel-bridge
+printf '#!/bin/sh\n' > "$root/usr/local/lib/proxycontrol/panel-update-request"
+printf '# service unit\n' > "$root/etc/systemd/system/proxy-panel-update.service"
+printf '# path unit\n' > "$root/etc/systemd/system/proxy-panel-update.path"
+while IFS= read -r path; do
+  [[ -f $path ]] || continue
+  mkdir -p "${snapshot}/files${path%/*}"
+  cp -p "$path" "$snapshot/files$path"
+done < <(component_files panel)
+: > "$systemctl_calls"
+check 'panel restore of a bridging release' restore_snapshot panel
+if grep -qx -- 'disable --now proxy-panel-update.path' "$systemctl_calls"; then
+  printf 'FAIL - the update path unit must not be disabled when the snapshot has it\n' >&2; exit 1
+fi
+printf 'ok - bridging release keeps its update path unit\n'; passes=$((passes+1))
 printf 'multi-core-test: %s passed\n' "$passes"

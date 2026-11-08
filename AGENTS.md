@@ -1132,6 +1132,17 @@ POST   /portal/subscription/reset
 
 三个安装命令对话框（新建服务器、原位身份恢复、版本页“添加内核”）共用该默认值；只有在面板 Web 位于 CDN 或终止 TLS 的反向代理后面、gRPC 单独暴露时才需要设置 `grpcHost`，且该名字必须被面板证书覆盖并直达面板。修改只影响之后生成的命令，不改动已有节点。
 
+## 27.15 系统管理：面板网页更新
+
+「系统设置 → 系统信息」顶部的「面板更新」卡片只有 Owner 可见：显示当前版本与 GitHub 最新正式发布（`api.github.com/repos/jingniao/qui/releases/latest`，忽略草稿与预发布，缓存 10 分钟，「检查更新」强制刷新），仅在确实存在更新的正式版时给出「更新到 vX.Y.Z」。只能安装最新正式版：没有版本选择、降级与 rc；开发版与候选版面板不支持（`dev_build`），没有 helper 目录的面板也不支持（`helper_missing`，卡片提示先在服务器上执行一次 `qui-update --component panel`）。
+
+| 接口 | 合同 |
+| --- | --- |
+| `GET /api/v1/system/panel-update` | Owner 专用（Viewer 不可见）；`?refresh=1` 跳过发布缓存。返回 `{currentVersion,supported,unsupportedReason,latest{version,publishedAt,url},latestError,updateAvailable,pending,status}`：查询失败时 `latest` 为 null、`latestError` 为固定码 `check_failed`（不回显上游文本）；`pending` 为 `{requestId,version,requestedAt,requestedBy,stalled}`，`status` 为 `{requestId,version,previousVersion,state,code,startedAt,finishedAt,interrupted}` |
+| `POST /api/v1/system/panel-update` | Owner＋CSRF，体 `{version}`，未知字段与非 X.Y.Z 版本 400 `invalid_request`，成功 202 `{requestId,version}`；409 `panel_update_unsupported`（details.reason 为 `dev_build`／`helper_missing`）、409 `panel_update_busy`、409 `panel_update_stale`（details 含 `latestVersion`／`currentVersion`）、502 `panel_update_check_failed`；请求文件写成功即记操作日志“更新面板”（target `panel`，结果为成功，实际结果看 `status`） |
+
+文件合同：面板以无特权账号运行且 `ProtectSystem=strict`，只能原子写 `/var/lib/proxy-panel/panel-update/request.json`（`{requestId,version,requestedAt,requestedBy}`，requestId 为 32 位小写十六进制、version 为正式 X.Y.Z）；`proxy-panel-update.path`（PathChanged）触发 root oneshot `proxy-panel-update.service`（`TimeoutStartSec=1800`，故意不做沙箱、不对 `proxy-panel.service` 设 PartOf/BindsTo/Requires）运行 `/usr/local/lib/proxycontrol/panel-update-request`，它校验请求（非符号链接的普通文件、属主为 proxy-panel、≤4096 字节、合法 requestId 与版本号、且版本严格新于已安装面板）后执行 `/usr/local/bin/qui-update --component panel --version X.Y.Z --yes`（更新前数据库备份、10 秒健康检查、失败回滚），把固定码写回同一目录的 `status.json`（state 为 `running`／`succeeded`／`failed`，code 为 `running`／`succeeded`／`invalid_request`／`not_newer`／`update_failed`／`version_mismatch`，无自由文本）；更新器的输出只追加到 root 0600 的 `/var/lib/proxycontrol-install/panel-update.log`。同一 requestId 只执行一次：`status.json` 已含该 id 即为该请求的答案，不再重复更新。更新期间面板重启，页面轮询重连；`pending.stalled` 表示请求超过 10 分钟没有被应答、`status.interrupted` 表示 running 超过 35 分钟（例如更新中主机重启），两者都不再算占用，允许重新提交。仅 systemd（面板本身只支持 systemd）：`install.sh` 随面板发布 helper 与两个单元（与 update-recovery、`qui` 一样不进安装记录）、创建 0700 的请求目录并只 enable/start path 单元，`update.sh` 快照这三份文件，`uninstall.sh` 停用并删除它们、保留目录与日志。已有面板需先在 shell 里跑一次 `qui-update` 才具备该能力；它只更新面板，不更新节点 Agent。
+
 # 28. gRPC 节点通信
 
 节点通信使用 Enroll 与双向流 Connect。
@@ -1163,6 +1174,8 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 终端用户认证与管理员认证隔离：门户 Cookie 为 `qui_portal_session`（Secure 时使用 `__Host-` 前缀），HttpOnly、SameSite=Strict、Path=/；会话表只存 Token 哈希。复用密码哈希、限流、同源 CSRF 与会话时长策略。禁用登录、改密码、撤销会话和删除用户立即结束相应会话；恢复备份结束门户会话。门户仅从会话取用户 ID，不接受请求指定其他用户；不展示域名访问记录。订阅链接不存浏览器 localStorage。
 
 管理员密码安全哈希存储；HTTPS；安全 Cookie；登录失败限制；会话超时；CSRF 防护；API 请求大小限制；Owner 与 Viewer 权限隔离；敏感数据默认隐藏；管理操作日志。
+
+面板网页更新是固定的 root 操作而非命令执行：面板只能写一个只含版本号的请求文件，root helper 仅安装 GitHub 最新正式版并调用既有 `qui-update`（第 27.15 节），也不因此获得其他远程操作能力。
 
 ## 29.2 节点安全
 
@@ -1199,8 +1212,11 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 | /var/lib/proxycontrol-install/ | root 0700；安装记录、operation.lock、update.lock、更新中的 rollback.*/（文件快照、updater、service.sh、journal） |
 | /usr/local/lib/proxycontrol/service.sh | systemd/OpenRC 共用服务封装 |
 | /usr/local/lib/proxycontrol/update-recovery | 开机恢复；systemd 的 proxycontrol-update-recovery.service 或 OpenRC 同名单元，不记安装记录，排在 Agent/面板/强制出站之前 |
+| /usr/local/lib/proxycontrol/panel-update-request | 面板网页更新的 root helper；由 proxy-panel-update.path 触发，校验请求后运行 qui-update（第 27.15 节） |
+| /etc/systemd/system/proxy-panel-update.path、proxy-panel-update.service | 监视 /var/lib/proxy-panel/panel-update/request.json 并运行 helper；root oneshot，TimeoutStartSec=1800，不沙箱、不 PartOf 面板；随面板发布，不记安装记录 |
+| /var/lib/proxy-panel/panel-update/ | proxy-panel 0700；面板写 request.json，helper 写 status.json |
 
-日志写 stdout → journald，OpenRC 经 logger → syslog，不写 /var/log 文件。更新前备份名为 pre-update-<版本>-<时间>.db，回滚保留 failed-update-<版本>-<时间>.db。
+日志写 stdout → journald，OpenRC 经 logger → syslog，不写 /var/log 文件。面板网页更新的更新器输出例外，只追加到 /var/lib/proxycontrol-install/panel-update.log（root 0600），拒绝原因留在 journalctl -u proxy-panel-update。更新前备份名为 pre-update-<版本>-<时间>.db，回滚保留 failed-update-<版本>-<时间>.db。
 
 `qui-update --version X.Y.Z[-rc.N] --component panel|agent` 支持 RC 与组件范围（快照/日志/回滚），组合主机明确先 panel 后 agent；省略 component 的默认仍先 Agent 后面板。`--database` 仅面板，跨迁移降级须匹配备份。首次升级步骤见[部署](docs/deployment.md) §5.0。
 
@@ -1257,7 +1273,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 
 新增能力通过既有模块接口扩展，不修改已应用迁移。
 
-每个变更在 Linux 测试机运行 `scripts/check.sh` 与真实核套件。GitHub `check` 每个发布提交手动派发，另有每周运行；`cores` 仅每周或派发 `cores=true`。`v*` 标签只构建发布，并要求同 SHA 已有成功 `check`。选包、执行命令与依赖见[部署与升级](docs/deployment.md) §2。
+日常改动用 `bash scripts/quick-check.sh` 按改动文件裁剪检查（Markdown 只查 CR/BOM；`web/**` 跑类型检查、构建与全部 `web/scripts/*-selftest.mjs`；`deploy/**`、`scripts/*.sh` 跑 `bash -n` 与相关 `deploy/linux/tests/*.sh`，并对 git 模式不是 `100755` 的脚本告警；Go 跑改动包及其模块内依赖包的 vet/test，Windows 带 `-p 1`；agent／proto／pkg／contracts 与真实核相关包跑真实核测试；`migrations/**`、`.github/**` 要求完整门禁）。完整的 Linux 门禁（`scripts/check.sh` ＋ 真实核套件）每个版本在推送到 `main` 的发布提交上跑一次，并与同一 SHA 的 GitHub `check` 并行，两者都通过才打 tag。GitHub `check` 仍按发布手动派发（另有每周运行），`cores` 只在每周或派发 `cores=true` 时运行真实核任务，`v*` 标签只构建发布且要求同 SHA 已有成功 `check`；选包、执行命令与依赖见[部署与升级](docs/deployment.md) §2。
 
 # 33. 测试要求
 

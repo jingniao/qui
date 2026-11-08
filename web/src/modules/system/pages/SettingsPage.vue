@@ -2,6 +2,9 @@
   <div class="space-y-6">
     <PageHeader title="系统设置" parent="系统" description="查看当前平台信息并管理访问记录保留策略。" />
     <div class="ios-segmented-container inline-flex overflow-x-auto max-w-full"><button v-for="tab in tabs" :key="tab.key" @click="activeTab = tab.key" :class="['ios-segmented-item whitespace-nowrap', activeTab === tab.key ? 'active' : '']">{{ tab.label }}</button></div>
+    <!-- The panel updates itself from the web UI; only the Owner sees the card and
+         it heads the 系统信息 tab, above the read-only runtime information. -->
+    <PanelUpdatePanel v-if="isOwner && activeTab === 'info'" />
     <section v-if="activeTab === 'base'" class="panel-card p-6 max-w-3xl space-y-5 text-sm">
       <div class="flex justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">平台基础设置</h2><button class="ios-btn-secondary" :disabled="baseLoading || baseSaving" @click="loadBase">刷新已保存设置</button></div>
       <ErrorState v-if="baseError" :message="baseError" @retry="loadBase" /><LoadingSkeleton v-else-if="!baseSaved" />
@@ -67,6 +70,7 @@ import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import BackupSchedulePanel from '../components/BackupSchedulePanel.vue';
 import LatencyTargetsPanel from '../components/LatencyTargetsPanel.vue';
 import RuntimeSettingsPanel from '../components/RuntimeSettingsPanel.vue';
+import PanelUpdatePanel from '../components/PanelUpdatePanel.vue';
 import RetentionJobPanel from '../components/RetentionJobPanel.vue';
 import StorageObservationPanel from '../components/StorageObservationPanel.vue';
 const route = useRoute();

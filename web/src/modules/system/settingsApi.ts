@@ -22,6 +22,24 @@ export interface RuntimeInfo {
  security:{secureCookies:boolean;httpOnlyCookies:boolean;sameSite:string;csrfRequired:boolean;passwordMinCharacters:number;passwordMaxCharacters:number;passwordAlgorithm:string;passwordIterations:number;loginAttempts:number;loginWindowMinutes:number;requestBytes:number};
 }
 export interface SubscriptionFormatInfo { id:string; aliases:string[]; contentType:string; fileName:string; usesRules:boolean; }
+// The panel updates itself from the web UI: the panel only writes a request file
+// for a root helper, so this answer carries what the card may offer. A development
+// or candidate build and a panel without the helper are unsupported but still show
+// the versions; a failed release lookup is the fixed code 'check_failed'.
+export interface PanelUpdateRelease { version:string; publishedAt:string; url:string; }
+// A pending request the helper has not answered. stalled means it has waited over ten
+// minutes, so nothing is working on it and a new request may replace it.
+export interface PanelUpdateRequestInfo { requestId:string; version:string; requestedAt:string; requestedBy:string; stalled:boolean; }
+export type PanelUpdateStateName = 'running' | 'succeeded' | 'failed';
+export type PanelUpdateCode = 'running' | 'succeeded' | 'invalid_request' | 'not_newer' | 'update_failed' | 'version_mismatch';
+// interrupted marks a status left in 'running' that no live helper can still finish,
+// for example an update killed by a server restart.
+export interface PanelUpdateStatus { requestId:string; version:string; previousVersion:string; state:PanelUpdateStateName; code:PanelUpdateCode; startedAt:string; finishedAt:string; interrupted:boolean; }
+export interface PanelUpdateInfo {
+  currentVersion:string; supported:boolean; unsupportedReason:'dev_build'|'helper_missing'|null;
+  latest:PanelUpdateRelease|null; latestError:'check_failed'|null; updateAvailable:boolean;
+  pending:PanelUpdateRequestInfo|null; status:PanelUpdateStatus|null;
+}
 export const settingsAPI = {
   subscriptionFormats: () => request<{ items: SubscriptionFormatInfo[]; default: string }>("/subscription-formats"),
   runtime:()=>request<RuntimeInfo>('/system/runtime'),
@@ -35,5 +53,7 @@ export const settingsAPI = {
   installEndpoint: () => request<InstallEndpoint>('/system/install-endpoint'),
   saveInstallEndpoint: (host: string, httpPort: number, grpcHost: string, grpcPort: number, expectedRevision: number) => request<InstallEndpoint>('/system/install-endpoint', 'PUT', { host, httpPort, grpcHost, grpcPort, expectedRevision }),
   retention: () => request<RetentionSettings>('/system/access-retention'),
-  saveRetention: (policy: RetentionPolicy, expectedRevision: number) => request<RetentionSettings>('/system/access-retention', 'PUT', { policy, expectedRevision })
+  saveRetention: (policy: RetentionPolicy, expectedRevision: number) => request<RetentionSettings>('/system/access-retention', 'PUT', { policy, expectedRevision }),
+  panelUpdate: (refresh = false) => request<PanelUpdateInfo>(`/system/panel-update${refresh ? '?refresh=1' : ''}`),
+  startPanelUpdate: (version: string) => request<{ requestId: string; version: string }>('/system/panel-update', 'POST', { version })
 };

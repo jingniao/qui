@@ -114,6 +114,13 @@ library=/usr/local/lib/proxycontrol/service.sh
 # installed once per host as well, and by both components: a host runs at most one
 # of them and the recovery must run before whichever one starts.
 recovery=/usr/local/lib/proxycontrol/update-recovery
+# The root-only half of "update the panel from the web UI": a path unit watches the
+# request file the panel writes into its own state directory, and a oneshot unit runs the
+# installed updater with the version from that file. The panel is systemd-only, so this
+# pair is a systemd pair.
+panel_update=/usr/local/lib/proxycontrol/panel-update-request
+panel_update_service=/etc/systemd/system/proxy-panel-update.service
+panel_update_path=/etc/systemd/system/proxy-panel-update.path
 registry=/var/lib/proxycontrol-install
 record=$registry/$component.manifest
 removed=$registry/$component.removed
@@ -266,7 +273,7 @@ done
 [[ -z $config || -f $config && ! -L $config ]] || fail 'Config template must be a regular local file.'
 
 # Refuse symlinked system destinations rather than traversing them as root.
-for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib /run/lock /etc/sysctl.d "$etc" "$data" "$data/host-network" "$data/tuning" "$registry"; do
+for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib /run/lock /etc/sysctl.d "$etc" "$data" "$data/host-network" "$data/tuning" "$data/panel-update" "$registry"; do
   [[ ! -L $path ]] || fail "Symlinked destination: $path"
 done
 if [[ $init_system == systemd ]]; then
@@ -522,7 +529,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/machine-id"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
@@ -537,6 +544,18 @@ if [[ $component == panel ]]; then
   # the other scripts read by line number.
   [[ -f $root/linux/qui.sh && ! -L $root/linux/qui.sh ]] || fail 'Missing packaged terminal menu script.'
   install -o root -g root -m 0600 -- "$root/linux/qui.sh" "$stage/qui"
+  # The web-UI update bridge: a path unit arms a oneshot unit, which runs the helper that
+  # is the only thing allowed to run the updater on the panel's behalf. Staged and
+  # published like the terminal menu, and likewise not part of the install record.
+  [[ -f $root/linux/panel-update-request.sh && ! -L $root/linux/panel-update-request.sh ]] \
+    || fail 'Missing packaged panel update request script.'
+  install -o root -g root -m 0600 -- "$root/linux/panel-update-request.sh" "$stage/panel-update-request"
+  for packaged in proxy-panel-update.service proxy-panel-update.path; do
+    [[ -f $service_directory/$packaged && ! -L $service_directory/$packaged ]] \
+      || fail "Missing packaged service file: $packaged"
+  done
+  install -o root -g root -m 0600 -- "$service_directory/proxy-panel-update.service" "$stage/panel-update-service"
+  install -o root -g root -m 0600 -- "$service_directory/proxy-panel-update.path" "$stage/panel-update-path"
 fi
 # The updater serves both components, so it is installed on panel and node hosts.
 [[ -f $root/linux/update.sh && ! -L $root/linux/update.sh ]] || fail 'Missing packaged updater script.'
@@ -680,6 +699,12 @@ if [[ $component == agent ]]; then
   install -d -o "$account" -g "$account" -m 0700 "$data/tuning"
   install -d -o root -g root -m 0755 /etc/sysctl.d
 fi
+if [[ $component == panel ]]; then
+  # The panel writes its update request here and reads the status the helper leaves next
+  # to it; the helper writes nothing else that the panel could see. The root helper
+  # replaces the status through a rename, so the directory stays 0700 for this account.
+  install -d -o "$account" -g "$account" -m 0700 "$data/panel-update"
+fi
 
 publishing_started=true
 publish "$stage/program" "$target" root root 0755
@@ -696,6 +721,15 @@ publish "$stage/update-recovery" "$recovery" root root 0755
 # published together with them: the systemd unit (0644) or the OpenRC init script
 # (0755), which is the mode the component's own definition gets as well.
 publish "$stage/update-recovery-service" "$recovery_service" root root "$service_mode"
+if [[ $component == panel ]]; then
+  # The update bridge lives next to the recovery hook and is published the same way;
+  # like the hook and the terminal menu it is not part of the install record. The unit
+  # pair is enabled and armed below, never started from here: only the panel asks for an
+  # update.
+  publish "$stage/panel-update-request" "$panel_update" root root 0755
+  publish "$stage/panel-update-service" "$panel_update_service" root root 0644
+  publish "$stage/panel-update-path" "$panel_update_path" root root 0644
+fi
 if [[ -n $host_network_service_digest ]]; then
   if [[ $init_system == systemd ]]; then
     publish "$stage/host-network-service" "$host_network_service" root root 0644
@@ -738,6 +772,15 @@ fi
 # update in progress (it would wait for qui-update's lock and then give up). It
 # only has work at boot; on every other boot it finds no journal.
 service_enable proxycontrol-update-recovery
+if [[ $component == panel ]]; then
+  # Only the path unit is enabled: the oneshot unit it arms runs when the panel writes a
+  # request, and starting the path unit does not evaluate the request file that is
+  # already there, so an update that this install.sh is part of is not run again. Arming
+  # the path unit here is what lets an installation that has not rebooted accept the
+  # first request from the web UI.
+  systemctl enable "${panel_update_path##*/}"
+  systemctl start "${panel_update_path##*/}"
+fi
 if [[ -n $host_network_service_digest ]]; then
   if [[ $init_system == systemd ]]; then
     # Enabled and armed, while no proxy service is started by this script: the path
@@ -789,7 +832,11 @@ else
   [[ -n ${QUI_UPDATE:-} ]] || printf 'Next: review %s/config.yaml, then rc-update add %s default && rc-service %s start.\n' "$etc" "$name" "$name"
   printf 'The service logs through logger into /var/log/messages.\n'
 fi
-if [[ $component == panel ]]; then printf 'Run qui for the terminal menu.\n'; fi
+if [[ $component == panel ]]; then
+  printf 'Run qui for the terminal menu.\n'
+  printf 'Panel updates requested in the web UI are run by %s; the request directory is %s.\n' \
+    "${panel_update_path##*/}" "$data/panel-update"
+fi
 if [[ -n $host_network_service_digest ]]; then
   if [[ $init_system == systemd ]]; then
     printf 'The enforced-source units %s and %s are enabled and armed; they apply only what the panel publishes.\n' "${host_network_service##*/}" "${host_network_path##*/}"

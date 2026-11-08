@@ -549,3 +549,67 @@ const rankedE = vueSubset('modules/dashboard/pages/DashboardPage.vue', ['userAtt
 assert.deepEqual(rankedE.topAttentionUsers.value.map(user => user.id), ['over', 'expired', 'soon', 'heavy'], 'expired/expiring users outrank plain usage, disabled users last');
 assert.equal(rankedE.userAttentionRank({ status: 'disabled', trafficLimit: 0, usedTraffic: 0 }, Date.now()), 4);
 console.log('PASS walkthrough E dashboard: panel-timezone date chip, compact ranking rows, attention ordering');
+
+// The panel updates itself from 系统设置 → 系统信息: the card heads that tab, only
+// offers the update when the server reports one, hides the action while a request is
+// outstanding, polls the helper status and never claims success by itself.
+const updatePanel = read('modules/system/components/PanelUpdatePanel.vue');
+assert.match(updatePanel, /settingsAPI\.panelUpdate\(/, 'the card reads the panel update state');
+assert.match(updatePanel, /settingsAPI\.startPanelUpdate\(/, 'the card submits the update request');
+assert.match(updatePanel, /POLL_INTERVAL_MS = 3000/, 'the card polls every 3 s');
+assert.match(updatePanel, /15 \* 60 \* 1000/, 'the card gives up polling after 15 minutes');
+assert.match(updatePanel, /journalctl -u proxy-panel-update/, 'the timeout hint names the helper unit');
+assert.match(updatePanel, /state\.value\.updateAvailable && !busy/, 'the update button needs an available update and no request in flight');
+assert.match(updatePanel, /更新请求超过 10 分钟没有被服务器处理/, 'a stalled request says what to check and is offered again');
+assert.match(updatePanel, /上次更新没有完成就被中断了/, 'an interrupted run says the server rolls back at boot');
+assert.doesNotMatch(updatePanel, /localStorage/, 'the update state comes from the backend');
+assert.match(read('modules/system/settingsApi.ts'), /panelUpdate: \(refresh/, 'the settings API exposes the update state');
+assert.match(read('modules/system/pages/SettingsPage.vue'), /<PanelUpdatePanel v-if="isOwner && activeTab === 'info'" \/>/, '系统信息 heads with the panel update card');
+console.log('PASS panel update: Owner-only card, confirmed request, helper polling, no local state');
+
+// Owner report: in the expanded sidebar an open section must collapse when its
+// header is clicked even if the current page lives outside it — it used to
+// navigate to the section's first accessible page and stay open instead.
+let sidebarSection = 'users';
+const sidebarPushed = [];
+const sidebarCollapsed = { value: false };
+const sidebarA = vueSubset('components/AppSidebar.vue', ['openSections', 'handleSectionClick'], {
+  ref: value => ({ value }),
+  navSections: [
+    { id: 'users', label: '用户管理', iconPath: '', path: '/users' },
+    { id: 'servers', label: '服务器', iconPath: '', items: [
+      { label: '服务器列表', path: '/nodes', iconPath: '' },
+      { label: '版本与更新', path: '/nodes/versions', iconPath: '', ownerOnly: true }
+    ] }
+  ],
+  router: { push: path => sidebarPushed.push(path) },
+  isOwner: { value: true },
+  isCollapsed: sidebarCollapsed,
+  isSectionActive: id => id === sidebarSection
+});
+// A closed section still opens and navigates to its first accessible page.
+sidebarA.openSections.value.servers = false;
+sidebarA.handleSectionClick('servers');
+assert.equal(sidebarA.openSections.value.servers, true, 'a closed section opens');
+assert.deepEqual(sidebarPushed, ['/nodes'], 'a closed section outside the route navigates to its first accessible page');
+// The reported bug: open + current page outside the section → collapse, never navigate.
+sidebarPushed.length = 0;
+sidebarA.handleSectionClick('servers');
+assert.equal(sidebarA.openSections.value.servers, false, 'an open section collapses even when the current page is outside it');
+assert.deepEqual(sidebarPushed, [], 'collapsing a section must not navigate');
+// Open + current page inside the section → still just collapses.
+sidebarA.openSections.value.servers = true;
+sidebarSection = 'servers';
+sidebarA.handleSectionClick('servers');
+assert.equal(sidebarA.openSections.value.servers, false, 'an open section containing the current page also collapses');
+assert.deepEqual(sidebarPushed, [], 'collapsing the active section must not navigate');
+// The collapsed sidebar and sections with a direct path stay unchanged.
+sidebarCollapsed.value = true;
+sidebarA.openSections.value.servers = false;
+sidebarA.handleSectionClick('servers');
+assert.equal(sidebarA.openSections.value.servers, false, 'the collapsed sidebar does not expand sections');
+assert.deepEqual(sidebarPushed, ['/nodes'], 'the collapsed sidebar navigates to the first accessible page');
+sidebarPushed.length = 0;
+sidebarA.handleSectionClick('users');
+assert.deepEqual(sidebarPushed, ['/users'], 'a section with a direct path still navigates');
+console.log('PASS sidebar: an open section collapses on header click even outside its pages, closed sections still open and navigate');

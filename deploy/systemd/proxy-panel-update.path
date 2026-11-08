@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the panel update request written by the web UI
+
+[Path]
+PathChanged=/var/lib/proxy-panel/panel-update/request.json
+Unit=proxy-panel-update.service
+
+[Install]
+WantedBy=multi-user.target

@@ -27,6 +27,7 @@ func (installAudit) Record(context.Context, string, string, string, string, stri
 type installHTTPFixture struct {
 	handler            http.Handler
 	repository         *Repository
+	system             *Handler
 	owner, ownerCSRF   string
 	viewer, viewerCSRF string
 }
@@ -65,12 +66,19 @@ func newInstallHTTPFixture(t *testing.T) *installHTTPFixture {
 		ActorName: func(ctx context.Context) string { return auth.Actor(ctx).Username }}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	return &installHTTPFixture{handler: mux, repository: repository, owner: ownerToken, ownerCSRF: session.CSRFToken, viewer: viewerToken, viewerCSRF: viewerSession.CSRFToken}
+	return &installHTTPFixture{handler: mux, repository: repository, system: handler, owner: ownerToken, ownerCSRF: session.CSRFToken, viewer: viewerToken, viewerCSRF: viewerSession.CSRFToken}
 }
 
 func (f *installHTTPFixture) do(t *testing.T, method, body, cookie, csrf string) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(method, "/api/v1/system/install-endpoint", strings.NewReader(body))
+	return f.at(t, method, "/api/v1/system/install-endpoint", body, cookie, csrf)
+}
+
+// at sends one request to any system route of the fixture, so the shared setup can
+// also serve the panel update handlers.
+func (f *installHTTPFixture) at(t *testing.T, method, path, body, cookie, csrf string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.RemoteAddr = "192.0.2.10:4000"
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")

@@ -267,6 +267,18 @@ install_everything() {
     printf '#!/bin/sh\n# fake terminal menu of version %s\nexit 0\n' "$version" \
       > "$state/qui.tmp.new"
     install -m 0755 "$state/qui.tmp.new" "$bin_dir/qui"
+    # The web-UI update bridge: published by this version, absent from an older host. A
+    # rollback therefore has to remove the three files, which is what the scenarios that
+    # fail after this point check.
+    printf '#!/bin/sh\n# fake panel update helper of version %s\nexit 0\n' "$version" \
+      > "$state/panel-update.tmp.new"
+    install -m 0755 "$state/panel-update.tmp.new" "$library_dir/panel-update-request"
+    printf '# fake panel update unit of version %s\n' "$version" > "$state/panel-update-unit.tmp.new"
+    install -m 0644 "$state/panel-update-unit.tmp.new" \
+      "$root/etc/systemd/system/proxy-panel-update.service"
+    printf '# fake panel update path unit of version %s\n' "$version" > "$state/panel-update-path.tmp.new"
+    install -m 0644 "$state/panel-update-path.tmp.new" \
+      "$root/etc/systemd/system/proxy-panel-update.path"
   else
     if [ "$init" = openrc ]; then
       printf '#!/sbin/openrc-run\n# fake enforced-source init script %s\nexit 0\n' "$version" \
@@ -504,7 +516,14 @@ component_files_list() {
   printf '%s\n' "$ROOT/usr/local/bin/qui-update" \
     "$ROOT/usr/local/lib/proxycontrol/service.sh"
   if [[ $component == panel ]]; then
-    printf '%s\n' "$ROOT/usr/local/bin/qui"
+    # The terminal menu and the web-UI update bridge, in the order component_files prints
+    # them. The fake install.sh below publishes the bridge as the new version does, so a
+    # scenario that fails after it starts proves that a rollback removes the three files
+    # again instead of leaving them at the new version.
+    printf '%s\n' "$ROOT/usr/local/bin/qui" \
+      "$ROOT/usr/local/lib/proxycontrol/panel-update-request" \
+      "$ROOT/etc/systemd/system/proxy-panel-update.service" \
+      "$ROOT/etc/systemd/system/proxy-panel-update.path"
   elif [[ $init == systemd ]]; then
     printf '%s\n' "$ROOT/etc/systemd/system/proxy-agent-host-network.service" \
       "$ROOT/etc/systemd/system/proxy-agent-host-network.path"
@@ -518,6 +537,27 @@ component_files_list() {
   printf '%s\n' "$REGISTRY/$component.manifest"
 }
 
+
+# The file list update.sh itself computes, extracted from the script under test and run
+# with the globals component_files reads. Scenario 24 compares it with the mirror below, so
+# a path that is added to one of them only is caught here instead of hiding at rollback
+# time.
+component_files_from_update_sh() { # component
+  local component=$1 function
+  function=$(sed -n '/^component_files() {/,/^}/p' "$update_script")
+  if [[ -z $function ]]; then
+    printf 'update-test: component_files not found in %s\n' "$update_script" >&2
+    return 1
+  fi
+  (
+    root=''
+    program_directory=/usr/local/bin
+    registry=/var/lib/proxycontrol-install
+    init_system=systemd
+    eval "$function"
+    component_files "$component"
+  )
+}
 
 # Record the digests of every file of a component, so a scenario can prove that a
 # failed update left the host exactly as it was.
@@ -1419,6 +1459,41 @@ scenario_23() {
   expect_eq 'legacy digest carried forward' "$legacy_digest" "${record_digests[*]}"
 }
 
+# 24. The panel's web-UI update bridge is part of what an update snapshots and restores:
+#     the file list component_files computes names the helper and both units, the agent's
+#     list does not, and a rollback removes a bridge that this version published onto a
+#     host whose previous version had none.
+scenario_24() {
+  new_scenario scenario-24
+  fake_reset
+  component_files_from_update_sh panel > "$dir/panel.txt"
+  expect_grep 'panel 文件列表包含更新助手' '/usr/local/lib/proxycontrol/panel-update-request' "$dir/panel.txt"
+  expect_grep 'panel 文件列表包含更新单元' '/etc/systemd/system/proxy-panel-update.service' "$dir/panel.txt"
+  expect_grep 'panel 文件列表包含更新路径单元' '/etc/systemd/system/proxy-panel-update.path' "$dir/panel.txt"
+  component_files_from_update_sh agent > "$dir/agent.txt"
+  if grep -q -F -- 'panel-update' "$dir/agent.txt"; then
+    fail_note 'agent 的文件列表不应包含面板更新单元'
+  fi
+  # The mirror the other scenarios use has to agree with the extracted function, or a
+  # rollback test would pass while a file of the component was left at the new version.
+  component_files_list panel | sed -e "s|^$ROOT||" > "$dir/panel-mirror.txt"
+  if ! cmp -s -- "$dir/panel.txt" "$dir/panel-mirror.txt"; then
+    fail_note '面板的文件列表与 update-test 的镜像不一致（见 '"$dir"')'
+  fi
+  # A host whose panel predates the bridge: the new version publishes it, the new version
+  # does not stay healthy, and the rollback has to remove the three files.
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  export FAKE_UNHEALTHY_VERSION=1.0.4
+  update_bundle 1.0.4 --component panel
+  expect_status '不健康的新版本被回滚' 1 "$LAST_STATUS"
+  expect_absent '回滚删除新的更新助手' "$ROOT/usr/local/lib/proxycontrol/panel-update-request"
+  expect_absent '回滚删除新的更新单元' "$ROOT/etc/systemd/system/proxy-panel-update.service"
+  expect_absent '回滚删除新的更新路径单元' "$ROOT/etc/systemd/system/proxy-panel-update.path"
+}
+
+
 # Each scenario runs in its own subshell with errexit on, so an unexpected failure ends
 # that scenario only; the reasons it collected are reported together.
 passes=0
@@ -1453,6 +1528,7 @@ printf 'update-test: root %s, arch %s, update.sh %s\n' \
 
 run_scenario '22 multi-core rollback and boot recovery' scenario_22
 run_scenario '23 v1 single core to v2 migration' scenario_23
+run_scenario '24 panel web-UI update bridge in the file list' scenario_24
 run_scenario '1 success' scenario_1
 run_scenario '2 install fails after replacing' scenario_2
 run_scenario '3 unhealthy new version' scenario_3

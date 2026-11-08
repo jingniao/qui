@@ -348,10 +348,10 @@ report_failure() {
 
 # The files the archive's install.sh replaces for a component: the program, the main
 # service definition, the updater and the init-system library that every host gets,
-# the terminal menu on a panel, the enforced-source pair on an agent, and the install
-# record. Defined once because the snapshot and its restore have to agree: a file
-# added to install.sh's publish calls belongs here too, or a rollback leaves it at the
-# new version.
+# the terminal menu and the web-UI update bridge on a panel, the enforced-source and
+# tuning pairs on an agent, and the install record. Defined once because the snapshot and
+# its restore have to agree: a file added to install.sh's publish calls belongs here too,
+# or a rollback leaves it at the new version.
 component_files() {
   local component=$1
   printf '%s\n' "$program_directory/proxy-$component"
@@ -362,7 +362,13 @@ component_files() {
   fi
   printf '%s\n' "$program_directory/qui-update" "$root/usr/local/lib/proxycontrol/service.sh"
   if [[ $component == panel ]]; then
-    printf '%s\n' "$program_directory/qui"
+    # The web-UI update bridge is part of a panel: install.sh publishes the helper and
+    # the two units beside the terminal menu. A snapshot taken before they existed does
+    # not contain them, and the restore then removes the ones the failed install created.
+    printf '%s\n' "$program_directory/qui" \
+      "$root/usr/local/lib/proxycontrol/panel-update-request" \
+      "$root/etc/systemd/system/proxy-panel-update.service" \
+      "$root/etc/systemd/system/proxy-panel-update.path"
   elif [[ $init_system == systemd ]]; then
     printf '%s\n' "$root/etc/systemd/system/proxy-agent-host-network.service" \
       "$root/etc/systemd/system/proxy-agent-host-network.path" \
@@ -554,6 +560,14 @@ restore_snapshot() {
       if service_is_active proxy-agent-tuning; then service_stop proxy-agent-tuning || return 1; fi
       if [[ ! -f $snapshot/files$root/etc/init.d/proxy-agent-tuning ]]; then service_disable proxy-agent-tuning || return 1; fi
     fi
+  fi
+  # An update started from the panel's web UI runs inside proxy-panel-update.service, so
+  # the restore must not stop the unit it is running in: the path unit is only disabled
+  # when the snapshot shows the previous version had no update bridge at all, before its
+  # unit files are removed below.
+  if [[ $component == panel && $init_system == systemd && -f $root/etc/systemd/system/proxy-panel-update.path ]] \
+    && [[ ! -f $snapshot/files$root/etc/systemd/system/proxy-panel-update.path ]]; then
+    systemctl disable --now proxy-panel-update.path || return 1
   fi
   while IFS= read -r path; do
     source=$snapshot/files$path

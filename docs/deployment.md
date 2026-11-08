@@ -111,7 +111,7 @@ VERSION=1.3.1 bash scripts/build-release.sh
 - 归档可复现：成员按名称排序、所有时间戳取源码提交时间（可用 `SOURCE_DATE_EPOCH` 覆盖）、属主统一为 root，gzip 不带时间戳，所以同一提交两次构建得到相同的 `SHA256SUMS`。
 - 脚本不运行测试、不部署。
 
-**门禁**：每个变更在 Linux 测试机执行 `bash scripts/check.sh`（约 31 分钟）与真实核套件（约 9 分钟）。前者包含前端构建/自测、`go vet`、`go test -race`、程序构建和部署脚本检查，需要 root 或 sudo。后者使用已校验的 Xray 26.3.27、sing-box 1.14.3、qui sing-box、mihomo 与 GOST 3.3.2，设置对应二进制/数据环境变量后执行：
+**门禁**：日常改动先跑按范围裁剪的 `bash scripts/quick-check.sh`（约 2–10 分钟：Markdown 只查 CR/BOM，`web/**` 跑类型检查/构建/自测，`deploy/**` 与 `scripts/*.sh` 跑 `bash -n` 与相关脚本测试并告警缺失的 `100755`，Go 跑改动包及其模块内依赖包的 vet/test，agent／proto／pkg／contracts 与真实核相关包跑真实核测试，`migrations/**`、`.github/**` 直接要求完整门禁）；完整的 Linux 门禁每个版本在发布提交上执行一次，并与同一 SHA 的 GitHub `check` 并行，步骤见[发布流程手册](release-runbook.md)第 2、4 节。完整门禁即 `bash scripts/check.sh`（约 31 分钟）与真实核套件（约 9 分钟）。前者包含前端构建/自测、`go vet`、`go test -race`、程序构建和部署脚本检查，需要 root 或 sudo。后者使用已校验的 Xray 26.3.27、sing-box 1.14.3、qui sing-box、mihomo 与 GOST 3.3.2，设置对应二进制/数据环境变量后执行：
 
 ```sh
 bash scripts/check.sh
@@ -383,6 +383,17 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 **发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
 
 **代理核心**：不走 `install.sh`。在面板“服务器 → 代理核心”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 可用于安装或显式替换/追加核心；省略不删除核心。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。**降级 Agent 到 1.3 以下之前必须先移除 GOST 核心**（“内核管理 → 移除”，会先确认没有入站使用它），否则旧 Agent 无法读取三种核心类型。
+
+### 5.2 面板网页更新（未发布，v1.4.3 之后）
+
+面板装好后即可在「系统管理 → 系统设置 → 系统信息 → 面板更新」（仅 Owner）里检查并安装最新正式版，不必再登录服务器；机制与文件合同见[项目说明书](../AGENTS.md) §27.15。
+
+- **前提**：这台面板必须已经用 shell 跑过一次 `qui-update`。`panel-update-request` helper 与 `proxy-panel-update.path`/`proxy-panel-update.service` 两个单元由 `install.sh` 随面板程序一起发布，升级到带该功能的版本之后才会有；旧面板的卡片显示 `helper_missing` 并直接给出该命令。开发版本与 `-rc.N` 候选版不支持网页更新（`dev_build`），仍只能用 `qui-update`。
+- **出网要求**：面板主机需能直连 `https://api.github.com`（读取 `releases/latest`，结果缓存 10 分钟，卡片上的「检查更新」强制刷新）与 `https://github.com`（更新器下载归档与 `SHA256SUMS`）。完全离线的主机没有网页更新，仍用手工 `--bundle`/`--sums`。
+- **只能装最新正式版**：没有版本选择、没有降级、没有 rc，面板也只会往请求文件里放一个版本号。发布新版本后点「检查更新」获取新版本号，再点「更新到 vX.Y.Z」并确认。
+- **过程与 `qui-update --component panel` 相同**：先把数据库备份成预更新备份、替换程序与单元、做 10 秒健康检查，失败自动回滚（见本节与 5.1 的备份/回滚规则）。期间面板服务会重启，页面断开十几到几十秒后自行重连并显示结果。
+- **只更新面板，不更新节点 Agent**。同一台主机同时装有面板与 Agent 时，先网页更新面板，再按本节用 `qui-update --component agent` 更新 Agent。
+- 提交后没有人执行、结果码含义、`stalled`/`interrupted` 的处置见[运维手册](operations.md)的“面板网页更新”。
 
 ## 6. 卸载
 

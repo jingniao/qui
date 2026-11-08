@@ -492,6 +492,69 @@ else
   printf 'skip - systemctl, runuser or openssl is missing, --update scenario not run\n'
 fi
 
+# --- The panel update bridge install.sh publishes ---------------------------------
+# The web UI cannot replace the panel itself, so install.sh publishes a root helper and
+# the path+oneshot unit pair that runs it, and creates the request directory they share.
+# Nothing here runs install.sh - that needs root and a real host - so the packaged files
+# and the lines that publish them are checked instead.
+install_script=$repo/deploy/linux/install.sh
+updater_script=$repo/deploy/linux/update.sh
+update_helper=$repo/deploy/linux/panel-update-request.sh
+update_service=$repo/deploy/systemd/proxy-panel-update.service
+update_path=$repo/deploy/systemd/proxy-panel-update.path
+for file in "$install_script" "$updater_script" "$update_helper" "$update_service" "$update_path"; do
+  check "packaged file exists: ${file##*/}" 0 test -f "$file"
+done
+has_text() { grep -q -F -- "$1" "$2"; }
+
+# The path unit is the only thing that decides when the helper runs, and it has to name
+# the request file the panel writes and the unit that runs the helper.
+check 'path unit watches the panel request file' 0 has_text \
+  'PathChanged=/var/lib/proxy-panel/panel-update/request.json' "$update_path"
+check 'path unit arms the oneshot unit' 0 has_text 'Unit=proxy-panel-update.service' "$update_path"
+check 'the oneshot unit runs the installed helper' 0 has_text \
+  'ExecStart=/usr/local/lib/proxycontrol/panel-update-request' "$update_service"
+check 'the oneshot unit is a root oneshot with a long timeout' 0 has_text 'TimeoutStartSec=1800' "$update_service"
+check 'the oneshot unit is never rate-limited' 0 has_text 'StartLimitIntervalSec=0' "$update_service"
+check 'the oneshot unit runs after the boot recovery' 0 has_text \
+  'After=proxycontrol-update-recovery.service' "$update_service"
+# qui-update stops the panel while the helper runs, so a dependency on the panel unit
+# would cancel the update halfway.
+for directive in 'PartOf=proxy-panel.service' 'BindsTo=proxy-panel.service' 'Requires=proxy-panel.service'; do
+  check "the oneshot unit has no $directive" 1 has_text "$directive" "$update_service"
+done
+
+# install.sh: the helper and both units are published with the modes systemd expects, the
+# request directory is created for the panel account, and the path unit is enabled and
+# started while the oneshot unit is never started from there.
+check 'install.sh publishes the helper' 0 has_text \
+  'publish "$stage/panel-update-request" "$panel_update" root root 0755' "$install_script"
+check 'install.sh publishes the service unit' 0 has_text \
+  'publish "$stage/panel-update-service" "$panel_update_service" root root 0644' "$install_script"
+check 'install.sh publishes the path unit' 0 has_text \
+  'publish "$stage/panel-update-path" "$panel_update_path" root root 0644' "$install_script"
+check 'install.sh creates the request directory' 0 has_text \
+  'install -d -o "$account" -g "$account" -m 0700 "$data/panel-update"' "$install_script"
+check 'install.sh enables and starts the path unit' 0 has_text \
+  'systemctl enable "${panel_update_path##*/}"' "$install_script"
+check 'install.sh starts the path unit' 0 has_text \
+  'systemctl start "${panel_update_path##*/}"' "$install_script"
+# Nothing in install.sh may start the oneshot unit: only a panel request may.
+if grep -q -E 'systemctl (start|restart)[^|]*panel_update_service|systemctl start .*proxy-panel-update\.service' "$install_script"; then
+  check 'install.sh never starts the oneshot unit' 1 true
+else
+  check 'install.sh never starts the oneshot unit' 0 true
+fi
+
+# qui-update snapshots exactly the files install.sh publishes for the panel, so a rollback
+# puts the bridge back on a host that had it and removes it on a host that did not.
+check 'update.sh snapshots the helper' 0 has_text \
+  '"$root/usr/local/lib/proxycontrol/panel-update-request"' "$updater_script"
+check 'update.sh snapshots the service unit' 0 has_text \
+  '"$root/etc/systemd/system/proxy-panel-update.service"' "$updater_script"
+check 'update.sh snapshots the path unit' 0 has_text \
+  '"$root/etc/systemd/system/proxy-panel-update.path"' "$updater_script"
+
 printf '\npanel-install-test: %s passed, %s failed\n' "$passes" "$failed"
 ((failed == 0))
 

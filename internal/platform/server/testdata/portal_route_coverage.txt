@@ -105,6 +105,7 @@ GET /api/v1/system/access-retention
 GET /api/v1/system/backup-schedule
 GET /api/v1/system/base
 GET /api/v1/system/install-endpoint
+GET /api/v1/system/panel-update
 GET /api/v1/system/runtime
 GET /api/v1/system/runtime-policy
 GET /api/v1/system/storage-thresholds
@@ -192,6 +193,7 @@ POST /api/v1/service-sets
 POST /api/v1/subscription-sources
 POST /api/v1/subscription-sources/{id}/refresh
 POST /api/v1/system/backup-retention-preview
+POST /api/v1/system/panel-update
 POST /api/v1/tunnel-rules
 POST /api/v1/tunnels
 POST /api/v1/tunnels/plan

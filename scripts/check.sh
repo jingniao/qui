@@ -152,5 +152,9 @@ fi
 # tuning-helper-test.sh activates the packaged tuning units against a fake helper
 # below /run and never writes host sysctls; the other two are rootless.
 "${as_root[@]}" bash deploy/linux/tests/tuning-helper-test.sh
+# panel-update-helper-test.sh covers the root helper behind "update the panel from the
+# web UI" against a fake installation and fake programs; it needs no privileges.
+bash -n -- deploy/linux/tests/panel-update-helper-test.sh
+bash deploy/linux/tests/panel-update-helper-test.sh
 bash deploy/linux/tests/multi-core-test.sh
 bash deploy/linux/tests/release-version-test.sh

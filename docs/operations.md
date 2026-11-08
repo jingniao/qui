@@ -265,6 +265,35 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 
 组件的回滚/恢复不替换或重启另一个组件，共享更新脚本与服务库随本次更新恢复；进入新更新前仍先处理已有未完成日志。面板数据库的备份、只读预检与跨迁移回退不变；`--database` 不能用于 `--component agent`。锁、10 秒健康窗口、systemd/OpenRC 和断电恢复机制均不变。RC1/RC2 仍 awaiting Owner approval，未执行。
 
+### 面板网页更新 **[待实机]**
+
+「系统设置 → 系统信息 → 面板更新」只由 root 侧两个单元执行，面板本身以无特权账号只写一个请求文件（第 27.15 节）。检查与排错：
+
+```sh
+systemctl status proxy-panel-update.path proxy-panel-update.service
+journalctl -u proxy-panel-update -n 100
+tail -n 100 /var/lib/proxycontrol-install/panel-update.log   # root 0600，更新器输出
+cat /var/lib/proxy-panel/panel-update/request.json /var/lib/proxy-panel/panel-update/status.json
+```
+
+- `proxy-panel-update.path` 是常驻的监视单元（正常的 `active (waiting)` 表示请求会被执行），`proxy-panel-update.service` 是每次请求运行一次的 `oneshot`（上限 1800 秒）。path 单元被停掉时网页提交仍然成功，但没有任何东西会执行：`systemctl start proxy-panel-update.path` 恢复即可；单元被 `reset-failed` 过也一样。
+- helper 在“拒绝请求”和“更新失败”时都退出 0（结果是写进 `status.json` 给面板看的），**非 0 退出只表示它连结果都没能记下**，这时按 journal 的报错修（目录/账号/权限）。
+- `status.json` 的 `code` 是唯一判据：
+
+| code | 含义与处置 |
+| --- | --- |
+| `running` | 正在更新，面板会短暂重启；等它变成别的码 |
+| `succeeded` | 已换版并通过 10 秒健康检查 |
+| `invalid_request` | 请求文件不合法（非普通文件、属主不是 proxy-panel、超过 4096 字节、requestId 或版本号不合规）；原因在 journal，重新在网页提交即可 |
+| `not_newer` | 目标版本不新于已安装版本；通常说明面板已经更新过，刷新页面 |
+| `update_failed` | `qui-update` 失败并已自动回滚；原因在 `panel-update.log` |
+| `version_mismatch` | 更新后程序报告的版本与请求不符（已被回滚）；看 `panel-update.log` 与 `pre-update-*` 备份 |
+
+- `pending.stalled`：请求写进目录但 helper 超过 10 分钟没有给出结果（path 单元没在跑是常见原因）。此时面板不再把它当作“正在更新”，可以直接重新提交。
+- `status.interrupted`：`running` 持续超过 35 分钟，通常是更新过程中主机重启或被强制断电。开机恢复（`proxycontrol-update-recovery`）会先处理上次中断的更新；确认面板已经起来、`proxy-panel --version` 正常之后，直接重新提交即可。更新期间面板被 `qui-update` 停掉是正常现象：这两个单元不对面板设 `PartOf`/`BindsTo`，不会被一起停掉。
+- **备份与回滚和手工 `qui-update --component panel` 完全一致**：更新前把数据库备份为 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间>.db`；新版本 10 秒内重启、版本不符或 `install.sh` 失败都会回滚到旧程序，并把新版本写过的数据库保留为 `failed-update-<目标版本>-<时间>.db`。要指定版本、降级或跨迁移回退，仍用命令行 [`--version`/`--database`](deployment.md#51-面板降级与数据库回退)。
+- `uninstall.sh panel` 会先停用 path 单元，再删除两个单元与 helper，保留请求目录与 `panel-update.log`。重装后能力随 `install.sh` 一起回来；已有面板仍需先用 shell 跑一次 `qui-update`。
+
 ## 11. 已移除的运维操作（不要再找这些命令）
 
 精简重构删掉了以下 Agent 本地运维模式（Phase 9/12 删除，`cmd/agent` 现在只有 14 个参数，含服务器强制出站的 `--apply-host-network`）。它们**不再存在**，对应的替代做法如下：

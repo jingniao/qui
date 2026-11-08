@@ -2,13 +2,13 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
-**未发布（开发分支 `feat/v1.4-tunnels`）**：节点一键安装命令的面板地址与面板 Web 端口改为系统设置里保存一次，不再每台新服务器手改。
+**v1.4.2（2026-11-08，tag `v1.4.2` → `a588c17`，无迁移，迁移头仍 0134）**：节点一键安装命令的面板地址与面板 Web 端口改为系统设置里保存一次，不再每台新服务器手改。
 - 新增「系统管理 → 系统设置 → 基础设置 → 节点安装连接地址」（Owner 专用）：存于既有 `system_settings` 表单一键 `install_endpoint`，**无迁移**，键缺失即未设置；`GET/PUT /api/v1/system/install-endpoint` 带 `expectedRevision` 冲突检查（409 `settings_conflict`）、无改动不推进版本，写成功记操作日志“修改节点安装连接地址”。
 - 校验口径与安装器一致：主机须匹配 `^[A-Za-z0-9.-]+$` 的域名或 IPv4（无协议、端口、括号），因此不接受裸 IPv6——`node-install.sh` 对 `--panel` 同样拒绝；端口为 0（未设置）或 1–65535；主机与端口可独立留空。
 - 三个生成安装命令的对话框（新建服务器、原位身份恢复、版本页“添加内核”）默认取该设置，未设置或读取失败时回落到浏览器访问地址；对话框内改动只影响本次命令；端口标签统一改为“面板 Web 端口”，并说明它不是 Agent gRPC 端口 18880（gRPC 端口仍取注册响应里的实际监听端口）。
 - 备份与恢复无需改动：加密归档是整库快照，`system_settings` 没有键白名单，新键随归档保存与校验；旧归档缺该键读作未设置。
 - 设置页端口输入框在“未设置”（`httpPort=0`）时显示为空并保留 22550 占位符，不再显示 `0`；提交时留空按 0 处理。
-- `node-install.sh` 加固：`--http-port` 与 `--grpc-port` 相同立即拒绝；`GET /install/ca.pem` 失败按 curl 的 HTTP 状态与退出码分类（415/426 → `--http-port` 指向 gRPC 端口；404 → 开发模式面板或没转发该路径的别的 Web 服务；DNS/拒绝/超时 → 不可达并给出 host:port），公网 CA 分支也按 `--ca-sha256` 核对取回的字节；装好信任锚、写完 `control_address` 后、登记之前用该信任锚与 `--panel` 预检 gRPC 端点（`--cacert`、无 `-k`、有 HTTP/2 时带 `--http2`，否则只测 TCP 可达），exit 0/22 通过、51/58/60/77/90/91 在登记前中止并说明面板在反代/Cloudflare 后面的常见成因与修法、6/7/28 报不可达、其余只警告不阻塞。新增 `deploy/linux/tests/node-install-test.sh`（curl/install 用 PATH 桩，42 项）并接入 `scripts/check.sh`；文档补充反代/CDN 场景。见[安装指南](install-guide.md)第 4 节与[部署](deployment.md)第 8 节。
+- `node-install.sh` 加固：`--http-port` 与 `--grpc-port` 相同立即拒绝；`GET /install/ca.pem` 失败按 curl 的 HTTP 状态与退出码分类（415/426 → `--http-port` 指向 gRPC 端口；404 → 开发模式面板或没转发该路径的别的 Web 服务；DNS/拒绝/超时 → 不可达并给出 host:port），公网 CA 分支也按 `--ca-sha256` 核对取回的字节；装好信任锚、写完 `control_address` 后、登记之前用该信任锚与 `--panel` 预检 gRPC 端点（`--cacert`、无 `-k`、有 HTTP/2 时带 `--http2`，否则只测 TCP 可达），exit 0/22 通过、51/58/60/77/90/91 在登记前中止并说明面板在反代/Cloudflare 后面的常见成因与修法、6/7/28 报不可达、其余只警告不阻塞。新增 `deploy/linux/tests/node-install-test.sh`（curl/install 用 PATH 桩，42 项）并接入 `scripts/check.sh`；文档补充反代/CDN 场景。见[安装指南](install-guide.md)第 4 节与[部署](deployment.md)第 8 节。门禁（快照 `30ae663`，合计 2801 秒）与 GitHub `check` 均通过，详见[1.4.2 发布说明](release-notes-1.4.2.md)。
 
 **v1.4.1（2026-11-08，tag `v1.4.1` → `0c1b061`）**：v1.4.0 之上的补丁版，**没有迁移**（迁移头仍 0134）：新增面板一键安装器与安装指南、默认端口改为 22550／18880，修正节点编辑器与用户列表交互，并为被拒的节点证书写日志。见[1.4.1 发布说明](release-notes-1.4.1.md)。
 

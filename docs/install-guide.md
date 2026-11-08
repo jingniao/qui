@@ -45,7 +45,7 @@ bash panel-install.sh
 **自动化安装**（无人值守，不提问、不确认）：
 
 ```sh
-bash panel-install.sh --version 1.4.0 --http-port 22550 --grpc-port 18880 \
+bash panel-install.sh --version 1.4.2 --http-port 22550 --grpc-port 18880 \
   --address panel.example.com --tls self-signed --yes
 ```
 

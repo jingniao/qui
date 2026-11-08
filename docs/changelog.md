@@ -2,8 +2,9 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
-**v1.4.1（发布日期待定）**：v1.4.0 之上的补丁版，**没有迁移**（迁移头仍 0134）：新增面板一键安装器与安装指南、默认端口改为 22550／18880，修正节点编辑器与用户列表交互，并为被拒的节点证书写日志。见[1.4.1 发布说明](release-notes-1.4.1.md)。
+**v1.4.1（2026-11-08，tag `v1.4.1` → `0c1b061`）**：v1.4.0 之上的补丁版，**没有迁移**（迁移头仍 0134）：新增面板一键安装器与安装指南、默认端口改为 22550／18880，修正节点编辑器与用户列表交互，并为被拒的节点证书写日志。见[1.4.1 发布说明](release-notes-1.4.1.md)。
 
+- 生产升级（2026-11-08，约 02:47–02:56 UTC）：用 `qui-update` 从 GitHub Release v1.4.1 升级。先面板 us2 `1.4.0` → `1.4.1`（迁移头仍 0134；`/etc/proxy-panel/config.yaml` 升级前后字节相同，仍监听 `[::]:443`／`[::]:9443`，新的 22550／18880 默认值只用于新装），再按 uk、Alpine、us2 逐台把 Agent 从 `1.4.0` 升到 `1.4.1`。四次 `qui-update` 均打印成功行，三台在线，UK/Alpine/US 修订仍为 295/296/291，无新修订、无回滚，面板服务自 02:49:22 UTC 起未重启，升级后面板日志 0 WARN／0 ERROR。恢复点为校验过的加密面板备份 `GenwwAYh…`（`.pcb`）与更新器备份 `pre-update-1.4.0-20261108-104919.db`。升级后经 uk-node 的 SOCKS5／HTTP／VLESS／SS 真实流量返回 200，阻断规则仍阻断、错误密码仍被拒；Trojan 端到端未执行（测试工具限制）。“UK → Alpine NAT”隧道自 Owner 于 2026-11-07 16:18 UTC 删除后为 `pending_delete`，仍由 Alpine 监听 21411 直到 Owner 发布移除，本次升级未改变它。净化的执行记录仅存本机忽略目录 `.tools/v141-prod-upgrade/upgrade.md`。
 - 一键面板安装器 `deploy/linux/panel-install.sh` 与[项目安装与使用指南](install-guide.md)：Debian/Ubuntu 面板主机上一条命令完成下载、按 `SHA256SUMS` 校验归档、安装程序与服务账号、写端口与证书路径、用 `--check-config` 校验、开机自启、稳定性确认与防火墙放行（ufw/firewalld 已启用时才询问）；已安装主机上同一脚本变成更新／状态／重启／卸载菜单，更新交给 `qui-update`，不覆盖已有配置、证书与数据库。
 - 默认端口改为面板 **22550**（`http_address`：Web/API/SSE/订阅）与 Agent **18880**（`grpc_address`）：安装器提问默认值与 `--help`、示例配置 `deploy/examples/panel.yaml`／`agent.yaml`、节点一键安装脚本（默认值与帮文，信任锚 URL 在端口不是 443 时带端口）、面板生成的节点安装命令（总是显式传 `--http-port` 与 `--grpc-port`，不再依赖脚本默认值）及文档同步；已有安装保持原端口，安装器从不改写已存在的 `/etc/proxy-panel/config.yaml`。本地开发配置 `*.dev.yaml` 仍是 8080／9443。
 - 节点编辑器补充自动填充与就地说明：切到 Reality 时自动生成一个 Short ID、由握手目标一键回填 server names、追加 Short ID、生成 xhttp 路径，选 xhttp 而当前安全方式在该核心上不成立时自动切到核心上报的安全并提示；Reality／xhttp 字段增加填写说明。

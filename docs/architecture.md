@@ -67,7 +67,7 @@ Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查�
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。正式版迁移头 `0128`，未发布的 `feat/v1.4-tunnels` 分支为 `0133`；新结构见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。正式版迁移头 `0134`（v1.4.0 起）；新结构见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |
@@ -104,7 +104,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **多核心运行**：`cores: [{name,path}]` 的首项是主核心，必须为 Xray 或 sing-box；GOST 不能是主核心。`cores.json.enc` 持久记录启用/禁用；每核使用 `runtime/<core>/`。一条 Revision 覆盖所有核心，先全部校验再依序切换，失败逆序补偿；发布仍重启该节点全部核心，supervisor 只恢复异常核心。移除须确认退出才删除运行目录与 Agent 自管镜像，安装器二进制与记录保留。
 
-**隧道管理（v1.4 未发布）**：`tunnels/tunnel_hops` 表达 entry → [mid] → exit，GOST TLS＋mTLS；接收跳各有一个共享监听，每节点只有一个下一跳。两节点要求契约 ≥3，三节点 ≥4，当前 Agent 上报 4。`tunnel_rules` 将入口监听指向隧道或直接目标；直接规则优先 GOST，否则主 Xray/sing-box。linked 目标随目标地址/入站端口变化派生并标 needs_publish，出口等于目标时用 loopback；manual 固定目标。`tunnel_objects` 按 ID 归属生成入站，普通入站编辑/删除返回 managed_by_tunnel。`port_claims` 持久预留，保存草稿不部署，删除已发布对象须再发布移除。
+**隧道管理（v1.4）**：`tunnels/tunnel_hops` 表达 entry → [mid] → exit，GOST TLS＋mTLS；接收跳各有一个共享监听，每节点只有一个下一跳。两节点要求契约 ≥3，三节点 ≥4，当前 Agent 上报 4。`tunnel_rules` 将入口监听指向隧道或直接目标；直接规则优先 GOST，否则主 Xray/sing-box。linked 目标随目标地址/入站端口变化派生并标 needs_publish，出口等于目标时用 loopback；manual 固定目标。`tunnel_objects` 按 ID 归属生成入站，普通入站编辑/删除返回 managed_by_tunnel。`port_claims` 持久预留，保存草稿不部署，删除已发布对象须再发布移除。
 
 **隧道发布与订阅**：计划只读，发布重算依赖、按 exit → mid → entry 交给部署批次，失败反向回滚；未变返回 unchanged。只有全成功推进版本及 0130 的无凭据 published_snapshot。订阅先按目标用户入站授权/凭据过滤，再给可见 linked 规则生成中转端点，保留协议字段、显式原 TLS server name，仅换入口地址/规则端口。草稿与 needs_publish 不改已发布地址；目标设备限制只能看到中继源地址，账户计量仍在目标。
 

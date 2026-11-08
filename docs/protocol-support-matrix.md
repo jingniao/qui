@@ -4,7 +4,7 @@
 
 本表描述当前源码支持与上游边界，不替代运行证据。基础协议证据见[验收矩阵](v1-acceptance.md) §9.12、§10.4，v1.2 与 v1.3 实机结果见 §11–12。真实主机范围为 linux/amd64；arm64 仅做 qemu-user 模拟，正式浏览器走查未执行。
 
-v1.4 开发分支未发布，迁移头 0133（正式版 0128）。画布转发迁移不增加协议能力：普通转发保留原核心，两节点 GOST 保留单段材料，三节点须独立第二段材料及契约 4。规则默认订阅隐藏，目标公网地址及已发布用户入站端口唯一匹配才 linked，否则 manual。转换不改运行修订；遗留项由 Owner 读 migration-report，详见 [M1 报告](v1.4-m1-report.md)。A1 验收待补，不把旧两节点实机结论推广到新三节点路径。
+v1.4 已发布，迁移头 0134。画布转发迁移不增加协议能力：普通转发保留原核心，两节点 GOST 保留单段材料，三节点须独立第二段材料及契约 4。规则默认订阅隐藏，目标公网地址及已发布用户入站端口唯一匹配才 linked，否则 manual。转换不改运行修订；遗留项由 Owner 读 migration-report，详见 [M1 报告](v1.4-m1-report.md)。A1 验收待补，不把旧两节点实机结论推广到新三节点路径。
 
 本表描述未修改的官方上游能力：Xray 26.x 官方发布核、sing-box 1.14.x 官方核及加上游标签的 qui 构建。fork 专有维度（`egress_proof`、`inbound_bytes`）已删除，不使用补丁核；账户统计和门控的新能力单独协商。
 
@@ -75,7 +75,7 @@ Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组
 
 ### GOST 转发的池、范围与限流（v1.3 G2）
 
-`ForwardSettings` 的目标池、`strategy`/`max_fails`/`fail_timeout`、端口范围 `port_end`、双向字节限速与 TCP 连接上限属于 GOST 设置契约**版本 2**（`CoreCapability.gost_contract_version >= 2`，开发分支 Agent 上报 4，正式版 1.3.1 为 3）。它们按“是否出现”判定：Xray 与 sing-box 转发携带任一字段时，`desiredstate.ValidateForwardCore`、面板保存/发布（`proxy.ValidateInboundForwardOptions`）与 Agent 解析主核心后的校验三处一致拒绝，不会静默丢弃；`State.Validate` 只对显式指定核心的入站判定，留空跟随主核心的入站在 `MultiRuntime` 解析后再判。
+`ForwardSettings` 的目标池、`strategy`/`max_fails`/`fail_timeout`、端口范围 `port_end`、双向字节限速与 TCP 连接上限属于 GOST 设置契约**版本 2**（`CoreCapability.gost_contract_version >= 2`，v1.4 起 Agent 上报 4，v1.3.1 为 3）。它们按“是否出现”判定：Xray 与 sing-box 转发携带任一字段时，`desiredstate.ValidateForwardCore`、面板保存/发布（`proxy.ValidateInboundForwardOptions`）与 Agent 解析主核心后的校验三处一致拒绝，不会静默丢弃；`State.Validate` 只对显式指定核心的入站判定，留空跟随主核心的入站在 `MultiRuntime` 解析后再判。
 
 | 能力 | GOST 3.3.2 | 依据与边界 |
 | --- | --- | --- |
@@ -87,7 +87,7 @@ Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组
 | UDP 限速 | 支持（待实机） | `tcp,udp` 转发的 UDP 服务同样渲染 limiter，真实 UDP 执行需实机门禁确认；UDP 目标失效后的故障切换不承诺（G0 未确认缺失 UDP 响应会产生拨号错误，`fifo` 的切换实测只在 TCP 上验证） |
 | 每转发字节 | 节点总量 | 只进入 `gost` 节点计数（AGENTS §21），没有用户额度、设备门控或域名归属，也不提供每转发的历史表/接口 |
 
-### GOST 隧道与规则（v1.4 未发布）
+### GOST 隧道与规则（v1.4）
 
 隧道管理提供 GOST TLS＋mTLS 的 entry → [mid] → exit（最多三台不同服务器）；两节点各跳契约 ≥3，三节点各跳 ≥4。每接收跳一个共享监听，中间监听只有一个下一跳，分段材料独立密封。不选隧道的规则是直接转发，有 GOST 优先，否则主 Xray/sing-box。GOST 固定 3.3.2、仅 linux/amd64，能力从 Agent 上报契约判断。规则只支持单目标/单端口；目标池/范围/限流仍在普通 GOST forward 入站中配置。
 

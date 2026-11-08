@@ -9,7 +9,8 @@
 - 三个生成安装命令的对话框（新建服务器、原位身份恢复、版本页“添加内核”）默认采用保存的 gRPC 地址与端口；gRPC 地址与面板地址相同时命令不写 `--grpc-host`，gRPC 端口未保存时沿用注册响应里的实际监听端口。修改只影响之后生成的命令，不改动已有节点。
 - 场景：面板 Web 位于 CDN 或终止 TLS 的反向代理后、gRPC 端口单独直连暴露时，把 gRPC 地址设为那条直连的 DNS-only 主机名；该名字必须被面板证书覆盖，否则安装器的预检会在登记前中止并说明。
 - 测试：`go test ./internal/panel/system/`（安装地址读写与校验）、`deploy/linux/tests/node-install-test.sh`（47 项）、`npm run typecheck`、`node web/scripts/ui-regression-selftest.mjs` 通过。
-- 发布（2026-11-08 UTC）：`v1.4.3` 打 tag → `22fb794` 并经 GitHub 发布工作流发布。门禁首轮真实核部分出现两项环境性偶发（回环端口被并行包占用、Xray 首次启动失败），隔离重跑均通过；同一快照重跑门禁 PASS（`check` 227 秒缓存命中且首轮已完整通过、实核 681 秒，合计 908 秒，无 DATA RACE），GitHub `check` run 42479913511 success。生产尚未升级，需 Owner 单独同意。见[1.4.3 发布说明](release-notes-1.4.3.md)。
+- 发布（2026-11-08 UTC）：`v1.4.3` 打 tag → `22fb794` 并经 GitHub 发布工作流发布。门禁首轮真实核部分出现两项环境性偶发（回环端口被并行包占用、Xray 首次启动失败），隔离重跑均通过；同一快照重跑门禁 PASS（`check` 227 秒缓存命中且首轮已完整通过、实核 681 秒，合计 908 秒，无 DATA RACE），GitHub `check` run 42479913511 success。见[1.4.3 发布说明](release-notes-1.4.3.md)。
+- 生产升级（2026-11-08，约 13:25–13:29 UTC）：用 `qui-update` 从 GitHub Release v1.4.3 升级。先面板 us2 `1.4.2` → `1.4.3`（13:26:02 UTC 起服务，10 秒内无重启；迁移头仍 0134；`/etc/proxy-panel/config.yaml` 未改写，sha256 仍 `e57bc1d9…`），再按 uk、Alpine、us2 逐台把 Agent 从 `1.4.2` 升到 `1.4.3`（13:26:27／13:27:36／13:28:27 UTC 启动）。四次 `qui-update` 均成功退出 0，三台在线，UK/Alpine/US 修订仍为 295/296/291（无新修订、无回滚），各主机无残留 `rollback.*`，面板升级后 0 WARN／0 ERROR（Alpine 仅在面板停机换版时记录一次预期的控制流断开并自动重连）。恢复点为校验过的加密面板备份 `yO25OluW…`（13:25:42 UTC 验证）与更新器备份 `pre-update-1.4.2-20261108-212559.db`。升级后经 uk-node 的 SOCKS5／HTTP／VLESS／Shadowsocks／Trojan 五个入口均返回 200，阻断规则与错误密码拒绝仍生效。
 
 **v1.4.2（2026-11-08，tag `v1.4.2` → `a588c17`，无迁移，迁移头仍 0134）**：节点一键安装命令的面板地址与面板 Web 端口改为系统设置里保存一次，不再每台新服务器手改。
 - 新增「系统管理 → 系统设置 → 基础设置 → 节点安装连接地址」（Owner 专用）：存于既有 `system_settings` 表单一键 `install_endpoint`，**无迁移**，键缺失即未设置；`GET/PUT /api/v1/system/install-endpoint` 带 `expectedRevision` 冲突检查（409 `settings_conflict`）、无改动不推进版本，写成功记操作日志“修改节点安装连接地址”。

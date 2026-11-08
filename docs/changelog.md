@@ -2,15 +2,16 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
-**未发布（2026-11-08，无迁移，迁移头仍 0134）**：面板可在网页里更新自己；节点安装器在 CDN 或终止 TLS 的反向代理后固定面板证书。
+**v1.4.4（2026-11-08，tag `v1.4.4` → `67c9fb0`，无迁移，迁移头仍 0134）**：面板可在网页里更新自己；节点安装器在 CDN 或终止 TLS 的反向代理后固定面板证书；面板回滚不再因停用更新单元失败而中断。见[发布说明](release-notes-1.4.4.md)。
 - 面板网页更新：「系统管理 → 系统设置 → 系统信息」顶部新增 Owner 专用「面板更新」卡片，显示当前版本与 GitHub 最新正式发布（`api.github.com/repos/jingniao/qui/releases/latest`，忽略草稿与预发布，缓存 10 分钟，「检查更新」强制刷新），只有存在更新的正式版时才出现「更新到 vX.Y.Z」。只能安装最新正式版，没有版本选择、降级与 rc；开发/候选版面板（`dev_build`）与没有 helper 目录的面板（`helper_missing`，卡片提示先在服务器上跑一次 `qui-update --component panel`）不支持。
 - 接口：`GET /api/v1/system/panel-update`（Owner，`?refresh=1` 跳过缓存）与 `POST /api/v1/system/panel-update`（Owner＋CSRF，体 `{version}`，202 `{requestId,version}`；400 `invalid_request`、409 `panel_update_unsupported`／`panel_update_busy`／`panel_update_stale`、502 `panel_update_check_failed`），写成功记操作日志「更新面板」（target `panel`）。`pending.stalled`（请求超过 10 分钟未被应答）与 `status.interrupted`（running 超过 35 分钟，例如更新中主机重启）都允许重新提交。
 - 机制：面板无特权且 `ProtectSystem=strict`，只原子写 `/var/lib/proxy-panel/panel-update/request.json`；`proxy-panel-update.path`（PathChanged）触发 root oneshot `proxy-panel-update.service`（TimeoutStartSec=1800，故意不沙箱、不对面板设 PartOf/BindsTo）运行 `/usr/local/lib/proxycontrol/panel-update-request`，校验请求（普通文件、属主 proxy-panel、≤4096 字节、32 位十六进制 requestId、严格更新的 X.Y.Z）后执行 `qui-update --component panel --version X.Y.Z --yes`（数据库备份、10 秒健康检查、失败回滚），把固定码写回 `status.json`（`running`／`succeeded`／`invalid_request`／`not_newer`／`update_failed`／`version_mismatch`，无自由文本），更新器输出只进 root 0600 的 `/var/lib/proxycontrol-install/panel-update.log`。更新期间面板重启，页面轮询重连。
 - 安装与升级：`install.sh` 随面板发布 helper 与两个单元（与 update-recovery、`qui` 一样不进安装记录）、创建 0700 的请求目录并只 enable/start path 单元；`update.sh` 快照这三份文件，`uninstall.sh` 停用并删除它们、保留目录与日志。仅 systemd；已有面板需先在 shell 跑一次 `qui-update` 才具备该能力；只更新面板，不更新节点 Agent。**无迁移**（不新增表，也不改备份/恢复合同）。
 - 文档：[项目说明书](../AGENTS.md) §27.15、§29.1、§30.1；[部署](deployment.md) §5.2；[运维](operations.md) §10。
-- 已提交未发布的修复（`8c67a46`）：节点安装器在面板 Web 位于 Cloudflare 或终止 TLS 的反向代理后时固定面板证书。此前 `GET /install/ca.pem` 用 `--cacert` 会成功（边缘证书由公网 CA 签发），但取回的文件是面板自己的证书，而 gRPC 端口呈现的正是它；把系统 CA 包装成 `/etc/proxy-agent/tls/ca.crt` 会让预检以 curl 60 失败并在登记前中止。现在按取回的文件判断：用 openssl 对照系统 CA 包，只有证书本身受公网信任时才走系统 CA 包分支，否则按固定 SHA-256 核对后直接安装该面板证书；没有 openssl 的主机回落到固定证书（同样正确）。新增 4 项 shell 测试（共 51 项通过）。
+- 修复（`8c67a46`，随本版发布）：节点安装器在面板 Web 位于 Cloudflare 或终止 TLS 的反向代理后时固定面板证书。此前 `GET /install/ca.pem` 用 `--cacert` 会成功（边缘证书由公网 CA 签发），但取回的文件是面板自己的证书，而 gRPC 端口呈现的正是它；把系统 CA 包装成 `/etc/proxy-agent/tls/ca.crt` 会让预检以 curl 60 失败并在登记前中止。现在按取回的文件判断：用 openssl 对照系统 CA 包，只有证书本身受公网信任时才走系统 CA 包分支，否则按固定 SHA-256 核对后直接安装该面板证书；没有 openssl 的主机回落到固定证书（同样正确）。新增 4 项 shell 测试（共 51 项通过）。
 - 侧栏修复：展开状态下，已展开的分栏点击标题总是收起，不再因当前页面不在该分栏而跳转到它的第一个页面；收起的分栏点击后仍展开并在需要时导航（`web/src/components/AppSidebar.vue`，前端自检新增对应检查）。
 - 发布流程提速：新增 `scripts/quick-check.sh`（按改动文件裁剪检查：文本 CR/BOM、web 类型检查/构建/自检、deploy 脚本 `bash -n` 与相关测试及可执行位告警、受影响 Go 包 vet/test、真实核包、迁移/CI 要求完整门禁）；完整门禁每个版本只在发布提交上跑一次并与 GitHub `check` 并行，偶发失败只重跑失败包一次；见[发布流程手册](release-runbook.md)、[部署](deployment.md) §2 与[项目说明书](../AGENTS.md) §32。
+- 面板回滚修复（`67c9fb0`，发布前修复）：从网页发起的更新运行在 `proxy-panel-update.service` 内，回滚只在旧版本没有更新桥接时停用 `proxy-panel-update.path`；这一步原来是严格的，systemd 拒绝（安装失败留下的坏单元文件，或 systemd 不认识该单元）时会在写回任何文件前中止恢复，面板停在刚失败的版本上。现在只报告并继续恢复文件与数据库。该回归由 GitHub `check` 在 `aa549a1` 上抓到（`deploy/linux/tests/update-test.sh` 10 个回滚场景），修复后 28 通过 / 0 失败。
 
 **v1.4.3（2026-11-08，tag `v1.4.3` → `22fb794`，无迁移，迁移头仍 0134）**：节点安装连接地址扩大到 Agent gRPC 地址与端口。
 - 「系统管理 → 系统设置 → 基础设置 → 节点安装连接地址」在原有面板地址与面板 Web 端口之外，新增 **Agent gRPC 地址**与 **Agent gRPC 端口**；`install_endpoint` 的 JSON 增加 `grpcHost`/`grpcPort`，旧数据缺这两项时读作未设置，**无迁移**。

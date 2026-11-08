@@ -50,4 +50,9 @@
 
 ## 生产升级
 
-**尚未执行。** 本版发布后生产面板与三台 Agent 仍为 v1.4.1；升级需要 Owner 单独同意，步骤与恢复点按[发布流程手册](release-runbook.md)第 7 节执行，结果会补记在本节与 [AGENTS.md](../AGENTS.md) 的“当前状态”。
+**已完成（2026-11-08，Owner 单独同意后执行）。** 先面板 us2 `1.4.1` → `1.4.2`（07:04:15 UTC 起服务），随后按 uk、Alpine、us2 逐台把 Agent 从 `1.4.1` 升到 `1.4.2`（分别在 07:04:57、07:05:31、07:05:59 UTC 启动）；四次 `qui-update` 均输出“已更新到 1.4.2，服务运行正常”。
+
+- **恢复点：** 加密面板备份 `KT7hNrOzw3rD1eWjs5sq0B48pyShxgFl21UxY04MhB8`（07:03:46Z 创建，07:03:53Z 校验通过）与更新器备份 `/var/lib/proxy-panel/backups/pre-update-1.4.1-20261108-150413.db`；四台主机的 `rollback.*` 快照在成功后已自动清理。
+- **核对：** 面板与三台 Agent 均为 1.4.2、服务 active/started；三台节点 online，修订仍为 295/296/291，核心健康（xray、gost）；面板 `NRestarts=0`，升级窗口内 0 WARN／0 ERROR；`/etc/proxy-panel/config.yaml` 的 SHA-256 未变（`e57bc1d9…`）；无 `rollback.*` 残留。Alpine 在面板停服瞬间记录一条预期的 `control channel disconnected; retaining local state` WARN，随后自动重连。
+- **真实代理抽样：** 升级后经生产入口请求，SOCKS5、HTTP、VLESS、Shadowsocks、Trojan 五个路径均返回 200。首次抽样用的旧临时客户端配置没有 Trojan 出站，误报 `000`；改用订阅中的当前凭据重测通过，与升级无关。
+- **未覆盖：** 跨迁移降级（本版无迁移）、原生 arm64 与浏览器交互回归本轮未重复验收。

@@ -4,7 +4,7 @@
 
 支持用户门户与节点组订阅、分流和域名级访问控制、协议中转/代理链、设备限制、用户额度、主机观测与整机月流量。节点可同时运行官方 Xray、官方或 qui 的未修改上游 sing-box 构建，以及仅做端口转发/加密中继的 GOST 3.3.2。中央失联时保留最后成功配置，配置失败自动回滚。
 
-最新正式版 **v1.4.2**（2026-11-08，tag → `a588c17`）；生产面板与三台 Agent（us2-node 面板＋Agent、uk-node、alpine-node Alpine LXC/OpenRC）当前仍为 v1.4.1，升级 v1.4.2 待 Owner 确认。仅在 linux/amd64 真机验证与验收；原生 arm64 主机验收本轮由 Owner 明确跳过，只有 qemu-user 模拟。版本与限制见[发布说明](docs/release-notes-1.4.2.md)，当前事实与历史见[项目说明书](AGENTS.md) 的“当前状态”和[变更记录](docs/changelog.md)。v1.4.2 之后暂无下一版本计划。
+最新正式版 **v1.4.2**（2026-11-08，tag → `a588c17`）；生产面板与三台 Agent（us2-node 面板＋Agent、uk-node、alpine-node Alpine LXC/OpenRC）均已升级到 v1.4.2。仅在 linux/amd64 真机验证与验收；原生 arm64 主机验收本轮由 Owner 明确跳过，只有 qemu-user 模拟。版本与限制见[发布说明](docs/release-notes-1.4.2.md)，当前事实与历史见[项目说明书](AGENTS.md) 的“当前状态”和[变更记录](docs/changelog.md)。v1.4.2 之后暂无下一版本计划。
 
 | 任务 | 入口 |
 | --- | --- |

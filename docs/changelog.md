@@ -2,13 +2,14 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
-**未发布（开发分支，基于 v1.4.2，无迁移，迁移头仍 0134）**：节点安装连接地址扩大到 Agent gRPC 地址与端口。
+**v1.4.3（2026-11-08，tag `v1.4.3` → `22fb794`，无迁移，迁移头仍 0134）**：节点安装连接地址扩大到 Agent gRPC 地址与端口。
 - 「系统管理 → 系统设置 → 基础设置 → 节点安装连接地址」在原有面板地址与面板 Web 端口之外，新增 **Agent gRPC 地址**与 **Agent gRPC 端口**；`install_endpoint` 的 JSON 增加 `grpcHost`/`grpcPort`，旧数据缺这两项时读作未设置，**无迁移**。
 - 校验与安装器一致：`grpcHost` 与 `host` 同规则（空、域名或 IPv4，不含协议/端口）；`grpcPort` 为 0（未设置）或 1–65535；面板 Web 端口非 0 时不得与 gRPC 端口相同；四项可独立留空。
 - `node-install.sh` 新增 `--grpc-host HOST`：省略或等于 `--panel` 时沿用面板地址；该地址用于 `control_address`、`server_name` 与登记前 gRPC 预检，失败信息按 `--grpc-host`/`--grpc-port` 命名。证书下载仍走 `--panel` 与 `--http-port`。
 - 三个生成安装命令的对话框（新建服务器、原位身份恢复、版本页“添加内核”）默认采用保存的 gRPC 地址与端口；gRPC 地址与面板地址相同时命令不写 `--grpc-host`，gRPC 端口未保存时沿用注册响应里的实际监听端口。修改只影响之后生成的命令，不改动已有节点。
 - 场景：面板 Web 位于 CDN 或终止 TLS 的反向代理后、gRPC 端口单独直连暴露时，把 gRPC 地址设为那条直连的 DNS-only 主机名；该名字必须被面板证书覆盖，否则安装器的预检会在登记前中止并说明。
 - 测试：`go test ./internal/panel/system/`（安装地址读写与校验）、`deploy/linux/tests/node-install-test.sh`（47 项）、`npm run typecheck`、`node web/scripts/ui-regression-selftest.mjs` 通过。
+- 发布（2026-11-08 UTC）：`v1.4.3` 打 tag → `22fb794` 并经 GitHub 发布工作流发布。门禁首轮真实核部分出现两项环境性偶发（回环端口被并行包占用、Xray 首次启动失败），隔离重跑均通过；同一快照重跑门禁 PASS（`check` 227 秒缓存命中且首轮已完整通过、实核 681 秒，合计 908 秒，无 DATA RACE），GitHub `check` run 42479913511 success。生产尚未升级，需 Owner 单独同意。见[1.4.3 发布说明](release-notes-1.4.3.md)。
 
 **v1.4.2（2026-11-08，tag `v1.4.2` → `a588c17`，无迁移，迁移头仍 0134）**：节点一键安装命令的面板地址与面板 Web 端口改为系统设置里保存一次，不再每台新服务器手改。
 - 新增「系统管理 → 系统设置 → 基础设置 → 节点安装连接地址」（Owner 专用）：存于既有 `system_settings` 表单一键 `install_endpoint`，**无迁移**，键缺失即未设置；`GET/PUT /api/v1/system/install-endpoint` 带 `expectedRevision` 冲突检查（409 `settings_conflict`）、无改动不推进版本，写成功记操作日志“修改节点安装连接地址”。

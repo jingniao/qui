@@ -562,12 +562,16 @@ restore_snapshot() {
     fi
   fi
   # An update started from the panel's web UI runs inside proxy-panel-update.service, so
-  # the restore must not stop the unit it is running in: the path unit is only disabled
-  # when the snapshot shows the previous version had no update bridge at all, before its
-  # unit files are removed below.
+  # the restore must not stop the unit it is running in: only the path unit is disabled,
+  # and only when the snapshot shows the previous version had no update bridge at all,
+  # before its unit files are removed below. A disable that fails (a unit file the failed
+  # install left broken, or systemd refusing the call) is reported and the restore goes
+  # on: leaving the old files in place because the watcher could not be disabled would
+  # keep the panel on the version that just failed.
   if [[ $component == panel && $init_system == systemd && -f $root/etc/systemd/system/proxy-panel-update.path ]] \
     && [[ ! -f $snapshot/files$root/etc/systemd/system/proxy-panel-update.path ]]; then
-    systemctl disable --now proxy-panel-update.path || return 1
+    systemctl disable --now proxy-panel-update.path \
+      || printf '[%s] 无法停用 proxy-panel-update.path，仍继续恢复更新前的文件。\n' "$component"
   fi
   while IFS= read -r path; do
     source=$snapshot/files$path

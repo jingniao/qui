@@ -53,7 +53,7 @@
       </section>
       <section class="space-y-3 border-t border-ios-border pt-5">
         <h4 class="text-ios-label text-base font-semibold leading-normal">连接设置</h4>
-        <p class="text-xs text-ios-secondary">服务器地址：<span class="font-mono">{{ selectedServer?.publicIp || selectedServer?.hostname || '未上报' }}</span></p>
+        <p class="text-xs text-ios-secondary">服务器地址：<span class="font-mono" :class="connectAddress(selectedServer) ? '' : 'text-ios-orange'">{{ connectAddress(selectedServer) || '未设置连接地址' }}</span><router-link v-if="isOwner && selectedServer && !connectAddress(selectedServer)" :to="`/nodes/${selectedServer.id}?tab=settings`" class="ml-2 text-ios-blue font-medium hover:underline">去设置连接地址</router-link></p>
         <div class="text-xs text-ios-secondary">
           <label for="node-editor-port" class="block">监听端口</label>
           <div class="flex items-center gap-2 mt-1.5">
@@ -68,7 +68,7 @@
       </section>
       <section class="space-y-4 border-t border-ios-border pt-5">
         <h4 class="text-ios-label text-base font-semibold leading-normal">协议设置</h4>
-        <NodeProtocolFields :state="state" :server="selectedServer" :gost="gostForwardReady(selectedServer, f.core)" />
+        <NodeProtocolFields :state="state" :server="selectedServer" :certificates="certificates" :gost="gostForwardReady(selectedServer, f.core)" />
       </section>
       <section class="space-y-3 border-t border-ios-border pt-5">
         <h4 class="text-ios-label text-base font-semibold leading-normal">授权与订阅</h4>
@@ -127,10 +127,12 @@ import { deviceGateUdpUnsupported } from '../../../../app/deviceLimit';
 import { proxyAPI, choices, loadProtocolSupport, protocolOptions, type Inbound, type Outbound, type OutboundGroup, type ProxyChain } from '../../api';
 import { nodeAPI, type NodeView } from '../../../nodes/api';
 import { getNodePortRange, loadNodeMeta } from '../../../nodes/nodeMeta';
+import { connectAddress } from '../../../nodes/nodeAddress';
 import { groupAPI, freshGroup, type NodeGroup } from '../../../nodes/groupsApi';
 import { groupInput } from '../../lineGroups';
 import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
+import { certificatesAPI, type ManagedCertificate } from '../../../system/certificatesApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
 import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, portConflict, previewPayload, protocolChoices, protocolReason, randomPort, relayMode, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
@@ -140,6 +142,7 @@ const route = useRoute();
 const state = reactive(createEditor(props.serverId || String(route.query.server || ''), props.inbound, props.origin));
 const f = computed(() => state.form);
 const servers = ref<NodeView[]>([]), inbounds = ref<Inbound[]>([]), users = ref<ProxyUser[]>([]);
+const certificates = ref<ManagedCertificate[]>([]);
 const outbounds = ref<Outbound[]>([]), groups = ref<OutboundGroup[]>([]), chains = ref<ProxyChain[]>([]);
 const memberGroups = ref<NodeGroup[]>([]), selectedGroupIds = ref<string[]>([]);
 const initialGroupIds = ref<string[]>([]);
@@ -188,7 +191,7 @@ const forwardPreview = computed(() => {
 });
 const serverPortRange = computed(() => getNodePortRange(f.value.nodeId));
 const diff = computed(() => {
-  const after = previewPayload(buildPayload(state));
+  const after = previewPayload(buildPayload(state, selectedServer.value));
   const before = state.original ? previewPayload(createEditor('', state.original, 'server').form) : {} as Record<string, unknown>;
   return Object.entries(after).map(([field, value]) => ({ field, before: JSON.stringify(before[field], null, 2) ?? '—', after: JSON.stringify(value, null, 2), changed: JSON.stringify(before[field]) !== JSON.stringify(value) }));
 });
@@ -222,6 +225,7 @@ async function load() {
   loading.value = true; loadError.value = '';
   try {
     await loadProtocolSupport();
+    if (isOwner.value) certificates.value = await certificatesAPI.list();
     const data = await Promise.all([choices((p, s) => nodeAPI.list(p, '', false, s)), choices((p, s) => proxyAPI.inbounds('', p, s)), choices((p, s) => userAPI.list(p, '', s)), choices((p, s) => proxyAPI.outbounds('', p, s)), choices((p, s) => proxyAPI.groups('', p, s)), choices((p, s) => proxyAPI.chains('', p, s)), choices(groupAPI.list)]);
     if (disposed) return;
     [servers.value, inbounds.value, users.value, outbounds.value, groups.value, chains.value] = data;
@@ -262,7 +266,7 @@ async function save(publish: boolean) {
     // Re-read before save; the live check is advisory and the API remains authoritative.
     inbounds.value = await choices((p, s) => proxyAPI.inbounds('', p, s));
     for (let n = 1; n <= 5; n++) if (!check(n)) return;
-    const value = buildPayload(state);
+    const value = buildPayload(state, selectedServer.value);
     const saved = await proxyAPI.saveInbound(state.original?.id || null, value);
     savedInbound.value = saved;
     savedId.value = saved.id;

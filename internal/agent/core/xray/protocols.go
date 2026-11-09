@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/netip"
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"strings"
 )
@@ -31,9 +32,11 @@ type tlsSettings struct {
 	ALPN              []string         `json:"alpn,omitempty"`
 }
 type tlsCertificate struct {
-	Certificate []string `json:"certificate"`
-	Key         []string `json:"key,omitempty"`
-	Usage       string   `json:"usage,omitempty"`
+	Certificate     []string `json:"certificate,omitempty"`
+	Key             []string `json:"key,omitempty"`
+	CertificateFile string   `json:"certificateFile,omitempty"`
+	KeyFile         string   `json:"keyFile,omitempty"`
+	Usage           string   `json:"usage,omitempty"`
 }
 type wsSettings struct {
 	Path string `json:"path"`
@@ -128,8 +131,9 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 		return nil, nil
 	}
 	// Legacy transports were checked without server certificate material here.
-	// New server settings must keep their direction, including their private key.
-	validateInbound := inbound && settings.HasServerSettings()
+	// New server settings must keep their direction, including their private key,
+	// and a node-side file pair is inbound TLS material like any other.
+	validateInbound := inbound && (settings.HasServerSettings() || settings.HasCertificateFiles())
 	if err := desiredstate.ValidateSettings("vless", settings, validateInbound); err != nil {
 		return nil, err
 	}
@@ -147,9 +151,23 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 		result.Reality = &realitySettings{Target: r.HandshakeTarget, ServerNames: r.ServerNames, PrivateKey: r.PrivateKey, ShortIDs: r.ShortIDs}
 	}
 	if security == "tls" {
+		// The core reads these files itself, so their usability is proved here,
+		// before the native check and the apply (v1.4.7 section 3).
+		if inbound && settings.HasCertificateFiles() {
+			if err := core.ValidateCertificateFiles(settings); err != nil {
+				return nil, err
+			}
+		}
 		result.TLS = &tlsSettings{ServerName: settings.ServerName}
 		if inbound {
-			result.TLS.Certificates = []tlsCertificate{{Certificate: strings.Split(strings.TrimSpace(settings.CertificatePEM), "\n"), Key: strings.Split(strings.TrimSpace(settings.PrivateKeyPEM), "\n")}}
+			// A node-side file pair is read by the core itself; pasted material
+			// travels inline. The two cannot be mixed (desiredstate refuses it),
+			// and the Agent has already proved the files load.
+			if settings.CertificatePath != "" {
+				result.TLS.Certificates = []tlsCertificate{{CertificateFile: settings.CertificatePath, KeyFile: settings.PrivateKeyPath}}
+			} else {
+				result.TLS.Certificates = []tlsCertificate{{Certificate: strings.Split(strings.TrimSpace(settings.CertificatePEM), "\n"), Key: strings.Split(strings.TrimSpace(settings.PrivateKeyPEM), "\n")}}
+			}
 		} else if settings.TrustedCAPEM != "" {
 			result.TLS.Certificates = []tlsCertificate{{Certificate: strings.Split(strings.TrimSpace(settings.TrustedCAPEM), "\n"), Usage: "verify"}}
 			result.TLS.DisableSystemRoot = true

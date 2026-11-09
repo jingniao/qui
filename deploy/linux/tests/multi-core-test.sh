@@ -116,6 +116,13 @@ if node_args --core gost >/dev/null 2>&1; then exit 1; fi
 if node_args --core gost --core sing-box >/dev/null 2>&1; then exit 1; fi
 printf 'ok - one-click GOST as the first core refused\n'; passes=$((passes+1))
 
+# The Agent's certificate directory is a fixed part of the section 30.2 layout: an
+# inbound may name certificate files from it, so the installer has to create it with
+# the mode the Agent can read and root alone can write. Both installers state it, and
+# neither removes it again (uninstall keeps the configuration next to it).
+check 'installer creates the Agent certificate directory' grep -qF 'install -d -o root -g "$account" -m 0750 "$etc/certs"' "$repo/deploy/linux/install.sh"
+check 'one-command installer creates the Agent certificate directory' grep -qF 'install -d -o root -g proxy-agent -m 0750 /etc/proxy-agent/certs' "$repo/deploy/linux/node-install.sh"
+
 eval "$(sed -n '/^component_files() {/,/^}/p' "$repo/deploy/linux/update.sh")"
 root=$T/root; program_directory=$root/usr/local/bin; registry=$root/var/lib/proxycontrol-install
 for init_system in systemd openrc; do

@@ -654,6 +654,11 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 		return &pb.Capabilities{}, errors.New("configured core does not identify as sing-box")
 	}
 	capabilities := &pb.Capabilities{CoreName: "sing-box", CoreVersion: match[1], ForwardInboundSupported: true}
+	// The renderer emits the upstream certificate_path/key_path fields, so this
+	// Agent can apply an inbound whose certificate lives on the node. The native
+	// check still gates every apply, and the panel only accepts the setting when
+	// this bit is reported (v1.4.7 section 3).
+	capabilities.TlsCertificateFilesSupported = true
 	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
 	if capabilities.DeviceGateSupported {
 		capabilities.ObservationContractVersion = 2

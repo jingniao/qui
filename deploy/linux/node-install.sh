@@ -309,6 +309,12 @@ printf '\nInstalling Agent and cores: %s ...\n' "${cores[*]}"
 
 config=/etc/proxy-agent/config.yaml
 ca_file=/etc/proxy-agent/tls/ca.crt
+# The Agent's own certificate directory (v1.4.7 section 3): an inbound may name a
+# certificate and key file from here instead of pasted material. install.sh
+# created it above; repeating it keeps the one-command install self-contained and
+# idempotent, because a re-run over an existing installation must not fail.
+install -d -o root -g proxy-agent -m 0750 /etc/proxy-agent/certs \
+  || fail '无法创建 /etc/proxy-agent/certs。'
 # 443 is the implicit HTTPS port of a URL, not the default: the default 22550 and
 # every other port has to be spelled out in the URL that fetches the CA.
 authority=$panel

@@ -79,6 +79,47 @@ systemctl start proxy-agent.service
 - **吊销单个证书**：面板节点页的 `POST /api/v1/nodes/{id}/revoke-certificate`；被吊销的证书在 mTLS 上被拒绝，需要重新登记。
 - **身份存储格式**：当前只支持一种格式（写 2 / 读最大 2，`identity/client.crt` + `identity/client.key`）。若节点上保存的是已删除的旧格式（例如旧代码下轮换过密钥的节点，格式 3），Agent 启动会被拒绝并提示 `stored agent identity format N is no longer supported; re-enroll this node`，该节点必须重新登记。
 
+## 3.1 入站 TLS 证书：节点文件与续期（v1.4.7 C1）
+
+入站的证书来源记在 `inbounds.tls_source`：`paste` 粘贴内容、`self_signed` 面板自签、`file` 节点上的文件、`acme` 引用面板自己申请的证书（第 3.2 节），入站只存证书 ID、不存 PEM。
+
+**节点文件**（`file`）：
+
+- 文件只能放在 `/etc/proxy-agent/certs/`（安装器以 root:proxy-agent 0750 幂等创建，卸载保留），由 Owner 自己放进去并保证 Agent 账号可读；面板只保存两个绝对路径，不复制也不转存私钥。
+- 保存规则：仅 TLS 入站；必须同时填证书与私钥；与粘贴的 PEM 互斥；路径必须绝对、已规范、≤256 字节、位于上述目录且不含 `..`；出站永不携带。
+- Agent 在应用配置时用 `filepath.EvalSymlinks` 解析两个路径，确认解析结果仍在该目录、文件可读、`tls.LoadX509KeyPair` 成功且叶子证书未过期；任一不满足就拒绝应用，按普通失败规则回滚到上一次成功的配置。私钥权限宽于 0640 只记一条 WARN（`journalctl -u proxy-agent` 里的 `certificate private key is readable beyond its owner and group`）。
+- 证书文件过期或丢失时，下一次应用失败并保留原配置；Agent 重启后仍保留的修订若引用过期或缺失的文件就无法渲染，该核心停到文件恢复为止，请在到期前续期再重启核心。
+- 首次使用需要 Agent 已上报 `tls_certificate_files_supported`；旧 Agent 保存这类入站会直接被面板拒绝，先升级 Agent。
+
+**续期**：证书由 certbot、acme.sh 等外部工具续期后，**由 Owner 在「节点详情 → 重启核心」重启一次该节点的核心**，新证书才会生效。本版不做文件监视、也不会自动重启核心；sing-box 与 Xray 是否会自动重新加载同名文件中的新证书，须在 Linux 实机上验证后再改这段说明。**不要把证书文件改名轮换**：入站记录的是固定路径，改名等于让下次发布找不到文件。
+
+**自签名**（`self_signed`）：面板按节点客户端连接地址（连接地址优先，其次公网 IP）签发，用户入站有效期 10 年，内部中转 1 年。证书、私钥与可信 CA 都写进入站设置，客户端通过订阅钉住它：sing-box 格式写 `tls.certificate`，mihomo 写 fingerprint，URI/Base64 会省略钉了 CA 的 Hysteria2/TUIC。改了连接地址后可在编辑器里请求重新生成（`regenerateCertificate`），否则沿用已发的证书，读取接口的 `certificateInfo.coverageWarning` 会提示证书已不覆盖当前地址。
+
+**备份**：面板备份与恢复只带上两个路径（`tls_source` 与设置里的路径），不包含节点文件本身；恢复后仍需保证节点上文件存在，否则发布会被 Agent 拒绝。
+
+## 3.2 Cloudflare API Token 与自动申请（v1.4.7 D1）
+
+面板可以自己向 Let's Encrypt 申请证书并自动续期（说明书 §27.16）。签发过程写在面板上：面板写 Cloudflare 的 TXT 记录完成 DNS-01，再等权威名称服务器生效，然后才向 CA 提交。入站选择来源 `acme` 并指定证书即可使用（需要证书已签发成功）；页面（D3）之前，证书库与设置只有接口可用。
+
+**建一个最小权限的 Token**（不要用 Global API Key，也不要给 Token 任何 `Zone:Zone`、`Zone:Zone Settings` 权限）：
+
+1. Cloudflare 控制台 → My Profile → API Tokens → Create Token → Custom token。
+2. Permissions 只加一项：`Zone` → `DNS` → `Edit`。
+3. Zone Resources 只选真正要签发的那一个（或几个）区域，不要给全部区域。
+4. 创建后复制一次，粘贴到「Cloudflare API Token」；面板保存前会调 `GET /user/tokens/verify` 验证，无效直接拒绝（`cloudflare_token_invalid`）。保存后接口只回末 4 位，Token 本身不再出现。
+
+**先用 staging**：CA 选 `staging`，申请一个测试域名走一遍「申请 → 续期」。staging 签发的是客户端不信任的证书，只用来验证 Token、区域与 DNS 生效；确认无误后改成 `production` 再正式申请。切换 CA 或邮箱时面板会重新注册 ACME 账户（旧的留在 CA 上，不影响使用）。
+
+**自动 DNS**：勾选后，面板把每个非通配域名的 A/AAAA 记录指向所选节点的**公网 IP**（不是连接地址，因为连接地址可能正是这个域名），`proxied=false`（灰云，橙云不支持 UDP，Hysteria2/TUIC 会失效）、`ttl=1`（自动）。节点没有公网 IP 时这一步直接失败（`dns_node_address_missing`），先在节点设置里填好或等心跳自动填上。
+
+**速率与退避**：Let's Encrypt 对正式环境的同一组域名有「每周重复证书」与「每账户每小时」的限制，测试时请用 staging。面板失败后按 1 小时 → 6 小时 → 24 小时退避重试，记录固定错误码（页面显示对应中文）；被 CA 限流时是 `acme_rate_limited`，需要等窗口过去，不要连着点「续期」。到期前 30 天开始续期，剩余不足 7 天仍失败时会发一条 `system.alert` 并记一条“证书续期失败”操作日志，每张证书每天最多一次。
+
+**续期后的发布窗口**：证书续期成功后，面板会为用到它的节点（入站来源 `acme`）自动生成并部署一个配置版本（说明 `auto: certificate <域名> renewed`），只替换证书与私钥。这次发布和任何发布一样会重启该节点的全部核心，现有连接会短暂中断，所以只在低峰窗口内进行：设置里的 `deployStartHour`–`deployEndHour`（面板时区，默认 3–6 点，结束小时不含，开始大于结束表示跨零点；通过 `PUT /api/v1/system/certificate-settings` 修改）。窗口外续期好的证书先留在证书库，窗口打开后（每小时检查一次）才下发，旧证书在到期前一直可用，所以窗口不要设得太窄。自动发布只处理续期（证书名称不变）；把入站改选另一张证书必须由 Owner 手动发布。节点正忙则下次检查再来；节点离线则重连后收到；部署失败或节点回滚的节点在下一个窗口重试。同一节点连续 3 次失败后面板停止重试，发布一条 `system.alert`（`certificate_deploy_failed`）并在操作日志记“证书自动发布失败”：先看该节点的最新修订与 Agent 日志，修好后手动发布一次即可（手动发布已带新证书，自动发布不会重复）；下一次续期出新证书时会重新开始自动发布。面板重启后第一次检查会找回重启前已续期、尚未下发的证书。
+
+**恢复**：证书库、Cloudflare Token 与 ACME 账户密钥都在加密备份里（密封值原样往返）。恢复后不会自动重新申请；签发中被打断的行变成 `failed`/`interrupted`，按退避在下一个调度周期重试。恢复后如果换了域名或 Token，先更新设置再续期。
+
+**出站要求**：面板需要能访问 `api.cloudflare.com`、`acme-v02.api.letsencrypt.org`／`acme-staging-v02.api.letsencrypt.org`，并用 UDP 53 查询权威名称服务器；不需要开放 80 端口。
+
 ## 4. 手工轮换面板节点 CA **[待实机]**
 
 面板只持有一个节点 CA，加载或创建都在 `node_identity_directory`（示例 `/var/lib/proxy-panel/identity`）。轮换是本地文件操作：

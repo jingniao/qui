@@ -209,6 +209,29 @@ func (d *quotaDeployer) accessChanged(ctx context.Context, userID, username, rea
 	d.schedule(ctx, user.Transition{UserID: userID, Username: username, Reason: reason})
 }
 
+// groupAccessChanged is the Owner-save/delete hook for a node group. A group's
+// members decide which inbounds a granted user's credentials reach, so changing
+// or deleting the group changes every granted user's access without touching a
+// user row: the node would otherwise keep the credentials until someone
+// published by hand. Each user is queued through the same schedule call a grant
+// change uses, so the node set, the coalescing window and the reconciliation
+// stay exactly as they are for a user edit.
+func (d *quotaDeployer) groupAccessChanged(ctx context.Context, groupID string, userIDs []string, reason string) {
+	for _, userID := range userIDs {
+		account, err := d.users.Get(ctx, userID)
+		if errors.Is(err, user.ErrNotFound) {
+			// The grant outlived its user; the delete path already removed
+			// that user's credentials.
+			continue
+		}
+		if err != nil {
+			d.logger.Error("node group change could not read user", "group", groupID, "user", userID, "error", err)
+			continue
+		}
+		d.schedule(ctx, user.Transition{UserID: account.ID, Username: account.Username, Reason: reason})
+	}
+}
+
 // reconcileNode queues one reconciliation of a node's user access surface. The
 // Deployment module calls it after every successful deploy and rollback: both
 // re-publish a stored revision verbatim, so a rollback to a revision rendered

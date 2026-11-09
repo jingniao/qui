@@ -33,6 +33,11 @@ const nodeEditor = await load(transpile(read('components/node-editor/nodeEditorM
   source.replaceAll("'./serverSettingsModel'", JSON.stringify(serverSettingsURL)).replace(
     /import \{[^}]*\} from '\.\.\/\.\.\/\.\.\/nodes\/coreSummary';/,
     'const blockedCores = () => []; const findCore = () => undefined; const multiCoreSupported = () => false; const nodeCores = () => []; const primaryCoreName = () => "";'
+  ).replace(
+    // The address helper has its own self-test; this harness only needs the model
+    // to load, and it never resolves a certificate source here.
+    /import \{ connectAddress \} from '\.\.\/\.\.\/\.\.\/nodes\/nodeAddress';/,
+    'const connectAddress = () => "";'
   )));
 assert.deepEqual(nodeEditor.listenNetworks({ protocol: 'vless', settings: {} }), ['tcp']);
 assert.deepEqual(nodeEditor.listenNetworks({ protocol: 'trojan', settings: {} }), ['tcp']);
@@ -61,7 +66,7 @@ assert.match(guess.slice(0, guess.indexOf('// Simple protocol parser')), /suppor
 
 
 // ------------------------------------------------------------- 2. canvas library
-// api.ts is transpiled with its two runtime imports stubbed so the real
+// api.ts is transpiled with its runtime imports stubbed so the real
 // canvasInstanceRef / selfHostedResourceId are the ones under test.
 const api = await load(transpile(read('api.ts'), source => source
   .replace("import { reactive } from 'vue';", 'const reactive = value => value;')
@@ -74,8 +79,9 @@ const library = await load(transpile(
 
 const servers = [
   { id: 'srv-a', name: 'HK-01', publicIp: '203.0.113.9', status: 'online', enabled: true },
-  { id: 'srv-b', name: 'JP-01', hostname: 'jp.example.com', status: 'degraded', enabled: true },
+  { id: 'srv-b', name: 'JP-01', connectHost: 'jp.example.com', status: 'degraded', enabled: true },
   { id: 'srv-off', name: 'OLD-01', publicIp: '198.51.100.1', status: 'online', enabled: false },
+  { id: 'srv-empty', name: 'NONE-01', status: 'online', enabled: true },
   { id: 'srv-gone', name: 'GONE-01', publicIp: '198.51.100.2', status: 'online', enabled: true, deletedAt: '2026-10-01T00:00:00Z' }
 ];
 const inbounds = [
@@ -83,17 +89,21 @@ const inbounds = [
   { id: 'ib-2', nodeId: 'srv-a', name: 'SS', protocol: 'shadowsocks', port: 8388, enabled: false, internalRelay: false },
   { id: 'ib-3', nodeId: 'srv-b', name: 'relay', protocol: 'trojan', port: 8443, enabled: true, internalRelay: true },
   { id: 'ib-4', nodeId: 'srv-off', name: 'disabled server', protocol: 'vless', port: 444, enabled: true, internalRelay: false },
-  { id: 'ib-5', nodeId: 'srv-gone', name: 'deleted server', protocol: 'vless', port: 445, enabled: true, internalRelay: false }
+  { id: 'ib-5', nodeId: 'srv-gone', name: 'deleted server', protocol: 'vless', port: 445, enabled: true, internalRelay: false },
+  { id: 'ib-6', nodeId: 'srv-empty', name: 'no address', protocol: 'vless', port: 446, enabled: true, internalRelay: false }
 ];
 const items = library.selfHostedLibraryItems(servers, inbounds);
 // Disabled and deleted servers contribute nothing; disabled inbounds stay listed.
-assert.deepEqual(items.map(item => item.inboundId), ['ib-1', 'ib-2', 'ib-3']);
-assert.deepEqual(items.map(item => item.name), ['HK-01 · vless', 'HK-01 · SS (已停用)', 'JP-01 · relay (内部中转)']);
-assert.deepEqual(items.map(item => item.server), ['203.0.113.9', '203.0.113.9', 'jp.example.com']);
-assert.deepEqual(items.map(item => item.status), ['online', 'offline', 'online']);
-assert.deepEqual(items.map(item => item.enabled), [true, false, true]);
-assert.deepEqual(items.map(item => item.port), [443, 8388, 8443]);
-assert.deepEqual(items.map(item => item.internalRelay), [false, false, true]);
+assert.deepEqual(items.map(item => item.inboundId), ['ib-1', 'ib-2', 'ib-3', 'ib-6']);
+assert.deepEqual(items.map(item => item.name), ['HK-01 · vless', 'HK-01 · SS (已停用)', 'JP-01 · relay (内部中转)', 'NONE-01 · no address']);
+// A drawing and its relays dial the node's public address, so that is what the
+// library shows; a connect host is a client-only address (AGENTS.md §14) and a
+// node with no public address shows the empty state instead.
+assert.deepEqual(items.map(item => item.server), ['203.0.113.9', '203.0.113.9', '未设置公网 IP', '未设置公网 IP']);
+assert.deepEqual(items.map(item => item.status), ['online', 'offline', 'online', 'online']);
+assert.deepEqual(items.map(item => item.enabled), [true, false, true, true]);
+assert.deepEqual(items.map(item => item.port), [443, 8388, 8443, 446]);
+assert.deepEqual(items.map(item => item.internalRelay), [false, false, true, false]);
 assert.equal(items[0].id, 'self-srv-a-ib-1');
 
 // A dropped item must save as `inbound:<id>` — the reference the plan, the

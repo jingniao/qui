@@ -44,6 +44,7 @@ type Node struct {
 	CoreSelectionBlocked []string         `json:"coreSelectionBlocked"`
 	AllowSubscription    bool             `json:"allowSubscription"`
 	Maintenance          bool             `json:"maintenance"`
+	PublicIPManual       bool             `json:"-"`
 	ID                   string           `json:"id"`
 	Name                 string           `json:"name"`
 	Status               string           `json:"status"`
@@ -52,6 +53,8 @@ type Node struct {
 	OS                   string           `json:"os"`
 	AgentVersion         string           `json:"agentVersion"`
 	PublicIP             string           `json:"publicIp"`
+	PublicIPSource       string           `json:"publicIpSource"`
+	ConnectHost          string           `json:"connectHost"`
 	OutboundSourceIP     string           `json:"outboundSourceIp"`
 	OutboundInterface    string           `json:"outboundInterface"`
 	HostSourceIPv4       string           `json:"hostSourceIpv4"`
@@ -120,13 +123,14 @@ func (r *Repository) ReissueEnrollment(ctx context.Context, nodeID string, durat
 	defer tx.Rollback()
 	var n Node
 	var capabilities, heartbeat string
-	err = tx.QueryRowContext(ctx, "SELECT "+columns+" FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt)
+	err = tx.QueryRowContext(ctx, "SELECT "+columns+" FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, "", expires, ErrNotFound
 	}
 	if err != nil {
 		return Node{}, "", expires, err
 	}
+	n.PublicIPSource = publicIPSource(n.PublicIP, n.PublicIPManual)
 	if n.DeletedAt != "" {
 		return Node{}, "", expires, ErrNodeNotPending
 	}
@@ -253,7 +257,9 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 	defer tx.Rollback()
 	var last uint64
 	var enabled bool
-	if err := tx.QueryRowContext(ctx, "SELECT "+sequenceMaterialSQL+",CASE WHEN typeof(enabled)='integer' AND enabled IN (0,1) THEN enabled ELSE NULL END FROM nodes WHERE id=?", id).Scan(&last, &enabled); err != nil {
+	var storedPublicIP string
+	var publicIPManual bool
+	if err := tx.QueryRowContext(ctx, "SELECT "+sequenceMaterialSQL+",CASE WHEN typeof(enabled)='integer' AND enabled IN (0,1) THEN enabled ELSE NULL END,public_ip,public_ip_manual FROM nodes WHERE id=?", id).Scan(&last, &enabled, &storedPublicIP, &publicIPManual); err != nil {
 		return 0, err
 	}
 	if last > uint64(1<<63-1) {
@@ -282,7 +288,20 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 		if heartbeat.CoreHealthy != nil && !heartbeat.GetCoreHealthy() {
 			status = "degraded"
 		}
-		if err := sequenceRowsChanged(tx.ExecContext(ctx, "UPDATE nodes SET status=?,last_heartbeat=?,heartbeat_json=?,public_ip=CASE WHEN ?<>'' THEN ? ELSE public_ip END,last_sequence=? WHERE id=? AND enabled=1 AND last_sequence=?", status, timestamp(time.Now()), string(data), heartbeat.PublicIp, heartbeat.PublicIp, message.Sequence, id, last)); err != nil {
+		// A manual address is never overwritten. Otherwise the Agent's own
+		// detection wins, and an empty report falls back to the address the
+		// control connection came from, which is the only address a node behind
+		// NAT cannot hide from the panel.
+		publicIP := storedPublicIP
+		if !publicIPManual {
+			switch {
+			case heartbeat.PublicIp != "":
+				publicIP = heartbeat.PublicIp
+			case storedPublicIP == "":
+				publicIP = peerPublicIP(ctx)
+			}
+		}
+		if err := sequenceRowsChanged(tx.ExecContext(ctx, "UPDATE nodes SET status=?,last_heartbeat=?,heartbeat_json=?,public_ip=?,last_sequence=? WHERE id=? AND enabled=1 AND last_sequence=?", status, timestamp(time.Now()), string(data), publicIP, message.Sequence, id, last)); err != nil {
 			return 0, err
 		}
 		if err := recordMetricTx(ctx, tx, id, message, now); err != nil {
@@ -346,7 +365,7 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,'')"
+const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host"
 
 type scanner interface{ Scan(...any) error }
 
@@ -357,10 +376,11 @@ var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 func scan(row scanner) (Node, error) {
 	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}}
 	var capabilities, heartbeat string
-	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt)
+	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost)
 	if err != nil {
 		return n, err
 	}
+	n.PublicIPSource = publicIPSource(n.PublicIP, n.PublicIPManual)
 	if err := storedJSON.Unmarshal([]byte(capabilities), n.Capabilities); err != nil {
 		return n, err
 	}

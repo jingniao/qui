@@ -94,9 +94,12 @@ async function execute() {
       for (const target of targets.value) {
         try {
           // Fetch the latest complete settings so unrelated fields are preserved.
+          // The address fields stay out of the body: a bulk toggle must not turn
+          // a detected public IP into a manual one.
           const node = await nodeAPI.get(target.id);
           if (node.deletedAt) throw new Error('服务器已删除');
-          await nodeAPI.save({ ...node, maintenance: mode.value === 'maintenance-on' }); succeeded++;
+          const { id, name, enabled, allowSubscription, outboundSourceIp, outboundInterface, hostSourceIpv4, hostSourceIpv6 } = node;
+          await nodeAPI.save({ id, name, enabled, allowSubscription, outboundSourceIp, outboundInterface, hostSourceIpv4, hostSourceIpv6, maintenance: mode.value === 'maintenance-on' }); succeeded++;
         } catch (e) { failed.push(`${target.name}：${(e as Error).message}`); }
       }
     }

@@ -431,16 +431,16 @@
                 v-for="srv in filteredServers"
                 :key="'srv-' + srv.id"
                 draggable="true"
-                @dragstart="onDragStart($event, { type: 'server', id: srv.id, name: srv.name, server: srv.publicIp || srv.hostname || '未分配 IP', protocol: 'server', status: srv.status === 'online' ? 'online' : 'offline', isManageable: true })"
+                @dragstart="onDragStart($event, { type: 'server', id: srv.id, name: srv.name, server: srv.publicIp || '未设置公网 IP', protocol: 'server', status: srv.status === 'online' ? 'online' : 'offline', isManageable: true })"
                 class="p-2 rounded-xl border border-black/[0.04] hover:border-ios-blue/40 hover:bg-blue-50/30 cursor-grab active:cursor-grabbing transition-all select-none group"
-                :title="`IP: ${srv.publicIp || '未分配'}`"
+                :title="'地址: ' + (srv.publicIp || '未设置公网 IP')"
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[150px]">{{ srv.name }}</span>
                   <span class="w-1.5 h-1.5 rounded-full" :class="srv.status === 'online' ? 'bg-emerald-500' : 'bg-neutral-400'"></span>
                 </div>
                 <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
-                  <span class="font-mono truncate">{{ srv.publicIp || srv.hostname || '未分配 IP' }}</span>
+                  <span class="font-mono truncate" :class="srv.publicIp ? '' : 'text-ios-orange font-sans'">{{ srv.publicIp || '未设置公网 IP' }}</span>
                   <span class="text-ios-blue font-medium">Agent 部署</span>
                 </div>
               </div>

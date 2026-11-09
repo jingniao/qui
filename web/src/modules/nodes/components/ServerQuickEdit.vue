@@ -132,10 +132,11 @@ async function saveEdit() {
   editingSaving.value = true;
   try {
     const [latest, meta] = await Promise.all([nodeAPI.get(editTarget.value.id), loadNodeMeta(editTarget.value.id, true)]);
+    // The address fields are left out on purpose: this dialog does not edit them,
+    // and echoing the loaded public IP back would mark a detected address manual.
     await nodeAPI.save({
       id: editTarget.value.id,
       name: editForm.name,
-      publicIp: latest.publicIp || '',
       enabled: editForm.enabled,
       allowSubscription: editForm.allowSubscription,
       maintenance: editForm.maintenance,

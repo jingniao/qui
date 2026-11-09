@@ -19,6 +19,9 @@ import (
 type Repository struct {
 	Database *sql.DB
 	Vault    *vault.Vault
+	// Certificates is the stored certificate library an acme inbound reads its PEM
+	// pair from; nil on a repository that never reads such an inbound.
+	Certificates CertificateStore
 	// archiveBeforeGostMaterial marks a database read by the backup validation
 	// that has not applied 0128_gost_tunnels.sql: its tunnels have no sealed
 	// credential column. Live repositories never set it.
@@ -85,7 +88,7 @@ func (r *Repository) storedInbound(ctx context.Context, q tunnelDatabase, inboun
 	var inbound Inbound
 	var encoded []byte
 	var users string
-	err := q.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt, &inbound.Core)
+	err := q.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core,tls_source,coalesce(certificate_id,'') FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt, &inbound.Core, &inbound.TLSSource, &inbound.CertificateID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inbound, ErrNotFound
 	}
@@ -105,7 +108,8 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 		return inbound, err
 	}
 	var caps []byte
-	if err := r.Database.QueryRowContext(ctx, "SELECT capabilities_json FROM nodes WHERE id=?", inbound.NodeID).Scan(&caps); err != nil {
+	var publicIP, connectHost string
+	if err := r.Database.QueryRowContext(ctx, "SELECT capabilities_json,public_ip,connect_host FROM nodes WHERE id=?", inbound.NodeID).Scan(&caps, &publicIP, &connectHost); err != nil {
 		return inbound, err
 	}
 	c := &pb.Capabilities{}
@@ -120,9 +124,19 @@ func (r *Repository) Inbound(ctx context.Context, inboundID string, reveal bool)
 		coverage := node.DeviceGateCoverage(core, inbound.Protocol)
 		inbound.DeviceGateCoverage = &coverage
 	}
+	if err := r.injectCertificate(ctx, &inbound); err != nil {
+		return inbound, err
+	}
 	inbound.HasTLSKey = inbound.Settings.PrivateKeyPEM != ""
 	inbound.HasWireGuardKey = inbound.Settings.WireGuard != nil && inbound.Settings.WireGuard.SecretKey != ""
 	inbound.HasRealityKey = inbound.Settings.Reality != nil && inbound.Settings.Reality.PrivateKey != ""
+	// The source is resolved before the private half is masked, because a legacy
+	// row is recognised by the certificate it carries (tls.go).
+	inbound.TLSSource = tlsSourceOf(inbound.TLSSource, inbound.Settings)
+	inbound.CertificateInfo, err = certificateInfo(inbound.Settings, inbound.TLSSource, node.Node{PublicIP: publicIP, ConnectHost: connectHost}.ConnectAddress())
+	if err != nil {
+		return inbound, err
+	}
 	if !reveal {
 		inbound.Settings = mask(inbound.Settings)
 	}
@@ -278,7 +292,7 @@ func (r *Repository) saveInbound(ctx context.Context, inboundID string, input In
 		relayCredential = old.RelayCredentialID
 		created = old.CreatedAt
 	}
-	encoded, err := r.encode(input.Settings)
+	encoded, err := r.encode(storedSettings(input))
 	if err != nil {
 		return Inbound{}, err
 	}
@@ -312,9 +326,9 @@ func (r *Repository) saveInbound(ctx context.Context, inboundID string, input In
 		relayCredential = credential.ID
 	}
 	if create {
-		_, err = tx.ExecContext(ctx, "INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", inboundID, input.Name, input.NodeID, input.Protocol, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.InternalRelay, input.DefaultOutbound, string(users), encoded, relayCredential, created, input.Core)
+		_, err = tx.ExecContext(ctx, "INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core,tls_source,certificate_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", inboundID, input.Name, input.NodeID, input.Protocol, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.InternalRelay, input.DefaultOutbound, string(users), encoded, relayCredential, created, input.Core, input.TLSSource, nullable(input.CertificateID))
 	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE inbounds SET name=?,listen=?,port=?,enabled=?,subscription_visible=?,default_outbound=?,allowed_users_json=?,encrypted_settings=?,core=? WHERE id=?", input.Name, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.DefaultOutbound, string(users), encoded, input.Core, inboundID)
+		_, err = tx.ExecContext(ctx, "UPDATE inbounds SET name=?,listen=?,port=?,enabled=?,subscription_visible=?,default_outbound=?,allowed_users_json=?,encrypted_settings=?,core=?,tls_source=?,certificate_id=? WHERE id=?", input.Name, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.DefaultOutbound, string(users), encoded, input.Core, input.TLSSource, nullable(input.CertificateID), inboundID)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {

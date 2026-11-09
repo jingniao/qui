@@ -42,7 +42,7 @@ func SettingsContractCapability(core *pb.CoreCapability) desiredstate.CoreSettin
 		}
 		combinations = append(combinations, settingsCombination(combination))
 	}
-	return desiredstate.CoreSettingsCapability{Core: core.Name, Version: core.ServerSettingsContractVersion, Combinations: combinations}
+	return desiredstate.CoreSettingsCapability{Core: core.Name, Version: core.ServerSettingsContractVersion, Combinations: combinations, CertificateFiles: core.TlsCertificateFilesSupported}
 }
 
 // validateSettingsContract checks one report with the shared combination

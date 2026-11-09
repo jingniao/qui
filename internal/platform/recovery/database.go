@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/panel/access"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/certificate"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/portal"
@@ -219,6 +220,7 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 			func() error { return (&deployment.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&system.Repository{}).PrepareRestoreTx(ctx, tx, stamp, plan.Source.ID) },
 			func() error { return (&deployment.Repository{}).PrepareCoreUpdatesRestoreTx(ctx, tx) },
+			func() error { return (&certificate.Repository{}).PrepareRestoreTx(ctx, tx, stamp) },
 		} {
 			if err := step(); err != nil {
 				return fmt.Errorf("recovery module %d: %w", index, err)

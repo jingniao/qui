@@ -231,7 +231,7 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 
 0122 显式保留旧 relay/egress 全部服务器，以及 subscription/mixed 中无合格入站的服务器，保证迁移前后服务器集合不变。API 返回 `serverIds`（显式）和 `nodeIds`（并集）。`serverIds` 最多 100 个存在且未删除服务器；省略/null 保留，[] 清空。旧 `nodeIds` 在 subscription/mixed 且 `inboundIds` 缺省/null 时展开合格入站，并按选中服务器过滤旧显式成员；relay/egress 则设置显式成员，显式 `serverIds` 优先。旧批量请求保留省略的导入成员。
 
-订阅按“用户 → 授权组 → 合格入站/导入 → 可用性与协议过滤”生成；组内新增可用接入后，用户刷新订阅即可获得，无须重新授权。
+订阅按“用户 → 授权组 → 合格入站/导入 → 可用性与协议过滤”生成；组内新增可用接入后，用户刷新订阅即可获得，无须重新授权。保存或删除节点组后按自动额度版本（§22.1）下发：受影响用户为 `user_node_group_grants` 中的账号，约一个合并窗口（60 秒）生效，只有访问面不一致的节点才生成 Revision。
 
 ## 10.2 节点组类型
 
@@ -259,9 +259,10 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 9. 过滤不允许订阅的节点。
 10. 仅保留组内可用入站；入站非空 `allowedUserIds` 仍须包含本人，订阅还须核对已发布凭据。凭据渲染按入站授权，同服务器其他入站不自动获得用户凭据。
 11. 过滤用户不允许使用的协议。
-12. 输出订阅内容。
+12. 仅保留节点有客户端连接地址（`connectHost`，否则 `publicIp`，见第 11.1 节）的入站；没有地址的节点不产生端点。
+13. 输出订阅内容。
 
-输出名称按节点与协议命名：同一节点同一协议有多个入站时追加端口（`节点 · 协议 · 端口`），只有一个时保持 `节点 · 协议`。
+输出名称按节点与协议命名：同一节点同一协议有多个入站时追加端口（`节点 · 协议 · 端口`），只有一个时保持 `节点 · 协议`。地址缺失不再静默：订阅预览按节点给出 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告，`/sub` 本身只输出能连的端点。
 
 关联目标入站的中转规则按成功发布快照追加订阅端点；仅纳入已发布、启用且对用户可见的规则，仍须通过目标入站的授权、可用性、协议与已发布凭据检查。保留目标协议、凭据、传输与 TLS 等协议字段，仅把连接地址/端口换为入口地址/规则端口；原隐含 TLS server name 显式写为目标地址。名称为 `<目标节点> · <协议> · 经 <入口节点>`（目标协议原有端口消歧保留），直接端点保持自身可见性。Hysteria2/TUIC/WireGuard 按 UDP、其余按 TCP 与规则 network 过滤；Reality/xhttp 保留目标公开参数与原 SNI，xhttp 限 TCP，格式继续按各自能力省略。
 
@@ -296,6 +297,10 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 节点列表显示：
 
 节点名称；在线状态；公网 IP；操作系统；CPU 使用率；内存使用率；磁盘使用率；当前连接数；今日流量；Agent 版本；代理核心；核心版本；当前配置版本；最后心跳时间；本月整机流量（单张网卡的本期整机用量与可选额度，见第 21 节）。
+
+节点有两个地址字段（迁移 0135）。`publicIp` 是公网地址：Agent 心跳从默认路由网卡的全局单播地址里选（排除回环、链路本地、私网、100.64/10 与组播，IPv4 优先，否则首个公网 IPv6，没有就不填）；上报为空且库里为空时用控制连接的 gRPC 对端地址，同样只收公网地址（`pkg/contracts/netaddr` 一处判定，面板与 Agent 共用）。`publicIpSource` 说明来源：`manual` / `auto` / 空（没有地址）。Owner 在节点设置里填了 IP 就记为手工（`public_ip_manual`），心跳永不覆盖；清空则回到自动，下一次心跳再填。`connectHost` 是 Owner 选的客户端连接地址（域名或 IP，无协议、端口与方括号），可再清空。
+
+客户端连接地址 = `connectHost` 非空则用它，否则用 `publicIp`；订阅、订阅预览与分享链接都按这个顺序，中转、隧道与画布继续用 `publicIp`，因为它们需要节点之间的地址。使用域名且入站 TLS 没有显式服务器名时，SNI 规则不变，不因连接地址是域名而新增 SNI。两者都为空时该节点不进订阅，订阅预览对每个这样的节点给出一条 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告（第 10.3 节）。
 
 ## 11.2 节点详情
 
@@ -375,6 +380,9 @@ v1.4 自建 VLESS 用户入站：Xray 支持 Reality TCP（无 flow/Vision）、
 
 自建 VLESS 的 xhttp／Reality（v1.4，契约、渲染、密钥生命周期与订阅映射已实现）已加入 `desiredstate.ProtocolSettings` 的类型化服务端私有字段：`reality{private_key,public_key,handshake_target,server_names[],short_ids[]}` 与 `xhttp{host,path,mode}`。两者只接受 VLESS 入站；不接受 JSON 透传、`extra`／`xmux` 或未知键（API 与 `desiredstate.Decode` 均拒绝未知字段）。Reality 私钥只进加密的 `encrypted_settings` 与加密修订，普通读取（`mask`）、修订差异和预览只暴露公钥、握手目标、server names 与 Short ID；省略私钥的编辑沿用已存值，普通保存不轮换密钥。校验口径：两把 X25519 键均为无填充 base64url、32 字节，且公钥必须由私钥导出（角色正确）；Short ID 为 1–16 个字符的偶数位十六进制；server names 1–16 个、每个 ≤253 且无控制字符；握手目标由 Owner 必填 `host:port`，面板只校验语法，不做默认站点或网络可达检查（Agent 原生校验是最终门禁）；Reality 与普通 TLS 证书材料互斥。xhttp 只接受 `auto`／`packet-up`／`stream-up`／`stream-one` 这一 TCP/H2 承载子集，`path` 归 xhttp 自己，`service_name` 必须为空；Vision（`xtls-rprx-vision`）只允许 TCP 上的 TLS 或 Reality，xhttp／gRPC 上的 Vision 在保存前拒绝。
 
+TLS 入站的证书来源（v1.4.7 §3，C1 后端＋Agent）记在 `inbounds.tls_source`（迁移 0136）：`paste` 粘贴内容、`self_signed` 面板自签、`file` 节点上的文件、`acme` 引用面板自己申请的证书（第 27.16 节），`''` 为 0136 之前的历史行或不带证书的入站。该列只是面板元数据，不进 `desiredstate`（Agent 的 `DesiredState` 解码拒绝未知字段）。自签沿用内部中转的生成逻辑，有效期由参数区分：内部中转 1 年，用户入站 10 年（客户端会钉住证书）；证书的 Subject/SAN 取节点客户端连接地址（第 11.1 节的 `ConnectAddress()`），没有地址时保存返回 400「请先在节点设置里填写公网 IP 或客户端连接地址，再生成自签名证书」。写库仍是 CertificatePEM＋PrivateKeyPEM＋TrustedCAPEM＝同一张证书并设置 ServerName，所以订阅无需改动：URI/Base64 省略钉了 CA 的 Hysteria2/TUIC，sing-box 写 `tls.certificate`，mihomo 写 fingerprint。来源本来就是自签时编辑保留已发证书，`regenerateCertificate: true` 或从其他来源切到自签才签发新证书（例如连接地址变化后）。节点文件来源只保存两个路径（`certificate_path`／`private_key_path`）：仅限 TLS 入站、与粘贴材料互斥、必须同时填写、绝对且已规范（`path.Clean` 不变）、≤256 字节、位于 `/etc/proxy-agent/certs/` 下、不得含 `..`；出站永不携带。Agent 在渲染时用 `filepath.EvalSymlinks` 解析并确认仍在同一目录、文件可读、`tls.LoadX509KeyPair` 成功且叶子未过期，密钥权限宽于 0640 只记一条 WARN；任一失败按普通失败规则回滚。渲染用核心自身字段（sing-box `certificate_path`/`key_path`，Xray `certificateFile`/`keyFile`），原生 `check` 照常执行。文件来源受 `CoreCapability.tls_certificate_files_supported`（字段 12，`Capabilities` 字段 25 为单核标量形式）门禁，保存、快照与发布前三处一致拒绝旧 Agent。读取接口另有只读 `certificateInfo{subject,dnsNames,ipAddresses,notAfter,selfSigned,coverageWarning}`：用 `crypto/x509` 解析面板持有的证书，ServerName 与连接地址都不被覆盖（`VerifyHostname`）时给出中文提示；`file` 来源返回 null，因为面板读不到节点文件。证书文件过期或丢失时，下一次应用失败并保留原配置；Agent 重启后仍保留的修订若引用过期或缺失的文件就无法渲染，该核心停到文件恢复为止，请在到期前续期再重启核心。
+
+`acme` 来源（v1.4.7 §4，D2）：入站只保存 `certificate_id`（请求与读取字段 `certificateId`，指向证书库，迁移 0137），**不保存 PEM**——密封的 `encrypted_settings` 里没有证书副本，面板在读入站时把证书库里的证书与私钥填进设置，所以快照（`SnapshotIntent`，所有发布路径共用）、预览与差异看到的都是证书库当前内容；私钥同其他来源一样在普通读取、差异与预览里隐藏。保存校验：仅 TLS 入站（不含 Reality、不含内部中转）、必须选择存在且已签发（有证书与私钥）的证书，否则 400「所选证书尚未签发成功」等中文提示；不得同时粘贴私钥或填写节点文件路径；`server_name` 为空时取证书的第一个非通配域名；改用其他来源会清空 `certificate_id`，且不会把证书库的证书冻结成粘贴副本。快照遇到证书缺失或没有签发材料的 `acme` 入站直接失败，绝不把没有证书的入站发布到节点。`certificateInfo` 用证书库里的证书解析（`selfSigned` 为 false，覆盖提示照常按 ServerName 与连接地址判断）。`acme` 入站没有 `TrustedCAPEM`，订阅按公网可信证书输出，URI/Base64 也包含 Hysteria2/TUIC。Agent 收到的仍是普通 PEM，无需新能力。
 能力门禁独立于协议标志与版本号：`desiredstate.CoreSettingsCapability{core,settings_contract_version,combinations[]}` 按（协议、方向、安全、传输、flow）逐项声明。版本 0、缺失、未知版本、其他核心的上报以及未列出的组合一律不授权；Agent 版本文本、VLESS 入站标志、`multi_core_supported` 与 GOST 契约位都不能替代它。M1 已把该上报落到 `agentpb`：`CoreCapability.server_settings_contract_version`（字段 10）与 `server_settings_combinations`（字段 11）为逐核声明，`Capabilities` 的同名字段（23／24）是单核 Agent 的标量形式，均由 `scripts/generate-proto.sh` 生成、只做加法，旧 Agent／旧面板各自忽略或保留未知字段。Agent 的 `MultiRuntime.DetectCapabilities` 按各适配器上报复制到对应核心，`control.reportCapabilities` 的旧标量装饰同样保留；面板 `node.SettingsContractCapability` 只把上报转换为共享契约、不推断来源，`node.EnabledCores` 的单核回退也保留这些字段。上报结构在 `validateMultiCapabilities` 里用共享组合校验一次：组合缺版本、方向／传输非法、重复项或超上限都拒绝整条上报；未知版本仍被接受（不因未来版本断连）但不授权。当前 Xray／sing-box 适配器都没有渲染器，因此生产 Agent 上报版本 0 与空列表，面板保存（`proxy.ValidateInboundServerSettings`）、配置快照（`SnapshotIntent`）与发布前（`deployment.validateStateCoresTx`）三处一致拒绝 Reality／xhttp 设置；合成上报可完整传输并放行对应组合，真实启用仍待渲染器（M2／M4）。
 
 M1 不提供渲染：Xray 与 sing-box 适配器都没有 Reality／xhttp 渲染器，渲染入口（`desiredstate.ValidateServerSettingsRenderer`）对携带这些设置的入站或出站一律失败，避免结构校验通过后静默丢弃设置；已发布状态若意外带这些字段，`subscription/source/published` 也跳过该端点而不是导出缺公钥与 Short ID 的客户端条目，这只是渲染器缺席期间的临时保护，不代表客户端映射已完成。`/api/v1/protocol-support` 的 VLESS 行把 `security_reality`、`transport_xhttp` 列为 `pending`，选项、订阅映射与 sing-box 适配留待 M2–M4。
@@ -591,6 +599,8 @@ Xray 总量=账户计数＋已渲染 forward 的原生入站计数。渲染生�
 一条 Revision 覆盖全部核心，`core.json.enc` 按核心名保存 JSON；恢复从校验过的 DesiredState 重建，兼容旧单核心修订。所有活跃核心先校验，再按配置顺序切换，失败逆序补偿。每核 `runtime/<core>/` 隔离标记、accounting key、访问日志与临时文件，无启用入站则停止；旧 core_healthy 是逐核 AND，supervisor 分核恢复/退避。
 
 **发布仍重启目标节点全部核心**，即使某核配置未变，所有用户既有连接会中断；崩溃恢复只影响异常核心。编译/校验失败不改配置，启动/健康失败回滚；中央失联保留成功配置。Agent 启动时核心不能运行保留修订，核心停止但 Agent 继续连接、上报不健康并等待新版本。默认保留最近 3～5 个成功版本。
+
+续期后的证书由面板自动发布（第 27.16 节）：这同样是一次会重启该节点全部核心的发布，所以只在 Owner 设定的低峰窗口（`deployStartHour`–`deployEndHour`，面板时区，默认 3–6 点，结束小时不含）内进行。
 
 ## 22.0 服务器调优应用流程
 
@@ -882,6 +892,9 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0131 `canvas_forward_migration` | `canvas_forward_reconcile` 单次标记及 migrated_ids、`tunnel_migration_report` 持久原因；启动/恢复事务转换合格画布转发，保留运行对象与凭据 |
 | 0133 `subscription_source_results` | `subscription_sources.latest_result_json`（有界刷新结果）与 `last_success_at`；默认空串，旧来源与旧归档读出“未记录原因”，迁移不抓取订阅 |
 | 0134 `node_identity_recovery` | `node_enrollment_tokens.purpose`（`enroll`/`recover`，默认 `enroll`）与 `bound_fingerprint`；`node_identity_recoveries`：每次恢复一行（token 哈希、旧/新指纹、签发人、状态、`redeploy_state`/`redeploy_revision`/`redeploy_code`，每节点最多一条 `issued`）；`node_identity_retirements`：被恢复替换的指纹永久拒绝，签发不重签证书，核销由 Enroll 完成 |
+| 0135 `node_connect_address` | `nodes.public_ip_manual`（0/1，默认 0）与 `nodes.connect_host`（客户端连接地址，默认空串）；迁移把既有 `public_ip<>''` 的行回填为手工，因为此前只有 Owner 能写该列。心跳只在不手工时填 `public_ip`，语义见第 11.1 节 |
+| 0136 `inbound_tls_source` | `inbounds.tls_source`（`''`/`paste`/`self_signed`/`file`/`acme`，默认 `''`，CHECK 限定取值）；`''` 表示 0136 之前的行或不带证书的入站。证书本身在密封列里，SQL 无法据此回填，历史行在读取时按「有证书即 `paste`」解析（第 12 节）；`acme` 引用证书库（`certificate_id`，0137） |
+| 0137 `certificates` | `certificates`：域名 JSON（1–10 个，可带一个前导 `*.`）、状态（`pending`/`issuing`/`valid`/`failed`）、密封的证书与私钥（`{certificate_pem, private_key_pem}`，首次签发前为 NULL）、签发与到期时间、失败码、上次/下次尝试时间、尝试次数、`auto_dns` 与 `dns_node_id`；`inbounds.certificate_id` 引用证书行、默认 NULL，D2 才写入。域名格式、状态集合、错误码与密封材料可解密由面板与归档校验共同约束 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -943,6 +956,8 @@ DELETE /api/v1/nodes/{id}
 ```
 
 `GET /api/v1/nodes` 默认只返回未删除的节点；`?deleted=1` 只返回已删除的节点（Owner 与 Viewer 都可读）。`DELETE` 需要 Owner：未登记节点等同取消登记（记录移除），已登记节点执行逻辑删除，被引用时返回 409 `node_delete_blocked`，阻塞项（`blockers: [{kind,id,name}]`）位于错误体中（见第 11.3 节）。
+
+节点对象含 `publicIp`、`publicIpSource`（`manual`/`auto`/空）与 `connectHost`，含义与优先级见第 11.1 节。`PUT /api/v1/nodes/{id}` 的 `publicIp` 与 `connectHost` 都是可选字段：省略（或 JSON null）保留原值；`publicIp` 写非空 IP 记为手工并停用自动填写，写空串清除并恢复自动；`connectHost` 接受空串、IPv4/IPv6 字面量或域名（复用 `install_endpoint.host` 的 `^[A-Za-z0-9.-]+$` 与逐标签规则，落在 `netaddr.ValidHostName`），不接受协议、端口与方括号，非法值返回 400 `invalid_request`。保存仍记“修改节点”操作日志并要求 CSRF。
 
 原位身份恢复：`POST /api/v1/nodes/{id}/recovery-token`（Owner＋CSRF，体 `{expiresInSeconds,revokeNow}`，0 或省略为 900 秒、范围 300–3600）201 返回只出现一次的 `enrollmentToken`、`expiresAt`、`install` 与 `purpose:"recover"`；`GET /api/v1/nodes/{id}/recovery-status`（Owner）返回最近一条恢复记录，无记录为 404。未登记、禁用或已删除节点返回 409 `node_not_enrolled`，存在未完成任务返回 409 `node_recovery_blocked`，`blockers:[{kind,id,name}]` 在错误体中（见第 11.3 节）。
 
@@ -1148,6 +1163,23 @@ POST   /portal/subscription/reset
 
 文件合同：面板以无特权账号运行且 `ProtectSystem=strict`，只能原子写 `/var/lib/proxy-panel/panel-update/request.json`（`{requestId,version,requestedAt,requestedBy}`，requestId 为 32 位小写十六进制、version 为正式 X.Y.Z）；`proxy-panel-update.path`（PathChanged）触发 root oneshot `proxy-panel-update.service`（`TimeoutStartSec=1800`，故意不做沙箱、不对 `proxy-panel.service` 设 PartOf/BindsTo/Requires）运行 `/usr/local/lib/proxycontrol/panel-update-request`，它校验请求（非符号链接的普通文件、属主为 proxy-panel、≤4096 字节、合法 requestId 与版本号、且版本严格新于已安装面板）后执行 `/usr/local/bin/qui-update --component panel --version X.Y.Z --yes`（更新前数据库备份、10 秒健康检查、失败回滚），把固定码写回同一目录的 `status.json`（state 为 `running`／`succeeded`／`failed`，code 为 `running`／`succeeded`／`invalid_request`／`not_newer`／`update_failed`／`version_mismatch`，无自由文本）；更新器的输出只追加到 root 0600 的 `/var/lib/proxycontrol-install/panel-update.log`。同一 requestId 只执行一次：`status.json` 已含该 id 即为该请求的答案，不再重复更新。更新期间面板重启，页面轮询重连；`pending.stalled` 表示请求超过 10 分钟没有被应答、`status.interrupted` 表示 running 超过 35 分钟（例如更新中主机重启），两者都不再算占用，允许重新提交。仅 systemd（面板本身只支持 systemd）：`install.sh` 随面板发布 helper 与两个单元（与 update-recovery、`qui` 一样不进安装记录）、创建 0700 的请求目录并只 enable/start path 单元，`update.sh` 快照这三份文件，`uninstall.sh` 停用并删除它们、保留目录与日志。已有面板需先在 shell 里跑一次 `qui-update` 才具备该能力；它只更新面板，不更新节点 Agent。
 
+## 27.16 系统管理：证书与 Cloudflare DNS-01
+
+面板自己申请、保存并续期 TLS 证书（v1.4.7 §4，D1 后端）。Owner 保存一次 Cloudflare API Token 与 ACME 账户邮箱后，在证书库里提交域名即可；Token 只留在面板，不分发到节点。全部接口 Owner 专用，写操作需要 CSRF 并记操作日志；Viewer 与门户会话都被拒绝。入站通过 `certificateId` 引用证书、续期后自动发布（D2，第 12 节与本节末），页面待 D3。
+
+| 接口 | 合同 |
+| --- | --- |
+| `GET /api/v1/system/certificate-settings` | 返回 `{email, directory, deployStartHour, deployEndHour, revision, cloudflare:{configured, last4, verifiedAt}}`；`directory` 缺省为 `production`（`staging` 为另一取值），Token 本身永不返回 |
+| `PUT /api/v1/system/certificate-settings` | 体 `{email, directory, deployStartHour?, deployEndHour?, cloudflareToken?, expectedRevision}`，未知字段拒绝；两个小时为 0–23 的整数且不得相同（结束小时不含，开始大于结束表示跨零点），省略则保留原值，非法 400 `invalid_request`，旧存储值没有这两项时读作 3 与 6；省略 `cloudflareToken` 保留原值、`""` 清除、非空值先调 `GET https://api.cloudflare.com/client/v4/user/tokens/verify` 验证再保存（无效 400 `cloudflare_token_invalid`，验证请求本身失败 502 `cloudflare_api_failed`）；`expectedRevision` 不匹配 409 `settings_conflict`；内容未变不推进 revision、不写日志；成功记“修改证书设置” |
+| `GET /api/v1/certificates` | `{items:[{id,domains,status,notBefore,notAfter,lastErrorCode,lastErrorText,lastAttemptAt,nextAttemptAt,autoDns,dnsNodeId,usedBy:[{inboundId,name,nodeId}],createdAt,updatedAt}]}`；`usedBy` 来自 `inbounds.certificate_id`，`lastErrorText` 是固定码对应的唯一中文说明 |
+| `POST /api/v1/certificates` | 体 `{domains[], autoDns, dnsNodeId?}`；域名 1–10 个、小写、可带一个前导 `*.`、不接受 IP 与重复；缺少邮箱或 Token 返回 400 `certificate_settings_missing`；成功 202 返回该行（状态 `pending`）并排队申请，记“申请证书” |
+| `POST /api/v1/certificates/{id}/renew` | 202 并立即排队续期，记“续期证书” |
+| `DELETE /api/v1/certificates/{id}` | 仍被入站引用时 409 `certificate_in_use` 并在错误体给出 `inbounds:[{id,name}]`，否则 204，记“删除证书” |
+
+签发在面板上以单 worker 串行执行（`internal/panel/certificate`）：确保 ACME 账户（同意条款，目录或邮箱变化时重新注册）→ 可选把 A/AAAA 记录（`proxied=false`、`ttl=1`）指向 `dns_node_id` 的 `public_ip`（没有公网地址即 `dns_node_address_missing`；不使用连接地址，因为它可能正是这个域名）→ 授权订单、写 `_acme-challenge.<域名>` TXT（ttl 60）→ 直接查询该区域 `name_servers` 等 TXT 生效（每 5 秒、最长 180 秒，超时 `dns_propagation_timeout`）→ 接受挑战、等待授权、生成 ECDSA P-256 密钥与 CSR 并完成签发 → 密封保存证书与私钥。无论成功失败，它创建的 TXT 记录都会被删除。失败写固定错误码（`cloudflare_not_configured`、`cloudflare_token_invalid`、`cloudflare_zone_not_found`、`cloudflare_api_failed`、`cloudflare_dns_record_failed`、`dns_node_address_missing`、`dns_propagation_timeout`、`acme_account_failed`、`acme_order_failed`、`acme_authorization_failed`、`acme_finalize_failed`、`acme_rate_limited`、`interrupted`、`internal`），按 1 小时 → 6 小时 → 24 小时退避重试；仍在服务有效证书的续期失败保留 `valid` 状态。上游正文、带 Token 的 URL 与 Token 本身都不入库、不进日志、不回显。续期调度每小时一次并在启动后立即跑一次：`valid` 且到期不足 30 天、或 `failed` 且 `next_attempt_at` 已到、或 `pending` 的行进入队列；续期失败且剩余不足 7 天时发布 `system.alert` 并记“证书续期失败”，每证书每 UTC 日最多一次。启动时残留的 `issuing` 行改为 `failed`/`interrupted` 并按退避重试。成功签发或续期后调用 `Renewed` 回调，唤醒证书发布器（见下）。仍有效但续期失败的行同样遵守退避：`valid` 行在续期窗口内只有 `next_attempt_at` 为空或已到才再次入队。
+
+续期后的自动发布（D2，`internal/platform/server/certificate_deploy.go`）：证书发布器没有队列，每次检查都把证书库与各节点**已发布状态**比较——某节点已发布状态里含一个入站，其当前 `certificate_id` 指向某证书，而已发布的证书或私钥与证书库现值不同，且**已发布证书的 DNS 名称集合与证书库证书完全相同**，该节点即待发布（续期保持名称；Owner 把入站改指另一张证书但尚未发布时名称不同，属于未审阅的编辑，不会被自动推送，须手动发布，快照本身就带新证书；已发布 PEM 为空或无法解析也不算待发布）。对待发布节点，以其已发布状态为基线，只替换这些入站的 `CertificatePEM`／`PrivateKeyPEM`，用户、启用意图（沿用已发布修订的意图）与其他入站原样保留，创建说明为 `auto: certificate <第一个域名> renewed` 的修订（作者 `auto`）并部署。因此 Owner 手动发布（快照已带新证书）后发布器发现无差异、什么也不做；面板重启后第一次检查即找回重启前完成的续期。检查在启动时、每小时与每次续期完成时运行，且只在窗口内部署：窗口外的待发布节点等到窗口打开。节点忙（`ErrNodeBusy`）不计失败，下次检查继续并复用未部署的草稿；Agent 尚未应答时等待（节点离线则重连后收到，与其他修订相同）；部署失败或 Agent 回滚计一次失败，当前窗口内不再重试、下个窗口用新修订重试；同一节点连续 3 次失败后停止，发布 `system.alert`（`alert: certificate_deploy_failed`）并记操作日志“证书自动发布失败”，下一次续期得到新证书时重新开始。
+
 # 28. gRPC 节点通信
 
 节点通信使用 Enroll 与双向流 Connect。
@@ -1158,7 +1190,11 @@ Hello；Heartbeat；Capabilities；ApplyResult；HealthResult；TrafficBatch；A
 
 Heartbeat 省略即缺测，实测 0 保留。v1.3 增加 `boot_id`（字段 34）与 `default_route_interface`（字段 35）供整机流量记账（第 21 节）：两者各自独立，读取失败只省略自己的字段，旧面板忽略未知字段。整机网卡的累计字节沿用既有 `interfaces`（字段 20）。
 
+`Heartbeat.public_ip`（字段 9）由 Agent 填写：它读默认路由网卡的地址列表（字段 35 的同一来源），用 `netaddr.Select` 取第一个公网 IPv4，否则第一个公网 IPv6，没有合格地址就留空，绝不发送私网、链路本地、回环、100.64/10 或组播地址，也不做任何外部查询。面板只在 `public_ip_manual=0` 时写入该值（手工地址不覆盖），上报为空且库中为空时改用控制连接的 gRPC 对端地址，同样按 `netaddr` 判定是否为公网（第 11.1 节）。
+
 GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool）表示该 Agent 懂 GOST 组件的安装与移除——即使 GOST 尚未安装；`CoreCapability.gost_contract_version`（字段 9，uint32）表示 GOST 设置契约版本（0 = 不支持，1 = 基础转发，2 = 池/范围/限流，3 = 加密中继，4 = 中间 relay 的下一跳链；开发分支 Agent 报告 4，正式版 1.3.1 为 3）。隧道发布按各跳能力要求两节点 ≥3、三节点 ≥4。GOST 设置随既有 `ApplyCommand.desired_state_json` 下发，不占用独立字段；没有新的 Welcome 标志，多核心与节点流量协商照旧。面板把 Hello 标志持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新，不用 Agent 版本号文本推断；旧 Agent 无法收到 GOST 分配。
+
+节点证书文件的能力位（v1.4.7 §3）：`CoreCapability.tls_certificate_files_supported`（字段 12，bool）逐核声明该核心的渲染器能读节点上的证书与私钥文件；`Capabilities` 的同名字段（25）是单核 Agent 的标量形式，与 `forward_inbound_supported`（18／5）、`device_gate_supported`（17／6）同一写法，因为渲染按核心进行，逐核上报才作数。旧 Agent／旧面板各自忽略未知字段；面板 `node.SettingsContractCapability` 把该位并入共享的 `CoreSettingsCapability.certificate_files`，保存、配置快照与发布前三处由同一个 `RequireInboundServerSettings` 判断，因此没上报该位的 Agent 无法保存 `file` 来源。Xray、sing-box 适配器各自上报为真（GOST 不渲染 TLS 入站，保持假），原生 `check` 仍是最终门禁。
 
 中央端下发消息包括：
 
@@ -1198,6 +1234,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 - 用户凭据与节点间凭据分离、订阅 Token 的哈希查找与加密副本规则、节点私钥不上传中央端：见第 9.3 与 11.3 节。
 - 节点间 GOST 凭据与用户凭据隔离，隧道管理存 `tunnels.gost_material`，旧画布材料存 `canvas_tunnels.gost_material`；三节点按段独立 CA 与服务端/客户端叶子证书。Vault 密封、CA 私钥签发后丢弃、有效期 10 年；API/计划/日志只露代数、服务器名、到期与指纹。轮换换整套草稿，发布才生效；删除不会撤销离线节点仍生效的凭据（见[运维手册](docs/operations.md)第 20–21 节）。
+- 自动申请证书用的 Cloudflare API Token 与 ACME 账户私钥（ECDSA P-256）各自 vault 密封保存在 `system_settings` 的 `cloudflare_token`、`acme_account` 两行；接口只回“已设置”、末 4 位与验证时间，永不回显 Token 或私钥。保存前先向 Cloudflare 校验 Token；签发与续期的上游正文、带 Token 的链接与 Token 本身都不入库、不进日志、不回显。证书与私钥密封在 `certificates.encrypted_material`，只随加密备份与恢复离开面板（第 27.16 节）。
 - 敏感配置写入节点时限制文件权限
 - 配置和备份中的敏感字段加密保存
 
@@ -1223,6 +1260,8 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 日志写 stdout → journald，OpenRC 经 logger → syslog，不写 /var/log 文件。面板网页更新的更新器输出例外，只追加到 /var/lib/proxycontrol-install/panel-update.log（root 0600），拒绝原因留在 journalctl -u proxy-panel-update。更新前备份名为 pre-update-<版本>-<时间>.db，回滚保留 failed-update-<版本>-<时间>.db。
 
+自动申请证书（第 27.16 节）需要面板**出站** HTTPS 到 `api.cloudflare.com`（Token 校验与 DNS 记录）与 Let's Encrypt 的 `acme-v02.api.letsencrypt.org`／`acme-staging-v02.api.letsencrypt.org`。它不需要开放 80 端口，也不接受来自 CA 的入站连接：DNS-01 由面板自己写 TXT 记录，再用 `net.Resolver` 直接查该区域的权威名称服务器（UDP 53）。出站被阻断时的现象是固定错误码 `cloudflare_api_failed` 或 `acme_*_failed`，页面只给中文说明、不回显上游内容。
+
 `qui-update --version X.Y.Z[-rc.N] --component panel|agent` 支持 RC 与组件范围（快照/日志/回滚），组合主机明确先 panel 后 agent；省略 component 的默认仍先 Agent 后面板。`--database` 仅面板，跨迁移降级须匹配备份。首次升级步骤见[部署](docs/deployment.md) §5.0。
 
 ## 30.2 节点端
@@ -1231,6 +1270,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 | --- | --- |
 | /usr/local/bin/proxy-agent、qui-update | Agent 引导镜像、更新器 |
 | /etc/proxy-agent/config.yaml、tls/ca.crt | 配置、受信面板 CA |
+| /etc/proxy-agent/certs/ | 入站可引用的证书与私钥文件（`file` 来源，第 12 节）。安装器以 root:proxy-agent 0750 幂等创建；卸载与配置一样保留 |
 | /usr/local/lib/proxy-agent/<name> | 安装器核心二进制 |
 | /var/lib/proxy-agent/identity/ | 节点身份与证书 |
 | /var/lib/proxy-agent/revisions/、spool/、releases/ | 修订、缓存、Agent/核心镜像 |
@@ -1269,6 +1309,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | port_claims、tunnel_objects | 保留 ID 归属与历史声明；拒绝孤立/重复归属、缺失或冲突声明，不自动重分配 |
 | canvas_forward_reconcile、tunnel_migration_report | 保留单次完成标记、已迁移 ID 与原因；0129 前归档先升级再转换，已完成的不自动重试；事务失败可重试，转换不改运行修订/入站/证书 |
 | node_machine_traffic_settings/daily/cursors | 三表长期保留、全部加密备份，非 7 天遥测；validateMachineTraffic 校验设置/日期/字节/主外键，0126 前无表合法，清单有三项计数。冻结当前库已到 0126 则整组复制当前表（空表也权威），否则保留归档；不丢当前量、不重复/复活旧量 |
+| certificates、inbounds.certificate_id | 面板自签发的证书库随加密备份、清单与校验保存；validateCertificates 要求域名 JSON 已是面板写出的规范形式（1–10 个、小写、可带一个 `*.`）、状态在集合内、错误码是已知固定码、时间列为 UTC、密封材料能用配置密钥打开、`inbounds.certificate_id` 必须指向存在行，0137 前无表合法并有一项计数。恢复保留归档行，`issuing` 改为 `failed`/`interrupted` 并按正常退避重试；恢复本身不触发申请。`system_settings` 的 `certificate_settings`、`cloudflare_token`、`acme_account` 随整库快照原样往返，密封值不需要重新加密 |
 | subscription_sources 的 latest_result_json/last_success_at | 加密备份与校验覆盖：结果必须是固定阶段/代码、counts 一致且诊断文本等于代码固定文本，超界或夹带任意文本拒绝整份归档；0133 前归档无该列仍合法，恢复按旧列复制，保留“未记录原因”，不自动抓取、不编造原因 |
 | node_identity_retirements、node_identity_recoveries | 作废指纹在恢复时并入当前库，只注册不复活：已作废的指纹既不能覆盖也不能写入当前身份；恢复记录以当前库为准，`issued` 统一改为已过期，不重发恢复码、不重签证书 |
 
@@ -1358,7 +1399,7 @@ L8（部分协议 UDP 不支持设备限制）、L9（保留样本不能还原�
 
 # 36. 扩展边界
 
-v1.4.4 之后暂无下一版本计划。完整系统 TUN、Passkey、OIDC、更细管理员权限、灰度升级及更大规模存储/多中央等仅为可能方向，不是交付承诺。新增能力须通过现有模块接口扩展，保持第 3、35 节的架构与安全边界；已支持协议见第 12、13 节。
+v1.4.7 规划见[v1.4.7 规划](docs/v1.4.7-plan.md)（节点组自动下发凭据、节点连接地址自动探测与域名、证书文件路径与 Cloudflare 自动申请，尚未实施）。完整系统 TUN、Passkey、OIDC、更细管理员权限、灰度升级及更大规模存储/多中央等仅为可能方向，不是交付承诺。新增能力须通过现有模块接口扩展，保持第 3、35 节的架构与安全边界；已支持协议见第 12、13 节。
 
 # 37. 项目运行流程
 

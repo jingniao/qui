@@ -72,6 +72,7 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 		return nil, nil, err
 	}
 	endpoints := []proxy.Proxy{}
+	warnings := []proxy.Warning{}
 	var relays []Relay
 	if s.Relays != nil {
 		relays, err = s.Relays.Relays(ctx)
@@ -94,6 +95,8 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 		if err != nil {
 			return nil, nil, err
 		}
+		address := n.ConnectAddress()
+		warned := false
 		for _, inbound := range state.Inbounds {
 			labels, err := s.labels(ctx, inbound.ID, viewer)
 			if err != nil {
@@ -119,7 +122,14 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 				if !publishedCredential(state, credential, viewer) {
 					continue
 				}
-				if n.PublicIP == "" {
+				// A client cannot dial a node without an address, so the endpoint
+				// is withheld. The Owner sees why once per node instead of an
+				// unexplained short subscription.
+				if address == "" {
+					if !warned {
+						warnings = append(warnings, proxy.SourceWarning(s.ID(), "节点「"+n.Name+"」未设置连接地址，订阅不包含它的入站"))
+						warned = true
+					}
 					continue
 				}
 				endpoint, ok, err := build(n, inbound, credential, labels)
@@ -143,7 +153,7 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 		}
 	}
 	uniqueNames(endpoints)
-	return endpoints, nil, nil
+	return endpoints, warnings, nil
 }
 
 // uniqueNames makes the names of one subscription's own endpoints distinct: a
@@ -212,7 +222,7 @@ func build(n node.Node, inbound desiredstate.Inbound, credential user.Credential
 	endpoint := proxy.Proxy{
 		Origin:     proxy.Origin{Source: "published", Ref: inbound.ID, Node: proxy.Ref{ID: n.ID, Name: n.Name}, Labels: labels},
 		Name:       n.Name + " · " + inbound.Protocol,
-		Server:     n.PublicIP,
+		Server:     n.ConnectAddress(),
 		Port:       inbound.Port,
 		Protocol:   inbound.Protocol,
 		Credential: proxy.Credential{Username: credential.Username, Password: credential.Secret, PublicKey: credential.PublicKey},

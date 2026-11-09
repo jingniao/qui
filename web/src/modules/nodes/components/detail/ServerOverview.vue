@@ -61,6 +61,7 @@
           <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="node.publicIp">
             {{ node.publicIp || '—' }}
           </p>
+          <p class="text-xs text-ios-tertiary">{{ publicIpSourceText }}</p>
         </div>
 
         <!-- 地区 -->
@@ -110,6 +111,16 @@
             {{ node.createdAt ? formatTime(node.createdAt) : '—' }}
           </p>
         </div>
+      </div>
+
+      <!-- 客户端连接地址：订阅与分享链接优先使用它；为空时订阅不会包含本服务器的入站 -->
+      <div v-if="!connectAddress(node)" class="bg-ios-orange/10 border border-ios-orange/30 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2">
+        <span class="text-xs text-ios-orange">未设置连接地址，订阅不会包含该服务器的入站。</span>
+        <button v-if="isOwner" type="button" class="text-xs text-ios-blue hover:underline font-medium" @click="$emit('tab', 'settings')">前往节点设置</button>
+      </div>
+      <div v-else-if="node.connectHost" class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 flex items-center justify-between gap-2">
+        <span class="text-xs text-ios-secondary font-medium shrink-0">客户端连接地址</span>
+        <span class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="node.connectHost">{{ node.connectHost }}</span>
       </div>
 
       <!-- 备注说明 -->
@@ -216,6 +227,7 @@ import ServerFinancialCards from './ServerFinancialCards.vue';
 import ServerSystemPanels from './ServerSystemPanels.vue';
 import { isOwner } from '../../../../app/auth';
 import { showToast } from '../../../../app/api';
+import { connectAddress } from '../../nodeAddress';
 
 const props = defineProps<{
   node: NodeView;
@@ -279,6 +291,13 @@ const connections = computed(() => {
 });
 
 const status = computed(() => serverStatus(props.node, props.now));
+// Where the stored public address came from, so "no address yet" and "the Owner
+// pinned this one" do not read the same (§11.1).
+const publicIpSourceText = computed(() => {
+  if (props.node.publicIpSource === 'manual') return '手动设置';
+  if (props.node.publicIpSource === 'auto') return '自动探测';
+  return '未探测到';
+});
 // Per-core view (K3b): each reported core with its own version and health. A
 // legacy Agent reports one core; a missing health observation stays "—".
 const cores = computed(() => nodeCores(props.node));

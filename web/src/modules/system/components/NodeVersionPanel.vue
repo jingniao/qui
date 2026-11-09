@@ -195,7 +195,7 @@
                   </span>
                 </div>
                 <p class="text-sm text-ios-secondary tabular-nums truncate mt-0.5">
-                  {{ node.publicIp || node.hostname || '等待 Agent 注册' }}
+                  {{ connectAddress(node) || '未设置连接地址' }}
                 </p>
               </div>
             </div>
@@ -394,11 +394,11 @@
 
           <!-- Row 2: Sub-info (IP & Last Heartbeat) -->
           <div class="text-xs font-mono tabular-nums text-neutral-400 tracking-normal flex flex-wrap gap-x-2 gap-y-1 items-center justify-between pt-0.5">
-            <span class="flex items-center gap-1.5 text-neutral-600 truncate tabular-nums" :title="node.publicIp">
+            <span class="flex items-center gap-1.5 text-neutral-600 truncate tabular-nums" :title="connectAddress(node)">
               <svg class="w-3.5 h-3.5 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
               </svg>
-              <span class="truncate">{{ node.publicIp || node.hostname || '未分配 IP' }}</span>
+              <span class="truncate" :class="connectAddress(node) ? '' : 'text-ios-orange font-sans'">{{ connectAddress(node) || '未设置连接地址' }}</span>
             </span>
             <span class="shrink-0 text-neutral-400 flex items-center gap-1 text-xs tabular-nums" :title="'最近心跳: ' + formatTime(node.lastHeartbeat)">
               <svg class="w-3 h-3 text-neutral-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -655,7 +655,7 @@
                 </span>
               </div>
               <p class="text-xs text-neutral-500 tabular-nums mt-0.5">
-                {{ coreManagementTargetNode.publicIp || coreManagementTargetNode.hostname || '未分配公网 IP' }}
+                {{ connectAddress(coreManagementTargetNode) || '未设置连接地址' }}
               </p>
             </div>
           </div>
@@ -1197,6 +1197,7 @@ import { browserInstallEndpoint, resolveInstallEndpoint } from '../../nodes/inst
 import { proxyAPI, type Inbound } from '../../proxy/api';
 import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
+import { connectAddress } from '../../nodes/nodeAddress';
 import { agentUpdatesAPI } from '../agentUpdatesApi';
 import { coreUpdatesAPI, type CoreRemoveTask, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
 import { coreReleasesAPI, defaultCoreSource, deriveAssetURL, DIGEST_SOURCE_LABELS, nodeArchitecture, nodeUsesMusl, pickAsset, quiSourceAllowed, type CoreRelease, type CoreReleaseAsset, type CoreSource } from '../coreReleases';

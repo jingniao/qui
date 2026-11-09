@@ -48,6 +48,7 @@
         </div>
       </template>
     </section>
+    <CertificatesPanel v-if="isOwner && activeTab === 'base'" />
     <ConfirmDialog v-model="baseConfirmation" title="确认修改平台基础设置" :message="`平台名称：${baseConfirm.platformName}，系统时区：${baseConfirm.timezone}。`" warning-details="时区变化会影响页面时间与后续配置。已发布规则仍按原时区执行。" confirm-text="确认保存" :is-danger="false" @confirm="saveBase" />
     <RetentionJobPanel v-if="isOwner && activeTab === 'accessLog'" />
     <StorageObservationPanel v-if="isOwner && activeTab === 'accessLog'" />
@@ -70,6 +71,7 @@ import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import BackupSchedulePanel from '../components/BackupSchedulePanel.vue';
 import LatencyTargetsPanel from '../components/LatencyTargetsPanel.vue';
 import RuntimeSettingsPanel from '../components/RuntimeSettingsPanel.vue';
+import CertificatesPanel from '../components/CertificatesPanel.vue';
 import PanelUpdatePanel from '../components/PanelUpdatePanel.vue';
 import RetentionJobPanel from '../components/RetentionJobPanel.vue';
 import StorageObservationPanel from '../components/StorageObservationPanel.vue';

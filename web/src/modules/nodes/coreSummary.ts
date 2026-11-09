@@ -19,6 +19,9 @@ export interface NodeCore {
   singboxUserStats: boolean | null;
   forwardInboundSupported: boolean | null;
   deviceGateSupported: boolean | null;
+  // The core can render a TLS inbound from certificate and key files that live on
+  // the node (v1.4.7 section 3); null means the Agent reported nothing about it.
+  tlsCertificateFilesSupported: boolean | null;
   // The GOST settings contract the core reports (0 when it reports none). G2
   // forward pools, ranges and limits need contract 2 or newer.
   gostContractVersion: number;
@@ -64,6 +67,7 @@ export function nodeCores(node?: NodeView | null): NodeCore[] {
       error: status?.error || '', protocols: protocolsOf(null, caps.protocols),
       singboxUserStats: typeof caps.singbox_user_stats === 'boolean' ? caps.singbox_user_stats : null,
       forwardInboundSupported: null, deviceGateSupported: null, gostContractVersion: 0,
+      tlsCertificateFilesSupported: typeof caps.tls_certificate_files_supported === 'boolean' ? caps.tls_certificate_files_supported : null,
       serverSettingsContractVersion: caps.server_settings_contract_version || 0,
       serverSettingsCombinations: caps.server_settings_combinations || [], primary: true
     }];
@@ -78,6 +82,7 @@ export function nodeCores(node?: NodeView | null): NodeCore[] {
       singboxUserStats: typeof core.singbox_user_stats === 'boolean' ? core.singbox_user_stats : null,
       forwardInboundSupported: typeof core.forward_inbound_supported === 'boolean' ? core.forward_inbound_supported : null,
       deviceGateSupported: typeof core.device_gate_supported === 'boolean' ? core.device_gate_supported : null,
+      tlsCertificateFilesSupported: typeof core.tls_certificate_files_supported === 'boolean' ? core.tls_certificate_files_supported : null,
       gostContractVersion: typeof core.gost_contract_version === 'number' ? core.gost_contract_version : 0,
       serverSettingsContractVersion: core.server_settings_contract_version || 0,
       serverSettingsCombinations: core.server_settings_combinations || [],

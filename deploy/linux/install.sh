@@ -273,7 +273,7 @@ done
 [[ -z $config || -f $config && ! -L $config ]] || fail 'Config template must be a regular local file.'
 
 # Refuse symlinked system destinations rather than traversing them as root.
-for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib /run/lock /etc/sysctl.d "$etc" "$data" "$data/host-network" "$data/tuning" "$data/panel-update" "$registry"; do
+for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib /run/lock /etc/sysctl.d "$etc" "$etc/certs" "$data" "$data/host-network" "$data/tuning" "$data/panel-update" "$registry"; do
   [[ ! -L $path ]] || fail "Symlinked destination: $path"
 done
 if [[ $init_system == systemd ]]; then
@@ -697,6 +697,10 @@ if [[ $component == agent ]]; then
   # only directory the helper unit can write to.
   install -d -o "$account" -g "$account" -m 0700 "$data/host-network"
   install -d -o "$account" -g "$account" -m 0700 "$data/tuning"
+  # Certificate files an inbound may name (v1.4.7 section 3). Only root writes
+  # here; the Agent reads what the Owner placed. Uninstall keeps the directory,
+  # like the configuration.
+  install -d -o root -g "$account" -m 0750 "$etc/certs"
   install -d -o root -g root -m 0755 /etc/sysctl.d
 fi
 if [[ $component == panel ]]; then

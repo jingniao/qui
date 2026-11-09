@@ -139,8 +139,10 @@ assert.equal(external.calls[0].value.secret, 'secret');
 assert.equal(external.form.secret, '');
 assert.ok(external.events.some(e => e[0] === 'created' && e[1].id === 'external'));
 
+globalThis.__u1bNodeAddress = await load(read('modules/nodes/nodeAddress.ts'));
 const api = await load(read('modules/proxy/api.ts')
   .replace("import { reactive } from 'vue';", 'const reactive = value => value;')
+  .replace("import { connectAddress } from '../nodes/nodeAddress';", 'const { connectAddress } = globalThis.__u1bNodeAddress;')
   .replace("import { request, type Page } from '../../app/apiClient';", 'const request = () => {};'));
 const context = { servers: [], inbounds: [{ id: 'socks', nodeId: 'us', protocol: 'socks5', name: '美国 SOCKS5', port: 1080, enabled: true }], imported: [], outbounds: [{ id: 'external', name: '外部代理', protocol: 'trojan', address: 'proxy.example.com', port: 443, enabled: true }] };
 const scheme = api.canvasSchemeToRelayScheme({ id: 'scheme', name: '方案', execution: 'server', updatedAt: 'now', publishedAt: '', layout: { instances: [

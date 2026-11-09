@@ -78,22 +78,57 @@
         <label v-if="state.original?.hasRealityKey" class="block text-xs"><input v-model="f.rotateRealityKey" type="checkbox" /> 保存时轮换 Reality 密钥</label>
         <p v-if="f.rotateRealityKey" class="text-xs text-ios-orange">保存会生成新密钥对；发布成功后，客户端须更新订阅以取得新公钥，旧公钥将不能连接。</p>
       </template>
-      <template v-if="forcedTLS(f.protocol) || s.security === 'tls'">
+      <template v-if="tlsShown">
         <label class="block">服务器名称
           <input v-model="s.server_name" placeholder="例如 node.example.com（证书上的域名）" class="form-input-base mt-2 font-mono" />
-          <span class="block text-xs mt-1">客户端用它校验证书；留空则由客户端使用实际连接的地址。</span>
+          <span class="block text-xs mt-1">客户端用它校验证书；须是证书覆盖的域名。留空时客户端使用连接地址，此时证书必须覆盖连接地址。</span>
+          <span v-if="quicTLS" class="block text-xs mt-1">域名须解析到这台服务器；使用 Cloudflare 时请设为“仅 DNS”（灰云），代理模式不转发 UDP。</span>
         </label>
         <label v-if="!state.original" class="block text-xs"><input v-model="f.internalRelay" @change="f.internalRelay && (f.subscriptionVisible = false)" type="checkbox" /> 内部中转（使用自动证书；也可在高级设置中修改）</label>
         <p v-if="f.internalRelay" class="text-xs">内部 TLS 证书由系统生成并固定信任，也可提供自有证书。</p>
-        <label class="block">证书 PEM<textarea v-model="s.certificate_pem" rows="4" :placeholder="state.original?.settings.certificate_pem ? '留空保留现有证书' : '必填（内部中转可自动生成）'" class="form-input-base mt-2 font-mono text-xs" />
-          <span class="block text-xs mt-1">以 -----BEGIN CERTIFICATE----- 开头的完整证书链；首次填写时必填，编辑时留空表示沿用已存证书。</span>
+        <label v-else class="block">证书来源
+          <select :value="source" @change="setSource" class="form-input-base mt-2"><option v-for="choice in sources" :key="choice.value" :value="choice.value">{{ choice.label }}</option></select>
         </label>
-        <label class="block">私钥 PEM<textarea v-model="s.private_key_pem" rows="4" autocomplete="off" :placeholder="state.original?.hasTlsKey ? '留空保留现有私钥' : '必填（内部中转可自动生成）'" class="form-input-base mt-2 font-mono text-xs" />
-          <span class="block text-xs mt-1">与上面证书配对的私钥，保存后不会回显；留空表示沿用已存私钥。</span>
-        </label>
-        <label class="block">信任 CA PEM（可选）<textarea v-model="s.trusted_ca_pem" rows="3" placeholder="一般留空" class="form-input-base mt-2 font-mono text-xs" />
-          <span class="block text-xs mt-1">需要固定自签证书时才填客户端另外信任的 CA，一般留空。</span>
-        </label>
+        <template v-if="source === 'self_signed' && !f.internalRelay">
+          <p class="text-xs">面板为「{{ address || '连接地址' }}」生成自签名证书（10 年），客户端通过订阅固定信任它；sing-box 与 mihomo 订阅可用，通用 URI 订阅不包含 Hysteria2/TUIC 的自签名节点。</p>
+          <p v-if="!address" role="alert" class="text-xs text-ios-orange">{{ SELF_SIGNED_REQUIRES_ADDRESS }}<router-link v-if="server" :to="`/nodes/${server.id}?tab=settings`" class="ml-2 text-ios-blue font-medium hover:underline">去设置连接地址</router-link></p>
+          <label v-if="state.original?.tlsSource === 'self_signed'" class="block text-xs"><input v-model="f.regenerateCertificate" type="checkbox" /> 保存时重新生成证书</label>
+          <p v-if="f.regenerateCertificate" class="text-xs text-ios-orange">保存会签发新证书；发布成功后客户端须更新订阅以取得新证书，旧证书将不能连接。</p>
+        </template>
+        <template v-else-if="source === 'acme' && !f.internalRelay">
+          <label class="block">证书
+            <select v-model="f.certificateId" class="form-input-base mt-2"><option value="" disabled>请选择证书</option><option v-for="item in acmeCertificates" :key="item.id" :value="item.id">{{ item.domains.join('、') }}（{{ formatTime(item.notAfter) }} 到期）</option></select>
+          </label>
+          <p class="text-xs">没有合适的证书？<router-link to="/system/settings?tab=base" class="text-ios-blue font-medium hover:underline">在「证书与 DNS」申请新证书</router-link></p>
+          <p class="text-xs">证书由面板自动续期；续期后在「自动发布时段」内自动发布到节点，客户端无需改动。</p>
+          <p v-if="acmeHint" role="alert" class="text-xs text-ios-orange">{{ acmeHint }}<router-link v-if="server" :to="`/nodes/${server.id}?tab=settings`" class="ml-2 text-ios-blue font-medium hover:underline">去设置连接地址</router-link></p>
+        </template>
+        <template v-else-if="source === 'file' && !f.internalRelay">
+          <label class="block">证书文件路径
+            <input v-model="s.certificate_path" maxlength="256" placeholder="/etc/proxy-agent/certs/example.com.crt" class="form-input-base mt-2 font-mono" />
+          </label>
+          <label class="block">私钥文件路径
+            <input v-model="s.private_key_path" maxlength="256" placeholder="/etc/proxy-agent/certs/example.com.key" class="form-input-base mt-2 font-mono" />
+          </label>
+          <p v-if="pathError" role="alert" class="text-xs text-ios-red">{{ pathError }}</p>
+          <p class="text-xs">证书须由公认 CA 签发（例如 certbot 或 acme.sh 申请的证书）并覆盖服务器名称；文件放在节点的 /etc/proxy-agent/certs/，属主 root、组 proxy-agent，私钥权限 0640。续期替换文件后，在节点详情里重启核心。</p>
+        </template>
+        <template v-else>
+          <label class="block">证书 PEM<textarea v-model="s.certificate_pem" rows="4" :placeholder="state.original?.settings.certificate_pem ? '留空保留现有证书' : '必填（内部中转可自动生成）'" class="form-input-base mt-2 font-mono text-xs" />
+            <span class="block text-xs mt-1">以 -----BEGIN CERTIFICATE----- 开头的完整证书链；首次填写时必填，编辑时留空表示沿用已存证书。</span>
+          </label>
+          <label class="block">私钥 PEM<textarea v-model="s.private_key_pem" rows="4" autocomplete="off" :placeholder="state.original?.hasTlsKey ? '留空保留现有私钥' : '必填（内部中转可自动生成）'" class="form-input-base mt-2 font-mono text-xs" />
+            <span class="block text-xs mt-1">与上面证书配对的私钥，保存后不会回显；留空表示沿用已存私钥。</span>
+          </label>
+          <label class="block">信任 CA PEM（可选）<textarea v-model="s.trusted_ca_pem" rows="3" placeholder="一般留空" class="form-input-base mt-2 font-mono text-xs" />
+            <span class="block text-xs mt-1">需要固定自签证书时才填客户端另外信任的 CA，一般留空。</span>
+          </label>
+        </template>
+        <div v-if="certificateInfo" class="space-y-1 text-xs">
+          <p>当前证书：<span class="font-mono">{{ coveredNames }}</span><span v-if="certificateInfo.selfSigned" class="ml-1.5 rounded bg-ios-fill px-1.5 py-0.5">自签名</span></p>
+          <p>到期时间：{{ formatTime(certificateInfo.notAfter) }}</p>
+          <p v-if="certificateInfo.coverageWarning" role="alert" class="text-ios-orange">{{ certificateInfo.coverageWarning }}</p>
+        </div>
       </template>
     </template>
       <label v-if="f.protocol === 'shadowsocks'" class="block">加密方式
@@ -177,9 +212,41 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { NodeView } from '../../../nodes/api';
-import { appendShortId, changeSecurity, changeTransport, applyXhttpSecurity, fillServerNamesFromTarget, flowChoices, internalRelaySettingsReason, randomXhttpPath, REALITY_HANDSHAKE_PRESETS, securityChoices, serverSettingsReason, sniFromTarget, transportChoices, visibleChoices, XHTTP_MODES, forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type EditorState } from './nodeEditorModel';
-const props = defineProps<{ state: EditorState; gost?: boolean; server?: NodeView }>();
+import type { TLSSource } from '../../api';
+import type { ManagedCertificate } from '../../../system/certificatesApi';
+import { connectAddress } from '../../../nodes/nodeAddress';
+import { formatTime } from '../../../../app/auth';
+import { appendShortId, certificateFilesSupported, certificatePathError, changeSecurity, changeTransport, applyXhttpSecurity, fillServerNamesFromTarget, flowChoices, internalRelaySettingsReason, randomXhttpPath, REALITY_HANDSHAKE_PRESETS, securityChoices, serverSettingsReason, sniFromTarget, SELF_SIGNED_REQUIRES_ADDRESS, tlsBlockShown, acmeAddressHint, tlsSourceChoices, tlsSourceFor, usableCertificates, transportChoices, visibleChoices, XHTTP_MODES, forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type EditorState } from './nodeEditorModel';
+const props = defineProps<{ state: EditorState; gost?: boolean; server?: NodeView; certificates?: ManagedCertificate[] }>();
 const f = computed(() => props.state.form), s = computed(() => props.state.form.settings);
+// The TLS block is shown for both the TLS-only protocols and an explicit TLS
+// security; the certificate source inside it names the one material it presents.
+const tlsShown = computed(() => tlsBlockShown(f.value));
+const source = computed(() => tlsSourceFor(props.state, props.server));
+const acmeCertificates = computed(() => usableCertificates(props.certificates || []));
+const sources = computed(() => tlsSourceChoices(certificateFilesSupported(props.server, f.value.core || ''), source.value, acmeCertificates.value.length > 0));
+function setSource(event: Event) {
+  f.value.tlsSource = (event.target as HTMLSelectElement).value as TLSSource;
+  if (f.value.tlsSource === 'acme' && !f.value.certificateId) f.value.certificateId = acmeCertificates.value[0]?.id || '';
+}
+const address = computed(() => connectAddress(props.server));
+// The saved inbound already shows its own coverage warning for an unchanged certificate.
+const acmeHint = computed(() => {
+  if (props.state.original?.certificateInfo?.coverageWarning && f.value.certificateId === props.state.original.certificateId) return '';
+  return acmeAddressHint(acmeCertificates.value.find(item => item.id === f.value.certificateId), address.value);
+});
+// Warnings only once a path is typed: an empty pair is the state before the Owner
+// starts, and the save-time message comes from validateStep anyway.
+const pathError = computed(() => {
+  const certificate = (s.value.certificate_path || '').trim(), key = (s.value.private_key_path || '').trim();
+  if (source.value !== 'file' || f.value.internalRelay || (!certificate && !key)) return '';
+  return certificatePathError(certificate, key);
+});
+// Hysteria2 and TUIC run over QUIC, which a proxied (orange cloud) DNS record does
+// not carry.
+const quicTLS = computed(() => ['hysteria2', 'tuic'].includes(f.value.protocol));
+const certificateInfo = computed(() => props.state.original?.certificateInfo || null);
+const coveredNames = computed(() => [...(certificateInfo.value?.dnsNames || []), ...(certificateInfo.value?.ipAddresses || [])].join('、') || '—');
 const transports = computed(() => visibleChoices(transportChoices(props.server, f.value.core || '', f.value.protocol, s.value), s.value.transport || 'tcp'));
 const securities = computed(() => visibleChoices(securityChoices(props.server, f.value.core || '', f.value.protocol, s.value), s.value.security || 'none')
   .filter(choice => !forcedTLS(f.value.protocol) || choice.value === 'tls'));

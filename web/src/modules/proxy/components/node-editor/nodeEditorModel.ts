@@ -1,7 +1,9 @@
-import type { ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings } from '../../api';
+import type { ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings, TLSSource } from '../../api';
 import type { CoreName, NodeView } from '../../../nodes/api';
 import { blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
+import { connectAddress } from '../../../nodes/nodeAddress';
 import { generateShortId, internalRelaySettingsReason, nonemptyLines, publicReality, serverSettingsReason, validateServerFields, xhttpSecurityFallback, xhttpSecurityNote } from './serverSettingsModel';
+import type { ManagedCertificate } from '../../../system/certificatesApi';
 export { transportChoices, securityChoices, flowChoices, visibleChoices, internalRelaySettingsReason, serverSettingsReason, validateServerFields, XHTTP_MODES, generateShortId, appendShortId, sniFromTarget, fillServerNamesFromTarget, randomXhttpPath, REALITY_HANDSHAKE_PRESETS, xhttpSecurityFallback } from './serverSettingsModel';
 
 export type EditorOrigin = 'list' | 'server';
@@ -72,6 +74,7 @@ export function createEditor(serverId = '', original: Inbound | null = null, ori
     subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
     settings: { transport: 'tcp', security: 'none' }, core: ''
   };
+  if (original?.certificateId) form.certificateId = original.certificateId;
   if (origin === 'list') {
     form.settings.transport ||= 'tcp'; form.settings.security ||= 'none';
     form.settings.method ||= 'chacha20-ietf-poly1305';
@@ -138,10 +141,98 @@ export function applyXhttpSecurity(state: EditorState, server: NodeView | undefi
   return xhttpSecurityNote(reported);
 }
 
+// The TLS block the editor shows: the protocols that are TLS by definition, and
+// any protocol whose security is TLS. Reality draws its own block and presents no
+// certificate at all, so it never carries a certificate source.
+export function tlsBlockShown(form: InboundInput): boolean {
+  return hasSecurity(form.protocol) && (forcedTLS(form.protocol) || (form.settings.security || 'none') === 'tls');
+}
+
+// The one permission bit that allows a node-side certificate pair: the core that
+// runs this inbound must report that its renderer reads the two files (v1.4.7
+// section 3). An Agent that reports nothing grants nothing.
+export function certificateFilesSupported(server: NodeView | undefined, core: CoreName | ''): boolean {
+  return findCore(server, core)?.tlsCertificateFilesSupported === true;
+}
+
+export const TLS_SOURCE_LABELS: Record<string, string> = { self_signed: '自签名', file: '节点上的证书文件', paste: '粘贴证书', acme: '自动申请（Cloudflare）' };
+// The sources the editor offers. A node-side pair is hidden (not disabled) unless
+// the selected core reports the capability; the source the draft already holds
+// stays listed, so the select never shows a value other than the saved one.
+export function tlsSourceChoices(filesSupported: boolean, current: TLSSource = '', acmeUsable = false): { value: TLSSource; label: string }[] {
+  const values: TLSSource[] = ['self_signed'];
+  if (filesSupported) values.push('file');
+  if (acmeUsable) values.push('acme');
+  values.push('paste');
+  if (current && !values.includes(current)) values.push(current);
+  return values.map(value => ({ value, label: TLS_SOURCE_LABELS[value] || `${value}（现有值）` }));
+}
+
+// The certificate source the draft records, or the default for its state. A new
+// inbound issues its own self-signed certificate when the node has a client
+// address to put in it, and asks the Owner to paste one otherwise. Editing keeps
+// the stored source; an empty source on a row written before migration 0136 means
+// it holds pasted material, which is why it reads as such.
+export function tlsSourceFor(state: EditorState, server?: NodeView): TLSSource {
+  if (state.form.tlsSource) return state.form.tlsSource;
+  if (state.original) {
+    const stored = state.original.tlsSource;
+    return stored === 'self_signed' || stored === 'file' || stored === 'acme' ? stored : 'paste';
+  }
+  return connectAddress(server) ? 'self_signed' : 'paste';
+}
+
+// The certificates an inbound may reference: the panel holds issued material for
+// them, which is the case once notAfter is set (a renewing certificate keeps the
+// material it already has).
+export function usableCertificates(items: ManagedCertificate[]): ManagedCertificate[] {
+  return items.filter(item => !!item.notAfter);
+}
+// Whether a certificate name list covers a host: exact, or one label under *.
+export function certificateCoversHost(domains: string[], host: string): boolean {
+  const name = host.trim().toLowerCase();
+  return !!name && domains.some(domain => domain === name || (domain.startsWith('*.') && name.split('.').length > 1 && name.slice(name.indexOf('.') + 1) === domain.slice(2)));
+}
+// The hint shown when the address clients dial is not covered by the chosen
+// certificate: the connect address has to be the certificate's domain.
+export function acmeAddressHint(certificate: ManagedCertificate | undefined, address: string): string {
+  if (!certificate) return '';
+  const first = certificate.domains.find(domain => !domain.startsWith('*.')) || certificate.domains[0] || '';
+  if (!address) return `节点还没有客户端连接地址；请在节点设置里把「客户端连接地址」设为 ${first}。`;
+  if (certificateCoversHost(certificate.domains, address)) return '';
+  return `当前客户端连接地址 ${address} 不在证书覆盖范围内；请在节点设置里把「客户端连接地址」改为证书域名（如 ${first}）。`;
+}
+
+// The message the panel itself returns when a self-signed certificate has no
+// address to name; the editor shows the same words before it even sends the save.
+export const SELF_SIGNED_REQUIRES_ADDRESS = '请先在节点设置里填写公网 IP 或客户端连接地址，再生成自签名证书';
+// Where the installer puts certificate files, and how long one path may be
+// (desiredstate.CertificateDirectory / MaxCertificatePathLength).
+export const CERTIFICATE_DIRECTORY = '/etc/proxy-agent/certs/';
+export const CERTIFICATE_PATH_LIMIT = 256;
+// The node-side pair, judged exactly like desiredstate.validateCertificateFiles:
+// two different absolute paths, already clean, inside the directory the installer
+// creates. Nothing is normalized here, so one file has exactly one spelling.
+export function certificatePathError(certificatePath = '', privateKeyPath = ''): string {
+  const certificate = certificatePath.trim(), key = privateKeyPath.trim();
+  if (!certificate) return '请填写证书文件路径';
+  if (!key) return '请填写私钥文件路径';
+  if (certificate === key) return '证书文件与私钥文件不能是同一个文件';
+  for (const [label, value] of [['证书文件', certificate], ['私钥文件', key]] as const) {
+    if (value.length > CERTIFICATE_PATH_LIMIT) return `${label}路径不能超过 ${CERTIFICATE_PATH_LIMIT} 个字符`;
+    if (!value.startsWith('/')) return `${label}路径必须是绝对路径（以 / 开头）`;
+    if (!value.startsWith(CERTIFICATE_DIRECTORY)) return `${label}路径必须位于 ${CERTIFICATE_DIRECTORY} 之下`;
+    if (value.includes('//') || value.endsWith('/') || value.split('/').some(segment => segment === '.' || segment === '..')) {
+      return `${label}路径必须已经规范化（不能含 . 或 .. 段或连续的 /）`;
+    }
+  }
+  return '';
+}
+
 // Match the old list's merge rules, including absent QUIC transport, optional
 // TLS replacements and the empty WireGuard transport. Advanced edits are then
 // applied explicitly; simply opening a step must never add settings/defaults.
-export function buildPayload(state: EditorState): InboundInput {
+export function buildPayload(state: EditorState, server?: NodeView): InboundInput {
   const f = state.form, p = f.protocol, input = f.settings;
   let settings: ProtocolSettings;
   if (state.origin === 'server') settings = clone(input);
@@ -186,12 +277,32 @@ export function buildPayload(state: EditorState): InboundInput {
   } else {
     delete settings.reality; delete settings.xhttp;
   }
+  // One certificate source at a time (v1.4.7 section 3): node-side files and pasted
+  // PEM never travel together, and an empty pasted PEM keeps the stored pair, which
+  // is the merge rule the panel has always applied. A relay listener presents the
+  // panel-managed material it carries, so it names no source and no files.
+  const source = tlsBlockShown(f) && !f.internalRelay ? tlsSourceFor(state, server) : '';
+  if (source === 'acme') {
+    delete settings.certificate_path; delete settings.private_key_path;
+    delete settings.certificate_pem; delete settings.private_key_pem; delete settings.trusted_ca_pem;
+  } else if (source === 'file') {
+    settings.certificate_path = input.certificate_path?.trim();
+    settings.private_key_path = input.private_key_path?.trim();
+    delete settings.certificate_pem; delete settings.private_key_pem; delete settings.trusted_ca_pem;
+  } else {
+    delete settings.certificate_path; delete settings.private_key_path;
+  }
   const payload: InboundInput = { name: state.origin === 'list' ? f.name.trim() : f.name, nodeId: f.nodeId, protocol: p, listen: f.listen, port: f.port,
     enabled: f.enabled, subscriptionVisible: f.internalRelay ? false : f.subscriptionVisible,
     internalRelay: f.internalRelay, defaultOutbound: f.core === 'gost' ? 'direct' : f.defaultOutbound, allowedUserIds: f.allowedUserIds, settings };
   // An empty core means "the node's current primary core" and is omitted from the
   // request, exactly like the Agent contract; a concrete core is sent explicitly.
   if (f.core) payload.core = f.core;
+  if (source) {
+    payload.tlsSource = source;
+    if (source === 'self_signed' && f.regenerateCertificate) payload.regenerateCertificate = true;
+    if (source === 'acme') payload.certificateId = f.certificateId;
+  }
   if (p === 'vless' && settings.security === 'reality' && f.rotateRealityKey) payload.rotateRealityKey = true;
   return clone(payload);
 }
@@ -318,9 +429,21 @@ export function validateStep(step: number, state: EditorState, server: NodeView 
     const fields = validateServerFields(s);
     if (fields) return fields;
   }
-  if (step === 3 && hasSecurity(f.protocol) && (forcedTLS(f.protocol) || s.security === 'tls')) {
-    if (!s.certificate_pem?.trim() && !state.original?.settings.certificate_pem && !f.internalRelay) return '请输入 TLS 证书 PEM';
-    if (!s.private_key_pem?.trim() && !state.original?.hasTlsKey && !f.internalRelay) return '请输入 TLS 私钥 PEM';
+  // A self-signed certificate or a node-side file pair brings its own material;
+  // only a pasted certificate asks for PEM, and an internal relay's certificate is
+  // the panel's own business. The two errors here are the panel's own words.
+  if (step === 3 && tlsBlockShown(f)) {
+    const source = tlsSourceFor(state, server);
+    if (!f.internalRelay && source === 'file') {
+      const paths = certificatePathError(s.certificate_path, s.private_key_path);
+      if (paths) return paths;
+    }
+    if (!f.internalRelay && source === 'acme' && !f.certificateId) return '请选择一张已签发的证书';
+    if (!f.internalRelay && source === 'self_signed' && !connectAddress(server)) return SELF_SIGNED_REQUIRES_ADDRESS;
+    if (!f.internalRelay && source === 'paste') {
+      if (!s.certificate_pem?.trim() && !state.original?.settings.certificate_pem) return '请输入 TLS 证书 PEM';
+      if (!s.private_key_pem?.trim() && !state.original?.hasTlsKey) return '请输入 TLS 私钥 PEM';
+    }
   }
   if (step === 4) {
     if (f.protocol === 'forward' && s.forward && !relayMode(s)) {

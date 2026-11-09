@@ -2304,6 +2304,7 @@ import {
   type ServiceInput
 } from '../api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { connectAddress } from '../../nodes/nodeAddress';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { userAPI, type ProxyUser } from '../../users/api';
 import { showToast } from '../../../app/api';
@@ -3468,7 +3469,7 @@ const ruleTargetOptions = computed<SelectOption[]>(() => {
         group: '🌐 指定单个节点',
         value: 'node:' + node.id,
         label: node.name,
-        desc: node.publicIp || '未知 IP'
+        desc: connectAddress(node) || '未设置连接地址'
       });
     });
   }

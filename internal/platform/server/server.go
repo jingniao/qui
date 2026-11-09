@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"proxycontrol/internal/panel/access"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/certificate"
 	"proxycontrol/internal/panel/connections"
 	"proxycontrol/internal/panel/dashboard"
 	"proxycontrol/internal/panel/deployment"
@@ -53,35 +54,37 @@ import (
 )
 
 type Server struct {
-	restoreStartup     func(context.Context) error
-	Config             config.Panel
-	Database           *sql.DB
-	Logger             *slog.Logger
-	HTTP               *http.Server
-	httpMux            *http.ServeMux
-	GRPC               *grpc.Server
-	health             *health.Server
-	Authority          *pki.Authority
-	accessRepository   *access.Repository
-	trafficService     *access.Service
-	nodeRepository     *node.Repository
-	deployments        *deployment.Repository
-	readPool           *sql.DB
-	retentionWake      chan struct{}
-	backupWake         chan struct{}
-	backupService      *system.BackupService
-	preparedTLS        bool
-	systemHandler      *system.Handler
-	authService        *auth.Service
-	quotaDeployer      *quotaDeployer
-	latencyScheduler   *node.LatencyScheduler
-	cycleScheduler     *cycleScheduler
-	importStore        *importer.Store
-	connectionStore    *connections.Store
-	connectionObserver *user.ConnectionObserver
-	deviceObserver     *user.DeviceObserver
-	admission          admission
-	startedAt          time.Time
+	restoreStartup      func(context.Context) error
+	Config              config.Panel
+	Database            *sql.DB
+	Logger              *slog.Logger
+	HTTP                *http.Server
+	httpMux             *http.ServeMux
+	GRPC                *grpc.Server
+	health              *health.Server
+	Authority           *pki.Authority
+	accessRepository    *access.Repository
+	trafficService      *access.Service
+	nodeRepository      *node.Repository
+	deployments         *deployment.Repository
+	readPool            *sql.DB
+	retentionWake       chan struct{}
+	backupWake          chan struct{}
+	backupService       *system.BackupService
+	preparedTLS         bool
+	systemHandler       *system.Handler
+	authService         *auth.Service
+	quotaDeployer       *quotaDeployer
+	certificates        *certificate.Service
+	certificateDeployer *certificateDeployer
+	latencyScheduler    *node.LatencyScheduler
+	cycleScheduler      *cycleScheduler
+	importStore         *importer.Store
+	connectionStore     *connections.Store
+	connectionObserver  *user.ConnectionObserver
+	deviceObserver      *user.DeviceObserver
+	admission           admission
+	startedAt           time.Time
 }
 
 func New(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logger) (*Server, error) {
@@ -265,12 +268,23 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}}
 	s.systemHandler.Runtime = s.runtimeInfo
 	s.systemHandler.Register(mux)
+	// Certificates are requested, issued, renewed and stored by the panel itself.
+	// No Cloudflare token or private key leaves it, and no Agent sees a
+	// certificate until phase D2 references one from an inbound.
+	s.certificates = certificate.NewService(&certificate.Repository{Database: database, Vault: configurationVault})
+	s.certificates.Issuer = certificate.NewACMEIssuer()
+	s.certificates.DNS = certificate.NewCloudflare("")
+	s.certificates.Propagation = &certificate.DNSPropagator{}
+	s.certificates.Audit = systemRepository
+	s.certificates.Publish = eventBus.Publish
+	s.certificates.Logger = logger
+	(&certificate.Handler{Service: s.certificates, Auth: authHandler, Actor: func(ctx context.Context) string { return auth.Actor(ctx).Username }}).Register(mux)
 	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository, BaseSettings: systemRepository}).Register(mux)
 	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments, Disconnect: control.Disconnect}
 	nodeHandler.Install = s.installInfo
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)
-	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault}, Nodes: nodeRepository}
+	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates}, Nodes: nodeRepository}
 	if err := proxyService.Repository.ReconcileCanvasTunnels(context.Background()); err != nil {
 		return nil, err
 	}
@@ -302,6 +316,18 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}
 	s.quotaDeployer = newQuotaDeployer(logger, users, quotaState, proxyService, nodeRepository, deployments, eventBus.Publish)
 	s.quotaDeployer.record = systemRepository.Record
+	// A renewed certificate reaches the nodes that serve it through an automatic
+	// revision inside the Owner's deploy window.
+	s.certificateDeployer = newCertificateDeployer(logger, s.certificates, deployments, eventBus.Publish)
+	s.certificateDeployer.record = systemRepository.Record
+	s.certificateDeployer.location = func(ctx context.Context) (*time.Location, error) {
+		base, err := systemRepository.ReadBase(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return time.LoadLocation(base.Timezone)
+	}
+	s.certificates.Renewed = s.certificateDeployer.renewed
 	s.latencyScheduler = &node.LatencyScheduler{Repository: nodeRepository, Logger: logger}
 	s.cycleScheduler = &cycleScheduler{users: users, nodes: nodeRepository, settings: systemRepository, quota: s.quotaDeployer, now: time.Now, publish: eventBus.Publish}
 	users.TrafficApplied = s.quotaDeployer.evaluate
@@ -311,6 +337,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	deployments.Applied = s.quotaDeployer.reconcileNode
 	userHandler := &user.Handler{Repository: users, Auth: authHandler, Audit: systemRepository, Nodes: nodeRepository, QuotaChanged: s.quotaDeployer.evaluateUser, ExpiryRenewed: s.quotaDeployer.renewExpiry, AccessRemoved: s.quotaDeployer.accessRemoved, AccessChanged: s.quotaDeployer.accessChanged, Observations: s.connectionObserver, Devices: devices}
 	userHandler.Register(mux)
+	// A saved or deleted node group changes which inbounds its granted users
+	// may reach, so their credentials follow through the same scheduler.
+	nodeHandler.GroupAccessChanged = s.quotaDeployer.groupAccessChanged
 	// The subscription path only reads users, nodes and published state, and a
 	// snapshot that lags a just-committed write is acceptable there. Pointing
 	// those reads at the read-only pool keeps /sub responsive while the single
@@ -471,9 +500,13 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(7)
+	jobs.Add(9)
 	defer func() { stopBackground(); jobs.Wait() }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
+	// One worker owns issuance and renewal: it marks interrupted runs, sweeps
+	// hourly and issues one certificate at a time.
+	go func() { defer jobs.Done(); s.certificates.Run(background) }()
+	go func() { defer jobs.Done(); s.certificateDeployer.run(background) }()
 	go func() { defer jobs.Done(); s.latencyScheduler.Run(background) }()
 	go func() { defer jobs.Done(); s.importStore.Run(background) }()
 	go func() {

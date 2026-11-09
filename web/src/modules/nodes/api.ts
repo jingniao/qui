@@ -9,16 +9,27 @@ export interface NodeNetworkSettings {
   outboundSourceIp: string; outboundInterface: string; hostSourceIpv4: string; hostSourceIpv6: string;
 }
 // The body of PUT /api/v1/nodes/{id}: the node basics plus the outbound network.
+// The two address fields are optional because they carry meaning only when the
+// Owner changed them: a non-empty publicIp is stored as a manual value, and an
+// omitted field keeps whatever the panel holds.
 export interface NodeSettingsInput extends NodeNetworkSettings {
-  id: string; name: string; enabled: boolean; publicIp: string; allowSubscription: boolean; maintenance: boolean;
+  id: string; name: string; enabled: boolean; publicIp?: string; connectHost?: string; allowSubscription: boolean; maintenance: boolean;
 }
 export interface NodeView extends NodeNetworkSettings {
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';
-  enabled: boolean; allowSubscription: boolean; maintenance: boolean; hostname: string; os: string; agentVersion: string; publicIp: string; lastHeartbeat: string; createdAt: string;
+  enabled: boolean; allowSubscription: boolean; maintenance: boolean; hostname: string; os: string; agentVersion: string; publicIp: string;
+  // Where the public address came from: manual means the Owner typed it and the
+  // Agent never replaces it, auto means the panel filled it from detection, and
+  // an empty source means there is no address at all.
+  publicIpSource: '' | 'manual' | 'auto';
+  // Client-facing address when the Owner set one (domain or IP literal); the
+  // subscriptions and share links prefer it over publicIp.
+  connectHost: string;
+  lastHeartbeat: string; createdAt: string;
   // Set once the node was logically deleted; an empty string means "live".
   deletedAt: string;
   coreSelectionBlocked?:CoreName[];
-  capabilities: { multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; server_settings_contract_version?: number; server_settings_combinations?: ServerSettingsCombination[]; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
+  capabilities: { multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; tls_certificate_files_supported?: boolean; server_settings_contract_version?: number; server_settings_combinations?: ServerSettingsCombination[]; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
   heartbeat: { bootId?: string; defaultRouteInterface?: string; cores?:CoreStatus[]; load1?: number; load5?: number; load15?: number; processCount?: string; tcpConnections?: string; udpSockets?: string; memoryUsedBytes?: string; swapUsedBytes?: string; diskUsedBytes?: string; tuningCurrent?: Record<string,string>; traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
 }
 // The panel publishes the release version, the gRPC port and the digest of the
@@ -101,7 +112,15 @@ requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<H
   enroll: (name: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name }),
   reissueEnrollment: (id: string) => request<Enrollment>(`/nodes/${encodeURIComponent(id)}/enrollment-token`, 'POST', {}),
   update: (node: NodeView, enabled: boolean) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled }),
-  save: (node: NodeSettingsInput) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled: node.enabled, publicIp: node.publicIp, allowSubscription: node.allowSubscription, maintenance: node.maintenance, outboundSourceIp: node.outboundSourceIp, outboundInterface: node.outboundInterface, hostSourceIpv4: node.hostSourceIpv4, hostSourceIpv6: node.hostSourceIpv6 }),
+  // The two address fields are sent only when they carry a value: an empty
+  // string is a real instruction ("clear it, go back to detection"), so an
+  // omitted field must stay absent instead of defaulting to one of the two.
+  save: (node: NodeSettingsInput) => request(`/nodes/${node.id}`, 'PUT', {
+    name: node.name, enabled: node.enabled,
+    ...(node.publicIp === undefined ? {} : { publicIp: node.publicIp }),
+    ...(node.connectHost === undefined ? {} : { connectHost: node.connectHost }),
+    allowSubscription: node.allowSubscription, maintenance: node.maintenance, outboundSourceIp: node.outboundSourceIp, outboundInterface: node.outboundInterface, hostSourceIpv4: node.hostSourceIpv4, hostSourceIpv6: node.hostSourceIpv6
+  }),
   revoke: (id: string) => request(`/nodes/${id}/revoke-certificate`, 'POST'),
   deletionPreview: (id: string) => request<DeletionPreview>(`/nodes/${encodeURIComponent(id)}/deletion-preview`),
   machineTraffic: (id: string) => request<MachineTrafficSummary>(`/nodes/${encodeURIComponent(id)}/machine-traffic`),
@@ -143,5 +162,5 @@ export interface NodeTuning { supported:boolean; desired:Record<string,string>; 
 
 export type CoreName = 'xray' | 'sing-box' | 'gost';
 export interface ServerSettingsCombination { protocol: string; direction: string; security: string; transport: string; flow?: string; }
-export interface CoreCapability { name:CoreName; version?:string; protocols?:{protocol:string;inbound?:boolean;outbound?:boolean;tcp?:boolean;udp?:boolean}[]; singbox_user_stats?:boolean; forward_inbound_supported?:boolean; device_gate_supported?:boolean; healthy?:boolean; observation_contract_version?:number; gost_contract_version?:number; server_settings_contract_version?:number; server_settings_combinations?:ServerSettingsCombination[]; }
+export interface CoreCapability { name:CoreName; version?:string; protocols?:{protocol:string;inbound?:boolean;outbound?:boolean;tcp?:boolean;udp?:boolean}[]; singbox_user_stats?:boolean; forward_inbound_supported?:boolean; device_gate_supported?:boolean; tls_certificate_files_supported?:boolean; healthy?:boolean; observation_contract_version?:number; gost_contract_version?:number; server_settings_contract_version?:number; server_settings_combinations?:ServerSettingsCombination[]; }
 export interface CoreStatus { name:CoreName; healthy:boolean; error?:string; started_at?:{seconds?:number;nanos?:number}; traffic_source_status?:TrafficSourceStatus; }

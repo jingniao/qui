@@ -5,7 +5,7 @@
 #   * in the `check` job of .github/workflows/check.yml, for a manual
 #     (workflow_dispatch) or weekly (schedule) run on a clean runner.
 #
-# A v* tag does not run it again: the `release` job only builds when an earlier
+# A v* tag does not run it again: the `release` job only builds when an earlie
 # manual or weekly run already passed `check` on exactly that commit.
 #
 # A commit that changes only frontend source and documentation since the previous
@@ -97,6 +97,8 @@ node web/scripts/u1b-selftest.mjs
 node web/scripts/server-detail-selftest.mjs
 node web/scripts/ui-regression-selftest.mjs
 node web/scripts/canvas-library-selftest.mjs
+node web/scripts/node-address-selftest.mjs
+node web/scripts/certificates-selftest.mjs
 
 # The web gate ends here: build the panel exactly as a release does (the embed in
 # web/embed.go reads web/dist) and check that every asset index.html references is
@@ -203,7 +205,7 @@ if [ -f deploy/linux/tests/node-install-test.sh ]; then
   bash -n -- deploy/linux/tests/node-install-test.sh
   bash deploy/linux/tests/node-install-test.sh
 fi
-# tuning-helper-test.sh activates the packaged tuning units against a fake helper
+# tuning-helper-test.sh activates the packaged tuning units against a fake helpe
 # below /run and never writes host sysctls; the other two are rootless.
 "${as_root[@]}" bash deploy/linux/tests/tuning-helper-test.sh
 # panel-update-helper-test.sh covers the root helper behind "update the panel from the

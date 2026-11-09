@@ -19,13 +19,18 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		if err := f.Validate(); err != nil {
 			return err
 		}
-		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" || settings.HasServerSettings() {
+		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" || settings.HasServerSettings() || settings.HasCertificateFiles() {
 			return errors.New("forward cannot carry proxy security or transport settings")
 		}
 		return nil
 	}
 	if settings.Forward != nil {
 		return errors.New("forward settings require a forward inbound")
+	}
+	// Node-side certificate files are inbound-only TLS material; the rule set
+	// lives in certificates.go so the panel and the Agent apply the same one.
+	if err := validateCertificateFiles(settings, inbound); err != nil {
+		return err
 	}
 	quic := protocol == "hysteria2" || protocol == "tuic"
 	if settings.QUIC != nil && !quic {
@@ -85,7 +90,10 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 	if protocol == "trojan" && settings.Security != "tls" {
 		return errors.New("Trojan requires TLS")
 	}
-	if settings.Security == "tls" && inbound {
+	// A file pair is loaded by the core from the node's own filesystem, so the
+	// pasted material requirement does not apply to it: the Agent proves the
+	// files instead (v1.4.7 section 3, certificates.go).
+	if settings.Security == "tls" && inbound && !settings.HasCertificateFiles() {
 		if len(settings.CertificatePEM) > 32768 || len(settings.PrivateKeyPEM) > 16384 {
 			return errors.New("TLS material exceeds limit")
 		}

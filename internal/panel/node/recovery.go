@@ -42,9 +42,10 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp str
 	}
 	// Newer nodes absent from the chosen business snapshot remain disabled
 	// tombstones so issued allowances and received batch identities survive.
-	// Their outbound network settings are carried over like their other fields.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_sequence,capabilities_json,created_at,allow_subscription,maintenance,deleted_at)
-SELECT c.id,c.name,'disabled',0,c.hostname,c.operating_system,c.agent_version,c.public_ip,c.outbound_source_ip,c.outbound_interface,c.host_source_ipv4,c.host_source_ipv6,c.last_sequence,c.capabilities_json,c.created_at,0,1,c.deleted_at
+	// Their outbound network settings and connection address are carried over
+	// like their other fields.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(id,name,status,enabled,hostname,operating_system,agent_version,public_ip,public_ip_manual,connect_host,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_sequence,capabilities_json,created_at,allow_subscription,maintenance,deleted_at)
+SELECT c.id,c.name,'disabled',0,c.hostname,c.operating_system,c.agent_version,c.public_ip,c.public_ip_manual,c.connect_host,c.outbound_source_ip,c.outbound_interface,c.host_source_ipv4,c.host_source_ipv6,c.last_sequence,c.capabilities_json,c.created_at,0,1,c.deleted_at
 FROM restore_source.nodes c WHERE NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=c.id)`); err != nil {
 		return err
 	}

@@ -288,8 +288,8 @@
                     </div>
 
                     <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
-                      <span class="tabular-nums text-xs text-ios-tertiary truncate">
-                        {{ node.publicIp || node.hostname || '未分配IP' }}
+                      <span class="tabular-nums text-xs truncate" :class="connectAddress(node) ? 'text-ios-tertiary' : 'text-ios-orange'">
+                        {{ connectAddress(node) || '未设置连接地址' }}
                       </span>
                       <span class="tabular-nums text-xs text-ios-tertiary shrink-0">
                         {{ node.lastHeartbeat ? formatTime(node.lastHeartbeat).slice(11, 19) : '未同步' }}
@@ -438,8 +438,8 @@
                             {{ item.node.name }}
                           </router-link>
 
-                          <span class="tabular-nums text-xs text-ios-tertiary truncate hidden sm:inline">
-                            {{ item.node.publicIp || item.node.hostname || '' }}
+                          <span class="tabular-nums text-xs truncate hidden sm:inline" :class="connectAddress(item.node) ? 'text-ios-tertiary' : 'text-ios-orange'">
+                            {{ connectAddress(item.node) || '未设置连接地址' }}
                           </span>
                         </div>
 
@@ -618,6 +618,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { dashboardAPI, type Dashboard, type Hour, type Recent } from '../api';
 import { accessAPI } from '../../access/api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { connectAddress } from '../../nodes/nodeAddress';
 import { unhealthyCoreLabel } from '../../nodes/coreSummary';
 import { userAPI, type ProxyUser } from '../../users/api';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
@@ -786,7 +787,7 @@ const pendingIssues = computed<PendingIssue[]>(() => {
       issues.push({
         title: `节点待登记: ${n.name}`,
         desc: '等待登记。',
-        tag: n.publicIp || n.hostname || '未分配IP',
+        tag: connectAddress(n) || '未设置连接地址',
         level: 'warning',
         link: `/nodes/${n.id}`
       });
@@ -796,7 +797,7 @@ const pendingIssues = computed<PendingIssue[]>(() => {
       issues.push({
         title: `节点异常: ${n.name}`,
         desc: '节点异常。',
-        tag: n.publicIp || n.hostname || '未分配IP',
+        tag: connectAddress(n) || '未设置连接地址',
         level: 'danger',
         link: `/nodes/${n.id}`
       });
@@ -806,7 +807,7 @@ const pendingIssues = computed<PendingIssue[]>(() => {
       issues.push({
         title: `节点离线: ${n.name}`,
         desc: '节点离线，心跳中断。',
-        tag: n.publicIp || n.hostname || '未分配IP',
+        tag: connectAddress(n) || '未设置连接地址',
         level: 'danger',
         link: `/nodes/${n.id}`
       });

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -42,6 +43,13 @@ type Handler struct {
 	// Install supplies the one-command install metadata. A nil field leaves the
 	// fields empty; enrollment never depends on it.
 	Install func() InstallInfo
+	// GroupAccessChanged queues the automatic revision for the users granted a
+	// node group whose membership, enablement or purpose changed: the group is
+	// what decides which inbounds their credentials reach, so a saved or
+	// deleted group changes their access without any user row being touched.
+	// The node package does not import the user or platform packages; the
+	// platform wires this to the same scheduler a grant change uses. Optional.
+	GroupAccessChanged func(ctx context.Context, groupID string, userIDs []string, reason string)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -186,6 +194,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		AllowSubscription *bool   `json:"allowSubscription"`
 		Maintenance       *bool   `json:"maintenance"`
 		PublicIP          *string `json:"publicIp"`
+		ConnectHost       *string `json:"connectHost"`
 		OutboundSourceIP  *string `json:"outboundSourceIp"`
 		OutboundInterface *string `json:"outboundInterface"`
 		HostSourceIPv4    *string `json:"hostSourceIpv4"`
@@ -203,7 +212,11 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Invalid public IP")
 		return
 	}
-	settings := SettingsInput{Name: body.Name, Enabled: *body.Enabled, AllowSubscription: body.AllowSubscription, Maintenance: body.Maintenance, PublicIP: body.PublicIP, OutboundSourceIP: body.OutboundSourceIP, OutboundInterface: body.OutboundInterface, HostSourceIPv4: body.HostSourceIPv4, HostSourceIPv6: body.HostSourceIPv6}
+	if body.ConnectHost != nil && !validConnectHost(strings.TrimSpace(*body.ConnectHost)) {
+		httpapi.Error(w, 400, "invalid_request", "Invalid connect host: use a domain name or an IP literal without a scheme or port")
+		return
+	}
+	settings := SettingsInput{Name: body.Name, Enabled: *body.Enabled, AllowSubscription: body.AllowSubscription, Maintenance: body.Maintenance, PublicIP: body.PublicIP, ConnectHost: body.ConnectHost, OutboundSourceIP: body.OutboundSourceIP, OutboundInterface: body.OutboundInterface, HostSourceIPv4: body.HostSourceIPv4, HostSourceIPv6: body.HostSourceIPv6}
 	if _, err := networkSettings(desiredstate.Network{}, settings); err != nil {
 		httpapi.Error(w, 400, "invalid_request", "Invalid outbound network settings")
 		return

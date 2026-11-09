@@ -28,10 +28,23 @@
               <span class="font-medium text-neutral-600 text-xs">服务器名称 <span class="text-rose-500">*</span></span>
               <input v-model.trim="form.name" required maxlength="40" class="form-input-base" />
             </label>
-            <label class="space-y-1">
-              <span class="font-medium text-neutral-600 text-xs">订阅接入 IP</span>
-              <input v-model.trim="form.publicIp" class="form-input-base font-mono" placeholder="留空默认使用服务器公网 IP" />
-            </label>
+            <div class="sm:col-span-2 space-y-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-medium text-neutral-600 text-xs">公网 IP</span>
+                    <span class="text-xs" :class="publicIpSource === 'manual' ? 'text-ios-blue' : 'text-ios-tertiary'">{{ publicIpSourceText }}</span>
+                  </div>
+                  <input v-model.trim="form.publicIp" class="form-input-base font-mono" placeholder="留空则使用 Agent 自动探测的公网 IP" />
+                  <button v-if="isOwner && publicIpSource === 'manual'" type="button" class="text-xs text-ios-blue hover:underline" :disabled="!!saving" @click="restoreAutoDetection">恢复自动探测</button>
+                </div>
+                <label class="space-y-1">
+                  <span class="font-medium text-neutral-600 text-xs">客户端连接地址</span>
+                  <input v-model.trim="form.connectHost" class="form-input-base font-mono" placeholder="可填域名或 IP，留空使用公网 IP" />
+                </label>
+              </div>
+              <p class="text-xs text-ios-tertiary leading-relaxed">订阅与分享链接优先使用客户端连接地址；中转、隧道与画布仍使用公网 IP。</p>
+            </div>
             <label class="space-y-1">
               <span class="font-medium text-neutral-600 text-xs">地区 / 位置</span>
               <input v-model.trim="metaForm.region" class="form-input-base" placeholder="例如：🇯🇵 东京" />
@@ -368,6 +381,7 @@ import type { HostMetrics } from '../../metrics';
 import {
   MACHINE_TRAFFIC_METHODS, MACHINE_TRAFFIC_UNITS, formFromSettings, payloadFromForm, type MachineTrafficForm
 } from '../../machineTrafficModel';
+import { addressChanges, validConnectHost, type NodeAddress } from '../../nodeAddress';
 
 const coreDetails = ref<HTMLDetailsElement>();
 
@@ -390,6 +404,15 @@ const metaForm = reactive({
 const saving = ref('');
 const revokeOpen = ref(false);
 const errors = reactive<Record<string, string>>({});
+
+// The public address is the Agent's detection unless the Owner typed one, so
+// the hint names which of the two the stored value is (§11.1).
+const publicIpSource = computed(() => props.node.publicIpSource);
+const publicIpSourceText = computed(() => {
+  if (publicIpSource.value === 'manual') return '手动设置';
+  if (publicIpSource.value === 'auto') return '自动探测';
+  return '未探测到';
+});
 
 // 整机流量 (T1): the settings are saved on their own, so they carry their own
 // form copy, baseline and dirty flag instead of the basic-information snapshot.
@@ -419,6 +442,10 @@ const networkFields = [
 
 watch(() => props.node.id, () => {
   Object.assign(form, props.node);
+  // Both addresses are strings in the form even when the API omits them, so the
+  // dirty check compares what the Owner sees instead of undefined against ''.
+  form.publicIp = props.node.publicIp || '';
+  form.connectHost = props.node.connectHost || '';
   const meta = props.meta;
   const price = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
   Object.assign(metaForm, {
@@ -438,7 +465,8 @@ watch(() => props.node.id, () => {
 const snapshots = computed(() => ({
   basic: {
     name: form.name,
-    publicIp: form.publicIp,
+    publicIp: form.publicIp ?? '',
+    connectHost: form.connectHost ?? '',
     region: metaForm.region,
     remark: metaForm.remark,
     portRangeStart: metaForm.portRangeStart,
@@ -458,6 +486,14 @@ const snapshots = computed(() => ({
 const baseline = reactive<Record<string, unknown>>(JSON.parse(JSON.stringify(snapshots.value)));
 const dirty = computed(() => Object.fromEntries(Object.entries(snapshots.value).map(([key, value]) => [key, isDirty(value, baseline[key])])));
 const hasUnsaved = computed(() => machineDirty.value || Object.values(dirty.value).some(Boolean));
+
+// The addresses the form was loaded (or last saved) with. Only a field the Owner
+// moved away from these is submitted, because a non-empty public IP is stored as
+// a manual value that Agent detection never replaces (§11.1).
+const loadedAddresses = computed<NodeAddress>(() => {
+  const basic = baseline.basic as NodeAddress;
+  return { publicIp: basic.publicIp, connectHost: basic.connectHost };
+});
 
 defineExpose({ hasUnsaved });
 
@@ -488,6 +524,43 @@ function validateNetwork() {
   }
 }
 
+// Everything the update endpoint requires plus the outbound network, read from
+// the server's current row so a partial save cannot reset another group. The two
+// address fields stay absent unless the Owner changed them.
+function settingsBody(latest: NodeView, name: string): NodeSettingsInput {
+  return {
+    id: latest.id,
+    name,
+    enabled: latest.enabled,
+    allowSubscription: latest.allowSubscription,
+    maintenance: latest.maintenance,
+    outboundSourceIp: latest.outboundSourceIp || '',
+    outboundInterface: latest.outboundInterface || '',
+    hostSourceIpv4: latest.hostSourceIpv4 || '',
+    hostSourceIpv6: latest.hostSourceIpv6 || ''
+  };
+}
+
+// Clearing the address drops the manual mark, so the next heartbeat fills the
+// detected address again (§11.1).
+async function restoreAutoDetection() {
+  if (saving.value || !isOwner.value) return;
+  saving.value = 'basic';
+  errors.basic = '';
+  try {
+    const latest = await nodeAPI.get(props.node.id);
+    await nodeAPI.save({ ...settingsBody(latest, form.name), publicIp: '' });
+    form.publicIp = '';
+    (baseline.basic as Record<string, unknown>).publicIp = '';
+    showToast('已恢复自动探测，下一次心跳会重新填写公网 IP');
+    emit('changed');
+  } catch (e) {
+    errors.basic = (e as Error).message;
+  } finally {
+    saving.value = '';
+  }
+}
+
 async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
   if (saving.value || !isOwner.value) return;
   saving.value = group;
@@ -495,6 +568,13 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
   try {
     if (group === 'network') validateNetwork();
     if (group === 'basic') {
+      const publicIp = String((form.publicIp ?? '')).trim();
+      if (publicIp && !ipv4(publicIp) && !ipv6(publicIp)) {
+        throw new Error('公网 IP 需要有效 IPv4 或 IPv6 地址');
+      }
+      if (!validConnectHost(form.connectHost ?? '')) {
+        throw new Error('客户端连接地址需为域名或 IP，不能包含协议、端口或方括号');
+      }
       const hasStart = metaForm.portRangeStart !== undefined && metaForm.portRangeStart !== null && (metaForm.portRangeStart as any) !== '';
       const hasEnd = metaForm.portRangeEnd !== undefined && metaForm.portRangeEnd !== null && (metaForm.portRangeEnd as any) !== '';
       if (hasStart && hasEnd) {
@@ -513,8 +593,11 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
 
     const submitted = JSON.parse(JSON.stringify(snapshots.value[group]));
     const latest = await nodeAPI.get(props.node.id);
-    const change = group === 'basic' ? { name: submitted.name, publicIp: submitted.publicIp } : submitted;
-    if (group !== 'renewal') await nodeAPI.save({ ...latest, ...change });
+    if (group !== 'renewal') {
+      await nodeAPI.save(group === 'basic'
+        ? { ...settingsBody(latest, submitted.name), ...addressChanges(loadedAddresses.value, submitted) }
+        : { ...settingsBody(latest, latest.name), ...submitted });
+    }
     if (group === 'basic' || group === 'renewal') {
       const latestMeta = await loadNodeMeta(props.node.id, true);
       const metaChange = group === 'basic' ? {

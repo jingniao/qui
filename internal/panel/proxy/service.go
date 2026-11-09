@@ -137,10 +137,32 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	if input.Core == desiredstate.CoreGost && input.DefaultOutbound != "direct" {
 		return Inbound{}, errors.New("GOST 转发只能直接出站（默认出站必须是 direct）")
 	}
+	// A pasted private key is the only way to tell new pasted material from the pair
+	// an acme inbound is shown with (its certificate half is public), so it is
+	// noted before the stored settings are merged in.
+	pastedKey := input.Settings.PrivateKeyPEM != ""
+	previousSource := ""
 	if id != "" {
 		old, err := s.Repository.Inbound(ctx, id, true)
 		if err != nil {
 			return Inbound{}, err
+		}
+		// old.TLSSource is already resolved for a row written before 0136, so it
+		// names the material this inbound actually presents. A self-signed save
+		// needs it to tell its own certificate from one it inherited.
+		previousSource = old.TLSSource
+		// An ordinary save keeps the recorded certificate source: only a request
+		// that names one changes it (v1.4.7 section 3).
+		if input.TLSSource == "" {
+			input.TLSSource = old.TLSSource
+		}
+		if input.TLSSource == TLSSourceACME && input.CertificateID == "" {
+			input.CertificateID = old.CertificateID
+		}
+		// The pair an acme inbound is shown with belongs to the certificate library:
+		// leaving acme must not turn it into a pasted copy that never renews.
+		if old.TLSSource == TLSSourceACME && input.TLSSource != TLSSourceACME {
+			old.Settings.CertificatePEM, old.Settings.PrivateKeyPEM, old.Settings.TrustedCAPEM = "", "", ""
 		}
 		// A drawing owns its objects by identity, not by name: an ordinary rename
 		// here would detach the inbound from the canvas, which knows it under the
@@ -174,6 +196,17 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	if !generated && input.Settings.Forward.HasRelaySettings() {
 		return Inbound{}, errors.New("GOST 中继证书由隧道资源管理，不能在入站中填写")
 	}
+	// A certificate source on the node and pasted material cannot coexist, and
+	// merging the stored pair back in would create exactly that patchwork.
+	if input.Settings.HasCertificateFiles() {
+		input.Settings.CertificatePEM, input.Settings.PrivateKeyPEM, input.Settings.TrustedCAPEM = "", "", ""
+	}
+	if !validTLSSource(input.TLSSource) {
+		return Inbound{}, errors.New("无效的证书来源")
+	}
+	if input.TLSSource == TLSSourceACME && input.InternalRelay {
+		return Inbound{}, errors.New("内部中转入站使用自己的证书材料，不能使用自动申请证书")
+	}
 	if input.RotateRealityKey && (input.Settings.Security != desiredstate.SecurityReality || input.Settings.Reality == nil) {
 		return Inbound{}, errors.New("Reality key rotation requires a Reality inbound")
 	}
@@ -193,9 +226,24 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	if input.InternalRelay {
 		input.SubscriptionVisible = false
 		input.AllowedUserIDs = []string{}
+		// A relay presents the panel-managed material it carries in its own
+		// settings, and its outbound copies those settings to another node, so a
+		// node-side file pair is never meaningful there.
+		if input.Settings.HasCertificateFiles() {
+			return Inbound{}, errors.New("内部中转入站使用自己的证书材料，不能使用节点证书文件")
+		}
+		if input.Settings.Security == "tls" {
+			input.TLSSource = TLSSourcePaste
+		}
 	}
 	if input.Protocol == "trojan" || input.Protocol == "hysteria2" || input.Protocol == "tuic" {
 		input.Settings.Security = "tls"
+	}
+	if err := validateCertificateSource(input); err != nil {
+		return Inbound{}, err
+	}
+	if err := s.Repository.useStoredCertificate(ctx, &input, pastedKey); err != nil {
+		return Inbound{}, err
 	}
 	if input.InternalRelay && input.Settings.Security == "tls" && input.Settings.PrivateKeyPEM == "" {
 		serverName := n.PublicIP
@@ -205,7 +253,7 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 		if serverName == "" {
 			return Inbound{}, errors.New("relay TLS needs node IP or hostname")
 		}
-		managed, err := managedTLS(serverName)
+		managed, err := managedTLS(serverName, relayCertificateValidity)
 		if err != nil {
 			return Inbound{}, err
 		}
@@ -214,7 +262,30 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 		managed.ServiceName = input.Settings.ServiceName
 		managed.QUIC = input.Settings.QUIC
 		input.Settings = managed
+	} else if input.TLSSource == TLSSourceSelfSigned {
+		address := n.ConnectAddress()
+		if address == "" {
+			return Inbound{}, errors.New("请先在节点设置里填写公网 IP 或客户端连接地址，再生成自签名证书")
+		}
+		// An ordinary save keeps the certificate the clients already pinned;
+		// an explicit regenerate, a missing certificate, or a source that is not
+		// self-signed yet (the stored pair was merged in above) issues a new one.
+		if input.RegenerateCertificate || input.Settings.CertificatePEM == "" || previousSource != TLSSourceSelfSigned {
+			managed, err := managedTLS(address, userCertificateValidity)
+			if err != nil {
+				return Inbound{}, err
+			}
+			managed.Transport = input.Settings.Transport
+			managed.Path = input.Settings.Path
+			managed.ServiceName = input.Settings.ServiceName
+			managed.QUIC = input.Settings.QUIC
+			managed.XHTTP = input.Settings.XHTTP
+			input.Settings = managed
+		}
 	}
+	// A row written before 0136 keeps its pasted certificate and records what it
+	// is on its next save; an inbound without a certificate records nothing.
+	input.TLSSource = tlsSourceOf(input.TLSSource, input.Settings)
 	if input.Protocol == "wireguard" {
 		if input.Settings.WireGuard == nil {
 			input.Settings.WireGuard = &desiredstate.WireGuardSettings{Addresses: []string{"10.77.0.1/24"}, Peers: []desiredstate.WireGuardPeer{}}

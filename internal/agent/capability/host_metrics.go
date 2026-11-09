@@ -3,9 +3,11 @@ package capability
 import (
 	"encoding/hex"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/netaddr"
 	"runtime"
 	"strconv"
 	"strings"
@@ -119,8 +121,30 @@ func (s *Sampler) hostHeartbeat(h *pb.Heartbeat, now time.Time) {
 	}
 	readHost("/proc", h)
 	readExtraHost("/proc", h)
+	h.PublicIp = publicIP(h.GetDefaultRouteInterface())
 	_, h.DiskUsedBytes = diskBytes(s.directory)
 	s.interfaceRates(h, now)
+}
+
+// publicIP reports the address a client on the Internet could dial, read from
+// the interface that carries the default route. Only global unicast addresses
+// that are not private, CGNAT, loopback, link-local or multicast qualify, so a
+// node behind NAT reports nothing instead of an address no client can reach. The
+// panel needs this because a subscription endpoint without an address is
+// unusable; a wrong one is worse. Nothing here leaves the host.
+func publicIP(iface string) string {
+	if iface == "" {
+		return ""
+	}
+	device, err := net.InterfaceByName(iface)
+	if err != nil {
+		return ""
+	}
+	addrs, err := device.Addrs()
+	if err != nil {
+		return ""
+	}
+	return netaddr.Select(addrs)
 }
 
 func (s *Sampler) interfaceRates(h *pb.Heartbeat, now time.Time) {

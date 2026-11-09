@@ -143,7 +143,7 @@ function changePage(value: number) { if (!ours()) return; void router.replace({ 
 const filtered = computed(() => nodes.value.filter(node => {
   const q = scalar(route.query.keyword).trim().toLowerCase();
   const meta = getNodeMeta(node.id);
-  if (q && ![node.name, node.publicIp, node.hostname, meta.region, meta.remark].some(value => value?.toLowerCase().includes(q))) return false;
+  if (q && ![node.name, node.publicIp, node.connectHost, node.hostname, meta.region, meta.remark].some(value => value?.toLowerCase().includes(q))) return false;
   if (status.value !== 'all' && serverStatus(node, now.value).key !== status.value) return false;
   return !group.value || groups.value.some(item => item.id === group.value && item.nodeIds.includes(node.id));
 }));

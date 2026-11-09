@@ -5,6 +5,7 @@ DELETE /api/v1/admins/{id}
 DELETE /api/v1/backups/{id}
 DELETE /api/v1/canvas-schemes/{id}
 DELETE /api/v1/canvas-tunnels/{id}
+DELETE /api/v1/certificates/{id}
 DELETE /api/v1/client-policy-profiles/{id}
 DELETE /api/v1/devices/{id}
 DELETE /api/v1/devices/{id}/credentials/{protocol}
@@ -40,6 +41,7 @@ GET /api/v1/canvas-schemes
 GET /api/v1/canvas-schemes/{id}
 GET /api/v1/canvas-tunnels
 GET /api/v1/canvas-tunnels/legacy-objects
+GET /api/v1/certificates
 GET /api/v1/client-policy-candidates
 GET /api/v1/client-policy-profiles
 GET /api/v1/client-policy-profiles/{id}
@@ -105,6 +107,7 @@ GET /api/v1/subscriptions
 GET /api/v1/system/access-retention
 GET /api/v1/system/backup-schedule
 GET /api/v1/system/base
+GET /api/v1/system/certificate-settings
 GET /api/v1/system/install-endpoint
 GET /api/v1/system/panel-update
 GET /api/v1/system/runtime
@@ -151,6 +154,8 @@ POST /api/v1/canvas-schemes/{id}/publish
 POST /api/v1/canvas-tunnels
 POST /api/v1/canvas-tunnels/{id}/adopt
 POST /api/v1/canvas-tunnels/{id}/rotate-credentials
+POST /api/v1/certificates
+POST /api/v1/certificates/{id}/renew
 POST /api/v1/client-policy-profiles
 POST /api/v1/client-policy-profiles/preview
 POST /api/v1/client-policy-profiles/{id}/activate
@@ -232,6 +237,7 @@ PUT /api/v1/subscription-sources/{id}
 PUT /api/v1/system/access-retention
 PUT /api/v1/system/backup-schedule
 PUT /api/v1/system/base
+PUT /api/v1/system/certificate-settings
 PUT /api/v1/system/install-endpoint
 PUT /api/v1/system/runtime-policy
 PUT /api/v1/system/storage-thresholds

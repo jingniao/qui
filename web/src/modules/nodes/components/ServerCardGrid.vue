@@ -46,9 +46,9 @@
             </span>
           </div>
 
-          <!-- Row 2: Sub-info (IP · Core Version · Running Time) -->
+          <!-- Row 2: Sub-info (Address · Core Version · Running Time) -->
           <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap">
-            <span class="text-neutral-500">{{ node.publicIp || node.hostname || '未分配 IP' }}</span>
+            <span :class="connectAddress(node) ? 'text-neutral-500' : 'text-ios-orange font-sans'">{{ connectAddress(node) || '未设置连接地址' }}</span>
             <span class="text-neutral-300">·</span>
             <span>{{ coreSummaryLabel(node) }}</span>
             <span class="text-neutral-300">·</span>
@@ -250,6 +250,7 @@ import type { MachineTrafficSummary, NodeView } from '../api';
 import { isOwner } from '../../../app/auth';
 import { hostMetrics, nicRate } from '../metrics';
 import { coreSummaryLabel } from '../coreSummary';
+import { connectAddress } from '../nodeAddress';
 import MachineTrafficUsage from './MachineTrafficUsage.vue';
 import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';

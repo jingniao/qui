@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
@@ -45,6 +46,11 @@ func (h *Handler) saveGroup(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	// The saved members decide which inbounds the group's users may reach, so
+	// their credentials have to follow. Only a committed save with its audit
+	// entry reaches this point; a rejected save changes nothing and queues
+	// nothing.
+	h.groupAccessChanged(r.Context(), group.ID, group.GrantedUserIDs, "node group updated")
 	status := 200
 	if r.Method == http.MethodPost {
 		status = 201
@@ -53,6 +59,13 @@ func (h *Handler) saveGroup(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// The grants cascade away with the group, and they are what the automatic
+	// revision needs to know whose credentials to take off the nodes.
+	group, err := h.Repository.Group(r.Context(), id)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
 	if err := h.Repository.DeleteGroup(r.Context(), id); err != nil {
 		h.fail(w, err)
 		return
@@ -61,5 +74,16 @@ func (h *Handler) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	h.groupAccessChanged(r.Context(), id, group.GrantedUserIDs, "node group deleted")
 	w.WriteHeader(204)
+}
+
+// groupAccessChanged hands the group's granted users to the platform's
+// scheduler. It queues only: the affected nodes are resolved there, exactly as
+// for a grant change, and a change the nodes already reflect deploys nothing.
+func (h *Handler) groupAccessChanged(ctx context.Context, groupID string, userIDs []string, reason string) {
+	if h.GroupAccessChanged == nil || len(userIDs) == 0 {
+		return
+	}
+	h.GroupAccessChanged(ctx, groupID, userIDs, reason)
 }

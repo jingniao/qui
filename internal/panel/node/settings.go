@@ -18,6 +18,7 @@ type SettingsInput struct {
 	AllowSubscription *bool
 	Maintenance       *bool
 	PublicIP          *string
+	ConnectHost       *string
 	OutboundSourceIP  *string
 	OutboundInterface *string
 	HostSourceIPv4    *string
@@ -49,9 +50,13 @@ func networkSettings(stored desiredstate.Network, input SettingsInput) (desireds
 
 // Optional fields are merged with the transaction's current values, not a
 // stale HTTP read. Every field commits together, including enabled/status.
+//
+// A public IP the Owner types is marked manual and is never replaced by the
+// address an Agent reports. Clearing it drops the mark too, so the next
+// heartbeat fills the address again.
 func (r *Repository) UpdateSettings(ctx context.Context, id string, input SettingsInput) error {
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || len(input.Name) > 120 || input.PublicIP != nil && *input.PublicIP != "" && net.ParseIP(*input.PublicIP) == nil {
+	if input.Name == "" || len(input.Name) > 120 || input.PublicIP != nil && *input.PublicIP != "" && net.ParseIP(*input.PublicIP) == nil || input.ConnectHost != nil && !validConnectHost(strings.TrimSpace(*input.ConnectHost)) {
 		return ErrSettings
 	}
 	tx, err := r.Database.BeginTx(ctx, nil)
@@ -59,10 +64,10 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 		return err
 	}
 	defer tx.Rollback()
-	var allow, maintenance, wasEnabled bool
-	var publicIP, deleted string
+	var allow, maintenance, wasEnabled, manual bool
+	var publicIP, connectHost, deleted string
 	var network desiredstate.Network
-	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,coalesce(deleted_at,'') FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6, &deleted); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,public_ip_manual,connect_host,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,coalesce(deleted_at,'') FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &manual, &connectHost, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6, &deleted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -80,11 +85,15 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	}
 	if input.PublicIP != nil {
 		publicIP = *input.PublicIP
+		manual = publicIP != ""
+	}
+	if input.ConnectHost != nil {
+		connectHost = strings.TrimSpace(*input.ConnectHost)
 	}
 	if network, err = networkSettings(network, input); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET name=?,enabled=?,allow_subscription=?,maintenance=?,public_ip=?,outbound_source_ip=?,outbound_interface=?,host_source_ipv4=?,host_source_ipv6=?,status=CASE WHEN ?=0 THEN 'disabled' WHEN enabled=0 THEN 'offline' ELSE status END WHERE id=?", input.Name, input.Enabled, allow, maintenance, publicIP, network.OutboundSourceIP, network.OutboundInterface, network.HostSourceIPv4, network.HostSourceIPv6, input.Enabled, id); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET name=?,enabled=?,allow_subscription=?,maintenance=?,public_ip=?,public_ip_manual=?,connect_host=?,outbound_source_ip=?,outbound_interface=?,host_source_ipv4=?,host_source_ipv6=?,status=CASE WHEN ?=0 THEN 'disabled' WHEN enabled=0 THEN 'offline' ELSE status END WHERE id=?", input.Name, input.Enabled, allow, maintenance, publicIP, manual, connectHost, network.OutboundSourceIP, network.OutboundInterface, network.HostSourceIPv4, network.HostSourceIPv6, input.Enabled, id); err != nil {
 		return err
 	}
 	return tx.Commit()

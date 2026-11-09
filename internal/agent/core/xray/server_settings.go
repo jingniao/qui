@@ -31,7 +31,9 @@ func serverSettingsCapability() desiredstate.CoreSettingsCapability {
 		combinations = append(combinations, desiredstate.SettingsCombination{Protocol: "vless", Direction: desiredstate.DirectionInbound, Security: pair[0], Transport: pair[1]})
 	}
 	combinations = append(combinations, desiredstate.SettingsCombination{Protocol: "vless", Direction: desiredstate.DirectionInbound, Security: "reality", Transport: "tcp", Flow: "xtls-rprx-vision"})
-	return desiredstate.CoreSettingsCapability{Core: "xray", Version: desiredstate.SettingsContractVersion, Combinations: combinations}
+	// The same renderer reads node-side certificate files, so the report the
+	// renderer checks itself against carries that bit too (detect.go reports it).
+	return desiredstate.CoreSettingsCapability{Core: "xray", Version: desiredstate.SettingsContractVersion, Combinations: combinations, CertificateFiles: true}
 }
 
 func validateServerCombinations(state desiredstate.State) error {

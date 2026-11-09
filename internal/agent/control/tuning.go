@@ -13,7 +13,7 @@ import (
 func reportCapabilities(s *capability.Sampler, c *capabilityState) *pb.Capabilities {
 	result := c.Snapshot()
 	if len(result.Cores) == 0 && result.CoreName != "" {
-		result.Cores = []*pb.CoreCapability{{Name: result.CoreName, Version: result.CoreVersion, Protocols: result.Protocols, SingboxUserStats: result.SingboxUserStats, ForwardInboundSupported: result.ForwardInboundSupported, DeviceGateSupported: result.DeviceGateSupported, ObservationContractVersion: result.ObservationContractVersion, ServerSettingsContractVersion: result.ServerSettingsContractVersion, ServerSettingsCombinations: result.ServerSettingsCombinations}}
+		result.Cores = []*pb.CoreCapability{{Name: result.CoreName, Version: result.CoreVersion, Protocols: result.Protocols, SingboxUserStats: result.SingboxUserStats, ForwardInboundSupported: result.ForwardInboundSupported, DeviceGateSupported: result.DeviceGateSupported, ObservationContractVersion: result.ObservationContractVersion, ServerSettingsContractVersion: result.ServerSettingsContractVersion, ServerSettingsCombinations: result.ServerSettingsCombinations, TlsCertificateFilesSupported: result.TlsCertificateFilesSupported}}
 	}
 	result.Host = s.HostInfo()
 	result.TuningSupported = tuning.Supported()

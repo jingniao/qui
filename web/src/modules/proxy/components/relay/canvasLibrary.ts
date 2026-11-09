@@ -16,7 +16,7 @@ export interface CanvasLibraryServerRef {
   id: string;
   name: string;
   publicIp?: string;
-  hostname?: string;
+  connectHost?: string;
   status?: string;
   enabled?: boolean;
   deletedAt?: string;
@@ -62,7 +62,10 @@ export function selfHostedLibraryItems(
       const name = inbound.internalRelay
         ? `${base} (内部中转)`
         : inbound.enabled ? base : `${base} (已停用)`;
-      const address = server.publicIp || server.hostname || '127.0.0.1';
+      // A drawing and its relays dial the node's public address, not the address
+      // a client uses (AGENTS.md §14): a connect host may resolve through a CDN,
+      // and one node cannot reach another through it.
+      const address = (server.publicIp || '').trim() || '未设置公网 IP';
       const live = (server.status === 'online' || server.status === 'degraded') && inbound.enabled;
       const item: SelfHostedLibraryItem = {
         id: selfHostedResourceId(inbound),

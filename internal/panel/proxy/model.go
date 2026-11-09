@@ -16,6 +16,7 @@ type Inbound struct {
 	UserTrafficSupported *bool                         `json:"userTrafficSupported"`
 	DeviceGateSupported  *bool                         `json:"deviceGateSupported"`
 	DeviceGateCoverage   *string                       `json:"deviceGateCoverage"`
+	CertificateInfo      *CertificateInfo              `json:"certificateInfo"`
 	Core                 string                        `json:"core"`
 	ID                   string                        `json:"id"`
 	Name                 string                        `json:"name"`
@@ -30,25 +31,30 @@ type Inbound struct {
 	AllowedUserIDs       []string                      `json:"allowedUserIds"`
 	Settings             desiredstate.ProtocolSettings `json:"settings"`
 	RelayCredentialID    string                        `json:"relayCredentialId,omitempty"`
+	TLSSource            string                        `json:"tlsSource"`
+	CertificateID        string                        `json:"certificateId"`
 	CreatedAt            string                        `json:"createdAt"`
 	HasTLSKey            bool                          `json:"hasTlsKey"`
 	HasWireGuardKey      bool                          `json:"hasWireGuardKey"`
 	HasRealityKey        bool                          `json:"hasRealityKey"`
 }
 type InboundInput struct {
-	RotateRealityKey    bool                          `json:"rotateRealityKey,omitempty"`
-	Core                string                        `json:"core"`
-	Name                string                        `json:"name"`
-	NodeID              string                        `json:"nodeId"`
-	Protocol            string                        `json:"protocol"`
-	Listen              string                        `json:"listen"`
-	Port                int                           `json:"port"`
-	Enabled             bool                          `json:"enabled"`
-	SubscriptionVisible bool                          `json:"subscriptionVisible"`
-	InternalRelay       bool                          `json:"internalRelay"`
-	DefaultOutbound     string                        `json:"defaultOutbound"`
-	AllowedUserIDs      []string                      `json:"allowedUserIds"`
-	Settings            desiredstate.ProtocolSettings `json:"settings"`
+	RotateRealityKey      bool                          `json:"rotateRealityKey,omitempty"`
+	RegenerateCertificate bool                          `json:"regenerateCertificate,omitempty"`
+	Core                  string                        `json:"core"`
+	Name                  string                        `json:"name"`
+	NodeID                string                        `json:"nodeId"`
+	Protocol              string                        `json:"protocol"`
+	Listen                string                        `json:"listen"`
+	Port                  int                           `json:"port"`
+	Enabled               bool                          `json:"enabled"`
+	SubscriptionVisible   bool                          `json:"subscriptionVisible"`
+	InternalRelay         bool                          `json:"internalRelay"`
+	DefaultOutbound       string                        `json:"defaultOutbound"`
+	AllowedUserIDs        []string                      `json:"allowedUserIds"`
+	Settings              desiredstate.ProtocolSettings `json:"settings"`
+	TLSSource             string                        `json:"tlsSource,omitempty"`
+	CertificateID         string                        `json:"certificateId,omitempty"`
 }
 type Outbound struct {
 	ID                 string                        `json:"id"`

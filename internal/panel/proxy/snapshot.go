@@ -147,6 +147,12 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		if err := ValidateInboundServerSettings(n.Capabilities, record.Core, record.Protocol, record.Settings); err != nil {
 			return state, enabled, fmt.Errorf("inbound %s: %w", record.ID, err)
 		}
+		// An acme inbound is published with the pair read from the certificate
+		// library; one without a pair must fail the publication instead of reaching
+		// a node without its certificate.
+		if record.TLSSource == TLSSourceACME && record.Settings.PrivateKeyPEM == "" {
+			return state, enabled, fmt.Errorf("inbound %s: 所选证书尚未签发成功，无法发布", record.ID)
+		}
 		// The intent is taken before the auto-disable below: an inbound the
 		// Owner enabled stays in it even while it has no users.
 		if record.Enabled {

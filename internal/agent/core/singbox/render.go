@@ -43,12 +43,14 @@ type logOptions struct {
 	Timestamp bool   `json:"timestamp,omitempty"`
 }
 type tlsOptions struct {
-	Enabled     bool            `json:"enabled"`
-	ServerName  string          `json:"server_name,omitempty"`
-	Certificate []string        `json:"certificate,omitempty"`
-	Key         []string        `json:"key,omitempty"`
-	ALPN        []string        `json:"alpn,omitempty"`
-	Reality     *realityOptions `json:"reality,omitempty"`
+	Enabled         bool            `json:"enabled"`
+	ServerName      string          `json:"server_name,omitempty"`
+	Certificate     []string        `json:"certificate,omitempty"`
+	Key             []string        `json:"key,omitempty"`
+	CertificatePath string          `json:"certificate_path,omitempty"`
+	KeyPath         string          `json:"key_path,omitempty"`
+	ALPN            []string        `json:"alpn,omitempty"`
+	Reality         *realityOptions `json:"reality,omitempty"`
 }
 
 type realityOptions struct {
@@ -578,8 +580,17 @@ func security(protocol string, settings desiredstate.ProtocolSettings, inbound b
 			tls.ALPN = []string{"h3"}
 		}
 		if inbound {
-			tls.Certificate = strings.Split(strings.TrimSpace(settings.CertificatePEM), "\n")
-			tls.Key = strings.Split(strings.TrimSpace(settings.PrivateKeyPEM), "\n")
+			// A node-side file pair is read by the core itself and proved usable
+			// here; pasted material travels inline (v1.4.7 section 3).
+			if settings.HasCertificateFiles() {
+				if err := core.ValidateCertificateFiles(settings); err != nil {
+					return nil, nil, err
+				}
+				tls.CertificatePath, tls.KeyPath = settings.CertificatePath, settings.PrivateKeyPath
+			} else {
+				tls.Certificate = strings.Split(strings.TrimSpace(settings.CertificatePEM), "\n")
+				tls.Key = strings.Split(strings.TrimSpace(settings.PrivateKeyPEM), "\n")
+			}
 		} else if settings.TrustedCAPEM != "" {
 			tls.Certificate = strings.Split(strings.TrimSpace(settings.TrustedCAPEM), "\n")
 		}

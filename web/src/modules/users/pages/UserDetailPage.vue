@@ -287,8 +287,8 @@
                     <span :class="['w-1.5 h-1.5 rounded-full shrink-0', node.status === 'online' ? 'bg-emerald-500' : 'bg-ios-red']"></span>
                     <span class="font-semibold text-ios-label truncate">{{ node.name }}</span>
                   </div>
-                  <p class="font-mono text-xs text-ios-tertiary truncate mt-0.5">
-                    {{ node.publicIp || node.hostname || '—' }}
+                  <p class="font-mono text-xs truncate mt-0.5" :class="connectAddress(node) ? 'text-ios-tertiary' : 'text-ios-orange'">
+                    {{ connectAddress(node) || '未设置连接地址' }}
                   </p>
                 </div>
 
@@ -303,6 +303,9 @@
                 导入来源：{{ source.name }}<span class="text-ios-secondary">（分组内导入成员；不参与节点额度与设备门控）</span>
               </div>
               <p class="text-xs text-ios-tertiary">按分组与入站授权筛选；订阅内容还需核对已发布凭据及来源可用性。</p>
+              <p v-for="warning in previewWarnings" :key="warning.stage + warning.ref + warning.message" class="text-xs text-ios-orange leading-relaxed">
+                订阅预览：{{ warning.message }}
+              </p>
               <div v-if="availableNodes.length === 0 && availableSources.length === 0" class="text-center py-6 text-xs text-ios-tertiary">
                 暂无节点接入该授权组
               </div>
@@ -605,6 +608,7 @@ import { proxyAPI, type Inbound } from '../../proxy/api';
 import { importAPI, type ImportSource, type ImportedProxy } from '../../proxy/importApi';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { connectAddress } from '../../nodes/nodeAddress';
 import { accessAPI, type AccessRecord } from '../../access/api';
 import { request, APIError, type Page } from '../../../app/apiClient';
 import { authState, formatTime } from '../../../app/auth';
@@ -640,6 +644,10 @@ const allNodes = ref<NodeView[]>([]);
 const memberInbounds = ref<Inbound[]>([]);
 const importedSources = ref<ImportSource[]>([]);
 const importedProxies = ref<ImportedProxy[]>([]);
+// What the panel's own subscription preview reports: the local node list cannot
+// tell why an endpoint is missing, for example a node without a connection
+// address (§11.1).
+const previewWarnings = ref<{ stage: string; ref: string; message: string }[]>([]);
 const error = ref('');
 
 // 订阅与二维码
@@ -995,6 +1003,7 @@ async function load() {
     importedProxies.value = proxyRes.items;
 
     await loadSubscription();
+    void userAPI.preview(id).then(result => { previewWarnings.value = result.warnings; }).catch(() => { previewWarnings.value = []; });
 
     // 获取流量历史与请求
     void accessAPI.accounts({ userId: u.id }).then(summary => {

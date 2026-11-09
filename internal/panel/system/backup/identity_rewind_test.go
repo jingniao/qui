@@ -12,6 +12,9 @@ import (
 // 0003_nodes.sql created and the remaining rows are copied over.
 func rewindIdentityRecovery(t *testing.T, database *sql.DB) {
 	t.Helper()
+	// Every fixture that rewinds below 0134 passes through here, so the newest
+	// migration is dropped first.
+	rewindNodeConnectAddress(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0134_node_identity_recovery.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

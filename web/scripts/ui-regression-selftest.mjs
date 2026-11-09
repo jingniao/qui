@@ -223,10 +223,15 @@ const revisionsA = [
   { id: 8, nodeId: 'named', status: 'failed' }, { id: 11, nodeId: 'online', status: 'draft' },
   { id: 7, nodeId: 'long-id-without-name', resultCode: 'error' }
 ];
+const addressHelperA = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(
+  read('modules/nodes/nodeAddress.ts'),
+  { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }
+).outputText).toString('base64'));
 const dashboardA = vueSubset('modules/dashboard/pages/DashboardPage.vue', [
   'isNodeOnline', 'nodeStatusLabel', 'isUserActive', 'getUserExpiryLabel', 'getUserExpiryBadgeClass',
   'activeUsersCount', 'warningUsersCount', 'adminOnlineNodesCount', 'healthyNodesCount', 'latestFailedRevisions', 'pendingIssues', 'formatGiB'
 ], {
+  connectAddress: addressHelperA.connectAddress,
   allUsers: { value: [userA, disabledA, expiredA, quotaA, soonA, { ...disabledA, usedTraffic: 100 }] },
   allNodes: { value: [onlineA, pendingA, { ...onlineA, id: 'unknown', heartbeat: {} }] },
   allRevisions: { value: revisionsA }, dashboard: { value: { nodeNames: { named: '名称映射' } } }, unhealthyCoreLabel: () => ''

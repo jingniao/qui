@@ -978,6 +978,11 @@ func (x *SettingsCombination) GetFlow() string {
 // also uses for the additive address observation contract (version 2). Device
 // gates require the explicit field 17 and a negotiated Welcome; old peers
 // continue to see no admission or ledger capability.
+// tls_certificate_files_supported (25) is the scalar form for a single-core
+// Agent and mirrors CoreCapability field 12, exactly like
+// forward_inbound_supported (18) and device_gate_supported (17). Rendering is per
+// core, so the per-core report is authoritative; an old Agent omits both and the
+// panel then refuses an inbound that names certificate files on the node.
 type Capabilities struct {
 	state                          protoimpl.MessageState `protogen:"open.v1"`
 	CoreName                       string                 `protobuf:"bytes,1,opt,name=core_name,json=coreName,proto3" json:"core_name,omitempty"`
@@ -1004,6 +1009,7 @@ type Capabilities struct {
 	MultiCoreSupported             bool                   `protobuf:"varint,22,opt,name=multi_core_supported,json=multiCoreSupported,proto3" json:"multi_core_supported,omitempty"`
 	ServerSettingsContractVersion  uint32                 `protobuf:"varint,23,opt,name=server_settings_contract_version,json=serverSettingsContractVersion,proto3" json:"server_settings_contract_version,omitempty"`
 	ServerSettingsCombinations     []*SettingsCombination `protobuf:"bytes,24,rep,name=server_settings_combinations,json=serverSettingsCombinations,proto3" json:"server_settings_combinations,omitempty"`
+	TlsCertificateFilesSupported   bool                   `protobuf:"varint,25,opt,name=tls_certificate_files_supported,json=tlsCertificateFilesSupported,proto3" json:"tls_certificate_files_supported,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -1206,6 +1212,13 @@ func (x *Capabilities) GetServerSettingsCombinations() []*SettingsCombination {
 	return nil
 }
 
+func (x *Capabilities) GetTlsCertificateFilesSupported() bool {
+	if x != nil {
+		return x.TlsCertificateFilesSupported
+	}
+	return false
+}
+
 type CoreCapability struct {
 	state                         protoimpl.MessageState `protogen:"open.v1"`
 	Name                          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1219,6 +1232,7 @@ type CoreCapability struct {
 	GostContractVersion           uint32                 `protobuf:"varint,9,opt,name=gost_contract_version,json=gostContractVersion,proto3" json:"gost_contract_version,omitempty"`
 	ServerSettingsContractVersion uint32                 `protobuf:"varint,10,opt,name=server_settings_contract_version,json=serverSettingsContractVersion,proto3" json:"server_settings_contract_version,omitempty"`
 	ServerSettingsCombinations    []*SettingsCombination `protobuf:"bytes,11,rep,name=server_settings_combinations,json=serverSettingsCombinations,proto3" json:"server_settings_combinations,omitempty"`
+	TlsCertificateFilesSupported  bool                   `protobuf:"varint,12,opt,name=tls_certificate_files_supported,json=tlsCertificateFilesSupported,proto3" json:"tls_certificate_files_supported,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -1328,6 +1342,13 @@ func (x *CoreCapability) GetServerSettingsCombinations() []*SettingsCombination 
 		return x.ServerSettingsCombinations
 	}
 	return nil
+}
+
+func (x *CoreCapability) GetTlsCertificateFilesSupported() bool {
+	if x != nil {
+		return x.TlsCertificateFilesSupported
+	}
+	return false
 }
 
 type CoreStatus struct {
@@ -5382,7 +5403,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12\x1a\n" +
 	"\bsecurity\x18\x03 \x01(\tR\bsecurity\x12\x1c\n" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12\x12\n" +
-	"\x04flow\x18\x05 \x01(\tR\x04flow\"\x8d\v\n" +
+	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xd4\v\n" +
 	"\fCapabilities\x12\x1b\n" +
 	"\tcore_name\x18\x01 \x01(\tR\bcoreName\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12G\n" +
@@ -5408,7 +5429,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x05cores\x18\x15 \x03(\v2%.proxycontrol.agent.v1.CoreCapabilityR\x05cores\x120\n" +
 	"\x14multi_core_supported\x18\x16 \x01(\bR\x12multiCoreSupported\x12G\n" +
 	" server_settings_contract_version\x18\x17 \x01(\rR\x1dserverSettingsContractVersion\x12l\n" +
-	"\x1cserver_settings_combinations\x18\x18 \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\"\xfd\x04\n" +
+	"\x1cserver_settings_combinations\x18\x18 \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\x12E\n" +
+	"\x1ftls_certificate_files_supported\x18\x19 \x01(\bR\x1ctlsCertificateFilesSupported\"\xc4\x05\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +
@@ -5421,7 +5443,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x15gost_contract_version\x18\t \x01(\rR\x13gostContractVersion\x12G\n" +
 	" server_settings_contract_version\x18\n" +
 	" \x01(\rR\x1dserverSettingsContractVersion\x12l\n" +
-	"\x1cserver_settings_combinations\x18\v \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinationsB\n" +
+	"\x1cserver_settings_combinations\x18\v \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\x12E\n" +
+	"\x1ftls_certificate_files_supported\x18\f \x01(\bR\x1ctlsCertificateFilesSupportedB\n" +
 	"\n" +
 	"\b_healthy\"\xeb\x01\n" +
 	"\n" +

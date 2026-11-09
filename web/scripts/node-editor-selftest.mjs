@@ -69,11 +69,18 @@ for (const protocol of protocols) {
     if (!edit && protocol === 'vless') Object.assign(state.form.settings, settings);
     const f = state.form;
     const oldForm = { ...f.settings, name: f.name, protocol, serverId: f.nodeId, port: f.port, inboundId: original?.id || '', forward: f.settings.forward || { host: '', port: 443, network: 'tcp' } };
-    assert.deepEqual(api.buildPayload(state), json(legacyList(oldForm, original)), `list ${protocol} ${edit ? 'edit' : 'create'}`);
+    // C2 adds the certificate source to a TLS inbound. This frozen form carries no
+    // address and no stored source, so a new row and an edited one both resolve to
+    // the pasted material the old payload already assumed.
+    const expected = json(legacyList(oldForm, original));
+    if (api.tlsBlockShown(f)) expected.tlsSource = 'paste';
+    assert.deepEqual(api.buildPayload(state), expected, `list ${protocol} ${edit ? 'edit' : 'create'}`);
     comparisons++;
     if (edit && protocol === 'vless') {
       f.settings.private_key_pem = 'REPLACEMENT';
-      assert.deepEqual(api.buildPayload(state), json(legacyList({ ...oldForm, private_key_pem: 'REPLACEMENT' }, original)));
+      const replaced = json(legacyList({ ...oldForm, private_key_pem: 'REPLACEMENT' }, original));
+      if (api.tlsBlockShown(f)) replaced.tlsSource = 'paste';
+      assert.deepEqual(api.buildPayload(state), replaced);
       comparisons++;
     }
   }
@@ -83,7 +90,9 @@ for (const protocol of protocols) {
   for (const internal of [false, true]) {
     server.form.name = '  server name  ';
     server.form.internalRelay = internal;
-    assert.deepEqual(api.buildPayload(server), legacyServer(server.form, server.addresses, server.mtu), `U3 ${protocol} payload`);
+    const expected = legacyServer(server.form, server.addresses, server.mtu);
+    if (!internal && api.tlsBlockShown(server.form)) expected.tlsSource = 'paste';
+    assert.deepEqual(api.buildPayload(server), expected, `U3 ${protocol} payload`);
     comparisons++;
   }
 }
@@ -418,6 +427,168 @@ api.changeProtocol(state, 'wireguard'); state.mtu = 575;
 assert.match(api.validateStep(4, state, server, rows), /MTU/);
 for (const protocol of ['forward', 'wireguard', 'tuic', 'hysteria2']) assert.equal(api.hasTransport(protocol), false);
 console.log('PASS NODE_EDITOR_MODEL: registered server filtering, capability reasons, canvas/edit port checks, random port, validation, secret masking');
+
+// C2 (v1.4.7 section 3): the TLS block names one certificate source — a
+// self-signed pair the panel issues, two files on the node, or pasted PEM. The
+// defaults, the payload and the path rules are pure, so they are checked here.
+const addressedNode = { ...server, publicIp: '192.0.2.10', publicIpSource: 'auto', connectHost: '' };
+const bareNode = { ...server, publicIp: '', publicIpSource: '', connectHost: '' };
+assert.equal(api.tlsBlockShown({ protocol: 'vless', settings: { security: 'tls' } }), true);
+assert.equal(api.tlsBlockShown({ protocol: 'vless', settings: { security: 'none' } }), false);
+assert.equal(api.tlsBlockShown({ protocol: 'vless', settings: { security: 'reality' } }), false, 'Reality presents no certificate');
+assert.equal(api.tlsBlockShown({ protocol: 'trojan', settings: {} }), true, 'trojan is TLS by definition');
+assert.equal(api.tlsBlockShown({ protocol: 'forward', settings: { security: 'tls' } }), false);
+// A new inbound issues its own certificate when the node has an address, and asks
+// for pasted material when it has none.
+assert.equal(api.tlsSourceFor(api.createEditor('server'), addressedNode), 'self_signed');
+assert.equal(api.tlsSourceFor(api.createEditor('server'), bareNode), 'paste');
+assert.equal(api.tlsSourceFor(api.createEditor('server')), 'paste', 'no server report means no address');
+// Editing keeps the recorded source; an empty one holds pasted material.
+const storedSources = [['self_signed', 'self_signed'], ['file', 'file'], ['paste', 'paste'], ['', 'paste'], ['acme', 'acme']];
+for (const [stored, expected] of storedSources) {
+  const original = { id: 'editing', nodeId: 'server', name: 'edge', protocol: 'trojan', port: 443, listen: '0.0.0.0',
+    enabled: true, subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
+    settings: { security: 'tls', server_name: 'edge.example.com' }, tlsSource: stored, hasTlsKey: true, hasWireGuardKey: true };
+  assert.equal(api.tlsSourceFor(api.createEditor('server', original), addressedNode), expected, `stored source ${stored || 'empty'}`);
+}
+// The Owner's own choice wins over the default for the state.
+const chosen = api.createEditor('server');
+chosen.form.tlsSource = 'file';
+assert.equal(api.tlsSourceFor(chosen, addressedNode), 'file');
+
+// The node-side pair is hidden, not disabled, unless the selected core reports
+// that its renderer reads the files; a stored choice stays listed.
+assert.deepEqual(api.tlsSourceChoices(true).map(choice => choice.value), ['self_signed', 'file', 'paste']);
+assert.deepEqual(api.tlsSourceChoices(false).map(choice => choice.value), ['self_signed', 'paste']);
+assert.deepEqual(api.tlsSourceChoices(false, 'file').map(choice => choice.value), ['self_signed', 'paste', 'file']);
+assert.deepEqual(api.tlsSourceChoices(true).map(choice => choice.label), ['自签名', '节点上的证书文件', '粘贴证书']);
+// acme (v1.4.7 D3): offered only while a certificate has material; a stored acme stays listed.
+const issued = { id: 'c1', domains: ['node.example.com'], status: 'valid', notAfter: '2027-01-01T00:00:00Z' };
+const renewing = { id: 'c2', domains: ['*.example.org'], status: 'issuing', notAfter: '2027-02-01T00:00:00Z' };
+const fresh = { id: 'c3', domains: ['new.example.com'], status: 'pending', notAfter: '' };
+assert.deepEqual(api.usableCertificates([issued, renewing, fresh]).map(item => item.id), ['c1', 'c2']);
+assert.deepEqual(api.tlsSourceChoices(false, '', false).map(choice => choice.value), ['self_signed', 'paste']);
+assert.deepEqual(api.tlsSourceChoices(false, '', true).map(choice => choice.value), ['self_signed', 'acme', 'paste']);
+assert.deepEqual(api.tlsSourceChoices(true, '', true).map(choice => choice.value), ['self_signed', 'file', 'acme', 'paste']);
+assert.deepEqual(api.tlsSourceChoices(false, 'acme', false).map(choice => choice.value), ['self_signed', 'paste', 'acme'], 'a stored acme stays listed');
+assert.equal(api.tlsSourceChoices(false, '', true)[1].label, '自动申请（Cloudflare）');
+assert.equal(api.certificateCoversHost(['node.example.com'], 'Node.Example.com'), true);
+assert.equal(api.certificateCoversHost(['*.example.com'], 'a.example.com'), true);
+assert.equal(api.certificateCoversHost(['*.example.com'], 'a.b.example.com'), false);
+assert.equal(api.certificateCoversHost(['node.example.com'], '203.0.113.7'), false);
+assert.equal(api.acmeAddressHint(issued, 'node.example.com'), '');
+assert.match(api.acmeAddressHint(issued, '203.0.113.7'), /203.0.113.7.*node.example.com/);
+assert.match(api.acmeAddressHint(issued, ''), /还没有客户端连接地址/);
+assert.equal(api.acmeAddressHint(undefined, 'x'), '');
+const acmeNew = api.createEditor('server');
+acmeNew.form.protocol = 'trojan'; acmeNew.form.settings = { security: 'tls', certificate_pem: 'OLD', private_key_pem: 'KEY', certificate_path: '/etc/proxy-agent/certs/a.crt', private_key_path: '/etc/proxy-agent/certs/a.key' };
+acmeNew.form.tlsSource = 'acme';
+assert.match(api.validateStep(3, acmeNew, addressedNode, []), /请选择一张已签发的证书/);
+acmeNew.form.certificateId = 'c1';
+assert.equal(api.validateStep(3, acmeNew, addressedNode, []), '');
+const acmePayload = api.buildPayload(acmeNew, addressedNode);
+assert.equal(acmePayload.tlsSource, 'acme');
+assert.equal(acmePayload.certificateId, 'c1');
+for (const key of ['certificate_pem', 'private_key_pem', 'trusted_ca_pem', 'certificate_path', 'private_key_path']) assert.equal(key in acmePayload.settings, false, key);
+const acmeStored = api.createEditor('server', { id: 'editing', nodeId: 'server', name: 'edge', protocol: 'trojan', port: 443, listen: '0.0.0.0', enabled: true, subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [], settings: { security: 'tls' }, tlsSource: 'acme', certificateId: 'c2', hasTlsKey: true, hasWireGuardKey: false });
+assert.equal(acmeStored.form.certificateId, 'c2');
+assert.equal(api.buildPayload(acmeStored, addressedNode).certificateId, 'c2');
+const selfSignedPayload = api.buildPayload(certEditorFor('self_signed'), addressedNode);
+assert.equal('certificateId' in selfSignedPayload, false);
+function certEditorFor(stored) { return api.createEditor('server', { id: 'e', nodeId: 'server', name: 'edge', protocol: 'trojan', port: 443, listen: '0.0.0.0', enabled: true, subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [], settings: { security: 'tls' }, tlsSource: stored, hasTlsKey: true, hasWireGuardKey: false }); }
+assert.equal(api.certificateFilesSupported(addressedNode, ''), false, 'an Agent that reports nothing grants nothing');
+assert.equal(api.certificateFilesSupported({ ...server, capabilities: { ...server.capabilities, tls_certificate_files_supported: true } }, ''), true, 'single-core scalar form');
+const fileCores = { ...server, capabilities: { core_name: 'xray', multi_core_supported: true, cores: [
+  { name: 'xray', protocols: [{ protocol: 'vless', inbound: true }], tls_certificate_files_supported: false },
+  { name: 'sing-box', protocols: [{ protocol: 'trojan', inbound: true }], tls_certificate_files_supported: true }
+] } };
+assert.equal(api.certificateFilesSupported(fileCores, 'sing-box'), true);
+assert.equal(api.certificateFilesSupported(fileCores, 'xray'), false);
+assert.equal(api.certificateFilesSupported(fileCores, ''), false, 'the primary core is xray');
+assert.equal(api.certificateFilesSupported({ ...server, capabilities: { ...server.capabilities, multi_core_supported: true, cores: [{ name: 'xray', tls_certificate_files_supported: true }] } }, 'xray'), true);
+
+function certEditor(stored) {
+  const original = { id: 'editing', nodeId: 'server', name: 'edge', protocol: 'trojan', port: 443, listen: '0.0.0.0',
+    enabled: true, subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
+    settings: { security: 'tls', server_name: 'edge.example.com' }, tlsSource: stored, hasTlsKey: true, hasWireGuardKey: true };
+  return api.createEditor('server', original);
+}
+const certificate = '/etc/proxy-agent/certs/edge.crt', privateKey = '/etc/proxy-agent/certs/edge.key';
+// paste: an empty PEM keeps the stored pair and the payload names the source.
+const pastedEditor = certEditor('paste');
+const pastedPayload = api.buildPayload(pastedEditor, addressedNode);
+assert.equal(pastedPayload.tlsSource, 'paste');
+assert.equal('certificate_pem' in pastedPayload.settings, false, 'an empty PEM keeps the stored certificate');
+assert.equal('private_key_path' in pastedPayload.settings, false);
+assert.equal('regenerateCertificate' in pastedPayload, false);
+pastedEditor.form.settings.certificate_pem = 'NEW-CERT';
+assert.equal(api.buildPayload(pastedEditor, addressedNode).settings.certificate_pem, 'NEW-CERT');
+// self_signed: the panel brings the material, so the payload only names the source
+// and asks for a new certificate explicitly.
+const selfSignedEditor = certEditor('self_signed');
+assert.equal(api.buildPayload(selfSignedEditor, addressedNode).tlsSource, 'self_signed');
+assert.equal('regenerateCertificate' in api.buildPayload(selfSignedEditor, addressedNode), false);
+assert.equal(api.validateStep(3, selfSignedEditor, addressedNode, []), '');
+assert.equal(api.validateStep(3, selfSignedEditor, bareNode, []), api.SELF_SIGNED_REQUIRES_ADDRESS, "the panel's own words for a missing address");
+selfSignedEditor.form.regenerateCertificate = true;
+assert.equal(api.buildPayload(selfSignedEditor, addressedNode).regenerateCertificate, true);
+// file: both paths travel, the pasted pair never does.
+const fileEditor = certEditor('file');
+assert.match(api.validateStep(3, fileEditor, addressedNode, []), /证书文件路径/);
+fileEditor.form.settings.certificate_path = certificate;
+fileEditor.form.settings.private_key_path = privateKey;
+const filePayload = api.buildPayload(fileEditor, addressedNode);
+assert.equal(filePayload.tlsSource, 'file');
+assert.equal(filePayload.settings.certificate_path, certificate);
+assert.equal(filePayload.settings.private_key_path, privateKey);
+for (const key of ['certificate_pem', 'private_key_pem', 'trusted_ca_pem']) assert.equal(key in filePayload.settings, false, key + ' is cleared for a node-side pair');
+assert.equal(api.validateStep(3, fileEditor, addressedNode, []), '');
+assert.equal(api.validateStep(3, fileEditor, bareNode, []), '', 'a node-side pair needs no connect address');
+fileEditor.form.settings.private_key_path = certificate;
+assert.match(api.validateStep(3, fileEditor, addressedNode, []), /同一个文件/);
+// Switching back to paste drops the paths again.
+fileEditor.form.settings.private_key_path = privateKey;
+fileEditor.form.tlsSource = 'paste';
+const switched = api.buildPayload(fileEditor, addressedNode);
+assert.equal('certificate_path' in switched.settings, false);
+assert.equal('private_key_path' in switched.settings, false);
+assert.equal(switched.tlsSource, 'paste');
+// An internal relay keeps the panel's automatic certificate: no source, no files.
+fileEditor.form.internalRelay = true;
+const relayTLSPayload = api.buildPayload(fileEditor, addressedNode);
+assert.equal('tlsSource' in relayTLSPayload, false);
+assert.equal('certificate_path' in relayTLSPayload.settings, false);
+assert.equal(api.validateStep(3, fileEditor, addressedNode, []), '');
+// A new inbound defaults to a self-signed certificate when the node has an address.
+const freshTLS = api.createEditor('server');
+freshTLS.form.protocol = 'trojan'; freshTLS.form.settings = { security: 'tls' };
+assert.equal(api.buildPayload(freshTLS, addressedNode).tlsSource, 'self_signed');
+assert.equal(api.buildPayload(freshTLS, bareNode).tlsSource, 'paste');
+
+// The path rules are desiredstate.validateCertificateFiles: absolute, already
+// clean, inside the directory the installer creates, both required and different.
+assert.equal(api.certificatePathError(certificate, privateKey), '');
+for (const [cert, key, expected] of [
+  [certificate, '', /私钥文件路径/],
+  ['', privateKey, /证书文件路径/],
+  [certificate, certificate, /同一个文件/],
+  ['etc/proxy-agent/certs/edge.crt', privateKey, /绝对路径/],
+  ['/etc/ssl/edge.crt', privateKey, /必须位于/],
+  ['/etc/proxy-agent/certsx/edge.crt', privateKey, /必须位于/],
+  ['/etc/proxy-agent/certs/../edge.crt', privateKey, /规范化/],
+  ['/etc/proxy-agent/certs/sub//edge.crt', privateKey, /规范化/],
+  ['/etc/proxy-agent/certs/./edge.crt', privateKey, /规范化/],
+  ['/etc/proxy-agent/certs/sub/edge.crt/', privateKey, /规范化/],
+  [`/etc/proxy-agent/certs/${'a'.repeat(240)}.crt`, privateKey, /256/]
+]) {
+  assert.match(api.certificatePathError(cert, key), expected, `${cert} / ${key}`);
+}
+assert.equal(api.certificatePathError(` ${certificate} `, ` ${privateKey} `), '', 'padding is trimmed');
+assert.match(protocolFields, /证书来源/);
+assert.match(protocolFields, /v-for="choice in sources"/, 'the source choice lists only the offered sources');
+assert.doesNotMatch(protocolFields, /value="acme"/, 'automatic issuance is not offered');
+assert.match(protocolFields, /certificateInfo\.coverageWarning/, 'the certificate summary warns about a coverage gap');
+console.log('PASS NODE_EDITOR_TLS_SOURCE: defaults follow the node address and the stored source, node-file options follow the core capability, the payload names one source (PEM cleared for files, paths cleared for paste, nothing for a relay), paths match the panel rule');
 
 // G2: GOST forward pools, ranges and limits. The editor offers them only for a
 // GOST core that reports settings contract 2, and every conflict hint expands the

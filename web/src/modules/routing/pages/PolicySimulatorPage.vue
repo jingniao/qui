@@ -186,7 +186,7 @@
           <select v-model="nodeForm.nodeId" required @change="nodeForm.inboundId = ''" class="form-input-base mt-1.5">
             <option value="">请选择入口服务器...</option>
             <option v-for="node in nodes" :key="node.id" :value="node.id">
-              {{ node.name }} ({{ node.publicIp || '未分配 IP' }})
+              {{ node.name }} ({{ connectAddress(node) || '未设置连接地址' }})
             </option>
           </select>
         </label>
@@ -353,6 +353,7 @@ import { authState } from '../../../app/auth';
 import { utcInput } from '../../../app/time';
 import { userAPI, type ProxyUser } from '../../users/api';
 import { type NodeView } from '../../nodes/api';
+import { connectAddress } from '../../nodes/nodeAddress';
 import { proxyAPI, type Inbound, strategyNames } from '../../proxy/api';
 import PageHeader from '../../../components/PageHeader.vue';
 import ErrorState from '../../../components/ErrorState.vue';

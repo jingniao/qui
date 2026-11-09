@@ -64,6 +64,11 @@ func Detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	major, _ := strconv.Atoi(strings.Split(match[1], ".")[0])
 	protocols = append(protocols, &pb.ProtocolCapability{Protocol: "wireguard", Inbound: major >= 25, Outbound: true, Tcp: true, Udp: true})
 	caps := &pb.Capabilities{CoreName: "xray", CoreVersion: match[1], Protocols: protocols, ForwardInboundSupported: true}
+	// The renderer emits the pinned core's own certificateFile/keyFile fields, so
+	// this Agent can apply an inbound whose certificate lives on the node. The
+	// native check still gates every apply, and the panel only accepts the
+	// setting when this bit is reported (v1.4.7 section 3).
+	caps.TlsCertificateFilesSupported = true
 	caps.ServerSettingsCombinations = detectServerSettings(ctx, executable, match[1])
 	if len(caps.ServerSettingsCombinations) > 0 {
 		caps.ServerSettingsContractVersion = desiredstate.SettingsContractVersion

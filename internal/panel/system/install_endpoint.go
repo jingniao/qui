@@ -8,9 +8,10 @@ import (
 	"errors"
 	"io"
 	"math"
-	"regexp"
 	"strings"
 	"time"
+
+	"proxycontrol/pkg/contracts/netaddr"
 )
 
 var ErrInstallEndpointInvalid = errors.New("invalid node install endpoint (hosts must be DNS names or IPv4 literals without a scheme, ports 1 to 65535 or 0 for unset, and the Web and gRPC ports must differ)")
@@ -23,9 +24,8 @@ const installEndpointKey = "install_endpoint"
 
 // hostPattern is the rule the frontend uses before it builds the command and the
 // rule deploy/linux/node-install.sh applies to --panel. A bare IPv6 literal
-// contains ':' and therefore fails both, so it is refused here as well instead
-// of storing a value the install command can never use.
-var hostPattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
+// contains ':' and therefore fails both, so it is refused instead of storing a
+// value the install command can never use. The rule itself lives in netaddr.
 
 // InstallEndpoint is the panel address one-click Agent installation defaults to:
 // the domain or IPv4 literal a new node can reach plus the panel Web (HTTPS)
@@ -78,20 +78,11 @@ func validateInstallEndpoint(host string, httpPort, grpcPort int, grpcHost strin
 
 // validInstallHost reports whether one saved host can be used verbatim in the
 // install command: empty (unset) or a DNS name / IPv4 literal without scheme,
-// port or brackets.
+// port or brackets. The label rules live in netaddr, which the node connect
+// address shares; a bare IPv6 literal is refused here because
+// deploy/linux/node-install.sh cannot take one for --panel.
 func validInstallHost(host string) bool {
-	if host == "" {
-		return true
-	}
-	if len(host) > 253 || !hostPattern.MatchString(host) {
-		return false
-	}
-	for _, label := range strings.Split(host, ".") {
-		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
-			return false
-		}
-	}
-	return true
+	return host == "" || netaddr.ValidHostName(host)
 }
 
 func readInstallEndpoint(ctx context.Context, tx *sql.Tx) (InstallEndpoint, error) {

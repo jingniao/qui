@@ -1,0 +1,13 @@
+-- The certificate source of an inbound (v1.4.7 section 3, phase C1). Until now a
+-- TLS inbound could only carry a pasted certificate and key, so nothing recorded
+-- where its material came from. '' is the legacy value: a row written before this
+-- migration, or an inbound that presents no certificate at all. 'acme' is
+-- reserved for the automatic issuance of section 4 and is never written by this
+-- version.
+--
+-- The backfill cannot be written here: the certificate itself lives in
+-- encrypted_settings, which SQLite cannot read. A legacy TLS inbound that carries
+-- a certificate is therefore resolved where the panel can decrypt it, in the
+-- inbound read path (internal/panel/proxy/tls.go tlsSourceOf), which reads as
+-- 'paste' — the only source this version ever produced.
+ALTER TABLE inbounds ADD COLUMN tls_source TEXT NOT NULL DEFAULT '' CHECK(tls_source IN ('','paste','self_signed','file','acme'));

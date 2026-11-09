@@ -1133,6 +1133,7 @@ import { nodeAPI, type NodeView } from '../../nodes/api';
 import { deploymentAPI } from '../../system/deploymentApi';
 import { proxyAPI, canvasAPI, type Inbound, loadProtocolSupport, choices } from '../api';
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
+import { connectAddress } from '../../nodes/nodeAddress';
 import {
   proxyNodeStore,
   loadStoredData,
@@ -1319,7 +1320,7 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
           sourceName: srv.name,
           sourceId: srv.id,
           inboundId: ib.id,
-          server: srv.publicIp || srv.hostname || '127.0.0.1',
+          server: connectAddress(srv) || '未设置连接地址',
           port: ib.port || 443,
           protocol: ib.protocol || 'vless',
           status: status,

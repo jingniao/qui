@@ -116,6 +116,13 @@ type ProtocolSettings struct {
 	// shared subscription/proxy model and the two halves cannot be confused.
 	Reality *RealityServerSettings `json:"reality,omitempty"`
 	XHTTP   *XHTTPSettings         `json:"xhttp,omitempty"`
+
+	// CertificatePath and PrivateKeyPath name certificate files that already
+	// exist on the node (v1.4.7 section 3, certificates.go). They are inbound
+	// only, mutually exclusive with the pasted PEM fields, and the Agent reads
+	// the files itself: the private key is never sent as content.
+	CertificatePath string `json:"certificate_path,omitempty"`
+	PrivateKeyPath  string `json:"private_key_path,omitempty"`
 }
 
 // ForwardSettings describes a port forward. Host, Port and Network are the

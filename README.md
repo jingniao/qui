@@ -4,7 +4,7 @@
 
 支持用户门户与节点组订阅、分流和域名级访问控制、协议中转/代理链、设备限制、用户额度、主机观测与整机月流量。节点可同时运行官方 Xray、官方或 qui 的未修改上游 sing-box 构建，以及仅做端口转发/加密中继的 GOST 3.3.2。中央失联时保留最后成功配置，配置失败自动回滚。
 
-最新正式版 **v1.4.6**（2026-11-09，tag → `620c6d7`）；生产面板与三台 Agent（us2-node 面板＋Agent、uk-node、alpine-node Alpine LXC/OpenRC）均已升级到 v1.4.6，本版起「添加内核」「升级内核」对话框选一个版本就会按服务器的架构与 C 库填好官方地址与厂商公布的摘要，不再手抄。仅在 linux/amd64 真机验证与验收；原生 arm64 主机验收本轮由 Owner 明确跳过，只有 qemu-user 模拟。版本与限制见[发布说明](docs/release-notes-1.4.6.md)，当前事实与历史见[项目说明书](AGENTS.md) 的“当前状态”和[变更记录](docs/changelog.md)。下一版本 v1.4.7 的规划见[v1.4.7 规划](docs/v1.4.7-plan.md)（尚未实施）。
+最新正式版 **v1.4.7**（2026-11-09，tag → `25b95e3`，迁移头 0137）：保存节点组后凭据自动下发、节点客户端连接地址（自动探测＋域名）、TLS 入站证书来源，以及面板经 Cloudflare DNS-01 自动申请和续期证书。生产面板与三台 Agent（us2-node 面板＋Agent、uk-node、alpine-node Alpine LXC/OpenRC）**尚未升级，仍为 v1.4.6**。仅在 linux/amd64 真机验证与验收；原生 arm64 主机验收本轮由 Owner 明确跳过，只有 qemu-user 模拟。版本与限制见[发布说明](docs/release-notes-1.4.7.md)，当前事实与历史见[项目说明书](AGENTS.md) 的“当前状态”和[变更记录](docs/changelog.md)。v1.4.7 的规划与未落地子项见[v1.4.7 规划](docs/v1.4.7-plan.md)。
 
 | 任务 | 入口 |
 | --- | --- |

@@ -2,6 +2,13 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
+**v1.4.7（2026-11-09，tag `v1.4.7` → `25b95e3`，迁移 0135–0137，迁移头 0137）**：保存节点组后凭据自动下发、节点客户端连接地址、TLS 入站证书来源、面板经 Cloudflare DNS-01 自动申请与续期证书。见[发布说明](release-notes-1.4.7.md)。
+- 节点组保存或删除后，按该组授权用户排自动额度版本，约 60 秒合并窗口内下发或移除凭据，无须手动发布。
+- 0135：Agent 填写 `Heartbeat.public_ip`（默认路由网卡的公网地址），面板以 gRPC 对端公网地址兜底，`public_ip_manual` 保护手工值；新增客户端连接地址 `connectHost`，订阅与分享链接优先使用；没有地址的节点在订阅预览里给出警告，不再静默丢弃。
+- 0136：`inbounds.tls_source` 为 `paste`／`self_signed`／`file`／`acme`；节点文件来源只允许 `/etc/proxy-agent/certs/` 下的路径，由新能力位 `tls_certificate_files_supported` 门禁；读取接口新增只读 `certificateInfo`。
+- 0137：证书库与「证书与 DNS」设置（Owner）。Token 经 Cloudflare 校验后密封，签发与续期失败按固定错误码退避；入站以 `certificateId` 引用证书；续期后只在低峰窗口内、且已发布证书名称集合不变时自动发布。证书库随加密备份恢复。
+- 门禁与发布：同一提交 `25b95e3` 上本地 Linux 完整门禁 `GATE 25b95e3 PASS total=2976s`（check 2277s ＋ 真核 698s，无 DATA RACE）与 GitHub `check`（run 42627577140，check＋cores）均通过；`release`（run 42639012134）于 2026-11-09T14:54:28Z 发布，附件齐全。**生产尚未升级**（截至 15:55Z 面板与 Agent 仍为 1.4.6）；Cloudflare／Let's Encrypt staging 实机验收待做。
+
 **v1.4.6（2026-11-09，tag `v1.4.6` → `620c6d7`，无迁移，迁移头仍 0134）**：内核版本、地址与摘要不用再手抄，选一个版本就按服务器的架构与 C 库填好。见[发布说明](release-notes-1.4.6.md)。
 - 内核版本、地址与摘要不用再手抄：服务器 → 代理核心的「添加内核」「升级内核」对话框和「系统设置 → 系统信息 → 核心更新」卡片改为先选版本，面板按这台服务器的架构与 C 库把官方资源 URL 与厂商公布的归档摘要填好。新接口 `GET /api/v1/core-releases?component=&source=[&refresh=1]`（Owner-only）列最近 5 个正式版，摘要只读公布处——Xray 取发布页旁的 `<asset>.dgst`，官方 sing-box 取 GitHub 资产摘要，qui 构建取我们自己的 `SHA256SUMS`，GOST 取 `pkg/contracts/release` 的审阅固定值（不发请求）；同一资产两处公布值必须一致，否则留空由人粘贴。面板从不自行计算摘要，提交仍走同一 `POST /api/v1/core-updates`，面板与 Agent 的校验链不变。列表缓存 10 分钟（`refresh=1` 跳过）、失败不缓存，失败一律 502 `core_release_lookup_failed`，不回显上游。
 - 批量升级按每台服务器各自取资产（Alpine 用官方 sing-box 的 `-musl` 归档，qui 构建是静态单包），没有匹配资产或该资产没有可信摘要的那台跳过并说明，不会把一台的地址套到另一台上。手输版本会清掉旧摘要：地址能按官方命名规则重建就重建（Xray、官方 sing-box），不能重建（qui 构建在面板 tag 下、GOST 单一固定归档、架构未知）就清空，避免把别的版本的地址和摘要当一对提交。

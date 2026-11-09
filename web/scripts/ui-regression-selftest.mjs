@@ -7,10 +7,10 @@ assert.doesNotMatch(read('modules/nodes/components/serverMetricsModel.ts'), /Mat
 const meta = read('modules/nodes/nodeMeta.ts');
 const saveMeta = meta.slice(meta.indexOf('export async function saveNodeMeta'));
 assert.doesNotMatch(saveMeta, /\.\.\.meta\b/, 'metadata request must whitelist API fields');
-// The panel never invents a digest: the Owner pastes the vendor's published
-// checksums. The one exception is a reviewed pin, where the archive digest is
-// part of the contract (pkg/contracts/release GostArchiveSHA256), so exactly this
-// literal may appear in the UI and nowhere else.
+// The panel never invents a digest: the vendor's published checksum is either
+// read by GET /api/v1/core-releases (Xray .dgst, GitHub asset digest, our
+// SHA256SUMS, the reviewed GOST pin served by the backend) or pasted by the Owner.
+// No digest literal ships in the UI; the GOST pin may still appear verbatim.
 const reviewedPin = '162feb43b1c284dbea599cdfe898169931af875233060dedc19432c7a9d18274';
 const digestsOf = text => (text.match(/\b[a-f0-9]{64}\b/gi) || []).map(digest => digest.toLowerCase());
 for (const digest of digestsOf(read('modules/system/components/NodeVersionPanel.vue'))) {
@@ -60,7 +60,59 @@ assert.match(versionPanel, /nodes\/coreSummary/, 'the cores page uses the shared
 assert.match(versionPanel, /capabilities\.cores|nodeCores\(/, 'installed cores come from capabilities.cores (old Agents: one core)');
 assert.match(read('modules/nodes/coreSummary.ts'), /heartbeat\?\.cores/, 'per-core health comes from the heartbeat');
 assert.doesNotMatch(versionPanel, /localStorage[^\n]*[Cc]ore/, 'cores must never be read from or written to browser storage');
-assert.deepEqual(digestsOf(versionPanel).filter(digest => digest !== reviewedPin), [], 'the Owner pastes the SHA-256; only the reviewed GOST pin ships a digest literal');
+assert.deepEqual(digestsOf(versionPanel).filter(digest => digest !== reviewedPin), [], 'digests come from the release lookup or the Owner; only the reviewed GOST pin may ship as a literal');
+// Official release lookup: both core forms pick a release instead of hard-coded
+// presets, and the helper resolves each server's own archive and never a digest
+// literal of its own.
+const coreReleasesHelper = read('modules/system/coreReleases.ts');
+assert.ok(coreReleasesHelper.includes('/core-releases?component='), 'the release lookup uses GET /api/v1/core-releases');
+assert.deepEqual(digestsOf(coreReleasesHelper), [], 'the release helper carries no digest literal');
+assert.ok(coreReleasesHelper.includes('export function pickAsset('), 'each server gets the archive for its architecture and C library');
+assert.ok(coreReleasesHelper.includes('export function deriveAssetURL('), 'a hand-typed version rebuilds the URL in one shared place');
+for (const file of ['modules/system/components/NodeVersionPanel.vue', 'modules/system/components/CoreUpdatesPanel.vue']) {
+  const source = read(file);
+  assert.ok(source.includes('coreReleasesAPI.list('), file + ' reads the official releases');
+  assert.ok(source.includes('pickAsset('), file + ' fills the asset of the target server');
+  assert.ok(source.includes('deriveAssetURL('), file + ' clears or rebuilds the URL when the version is typed by hand');
+  assert.doesNotMatch(source, /摘要已自动填写，来自/, file + ' names the digest source instead of running it into the sentence');
+  assert.doesNotMatch(source, /CORE_PRESETS|摘要不会自动填充/, file + ' no longer ships hard-coded presets or the old paste-only wording');
+  assert.deepEqual(digestsOf(source).filter(digest => digest !== reviewedPin), [], file + ' ships no digest literal');
+}
+// pickAsset chooses the archive for the server's architecture and C library and
+// never falls back to an archive built for another one; the qui build is offered
+// to the Agents the backend accepts it for.
+{
+  const helperCode = ts.transpileModule(('const request = () => { throw new Error("no network"); };\n' + coreReleasesHelper.replace(/^import .*;$/gm, '')), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+  const helper = await import(`data:text/javascript;base64,${Buffer.from(helperCode).toString('base64')}`);
+  const asset = (platform, libc, name) => ({ platform, libc, url: 'https://github.com/x/' + name, sha256: 'a'.repeat(64), digestSource: 'github' });
+  const singbox = { version: '1.14.4', publishedAt: '', assets: [asset('linux/amd64', '', 'glibc-amd64'), asset('linux/arm64', '', 'glibc-arm64'), asset('linux/amd64', 'musl', 'musl-amd64')] };
+  const xray = { version: '26.3.27', publishedAt: '', assets: [asset('linux/amd64', '', 'xray-amd64'), asset('linux/arm64', '', 'xray-arm64')] };
+  const node = (architecture, osPrettyName, extra = {}) => ({ capabilities: { host: { architecture, osPrettyName }, ...extra } });
+  assert.equal(helper.pickAsset(singbox, node('amd64', 'Debian GNU/Linux 12'))?.url.endsWith('glibc-amd64'), true, 'glibc amd64');
+  assert.equal(helper.pickAsset(singbox, node('amd64', 'Alpine Linux v3.19'))?.url.endsWith('musl-amd64'), true, 'Alpine gets the musl build');
+  assert.equal(helper.pickAsset(singbox, node('arm64', 'Alpine Linux v3.19')), null, 'no arm64 musl build: no guess');
+  assert.equal(helper.pickAsset(singbox, node('', 'Debian')), null, 'unknown architecture: no guess');
+  assert.equal(helper.pickAsset(xray, node('amd64', 'Alpine Linux v3.19'))?.url.endsWith('xray-amd64'), true, 'Xray is one static build for every libc');
+  assert.equal(helper.pickAsset(xray, node('arm64', 'Ubuntu'))?.url.endsWith('xray-arm64'), true, 'arm64');
+  assert.equal(helper.defaultCoreSource('sing-box', node('amd64', 'Debian', { multi_core_supported: true })), 'qui', 'adding sing-box defaults to the qui build where accepted');
+  assert.equal(helper.defaultCoreSource('sing-box', node('amd64', 'Debian', { multi_core_supported: true, cores: [{ name: 'sing-box', singbox_user_stats: false }] })), 'official', 'an official sing-box keeps the official build');
+  assert.equal(helper.defaultCoreSource('sing-box', node('amd64', 'Debian')), 'official', 'an Agent without qui support stays official');
+  assert.equal(helper.defaultCoreSource('xray', node('amd64', 'Debian', { multi_core_supported: true })), 'official');
+  // A version typed by hand never keeps the URL of the release picked before it:
+  // it is rebuilt where the official naming rule allows it and cleared where it
+  // does not (qui lives under a panel tag, GOST is one pin, unknown arch has no
+  // asset), so a stale URL and digest cannot be submitted as a pair.
+  assert.equal(helper.deriveAssetURL('xray', 'official', '26.11.1', node('amd64', 'Debian')), 'https://github.com/XTLS/Xray-core/releases/download/v26.11.1/Xray-linux-64.zip', 'xray amd64 is rebuilt');
+  assert.equal(helper.deriveAssetURL('xray', 'official', '26.11.1', node('arm64', 'Debian')).endsWith('/v26.11.1/Xray-linux-arm64-v8a.zip'), true, 'xray arm64 is rebuilt');
+  assert.equal(helper.deriveAssetURL('sing-box', 'official', '1.15.0', node('amd64', 'Alpine Linux v3.19')).endsWith('/sing-box-1.15.0-linux-amd64-musl.tar.gz'), true, 'Alpine keeps the musl name');
+  assert.equal(helper.deriveAssetURL('sing-box', 'qui', '1.15.0', node('amd64', 'Debian')), '', 'the qui build sits under a panel tag: no derived URL');
+  assert.equal(helper.deriveAssetURL('gost', 'official', '3.3.2', node('amd64', 'Debian')), '', 'GOST is one pinned archive: no derived URL');
+  assert.equal(helper.deriveAssetURL('xray', 'official', '26.11.1', node('', 'Debian')), '', 'unknown architecture: no derived URL');
+  assert.equal(helper.deriveAssetURL('xray', 'official', '  ', node('amd64', 'Debian')), '', 'an empty version derives nothing');
+  console.log('PASS core releases: per-server archive by architecture and libc, no cross-platform guess, source defaults, typed-version URL rule');
+}
+// A batch upgrade resolves each server's own archive unless the form was edited.
+assert.ok(versionPanel.includes('const perNode = !releaseFormManual(corePicker, coreForm)'), 'a picked release resolves the archive per server in a batch');
 assert.match(versionPanel, /coreUpdatesAPI\.queue\(/, '添加/升级内核 uses POST /core-updates');
 assert.match(versionPanel, /coreUpdatesAPI\.remove\(/, '删除内核 uses the real remove-core API');
 assert.match(versionPanel, /coreUpdatesAPI\.removals\(/, 'removal tasks come from the removal history endpoint');

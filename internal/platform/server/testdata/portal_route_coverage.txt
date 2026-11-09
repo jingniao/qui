@@ -43,6 +43,7 @@ GET /api/v1/canvas-tunnels/legacy-objects
 GET /api/v1/client-policy-candidates
 GET /api/v1/client-policy-profiles
 GET /api/v1/client-policy-profiles/{id}
+GET /api/v1/core-releases
 GET /api/v1/core-updates
 GET /api/v1/dashboard
 GET /api/v1/deployment-batches

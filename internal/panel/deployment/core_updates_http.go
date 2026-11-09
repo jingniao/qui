@@ -13,11 +13,14 @@ type CoreUpdateHandler struct {
 	Repository *Repository
 	Audit      ReleaseAccess
 	Auth       *auth.Handler
+	// Releases answers the official release lookup; nil uses the shared default.
+	Releases *CoreReleaseService
 }
 
 func (h *CoreUpdateHandler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/nodes/{id}/cores/{component}/remove", h.Auth.Require(http.HandlerFunc(h.remove), true))
 	mux.Handle("GET /api/v1/nodes/{id}/cores/{component}/removals", h.Auth.Require(http.HandlerFunc(h.removals), true))
+	mux.Handle("GET /api/v1/core-releases", h.Auth.Require(http.HandlerFunc(h.coreReleases), true))
 	mux.Handle("GET /api/v1/core-updates", h.Auth.Require(http.HandlerFunc(h.list), true))
 	mux.Handle("POST /api/v1/core-updates", h.Auth.Require(http.HandlerFunc(h.queue), true))
 	mux.Handle("POST /api/v1/core-updates/{id}/clear", h.Auth.Require(http.HandlerFunc(h.clear), true))

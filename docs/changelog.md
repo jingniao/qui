@@ -2,7 +2,13 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
-**未发布（v1.4.4 之后）**
+**未发布（v1.4.5 之后）**
+- 内核版本、地址与摘要不用再手抄：服务器 → 代理核心的「添加内核」「升级内核」对话框和「系统设置 → 系统信息 → 核心更新」卡片改为先选版本，面板按这台服务器的架构与 C 库把官方资源 URL 与厂商公布的归档摘要填好。新接口 `GET /api/v1/core-releases?component=&source=[&refresh=1]`（Owner-only）列最近 5 个正式版，摘要只读公布处——Xray 取发布页旁的 `<asset>.dgst`，官方 sing-box 取 GitHub 资产摘要，qui 构建取我们自己的 `SHA256SUMS`，GOST 取 `pkg/contracts/release` 的审阅固定值（不发请求）；同一资产两处公布值必须一致，否则留空由人粘贴。面板从不自行计算摘要，提交仍走同一 `POST /api/v1/core-updates`，面板与 Agent 的校验链不变。列表缓存 10 分钟（`refresh=1` 跳过）、失败不缓存，失败一律 502 `core_release_lookup_failed`，不回显上游。
+- 批量升级按每台服务器各自取资产（Alpine 用官方 sing-box 的 `-musl` 归档，qui 构建是静态单包），没有匹配资产或该资产没有可信摘要的那台跳过并说明，不会把一台的地址套到另一台上。手输版本会清掉旧摘要：地址能按官方命名规则重建就重建（Xray、官方 sing-box），不能重建（qui 构建在面板 tag 下、GOST 单一固定归档、架构未知）就清空，避免把别的版本的地址和摘要当一对提交。
+- 前端去掉写死的 `CORE_PRESETS` 预设与「生成默认地址」按钮，改为 `web/src/modules/system/coreReleases.ts` 的共享解析；前端自检新增按架构/libc 选资产、来源默认值与手输版本 URL 规则的断言，并继续断言 UI 里除 GOST 固定值外不含摘要字面量。
+- 后端新增 `internal/panel/deployment/core_releases.go`、`core_releases_http.go` 与 6 组测试（`.dgst` 与 GitHub 摘要冲突、缺摘要、qui 去重、GOST 零请求、缓存/刷新/失败码、HTTP 固定错误）；新路由登记到门户路由覆盖清单。文档：项目说明书 §22.2 与 §27.9、[运维](operations.md) §9.2／§20。
+
+**v1.4.5（2026-11-09，tag `v1.4.5` → `88fe266`，无迁移，迁移头仍 0134）**：安装命令对话框改用「节点安装连接地址」里保存的面板与 Agent 地址端口；纯前端补丁走短门禁。
 - 修复：「新增服务器」与「生成安装命令」对话框没有采用 系统设置 → 节点安装连接地址 里保存的面板地址、Web 端口与 Agent gRPC 地址／端口，总是生成浏览器地址与面板实际 gRPC 端口的命令。对话框把 `enrollment.value`（Vue `ref` 里存的是响应式代理）与原始对象比较，永远不相等，读到的设置因此被丢弃；改为按每次打开对话框的序号判断（`web/src/modules/nodes/components/ServerEnrollment.vue`）。原位身份恢复与版本页「添加内核」对话框不受影响。前端自检新增对应检查。
 - 发布流程：纯前端补丁走短门禁。`scripts/gate-scope.sh` 对比上一个 `v*` 标签，只改了 `web/**`（不含 `.go`）、`docs/**` 与根目录 `*.md` 时判为 `web`：`scripts/check.sh` 只跑前端构建／自检并核对面板二进制已嵌入新资源，本地门禁封装跳过真实核套件；其他改动或无法判定时完整门禁，每周 GitHub `check` 始终完整，派发可设 `full_gate`。新增 `deploy/linux/tests/gate-scope-test.sh`（17 项）。见[发布流程手册](release-runbook.md)第 4 节与[项目说明书](../AGENTS.md) §32。
 

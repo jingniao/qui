@@ -251,7 +251,7 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 不应对外转发其端口；代理入站也会阻断访问该端口。Clash API 继续用于节点
 总量；没有该构建标签的官方核心保留 D5。
 
-**代理核心（面板驱动，直接 URL + SHA-256）**：服务器 → 代理核心里填 `组件 / 稳定版本号 / 官方 GitHub 发布资源 URL / 归档 SHA-256`。面板在入队时校验组件、纯发布版本号、摘要格式、URL 前缀和资源名与节点平台是否匹配（`internal/panel/deployment/core_updates.go`）。Agent 侧再次校验：URL 只接受官方前缀，重定向最多 3 跳且只允许 `github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`；先校验归档摘要再解包；解包拒绝符号链接、路径穿越和多余候选；版本不匹配或健康检查失败时回滚到上一镜像（`internal/agent/updater/core_source.go`、`internal/agent/control/core_updates.go`）。排队、状态和结果见 `GET /api/v1/core-updates`；卡住的任务在节点重连时关闭，Owner 也可用 `POST /api/v1/core-updates/{id}/clear` 关闭。旧任务（无 URL）按 `failed_closed/history_invalid` 关闭。
+**代理核心（面板驱动，直接 URL + SHA-256）**：服务器 → 代理核心里选 `组件 / 稳定版本号`，官方 GitHub 发布资源 URL 与归档 SHA-256 会按所选版本自动填写，也可以照旧手工粘贴。自动填写的数据来自 `GET /api/v1/core-releases`（Owner，见[项目说明书](../AGENTS.md) §22.2）：面板只读厂商公布的摘要（Xray 的 `.dgst`、GitHub 资产摘要、我们自己的 `SHA256SUMS`），从不自行计算，两处公布值不一致或缺失时留空由人核对。面板在入队时校验组件、纯发布版本号、摘要格式、URL 前缀和资源名与节点平台是否匹配（`internal/panel/deployment/core_updates.go`）。Agent 侧再次校验：URL 只接受官方前缀，重定向最多 3 跳且只允许 `github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`；先校验归档摘要再解包；解包拒绝符号链接、路径穿越和多余候选；版本不匹配或健康检查失败时回滚到上一镜像（`internal/agent/updater/core_source.go`、`internal/agent/control/core_updates.go`）。排队、状态和结果见 `GET /api/v1/core-updates`；卡住的任务在节点重连时关闭，Owner 也可用 `POST /api/v1/core-updates/{id}/clear` 关闭。旧任务（无 URL）按 `failed_closed/history_invalid` 关闭。
 
 **Agent 自身（签名目录）**：Agent 自更新仍然使用 Ed25519 签名清单，不改成 URL + SHA-256。
 
@@ -482,7 +482,7 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 **给入站指定核心**：入站表单的 `core` 留空表示“当前主核心”，不要为了跟主核心显式绑定而填值——主核心换人后空值会跟着走，显式值不会。保存与发布都会按该核心的能力拒绝不支持的协议、转发入站、WireGuard 与设备门控；同一节点的监听端口在所有核心与端口转发之间**唯一**（同一数字端口即使传输不同也不能复用）。
 
-**添加缺失核心**：服务器 → 代理核心，`POST /api/v1/core-updates`，`component` 填 `xray`、`sing-box` 或 `gost`，并带当前已确认修订、官方（或严格匹配的 qui）资源 URL 与归档 SHA-256；GOST 的版本、URL 与摘要固定，见第 20 节。每个（节点、组件）同时只有一个活跃任务，不同组件可以同时排队。任务 `success` 只表示镜像切换成功；只有下一次能力上报里出现该组件，它才会从 `core_selectionBlocked` 消失并可选为入站核心。
+**添加缺失核心**：服务器 → 代理核心，`POST /api/v1/core-updates`，`component` 填 `xray`、`sing-box` 或 `gost`，并带当前已确认修订、官方（或严格匹配的 qui）资源 URL 与归档 SHA-256；对话框里选一个版本就会按这台服务器的架构与 C 库填好 URL 与官方公布的摘要，批量升级按每台各自解析，手改过就按填写的值提交。GOST 的版本、URL 与摘要固定，见第 20 节。每个（节点、组件）同时只有一个活跃任务，不同组件可以同时排队。任务 `success` 只表示镜像切换成功；只有下一次能力上报里出现该组件，它才会从 `core_selectionBlocked` 消失并可选为入站核心。
 
 **移除核心**：先删掉该组件上的所有入站（包括禁用的），发布并确认该修订，然后 `POST /api/v1/nodes/{id}/cores/{component}/remove`（带 `confirmNodeId` 与当前已确认修订）。拒绝码：`core_in_use`（错误体 `inboundIds` 列出仍占用该组件的入站）、`core_pending`（该组件正在添加/移除或有部署占用）、`last_core`（最后一个启用核心不能移除）、`revision_mismatch`（提交的修订不是当前已确认修订）。断线后用同一 id 重发即可，回执幂等；在能力上报确认之前该组件仍然显示。安装器拥有的二进制不会被 Agent 删除，只会被禁用，重新安装同组件即重新启用。移除成功时 Agent 还会删除该核心的 `runtime/<组件>/`（运行标记、accounting key、访问日志等）：确认退出之后才删，退出未确认（`ErrCoreStopUnconfirmed`）时目录、清单与镜像都保留，所以看到该目录存在且移除报这个码，说明进程没退干净，别手工 rm。`cores.json.enc`、更新历史与安装器二进制保留；重新添加同一组件会建全新的运行目录。移除后要回滚到使用该组件的历史修订会被拒绝（`rollback refused: …`），必须先装回组件或发布一份显式指定核心的新修订。
 

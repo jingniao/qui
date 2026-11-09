@@ -614,6 +614,10 @@ Owner＋CSRF 提交完整 settings/clear 和匹配 confirmNodeId → 校验白�
 
 核心更新独立于配置发布：Owner 提交组件、稳定版本、白名单 GitHub URL、归档 SHA-256 → 面板校验平台/版本/来源/摘要 → Agent 再校验 URL/重定向主机/摘要 → 解包（拒绝链接、穿越、多余候选）→ 原生版本/健康校验与切换，失败回滚。无可信摘要不安装。缺失组件走同一 schema-2 请求安装启用，空闲核心不启动；每组件有 worker、staging、认证 release hold 与独立历史，重新添加使用新历史命名空间并保留反回滚序号检查。
 
+- 版本、地址与摘要可由 Owner 在「代理核心」的对话框里选版本自动填写（`GET /api/v1/core-releases`，Owner-only，见第 27.9 节）：按（组件、来源）列最近 5 个正式版，按平台给出官方资产 URL 与厂商公布的归档摘要。摘要只读对方公布处，面板从不自行计算：Xray 取发布页旁 `<asset>.dgst` 的 SHA2-256，官方 sing-box 取 GitHub 资产摘要，qui 构建取我们自己的 `SHA256SUMS`，GOST 取 `pkg/contracts/release` 里已审阅的固定值（不发请求）。同一资产有两处公布值时必须一致，否则该项摘要留空由 Owner 手动粘贴；资产没有发布时间或为空时同样留空。提交仍走同一 `POST /api/v1/core-updates`，面板与 Agent 的校验链不变，选版本只是省去抄写。
+- 每台服务器按自身架构与 C 库取资产（Alpine 用官方 sing-box 的 `-musl` 归档，其余用通用归档；qui 构建是静态单包），没有匹配资产时不猜；批量升级按每台各自解析，`uiMetadata` 之外的表格值仍是一次提交里的同一版本。Owner 手动改过版本、地址或摘要后，表单按所填写内容提交，不再按发布信息解析；手输版本会清空摘要，地址能按官方命名规则重建就重建（Xray、官方 sing-box），不能重建（qui 构建在面板 tag 下、GOST 单一固定归档、架构未知）就清空。
+- 查询失败（网络、限流、上游非 200、内容不可解析、超过 30 秒）一律 502 `core_release_lookup_failed`，不回显上游状态、正文或链接；对话框给出固定提示并保留已填内容，Owner 可点「刷新」重试或全部手填。列表结果缓存 10 分钟（`refresh=1` 跳过），失败不缓存；GOST 完全在本地作答。一次冷查询的上游开销：Xray 为 1 次 releases 列表加最多 5 个正式版 × 2 个资产共 10 次 `.dgst`，qui 为 1 次列表加 5 次 `SHA256SUMS`，官方 sing-box 只用 1 次列表（`.dgst`／`SHA256SUMS` 走 github.com 下载路径，列表走 `api.github.com` 且受其匿名限流，按面板主机 IP 计）；被限流时表现为上面的固定失败，不影响任务本身。
+
 - Xray 只收官方前缀；sing-box 也收精确 `sing-box-<版本>-qui.<序号>-linux-<架构>.tar.gz` 的 qui 归档，面板/Agent 双检，旧 Agent 未声明能力不能排队 qui 来源。
 - GOST 仅 linux/amd64、3.3.2、`v3.3.2/gost_3.3.2_linux_amd64.tar.gz`，前缀 `https://github.com/go-gost/gost/releases/download/`，固定**归档**摘要 `162feb43…a9d18274`（非二进制摘要）。下划线资产不套通用连字符匹配。共享规则只定义在 `pkg/contracts/release` 的 CoreAssetURL/CoreAssetMatches/CorePinnedTarget；改版本须审阅固定值并重跑真实核回归。安装缺失 GOST 另须当前 Hello.gost_core_supported；nodes 对应位恢复清零、重连刷新，多核心能力不能替代该位。
 - Agent 自更新使用配置固定 Ed25519 公钥、签名清单与安装历史防重放，失败回滚确认镜像；核心不用签名目录，也无旧 receipt/outcome journal 路径。
@@ -1006,6 +1010,7 @@ POST /api/v1/nodes/{id}/rollback
 GET  /api/v1/nodes/{id}/restart-core            # 列表项含 core
 POST /api/v1/nodes/{id}/restart-core            # {expectedRevision,confirmNodeId,core?}；core 留空表示整节点
 GET  /api/v1/nodes/{id}/health-checks           # 列表项含 core
+GET  /api/v1/core-releases                      # Owner；?component=&source=[&refresh=1]，发布信息查询，见 22.2
 GET  /api/v1/core-updates                       # 任务列表，含 component 与 adding
 POST /api/v1/core-updates                       # {nodeId,confirmNodeId,revision,component,version,url,sha256}
 POST /api/v1/core-updates/{id}/clear

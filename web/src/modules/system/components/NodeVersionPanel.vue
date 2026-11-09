@@ -900,24 +900,41 @@
               </div>
             </div>
 
-            <!-- Version Presets -->
-            <div>
-              <label class="block text-neutral-600 font-medium mb-1.5">版本与 URL 辅助（SHA-256 需自行核验并粘贴）</label>
+            <!-- Source (sing-box only): the qui build carries per-user statistics -->
+            <div v-if="addCoreForm.component === 'sing-box' && quiSourceAllowed(coreManagementTargetNode)">
+              <label class="block text-neutral-600 font-medium mb-1.5">构建来源</label>
               <div class="flex flex-wrap gap-2">
+                <button type="button" @click="setAddCoreSource('qui')" class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all"
+                  :class="addCorePicker.source === 'qui' ? 'bg-ios-blue text-white border-ios-blue font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'">qui 构建（含用户流量统计，推荐）</button>
+                <button type="button" @click="setAddCoreSource('official')" class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all"
+                  :class="addCorePicker.source === 'official' ? 'bg-ios-blue text-white border-ios-blue font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'">官方构建</button>
+              </div>
+            </div>
+
+            <!-- Official releases: picking one fills version, URL and digest -->
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <label class="text-neutral-600 font-medium">选择版本（自动填写地址与官方摘要）</label>
+                <button v-if="addCorePicker.state !== 'loading'" type="button" @click="loadCoreReleases(addCorePicker, addCoreForm, coreManagementTargetNode, true)" class="text-ios-blue hover:underline text-xs font-medium">刷新</button>
+              </div>
+              <p v-if="addCorePicker.state === 'loading'" class="text-xs text-ios-tertiary">正在读取官方发布…</p>
+              <p v-else-if="addCorePicker.state === 'failed'" class="text-xs text-ios-orange">无法读取官方发布信息，可点「刷新」重试，或在下方手动填写版本、地址与摘要。</p>
+              <p v-else-if="addCorePicker.state === 'ready' && !addCorePicker.items.length" class="text-xs text-ios-orange">没有找到可用的正式版本，请在下方手动填写。</p>
+              <div v-else class="flex flex-wrap gap-2">
                 <button
-                  v-for="preset in addCorePresets"
-                  :key="preset.version"
+                  v-for="(item, index) in addCorePicker.items"
+                  :key="item.version"
                   type="button"
-                  @click="applyAddCorePreset(preset)"
-                  class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all"
-                  :class="addCoreForm.version === preset.version ? 'bg-ios-blue text-white border-ios-blue shadow-2xs font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'"
+                  @click="applyCoreRelease(addCorePicker, addCoreForm, item, coreManagementTargetNode)"
+                  class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all tabular-nums"
+                  :class="addCorePicker.selected?.version === item.version ? 'bg-ios-blue text-white border-ios-blue shadow-2xs font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'"
                 >
-                  {{ preset.label }}
+                  v{{ item.version }}{{ index === 0 ? '（最新）' : '' }}
                 </button>
               </div>
             </div>
 
-            <!-- Version & Core Architecture -->
+            <!-- Component & Version -->
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">内核平台</label>
@@ -927,23 +944,21 @@
               </div>
               <div>
                 <label class="block text-neutral-600 font-medium mb-1.5">目标版本号</label>
-                <input v-model.trim="addCoreForm.version" @input="autoFillAddCoreURL" placeholder="例如: 26.3.27" class="form-input-base w-full !py-1.5 tabular-nums font-semibold" />
+                <input v-model.trim="addCoreForm.version" @input="onAddCoreVersionInput" placeholder="例如: 26.3.27" class="form-input-base w-full !py-1.5 tabular-nums font-semibold" />
               </div>
             </div>
 
             <!-- URL -->
             <div>
-              <div class="flex items-center justify-between mb-1.5">
-                <label class="text-neutral-600 font-medium">官方发布资产地址 (Asset URL)</label>
-                <button type="button" @click="autoFillAddCoreURL" class="text-ios-blue hover:underline text-xs font-medium">生成默认地址</button>
-              </div>
+              <label class="block text-neutral-600 font-medium mb-1.5">官方发布资产地址 (Asset URL)</label>
               <input v-model.trim="addCoreForm.url" class="form-input-base w-full !py-1.5 font-mono" />
             </div>
 
             <!-- SHA-256 -->
             <div>
               <label class="block text-neutral-600 font-medium mb-1.5">SHA-256 校验和 (64位十六进制)</label>
-              <input v-model.trim="addCoreForm.sha256" placeholder="输入 64 位 SHA-256 摘要" class="form-input-base w-full !py-1.5 font-mono" />
+              <input v-model.trim="addCoreForm.sha256" placeholder="选择版本后自动填写；也可粘贴官方公布的摘要" class="form-input-base w-full !py-1.5 font-mono" />
+              <p v-if="releaseDigestNote(addCorePicker, addCoreForm)" class="text-xs mt-1" :class="addCoreForm.sha256 && addCoreForm.url ? 'text-ios-tertiary' : 'text-ios-orange'">{{ releaseDigestNote(addCorePicker, addCoreForm) }}</p>
             </div>
 
             <!-- Submit Button: 确认添加内核 -->
@@ -1013,19 +1028,36 @@
 
         <!-- Upgrade Configuration Form -->
         <div class="space-y-3.5">
-          <!-- Official Release Presets (Pills) -->
-          <div>
-            <label class="block text-neutral-600 font-medium mb-1.5">版本与 URL 辅助（SHA-256 需自行核验并粘贴）</label>
+          <!-- Source (sing-box only) -->
+          <div v-if="coreForm.component === 'sing-box' && coreQuiAllowed">
+            <label class="block text-neutral-600 font-medium mb-1.5">构建来源</label>
             <div class="flex flex-wrap gap-2">
+              <button type="button" @click="setCoreSource('qui')" class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all"
+                :class="corePicker.source === 'qui' ? 'bg-ios-blue text-white border-ios-blue font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'">qui 构建（含用户流量统计）</button>
+              <button type="button" @click="setCoreSource('official')" class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all"
+                :class="corePicker.source === 'official' ? 'bg-ios-blue text-white border-ios-blue font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'">官方构建</button>
+            </div>
+          </div>
+
+          <!-- Official releases: picking one fills version, URL and digest -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-neutral-600 font-medium">选择版本（自动填写地址与官方摘要）</label>
+              <button v-if="corePicker.state !== 'loading'" type="button" @click="loadCoreReleases(corePicker, coreForm, coreDisplayNode, true)" class="text-ios-blue hover:underline text-xs font-medium">刷新</button>
+            </div>
+            <p v-if="corePicker.state === 'loading'" class="text-xs text-ios-tertiary">正在读取官方发布…</p>
+            <p v-else-if="corePicker.state === 'failed'" class="text-xs text-ios-orange">无法读取官方发布信息，可点「刷新」重试，或在下方手动填写版本、地址与摘要。</p>
+            <p v-else-if="corePicker.state === 'ready' && !corePicker.items.length" class="text-xs text-ios-orange">没有找到可用的正式版本，请在下方手动填写。</p>
+            <div v-else class="flex flex-wrap gap-2">
               <button
-                v-for="preset in currentCorePresets"
-                :key="preset.version"
+                v-for="(item, index) in corePicker.items"
+                :key="item.version"
                 type="button"
-                @click="applyCorePreset(preset)"
-                class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all"
-                :class="coreForm.version === preset.version ? 'bg-ios-blue text-white border-ios-blue shadow-2xs font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'"
+                @click="applyCoreRelease(corePicker, coreForm, item, coreDisplayNode)"
+                class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-all tabular-nums"
+                :class="corePicker.selected?.version === item.version ? 'bg-ios-blue text-white border-ios-blue shadow-2xs font-semibold' : 'bg-white text-neutral-700 border-black/[0.08] hover:border-black/20'"
               >
-                {{ preset.label }}
+                v{{ item.version }}{{ index === 0 ? '（最新）' : '' }}
               </button>
             </div>
           </div>
@@ -1047,21 +1079,20 @@
             </div>
           </div>
           <p v-if="!coreDialogTargetNode" class="text-xs text-ios-secondary">
-            将只向已运行 {{ coreForm.component }} 的 {{ coreBatchTargets.length }} 台在线服务器下发同一个版本、地址与摘要；未运行该内核的服务器不会收到安装任务。
+            将只向已运行 {{ coreForm.component }} 的 {{ coreBatchTargets.length }} 台在线服务器下发同一个版本；未运行该内核的服务器不会收到安装任务。
+            <template v-if="coreBatchArchitectures > 1">这些服务器的架构不同：选择版本后每台自动使用对应的文件与摘要，下方只显示「{{ coreDisplayNode?.name }}」的。手动改过地址或摘要时，所有服务器都使用你填写的值。</template>
           </p>
 
           <div>
-            <div class="flex items-center justify-between mb-1.5">
-              <label class="text-neutral-600 font-medium">官方发布资产地址 (Asset URL)</label>
-              <button type="button" @click="autoFillCoreURL" class="text-ios-blue hover:underline text-xs font-medium">生成默认地址</button>
-            </div>
+            <label class="block text-neutral-600 font-medium mb-1.5">官方发布资产地址 (Asset URL)</label>
             <input v-model.trim="coreForm.url" placeholder="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" class="form-input-base w-full !py-1.5 font-mono" />
             <p class="text-xs text-neutral-400 mt-1">必须为官方 releases 下载地址，节点下载后将比对文件指纹。</p>
           </div>
 
           <div>
             <label class="block text-neutral-600 font-medium mb-1.5">SHA-256 校验和 (64位十六进制)</label>
-            <input v-model.trim="coreForm.sha256" placeholder="输入 64 位 SHA-256 摘要" class="form-input-base w-full !py-1.5 font-mono" />
+            <input v-model.trim="coreForm.sha256" placeholder="选择版本后自动填写；也可粘贴官方公布的摘要" class="form-input-base w-full !py-1.5 font-mono" />
+            <p v-if="releaseDigestNote(corePicker, coreForm)" class="text-xs mt-1" :class="coreForm.sha256 && coreForm.url ? 'text-ios-tertiary' : 'text-ios-orange'">{{ releaseDigestNote(corePicker, coreForm) }}</p>
           </div>
         </div>
       </div>
@@ -1168,6 +1199,7 @@ import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupport
 import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
 import { agentUpdatesAPI } from '../agentUpdatesApi';
 import { coreUpdatesAPI, type CoreRemoveTask, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
+import { coreReleasesAPI, defaultCoreSource, deriveAssetURL, DIGEST_SOURCE_LABELS, nodeArchitecture, nodeUsesMusl, pickAsset, quiSourceAllowed, type CoreRelease, type CoreReleaseAsset, type CoreSource } from '../coreReleases';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
@@ -1285,20 +1317,12 @@ const batchAgentConfirmMessage = computed(() => {
 // ========================================================
 // CORE PRESETS & DATA STRUCTURES
 // ========================================================
-// A preset only fills the version and the official asset URL for the node's
-// architecture. The SHA-256 is never prefilled: the Owner must paste the digest
-// published by the vendor, otherwise the Agent refuses to install.
-interface CorePreset {
-  version: string;
-  label: string;
-  amd64Url: string;
-  // Empty when the release has no arm64 asset at all (the pinned GOST archive).
-  arm64Url: string;
-  // Only a reviewed pin carries its own archive digest; every other core's digest
-  // is pasted by the Owner from the vendor's published checksums.
-  sha256?: string;
-}
-
+// The add and upgrade dialogs list the newest stable releases of the chosen core
+// and source from GET /api/v1/core-releases (see ../coreReleases.ts): picking one
+// fills the version, the official asset URL for the server's architecture and C
+// library, and the digest the vendor published for that asset. The panel never
+// computes a digest; an asset without a published one leaves the field empty
+// for the Owner to paste, and every value stays editable.
 export interface InstalledCoreInfo {
   component: CoreName;
   name: string;
@@ -1309,49 +1333,6 @@ export interface InstalledCoreInfo {
   protocols: string[];
   primary: boolean;
 }
-
-const CORE_PRESETS: Record<string, CorePreset[]> = {
-  xray: [
-    {
-      version: '25.10.15',
-      label: 'v25.10.15 (版本辅助)',
-      amd64Url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
-      arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-arm64-v8a.zip'
-    },
-    {
-      version: '26.3.27',
-      label: 'v26.3.27 (版本辅助)',
-      amd64Url: 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip',
-      arm64Url: 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-arm64-v8a.zip'
-    }
-  ],
-  'sing-box': [
-    {
-      version: '1.10.7',
-      label: 'v1.10.7 (版本辅助)',
-      amd64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.10.7/sing-box-1.10.7-linux-amd64.tar.gz',
-      arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.10.7/sing-box-1.10.7-linux-arm64.tar.gz'
-    },
-    {
-      version: '1.11.0',
-      label: 'v1.11.0 (版本辅助)',
-      amd64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz',
-      arm64Url: 'https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-arm64.tar.gz'
-    }
-  ],
-  // GOST is a reviewed pin (docs/v1.3-design-gost.md 3.1): exactly one official
-  // archive, one version and one archive digest. The panel and the Agent both
-  // refuse any other combination, so the digest travels with the preset.
-  gost: [
-    {
-      version: '3.3.2',
-      label: 'v3.3.2 (固定版本)',
-      amd64Url: 'https://github.com/go-gost/gost/releases/download/v3.3.2/gost_3.3.2_linux_amd64.tar.gz',
-      arm64Url: '',
-      sha256: '162feb43b1c284dbea599cdfe898169931af875233060dedc19432c7a9d18274'
-    }
-  ]
-};
 
 // ========================================================
 // MULTI-CORE INSTALLED STATE MANAGEMENT
@@ -1642,62 +1623,101 @@ function openCoreManagementModal(node: NodeView) {
 // Add Core Form State inside Management Modal
 const addCoreForm = reactive({
   component: 'xray' as CoreName,
-  version: '25.10.15',
-  url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
+  version: '',
+  url: '',
   sha256: ''
-});
-
-const addCorePresets = computed(() => {
-  return CORE_PRESETS[addCoreForm.component] || [];
 });
 
 const addCoreBusy = ref(false);
 
-// A preset fills version and official URL for the node's architecture, plus the
-// reviewed digest when the release is a pin (GOST). A release without an asset
-// for this architecture is refused instead of guessing one.
-function applyPreset(form: { version: string; url: string; sha256: string }, preset: CorePreset, node: NodeView | null) {
-  form.sha256 = preset.sha256 || ''; form.url = '';
-  form.version = preset.version;
-  const arch = detectArch(node);
-  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
-  const isArm = arch === 'arm64';
-  const url = isArm ? preset.arm64Url : preset.amd64Url;
-  if (!url) { showToast(`该版本只提供 linux/amd64 资产，不支持此服务器的 ${arch} 架构`, 'warning'); return; }
-  form.url = url;
+// One release picker per dialog: the releases of the chosen core and source, the
+// release the Owner picked and the URL/digest it filled in. When the Owner edits
+// the version, URL or digest afterwards the form is "manual" and is submitted as
+// typed; the digest note then no longer claims a source.
+interface ReleasePicker {
+  source: CoreSource;
+  items: CoreRelease[];
+  state: 'idle' | 'loading' | 'ready' | 'failed';
+  selected: CoreRelease | null;
+  autoURL: string;
+  autoSHA: string;
+  digestSource: CoreReleaseAsset['digestSource'];
+  generation: number;
+}
+type CoreFormFields = { component: CoreName; version: string; url: string; sha256: string };
+function newReleasePicker(): ReleasePicker {
+  return reactive<ReleasePicker>({ source: 'official', items: [], state: 'idle', selected: null, autoURL: '', autoSHA: '', digestSource: '', generation: 0 }) as ReleasePicker;
+}
+const addCorePicker = newReleasePicker();
+
+async function loadCoreReleases(picker: ReleasePicker, form: CoreFormFields, node: NodeView | null, refresh = false) {
+  const current = ++picker.generation;
+  picker.state = 'loading'; picker.items = []; picker.selected = null; picker.digestSource = '';
+  try {
+    const list = await coreReleasesAPI.list(form.component, picker.source, refresh);
+    if (current !== picker.generation) return;
+    picker.items = list.items;
+    picker.state = 'ready';
+    if (list.items.length) applyCoreRelease(picker, form, list.items[0], node, true);
+  } catch {
+    if (current === picker.generation) picker.state = 'failed';
+  }
 }
 
-function applyAddCorePreset(preset: CorePreset) {
-  applyPreset(addCoreForm, preset, coreManagementTargetNode.value);
+// applyCoreRelease fills the form from one release for one server. A release
+// without an archive for the server's architecture or C library fills no URL and
+// no digest instead of guessing one.
+function applyCoreRelease(picker: ReleasePicker, form: CoreFormFields, item: CoreRelease, node: NodeView | null, quiet = false) {
+  picker.selected = item;
+  form.version = item.version;
+  const asset = pickAsset(item, node);
+  form.url = asset?.url ?? '';
+  form.sha256 = asset?.sha256 ?? '';
+  picker.autoURL = form.url; picker.autoSHA = form.sha256;
+  picker.digestSource = asset?.sha256 ? asset.digestSource : '';
+  if (!asset && node && !quiet) {
+    showToast(`v${item.version} 没有适用于「${node.name}」（${nodeArchitecture(node) || '架构未知'}${nodeUsesMusl(node) ? '，musl' : ''}）的文件`, 'warning');
+  }
 }
 
-function autoFillAddCoreURL() {
-  if (addCoreForm.component === 'gost') {
-    // One reviewed release: the pinned asset decides the version too.
-    applyAddCorePreset(CORE_PRESETS.gost[0]);
-    return;
-  }
-  const v = addCoreForm.version || (addCoreForm.component === 'xray' ? '25.10.15' : '1.10.7');
-  const arch = detectArch(coreManagementTargetNode.value);
-  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
-  const isArm = arch === 'arm64';
-  if (addCoreForm.component === 'xray') {
-    const asset = isArm ? 'Xray-linux-arm64-v8a.zip' : 'Xray-linux-64.zip';
-    addCoreForm.url = `https://github.com/XTLS/Xray-core/releases/download/v${v}/${asset}`;
-  } else {
-    const asset = isArm ? `sing-box-${v}-linux-arm64.tar.gz` : `sing-box-${v}-linux-amd64.tar.gz`;
-    addCoreForm.url = `https://github.com/SagerNet/sing-box/releases/download/v${v}/${asset}`;
-  }
+function releaseFormManual(picker: ReleasePicker, form: CoreFormFields): boolean {
+  return !picker.selected || form.version !== picker.selected.version || form.url !== picker.autoURL || form.sha256 !== picker.autoSHA;
+}
+
+function releaseDigestNote(picker: ReleasePicker, form: CoreFormFields): string {
+  if (!picker.selected || releaseFormManual(picker, form)) return '';
+  if (!form.url) return '该版本没有适用于这台服务器的文件，请换一个版本或手动填写。';
+  if (!form.sha256) return '该文件没有可用的官方摘要（缺失或两处公布的值不一致），请从官方发布页核对后手动粘贴。';
+  return `摘要已自动填写，来源：${DIGEST_SOURCE_LABELS[picker.digestSource]}；节点下载后仍会逐字节核对。`;
+}
+
+// Typing a version drops the picked release, its digest and the URL it filled:
+// the URL is rebuilt from the official naming rule where one exists, and cleared
+// where it cannot be derived (the qui build lives under a panel release tag and
+// GOST is one pinned archive), so a hand-typed version never keeps a URL and a
+// digest that belong to a different release.
+function onReleaseVersionInput(picker: ReleasePicker, form: CoreFormFields, node: NodeView | null) {
+  picker.selected = null; picker.digestSource = '';
+  form.sha256 = '';
+  form.url = deriveAssetURL(form.component, picker.source, form.version, node);
+}
+
+function onAddCoreVersionInput() {
+  onReleaseVersionInput(addCorePicker, addCoreForm, coreManagementTargetNode.value);
+}
+
+function setAddCoreSource(source: CoreSource) {
+  if (addCorePicker.source === source) return;
+  addCorePicker.source = source;
+  addCoreForm.version = ''; addCoreForm.url = ''; addCoreForm.sha256 = '';
+  void loadCoreReleases(addCorePicker, addCoreForm, coreManagementTargetNode.value);
 }
 
 function selectAddCoreComp(comp: CoreName) {
   addCoreForm.component = comp;
-  const presets = CORE_PRESETS[comp] || [];
-  if (presets.length > 0) {
-    applyAddCorePreset(presets[0]);
-  } else {
-    autoFillAddCoreURL();
-  }
+  addCoreForm.version = ''; addCoreForm.url = ''; addCoreForm.sha256 = '';
+  addCorePicker.source = defaultCoreSource(comp, coreManagementTargetNode.value);
+  void loadCoreReleases(addCorePicker, addCoreForm, coreManagementTargetNode.value);
 }
 
 function onAddCoreCompChange() {
@@ -1722,7 +1742,7 @@ async function submitAddNewCore() {
   }
 
   if (!addCoreForm.version || !addCoreForm.url || !/^[a-f0-9]{64}$/i.test(addCoreForm.sha256)) {
-    showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和（摘要不会自动填充，请粘贴官方发布的摘要）', 'warning');
+    showToast('请先选择一个版本；没有自动填好的项（地址或 SHA-256 摘要）请从官方发布页核对后手动填写', 'warning');
     return;
   }
 
@@ -1757,22 +1777,32 @@ function triggerCoreUpgradeFromModal(core: InstalledCoreInfo) {
 // ========================================================
 // CORE UPGRADE MODAL (升级内核)
 // ========================================================
-const currentCorePresets = computed(() => {
-  return CORE_PRESETS[coreForm.component] || [];
-});
+const corePicker = newReleasePicker();
 
-function applyCorePreset(preset: CorePreset) {
-  applyPreset(coreForm, preset, coreDialogTargetNode.value);
-}
+// The server the upgrade form shows a URL for: the single target, or in a batch
+// the first server that runs the component. A batch submits each server's own
+// archive (pickAsset) unless the Owner edited the form by hand.
+const coreDisplayNode = computed<NodeView | null>(() => coreDialogTargetNode.value ?? coreBatchTargets.value[0] ?? null);
+const coreBatchArchitectures = computed(() => new Set(coreBatchTargets.value.map(node => `${nodeArchitecture(node)}${nodeUsesMusl(node) ? '/musl' : ''}`)).size);
+// The qui build is offered only when every server the form targets accepts it.
+const coreQuiAllowed = computed(() => {
+  const targets = coreDialogTargetNode.value ? [coreDialogTargetNode.value] : coreBatchTargets.value;
+  return targets.length > 0 && targets.every(node => quiSourceAllowed(node));
+});
 
 function selectCoreComponent(comp: CoreName) {
   coreForm.component = comp;
-  const presets = CORE_PRESETS[comp] || [];
-  if (presets.length > 0) {
-    applyCorePreset(presets[0]);
-  } else {
-    autoFillCoreURL();
-  }
+  coreForm.version = ''; coreForm.url = ''; coreForm.sha256 = '';
+  const source = defaultCoreSource(comp, coreDisplayNode.value);
+  corePicker.source = source === 'qui' && !coreQuiAllowed.value ? 'official' : source;
+  void loadCoreReleases(corePicker, coreForm, coreDisplayNode.value);
+}
+
+function setCoreSource(source: CoreSource) {
+  if (corePicker.source === source) return;
+  corePicker.source = source;
+  coreForm.version = ''; coreForm.url = ''; coreForm.sha256 = '';
+  void loadCoreReleases(corePicker, coreForm, coreDisplayNode.value);
 }
 
 const coreDialogVisible = ref(false);
@@ -1828,21 +1858,21 @@ const coreDialogTitle = computed(() => {
 
 const coreDialogDescription = computed(() => {
   if (!coreDialogTargetNode.value) {
-    return `按内核分别升级：将对 ${coreBatchTargets.value.length} 台已运行 ${coreForm.component} 的在线服务器下发同一个版本与摘要。`;
+    return `按内核分别升级：将对 ${coreBatchTargets.value.length} 台已运行 ${coreForm.component} 的在线服务器下发同一个版本，每台按自身架构使用对应文件与摘要。`;
   }
-  return '配置目标内核版本、官方下载地址与校验和。Agent 将进行 SHA-256 校验，切换可能中断连接，结果以节点回执为准。';
+  return '选择目标版本，官方下载地址与摘要会自动填写。Agent 将进行 SHA-256 校验，切换可能中断连接，结果以节点回执为准。';
 });
 
 const coreDialogConfirmText = computed(() => {
   return '确认升级';
 });
 
-// Nothing about cores is kept in browser storage: the form starts empty and the
-// digest is always pasted by the Owner.
+// Nothing about cores is kept in browser storage: the form starts empty and is
+// filled from the release the Owner picks (or typed by hand).
 const coreForm = reactive({
   component: 'xray' as CoreName,
-  version: '25.10.15',
-  url: 'https://github.com/XTLS/Xray-core/releases/download/v25.10.15/Xray-linux-64.zip',
+  version: '',
+  url: '',
   sha256: ''
 });
 
@@ -1851,27 +1881,7 @@ function onCoreComponentChange() {
 }
 
 function onCoreVersionInput() {
-  coreForm.sha256 = '';
-  autoFillCoreURL();
-}
-
-function autoFillCoreURL() {
-  if (coreForm.component === 'gost') {
-    // One reviewed release: the pinned asset decides the version too.
-    applyCorePreset(CORE_PRESETS.gost[0]);
-    return;
-  }
-  const v = coreForm.version || '26.3.27';
-  const arch = detectArch(coreDialogTargetNode.value);
-  if (!arch) { showToast('架构未知，请手动填写匹配平台的下载地址', 'info'); return; }
-  const isArm = arch === 'arm64';
-  if (coreForm.component === 'xray') {
-    const asset = isArm ? 'Xray-linux-arm64-v8a.zip' : 'Xray-linux-64.zip';
-    coreForm.url = `https://github.com/XTLS/Xray-core/releases/download/v${v}/${asset}`;
-  } else {
-    const asset = isArm ? `sing-box-${v}-linux-arm64.tar.gz` : `sing-box-${v}-linux-amd64.tar.gz`;
-    coreForm.url = `https://github.com/SagerNet/sing-box/releases/download/v${v}/${asset}`;
-  }
+  onReleaseVersionInput(corePicker, coreForm, coreDisplayNode.value);
 }
 
 // Open Core Upgrade Modal for a specific node (defaults to its primary core)
@@ -2026,7 +2036,7 @@ async function executeBatchAgentUpgrade() {
 async function submitCoreAction() {
   if (!isOwner.value) return;
   if (!coreForm.version || !coreForm.url || !coreForm.sha256) {
-    showToast('请完整填写版本号、官方发布地址和 64 位 SHA-256 校验和（摘要不会自动填充，请粘贴官方发布的摘要）', 'warning');
+    showToast('请先选择一个版本；没有自动填好的项（地址或 SHA-256 摘要）请从官方发布页核对后手动填写', 'warning');
     return;
   }
   if (!/^[a-f0-9]{64}$/i.test(coreForm.sha256)) {
@@ -2057,18 +2067,27 @@ async function submitCoreAction() {
         return;
       }
 
+      // A picked release resolves each server's own archive and digest; a form
+      // the Owner edited by hand is sent unchanged to every server, as before.
+      const perNode = !releaseFormManual(corePicker, coreForm) ? corePicker.selected : null;
       let success = 0;
       let failed = 0;
       for (const node of targets) {
         try {
           requireCoreTarget(node, coreForm.component);
+          let url = coreForm.url, sha256 = coreForm.sha256;
+          if (perNode) {
+            const asset = pickAsset(perNode, node);
+            if (!asset || !asset.sha256) throw new Error(`v${perNode.version} 没有适用于这台服务器（${nodeArchitecture(node) || '架构未知'}${nodeUsesMusl(node) ? '，musl' : ''}）且带官方摘要的文件，已跳过`);
+            url = asset.url; sha256 = asset.sha256;
+          }
           await coreUpdatesAPI.queue({
             nodeId: node.id,
             revision: node.heartbeat!.current_revision!,
             component: coreForm.component,
             version: coreForm.version,
-            url: coreForm.url,
-            sha256: coreForm.sha256
+            url,
+            sha256
           });
           success++;
         } catch (e) {

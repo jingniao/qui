@@ -1273,7 +1273,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 
 新增能力通过既有模块接口扩展，不修改已应用迁移。
 
-日常改动用 `bash scripts/quick-check.sh` 按改动文件裁剪检查（Markdown 只查 CR/BOM；`web/**` 跑类型检查、构建与全部 `web/scripts/*-selftest.mjs`；`deploy/**`、`scripts/*.sh` 跑 `bash -n` 与相关 `deploy/linux/tests/*.sh`，并对 git 模式不是 `100755` 的脚本告警；Go 跑改动包及其模块内依赖包的 vet/test，Windows 带 `-p 1`；agent／proto／pkg／contracts 与真实核相关包跑真实核测试；`migrations/**`、`.github/**` 要求完整门禁）。完整的 Linux 门禁（`scripts/check.sh` ＋ 真实核套件）每个版本在推送到 `main` 的发布提交上跑一次，并与同一 SHA 的 GitHub `check` 并行，两者都通过才打 tag。GitHub `check` 仍按发布手动派发（另有每周运行），`cores` 只在每周或派发 `cores=true` 时运行真实核任务，`v*` 标签只构建发布且要求同 SHA 已有成功 `check`；选包、执行命令与依赖见[部署与升级](docs/deployment.md) §2。
+日常改动用 `bash scripts/quick-check.sh` 按改动文件裁剪检查（Markdown 只查 CR/BOM；`web/**` 跑类型检查、构建与全部 `web/scripts/*-selftest.mjs`；`deploy/**`、`scripts/*.sh` 跑 `bash -n` 与相关 `deploy/linux/tests/*.sh`，并对 git 模式不是 `100755` 的脚本告警；Go 跑改动包及其模块内依赖包的 vet/test，Windows 带 `-p 1`；agent／proto／pkg／contracts 与真实核相关包跑真实核测试；`migrations/**`、`.github/**` 要求完整门禁）。完整的 Linux 门禁（`scripts/check.sh` ＋ 真实核套件）每个版本在推送到 `main` 的发布提交上跑一次，并与同一 SHA 的 GitHub `check` 并行，两者都通过才打 tag。自上一个 `v*` 标签以来只改了 `web/**`（不含 `.go`）、`docs/**` 与根目录 `*.md` 的纯前端补丁，由 `scripts/gate-scope.sh` 判为 `web`，两条门禁只跑前端构建／自测与面板嵌入核对，跳过 Go `-race`、部署脚本测试与真实核（Owner 2026-11-09 批准）；其他改动或无法判定时一律完整门禁，`QUI_GATE_SCOPE=full`／派发 `full_gate=true` 可强制，每周 GitHub `check` 始终完整。GitHub `check` 仍按发布手动派发（另有每周运行），`cores` 只在每周或派发 `cores=true` 时运行真实核任务，`v*` 标签只构建发布且要求同 SHA 已有成功 `check`；选包、执行命令与依赖见[部署与升级](docs/deployment.md) §2。
 
 # 33. 测试要求
 

@@ -11,6 +11,10 @@ name: Check
 # gate already ran it. A push of a v* tag runs only `release`: it does not repeat
 # the gate but requires that an earlier run already passed `check` on exactly
 # that commit, then builds the archives and publishes them as a GitHub release.
+# A release commit that changed only web/ (no Go file) and docs/ since the
+# previous release tag runs the shorter web gate in `check` (frontend build,
+# self-tests and an embed check of the panel binary); the weekly run always runs
+# the whole gate.
 on:
   push:
     tags: ['v*']
@@ -18,6 +22,10 @@ on:
     inputs:
       cores:
         description: 'Also run `cores` (official Xray, sing-box, mihomo and the qui sing-box build)'
+        type: boolean
+        default: false
+      full_gate:
+        description: 'Run the whole gate even when only web/ and docs/ changed since the previous release'
         type: boolean
         default: false
   schedule:
@@ -34,7 +42,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      # The full history and tags let scripts/gate-scope.sh compare this commit
+      # with the previous release tag; a shallow clone would always answer `full`.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -43,7 +55,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # A dispatch on a release commit that changed only web/ and docs/ since the
+      # previous release runs the shorter web gate (scripts/gate-scope.sh). The
+      # weekly run, and a dispatch with `full_gate`, always run the whole gate.
       - name: Gate
+        env:
+          QUI_GATE_SCOPE: ${{ (github.event_name == 'schedule' || github.event.inputs.full_gate == 'true') && 'full' || '' }}
         run: bash scripts/check.sh
 
 

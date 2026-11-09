@@ -187,6 +187,7 @@ pick_deploy_tests() {
       deploy/linux/update.sh) want[update-test.sh]=1 want[multi-core-test.sh]=1 ;;
       deploy/linux/node-install.sh) want[node-install-test.sh]=1 ;;
       deploy/linux/panel-update-request.sh) want[panel-update-helper-test.sh]=1 ;;
+      scripts/gate-scope.sh) want[gate-scope-test.sh]=1 ;;
       deploy/systemd/proxy-panel-update.*) want[panel-install-test.sh]=1 want[multi-core-test.sh]=1 ;;
       deploy/systemd/proxy-agent-host-network.* | deploy/openrc/host-network-watch) want[host-network-test.sh]=1 ;;
       *tuning*) want[tuning-helper-test.sh]=1 ;;

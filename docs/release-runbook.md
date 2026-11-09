@@ -65,24 +65,34 @@ Go 工具链可用仓库内的 `.tools/go/bin/go.exe`（设 `GOTOOLCHAIN=local`�
 
 本地完整门禁 = `bash scripts/check.sh`（约 31–36 分钟，含 `go test -race`、前端构建/自测、部署脚本测试）+ 真实核套件（约 9–11 分钟）。命令见[部署与升级](deployment.md)第 2 节。门禁在 Linux 测试机上跑，**不能用 Windows 上的本地测试替代**。
 
+**纯前端补丁走短门禁（Owner 2026-11-09 批准）：** 发布提交与上一个 `v*` 标签相比，只改了 `web/**`（不含任何 `.go` 文件，`web/embed.go` 决定面板嵌入什么）、`docs/**` 与仓库根目录的 `*.md` 时，`scripts/gate-scope.sh` 判为 `web`，两条门禁都自动缩短：
+
+- `scripts/check.sh` 只跑 `npm --prefix web ci`、`npm --prefix web run build`（含类型检查）、`npm run test:time` 与全部前端自测，再构建面板并确认 `web/dist/index.html` 引用的每个资源都已嵌入二进制；跳过 `go vet`、`go test -race`、Agent 构建与部署脚本测试。日志里有 `GATE SCOPE web`。
+- `~/.qui-local/gate.sh` 在开发机上（有 git 历史的地方）用该提交自带的 `scripts/gate-scope.sh` 判定范围，传给测试机，并跳过真实核套件（日志 `PART cores SKIPPED scope=web`）。
+- GitHub `check` 自行判定（检出完整历史），打 tag 前仍要求同 SHA 的 `check` 成功。
+
+判定按“自上一个标签以来的全部改动”累计，不是只看最后一个提交；碰到 Go、`go.mod`、迁移、proto、`deploy/**`、`scripts/**`、`.github/**` 或根目录非 Markdown 文件，或无法判定（没有 git 历史、找不到上一个标签、自上一个标签以来没有改动），一律走完整门禁。要强制完整门禁：本地 `QUI_GATE_SCOPE=full ~/.qui-local/gate.sh <SHA>`，GitHub 派发时设 `full_gate=true`。每周的 GitHub `check` 始终跑完整门禁，兜住前端改动与 Go 之间的冲突。
+
+代价：Go 代码、部署脚本与真实核没有变化，所以不重跑它们；前端改动如果碰巧依赖了尚未发布的后端行为，只在下一次完整门禁（或每周运行）暴露。
+
 Owner 本机已有封装（不在仓库里，接手者若在同一台开发机上可直接用）：
 
 | 命令 | 作用 |
 | --- | --- |
-| `~/.qui-local/gate.sh <SHA>` | 把该提交 `git archive` 到测试机 `/root/qui-gate/<短 SHA>/`，后台依次跑 check 与真实核套件 |
+| `~/.qui-local/gate.sh <SHA>` | 把该提交 `git archive` 到测试机 `/root/qui-gate/<短 SHA>/`，后台依次跑 check 与真实核套件；纯前端补丁只跑短门禁、跳过真实核（见上） |
 | `~/.qui-local/gate-status.sh <短 SHA>` | 查看进度；最后一行 `GATE <sha> PASS total=<秒>` 才算通过 |
 | `~/.qui-local/gate-rerun.sh <短 SHA>` | 只重跑上次失败的那些包（第 4.2 节） |
 | `~/.qui-local/r.sh '<命令>'` | 在测试机上执行命令 |
 
 ### 4.1 GitHub `check`（与本地门禁同时启动）
 
-推送后对**要打 tag 的那个 SHA** 派发 `check`（约 21 分钟），它与 `~/.qui-local/gate.sh <SHA>` 同时进行，互不等待。本地没有 `gh` 命令时用 REST API，令牌从 git 凭据读取：
+推送后对**要打 tag 的那个 SHA** 派发 `check`（完整门禁约 21–51 分钟，v1.4.3／v1.4.4 各 51 分钟；纯前端补丁走短门禁），它与 `~/.qui-local/gate.sh <SHA>` 同时进行，互不等待。本地没有 `gh` 命令时用 REST API，令牌从 git 凭据读取：
 
 ```sh
 TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill | sed -n 's/^password=//p')
 curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Accept: application/vnd.github+json' \
   https://api.github.com/repos/jingniao/qui/actions/workflows/check.yml/dispatches \
-  -d '{"ref":"main","inputs":{"cores":false}}'
+  -d '{"ref":"main","inputs":{"cores":false,"full_gate":false}}'
 # 查找本次运行并轮询结果
 curl -fsS -H "Authorization: Bearer $TOKEN" \
   "https://api.github.com/repos/jingniao/qui/actions/workflows/check.yml/runs?head_sha=$(git rev-parse HEAD)&per_page=5"
@@ -169,11 +179,12 @@ tag 推送触发 `release` 任务：先确认同 SHA 有成功的 `check`，再�
 | --- | --- |
 | 日常裁剪检查（`bash scripts/quick-check.sh`） | 2–10 分钟 |
 | 本地完整门禁（`scripts/check.sh` ＋ 真实核套件） | 15–47 分钟 |
-| GitHub `check` | 约 21 分钟，与本地门禁并行，不额外占用时间 |
+| GitHub `check` | 完整门禁约 21–51 分钟，与本地门禁并行，不额外占用时间 |
+| 纯前端补丁的两条短门禁（第 4 节） | 预计约 5–10 分钟（尚无实测记录） |
 | `release` 构建 | 几分钟 |
 | 生产升级（面板 ＋ 逐台 Agent） | 逐台约 1 分钟，视节点数 |
 
-小范围面板／前端修复从“改动完成”到“版本发布”，约 40 分钟：裁剪检查 ＋ 一次完整门禁（GitHub `check` 并行）。
+涉及 Go 的小范围修复从“改动完成”到“版本发布”约 1 小时：裁剪检查 ＋ 一次完整门禁（GitHub `check` 并行，常是最慢的一环）。纯前端补丁走短门禁，预计约 15–20 分钟（含 `release` 构建与网页更新面板；首次实测后在此更新）。
 
 ## 9. 接手时的检查清单
 

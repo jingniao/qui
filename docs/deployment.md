@@ -120,7 +120,9 @@ bash scripts/ci-real-core-test.sh -p 4 -count=1 -timeout 60m $(scripts/real-core
 
 选包脚本从测试源码中的 `XRAY_BINARY`、`SINGBOX_BINARY`、`MIHOMO_BINARY`、`MIHOMO_HOME`、`GOST_BINARY` 自动选出当前 8 个包；缺核心导致的跳过不算通过。不要给全量 race 门禁加 `-p 1`。
 
-GitHub Actions `check` 对每个发布提交手动派发（约 21 分钟），另每周运行；`cores` 只在每周或手动输入 `cores=true` 时运行。`v*` 标签只构建发布，并要求同 SHA 已有成功 `check`。qui sing-box 可复现构建按构建脚本摘要缓存。入口以 `.github/workflows/check.yml` 和 `scripts/` 为准，历史耗时见[变更记录](changelog.md)。
+**纯前端补丁的短门禁：** 发布提交与上一个 `v*` 标签相比只改了 `web/**`（不含 `.go`）、`docs/**` 与根目录 `*.md` 时，`scripts/gate-scope.sh` 输出 `web`，`scripts/check.sh` 只跑前端依赖安装、构建（含类型检查）、`test:time`、全部前端自测，再构建面板并核对 `web/dist/index.html` 引用的资源都已嵌入，跳过 `go vet`、`go test -race`、Agent 构建与部署脚本测试；本地封装同时跳过真实核套件。其他任何改动或无法判定时输出 `full`。`QUI_GATE_SCOPE=full` 强制完整门禁（GitHub 每周运行固定设置，手动派发可勾选 `full_gate`）；没有 git 历史的目录（如 `git archive` 解包）判为 `full`，除非调用方像 `~/.qui-local/gate.sh` 那样在有历史处算好后传入 `QUI_GATE_SCOPE=web`。规则与测试见 `scripts/gate-scope.sh`、`deploy/linux/tests/gate-scope-test.sh`。
+
+GitHub Actions `check` 对每个发布提交手动派发（完整门禁约 21–51 分钟，检出完整历史以判定范围），另每周运行；`cores` 只在每周或手动输入 `cores=true` 时运行。`v*` 标签只构建发布，并要求同 SHA 已有成功 `check`。qui sing-box 可复现构建按构建脚本摘要缓存。入口以 `.github/workflows/check.yml` 和 `scripts/` 为准，历史耗时见[变更记录](changelog.md)。
 
 本地开发（仅开发环境）：
 

@@ -108,6 +108,9 @@ console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated 
 assert.match(read('modules/nodes/installEndpoint.ts'), /settingsAPI\.installEndpoint\(/, 'the install endpoint comes from the settings API');
 assert.match(read('modules/nodes/installEndpoint.ts'), /window\.location\.hostname/, 'the fallback stays the browser address');
 assert.match(read('modules/nodes/installEndpoint.ts'), /saved\.grpcHost/, 'the saved Agent gRPC address is resolved too');
+// A ref stores a reactive proxy, so `enrollment.value !== item` is always true and
+// silently discarded the saved install endpoint in the enrollment dialog.
+assert.doesNotMatch(read('modules/nodes/components/ServerEnrollment.vue'), /enrollment\.value\s*!==\s*item/, 'the enrollment dialog must not compare the reactive ref with the raw enrollment');
 for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/nodes/components/NodeRecoveryPanel.vue', 'modules/system/components/NodeVersionPanel.vue']) {
   const source = read(file);
   assert.match(source, /resolveInstallEndpoint\(/, file + ' must default to the saved install endpoint');

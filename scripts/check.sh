@@ -8,6 +8,10 @@
 # A v* tag does not run it again: the `release` job only builds when an earlier
 # manual or weekly run already passed `check` on exactly that commit.
 #
+# A commit that changes only frontend source and documentation since the previous
+# release tag runs the shorter `web` gate (see "Scope" below and
+# scripts/gate-scope.sh); the weekly run always runs the whole gate.
+#
 # Needs Go (the version in go.mod), Node 22 with npm, and - for the deploy script
 # tests - root or sudo. Nothing here depends on GitHub: GITHUB_ACTIONS=true only
 # adds ::error:: annotations, and RUNNER_TEMP falls back to a temporary directory.
@@ -28,18 +32,43 @@ trap 'if [[ -n $cleanup ]]; then rm -rf -- "$cleanup"; fi' EXIT
 annotate=0
 [[ ${GITHUB_ACTIONS:-} == true ]] && annotate=1
 
-# The deploy script tests activate packaged units, so they need root. The CI
-# runner has sudo; the test machine runs as root and has none.
-if command -v sudo >/dev/null 2>&1; then
-  as_root=(sudo)
-elif ((EUID == 0)); then
-  as_root=()
-else
-  printf 'The deploy script tests need root or sudo.\n' >&2
-  exit 1
-fi
-
 step() { printf '\n== %s\n' "$*"; }
+
+# Scope (scripts/gate-scope.sh): a release that changes only web/ (no Go file) and
+# documentation since the previous release tag runs the `web` gate - the frontend
+# steps below plus a panel build that proves the new assets are embedded - and
+# skips go vet, go test -race, the Agent build and the deploy script tests, whose
+# inputs did not change since the gate of that release. Everything else runs the
+# whole gate. QUI_GATE_SCOPE=full forces the whole gate (the weekly run sets it);
+# QUI_GATE_SCOPE=web is only for a caller that computed the scope itself where git
+# history is available (~/.qui-local/gate.sh streams a git archive, which has none).
+# Without the variable the scope is computed here, and a tree without git history
+# answers `full`.
+scope=${QUI_GATE_SCOPE:-}
+if [[ -z $scope ]]; then
+  scope=$(bash scripts/gate-scope.sh HEAD)
+fi
+case $scope in
+  web | full) ;;
+  *)
+    printf 'QUI_GATE_SCOPE must be web or full, not %s.\n' "$scope" >&2
+    exit 2
+    ;;
+esac
+printf 'GATE SCOPE %s\n' "$scope"
+
+# The deploy script tests activate packaged units, so the whole gate needs root.
+# The CI runner has sudo; the test machine runs as root and has none. The web gate
+# runs no deploy test and needs neither.
+as_root=()
+if [[ $scope == full ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    as_root=(sudo)
+  elif ((EUID != 0)); then
+    printf 'The deploy script tests need root or sudo.\n' >&2
+    exit 1
+  fi
+fi
 
 step 'npm --prefix web ci'
 npm --prefix web ci
@@ -68,6 +97,31 @@ node web/scripts/u1b-selftest.mjs
 node web/scripts/server-detail-selftest.mjs
 node web/scripts/ui-regression-selftest.mjs
 node web/scripts/canvas-library-selftest.mjs
+
+# The web gate ends here: build the panel exactly as a release does (the embed in
+# web/embed.go reads web/dist) and check that every asset index.html references is
+# inside the binary, so a frontend release cannot ship a panel that serves a stale
+# or missing UI. embed.FS stores file names verbatim, so a plain byte search finds
+# them.
+if [[ $scope == web ]]; then
+  step 'build the panel with the new frontend embedded'
+  mkdir -p bin
+  go build -o bin/proxy-panel ./cmd/panel
+  mapfile -t embedded < <(grep -oE 'assets/[A-Za-z0-9._-]+\.(js|css)' web/dist/index.html | sort -u)
+  if ((${#embedded[@]} == 0)); then
+    printf 'web/dist/index.html references no assets/*.js or assets/*.css.\n' >&2
+    exit 1
+  fi
+  for asset in "${embedded[@]}"; do
+    if ! LC_ALL=C grep -aqF -- "${asset#assets/}" bin/proxy-panel; then
+      printf 'bin/proxy-panel does not embed %s from web/dist/index.html.\n' "$asset" >&2
+      exit 1
+    fi
+  done
+  printf 'bin/proxy-panel embeds the %s assets web/dist/index.html references.\n' "${#embedded[@]}"
+  printf '\nGATE SCOPE web: skipped go vet, go test -race, the Agent build and the deploy script tests (no file outside web/ and docs/ changed since the previous release).\n'
+  exit 0
+fi
 
 step 'go vet ./...'
 go vet ./...
@@ -115,7 +169,7 @@ go build -o bin/proxy-agent ./cmd/agent
 # node-install.sh and needs no privileges, so it runs without sudo.
 step 'deploy script checks'
 for script in scripts/build-singbox.sh scripts/build-release.sh scripts/real-core-packages.sh \
-  scripts/ci-real-core-test.sh deploy/linux/*.sh; do bash -n -- "$script"; done
+  scripts/ci-real-core-test.sh scripts/gate-scope.sh deploy/linux/*.sh; do bash -n -- "$script"; done
 for script in deploy/linux/update-recovery.sh deploy/openrc/host-network-watch \
   deploy/openrc/tuning-watch deploy/openrc/proxycontrol-update-recovery; do
   sh -n -- "$script"
@@ -158,3 +212,6 @@ bash -n -- deploy/linux/tests/panel-update-helper-test.sh
 bash deploy/linux/tests/panel-update-helper-test.sh
 bash deploy/linux/tests/multi-core-test.sh
 bash deploy/linux/tests/release-version-test.sh
+# gate-scope-test.sh builds throwaway repositories with release tags and checks
+# which changes scripts/gate-scope.sh lets through the shorter web gate.
+bash deploy/linux/tests/gate-scope-test.sh

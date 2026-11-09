@@ -2,6 +2,10 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
+**未发布（v1.4.4 之后）**
+- 修复：「新增服务器」与「生成安装命令」对话框没有采用 系统设置 → 节点安装连接地址 里保存的面板地址、Web 端口与 Agent gRPC 地址／端口，总是生成浏览器地址与面板实际 gRPC 端口的命令。对话框把 `enrollment.value`（Vue `ref` 里存的是响应式代理）与原始对象比较，永远不相等，读到的设置因此被丢弃；改为按每次打开对话框的序号判断（`web/src/modules/nodes/components/ServerEnrollment.vue`）。原位身份恢复与版本页「添加内核」对话框不受影响。前端自检新增对应检查。
+- 发布流程：纯前端补丁走短门禁。`scripts/gate-scope.sh` 对比上一个 `v*` 标签，只改了 `web/**`（不含 `.go`）、`docs/**` 与根目录 `*.md` 时判为 `web`：`scripts/check.sh` 只跑前端构建／自检并核对面板二进制已嵌入新资源，本地门禁封装跳过真实核套件；其他改动或无法判定时完整门禁，每周 GitHub `check` 始终完整，派发可设 `full_gate`。新增 `deploy/linux/tests/gate-scope-test.sh`（17 项）。见[发布流程手册](release-runbook.md)第 4 节与[项目说明书](../AGENTS.md) §32。
+
 **v1.4.4（2026-11-08，tag `v1.4.4` → `67c9fb0`，无迁移，迁移头仍 0134）**：面板可在网页里更新自己；节点安装器在 CDN 或终止 TLS 的反向代理后固定面板证书；面板回滚不再因停用更新单元失败而中断。见[发布说明](release-notes-1.4.4.md)。
 - 面板网页更新：「系统管理 → 系统设置 → 系统信息」顶部新增 Owner 专用「面板更新」卡片，显示当前版本与 GitHub 最新正式发布（`api.github.com/repos/jingniao/qui/releases/latest`，忽略草稿与预发布，缓存 10 分钟，「检查更新」强制刷新），只有存在更新的正式版时才出现「更新到 vX.Y.Z」。只能安装最新正式版，没有版本选择、降级与 rc；开发/候选版面板（`dev_build`）与没有 helper 目录的面板（`helper_missing`，卡片提示先在服务器上跑一次 `qui-update --component panel`）不支持。
 - 接口：`GET /api/v1/system/panel-update`（Owner，`?refresh=1` 跳过缓存）与 `POST /api/v1/system/panel-update`（Owner＋CSRF，体 `{version}`，202 `{requestId,version}`；400 `invalid_request`、409 `panel_update_unsupported`／`panel_update_busy`／`panel_update_stale`、502 `panel_update_check_failed`），写成功记操作日志「更新面板」（target `panel`）。`pending.stalled`（请求超过 10 分钟未被应答）与 `status.interrupted`（running 超过 35 分钟，例如更新中主机重启）都允许重新提交。

@@ -68,7 +68,13 @@ const command = computed(() => {
   return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
     grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
 });
+// Each opening of the dialog gets its own number, so a late settings answer for
+// an earlier opening is ignored. This cannot compare `enrollment.value` with
+// `item`: the ref stores a reactive proxy, which is never === the raw object,
+// and that comparison silently dropped the saved endpoint every time.
+let showGeneration = 0;
 function showInstall(item: Enrollment) {
+  const current = ++showGeneration;
   enrollment.value = item;
   // The dialog opens with the browser address immediately, so the command is
   // usable even before the saved endpoint arrives; a saved address then replaces
@@ -82,7 +88,7 @@ function showInstall(item: Enrollment) {
   cores.value = ['xray'];
   installOpen.value = true;
   void resolveInstallEndpoint().then(endpoint => {
-    if (enrollment.value !== item) return;
+    if (current !== showGeneration) return;
     // The gRPC overrides are independent of the Web host/port fields, so they
     // apply even when the Owner already edited those two.
     grpcHost.value = endpoint.grpcHost;

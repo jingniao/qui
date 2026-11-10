@@ -22,7 +22,7 @@
           'absolute bg-ios-red text-white font-bold rounded-full flex items-center justify-center shadow-sm',
           collapsed
             ? 'top-2 right-2 w-2.5 h-2.5 ring-2 ring-white'
-            : '-top-1 -right-1 min-w-[1.125rem] h-[1.125rem] px-1 text-[10px]'
+            : '-top-1 -right-1 min-w-5 h-5 px-1 text-xs'
         ]"
       >
         <span v-if="!collapsed">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
@@ -41,7 +41,7 @@
       <div class="px-4 py-3 border-b border-black/[0.06] flex items-center justify-between bg-[#F8F8FA]/90 shrink-0">
         <div class="flex items-center gap-2">
           <span class="text-sm font-semibold text-ios-label">通知中心</span>
-          <span v-if="unreadCount > 0" class="px-1.5 py-0.5 text-[11px] font-medium bg-ios-red/10 text-ios-red rounded-full">
+          <span v-if="unreadCount > 0" class="px-1.5 py-0.5 text-xs font-medium bg-ios-red/10 text-ios-red rounded-full">
             {{ unreadCount }} 条未读
           </span>
         </div>
@@ -101,7 +101,7 @@
             <div class="flex items-center gap-1.5 min-w-0">
               <span
                 :class="[
-                  'px-1.5 py-0.5 text-[10px] font-semibold rounded shrink-0',
+                  'px-1.5 py-0.5 text-xs font-semibold rounded shrink-0',
                   badgeClass(item.severity)
                 ]"
               >
@@ -109,7 +109,7 @@
               </span>
               <span class="text-xs font-semibold text-ios-label truncate">{{ item.title }}</span>
             </div>
-            <span class="text-[11px] text-ios-tertiary shrink-0">{{ formatTimeDisplay(item.at) }}</span>
+            <span class="text-xs text-ios-tertiary shrink-0">{{ formatTimeDisplay(item.at) }}</span>
           </div>
 
           <p class="text-xs text-ios-secondary break-words leading-relaxed pl-0.5">
@@ -120,7 +120,7 @@
             <button
               type="button"
               @click="goToNode(item.nodeId)"
-              class="text-[11px] text-ios-blue hover:text-blue-700 flex items-center gap-0.5"
+              class="text-xs text-ios-blue hover:text-blue-700 flex items-center gap-0.5"
             >
               查看节点 &rarr;
             </button>

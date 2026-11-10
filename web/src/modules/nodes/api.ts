@@ -161,14 +161,14 @@ export interface HostInfo {
   qdiscAvailable?: string[];
   qdiscLoadable?: string[];
   sysctlSources?: { key: string; file: string; value: string }[];
-  agentLimits?: { fdCur: number; fdMax: number };
+  fdLimits?: { name: string; soft: string | number; hard: string | number }[];
   tuning_keys?: { key: string; present: boolean; writable: boolean }[];
   congestion_available?: string[];
   congestion_loadable?: string[];
   qdisc_available?: string[];
   qdisc_loadable?: string[];
   sysctl_sources?: { key: string; file: string; value: string }[];
-  agent_limits?: { fd_cur: number; fd_max: number };
+  fd_limits?: { name: string; soft: string | number; hard: string | number }[];
 }
 
 export interface RecommendationItem {

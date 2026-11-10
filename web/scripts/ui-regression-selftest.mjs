@@ -698,3 +698,20 @@ assert.match(nodesApiP2, /panel_catalogue_supported\?:\s*boolean/, 'NodeView cap
 assert.match(nodesApiP2, /agentReleases/, 'nodeAPI exposes agentReleases');
 assert.match(nodesApiP2, /importAgentRelease/, 'nodeAPI exposes importAgentRelease');
 console.log('PASS P2 AGENT: one-click signed Agent upgrade and capability check');
+
+// A13: the chosen release must match both version and platform.
+const releaseFinderSource = nodeVersionPanel.slice(nodeVersionPanel.indexOf('function findAgentReleaseForNode('), nodeVersionPanel.indexOf('async function selectAgentVersionForUpgrade('));
+const releaseFinderJs = ts.transpileModule(releaseFinderSource, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const findRelease = new Function('nodePlatform', releaseFinderJs + '\nreturn findAgentReleaseForNode;')(node => node.platform);
+const release = (version, architecture = 'amd64', component = 'proxy-agent') => ({ signed: { manifest: { version, architecture, component, os: 'linux' } } });
+const wrong = release('1.4.6'), correct = release('1.5.0');
+assert.equal(findRelease({ platform: 'linux/amd64' }, '1.5.0', [wrong]), undefined);
+assert.equal(findRelease({ platform: 'linux/amd64' }, '1.5.0', [wrong, release('1.5.0', 'arm64'), correct]), correct);
+assert.equal(findRelease({}, '1.5.0', [correct]), undefined);
+assert.equal(findRelease({ platform: 'linux/amd64' }, '1.5.0', [release('1.5.0', 'amd64', 'proxy-panel')]), undefined);
+for (const file of ['components/NotificationBell.vue', 'modules/routing/pages/ClientPolicyPage.vue', 'modules/system/components/NotificationSettings.vue']) {
+  for (const match of read(file).matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)) {
+    assert.ok(Number(match[1]) >= 12, file + ' must not contain an arbitrary font size below 12px');
+  }
+}
+console.log('PASS AUDIT A13/FONTS: exact release version/platform, notifications and external rule sources use at least 12px');

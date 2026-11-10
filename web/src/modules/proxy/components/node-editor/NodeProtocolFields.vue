@@ -260,14 +260,21 @@ const choices = computed(() => matches.value ? certificateChoices(matches.value,
 const lookupDomain = computed(() => (s.value.server_name || '').trim());
 let lookupTimer: ReturnType<typeof setTimeout> | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
+let lookupSequence = 0;
+let requestSequence = 0;
 async function findCertificates() {
   if (lookupTimer) { clearTimeout(lookupTimer); lookupTimer = undefined; }
   const domain = lookupDomain.value;
-  if (!domain || !f.value.nodeId) { matches.value = null; choiceKey.value = ''; lookupError.value = ''; return; }
+  const nodeId = f.value.nodeId, sequence = ++lookupSequence;
+  const isCurrent = () => sequence === lookupSequence && domain === lookupDomain.value && nodeId === f.value.nodeId;
+  if (!domain || !nodeId) { matches.value = null; choiceKey.value = ''; lookupError.value = ''; lookupBusy.value = false; return; }
   lookupBusy.value = true; lookupError.value = '';
-  try { matches.value = await findCertificateMatches(f.value.nodeId, domain); }
-  catch { matches.value = null; lookupError.value = '查找证书失败，请稍后重试'; }
-  finally { lookupBusy.value = false; }
+  try {
+    const result = await findCertificateMatches(nodeId, domain);
+    if (isCurrent()) matches.value = result;
+  }
+  catch { if (isCurrent()) { matches.value = null; lookupError.value = '查找证书失败，请稍后重试'; } }
+  finally { if (isCurrent()) lookupBusy.value = false; }
 }
 function scheduleLookup() {
   if (lookupTimer) clearTimeout(lookupTimer);
@@ -283,28 +290,43 @@ function chooseCertificate(index: number) {
 async function requestCertificate() {
   const domain = lookupDomain.value;
   if (!domain) return;
+  const nodeId = f.value.nodeId, sequence = ++requestSequence;
+  const isCurrent = () => sequence === requestSequence && domain === lookupDomain.value && nodeId === f.value.nodeId;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
   requestStatus.value = `正在为 ${domain} 申请证书…`;
   try {
     const created = await certificatesAPI.create([domain], false, '');
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(async () => {
+    if (!isCurrent()) return;
+    const timer = setInterval(async () => {
       try {
         const current = (await certificatesAPI.list()).find(item => item.id === created.id);
-        if (!current) return;
+        if (!current || sequence !== requestSequence) return;
         if (current.status === 'valid') {
-          if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
-          applyCertificateChoice(f.value, { kind: 'acme', certificateId: current.id, label: '' });
-          requestStatus.value = `${domain} 的证书已签发并选中，保存后生效`;
+          clearInterval(timer);
+          if (pollTimer === timer) pollTimer = undefined;
+          if (isCurrent()) {
+            applyCertificateChoice(f.value, { kind: 'acme', certificateId: current.id, label: '' });
+            requestStatus.value = `${domain} 的证书已签发并选中，保存后生效`;
+          } else {
+            requestStatus.value = `${domain} 的证书已签发`;
+          }
         } else if (current.status === 'failed') {
-          if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
-          requestStatus.value = `证书申请失败：${current.lastErrorText || current.lastErrorCode || '未知原因'}`;
+          clearInterval(timer);
+          if (pollTimer === timer) pollTimer = undefined;
+          if (isCurrent()) requestStatus.value = `证书申请失败：${current.lastErrorText || current.lastErrorCode || '未知原因'}`;
         }
       } catch { /* keep polling until the certificate reaches a terminal state */ }
     }, 5000);
-  } catch { requestStatus.value = '证书申请未能发起，请检查 Cloudflare 配置'; }
+    pollTimer = timer;
+  } catch { if (isCurrent()) requestStatus.value = '证书申请未能发起，请检查 Cloudflare 配置'; }
 }
-watch(lookupDomain, () => { matches.value = null; choiceKey.value = ''; requestStatus.value = ''; });
-onUnmounted(() => { if (lookupTimer) clearTimeout(lookupTimer); if (pollTimer) clearInterval(pollTimer); });
+watch([lookupDomain, () => f.value.nodeId], () => {
+  lookupSequence++;
+  matches.value = null; choiceKey.value = ''; requestStatus.value = ''; lookupError.value = ''; lookupBusy.value = false;
+  if (lookupTimer) { clearTimeout(lookupTimer); lookupTimer = undefined; }
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
+}, { flush: 'sync' });
+onUnmounted(() => { lookupSequence++; requestSequence++; if (lookupTimer) clearTimeout(lookupTimer); if (pollTimer) clearInterval(pollTimer); });
 function setSource(event: Event) {
   f.value.tlsSource = (event.target as HTMLSelectElement).value as TLSSource;
   if (f.value.tlsSource === 'acme' && !f.value.certificateId) f.value.certificateId = acmeCertificates.value[0]?.id || '';

@@ -92,8 +92,8 @@ const merged = tuning.applyPreset({ 'net.core.somaxconn': '4096', 'net.ipv4.tcp_
 assert.equal(merged['net.core.somaxconn'], '4096', 'a preset keeps keys it does not name');
 assert.equal(merged['net.ipv4.tcp_congestion_control'], 'bbr');
 assert.deepEqual(tuning.revertedKeys({ 'net.core.somaxconn': '4096' }, { 'net.core.somaxconn': '' }), ['net.core.somaxconn']);
-assert.ok(!tuning.tuningFields[0].choices.includes('bbr3'), 'no algorithm that no server offers');
-console.log('PASS P1 TUNING: presets merge, reverted keys listed, no bbr2/bbr3');
+assert.ok(tuning.tuningFields[0].choices.includes('bbr3'), 'legacy fallback follows the shared contract');
+console.log('PASS P1 TUNING: presets merge, reverted keys listed, contract algorithm fallback');
 
 // P7 Task 7 assertions
 // 1. tuningRequest with available: Set<string>
@@ -158,3 +158,72 @@ const gridSource = readFileSync(new URL('../src/modules/nodes/components/ServerC
 assert.ok(gridSource.includes('tuningAdviceCount'), 'ServerCardGrid must reference tuningAdviceCount');
 
 console.log('PASS P7 TASK 7: tuningRequest available filter, keyStatus 5 states, algorithmOptions, applyAdvice, 4 presets with LXC filter, 19 fields with help, ServerCardGrid badge');
+
+// A06: observed/source TCP vectors represent the maximum submitted by the panel.
+for (const key of ['net.ipv4.tcp_rmem', 'net.ipv4.tcp_wmem']) {
+  const current = { [key]: '4096 131072 8388608' };
+  assert.equal(tuning.keyStatus(key, { current, desired: { [key]: '8388608' } }, {}), 'panel');
+  assert.equal(tuning.keyStatus(key, { current, desired: { [key]: '16777216' } }, {}), 'drift');
+  for (const value of ['4096 131072 8388608', '8388608']) {
+    const host = { sysctlSources: [{ key, file: '50-external.conf', value }] };
+    assert.equal(tuning.keyStatus(key, { current }, host), 'external');
+    const adopted = tuning.adoptExternal({}, { current }, host);
+    assert.equal(adopted[key], '8388608');
+    assert.equal(tuning.tuningRequest('n', adopted).settings[key], '8388608');
+  }
+}
+
+// Execute the component's actual host-derived computed values with fixture data.
+const tuningSfc = readFileSync(new URL('../src/modules/nodes/components/detail/ServerTuning.vue', import.meta.url), 'utf8');
+const hostComputeds = tuningSfc.slice(tuningSfc.indexOf('const hostInfo ='), tuningSfc.indexOf('const essentialFields ='));
+const hostJs = ts.transpileModule(hostComputeds, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const { computed } = await import('vue');
+function tuningHost(host) {
+  return new Function('computed', 'props', hostJs + '\nreturn { availableKeys: availableKeys.value, fdLimits: fdLimits.value };')(computed, { node: { capabilities: { host } } });
+}
+const cc = 'net.ipv4.tcp_congestion_control', qdisc = 'net.core.default_qdisc', rmem = 'net.core.rmem_max';
+const restricted = { tuningKeys: [
+  { key: cc, present: true, writable: true }, { key: qdisc, present: true, writable: true },
+  { key: rmem, present: true, writable: false }, { key: 'net.core.wmem_max', present: false, writable: true }
+], congestionAvailable: ['cubic'], congestionLoadable: ['bbr3'], qdiscAvailable: ['fq_codel'] };
+const available = tuningHost(restricted).availableKeys;
+assert.deepEqual([...available], [cc, qdisc]);
+assert.equal(tuning.keyStatus(rmem, {}, restricted), 'unavailable');
+assert.equal(tuning.keyStatus('net.core.wmem_max', {}, restricted), 'unavailable');
+assert.deepEqual(tuning.tuningRequest('n', { [cc]: 'bbr3', [rmem]: '8388608' }, false, available, restricted).settings, { [cc]: 'bbr3' });
+assert.throws(() => tuning.tuningRequest('n', { [cc]: 'bbr' }, false, available, restricted));
+assert.throws(() => tuning.tuningRequest('n', { [cc]: 'reno' }, false, available, { congestionAvailable: [] }));
+assert.equal(tuning.tuningRequest('n', { [cc]: 'bbr3' }, false, undefined, {}).settings[cc], 'bbr3');
+assert.ok(tuning.algorithmOptions('cc', {}).some(o => o.value === 'bbr3'));
+assert.deepEqual(tuning.applyPreset({}, tuning.tuningPresets[1], available, restricted), {});
+assert.deepEqual(tuning.applyAdvice({}, [{ key: cc, value: 'bbr' }, { key: qdisc, value: 'fq' }, { key: rmem, value: '8388608' }], available, restricted), {});
+assert.deepEqual(tuning.applyAdvice({}, [{ key: cc, value: 'bbr3' }], available, restricted), { [cc]: 'bbr3' });
+assert.deepEqual(tuning.adoptExternal({}, { current: { [rmem]: '8388608' } }, { ...restricted, sysctlSources: [{ key: rmem, value: '8388608', file: '50-other.conf' }] }), {});
+const limits = [{ name: 'agent', soft: '524287', hard: '524287' }, { name: 'xray', soft: '18446744073709551615', hard: '18446744073709551615' }];
+assert.deepEqual(tuningHost({ fdLimits: limits }).fdLimits, limits);
+assert.deepEqual(tuningHost({ fd_limits: limits }).fdLimits, limits);
+assert.deepEqual(tuningHost({}).fdLimits, []);
+assert.match(tuningSfc, /v-for="limit in fdLimits"/);
+assert.match(tuningSfc, /limit\.name/);
+assert.match(tuningSfc, /limit\.soft/);
+assert.match(tuningSfc, /limit\.hard/);
+assert.match(tuningSfc, /v-if="!fdLimits.length"[^>]*>未知</);
+assert.doesNotMatch(tuningSfc, /重启后保持|persistAcrossReboot/);
+assert.match(tuningSfc, /当前与期望一致/);
+assert.match(tuningSfc, /<p v-if="error"[^>]*text-ios-red[^>]*>\{\{ error \}\}<\/p>/);
+assert.equal((tuningSfc.match(/v-if="!isKeyAvailable\(field.key\)"/g) || []).length, 2, 'both tables hide unavailable inputs');
+assert.match(tuningSfc, /v-if="canEdit && adoptableAdviceKeys\.has\(item.key\)"/);
+assert.equal((tuningSfc.match(/v-if="canEdit && adoptableAdviceKeys\.has\(field.key\)"/g) || []).length, 2, 'both tables hide unavailable recommendation actions');
+
+// A15: validation, save and recommendation failures all reach the rendered error.
+const script = tuningSfc.split('<script setup lang="ts">')[1].split('</script>')[0];
+const tree = ts.createSourceFile('ServerTuning.ts', script, ts.ScriptTarget.Latest, true);
+const handlers = tree.statements.filter(s => ts.isFunctionDeclaration(s) && ['confirm', 'submit', 'dismissAdvice'].includes(s.name?.text)).map(s => s.getText(tree)).join('\n');
+const handlersJs = ts.transpileModule(handlers, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const errors = { value: '' }, errorDraft = { value: { 'net.core.somaxconn': 'bad' } };
+const handlerHarness = new Function('error', 'draft', 'tuningRequest', handlersJs.replace(/^/, 'let confirmed = null; const props = {node: {id: "n"}}, canEdit = {value: true}, clearing = {}, dialog = {}, availableKeys = {}, hostInfo = {}, sending = {}, lifecycle = 0, state = {value: null}; const stopPoll = () => {}, refresh = async () => {}, loadRecommendations = async () => {}, showToast = () => {}; const nodeAPI = {saveTuning: async () => {throw new Error("save rejected");}, dismissTuningRecommendation: async () => {throw new Error("advice rejected");}};\n') + '\nreturn {confirm, submit, dismissAdvice};')(errors, errorDraft, tuning.tuningRequest);
+handlerHarness.confirm(false); assert.match(errors.value, /参数超出允许范围/);
+errorDraft.value = { 'net.core.somaxconn': '128' };
+handlerHarness.confirm(false); await handlerHarness.submit(); assert.match(errors.value, /save rejected/);
+await handlerHarness.dismissAdvice({ key: cc, value: 'bbr3' }); assert.match(errors.value, /advice rejected/);
+console.log('PASS AUDIT A06–A10/A15: vector maximum, writable filter, host algorithms, filtered merges, process fd limits, honest consistency status and visible errors');

@@ -1350,9 +1350,6 @@ function findAgentReleaseForNode(node: NodeView, version: string, entries: Relea
     r.signed?.manifest?.component === 'proxy-agent' &&
     r.signed?.manifest?.version === version &&
     (r.signed?.manifest?.os + '/' + r.signed?.manifest?.architecture) === platform
-  ) || entries.find(r =>
-    r.signed?.manifest?.component === 'proxy-agent' &&
-    (r.signed?.manifest?.os + '/' + r.signed?.manifest?.architecture) === platform
   );
 }
 

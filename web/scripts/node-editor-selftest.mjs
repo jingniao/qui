@@ -801,3 +801,52 @@ assert.deepEqual(api.claimedPorts(8443, hopSettings).slice(0, 4), [8443, 20000, 
 const protocolFieldsP6 = readFileSync(new URL('../src/modules/proxy/components/node-editor/NodeProtocolFields.vue', import.meta.url), 'utf8');
 assert.match(protocolFieldsP6, /portHopSupported/, 'the hop block is gated on the Agent capability');
 console.log('PASS P6 HOP RANGE');
+
+// A16: run the SFC functions, delaying only network and timer boundaries.
+const certBlock = protocolFieldsP6.slice(protocolFieldsP6.indexOf('const matches = ref'), protocolFieldsP6.indexOf('function setSource('));
+const certJs = ts.transpileModule(certBlock, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+function certificateHarness() {
+  const form = ref({ nodeId: 'n1', settings: { server_name: 'a.example.com' }, certificateId: '' });
+  const lookups = [], lists = [], intervals = new Map(), watchers = [];
+  let timer = 0, resolveCreate;
+  const result = new Function('ref', 'computed', 'f', 's', 'props', 'certificateFilesSupported', 'certificateChoices', 'findCertificateMatches', 'certificatesAPI', 'applyCertificateChoice', 'watch', 'onUnmounted', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', certJs + '\nreturn { findCertificates, requestCertificate, matches, lookupBusy, lookupError, requestStatus };')(
+    ref, computed, form, computed(() => form.value.settings), {}, () => true, () => [],
+    (node, domain) => new Promise((resolve, reject) => lookups.push({ node, domain, resolve, reject })),
+    { create: () => new Promise(resolve => { resolveCreate = resolve; }), list: () => new Promise(resolve => lists.push(resolve)) },
+    (target, choice) => { target.certificateId = choice.certificateId; },
+    (_source, cb) => watchers.push(cb), () => {}, () => ++timer, () => {},
+    cb => { intervals.set(++timer, cb); return timer; }, id => intervals.delete(id)
+  );
+  return { ...result, form, lookups, lists, intervals, watchers, created: () => resolveCreate({ id: 'cert-a' }),
+    change(domain, node = form.value.nodeId) { form.value.settings.server_name = domain; form.value.nodeId = node; watchers.forEach(cb => cb()); } };
+}
+for (const change of [h => h.change('b.example.com'), h => h.change('a.example.com', 'n2')]) {
+  const h = certificateHarness();
+  const pending = h.findCertificates();
+  change(h);
+  h.lookups[0].resolve({ domain: 'a.example.com' });
+  await pending;
+  assert.equal(h.matches.value, null, 'stale domain/node lookup must not populate matches');
+}
+const latest = certificateHarness();
+const oldLookup = latest.findCertificates(), newLookup = latest.findCertificates();
+latest.lookups[1].resolve({ domain: 'a.example.com', marker: 'latest' }); await newLookup;
+latest.lookups[0].reject(new Error('late failure')); await oldLookup;
+assert.equal(latest.matches.value.marker, 'latest');
+assert.equal(latest.lookupError.value, '');
+for (const changed of [false, true]) {
+  const h = certificateHarness();
+  const request = h.requestCertificate(); h.created(); await request;
+  const poll = [...h.intervals.values()][0]();
+  if (changed) {
+    h.change('b.example.com');
+    assert.equal(h.intervals.size, 0, 'changing domain stops issuance polling');
+  }
+  h.lists[0]([{ id: 'cert-a', status: 'valid' }]); await poll;
+  assert.equal(h.form.value.certificateId, changed ? '' : 'cert-a');
+  assert.equal(h.requestStatus.value, changed ? 'a.example.com 的证书已签发' : 'a.example.com 的证书已签发并选中，保存后生效');
+}
+const createRace = certificateHarness();
+const issuing = createRace.requestCertificate(); createRace.change('b.example.com'); createRace.created(); await issuing;
+assert.equal(createRace.intervals.size, 0, 'a late create response must not restart polling for the old domain');
+console.log('PASS AUDIT A16: stale domain/node lookup and errors discarded, latest lookup wins, domain changes cancel polling, stale issuance never selects a certificate');

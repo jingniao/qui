@@ -39,4 +39,9 @@ assert.doesNotMatch(notifSettings, /channel\.botToken/, 'must not echo plaintext
 assert.doesNotMatch(notifSettings, /channel\.config\.botToken/, 'must not echo plaintext botToken');
 assert.match(notifSettings, /last4/, 'must show last4 instead of full secret');
 
+for (const file of ['components/NotificationBell.vue', 'modules/system/components/NotificationSettings.vue']) {
+  for (const match of read(file).matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)) {
+    assert.ok(Number(match[1]) >= 12, file + ' notification text must remain readable at 12px or above');
+  }
+}
 console.log('PASS NOTIFICATIONS SELFTEST');

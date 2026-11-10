@@ -15,7 +15,7 @@ export const tuningFields: TuningField[] = [
   {
     key: 'net.ipv4.tcp_congestion_control',
     label: 'TCP 拥塞控制',
-    choices: ['bbr', 'cubic', 'reno', 'htcp', 'hybla'],
+    choices: ['bbr', 'cubic', 'reno', 'htcp', 'hybla', 'bbr2', 'bbr3'],
     help: '选择拥塞控制算法；BBR 在长距离和有丢包的线路上吞吐更稳定。'
   },
   {
@@ -157,21 +157,28 @@ export const essentialKeys: string[] = [
   'net.ipv4.tcp_mtu_probing'
 ];
 
+function tuningValue(key: string, value?: string): string | undefined {
+  if (value !== undefined && (key === 'net.ipv4.tcp_rmem' || key === 'net.ipv4.tcp_wmem')) {
+    return value.trim().split(/\s+/).at(-1);
+  }
+  return value;
+}
+
 export function keyStatus(key: string, t: any, host: any): KeyStatus {
   const keys = host?.tuningKeys || host?.tuning_keys;
   if (Array.isArray(keys)) {
     const k = keys.find((x: any) => x.key === key);
-    if (k && !k.present) return 'unavailable';
+    if (k && (!k.present || !k.writable)) return 'unavailable';
   }
-  const current = t?.current?.[key];
-  const desired = t?.desired?.[key];
+  const current = tuningValue(key, t?.current?.[key]);
+  const desired = tuningValue(key, t?.desired?.[key]);
   if (desired !== undefined && desired !== '') {
     return current === desired ? 'panel' : 'drift';
   }
   const sources = host?.sysctlSources || host?.sysctl_sources;
   if (Array.isArray(sources)) {
     const src = sources.find((s: any) => s.key === key);
-    if (src && src.file !== '99-proxy-tuning.conf' && src.value !== undefined && current === src.value) {
+    if (src && src.file !== '99-proxy-tuning.conf' && src.value !== undefined && current === tuningValue(key, src.value)) {
       return 'external';
     }
   }
@@ -180,20 +187,21 @@ export function keyStatus(key: string, t: any, host: any): KeyStatus {
 
 export function algorithmOptions(kind: 'cc' | 'qdisc', host: any, current?: string): { value: string; label: string }[] {
   const avail = kind === 'cc'
-    ? (host?.congestionAvailable || host?.congestion_available || [])
-    : (host?.qdiscAvailable || host?.qdisc_available || []);
+    ? (host?.congestionAvailable ?? host?.congestion_available)
+    : (host?.qdiscAvailable ?? host?.qdisc_available);
   const load = kind === 'cc'
-    ? (host?.congestionLoadable || host?.congestion_loadable || [])
-    : (host?.qdiscLoadable || host?.qdisc_loadable || []);
+    ? (host?.congestionLoadable ?? host?.congestion_loadable)
+    : (host?.qdiscLoadable ?? host?.qdisc_loadable);
+  const fallback = tuningFields.find(f => f.key === (kind === 'cc' ? 'net.ipv4.tcp_congestion_control' : 'net.core.default_qdisc'))!.choices!;
   const result: { value: string; label: string }[] = [];
   const seen = new Set<string>();
-  for (const v of avail) {
+  for (const v of avail ?? (load === undefined ? fallback : [])) {
     if (!seen.has(v)) {
       seen.add(v);
       result.push({ value: v, label: v });
     }
   }
-  for (const v of load) {
+  for (const v of load ?? []) {
     if (!seen.has(v)) {
       seen.add(v);
       result.push({ value: v, label: `${v}（可加载）` });
@@ -209,19 +217,22 @@ export function adoptExternal(draft: Record<string, string>, t: any, host: any):
   const result = { ...draft };
   const sources = host?.sysctlSources || host?.sysctl_sources || [];
   for (const s of sources) {
-    if (s.file !== '99-proxy-tuning.conf' && s.value !== undefined && t?.current?.[s.key] === s.value) {
-      result[s.key] = s.value;
+    if (keyStatus(s.key, {}, host) !== 'unavailable' && s.file !== '99-proxy-tuning.conf' && s.value !== undefined && tuningValue(s.key, t?.current?.[s.key]) === tuningValue(s.key, s.value)) {
+      result[s.key] = tuningValue(s.key, s.value)!;
     }
   }
   return result;
 }
 
-export function applyAdvice(draft: Record<string, string>, items: { key: string; value: string }[]): Record<string, string> {
-  const result = { ...draft };
-  for (const item of items) {
-    result[item.key] = item.value;
+export function applyAdvice(draft: Record<string, string>, items: { key: string; value: string }[], available?: Set<string>, host?: any): Record<string, string> {
+  return applyPreset(draft, { settings: Object.fromEntries(items.map(item => [item.key, item.value])) }, available, host);
+}
+
+function valueChoices(field: TuningField, host: any): string[] | undefined {
+  if (field.key === 'net.ipv4.tcp_congestion_control' || field.key === 'net.core.default_qdisc') {
+    return algorithmOptions(field.key === 'net.ipv4.tcp_congestion_control' ? 'cc' : 'qdisc', host).map(option => option.value);
   }
-  return result;
+  return field.choices;
 }
 
 export function tuningStatus(status: string): string {
@@ -238,7 +249,7 @@ export function tuningDraft(settings: Record<string, string> = {}): Record<strin
   return draft;
 }
 
-export function tuningRequest(nodeId: string, draft: Record<string, string>, clear = false, available?: Set<string>): NodeTuningInput {
+export function tuningRequest(nodeId: string, draft: Record<string, string>, clear = false, available?: Set<string>, host?: any): NodeTuningInput {
   if (clear) return { settings: {}, clear: true, confirmNodeId: nodeId };
   const settings: Record<string, string> = {};
   for (const [key, raw] of Object.entries(draft)) {
@@ -247,7 +258,8 @@ export function tuningRequest(nodeId: string, draft: Record<string, string>, cle
     if (!value) continue;
     const field = tuningFields.find(f => f.key === key);
     if (!field) throw new Error('非白名单参数：' + key);
-    if (field.choices ? !field.choices.includes(value) : !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < field.min! || Number(value) > field.max!) throw new Error('参数超出允许范围：' + key);
+    const choices = valueChoices(field, host);
+    if (choices ? !choices.includes(value) : !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < field.min! || Number(value) > field.max!) throw new Error('参数超出允许范围：' + key);
     settings[key] = value;
   }
   if (!Object.keys(settings).length) throw new Error('请填写至少一个参数；恢复原值请使用清除调优');
@@ -304,10 +316,12 @@ export const tuningPresets: { name: string; settings: Record<string, string> }[]
 ];
 
 /** Merge a preset into the draft; keys the preset does not name keep their draft value. */
-export function applyPreset(draft: Record<string, string>, preset: { settings: Record<string, string> }, available?: Set<string>): Record<string, string> {
+export function applyPreset(draft: Record<string, string>, preset: { settings: Record<string, string> }, available?: Set<string>, host?: any): Record<string, string> {
   const result: Record<string, string> = { ...draft };
   for (const [key, value] of Object.entries(preset.settings)) {
-    if (!available || available.has(key)) {
+    const field = tuningFields.find(f => f.key === key);
+    const choices = field && valueChoices(field, host);
+    if ((!available || available.has(key)) && (!choices || choices.includes(value))) {
       result[key] = value;
     }
   }

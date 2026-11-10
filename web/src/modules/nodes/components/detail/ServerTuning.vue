@@ -7,7 +7,7 @@
           <h2 class="text-ios-label text-base font-semibold leading-normal">调优状态</h2>
           <span v-if="state?.supported" class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">Agent 支持</span>
           <span v-else class="px-2 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-500">Agent 不支持</span>
-          <span v-if="persistAcrossReboot" class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200/60">重启后保持</span>
+          <span v-if="currentlyConsistent" class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200/60">当前与期望一致</span>
         </div>
         <button type="button" class="ios-btn-secondary" :disabled="loading" @click="refresh">刷新状态</button>
       </div>
@@ -27,8 +27,9 @@
           <p class="font-semibold text-ios-label truncate">{{ virtualization }}</p>
         </div>
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
-          <span class="text-ios-secondary">Agent 文件句柄 (软/硬)</span>
-          <p class="font-mono font-semibold text-ios-label truncate">{{ agentFdLimits }}</p>
+          <span class="text-ios-secondary">进程文件句柄 (软/硬)</span>
+          <p v-for="limit in fdLimits" :key="limit.name" class="font-mono font-semibold text-ios-label break-all">{{ limit.name }}：{{ limit.soft }} / {{ limit.hard }}</p>
+          <p v-if="!fdLimits.length" class="text-ios-secondary">未知</p>
         </div>
       </div>
 
@@ -66,8 +67,8 @@
           <span v-if="recommendations?.rulesVersion" class="text-xs text-neutral-400 font-mono">规则版本 {{ recommendations.rulesVersion }}</span>
           <span v-if="activeRecommendations.length > 0" class="px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20">{{ activeRecommendations.length }} 项待采纳</span>
         </div>
-        <div v-if="activeRecommendations.length > 0 && canEdit" class="flex items-center gap-2">
-          <button type="button" class="ios-action-btn-primary text-xs px-2.5 py-1" :disabled="!selectedAdviceKeys.length" @click="adoptSelectedAdvice">采用所选 ({{ selectedAdviceKeys.length }})</button>
+        <div v-if="adoptableAdviceKeys.size > 0 && canEdit" class="flex items-center gap-2">
+          <button v-if="selectedAdviceKeys.length" type="button" class="ios-action-btn-primary text-xs px-2.5 py-1" @click="adoptSelectedAdvice">采用所选 ({{ selectedAdviceKeys.length }})</button>
           <button type="button" class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="toggleSelectAllAdvice">{{ allAdviceSelected ? '取消全选' : '全选建议' }}</button>
         </div>
       </div>
@@ -75,7 +76,7 @@
       <div v-if="activeRecommendations.length > 0" class="space-y-2">
         <div v-for="item in activeRecommendations" :key="item.key" class="rounded-xl border border-black/[0.06] p-3 text-xs bg-black/[0.01] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div class="flex items-start gap-2.5 min-w-0">
-            <input v-if="canEdit" type="checkbox" :value="item.key" v-model="selectedAdviceKeys" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-ios-blue focus:ring-ios-blue shrink-0" />
+            <input v-if="canEdit && adoptableAdviceKeys.has(item.key)" type="checkbox" :value="item.key" v-model="selectedAdviceKeys" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-ios-blue focus:ring-ios-blue shrink-0" />
             <div class="space-y-0.5 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-semibold text-ios-label">{{ fieldLabel(item.key) }}</span>
@@ -87,7 +88,7 @@
             </div>
           </div>
           <div v-if="canEdit" class="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-            <button type="button" class="ios-action-btn-secondary text-xs px-2 py-0.5" @click="applySingleAdvice(item)">填入草稿</button>
+            <button v-if="adoptableAdviceKeys.has(item.key)" type="button" class="ios-action-btn-secondary text-xs px-2 py-0.5" @click="applySingleAdvice(item)">填入草稿</button>
             <button type="button" class="text-xs text-neutral-400 hover:text-rose-600 transition-colors" @click="dismissAdvice(item)">不采纳</button>
           </div>
         </div>
@@ -108,7 +109,7 @@
       <!-- Presets -->
       <div v-if="canEdit" class="flex flex-wrap items-center gap-2 text-xs">
         <span class="text-neutral-400">场景预设：</span>
-        <button v-for="preset in tuningPresets" :key="preset.name" type="button" class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="draft = applyPreset(draft, preset, availableKeys)">{{ preset.name }}</button>
+        <button v-for="preset in availablePresets" :key="preset.name" type="button" class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="draft = applyPreset(draft, preset, availableKeys, hostInfo)">{{ preset.name }}</button>
       </div>
 
       <p class="text-xs text-ios-secondary leading-relaxed">
@@ -153,16 +154,17 @@
                 <td class="p-2">
                   <div v-if="adviceByKey.has(field.key)" class="flex items-center gap-1">
                     <span class="font-mono font-semibold text-emerald-600">{{ adviceByKey.get(field.key)!.value }}</span>
-                    <button v-if="canEdit" type="button" class="text-xs text-ios-blue hover:underline" @click="applySingleAdvice(adviceByKey.get(field.key)!)">采用</button>
+                    <button v-if="canEdit && adoptableAdviceKeys.has(field.key)" type="button" class="text-xs text-ios-blue hover:underline" @click="applySingleAdvice(adviceByKey.get(field.key)!)">采用</button>
                   </div>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
                 <td class="p-2">
-                  <select v-if="field.choices || isAlgorithmKey(field.key)" v-model="draft[field.key]" class="form-input-base" :disabled="!canEdit || !isKeyAvailable(field.key)">
+                  <span v-if="!isKeyAvailable(field.key)" class="text-ios-secondary">此环境不可用</span>
+                  <select v-else-if="field.choices || isAlgorithmKey(field.key)" v-model="draft[field.key]" class="form-input-base" :disabled="!canEdit">
                     <option value="">不设置</option>
                     <option v-for="opt in fieldOptions(field)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                   </select>
-                  <input v-else v-model="draft[field.key]" type="text" inputmode="numeric" pattern="[0-9]*" :placeholder="field.min + '–' + field.max" :aria-label="field.label" class="form-input-base" :disabled="!canEdit || !isKeyAvailable(field.key)" />
+                  <input v-else v-model="draft[field.key]" type="text" inputmode="numeric" pattern="[0-9]*" :placeholder="field.min + '–' + field.max" :aria-label="field.label" class="form-input-base" :disabled="!canEdit" />
                 </td>
               </tr>
             </tbody>
@@ -208,16 +210,17 @@
                 <td class="p-2">
                   <div v-if="adviceByKey.has(field.key)" class="flex items-center gap-1">
                     <span class="font-mono font-semibold text-emerald-600">{{ adviceByKey.get(field.key)!.value }}</span>
-                    <button v-if="canEdit" type="button" class="text-xs text-ios-blue hover:underline" @click="applySingleAdvice(adviceByKey.get(field.key)!)">采用</button>
+                    <button v-if="canEdit && adoptableAdviceKeys.has(field.key)" type="button" class="text-xs text-ios-blue hover:underline" @click="applySingleAdvice(adviceByKey.get(field.key)!)">采用</button>
                   </div>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
                 <td class="p-2">
-                  <select v-if="field.choices || isAlgorithmKey(field.key)" v-model="draft[field.key]" class="form-input-base" :disabled="!canEdit || !isKeyAvailable(field.key)">
+                  <span v-if="!isKeyAvailable(field.key)" class="text-ios-secondary">此环境不可用</span>
+                  <select v-else-if="field.choices || isAlgorithmKey(field.key)" v-model="draft[field.key]" class="form-input-base" :disabled="!canEdit">
                     <option value="">不设置</option>
                     <option v-for="opt in fieldOptions(field)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                   </select>
-                  <input v-else v-model="draft[field.key]" type="text" inputmode="numeric" pattern="[0-9]*" :placeholder="field.min + '–' + field.max" :aria-label="field.label" class="form-input-base" :disabled="!canEdit || !isKeyAvailable(field.key)" />
+                  <input v-else v-model="draft[field.key]" type="text" inputmode="numeric" pattern="[0-9]*" :placeholder="field.min + '–' + field.max" :aria-label="field.label" class="form-input-base" :disabled="!canEdit" />
                 </td>
               </tr>
             </tbody>
@@ -231,6 +234,8 @@
       </div>
       <p v-else class="text-xs text-ios-secondary">Viewer 只读</p>
     </section>
+
+    <p v-if="error" class="text-sm text-ios-red">{{ error }}</p>
 
     <!-- 4. 最近执行回执 (Receipt) -->
     <section v-if="state?.result" class="panel-card p-4 space-y-3">
@@ -266,18 +271,12 @@ const canEdit = computed(() => owner.value && state.value?.supported === true &&
 const hostInfo = computed(() => props.node.capabilities?.host);
 const virtualization = computed(() => hostInfo.value?.virtualization || '未知 / 物理机');
 const isLXC = computed(() => virtualization.value?.toLowerCase().includes('lxc'));
-const agentFdLimits = computed(() => {
-  const limits = hostInfo.value?.agentLimits || hostInfo.value?.agent_limits;
-  if (!limits) return '—';
-  const cur = 'fdCur' in limits ? limits.fdCur : limits.fd_cur;
-  const max = 'fdMax' in limits ? limits.fdMax : limits.fd_max;
-  return `${cur ?? '—'} / ${max ?? '—'}`;
-});
+const fdLimits = computed(() => hostInfo.value?.fdLimits || hostInfo.value?.fd_limits || []);
 
 const availableKeys = computed(() => {
   const keys = hostInfo.value?.tuningKeys || hostInfo.value?.tuning_keys;
   if (!Array.isArray(keys)) return undefined;
-  return new Set(keys.filter(k => k.present).map(k => k.key));
+  return new Set(keys.filter(k => k.present && k.writable).map(k => k.key));
 });
 
 function isKeyAvailable(key: string): boolean {
@@ -287,6 +286,7 @@ function isKeyAvailable(key: string): boolean {
 
 const essentialFields = computed(() => tuningFields.filter(f => essentialKeys.includes(f.key)));
 const advancedFields = computed(() => tuningFields.filter(f => !essentialKeys.includes(f.key)));
+const availablePresets = computed(() => tuningPresets.filter(preset => Object.keys(applyPreset({}, preset, availableKeys.value, hostInfo.value)).length > 0));
 
 function getFieldStatus(key: string): KeyStatus {
   if (!state.value) return 'default';
@@ -303,7 +303,7 @@ const statusCounts = computed(() => {
   return counts;
 });
 
-const persistAcrossReboot = computed(() => {
+const currentlyConsistent = computed(() => {
   return statusCounts.value.panel > 0 && statusCounts.value.drift === 0;
 });
 
@@ -364,6 +364,7 @@ function fieldOptions(field: TuningField): { value: string; label: string }[] {
 
 // Recommendations
 const activeRecommendations = computed(() => (recommendations.value?.items || []).filter(item => !item.dismissed));
+const adoptableAdviceKeys = computed(() => new Set(Object.keys(applyAdvice({}, activeRecommendations.value, availableKeys.value, hostInfo.value))));
 const adviceByKey = computed(() => {
   const map = new Map<string, RecommendationItem>();
   for (const item of activeRecommendations.value) {
@@ -373,26 +374,26 @@ const adviceByKey = computed(() => {
 });
 
 const allAdviceSelected = computed(() => {
-  return activeRecommendations.value.length > 0 && selectedAdviceKeys.value.length === activeRecommendations.value.length;
+  return adoptableAdviceKeys.value.size > 0 && [...adoptableAdviceKeys.value].every(key => selectedAdviceKeys.value.includes(key));
 });
 
 function toggleSelectAllAdvice() {
   if (allAdviceSelected.value) {
     selectedAdviceKeys.value = [];
   } else {
-    selectedAdviceKeys.value = activeRecommendations.value.map(item => item.key);
+    selectedAdviceKeys.value = [...adoptableAdviceKeys.value];
   }
 }
 
 function adoptSelectedAdvice() {
   const items = activeRecommendations.value.filter(item => selectedAdviceKeys.value.includes(item.key));
-  draft.value = applyAdvice(draft.value, items);
+  draft.value = applyAdvice(draft.value, items, availableKeys.value, hostInfo.value);
   selectedAdviceKeys.value = [];
   showToast('已将所选建议填入草稿');
 }
 
 function applySingleAdvice(item: { key: string; value: string }) {
-  draft.value = applyAdvice(draft.value, [item]);
+  draft.value = applyAdvice(draft.value, [item], availableKeys.value, hostInfo.value);
   showToast(`已将 ${fieldLabel(item.key)} 推荐值填入草稿`);
 }
 
@@ -470,7 +471,7 @@ async function refresh() {
 function confirm(clear:boolean) {
   if (!canEdit.value) return;
   try {
-    confirmed = tuningRequest(props.node.id, draft.value, clear, availableKeys.value);
+    confirmed = tuningRequest(props.node.id, draft.value, clear, availableKeys.value, hostInfo.value);
     clearing.value = clear;
     dialog.value = true;
     error.value = '';

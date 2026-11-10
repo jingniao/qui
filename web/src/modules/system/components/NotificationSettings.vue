@@ -52,7 +52,7 @@
               <!-- Kind & Description -->
               <td class="py-3 px-3">
                 <div class="font-medium text-ios-label">{{ ruleKindLabel(rule.kind) }}</div>
-                <div class="text-[11px] text-ios-tertiary">{{ ruleKindDesc(rule.kind) }}</div>
+                <div class="text-xs text-ios-tertiary">{{ ruleKindDesc(rule.kind) }}</div>
               </td>
               <!-- Threshold -->
               <td class="py-3 px-3">
@@ -162,7 +162,7 @@
                   <span :class="deliveryCodeClass(ch.lastResultCode)">
                     {{ deliveryCodeLabel(ch.lastResultCode) }}
                   </span>
-                  <span v-if="ch.lastSentAt" class="text-[10px] text-ios-tertiary mt-0.5">
+                  <span v-if="ch.lastSentAt" class="text-xs text-ios-tertiary mt-0.5">
                     {{ formatTimestamp(ch.lastSentAt) }}
                   </span>
                 </div>

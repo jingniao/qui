@@ -2239,10 +2239,10 @@
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs font-bold text-neutral-700">来源 #{{ idx + 1 }}</span>
               <div class="flex items-center gap-2">
-                <span v-if="source.nodeUsable === false" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700">
+                <span v-if="source.nodeUsable === false" class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700">
                   仅客户端可用
                 </span>
-                <span v-else-if="source.nodeUsable" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
+                <span v-else-if="source.nodeUsable" class="px-1.5 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-700">
                   节点可用
                 </span>
                 <button
@@ -2264,12 +2264,12 @@
               </div>
             </div>
             <label class="block">
-              <span class="text-[11px] text-neutral-500">来源 URL</span>
+              <span class="text-xs text-neutral-500">来源 URL</span>
               <input v-model="source.url" placeholder="https://example.com/rules.txt" class="form-input-base mt-1 text-xs" required />
             </label>
             <div class="grid grid-cols-3 gap-2">
               <label class="block">
-                <span class="text-[11px] text-neutral-500">格式</span>
+                <span class="text-xs text-neutral-500">格式</span>
                 <select v-model="source.format" @change="onSourceFormatChange(source)" class="form-input-base mt-1 text-xs py-1">
                   <option value="text">text</option>
                   <option value="yaml">yaml</option>
@@ -2277,7 +2277,7 @@
                 </select>
               </label>
               <label class="block">
-                <span class="text-[11px] text-neutral-500">行为</span>
+                <span class="text-xs text-neutral-500">行为</span>
                 <select v-model="source.behavior" class="form-input-base mt-1 text-xs py-1">
                   <option v-if="source.format !== 'mrs'" value="classical">classical</option>
                   <option value="domain">domain</option>
@@ -2285,11 +2285,11 @@
                 </select>
               </label>
               <label class="block">
-                <span class="text-[11px] text-neutral-500">刷新间隔 (秒)</span>
+                <span class="text-xs text-neutral-500">刷新间隔 (秒)</span>
                 <input v-model.number="source.intervalSeconds" type="number" min="3600" max="604800" class="form-input-base mt-1 text-xs py-1" />
               </label>
             </div>
-            <div v-if="source.lastStatus" class="flex flex-wrap items-center gap-x-3 text-[11px] text-neutral-500 pt-1 border-t border-black/[0.04]">
+            <div v-if="source.lastStatus" class="flex flex-wrap items-center gap-x-3 text-xs text-neutral-500 pt-1 border-t border-black/[0.04]">
               <span>状态: <strong :class="source.lastStatus === 'ok' ? 'text-emerald-600' : 'text-red-600'">{{ source.lastStatus }}</strong></span>
               <span v-if="source.entryCount != null">条目: {{ source.entryCount }}</span>
               <span v-if="source.skippedCount != null">跳过: {{ source.skippedCount }}</span>

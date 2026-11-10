@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"time"
 	"proxycontrol/internal/agent/tuning"
+	"proxycontrol/pkg/contracts/desiredstate"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
@@ -82,6 +84,8 @@ func (s *Sampler) HostInfo() *pb.HostInfo {
 	if total != nil {
 		h.DiskTotalBytes = *total
 	}
+	h.CertificateFiles = CertificateInventory(desiredstate.CertificateDirectory, time.Now())
+	h.CertificateInventorySupported = true
 	return h
 }
 

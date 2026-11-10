@@ -35,3 +35,9 @@ clock = progress.publishWatchTimeout + 1; timers.at(-1)(); await new Promise(r =
 assert.deepEqual(seen.at(-1), ['待服务器确认', true]);
 watch.stop();
 console.log('PASS P1 PUBLISH: phases, own revision only, timeout');
+
+assert.equal(progress.serverPublishState(undefined, undefined).label, '尚未发布');
+assert.equal(progress.serverPublishState({ id: 9, status: 'success' }, 9).label, '已生效');
+assert.equal(progress.serverPublishState({ id: 9, status: 'success' }, 8).label, '已生效，等待服务器上报');
+assert.equal(progress.serverPublishState({ id: 9, status: 'failed' }, 8).tone, 'danger');
+console.log('PASS P1 SERVER PUBLISH STATE');

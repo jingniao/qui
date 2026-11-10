@@ -24,6 +24,22 @@ export function publishPhase(status: string): PublishPhase {
   }
 }
 
+export function serverPublishState(
+  latest: { id: number; status: string } | undefined,
+  runningRevision: number | undefined
+): PublishPhase {
+  if (!latest) {
+    return { label: '尚未发布', tone: 'warning', final: true };
+  }
+  if (latest.status === 'success') {
+    if (runningRevision === latest.id) {
+      return { label: '已生效', tone: 'success', final: true };
+    }
+    return { label: '已生效，等待服务器上报', tone: 'info', final: false };
+  }
+  return publishPhase(latest.status);
+}
+
 export const publishWatchTimeout = 120_000;
 
 export interface PublishWatch {

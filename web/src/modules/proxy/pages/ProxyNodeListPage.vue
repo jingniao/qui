@@ -213,6 +213,12 @@
                   <span class="px-1.5 py-0.2 rounded text-xs font-semibold shrink-0" :class="sourceCapsuleColor(node.sourceType)">
                     {{ node.sourceName }}
                   </span>
+                  <StatusBadge
+                    v-if="node.sourceType === 'self_hosted' && node.sourceId && serverPublishMap.get(node.sourceId)"
+                    :status="serverBadgeTone(serverPublishMap.get(node.sourceId)!.tone)"
+                    :label="serverPublishMap.get(node.sourceId)!.label"
+                    :title="`所属服务器 ${node.sourceName} 的发布状态`"
+                  />
                 </div>
                 <p v-if="node.sourceType !== 'self_hosted' && node.sourceId" class="text-xs text-ios-secondary">所属分组：{{ importedGroupNames(node) }}</p>
                 <p class="text-xs text-neutral-400 font-mono mt-0.5 truncate">
@@ -373,13 +379,21 @@
             </div>
 
             <!-- Status Badge Capsule (Exact same class as Server Page) -->
-            <span
-              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 select-none"
-              :class="statusCapsuleClass(node)"
-            >
-              <span class="w-1.5 h-1.5 rounded-full" :class="statusDotClass(node)"></span>
-              <span>{{ statusCapsuleText(node) }}</span>
-            </span>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <StatusBadge
+                v-if="node.sourceType === 'self_hosted' && node.sourceId && serverPublishMap.get(node.sourceId)"
+                :status="serverBadgeTone(serverPublishMap.get(node.sourceId)!.tone)"
+                :label="serverPublishMap.get(node.sourceId)!.label"
+                :title="`所属服务器 ${node.sourceName} 的发布状态`"
+              />
+              <span
+                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 select-none"
+                :class="statusCapsuleClass(node)"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :class="statusDotClass(node)"></span>
+                <span>{{ statusCapsuleText(node) }}</span>
+              </span>
+            </div>
           </div>
 
           <!-- Row 2: Sub-info (Source · Transport · Latency) -->
@@ -1110,7 +1124,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted } from 'vue';
+import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue';
+import StatusBadge from '../../../components/StatusBadge.vue';
+import { serverPublishState, type PublishPhase, type PublishTone } from '../../system/publishProgress';
 import AddRelayDialog from '../../tunnels/components/AddRelayDialog.vue';
 import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
 import { nodeRelayAPI, type NodeRelay } from '../../tunnels/api';
@@ -1728,8 +1744,55 @@ async function deleteSubscription(subId: string) {
   }
 }
 
+const serverPublishMap = ref<Map<string, PublishPhase>>(new Map());
+
+function serverBadgeTone(tone: PublishTone): string {
+  if (tone === 'success') return 'green';
+  if (tone === 'danger') return 'red';
+  if (tone === 'warning') return 'yellow';
+  if (tone === 'info') return 'blue';
+  return 'gray';
+}
+
+async function loadServerPublishStates() {
+  const currentNodes = displayMode.value === 'list' ? pagedNodes.value : filteredNodes.value;
+  const serverIds = [...new Set(currentNodes.filter(n => n.sourceType === 'self_hosted' && n.sourceId).map(n => n.sourceId!))];
+  if (!serverIds.length) return;
+
+  const results = await Promise.all(
+    serverIds.map(async (id) => {
+      try {
+        const revs = await deploymentAPI.nodeRevisions(id, 1, 1);
+        const latest = revs.items[0];
+        const server = servers.value.find(s => s.id === id);
+        const phase = serverPublishState(latest, server?.heartbeat?.current_revision);
+        return [id, phase] as const;
+      } catch {
+        return [id, serverPublishState(undefined, undefined)] as const;
+      }
+    })
+  );
+
+  const nextMap = new Map(serverPublishMap.value);
+  for (const [id, phase] of results) {
+    nextMap.set(id, phase);
+  }
+  serverPublishMap.value = nextMap;
+}
+
+watch([pagedNodes, displayMode, servers], () => {
+  loadServerPublishStates();
+}, { immediate: true });
+
 onMounted(() => {
   loadProtocolSupport();
   loadData();
+  window.addEventListener('proxy-deployment-status', loadServerPublishStates);
+  window.addEventListener('proxy-node-status', loadServerPublishStates);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('proxy-deployment-status', loadServerPublishStates);
+  window.removeEventListener('proxy-node-status', loadServerPublishStates);
 });
 </script>

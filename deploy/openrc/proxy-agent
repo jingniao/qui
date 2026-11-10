@@ -19,6 +19,7 @@
 #                             -> capabilities="^cap_net_bind_service" (the ^ marks
 #                                the capability ambient, so the cores the Agent
 #                                spawns inherit it and can bind ports below 1024)
+#   LimitNOFILE=524288        -> rc_ulimit="-n 524288"
 #   NoNewPrivileges=true      -> no_new_privs=yes
 #   StateDirectory=proxy-agent-> start_pre checkpath creates /var/lib/proxy-agent
 #                                with the owner and mode the unit would give it
@@ -52,6 +53,7 @@ respawn_delay=5
 respawn_max=0
 retry="TERM/90/KILL/5"
 rc_cgroup_cleanup="yes"
+rc_ulimit="-n 524288"
 output_logger="logger -t proxy-agent -p daemon.info"
 error_logger="logger -t proxy-agent -p daemon.err"
 

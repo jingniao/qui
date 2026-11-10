@@ -215,4 +215,5 @@ if grep -qx -- 'disable --now proxy-panel-update.path' "$systemctl_calls"; then
   printf 'FAIL - the update path unit must not be disabled when the snapshot has it\n' >&2; exit 1
 fi
 printf 'ok - bridging release keeps its update path unit\n'; passes=$((passes+1))
+check 'OpenRC proxy-agent rc_ulimit' grep -Eq '^[[:space:]]*rc_ulimit="-n 524288"' "$repo/deploy/openrc/proxy-agent"
 printf 'multi-core-test: %s passed\n' "$passes"

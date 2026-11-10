@@ -412,6 +412,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateNodePublicAddresses(ctx, database); err != nil {
 		return err
 	}
+	if err := validateNotifications(ctx, database, configurationVault); err != nil {
+		return err
+	}
 	for _, item := range []struct {
 		table, field, kind string
 		limit              int

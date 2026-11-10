@@ -9,6 +9,7 @@ import (
 // an archive written before it.
 func rewindNodePublicAddresses(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindNotifications(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0138_node_public_addresses.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

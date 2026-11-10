@@ -13,6 +13,7 @@ import (
 // ending) makes existing panels refuse to start and old backups fail to
 // restore. Add new migrations here; never change an existing entry.
 var applied = map[string]string{
+	"0139_notifications.sql":                            "c92161af9d1f3b3f2fd25d0649be373600d619722bccb6e13c2af29b037d958f",
 	"0138_node_public_addresses.sql":                 "e368fe8b0ad693d73bc997203a613436a7288df4566490885437500ff55668f9",
 	"0137_certificates.sql":                             "3e9697540e0626f01595f8070e5f4f4d0a935b13e626ae1077560d7458a8ee1b",
 	"0136_inbound_tls_source.sql":                       "6afec3e45f30c7b417bbdf33ed5b36bd61fa989a8313ca0e84cbc850e2cb4a05",

@@ -1,3 +1,4 @@
+import type { ReleaseEntry } from '../system/coreUpdatesApi';
 export interface CollectorLossStatus {measured?:boolean;status:"ok"|"unavailable";generation?:number;dropped_allowed_observations?:number;dropped_blocked_observations?:number;rejected_observations?:number;persistence_failures?:number;unconfirmed_processes?:number;baseline_at?:{seconds?:number;nanos?:number};checkpoint_at?:{seconds?:number;nanos?:number};counters_saturated?:boolean;coverage_incomplete?:boolean;end_confirmed?:boolean;}
 export interface TrafficSourceStatus {status:"busy"|"unavailable"|"unobserved"|"partial"|"covered"|"not_running"|"sampling_failed";core_epoch?:string;revision?:number;configured_sources?:number;observed_sources?:number;core_running?:boolean;observed_at?:{seconds?:number;nanos?:number};last_success_at?:{seconds?:number;nanos?:number};}
 import { request, type Page } from '../../app/apiClient';
@@ -29,7 +30,7 @@ export interface NodeView extends NodeNetworkSettings {
   // Set once the node was logically deleted; an empty string means "live".
   deletedAt: string;
   coreSelectionBlocked?:CoreName[];
-  capabilities: { multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; tls_certificate_files_supported?: boolean; server_settings_contract_version?: number; server_settings_combinations?: ServerSettingsCombination[]; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[] };
+  capabilities: { multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; tls_certificate_files_supported?: boolean; server_settings_contract_version?: number; server_settings_combinations?: ServerSettingsCombination[]; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[]; panel_catalogue_supported?: boolean; };
   heartbeat: { bootId?: string; defaultRouteInterface?: string; cores?:CoreStatus[]; load1?: number; load5?: number; load15?: number; processCount?: string; tcpConnections?: string; udpSockets?: string; memoryUsedBytes?: string; swapUsedBytes?: string; diskUsedBytes?: string; tuningCurrent?: Record<string,string>; traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
 }
 // The panel publishes the release version, the gRPC port and the digest of the
@@ -127,7 +128,9 @@ requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<H
   machineTrafficBatch: () => request<MachineTrafficBatch>('/nodes/machine-traffic'),
   machineTrafficSettings: (id: string) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`),
   saveMachineTrafficSettings: (id: string, input: MachineTrafficSettings) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`, 'PUT', input),
-  deleteNode: (id: string) => request(`/nodes/${encodeURIComponent(id)}`, 'DELETE')
+  deleteNode: (id: string) => request(`/nodes/${encodeURIComponent(id)}`, 'DELETE'),
+  agentReleases: (refresh = false) => request<AgentReleaseVersion[]>(`/agent-releases${refresh ? '?refresh=1' : ''}`),
+  importAgentRelease: (version: string) => request<ReleaseEntry[]>(`/agent-releases/${encodeURIComponent(version)}/import`, 'POST')
 };
 
 export interface ProbeTarget { id: string; label: string; host: string; port: number; allowNonPublic: boolean; scheduled: boolean; }
@@ -164,3 +167,10 @@ export type CoreName = 'xray' | 'sing-box' | 'gost';
 export interface ServerSettingsCombination { protocol: string; direction: string; security: string; transport: string; flow?: string; }
 export interface CoreCapability { name:CoreName; version?:string; protocols?:{protocol:string;inbound?:boolean;outbound?:boolean;tcp?:boolean;udp?:boolean}[]; singbox_user_stats?:boolean; forward_inbound_supported?:boolean; device_gate_supported?:boolean; tls_certificate_files_supported?:boolean; healthy?:boolean; observation_contract_version?:number; gost_contract_version?:number; server_settings_contract_version?:number; server_settings_combinations?:ServerSettingsCombination[]; }
 export interface CoreStatus { name:CoreName; healthy:boolean; error?:string; started_at?:{seconds?:number;nanos?:number}; traffic_source_status?:TrafficSourceStatus; }
+
+export interface AgentReleaseVersion {
+  version: string;
+  publishedAt: string;
+  architectures: string[];
+  imported: boolean;
+}

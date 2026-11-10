@@ -296,14 +296,19 @@
           <!-- 7. 操作 -->
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
             <template v-if="kind === 'agent'">
-              <button v-if="isOwner && !upgradeUnavailableReason(node)"
-                type="button"
-                @click="handleUpgradeSingle(node)"
-                class="ios-action-btn-secondary"
-                title="升级 Agent 到最新版本"
-              >
-                升级
-              </button>
+              <template v-if="node.capabilities?.panel_catalogue_supported">
+                <button v-if="isOwner && !upgradeUnavailableReason(node)"
+                  type="button"
+                  @click="handleUpgradeSingle(node)"
+                  class="ios-action-btn-secondary"
+                  title="升级 Agent 到最新版本"
+                >
+                  升级
+                </button>
+              </template>
+              <span v-else class="text-xs text-neutral-400">
+                此 Agent 需先在服务器上运行一次 qui-update 升级到 1.5.0
+              </span>
             </template>
             <template v-else>
               <!-- Core Actions in Table Mode -->
@@ -512,17 +517,22 @@
         <!-- Row 4: Action Buttons (Apple HIG Precision) -->
         <template v-if="kind === 'agent'">
           <div class="pt-2 border-t border-black/[0.04] grid grid-cols-2 gap-2.5">
-            <button v-if="isOwner && !upgradeUnavailableReason(node)"
-              type="button"
-              @click="handleUpgradeSingle(node)"
-              class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
-              title="升级 Agent 到最新版本"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              <span>升级</span>
-            </button>
+            <template v-if="node.capabilities?.panel_catalogue_supported">
+              <button v-if="isOwner && !upgradeUnavailableReason(node)"
+                type="button"
+                @click="handleUpgradeSingle(node)"
+                class="py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] active:scale-[0.98] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
+                title="升级 Agent 到最新版本"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <span>升级</span>
+              </button>
+            </template>
+            <div v-else class="text-xs text-neutral-400 flex items-center justify-center text-center">
+              此 Agent 需先在服务器上运行一次 qui-update 升级到 1.5.0
+            </div>
 
             <router-link
               :to="`/nodes/${node.id}`"
@@ -602,7 +612,60 @@
       </div>
     </div>
 
-    <p v-if="isOwner && !releasesConfigured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
+    <!-- Dialog: Agent Upgrade Dialog -->
+    <AppDialog
+      v-model="agentUpgradeDialogVisible"
+      :title="agentUpgradeTargetNode ? `升级 Agent - ${agentUpgradeTargetNode.name}` : '全部升级 Agent'"
+      :description="agentUpgradeTargetNode ? '选择官方签名版本进行升级。如果版本尚未导入面板，将自动下载并导入本地签名目录。' : '为全部支持的在线服务器批量升级到选定的 Agent 版本。'"
+      max-width="lg"
+      :show-confirm="false"
+      cancel-text="关闭"
+    >
+      <div class="space-y-3">
+        <div v-if="agentUpgradeLoading" class="py-8 text-center text-sm text-neutral-400 flex flex-col items-center justify-center gap-2">
+          <svg class="w-5 h-5 text-ios-blue animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <span>正在获取官方签名版本…</span>
+        </div>
+        <div v-else-if="!agentReleaseList.length" class="py-8 text-center text-sm text-neutral-400">
+          暂未发现可用的官方 Agent 发布版本
+        </div>
+        <div v-else class="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
+          <div
+            v-for="item in agentReleaseList"
+            :key="item.version"
+            class="flex items-center justify-between p-3.5 rounded-2xl border border-black/[0.06] bg-neutral-50/50 hover:bg-neutral-50 transition-colors gap-3"
+          >
+            <div class="space-y-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-sm text-neutral-900">v{{ item.version }}</span>
+                <span
+                  class="px-1.5 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider"
+                  :class="item.imported ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-neutral-100 text-neutral-600'"
+                >
+                  {{ item.imported ? '已导入' : '未导入' }}
+                </span>
+              </div>
+              <div class="text-xs text-neutral-500 flex items-center gap-2 flex-wrap">
+                <span>支持架构: {{ item.architectures.join(', ') || 'linux/amd64, linux/arm64' }}</span>
+                <span v-if="item.publishedAt">· {{ formatTime(item.publishedAt) }}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              :disabled="agentUpgradeBusy"
+              @click="selectAgentVersionForUpgrade(item)"
+              class="shrink-0 py-1.5 px-3 rounded-xl text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-50"
+              :class="item.imported ? 'bg-ios-blue text-white hover:bg-blue-600' : 'bg-neutral-900 text-white hover:bg-black'"
+            >
+              {{ item.imported ? (agentUpgradeTargetNode ? '升级' : '全部升级') : (agentUpgradeTargetNode ? '导入并升级' : '导入并全部升级') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </AppDialog>
     <AppDialog :model-value="!!manualAgentNode" @update:model-value="v => { if (!v) manualAgentNode = null; }" title="手动选择 Agent 发布平台" description="节点架构未知或无完全匹配的版本，请核对目标主机后明确选择。" @confirm="prepareManualAgent">
       <select v-model="manualReleaseId" class="form-input-base"><option value="">选择已签名版本与平台</option><option v-for="r in agentReleases.filter(r => r.signed.manifest.component === 'proxy-agent')" :key="r.id" :value="r.id">{{ r.signed.manifest.version }} · {{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</option></select>
     </AppDialog>
@@ -1192,7 +1255,7 @@ import { onMounted, onUnmounted, ref, reactive, computed } from 'vue';
 import { isOwner, formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
-import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../../nodes/api';
+import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type AgentReleaseVersion } from '../../nodes/api';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../../nodes/installEndpoint';
 import { proxyAPI, type Inbound } from '../../proxy/api';
 import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
@@ -1263,7 +1326,90 @@ function findLatestAgentReleaseForNode(node: NodeView, releases: ReleaseEntry[])
   return releases.filter(r => r.signed.manifest.component === 'proxy-agent' && r.signed.manifest.os + '/' + r.signed.manifest.architecture === platform)
     .sort((a,b) => b.signed.manifest.sequence - a.signed.manifest.sequence)[0];
 }
-const releasesConfigured = ref(false);
+const agentUpgradeDialogVisible = ref(false);
+const agentUpgradeTargetNode = ref<NodeView | null>(null);
+const agentReleaseList = ref<AgentReleaseVersion[]>([]);
+const agentUpgradeLoading = ref(false);
+const agentUpgradeBusy = ref(false);
+
+async function loadAgentReleases(refresh = false) {
+  agentUpgradeLoading.value = true;
+  try {
+    agentReleaseList.value = await nodeAPI.agentReleases(refresh);
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    agentUpgradeLoading.value = false;
+  }
+}
+
+function findAgentReleaseForNode(node: NodeView, version: string, entries: ReleaseEntry[]): ReleaseEntry | undefined {
+  const platform = nodePlatform(node);
+  if (!platform) return undefined;
+  return entries.find(r =>
+    r.signed?.manifest?.component === 'proxy-agent' &&
+    r.signed?.manifest?.version === version &&
+    (r.signed?.manifest?.os + '/' + r.signed?.manifest?.architecture) === platform
+  ) || entries.find(r =>
+    r.signed?.manifest?.component === 'proxy-agent' &&
+    (r.signed?.manifest?.os + '/' + r.signed?.manifest?.architecture) === platform
+  );
+}
+
+async function selectAgentVersionForUpgrade(versionItem: AgentReleaseVersion) {
+  if (agentUpgradeBusy.value) return;
+  agentUpgradeBusy.value = true;
+  try {
+    let entries: ReleaseEntry[] = [];
+    if (!versionItem.imported) {
+      entries = await nodeAPI.importAgentRelease(versionItem.version);
+      versionItem.imported = true;
+      await loadUpgradeContext();
+    } else {
+      await loadUpgradeContext();
+      entries = agentReleases.value;
+    }
+
+    if (agentUpgradeTargetNode.value) {
+      const node = agentUpgradeTargetNode.value;
+      const targetRel = findAgentReleaseForNode(node, versionItem.version, entries);
+      if (!targetRel) {
+        throw new Error(`找不到与服务器平台匹配的 ${versionItem.version} 版本`);
+      }
+      await agentUpdatesAPI.queue(node.id, targetRel.id, node.heartbeat!.current_revision!);
+      showToast(`已向「${node.name}」下发 Agent 升级任务 (v${versionItem.version})`);
+      agentUpgradeDialogVisible.value = false;
+    } else {
+      const eligible = eligibleOnlineNodes.value.filter(n => n.capabilities?.panel_catalogue_supported);
+      if (!eligible.length) {
+        throw new Error('没有符合升级条件的在线服务器');
+      }
+      let success = 0;
+      let failed = 0;
+      for (const node of eligible) {
+        try {
+          const targetRel = findAgentReleaseForNode(node, versionItem.version, entries);
+          if (!targetRel) throw new Error('无完全匹配的平台版本');
+          await agentUpdatesAPI.queue(node.id, targetRel.id, node.heartbeat!.current_revision!);
+          success++;
+        } catch {
+          failed++;
+        }
+      }
+      if (success > 0) {
+        showToast(`已成功向 ${success} 台在线服务器下发 Agent 升级任务${failed ? ` (${failed} 台失败)` : ''}`);
+        agentUpgradeDialogVisible.value = false;
+      } else {
+        showToast('批量升级任务下发失败，请检查各节点状态与版本配置', 'error');
+      }
+    }
+    void load();
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    agentUpgradeBusy.value = false;
+  }
+}
 const manualAgentNode = ref<NodeView | null>(null);
 const manualReleaseId = ref('');
 async function readAllNodes(): Promise<NodeView[]> {
@@ -1289,7 +1435,6 @@ async function loadUpgradeContext() {
       list.push(...next.items);
     }
     agentReleases.value = list;
-    releasesConfigured.value = first.configured;
   } catch (e) { error.value = (e as Error).message; showToast(error.value, 'error'); }
 }
 
@@ -1915,14 +2060,9 @@ function handleUpgradeSingle(node: NodeView) {
   }
 
   if (props.kind === 'agent') {
-    const release = findLatestAgentReleaseForNode(node, agentReleases.value);
-    if (!releasesConfigured.value) { showToast('中央尚未配置发布公钥', 'warning'); return; }
-    if (!release) {
-      manualAgentNode.value = node; manualReleaseId.value = '';
-      return;
-    }
-    singleAgentConfirmTarget.value = { node, release, revision };
-    singleAgentConfirmVisible.value = true;
+    agentUpgradeTargetNode.value = node;
+    agentUpgradeDialogVisible.value = true;
+    void loadAgentReleases();
   } else {
     openUpgradeCore(node);
   }
@@ -1942,12 +2082,9 @@ async function upgradeAll() {
   }
 
   if (props.kind === 'agent') {
-    if (!releasesConfigured.value) { showToast('中央尚未配置发布公钥', 'warning'); return; }
-    if (!latestAgentRelease.value) {
-      showToast('尚未在系统中登记可信 Agent 签名版本，请前往「系统管理 › 任务记录」登记签名清单', 'warning');
-      return;
-    }
-    batchAgentConfirmVisible.value = true;
+    agentUpgradeTargetNode.value = null;
+    agentUpgradeDialogVisible.value = true;
+    void loadAgentReleases();
   } else {
     if (!coreBatchComponents.value.length) {
       showToast('尚未有服务器上报已启用的内核，无法批量升级', 'warning');

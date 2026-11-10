@@ -687,3 +687,14 @@ for (const file of ['modules/users/pages/UserListPage.vue', 'modules/users/pages
   assert.doesNotMatch(read(file), /allowedProtocols/, file + ' no longer edits or filters by protocol');
 }
 console.log('PASS P1 USERS: no per-user protocol control');
+
+const nodeVersionPanel = read('modules/system/components/NodeVersionPanel.vue');
+assert.doesNotMatch(nodeVersionPanel, /中央尚未配置发布公钥/, 'no warnings about unconfigured release keys');
+assert.match(nodeVersionPanel, /importAgentRelease\(/, 'NodeVersionPanel imports official releases');
+assert.match(nodeVersionPanel, /panel_catalogue_supported/, 'reads panel_catalogue_supported capability');
+assert.match(nodeVersionPanel, /此 Agent 需先在服务器上运行一次 qui-update 升级到 1\.5\.0/, 'shows hint when Agent does not support panel catalogue');
+const nodesApiP2 = read('modules/nodes/api.ts');
+assert.match(nodesApiP2, /panel_catalogue_supported\?:\s*boolean/, 'NodeView capability includes panel_catalogue_supported');
+assert.match(nodesApiP2, /agentReleases/, 'nodeAPI exposes agentReleases');
+assert.match(nodesApiP2, /importAgentRelease/, 'nodeAPI exposes importAgentRelease');
+console.log('PASS P2 AGENT: one-click signed Agent upgrade and capability check');

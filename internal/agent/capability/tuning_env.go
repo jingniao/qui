@@ -59,40 +59,53 @@ func detectVirtualization(root string) string {
 	return "unknown"
 }
 
-func procSysReadOnly(root string) bool {
-	raw, err := os.ReadFile(filepath.Join(root, "proc/self/mountinfo"))
-	if err != nil {
-		return false
-	}
+type procMount struct {
+	path     string
+	readOnly bool
+}
+
+func procMounts(root string) []procMount {
+	raw, _ := os.ReadFile(filepath.Join(root, "proc/self/mountinfo"))
+	var mounts []procMount
 	for _, line := range strings.Split(string(raw), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 6 || fields[4] != "/proc/sys" {
+		if len(fields) < 6 || fields[4] != "/proc" && !strings.HasPrefix(fields[4], "/proc/") {
 			continue
 		}
-		if slices.Contains(strings.Split(fields[5], ","), "ro") {
-			return true
-		}
+		ro := slices.Contains(strings.Split(fields[5], ","), "ro")
 		if idx := slices.Index(fields, "-"); idx >= 0 && idx+3 < len(fields) {
-			if slices.Contains(strings.Split(fields[idx+3], ","), "ro") {
-				return true
-			}
+			ro = ro || slices.Contains(strings.Split(fields[idx+3], ","), "ro")
+		}
+		mounts = append(mounts, procMount{path: fields[4], readOnly: ro})
+	}
+	return mounts
+}
+
+func procPathReadOnly(mounts []procMount, path string) bool {
+	// mountinfo lists mounts in mount order, so a later mount stacked on the
+	// same point (>=) is the one that is visible.
+	longest, ro := 0, false
+	for _, mount := range mounts {
+		if len(mount.path) >= longest && (path == mount.path || strings.HasPrefix(path, mount.path+"/")) {
+			longest, ro = len(mount.path), mount.readOnly
 		}
 	}
-	return false
+	return ro
 }
 
 func tuningKeyStates(root string) []*pb.TuningKeyState {
-	ro := procSysReadOnly(root)
+	mounts := procMounts(root)
 	keys := tuningcontract.Keys()
 	out := make([]*pb.TuningKeyState, 0, len(keys))
 	for _, k := range keys {
-		p := filepath.Join(root, "proc/sys", strings.ReplaceAll(k, ".", "/"))
-		info, err := os.Stat(p)
+		// mountinfo uses namespace paths, independent of the fixture root.
+		p := "/proc/sys/" + strings.ReplaceAll(k, ".", "/")
+		info, err := os.Stat(filepath.Join(root, p))
 		present := err == nil && !info.IsDir()
 		out = append(out, &pb.TuningKeyState{
 			Key:      k,
 			Present:  present,
-			Writable: present && !ro,
+			Writable: present && !procPathReadOnly(mounts, p),
 		})
 	}
 	return out

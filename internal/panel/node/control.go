@@ -50,6 +50,7 @@ type Control struct {
 	mu               sync.Mutex
 	connected        map[string]*liveStream
 	RecoveryRedeploy func(context.Context, string) error
+	CataloguePort    func(context.Context) uint32
 	Notify           func(string)
 	DashboardNotify  func()
 
@@ -328,7 +329,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		return stream.Send(message)
 	}
-	if err := send(&pb.Welcome{MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: ""}); err != nil {
+	cataloguePort := uint32(0)
+	if c.CataloguePort != nil {
+		cataloguePort = c.CataloguePort(ctx)
+	}
+	if err := send(&pb.Welcome{MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: "", AgentCataloguePort: cataloguePort}); err != nil {
 		return err
 	}
 	type gatePacket struct {

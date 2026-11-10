@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -206,6 +207,17 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	mux := http.NewServeMux()
 	s.httpMux = mux
 	systemRepository := &system.Repository{Database: database, Reader: s.readPool}
+	control.CataloguePort = func(ctx context.Context) uint32 {
+		if endpoint, err := systemRepository.ReadInstallEndpoint(ctx); err == nil && endpoint.HTTPPort > 0 {
+			return uint32(endpoint.HTTPPort)
+		}
+		if _, portStr, err := net.SplitHostPort(c.HTTPAddress); err == nil {
+			if p, err := strconv.ParseUint(portStr, 10, 32); err == nil {
+				return uint32(p)
+			}
+		}
+		return 0
+	}
 	// Machine traffic keeps its days in the panel zone, read inside the same
 	// transaction as the heartbeat; the node module never imports system.
 	nodeRepository.Timezone = systemRepository.ReadTimezoneTx
@@ -218,11 +230,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		return nil, err
 	}
 	var releaseKeys map[string]release.TrustedKey
-	if len(c.ReleaseKeys) > 0 {
-		releaseKeys, err = release.PinnedKeys(c.ReleaseKeys)
-		if err != nil {
-			return nil, err
-		}
+	releaseKeys, err = release.PinnedKeys(release.EffectiveKeyPins(c.ReleaseKeys))
+	if err != nil {
+		return nil, err
 	}
 	nodeRepository.CertificateAudit = systemRepository
 	s.backupService = &system.BackupService{Repository: systemRepository, Source: backupArchive.Source{Database: database, Config: c, ConfigurationVault: configurationVault}, Directory: filepath.Join(filepath.Dir(c.Database), "backups"), Notify: func() { eventBus.Publish("backup_status", map[string]bool{"changed": true}) }}

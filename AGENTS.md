@@ -298,7 +298,7 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 节点名称；在线状态；公网 IP；操作系统；CPU 使用率；内存使用率；磁盘使用率；当前连接数；今日流量；Agent 版本；代理核心；核心版本；当前配置版本；最后心跳时间；本月整机流量（单张网卡的本期整机用量与可选额度，见第 21 节）。
 
-节点有两个地址字段（迁移 0135）。`publicIp` 是公网地址：Agent 心跳从默认路由网卡的全局单播地址里选（排除回环、链路本地、私网、100.64/10 与组播，IPv4 优先，否则首个公网 IPv6，没有就不填）；上报为空且库里为空时用控制连接的 gRPC 对端地址，同样只收公网地址（`pkg/contracts/netaddr` 一处判定，面板与 Agent 共用）。`publicIpSource` 说明来源：`manual` / `auto` / 空（没有地址）。Owner 在节点设置里填了 IP 就记为手工（`public_ip_manual`），心跳永不覆盖；清空则回到自动，下一次心跳再填。`connectHost` 是 Owner 选的客户端连接地址（域名或 IP，无协议、端口与方括号），可再清空。
+节点有两个地址字段（迁移 0135、0138）。`publicIp` 是公网地址：Agent 心跳（第 36 字段 `public_addresses`）上报当前机器的所有非回环公网全局单播地址（最多 16 个，包含网卡与对端源），面板在数据库保存为候选列表 `public_addresses_json` 并由接口暴露为 `publicAddresses` 数组；上报为空且库里为空时以控制连接的 gRPC 对端公网地址填入。Owner 可在节点设置里从候选地址列表中勾选 `publicIpSelected`，选定地址记为 `selected` 来源；设置里手填 IP 则记为 `manual`；清空则为 `auto` 自动推导（优先默认路由 IPv4，其次首个公网 IPv6，最后连接对端）。`publicIpSource` 取值统一为 `manual` / `selected` / `auto` / 空。若选定地址从当前心跳候选列表中消失，节点标记 `publicIpSelectionMissing=true` 提醒 Owner。节点登记接口支持可选 `connectHost`。`connectHost` 是 Owner 选的客户端连接地址（域名或 IP，无协议、端口与方括号），可再清空。
 
 客户端连接地址 = `connectHost` 非空则用它，否则用 `publicIp`；订阅、订阅预览与分享链接都按这个顺序，中转、隧道与画布继续用 `publicIp`，因为它们需要节点之间的地址。使用域名且入站 TLS 没有显式服务器名时，SNI 规则不变，不因连接地址是域名而新增 SNI。两者都为空时该节点不进订阅，订阅预览对每个这样的节点给出一条 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告（第 10.3 节）。
 
@@ -895,6 +895,8 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0135 `node_connect_address` | `nodes.public_ip_manual`（0/1，默认 0）与 `nodes.connect_host`（客户端连接地址，默认空串）；迁移把既有 `public_ip<>''` 的行回填为手工，因为此前只有 Owner 能写该列。心跳只在不手工时填 `public_ip`，语义见第 11.1 节 |
 | 0136 `inbound_tls_source` | `inbounds.tls_source`（`''`/`paste`/`self_signed`/`file`/`acme`，默认 `''`，CHECK 限定取值）；`''` 表示 0136 之前的行或不带证书的入站。证书本身在密封列里，SQL 无法据此回填，历史行在读取时按「有证书即 `paste`」解析（第 12 节）；`acme` 引用证书库（`certificate_id`，0137） |
 | 0137 `certificates` | `certificates`：域名 JSON（1–10 个，可带一个前导 `*.`）、状态（`pending`/`issuing`/`valid`/`failed`）、密封的证书与私钥（`{certificate_pem, private_key_pem}`，首次签发前为 NULL）、签发与到期时间、失败码、上次/下次尝试时间、尝试次数、`auto_dns` 与 `dns_node_id`；`inbounds.certificate_id` 引用证书行、默认 NULL，D2 才写入。域名格式、状态集合、错误码与密封材料可解密由面板与归档校验共同约束 |
+| 0138 `node_public_addresses` | `nodes.public_addresses_json`（文本 JSON，默认 `[]`，严格校验最多 16 项全局单播地址列表）与 `nodes.public_ip_selected`（文本，默认 `''`）。接口与心跳上报联动，设置支持选择候选公网 IP |
+| 0139 `notifications` | 4 张表：`notification_rules`（7 类默认规则、阈值、持续窗口、冷却分钟及 CHECK 约束）、`notification_channels`（AES-256-GCM 密封配置、末 4 位摘要、投递状态与时间）、`notifications`（通知记录，90 天保留自动清理）、`notification_state`（去重状态与冷却追踪） |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -957,7 +959,7 @@ DELETE /api/v1/nodes/{id}
 
 `GET /api/v1/nodes` 默认只返回未删除的节点；`?deleted=1` 只返回已删除的节点（Owner 与 Viewer 都可读）。`DELETE` 需要 Owner：未登记节点等同取消登记（记录移除），已登记节点执行逻辑删除，被引用时返回 409 `node_delete_blocked`，阻塞项（`blockers: [{kind,id,name}]`）位于错误体中（见第 11.3 节）。
 
-节点对象含 `publicIp`、`publicIpSource`（`manual`/`auto`/空）与 `connectHost`，含义与优先级见第 11.1 节。`PUT /api/v1/nodes/{id}` 的 `publicIp` 与 `connectHost` 都是可选字段：省略（或 JSON null）保留原值；`publicIp` 写非空 IP 记为手工并停用自动填写，写空串清除并恢复自动；`connectHost` 接受空串、IPv4/IPv6 字面量或域名（复用 `install_endpoint.host` 的 `^[A-Za-z0-9.-]+$` 与逐标签规则，落在 `netaddr.ValidHostName`），不接受协议、端口与方括号，非法值返回 400 `invalid_request`。保存仍记“修改节点”操作日志并要求 CSRF。
+节点对象含 `publicIp`、`publicIpSource`（`manual`/`selected`/`auto`/空）、`publicAddresses` 候选数组、`publicIpSelected`、`publicIpSelectionMissing` 与 `connectHost`，含义与优先级见第 11.1 节。`PUT /api/v1/nodes/{id}` 的 `publicIp`、`publicIpSelected` 与 `connectHost` 都是可选字段（`publicIpSelected` 必须是候选列表中存在的合法地址，或空串表示回到自动推导）；`POST /api/v1/nodes/enrollment-token` 支持在生成注册码时传入可选的 `connectHost`：省略（或 JSON null）保留原值；`publicIp` 写非空 IP 记为手工并停用自动填写，写空串清除并恢复自动；`connectHost` 接受空串、IPv4/IPv6 字面量或域名（复用 `install_endpoint.host` 的 `^[A-Za-z0-9.-]+$` 与逐标签规则，落在 `netaddr.ValidHostName`），不接受协议、端口与方括号，非法值返回 400 `invalid_request`。保存仍记“修改节点”操作日志并要求 CSRF。
 
 原位身份恢复：`POST /api/v1/nodes/{id}/recovery-token`（Owner＋CSRF，体 `{expiresInSeconds,revokeNow}`，0 或省略为 900 秒、范围 300–3600）201 返回只出现一次的 `enrollmentToken`、`expiresAt`、`install` 与 `purpose:"recover"`；`GET /api/v1/nodes/{id}/recovery-status`（Owner）返回最近一条恢复记录，无记录为 404。未登记、禁用或已删除节点返回 409 `node_not_enrolled`，存在未完成任务返回 409 `node_recovery_blocked`，`blockers:[{kind,id,name}]` 在错误体中（见第 11.3 节）。
 
@@ -1183,6 +1185,28 @@ POST   /portal/subscription/reset
 
 续期后的自动发布（D2，`internal/platform/server/certificate_deploy.go`）：证书发布器没有队列，每次检查都把证书库与各节点**已发布状态**比较——某节点已发布状态里含一个入站，其当前 `certificate_id` 指向某证书，而已发布的证书或私钥与证书库现值不同，且**已发布证书的 DNS 名称集合与证书库证书完全相同**，该节点即待发布（续期保持名称；Owner 把入站改指另一张证书但尚未发布时名称不同，属于未审阅的编辑，不会被自动推送，须手动发布，快照本身就带新证书；已发布 PEM 为空或无法解析也不算待发布）。对待发布节点，以其已发布状态为基线，只替换这些入站的 `CertificatePEM`／`PrivateKeyPEM`，用户、启用意图（沿用已发布修订的意图）与其他入站原样保留，创建说明为 `auto: certificate <第一个域名> renewed` 的修订（作者 `auto`）并部署。因此 Owner 手动发布（快照已带新证书）后发布器发现无差异、什么也不做；面板重启后第一次检查即找回重启前完成的续期。检查在启动时、每小时与每次续期完成时运行，且只在窗口内部署：窗口外的待发布节点等到窗口打开。节点忙（`ErrNodeBusy`）不计失败，下次检查继续并复用未部署的草稿；Agent 尚未应答时等待（节点离线则重连后收到，与其他修订相同）；部署失败或 Agent 回滚计一次失败，当前窗口内不再重试、下个窗口用新修订重试；同一节点连续 3 次失败后停止，发布 `system.alert`（`alert: certificate_deploy_failed`）并记操作日志“证书自动发布失败”，下一次续期得到新证书时重新开始。
 
+
+## 27.17 通知
+
+```text
+GET    /api/v1/notifications?unread=1&page=1&pageSize=20
+POST   /api/v1/notifications/read-all
+GET    /api/v1/notification-rules
+PUT    /api/v1/notification-rules
+GET    /api/v1/notification-channels
+POST   /api/v1/notification-channels
+PUT    /api/v1/notification-channels/{id}
+DELETE /api/v1/notification-channels/{id}
+POST   /api/v1/notification-channels/{id}/test
+```
+
+`GET /api/v1/notifications` 支持 Owner 与 Viewer：Viewer 角色仅返回允许的 4 类监控通知（`node_offline`、`cpu`、`memory`、`disk`），Owner 可查看全部通知（含 `public_ip`、`machine_traffic`、`system_alert`）；支持 `unread=1` 只看未读与分页参数，返回 `{items,total,unread}`。
+`POST /api/v1/notifications/read-all`：仅限 Owner＋CSRF，批量将全部未读通知标记为已读。
+`GET /api/v1/notification-rules` 与 `PUT /api/v1/notification-rules`：仅限 Owner，PUT 要求 CSRF。体 `{items:[Rule]}` 进行完整规则替换，包含 7 类规则的启用开关、阈值、持续分钟与冷却分钟，非法值返回 400 `invalid_request`，记操作日志“修改通知规则”。
+`GET /api/v1/notification-channels`：仅限 Owner，返回渠道列表，不包含任何明文密钥（仅显示末 4 位 `last4`）。
+`POST /api/v1/notification-channels`、`PUT /api/v1/notification-channels/{id}`、`DELETE /api/v1/notification-channels/{id}`：仅限 Owner＋CSRF。支持 `telegram`（Bot Token、Chat ID）与 `webhook`（须为 HTTPS URL）。PUT 中若省略 `config` 字段则保留原已保存配置，记操作日志“修改通知渠道”。
+`POST /api/v1/notification-channels/{id}/test`：仅限 Owner＋CSRF，立即向指定渠道发送一条测试通知并记录投递状态，响应 `{code}`（空串表示成功，否则为固定错误码）。
+
 # 28. gRPC 节点通信
 
 节点通信使用 Enroll 与双向流 Connect。
@@ -1192,6 +1216,8 @@ Agent 上报消息包括：
 Hello；Heartbeat；Capabilities；ApplyResult；HealthResult；TrafficBatch；AccessBatch；UpdateResult；CertificateRequest。
 
 Heartbeat 省略即缺测，实测 0 保留。v1.3 增加 `boot_id`（字段 34）与 `default_route_interface`（字段 35）供整机流量记账（第 21 节）：两者各自独立，读取失败只省略自己的字段，旧面板忽略未知字段。整机网卡的累计字节沿用既有 `interfaces`（字段 20）。
+
+Heartbeat 字段 36（`public_addresses`，repeated PublicAddress）由 Agent 填写：上报当前机器上所有非回环网卡的全部公网全局单播地址（最多 16 个，包含 address、source、family），供面板维护候选地址列表。
 
 `Heartbeat.public_ip`（字段 9）由 Agent 填写：它读默认路由网卡的地址列表（字段 35 的同一来源），用 `netaddr.Select` 取第一个公网 IPv4，否则第一个公网 IPv6，没有合格地址就留空，绝不发送私网、链路本地、回环、100.64/10 或组播地址，也不做任何外部查询。面板只在 `public_ip_manual=0` 时写入该值（手工地址不覆盖），上报为空且库中为空时改用控制连接的 gRPC 对端地址，同样按 `netaddr` 判定是否为公网（第 11.1 节）。
 
@@ -1242,6 +1268,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 - 用户凭据与节点间凭据分离、订阅 Token 的哈希查找与加密副本规则、节点私钥不上传中央端：见第 9.3 与 11.3 节。
 - 节点间 GOST 凭据与用户凭据隔离，隧道管理存 `tunnels.gost_material`，旧画布材料存 `canvas_tunnels.gost_material`；三节点按段独立 CA 与服务端/客户端叶子证书。Vault 密封、CA 私钥签发后丢弃、有效期 10 年；API/计划/日志只露代数、服务器名、到期与指纹。轮换换整套草稿，发布才生效；删除不会撤销离线节点仍生效的凭据（见[运维手册](docs/operations.md)第 20–21 节）。
+- 通知渠道配置（Telegram Bot Token、Chat ID、Webhook URL）加密保存在 `notification_channels.encrypted_config`，使用 `configuration.key` AES-256-GCM 密封；接口只暴露末 4 位 last4，永不向浏览器回显明文密钥。
 - 自动申请证书用的 Cloudflare API Token 与 ACME 账户私钥（ECDSA P-256）各自 vault 密封保存在 `system_settings` 的 `cloudflare_token`、`acme_account` 两行；接口只回“已设置”、末 4 位与验证时间，永不回显 Token 或私钥。保存前先向 Cloudflare 校验 Token；签发与续期的上游正文、带 Token 的链接与 Token 本身都不入库、不进日志、不回显。证书与私钥密封在 `certificates.encrypted_material`，只随加密备份与恢复离开面板（第 27.16 节）。
 - 敏感配置写入节点时限制文件权限
 - 配置和备份中的敏感字段加密保存
@@ -1320,6 +1347,8 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | certificates、inbounds.certificate_id | 面板自签发的证书库随加密备份、清单与校验保存；validateCertificates 要求域名 JSON 已是面板写出的规范形式（1–10 个、小写、可带一个 `*.`）、状态在集合内、错误码是已知固定码、时间列为 UTC、密封材料能用配置密钥打开、`inbounds.certificate_id` 必须指向存在行，0137 前无表合法并有一项计数。恢复保留归档行，`issuing` 改为 `failed`/`interrupted` 并按正常退避重试；恢复本身不触发申请。`system_settings` 的 `certificate_settings`、`cloudflare_token`、`acme_account` 随整库快照原样往返，密封值不需要重新加密 |
 | subscription_sources 的 latest_result_json/last_success_at | 加密备份与校验覆盖：结果必须是固定阶段/代码、counts 一致且诊断文本等于代码固定文本，超界或夹带任意文本拒绝整份归档；0133 前归档无该列仍合法，恢复按旧列复制，保留“未记录原因”，不自动抓取、不编造原因 |
 | node_identity_retirements、node_identity_recoveries | 作废指纹在恢复时并入当前库，只注册不复活：已作废的指纹既不能覆盖也不能写入当前身份；恢复记录以当前库为准，`issued` 统一改为已过期，不重发恢复码、不重签证书 |
+| node_public_addresses（nodes.public_addresses_json 与 public_ip_selected） | 随 nodes 主表加密备份；validateNodePublicAddresses 校验列表格式、项数不超过 16 项且均为合法单播 IP 与源标识，恢复保留归档选定地址 |
+| notifications、notification_rules、notification_channels、notification_state | 四表纳入加密备份；notification_channels 密封材料必须能由当前密钥打开，校验 rules 包含全部 7 类规则且无越界值；历史通知超过 90 天由后台自动 Prune |
 
 调度随停机/进程内恢复取消并等待退出，新实例仅一个循环。其他模块的会话结束、安全状态与撤销访问保守合并规则见第 26.9、29 节。
 

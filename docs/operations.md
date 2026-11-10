@@ -594,3 +594,29 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 “中转方案”只建代理中转：可从节点“添加中转”新建并预选当前节点为入口，出口可选 qui 入站或外部代理出站。qui 入站出口使用独立内部监听/凭据；外部出站须属于前一跳且满足 TCP/UDP，HTTP 不支持 UDP。relay/exit 实例可填 relayPortMode/relayPort，优先旧 tunnelPort；未设范围才保留 8443/51820 默认。旧 port_forward/gost 连接在迁移前只读保留，可删除，不可新增或改动。
 
 目标只能看到中继源地址，同一中继后的客户端在设备限制中合为一个来源；账户流量在目标计量，规则入口字节仅节点总量，中间/出口 relay 排除。UDP 经 TLS/TCP 封装，延迟可能受丢包和队头阻塞影响；监听健康不等于握手或目标可达，不承诺重启保留既有流或未测的 UDP 空闲寿命。
+
+
+## 22. 通知与告警（v1.5）
+
+### 22.1 规则与评估
+
+通知模块（`internal/panel/notification`）由后台工作循环每 60 秒运行一次规则评估：
+- **节点离线（`node_offline`）**：节点处于 offline 状态且超过持续时间（默认 3 分钟）没有心跳时触发告警；节点重新上线后发送恢复通知。
+- **CPU / 内存 / 磁盘占用（`cpu` / `memory` / `disk`）**：在指定持续窗口（默认 5 分钟，磁盘 0 分钟即单次采样）内，全部非空采样均达到或超过阈值（默认 90%）时触发告警；指标回落至阈值以下时发送恢复通知。
+- **公网 IP 变化（`public_ip`）**：探测到节点上报的候选公网地址与记录值不同时触发通知（首次启动记录 baseline，不发通知）。
+- **整机流量超额（`machine_traffic`）**：节点当前计费周期的整机用量达到额度阈值（默认 100%）时触发告警；重置周期后回落发恢复通知。
+- **系统告警（`system_alert`）**：自动接入内部 `system.alert` 事件（证书续期失败、证书发布失败、服务器续费提醒、自动额度发布失败等）。
+
+**冷却控制**：同一节点和规则类型在冷却时间（默认 30 分钟）内不重复发送告警通知。恢复通知（`resolved`）不受冷却限制。
+
+### 22.2 渠道配置与排查
+
+Owner 在「系统设置 → 通知」中配置外发渠道：
+- **Telegram Bot**：配置 `Bot Token` 与目标 `Chat ID`。面板通过 HTTPS POST 调用 Telegram Bot API `sendMessage` 发送通知。
+- **Webhook**：配置目标 URL（必须为 HTTPS）。面板向目标 Webhook 发送 JSON 格式告警消息。
+
+**投递错误码与排查**：
+- `channel_timeout`：向外部平台发起连接或等待响应超时（默认 10 秒超时限制）。检查面板服务器的网络出站连接及上游响应速度。
+- `channel_network`：网络连接失败（如 DNS 解析失败、TCP 连接被拒绝）。检查面板服务器的 DNS 配置与外部网络连通性。
+- `channel_http`：上游服务器返回 HTTP 4xx 或 5xx 错误响应（如 Webhook 接收端发生内部错误）。核对 Webhook 接收端服务日志。
+- `channel_rejected`：请求被拒绝或参数无效（例如 Telegram 返回 `{"ok": false, "description": "..."}`，如 Token 错误、Chat ID 不存在或机器人未加入群组；或 Webhook 使用了非 HTTPS 地址）。核对渠道 Token、Chat ID 与 URL 配置。

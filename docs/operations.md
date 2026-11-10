@@ -90,6 +90,7 @@ systemctl start proxy-agent.service
 - Agent 在应用配置时用 `filepath.EvalSymlinks` 解析两个路径，确认解析结果仍在该目录、文件可读、`tls.LoadX509KeyPair` 成功且叶子证书未过期；任一不满足就拒绝应用，按普通失败规则回滚到上一次成功的配置。私钥权限宽于 0640 只记一条 WARN（`journalctl -u proxy-agent` 里的 `certificate private key is readable beyond its owner and group`）。
 - 证书文件过期或丢失时，下一次应用失败并保留原配置；Agent 重启后仍保留的修订若引用过期或缺失的文件就无法渲染，该核心停到文件恢复为止，请在到期前续期再重启核心。
 - 首次使用需要 Agent 已上报 `tls_certificate_files_supported`；旧 Agent 保存这类入站会直接被面板拒绝，先升级 Agent。
+- 把证书与私钥放进该目录后，Agent 每 5 分钟重扫并在变化时重新上报能力，因此最多 5 分钟（或重启 Agent）后，编辑器的「查找证书」就能按域名列出它们；删除文件后同样最多 5 分钟从结果里消失。面板只读证书摘要，不读取也不上报私钥内容。
 
 **续期**：证书由 certbot、acme.sh 等外部工具续期后，**由 Owner 在「节点详情 → 重启核心」重启一次该节点的核心**，新证书才会生效。本版不做文件监视、也不会自动重启核心；sing-box 与 Xray 是否会自动重新加载同名文件中的新证书，须在 Linux 实机上验证后再改这段说明。**不要把证书文件改名轮换**：入站记录的是固定路径，改名等于让下次发布找不到文件。
 

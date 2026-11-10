@@ -382,6 +382,8 @@ v1.4 自建 VLESS 用户入站：Xray 支持 Reality TCP（无 flow/Vision）、
 
 TLS 入站的证书来源（v1.4.7 §3，C1 后端＋Agent）记在 `inbounds.tls_source`（迁移 0136）：`paste` 粘贴内容、`self_signed` 面板自签、`file` 节点上的文件、`acme` 引用面板自己申请的证书（第 27.16 节），`''` 为 0136 之前的历史行或不带证书的入站。该列只是面板元数据，不进 `desiredstate`（Agent 的 `DesiredState` 解码拒绝未知字段）。自签沿用内部中转的生成逻辑，有效期由参数区分：内部中转 1 年，用户入站 10 年（客户端会钉住证书）；证书的 Subject/SAN 取节点客户端连接地址（第 11.1 节的 `ConnectAddress()`），没有地址时保存返回 400「请先在节点设置里填写公网 IP 或客户端连接地址，再生成自签名证书」。写库仍是 CertificatePEM＋PrivateKeyPEM＋TrustedCAPEM＝同一张证书并设置 ServerName，所以订阅无需改动：URI/Base64 省略钉了 CA 的 Hysteria2/TUIC，sing-box 写 `tls.certificate`，mihomo 写 fingerprint。来源本来就是自签时编辑保留已发证书，`regenerateCertificate: true` 或从其他来源切到自签才签发新证书（例如连接地址变化后）。节点文件来源只保存两个路径（`certificate_path`／`private_key_path`）：仅限 TLS 入站、与粘贴材料互斥、必须同时填写、绝对且已规范（`path.Clean` 不变）、≤256 字节、位于 `/etc/proxy-agent/certs/` 下、不得含 `..`；出站永不携带。Agent 在渲染时用 `filepath.EvalSymlinks` 解析并确认仍在同一目录、文件可读、`tls.LoadX509KeyPair` 成功且叶子未过期，密钥权限宽于 0640 只记一条 WARN；任一失败按普通失败规则回滚。渲染用核心自身字段（sing-box `certificate_path`/`key_path`，Xray `certificateFile`/`keyFile`），原生 `check` 照常执行。文件来源受 `CoreCapability.tls_certificate_files_supported`（字段 12，`Capabilities` 字段 25 为单核标量形式）门禁，保存、快照与发布前三处一致拒绝旧 Agent。读取接口另有只读 `certificateInfo{subject,dnsNames,ipAddresses,notAfter,selfSigned,coverageWarning}`：用 `crypto/x509` 解析面板持有的证书，ServerName 与连接地址都不被覆盖（`VerifyHostname`）时给出中文提示；`file` 来源返回 null，因为面板读不到节点文件。证书文件过期或丢失时，下一次应用失败并保留原配置；Agent 重启后仍保留的修订若引用过期或缺失的文件就无法渲染，该核心停到文件恢复为止，请在到期前续期再重启核心。
 
+v1.5.0 §6 起编辑器按域名查找证书：TLS 区块先填「域名（服务器名称）」，点「查找证书」（输入框失焦也触发，400ms 防抖）后调用 `GET /api/v1/nodes/{id}/certificate-matches?domain=`，结果按「节点上覆盖该域名且未过期的证书文件 → 证书库里已签发的证书 → 已过期的节点文件 → 申请证书」排序显示；节点文件选项只在所属核心上报 `tls_certificate_files_supported` 时出现，旧 Agent 仍能走证书库与申请路径。选中节点文件或证书库证书即写入对应来源与路径／证书 ID；「申请证书」只在已配置 Cloudflare Token 且没有可用证书时出现，点击后在证书库创建该域名的申请并每 5 秒轮询，签发成功自动选中（`acme` 来源，由面板随配置下发，不往节点写文件），失败显示原因。自签与粘贴仍保留在「证书来源」下拉里。
+
 `acme` 来源（v1.4.7 §4，D2）：入站只保存 `certificate_id`（请求与读取字段 `certificateId`，指向证书库，迁移 0137），**不保存 PEM**——密封的 `encrypted_settings` 里没有证书副本，面板在读入站时把证书库里的证书与私钥填进设置，所以快照（`SnapshotIntent`，所有发布路径共用）、预览与差异看到的都是证书库当前内容；私钥同其他来源一样在普通读取、差异与预览里隐藏。保存校验：仅 TLS 入站（不含 Reality、不含内部中转）、必须选择存在且已签发（有证书与私钥）的证书，否则 400「所选证书尚未签发成功」等中文提示；不得同时粘贴私钥或填写节点文件路径；`server_name` 为空时取证书的第一个非通配域名；改用其他来源会清空 `certificate_id`，且不会把证书库的证书冻结成粘贴副本。快照遇到证书缺失或没有签发材料的 `acme` 入站直接失败，绝不把没有证书的入站发布到节点。`certificateInfo` 用证书库里的证书解析（`selfSigned` 为 false，覆盖提示照常按 ServerName 与连接地址判断）。`acme` 入站没有 `TrustedCAPEM`，订阅按公网可信证书输出，URI/Base64 也包含 Hysteria2/TUIC。Agent 收到的仍是普通 PEM，无需新能力。
 能力门禁独立于协议标志与版本号：`desiredstate.CoreSettingsCapability{core,settings_contract_version,combinations[]}` 按（协议、方向、安全、传输、flow）逐项声明。版本 0、缺失、未知版本、其他核心的上报以及未列出的组合一律不授权；Agent 版本文本、VLESS 入站标志、`multi_core_supported` 与 GOST 契约位都不能替代它。M1 已把该上报落到 `agentpb`：`CoreCapability.server_settings_contract_version`（字段 10）与 `server_settings_combinations`（字段 11）为逐核声明，`Capabilities` 的同名字段（23／24）是单核 Agent 的标量形式，均由 `scripts/generate-proto.sh` 生成、只做加法，旧 Agent／旧面板各自忽略或保留未知字段。Agent 的 `MultiRuntime.DetectCapabilities` 按各适配器上报复制到对应核心，`control.reportCapabilities` 的旧标量装饰同样保留；面板 `node.SettingsContractCapability` 只把上报转换为共享契约、不推断来源，`node.EnabledCores` 的单核回退也保留这些字段。上报结构在 `validateMultiCapabilities` 里用共享组合校验一次：组合缺版本、方向／传输非法、重复项或超上限都拒绝整条上报；未知版本仍被接受（不因未来版本断连）但不授权。当前 Xray／sing-box 适配器都没有渲染器，因此生产 Agent 上报版本 0 与空列表，面板保存（`proxy.ValidateInboundServerSettings`）、配置快照（`SnapshotIntent`）与发布前（`deployment.validateStateCoresTx`）三处一致拒绝 Reality／xhttp 设置；合成上报可完整传输并放行对应组合，真实启用仍待渲染器（M2／M4）。
 
@@ -956,6 +958,7 @@ POST   /api/v1/nodes/{id}/recovery-token
 GET    /api/v1/nodes/{id}/recovery-status
 PUT    /api/v1/nodes/{id}
 DELETE /api/v1/nodes/{id}
+GET    /api/v1/nodes/{id}/certificate-matches?domain=<域名>
 ```
 
 `GET /api/v1/nodes` 默认只返回未删除的节点；`?deleted=1` 只返回已删除的节点（Owner 与 Viewer 都可读）。`DELETE` 需要 Owner：未登记节点等同取消登记（记录移除），已登记节点执行逻辑删除，被引用时返回 409 `node_delete_blocked`，阻塞项（`blockers: [{kind,id,name}]`）位于错误体中（见第 11.3 节）。
@@ -965,6 +968,8 @@ DELETE /api/v1/nodes/{id}
 原位身份恢复：`POST /api/v1/nodes/{id}/recovery-token`（Owner＋CSRF，体 `{expiresInSeconds,revokeNow}`，0 或省略为 900 秒、范围 300–3600）201 返回只出现一次的 `enrollmentToken`、`expiresAt`、`install` 与 `purpose:"recover"`；`GET /api/v1/nodes/{id}/recovery-status`（Owner）返回最近一条恢复记录，无记录为 404。未登记、禁用或已删除节点返回 409 `node_not_enrolled`，存在未完成任务返回 409 `node_recovery_blocked`，`blockers:[{kind,id,name}]` 在错误体中（见第 11.3 节）。
 
 `GET /install/ca.pem` 无需登录，返回面板 Web 证书链顶层的 PEM（`application/x-pem-file`，`Cache-Control: no-store`），供节点安装脚本建立对面板证书的信任（见第 11.3 节）；开发模式或证书不可读时返回 404。
+
+`GET /api/v1/nodes/{id}/certificate-matches?domain=<域名>`（Owner；v1.5.0 §6）：按域名返回该节点可用的证书候选 `{domain, inventorySupported, nodeFiles, library, cloudflareConfigured}`。`nodeFiles` 只列覆盖该域名、带配对私钥的节点证书文件，字段是路径、DNS 名称、到期时间与是否过期，**绝不上报私钥内容**；按「未过期在前、到期晚的在前」排序。`library` 是证书库里已签发且覆盖该域名的证书。`inventorySupported` 为假（旧 Agent）时仍返回 `library` 与 `cloudflareConfigured`，编辑器据此只显示证书库与申请路径。域名用 `netaddr.ValidHostName` 校验，非法 400 `invalid_request`，已删除节点 404。
 
 metrics 与 tuning GET 均允许 Owner/Viewer；逻辑删除节点返回 404。metrics 默认 hours=24，合法范围 1–168；≤12 小时原始分钟点，>12 小时 epoch 对齐，intervalSeconds=ceil(hours×60/720)×60，sampleSeconds=60。响应 {intervalSeconds,sampleSeconds,points}；空 points 为 []，无测量字段为 null。桶内各字段对非 null 值取算术平均，计数/字节可能为小数，samples 为桶内行数。指标字段见第 11.2 节。
 
@@ -1227,6 +1232,8 @@ Heartbeat 字段 36（`public_addresses`，repeated PublicAddress）由 Agent �
 GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool）表示该 Agent 懂 GOST 组件的安装与移除——即使 GOST 尚未安装；`CoreCapability.gost_contract_version`（字段 9，uint32）表示 GOST 设置契约版本（0 = 不支持，1 = 基础转发，2 = 池/范围/限流，3 = 加密中继，4 = 中间 relay 的下一跳链；开发分支 Agent 报告 4，正式版 1.3.1 为 3）。隧道发布按各跳能力要求两节点 ≥3、三节点 ≥4。GOST 设置随既有 `ApplyCommand.desired_state_json` 下发，不占用独立字段；没有新的 Welcome 标志，多核心与节点流量协商照旧。面板把 Hello 标志持久化在 `nodes.gost_core_supported`，恢复时清零、重连刷新，不用 Agent 版本号文本推断；旧 Agent 无法收到 GOST 分配。
 
 节点证书文件的能力位（v1.4.7 §3）：`CoreCapability.tls_certificate_files_supported`（字段 12，bool）逐核声明该核心的渲染器能读节点上的证书与私钥文件；`Capabilities` 的同名字段（25）是单核 Agent 的标量形式，与 `forward_inbound_supported`（18／5）、`device_gate_supported`（17／6）同一写法，因为渲染按核心进行，逐核上报才作数。旧 Agent／旧面板各自忽略未知字段；面板 `node.SettingsContractCapability` 把该位并入共享的 `CoreSettingsCapability.certificate_files`，保存、配置快照与发布前三处由同一个 `RequireInboundServerSettings` 判断，因此没上报该位的 Agent 无法保存 `file` 来源。Xray、sing-box 适配器各自上报为真（GOST 不渲染 TLS 入站，保持假），原生 `check` 仍是最终门禁。
+
+节点证书文件清单（v1.5.0 §6）：`HostInfo.certificate_files`（字段 9，repeated `CertificateFileSummary`）与 `HostInfo.certificate_inventory_supported`（字段 10，bool）由 Agent 只读扫描 `/etc/proxy-agent/certs/` 上报：每条摘要含证书路径、私钥路径（仅表示是否有配对私钥）、Subject、SAN、到期时间与指纹，**绝不读取或上报私钥内容**；解析符号链接后路径必须仍在该目录，读取失败只省略该文件。清单每 5 分钟重扫，变化时重新上报能力（`control.reportCapabilities`）。面板持久化在 `nodes.capabilities_json` 并提供按域名查找（第 27.4 节）；旧 Agent 不上报该能力时编辑器只走证书库与申请路径。
 
 Agent 目录更新能力与端口协商（v1.5.0）：
 - `Capabilities.panel_catalogue_supported`（字段 26，bool）：Agent 声明支持从面板只读目录拉取官方签名清单与更新归档。

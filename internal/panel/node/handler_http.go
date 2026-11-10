@@ -37,6 +37,7 @@ type Handler struct {
 	Auth       *auth.Handler
 	Notify     func(string)
 	Disconnect func(string)
+	Certificates CertificateLibrary
 	// Tasks closes a deleted node's own coordination rows; the deployment module
 	// owns those tables. A nil field leaves them as they are.
 	Tasks Tasks
@@ -73,6 +74,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(h.putMeta), true))
 	mux.Handle("GET /api/v1/nodes/{id}/enrollment-status", h.Auth.Require(http.HandlerFunc(h.enrollmentStatus), true))
 	mux.Handle("GET /api/v1/nodes/{id}/certificate-status", h.Auth.Require(http.HandlerFunc(h.certificateStatus), true))
+	mux.Handle("GET /api/v1/nodes/{id}/certificate-matches", h.Auth.Require(http.HandlerFunc(h.certificateMatches), true))
 	mux.Handle("POST /api/v1/nodes/{id}/health-checks", h.Auth.Require(http.HandlerFunc(h.requestHealthCheck), true))
 	mux.Handle("GET /api/v1/nodes/{id}/health-checks", h.Auth.Require(http.HandlerFunc(h.listHealthChecks), true))
 	mux.Handle("GET /api/v1/nodes/{id}/deletion-preview", h.Auth.Require(http.HandlerFunc(h.deletionPreview), true))

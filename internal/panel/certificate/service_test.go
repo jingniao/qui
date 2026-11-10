@@ -471,3 +471,39 @@ func TestSweepQueuesOnlyDueCertificates(t *testing.T) {
 		t.Fatalf("queued: %v", queued)
 	}
 }
+
+func TestCoveringAndCloudflareConfigured(t *testing.T) {
+	fixture := newIssuanceFixture(t)
+	ctx := context.Background()
+
+	configured, err := fixture.service.CloudflareConfigured(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured {
+		t.Fatal("expected CloudflareConfigured to be true")
+	}
+
+	c1 := fixture.store(t, []string{"*.example.com"}, false)
+	fixture.store(t, []string{"other.com"}, false)
+	notAfter := Stamp(fixture.now.Add(30 * 24 * time.Hour))
+	if _, err := fixture.database.Exec("UPDATE certificates SET status=?,not_after=? WHERE id=?", StatusValid, notAfter, c1.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := fixture.service.Covering(ctx, "a.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].ID != c1.ID {
+		t.Fatalf("expected 1 match for c1, got %v", matches)
+	}
+
+	noMatches, err := fixture.service.Covering(ctx, "nomatch.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(noMatches) != 0 {
+		t.Fatalf("expected 0 matches, got %v", noMatches)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/id"
 )
 
@@ -255,4 +256,35 @@ func (s *Service) CertificateMaterial(ctx context.Context, certificateID string)
 		return "", "", false, err
 	}
 	return material.CertificatePEM, material.PrivateKeyPEM, true, nil
+}
+
+// Covering returns issued (valid) library certificates whose names cover domain.
+func (s *Service) Covering(ctx context.Context, domain string) ([]node.LibraryMatch, error) {
+	items, err := s.Repository.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	matches := []node.LibraryMatch{}
+	for _, c := range items {
+		if c.Status != StatusValid {
+			continue
+		}
+		if !node.CoversDomain(c.Domains, domain) {
+			continue
+		}
+		matches = append(matches, node.LibraryMatch{
+			ID:       c.ID,
+			Domains:  c.Domains,
+			NotAfter: c.NotAfter,
+		})
+	}
+	return matches, nil
+}
+
+func (s *Service) CloudflareConfigured(ctx context.Context) (bool, error) {
+	_, status, err := s.Repository.ReadCloudflare(ctx)
+	if err != nil {
+		return false, err
+	}
+	return status.Configured, nil
 }

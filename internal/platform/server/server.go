@@ -304,7 +304,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.certificates.Logger = logger
 	(&certificate.Handler{Service: s.certificates, Auth: authHandler, Actor: func(ctx context.Context) string { return auth.Actor(ctx).Username }}).Register(mux)
 	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository, BaseSettings: systemRepository}).Register(mux)
-	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments, Disconnect: control.Disconnect}
+	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments, Disconnect: control.Disconnect, Certificates: s.certificates}
 	nodeHandler.Install = s.installInfo
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)

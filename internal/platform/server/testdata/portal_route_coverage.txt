@@ -62,6 +62,7 @@ GET /api/v1/node-groups
 GET /api/v1/nodes
 GET /api/v1/nodes/machine-traffic
 GET /api/v1/nodes/{id}
+GET /api/v1/nodes/{id}/certificate-matches
 GET /api/v1/nodes/{id}/certificate-status
 GET /api/v1/nodes/{id}/cores/{component}/removals
 GET /api/v1/nodes/{id}/deletion-preview

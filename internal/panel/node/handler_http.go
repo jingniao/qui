@@ -119,6 +119,7 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name             string `json:"name"`
 		ExpiresInSeconds int    `json:"expiresInSeconds"`
+		ConnectHost      string `json:"connectHost"`
 	}
 	if err := httpapi.Decode(w, r, &body); err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
@@ -128,6 +129,11 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Node name must contain 1 to 120 bytes")
 		return
 	}
+	connectHost := strings.TrimSpace(body.ConnectHost)
+	if !validConnectHost(connectHost) {
+		httpapi.Error(w, 400, "invalid_request", "Invalid connect host: use a domain name or an IP literal without a scheme or port")
+		return
+	}
 	if body.ExpiresInSeconds == 0 {
 		body.ExpiresInSeconds = 3600
 	}
@@ -135,7 +141,7 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Enrollment expiry must be between 60 and 86400 seconds")
 		return
 	}
-	n, token, expires, err := h.Repository.CreateEnrollment(r.Context(), strings.TrimSpace(body.Name), time.Duration(body.ExpiresInSeconds)*time.Second)
+	n, token, expires, err := h.Repository.CreateEnrollment(r.Context(), strings.TrimSpace(body.Name), connectHost, time.Duration(body.ExpiresInSeconds)*time.Second)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -194,6 +200,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		AllowSubscription *bool   `json:"allowSubscription"`
 		Maintenance       *bool   `json:"maintenance"`
 		PublicIP          *string `json:"publicIp"`
+		PublicIPSelected  *string `json:"publicIpSelected"`
 		ConnectHost       *string `json:"connectHost"`
 		OutboundSourceIP  *string `json:"outboundSourceIp"`
 		OutboundInterface *string `json:"outboundInterface"`
@@ -212,11 +219,15 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "Invalid public IP")
 		return
 	}
+	if body.PublicIPSelected != nil && *body.PublicIPSelected != "" && net.ParseIP(*body.PublicIPSelected) == nil {
+		httpapi.Error(w, 400, "invalid_request", "Invalid selected public IP")
+		return
+	}
 	if body.ConnectHost != nil && !validConnectHost(strings.TrimSpace(*body.ConnectHost)) {
 		httpapi.Error(w, 400, "invalid_request", "Invalid connect host: use a domain name or an IP literal without a scheme or port")
 		return
 	}
-	settings := SettingsInput{Name: body.Name, Enabled: *body.Enabled, AllowSubscription: body.AllowSubscription, Maintenance: body.Maintenance, PublicIP: body.PublicIP, ConnectHost: body.ConnectHost, OutboundSourceIP: body.OutboundSourceIP, OutboundInterface: body.OutboundInterface, HostSourceIPv4: body.HostSourceIPv4, HostSourceIPv6: body.HostSourceIPv6}
+	settings := SettingsInput{Name: body.Name, Enabled: *body.Enabled, AllowSubscription: body.AllowSubscription, Maintenance: body.Maintenance, PublicIP: body.PublicIP, PublicIPSelected: body.PublicIPSelected, ConnectHost: body.ConnectHost, OutboundSourceIP: body.OutboundSourceIP, OutboundInterface: body.OutboundInterface, HostSourceIPv4: body.HostSourceIPv4, HostSourceIPv6: body.HostSourceIPv6}
 	if _, err := networkSettings(desiredstate.Network{}, settings); err != nil {
 		httpapi.Error(w, 400, "invalid_request", "Invalid outbound network settings")
 		return
@@ -359,6 +370,10 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, ErrNodeNotEnrolled) {
 		httpapi.Error(w, 409, "node_not_enrolled", err.Error())
+		return
+	}
+	if errors.Is(err, ErrSettings) {
+		httpapi.Error(w, 400, "invalid_request", "Invalid node settings")
 		return
 	}
 	if errors.Is(err, ErrNodeDeleted) {

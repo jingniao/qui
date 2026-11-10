@@ -11,6 +11,7 @@ import (
 // would see a schema it did not write.
 func rewindCertificates(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindNodePublicAddresses(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0137_certificates.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

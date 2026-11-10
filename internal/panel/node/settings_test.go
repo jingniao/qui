@@ -129,3 +129,80 @@ func TestSettingsStoreOutboundNetworkAndRejectInvalidValues(t *testing.T) {
 		t.Fatalf("rejected settings changed the node: %+v %v", after, err)
 	}
 }
+
+func TestSelectPublicIPMustBeACandidate(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	r := &Repository{Database: database}
+	n, _, _, err := r.CreateEnrollment(ctx, "CandidateNode", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	candJSON := `[{"address":"203.0.113.10","source":"peer","family":"ipv4","lastSeen":"2026-11-09T00:00:00Z"}]`
+	if _, err := database.ExecContext(ctx, "UPDATE nodes SET public_addresses_json=?, public_ip=? WHERE id=?", candJSON, "203.0.113.10", n.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Selecting candidate succeeds
+	validCandidate := "203.0.113.10"
+	if err := r.UpdateSettings(ctx, n.ID, SettingsInput{Name: "CandidateNode", Enabled: true, PublicIPSelected: &validCandidate}); err != nil {
+		t.Fatalf("selecting candidate failed: %v", err)
+	}
+	stored, err := r.Get(ctx, n.ID)
+	if err != nil || stored.PublicIP != "203.0.113.10" || stored.PublicIPSelected != "203.0.113.10" || stored.PublicIPSource != "selected" {
+		t.Fatalf("unexpected stored node after select candidate: %+v, err: %v", stored, err)
+	}
+
+	// 2. Selecting non-candidate that does not equal public_ip fails
+	notCandidate := "198.51.100.99"
+	if err := r.UpdateSettings(ctx, n.ID, SettingsInput{Name: "CandidateNode", Enabled: true, PublicIPSelected: &notCandidate}); !errors.Is(err, ErrSettings) {
+		t.Fatalf("selecting non-candidate expected ErrSettings, got %v", err)
+	}
+
+	// 3. Selecting IP equal to current public_ip succeeds even if not in candidate list
+	if _, err := database.ExecContext(ctx, "UPDATE nodes SET public_ip=? WHERE id=?", "198.51.100.50", n.ID); err != nil {
+		t.Fatal(err)
+	}
+	currentIP := "198.51.100.50"
+	if err := r.UpdateSettings(ctx, n.ID, SettingsInput{Name: "CandidateNode", Enabled: true, PublicIPSelected: &currentIP}); err != nil {
+		t.Fatalf("selecting current public_ip failed: %v", err)
+	}
+	stored, err = r.Get(ctx, n.ID)
+	if err != nil || stored.PublicIP != "198.51.100.50" || stored.PublicIPSelected != "198.51.100.50" {
+		t.Fatalf("unexpected stored node after select current public_ip: %+v, err: %v", stored, err)
+	}
+}
+
+func TestSelectEmptyReturnsToAutomatic(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	r := &Repository{Database: database}
+	n, _, _, err := r.CreateEnrollment(ctx, "AutoNode", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	candJSON := `[{"address":"203.0.113.10","source":"peer","family":"ipv4","lastSeen":"2026-11-09T00:00:00Z"}]`
+	if _, err := database.ExecContext(ctx, "UPDATE nodes SET public_addresses_json=?, public_ip=?, public_ip_selected=? WHERE id=?", candJSON, "203.0.113.10", "203.0.113.10", n.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	empty := ""
+	if err := r.UpdateSettings(ctx, n.ID, SettingsInput{Name: "AutoNode", Enabled: true, PublicIPSelected: &empty}); err != nil {
+		t.Fatalf("clearing selected public IP failed: %v", err)
+	}
+
+	stored, err := r.Get(ctx, n.ID)
+	if err != nil || stored.PublicIPSelected != "" || stored.PublicIP != "203.0.113.10" || stored.PublicIPSource != "auto" {
+		t.Fatalf("unexpected stored node after clearing selected IP: %+v, err: %v", stored, err)
+	}
+}

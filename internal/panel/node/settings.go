@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"context"
 	"database/sql"
 	"errors"
@@ -18,6 +19,7 @@ type SettingsInput struct {
 	AllowSubscription *bool
 	Maintenance       *bool
 	PublicIP          *string
+	PublicIPSelected  *string
 	ConnectHost       *string
 	OutboundSourceIP  *string
 	OutboundInterface *string
@@ -56,7 +58,10 @@ func networkSettings(stored desiredstate.Network, input SettingsInput) (desireds
 // heartbeat fills the address again.
 func (r *Repository) UpdateSettings(ctx context.Context, id string, input SettingsInput) error {
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || len(input.Name) > 120 || input.PublicIP != nil && *input.PublicIP != "" && net.ParseIP(*input.PublicIP) == nil || input.ConnectHost != nil && !validConnectHost(strings.TrimSpace(*input.ConnectHost)) {
+	if input.Name == "" || len(input.Name) > 120 ||
+		(input.PublicIP != nil && *input.PublicIP != "" && net.ParseIP(*input.PublicIP) == nil) ||
+		(input.PublicIPSelected != nil && *input.PublicIPSelected != "" && net.ParseIP(*input.PublicIPSelected) == nil) ||
+		(input.ConnectHost != nil && !validConnectHost(strings.TrimSpace(*input.ConnectHost))) {
 		return ErrSettings
 	}
 	tx, err := r.Database.BeginTx(ctx, nil)
@@ -65,9 +70,9 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	}
 	defer tx.Rollback()
 	var allow, maintenance, wasEnabled, manual bool
-	var publicIP, connectHost, deleted, selected string
+	var publicIP, connectHost, deleted, selected, candidatesJSON string
 	var network desiredstate.Network
-	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,public_ip_manual,connect_host,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,coalesce(deleted_at,''),public_ip_selected FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &manual, &connectHost, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6, &deleted, &selected); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,public_ip_manual,connect_host,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,coalesce(deleted_at,''),public_ip_selected,public_addresses_json FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &manual, &connectHost, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6, &deleted, &selected, &candidatesJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -83,11 +88,42 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	if input.Maintenance != nil {
 		maintenance = *input.Maintenance
 	}
-	if input.PublicIP != nil {
-		publicIP = *input.PublicIP
-		manual = publicIP != ""
-		selected = publicIP
+
+	var candidates []PublicAddress
+	if candidatesJSON != "" {
+		_ = json.Unmarshal([]byte(candidatesJSON), &candidates)
 	}
+
+	if input.PublicIPSelected != nil {
+		target := strings.TrimSpace(*input.PublicIPSelected)
+		if target == "" {
+			selected = ""
+			manual = false
+			publicIP = effectivePublicIP("", candidates)
+		} else {
+			matched := (target == publicIP)
+			if !matched {
+				for _, c := range candidates {
+					if c.Address == target {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				return ErrSettings
+			}
+			selected = target
+			publicIP = target
+			manual = false
+		}
+	} else if input.PublicIP != nil {
+		target := strings.TrimSpace(*input.PublicIP)
+		publicIP = target
+		manual = target != ""
+		selected = target
+	}
+
 	if input.ConnectHost != nil {
 		connectHost = strings.TrimSpace(*input.ConnectHost)
 	}

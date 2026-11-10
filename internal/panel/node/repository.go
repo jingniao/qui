@@ -84,7 +84,17 @@ func RandomID() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
-func (r *Repository) CreateEnrollment(ctx context.Context, name string, duration time.Duration) (Node, string, time.Time, error) {
+func (r *Repository) CreateEnrollment(ctx context.Context, name string, args ...any) (Node, string, time.Time, error) {
+	var connectHost string
+	var duration time.Duration
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case string:
+			connectHost = v
+		case time.Duration:
+			duration = v
+		}
+	}
 	id, err := RandomID()
 	if err != nil {
 		return Node{}, "", time.Time{}, err
@@ -95,13 +105,13 @@ func (r *Repository) CreateEnrollment(ctx context.Context, name string, duration
 	}
 	now := time.Now().UTC()
 	expires := now.Add(duration)
-	n := Node{ID: id, Name: name, Status: "pending", Enabled: true, AllowSubscription: true, CreatedAt: timestamp(now)}
+	n := Node{ID: id, Name: name, Status: "pending", Enabled: true, AllowSubscription: true, CreatedAt: timestamp(now), ConnectHost: connectHost}
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return Node{}, "", expires, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, "INSERT INTO nodes(id,name,status,created_at) VALUES(?,?,?,?)", id, name, "pending", n.CreatedAt); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO nodes(id,name,status,created_at,connect_host) VALUES(?,?,?,?,?)", id, name, "pending", n.CreatedAt, connectHost); err != nil {
 		return Node{}, "", expires, err
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO node_enrollment_tokens(token_hash,node_id,expires_at) VALUES(?,?,?)", Hash(token), id, timestamp(expires)); err != nil {

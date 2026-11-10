@@ -393,6 +393,8 @@ M1 复核修正：Reality server names 只接受具体主机名或 IP，不接�
 
 M4（sing-box Reality 适配，待复核与 Linux 门禁）覆盖前述 M1 的 sing-box 渲染器缺席状态：Agent 实现 VLESS Reality + TCP 的无 flow 与 Vision，先用自身类型化渲染器和安装核心的原生 `check` 逐项探测，成功才上报对应契约。仅单个具体 server name，ShortID 列表完整映射；多名称、冲突的旧 server name、Reality+gRPC 与 xhttp 显式拒绝。Windows/amd64 固定官方 1.14.3 已独立验证回环认证连接、错误凭据和密钥回滚；官方无用户统计构建仍显示未知，不因 Reality 能力推断计量。此处只是 Agent 适配器能力，订阅映射、UI、Linux／统计构建／设备门控验收另行记录，见 [M4 报告](docs/v1.4-m4-singbox-reality.md)。
 
+Hysteria2 端口跳跃（v1.5.0 §7）：入站 `settings.quic` 可带 `hop_port_start`、`hop_port_end`、`hop_interval_seconds`。仅 Hysteria2 **入站**、仅 sing-box 核心；范围 1–65535、`end > start`、最多 10000 个端口、不得包含入站自身端口，间隔 5–300 秒（0 用默认 30，只用于订阅）。`Capabilities.port_hop_supported`（字段 28）由 Agent 在 host-network helper 已安装时上报；面板在保存、`SnapshotIntent` 与发布前（`validateStateCoresTx`）三处一致拒绝旧 Agent（`port_hop_unsupported`）。面板端口冲突用 `desiredstate.ClaimedPorts`（监听端口＋跳跃段），Agent 的监听预留仍用 `ListenPorts`；helper 的 `inet proxy_agent_hop` 表整表替换、无跳跃入站时删除。订阅输出：mihomo `ports`/`hop-interval`，sing-box `server_ports`/`hop_interval`，URI `mport`；legacy Clash 本就不输出 Hysteria2。NAT 主机的跳跃段必须在服务商放行的端口内，主机防火墙需放行该段 UDP。
+
 # 13. 出站代理模块
 
 出站表示节点收到用户流量后，以什么方式继续访问。
@@ -662,6 +664,7 @@ success 仅证明镜像切换；须等 Capabilities.cores 出现组件才允许�
 **禁止**任意 Shell、Web Terminal、任意命令、上传脚本执行与未定义远程操作。只允许：应用/回滚版本、重启/重载核心、健康检查、证书轮换、Agent/核心更新与核心移除，以及以下固定操作：
 
 - 强制出站源地址：固定 nft 规则，独立 oneshot，仅 CAP_NET_ADMIN。
+- 端口跳跃：同一个 host-network helper 额外维护 `inet proxy_agent_hop` 一张表（prerouting，`udp dport <start>-<end> redirect to :<port>`），整表替换、无跳跃入站时删除；仍是同一个固定 oneshot、仅 CAP_NET_ADMIN，不新增单元，也不引入任意命令。
 - 调优/清除：13 个白名单 sysctl 键及边界；root helper 直接写 procfs、读回校验、原子保存 99-proxy-tuning.conf，失败恢复原值，clear 恢复首次快照；无 shell/任意 sysctl（第 22.0、30 节）。
 - TTL 设备门控：Xray 官方运行时规则 API / sing-box Clash 关连接，不发 Revision/不重启。
 - TCP-connect：只接受已解析 IP、端口、次数、超时、截止时间，Agent 再检，最多 10 次、每次 3 秒，无 shell。
@@ -1239,6 +1242,7 @@ Agent 目录更新能力与端口协商（v1.5.0）：
 - `Capabilities.panel_catalogue_supported`（字段 26，bool）：Agent 声明支持从面板只读目录拉取官方签名清单与更新归档。
 - `Capabilities.domain_keyword_supported`（字段 27，bool）与 `CoreCapability.domain_keyword_supported`（字段 13，bool）：逐核声明该核心的路由渲染器支持域名关键字（domain keyword）匹配规则。Xray 与 sing-box 各自上报为真，GOST 保持为假。
 - `Welcome.agent_catalogue_port`（字段 22，uint32）：面板告知 Agent 托管只读签名目录的 HTTP/HTTPS 端口号（未配置安装端点时取面板 Web 监听端口）。旧 Agent 忽略未知字段。
+- `Capabilities.port_hop_supported`（字段 28，bool）：Agent 声明 host-network helper 已安装，可维护 Hysteria2 跳跃表（第 12 节）。旧 Agent 不上报，面板在保存、快照与发布前三处拒绝跳跃入站。
 
 中央端下发消息包括：
 
@@ -1323,7 +1327,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 | /var/lib/proxy-agent/runtime/<core>/ | 逐核心运行状态、日志、临时文件 |
 | /var/lib/proxy-agent/host-network/、tuning/ | Agent 的 desired.json 请求与 helper 的 status.json 回执 |
 
-强制出站 helper：proxy-agent-host-network.service（oneshot，仅 CAP_NET_ADMIN）执行 `proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，.path 监视并开机重放，只维护 nft 表 inet proxy_agent_source；卸载删除表/单元。OpenRC 的 /etc/init.d/proxy-agent-host-network 监管 /usr/local/lib/proxy-agent/host-network-watch（busybox inotifyd）。Agent 本身由 systemd 或 /etc/init.d/proxy-agent 的 supervise-daemon 管理。
+强制出站 helper：proxy-agent-host-network.service（oneshot，仅 CAP_NET_ADMIN）执行 `proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，.path 监视并开机重放，只维护 nft 表 inet proxy_agent_source 与 inet proxy_agent_hop（Hysteria2 端口跳跃，第 12 节）；卸载删除表/单元。OpenRC 的 /etc/init.d/proxy-agent-host-network 监管 /usr/local/lib/proxy-agent/host-network-watch（busybox inotifyd）。Agent 本身由 systemd 或 /etc/init.d/proxy-agent 的 supervise-daemon 管理。
 
 调优 helper：Agent 写 0600 请求；root oneshot proxy-agent-tuning.service/.path 执行 `--apply-tuning /var/lib/proxy-agent/tuning`。CAP_NET_ADMIN＋CAP_DAC_OVERRIDE（读写 Agent 0700/0600 目录），fs.file-max 靠 root 权限。systemd 仅开放固定 procfs 键、/etc/sysctl.d、请求目录；OpenRC 的 proxy-agent-tuning 监管 tuning-watch，无文件系统命名空间隔离。root 0600 的 /etc/sysctl.d/.proxy-tuning-snapshot.json 保存原值/管理键，flock 串行，按 request_id 回逐键结果，Agent 最多等 30 秒，超时未确认。clear/空配置删 99-proxy-tuning.conf 并恢复原值；卸载先恢复再移单元。写入拒绝即失败，不扩权/加载模块。主机信息随能力刷新，不可读心跳值未知；磁盘与 disk_percent 均指状态目录文件系统。
 

@@ -162,6 +162,8 @@ Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组
 
 格式别名、预览警告与显式 `?format=` 优先规则见 AGENTS §10.3；UA 表仍为空，不能宣称客户端自动识别通过。每格式按自己能力过滤，不把不支持协议改写为另一协议。
 
+Hysteria2 端口跳跃（v1.5.0 §7）只在入站设置了跳跃段时输出，未设置时各格式输出逐字不变：mihomo（Clash Meta）写 `ports: "<start>-<end>"` 与 `hop-interval: <秒>`；sing-box 写 `server_ports: ["<start>:<end>"]` 与 `hop_interval: "<秒>s"`；URI 查询参数写 `mport=<start>-<end>`；legacy Clash 本来就不输出 Hysteria2。间隔默认 30 秒。左侧「Hysteria2、TUIC」行的省略规则对跳跃端点继续有效（固定 CA 的端点仍不进 URI/sing-box 片段）。
+
 linked 中转端点来自规则成功发布快照，且须启用/对用户可见并通过目标入站授权与凭据检查；保留协议字段，仅换入口地址/端口，补显式原 TLS server name。命名为目标端点名追加 ` · 经 <入口节点>`，原端口消歧保留。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality/xhttp 中转保留目标公开参数与原 SNI；xhttp 限 TCP，并继续执行各格式省略边界。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
 
 xhttp 前置 CDN 时节点看到边缘地址，源地址设备估计可能合并或分散客户端。目标看到中继源地址，设备限制把同一中继后的客户端合为一个来源；账户额度仍在目标计量，规则转发只计节点总量，中间/出口 relay 服务排除。

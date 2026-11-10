@@ -337,6 +337,22 @@ cat /var/lib/proxy-panel/panel-update/request.json /var/lib/proxy-panel/panel-up
 - **备份与回滚和手工 `qui-update --component panel` 完全一致**：更新前把数据库备份为 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间>.db`；新版本 10 秒内重启、版本不符或 `install.sh` 失败都会回滚到旧程序，并把新版本写过的数据库保留为 `failed-update-<目标版本>-<时间>.db`。要指定版本、降级或跨迁移回退，仍用命令行 [`--version`/`--database`](deployment.md#51-面板降级与数据库回退)。
 - `uninstall.sh panel` 会先停用 path 单元，再删除两个单元与 helper，保留请求目录与 `panel-update.log`。重装后能力随 `install.sh` 一起回来；已有面板仍需先用 shell 跑一次 `qui-update`。
 
+## Hysteria2 端口跳跃（v1.5.0）
+
+入站编辑器里的「端口跳跃」只在节点 Agent 上报 `port_hop_supported`（host-network helper 已安装）时出现；旧 Agent 先升级。填写起始/结束端口与间隔（5–300 秒，默认 30），跳跃段最多 10000 个端口，不能包含入站自身端口，也不能与同节点其他入站的端口或跳跃段重叠。
+
+**防火墙与 NAT**：节点防火墙必须放行整段 UDP；服务商只映射了部分端口的 NAT 主机（例如只放行 21411–21419）必须把跳跃段限制在放行的端口内，否则客户端连不上。跳跃段由 helper 用 nftables `redirect` 转到入站监听端口，入站本身仍只监听单个端口。
+
+**排查**：
+
+```sh
+nft list table inet proxy_agent_hop     # 规则与计数器；无输出表示当前没有跳跃入站
+journalctl -u proxy-agent-host-network -n 100
+cat /var/lib/proxy-agent/host-network/desired.json /var/lib/proxy-agent/host-network/status.json
+```
+
+删除最后一个跳跃入站并发布后，`nft list tables` 不应再有 `proxy_agent_hop`；回滚到含跳跃的修订会恢复。helper 单元由 `.path` 监视 desired 文件，重启 Agent 或主机后规则按最后成功修订重放；必要时 `systemctl restart proxy-agent-host-network.path`。订阅输出见[协议矩阵](protocol-support-matrix.md)：mihomo `ports`/`hop-interval`、sing-box `server_ports`/`hop_interval`、URI `mport`；legacy Clash 不输出 Hysteria2。
+
 ## 11. 已移除的运维操作（不要再找这些命令）
 
 精简重构删掉了以下 Agent 本地运维模式（Phase 9/12 删除，`cmd/agent` 现在只有 14 个参数，含服务器强制出站的 `--apply-host-network`）。它们**不再存在**，对应的替代做法如下：

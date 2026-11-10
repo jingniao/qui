@@ -606,6 +606,9 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	if err := state.Save(sequence); err != nil {
 		return err
 	}
+	if err := agenthost.SaveCataloguePort(filepath.Dir(state.Directory), welcome.GetWelcome().AgentCataloguePort); err != nil {
+		return err
+	}
 	deviceGate := func(message *pb.ServerMessage) {
 		if message.NodeId != state.NodeID || !welcome.GetWelcome().DeviceGateSupported {
 			return

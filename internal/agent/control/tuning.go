@@ -17,6 +17,7 @@ func reportCapabilities(s *capability.Sampler, c *capabilityState) *pb.Capabilit
 	}
 	result.Host = s.HostInfo()
 	result.TuningSupported = tuning.Supported()
+	result.PanelCatalogueSupported = true
 	return result
 }
 

@@ -65,7 +65,14 @@ func QueueUpdate(configPath, id string, revision int64, signed release.Signed) (
 	if r.Validate() != nil {
 		return r, release.ErrUpdate
 	}
-	keys, err := release.PinnedKeys(c.Updates.Keys)
+	updates, ok, err := EffectiveUpdates(c)
+	if err != nil {
+		return r, err
+	}
+	if !ok {
+		return r, errors.New("release trust requires between 1 and 32 pinned public keys")
+	}
+	keys, err := release.PinnedKeys(updates.Keys)
 	if err != nil {
 		return r, err
 	}
@@ -285,7 +292,11 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	if err != nil || !os.SameFile(a, b) {
 		return reject("scope_mismatch")
 	}
-	keys, err := release.PinnedKeys(c.Updates.Keys)
+	updates, ok, err := EffectiveUpdates(c)
+	if err != nil || !ok {
+		return reject("trust_failed")
+	}
+	keys, err := release.PinnedKeys(updates.Keys)
 	if err != nil {
 		return reject("trust_failed")
 	}
@@ -299,11 +310,11 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	if err != nil || observed != request.Revision {
 		return reject("scope_mismatch")
 	}
-	trust, err := c.Updates.TrustConfig()
+	trust, err := updates.TrustConfig()
 	if err != nil {
 		return reject("trust_failed")
 	}
-	downloader, err := updater.NewDownloader(c.Updates.Catalogue, trust)
+	downloader, err := updater.NewDownloader(updates.Catalogue, trust)
 	if err != nil {
 		return reject("download_failed")
 	}

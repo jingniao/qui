@@ -1010,6 +1010,7 @@ type Capabilities struct {
 	ServerSettingsContractVersion  uint32                 `protobuf:"varint,23,opt,name=server_settings_contract_version,json=serverSettingsContractVersion,proto3" json:"server_settings_contract_version,omitempty"`
 	ServerSettingsCombinations     []*SettingsCombination `protobuf:"bytes,24,rep,name=server_settings_combinations,json=serverSettingsCombinations,proto3" json:"server_settings_combinations,omitempty"`
 	TlsCertificateFilesSupported   bool                   `protobuf:"varint,25,opt,name=tls_certificate_files_supported,json=tlsCertificateFilesSupported,proto3" json:"tls_certificate_files_supported,omitempty"`
+	PanelCatalogueSupported        bool                   `protobuf:"varint,26,opt,name=panel_catalogue_supported,json=panelCatalogueSupported,proto3" json:"panel_catalogue_supported,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -1215,6 +1216,13 @@ func (x *Capabilities) GetServerSettingsCombinations() []*SettingsCombination {
 func (x *Capabilities) GetTlsCertificateFilesSupported() bool {
 	if x != nil {
 		return x.TlsCertificateFilesSupported
+	}
+	return false
+}
+
+func (x *Capabilities) GetPanelCatalogueSupported() bool {
+	if x != nil {
+		return x.PanelCatalogueSupported
 	}
 	return false
 }
@@ -3266,6 +3274,7 @@ type Welcome struct {
 	DeviceGateSupported                 bool                   `protobuf:"varint,19,opt,name=device_gate_supported,json=deviceGateSupported,proto3" json:"device_gate_supported,omitempty"`
 	MultiCoreSupported                  bool                   `protobuf:"varint,20,opt,name=multi_core_supported,json=multiCoreSupported,proto3" json:"multi_core_supported,omitempty"`
 	NodeTrafficSupported                bool                   `protobuf:"varint,21,opt,name=node_traffic_supported,json=nodeTrafficSupported,proto3" json:"node_traffic_supported,omitempty"`
+	AgentCataloguePort                  uint32                 `protobuf:"varint,22,opt,name=agent_catalogue_port,json=agentCataloguePort,proto3" json:"agent_catalogue_port,omitempty"`
 	unknownFields                       protoimpl.UnknownFields
 	sizeCache                           protoimpl.SizeCache
 }
@@ -3445,6 +3454,13 @@ func (x *Welcome) GetNodeTrafficSupported() bool {
 		return x.NodeTrafficSupported
 	}
 	return false
+}
+
+func (x *Welcome) GetAgentCataloguePort() uint32 {
+	if x != nil {
+		return x.AgentCataloguePort
+	}
+	return 0
 }
 
 type DeviceGateCommand struct {
@@ -5403,7 +5419,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12\x1a\n" +
 	"\bsecurity\x18\x03 \x01(\tR\bsecurity\x12\x1c\n" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12\x12\n" +
-	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xd4\v\n" +
+	"\x04flow\x18\x05 \x01(\tR\x04flow\"\x90\f\n" +
 	"\fCapabilities\x12\x1b\n" +
 	"\tcore_name\x18\x01 \x01(\tR\bcoreName\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12G\n" +
@@ -5430,7 +5446,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x14multi_core_supported\x18\x16 \x01(\bR\x12multiCoreSupported\x12G\n" +
 	" server_settings_contract_version\x18\x17 \x01(\rR\x1dserverSettingsContractVersion\x12l\n" +
 	"\x1cserver_settings_combinations\x18\x18 \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\x12E\n" +
-	"\x1ftls_certificate_files_supported\x18\x19 \x01(\bR\x1ctlsCertificateFilesSupported\"\xc4\x05\n" +
+	"\x1ftls_certificate_files_supported\x18\x19 \x01(\bR\x1ctlsCertificateFilesSupported\x12:\n" +
+	"\x19panel_catalogue_supported\x18\x1a \x01(\bR\x17panelCatalogueSupported\"\xc4\x05\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +
@@ -5668,7 +5685,8 @@ const file_agent_proto_rawDesc = "" +
 	"\rsnapshot_json\x18\x02 \x01(\fR\fsnapshotJson\"z\n" +
 	"\x10ConnectionStatus\x12#\n" +
 	"\rsnapshot_json\x18\x01 \x01(\fR\fsnapshotJson\x12A\n" +
-	"\x05cores\x18\x02 \x03(\v2+.proxycontrol.agent.v1.CoreConnectionStatusR\x05cores\"\xe2\t\n" +
+	"\x05cores\x18\x02 \x03(\v2+.proxycontrol.agent.v1.CoreConnectionStatusR\x05cores\"\x94\n" +
+	"\n" +
 	"\aWelcome\x124\n" +
 	"\x16last_accepted_sequence\x18\x01 \x01(\x04R\x14lastAcceptedSequence\x12<\n" +
 	"\x1aheartbeat_interval_seconds\x18\x02 \x01(\rR\x18heartbeatIntervalSeconds\x122\n" +
@@ -5691,7 +5709,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fmax_egress_hops\x18\x12 \x01(\x05R\rmaxEgressHops\x122\n" +
 	"\x15device_gate_supported\x18\x13 \x01(\bR\x13deviceGateSupported\x120\n" +
 	"\x14multi_core_supported\x18\x14 \x01(\bR\x12multiCoreSupported\x124\n" +
-	"\x16node_traffic_supported\x18\x15 \x01(\bR\x14nodeTrafficSupported\"6\n" +
+	"\x16node_traffic_supported\x18\x15 \x01(\bR\x14nodeTrafficSupported\x120\n" +
+	"\x14agent_catalogue_port\x18\x16 \x01(\rR\x12agentCataloguePort\"6\n" +
 	"\x11DeviceGateCommand\x12!\n" +
 	"\frequest_json\x18\x01 \x01(\fR\vrequestJson\"7\n" +
 	"\x12AgentUpdateCommand\x12!\n" +

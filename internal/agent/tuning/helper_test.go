@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	tuningcontract "proxycontrol/pkg/contracts/tuning"
 )
 
 func TestKernelWriteAndReadbackFailuresRollback(t *testing.T) {
@@ -79,8 +81,8 @@ func TestWhitelist(t *testing.T) {
 			t.Fatalf("accepted %v", settings)
 		}
 	}
-	for k, b := range bounds {
-		for _, v := range []uint64{b.min, b.max} {
+	for k, b := range tuningcontract.Bounds {
+		for _, v := range []uint64{b.Min, b.Max} {
 			if err := Validate(map[string]string{k: fmtUint(v)}, h.ProcRoot); err != nil {
 				t.Fatal(err)
 			}

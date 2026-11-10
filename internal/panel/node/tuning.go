@@ -5,53 +5,22 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"google.golang.org/protobuf/encoding/protojson"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
 	pb "proxycontrol/pkg/contracts/agentpb"
-	"strconv"
-	"strings"
+	"proxycontrol/pkg/contracts/tuning"
 	"time"
 )
-
-type tuningRule struct {
-	min, max int64
-	choices  string
-}
-
-// This is the panel's single whitelist. The privileged helper independently
-// validates again, including actual congestion-control availability on the host.
-var tuningRules = map[string]tuningRule{
-	"net.ipv4.tcp_congestion_control": {choices: "bbr cubic reno htcp hybla bbr2 bbr3"},
-	"net.core.default_qdisc":          {choices: "fq fq_codel cake pfifo_fast"},
-	"net.ipv4.tcp_ecn":                {min: 0, max: 2}, "net.ipv4.tcp_tw_reuse": {min: 0, max: 2}, "net.ipv4.tcp_mtu_probing": {min: 0, max: 2},
-	"fs.file-max":       {min: 65536, max: 16777216},
-	"net.ipv4.tcp_rmem": {min: 4194304, max: 268435456}, "net.ipv4.tcp_wmem": {min: 4194304, max: 268435456},
-	"net.core.somaxconn": {min: 128, max: 65535}, "net.ipv4.tcp_max_syn_backlog": {min: 128, max: 262144},
-	"net.core.rmem_max": {min: 212992, max: 268435456}, "net.core.wmem_max": {min: 212992, max: 268435456},
-	"net.ipv4.tcp_fastopen": {min: 0, max: 3},
-}
 
 func ValidateTuning(settings map[string]string, clear bool) error {
 	if clear && len(settings) > 0 {
 		return errors.New("clear requires empty settings")
 	}
 	for key, value := range settings {
-		rule, ok := tuningRules[key]
-		if !ok {
-			return fmt.Errorf("unsupported tuning key: %s", key)
-		}
-		if rule.choices != "" {
-			if !strings.Contains(" "+rule.choices+" ", " "+value+" ") || value == "" || strings.ContainsAny(value, " \t\r\n") {
-				return fmt.Errorf("invalid value for %s", key)
-			}
-			continue
-		}
-		n, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || strconv.FormatInt(n, 10) != value || n < rule.min || n > rule.max {
-			return fmt.Errorf("invalid value for %s", key)
+		if err := tuning.ValidateValue(key, value); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -243,7 +212,7 @@ func validateTuningResult(r *pb.TuningResult) error {
 // ValidateTuningResult is shared with portable archive validation so restored
 // receipts obey the same constraints as authenticated stream receipts.
 func ValidateTuningResult(r *pb.TuningResult) error {
-	if r == nil || r.RequestId == "" || len(r.RequestId) > 128 || (r.Status != "applied" && r.Status != "cleared" && r.Status != "failed") || len(r.Keys) > 14 {
+	if r == nil || r.RequestId == "" || len(r.RequestId) > 128 || (r.Status != "applied" && r.Status != "cleared" && r.Status != "failed") || len(r.Keys) > len(tuning.Keys())+1 {
 		return errors.New("invalid tuning result")
 	}
 	seen := map[string]bool{}
@@ -252,7 +221,7 @@ func ValidateTuningResult(r *pb.TuningResult) error {
 			return errors.New("invalid tuning key result")
 		}
 		seen[k.Key] = true
-		if _, ok := tuningRules[k.Key]; !ok && k.Key != "" {
+		if !tuning.Known(k.Key) && k.Key != "" {
 			return errors.New("unknown tuning result key")
 		}
 		if r.Status == "failed" && k.Applied {

@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"net/http/httptest"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/tuning"
 	"strings"
 	"testing"
 	"time"
@@ -137,21 +138,24 @@ func TestK2bMetricBucketsAndRetention(t *testing.T) {
 }
 
 func TestK2bTuningWhitelistAndReceipts(t *testing.T) {
-	for key, rule := range tuningRules {
-		if rule.choices != "" {
-			for _, v := range strings.Fields(rule.choices) {
-				if err := ValidateTuning(map[string]string{key: v}, false); err != nil {
-					t.Fatal(err)
-				}
+	for key, choices := range tuning.Choices {
+		for _, v := range choices {
+			if err := ValidateTuning(map[string]string{key: v}, false); err != nil {
+				t.Fatal(err)
 			}
-			continue
 		}
-		for _, v := range []int64{rule.min, rule.max} {
+	}
+	for key, rule := range tuning.Bounds {
+		for _, v := range []uint64{rule.Min, rule.Max} {
 			if err := ValidateTuning(map[string]string{key: fmt.Sprint(v)}, false); err != nil {
 				t.Fatal(err)
 			}
 		}
-		for _, v := range []string{fmt.Sprint(rule.min - 1), fmt.Sprint(rule.max + 1), "1 2 4194304", "1.0", "+128", " 128"} {
+		low := "-1"
+		if rule.Min > 0 {
+			low = fmt.Sprint(rule.Min - 1)
+		}
+		for _, v := range []string{low, fmt.Sprint(rule.Max + 1), "1 2 4194304", "1.0", "+128", " 128"} {
 			if ValidateTuning(map[string]string{key: v}, false) == nil {
 				t.Fatal(key, v)
 			}

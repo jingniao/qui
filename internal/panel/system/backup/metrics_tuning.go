@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/tuning"
 	"time"
 )
 
@@ -35,8 +36,13 @@ func validateMetricsTuning(ctx context.Context, db *sql.DB) error {
 			return ErrArchive
 		}
 		var settings map[string]string
-		if json.Unmarshal([]byte(raw), &settings) != nil || settings == nil || node.ValidateTuning(settings, false) != nil {
+		if json.Unmarshal([]byte(raw), &settings) != nil || settings == nil {
 			return ErrArchive
+		}
+		for k, v := range settings {
+			if tuning.ValidateValue(k, v) != nil {
+				return ErrArchive
+			}
 		}
 		if status != "pending" && status != "applied" && status != "cleared" && status != "failed" && status != "unconfirmed" {
 			return ErrArchive

@@ -14,6 +14,7 @@ import (
 
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	tuningcontract "proxycontrol/pkg/contracts/tuning"
 )
 
 // The baseline is root-owned, outside the Agent-writable request directory.
@@ -154,10 +155,10 @@ func (h Helper) write(key, value string) error {
 	return errors.Join(err, f.Close())
 }
 func safeOriginal(key, value string) bool {
-	if _, ok := names[key]; ok {
+	if _, ok := tuningcontract.Choices[key]; ok {
 		return value != "" && len(value) <= 64 && len(strings.Fields(value)) == 1 && !strings.ContainsAny(value, "\n\r=\x00")
 	}
-	if _, ok := bounds[key]; !ok {
+	if _, ok := tuningcontract.Bounds[key]; !ok {
 		return false
 	}
 	fields := strings.Fields(value)

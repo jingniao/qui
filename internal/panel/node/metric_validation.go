@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/tuning"
 )
 
 func validateK2bMetrics(h *pb.Heartbeat) error {
@@ -33,11 +34,11 @@ func validateK2bMetrics(h *pb.Heartbeat) error {
 			}
 		}
 	}
-	if len(h.TuningCurrent) > len(tuningRules) {
+	if len(h.TuningCurrent) > len(tuning.Keys()) {
 		return errors.New("too many tuning observations")
 	}
 	for key, value := range h.TuningCurrent {
-		if _, ok := tuningRules[key]; !ok || len(value) > 256 {
+		if !tuning.Known(key) || len(value) > 256 {
 			return errors.New("invalid tuning observation")
 		}
 	}

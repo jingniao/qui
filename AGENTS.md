@@ -909,7 +909,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0138 `node_public_addresses` | `nodes.public_addresses_json`（文本 JSON，默认 `[]`，严格校验最多 16 项全局单播地址列表）与 `nodes.public_ip_selected`（文本，默认 `''`）。接口与心跳上报联动，设置支持选择候选公网 IP |
 | 0139 `notifications` | 4 张表：`notification_rules`（7 类默认规则、阈值、持续窗口、冷却分钟及 CHECK 约束）、`notification_channels`（AES-256-GCM 密封配置、末 4 位摘要、投递状态与时间）、`notifications`（通知记录，90 天保留自动清理）、`notification_state`（去重状态与冷却追踪） |
 | 0140 `ruleset_sources` | `service_sets` / `service_set_entries` 增加 `keyword` 匹配类型支持；新增 `service_set_sources` 表（存储外部规则源 URL、格式 yaml/text/mrs、行为 classical/domain/ipcidr、刷新周期、运行状态及密封缓存） |
-| 0141 `tuning_recommendations` | 新增 `node_tuning_dismissals` 表（主键 `(node_id, rule_key)`，记录不采纳的推荐值 `dismissed_value` 与时间，级联删除）；`node_meta` 扩充可空整数 `bandwidth_mbps`（1–1000000 Mbps）；`system_settings` 新增 `tuning_auto_apply` 开关 |
+| 0141 `tuning_recommendations` | 新增 `node_tuning_dismissals` 表（主键 `(node_id, key)`，列 `key` / `value` 记录不采纳的参数与推荐值，另存规则版本与时间，级联删除）；`node_meta` 扩充可空整数 `bandwidth_mbps`（1–100000 Mbps）；`system_settings` 新增 `tuning_auto_apply` 开关 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -989,7 +989,7 @@ metrics 与 tuning GET 均允许 Owner/Viewer；逻辑删除节点返回 404。m
 
 tuning PUT 请求 {settings:对象,clear:布尔,confirmNodeId:节点ID}，拒绝未知 JSON 字段；202 返回 {requestId,status:"pending"}。settings 为完整字符串 profile，空 profile 等同 clear；clear=true 不得带非空 settings。GET 返回 supported、desired、requestId、status、result、requestedAt、updatedAt、current；未操作时 ID/结果/时间为 null、期望为空对象、status=unconfirmed。current 是最后心跳实际读数，可能过期。PUT 权限、并发和错误码见第 22.0 节。
 
-调优建议接口：`GET /api/v1/nodes/{id}/tuning/recommendations`（Owner/Viewer）返回建议规则版本与建议项列表；`POST /api/v1/nodes/{id}/tuning/recommendations/dismiss`（Owner＋CSRF，体 `{key, value}`，操作日志“不采纳调优建议”）；`GET/PUT /api/v1/system/tuning-auto-apply`（Owner；PUT 须 CSRF 与 `expectedRevision`，体 `{enabled, expectedRevision}`，操作日志“修改调优自动应用”）。节点元数据支持可选整数 `bandwidthMbps`（1–1000000），供调优建议与线路显示使用。
+调优建议接口：`GET /api/v1/nodes/{id}/tuning/recommendations`（Owner/Viewer）返回建议规则版本与建议项列表；`POST /api/v1/nodes/{id}/tuning/recommendations/dismiss`（Owner＋CSRF，体 `{key, value}`，操作日志“不采纳调优建议”）；`GET/PUT /api/v1/system/tuning-auto-apply`（Owner；PUT 须 CSRF 与 `expectedRevision`，体 `{enabled, expectedRevision}`，操作日志“修改调优自动应用”）。节点元数据支持可选整数 `bandwidthMbps`（1–100000），供调优建议与线路显示使用。
 
 整机流量：GET settings 与两个摘要接口允许 Owner/Viewer；PUT settings 仅 Owner＋CSRF；逻辑删除节点返回 404，字段/设置非法返回 400 `invalid_request`。settings 为 `{method:"sum"|"outbound"|"max", interfaceName, allowanceBytes, resetDay}` 的完整替换，PUT 必须带全部四个字段（含显式 nullable allowance，1–9007199254740991 的整数字节或 null），未知字段拒绝，并写入操作日志“服务器流量设置”。摘要 `{nodeId, settings, interfaceName, timezone, periodStart, periodEnd, nextResetAt, rxBytes, txBytes, usedBytes, status, lastObservedAt}`，字节为十进制字符串，未知为 null，status 为 measured/stale/unknown；批量接口 `{items:[摘要],timezone}` 一次返回全部未删除节点，服务器列表只用它，详情用单节点接口。口径与限制见第 21 节。
 
@@ -1380,8 +1380,8 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | node_identity_retirements、node_identity_recoveries | 作废指纹在恢复时并入当前库，只注册不复活：已作废的指纹既不能覆盖也不能写入当前身份；恢复记录以当前库为准，`issued` 统一改为已过期，不重发恢复码、不重签证书 |
 | node_public_addresses（nodes.public_addresses_json 与 public_ip_selected） | 随 nodes 主表加密备份；validateNodePublicAddresses 校验列表格式、项数不超过 16 项且均为合法单播 IP 与源标识，恢复保留归档选定地址 |
 | notifications、notification_rules、notification_channels、notification_state | 四表纳入加密备份；notification_channels 密封材料必须能由当前密钥打开，校验 rules 包含全部 7 类规则且无越界值；历史通知超过 90 天由后台自动 Prune |
-| service_set_sources | 随服务规则集加密备份；保留外部来源配置、状态、计数与密封解析缓存（能由当前密钥解密），恢复时不触发抓取 |
-| node_tuning_dismissals、node_meta.bandwidth_mbps | 随加密备份保留与恢复；validateTuningDismissals 校验 rule_key 属于 19 键白名单、dismissed_value 非空且长度不超过 256；node_meta.bandwidth_mbps 校验正整数且 ≤1000000。恢复保留归档记录并关联存在节点；system_settings.tuning_auto_apply 随系统设置整体原样往返 |
+| service_set_sources | 随服务规则集加密备份；validateServiceSetSources 校验 format / behavior / last_status 的合法集合及 mrs 行为组合，非空 encrypted_cache 须能由配置 vault 解密并解码为策略 ParsedEntries；保留配置、状态与计数，恢复时不触发抓取；0140 之前无该表的归档仍合法 |
+| node_tuning_dismissals、node_meta.bandwidth_mbps | 随加密备份保留与恢复；主键 `(node_id, key)`，列 `key` / `value`；validateTuningDismissals 校验 key 属于共享 tuning 白名单、value 非空且长度不超过 256 字节、node_id 关联存在节点；0141 之前无该表的归档仍合法。node_meta.bandwidth_mbps 为 1–100000 的整数（可空），沿用数据库约束校验；system_settings.tuning_auto_apply 随系统设置整体原样往返 |
 
 调度随停机/进程内恢复取消并等待退出，新实例仅一个循环。其他模块的会话结束、安全状态与撤销访问保守合并规则见第 26.9、29 节。
 

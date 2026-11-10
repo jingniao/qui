@@ -143,6 +143,16 @@ func (r *Repository) MarkAllRead(ctx context.Context) error {
 	return err
 }
 
+func (r *Repository) UnreadCount(ctx context.Context, viewer bool) (int, error) {
+	where := "(read_at IS NULL OR read_at = '')"
+	if viewer {
+		where += " AND kind IN ('node_offline','cpu','memory','disk')"
+	}
+	var count int
+	err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE "+where).Scan(&count)
+	return count, err
+}
+
 func (r *Repository) Channels(ctx context.Context) ([]Channel, error) {
 	rows, err := r.Database.QueryContext(ctx, "SELECT id, kind, name, enabled, last4, last_result_code, last_sent_at FROM notification_channels ORDER BY created_at ASC")
 	if err != nil {

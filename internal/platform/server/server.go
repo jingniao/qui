@@ -33,6 +33,7 @@ import (
 	"proxycontrol/internal/panel/dashboard"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/notification"
 	"proxycontrol/internal/panel/policy"
 	"proxycontrol/internal/panel/portal"
 	"proxycontrol/internal/panel/proxy"
@@ -85,6 +86,8 @@ type Server struct {
 	connectionObserver  *user.ConnectionObserver
 	deviceObserver      *user.DeviceObserver
 	admission           admission
+	notificationWorker  *notification.Worker
+	eventBus            *events.Bus
 	startedAt           time.Time
 }
 
@@ -146,6 +149,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.deployments = deployments
 	s.accessRepository = &access.Repository{Database: database, Vault: configurationVault}
 	eventBus := &events.Bus{}
+	s.eventBus = eventBus
 	notify := func(id string) { eventBus.Publish("node_status", map[string]string{"nodeId": id}) }
 	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Logger: s.Logger, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
 	control.RecoveryRedeploy = func(ctx context.Context, id string) error {
@@ -406,6 +410,21 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	proxyHandler.RelayProxies = subscriptionService
 	(&subscription.Handler{Service: subscriptionService, Auth: authHandler, Audit: systemRepository, Rules: ruleStore, Profiles: ruleStore, ServiceRules: serviceRules{policies: policyService.Repository}}).Register(mux)
 	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux)
+	notificationRepo := &notification.Repository{Database: database, Vault: configurationVault}
+	s.notificationWorker = &notification.Worker{
+		Repository: notificationRepo,
+		Sources:    &nodeNotificationSources{nodes: nodeRepository},
+		Sender:     notification.Sender{},
+		Publish:    eventBus.Publish,
+		Logger:     logger,
+		Interval:   60 * time.Second,
+	}
+	(&notification.Handler{
+		Repository: notificationRepo,
+		Worker:     s.notificationWorker,
+		Auth:       authHandler,
+		Audit:      systemRepository,
+	}).Register(mux)
 	mux.Handle("GET /api/v1/events", eventBus.Handler(authHandler))
 	mux.Handle("GET /api/v1/operations", authHandler.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page, size, err := httpapi.Pagination(r)
@@ -523,7 +542,7 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(9)
+	jobs.Add(10)
 	defer func() { stopBackground(); jobs.Wait() }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
 	// One worker owns issuance and renewal: it marks interrupted runs, sweeps
@@ -532,6 +551,10 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	go func() { defer jobs.Done(); s.certificateDeployer.run(background) }()
 	go func() { defer jobs.Done(); s.latencyScheduler.Run(background) }()
 	go func() { defer jobs.Done(); s.importStore.Run(background) }()
+	go func() {
+		defer jobs.Done()
+		s.runNotifications(background)
+	}()
 	go func() {
 		defer jobs.Done()
 		s.quotaDeployer.run(background)
@@ -738,4 +761,103 @@ func securityHeaders(next http.Handler, https bool) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) runNotifications(ctx context.Context) {
+	if s.notificationWorker == nil || s.eventBus == nil {
+		return
+	}
+	evCh, cancelSub := s.eventBus.Subscribe(32)
+	defer cancelSub()
+
+	go s.notificationWorker.Run(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-evCh:
+			if !ok {
+				return
+			}
+			if ev.Type == "system.alert" {
+				s.notificationWorker.Alert(ctx, ev.Data)
+			}
+		}
+	}
+}
+
+type nodeNotificationSources struct {
+	nodes *node.Repository
+}
+
+func (s *nodeNotificationSources) Nodes(ctx context.Context) ([]notification.NodeSnapshot, error) {
+	nodes, _, err := s.nodes.List(ctx, "", 1, 10000, false)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]notification.NodeSnapshot, 0, len(nodes))
+	for _, n := range nodes {
+		lastHeartbeat, _ := time.Parse(time.RFC3339Nano, n.LastHeartbeat)
+		if lastHeartbeat.IsZero() {
+			lastHeartbeat, _ = time.Parse(time.RFC3339, n.LastHeartbeat)
+		}
+		var addrs []string
+		for _, a := range n.PublicAddresses {
+			addrs = append(addrs, a.Address)
+		}
+		res = append(res, notification.NodeSnapshot{
+			ID:            n.ID,
+			Name:          n.Name,
+			Status:        n.Status,
+			LastHeartbeat: lastHeartbeat,
+			Addresses:     addrs,
+		})
+	}
+	return res, nil
+}
+
+func (s *nodeNotificationSources) Metrics(ctx context.Context, since time.Time) (map[string]notification.MetricWindow, error) {
+	metricsMap, err := s.nodes.RecentMetrics(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	res := make(map[string]notification.MetricWindow, len(metricsMap))
+	for nodeID, samples := range metricsMap {
+		win := notification.MetricWindow{NodeID: nodeID}
+		for _, sm := range samples {
+			win.CPU = append(win.CPU, sm.CPUPercent)
+			win.Memory = append(win.Memory, sm.MemoryPercent)
+			win.Disk = append(win.Disk, sm.DiskPercent)
+		}
+		res[nodeID] = win
+	}
+	return res, nil
+}
+
+func (s *nodeNotificationSources) Traffic(ctx context.Context, now time.Time) (map[string]notification.TrafficSnapshot, error) {
+	summaries, err := s.nodes.MachineTrafficSummaries(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	res := make(map[string]notification.TrafficSnapshot, len(summaries))
+	for _, sm := range summaries {
+		var used *uint64
+		if sm.UsedBytes != nil {
+			if u, err := strconv.ParseUint(*sm.UsedBytes, 10, 64); err == nil {
+				used = &u
+			}
+		}
+		var allowance *uint64
+		if sm.Settings.AllowanceBytes != nil && *sm.Settings.AllowanceBytes > 0 {
+			a := uint64(*sm.Settings.AllowanceBytes)
+			allowance = &a
+		}
+		res[sm.NodeID] = notification.TrafficSnapshot{
+			NodeID:         sm.NodeID,
+			UsedBytes:      used,
+			AllowanceBytes: allowance,
+		}
+	}
+	return res, nil
 }

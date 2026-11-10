@@ -151,11 +151,21 @@ func (w *Worker) Alert(ctx context.Context, data any) {
 	}
 
 	var alertKind, message string
-	if m, ok := data.(map[string]any); ok {
+	switch m := data.(type) {
+	case map[string]any:
 		if v, ok := m["alert"].(string); ok {
 			alertKind = v
 		}
 		if v, ok := m["message"].(string); ok {
+			message = v
+		} else if v, ok := m["reason"].(string); ok {
+			message = v
+		}
+	case map[string]string:
+		alertKind = m["alert"]
+		if v, ok := m["message"]; ok {
+			message = v
+		} else if v, ok := m["reason"]; ok {
 			message = v
 		}
 	}

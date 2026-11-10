@@ -53,6 +53,8 @@ type outbound struct {
 	DownMbps          int        `json:"down_mbps,omitempty"`
 	CongestionControl string     `json:"congestion_control,omitempty"`
 	UDPRelayMode      string     `json:"udp_relay_mode,omitempty"`
+	ServerPorts       []string   `json:"server_ports,omitempty"`
+	HopInterval       string     `json:"hop_interval,omitempty"`
 }
 
 type transport struct {
@@ -189,6 +191,10 @@ func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
 		value.DownMbps = q.DownMbps
 		value.CongestionControl = q.CongestionControl
 		value.UDPRelayMode = q.UDPRelayMode
+		if q.HopPorts != "" {
+			value.ServerPorts = []string{strings.Replace(q.HopPorts, "-", ":", 1)}
+			value.HopInterval = fmt.Sprintf("%ds", q.HopInterval)
+		}
 	}
 	if endpoint.Security == "tls" || endpoint.Security == "reality" {
 		value.TLS = &tls{Enabled: true, ServerName: serverName(endpoint)}

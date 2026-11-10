@@ -103,6 +103,11 @@ type QUIC struct {
 	DownMbps          int
 	CongestionControl string
 	UDPRelayMode      string
+	// HopPorts is the Hysteria2 UDP range ("20000-20010") and HopInterval the
+	// client's hop interval in seconds (v1.5.0 section 7). Both are empty/zero
+	// for an inbound without port hopping, so every format stays byte-identical.
+	HopPorts    string
+	HopInterval int
 }
 
 // WireGuard is the peer material of a WireGuard inbound.

@@ -414,16 +414,31 @@ export function listenNetworks(value: Pick<InboundInput, 'protocol' | 'settings'
   if (['shadowsocks', 'socks5'].includes(value.protocol)) return ['tcp', 'udp'];
   return ['tcp'];
 }
+export const MAX_HOP_PORTS = 10000;
+// A Hysteria2 hop range occupies every UDP port in it, just like the backend's
+// ClaimedPorts: the editor's local conflict check and the panel must agree.
+export function hopRange(settings?: ProtocolSettings): { start: number; end: number } | null {
+  const start = settings?.quic?.hop_port_start, end = settings?.quic?.hop_port_end;
+  if (!start || !end || start < 1 || end > 65535 || end <= start || end - start + 1 > MAX_HOP_PORTS) return null;
+  return { start, end };
+}
+export function claimedPorts(port: number, settings?: ProtocolSettings): number[] {
+  const ports = forwardListenPorts(port, settings);
+  const range = hopRange(settings);
+  if (range) for (let p = range.start; p <= range.end; p++) ports.push(p);
+  return ports;
+}
 export function portConflict(form: InboundInput, inbounds: Inbound[], excludeId = ''): string {
   // Node-wide numeric rule (K3b): a second listener on the same port fails at
   // apply time even when one side is TCP and the other UDP, so the local check
-  // must not let a TCP/UDP pair through. A GOST forward range reserves every
-  // number it listens on, so both sides are expanded the way the backend does.
-  const mine = forwardListenPorts(form.port, form.settings);
+  // must not let a TCP/UDP pair through. A GOST forward range and a Hysteria2
+  // hop range reserve every number they occupy, so both sides are expanded the
+  // way the backend does.
+  const mine = new Set(claimedPorts(form.port, form.settings));
   const conflict = inbounds.find(i => i.nodeId === form.nodeId && i.id !== excludeId
-    && forwardListenPorts(i.port, i.settings).some(port => mine.includes(port)));
+    && claimedPorts(i.port, i.settings).some(port => mine.has(port)));
   if (!conflict) return '';
-  const taken = forwardListenPorts(conflict.port, conflict.settings).find(port => mine.includes(port));
+  const taken = claimedPorts(conflict.port, conflict.settings).find(port => mine.has(port));
   return `端口 ${taken ?? form.port} 已被「${conflict.name}」占用`;
 }
 export function randomPort(

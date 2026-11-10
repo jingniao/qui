@@ -153,6 +153,17 @@
           <input :value="s.quic?.[field.key]" @input="setBandwidth(field.key, $event)" type="number" min="0" max="100000" placeholder="0（不限）" class="form-input-base mt-2" />
         </label>
         <p class="text-xs">这里只是向客户端声明的带宽提示（Mbps），不限制真实速率。</p>
+        <template v-if="portHopSupported">
+          <label class="block text-xs"><input type="checkbox" :checked="hopEnabled" @change="setHopEnabled" /> 端口跳跃（把一段 UDP 端口重定向到本入站端口）</label>
+          <template v-if="hopEnabled">
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block">起始端口<input :value="s.quic?.hop_port_start" @input="setHopNumber('hop_port_start', $event)" type="number" min="1" max="65535" class="form-input-base mt-2" /></label>
+              <label class="block">结束端口<input :value="s.quic?.hop_port_end" @input="setHopNumber('hop_port_end', $event)" type="number" min="1" max="65535" class="form-input-base mt-2" /></label>
+            </div>
+            <label class="block">跳跃间隔（秒）<input :value="s.quic?.hop_interval_seconds" @input="setHopNumber('hop_interval_seconds', $event)" type="number" min="5" max="300" placeholder="30" class="form-input-base mt-2" /></label>
+            <p class="text-xs">NAT 主机的跳跃段必须在服务商放行的端口内；主机防火墙需放行该段 UDP。最多 10000 个端口，且不能包含入站自身端口。</p>
+          </template>
+        </template>
       </template>
       <label v-if="f.protocol === 'tuic'" class="block">拥塞控制
         <select :value="s.quic?.congestion_control || ''" @change="setCongestion" class="form-input-base mt-2"><option value="">默认</option><option>cubic</option><option>new_reno</option><option>bbr</option></select>
@@ -376,6 +387,22 @@ function setBandwidth(key: 'up_mbps' | 'down_mbps', event: Event) {
   (s.value.quic ||= {})[key] = value === '' ? undefined : Number(value);
 }
 function setCongestion(event: Event) { (s.value.quic ||= {}).congestion_control = (event.target as HTMLSelectElement).value; }
+// Port hopping is offered only when the Agent reported the helper capability;
+// an old Agent has nowhere to put the nft rules, so the whole block is hidden.
+const portHopSupported = computed(() => props.server?.capabilities?.port_hop_supported === true);
+const hopEnabled = computed(() => !!(s.value.quic?.hop_port_start || s.value.quic?.hop_port_end));
+function setHopEnabled(event: Event) {
+  const quic = (s.value.quic ||= {});
+  if ((event.target as HTMLInputElement).checked) {
+    quic.hop_port_start = 20000; quic.hop_port_end = 20010; quic.hop_interval_seconds = 30;
+  } else {
+    delete quic.hop_port_start; delete quic.hop_port_end; delete quic.hop_interval_seconds;
+  }
+}
+function setHopNumber(key: 'hop_port_start' | 'hop_port_end' | 'hop_interval_seconds', event: Event) {
+  const value = (event.target as HTMLInputElement).value;
+  (s.value.quic ||= {})[key] = value === '' ? undefined : Number(value);
+}
 
 // The pool is edited in place. A legacy single-target forward becomes an explicit
 // pool only when the Owner touches a row, and collapsing back to one target

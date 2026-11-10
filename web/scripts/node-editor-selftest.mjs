@@ -790,3 +790,14 @@ assert.deepEqual(api.certificateChoices({ ...m, nodeFiles: [], library: [] }, tr
 assert.deepEqual(api.certificateChoices({ ...m, nodeFiles: [], library: [], cloudflareConfigured: false }, true), []);
 assert.ok(!api.certificateChoices(m, false).some(c => c.kind === 'file'), 'no file choice without the capability');
 console.log('PASS P5 CERTIFICATE CHOICES');
+
+// P6: a Hysteria2 hop range occupies every number in it, and the editor hides
+// the whole block when the Agent did not report the capability.
+const hopSettings = { quic: { hop_port_start: 20000, hop_port_end: 20010, hop_interval_seconds: 30 } };
+const hopInbound = { id: 'hop', nodeId: 'n1', name: 'hy2', port: 8443, protocol: 'hysteria2', settings: hopSettings };
+assert.ok(api.portConflict({ nodeId: 'n1', port: 20005, protocol: 'vless', settings: {} }, [hopInbound]), 'a listener inside a hop range must be reported as occupied');
+assert.equal(api.portConflict({ nodeId: 'n1', port: 30000, protocol: 'vless', settings: {} }, [hopInbound]), '');
+assert.deepEqual(api.claimedPorts(8443, hopSettings).slice(0, 4), [8443, 20000, 20001, 20002]);
+const protocolFieldsP6 = readFileSync(new URL('../src/modules/proxy/components/node-editor/NodeProtocolFields.vue', import.meta.url), 'utf8');
+assert.match(protocolFieldsP6, /portHopSupported/, 'the hop block is gated on the Agent capability');
+console.log('PASS P6 HOP RANGE');

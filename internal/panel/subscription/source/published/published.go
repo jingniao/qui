@@ -258,7 +258,16 @@ func build(n node.Node, inbound desiredstate.Inbound, credential user.Credential
 		return proxy.Proxy{}, false, errors.New("published client settings are invalid")
 	}
 	if settings.QUIC != nil {
-		endpoint.QUIC = &proxy.QUIC{UpMbps: settings.QUIC.UpMbps, DownMbps: settings.QUIC.DownMbps, CongestionControl: settings.QUIC.CongestionControl, UDPRelayMode: settings.QUIC.UDPRelayMode}
+		quic := &proxy.QUIC{UpMbps: settings.QUIC.UpMbps, DownMbps: settings.QUIC.DownMbps, CongestionControl: settings.QUIC.CongestionControl, UDPRelayMode: settings.QUIC.UDPRelayMode}
+		if settings.QUIC.HasHop() {
+			interval := settings.QUIC.HopIntervalSeconds
+			if interval == 0 {
+				interval = 30
+			}
+			quic.HopPorts = strconv.Itoa(settings.QUIC.HopPortStart) + "-" + strconv.Itoa(settings.QUIC.HopPortEnd)
+			quic.HopInterval = interval
+		}
+		endpoint.QUIC = quic
 	}
 	if settings.WireGuard != nil {
 		peer, ok, err := wireguardPeer(settings.WireGuard, credential)

@@ -203,6 +203,9 @@ func Link(endpoint proxy.Proxy) (string, error) {
 				if q.DownMbps > 0 {
 					query.Set("downmbps", strconv.Itoa(q.DownMbps))
 				}
+				if q.HopPorts != "" {
+					query.Set("mport", q.HopPorts)
+				}
 			} else {
 				if q.CongestionControl != "" {
 					query.Set("congestion_control", q.CongestionControl)

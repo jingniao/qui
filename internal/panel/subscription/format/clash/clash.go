@@ -133,6 +133,8 @@ type clashProxy struct {
 	Type                 string          `yaml:"type"`
 	Server               string          `yaml:"server"`
 	Port                 int             `yaml:"port"`
+	Ports                string          `yaml:"ports,omitempty"`
+	HopInterval          int             `yaml:"hop-interval,omitempty"`
 	Username             string          `yaml:"username,omitempty"`
 	Password             string          `yaml:"password,omitempty"`
 	UUID                 string          `yaml:"uuid,omitempty"`
@@ -509,6 +511,10 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 			}
 			if q.DownMbps > 0 {
 				value.Down = strconv.Itoa(q.DownMbps) + " Mbps"
+			}
+			if q.HopPorts != "" {
+				value.Ports = q.HopPorts
+				value.HopInterval = q.HopInterval
 			}
 		}
 		if err := pin(); err != nil {

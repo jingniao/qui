@@ -79,7 +79,13 @@ func (w *Worker) tick(ctx context.Context) {
 		return
 	}
 	now := time.Now()
-	metrics, err := w.Sources.Metrics(ctx, now.Add(-15*time.Minute))
+	windowMinutes := 15
+	for _, rule := range rules {
+		if rule.Enabled && (rule.Kind == "cpu" || rule.Kind == "memory") && rule.DurationMinutes > windowMinutes {
+			windowMinutes = rule.DurationMinutes
+		}
+	}
+	metrics, err := w.Sources.Metrics(ctx, now.Truncate(time.Minute).Add(-time.Duration(windowMinutes)*time.Minute))
 	if err != nil {
 		if w.Logger != nil {
 			w.Logger.Error("failed to load metrics", "error", err)

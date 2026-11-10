@@ -396,7 +396,12 @@ func (r *Repository) SaveStates(ctx context.Context, states map[string]State) er
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO notification_state(dedupe_key, active, since, last_notified_at, value) VALUES(?,?,?,?,?) ON CONFLICT(dedupe_key) DO UPDATE SET active=excluded.active, since=excluded.since, last_notified_at=excluded.last_notified_at, value=excluded.value")
+	// Evaluate returns the complete next snapshot, including resolved deletions.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM notification_state"); err != nil {
+		return err
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO notification_state(dedupe_key, active, since, last_notified_at, value) VALUES(?,?,?,?,?)")
 	if err != nil {
 		return err
 	}

@@ -2,8 +2,8 @@ package policy
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/user"
@@ -149,12 +149,13 @@ func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy) (desire
 		rule.Match.CIDRs = append(rule.Match.CIDRs, service.CIDRs...)
 
 		srcEntries, err := s.Repository.SourceEntries(ctx, id)
-		if err == nil {
-			rule.Match.Domains = append(rule.Match.Domains, srcEntries.Domains...)
-			rule.Match.Suffixes = append(rule.Match.Suffixes, srcEntries.Suffixes...)
-			rule.Match.Keywords = append(rule.Match.Keywords, srcEntries.Keywords...)
-			rule.Match.CIDRs = append(rule.Match.CIDRs, srcEntries.CIDRs...)
+		if err != nil {
+			return rule, err
 		}
+		rule.Match.Domains = append(rule.Match.Domains, srcEntries.Domains...)
+		rule.Match.Suffixes = append(rule.Match.Suffixes, srcEntries.Suffixes...)
+		rule.Match.Keywords = append(rule.Match.Keywords, srcEntries.Keywords...)
+		rule.Match.CIDRs = append(rule.Match.CIDRs, srcEntries.CIDRs...)
 	}
 	if len(rule.Match.ServiceIDs) > 0 && len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) == 0 {
 		rule.Enabled = false

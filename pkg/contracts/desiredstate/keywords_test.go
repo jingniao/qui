@@ -38,9 +38,9 @@ func TestRequireKeywordSupport(t *testing.T) {
 		t.Fatalf("expected pass without keywords, got: %v", err)
 	}
 
-	// 2. 停用策略带关键字放行
-	if err := desiredstate.RequireKeywordSupport(disabledKeywordState, []desiredstate.CoreKeywordCapability{oldCore}); err != nil {
-		t.Fatalf("expected pass for disabled keyword policy, got: %v", err)
+	// Disabled policies still serialize keywords and require a capable decoder.
+	if err := desiredstate.RequireKeywordSupport(disabledKeywordState, []desiredstate.CoreKeywordCapability{oldCore}); err != desiredstate.ErrKeywordUnsupported {
+		t.Fatalf("expected refusal for disabled keyword policy, got: %v", err)
 	}
 
 	// 3. 全部核心支持放行

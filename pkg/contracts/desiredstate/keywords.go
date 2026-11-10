@@ -9,12 +9,12 @@ type CoreKeywordCapability struct {
 	DomainKeywordSupported bool
 }
 
-// RequireKeywordSupport fails when any enabled policy uses keywords and any enabled
+// RequireKeywordSupport fails when any policy serializes keywords and any enabled
 // xray/sing-box core in cores lacks DomainKeywordSupported.
 func RequireKeywordSupport(state State, cores []CoreKeywordCapability) error {
 	hasKeyword := false
 	for _, policy := range state.Policies {
-		if policy.Enabled && len(policy.Match.Keywords) > 0 {
+		if len(policy.Match.Keywords) > 0 {
 			hasKeyword = true
 			break
 		}

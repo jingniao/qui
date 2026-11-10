@@ -38,7 +38,7 @@ func setupPolicyRepo(t *testing.T) (*policy.Repository, *vault.Vault) {
 	return &policy.Repository{Database: database, Vault: v}, v
 }
 
-func TestSaveSourcesKeepsCacheForSameID(t *testing.T) {
+func TestSaveSourcesResetsCacheForChangedURL(t *testing.T) {
 	ctx := context.Background()
 	repo, v := setupPolicyRepo(t)
 
@@ -62,7 +62,7 @@ func TestSaveSourcesKeepsCacheForSameID(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := repo.Database.ExecContext(ctx,
 		`INSERT INTO service_set_sources(id, service_id, url, format, behavior, interval_seconds, position, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, encrypted_cache, created_at, updated_at)
-		 VALUES('src-1', ?, 'https://example.com/rules.txt', 'text', 'domain', 86400, 0, 'ok', '', ?, ?, 1, 0, ?, ?, ?)`,
+		 VALUES('src-1', ?, 'https://example.com/rules.txt', 'text', 'domain', 86400, 0, 'ok', 'previous_error', ?, ?, 1, 2, ?, ?, ?)`,
 		svc.ID, now, now, sealedCache, now, now); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestSaveSourcesKeepsCacheForSameID(t *testing.T) {
 		t.Fatalf("SaveSources failed: %v", err)
 	}
 
-	// Verify that src-1 retains its status and cache
+	// A changed identity must not reuse the previous source's cache.
 	updatedSvc, err := repo.Service(ctx, svc.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -93,8 +93,8 @@ func TestSaveSourcesKeepsCacheForSameID(t *testing.T) {
 	if src.ID != "src-1" || src.URL != "https://example.com/rules-v2.txt" {
 		t.Errorf("unexpected source url or id: %+v", src)
 	}
-	if src.LastStatus != "ok" || src.EntryCount != 1 {
-		t.Errorf("expected cached status 'ok' and count 1, got %+v", src)
+	if src.LastStatus != "pending" || src.EntryCount != 0 || src.SkippedCount != 0 || src.LastErrorCode != "" || src.LastFetchAt != nil || src.LastSuccessAt != nil {
+		t.Errorf("expected pending source with cleared metadata, got %+v", src)
 	}
 
 	// Decrypt entries via SourceEntries
@@ -102,8 +102,12 @@ func TestSaveSourcesKeepsCacheForSameID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SourceEntries failed: %v", err)
 	}
-	if len(entries.Domains) != 1 || entries.Domains[0] != "cached.example.com" {
+	if len(entries.Domains) != 0 {
 		t.Errorf("unexpected cached entries: %+v", entries)
+	}
+	var created string
+	if err := repo.Database.QueryRowContext(ctx, "SELECT created_at FROM service_set_sources WHERE id='src-1'").Scan(&created); err != nil || created != now {
+		t.Fatalf("created_at changed: %q %v", created, err)
 	}
 }
 
@@ -181,6 +185,51 @@ func TestRefreshStoresSealedCache(t *testing.T) {
 	}
 	if len(entries.Keywords) != 1 || entries.Keywords[0] != "openai" {
 		t.Errorf("unexpected decrypted keywords: %v", entries.Keywords)
+	}
+}
+
+func TestSaveSourcesIdentityAndIntervalChanges(t *testing.T) {
+	for _, change := range []string{"interval", "format", "behavior"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := context.Background()
+			repo, v := setupPolicyRepo(t)
+			sources := []policy.SourceInput{{URL: "https://example.com/rules", Format: "text", Behavior: "domain", IntervalSeconds: 3600}}
+			set, err := repo.SaveService(ctx, "", policy.ServiceInput{Name: "identity", Enabled: true, Sources: &sources})
+			if err != nil {
+				t.Fatal(err)
+			}
+			refresher := &policy.SourceRefresher{Repository: repo, Vault: v, Fetcher: &fakeFetcher{fetchFunc: func(context.Context, string) ([]byte, error) { return []byte("example.com\n"), nil }}}
+			if _, err := refresher.Refresh(ctx, set.Sources[0].ID); err != nil {
+				t.Fatal(err)
+			}
+			sources[0].ID = set.Sources[0].ID
+			switch change {
+			case "interval":
+				sources[0].IntervalSeconds = 7200
+			case "format":
+				sources[0].Format = "yaml"
+			case "behavior":
+				sources[0].Behavior = "classical"
+			}
+			if err := repo.SaveSources(ctx, nil, set.ID, sources); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := repo.Service(ctx, set.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := repo.SourceEntries(ctx, set.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if change == "interval" {
+				if updated.Sources[0].LastStatus != "ok" || len(entries.Domains) != 1 {
+					t.Fatalf("unchanged identity lost cache: %+v %+v", updated.Sources, entries)
+				}
+			} else if updated.Sources[0].LastStatus != "pending" || updated.Sources[0].LastFetchAt != nil || len(entries.Domains) != 0 {
+				t.Fatalf("changed identity kept cache: %+v %+v", updated.Sources, entries)
+			}
+		})
 	}
 }
 

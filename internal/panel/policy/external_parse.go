@@ -10,12 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type ParsedEntries struct {
-	Domains  []string `json:"domains,omitempty"`
-	Suffixes []string `json:"suffixes,omitempty"`
-	Keywords []string `json:"keywords,omitempty"`
-	CIDRs    []string `json:"cidrs,omitempty"`
-}
+type ParsedEntries = shared.ParsedEntries
 
 const MaxSourceEntries = 20000
 

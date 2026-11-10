@@ -60,8 +60,7 @@ func TestRequirePortHopSupport(t *testing.T) {
 	if err := RequirePortHopSupport(State{Inbounds: []Inbound{hop}}, false); err != ErrPortHopUnsupported {
 		t.Fatal("an old Agent accepted a hop inbound:", err)
 	}
-	// A disabled hop, another protocol or an inbound without a hop never needs
-	// the capability, so an old Agent keeps publishing everything else unchanged.
+	// Hop fields are serialized even for disabled inbounds or other protocols.
 	disabled := hop
 	disabled.Enabled = false
 	plain := hop
@@ -69,6 +68,12 @@ func TestRequirePortHopSupport(t *testing.T) {
 	for _, state := range []State{
 		{Inbounds: []Inbound{disabled}},
 		{Inbounds: []Inbound{{Protocol: "vless", Enabled: true, Settings: hop.Settings}}},
+	} {
+		if err := RequirePortHopSupport(state, false); err != ErrPortHopUnsupported {
+			t.Fatal("old Agent accepted serialized hop fields:", err)
+		}
+	}
+	for _, state := range []State{
 		{Inbounds: []Inbound{plain}},
 		{},
 	} {

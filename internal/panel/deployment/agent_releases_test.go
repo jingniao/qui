@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,31 @@ func TestListAgentReleasesSkipsUnsignedAndPrerelease(t *testing.T) {
 	}
 	if list[0].Imported {
 		t.Fatalf("expected imported=false before import")
+	}
+}
+
+func TestImportAgentReleaseBindsSelectedVersionAndSequence(t *testing.T) {
+	for _, tc := range []struct {
+		version  string
+		sequence int64
+	}{{"1.4.6", 1004006}, {"1.5.0", 1004006}} {
+		t.Run(fmt.Sprintf("%s-%d", tc.version, tc.sequence), func(t *testing.T) {
+			pub, priv := generateSigningKey(t)
+			manifest, binary := createSignedAgentAsset(t, tc.version, "amd64", tc.sequence, priv, []byte("agent"))
+			fake := &fakeGitHub{lists: map[string]string{"jingniao/qui": `[{"tag_name":"v1.5.0","assets":[{"name":"proxy-agent-1.5.0-linux-amd64.bin","browser_download_url":"/download/a.bin"},{"name":"proxy-agent-1.5.0-linux-amd64.manifest.json","browser_download_url":"/download/a.json"}]}]`}, files: map[string]string{"/download/a.bin": string(binary), "/download/a.json": manifest}}
+			server := httptest.NewServer(fake)
+			defer server.Close()
+			dir := t.TempDir()
+			store := &fakeAgentReleaseStore{}
+			svc := &AgentReleases{Directory: dir, Store: store, Keys: []release.KeyPin{{PublicKey: base64.StdEncoding.EncodeToString(pub), Components: []string{"proxy-agent"}}}, Client: server.Client(), API: server.URL + "/repos/jingniao/qui"}
+			if _, err := svc.Import(context.Background(), "1.5.0", "owner", "127.0.0.1"); !errors.Is(err, ErrAgentReleaseImport) {
+				t.Fatalf("mismatched manifest accepted: %v", err)
+			}
+			files, err := os.ReadDir(dir)
+			if err != nil || len(files) != 0 || len(store.saved) != 0 {
+				t.Fatalf("import wrote data: %v %v %+v", files, err, store.saved)
+			}
+		})
 	}
 }
 

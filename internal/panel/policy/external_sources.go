@@ -59,14 +59,15 @@ func (r *Repository) SaveSources(ctx context.Context, tx *sql.Tx, serviceID stri
 }
 
 type existingSource struct {
-	lastStatus     string
-	lastErrorCode  string
-	lastFetchAt    sql.NullString
-	lastSuccessAt  sql.NullString
-	entryCount     int
-	skippedCount   int
-	encryptedCache []byte
-	createdAt      string
+	url, format, behavior string
+	lastStatus            string
+	lastErrorCode         string
+	lastFetchAt           sql.NullString
+	lastSuccessAt         sql.NullString
+	entryCount            int
+	skippedCount          int
+	encryptedCache        []byte
+	createdAt             string
 }
 
 func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID string, inputs []SourceInput) error {
@@ -95,7 +96,7 @@ func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID st
 	}
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, encrypted_cache, created_at
+		`SELECT id, url, format, behavior, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, encrypted_cache, created_at
 		 FROM service_set_sources WHERE service_id=?`, serviceID)
 	if err != nil {
 		return err
@@ -106,7 +107,7 @@ func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID st
 	for rows.Next() {
 		var id string
 		var ex existingSource
-		if err := rows.Scan(&id, &ex.lastStatus, &ex.lastErrorCode, &ex.lastFetchAt, &ex.lastSuccessAt, &ex.entryCount, &ex.skippedCount, &ex.encryptedCache, &ex.createdAt); err != nil {
+		if err := rows.Scan(&id, &ex.url, &ex.format, &ex.behavior, &ex.lastStatus, &ex.lastErrorCode, &ex.lastFetchAt, &ex.lastSuccessAt, &ex.entryCount, &ex.skippedCount, &ex.encryptedCache, &ex.createdAt); err != nil {
 			return err
 		}
 		existing[id] = ex
@@ -140,14 +141,16 @@ func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID st
 
 		if sourceID != "" {
 			if ex, ok := existing[sourceID]; ok {
-				lastStatus = ex.lastStatus
-				lastErrorCode = ex.lastErrorCode
-				lastFetchAt = ex.lastFetchAt
-				lastSuccessAt = ex.lastSuccessAt
-				entryCount = ex.entryCount
-				skippedCount = ex.skippedCount
-				encryptedCache = ex.encryptedCache
 				createdAt = ex.createdAt
+				if ex.url == in.URL && ex.format == format && ex.behavior == behavior {
+					lastStatus = ex.lastStatus
+					lastErrorCode = ex.lastErrorCode
+					lastFetchAt = ex.lastFetchAt
+					lastSuccessAt = ex.lastSuccessAt
+					entryCount = ex.entryCount
+					skippedCount = ex.skippedCount
+					encryptedCache = ex.encryptedCache
+				}
 			}
 		} else {
 			var err error

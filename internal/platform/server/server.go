@@ -53,6 +53,7 @@ import (
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
 )
 
@@ -317,7 +318,15 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		return nil, err
 	}
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
-	policyService := &policy.Service{Repository: &policy.Repository{Database: database, ClientReferences: clientServiceReferences{}}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository}
+	policyService := &policy.Service{Repository: &policy.Repository{Database: database, Vault: configurationVault, ClientReferences: clientServiceReferences{}}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository,
+		NodeCapabilities: func(ctx context.Context, nodeID string) ([]desiredstate.CoreKeywordCapability, error) {
+			n, err := nodeRepository.Get(ctx, nodeID)
+			if err != nil {
+				return nil, err
+			}
+			return node.KeywordCapabilities(node.EnabledCores(n.Capabilities)), nil
+		},
+	}
 	proxyService.Policies = policyService
 	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: database, Connections: s.connectionStore}, Nodes: nodeRepository, Deployments: deployments, Proxies: proxyService.Repository, Settings: systemRepository}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
@@ -844,12 +853,22 @@ func (s *nodeNotificationSources) Metrics(ctx context.Context, since time.Time) 
 		return nil, err
 	}
 	res := make(map[string]notification.MetricWindow, len(metricsMap))
+	start := since.Truncate(time.Minute)
+	end := time.Now().Truncate(time.Minute)
+	minutes := int(end.Sub(start) / time.Minute)
+	if minutes <= 0 {
+		return res, nil
+	}
 	for nodeID, samples := range metricsMap {
-		win := notification.MetricWindow{NodeID: nodeID}
+		// One slot per completed minute; missing minutes remain nil.
+		win := notification.MetricWindow{NodeID: nodeID, CPU: make([]*float64, minutes), Memory: make([]*float64, minutes), Disk: make([]*float64, minutes)}
 		for _, sm := range samples {
-			win.CPU = append(win.CPU, sm.CPUPercent)
-			win.Memory = append(win.Memory, sm.MemoryPercent)
-			win.Disk = append(win.Disk, sm.DiskPercent)
+			at, err := time.Parse(time.RFC3339Nano, sm.At)
+			if err != nil || at.Before(start) || !at.Before(end) {
+				continue
+			}
+			i := int(at.Sub(start) / time.Minute)
+			win.CPU[i], win.Memory[i], win.Disk[i] = sm.CPUPercent, sm.MemoryPercent, sm.DiskPercent
 		}
 		res[nodeID] = win
 	}

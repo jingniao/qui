@@ -229,6 +229,7 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 					}
 				}
 			} else {
+				// Empty candidates usually mean missing observations; keep the baseline.
 				if currentVal != "" && st.Value != "" && currentVal != st.Value {
 					cooldown := time.Duration(r.CooldownMinutes) * time.Minute
 					shouldSend := false
@@ -249,6 +250,7 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 							Resolved:  false,
 						})
 						st.Value = currentVal
+						st.Active = true
 						st.LastNotified = snap.Now
 						next[key] = st
 					}

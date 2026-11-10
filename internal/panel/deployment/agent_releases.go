@@ -390,6 +390,9 @@ func (a *AgentReleases) Import(ctx context.Context, version, actor, ip string) (
 		if err := signed.Verify(policy); err != nil {
 			return nil, fmt.Errorf("%w: signature verification failed: %v", ErrAgentReleaseImport, err)
 		}
+		if signed.Manifest.Version != version || signed.Manifest.Sequence != seq {
+			return nil, fmt.Errorf("%w: manifest version or sequence does not match selected release", ErrAgentReleaseImport)
+		}
 
 		binURL := binAsset.BrowserDownloadURL
 		if binURL == "" {

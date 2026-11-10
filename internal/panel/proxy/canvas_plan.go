@@ -68,7 +68,7 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 		listeners = append(listeners, canvasListener{e.targetNode, e.inboundName, e.protocol, e.connectionID, e.port, e})
 	}
 	for i, f := range plan.forwards {
-		for _, port := range desiredstate.ListenPorts(f.Port, f.Settings) {
+		for _, port := range desiredstate.ClaimedPorts(f.Port, f.Settings) {
 			listeners = append(listeners, canvasListener{f.NodeID, f.Name, f.Protocol, plan.forwardConnections[i], port, nil})
 		}
 	}

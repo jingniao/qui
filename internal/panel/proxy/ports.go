@@ -90,7 +90,7 @@ func (r *Repository) portOccupants(ctx context.Context, q portDatabase, nodeID s
 		if excluded(o) {
 			continue
 		}
-		for _, p := range desiredstate.ListenPorts(port, settings) {
+		for _, p := range desiredstate.ClaimedPorts(port, settings) {
 			result[p] = append(result[p], o)
 		}
 	}

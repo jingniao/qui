@@ -1012,6 +1012,7 @@ type Capabilities struct {
 	TlsCertificateFilesSupported   bool                   `protobuf:"varint,25,opt,name=tls_certificate_files_supported,json=tlsCertificateFilesSupported,proto3" json:"tls_certificate_files_supported,omitempty"`
 	PanelCatalogueSupported        bool                   `protobuf:"varint,26,opt,name=panel_catalogue_supported,json=panelCatalogueSupported,proto3" json:"panel_catalogue_supported,omitempty"`
 	DomainKeywordSupported         bool                   `protobuf:"varint,27,opt,name=domain_keyword_supported,json=domainKeywordSupported,proto3" json:"domain_keyword_supported,omitempty"`
+	PortHopSupported               bool                   `protobuf:"varint,28,opt,name=port_hop_supported,json=portHopSupported,proto3" json:"port_hop_supported,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -1231,6 +1232,13 @@ func (x *Capabilities) GetPanelCatalogueSupported() bool {
 func (x *Capabilities) GetDomainKeywordSupported() bool {
 	if x != nil {
 		return x.DomainKeywordSupported
+	}
+	return false
+}
+
+func (x *Capabilities) GetPortHopSupported() bool {
+	if x != nil {
+		return x.PortHopSupported
 	}
 	return false
 }
@@ -5603,7 +5611,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12\x1a\n" +
 	"\bsecurity\x18\x03 \x01(\tR\bsecurity\x12\x1c\n" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12\x12\n" +
-	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xca\f\n" +
+	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xf8\f\n" +
 	"\fCapabilities\x12\x1b\n" +
 	"\tcore_name\x18\x01 \x01(\tR\bcoreName\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12G\n" +
@@ -5632,7 +5640,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x1cserver_settings_combinations\x18\x18 \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\x12E\n" +
 	"\x1ftls_certificate_files_supported\x18\x19 \x01(\bR\x1ctlsCertificateFilesSupported\x12:\n" +
 	"\x19panel_catalogue_supported\x18\x1a \x01(\bR\x17panelCatalogueSupported\x128\n" +
-	"\x18domain_keyword_supported\x18\x1b \x01(\bR\x16domainKeywordSupported\"\xfe\x05\n" +
+	"\x18domain_keyword_supported\x18\x1b \x01(\bR\x16domainKeywordSupported\x12,\n" +
+	"\x12port_hop_supported\x18\x1c \x01(\bR\x10portHopSupported\"\xfe\x05\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +

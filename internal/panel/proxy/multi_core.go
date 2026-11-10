@@ -85,7 +85,7 @@ func (r *Repository) validateInboundPorts(ctx context.Context, tx *sql.Tx, id st
 	if err != nil {
 		return err
 	}
-	for _, port := range desiredstate.ListenPorts(in.Port, in.Settings) {
+	for _, port := range desiredstate.ClaimedPorts(in.Port, in.Settings) {
 		if owners := occupied[port]; len(owners) > 0 {
 			return fmt.Errorf("inbound port %d is already used by %s on this node", port, owners[0].ID)
 		}

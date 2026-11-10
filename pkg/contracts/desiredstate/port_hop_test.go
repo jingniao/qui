@@ -52,6 +52,32 @@ func TestHopRangeCannotContainTheListener(t *testing.T) {
 	}
 }
 
+func TestRequirePortHopSupport(t *testing.T) {
+	hop := Inbound{Protocol: "hysteria2", Enabled: true, Settings: hopSettings(20000, 20010, 30)}
+	if err := RequirePortHopSupport(State{Inbounds: []Inbound{hop}}, true); err != nil {
+		t.Fatal("a capable Agent refused a hop inbound:", err)
+	}
+	if err := RequirePortHopSupport(State{Inbounds: []Inbound{hop}}, false); err != ErrPortHopUnsupported {
+		t.Fatal("an old Agent accepted a hop inbound:", err)
+	}
+	// A disabled hop, another protocol or an inbound without a hop never needs
+	// the capability, so an old Agent keeps publishing everything else unchanged.
+	disabled := hop
+	disabled.Enabled = false
+	plain := hop
+	plain.Settings = ProtocolSettings{Security: "tls", CertificatePath: CertificateDirectory + "/a.crt", PrivateKeyPath: CertificateDirectory + "/a.key"}
+	for _, state := range []State{
+		{Inbounds: []Inbound{disabled}},
+		{Inbounds: []Inbound{{Protocol: "vless", Enabled: true, Settings: hop.Settings}}},
+		{Inbounds: []Inbound{plain}},
+		{},
+	} {
+		if err := RequirePortHopSupport(state, false); err != nil {
+			t.Fatal("old Agent refused a state without an enabled hop:", err)
+		}
+	}
+}
+
 func TestClaimedPortsIncludesTheHopRange(t *testing.T) {
 	settings := hopSettings(20000, 20002, 30)
 	want := []int{8443, 20000, 20001, 20002}

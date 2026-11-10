@@ -174,7 +174,7 @@ func (s *Service) relayPortTaken(ctx context.Context, plan *canvasPlan, relay *c
 	}
 	for _, forward := range plan.forwards {
 		if forward.NodeID == relay.exitNode {
-			for _, port := range desiredstate.ListenPorts(forward.Port, forward.Settings) {
+			for _, port := range desiredstate.ClaimedPorts(forward.Port, forward.Settings) {
 				taken[port] = true
 			}
 		}

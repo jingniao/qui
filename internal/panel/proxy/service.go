@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
@@ -131,6 +132,11 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	// has explicitly reported the combination.
 	if err := ValidateInboundServerSettings(n.Capabilities, input.Core, input.Protocol, input.Settings); err != nil {
 		return Inbound{}, err
+	}
+	// A hop range needs the Agent's host-network helper. An old Agent would
+	// silently drop the nft rules, so refuse the save as well as publication.
+	if err := desiredstate.RequirePortHopSupport(desiredstate.State{Inbounds: []desiredstate.Inbound{{Protocol: input.Protocol, Enabled: input.Enabled, Settings: input.Settings}}}, n.Capabilities.GetPortHopSupported()); err != nil {
+		return Inbound{}, fmt.Errorf("%w: 该服务器的 Agent 不支持端口跳跃，请先升级 Agent", desiredstate.ErrPortHopUnsupported)
 	}
 	// The same rule desiredstate.Validate applies at publication, reported here
 	// at save time.

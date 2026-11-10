@@ -66,7 +66,7 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 		}
 		for _, f := range plan.forwards {
 			if f.NodeID == edge.targetNode {
-				for _, occupied := range desiredstate.ListenPorts(f.Port, f.Settings) {
+				for _, occupied := range desiredstate.ClaimedPorts(f.Port, f.Settings) {
 					taken[occupied] = true
 				}
 			}

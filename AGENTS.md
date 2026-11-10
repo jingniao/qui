@@ -308,9 +308,9 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 `capabilities.cores` 列启用核心的版本、协议、用户统计、转发和门控能力；`heartbeat.cores` 列健康/错误/启动时间/统计源状态。`core_selectionBlocked` 列添加/移除中不可选组件。入站的 `core`、`userTrafficSupported`、`deviceGateSupported` 给所属与覆盖。`Welcome.multi_core_supported` 仅对声明支持的 Agent 为真；旧 Agent 按 `core_name` 单核心建模，缺 `Capabilities.cores` 时由旧标量合成。不得接受未上报启用核心；缺测保留 null，不编造 0/健康。GOST 仅 forward，无用户统计/门控/连接快照，coverage=none；编辑器只为 forward 提供已上报 GOST。端口唯一性见第 12 节。
 
-`Capabilities.host` 刷新 CPU 型号/逻辑核、架构、内核、系统、内存/交换/状态目录文件系统总量。心跳提供 load1/5/15、processCount、tcpConnections、udpSockets、memoryUsedBytes、swapUsedBytes、diskUsedBytes、tuningCurrent；optional 缺测省略，实测 0 保留，uint64 JSON 为十进制字符串，旧 snake_case 字段保留。HostInfo 普通标量 0 无法区分缺测。`bootId/defaultRouteInterface` 缺测仅影响整机流量。
+`Capabilities.host` 刷新 CPU 型号/逻辑核、架构、内核、系统、内存/交换/状态目录文件系统总量；v1.5.0 扩充宿主虚拟化（`virtualization`：none/kvm/lxc/openvz/wsl 等）、19 个白名单调优键的可用与只读状态（`tuning_keys`）、拥塞控制与排队规则已就绪及可加载算法（`congestion_available/loadable`、`qdisc_available/loadable`）、进程文件句柄限制（`fd_limits`：Agent 与核心进程的 soft/hard 上限，OpenRC 设 `rc_ulimit="-n 524288"` 对齐 systemd `LimitNOFILE=524288`）及宿主机 `/etc/sysctl.d/` 与 `/etc/sysctl.conf` 的显式配置源（`sysctl_sources`）。心跳提供 load1/5/15、processCount、tcpConnections、udpSockets、memoryUsedBytes、swapUsedBytes、diskUsedBytes、tuningCurrent，以及 TCP 出站段 `tcp_out_segs`（字段 37）与重传段 `tcp_retrans_segs`（字段 38）；optional 缺测省略，实测 0 保留，uint64 JSON 为十进制字符串，旧 snake_case 字段保留。HostInfo 普通标量 0 无法区分缺测。`bootId/defaultRouteInterface` 缺测仅影响整机流量。
 
-资源曲线每节点每 UTC 分钟保存最后一条新鲜心跳（消息/接收时间差 ≤45 秒），确认过的重放和过期消息不采样，随延迟调度清理、保留 7 天。查询 CPU/内存/磁盘百分比及字节、load1、进程/套接字/已测活连接、非 lo 接口速率合计；网卡合计可能重复计数，不等于代理量。缺测 null，不补 0。调优 GET 允许 Owner/Viewer，修改限 Owner＋CSRF＋匹配 confirmNodeId；期望与实际分列（第 22.0 节）。
+资源曲线每节点每 UTC 分钟保存最后一条新鲜心跳（消息/接收时间差 ≤45 秒），确认过的重放和过期消息不采样，随延迟调度清理、保留 7 天。查询 CPU/内存/磁盘百分比及字节、load1、进程/套接字/已测活连接、非 lo 接口速率合计与 TCP 重传率 `tcpRetransPercent`（根据两分钟心跳的 TCP 出站段与重传段增量比值计算，缺测或出站段为 0 时为 null，不补 0）；网卡合计可能重复计数，不等于代理量。缺测 null，不补 0。调优 GET 允许 Owner/Viewer，修改限 Owner＋CSRF＋匹配 confirmNodeId；期望与实际分列（第 22.0 节）。
 
 ## 11.3 节点注册与删除
 
@@ -606,7 +606,13 @@ Xray 总量=账户计数＋已渲染 forward 的原生入站计数。渲染生�
 
 续期后的证书由面板自动发布（第 27.16 节）：这同样是一次会重启该节点全部核心的发布，所以只在 Owner 设定的低峰窗口（`deployStartHour`–`deployEndHour`，面板时区，默认 3–6 点，结束小时不含）内进行。
 
-## 22.0 服务器调优应用流程
+## 22.0 服务器调优与推荐应用流程
+
+调优白名单固定为 19 个 sysctl 键（`pkg/contracts/tuning`），禁止任意 shell、modprobe 或外部命令。root helper 直接操作 procfs 并原子写入 `/etc/sysctl.d/99-proxy-tuning.conf`，通过 `/etc/sysctl.d/.proxy-tuning-snapshot.json` 保存首次应用前的基线原值，失败自动回滚，清空调优恢复基线。当内核模块存在时，helper 允许将未直接加载的可用算法（如 `bbr`、`cake`）直接写入内核 procfs，并在回执的 `initial` 字典中返回完整 19 键初始值快照。
+
+面板基于纯规则引擎（`internal/panel/node/tuningadvice`，`RulesVersion = "2026.11-1"`）为节点提供调优建议：综合评估节点虚拟化类型、可用及可加载算法、总内存大小、线路带宽（`node_meta.bandwidth_mbps`）、最近 24 小时探测 RTT 中位数、是否启用 QUIC/Hysteria2 入站以及是否承担中继角色，推荐最优拥塞控制算法、排队规则、缓冲上限及核心网络参数。每条建议具有级别（`suggested`/`optional`）与详细说明。
+
+Owner/Viewer 可通过 `GET /api/v1/nodes/{id}/tuning/recommendations` 获取建议列表；Owner 可通过 `POST /api/v1/nodes/{id}/tuning/recommendations/dismiss` 记录不采纳某项建议（`{key, value}`），仅当该键推荐值变化时重新展示。系统设置支持可选的“新服务器上线后自动应用调优推荐”（`GET/PUT /api/v1/system/tuning-auto-apply`，Owner 权限，PUT 须 CSRF 与 `expectedRevision`）；开启后，节点首次上报能力且尚无任何 `node_tuning` 请求时，面板以 `auto` 操作者自动下发推荐 profile。
 
 Owner＋CSRF 提交完整 settings/clear 和匹配 confirmNodeId → 校验白名单/边界 → 事务保存 node_tuning 唯一 request_id、期望 profile、pending、审计“修改服务器调优” → Connect 下发 TuningCommand。每节点最多一个 pending（409 tuning_busy）；缺能力 409 tuning_unsupported；禁用/离线/心跳过期 409 node_offline。
 
@@ -665,7 +671,7 @@ success 仅证明镜像切换；须等 Capabilities.cores 出现组件才允许�
 
 - 强制出站源地址：固定 nft 规则，独立 oneshot，仅 CAP_NET_ADMIN。
 - 端口跳跃：同一个 host-network helper 额外维护 `inet proxy_agent_hop` 一张表（prerouting，`udp dport <start>-<end> redirect to :<port>`），整表替换、无跳跃入站时删除；仍是同一个固定 oneshot、仅 CAP_NET_ADMIN，不新增单元，也不引入任意命令。
-- 调优/清除：13 个白名单 sysctl 键及边界；root helper 直接写 procfs、读回校验、原子保存 99-proxy-tuning.conf，失败恢复原值，clear 恢复首次快照；无 shell/任意 sysctl（第 22.0、30 节）。
+- 调优/清除：19 个白名单 sysctl 键及边界；root helper 直接写 procfs、读回校验、原子保存 99-proxy-tuning.conf，失败恢复原值，clear 恢复首次快照；无 shell/任意 sysctl（第 22.0、30 节）。
 - TTL 设备门控：Xray 官方运行时规则 API / sing-box Clash 关连接，不发 Revision/不重启。
 - TCP-connect：只接受已解析 IP、端口、次数、超时、截止时间，Agent 再检，最多 10 次、每次 3 秒，无 shell。
 - 转发/中继：正常发布，旧能力拒绝；Xray dokodemo-door、sing-box direct override、GOST tcp/udp。无用户身份，不进订阅/额度/设备限制/域名归属。
@@ -903,6 +909,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0138 `node_public_addresses` | `nodes.public_addresses_json`（文本 JSON，默认 `[]`，严格校验最多 16 项全局单播地址列表）与 `nodes.public_ip_selected`（文本，默认 `''`）。接口与心跳上报联动，设置支持选择候选公网 IP |
 | 0139 `notifications` | 4 张表：`notification_rules`（7 类默认规则、阈值、持续窗口、冷却分钟及 CHECK 约束）、`notification_channels`（AES-256-GCM 密封配置、末 4 位摘要、投递状态与时间）、`notifications`（通知记录，90 天保留自动清理）、`notification_state`（去重状态与冷却追踪） |
 | 0140 `ruleset_sources` | `service_sets` / `service_set_entries` 增加 `keyword` 匹配类型支持；新增 `service_set_sources` 表（存储外部规则源 URL、格式 yaml/text/mrs、行为 classical/domain/ipcidr、刷新周期、运行状态及密封缓存） |
+| 0141 `tuning_recommendations` | 新增 `node_tuning_dismissals` 表（主键 `(node_id, rule_key)`，记录不采纳的推荐值 `dismissed_value` 与时间，级联删除）；`node_meta` 扩充可空整数 `bandwidth_mbps`（1–1000000 Mbps）；`system_settings` 新增 `tuning_auto_apply` 开关 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -951,6 +958,10 @@ GET    /api/v1/nodes/{id}
 GET    /api/v1/nodes/{id}/metrics?hours=1..168
 GET    /api/v1/nodes/{id}/tuning
 PUT    /api/v1/nodes/{id}/tuning
+GET    /api/v1/nodes/{id}/tuning/recommendations
+POST   /api/v1/nodes/{id}/tuning/recommendations/dismiss
+GET    /api/v1/system/tuning-auto-apply
+PUT    /api/v1/system/tuning-auto-apply
 GET    /api/v1/nodes/machine-traffic
 GET    /api/v1/nodes/{id}/machine-traffic
 GET    /api/v1/nodes/{id}/machine-traffic/settings
@@ -977,6 +988,8 @@ GET    /api/v1/nodes/{id}/certificate-matches?domain=<域名>
 metrics 与 tuning GET 均允许 Owner/Viewer；逻辑删除节点返回 404。metrics 默认 hours=24，合法范围 1–168；≤12 小时原始分钟点，>12 小时 epoch 对齐，intervalSeconds=ceil(hours×60/720)×60，sampleSeconds=60。响应 {intervalSeconds,sampleSeconds,points}；空 points 为 []，无测量字段为 null。桶内各字段对非 null 值取算术平均，计数/字节可能为小数，samples 为桶内行数。指标字段见第 11.2 节。
 
 tuning PUT 请求 {settings:对象,clear:布尔,confirmNodeId:节点ID}，拒绝未知 JSON 字段；202 返回 {requestId,status:"pending"}。settings 为完整字符串 profile，空 profile 等同 clear；clear=true 不得带非空 settings。GET 返回 supported、desired、requestId、status、result、requestedAt、updatedAt、current；未操作时 ID/结果/时间为 null、期望为空对象、status=unconfirmed。current 是最后心跳实际读数，可能过期。PUT 权限、并发和错误码见第 22.0 节。
+
+调优建议接口：`GET /api/v1/nodes/{id}/tuning/recommendations`（Owner/Viewer）返回建议规则版本与建议项列表；`POST /api/v1/nodes/{id}/tuning/recommendations/dismiss`（Owner＋CSRF，体 `{key, value}`，操作日志“不采纳调优建议”）；`GET/PUT /api/v1/system/tuning-auto-apply`（Owner；PUT 须 CSRF 与 `expectedRevision`，体 `{enabled, expectedRevision}`，操作日志“修改调优自动应用”）。节点元数据支持可选整数 `bandwidthMbps`（1–1000000），供调优建议与线路显示使用。
 
 整机流量：GET settings 与两个摘要接口允许 Owner/Viewer；PUT settings 仅 Owner＋CSRF；逻辑删除节点返回 404，字段/设置非法返回 400 `invalid_request`。settings 为 `{method:"sum"|"outbound"|"max", interfaceName, allowanceBytes, resetDay}` 的完整替换，PUT 必须带全部四个字段（含显式 nullable allowance，1–9007199254740991 的整数字节或 null），未知字段拒绝，并写入操作日志“服务器流量设置”。摘要 `{nodeId, settings, interfaceName, timezone, periodStart, periodEnd, nextResetAt, rxBytes, txBytes, usedBytes, status, lastObservedAt}`，字节为十进制字符串，未知为 null，status 为 measured/stale/unknown；批量接口 `{items:[摘要],timezone}` 一次返回全部未删除节点，服务器列表只用它，详情用单节点接口。口径与限制见第 21 节。
 
@@ -1243,6 +1256,9 @@ Agent 目录更新能力与端口协商（v1.5.0）：
 - `Capabilities.domain_keyword_supported`（字段 27，bool）与 `CoreCapability.domain_keyword_supported`（字段 13，bool）：逐核声明该核心的路由渲染器支持域名关键字（domain keyword）匹配规则。Xray 与 sing-box 各自上报为真，GOST 保持为假。
 - `Welcome.agent_catalogue_port`（字段 22，uint32）：面板告知 Agent 托管只读签名目录的 HTTP/HTTPS 端口号（未配置安装端点时取面板 Web 监听端口）。旧 Agent 忽略未知字段。
 - `Capabilities.port_hop_supported`（字段 28，bool）：Agent 声明 host-network helper 已安装，可维护 Hysteria2 跳跃表（第 12 节）。旧 Agent 不上报，面板在保存、快照与发布前三处拒绝跳跃入站。
+- `HostInfo` 扩充字段 11–18：`virtualization`（11，string）、`tuning_keys`（12，repeated TuningKeyState）、`congestion_available`（13，repeated string）、`congestion_loadable`（14，repeated string）、`qdisc_available`（15，repeated string）、`qdisc_loadable`（16，repeated string）、`fd_limits`（17，repeated ProcessLimit，包含 soft 与 hard）、`sysctl_sources`（18，repeated SysctlSource，包含 key/value/file）。
+- `Heartbeat` 扩充 `tcp_out_segs`（字段 37，uint64）与 `tcp_retrans_segs`（字段 38，uint64），用于面板计算每分钟 TCP 重传率。
+- `TuningResult` 扩充 `initial`（字段 4，map<string, string>，回传 19 键初始快照值）。
 
 中央端下发消息包括：
 
@@ -1329,7 +1345,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 强制出站 helper：proxy-agent-host-network.service（oneshot，仅 CAP_NET_ADMIN）执行 `proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，.path 监视并开机重放，只维护 nft 表 inet proxy_agent_source 与 inet proxy_agent_hop（Hysteria2 端口跳跃，第 12 节）；卸载删除表/单元。OpenRC 的 /etc/init.d/proxy-agent-host-network 监管 /usr/local/lib/proxy-agent/host-network-watch（busybox inotifyd）。Agent 本身由 systemd 或 /etc/init.d/proxy-agent 的 supervise-daemon 管理。
 
-调优 helper：Agent 写 0600 请求；root oneshot proxy-agent-tuning.service/.path 执行 `--apply-tuning /var/lib/proxy-agent/tuning`。CAP_NET_ADMIN＋CAP_DAC_OVERRIDE（读写 Agent 0700/0600 目录），fs.file-max 靠 root 权限。systemd 仅开放固定 procfs 键、/etc/sysctl.d、请求目录；OpenRC 的 proxy-agent-tuning 监管 tuning-watch，无文件系统命名空间隔离。root 0600 的 /etc/sysctl.d/.proxy-tuning-snapshot.json 保存原值/管理键，flock 串行，按 request_id 回逐键结果，Agent 最多等 30 秒，超时未确认。clear/空配置删 99-proxy-tuning.conf 并恢复原值；卸载先恢复再移单元。写入拒绝即失败，不扩权/加载模块。主机信息随能力刷新，不可读心跳值未知；磁盘与 disk_percent 均指状态目录文件系统。
+调优 helper：Agent 写 0600 请求；root oneshot proxy-agent-tuning.service/.path 执行 `--apply-tuning /var/lib/proxy-agent/tuning`。CAP_NET_ADMIN＋CAP_DAC_OVERRIDE（读写 Agent 0700/0600 目录），fs.file-max 靠 root 权限。systemd 仅开放固定 procfs 键、/etc/sysctl.d、请求目录；OpenRC 的 proxy-agent-tuning 监管 tuning-watch，无文件系统命名空间隔离。root 0600 的 /etc/sysctl.d/.proxy-tuning-snapshot.json 保存原值/管理键，flock 串行，按 request_id 回逐键结果，Agent 最多等 30 秒，超时未确认。clear/空配置删 99-proxy-tuning.conf 并恢复原值；卸载先恢复再移单元。写入拒绝即失败，不扩权；当内核模块存在时，允许将可加载算法直接写入内核 procfs。主机信息随能力刷新，不可读心跳值未知；磁盘与 disk_percent 均指状态目录文件系统。
 
 install.sh/node-install.sh 可重复 `--core xray --core sing-box --core gost`，新装缺省仅 Xray。显式安装将顶层规范为 cores 列表，保留首项 core_name/core_path 供旧 Agent，其余配置/身份不变；手工版本/URL/摘要紧跟对应核心。升级不带核心参数保留全部记录核心与 config 原文；显式参数只替换/追加，省略不删除。`--core-source qui|official` 仅 sing-box，维持架构/libc、官方 musl 与同版本 qui 选项。
 
@@ -1365,6 +1381,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | node_public_addresses（nodes.public_addresses_json 与 public_ip_selected） | 随 nodes 主表加密备份；validateNodePublicAddresses 校验列表格式、项数不超过 16 项且均为合法单播 IP 与源标识，恢复保留归档选定地址 |
 | notifications、notification_rules、notification_channels、notification_state | 四表纳入加密备份；notification_channels 密封材料必须能由当前密钥打开，校验 rules 包含全部 7 类规则且无越界值；历史通知超过 90 天由后台自动 Prune |
 | service_set_sources | 随服务规则集加密备份；保留外部来源配置、状态、计数与密封解析缓存（能由当前密钥解密），恢复时不触发抓取 |
+| node_tuning_dismissals、node_meta.bandwidth_mbps | 随加密备份保留与恢复；validateTuningDismissals 校验 rule_key 属于 19 键白名单、dismissed_value 非空且长度不超过 256；node_meta.bandwidth_mbps 校验正整数且 ≤1000000。恢复保留归档记录并关联存在节点；system_settings.tuning_auto_apply 随系统设置整体原样往返 |
 
 调度随停机/进程内恢复取消并等待退出，新实例仅一个循环。其他模块的会话结束、安全状态与撤销访问保守合并规则见第 26.9、29 节。
 

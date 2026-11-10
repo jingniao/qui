@@ -492,9 +492,15 @@ qui sing-box 增加上游 `with_v2ray_api`，声明 `singbox_user_stats` 后逐�
 
 Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）。每节点每分钟保留最后一条新鲜心跳，7 天清理；≤12 小时原始点，>12 小时分桶步长 ceil(hours×60/720)×60 秒。响应 intervalSeconds 为桶步长、sampleSeconds 固定 60、points 缺测为 null；桶内只平均已测值，不补零。非 lo 接口速率合计是宿主流量，可能跨接口重复计数。HostInfo 和 heartbeat 可空指标随节点详情提供，缺测不得当作 0。
 
-`GET /api/v1/nodes/{id}/tuning` 返回期望 desired、操作 status、逐键 result 与末次心跳 current。Owner 通过带 CSRF 的 PUT 提交完整字符串 settings、clear 和匹配 confirmNodeId；新 profile 省略旧键会恢复其初始值。clear=true 只能带空 settings，空 profile 同样清除。只接受 13 个固定 sysctl 键和 Agent 相同边界；tcp_rmem/tcp_wmem 仅填最大整数。无能力返回 409 tuning_unsupported，离线/过期心跳返回 409 node_offline，同节点 pending 返回 409 tuning_busy。成功受理 202 仅表示排队，操作日志为“修改服务器调优”。
+`GET /api/v1/nodes/{id}/tuning` 返回期望 desired、操作 status、逐键 result、末次心跳 current 与面板计算的 keyStatus。Owner 通过带 CSRF 的 PUT 提交完整字符串 settings、clear 和匹配 confirmNodeId；新 profile 省略旧键会恢复其初始值。clear=true 只能带空 settings，空 profile 同样清除。只接受 19 个固定 sysctl 键（`pkg/contracts/tuning`）和 Agent 相同边界；tcp_rmem/tcp_wmem 仅填最大整数。无能力返回 409 tuning_unsupported，离线/过期心跳返回 409 node_offline，同节点 pending 返回 409 tuning_busy。成功受理 202 仅表示排队，操作日志为“修改服务器调优”。
 
 等待结果期间其他心跳照常确认；断流后 pending 变为 unconfirmed，不自动换 ID 或重发。unconfirmed 时先查看后续 current、节点日志及 helper status.json，再由 Owner 明确提交新操作，不能根据本地期望宣称已成功或未应用。应用成功也要按实际读回值核对。
+
+调优状态看板与参数来源：
+- 状态板汇总展示：拥塞控制与排队规则当前值、各状态键数量（`panel` 实测匹配面板期望、`drift` 发生偏离、`external` 外部配置管理、`unavailable` 键不可用、`default` 系统默认）、进程文件句柄限制（Agent 与核心子进程 soft/hard）、虚拟化类型（none/kvm/lxc/openvz 等，LXC 提示“容器内看不到 net.core.*，由宿主决定”）、最后一次应用结果及“重启后保持”（当开机标识 bootId 变化后 drift 为 0 即认定重启后保持）。
+- 来源识别与漂移：Agent 探测 `/etc/sysctl.d/*.conf` 与 `/etc/sysctl.conf` 中的显式条目。当某参数实测值与期望不同时，状态显示为 `drift` 并明确标明外部来源文件；参数表提供“纳入面板管理”按钮，可一键将外部生效的值吸纳进草稿。
+- 调优建议引擎：基于节点内存、线路带宽（`node_meta.bandwidth_mbps`）、虚拟化、RTT 中位数、入站协议及中继角色给出推荐项。Owner 可勾选并点击“采用所选”填入草稿，或点击“不采纳”隐藏该建议（当推荐值变化后会重新展示）。系统设置支持“新服务器上线后自动应用调优推荐”，开启后首次上报能力的全新节点会自动采纳推荐值。
+- 资源监控：曲线图增加“TCP 重传率”（根据心跳 `tcp_out_segs` 与 `tcp_retrans_segs` 跨分钟增量计算，无段发送时为空，不绘制为 0）。
 
 便携备份排除 node_metric_samples，快照删除后压实；恢复再次清空采样。node_tuning 随备份保存，但恢复合并保留当前库的调优行，删除仅在归档存在的行，pending 变为 unconfirmed，不下发旧操作。恢复不会修改服务器 sysctl，恢复后重新核对观测。面板自动续证准入已与 对齐：证书满 30 天或剩余不超过 14 天，沿用原密钥与现有确认流程。
 
@@ -506,10 +512,10 @@ Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）
 
 - systemd：查看 `systemctl status proxy-agent-tuning.path proxy-agent-tuning.service`、`journalctl -u proxy-agent-tuning`；path 应保持运行，oneshot 执行完为 inactive 正常。反复失败后仍应接收新请求。
 - OpenRC：查看 `rc-service proxy-agent-tuning status`、syslog 的 proxy-agent-tuning；检查 `/usr/local/lib/proxy-agent/tuning-watch`、busybox inotifyd 与启动运行级。
-- 检查 desired/status 的 request_id 是否一致及 keys 错误；算法必须已在 tcp_available_congestion_control 中。helper 不加载模块，不调用 shell 或 sysctl 命令。容器只读 procfs、权限不足、内核不支持或读回不符均报告失败，并尝试恢复全部原值；恢复失败也逐键记错，须管理员核对真实 sysctl。
+- 检查 desired/status 的 request_id 是否一致及 keys 错误；算法必须已在 tcp_available_congestion_control 中或其内核模块存在于 `/lib/modules/$(uname -r)/kernel/net/ipv4`（qdisc 为 `/lib/modules/$(uname -r)/kernel/net/sched`）。helper 不调用 modprobe，不调用 shell 或 sysctl 命令，当内核模块文件存在时直接写入内核 procfs。容器只读 procfs、权限不足、内核不支持或读回不符均报告失败，并尝试恢复全部原值；恢复失败也逐键记错，须管理员核对真实 sysctl。
 - `/etc/sysctl.d/99-proxy-tuning.conf` 保存成功配置；root 0600 的 `.proxy-tuning-snapshot.json` 保存首次应用前原值，不由 Agent 写。空 profile/clear 删除配置并恢复原值。卸载先停 watcher、恢复快照，恢复失败保留程序并中止卸载。不要手动删除快照来处理失败。
 
-systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者读取 Agent 的 0600 请求并写入其 0700 目录），fs.file-max 靠 root 文件权限；/proc/sys 默认只读，只开放 13 个固定键。OpenRC 同为 root/CAP_NET_ADMIN + CAP_DAC_OVERRIDE，但缺少 systemd 文件系统隔离。若宿主策略拒绝写入，保留失败结果；不扩权。Linux/root 与 OpenRC 的主机结果见[验收矩阵](v1-acceptance.md) §11；可运行 `sudo bash deploy/linux/tests/tuning-helper-test.sh` 验证隔离的触发/重放流程，Go tuning 测试用假 proc 验证应用/恢复，不改宿主。
+systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者读取 Agent 的 0600 请求并写入其 0700 目录），fs.file-max 靠 root 文件权限；/proc/sys 默认只读，只开放 19 个固定键。OpenRC 同为 root/CAP_NET_ADMIN + CAP_DAC_OVERRIDE，但缺少 systemd 文件系统隔离。若宿主策略拒绝写入，保留失败结果；不扩权。Linux/root 与 OpenRC 的主机结果见[验收矩阵](v1-acceptance.md) §11；可运行 `sudo bash deploy/linux/tests/tuning-helper-test.sh` 验证隔离的触发/重放流程，Go tuning 测试用假 proc 验证应用/恢复，不改宿主。
 
 ### 整机月流量（v1.3 T1）
 

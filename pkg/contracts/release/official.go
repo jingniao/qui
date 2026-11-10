@@ -3,7 +3,7 @@
 // OfficialKeyPins are the release keys of the official qui builds. Revoked pins stay listed.
 var OfficialKeyPins = []KeyPin{
 	{
-		PublicKey:  "HIFPXy0aPRHUmS16VXWwf2dnbCIYnf0xwZTxW49ZyJ4=",
+		PublicKey:  "v1GzEWqRzysqZRFBryZStMCw4KeAkF3Vq2metTUlxTE=",
 		Components: []string{"proxy-agent"},
 	},
 }

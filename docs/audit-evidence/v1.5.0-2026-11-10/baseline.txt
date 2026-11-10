@@ -1,0 +1,13 @@
+2026-11-10T12:25:50Z
+10
+/usr/local/bin/go
+/usr/local/bin/node
+/usr/local/bin/npm
+/usr/sbin/nft
+/usr/bin/unshare
+inactive
+inactive
+active
+active
+net.ipv4.tcp_congestion_control = cubic
+net.core.default_qdisc = fq_codel

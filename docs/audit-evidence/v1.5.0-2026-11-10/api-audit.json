@@ -1,0 +1,188 @@
+{
+  "snapshot": "0b60eca",
+  "base": "http://127.0.0.1:18195",
+  "checks": [
+    {
+      "name": "auth /notification-rules",
+      "result": "PASS",
+      "detail": {
+        "anonymous": 401,
+        "viewer": 403
+      }
+    },
+    {
+      "name": "auth /notification-channels",
+      "result": "PASS",
+      "detail": {
+        "anonymous": 401,
+        "viewer": 403
+      }
+    },
+    {
+      "name": "auth /agent-releases",
+      "result": "PASS",
+      "detail": {
+        "anonymous": 401,
+        "viewer": 403
+      }
+    },
+    {
+      "name": "auth /system/tuning-auto-apply",
+      "result": "PASS",
+      "detail": {
+        "anonymous": 401,
+        "viewer": 403
+      }
+    },
+    {
+      "name": "auth /nodes/audit-none/certificate-matches?domain=example.com",
+      "result": "PASS",
+      "detail": {
+        "anonymous": 401,
+        "viewer": 403
+      }
+    },
+    {
+      "name": "auth /service-sets",
+      "result": "PASS",
+      "detail": {
+        "anonymous": 401,
+        "viewer": 403
+      }
+    },
+    {
+      "name": "auth /agent-updates",
+      "result": "PASS",
+      "detail": {
+        "anonymous": 401,
+        "viewer": 403
+      }
+    },
+    {
+      "name": "csrf POST /notification-channels",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "csrf PUT /notification-rules",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "csrf POST /notifications/read-all",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "csrf POST /nodes/audit-none/tuning/recommendations/dismiss",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "csrf PUT /system/tuning-auto-apply",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "csrf POST /agent-releases/9.9.9/import",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "csrf POST /agent-updates",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "csrf POST /service-sets",
+      "result": "PASS",
+      "detail": {
+        "missing": 403,
+        "crossOrigin": 403
+      }
+    },
+    {
+      "name": "Viewer notification center",
+      "result": "PASS"
+    },
+    {
+      "name": "channel credentials masked",
+      "result": "PASS",
+      "detail": {
+        "status": 201,
+        "last4": "1234"
+      }
+    },
+    {
+      "name": "enrollment connectHost stored",
+      "result": "PASS"
+    },
+    {
+      "name": "legacy allowedProtocols normalized",
+      "result": "PASS",
+      "detail": {
+        "status": 201,
+        "protocols": 8
+      }
+    },
+    {
+      "name": "create/read external rule source",
+      "result": "PASS",
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "name": "real HTTPS source refresh",
+      "result": "PASS",
+      "detail": {
+        "status": 200,
+        "lastStatus": "ok",
+        "entryCount": 34,
+        "error": ""
+      }
+    },
+    {
+      "name": "catalogue path refusal ../configuration.key",
+      "result": "PASS",
+      "detail": {
+        "status": 404
+      }
+    },
+    {
+      "name": "catalogue path refusal artifacts/abc.bin",
+      "result": "PASS",
+      "detail": {
+        "status": 404
+      }
+    },
+    {
+      "name": "catalogue path refusal proxy-agent/linux/amd64/1/manifest.json",
+      "result": "PASS",
+      "detail": {
+        "status": 404
+      }
+    }
+  ]
+}

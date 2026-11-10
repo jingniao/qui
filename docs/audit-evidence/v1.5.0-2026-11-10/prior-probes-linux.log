@@ -1,0 +1,5 @@
+server_wiring_refresh: status=ok entries=1
+server_wiring_read_cache_error: vault unconfigured
+changed_url: url=https://new.example.com/rules status=ok cached_domains=[old.example.com]
+ip_notifications: first=1 second_within_cooldown=1 last_address_removed=0
+recovery_persistence: first=1 next_has_key=false persisted_active=true repeated_recovery=1

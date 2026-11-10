@@ -1,0 +1,705 @@
+{
+  "toolchain": "go1.26.0 linux/amd64",
+  "calledIDs": 42,
+  "interpretation": "scanner-reported symbol traces, not confirmed exploitability",
+  "findings": [
+    {
+      "id": "GO-2026-6090",
+      "summary": "Limit handshake messages we are willing to accept post-handshake in crypto/tls",
+      "aliases": [
+        "CVE-2026-56862"
+      ],
+      "module": "stdlib",
+      "package": "crypto/tls",
+      "function": "DialContext",
+      "projectPaths": [
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-6607",
+      "summary": "Reject malformed ECH outer extension references in crypto/tls",
+      "aliases": [
+        "CVE-2026-97031"
+      ],
+      "module": "stdlib",
+      "package": "crypto/tls",
+      "function": "HandshakeContext",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-6617",
+      "summary": "HTTP/2 server crash due to HPACK encoder race in net/http",
+      "aliases": [
+        "CVE-2026-97032"
+      ],
+      "module": "golang.org/x/net",
+      "package": "golang.org/x/net/http2",
+      "function": "Error",
+      "projectPaths": [
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/panel/subscription/importer",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/panel/certificate"
+      ]
+    },
+    {
+      "id": "GO-2026-6612",
+      "summary": "Double flow control refund on HTTP/2 server streams in net/http",
+      "aliases": [
+        "CVE-2026-78663"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "ServeTLS",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/panel/certificate",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/panel/subscription/importer"
+      ]
+    },
+    {
+      "id": "GO-2026-6611",
+      "summary": "Excessive CPU consumption from repeated initial window changes in net/http",
+      "aliases": [
+        "CVE-2026-78669"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "Write",
+      "projectPaths": [
+        "proxycontrol/cmd/agent",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/internal/panel/subscription/importer",
+        "proxycontrol/internal/panel/certificate"
+      ]
+    },
+    {
+      "id": "GO-2026-6603",
+      "summary": "HTTP/2 server memory exhaustion due to Trailer headers in net/http",
+      "aliases": [
+        "CVE-2026-78659"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "Write",
+      "projectPaths": [
+        "proxycontrol/cmd/agent",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/internal/panel/subscription/importer",
+        "proxycontrol/internal/panel/certificate"
+      ]
+    },
+    {
+      "id": "GO-2026-6613",
+      "summary": "HTTP/1 server connection desynchronization after 2xx CONNECT response in net/http",
+      "aliases": [
+        "CVE-2026-94439"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "Read",
+      "projectPaths": [
+        "proxycontrol/cmd/panel",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/internal/panel/certificate",
+        "proxycontrol/internal/panel/subscription/importer"
+      ]
+    },
+    {
+      "id": "GO-2026-4599",
+      "summary": "Incorrect enforcement of email constraints in crypto/x509",
+      "aliases": [
+        "CVE-2026-27137"
+      ],
+      "module": "stdlib",
+      "package": "crypto/x509",
+      "function": "Verify",
+      "projectPaths": [
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4971",
+      "summary": "Panic in Dial and LookupPort when handling NUL byte on Windows in net",
+      "aliases": [
+        "CVE-2026-39836"
+      ],
+      "module": "stdlib",
+      "package": "net",
+      "function": "DialTimeout",
+      "projectPaths": [
+        "proxycontrol/internal/agent/core/gost",
+        "proxycontrol/internal/agent/reconcile",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/panel/certificate",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/internal/agent/core/xray",
+        "proxycontrol/internal/agent/core"
+      ]
+    },
+    {
+      "id": "GO-2026-4865",
+      "summary": "JsBraceDepth Context Tracking Bugs (XSS) in html/template",
+      "aliases": [
+        "CVE-2026-32289"
+      ],
+      "module": "stdlib",
+      "package": "html/template",
+      "function": "Error",
+      "projectPaths": [
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost"
+      ]
+    },
+    {
+      "id": "GO-2026-6604",
+      "summary": "Root.Mkdir(All) can follow junctions out of the root on Windows in os",
+      "aliases": [
+        "CVE-2026-56857"
+      ],
+      "module": "stdlib",
+      "package": "os",
+      "function": "Link",
+      "projectPaths": [
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/agent/tuning",
+        "proxycontrol/internal/panel/system/backup",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/platform/recovery",
+        "proxycontrol/internal/agent/control"
+      ]
+    },
+    {
+      "id": "GO-2026-4977",
+      "summary": "Quadratic string concatenation in consumePhrase in net/mail",
+      "aliases": [
+        "CVE-2026-42499"
+      ],
+      "module": "stdlib",
+      "package": "net/mail",
+      "function": "ParseAddress",
+      "projectPaths": [
+        "proxycontrol/internal/panel/certificate",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-4864",
+      "summary": "TOCTOU permits root escape on Linux via Root.Chmod in os in internal/syscall/unix",
+      "aliases": [
+        "CVE-2026-32282"
+      ],
+      "module": "stdlib",
+      "package": "internal/syscall/unix",
+      "function": "Fchmodat",
+      "projectPaths": [
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-4970",
+      "summary": "Root escape via symlink plus trailing slash in os",
+      "aliases": [
+        "CVE-2026-39822"
+      ],
+      "module": "stdlib",
+      "package": "os",
+      "function": "Open",
+      "projectPaths": [
+        "proxycontrol/internal/platform/recovery",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4601",
+      "summary": "Incorrect parsing of IPv6 host literals in net/url",
+      "aliases": [
+        "CVE-2026-25679"
+      ],
+      "module": "stdlib",
+      "package": "net/url",
+      "function": "ParseRequestURI",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/pkg/contracts/release",
+        "proxycontrol/internal/platform/config",
+        "proxycontrol/internal/agent/configuration"
+      ]
+    },
+    {
+      "id": "GO-2026-6600",
+      "summary": "Recognize yield as regexp preceder keyword in html/template",
+      "aliases": [
+        "CVE-2026-97030"
+      ],
+      "module": "stdlib",
+      "package": "html/template",
+      "function": "ExecuteTemplate",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-5856",
+      "summary": "Invoking Encrypted Client Hello privacy leak in crypto/tls",
+      "aliases": [
+        "CVE-2026-42505"
+      ],
+      "module": "stdlib",
+      "package": "crypto/tls",
+      "function": "Handshake",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost"
+      ]
+    },
+    {
+      "id": "GO-2026-4918",
+      "summary": "Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in net/http/internal/http2 in golang.org/x/net",
+      "aliases": [
+        "CVE-2026-33814"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "CloseIdleConnections",
+      "projectPaths": [
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-6608",
+      "summary": "Memory limit bypass when parsing MIME headers in net/textproto, mime/multipart",
+      "aliases": [
+        "CVE-2026-94440"
+      ],
+      "module": "stdlib",
+      "package": "mime/multipart",
+      "function": "ReadForm",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/panel/system"
+      ]
+    },
+    {
+      "id": "GO-2026-6218",
+      "summary": "Avoid quadratic complexity in resolvePath in net/url",
+      "aliases": [
+        "CVE-2026-56860"
+      ],
+      "module": "stdlib",
+      "package": "net/url",
+      "function": "ResolveReference",
+      "projectPaths": [
+        "proxycontrol/internal/panel/deployment",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4986",
+      "summary": "Quadratic string concatentation in consumeComment in net/mail",
+      "aliases": [
+        "CVE-2026-39820"
+      ],
+      "module": "stdlib",
+      "package": "net/mail",
+      "function": "ParseAddress",
+      "projectPaths": [
+        "proxycontrol/internal/panel/certificate",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-6089",
+      "summary": "Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http",
+      "aliases": [
+        "CVE-2026-56853"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "Serve",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-5972",
+      "summary": "Enforce maximum recursion depth in encoding/asn1",
+      "aliases": [
+        "CVE-2026-33818"
+      ],
+      "module": "stdlib",
+      "package": "encoding/asn1",
+      "function": "Unmarshal",
+      "projectPaths": [
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4603",
+      "summary": "URLs in meta content attribute actions are not escaped in html/template",
+      "aliases": [
+        "CVE-2026-27142"
+      ],
+      "module": "stdlib",
+      "package": "html/template",
+      "function": "ExecuteTemplate",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-6605",
+      "summary": "HTTP/1 client connection desynchronization after CONNECT rejection in net/http",
+      "aliases": [
+        "CVE-2026-56866"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "CloseIdleConnections",
+      "projectPaths": [
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4870",
+      "summary": "Unauthenticated TLS 1.3 KeyUpdate record can cause persistent connection retention and DoS in crypto/tls",
+      "aliases": [
+        "CVE-2026-32283"
+      ],
+      "module": "stdlib",
+      "package": "crypto/tls",
+      "function": "DialContext",
+      "projectPaths": [
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost"
+      ]
+    },
+    {
+      "id": "GO-2026-5037",
+      "summary": "Inefficient candidate hostname parsing in crypto/x509",
+      "aliases": [
+        "CVE-2026-27145"
+      ],
+      "module": "stdlib",
+      "package": "crypto/x509",
+      "function": "Error",
+      "projectPaths": [
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent",
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-6610",
+      "summary": "HTTP/2 transport accepts malformed framing-related headers in net/http",
+      "aliases": [
+        "CVE-2026-78660"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "CloseIdleConnections",
+      "projectPaths": [
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4947",
+      "summary": "Unexpected work during chain building in crypto/x509",
+      "aliases": [
+        "CVE-2026-32280"
+      ],
+      "module": "stdlib",
+      "package": "crypto/x509",
+      "function": "Verify",
+      "projectPaths": [
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-6609",
+      "summary": "Lack of limit on size of parsed Range headers in net/http",
+      "aliases": [
+        "CVE-2026-78667"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "ServeContent",
+      "projectPaths": [
+        "proxycontrol/internal/panel/system",
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-4980",
+      "summary": "Escaper bypass leads to XSS in html/template",
+      "aliases": [
+        "CVE-2026-39826"
+      ],
+      "module": "stdlib",
+      "package": "html/template",
+      "function": "ExecuteTemplate",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-5039",
+      "summary": "Arbitrary inputs are included in errors without any escaping in net/textproto",
+      "aliases": [
+        "CVE-2026-42507"
+      ],
+      "module": "stdlib",
+      "package": "net/textproto",
+      "function": "ReadMIMEHeader",
+      "projectPaths": [
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-6599",
+      "summary": "Reset context tracking on consecutive template expressions in html/template",
+      "aliases": [
+        "CVE-2026-94448"
+      ],
+      "module": "stdlib",
+      "package": "html/template",
+      "function": "Execute",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-4869",
+      "summary": "Unbounded allocation for old GNU sparse in archive/tar",
+      "aliases": [
+        "CVE-2026-32288"
+      ],
+      "module": "stdlib",
+      "package": "archive/tar",
+      "function": "Next",
+      "projectPaths": [
+        "proxycontrol/internal/panel/system/backup",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-4982",
+      "summary": "Bypass of meta content URL escaping causes XSS in html/template",
+      "aliases": [
+        "CVE-2026-39823"
+      ],
+      "module": "stdlib",
+      "package": "html/template",
+      "function": "Execute",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-6091",
+      "summary": "Fix Javascript regexp context tracking in html/template",
+      "aliases": [
+        "CVE-2026-56858"
+      ],
+      "module": "stdlib",
+      "package": "html/template",
+      "function": "Execute",
+      "projectPaths": [
+        "proxycontrol/internal/platform/server",
+        "proxycontrol/internal/platform/panelhost",
+        "proxycontrol/cmd/panel"
+      ]
+    },
+    {
+      "id": "GO-2026-4866",
+      "summary": "Case-sensitive excludedSubtrees name constraints cause Auth Bypass in crypto/x509",
+      "aliases": [
+        "CVE-2026-33810"
+      ],
+      "module": "stdlib",
+      "package": "crypto/x509",
+      "function": "Verify",
+      "projectPaths": [
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4946",
+      "summary": "Inefficient policy validation in crypto/x509",
+      "aliases": [
+        "CVE-2026-32281"
+      ],
+      "module": "stdlib",
+      "package": "crypto/x509",
+      "function": "Verify",
+      "projectPaths": [
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-5026",
+      "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna",
+      "aliases": [
+        "CVE-2026-39821"
+      ],
+      "module": "stdlib",
+      "package": "net/http",
+      "function": "Do",
+      "projectPaths": [
+        "proxycontrol/internal/agent/updater",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4602",
+      "summary": "FileInfo can escape from a Root in os",
+      "aliases": [
+        "CVE-2026-27139"
+      ],
+      "module": "stdlib",
+      "package": "os",
+      "function": "ReadDir",
+      "projectPaths": [
+        "proxycontrol/internal/platform/restoretasks",
+        "proxycontrol/cmd/panel",
+        "proxycontrol/internal/agent/reconcile",
+        "proxycontrol/internal/agent/agenthost",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-6809",
+      "summary": "Distrust compromised intermediate certificates in crypto/x509",
+      "aliases": [
+        "CVE-2026-111943"
+      ],
+      "module": "stdlib",
+      "package": "crypto/x509",
+      "function": "Verify",
+      "projectPaths": [
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/agent"
+      ]
+    },
+    {
+      "id": "GO-2026-4600",
+      "summary": "Panic in name constraint checking for malformed certificates in crypto/x509",
+      "aliases": [
+        "CVE-2026-27138"
+      ],
+      "module": "stdlib",
+      "package": "crypto/x509",
+      "function": "Verify",
+      "projectPaths": [
+        "proxycontrol/internal/agent/identity",
+        "proxycontrol/internal/agent/control",
+        "proxycontrol/cmd/agent"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+AUDIT START 2026-11-10T12:25:50Z SHA=0b60eca7b3c57f72a8ddd7c1b6a86eafb95940eb
+go version go1.26.0 linux/amd64
+v22.23.4
+10.9.9
+CORES
+Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)
+sing-box version 1.14.3
+
+Mihomo Meta v1.19.33 linux amd64 with go1.26.10 Wed Oct 21 16:44:56 UTC 2026
+gost 3.3.2 (go1.27.3 linux/amd64)
+PART check START 2026-11-10T12:25:50Z
+PART check EXIT=0 2026-11-10T13:05:36Z
+PART cores START 2026-11-10T13:05:37Z
+PART cores EXIT=0 2026-11-10T13:17:16Z
+PART signing START 2026-11-10T13:17:16Z
+PART signing EXIT=0 2026-11-10T13:17:17Z
+AUDIT END 2026-11-10T13:17:17Z elapsed=3087s

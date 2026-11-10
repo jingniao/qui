@@ -1,0 +1,13 @@
+{
+  "snapshot": "0b60eca",
+  "probe": "actual SFC async functions transpiled with injected network/timer boundaries",
+  "lookup": {
+    "currentDomain": "b.example.com",
+    "displayedMatchesDomain": "a.example.com"
+  },
+  "issuance": {
+    "currentDomain": "b.example.com",
+    "selectedCertificateId": "cert-a",
+    "status": "a.example.com 的证书已签发并选中，保存后生效"
+  }
+}

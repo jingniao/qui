@@ -1,0 +1,34 @@
+NAMESPACE net:[4026532369]
+root_tuning_exit=0
+namespace_nft_exit=0
+packaged_sandbox_tuning_exit=1
+expanded_sandbox_tuning_exit=0
+BBR_MODULE_BEFORE loaded
+sandbox_bbr_exit=0
+BBR_MODULE_AFTER loaded
+apply_result={"request_id":"audit-apply","status":"applied","keys":[{"key":"net.ipv4.tcp_notsent_lowat","value":"131072","applied":true},{"key":"net.ipv4.tcp_rmem","value":"4096 131072 8388608","applied":true},{"key":"net.ipv4.tcp_slow_start_after_idle","value":"0","applied":true},{"key":"net.ipv4.udp_rmem_min","value":"8192","applied":true},{"key":"net.ipv4.udp_wmem_min","value":"8192","applied":true}],"initial":{"fs.file-max":"9223372036854775807","net.core.somaxconn":"4096","net.ipv4.tcp_congestion_control":"cubic","net.ipv4.tcp_ecn":"2","net.ipv4.tcp_fastopen":"1","net.ipv4.tcp_max_syn_backlog":"512","net.ipv4.tcp_mtu_probing":"0","net.ipv4.tcp_notsent_lowat":"4294967295","net.ipv4.tcp_rmem":"4096 131072 6291456","net.ipv4.tcp_slow_start_after_idle":"1","net.ipv4.tcp_tw_reuse":"2","net.ipv4.tcp_wmem":"4096 16384 4194304","net.ipv4.udp_rmem_min":"4096","net.ipv4.udp_wmem_min":"4096"}}
+persisted=true
+clear_status=cleared
+namespace_values_restored=true
+nft_apply_error=<nil>
+nft_table=table inet proxy_agent_hop {
+	chain prerouting {
+		type nat hook prerouting priority dstnat; policy accept;
+		udp dport 20000-20010 redirect to :8443
+	}
+}
+ error=<nil>
+nft_clear_error=<nil>
+nft_absent_after_clear=true
+apply_result={"request_id":"audit-apply","status":"failed","keys":[{"key":"net.ipv4.tcp_notsent_lowat","value":"4294967295","error":"net.ipv4.tcp_notsent_lowat: open /proc/sys/net/ipv4/tcp_notsent_lowat: read-only file system"},{"key":"net.ipv4.tcp_rmem","value":"4096 131072 6291456","error":"net.ipv4.tcp_notsent_lowat: open /proc/sys/net/ipv4/tcp_notsent_lowat: read-only file system"},{"key":"net.ipv4.tcp_slow_start_after_idle","value":"1","error":"net.ipv4.tcp_notsent_lowat: open /proc/sys/net/ipv4/tcp_notsent_lowat: read-only file system"},{"key":"net.ipv4.udp_rmem_min","value":"4096","error":"net.ipv4.tcp_notsent_lowat: open /proc/sys/net/ipv4/tcp_notsent_lowat: read-only file system"},{"key":"net.ipv4.udp_wmem_min","value":"4096","error":"net.ipv4.tcp_notsent_lowat: open /proc/sys/net/ipv4/tcp_notsent_lowat: read-only file system"}],"initial":{"fs.file-max":"9223372036854775807","net.core.somaxconn":"4096","net.ipv4.tcp_congestion_control":"cubic","net.ipv4.tcp_ecn":"2","net.ipv4.tcp_fastopen":"1","net.ipv4.tcp_max_syn_backlog":"512","net.ipv4.tcp_mtu_probing":"0","net.ipv4.tcp_notsent_lowat":"4294967295","net.ipv4.tcp_rmem":"4096 131072 6291456","net.ipv4.tcp_slow_start_after_idle":"1","net.ipv4.tcp_tw_reuse":"2","net.ipv4.tcp_wmem":"4096 16384 4194304","net.ipv4.udp_rmem_min":"4096","net.ipv4.udp_wmem_min":"4096"}}
+persisted=false
+clear_status=cleared
+namespace_values_restored=true
+apply_result={"request_id":"audit-apply","status":"applied","keys":[{"key":"net.ipv4.tcp_notsent_lowat","value":"131072","applied":true},{"key":"net.ipv4.tcp_rmem","value":"4096 131072 8388608","applied":true},{"key":"net.ipv4.tcp_slow_start_after_idle","value":"0","applied":true},{"key":"net.ipv4.udp_rmem_min","value":"8192","applied":true},{"key":"net.ipv4.udp_wmem_min","value":"8192","applied":true}],"initial":{"fs.file-max":"9223372036854775807","net.core.somaxconn":"4096","net.ipv4.tcp_congestion_control":"cubic","net.ipv4.tcp_ecn":"2","net.ipv4.tcp_fastopen":"1","net.ipv4.tcp_max_syn_backlog":"512","net.ipv4.tcp_mtu_probing":"0","net.ipv4.tcp_notsent_lowat":"4294967295","net.ipv4.tcp_rmem":"4096 131072 6291456","net.ipv4.tcp_slow_start_after_idle":"1","net.ipv4.tcp_tw_reuse":"2","net.ipv4.tcp_wmem":"4096 16384 4194304","net.ipv4.udp_rmem_min":"4096","net.ipv4.udp_wmem_min":"4096"}}
+persisted=true
+clear_status=cleared
+namespace_values_restored=true
+apply_result={"request_id":"audit-apply","status":"applied","keys":[{"key":"net.ipv4.tcp_congestion_control","value":"bbr","applied":true}],"initial":{"fs.file-max":"9223372036854775807","net.core.somaxconn":"4096","net.ipv4.tcp_congestion_control":"cubic","net.ipv4.tcp_ecn":"2","net.ipv4.tcp_fastopen":"1","net.ipv4.tcp_max_syn_backlog":"512","net.ipv4.tcp_mtu_probing":"0","net.ipv4.tcp_notsent_lowat":"4294967295","net.ipv4.tcp_rmem":"4096 131072 6291456","net.ipv4.tcp_slow_start_after_idle":"1","net.ipv4.tcp_tw_reuse":"2","net.ipv4.tcp_wmem":"4096 16384 4194304","net.ipv4.udp_rmem_min":"4096","net.ipv4.udp_wmem_min":"4096"}}
+persisted=true
+clear_status=cleared
+namespace_values_restored=true

@@ -1,0 +1,10 @@
+ok - skip on pre-release
+signed proxy-agent 9.8.7 2a9397e2507b844e22d730c5023a4186028b4c051d344861a4002ab9b749d81b
+ok - generates .bin
+ok - generates .manifest.json
+ok - sequence in manifest is 9008007
+verified proxy-agent 9.8.7 2a9397e2507b844e22d730c5023a4186028b4c051d344861a4002ab9b749d81b
+ok - verify passes
+ok - bin in SHA256SUMS
+ok - manifest in SHA256SUMS
+sign-agent-release-test: 7 passed, 0 failed

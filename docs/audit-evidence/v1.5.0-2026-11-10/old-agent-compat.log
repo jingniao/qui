@@ -1,0 +1,6 @@
+disabled_hop_capability_error=<nil>
+disabled_keyword_capability_error=<nil>
+current_decode_disabled-hop=<nil>
+current_decode_disabled-keyword=<nil>
+v1.4.7_strict_decode_disabled-hop=json: unknown field "hop_port_start"
+v1.4.7_strict_decode_disabled-keyword=json: unknown field "keywords"

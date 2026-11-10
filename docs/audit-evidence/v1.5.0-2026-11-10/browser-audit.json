@@ -1,0 +1,64 @@
+{
+  "snapshot": "0b60eca",
+  "fixture": "synthetic HostInfo/heartbeat in isolated Linux panel DB; no live Agent",
+  "results": [
+    {
+      "name": "satisfied vector displayed as managed",
+      "result": "FAIL",
+      "detail": {
+        "text": "tcp_rmem（仅最大值） net.ipv4.tcp_rmem TCP 接收缓冲区上限；长距离大带宽链路需要足够缓冲以充分利用带宽。 4096 131072 8388608 偏离/漂移 99-proxy-tuning.conf 4096 131072 6291456 8388608 33554432 采用 "
+      }
+    },
+    {
+      "name": "fd limits displayed from real API fields",
+      "result": "FAIL",
+      "detail": {
+        "text": "Agent 文件句柄 (软/硬)\n\n—"
+      }
+    },
+    {
+      "name": "reported read-only key disabled",
+      "result": "FAIL"
+    },
+    {
+      "name": "adopted external TCP buffer can be confirmed",
+      "result": "FAIL",
+      "detail": {
+        "adoptedValue": "4096 16384 8388608",
+        "validationErrors": []
+      }
+    },
+    {
+      "name": "policy creation accepted",
+      "result": "PASS",
+      "detail": {
+        "status": 201
+      }
+    },
+    {
+      "name": "fetched external source actually blocks in simulator",
+      "result": "FAIL",
+      "detail": {
+        "status": 200,
+        "matched": false,
+        "action": "Direct",
+        "reason": "no matching policy; inbound default rule"
+      }
+    },
+    {
+      "name": "Viewer sees node alerts but not system alerts",
+      "result": "PASS"
+    },
+    {
+      "name": "Viewer UI has no apply control",
+      "result": "PASS"
+    },
+    {
+      "name": "browser page errors absent",
+      "result": "PASS",
+      "detail": {
+        "errors": []
+      }
+    }
+  ]
+}

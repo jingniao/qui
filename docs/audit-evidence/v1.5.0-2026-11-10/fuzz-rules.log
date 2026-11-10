@@ -1,0 +1,11 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/3 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 3/3 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 27878 (9291/sec), new interesting: 40 (total: 43)
+fuzz: elapsed: 6s, execs: 54920 (9015/sec), new interesting: 89 (total: 92)
+fuzz: elapsed: 9s, execs: 81936 (9003/sec), new interesting: 131 (total: 134)
+fuzz: elapsed: 12s, execs: 110066 (9376/sec), new interesting: 166 (total: 169)
+fuzz: elapsed: 15s, execs: 138380 (9438/sec), new interesting: 201 (total: 204)
+fuzz: elapsed: 18s, execs: 174736 (12120/sec), new interesting: 223 (total: 226)
+fuzz: elapsed: 21s, execs: 191817 (6240/sec), new interesting: 238 (total: 241)
+PASS
+ok  	proxycontrol/internal/panel/policy	20.741s

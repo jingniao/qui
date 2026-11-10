@@ -1,0 +1,3 @@
+panel=0 agent=0
+/root/qui-audit/20261110-0b60eca/bin/panel-arm64: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, Go BuildID=uP9-8MbxIVW094i721XJ/eyZhJ-cjrkg94nGSSMP2/oG9tCE_iXJ-fJlMzruI9/GVucYyWNt-X6g6Z_Xe0Q, BuildID[sha1]=c0ee7728c12a5d8f1c7ce2b0d9609a85ab7c8201, with debug_info, not stripped
+/root/qui-audit/20261110-0b60eca/bin/agent-arm64: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, Go BuildID=Cz416fPHdS6gjwmTbNN_/52n9r-FRdx70ovcHO3hT/vzYHq3yKDHtW2UNz4XSY/lExe5NA2bat4kE3tD-IY, BuildID[sha1]=c2a9ada269eaf1afd27084061322614a9bb10b66, with debug_info, not stripped

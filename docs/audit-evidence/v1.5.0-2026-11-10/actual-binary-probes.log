@@ -1,0 +1,18 @@
+=== RUN   TestRealSignedAgentFixedStorageProbeVersionTrustAndIdentity
+--- PASS: TestRealSignedAgentFixedStorageProbeVersionTrustAndIdentity (2.17s)
+=== RUN   TestAgentProbeRejectsUnsafeContractsAndMalformedImmutableCandidate
+--- PASS: TestAgentProbeRejectsUnsafeContractsAndMalformedImmutableCandidate (0.88s)
+PASS
+ok  	proxycontrol/internal/agent/updater	3.059s
+=== RUN   TestInstalledCandidateStartsActualPanelBinary
+=== PAUSE TestInstalledCandidateStartsActualPanelBinary
+=== CONT  TestInstalledCandidateStartsActualPanelBinary
+=== RUN   TestInstalledCandidateStartsActualPanelBinary/committed
+=== RUN   TestInstalledCandidateStartsActualPanelBinary/startup-rollback
+=== RUN   TestInstalledCandidateStartsActualPanelBinary/prepared-startup-rollback
+--- PASS: TestInstalledCandidateStartsActualPanelBinary (16.66s)
+    --- PASS: TestInstalledCandidateStartsActualPanelBinary/committed (5.57s)
+    --- PASS: TestInstalledCandidateStartsActualPanelBinary/startup-rollback (5.52s)
+    --- PASS: TestInstalledCandidateStartsActualPanelBinary/prepared-startup-rollback (5.57s)
+PASS
+ok  	proxycontrol/internal/platform/recovery	16.660s

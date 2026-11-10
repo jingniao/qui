@@ -1,0 +1,14 @@
+=== RUN   TestAuditRejectUndecryptableRuleCache
+    audit_regression_test.go:22: AUDIT DEFECT: complete encrypted archive inspection accepted undecryptable service_set_sources.encrypted_cache
+--- FAIL: TestAuditRejectUndecryptableRuleCache (1.72s)
+=== RUN   TestAuditRejectUnknownTuningDismissal
+    audit_regression_test.go:35: AUDIT DEFECT: archive inspection accepted non-whitelisted tuning dismissal key
+--- FAIL: TestAuditRejectUnknownTuningDismissal (1.57s)
+FAIL
+FAIL	proxycontrol/internal/panel/system/backup	3.302s
+=== RUN   TestAuditRejectSignedReleaseVersionMismatch
+    audit_regression_test.go:20: AUDIT DEFECT: requested 1.5.0 but imported 1.4.6 sequence=1004006
+--- FAIL: TestAuditRejectSignedReleaseVersionMismatch (0.00s)
+FAIL
+FAIL	proxycontrol/internal/panel/deployment	0.015s
+FAIL

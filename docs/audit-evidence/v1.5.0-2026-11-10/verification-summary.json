@@ -1,0 +1,85 @@
+{
+  "snapshot": "0b60eca7b3c57f72a8ddd7c1b6a86eafb95940eb",
+  "findingCount": 19,
+  "p1": 5,
+  "p2": 14,
+  "standard": {
+    "checkExit": 0,
+    "coresExit": 0,
+    "signingExit": 0,
+    "runnerSeconds": 3087,
+    "racePackagesPassed": 72,
+    "dataRaceWarnings": 0,
+    "realTestsPassed": 207,
+    "originalSkipEntries": [
+      "--- SKIP: TestActualLegacyAgentProbeFallsBackOnlyForUnknownQueryFlag (0.00s) <-    agent_legacy_probe_test.go:13: set an actual pre-extension Agent",
+      "--- SKIP: TestRealSignedAgentFixedStorageProbeVersionTrustAndIdentity (0.00s) <-    agent_preflight_test.go:47: set actual Agent for fixed compatibility probe",
+      "--- SKIP: TestAgentProbeRejectsUnsafeContractsAndMalformedImmutableCandidate (0.00s) <-    agent_preflight_test.go:85: set actual Agent for fixed compatibility probe",
+      "--- SKIP: TestFileTransactionChild (0.00s) <-    files_test.go:165: subprocess only",
+      "--- SKIP: TestCandidateInstallChild (0.00s) <-    files_test.go:458: subprocess only",
+      "--- SKIP: TestInstalledCandidateStartsActualPanelBinary (0.00s) <-    files_test.go:343: set PANEL_BINARY for actual binary restart verification",
+      "--- SKIP: TestManagedAgentParentChild (0.00s) <-    agent_parent_test.go:26: only run in parent-death fixture"
+    ],
+    "supplementaryActualBinaryProbesExit": 0
+  },
+  "http": {
+    "groups": 24,
+    "passed": 24
+  },
+  "browser": {
+    "checks": 9,
+    "passed": 4,
+    "defectsReproduced": 5,
+    "fixture": "synthetic HostInfo/heartbeat in isolated real Linux panel"
+  },
+  "extraRegression": {
+    "archiveAndReleaseBindingFailures": 3,
+    "oldAgentDisabledFieldCases": 2
+  },
+  "hy2": {
+    "singboxHTTP200": 24,
+    "mihomoHTTP200": 24,
+    "rounds": 24,
+    "observedTargetPorts": [
+      20000,
+      20001,
+      20002,
+      20004,
+      20008,
+      20009,
+      20010
+    ],
+    "scope": "independent network namespaces; local origin and self-signed test TLS; not panel-to-Agent E2E"
+  },
+  "fuzz": {
+    "executions": 191817,
+    "seconds": 20.741,
+    "exit": 0
+  },
+  "arm64": {
+    "panelBuildExit": 0,
+    "agentBuildExit": 0,
+    "nativeExecution": false
+  },
+  "securityScan": {
+    "goToolchain": "go1.26.0 linux/amd64",
+    "goSymbolTraceVulnerabilityIDs": 42,
+    "goFindingIsExploitProof": false,
+    "npmAll": {
+      "high": 1,
+      "moderate": 5
+    },
+    "npmProduction": 0
+  },
+  "cleanup": {
+    "recordedUTC": "2026-11-10T13:20:57Z",
+    "isolatedPanelStopped": true,
+    "liveTestDatabaseRemoved": true,
+    "localPrivateSessionFileRemoved": true,
+    "sshForwardStopped": true,
+    "hostCongestionControl": "cubic",
+    "hostQdisc": "fq_codel",
+    "hostNftTables": 0,
+    "auditNamespacesAndUnitsRemaining": 0
+  }
+}

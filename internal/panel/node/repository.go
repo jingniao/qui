@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -45,6 +46,9 @@ type Node struct {
 	AllowSubscription    bool             `json:"allowSubscription"`
 	Maintenance          bool             `json:"maintenance"`
 	PublicIPManual       bool             `json:"-"`
+	PublicAddresses      []PublicAddress  `json:"publicAddresses"`
+	PublicIPSelected     string           `json:"publicIpSelected"`
+	PublicIPSelectionMissing bool         `json:"publicIpSelectionMissing"`
 	ID                   string           `json:"id"`
 	Name                 string           `json:"name"`
 	Status               string           `json:"status"`
@@ -122,15 +126,13 @@ func (r *Repository) ReissueEnrollment(ctx context.Context, nodeID string, durat
 	}
 	defer tx.Rollback()
 	var n Node
-	var capabilities, heartbeat string
-	err = tx.QueryRowContext(ctx, "SELECT "+columns+" FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost)
+	n, err = scan(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM nodes WHERE id=?", nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, "", expires, ErrNotFound
 	}
 	if err != nil {
 		return Node{}, "", expires, err
 	}
-	n.PublicIPSource = publicIPSource(n.PublicIP, n.PublicIPManual)
 	if n.DeletedAt != "" {
 		return Node{}, "", expires, ErrNodeNotPending
 	}
@@ -257,9 +259,9 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 	defer tx.Rollback()
 	var last uint64
 	var enabled bool
-	var storedPublicIP string
+	var storedPublicIP, storedAddrsJSON, storedSelected string
 	var publicIPManual bool
-	if err := tx.QueryRowContext(ctx, "SELECT "+sequenceMaterialSQL+",CASE WHEN typeof(enabled)='integer' AND enabled IN (0,1) THEN enabled ELSE NULL END,public_ip,public_ip_manual FROM nodes WHERE id=?", id).Scan(&last, &enabled, &storedPublicIP, &publicIPManual); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT "+sequenceMaterialSQL+",CASE WHEN typeof(enabled)='integer' AND enabled IN (0,1) THEN enabled ELSE NULL END,public_ip,public_ip_manual,public_addresses_json,public_ip_selected FROM nodes WHERE id=?", id).Scan(&last, &enabled, &storedPublicIP, &publicIPManual, &storedAddrsJSON, &storedSelected); err != nil {
 		return 0, err
 	}
 	if last > uint64(1<<63-1) {
@@ -288,20 +290,26 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 		if heartbeat.CoreHealthy != nil && !heartbeat.GetCoreHealthy() {
 			status = "degraded"
 		}
-		// A manual address is never overwritten. Otherwise the Agent's own
-		// detection wins, and an empty report falls back to the address the
-		// control connection came from, which is the only address a node behind
-		// NAT cannot hide from the panel.
-		publicIP := storedPublicIP
-		if !publicIPManual {
-			switch {
-			case heartbeat.PublicIp != "":
-				publicIP = heartbeat.PublicIp
-			case storedPublicIP == "":
-				publicIP = peerPublicIP(ctx)
-			}
+		var prevCandidates []PublicAddress
+		if storedAddrsJSON != "" && storedAddrsJSON != "[]" {
+			_ = json.Unmarshal([]byte(storedAddrsJSON), &prevCandidates)
 		}
-		if err := sequenceRowsChanged(tx.ExecContext(ctx, "UPDATE nodes SET status=?,last_heartbeat=?,heartbeat_json=?,public_ip=?,last_sequence=? WHERE id=? AND enabled=1 AND last_sequence=?", status, timestamp(time.Now()), string(data), publicIP, message.Sequence, id, last)); err != nil {
+		peerIP := peerPublicIP(ctx)
+		newCandidates := mergeCandidates(prevCandidates, heartbeat.PublicAddresses, peerIP, now)
+		if len(heartbeat.PublicAddresses) == 0 && heartbeat.PublicIp != "" && len(newCandidates) == 0 {
+			newCandidates = mergeCandidates(prevCandidates, []*pb.PublicAddress{{Address: heartbeat.PublicIp, Interface: ""}}, peerIP, now)
+		}
+		newAddrsBytes, _ := json.Marshal(newCandidates)
+		newAddrsJSON := string(newAddrsBytes)
+
+		publicIP := effectivePublicIP(storedSelected, newCandidates)
+		if publicIP == "" && storedSelected != "" {
+			publicIP = storedSelected
+		} else if publicIP == "" && storedPublicIP != "" {
+			publicIP = storedPublicIP
+		}
+
+		if err := sequenceRowsChanged(tx.ExecContext(ctx, "UPDATE nodes SET status=?,last_heartbeat=?,heartbeat_json=?,public_ip=?,public_addresses_json=?,last_sequence=? WHERE id=? AND enabled=1 AND last_sequence=?", status, timestamp(time.Now()), string(data), publicIP, newAddrsJSON, message.Sequence, id, last)); err != nil {
 			return 0, err
 		}
 		if err := recordMetricTx(ctx, tx, id, message, now); err != nil {
@@ -365,7 +373,7 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host"
+const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected"
 
 type scanner interface{ Scan(...any) error }
 
@@ -374,13 +382,29 @@ type scanner interface{ Scan(...any) error }
 var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func scan(row scanner) (Node, error) {
-	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}}
-	var capabilities, heartbeat string
-	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost)
+	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}, PublicAddresses: []PublicAddress{}}
+	var capabilities, heartbeat, addrsJSON string
+	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected)
 	if err != nil {
 		return n, err
 	}
-	n.PublicIPSource = publicIPSource(n.PublicIP, n.PublicIPManual)
+	if addrsJSON != "" && addrsJSON != "[]" {
+		_ = json.Unmarshal([]byte(addrsJSON), &n.PublicAddresses)
+	}
+	if n.PublicAddresses == nil {
+		n.PublicAddresses = []PublicAddress{}
+	}
+	n.PublicIPSource = publicIPSource(n.PublicIP, n.PublicIPSelected)
+	if n.PublicIPSelected != "" {
+		missing := true
+		for _, a := range n.PublicAddresses {
+			if a.Address == n.PublicIPSelected {
+				missing = false
+				break
+			}
+		}
+		n.PublicIPSelectionMissing = missing
+	}
 	if err := storedJSON.Unmarshal([]byte(capabilities), n.Capabilities); err != nil {
 		return n, err
 	}

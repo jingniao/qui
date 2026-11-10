@@ -44,11 +44,11 @@ func TestHeartbeatFillsPublicIPUnlessItIsManual(t *testing.T) {
 	if err := r.UpdateSettings(ctx, id, SettingsInput{Name: "machine", Enabled: true, PublicIP: &manual}); err != nil {
 		t.Fatal(err)
 	}
-	if n := storedNode(t, r, id); n.PublicIP != manual || n.PublicIPSource != "manual" {
+	if n := storedNode(t, r, id); n.PublicIP != manual || n.PublicIPSource != "selected" {
 		t.Fatalf("manual address: %+v", n)
 	}
 	recordPublicHeartbeat(t, r, ctx, id, 2, "203.0.113.11")
-	if n := storedNode(t, r, id); n.PublicIP != manual || n.PublicIPSource != "manual" {
+	if n := storedNode(t, r, id); n.PublicIP != manual || n.PublicIPSource != "selected" {
 		t.Fatalf("a heartbeat replaced the manual address: %+v", n)
 	}
 	empty := ""
@@ -79,7 +79,7 @@ func TestHeartbeatFallsBackToAPublicPeerAddress(t *testing.T) {
 			r, id := machineFixture(t)
 			ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP(test.peer), Port: 51234}})
 			recordPublicHeartbeat(t, r, ctx, id, 1, "")
-			if n := storedNode(t, r, id); n.PublicIP != test.want || n.PublicIPSource != publicIPSource(test.want, false) {
+			if n := storedNode(t, r, id); n.PublicIP != test.want || n.PublicIPSource != publicIPSource(test.want, "") {
 				t.Fatalf("peer fallback: %+v", n)
 			}
 		})
@@ -117,7 +117,7 @@ func TestConnectHostAcceptsNamesAndLiteralsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := storedNode(t, r, id)
-	if n.ConnectHost != "" || n.ConnectAddress() != public || n.PublicIPSource != "manual" {
+	if n.ConnectHost != "" || n.ConnectAddress() != public || n.PublicIPSource != "selected" {
 		t.Fatalf("fallback to the public address: %+v", n)
 	}
 }

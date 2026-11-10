@@ -65,9 +65,9 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	}
 	defer tx.Rollback()
 	var allow, maintenance, wasEnabled, manual bool
-	var publicIP, connectHost, deleted string
+	var publicIP, connectHost, deleted, selected string
 	var network desiredstate.Network
-	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,public_ip_manual,connect_host,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,coalesce(deleted_at,'') FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &manual, &connectHost, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6, &deleted); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT allow_subscription,maintenance,public_ip,public_ip_manual,connect_host,enabled,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,coalesce(deleted_at,''),public_ip_selected FROM nodes WHERE id=?", id).Scan(&allow, &maintenance, &publicIP, &manual, &connectHost, &wasEnabled, &network.OutboundSourceIP, &network.OutboundInterface, &network.HostSourceIPv4, &network.HostSourceIPv6, &deleted, &selected); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -86,6 +86,7 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	if input.PublicIP != nil {
 		publicIP = *input.PublicIP
 		manual = publicIP != ""
+		selected = publicIP
 	}
 	if input.ConnectHost != nil {
 		connectHost = strings.TrimSpace(*input.ConnectHost)
@@ -93,7 +94,7 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	if network, err = networkSettings(network, input); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET name=?,enabled=?,allow_subscription=?,maintenance=?,public_ip=?,public_ip_manual=?,connect_host=?,outbound_source_ip=?,outbound_interface=?,host_source_ipv4=?,host_source_ipv6=?,status=CASE WHEN ?=0 THEN 'disabled' WHEN enabled=0 THEN 'offline' ELSE status END WHERE id=?", input.Name, input.Enabled, allow, maintenance, publicIP, manual, connectHost, network.OutboundSourceIP, network.OutboundInterface, network.HostSourceIPv4, network.HostSourceIPv6, input.Enabled, id); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET name=?,enabled=?,allow_subscription=?,maintenance=?,public_ip=?,public_ip_manual=?,public_ip_selected=?,connect_host=?,outbound_source_ip=?,outbound_interface=?,host_source_ipv4=?,host_source_ipv6=?,status=CASE WHEN ?=0 THEN 'disabled' WHEN enabled=0 THEN 'offline' ELSE status END WHERE id=?", input.Name, input.Enabled, allow, maintenance, publicIP, manual, selected, connectHost, network.OutboundSourceIP, network.OutboundInterface, network.HostSourceIPv4, network.HostSourceIPv6, input.Enabled, id); err != nil {
 		return err
 	}
 	return tx.Commit()

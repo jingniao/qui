@@ -3,11 +3,111 @@ package node
 import (
 	"context"
 	"net"
+	"time"
 
 	"google.golang.org/grpc/peer"
 
+	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/netaddr"
 )
+
+type PublicAddress struct {
+	Address  string `json:"address"`
+	Source   string `json:"source"`   // "interface:<name>" | "peer"
+	Family   string `json:"family"`   // "ipv4" | "ipv6"
+	LastSeen string `json:"lastSeen"` // RFC3339 UTC
+}
+
+// mergeCandidates replaces the reported set (reported addresses plus the peer, if public),
+// keeping LastSeen of addresses seen before; addresses gone from the report are dropped.
+func mergeCandidates(previous []PublicAddress, reported []*pb.PublicAddress, peer string, now time.Time) []PublicAddress {
+	prevMap := make(map[string]PublicAddress, len(previous))
+	for _, p := range previous {
+		prevMap[p.Address] = p
+	}
+
+	seen := make(map[string]bool)
+	var candidates []PublicAddress
+
+	for _, r := range reported {
+		ip := net.ParseIP(r.Address)
+		if !netaddr.Public(ip) {
+			continue
+		}
+		addrStr := ip.String()
+		if seen[addrStr] {
+			continue
+		}
+		seen[addrStr] = true
+
+		fam := "ipv6"
+		if ip.To4() != nil {
+			fam = "ipv4"
+		}
+		src := "interface:" + r.Interface
+		lastSeen := now.UTC().Format(time.RFC3339)
+		if old, ok := prevMap[addrStr]; ok && old.LastSeen != "" {
+			lastSeen = old.LastSeen
+		}
+		candidates = append(candidates, PublicAddress{
+			Address:  addrStr,
+			Source:   src,
+			Family:   fam,
+			LastSeen: lastSeen,
+		})
+		if len(candidates) >= 16 {
+			return candidates
+		}
+	}
+
+	if peer != "" {
+		ip := net.ParseIP(peer)
+		if netaddr.Public(ip) {
+			addrStr := ip.String()
+			if !seen[addrStr] {
+				seen[addrStr] = true
+				fam := "ipv6"
+				if ip.To4() != nil {
+					fam = "ipv4"
+				}
+				lastSeen := now.UTC().Format(time.RFC3339)
+				if old, ok := prevMap[addrStr]; ok && old.LastSeen != "" {
+					lastSeen = old.LastSeen
+				}
+				candidates = append(candidates, PublicAddress{
+					Address:  addrStr,
+					Source:   "peer",
+					Family:   fam,
+					LastSeen: lastSeen,
+				})
+			}
+		}
+	}
+
+	if len(candidates) > 16 {
+		candidates = candidates[:16]
+	}
+	return candidates
+}
+
+// effectivePublicIP returns selected when non-empty, else the first IPv4 candidate,
+// else the first IPv6 candidate, else "".
+func effectivePublicIP(selected string, candidates []PublicAddress) string {
+	if selected != "" {
+		return selected
+	}
+	for _, c := range candidates {
+		if c.Family == "ipv4" {
+			return c.Address
+		}
+	}
+	for _, c := range candidates {
+		if c.Family == "ipv6" {
+			return c.Address
+		}
+	}
+	return ""
+}
 
 // ConnectAddress is the address a client dials: the connect host when the Owner
 // set one, otherwise the public address the Agent reported or the Owner typed.
@@ -21,13 +121,13 @@ func (n Node) ConnectAddress() string {
 }
 
 // publicIPSource names where the stored public address came from. An empty
-// address has no source, so the page can tell "not known yet" from "manual".
-func publicIPSource(publicIP string, manual bool) string {
+// address has no source, so the page can tell "not known yet" from "selected".
+func publicIPSource(publicIP, selected string) string {
 	switch {
 	case publicIP == "":
 		return ""
-	case manual:
-		return "manual"
+	case selected != "":
+		return "selected"
 	}
 	return "auto"
 }

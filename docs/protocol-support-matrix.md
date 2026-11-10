@@ -156,7 +156,7 @@ Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组
 | VLESS xhttp 四种模式 | 支持；空或 TCP ALPN，仅 h2/http/1.1 | 省略并警告 | 仅 Reality auto 且 ALPN 恰为 [h2] | 省略并警告 |
 | Hysteria2、TUIC | 支持；固定 CA 时省略 | 支持，含固定证书 | 支持，固定证书转指纹 | 省略并警告 |
 | WireGuard | 支持既有导出 | 支持既有导出 | 支持 | 省略并警告 |
-| 全局规则模板 | 不适用 | 不适用（不是完整配置） | 支持规则与 provider | 受限，无 GEOSITE/RULE-SET/provider |
+| 全局规则模板与外部来源 | 不适用 | 不适用（不是完整配置） | 支持规则、内置服务集及外部 provider（文本/YAML/MRS 格式，追加 RULE-SET 行） | 受限，无 GEOSITE/RULE-SET/provider |
 | 客户端链 | 省略依赖链并警告 | 省略依赖链并警告 | `dialer-proxy` | 省略依赖链并警告 |
 | forward 入站 | 不进入订阅 | 不进入订阅 | 不进入订阅 | 不进入订阅 |
 

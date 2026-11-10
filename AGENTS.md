@@ -537,7 +537,7 @@ YouTube → Direct
 
 访问控制支持：
 
-精确域名；域名后缀；通配域名；自定义网站分类；内置服务规则；IP/CIDR。
+精确域名；域名后缀；域名关键字（domain_keyword / keyword）；通配域名；自定义网站分类；内置服务规则；IP/CIDR。
 
 # 20. 网站访问记录
 
@@ -897,6 +897,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0137 `certificates` | `certificates`：域名 JSON（1–10 个，可带一个前导 `*.`）、状态（`pending`/`issuing`/`valid`/`failed`）、密封的证书与私钥（`{certificate_pem, private_key_pem}`，首次签发前为 NULL）、签发与到期时间、失败码、上次/下次尝试时间、尝试次数、`auto_dns` 与 `dns_node_id`；`inbounds.certificate_id` 引用证书行、默认 NULL，D2 才写入。域名格式、状态集合、错误码与密封材料可解密由面板与归档校验共同约束 |
 | 0138 `node_public_addresses` | `nodes.public_addresses_json`（文本 JSON，默认 `[]`，严格校验最多 16 项全局单播地址列表）与 `nodes.public_ip_selected`（文本，默认 `''`）。接口与心跳上报联动，设置支持选择候选公网 IP |
 | 0139 `notifications` | 4 张表：`notification_rules`（7 类默认规则、阈值、持续窗口、冷却分钟及 CHECK 约束）、`notification_channels`（AES-256-GCM 密封配置、末 4 位摘要、投递状态与时间）、`notifications`（通知记录，90 天保留自动清理）、`notification_state`（去重状态与冷却追踪） |
+| 0140 `ruleset_sources` | `service_sets` / `service_set_entries` 增加 `keyword` 匹配类型支持；新增 `service_set_sources` 表（存储外部规则源 URL、格式 yaml/text/mrs、行为 classical/domain/ipcidr、刷新周期、运行状态及密封缓存） |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -999,8 +1000,10 @@ GET/POST/PUT/DELETE /api/v1/proxy-chains
 
 ```text
 GET/POST/PUT/DELETE /api/v1/policies
-GET                    /api/v1/service-sets
-POST                   /api/v1/policies/simulate
+GET/POST/PUT/DELETE /api/v1/service-sets
+GET                 /api/v1/service-sets/{id}/references
+POST                /api/v1/service-sets/{id}/sources/{sourceId}/refresh
+POST                /api/v1/policies/simulate
 ```
 
 ## 27.8 访问记录
@@ -1227,6 +1230,7 @@ GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool�
 
 Agent 目录更新能力与端口协商（v1.5.0）：
 - `Capabilities.panel_catalogue_supported`（字段 26，bool）：Agent 声明支持从面板只读目录拉取官方签名清单与更新归档。
+- `Capabilities.domain_keyword_supported`（字段 27，bool）与 `CoreCapability.domain_keyword_supported`（字段 13，bool）：逐核声明该核心的路由渲染器支持域名关键字（domain keyword）匹配规则。Xray 与 sing-box 各自上报为真，GOST 保持为假。
 - `Welcome.agent_catalogue_port`（字段 22，uint32）：面板告知 Agent 托管只读签名目录的 HTTP/HTTPS 端口号（未配置安装端点时取面板 Web 监听端口）。旧 Agent 忽略未知字段。
 
 中央端下发消息包括：
@@ -1349,6 +1353,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | node_identity_retirements、node_identity_recoveries | 作废指纹在恢复时并入当前库，只注册不复活：已作废的指纹既不能覆盖也不能写入当前身份；恢复记录以当前库为准，`issued` 统一改为已过期，不重发恢复码、不重签证书 |
 | node_public_addresses（nodes.public_addresses_json 与 public_ip_selected） | 随 nodes 主表加密备份；validateNodePublicAddresses 校验列表格式、项数不超过 16 项且均为合法单播 IP 与源标识，恢复保留归档选定地址 |
 | notifications、notification_rules、notification_channels、notification_state | 四表纳入加密备份；notification_channels 密封材料必须能由当前密钥打开，校验 rules 包含全部 7 类规则且无越界值；历史通知超过 90 天由后台自动 Prune |
+| service_set_sources | 随服务规则集加密备份；保留外部来源配置、状态、计数与密封解析缓存（能由当前密钥解密），恢复时不触发抓取 |
 
 调度随停机/进程内恢复取消并等待退出，新实例仅一个循环。其他模块的会话结束、安全状态与撤销访问保守合并规则见第 26.9、29 节。
 

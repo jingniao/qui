@@ -62,6 +62,21 @@ message CertificateFileSummary {
   google.protobuf.Timestamp not_after = 6;
   string fingerprint_sha256 = 7;
 }
+message TuningKeyState {
+  string key = 1;
+  bool present = 2;
+  bool writable = 3;
+}
+message SysctlSource {
+  string key = 1;
+  string file = 2;
+  string value = 3;
+}
+message ProcessLimit {
+  string name = 1;
+  uint64 soft = 2;
+  uint64 hard = 3;
+}
 
 message HostInfo {
   string cpu_model = 1;
@@ -74,6 +89,14 @@ message HostInfo {
   string os_pretty_name = 8;
   repeated CertificateFileSummary certificate_files = 9;
   bool certificate_inventory_supported = 10;
+  string virtualization = 11;
+  repeated TuningKeyState tuning_keys = 12;
+  repeated string congestion_available = 13;
+  repeated string congestion_loadable = 14;
+  repeated string qdisc_available = 15;
+  repeated string qdisc_loadable = 16;
+  repeated ProcessLimit fd_limits = 17;
+  repeated SysctlSource sysctl_sources = 18;
 }
 message Heartbeat {
   optional double cpu_percent = 1;

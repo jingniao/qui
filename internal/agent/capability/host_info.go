@@ -86,6 +86,11 @@ func (s *Sampler) HostInfo() *pb.HostInfo {
 	}
 	h.CertificateFiles = CertificateInventory(desiredstate.CertificateDirectory, time.Now())
 	h.CertificateInventorySupported = true
+	h.Virtualization = detectVirtualization("/")
+	h.TuningKeys = tuningKeyStates("/")
+	h.CongestionAvailable, h.CongestionLoadable, h.QdiscAvailable, h.QdiscLoadable = algorithms("/", h.KernelVersion)
+	h.FdLimits = processLimits("/", os.Getpid())
+	h.SysctlSources = sysctlSources("/")
 	return h
 }
 

@@ -9,13 +9,14 @@ import (
 )
 
 type Handler struct {
-	Service *Service
-	Auth    *auth.Handler
-	Audit   auth.Audit
+	Service   *Service
+	Refresher *SourceRefresher
+	Auth      *auth.Handler
+	Audit     auth.Audit
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/policies": h.list, "GET /api/v1/policies/{id}": h.get, "POST /api/v1/policies": h.save, "PUT /api/v1/policies/{id}": h.save, "DELETE /api/v1/policies/{id}": h.delete, "POST /api/v1/policies/simulate": h.simulate, "GET /api/v1/service-sets": h.services, "GET /api/v1/service-sets/{id}": h.getService, "GET /api/v1/service-sets/{id}/references": h.serviceReferences, "POST /api/v1/service-sets": h.saveService, "PUT /api/v1/service-sets/{id}": h.saveService, "DELETE /api/v1/service-sets/{id}": h.deleteService} {
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/policies": h.list, "GET /api/v1/policies/{id}": h.get, "POST /api/v1/policies": h.save, "PUT /api/v1/policies/{id}": h.save, "DELETE /api/v1/policies/{id}": h.delete, "POST /api/v1/policies/simulate": h.simulate, "GET /api/v1/service-sets": h.services, "GET /api/v1/service-sets/{id}": h.getService, "GET /api/v1/service-sets/{id}/references": h.serviceReferences, "POST /api/v1/service-sets": h.saveService, "PUT /api/v1/service-sets/{id}": h.saveService, "DELETE /api/v1/service-sets/{id}": h.deleteService, "POST /api/v1/service-sets/{id}/sources/{sourceId}/refresh": h.refreshSource} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
 }
@@ -148,6 +149,23 @@ func (h *Handler) deleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+func (h *Handler) refreshSource(w http.ResponseWriter, r *http.Request) {
+	if h.Refresher == nil {
+		httpapi.Error(w, 503, "unavailable", "Refresher unavailable")
+		return
+	}
+	sourceID := r.PathValue("sourceId")
+	source, err := h.Refresher.Refresh(r.Context(), sourceID)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	if err := h.audit(r, "刷新规则集来源", sourceID); err != nil {
+		h.internal(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, source)
 }
 func (h *Handler) fail(w http.ResponseWriter, err error) {
 	var referenced *ServiceReferencedError

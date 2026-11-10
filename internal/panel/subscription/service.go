@@ -76,6 +76,7 @@ func DefaultFormats() *format.Registry {
 // Service renders subscriptions.
 type Service struct {
 	ServiceSetEnabled func(context.Context, string) bool
+	ServiceSetSources func(context.Context, string) []format.ExternalProvider
 	Repository        *Repository
 	Users             Users
 	Sources           *source.Registry
@@ -271,6 +272,9 @@ func (s *Service) render(ctx context.Context, userID, deviceID, requested, userA
 	profile := format.Profile{Proxies: proxies, Usage: usage, ProviderURL: providerURL}
 	if s.ServiceSetEnabled != nil {
 		profile.ServiceSetEnabled = func(id string) bool { return s.ServiceSetEnabled(ctx, id) }
+	}
+	if s.ServiceSetSources != nil {
+		profile.ServiceSetSources = func(id string) []format.ExternalProvider { return s.ServiceSetSources(ctx, id) }
 	}
 	warnings := append(sourceWarnings, resolveWarnings...)
 	if exporter.UsesRules() {

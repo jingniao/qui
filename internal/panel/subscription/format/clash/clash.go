@@ -305,6 +305,7 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 			}
 			target = mapped
 		}
+		var extraProviders []string
 		if rule.Type == rules.RuleSet {
 			provider, ok := providers[rule.Payload]
 			if !ok {
@@ -328,6 +329,34 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 				doc.RuleProviders = map[string]ruleProvider{}
 			}
 			doc.RuleProviders[provider.Name] = value
+
+			if provider.ServiceSetID != "" && profile.ServiceSetSources != nil {
+				sources := profile.ServiceSetSources(provider.ServiceSetID)
+				for idx, src := range sources {
+					srcName := fmt.Sprintf("%s-src%d", provider.Name, idx+1)
+					behavior := src.Behavior
+					if behavior == "" {
+						behavior = "domain"
+					}
+					formatType := src.Format
+					if formatType == "" {
+						formatType = "text"
+					}
+					interval := src.IntervalSeconds
+					if interval <= 0 {
+						interval = 86400
+					}
+					doc.RuleProviders[srcName] = ruleProvider{
+						Type:     "http",
+						Behavior: behavior,
+						Format:   formatType,
+						URL:      src.URL,
+						Path:     "./ruleset/" + providerFile(srcName),
+						Interval: interval,
+					}
+					extraProviders = append(extraProviders, srcName)
+				}
+			}
 		}
 		line := rule.Type + "," + rule.Payload + "," + target
 		if rule.Type == rules.RuleMatch {
@@ -337,6 +366,13 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 			line += ",no-resolve"
 		}
 		doc.Rules = append(doc.Rules, line)
+		for _, extraName := range extraProviders {
+			extraLine := "RULE-SET," + extraName + "," + target
+			if rule.NoResolve {
+				extraLine += ",no-resolve"
+			}
+			doc.Rules = append(doc.Rules, extraLine)
+		}
 	}
 	if len(doc.Rules) == 0 || !strings.HasPrefix(doc.Rules[len(doc.Rules)-1], rules.RuleMatch+",") {
 		// The template always ends in MATCH; a dialect that dropped it (never the

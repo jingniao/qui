@@ -38,6 +38,7 @@ import (
 	"proxycontrol/internal/panel/portal"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/format"
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/panel/subscription/source"
@@ -86,6 +87,7 @@ type Server struct {
 	connectionObserver  *user.ConnectionObserver
 	deviceObserver      *user.DeviceObserver
 	admission           admission
+	sourceRefresher     *policy.SourceRefresher
 	notificationWorker  *notification.Worker
 	eventBus            *events.Bus
 	startedAt           time.Time
@@ -318,7 +320,8 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	proxyService.Policies = policyService
 	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: database, Connections: s.connectionStore}, Nodes: nodeRepository, Deployments: deployments, Proxies: proxyService.Repository, Settings: systemRepository}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
-	(&policy.Handler{Service: policyService, Auth: authHandler, Audit: systemRepository}).Register(mux)
+	s.sourceRefresher = &policy.SourceRefresher{Repository: policyService.Repository, Fetcher: importer.Fetcher{Timeout: 15 * time.Second}, Vault: configurationVault}
+	(&policy.Handler{Service: policyService, Refresher: s.sourceRefresher, Auth: authHandler, Audit: systemRepository}).Register(mux)
 	proxyHandler := &proxy.Handler{Service: proxyService, Auth: authHandler, Audit: systemRepository, Users: users}
 	proxyHandler.Register(mux)
 	proxyHandler.RegisterGroups(mux)
@@ -404,6 +407,22 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// checked against the node and policy modules, which own what it refers to.
 	ruleStore := &rules.Store{Database: database, Lookup: ruleLookup{nodes: nodeRepository, policies: policyService.Repository}}
 	subscriptionService.ServiceSetEnabled = func(ctx context.Context, id string) bool { return ruleStore.Lookup.ServiceSetExists(ctx, id, true) }
+	subscriptionService.ServiceSetSources = func(ctx context.Context, id string) []format.ExternalProvider {
+		svc, err := policyService.Repository.Service(ctx, id)
+		if err != nil {
+			return nil
+		}
+		providers := make([]format.ExternalProvider, 0, len(svc.Sources))
+		for _, src := range svc.Sources {
+			providers = append(providers, format.ExternalProvider{
+				URL:             src.URL,
+				Format:          src.Format,
+				Behavior:        src.Behavior,
+				IntervalSeconds: src.IntervalSeconds,
+			})
+		}
+		return providers
+	}
 	if err := ruleStore.Initialize(context.Background()); err != nil {
 		return nil, err
 	}
@@ -542,7 +561,7 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(10)
+	jobs.Add(11)
 	defer func() { stopBackground(); jobs.Wait() }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
 	// One worker owns issuance and renewal: it marks interrupted runs, sweeps
@@ -551,6 +570,7 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	go func() { defer jobs.Done(); s.certificateDeployer.run(background) }()
 	go func() { defer jobs.Done(); s.latencyScheduler.Run(background) }()
 	go func() { defer jobs.Done(); s.importStore.Run(background) }()
+	go func() { defer jobs.Done(); s.sourceRefresher.Run(background) }()
 	go func() {
 		defer jobs.Done()
 		s.runNotifications(background)

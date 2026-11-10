@@ -206,6 +206,7 @@ POST /api/v1/revisions/proxy
 POST /api/v1/revisions/user-access
 POST /api/v1/revisions/{id}/deploy
 POST /api/v1/service-sets
+POST /api/v1/service-sets/{id}/sources/{sourceId}/refresh
 POST /api/v1/subscription-sources
 POST /api/v1/subscription-sources/{id}/refresh
 POST /api/v1/system/backup-retention-preview

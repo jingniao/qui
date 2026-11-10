@@ -33,8 +33,16 @@ func (u Usage) Header() string {
 }
 
 // Profile is everything an exporter renders.
+type ExternalProvider struct {
+	URL             string
+	Format          string
+	Behavior        string
+	IntervalSeconds int
+}
+
 type Profile struct {
 	ServiceSetEnabled func(string) bool
+	ServiceSetSources func(string) []ExternalProvider
 	Proxies           []proxy.Proxy
 	Usage             Usage
 	// Rules is the client rule template expanded for this user. It is set only

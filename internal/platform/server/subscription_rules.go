@@ -46,7 +46,7 @@ func (s serviceRules) ServiceRule(ctx context.Context, id string) (subscription.
 	if err != nil {
 		return subscription.ServiceRule{}, err
 	}
-	return subscription.ServiceRule{Enabled: service.Enabled, Domains: service.Domains, Suffixes: service.Suffixes, CIDRs: service.CIDRs}, nil
+	return subscription.ServiceRule{Enabled: service.Enabled, Domains: service.Domains, Suffixes: service.Suffixes, Keywords: service.Keywords, CIDRs: service.CIDRs}, nil
 }
 
 type clientServiceReferences struct{}

@@ -24,6 +24,7 @@ type ServiceRule struct {
 	Enabled  bool
 	Domains  []string
 	Suffixes []string
+	Keywords []string
 	CIDRs    []string
 }
 
@@ -146,6 +147,11 @@ func ClassicalRuleSet(service ServiceRule) string {
 	for _, suffix := range service.Suffixes {
 		if safe(suffix) {
 			lines = append(lines, "DOMAIN-SUFFIX,"+strings.TrimPrefix(suffix, "."))
+		}
+	}
+	for _, kw := range service.Keywords {
+		if safe(kw) {
+			lines = append(lines, "DOMAIN-KEYWORD,"+kw)
 		}
 	}
 	for _, cidr := range service.CIDRs {

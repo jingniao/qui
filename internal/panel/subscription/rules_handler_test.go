@@ -219,3 +219,17 @@ func TestPreviewDocumentByFormat(t *testing.T) {
 		t.Fatal("the preview marked a token fetched")
 	}
 }
+
+func TestClassicalRuleSetIncludesKeywords(t *testing.T) {
+	rule := ServiceRule{
+		Enabled:  true,
+		Domains:  []string{"openai.com"},
+		Suffixes: []string{"chatgpt.com"},
+		Keywords: []string{"openai"},
+		CIDRs:    []string{"1.1.1.1/32"},
+	}
+	text := ClassicalRuleSet(rule)
+	if !strings.Contains(text, "DOMAIN-KEYWORD,openai\n") {
+		t.Fatalf("expected DOMAIN-KEYWORD,openai in ClassicalRuleSet output, got:\n%s", text)
+	}
+}

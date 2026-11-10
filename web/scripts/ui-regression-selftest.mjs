@@ -673,3 +673,12 @@ sidebarPushed.length = 0;
 sidebarA.handleSectionClick('users');
 assert.deepEqual(sidebarPushed, ['/users'], 'a section with a direct path still navigates');
 console.log('PASS sidebar: an open section collapses on header click even outside its pages, closed sections still open and navigate');
+
+const toast = read('components/ToastContainer.vue');
+assert.match(toast, /<Teleport to="body">/, 'toasts must be teleported after the dialogs');
+assert.match(toast, /z-\[100\]/, 'toasts must sit above dialogs (z-50) and drawers (z-[60])');
+for (const file of ['components/AppDialog.vue', 'components/ConfirmDialog.vue', 'components/FormDrawer.vue']) {
+  const layers = [...read(file).matchAll(/\bz-(?:\[(\d+)\]|(\d+))/g)].map(m => Number(m[1] || m[2]));
+  assert.ok(layers.every(z => z < 100), file + ' must stay below the toast layer');
+}
+console.log('PASS P1 TOAST: toasts above every dialog and drawer');

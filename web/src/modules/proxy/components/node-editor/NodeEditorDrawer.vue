@@ -99,7 +99,7 @@
       </details>
       <p class="text-xs text-ios-orange">保存草稿后运行配置不变。发布会包含该服务器的全部待发布修改；内部中转请先发布目标服务器。</p>
     </fieldset>
-    <p v-if="result" role="status" class="text-sm text-ios-secondary">{{ result }}</p>
+    <p v-if="result" role="status" :class="['text-sm', resultTone === 'success' ? 'text-emerald-600' : resultTone === 'danger' ? 'text-red-600' : resultTone === 'warning' ? 'text-amber-600' : resultTone === 'info' ? 'text-ios-blue' : 'text-ios-secondary']">{{ result }}</p>
     <div v-if="savedInbound?.settings.reality?.public_key" class="space-y-2 text-xs text-ios-secondary">
       <label class="block">已保存的 Reality 公钥<input :value="savedInbound.settings.reality.public_key" readonly class="form-input-base mt-2 font-mono" /></label>
       <button type="button" class="ios-btn-secondary" @click="copySavedPublicKey">复制已保存公钥</button>
@@ -132,6 +132,7 @@ import { groupAPI, freshGroup, type NodeGroup } from '../../../nodes/groupsApi';
 import { groupInput } from '../../lineGroups';
 import { userAPI, type ProxyUser } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
+import { watchPublish, type PublishTone, type PublishWatch } from '../../../system/publishProgress';
 import { certificatesAPI, type ManagedCertificate } from '../../../system/certificatesApi';
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
@@ -147,7 +148,8 @@ const outbounds = ref<Outbound[]>([]), groups = ref<OutboundGroup[]>([]), chains
 const memberGroups = ref<NodeGroup[]>([]), selectedGroupIds = ref<string[]>([]);
 const initialGroupIds = ref<string[]>([]);
 const autoName = ref(!props.inbound);
-const loading = ref(true), busy = ref(false), error = ref(''), loadError = ref(''), result = ref(''), savedId = ref('');
+const loading = ref(true), busy = ref(false), error = ref(''), loadError = ref(''), result = ref(''), resultTone = ref<PublishTone>('info'), savedId = ref('');
+let publishWatcher: PublishWatch | null = null;
 const savedInbound = ref<Inbound | null>(null), keyCopyStatus = ref('');
 const errorMessage = ref<HTMLElement | null>(null);
 watch(error, async message => { if (message) { await nextTick(); errorMessage.value?.focus(); } });
@@ -220,7 +222,7 @@ watch(() => f.value.nodeId, async (newNodeId) => {
   }
 });
 let disposed = false;
-onUnmounted(() => { disposed = true; f.value.settings.private_key_pem = ''; });
+onUnmounted(() => { disposed = true; f.value.settings.private_key_pem = ''; publishWatcher?.stop(); });
 async function load() {
   loading.value = true; loadError.value = '';
   try {
@@ -271,6 +273,7 @@ async function save(publish: boolean) {
     savedInbound.value = saved;
     savedId.value = saved.id;
     result.value = '节点草稿已保存，运行配置未改变。';
+    resultTone.value = 'warning';
     try {
       const changed = [...new Set([...initialGroupIds.value, ...selectedGroupIds.value])]
         .filter(id => initialGroupIds.value.includes(id) !== selectedGroupIds.value.includes(id));
@@ -286,7 +289,15 @@ async function save(publish: boolean) {
     if (publish) {
       try {
         const published = await deploymentAPI.publishNode(value.nodeId, `${state.original ? '更新' : '新建'}自建节点入站: ${value.name}`);
-        result.value = `已保存并发布配置 #${published.revision}（${published.status}），服务器确认后生效。`;
+        result.value = `配置 #${published.revision}：待服务器确认`;
+        resultTone.value = 'info';
+        publishWatcher?.stop();
+        publishWatcher = watchPublish(value.nodeId, published.revision, (phase, timedOut) => {
+          let text = `配置 #${published.revision}：${phase.label}`;
+          if (timedOut) text += '，仍未收到服务器结果，可在服务器详情的配置版本中查看';
+          result.value = text;
+          resultTone.value = phase.tone;
+        });
       } catch (e) { error.value = `发布失败：${(e as Error).message}。草稿已保存并保留，可在服务器详情的配置版本中重试发布。`; }
     }
     emit('saved');

@@ -12,6 +12,7 @@ import (
 )
 
 const metricColumns = "cpu_percent,memory_percent,disk_percent,memory_used_bytes,swap_used_bytes,disk_used_bytes,load1,process_count,tcp_connections,udp_sockets,active_connections,rx_bytes_per_second,tx_bytes_per_second"
+const sampleInsertColumns = metricColumns + ",tcp_out_segs,tcp_retrans_segs"
 
 // heartbeatFreshness is the age at which a stored heartbeat stops counting as a
 // current measurement.
@@ -65,10 +66,10 @@ func recordMetricTx(ctx context.Context, tx *sql.Tx, node string, m *pb.AgentMes
 		}
 	}
 	assignments := []string{}
-	for _, col := range strings.Split(metricColumns, ",") {
+	for _, col := range strings.Split(sampleInsertColumns, ",") {
 		assignments = append(assignments, col+"=excluded."+col)
 	}
-	_, err := tx.ExecContext(ctx, "INSERT INTO node_metric_samples(node_id,at,"+metricColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id,at) DO UPDATE SET "+strings.Join(assignments, ","), node, timestamp(at.Truncate(time.Minute)), h.CpuPercent, h.MemoryPercent, h.DiskPercent, h.MemoryUsedBytes, h.SwapUsedBytes, h.DiskUsedBytes, h.Load1, h.ProcessCount, h.TcpConnections, h.UdpSockets, active, rx, ntx)
+	_, err := tx.ExecContext(ctx, "INSERT INTO node_metric_samples(node_id,at,"+sampleInsertColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id,at) DO UPDATE SET "+strings.Join(assignments, ","), node, timestamp(at.Truncate(time.Minute)), h.CpuPercent, h.MemoryPercent, h.DiskPercent, h.MemoryUsedBytes, h.SwapUsedBytes, h.DiskUsedBytes, h.Load1, h.ProcessCount, h.TcpConnections, h.UdpSockets, active, rx, ntx, h.TcpOutSegs, h.TcpRetransSegs)
 	return err
 }
 
@@ -87,6 +88,7 @@ type MetricPoint struct {
 	ActiveConnections *float64 `json:"activeConnections"`
 	RxBytesPerSecond  *float64 `json:"rxBytesPerSecond"`
 	TxBytesPerSecond  *float64 `json:"txBytesPerSecond"`
+	TCPRetransPercent *float64 `json:"tcpRetransPercent"`
 	Samples           int      `json:"samples"`
 }
 
@@ -110,16 +112,42 @@ func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	step := latencyStepSeconds(hours)
-	since := timestamp(time.Now().UTC().Add(-time.Duration(hours) * time.Hour))
-	query := "SELECT at," + metricColumns + ",1 FROM node_metric_samples WHERE node_id=? AND at>=? ORDER BY at"
-	args := []any{n.ID, since}
+	sinceTime := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+	since := timestamp(sinceTime)
+	lookback := timestamp(sinceTime.Add(-time.Minute))
+	cte := `WITH ordered AS (
+		SELECT *,
+			CAST(strftime('%s',substr(at,1,19)||'Z') AS INTEGER) AS ts,
+			LAG(CAST(strftime('%s',substr(at,1,19)||'Z') AS INTEGER)) OVER (ORDER BY at) AS prev_ts,
+			LAG(tcp_out_segs) OVER (ORDER BY at) AS prev_out,
+			LAG(tcp_retrans_segs) OVER (ORDER BY at) AS prev_retrans
+		FROM node_metric_samples
+		WHERE node_id=? AND at>=?
+	),
+	samples AS (
+		SELECT *,
+			CASE
+				WHEN prev_out IS NOT NULL AND prev_retrans IS NOT NULL
+					AND tcp_out_segs IS NOT NULL AND tcp_retrans_segs IS NOT NULL
+					AND ts - prev_ts = 60
+					AND tcp_out_segs > prev_out
+					AND tcp_retrans_segs >= prev_retrans
+				THEN CAST(tcp_retrans_segs - prev_retrans AS REAL) * 100.0 / CAST(tcp_out_segs - prev_out AS REAL)
+				ELSE NULL
+			END AS tcp_retrans_percent
+		FROM ordered
+		WHERE at>=?
+	)`
+	query := cte + " SELECT at," + metricColumns + ",tcp_retrans_percent,1 FROM samples ORDER BY at"
+	args := []any{n.ID, lookback, since}
 	if step > 60 {
 		avgs := []string{}
 		for _, col := range strings.Split(metricColumns, ",") {
 			avgs = append(avgs, "AVG("+col+")")
 		}
-		query = "WITH samples AS (SELECT *,CAST(strftime('%s',substr(at,1,19)||'Z') AS INTEGER)/?*? AS bucket FROM node_metric_samples WHERE node_id=? AND at>=?) SELECT strftime('%Y-%m-%dT%H:%M:%S',bucket,'unixepoch')||'.000000000Z'," + strings.Join(avgs, ",") + ",COUNT(*) FROM samples GROUP BY bucket ORDER BY bucket"
-		args = []any{step, step, n.ID, since}
+		avgs = append(avgs, "AVG(tcp_retrans_percent)")
+		query = cte + ", bucketed AS (SELECT *,(ts/?)*? AS bucket FROM samples) SELECT strftime('%Y-%m-%dT%H:%M:%S',bucket,'unixepoch')||'.000000000Z'," + strings.Join(avgs, ",") + ",COUNT(*) FROM bucketed GROUP BY bucket ORDER BY bucket"
+		args = []any{n.ID, lookback, since, step, step}
 	}
 	rows, err := h.Repository.Database.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -130,7 +158,7 @@ func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
 	points := []MetricPoint{}
 	for rows.Next() {
 		var p MetricPoint
-		if err = rows.Scan(&p.At, &p.CPUPercent, &p.MemoryPercent, &p.DiskPercent, &p.MemoryUsedBytes, &p.SwapUsedBytes, &p.DiskUsedBytes, &p.Load1, &p.ProcessCount, &p.TCPConnections, &p.UDPSockets, &p.ActiveConnections, &p.RxBytesPerSecond, &p.TxBytesPerSecond, &p.Samples); err != nil {
+		if err = rows.Scan(&p.At, &p.CPUPercent, &p.MemoryPercent, &p.DiskPercent, &p.MemoryUsedBytes, &p.SwapUsedBytes, &p.DiskUsedBytes, &p.Load1, &p.ProcessCount, &p.TCPConnections, &p.UDPSockets, &p.ActiveConnections, &p.RxBytesPerSecond, &p.TxBytesPerSecond, &p.TCPRetransPercent, &p.Samples); err != nil {
 			h.fail(w, err)
 			return
 		}

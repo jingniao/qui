@@ -9,6 +9,7 @@ import (
 // an archive written before it.
 func rewindServiceSetSources(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindTuningRecommendations(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0140_service_set_sources.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

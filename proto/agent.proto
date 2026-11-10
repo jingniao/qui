@@ -137,6 +137,8 @@ message Heartbeat {
   optional string boot_id = 34;
   optional string default_route_interface = 35;
   repeated PublicAddress public_addresses = 36;
+  optional uint64 tcp_out_segs = 37;
+  optional uint64 tcp_retrans_segs = 38;
 }
 
 message PublicAddress {

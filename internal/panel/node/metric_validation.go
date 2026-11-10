@@ -13,7 +13,7 @@ func validateK2bMetrics(h *pb.Heartbeat) error {
 			return errors.New("invalid host load")
 		}
 	}
-	for _, v := range []*uint64{h.ProcessCount, h.TcpConnections, h.UdpSockets, h.MemoryUsedBytes, h.SwapUsedBytes, h.DiskUsedBytes} {
+	for _, v := range []*uint64{h.ProcessCount, h.TcpConnections, h.UdpSockets, h.MemoryUsedBytes, h.SwapUsedBytes, h.DiskUsedBytes, h.TcpOutSegs, h.TcpRetransSegs} {
 		if v != nil && *v > math.MaxInt64 {
 			return errors.New("host count exceeds storage range")
 		}

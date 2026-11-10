@@ -16,6 +16,7 @@ import (
 type Meta struct {
 	PortRangeStart  *int   `json:"portRangeStart"`
 	PortRangeEnd    *int   `json:"portRangeEnd"`
+	BandwidthMbps   *int   `json:"bandwidthMbps"`
 	Region          string `json:"region"`
 	Remark          string `json:"remark"`
 	RenewDate       string `json:"renewDate"`
@@ -31,6 +32,9 @@ func (m Meta) Validate() error {
 	}
 	if m.PortRangeStart != nil && (*m.PortRangeStart < 1 || *m.PortRangeEnd > 65535 || *m.PortRangeStart > *m.PortRangeEnd) {
 		return errors.New("invalid port range")
+	}
+	if m.BandwidthMbps != nil && (*m.BandwidthMbps < 1 || *m.BandwidthMbps > 100000) {
+		return errors.New("invalid bandwidth")
 	}
 	if len(m.Region) > 120 || len(m.Remark) > 1024 || len(m.RenewCycle) > 40 || len(m.RenewCurrency) > 8 || len(m.RenewPrice) > 32 || m.RenewNoticeDays < 0 || m.RenewNoticeDays > 365 {
 		return errors.New("invalid node metadata")
@@ -53,7 +57,7 @@ func (r *Repository) Meta(ctx context.Context, id string) (Meta, bool, error) {
 		return Meta{}, false, err
 	}
 	m := Meta{RenewNoticeDays: 7}
-	err := r.Database.QueryRowContext(ctx, "SELECT region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,port_range_start,port_range_end FROM node_meta WHERE node_id=?", id).Scan(&m.Region, &m.Remark, &m.RenewDate, &m.RenewCycle, &m.RenewPrice, &m.RenewCurrency, &m.RenewNoticeDays, &m.PortRangeStart, &m.PortRangeEnd)
+	err := r.Database.QueryRowContext(ctx, "SELECT region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,port_range_start,port_range_end,bandwidth_mbps FROM node_meta WHERE node_id=?", id).Scan(&m.Region, &m.Remark, &m.RenewDate, &m.RenewCycle, &m.RenewPrice, &m.RenewCurrency, &m.RenewNoticeDays, &m.PortRangeStart, &m.PortRangeEnd, &m.BandwidthMbps)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, false, nil
 	}
@@ -90,12 +94,12 @@ func (h *Handler) putMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	conflict := "DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,port_range_start=excluded.port_range_start,port_range_end=excluded.port_range_end"
+	conflict := "DO UPDATE SET region=excluded.region,remark=excluded.remark,renew_date=excluded.renew_date,renew_cycle=excluded.renew_cycle,renew_price=excluded.renew_price,renew_currency=excluded.renew_currency,renew_notice_days=excluded.renew_notice_days,port_range_start=excluded.port_range_start,port_range_end=excluded.port_range_end,bandwidth_mbps=excluded.bandwidth_mbps"
 	if body.ImportOnly {
 		conflict = "DO NOTHING"
 	}
 	m := body.Meta
-	_, err = tx.ExecContext(r.Context(), "INSERT INTO node_meta(node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,port_range_start,port_range_end) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id) "+conflict, r.PathValue("id"), m.Region, m.Remark, m.RenewDate, m.RenewCycle, m.RenewPrice, m.RenewCurrency, m.RenewNoticeDays, m.PortRangeStart, m.PortRangeEnd)
+	_, err = tx.ExecContext(r.Context(), "INSERT INTO node_meta(node_id,region,remark,renew_date,renew_cycle,renew_price,renew_currency,renew_notice_days,port_range_start,port_range_end,bandwidth_mbps) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id) "+conflict, r.PathValue("id"), m.Region, m.Remark, m.RenewDate, m.RenewCycle, m.RenewPrice, m.RenewCurrency, m.RenewNoticeDays, m.PortRangeStart, m.PortRangeEnd, m.BandwidthMbps)
 	if err == nil {
 		err = h.Audit.RecordTx(r.Context(), tx, auth.Actor(r.Context()).Username, "节点元数据", r.PathValue("id"), "成功", r.RemoteAddr)
 	}

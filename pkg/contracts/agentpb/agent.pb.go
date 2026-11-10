@@ -1951,6 +1951,8 @@ type Heartbeat struct {
 	BootId                *string          `protobuf:"bytes,34,opt,name=boot_id,json=bootId,proto3,oneof" json:"boot_id,omitempty"`
 	DefaultRouteInterface *string          `protobuf:"bytes,35,opt,name=default_route_interface,json=defaultRouteInterface,proto3,oneof" json:"default_route_interface,omitempty"`
 	PublicAddresses       []*PublicAddress `protobuf:"bytes,36,rep,name=public_addresses,json=publicAddresses,proto3" json:"public_addresses,omitempty"`
+	TcpOutSegs            *uint64          `protobuf:"varint,37,opt,name=tcp_out_segs,json=tcpOutSegs,proto3,oneof" json:"tcp_out_segs,omitempty"`
+	TcpRetransSegs        *uint64          `protobuf:"varint,38,opt,name=tcp_retrans_segs,json=tcpRetransSegs,proto3,oneof" json:"tcp_retrans_segs,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -2235,6 +2237,20 @@ func (x *Heartbeat) GetPublicAddresses() []*PublicAddress {
 		return x.PublicAddresses
 	}
 	return nil
+}
+
+func (x *Heartbeat) GetTcpOutSegs() uint64 {
+	if x != nil && x.TcpOutSegs != nil {
+		return *x.TcpOutSegs
+	}
+	return 0
+}
+
+func (x *Heartbeat) GetTcpRetransSegs() uint64 {
+	if x != nil && x.TcpRetransSegs != nil {
+		return *x.TcpRetransSegs
+	}
+	return 0
 }
 
 type PublicAddress struct {
@@ -5959,7 +5975,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fqdisc_available\x18\x0f \x03(\tR\x0eqdiscAvailable\x12%\n" +
 	"\x0eqdisc_loadable\x18\x10 \x03(\tR\rqdiscLoadable\x12@\n" +
 	"\tfd_limits\x18\x11 \x03(\v2#.proxycontrol.agent.v1.ProcessLimitR\bfdLimits\x12J\n" +
-	"\x0esysctl_sources\x18\x12 \x03(\v2#.proxycontrol.agent.v1.SysctlSourceR\rsysctlSources\"\x84\x12\n" +
+	"\x0esysctl_sources\x18\x12 \x03(\v2#.proxycontrol.agent.v1.SysctlSourceR\rsysctlSources\"\x80\x13\n" +
 	"\tHeartbeat\x12$\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01H\x00R\n" +
 	"cpuPercent\x88\x01\x01\x12*\n" +
@@ -6003,7 +6019,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x05cores\x18! \x03(\v2!.proxycontrol.agent.v1.CoreStatusR\x05cores\x12\x1c\n" +
 	"\aboot_id\x18\" \x01(\tH\x11R\x06bootId\x88\x01\x01\x12;\n" +
 	"\x17default_route_interface\x18# \x01(\tH\x12R\x15defaultRouteInterface\x88\x01\x01\x12O\n" +
-	"\x10public_addresses\x18$ \x03(\v2$.proxycontrol.agent.v1.PublicAddressR\x0fpublicAddresses\x1a@\n" +
+	"\x10public_addresses\x18$ \x03(\v2$.proxycontrol.agent.v1.PublicAddressR\x0fpublicAddresses\x12%\n" +
+	"\ftcp_out_segs\x18% \x01(\x04H\x13R\n" +
+	"tcpOutSegs\x88\x01\x01\x12-\n" +
+	"\x10tcp_retrans_segs\x18& \x01(\x04H\x14R\x0etcpRetransSegs\x88\x01\x01\x1a@\n" +
 	"\x12TuningCurrentEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x0e\n" +
@@ -6026,7 +6045,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x10_disk_used_bytesB\n" +
 	"\n" +
 	"\b_boot_idB\x1a\n" +
-	"\x18_default_route_interface\"G\n" +
+	"\x18_default_route_interfaceB\x0f\n" +
+	"\r_tcp_out_segsB\x13\n" +
+	"\x11_tcp_retrans_segs\"G\n" +
 	"\rPublicAddress\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\"\xac\x02\n" +

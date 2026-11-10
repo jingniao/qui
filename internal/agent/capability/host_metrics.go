@@ -1,7 +1,6 @@
 package capability
 
 import (
-	"sort"
 	"encoding/hex"
 	"math"
 	"net"
@@ -10,6 +9,7 @@ import (
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/netaddr"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +49,9 @@ func readHost(root string, h *pb.Heartbeat) {
 			h.DefaultRouteInterface = &v
 		}
 	}
+	if raw, err := os.ReadFile(filepath.Join(root, "net/snmp")); err == nil {
+		h.TcpOutSegs, h.TcpRetransSegs = readSNMPCounters(string(raw))
+	}
 	raw, err := os.ReadFile(filepath.Join(root, "net/dev"))
 	if err != nil {
 		return
@@ -70,6 +73,38 @@ func readHost(root string, h *pb.Heartbeat) {
 		}
 		h.Interfaces = append(h.Interfaces, &pb.InterfaceCounters{Name: name, ReceiveBytes: rx, TransmitBytes: tx})
 	}
+}
+
+func readSNMPCounters(raw string) (outSegs, retransSegs *uint64) {
+	lines := strings.Split(raw, "\n")
+	for i := 0; i+1 < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "Tcp:") || !strings.HasPrefix(lines[i+1], "Tcp:") {
+			continue
+		}
+		headers := strings.Fields(lines[i])
+		values := strings.Fields(lines[i+1])
+		if len(headers) != len(values) {
+			return nil, nil
+		}
+		var outVal, retransVal *uint64
+		for j := 1; j < len(headers); j++ {
+			switch headers[j] {
+			case "OutSegs":
+				if v, err := strconv.ParseUint(values[j], 10, 64); err == nil {
+					outVal = &v
+				}
+			case "RetransSegs":
+				if v, err := strconv.ParseUint(values[j], 10, 64); err == nil {
+					retransVal = &v
+				}
+			}
+		}
+		if outVal != nil && retransVal != nil {
+			return outVal, retransVal
+		}
+		return nil, nil
+	}
+	return nil, nil
 }
 
 // canonicalBootID accepts the kernel's canonical UUID text, 8-4-4-4-12 in

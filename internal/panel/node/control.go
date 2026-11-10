@@ -47,6 +47,7 @@ type Control struct {
 		AgentUpdateReserved(context.Context, string) (bool, error)
 	}
 	Authority        *pki.Authority
+	Audit            auditLog
 	mu               sync.Mutex
 	connected        map[string]*liveStream
 	RecoveryRedeploy func(context.Context, string) error
@@ -523,6 +524,12 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.FailedPrecondition, "health observation rejected")
 			}
 		}
+		var wasEmptyCaps bool
+		if message.GetCapabilities() != nil {
+			var prev string
+			_ = c.Repository.Database.QueryRowContext(ctx, "SELECT capabilities_json FROM nodes WHERE id=?", id).Scan(&prev)
+			wasEmptyCaps = (prev == "" || prev == "{}")
+		}
 		accepted, err := c.Repository.Record(ctx, id, message)
 		if errors.Is(err, ErrSequence) {
 			return status.Error(codes.FailedPrecondition, err.Error())
@@ -537,6 +544,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				// not write a second, unbounded code.
 				_ = c.RecoveryRedeploy(ctx, id)
 			}
+		}
+		if message.GetCapabilities() != nil {
+			_ = c.maybeAutoApplyTuning(ctx, id, message.GetCapabilities(), wasEmptyCaps)
 		}
 		settingsSession.record(message, message.Sequence > lastSequence)
 		if updateSupported {

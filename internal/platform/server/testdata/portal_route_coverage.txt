@@ -80,6 +80,7 @@ GET /api/v1/nodes/{id}/relays
 GET /api/v1/nodes/{id}/restart-core
 GET /api/v1/nodes/{id}/tcp-probes
 GET /api/v1/nodes/{id}/tuning
+GET /api/v1/nodes/{id}/tuning/recommendations
 GET /api/v1/notification-channels
 GET /api/v1/notification-rules
 GET /api/v1/notifications
@@ -120,6 +121,7 @@ GET /api/v1/system/panel-update
 GET /api/v1/system/runtime
 GET /api/v1/system/runtime-policy
 GET /api/v1/system/storage-thresholds
+GET /api/v1/system/tuning-auto-apply
 GET /api/v1/traffic/accounts/daily
 GET /api/v1/traffic/accounts/hourly
 GET /api/v1/traffic/accounts/summary
@@ -189,6 +191,7 @@ POST /api/v1/nodes/{id}/restart-core
 POST /api/v1/nodes/{id}/revoke-certificate
 POST /api/v1/nodes/{id}/rollback
 POST /api/v1/nodes/{id}/tcp-probes
+POST /api/v1/nodes/{id}/tuning/recommendations/dismiss
 POST /api/v1/notification-channels
 POST /api/v1/notification-channels/{id}/test
 POST /api/v1/notifications/read-all
@@ -255,6 +258,7 @@ PUT /api/v1/system/certificate-settings
 PUT /api/v1/system/install-endpoint
 PUT /api/v1/system/runtime-policy
 PUT /api/v1/system/storage-thresholds
+PUT /api/v1/system/tuning-auto-apply
 PUT /api/v1/tunnel-rules/{id}
 PUT /api/v1/tunnels/{id}
 PUT /api/v1/users/{id}

@@ -130,7 +130,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		return nil, err
 	}
 	s.Authority = authority
-	nodeRepository := &node.Repository{Database: database}
+	nodeRepository := &node.Repository{Database: database, AdviceSources: &serverAdviceSources{db: database}}
 	var configurationVault *vault.Vault
 	if existing {
 		key, readErr := os.ReadFile(filepath.Join(c.NodeIdentityDirectory, "configuration.key"))
@@ -213,6 +213,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	mux := http.NewServeMux()
 	s.httpMux = mux
 	systemRepository := &system.Repository{Database: database, Reader: s.readPool}
+	control.Audit = systemRepository
 	control.CataloguePort = func(ctx context.Context) uint32 {
 		if endpoint, err := systemRepository.ReadInstallEndpoint(ctx); err == nil && endpoint.HTTPPort > 0 {
 			return uint32(endpoint.HTTPPort)
@@ -880,4 +881,53 @@ func (s *nodeNotificationSources) Traffic(ctx context.Context, now time.Time) (m
 		}
 	}
 	return res, nil
+}
+
+type serverAdviceSources struct {
+	db *sql.DB
+}
+
+func (s *serverAdviceSources) HasQUICInbound(ctx context.Context, nodeID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM inbounds WHERE node_id=? AND enabled=1 AND protocol IN ('hysteria2','tuic')", nodeID).Scan(&count)
+	return count > 0, err
+}
+
+func (s *serverAdviceSources) RelayRole(ctx context.Context, nodeID string) (bool, error) {
+	var count int
+	query := `SELECT (SELECT count(*) FROM tunnel_hops WHERE node_id=? AND role IN ('mid','exit')) +
+	(SELECT count(*) FROM inbounds WHERE node_id=? AND (internal_relay=1 OR id IN (SELECT object_id FROM canvas_tunnel_objects WHERE object_kind='inbound')))`
+	err := s.db.QueryRowContext(ctx, query, nodeID, nodeID).Scan(&count)
+	return count > 0, err
+}
+
+func (s *serverAdviceSources) MedianRTT(ctx context.Context, nodeID string) (*float64, error) {
+	since := time.Now().Add(-24 * time.Hour).UTC().Format("2006-01-02T15:04:05.000000000Z")
+	rows, err := s.db.QueryContext(ctx, "SELECT median_ms FROM node_latency_samples WHERE node_id=? AND at>=? AND median_ms IS NOT NULL ORDER BY median_ms", nodeID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var medians []float64
+	for rows.Next() {
+		var m float64
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		medians = append(medians, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(medians) == 0 {
+		return nil, nil
+	}
+	n := len(medians)
+	var median float64
+	if n%2 == 1 {
+		median = medians[n/2]
+	} else {
+		median = (medians[n/2-1] + medians[n/2]) / 2.0
+	}
+	return &median, nil
 }

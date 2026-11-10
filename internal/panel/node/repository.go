@@ -40,11 +40,13 @@ type Repository struct {
 	// Timezone reads the explicit panel zone inside a caller's transaction. It
 	// is injected at composition because this package must not import system.
 	Timezone func(context.Context, *sql.Tx) (string, error)
+	AdviceSources AdviceSources
 }
 type Node struct {
 	CoreSelectionBlocked []string         `json:"coreSelectionBlocked"`
 	AllowSubscription    bool             `json:"allowSubscription"`
 	Maintenance          bool             `json:"maintenance"`
+	TuningAdviceCount    int              `json:"tuningAdviceCount"`
 	PublicIPManual       bool             `json:"-"`
 	PublicAddresses      []PublicAddress  `json:"publicAddresses"`
 	PublicIPSelected     string           `json:"publicIpSelected"`
@@ -443,6 +445,9 @@ func (r *Repository) Get(ctx context.Context, id string) (Node, error) {
 	if err == nil {
 		items := []Node{n}
 		err = r.decorateCoreSelection(ctx, items)
+		if err == nil {
+			err = r.decorateTuningAdvice(ctx, items)
+		}
 		n = items[0]
 	}
 	return n, err
@@ -478,6 +483,9 @@ func (r *Repository) List(ctx context.Context, keyword string, page, size int, d
 	rows.Close()
 	if err == nil {
 		err = r.decorateCoreSelection(ctx, items)
+		if err == nil {
+			err = r.decorateTuningAdvice(ctx, items)
+		}
 	}
 	return items, count, err
 }

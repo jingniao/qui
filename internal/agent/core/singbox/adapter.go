@@ -88,7 +88,7 @@ func (a *Adapter) applyUpstreamCapabilities(capabilities *pb.Capabilities) {
 	a.v2rayAPI = SupportsV2rayAPI(capabilities)
 	a.nativeWireGuard = hasWireGuardOutbound(capabilities)
 	a.nativeWireGuardInbound = hasWireGuardInbound(capabilities)
-	a.nativeServerSettings = desiredstate.CoreSettingsCapability{Core: "sing-box", Version: capabilities.ServerSettingsContractVersion}
+	a.nativeServerSettings = desiredstate.CoreSettingsCapability{Core: "sing-box", Version: capabilities.ServerSettingsContractVersion, CertificateFiles: capabilities.TlsCertificateFilesSupported}
 	for _, combination := range capabilities.ServerSettingsCombinations {
 		a.nativeServerSettings.Combinations = append(a.nativeServerSettings.Combinations, desiredstate.SettingsCombination{Protocol: combination.Protocol, Direction: combination.Direction, Security: combination.Security, Transport: combination.Transport, Flow: combination.Flow})
 	}

@@ -9,6 +9,7 @@ import (
 
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/testutil"
+	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
@@ -40,6 +41,11 @@ func TestRenderUsesNodeCertificateFiles(t *testing.T) {
 	}
 	if len(options.Certificate) != 0 || len(options.Key) != 0 {
 		t.Fatal("the inline certificate branch also ran")
+	}
+	adapter := &Adapter{}
+	adapter.applyUpstreamCapabilities(&pb.Capabilities{CoreName: "sing-box", TlsCertificateFilesSupported: true})
+	if _, err := adapter.Render(context.Background(), state); err != nil {
+		t.Fatalf("adapter.Render refused a valid node certificate file pair after capability detection: %v", err)
 	}
 	broken := stateFixture(t, "trojan", 24444)
 	broken.Inbounds[0].Settings = desiredstate.ProtocolSettings{Security: "tls", ServerName: "localhost", CertificatePath: desiredstate.CertificateDirectory + "/absent.crt", PrivateKeyPath: keyPath}

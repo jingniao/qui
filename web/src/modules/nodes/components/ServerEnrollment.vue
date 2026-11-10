@@ -37,11 +37,17 @@
     </div>
     <p class="text-xs text-ios-tertiary">命令含一次性注册码，{{ formatTime(enrollment?.expiresAt || '') }} 前有效。重新生成会撤销旧注册码。</p>
     <p v-if="metaWarning" role="alert" class="text-sm text-ios-orange">{{ metaWarning }}</p>
-    <button type="button" class="ios-dialog-btn-secondary" @click="installOpen = false">关闭</button>
+    <div v-if="enrollmentStageInfo" class="rounded-xl border border-black/[0.08] bg-black/[0.02] p-3 text-xs flex items-center justify-between">
+      <span class="text-ios-secondary">登记状态：<span class="font-semibold text-ios-label">{{ enrollmentStageInfo.label }}</span></span>
+      <span v-if="enrollmentStageInfo.done" class="text-emerald-600 font-medium">✓ 就绪</span>
+      <span v-else class="inline-block w-3.5 h-3.5 border-2 border-ios-blue border-t-transparent rounded-full animate-spin"></span>
+    </div>
+    <button type="button" class="ios-dialog-btn-secondary" @click="closeInstall">关闭</button>
   </FormDrawer>
 </template>
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
+import { enrollmentStage, type EnrollmentStage } from '../enrollmentStage';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../api';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
 import { CURRENCY_LIST, CYCLE_LIST, saveNodeMeta } from '../nodeMeta';
@@ -72,8 +78,63 @@ const command = computed(() => {
 // an earlier opening is ignored. This cannot compare `enrollment.value` with
 // `item`: the ref stores a reactive proxy, which is never === the raw object,
 // and that comparison silently dropped the saved endpoint every time.
+
+const enrollmentStageInfo = ref<EnrollmentStage | null>(null);
+let stageWatcherTimer: any = null;
+let stageNodeId = '';
+
+function stopStageWatcher() {
+  if (stageWatcherTimer !== null) {
+    clearInterval(stageWatcherTimer);
+    stageWatcherTimer = null;
+  }
+  window.removeEventListener('proxy-node-status', handleNodeStatusEvent);
+}
+
+async function checkStage() {
+  if (!stageNodeId) return;
+  try {
+    const node = await nodeAPI.get(stageNodeId);
+    const stage = enrollmentStage(node.status);
+    enrollmentStageInfo.value = stage;
+    if (stage.done) {
+      stopStageWatcher();
+      emit('changed');
+    }
+  } catch {
+    // ignore network errors
+  }
+}
+
+function handleNodeStatusEvent() {
+  void checkStage();
+}
+
+function startStageWatcher(nodeId: string) {
+  stopStageWatcher();
+  stageNodeId = nodeId;
+  enrollmentStageInfo.value = enrollmentStage('pending');
+  window.addEventListener('proxy-node-status', handleNodeStatusEvent);
+  stageWatcherTimer = setInterval(checkStage, 5000);
+  void checkStage();
+}
+
+function closeInstall() {
+  installOpen.value = false;
+  stopStageWatcher();
+}
+
+watch(installOpen, open => {
+  if (!open) stopStageWatcher();
+});
+
+onUnmounted(() => {
+  stopStageWatcher();
+});
+
 let showGeneration = 0;
 function showInstall(item: Enrollment) {
+  startStageWatcher(item.node.id);
   const current = ++showGeneration;
   enrollment.value = item;
   // The dialog opens with the browser address immediately, so the command is

@@ -128,3 +128,9 @@ for (const label of ['手动设置', '自动探测', '未探测到']) assert.ok(
 assert.doesNotMatch(read('modules/nodes/components/ServerQuickEdit.vue'), /publicIp: latest\.publicIp/);
 assert.doesNotMatch(read('modules/nodes/components/ServerBulkActions.vue'), /\.\.\.node, maintenance/);
 console.log('PASS NODE_ADDRESS: connect address precedence and blanks, change-only submission, connect host validation, no echoed address in either settings form');
+
+const stage = await load('modules/nodes/enrollmentStage.ts');
+assert.deepEqual(stage.enrollmentStage('pending'), { label: '等待 Agent 登记', done: false });
+assert.deepEqual(stage.enrollmentStage('online'), { label: '已上线', done: true });
+assert.equal(stage.enrollmentStage('offline').label, '已登记，等待连接');
+console.log('PASS P1 ENROLLMENT STAGE');

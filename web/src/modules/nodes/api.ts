@@ -2,6 +2,7 @@ import type { ReleaseEntry } from '../system/coreUpdatesApi';
 export interface CollectorLossStatus {measured?:boolean;status:"ok"|"unavailable";generation?:number;dropped_allowed_observations?:number;dropped_blocked_observations?:number;rejected_observations?:number;persistence_failures?:number;unconfirmed_processes?:number;baseline_at?:{seconds?:number;nanos?:number};checkpoint_at?:{seconds?:number;nanos?:number};counters_saturated?:boolean;coverage_incomplete?:boolean;end_confirmed?:boolean;}
 export interface TrafficSourceStatus {status:"busy"|"unavailable"|"unobserved"|"partial"|"covered"|"not_running"|"sampling_failed";core_epoch?:string;revision?:number;configured_sources?:number;observed_sources?:number;core_running?:boolean;observed_at?:{seconds?:number;nanos?:number};last_success_at?:{seconds?:number;nanos?:number};}
 import { request, type Page } from '../../app/apiClient';
+import type { PublicAddress } from './nodeAddress';
 export interface CollectorStatus {persisted_loss?:CollectorLossStatus;process_id:string;status:'ok'|'observation_loss'|'persistence_degraded';pending_observations?:number;aggregated_rollups?:number;dropped_allowed_observations?:number;dropped_blocked_observations?:number;rejected_observations?:number;persistence_failures?:number;counters_saturated?:boolean;started_at?:{seconds?:number;nanos?:number};observed_at?:{seconds?:number;nanos?:number};last_flush_at?:{seconds?:number;nanos?:number};last_flush_success_at?:{seconds?:number;nanos?:number};}
 // Outbound network settings of one node. The first two pin the proxy core's own
 // dials (A); the last two are enforced by the host-network helper for every new
@@ -14,7 +15,7 @@ export interface NodeNetworkSettings {
 // Owner changed them: a non-empty publicIp is stored as a manual value, and an
 // omitted field keeps whatever the panel holds.
 export interface NodeSettingsInput extends NodeNetworkSettings {
-  id: string; name: string; enabled: boolean; publicIp?: string; connectHost?: string; allowSubscription: boolean; maintenance: boolean;
+  id: string; name: string; enabled: boolean; publicIp?: string; publicIpSelected?: string; connectHost?: string; allowSubscription: boolean; maintenance: boolean;
 }
 export interface NodeView extends NodeNetworkSettings {
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';
@@ -22,7 +23,10 @@ export interface NodeView extends NodeNetworkSettings {
   // Where the public address came from: manual means the Owner typed it and the
   // Agent never replaces it, auto means the panel filled it from detection, and
   // an empty source means there is no address at all.
-  publicIpSource: '' | 'manual' | 'auto';
+  publicIpSource: '' | 'manual' | 'auto' | 'selected';
+  publicAddresses?: PublicAddress[];
+  publicIpSelected?: string;
+  publicIpSelectionMissing?: boolean;
   // Client-facing address when the Owner set one (domain or IP literal); the
   // subscriptions and share links prefer it over publicIp.
   connectHost: string;
@@ -110,7 +114,7 @@ healthChecks:(id:string)=>request<{items:HealthCheck[]}>(`/nodes/${encodeURIComp
 requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<HealthCheck>(`/nodes/${encodeURIComponent(id)}/health-checks`,"POST",{expectedRevision,core}),
   list: (page: number, keyword: string, deleted = false, pageSize = 20) => request<Page<NodeView>>(`/nodes?page=${page}&pageSize=${pageSize}&keyword=${encodeURIComponent(keyword)}${deleted ? '&deleted=1' : ''}`),
   get: (id: string) => request<NodeView>(`/nodes/${encodeURIComponent(id)}`),
-  enroll: (name: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name }),
+  enroll: (name: string, connectHost?: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name, ...(connectHost ? { connectHost } : {}) }),
   reissueEnrollment: (id: string) => request<Enrollment>(`/nodes/${encodeURIComponent(id)}/enrollment-token`, 'POST', {}),
   update: (node: NodeView, enabled: boolean) => request(`/nodes/${node.id}`, 'PUT', { name: node.name, enabled }),
   // The two address fields are sent only when they carry a value: an empty
@@ -118,7 +122,7 @@ requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<H
   // omitted field must stay absent instead of defaulting to one of the two.
   save: (node: NodeSettingsInput) => request(`/nodes/${node.id}`, 'PUT', {
     name: node.name, enabled: node.enabled,
-    ...(node.publicIp === undefined ? {} : { publicIp: node.publicIp }),
+    ...(node.publicIpSelected === undefined ? {} : { publicIpSelected: node.publicIpSelected }),
     ...(node.connectHost === undefined ? {} : { connectHost: node.connectHost }),
     allowSubscription: node.allowSubscription, maintenance: node.maintenance, outboundSourceIp: node.outboundSourceIp, outboundInterface: node.outboundInterface, hostSourceIpv4: node.hostSourceIpv4, hostSourceIpv6: node.hostSourceIpv6
   }),

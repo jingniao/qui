@@ -1,6 +1,7 @@
 <template>
   <FormDrawer v-model="createOpen" title="新增服务器" description="① 填写服务器信息 → ② 在目标服务器执行一次性安装命令" :loading="creating" confirm-text="生成安装命令" @confirm="create">
     <label class="block text-xs text-ios-secondary">服务器名称<input v-model.trim="name" maxlength="40" class="form-input-base mt-1.5" placeholder="例如 东京 01" /></label>
+    <label class="block text-xs text-ios-secondary mt-3">客户端连接地址（可选）<input v-model.trim="connectHost" maxlength="253" class="form-input-base mt-1.5 font-mono" placeholder="可填域名或 IP，留空使用公网 IP" /></label>
     <details class="text-sm text-ios-secondary">
       <summary class="cursor-pointer">续费信息（可选）</summary>
       <div class="space-y-3 mt-3">
@@ -50,6 +51,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { enrollmentStage, type EnrollmentStage } from '../enrollmentStage';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../api';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
+import { validConnectHost } from '../nodeAddress';
 import { CURRENCY_LIST, CYCLE_LIST, saveNodeMeta } from '../nodeMeta';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
@@ -60,7 +62,7 @@ const emit = defineEmits<{ changed: [] }>();
 // (K3c), so the dialog keeps the selection as a list and never sends an empty one.
 const CORE_OPTIONS: { name: CoreName; label: string }[] = [{ name: 'xray', label: 'Xray' }, { name: 'sing-box', label: 'sing-box' }];
 const createOpen = ref(false), installOpen = ref(false), creating = ref(false);
-const name = ref(''), renewDate = ref(''), currency = ref('CNY'), price = ref(''), cycle = ref('/年');
+const name = ref(''), connectHost = ref(''), renewDate = ref(''), currency = ref('CNY'), price = ref(''), cycle = ref('/年');
 const error = ref(''), metaWarning = ref('');
 const enrollment = ref<Enrollment | null>(null);
 const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
@@ -163,16 +165,20 @@ function showInstall(item: Enrollment) {
 async function create() {
   if (creating.value) return;
   if (!name.value) { error.value = '请输入服务器名称'; return; }
+  if (connectHost.value && !validConnectHost(connectHost.value)) {
+    error.value = '客户端连接地址需为域名或 IP，不能包含协议、端口或方括号';
+    return;
+  }
   creating.value = true; error.value = ''; metaWarning.value = '';
   try {
-    const item = await nodeAPI.enroll(name.value);
+    const item = await nodeAPI.enroll(name.value, connectHost.value.trim() || undefined);
     // The enrollment succeeded: always show its token, even if optional metadata fails.
     showInstall(item); createOpen.value = false;
     try {
       await saveNodeMeta(item.node.id, { renewDate: renewDate.value, renewCurrency: currency.value,
         renewPrice: price.value.trim(), renewCycle: cycle.value });
     } catch (e) { metaWarning.value = `服务器已创建，续费信息未保存：${(e as Error).message}。请在详情设置中补填。`; }
-    name.value = ''; renewDate.value = ''; currency.value = 'CNY'; price.value = ''; cycle.value = '/年';
+    name.value = ''; connectHost.value = ''; renewDate.value = ''; currency.value = 'CNY'; price.value = ''; cycle.value = '/年';
     emit('changed');
   } catch (e) { error.value = (e as Error).message; }
   finally { creating.value = false; }
@@ -186,5 +192,5 @@ async function reissue(node: NodeView) {
   finally { reissuing.value = false; }
 }
 function installCode(id: string) { return enrollment.value?.node.id === id ? installAvailable.value ? command.value : enrollment.value.enrollmentToken : ''; }
-defineExpose({ installCode, open: () => { error.value = ''; createOpen.value = true; }, reissue });
+defineExpose({ installCode, open: () => { error.value = ''; connectHost.value = ''; createOpen.value = true; }, reissue });
 </script>

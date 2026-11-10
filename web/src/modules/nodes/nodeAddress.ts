@@ -4,8 +4,22 @@
 // empty result means the node has no dialable address at all, so its inbounds
 // stay out of every subscription; no other value may stand in for it.
 
+export interface PublicAddress {
+  address: string;
+  source: string;
+  family: string;
+  lastSeen?: string;
+}
+
+export function candidateLabel(c: PublicAddress): string {
+  const family = c.family === 'ipv6' ? 'IPv6' : 'IPv4';
+  const source = c.source === 'peer' ? '连接对端' : (c.source.startsWith('interface:') ? '网卡 ' + c.source.slice('interface:'.length) : c.source);
+  return `${c.address} · ${family} · ${source}`;
+}
+
 export interface NodeAddress {
   publicIp?: string;
+  publicIpSelected?: string;
   connectHost?: string;
 }
 
@@ -24,10 +38,18 @@ export function connectAddress(node: NodeAddress | null | undefined): string {
 // unrelated save would pin it forever.
 export function addressChanges(loaded: NodeAddress, next: NodeAddress): NodeAddress {
   const changes: NodeAddress = {};
+  const publicIpSelected = next.publicIpSelected !== undefined ? next.publicIpSelected.trim() : undefined;
+  if (publicIpSelected !== undefined && publicIpSelected !== (loaded.publicIpSelected || '').trim()) {
+    changes.publicIpSelected = publicIpSelected;
+  }
   const publicIp = next.publicIp?.trim();
-  if (publicIp !== undefined && publicIp !== (loaded.publicIp || '').trim()) changes.publicIp = publicIp;
+  if (publicIp !== undefined && publicIp !== (loaded.publicIp || '').trim()) {
+    changes.publicIp = publicIp;
+  }
   const connectHost = next.connectHost?.trim();
-  if (connectHost !== undefined && connectHost !== (loaded.connectHost || '').trim()) changes.connectHost = connectHost;
+  if (connectHost !== undefined && connectHost !== (loaded.connectHost || '').trim()) {
+    changes.connectHost = connectHost;
+  }
   return changes;
 }
 

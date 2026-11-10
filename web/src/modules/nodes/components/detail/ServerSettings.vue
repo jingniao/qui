@@ -30,13 +30,26 @@
             </label>
             <div class="sm:col-span-2 space-y-2">
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div class="space-y-1">
+                <div class="space-y-1.5">
                   <div class="flex items-center justify-between gap-2">
-                    <span class="font-medium text-neutral-600 text-xs">公网 IP</span>
-                    <span class="text-xs" :class="publicIpSource === 'manual' ? 'text-ios-blue' : 'text-ios-tertiary'">{{ publicIpSourceText }}</span>
+                    <span class="font-medium text-neutral-600 text-xs">公网 IP（中转 / 节点间通信）</span>
+                    <span class="text-xs" :class="props.node.publicIpSource === 'selected' ? 'text-ios-blue' : 'text-ios-tertiary'">{{ publicIpSourceText }}</span>
                   </div>
-                  <input v-model.trim="form.publicIp" class="form-input-base font-mono" placeholder="留空则使用 Agent 自动探测的公网 IP" />
-                  <button v-if="isOwner && publicIpSource === 'manual'" type="button" class="text-xs text-ios-blue hover:underline" :disabled="!!saving" @click="restoreAutoDetection">恢复自动探测</button>
+                  <div class="space-y-1 rounded-xl bg-ios-bg p-2 text-xs">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                      <input v-model="form.publicIpSelected" type="radio" value="" class="accent-ios-blue" />
+                      <span>自动探测 <span class="text-ios-tertiary">(当前: {{ props.node.publicIp || '未探测到' }})</span></span>
+                    </label>
+                    <label v-for="cand in (props.node.publicAddresses || [])" :key="cand.address" class="flex items-center gap-2 cursor-pointer font-mono">
+                      <input v-model="form.publicIpSelected" type="radio" :value="cand.address" class="accent-ios-blue" />
+                      <span>{{ candidateLabel(cand) }}</span>
+                    </label>
+                    <label v-if="props.node.publicIpSelectionMissing && props.node.publicIpSelected" class="flex items-center gap-2 cursor-pointer font-mono text-ios-orange">
+                      <input v-model="form.publicIpSelected" type="radio" :value="props.node.publicIpSelected" class="accent-ios-blue" />
+                      <span>{{ props.node.publicIpSelected }} · 原手动地址</span>
+                    </label>
+                  </div>
+                  <p v-if="props.node.publicIpSelectionMissing" role="alert" class="text-xs text-ios-orange">原手动地址不在探测结果中，请确认</p>
                 </div>
                 <label class="space-y-1">
                   <span class="font-medium text-neutral-600 text-xs">客户端连接地址</span>
@@ -381,7 +394,7 @@ import type { HostMetrics } from '../../metrics';
 import {
   MACHINE_TRAFFIC_METHODS, MACHINE_TRAFFIC_UNITS, formFromSettings, payloadFromForm, type MachineTrafficForm
 } from '../../machineTrafficModel';
-import { addressChanges, validConnectHost, type NodeAddress } from '../../nodeAddress';
+import { addressChanges, validConnectHost, candidateLabel, type NodeAddress } from '../../nodeAddress';
 
 const coreDetails = ref<HTMLDetailsElement>();
 
@@ -409,6 +422,7 @@ const errors = reactive<Record<string, string>>({});
 // the hint names which of the two the stored value is (§11.1).
 const publicIpSource = computed(() => props.node.publicIpSource);
 const publicIpSourceText = computed(() => {
+  if (publicIpSource.value === 'selected') return '已指定地址';
   if (publicIpSource.value === 'manual') return '手动设置';
   if (publicIpSource.value === 'auto') return '自动探测';
   return '未探测到';
@@ -444,7 +458,7 @@ watch(() => props.node.id, () => {
   Object.assign(form, props.node);
   // Both addresses are strings in the form even when the API omits them, so the
   // dirty check compares what the Owner sees instead of undefined against ''.
-  form.publicIp = props.node.publicIp || '';
+  form.publicIpSelected = props.node.publicIpSelected || '';
   form.connectHost = props.node.connectHost || '';
   const meta = props.meta;
   const price = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
@@ -465,7 +479,7 @@ watch(() => props.node.id, () => {
 const snapshots = computed(() => ({
   basic: {
     name: form.name,
-    publicIp: form.publicIp ?? '',
+    publicIpSelected: form.publicIpSelected ?? '',
     connectHost: form.connectHost ?? '',
     region: metaForm.region,
     remark: metaForm.remark,
@@ -492,7 +506,7 @@ const hasUnsaved = computed(() => machineDirty.value || Object.values(dirty.valu
 // a manual value that Agent detection never replaces (§11.1).
 const loadedAddresses = computed<NodeAddress>(() => {
   const basic = baseline.basic as NodeAddress;
-  return { publicIp: basic.publicIp, connectHost: basic.connectHost };
+  return { publicIpSelected: (basic as any).publicIpSelected, connectHost: basic.connectHost };
 });
 
 defineExpose({ hasUnsaved });
@@ -543,23 +557,7 @@ function settingsBody(latest: NodeView, name: string): NodeSettingsInput {
 
 // Clearing the address drops the manual mark, so the next heartbeat fills the
 // detected address again (§11.1).
-async function restoreAutoDetection() {
-  if (saving.value || !isOwner.value) return;
-  saving.value = 'basic';
-  errors.basic = '';
-  try {
-    const latest = await nodeAPI.get(props.node.id);
-    await nodeAPI.save({ ...settingsBody(latest, form.name), publicIp: '' });
-    form.publicIp = '';
-    (baseline.basic as Record<string, unknown>).publicIp = '';
-    showToast('已恢复自动探测，下一次心跳会重新填写公网 IP');
-    emit('changed');
-  } catch (e) {
-    errors.basic = (e as Error).message;
-  } finally {
-    saving.value = '';
-  }
-}
+
 
 async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
   if (saving.value || !isOwner.value) return;
@@ -568,10 +566,7 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
   try {
     if (group === 'network') validateNetwork();
     if (group === 'basic') {
-      const publicIp = String((form.publicIp ?? '')).trim();
-      if (publicIp && !ipv4(publicIp) && !ipv6(publicIp)) {
-        throw new Error('公网 IP 需要有效 IPv4 或 IPv6 地址');
-      }
+
       if (!validConnectHost(form.connectHost ?? '')) {
         throw new Error('客户端连接地址需为域名或 IP，不能包含协议、端口或方括号');
       }

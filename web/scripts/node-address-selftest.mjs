@@ -48,6 +48,11 @@ assert.deepEqual(address.addressChanges({}, { publicIp: '203.0.113.9', connectHo
 // Trimming happens on both sides, so a stray space is not a change.
 assert.deepEqual(address.addressChanges({ publicIp: ' 203.0.113.9 ' }, { publicIp: '203.0.113.9' }), {});
 
+// --- candidateLabel -----------------------------------------------------------
+assert.equal(address.candidateLabel({ address: '203.0.113.5', family: 'ipv4', source: 'interface:eth0' }), '203.0.113.5 · IPv4 · 网卡 eth0');
+assert.equal(address.candidateLabel({ address: '203.0.113.5', family: 'ipv4', source: 'peer' }), '203.0.113.5 · IPv4 · 连接对端');
+assert.equal(address.candidateLabel({ address: '2001:db8::1', family: 'ipv6', source: 'peer' }), '2001:db8::1 · IPv6 · 连接对端');
+
 // --- validConnectHost ---------------------------------------------------------
 for (const value of ['', '   ', 'node.example.com', 'node-1.example.com', '203.0.113.9', '2001:db8::1', '::1']) {
   assert.equal(address.validConnectHost(value), true, 'accepts ' + JSON.stringify(value));
@@ -73,15 +78,20 @@ const base = { id: 'node-a', name: 'Tokyo', enabled: true, allowSubscription: tr
 await nodesApi.nodeAPI.save(base);
 assert.equal(call[0], '/nodes/node-a');
 assert.equal(call[1], 'PUT');
-assert.deepEqual(Object.keys(call[2]).filter(key => key === 'publicIp' || key === 'connectHost'), [], 'an untouched address is not submitted');
+assert.deepEqual(Object.keys(call[2]).filter(key => key === 'publicIp' || key === 'publicIpSelected' || key === 'connectHost'), [], 'an untouched address is not submitted');
 // A save of another group therefore keeps a detected address detected.
 await nodesApi.nodeAPI.save({ ...base, name: 'Tokyo-2' });
 assert.equal(Object.hasOwn(call[2], 'publicIp'), false);
+assert.equal(Object.hasOwn(call[2], 'publicIpSelected'), false);
 await nodesApi.nodeAPI.save({ ...base, connectHost: 'node.example.com' });
 assert.deepEqual(call[2].connectHost, 'node.example.com');
 assert.equal(Object.hasOwn(call[2], 'publicIp'), false);
-await nodesApi.nodeAPI.save({ ...base, publicIp: '' });
-assert.equal(call[2].publicIp, '', 'clearing the address is a value, not an omission');
+assert.equal(Object.hasOwn(call[2], 'publicIpSelected'), false);
+await nodesApi.nodeAPI.save({ ...base, publicIpSelected: '203.0.113.9' });
+assert.equal(call[2].publicIpSelected, '203.0.113.9');
+assert.equal(Object.hasOwn(call[2], 'publicIp'), false);
+await nodesApi.nodeAPI.save({ ...base, publicIpSelected: '' });
+assert.equal(call[2].publicIpSelected, '', 'clearing the address is a value, not an omission');
 
 // --- the components -----------------------------------------------------------
 // Every place that shows a node's address reads the shared helper, and none of
@@ -121,10 +131,11 @@ assert.doesNotMatch(versionPanel, /publicIp \|\| [^\n]*hostname \|\| '[^']*地�
 const settings = read('modules/nodes/components/detail/ServerSettings.vue');
 assert.match(settings, /addressChanges\(loadedAddresses\.value, submitted\)/);
 assert.doesNotMatch(settings, /publicIp: submitted\.publicIp/);
+assert.doesNotMatch(settings, /v-model(\.trim)?="form\.publicIp"/);
+const enrollment = read('modules/nodes/components/ServerEnrollment.vue');
+assert.match(enrollment, /nodeAPI\.enroll\(name\.value,\s*connectHost\.value/);
 assert.doesNotMatch(settings, /\.\.\.latest, \.\.\.change/);
-assert.match(settings, /restoreAutoDetection/);
-assert.match(settings, /v-if="isOwner && publicIpSource === 'manual'"/);
-for (const label of ['手动设置', '自动探测', '未探测到']) assert.ok(settings.includes(label), 'source hint ' + label);
+for (const label of ['已指定地址', '自动探测', '未探测到']) assert.ok(settings.includes(label), 'source hint ' + label);
 assert.doesNotMatch(read('modules/nodes/components/ServerQuickEdit.vue'), /publicIp: latest\.publicIp/);
 assert.doesNotMatch(read('modules/nodes/components/ServerBulkActions.vue'), /\.\.\.node, maintenance/);
 console.log('PASS NODE_ADDRESS: connect address precedence and blanks, change-only submission, connect host validation, no echoed address in either settings form');

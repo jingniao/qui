@@ -1665,11 +1665,16 @@
                       <span class="font-mono font-bold text-neutral-700 bg-neutral-100 px-2 py-0.5 rounded-md text-xs">
                         v{{ set.version || 1 }}
                       </span>
+                      <span v-if="set.sources?.length" class="ml-1 text-xs text-neutral-500">
+                        ({{ set.sources.length }} 外部来源)
+                      </span>
                     </td>
 
                     <!-- 3. 匹配规模 -->
                     <td class="py-3.5 px-3 font-mono text-neutral-600">
                       <span>{{ (set.domains?.length || 0) + (set.suffixes?.length || 0) }} 域名</span>
+                      <span v-if="set.keywords?.length" class="text-neutral-300 mx-1">/</span>
+                      <span v-if="set.keywords?.length">{{ set.keywords.length }} 关键字</span>
                       <span class="text-neutral-300 mx-1">/</span>
                       <span>{{ set.cidrs?.length || 0 }} IP网段</span>
                     </td>
@@ -2191,6 +2196,16 @@
         </div>
 
         <div>
+          <span class="text-xs font-medium text-neutral-600">域名关键字 (每行一个，包含该子串即命中)</span>
+          <textarea
+            v-model="serviceKeywordsText"
+            rows="3"
+            placeholder="openai&#10;google"
+            class="form-input-base mt-1.5 font-mono text-xs"
+          ></textarea>
+        </div>
+
+        <div>
           <span class="text-xs font-medium text-neutral-600">IP 网段 / CIDR (每行一个)</span>
           <textarea
             v-model="serviceCidrsText"
@@ -2198,6 +2213,89 @@
             placeholder="192.168.1.0/24&#10;10.0.0.0/8"
             class="form-input-base mt-1.5 font-mono text-xs"
           ></textarea>
+        </div>
+
+        <!-- 外部规则来源 -->
+        <div class="space-y-3 pt-2 border-t border-black/[0.06]">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-neutral-800">外部规则来源 (最多 10 个)</span>
+            <button
+              v-if="(serviceForm.sources?.length || 0) < 10"
+              type="button"
+              @click="addServiceSource"
+              class="text-xs text-ios-blue hover:underline font-medium"
+            >
+              + 添加外部来源
+            </button>
+          </div>
+          <div v-if="!serviceForm.sources?.length" class="text-xs text-neutral-400 py-1">
+            未配置外部来源（支持纯文本、YAML 或 MRS 规则集）
+          </div>
+          <div
+            v-for="(source, idx) in serviceForm.sources"
+            :key="source.id || idx"
+            class="p-3 bg-neutral-50 rounded-xl border border-black/[0.06] space-y-2.5"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-bold text-neutral-700">来源 #{{ idx + 1 }}</span>
+              <div class="flex items-center gap-2">
+                <span v-if="source.nodeUsable === false" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700">
+                  仅客户端可用
+                </span>
+                <span v-else-if="source.nodeUsable" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
+                  节点可用
+                </span>
+                <button
+                  v-if="editingService && source.id"
+                  type="button"
+                  @click="refreshSourceItem(editingService.id, source)"
+                  :disabled="refreshingSourceId === source.id"
+                  class="text-xs text-ios-blue hover:underline font-medium"
+                >
+                  {{ refreshingSourceId === source.id ? '刷新中…' : '刷新' }}
+                </button>
+                <button
+                  type="button"
+                  @click="removeServiceSource(idx)"
+                  class="text-xs text-red-500 hover:underline"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+            <label class="block">
+              <span class="text-[11px] text-neutral-500">来源 URL</span>
+              <input v-model="source.url" placeholder="https://example.com/rules.txt" class="form-input-base mt-1 text-xs" required />
+            </label>
+            <div class="grid grid-cols-3 gap-2">
+              <label class="block">
+                <span class="text-[11px] text-neutral-500">格式</span>
+                <select v-model="source.format" @change="onSourceFormatChange(source)" class="form-input-base mt-1 text-xs py-1">
+                  <option value="text">text</option>
+                  <option value="yaml">yaml</option>
+                  <option value="mrs">mrs</option>
+                </select>
+              </label>
+              <label class="block">
+                <span class="text-[11px] text-neutral-500">行为</span>
+                <select v-model="source.behavior" class="form-input-base mt-1 text-xs py-1">
+                  <option v-if="source.format !== 'mrs'" value="classical">classical</option>
+                  <option value="domain">domain</option>
+                  <option value="ipcidr">ipcidr</option>
+                </select>
+              </label>
+              <label class="block">
+                <span class="text-[11px] text-neutral-500">刷新间隔 (秒)</span>
+                <input v-model.number="source.intervalSeconds" type="number" min="3600" max="604800" class="form-input-base mt-1 text-xs py-1" />
+              </label>
+            </div>
+            <div v-if="source.lastStatus" class="flex flex-wrap items-center gap-x-3 text-[11px] text-neutral-500 pt-1 border-t border-black/[0.04]">
+              <span>状态: <strong :class="source.lastStatus === 'ok' ? 'text-emerald-600' : 'text-red-600'">{{ source.lastStatus }}</strong></span>
+              <span v-if="source.entryCount != null">条目: {{ source.entryCount }}</span>
+              <span v-if="source.skippedCount != null">跳过: {{ source.skippedCount }}</span>
+              <span v-if="source.lastFetchAt">更新: {{ source.lastFetchAt }}</span>
+            </div>
+          </div>
         </div>
 
         <label class="flex items-center gap-2 pt-1 cursor-pointer">
@@ -4113,15 +4211,54 @@ const deletingService = ref(false);
 const savingService = ref(false);
 const serviceDomainsText = ref('');
 const serviceSuffixesText = ref('');
+const serviceKeywordsText = ref('');
 const serviceCidrsText = ref('');
+const refreshingSourceId = ref('');
 const serviceForm = reactive<ServiceInput>({
   name: '',
   enabled: true,
   description: '',
   domains: [],
   suffixes: [],
-  cidrs: []
+  keywords: [],
+  cidrs: [],
+  sources: []
 });
+
+function addServiceSource() {
+  if (!serviceForm.sources) serviceForm.sources = [];
+  if (serviceForm.sources.length >= 10) return;
+  serviceForm.sources.push({
+    url: '',
+    format: 'text',
+    behavior: 'domain',
+    intervalSeconds: 86400
+  });
+}
+
+function removeServiceSource(index: number) {
+  serviceForm.sources?.splice(index, 1);
+}
+
+function onSourceFormatChange(source: any) {
+  if (source.format === 'mrs' && source.behavior === 'classical') {
+    source.behavior = 'domain';
+  }
+}
+
+async function refreshSourceItem(serviceId: string, source: any) {
+  if (!source.id || refreshingSourceId.value) return;
+  refreshingSourceId.value = source.id;
+  try {
+    const updated = await policyAPI.refreshServiceSource(serviceId, source.id);
+    Object.assign(source, updated);
+    showToast('规则集来源已刷新');
+  } catch (e) {
+    showToast('刷新来源失败: ' + (e as Error).message, 'error');
+  } finally {
+    refreshingSourceId.value = '';
+  }
+}
 
 function lines(value: string) {
   return value
@@ -4140,10 +4277,13 @@ function openCreateService() {
     description: '',
     domains: [],
     suffixes: [],
-    cidrs: []
+    keywords: [],
+    cidrs: [],
+    sources: []
   });
   serviceDomainsText.value = '';
   serviceSuffixesText.value = '';
+  serviceKeywordsText.value = '';
   serviceCidrsText.value = '';
   serviceDrawerVisible.value = true;
 }
@@ -4158,10 +4298,13 @@ async function openEditService(service: ServiceSet, clone = false) {
     description: service.description || '',
     domains: [...(service.domains || [])],
     suffixes: [...(service.suffixes || [])],
-    cidrs: [...(service.cidrs || [])]
+    keywords: [...(service.keywords || [])],
+    cidrs: [...(service.cidrs || [])],
+    sources: (service.sources || []).map(s => ({ ...s }))
   });
   serviceDomainsText.value = (service.domains || []).join('\n');
   serviceSuffixesText.value = (service.suffixes || []).join('\n');
+  serviceKeywordsText.value = (service.keywords || []).join('\n');
   serviceCidrsText.value = (service.cidrs || []).join('\n');
   serviceDrawerVisible.value = true;
   if (!clone) {
@@ -4210,7 +4353,15 @@ async function saveService() {
       description: serviceForm.description.trim(),
       domains: lines(serviceDomainsText.value),
       suffixes: lines(serviceSuffixesText.value),
-      cidrs: lines(serviceCidrsText.value)
+      keywords: lines(serviceKeywordsText.value),
+      cidrs: lines(serviceCidrsText.value),
+      sources: serviceForm.sources?.map(s => ({
+        id: s.id,
+        url: s.url.trim(),
+        format: s.format,
+        behavior: s.behavior,
+        intervalSeconds: Number(s.intervalSeconds) || 86400
+      }))
     });
     serviceNotice.value = '规则集「' + saved.name + '」已立即保存，引用：' + saved.references.nodePolicies.length + ' 个节点策略、' + saved.references.clientProfiles.length + ' 个客户端配置。' + (saved.warning || '客户端更新规则集、节点发布配置后生效。');
     showToast('规则集已保存');

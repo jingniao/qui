@@ -241,7 +241,7 @@ class TestAPIError extends Error { constructor(status, details) { super('规则�
 const sharedRefs = { nodePolicies: [{ id: 'node', name: '节点策略', enabled: false }], clientProfiles: [{ id: 'profile', name: '配置', active: false, rules: [{ id: 'off', enabled: false }] }] };
 const shared = {
   editingService: ref(null), serviceReferences: ref(null), serviceReferencesError: ref(''), serviceNotice: ref(''), deletingService: ref(false),
-  savingService: ref(false), serviceDrawerVisible: ref(false), serviceForm: {}, serviceDomainsText: ref(''), serviceSuffixesText: ref(''), serviceCidrsText: ref(''), serviceSets: ref([]),
+  savingService: ref(false), serviceDrawerVisible: ref(false), serviceForm: {}, serviceDomainsText: ref(''), serviceSuffixesText: ref(''), serviceKeywordsText: ref(''), serviceCidrsText: ref(''), serviceSets: ref([]),
   APIError: TestAPIError, allPages, showToast: () => {},
   policyAPI: { serviceReferences: async () => sharedRefs, deleteService: async () => { throw new TestAPIError(409, sharedRefs); }, saveService: async () => ({ name: '共享规则', references: sharedRefs, warning: '404；客户端可能继续使用缓存或报告错误' }), services: async () => ({ items: [], total: 0 }) }
 };
@@ -260,6 +260,12 @@ await sharedRun.openEditService(set, true);
 check('clone creates an independent shared set without old references', shared.editingService.value === null && shared.serviceForm.name === '共享规则-副本' && shared.serviceReferences.value.clientProfiles.length === 0);
 check('shared editor explains immediate save and cached-rule semantics', page.includes('放弃配置草稿不会撤销这里的保存') && page.includes('客户端可能继续使用缓存或报告错误') && page.includes('profile.active') && page.includes('rule.enabled') && page.includes('policy.enabled'));
 check('shared deletion confirmation temporarily hides its higher-layer drawer without clearing the draft', page.includes('v-if="!deletingService"\n      v-model="serviceDrawerVisible"'));
+
+check('shared editor has keywords and external sources', page.includes('serviceKeywordsText') && page.includes('serviceForm.sources'));
+check('mrs format restricts behaviors to domain and ipcidr', page.includes("source.format === 'mrs'") || page.includes("s.format === 'mrs'"));
+check('nodeUsable false displays client only label', page.includes('仅客户端可用'));
+await api.policyAPI.refreshServiceSource('svc', 'src');
+check('refreshServiceSource endpoint works', client.calls.at(-1).path === '/service-sets/svc/sources/src/refresh' && client.calls.at(-1).method === 'POST');
 
 if (failures) {
   console.log(`\n${failures} client policy self-test(s) failed`);

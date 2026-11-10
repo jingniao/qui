@@ -47,13 +47,47 @@ export interface PolicyRecord extends PolicyInput {
   updatedAt: string;
 }
 
+export interface ExternalSource {
+  id: string;
+  url: string;
+  format: 'yaml' | 'text' | 'mrs';
+  behavior: 'classical' | 'domain' | 'ipcidr';
+  intervalSeconds: number;
+  nodeUsable: boolean;
+  clientUsable: boolean;
+  lastStatus: string;
+  lastErrorCode: string;
+  lastFetchAt?: string | null;
+  lastSuccessAt?: string | null;
+  entryCount: number;
+  skippedCount: number;
+}
+
+export interface SourceInput {
+  id?: string;
+  url: string;
+  format: 'yaml' | 'text' | 'mrs';
+  behavior: 'classical' | 'domain' | 'ipcidr';
+  intervalSeconds: number;
+  nodeUsable?: boolean;
+  clientUsable?: boolean;
+  lastStatus?: string;
+  lastErrorCode?: string;
+  lastFetchAt?: string | null;
+  lastSuccessAt?: string | null;
+  entryCount?: number;
+  skippedCount?: number;
+}
+
 export interface ServiceInput {
   name: string;
   enabled: boolean;
   description: string;
   domains: string[];
   suffixes: string[];
+  keywords?: string[];
   cidrs: string[];
+  sources?: SourceInput[];
 }
 
 export interface ServiceReferences {
@@ -67,6 +101,7 @@ export interface ServiceSet extends ServiceInput {
   id: string;
   builtin: boolean;
   version: number;
+  sources: ExternalSource[];
   createdAt: string;
   updatedAt: string;
 }
@@ -109,6 +144,8 @@ export const policyAPI = {
   saveService: (id: string | null, value: ServiceInput) =>
     request<ServiceSet & { references: ServiceReferences }>(id ? `/service-sets/${id}` : '/service-sets', id ? 'PUT' : 'POST', value),
   deleteService: (id: string) => request(`/service-sets/${id}`, 'DELETE'),
+  refreshServiceSource: (id: string, sourceId: string) =>
+    request<ExternalSource>(`/service-sets/${id}/sources/${sourceId}/refresh`, 'POST'),
   simulate: (value: SimulationRequest) => request<Decision>('/policies/simulate', 'POST', value)
 };
 

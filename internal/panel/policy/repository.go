@@ -10,12 +10,14 @@ import (
 	shared "proxycontrol/pkg/contracts/policy"
 	"strings"
 	"time"
+	"proxycontrol/internal/platform/vault"
 )
 
 var ErrNotFound = errors.New("policy or service set not found")
 
 type Repository struct {
 	Database         *sql.DB
+	Vault            *vault.Vault
 	ClientReferences ClientReferenceReader
 }
 
@@ -77,17 +79,21 @@ type ServiceSet struct {
 	Description string             `json:"description"`
 	Domains     []string           `json:"domains"`
 	Suffixes    []string           `json:"suffixes"`
+	Keywords    []string           `json:"keywords"`
 	CIDRs       []string           `json:"cidrs"`
+	Sources     []ExternalSource   `json:"sources"`
 	CreatedAt   string             `json:"createdAt"`
 	UpdatedAt   string             `json:"updatedAt"`
 }
 type ServiceInput struct {
-	Name        string   `json:"name"`
-	Enabled     bool     `json:"enabled"`
-	Description string   `json:"description"`
-	Domains     []string `json:"domains"`
-	Suffixes    []string `json:"suffixes"`
-	CIDRs       []string `json:"cidrs"`
+	Name        string         `json:"name"`
+	Enabled     bool           `json:"enabled"`
+	Description string         `json:"description"`
+	Domains     []string       `json:"domains"`
+	Suffixes    []string       `json:"suffixes"`
+	Keywords    []string       `json:"keywords"`
+	CIDRs       []string       `json:"cidrs"`
+	Sources     *[]SourceInput `json:"sources,omitempty"`
 }
 
 func timestamp() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z") }
@@ -212,7 +218,7 @@ func (r *Repository) Delete(ctx context.Context, ruleID string) error {
 	return err
 }
 func (r *Repository) Service(ctx context.Context, serviceID string) (ServiceSet, error) {
-	service := ServiceSet{Domains: []string{}, Suffixes: []string{}, CIDRs: []string{}}
+	service := ServiceSet{Domains: []string{}, Suffixes: []string{}, Keywords: []string{}, CIDRs: []string{}, Sources: []ExternalSource{}}
 	err := r.Database.QueryRowContext(ctx, "SELECT id,name,builtin,version,enabled,description,created_at,updated_at FROM service_sets WHERE id=?", serviceID).Scan(&service.ID, &service.Name, &service.Builtin, &service.Version, &service.Enabled, &service.Description, &service.CreatedAt, &service.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service, ErrNotFound
@@ -235,11 +241,39 @@ func (r *Repository) Service(ctx context.Context, serviceID string) (ServiceSet,
 			service.Domains = append(service.Domains, value)
 		case "suffix":
 			service.Suffixes = append(service.Suffixes, value)
+		case "keyword":
+			service.Keywords = append(service.Keywords, value)
 		case "cidr":
 			service.CIDRs = append(service.CIDRs, value)
 		}
 	}
-	return service, rows.Err()
+	if err := rows.Err(); err != nil {
+		return service, err
+	}
+	srcRows, err := r.Database.QueryContext(ctx,
+		`SELECT id, url, format, behavior, interval_seconds, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count
+		 FROM service_set_sources WHERE service_id=? ORDER BY position ASC`, serviceID)
+	if err != nil {
+		return service, err
+	}
+	defer srcRows.Close()
+	for srcRows.Next() {
+		var src ExternalSource
+		var lastFetch, lastSuccess sql.NullString
+		if err := srcRows.Scan(&src.ID, &src.URL, &src.Format, &src.Behavior, &src.IntervalSeconds, &src.LastStatus, &src.LastErrorCode, &lastFetch, &lastSuccess, &src.EntryCount, &src.SkippedCount); err != nil {
+			return service, err
+		}
+		if lastFetch.Valid {
+			src.LastFetchAt = &lastFetch.String
+		}
+		if lastSuccess.Valid {
+			src.LastSuccessAt = &lastSuccess.String
+		}
+		src.ClientUsable = true
+		src.NodeUsable = src.Format != "mrs"
+		service.Sources = append(service.Sources, src)
+	}
+	return service, srcRows.Err()
 }
 func (r *Repository) Services(ctx context.Context, page, size int) ([]ServiceSet, int, error) {
 	var count int
@@ -283,10 +317,25 @@ func (r *Repository) SaveService(ctx context.Context, serviceID string, input Se
 	if err := shared.Validate(&rule); err != nil {
 		return ServiceSet{}, err
 	}
-	if len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.CIDRs) == 0 {
-		return ServiceSet{}, errors.New("service needs at least one domain or CIDR")
+	if len(input.Keywords) > 1000 {
+		return ServiceSet{}, errors.New("keywords limit exceeded")
+	}
+	for _, kw := range input.Keywords {
+		if _, err := shared.Keyword(kw); err != nil {
+			return ServiceSet{}, err
+		}
 	}
 	create := serviceID == ""
+	entriesCount := len(rule.Match.Domains) + len(rule.Match.Suffixes) + len(rule.Match.CIDRs) + len(input.Keywords)
+	sourcesCount := 0
+	if input.Sources != nil {
+		sourcesCount = len(*input.Sources)
+	} else if !create {
+		_ = r.Database.QueryRowContext(ctx, "SELECT count(*) FROM service_set_sources WHERE service_id=?", serviceID).Scan(&sourcesCount)
+	}
+	if entriesCount+sourcesCount == 0 {
+		return ServiceSet{}, errors.New("service needs at least one domain, keyword, CIDR or external source")
+	}
 	if create {
 		var err error
 		serviceID, err = id.New()
@@ -318,7 +367,7 @@ func (r *Repository) SaveService(ctx context.Context, serviceID string, input Se
 	for _, entries := range []struct {
 		kind   string
 		values []string
-	}{{"domain", rule.Match.Domains}, {"suffix", rule.Match.Suffixes}, {"cidr", rule.Match.CIDRs}} {
+	}{{"domain", rule.Match.Domains}, {"suffix", rule.Match.Suffixes}, {"cidr", rule.Match.CIDRs}, {"keyword", input.Keywords}} {
 		seen := map[string]bool{}
 		for _, value := range entries.values {
 			if seen[value] {
@@ -328,6 +377,11 @@ func (r *Repository) SaveService(ctx context.Context, serviceID string, input Se
 			if _, err := tx.ExecContext(ctx, "INSERT INTO service_set_entries(service_id,kind,value) VALUES(?,?,?)", serviceID, entries.kind, value); err != nil {
 				return ServiceSet{}, err
 			}
+		}
+	}
+	if input.Sources != nil {
+		if err := r.saveSourcesTx(ctx, tx, serviceID, *input.Sources); err != nil {
+			return ServiceSet{}, err
 		}
 	}
 	refs, err := r.serviceReferences(ctx, tx, serviceID)

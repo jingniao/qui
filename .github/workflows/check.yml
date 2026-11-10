@@ -214,7 +214,7 @@ jobs:
           key: qui-singbox-${{ hashFiles('scripts/build-singbox.sh') }}
       - name: Build qui sing-box twice and verify reproducibility
         if: ${{ !cancelled() && steps.qui-singbox.outputs.cache-hit != 'true' }}
-        run: |
+        run: |\
           set -euo pipefail
           GOCACHE="$RUNNER_TEMP/singbox-cache-first" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-first" bash scripts/build-singbox.sh
           GOCACHE="$RUNNER_TEMP/singbox-cache-second" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-second" bash scripts/build-singbox.sh
@@ -223,7 +223,7 @@ jobs:
           done
       - name: Use the qui sing-box build, cached or fresh
         if: ${{ !cancelled() }}
-        run: |
+        run: |\
           set -euo pipefail
           archive="$RUNNER_TEMP/singbox-first/sing-box-1.14.4-qui.1-linux-amd64.tar.gz"
           test -s "$archive"
@@ -240,7 +240,7 @@ jobs:
         run: bash scripts/ci-real-core-test.sh -p 4 -count=1 -timeout 60m $(bash scripts/real-core-packages.sh)
       - name: Release dry-run (no publication)
         if: ${{ !cancelled() }}
-        run: |
+        run: |\
           set -euo pipefail
           VERSION=1.2.0 SKIP_NPM_CI=1 OUTPUT_DIRECTORY="$RUNNER_TEMP/dry-release" bash scripts/build-release.sh
           cd "$RUNNER_TEMP/dry-release"
@@ -322,11 +322,41 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Build the release archives
         run: VERSION="${GITHUB_REF_NAME#v}" OUTPUT_DIRECTORY="$RUNNER_TEMP/dist" scripts/build-release.sh
+      - name: Sign the Agent binaries for formal releases
+        env:
+          AGENT_SIGNING_KEY: ${{ secrets.AGENT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            if [[ -z "${AGENT_SIGNING_KEY:-}" ]]; then
+              printf 'AGENT_SIGNING_KEY secret is required for formal releases.\n' >&2
+              exit 1
+            fi
+            (umask 077 && printf '%s' "$AGENT_SIGNING_KEY" > "$RUNNER_TEMP/agent.key")
+            trap 'rm -f -- "$RUNNER_TEMP/agent.key"' EXIT
+            bash scripts/sign-agent-release.sh "$version" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/agent.key"
+          else
+            bash scripts/sign-agent-release.sh "$version" "$RUNNER_TEMP/dist" /dev/null
+          fi
       - name: Publish the GitHub release
         run: |
           set -euo pipefail
           prerelease=()
           [[ $GITHUB_REF_NAME == *-rc.* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/proxy-control-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.tar.gz "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.provenance.txt "$RUNNER_TEMP/dist/SHA256SUMS" deploy/linux/node-install.sh deploy/linux/panel-install.sh --title "$GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"
+          assets=(
+            "$RUNNER_TEMP"/dist/proxy-control-*.tar.gz
+            "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.tar.gz
+            "$RUNNER_TEMP"/dist/sing-box-*-qui.*-linux-*.provenance.txt
+            "$RUNNER_TEMP/dist/SHA256SUMS"
+            deploy/linux/node-install.sh
+            deploy/linux/panel-install.sh
+          )
+          shopt -s nullglob
+          for agent_asset in "$RUNNER_TEMP"/dist/proxy-agent-*.bin "$RUNNER_TEMP"/dist/proxy-agent-*.manifest.json; do
+            assets+=("$agent_asset")
+          done
+          shopt -u nullglob
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --title "$GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"
         env:
           GH_TOKEN: ${{ github.token }}

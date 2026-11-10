@@ -100,6 +100,7 @@ node web/scripts/canvas-library-selftest.mjs
 node web/scripts/node-address-selftest.mjs
 node web/scripts/certificates-selftest.mjs
 node web/scripts/publish-status-selftest.mjs
+node web/scripts/notifications-selftest.mjs
 
 # The web gate ends here: build the panel exactly as a release does (the embed in
 # web/embed.go reads web/dist) and check that every asset index.html references is

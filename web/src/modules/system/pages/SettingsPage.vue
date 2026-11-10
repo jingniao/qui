@@ -27,6 +27,7 @@
     </section>
     <LatencyTargetsPanel v-else-if="activeTab === 'latency'" />
     <BackupSchedulePanel v-else-if="activeTab === 'backup'" />
+    <NotificationSettings v-else-if="isOwner && activeTab === 'notifications'" />
     <RuntimeSettingsPanel v-else :key="activeTab" :kind="runtimeTab" />
     <section v-if="isOwner && activeTab === 'base'" class="panel-card p-6 max-w-3xl space-y-5 text-sm">
       <div class="flex flex-wrap justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">节点安装连接地址</h2><button class="ios-btn-secondary" :disabled="endpointLoading || endpointSaving" @click="loadEndpoint">刷新已保存地址</button></div>
@@ -75,18 +76,25 @@ import CertificatesPanel from '../components/CertificatesPanel.vue';
 import PanelUpdatePanel from '../components/PanelUpdatePanel.vue';
 import RetentionJobPanel from '../components/RetentionJobPanel.vue';
 import StorageObservationPanel from '../components/StorageObservationPanel.vue';
+import NotificationSettings from '../components/NotificationSettings.vue';
 const route = useRoute();
 const router = useRouter();
-const tabs = [
-  { key: 'base', label: '基础设置' },
-  { key: 'network', label: '网络设置' },
-  { key: 'security', label: '安全设置' },
-  { key: 'accessLog', label: '访问记录设置' },
-  { key: 'latency', label: '延迟监控' },
-  { key: 'subscription', label: '订阅设置' },
-  { key: 'backup', label: '备份设置' },
-  { key: 'info', label: '系统信息' }
-];
+const tabs = computed(() => {
+  const items = [
+    { key: 'base', label: '基础设置' },
+    { key: 'network', label: '网络设置' },
+    { key: 'security', label: '安全设置' },
+    { key: 'accessLog', label: '访问记录设置' },
+    { key: 'latency', label: '延迟监控' },
+    { key: 'subscription', label: '订阅设置' },
+    { key: 'backup', label: '备份设置' }
+  ];
+  if (isOwner.value) {
+    items.push({ key: 'notifications', label: '通知' });
+  }
+  items.push({ key: 'info', label: '系统信息' });
+  return items;
+});
 const activeTab = ref('accessLog'), saved = ref<RetentionSettings | null>(null), loading = ref(false), saving = ref(false), error = ref(''), confirmation = ref(false);
 const form = reactive({ allowedDays: 30, blockedDays: 90, hourlyDays: 90 });
 const retentionConfirm = ref({ allowedDays: 0, blockedDays: 0, hourlyDays: 0 });
@@ -103,7 +111,7 @@ watch(
     if (tab === 'clashRules' || tab === 'clash') {
       router.replace('/routing/client');
       return;
-    } else if (tab && typeof tab === 'string' && tabs.some(t => t.key === tab)) {
+    } else if (tab && typeof tab === 'string' && tabs.value.some(t => t.key === tab)) {
       activeTab.value = tab;
     }
   },

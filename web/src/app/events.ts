@@ -26,6 +26,7 @@ export function connectEvents() {
   connection.addEventListener('dashboard_status', () => window.dispatchEvent(new Event('proxy-dashboard-status')));
   connection.addEventListener('backup_status', () => window.dispatchEvent(new Event('proxy-backup-status')));
   connection.addEventListener('system.alert', () => window.dispatchEvent(new Event('proxy-system-alert')));
+  connection.addEventListener('notification', () => window.dispatchEvent(new Event('proxy-notification')));
 }
 export function disconnectEvents() { connection?.close(); connection = null; authState.sseStatus = 'disconnected'; }
 

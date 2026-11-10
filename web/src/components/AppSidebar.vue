@@ -8,34 +8,40 @@
     <!-- Brand Logo & Title -->
     <div :class="['h-16 flex items-center border-b border-black/[0.05] shrink-0 transition-all', isCollapsed ? 'justify-center px-0' : 'justify-between px-4']">
       <router-link
+        v-if="!isCollapsed"
         to="/dashboard"
-        :class="['flex items-center min-w-0 overflow-hidden group', isCollapsed ? 'justify-center' : 'gap-2.5 flex-1']"
-        :title="isCollapsed ? (authState.platformName || '轻量代理控制平台') : undefined"
+        :class="['flex items-center min-w-0 overflow-hidden group gap-2.5 flex-1']"
       >
         <div class="w-9 h-9 rounded-[10px] bg-gradient-to-tr from-[#0071E3] to-[#5856D6] flex items-center justify-center text-white shrink-0 shadow-[0_3px_10px_rgba(0,113,227,0.25)] group-hover:scale-105 transition-transform">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         </div>
-        <div v-if="!isCollapsed" class="flex flex-col min-w-0 truncate">
+        <div class="flex flex-col min-w-0 truncate">
           <span class="font-semibold text-ios-label text-sm tracking-normal truncate leading-snug">{{ authState.platformName || 'Proxy Control' }}</span>
           <span class="text-xs text-ios-tertiary font-normal leading-normal truncate">轻量代理控制平台</span>
         </div>
       </router-link>
 
-      <button
-        v-if="!isCollapsed"
-        type="button"
-        @click="toggleCollapse"
-        class="hidden lg:flex w-7 h-7 rounded-lg text-ios-tertiary hover:text-ios-label hover:bg-black/[0.05] items-center justify-center transition-colors shrink-0 ml-1.5"
-        title="折叠导航栏"
-      >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <rect x="3" y="4" width="18" height="16" rx="2.5" stroke-width="1.8" />
-          <path d="M9 4v16" stroke-width="1.8" />
-          <path d="M16 9.5L13.5 12l2.5 2.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
+      <div v-if="isCollapsed" class="flex items-center justify-center">
+        <NotificationBell :collapsed="true" />
+      </div>
+
+      <div v-if="!isCollapsed" class="flex items-center gap-1 shrink-0 ml-1.5">
+        <NotificationBell :collapsed="false" />
+        <button
+          type="button"
+          @click="toggleCollapse"
+          class="hidden lg:flex w-7 h-7 rounded-lg text-ios-tertiary hover:text-ios-label hover:bg-black/[0.05] items-center justify-center transition-colors shrink-0"
+          title="折叠导航栏"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke-width="1.8" />
+            <path d="M9 4v16" stroke-width="1.8" />
+            <path d="M16 9.5L13.5 12l2.5 2.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- Navigation Menu Items -->
@@ -485,6 +491,7 @@ import { authState, isOwner, isViewer, logout, clearSession } from '../app/auth'
 import { request } from '../app/apiClient';
 import { showToast } from '../app/api';
 import FormDrawer from './FormDrawer.vue';
+import NotificationBell from './NotificationBell.vue';
 
 interface Props {
   collapsed?: boolean;

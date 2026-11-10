@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	_ "time/tzdata"
 )
 
@@ -70,6 +71,20 @@ func Domain(value string, wildcard bool) (string, error) {
 		}
 		if label[0] == '-' || label[len(label)-1] == '-' {
 			return "", errors.New("invalid domain label")
+		}
+	}
+	return value, nil
+}
+func Keyword(value string) (string, error) {
+	if len(value) < 1 || len(value) > 253 {
+		return "", errors.New("keyword must be between 1 and 253 bytes")
+	}
+	if value != strings.ToLower(value) {
+		return "", errors.New("keyword must be lowercase")
+	}
+	for _, r := range value {
+		if r == ',' || unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "", errors.New("keyword contains invalid characters")
 		}
 	}
 	return value, nil

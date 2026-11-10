@@ -1,0 +1,14 @@
+# OpenAI Ruleset
+# Format: Classical
+DOMAIN,cdn.oaistatic.com
+DOMAIN,openaicom.imgix.net
+DOMAIN-KEYWORD,openai
+DOMAIN-KEYWORD,chatgpt
+DOMAIN-SUFFIX,identrust.com
+DOMAIN-SUFFIX,openai.com
+DOMAIN-SUFFIX,chatgpt.com
+DOMAIN-SUFFIX,oaistatic.com
+IP-CIDR,24.199.123.28/32,no-resolve
+IP-CIDR6,2606:4700:7::a29f:9804/128,no-resolve
+PROCESS-NAME,com.openai.chatgpt
+USER-AGENT,OpenAI*

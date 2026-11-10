@@ -101,6 +101,12 @@ message Heartbeat {
   // independent measurements: a failed read omits only its own field.
   optional string boot_id = 34;
   optional string default_route_interface = 35;
+  repeated PublicAddress public_addresses = 36;
+}
+
+message PublicAddress {
+  string address = 1;
+  string interface = 2;
 }
 message InterfaceCounters {
   string name = 1;

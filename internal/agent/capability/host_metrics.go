@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"sort"
 	"encoding/hex"
 	"math"
 	"net"
@@ -115,13 +116,107 @@ func defaultRouteInterface(raw string) (string, bool) {
 	return best, best != ""
 }
 
+type interfaceAddrs struct {
+	Name     string
+	Up       bool
+	Loopback bool
+	Addrs    []net.Addr
+}
+
+func readInterfaces() []interfaceAddrs {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	res := make([]interfaceAddrs, 0, len(ifaces))
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		res = append(res, interfaceAddrs{
+			Name:     iface.Name,
+			Up:       iface.Flags&net.FlagUp != 0,
+			Loopback: iface.Flags&net.FlagLoopback != 0,
+			Addrs:    addrs,
+		})
+	}
+	return res
+}
+
+func addressIP(addr net.Addr) net.IP {
+	switch value := addr.(type) {
+	case *net.IPNet:
+		return value.IP
+	case *net.IPAddr:
+		return value.IP
+	case *net.TCPAddr:
+		return value.IP
+	case *net.UDPAddr:
+		return value.IP
+	}
+	return nil
+}
+
+func publicAddresses(ifaces []interfaceAddrs, defaultRoute string) []*pb.PublicAddress {
+	var valid []interfaceAddrs
+	for _, iface := range ifaces {
+		if iface.Up && !iface.Loopback {
+			valid = append(valid, iface)
+		}
+	}
+	sort.SliceStable(valid, func(i, j int) bool {
+		if valid[i].Name == defaultRoute {
+			return true
+		}
+		if valid[j].Name == defaultRoute {
+			return false
+		}
+		return valid[i].Name < valid[j].Name
+	})
+
+	seen := make(map[string]bool)
+	var out []*pb.PublicAddress
+	for _, iface := range valid {
+		var v4, v6 []string
+		for _, addr := range iface.Addrs {
+			ip := addressIP(addr)
+			if !netaddr.Public(ip) {
+				continue
+			}
+			ipStr := ip.String()
+			if ip.To4() != nil {
+				v4 = append(v4, ipStr)
+			} else {
+				v6 = append(v6, ipStr)
+			}
+		}
+		for _, ipStr := range append(v4, v6...) {
+			if seen[ipStr] {
+				continue
+			}
+			seen[ipStr] = true
+			out = append(out, &pb.PublicAddress{
+				Address:   ipStr,
+				Interface: iface.Name,
+			})
+			if len(out) >= 16 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
 func (s *Sampler) hostHeartbeat(h *pb.Heartbeat, now time.Time) {
 	if runtime.GOOS != "linux" {
 		return
 	}
 	readHost("/proc", h)
 	readExtraHost("/proc", h)
-	h.PublicIp = publicIP(h.GetDefaultRouteInterface())
+	defIface := h.GetDefaultRouteInterface()
+	h.PublicIp = publicIP(defIface)
+	h.PublicAddresses = publicAddresses(readInterfaces(), defIface)
 	_, h.DiskUsedBytes = diskBytes(s.directory)
 	s.interfaceRates(h, now)
 }

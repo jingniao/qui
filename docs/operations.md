@@ -294,11 +294,12 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 
 **代理核心（面板驱动，直接 URL + SHA-256）**：服务器 → 代理核心里选 `组件 / 稳定版本号`，官方 GitHub 发布资源 URL 与归档 SHA-256 会按所选版本自动填写，也可以照旧手工粘贴。自动填写的数据来自 `GET /api/v1/core-releases`（Owner，见[项目说明书](../AGENTS.md) §22.2）：面板只读厂商公布的摘要（Xray 的 `.dgst`、GitHub 资产摘要、我们自己的 `SHA256SUMS`），从不自行计算，两处公布值不一致或缺失时留空由人核对。面板在入队时校验组件、纯发布版本号、摘要格式、URL 前缀和资源名与节点平台是否匹配（`internal/panel/deployment/core_updates.go`）。Agent 侧再次校验：URL 只接受官方前缀，重定向最多 3 跳且只允许 `github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`；先校验归档摘要再解包；解包拒绝符号链接、路径穿越和多余候选；版本不匹配或健康检查失败时回滚到上一镜像（`internal/agent/updater/core_source.go`、`internal/agent/control/core_updates.go`）。排队、状态和结果见 `GET /api/v1/core-updates`；卡住的任务在节点重连时关闭，Owner 也可用 `POST /api/v1/core-updates/{id}/clear` 关闭。旧任务（无 URL）按 `failed_closed/history_invalid` 关闭。
 
-**Agent 自身（签名目录）**：Agent 自更新仍然使用 Ed25519 签名清单，不改成 URL + SHA-256。
+**Agent 自身（签名目录）**：Agent 自更新仍然使用 Ed25519 签名清单，不改成 URL + SHA-256。v1.5.0 起支持面板驱动的官方签名版本一键升级：
 
-- 面板侧：`release_keys` 固定受信公钥；`POST /api/v1/releases` 保存签名条目，`POST /api/v1/agent-updates` 为节点排队（另有 `/recover`、`/attempts`）。
-- 签名端：`cmd/release` 是离线工具，子命令为 `keygen`、`sign`、`verify`、`stage`、`fetch`、`prepare-agent`、`queue-agent`、`agent-result`。典型流程是 `keygen` 生成密钥对，`sign` 对本地二进制生成签名清单，`verify`/`stage` 校验并生成候选，`fetch`/`prepare-agent`/`queue-agent`/`agent-result` 面向本机已登记的 Agent 配置（`--agent-config`）。私钥始终留在离线签名端。
-- 节点侧：Agent 用配置里固定的公钥校验清单，按安装历史防重放，失败回滚到已确认镜像；受管 Agent 启动时会自行修复中断的切换（`internal/agent/agenthost/recovery.go`、`internal/agent/reconcile/core_rollback_repair.go`）。
+- 官方签名发布：GitHub Releases 附带官方 Ed25519 签名清单（CI release 任务使用 Repository Secret `AGENT_SIGNING_KEY` 签名），官方公钥出厂内置在面板与 Agent 中。面板配置 `release_keys` 留空时默认信任官方公钥；Agent 未显式配置 `updates.keys` 时默认信任官方公钥。
+- 面板一键导入与托管：面板提供 `GET /api/v1/agent-releases` 列出官方正式版；Owner 点击升级时，面板通过 `POST /api/v1/agent-releases/{version}/import` 自动拉取官方已签名清单与二进制产物，保存到 `<data_dir>/releases/agent-catalogue/` 签名目录，并向 `POST /api/v1/agent-updates` 入队。面板通过只读路由 `GET /agent-catalogue/`（仅开放白名单清单与二进制路径，严格限制目录穿越）向 Agent 托管该签名目录。
+- 节点自动协商：Agent 1.5.0 握手时上报 `Capabilities.panel_catalogue_supported = true`，并在 Welcome 消息中接收面板告知的目录端口（`agent_catalogue_port`）。Agent updater 默认目录回退到面板只读端口。
+- 兼容与离线签名：`cmd/release` 离线签名工具与配置中显式指定的自定义签名公钥 / 目录完全兼容保留。
 
 ### RC 更新与组合主机的组件选择
 

@@ -655,7 +655,7 @@ success 仅证明镜像切换；须等 Capabilities.cores 出现组件才允许�
 
 模块：Identity（身份/证书）、Control（连接/心跳/重连/Ack）、Capability（系统/核心探测）、Reconciler（期望协调）、Compiler（Xray/sing-box/GOST）、Supervisor（进程/健康）、Collector（统计/域名）、Spool（持久缓存）、Updater（Agent/核心）。GOST 持久化 JSON，执行前生成 YAML。
 
-更新方式见第 22.2 节；qui sing-box 仅为未修改上游加上游标签。受管 Agent 启动按安装历史完成中断切换，不使用旧候选确认恢复或 supervisor 巡检模式。
+更新方式见第 22.2 节；qui sing-box 仅为未修改上游加上游标签。受管 Agent 启动按安装历史完成中断切换，不使用旧候选确认恢复或 supervisor 巡检模式。 v1.5.0 起支持面板托管的官方签名 Agent 一键升级（详见 27.9、28 与 29.2 节）。
 
 **禁止**任意 Shell、Web Terminal、任意命令、上传脚本执行与未定义远程操作。只允许：应用/回滚版本、重启/重载核心、健康检查、证书轮换、Agent/核心更新与核心移除，以及以下固定操作：
 
@@ -1029,6 +1029,9 @@ GET  /api/v1/core-releases                      # Owner；?component=&source=[&r
 GET  /api/v1/core-updates                       # 任务列表，含 component 与 adding
 POST /api/v1/core-updates                       # {nodeId,confirmNodeId,revision,component,version,url,sha256}
 POST /api/v1/core-updates/{id}/clear
+GET  /api/v1/agent-releases                      # Owner；?refresh=1，查询官方签名 Agent 发布版本列表
+POST /api/v1/agent-releases/{version}/import     # Owner+CSRF；从 GitHub 导入官方签名清单与归档到面板只读目录
+GET  /agent-catalogue/...                        # 只读托管 Agent 签名清单与归档，严格白名单防穿越
 POST /api/v1/nodes/{id}/cores/{component}/remove    # Owner+CSRF；{confirmNodeId,revision}
 GET  /api/v1/nodes/{id}/cores/{component}/removals  # 最近 100 个移除任务
 ```
@@ -1196,6 +1199,10 @@ GOST 使用两个能力字段：`Hello.gost_core_supported`（字段 13，bool�
 
 节点证书文件的能力位（v1.4.7 §3）：`CoreCapability.tls_certificate_files_supported`（字段 12，bool）逐核声明该核心的渲染器能读节点上的证书与私钥文件；`Capabilities` 的同名字段（25）是单核 Agent 的标量形式，与 `forward_inbound_supported`（18／5）、`device_gate_supported`（17／6）同一写法，因为渲染按核心进行，逐核上报才作数。旧 Agent／旧面板各自忽略未知字段；面板 `node.SettingsContractCapability` 把该位并入共享的 `CoreSettingsCapability.certificate_files`，保存、配置快照与发布前三处由同一个 `RequireInboundServerSettings` 判断，因此没上报该位的 Agent 无法保存 `file` 来源。Xray、sing-box 适配器各自上报为真（GOST 不渲染 TLS 入站，保持假），原生 `check` 仍是最终门禁。
 
+Agent 目录更新能力与端口协商（v1.5.0）：
+- `Capabilities.panel_catalogue_supported`（字段 26，bool）：Agent 声明支持从面板只读目录拉取官方签名清单与更新归档。
+- `Welcome.agent_catalogue_port`（字段 22，uint32）：面板告知 Agent 托管只读签名目录的 HTTP/HTTPS 端口号（未配置安装端点时取面板 Web 监听端口）。旧 Agent 忽略未知字段。
+
 中央端下发消息包括：
 
 Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；CertificateRotate；UpdateCommand；Ack。
@@ -1220,6 +1227,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 ## 29.2 节点安全
 
+- 默认 Agent 签名目录安全边界（v1.5.0）：出厂内置官方公钥；Agent 默认目录仅接受主机名严格等于控制连接主机、端口来自本次 Welcome 握手且证书受面板信任的连接；面板端只读路由 `GET /agent-catalogue/` 仅开放匹配 `^proxy-agent/linux/(amd64|arm64)/[0-9]{1,12}/manifest\.json$` 与 `^artifacts/[0-9a-f]{64}\.bin$` 的路径，底层使用 `os.OpenRoot` 隔离文件系统，禁止路径穿越。
 - Agent 主动连接中央端
 - gRPC 使用 mTLS
 - 每个节点独立证书

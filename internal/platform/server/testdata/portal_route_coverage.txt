@@ -25,12 +25,14 @@ DELETE /api/v1/users/{id}
 DELETE /api/v1/users/{id}/node-groups/{groupId}
 DELETE /api/v1/users/{id}/sessions
 DELETE /api/v1/users/{id}/subscription-token
+GET /agent-catalogue/
 GET /api/v1/access-records
 GET /api/v1/access-records/blocked
 GET /api/v1/access-records/domains
 GET /api/v1/access-retention-job
 GET /api/v1/access-storage-observation
 GET /api/v1/admins
+GET /api/v1/agent-releases
 GET /api/v1/agent-updates
 GET /api/v1/agent-updates/{id}/attempts
 GET /api/v1/auth/session
@@ -138,6 +140,7 @@ GET /sub/{token}/rules/{id}
 POST /api/v1/admins
 POST /api/v1/admins/{id}/password
 POST /api/v1/admins/{id}/revoke-sessions
+POST /api/v1/agent-releases/{version}/import
 POST /api/v1/agent-updates
 POST /api/v1/agent-updates/{id}/recover
 POST /api/v1/auth/login

@@ -257,6 +257,14 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	(&system.ReleaseHandler{Repository: systemRepository, Auth: authHandler, Keys: releaseKeys, ActorName: func(ctx context.Context) string { return auth.Actor(ctx).Username }}).Register(mux)
 	(&deployment.CoreUpdateHandler{Repository: deployments, Audit: systemRepository, Auth: authHandler}).Register(mux)
 	(&deployment.AgentUpdateHandler{Repository: deployments, Catalogue: systemRepository, Auth: authHandler, Keys: releaseKeys}).Register(mux)
+	agentCatalogueDir := filepath.Join(filepath.Dir(c.Database), "releases", "agent-catalogue")
+	agentReleases := &deployment.AgentReleases{
+		Directory: agentCatalogueDir,
+		Store:     systemRepository,
+		Keys:      c.ReleaseKeys,
+	}
+	(&deployment.AgentReleaseHandler{Releases: agentReleases, Auth: authHandler, Audit: systemRepository}).Register(mux)
+	mux.Handle("GET /agent-catalogue/", deployment.CatalogueHandler(agentCatalogueDir))
 	s.systemHandler = &system.Handler{Repository: systemRepository, Backups: s.backupService, PanelUpdate: &system.PanelUpdateService{CurrentVersion: Version}, BackupChanged: func() {
 		eventBus.Publish("backup_status", map[string]bool{"changed": true})
 		select {

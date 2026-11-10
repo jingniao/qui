@@ -172,7 +172,6 @@
 
             <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
               <span>{{ accountStatusText }}</span>
-              <span class="text-ios-tertiary">{{ user.allowedProtocols.length }} 种协议</span>
             </div>
           </div>
         </div>
@@ -247,7 +246,6 @@
               <button :disabled="loginBusy" class="ios-btn-secondary" @click="revokeVisible = true">撤销所有登录会话</button>
             </div>
             <p class="text-xs text-ios-secondary">关闭登录或设置新密码会立即撤销此用户的所有门户会话。代理连接凭证单独管理。</p>
-            <p v-if="user.allowedProtocols.includes('wireguard')" class="text-xs text-amber-700">WireGuard 一次只能在一台设备上使用，且不计入设备上限。</p>
           </div>
 
           <!-- 二维码扫描展示 -->
@@ -314,7 +312,6 @@
 
           <div class="pt-3 border-t border-black/[0.04] text-xs text-ios-tertiary flex items-center justify-between">
             <span>共 {{ availableNodes.length }} 台服务器、{{ availableSources.length }} 个导入来源</span>
-            <span class="font-mono">协议: {{ user.allowedProtocols.join(' · ') }}</span>
           </div>
         </section>
       </div>
@@ -746,12 +743,12 @@ const accountStatusText = computed(() => {
   return '账号正常';
 });
 const accessGroups = computed(() => groups.value.filter(g => user.value?.nodeGroupIds.includes(g.id) && g.enabled && g.subscriptionVisible && (g.purpose === 'subscription' || g.purpose === 'mixed')));
-const availableSources = computed(() => importedSources.value.filter(source => accessGroups.value.some(g => g.imports?.some(item => item.sourceId === source.id && importedProxies.value.some(proxy => proxy.sourceId === item.sourceId && (item.proxyKey === '' || item.proxyKey === proxy.proxyKey) && user.value?.allowedProtocols.includes(proxy.protocol))))));
+const availableSources = computed(() => importedSources.value.filter(source => accessGroups.value.some(g => g.imports?.some(item => item.sourceId === source.id && importedProxies.value.some(proxy => proxy.sourceId === item.sourceId && (item.proxyKey === '' || item.proxyKey === proxy.proxyKey))))));
 const availableNodes = computed(() => {
   if (!user.value) return [];
   const inboundIds = new Set(accessGroups.value.flatMap(g => g.inboundIds || []));
   const grantedNodes = new Set(memberInbounds.value.filter(ib => inboundIds.has(ib.id) && ib.enabled && ib.subscriptionVisible && !ib.internalRelay &&
-    (!ib.allowedUserIds.length || ib.allowedUserIds.includes(user.value!.id)) && user.value!.allowedProtocols.includes(ib.protocol)).map(ib => ib.nodeId));
+    (!ib.allowedUserIds.length || ib.allowedUserIds.includes(user.value!.id))).map(ib => ib.nodeId));
   return allNodes.value.filter(n => grantedNodes.has(n.id) && !n.deletedAt && n.enabled && !n.maintenance && n.allowSubscription);
 });
 
@@ -808,7 +805,6 @@ async function submitRenew() {
       expiresAt: updatedExpiry,
       trafficLimit: user.value.trafficLimit,
  deviceLimit: user.value.deviceLimit,
-      allowedProtocols: user.value.allowedProtocols,
       nodeGroupIds: user.value.nodeGroupIds,
       remark: user.value.remark
     });
@@ -901,7 +897,6 @@ const form = reactive<UserInput>({
   expiresAt: '',
   trafficLimit: 0,
  deviceLimit: 0,
-  allowedProtocols: ['socks5'],
   nodeGroupIds: [],
   remark: ''
 });
@@ -919,7 +914,6 @@ function openEdit() {
   form.expiresAt = user.value.expiresAt;
   form.trafficLimit = user.value.trafficLimit;
  form.deviceLimit = user.value.deviceLimit;
-  form.allowedProtocols = [...user.value.allowedProtocols];
   form.nodeGroupIds = [...user.value.nodeGroupIds];
 
   Object.assign(formMeta, { resetCycle: user.value.trafficResetCycle, rawRemark: user.value.remark });

@@ -17,7 +17,7 @@ export interface ProxyUser {
   expiresAt: string;
   trafficLimit: number;
   usedTraffic: number;
-  allowedProtocols: string[];
+  allowedProtocols?: string[];
   nodeGroupIds: string[];
   remark: string;
   createdAt: string;
@@ -33,7 +33,7 @@ export interface UserInput {
   status: string;
   expiresAt: string;
   trafficLimit: number;
-  allowedProtocols: string[];
+  allowedProtocols?: string[];
   nodeGroupIds: string[];
   remark: string;
 }

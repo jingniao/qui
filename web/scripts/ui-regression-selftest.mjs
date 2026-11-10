@@ -682,3 +682,8 @@ for (const file of ['components/AppDialog.vue', 'components/ConfirmDialog.vue', 
   assert.ok(layers.every(z => z < 100), file + ' must stay below the toast layer');
 }
 console.log('PASS P1 TOAST: toasts above every dialog and drawer');
+
+for (const file of ['modules/users/pages/UserListPage.vue', 'modules/users/pages/UserDetailPage.vue']) {
+  assert.doesNotMatch(read(file), /allowedProtocols/, file + ' no longer edits or filters by protocol');
+}
+console.log('PASS P1 USERS: no per-user protocol control');

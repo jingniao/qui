@@ -321,6 +321,9 @@ func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T)
 func TestProtocolChangeAddsAndResetRevokesCredentials(t *testing.T) {
 	f := newQuotaFixture(t)
 	account, vlessCredential := f.addProtocolUser(t, "protocol_user", "", "vless")
+	// Simulate an older user that was created before v1.5 with only VLESS:
+	f.app.Database.ExecContext(f.ctx, `DELETE FROM credentials WHERE user_id=? AND protocol='socks5'`, account.ID)
+	f.app.Database.ExecContext(f.ctx, `UPDATE users SET protocols_json='["vless"]' WHERE id=?`, account.ID)
 	f.publish(t)
 	f.quickAccess(t, "socks5", "0.0.0.0", 1080)
 	f.markRecovered()

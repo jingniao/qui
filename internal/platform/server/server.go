@@ -305,6 +305,11 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// a protocol list edited elsewhere is brought in line here, before the quota
 	// deployer's startup reconciliation publishes the nodes whose user access
 	// surface now differs.
+	if granted, err := users.GrantAllProtocols(context.Background()); err != nil {
+		return nil, err
+	} else if len(granted) > 0 {
+		logger.Info("all protocols granted at startup", "users", len(granted))
+	}
 	if changed, err := users.EnsureAllAccessIdentities(context.Background()); err != nil {
 		return nil, err
 	} else if len(changed) > 0 {

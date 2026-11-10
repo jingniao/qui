@@ -209,41 +209,7 @@
           <input v-model.number="form.deviceLimit" type="number" min="0" max="100" step="1" class="form-input-base mt-1.5" />
         </label>
         <details class="text-xs text-ios-secondary"><summary>同时在线设备上限的限制与隐私</summary><p v-for="help in deviceLimitHelp" :key="help" class="mt-2">{{ help }}</p></details>
-        <!-- 允许协议 -->
-        <div class="space-y-1.5">
-          <div class="flex items-center justify-between">
-            <label class="text-xs font-medium text-ios-secondary">允许协议</label>
-            <span class="text-xs text-ios-tertiary">已选 {{ form.allowedProtocols.length }} / {{ protocols.length }}</span>
-          </div>
-          <div class="rounded-2xl p-3 bg-[#F5F5F7] border border-black/[0.06] flex flex-wrap gap-2">
-            <label
-              v-for="protocol in protocols"
-              :key="protocol"
-              :class="[
-                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer select-none active:scale-95',
-                form.allowedProtocols.includes(protocol)
-                  ? 'bg-ios-blue text-white shadow-[0_2px_6px_rgba(0,113,227,0.25)] ring-1 ring-ios-blue'
-                  : 'bg-white text-ios-secondary border border-black/[0.08] hover:text-ios-label hover:border-black/[0.15] hover:bg-black/[0.02]'
-              ]"
-            >
-              <input
-                type="checkbox"
-                v-model="form.allowedProtocols"
-                :value="protocol"
-                class="sr-only"
-              />
-              <svg
-                v-if="form.allowedProtocols.includes(protocol)"
-                class="w-3.5 h-3.5 shrink-0"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-              </svg>
-              <span>{{ protocol }}</span>
-            </label>
-          </div>
-        </div>
+        
 
         <label class="block text-xs font-medium text-ios-secondary">
           备注
@@ -298,7 +264,7 @@
 import { deviceLimitHelp, udpUnsupportedText } from "../../../app/deviceLimit";
 import type { DevicesOnline } from "../api";
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
-import { userAPI, protocols, type ProxyUser, type UserInput } from '../api';
+import { userAPI, type ProxyUser, type UserInput } from '../api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import type { AdminUser } from '../../../types';
 import { request, type Page } from '../../../app/apiClient';
@@ -366,7 +332,6 @@ function defaults(): UserInput {
     expiresAt: '',
     trafficLimit: 0,
     deviceLimit: 0,
-    allowedProtocols: ['socks5', 'vless', 'trojan'],
     nodeGroupIds: [],
     remark: ''
   };
@@ -511,7 +476,6 @@ function openEdit(user: ProxyUser) {
     expiresAt: user.expiresAt,
     trafficLimit: user.trafficLimit,
     deviceLimit: user.deviceLimit,
-    allowedProtocols: [...user.allowedProtocols],
     nodeGroupIds: [...user.nodeGroupIds],
     remark: user.remark
   });

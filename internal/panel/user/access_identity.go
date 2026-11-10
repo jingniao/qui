@@ -26,6 +26,50 @@ const identityName = "access"
 // oldest.
 const identityOrder = "EXISTS(SELECT 1 FROM subscription_tokens t WHERE t.device_id=devices.id AND t.revoked_at IS NULL) DESC, status='active' DESC, created_at, id"
 
+// GrantAllProtocols sets protocols_json to AllProtocols for every user whose list differs and
+// returns their IDs. EnsureAllAccessIdentities then issues the missing credentials.
+func (r *Repository) GrantAllProtocols(ctx context.Context) ([]string, error) {
+	allBytes, err := json.Marshal(AllProtocols)
+	if err != nil {
+		return nil, err
+	}
+	allJSON := string(allBytes)
+
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, "SELECT id FROM users WHERE protocols_json <> ? OR protocols_json IS NULL ORDER BY id", allJSON)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	if len(ids) > 0 {
+		if _, err := tx.ExecContext(ctx, "UPDATE users SET protocols_json = ? WHERE protocols_json <> ? OR protocols_json IS NULL", allJSON, allJSON); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // AccessIdentity returns the user's access identity, or ErrNotFound when the
 // user has none yet (EnsureAccessIdentity creates it).
 func (r *Repository) AccessIdentity(ctx context.Context, userID string) (Device, error) {

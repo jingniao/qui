@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
+	"slices"
 	"testing"
 	"time"
 )
@@ -139,17 +140,17 @@ func TestAccessIdentityFollowsTheUser(t *testing.T) {
 		return result
 	}
 	initial := active()
-	if len(initial) != 3 || initial["socks5"] == "" || initial["vless"] == "" || initial["wireguard"] == "" {
+	if len(initial) != len(AllProtocols) || initial["socks5"] == "" || initial["vless"] == "" || initial["wireguard"] == "" {
 		t.Fatalf("credentials after create: %v", initial)
 	}
 	input := userInput()
-	input.AllowedProtocols = []string{"socks5", "trojan"}
+	input.DisplayName = "Renamed"
 	if _, err := repository.Save(ctx, u.ID, input); err != nil {
 		t.Fatal(err)
 	}
 	changed := active()
-	if len(changed) != 2 || changed["socks5"] != initial["socks5"] || changed["trojan"] == "" {
-		t.Fatalf("credentials after the protocol change: %v", changed)
+	if len(changed) != len(AllProtocols) || changed["socks5"] != initial["socks5"] {
+		t.Fatalf("credentials after user save: %v", changed)
 	}
 	if again, err := repository.EnsureAccessIdentity(ctx, u.ID); err != nil || again {
 		t.Fatalf("a consistent identity reported a change: %t %v", again, err)
@@ -158,7 +159,7 @@ func TestAccessIdentityFollowsTheUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	reset := active()
-	if len(reset) != 2 || reset["socks5"] == changed["socks5"] || reset["trojan"] == changed["trojan"] {
+	if len(reset) != len(AllProtocols) || reset["socks5"] == changed["socks5"] || reset["vless"] == changed["vless"] {
 		t.Fatalf("credentials after the reset: %v (before %v)", reset, changed)
 	}
 	stamp := timestamp(time.Now())
@@ -176,5 +177,65 @@ func TestAccessIdentityFollowsTheUser(t *testing.T) {
 	repository.Database.QueryRow(`SELECT count(*) FROM credential_tombstones WHERE credential_id='extra-credential' AND device_id='extra-device'`).Scan(&tombstones)
 	if devices != 1 || tombstones != 1 {
 		t.Fatalf("devices %d, tombstones %d", devices, tombstones)
+	}
+}
+
+func TestInputValidateGrantsAllProtocols(t *testing.T) {
+	input := userInput()
+	input.AllowedProtocols = []string{"socks5"}
+	if err := input.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(input.AllowedProtocols, AllProtocols) {
+		t.Fatalf("protocols = %v", input.AllowedProtocols)
+	}
+}
+
+func TestGrantAllProtocolsBackfillsAndIssuesCredentials(t *testing.T) {
+	ctx := context.Background()
+	r := testRepository(t)
+	u, err := r.Save(ctx, "", userInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Database.ExecContext(ctx, `UPDATE users SET protocols_json='["socks5"]' WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := r.AccessIdentity(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Database.ExecContext(ctx, `DELETE FROM credentials WHERE device_id=? AND protocol <> 'socks5'`, identity.ID); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := r.GrantAllProtocols(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ids, []string{u.ID}) {
+		t.Fatalf("ids = %v, expected [%s]", ids, u.ID)
+	}
+	// 再次调用返回空切片（幂等）
+	ids2, err := r.GrantAllProtocols(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids2) != 0 {
+		t.Fatalf("ids2 = %v, expected empty", ids2)
+	}
+	// EnsureAccessIdentity 后该用户每个协议恰有一个 active 凭据，共 8 个
+	changed, err := r.EnsureAccessIdentity(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected credentials to be issued")
+	}
+	identity, err = r.AccessIdentity(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identity.Credentials) != len(AllProtocols) {
+		t.Fatalf("credentials count = %d, expected %d", len(identity.Credentials), len(AllProtocols))
 	}
 }

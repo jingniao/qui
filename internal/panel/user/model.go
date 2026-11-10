@@ -94,6 +94,9 @@ type DeviceInput struct {
 	Protocols []string `json:"protocols"`
 }
 
+// AllProtocols lists every protocol a user may connect with; the order is the stored order.
+var AllProtocols = []string{"http", "socks5", "shadowsocks", "vless", "trojan", "wireguard", "hysteria2", "tuic"}
+
 func ValidateProtocols(protocols []string) error {
 	if len(protocols) == 0 || len(protocols) > 8 {
 		return errors.New("choose one to eight supported protocols")
@@ -156,6 +159,7 @@ func (i *Input) Validate() error {
 	if i.TrafficLimit < 0 {
 		return errors.New("invalid quota")
 	}
+	i.AllowedProtocols = append([]string(nil), AllProtocols...)
 	return ValidateProtocols(i.AllowedProtocols)
 }
 func (u User) Active(at time.Time) bool { return InactivityReason(u, at) == "" }

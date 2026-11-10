@@ -21,6 +21,9 @@ const (
 	MaxForwardConnections = 100000
 	MaxForwardFailTimeout = 3600
 	MaxForwardFailures    = 100
+	// A Hysteria2 hop range is bounded so the panel's claimed-port set stays
+	// predictable; the node writes one nft rule for the whole range.
+	MaxHopPorts = 10000
 )
 
 // Forward selector defaults. They are rendered when the Owner leaves the
@@ -147,6 +150,22 @@ func ListenPorts(port int, settings ProtocolSettings) []int {
 	return settings.Forward.ListenPorts(port)
 }
 
+// ClaimedPorts is every numeric port an inbound occupies on its node: the
+// listening ports plus a Hysteria2 hop range. Panel conflict checks use it; the
+// Agent's listener reservation keeps ListenPorts, because a hop range has no
+// real listener.
+func ClaimedPorts(port int, settings ProtocolSettings) []int {
+	ports := ListenPorts(port, settings)
+	q := settings.QUIC
+	if !q.HasHop() {
+		return ports
+	}
+	for p := q.HopPortStart; p <= q.HopPortEnd && p <= 65535; p++ {
+		ports = append(ports, p)
+	}
+	return ports
+}
+
 // ValidateForwardCore rejects the GOST-only forward options on a core that cannot
 // render them. core is the resolved core name: callers resolve the primary before
 // asking, so an inbound that leaves its core empty is checked against the core
@@ -165,6 +184,9 @@ func ValidateForwardCore(core string, settings ProtocolSettings) error {
 func ValidateListenPorts(port int, settings ProtocolSettings) error {
 	if port < 1 || port > 65535 {
 		return errors.New("invalid inbound listener")
+	}
+	if q := settings.QUIC; q.HasHop() && q.HopPortStart <= port && port <= q.HopPortEnd {
+		return errors.New("a Hysteria2 hop range cannot contain its own listening port")
 	}
 	end := settings.Forward
 	if !end.GostForwardPorts() {

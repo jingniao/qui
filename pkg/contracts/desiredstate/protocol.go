@@ -41,6 +41,20 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 			return errors.New("Hysteria2/TUIC require native QUIC and TLS without legacy transport fields")
 		}
 		if q := settings.QUIC; q != nil {
+			if q.HasHop() {
+				if protocol != "hysteria2" || !inbound {
+					return errors.New("port hopping requires a Hysteria2 inbound")
+				}
+				if q.HopPortStart < 1 || q.HopPortStart > 65535 || q.HopPortEnd < 1 || q.HopPortEnd > 65535 || q.HopPortEnd <= q.HopPortStart {
+					return errors.New("invalid Hysteria2 hop port range")
+				}
+				if q.HopPortEnd-q.HopPortStart+1 > MaxHopPorts {
+					return errors.New("a Hysteria2 hop range supports at most 10000 ports")
+				}
+				if q.HopIntervalSeconds != 0 && (q.HopIntervalSeconds < 5 || q.HopIntervalSeconds > 300) {
+					return errors.New("hop interval must be between 5 and 300 seconds")
+				}
+			}
 			if q.UpMbps < 0 || q.DownMbps < 0 || q.UpMbps > 100000 || q.DownMbps > 100000 {
 				return errors.New("QUIC bandwidth is outside allowed range")
 			}

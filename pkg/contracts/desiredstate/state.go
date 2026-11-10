@@ -164,6 +164,18 @@ type QUICSettings struct {
 	DownMbps          int    `json:"down_mbps,omitempty"`
 	CongestionControl string `json:"congestion_control,omitempty"`
 	UDPRelayMode      string `json:"udp_relay_mode,omitempty"`
+	// A Hysteria2 inbound can ask the node to redirect a UDP port range to its
+	// listener (v1.5.0 section 7). Zero values mean "no hop"; a zero interval
+	// means the default interval.
+	HopPortStart       int `json:"hop_port_start,omitempty"`
+	HopPortEnd         int `json:"hop_port_end,omitempty"`
+	HopIntervalSeconds int `json:"hop_interval_seconds,omitempty"`
+}
+
+// HasHop reports whether any port-hopping field was written. Presence-based: a
+// zero interval still counts when a range is given.
+func (q *QUICSettings) HasHop() bool {
+	return q != nil && (q.HopPortStart != 0 || q.HopPortEnd != 0 || q.HopIntervalSeconds != 0)
 }
 type WireGuardSettings struct {
 	SecretKey string          `json:"secret_key"`

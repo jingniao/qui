@@ -351,3 +351,57 @@ func (r *Repository) Prune(ctx context.Context, before time.Time) (int64, error)
 	}
 	return res.RowsAffected()
 }
+
+func (r *Repository) States(ctx context.Context) (map[string]State, error) {
+	rows, err := r.Database.QueryContext(ctx, "SELECT dedupe_key, active, since, last_notified_at, value FROM notification_state")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	states := make(map[string]State)
+	for rows.Next() {
+		var key, sinceStr, lastNotifiedStr, val string
+		var activeInt int
+		if err := rows.Scan(&key, &activeInt, &sinceStr, &lastNotifiedStr, &val); err != nil {
+			return nil, err
+		}
+		since, _ := time.Parse(time.RFC3339Nano, sinceStr)
+		lastNotified, _ := time.Parse(time.RFC3339Nano, lastNotifiedStr)
+		states[key] = State{
+			Key:          key,
+			Active:       activeInt != 0,
+			Since:        since,
+			LastNotified: lastNotified,
+			Value:        val,
+		}
+	}
+	return states, rows.Err()
+}
+
+func (r *Repository) SaveStates(ctx context.Context, states map[string]State) error {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO notification_state(dedupe_key, active, since, last_notified_at, value) VALUES(?,?,?,?,?) ON CONFLICT(dedupe_key) DO UPDATE SET active=excluded.active, since=excluded.since, last_notified_at=excluded.last_notified_at, value=excluded.value")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, s := range states {
+		active := 0
+		if s.Active {
+			active = 1
+		}
+		sinceStr := s.Since.UTC().Format(time.RFC3339Nano)
+		lastNotifiedStr := s.LastNotified.UTC().Format(time.RFC3339Nano)
+		if _, err := stmt.ExecContext(ctx, s.Key, active, sinceStr, lastNotifiedStr, s.Value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

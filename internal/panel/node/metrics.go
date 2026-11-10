@@ -142,3 +142,30 @@ func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.JSON(w, 200, map[string]any{"intervalSeconds": step, "sampleSeconds": 60, "points": points})
 }
+
+type MetricSample struct {
+	At            string
+	CPUPercent    *float64
+	MemoryPercent *float64
+	DiskPercent   *float64
+}
+
+func (r *Repository) RecentMetrics(ctx context.Context, since time.Time) (map[string][]MetricSample, error) {
+	query := "SELECT node_id, at, cpu_percent, memory_percent, disk_percent FROM node_metric_samples WHERE at>=? ORDER BY at ASC"
+	rows, err := r.Database.QueryContext(ctx, query, timestamp(since))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := make(map[string][]MetricSample)
+	for rows.Next() {
+		var nodeID string
+		var s MetricSample
+		if err := rows.Scan(&nodeID, &s.At, &s.CPUPercent, &s.MemoryPercent, &s.DiskPercent); err != nil {
+			return nil, err
+		}
+		res[nodeID] = append(res[nodeID], s)
+	}
+	return res, rows.Err()
+}

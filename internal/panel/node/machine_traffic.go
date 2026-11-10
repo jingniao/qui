@@ -361,6 +361,11 @@ func machineCursors(ctx context.Context, q rowQuery, only string) (map[machineCu
 
 // machineTrafficSummaries builds the current period of one node (only set) or of
 // every live node, from one captured clock and panel zone.
+func (r *Repository) MachineTrafficSummaries(ctx context.Context, now time.Time) ([]MachineTrafficSummary, error) {
+	items, _, err := r.machineTrafficSummaries(ctx, "", now)
+	return items, err
+}
+
 func (r *Repository) machineTrafficSummaries(ctx context.Context, only string, now time.Time) ([]MachineTrafficSummary, string, error) {
 	tx, err := r.Database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

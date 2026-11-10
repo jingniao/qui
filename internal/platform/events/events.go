@@ -31,6 +31,27 @@ func (b *Bus) Publish(kind string, data any) {
 		}
 	}
 }
+
+func (b *Bus) Subscribe(buffer int) (<-chan Event, func()) {
+	if buffer < 1 {
+		buffer = 8
+	}
+	ch := make(chan Event, buffer)
+	b.mu.Lock()
+	if b.subscribers == nil {
+		b.subscribers = map[chan Event]bool{}
+	}
+	b.subscribers[ch] = true
+	b.mu.Unlock()
+
+	unsubscribe := func() {
+		b.mu.Lock()
+		delete(b.subscribers, ch)
+		b.mu.Unlock()
+	}
+	return ch, unsubscribe
+}
+
 func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 	return authentication.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
@@ -62,15 +83,6 @@ func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 			select {
 			case <-r.Context().Done():
 				return
-			case event := <-channel:
-				data, err := json.Marshal(event.Data)
-				if err != nil {
-					return
-				}
-				if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, data); err != nil {
-					return
-				}
-				flusher.Flush()
 			case <-timer.C:
 				if cookie == nil {
 					return
@@ -79,9 +91,14 @@ func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 				if err != nil || !session.IsAuthenticated {
 					return
 				}
-				if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
-					return
+				fmt.Fprint(w, ": keepalive\n\n")
+				flusher.Flush()
+			case event := <-channel:
+				data, err := json.Marshal(event.Data)
+				if err != nil {
+					continue
 				}
+				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, data)
 				flusher.Flush()
 			}
 		}

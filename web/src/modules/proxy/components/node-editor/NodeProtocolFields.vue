@@ -79,11 +79,23 @@
         <p v-if="f.rotateRealityKey" class="text-xs text-ios-orange">保存会生成新密钥对；发布成功后，客户端须更新订阅以取得新公钥，旧公钥将不能连接。</p>
       </template>
       <template v-if="tlsShown">
-        <label class="block">服务器名称
-          <input v-model="s.server_name" placeholder="例如 node.example.com（证书上的域名）" class="form-input-base mt-2 font-mono" />
+        <div class="block">域名（服务器名称）
+          <div class="flex items-center gap-2 mt-2">
+            <input v-model="s.server_name" @blur="scheduleLookup" placeholder="例如 node.example.com（证书上的域名）" class="form-input-base font-mono flex-1" />
+            <button type="button" class="ios-btn-secondary" :disabled="lookupBusy" @click="findCertificates">查找证书</button>
+          </div>
           <span class="block text-xs mt-1">客户端用它校验证书；须是证书覆盖的域名。留空时客户端使用连接地址，此时证书必须覆盖连接地址。</span>
           <span v-if="quicTLS" class="block text-xs mt-1">域名须解析到这台服务器；使用 Cloudflare 时请设为“仅 DNS”（灰云），代理模式不转发 UDP。</span>
-        </label>
+        </div>
+        <div v-if="lookupBusy || lookupError || choices.length || requestStatus || (matches && !choices.length)" class="space-y-1">
+          <p v-if="lookupBusy" class="text-xs">正在查找覆盖该域名的证书…</p>
+          <p v-if="lookupError" role="alert" class="text-xs text-ios-red">{{ lookupError }}</p>
+          <label v-for="(choice, index) in choices" :key="index" class="block text-xs">
+            <input type="radio" name="certificate-choice" :checked="choiceKey === String(index)" @change="chooseCertificate(index)" /> {{ choice.label }}
+          </label>
+          <p v-if="!lookupBusy && matches && !choices.length && !lookupError" class="text-xs">没有找到覆盖该域名的证书；可在下方选择其他来源。</p>
+          <p v-if="requestStatus" role="status" class="text-xs">{{ requestStatus }}</p>
+        </div>
         <label v-if="!state.original" class="block text-xs"><input v-model="f.internalRelay" @change="f.internalRelay && (f.subscriptionVisible = false)" type="checkbox" /> 内部中转（使用自动证书；也可在高级设置中修改）</label>
         <p v-if="f.internalRelay" class="text-xs">内部 TLS 证书由系统生成并固定信任，也可提供自有证书。</p>
         <label v-else class="block">证书来源
@@ -210,13 +222,13 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import type { NodeView } from '../../../nodes/api';
-import type { TLSSource } from '../../api';
-import type { ManagedCertificate } from '../../../system/certificatesApi';
+import { certificateMatches as findCertificateMatches, type CertificateMatches, type TLSSource } from '../../api';
+import { certificatesAPI, type ManagedCertificate } from '../../../system/certificatesApi';
 import { connectAddress } from '../../../nodes/nodeAddress';
 import { formatTime } from '../../../../app/auth';
-import { appendShortId, certificateFilesSupported, certificatePathError, changeSecurity, changeTransport, applyXhttpSecurity, fillServerNamesFromTarget, flowChoices, internalRelaySettingsReason, randomXhttpPath, REALITY_HANDSHAKE_PRESETS, securityChoices, serverSettingsReason, sniFromTarget, SELF_SIGNED_REQUIRES_ADDRESS, tlsBlockShown, acmeAddressHint, tlsSourceChoices, tlsSourceFor, usableCertificates, transportChoices, visibleChoices, XHTTP_MODES, forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type EditorState } from './nodeEditorModel';
+import { appendShortId, applyCertificateChoice, certificateChoices, certificateFilesSupported, certificatePathError, changeSecurity, changeTransport, applyXhttpSecurity, fillServerNamesFromTarget, flowChoices, internalRelaySettingsReason, randomXhttpPath, REALITY_HANDSHAKE_PRESETS, securityChoices, serverSettingsReason, sniFromTarget, SELF_SIGNED_REQUIRES_ADDRESS, tlsBlockShown, acmeAddressHint, tlsSourceChoices, tlsSourceFor, usableCertificates, transportChoices, visibleChoices, XHTTP_MODES, forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type CertificateChoice, type EditorState } from './nodeEditorModel';
 const props = defineProps<{ state: EditorState; gost?: boolean; server?: NodeView; certificates?: ManagedCertificate[] }>();
 const f = computed(() => props.state.form), s = computed(() => props.state.form.settings);
 // The TLS block is shown for both the TLS-only protocols and an explicit TLS
@@ -225,6 +237,63 @@ const tlsShown = computed(() => tlsBlockShown(f.value));
 const source = computed(() => tlsSourceFor(props.state, props.server));
 const acmeCertificates = computed(() => usableCertificates(props.certificates || []));
 const sources = computed(() => tlsSourceChoices(certificateFilesSupported(props.server, f.value.core || ''), source.value, acmeCertificates.value.length > 0));
+// Section 6: look certificates up by domain before picking a source. Node-side
+// files are offered only when the core reports that it can read them.
+const matches = ref<CertificateMatches | null>(null);
+const choiceKey = ref('');
+const lookupBusy = ref(false);
+const lookupError = ref('');
+const requestStatus = ref('');
+const filesSupported = computed(() => certificateFilesSupported(props.server, f.value.core || ''));
+const choices = computed(() => matches.value ? certificateChoices(matches.value, filesSupported.value) : []);
+const lookupDomain = computed(() => (s.value.server_name || '').trim());
+let lookupTimer: ReturnType<typeof setTimeout> | undefined;
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+async function findCertificates() {
+  if (lookupTimer) { clearTimeout(lookupTimer); lookupTimer = undefined; }
+  const domain = lookupDomain.value;
+  if (!domain || !f.value.nodeId) { matches.value = null; choiceKey.value = ''; lookupError.value = ''; return; }
+  lookupBusy.value = true; lookupError.value = '';
+  try { matches.value = await findCertificateMatches(f.value.nodeId, domain); }
+  catch { matches.value = null; lookupError.value = '查找证书失败，请稍后重试'; }
+  finally { lookupBusy.value = false; }
+}
+function scheduleLookup() {
+  if (lookupTimer) clearTimeout(lookupTimer);
+  lookupTimer = setTimeout(findCertificates, 400);
+}
+function chooseCertificate(index: number) {
+  const choice: CertificateChoice | undefined = choices.value[index];
+  if (!choice) return;
+  if (choice.kind === 'request') { void requestCertificate(); return; }
+  choiceKey.value = String(index);
+  applyCertificateChoice(f.value, choice);
+}
+async function requestCertificate() {
+  const domain = lookupDomain.value;
+  if (!domain) return;
+  requestStatus.value = `正在为 ${domain} 申请证书…`;
+  try {
+    const created = await certificatesAPI.create([domain], false, '');
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const current = (await certificatesAPI.list()).find(item => item.id === created.id);
+        if (!current) return;
+        if (current.status === 'valid') {
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
+          applyCertificateChoice(f.value, { kind: 'acme', certificateId: current.id, label: '' });
+          requestStatus.value = `${domain} 的证书已签发并选中，保存后生效`;
+        } else if (current.status === 'failed') {
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
+          requestStatus.value = `证书申请失败：${current.lastErrorText || current.lastErrorCode || '未知原因'}`;
+        }
+      } catch { /* keep polling until the certificate reaches a terminal state */ }
+    }, 5000);
+  } catch { requestStatus.value = '证书申请未能发起，请检查 Cloudflare 配置'; }
+}
+watch(lookupDomain, () => { matches.value = null; choiceKey.value = ''; requestStatus.value = ''; });
+onUnmounted(() => { if (lookupTimer) clearTimeout(lookupTimer); if (pollTimer) clearInterval(pollTimer); });
 function setSource(event: Event) {
   f.value.tlsSource = (event.target as HTMLSelectElement).value as TLSSource;
   if (f.value.tlsSource === 'acme' && !f.value.certificateId) f.value.certificateId = acmeCertificates.value[0]?.id || '';

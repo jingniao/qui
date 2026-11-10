@@ -39,6 +39,11 @@ export type TLSSource = '' | 'paste' | 'self_signed' | 'file' | 'acme';
 // null for a node-side file source and for an inbound without a certificate,
 // because the panel cannot read either.
 export interface CertificateInfo { subject: string; dnsNames: string[]; ipAddresses: string[]; notAfter: string; selfSigned: boolean; coverageWarning: string; }
+// v1.5.0 section 6: a read-only lookup of the certificates covering one domain.
+// Node files are paths only; the panel never returns key material.
+export interface CertificateFileMatch { certificatePath: string; keyPath: string; dnsNames: string[]; notAfter: string; expired: boolean; }
+export interface CertificateLibraryMatch { id: string; domains: string[]; notAfter: string; }
+export interface CertificateMatches { domain: string; inventorySupported: boolean; nodeFiles: CertificateFileMatch[]; library: CertificateLibraryMatch[]; cloudflareConfigured: boolean; }
 export interface ProtocolSettings { reality?: RealitySettings; xhttp?: XHTTPSettings; forward?: ForwardSettings; quic?: { up_mbps?: number; down_mbps?: number; congestion_control?: string; udp_relay_mode?: string }; transport?: string; security?: string; server_name?: string; method?: string; flow?: string; certificate_pem?: string; private_key_pem?: string; trusted_ca_pem?: string; certificate_path?: string; private_key_path?: string; path?: string; service_name?: string; wireguard?: { secret_key: string; addresses: string[]; peers: WireGuardPeer[]; mtu?: number }; }
 // `core` is the core that runs this inbound (K3b); an empty string follows the
 // node's current primary core and is never rewritten to a concrete name. The
@@ -97,6 +102,11 @@ export const proxyAPI = {
   deleteOutbound: (id: string) => request(`/outbounds/${id}`, 'DELETE'),
   revision: (nodeId: string, summary: string) => request<{ id: number }>('/revisions/proxy', 'POST', { nodeId, summary })
 };
+
+// Section 6: read-only lookup of the certificates covering one domain on one node.
+export function certificateMatches(nodeId: string, domain: string): Promise<CertificateMatches> {
+  return request<CertificateMatches>(`/nodes/${encodeURIComponent(nodeId)}/certificate-matches?domain=${encodeURIComponent(domain)}`);
+}
 
 export async function choices<T>(read: (page: number, size: number) => Promise<Page<T>>): Promise<T[]> {
   const items: T[] = [];

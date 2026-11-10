@@ -1,4 +1,4 @@
-import type { ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings, TLSSource } from '../../api';
+import type { CertificateMatches, ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings, TLSSource } from '../../api';
 import type { CoreName, NodeView } from '../../../nodes/api';
 import { blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
 import { connectAddress } from '../../../nodes/nodeAddress';
@@ -153,6 +153,48 @@ export function tlsBlockShown(form: InboundInput): boolean {
 // section 3). An Agent that reports nothing grants nothing.
 export function certificateFilesSupported(server: NodeView | undefined, core: CoreName | ''): boolean {
   return findCore(server, core)?.tlsCertificateFilesSupported === true;
+}
+
+// Section 6: certificates are looked up by domain before the Owner picks a
+// source. Unusable (expired) node files stay visible but sort last; a request is
+// offered only when Cloudflare is configured and nothing usable was found.
+export type CertificateChoice =
+  | { kind: 'file'; certificatePath: string; keyPath: string; label: string; expired: boolean }
+  | { kind: 'acme'; certificateId: string; label: string }
+  | { kind: 'request'; label: string };
+const certificateFileName = (path: string) => path.split('/').pop() || path;
+const certificateDate = (value: string) => value ? value.slice(0, 10) : '未知';
+export function certificateChoices(matches: CertificateMatches, filesSupported: boolean): CertificateChoice[] {
+  const result: CertificateChoice[] = [];
+  const fileChoice = (file: CertificateMatches['nodeFiles'][number]): CertificateChoice => ({
+    kind: 'file', certificatePath: file.certificatePath, keyPath: file.keyPath, expired: file.expired,
+    label: file.expired ? `已过期：${certificateFileName(file.certificatePath)}` : `节点文件 ${certificateFileName(file.certificatePath)} · 到期 ${certificateDate(file.notAfter)}`
+  });
+  if (filesSupported) for (const file of matches.nodeFiles.filter(item => !item.expired)) result.push(fileChoice(file));
+  for (const item of matches.library) {
+    result.push({ kind: 'acme', certificateId: item.id, label: `证书库 ${item.domains.join('、') || item.id} · 到期 ${certificateDate(item.notAfter)}` });
+  }
+  if (filesSupported) for (const file of matches.nodeFiles.filter(item => item.expired)) result.push(fileChoice(file));
+  if (matches.cloudflareConfigured && !result.some(choice => (choice.kind === 'file' && !choice.expired) || choice.kind === 'acme')) {
+    result.push({ kind: 'request', label: `申请 ${matches.domain} 的证书` });
+  }
+  return result;
+}
+// A choice writes exactly one source into the draft and clears the other's
+// fields, so a save can never carry two certificates at once.
+export function applyCertificateChoice(form: InboundInput, choice: CertificateChoice): void {
+  if (choice.kind === 'request') return;
+  if (choice.kind === 'file') {
+    form.tlsSource = 'file';
+    form.settings.certificate_path = choice.certificatePath;
+    form.settings.private_key_path = choice.keyPath;
+    form.certificateId = '';
+  } else {
+    form.tlsSource = 'acme';
+    form.certificateId = choice.certificateId;
+    form.settings.certificate_path = '';
+    form.settings.private_key_path = '';
+  }
 }
 
 export const TLS_SOURCE_LABELS: Record<string, string> = { self_signed: '自签名', file: '节点上的证书文件', paste: '粘贴证书', acme: '自动申请（Cloudflare）' };

@@ -780,3 +780,13 @@ assert.equal(JSON.stringify(api.previewPayload(realityPublishedFailure.calls[0][
 assert.match(drawer, /savedInbound\.value = saved/);
 assert.match(drawer, /savedInbound\?\.settings\.reality\?\.public_key/);
 console.log('PASS NODE_EDITOR_REALITY_SAVE: explicit rotation sent only on save, rejected save retains form, publish failure retains persisted draft without duplicate save, returned public key has a separate readback view');
+
+const m = { domain: 'a.example.com', inventorySupported: true, cloudflareConfigured: true,
+  nodeFiles: [{ certificatePath: '/etc/proxy-agent/certs/old.pem', keyPath: '/etc/proxy-agent/certs/old.key', dnsNames: ['a.example.com'], notAfter: '2020-01-01T00:00:00Z', expired: true },
+              { certificatePath: '/etc/proxy-agent/certs/fullchain.pem', keyPath: '/etc/proxy-agent/certs/privkey.pem', dnsNames: ['a.example.com'], notAfter: '2027-02-01T00:00:00Z', expired: false }],
+  library: [{ id: 'c1', domains: ['a.example.com'], notAfter: '2027-01-15T00:00:00Z' }] };
+assert.deepEqual(api.certificateChoices(m, true).map(c => c.kind), ['file', 'acme', 'file']);
+assert.deepEqual(api.certificateChoices({ ...m, nodeFiles: [], library: [] }, true).map(c => c.kind), ['request']);
+assert.deepEqual(api.certificateChoices({ ...m, nodeFiles: [], library: [], cloudflareConfigured: false }, true), []);
+assert.ok(!api.certificateChoices(m, false).some(c => c.kind === 'file'), 'no file choice without the capability');
+console.log('PASS P5 CERTIFICATE CHOICES');

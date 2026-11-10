@@ -270,7 +270,7 @@ message RemoveCoreResult { string id = 1; string component = 2; int64 revision =
 message TuningCommand { string request_id = 1; map<string,string> settings = 2; bool clear = 3; }
 message TuningKeyResult { string key = 1; string value = 2; bool applied = 3; string error = 4; }
 // status is applied, cleared, or failed. A failed transaction rolls back all keys.
-message TuningResult { string request_id = 1; string status = 2; repeated TuningKeyResult keys = 3; }
+message TuningResult { string request_id = 1; string status = 2; repeated TuningKeyResult keys = 3; map<string,string> initial = 4; }
 
 // Addresses are panel-resolved IP literals. The Agent never performs DNS here.
 message TCPProbeCommand { string id = 1; repeated string addresses = 2; uint32 port = 3; uint32 attempts = 4; uint32 timeout_ms = 5; bool allow_non_public = 6; google.protobuf.Timestamp deadline = 7; }

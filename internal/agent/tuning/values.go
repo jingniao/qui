@@ -26,6 +26,58 @@ func contains(list, value string) bool {
 	}
 	return false
 }
+
+func moduleRoots(root string) []string {
+	roots := []string{root}
+	if filepath.Base(root) == "sys" && filepath.Base(filepath.Dir(root)) == "proc" {
+		roots = append(roots, filepath.Clean(filepath.Join(root, "../..")))
+	}
+	return roots
+}
+
+func hasKernelModule(root, subdir, modName string) (moduleTreePresent bool, found bool) {
+	var kernel string
+	if raw, err := os.ReadFile(sysPath(root, "kernel.osrelease")); err == nil {
+		kernel = strings.TrimSpace(string(raw))
+	}
+	for _, base := range moduleRoots(root) {
+		if raw, err := os.ReadFile(filepath.Join(base, "proc/modules")); err == nil {
+			moduleTreePresent = true
+			for _, line := range strings.Split(string(raw), "\n") {
+				if fields := strings.Fields(line); len(fields) > 0 && fields[0] == modName {
+					return true, true
+				}
+			}
+		}
+		var modDirs []string
+		if kernel != "" {
+			d := filepath.Join(base, "lib/modules", kernel)
+			if info, err := os.Stat(d); err == nil && info.IsDir() {
+				modDirs = append(modDirs, d)
+			}
+		} else if matches, err := filepath.Glob(filepath.Join(base, "lib/modules/*")); err == nil {
+			modDirs = append(modDirs, matches...)
+		}
+		for _, modDir := range modDirs {
+			moduleTreePresent = true
+			if raw, err := os.ReadFile(filepath.Join(modDir, "modules.builtin")); err == nil {
+				for _, line := range strings.Split(string(raw), "\n") {
+					b := filepath.Base(strings.TrimSpace(line))
+					name, _, _ := strings.Cut(b, ".ko")
+					if name == modName {
+						return true, true
+					}
+				}
+			}
+			pattern := filepath.Join(modDir, "kernel", subdir, modName+".ko*")
+			if matches, err := filepath.Glob(pattern); err == nil && len(matches) > 0 {
+				return true, true
+			}
+		}
+	}
+	return moduleTreePresent, false
+}
+
 func Validate(settings map[string]string, root string) error {
 	for k, v := range settings {
 		if err := tuningcontract.ValidateValue(k, v); err != nil {
@@ -37,6 +89,13 @@ func Validate(settings map[string]string, root string) error {
 				return fmt.Errorf("%s: %w", k, err)
 			}
 			if !contains(string(raw), v) {
+				if _, ok := hasKernelModule(root, "net/ipv4", "tcp_"+v); !ok {
+					return fmt.Errorf("%s: algorithm unavailable", k)
+				}
+			}
+		}
+		if k == "net.core.default_qdisc" && v != "pfifo_fast" {
+			if present, ok := hasKernelModule(root, "net/sched", "sch_"+v); present && !ok {
 				return fmt.Errorf("%s: algorithm unavailable", k)
 			}
 		}

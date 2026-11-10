@@ -192,3 +192,59 @@ func TestReadDesiredStrictAndAtomic(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyReturnsInitialValues(t *testing.T) {
+	h := fakeHelper(t)
+	r1 := h.Apply(Desired{RequestID: "r1", Settings: map[string]string{"net.ipv4.tcp_congestion_control": "bbr", "net.ipv4.tcp_ecn": "2"}})
+	if r1.Status != "applied" {
+		t.Fatalf("r1 failed: %+v", r1)
+	}
+	if r1.Initial["net.ipv4.tcp_congestion_control"] != "cubic" || r1.Initial["net.ipv4.tcp_ecn"] != "1" {
+		t.Fatalf("unexpected r1.Initial: %+v", r1.Initial)
+	}
+
+	r2 := h.Apply(Desired{RequestID: "r2", Settings: map[string]string{"net.ipv4.tcp_congestion_control": "reno"}})
+	if r2.Status != "applied" {
+		t.Fatalf("r2 failed: %+v", r2)
+	}
+	if r2.Initial["net.ipv4.tcp_congestion_control"] != "cubic" {
+		t.Fatalf("r2.Initial lost baseline cubic: %+v", r2.Initial)
+	}
+
+	rClear := h.Apply(Desired{RequestID: "clear", Clear: true})
+	if rClear.Status != "cleared" {
+		t.Fatalf("rClear failed: %+v", rClear)
+	}
+	if rClear.Initial["net.ipv4.tcp_congestion_control"] != "cubic" {
+		t.Fatalf("rClear.Initial lost baseline cubic: %+v", rClear.Initial)
+	}
+}
+
+func TestApplyRollsBackWholeRequestOnAbsentKey(t *testing.T) {
+	h := fakeHelper(t)
+	if err := os.Remove(sysPath(h.ProcRoot, "net.core.somaxconn")); err != nil {
+		t.Fatal(err)
+	}
+	r := h.Apply(Desired{
+		RequestID: "absent",
+		Settings: map[string]string{
+			"net.ipv4.tcp_ecn":   "2",
+			"net.core.somaxconn": "1024",
+		},
+	})
+	if r.Status != "failed" {
+		t.Fatalf("expected failed status when key is absent, got %+v", r)
+	}
+	if v, _ := h.read("net.ipv4.tcp_ecn"); v != "1" {
+		t.Fatalf("expected tcp_ecn to remain 1, got %q", v)
+	}
+	foundError := false
+	for _, kr := range r.Keys {
+		if strings.Contains(kr.Error, "net.core.somaxconn") {
+			foundError = true
+		}
+	}
+	if !foundError {
+		t.Fatalf("expected error to name absent key net.core.somaxconn, got %+v", r.Keys)
+	}
+}

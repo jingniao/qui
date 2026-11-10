@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"google.golang.org/protobuf/encoding/protojson"
+	"maps"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
@@ -35,6 +36,7 @@ type TuningView struct {
 	RequestedAt *string           `json:"requestedAt"`
 	UpdatedAt   *string           `json:"updatedAt"`
 	Current     map[string]string `json:"current"`
+	Initial     map[string]string `json:"initial"`
 }
 
 func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +50,7 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "GET" {
-		v := TuningView{Supported: n.Capabilities.GetTuningSupported(), Desired: map[string]string{}, Status: "unconfirmed", Current: n.Heartbeat.GetTuningCurrent(), Result: json.RawMessage("null")}
+		v := TuningView{Supported: n.Capabilities.GetTuningSupported(), Desired: map[string]string{}, Status: "unconfirmed", Current: n.Heartbeat.GetTuningCurrent(), Initial: map[string]string{}, Result: json.RawMessage("null")}
 		if v.Current == nil {
 			v.Current = map[string]string{}
 		}
@@ -66,6 +68,10 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 			}
 			if result != nil {
 				v.Result = json.RawMessage(*result)
+				var parsed pb.TuningResult
+				if protojson.Unmarshal([]byte(*result), &parsed) == nil && len(parsed.Initial) > 0 {
+					v.Initial = maps.Clone(parsed.Initial)
+				}
 			}
 		}
 		httpapi.JSON(w, 200, v)
@@ -212,7 +218,7 @@ func validateTuningResult(r *pb.TuningResult) error {
 // ValidateTuningResult is shared with portable archive validation so restored
 // receipts obey the same constraints as authenticated stream receipts.
 func ValidateTuningResult(r *pb.TuningResult) error {
-	if r == nil || r.RequestId == "" || len(r.RequestId) > 128 || (r.Status != "applied" && r.Status != "cleared" && r.Status != "failed") || len(r.Keys) > len(tuning.Keys())+1 {
+	if r == nil || r.RequestId == "" || len(r.RequestId) > 128 || (r.Status != "applied" && r.Status != "cleared" && r.Status != "failed") || len(r.Keys) > len(tuning.Keys())+1 || len(r.Initial) > len(tuning.Keys()) {
 		return errors.New("invalid tuning result")
 	}
 	seen := map[string]bool{}
@@ -226,6 +232,11 @@ func ValidateTuningResult(r *pb.TuningResult) error {
 		}
 		if r.Status == "failed" && k.Applied {
 			return errors.New("failed tuning result claims applied")
+		}
+	}
+	for k, v := range r.Initial {
+		if !tuning.Known(k) || len(v) > 256 {
+			return errors.New("invalid tuning initial value")
 		}
 	}
 	return nil

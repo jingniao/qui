@@ -5391,6 +5391,7 @@ type TuningResult struct {
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	Keys          []*TuningKeyResult     `protobuf:"bytes,3,rep,name=keys,proto3" json:"keys,omitempty"`
+	Initial       map[string]string      `protobuf:"bytes,4,rep,name=initial,proto3" json:"initial,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5442,6 +5443,13 @@ func (x *TuningResult) GetStatus() string {
 func (x *TuningResult) GetKeys() []*TuningKeyResult {
 	if x != nil {
 		return x.Keys
+	}
+	return nil
+}
+
+func (x *TuningResult) GetInitial() map[string]string {
+	if x != nil {
+		return x.Initial
 	}
 	return nil
 }
@@ -6300,12 +6308,16 @@ const file_agent_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x18\n" +
 	"\aapplied\x18\x03 \x01(\bR\aapplied\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x81\x01\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x89\x02\n" +
 	"\fTuningResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12:\n" +
-	"\x04keys\x18\x03 \x03(\v2&.proxycontrol.agent.v1.TuningKeyResultR\x04keys\"\xf0\x01\n" +
+	"\x04keys\x18\x03 \x03(\v2&.proxycontrol.agent.v1.TuningKeyResultR\x04keys\x12J\n" +
+	"\ainitial\x18\x04 \x03(\v20.proxycontrol.agent.v1.TuningResult.InitialEntryR\ainitial\x1a:\n" +
+	"\fInitialEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf0\x01\n" +
 	"\x0fTCPProbeCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1c\n" +
 	"\taddresses\x18\x02 \x03(\tR\taddresses\x12\x12\n" +
@@ -6356,7 +6368,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 	return file_agent_proto_rawDescData
 }
 
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 65)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
 var file_agent_proto_goTypes = []any{
 	(*NodeRootRetirementConfirmation)(nil),    // 0: proxycontrol.agent.v1.NodeRootRetirementConfirmation
 	(*NodeRootRetirementAcknowledgement)(nil), // 1: proxycontrol.agent.v1.NodeRootRetirementAcknowledgement
@@ -6423,45 +6435,46 @@ var file_agent_proto_goTypes = []any{
 	(*HealthCheckResult)(nil),                 // 62: proxycontrol.agent.v1.HealthCheckResult
 	nil,                                       // 63: proxycontrol.agent.v1.Heartbeat.TuningCurrentEntry
 	nil,                                       // 64: proxycontrol.agent.v1.TuningCommand.SettingsEntry
-	(*timestamppb.Timestamp)(nil),             // 65: google.protobuf.Timestamp
+	nil,                                       // 65: proxycontrol.agent.v1.TuningResult.InitialEntry
+	(*timestamppb.Timestamp)(nil),             // 66: google.protobuf.Timestamp
 }
 var file_agent_proto_depIdxs = []int32{
-	65, // 0: proxycontrol.agent.v1.NodeRootRetirementAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
-	65, // 1: proxycontrol.agent.v1.CATrustAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
-	65, // 2: proxycontrol.agent.v1.CertificateRenewal.expires_at:type_name -> google.protobuf.Timestamp
-	65, // 3: proxycontrol.agent.v1.EnrollResponse.expires_at:type_name -> google.protobuf.Timestamp
+	66, // 0: proxycontrol.agent.v1.NodeRootRetirementAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
+	66, // 1: proxycontrol.agent.v1.CATrustAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
+	66, // 2: proxycontrol.agent.v1.CertificateRenewal.expires_at:type_name -> google.protobuf.Timestamp
+	66, // 3: proxycontrol.agent.v1.EnrollResponse.expires_at:type_name -> google.protobuf.Timestamp
 	11, // 4: proxycontrol.agent.v1.Capabilities.protocols:type_name -> proxycontrol.agent.v1.ProtocolCapability
 	20, // 5: proxycontrol.agent.v1.Capabilities.host:type_name -> proxycontrol.agent.v1.HostInfo
 	14, // 6: proxycontrol.agent.v1.Capabilities.cores:type_name -> proxycontrol.agent.v1.CoreCapability
 	12, // 7: proxycontrol.agent.v1.Capabilities.server_settings_combinations:type_name -> proxycontrol.agent.v1.SettingsCombination
 	11, // 8: proxycontrol.agent.v1.CoreCapability.protocols:type_name -> proxycontrol.agent.v1.ProtocolCapability
 	12, // 9: proxycontrol.agent.v1.CoreCapability.server_settings_combinations:type_name -> proxycontrol.agent.v1.SettingsCombination
-	65, // 10: proxycontrol.agent.v1.CoreStatus.started_at:type_name -> google.protobuf.Timestamp
+	66, // 10: proxycontrol.agent.v1.CoreStatus.started_at:type_name -> google.protobuf.Timestamp
 	24, // 11: proxycontrol.agent.v1.CoreStatus.traffic_source_status:type_name -> proxycontrol.agent.v1.TrafficSourceStatus
-	65, // 12: proxycontrol.agent.v1.CertificateFileSummary.not_after:type_name -> google.protobuf.Timestamp
+	66, // 12: proxycontrol.agent.v1.CertificateFileSummary.not_after:type_name -> google.protobuf.Timestamp
 	16, // 13: proxycontrol.agent.v1.HostInfo.certificate_files:type_name -> proxycontrol.agent.v1.CertificateFileSummary
 	17, // 14: proxycontrol.agent.v1.HostInfo.tuning_keys:type_name -> proxycontrol.agent.v1.TuningKeyState
 	19, // 15: proxycontrol.agent.v1.HostInfo.fd_limits:type_name -> proxycontrol.agent.v1.ProcessLimit
 	18, // 16: proxycontrol.agent.v1.HostInfo.sysctl_sources:type_name -> proxycontrol.agent.v1.SysctlSource
-	65, // 17: proxycontrol.agent.v1.Heartbeat.active_connections_observed_at:type_name -> google.protobuf.Timestamp
+	66, // 17: proxycontrol.agent.v1.Heartbeat.active_connections_observed_at:type_name -> google.protobuf.Timestamp
 	27, // 18: proxycontrol.agent.v1.Heartbeat.spool_status:type_name -> proxycontrol.agent.v1.SpoolStatus
 	25, // 19: proxycontrol.agent.v1.Heartbeat.collector_status:type_name -> proxycontrol.agent.v1.CollectorStatus
 	24, // 20: proxycontrol.agent.v1.Heartbeat.traffic_source_status:type_name -> proxycontrol.agent.v1.TrafficSourceStatus
-	65, // 21: proxycontrol.agent.v1.Heartbeat.core_started_at:type_name -> google.protobuf.Timestamp
+	66, // 21: proxycontrol.agent.v1.Heartbeat.core_started_at:type_name -> google.protobuf.Timestamp
 	23, // 22: proxycontrol.agent.v1.Heartbeat.interfaces:type_name -> proxycontrol.agent.v1.InterfaceCounters
 	63, // 23: proxycontrol.agent.v1.Heartbeat.tuning_current:type_name -> proxycontrol.agent.v1.Heartbeat.TuningCurrentEntry
 	15, // 24: proxycontrol.agent.v1.Heartbeat.cores:type_name -> proxycontrol.agent.v1.CoreStatus
 	22, // 25: proxycontrol.agent.v1.Heartbeat.public_addresses:type_name -> proxycontrol.agent.v1.PublicAddress
-	65, // 26: proxycontrol.agent.v1.TrafficSourceStatus.observed_at:type_name -> google.protobuf.Timestamp
-	65, // 27: proxycontrol.agent.v1.TrafficSourceStatus.last_success_at:type_name -> google.protobuf.Timestamp
-	65, // 28: proxycontrol.agent.v1.CollectorStatus.started_at:type_name -> google.protobuf.Timestamp
-	65, // 29: proxycontrol.agent.v1.CollectorStatus.observed_at:type_name -> google.protobuf.Timestamp
-	65, // 30: proxycontrol.agent.v1.CollectorStatus.last_flush_at:type_name -> google.protobuf.Timestamp
-	65, // 31: proxycontrol.agent.v1.CollectorStatus.last_flush_success_at:type_name -> google.protobuf.Timestamp
+	66, // 26: proxycontrol.agent.v1.TrafficSourceStatus.observed_at:type_name -> google.protobuf.Timestamp
+	66, // 27: proxycontrol.agent.v1.TrafficSourceStatus.last_success_at:type_name -> google.protobuf.Timestamp
+	66, // 28: proxycontrol.agent.v1.CollectorStatus.started_at:type_name -> google.protobuf.Timestamp
+	66, // 29: proxycontrol.agent.v1.CollectorStatus.observed_at:type_name -> google.protobuf.Timestamp
+	66, // 30: proxycontrol.agent.v1.CollectorStatus.last_flush_at:type_name -> google.protobuf.Timestamp
+	66, // 31: proxycontrol.agent.v1.CollectorStatus.last_flush_success_at:type_name -> google.protobuf.Timestamp
 	26, // 32: proxycontrol.agent.v1.CollectorStatus.persisted_loss:type_name -> proxycontrol.agent.v1.CollectorLossStatus
-	65, // 33: proxycontrol.agent.v1.CollectorLossStatus.baseline_at:type_name -> google.protobuf.Timestamp
-	65, // 34: proxycontrol.agent.v1.CollectorLossStatus.checkpoint_at:type_name -> google.protobuf.Timestamp
-	65, // 35: proxycontrol.agent.v1.SpoolStatus.observed_at:type_name -> google.protobuf.Timestamp
+	66, // 33: proxycontrol.agent.v1.CollectorLossStatus.baseline_at:type_name -> google.protobuf.Timestamp
+	66, // 34: proxycontrol.agent.v1.CollectorLossStatus.checkpoint_at:type_name -> google.protobuf.Timestamp
+	66, // 35: proxycontrol.agent.v1.SpoolStatus.observed_at:type_name -> google.protobuf.Timestamp
 	29, // 36: proxycontrol.agent.v1.SpoolStatus.final_usage_head:type_name -> proxycontrol.agent.v1.ReplayHeadStatus
 	29, // 37: proxycontrol.agent.v1.SpoolStatus.runtime_source_head:type_name -> proxycontrol.agent.v1.ReplayHeadStatus
 	29, // 38: proxycontrol.agent.v1.SpoolStatus.access_ack:type_name -> proxycontrol.agent.v1.ReplayHeadStatus
@@ -6472,10 +6485,10 @@ var file_agent_proto_depIdxs = []int32{
 	28, // 43: proxycontrol.agent.v1.SpoolStatus.traffic_ack_history:type_name -> proxycontrol.agent.v1.ReplayAckHistoryStatus
 	28, // 44: proxycontrol.agent.v1.SpoolStatus.final_usage_ack_history:type_name -> proxycontrol.agent.v1.ReplayAckHistoryStatus
 	28, // 45: proxycontrol.agent.v1.SpoolStatus.runtime_source_ack_history:type_name -> proxycontrol.agent.v1.ReplayAckHistoryStatus
-	65, // 46: proxycontrol.agent.v1.ReplayAckHistoryStatus.recorded_at:type_name -> google.protobuf.Timestamp
-	65, // 47: proxycontrol.agent.v1.ReplayAckHistoryStatus.observed_at:type_name -> google.protobuf.Timestamp
-	65, // 48: proxycontrol.agent.v1.ReplayHeadStatus.observed_at:type_name -> google.protobuf.Timestamp
-	65, // 49: proxycontrol.agent.v1.AgentMessage.timestamp:type_name -> google.protobuf.Timestamp
+	66, // 46: proxycontrol.agent.v1.ReplayAckHistoryStatus.recorded_at:type_name -> google.protobuf.Timestamp
+	66, // 47: proxycontrol.agent.v1.ReplayAckHistoryStatus.observed_at:type_name -> google.protobuf.Timestamp
+	66, // 48: proxycontrol.agent.v1.ReplayHeadStatus.observed_at:type_name -> google.protobuf.Timestamp
+	66, // 49: proxycontrol.agent.v1.AgentMessage.timestamp:type_name -> google.protobuf.Timestamp
 	10, // 50: proxycontrol.agent.v1.AgentMessage.hello:type_name -> proxycontrol.agent.v1.Hello
 	21, // 51: proxycontrol.agent.v1.AgentMessage.heartbeat:type_name -> proxycontrol.agent.v1.Heartbeat
 	13, // 52: proxycontrol.agent.v1.AgentMessage.capabilities:type_name -> proxycontrol.agent.v1.Capabilities
@@ -6496,9 +6509,9 @@ var file_agent_proto_depIdxs = []int32{
 	58, // 67: proxycontrol.agent.v1.AgentMessage.tuning_result:type_name -> proxycontrol.agent.v1.TuningResult
 	55, // 68: proxycontrol.agent.v1.AgentMessage.remove_core_result:type_name -> proxycontrol.agent.v1.RemoveCoreResult
 	33, // 69: proxycontrol.agent.v1.ConnectionStatus.cores:type_name -> proxycontrol.agent.v1.CoreConnectionStatus
-	65, // 70: proxycontrol.agent.v1.OutboundHealth.checked_at:type_name -> google.protobuf.Timestamp
+	66, // 70: proxycontrol.agent.v1.OutboundHealth.checked_at:type_name -> google.protobuf.Timestamp
 	50, // 71: proxycontrol.agent.v1.OutboundHealthBatch.items:type_name -> proxycontrol.agent.v1.OutboundHealth
-	65, // 72: proxycontrol.agent.v1.ServerMessage.timestamp:type_name -> google.protobuf.Timestamp
+	66, // 72: proxycontrol.agent.v1.ServerMessage.timestamp:type_name -> google.protobuf.Timestamp
 	35, // 73: proxycontrol.agent.v1.ServerMessage.welcome:type_name -> proxycontrol.agent.v1.Welcome
 	43, // 74: proxycontrol.agent.v1.ServerMessage.ack:type_name -> proxycontrol.agent.v1.Ack
 	48, // 75: proxycontrol.agent.v1.ServerMessage.apply_command:type_name -> proxycontrol.agent.v1.ApplyCommand
@@ -6513,26 +6526,27 @@ var file_agent_proto_depIdxs = []int32{
 	54, // 84: proxycontrol.agent.v1.ServerMessage.remove_core_command:type_name -> proxycontrol.agent.v1.RemoveCoreCommand
 	64, // 85: proxycontrol.agent.v1.TuningCommand.settings:type_name -> proxycontrol.agent.v1.TuningCommand.SettingsEntry
 	57, // 86: proxycontrol.agent.v1.TuningResult.keys:type_name -> proxycontrol.agent.v1.TuningKeyResult
-	65, // 87: proxycontrol.agent.v1.TCPProbeCommand.deadline:type_name -> google.protobuf.Timestamp
-	65, // 88: proxycontrol.agent.v1.HealthCheckCommand.deadline:type_name -> google.protobuf.Timestamp
-	65, // 89: proxycontrol.agent.v1.HealthCheckResult.observed_at:type_name -> google.protobuf.Timestamp
-	8,  // 90: proxycontrol.agent.v1.AgentControl.Enroll:input_type -> proxycontrol.agent.v1.EnrollRequest
-	30, // 91: proxycontrol.agent.v1.AgentControl.Connect:input_type -> proxycontrol.agent.v1.AgentMessage
-	6,  // 92: proxycontrol.agent.v1.AgentControl.RenewCertificate:input_type -> proxycontrol.agent.v1.CertificateRequest
-	4,  // 93: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:input_type -> proxycontrol.agent.v1.CATrustConfirmation
-	2,  // 94: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementRequest
-	0,  // 95: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementConfirmation
-	9,  // 96: proxycontrol.agent.v1.AgentControl.Enroll:output_type -> proxycontrol.agent.v1.EnrollResponse
-	53, // 97: proxycontrol.agent.v1.AgentControl.Connect:output_type -> proxycontrol.agent.v1.ServerMessage
-	7,  // 98: proxycontrol.agent.v1.AgentControl.RenewCertificate:output_type -> proxycontrol.agent.v1.CertificateRenewal
-	5,  // 99: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:output_type -> proxycontrol.agent.v1.CATrustAcknowledgement
-	3,  // 100: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementResponse
-	1,  // 101: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementAcknowledgement
-	96, // [96:102] is the sub-list for method output_type
-	90, // [90:96] is the sub-list for method input_type
-	90, // [90:90] is the sub-list for extension type_name
-	90, // [90:90] is the sub-list for extension extendee
-	0,  // [0:90] is the sub-list for field type_name
+	65, // 87: proxycontrol.agent.v1.TuningResult.initial:type_name -> proxycontrol.agent.v1.TuningResult.InitialEntry
+	66, // 88: proxycontrol.agent.v1.TCPProbeCommand.deadline:type_name -> google.protobuf.Timestamp
+	66, // 89: proxycontrol.agent.v1.HealthCheckCommand.deadline:type_name -> google.protobuf.Timestamp
+	66, // 90: proxycontrol.agent.v1.HealthCheckResult.observed_at:type_name -> google.protobuf.Timestamp
+	8,  // 91: proxycontrol.agent.v1.AgentControl.Enroll:input_type -> proxycontrol.agent.v1.EnrollRequest
+	30, // 92: proxycontrol.agent.v1.AgentControl.Connect:input_type -> proxycontrol.agent.v1.AgentMessage
+	6,  // 93: proxycontrol.agent.v1.AgentControl.RenewCertificate:input_type -> proxycontrol.agent.v1.CertificateRequest
+	4,  // 94: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:input_type -> proxycontrol.agent.v1.CATrustConfirmation
+	2,  // 95: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementRequest
+	0,  // 96: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementConfirmation
+	9,  // 97: proxycontrol.agent.v1.AgentControl.Enroll:output_type -> proxycontrol.agent.v1.EnrollResponse
+	53, // 98: proxycontrol.agent.v1.AgentControl.Connect:output_type -> proxycontrol.agent.v1.ServerMessage
+	7,  // 99: proxycontrol.agent.v1.AgentControl.RenewCertificate:output_type -> proxycontrol.agent.v1.CertificateRenewal
+	5,  // 100: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:output_type -> proxycontrol.agent.v1.CATrustAcknowledgement
+	3,  // 101: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementResponse
+	1,  // 102: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementAcknowledgement
+	97, // [97:103] is the sub-list for method output_type
+	91, // [91:97] is the sub-list for method input_type
+	91, // [91:91] is the sub-list for extension type_name
+	91, // [91:91] is the sub-list for extension extendee
+	0,  // [0:91] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -6585,7 +6599,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   65,
+			NumMessages:   66,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

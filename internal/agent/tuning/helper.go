@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -262,6 +263,9 @@ func (h Helper) Apply(d Desired) *pb.TuningResult {
 			}
 			targets[k] = v
 		}
+	}
+	if len(old.Before) > 0 {
+		r.Initial = maps.Clone(old.Before)
 	}
 	keys := make([]string, 0, len(targets))
 	for _, k := range Keys() {

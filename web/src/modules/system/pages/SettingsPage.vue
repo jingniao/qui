@@ -49,6 +49,24 @@
         </div>
       </template>
     </section>
+    <section v-if="isOwner && activeTab === 'base'" class="panel-card p-6 max-w-3xl space-y-5 text-sm">
+      <div class="flex flex-wrap justify-between items-center gap-3">
+        <h2 class="text-base font-semibold leading-normal">服务器调优推荐自动应用</h2>
+        <button class="ios-btn-secondary" :disabled="tuningAutoApplyLoading || tuningAutoApplySaving" @click="loadTuningAutoApply">刷新</button>
+      </div>
+      <ErrorState v-if="tuningAutoApplyError" :message="tuningAutoApplyError" @retry="loadTuningAutoApply" />
+      <LoadingSkeleton v-else-if="tuningAutoApplyRevision === null" />
+      <template v-else>
+        <label class="flex items-center justify-between gap-4 cursor-pointer">
+          <div>
+            <span class="font-medium text-ios-label block">新服务器上线后自动应用调优推荐</span>
+            <span class="text-xs text-gray-500 block mt-0.5">开启后，新节点首次上报硬件与内核能力时，将根据白名单规则自动生成并下发调优配置。已有自定义调优配置的服务器不受影响。</span>
+          </div>
+          <input type="checkbox" v-model="tuningAutoApplyEnabled" :disabled="tuningAutoApplySaving" class="h-4 w-4 rounded border-gray-300 text-ios-blue focus:ring-ios-blue shrink-0" @change="saveTuningAutoApply" />
+        </label>
+        <p class="text-xs text-gray-500">设置版本：{{ tuningAutoApplyRevision }}</p>
+      </template>
+    </section>
     <CertificatesPanel v-if="isOwner && activeTab === 'base'" />
     <ConfirmDialog v-model="baseConfirmation" title="确认修改平台基础设置" :message="`平台名称：${baseConfirm.platformName}，系统时区：${baseConfirm.timezone}。`" warning-details="时区变化会影响页面时间与后续配置。已发布规则仍按原时区执行。" confirm-text="确认保存" :is-danger="false" @confirm="saveBase" />
     <RetentionJobPanel v-if="isOwner && activeTab === 'accessLog'" />
@@ -64,6 +82,7 @@ import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { refreshSettingsView } from '../../../app/events';
 import { clearInstallEndpointCache } from '../../nodes/installEndpoint';
+import { nodeAPI } from '../../nodes/api';
 import { settingsAPI, type BaseSettings, type InstallEndpoint, type RetentionSettings } from '../settingsApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import ErrorState from '../../../components/ErrorState.vue';
@@ -141,7 +160,46 @@ async function saveBase() {
   catch (e) { showToast((e as Error).message, 'error'); }
   finally { baseSaving.value = false; }
 }
-function settingsChanged() { if (baseSaved.value && (baseForm.platformName !== baseSaved.value.platformName || baseForm.timezone !== baseSaved.value.timezone)) { showToast('其他页面已更新基础设置。请核对时区并刷新后再提交', 'warning'); return; } void loadBase(); }
+function settingsChanged() { if (baseSaved.value && (baseForm.platformName !== baseSaved.value.platformName || baseForm.timezone !== baseSaved.value.timezone)) { showToast('其他页面已更新基础设置。请核对时区并刷新后再提交', 'warning'); return; } void loadBase(); if (isOwner.value) void loadTuningAutoApply(); }
+
+// Tuning Auto Apply
+const tuningAutoApplyEnabled = ref(false);
+const tuningAutoApplyRevision = ref<number | null>(null);
+const tuningAutoApplyLoading = ref(false);
+const tuningAutoApplySaving = ref(false);
+const tuningAutoApplyError = ref('');
+
+async function loadTuningAutoApply() {
+  if (!isOwner.value) return;
+  tuningAutoApplyLoading.value = true;
+  tuningAutoApplyError.value = '';
+  try {
+    const res = await nodeAPI.tuningAutoApply();
+    tuningAutoApplyEnabled.value = res.enabled;
+    tuningAutoApplyRevision.value = res.revision;
+  } catch (e) {
+    tuningAutoApplyError.value = '读取调优自动应用设置失败：' + (e as Error).message;
+  } finally {
+    tuningAutoApplyLoading.value = false;
+  }
+}
+
+async function saveTuningAutoApply() {
+  if (!isOwner.value || tuningAutoApplyRevision.value === null) return;
+  tuningAutoApplySaving.value = true;
+  tuningAutoApplyError.value = '';
+  try {
+    const res = await nodeAPI.saveTuningAutoApply(tuningAutoApplyEnabled.value, tuningAutoApplyRevision.value);
+    tuningAutoApplyEnabled.value = res.enabled;
+    tuningAutoApplyRevision.value = res.revision;
+    showToast('调优自动应用设置已更新');
+  } catch (e) {
+    tuningAutoApplyError.value = '保存调优自动应用设置失败：' + (e as Error).message;
+    await loadTuningAutoApply();
+  } finally {
+    tuningAutoApplySaving.value = false;
+  }
+}
 
 // The panel address a new node uses for one-click Agent installation. It is
 // edited once here instead of per server in the install dialogs.
@@ -211,5 +269,5 @@ async function saveEndpoint() {
   }
 }
 onUnmounted(() => { baseRefreshGeneration++; endpointGeneration++; window.removeEventListener('proxy-system-settings', settingsChanged); });
-onMounted(() => { void load(); void loadBase(); if (isOwner.value) void loadEndpoint(); window.addEventListener('proxy-system-settings', settingsChanged); });
+onMounted(() => { void load(); void loadBase(); if (isOwner.value) { void loadEndpoint(); void loadTuningAutoApply(); } window.addEventListener('proxy-system-settings', settingsChanged); });
 </script>

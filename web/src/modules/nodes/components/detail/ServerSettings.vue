@@ -66,6 +66,10 @@
               <span class="font-medium text-neutral-600 text-xs">备注说明</span>
               <input v-model.trim="metaForm.remark" class="form-input-base" placeholder="管理员自定备注" />
             </label>
+            <label class="space-y-1 sm:col-span-2">
+              <span class="font-medium text-neutral-600 text-xs">线路带宽 (Mbps)</span>
+              <input v-model.number="metaForm.bandwidthMbps" type="number" min="1" max="100000" class="form-input-base font-mono" placeholder="留空不限制（1 - 100000）" />
+            </label>
 
             <!-- 默认端口分配范围 -->
             <div class="sm:col-span-2 pt-2 border-t border-black/[0.04] space-y-1.5">
@@ -411,7 +415,8 @@ const metaForm = reactive({
   renewCycle: '/年',
   renewNoticeDays: 7,
   portRangeStart: undefined as number | undefined,
-  portRangeEnd: undefined as number | undefined
+  portRangeEnd: undefined as number | undefined,
+  bandwidthMbps: undefined as number | undefined
 });
 
 const saving = ref('');
@@ -471,10 +476,28 @@ watch(() => props.node.id, () => {
     renewCycle: price.cycle,
     renewNoticeDays: meta.renewNoticeDays ?? 7,
     portRangeStart: meta.portRangeStart ?? undefined,
-    portRangeEnd: meta.portRangeEnd ?? undefined
+    portRangeEnd: meta.portRangeEnd ?? undefined,
+    bandwidthMbps: meta.bandwidthMbps ?? undefined
   });
   void loadMachineTraffic();
 }, { immediate: true });
+
+watch(() => props.meta, (meta) => {
+  if (!meta) return;
+  const price = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
+  Object.assign(metaForm, {
+    region: meta.region || '',
+    remark: meta.remark || '',
+    renewDate: meta.renewDate || '',
+    renewCurrency: price.currency,
+    renewPrice: price.price,
+    renewCycle: price.cycle,
+    renewNoticeDays: meta.renewNoticeDays ?? 7,
+    portRangeStart: meta.portRangeStart ?? undefined,
+    portRangeEnd: meta.portRangeEnd ?? undefined,
+    bandwidthMbps: meta.bandwidthMbps ?? undefined
+  });
+});
 
 const snapshots = computed(() => ({
   basic: {
@@ -484,7 +507,8 @@ const snapshots = computed(() => ({
     region: metaForm.region,
     remark: metaForm.remark,
     portRangeStart: metaForm.portRangeStart,
-    portRangeEnd: metaForm.portRangeEnd
+    portRangeEnd: metaForm.portRangeEnd,
+    bandwidthMbps: metaForm.bandwidthMbps
   },
   renewal: {
     renewDate: metaForm.renewDate,
@@ -584,6 +608,13 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
       } else if (hasStart || hasEnd) {
         throw new Error('请同时指定起始端口和结束端口，或全部留空清除范围');
       }
+
+      if (metaForm.bandwidthMbps !== undefined && metaForm.bandwidthMbps !== null && (metaForm.bandwidthMbps as any) !== '') {
+        const bw = Number(metaForm.bandwidthMbps);
+        if (!Number.isInteger(bw) || bw < 1 || bw > 100000) {
+          throw new Error('线路带宽需为 1 到 100000 之间的整数（Mbps），或留空');
+        }
+      }
     }
 
     const submitted = JSON.parse(JSON.stringify(snapshots.value[group]));
@@ -599,7 +630,8 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
         region: submitted.region,
         remark: submitted.remark,
         portRangeStart: submitted.portRangeStart ? Number(submitted.portRangeStart) : undefined,
-        portRangeEnd: submitted.portRangeEnd ? Number(submitted.portRangeEnd) : undefined
+        portRangeEnd: submitted.portRangeEnd ? Number(submitted.portRangeEnd) : undefined,
+        bandwidthMbps: submitted.bandwidthMbps ? Number(submitted.bandwidthMbps) : null
       } : submitted;
       await saveNodeMeta(props.node.id, { ...latestMeta, ...metaChange });
     }

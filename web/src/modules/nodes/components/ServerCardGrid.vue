@@ -31,6 +31,9 @@
               <span v-if="getNodeRegion(node)" class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-semibold text-neutral-600 shrink-0 truncate max-w-[80px]" :title="getNodeRegion(node)">
                 {{ getNodeRegion(node) }}
               </span>
+              <span v-if="node.tuningAdviceCount && node.tuningAdviceCount > 0" class="rounded bg-amber-500/10 text-amber-600 border border-amber-500/20 px-1.5 py-0.5 text-xs font-semibold shrink-0" :title="`有 ${node.tuningAdviceCount} 条调优建议`">
+                调优建议 {{ node.tuningAdviceCount }}
+              </span>
               <span v-if="node.deletedAt" class="rounded-full bg-black/[0.05] px-1.5 py-0.2 text-xs font-semibold text-neutral-400 shrink-0">
                 已删除
               </span>

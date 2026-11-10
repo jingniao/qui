@@ -12,7 +12,7 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <section v-for="metric in metrics" :key="metric.key" class="panel-card p-4 space-y-3">
         <div class="flex justify-between text-sm gap-2"><h3 class="text-ios-label text-base font-semibold leading-normal">{{ metric.label }}</h3><span class="font-mono text-ios-label">{{ display(metric.key, current[metric.key]) }}</span></div>
-        <svg v-if="points.some(p => p[metric.key] !== null)" viewBox="0 0 320 100" class="w-full text-ios-blue" role="img" :aria-label="metric.label + '历史采样'">
+        <svg v-if="points.some(p => p[metric.key] !== null && p[metric.key] !== undefined)" viewBox="0 0 320 100" class="w-full text-ios-blue" role="img" :aria-label="metric.label + '历史采样'">
           <path :d="metricPath(points, metric.key, start, end, intervalSeconds)" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           <circle v-for="p in dots(metric.key)" :key="p.time" :cx="p.x" :cy="p.y" r="1.5" fill="currentColor" />
         </svg>
@@ -37,7 +37,8 @@ const ranges = [1, 6, 12, 24, 168];
 const metrics: { key: MetricKey; label: string }[] = [
   {key:'cpu',label:'CPU'}, {key:'memory',label:'内存占用'}, {key:'disk',label:'磁盘占用'},
   {key:'rxRate',label:'接收速率'}, {key:'txRate',label:'发送速率'}, {key:'connections',label:'代理活跃会话'},
-  {key:'tcp',label:'TCP 连接（全部状态）'}, {key:'udp',label:'UDP 套接字'}, {key:'processes',label:'进程数'}, {key:'load',label:'1 分钟负载'}
+  {key:'tcp',label:'TCP 连接（全部状态）'}, {key:'udp',label:'UDP 套接字'}, {key:'processes',label:'进程数'}, {key:'load',label:'1 分钟负载'},
+  {key:'retransRate',label:'TCP 重传率'}
 ];
 const points = ref<SystemMetricPoint[]>([]), intervalSeconds = ref(60), loading = ref(false), error = ref('');
 const end = ref(Date.now());
@@ -67,11 +68,17 @@ watch(() => [props.node.id, props.hours], () => { points.value = []; void load()
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => { timer = setInterval(load, 60000); window.addEventListener('proxy-node-status', load); });
 onUnmounted(() => { disposed = true; generation++; clearInterval(timer); window.removeEventListener('proxy-node-status', load); });
-function display(key: MetricKey, value: number | null) {
-  return formatMetricValue(key, value);
+function display(key: MetricKey, value: number | null | undefined) {
+  if (key === 'retransRate' && (value === null || value === undefined)) {
+    const valid = points.value.filter(p => p.retransRate !== null && p.retransRate !== undefined);
+    if (valid.length) {
+      return formatMetricValue(key, valid[valid.length - 1].retransRate!);
+    }
+  }
+  return formatMetricValue(key, value ?? null);
 }
 function dots(key: MetricKey) {
   const max = ['cpu','memory','disk'].includes(key) ? 100 : Math.max(1,...points.value.map(p => p[key] ?? 0));
-  return points.value.filter(p => p[key] !== null).map(p => ({time:p.time,x:10+(p.time-start.value)/Math.max(1,end.value-start.value)*300,y:90-p[key]!/max*80}));
+  return points.value.filter(p => p[key] !== null && p[key] !== undefined).map(p => ({time:p.time,x:10+(p.time-start.value)/Math.max(1,end.value-start.value)*300,y:90-p[key]!/max*80}));
 }
 </script>

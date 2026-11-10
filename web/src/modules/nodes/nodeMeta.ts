@@ -11,6 +11,7 @@ export interface NodeMeta {
   renewNoticeDays?: number;
   portRangeStart?: number | null;
   portRangeEnd?: number | null;
+  bandwidthMbps?: number | null;
 }
 
 export const CURRENCY_LIST = [
@@ -97,11 +98,18 @@ export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void
       (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end > 65535 || start > end))) {
     throw new Error('请同时填写有效的起始和结束端口（1–65535），或全部留空');
   }
+  const bandwidth = meta.bandwidthMbps === undefined || meta.bandwidthMbps === null || (meta.bandwidthMbps as any) === ''
+    ? null
+    : Number(meta.bandwidthMbps);
+  if (bandwidth !== null && (!Number.isInteger(bandwidth) || bandwidth < 1 || bandwidth > 100000)) {
+    throw new Error('请填写有效的线路带宽（1–100000 Mbps），或留空');
+  }
   const result = await request<{ meta: NodeMeta }>('/nodes/'+encodeURIComponent(nodeId)+'/meta', 'PUT', {
     region: meta.region ?? '', remark: (meta.remark || '').trim(),
     renewDate: meta.renewDate ?? '', renewCycle: meta.renewCycle ?? '',
     renewCurrency: meta.renewCurrency ?? '', renewPrice: String(meta.renewPrice ?? ''),
-    renewNoticeDays: meta.renewNoticeDays ?? 7, portRangeStart: start, portRangeEnd: end
+    renewNoticeDays: meta.renewNoticeDays ?? 7, portRangeStart: start, portRangeEnd: end,
+    bandwidthMbps: bandwidth
   });
   metadata[nodeId] = result.meta;
 }

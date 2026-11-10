@@ -94,3 +94,67 @@ assert.equal(merged['net.ipv4.tcp_congestion_control'], 'bbr');
 assert.deepEqual(tuning.revertedKeys({ 'net.core.somaxconn': '4096' }, { 'net.core.somaxconn': '' }), ['net.core.somaxconn']);
 assert.ok(!tuning.tuningFields[0].choices.includes('bbr3'), 'no algorithm that no server offers');
 console.log('PASS P1 TUNING: presets merge, reverted keys listed, no bbr2/bbr3');
+
+// P7 Task 7 assertions
+// 1. tuningRequest with available: Set<string>
+const avail = new Set(['net.ipv4.tcp_congestion_control']);
+const reqWithAvail = tuning.tuningRequest('n', { 'net.ipv4.tcp_congestion_control': 'bbr', 'net.core.default_qdisc': 'fq' }, false, avail);
+assert.deepEqual(reqWithAvail.settings, { 'net.ipv4.tcp_congestion_control': 'bbr' });
+
+// 2. keyStatus 5 cases
+const mockTuning = {
+  desired: { 'net.ipv4.tcp_congestion_control': 'bbr', 'net.core.default_qdisc': 'fq' },
+  current: { 'net.ipv4.tcp_congestion_control': 'bbr', 'net.core.default_qdisc': 'pfifo_fast', 'net.ipv4.tcp_slow_start_after_idle': '0', 'net.ipv4.tcp_ecn': '2' }
+};
+const mockHost = {
+  tuningKeys: [
+    { key: 'net.ipv4.tcp_congestion_control', present: true, writable: true },
+    { key: 'net.core.default_qdisc', present: true, writable: true },
+    { key: 'net.ipv4.tcp_slow_start_after_idle', present: true, writable: true },
+    { key: 'net.ipv4.tcp_ecn', present: true, writable: true },
+    { key: 'net.core.rmem_max', present: false, writable: false }
+  ],
+  sysctlSources: [
+    { key: 'net.ipv4.tcp_slow_start_after_idle', file: '50-default.conf', value: '0' }
+  ]
+};
+assert.equal(tuning.keyStatus('net.ipv4.tcp_congestion_control', mockTuning, mockHost), 'panel');
+assert.equal(tuning.keyStatus('net.core.default_qdisc', mockTuning, mockHost), 'drift');
+assert.equal(tuning.keyStatus('net.ipv4.tcp_slow_start_after_idle', mockTuning, mockHost), 'external');
+assert.equal(tuning.keyStatus('net.core.rmem_max', mockTuning, mockHost), 'unavailable');
+assert.equal(tuning.keyStatus('net.ipv4.tcp_ecn', mockTuning, mockHost), 'default');
+
+// 3. algorithmOptions: {ccAvail:[reno,cubic], ccLoad:[bbr]} -> 3 items with bbr having （可加载）, no bbr3
+const ccOpts = tuning.algorithmOptions('cc', { congestionAvailable: ['reno', 'cubic'], congestionLoadable: ['bbr'] });
+assert.deepEqual(ccOpts, [
+  { value: 'reno', label: 'reno' },
+  { value: 'cubic', label: 'cubic' },
+  { value: 'bbr', label: 'bbr（可加载）' }
+]);
+assert.ok(!ccOpts.some(o => o.value === 'bbr3'));
+
+// 4. applyAdvice does not clear other draft keys
+const existingDraft = { 'net.core.somaxconn': '1024', 'net.ipv4.tcp_congestion_control': 'cubic' };
+const advResult = tuning.applyAdvice(existingDraft, [{ key: 'net.ipv4.tcp_congestion_control', value: 'bbr' }]);
+assert.equal(advResult['net.core.somaxconn'], '1024');
+assert.equal(advResult['net.ipv4.tcp_congestion_control'], 'bbr');
+
+// 5. 4 presets and LXC filtering
+assert.equal(tuning.tuningPresets.length, 4);
+const presetNames = tuning.tuningPresets.map(p => p.name);
+assert.deepEqual(presetNames, ['通用代理', '高带宽长距离', 'QUIC/Hysteria2', '小内存 VPS']);
+const lxcAvail = new Set(['net.ipv4.tcp_congestion_control', 'net.ipv4.tcp_slow_start_after_idle', 'net.ipv4.tcp_notsent_lowat']);
+const lxcApplied = tuning.applyPreset({}, tuning.tuningPresets[1], lxcAvail);
+assert.ok(!Object.keys(lxcApplied).some(k => k.startsWith('net.core.')));
+
+// 6. Every tuningField has non-empty help string
+assert.equal(tuning.tuningFields.length, 19);
+for (const field of tuning.tuningFields) {
+  assert.ok(typeof field.help === 'string' && field.help.trim().length > 0, `field ${field.key} missing help`);
+}
+
+// 7. ServerCardGrid renders tuningAdviceCount
+const gridSource = readFileSync(new URL('../src/modules/nodes/components/ServerCardGrid.vue', import.meta.url), 'utf8');
+assert.ok(gridSource.includes('tuningAdviceCount'), 'ServerCardGrid must reference tuningAdviceCount');
+
+console.log('PASS P7 TASK 7: tuningRequest available filter, keyStatus 5 states, algorithmOptions, applyAdvice, 4 presets with LXC filter, 19 fields with help, ServerCardGrid badge');

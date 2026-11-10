@@ -13,6 +13,7 @@ export interface SystemMetricPoint {
   connections: number | null;
   rxRate: number | null;
   txRate: number | null;
+  retransRate?: number | null;
 }
 export function formatBytes(bytes: number | null | undefined, decimals = 1): string {
   if (bytes == null) return '—';
@@ -68,12 +69,13 @@ export function formatMetricRange(start: number, end: number): string {
 export function formatMetricValue(key: MetricKey, value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '—';
   if (key === 'rxRate' || key === 'txRate') return formatRate(value);
+  if (key === 'retransRate') return value.toFixed(2) + '%';
   return ['cpu', 'memory', 'disk'].includes(key) ? value.toFixed(1) + '%' : String(value);
 }
 
 /** "最低 18.2% · 最高 31.5%" for the visible series; "—" when nothing was measured. */
 export function metricRangeLabel(points: SystemMetricPoint[], key: MetricKey): string {
-  const values = points.map(point => point[key]).filter((value): value is number => value !== null && Number.isFinite(value));
+  const values = points.map(point => point[key]).filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value));
   if (!values.length) return '最低 — · 最高 —';
   return `最低 ${formatMetricValue(key, Math.min(...values))} · 最高 ${formatMetricValue(key, Math.max(...values))}`;
 }
@@ -121,7 +123,7 @@ export function extractCurrentValues(node: NodeView, now = Date.now()): Omit<Sys
   };
   return { cpu: measured(hb?.cpu_percent), memory: measured(hb?.memory_percent), disk: measured(hb?.disk_percent),
     connections: hb?.active_connections_measured === true ? measured(hb.active_connections) : null,
-    rxRate: rates('receive'), txRate: rates('transmit'), tcp: decimal(hb?.tcpConnections), udp: decimal(hb?.udpSockets), processes: decimal(hb?.processCount), load: measured(hb?.load1) };
+    rxRate: rates('receive'), txRate: rates('transmit'), tcp: decimal(hb?.tcpConnections), udp: decimal(hb?.udpSockets), processes: decimal(hb?.processCount), load: measured(hb?.load1), retransRate: null };
 }
 // Legacy live-heartbeat adapter retained for consumers.
 // Only append a fresh, distinct heartbeat observed while this component is open.
@@ -135,16 +137,29 @@ function decimal(value: unknown): number | null {
   return typeof value === 'string' && /^\d+$/.test(value) ? measured(Number(value)) : null;
 }
 export function metricPoint(p: NodeMetricPoint): SystemMetricPoint {
-  return {time: Date.parse(p.at), cpu: measured(p.cpuPercent), memory: measured(p.memoryPercent), disk: measured(p.diskPercent), connections: measured(p.activeConnections), rxRate: measured(p.rxBytesPerSecond), txRate: measured(p.txBytesPerSecond), tcp: measured(p.tcpConnections), udp: measured(p.udpSockets), processes: measured(p.processCount), load: measured(p.load1)};
+  return {
+    time: Date.parse(p.at),
+    cpu: measured(p.cpuPercent),
+    memory: measured(p.memoryPercent),
+    disk: measured(p.diskPercent),
+    connections: measured(p.activeConnections),
+    rxRate: measured(p.rxBytesPerSecond),
+    txRate: measured(p.txBytesPerSecond),
+    tcp: measured(p.tcpConnections),
+    udp: measured(p.udpSockets),
+    processes: measured(p.processCount),
+    load: measured(p.load1),
+    retransRate: measured(p.tcpRetransPercent)
+  };
 }
 export type MetricKey = Exclude<keyof SystemMetricPoint, 'time'>;
 export function metricPath(points: SystemMetricPoint[], key: MetricKey, start: number, end: number, intervalSeconds: number): string {
   const max = ['cpu', 'memory', 'disk'].includes(key) ? 100 : Math.max(1, ...points.map(p => p[key] ?? 0));
   let previous: number | null = null;
   return points.map(p => {
-    if (p[key] === null) { previous = null; return ''; }
+    if (p[key] === null || p[key] === undefined) { previous = null; return ''; }
     const command = previous !== null && p.time - previous <= intervalSeconds * 1500 ? 'L' : 'M';
     previous = p.time;
     return command + (10 + (p.time - start) / Math.max(1, end - start) * 300).toFixed(1) + ',' + (90 - p[key]! / max * 80).toFixed(1);
-  }).join(' ');
+  }).filter(Boolean).join(' ');
 }

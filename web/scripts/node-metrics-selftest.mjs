@@ -73,8 +73,15 @@ await metadata.saveNodeMeta('range', { portRangeStart: null, portRangeEnd: null 
 assert.equal(metadata.getNodePortRange('range'), null);
 assert.equal(metadata.formatPortRange(metadata.getNodeMeta('range')), '—');
 const body = remote.get('/nodes/range/meta');
-assert.deepEqual(Object.keys(body).sort(), ['region', 'remark', 'renewDate', 'renewCycle', 'renewPrice', 'renewCurrency', 'renewNoticeDays', 'portRangeStart', 'portRangeEnd'].sort());
+assert.deepEqual(Object.keys(body).sort(), ['region', 'remark', 'renewDate', 'renewCycle', 'renewPrice', 'renewCurrency', 'renewNoticeDays', 'portRangeStart', 'portRangeEnd', 'bandwidthMbps'].sort());
 assert.equal(body.portRangeStart, null); assert.equal(body.portRangeEnd, null);
+
+// BandwidthMbps validation and round-trip
+await assert.rejects(metadata.saveNodeMeta('range', { bandwidthMbps: -1 }), /带宽/);
+await assert.rejects(metadata.saveNodeMeta('range', { bandwidthMbps: 100001 }), /带宽/);
+await metadata.saveNodeMeta('range', { bandwidthMbps: 500 });
+assert.equal(remote.get('/nodes/range/meta').bandwidthMbps, 500);
+
 console.log('PASS F1 PORT_RANGE: dedicated fields round-trip, random candidate uses range, invalid pairs rejected, null clears, API input whitelist');
 
 assert.deepEqual(metadata.calculateMonthlyExpenditure({ renewPrice: '219', renewCycle: '/年', renewCurrency: 'CNY' }), { value: '18.25', currency: 'CNY', symbol: '¥' });
@@ -91,3 +98,19 @@ assert.equal(res?.currency, 'CNY');
 assert.equal(res?.symbol, '¥');
 assert.equal(res?.value, (219 / 365 * expectedDays).toFixed(2));
 console.log('PASS FINANCIAL: calculateMonthlyExpenditure and calculateResidualValue compute correct figures');
+
+// Test retransmission rate: null points do not draw as 0
+const metricsModelSource = readFileSync(new URL('../src/modules/nodes/components/serverMetricsModel.ts', import.meta.url), 'utf8')
+  .replace("import { authState } from '../../../app/auth';", "const authState = { timezone: 'Asia/Shanghai' };")
+  .replace("import { hostMetrics } from '../metrics';", 'const hostMetrics = node => node.heartbeat;');
+const metricsModelCode = ts.transpileModule(metricsModelSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+const metricsModel = await import(`data:text/javascript;base64,${Buffer.from(metricsModelCode).toString('base64')}`);
+const retransSamples = [
+  { at: new Date(0).toISOString(), retransRate: 1.5 },
+  { at: new Date(60000).toISOString(), retransRate: null },
+  { at: new Date(120000).toISOString(), retransRate: 2.0 }
+];
+const retransPath = metricsModel.metricPath(retransSamples, 'retransRate', 0, 120000, 60);
+// Null point breaks path with M, does not plot L to 0
+assert.equal((retransPath.match(/M/g) || []).length, 2, 'null retrans point breaks the line');
+console.log('PASS P7 METRICS: null retransmission rate breaks path, does not plot as zero');

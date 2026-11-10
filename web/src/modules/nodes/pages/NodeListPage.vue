@@ -35,6 +35,12 @@
           <option v-for="option in statusOptions" :key="option[0]" :value="option[0]">{{ option[1] }}</option>
         </select>
 
+        <!-- Advice Filter -->
+        <select v-model="adviceFilter" class="ios-filter-select !w-auto" @change="applyFilters">
+          <option value="all">全部调优状态</option>
+          <option value="has_advice">有调优建议</option>
+        </select>
+
         <!-- Group Filter (Owner only) -->
         <select v-if="isOwner" v-model="group" class="ios-filter-select !w-auto" @change="applyFilters">
           <option value="">全部节点分组</option>
@@ -114,7 +120,7 @@ function install(node: NodeView) {
 }
 const route = useRoute(), router = useRouter();
 const scalar = (value: unknown) => typeof value === 'string' ? value : '';
-const keyword = ref(''), status = ref('all'), group = ref(''), deleted = ref(false), page = ref(1);
+const keyword = ref(''), status = ref('all'), adviceFilter = ref('all'), group = ref(''), deleted = ref(false), page = ref(1);
 const nodes = ref<NodeView[]>([]), groups = ref<NodeGroup[]>([]);
 const loading = ref(false), error = ref(''), warnings = ref<string[]>([]), selected = ref<string[]>([]);
 const today = ref<Record<string, number>>({}), month = ref<Record<string, number>>({}), monthZone = ref('');
@@ -124,6 +130,7 @@ function readQuery() {
   keyword.value = scalar(route.query.keyword);
   const raw = scalar(route.query.status);
   status.value = statusOptions.some(option => option[0] === raw) ? raw : 'all';
+  adviceFilter.value = route.query.advice === 'has_advice' ? 'has_advice' : 'all';
   group.value = isOwner.value ? scalar(route.query.group) : '';
   deleted.value = route.query.deleted === '1';
   const value = Number(route.query.page);
@@ -133,7 +140,9 @@ readQuery();
 function applyFilters() {
   selected.value = [];
   void router.replace({ query: { ...route.query, keyword: keyword.value.trim() || undefined,
-    status: status.value === 'all' ? undefined : status.value, group: group.value || undefined,
+    status: status.value === 'all' ? undefined : status.value,
+    advice: adviceFilter.value === 'has_advice' ? 'has_advice' : undefined,
+    group: group.value || undefined,
     deleted: deleted.value ? '1' : undefined, page: undefined } });
 }
 // The layout keeps a leaving page mounted during its out-in transition while
@@ -145,6 +154,7 @@ const filtered = computed(() => nodes.value.filter(node => {
   const meta = getNodeMeta(node.id);
   if (q && ![node.name, node.publicIp, node.connectHost, node.hostname, meta.region, meta.remark].some(value => value?.toLowerCase().includes(q))) return false;
   if (status.value !== 'all' && serverStatus(node, now.value).key !== status.value) return false;
+  if (adviceFilter.value === 'has_advice' && (!node.tuningAdviceCount || node.tuningAdviceCount <= 0)) return false;
   return !group.value || groups.value.some(item => item.id === group.value && item.nodeIds.includes(node.id));
 }));
 const rows = computed(() => filtered.value.map(node => serverRow(node, now.value, today.value[node.id], month.value[node.id])));

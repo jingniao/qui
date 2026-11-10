@@ -104,6 +104,14 @@
           </p>
         </div>
 
+        <!-- 线路带宽 -->
+        <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
+          <div class="text-xs text-ios-secondary font-medium">线路带宽</div>
+          <p class="text-xs sm:text-sm font-semibold text-ios-label font-mono truncate" :title="meta.bandwidthMbps ? `${meta.bandwidthMbps} Mbps` : '—'">
+            {{ meta.bandwidthMbps ? `${meta.bandwidthMbps} Mbps` : '—' }}
+          </p>
+        </div>
+
         <!-- 创建时间 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
           <div class="text-xs text-ios-secondary font-medium">创建时间</div>

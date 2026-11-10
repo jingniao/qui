@@ -20,6 +20,7 @@ export interface NodeSettingsInput extends NodeNetworkSettings {
 export interface NodeView extends NodeNetworkSettings {
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';
   enabled: boolean; allowSubscription: boolean; maintenance: boolean; hostname: string; os: string; agentVersion: string; publicIp: string;
+  tuningAdviceCount?: number;
   // Where the public address came from: manual means the Owner typed it and the
   // Agent never replaces it, auto means the panel filled it from detection, and
   // an empty source means there is no address at all.
@@ -95,6 +96,10 @@ export const nodeAPI = {
   metrics: (id: string, hours = 1) => request<NodeMetricsResponse>(`/nodes/${encodeURIComponent(id)}/metrics?hours=${hours}`),
   tuning: (id: string) => request<NodeTuning>(`/nodes/${encodeURIComponent(id)}/tuning`),
   saveTuning: (id: string, input: NodeTuningInput) => request<{requestId:string;status:'pending'}>(`/nodes/${encodeURIComponent(id)}/tuning`, 'PUT', input),
+  tuningRecommendations: (id: string) => request<RecommendationView>(`/nodes/${encodeURIComponent(id)}/tuning/recommendations`),
+  dismissTuningRecommendation: (id: string, key: string, value: string) => request(`/nodes/${encodeURIComponent(id)}/tuning/recommendations/dismiss`, 'POST', { key, value }),
+  tuningAutoApply: () => request<TuningAutoApplySettings>('/system/tuning-auto-apply'),
+  saveTuningAutoApply: (enabled: boolean, expectedRevision: number) => request<TuningAutoApplySettings>('/system/tuning-auto-apply', 'PUT', { enabled, expectedRevision }),
   latencyTargets: (nodeId: string) => request<LatencyTargetsSettings>(`/nodes/${encodeURIComponent(nodeId)}/latency-targets`),
   saveLatencyTargets: (nodeId: string, input: LatencyTargetsInput) => request<LatencyTargetsSettings>(`/nodes/${encodeURIComponent(nodeId)}/latency-targets`, 'PUT', input),
   latency: (id: string, hours: number = 1) => request<LatencyResponse>(`/nodes/${encodeURIComponent(id)}/latency?hours=${hours}`),
@@ -147,8 +152,51 @@ export interface LatencyResponse {
 }
 
 // New camelCase observations use protobuf JSON: uint64 values are decimal strings.
-export interface HostInfo { cpuModel?:string; cpuCores?:number; architecture?:string; kernelVersion?:string; memoryTotalBytes?:string; swapTotalBytes?:string; diskTotalBytes?:string; osPrettyName?:string; }
-export interface NodeMetricPoint { at:string; cpuPercent:number|null; memoryPercent:number|null; diskPercent:number|null; memoryUsedBytes:number|null; swapUsedBytes:number|null; diskUsedBytes:number|null; load1:number|null; processCount:number|null; tcpConnections:number|null; udpSockets:number|null; activeConnections:number|null; rxBytesPerSecond:number|null; txBytesPerSecond:number|null; samples:number; }
+export interface HostInfo {
+  cpuModel?:string; cpuCores?:number; architecture?:string; kernelVersion?:string; memoryTotalBytes?:string; swapTotalBytes?:string; diskTotalBytes?:string; osPrettyName?:string;
+  virtualization?: string;
+  tuningKeys?: { key: string; present: boolean; writable: boolean }[];
+  congestionAvailable?: string[];
+  congestionLoadable?: string[];
+  qdiscAvailable?: string[];
+  qdiscLoadable?: string[];
+  sysctlSources?: { key: string; file: string; value: string }[];
+  agentLimits?: { fdCur: number; fdMax: number };
+  tuning_keys?: { key: string; present: boolean; writable: boolean }[];
+  congestion_available?: string[];
+  congestion_loadable?: string[];
+  qdisc_available?: string[];
+  qdisc_loadable?: string[];
+  sysctl_sources?: { key: string; file: string; value: string }[];
+  agent_limits?: { fd_cur: number; fd_max: number };
+}
+
+export interface RecommendationItem {
+  key: string;
+  value: string;
+  reason: string;
+  level: 'info' | 'suggested' | 'warning';
+  rule: string;
+  dismissed: boolean;
+}
+
+export interface RecommendationView {
+  rulesVersion: string;
+  items: RecommendationItem[];
+}
+
+export interface TuningAutoApplySettings {
+  enabled: boolean;
+  revision: number;
+}
+
+export interface NodeMetricPoint {
+  at:string; cpuPercent:number|null; memoryPercent:number|null; diskPercent:number|null;
+  memoryUsedBytes:number|null; swapUsedBytes:number|null; diskUsedBytes:number|null;
+  load1:number|null; processCount:number|null; tcpConnections:number|null; udpSockets:number|null;
+  activeConnections:number|null; rxBytesPerSecond:number|null; txBytesPerSecond:number|null;
+  tcpRetransPercent?:number|null; samples:number;
+}
 export interface NodeMetricsResponse { intervalSeconds:number; sampleSeconds:60; points:NodeMetricPoint[]; }
 export interface NodeTuningInput { settings:Record<string,string>; clear:boolean; confirmNodeId:string; }
 // Machine traffic of one server: durable daily rows of one selected interface,
@@ -165,7 +213,13 @@ export interface MachineTrafficSummary {
   status: 'measured' | 'stale' | 'unknown'; lastObservedAt: string | null;
 }
 export interface MachineTrafficBatch { items: MachineTrafficSummary[]; timezone: string; }
-export interface NodeTuning { supported:boolean; desired:Record<string,string>; requestId:string|null; status:'pending'|'applied'|'cleared'|'failed'|'unconfirmed'; result:{requestId?:string;status?:string;keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null; requestedAt:string|null; updatedAt:string|null; current:Record<string,string>; }
+export interface NodeTuning {
+  supported:boolean; desired:Record<string,string>; requestId:string|null;
+  status:'pending'|'applied'|'cleared'|'failed'|'unconfirmed';
+  result:{requestId?:string;status?:string;keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null;
+  requestedAt:string|null; updatedAt:string|null; current:Record<string,string>;
+  initial?:Record<string,string>;
+}
 
 export type CoreName = 'xray' | 'sing-box' | 'gost';
 export interface ServerSettingsCombination { protocol: string; direction: string; security: string; transport: string; flow?: string; }

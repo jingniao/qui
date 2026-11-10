@@ -254,10 +254,19 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 		t.Fatalf("identity: %v", err)
 	}
 	credentials, err := app.quotaDeployer.users.Credentials(context.Background(), identity.ID, true)
-	if err != nil || len(credentials) != 1 || credentials[0].Secret == "" {
+	if err != nil || len(credentials) != len(user.AllProtocols) {
 		t.Fatalf("credentials: %v %v", err, credentials)
 	}
-	credential := credentials[0]
+	var credential user.Credential
+	for _, c := range credentials {
+		if c.Protocol == "vless" && c.Secret != "" {
+			credential = c
+			break
+		}
+	}
+	if credential.Secret == "" {
+		t.Fatalf("missing vless credential in %v", credentials)
+	}
 	inboundResponse := owner.call("POST", "/api/v1/inbounds", proxy.InboundInput{Name: "Flow VLESS", NodeID: pending.ID, Protocol: "vless", Listen: "0.0.0.0", Port: 24443, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())

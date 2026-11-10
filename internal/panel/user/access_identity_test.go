@@ -62,6 +62,9 @@ func TestIdentityCredentialsAreIndependentEncryptedAndMasked(t *testing.T) {
 	if replaced.Secret == first.Credentials[0].Secret || replaced.ID == first.Credentials[0].ID {
 		t.Fatal("rotation reused credentials")
 	}
+	if _, err := repository.Database.Exec(`UPDATE users SET protocols_json='["socks5"]' WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := repository.CreateDevice(ctx, u.ID, DeviceInput{Name: "Unsupported", Protocols: []string{"trojan"}}); err == nil {
 		t.Fatal("user protocol whitelist bypassed")
 	}

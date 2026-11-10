@@ -99,10 +99,19 @@ func TestStartupReconciliationAfterUserLevelMigration(t *testing.T) {
 		t.Fatalf("identity: %v", err)
 	}
 	credentials, err := f.app.quotaDeployer.users.Credentials(ctx, identity.ID, true)
-	if err != nil || len(credentials) != 1 || credentials[0].Secret == "" {
+	if err != nil || len(credentials) != len(user.AllProtocols) {
 		t.Fatalf("credentials: %v %v", err, credentials)
 	}
-	credential := credentials[0]
+	var credential user.Credential
+	for _, c := range credentials {
+		if c.Protocol == "vless" && c.Secret != "" {
+			credential = c
+			break
+		}
+	}
+	if credential.Secret == "" {
+		t.Fatalf("missing vless credential in %v", credentials)
+	}
 	publishNodeRevision(t, f, second.ID, "Second node baseline")
 	f.markRecovered()
 
@@ -265,10 +274,19 @@ func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T)
 		t.Fatal(err)
 	}
 	credentials, err := app.quotaDeployer.users.Credentials(ctx, identity.ID, true)
-	if err != nil || len(credentials) != 1 || credentials[0].Secret == "" {
+	if err != nil || len(credentials) != len(user.AllProtocols) {
 		t.Fatalf("credentials: %v %v", err, credentials)
 	}
-	credential := credentials[0]
+	var credential user.Credential
+	for _, c := range credentials {
+		if c.Protocol == "vless" && c.Secret != "" {
+			credential = c
+			break
+		}
+	}
+	if credential.Secret == "" {
+		t.Fatalf("missing vless credential in %v", credentials)
+	}
 	current := publish("Legacy with the identity credential")
 	state, err := app.deployments.State(ctx, current)
 	if err != nil {

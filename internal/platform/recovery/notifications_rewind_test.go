@@ -9,6 +9,7 @@ import (
 // an archive written before it.
 func rewindNotifications(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindServiceSetSources(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0139_notifications.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

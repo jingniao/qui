@@ -19,7 +19,7 @@
       <h3 class="text-ios-label text-base font-semibold leading-normal">白名单参数</h3>
       <p class="text-xs text-ios-secondary">草稿尚未应用。提交会替换整个期望配置，留空的旧参数将恢复初始值。算法是否可用由服务器校验；tcp_rmem / tcp_wmem 只提交最大值，Agent 保留前两项。</p>
       <div v-if="canEdit" class="flex flex-wrap gap-2">
-        <button v-for="preset in tuningPresets" :key="preset.name" type="button" class="ios-btn-secondary" @click="draft = tuningDraft(preset.settings)">{{ preset.name }}</button>
+        <button v-for="preset in tuningPresets" :key="preset.name" type="button" class="ios-btn-secondary" @click="draft = applyPreset(draft, preset)">{{ preset.name }}</button>
         <button type="button" class="ios-btn-secondary" @click="draft = tuningDraft(state.desired)">载入期望配置为草稿</button>
       </div>
       <div class="overflow-x-auto">
@@ -31,7 +31,7 @@
               <td class="p-2 font-mono text-ios-label">{{ state.current[field.key] || '—' }}</td>
               <td class="p-2 font-mono text-ios-label">{{ state.desired[field.key] || '—' }}</td>
               <td class="p-2">
-                <select v-if="field.choices" v-model="draft[field.key]" class="form-input-base" :disabled="!canEdit"><option value="">不设置</option><option v-for="value in field.choices" :key="value" :value="value">{{ value }}</option></select>
+                <select v-if="field.choices" v-model="draft[field.key]" class="form-input-base" :disabled="!canEdit"><option value="">不设置</option><option v-if="state.current[field.key] && !field.choices.includes(state.current[field.key])" :value="state.current[field.key]">{{ state.current[field.key] }}（当前值）</option><option v-for="value in field.choices" :key="value" :value="value">{{ value }}</option></select>
                 <input v-else v-model="draft[field.key]" type="text" inputmode="numeric" pattern="[0-9]*" :placeholder="field.min + '–' + field.max" :aria-label="field.label" class="form-input-base" :disabled="!canEdit" />
               </td>
             </tr>
@@ -59,7 +59,7 @@ import { computed, ref, watch, onUnmounted } from 'vue';
 import { isOwner as sessionOwner } from '../../../../app/auth';
 import ConfirmDialog from '../../../../components/ConfirmDialog.vue';
 import { nodeAPI, type NodeView, type NodeTuning, type NodeTuningInput } from '../../api';
-import { tuningFields, tuningStatus, tuningRequest, tuningPresets, tuningDraft } from './serverTuningModel';
+import { tuningFields, tuningStatus, tuningRequest, tuningPresets, tuningDraft, applyPreset, revertedKeys } from './serverTuningModel';
 const props = defineProps<{node:NodeView;isOwner?:boolean}>();
 const owner = computed(() => sessionOwner.value && props.isOwner !== false);
 const state = ref<NodeTuning | null>(null), draft = ref<Record<string,string>>({});
@@ -67,7 +67,16 @@ const loading = ref(false), sending = ref(false), error = ref(''), dialog = ref(
 const canEdit = computed(() => owner.value && state.value?.supported === true && state.value.status !== 'pending' && !loading.value && !sending.value);
 let lifecycle = 0, reads = 0, timer: ReturnType<typeof setTimeout> | undefined, deadline = 0;
 let confirmed: NodeTuningInput | null = null;
-const confirmMessage = computed(() => '将向服务器【' + props.node.name + '】的 Agent 发送' + (clearing.value ? '清除请求。root helper 将恢复初始快照并移除 /etc/sysctl.d/99-proxy-tuning.conf。' : '所确认的完整配置。root helper 将应用参数并持久化至 /etc/sysctl.d/99-proxy-tuning.conf。') + '代理核心不会重启。请以执行回执和后续心跳为准。');
+const confirmMessage = computed(() => {
+  let msg = '将向服务器【' + props.node.name + '】的 Agent 发送' + (clearing.value ? '清除请求。root helper 将恢复初始快照并移除 /etc/sysctl.d/99-proxy-tuning.conf。' : '所确认的完整配置。root helper 将应用参数并持久化至 /etc/sysctl.d/99-proxy-tuning.conf。') + '代理核心不会重启。请以执行回执和后续心跳为准。';
+  if (!clearing.value && state.value?.desired) {
+    const reverted = revertedKeys(state.value.desired, draft.value);
+    if (reverted.length > 0) {
+      msg += ' 以下参数将恢复初始值：' + reverted.join('、') + '。';
+    }
+  }
+  return msg;
+});
 function time(value?:string|null) { return value ? formatTime(value) : '—'; }
 function stopPoll() { clearTimeout(timer); timer = undefined; }
 function schedulePoll() {

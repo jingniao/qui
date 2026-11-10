@@ -87,3 +87,10 @@ await nodeF2.nodeAPI.tuning('a/b'); assert.equal(calledF2[0],'/nodes/a%2Fb/tunin
 for (const hours of [1,6,12,24,168]) {await nodeF2.nodeAPI.metrics('a/b',hours);assert.equal(calledF2[0],'/nodes/a%2Fb/metrics?hours='+hours);}
 delete globalThis.f2Request;
 console.log('PASS F2: uint64 strings/zero/unknown, storage fallback, null/time gaps, fractional averages, tuning bounds/statuses/request/API routes');
+
+const merged = tuning.applyPreset({ 'net.core.somaxconn': '4096', 'net.ipv4.tcp_congestion_control': '' }, tuning.tuningPresets[0]);
+assert.equal(merged['net.core.somaxconn'], '4096', 'a preset keeps keys it does not name');
+assert.equal(merged['net.ipv4.tcp_congestion_control'], 'bbr');
+assert.deepEqual(tuning.revertedKeys({ 'net.core.somaxconn': '4096' }, { 'net.core.somaxconn': '' }), ['net.core.somaxconn']);
+assert.ok(!tuning.tuningFields[0].choices.includes('bbr3'), 'no algorithm that no server offers');
+console.log('PASS P1 TUNING: presets merge, reverted keys listed, no bbr2/bbr3');

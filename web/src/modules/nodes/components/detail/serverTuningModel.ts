@@ -1,7 +1,7 @@
 import type { NodeTuningInput } from '../../api';
 export interface TuningField {key:string; label:string; choices?:string[]; min?:number; max?:number;}
 export const tuningFields: TuningField[] = [
-  {key:'net.ipv4.tcp_congestion_control',label:'TCP 拥塞控制',choices:['bbr','cubic','reno','htcp','hybla','bbr2','bbr3']},
+  {key:'net.ipv4.tcp_congestion_control',label:'TCP 拥塞控制',choices:['bbr','cubic','reno','htcp','hybla']},
   {key:'net.core.default_qdisc',label:'排队算法',choices:['fq','fq_codel','cake','pfifo_fast']},
   ...['tcp_ecn','tcp_tw_reuse','tcp_mtu_probing'].map(key=>({key:'net.ipv4.'+key,label:key,min:0,max:2})),
   {key:'fs.file-max',label:'文件句柄上限',min:65536,max:16777216},
@@ -41,3 +41,23 @@ export const tuningPresets: {name:string;settings:Record<string,string>}[] = [
   {name:'BBR / FQ 草稿',settings:{'net.ipv4.tcp_congestion_control':'bbr','net.core.default_qdisc':'fq'}},
   {name:'Cubic / FQ-CoDel 草稿',settings:{'net.ipv4.tcp_congestion_control':'cubic','net.core.default_qdisc':'fq_codel'}}
 ];
+
+/** Merge a preset into the draft; keys the preset does not name keep their draft value. */
+export function applyPreset(draft: Record<string,string>, preset: { settings: Record<string,string> }): Record<string,string> {
+  const result: Record<string,string> = { ...draft };
+  for (const [key, value] of Object.entries(preset.settings)) {
+    result[key] = value;
+  }
+  return result;
+}
+
+/** Keys that are desired now but empty in the draft: submitting restores their initial value. */
+export function revertedKeys(desired: Record<string,string>, draft: Record<string,string>): string[] {
+  const result: string[] = [];
+  for (const [key, val] of Object.entries(desired)) {
+    if (val && !draft[key]) {
+      result.push(key);
+    }
+  }
+  return result;
+}

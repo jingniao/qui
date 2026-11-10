@@ -134,6 +134,9 @@ func compilePolicies(state desiredstate.State, at time.Time) ([]route, error) {
 		for _, suffix := range policy.Match.Suffixes {
 			domains = append(domains, "domain:"+suffix)
 		}
+		for _, keyword := range policy.Match.Keywords {
+			domains = append(domains, "keyword:"+keyword)
+		}
 		for _, scope := range scopes(state, policy) {
 			base := route{Type: "field", RuleTag: policy.ID, InboundTag: scope.InboundTags, User: scope.Users, Source: scope.Sources, Network: policy.Match.Network, Port: strings.Join(policy.Match.Ports, ","), OutboundTag: target}
 			if base.Network == "" || base.Network == "all" {

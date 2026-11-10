@@ -389,3 +389,24 @@ func TestRealScopedTCPPolicyBlocksOnlyMatchingAccountAndTimeWindow(t *testing.T)
 		t.Fatal("unmatched account rule affected another account")
 	}
 }
+
+func TestSingboxRenderDomainKeyword(t *testing.T) {
+	state := stateFixture(t, "http", 1080)
+	state.Policies = []desiredstate.Policy{
+		{
+			ID:       "deny-kw",
+			Enabled:  true,
+			Priority: 10,
+			Match:    desiredstate.Match{Keywords: []string{"openai"}},
+			Action:   desiredstate.Action{Type: "Block"},
+		},
+	}
+	rendered, err := Render(context.Background(), state, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(rendered.Data)
+	if !strings.Contains(raw, `"domain_keyword"`) || !strings.Contains(raw, `"openai"`) {
+		t.Fatalf("expected rendered singbox config to contain domain_keyword with openai, got: %s", raw)
+	}
+}

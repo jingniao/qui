@@ -225,6 +225,7 @@ type Scope struct {
 type Match struct {
 	Domains    []string `json:"domains,omitempty"`
 	Suffixes   []string `json:"suffixes,omitempty"`
+	Keywords   []string `json:"keywords,omitempty"`
 	CIDRs      []string `json:"cidrs,omitempty"`
 	Ports      []string `json:"ports,omitempty"`
 	Network    string   `json:"network,omitempty"`

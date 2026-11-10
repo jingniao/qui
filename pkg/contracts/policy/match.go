@@ -223,7 +223,7 @@ func Validate(rule *desiredstate.Policy) error {
 			seen[id] = true
 		}
 	}
-	if len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.CIDRs) > 2000 || len(rule.Match.Ports) > 100 || len(rule.Match.ServiceIDs) > 32 {
+	if len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) > 2000 || len(rule.Match.Ports) > 100 || len(rule.Match.ServiceIDs) > 32 {
 		return errors.New("policy matcher limit exceeded")
 	}
 	for index, value := range rule.Match.Domains {
@@ -239,6 +239,13 @@ func Validate(rule *desiredstate.Policy) error {
 			return err
 		}
 		rule.Match.Suffixes[index] = domain
+	}
+	for index, value := range rule.Match.Keywords {
+		kw, err := Keyword(value)
+		if err != nil {
+			return err
+		}
+		rule.Match.Keywords[index] = kw
 	}
 	for index, value := range rule.Match.CIDRs {
 		if prefix, err := netip.ParsePrefix(value); err == nil {
@@ -330,7 +337,7 @@ func Matches(rule desiredstate.Policy, request Request) bool {
 			return false
 		}
 	}
-	hasAddress := len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.CIDRs) > 0
+	hasAddress := len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) > 0
 	if !hasAddress {
 		return len(rule.Match.ServiceIDs) == 0
 	}
@@ -341,6 +348,11 @@ func Matches(rule desiredstate.Policy, request Request) bool {
 	}
 	for _, suffix := range rule.Match.Suffixes {
 		if request.Domain == suffix || strings.HasSuffix(request.Domain, "."+suffix) {
+			return true
+		}
+	}
+	for _, keyword := range rule.Match.Keywords {
+		if strings.Contains(strings.ToLower(request.Domain), keyword) {
 			return true
 		}
 	}

@@ -140,3 +140,33 @@ func TestRealDeviceScopedPolicyDoesNotBlockOtherDevice(t *testing.T) {
 		t.Fatal("other device was incorrectly blocked")
 	}
 }
+
+func TestXrayPolicyKeywordRendering(t *testing.T) {
+	state := testState(1080, 1)
+	state.Policies = []desiredstate.Policy{
+		{
+			ID:       "kw-block",
+			Name:     "Keyword block",
+			Priority: 10,
+			Enabled:  true,
+			Match:    desiredstate.Match{Keywords: []string{"openai"}},
+			Action:   desiredstate.Action{Type: "Block"},
+		},
+	}
+	rules, err := compilePolicies(state, time.Now())
+	if err != nil {
+		t.Fatalf("policyRules failed: %v", err)
+	}
+	found := false
+	for _, r := range rules {
+		for _, d := range r.Domain {
+			if d == "keyword:openai" {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected domain rule with 'keyword:openai', got rules: %+v", rules)
+	}
+}

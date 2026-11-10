@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"strings"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"testing"
 	"time"
@@ -120,5 +121,34 @@ func TestTimeWindowsUsePolicyZoneAndSupportMidnight(t *testing.T) {
 		if Validate(&policy) == nil {
 			t.Fatal("invalid time window accepted", value)
 		}
+	}
+}
+
+func TestKeywordValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		keyword string
+		wantErr bool
+	}{
+		{"uppercase rejected", "OPENAI", true},
+		{"comma rejected", "open,ai", true},
+		{"space rejected", "open ai", true},
+		{"too long rejected", strings.Repeat("a", 254), true},
+		{"valid lowercase", "openai", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := desiredstate.Policy{
+				ID:       "test",
+				Name:     "Test",
+				Priority: 10,
+				Action:   desiredstate.Action{Type: "Direct"},
+				Match:    desiredstate.Match{Keywords: []string{tc.keyword}},
+			}
+			err := Validate(&p)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Validate(%q) err = %v, wantErr = %v", tc.keyword, err, tc.wantErr)
+			}
+		})
 	}
 }

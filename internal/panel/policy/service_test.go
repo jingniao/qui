@@ -50,7 +50,7 @@ func fixture(t *testing.T) (*Service, string, user.User, user.Device, node.Group
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Service{Repository: &Repository{Database: database}, Nodes: nodes, Users: users, Proxies: &proxy.Repository{Database: database, Vault: configurationVault}, Settings: &system.Repository{Database: database}}, n.ID, u, device, group
+	return &Service{Repository: &Repository{Database: database, Vault: configurationVault}, Nodes: nodes, Users: users, Proxies: &proxy.Repository{Database: database, Vault: configurationVault}, Settings: &system.Repository{Database: database}}, n.ID, u, device, group
 }
 func TestServiceSetsExpandAtPublicationAndMatchSimulator(t *testing.T) {
 	service, nodeID, u, _, group := fixture(t)
@@ -148,5 +148,105 @@ func TestExplicitServerGroupPolicyScope(t *testing.T) {
 		if err != nil || !found {
 			t.Fatal("explicit server lost group policy", purpose, policies, err)
 		}
+	}
+}
+
+func TestResolveMergesKeywordsAndSources(t *testing.T) {
+	service, _, _, _, _ := fixture(t)
+	ctx := context.Background()
+
+	svc, err := service.Repository.SaveService(ctx, "", ServiceInput{
+		Name:     "Resolve Svc",
+		Enabled:  true,
+		Keywords: []string{"openai"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cacheRaw, _ := json.Marshal(ParsedEntries{
+		Domains:  []string{"source.example.com"},
+		Keywords: []string{"chatgpt"},
+	})
+	sealedCache, err := service.Repository.Vault.Seal(cacheRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := service.Repository.Database.ExecContext(ctx,
+		`INSERT INTO service_set_sources(id, service_id, url, format, behavior, interval_seconds, position, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, encrypted_cache, created_at, updated_at)
+		 VALUES('src-res', ?, 'https://example.com/rules.txt', 'text', 'classical', 86400, 0, 'ok', '', ?, ?, 2, 0, ?, ?, ?)`,
+		svc.ID, now, now, sealedCache, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	rule := desiredstate.Policy{
+		ID:       "pol-1",
+		Name:     "Policy with Svc",
+		Priority: 10,
+		Enabled:  true,
+		Action:   desiredstate.Action{Type: "Direct"},
+		Match:    desiredstate.Match{ServiceIDs: []string{svc.ID}},
+	}
+
+	resolved, err := service.resolve(ctx, rule)
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	if len(resolved.Match.Keywords) != 2 {
+		t.Fatalf("expected 2 keywords, got: %v", resolved.Match.Keywords)
+	}
+	if len(resolved.Match.Domains) != 1 || resolved.Match.Domains[0] != "source.example.com" {
+		t.Fatalf("expected domain from source, got: %v", resolved.Match.Domains)
+	}
+}
+
+func TestDisabledServiceSetSkipsSources(t *testing.T) {
+	service, _, _, _, _ := fixture(t)
+	ctx := context.Background()
+
+	svc, err := service.Repository.SaveService(ctx, "", ServiceInput{
+		Name:     "Disabled Svc",
+		Enabled:  false,
+		Keywords: []string{"openai"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cacheRaw, _ := json.Marshal(ParsedEntries{
+		Domains: []string{"source.example.com"},
+	})
+	sealedCache, err := service.Repository.Vault.Seal(cacheRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := service.Repository.Database.ExecContext(ctx,
+		`INSERT INTO service_set_sources(id, service_id, url, format, behavior, interval_seconds, position, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, encrypted_cache, created_at, updated_at)
+		 VALUES('src-dis', ?, 'https://example.com/rules.txt', 'text', 'classical', 86400, 0, 'ok', '', ?, ?, 1, 0, ?, ?, ?)`,
+		svc.ID, now, now, sealedCache, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	rule := desiredstate.Policy{
+		ID:       "pol-dis",
+		Name:     "Policy with Disabled Svc",
+		Priority: 10,
+		Enabled:  true,
+		Action:   desiredstate.Action{Type: "Direct"},
+		Match:    desiredstate.Match{ServiceIDs: []string{svc.ID}},
+	}
+
+	resolved, err := service.resolve(ctx, rule)
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if resolved.Enabled {
+		t.Errorf("expected policy to be disabled when referencing only disabled service set")
+	}
+	if len(resolved.Match.Domains) != 0 || len(resolved.Match.Keywords) != 0 {
+		t.Errorf("expected no matchers from disabled service set, got domains=%v keywords=%v", resolved.Match.Domains, resolved.Match.Keywords)
 	}
 }

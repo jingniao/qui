@@ -129,6 +129,7 @@ type route struct {
 	AuthUser   []string                  `json:"auth_user,omitempty"`
 	Domain     []string                  `json:"domain,omitempty"`
 	Suffix     []string                  `json:"domain_suffix,omitempty"`
+	Keywords   []string                  `json:"domain_keyword,omitempty"`
 	Regex      []string                  `json:"domain_regex,omitempty"`
 	CIDR       []string                  `json:"ip_cidr,omitempty"`
 	Ports      []uint16                  `json:"port,omitempty"`
@@ -412,6 +413,7 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 		}
 		base.Domain = rule.Match.Domains
 		base.Suffix = rule.Match.Suffixes
+		base.Keywords = rule.Match.Keywords
 		base.CIDR = rule.Match.CIDRs
 		base.Domain = nil
 		for _, domain := range rule.Match.Domains {

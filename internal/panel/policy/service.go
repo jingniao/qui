@@ -110,9 +110,18 @@ func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy) (desire
 		}
 		rule.Match.Domains = append(rule.Match.Domains, service.Domains...)
 		rule.Match.Suffixes = append(rule.Match.Suffixes, service.Suffixes...)
+		rule.Match.Keywords = append(rule.Match.Keywords, service.Keywords...)
 		rule.Match.CIDRs = append(rule.Match.CIDRs, service.CIDRs...)
+
+		srcEntries, err := s.Repository.SourceEntries(ctx, id)
+		if err == nil {
+			rule.Match.Domains = append(rule.Match.Domains, srcEntries.Domains...)
+			rule.Match.Suffixes = append(rule.Match.Suffixes, srcEntries.Suffixes...)
+			rule.Match.Keywords = append(rule.Match.Keywords, srcEntries.Keywords...)
+			rule.Match.CIDRs = append(rule.Match.CIDRs, srcEntries.CIDRs...)
+		}
 	}
-	if len(rule.Match.ServiceIDs) > 0 && len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.CIDRs) == 0 {
+	if len(rule.Match.ServiceIDs) > 0 && len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) == 0 {
 		rule.Enabled = false
 	}
 	rule.Match.ServiceIDs = nil

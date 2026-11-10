@@ -539,6 +539,26 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	return nil
 }
 
+
+const certificateRescanInterval = 5 * time.Minute
+
+type inventoryWatch struct {
+	last string
+}
+
+func (w *inventoryWatch) changed(files []*pb.CertificateFileSummary) bool {
+	d := capability.InventoryDigest(files)
+	if w.last == "" {
+		w.last = d
+		return false
+	}
+	if w.last != d {
+		w.last = d
+		return true
+	}
+	return false
+}
+
 func session(ctx context.Context, client pb.AgentControlClient, state *identity.State, logger *slog.Logger, sampler *capability.Sampler, capabilities *capabilityState, version string, manager *reconcile.Reconciler, healthSource interface {
 	OutboundHealth() map[string]scheduler.Health
 }, telemetryQueue *spool.Spool, updates *coreUpdates, agents *agentUpdates, renewals ...func(context.Context) (bool, error)) error {
@@ -866,6 +886,12 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	if interval < time.Second || interval > time.Minute {
 		return errors.New("invalid heartbeat interval")
 	}
+	certWatch := &inventoryWatch{}
+	if h := sampler.HostInfo(); h != nil {
+		certWatch.changed(h.CertificateFiles)
+	}
+	certRescan := time.NewTicker(certificateRescanInterval)
+	defer certRescan.Stop()
 	for ctx.Err() == nil {
 		for len(removalResults) > 0 {
 			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_RemoveCoreResult{RemoveCoreResult: removalResults[0]}}); err != nil {
@@ -1086,6 +1112,13 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
+		case <-certRescan.C:
+			timer.Stop()
+			if h := sampler.HostInfo(); h != nil && certWatch.changed(h.CertificateFiles) {
+				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
+					return err
+				}
+			}
 		case result := <-probeReplies:
 			timer.Stop()
 			lastProbe = result

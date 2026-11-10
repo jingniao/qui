@@ -198,7 +198,11 @@ func CertificateInventory(directory string, now time.Time) []*pb.CertificateFile
 	return summaries
 }
 
-// inventoryDigest is a stable hash of the summaries, used to decide when to re-report.
+// InventoryDigest is a stable hash of the summaries, used to decide when to re-report.
+func InventoryDigest(files []*pb.CertificateFileSummary) string {
+	return inventoryDigest(files)
+}
+
 func inventoryDigest(files []*pb.CertificateFileSummary) string {
 	entries := make([]string, len(files))
 	for i, f := range files {

@@ -214,7 +214,7 @@ jobs:
           key: qui-singbox-${{ hashFiles('scripts/build-singbox.sh') }}
       - name: Build qui sing-box twice and verify reproducibility
         if: ${{ !cancelled() && steps.qui-singbox.outputs.cache-hit != 'true' }}
-        run: |\
+        run: |
           set -euo pipefail
           GOCACHE="$RUNNER_TEMP/singbox-cache-first" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-first" bash scripts/build-singbox.sh
           GOCACHE="$RUNNER_TEMP/singbox-cache-second" OUTPUT_DIRECTORY="$RUNNER_TEMP/singbox-second" bash scripts/build-singbox.sh
@@ -223,7 +223,7 @@ jobs:
           done
       - name: Use the qui sing-box build, cached or fresh
         if: ${{ !cancelled() }}
-        run: |\
+        run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/singbox-first/sing-box-1.14.4-qui.1-linux-amd64.tar.gz"
           test -s "$archive"
@@ -240,7 +240,7 @@ jobs:
         run: bash scripts/ci-real-core-test.sh -p 4 -count=1 -timeout 60m $(bash scripts/real-core-packages.sh)
       - name: Release dry-run (no publication)
         if: ${{ !cancelled() }}
-        run: |\
+        run: |
           set -euo pipefail
           VERSION=1.2.0 SKIP_NPM_CI=1 OUTPUT_DIRECTORY="$RUNNER_TEMP/dry-release" bash scripts/build-release.sh
           cd "$RUNNER_TEMP/dry-release"

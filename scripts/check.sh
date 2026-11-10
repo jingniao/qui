@@ -57,6 +57,9 @@ case $scope in
 esac
 printf 'GATE SCOPE %s\n' "$scope"
 
+step 'workflow YAML parsing'
+go test -p 1 ./scripts/workflowcheck
+
 # The deploy script tests activate packaged units, so the whole gate needs root.
 # The CI runner has sudo; the test machine runs as root and has none. The web gate
 # runs no deploy test and needs neither.

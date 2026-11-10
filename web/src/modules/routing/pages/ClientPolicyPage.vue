@@ -724,6 +724,18 @@
                           @change="e => { const val = (e.target as HTMLSelectElement).value; if (val) { addGroupMemberDirect(item.group, val); (e.target as HTMLSelectElement).value = ''; } }"
                         >
                           <option value="">＋ 添加可选出口...</option>
+                          <optgroup label="🌐 节点">
+                            <option value="@all">全部节点 (@all)</option>
+                          </optgroup>
+                          <optgroup v-if="candidates.items.length" label="📍 单个节点">
+                            <option
+                              v-for="endpoint in candidates.items"
+                              :key="endpoint.ref"
+                              :value="'@endpoint:' + endpoint.ref"
+                            >
+                              {{ endpoint.name }} · {{ endpoint.protocol }}
+                            </option>
+                          </optgroup>
                           <optgroup label="🌏 地区分组">
                             <option
                               v-for="rg in clientConfig.proxyGroups.filter(g => getGroupCategory(g) === 'region' && g.name !== item.group.name)"

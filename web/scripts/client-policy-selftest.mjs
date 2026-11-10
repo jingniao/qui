@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 // Self-test for the client policy simulator in web/src/modules/routing/api.ts.
 //
 // The module is transpiled in memory (ts.transpileModule) into a fresh
@@ -105,6 +106,10 @@ check('region matching is not duplicated in the page', !page.includes('groupKeyw
 check('endpoint selection writes stable references', page.includes("addGroupMemberDirect(group, '@endpoint:' + ref)"));
 check('group category metadata follows renames', page.includes('delete groupCategories.value[previous]') && page.includes('groupCategories.value[name] = category') && page.includes('uiMetadata: { ...draftMetadata.value, groupCategories:'));
 check('region creation has persisted constraints and rejects empty sets', page.includes("includeKeywords: target.inc.split(',')") && page.includes("emptyPolicy: 'reject'"));
+const serviceBlock = page.slice(page.indexOf('v-if="item.category === \'service\'"'), page.indexOf('item.category === \'region\'', page.indexOf('v-if="item.category === \'service\'"')));
+assert.match(serviceBlock, /<option value="@all">/, 'purpose groups can add every node');
+assert.match(serviceBlock, /v-for="endpoint in candidates\.items"[\s\S]*?:value="'@endpoint:' \+ endpoint\.ref"/, 'purpose groups can add a single node');
+console.log('PASS P1 PURPOSE GROUP: @all and single endpoints');
 const membershipTemplate = structuredClone(template);
 membershipTemplate.groups[0].includeKeywords = ['United States', 'US'];
 membershipTemplate.groups[0].excludeKeywords = ['维护'];

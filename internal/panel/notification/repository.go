@@ -154,7 +154,7 @@ func (r *Repository) UnreadCount(ctx context.Context, viewer bool) (int, error) 
 }
 
 func (r *Repository) Channels(ctx context.Context) ([]Channel, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT id, kind, name, enabled, last4, last_result_code, last_sent_at FROM notification_channels ORDER BY created_at ASC")
+	rows, err := r.Database.QueryContext(ctx, "SELECT id, kind, name, enabled, last4, last_result_code, last_sent_at, encrypted_config FROM notification_channels ORDER BY created_at ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +165,16 @@ func (r *Repository) Channels(ctx context.Context) ([]Channel, error) {
 		var ch Channel
 		var enabled int
 		var lastSent sql.NullString
-		if err := rows.Scan(&ch.ID, &ch.Kind, &ch.Name, &enabled, &ch.Last4, &ch.LastResultCode, &lastSent); err != nil {
+		var encrypted []byte
+		if err := rows.Scan(&ch.ID, &ch.Kind, &ch.Name, &enabled, &ch.Last4, &ch.LastResultCode, &lastSent, &encrypted); err != nil {
 			return nil, err
+		}
+		if ch.Kind == "webhook" {
+			cfg, err := r.openChannelConfig(encrypted)
+			if err != nil {
+				return nil, err
+			}
+			ch.Format = cfg.WebhookFormat()
 		}
 		ch.Enabled = enabled != 0
 		if lastSent.Valid {
@@ -200,6 +208,9 @@ func (r *Repository) SaveChannel(ctx context.Context, ch Channel, config *Channe
 	ch.Name = strings.TrimSpace(ch.Name)
 	if ch.Name == "" {
 		return Channel{}, ErrInvalid
+	}
+	if config != nil && ch.Kind == "webhook" {
+		ch.Format = config.WebhookFormat()
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -296,6 +307,10 @@ func (r *Repository) ChannelConfig(ctx context.Context, id string) (ChannelConfi
 	if err := r.Database.QueryRowContext(ctx, "SELECT encrypted_config FROM notification_channels WHERE id=?", id).Scan(&encrypted); err != nil {
 		return ChannelConfig{}, err
 	}
+	return r.openChannelConfig(encrypted)
+}
+
+func (r *Repository) openChannelConfig(encrypted []byte) (ChannelConfig, error) {
 	plaintext, err := r.Vault.Open(encrypted)
 	if err != nil {
 		return ChannelConfig{}, err

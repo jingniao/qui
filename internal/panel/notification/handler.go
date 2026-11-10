@@ -2,7 +2,6 @@ package notification
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 
 	"proxycontrol/internal/panel/auth"
@@ -143,18 +142,7 @@ type createChannelRequest struct {
 }
 
 func validateChannelConfig(kind string, cfg *ChannelConfig) bool {
-	if cfg == nil {
-		return false
-	}
-	switch kind {
-	case "telegram":
-		return strings.TrimSpace(cfg.BotToken) != "" && strings.TrimSpace(cfg.ChatID) != ""
-	case "webhook":
-		u, err := url.Parse(cfg.URL)
-		return err == nil && u.Scheme == "https"
-	default:
-		return false
-	}
+	return cfg != nil && cfg.Validate(kind) == nil
 }
 
 func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
@@ -187,9 +175,14 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateChannelRequest struct {
-	Name    string         `json:"name"`
-	Enabled bool           `json:"enabled"`
-	Config  *ChannelConfig `json:"config"`
+	Name    string               `json:"name"`
+	Enabled bool                 `json:"enabled"`
+	Config  *updateChannelConfig `json:"config"`
+}
+
+type updateChannelConfig struct {
+	ChannelConfig
+	ClearSecret bool `json:"clearSecret"`
 }
 
 func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
@@ -211,10 +204,12 @@ func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var targetKind string
+	var targetFormat string
 	found := false
 	for _, ch := range channels {
 		if ch.ID == id {
 			targetKind = ch.Kind
+			targetFormat = ch.Format
 			found = true
 			break
 		}
@@ -224,17 +219,57 @@ func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Config != nil && !validateChannelConfig(targetKind, req.Config) {
-		httpapi.Error(w, http.StatusBadRequest, "invalid_request", "invalid channel configuration")
-		return
+	var config *ChannelConfig
+	if req.Config != nil {
+		incoming := req.Config
+		if (targetKind == "webhook" && incoming.Format == "") ||
+			(targetKind == "telegram" && incoming.ClearSecret) {
+			httpapi.Error(w, http.StatusBadRequest, "invalid_request", "invalid channel configuration")
+			return
+		}
+		merged, err := h.Repository.ChannelConfig(r.Context(), id)
+		if err != nil {
+			httpapi.Error(w, http.StatusInternalServerError, "database_error", "cannot read channel configuration")
+			return
+		}
+		if incoming.URL != "" {
+			merged.URL = incoming.URL
+		}
+		if incoming.BotToken != "" {
+			merged.BotToken = incoming.BotToken
+		}
+		if incoming.ChatID != "" {
+			merged.ChatID = incoming.ChatID
+		}
+		merged.Format = incoming.Format
+		if incoming.Secret != "" {
+			merged.Secret = incoming.Secret
+		}
+		if incoming.ClearSecret {
+			merged.Secret = ""
+		}
+		if targetKind == "webhook" && merged.Format != "dingtalk" && merged.Format != "feishu" {
+			// Reject a newly supplied secret, but discard a previously saved signing key.
+			if incoming.Secret != "" {
+				httpapi.Error(w, http.StatusBadRequest, "invalid_request", "invalid channel configuration")
+				return
+			}
+			merged.Secret = ""
+		}
+		if !validateChannelConfig(targetKind, &merged) {
+			httpapi.Error(w, http.StatusBadRequest, "invalid_request", "invalid channel configuration")
+			return
+		}
+		config = &merged
 	}
 
 	ch, err := h.Repository.SaveChannel(r.Context(), Channel{
 		ID:      id,
 		Kind:    targetKind,
+		Format:  targetFormat,
 		Name:    req.Name,
 		Enabled: req.Enabled,
-	}, req.Config)
+	}, config)
 	if err != nil {
 		httpapi.Error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return

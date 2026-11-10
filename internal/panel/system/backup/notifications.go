@@ -1,9 +1,12 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+
+	"proxycontrol/internal/panel/notification"
 	"proxycontrol/internal/platform/vault"
 )
 
@@ -75,12 +78,10 @@ func validateNotifications(ctx context.Context, database *sql.DB, vault *vault.V
 			if err != nil {
 				return ErrArchive
 			}
-			var cfg struct {
-				BotToken string `json:"botToken,omitempty"`
-				ChatID   string `json:"chatId,omitempty"`
-				URL      string `json:"url,omitempty"`
-			}
-			if err := json.Unmarshal(decrypted, &cfg); err != nil {
+			var cfg notification.ChannelConfig
+			decoder := json.NewDecoder(bytes.NewReader(decrypted))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&cfg); err != nil || cfg.Validate(kind) != nil || !json.Valid(decrypted) {
 				return ErrArchive
 			}
 		}

@@ -25,15 +25,21 @@ export interface NotificationRule {
   cooldownMinutes: number;
 }
 
+export type WebhookFormat = 'generic' | 'wecom' | 'dingtalk' | 'feishu';
+
 export interface NotificationChannelConfig {
   botToken?: string;
   chatId?: string;
   url?: string;
+  format?: WebhookFormat;
+  secret?: string;
+  clearSecret?: boolean;
 }
 
 export interface NotificationChannel {
   id: string;
   kind: 'telegram' | 'webhook' | string;
+  format?: WebhookFormat;
   name: string;
   enabled: boolean;
   last4: string;

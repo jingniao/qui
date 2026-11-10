@@ -2,8 +2,74 @@ package backup
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestWebhookFormatsArchiveInspection(t *testing.T) {
+	source, directory, _ := sourceFixture(t)
+	ctx := context.Background()
+	for i, format := range []string{"", "generic", "wecom", "dingtalk", "feishu", "invalid"} {
+		config := fmt.Sprintf(`{"url":"https://example.com/hook","format":%q}`, format)
+		if format == "dingtalk" || format == "feishu" {
+			config = fmt.Sprintf(`{"url":"https://example.com/hook","format":%q,"secret":"signing-key"}`, format)
+		}
+		encrypted, err := source.ConfigurationVault.Seal([]byte(config))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := source.Database.Exec("INSERT OR REPLACE INTO notification_channels(id,kind,name,enabled,encrypted_config,created_at,updated_at) VALUES('archive_formats','webhook','Formats',1,?,'now','now')", encrypted); err != nil {
+			t.Fatal(err)
+		}
+		created, err := source.Create(ctx, directory, fmt.Sprintf("webhook_formats_%02d", i), "owner", testPassword)
+		if format == "invalid" {
+			if err == nil {
+				t.Fatal("invalid format accepted during archive creation/inspection")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("create %q: %v", format, err)
+		}
+		if _, err := Inspect(ctx, directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword); err != nil {
+			t.Fatalf("inspect %q: %v", format, err)
+		}
+	}
+}
+
+func TestBackupWebhookFormatValidation(t *testing.T) {
+	source, _, _ := sourceFixture(t)
+	for _, tc := range []struct {
+		kind, config string
+		valid        bool
+	}{
+		{"webhook", `{"url":"https://example.com"}`, true},
+		{"webhook", `{"url":"https://example.com","format":"generic"}`, true},
+		{"webhook", `{"url":"https://example.com","format":"wecom"}`, true},
+		{"webhook", `{"url":"https://example.com","format":"dingtalk","secret":"SEC-key"}`, true},
+		{"webhook", `{"url":"https://example.com","format":"feishu","secret":"key"}`, true},
+		{"webhook", `{"url":"https://example.com","format":"invalid"}`, false},
+		{"webhook", `{"url":"https://example.com","format":"wecom","secret":"bad"}`, false},
+		{"webhook", `{"url":"https://example.com","format":"feishu","secret":"` + strings.Repeat("x", 1025) + `"}`, false},
+		{"telegram", `{"botToken":"bot","chatId":"chat","format":"generic"}`, false},
+		{"webhook", `{"url":"https://example.com","unknown":true}`, false},
+	} {
+		encrypted, err := source.ConfigurationVault.Seal([]byte(tc.config))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = source.Database.Exec("INSERT OR REPLACE INTO notification_channels(id,kind,name,enabled,encrypted_config,created_at,updated_at) VALUES('formats',?,'Formats',1,?,'now','now')", tc.kind, encrypted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = validateNotifications(context.Background(), source.Database, source.ConfigurationVault)
+		if (err == nil) != tc.valid {
+			t.Fatalf("config %s: valid=%v err=%v", tc.config, tc.valid, err)
+		}
+	}
+}
 
 func TestBackupRejectsMalformedNotifications(t *testing.T) {
 	source, _, _ := sourceFixture(t)

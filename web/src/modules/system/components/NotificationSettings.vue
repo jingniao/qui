@@ -150,7 +150,7 @@
               </td>
               <td class="py-3 px-3">
                 <span class="px-2 py-0.5 text-xs rounded-full bg-black/[0.05] font-medium text-ios-secondary">
-                  {{ ch.kind === 'telegram' ? 'Telegram' : 'Webhook' }}
+                  {{ ch.kind === 'telegram' ? 'Telegram' : webhookFormats[ch.format || 'generic'].label }}
                 </span>
               </td>
               <td class="py-3 px-3 text-xs text-ios-secondary font-mono">
@@ -264,6 +264,13 @@
         <!-- Webhook specific fields -->
         <template v-if="channelForm.kind === 'webhook'">
           <label class="block">
+            格式
+            <select v-model="channelForm.format" class="form-input-base mt-1.5 w-full">
+              <option v-for="(option, value) in webhookFormats" :key="value" :value="value">{{ option.label }}</option>
+            </select>
+            <span class="block mt-1.5 text-xs text-ios-secondary">{{ webhookFormats[channelForm.format].description }}</span>
+          </label>
+          <label class="block">
             Webhook URL (须为 HTTPS)
             <input
               v-model.trim="channelForm.url"
@@ -271,6 +278,24 @@
               class="form-input-base mt-1.5 w-full font-mono text-xs"
             />
           </label>
+          <template v-if="supportsSigning(channelForm.format)">
+            <label class="block">
+              签名密钥（可选）
+              <input
+                v-model="channelForm.secret"
+                type="password"
+                autocomplete="new-password"
+                maxlength="1024"
+                :disabled="channelForm.clearSecret"
+                :placeholder="isEditingChannel ? '留空表示保留原密钥' : '机器人安全设置中的签名密钥'"
+                class="form-input-base mt-1.5 w-full font-mono"
+              />
+            </label>
+            <label v-if="isEditingChannel" class="flex items-center gap-2 mt-3">
+              <input v-model="channelForm.clearSecret" type="checkbox" class="rounded text-ios-blue focus:ring-ios-blue" />
+              清除密钥
+            </label>
+          </template>
         </template>
 
         <p v-if="channelFormError" class="text-xs text-ios-red font-medium">
@@ -307,7 +332,8 @@ import {
   notificationsAPI,
   type NotificationRule,
   type NotificationChannel,
-  type NotificationChannelInput
+  type NotificationChannelInput,
+  type WebhookFormat
 } from '../notificationsApi';
 
 // 1. Rules Logic
@@ -392,6 +418,17 @@ const isEditingChannel = ref(false);
 const channelSaving = ref(false);
 const channelFormError = ref('');
 
+const webhookFormats = {
+  generic: { label: '通用 JSON', description: '通用：POST {kind,severity,title,body,node_id,at}，用于自建服务或兼容该负载的服务。' },
+  wecom: { label: '企业微信群机器人', description: '企业微信：发送 text 文本消息，使用机器人 Webhook 地址。' },
+  dingtalk: { label: '钉钉群机器人', description: '钉钉：发送 text 文本消息，可填写安全设置中的加签密钥。' },
+  feishu: { label: '飞书群机器人', description: '飞书：发送 text 文本消息，可填写安全设置中的签名校验密钥。' }
+};
+
+function supportsSigning(format: WebhookFormat): boolean {
+  return format === 'dingtalk' || format === 'feishu';
+}
+
 const channelForm = reactive({
   id: '',
   kind: 'telegram',
@@ -399,7 +436,10 @@ const channelForm = reactive({
   enabled: true,
   botToken: '',
   chatId: '',
-  url: ''
+  url: '',
+  format: 'generic' as WebhookFormat,
+  secret: '',
+  clearSecret: false
 });
 
 function deliveryCodeLabel(code: string): string {
@@ -448,6 +488,9 @@ function openAddChannel() {
   channelForm.botToken = '';
   channelForm.chatId = '';
   channelForm.url = '';
+  channelForm.format = 'generic';
+  channelForm.secret = '';
+  channelForm.clearSecret = false;
   channelFormError.value = '';
   channelModalOpen.value = true;
 }
@@ -461,6 +504,9 @@ function openEditChannel(ch: NotificationChannel) {
   channelForm.botToken = '';
   channelForm.chatId = '';
   channelForm.url = '';
+  channelForm.format = ch.format || 'generic';
+  channelForm.secret = '';
+  channelForm.clearSecret = false;
   channelFormError.value = '';
   channelModalOpen.value = true;
 }
@@ -488,14 +534,6 @@ async function submitChannel() {
         botToken: channelForm.botToken.trim(),
         chatId: channelForm.chatId.trim()
       };
-    } else if (channelForm.kind === 'webhook') {
-      if (!channelForm.url.trim() || !channelForm.url.trim().startsWith('https://')) {
-        channelFormError.value = '请输入以 https:// 开头的有效 Webhook 地址';
-        return;
-      }
-      input.config = {
-        url: channelForm.url.trim()
-      };
     }
   } else {
     // Editing: if secrets provided, update config
@@ -504,14 +542,19 @@ async function submitChannel() {
         botToken: channelForm.botToken.trim(),
         chatId: channelForm.chatId.trim()
       };
-    } else if (channelForm.kind === 'webhook' && channelForm.url.trim()) {
-      if (!channelForm.url.trim().startsWith('https://')) {
-        channelFormError.value = 'Webhook 地址须以 https:// 开头';
-        return;
-      }
-      input.config = {
-        url: channelForm.url.trim()
-      };
+    }
+  }
+
+  if (channelForm.kind === 'webhook') {
+    const url = channelForm.url.trim();
+    if ((!isEditingChannel.value || url) && !url.startsWith('https://')) {
+      channelFormError.value = '请输入以 https:// 开头的有效 Webhook 地址';
+      return;
+    }
+    input.config = { url, format: channelForm.format };
+    if (supportsSigning(channelForm.format)) {
+      input.config.secret = channelForm.clearSecret ? '' : channelForm.secret;
+      if (isEditingChannel.value) input.config.clearSecret = channelForm.clearSecret;
     }
   }
 

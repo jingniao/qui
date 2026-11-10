@@ -1227,8 +1227,12 @@ POST   /api/v1/notification-channels/{id}/test
 `GET /api/v1/notifications` 支持 Owner 与 Viewer：Viewer 角色仅返回允许的 4 类监控通知（`node_offline`、`cpu`、`memory`、`disk`），Owner 可查看全部通知（含 `public_ip`、`machine_traffic`、`system_alert`）；支持 `unread=1` 只看未读与分页参数，返回 `{items,total,unread}`。
 `POST /api/v1/notifications/read-all`：仅限 Owner＋CSRF，批量将全部未读通知标记为已读。
 `GET /api/v1/notification-rules` 与 `PUT /api/v1/notification-rules`：仅限 Owner，PUT 要求 CSRF。体 `{items:[Rule]}` 进行完整规则替换，包含 7 类规则的启用开关、阈值、持续分钟与冷却分钟，非法值返回 400 `invalid_request`，记操作日志“修改通知规则”。
-`GET /api/v1/notification-channels`：仅限 Owner，返回渠道列表，不包含任何明文密钥（仅显示末 4 位 `last4`）。
-`POST /api/v1/notification-channels`、`PUT /api/v1/notification-channels/{id}`、`DELETE /api/v1/notification-channels/{id}`：仅限 Owner＋CSRF。支持 `telegram`（Bot Token、Chat ID）与 `webhook`（须为 HTTPS URL）。PUT 中若省略 `config` 字段则保留原已保存配置，记操作日志“修改通知渠道”。
+`GET /api/v1/notification-channels`：仅限 Owner，返回渠道列表；Webhook 项增加非敏感 `format`，不包含配置明文。`last4` 仍只显示 Telegram Token 或 Webhook URL 的末 4 位，不显示签名密钥摘要。
+`POST /api/v1/notification-channels`、`PUT /api/v1/notification-channels/{id}`、`DELETE /api/v1/notification-channels/{id}`：仅限 Owner＋CSRF。支持 `telegram`（Bot Token、Chat ID）与 `webhook`（须为 HTTPS URL）。Webhook 的 `config.format` 支持 `generic`、`wecom`、`dingtalk`、`feishu`；新建或旧配置为空时等同 `generic`，无需迁移。`config.secret` 为可选签名密钥，仅钉钉和飞书允许，最多 1024 字节；Telegram 不允许设置 format/secret。未知字段拒绝，记操作日志“修改通知渠道”。
+
+PUT 省略 `config` 保留整份原配置；携带时按字段合并，Webhook 必须明确填写非空 `format`。`url` 空串保留原地址，`secret` 空串保留原密钥；`config.clearSecret: true` 删除密钥且优先于新填密钥。切换到 generic/wecom 自动清除已保存签名密钥，不接受这两种格式新填 secret。Telegram 的 Bot Token、Chat ID 空串同样保留原值。
+
+Webhook 四种格式：generic 保持原 `POST {kind,severity,title,body,node_id,at}`；wecom、dingtalk 发送 `{"msgtype":"text","text":{"content":"文本"}}`；feishu 发送 `{"msg_type":"text","content":{"text":"文本"}}`。机器人文本与 Telegram 统一为 `[SEVERITY] 标题\n正文`，无 severity 省略前缀。钉钉有密钥时用毫秒时间戳，以 secret 为 HMAC-SHA256 key、`ts+"\n"+secret` 为消息，Base64 后 URL 编码一次，追加 timestamp/sign 并保留原 query；飞书使用秒时间戳，以 `ts+"\n"+secret` 为 HMAC-SHA256 key、空消息计算 Base64 签名，timestamp/sign 放入 JSON。三家均须 HTTP 2xx 且业务码为 0（企业微信/钉钉 errcode，兼容钉钉官方示例的字符串 "0"；飞书 code、兼容旧 StatusCode）才成功；非法或非零业务码返回固定 `channel_rejected`。响应最多读取 64 KiB，不回显上游内容、签名或带 Token 地址。
 `POST /api/v1/notification-channels/{id}/test`：仅限 Owner＋CSRF，立即向指定渠道发送一条测试通知并记录投递状态，响应 `{code}`（空串表示成功，否则为固定错误码）。
 
 # 28. gRPC 节点通信
@@ -1299,7 +1303,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 - 用户凭据与节点间凭据分离、订阅 Token 的哈希查找与加密副本规则、节点私钥不上传中央端：见第 9.3 与 11.3 节。
 - 节点间 GOST 凭据与用户凭据隔离，隧道管理存 `tunnels.gost_material`，旧画布材料存 `canvas_tunnels.gost_material`；三节点按段独立 CA 与服务端/客户端叶子证书。Vault 密封、CA 私钥签发后丢弃、有效期 10 年；API/计划/日志只露代数、服务器名、到期与指纹。轮换换整套草稿，发布才生效；删除不会撤销离线节点仍生效的凭据（见[运维手册](docs/operations.md)第 20–21 节）。
-- 通知渠道配置（Telegram Bot Token、Chat ID、Webhook URL）加密保存在 `notification_channels.encrypted_config`，使用 `configuration.key` AES-256-GCM 密封；接口只暴露末 4 位 last4，永不向浏览器回显明文密钥。
+- 通知渠道配置（Telegram Bot Token、Chat ID、Webhook URL、format 与可选签名密钥 secret）加密保存在 `notification_channels.encrypted_config`，使用 `configuration.key` AES-256-GCM 密封并随加密备份校验；接口仅回公开格式与 Token/URL 末 4 位 last4，签名密钥不回显、不进入日志或错误。
 - 自动申请证书用的 Cloudflare API Token 与 ACME 账户私钥（ECDSA P-256）各自 vault 密封保存在 `system_settings` 的 `cloudflare_token`、`acme_account` 两行；接口只回“已设置”、末 4 位与验证时间，永不回显 Token 或私钥。保存前先向 Cloudflare 校验 Token；签发与续期的上游正文、带 Token 的链接与 Token 本身都不入库、不进日志、不回显。证书与私钥密封在 `certificates.encrypted_material`，只随加密备份与恢复离开面板（第 27.16 节）。
 - 敏感配置写入节点时限制文件权限
 - 配置和备份中的敏感字段加密保存

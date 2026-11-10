@@ -260,3 +260,94 @@ func TestHandlerTestChannelReturnsFixedCode(t *testing.T) {
 		t.Fatalf("expected channel_not_found, got %q", testResp.Code)
 	}
 }
+
+func TestHandlerWebhookConfigMerge(t *testing.T) {
+	app := newNotificationHTTP(t)
+	resp := app.call(t, "POST", "/api/v1/notification-channels", `{"kind":"webhook","name":"Ops","enabled":true,"config":{"url":"https://example.com/hook?token=abcd","format":"dingtalk","secret":"private-signing-key"}}`, app.owner, app.ownerCSRF)
+	if resp.Code != 201 {
+		t.Fatalf("create: %d %s", resp.Code, resp.Body.String())
+	}
+	var ch Channel
+	if err := json.Unmarshal(resp.Body.Bytes(), &ch); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ body, format, secret string }{
+		{`{"name":"Ops","enabled":true}`, "dingtalk", "private-signing-key"},
+		{`{"name":"Ops","enabled":true,"config":{"url":"","format":"dingtalk","secret":""}}`, "dingtalk", "private-signing-key"},
+		{`{"name":"Ops","enabled":true,"config":{"format":"dingtalk","clearSecret":true}}`, "dingtalk", ""},
+		{`{"name":"Ops","enabled":true,"config":{"format":"feishu","secret":"new-key"}}`, "feishu", "new-key"},
+		{`{"name":"Ops","enabled":true,"config":{"format":"wecom"}}`, "wecom", ""},
+		{`{"name":"Ops","enabled":true,"config":{"format":"feishu","secret":"another-key"}}`, "feishu", "another-key"},
+		{`{"name":"Ops","enabled":true,"config":{"format":"generic"}}`, "generic", ""},
+		{`{"name":"Ops","enabled":true,"config":{"format":"dingtalk","secret":"discarded-key","clearSecret":true}}`, "dingtalk", ""},
+	} {
+		resp = app.call(t, "PUT", "/api/v1/notification-channels/"+ch.ID, tc.body, app.owner, app.ownerCSRF)
+		if resp.Code != 200 {
+			t.Fatalf("update: %d %s", resp.Code, resp.Body.String())
+		}
+		cfg, err := app.repository.ChannelConfig(context.Background(), ch.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(cfg)
+		var fields map[string]string
+		json.Unmarshal(raw, &fields)
+		if cfg.URL != "https://example.com/hook?token=abcd" || fields["secret"] != tc.secret || fields["format"] != tc.format {
+			t.Fatalf("incorrect merged config: %s", raw)
+		}
+		if strings.Contains(resp.Body.String(), "secret") || strings.Contains(resp.Body.String(), "token=") {
+			t.Fatal("private config leaked")
+		}
+		listed := app.call(t, "GET", "/api/v1/notification-channels", "", app.owner, "")
+		var listing struct {
+			Items []map[string]any `json:"items"`
+		}
+		json.Unmarshal(listed.Body.Bytes(), &listing)
+		if len(listing.Items) != 1 || listing.Items[0]["format"] != tc.format || listing.Items[0]["last4"] != "abcd" {
+			t.Fatalf("listing: %s", listed.Body.String())
+		}
+	}
+	for _, cfg := range []string{`{"url":""}`, `{"format":""}`, `{"format":"bogus"}`, `{"format":"generic","secret":"bad"}`, `{"format":"feishu","secret":"` + strings.Repeat("x", 1025) + `"}`, `{"format":"feishu","unknown":true}`} {
+		resp = app.call(t, "PUT", "/api/v1/notification-channels/"+ch.ID, `{"name":"Ops","enabled":true,"config":`+cfg+`}`, app.owner, app.ownerCSRF)
+		if resp.Code != 400 {
+			t.Fatalf("accepted invalid update %s: %d", cfg, resp.Code)
+		}
+	}
+	resp = app.call(t, "PUT", "/api/v1/notification-channels/"+ch.ID, `{"name":"Ops","enabled":true,"config":{"url":"https://example.com/new?token=wxyz","format":"feishu","secret":"replacement-key"}}`, app.owner, app.ownerCSRF)
+	if resp.Code != 200 {
+		t.Fatalf("replace URL: %d", resp.Code)
+	}
+	cfg, err := app.repository.ChannelConfig(context.Background(), ch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.URL != "https://example.com/new?token=wxyz" || cfg.Secret != "replacement-key" || cfg.Format != "feishu" {
+		t.Fatal("URL or secret replacement was not saved")
+	}
+	if strings.Contains(resp.Body.String(), "replacement-key") || strings.Contains(resp.Body.String(), "token=") {
+		t.Fatal("replacement config leaked")
+	}
+}
+
+func TestHandlerChannelFormatValidation(t *testing.T) {
+	app := newNotificationHTTP(t)
+	for _, tc := range []struct {
+		kind, cfg string
+		status    int
+	}{
+		{"webhook", `{"url":"https://example.com"}`, 201},
+		{"webhook", `{"url":"https://example.com","format":"wecom"}`, 201},
+		{"webhook", `{"url":"https://example.com","format":"unknown"}`, 400},
+		{"webhook", `{"url":"https://example.com","secret":"bad"}`, 400},
+		{"webhook", `{"url":"https://example.com","format":"wecom","secret":"bad"}`, 400},
+		{"telegram", `{"botToken":"bot","chatId":"chat","format":"generic"}`, 400},
+		{"telegram", `{"botToken":"bot","chatId":"chat","secret":"bad"}`, 400},
+		{"webhook", `{"url":"https://example.com","format":"feishu","typo":true}`, 400},
+		{"webhook", `{"url":"https://example.com","clearSecret":true}`, 400},
+	} {
+		resp := app.call(t, "POST", "/api/v1/notification-channels", `{"kind":"`+tc.kind+`","name":"Ops","config":`+tc.cfg+`}`, app.owner, app.ownerCSRF)
+		if resp.Code != tc.status {
+			t.Fatalf("%s: %d want %d", tc.cfg, resp.Code, tc.status)
+		}
+	}
+}

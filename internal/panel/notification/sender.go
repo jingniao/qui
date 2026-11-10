@@ -3,6 +3,9 @@ package notification
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +21,7 @@ import (
 type Sender struct {
 	Client      *http.Client
 	TelegramAPI string
+	Now         func() time.Time
 }
 
 func (s Sender) Send(ctx context.Context, channel Channel, config ChannelConfig, n Notification) string {
@@ -45,14 +50,9 @@ func (s Sender) sendTelegram(ctx context.Context, client *http.Client, config Ch
 	}
 	targetURL := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(apiBase, "/"), config.BotToken)
 
-	text := fmt.Sprintf("[%s] %s\n%s", strings.ToUpper(n.Severity), n.Title, n.Body)
-	if n.Severity == "" {
-		text = fmt.Sprintf("%s\n%s", n.Title, n.Body)
-	}
-
 	reqBody, _ := json.Marshal(map[string]any{
 		"chat_id": config.ChatID,
-		"text":    text,
+		"text":    notificationText(n),
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(reqBody))
@@ -88,9 +88,17 @@ func (s Sender) sendTelegram(ctx context.Context, client *http.Client, config Ch
 	return ""
 }
 
+func notificationText(n Notification) string {
+	text := n.Title + "\n" + n.Body
+	if n.Severity != "" {
+		text = "[" + strings.ToUpper(n.Severity) + "] " + text
+	}
+	return text
+}
+
 func (s Sender) sendWebhook(ctx context.Context, client *http.Client, config ChannelConfig, n Notification) string {
 	u, err := url.Parse(config.URL)
-	if err != nil || u.Scheme != "https" {
+	if err != nil || config.Validate("webhook") != nil {
 		return "channel_rejected"
 	}
 
@@ -102,12 +110,39 @@ func (s Sender) sendWebhook(ctx context.Context, client *http.Client, config Cha
 		"node_id":  n.NodeID,
 		"at":       n.At,
 	}
+	switch config.WebhookFormat() {
+	case "wecom", "dingtalk":
+		payload = map[string]any{"msgtype": "text", "text": map[string]string{"content": notificationText(n)}}
+	case "feishu":
+		payload = map[string]any{"msg_type": "text", "content": map[string]string{"text": notificationText(n)}}
+	}
+	if config.Secret != "" {
+		now := time.Now
+		if s.Now != nil {
+			now = s.Now
+		}
+		if config.Format == "dingtalk" {
+			ts := strconv.FormatInt(now().UnixMilli(), 10)
+			mac := hmac.New(sha256.New, []byte(config.Secret))
+			_, _ = mac.Write([]byte(ts + "\n" + config.Secret))
+			query := u.Query()
+			query.Set("timestamp", ts)
+			// Values.Encode applies QueryEscape once, including Base64 '+' and '='.
+			query.Set("sign", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+			u.RawQuery = query.Encode()
+		} else {
+			ts := strconv.FormatInt(now().Unix(), 10)
+			mac := hmac.New(sha256.New, []byte(ts+"\n"+config.Secret))
+			payload["timestamp"] = ts
+			payload["sign"] = base64.StdEncoding.EncodeToString(mac.Sum(nil))
+		}
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "channel_rejected"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.URL, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(data))
 	if err != nil {
 		return "channel_rejected"
 	}
@@ -119,9 +154,36 @@ func (s Sender) sendWebhook(ctx context.Context, client *http.Client, config Cha
 	}
 	defer resp.Body.Close()
 
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "channel_http"
+	}
+	if readErr != nil {
+		return "channel_network"
+	}
+	if config.WebhookFormat() != "generic" {
+		var result struct {
+			ErrCode    json.Number `json:"errcode"`
+			Code       *int        `json:"code"`
+			StatusCode *int        `json:"StatusCode"`
+		}
+		if json.Unmarshal(body, &result) != nil {
+			return "channel_rejected"
+		}
+		if config.Format != "feishu" {
+			// DingTalk documents Number, but its official response example uses "0".
+			if result.ErrCode != "0" {
+				return "channel_rejected"
+			}
+			return ""
+		}
+		code := result.Code
+		if code == nil {
+			code = result.StatusCode
+		}
+		if code == nil || *code != 0 {
+			return "channel_rejected"
+		}
 	}
 	return ""
 }

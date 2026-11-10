@@ -44,4 +44,54 @@ for (const file of ['components/NotificationBell.vue', 'modules/system/component
     assert.ok(Number(match[1]) >= 12, file + ' notification text must remain readable at 12px or above');
   }
 }
+// Exercise the actual Vue script and API payloads with controlled transport and reactive primitives.
+const vueScript = notifSettings.match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1];
+const calls = [];
+globalThis.__notificationCalls = calls;
+const formModule = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(
+  vueScript.replace(/import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];?/g, '') + `
+  export { channelForm, openAddChannel, openEditChannel, submitChannel, supportsSigning };
+  `, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }
+).outputText.replace(/^/, `
+const ref = value => ({value});
+const reactive = value => value;
+const onMounted = () => {};
+const showToast = () => {};
+const notificationsAPI = {saveChannel: async value => globalThis.__notificationCalls.push(JSON.parse(JSON.stringify(value))), channels: async () => []};
+`)).toString('base64'));
+for (const format of ['generic', 'wecom', 'dingtalk', 'feishu']) {
+  assert.equal(formModule.supportsSigning(format), ['dingtalk', 'feishu'].includes(format));
+  formModule.openAddChannel();
+  Object.assign(formModule.channelForm, { kind: 'webhook', name: 'Ops', url: 'https://example.com/hook', format, secret: 'test-key' });
+  await formModule.submitChannel();
+  assert.equal(calls.at(-1).config.format, format);
+  assert.equal(calls.at(-1).config.secret, ['dingtalk', 'feishu'].includes(format) ? 'test-key' : undefined);
+}
+formModule.openEditChannel({ id: 'one', kind: 'webhook', name: 'Ops', enabled: true, format: 'dingtalk' });
+await formModule.submitChannel();
+assert.deepEqual(calls.at(-1).config, { url: '', format: 'dingtalk', secret: '', clearSecret: false });
+formModule.channelForm.clearSecret = true;
+await formModule.submitChannel();
+assert.equal(calls.at(-1).config.clearSecret, true);
+formModule.channelForm.secret = 'ignored-when-clearing';
+await formModule.submitChannel();
+assert.equal(calls.at(-1).config.secret, '');
+formModule.channelForm.format = 'wecom';
+await formModule.submitChannel();
+assert.deepEqual(calls.at(-1).config, { url: '', format: 'wecom' });
+assert.match(notifSettings, /v-if="supportsSigning\(channelForm\.format\)"[\s\S]*?v-model="channelForm\.secret"/, 'signing fields must be gated to supported formats');
+assert.match(notifSettings, /留空表示保留原密钥/);
+assert.match(notifSettings, /清除密钥/);
+const transport = [];
+globalThis.__notificationTransport = transport;
+const realAPI = await load('modules/system/notificationsApi.ts', source => source.replace(
+  /import\s*\{[^}]*\}\s*from\s*['"][^'"]*apiClient['"];?/,
+  'const request = async (...args) => { globalThis.__notificationTransport.push(JSON.parse(JSON.stringify(args))); return {}; };'
+));
+await realAPI.notificationsAPI.saveChannel(calls.at(-1));
+assert.deepEqual(transport.at(-1), ['/notification-channels/one', 'PUT', {name: 'Ops', enabled: true, config: { url: '', format: 'wecom' }}]);
+await realAPI.notificationsAPI.saveChannel({id: 'one', kind: 'webhook', name: 'Ops', enabled: false});
+assert.deepEqual(transport.at(-1), ['/notification-channels/one', 'PUT', {name: 'Ops', enabled: false}]);
+delete globalThis.__notificationCalls;
+delete globalThis.__notificationTransport;
 console.log('PASS NOTIFICATIONS SELFTEST');

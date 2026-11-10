@@ -2,6 +2,8 @@ package notification
 
 import (
 	"errors"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -58,11 +60,50 @@ type ChannelConfig struct {
 	BotToken string `json:"botToken,omitempty"`
 	ChatID   string `json:"chatId,omitempty"`
 	URL      string `json:"url,omitempty"`
+	Format   string `json:"format,omitempty"`
+	Secret   string `json:"secret,omitempty"`
+}
+
+func (c ChannelConfig) WebhookFormat() string {
+	if c.Format == "" {
+		return "generic"
+	}
+	return c.Format
+}
+
+func (c ChannelConfig) Validate(kind string) error {
+	if len(c.Secret) > 1024 {
+		return ErrInvalid
+	}
+	switch kind {
+	case "telegram":
+		if strings.TrimSpace(c.BotToken) == "" || strings.TrimSpace(c.ChatID) == "" || c.Format != "" || c.Secret != "" {
+			return ErrInvalid
+		}
+	case "webhook":
+		u, err := url.Parse(c.URL)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return ErrInvalid
+		}
+		switch c.WebhookFormat() {
+		case "generic", "wecom":
+			if c.Secret != "" {
+				return ErrInvalid
+			}
+		case "dingtalk", "feishu":
+		default:
+			return ErrInvalid
+		}
+	default:
+		return ErrInvalid
+	}
+	return nil
 }
 
 type Channel struct {
 	ID             string  `json:"id"`
 	Kind           string  `json:"kind"` // "telegram" | "webhook"
+	Format         string  `json:"format,omitempty"`
 	Name           string  `json:"name"`
 	Enabled        bool    `json:"enabled"`
 	Last4          string  `json:"last4"`

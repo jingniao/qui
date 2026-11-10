@@ -1011,6 +1011,7 @@ type Capabilities struct {
 	ServerSettingsCombinations     []*SettingsCombination `protobuf:"bytes,24,rep,name=server_settings_combinations,json=serverSettingsCombinations,proto3" json:"server_settings_combinations,omitempty"`
 	TlsCertificateFilesSupported   bool                   `protobuf:"varint,25,opt,name=tls_certificate_files_supported,json=tlsCertificateFilesSupported,proto3" json:"tls_certificate_files_supported,omitempty"`
 	PanelCatalogueSupported        bool                   `protobuf:"varint,26,opt,name=panel_catalogue_supported,json=panelCatalogueSupported,proto3" json:"panel_catalogue_supported,omitempty"`
+	DomainKeywordSupported         bool                   `protobuf:"varint,27,opt,name=domain_keyword_supported,json=domainKeywordSupported,proto3" json:"domain_keyword_supported,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -1227,6 +1228,13 @@ func (x *Capabilities) GetPanelCatalogueSupported() bool {
 	return false
 }
 
+func (x *Capabilities) GetDomainKeywordSupported() bool {
+	if x != nil {
+		return x.DomainKeywordSupported
+	}
+	return false
+}
+
 type CoreCapability struct {
 	state                         protoimpl.MessageState `protogen:"open.v1"`
 	Name                          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1241,6 +1249,7 @@ type CoreCapability struct {
 	ServerSettingsContractVersion uint32                 `protobuf:"varint,10,opt,name=server_settings_contract_version,json=serverSettingsContractVersion,proto3" json:"server_settings_contract_version,omitempty"`
 	ServerSettingsCombinations    []*SettingsCombination `protobuf:"bytes,11,rep,name=server_settings_combinations,json=serverSettingsCombinations,proto3" json:"server_settings_combinations,omitempty"`
 	TlsCertificateFilesSupported  bool                   `protobuf:"varint,12,opt,name=tls_certificate_files_supported,json=tlsCertificateFilesSupported,proto3" json:"tls_certificate_files_supported,omitempty"`
+	DomainKeywordSupported        bool                   `protobuf:"varint,13,opt,name=domain_keyword_supported,json=domainKeywordSupported,proto3" json:"domain_keyword_supported,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -1355,6 +1364,13 @@ func (x *CoreCapability) GetServerSettingsCombinations() []*SettingsCombination 
 func (x *CoreCapability) GetTlsCertificateFilesSupported() bool {
 	if x != nil {
 		return x.TlsCertificateFilesSupported
+	}
+	return false
+}
+
+func (x *CoreCapability) GetDomainKeywordSupported() bool {
+	if x != nil {
+		return x.DomainKeywordSupported
 	}
 	return false
 }
@@ -5479,7 +5495,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12\x1a\n" +
 	"\bsecurity\x18\x03 \x01(\tR\bsecurity\x12\x1c\n" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12\x12\n" +
-	"\x04flow\x18\x05 \x01(\tR\x04flow\"\x90\f\n" +
+	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xca\f\n" +
 	"\fCapabilities\x12\x1b\n" +
 	"\tcore_name\x18\x01 \x01(\tR\bcoreName\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12G\n" +
@@ -5507,7 +5523,8 @@ const file_agent_proto_rawDesc = "" +
 	" server_settings_contract_version\x18\x17 \x01(\rR\x1dserverSettingsContractVersion\x12l\n" +
 	"\x1cserver_settings_combinations\x18\x18 \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\x12E\n" +
 	"\x1ftls_certificate_files_supported\x18\x19 \x01(\bR\x1ctlsCertificateFilesSupported\x12:\n" +
-	"\x19panel_catalogue_supported\x18\x1a \x01(\bR\x17panelCatalogueSupported\"\xc4\x05\n" +
+	"\x19panel_catalogue_supported\x18\x1a \x01(\bR\x17panelCatalogueSupported\x128\n" +
+	"\x18domain_keyword_supported\x18\x1b \x01(\bR\x16domainKeywordSupported\"\xfe\x05\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +
@@ -5521,7 +5538,8 @@ const file_agent_proto_rawDesc = "" +
 	" server_settings_contract_version\x18\n" +
 	" \x01(\rR\x1dserverSettingsContractVersion\x12l\n" +
 	"\x1cserver_settings_combinations\x18\v \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\x12E\n" +
-	"\x1ftls_certificate_files_supported\x18\f \x01(\bR\x1ctlsCertificateFilesSupportedB\n" +
+	"\x1ftls_certificate_files_supported\x18\f \x01(\bR\x1ctlsCertificateFilesSupported\x128\n" +
+	"\x18domain_keyword_supported\x18\r \x01(\bR\x16domainKeywordSupportedB\n" +
 	"\n" +
 	"\b_healthy\"\xeb\x01\n" +
 	"\n" +

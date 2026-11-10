@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"fmt"
 	"errors"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
@@ -31,11 +32,12 @@ type Settings interface {
 	ReadSetup(context.Context) (string, string, error)
 }
 type Service struct {
-	Repository *Repository
-	Nodes      Nodes
-	Users      Users
-	Proxies    Proxies
-	Settings   Settings
+	Repository       *Repository
+	Nodes            Nodes
+	Users            Users
+	Proxies          Proxies
+	Settings         Settings
+	NodeCapabilities func(context.Context, string) ([]desiredstate.CoreKeywordCapability, error)
 }
 
 func contains(values []string, value string) bool {
@@ -95,6 +97,39 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 		}
 		if err := s.validateActionBackup(ctx, owner, input.Action.Failover, input.Action.BackupID, input.Match.Network); err != nil {
 			return Record{}, err
+		}
+	}
+	if s.NodeCapabilities != nil {
+		hasKeywords := len(input.Match.Keywords) > 0
+		if !hasKeywords {
+			for _, sID := range input.Match.ServiceIDs {
+				if svc, err := s.Repository.Service(ctx, sID); err == nil && svc.Enabled {
+					if len(svc.Keywords) > 0 || len(svc.Sources) > 0 {
+						hasKeywords = true
+						break
+					}
+				}
+			}
+		}
+		if hasKeywords {
+			targetNodes := append([]string(nil), input.Scope.NodeIDs...)
+			for _, gID := range input.Scope.GroupIDs {
+				if g, err := s.Nodes.Group(ctx, gID); err == nil {
+					targetNodes = append(targetNodes, g.ServerIDs...)
+				}
+			}
+			if len(targetNodes) == 0 {
+				targetNodes = []string{""}
+			}
+			for _, nID := range targetNodes {
+				caps, err := s.NodeCapabilities(ctx, nID)
+				if err == nil {
+					dummyState := desiredstate.State{Policies: []desiredstate.Policy{{Enabled: true, Match: desiredstate.Match{Keywords: []string{"check"}}}}}
+					if err := desiredstate.RequireKeywordSupport(dummyState, caps); err != nil {
+						return Record{}, fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
+					}
+				}
+			}
 		}
 	}
 	return s.Repository.Save(ctx, ruleID, input)

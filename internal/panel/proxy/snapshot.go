@@ -248,6 +248,10 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		}
 		state.Policies = rules
 	}
+	cores := node.EnabledCores(n.Capabilities)
+	if err := desiredstate.RequireKeywordSupport(state, node.KeywordCapabilities(cores)); err != nil {
+		return state, enabled, fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
+	}
 	chains, err := snapshotList(func(page, size int) ([]Chain, int, error) {
 		return s.Repository.Chains(ctx, nodeID, page, size)
 	})

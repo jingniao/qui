@@ -22,7 +22,7 @@ func EnabledCores(c *pb.Capabilities) []*pb.CoreCapability {
 	if c.CoreName == "" {
 		return nil
 	}
-	return []*pb.CoreCapability{{Name: c.CoreName, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations, TlsCertificateFilesSupported: c.TlsCertificateFilesSupported}}
+	return []*pb.CoreCapability{{Name: c.CoreName, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations, TlsCertificateFilesSupported: c.TlsCertificateFilesSupported, DomainKeywordSupported: c.DomainKeywordSupported}}
 }
 func SelectedCore(c *pb.Capabilities, name string) *pb.CoreCapability {
 	if c == nil {

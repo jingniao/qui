@@ -72,3 +72,23 @@ func validateSettingsContract(version uint32, combinations []*pb.SettingsCombina
 	}
 	return nil
 }
+
+func KeywordCapability(core *pb.CoreCapability) desiredstate.CoreKeywordCapability {
+	if core == nil {
+		return desiredstate.CoreKeywordCapability{}
+	}
+	return desiredstate.CoreKeywordCapability{
+		Name:                   core.Name,
+		DomainKeywordSupported: core.DomainKeywordSupported,
+	}
+}
+
+func KeywordCapabilities(cores []*pb.CoreCapability) []desiredstate.CoreKeywordCapability {
+	out := make([]desiredstate.CoreKeywordCapability, 0, len(cores))
+	for _, c := range cores {
+		if c != nil {
+			out = append(out, KeywordCapability(c))
+		}
+	}
+	return out
+}

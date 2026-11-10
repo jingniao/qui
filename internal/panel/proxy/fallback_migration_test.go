@@ -6,13 +6,11 @@ import (
 	"database/sql"
 	"io/fs"
 	"path/filepath"
-	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/migrations"
 	"testing"
 	"testing/fstest"
-	"time"
 )
 
 func TestFallbackMigrationPreservesLegacyModesAndEncryptedSettings(t *testing.T) {
@@ -42,9 +40,8 @@ func TestFallbackMigrationPreservesLegacyModesAndEncryptedSettings(t *testing.T)
 	if err := db.Migrate(ctx, database, legacy); err != nil {
 		t.Fatal(err)
 	}
-	nodes := &node.Repository{Database: database}
-	n, _, _, err := nodes.CreateEnrollment(ctx, "Legacy", time.Hour)
-	if err != nil {
+	nodeID := "node-legacy"
+	if _, err := database.ExecContext(ctx, "INSERT INTO nodes(id,name,status,enabled,hostname,operating_system,agent_version,public_ip,created_at) VALUES(?,'Legacy','pending',1,'','','','',?)", nodeID, timestamp()); err != nil {
 		t.Fatal(err)
 	}
 	configurationVault, err := vault.Open(filepath.Join(directory, "key"))
@@ -56,7 +53,7 @@ func TestFallbackMigrationPreservesLegacyModesAndEncryptedSettings(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, value := range []struct{ id, mode, backup string }{{"backup", "Block", ""}, {"primary", "BackupOutbound", "backup"}} {
-		if _, err := database.ExecContext(ctx, `INSERT INTO outbounds(id,name,node_id,protocol,address,port,enabled,encrypted_settings,support_tcp,support_udp,failure_policy,backup_outbound_id,created_at) VALUES(?,?,?,'socks5','192.0.2.10',1080,1,?,1,1,?,?,?)`, value.id, value.id, n.ID, sealed, value.mode, value.backup, timestamp()); err != nil {
+		if _, err := database.ExecContext(ctx, `INSERT INTO outbounds(id,name,node_id,protocol,address,port,enabled,encrypted_settings,support_tcp,support_udp,failure_policy,backup_outbound_id,created_at) VALUES(?,?,?,'socks5','192.0.2.10',1080,1,?,1,1,?,?,?)`, value.id, value.id, nodeID, sealed, value.mode, value.backup, timestamp()); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -69,6 +69,7 @@ func Detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	// native check still gates every apply, and the panel only accepts the
 	// setting when this bit is reported (v1.4.7 section 3).
 	caps.TlsCertificateFilesSupported = true
+	caps.DomainKeywordSupported = true
 	caps.ServerSettingsCombinations = detectServerSettings(ctx, executable, match[1])
 	if len(caps.ServerSettingsCombinations) > 0 {
 		caps.ServerSettingsContractVersion = desiredstate.SettingsContractVersion

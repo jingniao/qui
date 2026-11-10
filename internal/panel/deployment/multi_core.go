@@ -41,7 +41,11 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 			return fmt.Errorf("inbound %s: %w", in.ID, err)
 		}
 	}
-	for _, core := range node.EnabledCores(c) {
+	cores := node.EnabledCores(c)
+	if err := desiredstate.RequireKeywordSupport(state, node.KeywordCapabilities(cores)); err != nil {
+		return fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
+	}
+	for _, core := range cores {
 		// A GOST forward leaves through its own target and carries no outbound
 		// resources at all (desiredstate.Validate enforces its enabled direct
 		// default), so only cores that open outbounds are checked here.

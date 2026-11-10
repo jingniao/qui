@@ -15,7 +15,9 @@ ProtectHome=true
 PrivateTmp=true
 # This operation writes sysctls; ProtectKernelTunables=true would prevent it.
 ProtectKernelTunables=false
-ProtectKernelModules=true
+# Keep module files readable for algorithm discovery; the syscall filter and
+# capability set block explicit loading, while kernel sysctl autoload uses modprobe outside this sandbox.
+SystemCallFilter=~@module
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX

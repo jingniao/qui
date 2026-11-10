@@ -35,7 +35,7 @@
 #     `rc-service proxy-agent status` as "crashed".
 #   * systemd hardening options have no OpenRC equivalent, so they are simply
 #     missing here: ProtectSystem, ProtectHome, PrivateTmp, ProtectKernelTunables,
-#     ProtectKernelModules, ProtectControlGroups and RestrictSUIDSGID. The
+#     SystemCallFilter, ProtectControlGroups and RestrictSUIDSGID. The
 #     process hardening that does exist (user, no_new_privs, capabilities, umask)
 #     is applied.
 name="Proxy Control node agent"

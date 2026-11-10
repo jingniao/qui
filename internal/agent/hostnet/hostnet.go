@@ -25,6 +25,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 
 	"proxycontrol/internal/platform/vault"
@@ -34,6 +36,14 @@ import (
 // Table is the one nftables table this feature owns. Nothing else on the host is
 // read or changed, so deleting the table restores the previous behaviour.
 const Table = "proxy_agent_source"
+
+// HopTable is the second table this helper owns: the Hysteria2 port-hop
+// redirections (v1.5.0 section 7). It is independent of the source table, and
+// deleting it restores the host to a node with no port hopping.
+const HopTable = "proxy_agent_hop"
+
+// MaxPortHops bounds one desired file so a single nft invocation stays small.
+const MaxPortHops = 32
 
 // The helper protocol is two files in one directory. Their names and the field
 // set are fixed and minimal: an Agent that has updated itself writes
@@ -54,6 +64,14 @@ type Desired struct {
 	IPv6       string `json:"ipv6"`
 	ExemptIPv4 string `json:"exempt_ipv4"`
 	ExemptIPv6 string `json:"exempt_ipv6"`
+	PortHops   []PortHop `json:"port_hops,omitempty"`
+}
+
+// PortHop is one Hysteria2 inbound's UDP range redirected to its listener.
+type PortHop struct {
+	Start  int `json:"start"`
+	End    int `json:"end"`
+	Target int `json:"target"`
 }
 
 // Status is the helper outcome for one Desired.ID.
@@ -83,12 +101,28 @@ func (d Desired) Validate() error {
 			return fmt.Errorf("invalid exempt IPv6: %w", err)
 		}
 	}
+	if len(d.PortHops) > MaxPortHops {
+		return errors.New("too many port hops")
+	}
+	for i, hop := range d.PortHops {
+		if hop.Start < 1 || hop.Start > 65535 || hop.End < 1 || hop.End > 65535 || hop.End <= hop.Start {
+			return errors.New("invalid hop port range")
+		}
+		if hop.Target < 1 || hop.Target > 65535 {
+			return errors.New("invalid hop target port")
+		}
+		for _, other := range d.PortHops[:i] {
+			if hop.Start <= other.End && other.Start <= hop.End {
+				return errors.New("hop port ranges overlap")
+			}
+		}
+	}
 	return nil
 }
 
 // Clear reports whether no family is configured: the table is then removed
 // instead of being rewritten, and an unconfigured family is never translated.
-func (d Desired) Clear() bool { return d.IPv4 == "" && d.IPv6 == "" }
+func (d Desired) Clear() bool { return d.IPv4 == "" && d.IPv6 == "" && len(d.PortHops) == 0 }
 
 // InterfaceLookup resolves the interface that owns an address. An address that
 // is not assigned locally is an error: the rule would never match.
@@ -123,9 +157,10 @@ func HostInterfaceLookup(address string) (string, error) {
 	return "", fmt.Errorf("address %s is not assigned to any local interface", address)
 }
 
-// Render returns the rule file of one desired state. It creates the table first
-// so the following delete also succeeds on a first install, and it keeps every
-// rule in the one table this feature owns.
+// Render returns the rule file of one desired state. Each of the two tables this
+// helper owns is created before it is deleted, so a first install works and a
+// clear request removes a table that was in force before. The Hysteria2 hop
+// table is appended after the source table; neither rewrites the other.
 func Render(desired Desired, interfaces InterfaceLookup) ([]byte, error) {
 	if err := desired.Validate(); err != nil {
 		return nil, err
@@ -135,31 +170,44 @@ func Render(desired Desired, interfaces InterfaceLookup) ([]byte, error) {
 	var rules strings.Builder
 	rules.WriteString("table inet " + Table + " {} # makes the delete safe on first install\n")
 	rules.WriteString("delete table inet " + Table + "\n")
-	if ipv4 == "" && ipv6 == "" {
-		return []byte(rules.String()), nil
-	}
-	if interfaces == nil {
-		return nil, errors.New("no interface lookup")
-	}
-	rules.WriteString("table inet " + Table + " {\n")
-	rules.WriteString("  chain postrouting {\n")
-	rules.WriteString("    type nat hook postrouting priority 90; # before Docker/other srcnat chains (100); first NAT binding wins\n")
-	if ipv4 != "" {
-		name, err := interfaces(ipv4)
-		if err != nil {
-			return nil, err
+	if ipv4 != "" || ipv6 != "" {
+		if interfaces == nil {
+			return nil, errors.New("no interface lookup")
 		}
-		fmt.Fprintf(&rules, "    oifname %q ip saddr != { %s } snat ip to %s\n", name, sourceSet(ipv4, exemptIPv4), ipv4)
-	}
-	if ipv6 != "" {
-		name, err := interfaces(ipv6)
-		if err != nil {
-			return nil, err
+		rules.WriteString("table inet " + Table + " {\n")
+		rules.WriteString("  chain postrouting {\n")
+		rules.WriteString("    type nat hook postrouting priority 90; # before Docker/other srcnat chains (100); first NAT binding wins\n")
+		if ipv4 != "" {
+			name, err := interfaces(ipv4)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&rules, "    oifname %q ip saddr != { %s } snat ip to %s\n", name, sourceSet(ipv4, exemptIPv4), ipv4)
 		}
-		fmt.Fprintf(&rules, "    oifname %q ip6 saddr != { %s } snat ip6 to %s\n", name, sourceSet(ipv6, exemptIPv6), ipv6)
+		if ipv6 != "" {
+			name, err := interfaces(ipv6)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&rules, "    oifname %q ip6 saddr != { %s } snat ip6 to %s\n", name, sourceSet(ipv6, exemptIPv6), ipv6)
+		}
+		rules.WriteString("  }\n")
+		rules.WriteString("}\n")
 	}
-	rules.WriteString("  }\n")
-	rules.WriteString("}\n")
+	rules.WriteString("table inet " + HopTable + " {} # makes the delete safe on first install\n")
+	rules.WriteString("delete table inet " + HopTable + "\n")
+	if len(desired.PortHops) > 0 {
+		hops := append([]PortHop(nil), desired.PortHops...)
+		sort.Slice(hops, func(i, j int) bool { return hops[i].Start < hops[j].Start })
+		rules.WriteString("table inet " + HopTable + " {\n")
+		rules.WriteString("  chain prerouting {\n")
+		rules.WriteString("    type nat hook prerouting priority dstnat; policy accept;\n")
+		for _, hop := range hops {
+			fmt.Fprintf(&rules, "    udp dport %d-%d redirect to :%d\n", hop.Start, hop.End, hop.Target)
+		}
+		rules.WriteString("  }\n")
+		rules.WriteString("}\n")
+	}
 	return []byte(rules.String()), nil
 }
 
@@ -251,6 +299,31 @@ func RunHelper(ctx context.Context, directory string) error {
 		return errors.Join(applyErr, err)
 	}
 	return applyErr
+}
+
+// HelperInstalled reports whether the host-network helper units are present.
+// The same fixed program maintains both tables, so an Agent only advertises
+// port hopping when the helper that would create the hop table can run.
+func HelperInstalled() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	for _, paths := range [][]string{
+		{"/etc/systemd/system/proxy-agent-host-network.service", "/etc/systemd/system/proxy-agent-host-network.path"},
+		{"/etc/init.d/proxy-agent-host-network", "/usr/local/lib/proxy-agent/host-network-watch"},
+	} {
+		good := true
+		for _, p := range paths {
+			info, err := os.Stat(p)
+			if err != nil || !info.Mode().IsRegular() {
+				good = false
+			}
+		}
+		if good {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadDesired reads and validates the helper input of one directory. Decoding is

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,8 @@ table inet proxy_agent_source {
     oifname "eth0" ip saddr != { 198.51.100.4 } snat ip to 198.51.100.4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -57,6 +60,8 @@ table inet proxy_agent_source {
     oifname "eth0" ip saddr != { 198.51.100.4, 198.51.100.9 } snat ip to 198.51.100.4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -70,6 +75,8 @@ table inet proxy_agent_source {
     oifname "eth1" ip6 saddr != { 2001:db8::4 } snat ip6 to 2001:db8::4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -83,6 +90,8 @@ table inet proxy_agent_source {
     oifname "eth1" ip6 saddr != { 2001:db8::4, 2001:db8::9 } snat ip6 to 2001:db8::4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -97,6 +106,8 @@ table inet proxy_agent_source {
     oifname "eth1" ip6 saddr != { 2001:db8::4 } snat ip6 to 2001:db8::4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -111,6 +122,8 @@ table inet proxy_agent_source {
     oifname "eth1" ip6 saddr != { 2001:db8::4, 2001:db8::9 } snat ip6 to 2001:db8::4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -124,6 +137,8 @@ table inet proxy_agent_source {
     oifname "eth1" ip6 saddr != { 2001:db8::4 } snat ip6 to 2001:db8::4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -137,6 +152,8 @@ table inet proxy_agent_source {
     oifname "eth0" ip saddr != { 198.51.100.4, 198.51.100.9 } snat ip to 198.51.100.4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -150,6 +167,8 @@ table inet proxy_agent_source {
     oifname "eth0" ip saddr != { 198.51.100.4 } snat ip to 198.51.100.4
   }
 }
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 		{
@@ -157,6 +176,8 @@ table inet proxy_agent_source {
 			desired: Desired{ID: "a"},
 			want: `table inet proxy_agent_source {} # makes the delete safe on first install
 delete table inet proxy_agent_source
+table inet proxy_agent_hop {} # makes the delete safe on first install
+delete table inet proxy_agent_hop
 `,
 		},
 	}
@@ -315,7 +336,7 @@ func TestDesiredFilesRoundTripAndLeaveNoTemporaryFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read != desired {
+	if !reflect.DeepEqual(read, desired) {
 		t.Fatalf("desired file lost a field: %+v", read)
 	}
 	if err := WriteStatus(directory, Status{ID: "round-trip", OK: true}); err != nil {

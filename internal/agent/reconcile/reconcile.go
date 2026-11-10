@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
+	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"sort"
@@ -51,6 +52,9 @@ type Reconciler struct {
 	// HostNetworkSync replaces the whole helper interaction. It is a test seam;
 	// nil selects syncHostNetwork.
 	HostNetworkSync        func(ctx context.Context, network desiredstate.Network) error
+	// HostNetworkPortHops are the enabled Hysteria2 hop ranges of the revision
+	// being applied, collected before the helper is driven.
+	HostNetworkPortHops []hostnet.PortHop
 	RequireSuccessReceipts bool
 	mu                     sync.Mutex
 	manifest               Manifest
@@ -269,7 +273,7 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	// be committed, so the helper is driven before the manifest: a failure
 	// restores the previous runtime and the previous rules on the host and is
 	// retried like any other temporary failure.
-	if err := r.applyHostNetwork(ctx, state.Network); err != nil {
+	if err := r.applyHostNetwork(ctx, state); err != nil {
 		result.Success = false
 		result.Code = hostNetworkFailedCode
 		result.Message = err.Error()
@@ -417,7 +421,7 @@ func (r *Reconciler) restoreRevision(ctx context.Context, revision int64) error 
 	r.renderedDigest = digest(rendered.Data)
 	// A failure rollback, a manual rollback and a startup restore all end here,
 	// so the helper is driven to the restored revision as well.
-	if err := r.applyHostNetwork(ctx, state.Network); err != nil {
+	if err := r.applyHostNetwork(ctx, state); err != nil {
 		return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
 	}
 	return nil
@@ -430,7 +434,7 @@ func (r *Reconciler) Restore(ctx context.Context) error {
 	}
 	if r.manifest.Revision == 0 {
 		// Nothing is retained, so nothing may stay enforced either.
-		return r.applyHostNetwork(ctx, nil)
+		return r.applyHostNetwork(ctx, desiredstate.State{})
 	}
 	data, err := r.readRevision(r.manifest.Revision)
 	if err != nil {
@@ -517,7 +521,7 @@ func (r *Reconciler) restoreRuntimeLocked(ctx context.Context, revision int64) e
 		return err
 	}
 	// The empty state enforces nothing, so the helper clears the table.
-	return r.applyHostNetwork(ctx, nil)
+	return r.applyHostNetwork(ctx, desiredstate.State{})
 }
 func (r *Reconciler) readRevision(revision int64) ([]byte, error) {
 	data, err := os.ReadFile(filepath.Join(r.Directory, "revisions", strconv.FormatInt(revision, 10), "desired.json.enc"))

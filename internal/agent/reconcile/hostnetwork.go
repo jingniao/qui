@@ -59,10 +59,11 @@ var hostNetworkDial = func(ctx context.Context, network, address string) error {
 
 // applyHostNetwork mirrors one revision in the helper. A nil network is the empty
 // network: the revision configures nothing, so the table is removed.
-func (r *Reconciler) applyHostNetwork(ctx context.Context, network *desiredstate.Network) error {
+func (r *Reconciler) applyHostNetwork(ctx context.Context, state desiredstate.State) error {
+	r.HostNetworkPortHops = collectPortHops(state.Inbounds)
 	value := desiredstate.Network{}
-	if network != nil {
-		value = *network
+	if state.Network != nil {
+		value = *state.Network
 	}
 	sync := r.HostNetworkSync
 	if sync == nil {
@@ -71,13 +72,31 @@ func (r *Reconciler) applyHostNetwork(ctx context.Context, network *desiredstate
 	return sync(ctx, value)
 }
 
+// collectPortHops mirrors the enabled Hysteria2 hop inbounds of one revision
+// into the helper's second table. A hop range has no listener of its own: the
+// target is the inbound's real listening port.
+func collectPortHops(inbounds []desiredstate.Inbound) []hostnet.PortHop {
+	var hops []hostnet.PortHop
+	for _, in := range inbounds {
+		if !in.Enabled || in.Protocol != "hysteria2" {
+			continue
+		}
+		q := in.Settings.QUIC
+		if !q.HasHop() {
+			continue
+		}
+		hops = append(hops, hostnet.PortHop{Start: q.HopPortStart, End: q.HopPortEnd, Target: in.Port})
+	}
+	return hops
+}
+
 // syncHostNetwork writes the helper's desired file and waits for its answer, so
 // the rules on the host always mirror the revision the Agent runs. The
 // reachability proof afterwards is what makes the change safe: a rule that breaks
 // new outbound connections rolls the revision back instead of taking the node off
 // the control plane.
 func (r *Reconciler) syncHostNetwork(ctx context.Context, network desiredstate.Network) error {
-	configured := network.HostSourceIPv4 != "" || network.HostSourceIPv6 != ""
+	configured := network.HostSourceIPv4 != "" || network.HostSourceIPv6 != "" || len(r.HostNetworkPortHops) > 0
 	directory := r.HostNetworkDirectory
 	if directory == "" {
 		if !configured {
@@ -132,6 +151,7 @@ func (r *Reconciler) syncHostNetwork(ctx context.Context, network desiredstate.N
 		IPv6:       network.HostSourceIPv6,
 		ExemptIPv4: exemptAddress(network.OutboundSourceIP, 4),
 		ExemptIPv6: exemptAddress(network.OutboundSourceIP, 6),
+		PortHops:   r.HostNetworkPortHops,
 	}
 	if err := hostnet.WriteDesired(directory, desired); err != nil {
 		return err

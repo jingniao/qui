@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -370,7 +371,7 @@ func TestSyncHostNetworkLeavesTheHelperAloneWhenNothingIsEnforced(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if desired != *test.retain {
+			if !reflect.DeepEqual(desired, *test.retain) {
 				t.Fatalf("an unconfigured revision rewrote the helper input: %+v", desired)
 			}
 		})

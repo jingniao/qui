@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/agent/capability"
+	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/internal/agent/tuning"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
@@ -18,6 +19,7 @@ func reportCapabilities(s *capability.Sampler, c *capabilityState) *pb.Capabilit
 	result.Host = s.HostInfo()
 	result.TuningSupported = tuning.Supported()
 	result.PanelCatalogueSupported = true
+	result.PortHopSupported = hostnet.HelperInstalled()
 	return result
 }
 

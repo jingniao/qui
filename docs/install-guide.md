@@ -87,7 +87,7 @@ bash panel-install.sh --version 1.4.2 --http-port 22550 --grpc-port 18880 \
 1. 选择所属节点与**所属核心**（留空表示该节点当前的主核心）。
 2. 选择协议（VLESS、Trojan、Shadowsocks、Hysteria2/TUIC、SOCKS5/HTTP、端口转发等），填监听端口。
 3. 需要 TLS/Reality 时按协议展开设置：
-   - **Reality**：握手目标可用「常用目标」按钮填入（如 `www.microsoft.com:443`），再点「生成」得到密钥对与 Short ID；server names 只写具体主机名，Short ID 为偶数位十六进制。
+   - **Reality**：握手目标可用「常用目标」按钮填入（如 `www.amd.com:443`），再点「生成」得到密钥对与 Short ID；server names 只写具体主机名，Short ID 为偶数位十六进制。
    - 仅 VLESS 支持 Reality 与 xhttp；能保存哪些组合由该节点所属核心上报的能力决定，未列出的组合会被拒绝。
    - **TLS 的证书来源**四选一：
      - **自签名**：面板按该节点的客户端连接地址签发 10 年证书，客户端通过订阅固定信任它；sing-box 与 mihomo 订阅可用，通用 URI 订阅不含 Hysteria2/TUIC 的自签名节点。节点没有连接地址时，先在节点设置里填公网 IP 或客户端连接地址，否则保存会被拒绝。

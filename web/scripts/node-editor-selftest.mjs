@@ -319,7 +319,7 @@ assert.match(api.randomXhttpPath(), /^\/[a-z0-9]{12}$/);
 assert.equal(api.validateServerFields({ security: 'tls', transport: 'xhttp', xhttp: { path: api.randomXhttpPath(), mode: 'auto' } }), '');
 // A preset handshake target and the SNI derived from it are a valid pair.
 assert.deepEqual([...api.REALITY_HANDSHAKE_PRESETS],
-  ['www.microsoft.com:443', 'www.apple.com:443', 'www.amd.com:443', 'www.nvidia.com:443', 'dl.google.com:443', 'www.cloudflare.com:443']);
+  ['www.apple.com:443', 'www.amd.com:443', 'www.nvidia.com:443', 'dl.google.com:443', 'www.cloudflare.com:443']);
 for (const preset of api.REALITY_HANDSHAKE_PRESETS) {
   const sni = api.sniFromTarget(preset);
   assert.ok(sni, preset + ' yields a server name');

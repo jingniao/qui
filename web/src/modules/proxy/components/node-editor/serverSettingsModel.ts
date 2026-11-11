@@ -115,7 +115,7 @@ export function randomXhttpPath(randomBytes: RandomBytes = webCryptoBytes): stri
 // and HTTP/2. A node only sends unauthenticated handshakes there, so they must not
 // be the Owner's own domain.
 export const REALITY_HANDSHAKE_PRESETS: readonly string[] = [
-  'www.microsoft.com:443', 'www.apple.com:443', 'www.amd.com:443',
+  'www.apple.com:443', 'www.amd.com:443',
   'www.nvidia.com:443', 'dl.google.com:443', 'www.cloudflare.com:443'
 ];
 // xhttp only rides on TLS, so the selected core's report decides which security the

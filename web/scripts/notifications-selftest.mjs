@@ -24,6 +24,16 @@ const sidebar = read('components/AppSidebar.vue');
 assert.match(sidebar, /NotificationBell/, 'AppSidebar must import NotificationBell');
 assert.match(sidebar, /<NotificationBell/, 'AppSidebar must render NotificationBell');
 
+// 2b. The expanded-sidebar popover is anchored to the sidebar, not right-aligned to the
+// bell near its right edge, which pushed a 24rem panel off the left of the window.
+const bell = read('components/NotificationBell.vue');
+assert.doesNotMatch(bell, /'right-0 top-full mt-2'/, 'expanded popover must not right-align to the bell');
+assert.match(bell, /:class="collapsed \? 'relative' : ''"/, 'expanded popover must position against the sidebar');
+assert.match(bell, /max-w-\[calc\(100vw-1\.5rem\)\]/, 'popover width must stay within the viewport');
+// read-all is Owner-only on the server; Viewers must not see the button.
+assert.match(bell, /v-if="isOwner && unreadCount > 0"[\s\S]{0,200}@click="markAllAsRead"/, 'mark-all-read must be Owner-only');
+assert.match(bell, /import \{ isOwner \} from '\.\.\/app\/auth'/, 'NotificationBell must read the role from app/auth');
+
 // 3. events.ts dispatches proxy-notification
 const events = read('app/events.ts');
 assert.match(events, /connection\.addEventListener\('notification',\s*\(\)\s*=>\s*window\.dispatchEvent\(new Event\('proxy-notification'\)\)\)/, 'events.ts must handle notification event');

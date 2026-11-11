@@ -1,5 +1,7 @@
 <template>
-  <div class="relative" ref="rootRef">
+  <!-- Expanded: the popover is positioned against the sidebar (which is relative), not
+       the bell near its right edge, so a right-aligned 24rem panel never runs off-screen. -->
+  <div :class="collapsed ? 'relative' : ''" ref="rootRef">
     <!-- Bell Button -->
     <button
       type="button"
@@ -33,8 +35,8 @@
     <div
       v-if="isOpen"
       :class="[
-        'absolute z-50 bg-white/95 backdrop-blur-xl rounded-2xl shadow-ios-lg border border-black/[0.08] flex flex-col w-80 sm:w-96 max-h-[30rem] overflow-hidden select-text text-left',
-        collapsed ? 'left-full ml-3 top-0' : 'right-0 top-full mt-2'
+        'absolute z-50 bg-white/95 backdrop-blur-xl rounded-2xl shadow-ios-lg border border-black/[0.08] flex flex-col w-80 sm:w-96 max-w-[calc(100vw-1.5rem)] max-h-[30rem] overflow-hidden select-text text-left',
+        collapsed ? 'left-full ml-3 top-0' : 'left-3 top-14'
       ]"
     >
       <!-- Header -->
@@ -46,8 +48,9 @@
           </span>
         </div>
         <div class="flex items-center gap-2">
+          <!-- read-all is Owner-only (403 for Viewer), so Viewers do not see it. -->
           <button
-            v-if="unreadCount > 0"
+            v-if="isOwner && unreadCount > 0"
             type="button"
             @click="markAllAsRead"
             class="text-xs text-ios-blue hover:text-blue-700 transition-colors"
@@ -135,6 +138,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { notificationsAPI, severityTone, type Notification } from '../modules/system/notificationsApi';
+import { isOwner } from '../app/auth';
 
 defineProps<{
   collapsed?: boolean;

@@ -362,6 +362,22 @@
                   />
                 </div>
               </div>
+              <div v-if="modalMode === 'create' && presetTemplates.length > 0" class="space-y-2" data-testid="client-policy-presets">
+                <span class="block text-xs font-semibold text-neutral-700">从内置模板开始</span>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    v-for="preset in presetTemplates"
+                    :key="preset.id"
+                    type="button"
+                    class="text-left rounded-lg border px-3 py-2 transition-colors"
+                    :class="clientConfig.activePreset === preset.id ? 'border-neutral-900 bg-white' : 'border-black/[0.08] bg-white/60 hover:border-black/20'"
+                    @click="applyPresetTemplate(preset.id)"
+                  >
+                    <span class="block text-sm font-semibold text-neutral-900">{{ preset.name }}</span>
+                    <span class="block text-xs text-neutral-500 mt-0.5">{{ preset.description }}</span>
+                  </button>
+                </div>
+              </div>
               <div v-if="modalMode === 'create'" class="pt-1">
                 <label class="inline-flex items-center gap-2 text-xs text-neutral-700 cursor-pointer">
                   <input v-model="setAsActiveOnSave" type="checkbox" />
@@ -2545,17 +2561,19 @@ function applyPresetTemplate(presetId: string) {
     showToast('预设模板尚未加载，请稍候重试', 'error');
     return;
   }
+  // The whole template is taken over: groups, rules, rule providers and DNS.
+  // Copying only groups and rules left a preset's RULE-SET rules pointing at
+  // providers the draft did not have.
+  const previousPreset = presetTemplates.value.find(p => p.id === clientConfig.value.activePreset);
   groupCategories.value = {};
-  clientConfig.value.activePreset = presetId;
-  clientConfig.value.settings = { ...preset.template.client };
-  clientConfig.value.proxyGroups = preset.template.groups.map(group => ({
-    name: group.name,
-    type: group.type,
-    proxies: formatGroupMembers(group.members),
-    url: group.testUrl || undefined,
-    interval: group.intervalSeconds || undefined
-  }));
-  clientConfig.value.rules = preset.template.rules.map(rule => ({ ...rule, type: rule.type as ClientRuleType }));
+  const current = clientConfig.value;
+  const next = toConfig({ template: JSON.parse(JSON.stringify(preset.template)), revision: current.version, updatedAt: current.updatedAt, updatedBy: current.updatedBy || '' });
+  clientConfig.value = next;
+  const name = policyNameInput.value.trim();
+  if (modalMode.value === 'create' && (name === '' || /^自定义策略 #\d+$/.test(name) || name === previousPreset?.name)) {
+    policyNameInput.value = preset.name;
+    if (!policyDescInput.value.trim() || policyDescInput.value === previousPreset?.description) policyDescInput.value = preset.description;
+  }
   markDirty();
   showToast('已载入「' + preset.name + '」模板拓扑');
 }
@@ -4160,7 +4178,18 @@ function fieldLabel(field: string): string {
     const part: Record<string, string> = { payload: '匹配内容', target: '执行动作', priority: '优先级', noResolve: 'no-resolve', description: '备注', id: 'ID' };
     return '规则 #' + (item?.priority ?? Number(rule[1]) + 1) + ' 的' + (part[rule[2]] || '设置');
   }
-  return field || '配置参数';
+  const provider = /^providers\[(\d+)\]/.exec(field);
+  if (provider) {
+    const item = clientConfig.value.extra.providers[Number(provider[1])];
+    return '规则集「' + (item?.name || '#' + (Number(provider[1]) + 1)) + '」';
+  }
+  const group = /^groups\[(\d+)\]/.exec(field);
+  if (group) {
+    const item = clientConfig.value.proxyGroups[Number(group[1])];
+    return '策略组「' + (item?.name || '#' + (Number(group[1]) + 1)) + '」';
+  }
+  const top: Record<string, string> = { providers: '规则集', groups: '策略组', rules: '规则' };
+  return top[field] || field || '配置参数';
 }
 
 async function saveAll() {

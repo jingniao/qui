@@ -18,6 +18,10 @@ func Decode(w http.ResponseWriter, r *http.Request, target any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return errors.New("请求内容超过 1 MiB 上限")
+		}
 		return errors.New("invalid JSON request")
 	}
 	var extra any

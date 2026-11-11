@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,7 +90,7 @@ func TestValidationCoversEveryRule(t *testing.T) {
 		}, "providers[0].behavior"},
 		{"too many providers", func(t *Template) {
 			for index := 0; index <= MaxProviders; index++ {
-				t.Providers = append(t.Providers, Provider{Name: "p" + string(rune('a'+index%26)) + string(rune('a'+index/26)), Behavior: "domain", URL: "https://rules.example/x", IntervalSeconds: 86400})
+				t.Providers = append(t.Providers, Provider{Name: fmt.Sprintf("p%d", index), Behavior: "domain", URL: "https://rules.example/x", IntervalSeconds: 86400})
 			}
 		}, "providers"},
 		{"too many rules", func(t *Template) {

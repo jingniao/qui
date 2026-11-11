@@ -113,11 +113,12 @@ const (
 	ServicePrefix    = "service:"
 )
 
-// Limits of one template (plan section 4.4).
+// Limits of one template (plan section 4.4). MaxProviders was 32 until v1.5.2;
+// the built-in 完整分流 preset alone uses 58.
 const (
 	MaxGroups       = 64
 	MaxRules        = 2000
-	MaxProviders    = 32
+	MaxProviders    = 256
 	MaxMembers      = 256
 	MaxNameRunes    = 64
 	MaxPayloadBytes = 256

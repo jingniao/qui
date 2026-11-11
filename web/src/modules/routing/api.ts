@@ -380,7 +380,10 @@ export const clientPresets: ClientPreset[] = [
   { id: 'standard', name: '经典分流', desc: '国内直连，常见海外服务走代理，局域网与私网直接通信。', recommended: true },
   { id: 'minimal', name: '基础代理', desc: '仅私有地址直连，其余流量均通过 PROXY 代理分流。', recommended: false },
   { id: 'adblock', name: '分流+去广告', desc: '在经典分流基础上增加常见广告域名与追踪域拦截 (REJECT)。', recommended: false },
-  { id: 'whitelist', name: '白名单模式', desc: '仅指定站点走代理，其余全部 DIRECT 国内直连。', recommended: false }
+  { id: 'whitelist', name: '白名单模式', desc: '仅指定站点走代理，其余全部 DIRECT 国内直连。', recommended: false },
+  { id: 'meta-lite', name: '精简分流 · 屏蔽回国', desc: '节点选择、非中国与漏网之鱼三组；国内域名与国内 IP 一律拒绝，私网直连。', recommended: false },
+  { id: 'meta-standard', name: '标准分流 · 屏蔽回国', desc: '在精简分流上增加 AI、YouTube、Google、Telegram、GitHub 分组；国内域名与国内 IP 一律拒绝。', recommended: false },
+  { id: 'meta-full', name: '完整分流 · 屏蔽回国', desc: '按服务细分 20 个分组（广告、AI、流媒体、游戏、金融、云服务等）；国内域名与国内 IP 一律拒绝。', recommended: false }
 ];
 
 const DEFAULT_TEST_URL = 'http://www.gstatic.com/generate_204';

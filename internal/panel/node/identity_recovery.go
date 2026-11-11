@@ -89,7 +89,7 @@ func (r *Repository) IssueRecovery(ctx context.Context, nodeID, owner string, tt
 	var n Node
 	var caps, hb string
 	var fingerprint, addrsJSON string
-	err = tx.QueryRowContext(ctx, "SELECT "+columns+",coalesce((SELECT fingerprint FROM node_identities WHERE node_id=nodes.id),'') FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &caps, &hb, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &fingerprint)
+	err = tx.QueryRowContext(ctx, "SELECT "+columns+",coalesce((SELECT fingerprint FROM node_identities WHERE node_id=nodes.id),'') FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &caps, &hb, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &fingerprint)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, "", expires, ErrNotFound
 	}

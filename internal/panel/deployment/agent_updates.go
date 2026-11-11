@@ -81,8 +81,11 @@ func (r *Repository) QueueAgentUpdate(ctx context.Context, catalogue ReleaseAcce
 	if err != nil {
 		return AgentUpdateTask{}, err
 	}
-	if !enabled || !supported || revision != expected {
+	if !enabled || revision != expected {
 		return AgentUpdateTask{}, ErrNodeBusy
+	}
+	if !supported {
+		return AgentUpdateTask{}, ErrAgentUpdateUnsupported
 	}
 	entry, err := catalogue.ReleaseTx(ctx, tx, entryID)
 	if err != nil {

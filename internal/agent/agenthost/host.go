@@ -22,7 +22,7 @@ import (
 
 // Run holds supervisor ownership for its lifetime. Initialization is explicit;
 // subsequent ordinary starts automatically honor the authenticated history.
-func Run(ctx context.Context, configPath, version string, initialize bool, logger *slog.Logger) (resultErr error) {
+func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (resultErr error) {
 	if configPath == "" {
 		return errors.New("supervised Agent requires an explicit configuration file")
 	}
@@ -75,50 +75,14 @@ func Run(ctx context.Context, configPath, version string, initialize bool, logge
 	images := filepath.Join(c.DataDirectory, "releases", "agent-installed")
 	marker := filepath.Join(c.DataDirectory, "identity", markerName)
 	options := updater.HistoryOptions{Directory: filepath.Join(c.DataDirectory, "agent-release-history"), Checkpoint: filepath.Join(c.DataDirectory, "identity", "agent-release-checkpoint.enc"), NodeID: node.NodeID, Key: key}
-	var history *updater.History
-	if initialize {
-		if active {
-			return errors.New("Agent supervision already exists or is incomplete; original state must be recovered")
-		}
-		executable, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		image, err := updater.InspectImage(ctx, "proxy-agent", executable, version)
-		if err != nil {
-			return err
-		}
-		if _, err := updater.MaterializeImage(ctx, images, executable, "proxy-agent", image); err != nil {
-			return err
-		}
-		probe, err := updater.ProbeAgentImage(ctx, images, image, required)
-		if err != nil || probe.Contract.ManagedProtocol != 1 {
-			return errors.Join(ErrState, err)
-		}
-		if err := createRecord(marker, key, record{Kind: "agent-supervision-v1", NodeID: node.NodeID, Baseline: image, Jobs: true}); err != nil {
-			return err
-		}
-		if err := agentjobs.Initialize(jobsOptions(c.DataDirectory, node.NodeID, key)); err != nil {
-			return err
-		}
-		history, err = updater.CreateHistory(options)
-		if err != nil {
-			return err
-		}
-		defer func() { resultErr = errors.Join(resultErr, history.Close()) }()
-		if err := history.BootstrapImage(ctx, "proxy-agent", image); err != nil {
-			return err
-		}
-	} else {
-		if !active {
-			return errors.New("enable Agent supervision with --initialize-agent-history first")
-		}
-		history, err = updater.OpenHistory(options)
-		if err != nil {
-			return err
-		}
-		defer func() { resultErr = errors.Join(resultErr, history.Close()) }()
+	if !active {
+		return errors.New("run --initialize-agent-history once to enable Agent web upgrades")
 	}
+	history, err := updater.OpenHistory(options)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, history.Close()) }()
 	r, err := readRecord(marker, key, node.NodeID)
 	if err != nil {
 		return err
@@ -259,4 +223,121 @@ func Run(ctx context.Context, configPath, version string, initialize bool, logge
 			}
 		}
 	}
+}
+
+// Initialize creates the authenticated baseline and history used by supervised
+// Agent updates, then returns. It never starts a worker.
+func Initialize(ctx context.Context, configPath, version string) (resultErr error) {
+	if configPath == "" {
+		return errors.New("Agent initialization requires an explicit configuration file")
+	}
+	abs, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+	c, err := configuration.LoadAgent(abs)
+	if err != nil {
+		return err
+	}
+	owner, err := lifecycle.TrySupervisor(c.DataDirectory)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, owner.Close()) }()
+	c.DataDirectory = owner.Directory()
+	worker, err := lifecycle.Try(c.DataDirectory)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, worker.Close()) }()
+	node, err := identity.Load(filepath.Join(c.DataDirectory, "identity"))
+	if err != nil {
+		return errors.Join(errors.New("node must be enrolled before initialization"), err)
+	}
+	required, adopted, err := storage.Check(c.DataDirectory, node.NodeID, agentstorage.Current(version))
+	if err != nil {
+		return err
+	}
+	if !adopted {
+		return errors.New("node must have a stored configuration baseline before initialization")
+	}
+	key, err := readOriginal(filepath.Join(c.DataDirectory, "configuration.key"), 32)
+	if err != nil {
+		return err
+	}
+	defer clear(key)
+	if _, err := reconcile.InspectCurrent(c.DataDirectory, node.NodeID, key); err != nil {
+		return err
+	}
+	active, err := Active(c.DataDirectory)
+	if err != nil {
+		return err
+	}
+	if active {
+		return errors.New("Agent supervision already exists or is incomplete")
+	}
+	pending := filepath.Join(c.DataDirectory, filepath.FromSlash(pendingPath))
+	f, err := os.OpenFile(pending, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return errors.New("Agent initialization is already in progress")
+		}
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = syncDirectory(filepath.Join(c.DataDirectory, "identity")); err != nil {
+		return err
+	}
+	defer func() {
+		if resultErr != nil {
+			if cleanErr := cleanupInitialization(c.DataDirectory); cleanErr != nil {
+				resultErr = errors.Join(resultErr, cleanErr)
+			}
+		}
+	}()
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	images := filepath.Join(c.DataDirectory, "releases", "agent-installed")
+	image, err := updater.InspectImage(ctx, "proxy-agent", executable, version)
+	if err != nil {
+		return err
+	}
+	if _, err = updater.MaterializeImage(ctx, images, executable, "proxy-agent", image); err != nil {
+		return err
+	}
+	probe, err := updater.ProbeAgentImage(ctx, images, image, required)
+	if err != nil || probe.Contract.ManagedProtocol != 1 {
+		return errors.Join(ErrState, err)
+	}
+	marker := filepath.Join(c.DataDirectory, "identity", markerName)
+	if err := createRecord(marker, key, record{Kind: "agent-supervision-v1", NodeID: node.NodeID, Baseline: image, Jobs: true}); err != nil {
+		return err
+	}
+	if err := agentjobs.Initialize(jobsOptions(c.DataDirectory, node.NodeID, key)); err != nil {
+		return err
+	}
+	history, err := updater.CreateHistory(updater.HistoryOptions{Directory: filepath.Join(c.DataDirectory, "agent-release-history"), Checkpoint: filepath.Join(c.DataDirectory, "identity", "agent-release-checkpoint.enc"), NodeID: node.NodeID, Key: key})
+	if err != nil {
+		return err
+	}
+	if err = history.BootstrapImage(ctx, "proxy-agent", image); err == nil {
+		err = history.Close()
+	} else {
+		_ = history.Close()
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Remove(pending); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Join(c.DataDirectory, "identity"))
 }

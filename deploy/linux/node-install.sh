@@ -586,6 +586,7 @@ else
   service_is_active proxy-agent-tuning || service_start proxy-agent-tuning || fail '无法启动调优 watcher。'
 fi
 printf 'proxy-agent 服务状态：%s\n' "$(service_state proxy-agent)"
+agent_enable_web_upgrade || true
 printf '\n节点已安装并登记：面板 %s，核心 %s。\n' "$panel" "${cores[*]}"
 printf '注册码文件已删除；私钥只保存在本机 /var/lib/proxy-agent/identity。\n'
 printf '在面板里为该节点配置入站并发布配置版本后才会代理流量。\n'

@@ -302,6 +302,10 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 - 节点自动协商：Agent 1.5.0 握手时上报 `Capabilities.panel_catalogue_supported = true`，并在 Welcome 消息中接收面板告知的目录端口（`agent_catalogue_port`）。Agent updater 默认目录回退到面板只读端口。
 - 兼容与离线签名：`cmd/release` 离线签名工具与配置中显式指定的自定义签名公钥 / 目录完全兼容保留。
 
+### Agent 网页升级启用与退出
+
+普通节点运行 `qui-update --component agent`（服务须已运行）即可启用网页升级；服务未运行时先启动再重跑。面板 Agent 管理页出现“升级”按钮表示已启用。≤1.4.7 主机上已安装的 qui-update 是旧脚本，不含启用步骤，所以第一次 `qui-update --component agent` 只把 Agent 升到 1.5.0，需要再运行一次 `qui-update --component agent` 才会启用网页升级，面板上的提示会一直显示到启用为止；新装（node-install.sh）自动启用。失败证据保存在 `/var/lib/proxy-agent/web-upgrade-failed-<UTC时间>/`，节点会退回普通模式。手动退出受管模式：停服务，把受管路径移作备份后启动；旧引导程序遇到已提高的存储格式会明确拒绝启动，应装回足够新的版本。
+
 ### RC 更新与组合主机的组件选择
 
 `qui-update --component panel|agent` 只更新指定的已安装组件；不指定仍先 Agent 后面板。组合主机先运行 `--component panel`，确认后再 `--component agent`。`qui` 菜单更新项仍使用默认方式，组合主机升级应使用命令行组件选择。RC 版本必须是 `X.Y.Z-rc.N`（N 为无前导零的正整数），比较顺序为 `1.0.9 < 1.3.1-rc.1 < 1.3.1-rc.2 < 1.3.1`；线上显式指定 RC 使用同名 v 标签，离线仍必须同时提供 bundle/sums。旧版更新器不能识别新参数，首次更新从已审核并校验的 RC 归档运行新版 update.sh，完整命令见[部署与升级 §5.0](deployment.md#50-rc-与旧更新器的首次升级)。

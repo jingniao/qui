@@ -200,6 +200,53 @@ service_healthy() {
   return 0
 }
 
+# Opt an existing node into supervised web Agent upgrades. Failure is deliberately
+# non-fatal to the caller: the service is restored in standalone mode and the
+# failed evidence is retained for diagnosis.
+agent_web_upgrade_failed() {
+  local data=$1 stamp backup path
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  backup="$data/web-upgrade-failed-$stamp"
+  mkdir -p -- "$backup" && chmod 0700 -- "$backup"
+  for path in "$data/identity/agent-supervisor.enc" "$data/identity/agent-release-checkpoint.enc" \
+    "$data/agent-release-history" "$data/releases/agent-installed" "$data/releases/agent-candidates" \
+    "$data/agent-jobs" "$data/identity/agent-jobs-checkpoint.enc" "$data/identity/agent-supervision-init.pending"; do
+    [[ -e $path || -L $path ]] || continue
+    mv -- "$path" "$backup/" || true
+  done
+  chown -R proxy-agent:proxy-agent -- "$backup" 2>/dev/null || true
+  service_start proxy-agent || true
+  service_healthy proxy-agent 10 || true
+  printf '网页升级未启用，节点仍按普通模式运行；失败现场在 %s\n' "$backup" >&2
+  return 1
+}
+
+agent_enable_web_upgrade() {
+  local data marker pending
+  data=${QUI_AGENT_DATA:-/var/lib/proxy-agent}
+  marker="$data/identity/agent-supervisor.enc"
+  pending="$data/identity/agent-supervision-init.pending"
+  if [[ -f $marker && ! -e $pending && ! -L $pending ]]; then
+    printf '网页升级已启用\n'
+    return 0
+  fi
+  if ! service_is_active proxy-agent; then
+    printf '服务未运行，跳过网页升级启用；请启动服务后重跑 qui-update --component agent。\n'
+    return 0
+  fi
+  service_stop proxy-agent || return 1
+  if ! (umask 077; runuser -u proxy-agent -- /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --initialize-agent-history); then
+    agent_web_upgrade_failed "$data"
+    return 1
+  fi
+  if ! service_start proxy-agent || ! service_healthy proxy-agent 10; then
+    service_stop proxy-agent || true
+    agent_web_upgrade_failed "$data"
+    return 1
+  fi
+  printf '网页升级已启用\n'
+}
+
 # Print a command that shows the last 50 log lines of a service. Both programs
 # write to stdout and are collected by the host logger: journald on systemd, and
 # busybox syslogd on a stock Alpine node, where /var/log/messages holds every

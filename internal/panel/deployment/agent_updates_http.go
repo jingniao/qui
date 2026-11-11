@@ -1,6 +1,7 @@
 package deployment
 
 import (
+	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
@@ -76,6 +77,10 @@ func (h *AgentUpdateHandler) queue(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.Repository.QueueAgentUpdate(r.Context(), h.Catalogue, h.Keys, input.NodeID, input.ReleaseID, auth.Actor(r.Context()).Username, r.RemoteAddr, input.Revision)
 	if err != nil {
+		if errors.Is(err, ErrAgentUpdateUnsupported) {
+			httpapi.Error(w, 409, "agent_update_unsupported", "该节点尚未启用网页升级，请先在服务器上运行一次 qui-update --component agent")
+			return
+		}
 		httpapi.Error(w, 409, "agent_update_conflict", "节点能力、已发布配置、版本信任或运行中操作存在冲突")
 		return
 	}

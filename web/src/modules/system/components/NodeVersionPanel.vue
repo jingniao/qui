@@ -296,7 +296,7 @@
           <!-- 7. 操作 -->
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
             <template v-if="kind === 'agent'">
-              <template v-if="node.capabilities?.panel_catalogue_supported">
+              <template v-if="node.agentUpdateSupported">
                 <button v-if="isOwner && !upgradeUnavailableReason(node)"
                   type="button"
                   @click="handleUpgradeSingle(node)"
@@ -307,7 +307,7 @@
                 </button>
               </template>
               <span v-else class="text-xs text-neutral-400">
-                此 Agent 需先在服务器上运行一次 qui-update 升级到 1.5.0
+                需在服务器上运行一次 qui-update --component agent 启用网页升级
               </span>
             </template>
             <template v-else>
@@ -517,7 +517,7 @@
         <!-- Row 4: Action Buttons (Apple HIG Precision) -->
         <template v-if="kind === 'agent'">
           <div class="pt-2 border-t border-black/[0.04] grid grid-cols-2 gap-2.5">
-            <template v-if="node.capabilities?.panel_catalogue_supported">
+            <template v-if="node.agentUpdateSupported">
               <button v-if="isOwner && !upgradeUnavailableReason(node)"
                 type="button"
                 @click="handleUpgradeSingle(node)"
@@ -531,7 +531,7 @@
               </button>
             </template>
             <div v-else class="text-xs text-neutral-400 flex items-center justify-center text-center">
-              此 Agent 需先在服务器上运行一次 qui-update 升级到 1.5.0
+              需在服务器上运行一次 qui-update --component agent 启用网页升级
             </div>
 
             <router-link
@@ -1377,7 +1377,7 @@ async function selectAgentVersionForUpgrade(versionItem: AgentReleaseVersion) {
       showToast(`已向「${node.name}」下发 Agent 升级任务 (v${versionItem.version})`);
       agentUpgradeDialogVisible.value = false;
     } else {
-      const eligible = eligibleOnlineNodes.value.filter(n => n.capabilities?.panel_catalogue_supported);
+      const eligible = eligibleAgentOnlineNodes.value;
       if (!eligible.length) {
         throw new Error('没有符合升级条件的在线服务器');
       }
@@ -1452,8 +1452,12 @@ const eligibleOnlineNodes = computed(() => {
   return batchNodes.value.filter(n => n.status === 'online' && n.heartbeat?.current_revision);
 });
 
+const eligibleAgentOnlineNodes = computed(() => {
+  return eligibleOnlineNodes.value.filter(n => n.agentUpdateSupported);
+});
+
 const batchAgentConfirmMessage = computed(() => {
-  const count = eligibleOnlineNodes.value.length;
+  const count = eligibleAgentOnlineNodes.value.length;
   return `确认遍历全部 ${count} 台符合条件的在线服务器，按各自 os/arch 下发最新签名版本？无完全匹配版本的服务器会跳过并报告原因，请逐台手动选择。`;
 });
 

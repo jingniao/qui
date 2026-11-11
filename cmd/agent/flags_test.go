@@ -63,3 +63,24 @@ func TestAgentRejectsRemovedModes(t *testing.T) {
 		}
 	}
 }
+
+func TestInitializeHistoryIsExclusiveOneShot(t *testing.T) {
+	for _, extra := range []string{"--supervise", "--version", "--managed-worker", "--enroll=false", "--token-file=", "unexpected"} {
+		set := flag.NewFlagSet("agent", flag.ContinueOnError)
+		f := registerFlags(set)
+		if err := set.Parse([]string{"--config", "missing.yaml", "--initialize-agent-history", extra}); err != nil {
+			t.Fatal(err)
+		}
+		if err := execute(set, f); err == nil {
+			t.Fatalf("accepted %s", extra)
+		}
+	}
+	set := flag.NewFlagSet("agent", flag.ContinueOnError)
+	f := registerFlags(set)
+	if err := set.Parse([]string{"--config", "missing.yaml", "--initialize-agent-history"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := execute(set, f); err == nil || strings.Contains(err.Error(), "supervision requires") {
+		t.Fatalf("one-shot did not reach configuration: %v", err)
+	}
+}

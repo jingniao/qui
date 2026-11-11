@@ -19,6 +19,7 @@ export interface NodeSettingsInput extends NodeNetworkSettings {
 }
 export interface NodeView extends NodeNetworkSettings {
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';
+  agentUpdateSupported: boolean;
   enabled: boolean; allowSubscription: boolean; maintenance: boolean; hostname: string; os: string; agentVersion: string; publicIp: string;
   tuningAdviceCount?: number;
   // Where the public address came from: manual means the Owner typed it and the

@@ -666,6 +666,7 @@ success 仅证明镜像切换；须等 Capabilities.cores 出现组件才允许�
 模块：Identity（身份/证书）、Control（连接/心跳/重连/Ack）、Capability（系统/核心探测）、Reconciler（期望协调）、Compiler（Xray/sing-box/GOST）、Supervisor（进程/健康）、Collector（统计/域名）、Spool（持久缓存）、Updater（Agent/核心）。GOST 持久化 JSON，执行前生成 YAML。
 
 更新方式见第 22.2 节；qui sing-box 仅为未修改上游加上游标签。受管 Agent 启动按安装历史完成中断切换，不使用旧候选确认恢复或 supervisor 巡检模式。 v1.5.0 起支持面板托管的官方签名 Agent 一键升级（详见 27.9、28 与 29.2 节）。
+新装节点由 node-install.sh 自动启用网页升级；已有节点在服务运行时执行 `qui-update --component agent`（从 ≤1.4.7 升级需执行两次）启用，面板 Agent 管理页出现“升级”按钮即已启用。
 
 **禁止**任意 Shell、Web Terminal、任意命令、上传脚本执行与未定义远程操作。只允许：应用/回滚版本、重启/重载核心、健康检查、证书轮换、Agent/核心更新与核心移除，以及以下固定操作：
 
@@ -1290,6 +1291,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 - 默认 Agent 签名目录安全边界（v1.5.0）：出厂内置官方公钥；Agent 默认目录仅接受主机名严格等于控制连接主机、端口来自本次 Welcome 握手且证书受面板信任的连接；面板端只读路由 `GET /agent-catalogue/` 仅开放匹配 `^proxy-agent/linux/(amd64|arm64)/[0-9]{1,12}/manifest\.json$` 与 `^artifacts/[0-9a-f]{64}\.bin$` 的路径，底层使用 `os.OpenRoot` 隔离文件系统，禁止路径穿越。
 - Agent 主动连接中央端
+- 网页升级须先在节点建立受管安装历史（node-install.sh 或 qui-update 自动完成）
 - gRPC 使用 mTLS
 - 每个节点独立证书
 - 每个节点独立私钥

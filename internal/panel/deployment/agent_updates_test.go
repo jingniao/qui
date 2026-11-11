@@ -138,6 +138,16 @@ func TestAgentUpdateReservationReplayAndResults(t *testing.T) {
 	}
 }
 
+func TestAgentUpdateRejectsUnsupportedNodeSeparately(t *testing.T) {
+	r, catalogue, nodes, nodeID, revision, entry, keys := agentTaskFixture(t)
+	if err := nodes.AgentUpdateSupport(context.Background(), nodeID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueAgentUpdate(context.Background(), catalogue, keys, nodeID, entry.ID, "owner", "local", revision.ID); !errors.Is(err, ErrAgentUpdateUnsupported) {
+		t.Fatalf("unsupported node error = %v", err)
+	}
+}
+
 func TestAgentUpdateValidationAndAuditLeaveNoPartialTask(t *testing.T) {
 	for _, mode := range []string{"audit", "legacy", "revision", "platform", "trust", "component", "core_busy"} {
 		t.Run(mode, func(t *testing.T) {

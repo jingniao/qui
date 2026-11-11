@@ -969,7 +969,11 @@ update_component() {
       printf '[%s] 无法把更新记录为完成。\n' "$name"
     fi
     dispose_snapshot || true
-    printf '[%s] 已更新到 %s；服务原本未运行，未启动。\n' "$name" "$version"
+    if [[ $component == agent ]]; then
+      printf '[%s] 已更新到 %s；服务原本未运行，未启动，网页升级未启用（启动服务后重跑 qui-update --component agent）。\n' "$name" "$version"
+    else
+      printf '[%s] 已更新到 %s；服务原本未运行，未启动。\n' "$name" "$version"
+    fi
     active_component=''
     return 0
   fi
@@ -993,7 +997,16 @@ update_component() {
       printf '[%s] 无法把更新记录为完成。\n' "$name"
     fi
     dispose_snapshot || true
-    printf '[%s] 已更新到 %s，服务运行正常（10 秒内无重启）。\n' "$name" "$version"
+    if [[ $component == agent ]]; then
+      agent_enable_web_upgrade || true
+      if [[ -f ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervisor.enc && ! -e ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervision-init.pending && ! -L ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervision-init.pending ]]; then
+        printf '[%s] 引导程序已更新到 %s；节点实际运行的 Agent 版本由面板的 Agent 管理决定。\n' "$name" "$version"
+      else
+        printf '[%s] 已更新到 %s，服务运行正常（10 秒内无重启）；网页升级未启用。\n' "$name" "$version"
+      fi
+    else
+      printf '[%s] 已更新到 %s，服务运行正常（10 秒内无重启）。\n' "$name" "$version"
+    fi
     active_component=''
     return 0
   fi

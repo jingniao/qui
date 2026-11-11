@@ -224,16 +224,23 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 			return fmt.Errorf("managed worker requires only --config and its local handshake")
 		}
 	}
-	if *f.supervise || *f.initializeHistory {
-		valid := *f.supervise && *f.path != "" && set.NArg() == 0
+	if *f.initializeHistory {
+		valid := !*f.supervise && *f.path != "" && set.NArg() == 0
 		set.Visit(func(o *flag.Flag) {
-			if o.Name != "supervise" && o.Name != "initialize-agent-history" && o.Name != "config" {
+			if o.Name != "initialize-agent-history" && o.Name != "config" {
 				valid = false
 			}
 		})
 		if !valid {
-			return fmt.Errorf("supervision requires --supervise and --config, with optional first-time --initialize-agent-history")
+			return fmt.Errorf("initialization requires only --config and --initialize-agent-history")
 		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if err := agenthost.Initialize(ctx, *f.path, version); err != nil {
+			return err
+		}
+		fmt.Println("agent web upgrade enabled")
+		return nil
 	}
 	if *f.showVersion {
 		fmt.Println("proxy-agent", version)
@@ -258,6 +265,11 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 	if *f.managed {
 		return runManaged(ctx, c, logger)
 	}
+	if cleaned, cleanErr := agenthost.CleanupInterrupted(c.DataDirectory); cleanErr != nil {
+		return cleanErr
+	} else if cleaned {
+		logger.Warn("interrupted Agent web-upgrade initialization was cleaned up")
+	}
 	active, err := agenthost.Active(c.DataDirectory)
 	if err != nil {
 		return err
@@ -266,7 +278,7 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 		if *f.tokenFile != "" {
 			return fmt.Errorf("cannot enroll over supervised Agent state")
 		}
-		return agenthost.Run(ctx, *f.path, version, *f.initializeHistory, logger)
+		return agenthost.Run(ctx, *f.path, version, logger)
 	}
 	return control.Run(ctx, c, logger, version)
 }

@@ -2,8 +2,10 @@ package agenthost
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,7 +13,7 @@ import (
 )
 
 func TestPartialSupervisionNeverLooksLikeStandalone(t *testing.T) {
-	for _, artifact := range []string{"identity/" + markerName, "identity/agent-release-checkpoint.enc", "agent-release-history", "releases/agent-installed"} {
+	for _, artifact := range append(managedPaths(), pendingPath) {
 		t.Run(artifact, func(t *testing.T) {
 			root := t.TempDir()
 			if active, err := Active(root); err != nil || active {
@@ -26,6 +28,44 @@ func TestPartialSupervisionNeverLooksLikeStandalone(t *testing.T) {
 			}
 			if active, err := Active(root); err != nil || !active {
 				t.Fatal("partial state became standalone", active, err)
+			}
+		})
+	}
+}
+
+func TestInterruptedInitializationCleanup(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(fmt.Sprint(pending), func(t *testing.T) {
+			if pending && runtime.GOOS == "windows" {
+				t.Skip("Windows file locking prevents cleanup while ownership handles are open")
+			}
+			root := t.TempDir()
+			for _, relative := range managedPaths() {
+				path := filepath.Join(root, relative)
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("evidence"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if pending {
+				if err := os.WriteFile(filepath.Join(root, pendingPath), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(root, "configuration.key"), []byte("retain"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cleaned, err := CleanupInterrupted(root)
+			if err != nil || cleaned != pending {
+				t.Fatal(cleaned, err)
+			}
+			if active, err := Active(root); err != nil || active == pending {
+				t.Fatal(active, err)
+			}
+			if data, err := os.ReadFile(filepath.Join(root, "configuration.key")); err != nil || string(data) != "retain" {
+				t.Fatal("ordinary state changed", err)
 			}
 		})
 	}

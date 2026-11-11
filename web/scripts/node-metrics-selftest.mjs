@@ -106,11 +106,11 @@ const metricsModelSource = readFileSync(new URL('../src/modules/nodes/components
 const metricsModelCode = ts.transpileModule(metricsModelSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const metricsModel = await import(`data:text/javascript;base64,${Buffer.from(metricsModelCode).toString('base64')}`);
 const retransSamples = [
-  { at: new Date(0).toISOString(), retransRate: 1.5 },
-  { at: new Date(60000).toISOString(), retransRate: null },
-  { at: new Date(120000).toISOString(), retransRate: 2.0 }
+  { time: 0, retransRate: 1.5 },
+  { time: 60000, retransRate: null },
+  { time: 120000, retransRate: 2.0 }
 ];
-const retransPath = metricsModel.metricPath(retransSamples, 'retransRate', 0, 120000, 60);
-// Null point breaks path with M, does not plot L to 0
-assert.equal((retransPath.match(/M/g) || []).length, 2, 'null retrans point breaks the line');
-console.log('PASS P7 METRICS: null retransmission rate breaks path, does not plot as zero');
+const retransData = metricsModel.seriesData(retransSamples, 'retransRate', 60);
+// A null point yields a null y (broken line), never a zero
+assert.deepEqual(retransData.map(p => p.y), [1.5, null, 2.0], 'null retrans point breaks the line');
+console.log('PASS P7 METRICS: null retransmission rate breaks the line, does not plot as zero');

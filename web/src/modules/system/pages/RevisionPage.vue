@@ -53,6 +53,7 @@ import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { deploymentAPI, type Revision, type DeploymentBatch, type ChainChoice, type RevisionDiff } from '../deploymentApi';
+import { revisionResult } from '../revisionResult';
 import AppDialog from '../../../components/AppDialog.vue';
 import ConfigDiffViewer from '../../../components/ConfigDiffViewer.vue';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -72,7 +73,7 @@ const batchDrawer = ref(false); const chains = ref<ChainChoice[]>([]); const rel
 const batchConfirm = ref(false); const batchRollback = ref(false); const batchTarget = ref<DeploymentBatch | null>(null);
 const nodeRollbackConfirm = ref(false); const rollbackTarget = ref<Revision | null>(null); const executing = ref(false);
 const form = reactive({ nodeId: '', summary: '', protocol: 'socks5', listen: '127.0.0.1', port: 1080 });
-function resultLabel(code: string) { return ({success:'已应用且健康',validation_failed:'核心校验失败',compile_failed:'配置编译失败',apply_failed:'应用失败',start_failed:'启动失败',rollback_failed:'回滚失败',stop_failed:'停止失败',persistence_failed:'保存成功清单失败，已恢复旧配置'} as Record<string,string>)[code] || code || '—'; }
+const resultLabel = revisionResult;
 async function load() { loading.value = true; try { const [result, batchResult, nodeResult] = await Promise.all([request<Page<Revision>>(`/revisions?page=${page.value}&pageSize=20`), deploymentAPI.batches(batchPage.value), nodeAPI.list(1, '')]); revisions.value = result.items; total.value = result.total; batches.value = batchResult.items; batchTotal.value = batchResult.total; nodes.value = nodeResult.items; error.value = ''; } catch (e) { error.value = (e as Error).message; } finally { loading.value = false; } }
 function nodeName(id: string) { return nodes.value.find(node => node.id === id)?.name || id.slice(0, 12); }
 function batchStatus(status: string) { return ({ draft: '草稿', waiting: '等待前序节点', pending: '等待节点确认', deploying: '发布中', success: '成功', failed: '失败', rolling_back: '回滚中', rollback_pending: '等待回滚确认', rolled_back: '已回滚', rollback_failed: '回滚失败' } as Record<string, string>)[status] || status; }

@@ -221,30 +221,36 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 		}
 		return result, err
 	}
+	// Failures before the core is touched carry a fixed code and the error text,
+	// so the Agent log can say why the apply was refused.
+	early := func(code string, err error) (core.ApplyResult, error) {
+		result.Code, result.Message = code, err.Error()
+		return result, err
+	}
 	if r.PrepareStorage != nil {
 		if err := r.PrepareStorage(ctx, state); err != nil {
-			return result, err
+			return early(storagePreflightFailedCode, err)
 		}
 	}
 	if err := os.MkdirAll(revisionDir, 0700); err != nil {
-		return result, err
+		return early(revisionStoreFailedCode, err)
 	}
 	if existing, err := r.readRevision(state.Revision); err == nil && digest(existing) != hash {
-		return result, errors.New("saved revision is immutable")
+		return early(revisionStoreFailedCode, errors.New("saved revision is immutable"))
 	}
 	sealedDesired, err := r.vault.Seal(desired)
 	if err != nil {
-		return result, err
+		return early(revisionStoreFailedCode, err)
 	}
 	if err := writeFile(filepath.Join(revisionDir, "desired.json.enc"), sealedDesired); err != nil {
-		return result, err
+		return early(revisionStoreFailedCode, err)
 	}
 	sealedCore, err := r.vault.Seal(rendered.Data)
 	if err != nil {
-		return result, err
+		return early(revisionStoreFailedCode, err)
 	}
 	if err := writeFile(filepath.Join(revisionDir, "core.json.enc"), sealedCore); err != nil {
-		return result, err
+		return early(revisionStoreFailedCode, err)
 	}
 	result, err = r.Adapter.Apply(ctx, rendered)
 	if err != nil {

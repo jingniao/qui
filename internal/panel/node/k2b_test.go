@@ -86,6 +86,35 @@ func TestK2bFreshMetricsAndViews(t *testing.T) {
 	}
 }
 
+func TestMetricSampleKeepsMeasuredRatesWithinMinute(t *testing.T) {
+	r, id := latencyFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Minute).Add(30 * time.Second)
+	record := func(h *pb.Heartbeat) {
+		t.Helper()
+		tx, err := r.Database.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := &pb.AgentMessage{Timestamp: timestamppb.New(now), Payload: &pb.AgentMessage_Heartbeat{Heartbeat: h}}
+		if err := recordMetricTx(ctx, tx, id, m, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(&pb.Heartbeat{CpuPercent: proto.Float64(40), MemoryPercent: proto.Float64(10), Interfaces: []*pb.InterfaceCounters{{Name: "eth0", ReceiveBytesPerSecond: proto.Float64(5), TransmitBytesPerSecond: proto.Float64(7)}}})
+	record(&pb.Heartbeat{MemoryPercent: proto.Float64(20), Interfaces: []*pb.InterfaceCounters{{Name: "eth0"}}})
+	var cpu, rx, tx, mem float64
+	if err := r.Database.QueryRow("SELECT cpu_percent,rx_bytes_per_second,tx_bytes_per_second,memory_percent FROM node_metric_samples").Scan(&cpu, &rx, &tx, &mem); err != nil {
+		t.Fatal(err)
+	}
+	if cpu != 40 || rx != 5 || tx != 7 || mem != 20 {
+		t.Fatal(cpu, rx, tx, mem)
+	}
+}
+
 func TestK2bMetricBucketsAndRetention(t *testing.T) {
 	r, id := latencyFixture(t)
 	ctx := context.Background()

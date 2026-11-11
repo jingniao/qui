@@ -25,6 +25,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/runtime-topology", h.Auth.Require(http.HandlerFunc(h.publishedTopology), true))
 	mux.Handle("POST /api/v1/nodes/{id}/restart-core", h.Auth.Require(http.HandlerFunc(h.restartNode), true))
 	mux.Handle("GET /api/v1/nodes/{id}/restart-core", h.Auth.Require(http.HandlerFunc(h.restartTasks), true))
+	mux.Handle("GET /api/v1/nodes/{id}/inbound-states", h.Auth.Require(http.HandlerFunc(h.inboundStates), false))
 	mux.Handle("GET /api/v1/revisions", h.Auth.Require(http.HandlerFunc(h.list), true))
 	mux.Handle("GET /api/v1/revisions/{id}/diff", h.Auth.Require(http.HandlerFunc(h.diff), true))
 	mux.Handle("POST /api/v1/revisions", h.Auth.Require(http.HandlerFunc(h.create), true))

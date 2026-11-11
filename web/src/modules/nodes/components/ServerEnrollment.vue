@@ -15,22 +15,19 @@
   </FormDrawer>
   <FormDrawer v-model="installOpen" title="一键安装命令" description="② 在服务器终端以 root 用户运行命令，完成 Agent 部署与证书信任配置。" :show-footer="false" width="2xl">
     <div v-if="installAvailable" class="space-y-3">
-      <div class="grid gap-3 sm:grid-cols-3">
-        <label class="text-xs text-ios-secondary">面板地址<input v-model.trim="host" maxlength="253" placeholder="panel.example.com 或 203.0.113.10" class="form-input-base mt-1.5" /></label>
-        <label class="text-xs text-ios-secondary">面板 Web 端口<input v-model.number="port" type="number" min="1" max="65535" placeholder="22550" title="面板 Web（HTTPS）端口，不是 Agent gRPC 端口" class="form-input-base mt-1.5" /></label>
-        <div class="text-xs text-ios-secondary">运行内核
-          <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-ios-bg px-3 py-2">
-            <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
-              <input v-model="cores" type="checkbox" :value="option.name" class="accent-ios-blue" />{{ option.label }}
-            </label>
-          </div>
+      <div class="text-xs text-ios-secondary">运行内核
+        <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-ios-bg px-3 py-2">
+          <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
+            <input v-model="cores" type="checkbox" :value="option.name" class="accent-ios-blue" />{{ option.label }}
+          </label>
         </div>
       </div>
       <p v-if="!cores.length" role="alert" class="text-xs text-ios-red">请至少选择一个运行内核（xray 或 sing-box）。</p>
-      <p v-if="fromSettings" class="text-xs text-ios-tertiary">默认取自 系统设置 → 节点安装连接地址；在此修改只影响本次命令，不写回设置。</p>
-      <p class="text-xs text-ios-tertiary">面板 Web 端口是节点下载面板证书与登记用的 HTTPS 端口；Agent gRPC 地址与端口默认取面板地址与面板实际监听端口，可在 系统设置 → 节点安装连接地址 里覆盖。命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
+      <WebUpgradeOption v-model="webUpgrade" />
+      <p class="text-xs text-ios-tertiary">面板地址：<code class="font-mono">{{ host }}:{{ port }}</code>（{{ fromSettings ? '取自 系统设置 → 节点安装连接地址' : '当前浏览器地址' }}）；如需修改请到 系统设置 → 节点安装连接地址。</p>
+      <p class="text-xs text-ios-tertiary">Agent gRPC 地址与端口默认取面板地址与面板实际监听端口，可在 系统设置 → 节点安装连接地址 里覆盖。命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
-      <p v-else class="text-sm text-ios-red">请填写有效的面板地址与端口</p>
+      <p v-else class="text-sm text-ios-red">面板地址无效，请在 系统设置 → 节点安装连接地址 中设置</p>
     </div>
     <div v-else class="space-y-2">
       <CodePreview :code="enrollment?.enrollmentToken || ''" />
@@ -57,6 +54,7 @@ import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import CodePreview from '../../../components/CodePreview.vue';
+import WebUpgradeOption from './WebUpgradeOption.vue';
 const emit = defineEmits<{ changed: [] }>();
 // A fresh node gets Xray by default; sing-box is optional. `--core` is repeatable
 // (K3c), so the dialog keeps the selection as a list and never sends an empty one.
@@ -65,7 +63,7 @@ const createOpen = ref(false), installOpen = ref(false), creating = ref(false);
 const name = ref(''), connectHost = ref(''), renewDate = ref(''), currency = ref('CNY'), price = ref(''), cycle = ref('/年');
 const error = ref(''), metaWarning = ref('');
 const enrollment = ref<Enrollment | null>(null);
-const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
+const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), webUpgrade = ref(false), fromSettings = ref(false);
 const installAvailable = computed(() => Boolean(enrollment.value?.install?.version && enrollment.value?.install?.caSha256));
 const command = computed(() => {
   const item = enrollment.value;
@@ -74,7 +72,7 @@ const command = computed(() => {
   // grpcHost '' keeps the panel address; grpcPort 0 keeps the listening port the
   // enrollment response reported. Both are overridden only by the saved setting.
   return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
-    grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
+    grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value], webUpgrade: webUpgrade.value });
 });
 // Each opening of the dialog gets its own number, so a late settings answer for
 // an earlier opening is ignored. This cannot compare `enrollment.value` with
@@ -140,8 +138,7 @@ function showInstall(item: Enrollment) {
   const current = ++showGeneration;
   enrollment.value = item;
   // The dialog opens with the browser address immediately, so the command is
-  // usable even before the saved endpoint arrives; a saved address then replaces
-  // it unless the Owner already typed a one-off value.
+  // usable even before the saved endpoint arrives; a saved address then replaces it.
   const fallback = browserInstallEndpoint();
   host.value = fallback.host;
   port.value = fallback.port;
@@ -149,14 +146,12 @@ function showInstall(item: Enrollment) {
   grpcPort.value = 0;
   fromSettings.value = false;
   cores.value = ['xray'];
+  webUpgrade.value = false;
   installOpen.value = true;
   void resolveInstallEndpoint().then(endpoint => {
     if (current !== showGeneration) return;
-    // The gRPC overrides are independent of the Web host/port fields, so they
-    // apply even when the Owner already edited those two.
     grpcHost.value = endpoint.grpcHost;
     grpcPort.value = endpoint.grpcPort ?? 0;
-    if (host.value !== fallback.host || port.value !== fallback.port) return;
     host.value = endpoint.host;
     port.value = endpoint.port;
     fromSettings.value = endpoint.fromSettings;

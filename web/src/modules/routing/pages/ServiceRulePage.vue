@@ -4,7 +4,7 @@
     <PageHeader
       title="规则集"
       parent="分流控制"
-      description="统一维护可复用的域名、域名后缀、IP 与 CIDR 集合。只定义匹配目标，不包含转发动作，供客户端策略与节点策略共同引用。"
+      description="统一维护可复用的域名、域名后缀、关键字、IP 与 CIDR 集合，并可引入外部规则来源。只定义匹配目标，不包含转发动作，供客户端策略与节点策略共同引用。"
     >
       <template #actions>
         <button type="button" @click="openCreate" class="ios-btn-primary inline-flex items-center gap-1.5">
@@ -46,7 +46,7 @@
       <template #header>
         <th>规则集名称</th>
         <th>来源 / 版本</th>
-        <th>匹配规模 (域名 / IP)</th>
+        <th>匹配规模 (域名 / 关键字 / IP)</th>
         <th>Clash Rule-Provider 引用</th>
         <th>状态</th>
         <th>更新时间</th>
@@ -70,11 +70,17 @@
             <span class="font-mono font-bold text-neutral-700 bg-neutral-100 px-2 py-0.5 rounded-md">
               v{{ service.version }}
             </span>
+            <template v-if="service.sources.length">
+              <span class="ml-1 text-neutral-500">{{ service.sources.length }} 个外部来源</span>
+              <span class="ml-1 font-medium" :class="sourceStatus(service).tone">{{ sourceStatus(service).label }}</span>
+            </template>
           </td>
 
           <!-- 3. Size -->
           <td class="text-xs font-mono text-neutral-600">
             <span>{{ service.domains.length + service.suffixes.length }} 域名</span>
+            <span class="text-neutral-300 mx-1">/</span>
+            <span>{{ service.keywords?.length || 0 }} 关键字</span>
             <span class="text-neutral-300 mx-1">/</span>
             <span>{{ service.cidrs.length }} IP网段</span>
           </td>
@@ -168,71 +174,13 @@
       </div>
     </AppDialog>
 
-    <!-- Form Drawer: Edit / Create -->
-    <FormDrawer
-      v-model="drawer"
-      :title="editing ? `编辑规则集 · v${editing.version}` : '创建自定义规则集'"
-      description="统一维护目标域名、后缀与 IP/CIDR。保存后版本号自动增加，两端需按各自机制刷新生效。"
-      :loading="saving"
-      confirm-text="保存规则集"
-      @confirm="save"
-    >
-      <div class="space-y-4 text-sm">
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">规则集名称</span>
-          <input v-model="form.name" maxlength="40" placeholder="例如: OpenAI 官方服务 / 国内白名单" class="form-input-base mt-1.5" required />
-        </label>
-
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">业务说明</span>
-          <textarea v-model="form.description" rows="2" maxlength="300" placeholder="说明该规则集的收录范围与用途…" class="form-input-base mt-1.5"></textarea>
-        </label>
-
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">精确 / 通配域名（每行一个）</span>
-          <textarea
-            v-model="domainsText"
-            rows="4"
-            placeholder="api.openai.com&#10;chat.openai.com&#10;*.oaistatic.com"
-            class="form-input-base mt-1.5 font-mono text-xs"
-          ></textarea>
-        </label>
-
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">域名后缀（每行一个）</span>
-          <textarea
-            v-model="suffixesText"
-            rows="4"
-            placeholder="openai.com&#10;anthropic.com&#10;claude.ai"
-            class="form-input-base mt-1.5 font-mono text-xs"
-          ></textarea>
-        </label>
-
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">IP / CIDR 网段（每行一个）</span>
-          <textarea
-            v-model="cidrsText"
-            rows="3"
-            placeholder="192.168.0.0/16&#10;10.0.0.0/8&#10;172.16.0.0/12"
-            class="form-input-base mt-1.5 font-mono text-xs"
-          ></textarea>
-          <span class="block text-xs text-neutral-400 mt-1">
-            仅用于字面 IP / CIDR 匹配，不发起反向 DNS 解析。
-          </span>
-        </label>
-
-        <label class="block pt-1">
-          <label class="inline-flex items-center gap-2 text-xs text-neutral-700">
-            <input v-model="form.enabled" type="checkbox" />
-            <span>启用此规则集</span>
-          </label>
-        </label>
-
-        <div class="p-3 rounded-xl bg-neutral-100 text-xs text-neutral-500 leading-relaxed">
-          <strong>生效机制提示</strong>：保存修改后系统将递增该规则集的版本号并记录更新时间。客户端与节点端均需按照各自更新流程同步最新内容，保存操作本身不保证流量即刻按新规则路由。
-        </div>
-      </div>
-    </FormDrawer>
+    <ServiceSetEditor
+      v-model="editorOpen"
+      :service="editorTarget"
+      :clone="editorClone"
+      @saved="load"
+      @deleted="load"
+    />
 
     <!-- Confirm Delete -->
     <ConfirmDialog
@@ -245,20 +193,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
-import { policyAPI, type ServiceSet, type ServiceInput } from '../api';
+import { ref, computed, onMounted } from 'vue';
+import { policyAPI, type ServiceSet } from '../api';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
-import FormDrawer from '../../../components/FormDrawer.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
+import ServiceSetEditor from '../components/ServiceSetEditor.vue';
 
 const services = ref<ServiceSet[]>([]);
 const page = ref(1);
@@ -266,28 +214,15 @@ const total = ref(0);
 const error = ref('');
 const loading = ref(false);
 
-const drawer = ref(false);
-const saving = ref(false);
-const editing = ref<ServiceSet | null>(null);
+const editorOpen = ref(false);
+const editorTarget = ref<ServiceSet | null>(null);
+const editorClone = ref(false);
 const target = ref<ServiceSet | null>(null);
 const confirmVisible = ref(false);
-
-const domainsText = ref('');
-const suffixesText = ref('');
-const cidrsText = ref('');
 
 const providerModalVisible = ref(false);
 const selectedService = ref<ServiceSet | null>(null);
 const snippetCopied = ref(false);
-
-const form = reactive<ServiceInput>({
-  name: '',
-  enabled: true,
-  description: '',
-  domains: [],
-  suffixes: [],
-  cidrs: []
-});
 
 async function load() {
   loading.value = true;
@@ -308,69 +243,30 @@ function changePage(value: number) {
   load();
 }
 
+function openEditor(service: ServiceSet | null, clone = false) {
+  editorTarget.value = service;
+  editorClone.value = clone;
+  editorOpen.value = true;
+}
+
 function openCreate() {
-  editing.value = null;
-  Object.assign(form, {
-    name: '',
-    enabled: true,
-    description: '',
-    domains: [],
-    suffixes: [],
-    cidrs: []
-  });
-  domainsText.value = '';
-  suffixesText.value = '';
-  cidrsText.value = '';
-  drawer.value = true;
+  openEditor(null);
 }
 
 function openEdit(service: ServiceSet) {
-  editing.value = service;
-  Object.assign(form, {
-    name: service.name,
-    enabled: service.enabled,
-    description: service.description,
-    domains: [...service.domains],
-    suffixes: [...service.suffixes],
-    cidrs: [...service.cidrs]
-  });
-  domainsText.value = service.domains.join('\n');
-  suffixesText.value = service.suffixes.join('\n');
-  cidrsText.value = service.cidrs.join('\n');
-  drawer.value = true;
+  openEditor(service);
 }
 
 function copy(service: ServiceSet) {
-  openEdit(service);
-  editing.value = null;
-  form.name = service.name + '-副本';
+  openEditor(service, true);
 }
 
-function lines(value: string) {
-  return value
-    .split('\n')
-    .map(item => item.trim())
-    .filter(Boolean);
-}
-
-async function save() {
-  if (saving.value) return;
-  saving.value = true;
-  try {
-    await policyAPI.saveService(editing.value?.id || null, {
-      ...form,
-      domains: lines(domainsText.value),
-      suffixes: lines(suffixesText.value),
-      cidrs: lines(cidrsText.value)
-    });
-    drawer.value = false;
-    showToast('规则集已保存（需按两端机制触发更新生效）');
-    await load();
-  } catch (e) {
-    showToast((e as Error).message, 'error');
-  } finally {
-    saving.value = false;
-  }
+// 列表里的外部来源状态：任一失败即失败，其次有待抓取，否则成功。
+function sourceStatus(service: ServiceSet) {
+  const statuses = service.sources.map(s => s.lastStatus);
+  if (statuses.includes('failed')) return { label: '失败', tone: 'text-red-600' };
+  if (statuses.some(s => s !== 'ok')) return { label: '待抓取', tone: 'text-amber-700' };
+  return { label: '成功', tone: 'text-emerald-600' };
 }
 
 function promptDelete(service: ServiceSet) {

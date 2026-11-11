@@ -921,6 +921,7 @@
             </div>
 
             <div class="space-y-1.5">
+              <WebUpgradeOption v-model="pendingWebUpgrade" />
               <div class="flex items-center justify-between text-xs">
                 <span class="text-neutral-700 font-bold">一键安装命令</span>
                 <span class="text-xs text-ios-tertiary">指定默认核心 --core {{ addCoreForm.component }}</span>
@@ -1275,6 +1276,7 @@ import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import CodePreview from '../../../components/CodePreview.vue';
 import ServerDisplayMode from '../../nodes/components/ServerDisplayMode.vue';
+import WebUpgradeOption from '../../nodes/components/WebUpgradeOption.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -1742,6 +1744,7 @@ function openCoreManagementModal(node: NodeView) {
 
   if (node.status === 'pending') {
     pendingEnrollmentLoading.value = true;
+    pendingWebUpgrade.value = false;
     // Show the browser address at once and swap in the saved one when it
     // arrives, so the command never waits on the settings request.
     const fallback = browserInstallEndpoint();
@@ -1971,6 +1974,7 @@ const coreBatchTargets = computed(() => eligibleOnlineNodes.value.filter(node =>
 // Pending node enrollment state for 1-click install command
 const pendingEnrollment = ref<Enrollment | null>(null);
 const pendingEnrollmentLoading = ref(false);
+const pendingWebUpgrade = ref(false);
 // The install command defaults to 系统设置 → 节点安装连接地址 when the Owner saved
 // one, otherwise to the address this browser reached the panel on.
 const installEndpointHost = ref(browserInstallEndpoint().host);
@@ -1994,7 +1998,8 @@ const pendingEnrollmentCommand = computed(() => {
     grpcPort: installEndpointGrpcPort.value ?? item.install.grpcPort,
     caSha256: item.install.caSha256,
     token: item.enrollmentToken,
-    cores: [addCoreForm.component]
+    cores: [addCoreForm.component],
+    webUpgrade: pendingWebUpgrade.value
   });
 });
 

@@ -14,6 +14,9 @@ export interface SystemMetricPoint {
   rxRate: number | null;
   txRate: number | null;
   retransRate?: number | null;
+  memoryBytes: number | null;
+  swapBytes: number | null;
+  diskBytes: number | null;
 }
 export function formatBytes(bytes: number | null | undefined, decimals = 1): string {
   if (bytes == null) return '—';
@@ -57,6 +60,17 @@ export function formatTimeMD(timestamp: number): string {
   return `${p.month}/${p.day}`;
 }
 
+/** Tooltip title: full local time in the panel timezone. */
+export function formatTimeFull(timestamp: number): string {
+  const p = timeParts(timestamp);
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+/** x-axis tick: time only up to a day, date and time beyond. */
+export function formatXTick(timestamp: number, spanMs: number): string {
+  return spanMs > 86400000 ? `${formatTimeMD(timestamp)} ${formatTimeHM(timestamp)}` : formatTimeHM(timestamp);
+}
+
 /** Compact chart range: "10/30 09:34 – 10:34" (second date omitted on the same day). */
 export function formatMetricRange(start: number, end: number): string {
   const a = timeParts(start), b = timeParts(end);
@@ -69,8 +83,21 @@ export function formatMetricRange(start: number, end: number): string {
 export function formatMetricValue(key: MetricKey, value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '—';
   if (key === 'rxRate' || key === 'txRate') return formatRate(value);
+  if (key === 'memoryBytes' || key === 'swapBytes' || key === 'diskBytes') return formatBytes(value);
   if (key === 'retransRate') return value.toFixed(2) + '%';
-  return ['cpu', 'memory', 'disk'].includes(key) ? value.toFixed(1) + '%' : String(value);
+  if (key === 'load') return value.toFixed(2);
+  if (['cpu', 'memory', 'disk'].includes(key)) return value.toFixed(1) + '%';
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+export type AxisUnit = 'percent' | 'bytes' | 'rate' | 'count' | 'load' | 'retrans';
+/** Compact y-axis tick label. */
+export function formatAxisTick(unit: AxisUnit, value: number): string {
+  if (unit === 'percent') return `${value}%`;
+  if (unit === 'bytes') return formatBytes(value);
+  if (unit === 'rate') return formatRate(value);
+  if (unit === 'retrans') return `${Number(value.toFixed(2))}%`;
+  return String(Number(value.toFixed(2)));
 }
 
 /** "最低 18.2% · 最高 31.5%" for the visible series; "—" when nothing was measured. */
@@ -80,38 +107,64 @@ export function metricRangeLabel(points: SystemMetricPoint[], key: MetricKey): s
   return `最低 ${formatMetricValue(key, Math.min(...values))} · 最高 ${formatMetricValue(key, Math.max(...values))}`;
 }
 
-export function scaleLinear(val: number, inMin: number, inMax: number, outMin: number, outMax: number): number {
-  if (inMax <= inMin) return outMax;
-  const clamped = Math.max(inMin, Math.min(inMax, val));
-  return outMin + ((clamped - inMin) / (inMax - inMin)) * (outMax - outMin);
+/**
+ * Chart.js draws on a canvas and cannot use Tailwind classes, so chart colours
+ * live here as hex copies of the semantic `colors.ios` values in
+ * tailwind.config.js. This is the only place chart colours are defined.
+ */
+export const CHART_COLORS = {
+  blue: '#0071E3', green: '#34C759', orange: '#FF9500', purple: '#AF52DE', red: '#FF3B30', teal: '#5AC8FA', indigo: '#5856D6',
+  tick: '#6E6E73', grid: 'rgba(0, 0, 0, 0.08)', tooltipBg: '#1D1D1F'
+} as const;
+
+export interface MetricSeries { key: MetricKey; label: string; color: 'blue' | 'green' | 'orange' | 'purple' | 'red' | 'teal' | 'indigo'; fill?: boolean; axis?: 'y' | 'y1'; optional?: boolean }
+export interface MetricCard {
+  id: string; title: string; series: MetricSeries[];
+  axes: { y: { unit: AxisUnit; max?: number }; y1?: { unit: AxisUnit } };
+  /** Key whose min/max summary is shown in the footer; omitted for multi-series cards. */
+  footerKey?: MetricKey;
+}
+export const metricCards: MetricCard[] = [
+  { id: 'cpu', title: 'CPU', footerKey: 'cpu', axes: { y: { unit: 'percent', max: 100 }, y1: { unit: 'load' } }, series: [
+    { key: 'cpu', label: 'CPU', color: 'blue', fill: true }, { key: 'load', label: '1 分钟负载', color: 'orange', axis: 'y1' }] },
+  { id: 'memory', title: '内存', footerKey: 'memoryBytes', axes: { y: { unit: 'bytes' } }, series: [
+    { key: 'memoryBytes', label: '已用', color: 'green', fill: true }, { key: 'swapBytes', label: '交换已用', color: 'orange', optional: true }] },
+  { id: 'disk', title: '磁盘', footerKey: 'diskBytes', axes: { y: { unit: 'bytes' } }, series: [
+    { key: 'diskBytes', label: '已用', color: 'purple', fill: true }] },
+  { id: 'network', title: '网络', axes: { y: { unit: 'rate' } }, series: [
+    { key: 'rxRate', label: '下载', color: 'blue' }, { key: 'txRate', label: '上传', color: 'green' }] },
+  { id: 'connections', title: '连接', axes: { y: { unit: 'count' } }, series: [
+    { key: 'tcp', label: 'TCP（全部状态）', color: 'blue' }, { key: 'udp', label: 'UDP 套接字', color: 'teal' },
+    { key: 'connections', label: '代理活跃会话', color: 'orange', optional: true }] },
+  { id: 'processes', title: '进程数', footerKey: 'processes', axes: { y: { unit: 'count' } }, series: [
+    { key: 'processes', label: '进程数', color: 'indigo', fill: true }] },
+  { id: 'retrans', title: 'TCP 重传率', footerKey: 'retransRate', axes: { y: { unit: 'retrans' } }, series: [
+    { key: 'retransRate', label: 'TCP 重传率', color: 'red' }] }
+];
+
+const isMeasured = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+/** Series worth drawing: required ones always, optional ones only when measured in range. */
+export function visibleSeries(card: MetricCard, points: SystemMetricPoint[]): MetricSeries[] {
+  return card.series.filter(s => !s.optional || points.some(p => isMeasured(p[s.key])));
 }
 
-export function buildSvgPath(points: { x: number; y: number }[]): string {
-  if (!points.length) return '';
-  return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+/**
+ * Chart.js line data with "缺测处断线": a null y is emitted for unmeasured
+ * points and between neighbours more than 1.5 x the sampling step apart.
+ */
+export function seriesData(points: SystemMetricPoint[], key: MetricKey, intervalSeconds: number): { x: number; y: number | null }[] {
+  const limit = intervalSeconds * 1500;
+  const out: { x: number; y: number | null }[] = [];
+  let previous: number | null = null;
+  for (const p of points) {
+    const v = p[key];
+    if (!isMeasured(v)) { out.push({ x: p.time, y: null }); previous = null; continue; }
+    if (previous !== null && p.time - previous > limit) out.push({ x: (previous + p.time) / 2, y: null });
+    out.push({ x: p.time, y: v });
+    previous = p.time;
+  }
+  return out;
 }
-
-export function buildAreaSvgPath(points: { x: number; y: number }[], baseY: number): string {
-  if (!points.length) return '';
-  const line = buildSvgPath(points);
-  const first = points[0];
-  const last = points[points.length - 1];
-  return `${line} L ${last.x.toFixed(1)},${baseY} L ${first.x.toFixed(1)},${baseY} Z`;
-}
-
-export function niceStepCeil(maxVal: number, steps = 5): number {
-  if (!Number.isFinite(maxVal) || maxVal <= 0) return 10;
-  const raw = maxVal / steps;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / mag;
-  let niceNorm = 10;
-  if (norm <= 1) niceNorm = 1;
-  else if (norm <= 2) niceNorm = 2;
-  else if (norm <= 2.5) niceNorm = 2.5;
-  else if (norm <= 5) niceNorm = 5;
-  return niceNorm * mag * steps;
-}
-
 
 const measured = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 export function extractCurrentValues(node: NodeView, now = Date.now()): Omit<SystemMetricPoint, 'time'> {
@@ -123,7 +176,8 @@ export function extractCurrentValues(node: NodeView, now = Date.now()): Omit<Sys
   };
   return { cpu: measured(hb?.cpu_percent), memory: measured(hb?.memory_percent), disk: measured(hb?.disk_percent),
     connections: hb?.active_connections_measured === true ? measured(hb.active_connections) : null,
-    rxRate: rates('receive'), txRate: rates('transmit'), tcp: decimal(hb?.tcpConnections), udp: decimal(hb?.udpSockets), processes: decimal(hb?.processCount), load: measured(hb?.load1), retransRate: null };
+    rxRate: rates('receive'), txRate: rates('transmit'), tcp: decimal(hb?.tcpConnections), udp: decimal(hb?.udpSockets), processes: decimal(hb?.processCount), load: measured(hb?.load1), retransRate: null,
+    memoryBytes: decimal(hb?.memoryUsedBytes), swapBytes: decimal(hb?.swapUsedBytes), diskBytes: decimal(hb?.diskUsedBytes) };
 }
 // Legacy live-heartbeat adapter retained for consumers.
 // Only append a fresh, distinct heartbeat observed while this component is open.
@@ -149,17 +203,10 @@ export function metricPoint(p: NodeMetricPoint): SystemMetricPoint {
     udp: measured(p.udpSockets),
     processes: measured(p.processCount),
     load: measured(p.load1),
-    retransRate: measured(p.tcpRetransPercent)
+    retransRate: measured(p.tcpRetransPercent),
+    memoryBytes: measured(p.memoryUsedBytes),
+    swapBytes: measured(p.swapUsedBytes),
+    diskBytes: measured(p.diskUsedBytes)
   };
 }
 export type MetricKey = Exclude<keyof SystemMetricPoint, 'time'>;
-export function metricPath(points: SystemMetricPoint[], key: MetricKey, start: number, end: number, intervalSeconds: number): string {
-  const max = ['cpu', 'memory', 'disk'].includes(key) ? 100 : Math.max(1, ...points.map(p => p[key] ?? 0));
-  let previous: number | null = null;
-  return points.map(p => {
-    if (p[key] === null || p[key] === undefined) { previous = null; return ''; }
-    const command = previous !== null && p.time - previous <= intervalSeconds * 1500 ? 'L' : 'M';
-    previous = p.time;
-    return command + (10 + (p.time - start) / Math.max(1, end - start) * 300).toFixed(1) + ',' + (90 - p[key]! / max * 80).toFixed(1);
-  }).filter(Boolean).join(' ');
-}

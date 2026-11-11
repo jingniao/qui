@@ -1,5 +1,6 @@
 import type { NodeView } from '../../api';
 import type { Revision } from '../../../system/deploymentApi';
+import { revisionResult } from '../../../system/revisionResult';
 export type RevisionFilter = 'all' | 'manual' | 'auto';
 export function filterRevisions(items: Revision[], filter: RevisionFilter) {
   return items.filter(item => filter === 'all' || item.summary.startsWith('auto:') === (filter === 'auto'));
@@ -24,9 +25,7 @@ function stable(value: unknown): string {
   return JSON.stringify(value) ?? '';
 }
 export function isDirty(current: unknown, saved: unknown) { return stable(current) !== stable(saved); }
-export function revisionResult(code: string) {
-  return ({ success: '已应用且健康', validation_failed: '核心校验失败', compile_failed: '配置编译失败', apply_failed: '应用失败', start_failed: '启动失败', rollback_failed: '回滚失败', stop_failed: '停止失败', persistence_failed: '保存成功清单失败，已恢复旧配置', failed_closed: '保护性停止', accounting_interrupted: '记账中断' } as Record<string, string>)[code] || (code ? '其他结果' : '—');
-}
+export { revisionResult };
 // Recent-event lines already carry the Chinese status (应用成功 / 失败), so the raw
 // result code is appended only when it adds information. Known codes reuse the same
 // labels as the 配置版本 tab; `success` is dropped because it repeats the status.

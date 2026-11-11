@@ -87,13 +87,14 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 	if err != nil {
 		return err
 	}
-	needsRecovery := false
+	needsRecovery, jobsIdle := false, true
 	if r.Jobs {
 		store, err := agentjobs.OpenForStartup(ctx, jobsOptions(c.DataDirectory, node.NodeID, key))
 		if err != nil {
 			return err
 		}
 		needsRecovery = store.NeedsRecovery()
+		jobsIdle = !needsRecovery && store.Pending() == nil
 		if pending := store.Pending(); pending != nil && pending.Started {
 			// A start record without an installation event cannot prove that
 			// the old Worker drained. Never reopen data access or retry install.
@@ -118,6 +119,22 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 	if err != nil || probe.Contract.ManagedProtocol != 1 {
 		return errors.Join(ErrState, err)
 	}
+	baseline, baselinePending, err := history.PendingBaselineRecovery("proxy-agent")
+	if err != nil {
+		return err
+	}
+	controlOnly := baselinePending || state.Phase == "failed_closed" || needsRecovery
+	if !controlOnly {
+		// The Worker cannot take the history locks held here, so this process
+		// raises the storage floors, as it does for nothing else, while it still
+		// owns the Worker lifetime. A refused proof leaves the floor unchanged and
+		// the Worker applies its own refusal or degraded start.
+		if err := raiseFormats(ctx, c.DataDirectory, node.NodeID, agentstorage.Current(version), required, history, images, r.Baseline, jobsIdle); err != nil {
+			logger.Warn("Agent storage formats not raised", "error", err)
+		} else if required, _, err = storage.Check(c.DataDirectory, node.NodeID, agentstorage.Current(version)); err != nil {
+			return err
+		}
+	}
 	if err := workerOwner.Close(); err != nil {
 		return err
 	}
@@ -130,11 +147,7 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 			resultErr = errors.Join(resultErr, process.Stop(stopCtx))
 		}
 	}()
-	baseline, baselinePending, err := history.PendingBaselineRecovery("proxy-agent")
-	if err != nil {
-		return err
-	}
-	if baselinePending || state.Phase == "failed_closed" || needsRecovery {
+	if controlOnly {
 		if !r.Jobs || baselinePending && baseline.Request.Revision != revision || state.Phase == "failed_closed" && state.Revision != revision {
 			return ErrState
 		}

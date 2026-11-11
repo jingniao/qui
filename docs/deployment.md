@@ -458,7 +458,7 @@ grep -F proxy-agent /var/log/messages | tail -n 200
 
 ### Agent 网页升级启用
 
-登记并首次健康启动后，安装器会自动执行 `qui-update --component agent` 的等价初始化；已有节点升级后由 `qui-update --component agent` 在健康检查并记录 committed 后启用。≤1.4.7 主机上已安装的 qui-update 是旧脚本，不含启用步骤，所以第一次 `qui-update --component agent` 只把 Agent 升到 1.5.0，需要再运行一次 `qui-update --component agent` 才会启用网页升级，面板上的提示会一直显示到启用为止；新装（node-install.sh）自动启用。面板 Agent 管理页出现“升级”按钮即为确认。初始化失败会把受管路径移到 `/var/lib/proxy-agent/web-upgrade-failed-<UTC时间>/`，节点继续普通模式运行。手动退出受管模式：停止服务，将上述受管路径移到备份目录，再启动服务；节点回到引导程序版本，若存储格式已被新版本提高，旧引导程序会明确拒绝启动，此时需先安装足够新的版本。
+`node-install.sh` 默认不启用网页升级：只有带 `--web-upgrade`（安装命令对话框勾选「启用网页升级」）时，登记并首次健康启动后才会自动执行 `qui-update --component agent` 的等价初始化，不带则在结尾提示，需要时在节点本机运行一次 `qui-update --component agent`；已有节点升级后由 `qui-update --component agent` 在健康检查并记录 committed 后启用。≤1.4.7 主机上已安装的 qui-update 是旧脚本，不含启用步骤，所以第一次 `qui-update --component agent` 只把 Agent 升到 1.5.0，需要再运行一次 `qui-update --component agent` 才会启用网页升级，面板上的提示会一直显示到启用为止；新装（node-install.sh）仅带 `--web-upgrade` 时自动启用。面板 Agent 管理页出现“升级”按钮即为确认。启用步骤会先等待（最长 60 秒）Agent 首次正常启动写出存储基线，超时则跳过并提示稍后重跑 `qui-update --component agent`，不会停止服务。初始化失败会把受管路径移到 `/var/lib/proxy-agent/web-upgrade-failed-<UTC时间>/`，节点继续普通模式运行。手动退出受管模式：停止服务，将上述受管路径移到备份目录，再启动服务；节点回到引导程序版本，若存储格式已被新版本提高，旧引导程序会明确拒绝启动，此时需先安装足够新的版本。
 
 Agent 安装与一键安装新增 `/var/lib/proxy-agent/tuning/`（Agent 所有、0700），systemd 的 proxy-agent-tuning.service/.path 或 OpenRC 的 proxy-agent-tuning 与 tuning-watch；安装时启用并布防，开机重放保留请求。主程序仍无调优特权，独立 root helper 带 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者用于 Agent 的 0700/0600 文件协议），固定写入 13 个 sysctl；fs.file-max 使用 root 文件权限。systemd 将 /proc/sys 默认设为只读，仅开放白名单文件；OpenRC 没有对应的文件系统隔离。无需 sysctl 二进制或新依赖，不加载拥塞控制模块；容器/内核拒绝时失败并恢复，不补权限。
 

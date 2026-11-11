@@ -38,10 +38,21 @@ runuser() {
   return 0
 }
 
+baseline=$QUI_AGENT_DATA/identity/agent-storage-contract.enc
+sleeps=0
+sleep_hook=
+# Each poll counts as one second; the hook lets a scenario change state mid-wait.
+sleep() { sleeps=$((sleeps + 1)); [[ -z $sleep_hook ]] || "$sleep_hook"; }
+create_baseline() { ((sleeps < 3)) || : > "$baseline"; }
+deactivate_service() { init_active=0; }
+
+# The Agent has normally written its storage baseline by the time it is enabled.
 reset() {
   rm -rf -- "$QUI_AGENT_DATA"
   mkdir -p "$QUI_AGENT_DATA/identity"
-  init_active=1; init_result=0; healthy=1; started=0; stopped=0
+  : > "$baseline"
+  init_active=1; init_result=0; healthy=1; started=0; stopped=0; sleeps=0; sleep_hook=
+  unset QUI_WEB_UPGRADE_WAIT
 }
 fail() { printf 'not ok: %s\n' "$1" >&2; exit 1; }
 has_backup() { compgen -G "$QUI_AGENT_DATA/web-upgrade-failed-*/*" >/dev/null; }
@@ -83,5 +94,24 @@ if agent_enable_web_upgrade >/dev/null 2>&1; then fail 'health failure reported 
 [[ $started == 2 ]] || fail 'standalone service was not restarted after health failure'
 has_backup || fail 'health failure left no backup'
 [[ ! -e $QUI_AGENT_DATA/identity/agent-supervisor.enc ]] || fail 'supervision marker survived a health failure'
+
+# The baseline appears after a few polls: enabling waits, and only then stops the service.
+reset; rm -f -- "$baseline"; sleep_hook=create_baseline
+agent_enable_web_upgrade >/dev/null
+[[ $sleeps == 3 && $stopped == 1 && $started == 1 && -f $QUI_AGENT_DATA/identity/agent-supervisor.enc ]] \
+  || fail 'did not wait for the storage baseline before stopping the service'
+
+# The baseline never appears: give up without touching the running service.
+reset; rm -f -- "$baseline"; QUI_WEB_UPGRADE_WAIT=5
+if agent_enable_web_upgrade >/dev/null 2>&1; then fail 'missing baseline reported success'; fi
+[[ $sleeps == 5 && $stopped == 0 && $started == 0 ]] || fail 'service was touched while the baseline was missing'
+has_backup && fail 'missing baseline created a failure backup'
+[[ ! -e $QUI_AGENT_DATA/identity/agent-supervisor.enc ]] || fail 'initialization ran without a baseline'
+
+# The service stops while waiting: return without stopping or initializing.
+reset; rm -f -- "$baseline"; sleep_hook=deactivate_service
+agent_enable_web_upgrade >/dev/null 2>&1 || fail 'service that stopped while waiting was treated as a failure'
+[[ $stopped == 0 && $started == 0 && ! -e $QUI_AGENT_DATA/identity/agent-supervisor.enc ]] \
+  || fail 'inactive service was initialized after waiting'
 
 printf 'PASS agent-web-upgrade-test\n'

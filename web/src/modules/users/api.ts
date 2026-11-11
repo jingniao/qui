@@ -76,5 +76,5 @@ export const userAPI = {
   revokeToken: (userId: string) => request(`/users/${userId}/subscription-token`, 'DELETE'),
   tokens: (page: number) => request<Page<TokenView>>(`/subscriptions?page=${page}&pageSize=20`),
   preview: (userId: string) =>
-    request<{ items: { nodeId: string; nodeName: string; inboundId: string; protocol: string; address: string; port: number; link?: string }[]; total: number; warnings: { stage: string; ref: string; message: string }[] }>(`/users/${userId}/subscription-preview`)
+    request<{ items: { nodeId: string; nodeName: string; inboundId: string; protocol: string; address: string; port: number; link?: string; name: string; kind: 'inbound' | 'relay' | 'import' }[]; total: number; warnings: { stage: string; ref: string; message: string }[] }>(`/users/${userId}/subscription-preview`)
 };

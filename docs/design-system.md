@@ -72,7 +72,7 @@
 ### 1. 字体家族 (Font Stack)
 - **无衬线字体 (通用界面)**：`-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", sans-serif`
 - **等宽字体 (数据/编码)**：`"SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Cascadia Mono", "Segoe UI Mono", monospace`
-- 字体栈统一维护于 `web/tailwind.config.js`；全局正文通过 `font-sans` 引用，不在业务页面重复声明。使用本机系统字体，无需下载字体文件。
+- 字体栈统一维护于 `web/tailwind.config.js`；全局正文通过 `font-sans` 引用，不在业务页面重复声明。使用本机系统字体，无需下载字体文件；唯一例外是自托管的 Twemoji Country Flags 字体（`unicode-range` 仅限国旗码位，约 78 KB，页面出现国旗时才加载），用于让国旗在 Windows 上正常显示。
 
 ### 2. 标准字阶表
 

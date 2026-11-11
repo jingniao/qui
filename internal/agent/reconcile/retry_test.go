@@ -2,9 +2,12 @@ package reconcile
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 // TestTemporaryApplyFailureRetries proves a start failure is not cached: the
@@ -33,6 +36,23 @@ func TestTemporaryApplyFailureRetries(t *testing.T) {
 	}
 	if adapter.applyCalls != 2 {
 		t.Fatalf("apply called %d times", adapter.applyCalls)
+	}
+}
+
+// TestStoragePreflightFailureCarriesCodeAndMessage proves a failing storage
+// preflight is reported with a fixed code and the reason, not an empty result,
+// and never reaches the core.
+func TestStoragePreflightFailureCarriesCodeAndMessage(t *testing.T) {
+	directory := t.TempDir()
+	adapter := &fakeCoreAdapter{}
+	manager, err := New(directory, "node-test", adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.PrepareStorage = func(context.Context, desiredstate.State) error { return errors.New("history is locked") }
+	result, err := manager.Apply(context.Background(), state(1080, 1))
+	if err == nil || result.Code != storagePreflightFailedCode || result.Message != "history is locked" || adapter.applyCalls != 0 {
+		t.Fatalf("preflight failure not reported: %+v %v", result, err)
 	}
 }
 

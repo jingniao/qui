@@ -121,6 +121,33 @@ case $(different_grpc_host || true) in
   *) check 'a valid gRPC host passes the host check' 0 true;;
 esac
 
+# --web-upgrade takes no value and is accepted by argument parsing: with a bad port
+# pair the refusal is the port one, not "unknown argument"; a value after it is read
+# as the next (unknown) argument.
+web_upgrade_flag() {
+  bash "$installer" --version 1.4.1 --panel panel.example.com --http-port 18880 \
+    --grpc-port 18880 --ca-sha256 "$zeros" --token "$token" --core xray --web-upgrade 2>&1
+}
+case $(web_upgrade_flag || true) in
+  *'未知参数'*) check '--web-upgrade is accepted by argument parsing' 1 true;;
+  *'不能是同一个端口'*) check '--web-upgrade is accepted by argument parsing' 0 true;;
+  *) check '--web-upgrade is accepted by argument parsing' 1 true;;
+esac
+web_upgrade_with_value() {
+  bash "$installer" --version 1.4.1 --panel panel.example.com --web-upgrade yes 2>&1
+}
+case $(web_upgrade_with_value || true) in
+  *'未知参数：yes'*) check '--web-upgrade takes no value' 0 true;;
+  *) check '--web-upgrade takes no value' 1 true;;
+esac
+# The enabling call needs the whole installer to run, so its gating is asserted on
+# the source: the only call sits inside a condition on the flag variable.
+gated_enable() {
+  [[ $(grep -c '^ *agent_enable_web_upgrade' "$installer") == 1 ]] \
+    && grep -B1 '^ *agent_enable_web_upgrade' "$installer" | grep -q 'if \[\[ \$web_upgrade == true \]\]; then'
+}
+check 'agent_enable_web_upgrade is gated on --web-upgrade' 0 gated_enable
+
 # --- curl and install stubs -------------------------------------------------------
 # Every network call of the functions under test goes through $TOP/bin/curl, and the
 # trust step installs its anchor with install(1); both are stubbed here. A scenario

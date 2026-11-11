@@ -157,7 +157,7 @@ func TestPreviewItemsCarryTheSubscriptionLink(t *testing.T) {
 	if err := json.Unmarshal(raw, &document); err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"nodeId": true, "nodeName": true, "inboundId": true, "protocol": true, "address": true, "port": true, "link": true}
+	allowed := map[string]bool{"nodeId": true, "nodeName": true, "inboundId": true, "protocol": true, "address": true, "port": true, "link": true, "name": true, "kind": true}
 	for _, item := range document.Items {
 		for key := range item {
 			if !allowed[key] {
@@ -182,6 +182,14 @@ func TestPreviewItemsCarryTheSubscriptionLink(t *testing.T) {
 	}
 	if vless.NodeID != "preview-node" || vless.NodeName != "Preview" || vless.Protocol != "vless" || vless.Address != "node.example" || vless.Port != 443 {
 		t.Fatalf("preview item lost its fields: %+v", vless)
+	}
+
+	// The display name is the one the subscription outputs, and published
+	// inbounds are plain inbound endpoints.
+	for _, id := range []string{"vless-in", "quic-in"} {
+		if items[id].Name != byInbound[id].Name || items[id].Name == "" || items[id].Kind != "inbound" {
+			t.Fatalf("preview item %s name/kind %q/%q, want %q/inbound", id, items[id].Name, items[id].Kind, byInbound[id].Name)
+		}
 	}
 
 	// The Hysteria2 endpoint pins a CA, which no URI can carry: the item keeps its

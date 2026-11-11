@@ -305,6 +305,15 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	}
 	defer closeCore()
 	controlOnly := startup != nil && startup.ControlOnly
+	// A managed Worker can never take the release-history locks its supervisor
+	// holds, so it does not prove activation itself: the supervisor raises the
+	// storage floors before starting it, and an unraised floor is a refusal here.
+	checkFloorRaise := func(check func(context.Context, string, string, string) error) error {
+		if startup != nil {
+			return errors.New("the supervisor did not raise the storage format")
+		}
+		return check(ctx, c.DataDirectory, state.NodeID, agentVersion)
+	}
 	if _, err := storage.Ensure(c.DataDirectory, state.NodeID, storageContract); err != nil {
 		return err
 	}
@@ -319,7 +328,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	} else if requiredStorage.Formats.CoreAccounting.Write >= agentstorage.CoreAccountingFormat {
 		// The floor already writes the current ABI; every retained image was proven
 		// readable when it was raised, so no per-start probe is needed.
-	} else if err := agenthost.CheckCoreAccountingActivation(ctx, c.DataDirectory, state.NodeID, agentVersion); err != nil {
+	} else if err := checkFloorRaise(agenthost.CheckCoreAccountingActivation); err != nil {
 		// The retained fallback images cannot read the newer marker ABI. Preserve
 		// the old write declaration, do not raise the floor and do not open a data
 		// plane. When the supervisor negotiated a degraded/recovery start the node
@@ -335,7 +344,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	}
 	if NewRuntime == nil && !controlOnly {
 		if requiredStorage.Formats.Configuration.Write < 4 {
-			if err := agenthost.CheckMultiCoreActivation(ctx, c.DataDirectory, state.NodeID, agentVersion); err != nil {
+			if err := checkFloorRaise(agenthost.CheckMultiCoreActivation); err != nil {
 				return fmt.Errorf("multi-core format cannot be raised safely: %w", err)
 			}
 			if _, err := storage.ActivateCoreInventoryFormats(c.DataDirectory, state.NodeID, storageContract); err != nil {
@@ -370,16 +379,8 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			for _, in := range desired.Inbounds {
-				if in.Core != "" {
-					if err := agenthost.CheckMultiCoreActivation(ctx, c.DataDirectory, state.NodeID, agentVersion); err != nil {
-						return err
-					}
-					if _, err := storage.ActivateCoreInventoryFormats(c.DataDirectory, state.NodeID, storageContract); err != nil {
-						return err
-					}
-					break
-				}
+			if err := activateInventoryFormats(c.DataDirectory, state.NodeID, storageContract, desired, func() error { return checkFloorRaise(agenthost.CheckMultiCoreActivation) }); err != nil {
+				return err
 			}
 			_, err := storage.ActivateSuccessReceiptFormat(c.DataDirectory, state.NodeID, storageContract)
 			return err
@@ -738,6 +739,9 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			result.Code = applied.Code
 			if applyErr != nil && result.Code == "" {
 				result.Code = "apply_failed"
+			}
+			if applyErr != nil {
+				logger.Warn("apply failed", "revision", desired.Revision, "code", result.Code, "error", applyErr)
 			}
 		}
 		results = append(results, result)

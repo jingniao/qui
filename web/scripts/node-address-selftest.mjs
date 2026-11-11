@@ -102,7 +102,6 @@ const displaySites = [
   'modules/dashboard/pages/DashboardPage.vue',
   'modules/proxy/components/node-editor/NodeEditorDrawer.vue',
   'modules/proxy/pages/ProxyNodeListPage.vue',
-  'modules/users/pages/UserDetailPage.vue',
   'modules/routing/pages/ClientPolicyPage.vue',
   'modules/routing/pages/PolicySimulatorPage.vue'
 ];

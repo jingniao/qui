@@ -68,6 +68,7 @@ GET /api/v1/nodes/{id}/cores/{component}/removals
 GET /api/v1/nodes/{id}/deletion-preview
 GET /api/v1/nodes/{id}/enrollment-status
 GET /api/v1/nodes/{id}/health-checks
+GET /api/v1/nodes/{id}/inbound-states
 GET /api/v1/nodes/{id}/latency
 GET /api/v1/nodes/{id}/latency-targets
 GET /api/v1/nodes/{id}/machine-traffic

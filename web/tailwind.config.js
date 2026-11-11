@@ -8,6 +8,7 @@ export default {
     extend: {
       fontFamily: {
         sans: [
+          '"Twemoji Country Flags"',
           '-apple-system',
           'BlinkMacSystemFont',
           '"SF Pro Text"',

@@ -13,6 +13,13 @@ import (
 // tunnel that comes up after boot), so the revision is retried.
 const networkUnavailableCode = "network_unavailable"
 
+// Fixed codes for failures before the core is touched: the storage format
+// preflight, and writing the revision's sealed snapshots. Neither is cached.
+const (
+	storagePreflightFailedCode = "storage_preflight_failed"
+	revisionStoreFailedCode    = "revision_store_failed"
+)
+
 // networkAvailable reports whether the node's outbound source address and
 // interface exist locally. It is injectable so tests can simulate an address
 // that appears later; the default inspects the host.

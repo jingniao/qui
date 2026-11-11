@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
+// The model imports the shared result-code labels, so its imports are resolved too.
+async function tsModuleUrl(url, cache = new Map()) {
+  if (cache.has(url.href)) return cache.get(url.href);
+  let code = ts.transpileModule(readFileSync(url, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+  for (const spec of new Set([...code.matchAll(/from\s+'([^']+)'/g)].map(match => match[1]).filter(value => value.startsWith('.')))) {
+    const target = new URL(spec, url);
+    if (!/\.tsx?$/.test(target.pathname)) target.pathname += '.ts';
+    code = code.split(`from '${spec}'`).join(`from '${await tsModuleUrl(target, cache)}'`);
+  }
+  const moduleUrl = `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
+  cache.set(url.href, moduleUrl);
+  return moduleUrl;
+}
 const source = readFileSync(new URL('../src/modules/nodes/components/detail/serverDetailModel.ts', import.meta.url), 'utf8');
-const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
-const { filterRevisions, defaultRevisionFilter, revisionStrip, basicFacts, detailState, isDirty, revisionResult } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const { filterRevisions, defaultRevisionFilter, revisionStrip, basicFacts, detailState, isDirty, revisionResult } = await import(await tsModuleUrl(new URL('../src/modules/nodes/components/detail/serverDetailModel.ts', import.meta.url)));
 const rows = [{ id: 5, summary: 'auto: quota' }, { id: 4, summary: 'manual' }, { id: 3, summary: 'auto: user' }];
 assert.deepEqual(filterRevisions(rows, 'all'), rows);
 assert.deepEqual(filterRevisions(rows, 'manual').map(r => r.id), [4]);
@@ -36,7 +48,7 @@ assert.equal(isDirty({ enabled: false }, { enabled: true }), true);
 assert.equal(isDirty({ renewal: '' }, { renewal: '' }), false);
 assert.equal(isDirty({ ids: [1, 2] }, { ids: [2, 1] }), true);
 assert.equal(revisionResult('success'), '已应用且健康');
-assert.equal(revisionResult('future_code'), '其他结果');
+assert.equal(revisionResult('future_code'), 'future_code');
 console.log('All server-detail self-tests passed');
 
 // F2: K2 host observations, nullable historical buckets and tuning contract.
@@ -59,10 +71,11 @@ const point = (at, cpuPercent) => history.metricPoint({at:new Date(at).toISOStri
 const minute = 60000;
 const samples = [point(0,1),point(minute,null),point(2*minute,2),point(3*minute,0),point(6*minute,3)];
 assert.equal(samples[1].cpu,null); assert.equal(samples[0].processes,0.5); assert.equal(samples[0].rxRate,0); assert.equal(samples[0].tcp,null);
-const pathF2 = history.metricPath(samples,'cpu',0,6*minute,60);
-assert.equal((pathF2.match(/M/g)||[]).length,3,'null and missing time buckets break the line');
-assert.equal((pathF2.match(/L/g)||[]).length,1);
-assert.equal(history.metricPath([point(0,null)],'cpu',0,minute,60).trim(),'');
+const dataF2 = history.seriesData(samples,'cpu',60);
+assert.deepEqual(dataF2.map(p=>p.y),[1,null,2,0,null,3],'null values and gaps over 1.5 x the step insert null, adjacent minutes stay joined');
+assert.equal(dataF2[4].x,4.5*minute,'the gap marker sits between the neighbours');
+assert.deepEqual(history.seriesData([point(0,null)],'cpu',60).map(p=>p.y),[null]);
+assert.deepEqual(history.seriesData([point(0,1),point(90000,2),point(90000+90001,3)],'cpu',60).map(p=>p.y),[1,2,null,3],'exactly 1.5 x the step stays joined, beyond it breaks');
 const tuning = await loadF2Model('detail/serverTuningModel.ts');
 for (const [status,label] of Object.entries({pending:'等待 Agent 执行',applied:'已应用',cleared:'已清除',failed:'执行失败',unconfirmed:'结果未确认'})) assert.equal(tuning.tuningStatus(status),label);
 assert.equal(tuning.tuningStatus('future'),'未知状态');

@@ -239,31 +239,56 @@ check('incomplete pagination reports an error', incomplete);
 check('node, group and rule-set selectors use complete pagination', page.includes("allPages(page => nodeAPI.list(page, ''))") && page.includes('allPages(page => groupAPI.list(page, 100))') && !page.includes('policyAPI.services(1, 100)'));
 class TestAPIError extends Error { constructor(status, details) { super('规则集仍被引用'); this.status = status; this.details = details; } }
 const sharedRefs = { nodePolicies: [{ id: 'node', name: '节点策略', enabled: false }], clientProfiles: [{ id: 'profile', name: '配置', active: false, rules: [{ id: 'off', enabled: false }] }] };
-const shared = {
-  editingService: ref(null), serviceReferences: ref(null), serviceReferencesError: ref(''), serviceNotice: ref(''), deletingService: ref(false),
-  savingService: ref(false), serviceDrawerVisible: ref(false), serviceForm: {}, serviceDomainsText: ref(''), serviceSuffixesText: ref(''), serviceKeywordsText: ref(''), serviceCidrsText: ref(''), serviceSets: ref([]),
-  APIError: TestAPIError, allPages, showToast: () => {},
-  policyAPI: { serviceReferences: async () => sharedRefs, deleteService: async () => { throw new TestAPIError(409, sharedRefs); }, saveService: async () => ({ name: '共享规则', references: sharedRefs, warning: '404；客户端可能继续使用缓存或报告错误' }), services: async () => ({ items: [], total: 0 }) }
+// The rule-set dialog lives in one shared component used by both pages.
+const editorSource = readFileSync(path.resolve(here, '..', 'src', 'modules', 'routing', 'components', 'ServiceSetEditor.vue'), 'utf8');
+const editorScript = editorSource.slice(editorSource.indexOf('<script setup lang="ts">') + '<script setup lang="ts">'.length, editorSource.indexOf('</script>'));
+const editorAst = ts.createSourceFile('ServiceSetEditor.ts', editorScript, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const editorAction = name => editorAst.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name).getText(editorAst);
+const savedPayloads = [];
+const emitted = [];
+const set = {
+  id: 'shared', name: '共享规则', enabled: true, domains: ['example.org'], suffixes: [], keywords: ['openai'], cidrs: [],
+  sources: [{ id: 'src1', url: 'https://example.com/r.txt', format: 'text', behavior: 'domain', intervalSeconds: 3600, lastStatus: 'ok' }]
 };
-const sharedActions = ['openEditService', 'cloneService', 'deleteService', 'saveService', 'lines'];
-const sharedJS = ts.transpileModule(sharedActions.map(pageAction).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
-const sharedRun = new Function(...Object.keys(shared), sharedJS + '\nreturn {' + sharedActions.join(',') + '};')(...Object.values(shared));
-const set = { id: 'shared', name: '共享规则', enabled: true, domains: ['example.org'], suffixes: [], cidrs: [] };
-await sharedRun.openEditService(set);
-check('shared editor loads inactive profiles, disabled rules and node references', shared.serviceReferences.value === sharedRefs && shared.editingService.value.id === 'shared');
-await sharedRun.deleteService();
-check('delete 409 displays references and retains the shared editor', shared.serviceReferences.value === sharedRefs && shared.serviceReferencesError.value && shared.serviceDrawerVisible.value);
-shared.serviceForm.enabled = false;
-await sharedRun.saveService();
-check('shared save immediately displays the returned disable warning', shared.serviceNotice.value.includes('缓存') && !shared.serviceDrawerVisible.value);
-await sharedRun.openEditService(set, true);
-check('clone creates an independent shared set without old references', shared.editingService.value === null && shared.serviceForm.name === '共享规则-副本' && shared.serviceReferences.value.clientProfiles.length === 0);
-check('shared editor explains immediate save and cached-rule semantics', page.includes('放弃配置草稿不会撤销这里的保存') && page.includes('客户端可能继续使用缓存或报告错误') && page.includes('profile.active') && page.includes('rule.enabled') && page.includes('policy.enabled'));
-check('shared deletion confirmation temporarily hides its higher-layer drawer without clearing the draft', page.includes('v-if="!deletingService"\n      v-model="serviceDrawerVisible"'));
-
-check('shared editor has keywords and external sources', page.includes('serviceKeywordsText') && page.includes('serviceForm.sources'));
-check('mrs format restricts behaviors to domain and ipcidr', page.includes("source.format === 'mrs'") || page.includes("s.format === 'mrs'"));
-check('nodeUsable false displays client only label', page.includes('仅客户端可用'));
+const editor = {
+  props: { modelValue: true, service: set, clone: false },
+  emit: (...args) => emitted.push(args),
+  editingId: ref(''), references: ref(null), referencesError: ref(''), deletingService: ref(false), saving: ref(false), refreshingSourceId: ref(''),
+  domainsText: ref(''), suffixesText: ref(''), keywordsText: ref(''), cidrsText: ref(''),
+  form: { name: '', enabled: true, description: '', sources: [] },
+  emptyReferences: () => ({ nodePolicies: [], clientProfiles: [] }),
+  APIError: TestAPIError, showToast: () => {},
+  policyAPI: {
+    serviceReferences: async () => sharedRefs,
+    deleteService: async () => { throw new TestAPIError(409, sharedRefs); },
+    saveService: async (id, payload) => { savedPayloads.push({ id, payload }); return { name: '共享规则', references: sharedRefs, warning: '404；客户端可能继续使用缓存或报告错误' }; }
+  }
+};
+const editorActions = ['lines', 'addSource', 'removeSource', 'onFormatChange', 'initForm', 'buildPayload', 'save', 'remove'];
+const editorJS = ts.transpileModule(editorActions.map(editorAction).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
+const editorRun = new Function(...Object.keys(editor), editorJS + '\nreturn {' + editorActions.join(',') + '};')(...Object.values(editor));
+await editorRun.initForm();
+check('shared editor loads inactive profiles, disabled rules and node references', editor.references.value === sharedRefs && editor.editingId.value === 'shared');
+await editorRun.remove();
+check('delete 409 displays references and keeps the editor open', editor.references.value === sharedRefs && editor.referencesError.value && !emitted.some(([name]) => name === 'update:modelValue' || name === 'deleted'));
+editor.form.enabled = false;
+await editorRun.save();
+check('save payload always carries complete keywords and sources', savedPayloads[0].id === 'shared' && isDeepStrictEqual(savedPayloads[0].payload.keywords, ['openai']) && savedPayloads[0].payload.sources.length === 1 && savedPayloads[0].payload.sources[0].id === 'src1' && savedPayloads[0].payload.enabled === false);
+check('shared save closes the editor and hands the result to the page', emitted.some(([name]) => name === 'update:modelValue') && emitted.find(([name]) => name === 'saved')[1].warning.includes('缓存'));
+editor.keywordsText.value = 'a\n\n b ';
+check('keyword lines are trimmed into the payload', isDeepStrictEqual(editorRun.buildPayload().keywords, ['a', 'b']));
+editor.props.clone = true;
+await editorRun.initForm();
+check('clone creates an independent shared set without old references or source ids', editor.editingId.value === '' && editor.form.name === '共享规则-副本' && editor.references.value.clientProfiles.length === 0 && editor.form.sources[0].id === undefined && isDeepStrictEqual(editorRun.buildPayload().keywords, ['openai']));
+check('shared editor explains immediate save and cached-rule semantics', editorSource.includes('放弃配置草稿不会撤销这里的保存') && editorSource.includes('客户端可能继续使用缓存或报告错误') && editorSource.includes('profile.active') && editorSource.includes('rule.enabled') && editorSource.includes('policy.enabled'));
+check('shared deletion confirmation temporarily hides its higher-layer drawer without clearing the draft', editorSource.includes('v-if="!deletingService"\n    :model-value="modelValue"'));
+check('shared editor has keywords and external sources', editorSource.includes('v-model="keywordsText"') && editorSource.includes('form.sources'));
+check('mrs format restricts behaviors to domain and ipcidr', editorSource.includes("source.format !== 'mrs'"));
+check('nodeUsable false displays client only label', editorSource.includes('仅客户端可用'));
+const rulePage = readFileSync(path.resolve(here, '..', 'src', 'modules', 'routing', 'pages', 'ServiceRulePage.vue'), 'utf8');
+check('both pages use the shared rule-set editor', page.includes("import ServiceSetEditor from '../components/ServiceSetEditor.vue'") && page.includes('<ServiceSetEditor') && rulePage.includes("import ServiceSetEditor from '../components/ServiceSetEditor.vue'") && rulePage.includes('<ServiceSetEditor'));
+check('neither page keeps its own rule-set form', [page, rulePage].every(source => !source.includes('keywordsText') && !source.includes('KeywordsText') && !source.includes('domainsText') && !source.includes('DomainsText') && !source.includes('serviceForm') && !source.includes('policyAPI.saveService')));
+check('rule-set list counts keywords and shows source status', rulePage.includes('service.keywords?.length') && rulePage.includes('sourceStatus(service)') && rulePage.includes("'待抓取'") && rulePage.includes("'失败'"));
 await api.policyAPI.refreshServiceSource('svc', 'src');
 check('refreshServiceSource endpoint works', client.calls.at(-1).path === '/service-sets/svc/sources/src/refresh' && client.calls.at(-1).method === 'POST');
 

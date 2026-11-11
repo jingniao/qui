@@ -14,6 +14,12 @@ import (
 const metricColumns = "cpu_percent,memory_percent,disk_percent,memory_used_bytes,swap_used_bytes,disk_used_bytes,load1,process_count,tcp_connections,udp_sockets,active_connections,rx_bytes_per_second,tx_bytes_per_second"
 const sampleInsertColumns = metricColumns + ",tcp_out_segs,tcp_retrans_segs"
 
+// keepMeasured lists the rate-style columns an Agent can only compute some of
+// the time (two heartbeats less than a second apart carry none). Within one
+// minute a later NULL must not erase an earlier measurement; every other column
+// keeps last-write-wins.
+var keepMeasured = map[string]bool{"cpu_percent": true, "rx_bytes_per_second": true, "tx_bytes_per_second": true}
+
 // heartbeatFreshness is the age at which a stored heartbeat stops counting as a
 // current measurement.
 const heartbeatFreshness = 45 * time.Second
@@ -67,7 +73,11 @@ func recordMetricTx(ctx context.Context, tx *sql.Tx, node string, m *pb.AgentMes
 	}
 	assignments := []string{}
 	for _, col := range strings.Split(sampleInsertColumns, ",") {
-		assignments = append(assignments, col+"=excluded."+col)
+		if keepMeasured[col] {
+			assignments = append(assignments, col+"=coalesce(excluded."+col+","+col+")")
+		} else {
+			assignments = append(assignments, col+"=excluded."+col)
+		}
 	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO node_metric_samples(node_id,at,"+sampleInsertColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id,at) DO UPDATE SET "+strings.Join(assignments, ","), node, timestamp(at.Truncate(time.Minute)), h.CpuPercent, h.MemoryPercent, h.DiskPercent, h.MemoryUsedBytes, h.SwapUsedBytes, h.DiskUsedBytes, h.Load1, h.ProcessCount, h.TcpConnections, h.UdpSockets, active, rx, ntx, h.TcpOutSegs, h.TcpRetransSegs)
 	return err

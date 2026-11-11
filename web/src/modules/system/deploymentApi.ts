@@ -21,7 +21,11 @@ export interface RevisionDiff {
   nodeId: string; baseRevision: number; revision: number; changes: RevisionChange[];
 }
 
+export type InboundPublishState = 'effective' | 'modified' | 'pending' | 'unpublished';
+export interface InboundStateItem { inboundId: string; state: InboundPublishState; code?: string; revision?: number; }
+
 export const deploymentAPI = {
+  inboundStates: (nodeId: string) => request<{ items: InboundStateItem[] }>(`/nodes/${encodeURIComponent(nodeId)}/inbound-states`),
   diff: (revision: number, baseRevision?: number) => request<RevisionDiff>(`/revisions/${revision}/diff${baseRevision === undefined ? '' : '?baseRevision=' + baseRevision}`),
   batches: (page: number) => request<Page<DeploymentBatch>>(`/deployment-batches?page=${page}&pageSize=20`),
   chains: () => request<Page<ChainChoice>>('/proxy-chains?page=1&pageSize=100'),

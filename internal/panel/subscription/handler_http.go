@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/subscription/format/uri"
+	"proxycontrol/internal/panel/subscription/proxy"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/httpapi"
 )
@@ -150,6 +152,20 @@ type previewItem struct {
 	Address   string  `json:"address"`
 	Port      int     `json:"port"`
 	Link      *string `json:"link,omitempty"`
+	// Name is the display name the subscription outputs; Kind is "inbound",
+	// "relay" or "import" so the page can tag how the client reaches it.
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+func previewKind(origin proxy.Origin) string {
+	switch {
+	case strings.HasPrefix(origin.Source, "import:"):
+		return "import"
+	case origin.Relayed:
+		return "relay"
+	}
+	return "inbound"
 }
 
 // previewWarning is one diagnostic of the preview. Warnings are shown to the
@@ -176,7 +192,7 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]previewItem, 0, len(proxies))
 	for _, endpoint := range proxies {
-		item := previewItem{NodeID: endpoint.Origin.Node.ID, NodeName: endpoint.Origin.Node.Name, InboundID: endpoint.Origin.Ref, Protocol: endpoint.Protocol, Address: endpoint.Server, Port: endpoint.Port}
+		item := previewItem{NodeID: endpoint.Origin.Node.ID, NodeName: endpoint.Origin.Node.Name, InboundID: endpoint.Origin.Ref, Protocol: endpoint.Protocol, Address: endpoint.Server, Port: endpoint.Port, Name: endpoint.Name, Kind: previewKind(endpoint.Origin)}
 		if link, err := uri.Link(endpoint); err == nil {
 			item.Link = &link
 		} else {

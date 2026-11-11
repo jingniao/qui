@@ -2131,181 +2131,13 @@
       </div>
     </AppDialog>
 
-    <!-- Form Drawer: Edit / Create Service Rule Set -->
-    <FormDrawer
-      v-if="!deletingService"
-      v-model="serviceDrawerVisible"
-      :title="editingService ? `编辑规则集 · v${editingService.version || 1}` : '创建自定义规则集'"
-      description="统一维护目标域名、后缀与 IP/CIDR。保存后版本号自动增加，客户端与节点端均可引用。"
-      :confirm-text="editingService ? '保存修改' : '创建规则集'"
-      :loading="savingService"
-      @confirm="saveService"
-    >
-      <div class="space-y-4 text-sm">
-        <p class="text-xs text-amber-700">这是共享规则集，修改会影响下列全部引用。保存立即写入，独立于配置草稿；放弃配置草稿不会撤销这里的保存。客户端更新规则集、节点发布配置后生效。</p>
-        <div v-if="editingService" class="space-y-2 text-xs">
-          <p v-if="serviceReferencesError" role="alert" class="text-red-600">{{ serviceReferencesError }}</p>
-          <p class="font-semibold">共享引用</p>
-          <p v-for="policy in serviceReferences.nodePolicies" :key="policy.id">节点策略：{{ policy.name }}（{{ policy.enabled ? '启用' : '禁用' }}）</p>
-          <div v-for="profile in serviceReferences.clientProfiles" :key="profile.id">
-            <p>客户端配置：{{ profile.name }}（{{ profile.active ? '活动' : '未启用' }}）</p>
-            <p v-for="rule in profile.rules" :key="rule.id" class="pl-3">规则 {{ rule.id }}（{{ rule.enabled ? '启用' : '禁用' }}）</p>
-          </div>
-          <p v-if="!serviceReferencesError && !serviceReferences.nodePolicies.length && !serviceReferences.clientProfiles.length">暂无已保存引用</p>
-        </div>
-        <p v-if="!serviceForm.enabled" class="text-xs text-amber-700">禁用后规则集下载返回 404；客户端可能继续使用缓存或报告错误，不会立即停止使用缓存规则。启用的 RULE-SET 规则将无法通过配置保存校验。</p>
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">规则集名称</span>
-          <input
-            v-model="serviceForm.name"
-            placeholder="例如: OpenAI、常见流媒体"
-            class="form-input-base mt-1.5"
-            required
-          />
-        </label>
-
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">描述说明 (可选)</span>
-          <textarea
-            v-model="serviceForm.description"
-            rows="2"
-            maxlength="300"
-            placeholder="说明该规则集的收录范围与用途…"
-            class="form-input-base mt-1.5"
-          ></textarea>
-        </label>
-
-        <div>
-          <span class="text-xs font-medium text-neutral-600">完整域名 (每行一个精确域名)</span>
-          <textarea
-            v-model="serviceDomainsText"
-            rows="3"
-            placeholder="api.example.com&#10;login.example.com"
-            class="form-input-base mt-1.5 font-mono text-xs"
-          ></textarea>
-        </div>
-
-        <div>
-          <span class="text-xs font-medium text-neutral-600">域名后缀 (每行一个，子域名自动命中)</span>
-          <textarea
-            v-model="serviceSuffixesText"
-            rows="3"
-            placeholder="example.com&#10;openai.com"
-            class="form-input-base mt-1.5 font-mono text-xs"
-          ></textarea>
-        </div>
-
-        <div>
-          <span class="text-xs font-medium text-neutral-600">域名关键字 (每行一个，包含该子串即命中)</span>
-          <textarea
-            v-model="serviceKeywordsText"
-            rows="3"
-            placeholder="openai&#10;google"
-            class="form-input-base mt-1.5 font-mono text-xs"
-          ></textarea>
-        </div>
-
-        <div>
-          <span class="text-xs font-medium text-neutral-600">IP 网段 / CIDR (每行一个)</span>
-          <textarea
-            v-model="serviceCidrsText"
-            rows="3"
-            placeholder="192.168.1.0/24&#10;10.0.0.0/8"
-            class="form-input-base mt-1.5 font-mono text-xs"
-          ></textarea>
-        </div>
-
-        <!-- 外部规则来源 -->
-        <div class="space-y-3 pt-2 border-t border-black/[0.06]">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-neutral-800">外部规则来源 (最多 10 个)</span>
-            <button
-              v-if="(serviceForm.sources?.length || 0) < 10"
-              type="button"
-              @click="addServiceSource"
-              class="text-xs text-ios-blue hover:underline font-medium"
-            >
-              + 添加外部来源
-            </button>
-          </div>
-          <div v-if="!serviceForm.sources?.length" class="text-xs text-neutral-400 py-1">
-            未配置外部来源（支持纯文本、YAML 或 MRS 规则集）
-          </div>
-          <div
-            v-for="(source, idx) in serviceForm.sources"
-            :key="source.id || idx"
-            class="p-3 bg-neutral-50 rounded-xl border border-black/[0.06] space-y-2.5"
-          >
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-bold text-neutral-700">来源 #{{ idx + 1 }}</span>
-              <div class="flex items-center gap-2">
-                <span v-if="source.nodeUsable === false" class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700">
-                  仅客户端可用
-                </span>
-                <span v-else-if="source.nodeUsable" class="px-1.5 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-700">
-                  节点可用
-                </span>
-                <button
-                  v-if="editingService && source.id"
-                  type="button"
-                  @click="refreshSourceItem(editingService.id, source)"
-                  :disabled="refreshingSourceId === source.id"
-                  class="text-xs text-ios-blue hover:underline font-medium"
-                >
-                  {{ refreshingSourceId === source.id ? '刷新中…' : '刷新' }}
-                </button>
-                <button
-                  type="button"
-                  @click="removeServiceSource(idx)"
-                  class="text-xs text-red-500 hover:underline"
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-            <label class="block">
-              <span class="text-xs text-neutral-500">来源 URL</span>
-              <input v-model="source.url" placeholder="https://example.com/rules.txt" class="form-input-base mt-1 text-xs" required />
-            </label>
-            <div class="grid grid-cols-3 gap-2">
-              <label class="block">
-                <span class="text-xs text-neutral-500">格式</span>
-                <select v-model="source.format" @change="onSourceFormatChange(source)" class="form-input-base mt-1 text-xs py-1">
-                  <option value="text">text</option>
-                  <option value="yaml">yaml</option>
-                  <option value="mrs">mrs</option>
-                </select>
-              </label>
-              <label class="block">
-                <span class="text-xs text-neutral-500">行为</span>
-                <select v-model="source.behavior" class="form-input-base mt-1 text-xs py-1">
-                  <option v-if="source.format !== 'mrs'" value="classical">classical</option>
-                  <option value="domain">domain</option>
-                  <option value="ipcidr">ipcidr</option>
-                </select>
-              </label>
-              <label class="block">
-                <span class="text-xs text-neutral-500">刷新间隔 (秒)</span>
-                <input v-model.number="source.intervalSeconds" type="number" min="3600" max="604800" class="form-input-base mt-1 text-xs py-1" />
-              </label>
-            </div>
-            <div v-if="source.lastStatus" class="flex flex-wrap items-center gap-x-3 text-xs text-neutral-500 pt-1 border-t border-black/[0.04]">
-              <span>状态: <strong :class="source.lastStatus === 'ok' ? 'text-emerald-600' : 'text-red-600'">{{ source.lastStatus }}</strong></span>
-              <span v-if="source.entryCount != null">条目: {{ source.entryCount }}</span>
-              <span v-if="source.skippedCount != null">跳过: {{ source.skippedCount }}</span>
-              <span v-if="source.lastFetchAt">更新: {{ source.lastFetchAt }}</span>
-            </div>
-          </div>
-        </div>
-
-        <label class="flex items-center gap-2 pt-1 cursor-pointer">
-          <input type="checkbox" v-model="serviceForm.enabled" class="rounded text-ios-blue focus:ring-ios-blue" />
-          <span class="text-xs font-medium text-neutral-700">启用此规则集</span>
-        </label>
-        <button v-if="editingService && !editingService.builtin" type="button" class="ios-action-btn-secondary text-red-600" :disabled="savingService" @click="deletingService = true">删除规则集</button>
-      </div>
-    </FormDrawer>
-    <ConfirmDialog v-model="deletingService" title="删除共享规则集" message="确定删除此规则集？有已保存引用时将拒绝删除并显示引用。" confirm-text="删除规则集" :loading="savingService" @confirm="deleteService" />
+    <ServiceSetEditor
+      v-model="serviceEditorOpen"
+      :service="serviceEditorTarget"
+      :clone="serviceEditorClone"
+      @saved="onServiceSaved"
+      @deleted="reloadServiceSets"
+    />
     <!-- Provider Create Drawer -->
     <FormDrawer
       v-model="providerDrawerVisible"
@@ -2390,7 +2222,7 @@
 
 <script setup lang="ts">
 import { allPages } from '../../../app/pagination';
-import { ref, reactive, computed, onMounted, h, watch } from 'vue';
+import { ref, computed, onMounted, h, watch } from 'vue';
 import {
   clientPolicyAPI,
   clientPolicyProfilesAPI,
@@ -2410,8 +2242,7 @@ import {
   type ClientRuleType,
   type RulePreset,
   type ServiceSet,
-  type ServiceReferences,
-  type ServiceInput
+  type ServiceReferences
 } from '../api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { connectAddress } from '../../nodes/nodeAddress';
@@ -2423,6 +2254,7 @@ import { authState, formatTime } from '../../../app/auth';
 import PageHeader from '../../../components/PageHeader.vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
+import ServiceSetEditor from '../components/ServiceSetEditor.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import AppSelect, { type SelectOption } from '../../../components/AppSelect.vue';
 
@@ -4201,178 +4033,35 @@ function copyUrl() {
   showToast('Provider URL 已复制');
 }
 
-// 规则集编辑 / 创建 Drawer
-const serviceDrawerVisible = ref(false);
-const editingService = ref<ServiceSet | null>(null);
-const serviceReferences = ref<ServiceReferences>({ nodePolicies: [], clientProfiles: [] });
-const serviceReferencesError = ref('');
+// 规则集编辑 / 创建：对话框由共享组件 ServiceSetEditor 提供
+const serviceEditorOpen = ref(false);
+const serviceEditorTarget = ref<ServiceSet | null>(null);
+const serviceEditorClone = ref(false);
 const serviceNotice = ref('');
-const deletingService = ref(false);
-const savingService = ref(false);
-const serviceDomainsText = ref('');
-const serviceSuffixesText = ref('');
-const serviceKeywordsText = ref('');
-const serviceCidrsText = ref('');
-const refreshingSourceId = ref('');
-const serviceForm = reactive<ServiceInput>({
-  name: '',
-  enabled: true,
-  description: '',
-  domains: [],
-  suffixes: [],
-  keywords: [],
-  cidrs: [],
-  sources: []
-});
-
-function addServiceSource() {
-  if (!serviceForm.sources) serviceForm.sources = [];
-  if (serviceForm.sources.length >= 10) return;
-  serviceForm.sources.push({
-    url: '',
-    format: 'text',
-    behavior: 'domain',
-    intervalSeconds: 86400
-  });
-}
-
-function removeServiceSource(index: number) {
-  serviceForm.sources?.splice(index, 1);
-}
-
-function onSourceFormatChange(source: any) {
-  if (source.format === 'mrs' && source.behavior === 'classical') {
-    source.behavior = 'domain';
-  }
-}
-
-async function refreshSourceItem(serviceId: string, source: any) {
-  if (!source.id || refreshingSourceId.value) return;
-  refreshingSourceId.value = source.id;
-  try {
-    const updated = await policyAPI.refreshServiceSource(serviceId, source.id);
-    Object.assign(source, updated);
-    showToast('规则集来源已刷新');
-  } catch (e) {
-    showToast('刷新来源失败: ' + (e as Error).message, 'error');
-  } finally {
-    refreshingSourceId.value = '';
-  }
-}
-
-function lines(value: string) {
-  return value
-    .split('\n')
-    .map(item => item.trim())
-    .filter(Boolean);
-}
 
 function openCreateService() {
-  editingService.value = null;
-  serviceReferences.value = { nodePolicies: [], clientProfiles: [] };
-  serviceReferencesError.value = '';
-  Object.assign(serviceForm, {
-    name: '',
-    enabled: true,
-    description: '',
-    domains: [],
-    suffixes: [],
-    keywords: [],
-    cidrs: [],
-    sources: []
-  });
-  serviceDomainsText.value = '';
-  serviceSuffixesText.value = '';
-  serviceKeywordsText.value = '';
-  serviceCidrsText.value = '';
-  serviceDrawerVisible.value = true;
+  serviceEditorTarget.value = null;
+  serviceEditorClone.value = false;
+  serviceEditorOpen.value = true;
 }
 
-async function openEditService(service: ServiceSet, clone = false) {
-  editingService.value = clone ? null : service;
-  serviceReferences.value = { nodePolicies: [], clientProfiles: [] };
-  serviceReferencesError.value = '';
-  Object.assign(serviceForm, {
-    name: service.name + (clone ? '-副本' : ''),
-    enabled: service.enabled !== false,
-    description: service.description || '',
-    domains: [...(service.domains || [])],
-    suffixes: [...(service.suffixes || [])],
-    keywords: [...(service.keywords || [])],
-    cidrs: [...(service.cidrs || [])],
-    sources: (service.sources || []).map(s => ({ ...s }))
-  });
-  serviceDomainsText.value = (service.domains || []).join('\n');
-  serviceSuffixesText.value = (service.suffixes || []).join('\n');
-  serviceKeywordsText.value = (service.keywords || []).join('\n');
-  serviceCidrsText.value = (service.cidrs || []).join('\n');
-  serviceDrawerVisible.value = true;
-  if (!clone) {
-    try {
-      const refs = await policyAPI.serviceReferences(service.id);
-      if (editingService.value?.id === service.id) serviceReferences.value = refs;
-    } catch (e) {
-      if (editingService.value?.id === service.id) serviceReferencesError.value = '读取引用失败: ' + (e as Error).message;
-    }
-  }
+function openEditService(service: ServiceSet, clone = false) {
+  serviceEditorTarget.value = service;
+  serviceEditorClone.value = clone;
+  serviceEditorOpen.value = true;
 }
 
 function cloneService(service: ServiceSet) {
-  void openEditService(service, true);
+  openEditService(service, true);
 }
 
-async function deleteService() {
-  const service = editingService.value!;
-  savingService.value = true;
-  try {
-    await policyAPI.deleteService(service.id);
-    deletingService.value = false;
-    serviceDrawerVisible.value = false;
-    serviceSets.value = (await allPages(page => policyAPI.services(page, 100))).items;
-    showToast('规则集已删除');
-  } catch (e) {
-    deletingService.value = false;
-    if (e instanceof APIError && e.status === 409) {
-      serviceReferences.value = e.details as unknown as ServiceReferences;
-      serviceReferencesError.value = e.message;
-    } else { showToast('删除规则集失败: ' + (e as Error).message, 'error'); }
-  } finally { savingService.value = false; }
+async function reloadServiceSets() {
+  serviceSets.value = (await allPages(page => policyAPI.services(page, 100))).items;
 }
 
-async function saveService() {
-  if (savingService.value) return;
-  if (!serviceForm.name.trim()) {
-    showToast('请填写规则集名称', 'error');
-    return;
-  }
-  savingService.value = true;
-  try {
-    const saved = await policyAPI.saveService(editingService.value?.id || null, {
-      name: serviceForm.name.trim(),
-      enabled: serviceForm.enabled,
-      description: serviceForm.description.trim(),
-      domains: lines(serviceDomainsText.value),
-      suffixes: lines(serviceSuffixesText.value),
-      keywords: lines(serviceKeywordsText.value),
-      cidrs: lines(serviceCidrsText.value),
-      sources: serviceForm.sources?.map(s => ({
-        id: s.id,
-        url: s.url.trim(),
-        format: s.format,
-        behavior: s.behavior,
-        intervalSeconds: Number(s.intervalSeconds) || 86400
-      }))
-    });
-    serviceNotice.value = '规则集「' + saved.name + '」已立即保存，引用：' + saved.references.nodePolicies.length + ' 个节点策略、' + saved.references.clientProfiles.length + ' 个客户端配置。' + (saved.warning || '客户端更新规则集、节点发布配置后生效。');
-    showToast('规则集已保存');
-    serviceDrawerVisible.value = false;
-    const res = await allPages(page => policyAPI.services(page, 100));
-    serviceSets.value = res.items;
-  } catch (e) {
-    showToast('保存规则集失败: ' + (e as Error).message, 'error');
-  } finally {
-    savingService.value = false;
-  }
+async function onServiceSaved(saved: ServiceSet & { references: ServiceReferences }) {
+  serviceNotice.value = '规则集「' + saved.name + '」已立即保存，引用：' + saved.references.nodePolicies.length + ' 个节点策略、' + saved.references.clientProfiles.length + ' 个客户端配置。' + (saved.warning || '客户端更新规则集、节点发布配置后生效。');
+  await reloadServiceSets();
 }
 
 // 规则集管理辅助

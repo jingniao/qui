@@ -222,7 +222,7 @@ agent_web_upgrade_failed() {
 }
 
 agent_enable_web_upgrade() {
-  local data marker pending
+  local data marker pending baseline waited=0
   data=${QUI_AGENT_DATA:-/var/lib/proxy-agent}
   marker="$data/identity/agent-supervisor.enc"
   pending="$data/identity/agent-supervision-init.pending"
@@ -234,6 +234,21 @@ agent_enable_web_upgrade() {
     printf '服务未运行，跳过网页升级启用；请启动服务后重跑 qui-update --component agent。\n'
     return 0
   fi
+  # Initialization needs the storage baseline the Agent writes on its first normal
+  # start; stopping a freshly started Agent before that would make it fail.
+  baseline="$data/identity/agent-storage-contract.enc"
+  while [[ ! -f $baseline ]]; do
+    if ((waited >= ${QUI_WEB_UPGRADE_WAIT:-60})); then
+      printf 'Agent 尚未完成首次启动（未生成存储基线），跳过网页升级启用；稍后在本机运行 qui-update --component agent。\n'
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+    if ! service_is_active proxy-agent; then
+      printf '服务未运行，跳过网页升级启用；请启动服务后重跑 qui-update --component agent。\n'
+      return 0
+    fi
+  done
   service_stop proxy-agent || return 1
   if ! (umask 077; runuser -u proxy-agent -- /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --initialize-agent-history); then
     agent_web_upgrade_failed "$data"

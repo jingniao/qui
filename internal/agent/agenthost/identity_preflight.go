@@ -19,6 +19,50 @@ import (
 func CheckCoreAccountingActivation(ctx context.Context, directory, nodeID, version string) error {
 	return checkFormatActivation(ctx, directory, nodeID, version, false)
 }
+
+// raiseWrites sets the write formats activation would persist: core accounting
+// always, and the multi-core configuration, spool, desired-state and release
+// hold formats when multi is set.
+func raiseWrites(c *agentstorage.Contract, multi bool) {
+	c.Formats.CoreAccounting.Write = agentstorage.CoreAccountingFormat
+	if multi {
+		c.Formats.Configuration.Write = 4
+		c.Formats.Spool.Write = 6
+		c.Formats.DesiredState.Write = 3
+		c.Formats.ReleaseHold.Write = 3
+	}
+}
+
+// raiseFormats is the supervisor's activation, done before any Worker starts and
+// with the release history it already holds open (the Worker can never take that
+// history's locks). Retained images and idle jobs are proven first; when the proof
+// fails nothing is raised. required is the stored floor and reader the running
+// supervisor's contract.
+func raiseFormats(ctx context.Context, directory, nodeID string, reader, required agentstorage.Contract, history *updater.History, images string, baseline updater.Image, jobsIdle bool) error {
+	if required.Formats.CoreAccounting.Write >= agentstorage.CoreAccountingFormat && required.Formats.Configuration.Write >= 4 {
+		return nil
+	}
+	if !jobsIdle {
+		return ErrState
+	}
+	target, err := agentstorage.WithRequiredWriter(reader, required)
+	if err != nil {
+		return ErrState
+	}
+	raiseWrites(&target, true)
+	if target.Validate() != nil {
+		return ErrState
+	}
+	if err := history.CheckActivation(ctx, images, baseline, target); err != nil {
+		return err
+	}
+	if _, err := storage.ActivateCoreAccountingFormat(directory, nodeID, reader); err != nil {
+		return err
+	}
+	_, err = storage.ActivateCoreInventoryFormats(directory, nodeID, reader)
+	return err
+}
+
 func CheckMultiCoreActivation(ctx context.Context, directory, nodeID, version string) error {
 	return checkFormatActivation(ctx, directory, nodeID, version, true)
 }
@@ -40,13 +84,7 @@ func checkFormatActivation(ctx context.Context, directory, nodeID, version strin
 		if err != nil {
 			return ErrState
 		}
-		raising.Formats.CoreAccounting.Write = agentstorage.CoreAccountingFormat
-		if multi {
-			raising.Formats.Configuration.Write = 4
-			raising.Formats.Spool.Write = 6
-			raising.Formats.DesiredState.Write = 3
-			raising.Formats.ReleaseHold.Write = 3
-		}
+		raiseWrites(&raising, multi)
 		baseline := required
 		if multi {
 			baseline = running
@@ -82,13 +120,7 @@ func checkFormatActivation(ctx context.Context, directory, nodeID, version strin
 	if err != nil {
 		return err
 	}
-	required.Formats.CoreAccounting.Write = agentstorage.CoreAccountingFormat
-	if multi {
-		required.Formats.Configuration.Write = 4
-		required.Formats.Spool.Write = 6
-		required.Formats.DesiredState.Write = 3
-		required.Formats.ReleaseHold.Write = 3
-	}
+	raiseWrites(&required, multi)
 	if required.Validate() != nil {
 		return ErrState
 	}

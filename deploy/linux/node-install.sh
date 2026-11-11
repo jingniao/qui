@@ -52,6 +52,7 @@ usage() {
                         面板证书覆盖、且不经终止 TLS 的反向代理／CDN 的地址）
   --core xray|sing-box|gost  可重复，例如 --core xray --core sing-box（默认 xray）
   --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
+  --web-upgrade         安装完成后启用 Agent 网页升级（默认不启用；之后也可在本机运行 qui-update --component agent 启用）
   --bundle FILE --sums FILE
                         离线安装：用本地发布归档与其 SHA256SUMS，不访问 GitHub
                         （两个参数必须同时给出）
@@ -75,8 +76,10 @@ cores=(); core=''
 core_source=qui
 bundle_file=''
 sums_file=''
+web_upgrade=false
 while (($#)); do
   case $1 in
+    --web-upgrade) web_upgrade=true; shift;;
     --version|--panel|--grpc-host|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums|--core-source)
       (($# >= 2)) || fail "缺少 $1 的值。"
       case $1 in
@@ -586,8 +589,13 @@ else
   service_is_active proxy-agent-tuning || service_start proxy-agent-tuning || fail '无法启动调优 watcher。'
 fi
 printf 'proxy-agent 服务状态：%s\n' "$(service_state proxy-agent)"
-agent_enable_web_upgrade || true
+if [[ $web_upgrade == true ]]; then
+  agent_enable_web_upgrade || true
+fi
 printf '\n节点已安装并登记：面板 %s，核心 %s。\n' "$panel" "${cores[*]}"
+if [[ $web_upgrade != true ]]; then
+  printf '网页升级未启用；需要在面板网页上升级 Agent 时，在本机运行一次 qui-update --component agent。\n'
+fi
 printf '注册码文件已删除；私钥只保存在本机 /var/lib/proxy-agent/identity。\n'
 printf '在面板里为该节点配置入站并发布配置版本后才会代理流量。\n'
 printf '以后升级用 qui-update（面板或节点主机），不要重跑本脚本。\n'

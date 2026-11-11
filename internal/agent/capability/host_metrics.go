@@ -279,11 +279,24 @@ func publicIP(iface string) string {
 
 func (s *Sampler) interfaceRates(h *pb.Heartbeat, now time.Time) {
 	elapsed := now.Sub(s.sampled).Seconds()
+	if elapsed < 1 {
+		// Too soon after the baseline: reuse the last rates, keep the baseline.
+		for _, nic := range h.Interfaces {
+			if r, ok := s.lastRates[nic.Name]; ok {
+				rx, tx := r[0], r[1]
+				nic.ReceiveBytesPerSecond = &rx
+				nic.TransmitBytesPerSecond = &tx
+			}
+		}
+		return
+	}
+	s.lastRates = map[string][2]float64{}
 	for _, nic := range h.Interfaces {
-		if old, ok := s.interfaces[nic.Name]; ok && elapsed >= 1 && nic.ReceiveBytes >= old[0] && nic.TransmitBytes >= old[1] {
+		if old, ok := s.interfaces[nic.Name]; ok && nic.ReceiveBytes >= old[0] && nic.TransmitBytes >= old[1] {
 			rx, tx := float64(nic.ReceiveBytes-old[0])/elapsed, float64(nic.TransmitBytes-old[1])/elapsed
 			nic.ReceiveBytesPerSecond = &rx
 			nic.TransmitBytesPerSecond = &tx
+			s.lastRates[nic.Name] = [2]float64{rx, tx}
 		}
 	}
 	s.interfaces = map[string][2]uint64{}

@@ -151,6 +151,21 @@ assert.throws(() => nodesApi.installCommand({ ...install, cores: ['v2ray'] }), /
 assert.match(nodesApi.installCommand({ ...install, grpcHost: 'grpc.example.com' }), /--panel panel\.example\.com --grpc-host grpc\.example\.com --http-port 22550 --grpc-port 18880/, 'a separate gRPC address is passed as --grpc-host');
 assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: 'panel.example.com' }), /--grpc-host/, 'the installer already defaults --grpc-host to --panel, so an equal value is omitted');
 assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: '' }), /--grpc-host/, 'an unset gRPC address keeps the panel address');
+// Web upgrade is opt-in: the flag is emitted only when asked, and each dialog starts
+// unchecked, resets on every new token and passes the choice into the command.
+assert.doesNotMatch(defaultCommand, /--web-upgrade/, 'web upgrade is not enabled by default');
+assert.doesNotMatch(nodesApi.installCommand({ ...install, webUpgrade: false }), /--web-upgrade/, 'an unchecked box adds no flag');
+assert.match(nodesApi.installCommand({ ...install, webUpgrade: true }), / --core xray --web-upgrade$/, 'a checked box appends --web-upgrade');
+const webUpgradeOption = read('modules/nodes/components/WebUpgradeOption.vue');
+assert.match(webUpgradeOption, /<input v-model="enabled" type="checkbox"[^>]*\/>启用网页升级/, 'the shared option is the 启用网页升级 checkbox');
+assert.match(webUpgradeOption, /class="mt-1 text-ios-tertiary"/, 'the helper line sits under the checkbox');
+for (const [file, ref_] of [['modules/nodes/components/ServerEnrollment.vue', 'webUpgrade'], ['modules/nodes/components/NodeRecoveryPanel.vue', 'webUpgrade'], ['modules/system/components/NodeVersionPanel.vue', 'pendingWebUpgrade']]) {
+  const source = read(file);
+  assert.match(source, new RegExp(`<WebUpgradeOption [^>]*v-model="${ref_}"`), file + ' shows the web upgrade option');
+  assert.match(source, new RegExp(`${ref_} = ref\\(false\\)`), file + ' starts unchecked');
+  assert.match(source, new RegExp(`${ref_}\\.value = false;`), file + ' resets the choice for each new token');
+  assert.match(source, new RegExp(`webUpgrade: ${ref_}\\.value`), file + ' passes the choice into installCommand');
+}
 console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated allowlist, both ports always explicit');
 
 // The panel address of the install command is saved once in 系统设置 → 节点安装
@@ -168,6 +183,12 @@ for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/no
   assert.match(source, /resolveInstallEndpoint\(/, file + ' must default to the saved install endpoint');
   assert.match(source, /grpcHost: /, file + ' must pass the resolved Agent gRPC address into the command');
   assert.doesNotMatch(source, /window\.location\.hostname/, file + ' must not read the browser address directly');
+}
+for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/nodes/components/NodeRecoveryPanel.vue']) {
+  const source = read(file);
+  assert.doesNotMatch(source, /v-model\.trim="host"/, file + ' must not offer a per-dialog panel address input');
+  assert.doesNotMatch(source, /v-model\.number="port"/, file + ' must not offer a per-dialog panel port input');
+  assert.doesNotMatch(source, /不写回设置/, file + ' must not describe one-off edits any more');
 }
 assert.match(read('modules/system/pages/SettingsPage.vue'), /saveInstallEndpoint\(/, '系统设置 saves the install endpoint');
 assert.match(read('modules/system/pages/SettingsPage.vue'), /Agent gRPC 地址/, '系统设置 edits the Agent gRPC address');
@@ -291,7 +312,8 @@ assert.equal(metricStateA.current.value.cpu, null, 'fresh but disconnected sampl
 metricPropsA.node.status = 'online'; metricPropsA.now += 45000;
 assert.equal(metricStateA.currentUnavailable.value, true, 'stale heartbeat is unavailable even with history');
 assert.equal(metricStateA.current.value.cpu, null);
-assert.match(read(gridPathA), /currentUnavailable \? '服务器离线，当前值不可用' : '需要新版 Agent 上报'/);
+assert.match(read(gridPathA), /currentUnavailable \? '服务器离线，当前值不可用' : '暂无读数'/);
+assert.ok(!read(gridPathA).includes('需要新版 Agent 上报'), 'misleading upgrade hint removed');
 assert.doesNotMatch(read(gridPathA), /需要 Agent 1\.2/);
 const connectionCardA = read('modules/users/pages/UserDetailPage.vue').split('<!-- 连接控制 -->')[1].split('<!--')[0];
 assert.doesNotMatch(connectionCardA, /formatResetCycle/);
@@ -525,7 +547,7 @@ console.log('PASS walkthrough E layout: card columns, hidden unavailable actions
 
 
 // (6) 最近事件 drops a code that repeats the status and translates known failures.
-const detailE = await walkthroughEModule('modules/nodes/components/detail/serverDetailModel.ts');
+const detailE = await import(await tsModuleUrl(new URL('../src/modules/nodes/components/detail/serverDetailModel.ts', import.meta.url)));
 assert.equal(detailE.eventResultLabel('success'), '', 'success only repeats 应用成功');
 assert.equal(detailE.eventResultLabel(''), '');
 assert.equal(detailE.eventResultLabel(undefined), '');
@@ -550,9 +572,32 @@ assert.equal(metricsA.formatMetricValue('cpu', null), '—');
 assert.equal(metricsA.metricRangeLabel([{ time: 0, cpu: 18.24 }, { time: 1, cpu: null }, { time: 2, cpu: 31.46 }], 'cpu'), '最低 18.2% · 最高 31.5%');
 assert.equal(metricsA.metricRangeLabel([{ time: 0, cpu: null }], 'cpu'), '最低 — · 最高 —');
 const gridE = read('modules/nodes/components/ServerMetricsGrid.vue');
-assert.match(gridE, /metricRangeLabel\(points, metric\.key\)/);
+assert.match(gridE, /metricRangeLabel\(points, card\.footerKey\)/);
 assert.match(gridE, /formatMetricRange\(start\.value, end\.value\)/);
 assert.doesNotMatch(gridE, /formatTime\(new Date\(start\)\.toISOString\(\)\)/, 'the full date is no longer printed twice');
+// v1.5.1 item 8: Chart.js cards replace the hand-written SVG (the metric.key assertion above became card.footerKey).
+const chartE = read('modules/nodes/components/MetricLineChart.vue');
+assert.match(chartE, /from 'chart\.js';/); assert.doesNotMatch(chartE, /chart\.js\/auto/, 'register Chart.js piecemeal');
+assert.match(chartE, /Chart\.register\(LineController, LineElement, PointElement, LinearScale, Filler, Tooltip, Legend\)/);
+assert.match(chartE, /const FONT = \{ size: 12 \}/); assert.doesNotMatch(chartE, /size:\s*(?:[0-9]|1[01])\b/, 'chart fonts are at least 12px');
+assert.match(chartE, /titleFont: FONT, bodyFont: FONT/); assert.ok((chartE.match(/font: FONT/g) || []).length >= 3, 'tick and legend fonts use FONT');
+assert.match(chartE, /type: 'linear'/); assert.match(chartE, /spanGaps: false/);
+assert.match(gridE, /defineAsyncComponent\(\(\) => import\('\.\/MetricLineChart\.vue'\)\)/, 'Chart.js loads lazily');
+assert.doesNotMatch(gridE, /<svg|metricPath/, 'no hand-written SVG charts remain');
+const cardE = id => metricsA.metricCards.find(c => c.id === id);
+assert.deepEqual(metricsA.metricCards.map(c => c.id), ['cpu', 'memory', 'disk', 'network', 'connections', 'processes', 'retrans']);
+assert.deepEqual(cardE('cpu').series.map(s => [s.key, s.axis ?? 'y']), [['cpu', 'y'], ['load', 'y1']]);
+assert.equal(cardE('cpu').axes.y.max, 100); assert.equal(cardE('cpu').axes.y1.unit, 'load');
+assert.deepEqual(cardE('network').series.map(s => s.key), ['rxRate', 'txRate']);
+assert.deepEqual(cardE('connections').series.map(s => [s.key, !!s.optional]), [['tcp', false], ['udp', false], ['connections', true]]);
+assert.deepEqual(cardE('memory').series.map(s => s.key), ['memoryBytes', 'swapBytes']);
+const noneE = { time: 0, swapBytes: null, connections: null }, someE = { time: 1, swapBytes: 5, connections: 2 };
+assert.deepEqual(metricsA.visibleSeries(cardE('memory'), [noneE]).map(s => s.key), ['memoryBytes']);
+assert.deepEqual(metricsA.visibleSeries(cardE('connections'), [someE]).map(s => s.key), ['tcp', 'udp', 'connections']);
+assert.match(gridE, /headline\(card\)/);
+for (const gone of ['接收速率', '发送速率', '代理活跃会话', '1 分钟负载']) assert.ok(!gridE.includes(gone), 'merged card label lives in the model only: ' + gone);
+assert.equal(metricsA.formatTimeFull(midnightA), '2026-10-30 00:05:09');
+assert.equal(metricsA.formatXTick(midnightA, 3600000), '00:05'); assert.equal(metricsA.formatXTick(midnightA, 7 * 86400000), '10/30 00:05');
 console.log('PASS walkthrough E charts: compact panel-timezone range, min/max of visible series, no duplicated timestamps');
 
 // (9) An empty tuning draft value selects 不设置, and hints no longer duplicate placeholders.
@@ -585,7 +630,11 @@ assert.doesNotMatch(usersListE, /formatTime\(user\.expiresAt\) \}\}/, 'the secon
 const userDetailE = read('modules/users/pages/UserDetailPage.vue');
 assert.match(userDetailE, /expiryParts\.date/, 'the expiry card shows the date on its own line');
 assert.match(userDetailE, /expiryParts\.time/, 'and the time on a smaller second line');
-console.log('PASS walkthrough E expiry: minute precision in the panel timezone, nowrap cell, split detail card');
+const availableCardE = userDetailE.split('可用节点</h3>')[1].split('</section>')[0];
+assert.match(availableCardE, /v-for="item in previewItems"/, 'the available-node card lists the subscription preview items');
+assert.match(availableCardE, /\{\{ item\.name \}\}/, 'each row shows the subscription display name');
+assert.doesNotMatch(availableCardE, /导入来源：|capabilities\?\.core_name|connectAddress/, 'the card shows no server information');
+console.log('PASS walkthrough E expiry: minute precision in the panel timezone, nowrap cell, split detail card, available nodes from the preview');
 
 // (11a) The dashboard date chip uses the panel timezone, not the browser's.
 assert.equal(timeE.panelDateLabel(new Date('2026-10-29T17:00:00Z')), '10月30日 周五');
@@ -715,3 +764,10 @@ for (const file of ['components/NotificationBell.vue', 'modules/routing/pages/Cl
   }
 }
 console.log('PASS AUDIT A13/FONTS: exact release version/platform, notifications and external rule sources use at least 12px');
+
+const flagCss = read('styles/main.css');
+assert.match(flagCss, /@font-face\s*\{[^}]*font-family:\s*"Twemoji Country Flags"/, 'main.css declares the Twemoji Country Flags font');
+assert.match(flagCss, /unicode-range:[^;]*U\+1F1E6-1F1FF/, 'flag font is limited to regional indicator code points');
+assert.match(readFileSync(new URL('../tailwind.config.js', import.meta.url), 'utf8'), /sans:\s*\[\s*'"Twemoji Country Flags"'/, 'sans stack starts with the flag font');
+assert.ok(readFileSync(new URL('../src/styles/fonts/TwemojiCountryFlags.woff2', import.meta.url)).length > 10000, 'flag font file is present');
+console.log('PASS V1.5.1 FLAGS: self-hosted Twemoji flag font declared, range-limited and first in the sans stack');

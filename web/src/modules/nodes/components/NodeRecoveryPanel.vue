@@ -32,22 +32,19 @@
       <p class="font-semibold">恢复码只显示一次，请立即复制</p>
       <p>有效期至 {{ formatTime(result.expiresAt) }}。离开本页后无法再次查看；需要新码只能重新签发，重新签发会作废此码。</p>
       <CodePreview :code="result.enrollmentToken" title="一次性恢复码" />
-      <div v-if="installAvailable" class="grid gap-3 sm:grid-cols-3">
-        <label class="text-xs text-amber-900">面板地址<input v-model.trim="host" maxlength="253" placeholder="panel.example.com 或 203.0.113.10" class="form-input-base mt-1.5" /></label>
-        <label class="text-xs text-amber-900">面板 Web 端口<input v-model.number="port" type="number" min="1" max="65535" placeholder="22550" title="面板 Web（HTTPS）端口，不是 Agent gRPC 端口" class="form-input-base mt-1.5" /></label>
-        <div class="text-xs text-amber-900">运行内核
-          <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-white px-3 py-2">
-            <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
-              <input v-model="cores" type="checkbox" :value="option.name" class="accent-ios-blue" />{{ option.label }}
-            </label>
-          </div>
+      <div v-if="installAvailable" class="text-xs text-amber-900">运行内核
+        <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-white px-3 py-2">
+          <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
+            <input v-model="cores" type="checkbox" :value="option.name" class="accent-ios-blue" />{{ option.label }}
+          </label>
         </div>
       </div>
-      <p v-if="fromSettings" class="text-xs">默认取自 系统设置 → 节点安装连接地址；在此修改只影响本次命令，不写回设置。</p>
+      <WebUpgradeOption v-if="installAvailable" v-model="webUpgrade" />
+      <p v-if="installAvailable" class="text-xs">面板地址：<code class="font-mono">{{ host }}:{{ port }}</code>（{{ fromSettings ? '取自 系统设置 → 节点安装连接地址' : '当前浏览器地址' }}）；如需修改请到 系统设置 → 节点安装连接地址。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
       <p v-else-if="!installAvailable" class="text-sm">本地或开发构建无法生成一键命令，请在重装的主机上用恢复码手动登记。</p>
       <p v-else-if="!cores.length" role="alert" class="text-sm text-ios-red">请至少选择一个运行内核。</p>
-      <p v-else class="text-sm text-ios-red">请填写有效的面板地址与端口。</p>
+      <p v-else class="text-sm text-ios-red">面板地址无效，请在 系统设置 → 节点安装连接地址 中设置。</p>
       <p class="text-xs">主机若仍留有旧的 <code class="font-mono">/var/lib/proxy-agent</code>，Agent 会以已有身份拒绝登记；重装系统后无需额外处理。</p>
     </div>
     <p v-if="statusError" role="alert" class="text-sm text-ios-red">{{ statusError }}</p>
@@ -76,6 +73,7 @@ import { APIError } from '../../../app/apiClient';
 import { showToast } from '../../../app/api';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import CodePreview from '../../../components/CodePreview.vue';
+import WebUpgradeOption from './WebUpgradeOption.vue';
 const props = defineProps<{ node: NodeView }>();
 // The reinstall keeps the cores the node ran before: that set is what the
 // installer has to place again, so it starts from the reported capabilities.
@@ -84,7 +82,7 @@ const statusLabels: Record<string, string> = { issued: '已签发', consumed: '�
 const redeployLabels: Record<string, string> = { none: '—', pending: '等待节点上线', queued: '重新下发中', success: '重新下发成功', failed: '重新下发失败', not_needed: '无需下发' };
 const blockerLabels: Record<string, string> = { deployment_target: '待完成的发布', deployment_command: '待执行的节点操作', deployment_batch: '进行中的批量发布', agent_update: 'Agent 更新任务', core_update: '核心更新任务', core_remove: '核心移除任务', node_pause: '暂停/恢复任务' };
 const ttl = ref(900), revokeNow = ref(false), loading = ref(false), statusLoading = ref(false), confirm = ref(false);
-const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), fromSettings = ref(false);
+const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), webUpgrade = ref(false), fromSettings = ref(false);
 const error = ref(''), statusError = ref(''), noRecovery = ref(false);
 const result = ref<(Enrollment & { purpose: string }) | null>(null), status = ref<RecoveryStatus | null>(null);
 const blockers = ref<{ kind: string; id: string; name: string }[]>([]);
@@ -100,7 +98,7 @@ const command = computed(() => {
   if (!/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
   try {
     return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
-      grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value] });
+      grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value], webUpgrade: webUpgrade.value });
   } catch { return ''; }
 });
 function blockerDetail(item: { kind: string; id: string; name: string }) {
@@ -137,7 +135,7 @@ async function issue() {
   try {
     result.value = await nodeAPI.issueRecovery(props.node.id, { expiresInSeconds: ttl.value, revokeNow: revokeNow.value });
     // Same defaults as the enrollment dialog: the saved panel address if any,
-    // otherwise the browser address. Both stay editable for a one-off override.
+    // otherwise the browser address.
     const fallback = browserInstallEndpoint();
     host.value = fallback.host;
     port.value = fallback.port;
@@ -145,6 +143,7 @@ async function issue() {
     grpcPort.value = 0;
     fromSettings.value = false;
     cores.value = defaultCores();
+    webUpgrade.value = false;
     showToast('恢复码已签发，请立即复制');
     await refresh();
     const nodeId = props.node.id;
@@ -152,7 +151,6 @@ async function issue() {
       if (props.node.id !== nodeId) return;
       grpcHost.value = endpoint.grpcHost;
       grpcPort.value = endpoint.grpcPort ?? 0;
-      if (host.value !== fallback.host || port.value !== fallback.port) return;
       host.value = endpoint.host;
       port.value = endpoint.port;
       fromSettings.value = endpoint.fromSettings;

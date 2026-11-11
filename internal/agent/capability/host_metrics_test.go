@@ -52,6 +52,40 @@ func TestNICRatesUseElapsedClockAndCounterResetIsUnknown(t *testing.T) {
 	}
 }
 
+func TestShortIntervalHeartbeatsReuseCPUAndNICRatesWithoutResettingBaseline(t *testing.T) {
+	t0 := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	s := &Sampler{sampled: t0, previous: counters{total: 1000, idle: 900, valid: true}, interfaces: map[string][2]uint64{"eth0": {100, 200}}}
+	beat := func(at time.Time, cpu counters, rx, tx uint64) *pb.Heartbeat {
+		h := &pb.Heartbeat{Interfaces: []*pb.InterfaceCounters{{Name: "eth0", ReceiveBytes: rx, TransmitBytes: tx}}}
+		s.interfaceRates(h, at)
+		s.applyCPU(h, cpu, at)
+		return h
+	}
+	first := beat(t0.Add(2*time.Second), counters{total: 1200, idle: 1000, valid: true}, 160, 320)
+	if first.GetCpuPercent() != 50 || first.Interfaces[0].GetReceiveBytesPerSecond() != 30 || first.Interfaces[0].GetTransmitBytesPerSecond() != 60 {
+		t.Fatal(first)
+	}
+	// 100 ms later: values are reused and the baseline stays at the first sample.
+	second := beat(t0.Add(2100*time.Millisecond), counters{total: 1210, idle: 1010, valid: true}, 170, 330)
+	if second.GetCpuPercent() != 50 || second.Interfaces[0].GetReceiveBytesPerSecond() != 30 || second.Interfaces[0].GetTransmitBytesPerSecond() != 60 {
+		t.Fatal("short interval lost readings", second)
+	}
+	if !s.sampled.Equal(t0.Add(2*time.Second)) || s.previous.total != 1200 || s.interfaces["eth0"] != [2]uint64{160, 320} {
+		t.Fatal("short interval moved the baseline", s.sampled, s.previous, s.interfaces)
+	}
+	// A NIC that disappeared is not given a stale rate.
+	h := &pb.Heartbeat{Interfaces: []*pb.InterfaceCounters{{Name: "eth9", ReceiveBytes: 1}}}
+	s.interfaceRates(h, t0.Add(2200*time.Millisecond))
+	if h.Interfaces[0].ReceiveBytesPerSecond != nil {
+		t.Fatal(h)
+	}
+	// The next full interval measures against the first baseline (4 s since t0+2s).
+	third := beat(t0.Add(4*time.Second), counters{total: 1600, idle: 1200, valid: true}, 280, 520)
+	if third.GetCpuPercent() != 50 || third.Interfaces[0].GetReceiveBytesPerSecond() != 60 {
+		t.Fatal(third)
+	}
+}
+
 func procFixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()

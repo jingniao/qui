@@ -17,6 +17,8 @@ type systemMetrics struct {
 }
 type Sampler struct {
 	interfaces          map[string][2]uint64
+	lastRates           map[string][2]float64
+	lastCPU             *float64
 	mu                  sync.Mutex
 	directory           string
 	previous            counters
@@ -49,14 +51,29 @@ func (s *Sampler) Heartbeat() *pb.Heartbeat {
 	if s.TrafficSourceStatus != nil {
 		heartbeat.TrafficSourceStatus = s.TrafficSourceStatus()
 	}
-	if now.Sub(s.sampled) >= time.Second && metrics.cpu.valid && s.previous.valid && metrics.cpu.total > s.previous.total && metrics.cpu.idle >= s.previous.idle {
-		total := metrics.cpu.total - s.previous.total
-		idle := metrics.cpu.idle - s.previous.idle
+	s.applyCPU(heartbeat, metrics.cpu, now)
+	return heartbeat
+}
+
+// applyCPU fills the CPU percentage and advances the shared baseline (CPU
+// counters and sampled time, also used by interfaceRates). A call less than a
+// second after the baseline reuses the last computed value and leaves the
+// baseline alone, so back-to-back heartbeats all carry a reading. It must run
+// after interfaceRates, which reads the same baseline time.
+func (s *Sampler) applyCPU(h *pb.Heartbeat, cur counters, now time.Time) {
+	if now.Sub(s.sampled) < time.Second {
+		h.CpuPercent = s.lastCPU
+		return
+	}
+	s.lastCPU = nil
+	if cur.valid && s.previous.valid && cur.total > s.previous.total && cur.idle >= s.previous.idle {
+		total := cur.total - s.previous.total
+		idle := cur.idle - s.previous.idle
 		if idle <= total {
-			heartbeat.CpuPercent = percent(float64(total-idle) / float64(total) * 100)
+			s.lastCPU = percent(float64(total-idle) / float64(total) * 100)
 		}
 	}
-	s.previous = metrics.cpu
+	h.CpuPercent = s.lastCPU
+	s.previous = cur
 	s.sampled = now
-	return heartbeat
 }

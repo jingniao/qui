@@ -266,7 +266,7 @@
             <div class="flex items-center justify-between">
               <div>
                 <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">可用节点</h3>
-                <p class="text-xs text-ios-tertiary mt-0.5">该用户有权接入的网络节点</p>
+                <p class="text-xs text-ios-tertiary mt-0.5">该用户订阅里可用的节点</p>
               </div>
               <router-link to="/nodes" class="text-xs font-semibold text-ios-blue hover:underline">
                 节点网络 &rarr;
@@ -276,42 +276,36 @@
             <!-- 可用节点明细列表 -->
             <div class="mt-3.5 space-y-2 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
               <div
-                v-for="node in availableNodes"
-                :key="node.id"
-                class="p-2.5 rounded-xl border border-black/[0.05] bg-[#F8F8FA] flex items-center justify-between text-xs"
+                v-for="item in previewItems"
+                :key="item.inboundId + item.address + item.port"
+                class="p-2.5 rounded-xl border border-black/[0.05] bg-[#F8F8FA] flex items-center justify-between gap-2 text-xs"
               >
                 <div class="min-w-0">
-                  <div class="flex items-center gap-1.5">
-                    <span :class="['w-1.5 h-1.5 rounded-full shrink-0', node.status === 'online' ? 'bg-emerald-500' : 'bg-ios-red']"></span>
-                    <span class="font-semibold text-ios-label truncate">{{ node.name }}</span>
-                  </div>
-                  <p class="font-mono text-xs truncate mt-0.5" :class="connectAddress(node) ? 'text-ios-tertiary' : 'text-ios-orange'">
-                    {{ connectAddress(node) || '未设置连接地址' }}
+                  <span class="block font-semibold text-ios-label truncate">{{ item.name }}</span>
+                  <p class="font-mono text-xs text-ios-tertiary truncate mt-0.5">
+                    {{ item.address.includes(':') ? '[' + item.address + ']' : item.address }}:{{ item.port }}
                   </p>
                 </div>
 
-                <div class="text-right shrink-0">
+                <div class="text-right shrink-0 flex items-center gap-1">
+                  <span v-if="item.kind !== 'inbound'" class="text-xs px-1.5 py-0.5 rounded bg-black/[0.04] text-ios-secondary">
+                    {{ item.kind === 'relay' ? '中转' : '导入' }}
+                  </span>
                   <span class="text-xs font-medium px-1.5 py-0.5 rounded bg-black/[0.04] text-ios-secondary">
-                    {{ node.capabilities?.core_name || '—' }}
+                    {{ item.protocol.toUpperCase() }}
                   </span>
                 </div>
               </div>
 
-              <div v-for="source in availableSources" :key="source.id" class="p-2.5 rounded-xl bg-ios-bg text-xs text-ios-label">
-                导入来源：{{ source.name }}<span class="text-ios-secondary">（分组内导入成员；不参与节点额度与设备门控）</span>
-              </div>
-              <p class="text-xs text-ios-tertiary">按分组与入站授权筛选；订阅内容还需核对已发布凭据及来源可用性。</p>
-              <p v-for="warning in previewWarnings" :key="warning.stage + warning.ref + warning.message" class="text-xs text-ios-orange leading-relaxed">
-                订阅预览：{{ warning.message }}
-              </p>
-              <div v-if="availableNodes.length === 0 && availableSources.length === 0" class="text-center py-6 text-xs text-ios-tertiary">
-                暂无节点接入该授权组
+              <p v-if="previewFailed" class="text-center py-6 text-xs text-ios-orange">节点列表读取失败</p>
+              <div v-else-if="previewLoaded && previewItems.length === 0" class="text-center py-6 text-xs text-ios-tertiary">
+                暂无可用节点
               </div>
             </div>
           </div>
 
           <div class="pt-3 border-t border-black/[0.04] text-xs text-ios-tertiary flex items-center justify-between">
-            <span>共 {{ availableNodes.length }} 台服务器、{{ availableSources.length }} 个导入来源</span>
+            <span>共 {{ previewItems.length }} 个可用节点</span>
           </div>
         </section>
       </div>
@@ -602,10 +596,8 @@ import {
   type UserMeta
 } from '../api';
 import { proxyAPI, type Inbound } from '../../proxy/api';
-import { importAPI, type ImportSource, type ImportedProxy } from '../../proxy/importApi';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
-import { connectAddress } from '../../nodes/nodeAddress';
 import { accessAPI, type AccessRecord } from '../../access/api';
 import { request, APIError, type Page } from '../../../app/apiClient';
 import { authState, formatTime } from '../../../app/auth';
@@ -639,12 +631,12 @@ const user = ref<ProxyUser | null>(null);
 const groups = ref<NodeGroup[]>([]);
 const allNodes = ref<NodeView[]>([]);
 const memberInbounds = ref<Inbound[]>([]);
-const importedSources = ref<ImportSource[]>([]);
-const importedProxies = ref<ImportedProxy[]>([]);
 // What the panel's own subscription preview reports: the local node list cannot
 // tell why an endpoint is missing, for example a node without a connection
 // address (§11.1).
-const previewWarnings = ref<{ stage: string; ref: string; message: string }[]>([]);
+const previewItems = ref<Awaited<ReturnType<typeof userAPI.preview>>['items']>([]);
+const previewLoaded = ref(false);
+const previewFailed = ref(false);
 const error = ref('');
 
 // 订阅与二维码
@@ -743,7 +735,6 @@ const accountStatusText = computed(() => {
   return '账号正常';
 });
 const accessGroups = computed(() => groups.value.filter(g => user.value?.nodeGroupIds.includes(g.id) && g.enabled && g.subscriptionVisible && (g.purpose === 'subscription' || g.purpose === 'mixed')));
-const availableSources = computed(() => importedSources.value.filter(source => accessGroups.value.some(g => g.imports?.some(item => item.sourceId === source.id && importedProxies.value.some(proxy => proxy.sourceId === item.sourceId && (item.proxyKey === '' || item.proxyKey === proxy.proxyKey))))));
 const availableNodes = computed(() => {
   if (!user.value) return [];
   const inboundIds = new Set(accessGroups.value.flatMap(g => g.inboundIds || []));
@@ -980,24 +971,23 @@ async function load() {
   if (!id || route.name !== 'UserDetail') return;
   error.value = '';
   try {
-    const [u, gRes, nRes, ibRes, sourceRes, proxyRes] = await Promise.all([
+    const [u, gRes, nRes, ibRes] = await Promise.all([
       userAPI.get(id),
       readPages(page => groupAPI.list(page, 100)),
       readPages(page => nodeAPI.list(page, '', false)),
-      readPages(page => proxyAPI.inbounds('', page, 100)),
-      importAPI.list(),
-      importAPI.proxies()
+      readPages(page => proxyAPI.inbounds('', page, 100))
     ]);
     user.value = u;
     loginEnabled.value = u.loginEnabled;
     groups.value = gRes.items;
     allNodes.value = nRes.items;
     memberInbounds.value = ibRes.items;
-    importedSources.value = sourceRes.items;
-    importedProxies.value = proxyRes.items;
 
     await loadSubscription();
-    void userAPI.preview(id).then(result => { previewWarnings.value = result.warnings; }).catch(() => { previewWarnings.value = []; });
+    void userAPI.preview(id)
+      .then(result => { previewItems.value = result.items; previewFailed.value = false; })
+      .catch(() => { previewItems.value = []; previewFailed.value = true; })
+      .finally(() => { previewLoaded.value = true; });
 
     // 获取流量历史与请求
     void accessAPI.accounts({ userId: u.id }).then(summary => {

@@ -6,21 +6,18 @@
         <button v-for="range in ranges" :key="range" type="button" class="ios-segmented-item" :class="{ active: hours === range }" @click="emit('update:hours', range)">{{ range === 168 ? '7D' : range + 'H' }}</button>
       </div>
     </div>
-    <p class="text-xs text-ios-secondary">服务端历史 · 每分钟采样 · 保留 7 天 · 长范围为分桶平均值。网络速率为主机网卡流量，可能包含多接口重复计数；缺测处断线。</p>
+    <p class="text-xs text-ios-secondary">服务端历史 · 每分钟采样 · 保留 7 天 · 长范围为分桶平均值。网络速率为主机网卡流量，可能包含多接口重复计数；缺测处断线，悬停可读各时刻数值。</p>
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }} <button class="ios-btn-secondary" @click="load">重试</button></p>
     <p v-if="loading" class="text-xs text-ios-secondary">正在读取历史指标…</p>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <section v-for="metric in metrics" :key="metric.key" class="panel-card p-4 space-y-3">
-        <div class="flex justify-between text-sm gap-2"><h3 class="text-ios-label text-base font-semibold leading-normal">{{ metric.label }}</h3><span class="font-mono text-ios-label">{{ display(metric.key, current[metric.key]) }}</span></div>
-        <svg v-if="points.some(p => p[metric.key] !== null && p[metric.key] !== undefined)" viewBox="0 0 320 100" class="w-full text-ios-blue" role="img" :aria-label="metric.label + '历史采样'">
-          <path :d="metricPath(points, metric.key, start, end, intervalSeconds)" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          <circle v-for="p in dots(metric.key)" :key="p.time" :cx="p.x" :cy="p.y" r="1.5" fill="currentColor" />
-        </svg>
+      <section v-for="card in cards" :key="card.id" class="panel-card p-4 space-y-3">
+        <div class="flex justify-between text-sm gap-2"><h3 class="text-ios-label text-base font-semibold leading-normal">{{ card.title }}</h3><span class="font-mono text-ios-label">{{ headline(card) }}</span></div>
+        <MetricLineChart v-if="card.hasData" :label="card.title + '历史采样'" :datasets="card.datasets" :axes="card.axes" :x-min="start" :x-max="end" />
         <p v-else class="text-xs text-ios-tertiary py-6">— · 暂无历史测量</p>
-        <p v-if="current[metric.key] === null" class="text-xs text-ios-secondary">{{ currentUnavailable ? '服务器离线，当前值不可用' : '需要新版 Agent 上报' }}</p>
+        <p v-if="current[card.primary] === null && (currentUnavailable || latestMeasured(card.primary) === null)" class="text-xs text-ios-secondary">{{ currentUnavailable ? '服务器离线，当前值不可用' : '暂无读数' }}</p>
         <p class="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-ios-tertiary">
           <span class="tabular-nums" :title="`${formatTime(rangeStartIso)} – ${formatTime(rangeEndIso)}`">{{ rangeLabel }}</span>
-          <span class="tabular-nums">{{ metricRangeLabel(points, metric.key) }}</span>
+          <span v-if="card.footerKey" class="tabular-nums">{{ metricRangeLabel(points, card.footerKey) }}</span>
         </p>
       </section>
     </div>
@@ -28,18 +25,14 @@
 </template>
 <script setup lang="ts">
 import { formatTime } from '../../../app/auth';
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { computed, defineAsyncComponent, ref, watch, onMounted, onUnmounted } from 'vue';
 import { nodeAPI, type NodeView } from '../api';
-import { metricPoint, metricPath, extractCurrentValues, formatMetricRange, formatMetricValue, metricRangeLabel, type MetricKey, type SystemMetricPoint } from './serverMetricsModel';
+import { metricPoint, extractCurrentValues, formatBytes, formatMetricRange, formatMetricValue, metricCards, metricRangeLabel, seriesData, visibleSeries, CHART_COLORS, type MetricCard, type MetricKey, type SystemMetricPoint } from './serverMetricsModel';
+// Chart.js stays out of the entry bundle: it loads with the first chart.
+const MetricLineChart = defineAsyncComponent(() => import('./MetricLineChart.vue'));
 const props = defineProps<{ node: NodeView; now: number; hours: number }>();
 const emit = defineEmits<{ 'update:hours': [hours: number] }>();
 const ranges = [1, 6, 12, 24, 168];
-const metrics: { key: MetricKey; label: string }[] = [
-  {key:'cpu',label:'CPU'}, {key:'memory',label:'内存占用'}, {key:'disk',label:'磁盘占用'},
-  {key:'rxRate',label:'接收速率'}, {key:'txRate',label:'发送速率'}, {key:'connections',label:'代理活跃会话'},
-  {key:'tcp',label:'TCP 连接（全部状态）'}, {key:'udp',label:'UDP 套接字'}, {key:'processes',label:'进程数'}, {key:'load',label:'1 分钟负载'},
-  {key:'retransRate',label:'TCP 重传率'}
-];
 const points = ref<SystemMetricPoint[]>([]), intervalSeconds = ref(60), loading = ref(false), error = ref('');
 const end = ref(Date.now());
 const start = computed(() => end.value - props.hours * 3600000);
@@ -69,16 +62,35 @@ let timer: ReturnType<typeof setInterval>;
 onMounted(() => { timer = setInterval(load, 60000); window.addEventListener('proxy-node-status', load); });
 onUnmounted(() => { disposed = true; generation++; clearInterval(timer); window.removeEventListener('proxy-node-status', load); });
 function display(key: MetricKey, value: number | null | undefined) {
-  if (key === 'retransRate' && (value === null || value === undefined)) {
-    const valid = points.value.filter(p => p.retransRate !== null && p.retransRate !== undefined);
-    if (valid.length) {
-      return formatMetricValue(key, valid[valid.length - 1].retransRate!);
-    }
+  if (value === null || value === undefined) {
+    const latest = latestMeasured(key);
+    if (latest !== null) return formatMetricValue(key, latest);
   }
   return formatMetricValue(key, value ?? null);
 }
-function dots(key: MetricKey) {
-  const max = ['cpu','memory','disk'].includes(key) ? 100 : Math.max(1,...points.value.map(p => p[key] ?? 0));
-  return points.value.filter(p => p[key] !== null && p[key] !== undefined).map(p => ({time:p.time,x:10+(p.time-start.value)/Math.max(1,end.value-start.value)*300,y:90-p[key]!/max*80}));
+function latestMeasured(key: MetricKey): number | null {
+  const valid = points.value.filter(p => p[key] !== null && p[key] !== undefined);
+  return valid.length ? valid[valid.length - 1][key]! : null;
+}
+const cards = computed(() => metricCards.map(card => {
+  const series = visibleSeries(card, points.value);
+  const datasets = series.map(sr => ({ label: sr.label, color: CHART_COLORS[sr.color], fill: sr.fill === true, axis: sr.axis ?? 'y' as const,
+    data: seriesData(points.value, sr.key, intervalSeconds.value), format: (v: number) => formatMetricValue(sr.key, v) }));
+  const axes = { y: card.axes.y, ...(card.axes.y1 && series.some(sr => sr.axis === 'y1') ? { y1: card.axes.y1 } : {}) };
+  return { ...card, datasets, axes, primary: card.series[0].key, hasData: series.some(sr => latestMeasured(sr.key) !== null) };
+}));
+function total(key: 'memoryTotalBytes' | 'diskTotalBytes') {
+  const bytes = Number(props.node.capabilities?.host?.[key]);
+  return Number.isFinite(bytes) && bytes > 0 ? ' · ' + formatBytes(bytes) : '';
+}
+function headline(card: MetricCard) {
+  const show = (key: MetricKey) => display(key, current.value[key]);
+  switch (card.id) {
+    case 'memory': return show('memoryBytes') + total('memoryTotalBytes');
+    case 'disk': return show('diskBytes') + total('diskTotalBytes');
+    case 'network': return `↑ ${show('txRate')} ↓ ${show('rxRate')}`;
+    case 'connections': return `TCP ${show('tcp')} · UDP ${show('udp')}`;
+    default: return show(card.series[0].key);
+  }
 }
 </script>

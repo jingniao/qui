@@ -56,7 +56,7 @@ export const releaseRepository = 'jingniao/qui';
 // no-op on a host that already has them, and the trailing `;` keeps it valid in
 // busybox ash, dash and bash. --no-insecure overrides a -k that a curl wrapper
 // on the node may add, so the script is never fetched without verified TLS.
-export function installCommand(input: { version: string; host: string; httpPort: number; grpcHost?: string; grpcPort: number; caSha256: string; token: string; core?: string; cores?: CoreName[] }): string {
+export function installCommand(input: { version: string; host: string; httpPort: number; grpcHost?: string; grpcPort: number; caSha256: string; token: string; core?: string; cores?: CoreName[]; webUpgrade?: boolean }): string {
   // `--core` is repeatable in the K3c installer: one flag per selected core. The
   // selection is deduplicated and allowlisted; the default remains ["xray"]. GOST
   // ships one linux/amd64 archive, so the installer itself refuses that flag on
@@ -73,7 +73,7 @@ export function installCommand(input: { version: string; host: string; httpPort:
   const grpcHostFlag = input.grpcHost && input.grpcHost !== input.host ? ` --grpc-host ${input.grpcHost}` : '';
   const bootstrap = 'if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; '
     + 'elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; ';
-  return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${grpcHostFlag}${portFlags} --ca-sha256 ${input.caSha256} --token ${input.token}${coreFlags}`;
+  return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${grpcHostFlag}${portFlags} --ca-sha256 ${input.caSha256} --token ${input.token}${coreFlags}${input.webUpgrade ? ' --web-upgrade' : ''}`;
 }
 
 export interface HealthCheck { core?:CoreName|""; id:string;nodeId:string;revision:number;status:"queued"|"complete"|"expired";createdAt:string;deadline:string;result?:{healthy?:boolean;code:string;observed_at?:{seconds?:number;nanos?:number}}; }

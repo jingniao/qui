@@ -214,10 +214,10 @@
                     {{ node.sourceName }}
                   </span>
                   <StatusBadge
-                    v-if="node.sourceType === 'self_hosted' && node.sourceId && serverPublishMap.get(node.sourceId)"
-                    :status="serverBadgeTone(serverPublishMap.get(node.sourceId)!.tone)"
-                    :label="serverPublishMap.get(node.sourceId)!.label"
-                    :title="`所属服务器 ${node.sourceName} 的发布状态`"
+                    v-if="inboundBadge(node)"
+                    :status="inboundBadge(node)!.tone"
+                    :label="inboundBadge(node)!.label"
+                    :title="inboundBadge(node)!.title"
                   />
                 </div>
                 <p v-if="node.sourceType !== 'self_hosted' && node.sourceId" class="text-xs text-ios-secondary">所属分组：{{ importedGroupNames(node) }}</p>
@@ -235,7 +235,7 @@
                 {{ node.protocol }}
               </span>
               <div class="text-xs text-neutral-400 font-mono">
-                {{ node.settings?.transport || 'tcp' }}{{ node.settings?.security ? ' + ' + node.settings.security : '' }}
+                {{ transportLabel(node) }}
               </div>
             </div>
           </td>
@@ -297,7 +297,7 @@
                 <span class="w-1.5 h-1.5 rounded-full" :class="statusDotClass(node)"></span>
                 <span>{{ statusCapsuleText(node) }}</span>
               </span>
-              <span v-if="node.status === 'online' && node.latencyMs" class="text-xs font-mono font-bold text-emerald-600">
+              <span v-if="node.status === 'online' && node.latencyMs && !notRunning(node)" class="text-xs font-mono font-bold text-emerald-600">
                 {{ node.latencyMs }} ms
               </span>
             </div>
@@ -381,10 +381,10 @@
             <!-- Status Badge Capsule (Exact same class as Server Page) -->
             <div class="flex items-center gap-1.5 shrink-0">
               <StatusBadge
-                v-if="node.sourceType === 'self_hosted' && node.sourceId && serverPublishMap.get(node.sourceId)"
-                :status="serverBadgeTone(serverPublishMap.get(node.sourceId)!.tone)"
-                :label="serverPublishMap.get(node.sourceId)!.label"
-                :title="`所属服务器 ${node.sourceName} 的发布状态`"
+                v-if="inboundBadge(node)"
+                :status="inboundBadge(node)!.tone"
+                :label="inboundBadge(node)!.label"
+                :title="inboundBadge(node)!.title"
               />
               <span
                 class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 select-none"
@@ -402,9 +402,9 @@
               {{ node.sourceName }}
             </span>
             <span class="text-neutral-300">·</span>
-            <span>{{ node.settings?.transport || 'tcp' }}{{ node.settings?.security ? ' + ' + node.settings.security : '' }}</span>
-            <span v-if="node.status === 'online' && node.latencyMs" class="text-neutral-300">·</span>
-            <span v-if="node.status === 'online' && node.latencyMs" class="font-bold text-emerald-600">
+            <span>{{ transportLabel(node) }}</span>
+            <span v-if="node.status === 'online' && node.latencyMs && !notRunning(node)" class="text-neutral-300">·</span>
+            <span v-if="node.status === 'online' && node.latencyMs && !notRunning(node)" class="font-bold text-emerald-600">
               {{ node.latencyMs }} ms
             </span>
           </div>
@@ -598,7 +598,7 @@
           <div class="flex justify-between items-center">
             <span class="text-neutral-500 font-medium">传输与安全</span>
             <span class="font-mono text-neutral-900">
-              {{ selectedDetailNode.settings?.transport || 'tcp' }} + {{ selectedDetailNode.settings?.security || 'none' }}
+              {{ transportLabel(selectedDetailNode) }}
             </span>
           </div>
           <div class="flex justify-between items-center">
@@ -1126,7 +1126,8 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
-import { serverPublishState, type PublishPhase, type PublishTone } from '../../system/publishProgress';
+import { revisionResult } from '../../system/revisionResult';
+import type { InboundStateItem, InboundPublishState } from '../../system/deploymentApi';
 import AddRelayDialog from '../../tunnels/components/AddRelayDialog.vue';
 import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
 import { nodeRelayAPI, type NodeRelay } from '../../tunnels/api';
@@ -1447,18 +1448,19 @@ function sourceCapsuleColor(sourceType: string): string {
 }
 
 function statusCapsuleClass(node: ProxyNodeItem): string {
-  if (node.status === 'online') {
+  if (node.status === 'online' && !notRunning(node)) {
     return 'bg-[#E8F8F0] text-[#12B76A]';
   }
   return 'bg-neutral-100 text-neutral-500';
 }
 
 function statusDotClass(node: ProxyNodeItem): string {
-  if (node.status === 'online') return 'bg-[#12B76A]';
+  if (node.status === 'online' && !notRunning(node)) return 'bg-[#12B76A]';
   return 'bg-neutral-400';
 }
 
 function statusCapsuleText(node: ProxyNodeItem): string {
+  if (notRunning(node)) return '未生效';
   if (node.status === 'online') return '在线';
   if (node.status === 'untested') return '未检测';
   return '离线';
@@ -1744,14 +1746,41 @@ async function deleteSubscription(subId: string) {
   }
 }
 
-const serverPublishMap = ref<Map<string, PublishPhase>>(new Map());
+// Publish state of each self-hosted inbound against the revision its server runs,
+// keyed by `<serverId>/<inboundId>`. A server whose states could not be read
+// simply has no entry, so its inbounds show no badge.
+const inboundStateMap = ref<Map<string, InboundStateItem>>(new Map());
 
-function serverBadgeTone(tone: PublishTone): string {
-  if (tone === 'success') return 'green';
-  if (tone === 'danger') return 'red';
-  if (tone === 'warning') return 'yellow';
-  if (tone === 'info') return 'blue';
-  return 'gray';
+const inboundBadgeLook: Record<InboundPublishState, { label: string; tone: string }> = {
+  effective: { label: '已生效', tone: 'green' },
+  modified: { label: '有未发布修改', tone: 'yellow' },
+  pending: { label: '发布中', tone: 'blue' },
+  unpublished: { label: '未生效', tone: 'red' },
+};
+
+function inboundState(node: ProxyNodeItem): InboundStateItem | undefined {
+  if (node.sourceType !== 'self_hosted' || !node.sourceId || !node.inboundId) return undefined;
+  return inboundStateMap.value.get(`${node.sourceId}/${node.inboundId}`);
+}
+
+function inboundBadge(node: ProxyNodeItem) {
+  const item = inboundState(node);
+  if (!item) return undefined;
+  const look = inboundBadgeLook[item.state];
+  const failure = item.state === 'unpublished' && item.code ? `最近一次发布失败：${revisionResult(item.code)}` : '';
+  return { ...look, title: failure || `入站「${node.name}」的发布状态` };
+}
+
+// A modified inbound still runs its old configuration, so only an inbound the
+// server does not run yet drops the server's online badge and latency.
+function notRunning(node: ProxyNodeItem): boolean {
+  const state = inboundState(node)?.state;
+  return state === 'unpublished' || state === 'pending';
+}
+
+function transportLabel(node: Pick<ProxyNodeItem, 'protocol' | 'settings'>): string {
+  if (node.protocol === 'hysteria2' || node.protocol === 'tuic') return 'udp + quic';
+  return `${node.settings?.transport || 'tcp'}${node.settings?.security ? ' + ' + node.settings.security : ''}`;
 }
 
 async function loadServerPublishStates() {
@@ -1762,22 +1791,19 @@ async function loadServerPublishStates() {
   const results = await Promise.all(
     serverIds.map(async (id) => {
       try {
-        const revs = await deploymentAPI.nodeRevisions(id, 1, 1);
-        const latest = revs.items[0];
-        const server = servers.value.find(s => s.id === id);
-        const phase = serverPublishState(latest, server?.heartbeat?.current_revision);
-        return [id, phase] as const;
+        return [id, (await deploymentAPI.inboundStates(id)).items] as const;
       } catch {
-        return [id, serverPublishState(undefined, undefined)] as const;
+        return [id, [] as InboundStateItem[]] as const;
       }
     })
   );
 
-  const nextMap = new Map(serverPublishMap.value);
-  for (const [id, phase] of results) {
-    nextMap.set(id, phase);
+  const nextMap = new Map(inboundStateMap.value);
+  for (const [id, items] of results) {
+    for (const key of [...nextMap.keys()]) if (key.startsWith(`${id}/`)) nextMap.delete(key);
+    for (const item of items) nextMap.set(`${id}/${item.inboundId}`, item);
   }
-  serverPublishMap.value = nextMap;
+  inboundStateMap.value = nextMap;
 }
 
 watch([pagedNodes, displayMode, servers], () => {

@@ -1,4 +1,4 @@
-﻿package release
+package release
 
 // OfficialKeyPins are the release keys of the official qui builds. Revoked pins stay listed.
 var OfficialKeyPins = []KeyPin{

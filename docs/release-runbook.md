@@ -141,7 +141,7 @@ tag 推送触发 `release` 任务：先确认同 SHA 有成功的 `check`，再�
 
 - `proxy-control-X.Y.Z-linux-amd64.tar.gz`、`proxy-control-X.Y.Z-linux-arm64.tar.gz`
 - `sing-box-<版本>-qui.<序号>-linux-{amd64,arm64}.tar.gz` 及各自的 `.provenance.txt`
-- `agent-releases-vX.Y.Z.tar.gz`（正式版必须包含签名清单，CI release 工作流依赖 Repository Secret `AGENT_SIGNING_KEY` 生成官方 Ed25519 签名清单）
+- `proxy-agent-X.Y.Z-linux-amd64.bin`、`proxy-agent-X.Y.Z-linux-arm64.bin` 及各自的 `.manifest.json`（官方 Ed25519 签名清单，由 release 工作流用 Repository Secret `AGENT_SIGNING_KEY` 调用 `scripts/sign-agent-release.sh` 生成；正式版缺该 Secret 会直接失败）
 - `SHA256SUMS`、`node-install.sh`、`panel-install.sh`
 
 若 `release` 报 “No successful check job”，说明 tag 打错了提交或 `check` 还没跑完/失败；删除远端 tag 前先问 Owner。

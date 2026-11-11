@@ -1298,6 +1298,13 @@ main() {
   done
   if $up_to_date; then
     printf '已是最新版本 %s。\n' "$version"
+    # A host upgraded to this version by an older qui-update never ran the enable
+    # step, and rerunning qui-update lands here because nothing needs installing.
+    for component in "${components[@]}"; do
+      if [[ $component == agent ]] && declare -F agent_enable_web_upgrade >/dev/null; then
+        agent_enable_web_upgrade || true
+      fi
+    done
     exit 0
   fi
 

@@ -4,7 +4,7 @@
 
 支持用户门户与节点组订阅、分流和域名级访问控制、协议中转/代理链、设备限制、用户额度、主机观测与整机月流量。节点可同时运行官方 Xray、官方或 qui 的未修改上游 sing-box 构建，以及仅做端口转发/加密中继的 GOST 3.3.2。中央失联时保留最后成功配置，配置失败自动回滚。
 
-最新正式版 **v1.5.0**（2026-11-11，迁移头 0141）：Agent 网页一键升级、多公网地址、通知系统（Telegram 与 Webhook 通用／企业微信／钉钉／飞书）、发布状态可见、按域名查找／申请证书、Hysteria2 端口跳跃、用途组 @all、规则集外部来源与关键字、服务器调优完善。**从 ≤1.4.7 升级 Agent 需运行两次 `qui-update --component agent`**，第二次启用网页升级。生产面板与三台 Agent（us2-node 面板＋Agent、uk-node、alpine-node Alpine LXC/OpenRC）**尚未升级，仍为 v1.4.6**。仅在 linux/amd64 真机验证与验收；原生 arm64 主机验收由 Owner 明确跳过，只有交叉构建。版本、升级注意与限制见[发布说明](docs/release-notes-1.5.0.md)，当前事实与历史见[项目说明书](AGENTS.md) 的“当前状态”和[变更记录](docs/changelog.md)。上一正式版 v1.4.7 见其[发布说明](docs/release-notes-1.4.7.md)。
+最新正式版 **v1.5.0**（2026-11-11，tag → `d823018`，迁移头 0141）：Agent 网页一键升级、多公网地址、通知系统（Telegram 与 Webhook 通用／企业微信／钉钉／飞书）、发布状态可见、按域名查找／申请证书、Hysteria2 端口跳跃、用途组 @all、规则集外部来源与关键字、服务器调优完善。**从 ≤1.4.7 升级 Agent 需运行两次 `qui-update --component agent`**，第二次启用网页升级。生产面板与三台 Agent（us2-node 面板＋Agent、uk-node、alpine-node Alpine LXC/OpenRC）**尚未升级，仍为 v1.4.6**。仅在 linux/amd64 真机验证与验收；原生 arm64 主机验收由 Owner 明确跳过，只有交叉构建。版本、升级注意与限制见[发布说明](docs/release-notes-1.5.0.md)，当前事实与历史见[项目说明书](AGENTS.md) 的“当前状态”和[变更记录](docs/changelog.md)。上一正式版 v1.4.7 见其[发布说明](docs/release-notes-1.4.7.md)。
 
 | 任务 | 入口 |
 | --- | --- |

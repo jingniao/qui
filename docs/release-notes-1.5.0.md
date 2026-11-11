@@ -1,6 +1,6 @@
 # v1.5.0 发布说明
 
-2026-11-11 发布。tag `v1.5.0` → 发布提交见文末「发布记录」，迁移 0138–0141，迁移头 `0141`。功能版：Agent 网页一键升级、多公网地址、通知系统、发布状态可见、按域名查找／申请证书、Hysteria2 端口跳跃、用途组 @all、规则集外部来源与关键字、服务器调优完善。**生产尚未升级**（面板与三台 Agent 仍为 1.4.6，见文末）。
+2026-11-11 发布。tag `v1.5.0` → `d823018`，迁移 0138–0141，迁移头 `0141`。功能版：Agent 网页一键升级、多公网地址、通知系统、发布状态可见、按域名查找／申请证书、Hysteria2 端口跳跃、用途组 @all、规则集外部来源与关键字、服务器调优完善。**生产尚未升级**（面板与三台 Agent 仍为 1.4.6，见文末）。
 
 **从 ≤1.4.7 升级 Agent 需要运行两次 `qui-update --component agent`**，第二次才启用网页升级，详见「迁移与升级注意」。
 
@@ -73,11 +73,20 @@
 | [Agent 网页升级验收](v1.5.0-agent-web-upgrade-verification.md) | 第二轮通过：OpenRC 与 systemd 上启用、失败退回、中断清理、升级到 1.5.1、损坏文件被拒、健康失败回滚均符合预期；systemd 上由原装 1.4.1 qui-update 走两次运行的真实路径 |
 | [浏览器走查](v1.5.0-browser-walkthrough.md) | 30/30，`pageerror` 为 0；发现的两处通知中心问题已修复并复测 |
 
-完整门禁与 GitHub `check` 的结果见「发布记录」。
+完整门禁（同一提交 `d823018`，两条并行）：
+
+| 门禁 | 结果 |
+| --- | --- |
+| 本地 Linux 测试机 `QUI_GATE_SCOPE=full ~/.qui-local/gate.sh d823018`（2026-11-11T04:27:14Z 起） | `PART check EXIT 0 DURATION 2405s`、`PART cores EXIT 0 DURATION 700s`、`GATE d823018 PASS total=3106s`，无 DATA RACE 告警 |
+| GitHub `check`（`workflow_dispatch`，`cores=true`、`full_gate=true`，run `42959338002`） | `check`（04:27:20Z–05:27:18Z）与 `cores`（04:27:20Z–04:57:23Z）均 `success` |
+
+发布前的 `quick-check --base v1.4.7` 只查出 `pkg/contracts/release/official.go` 带 UTF-8 BOM，已在发布提交中去掉；其余各层没有失败。
 
 ## 发布记录
 
-待发布完成后补写：发布 SHA、本地完整门禁耗时、GitHub `check` 运行号、`release` 运行号与附件核对。
+- tag `v1.5.0`（附注 tag）→ `d823018`（`release v1.5.0: release notes, current state and runbook asset list`），`main` 与工作分支同提交。
+- `release` 任务（tag push，run `42966711025`，2026-11-11T05:35:07Z–05:36:22Z）成功，Release 于 05:36:19Z 发布（非草稿、非预发布）。附件 13 个：`proxy-control-1.5.0-linux-{amd64,arm64}.tar.gz`、`proxy-agent-1.5.0-linux-{amd64,arm64}.bin` 及各自 `.manifest.json`、`sing-box-1.14.4-qui.1-linux-{amd64,arm64}.tar.gz` 及各自 `.provenance.txt`、`SHA256SUMS`、`node-install.sh`、`panel-install.sh`。
+- 签名核对：下载两个 `.manifest.json`，用代码内置的官方公钥（`pkg/contracts/release/official.go`）执行 `release verify`，amd64 与 arm64 均通过（版本 1.5.0、序号 1005000）；清单摘要与 `.bin` 实际摘要一致（amd64 `dad34c84…`，arm64 `e857ccee…`），四个文件与 `SHA256SUMS` 一致。核对通过后已删除开发机上的签名私钥，GitHub Secret `AGENT_SIGNING_KEY` 保留供后续发版。
 
 ## 生产状态
 

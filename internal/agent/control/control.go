@@ -1058,6 +1058,18 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				return err
 			}
 		}
+		// An apply that ran while an earlier message of this round awaited its
+		// acknowledgment has switched the cores, and the collectors already
+		// report the new revision. Send its result before that telemetry: a
+		// panel that refuses batches for a revision it has not seen confirmed
+		// would otherwise close the stream and the result would be lost.
+		for len(results) > 0 {
+			result := results[0]
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_ApplyResult{ApplyResult: result}}); err != nil {
+				return err
+			}
+			results = results[1:]
+		}
 		if telemetryQueue != nil {
 			for count := 0; count < 8; count++ {
 				batch, retried, err := telemetryQueue.PendingTrafficForPeer(ctx, welcome.GetWelcome().NodeTrafficSupported)

@@ -182,9 +182,17 @@ func (r *Repository) PublishedWithIntent(ctx context.Context, nodeID string) (de
 	return state, intent, nil
 }
 
+// AppliedState is the state of a revision the node ran, for attributing its
+// telemetry. A revision still awaiting the node's result counts too: the
+// Agent switches its cores before it reports the result, and its collectors
+// report the new revision from that moment. Refusing those batches broke the
+// control stream before the result could be sent, and the result of an apply
+// that finished on the broken session was lost, so the node never left
+// "pending" (v1.5.2, seen with a 15000-entry policy whose sing-box start took
+// about 30 seconds). A revision that failed or was rolled back stays refused.
 func (r *Repository) AppliedState(ctx context.Context, nodeID string, revision int64) (desiredstate.State, error) {
 	var count int
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM deployment_targets WHERE node_id=? AND revision=? AND status='success'", nodeID, revision).Scan(&count); err != nil {
+	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM deployment_targets WHERE node_id=? AND revision=? AND status IN ('success','pending')", nodeID, revision).Scan(&count); err != nil {
 		return desiredstate.State{}, err
 	}
 	if count != 1 {

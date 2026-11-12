@@ -26,7 +26,7 @@
 | 1.5.0 发布说明（迁移 0138–0141，2026-11-11，生产未升级；Agent 从 ≤1.4.7 升级需运行两次 qui-update） | [发布说明 1.5.0](release-notes-1.5.0.md) |
 | 1.5.1 发布说明（补丁版，无迁移，2026-11-11，生产未升级） | [发布说明 1.5.1](release-notes-1.5.1.md) |
 | 1.5.2 发布说明（迁移 0142，2026-11-12，生产未升级；含实机验证与浏览器走查） | [发布说明 1.5.2](release-notes-1.5.2.md) |
-| 1.5.3 发布说明（补丁版，无迁移，2026-11-12，生产未升级；修复大策略发布死锁） | [发布说明 1.5.3](release-notes-1.5.3.md) |
+| 1.5.3 发布说明（补丁版，无迁移，2026-11-12，生产已升级；修复大策略发布死锁） | [发布说明 1.5.3](release-notes-1.5.3.md) |
 | v1.5.1 受管 Agent 实机验收（`--web-upgrade` 安装、受管节点发布显式核心入站） | [受管 Agent 实机验收](v1.5.1-managed-agent-verification.md) |
 | v1.5.0 验收：Alpine/OpenRC、systemd 调优、通知、Agent 网页升级、浏览器走查 | [Alpine/OpenRC](v1.5.0-alpine-openrc-verification.md)、[systemd 调优](v1.5.0-systemd-tuning-verification.md)、[通知](v1.5.0-notification-verification.md)、[Agent 网页升级](v1.5.0-agent-web-upgrade-verification.md)、[浏览器走查](v1.5.0-browser-walkthrough.md) |
 | v1.5.0 审计与 Agent 网页升级启用修复方案 | [审计](v1.5.0-audit-2026-11-10.md)、[全面审计](v1.5.0-comprehensive-audit-2026-11-10.md)、[启用修复方案](v1.5.0-agent-supervision-plan.md) |

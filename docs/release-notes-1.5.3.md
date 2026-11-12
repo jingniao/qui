@@ -46,6 +46,13 @@ v1.5.3 是 v1.5.2 的补丁版，**没有迁移**（迁移头仍 0142）。只�
 - Agent 侧的发送顺序调整没有单独的时序测试。
 - 被隔离的流量批次在冷却（1 小时或 Agent 重启）后重试：本次两批在 03:22Z Agent 升级重启后重试并被接受，Agent 本地队列已清空（流量 0、访问记录 0）。
 
-## 生产状态
+## 生产升级（2026-11-12，Owner 授权）
 
-**未升级**：生产（面板主机 us2 与三台 Agent）仍为 1.4.6。1.5.2／1.5.3 的生产只读检查见 [1.5.2 发布说明](release-notes-1.5.2.md)「迁移与升级注意」。
+顺序：先面板，再按 uk、Alpine、us2 逐台 Agent，从 1.4.6 直接升到 1.5.3（03:27–03:35Z）。
+
+- 基线（03:27Z）：面板 `1.4.6`、`NRestarts=0`、`/etc/proxy-panel/config.yaml` sha256 `e57bc1d9…`、迁移头 0134、监听 `[::]:443`／`[::]:9443`；三台 Agent 均 `1.4.6`、在线，修订 295（uk）／296（Alpine）／291（us2）；另有升级前就存在的未登记 `pending` 节点 `111`（本次未改）。各主机无残留 `rollback.*`。
+- 恢复点：加密面板备份 `2Ciq37nO…`（03:28:17Z 创建、03:28:33Z 校验通过，3,660,404 字节，sha256 `4b8df49b…`）；面板升级时更新器另建 `pre-update-1.4.6-20261112-112905.db`。
+- 面板：`qui-update --component panel --version 1.5.3 --yes`（03:28:52–03:29:18Z）退出码 0，`已更新到 1.5.3，服务运行正常（10 秒内无重启）`；迁移 0135–0142 应用，迁移头 `0142_builtin_rule_sets.sql`；配置文件未改写，监听不变；25 个内置规则集写入，`policy-block-china` 为禁用；升级后面板 0 WARN／0 ERROR。
+- Agent：每台运行两次 `qui-update --component agent --version 1.5.3 --yes`（第一次安装、第二次启用网页升级），均退出码 0：uk 03:30:27–03:31:05Z、Alpine（OpenRC）03:32:14–03:32:46Z、us2 03:33:38–03:34:06Z；三台受管工作进程均为 1.5.3 官方签名二进制（`e51cf0ca…`），节点配置文件未变（`f5d407c1…`），面板 `MainPID` 在 Agent 升级期间不变。
+- 升级后核对：三台 `online`、`agentVersion=1.5.3`，修订仍为 **295／296／291**（无新修订、无回滚），公网地址不变；面板与三台 Agent 升级后 WARN／ERROR 均 0，各主机无 `rollback.*` 残留。
+- 数据面抽样（面板主机发起，经 uk-node）：SOCKS5、HTTP、VLESS、Shadowsocks、Trojan 五个入口均返回 200（出网 IP `195.72.166.247`）；Netflix 组与 GitHub 直连 200；`example.com`、`www.tiktok.com`、`www.example.net` 及 VLESS 版 `example.com` 仍被阻断，错误密码仍被拒。

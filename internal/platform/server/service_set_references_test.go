@@ -12,6 +12,7 @@ import (
 )
 
 func TestServiceSetReferencesAndProtection(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	ctx := context.Background()

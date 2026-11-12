@@ -18,6 +18,7 @@ import (
 )
 
 func TestRealCentralDeploymentAndOfflineProxyContinuity(t *testing.T) {
+	t.Parallel()
 	path := os.Getenv("XRAY_BINARY")
 	if path == "" {
 		t.Skip("set XRAY_BINARY for end-to-end deployment")

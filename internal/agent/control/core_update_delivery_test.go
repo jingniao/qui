@@ -68,6 +68,7 @@ func pendingCoreResults(worker *coreUpdates) int {
 // list existed the result lived in a session-local slice, so the next session
 // found an empty channel and the panel never learned the outcome.
 func TestSessionResendsCoreUpdateResultAfterSendFailure(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	worker, _, manager, _ := updateHarness(t, adapter)
 	worker.results <- coreResultPayload(t, "upd_send_failed")
@@ -99,6 +100,7 @@ func TestSessionResendsCoreUpdateResultAfterSendFailure(t *testing.T) {
 // other half of the same failure: the result has to be sent again, and then not
 // at all, because the panel acknowledges an identical duplicate.
 func TestSessionResendsCoreUpdateResultAfterLostAck(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	worker, _, manager, _ := updateHarness(t, adapter)
 	worker.results <- coreResultPayload(t, "upd_lost_ack")
@@ -135,6 +137,7 @@ func TestSessionResendsCoreUpdateResultAfterLostAck(t *testing.T) {
 // the node reconnecting without ever succeeding, so the result is dropped after
 // the limit.
 func TestSessionDropsRepeatedlyRejectedCoreUpdateResult(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	worker, _, manager, _ := updateHarness(t, adapter)
 	worker.results <- coreResultPayload(t, "upd_rejected")
@@ -170,6 +173,7 @@ func TestSessionDropsRepeatedlyRejectedCoreUpdateResult(t *testing.T) {
 // Only the panel's own permanent rejection may count against a result. A
 // transport failure, a cancellation or any other status keeps it forever.
 func TestCoreUpdateResultRejectionCountingIgnoresOtherErrors(t *testing.T) {
+	t.Parallel()
 	if !coreUpdateResultRejected(status.Error(codes.FailedPrecondition, "core update result rejected")) {
 		t.Fatal("the panel's rejection is not recognised")
 	}
@@ -189,6 +193,7 @@ func TestCoreUpdateResultRejectionCountingIgnoresOtherErrors(t *testing.T) {
 
 // Other failures never drop the result, however often they repeat.
 func TestSessionKeepsCoreUpdateResultAfterOtherFailures(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	worker, _, manager, _ := updateHarness(t, adapter)
 	worker.results <- coreResultPayload(t, "upd_transient")

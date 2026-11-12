@@ -10,6 +10,7 @@ import (
 )
 
 func TestCycleSchedulerReactivatesThroughAutomaticRevision(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "cycle_user", "")
 	f.publish(t)
@@ -40,6 +41,7 @@ func TestCycleSchedulerReactivatesThroughAutomaticRevision(t *testing.T) {
 }
 
 func TestNodeMetadataPermissionsImportAndRenewalRestart(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	ctx := context.Background()
@@ -112,6 +114,7 @@ func TestNodeMetadataPermissionsImportAndRenewalRestart(t *testing.T) {
 }
 
 func TestCycleSchedulerCancelledRunJoinsBeforeReturn(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

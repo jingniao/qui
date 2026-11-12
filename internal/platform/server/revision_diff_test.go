@@ -17,6 +17,7 @@ import (
 )
 
 func TestRevisionDiffHTTPPermissionsValidationAndRealImmutableChanges(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	nodes := &node.Repository{Database: app.Database}

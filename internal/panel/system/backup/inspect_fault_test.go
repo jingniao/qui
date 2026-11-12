@@ -102,6 +102,7 @@ func repackFixture(t *testing.T, archivePath string, manifest Manifest, files ma
 }
 
 func TestAuthenticatedArchiveRejectsInvalidDatabaseKeysLinksExtraFilesAndTrailingStreams(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	created, err := source.Create(context.Background(), directory, "valid_archive_001", "owner", testPassword)
 	if err != nil {
@@ -136,6 +137,7 @@ func TestAuthenticatedArchiveRejectsInvalidDatabaseKeysLinksExtraFilesAndTrailin
 }
 
 func TestBackupSnapshotContainsOneConsistentTransactionalDatabaseVersion(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

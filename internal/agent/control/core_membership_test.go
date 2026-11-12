@@ -46,6 +46,7 @@ func addRequest(digest string) release.CoreUpdateRequest {
 	return release.CoreUpdateRequest{SchemaVersion: 2, ID: "add_xray", NodeID: "node-update", Revision: 2, Sequence: 1, Component: "xray", Version: "26.3.27", URL: updateAssetURL, SHA256: digest}
 }
 func TestCoreMembershipAddRemoveRecoveryAndReadd(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	w, multi, dir, original := membershipHarness(t)
 	archive, digest, _ := updateArchive(t, original, "dynamic")
@@ -163,6 +164,7 @@ func TestCoreMembershipAddRemoveRecoveryAndReadd(t *testing.T) {
 	}
 }
 func TestAbsentCoreFailureDoesNotEnable(t *testing.T) {
+	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	archive, digest, _ := updateArchive(t, original, "bad-version")
 	server := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { rw.Write(archive) }))
@@ -230,6 +232,7 @@ func addFixtureCore(t *testing.T, w *coreUpdates, original string) string {
 // exited. Another core's directory, the installer's own binary, the inventory and
 // the update history stay, and a core added again starts from fresh material.
 func TestCoreRemovalCleansItsRuntimeDirectory(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	w, multi, dir, original := membershipHarness(t)
 	digest := addFixtureCore(t, w, original)
@@ -284,6 +287,7 @@ func TestCoreRemovalCleansItsRuntimeDirectory(t *testing.T) {
 // marker and the key are the evidence that the process is still there, so the
 // inventory stays enabled and nothing is deleted.
 func TestCoreRemovalKeepsRuntimeUntilExitIsConfirmed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	w, multi, dir, original := membershipHarness(t)
 	w.makeRuntime = func(node, directory, name, path string) core.Runtime {
@@ -309,6 +313,7 @@ func TestCoreRemovalKeepsRuntimeUntilExitIsConfirmed(t *testing.T) {
 	}
 }
 func TestCoreRemovalRefusals(t *testing.T) {
+	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	ctx := context.Background()
 	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "last", Component: "sing-box", Revision: 2}); r.Code != "last_core" {
@@ -361,6 +366,7 @@ func TestCoreRemovalRefusals(t *testing.T) {
 // forwards, so a node always keeps Xray or sing-box and removing the last one of
 // those is the existing last-core refusal, while removing GOST itself is allowed.
 func TestGostCannotBeTheLastUserCore(t *testing.T) {
+	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	ctx := context.Background()
 	if err := multi.AddIdle(&fakeCoreRuntime{name: "gost", version: "3.3.2", selected: original}); err != nil {
@@ -385,6 +391,7 @@ func TestGostCannotBeTheLastUserCore(t *testing.T) {
 }
 
 func TestInstallerCoreRemovalPreservesRecordAndBinary(t *testing.T) {
+	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	if err := multi.AddIdle(&fakeCoreRuntime{name: "xray", selected: original}); err != nil {
 		t.Fatal(err)
@@ -412,6 +419,7 @@ func TestInstallerCoreRemovalPreservesRecordAndBinary(t *testing.T) {
 }
 
 func TestRemovalRefusesInterruptedPendingRevision(t *testing.T) {
+	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	if err := multi.AddIdle(&fakeCoreRuntime{name: "xray", selected: original}); err != nil {
 		t.Fatal(err)
@@ -450,6 +458,7 @@ func TestRemovalRefusesInterruptedPendingRevision(t *testing.T) {
 }
 
 func TestRemovalStartupRecoveryWaitsForConfirmedExit(t *testing.T) {
+	t.Parallel()
 	w, _, dir, original := membershipHarness(t)
 	imageDir := filepath.Join(dir, "releases", "installed")
 	if err := os.MkdirAll(imageDir, 0700); err != nil {
@@ -498,6 +507,7 @@ func TestRemovalStartupRecoveryWaitsForConfirmedExit(t *testing.T) {
 }
 
 func TestRemovalPersistsNewPrimary(t *testing.T) {
+	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	if err := multi.AddIdle(&fakeCoreRuntime{name: "xray", selected: original}); err != nil {
 		t.Fatal(err)

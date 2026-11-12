@@ -77,6 +77,7 @@ func trustedClient(t *testing.T, address string, ca []byte, certificate *tls.Cer
 }
 
 func TestNodeEnrollmentIdentityAndDuplicateMessages(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()
@@ -207,6 +208,7 @@ func TestNodeEnrollmentIdentityAndDuplicateMessages(t *testing.T) {
 // sequence carrying a different overall message digest must be rejected before
 // any business change, so a node cannot rewrite an already accepted message.
 func TestNodeRejectsConflictingDuplicateSequence(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()
@@ -261,6 +263,7 @@ func TestNodeRejectsConflictingDuplicateSequence(t *testing.T) {
 }
 
 func TestAgentEnrollsAndSendsRealControlHeartbeat(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()
@@ -336,6 +339,7 @@ func TestAgentEnrollsAndSendsRealControlHeartbeat(t *testing.T) {
 }
 
 func TestNodeHTTPAuthorizationAndExpiredEnrollment(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	call := func(method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -430,6 +434,7 @@ func TestNodeHTTPAuthorizationAndExpiredEnrollment(t *testing.T) {
 }
 
 func TestAgentReconnectsAfterCentralDatabaseReopen(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	app.Config.ShutdownTimeout = time.Second
 	launch := func(server *Server, address string) (string, func()) {

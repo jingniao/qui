@@ -48,6 +48,7 @@ func (c *renewalClient) RenewCertificate(ctx context.Context, r *pb.CertificateR
 	return &pb.CertificateRenewal{CertificatePem: cert, CaPem: c.authority.PEM, ExpiresAt: timestamppb.New(leaf.NotAfter)}, nil
 }
 func TestConnectedRenewalUsesSameKeyAndBacksOff(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	authority, err := pki.LoadOrCreate(t.TempDir())
 	if err != nil {

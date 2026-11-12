@@ -141,6 +141,7 @@ func (c *certificateDeployFixture) publishedState(t *testing.T) desiredstate.Sta
 }
 
 func TestRenewedCertificateDeploysOnlyItsPair(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	before := c.publishedState(t)
 	if c.app.certificates.Renewed == nil {
@@ -194,6 +195,7 @@ func TestRenewedCertificateDeploysOnlyItsPair(t *testing.T) {
 }
 
 func TestRenewedCertificateWaitsForTheDeployWindow(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	c.renew(t)
 	c.at(0, 12)
@@ -213,6 +215,7 @@ func TestRenewedCertificateWaitsForTheDeployWindow(t *testing.T) {
 }
 
 func TestCertificateDeployWindowFollowsTheSettings(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	start, end := 22, 2
 	if _, _, err := c.app.certificates.Repository.SaveSettings(c.ctx, certificate.SaveSettingsInput{Email: "owner@example.com", Directory: certificate.DirectoryStaging, DeployStartHour: &start, DeployEndHour: &end, Actor: "owner"}); err != nil {
@@ -232,6 +235,7 @@ func TestCertificateDeployWindowFollowsTheSettings(t *testing.T) {
 }
 
 func TestCertificateDeployRetriesABusyNode(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	// A manual deployment the Agent has not answered keeps the node busy.
 	manual := c.owner.call("POST", "/api/v1/revisions/proxy", map[string]any{"nodeId": c.nodeID, "summary": "Manual"})
@@ -277,6 +281,7 @@ func TestCertificateDeployRetriesABusyNode(t *testing.T) {
 }
 
 func TestCertificateDeployGivesUpAfterThreeFailedWindows(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	c.renew(t)
 	fail := func(revision int64) {
@@ -325,6 +330,7 @@ func TestCertificateDeployGivesUpAfterThreeFailedWindows(t *testing.T) {
 }
 
 func TestManualPublicationAlreadyCarriesTheRenewedPair(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	c.renew(t)
 	c.publish(t)
@@ -335,6 +341,7 @@ func TestManualPublicationAlreadyCarriesTheRenewedPair(t *testing.T) {
 }
 
 func TestCertificateDeployerReconcilesAtStartAndOnRenewal(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	// A renewal made while the panel was down: the restarted deployer finds the
 	// difference in its first pass.
@@ -357,6 +364,7 @@ func TestCertificateDeployerReconcilesAtStartAndOnRenewal(t *testing.T) {
 // The deletion guard reads the reference the inbound save writes: the certificate
 // is held while an acme inbound uses it and released when the inbound moves on.
 func TestCertificateInUseFollowsTheInboundReference(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	held := c.owner.call("DELETE", "/api/v1/certificates/"+c.certificateID, nil)
 	if held.Code != 409 || !strings.Contains(held.Body.String(), "certificate_in_use") || !strings.Contains(held.Body.String(), c.inboundID) {
@@ -377,6 +385,7 @@ func TestCertificateInUseFollowsTheInboundReference(t *testing.T) {
 // certificate is renewed. Only a certificate that keeps the published names is a
 // renewal.
 func TestRepointedInboundWaitsForAManualPublication(t *testing.T) {
+	t.Parallel()
 	c := newCertificateDeployFixture(t)
 	other := "certificate-other"
 	stamp := certificate.Stamp(c.clock)

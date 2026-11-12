@@ -54,6 +54,7 @@ func telemetryRow(nodeID string, revision int64, domain string) contract.Rollup 
 }
 
 func TestAgentSpoolMTLSDeliveryOfflineReconnectAndAcknowledgement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	app := testServer(t)
 	app.Config.ShutdownTimeout = time.Second
@@ -170,6 +171,7 @@ func TestAgentSpoolMTLSDeliveryOfflineReconnectAndAcknowledgement(t *testing.T) 
 }
 
 func TestAccessHTTPPaginationPrivacyAndViewerSummary(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	ctx := context.Background()
 	nodes := &node.Repository{Database: app.Database}

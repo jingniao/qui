@@ -13,6 +13,7 @@ import (
 )
 
 func TestRealityImportArchivePreservesPublicClientSettings(t *testing.T) {
+	t.Parallel()
 	s, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	const content = "vless://11111111-1111-4111-8111-111111111111@example.net:443?security=reality&sni=example.com&pbk=VddTg9EFbwIYD3ymir-1P0xUxP74eFM_9UmM1e7bEwY&sid=&fp=chrome&type=grpc&serviceName=s0%20grpc&spx=%2Fsearch#reality"
@@ -79,6 +80,7 @@ func TestRealityImportArchivePreservesPublicClientSettings(t *testing.T) {
 }
 
 func TestXHTTPImportArchivePreservesHostAndEmptyPath(t *testing.T) {
+	t.Parallel()
 	s, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	const content = "vless://11111111-1111-4111-8111-111111111111@example.net:443?security=reality&sni=example.com&pbk=VddTg9EFbwIYD3ymir-1P0xUxP74eFM_9UmM1e7bEwY&sid=&fp=chrome&alpn=h2&type=xhttp&host=transport.example.com&path=&mode=auto#xhttp"

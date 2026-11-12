@@ -12,6 +12,7 @@ import (
 )
 
 func TestTuningWaitsForMatchingStatusAndRejectsBeforePublish(t *testing.T) {
+	// Not parallel: it holds the package-wide tuningSlot.
 	dir := t.TempDir()
 	proc := t.TempDir()
 	command := &pb.TuningCommand{RequestId: "new", Settings: map[string]string{"net.ipv4.tcp_ecn": "2"}}

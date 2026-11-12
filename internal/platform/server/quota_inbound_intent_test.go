@@ -70,6 +70,7 @@ func (f *quotaFixture) setInboundEnabled(t *testing.T, inboundID string, enabled
 // published before the intent existed (NULL) must behave the same way,
 // conservatively.
 func TestQuotaKeepsOwnerDisabledInboundDisabled(t *testing.T) {
+	t.Parallel()
 	for name, forgetIntent := range map[string]bool{"owner disabled it": false, "revision published before the intent": true} {
 		t.Run(name, func(t *testing.T) {
 			f := newQuotaFixture(t)
@@ -121,6 +122,7 @@ func TestQuotaKeepsOwnerDisabledInboundDisabled(t *testing.T) {
 // automatic revisions stays anchored on what the Owner reviewed and a re-enable
 // after several of them still restores an inbound the Owner wants enabled.
 func TestQuotaAutomaticRevisionInheritsInboundIntent(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "intent_inherit_user", "")
 	baseline := f.publish(t)

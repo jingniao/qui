@@ -95,6 +95,7 @@ func (f *installHTTPFixture) at(t *testing.T, method, path, body, cookie, csrf s
 }
 
 func TestInstallEndpointHTTPOwnerOnlyCSRFAndConflict(t *testing.T) {
+	t.Parallel()
 	f := newInstallHTTPFixture(t)
 	status := func(method, body, cookie, csrf string) int {
 		t.Helper()

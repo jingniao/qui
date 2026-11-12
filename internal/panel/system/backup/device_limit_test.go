@@ -7,6 +7,7 @@ import (
 )
 
 func TestDeviceLimitBackupRoundTripAndPre0115(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	if _, err := source.Database.Exec("UPDATE users SET device_limit=7"); err != nil {

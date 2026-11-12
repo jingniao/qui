@@ -12,6 +12,7 @@ import (
 )
 
 func TestOnlineRestoreAuthenticationConfirmationAndDispatchBoundary(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	password := "online-security-password"

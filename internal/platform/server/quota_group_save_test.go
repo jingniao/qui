@@ -134,6 +134,7 @@ func (f *quotaFixture) grantedGroupState(t *testing.T, username string) (string,
 // asserts the bindings on both group members; what is left is that the applied
 // revision settled the node and needed no correction of its own.
 func TestSavedNodeGroupDeploysTheGrantedCredential(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	f.grantedGroupState(t, "group_save_user")
 	if count := len(f.autoRevisions(t)); count != 1 {
@@ -147,6 +148,7 @@ func TestSavedNodeGroupDeploysTheGrantedCredential(t *testing.T) {
 // state, so the node runs the credential on both members before the change and a
 // single further automatic revision is what takes it away again.
 func TestNodeGroupChangeRemovesTheGrantedCredential(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		// keepsOtherMember says whether "Quota VLESS" may keep the credential:
@@ -202,6 +204,7 @@ func TestNodeGroupChangeRemovesTheGrantedCredential(t *testing.T) {
 // flags are unchanged: the reconciliation finds the node in sync and creates no
 // revision.
 func TestNodeGroupRenameOnlyDeploysNothing(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	added, _ := f.grantedGroupState(t, "group_rename_user")
 	input := f.groupInput(f.inboundID(t, "Quota VLESS"), added)
@@ -218,6 +221,7 @@ func TestNodeGroupRenameOnlyDeploysNothing(t *testing.T) {
 // TestNodeGroupWithoutGrantsSchedulesNothing proves the hook is skipped when the
 // group has no granted users: there is nobody whose access could change.
 func TestNodeGroupWithoutGrantsSchedulesNothing(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	f.publish(t)
 	if response := f.saveGroup(t, f.groupInput(f.inboundID(t, "Quota VLESS"), f.groupInbound(t))); response.Code != 200 {
@@ -235,6 +239,7 @@ func TestNodeGroupWithoutGrantsSchedulesNothing(t *testing.T) {
 // TestFailedNodeGroupSaveSchedulesNothing proves a rejected save is not a
 // change: neither the 400 nor the 404 may queue a reconciliation.
 func TestFailedNodeGroupSaveSchedulesNothing(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	f.addUser(t, "group_failed_save_user", "")
 	f.publish(t)
@@ -265,6 +270,7 @@ func TestFailedNodeGroupSaveSchedulesNothing(t *testing.T) {
 // published state and only borrows the fresh render's per-inbound bindings - must
 // not start serving that inbound on the node.
 func TestUnpublishedInboundInGroupIsNotCarried(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	_, credential := f.addUser(t, "group_unpublished_user", "")
 	f.publish(t)

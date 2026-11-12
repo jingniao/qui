@@ -135,6 +135,7 @@ func countingFixture(t *testing.T) (*auth.Service, http.Handler, *int64) {
 // TestAuthenticatedRequestQueryCount keeps the per-request query budget: the
 // first-run and base-setting state is cached, and a session is one statement.
 func TestAuthenticatedRequestQueryCount(t *testing.T) {
+	t.Parallel()
 	_, mux, counter := countingFixture(t)
 	cookie, _ := setup(t, mux)
 
@@ -161,6 +162,7 @@ func TestAuthenticatedRequestQueryCount(t *testing.T) {
 // TestSetupStateCacheSurvivesInvalidation checks that a dropped cache reloads
 // the same answer instead of a default one.
 func TestSetupStateCacheSurvivesInvalidation(t *testing.T) {
+	t.Parallel()
 	service, mux, counter := countingFixture(t)
 	cookie, session := setup(t, mux)
 	service.InvalidateSetupState()

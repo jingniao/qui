@@ -20,6 +20,7 @@ import (
 )
 
 func TestAccessMTLSLostAcknowledgementReplayAndStaleSequence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	app := testServer(t)
 	app.Config.ShutdownTimeout = time.Second

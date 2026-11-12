@@ -24,6 +24,7 @@ import (
 )
 
 func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *testing.T) {
+	t.Parallel()
 	for _, failCandidate := range []bool{false, true} {
 		t.Run(map[bool]string{false: "restored", true: "candidate-failure"}[failCandidate], func(t *testing.T) {
 			root := t.TempDir()
@@ -273,6 +274,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 }
 
 func TestConcurrentRestoreReservationHasSingleOwner(t *testing.T) {
+	t.Parallel()
 	r := &receiver{}
 	first, err := r.hooks().Reserve()
 	if err != nil {

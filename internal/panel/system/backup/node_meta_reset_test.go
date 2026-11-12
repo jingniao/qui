@@ -7,6 +7,7 @@ import (
 )
 
 func TestNodeMetaResetBackupValidationAndInventory(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	for _, q := range []string{"INSERT INTO node_meta(node_id,region,renew_date,last_alert_day) SELECT id,'JP','2026-10-31','2026-10-28' FROM nodes", "UPDATE users SET traffic_reset_cycle='monthly',traffic_reset_anchor='2024-01-31T00:00:00.000000000Z',traffic_reset_at='2024-02-29T00:00:00.000000000Z'"} {

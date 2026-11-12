@@ -55,6 +55,7 @@ func writeContractFile(t *testing.T, directory, name, content string) {
 }
 
 func TestPanelUpdateStateHTTPOwnerOnlyAndUnsupported(t *testing.T) {
+	t.Parallel()
 	fixture, _ := panelUpdateFixture(t, "1.4.3", t.TempDir())
 	if code := fixture.at(t, "GET", panelUpdatePath, "", fixture.viewer, "").Code; code != 403 {
 		t.Fatalf("viewer GET: %d", code)
@@ -82,6 +83,7 @@ func TestPanelUpdateStateHTTPOwnerOnlyAndUnsupported(t *testing.T) {
 }
 
 func TestPanelUpdateStateHTTPPendingAndStatus(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	fixture, _ := panelUpdateFixture(t, "1.4.3", directory)
 	const picked = `{"requestId":"0123456789abcdef0123456789abcdef","version":"1.5.0","requestedAt":"2026-11-08T10:00:00Z","requestedBy":"owner"}`
@@ -115,6 +117,7 @@ func TestPanelUpdateStateHTTPPendingAndStatus(t *testing.T) {
 }
 
 func TestPanelUpdateSubmitHTTPChecksAndWritesRequest(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	fixture, stub := panelUpdateFixture(t, "1.4.3", directory)
 	post := func(body, cookie, csrf string) (int, string) {
@@ -212,6 +215,7 @@ func TestPanelUpdateSubmitHTTPChecksAndWritesRequest(t *testing.T) {
 // forever: the helper unit may not be running at all, or a reboot may have killed it
 // mid-update after qui-update's boot recovery had already put the old version back.
 func TestPanelUpdateStalledAndInterruptedHTTP(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	fixture, _ := panelUpdateFixture(t, "1.4.3", directory)
 	now := panelUpdateFixedNow
@@ -277,6 +281,7 @@ func TestPanelUpdateStalledAndInterruptedHTTP(t *testing.T) {
 // successful update, and POST would disagree with GET, which reports no pending request
 // once the status names it.
 func TestPanelUpdateAnsweredRequestDoesNotBlockSubmit(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	fixture, stub := panelUpdateFixture(t, "1.4.3", directory)
 	stub.set(0, `{"tag_name":"v1.6.0","html_url":"https://github.com/jingniao/qui/releases/tag/v1.6.0","published_at":"2026-11-05T10:00:00Z","draft":false,"prerelease":false}`)

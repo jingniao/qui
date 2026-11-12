@@ -23,6 +23,7 @@ import (
 )
 
 func TestActualSingboxAgentCapabilitiesPublishAndOfflineContinuity(t *testing.T) {
+	t.Parallel()
 	binary := os.Getenv("SINGBOX_BINARY")
 	if binary == "" {
 		t.Skip("set SINGBOX_BINARY for actual sing-box Agent")

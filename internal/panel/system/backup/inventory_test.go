@@ -9,6 +9,7 @@ import (
 )
 
 func TestVerifiedExaminationOnlyCallsReaderAfterCompleteAuthenticationAndCleansCallbackFailure(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	created, err := source.Create(ctx, directory, "examine_fixture_001", "owner", testPassword)

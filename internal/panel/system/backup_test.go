@@ -41,6 +41,7 @@ func backupFixture(t *testing.T) *BackupService {
 }
 
 func TestBackupCatalogAuditVerificationAndFileDeletionStayConsistent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	item, err := s.Create(ctx, "owner", "ip", backupTestPassword)
@@ -115,6 +116,7 @@ func TestBackupCatalogAuditVerificationAndFileDeletionStayConsistent(t *testing.
 }
 
 func TestBackupAuditCreationFailurePublishesNeitherCatalogNorFile(t *testing.T) {
+	t.Parallel()
 	s := backupFixture(t)
 	if _, err := s.Repository.Database.Exec("CREATE TRIGGER fail_creation_audit BEFORE INSERT ON admin_operations BEGIN SELECT RAISE(ABORT,'audit unavailable');END"); err != nil {
 		t.Fatal(err)
@@ -140,6 +142,7 @@ func TestBackupAuditCreationFailurePublishesNeitherCatalogNorFile(t *testing.T) 
 }
 
 func TestBackupBusyTamperingAndMissingFilesFailExplicitly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	s.mu.Lock()

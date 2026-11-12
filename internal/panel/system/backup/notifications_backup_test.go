@@ -9,6 +9,7 @@ import (
 )
 
 func TestWebhookFormatsArchiveInspection(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	for i, format := range []string{"", "generic", "wecom", "dingtalk", "feishu", "invalid"} {
@@ -40,6 +41,7 @@ func TestWebhookFormatsArchiveInspection(t *testing.T) {
 }
 
 func TestBackupWebhookFormatValidation(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	for _, tc := range []struct {
 		kind, config string
@@ -72,6 +74,7 @@ func TestBackupWebhookFormatValidation(t *testing.T) {
 }
 
 func TestBackupRejectsMalformedNotifications(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	ctx := context.Background()
 

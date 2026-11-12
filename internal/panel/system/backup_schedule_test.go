@@ -23,6 +23,7 @@ func enableBackupSchedule(t *testing.T, s *BackupService) BackupSchedule {
 }
 
 func TestBackupScheduleDefaultsEncryptedPersistenceConflictAndAuditRollback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	initial, err := s.Repository.BackupSchedule(ctx)
@@ -79,6 +80,7 @@ func TestBackupScheduleDefaultsEncryptedPersistenceConflictAndAuditRollback(t *t
 }
 
 func TestAutomaticPeriodsRunOnceAcrossRestartAndDST(t *testing.T) {
+	t.Parallel()
 	s := backupFixture(t)
 	enableBackupSchedule(t, s)
 	ctx := context.Background()
@@ -146,6 +148,7 @@ func TestAutomaticPeriodsRunOnceAcrossRestartAndDST(t *testing.T) {
 }
 
 func TestClaimLeaseFailureRetryAndStaleCompletionCannotPublish(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	enableBackupSchedule(t, s)
@@ -188,6 +191,7 @@ func TestClaimLeaseFailureRetryAndStaleCompletionCannotPublish(t *testing.T) {
 }
 
 func TestChangedOrDisabledPolicyBlocksOldWorkerAndPreservesExistingBackups(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	settings := enableBackupSchedule(t, s)
@@ -217,6 +221,7 @@ func TestChangedOrDisabledPolicyBlocksOldWorkerAndPreservesExistingBackups(t *te
 }
 
 func TestInvalidStoredScheduleAndPasswordDoNotCreateOrCleanArchives(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"unknown-field", "invalid-time", "missing-password", "corrupt-password"} {
 		t.Run(fault, func(t *testing.T) {
 			s := backupFixture(t)

@@ -33,6 +33,7 @@ func connectionSnapshotJSON(t *testing.T, nodeID string, count uint64) []byte {
 // connection snapshot is stored, while a snapshot naming another node or
 // carrying invalid JSON is ignored without ending the stream.
 func TestConnectionStatusIsAdvisoryAndNeverBreaksTheStream(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()

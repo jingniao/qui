@@ -95,6 +95,7 @@ func renewalClient(t *testing.T, c config.Agent, address string) *grpc.ClientCon
 }
 
 func TestRenewalLostResponseIsIdempotentAndPossessionActivatesNewIdentity(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()
@@ -148,6 +149,7 @@ func TestRenewalLostResponseIsIdempotentAndPossessionActivatesNewIdentity(t *tes
 }
 
 func TestActualAgentAutomaticallyRenewsAndReconnectsWithoutResettingACK(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()
@@ -185,6 +187,7 @@ func TestActualAgentAutomaticallyRenewsAndReconnectsWithoutResettingACK(t *testi
 }
 
 func TestRenewalCannotReplaceAuthenticatedKeyOrBypassRevocation(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()
@@ -216,6 +219,7 @@ func TestRenewalCannotReplaceAuthenticatedKeyOrBypassRevocation(t *testing.T) {
 }
 
 func TestCertificateRenewalAndActivationAuditFailureLeaveOldIdentityUsable(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()
@@ -267,6 +271,7 @@ func TestCertificateRenewalAndActivationAuditFailureLeaveOldIdentityUsable(t *te
 }
 
 func TestRealXrayExistingConnectionSurvivesAutomaticCertificateRenewal(t *testing.T) {
+	t.Parallel()
 	binary := os.Getenv("XRAY_BINARY")
 	if binary == "" {
 		t.Skip("set XRAY_BINARY for renewal data-plane continuity")
@@ -411,6 +416,7 @@ func TestRealXrayExistingConnectionSurvivesAutomaticCertificateRenewal(t *testin
 // restores access. This is the supported replacement path for a lost node:
 // disable it (which revokes mTLS access) and enroll a new one.
 func TestDisabledNodeIsRefusedAtMTLS(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()

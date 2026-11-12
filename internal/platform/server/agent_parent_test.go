@@ -21,6 +21,7 @@ type managedParentFixture struct {
 }
 
 func TestManagedAgentParentChild(t *testing.T) {
+	t.Parallel()
 	data := os.Getenv("PROXY_MANAGED_PARENT_FIXTURE")
 	if data == "" {
 		t.Skip("only run in parent-death fixture")

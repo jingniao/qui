@@ -42,6 +42,7 @@ func trustAnchor(t *testing.T, app *Server) *httptest.ResponseRecorder {
 }
 
 func TestInstallCAEndpointServesTheTopCertificateOfTheChain(t *testing.T) {
+	// Not parallel: productionPanel sets the package-level Version.
 	app := productionPanel(t)
 	leaf, err := os.ReadFile(app.Config.TLS.Certificate)
 	if err != nil {
@@ -74,6 +75,7 @@ func TestInstallCAEndpointServesTheTopCertificateOfTheChain(t *testing.T) {
 }
 
 func TestInstallCAEndpointRefusesWithoutAReadableCertificate(t *testing.T) {
+	// Not parallel: productionPanel sets the package-level Version.
 	development := testServer(t)
 	if response := trustAnchor(t, development); response.Code != 404 {
 		t.Fatalf("development mode served a trust anchor: %d", response.Code)
@@ -96,6 +98,7 @@ func TestInstallCAEndpointRefusesWithoutAReadableCertificate(t *testing.T) {
 }
 
 func TestEnrollmentResponseCarriesInstallInfo(t *testing.T) {
+	// Not parallel: productionPanel sets the package-level Version.
 	app := productionPanel(t)
 	response := nodeAPIRequest(app, "POST", "/api/v1/auth/setup", `{"token":"`+app.SetupToken()+`","username":"owner","password":"node-test-password-123","platformName":"Test","timezone":"UTC"}`, nil, "")
 	if response.Code != 201 {
@@ -127,6 +130,7 @@ func TestEnrollmentResponseCarriesInstallInfo(t *testing.T) {
 }
 
 func TestInstallInfoReleaseVersions(t *testing.T) {
+	// Not parallel: productionPanel sets the package-level Version.
 	previous := Version
 	t.Cleanup(func() { Version = previous })
 	app := productionPanel(t)

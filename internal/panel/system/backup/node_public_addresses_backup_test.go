@@ -6,6 +6,7 @@ import (
 )
 
 func TestBackupRejectsMalformedPublicAddresses(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	ctx := context.Background()
 

@@ -13,6 +13,7 @@ import (
 // serves the session lookup, the list and the whole subscription read path; the
 // last-fetched marker is bounded and best effort.
 func TestReadsAndSubscriptionsAnswerWhileTheWriterIsBusy(t *testing.T) {
+	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
 	app := testServer(t)
 	if app.readPool == nil {
 		t.Fatal("read-only pool was not opened")
@@ -97,6 +98,7 @@ func TestReadsAndSubscriptionsAnswerWhileTheWriterIsBusy(t *testing.T) {
 
 // TestReadPoolIsClosedWithTheServer keeps the pool's lifetime tied to serving.
 func TestReadPoolIsClosedWithTheServer(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	pool := app.readPool
 	if pool == nil {

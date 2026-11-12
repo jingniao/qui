@@ -12,6 +12,7 @@ import (
 )
 
 func TestClientPolicyArchiveRoundTrip(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	store := &rules.Store{Database: source.Database}
@@ -66,6 +67,7 @@ func TestClientPolicyArchiveRoundTrip(t *testing.T) {
 }
 
 func TestClientPolicyArchiveValidation(t *testing.T) {
+	t.Parallel()
 	for _, query := range []string{
 		`UPDATE system_settings SET value_json='{"profileId":"missing"}' WHERE key='client_policy_active'`,
 		`DELETE FROM system_settings WHERE key='client_policy_active'`,
@@ -98,6 +100,7 @@ func TestClientPolicyArchiveValidation(t *testing.T) {
 }
 
 func TestPre0132ClientPolicyArchiveInitialization(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	// 0134 came after the client-policy library, so a pre-0132 archive cannot

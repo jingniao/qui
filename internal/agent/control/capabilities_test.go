@@ -156,6 +156,7 @@ func (c controlClient) ConfirmNodeRootRetirement(context.Context, *pb.NodeRootRe
 // capabilities kept for later sessions must describe that binary instead of the
 // core detected at process start.
 func TestCoreUpdateRefreshesCapabilities(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		rollback bool
@@ -200,6 +201,7 @@ func TestCoreUpdateRefreshesCapabilities(t *testing.T) {
 // The next session must send the refreshed capabilities instead of the ones
 // detected at process start.
 func TestLaterSessionReportsRefreshedCapabilities(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27", baselineVersion: "26.3.27"}
 	worker, _, manager, original := updateHarness(t, adapter)
 	archive, digest, _ := updateArchive(t, original, "next-session")

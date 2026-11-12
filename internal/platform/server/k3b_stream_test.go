@@ -20,6 +20,7 @@ import (
 )
 
 func TestK3bNodeCountersRequireIndependentNegotiationAndAckExactly(t *testing.T) {
+	t.Parallel()
 	for _, negotiated := range []bool{false, true} {
 		t.Run(fmt.Sprint(negotiated), func(t *testing.T) {
 			app := testServer(t)

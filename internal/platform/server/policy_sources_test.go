@@ -18,6 +18,7 @@ func (ruleSourceFetcher) Fetch(context.Context, string) ([]byte, error) {
 }
 
 func TestAssembledPolicySaveChecksReportedKeywordCapabilities(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	ctx := context.Background()
@@ -47,6 +48,7 @@ func TestAssembledPolicySaveChecksReportedKeywordCapabilities(t *testing.T) {
 }
 
 func TestAssembledPolicyRepositoryResolvesRefreshedSources(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	ctx := context.Background()
 	repo := app.sourceRefresher.Repository

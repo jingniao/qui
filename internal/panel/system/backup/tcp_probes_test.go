@@ -11,6 +11,7 @@ import (
 )
 
 func TestTCPProbeBackupValidationAndInventory(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -38,6 +39,7 @@ func TestTCPProbeBackupValidationAndInventory(t *testing.T) {
 }
 
 func TestLatencyTelemetryExcludedFromVerifiedBackup(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -97,6 +99,7 @@ func TestLatencyTelemetryExcludedFromVerifiedBackup(t *testing.T) {
 }
 
 func TestPreLatencyBackupValidation(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	ctx := context.Background()
 	for _, q := range []string{"DROP TABLE node_latency_samples", "DROP INDEX node_tcp_probes_inflight", "DROP TRIGGER probe_targets_scheduled_insert", "DROP TRIGGER probe_targets_scheduled_update", "ALTER TABLE node_tcp_probes DROP COLUMN source", "ALTER TABLE node_tcp_probes DROP COLUMN dispatched_at", "ALTER TABLE probe_targets DROP COLUMN scheduled", "DELETE FROM schema_migrations WHERE version='0120_latency_samples.sql'"} {

@@ -26,6 +26,7 @@ import (
 )
 
 func TestRealTwoAgentVlessTrojanDeployment(t *testing.T) {
+	t.Parallel()
 	binaryPath := os.Getenv("XRAY_BINARY")
 	if binaryPath == "" {
 		t.Skip("set XRAY_BINARY for two-Agent relay integration")

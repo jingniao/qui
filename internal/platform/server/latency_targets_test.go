@@ -10,6 +10,7 @@ import (
 )
 
 func TestNodeLatencyTargetsValidationPermissionsAndHistory(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	n, _, _, err := app.nodeRepository.CreateEnrollment(context.Background(), "targets", time.Hour)

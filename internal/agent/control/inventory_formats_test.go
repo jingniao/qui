@@ -35,6 +35,7 @@ func singBoxState() desiredstate.State {
 // With the floor already raised, an explicit-core inbound is published without
 // running the activation check (which would need the supervisor's history lock).
 func TestExplicitCoreSkipsCheckWhenFloorRaised(t *testing.T) {
+	t.Parallel()
 	root, contract := inventoryFixture(t)
 	if _, err := storage.ActivateCoreInventoryFormats(root, "node", contract); err != nil {
 		t.Fatal(err)
@@ -48,6 +49,7 @@ func TestExplicitCoreSkipsCheckWhenFloorRaised(t *testing.T) {
 // An unraised floor runs the check; a refusal is returned and nothing is raised,
 // a pass raises the floor.
 func TestExplicitCoreChecksWhenFloorNotRaised(t *testing.T) {
+	t.Parallel()
 	root, contract := inventoryFixture(t)
 	refused := errors.New("supervisor did not raise")
 	if err := activateInventoryFormats(root, "node", contract, singBoxState(), func() error { return refused }); !errors.Is(err, refused) {
@@ -65,6 +67,7 @@ func TestExplicitCoreChecksWhenFloorNotRaised(t *testing.T) {
 }
 
 func TestDefaultCoreNeverChecks(t *testing.T) {
+	t.Parallel()
 	root, contract := inventoryFixture(t)
 	if err := activateInventoryFormats(root, "node", contract, desiredstate.State{Inbounds: []desiredstate.Inbound{{}}}, func() error { return errors.New("called") }); err != nil {
 		t.Fatal(err)

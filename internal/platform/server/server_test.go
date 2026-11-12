@@ -45,6 +45,7 @@ func testServer(t *testing.T) *Server {
 }
 
 func TestHTTPHealthAndSPARouting(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	for _, tt := range []struct {
 		method, path string
@@ -68,6 +69,7 @@ func TestHTTPHealthAndSPARouting(t *testing.T) {
 }
 
 func TestHTTPAndGRPCStartAndStopTogether(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -137,6 +139,7 @@ func TestHTTPAndGRPCStartAndStopTogether(t *testing.T) {
 }
 
 func TestProductionTLSRequiresNodeCertificateButNotBrowserCertificate(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	certs := testutil.Certificates(t)
 	c := app.Config

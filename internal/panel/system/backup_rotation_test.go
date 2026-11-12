@@ -10,6 +10,7 @@ import (
 )
 
 func TestAutomaticRetentionKeepsSevenDailyFourWeeklyThreeMonthlyAndManualFiles(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	enableBackupSchedule(t, s)
@@ -56,6 +57,7 @@ func TestAutomaticRetentionKeepsSevenDailyFourWeeklyThreeMonthlyAndManualFiles(t
 }
 
 func TestFailedBackupOrUnusableNewestFileCannotPruneExistingArchives(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	policy := defaultBackupPolicy

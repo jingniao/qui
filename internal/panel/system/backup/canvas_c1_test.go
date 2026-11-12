@@ -10,6 +10,7 @@ import (
 )
 
 func TestCanvasC1ExitAndRelayFieldsArchive(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	var nodeID string

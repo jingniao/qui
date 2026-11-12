@@ -16,6 +16,7 @@ import (
 )
 
 func TestNodeRelayRealCredentialShareAndPortal(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	a, ca := f.addUser(t, "relay_a", "")
 	b, cb := f.addUser(t, "relay_b", "")

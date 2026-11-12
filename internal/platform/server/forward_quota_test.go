@@ -7,6 +7,7 @@ import (
 )
 
 func TestForwardUnaffectedByQuotaAndHasNoAccessIdentity(t *testing.T) {
+	t.Parallel()
 	s := desiredstate.State{Inbounds: []desiredstate.Inbound{{ID: "forward", Protocol: "forward", Enabled: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "1.1.1.1", Port: 443, Network: "tcp"}}}}}
 	next := mergeUserAccess(s, desiredstate.State{}, nil)
 	if !next.Inbounds[0].Enabled || len(next.Inbounds[0].CredentialIDs) != 0 {

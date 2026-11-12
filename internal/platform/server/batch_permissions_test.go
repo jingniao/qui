@@ -20,6 +20,7 @@ import (
 )
 
 func TestDeploymentBatchHTTPPermissionsCSRFAndSafeDTO(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	app := testServer(t)
 	call := func(method, path string, body any, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {

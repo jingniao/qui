@@ -10,6 +10,7 @@ import (
 )
 
 func TestMultiCoreArchiveInventoryAndResultValidation(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	db := source.Database

@@ -25,6 +25,7 @@ func nodeAPIRequest(app *Server, method, path, body string, cookie *http.Cookie,
 }
 
 func TestNodeUpdateCarriesOutboundNetworkSettings(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	response := nodeAPIRequest(app, "POST", "/api/v1/auth/setup", `{"token":"`+app.SetupToken()+`","username":"owner","password":"node-test-password-123","platformName":"Test","timezone":"UTC"}`, nil, "")
 	if response.Code != 201 {

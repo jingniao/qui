@@ -14,6 +14,7 @@ import (
 )
 
 func TestBaseSettingsOwnerViewerCSRFAndSessionRefresh(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	path := "/api/v1/system/base"
@@ -79,6 +80,7 @@ func TestBaseSettingsOwnerViewerCSRFAndSessionRefresh(t *testing.T) {
 	}
 }
 func TestBaseSettingsEventContainsOnlyRefreshHint(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	server := httptest.NewServer(app.HTTP.Handler)

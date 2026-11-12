@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -139,9 +140,23 @@ func (f *quotaFixture) idle(t *testing.T) {
 // the node as unchanged and skip the deploy.
 func (f *quotaFixture) apply(t *testing.T, revision int64) {
 	t.Helper()
-	if err := f.app.deployments.Result(f.ctx, f.nodeID, &pb.ApplyResult{Revision: revision, Success: true}); err != nil {
+	if err := f.report(t, &pb.ApplyResult{Revision: revision, Success: true}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// report hands the panel an Agent apply result for an automatic revision. The
+// quota deployer creates the revision before it inserts the deployment target,
+// so a revision the test has just listed may have no target yet; Result then
+// fails with sql.ErrNoRows before it writes anything, so wait for the target.
+func (f *quotaFixture) report(t *testing.T, result *pb.ApplyResult) error {
+	t.Helper()
+	var err error
+	flowWait(t, "the deployment target of revision "+strconv.FormatInt(result.Revision, 10), func() bool {
+		err = f.app.deployments.Result(f.ctx, f.nodeID, result)
+		return !errors.Is(err, sql.ErrNoRows)
+	})
+	return err
 }
 
 func (f *quotaFixture) autoRevisions(t *testing.T) []deployment.Revision {
@@ -242,6 +257,7 @@ func (f *quotaFixture) recordAlerts() *alertRecorder {
 }
 
 func TestQuotaCrossingDeploysOnceWithoutCredential(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "cross_user", "")
 	f.publish(t)
@@ -275,6 +291,7 @@ func TestQuotaCrossingDeploysOnceWithoutCredential(t *testing.T) {
 }
 
 func TestQuotaResetReactivatesAndRestoresCredential(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "reset_user", "")
 	f.publish(t)
@@ -304,6 +321,7 @@ func TestQuotaResetReactivatesAndRestoresCredential(t *testing.T) {
 }
 
 func TestExpiredUserRemovedByTickWithoutTraffic(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "expiry_user", time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
 	f.publish(t)
@@ -326,6 +344,7 @@ func TestExpiredUserRemovedByTickWithoutTraffic(t *testing.T) {
 }
 
 func TestTwoCrossingsCoalesceIntoOneDeploy(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	first, firstCredential := f.addUser(t, "coalesce_a", "")
 	second, secondCredential := f.addUser(t, "coalesce_b", "")
@@ -347,6 +366,7 @@ func TestTwoCrossingsCoalesceIntoOneDeploy(t *testing.T) {
 }
 
 func TestQuotaStatesEqualIgnoresRevision(t *testing.T) {
+	t.Parallel()
 	base := desiredstate.State{SchemaVersion: 1, Revision: 3, NodeID: "n", Users: []desiredstate.User{}, Credentials: []desiredstate.Credential{{ID: "c1"}}}
 	same := base
 	same.Revision = 9
@@ -391,6 +411,7 @@ func renewUser(t *testing.T, f *quotaFixture, account user.User, expiresAt strin
 // the nodes. The renewal is not an activity transition, so it redeploys without
 // a system.alert, and repeated ticks must not produce further revisions.
 func TestQuotaRenewalOfActiveUserRedeploysNewExpiry(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "renewed_user", time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
 	baseline := f.publish(t)
@@ -429,6 +450,7 @@ func TestQuotaRenewalOfActiveUserRedeploysNewExpiry(t *testing.T) {
 // a general "save deploys" switch: an Owner Save that changes nothing leaves
 // the node on its published revision.
 func TestQuotaSaveWithoutAccessChangeDoesNotDeploy(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "steady_user", time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
 	f.publish(t)
@@ -564,6 +586,7 @@ func waitClosed(t *testing.T, what string, done <-chan struct{}) {
 // node with no transition left to fix it. The draft survives and is queued by
 // the next window instead of being created twice.
 func TestQuotaDeployFailureKeepsTheEntryForTheNextWindow(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "deploy_retry_user", "")
 	f.publish(t)
@@ -596,6 +619,7 @@ func TestQuotaDeployFailureKeepsTheEntryForTheNextWindow(t *testing.T) {
 // TestQuotaScheduleReadFailureIsRetriedOnTick is problem (d): a transition whose
 // node set could not be read used to be dropped before it was ever enqueued.
 func TestQuotaScheduleReadFailureIsRetriedOnTick(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "schedule_retry_user", "")
 	f.publish(t)
@@ -628,6 +652,7 @@ func TestQuotaScheduleReadFailureIsRetriedOnTick(t *testing.T) {
 // Re-deploying it would be a no-op, so a new revision is created; after
 // quotaAttemptLimit failures the retries stop and the operator is told.
 func TestQuotaAgentFailureRetriesWithANewRevisionAndGivesUp(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "agent_failure_user", "")
 	f.publish(t)
@@ -638,7 +663,7 @@ func TestQuotaAgentFailureRetriesWithANewRevisionAndGivesUp(t *testing.T) {
 	for attempt := 0; attempt < quotaAttemptLimit; attempt++ {
 		flowWait(t, "the next automatic revision", func() bool { return len(f.autoRevisions(t)) == attempt+1 })
 		revision := f.autoRevisions(t)[attempt]
-		if err := f.app.deployments.Result(f.ctx, f.nodeID, &pb.ApplyResult{Revision: revision.ID, RolledBack: true}); err != nil {
+		if err := f.report(t, &pb.ApplyResult{Revision: revision.ID, RolledBack: true}); err != nil {
 			t.Fatalf("rollback result for revision %d: %v", revision.ID, err)
 		}
 	}
@@ -661,6 +686,7 @@ func TestQuotaAgentFailureRetriesWithANewRevisionAndGivesUp(t *testing.T) {
 // (which would revert the Owner's change) but a new revision built from what
 // the node now runs.
 func TestQuotaStaleDraftDoesNotRevertOwnerRevision(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "owner_race_user", "")
 	f.publish(t)
@@ -750,6 +776,7 @@ func TestQuotaStaleDraftDoesNotRevertOwnerRevision(t *testing.T) {
 // while an automatic revision is still on its way is not lost: the successful
 // result makes the entry recompute and deploy what is still missing.
 func TestQuotaTransitionWhileRevisionPendingIsApplied(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	first, _ := f.addUser(t, "pending_a", "")
 	second, secondCredential := f.addUser(t, "pending_b", "")
@@ -777,6 +804,7 @@ func TestQuotaTransitionWhileRevisionPendingIsApplied(t *testing.T) {
 // crossed the limit while the panel was down, so no transition exists. The
 // startup pass still removes the credential from the node that runs it.
 func TestQuotaStartupPassRemovesUserWhoWentOverWhileDown(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "startup_user", "")
 	f.publish(t)
@@ -798,6 +826,7 @@ func TestQuotaStartupPassRemovesUserWhoWentOverWhileDown(t *testing.T) {
 // deploy storm: a node whose published state already matches its users gets no
 // revision.
 func TestQuotaStartupPassLeavesInSyncNodeAlone(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	f.addUser(t, "startup_idle_user", "")
 	f.publish(t)
@@ -816,6 +845,7 @@ func TestQuotaStartupPassLeavesInSyncNodeAlone(t *testing.T) {
 // builds the revision from the published state's own user list, and the regular
 // render takes over again once it works.
 func TestQuotaInvalidDraftFallsBackToPublishedUsers(t *testing.T) {
+	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "invalid_draft_user", "")
 	f.publish(t)
@@ -851,6 +881,7 @@ func TestQuotaInvalidDraftFallsBackToPublishedUsers(t *testing.T) {
 // running the user's published credential while the user is in no granted group.
 // A later disable must still reach that node.
 func TestQuotaDisableAfterRemovingGrantReachesNode(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "removed_grant_user", "")
 	f.publish(t)
@@ -891,6 +922,7 @@ func TestQuotaDisableAfterRemovingGrantReachesNode(t *testing.T) {
 // moment was skipped for the lifetime of the process. The unfinished pass is run
 // again by the next tick, and the over-quota credential still goes away.
 func TestQuotaStartupPassRetriesAfterReadFailure(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "startup_retry_user", "")
 	f.publish(t)
@@ -987,6 +1019,7 @@ func stateInbound(t *testing.T, state desiredstate.State, protocol string) desir
 // startup reconcile compared the published state against a render that had never
 // heard of it and stripped the user's credential.
 func TestQuotaStartupReconcileKeepsQuickAccessCredential(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	_, credential := f.addProtocolUser(t, "quick_startup_user", "", "socks5")
 	f.publish(t)
@@ -1015,6 +1048,7 @@ func TestQuotaStartupReconcileKeepsQuickAccessCredential(t *testing.T) {
 // activity transition but still deploys, and that automatic revision used to
 // remove the quick-access credential and disable its inbound.
 func TestQuotaRenewalKeepsQuickAccessInbound(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addProtocolUser(t, "quick_renew_user", time.Now().UTC().Add(time.Hour).Format(time.RFC3339), "socks5")
 	f.publish(t)
@@ -1041,6 +1075,7 @@ func TestQuotaRenewalKeepsQuickAccessInbound(t *testing.T) {
 // must remove the credential and a re-enable must restore it on the same
 // business-data inbound, not on a revision-only one.
 func TestQuotaDisableAndReEnableKeepQuickAccessInbound(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addProtocolUser(t, "quick_cycle_user", "", "socks5")
 	f.publish(t)
@@ -1085,6 +1120,7 @@ func TestQuotaDisableAndReEnableKeepQuickAccessInbound(t *testing.T) {
 // TestQuotaBystanderTransitionKeepsQuickAccessCredential is issue 3 (d): another
 // user's over-quota transition must not touch the quick-access credential.
 func TestQuotaBystanderTransitionKeepsQuickAccessCredential(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	bystander, credential := f.addProtocolUser(t, "quick_bystander_user", "", "socks5")
 	other, otherCredential := f.addUser(t, "quick_over_user", "")
@@ -1113,6 +1149,7 @@ func TestQuotaBystanderTransitionKeepsQuickAccessCredential(t *testing.T) {
 // renderer must see the quick-access inbound too, so an Owner publication keeps
 // it and the rest of the node's configuration instead of wiping it.
 func TestOwnerProxyRevisionKeepsQuickAccessInbound(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	_, credential := f.addProtocolUser(t, "quick_owner_user", "", "socks5")
 	f.publish(t)
@@ -1169,6 +1206,7 @@ func (f *quotaFixture) rollbackNode(t *testing.T, revision int64) {
 // restart. The successful rollback now queues one reconciliation, and the
 // revision it creates must not start a chain of revisions.
 func TestQuotaRollbackToPreDisableRevisionIsCorrected(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "rollback_disable_user", "")
 	baseline := f.publish(t)
@@ -1203,6 +1241,7 @@ func TestQuotaRollbackToPreDisableRevisionIsCorrected(t *testing.T) {
 // rendered before a disable is still deployable, and applying it used to leave
 // the disabled user's credential on the node.
 func TestQuotaStaleDraftDeployIsCorrected(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "stale_draft_user", "")
 	f.publish(t)
@@ -1249,6 +1288,7 @@ func TestQuotaStaleDraftDeployIsCorrected(t *testing.T) {
 // 2: rolling back to a revision rendered while the user was disabled must not
 // lock a re-enabled user out.
 func TestQuotaRollbackToPreEnableRevisionRestoresCredential(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "rollback_enable_user", "")
 	account.Status = "disabled"
@@ -1283,6 +1323,7 @@ func TestQuotaRollbackToPreEnableRevisionRestoresCredential(t *testing.T) {
 // Deleting is now a revocation like disabling: one automatic revision that no
 // longer carries the credential.
 func TestQuotaDeletedUserRevokedOnNode(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "deleted_user", "")
 	f.publish(t)
@@ -1327,6 +1368,7 @@ func TestQuotaDeletedUserRevokedOnNode(t *testing.T) {
 // removed device handler used (the path a restored pre-0113 database still takes
 // when the extra identity is dropped).
 func TestQuotaDeletedDeviceRevokesOnlyThatDevice(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, first := f.addUser(t, "device_user", "")
 	_, kept := f.addUser(t, "bystander_user", "")
@@ -1376,6 +1418,7 @@ func TestQuotaDeletedDeviceRevokesOnlyThatDevice(t *testing.T) {
 // user. Without the credential-owner check that fallback found nothing to change
 // and the credential stayed valid on the node forever.
 func TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, first := f.addUser(t, "fallback_device_user", "")
 	_, kept := f.addUser(t, "fallback_bystander_user", "")
@@ -1421,6 +1464,7 @@ func TestQuotaDeletedDeviceAfterInvalidDraftRevokesIt(t *testing.T) {
 // contains the user. Deleting the user has to reach that node, which only the
 // published-state scan of schedule can find.
 func TestQuotaDeletedUserAfterRemovedGrantReachesNode(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "deleted_after_grant_user", "")
 	f.publish(t)
@@ -1454,6 +1498,7 @@ func TestQuotaDeletedUserAfterRemovedGrantReachesNode(t *testing.T) {
 // received a credential for leaves every published state untouched, so the
 // delete must not create a revision for them.
 func TestQuotaDeletedUserWithoutPublishedCredentialDoesNothing(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	response := f.owner.call("POST", "/api/v1/users", user.Input{Username: "ungranted_user", DisplayName: "ungranted_user", Status: "active", AllowedProtocols: []string{"vless"}})
 	if response.Code != 201 {
@@ -1496,6 +1541,7 @@ func TestQuotaDeletedUserWithoutPublishedCredentialDoesNothing(t *testing.T) {
 // minute, gave up after three attempts, and reported a failure the new instance
 // had already handled.
 func TestQuotaRunStopsTimersOnShutdown(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "shutdown_user", "")
 	f.publish(t)
@@ -1552,6 +1598,7 @@ func TestQuotaRunStopsTimersOnShutdown(t *testing.T) {
 // the closing database. The work is dropped instead; the next process's startup
 // pass re-derives it.
 func TestQuotaEnqueueAfterStopCreatesNoTimer(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "stopped_hook_user", "")
 	f.publish(t)
@@ -1597,6 +1644,7 @@ func TestQuotaEnqueueAfterStopCreatesNoTimer(t *testing.T) {
 // cancelled run context cut short must not count an attempt, requeue the entry or
 // report a failure.
 func TestQuotaFlushInFlightStopsOnShutdownWithoutCountingAnAttempt(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "inflight_user", "")
 	f.publish(t)

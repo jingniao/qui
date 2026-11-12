@@ -12,6 +12,7 @@ import (
 )
 
 func TestImportAPIOwnerOnlyEncryptedAndSubscriptionReadsCache(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "import_http")

@@ -26,6 +26,7 @@ import (
 )
 
 func TestRealCoreAccessAccountAggregationPrivacyAndOfflineRestartDelivery(t *testing.T) {
+	t.Parallel()
 	binary := os.Getenv("XRAY_BINARY")
 	if binary == "" {
 		t.Skip("set XRAY_BINARY for real core telemetry pipeline")

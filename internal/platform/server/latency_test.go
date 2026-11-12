@@ -11,6 +11,7 @@ import (
 )
 
 func TestLatencyAPIShapeBoundsTargetCapAndViewer(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	ctx := context.Background()
@@ -113,6 +114,7 @@ func TestLatencyAPIShapeBoundsTargetCapAndViewer(t *testing.T) {
 }
 
 func TestLatencySchedulerStopsWithServingInstance(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	app.latencyScheduler.Interval = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())

@@ -10,6 +10,7 @@ import (
 )
 
 func TestGroupEntriesBackupRoundTrip(t *testing.T) {
+	t.Parallel()
 	s, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	var server string

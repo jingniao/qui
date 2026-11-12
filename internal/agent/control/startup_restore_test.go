@@ -12,6 +12,7 @@ import (
 // A startup restore that could not start the retained revision must keep the
 // worker alive, while every other failure stays fatal.
 func TestStartupRestoreNonFatalSentinels(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		err  error

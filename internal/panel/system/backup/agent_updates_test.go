@@ -13,6 +13,7 @@ import (
 )
 
 func TestAgentArchiveInventoryAndConflictingUpdates(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	database := source.Database
 	ctx := context.Background()
@@ -82,6 +83,7 @@ func TestAgentArchiveInventoryAndConflictingUpdates(t *testing.T) {
 }
 
 func TestAgentArchiveLegacyAndMissingTables(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	database := source.Database
 	ctx := context.Background()

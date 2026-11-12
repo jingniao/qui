@@ -19,6 +19,7 @@ import (
 // before the backup comes back from the archive even after the running panel
 // replaced it.
 func TestClientRuleTemplateBackupRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	app := testServer(t)
 	owner := budgetOwner(t, app)

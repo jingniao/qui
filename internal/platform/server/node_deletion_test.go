@@ -31,6 +31,7 @@ func enrolledTestNode(t *testing.T, app *Server, name string) string {
 }
 
 func TestNodeDeletionPermissionsPreviewAndBlockers(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	ctx := context.Background()
@@ -88,6 +89,7 @@ func TestNodeDeletionPermissionsPreviewAndBlockers(t *testing.T) {
 }
 
 func TestNodeDeletionLogicalDeleteAndFollowUpRefusals(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	ctx := context.Background()
@@ -135,6 +137,7 @@ func TestNodeDeletionLogicalDeleteAndFollowUpRefusals(t *testing.T) {
 
 // A pending node that never enrolled keeps the cancel path: the row disappears.
 func TestNodeDeletionCancelsPendingNode(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	repository := &node.Repository{Database: app.Database}

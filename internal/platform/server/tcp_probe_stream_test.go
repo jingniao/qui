@@ -13,6 +13,7 @@ import (
 )
 
 func TestTCPProbeFixedOperationOverAuthenticatedStream(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

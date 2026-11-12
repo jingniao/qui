@@ -30,6 +30,7 @@ func backupReality(t *testing.T) desiredstate.ProtocolSettings {
 }
 
 func TestArchiveValidatesNewSettingsByProtocolAndDirection(t *testing.T) {
+	t.Parallel()
 	// Draft rows need validation even when no revision has ever included them.
 	cases := []struct {
 		name     string

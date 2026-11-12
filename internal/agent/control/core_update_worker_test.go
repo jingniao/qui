@@ -249,6 +249,7 @@ func updateRequest(request release.CoreUpdateRequest) *pb.CoreUpdateCommand {
 // Nothing is installed, no history is written, staging is removed and the core
 // is never switched.
 func TestCoreUpdateChecksumMismatchNeverActivates(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	worker, cfg, manager, original := updateHarness(t, adapter)
 	archive, digest, _ := updateArchive(t, original, "candidate")
@@ -290,6 +291,7 @@ func TestCoreUpdateChecksumMismatchNeverActivates(t *testing.T) {
 // A8.2 (i): the downloaded binary reports another version, so the switch never
 // happens and the previous image stays current.
 func TestCoreUpdateVersionMismatchKeepsCurrentImage(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "1.0.0"}
 	worker, cfg, manager, original := updateHarness(t, adapter)
 	archive, digest, _ := updateArchive(t, original, "candidate")
@@ -327,6 +329,7 @@ func TestCoreUpdateVersionMismatchKeepsCurrentImage(t *testing.T) {
 // A8.2 (ii): the new core starts but fails its health check, so the previous
 // image is restored and the installation is recorded as rolled back.
 func TestCoreUpdateHealthFailureRollsBackToPreviousImage(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	worker, cfg, manager, original := updateHarness(t, adapter)
 	archive, digest, binaryDigest := updateArchive(t, original, "candidate")
@@ -392,6 +395,7 @@ func awaitResult(t *testing.T, worker *coreUpdates) release.UpdateResult {
 // core update creates one, records the running core as the baseline and
 // switches to the downloaded image.
 func TestCoreUpdateWithoutHistoryCreatesItAndSwitches(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	worker, cfg, _, original := updateHarness(t, adapter, func(dataDirectory string) {
 		for _, path := range []string{filepath.Join(dataDirectory, "release-history"), filepath.Join(dataDirectory, "identity", "release-checkpoint.enc")} {

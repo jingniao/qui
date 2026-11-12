@@ -12,6 +12,7 @@ import (
 )
 
 func TestImportedForeignBackupPreservesBytesOriginalKeysAndCurrentBusinessState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source := backupFixture(t)
 	target := backupFixture(t)
@@ -74,6 +75,7 @@ func TestImportedForeignBackupPreservesBytesOriginalKeysAndCurrentBusinessState(
 }
 
 func TestWrongPasswordTransportFailureAndAuditFailureDoNotRegisterImport(t *testing.T) {
+	t.Parallel()
 	source := backupFixture(t)
 	item, err := source.Create(context.Background(), "owner", "ip", backupTestPassword)
 	if err != nil {
@@ -127,6 +129,7 @@ func TestWrongPasswordTransportFailureAndAuditFailureDoNotRegisterImport(t *test
 }
 
 func TestSameIdentifierDifferentAuthenticatedContentConflictsAndNeverOverwrites(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source := backupFixture(t)
 	target := backupFixture(t)

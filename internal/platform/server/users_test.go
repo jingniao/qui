@@ -33,6 +33,7 @@ import (
 // removed device routes answering 410, subscription token rotation by user, and a
 // Viewer refused everywhere.
 func TestUsersGroupsSubscriptionHTTPPermissions(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	call := func(method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -151,6 +152,7 @@ func TestUsersGroupsSubscriptionHTTPPermissions(t *testing.T) {
 }
 
 func TestRealUserCredentialSubscriptionAndRepublishedRevocation(t *testing.T) {
+	t.Parallel()
 	coreBinary := os.Getenv("XRAY_BINARY")
 	if coreBinary == "" {
 		t.Skip("set XRAY_BINARY for real user access integration")

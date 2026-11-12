@@ -25,6 +25,7 @@ func (r *failingReceiveReader) Read(buffer []byte) (int, error) {
 }
 
 func TestReceiveRequiresCompleteVerifiedArchiveBeforePublicationAndCleansAllFailures(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	created, err := source.Create(context.Background(), directory, "receive_fixture_001", "owner", testPassword)
 	if err != nil {

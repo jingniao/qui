@@ -29,6 +29,7 @@ func restoreTargetFixture(t *testing.T) RestoreTarget {
 }
 
 func TestRestoreStagePreservesMatchedDatabaseKeysAndRulesWithoutChangingTarget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, directory, secret := sourceFixture(t)
 	created, err := source.Create(ctx, directory, "restore_stage_001", "owner", testPassword)
@@ -141,6 +142,7 @@ func TestRestoreStagePreservesMatchedDatabaseKeysAndRulesWithoutChangingTarget(t
 }
 
 func TestRestoreStageRejectsTamperingSidecarsAndUnpinnedPlan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, directory, _ := sourceFixture(t)
 	created, err := source.Create(ctx, directory, "restore_stage_002", "owner", testPassword)
@@ -222,6 +224,7 @@ func TestRestoreStageRejectsTamperingSidecarsAndUnpinnedPlan(t *testing.T) {
 }
 
 func TestRestoreStagePreparationFailureCleansOnlyOwnedTemporaryMaterials(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, directory, _ := sourceFixture(t)
 	created, err := source.Create(ctx, directory, "restore_stage_003", "owner", testPassword)
@@ -298,6 +301,7 @@ func (c cancelWhenStagedDatabase) Err() error {
 }
 
 func TestRestoreStageProductionTLSRelocationAndMissingMaterials(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, directory, _ := sourceFixture(t)
 	source.Config.Development = false
@@ -341,6 +345,7 @@ func TestRestoreStageProductionTLSRelocationAndMissingMaterials(t *testing.T) {
 // The shipped panel.yaml leaves client_ca unset; such a production panel must
 // still back up, and the archive must prepare a restore onto a matching target.
 func TestRestoreStageProductionWithoutClientCA(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, directory, _ := sourceFixture(t)
 	source.Config.Development = false
@@ -369,6 +374,7 @@ func TestRestoreStageProductionWithoutClientCA(t *testing.T) {
 }
 
 func TestRestoreStageStrictPlanEvenWithExplicitlyPinnedNewDigest(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, directory, _ := sourceFixture(t)
 	created, err := source.Create(ctx, directory, "restore_stage_006", "owner", testPassword)
@@ -418,6 +424,7 @@ func TestRestoreStageStrictPlanEvenWithExplicitlyPinnedNewDigest(t *testing.T) {
 }
 
 func TestBackupAndRestoreRefuseIncompleteOrForeignDevelopmentServerIdentity(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"key", "missing-key", "foreign-pair"} {
 		t.Run(fault, func(t *testing.T) {
 			source, directory, _ := sourceFixture(t)
@@ -457,6 +464,7 @@ func TestBackupAndRestoreRefuseIncompleteOrForeignDevelopmentServerIdentity(t *t
 }
 
 func TestCompletedRestoreStageReopensInAnotherProcess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, directory, _ := sourceFixture(t)
 	created, err := source.Create(ctx, directory, "restore_process_01", "owner", testPassword)
@@ -480,6 +488,7 @@ func TestCompletedRestoreStageReopensInAnotherProcess(t *testing.T) {
 }
 
 func TestRestoreStageChild(t *testing.T) {
+	t.Parallel()
 	path := os.Getenv("PROXY_RESTORE_STAGE_PATH")
 	if path == "" {
 		t.Skip("subprocess only")

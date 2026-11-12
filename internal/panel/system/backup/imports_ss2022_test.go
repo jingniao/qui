@@ -13,6 +13,7 @@ import (
 )
 
 func TestImportBackupSS2022PreservesAndRejectsCorruptSettings(t *testing.T) {
+	t.Parallel()
 	s, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	store := &importer.Store{Database: s.Database, Vault: s.ConfigurationVault}

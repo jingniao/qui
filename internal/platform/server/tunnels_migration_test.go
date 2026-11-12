@@ -11,6 +11,7 @@ import (
 )
 
 func TestStartupReconcilesCanvasForwards(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	defer app.closeReadPool()
 	seeded := canvasfixture.PublishedForwards(t, app.Database, app.deployments.Vault)

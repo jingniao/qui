@@ -12,6 +12,7 @@ import (
 // a replaced certificate back on restore, so it is refused. A retirement on its
 // own stays consistent.
 func TestArchiveRejectsRetiredFingerprintStillInstalled(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	var nodeID string

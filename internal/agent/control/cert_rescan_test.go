@@ -9,6 +9,7 @@ import (
 )
 
 func TestInventoryWatchReportsOnlyChanges(t *testing.T) {
+	t.Parallel()
 	watch := &inventoryWatch{}
 
 	f1 := &pb.CertificateFileSummary{

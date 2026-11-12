@@ -15,6 +15,7 @@ import (
 )
 
 func TestBackupsOwnerCSRFViewerIsolationEncryptedDownloadAndActualOperations(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	password := "portable-http-backup-password"

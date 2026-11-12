@@ -61,6 +61,7 @@ func startProductionServer(t *testing.T) (*Server, testutil.PKI, string, string)
 // issued by another CA (here the panel TLS CA) is refused, while the same
 // transport without any client certificate is also refused.
 func TestGRPCRequiresNodeCAClientCertificate(t *testing.T) {
+	t.Parallel()
 	_, certs, _, grpcAddress := startProductionServer(t)
 	otherCA, err := tls.LoadX509KeyPair(certs.Client.Certificate, certs.Client.Key)
 	if err != nil {
@@ -91,6 +92,7 @@ func TestGRPCRequiresNodeCAClientCertificate(t *testing.T) {
 // sends a TLS CertificateRequest: a client that would answer one is served
 // normally and its callback is never invoked.
 func TestHTTPSDoesNotRequestClientCertificate(t *testing.T) {
+	t.Parallel()
 	_, certs, httpAddress, _ := startProductionServer(t)
 	requested := false
 	config := certs.RootOnly.Clone()
@@ -117,6 +119,7 @@ func TestHTTPSDoesNotRequestClientCertificate(t *testing.T) {
 // first enrollment: a second enrollment with the same token but a different
 // identity is refused.
 func TestEnrollmentTokenIsSingleUse(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	address, stop := startControl(t, app)
 	defer stop()

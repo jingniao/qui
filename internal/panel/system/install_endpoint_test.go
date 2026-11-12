@@ -11,6 +11,7 @@ import (
 // The install endpoint is one system_settings row: an absent row reads as unset
 // (host "", port 0, revision 0) and the first save becomes revision 1.
 func TestInstallEndpointRoundTripValidationAndAudit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
@@ -72,6 +73,7 @@ func TestInstallEndpointRoundTripValidationAndAudit(t *testing.T) {
 // "gRPC port unset" (0), so upgrading the panel does not invalidate a saved
 // endpoint or silently change the generated command.
 func TestInstallEndpointReadsLegacyRowWithoutGRPCPort(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
@@ -93,6 +95,7 @@ func TestInstallEndpointReadsLegacyRowWithoutGRPCPort(t *testing.T) {
 // deploy/linux/node-install.sh rejects for --panel (the pattern allows only
 // letters, digits, dots and hyphens).
 func TestInstallEndpointRejectsInvalidHostAndPort(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {

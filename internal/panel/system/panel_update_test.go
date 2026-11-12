@@ -59,6 +59,7 @@ func newPanelUpdateService(t *testing.T, stub *releaseStub, directory, current s
 }
 
 func TestPanelUpdateLookupIgnoresDraftsAndCaches(t *testing.T) {
+	t.Parallel()
 	stub := &releaseStub{}
 	stub.set(0, releaseBody150)
 	service := newPanelUpdateService(t, stub, t.TempDir(), "1.4.3")
@@ -85,6 +86,7 @@ func TestPanelUpdateLookupIgnoresDraftsAndCaches(t *testing.T) {
 }
 
 func TestPanelUpdateLookupRejectsUnusableReleases(t *testing.T) {
+	t.Parallel()
 	for name, answer := range map[string]struct {
 		status int
 		body   string
@@ -115,6 +117,7 @@ func TestPanelUpdateLookupRejectsUnusableReleases(t *testing.T) {
 }
 
 func TestCompareReleaseVersions(t *testing.T) {
+	t.Parallel()
 	for _, item := range []struct {
 		left, right string
 		want        int
@@ -135,6 +138,7 @@ func TestCompareReleaseVersions(t *testing.T) {
 }
 
 func TestPanelUpdateRequestIDIsRandomHex(t *testing.T) {
+	t.Parallel()
 	first, err := newPanelUpdateRequestID()
 	if err != nil {
 		t.Fatal(err)

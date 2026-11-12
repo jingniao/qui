@@ -8,6 +8,7 @@ import (
 )
 
 func TestK2bArchiveExcludesMetricsPreservesTuning(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -57,6 +58,7 @@ func TestK2bArchiveExcludesMetricsPreservesTuning(t *testing.T) {
 }
 
 func TestK2bArchiveRejectsInvalidTuningReceipt(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := source.Database.Exec(`INSERT INTO node_tuning SELECT id,'{}','request','failed','{"requestId":"request","status":"failed","keys":[{"key":"unknown","applied":true}]}',?,? FROM nodes`, stamp, stamp)

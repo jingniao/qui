@@ -15,6 +15,7 @@ import (
 )
 
 func TestDeviceGateNegotiationOldAgentsAndReconnect(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []struct {
 		name              string
 		hello, capability bool

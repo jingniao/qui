@@ -13,6 +13,7 @@ import (
 )
 
 func TestInspectRejectsInvalidV150Tables(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"undecryptable cache", "invalid cache JSON", "unknown dismissal", "empty dismissal", "oversized dismissal"} {
 		t.Run(scenario, func(t *testing.T) {
 			source, directory, _ := sourceFixture(t)
@@ -73,6 +74,7 @@ func TestInspectRejectsInvalidV150Tables(t *testing.T) {
 }
 
 func TestInspectAcceptsPre0140Archive(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	rewindServiceSetSources(t, source.Database)
 	created, err := source.Create(context.Background(), directory, "pre0140_archive_01", "owner", testPassword)
@@ -85,6 +87,7 @@ func TestInspectAcceptsPre0140Archive(t *testing.T) {
 }
 
 func TestInspectAcceptsValidV150Tables(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	sources := []policy.SourceInput{{URL: "https://example.com/rules", Format: "yaml", Behavior: "classical"}}

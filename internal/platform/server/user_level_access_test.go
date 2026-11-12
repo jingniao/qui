@@ -58,6 +58,7 @@ func publishNodeRevision(t *testing.T, f *quotaFixture, nodeID, summary string) 
 // is the only thing that can notice this, because QuotaState was seeded with the
 // post-migration database and therefore sees no activity transition.
 func TestStartupReconciliationAfterUserLevelMigration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newQuotaFixture(t)
 	// The first node is published before any user is granted to its group, so its
@@ -154,6 +155,7 @@ func TestStartupReconciliationAfterUserLevelMigration(t *testing.T) {
 // reports a traffic batch that the panel charges to the user's single access
 // identity.
 func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T) {
+	// Not parallel: it replaces the package-level control.NewRuntime.
 	ctx := context.Background()
 	app := testServer(t)
 	app.Config.ShutdownTimeout = time.Second
@@ -337,6 +339,7 @@ func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T)
 // quick user-access draft creates; the property under test is the same one the
 // plan names for socks5 -> trojan.
 func TestProtocolChangeAddsAndResetRevokesCredentials(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, vlessCredential := f.addProtocolUser(t, "protocol_user", "", "vless")
 	// Simulate an older user that was created before v1.5 with only VLESS:
@@ -415,6 +418,7 @@ func TestProtocolChangeAddsAndResetRevokesCredentials(t *testing.T) {
 // internal/panel/user/handler_http.go; the subscription token endpoint refuses the
 // removed deviceId field the same way.
 func TestRemovedDeviceRoutesAnswer410(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	paths := []struct{ method, path string }{

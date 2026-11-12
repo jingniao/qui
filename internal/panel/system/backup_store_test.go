@@ -12,6 +12,7 @@ import (
 )
 
 func TestInterruptedDeleteRestoresPreparedFileAndFinishesCommittedRemoval(t *testing.T) {
+	t.Parallel()
 	for _, committed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "prepared", true: "committed"}[committed], func(t *testing.T) {
 			ctx := context.Background()
@@ -81,6 +82,7 @@ func TestInterruptedDeleteRestoresPreparedFileAndFinishesCommittedRemoval(t *tes
 }
 
 func TestUncommittedCreateRecoveryRemovesOnlyJournalOwnedFile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	manual, err := s.Create(ctx, "owner", "ip", backupTestPassword)
@@ -116,6 +118,7 @@ func TestUncommittedCreateRecoveryRemovesOnlyJournalOwnedFile(t *testing.T) {
 }
 
 func TestStoreOperationsAreExclusiveAcrossServiceHandlesAndInvalidRecoveryFailsClosed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	done, err := s.beginStore(ctx)
@@ -145,6 +148,7 @@ func TestStoreOperationsAreExclusiveAcrossServiceHandlesAndInvalidRecoveryFailsC
 }
 
 func TestDeletePreparationFromBeforeOriginMigrationRestoresLocalBackup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	item, err := s.Create(ctx, "owner", "ip", backupTestPassword)

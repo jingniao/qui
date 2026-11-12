@@ -15,6 +15,7 @@ import (
 // Startup with a switching installation that was never activated rolls back to
 // the retained image, records the rollback and releases the node.
 func TestStartupRollsBackPendingCoreInstallation(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	_, cfg, manager, original := updateHarness(t, adapter)
 	ctx := context.Background()
@@ -74,6 +75,7 @@ func prepareSwitchingInstallation(t *testing.T, ctx context.Context, cfg config.
 // Startup with an unreadable hold marker preserves the damaged bytes, repairs
 // the marker and continues.
 func TestStartupRepairsUnreadableHoldMarker(t *testing.T) {
+	t.Parallel()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	_, cfg, manager, _ := updateHarness(t, adapter, func(dataDirectory string) {
 		if err := os.WriteFile(filepath.Join(dataDirectory, "core-update-hold.enc"), []byte("damaged"), 0600); err != nil {

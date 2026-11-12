@@ -8,6 +8,7 @@ import (
 )
 
 func TestStopAdmissionWaitsForAdmittedHandlerAndRejectsNewMutation(t *testing.T) {
+	t.Parallel()
 	var gate admission
 	entered := make(chan struct{})
 	finish := make(chan struct{})

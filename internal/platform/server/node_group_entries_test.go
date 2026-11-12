@@ -13,6 +13,7 @@ import (
 )
 
 func TestGroupInboundBoundarySubscriptionPortalAndQuota(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "inbound_boundary", "")
 	var entries []proxy.Inbound
@@ -90,6 +91,7 @@ func entriesDevice(t *testing.T, f *quotaFixture, userID string) string {
 }
 
 func TestGroupEntriesAndPortRangeAPIDecode(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	for _, body := range []any{
 		map[string]any{"portRangeStart": 10000},
@@ -129,6 +131,7 @@ func TestGroupEntriesAndPortRangeAPIDecode(t *testing.T) {
 }
 
 func TestExplicitGroupServerAPIAndAccessIsolation(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, _ := f.addUser(t, "server_only", "")
 	body := map[string]any{"name": "explicit only", "purpose": "subscription", "enabled": true, "subscriptionVisible": true, "serverIds": []string{f.nodeID}, "inboundIds": []string{}}

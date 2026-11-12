@@ -11,6 +11,7 @@ import (
 // durable traffic data: the archive keeps it while the rate telemetry is
 // stripped, and the inventory counts it.
 func TestMachineTrafficArchiveKeepsDurableRows(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -75,6 +76,7 @@ func TestMachineTrafficArchiveKeepsDurableRows(t *testing.T) {
 // TestMachineTrafficValidationRejectsMalformedRows checks the archive checker
 // against values the live schema would refuse to store.
 func TestMachineTrafficValidationRejectsMalformedRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name         string
@@ -110,6 +112,7 @@ func TestMachineTrafficValidationRejectsMalformedRows(t *testing.T) {
 
 // TestMachineTrafficValidationAcceptsPre0126 keeps older archives restorable.
 func TestMachineTrafficValidationAcceptsPre0126(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, _, _ := sourceFixture(t)
 	for _, statement := range []string{

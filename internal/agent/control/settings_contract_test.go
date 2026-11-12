@@ -11,6 +11,7 @@ import (
 // Decorating that report into one core entry must carry the contract instead of
 // dropping it, or the panel would gate xhttp/Reality on a report it never sees.
 func TestReportCapabilitiesKeepsTheScalarSettingsContract(t *testing.T) {
+	t.Parallel()
 	state := newCapabilityState(&pb.Capabilities{
 		CoreName: "xray", CoreVersion: "26.3.27",
 		ServerSettingsContractVersion: 1,

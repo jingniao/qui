@@ -10,6 +10,7 @@ import (
 )
 
 func TestCanvasForwardMigrationArchiveVersions(t *testing.T) {
+	t.Parallel()
 	for _, old := range []bool{true, false} {
 		t.Run(map[bool]string{true: "pre0129", false: "v14"}[old], func(t *testing.T) {
 			source, directory, _ := sourceFixture(t)

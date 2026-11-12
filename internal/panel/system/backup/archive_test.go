@@ -129,6 +129,7 @@ func assertNoStage(t *testing.T, directory string) {
 }
 
 func TestPortableSnapshotIncludesWALDataOriginalKeysRulesAndEncryptedCredentials(t *testing.T) {
+	t.Parallel()
 	source, directory, secret := sourceFixture(t)
 	wal, err := os.Stat(source.Config.Database + "-wal")
 	if err != nil || wal.Size() == 0 {
@@ -204,6 +205,7 @@ func TestPortableSnapshotIncludesWALDataOriginalKeysRulesAndEncryptedCredentials
 }
 
 func TestMissingReplacedKeysAndInvalidEncryptedRowsCannotPublishBackup(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"missing-key", "changed-key", "invalid-row", "bad-ca", "cancel"} {
 		t.Run(fault, func(t *testing.T) {
 			source, directory, _ := sourceFixture(t)
@@ -248,6 +250,7 @@ func TestMissingReplacedKeysAndInvalidEncryptedRowsCannotPublishBackup(t *testin
 }
 
 func TestManifestRejectsTraversalDuplicateMissingFilesAndOversizedMaterial(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"traversal", "duplicate", "missing", "oversized-key", "unknown-field"} {
 		t.Run(fault, func(t *testing.T) {
 			files := []File{}

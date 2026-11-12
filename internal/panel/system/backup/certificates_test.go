@@ -15,6 +15,7 @@ import (
 // archived unchanged, the archive validation opens it, and the inventory counts
 // the rows.
 func TestCertificateArchiveKeepsSealedMaterial(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -73,6 +74,7 @@ func TestCertificateArchiveKeepsSealedMaterial(t *testing.T) {
 // TestCertificateValidationRejectsMalformedRows checks the archive checker against
 // values the live schema or this panel could never write.
 func TestCertificateValidationRejectsMalformedRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, tc := range []struct {
@@ -106,6 +108,7 @@ func TestCertificateValidationRejectsMalformedRows(t *testing.T) {
 // TestCertificateValidationRejectsDanglingInboundReference refuses an archive
 // whose inbound points at a certificate the archive does not hold.
 func TestCertificateValidationRejectsDanglingInboundReference(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, _, _ := sourceFixture(t)
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -125,6 +128,7 @@ SELECT 'inbound-1','edge',id,'vless','0.0.0.0',443,1,1,0,'direct','[]',x'01',?,'
 
 // TestCertificateValidationAcceptsPre0137 keeps older archives restorable.
 func TestCertificateValidationAcceptsPre0137(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, _, _ := sourceFixture(t)
 	rewindCertificates(t, source.Database)

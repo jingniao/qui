@@ -27,6 +27,7 @@ import (
 )
 
 func TestProxyHTTPPermissionPortAndRelayMasking(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	call := func(method, path string, body any, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 		data, _ := json.Marshal(body)
@@ -96,6 +97,7 @@ func TestProxyHTTPPermissionPortAndRelayMasking(t *testing.T) {
 	}
 }
 func TestRealStoredProxyVlessTrojanConversion(t *testing.T) {
+	t.Parallel()
 	binaryPath := os.Getenv("XRAY_BINARY")
 	if binaryPath == "" {
 		t.Skip("set XRAY_BINARY for stored proxy conversion")

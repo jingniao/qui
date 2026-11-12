@@ -185,6 +185,7 @@ func flowWait(t *testing.T, what string, condition func() bool) {
 // subscription exports, access and traffic telemetry, and a backup round trip.
 // It needs no core binary and is never skipped.
 func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
+	// Not parallel: it replaces the package-level control.NewRuntime.
 	ctx := context.Background()
 	app := testServer(t)
 	app.Config.ShutdownTimeout = time.Second

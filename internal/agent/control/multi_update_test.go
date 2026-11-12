@@ -14,6 +14,7 @@ import (
 )
 
 func TestMultiComponentUpdateKeepsPeerRunning(t *testing.T) {
+	t.Parallel()
 	a := &fakeCoreRuntime{version: "26.3.27"}
 	w, c, m, original := updateHarness(t, a)
 	b := &fakeCoreRuntime{name: "sing-box", version: "1.12.0", selected: original}
@@ -52,6 +53,7 @@ func TestMultiComponentUpdateKeepsPeerRunning(t *testing.T) {
 }
 
 func TestCoreUpdateEnvelopeComponentMustMatchPayload(t *testing.T) {
+	t.Parallel()
 	a := &fakeCoreRuntime{version: "26.3.27"}
 	w, _, _, _ := updateHarness(t, a)
 	request := release.CoreUpdateRequest{SchemaVersion: 2, ID: "upd_scope", NodeID: "node-update", Revision: 1, Sequence: 1, Component: "xray", Version: "26.3.27", URL: updateAssetURL, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}

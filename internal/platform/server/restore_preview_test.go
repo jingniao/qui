@@ -9,6 +9,7 @@ import (
 )
 
 func TestRestorePreviewOwnerCSRFViewerAndVerifiedReadOnlyInventory(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	password := "restore-preview-http-password"

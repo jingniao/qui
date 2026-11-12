@@ -31,6 +31,7 @@ import (
 )
 
 func TestActualQUICAgentPublishedDeviceSubscriptionAndNativeClient(t *testing.T) {
+	t.Parallel()
 	binary := os.Getenv("SINGBOX_BINARY")
 	if binary == "" {
 		t.Skip("set SINGBOX_BINARY for full QUIC publish/subscription")

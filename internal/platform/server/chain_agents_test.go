@@ -34,6 +34,7 @@ import (
 )
 
 func TestRealThreeAgentChainBatchTCPUDPAndReverseReset(t *testing.T) {
+	t.Parallel()
 	binaryPath := os.Getenv("XRAY_BINARY")
 	if binaryPath == "" {
 		t.Skip("set XRAY_BINARY for three-Agent chain and rollback integration")
@@ -42,6 +43,7 @@ func TestRealThreeAgentChainBatchTCPUDPAndReverseReset(t *testing.T) {
 }
 
 func TestRealSingboxThreeAgentChainBatchTCPUDPAndReverseReset(t *testing.T) {
+	t.Parallel()
 	binaryPath := os.Getenv("SINGBOX_BINARY")
 	if binaryPath == "" || os.Getenv("XRAY_BINARY") == "" {
 		t.Skip("set SINGBOX_BINARY and XRAY_BINARY for three-Agent interoperability")

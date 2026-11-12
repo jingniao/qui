@@ -18,6 +18,7 @@ import (
 )
 
 func TestK2bTuningFixedOperationOverAuthenticatedStream(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -151,6 +152,7 @@ func TestK2bTuningFixedOperationOverAuthenticatedStream(t *testing.T) {
 }
 
 func TestK2bAutomaticRenewalAtThirtyDaysWithSixtyRemaining(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	n, c, csr := nearExpiryNode(t, app)
 	directory := filepath.Join(c.DataDirectory, "identity")

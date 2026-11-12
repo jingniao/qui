@@ -14,6 +14,7 @@ import (
 )
 
 func TestDashboardHTTPAuthenticationAndViewerDomainIsolation(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	ctx := context.Background()
 	nodes := &node.Repository{Database: app.Database}

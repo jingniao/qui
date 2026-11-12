@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/panel/node"
@@ -21,6 +23,7 @@ import (
 // mTLS streams must keep acknowledging old/replayed peers while withholding
 // both apply and rollback until this connection reports the exact combination.
 func TestSettingsDispatchAfterReconnectAndCapabilityWithdrawal(t *testing.T) {
+	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
 	for _, operation := range []string{"apply", "rollback", "rollback_empty"} {
 		t.Run(operation, func(t *testing.T) {
 			rollback := operation != "apply"
@@ -130,11 +133,27 @@ func TestSettingsDispatchAfterReconnectAndCapabilityWithdrawal(t *testing.T) {
 			if _, err := app.Database.Exec(query, revision.ID, n.ID, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 				t.Fatal(err)
 			}
-			stream, err = client.Connect(ctx)
-			if err != nil {
-				t.Fatal(err)
+			// The panel marks the node offline before it drops the old session from
+			// its connected set, so a reconnect right after the status change can
+			// still be refused as already connected, as a real Agent would see
+			// before its retry; retry the same way.
+			for deadline := time.Now().Add(5 * time.Second); ; {
+				stream, err = client.Connect(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: 1}}}); err != nil {
+					t.Fatal(err)
+				}
+				message, err := stream.Recv()
+				if err == nil && message.GetWelcome() != nil {
+					break
+				}
+				if status.Code(err) != codes.AlreadyExists || time.Now().After(deadline) {
+					t.Fatalf("welcome: %v", err)
+				}
+				time.Sleep(20 * time.Millisecond)
 			}
-			hello(1)
 			if operation == "rollback_empty" {
 				// A legacy peer sends only a heartbeat, without a fresh settings
 				// report. Clearing runtime must not attempt to read revision zero.

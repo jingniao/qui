@@ -11,6 +11,7 @@ import (
 )
 
 func TestRetentionDefaultsPersistenceConflictAndAuditAtomicity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "panel.db")
 	database, err := dbtest.Open(ctx, path)
@@ -64,6 +65,7 @@ func TestRetentionDefaultsPersistenceConflictAndAuditAtomicity(t *testing.T) {
 	}
 }
 func TestConcurrentRetentionWritersAndInvalidStoredPolicy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {

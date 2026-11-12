@@ -10,6 +10,7 @@ import (
 )
 
 func TestTCPProbeOwnerLimitsRetentionAndOldAgent(t *testing.T) {
+	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	ctx := context.Background()

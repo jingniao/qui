@@ -118,6 +118,7 @@ func routeCall(c budgetHTTP, pattern string) *httptest.ResponseRecorder {
 }
 
 func TestEveryAdminRouteRefusesAPortalSession(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "route_user")
@@ -145,6 +146,7 @@ func TestEveryAdminRouteRefusesAPortalSession(t *testing.T) {
 }
 
 func TestEveryPortalRouteRefusesAnAdminSession(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	for _, pattern := range coveragePatterns(t, app) {
@@ -162,6 +164,7 @@ func TestEveryPortalRouteRefusesAnAdminSession(t *testing.T) {
 }
 
 func TestPortalSessionTablesRejectRelabelledCookies(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "namespace_user")
@@ -177,6 +180,7 @@ func TestPortalSessionTablesRejectRelabelledCookies(t *testing.T) {
 }
 
 func TestPortalLimiterCountsBothIPAndUsername(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	call := func(ip, username string) int {
 		r := httptest.NewRequest("POST", "/api/v1/portal/auth/login", strings.NewReader(`{"username":"`+username+`","password":"wrong"}`))
@@ -205,6 +209,7 @@ func TestPortalLimiterCountsBothIPAndUsername(t *testing.T) {
 }
 
 func TestPortalRateLimitCSRFExpiryAndCleanup(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "security_user")
@@ -279,6 +284,7 @@ func TestPortalRateLimitCSRFExpiryAndCleanup(t *testing.T) {
 }
 
 func TestPortalInactiveUsersCanLoginButCannotSubscribe(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	for _, reason := range []string{"disabled", "expired", "quota_exceeded"} {
@@ -321,6 +327,7 @@ func TestPortalInactiveUsersCanLoginButCannotSubscribe(t *testing.T) {
 }
 
 func TestPortalOwnerChangesImmediatelyRevokeRequests(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	for _, action := range []string{"disable", "reset", "revoke", "delete"} {
@@ -358,6 +365,7 @@ func portalSubscriptions(t *testing.T, app *Server) *subscription.Repository {
 }
 
 func TestPortalSubscriptionRecoveryAndReset(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "link_user")
@@ -396,6 +404,7 @@ func TestPortalSubscriptionRecoveryAndReset(t *testing.T) {
 }
 
 func TestPortalEveryEndpointUsesOnlySessionUser(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	a := portalUser(t, app, owner, "private_alice")
@@ -504,6 +513,7 @@ func TestPortalEveryEndpointUsesOnlySessionUser(t *testing.T) {
 }
 
 func TestPortalMeExplainsWireGuardAndValidatesTrafficRange(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "wg_user")

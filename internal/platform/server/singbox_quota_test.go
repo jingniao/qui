@@ -10,6 +10,7 @@ import (
 )
 
 func TestSingboxOnlyTrafficCrossesQuotaAndRemovesCredential(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "singbox_quota", "")
 	if _, err := f.app.Database.Exec("UPDATE nodes SET capabilities_json=? WHERE id=?", `{"core_name":"sing-box","core_version":"1.14.4","singbox_user_stats":true}`, f.nodeID); err != nil {

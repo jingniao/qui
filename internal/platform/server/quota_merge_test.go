@@ -111,6 +111,7 @@ func credentialForTest(state desiredstate.State, credentialID string) (desiredst
 }
 
 func TestMergeUserAccessRemoval(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedCredentialFixture()
 	fresh.Users = []desiredstate.User{}
 	fresh.Credentials = []desiredstate.Credential{}
@@ -132,6 +133,7 @@ func TestMergeUserAccessRemoval(t *testing.T) {
 }
 
 func TestMergeUserAccessReactivation(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedCredentialFixture()
 	published.Users = []desiredstate.User{}
 	published.Credentials = []desiredstate.Credential{}
@@ -156,6 +158,7 @@ func TestMergeUserAccessReactivation(t *testing.T) {
 // TestMergeUserAccessMatchesProtocol ensures a reactivated credential is bound
 // only to the inbound whose protocol it matches.
 func TestMergeUserAccessMatchesProtocol(t *testing.T) {
+	t.Parallel()
 	published := desiredstate.State{
 		SchemaVersion: 1, Revision: 4, NodeID: "node-1",
 		Logging:     desiredstate.Logging{DomainOnly: true},
@@ -187,6 +190,7 @@ func TestMergeUserAccessMatchesProtocol(t *testing.T) {
 // TestMergeUserAccessInboundAbsentFromFresh removes the binding when its exact
 // inbound is gone, even if another inbound still uses the same user credential.
 func TestMergeUserAccessInboundAbsentFromFresh(t *testing.T) {
+	t.Parallel()
 	published := desiredstate.State{
 		SchemaVersion: 1, Revision: 4, NodeID: "node-1",
 		Logging: desiredstate.Logging{DomainOnly: true},
@@ -219,6 +223,7 @@ func TestMergeUserAccessInboundAbsentFromFresh(t *testing.T) {
 // renderer's disable-when-empty rule is mirrored for an inbound missing from the
 // fresh state once all of its credentials have disappeared.
 func TestMergeUserAccessDropsAbsentInboundWhenAllCredentialsGone(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedCredentialFixture()
 	fresh.Users = []desiredstate.User{}
 	fresh.Credentials = []desiredstate.Credential{}
@@ -235,6 +240,7 @@ func TestMergeUserAccessDropsAbsentInboundWhenAllCredentialsGone(t *testing.T) {
 // ExpiresAt even though the credential set is identical, because the agent
 // enforces the deadline from this entry itself.
 func TestMergeUserAccessTakesFreshUserEntries(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedCredentialFixture()
 	published.Users = []desiredstate.User{{ID: "user-1", Enabled: true, ExpiresAt: "2026-11-01T00:00:00Z"}}
 	fresh.Users = []desiredstate.User{{ID: "user-1", Enabled: true, ExpiresAt: "2026-12-01T00:00:00Z"}}
@@ -252,6 +258,7 @@ func TestMergeUserAccessTakesFreshUserEntries(t *testing.T) {
 // state equal to the published one even when the fresh render carries
 // unreviewed business changes: those changes must never be merged.
 func TestMergeUserAccessNoOpEquality(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedCredentialFixture()
 	fresh.Outbounds = append(append([]desiredstate.Outbound(nil), published.Outbounds...), desiredstate.Outbound{ID: "draft-exit", Protocol: "direct", Enabled: true})
 	fresh.Policies = append([]desiredstate.Policy(nil), desiredstate.Policy{ID: "draft-policy", Priority: 50, Enabled: true})
@@ -271,6 +278,7 @@ func TestMergeUserAccessNoOpEquality(t *testing.T) {
 // outbound still references: the automatic revision would otherwise fail
 // validation on the node's own published outbound.
 func TestMergeUserAccessKeepsPublishedInternalCredential(t *testing.T) {
+	t.Parallel()
 	published := desiredstate.State{
 		SchemaVersion: 1, Revision: 4, NodeID: "node-1",
 		Logging:     desiredstate.Logging{DomainOnly: true},
@@ -311,6 +319,7 @@ func TestMergeUserAccessKeepsPublishedInternalCredential(t *testing.T) {
 // credential, or the core refuses to render the inbound ("WireGuard peer
 // credential missing"), and reactivation has to bring the peer back.
 func TestMergeUserAccessDropsInactiveWireGuardPeer(t *testing.T) {
+	t.Parallel()
 	published, full := mergedWireGuardFixture()
 	fresh := full
 	fresh.Users = []desiredstate.User{{ID: "user-1", Enabled: true}}
@@ -355,6 +364,7 @@ func TestMergeUserAccessDropsInactiveWireGuardPeer(t *testing.T) {
 // TestMergeUserAccessWireGuardKeyRotation pins that a rotated device key from
 // the draft replaces the published one, on the credential and on its peer.
 func TestMergeUserAccessWireGuardKeyRotation(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedWireGuardFixture()
 	rotated := wgKey(41)
 	fresh.Credentials = []desiredstate.Credential{published.Credentials[0], published.Credentials[1], published.Credentials[2]}
@@ -392,6 +402,7 @@ func TestMergeUserAccessWireGuardKeyRotation(t *testing.T) {
 // relay credential survive a user change, and an unpublished edit of the relay
 // credential does not ride along.
 func TestMergeUserAccessKeepsLiteralAndInternalPeers(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedWireGuardFixture()
 	fresh.Users = []desiredstate.User{{ID: "user-1", Enabled: true}}
 	fresh.Credentials = []desiredstate.Credential{
@@ -428,6 +439,7 @@ func TestMergeUserAccessKeepsLiteralAndInternalPeers(t *testing.T) {
 // the Owner wanted no inbound enabled, which is the only thing that may re-enable
 // one.
 func TestMergeUserAccessKeepsDisabledInboundDisabled(t *testing.T) {
+	t.Parallel()
 	published := desiredstate.State{
 		SchemaVersion: 1, Revision: 4, NodeID: "node-1",
 		Logging:     desiredstate.Logging{DomainOnly: true},
@@ -468,6 +480,7 @@ func TestMergeUserAccessKeepsDisabledInboundDisabled(t *testing.T) {
 // out. The credential is still attached, so the merge produces what the node can
 // run.
 func TestMergeUserAccessUnknownIntentNeverReenables(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedCredentialFixture()
 	published.Users = []desiredstate.User{}
 	published.Credentials = []desiredstate.Credential{}
@@ -493,6 +506,7 @@ func TestMergeUserAccessUnknownIntentNeverReenables(t *testing.T) {
 // WireGuard settings: the published state has to stay byte-identical, because it
 // is the baseline every later automatic revision builds on.
 func TestMergeUserAccessDoesNotMutatePublished(t *testing.T) {
+	t.Parallel()
 	published, full := mergedWireGuardFixture()
 	fresh := full
 	fresh.Users = []desiredstate.User{{ID: "user-1", Enabled: true}}
@@ -525,6 +539,7 @@ func TestMergeUserAccessDoesNotMutatePublished(t *testing.T) {
 // draft whose credential and binding order differs but whose user surface is the
 // same merges back to the published bytes, so no spurious revision is created.
 func TestMergeUserAccessNoOpEqualityWithReorderedFresh(t *testing.T) {
+	t.Parallel()
 	published, fresh := mergedWireGuardFixture()
 	fresh.Credentials = []desiredstate.Credential{published.Credentials[2], published.Credentials[1], published.Credentials[0]}
 	inbound := published.Inbounds[0]
@@ -568,6 +583,7 @@ func statePolicyIDs(state desiredstate.State) []string {
 // crossing still produces an automatic revision, but that revision only drops
 // the user's credential. It must not carry the unpublished outbound or policy.
 func TestQuotaRevisionExcludesUnpublishedOwnerChanges(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "unpublished_user", "")
 	baseline := f.publish(t)
@@ -619,6 +635,7 @@ func TestQuotaRevisionExcludesUnpublishedOwnerChanges(t *testing.T) {
 // reactivated credential is restored to the inbound whose protocol matches it,
 // and never to an inbound of another protocol on the same node.
 func TestQuotaReactivationRestoresCredentialToMatchingInboundOnly(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	// A second, different-protocol inbound that must never receive the VLESS
 	// credential: it has no socks5 credential assigned, so it stays disabled.

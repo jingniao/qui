@@ -16,6 +16,7 @@ import (
 )
 
 func TestRetentionHTTPPermissionsStrictInputAndPersistedRead(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	path := "/api/v1/system/access-retention"
@@ -94,6 +95,7 @@ func (o *retentionObserver) AccessRetentionInTx(ctx context.Context, tx *sql.Tx)
 	return policy, err
 }
 func TestSavedRetentionWakesCleanupAndKeepsDailyReceipts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	app := testServer(t)
 	owner := budgetOwner(t, app)

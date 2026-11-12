@@ -104,6 +104,7 @@ func setup(t *testing.T, mux http.Handler) (*http.Cookie, auth.Session) {
 }
 
 func TestAuthenticationPermissionsAndCredentialRotation(t *testing.T) {
+	t.Parallel()
 	service, mux := fixture(t)
 	response := send(t, mux, "GET", "/api/v1/auth/session", nil, nil, "", "")
 	mustStatus(t, response, 200)
@@ -198,6 +199,7 @@ func TestAuthenticationPermissionsAndCredentialRotation(t *testing.T) {
 }
 
 func TestSessionAndRateLimitSurviveDatabaseReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "panel.db")
 	database, err := dbtest.Open(ctx, path)
@@ -241,6 +243,7 @@ func TestSessionAndRateLimitSurviveDatabaseReopen(t *testing.T) {
 }
 
 func TestInputValidationAndSecureCookie(t *testing.T) {
+	t.Parallel()
 	service, mux := fixture(t)
 	for _, password := range []string{"short", strings.Repeat("x", 129)} {
 		if _, _, err := service.Setup(context.Background(), testSetupToken, "owner", password, "Test", "UTC", "192.0.2.1"); err == nil {
@@ -265,6 +268,7 @@ func TestInputValidationAndSecureCookie(t *testing.T) {
 }
 
 func TestSetupRequiresOneTimeToken(t *testing.T) {
+	t.Parallel()
 	service, mux := fixture(t)
 	tokenPath := service.CurrentSetupTokenPath()
 	body := func(token string) map[string]string {
@@ -287,6 +291,7 @@ func TestSetupRequiresOneTimeToken(t *testing.T) {
 }
 
 func TestConcurrentSetupWithCorrectTokenCreatesOneOwner(t *testing.T) {
+	t.Parallel()
 	service, mux := fixture(t)
 	payload, err := json.Marshal(map[string]string{"token": testSetupToken, "username": "owner", "password": testPassword, "platformName": "Test", "timezone": "UTC"})
 	if err != nil {
@@ -336,6 +341,7 @@ func parseNetworks(t *testing.T, values ...string) []*net.IPNet {
 }
 
 func TestLoginLimiterCountsIPAndUsername(t *testing.T) {
+	t.Parallel()
 	service, _ := fixture(t)
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
@@ -361,6 +367,7 @@ func TestLoginLimiterCountsIPAndUsername(t *testing.T) {
 }
 
 func TestLoginHonoursForwardedIPOnlyFromTrustedProxies(t *testing.T) {
+	t.Parallel()
 	service, _ := fixture(t)
 	handler := &auth.Handler{Service: service, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), TrustedProxies: parseNetworks(t, "10.0.0.0/8")}
 	mux := http.NewServeMux()
@@ -397,6 +404,7 @@ func TestLoginHonoursForwardedIPOnlyFromTrustedProxies(t *testing.T) {
 }
 
 func TestRequestIPTrustsOnlyRightmostUntrustedForwardedEntry(t *testing.T) {
+	t.Parallel()
 	handler := &auth.Handler{TrustedProxies: parseNetworks(t, "10.0.0.0/8")}
 	resolve := func(remote, forwarded, real string) string {
 		request := httptest.NewRequest("GET", "/", nil)
@@ -433,6 +441,7 @@ func TestRequestIPTrustsOnlyRightmostUntrustedForwardedEntry(t *testing.T) {
 }
 
 func TestLoginRateLimitIgnoresRotatedForwardedEntries(t *testing.T) {
+	t.Parallel()
 	service, _ := fixture(t)
 	handler := &auth.Handler{Service: service, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), TrustedProxies: parseNetworks(t, "10.0.0.0/8")}
 	mux := http.NewServeMux()

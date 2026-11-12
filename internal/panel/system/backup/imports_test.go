@@ -13,6 +13,7 @@ import (
 )
 
 func TestImportBackupVerifierAndInventory(t *testing.T) {
+	t.Parallel()
 	s, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	users := &user.Repository{Database: s.Database, Vault: s.ConfigurationVault}
@@ -53,6 +54,7 @@ func TestImportBackupVerifierAndInventory(t *testing.T) {
 	}
 }
 func TestImportBackupVerifierAcceptsPre0116(t *testing.T) {
+	t.Parallel()
 	s, _, _ := sourceFixture(t)
 	for _, q := range []string{"DROP TABLE user_source_grants", "DROP TABLE imported_proxies", "DROP TABLE subscription_sources", "ALTER TABLE canvas_schemes DROP COLUMN client_published_layout", "DELETE FROM schema_migrations WHERE version='0116_subscription_sources.sql'"} {
 		if _, err := s.Database.Exec(q); err != nil {
@@ -67,6 +69,7 @@ func TestImportBackupVerifierAcceptsPre0116(t *testing.T) {
 // The stored result is validated: a payload this panel could not have written is
 // refused, and an archive taken before 0133 (no result columns) stays valid.
 func TestImportBackupVerifierValidatesResults(t *testing.T) {
+	t.Parallel()
 	s, _, _ := sourceFixture(t)
 	ctx := context.Background()
 	store := &importer.Store{Database: s.Database, Vault: s.ConfigurationVault}
@@ -105,6 +108,7 @@ func TestImportBackupVerifierValidatesResults(t *testing.T) {
 // to its own row - another source, another attempt or success time, a status it
 // contradicts, a diagnostic field or an unknown key - is refused.
 func TestImportBackupVerifierChecksResultAgainstRow(t *testing.T) {
+	t.Parallel()
 	s, _, _ := sourceFixture(t)
 	ctx := context.Background()
 	store := &importer.Store{Database: s.Database, Vault: s.ConfigurationVault}
@@ -202,6 +206,7 @@ func TestImportBackupVerifierChecksResultAgainstRow(t *testing.T) {
 // data: its stored reason names a field the verifier accepts, so a real backup of the
 // database is created and verified instead of being refused.
 func TestImportBackupAcceptsClashFieldReasons(t *testing.T) {
+	t.Parallel()
 	s, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	store := &importer.Store{Database: s.Database, Vault: s.ConfigurationVault}

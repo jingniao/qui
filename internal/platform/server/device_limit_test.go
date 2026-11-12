@@ -18,6 +18,7 @@ import (
 )
 
 func TestDeviceLimitViewsResetPrivacyAndOldNodePartial(t *testing.T) {
+	t.Parallel()
 	f := newQuotaFixture(t)
 	u, c := f.addUser(t, "device_limit_user", "")
 	revision := f.publish(t)

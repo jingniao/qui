@@ -22,6 +22,7 @@ import (
 // Only the panel's deterministic telemetry rejection may count against a batch.
 // Transport failures, cancellation and identity errors stay retryable.
 func TestTrafficRejectedOnlyCountsPanelRejections(t *testing.T) {
+	t.Parallel()
 	if !trafficRejected(status.Error(codes.FailedPrecondition, "traffic batch rejected")) {
 		t.Fatal("panel rejection not recognised")
 	}
@@ -39,6 +40,7 @@ func TestTrafficRejectedOnlyCountsPanelRejections(t *testing.T) {
 // head is counted, and after the limit the batch leaves the head so later traffic
 // is delivered again while the rejected records stay on disk.
 func TestSessionQuarantinesARepeatedlyRejectedTrafficBatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	adapter := &fakeCoreRuntime{version: "26.3.27"}
 	_, cfg, manager, _ := updateHarness(t, adapter)

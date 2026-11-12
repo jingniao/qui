@@ -13,6 +13,7 @@ import (
 // daily reminder: one row per operator, action, target and UTC day, and a new row
 // the next day or for another target.
 func TestRecordDailyWritesOncePerDay(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {

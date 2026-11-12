@@ -28,6 +28,7 @@ func encryptedFixture(t *testing.T, data []byte) []byte {
 }
 
 func TestAuthenticatedChunksRequireOrderingFinalFrameAndCompleteFile(t *testing.T) {
+	t.Parallel()
 	plaintext := bytes.Repeat([]byte("large-backup-content"), 120000)
 	encrypted := encryptedFixture(t, plaintext)
 	reader, err := newEncryptedReader(context.Background(), bytes.NewReader(encrypted), testPassword)
@@ -79,6 +80,7 @@ func TestAuthenticatedChunksRequireOrderingFinalFrameAndCompleteFile(t *testing.
 }
 
 func TestArchiveHeaderBoundsAndCancellation(t *testing.T) {
+	t.Parallel()
 	valid := encryptedFixture(t, []byte("content"))
 	for _, offset := range []int{0, 32, 36} {
 		bad := append([]byte(nil), valid...)

@@ -18,6 +18,7 @@ import (
 // panel could never create another backup and no archive containing the row
 // could be restored.
 func TestClearedCoreUpdateKeepsStoredResultAndStillBacksUp(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	database := source.Database

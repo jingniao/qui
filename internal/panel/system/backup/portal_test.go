@@ -14,6 +14,7 @@ import (
 )
 
 func TestPortalBackupVerifierAndInventory(t *testing.T) {
+	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
 	users := &user.Repository{Database: source.Database, Vault: source.ConfigurationVault}
@@ -81,6 +82,7 @@ func TestPortalBackupVerifierAndInventory(t *testing.T) {
 }
 
 func TestPortalBackupVerifierRejectsMissingOrCorrupt0114Material(t *testing.T) {
+	t.Parallel()
 	for _, query := range []string{
 		"DROP TABLE user_sessions",
 		"ALTER TABLE user_sessions DROP COLUMN created_at",
@@ -116,6 +118,7 @@ func TestPortalBackupVerifierRejectsMissingOrCorrupt0114Material(t *testing.T) {
 }
 
 func TestPortalBackupVerifierAcceptsPre0114Material(t *testing.T) {
+	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	ctx := context.Background()
 	// Model an older archive without changing any migration source or checksum.

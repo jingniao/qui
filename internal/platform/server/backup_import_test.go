@@ -58,6 +58,7 @@ func importMultipart(t *testing.T, data []byte, password, fault string) ([]byte,
 }
 
 func TestBackupImportUploadPermissionsValidationAndActualPortableDownload(t *testing.T) {
+	t.Parallel()
 	source := testServer(t)
 	sourceOwner := budgetOwner(t, source)
 	password := "portable-http-import-password"

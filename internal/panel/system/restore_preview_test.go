@@ -21,6 +21,7 @@ func hasRestoreIssue(result RestorePreview, code string) bool {
 }
 
 func TestRestorePreviewReadsValidatedSnapshotAndCurrentUsageWithoutWritingBusinessState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := backupFixture(t)
 	for _, query := range []string{
@@ -90,6 +91,7 @@ func TestRestorePreviewReadsValidatedSnapshotAndCurrentUsageWithoutWritingBusine
 }
 
 func TestForeignRestorePreviewFlagsMaterialChangesAndNeverClaimsExecutable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source := backupFixture(t)
 	target := backupFixture(t)
@@ -114,6 +116,7 @@ func TestForeignRestorePreviewFlagsMaterialChangesAndNeverClaimsExecutable(t *te
 }
 
 func TestRestoreReconciliationSignalsIncludeRevocationsAndPendingOperations(t *testing.T) {
+	t.Parallel()
 	snapshot := archive.Inventory{Totals: archive.Totals{Nodes: 2, Sessions: 2, PendingOperations: 1}, Nodes: map[string]archive.NodeRecord{"same": {ID: "same", Sequence: 1, RuntimeRevision: 1}, "new": {ID: "new"}}, Identities: map[string]archive.IdentityRecord{"same": {NodeID: "same", Fingerprint: "old"}}, Users: map[string]archive.UserRecord{"user": {ID: "user", Used: 100, Status: "active"}}}
 	current := archive.Inventory{Totals: archive.Totals{Nodes: 2, PendingOperations: 1}, Nodes: map[string]archive.NodeRecord{"same": {ID: "same", Sequence: 10, RuntimeRevision: 2}, "removed": {ID: "removed"}}, Identities: map[string]archive.IdentityRecord{"same": {NodeID: "same", Fingerprint: "new", Revoked: true}}, Users: map[string]archive.UserRecord{"user": {ID: "user", Used: 200, Status: "disabled"}, "gone": {ID: "gone", Used: 20}}}
 	result := compareRestore(snapshot, current)

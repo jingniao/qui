@@ -10,6 +10,7 @@ import (
 )
 
 func TestBasePersistenceCanonicalSetupAndAuditAtomicity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "panel.db")
 	database, err := dbtest.Open(ctx, path)
@@ -77,6 +78,7 @@ func TestBasePersistenceCanonicalSetupAndAuditAtomicity(t *testing.T) {
 	}
 }
 func TestBaseConcurrentViewsAndInvalidExplicitTimezone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {

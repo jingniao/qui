@@ -104,7 +104,11 @@ esac
 # locally the log stays in the temporary directory.
 # go test already runs up to GOMAXPROCS packages at a time, and every package
 # here keeps its own temporary directory and its own ephemeral ports, so do not
-# add -p 1: it would serialise the race run.
+# add -p 1: it would serialise the race run. Most tests of the slow packages call
+# t.Parallel (docs/build-speedup-plan.md 3); -parallel 3 caps them at three per
+# package, because the default (GOMAXPROCS) let several slow packages run some 60
+# race tests at once on 10 cores, and tests that wait on deadlines failed under
+# that load. 13 tests stay serial and say why in a "Not parallel" comment.
 race_tests() {
   step 'build the Agent fixture'
   mkdir -p bin
@@ -112,7 +116,7 @@ race_tests() {
 
   step "go test -race ${shard:-./...}"
   local test_log=$work/go-test.log status=0
-  AGENT_BINARY=$root/bin/proxy-agent-storage-test go test -race -timeout 55m "$@" 2>&1 | tee "$test_log" || status=$?
+  AGENT_BINARY=$root/bin/proxy-agent-storage-test go test -race -parallel 3 -timeout 55m "$@" 2>&1 | tee "$test_log" || status=$?
   if ((status != 0)) && ((annotate)); then
     grep -E -- '^(--- FAIL|FAIL|panic:|WARNING: DATA RACE)|_test\.go:[0-9]+:' "$test_log" |
       head -n 10 | while IFS= read -r line; do echo "::error::$line"; done

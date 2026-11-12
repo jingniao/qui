@@ -9,6 +9,7 @@ import (
 )
 
 func TestPortalFailedLoginCredentialsAndAudit(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "hardened_user")
@@ -92,6 +93,7 @@ func portalDatabaseSnapshot(t *testing.T, app *Server) map[string][]string {
 }
 
 func TestPortalPreviewReadOnlyMatchesPortalAndOwnerOnly(t *testing.T) {
+	t.Parallel()
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	u := portalUser(t, app, owner, "preview_user")

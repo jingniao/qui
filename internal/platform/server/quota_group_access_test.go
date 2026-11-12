@@ -6,6 +6,7 @@ import (
 )
 
 func TestQuotaMergeDoesNotRetainBindingToRemovedInbound(t *testing.T) {
+	t.Parallel()
 	c := desiredstate.Credential{ID: "shared", UserID: "u", Protocol: "vless"}
 	a := desiredstate.Inbound{ID: "a", Protocol: "vless", Enabled: true, CredentialIDs: []string{c.ID}}
 	b := a

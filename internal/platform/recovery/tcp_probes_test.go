@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"testing"
 	"time"
@@ -40,7 +40,7 @@ func TestRestoreTCPProbeDefinitionsExpiresRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

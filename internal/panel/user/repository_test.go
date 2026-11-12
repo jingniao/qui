@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	"testing"
 	"time"
@@ -16,7 +16,7 @@ import (
 func testRepository(t *testing.T) *Repository {
 	t.Helper()
 	directory := t.TempDir()
-	database, err := db.Open(context.Background(), filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 )
 
 func newTestRepo(t *testing.T) (*Repository, *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

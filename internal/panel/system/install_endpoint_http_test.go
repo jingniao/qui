@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/panel/auth"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +38,7 @@ type installHTTPFixture struct {
 func newInstallHTTPFixture(t *testing.T) *installHTTPFixture {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

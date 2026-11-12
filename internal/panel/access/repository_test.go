@@ -8,7 +8,7 @@ import (
 	"math"
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	contract "proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -30,7 +30,7 @@ func (s snapshots) AppliedState(_ context.Context, nodeID string, revision int64
 func fixture(t *testing.T) (*Repository, *Service, contract.Rollup) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

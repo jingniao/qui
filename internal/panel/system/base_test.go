@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"sync"
 	"testing"
 )
@@ -12,7 +12,7 @@ import (
 func TestBasePersistenceCanonicalSetupAndAuditAtomicity(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "panel.db")
-	database, err := db.Open(ctx, path)
+	database, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestBasePersistenceCanonicalSetupAndAuditAtomicity(t *testing.T) {
 		t.Fatal("name, timezone and version partially committed", current, err)
 	}
 	database.Close()
-	database, err = db.Open(ctx, path)
+	database, err = dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestBasePersistenceCanonicalSetupAndAuditAtomicity(t *testing.T) {
 }
 func TestBaseConcurrentViewsAndInvalidExplicitTimezone(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

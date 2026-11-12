@@ -10,7 +10,7 @@ import (
 
 	"proxycontrol/internal/panel/policy"
 	"proxycontrol/internal/panel/subscription/importer"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 )
 
@@ -26,7 +26,7 @@ func setupPolicyRepo(t *testing.T) (*policy.Repository, *vault.Vault) {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(dir, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(dir, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

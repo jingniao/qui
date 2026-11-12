@@ -10,6 +10,7 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/migrations"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -84,7 +85,7 @@ func TestTunnelRestoreVersions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+			restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

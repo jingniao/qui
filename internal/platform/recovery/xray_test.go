@@ -19,6 +19,7 @@ import (
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/server"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -246,7 +247,7 @@ func TestRealXrayContinuesOfflineAndReplaysTrafficAfterCentralRestore(t *testing
 	default:
 		t.Fatal("restored service served without recording its startup result")
 	}
-	database, err := db.Open(ctx, f.source.Config.Database)
+	database, err := dbtest.Open(ctx, f.source.Config.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

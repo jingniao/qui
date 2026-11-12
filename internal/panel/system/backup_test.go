@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/platform/vault"
 	"testing"
@@ -24,7 +24,7 @@ func backupFixture(t *testing.T) *BackupService {
 	c := config.DefaultPanel()
 	c.Database = filepath.Join(root, "panel.db")
 	c.NodeIdentityDirectory = filepath.Join(root, "identity")
-	database, err := db.Open(context.Background(), c.Database)
+	database, err := dbtest.Open(context.Background(), c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

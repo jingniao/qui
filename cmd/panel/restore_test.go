@@ -14,7 +14,7 @@ import (
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/filelock"
 	"proxycontrol/internal/platform/panelstore"
 	"proxycontrol/internal/platform/pki"
@@ -31,7 +31,7 @@ func restoreCLISetup(t *testing.T) (config.Panel, string, string, string, string
 	t.Helper()
 	root := t.TempDir()
 	c, path := panelConfig(t, filepath.Join(root, "panel.db"), filepath.Join(root, "identity"))
-	database, err := db.Open(context.Background(), c.Database)
+	database, err := dbtest.Open(context.Background(), c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestRestoreCommandAuthenticatesBeforeCurrentDatabaseChanges(t *testing.T) {
 	if err := runWithContext(context.Background(), []string{"--config", path, "--restore-backup", backup, "--restore-password-file", password}); err == nil {
 		t.Fatal("incorrect backup password restored database")
 	}
-	database, err := db.Open(context.Background(), c.Database)
+	database, err := dbtest.Open(context.Background(), c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestRestoreCommandStartsServiceAndCleansPlaintextMaterials(t *testing.T) {
 			t.Fatal("startup fabricated completed or rolled back outcome", records, err)
 		}
 	}
-	database, err := db.Open(context.Background(), c.Database)
+	database, err := dbtest.Open(context.Background(), c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

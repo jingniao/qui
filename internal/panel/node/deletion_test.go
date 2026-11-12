@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 	"time"
 )
@@ -32,7 +33,7 @@ func (t *testTasks) CloseNodeTasks(ctx context.Context, tx *sql.Tx, nodeID strin
 func deletionRepository(t *testing.T) (*Repository, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +321,7 @@ func TestRestoreKeepsDeletedNodesDeleted(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	candidatePath := filepath.Join(directory, "candidate.db")
-	candidate, err := db.Open(ctx, candidatePath)
+	candidate, err := dbtest.Open(ctx, candidatePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +331,7 @@ func TestRestoreKeepsDeletedNodesDeleted(t *testing.T) {
 	inserted := enrolledNode(t, r, ctx, "Inserted")
 	// The running panel: same nodes, not deleted yet.
 	sourcePath := filepath.Join(directory, "source.db")
-	source, err := db.Open(ctx, sourcePath)
+	source, err := dbtest.Open(ctx, sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}

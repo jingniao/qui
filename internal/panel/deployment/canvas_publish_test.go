@@ -8,7 +8,7 @@ import (
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -25,7 +25,7 @@ func canvasState(nodeID string, port int) desiredstate.State {
 func TestCanvasPublisherUsesRevisionOrBatch(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestCanvasPublisherUsesRevisionOrBatch(t *testing.T) {
 func TestCanvasPublisherSingleNodeChecksRelayTargets(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

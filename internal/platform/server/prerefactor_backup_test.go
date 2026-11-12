@@ -7,7 +7,7 @@ import (
 
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 // TestPreRefactorBackupRestores stages a backup archive produced by the
@@ -29,7 +29,7 @@ func TestPreRefactorBackupRestores(t *testing.T) {
 		t.Fatalf("prepare restore: %v", err)
 	}
 	staged := filepath.Join(prepared.Directory, "database", "panel.db")
-	restored, err := db.Open(ctx, staged)
+	restored, err := dbtest.Open(ctx, staged)
 	if err != nil {
 		t.Fatalf("open staged database: %v", err)
 	}

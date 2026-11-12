@@ -15,7 +15,7 @@ import (
 	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/panel/subscription/source"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 )
 
@@ -23,14 +23,14 @@ func storeFixture(t *testing.T) (*Store, string, string) {
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "panel.db")
-	d, err := db.Open(ctx, path)
+	d, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
 	// The panel gives the store a separate read pool; the fixture does the same, so a
 	// test can hold the only writer connection while reads keep working.
-	reader, err := db.Open(ctx, path)
+	reader, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}

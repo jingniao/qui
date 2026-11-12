@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"proxycontrol/internal/panel/subscription/rules"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 func TestClientPolicyArchiveRoundTrip(t *testing.T) {
@@ -124,7 +124,7 @@ func TestPre0132ClientPolicyArchiveInitialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Examine(ctx, directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword, func(_ Result, path string) error {
-		database, err := db.Open(ctx, filepath.Join(path, "database", "panel.db"))
+		database, err := dbtest.Open(ctx, filepath.Join(path, "database", "panel.db"))
 		if err != nil {
 			return err
 		}

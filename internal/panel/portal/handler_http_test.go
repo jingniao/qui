@@ -15,7 +15,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/portal"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 )
 
@@ -47,7 +47,7 @@ type panel struct {
 func newPanel(t *testing.T) *panel {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

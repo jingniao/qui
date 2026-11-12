@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
@@ -45,7 +45,7 @@ func (f *fakeCoreUpdates) CloseStaleCoreUpdates(ctx context.Context, nodeID stri
 // closure compares the requested version with exactly those capabilities.
 func TestStaleCoreUpdateClosureWaitsForStoredCapabilities(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

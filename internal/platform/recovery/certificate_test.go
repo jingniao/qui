@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
 	"testing"
 	"time"
@@ -55,7 +55,7 @@ func TestRecoveryPreservesUnconfirmedCertificateRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

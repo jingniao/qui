@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/panel/auth"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"strings"
 	"sync"
 	"testing"
@@ -73,7 +73,7 @@ type machineHTTPFixture struct {
 // node handler, with an Owner and a Viewer.
 func newMachineHTTPFixture(t *testing.T) *machineHTTPFixture {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

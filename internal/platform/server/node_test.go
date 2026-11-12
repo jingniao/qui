@@ -27,7 +27,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/filelock"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"testing/fstest"
@@ -500,7 +500,7 @@ func TestAgentReconnectsAfterCentralDatabaseReopen(t *testing.T) {
 	stop()
 	firstStopped = true
 	app.Database.Close()
-	database, err := db.Open(context.Background(), app.Config.Database)
+	database, err := dbtest.Open(context.Background(), app.Config.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

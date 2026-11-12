@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"proxycontrol/internal/panel/subscription/proxy"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 // fakeLookup knows one service rule, one node group and one node.
@@ -155,7 +155,7 @@ func TestValidationAcceptsEveryType(t *testing.T) {
 
 func openStore(t *testing.T) *Store {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

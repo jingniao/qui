@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 )
 
@@ -202,7 +202,7 @@ func newIssuanceFixture(t *testing.T) *issuanceFixture {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(root, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(root, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

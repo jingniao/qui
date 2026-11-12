@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 	"time"
 )
@@ -17,7 +18,7 @@ type machineRestore struct {
 
 func newMachineRestore(t *testing.T) *machineRestore {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +45,7 @@ func (m *machineRestore) snapshot(t *testing.T, name string) string {
 func restoreMachineTraffic(t *testing.T, archive, source string) *Repository {
 	t.Helper()
 	ctx := context.Background()
-	candidate, err := db.Open(ctx, archive)
+	candidate, err := dbtest.Open(ctx, archive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestMachineTrafficRestoreSourcePredatingTheMigration(t *testing.T) {
 	// A running database from before 0126 has none of the three tables: the
 	// archived history stays as the migrated candidate holds it.
 	source := live.snapshot(t, "source.db")
-	older, err := db.Open(context.Background(), source)
+	older, err := dbtest.Open(context.Background(), source)
 	if err != nil {
 		t.Fatal(err)
 	}

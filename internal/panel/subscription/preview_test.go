@@ -23,7 +23,7 @@ import (
 	"proxycontrol/internal/panel/subscription/source"
 	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -239,7 +239,7 @@ func (previewSettings) ReadSetup(context.Context) (string, string, error) {
 // The preview exposes a device's links and therefore stays with the Owner.
 func TestPreviewRequiresOwner(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

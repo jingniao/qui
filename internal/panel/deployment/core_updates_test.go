@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/system"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -27,7 +27,7 @@ func coreNodeFixture(t *testing.T, platform, coreName string) (*Repository, *sys
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(root, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(root, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

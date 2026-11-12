@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/migrations"
 	"testing"
 )
@@ -42,7 +43,7 @@ func TestPre0128CanvasArchiveWithSharedTunnelValidatesAndMigrates(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +104,7 @@ func TestPre0124CanvasArchiveMigratesAndAdoptsExactPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

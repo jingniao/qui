@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/migrations"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestK2bRestorePreservesCurrentTuningWithoutResend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +51,7 @@ func TestK2bRestoreDoesNotReviveSnapshotOnlyTuning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestK2bRestorePre0123KeepsCurrentAppliedTuning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

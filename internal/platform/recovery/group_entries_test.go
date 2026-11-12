@@ -6,7 +6,7 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/source"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 )
 
@@ -42,7 +42,7 @@ func TestRecoveryKeepsCurrentGroupEntriesAndPortRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

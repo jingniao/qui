@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 	"time"
 )
 
 func TestSettingsCommitTogetherAndPreserveOmittedFields(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestSettingsCommitTogetherAndPreserveOmittedFields(t *testing.T) {
 
 func TestSettingsStoreOutboundNetworkAndRejectInvalidValues(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestSettingsStoreOutboundNetworkAndRejectInvalidValues(t *testing.T) {
 
 func TestSelectPublicIPMustBeACandidate(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestSelectPublicIPMustBeACandidate(t *testing.T) {
 
 func TestSelectEmptyReturnsToAutomatic(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

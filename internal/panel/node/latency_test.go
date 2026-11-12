@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"strings"
 	"testing"
@@ -153,7 +153,7 @@ FROM minutes CROSS JOIN probe_targets t WHERE t.id IN ('a','b')`, id, start.Unix
 
 func latencyFixture(t *testing.T) (*Repository, string) {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

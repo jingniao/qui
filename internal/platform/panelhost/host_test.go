@@ -14,7 +14,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/panelstore"
 	"proxycontrol/internal/platform/restoretasks"
 	"strings"
@@ -135,7 +135,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 				t.Fatal(status, string(body))
 			}
 			if failCandidate {
-				injector, err := db.Open(context.Background(), c.Database)
+				injector, err := dbtest.Open(context.Background(), c.Database)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -150,7 +150,7 @@ func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *tes
 			if status != 201 {
 				t.Fatal(status, string(body))
 			}
-			observer, err := db.Open(context.Background(), c.Database)
+			observer, err := dbtest.Open(context.Background(), c.Database)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"google.golang.org/protobuf/proto"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"testing"
 	"time"
@@ -12,7 +12,7 @@ import (
 
 func TestAgentRecoveryCapabilityReconnectionClearsOldGrant(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

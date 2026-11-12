@@ -12,7 +12,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"proxycontrol/internal/panel/node/tuningadvice"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
@@ -408,7 +408,7 @@ func TestAdviceCountInNodeList(t *testing.T) {
 
 func TestAutoApplyOnlyForFreshNodes(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

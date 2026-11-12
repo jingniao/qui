@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"sort"
 	"testing"
@@ -26,7 +26,7 @@ func machineFixture(t *testing.T) (*Repository, string) {
 
 func machineFixtureInZone(t *testing.T, zone string) (*Repository, string) {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

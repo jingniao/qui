@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -22,7 +22,7 @@ func newInboundStateFixture(t *testing.T) *inboundStateFixture {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(root, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(root, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

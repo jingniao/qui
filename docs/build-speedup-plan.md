@@ -76,3 +76,14 @@
 - 本地完整门禁与 GitHub `check` 在同一提交上通过，耗时记录进本文：第一步后本地门禁目标 ≤ 25 分钟、GitHub `check` ≤ 30 分钟；第二步后本地门禁目标 ≤ 15 分钟。
 - 迁移、备份恢复与升级类测试仍从空库执行（列出保留的用例清单）；`migrations/checksums_test.go` 不变。
 - 第二步每个包 `-race -count=5` 连跑无失败；门禁中无新增偶发失败。
+
+## 8. 实施进度（2026-11-12 暂停，Owner：保留记录，之后再做）
+
+只在本地分支 `wip/build-speedup` 上，未推送、未门禁。
+
+- **2.1 已完成编码，未验证完整门禁**：新增 `internal/testutil/dbtest`（`Open` 与 `db.Open` 同签名；目标文件不存在时先复制按迁移内容哈希命名、原子发布在系统临时目录的模板库，已存在的文件直接打开）及其测试 `TestOpenMatchesFreshMigration`（模板库与空库迁移的版本与校验和一致、已存在文件不被覆盖）。90 个测试文件的 `db.Open(` 改为 `dbtest.Open(`（78 个只导入 dbtest、12 个两个包都保留），`internal/platform/db` 与 `migrations` 不改；本机 `go vet ./internal/... ./cmd/...` 通过。**尚未**区分「必须从空库执行迁移」的用例（第 2.1 节第三点），需要在跑完全量测试后按失败与语义逐个复核。
+- 测试机上已启动一轮与门禁相同参数的全量测试（`go test -race -timeout 55m ./...`，目录 `/root/qui-speed`，2026-11-12 03:57:28Z 开始，日志 `/root/qui-speed.log`）用于找出失败用例和对比各包耗时；暂停时尚无结果。
+- **2.2 编码一半、已撤回**：两段并行的门禁脚本改法另存为 `~/.qui-local/gate.sh.parallel-wip-2026-11-12`（未测试，`gate-status.sh` 尚未加分段进度），`~/.qui-local/gate.sh` 已还原为原版（备份 `gate.sh.bak-2026-11-12`）。
+- **2.3 GitHub 分片、第三节测试并行：未开始。**
+
+恢复时：先读 `/root/qui-speed.log`（若已被覆盖则重跑），修复失败用例并完成 2.1 的用例区分，再继续 2.2、2.3。

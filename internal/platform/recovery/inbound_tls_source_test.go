@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 // TestInboundTLSSourceSurvivesBackupAndRestore pins the source column of an
@@ -43,7 +43,7 @@ func TestInboundTLSSourceSurvivesBackupAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

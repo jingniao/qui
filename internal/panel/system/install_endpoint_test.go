@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 )
 
@@ -12,7 +12,7 @@ import (
 // (host "", port 0, revision 0) and the first save becomes revision 1.
 func TestInstallEndpointRoundTripValidationAndAudit(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestInstallEndpointRoundTripValidationAndAudit(t *testing.T) {
 // endpoint or silently change the generated command.
 func TestInstallEndpointReadsLegacyRowWithoutGRPCPort(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestInstallEndpointReadsLegacyRowWithoutGRPCPort(t *testing.T) {
 // letters, digits, dots and hyphens).
 func TestInstallEndpointRejectsInvalidHostAndPort(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

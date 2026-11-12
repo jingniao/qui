@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/vault"
 	"testing"
@@ -114,7 +114,7 @@ func TestBackupCrashChild(t *testing.T) {
 	c := config.DefaultPanel()
 	c.Database = filepath.Join(root, "panel.db")
 	c.NodeIdentityDirectory = filepath.Join(root, "identity")
-	database, err := db.Open(ctx, c.Database)
+	database, err := dbtest.Open(ctx, c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

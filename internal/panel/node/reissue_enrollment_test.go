@@ -13,7 +13,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"proxycontrol/internal/panel/auth"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +58,7 @@ type reissuePanel struct {
 func newReissuePanel(t *testing.T) *reissuePanel {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

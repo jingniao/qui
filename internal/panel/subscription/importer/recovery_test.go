@@ -8,7 +8,7 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription/source"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 func TestRestoreKeepsCurrentSourcesAndRevokedGrants(t *testing.T) {
@@ -20,7 +20,7 @@ func TestRestoreKeepsCurrentSourcesAndRevokedGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	groupID := grantImport(t, current, a, key, "")
-	candidate, err := db.Open(ctx, filepath.Join(t.TempDir(), "candidate.db"))
+	candidate, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "candidate.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

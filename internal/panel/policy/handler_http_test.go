@@ -15,7 +15,7 @@ import (
 
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/policy"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 )
 
@@ -54,7 +54,7 @@ func sessionFor(t *testing.T, database *sql.DB, role string) (*http.Cookie, stri
 func TestRefreshSourceEndpoint(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(dir, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(dir, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

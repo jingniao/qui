@@ -16,7 +16,7 @@ import (
 	"proxycontrol/internal/panel/subscription/source"
 	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -51,7 +51,7 @@ func setupProtocols(t *testing.T, limit int64, protocols ...string) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

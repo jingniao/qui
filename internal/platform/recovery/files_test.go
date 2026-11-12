@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/panelstore"
 	"proxycontrol/internal/platform/vault"
 	"testing"
@@ -305,7 +305,7 @@ func TestRealCandidateInstallsWithoutResettingUsageOrLeavingOldWAL(t *testing.T)
 	if err := InstallCandidate(ctx, f.owner, f.source, candidate, f.prepared, recoveryPassword); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := db.Open(ctx, f.source.Config.Database)
+	reopened, err := dbtest.Open(ctx, f.source.Config.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestInstalledCandidateStartsActualPanelBinary(t *testing.T) {
 			}
 			command.Wait()
 			finished = true
-			reopened, err := db.Open(ctx, f.source.Config.Database)
+			reopened, err := dbtest.Open(ctx, f.source.Config.Database)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -467,7 +467,7 @@ func TestCandidateInstallChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer owner.Close()
-	database, err := db.Open(ctx, owner.Database)
+	database, err := dbtest.Open(ctx, owner.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

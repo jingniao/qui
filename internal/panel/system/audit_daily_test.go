@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 // TestRecordDailyWritesOncePerDay checks the rule that makes a repeating alert a
@@ -14,7 +14,7 @@ import (
 // the next day or for another target.
 func TestRecordDailyWritesOncePerDay(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

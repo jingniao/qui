@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 	"time"
 )
@@ -65,7 +65,7 @@ func TestBackupScheduleDefaultsEncryptedPersistenceConflictAndAuditRollback(t *t
 	}
 	path := s.Source.Config.Database
 	s.Repository.Database.Close()
-	database, err := db.Open(ctx, path)
+	database, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 	"proxycontrol/internal/panel/system"
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 // A2.3: the client rule template travels with a backup. The template saved
@@ -63,7 +63,7 @@ func TestClientRuleTemplateBackupRoundTrip(t *testing.T) {
 		t.Fatalf("prepare restore: %v", err)
 	}
 	defer archive.DiscardPreparedRestore(ctx, prepared)
-	restored, err := db.Open(ctx, filepath.Join(prepared.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(prepared.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

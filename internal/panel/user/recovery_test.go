@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -19,7 +20,7 @@ import (
 func TestRestoreKeepsTombstonesCreatedAfterTheBackup(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestRestoreKeepsTombstonesCreatedAfterTheBackup(t *testing.T) {
 	if _, err := database.ExecContext(ctx, "VACUUM INTO ?", liveSnapshot); err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := db.Open(ctx, backup)
+	candidate, err := dbtest.Open(ctx, backup)
 	if err != nil {
 		t.Fatal(err)
 	}

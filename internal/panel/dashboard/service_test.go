@@ -10,7 +10,7 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/system"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	contract "proxycontrol/pkg/contracts/access"
 	"proxycontrol/pkg/contracts/traffic"
@@ -22,7 +22,7 @@ import (
 func dashboardFixture(t *testing.T) (*Service, *sql.DB, string) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

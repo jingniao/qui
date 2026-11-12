@@ -15,7 +15,7 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -29,7 +29,7 @@ func sourceFixture(t *testing.T) (Source, string, string) {
 	configuration := config.DefaultPanel()
 	configuration.Database = filepath.Join(root, "panel.db")
 	configuration.NodeIdentityDirectory = filepath.Join(root, "identity")
-	database, err := db.Open(context.Background(), configuration.Database)
+	database, err := dbtest.Open(context.Background(), configuration.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

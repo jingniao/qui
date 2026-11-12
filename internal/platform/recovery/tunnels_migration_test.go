@@ -7,6 +7,7 @@ import (
 
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/testutil/canvasfixture"
 	"proxycontrol/migrations"
 )
@@ -33,7 +34,7 @@ func TestCanvasForwardMigrationRestoreVersions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+			restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

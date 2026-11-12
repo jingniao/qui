@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"testing"
@@ -25,7 +25,7 @@ type fixture struct {
 func setup(t *testing.T) *fixture {
 	t.Helper()
 	directory := t.TempDir()
-	database, err := db.Open(context.Background(), filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

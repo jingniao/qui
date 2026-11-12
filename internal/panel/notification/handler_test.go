@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/panel/auth"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 )
 
@@ -56,7 +56,7 @@ func newNotificationHTTP(t *testing.T) *notificationHTTP {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(root, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(root, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

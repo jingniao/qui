@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/filelock"
 	"proxycontrol/internal/platform/panelstore"
 	"strings"
@@ -282,7 +283,7 @@ func quietExitStatus(t *testing.T, err error) int {
 
 func stoppedDatabase(t *testing.T, path string) {
 	t.Helper()
-	database, err := db.Open(context.Background(), path)
+	database, err := dbtest.Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}

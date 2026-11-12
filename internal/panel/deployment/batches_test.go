@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -19,7 +19,7 @@ func batchFixture(t *testing.T) (*Repository, []desiredstate.State, func()) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "panel.db")
-	database, err := db.Open(ctx, path)
+	database, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func batchFixture(t *testing.T) (*Repository, []desiredstate.State, func()) {
 			t.Fatal(err)
 		}
 		var err error
-		r.Database, err = db.Open(ctx, path)
+		r.Database, err = dbtest.Open(ctx, path)
 		if err != nil {
 			t.Fatal(err)
 		}

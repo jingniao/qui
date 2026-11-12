@@ -10,7 +10,7 @@ import (
 	"proxycontrol/internal/panel/access"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/system"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	contract "proxycontrol/pkg/contracts/access"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
@@ -30,7 +30,7 @@ func (s retentionSnapshots) AppliedState(_ context.Context, nodeID string, revis
 func retentionFixture(t *testing.T) (*access.Repository, *access.Service, contract.Rollup) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

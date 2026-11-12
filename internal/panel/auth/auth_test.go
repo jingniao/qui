@@ -19,7 +19,7 @@ import (
 
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/system"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 const testPassword = "test-password-unique-123"
@@ -37,7 +37,7 @@ func installSetupToken(t *testing.T, service *auth.Service) string {
 
 func fixture(t *testing.T) (*auth.Service, *http.ServeMux) {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(context.Background(), filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestAuthenticationPermissionsAndCredentialRotation(t *testing.T) {
 func TestSessionAndRateLimitSurviveDatabaseReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "panel.db")
-	database, err := db.Open(ctx, path)
+	database, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestSessionAndRateLimitSurviveDatabaseReopen(t *testing.T) {
 		}
 	}
 	database.Close()
-	database, err = db.Open(ctx, path)
+	database, err = dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}

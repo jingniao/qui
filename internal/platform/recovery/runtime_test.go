@@ -20,6 +20,7 @@ import (
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/platform/server"
 	"testing"
@@ -140,7 +141,7 @@ func TestServicePreparationFailureRollsBackBeforeCommit(t *testing.T) {
 			if fault == "canceled-after-prepare" && !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
-			database, err := db.Open(context.Background(), f.source.Config.Database)
+			database, err := dbtest.Open(context.Background(), f.source.Config.Database)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -327,7 +328,7 @@ func TestCommittedReservationServesAndRealAgentRejoinsPreservedIdentity(t *testi
 			t.Error("reconnected Agent did not stop")
 		}
 	}()
-	database, err := db.Open(ctx, f.source.Config.Database)
+	database, err := dbtest.Open(ctx, f.source.Config.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

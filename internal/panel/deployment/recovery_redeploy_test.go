@@ -6,7 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -30,7 +30,7 @@ func newRecoveryFixture(t *testing.T) *recoveryFixture {
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

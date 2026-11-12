@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	contract "proxycontrol/pkg/contracts/access"
 	"sync"
 	"testing"
@@ -13,7 +13,7 @@ import (
 func TestRetentionDefaultsPersistenceConflictAndAuditAtomicity(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "panel.db")
-	database, err := db.Open(ctx, path)
+	database, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestRetentionDefaultsPersistenceConflictAndAuditAtomicity(t *testing.T) {
 		t.Fatal(err)
 	}
 	database.Close()
-	database, err = db.Open(ctx, path)
+	database, err = dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestRetentionDefaultsPersistenceConflictAndAuditAtomicity(t *testing.T) {
 }
 func TestConcurrentRetentionWritersAndInvalidStoredPolicy(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,7 @@ import (
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/source"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 func TestDatabaseRecoveryPreservesImportsWithoutResurrectingGrants(t *testing.T) {
@@ -52,7 +52,7 @@ func TestDatabaseRecoveryPreservesImportsWithoutResurrectingGrants(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

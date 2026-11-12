@@ -14,7 +14,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/panelstore"
 )
 
@@ -32,7 +32,7 @@ func ownerCredentialDatabase(t *testing.T) (config.Panel, string, *auth.Service,
 	t.Helper()
 	root := t.TempDir()
 	c, path := panelConfig(t, filepath.Join(root, "panel.db"), filepath.Join(root, "identity"))
-	database, err := db.Open(context.Background(), c.Database)
+	database, err := dbtest.Open(context.Background(), c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestSetOwnerCredentialsRejectsShortPasswordAndTakenUsername(t *testing.T) {
 func TestSetOwnerCredentialsRequiresAnOwner(t *testing.T) {
 	root := t.TempDir()
 	c, path := panelConfig(t, filepath.Join(root, "panel.db"), filepath.Join(root, "identity"))
-	database, err := db.Open(context.Background(), c.Database)
+	database, err := dbtest.Open(context.Background(), c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,7 @@ import (
 	"context"
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -17,7 +17,7 @@ func TestEncryptedSnapshotPendingPersistenceAndIdempotentResult(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	path := filepath.Join(directory, "panel.db")
-	database, err := db.Open(ctx, path)
+	database, err := dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestEncryptedSnapshotPendingPersistenceAndIdempotentResult(t *testing.T) {
 		t.Fatal("duplicate deploy failed", err)
 	}
 	database.Close()
-	database, err = db.Open(ctx, path)
+	database, err = dbtest.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,7 @@ import (
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	access "proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -502,7 +502,7 @@ func flowVerifyRestoredBackup(t *testing.T, ctx context.Context, app *Server, ba
 		t.Fatalf("prepare restore: %v", err)
 	}
 	staged := filepath.Join(prepared.Directory, "database", "panel.db")
-	restored, err := db.Open(ctx, staged)
+	restored, err := dbtest.Open(ctx, staged)
 	if err != nil {
 		t.Fatalf("open staged database: %v", err)
 	}

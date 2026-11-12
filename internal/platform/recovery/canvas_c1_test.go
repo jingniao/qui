@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"proxycontrol/internal/panel/proxy"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 func TestCanvasC1RestoreLayout(t *testing.T) {
@@ -38,7 +38,7 @@ func TestCanvasC1RestoreLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

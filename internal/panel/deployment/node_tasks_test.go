@@ -4,7 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"testing"
@@ -15,7 +15,7 @@ func closeTasksFixture(t *testing.T) (*Repository, *node.Repository, string, Rev
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(directory, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(directory, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/internal/testutil"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -22,7 +22,7 @@ import (
 func TestRevisionDiffReadsImmutableSnapshotsMasksSecretsAndUsesRunningBase(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(root, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(root, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

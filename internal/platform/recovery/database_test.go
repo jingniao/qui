@@ -27,6 +27,7 @@ import (
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/panelstore"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/platform/vault"
@@ -73,7 +74,7 @@ func recoveryFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { owner.Close() })
 	c.Database, c.NodeIdentityDirectory = owner.Database, owner.IdentityDirectory
-	database, err := db.Open(ctx, c.Database)
+	database, err := dbtest.Open(ctx, c.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +242,7 @@ func TestDatabaseRecoveryPreservesNewUsageReceiptsRevocationsAndDraftSnapshot(t 
 	if err := archive.ValidateMaterialSet(ctx, candidate.Directory); err != nil {
 		t.Fatal(err)
 	}
-	candidateDB, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	candidateDB, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +375,7 @@ func TestDatabaseRecoveryPreservesPortalLoginAndRecoverableSubscription(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	restored, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +572,7 @@ func TestDatabaseRecoveryRetainsLaterAllocationsAndCredentialRotation(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidateDB, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	candidateDB, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +731,7 @@ func TestOldPendingSnapshotUsesCompletedCurrentDeploymentWithoutReplayingCommand
 	if candidate.Manifest.Snapshot.PendingOperations != 1 || candidate.Manifest.Candidate.PendingOperations != 0 {
 		t.Fatal("old pending work did not reconcile with current completion")
 	}
-	database, err := db.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

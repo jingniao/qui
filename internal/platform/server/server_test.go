@@ -20,7 +20,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/testutil"
 )
@@ -28,7 +28,7 @@ import (
 func testServer(t *testing.T) *Server {
 	t.Helper()
 	databasePath := filepath.Join(t.TempDir(), "panel.db")
-	database, err := db.Open(context.Background(), databasePath)
+	database, err := dbtest.Open(context.Background(), databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

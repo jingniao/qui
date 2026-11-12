@@ -16,7 +16,7 @@ import (
 
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/vault"
 )
@@ -64,7 +64,7 @@ func newCertificateHTTP(t *testing.T) *certificateHTTP {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.Open(ctx, filepath.Join(root, "panel.db"))
+	database, err := dbtest.Open(ctx, filepath.Join(root, "panel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

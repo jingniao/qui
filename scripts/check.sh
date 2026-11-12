@@ -3,7 +3,8 @@
 #
 #   * on the local Linux test machine, for every change (bash scripts/check.sh);
 #   * in the `check` job of .github/workflows/check.yml, for a manual
-#     (workflow_dispatch) or weekly (schedule) run on a clean runner.
+#     (workflow_dispatch) or weekly (schedule) run on a clean runner, split into
+#     shards (QUI_CHECK_SHARD, see "Shards" below) that run as parallel jobs.
 #
 # A v* tag does not run it again: the `release` job only builds when an earlie
 # manual or weekly run already passed `check` on exactly that commit.
@@ -56,6 +57,80 @@ case $scope in
     ;;
 esac
 printf 'GATE SCOPE %s\n' "$scope"
+
+# Shards: QUI_CHECK_SHARD splits the gate so GitHub can run it as parallel jobs.
+# `go test -race ./...` is as slow as its slowest package, so the slow packages
+# get shards of their own (docs/build-speedup-plan.md 2.3):
+#
+#   server   internal/platform/server
+#   backup   internal/panel/system/backup, internal/platform/recovery
+#   system   internal/panel/system, internal/agent/control, internal/agent/updater,
+#            internal/platform/panelhost, internal/panel/auth
+#   rest     every other package, plus everything that is not `go test`: workflow
+#            parsing, the frontend, go vet, the builds and the deploy script tests
+#
+# Unset (the local gate) runs everything, exactly as before. The three Go-only
+# shards build no frontend: their tests pass their own index.html (fstest.MapFS),
+# and web/embed.go accepts a dist/ holding only .gitkeep. Under the web scope they
+# have nothing to do and pass at once.
+shard=${QUI_CHECK_SHARD:-}
+shard_packages() {
+  case $1 in
+    server) printf '%s\n' ./internal/platform/server ;;
+    backup) printf '%s\n' ./internal/panel/system/backup ./internal/platform/recovery ;;
+    system)
+      printf '%s\n' ./internal/panel/system ./internal/agent/control ./internal/agent/updater \
+        ./internal/platform/panelhost ./internal/panel/auth
+      ;;
+  esac
+}
+case $shard in
+  '' | server | backup | system | rest) ;;
+  *)
+    printf 'QUI_CHECK_SHARD must be empty, server, backup, system or rest, not %s.\n' "$shard" >&2
+    exit 2
+    ;;
+esac
+[[ -z $shard ]] || printf 'GATE SHARD %s\n' "$shard"
+
+# go test -race over the given packages with the Agent fixture. The Agent
+# command-line and storage tests run against a real binary built with a fixed
+# version string. AGENT_CANDIDATE_BINARY, AGENT_RELEASE_BINARY and PANEL_BINARY
+# have no remaining consumer, so no other fixture is built.
+# platform/server took 34 min under -race at 141 tests (2026-10-28); the migrated
+# database template (internal/testutil/dbtest) brought it to about 15 min. Job
+# logs need a signed-in viewer, so failing tests, panics and races are also raised
+# as annotations (GitHub shows 10 per step), which the run page shows to anyone;
+# locally the log stays in the temporary directory.
+# go test already runs up to GOMAXPROCS packages at a time, and every package
+# here keeps its own temporary directory and its own ephemeral ports, so do not
+# add -p 1: it would serialise the race run.
+race_tests() {
+  step 'build the Agent fixture'
+  mkdir -p bin
+  go build -trimpath -ldflags '-X main.version=1.0.0-storage-test' -o bin/proxy-agent-storage-test ./cmd/agent
+
+  step "go test -race ${shard:-./...}"
+  local test_log=$work/go-test.log status=0
+  AGENT_BINARY=$root/bin/proxy-agent-storage-test go test -race -timeout 55m "$@" 2>&1 | tee "$test_log" || status=$?
+  if ((status != 0)) && ((annotate)); then
+    grep -E -- '^(--- FAIL|FAIL|panic:|WARNING: DATA RACE)|_test\.go:[0-9]+:' "$test_log" |
+      head -n 10 | while IFS= read -r line; do echo "::error::$line"; done
+  fi
+  return "$status"
+}
+
+case $shard in
+  server | backup | system)
+    if [[ $scope == web ]]; then
+      printf '\nGATE SCOPE web: shard %s runs only go test -race, which the web gate skips.\n' "$shard"
+      exit 0
+    fi
+    mapfile -t packages < <(shard_packages "$shard")
+    race_tests "${packages[@]}"
+    exit 0
+    ;;
+esac
 
 step 'workflow YAML parsing'
 go test -p 1 ./scripts/workflowcheck
@@ -133,29 +208,21 @@ fi
 step 'go vet ./...'
 go vet ./...
 
-# The Agent command-line and storage tests run against a real binary built with a
-# fixed version string. AGENT_CANDIDATE_BINARY, AGENT_RELEASE_BINARY and
-# PANEL_BINARY have no remaining consumer, so no other fixture is built.
-step 'build the Agent fixture'
-mkdir -p bin
-go build -trimpath -ldflags '-X main.version=1.0.0-storage-test' -o bin/proxy-agent-storage-test ./cmd/agent
-
-# platform/server took 34 min under -race at 141 tests (2026-10-28); there are 152
-# now. Job logs need a signed-in viewer, so failing tests, panics and races are
-# also raised as annotations (GitHub shows 10 per step), which the run page shows
-# to anyone; locally the log stays in the temporary directory.
-# go test already runs up to GOMAXPROCS packages at a time, and every package
-# here keeps its own temporary directory and its own ephemeral ports, so do not
-# add -p 1: it would serialise the ~26-minute race run.
-step 'go test -race ./...'
-test_log=$work/go-test.log
-status=0
-AGENT_BINARY=$root/bin/proxy-agent-storage-test go test -race -timeout 55m ./... 2>&1 | tee "$test_log" || status=$?
-if ((status != 0)) && ((annotate)); then
-  grep -E -- '^(--- FAIL|FAIL|panic:|WARNING: DATA RACE)|_test\.go:[0-9]+:' "$test_log" |
-    head -n 10 | while IFS= read -r line; do echo "::error::$line"; done
+# The rest shard tests every package the other shards do not; unset tests all.
+if [[ $shard == rest ]]; then
+  mapfile -t named < <(for s in server backup system; do shard_packages "$s"; done)
+  mapfile -t named < <(go list "${named[@]}")
+  mapfile -t packages < <(go list ./... | grep -vxF -f <(printf '%s\n' "${named[@]}"))
+  # Process substitution hides a failing go list, and go test with no package
+  # would test nothing and pass, so insist on both lists.
+  if ((${#named[@]} != 8 || ${#packages[@]} == 0)); then
+    printf 'Could not list the rest shard packages (named %s, rest %s).\n' "${#named[@]}" "${#packages[@]}" >&2
+    exit 1
+  fi
+  race_tests "${packages[@]}"
+else
+  race_tests ./...
 fi
-((status == 0)) || exit "$status"
 
 step 'build the panel'
 go build -o bin/proxy-panel ./cmd/panel

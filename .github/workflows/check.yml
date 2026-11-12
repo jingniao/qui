@@ -3,7 +3,8 @@ name: Check
 # The per-commit evidence, real cores included, is the local gate on the Linux
 # test machine: scripts/check.sh followed by the real-core suite. GitHub is the
 # second opinion, not the per-change gate: `check` runs the same script on a
-# clean runner, and it runs per release commit (a manual dispatch) and weekly.
+# clean runner (as four parallel shards that the `check` job sums up), and it
+# runs per release commit (a manual dispatch) and weekly.
 # `cores` downloads the official Xray, sing-box and mihomo releases, verifies
 # their SHA-256 and runs the real-core integration tests (including `mihomo -t`
 # on every generated Clash profile); it runs weekly (schedule) or when a manual
@@ -33,14 +34,22 @@ on:
 permissions:
   contents: read
 jobs:
-  check:
-    # The gate itself lives in scripts/check.sh, so this job only provides the
-    # toolchain and the same script runs unchanged on the local Linux test
-    # machine, which is where every change is gated. A tag push does not run it
-    # again; see the `release` job below.
+  # The gate itself lives in scripts/check.sh, so these jobs only provide the
+  # toolchain and the same script runs unchanged on the local Linux test machine,
+  # which is where every change is gated. A tag push does not run them again; see
+  # the `release` job below. `go test -race` is as slow as its slowest package, so
+  # the gate runs as four shards side by side (QUI_CHECK_SHARD in scripts/check.sh):
+  # three for the slow packages and `rest` for every other package, the frontend,
+  # go vet, the builds and the deploy script tests.
+  check-shard:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [server, backup, system, rest]
+    name: check (${{ matrix.shard }})
     steps:
       # The full history and tags let scripts/gate-scope.sh compare this commit
       # with the previous release tag; a shallow clone would always answer `full`.
@@ -50,18 +59,41 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v7
+      # Only `rest` builds the frontend; the Go-only shards need no Node.
+      - if: matrix.shard == 'rest'
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
       # A dispatch on a release commit that changed only web/ and docs/ since the
-      # previous release runs the shorter web gate (scripts/gate-scope.sh). The
-      # weekly run, and a dispatch with `full_gate`, always run the whole gate.
+      # previous release runs the shorter web gate (scripts/gate-scope.sh): `rest`
+      # runs the frontend part and the other shards pass at once. The weekly run,
+      # and a dispatch with `full_gate`, always run the whole gate.
       - name: Gate
         env:
           QUI_GATE_SCOPE: ${{ (github.event_name == 'schedule' || github.event.inputs.full_gate == 'true') && 'full' || '' }}
+          QUI_CHECK_SHARD: ${{ matrix.shard }}
         run: bash scripts/check.sh
+
+  # The release job requires a successful job named `check` on the tagged commit,
+  # so this job keeps that name and succeeds only when every shard succeeded; a
+  # failed, cancelled or skipped shard fails it.
+  check:
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+    needs: check-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every shard to pass
+        env:
+          SHARDS: ${{ needs.check-shard.result }}
+        run: |
+          if [[ $SHARDS != success ]]; then
+            printf 'check shards: %s\n' "$SHARDS" >&2
+            exit 1
+          fi
+          printf 'all check shards passed\n'
 
 
 

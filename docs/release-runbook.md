@@ -63,7 +63,7 @@ Go 工具链可用仓库内的 `.tools/go/bin/go.exe`（设 `GOTOOLCHAIN=local`�
 
 完整门禁跑在**已推送的发布提交**上，不再要求先门禁本地快照：推送后立刻同时启动本地完整门禁与 GitHub `check`，两者在同一个 SHA 上通过才打 tag。Owner 已接受“部分问题只在发布时才暴露”的风险，代价是每批改动必须全部实现后才跑门禁，不能改一点跑一次。
 
-本地完整门禁 = `bash scripts/check.sh`（约 31–36 分钟，含 `go test -race`、前端构建/自测、部署脚本测试）+ 真实核套件（约 9–11 分钟）。命令见[部署与升级](deployment.md)第 2 节。门禁在 Linux 测试机上跑，**不能用 Windows 上的本地测试替代**。
+本地完整门禁 = `bash scripts/check.sh`（含 `go test -race`、前端构建/自测、部署脚本测试）＋ 真实核套件，两段同时运行，合计约 16 分钟（2026-11-12 提速后实测 977 秒：check 977 秒、真实核 342 秒；提速前两段串行约 51 分钟，见[构建与门禁提速](build-speedup-plan.md)第 8 节）。命令见[部署与升级](deployment.md)第 2 节。门禁在 Linux 测试机上跑，**不能用 Windows 上的本地测试替代**。
 
 **纯前端补丁走短门禁（Owner 2026-11-09 批准）：** 发布提交与上一个 `v*` 标签相比，只改了 `web/**`（不含任何 `.go` 文件，`web/embed.go` 决定面板嵌入什么）、`docs/**` 与仓库根目录的 `*.md` 时，`scripts/gate-scope.sh` 判为 `web`，两条门禁都自动缩短：
 
@@ -79,14 +79,14 @@ Owner 本机已有封装（不在仓库里，接手者若在同一台开发机�
 
 | 命令 | 作用 |
 | --- | --- |
-| `~/.qui-local/gate.sh <SHA>` | 把该提交 `git archive` 到测试机 `/root/qui-gate/<短 SHA>/`，后台依次跑 check 与真实核套件；纯前端补丁只跑短门禁、跳过真实核（见上） |
-| `~/.qui-local/gate-status.sh <短 SHA>` | 查看进度；最后一行 `GATE <sha> PASS total=<秒>` 才算通过 |
+| `~/.qui-local/gate.sh <SHA>` | 把该提交 `git archive` 到测试机 `/root/qui-gate/<短 SHA>/`，后台**同时**跑 check 与真实核套件（真实核在副本 `<短 SHA>.cores/` 里先自建前端，两段日志结束后按 check、cores 的顺序并入主日志）；纯前端补丁只跑短门禁、跳过真实核（见上） |
+| `~/.qui-local/gate-status.sh <短 SHA>` | 查看进度（运行中分别显示两段的进度与尾部）；最后一行 `GATE <sha> PASS total=<秒>` 才算通过 |
 | `~/.qui-local/gate-rerun.sh <短 SHA>` | 只重跑上次失败的那些包（第 4.2 节） |
 | `~/.qui-local/r.sh '<命令>'` | 在测试机上执行命令 |
 
 ### 4.1 GitHub `check`（与本地门禁同时启动）
 
-推送后对**要打 tag 的那个 SHA** 派发 `check`（完整门禁约 21–51 分钟，v1.4.3／v1.4.4 各 51 分钟；纯前端补丁走短门禁），它与 `~/.qui-local/gate.sh <SHA>` 同时进行，互不等待。本地没有 `gh` 命令时用 REST API，令牌从 git 凭据读取：
+推送后对**要打 tag 的那个 SHA** 派发 `check`（完整门禁约 21–51 分钟，v1.4.3／v1.4.4 各 51 分钟；纯前端补丁走短门禁），它与 `~/.qui-local/gate.sh <SHA>` 同时进行，互不等待。`check` 分成四个并行任务 `check (server)`、`check (backup)`、`check (system)`、`check (rest)`（`scripts/check.sh` 的 `QUI_CHECK_SHARD`：三个慢包分片只跑 `go test -race`，`rest` 跑其余包、前端、`go vet`、构建与部署脚本测试），名为 `check` 的汇总任务在四片全部成功时才成功，`release` 仍只认这个 `check`。本地没有 `gh` 命令时用 REST API，令牌从 git 凭据读取：
 
 ```sh
 TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill | sed -n 's/^password=//p')
@@ -179,8 +179,8 @@ tag 推送触发 `release` 任务：先确认同 SHA 有成功的 `check`，再�
 | 环节 | 约 |
 | --- | --- |
 | 日常裁剪检查（`bash scripts/quick-check.sh`） | 2–10 分钟 |
-| 本地完整门禁（`scripts/check.sh` ＋ 真实核套件） | 15–47 分钟 |
-| GitHub `check` | 完整门禁约 21–51 分钟，与本地门禁并行，不额外占用时间 |
+| 本地完整门禁（`scripts/check.sh` ＋ 真实核套件，同时运行） | 约 16 分钟（提速前约 51 分钟） |
+| GitHub `check` | 四片并行（提速前完整门禁约 21–73 分钟；分片后尚无实测），与本地门禁并行，不额外占用时间 |
 | 纯前端补丁的两条短门禁（第 4 节） | 预计约 5–10 分钟（尚无实测记录） |
 | `release` 构建 | 几分钟 |
 | 生产升级（面板 ＋ 逐台 Agent） | 逐台约 1 分钟，视节点数 |

@@ -1,6 +1,6 @@
 # 构建与门禁提速规划（先于 v1.5.4）
 
-> **状态：规划，尚未实施（2026-11-12）。** Owner 决定单独成批、先于 [v1.5.4](v1.5.4-plan.md) 实施。本文取代 2026-11-09 的[提速方案 A](build-acceleration-plan.md)（其测试库模板一条保留并按实测更新，证书复用与前端拆分不再采用）。当前行为以[项目说明书](../AGENTS.md)与源码为准。
+> **状态：第一步与第二步已实施（2026-11-12，本地分支 `wip/build-speedup`，未推送），记录见第 8 节。** Owner 决定单独成批、先于 [v1.5.4](v1.5.4-plan.md) 实施。本文取代 2026-11-09 的[提速方案 A](build-acceleration-plan.md)（其测试库模板一条保留并按实测更新，证书复用与前端拆分不再采用）。当前行为以[项目说明书](../AGENTS.md)与源码为准。
 
 ## 1. 实测：时间花在哪里
 
@@ -77,13 +77,31 @@
 - 迁移、备份恢复与升级类测试仍从空库执行（列出保留的用例清单）；`migrations/checksums_test.go` 不变。
 - 第二步每个包 `-race -count=5` 连跑无失败；门禁中无新增偶发失败。
 
-## 8. 实施进度（2026-11-12 暂停，Owner：保留记录，之后再做）
+## 8. 实施记录（2026-11-12）
 
-只在本地分支 `wip/build-speedup` 上，未推送、未门禁。
+第一步与第二步都已在本地分支 `wip/build-speedup` 上完成；推送与 GitHub `check` 待 Owner 同意（第 5 节）。
 
-- **2.1 已完成编码，未验证完整门禁**：新增 `internal/testutil/dbtest`（`Open` 与 `db.Open` 同签名；目标文件不存在时先复制按迁移内容哈希命名、原子发布在系统临时目录的模板库，已存在的文件直接打开）及其测试 `TestOpenMatchesFreshMigration`（模板库与空库迁移的版本与校验和一致、已存在文件不被覆盖）。90 个测试文件的 `db.Open(` 改为 `dbtest.Open(`（78 个只导入 dbtest、12 个两个包都保留），`internal/platform/db` 与 `migrations` 不改；本机 `go vet ./internal/... ./cmd/...` 通过。**尚未**区分「必须从空库执行迁移」的用例（第 2.1 节第三点），需要在跑完全量测试后按失败与语义逐个复核。
-- 测试机上已启动一轮与门禁相同参数的全量测试（`go test -race -timeout 55m ./...`，目录 `/root/qui-speed`，2026-11-12 03:57:28Z 开始，日志 `/root/qui-speed.log`）用于找出失败用例和对比各包耗时；暂停时尚无结果。
-- **2.2 编码一半、已撤回**：两段并行的门禁脚本改法另存为 `~/.qui-local/gate.sh.parallel-wip-2026-11-12`（未测试，`gate-status.sh` 尚未加分段进度），`~/.qui-local/gate.sh` 已还原为原版（备份 `gate.sh.bak-2026-11-12`）。
-- **2.3 GitHub 分片、第三节测试并行：未开始。**
+### 8.1 第一步
 
-恢复时：先读 `/root/qui-speed.log`（若已被覆盖则重跑），修复失败用例并完成 2.1 的用例区分，再继续 2.2、2.3。
+- **2.1 测试数据库模板**：新增 `internal/testutil/dbtest`（`Open` 与 `db.Open` 同签名；目标文件不存在时先复制按迁移内容哈希命名、原子发布在系统临时目录的模板库，已存在的文件直接打开）及其测试 `TestOpenMatchesFreshMigration`。90 个测试文件改用 `dbtest.Open`；仍从空库执行迁移的是 `migrations` 包（自带迁移执行器，`certificates_test.go` 仍用 `db.Open`）与 `internal/platform/db`。备份恢复、升级与启动类测试里被测的生产代码（`recovery.InstallAndPrepare`、`runWithContext` 等）照旧自己调用 `db.Open` 与迁移，模板只替换测试准备与检查用的打开，所以这些路径仍被真实执行。`migrations/checksums_test.go` 未改。全量 `-race` 实测（单独运行，非门禁）：`server` 2026 → 888 秒、`backup` 1336 → 725、`proxy` 1011 → 71、`deployment` 802 → 29、`node` 713 → 53、`system` 909 → 608、`recovery` 632 → 435；首轮另有 3 个包失败，原因是临时脚本构建 Agent 夹具时漏了版本参数，按 `check.sh` 的方式重建后通过。
+- **2.2 本地门禁两段并行**：`~/.qui-local/gate.sh` 同时启动 check 与真实核套件。真实核在副本 `/root/qui-gate/<短 SHA>.cores/` 里先自建前端再测（`internal/platform/recovery` 嵌入 `web/dist`，与 check 同目录会在 Vite 清空 `dist` 时编译失败；GitHub `cores` 任务同样先建前端），两段日志结束后按 check、cores 的顺序并入主日志，`gate-status.sh` 运行中显示两段各自的进度，`gate-rerun.sh` 不变。原版备份 `gate.sh.bak-2026-11-12`。
+- **2.3 GitHub `check` 分片**：`scripts/check.sh` 新增 `QUI_CHECK_SHARD`（不设＝全部，本地门禁不变）：`server`、`backup`（`system/backup`＋`recovery`）、`system`（`panel/system`、`agent/control`、`agent/updater`、`panelhost`、`auth`）三片只跑 `go test -race`，`rest` 跑其余 77 个包、前端、`go vet`、构建与部署脚本测试；`rest` 的包列表由 `go list` 减去前三片得到，列表为空或数目不对时失败。`check.yml` 的 `check` 改为四片矩阵 `check-shard`，另设名为 `check` 的汇总任务，四片全部成功才成功，`release` 的判定不变。纯前端补丁时三个 Go 分片直接通过。
+- **门禁**：提交 `80fb85b`（2.1–2.3）本地完整门禁 `GATE 80fb85b PASS total=1422s`（v1.5.3 为 3073 秒），check 1422 秒、真实核 686 秒同时进行，无 DATA RACE。
+
+### 8.2 第二步：测试并行
+
+- `server`、`system/backup`、`system`、`agent/control`、`auth`、`panelhost` 的顶层测试加 `t.Parallel()`（`recovery` 原本就并行）。13 个测试保留串行，并在函数开头写明原因（`// Not parallel: …`）：改包级 `Version` 的 4 个安装测试、替换 `control.NewRuntime` 的 2 个、占用 `tuningSlot` 的 1 个，以及在并行负载下截止时间失败的 6 个（读池延迟、配额失效草稿、重连能力撤回、TCP 探测在线判定、真实备份调度、备份子进程崩溃恢复）。排查过：无 `t.Setenv`／`Chdir`，包级变量只有上述两处，固定端口只出现在不监听的配置里，测试证书与模板只读共享。
+- `scripts/check.sh` 的 `go test -race` 加 `-parallel 3`：默认并行度（GOMAXPROCS）下几个慢包同时运行约 60 个 race 测试（10 核），等待截止时间的测试成批失败；限为每包 3 个后这类失败消失。
+- 修复测试辅助的竞态：配额夹具在自动修订刚出现在列表里时就上报应用结果，而配额发布器先建修订、后写 `deployment_targets`，负载高时 `Result` 返回 `sql: no rows`。新增 `quotaFixture.report`，等到目标行出现再上报（`Result` 在写入前就返回该错误，重复的成功结果幂等）。该竞态在原串行门禁中也存在，只是负载低时很少触发。
+- 连跑验证（测试机，`-race -count=5`，多个慢包同时运行）：第 1、2 轮用默认并行度，失败的都是截止时间类测试；第 3 轮 `-parallel 3`（6 个包＋`recovery`）只剩配额夹具的 `no rows`；第 4 轮修好 `apply` 后又在直接上报回滚的测试里出现一次，改为统一走 `report`；第 5 轮又出现一次重连测试被拒「node already connected」（面板先写离线、再做数据库写入与通知、最后才从已连接集合移除旧会话，测试在这段间隙里重连），改为像真实 Agent 一样遇到 `AlreadyExists` 重试，产品代码不变；第 6 轮（`server`、`backup`、`system`、`recovery` 同时 `-count=5`）全部通过，`control`、`auth`、`panelhost` 在第 1–3 轮各 5 次均通过。第 6 轮每次运行的耗时（5 次合计 ÷ 5，含其他慢包的竞争）：`server` 约 460 秒、`backup` 约 330、`system` 约 395、`recovery` 约 607；`control` 约 150（第 3 轮）。
+- **门禁**：提交 `49946b2`（第一步＋第二步）本地完整门禁 `GATE 49946b2 PASS total=977s`，无 DATA RACE；check 977 秒、真实核 342 秒（原 686 秒，真实核测试同样并行）。最慢的包：`recovery` 653 秒、`server` 591、`system` 420、`backup` 364。
+
+### 8.3 与验收目标对照
+
+| 目标（第 7 节） | 结果 |
+| --- | --- |
+| 第一步后本地完整门禁 ≤ 25 分钟 | 1422 秒（约 24 分钟），达到 |
+| 第一步后 GitHub `check` ≤ 30 分钟 | 尚未运行（需推送） |
+| 第二步后本地完整门禁 ≤ 15 分钟 | 977 秒（约 16 分钟），**略超**：`recovery` 原本就并行，默认并行度下 435 秒，受 `-parallel 3` 限制变为 653 秒，成为最慢的包。可另行把 `recovery` 单独以较高并行度运行，需再做一轮连跑验证 |
+| 迁移、备份恢复与升级类测试仍从空库执行 | 见 8.1 |
+| 每个包 `-race -count=5` 无失败、门禁无新增偶发失败 | 第 6 轮与上表各包通过；修好 2 处测试竞态 |

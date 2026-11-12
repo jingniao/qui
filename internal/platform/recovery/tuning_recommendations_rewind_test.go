@@ -9,6 +9,7 @@ import (
 // for an archive written before it.
 func rewindTuningRecommendations(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindBuiltinRuleSets(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0141_tuning_recommendations.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

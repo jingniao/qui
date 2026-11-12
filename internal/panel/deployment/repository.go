@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -99,7 +100,7 @@ func (r *Repository) createStateTx(ctx context.Context, tx *sql.Tx, state desire
 		return Revision{}, err
 	}
 	if len(data) > 2<<20 {
-		return Revision{}, errors.New("DesiredState exceeds 2 MiB")
+		return Revision{}, fmt.Errorf("节点配置有 %.1f MiB，超过 2 MiB 上限；请减少策略引用的规则集", float64(len(data))/(1<<20))
 	}
 	sealed, err := r.Vault.Seal(data)
 	if err != nil {

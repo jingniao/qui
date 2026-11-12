@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"proxycontrol/internal/panel/subscription/importer"
@@ -247,12 +248,40 @@ func (r *Repository) SourceEntries(ctx context.Context, serviceID string) (Parse
 	}, rows.Err()
 }
 
+// referencedByEnabledPolicy is an SQL condition on an alias s of service_sets:
+// at least one enabled node policy names the set. Only node policies use the
+// panel's parsed cache; a client rule hands the source URL to the client.
+const referencedByEnabledPolicy = `EXISTS (SELECT 1 FROM policies p, json_each(p.match_json, '$.service_ids') j WHERE p.enabled=1 AND j.value=s.id)`
+
 type SourceRefresher struct {
 	Repository *Repository
 	Fetcher    SourceFetcher
 	Vault      *vault.Vault
 	Now        func() time.Time
 	OnChange   func(serviceID string)
+
+	kickOnce sync.Once
+	kicks    chan []string
+}
+
+func (s *SourceRefresher) kickChannel() chan []string {
+	s.kickOnce.Do(func() { s.kicks = make(chan []string, 32) })
+	return s.kicks
+}
+
+// Kick asks the refresh loop to fetch, now, the yaml/text sources of these
+// service sets that never succeeded or are due. A policy that starts naming a
+// set calls it, so the first publish need not wait for the five-minute check.
+// It never blocks; a full queue drops the request and the periodic check
+// catches up.
+func (s *SourceRefresher) Kick(serviceIDs ...string) {
+	if len(serviceIDs) == 0 {
+		return
+	}
+	select {
+	case s.kickChannel() <- append([]string(nil), serviceIDs...):
+	default:
+	}
 }
 
 func (s *SourceRefresher) now() time.Time {
@@ -264,11 +293,11 @@ func (s *SourceRefresher) now() time.Time {
 
 func (s *SourceRefresher) Refresh(ctx context.Context, sourceID string) (ExternalSource, error) {
 	var (
-		serviceID          string
-		url                string
-		format             string
-		behavior           string
-		oldEncryptedCache  []byte
+		serviceID         string
+		url               string
+		format            string
+		behavior          string
+		oldEncryptedCache []byte
 	)
 
 	err := s.Repository.Database.QueryRowContext(ctx,
@@ -382,24 +411,9 @@ func (s *SourceRefresher) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
+	kicks := s.kickChannel()
 	check := func() {
-		rows, err := s.Repository.Database.QueryContext(ctx,
-			`SELECT id FROM service_set_sources
-			 WHERE format <> 'mrs'
-			   AND (last_fetch_at IS NULL OR datetime(last_fetch_at, '+' || interval_seconds || ' seconds') <= datetime('now'))`)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-		var ids []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err == nil {
-				ids = append(ids, id)
-			}
-		}
-		rows.Close()
-		for _, id := range ids {
+		for _, id := range s.dueSources(ctx, nil) {
 			select {
 			case <-ctx.Done():
 				return
@@ -416,6 +430,47 @@ func (s *SourceRefresher) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			check()
+		case serviceIDs := <-kicks:
+			for _, id := range s.dueSources(ctx, serviceIDs) {
+				if ctx.Err() != nil {
+					return
+				}
+				_, _ = s.Refresh(ctx, id)
+			}
 		}
 	}
+}
+
+// dueSources lists the yaml/text sources to fetch. With no service IDs it is
+// the periodic check: sources of enabled sets that an enabled node policy
+// names, never fetched or past their interval (v1.5.2: unreferenced sets are
+// not fetched; their last cache stays). With service IDs (a Kick) it is those
+// sets' sources that never succeeded or are past their interval.
+func (s *SourceRefresher) dueSources(ctx context.Context, serviceIDs []string) []string {
+	query := `SELECT src.id FROM service_set_sources src JOIN service_sets s ON s.id=src.service_id
+		 WHERE src.format <> 'mrs' AND s.enabled=1`
+	args := []any{}
+	if len(serviceIDs) == 0 {
+		query += ` AND ` + referencedByEnabledPolicy + `
+		   AND (src.last_fetch_at IS NULL OR datetime(src.last_fetch_at, '+' || src.interval_seconds || ' seconds') <= datetime('now'))`
+	} else {
+		query += ` AND s.id IN (?` + strings.Repeat(",?", len(serviceIDs)-1) + `)
+		   AND (src.last_success_at IS NULL OR datetime(src.last_fetch_at, '+' || src.interval_seconds || ' seconds') <= datetime('now'))`
+		for _, id := range serviceIDs {
+			args = append(args, id)
+		}
+	}
+	rows, err := s.Repository.Database.QueryContext(ctx, query+` ORDER BY src.service_id, src.position`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }

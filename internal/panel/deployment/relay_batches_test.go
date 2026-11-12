@@ -51,10 +51,10 @@ func TestBatchValidationAcceptsOnlyAnAlreadyPublishedLaterTarget(t *testing.T) {
 		t.Fatalf("a target outside the batch with another published state was accepted: %v", err)
 	}
 	// Same protocol, port and credential but other listener settings (e.g. a new
-	// transport) is not the running listener either.
+	// server name) is not the running listener either.
 	changed := states[1]
 	changed.Inbounds = append([]desiredstate.Inbound(nil), states[1].Inbounds...)
-	changed.Inbounds[0].Settings.Transport = "ws"
+	changed.Inbounds[0].Settings.ServerName = "other.example.com"
 	applySnapshot(t, r, changed)
 	if _, err := r.CreateBatch(ctx, "", "later target", "owner", captured); !errors.Is(err, ErrDependency) {
 		t.Fatalf("a later target running other listener settings was accepted: %v", err)
@@ -135,7 +135,7 @@ func TestStartBatchRechecksALaterTargetsListener(t *testing.T) {
 	}
 	changed := states[1]
 	changed.Inbounds = append([]desiredstate.Inbound(nil), states[1].Inbounds...)
-	changed.Inbounds[0].Settings.Transport = "ws"
+	changed.Inbounds[0].Settings.ServerName = "other.example.com"
 	applySnapshot(t, r, changed)
 	if err := r.StartBatch(ctx, batch.ID); !errors.Is(err, ErrDependency) {
 		t.Fatalf("a batch started against a changed target listener: %v", err)

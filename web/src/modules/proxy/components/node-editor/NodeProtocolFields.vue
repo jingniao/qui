@@ -48,7 +48,7 @@
       <template v-if="f.protocol === 'vless' && s.security === 'reality' && s.reality">
         <label class="block">Reality 握手目标
           <input v-model="s.reality.handshake_target" placeholder="例如 www.amd.com:443" class="form-input-base mt-2 font-mono" />
-          <span class="block text-xs mt-1">填一个支持 TLS 1.3 与 HTTP/2 的境外常见 HTTPS 站点（不要用自己的域名，越靠近节点越好）；节点只把未通过认证的握手交给它。必须自行指定，不会自动选择。</span>
+          <span class="block text-xs mt-1">填一个支持 TLS 1.3 与 HTTP/2 的境外常见 HTTPS 站点（不要用自己的域名，越靠近节点越好）；节点只把未通过认证的握手交给它。必须自行指定，不会自动选择。部分站点只适用于 sing-box，Xray 连接会失败；不确定时从常用目标中选择。</span>
         </label>
         <label class="block">常用目标（可选）
           <select :value="''" class="form-input-base mt-2 font-mono" @change="pickPreset"><option value="">选择后填入上面的握手目标</option><option v-for="preset in REALITY_HANDSHAKE_PRESETS" :key="preset" :value="preset">{{ preset }}</option></select>

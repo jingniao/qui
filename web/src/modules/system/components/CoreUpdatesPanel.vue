@@ -56,6 +56,7 @@ import { coreReleasesAPI, defaultCoreSource, deriveAssetURL, DIGEST_SOURCE_LABEL
 import { type NodeView } from '../../nodes/api';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import DataTable from '../../../components/DataTable.vue';
@@ -159,6 +160,7 @@ function status(value: string) {
   return ({ queued:'等待节点', running:'已下发，结果未确认', success:'已确认成功', rolled_back:'已恢复上一核心', rejected:'节点拒绝', failed_closed:'未确认，已关闭', cleared:'已清除' } as Record<string,string>)[value] || value;
 }
 function changeTaskPage(value: number) { taskPage.value = value; void load(); }
-onMounted(() => { void load(); window.addEventListener('proxy-node-status', load); });
-onUnmounted(() => { generation++; window.removeEventListener('proxy-node-status', load); });
+const reloadOnNodeStatus = throttleTrailing(() => { void load(); }, 5000);
+onMounted(() => { void load(); window.addEventListener('proxy-node-status', reloadOnNodeStatus); });
+onUnmounted(() => { generation++; reloadOnNodeStatus.cancel(); window.removeEventListener('proxy-node-status', reloadOnNodeStatus); });
 </script>

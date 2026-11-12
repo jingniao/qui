@@ -4,6 +4,8 @@ import { blockedCores, findCore } from '../../../nodes/coreSummary';
 
 export const SERVER_SETTINGS_CONTRACT = 1;
 export const XHTTP_MODES = ['auto', 'packet-up', 'stream-up', 'stream-one'] as const;
+export const TCP_ONLY_PROTOCOLS = ['http', 'socks5', 'shadowsocks'];
+const protocolLabel = (protocol: string): string => ({ http: 'HTTP', socks5: 'SOCKS5', shadowsocks: 'Shadowsocks' } as Record<string, string>)[protocol] || protocol;
 export interface SettingChoice { value: string; label: string; reason: string; }
 export function internalRelaySettingsReason(internalRelay: boolean, settings: ProtocolSettings): string {
   return internalRelay && (settings.security === 'reality' || settings.transport === 'xhttp')
@@ -16,6 +18,7 @@ export function serverSettingsReason(server: NodeView | undefined, core: CoreNam
   const security = settings.security || 'none', transport = settings.transport || 'tcp', flow = settings.flow || '';
   if (!['none', 'tls', 'reality'].includes(security)) return '当前安全方式暂不支持，草稿已保留，请明确选择其他方式';
   if (!['tcp', 'ws', 'grpc', 'xhttp', 'quic'].includes(transport)) return '当前传输方式暂不支持，草稿已保留，请明确选择其他方式';
+  if (TCP_ONLY_PROTOCOLS.includes(protocol) && transport !== 'tcp') return `${protocolLabel(protocol)} 入站只支持 TCP 传输，请把传输改为 TCP 后再保存`;
   if (transport === 'quic' && !['hysteria2', 'tuic'].includes(protocol)) return '当前协议不支持 QUIC 传输，草稿已保留，请明确选择其他传输';
   if (flow && (protocol !== 'vless' || flow !== 'xtls-rprx-vision' || transport !== 'tcp' || !['tls', 'reality'].includes(security))) return 'Vision 只支持 VLESS + TCP + TLS / Reality，请明确修改传输、安全方式或 Flow';
   if (transport === 'xhttp' && security === 'none') return 'xhttp 只能运行在 Reality 或 TLS 之上：请把安全方式切换为 Reality / TLS，或把传输改回 TCP';
@@ -35,8 +38,11 @@ export function serverSettingsReason(server: NodeView | undefined, core: CoreNam
 }
 
 export function transportChoices(server: NodeView | undefined, core: CoreName | '', protocol: string, settings: ProtocolSettings): SettingChoice[] {
-  const items = [{ value: 'tcp', label: 'TCP' }, { value: 'ws', label: 'WebSocket' }, { value: 'grpc', label: 'gRPC' }];
-  if (protocol === 'vless' || settings.transport === 'xhttp') items.push({ value: 'xhttp', label: 'xhttp（TCP / H2）' });
+  const items = [{ value: 'tcp', label: 'TCP' }];
+  // WebSocket and gRPC are only offered where the cores render them and client
+  // links can describe them (VLESS, Trojan); HTTP/SOCKS5/Shadowsocks are TCP only.
+  if (!TCP_ONLY_PROTOCOLS.includes(protocol)) items.push({ value: 'ws', label: 'WebSocket' }, { value: 'grpc', label: 'gRPC' });
+  if (protocol === 'vless') items.push({ value: 'xhttp', label: 'xhttp（TCP / H2）' });
   if (settings.transport && !items.some(c => c.value === settings.transport)) items.push({ value: settings.transport, label: `${settings.transport}（现有值）` });
   return items.map(c => ({ ...c, reason: transportReason(server, core, protocol, settings, c.value) }));
 }

@@ -22,31 +22,7 @@ assert.equal(api.loss({ sent: 3, failed: 1 }), 1 / 3);
 assert.equal(api.loss({ sent: 3, failed: 8 }), 1);
 assert.equal(api.usable(point(0, { avgMs: NaN })), false);
 assert.equal(api.usable(point(0, { avgMs: -1 })), false);
-assert.equal(api.scale(50, 0, 100, 20, 220), 120);
-assert.equal(api.scale(0, 0, 0, 20, 220), 20);
 console.log('PASS LATENCY gaps: missing intervals, 1.5x boundary, null and fully failed samples break lines; loss and empty series');
-for (const max of [0, 0.003, 0.8, 1, 17, 99, 1000, NaN, Infinity]) {
-  const ticks = api.niceTicks(max);
-  assert.equal(ticks[0], 0);
-  assert.ok(ticks.length >= 2 && ticks.length <= 7);
-  assert.ok(ticks.every(Number.isFinite));
-  assert.ok(ticks.at(-1) >= (Number.isFinite(max) ? max : 1));
-  assert.ok(ticks.slice(1).every((value, index) => value > ticks[index]));
-}
-assert.deepEqual(api.niceTicks(99), [0, 25, 50, 75, 100]);
-console.log('PASS LATENCY scaling: nice ticks cover zero, tiny, large and nonfinite maxima');
-const utc = api.hourTicks(at, at + 86400000, 'UTC');
-const shanghai = api.hourTicks(at, at + 86400000, 'Asia/Shanghai');
-assert.equal(utc[0].label, '00:00');
-assert.equal(shanghai[0].label, '08:00');
-const kathmandu = api.hourTicks(at, at + 86400000, 'Asia/Kathmandu');
-assert.equal(kathmandu[0].label, '06:00');
-assert.equal(kathmandu[0].at, at + 15 * 60000);
-const dst = api.hourTicks(Date.parse('2026-11-01T07:00:00Z'), Date.parse('2026-11-02T07:00:00Z'), 'America/Los_Angeles', 1);
-assert.equal(dst.filter(tick => tick.label === '01:00').length, 2);
-assert.equal(dst.length, 25);
-assert.deepEqual(api.hourTicks(at + 1, at, 'UTC'), []);
-console.log('PASS LATENCY timezone: UTC, Asia/Shanghai, fractional offset and DST fallback hour ticks');
 
 // The Agent reports medians only; the chart must plot medianMs when avgMs is null.
 const median = { at: new Date(at).toISOString(), medianMs: 42, avgMs: null, minMs: null, maxMs: null, sent: 3, failed: 1 };
@@ -109,30 +85,11 @@ assert.equal(api.usable(smoothedWithFailed[2]), false);
 console.log('PASS LATENCY rolling median: 5-point rolling window hides spikes, preserves gaps and failures');
 
 // Nearest point / timestamp lookup
-const timestamps = [at, at + 60000, at + 120000];
-assert.equal(api.nearestTimestamp(timestamps, at + 10000), at);
-assert.equal(api.nearestTimestamp(timestamps, at + 50000), at + 60000);
-assert.equal(api.nearestTimestamp(timestamps, at + 200000), at + 120000);
-assert.equal(api.nearestTimestamp([], at), null);
 const pts = [point(0), point(60), point(120)];
 assert.equal(api.nearestPoint(pts, at + 25000), pts[0]);
 assert.equal(api.nearestPoint(pts, at + 45000), pts[1]);
 assert.equal(api.nearestPoint([], at), null);
 console.log('PASS LATENCY nearest point: cursor time resolves to closest sample timestamp');
-
-// Tick generation for 1H and 7D
-const ticks1h = api.timeTicks(at, at + 3600000, 'UTC', 1);
-assert.equal(ticks1h.length, 13);
-assert.equal(ticks1h[0].label, '00:00');
-assert.equal(ticks1h[1].label, '00:05');
-assert.equal(ticks1h.at(-1).label, '01:00');
-
-const ticks7d = api.timeTicks(at, at + 168 * 3600000, 'UTC', 168);
-assert.equal(ticks7d.length, 8);
-assert.equal(ticks7d[0].label, '10/28');
-assert.equal(ticks7d[1].label, '10/29');
-assert.equal(ticks7d.at(-1).label, '11/04');
-console.log('PASS LATENCY ticks: 1H minute ticks and 7D day ticks adapt to range and timezone');
 
 // Bucket vs raw wording
 const rawSample = point(0, { medianMs: 25 });
@@ -147,5 +104,71 @@ const nullSample = point(0, { medianMs: null, avgMs: null });
 assert.equal(api.describePointLatency(nullSample, false), '—');
 assert.equal(api.describePointLatency(nullSample, true), '—');
 console.log('PASS LATENCY wording: bucket shows interval range and raw shows median');
+
+
+// Chart model (bundled with esbuild so it can import latencySeries.ts)
+const { build } = await import('esbuild');
+const bundled = await build({
+  entryPoints: [new URL('../src/modules/nodes/components/latencyChartModel.ts', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')],
+  bundle: true, write: false, format: 'esm', platform: 'node'
+});
+const model = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+const target = { id: 't1', label: '上海电信' };
+const series = [point(0, { medianMs: 20, sent: 3, failed: 0 }), point(60, { medianMs: 500, sent: 3, failed: 1 }), point(120, { medianMs: 22 }), point(180, { medianMs: 21, sent: 3, failed: 3 }), point(240, { medianMs: 23 })];
+const entry = [{ target, colorIndex: 0, points: series }];
+const on = { showLatency: true, showLoss: true, showSmooth: false };
+
+// 12H / 24H / 7D: chart.js owns the x ticks; the model never emits a fixed tick list.
+for (const hours of [12, 24, 168]) {
+  const span = hours * 3600000;
+  const ds = model.buildLatencyDatasets(entry, 60, on);
+  assert.ok(ds.every(d => d.data.every(p => Number.isFinite(p.x))));
+  assert.ok(span > 0 && ds[0].data.length >= 2, `${hours}H keeps plotted points`);
+  assert.equal(model.latencyAxes(on).x, undefined);
+}
+const chartSource = readFileSync(new URL('../src/modules/nodes/components/MetricLineChart.vue', import.meta.url), 'utf8');
+const latencySource = readFileSync(new URL('../src/modules/nodes/components/LatencyChart.vue', import.meta.url), 'utf8');
+const seriesSource = readFileSync(new URL('../src/modules/nodes/components/latencySeries.ts', import.meta.url), 'utf8');
+assert.match(chartSource, /autoSkip: true, maxTicksLimit: 6/);
+assert.match(chartSource, /formatXTick/);
+for (const forbidden of ['hourTicks', 'timeTicks', 'viewBox', '<svg']) {
+  assert.ok(!latencySource.includes(forbidden) && !seriesSource.includes(forbidden), forbidden);
+}
+assert.match(latencySource, /defineAsyncComponent\(\(\) => import\('\.\/MetricLineChart\.vue'\)\)/);
+assert.ok(!/RANGES|selectRange/.test(latencySource), 'no duplicate range buttons');
+console.log('PASS LATENCY chart: 12H/24H/7D use automatic x ticks, no fixed hour-tick config, Chart.js loaded lazily');
+
+// Loss maps to the second axis as percent; gaps and unusable samples break the line.
+const both = model.buildLatencyDatasets(entry, 60, on);
+assert.deepEqual(both.map(d => [d.label, d.axis]), [['上海电信 延迟', 'y'], ['上海电信 丢包', 'y1']]);
+assert.deepEqual(model.latencyAxes(on), { y: { unit: 'ms' }, y1: { unit: 'percent', max: 100 } });
+const lossData = both[1].data.map(p => p.y);
+assert.equal(lossData[0], 0);
+assert.equal(Number(lossData[1].toFixed(2)), 33.33);
+assert.equal(lossData[3], 100);
+assert.equal(both[1].format(100), '100%');
+const latData = both[0].data.map(p => p.y);
+assert.equal(latData[3], null); // fully failed sample breaks the latency line
+const gapped = model.chartLine([point(0), point(600)], 60, p => 1);
+assert.deepEqual(gapped.map(p => p.y), [1, null, 1]);
+const lossOnly = model.buildLatencyDatasets(entry, 60, { ...on, showLatency: false });
+assert.deepEqual(lossOnly.map(d => [d.label, d.axis]), [['上海电信', 'y']]);
+assert.deepEqual(model.latencyAxes({ ...on, showLatency: false }), { y: { unit: 'percent', max: 100 } });
+const latencyOnly = model.buildLatencyDatasets(entry, 60, { ...on, showLoss: false });
+assert.deepEqual(latencyOnly.map(d => [d.label, d.axis]), [['上海电信', 'y']]);
+assert.equal(model.latencyAxes({ ...on, showLoss: false }).y1, undefined);
+console.log('PASS LATENCY loss: second axis in percent, line breaks, per-toggle datasets');
+
+// Smoothing changes only the displayed latency line, never loss or the card statistics.
+const smooth = model.buildLatencyDatasets(entry, 60, { ...on, showSmooth: true });
+assert.equal(both[0].data[1].y, 500);
+assert.ok(smooth[0].data[1].y < 100);
+assert.deepEqual(smooth[1].data, both[1].data);
+const before = JSON.stringify(api.seriesStats(series));
+model.buildLatencyDatasets(entry, 60, { ...on, showSmooth: true });
+assert.equal(JSON.stringify(api.seriesStats(series)), before);
+assert.equal(series[1].medianMs, 500); // raw samples untouched
+assert.match(latencySource, /seriesStats\(rawPoints\(t\.id\)\)/);
+console.log('PASS LATENCY smoothing: display data only, card stats stay raw');
 
 console.log('All latency chart self-tests passed');

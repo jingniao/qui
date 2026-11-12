@@ -136,3 +136,34 @@ func TestSingboxMalformedMultilineDestinationQuarantinesInjectedMetadata(t *test
 		t.Fatal("multiline target created fabricated audit", count, rejects)
 	}
 }
+
+// The Agent's TCP health check dials each sing-box inbound from loopback and
+// closes it before any destination is logged. Such a connection is dropped
+// silently when it expires; a non-loopback one without a destination still
+// counts as rejected, and a complete connection still produces a record.
+func TestSingboxLoopbackHealthCheckIsNotRejected(t *testing.T) {
+	records := []access.Rollup{}
+	rejects := 0
+	start := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	now := start
+	w := NewSingboxWriter(singboxFixture(), func(r access.Rollup) error { records = append(records, r); return nil }, func() { rejects++ })
+	w.now = func() time.Time { return now }
+	w.Write([]byte(nativeLine(1, "INFO", "inbound/http[http-in]", "inbound connection from 127.0.0.1:40000")))
+	w.Write([]byte(nativeLine(2, "INFO", "inbound/http[http-in]", "inbound connection from [::1]:40001")))
+	w.Write([]byte(nativeLine(3, "INFO", "inbound/http[http-in]", "inbound connection from 198.51.100.7:40002")))
+	w.Write([]byte(nativeLine(4, "INFO", "inbound/http[http-in]", "inbound connection from 127.0.0.1:40003")))
+	w.Write([]byte(nativeLine(4, "INFO", "inbound/http[http-in]", "[device-login] inbound connection to allowed.example:443")))
+	w.Write([]byte(nativeLine(4, "DEBUG", "router", "match[1] => route(direct)")))
+	w.Write([]byte(nativeLine(4, "INFO", "outbound/direct[direct]", "outbound connection to allowed.example:443")))
+	if len(records) != 1 || records[0].Domain != "allowed.example" || rejects != 0 {
+		t.Fatal(records, rejects)
+	}
+	now = start.Add(3 * time.Minute)
+	w.Write([]byte(nativeLine(5, "INFO", "inbound/http[http-in]", "inbound connection from 127.0.0.1:40004")))
+	if rejects != 1 {
+		t.Fatal("only the non-loopback connection without a destination counts", rejects)
+	}
+	if len(w.pending) != 1 {
+		t.Fatal("expired correlations were not dropped", len(w.pending))
+	}
+}

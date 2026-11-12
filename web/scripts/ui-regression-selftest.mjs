@@ -32,7 +32,7 @@ assert.doesNotMatch(tuningF2, /localStorage|qui_node_tuning_|BBR 就绪|saveTuni
 assert.match(tuningF2,/nodeAPI\.tuning\(/); assert.match(tuningF2,/nodeAPI\.saveTuning\(/);
 assert.match(tuningF2,/ConfirmDialog/); assert.match(tuningF2,/3000/); assert.match(tuningF2,/60000/);
 const metricF2 = read('modules/nodes/components/ServerMetricsGrid.vue');
-assert.match(metricF2,/nodeAPI\.metrics\(/); assert.match(metricF2,/60000/); assert.match(metricF2,/proxy-node-status/);
+assert.match(metricF2,/nodeAPI\.metrics\(/); assert.match(metricF2,/60000/); assert.doesNotMatch(metricF2,/proxy-node-status/); // heartbeat events no longer trigger reads (v1.5.2 item 1)
 assert.doesNotMatch(metricF2,/history\.value|持久化历史即将支持/);
 assert.match(read('modules/nodes/components/detail/ServerMonitoring.vue'),/v-model:hours="monitoringHours"/);
 for (const path of ['modules/nodes/components/detail/ServerTuning.vue','modules/nodes/components/detail/serverTuningModel.ts','modules/nodes/components/ServerMetricsGrid.vue','modules/nodes/components/hostObservationModel.ts']) assert.doesNotMatch(read(path), /\?{3,}/, 'F2 Chinese labels must survive UTF-8: '+path);

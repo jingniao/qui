@@ -22,6 +22,7 @@ export default {
           'sans-serif'
         ],
         mono: [
+          '"Twemoji Country Flags"',
           '"SF Mono"',
           'SFMono-Regular',
           'ui-monospace',

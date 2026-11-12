@@ -98,6 +98,8 @@ export interface ServiceReferences {
 export interface ServiceSet extends ServiceInput {
   references?: ServiceReferences;
   warning?: string;
+  // An enabled node policy names this set, so the panel refreshes its sources daily (v1.5.2).
+  autoRefresh?: boolean;
   id: string;
   builtin: boolean;
   version: number;

@@ -142,30 +142,41 @@ func nativeDestination(value string) (string, string, int, error) {
 	return domain, "", port, nil
 }
 
+// expire drops correlations idle for more than two minutes. An unfinished one
+// counts as a rejected observation, except a connection that came from a
+// loopback client and never named a destination: the Agent's own TCP health
+// check dials every inbound from loopback and closes at once, so it is not an
+// observation at all (the Xray writer exempts it the same way, see
+// loopbackSource). A non-loopback client without a destination still counts.
+func (w *SingboxWriter) expire(at time.Time) {
+	for key, entry := range w.pending {
+		if at.Sub(entry.updated) > 2*time.Minute {
+			if !entry.done && !entry.loopbackProbe() {
+				w.failed()
+			}
+			delete(w.pending, key)
+		}
+	}
+}
+
+func (entry *singboxConnection) loopbackProbe() bool {
+	if entry.event.InboundID != "" || entry.event.AccountID != "" {
+		return false
+	}
+	source, err := netip.ParseAddrPort(entry.source)
+	return err == nil && source.Addr().IsLoopback()
+}
+
 func (w *SingboxWriter) connection(id uint32, at time.Time) *singboxConnection {
 	if at.Sub(w.lastSweep) >= 10*time.Second {
-		for key, entry := range w.pending {
-			if at.Sub(entry.updated) > 2*time.Minute {
-				if !entry.done {
-					w.failed()
-				}
-				delete(w.pending, key)
-			}
-		}
+		w.expire(at)
 		w.lastSweep = at
 	}
 	if entry := w.pending[id]; entry != nil {
 		return entry
 	}
 	if len(w.pending) >= 4096 {
-		for key, entry := range w.pending {
-			if at.Sub(entry.updated) > 2*time.Minute {
-				if !entry.done {
-					w.failed()
-				}
-				delete(w.pending, key)
-			}
-		}
+		w.expire(at)
 	}
 	if len(w.pending) >= 4096 {
 		w.failed()

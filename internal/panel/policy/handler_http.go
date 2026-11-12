@@ -59,6 +59,11 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 		h.internal(w, err)
 		return
 	}
+	// An enabled policy that names a service set makes the set's sources part
+	// of the periodic refresh; fetch the never-fetched ones now.
+	if record.Enabled && h.Refresher != nil {
+		h.Refresher.Kick(record.Match.ServiceIDs...)
+	}
 	status := 200
 	if r.Method == http.MethodPost {
 		status = 201

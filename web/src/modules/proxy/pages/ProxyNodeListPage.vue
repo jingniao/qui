@@ -1145,6 +1145,7 @@ import { listenNetworks } from '../components/node-editor/nodeEditorModel';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import { showToast } from '../../../app/api';
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { request } from '../../../app/apiClient';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { deploymentAPI } from '../../system/deploymentApi';
@@ -1810,15 +1811,17 @@ watch([pagedNodes, displayMode, servers], () => {
   loadServerPublishStates();
 }, { immediate: true });
 
+const reloadPublishStatesOnNodeStatus = throttleTrailing(() => { void loadServerPublishStates(); }, 5000);
 onMounted(() => {
   loadProtocolSupport();
   loadData();
   window.addEventListener('proxy-deployment-status', loadServerPublishStates);
-  window.addEventListener('proxy-node-status', loadServerPublishStates);
+  window.addEventListener('proxy-node-status', reloadPublishStatesOnNodeStatus);
 });
 
 onUnmounted(() => {
+  reloadPublishStatesOnNodeStatus.cancel();
   window.removeEventListener('proxy-deployment-status', loadServerPublishStates);
-  window.removeEventListener('proxy-node-status', loadServerPublishStates);
+  window.removeEventListener('proxy-node-status', reloadPublishStatesOnNodeStatus);
 });
 </script>

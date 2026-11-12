@@ -45,6 +45,9 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 	if err := desiredstate.RequireKeywordSupport(state, node.KeywordCapabilities(cores)); err != nil {
 		return fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
 	}
+	if err := desiredstate.RequireExpandedPolicySupport(state, node.KeywordCapabilities(cores)); err != nil {
+		return err
+	}
 	if err := desiredstate.RequirePortHopSupport(state, c.GetPortHopSupported()); err != nil {
 		return fmt.Errorf("%w: 该服务器的 Agent 不支持端口跳跃，请先升级 Agent", desiredstate.ErrPortHopUnsupported)
 	}

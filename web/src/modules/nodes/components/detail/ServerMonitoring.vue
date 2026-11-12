@@ -4,7 +4,7 @@
     <ServerMetricsGrid :node="node" :now="now" v-model:hours="monitoringHours" />
 
     <!-- Latency & Network Quality Chart -->
-    <LatencyChart :node-id="node.id" v-model:hours="monitoringHours" />
+    <LatencyChart :node-id="node.id" :hours="monitoringHours" />
   </div>
 </template>
 

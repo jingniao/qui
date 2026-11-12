@@ -126,6 +126,11 @@ func ValidateInboundForwardOptions(c *pb.Capabilities, name string, settings des
 // publish paths are the same call in proxy.Snapshot and
 // deployment.validateStateCoresTx.
 func ValidateInboundServerSettings(c *pb.Capabilities, name, protocol string, settings desiredstate.ProtocolSettings) error {
+	// Transport/protocol pairing (v1.5.2 item 6): checked here, not in Decode, so
+	// historical revisions stay readable.
+	if err := desiredstate.ValidateInboundTransport(protocol, settings.Transport); err != nil {
+		return err
+	}
 	if !settings.HasServerSettings() && !settings.HasCertificateFiles() {
 		return nil
 	}

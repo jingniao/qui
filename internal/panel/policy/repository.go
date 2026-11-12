@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"proxycontrol/internal/platform/id"
+	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 	shared "proxycontrol/pkg/contracts/policy"
 	"strings"
 	"time"
-	"proxycontrol/internal/platform/vault"
 )
 
 var ErrNotFound = errors.New("policy or service set not found")
@@ -82,8 +82,11 @@ type ServiceSet struct {
 	Keywords    []string           `json:"keywords"`
 	CIDRs       []string           `json:"cidrs"`
 	Sources     []ExternalSource   `json:"sources"`
-	CreatedAt   string             `json:"createdAt"`
-	UpdatedAt   string             `json:"updatedAt"`
+	// AutoRefresh: an enabled node policy refers to this enabled set, so the
+	// panel refreshes its yaml/text sources on their interval (v1.5.2).
+	AutoRefresh bool   `json:"autoRefresh"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
 }
 type ServiceInput struct {
 	Name        string         `json:"name"`
@@ -273,7 +276,11 @@ func (r *Repository) Service(ctx context.Context, serviceID string) (ServiceSet,
 		src.NodeUsable = src.Format != "mrs"
 		service.Sources = append(service.Sources, src)
 	}
-	return service, srcRows.Err()
+	if err := srcRows.Err(); err != nil {
+		return service, err
+	}
+	err = r.Database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM service_sets s WHERE s.id=? AND s.enabled=1 AND "+referencedByEnabledPolicy+")", serviceID).Scan(&service.AutoRefresh)
+	return service, err
 }
 func (r *Repository) Services(ctx context.Context, page, size int) ([]ServiceSet, int, error) {
 	var count int

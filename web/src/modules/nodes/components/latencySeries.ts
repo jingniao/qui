@@ -29,30 +29,6 @@ export function segments(points: LatencyPoint[], intervalSeconds: number, start:
   if (current.length) result.push(current);
   return result;
 }
-export function niceTicks(maximum: number): number[] {
-  const max = Number.isFinite(maximum) && maximum > 0 ? maximum : 1;
-  const raw = max / 4;
-  const base = 10 ** Math.floor(Math.log10(raw));
-  const factor = [1, 2, 2.5, 5, 10].find(value => value * base >= raw) ?? 10;
-  const step = base * factor;
-  const top = Math.ceil(max / step);
-  return Array.from({ length: top + 1 }, (_, i) => Number((i * step).toPrecision(12)));
-}
-export function scale(value: number, from: number, to: number, low: number, high: number): number {
-  return to > from ? low + (value - from) / (to - from) * (high - low) : low;
-}
-export function hourTicks(start: number, end: number, timezone: string, every = 4) {
-  const format = new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-  // Align to local whole hours, including zones offset by 30 or 45 minutes.
-  const parts = new Intl.DateTimeFormat('en', { timeZone: timezone, minute: '2-digit', second: '2-digit' }).formatToParts(start);
-  const minutes = Number(parts.find(part => part.type === 'minute')?.value ?? 0);
-  const seconds = Number(parts.find(part => part.type === 'second')?.value ?? 0);
-  let at = start - minutes * 60000 - seconds * 1000 - (start % 1000);
-  if (at < start) at += 3600000;
-  const result = [];
-  for (; at <= end; at += Math.max(1, every) * 3600000) result.push({ at, label: format.format(at) });
-  return result;
-}
 
 export interface SeriesStats {
   meanMs: number | null;
@@ -150,20 +126,6 @@ export function rollingMedian(points: LatencyPoint[], windowSize = 5): LatencyPo
   });
 }
 
-export function nearestTimestamp(timestamps: number[], targetMs: number): number | null {
-  if (!timestamps.length || !Number.isFinite(targetMs)) return null;
-  let closest = timestamps[0];
-  let minDiff = Math.abs(timestamps[0] - targetMs);
-  for (let i = 1; i < timestamps.length; i++) {
-    const diff = Math.abs(timestamps[i] - targetMs);
-    if (diff < minDiff) {
-      minDiff = diff;
-      closest = timestamps[i];
-    }
-  }
-  return closest;
-}
-
 export function nearestPoint(points: LatencyPoint[], targetMs: number): LatencyPoint | null {
   if (!points.length || !Number.isFinite(targetMs)) return null;
   let closest = points[0];
@@ -190,68 +152,4 @@ export function describePointLatency(point: LatencyPoint, isBucket: boolean): st
     return `平均中位 ${msText}（区间 ${minText}–${maxText}）`;
   }
   return `中位 ${msText}`;
-}
-
-export function timeTicks(start: number, end: number, timezone: string, hours?: number): { at: number; label: string }[] {
-  if (start >= end) return [];
-  const duration = end - start;
-  const rangeHours = hours ?? Math.round(duration / 3600000);
-
-  if (rangeHours <= 1) {
-    // 1H: step every 5 minutes -> 12 intervals = 13 ticks
-    const format = new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-    const parts = new Intl.DateTimeFormat('en', { timeZone: timezone, minute: '2-digit', second: '2-digit' }).formatToParts(start);
-    const minutes = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
-    const seconds = Number(parts.find(p => p.type === 'second')?.value ?? 0);
-    const stepMinutes = 5;
-    const remainder = minutes % stepMinutes;
-    let at = start - remainder * 60000 - seconds * 1000 - (start % 1000);
-    if (at < start) at += stepMinutes * 60000;
-    const result = [];
-    for (; at <= end; at += stepMinutes * 60000) {
-      result.push({ at, label: format.format(at) });
-    }
-    return result;
-  }
-
-  if (rangeHours <= 6) {
-    // 6H: step every 30 minutes
-    const format = new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-    const parts = new Intl.DateTimeFormat('en', { timeZone: timezone, minute: '2-digit', second: '2-digit' }).formatToParts(start);
-    const minutes = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
-    const seconds = Number(parts.find(p => p.type === 'second')?.value ?? 0);
-    const stepMinutes = 30;
-    const remainder = minutes % stepMinutes;
-    let at = start - remainder * 60000 - seconds * 1000 - (start % 1000);
-    if (at < start) at += stepMinutes * 60000;
-    const result = [];
-    for (; at <= end; at += stepMinutes * 60000) {
-      result.push({ at, label: format.format(at) });
-    }
-    return result;
-  }
-
-  if (rangeHours <= 12) {
-    // 12H: step every 1 hour
-    return hourTicks(start, end, timezone, 1);
-  }
-
-  if (rangeHours <= 24) {
-    // 24H: step every 2 hours
-    return hourTicks(start, end, timezone, 2);
-  }
-
-  // 7D (168H): step every 24 hours (1 day) aligned to midnight in timezone
-  const format = new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, month: '2-digit', day: '2-digit' });
-  const parts = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(start);
-  const localHour = Number(parts.find(p => p.type === 'hour')?.value ?? 0);
-  const localMinute = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
-  const localSecond = Number(parts.find(p => p.type === 'second')?.value ?? 0);
-  let at = start - localHour * 3600000 - localMinute * 60000 - localSecond * 1000 - (start % 1000);
-  if (at < start) at += 86400000;
-  const result = [];
-  for (; at <= end; at += 86400000) {
-    result.push({ at, label: format.format(at) });
-  }
-  return result;
 }

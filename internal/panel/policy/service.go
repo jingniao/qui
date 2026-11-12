@@ -131,8 +131,60 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 				}
 			}
 		}
+		if err := s.requireExpandedSupport(ctx, input); err != nil {
+			return Record{}, err
+		}
 	}
 	return s.Repository.Save(ctx, ruleID, input)
+}
+
+// requireExpandedSupport rejects saving an enabled policy that expands to more
+// than MaxMatchers entries when a node it names explicitly (directly or through
+// a node group) runs an Agent without ExpandedPolicySupported, and names those
+// nodes. A policy for every node is checked per node when the state is built,
+// because the service sets' sources may not be fetched yet at save time.
+func (s *Service) requireExpandedSupport(ctx context.Context, input Input) error {
+	if !input.Enabled || len(input.Match.ServiceIDs) == 0 || len(input.Scope.NodeIDs)+len(input.Scope.GroupIDs) == 0 {
+		return nil
+	}
+	rule := input.Rule("check")
+	rule.Enabled = true
+	resolved, err := s.resolve(ctx, rule)
+	if err != nil {
+		return err
+	}
+	count := shared.MatcherCount(resolved)
+	if count <= shared.MaxMatchers {
+		return nil
+	}
+	targets := append([]string(nil), input.Scope.NodeIDs...)
+	for _, groupID := range input.Scope.GroupIDs {
+		if group, err := s.Nodes.Group(ctx, groupID); err == nil {
+			targets = append(targets, group.ServerIDs...)
+		}
+	}
+	state := desiredstate.State{Policies: []desiredstate.Policy{resolved}}
+	names := []string{}
+	seen := map[string]bool{}
+	for _, nodeID := range targets {
+		if seen[nodeID] {
+			continue
+		}
+		seen[nodeID] = true
+		caps, err := s.NodeCapabilities(ctx, nodeID)
+		if err != nil || desiredstate.RequireExpandedPolicySupport(state, caps) == nil {
+			continue
+		}
+		name := nodeID
+		if n, err := s.Nodes.Get(ctx, nodeID); err == nil && n.Name != "" {
+			name = n.Name
+		}
+		names = append(names, name)
+	}
+	if len(names) > 0 {
+		return fmt.Errorf("%w: 策略展开规则集后有 %d 条匹配，以下服务器的 Agent 只支持 %d 条，请先升级 Agent：%s", desiredstate.ErrExpandedPolicyUnsupported, count, shared.MaxMatchers, strings.Join(names, "、"))
+	}
+	return nil
 }
 func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy) (desiredstate.Policy, error) {
 	for _, id := range rule.Match.ServiceIDs {
@@ -157,11 +209,17 @@ func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy) (desire
 		rule.Match.Keywords = append(rule.Match.Keywords, srcEntries.Keywords...)
 		rule.Match.CIDRs = append(rule.Match.CIDRs, srcEntries.CIDRs...)
 	}
-	if len(rule.Match.ServiceIDs) > 0 && len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) == 0 {
+	if len(rule.Match.ServiceIDs) > 0 && shared.MatcherCount(rule) == 0 {
 		rule.Enabled = false
 	}
 	rule.Match.ServiceIDs = nil
-	return rule, shared.Validate(&rule)
+	// The expanded policy may exceed the 2000 entries an Owner can write into
+	// one policy; whether the node's Agent accepts that is checked against its
+	// capabilities when the state is built (RequireExpandedPolicySupport).
+	if count := shared.MatcherCount(rule); count > shared.MaxExpandedMatchers {
+		return rule, fmt.Errorf("%w: 策略「%s」展开规则集后有 %d 条匹配，超过上限 %d 条，请减少引用的规则集", shared.ErrMatcherLimit, rule.Name, count, shared.MaxExpandedMatchers)
+	}
+	return rule, shared.ValidateExpanded(&rule)
 }
 func (s *Service) ForNode(ctx context.Context, nodeID string) ([]desiredstate.Policy, error) {
 	if _, err := s.Nodes.Get(ctx, nodeID); err != nil {

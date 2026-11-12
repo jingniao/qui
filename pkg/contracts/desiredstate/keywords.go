@@ -7,6 +7,9 @@ var ErrKeywordUnsupported = errors.New("keyword_unsupported")
 type CoreKeywordCapability struct {
 	Name                   string
 	DomainKeywordSupported bool
+	// ExpandedPolicySupported: the core renders policies of up to
+	// MaxExpandedPolicyMatchers entries (v1.5.2).
+	ExpandedPolicySupported bool
 }
 
 // RequireKeywordSupport fails when any policy serializes keywords and any enabled

@@ -8,10 +8,10 @@ import { CHART_COLORS, formatAxisTick, formatTimeFull, formatXTick, type AxisUni
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, Filler, Tooltip, Legend);
 
-export interface ChartDataset { label: string; color: string; fill: boolean; axis: 'y' | 'y1'; data: { x: number; y: number | null }[]; format: (value: number) => string }
+export interface ChartDataset { label: string; color: string; fill: boolean; axis: 'y' | 'y1'; dash?: number[]; data: { x: number; y: number | null }[]; format: (value: number) => string }
 const props = defineProps<{
   label: string; datasets: ChartDataset[]; xMin: number; xMax: number;
-  axes: { y: { unit: AxisUnit; max?: number }; y1?: { unit: AxisUnit } };
+  axes: { y: { unit: AxisUnit; max?: number }; y1?: { unit: AxisUnit; max?: number } };
 }>();
 
 const FONT = { size: 12 };
@@ -43,7 +43,7 @@ function build(): ChartConfiguration<'line'> {
     data: {
       datasets: props.datasets.map(d => ({
         label: d.label, data: d.data, yAxisID: d.axis, borderColor: d.color, backgroundColor: d.color + '26',
-        fill: d.fill ? 'origin' : false, borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3,
+        fill: d.fill ? 'origin' : false, borderWidth: 1.5, borderDash: d.dash, pointRadius: 0, pointHoverRadius: 3,
         cubicInterpolationMode: 'monotone', spanGaps: false
       }))
     },

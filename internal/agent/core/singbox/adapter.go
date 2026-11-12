@@ -660,6 +660,7 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	// this bit is reported (v1.4.7 section 3).
 	capabilities.TlsCertificateFilesSupported = true
 	capabilities.DomainKeywordSupported = true
+	capabilities.ExpandedPolicySupported = true
 	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
 	if capabilities.DeviceGateSupported {
 		capabilities.ObservationContractVersion = 2

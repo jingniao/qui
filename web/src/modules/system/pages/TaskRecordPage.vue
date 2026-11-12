@@ -306,6 +306,7 @@ import AppDialog from '../../../components/AppDialog.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import { formatTime, isOwner } from '../../../app/auth';
 import { showToast } from '../../../app/api';
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { agentUpdatesAPI, type AgentUpdateAttempt, type AgentUpdateTask } from '../agentUpdatesApi';
 import { coreUpdatesAPI, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
 import { updateResultLabel, updateResultGuidance } from '../updateResultText';
@@ -599,13 +600,15 @@ async function clearCoreTask(id: string) {
   }
 }
 
+const reloadOnNodeStatus = throttleTrailing(() => { void loadAll(); }, 5000);
 onMounted(() => {
   void loadAll();
-  window.addEventListener('proxy-node-status', loadAll);
+  window.addEventListener('proxy-node-status', reloadOnNodeStatus);
 });
 
 onUnmounted(() => {
   generation++; attemptGeneration++;
-  window.removeEventListener('proxy-node-status', loadAll);
+  reloadOnNodeStatus.cancel();
+  window.removeEventListener('proxy-node-status', reloadOnNodeStatus);
 });
 </script>

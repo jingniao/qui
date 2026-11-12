@@ -51,6 +51,7 @@ import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoi
 import { validConnectHost } from '../nodeAddress';
 import { CURRENCY_LIST, CYCLE_LIST, saveNodeMeta } from '../nodeMeta';
 import { formatTime } from '../../../app/auth';
+import { nodeStatusMatches } from '../../../app/nodeStatusEvents';
 import { showToast } from '../../../app/api';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import CodePreview from '../../../components/CodePreview.vue';
@@ -106,8 +107,8 @@ async function checkStage() {
   }
 }
 
-function handleNodeStatusEvent() {
-  void checkStage();
+function handleNodeStatusEvent(event: Event) {
+  if (nodeStatusMatches(event, stageNodeId)) void checkStage();
 }
 
 function startStageWatcher(nodeId: string) {

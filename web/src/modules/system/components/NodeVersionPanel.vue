@@ -1254,6 +1254,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, reactive, computed } from 'vue';
 import { isOwner, formatTime } from '../../../app/auth';
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type AgentReleaseVersion } from '../../nodes/api';
@@ -2265,6 +2266,7 @@ let generation = 0;
 function nodeStatusChanged() {
   if (!loading.value) void load();
 }
+const nodeStatusThrottled = throttleTrailing(() => nodeStatusChanged(), 5000);
 async function load() {
   const current = ++generation;
   loading.value = true;
@@ -2391,11 +2393,12 @@ function statusCapsuleText(node: NodeView): string {
 onMounted(() => {
   void load();
   void loadUpgradeContext();
-  window.addEventListener('proxy-node-status', nodeStatusChanged);
+  window.addEventListener('proxy-node-status', nodeStatusThrottled);
 });
 
 onUnmounted(() => {
   generation++;
-  window.removeEventListener('proxy-node-status', nodeStatusChanged);
+  nodeStatusThrottled.cancel();
+  window.removeEventListener('proxy-node-status', nodeStatusThrottled);
 });
 </script>

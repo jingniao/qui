@@ -7,7 +7,7 @@
       </div>
     </div>
     <p class="text-xs text-ios-secondary">服务端历史 · 每分钟采样 · 保留 7 天 · 长范围为分桶平均值。网络速率为主机网卡流量，可能包含多接口重复计数；缺测处断线，悬停可读各时刻数值。</p>
-    <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }} <button class="ios-btn-secondary" @click="load">重试</button></p>
+    <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }} <button class="ios-btn-secondary" @click="load(true)">重试</button></p>
     <p v-if="loading" class="text-xs text-ios-secondary">正在读取历史指标…</p>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <section v-for="card in cards" :key="card.id" class="panel-card p-4 space-y-3">
@@ -27,6 +27,7 @@
 import { formatTime } from '../../../app/auth';
 import { computed, defineAsyncComponent, ref, watch, onMounted, onUnmounted } from 'vue';
 import { nodeAPI, type NodeView } from '../api';
+import { beginMetricsLoad, failMetricsLoad } from './metricsRefreshPolicy';
 import { metricPoint, extractCurrentValues, formatBytes, formatMetricRange, formatMetricValue, metricCards, metricRangeLabel, seriesData, visibleSeries, CHART_COLORS, type MetricCard, type MetricKey, type SystemMetricPoint } from './serverMetricsModel';
 // Chart.js stays out of the entry bundle: it loads with the first chart.
 const MetricLineChart = defineAsyncComponent(() => import('./MetricLineChart.vue'));
@@ -45,22 +46,27 @@ const currentUnavailable = computed(() => {
 });
 const current = computed(() => extractCurrentValues(currentUnavailable.value ? { ...props.node, lastHeartbeat: '' } : props.node, props.now));
 let generation = 0, disposed = false;
-async function load() {
+// Foreground loads (first read, node or range switch) clear the charts and show the
+// hint; background refreshes keep the old data until the new data arrives.
+async function load(foreground = false) {
   const ticket = ++generation, id = props.node.id, hours = props.hours;
-  loading.value = true; error.value = '';
+  const begun = beginMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, foreground);
+  if (foreground) points.value = [];
+  loading.value = begun.loading; error.value = begun.error;
   const until = Date.now();
   try {
     const response = await nodeAPI.metrics(id, hours);
     if (disposed || ticket !== generation) return;
     end.value = until; intervalSeconds.value = response.intervalSeconds;
     points.value = response.points.map(metricPoint).filter(p => Number.isFinite(p.time)).sort((a,b) => a.time-b.time);
-  } catch (e) { if (!disposed && ticket === generation) error.value = '历史指标读取失败：' + (e as Error).message; }
+  } catch (e) { if (!disposed && ticket === generation) { const failed = failMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, '历史指标读取失败：' + (e as Error).message); error.value = failed.error; } }
   finally { if (!disposed && ticket === generation) loading.value = false; }
 }
-watch(() => [props.node.id, props.hours], () => { points.value = []; void load(); }, {immediate:true});
+// History is sampled once a minute, so heartbeat events must not trigger reads; only the timer does.
+watch([() => props.node.id, () => props.hours], () => { void load(true); }, { immediate: true });
 let timer: ReturnType<typeof setInterval>;
-onMounted(() => { timer = setInterval(load, 60000); window.addEventListener('proxy-node-status', load); });
-onUnmounted(() => { disposed = true; generation++; clearInterval(timer); window.removeEventListener('proxy-node-status', load); });
+onMounted(() => { timer = setInterval(() => { void load(false); }, 60000); });
+onUnmounted(() => { disposed = true; generation++; clearInterval(timer); });
 function display(key: MetricKey, value: number | null | undefined) {
   if (value === null || value === undefined) {
     const latest = latestMeasured(key);

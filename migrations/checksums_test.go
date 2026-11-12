@@ -13,6 +13,7 @@ import (
 // ending) makes existing panels refuse to start and old backups fail to
 // restore. Add new migrations here; never change an existing entry.
 var applied = map[string]string{
+	"0142_builtin_rule_sets.sql":                        "f8dbe2a65e2b3d359bfdbfdcfea48679f74f221ac04893487c261dfd3e91f467",
 	"0141_tuning_recommendations.sql":                   "c5772f2801fd609d152783b53c7fdf1dd0271ebae37d1c44f94cf19aa30ef468",
 	"0140_service_set_sources.sql":                      "bc862625c12030bfc7840e8f9c7e9f0bbe4be32f2973fc8b41d642b284d64969",
 	"0139_notifications.sql":                            "c92161af9d1f3b3f2fd25d0649be373600d619722bccb6e13c2af29b037d958f",

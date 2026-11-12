@@ -86,7 +86,7 @@ func compilePolicies(state desiredstate.State, at time.Time) ([]route, error) {
 	}
 	rules := []route{}
 	for _, policy := range shared.Sort(state.Policies) {
-		if err := shared.Validate(&policy); err != nil {
+		if err := shared.ValidateExpanded(&policy); err != nil {
 			return nil, err
 		}
 		if !policy.Enabled {

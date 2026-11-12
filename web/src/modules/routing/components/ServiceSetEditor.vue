@@ -96,6 +96,7 @@
             + 添加外部来源
           </button>
         </div>
+        <p v-if="props.service && !props.clone && form.sources.length && !props.service.autoRefresh" class="text-xs text-neutral-500">未被启用的节点策略引用，不自动刷新；节点策略引用后会立即抓取，也可以手动刷新。客户端订阅直接下载来源地址，不受影响。</p>
         <div v-if="!form.sources.length" class="text-xs text-neutral-400 py-1">
           未配置外部来源（支持纯文本、YAML 或 MRS 规则集）
         </div>

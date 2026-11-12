@@ -80,7 +80,7 @@ func (m *MultiRuntime) DetectCapabilities(ctx context.Context) (*pb.Capabilities
 		if name == m.primary {
 			result = proto.Clone(c).(*pb.Capabilities)
 		}
-		cores = append(cores, &pb.CoreCapability{Name: name, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, GostContractVersion: gostContract(name), ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations, TlsCertificateFilesSupported: c.TlsCertificateFilesSupported, DomainKeywordSupported: c.DomainKeywordSupported})
+		cores = append(cores, &pb.CoreCapability{Name: name, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, GostContractVersion: gostContract(name), ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations, TlsCertificateFilesSupported: c.TlsCertificateFilesSupported, DomainKeywordSupported: c.DomainKeywordSupported, ExpandedPolicySupported: c.ExpandedPolicySupported})
 	}
 	result.Cores, result.MultiCoreSupported = cores, true
 	return result, nil

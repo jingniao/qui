@@ -282,6 +282,8 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 
 订阅路径是 Token → 用户 → 已发布节点及授权导入源 → 中立代理模型 → 格式导出器。`?format=` 优先，未知格式返回 400；其次为已验证 UA 表，再回退系统默认。UA 开关已实现，当前已验证 UA 匹配表为空，不能宣称自动识别已验收；一键导入协议也待核实，现提供复制与二维码。响应包含流量、到期、更新间隔与下载文件名等订阅头。
 
+内置预设（`GET /api/v1/subscription-rules/presets`，新建配置时可选）除经典分流、基础代理、分流+去广告、白名单外，v1.5.2 增加「精简／标准／完整分流 · 屏蔽回国」（`meta-lite`／`meta-standard`／`meta-full`）：MetaCubeX meta-rules-dat 的 mrs 规则集，国内域名（`geolocation-cn`、geosite `cn`）与国内 IP（`cn`，no-resolve）直接 REJECT，不经过可切回 DIRECT 的组，国内域名规则排在所有服务规则之前。一个模板最多 256 个规则集（v1.5.2 前为 32），请求体仍为 1 MiB，超限提示「请求内容超过 1 MiB 上限」。mihomo 下载规则集同样走规则，节点全部不可用时规则集为空、屏蔽不生效。
+
 全局模板存在 `system_settings.client_rules`，有版本冲突检查与预设，按用户授权展开 `@all`、`@nodeGroup:<id>`、`@source:<id>`；服务端生成 YAML。客户端规则不替代节点策略。外部源仅 HTTPS，逐跳解析并固定经校验的公网 IP，限制 2 MiB / 15 秒；抓取失败按类型（input、dns、address、redirect、tls、connect、deadline、http、size）返回固定代码与固定中文说明，不回显链接、Location、响应体或凭据。定时抓取加密缓存，订阅请求不抓取。导入节点仅用于客户端，不参与 Agent 发布、用户额度或设备门控。客户端链与格式边界见[协议矩阵](docs/protocol-support-matrix.md)。
 
 刷新返回结构化结果（S1）：`outcome` 为 `ok`/`partial`/`failed`，`counts` 含 `total`（= `accepted` + `rejected` + `duplicates`）、`accepted`、`rejected`、`duplicates`、`cached`、`usable`，未确定值为 null；每条目只计一次，多因条目按第一个原因计数。逐条原因最多 50 条且结果最多 32 KiB，超出置 `diagnosticsTruncated`。完整成功 200 `ok`；部分成功 200 `partial`，仍提交缓存且 `last_status=ok`、`last_error` 为空；抓取失败 502（超时 504）、内容无效或无可导入条目 422、输入错误 400、持久化失败 500、来源不存在 404，错误体 `details.result` 携带同一结果（仅限已完成的已分类结果）；请求在抓取进行中被取消时返回 503 固定文案“刷新已取消，来源状态保持不变”且不带结果，来源行、状态、缓存与订阅端点均不变。失败保留旧缓存行但 `last_status=failed`，该来源不进入订阅；`cached` 为现有行数，失败时 `usable=0`。`last_fetch_at` 是最近尝试，`last_success_at` 只在提交成功时更新；更换 URL 清空结果并回到 `pending`，不把旧结果当作新来源的结果。同一来源内 `name|protocol` 重复时保留文档顺序第一条，其余以 `duplicate_endpoint_key` 拒绝并附保留条目序号；完全相同的条目以 `duplicate_endpoint_content` 计为重复。诊断只含条目序号、协议、阶段、固定代码与固定文本，不含名称、UUID、密码或链接；手工刷新、定时刷新与粘贴导入共用同一分析路径。
@@ -379,6 +381,8 @@ v1.4 自建 VLESS 用户入站：Xray 支持 Reality TCP（无 flow/Vision）、
 同一节点按数字端口跨核心检查，不区分 TCP/UDP，转发范围每个端口均占用。手动保存检查启用入站对启用入站的冲突；禁用入站保存只检查持久声明。`port_claims` 无论启停始终保留，发布变更/删除成功前旧声明也保留。自动分配跳过所有入站（含禁用及范围）与声明；`ports/check` 同样报告禁用入站供提示，故其占用提示不等于手动保存必然失败。共享检查按 ID 排除自身，Agent 校验为最终门禁。
 
 协议、转发能力、WireGuard 与设备门控按入站所属核心的能力校验；组件正在被添加或移除（任务未落定）期间 `core` 不可选，保存草稿与发布都会拒绝，错误码 `core_pending`。
+
+入站传输（v1.5.2）：WebSocket、gRPC 只用于 VLESS 与 Trojan，xhttp 只用于 VLESS；HTTP、SOCKS5、Shadowsocks 入站只允许 TCP。规则在 `desiredstate.ValidateInboundTransport`，经 `proxy.ValidateInboundServerSettings` 在保存、`SnapshotIntent` 与发布前三处生效（快照校验节点全部入站，含禁用的），不进入 `Decode`，历史修订、回滚与备份仍可读取旧组合。编辑器只列可用传输，已保存的不合法值标「（现有值）」并要求改为 TCP。
 
 自建 VLESS 的 xhttp／Reality（v1.4，契约、渲染、密钥生命周期与订阅映射已实现）已加入 `desiredstate.ProtocolSettings` 的类型化服务端私有字段：`reality{private_key,public_key,handshake_target,server_names[],short_ids[]}` 与 `xhttp{host,path,mode}`。两者只接受 VLESS 入站；不接受 JSON 透传、`extra`／`xmux` 或未知键（API 与 `desiredstate.Decode` 均拒绝未知字段）。Reality 私钥只进加密的 `encrypted_settings` 与加密修订，普通读取（`mask`）、修订差异和预览只暴露公钥、握手目标、server names 与 Short ID；省略私钥的编辑沿用已存值，普通保存不轮换密钥。校验口径：两把 X25519 键均为无填充 base64url、32 字节，且公钥必须由私钥导出（角色正确）；Short ID 为 1–16 个字符的偶数位十六进制；server names 1–16 个、每个 ≤253 且无控制字符；握手目标由 Owner 必填 `host:port`，面板只校验语法，不做默认站点或网络可达检查（Agent 原生校验是最终门禁）；Reality 与普通 TLS 证书材料互斥。xhttp 只接受 `auto`／`packet-up`／`stream-up`／`stream-one` 这一 TCP/H2 承载子集，`path` 归 xhttp 自己，`service_name` 必须为空；Vision（`xtls-rprx-vision`）只允许 TCP 上的 TLS 或 Reality，xhttp／gRPC 上的 Vision 在保存前拒绝。
 
@@ -504,13 +508,17 @@ Direct；Block；指定 Outbound；指定出口组；指定 Proxy Chain。
 
 每个节点必须存在默认规则。
 
+一条策略里 Owner 直接写的域名、后缀、关键字与 CIDR 合计不超过 2000 条；引用的规则集（手写条目与外部来源缓存）展开后单条策略最多 50000 条（v1.5.2）。展开后超过 2000 条只发布到逐核上报 `expanded_policy_supported` 的 Agent，否则在快照与发布前给出带策略名与条数的中文提示，明确指定节点或节点组的策略在保存时就列出这些服务器；整份期望状态仍限 2 MiB。迁移 0142 写入一条默认禁用的「屏蔽回国」策略（`policy-block-china`：全部节点、匹配内置「国内」集合 `service-cn`、Block、优先级 1），它是普通策略，可编辑或删除，删除后不再写回。
+
 # 18. 服务规则模块
 
 服务规则用于将常见网站的域名集合封装成易于选择的服务。
 
 内置服务分类包括：
 
-Netflix；Disney+；YouTube；OpenAI；Google；GitHub；Telegram。
+Netflix；Disney+；YouTube；OpenAI；Google；GitHub；Telegram（迁移 0009，手写基础条目）；以及 v1.5.2 迁移 0142 按客户端「完整分流」预设补齐的广告拦截、AI 服务、微软服务、苹果服务、社交媒体、流媒体、游戏平台、教育资源、金融服务、云服务、Spotify、Pixiv、Abema、E-Hentai、代理服务、代理媒体、国内、私有网络。
+
+0142 为这 25 个内置集合挂上 MetaCubeX meta-rules-dat 的 yaml 来源（`testingcf.jsdelivr.net` 镜像，节点策略与客户端共用；mrs 只给客户端，面板不解析）；已有外部来源的内置集合不追加，Owner 已有同名自定义集合时跳过该项。面板只定时抓取被至少一条已启用节点策略引用的启用集合（`autoRefresh`），策略保存后立即抓取尚未成功的来源；未被引用的集合停止刷新但保留缓存，手动刷新不受限制。客户端规则引用不触发面板抓取，因为订阅直接输出来源地址。
 
 管理员不需要手工维护大量域名，只需要设置：
 
@@ -913,6 +921,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0139 `notifications` | 4 张表：`notification_rules`（7 类默认规则、阈值、持续窗口、冷却分钟及 CHECK 约束）、`notification_channels`（AES-256-GCM 密封配置、末 4 位摘要、投递状态与时间）、`notifications`（通知记录，90 天保留自动清理）、`notification_state`（去重状态与冷却追踪） |
 | 0140 `ruleset_sources` | `service_sets` / `service_set_entries` 增加 `keyword` 匹配类型支持；新增 `service_set_sources` 表（存储外部规则源 URL、格式 yaml/text/mrs、行为 classical/domain/ipcidr、刷新周期、运行状态及密封缓存） |
 | 0141 `tuning_recommendations` | 新增 `node_tuning_dismissals` 表（主键 `(node_id, key)`，列 `key` / `value` 记录不采纳的参数与推荐值，另存规则版本与时间，级联删除）；`node_meta` 扩充可空整数 `bandwidth_mbps`（1–100000 Mbps）；`system_settings` 新增 `tuning_auto_apply` 开关 |
+| 0142 `builtin_rule_sets` | 只写数据：新增 18 个内置规则集（`service-ads` … `service-private`，ID 或名称已存在则跳过）、为 25 个内置集合中尚无来源的写入 63 个 meta-rules-dat yaml 来源（ID `builtin-<集合>-<序号>`，`pending`）、更新 0009 集合仍为原文的描述，以及默认禁用的 `policy-block-china`（需内置 `service-cn` 存在）。不新增表，备份沿用 service_sets／service_set_sources／policies 的现有校验 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1264,6 +1273,7 @@ Agent 目录更新能力与端口协商（v1.5.0）：
 - `Capabilities.domain_keyword_supported`（字段 27，bool）与 `CoreCapability.domain_keyword_supported`（字段 13，bool）：逐核声明该核心的路由渲染器支持域名关键字（domain keyword）匹配规则。Xray 与 sing-box 各自上报为真，GOST 保持为假。
 - `Welcome.agent_catalogue_port`（字段 22，uint32）：面板告知 Agent 托管只读签名目录的 HTTP/HTTPS 端口号（未配置安装端点时取面板 Web 监听端口）。旧 Agent 忽略未知字段。
 - `Capabilities.port_hop_supported`（字段 28，bool）：Agent 声明 host-network helper 已安装，可维护 Hysteria2 跳跃表（第 12 节）。旧 Agent 不上报，面板在保存、快照与发布前三处拒绝跳跃入站。
+- `Capabilities.expanded_policy_supported`（字段 29，bool）与 `CoreCapability.expanded_policy_supported`（字段 14，bool）：逐核声明该核心的渲染器接受展开后最多 50000 条匹配的策略（v1.5.2；Xray 与 sing-box 上报为真，GOST 不渲染策略）。旧 Agent 不上报，面板对展开后超过 2000 条的策略按第 17 节拒绝。
 - `HostInfo` 扩充字段 11–18：`virtualization`（11，string）、`tuning_keys`（12，repeated TuningKeyState）、`congestion_available`（13，repeated string）、`congestion_loadable`（14，repeated string）、`qdisc_available`（15，repeated string）、`qdisc_loadable`（16，repeated string）、`fd_limits`（17，repeated ProcessLimit，包含 soft 与 hard）、`sysctl_sources`（18，repeated SysctlSource，包含 key/value/file）。
 - `Heartbeat` 扩充 `tcp_out_segs`（字段 37，uint64）与 `tcp_retrans_segs`（字段 38，uint64），用于面板计算每分钟 TCP 重传率。
 - `TuningResult` 扩充 `initial`（字段 4，map<string, string>，回传 19 键初始快照值）。

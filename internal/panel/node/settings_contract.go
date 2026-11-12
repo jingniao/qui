@@ -78,8 +78,9 @@ func KeywordCapability(core *pb.CoreCapability) desiredstate.CoreKeywordCapabili
 		return desiredstate.CoreKeywordCapability{}
 	}
 	return desiredstate.CoreKeywordCapability{
-		Name:                   core.Name,
-		DomainKeywordSupported: core.DomainKeywordSupported,
+		Name:                    core.Name,
+		DomainKeywordSupported:  core.DomainKeywordSupported,
+		ExpandedPolicySupported: core.ExpandedPolicySupported,
 	}
 }
 

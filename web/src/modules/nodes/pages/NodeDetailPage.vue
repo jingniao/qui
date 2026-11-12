@@ -60,6 +60,7 @@ import { choices } from '../../proxy/api';
 import { accessAPI } from '../../access/api';
 import { request } from '../../../app/apiClient';
 import { isOwner } from '../../../app/auth';
+import { nodeStatusMatches } from '../../../app/nodeStatusEvents';
 import { localInput, utcInput } from '../../../app/time';
 import ErrorState from '../../../components/ErrorState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
@@ -253,6 +254,11 @@ async function load() {
   }
 }
 
+// Only this node's status events (or the empty "all nodes" event) refresh the page.
+function nodeStatusChanged(event: Event) {
+  if (nodeStatusMatches(event, String(route.params.id || ''))) void load();
+}
+
 watch(() => route.params.id, () => {
   if (route.name !== 'NodeDetail') return;
   generation++;
@@ -277,7 +283,7 @@ onMounted(() => {
   timer = setInterval(() => {
     now.value = Date.now();
   }, 5000);
-  window.addEventListener('proxy-node-status', load);
+  window.addEventListener('proxy-node-status', nodeStatusChanged);
 });
 
 onUnmounted(() => {
@@ -287,6 +293,6 @@ onUnmounted(() => {
   cancelDiscard();
   generation++;
   if (timer) clearInterval(timer);
-  window.removeEventListener('proxy-node-status', load);
+  window.removeEventListener('proxy-node-status', nodeStatusChanged);
 });
 </script>

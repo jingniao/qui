@@ -90,10 +90,11 @@ export function formatMetricValue(key: MetricKey, value: number | null): string 
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-export type AxisUnit = 'percent' | 'bytes' | 'rate' | 'count' | 'load' | 'retrans';
+export type AxisUnit = 'percent' | 'bytes' | 'rate' | 'count' | 'load' | 'retrans' | 'ms';
 /** Compact y-axis tick label. */
 export function formatAxisTick(unit: AxisUnit, value: number): string {
   if (unit === 'percent') return `${value}%`;
+  if (unit === 'ms') return `${Number(value.toFixed(2))} ms`;
   if (unit === 'bytes') return formatBytes(value);
   if (unit === 'rate') return formatRate(value);
   if (unit === 'retrans') return `${Number(value.toFixed(2))}%`;

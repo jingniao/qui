@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -147,7 +148,7 @@ func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author stri
 			return Batch{}, err
 		}
 		if len(data) > 2<<20 {
-			return Batch{}, errors.New("node snapshot exceeds 2 MiB")
+			return Batch{}, fmt.Errorf("节点配置有 %.1f MiB，超过 2 MiB 上限；请减少策略引用的规则集", float64(len(data))/(1<<20))
 		}
 		sealed, err := r.Vault.Seal(data)
 		if err != nil {

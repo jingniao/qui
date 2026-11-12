@@ -385,6 +385,22 @@ assert.deepEqual(visibleFor(api.transportChoices(reported, '', 'vless', { securi
 assert.deepEqual(visibleFor(api.transportChoices(server, '', 'vless', { security: 'tls', transport: 'xhttp' }), 'xhttp'), ['tcp', 'ws', 'grpc', 'xhttp']);
 assert.deepEqual(visibleFor(api.securityChoices(server, '', 'vless', { transport: 'tcp' }), 'none'), ['none', 'tls']);
 assert.deepEqual(visibleFor(api.securityChoices(reported, '', 'vless', { transport: 'tcp' }), 'none'), ['none', 'tls', 'reality']);
+// HTTP, SOCKS5 and Shadowsocks are TCP only; VLESS and Trojan keep WebSocket/gRPC.
+for (const protocol of ['http', 'socks5', 'shadowsocks']) {
+  assert.deepEqual(visibleFor(api.transportChoices(server, '', protocol, { transport: 'tcp' }), 'tcp'), ['tcp'], protocol);
+  assert.deepEqual(visibleFor(api.transportChoices(server, '', protocol, {}), 'tcp'), ['tcp'], protocol);
+  // A stored invalid value is shown as the existing value and blocks saving until it is TCP.
+  const legacy = api.transportChoices(server, '', protocol, { transport: 'ws' });
+  assert.equal(legacy.find(c => c.value === 'ws').label, 'ws（现有值）');
+  assert.deepEqual(visibleFor(legacy, 'ws'), ['tcp', 'ws']);
+  assert.match(api.serverSettingsReason(server, '', protocol, { transport: 'ws' }), /只支持 TCP/);
+  assert.match(api.serverSettingsReason(server, '', protocol, { transport: 'xhttp', security: 'tls' }), /只支持 TCP/);
+  assert.equal(api.serverSettingsReason(server, '', protocol, { transport: 'tcp' }), '');
+}
+for (const protocol of ['vless', 'trojan']) {
+  assert.deepEqual(visibleFor(api.transportChoices(server, '', protocol, { transport: 'tcp' }), 'tcp'), ['tcp', 'ws', 'grpc'], protocol);
+  assert.equal(api.serverSettingsReason(server, '', protocol, { transport: 'ws' }), '');
+}
 assert.deepEqual(visibleFor(api.flowChoices(reported, '', 'vless', { security: 'reality', transport: 'grpc' }), ''), ['']);
 assert.deepEqual(visibleFor(api.flowChoices(reported, '', 'vless', { security: 'reality', transport: 'tcp' }), 'xtls-rprx-vision'), ['', 'xtls-rprx-vision']);
 assert.deepEqual(api.protocolChoices(server, '', ['vless', 'trojan', 'socks5'], 'vless'), ['vless']);

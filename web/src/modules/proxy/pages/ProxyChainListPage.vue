@@ -21,7 +21,7 @@
 </template>
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'; import { useRouter } from 'vue-router';
-import { proxyAPI, choices, healthLabel, type ProxyChain, type Outbound } from '../api'; import { deploymentAPI } from '../../system/deploymentApi'; import { request, type Page } from '../../../app/apiClient'; import { type NodeView } from '../../nodes/api'; import { showToast } from '../../../app/api';
+import { proxyAPI, choices, healthLabel, type ProxyChain, type Outbound } from '../api'; import { deploymentAPI } from '../../system/deploymentApi'; import { request, type Page } from '../../../app/apiClient'; import { type NodeView } from '../../nodes/api'; import { showToast } from '../../../app/api'; import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import PageHeader from '../../../components/PageHeader.vue'; import DataTable from '../../../components/DataTable.vue'; import StatusBadge from '../../../components/StatusBadge.vue'; import Pagination from '../../../components/Pagination.vue'; import ConfirmDialog from '../../../components/ConfirmDialog.vue'; import ErrorState from '../../../components/ErrorState.vue'; import LoadingSkeleton from '../../../components/LoadingSkeleton.vue'; import EmptyState from '../../../components/EmptyState.vue';
 const router = useRouter(); const chains = ref<ProxyChain[]>([]); const nodes = ref<NodeView[]>([]); const outbounds = ref<Outbound[]>([]); const nodeId = ref(''); const page = ref(1); const total = ref(0); const loading = ref(false); const busy = ref(false); const error = ref(''); const target = ref<ProxyChain | null>(null); const removeConfirm = ref(false);
 function nodeName(id: string) { return nodes.value.find(node => node.id === id)?.name || id; } function outboundName(id: string) { return id === 'direct' ? 'Direct' : id === 'block' ? 'Block' : outbounds.value.find(item => item.id === id)?.name || id; }
@@ -29,5 +29,6 @@ async function load() { if (loading.value) return; loading.value = true; try { c
 function changePage(value: number) { page.value = value; load(); }
 async function makeBatch(chain: ProxyChain) { if (busy.value) return; busy.value = true; try { await deploymentAPI.createBatch(chain.id, '更新代理链 ' + chain.name); showToast('批次草稿已创建，请确认发布'); await router.push('/system/revisions'); } catch (e) { showToast((e as Error).message, 'error'); } finally { busy.value = false; } }
 async function remove() { if (!target.value) return; try { await proxyAPI.deleteChain(target.value.id); showToast('代理链草稿已删除'); await load(); } catch (e) { showToast((e as Error).message, 'error'); } }
-onMounted(() => { load(); window.addEventListener('proxy-node-status', load); }); onUnmounted(() => window.removeEventListener('proxy-node-status', load));
+const reloadOnNodeStatus = throttleTrailing(() => { void load(); }, 5000);
+onMounted(() => { load(); window.addEventListener('proxy-node-status', reloadOnNodeStatus); }); onUnmounted(() => { reloadOnNodeStatus.cancel(); window.removeEventListener('proxy-node-status', reloadOnNodeStatus); });
 </script>

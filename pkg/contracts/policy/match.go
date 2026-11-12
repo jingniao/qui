@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	_ "time/tzdata"
+	"unicode"
 )
 
 type Request struct {
@@ -207,7 +207,35 @@ func ScopeMatches(scope desiredstate.Scope, request Request) bool {
 	}
 	return true
 }
-func Validate(rule *desiredstate.Policy) error {
+
+// MaxMatchers bounds the entries an Owner writes into one policy or service
+// rule. MaxExpandedMatchers bounds one policy after its service rules and their
+// external sources were expanded into it (v1.5.2): the built-in 国内 set alone
+// carries about 15000 entries. Only Agents whose cores report
+// ExpandedPolicySupported accept more than MaxMatchers (see
+// desiredstate.RequireExpandedPolicySupport).
+const (
+	MaxMatchers         = desiredstate.MaxPolicyMatchers
+	MaxExpandedMatchers = desiredstate.MaxExpandedPolicyMatchers
+)
+
+// ErrMatcherLimit is returned when a policy has too many match entries.
+var ErrMatcherLimit = errors.New("policy matcher limit exceeded")
+
+// MatcherCount is the number of domain, suffix, keyword and CIDR entries.
+func MatcherCount(rule desiredstate.Policy) int {
+	return len(rule.Match.Domains) + len(rule.Match.Suffixes) + len(rule.Match.Keywords) + len(rule.Match.CIDRs)
+}
+
+// Validate checks a policy as the Owner saves it: at most MaxMatchers entries.
+func Validate(rule *desiredstate.Policy) error { return validate(rule, MaxMatchers) }
+
+// ValidateExpanded checks a policy whose service rules were expanded into it,
+// as the panel publishes it and the Agent renders it: at most
+// MaxExpandedMatchers entries.
+func ValidateExpanded(rule *desiredstate.Policy) error { return validate(rule, MaxExpandedMatchers) }
+
+func validate(rule *desiredstate.Policy, maxMatchers int) error {
 	if rule.ID == "" || len(rule.ID) > 128 || len(rule.Name) > 240 || rule.Priority < 0 || rule.Priority > 1000000 {
 		return errors.New("invalid policy identity or priority")
 	}
@@ -223,8 +251,8 @@ func Validate(rule *desiredstate.Policy) error {
 			seen[id] = true
 		}
 	}
-	if len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) > 2000 || len(rule.Match.Ports) > 100 || len(rule.Match.ServiceIDs) > 32 {
-		return errors.New("policy matcher limit exceeded")
+	if MatcherCount(*rule) > maxMatchers || len(rule.Match.Ports) > 100 || len(rule.Match.ServiceIDs) > 32 {
+		return ErrMatcherLimit
 	}
 	for index, value := range rule.Match.Domains {
 		domain, err := Domain(value, true)

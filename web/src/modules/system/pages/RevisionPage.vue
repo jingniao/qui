@@ -51,6 +51,7 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue';
 import { request, type Page } from '../../../app/apiClient';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { deploymentAPI, type Revision, type DeploymentBatch, type ChainChoice, type RevisionDiff } from '../deploymentApi';
 import { revisionResult } from '../revisionResult';
@@ -109,8 +110,9 @@ async function create() {
 }
 function confirmPublish(revision: Revision) { target.value = revision; confirmVisible.value = true; }
 async function publish() { if (!target.value) return; try { await request(`/revisions/${target.value.id}/deploy`, 'POST'); showToast('发布已排队，节点确认后会更新结果', 'info'); await load(); } catch (e) { showToast((e as Error).message, 'error'); } }
-onMounted(() => { load(); window.addEventListener('proxy-node-status', load); window.addEventListener('proxy-deployment-status', load); });
-onUnmounted(() => { clearDiff(); window.removeEventListener('proxy-node-status', load); window.removeEventListener('proxy-deployment-status', load); });
+const reloadOnNodeStatus = throttleTrailing(() => { void load(); }, 5000);
+onMounted(() => { load(); window.addEventListener('proxy-node-status', reloadOnNodeStatus); window.addEventListener('proxy-deployment-status', load); });
+onUnmounted(() => { clearDiff(); reloadOnNodeStatus.cancel(); window.removeEventListener('proxy-node-status', reloadOnNodeStatus); window.removeEventListener('proxy-deployment-status', load); });
 </script>
 
 

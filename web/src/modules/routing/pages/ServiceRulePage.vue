@@ -265,6 +265,8 @@ function copy(service: ServiceSet) {
 function sourceStatus(service: ServiceSet) {
   const statuses = service.sources.map(s => s.lastStatus);
   if (statuses.includes('failed')) return { label: '失败', tone: 'text-red-600' };
+  // v1.5.2: sources of a set no enabled node policy names are not fetched on a schedule.
+  if (!service.autoRefresh && statuses.some(s => s !== 'ok')) return { label: '未被策略引用，不自动刷新', tone: 'text-neutral-500' };
   if (statuses.some(s => s !== 'ok')) return { label: '待抓取', tone: 'text-amber-700' };
   return { label: '成功', tone: 'text-emerald-600' };
 }

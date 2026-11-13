@@ -35,7 +35,7 @@ func TestRefresherFetchesOnlyReferencedSets(t *testing.T) {
 	}
 
 	service, err := repo.Service(ctx, "service-cn")
-	if err != nil || service.AutoRefresh || len(service.Sources) != 2 {
+	if err != nil || service.AutoRefresh || len(service.Sources) != 4 {
 		t.Fatal("built-in 国内 set", service, err)
 	}
 	done := make(chan struct{})

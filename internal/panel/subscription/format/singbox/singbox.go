@@ -29,10 +29,9 @@ func (Exporter) Aliases() []string   { return nil }
 func (Exporter) ContentType() string { return "application/json; charset=utf-8" }
 func (Exporter) FileName() string    { return "qui-sing-box.json" }
 
-// UserAgents returns the client patterns for this format. v1.1 ships none: no
-// client User-Agent could be verified from an official source
-// (docs/archive/v1.1-phase0-findings.md A.7).
-func (Exporter) UserAgents() []string { return nil }
+// UserAgents lists the official sing-box clients (SFA, SFI, SFM, SFT) and the
+// sing-box core itself.
+func (Exporter) UserAgents() []string { return []string{"sing-box", "sfa/", "sfi/", "sfm/", "sft/"} }
 
 func (Exporter) UsesRules() bool { return false }
 

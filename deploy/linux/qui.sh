@@ -3,7 +3,8 @@
 # deploy/linux/install.sh --panel and started by typing "qui" in an SSH session.
 #
 # It is a thin wrapper around the packaged program: the Owner credential reset
-# runs the panel binary offline (--set-owner-credentials), a port change edits
+# runs the panel binary offline (--set-owner-credentials), viewing or resetting
+# the admin login path runs it offline too (--admin-entry show|reset), a port change edits
 # only the port of the http_address line and lets the binary validate the
 # candidate file before it replaces the configuration, the remaining items call
 # systemctl, and the update item runs the packaged updater. Nothing else is
@@ -123,6 +124,40 @@ reset_owner_credentials() {
   fi
 }
 
+# 7. Show or reset the admin login path (--admin-entry). The Owner may have
+# forgotten the custom address; only root on the server can recover it. The panel
+# is stopped for the offline commands and started again in every path when it was
+# active before.
+admin_login_entry() {
+  local answer='' status=0 was_active=false
+  printf '查看／重置管理员登录地址：面板会短暂停止。\n'
+  printf '继续将停止 %s，然后以服务账号运行 --admin-entry。继续？[y/N] ' "$service"
+  read -r answer || answer=''
+  if [[ $answer != y && $answer != Y ]]; then printf '已取消，未做任何修改。\n'; return 0; fi
+  if service_active; then was_active=true; fi
+  if ! systemctl stop "$service"; then
+    printf '无法停止 %s，未做任何修改。\n' "$service"
+    if $was_active; then systemctl start "$service" || true; fi
+    return 0
+  fi
+  runuser -u "$account" -- "$program" --config "$config" --admin-entry show || status=$?
+  if ((status == 0)); then
+    printf '重置为 /login？[y/N] '
+    read -r answer || answer=''
+    if [[ $answer == y || $answer == Y ]]; then
+      runuser -u "$account" -- "$program" --config "$config" --admin-entry reset || status=$?
+      if ((status != 0)); then printf '重置管理员登录地址失败（退出码 %d）。\n' "$status"; fi
+    else
+      printf '未修改。\n'
+    fi
+  else
+    printf '读取管理员登录地址失败（退出码 %d）。\n' "$status"
+  fi
+  if $was_active; then
+    systemctl start "$service" || printf '启动 %s 失败；查看日志：journalctl -u %s -n 50\n' "$service" "$service"
+  fi
+}
+
 # 2. Change the web port only. The candidate file is written next to the
 # configuration, validated by the program, and only then moved over the original
 # with the original owner and mode; the previous configuration is kept as
@@ -230,6 +265,7 @@ print_menu() {
   printf '4. 启动\n'
   printf '5. 停止\n'
   printf '6. 更新（从 GitHub）\n'
+  printf '7. 查看／重置管理员登录地址\n'
   printf '0. 退出\n\n'
 }
 
@@ -246,6 +282,7 @@ main() {
       4) start_panel;;
       5) stop_panel;;
       6) update_panel;;
+      7) admin_login_entry;;
       0) printf '再见。\n'; return 0;;
       *) printf '无效选择：%s\n' "$choice"; continue;;
     esac

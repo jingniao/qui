@@ -80,7 +80,7 @@ func (m *MultiRuntime) DetectCapabilities(ctx context.Context) (*pb.Capabilities
 		if name == m.primary {
 			result = proto.Clone(c).(*pb.Capabilities)
 		}
-		cores = append(cores, &pb.CoreCapability{Name: name, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, GostContractVersion: gostContract(name), ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations, TlsCertificateFilesSupported: c.TlsCertificateFilesSupported, DomainKeywordSupported: c.DomainKeywordSupported, ExpandedPolicySupported: c.ExpandedPolicySupported})
+		cores = append(cores, &pb.CoreCapability{Name: name, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, GostContractVersion: gostContract(name), ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations, TlsCertificateFilesSupported: c.TlsCertificateFilesSupported, DomainKeywordSupported: c.DomainKeywordSupported, ExpandedPolicySupported: c.ExpandedPolicySupported, NativeRuleSetsSupported: c.NativeRuleSetsSupported})
 	}
 	result.Cores, result.MultiCoreSupported = cores, true
 	return result, nil
@@ -94,6 +94,53 @@ func gostContract(name string) uint32 {
 		return desiredstate.GostContractVersion
 	}
 	return 0
+}
+
+// RuleSetPreparer is implemented by cores that read node-native rule set files
+// (v1.5.4 item 5). PrepareRuleSets downloads what a revision needs before it is
+// rendered; CleanupRuleSets removes files no given state references.
+type RuleSetPreparer interface {
+	PrepareRuleSets(context.Context, desiredstate.State) error
+	CleanupRuleSets(...desiredstate.State)
+}
+
+// PrepareRuleSets prepares the rule set files of every core that will run part
+// of s. The adapter set is fixed at construction, so no lock is held across the
+// downloads.
+func (m *MultiRuntime) PrepareRuleSets(ctx context.Context, s desiredstate.State) error {
+	for _, name := range m.names {
+		preparer, ok := m.runtimes[name].(RuleSetPreparer)
+		if !ok {
+			continue
+		}
+		part := s.ForCore(name, m.primary)
+		active := false
+		for _, in := range part.Inbounds {
+			active = active || in.Enabled
+		}
+		if !active {
+			continue
+		}
+		if err := preparer.PrepareRuleSets(ctx, part); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CleanupRuleSets removes, per core, the rule set files none of states needs.
+func (m *MultiRuntime) CleanupRuleSets(states ...desiredstate.State) {
+	for _, name := range m.names {
+		preparer, ok := m.runtimes[name].(RuleSetPreparer)
+		if !ok {
+			continue
+		}
+		parts := make([]desiredstate.State, 0, len(states))
+		for _, s := range states {
+			parts = append(parts, s.ForCore(name, m.primary))
+		}
+		preparer.CleanupRuleSets(parts...)
+	}
 }
 
 func (m *MultiRuntime) Render(ctx context.Context, s desiredstate.State) (RenderedConfig, error) {

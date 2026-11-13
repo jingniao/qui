@@ -94,8 +94,17 @@ func TestConcurrentBatchDeduplicationAndConflictDoesNotAddTraffic(t *testing.T) 
 func TestAccessSnapshotAttributionAndStaleSequenceValidation(t *testing.T) {
 	r, s, record := fixture(t)
 	batch := contract.Batch{ID: "good", NodeID: record.NodeID, Records: []contract.Rollup{record}}
-	if err := submit(t, s, batch, false); err == nil {
-		t.Fatal("stale sequence created a batch")
+	// Every refusal carries the fixed reason the panel logs (v1.5.4 item 3).
+	reasonOf := func(err error) string {
+		var coded interface{ RejectionReason() (string, int64) }
+		if !errors.As(err, &coded) {
+			return "invalid"
+		}
+		reason, _ := coded.RejectionReason()
+		return reason
+	}
+	if err := submit(t, s, batch, false); err == nil || reasonOf(err) != "stale_sequence" {
+		t.Fatal("stale sequence created a batch", err)
 	}
 	if err := submit(t, s, batch, true); err != nil {
 		t.Fatal(err)
@@ -109,6 +118,8 @@ func TestAccessSnapshotAttributionAndStaleSequenceValidation(t *testing.T) {
 		badBatch := contract.Batch{ID: []string{"bad-user", "bad-device", "bad-revision", "bad-rule", "bad-outbound", "bad-content", "bad-clock", "bad-exit"}[index], NodeID: record.NodeID, Records: []contract.Rollup{bad}}
 		if err := submit(t, s, badBatch, true); err == nil {
 			t.Fatal("invalid access metadata accepted", index)
+		} else if want := []string{"identity_conflict", "identity_conflict", "revision_not_applied", "rule_unknown", "outbound_unknown", "invalid", "future_time", "egress_unobserved"}[index]; reasonOf(err) != want {
+			t.Fatalf("%s rejected as %q, want %q", badBatch.ID, reasonOf(err), want)
 		}
 	}
 	state := s.Snapshots.(snapshots).state

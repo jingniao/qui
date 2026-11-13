@@ -74,7 +74,7 @@ func TestAssembledPolicyRepositoryResolvesRefreshedSources(t *testing.T) {
 	if err != nil || len(rules) != 1 || !rules[0].Enabled || len(rules[0].Match.Domains) != 1 || rules[0].Match.Domains[0] != "chatgpt.com" {
 		t.Fatalf("external rules missing: %+v %v", rules, err)
 	}
-	if _, err := app.Database.ExecContext(ctx, "UPDATE service_set_sources SET encrypted_cache=?", []byte("invalid")); err != nil {
+	if _, err := app.Database.ExecContext(ctx, "UPDATE service_set_sources SET encrypted_cache=? WHERE format<>'native'", []byte("invalid")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.ForNode(ctx, n.ID); err == nil {

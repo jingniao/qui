@@ -29,6 +29,7 @@
     <BackupSchedulePanel v-else-if="activeTab === 'backup'" />
     <NotificationSettings v-else-if="isOwner && activeTab === 'notifications'" />
     <RuntimeSettingsPanel v-else :key="activeTab" :kind="runtimeTab" />
+    <AdminEntryPanel v-if="isOwner && activeTab === 'security'" />
     <section v-if="isOwner && activeTab === 'base'" class="panel-card p-6 max-w-3xl space-y-5 text-sm">
       <div class="flex flex-wrap justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">节点安装连接地址</h2><button class="ios-btn-secondary" :disabled="endpointLoading || endpointSaving" @click="loadEndpoint">刷新已保存地址</button></div>
       <ErrorState v-if="endpointError" :message="endpointError" @retry="loadEndpoint" /><LoadingSkeleton v-else-if="!endpointSaved" />
@@ -92,6 +93,7 @@ import BackupSchedulePanel from '../components/BackupSchedulePanel.vue';
 import LatencyTargetsPanel from '../components/LatencyTargetsPanel.vue';
 import RuntimeSettingsPanel from '../components/RuntimeSettingsPanel.vue';
 import CertificatesPanel from '../components/CertificatesPanel.vue';
+import AdminEntryPanel from '../components/AdminEntryPanel.vue';
 import PanelUpdatePanel from '../components/PanelUpdatePanel.vue';
 import RetentionJobPanel from '../components/RetentionJobPanel.vue';
 import StorageObservationPanel from '../components/StorageObservationPanel.vue';

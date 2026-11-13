@@ -98,7 +98,7 @@
         </div>
         <p v-if="props.service && !props.clone && form.sources.length && !props.service.autoRefresh" class="text-xs text-neutral-500">未被启用的节点策略引用，不自动刷新；节点策略引用后会立即抓取，也可以手动刷新。客户端订阅直接下载来源地址，不受影响。</p>
         <div v-if="!form.sources.length" class="text-xs text-neutral-400 py-1">
-          未配置外部来源（支持纯文本、YAML 或 MRS 规则集）
+          未配置外部来源（支持纯文本、YAML、MRS 规则集或节点原生规则集）
         </div>
         <div
           v-for="(source, idx) in form.sources"
@@ -108,14 +108,17 @@
           <div class="flex items-center justify-between gap-2">
             <span class="text-xs font-bold text-neutral-700">来源 #{{ idx + 1 }}</span>
             <div class="flex items-center gap-2">
-              <span v-if="source.nodeUsable === false" class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700">
+              <span v-if="source.format === 'native'" class="px-1.5 py-0.5 rounded text-xs font-bold bg-sky-50 text-sky-700">
+                仅节点可用 · 由节点下载
+              </span>
+              <span v-else-if="source.nodeUsable === false" class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700">
                 仅客户端可用
               </span>
               <span v-else-if="source.nodeUsable" class="px-1.5 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-700">
                 节点可用
               </span>
               <button
-                v-if="editingId && source.id"
+                v-if="editingId && source.id && source.format !== 'native'"
                 type="button"
                 @click="refreshSource(source)"
                 :disabled="refreshingSourceId === source.id"
@@ -133,8 +136,8 @@
             </div>
           </div>
           <label class="block">
-            <span class="text-xs text-neutral-500">来源 URL</span>
-            <input v-model="source.url" placeholder="https://example.com/rules.txt" class="form-input-base mt-1 text-xs" required />
+            <span class="text-xs text-neutral-500">{{ source.format === 'native' ? 'sing-box 规则集地址 (.srs)' : '来源 URL' }}</span>
+            <input v-model="source.url" :placeholder="source.format === 'native' ? 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs' : 'https://example.com/rules.txt'" class="form-input-base mt-1 text-xs" required />
           </label>
           <div class="grid grid-cols-3 gap-2">
             <label class="block">
@@ -143,12 +146,13 @@
                 <option value="text">text</option>
                 <option value="yaml">yaml</option>
                 <option value="mrs">mrs</option>
+                <option value="native">节点原生（sing-box .srs ＋ Xray geosite/geoip）</option>
               </select>
             </label>
             <label class="block">
               <span class="text-xs text-neutral-500">行为</span>
               <select v-model="source.behavior" class="form-input-base mt-1 text-xs py-1">
-                <option v-if="source.format !== 'mrs'" value="classical">classical</option>
+                <option v-if="source.format !== 'mrs' && source.format !== 'native'" value="classical">classical</option>
                 <option value="domain">domain</option>
                 <option value="ipcidr">ipcidr</option>
               </select>
@@ -158,7 +162,18 @@
               <input v-model.number="source.intervalSeconds" type="number" min="3600" max="604800" class="form-input-base mt-1 text-xs py-1" />
             </label>
           </div>
-          <div v-if="source.lastStatus" class="flex flex-wrap items-center gap-x-3 text-xs text-neutral-500 pt-1 border-t border-black/[0.04]">
+          <div v-if="source.format === 'native'" class="grid grid-cols-1 gap-2">
+            <label class="block">
+              <span class="text-xs text-neutral-500">Xray 数据文件地址 (.dat)</span>
+              <input v-model="source.xrayUrl" placeholder="https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat" class="form-input-base mt-1 text-xs" required />
+            </label>
+            <label class="block">
+              <span class="text-xs text-neutral-500">Xray 标签（例如 cn）</span>
+              <input v-model="source.xrayTag" placeholder="cn" class="form-input-base mt-1 text-xs" required />
+            </label>
+            <p class="text-xs text-neutral-500">由节点 Agent 自行下载并校验，面板不抓取；domain 对应 geosite，ipcidr 对应 geoip。仅对上报支持的节点生效，其他节点继续使用其余来源。</p>
+          </div>
+          <div v-if="source.format !== 'native' && source.lastStatus" class="flex flex-wrap items-center gap-x-3 text-xs text-neutral-500 pt-1 border-t border-black/[0.04]">
             <span>状态: <strong :class="source.lastStatus === 'ok' ? 'text-emerald-600' : 'text-red-600'">{{ source.lastStatus }}</strong></span>
             <span v-if="source.entryCount != null">条目: {{ source.entryCount }}</span>
             <span v-if="source.skippedCount != null">跳过: {{ source.skippedCount }}</span>
@@ -230,7 +245,9 @@ function removeSource(index: number) {
 }
 
 function onFormatChange(source: SourceInput) {
-  if (source.format === 'mrs' && source.behavior === 'classical') {
+  // 节点原生来源的 ID 会成为节点上规则集的标签，只接受小写 ID；旧的混合大小写 ID 让后端重新生成。
+  if (source.format === 'native' && source.id && !/^[a-z0-9][a-z0-9_-]*$/.test(source.id)) source.id = undefined;
+  if ((source.format === 'mrs' || source.format === 'native') && source.behavior === 'classical') {
     source.behavior = 'domain';
   }
 }
@@ -287,7 +304,8 @@ function buildPayload(): ServiceInput {
       url: s.url.trim(),
       format: s.format,
       behavior: s.behavior,
-      intervalSeconds: Number(s.intervalSeconds) || 86400
+      intervalSeconds: Number(s.intervalSeconds) || 86400,
+      ...(s.format === 'native' ? { xrayUrl: (s.xrayUrl || '').trim(), xrayTag: (s.xrayTag || '').trim() } : {})
     }))
   };
 }

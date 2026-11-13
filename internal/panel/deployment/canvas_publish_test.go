@@ -8,8 +8,8 @@ import (
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 

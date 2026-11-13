@@ -15,8 +15,8 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/portal"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 const timestampLayout = "2006-01-02T15:04:05.000000000Z"

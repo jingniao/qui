@@ -10,12 +10,14 @@ import (
 )
 
 // Only authenticated allowed records may be sacrificed for capacity. Priority
-// metadata alone cannot authorize deletion of an original damaged batch.
+// metadata alone cannot authorize deletion of an original damaged batch. A
+// quarantined batch is retained like a quarantined traffic batch, never evicted;
+// when only quarantined allowed batches are left, the spool reports ErrFull.
 func (s *Spool) evictAllowedTx(ctx context.Context, tx *sql.Tx) (int64, int64, error) {
 	var identity string
 	var sealed []byte
 	var count int64
-	err := tx.QueryRowContext(ctx, "SELECT "+criticalTextSQL("id", 128)+",CASE WHEN typeof(records)='integer' THEN records ELSE -1 END,"+criticalPayloadSQL+" FROM batches WHERE blocked=0 ORDER BY rowid LIMIT 1", maxQueuedBatchBytes).Scan(&identity, &count, &sealed)
+	err := tx.QueryRowContext(ctx, "SELECT "+criticalTextSQL("id", 128)+",CASE WHEN typeof(records)='integer' THEN records ELSE -1 END,"+criticalPayloadSQL+" FROM batches WHERE blocked=0 AND quarantined=0 ORDER BY rowid LIMIT 1", maxQueuedBatchBytes).Scan(&identity, &count, &sealed)
 	if err != nil {
 		return 0, 0, err
 	}

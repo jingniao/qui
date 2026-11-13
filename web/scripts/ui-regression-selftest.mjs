@@ -279,10 +279,10 @@ assert.equal(failedA[0].link, '/nodes/online?tab=revisions');
 assert.ok(!failedA.some(i => i.link.includes('recovered')));
 console.log('PASS walkthrough A dashboard: disabled/expired/quota users, pending/degraded nodes, measured health, latest results and node links');
 
-for (const path of ['modules/nodes/components/ServerMetricsGrid.vue', 'modules/nodes/components/detail/ServerTuning.vue', 'portal/PortalPage.vue']) assert.doesNotMatch(read(path), /\.toLocaleString\s*\(/, path + ' uses explicit Chinese time formatting');
+for (const path of ['modules/nodes/components/ServerMetricsGrid.vue', 'modules/nodes/components/detail/ServerTuning.vue', 'portal/PortalPage.vue', 'portal/format.ts', 'portal/PortalOverview.vue', 'portal/PortalTraffic.vue', 'portal/PortalAccount.vue']) assert.doesNotMatch(read(path), /\.toLocaleString\s*\(/, path + ' uses explicit Chinese time formatting');
 assert.match(read('modules/nodes/components/ServerMetricsGrid.vue'), /formatTime\(/);
 assert.match(read('modules/nodes/components/detail/ServerTuning.vue'), /formatTime\(/);
-assert.match(read('portal/PortalPage.vue'), /Intl\.DateTimeFormat\('zh-CN'/);
+assert.match(read('portal/format.ts'), /Intl\.DateTimeFormat\('zh-CN'/);
 globalThis.walkthroughAuth = { timezone: 'Asia/Shanghai' };
 const hostCodeA = ts.transpileModule(read('modules/nodes/metrics.ts'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 globalThis.walkthroughHostMetrics = (await import('data:text/javascript;base64,' + Buffer.from(hostCodeA).toString('base64'))).hostMetrics;

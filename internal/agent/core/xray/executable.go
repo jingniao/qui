@@ -4,7 +4,20 @@ import (
 	"context"
 	"errors"
 	"proxycontrol/internal/agent/core"
+	"proxycontrol/internal/agent/rulesets"
+	"proxycontrol/pkg/contracts/desiredstate"
 )
+
+// PrepareRuleSets makes the native rule set files state's policies reference
+// available in this core's rulesets directory (v1.5.4 item 5).
+func (a *Adapter) PrepareRuleSets(ctx context.Context, state desiredstate.State) error {
+	return a.RuleSets.Ensure(ctx, a.Directory, rulesets.Needs("xray", state))
+}
+
+// CleanupRuleSets deletes the rule set files none of states references.
+func (a *Adapter) CleanupRuleSets(states ...desiredstate.State) {
+	rulesets.Cleanup(a.Directory, rulesets.Keep("xray", states...))
+}
 
 func (a *Adapter) ExecutablePath() string { a.mu.Lock(); defer a.mu.Unlock(); return a.Path }
 

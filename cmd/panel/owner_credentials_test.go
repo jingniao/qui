@@ -14,8 +14,8 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/panelstore"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 const (

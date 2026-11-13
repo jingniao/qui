@@ -6,8 +6,8 @@ import (
 	"net/netip"
 	"strings"
 
-	shared "proxycontrol/pkg/contracts/policy"
 	"gopkg.in/yaml.v3"
+	shared "proxycontrol/pkg/contracts/policy"
 )
 
 type ParsedEntries = shared.ParsedEntries

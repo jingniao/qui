@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 type SourceFetcher interface {
@@ -33,6 +35,20 @@ type ExternalSource struct {
 	LastSuccessAt   *string `json:"lastSuccessAt"`
 	EntryCount      int     `json:"entryCount"`
 	SkippedCount    int     `json:"skippedCount"`
+	// XrayURL and XrayTag belong to format "native" (v1.5.4): URL is then the
+	// sing-box .srs file, XrayURL the Xray geosite/geoip .dat and XrayTag the
+	// tag in it. The node Agent downloads them; the panel never does.
+	XrayURL string `json:"xrayUrl"`
+	XrayTag string `json:"xrayTag"`
+}
+
+// ErrNativeSourceRefresh is returned when a refresh names a native source.
+var ErrNativeSourceRefresh = errors.New("节点原生规则集由节点 Agent 下载，面板不抓取")
+
+// sourceUsability reports where a source can be used: a native source only
+// on nodes, an mrs source only by clients' providers (v1.5.4 item 5).
+func sourceUsability(format string) (nodeUsable, clientUsable bool) {
+	return format != "mrs", format != "native"
 }
 
 type SourceInput struct {
@@ -41,6 +57,8 @@ type SourceInput struct {
 	Format          string `json:"format"`
 	Behavior        string `json:"behavior"`
 	IntervalSeconds int    `json:"intervalSeconds"`
+	XrayURL         string `json:"xrayUrl,omitempty"`
+	XrayTag         string `json:"xrayTag,omitempty"`
 }
 
 func (r *Repository) SaveSources(ctx context.Context, tx *sql.Tx, serviceID string, inputs []SourceInput) error {
@@ -77,11 +95,8 @@ func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID st
 	}
 
 	for _, in := range inputs {
-		if !importer.ValidURL(in.URL) {
-			return errors.New("invalid source url")
-		}
 		format := strings.ToLower(strings.TrimSpace(in.Format))
-		if format != "yaml" && format != "text" && format != "mrs" {
+		if format != "yaml" && format != "text" && format != "mrs" && format != "native" {
 			return errors.New("invalid source format")
 		}
 		behavior := strings.ToLower(strings.TrimSpace(in.Behavior))
@@ -90,6 +105,31 @@ func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID st
 		}
 		if format == "mrs" && behavior != "domain" && behavior != "ipcidr" {
 			return errors.New("mrs format requires domain or ipcidr behavior")
+		}
+		if format == "native" {
+			if behavior != "domain" && behavior != "ipcidr" {
+				return errors.New("节点原生规则集的类型只能是 domain 或 ipcidr")
+			}
+			if !desiredstate.RuleSetURLAllowed(in.URL, true) {
+				return errors.New("sing-box 规则集地址必须是 meta-rules-dat 的 HTTPS .srs 文件（testingcf／cdn／fastly.jsdelivr.net，sing 分支 geo/geosite 或 geo/geoip）")
+			}
+			if !desiredstate.RuleSetURLAllowed(in.XrayURL, false) {
+				return errors.New("Xray 数据文件地址必须是 meta-rules-dat 的 HTTPS geosite.dat 或 geoip.dat（release 分支）")
+			}
+			interval := in.IntervalSeconds
+			if interval == 0 {
+				interval = 86400
+			}
+			if err := desiredstate.ValidateRuleSet(desiredstate.RuleSet{ID: nativeSourceID(in.ID), Behavior: behavior, SingBoxURL: in.URL, XrayURL: in.XrayURL, XrayTag: in.XrayTag, RefreshSeconds: interval}); err != nil {
+				return fmt.Errorf("节点原生规则集无效：%w（类型、两个文件与标签须一致：domain 对应 geosite，ipcidr 对应 geoip）", err)
+			}
+		} else {
+			if in.XrayURL != "" || in.XrayTag != "" {
+				return errors.New("只有节点原生规则集可以填写 Xray 数据文件地址与标签")
+			}
+			if !importer.ValidURL(in.URL) {
+				return errors.New("invalid source url")
+			}
 		}
 		if in.IntervalSeconds != 0 && (in.IntervalSeconds < 3600 || in.IntervalSeconds > 604800) {
 			return errors.New("interval must be between 3600 and 604800 seconds")
@@ -155,16 +195,20 @@ func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID st
 			}
 		} else {
 			var err error
-			sourceID, err = id.New()
+			if format == "native" {
+				sourceID, err = newNativeSourceID()
+			} else {
+				sourceID, err = id.New()
+			}
 			if err != nil {
 				return err
 			}
 		}
 
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO service_set_sources(id, service_id, url, format, behavior, interval_seconds, position, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, encrypted_cache, created_at, updated_at)
-			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			sourceID, serviceID, in.URL, format, behavior, interval, pos, lastStatus, lastErrorCode, lastFetchAt, lastSuccessAt, entryCount, skippedCount, encryptedCache, createdAt, now); err != nil {
+			`INSERT INTO service_set_sources(id, service_id, url, format, behavior, interval_seconds, position, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, encrypted_cache, created_at, updated_at, xray_url, xray_tag)
+			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			sourceID, serviceID, in.URL, format, behavior, interval, pos, lastStatus, lastErrorCode, lastFetchAt, lastSuccessAt, entryCount, skippedCount, encryptedCache, createdAt, now, in.XrayURL, in.XrayTag); err != nil {
 			return err
 		}
 	}
@@ -175,7 +219,7 @@ func (r *Repository) saveSourcesTx(ctx context.Context, tx *sql.Tx, serviceID st
 func (r *Repository) SourceEntries(ctx context.Context, serviceID string) (ParsedEntries, error) {
 	rows, err := r.Database.QueryContext(ctx,
 		`SELECT encrypted_cache FROM service_set_sources
-		 WHERE service_id=? AND format <> 'mrs' AND encrypted_cache IS NOT NULL
+		 WHERE service_id=? AND format NOT IN ('mrs','native') AND encrypted_cache IS NOT NULL
 		 ORDER BY position ASC`, serviceID)
 	if err != nil {
 		return ParsedEntries{}, err
@@ -313,6 +357,9 @@ func (s *SourceRefresher) Refresh(ctx context.Context, sourceID string) (Externa
 	if format == "mrs" {
 		return s.readSource(ctx, sourceID)
 	}
+	if format == "native" {
+		return ExternalSource{}, ErrNativeSourceRefresh
+	}
 
 	nowStr := s.now().UTC().Format(time.RFC3339Nano)
 
@@ -387,9 +434,9 @@ func (s *SourceRefresher) readSource(ctx context.Context, sourceID string) (Exte
 	var src ExternalSource
 	var lastFetch, lastSuccess sql.NullString
 	err := s.Repository.Database.QueryRowContext(ctx,
-		`SELECT id, url, format, behavior, interval_seconds, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count
+		`SELECT id, url, format, behavior, interval_seconds, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, xray_url, xray_tag
 		 FROM service_set_sources WHERE id=?`, sourceID).
-		Scan(&src.ID, &src.URL, &src.Format, &src.Behavior, &src.IntervalSeconds, &src.LastStatus, &src.LastErrorCode, &lastFetch, &lastSuccess, &src.EntryCount, &src.SkippedCount)
+		Scan(&src.ID, &src.URL, &src.Format, &src.Behavior, &src.IntervalSeconds, &src.LastStatus, &src.LastErrorCode, &lastFetch, &lastSuccess, &src.EntryCount, &src.SkippedCount, &src.XrayURL, &src.XrayTag)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ExternalSource{}, ErrNotFound
 	}
@@ -402,8 +449,7 @@ func (s *SourceRefresher) readSource(ctx context.Context, sourceID string) (Exte
 	if lastSuccess.Valid {
 		src.LastSuccessAt = &lastSuccess.String
 	}
-	src.ClientUsable = true
-	src.NodeUsable = src.Format != "mrs"
+	src.NodeUsable, src.ClientUsable = sourceUsability(src.Format)
 	return src, nil
 }
 
@@ -448,7 +494,7 @@ func (s *SourceRefresher) Run(ctx context.Context) {
 // sets' sources that never succeeded or are past their interval.
 func (s *SourceRefresher) dueSources(ctx context.Context, serviceIDs []string) []string {
 	query := `SELECT src.id FROM service_set_sources src JOIN service_sets s ON s.id=src.service_id
-		 WHERE src.format <> 'mrs' AND s.enabled=1`
+		 WHERE src.format NOT IN ('mrs','native') AND s.enabled=1`
 	args := []any{}
 	if len(serviceIDs) == 0 {
 		query += ` AND ` + referencedByEnabledPolicy + `
@@ -473,4 +519,25 @@ func (s *SourceRefresher) dueSources(ctx context.Context, serviceIDs []string) [
 		}
 	}
 	return ids
+}
+
+// A native source's ID becomes the tag of its rule set on the node, and the
+// contract wants lowercase letters, digits, "_" and "-" (id.New is mixed-case
+// base64), so native sources get their own lowercase IDs.
+func newNativeSourceID() (string, error) {
+	raw, err := id.New()
+	if err != nil {
+		return "", err
+	}
+	sum := id.Hash(raw)
+	return "native-" + sum[:24], nil
+}
+
+// nativeSourceID is the ID validated for an input: its own when it already
+// has one, otherwise a stand-in with the shape new IDs have.
+func nativeSourceID(existing string) string {
+	if existing != "" {
+		return existing
+	}
+	return "native-new"
 }

@@ -6,7 +6,7 @@ import (
 )
 
 func floatPtr(v float64) *float64 { return &v }
-func uint64Ptr(v uint64) *uint64   { return &v }
+func uint64Ptr(v uint64) *uint64  { return &v }
 
 func defaultRules() []Rule {
 	return []Rule{

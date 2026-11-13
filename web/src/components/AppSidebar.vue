@@ -488,6 +488,7 @@
 import { ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { authState, isOwner, isViewer, logout, clearSession } from '../app/auth';
+import { goToAdminLogin } from '../app/adminEntry';
 import { request } from '../app/apiClient';
 import { showToast } from '../app/api';
 import FormDrawer from './FormDrawer.vue';
@@ -538,7 +539,7 @@ async function handleLogout() {
   } finally {
     clearSession();
     userCenterOpen.value = false;
-    router.push('/login');
+    goToAdminLogin();
   }
 }
 
@@ -564,7 +565,7 @@ async function submitPassword() {
     confirmPassword.value = '';
     showToast('密码已修改，请重新登录');
     clearSession();
-    await router.push('/login');
+    goToAdminLogin();
   } catch (e) {
     showToast((e as Error).message, 'error');
   } finally {

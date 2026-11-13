@@ -12,6 +12,7 @@ import (
 	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/hostnet"
+	"proxycontrol/internal/agent/rulesets"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"sort"
@@ -51,10 +52,10 @@ type Reconciler struct {
 	ControlAddress string
 	// HostNetworkSync replaces the whole helper interaction. It is a test seam;
 	// nil selects syncHostNetwork.
-	HostNetworkSync        func(ctx context.Context, network desiredstate.Network) error
+	HostNetworkSync func(ctx context.Context, network desiredstate.Network) error
 	// HostNetworkPortHops are the enabled Hysteria2 hop ranges of the revision
 	// being applied, collected before the helper is driven.
-	HostNetworkPortHops []hostnet.PortHop
+	HostNetworkPortHops    []hostnet.PortHop
 	RequireSuccessReceipts bool
 	mu                     sync.Mutex
 	manifest               Manifest
@@ -200,6 +201,20 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	// core may simply be unable to render it (for example sing-box to Xray). It
 	// is reported without touching disk so the next revision still applies.
 	retainedRevision := state.Revision == r.manifest.Revision
+	// Native rule set files are fetched here, before rendering, so the cores
+	// never reach the network and a revision that depends on a file that was
+	// never downloaded fails through the ordinary failure path. The failure
+	// is temporary (the next attempt downloads again), so it is not cached.
+	if preparer, ok := r.Adapter.(core.RuleSetPreparer); ok {
+		if err := preparer.PrepareRuleSets(ctx, state); err != nil {
+			result.Code = "apply_failed"
+			if errors.Is(err, rulesets.ErrUnavailable) {
+				result.Code = rulesets.Code
+			}
+			result.Message = err.Error()
+			return result, err
+		}
+	}
 	rendered, err := r.Adapter.Render(ctx, state)
 	if err != nil {
 		result.Code = "render_failed"
@@ -355,6 +370,7 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	}
 	r.manifest = next
 	r.renderedDigest = digest(rendered.Data)
+	r.cleanupRuleSets(state, next.Successful)
 	retained := map[int64]bool{}
 	for _, id := range next.Successful {
 		retained[id] = true
@@ -368,6 +384,32 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 		}
 	}
 	return result, nil
+}
+
+// cleanupRuleSets removes rule set files that neither the new revision nor any
+// retained successful revision references, so every rollback target keeps its
+// files. Best effort: an unreadable retained revision keeps everything.
+func (r *Reconciler) cleanupRuleSets(state desiredstate.State, successful []int64) {
+	preparer, ok := r.Adapter.(core.RuleSetPreparer)
+	if !ok {
+		return
+	}
+	states := []desiredstate.State{state}
+	for _, revision := range successful {
+		if revision == state.Revision {
+			continue
+		}
+		data, err := r.readRevision(revision)
+		if err != nil {
+			return
+		}
+		retained, err := desiredstate.Decode(data)
+		if err != nil {
+			return
+		}
+		states = append(states, retained)
+	}
+	preparer.CleanupRuleSets(states...)
 }
 
 // permanentFailure reports whether a failed apply is cached. A rendered or

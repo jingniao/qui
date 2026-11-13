@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/proxy"
 	"proxycontrol/internal/panel/user"
 )
 
@@ -40,6 +43,21 @@ func (s *Service) Me(ctx context.Context, id string) (Profile, error) {
 		p.DeviceLimitEnforced = view.Enforced
 		p.DeviceLimitUnsupportedNodes = view.UnsupportedNodes
 		p.DeviceLimitUDPUnsupported = view.UDPUnsupported
+	}
+	p.TrafficResetCycle = u.TrafficResetCycle
+	if p.TrafficResetCycle == "" {
+		p.TrafficResetCycle = "none"
+	}
+	if s.Auth != nil && s.Auth.Settings != nil {
+		location := time.UTC
+		if _, zone, e := s.Auth.Settings.ReadSetup(ctx); e == nil {
+			if loaded, e := time.LoadLocation(zone); e == nil {
+				location = loaded
+			}
+		}
+		if next := user.NextResetAt(u, time.Now(), location); next != "" {
+			p.NextTrafficResetAt = &next
+		}
 	}
 	p.Reason = user.InactivityReason(u, time.Now())
 	for _, protocol := range u.AllowedProtocols {
@@ -126,6 +144,25 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (str
 	return token, view, nil
 }
 
+// directProtocols groups the protocols of the user's own subscription endpoints
+// by entry node; relayed and client-chain clones are listed separately.
+func directProtocols(endpoints []proxy.Proxy) map[string][]string {
+	direct := map[string][]string{}
+	for _, endpoint := range endpoints {
+		if endpoint.Origin.Relayed || endpoint.ClientChain != "" || endpoint.Protocol == "" {
+			continue
+		}
+		direct[endpoint.Origin.Node.ID] = append(direct[endpoint.Origin.Node.ID], endpoint.Protocol)
+	}
+	return direct
+}
+
+func sortedProtocols(list []string) []string {
+	out := append([]string{}, list...)
+	sort.Strings(out)
+	return slices.Compact(out)
+}
+
 func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 	u, err := s.Users.Get(ctx, id)
 	if err != nil {
@@ -135,6 +172,19 @@ func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	var endpoints []proxy.Proxy
+	subscribed := s.Subscriptions != nil
+	if subscribed {
+		endpoints, _, err = s.Subscriptions.Proxies(ctx, id, "")
+		if errors.Is(err, user.ErrInactive) || errors.Is(err, user.ErrCredential) {
+			endpoints, err = nil, nil
+			subscribed = false
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	direct := directProtocols(endpoints)
 	items := make([]Node, 0, len(nodes))
 	for _, n := range nodes {
 		allowed, err := s.Nodes.UserHasNode(ctx, n.ID, id)
@@ -148,16 +198,9 @@ func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, Node{ID: n.ID, Name: n.Name, Region: meta.Region, Online: n.Status == "online"})
+		items = append(items, Node{ID: n.ID, Name: n.Name, Region: meta.Region, Online: n.Status == "online", Protocols: sortedProtocols(direct[n.ID])})
 	}
-	if s.Subscriptions != nil {
-		endpoints, _, err := s.Subscriptions.Proxies(ctx, id, "")
-		if errors.Is(err, user.ErrInactive) || errors.Is(err, user.ErrCredential) {
-			return items, nil
-		}
-		if err != nil {
-			return nil, err
-		}
+	if subscribed {
 		for _, endpoint := range endpoints {
 			if !endpoint.Origin.Relayed {
 				continue
@@ -166,7 +209,7 @@ func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, Node{ID: endpoint.Origin.Ref, Name: endpoint.Name, Online: entry.Status == "online"})
+			items = append(items, Node{ID: endpoint.Origin.Ref, Name: endpoint.Name, Online: entry.Status == "online", Protocols: sortedProtocols([]string{endpoint.Protocol})})
 		}
 	}
 	return items, nil

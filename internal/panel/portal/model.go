@@ -19,6 +19,8 @@ type Profile struct {
 	DeviceLimit                 *int     `json:"deviceLimit"`
 	OnlineDevices               *int     `json:"onlineDevices"`
 	WireGuardNote               string   `json:"wireGuardNote"`
+	TrafficResetCycle           string   `json:"trafficResetCycle"`
+	NextTrafficResetAt          *string  `json:"nextTrafficResetAt"`
 }
 
 type Session struct {
@@ -33,4 +35,6 @@ type Node struct {
 	Name   string `json:"name"`
 	Region string `json:"region"`
 	Online bool   `json:"online"`
+	// Protocols lists the subscription endpoint protocols this user can use on the node.
+	Protocols []string `json:"protocols"`
 }

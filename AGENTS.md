@@ -108,7 +108,7 @@ Viewer 默认不能：
 
 ## 6.3 终端用户与门户
 
-代理用户使用自己的用户名与 Owner 设置的密码登录 `/portal/login`；门户提供账号状态、订阅复制与二维码、授权节点、流量和修改密码。门户会话与管理员的表、Cookie、CSRF 状态和路由守卫独立，互相不能访问。禁用、到期或超额用户在登录开关开启时仍可登录查看原因，但不能取得订阅内容。Owner 的门户预览为只读，不签发 Token、不写数据；Viewer 使用后台只读视图。
+代理用户在面板根地址 `/` 用自己的用户名与 Owner 设置的门户密码登录（v1.5.4 起；旧地址 `/portal/login` 跳转到 `/`，用户详情显示可复制的门户地址，新建用户时可直接开启门户登录）；管理员登录页在 Owner 可自定义的管理员登录地址（默认 `/login`，第 29.1 节），未登录访问后台页面一律回到 `/`。门户提供账号状态（流量进度、到期剩余天数、下次流量重置日期）、按客户端列出的订阅链接与二维码、授权节点及其对本人开放的协议、流量图表和修改密码；登录过于频繁返回 429 时提示 15 分钟后再试。门户会话与管理员的表、Cookie、CSRF 状态和路由守卫独立，互相不能访问。禁用、到期或超额用户在登录开关开启时仍可登录查看原因，但不能取得订阅内容。Owner 的门户预览为只读，不签发 Token、不写数据；Viewer 使用后台只读视图。
 
 # 7. 网站功能模块
 
@@ -280,7 +280,7 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 
 URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，不是完整客户端配置。mihomo 支持全局客户端规则、provider 与客户端链；legacy Clash 过滤 VLESS、Hysteria2、TUIC、WireGuard、GEOSITE 与 RULE-SET/provider，并给 Owner 预览警告。mihomo 可用证书指纹表达固定证书的 QUIC 端点。
 
-订阅路径是 Token → 用户 → 已发布节点及授权导入源 → 中立代理模型 → 格式导出器。`?format=` 优先，未知格式返回 400；其次为已验证 UA 表，再回退系统默认。UA 开关已实现，当前已验证 UA 匹配表为空，不能宣称自动识别已验收；一键导入协议也待核实，现提供复制与二维码。响应包含流量、到期、更新间隔与下载文件名等订阅头。
+订阅路径是 Token → 用户 → 已发布节点及授权导入源 → 中立代理模型 → 格式导出器。`?format=` 优先，未知格式返回 400；其次按客户端 User-Agent（默认开启，不区分大小写，较长的匹配优先），再回退系统默认。v1.5.4 起匹配表：`clash`、`mihomo`、`clash.meta`、`clash-verge`、`clashmetaforandroid`、`flclash`、`clashx meta` → `clash`；`clashforwindows`、`clashx/` → `clash-legacy`；`sing-box`、`sfa/`、`sfi/`、`sfm/`、`sft/` → `sing-box`；`v2rayn`、`shadowrocket`、`nekobox`、`nekoray` → `base64`。这些字符串取自各客户端公开的写法，尚未逐一在真机上核实。用户详情与门户按客户端列出各格式链接，不带格式的链接标为「自动识别」。引用面板规则集时，规则集地址优先用「节点安装连接地址」里的面板地址与端口（第 27.14 节），未设置才按订阅请求拼出。一键导入协议仍待核实，现提供复制与二维码。响应包含流量、到期、更新间隔与下载文件名等订阅头。
 
 内置预设（`GET /api/v1/subscription-rules/presets`，新建配置时可选）除经典分流、基础代理、分流+去广告、白名单外，v1.5.2 增加「精简／标准／完整分流 · 屏蔽回国」（`meta-lite`／`meta-standard`／`meta-full`）：MetaCubeX meta-rules-dat 的 mrs 规则集，国内域名（`geolocation-cn`、geosite `cn`）与国内 IP（`cn`，no-resolve）直接 REJECT，不经过可切回 DIRECT 的组，国内域名规则排在所有服务规则之前。一个模板最多 256 个规则集（v1.5.2 前为 32），请求体仍为 1 MiB，超限提示「请求内容超过 1 MiB 上限」。mihomo 下载规则集同样走规则，节点全部不可用时规则集为空、屏蔽不生效。
 
@@ -510,6 +510,8 @@ Direct；Block；指定 Outbound；指定出口组；指定 Proxy Chain。
 
 一条策略里 Owner 直接写的域名、后缀、关键字与 CIDR 合计不超过 2000 条；引用的规则集（手写条目与外部来源缓存）展开后单条策略最多 50000 条（v1.5.2）。展开后超过 2000 条只发布到逐核上报 `expanded_policy_supported` 的 Agent，否则在快照与发布前给出带策略名与条数的中文提示，明确指定节点或节点组的策略在保存时就列出这些服务器；整份期望状态仍限 2 MiB。迁移 0142 写入一条默认禁用的「屏蔽回国」策略（`policy-block-china`：全部节点、匹配内置「国内」集合 `service-cn`、Block、优先级 1），它是普通策略，可编辑或删除，删除后不再写回。
 
+节点原生规则集（v1.5.4，迁移 0143）：规则集的外部来源可选「节点原生」格式，一条来源同时给出 sing-box 二进制规则集（`.srs`）地址和 Xray geosite/geoip 数据文件地址加标签；地址只允许 `testingcf.jsdelivr.net`／`cdn.jsdelivr.net`／`fastly.jsdelivr.net` 上的 MetaCubeX meta-rules-dat 文件（`desiredstate.RuleSetURLAllowed`，面板保存与 Agent 下载两处检查）。面板不抓取、不展开这类来源，订阅也不输出。展开到某节点时，若该节点所有 xray/sing-box 核心都上报 `native_rule_sets_supported`，引用的规则集有原生来源就改为在期望状态的 `match.rule_sets` 里带引用、跳过它的 yaml/text 来源（手写条目照常展开），不计入匹配条数上限；否则维持原来的 yaml 展开。保存快照与发布前两处按能力位把关。Agent 在应用修订、渲染之前下载文件到 `runtime/<core>/rulesets/`（目录 0700、文件 0600，按地址哈希命名，单文件 32 MiB、3 分钟、只跟随白名单主机的 HTTPS 跳转），超过来源刷新间隔才重新下载，下载失败沿用已有文件，从未下载成功则该修订以 `rule_set_unavailable` 失败并照常回滚；切换成功后删除新修订与全部保留修订都不再引用的文件。sing-box 渲染为本地二进制 `route.rule_set` 并在策略规则里引用，Xray 渲染为 `ext:<文件>:<标签>`（核心与原生检查都以 `XRAY_LOCATION_ASSET` 指向该目录）；规则集与手写条目同属地址条件，仅含规则集的策略绝不会变成匹配全部。核心自己不联网，也没有后台刷新与新的远程操作：文件新内容在下一次应用修订时生效。内置「国内」集合由 0143 追加 geosite `cn` 与 geoip `cn` 两条原生来源，「屏蔽回国」策略本身不变。
+
 # 18. 服务规则模块
 
 服务规则用于将常见网站的域名集合封装成易于选择的服务。
@@ -584,7 +586,7 @@ YouTube → Direct
 | Xray 原始访问行 | `/var/lib/proxy-agent/runtime/xray/access.log`，约 100 ms 轮询，读后/停核清空，20 MiB 截断兜底，避免保留 HTTP 路径/查询串 |
 | sing-box 访问行 | 核心日志 |
 
-离线缓存，重连补传，收到 Ack 才删。满时先淘汰最旧允许记录，优先保留阻断与流量。同批流量被面板连续拒绝 3 次则隔离、保留且不淘汰，后续批次继续；1 小时后或 Agent 重启重试。删除用户/旧设备前产生的批次按其修订与凭据墓碑归属，只累加仍存在的用户/身份。
+离线缓存，重连补传，收到 Ack 才删。满时先淘汰最旧允许记录，优先保留阻断与流量。同一流量或访问记录批次（访问记录自 v1.5.4 起）被面板连续拒绝 3 次则隔离、保留且不淘汰，后续批次继续；1 小时后或 Agent 重启重试。面板拒收批次时记一条 WARN「agent batch rejected」（节点、种类、批次 ID、固定原因码、修订号，同一节点同类同原因每分钟最多一条），不记录用户名或域名。删除用户/旧设备前产生的批次按其修订与凭据墓碑归属，只累加仍存在的用户/身份。
 
 **代理月流量**：按面板时区半开月区间汇总保留样本，`scope=retained_account_samples`。HourlyDays 清理后不能还原完整历史月份（L9），不得拼累计心跳/UTC 日桶冒充完整月份。
 
@@ -608,7 +610,7 @@ Xray 总量=账户计数＋已渲染 forward 的原生入站计数。渲染生�
 
 # 22. 配置发布与回滚
 
-草稿不直接覆盖运行配置：保存业务配置 → 生成 Revision → 校验用户/节点/能力 → DesiredState → Agent 编译 → 原生校验 → 保存/切换 → 健康检查 → 成功或自动回滚。
+草稿不直接覆盖运行配置：保存业务配置 → 生成 Revision → 校验用户/节点/能力 → DesiredState → Agent 编译 → 原生校验 → 保存/切换 → 健康检查 → 成功或自动回滚。 应用结果只在 Agent 会话内存里，会话在发出前断开会丢失；面板收到新的心跳且其成功修订等于待确认修订、核心健康时，按成功确认（与应用结果成功走同一路径，记 INFO「deployment confirmed by heartbeat」），其他情况仍等应用结果，失败、回滚与原因码只来自应用结果（v1.5.4）。
 
 一条 Revision 覆盖全部核心，`core.json.enc` 按核心名保存 JSON；恢复从校验过的 DesiredState 重建，兼容旧单核心修订。所有活跃核心先校验，再按配置顺序切换，失败逆序补偿。每核 `runtime/<core>/` 隔离标记、accounting key、访问日志与临时文件，无启用入站则停止；旧 core_healthy 是逐核 AND，supervisor 分核恢复/退避。
 
@@ -922,6 +924,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0140 `ruleset_sources` | `service_sets` / `service_set_entries` 增加 `keyword` 匹配类型支持；新增 `service_set_sources` 表（存储外部规则源 URL、格式 yaml/text/mrs、行为 classical/domain/ipcidr、刷新周期、运行状态及密封缓存） |
 | 0141 `tuning_recommendations` | 新增 `node_tuning_dismissals` 表（主键 `(node_id, key)`，列 `key` / `value` 记录不采纳的参数与推荐值，另存规则版本与时间，级联删除）；`node_meta` 扩充可空整数 `bandwidth_mbps`（1–100000 Mbps）；`system_settings` 新增 `tuning_auto_apply` 开关 |
 | 0142 `builtin_rule_sets` | 只写数据：新增 18 个内置规则集（`service-ads` … `service-private`，ID 或名称已存在则跳过）、为 25 个内置集合中尚无来源的写入 63 个 meta-rules-dat yaml 来源（ID `builtin-<集合>-<序号>`，`pending`）、更新 0009 集合仍为原文的描述，以及默认禁用的 `policy-block-china`（需内置 `service-cn` 存在）。不新增表，备份沿用 service_sets／service_set_sources／policies 的现有校验 |
+| 0143 `native_rule_sets` | 重建 `service_set_sources`：format 增加 `native`，新增 `xray_url`、`xray_tag`（默认空串；native 须 behavior 为 domain/ipcidr、两列非空且无缓存，非 native 两列须为空），原有行与索引保留；内置 `service-cn` 追加 `builtin-service-cn-native-1`（geosite cn）与 `-2`（geoip cn），已有原生来源或非内置集合时跳过 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1248,6 +1251,19 @@ PUT 省略 `config` 保留整份原配置；携带时按字段合并，Webhook �
 Webhook 四种格式：generic 保持原 `POST {kind,severity,title,body,node_id,at}`；wecom、dingtalk 发送 `{"msgtype":"text","text":{"content":"文本"}}`；feishu 发送 `{"msg_type":"text","content":{"text":"文本"}}`。机器人文本与 Telegram 统一为 `[SEVERITY] 标题\n正文`，无 severity 省略前缀。钉钉有密钥时用毫秒时间戳，以 secret 为 HMAC-SHA256 key、`ts+"\n"+secret` 为消息，Base64 后 URL 编码一次，追加 timestamp/sign 并保留原 query；飞书使用秒时间戳，以 `ts+"\n"+secret` 为 HMAC-SHA256 key、空消息计算 Base64 签名，timestamp/sign 放入 JSON。三家均须 HTTP 2xx 且业务码为 0（企业微信/钉钉 errcode，兼容钉钉官方示例的字符串 "0"；飞书 code、兼容旧 StatusCode）才成功；非法或非零业务码返回固定 `channel_rejected`。响应最多读取 64 KiB，不回显上游内容、签名或带 Token 地址。
 `POST /api/v1/notification-channels/{id}/test`：仅限 Owner＋CSRF，立即向指定渠道发送一条测试通知并记录投递状态，响应 `{code}`（空串表示成功，否则为固定错误码）。
 
+## 27.18 系统设置：管理员登录地址与门户字段（v1.5.4）
+
+管理员登录页的路径存于 `system_settings` 键 `admin_entry`（`{path,revision,updatedAt,updatedBy}`，无迁移；键缺失即默认 `/login`，所以升级后管理员地址不变），随整库快照备份与恢复。
+
+| 接口 | 合同 |
+| --- | --- |
+| `GET /api/v1/system/admin-entry` | Owner 专用；返回 `{path,revision,updatedAt,updatedBy}` |
+| `PUT /api/v1/system/admin-entry` | Owner＋CSRF，体 `{path,expectedRevision}`，未知字段拒绝；路径须以 `/` 开头、单段、含斜杠 4–64 个字符、只含小写字母数字 `-` `_`，且首段不得是面板已用的路径（`api`、`sub`、`install`、`agent-catalogue`、`assets`、`healthz`、`portal`、`portal-preview`、`setup`、`403`、`404` 与后台各页面的一级路径，清单在 `system.ReservedAdminEntrySegments`，`web/scripts/admin-entry-selftest.mjs` 核对路由表），非法 400 `invalid_settings`；`expectedRevision` 不匹配 409 `settings_conflict`；未变化不推进 revision；成功记“修改管理员登录地址” |
+
+面板只在请求路径等于当前管理员登录地址时，在返回的 `index.html` 里注入 `<meta name="qui-entry" content="admin">`（CSP 不允许内联脚本），前端据此注册管理员登录页；其他未知路径显示「页面不存在」，公开接口都不返回该地址。设置读取失败时按 `/login` 处理，不把 Owner 锁在外面。浏览器记住登录时的地址，退出后回到那里；会话过期回到 `/`。忘记地址时，服务器上 `qui` 菜单「查看／重置管理员登录地址」（`proxy-panel --config … --admin-entry show|reset`，面板须先停止）可查看或重置为 `/login`，记“重置管理员登录地址”（操作者 `root (qui)`）。这只是隐藏入口，不是新的安全边界：管理员接口仍在 `/api/v1`，认证、CSRF、登录限流与会话规则不变。
+
+门户接口只做加法：`GET /api/v1/portal/me`（及会话 `currentUser`、Owner 门户预览）增加 `trafficResetCycle`（`none`/`monthly`/`30days`）与 `nextTrafficResetAt`（RFC3339 UTC，不重置时为 null，与流量重置调度同一计算）；`GET /api/v1/portal/nodes` 每项增加 `protocols`（本人订阅端点在该节点的协议，取自订阅同一授权与过滤管线）；`GET /api/v1/portal/subscription` 增加 `defaultFormat`（系统默认格式）。
+
 # 28. gRPC 节点通信
 
 节点通信使用 Enroll 与双向流 Connect。
@@ -1274,6 +1290,7 @@ Agent 目录更新能力与端口协商（v1.5.0）：
 - `Welcome.agent_catalogue_port`（字段 22，uint32）：面板告知 Agent 托管只读签名目录的 HTTP/HTTPS 端口号（未配置安装端点时取面板 Web 监听端口）。旧 Agent 忽略未知字段。
 - `Capabilities.port_hop_supported`（字段 28，bool）：Agent 声明 host-network helper 已安装，可维护 Hysteria2 跳跃表（第 12 节）。旧 Agent 不上报，面板在保存、快照与发布前三处拒绝跳跃入站。
 - `Capabilities.expanded_policy_supported`（字段 29，bool）与 `CoreCapability.expanded_policy_supported`（字段 14，bool）：逐核声明该核心的渲染器接受展开后最多 50000 条匹配的策略（v1.5.2；Xray 与 sing-box 上报为真，GOST 不渲染策略）。旧 Agent 不上报，面板对展开后超过 2000 条的策略按第 17 节拒绝。
+- `Capabilities.native_rule_sets_supported`（字段 30，bool）与 `CoreCapability.native_rule_sets_supported`（字段 15，bool）：逐核声明 Agent 会下载、该核心会渲染 `match.rule_sets`（v1.5.4；Xray 与 sing-box 上报为真，GOST 不渲染策略）。旧 Agent 不上报，面板不向它下发原生规则集，保存快照与发布前两处拒绝带规则集的状态。
 - `HostInfo` 扩充字段 11–18：`virtualization`（11，string）、`tuning_keys`（12，repeated TuningKeyState）、`congestion_available`（13，repeated string）、`congestion_loadable`（14，repeated string）、`qdisc_available`（15，repeated string）、`qdisc_loadable`（16，repeated string）、`fd_limits`（17，repeated ProcessLimit，包含 soft 与 hard）、`sysctl_sources`（18，repeated SysctlSource，包含 key/value/file）。
 - `Heartbeat` 扩充 `tcp_out_segs`（字段 37，uint64）与 `tcp_retrans_segs`（字段 38，uint64），用于面板计算每分钟 TCP 重传率。
 - `TuningResult` 扩充 `initial`（字段 4，map<string, string>，回传 19 键初始快照值）。
@@ -1297,6 +1314,8 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 终端用户认证与管理员认证隔离：门户 Cookie 为 `qui_portal_session`（Secure 时使用 `__Host-` 前缀），HttpOnly、SameSite=Strict、Path=/；会话表只存 Token 哈希。复用密码哈希、限流、同源 CSRF 与会话时长策略。禁用登录、改密码、撤销会话和删除用户立即结束相应会话；恢复备份结束门户会话。门户仅从会话取用户 ID，不接受请求指定其他用户；不展示域名访问记录。订阅链接不存浏览器 localStorage。
 
 管理员密码安全哈希存储；HTTPS；安全 Cookie；登录失败限制；会话超时；CSRF 防护；API 请求大小限制；Owner 与 Viewer 权限隔离；敏感数据默认隐藏；管理操作日志。
+
+管理员登录地址可自定义（第 27.18 节），未登录访问后台页面回到用户登录页 `/`，只为减少扫描，不改变认证边界。
 
 面板网页更新是固定的 root 操作而非命令执行：面板只能写一个只含版本号的请求文件，root helper 仅安装 GitHub 最新正式版并调用既有 `qui-update`（第 27.15 节），也不因此获得其他远程操作能力。
 
@@ -1399,7 +1418,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | node_identity_retirements、node_identity_recoveries | 作废指纹在恢复时并入当前库，只注册不复活：已作废的指纹既不能覆盖也不能写入当前身份；恢复记录以当前库为准，`issued` 统一改为已过期，不重发恢复码、不重签证书 |
 | node_public_addresses（nodes.public_addresses_json 与 public_ip_selected） | 随 nodes 主表加密备份；validateNodePublicAddresses 校验列表格式、项数不超过 16 项且均为合法单播 IP 与源标识，恢复保留归档选定地址 |
 | notifications、notification_rules、notification_channels、notification_state | 四表纳入加密备份；notification_channels 密封材料必须能由当前密钥打开，校验 rules 包含全部 7 类规则且无越界值；历史通知超过 90 天由后台自动 Prune |
-| service_set_sources | 随服务规则集加密备份；validateServiceSetSources 校验 format / behavior / last_status 的合法集合及 mrs 行为组合，非空 encrypted_cache 须能由配置 vault 解密并解码为策略 ParsedEntries；保留配置、状态与计数，恢复时不触发抓取；0140 之前无该表的归档仍合法 |
+| service_set_sources | 随服务规则集加密备份；validateServiceSetSources 校验 format / behavior / last_status 的合法集合及 mrs 行为组合，非空 encrypted_cache 须能由配置 vault 解密并解码为策略 ParsedEntries；保留配置、状态与计数，恢复时不触发抓取；0140 之前无该表的归档仍合法  0143 起接受 `native` 行：须已应用 0143、无加密缓存，地址、标签与行为经 `desiredstate.ValidateRuleSet` 校验；非 native 行的 Xray 两列须为空；0143 之前的归档仍合法。 |
 | node_tuning_dismissals、node_meta.bandwidth_mbps | 随加密备份保留与恢复；主键 `(node_id, key)`，列 `key` / `value`；validateTuningDismissals 校验 key 属于共享 tuning 白名单、value 非空且长度不超过 256 字节、node_id 关联存在节点；0141 之前无该表的归档仍合法。node_meta.bandwidth_mbps 为 1–100000 的整数（可空），沿用数据库约束校验；system_settings.tuning_auto_apply 随系统设置整体原样往返 |
 
 调度随停机/进程内恢复取消并等待退出，新实例仅一个循环。其他模块的会话结束、安全状态与撤销访问保守合并规则见第 26.9、29 节。

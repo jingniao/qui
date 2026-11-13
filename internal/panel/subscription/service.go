@@ -216,6 +216,16 @@ func (s *Service) policy(ctx context.Context) (format.Policy, error) {
 	return policy, nil
 }
 
+// DefaultFormat is the format a link without ?format= falls back to when the
+// client is not recognised, shown to end users next to the automatic link.
+func (s *Service) DefaultFormat(ctx context.Context) string {
+	policy, err := s.policy(ctx)
+	if err != nil {
+		return ""
+	}
+	return policy.Default
+}
+
 // Render resolves a token and renders the subscription for the requested format,
 // the client User-Agent or the Owner default, in that order. providerURL builds
 // the link a client fetches a panel service rule from; it carries the token, so

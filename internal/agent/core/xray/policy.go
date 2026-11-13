@@ -2,6 +2,7 @@ package xray
 
 import (
 	"errors"
+	"proxycontrol/internal/agent/rulesets"
 	"proxycontrol/pkg/contracts/desiredstate"
 	shared "proxycontrol/pkg/contracts/policy"
 	"strings"
@@ -137,6 +138,18 @@ func compilePolicies(state desiredstate.State, at time.Time) ([]route, error) {
 		for _, keyword := range policy.Match.Keywords {
 			domains = append(domains, "keyword:"+keyword)
 		}
+		// Native rule sets are read from the core's own asset directory
+		// (XRAY_LOCATION_ASSET): ext:<file>:<tag> joins the domain or the IP
+		// list like a literal entry, so the conditions stay OR-ed.
+		ips := append([]string(nil), policy.Match.CIDRs...)
+		for _, set := range policy.Match.RuleSets {
+			entry := "ext:" + rulesets.FileName(set.XrayURL, false) + ":" + set.XrayTag
+			if set.Behavior == "ipcidr" {
+				ips = append(ips, entry)
+			} else {
+				domains = append(domains, entry)
+			}
+		}
 		for _, scope := range scopes(state, policy) {
 			base := route{Type: "field", RuleTag: policy.ID, InboundTag: scope.InboundTags, User: scope.Users, Source: scope.Sources, Network: policy.Match.Network, Port: strings.Join(policy.Match.Ports, ","), OutboundTag: target}
 			if base.Network == "" || base.Network == "all" {
@@ -147,12 +160,12 @@ func compilePolicies(state desiredstate.State, at time.Time) ([]route, error) {
 				rule.Domain = domains
 				rules = append(rules, rule)
 			}
-			if len(policy.Match.CIDRs) > 0 {
+			if len(ips) > 0 {
 				rule := base
-				rule.IP = policy.Match.CIDRs
+				rule.IP = ips
 				rules = append(rules, rule)
 			}
-			if len(domains) == 0 && len(policy.Match.CIDRs) == 0 {
+			if len(domains) == 0 && len(ips) == 0 {
 				rules = append(rules, base)
 			}
 		}

@@ -31,17 +31,20 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 		return "", err
 	}
 	if batch.NodeID != nodeID {
-		return "", errors.New("access batch node identity mismatch")
+		return "", reject("node_mismatch", 0)
 	}
 	accepted, err := s.Repository.Receipt(ctx, batch)
+	if errors.Is(err, ErrConflict) {
+		return "", &batchRejection{reason: "batch_conflict", cause: err}
+	}
 	if err != nil {
-		return "", err
+		return "", rejectStore("receipt_unavailable", err)
 	}
 	if accepted {
 		return batch.ID, nil
 	}
 	if !allowNew {
-		return "", errors.New("stale sequence cannot create an access batch")
+		return "", reject("stale_sequence", 0)
 	}
 	now := time.Now().UTC()
 	if s.Now != nil {
@@ -54,14 +57,14 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 	snapshots := map[attribution]desiredstate.State{}
 	for _, record := range batch.Records {
 		if record.Bucket.After(now.Add(2 * time.Minute)) {
-			return "", errors.New("access time is in the future")
+			return "", reject("future_time", record.Revision)
 		}
 		key := attribution{record.Revision, record.UserID, record.DeviceID, record.InboundProtocol}
 		state, known := snapshots[key]
 		if !known {
 			state, err = s.Snapshots.AppliedState(ctx, nodeID, record.Revision)
 			if err != nil {
-				return "", errors.New("access revision was not applied by authenticated node")
+				return "", reject("revision_not_applied", record.Revision)
 			}
 			snapshots[key] = state
 		}
@@ -72,7 +75,7 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 			}
 		}
 		if !inboundFound {
-			return "", errors.New("access inbound protocol not present in applied snapshot")
+			return "", reject("inbound_unknown", record.Revision)
 		}
 		if record.UserID != "" {
 			matched := false
@@ -91,7 +94,7 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 				}
 			}
 			if !matched {
-				return "", errors.New("access user or device not authorized on this revision")
+				return "", reject("identity_conflict", record.Revision)
 			}
 		}
 		if record.RuleID != "" {
@@ -99,13 +102,13 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 			for _, rule := range state.Policies {
 				if rule.ID == record.RuleID {
 					if rule.Logging != nil && (!rule.Logging.LogDomain && record.Domain != "" || !rule.Logging.LogTraffic && record.TrafficKnown) {
-						return "", errors.New("access logging disabled by applied rule")
+						return "", reject("logging_disabled", record.Revision)
 					}
 					found = true
 				}
 			}
 			if !found {
-				return "", errors.New("access rule not present in applied snapshot")
+				return "", reject("rule_unknown", record.Revision)
 			}
 		}
 		if record.OutboundID != "" {
@@ -116,7 +119,7 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 				}
 			}
 			if !found {
-				return "", errors.New("access outbound not present in applied snapshot")
+				return "", reject("outbound_unknown", record.Revision)
 			}
 		}
 		if record.ChainID != "" {
@@ -127,7 +130,7 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 				}
 			}
 			if !found {
-				return "", errors.New("access chain not present in applied snapshot")
+				return "", reject("chain_unknown", record.Revision)
 			}
 		}
 		if record.EgressKnown {
@@ -135,17 +138,17 @@ func (s *Service) RecordAccess(ctx context.Context, nodeID string, message *pb.A
 			// The current telemetry format can prove only local direct routing;
 			// remote proxy/chain exits require a future correlated observation.
 			if record.Action != "Direct" || record.OutboundProtocol != "direct" || record.FinalEgressNodeID != nodeID || record.ChainID != "" {
-				return "", errors.New("access final exit requires observed local direct routing")
+				return "", reject("egress_unobserved", record.Revision)
 			}
 			for _, outbound := range state.Outbounds {
 				if outbound.ID == record.OutboundID && (!outbound.Enabled || outbound.Protocol != "direct") {
-					return "", errors.New("access direct exit disagrees with applied outbound")
+					return "", reject("egress_conflict", record.Revision)
 				}
 			}
 		}
 	}
 	if err := s.Repository.Ingest(ctx, batch, now); err != nil {
-		return "", err
+		return "", rejectStore("ingest_failed", err)
 	}
 	return batch.ID, nil
 }

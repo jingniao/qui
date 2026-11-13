@@ -5,11 +5,13 @@ export interface Profile {
   trafficLimit: number; usedTraffic: number; expiresAt: string; allowedProtocols: string[];
   deviceLimitEnforced: boolean; deviceLimitUnsupportedNodes: string[]; deviceLimitUdpUnsupportedProtocols?: string[] | null;
  deviceLimit: number | null; onlineDevices: number | null; wireGuardNote: string;
+  /** Added in v1.5.4; absent on an older panel. */
+  trafficResetCycle?: string; nextTrafficResetAt?: string | null;
 }
-export interface PortalNode { id: string; name: string; region: string; online: boolean; }
-export interface Subscription { state: 'ready' | 'missing' | 'not_recoverable'; path?: string; formats?: { id: string; url: string }[]; }
+export interface PortalNode { id: string; name: string; region: string; online: boolean; /** absent on an older panel */ protocols?: string[]; }
+export interface Subscription { state: 'ready' | 'missing' | 'not_recoverable'; path?: string; formats?: { id: string; url: string }[]; defaultFormat?: string; }
 export interface Snapshot { me: Profile; nodes: { items: PortalNode[] }; subscription: Subscription; }
-export interface Session { isAuthenticated: boolean; currentUser: Profile; csrfToken: string; }
+export interface Session { isAuthenticated: boolean; currentUser: Profile; csrfToken: string; expiresAt?: string; }
 export interface Traffic { items: { bucket: string; uploadBytes: number; downloadBytes: number }[]; granularity: string; }
 export const portalState = reactive<{ session: Session | null }>({ session: null });
 
@@ -26,13 +28,15 @@ async function request<T>(path: `/api/v1/portal/${string}`, method = 'GET', body
     const data = await response.json().catch(() => ({}));
     // A wrong current password is a 401 from a still-valid session.
     const credentialCheck = path.endsWith('/auth/login') || path.endsWith('/auth/password');
-    if (response.status === 401 && !credentialCheck) {
+    // The session probe (guard and the login page at "/") must not redirect, or "/" would reload forever.
+    if (response.status === 401 && !credentialCheck && !path.endsWith('/auth/session')) {
       portalState.session = null;
-      window.location.assign('/portal/login');
+      window.location.assign('/');
     }
     throw new Error(response.status === 401 && path.endsWith('/auth/password') ? '当前密码错误。' :
-      response.status === 401 ? '用户名或密码错误，或登录已失效。' :
-      response.status === 429 ? '登录尝试次数过多，请稍后重试。' :
+      response.status === 401 && path.endsWith('/auth/login') ? '用户名或密码错误。' :
+      response.status === 401 ? '登录已失效，请重新登录。' :
+      response.status === 429 ? '请求过多，请 15 分钟后再试。' :
       data.error?.code === 'invalid_request' ? '输入无效，请检查密码是否符合要求（12 至 128 个字符）。' :
       data.error?.code === 'subscription_unavailable' ? '账号已禁用、到期或额度已用完，暂时无法重置订阅。' : '请求失败，请稍后重试。');
   }

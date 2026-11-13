@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	archive "proxycontrol/internal/panel/system/backup"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 )
 

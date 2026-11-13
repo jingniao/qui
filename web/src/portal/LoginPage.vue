@@ -10,11 +10,15 @@
   </main>
 </template>
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { portalAPI } from './api';
 const router = useRouter();
 const username = ref(''), password = ref(''), error = ref(''), busy = ref(false);
+// An already signed-in portal user goes straight to the overview.
+onMounted(async () => {
+  try { if ((await portalAPI.session()).isAuthenticated) await router.replace('/portal/overview'); } catch { /* not signed in */ }
+});
 async function login() {
   busy.value = true; error.value = '';
   try { await portalAPI.login(username.value, password.value); password.value = ''; await router.replace('/portal/overview'); }

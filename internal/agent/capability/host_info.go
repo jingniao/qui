@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"time"
 	"proxycontrol/internal/agent/tuning"
-	"proxycontrol/pkg/contracts/desiredstate"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
+	"time"
 )
 
 func memValues(root string) map[string]uint64 {

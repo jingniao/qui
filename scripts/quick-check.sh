@@ -366,6 +366,29 @@ build_agent_fixture_if_needed() {
   done
 }
 
+# Format check on the changed .go files only, with the .tools/go gofmt when
+# present (the Windows checkout has no go on PATH), else the one on PATH.
+gofmt_changed() {
+  local f gofmt_bin out
+  local -a files=()
+  for f in "${changed[@]}"; do
+    [[ $f == *.go && -f $f ]] && files+=("$f")
+  done
+  ((${#files[@]})) || return 0
+  gofmt_bin=gofmt
+  if [[ -x .tools/go/bin/gofmt ]]; then
+    gofmt_bin=.tools/go/bin/gofmt
+  elif [[ -x .tools/go/bin/gofmt.exe ]]; then
+    gofmt_bin=.tools/go/bin/gofmt.exe
+  fi
+  step "gofmt -l（${#files[@]} 个改动 .go 文件，$gofmt_bin）"
+  out=$("$gofmt_bin" -l "${files[@]}") || return 1
+  if [[ -n $out ]]; then
+    printf '以下文件未格式化：\n%s\n' "$out"
+    return 1
+  fi
+}
+
 tier_go() {
   local rc=0 label=''
   # check.sh deliberately does not pass -p 1: its race run is long and every
@@ -388,6 +411,7 @@ tier_go() {
     printf 'go test -count=1 -timeout 30m %s%s\n' "$label" "${go_affected_ip[*]}"
     return 0
   fi
+  gofmt_changed || rc=1
   build_agent_fixture_if_needed
   step "go vet（${#go_affected_ip[@]} 个包）"
   go vet "${go_affected_ip[@]}" || rc=1

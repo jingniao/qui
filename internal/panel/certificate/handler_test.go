@@ -16,9 +16,9 @@ import (
 
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 // setupSettings is the two-method platform settings interface the authentication

@@ -7,8 +7,8 @@ import (
 
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/db"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/testutil/canvasfixture"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/migrations"
 )
 

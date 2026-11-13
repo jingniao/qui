@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"proxycontrol/internal/panel/connections"
 	"proxycontrol/internal/platform/pki"
+	accesscontract "proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
@@ -50,6 +51,7 @@ type Control struct {
 	Audit            auditLog
 	mu               sync.Mutex
 	connected        map[string]*liveStream
+	rejections       rejectionLog
 	RecoveryRedeploy func(context.Context, string) error
 	CataloguePort    func(context.Context) uint32
 	Notify           func(string)
@@ -429,6 +431,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			}
 			accessBatchID, err = c.AccessRecorder.RecordAccess(ctx, id, batch, message.Sequence > lastSequence)
 			if err != nil {
+				batchID := ""
+				if decoded, decodeErr := accesscontract.DecodeBatch(batch.BatchJson); decodeErr == nil {
+					batchID = decoded.ID
+				}
+				c.logBatchRejection(id, "access", batchID, err)
 				return status.Error(codes.FailedPrecondition, "access batch rejected")
 			}
 		}
@@ -447,6 +454,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			}
 			trafficBatchID, err = c.AccessRecorder.RecordTraffic(ctx, id, batch, message.Sequence > lastSequence)
 			if err != nil {
+				c.logBatchRejection(id, "traffic", decoded.ID, err)
 				return status.Error(codes.FailedPrecondition, "traffic batch rejected")
 			}
 		}
@@ -471,6 +479,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			if err := c.Deployment.Result(ctx, id, result); err != nil {
 				return status.Error(codes.FailedPrecondition, "deployment result rejected")
 			}
+		}
+		confirmedRevision := int64(0)
+		if heartbeat := message.GetHeartbeat(); heartbeat != nil && c.Deployment != nil && message.Sequence > lastSequence {
+			confirmedRevision = c.confirmDeploymentByHeartbeat(ctx, id, heartbeat)
 		}
 		if batch := message.GetOutboundHealth(); batch != nil {
 			// Health observations remain independent from executable receipts.
@@ -559,6 +571,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		if result := message.GetApplyResult(); result != nil && c.DeploymentNotify != nil {
 			c.DeploymentNotify(result.Revision)
+		}
+		if confirmedRevision != 0 && c.DeploymentNotify != nil {
+			c.DeploymentNotify(confirmedRevision)
 		}
 		if c.DashboardNotify != nil && message.Sequence > lastSequence && (message.GetAccessBatch() != nil || message.GetTrafficBatch() != nil || message.GetConnectionStatus() != nil) {
 			c.DashboardNotify()

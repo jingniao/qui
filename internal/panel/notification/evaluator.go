@@ -19,7 +19,7 @@ type MetricWindow struct {
 }
 
 type TrafficSnapshot struct {
-	NodeID                     string
+	NodeID                    string
 	UsedBytes, AllowanceBytes *uint64
 }
 

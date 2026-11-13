@@ -20,9 +20,9 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/testutil"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 func testServer(t *testing.T) *Server {

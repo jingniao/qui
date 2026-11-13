@@ -254,7 +254,7 @@ func (r *Repository) Service(ctx context.Context, serviceID string) (ServiceSet,
 		return service, err
 	}
 	srcRows, err := r.Database.QueryContext(ctx,
-		`SELECT id, url, format, behavior, interval_seconds, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count
+		`SELECT id, url, format, behavior, interval_seconds, last_status, last_error_code, last_fetch_at, last_success_at, entry_count, skipped_count, xray_url, xray_tag
 		 FROM service_set_sources WHERE service_id=? ORDER BY position ASC`, serviceID)
 	if err != nil {
 		return service, err
@@ -263,7 +263,7 @@ func (r *Repository) Service(ctx context.Context, serviceID string) (ServiceSet,
 	for srcRows.Next() {
 		var src ExternalSource
 		var lastFetch, lastSuccess sql.NullString
-		if err := srcRows.Scan(&src.ID, &src.URL, &src.Format, &src.Behavior, &src.IntervalSeconds, &src.LastStatus, &src.LastErrorCode, &lastFetch, &lastSuccess, &src.EntryCount, &src.SkippedCount); err != nil {
+		if err := srcRows.Scan(&src.ID, &src.URL, &src.Format, &src.Behavior, &src.IntervalSeconds, &src.LastStatus, &src.LastErrorCode, &lastFetch, &lastSuccess, &src.EntryCount, &src.SkippedCount, &src.XrayURL, &src.XrayTag); err != nil {
 			return service, err
 		}
 		if lastFetch.Valid {
@@ -272,8 +272,7 @@ func (r *Repository) Service(ctx context.Context, serviceID string) (ServiceSet,
 		if lastSuccess.Valid {
 			src.LastSuccessAt = &lastSuccess.String
 		}
-		src.ClientUsable = true
-		src.NodeUsable = src.Format != "mrs"
+		src.NodeUsable, src.ClientUsable = sourceUsability(src.Format)
 		service.Sources = append(service.Sources, src)
 	}
 	if err := srcRows.Err(); err != nil {

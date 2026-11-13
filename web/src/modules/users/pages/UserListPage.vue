@@ -176,7 +176,7 @@
         <div class="grid sm:grid-cols-2 gap-4">
           <label class="block text-xs font-medium text-ios-secondary">
             用户名
-            <input v-model="form.username" :readonly="!!editing" maxlength="64" class="form-input-base mt-1.5" placeholder="用于身份凭据登录" />
+            <input v-model="form.username" :readonly="!!editing" maxlength="64" class="form-input-base mt-1.5" placeholder="代理凭据与用户门户登录使用的名称" />
           </label>
           <label class="block text-xs font-medium text-ios-secondary">
             显示名称
@@ -209,7 +209,21 @@
           <input v-model.number="form.deviceLimit" type="number" min="0" max="100" step="1" class="form-input-base mt-1.5" />
         </label>
         <details class="text-xs text-ios-secondary"><summary>同时在线设备上限的限制与隐私</summary><p v-for="help in deviceLimitHelp" :key="help" class="mt-2">{{ help }}</p></details>
-        
+
+        <div v-if="!editing" class="space-y-3">
+          <label class="flex items-center gap-2 text-sm"><input v-model="portalEnabled" type="checkbox" class="h-4 w-4" />允许登录用户门户</label>
+          <div v-if="portalEnabled" class="grid sm:grid-cols-2 gap-4">
+            <label class="block text-xs font-medium text-ios-secondary">
+              初始登录密码（12～128 个字符）
+              <input v-model="portalPassword" type="password" autocomplete="new-password" maxlength="128" class="form-input-base mt-1.5" />
+            </label>
+            <label class="block text-xs font-medium text-ios-secondary">
+              确认密码
+              <input v-model="portalPasswordConfirm" type="password" autocomplete="new-password" maxlength="128" class="form-input-base mt-1.5" />
+            </label>
+          </div>
+          <p v-if="portalEnabled" class="text-xs text-ios-secondary">用户在面板根地址用上面的用户名和这个密码登录门户。</p>
+        </div>
 
         <label class="block text-xs font-medium text-ios-secondary">
           备注
@@ -264,7 +278,9 @@
 import { deviceLimitHelp, udpUnsupportedText } from "../../../app/deviceLimit";
 import type { DevicesOnline } from "../api";
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { userAPI, type ProxyUser, type UserInput } from '../api';
+import { createUserWithPortalLogin, portalLoginFailureMessage, portalPasswordError } from '../portalLogin';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import type { AdminUser } from '../../../types';
 import { request, type Page } from '../../../app/apiClient';
@@ -307,6 +323,8 @@ const editing = ref<ProxyUser | null>(null);
 const saving = ref(false);
 const expiresLocal = ref('');
 const trafficGiB = ref(0);
+const portalEnabled = ref(false), portalPassword = ref(''), portalPasswordConfirm = ref('');
+const router = useRouter();
 const confirmVisible = ref(false);
 const removeTarget = ref<ProxyUser | null>(null);
 
@@ -459,6 +477,7 @@ function changePage(value: number) {
 
 function openCreate() {
   editing.value = null;
+  portalEnabled.value = false; portalPassword.value = ''; portalPasswordConfirm.value = '';
   Object.assign(form, defaults());
   expiresLocal.value = '';
   trafficGiB.value = 0;
@@ -490,13 +509,30 @@ async function save() {
   try {
     const desiredLimit = Math.round(trafficGiB.value * 1073741824);
     const id = editing.value?.id;
-    await userAPI.save(id || null, {
-      ...form,
-      expiresAt: utcInput(expiresLocal.value),
-      trafficLimit: desiredLimit
-    });
+    const input = { ...form, expiresAt: utcInput(expiresLocal.value), trafficLimit: desiredLimit };
+    if (id) {
+      await userAPI.save(id, input);
+      drawer.value = false;
+      showToast('用户已保存');
+      await load();
+      return;
+    }
+    if (portalEnabled.value) {
+      const problem = portalPasswordError(portalPassword.value, portalPasswordConfirm.value);
+      if (problem) { showToast(problem, 'error'); return; }
+    }
+    const result = await createUserWithPortalLogin(
+      { create: () => userAPI.save(null, input), setLogin: (userId, password) => userAPI.setLogin(userId, true, password) },
+      portalEnabled.value ? portalPassword.value : null
+    );
     drawer.value = false;
-    showToast('用户已保存');
+    portalPassword.value = ''; portalPasswordConfirm.value = '';
+    if (result.loginError) {
+      showToast(portalLoginFailureMessage(result.loginError), 'error');
+      router.push(`/users/${result.user.id}`);
+      return;
+    }
+    showToast(result.loginSet ? '用户已创建，门户登录已开启' : '用户已保存');
     await load();
   } catch (e) {
     showToast((e as Error).message, 'error');

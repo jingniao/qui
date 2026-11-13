@@ -1,5 +1,5 @@
 <template>
-  <div class="relative h-44 w-full"><canvas ref="canvas" role="img" :aria-label="label"></canvas></div>
+  <div class="relative w-full" :class="heightClass ?? 'h-44'"><canvas ref="canvas" role="img" :aria-label="label"></canvas></div>
 </template>
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
@@ -11,6 +11,8 @@ Chart.register(LineController, LineElement, PointElement, LinearScale, Filler, T
 export interface ChartDataset { label: string; color: string; fill: boolean; axis: 'y' | 'y1'; dash?: number[]; data: { x: number; y: number | null }[]; format: (value: number) => string }
 const props = defineProps<{
   label: string; datasets: ChartDataset[]; xMin: number; xMax: number;
+  /** Tailwind height classes of the chart box; default h-44. */
+  heightClass?: string;
   axes: { y: { unit: AxisUnit; max?: number }; y1?: { unit: AxisUnit; max?: number } };
 }>();
 

@@ -540,7 +540,6 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	return nil
 }
 
-
 const certificateRescanInterval = 5 * time.Minute
 
 type inventoryWatch struct {
@@ -1106,7 +1105,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				}
 			}
 			for count := 0; count < 8; count++ {
-				batch, err := telemetryQueue.Pending(ctx)
+				batch, retried, err := telemetryQueue.PendingRetry(ctx)
 				if err != nil {
 					logger.Error("telemetry queue read failed")
 					break
@@ -1114,11 +1113,24 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				if batch == nil {
 					break
 				}
+				if retried {
+					logger.Info("retrying quarantined access batch after cool-down", "batch_id", batch.ID)
+				}
 				data, err := json.Marshal(batch)
 				if err != nil {
 					return err
 				}
 				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_AccessBatch{AccessBatch: &pb.AccessBatch{BatchJson: data}}}); err != nil {
+					// Same defence as for traffic batches: a batch the panel
+					// keeps rejecting is quarantined, not retried forever.
+					if trafficRejected(err) {
+						quarantined, rejectErr := telemetryQueue.RejectAccess(ctx, batch.ID)
+						if rejectErr != nil {
+							logger.Error("access rejection could not be recorded", "error", rejectErr)
+						} else if quarantined {
+							logger.Error("access batch quarantined after repeated rejection", "batch_id", batch.ID)
+						}
+					}
 					return err
 				}
 			}

@@ -1014,6 +1014,7 @@ type Capabilities struct {
 	DomainKeywordSupported         bool                   `protobuf:"varint,27,opt,name=domain_keyword_supported,json=domainKeywordSupported,proto3" json:"domain_keyword_supported,omitempty"`
 	PortHopSupported               bool                   `protobuf:"varint,28,opt,name=port_hop_supported,json=portHopSupported,proto3" json:"port_hop_supported,omitempty"`
 	ExpandedPolicySupported        bool                   `protobuf:"varint,29,opt,name=expanded_policy_supported,json=expandedPolicySupported,proto3" json:"expanded_policy_supported,omitempty"`
+	NativeRuleSetsSupported        bool                   `protobuf:"varint,30,opt,name=native_rule_sets_supported,json=nativeRuleSetsSupported,proto3" json:"native_rule_sets_supported,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -1251,6 +1252,13 @@ func (x *Capabilities) GetExpandedPolicySupported() bool {
 	return false
 }
 
+func (x *Capabilities) GetNativeRuleSetsSupported() bool {
+	if x != nil {
+		return x.NativeRuleSetsSupported
+	}
+	return false
+}
+
 type CoreCapability struct {
 	state                         protoimpl.MessageState `protogen:"open.v1"`
 	Name                          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1267,6 +1275,7 @@ type CoreCapability struct {
 	TlsCertificateFilesSupported  bool                   `protobuf:"varint,12,opt,name=tls_certificate_files_supported,json=tlsCertificateFilesSupported,proto3" json:"tls_certificate_files_supported,omitempty"`
 	DomainKeywordSupported        bool                   `protobuf:"varint,13,opt,name=domain_keyword_supported,json=domainKeywordSupported,proto3" json:"domain_keyword_supported,omitempty"`
 	ExpandedPolicySupported       bool                   `protobuf:"varint,14,opt,name=expanded_policy_supported,json=expandedPolicySupported,proto3" json:"expanded_policy_supported,omitempty"`
+	NativeRuleSetsSupported       bool                   `protobuf:"varint,15,opt,name=native_rule_sets_supported,json=nativeRuleSetsSupported,proto3" json:"native_rule_sets_supported,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -1395,6 +1404,13 @@ func (x *CoreCapability) GetDomainKeywordSupported() bool {
 func (x *CoreCapability) GetExpandedPolicySupported() bool {
 	if x != nil {
 		return x.ExpandedPolicySupported
+	}
+	return false
+}
+
+func (x *CoreCapability) GetNativeRuleSetsSupported() bool {
+	if x != nil {
+		return x.NativeRuleSetsSupported
 	}
 	return false
 }
@@ -5895,7 +5911,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12\x1a\n" +
 	"\bsecurity\x18\x03 \x01(\tR\bsecurity\x12\x1c\n" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12\x12\n" +
-	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xb4\r\n" +
+	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xf1\r\n" +
 	"\fCapabilities\x12\x1b\n" +
 	"\tcore_name\x18\x01 \x01(\tR\bcoreName\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12G\n" +
@@ -5926,7 +5942,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x19panel_catalogue_supported\x18\x1a \x01(\bR\x17panelCatalogueSupported\x128\n" +
 	"\x18domain_keyword_supported\x18\x1b \x01(\bR\x16domainKeywordSupported\x12,\n" +
 	"\x12port_hop_supported\x18\x1c \x01(\bR\x10portHopSupported\x12:\n" +
-	"\x19expanded_policy_supported\x18\x1d \x01(\bR\x17expandedPolicySupported\"\xba\x06\n" +
+	"\x19expanded_policy_supported\x18\x1d \x01(\bR\x17expandedPolicySupported\x12;\n" +
+	"\x1anative_rule_sets_supported\x18\x1e \x01(\bR\x17nativeRuleSetsSupported\"\xf7\x06\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +
@@ -5942,7 +5959,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x1cserver_settings_combinations\x18\v \x03(\v2*.proxycontrol.agent.v1.SettingsCombinationR\x1aserverSettingsCombinations\x12E\n" +
 	"\x1ftls_certificate_files_supported\x18\f \x01(\bR\x1ctlsCertificateFilesSupported\x128\n" +
 	"\x18domain_keyword_supported\x18\r \x01(\bR\x16domainKeywordSupported\x12:\n" +
-	"\x19expanded_policy_supported\x18\x0e \x01(\bR\x17expandedPolicySupportedB\n" +
+	"\x19expanded_policy_supported\x18\x0e \x01(\bR\x17expandedPolicySupported\x12;\n" +
+	"\x1anative_rule_sets_supported\x18\x0f \x01(\bR\x17nativeRuleSetsSupportedB\n" +
 	"\n" +
 	"\b_healthy\"\xeb\x01\n" +
 	"\n" +

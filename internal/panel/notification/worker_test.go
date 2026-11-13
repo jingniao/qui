@@ -38,7 +38,7 @@ func TestAlertMapsKnownKinds(t *testing.T) {
 	expectedTitles := map[string]bool{
 		"证书续期失败":   true,
 		"证书自动发布失败": true,
-		"服务器续费提醒":   true,
+		"服务器续费提醒":  true,
 		"自动额度发布失败": true,
 		"系统告警":     true,
 	}

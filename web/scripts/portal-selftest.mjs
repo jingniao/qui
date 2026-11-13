@@ -94,13 +94,22 @@ try {
   assert.equal(api.portalState.session, null);
   globalThis.fetch = async () => new Response('{"error":{"code":"unauthorized"}}', { status: 401 });
   await assert.rejects(api.portalAPI.me());
-  assert.deepEqual(redirects, ['/portal/login']);
+  assert.deepEqual(redirects, ['/']);
+  // The session probe itself never redirects (the login page at "/" calls it).
+  await assert.rejects(api.portalAPI.session());
+  assert.deepEqual(redirects, ['/']);
   // A wrong current password is a 401 from a live session: report it, stay signed in.
   api.portalState.session = { isAuthenticated: true, csrfToken: 'portal-csrf' };
   await assert.rejects(api.portalAPI.password('wrong-test-only', 'changed-test-only'), /当前密码错误/);
-  assert.deepEqual(redirects, ['/portal/login']);
+  assert.deepEqual(redirects, ['/']);
   assert.ok(api.portalState.session);
   api.portalState.session = null;
+  // Bad credentials and rate limiting have different messages; bad credentials never hint at the account.
+  globalThis.fetch = async () => new Response('{"error":{"code":"unauthorized"}}', { status: 401 });
+  await assert.rejects(api.portalAPI.login('nobody', 'x'), error => error.message === '用户名或密码错误。');
+  globalThis.fetch = async () => new Response('{}', { status: 429 });
+  await assert.rejects(api.portalAPI.login('nobody', 'x'), /请求过多，请 15 分钟后再试/);
+  assert.deepEqual(redirects, ['/']);
   console.log('PASS portal login/session/read/reset/password/logout use separate CSRF and expire to portal login');
 } finally { globalThis.fetch = originalFetch; globalThis.window = originalWindow; }
 const guardSource = readFileSync(path.join(root, 'guard.ts'), 'utf8');
@@ -111,13 +120,45 @@ const { portalGuard } = await import('data:text/javascript;base64,' + Buffer.fro
 let probes = 0;
 globalThis.portalSessionProbe = async () => { probes++; throw new Error('unauthorized'); };
 try {
-  assert.equal(await portalGuard({ path: '/portal/login' }), true);
+  assert.equal(await portalGuard({ path: '/' }), true);
   assert.equal(probes, 0);
-  assert.deepEqual(await portalGuard({ path: '/portal/overview' }), { path: '/portal/login' });
+  assert.deepEqual(await portalGuard({ path: '/portal/overview' }), { path: '/' });
   globalThis.portalSessionProbe = async () => ({ isAuthenticated: true });
   assert.equal(await portalGuard({ path: '/portal/account' }), true);
   console.log('PASS portal guard admits login and checks its own session for protected pages');
 } finally { delete globalThis.portalSessionProbe; }
+function load(file, replacements = []) {
+  let code = ts.transpileModule(readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+  for (const [from, to] of replacements) code = code.replace(from, to);
+  return import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+}
+const fmt = await load('format.ts');
+assert.equal(fmt.formatBytes(0), '0 B');
+assert.equal(fmt.formatBytes(512), '512 B');
+assert.equal(fmt.formatBytes(1536), '1.50 KiB');
+assert.equal(fmt.formatBytes(5 * 1048576), '5.00 MiB');
+assert.equal(fmt.formatBytes(3 * 1073741824), '3.00 GiB');
+assert.equal(fmt.formatBytes(2 * 1099511627776), '2.00 TiB');
+assert.equal(fmt.formatBytes(4096 * 1099511627776), '4096.00 TiB');
+assert.equal(fmt.formatBytes(null), '—');
+assert.equal(fmt.daysLeft('2026-11-20T00:00:00Z', Date.parse('2026-11-12T12:00:00Z')), 8);
+assert.equal(fmt.daysLeft(''), null);
+assert.ok(fmt.daysLeft('2020-01-01T00:00:00Z') < 0);
+assert.equal(fmt.quotaPercent(50, 100), 50);
+assert.equal(fmt.quotaPercent(500, 100), 100);
+assert.equal(fmt.quotaPercent(5, 0), 0);
+assert.deepEqual(fmt.sortNodes([{ id: 'a', online: false }, { id: 'b', online: true }, { id: 'c', online: false }, { id: 'd', online: true }]).map(n => n.id), ['b', 'd', 'a', 'c']);
+assert.equal(fmt.protocolLabel('vless'), 'VLESS');
+const clients = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(readFileSync(path.join(root, '../app/subscriptionClients.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText).toString('base64'));
+assert.equal(clients.orderedSubscriptionClients(['uri', 'base64', 'sing-box', 'clash'], 'sing-box')[0].format, 'sing-box');
+assert.equal(clients.orderedSubscriptionClients(['uri', 'base64', 'clash'], undefined)[0].format, 'clash');
+// The portal page orders formats through that helper and labels the bare link as automatic.
+const subSfc = readFileSync(path.join(root, 'PortalSubscription.vue'), 'utf8');
+assert.match(subSfc, /orderedSubscriptionClients\(/);
+assert.match(subSfc, /AUTO_SUBSCRIPTION_LABEL/);
+assert.doesNotMatch(subSfc, /可直接复制或导入/);
+assert.doesNotMatch(readFileSync(path.join(root, 'PortalPage.vue'), 'utf8') + readFileSync(path.join(root, 'PortalLayout.vue'), 'utf8'), /一个账户一条订阅/);
+console.log('PASS portal formatter, subscription ordering, node ordering and wording');
 const mainSource = readFileSync(path.join(root, '../main.ts'), 'utf8');
 assert.match(mainSource, /authenticated && !path\.startsWith\('\/portal\/'\)/);
 assert.match(mainSource, /if \(!router\.currentRoute\.value\.path\.startsWith\('\/portal\/'\)\)/);

@@ -50,7 +50,7 @@ export interface PolicyRecord extends PolicyInput {
 export interface ExternalSource {
   id: string;
   url: string;
-  format: 'yaml' | 'text' | 'mrs';
+  format: 'yaml' | 'text' | 'mrs' | 'native';
   behavior: 'classical' | 'domain' | 'ipcidr';
   intervalSeconds: number;
   nodeUsable: boolean;
@@ -61,12 +61,14 @@ export interface ExternalSource {
   lastSuccessAt?: string | null;
   entryCount: number;
   skippedCount: number;
+  xrayUrl?: string;
+  xrayTag?: string;
 }
 
 export interface SourceInput {
   id?: string;
   url: string;
-  format: 'yaml' | 'text' | 'mrs';
+  format: 'yaml' | 'text' | 'mrs' | 'native';
   behavior: 'classical' | 'domain' | 'ipcidr';
   intervalSeconds: number;
   nodeUsable?: boolean;
@@ -77,6 +79,8 @@ export interface SourceInput {
   lastSuccessAt?: string | null;
   entryCount?: number;
   skippedCount?: number;
+  xrayUrl?: string;
+  xrayTag?: string;
 }
 
 export interface ServiceInput {

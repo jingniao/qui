@@ -27,9 +27,8 @@ func (URI) Aliases() []string   { return nil }
 func (URI) ContentType() string { return "text/plain; charset=utf-8" }
 func (URI) FileName() string    { return "qui-uri.txt" }
 
-// UserAgents returns the client patterns for this format. v1.1 ships none: no
-// client User-Agent could be verified from an official source
-// (docs/archive/v1.1-phase0-findings.md A.7).
+// UserAgents is empty: the plain list is never chosen by User-Agent; clients
+// that import links get "base64".
 func (URI) UserAgents() []string { return nil }
 
 func (URI) UsesRules() bool { return false }
@@ -46,8 +45,10 @@ func (Base64) Aliases() []string   { return nil }
 func (Base64) ContentType() string { return "text/plain; charset=utf-8" }
 func (Base64) FileName() string    { return "qui-base64.txt" }
 
-// UserAgents returns the client patterns for this format; see URI.UserAgents.
-func (Base64) UserAgents() []string { return nil }
+// UserAgents lists clients that import a Base64 link list.
+func (Base64) UserAgents() []string {
+	return []string{"v2rayn", "shadowrocket", "nekobox", "nekoray"}
+}
 
 func (Base64) UsesRules() bool { return false }
 

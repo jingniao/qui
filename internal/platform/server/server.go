@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -424,6 +425,10 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		}
 		providers := make([]format.ExternalProvider, 0, len(svc.Sources))
 		for _, src := range svc.Sources {
+			if !src.ClientUsable {
+				// Node-native sources (v1.5.4) are for node cores only.
+				continue
+			}
 			providers = append(providers, format.ExternalProvider{
 				URL:             src.URL,
 				Format:          src.Format,
@@ -437,7 +442,13 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		return nil, err
 	}
 	proxyHandler.RelayProxies = subscriptionService
-	(&subscription.Handler{Service: subscriptionService, Auth: authHandler, Audit: systemRepository, Rules: ruleStore, Profiles: ruleStore, ServiceRules: serviceRules{policies: policyService.Repository}}).Register(mux)
+	(&subscription.Handler{Service: subscriptionService, Auth: authHandler, Audit: systemRepository, Rules: ruleStore, Profiles: ruleStore, ServiceRules: serviceRules{policies: policyService.Repository}, PanelAddress: func(ctx context.Context) (string, int) {
+		endpoint, err := systemRepository.ReadInstallEndpoint(ctx)
+		if err != nil {
+			return "", 0
+		}
+		return endpoint.Host, endpoint.HTTPPort
+	}}).Register(mux)
 	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux)
 	notificationRepo := &notification.Repository{Database: database, Vault: configurationVault}
 	s.notificationWorker = &notification.Worker{
@@ -477,7 +488,14 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		httpapi.Error(w, 404, "not_found", "Subscription not found")
 	})
 	mux.HandleFunc("GET /install/ca.pem", s.installCA)
-	mux.Handle("/", staticHandler(files))
+	mux.Handle("/", staticHandler(files, func(ctx context.Context) string {
+		// An unreadable setting falls back to the default, so the Owner is
+		// never locked out of the admin login by a damaged row.
+		if entry, err := systemRepository.ReadAdminEntry(ctx); err == nil {
+			return entry.Path
+		}
+		return system.DefaultAdminEntry
+	}))
 	s.HTTP = &http.Server{Addr: c.HTTPAddress, Handler: s.admission.wrap(securityHeaders(mux, !c.Development)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	if !c.Development {
 		s.HTTP.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13}
@@ -738,7 +756,14 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 // fresh handler graph. No remote executable or arbitrary target is accepted.
 func (s *Server) ConfigureRestore(hooks *system.OnlineRestore) { s.systemHandler.Restore = hooks }
 
-func staticHandler(files fs.FS) http.Handler {
+// adminEntryMarker tells the frontend that this page load is the admin login
+// path. A meta tag rather than inline script: the CSP is script-src 'self'.
+const adminEntryMarker = `<meta name="qui-entry" content="admin">`
+
+// staticHandler serves the embedded frontend. Unknown page paths get
+// index.html for the router; only the current admin login path (adminEntry)
+// gets the admin marker, so the address is not disclosed on any other path.
+func staticHandler(files fs.FS, adminEntry func(context.Context) string) http.Handler {
 	fileServer := http.FileServer(http.FS(files))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -771,6 +796,9 @@ func staticHandler(files fs.FS) http.Handler {
 		if err != nil {
 			httpapi.Error(w, 503, "ui_unavailable", "Build the frontend before building the panel binary")
 			return
+		}
+		if adminEntry != nil && path.Clean(r.URL.Path) == adminEntry(r.Context()) {
+			index = bytes.Replace(index, []byte("<head>"), []byte("<head>"+adminEntryMarker), 1)
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")

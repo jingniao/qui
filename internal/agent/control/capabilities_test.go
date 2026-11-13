@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"proxycontrol/internal/agent/capability"
 	"proxycontrol/internal/agent/identity"
+	"proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/release"
 	"proxycontrol/pkg/contracts/traffic"
@@ -41,6 +42,12 @@ type controlStream struct {
 	// rejectTraffic names the traffic batch the fake panel rejects: the batch is
 	// received and the stream then ends with the panel's rejection code.
 	rejectTraffic string
+	// rejectAccess is rejectTraffic for access batches.
+	rejectAccess string
+	// applyBeforeAck makes the fake panel send this ApplyCommand ahead of the Ack
+	// of the first heartbeat, like a publish that arrives while the Agent waits
+	// for an acknowledgment. It is sent once.
+	applyBeforeAck *pb.ApplyCommand
 	// coreResultSendError makes the Agent's Send of a core-update result fail,
 	// like a stream that is already broken.
 	coreResultSendError error
@@ -80,6 +87,22 @@ func (c *controlStream) Send(message *pb.AgentMessage) error {
 			c.incoming <- controlPacket{err: status.Error(codes.FailedPrecondition, "traffic batch rejected")}
 			return nil
 		}
+	}
+	if batch := message.GetAccessBatch(); batch != nil {
+		decoded, err := access.DecodeBatch(batch.BatchJson)
+		if err != nil {
+			return err
+		}
+		ack.AccessBatchId = decoded.ID
+		if decoded.ID == c.rejectAccess && c.rejectAccess != "" {
+			c.incoming <- controlPacket{err: status.Error(codes.FailedPrecondition, "access batch rejected")}
+			return nil
+		}
+	}
+	if message.GetHeartbeat() != nil && c.applyBeforeAck != nil {
+		command := c.applyBeforeAck
+		c.applyBeforeAck = nil
+		c.incoming <- controlPacket{message: &pb.ServerMessage{NodeId: message.NodeId, MessageId: "apply", Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.ServerMessage_ApplyCommand{ApplyCommand: command}}}
 	}
 	if message.GetHello() != nil {
 		c.incoming <- controlPacket{message: &pb.ServerMessage{NodeId: message.NodeId, MessageId: "welcome", Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.ServerMessage_Welcome{Welcome: &pb.Welcome{LastAcceptedSequence: 0, HeartbeatIntervalSeconds: 1, CoreUpdateSupported: true}}}}

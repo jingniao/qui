@@ -66,6 +66,9 @@ export const userAPI = {
   save: (id: string | null, value: UserInput) =>
     request<ProxyUser>(id ? `/users/${id}` : '/users', id ? 'PUT' : 'POST', value),
   delete: (id: string) => request(`/users/${id}`, 'DELETE'),
+  // 用户门户登录开关与密码；password 省略表示保留原密码。
+  setLogin: (id: string, enabled: boolean, password?: string) =>
+    request<unknown>(`/users/${encodeURIComponent(id)}/login`, 'PUT', { enabled, ...(password ? { password } : {}) }),
   resetTraffic: (userId: string) => request(`/users/${userId}/reset-traffic`, 'POST'),
   // The subscription token belongs to the user (v1.1); a reset revokes the old link.
   rotateToken: (userId: string) =>

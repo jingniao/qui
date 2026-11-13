@@ -69,15 +69,15 @@ func TestRecommendationsEndpoint(t *testing.T) {
 	caps := testCapabilitiesWithHost(500*1024*1024, 2, "kvm")
 	hb := &pb.Heartbeat{
 		TuningCurrent: map[string]string{
-			"net.ipv4.tcp_congestion_control": "cubic",
-			"net.core.default_qdisc":          "pfifo_fast",
+			"net.ipv4.tcp_congestion_control":    "cubic",
+			"net.core.default_qdisc":             "pfifo_fast",
 			"net.ipv4.tcp_slow_start_after_idle": "1",
-			"net.ipv4.tcp_notsent_lowat":      "200000",
-			"net.core.rmem_max":               "212992",
-			"net.core.wmem_max":               "212992",
-			"net.ipv4.tcp_rmem":               "4096 87380 6291456",
-			"net.ipv4.tcp_wmem":               "4096 16384 4194304",
-			"net.ipv4.tcp_mtu_probing":        "0",
+			"net.ipv4.tcp_notsent_lowat":         "200000",
+			"net.core.rmem_max":                  "212992",
+			"net.core.wmem_max":                  "212992",
+			"net.ipv4.tcp_rmem":                  "4096 87380 6291456",
+			"net.ipv4.tcp_wmem":                  "4096 16384 4194304",
+			"net.ipv4.tcp_mtu_probing":           "0",
 		},
 	}
 	capsData, _ := json.Marshal(caps)

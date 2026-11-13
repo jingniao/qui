@@ -31,12 +31,12 @@ type auditLog interface {
 }
 
 type Handler struct {
-	Authority  *pki.Authority
-	Repository *Repository
-	Audit      auditLog
-	Auth       *auth.Handler
-	Notify     func(string)
-	Disconnect func(string)
+	Authority    *pki.Authority
+	Repository   *Repository
+	Audit        auditLog
+	Auth         *auth.Handler
+	Notify       func(string)
+	Disconnect   func(string)
 	Certificates CertificateLibrary
 	// Tasks closes a deleted node's own coordination rows; the deployment module
 	// owns those tables. A nil field leaves them as they are.

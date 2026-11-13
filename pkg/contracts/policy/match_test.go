@@ -1,8 +1,8 @@
 package policy
 
 import (
-	"strings"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"strings"
 	"testing"
 	"time"
 )

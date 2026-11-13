@@ -53,12 +53,18 @@ var legacy = capabilities{
 // as legacy gets.
 type Meta struct{}
 
-func (Meta) ID() string           { return meta.id }
-func (Meta) Aliases() []string    { return []string{"mihomo", "clash-meta"} }
-func (Meta) ContentType() string  { return "text/yaml; charset=utf-8" }
-func (Meta) FileName() string     { return "qui-clash.yaml" }
-func (Meta) UserAgents() []string { return nil }
-func (Meta) UsesRules() bool      { return true }
+func (Meta) ID() string          { return meta.id }
+func (Meta) Aliases() []string   { return []string{"mihomo", "clash-meta"} }
+func (Meta) ContentType() string { return "text/yaml; charset=utf-8" }
+func (Meta) FileName() string    { return "qui-clash.yaml" }
+
+// UserAgents lists mihomo (Clash Meta) clients. A bare "clash" also lands here:
+// current Clash clients run mihomo, and the legacy patterns below are longer,
+// so ClashforWindows and the Premium-core ClashX still get "clash-legacy".
+func (Meta) UserAgents() []string {
+	return []string{"clash", "mihomo", "clash.meta", "clash-verge", "clashmetaforandroid", "flclash", "clashx meta"}
+}
+func (Meta) UsesRules() bool { return true }
 func (Meta) Render(profile format.Profile) (format.Output, error) {
 	return render(meta, profile)
 }
@@ -67,11 +73,13 @@ func (Meta) Render(profile format.Profile) (format.Output, error) {
 // Premium cores.
 type Legacy struct{}
 
-func (Legacy) ID() string           { return legacy.id }
-func (Legacy) Aliases() []string    { return []string{"clash-premium"} }
-func (Legacy) ContentType() string  { return "text/yaml; charset=utf-8" }
-func (Legacy) FileName() string     { return "qui-clash-legacy.yaml" }
-func (Legacy) UserAgents() []string { return nil }
+func (Legacy) ID() string          { return legacy.id }
+func (Legacy) Aliases() []string   { return []string{"clash-premium"} }
+func (Legacy) ContentType() string { return "text/yaml; charset=utf-8" }
+func (Legacy) FileName() string    { return "qui-clash-legacy.yaml" }
+
+// UserAgents lists clients that only run the archived Clash Premium core.
+func (Legacy) UserAgents() []string { return []string{"clashforwindows", "clashx/"} }
 func (Legacy) UsesRules() bool      { return true }
 func (Legacy) Render(profile format.Profile) (format.Output, error) {
 	return render(legacy, profile)

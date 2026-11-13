@@ -13,11 +13,12 @@ import (
 // ending) makes existing panels refuse to start and old backups fail to
 // restore. Add new migrations here; never change an existing entry.
 var applied = map[string]string{
+	"0143_native_rule_sets.sql":                         "6174f6a14098490218e90c113b3653f7ef665a6ecc5c0e92c96cad1bdb4fa297",
 	"0142_builtin_rule_sets.sql":                        "f8dbe2a65e2b3d359bfdbfdcfea48679f74f221ac04893487c261dfd3e91f467",
 	"0141_tuning_recommendations.sql":                   "c5772f2801fd609d152783b53c7fdf1dd0271ebae37d1c44f94cf19aa30ef468",
 	"0140_service_set_sources.sql":                      "bc862625c12030bfc7840e8f9c7e9f0bbe4be32f2973fc8b41d642b284d64969",
 	"0139_notifications.sql":                            "c92161af9d1f3b3f2fd25d0649be373600d619722bccb6e13c2af29b037d958f",
-	"0138_node_public_addresses.sql":                 "e368fe8b0ad693d73bc997203a613436a7288df4566490885437500ff55668f9",
+	"0138_node_public_addresses.sql":                    "e368fe8b0ad693d73bc997203a613436a7288df4566490885437500ff55668f9",
 	"0137_certificates.sql":                             "3e9697540e0626f01595f8070e5f4f4d0a935b13e626ae1077560d7458a8ee1b",
 	"0136_inbound_tls_source.sql":                       "6afec3e45f30c7b417bbdf33ed5b36bd61fa989a8313ca0e84cbc850e2cb4a05",
 	"0135_node_connect_address.sql":                     "479aea0779e5f541666962e066ee4fdb0ad3fb62e7d95795e78fb0cd4bb6f283",

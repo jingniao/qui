@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"path/filepath"
 	"proxycontrol/internal/agent/collector"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/core/scheduling"
+	"proxycontrol/internal/agent/rulesets"
 	"proxycontrol/pkg/contracts/desiredstate"
 	policy "proxycontrol/pkg/contracts/policy"
 	"proxycontrol/pkg/contracts/scheduler"
@@ -118,10 +120,20 @@ type outbound struct {
 	DomainResolver    *domainResolver   `json:"domain_resolver,omitempty"`
 }
 type routeOptions struct {
-	Rules                 []route `json:"rules"`
-	Final                 string  `json:"final,omitempty"`
-	DefaultDomainResolver string  `json:"default_domain_resolver"`
+	Rules                 []route         `json:"rules"`
+	RuleSet               []ruleSetOption `json:"rule_set,omitempty"`
+	Final                 string          `json:"final,omitempty"`
+	DefaultDomainResolver string          `json:"default_domain_resolver"`
 }
+
+// ruleSetOption is one local binary rule set (v1.5.4 item 5).
+type ruleSetOption struct {
+	Type   string `json:"type"`
+	Tag    string `json:"tag"`
+	Format string `json:"format"`
+	Path   string `json:"path"`
+}
+
 type route struct {
 	candidates map[string]collector.Exit `json:"-"`
 	origin     collector.Exit            `json:"-"`
@@ -132,6 +144,7 @@ type route struct {
 	Keywords   []string                  `json:"domain_keyword,omitempty"`
 	Regex      []string                  `json:"domain_regex,omitempty"`
 	CIDR       []string                  `json:"ip_cidr,omitempty"`
+	RuleSet    []string                  `json:"rule_set,omitempty"`
 	Ports      []uint16                  `json:"port,omitempty"`
 	PortRange  []string                  `json:"port_range,omitempty"`
 	Network    []string                  `json:"network,omitempty"`
@@ -151,6 +164,9 @@ type renderOptions struct {
 	probeFingerprints map[string]string
 	wireGuardOutbound bool
 	wireGuardInbound  bool
+	// ruleSetDirectory is the core's rulesets directory; native rule sets are
+	// refused without it.
+	ruleSetDirectory string
 }
 
 func Render(ctx context.Context, state desiredstate.State, at time.Time) (core.RenderedConfig, error) {
@@ -415,6 +431,30 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 		base.Suffix = rule.Match.Suffixes
 		base.Keywords = rule.Match.Keywords
 		base.CIDR = rule.Match.CIDRs
+		// Native rule sets are local binary files the Agent downloaded; the rule
+		// references them by tag and sing-box merges their entries into the same
+		// address match as the literal entries. A rule set is never optional: a
+		// policy that depends on one must never render without an address field.
+		for _, set := range rule.Match.RuleSets {
+			if options.ruleSetDirectory == "" {
+				return result, errors.New("native rule sets need the core runtime directory")
+			}
+			tag := "qui-rs-" + set.ID
+			path := filepath.Join(options.ruleSetDirectory, rulesets.FileName(set.SingBoxURL, true))
+			known := false
+			for _, existing := range doc.Route.RuleSet {
+				if existing.Tag == tag {
+					known = true
+					if existing.Path != path {
+						return result, errors.New("native rule set ID maps to two files")
+					}
+				}
+			}
+			if !known {
+				doc.Route.RuleSet = append(doc.Route.RuleSet, ruleSetOption{Type: "local", Tag: tag, Format: "binary", Path: path})
+			}
+			base.RuleSet = append(base.RuleSet, tag)
+		}
 		base.Domain = nil
 		for _, domain := range rule.Match.Domains {
 			if strings.Contains(domain, "*") {
@@ -513,7 +553,7 @@ func appendRoute(doc *document, terminal route) {
 	// protocols must retain the original domain for the next node's policies.
 	if terminal.origin.Protocol == "direct" {
 		resolver := terminal
-		resolver.Domain, resolver.Suffix, resolver.Regex = []string{"localhost"}, nil, nil
+		resolver.Domain, resolver.Suffix, resolver.Regex, resolver.RuleSet = []string{"localhost"}, nil, nil, nil
 		resolver.Action, resolver.Outbound, resolver.Server = "resolve", "", "_panel_loopback_"
 		resolver.origin = collector.Exit{Protocol: "_resolve_", ID: "_panel_loopback_"}
 		doc.Route.Rules = append(doc.Route.Rules, resolver)

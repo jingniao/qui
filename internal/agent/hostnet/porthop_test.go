@@ -74,8 +74,8 @@ func TestDesiredRejectsInvalidPortHops(t *testing.T) {
 		many = append(many, PortHop{Start: 30000 + i*2, End: 30001 + i*2, Target: 8443})
 	}
 	cases := []struct {
-		name  string
-		hops  []PortHop
+		name string
+		hops []PortHop
 	}{
 		{"end below start", []PortHop{{Start: 20010, End: 20000, Target: 8443}}},
 		{"start below 1", []PortHop{{Start: 0, End: 20010, Target: 8443}}},

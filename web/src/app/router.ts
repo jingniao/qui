@@ -1,20 +1,20 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import MainLayout from '../layouts/MainLayout.vue';
 import { setupNavigationGuards } from './guards';
+import { adminEntryPage } from './adminEntry';
 
 const routes: RouteRecordRaw[] = [
-  { path: '/portal/login', component: () => import('../portal/LoginPage.vue'), meta: { title: '用户登录' } },
+  // The site root is the user portal login (v1.5.4). It must stay ahead of the
+  // MainLayout route below, which shares the path '/'.
+  { path: '/', name: 'PortalLogin', component: () => import('../portal/LoginPage.vue'), meta: { title: '用户登录' } },
+  { path: '/portal/login', redirect: '/' },
   { path: '/portal', redirect: '/portal/overview' },
   { path: '/portal/client', redirect: '/portal/overview' },
   { path: '/portal/:section(overview|subscription|nodes|traffic|account)', component: () => import('../portal/PortalLayout.vue'), meta: { title: '我的账号' } },
   { path: '/portal-preview', component: () => import('../modules/users/pages/PortalPreviewPage.vue'), meta: { title: '用户门户预览' } },
-  // Public auth routes
-  {
-    path: '/login',
-    name: 'Login',
-    component: () => import('../modules/auth/pages/LoginPage.vue'),
-    meta: { title: '登录' }
-  },
+  // The admin login page exists only on the page load the panel marked as the
+  // admin login path (see app/adminEntry.ts).
+  ...(adminEntryPage ? [{ path: adminEntryPage, name: 'Login', component: () => import('../modules/auth/pages/LoginPage.vue'), meta: { title: '登录' } }] : []),
   {
     path: '/setup',
     name: 'Setup',
@@ -38,7 +38,6 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: MainLayout,
-    redirect: '/dashboard',
     children: [
       // 1. Dashboard
       {

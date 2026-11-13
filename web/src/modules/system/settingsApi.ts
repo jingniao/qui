@@ -15,6 +15,8 @@ export interface RuntimePolicy { sessionMinutes:number; subscriptionFormat:strin
 // and the Agent gRPC port the panel actually listens on. The gRPC host '' means
 // "same as the panel address" and its port 0 means "the port in use".
 export interface InstallEndpoint { host:string; httpPort:number; grpcHost:string; grpcPort:number; revision:number; updatedAt:string; updatedBy:string; }
+// The Owner-chosen path of the administrator login page ('/login' by default).
+export interface AdminEntry { path:string; revision:number; updatedAt:string; updatedBy:string; }
 export interface RuntimeSettings { policy:RuntimePolicy; revision:number; updatedAt:string; updatedBy:string; }
 export interface RuntimeInfo {
  generatedAt:string; startedAt:string; uptimeSeconds:number; goVersion:string; buildVersion:string; os:string; arch:string; goroutines:number; heapBytes:number; databaseBytes:number; sqliteVersion:string; journalMode:string; migration:string;
@@ -52,6 +54,8 @@ export const settingsAPI = {
   saveBase: (platformName: string, timezone: string, expectedRevision: number) => request<BaseSettings>('/system/base', 'PUT', { platformName, timezone, expectedRevision }),
   installEndpoint: () => request<InstallEndpoint>('/system/install-endpoint'),
   saveInstallEndpoint: (host: string, httpPort: number, grpcHost: string, grpcPort: number, expectedRevision: number) => request<InstallEndpoint>('/system/install-endpoint', 'PUT', { host, httpPort, grpcHost, grpcPort, expectedRevision }),
+  adminEntry: () => request<AdminEntry>('/system/admin-entry'),
+  saveAdminEntry: (path: string, expectedRevision: number) => request<AdminEntry>('/system/admin-entry', 'PUT', { path, expectedRevision }),
   retention: () => request<RetentionSettings>('/system/access-retention'),
   saveRetention: (policy: RetentionPolicy, expectedRevision: number) => request<RetentionSettings>('/system/access-retention', 'PUT', { policy, expectedRevision }),
   panelUpdate: (refresh = false) => request<PanelUpdateInfo>(`/system/panel-update${refresh ? '?refresh=1' : ''}`),

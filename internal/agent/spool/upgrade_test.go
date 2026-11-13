@@ -285,6 +285,13 @@ func TestOlderSpoolFormatStillDrainsAfterUpgrade(t *testing.T) {
 	if err := reopened.database.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('final_usage_queue','runtime_source_metadata','runtime_sources','budget_retirements')").Scan(&ignored); err != nil || ignored != 4 {
 		t.Fatalf("older tables are not preserved untouched: %d %v", ignored, err)
 	}
+	// Both queue tables gained their quarantine columns in place.
+	for _, table := range []string{trafficTable, accessTable} {
+		columns, err := batchColumns(ctx, reopened.database, table)
+		if err != nil || !columns["quarantined"] || !columns["rejections"] || !columns["quarantined_at"] {
+			t.Fatalf("%s lacks the quarantine columns after upgrade: %v %v", table, columns, err)
+		}
+	}
 	if err := reopened.Ack(ctx, fixture.blocked); err != nil {
 		t.Fatal(err)
 	}

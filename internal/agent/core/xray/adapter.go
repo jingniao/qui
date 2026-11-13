@@ -13,6 +13,7 @@ import (
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/gate"
 	"proxycontrol/internal/agent/observer"
+	"proxycontrol/internal/agent/rulesets"
 	"proxycontrol/internal/platform/id"
 	access "proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -45,16 +46,18 @@ type Adapter struct {
 	AccessRejected     func()
 	Now                func() time.Time
 	Path, Directory    string
-	mu                 sync.Mutex
-	process            *exec.Cmd
-	done               chan error
-	stopPending        bool
-	marker             core.RunMarker
-	current            core.RenderedConfig
-	accessTail         *accessLogTail
-	history            map[int64]core.RenderedConfig
-	probePorts         map[string]int
-	outboundHealth     map[string]scheduler.Health
+	// RuleSets downloads the native rule set files; nil uses the defaults.
+	RuleSets       *rulesets.Fetcher
+	mu             sync.Mutex
+	process        *exec.Cmd
+	done           chan error
+	stopPending    bool
+	marker         core.RunMarker
+	current        core.RenderedConfig
+	accessTail     *accessLogTail
+	history        map[int64]core.RenderedConfig
+	probePorts     map[string]int
+	outboundHealth map[string]scheduler.Health
 }
 
 func (a *Adapter) Name() string { return "xray" }
@@ -146,6 +149,9 @@ func (a *Adapter) Validate(ctx context.Context, configuration core.RenderedConfi
 	timeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(timeout, a.Path, "run", "-test", "-config", file.Name())
+	// ext: rule set files resolve against the core's own rulesets directory,
+	// exactly as they do when the core runs.
+	command.Env = rulesets.AssetEnvironment(os.Environ(), a.Directory)
 	command.Stdout = io.Discard
 	command.Stderr = io.Discard
 	if err := command.Run(); err != nil {
@@ -252,7 +258,7 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 	// The process lifetime belongs to the Agent, never to a control connection.
 	command := exec.Command(absolute, "run", "-config", file.Name())
 	// Plain TCP listeners only (CVE-2026-98432 needs an MPTCP listener).
-	command.Env = core.CoreEnvironment()
+	command.Env = rulesets.AssetEnvironment(core.CoreEnvironment(), a.Directory)
 	// The core must also die with the Agent when the supervisor only signals the
 	// Agent PID (OpenRC supervise-daemon): the kernel kills the core with the
 	// starting thread.

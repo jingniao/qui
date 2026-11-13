@@ -59,11 +59,11 @@ const (
 // Desired is the helper input: the addresses the whole server must use and the
 // address of the node's own core outbound (A), which must not be rewritten.
 type Desired struct {
-	ID         string `json:"id"`
-	IPv4       string `json:"ipv4"`
-	IPv6       string `json:"ipv6"`
-	ExemptIPv4 string `json:"exempt_ipv4"`
-	ExemptIPv6 string `json:"exempt_ipv6"`
+	ID         string    `json:"id"`
+	IPv4       string    `json:"ipv4"`
+	IPv6       string    `json:"ipv6"`
+	ExemptIPv4 string    `json:"exempt_ipv4"`
+	ExemptIPv6 string    `json:"exempt_ipv6"`
 	PortHops   []PortHop `json:"port_hops,omitempty"`
 }
 

@@ -147,14 +147,14 @@ func (h *Handler) subscriptionView(ctx context.Context, id string) (map[string]a
 	case err != nil:
 		return nil, err
 	}
-	return h.linkView(token), nil
+	return h.linkView(ctx, token), nil
 }
 
-func (h *Handler) subscriptionLink(w http.ResponseWriter, token string, status int) {
-	httpapi.JSON(w, status, h.linkView(token))
+func (h *Handler) subscriptionLink(w http.ResponseWriter, r *http.Request, token string, status int) {
+	httpapi.JSON(w, status, h.linkView(r.Context(), token))
 }
 
-func (h *Handler) linkView(token string) map[string]any {
+func (h *Handler) linkView(ctx context.Context, token string) map[string]any {
 	path := "/sub/" + token
 	formats := []map[string]string{}
 	registry := h.Service.Subscriptions.Formats
@@ -164,7 +164,7 @@ func (h *Handler) linkView(token string) map[string]any {
 	for _, info := range registry.Info() {
 		formats = append(formats, map[string]string{"id": info.ID, "url": path + "?format=" + url.QueryEscape(info.ID)})
 	}
-	return map[string]any{"state": "ready", "path": path, "formats": formats}
+	return map[string]any{"state": "ready", "path": path, "formats": formats, "defaultFormat": h.Service.Subscriptions.DefaultFormat(ctx)}
 }
 
 func (h *Handler) resetSubscription(w http.ResponseWriter, r *http.Request) {
@@ -184,5 +184,5 @@ func (h *Handler) resetSubscription(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	h.subscriptionLink(w, token, 201)
+	h.subscriptionLink(w, r, token, 201)
 }

@@ -10,6 +10,9 @@ type CoreKeywordCapability struct {
 	// ExpandedPolicySupported: the core renders policies of up to
 	// MaxExpandedPolicyMatchers entries (v1.5.2).
 	ExpandedPolicySupported bool
+	// NativeRuleSetsSupported: the Agent downloads and the core renders
+	// Match.RuleSets (v1.5.4).
+	NativeRuleSetsSupported bool
 }
 
 // RequireKeywordSupport fails when any policy serializes keywords and any enabled

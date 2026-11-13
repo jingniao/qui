@@ -10,6 +10,7 @@ import (
 // archive written before it.
 func rewindBuiltinRuleSets(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindNativeRuleSets(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0142_builtin_rule_sets.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/access"
 	"strings"
+	"time"
 )
 
 const DefaultLimit = int64(100 << 20)
@@ -120,7 +121,7 @@ func Open(ctx context.Context, directory, nodeID string, limit int64) (*Spool, e
 		return closeError(err)
 	}
 	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS spool_metadata(id INTEGER PRIMARY KEY CHECK(id=1),schema_version INTEGER NOT NULL,node_id TEXT NOT NULL,dropped_allowed INTEGER NOT NULL DEFAULT 0);
- CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY,blocked INTEGER NOT NULL CHECK(blocked IN (0,1)),records INTEGER NOT NULL,payload BLOB NOT NULL);
+ CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY,blocked INTEGER NOT NULL CHECK(blocked IN (0,1)),records INTEGER NOT NULL,payload BLOB NOT NULL,quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1)),rejections INTEGER NOT NULL DEFAULT 0 CHECK(rejections>=0),quarantined_at INTEGER NOT NULL DEFAULT 0 CHECK(quarantined_at>=0));
  CREATE INDEX IF NOT EXISTS batch_eviction ON batches(blocked);`); err != nil {
 		return closeError(err)
 	}
@@ -141,13 +142,15 @@ func Open(ctx context.Context, directory, nodeID string, limit int64) (*Spool, e
 	// A store written before traffic quarantine existed gains its columns in
 	// place. traffic_batches is outside the authenticated v1 checkpoint, so the
 	// stored digest still verifies after the upgrade.
-	if err := attachTrafficQuarantine(ctx, database); err != nil {
-		return closeError(err)
-	}
-	// Quarantine is a cool-down owned by this process: every start, including an
-	// upgrade, retries the held-back batches right away.
-	if err := releaseTrafficQuarantine(ctx, database); err != nil {
-		return closeError(err)
+	for _, table := range []string{trafficTable, accessTable} {
+		if err := attachQuarantine(ctx, database, table); err != nil {
+			return closeError(err)
+		}
+		// Quarantine is a cool-down owned by this process: every start, including
+		// an upgrade, retries the held-back batches right away.
+		if err := releaseQuarantine(ctx, database, table); err != nil {
+			return closeError(err)
+		}
 	}
 	// budget_state is empty: the agent no longer keeps a local budget ledger. It
 	// stays in the schema because the authenticated v1 checkpoint hashes its name
@@ -264,44 +267,54 @@ func (s *Spool) Enqueue(ctx context.Context, records []access.Rollup) (Result, e
 	return result, nil
 }
 
+// Pending returns the next access delivery: the oldest batch that is not
+// quarantined or, when none is left, the oldest quarantined batch whose
+// cool-down expired (see traffic_quarantine.go).
 func (s *Spool) Pending(ctx context.Context) (*access.Batch, error) {
+	batch, _, err := s.PendingRetry(ctx)
+	return batch, err
+}
+
+// PendingRetry is Pending with the quarantine flag of the delivered batch, so
+// the caller can report the retry after the cool-down.
+func (s *Spool) PendingRetry(ctx context.Context) (*access.Batch, bool, error) {
 	var batchID string
 	var sealed []byte
 	var blocked bool
-	var records int
-	err := s.database.QueryRowContext(ctx, "SELECT id,blocked,records,CASE WHEN typeof(payload)='blob' AND length(payload) BETWEEN 1 AND ? THEN payload ELSE NULL END FROM batches ORDER BY rowid LIMIT 1", maxQueuedBatchBytes).Scan(&batchID, &blocked, &records, &sealed)
+	var records, quarantined int
+	err := s.database.QueryRowContext(ctx, "SELECT id,blocked,records,CASE WHEN typeof(payload)='blob' AND length(payload) BETWEEN 1 AND ? THEN payload ELSE NULL END,quarantined FROM batches WHERE quarantined=0 OR (quarantined=1 AND quarantined_at<=?) ORDER BY quarantined,rowid LIMIT 1", maxQueuedBatchBytes, time.Now().Unix()-int64(TrafficQuarantineCooldown/time.Second)).Scan(&batchID, &blocked, &records, &sealed, &quarantined)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(sealed) == 0 || records < 1 || records > access.MaxBatchRecords {
-		return nil, invalidQueuedBatch(errors.New("access queue payload or metadata exceeds bounds; preserve original batch"))
+		return nil, false, invalidQueuedBatch(errors.New("access queue payload or metadata exceeds bounds; preserve original batch"))
 	}
 	data, err := s.vault.Open(sealed)
 	if err != nil {
-		return nil, invalidQueuedBatch(err)
+		return nil, false, invalidQueuedBatch(err)
 	}
 	batch, err := access.DecodeBatch(data)
 	if err != nil {
-		return nil, invalidQueuedBatch(err)
+		return nil, false, invalidQueuedBatch(err)
 	}
 	if batch.ID != batchID || batch.NodeID != s.nodeID {
-		return nil, invalidQueuedBatch(errors.New("spool payload identity mismatch"))
+		return nil, false, invalidQueuedBatch(errors.New("spool payload identity mismatch"))
 	}
 	if err := batch.Validate(); err != nil {
-		return nil, invalidQueuedBatch(err)
+		return nil, false, invalidQueuedBatch(err)
 	}
 	if len(batch.Records) != records {
-		return nil, invalidQueuedBatch(errors.New("access queue count does not match authenticated payload"))
+		return nil, false, invalidQueuedBatch(errors.New("access queue count does not match authenticated payload"))
 	}
 	for _, record := range batch.Records {
 		if record.Allowed == blocked {
-			return nil, invalidQueuedBatch(errors.New("access queue priority does not match authenticated payload"))
+			return nil, false, invalidQueuedBatch(errors.New("access queue priority does not match authenticated payload"))
 		}
 	}
-	return &batch, nil
+	return &batch, quarantined == 1, nil
 }
 
 // Ack is idempotent. An eviction may already have removed an allowed batch;

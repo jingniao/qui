@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/pki"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 	"time"
 )

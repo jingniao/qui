@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"proxycontrol/internal/panel/auth"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 type setupSettings struct{}

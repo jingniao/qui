@@ -16,6 +16,7 @@ type Nodes interface {
 	Get(context.Context, string) (node.Node, error)
 	Group(context.Context, string) (node.Group, error)
 	GroupIDsForNode(context.Context, string) ([]string, error)
+	LiveIDs(context.Context) ([]string, error)
 }
 type Users interface {
 	Get(context.Context, string) (user.User, error)
@@ -141,15 +142,17 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 // requireExpandedSupport rejects saving an enabled policy that expands to more
 // than MaxMatchers entries when a node it names explicitly (directly or through
 // a node group) runs an Agent without ExpandedPolicySupported, and names those
-// nodes. A policy for every node is checked per node when the state is built,
-// because the service sets' sources may not be fetched yet at save time.
+// nodes. A policy for every node checks every non-deleted node the same way;
+// it is still checked again when the state is built, because the service sets'
+// sources may not be fetched yet at save time.
 func (s *Service) requireExpandedSupport(ctx context.Context, input Input) error {
-	if !input.Enabled || len(input.Match.ServiceIDs) == 0 || len(input.Scope.NodeIDs)+len(input.Scope.GroupIDs) == 0 {
+	if !input.Enabled || len(input.Match.ServiceIDs) == 0 {
 		return nil
 	}
+	allNodes := len(input.Scope.NodeIDs)+len(input.Scope.GroupIDs) == 0
 	rule := input.Rule("check")
 	rule.Enabled = true
-	resolved, err := s.resolve(ctx, rule)
+	resolved, err := s.resolve(ctx, rule, false)
 	if err != nil {
 		return err
 	}
@@ -162,6 +165,13 @@ func (s *Service) requireExpandedSupport(ctx context.Context, input Input) error
 		if group, err := s.Nodes.Group(ctx, groupID); err == nil {
 			targets = append(targets, group.ServerIDs...)
 		}
+	}
+	if allNodes {
+		ids, err := s.Nodes.LiveIDs(ctx)
+		if err != nil {
+			return err
+		}
+		targets = ids
 	}
 	state := desiredstate.State{Policies: []desiredstate.Policy{resolved}}
 	names := []string{}
@@ -186,7 +196,37 @@ func (s *Service) requireExpandedSupport(ctx context.Context, input Input) error
 	}
 	return nil
 }
-func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy) (desiredstate.Policy, error) {
+
+// nodeNative reports whether the node's cores read native rule set files
+// (v1.5.4 item 5): at least one xray/sing-box core and every one of them
+// reports NativeRuleSetsSupported. GOST renders no policies and is ignored.
+func (s *Service) nodeNative(ctx context.Context, nodeID string) bool {
+	if s.NodeCapabilities == nil {
+		return false
+	}
+	caps, err := s.NodeCapabilities(ctx, nodeID)
+	if err != nil {
+		return false
+	}
+	found := false
+	for _, core := range caps {
+		if core.Name == desiredstate.CoreGost {
+			continue
+		}
+		if !core.NativeRuleSetsSupported {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
+// resolve expands the service sets a policy names. With native set (the node's
+// cores read rule set files), a set that has native sources contributes one
+// desiredstate.RuleSet per native source instead of its expanded yaml/text
+// sources; its hand-written entries still expand. Without native the native
+// sources contribute nothing.
+func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy, native bool) (desiredstate.Policy, error) {
 	for _, id := range rule.Match.ServiceIDs {
 		service, err := s.Repository.Service(ctx, id)
 		if err != nil {
@@ -200,6 +240,19 @@ func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy) (desire
 		rule.Match.Keywords = append(rule.Match.Keywords, service.Keywords...)
 		rule.Match.CIDRs = append(rule.Match.CIDRs, service.CIDRs...)
 
+		if native {
+			hasNative := false
+			for _, src := range service.Sources {
+				if src.Format != "native" {
+					continue
+				}
+				hasNative = true
+				rule.Match.RuleSets = append(rule.Match.RuleSets, desiredstate.RuleSet{ID: src.ID, Behavior: src.Behavior, SingBoxURL: src.URL, XrayURL: src.XrayURL, XrayTag: src.XrayTag, RefreshSeconds: src.IntervalSeconds})
+			}
+			if hasNative {
+				continue
+			}
+		}
 		srcEntries, err := s.Repository.SourceEntries(ctx, id)
 		if err != nil {
 			return rule, err
@@ -209,7 +262,7 @@ func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy) (desire
 		rule.Match.Keywords = append(rule.Match.Keywords, srcEntries.Keywords...)
 		rule.Match.CIDRs = append(rule.Match.CIDRs, srcEntries.CIDRs...)
 	}
-	if len(rule.Match.ServiceIDs) > 0 && shared.MatcherCount(rule) == 0 {
+	if len(rule.Match.ServiceIDs) > 0 && shared.MatcherCount(rule) == 0 && len(rule.Match.RuleSets) == 0 {
 		rule.Enabled = false
 	}
 	rule.Match.ServiceIDs = nil
@@ -233,6 +286,7 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) ([]desiredstate.Po
 	if err != nil {
 		return nil, err
 	}
+	native := s.nodeNative(ctx, nodeID)
 	filtered := []desiredstate.Policy{}
 	for _, rule := range rules {
 		if len(rule.Scope.NodeIDs) > 0 && !contains(rule.Scope.NodeIDs, nodeID) {
@@ -260,7 +314,7 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) ([]desiredstate.Po
 				return nil, err
 			}
 		}
-		rule, err = s.resolve(ctx, rule)
+		rule, err = s.resolve(ctx, rule, native)
 		if err != nil {
 			return nil, err
 		}

@@ -177,6 +177,7 @@ type QUICSettings struct {
 func (q *QUICSettings) HasHop() bool {
 	return q != nil && (q.HopPortStart != 0 || q.HopPortEnd != 0 || q.HopIntervalSeconds != 0)
 }
+
 type WireGuardSettings struct {
 	SecretKey string          `json:"secret_key"`
 	Addresses []string        `json:"addresses"`
@@ -243,6 +244,9 @@ type Match struct {
 	Network    string   `json:"network,omitempty"`
 	TimeRange  string   `json:"time_range,omitempty"`
 	ServiceIDs []string `json:"service_ids,omitempty"`
+	// RuleSets are node-native rule set files (v1.5.4); like the entries above
+	// they are address conditions, never "match everything".
+	RuleSets []RuleSet `json:"rule_sets,omitempty"`
 }
 type Action struct {
 	Type     string `json:"type"`

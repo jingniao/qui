@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 func newTestRepo(t *testing.T) (*Repository, *sql.DB) {

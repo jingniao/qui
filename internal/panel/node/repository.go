@@ -491,6 +491,25 @@ func (r *Repository) List(ctx context.Context, keyword string, page, size int, d
 	return items, count, err
 }
 
+// LiveIDs returns the IDs of every non-deleted node, oldest first, without the
+// decoration List does. Policy saving uses it to check a policy for all nodes.
+func (r *Repository) LiveIDs(ctx context.Context) ([]string, error) {
+	rows, err := r.Database.QueryContext(ctx, "SELECT id FROM nodes WHERE deleted_at IS NULL ORDER BY created_at,id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // CancelEnrollment removes a node that has not enrolled an Agent yet. A node that
 // is already enrolled, or still referenced by other configuration, is kept: the
 // delete either matches no row or is refused by a foreign key. The enrollment

@@ -81,6 +81,7 @@ func KeywordCapability(core *pb.CoreCapability) desiredstate.CoreKeywordCapabili
 		Name:                    core.Name,
 		DomainKeywordSupported:  core.DomainKeywordSupported,
 		ExpandedPolicySupported: core.ExpandedPolicySupported,
+		NativeRuleSetsSupported: core.NativeRuleSetsSupported,
 	}
 }
 

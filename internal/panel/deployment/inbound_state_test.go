@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 

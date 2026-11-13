@@ -71,18 +71,21 @@
               v{{ service.version }}
             </span>
             <template v-if="service.sources.length">
-              <span class="ml-1 text-neutral-500">{{ service.sources.length }} 个外部来源</span>
-              <span class="ml-1 font-medium" :class="sourceStatus(service).tone">{{ sourceStatus(service).label }}</span>
+              <span class="ml-1 text-neutral-500 whitespace-nowrap">{{ service.sources.length }} 个外部来源</span>
+              <span class="block mt-1 font-medium" :class="sourceStatus(service).tone">{{ sourceStatus(service).label }}</span>
             </template>
           </td>
 
           <!-- 3. Size -->
           <td class="text-xs font-mono text-neutral-600">
-            <span>{{ service.domains.length + service.suffixes.length }} 域名</span>
-            <span class="text-neutral-300 mx-1">/</span>
-            <span>{{ service.keywords?.length || 0 }} 关键字</span>
-            <span class="text-neutral-300 mx-1">/</span>
-            <span>{{ service.cidrs.length }} IP网段</span>
+            <div class="flex flex-wrap items-center gap-x-1">
+              <span class="whitespace-nowrap">手写 {{ service.domains.length + service.suffixes.length }} 域名</span>
+              <span class="text-neutral-300">/</span>
+              <span class="whitespace-nowrap">{{ service.keywords?.length || 0 }} 关键字</span>
+              <span class="text-neutral-300">/</span>
+              <span class="whitespace-nowrap">{{ service.cidrs.length }} IP网段</span>
+            </div>
+            <div v-if="sourceSizeText(service)" class="mt-0.5 whitespace-nowrap">{{ sourceSizeText(service) }}</div>
           </td>
 
           <!-- 4. Rule Provider Quick Copy -->
@@ -263,12 +266,34 @@ function copy(service: ServiceSet) {
 
 // 列表里的外部来源状态：任一失败即失败，其次有待抓取，否则成功。
 function sourceStatus(service: ServiceSet) {
-  const statuses = service.sources.map(s => s.lastStatus);
+  // 节点原生来源由节点下载，面板没有抓取状态，不参与。
+  const statuses = service.sources.filter(s => s.format !== 'native').map(s => s.lastStatus);
+  if (!statuses.length) return { label: '由节点下载', tone: 'text-sky-700' };
   if (statuses.includes('failed')) return { label: '失败', tone: 'text-red-600' };
   // v1.5.2: sources of a set no enabled node policy names are not fetched on a schedule.
   if (!service.autoRefresh && statuses.some(s => s !== 'ok')) return { label: '未被策略引用，不自动刷新', tone: 'text-neutral-500' };
   if (statuses.some(s => s !== 'ok')) return { label: '待抓取', tone: 'text-amber-700' };
   return { label: '成功', tone: 'text-emerald-600' };
+}
+
+// 外部来源缓存条目数：只统计面板解析的来源（节点可用且非节点原生）；最近一次失败时仍按上次成功的缓存计数，
+// 从未成功的显示“未抓取”。仅客户端使用的来源（如 mrs）面板不解析，不计入；节点原生来源由节点下载，单独计数。
+function sourceSizeText(service: ServiceSet) {
+  const parsed = service.sources.filter(s => s.nodeUsable && s.format !== 'native');
+  const nativeCount = service.sources.filter(s => s.format === 'native').length;
+  const parts: string[] = [];
+  if (parsed.length) {
+    const fetched = parsed.filter(s => s.lastSuccessAt);
+    const pending = parsed.length - fetched.length;
+    if (!fetched.length) {
+      parts.push('来源 未抓取');
+    } else {
+      const count = fetched.reduce((sum, s) => sum + (s.entryCount || 0), 0);
+      parts.push(pending ? `来源 ${count} 条 · ${pending} 个未抓取` : `来源 ${count} 条`);
+    }
+  }
+  if (nativeCount) parts.push(`节点原生 ${nativeCount} 个`);
+  return parts.join(' · ');
 }
 
 function promptDelete(service: ServiceSet) {

@@ -72,15 +72,11 @@ func TestNeutralPackagesDoNotImportThePanel(t *testing.T) {
 	}
 }
 
-// U5 lifts the import reservation without introducing unverified client UAs.
+// U5 lifts the import reservation. Client User-Agent patterns arrived in
+// v1.5.4 (TestDefaultRegistryPicksFormatByUserAgent).
 func TestImportFeatureParsersRegistered(t *testing.T) {
 	registry := DefaultFormats()
 	if len(registry.Parsers()) != 3 {
 		t.Fatal("URI, Base64 and Clash parsers must be registered")
-	}
-	for _, exporter := range registry.Exporters() {
-		if len(exporter.UserAgents()) != 0 {
-			t.Fatal("unverified UA pattern")
-		}
 	}
 }

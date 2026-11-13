@@ -11,8 +11,8 @@ import (
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 
 	"google.golang.org/protobuf/types/known/timestamppb"

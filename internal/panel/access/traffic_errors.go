@@ -3,20 +3,30 @@ package access
 import "errors"
 
 type trafficProcessingError struct {
-	code  string
-	cause error
+	code     string
+	revision int64
+	cause    error
 }
 
 func (e *trafficProcessingError) Error() string {
 	return "traffic processing remains pending: " + e.code
 }
 func (e *trafficProcessingError) Unwrap() error { return e.cause }
+func (e *trafficProcessingError) RejectionReason() (string, int64) {
+	return e.code, e.revision
+}
 
 func trafficStageError(code string, err error) error {
+	return trafficRevisionError(code, 0, err)
+}
+
+// trafficRevisionError is trafficStageError for a failure caused by the
+// counter of one revision, which the panel log names.
+func trafficRevisionError(code string, revision int64, err error) error {
 	if trafficStorageFailure(err) {
 		code = "storage_failure"
 	}
-	return &trafficProcessingError{code: code, cause: err}
+	return &trafficProcessingError{code: code, revision: revision, cause: err}
 }
 
 func trafficStorageFailure(err error) bool {

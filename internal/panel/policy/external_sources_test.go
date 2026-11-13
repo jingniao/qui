@@ -10,8 +10,8 @@ import (
 
 	"proxycontrol/internal/panel/policy"
 	"proxycontrol/internal/panel/subscription/importer"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 type fakeFetcher struct {

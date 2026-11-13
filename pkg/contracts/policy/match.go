@@ -251,8 +251,13 @@ func validate(rule *desiredstate.Policy, maxMatchers int) error {
 			seen[id] = true
 		}
 	}
-	if MatcherCount(*rule) > maxMatchers || len(rule.Match.Ports) > 100 || len(rule.Match.ServiceIDs) > 32 {
+	if MatcherCount(*rule) > maxMatchers || len(rule.Match.Ports) > 100 || len(rule.Match.ServiceIDs) > 32 || len(rule.Match.RuleSets) > desiredstate.MaxPolicyRuleSets {
 		return ErrMatcherLimit
+	}
+	for _, set := range rule.Match.RuleSets {
+		if err := desiredstate.ValidateRuleSet(set); err != nil {
+			return err
+		}
 	}
 	for index, value := range rule.Match.Domains {
 		domain, err := Domain(value, true)
@@ -367,7 +372,9 @@ func Matches(rule desiredstate.Policy, request Request) bool {
 	}
 	hasAddress := len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) > 0
 	if !hasAddress {
-		return len(rule.Match.ServiceIDs) == 0
+		// Native rule sets are address conditions too; their lists are only on
+		// the node, so a policy with nothing else never matches here.
+		return len(rule.Match.ServiceIDs) == 0 && len(rule.Match.RuleSets) == 0
 	}
 	for _, domain := range rule.Match.Domains {
 		if domainMatches(domain, request.Domain) {

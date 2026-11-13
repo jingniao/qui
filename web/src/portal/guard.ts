@@ -1,8 +1,9 @@
 import type { RouteLocationNormalized } from 'vue-router';
 import { portalAPI } from './api';
 
+// Unauthenticated portal visitors go to the site root, which is the user login page.
 export async function portalGuard(to: RouteLocationNormalized) {
-  if (to.path === '/portal/login') return true;
+  if (to.path === '/') return true;
   try { await portalAPI.session(); return true; }
-  catch { return { path: '/portal/login' }; }
+  catch { return { path: '/' }; }
 }

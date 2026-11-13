@@ -27,8 +27,8 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/filelock"
+	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"testing/fstest"
 )

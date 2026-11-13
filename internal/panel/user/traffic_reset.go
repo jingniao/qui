@@ -5,37 +5,68 @@ import (
 	"time"
 )
 
-// resetBoundary retains the original day of month, clamping only the current
-// month's boundary. A February reset must not move a January 31 anchor.
-func resetBoundary(anchor, now time.Time, cycle string) time.Time {
+// boundaryAt is the k-th reset boundary after anchor (k >= 1). A monthly
+// boundary keeps the anchor's day of month and clamps only that month's: a
+// February reset must not move a January 31 anchor. A 30-day boundary uses
+// AddDate, which follows local calendar days through daylight saving changes.
+func boundaryAt(anchor time.Time, cycle string, k int) time.Time {
+	if cycle == "30days" {
+		return anchor.AddDate(0, 0, 30*k)
+	}
+	first := time.Date(anchor.Year(), anchor.Month()+time.Month(k), 1, anchor.Hour(), anchor.Minute(), anchor.Second(), anchor.Nanosecond(), anchor.Location())
+	day := min(anchor.Day(), first.AddDate(0, 1, -1).Day())
+	return first.AddDate(0, 0, day-1)
+}
+
+// boundaryIndex returns the index of the last boundary at or before now (0 when
+// none has passed yet).
+func boundaryIndex(anchor, now time.Time, cycle string) int {
 	if now.Before(anchor) {
+		return 0
+	}
+	k := (now.Year()-anchor.Year())*12 + int(now.Month()-anchor.Month())
+	if cycle == "30days" {
+		k = int(now.Sub(anchor)/(24*time.Hour)) / 30
+	}
+	for boundaryAt(anchor, cycle, k+1).Compare(now) <= 0 {
+		k++
+	}
+	for k > 0 && boundaryAt(anchor, cycle, k).After(now) {
+		k--
+	}
+	return k
+}
+
+// resetBoundary is the last reset boundary at or before now, or the zero time
+// when none has passed yet.
+func resetBoundary(anchor, now time.Time, cycle string) time.Time {
+	k := boundaryIndex(anchor, now, cycle)
+	if k == 0 {
 		return time.Time{}
 	}
-	if cycle == "30days" {
-		days := int(now.Sub(anchor)/(24*time.Hour)) / 30 * 30
-		// AddDate follows local calendar days through daylight saving changes.
-		for anchor.AddDate(0, 0, days+30).Compare(now) <= 0 {
-			days += 30
-		}
-		for days > 0 && anchor.AddDate(0, 0, days).After(now) {
-			days -= 30
-		}
-		if days == 0 {
-			return time.Time{}
-		}
-		return anchor.AddDate(0, 0, days)
+	return boundaryAt(anchor, cycle, k)
+}
+
+// nextBoundary is the first reset boundary strictly after now.
+func nextBoundary(anchor, now time.Time, cycle string) time.Time {
+	return boundaryAt(anchor, cycle, boundaryIndex(anchor, now, cycle)+1)
+}
+
+// NextResetAt returns the next traffic reset instant (UTC, same format as
+// TrafficResetAt) for the user, or "" when the cycle never resets or the
+// anchor is unusable. location is the panel time zone used by the scheduler.
+func NextResetAt(u User, now time.Time, location *time.Location) string {
+	if u.TrafficResetCycle != "monthly" && u.TrafficResetCycle != "30days" {
+		return ""
 	}
-	months := (now.Year()-anchor.Year())*12 + int(now.Month()-anchor.Month())
-	for months > 0 {
-		first := time.Date(anchor.Year(), anchor.Month()+time.Month(months), 1, anchor.Hour(), anchor.Minute(), anchor.Second(), anchor.Nanosecond(), anchor.Location())
-		day := min(anchor.Day(), first.AddDate(0, 1, -1).Day())
-		boundary := first.AddDate(0, 0, day-1)
-		if !boundary.After(now) {
-			return boundary
-		}
-		months--
+	start, err := time.Parse(time.RFC3339Nano, u.TrafficResetAnchor)
+	if err != nil {
+		return ""
 	}
-	return time.Time{}
+	if location == nil {
+		location = time.UTC
+	}
+	return timestamp(nextBoundary(start.In(location), now.In(location), u.TrafficResetCycle))
 }
 
 // ResetDue commits usage and its durable boundary together. Historical traffic

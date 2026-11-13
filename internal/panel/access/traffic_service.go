@@ -2,7 +2,6 @@ package access
 
 import (
 	"context"
-	"errors"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
@@ -19,7 +18,7 @@ func (s *Service) RecordTraffic(ctx context.Context, nodeID string, message *pb.
 		return "", err
 	}
 	if batch.NodeID != nodeID {
-		return "", errors.New("traffic batch node mismatch")
+		return "", reject("node_mismatch", 0)
 	}
 	if err := s.recordDecodedTraffic(ctx, batch, allowNew); err != nil {
 		return "", err
@@ -34,7 +33,7 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 		return trafficStageError("statistics_pending", err)
 	}
 	if !accepted && !allowNew {
-		return errors.New("stale sequence cannot create traffic batch")
+		return reject("stale_sequence", 0)
 	}
 	now := time.Now().UTC()
 	if s.Now != nil {
@@ -44,16 +43,16 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 	if !accepted {
 		for _, counter := range batch.Counters {
 			if counter.ObservedAt.After(now.Add(2 * time.Minute)) {
-				return errors.New("traffic sample time is in the future")
+				return reject("future_time", counter.Revision)
 			}
 			state, err := s.trafficState(ctx, nodeID, counter)
 			if err != nil {
-				return trafficStageError("source_unavailable", err)
+				return trafficRevisionError("source_unavailable", counter.Revision, err)
 			}
 			states[counter.Revision] = state
 			if counter.Kind == "node" {
 				if counter.UploadBytes > 1<<50 || counter.DownloadBytes > 1<<50 || !strings.HasSuffix(counter.CoreEpoch, ".node") {
-					return ErrInvalid
+					return &batchRejection{reason: "invalid", revision: counter.Revision, cause: ErrInvalid}
 				}
 				continue
 			}
@@ -72,7 +71,7 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 				}
 			}
 			if !matched {
-				return trafficStageError("identity_conflict", ErrInvalid)
+				return trafficRevisionError("identity_conflict", counter.Revision, ErrInvalid)
 			}
 		}
 		if s.Repository.Vault != nil {
@@ -97,7 +96,7 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 		return nil
 	}
 	if s.Users == nil {
-		return errors.New("user traffic recorder unavailable")
+		return reject("internal", 0)
 	}
 	if recorder, ok := s.Users.(interface {
 		ApplyTrafficWithStates(context.Context, traffic.Batch, map[int64]desiredstate.State) error
@@ -106,7 +105,7 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 			for _, counter := range batch.Counters {
 				state, err := s.trafficState(ctx, nodeID, counter)
 				if err != nil {
-					return trafficStageError("source_unavailable", err)
+					return trafficRevisionError("source_unavailable", counter.Revision, err)
 				}
 				states[counter.Revision] = state
 			}

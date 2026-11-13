@@ -57,7 +57,7 @@
               @click="options[opt.key] = !options[opt.key]">{{ opt.label }}</button>
             <span class="text-ios-tertiary cursor-help ml-1 text-xs" title="丢包为虚线，对应右侧纵轴（丢包率 %）。平滑峰值：使用 5 点滚动中位数过滤单次异常突刺，目标卡片始终展示原始统计数据。">ⓘ</span>
           </div>
-          <MetricLineChart v-if="datasets.length" label="网络质量与延迟历史采样" :datasets="datasets" :axes="axes" :x-min="start" :x-max="end" />
+          <MetricLineChart v-if="datasets.length" label="网络质量与延迟历史采样" :datasets="datasets" :axes="axes" :x-min="start" :x-max="end" height-class="h-56 lg:h-72 2xl:h-80" />
           <p v-else class="text-xs text-ios-tertiary py-6">未选择目标或指标</p>
         </section>
       </template>
@@ -120,7 +120,8 @@ function formatCardStats(targetId: string): string {
 const datasets = computed(() => {
   const shown = data.value.targets.slice(0, 5)
     .map((target, colorIndex) => ({ target, colorIndex, points: rawPoints(target.id) }))
-    .filter(item => !hidden.value.includes(item.target.id));
+    // A target without samples in the range adds only empty legend entries.
+    .filter(item => item.points.length > 0 && !hidden.value.includes(item.target.id));
   return buildLatencyDatasets(shown, data.value.intervalSeconds, options);
 });
 const axes = computed(() => latencyAxes(options));

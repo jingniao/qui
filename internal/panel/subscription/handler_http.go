@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -23,6 +24,9 @@ type Handler struct {
 	Rules        RulesStore
 	Profiles     ProfileStore
 	ServiceRules ServiceRules
+	// PanelAddress returns the panel address and Web port saved for node
+	// installation ("" and 0 when unset); rule provider links use it.
+	PanelAddress func(context.Context) (string, int)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -42,7 +46,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 // client User-Agent when the Owner enabled detection, then from the Owner default;
 // the exporter decides the content type and the download name.
 func (h *Handler) content(w http.ResponseWriter, r *http.Request) {
-	rendered, err := h.Service.Render(r.Context(), r.PathValue("token"), r.URL.Query().Get("format"), r.UserAgent(), providerURLFor(r, r.PathValue("token")))
+	rendered, err := h.Service.Render(r.Context(), r.PathValue("token"), r.URL.Query().Get("format"), r.UserAgent(), providerURLFor(r, r.PathValue("token"), h.PanelAddress))
 	if err != nil {
 		h.fail(w, err)
 		return

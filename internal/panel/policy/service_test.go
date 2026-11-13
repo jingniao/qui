@@ -8,8 +8,8 @@ import (
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/pkg/contracts/desiredstate"
 	shared "proxycontrol/pkg/contracts/policy"
 	"testing"
@@ -189,7 +189,7 @@ func TestResolveMergesKeywordsAndSources(t *testing.T) {
 		Match:    desiredstate.Match{ServiceIDs: []string{svc.ID}},
 	}
 
-	resolved, err := service.resolve(ctx, rule)
+	resolved, err := service.resolve(ctx, rule, false)
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestDisabledServiceSetSkipsSources(t *testing.T) {
 		Match:    desiredstate.Match{ServiceIDs: []string{svc.ID}},
 	}
 
-	resolved, err := service.resolve(ctx, rule)
+	resolved, err := service.resolve(ctx, rule, false)
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}

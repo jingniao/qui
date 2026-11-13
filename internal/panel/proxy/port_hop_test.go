@@ -29,8 +29,8 @@ func recordHopCapabilities(t *testing.T, f *fixture, nodeID string, supported bo
 	caps := &pb.Capabilities{
 		CoreName: "sing-box", CoreVersion: "1.14.3", MultiCoreSupported: true,
 		TlsCertificateFilesSupported: true,
-		Cores: []*pb.CoreCapability{{Name: "sing-box", Version: "1.14.3", TlsCertificateFilesSupported: true, Protocols: []*pb.ProtocolCapability{{Protocol: "hysteria2", Inbound: true, Udp: true}}}},
-		PortHopSupported: supported,
+		Cores:                        []*pb.CoreCapability{{Name: "sing-box", Version: "1.14.3", TlsCertificateFilesSupported: true, Protocols: []*pb.ProtocolCapability{{Protocol: "hysteria2", Inbound: true, Udp: true}}}},
+		PortHopSupported:             supported,
 	}
 	msg := &pb.AgentMessage{NodeId: nodeID, MessageId: "capabilities-hop", Sequence: sequence, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: caps}}
 	if _, err := f.nodes.Record(context.Background(), nodeID, msg); err != nil {

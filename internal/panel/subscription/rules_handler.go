@@ -3,9 +3,11 @@ package subscription
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"proxycontrol/internal/panel/auth"
@@ -175,15 +177,36 @@ func ClassicalRuleSet(service ServiceRule) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// providerURLFor builds the link a client fetches a service rule from. It uses
-// the scheme and host the client used for the subscription itself, so the
-// profile points back at the same panel address.
-func providerURLFor(r *http.Request, token string) func(string) string {
+// providerURLFor builds the link a client fetches a service rule from. The panel
+// address and Web port saved for node installation (system settings) win, so a
+// panel behind a TLS-terminating reverse proxy still writes https and its public
+// name; a value left unset there keeps what the client used for the
+// subscription request itself.
+func providerURLFor(r *http.Request, token string, panel func(context.Context) (string, int)) func(string) string {
 	scheme := "https"
 	if r.TLS == nil {
 		scheme = "http"
 	}
 	host := r.Host
+	if panel != nil {
+		if savedHost, savedPort := panel(r.Context()); savedHost != "" || savedPort != 0 {
+			scheme = "https"
+			name, port, err := net.SplitHostPort(r.Host)
+			if err != nil {
+				name, port = r.Host, ""
+			}
+			if savedHost != "" {
+				name = savedHost
+			}
+			if savedPort != 0 {
+				port = strconv.Itoa(savedPort)
+			}
+			host = name
+			if port != "" && port != "443" {
+				host = net.JoinHostPort(name, port)
+			}
+		}
+	}
 	return func(id string) string {
 		return (&url.URL{Scheme: scheme, Host: host, Path: "/sub/" + token + "/rules/" + id}).String()
 	}

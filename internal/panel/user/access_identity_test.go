@@ -3,8 +3,8 @@ package user
 import (
 	"bytes"
 	"context"
-	"sync"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )

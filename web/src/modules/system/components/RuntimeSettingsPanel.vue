@@ -20,7 +20,8 @@
      <label class="block">客户端刷新间隔（小时）<input v-model.number="form.subscriptionUpdateHours" type="number" min="1" max="168" step="1" class="form-input-base mt-2" /></label>
      <label class="flex items-center gap-2 sm:mt-7"><input v-model="form.subscriptionUaDetection" type="checkbox" class="h-4 w-4" />按客户端 User-Agent 自动选择格式</label>
     </div>
-    <p class="text-xs text-gray-500">刷新间隔写入订阅响应的 profile-update-interval，客户端据此定期重新拉取（1～168 小时）。目前没有可验证的客户端 User-Agent 特征，自动识别即使开启也只会回落到默认格式；关闭后始终使用默认格式。</p>
+    <p class="text-xs text-gray-500">Clash Verge／Mihomo Party／Clash Meta／FlClash → Clash Meta（mihomo）；sing-box 官方客户端 → sing-box；v2rayN 等 → Base64；识别不了时用上面的默认格式</p>
+    <p class="text-xs text-gray-500">刷新间隔写入订阅响应的 profile-update-interval，客户端据此定期重新拉取（1～168 小时）。关闭自动识别后始终使用默认格式。</p>
     <p class="text-xs text-gray-500">订阅继续按用户授权节点分组、已发布配置、有效设备凭据和协议能力过滤。默认格式不会改变用户权限或正在运行的节点配置。</p>
    </template>
    <template v-else>

@@ -7,8 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 	"testing"
 	"time"
 )

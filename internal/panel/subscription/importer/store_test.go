@@ -15,8 +15,8 @@ import (
 	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/panel/subscription/source"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 func storeFixture(t *testing.T) (*Store, string, string) {

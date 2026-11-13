@@ -81,6 +81,7 @@ func runWithContext(ctx context.Context, args []string) (resultErr error) {
 	restorePath := flags.String("restore-backup", "", "restore a verified encrypted backup while the panel is stopped, then serve")
 	passwordPath := flags.String("restore-password-file", "", "protected local file containing the backup password")
 	setOwner := flags.Bool("set-owner-credentials", false, "replace the Owner username and password of a stopped panel, reading two lines from stdin")
+	adminEntryAction := flags.String("admin-entry", "", "show or reset the admin login path of a stopped panel (show|reset)")
 	checkDatabase := flags.String("check-database", "", "report whether this binary can open a stopped panel database file (read-only, works on a private copy)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -140,6 +141,24 @@ func runWithContext(ctx context.Context, args []string) (resultErr error) {
 			return errors.New("owner credential reset requires an explicit config and no other flag")
 		}
 		return setOwnerCredentials(ctx, *configPath, os.Stdin)
+	}
+	adminEntryRequested := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "admin-entry" {
+			adminEntryRequested = true
+		}
+	})
+	if adminEntryRequested {
+		valid := *configPath != ""
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name != "config" && f.Name != "admin-entry" {
+				valid = false
+			}
+		})
+		if !valid {
+			return errors.New("admin-entry requires an explicit config and no other flag")
+		}
+		return adminEntry(ctx, *configPath, *adminEntryAction, os.Stdout)
 	}
 	if (*restorePath == "") != (*passwordPath == "") {
 		return errors.New("restore-backup and restore-password-file must be supplied together")

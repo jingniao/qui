@@ -205,9 +205,10 @@
             <!-- 订阅链接输入框 -->
             <div class="mt-4 p-3.5 rounded-2xl bg-[#F8F8FA] border border-black/[0.05] space-y-2">
               <div class="flex items-center justify-between text-xs text-ios-tertiary font-medium">
-                <span>通用订阅 URL</span>
-                <span class="font-mono text-xs">{{ subUrl ? '可直接复制或导入' : '重置后可查看' }}</span>
+                <span>{{ AUTO_SUBSCRIPTION_LABEL }}</span>
+                <span v-if="!subUrl" class="text-xs">重置后可查看</span>
               </div>
+              <p class="text-xs text-ios-secondary">按客户端 User-Agent 识别，识别不了时返回系统默认格式（{{ defaultFormatLabel }}）</p>
               <div class="flex items-center gap-2">
                 <input
                   :value="subUrl"
@@ -227,8 +228,11 @@
             </div>
 
             <p v-if="linkMessage" class="text-xs text-ios-secondary mt-3">{{ linkMessage }}</p>
-            <div v-for="format in subFormats" :key="format.id" class="mt-3 space-y-2">
-              <label class="text-xs font-semibold">{{ format.id }}</label>
+            <div v-for="format in clientRows" :key="format.format" class="mt-3 space-y-1.5">
+              <div>
+                <span class="text-xs font-semibold">{{ format.label }}</span>
+                <p v-if="format.clients" class="text-xs text-ios-secondary">{{ format.clients }}</p>
+              </div>
               <div class="flex gap-2">
                 <input readonly :value="absoluteLink(format.url)" class="form-input-base font-mono select-all" />
                 <button class="ios-btn-secondary" @click="copyText(absoluteLink(format.url))">复制</button>
@@ -244,6 +248,15 @@
               <input v-model="loginPassword" type="password" autocomplete="new-password" placeholder="设置 / 重置登录密码（留空保留）" class="form-input-base max-w-sm" />
               <button :disabled="loginBusy" class="ios-btn-primary" @click="saveLogin">保存登录设置</button>
               <button :disabled="loginBusy" class="ios-btn-secondary" @click="revokeVisible = true">撤销所有登录会话</button>
+            </div>
+            <div class="space-y-1.5">
+              <span class="text-xs font-semibold">用户门户地址</span>
+              <div class="flex flex-wrap gap-2">
+                <input readonly :value="portalUrl" class="form-input-base font-mono select-all max-w-sm" />
+                <button type="button" class="ios-btn-secondary" @click="copyText(portalUrl)">复制</button>
+                <button v-if="subUrl" type="button" class="ios-btn-secondary" @click="copyText(portalShareText(portalUrl, subUrl))">复制门户地址和订阅链接</button>
+              </div>
+              <p class="text-xs text-ios-secondary">用户在这个地址（面板根地址）用用户名和门户密码登录。</p>
             </div>
             <p class="text-xs text-ios-secondary">关闭登录或设置新密码会立即撤销此用户的所有门户会话。代理连接凭证单独管理。</p>
           </div>
@@ -595,6 +608,9 @@ import {
   type UserInput,
   type UserMeta
 } from '../api';
+import { settingsAPI } from '../../system/settingsApi';
+import { AUTO_SUBSCRIPTION_LABEL, orderedSubscriptionClients, subscriptionClient } from '../../../app/subscriptionClients';
+import { portalAddress, portalShareText } from '../portalLogin';
 import { proxyAPI, type Inbound } from '../../proxy/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
@@ -646,6 +662,22 @@ const subRotating = ref(false);
 const subFormats = ref<{ id: string; url: string }[]>([]);
 const linkMessage = ref('');
 const loginEnabled = ref(false), loginPassword = ref(''), loginBusy = ref(false), revokeVisible = ref(false);
+const defaultFormat = ref('');
+const installEndpoint = ref<{ host: string; httpPort: number } | null>(null);
+const portalUrl = computed(() => portalAddress(installEndpoint.value, window.location.host));
+const clientRows = computed(() =>
+  orderedSubscriptionClients(subFormats.value.map(f => f.id), defaultFormat.value)
+    .map(c => ({ ...c, url: subFormats.value.find(f => f.id === c.format)?.url ?? '' }))
+    .filter(c => c.url));
+const defaultFormatLabel = computed(() => (defaultFormat.value ? subscriptionClient(defaultFormat.value).label : '系统默认格式'));
+async function loadPortalContext() {
+  const [policy, endpoint] = await Promise.all([
+    settingsAPI.runtimePolicy().then(r => r.policy.subscriptionFormat).catch(() => settingsAPI.subscriptionFormats().then(r => r.default).catch(() => '')),
+    settingsAPI.installEndpoint().catch(() => null)
+  ]);
+  defaultFormat.value = policy;
+  installEndpoint.value = endpoint;
+}
 function absoluteLink(path: string) { return new URL(path, window.location.origin).href; }
 function formatQR(path: string) {
   try { subQrSvg.value = generateQRCodeSVG(absoluteLink(path), 160); }
@@ -665,7 +697,7 @@ async function loadSubscription() {
 async function saveLogin() {
   loginBusy.value = true;
   try {
-    await request(`/users/${userId.value}/login`, 'PUT', { enabled: loginEnabled.value, ...(loginPassword.value ? { password: loginPassword.value } : {}) });
+    await userAPI.setLogin(userId.value, loginEnabled.value, loginPassword.value || undefined);
     loginPassword.value = ''; await load(); showToast('登录设置已保存');
   } catch (e) { showToast((e as Error).message, 'error'); }
   finally { loginBusy.value = false; }
@@ -984,6 +1016,7 @@ async function load() {
     memberInbounds.value = ibRes.items;
 
     await loadSubscription();
+    void loadPortalContext();
     void userAPI.preview(id)
       .then(result => { previewItems.value = result.items; previewFailed.value = false; })
       .catch(() => { previewItems.value = []; previewFailed.value = true; })

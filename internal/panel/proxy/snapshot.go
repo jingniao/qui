@@ -255,6 +255,9 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 	if err := desiredstate.RequireExpandedPolicySupport(state, node.KeywordCapabilities(cores)); err != nil {
 		return state, enabled, err
 	}
+	if err := desiredstate.RequireNativeRuleSetSupport(state, node.KeywordCapabilities(cores)); err != nil {
+		return state, enabled, fmt.Errorf("%w: 该服务器的 Agent 不支持原生规则集，请先升级 Agent", err)
+	}
 	if err := desiredstate.RequirePortHopSupport(state, n.Capabilities.GetPortHopSupported()); err != nil {
 		return state, enabled, fmt.Errorf("%w: 该服务器的 Agent 不支持端口跳跃，请先升级 Agent", desiredstate.ErrPortHopUnsupported)
 	}

@@ -17,5 +17,7 @@ watch(() => [authState.isAuthenticated, router.currentRoute.value.path] as const
 }, { immediate: true });
 window.addEventListener('auth-expired', () => {
   clearSession();
-  if (!router.currentRoute.value.path.startsWith('/portal/')) void router.replace('/login');
+  // A lapsed admin session lands on the user login page at '/', which does not
+  // reveal the admin login address.
+  if (!router.currentRoute.value.path.startsWith('/portal/')) void router.replace('/');
 });

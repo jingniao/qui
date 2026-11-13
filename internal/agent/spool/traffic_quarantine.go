@@ -11,9 +11,10 @@ import (
 // after it was sent, so the Agent finds the same head batch again after every
 // reconnect. After TrafficRejectLimit consecutive rejections of that batch it
 // leaves the delivery head into quarantine: kept on disk, never deleted and
-// never evicted for capacity (every traffic record outranks allowed access
-// rollups), counted in the spool statistics, and skipped so later traffic and
-// access batches flow again.
+// never evicted for capacity, and skipped so later batches flow again. Traffic
+// batches (every traffic record outranks allowed access rollups) and access
+// batches (see evictAllowedTx) share this mechanism; the shared code takes the
+// table name, which is always one of the two constants below.
 //
 // Quarantine is a cool-down, not a verdict. The panel answers the same
 // FailedPrecondition for transient trouble (a busy database), and a panel-side
@@ -22,9 +23,14 @@ import (
 // restart of the Agent releases every quarantined batch at once.
 const TrafficRejectLimit = 3
 
+const (
+	trafficTable = "traffic_batches"
+	accessTable  = "batches"
+)
+
 // TrafficQuarantineCooldown is how long a quarantined batch waits behind the
-// rest of the queue before it is re-attempted as the last resort. It is a
-// variable so tests can shorten it.
+// rest of the queue before it is re-attempted as the last resort. It applies to
+// traffic and access batches alike. It is a variable so tests can shorten it.
 var TrafficQuarantineCooldown = time.Hour
 
 // RejectTraffic records one rejected delivery of a traffic batch and reports
@@ -32,8 +38,17 @@ var TrafficQuarantineCooldown = time.Hour
 // acknowledged, evicted, or whose quarantine cool-down is still running is left
 // untouched.
 func (s *Spool) RejectTraffic(ctx context.Context, batchID string) (bool, error) {
+	return s.rejectBatch(ctx, trafficTable, batchID)
+}
+
+// RejectAccess is RejectTraffic for access batches.
+func (s *Spool) RejectAccess(ctx context.Context, batchID string) (bool, error) {
+	return s.rejectBatch(ctx, accessTable, batchID)
+}
+
+func (s *Spool) rejectBatch(ctx context.Context, table, batchID string) (bool, error) {
 	if batchID == "" || len(batchID) > 128 {
-		return false, errors.New("invalid traffic rejection")
+		return false, errors.New("invalid batch rejection")
 	}
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
@@ -41,7 +56,7 @@ func (s *Spool) RejectTraffic(ctx context.Context, batchID string) (bool, error)
 	}
 	defer tx.Rollback()
 	var rejections, quarantined, quarantinedAt int64
-	err = tx.QueryRowContext(ctx, "SELECT CASE WHEN typeof(rejections)='integer' THEN rejections ELSE -1 END,quarantined,CASE WHEN typeof(quarantined_at)='integer' THEN quarantined_at ELSE -1 END FROM traffic_batches WHERE id=?", batchID).Scan(&rejections, &quarantined, &quarantinedAt)
+	err = tx.QueryRowContext(ctx, "SELECT CASE WHEN typeof(rejections)='integer' THEN rejections ELSE -1 END,quarantined,CASE WHEN typeof(quarantined_at)='integer' THEN quarantined_at ELSE -1 END FROM "+table+" WHERE id=?", batchID).Scan(&rejections, &quarantined, &quarantinedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -49,7 +64,7 @@ func (s *Spool) RejectTraffic(ctx context.Context, batchID string) (bool, error)
 		return false, err
 	}
 	if rejections < 0 || quarantinedAt < 0 || (quarantined != 0 && quarantined != 1) {
-		return false, errors.New("traffic rejection counter invalid")
+		return false, errors.New("batch rejection counter invalid")
 	}
 	now := time.Now().Unix()
 	if quarantined == 1 {
@@ -59,7 +74,7 @@ func (s *Spool) RejectTraffic(ctx context.Context, batchID string) (bool, error)
 		if quarantinedAt > now-int64(TrafficQuarantineCooldown/time.Second) {
 			return false, nil
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE traffic_batches SET rejections=?,quarantined_at=? WHERE id=? AND quarantined=1 AND quarantined_at=?", TrafficRejectLimit-1, now, batchID, quarantinedAt)
+		result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET rejections=?,quarantined_at=? WHERE id=? AND quarantined=1 AND quarantined_at=?", TrafficRejectLimit-1, now, batchID, quarantinedAt)
 		if err != nil {
 			return false, err
 		}
@@ -73,16 +88,16 @@ func (s *Spool) RejectTraffic(ctx context.Context, batchID string) (bool, error)
 		return true, tx.Commit()
 	}
 	if rejections >= TrafficRejectLimit {
-		return false, errors.New("traffic rejection counter invalid")
+		return false, errors.New("batch rejection counter invalid")
 	}
 	// The counter stops one short of the limit, so the rejection of the retry
 	// that follows a cool-down quarantines the batch again at once.
 	rejections++
-	statement := "UPDATE traffic_batches SET rejections=? WHERE id=? AND quarantined=0 AND rejections=?"
+	statement := "UPDATE " + table + " SET rejections=? WHERE id=? AND quarantined=0 AND rejections=?"
 	arguments := []any{rejections, batchID, rejections - 1}
 	nowQuarantined := rejections >= TrafficRejectLimit
 	if nowQuarantined {
-		statement = "UPDATE traffic_batches SET rejections=?,quarantined=1,quarantined_at=? WHERE id=? AND quarantined=0 AND rejections=?"
+		statement = "UPDATE " + table + " SET rejections=?,quarantined=1,quarantined_at=? WHERE id=? AND quarantined=0 AND rejections=?"
 		arguments = []any{rejections, now, batchID, rejections - 1}
 	}
 	result, err := tx.ExecContext(ctx, statement, arguments...)
@@ -102,12 +117,12 @@ func (s *Spool) RejectTraffic(ctx context.Context, batchID string) (bool, error)
 	return nowQuarantined, nil
 }
 
-// attachTrafficQuarantine adds the quarantine columns to a store that was
-// created before they existed. Their defaults keep every stored batch
-// deliverable, and traffic_batches is outside the authenticated checkpoint, so
-// the stored digest still verifies.
-func attachTrafficQuarantine(ctx context.Context, database *sql.DB) error {
-	present, err := trafficBatchColumns(ctx, database)
+// attachQuarantine adds the quarantine columns to a store that was created
+// before they existed. Their defaults keep every stored batch deliverable. Both
+// tables are outside the authenticated checkpoint, so the stored digest still
+// verifies.
+func attachQuarantine(ctx context.Context, database *sql.DB, table string) error {
+	present, err := batchColumns(ctx, database, table)
 	if err != nil {
 		return err
 	}
@@ -119,24 +134,24 @@ func attachTrafficQuarantine(ctx context.Context, database *sql.DB) error {
 		if present[column.name] {
 			continue
 		}
-		if _, err := database.ExecContext(ctx, "ALTER TABLE traffic_batches ADD COLUMN "+column.definition); err != nil {
+		if _, err := database.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column.definition); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// releaseTrafficQuarantine puts every held-back batch back into the delivery
-// head when the store opens. A restart or upgrade retries them immediately: the
-// panel may have rejected them for a transient reason and a newer panel may
-// accept them now, so a quarantine never outlives the process that set it.
-func releaseTrafficQuarantine(ctx context.Context, database *sql.DB) error {
-	_, err := database.ExecContext(ctx, "UPDATE traffic_batches SET quarantined=0,rejections=0,quarantined_at=0 WHERE quarantined=1")
+// releaseQuarantine puts every held-back batch back into the delivery head when
+// the store opens. A restart or upgrade retries them immediately: the panel may
+// have rejected them for a transient reason and a newer panel may accept them
+// now, so a quarantine never outlives the process that set it.
+func releaseQuarantine(ctx context.Context, database *sql.DB, table string) error {
+	_, err := database.ExecContext(ctx, "UPDATE "+table+" SET quarantined=0,rejections=0,quarantined_at=0 WHERE quarantined=1")
 	return err
 }
 
-func trafficBatchColumns(ctx context.Context, database *sql.DB) (map[string]bool, error) {
-	rows, err := database.QueryContext(ctx, "PRAGMA table_info(traffic_batches)")
+func batchColumns(ctx context.Context, database *sql.DB, table string) (map[string]bool, error) {
+	rows, err := database.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return nil, err
 	}

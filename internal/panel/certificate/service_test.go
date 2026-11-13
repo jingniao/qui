@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/internal/platform/vault"
+	"proxycontrol/internal/testutil/dbtest"
 )
 
 // fakeAuditor stands in for the operation log. RecordDaily keeps at most one entry

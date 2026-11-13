@@ -114,6 +114,7 @@ GET /api/v1/subscription-rules/presets
 GET /api/v1/subscription-sources
 GET /api/v1/subscriptions
 GET /api/v1/system/access-retention
+GET /api/v1/system/admin-entry
 GET /api/v1/system/backup-schedule
 GET /api/v1/system/base
 GET /api/v1/system/certificate-settings
@@ -253,6 +254,7 @@ PUT /api/v1/service-sets/{id}
 PUT /api/v1/subscription-rules
 PUT /api/v1/subscription-sources/{id}
 PUT /api/v1/system/access-retention
+PUT /api/v1/system/admin-entry
 PUT /api/v1/system/backup-schedule
 PUT /api/v1/system/base
 PUT /api/v1/system/certificate-settings

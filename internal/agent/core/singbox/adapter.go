@@ -15,6 +15,7 @@ import (
 	"proxycontrol/internal/agent/core/scheduling"
 	"proxycontrol/internal/agent/gate"
 	"proxycontrol/internal/agent/observer"
+	"proxycontrol/internal/agent/rulesets"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -28,13 +29,15 @@ import (
 var ErrTelemetryUnavailable = errors.New("sing-box native account/connection telemetry has not been adapted for this build")
 
 type Adapter struct {
-	Ports                  *core.PortAllocator
-	startedAt              time.Time
-	connectionObserver     observer.Store
-	deviceGate             gate.Lease
-	sourceWriter           *collector.SingboxWriter
-	gateFailed             bool
-	Path, Directory        string
+	Ports              *core.PortAllocator
+	startedAt          time.Time
+	connectionObserver observer.Store
+	deviceGate         gate.Lease
+	sourceWriter       *collector.SingboxWriter
+	gateFailed         bool
+	Path, Directory    string
+	// RuleSets downloads the native rule set files; nil uses the defaults.
+	RuleSets               *rulesets.Fetcher
 	NodeID                 string
 	Now                    func() time.Time
 	mu                     sync.Mutex
@@ -182,6 +185,11 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	}
 	if a.Ports != nil {
 		options.privatePorts = a.Ports.Ports()
+	}
+	if a.Directory != "" {
+		if absolute, err := filepath.Abs(rulesets.Dir(a.Directory)); err == nil {
+			options.ruleSetDirectory = absolute
+		}
 	}
 	return renderWithOptions(ctx, state, at, options)
 }
@@ -661,6 +669,9 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	capabilities.TlsCertificateFilesSupported = true
 	capabilities.DomainKeywordSupported = true
 	capabilities.ExpandedPolicySupported = true
+	// The renderer emits local binary rule_set entries the Agent downloaded
+	// (v1.5.4 item 5).
+	capabilities.NativeRuleSetsSupported = true
 	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
 	if capabilities.DeviceGateSupported {
 		capabilities.ObservationContractVersion = 2

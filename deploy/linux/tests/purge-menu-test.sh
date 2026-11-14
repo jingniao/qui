@@ -213,7 +213,7 @@ for INIT in systemd openrc; do
 done
 
 # Run the complete menu including manifest detection and startup validation.
-for selection in panel agent all; do
+for selection in agent panel all; do
   INIT=systemd; export INIT
   if [[ $selection == all ]]; then setup panel agent; else setup "$selection"; fi
   cp "$R/service.sh" "$R/usr/local/lib/proxycontrol/service.sh"
@@ -238,5 +238,39 @@ for selection in panel agent all; do
   rm "$R/usr/local/lib/proxycontrol/uninstall.sh"
   printf '%s\n0\n' "$choice" | bash "$R/menu.sh" > "$R/menu-output"
   check 'missing uninstaller recommends updater' grep -q '请先运行一次 qui-update' "$R/menu-output"
+  cp "$R/uninstall.sh" "$R/usr/local/lib/proxycontrol/uninstall.sh"
+  chmod 755 "$R/usr/local/lib/proxycontrol/uninstall.sh"
+  # The menu version fixture above changed the binary; keep its install record accurate.
+  for c in panel agent; do
+    if [[ -f $R/usr/local/bin/proxy-$c ]]; then
+      bd=$(sha256sum "$R/usr/local/bin/proxy-$c")
+      sed -i "3s/.*/${bd%% *}/" "$R/var/lib/proxycontrol-install/$c.manifest"
+    fi
+  done
+  for answer in 'n\n' 'y\nwrong\n'; do
+    status=0
+    back='\n'; [[ $selection != agent ]] || back=''
+    printf '%b' "$choice\n${answer}${back}0\n" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
+    check "$selection menu cancel exits zero" test "$status" = 0
+    check 'menu cancel message' grep -q '已取消' "$R/menu-output"
+    check 'menu cancel returns to menu' test "$(grep -c fixture-version "$R/menu-output")" = 2
+  done
+  c=$selection; [[ $c != all ]] || c=panel
+  mv "$R/var/lib/proxy-$c" "$R/saved"
+  ln -s "$R/saved" "$R/var/lib/proxy-$c"
+  status=0
+  printf '%s\ny\npurge\n' "$choice" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
+  check 'menu preserves purge failure exit' test "$status" != 0
+  check 'menu preserves original purge error' grep -q 'Uninstall refused:' "$R/menu-output"
+  check 'failed purge preserves data' test -d "$R/saved/tuning"
+  rm "$R/var/lib/proxy-$c"
+  mv "$R/saved" "$R/var/lib/proxy-$c"
+  status=0
+  printf '%s\ny\npurge\n' "$choice" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
+  cat "$R/menu-output"
+  check "$selection menu purge exits zero" test "$status" = 0
+  check 'menu purge removes registry' test ! -e "$R/var/lib/proxycontrol-install"
+  check 'successful purge does not redisplay menu' test "$(grep -c fixture-version "$R/menu-output")" = 1
+  check 'successful purge does not wait for Enter' bash -c '! grep -q "按 Enter 返回菜单" "$1"' _ "$R/menu-output"
 done
 printf 'purge-menu-test: passed\n'

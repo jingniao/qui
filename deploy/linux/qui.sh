@@ -85,6 +85,8 @@ uninstall_all() {
   local script=/usr/local/lib/proxycontrol/uninstall.sh
   if [[ -f $script && ! -L $script && $(stat -c '%u' "$script") == 0 ]]; then
     "$script" all --purge
+    # Cancellation keeps the registry; successful purge removes it and the menu.
+    [[ -e /var/lib/proxycontrol-install ]] || exit 0
   else
     printf '本机缺少卸载脚本，请先运行一次 qui-update\n'
   fi

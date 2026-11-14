@@ -116,6 +116,18 @@ if node_args --core gost >/dev/null 2>&1; then exit 1; fi
 if node_args --core gost --core sing-box >/dev/null 2>&1; then exit 1; fi
 printf 'ok - one-click GOST as the first core refused\n'; passes=$((passes+1))
 
+# Execute the installer's EXIT cleanup against all supported staged cores.
+registry=$T/registry
+mkdir -p "$registry"
+stage=$(mktemp -d "$registry/staging.XXXXXXXX")
+touch "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost"
+publishing_temporary=''; publishing_started=false
+eval "$(sed -n '/^cleanup() {/,/^}/p' "$repo/deploy/linux/install.sh")"
+status=0
+(set -e; trap cleanup EXIT) || status=$?
+check 'three-core EXIT cleanup succeeds' test "$status" = 0
+check 'three-core staging directory removed' test ! -e "$stage"
+
 # The Agent's certificate directory is a fixed part of the section 30.2 layout: an
 # inbound may name certificate files from it, so the installer has to create it with
 # the mode the Agent can read and root alone can write. Both installers state it, and

@@ -530,7 +530,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }

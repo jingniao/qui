@@ -21,10 +21,11 @@
       </div>
     </div>
 
-    <ErrorState v-if="error" :message="error" @retry="load" />
+    <ErrorState v-if="error && !node" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="!node" />
     <template v-else>
       <p v-if="node.heartbeat?.core_healthy === false" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : `最后心跳报告核心 ${unhealthyCoreLabel(node) || node.capabilities?.core_name || '代理核心'} 未通过健康检查，请检查该核心的程序与配置发布结果。` }}</p>
+      <p v-if="error" role="status" class="text-sm text-ios-red">{{ error }}</p>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
       <nav class="ios-segmented-container inline-flex overflow-x-auto max-w-full -mt-0.5" aria-label="服务器详情页签">
         <button v-for="tab in tabs" :key="tab.key" class="ios-segmented-item whitespace-nowrap" :class="activeTab === tab.key ? 'active' : ''" :aria-current="activeTab === tab.key ? 'page' : undefined" @click="selectTab(tab.key)">{{ tab.label }}</button>
@@ -38,7 +39,7 @@
         <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :groups="groups" :meta="meta" :now="now" :today="today" :month="month" :machine-traffic="machineTraffic" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
         <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id + ':' + nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
-        <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :latest-revision="latestRevision" @changed="load" @published="published" />
+        <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :active="activeTab === 'revisions'" :latest-revision="latestRevision" @changed="load" @published="published" />
         <ServerTuning v-if="activeTab === 'tuning'" :key="node.id" :node="node" :is-owner="isOwner" />
         <NodeEditorDrawer v-if="editorOpen && isOwner" :server-id="node.id" :inbound="editing" origin="server" @close="editorOpen = false" @saved="nodeSaved" />
       </template>
@@ -194,24 +195,42 @@ async function refreshNode() {
     // ServerSettings owns an edit copy and only initializes it when node.id changes.
     node.value = server;
     now.value = Date.now();
-  } catch {
-    // Keep the last view on a transient failure; SSE/the next interval can retry.
+    error.value = '';
+  } catch (e) {
+    if (mounted && current === generation) error.value = (e as Error).message;
   } finally {
     refreshing = false;
   }
 }
 function visibilityChanged() {
-  if (document.visibilityState === 'visible') void refreshNode();
+  if (document.visibilityState === 'visible') { void refreshNode(); void loadSupplements(); }
 }
 
 async function load() {
   if (loading.value) return;
   if (route.name !== 'NodeDetail') return;
+  supplementGeneration++; supplementReading = false;
   const id = String(route.params.id || ''), current = ++generation;
   loading.value = true;
   error.value = '';
   try {
     const server = await readNode(id);
+    if (!mounted || current !== generation) return;
+    node.value = server;
+    void loadSupplements();
+  } catch (e) {
+    if (current === generation) error.value = (e as Error).message;
+  } finally {
+    if (current === generation) loading.value = false;
+  }
+}
+
+let supplementGeneration = 0, supplementReading = false;
+async function loadSupplements() {
+  if (supplementReading || !node.value || document.visibilityState !== 'visible') return;
+  supplementReading = true;
+  const id = node.value.id, current = generation, ticket = ++supplementGeneration;
+  try {
     const notices: string[] = [];
     const optional = async <T,>(label: string, promise: Promise<T>, fallback: T): Promise<T> => {
       try {
@@ -230,38 +249,34 @@ async function load() {
       dayStart = utc.toISOString();
     }
     const [groupResult, revisionResult, daily, monthly, machine] = await Promise.all([
-      isOwner.value ? optional('节点分组读取失败', choices(groupAPI.list), []) : Promise.resolve([]),
-      isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), []) : Promise.resolve([]),
+      isOwner.value ? optional('节点分组读取失败', choices(groupAPI.list), groups.value) : Promise.resolve([]),
+      isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), revisions.value) : Promise.resolve([]),
       optional('今日流量读取失败', accessAPI.accounts({ nodeId: id, from: dayStart, to: new Date().toISOString() }), null),
       optional('本月流量读取失败', request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly'), null),
-      optional('本月整机流量读取失败', nodeAPI.machineTraffic(id), null),
+      optional('本月整机流量读取失败', nodeAPI.machineTraffic(id), machineTraffic.value),
       optional('元数据读取失败', loadNodeMeta(id, isOwner.value), null)
     ]);
-    if (current !== generation) return;
-    node.value = server;
+    if (current !== generation || ticket !== supplementGeneration) return;
     groups.value = groupResult;
     revisions.value = revisionResult;
     revisionRefresh.value++;
-    today.value = daily && daily.observations > 0 ? daily.uploadBytes + daily.downloadBytes : undefined;
+    if (daily) today.value = daily.observations > 0 ? daily.uploadBytes + daily.downloadBytes : undefined;
     const item = monthly?.items.find(item => item.nodeId === id);
-    month.value = item ? item.uploadBytes + item.downloadBytes : undefined;
+    if (monthly) month.value = item ? item.uploadBytes + item.downloadBytes : undefined;
     machineTraffic.value = machine;
     warnings.value = notices;
-  } catch (e) {
-    if (current === generation) error.value = (e as Error).message;
-  } finally {
-    if (current === generation) loading.value = false;
-  }
+  } finally { if (ticket === supplementGeneration) supplementReading = false; }
 }
 
 // Only this node's status events (or the empty "all nodes" event) refresh the page.
 function nodeStatusChanged(event: Event) {
-  if (nodeStatusMatches(event, String(route.params.id || ''))) void load();
+  if (nodeStatusMatches(event, String(route.params.id || ''))) void refreshNode();
 }
 
 watch(() => route.params.id, () => {
   if (route.name !== 'NodeDetail') return;
   generation++;
+  supplementGeneration++; supplementReading = false;
   loading.value = false;
   editorOpen.value = false;
   unpublished.value = false;
@@ -278,7 +293,7 @@ watch(() => route.params.id, () => {
 onMounted(() => {
   mounted = true;
   void load();
-  refreshTimer = setInterval(refreshNode, 15000);
+  refreshTimer = setInterval(visibilityChanged, 60000);
   document.addEventListener('visibilitychange', visibilityChanged);
   timer = setInterval(() => {
     now.value = Date.now();

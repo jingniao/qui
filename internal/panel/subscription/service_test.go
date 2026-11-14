@@ -60,7 +60,7 @@ func setupProtocols(t *testing.T, limit int64, protocols ...string) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{database: database, users: &user.Repository{Database: database, Vault: configurationVault}, nodes: &node.Repository{Database: database}, deployments: &deployment.Repository{Database: database, Vault: configurationVault}}
+	f := &fixture{database: database, users: &user.Repository{Database: database, Vault: configurationVault}, nodes: &node.Repository{Database: database, Vault: configurationVault}, deployments: &deployment.Repository{Database: database, Vault: configurationVault}}
 	f.service = &Service{
 		Repository: &Repository{Database: database},
 		Users:      f.users,

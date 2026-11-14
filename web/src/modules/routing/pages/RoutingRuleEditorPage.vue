@@ -321,14 +321,15 @@ const error = ref('');
 async function load() {
   loading.value = true;
   try {
-    const [u, n, g, s, o, og, pc] = await Promise.all([
+    const [u, n, g, s, o, og, pc, policy] = await Promise.all([
       userAPI.list(1, '', 100),
       request<Page<NodeView>>('/nodes?page=1&pageSize=100'),
       groupAPI.list(1, 100),
       policyAPI.services(1, 100),
       proxyAPI.outbounds('', 1, 100),
       choices((p, s) => proxyAPI.groups('', p, s)),
-      choices((p, s) => proxyAPI.chains('', p, s))
+      choices((p, s) => proxyAPI.chains('', p, s)),
+      editingId.value ? policyAPI.get(editingId.value) : Promise.resolve(null)
     ]);
     users.value = u.items;
     nodes.value = n.items;
@@ -338,8 +339,8 @@ async function load() {
     outboundGroups.value = og;
     chains.value = pc;
 
-    if (editingId.value) {
-      Object.assign(form, input(await policyAPI.get(editingId.value)));
+    if (policy) {
+      Object.assign(form, input(policy));
     } else {
       Object.assign(form, defaults());
       form.timezone = authState.timezone;

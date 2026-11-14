@@ -495,6 +495,11 @@ func TestRefreshUnreadablePayloadIsNotAFetch(t *testing.T) {
 	}
 	before := items[0]
 	// Corrupt only the sealed link, as a damaged vault or a foreign key would.
+	var sealedURL []byte
+	if err = s.Database.QueryRow("SELECT url_encrypted FROM subscription_sources WHERE id=?", key).Scan(&sealedURL); err != nil {
+		t.Fatal(err)
+	}
+	beforeCache := identitySnapshot(t, s, key, false)
 	if _, err = s.Database.Exec("UPDATE subscription_sources SET url_encrypted=x'00' WHERE id=?", key); err != nil {
 		t.Fatal(err)
 	}
@@ -522,8 +527,11 @@ func TestRefreshUnreadablePayloadIsNotAFetch(t *testing.T) {
 		after[0].LastFetch != before.LastFetch || after[0].LatestResult == nil || after[0].LatestResult.Code != "import_ok" {
 		t.Fatalf("a storage failure changed the source: %+v %v", after, err)
 	}
-	if p, _, err := s.Proxies(ctx, source.Viewer{UserID: userID, AllowedProtocols: []string{"socks5"}}); err != nil || len(p) != 1 {
-		t.Fatalf("a storage failure changed the served endpoints: %d %v", len(p), err)
+	if afterCache := identitySnapshot(t, s, key, false); afterCache != beforeCache {
+		t.Fatal("a storage failure changed the cached endpoints")
+	}
+	if _, _, err := s.Proxies(ctx, source.Viewer{UserID: userID, AllowedProtocols: []string{"socks5"}}); err == nil || !strings.Contains(err.Error(), "invalid encrypted configuration") {
+		t.Fatalf("identity resolution hid the unreadable source kind: %v", err)
 	}
 	// The answer is the panel's own 500 with the same result, never the vault error.
 	w := refreshHTTP(s, key)
@@ -540,6 +548,13 @@ func TestRefreshUnreadablePayloadIsNotAFetch(t *testing.T) {
 		if strings.Contains(lowered, leaked) {
 			t.Fatalf("response leaked %q: %s", leaked, w.Body.String())
 		}
+	}
+	// With the original source identity restored, the unchanged cache is usable.
+	if _, err = s.Database.Exec("UPDATE subscription_sources SET url_encrypted=? WHERE id=?", sealedURL, key); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, err := s.Proxies(ctx, source.Viewer{UserID: userID, AllowedProtocols: []string{"socks5"}}); err != nil || len(p) != 1 {
+		t.Fatalf("a storage failure changed the served endpoints: %d %v", len(p), err)
 	}
 }
 

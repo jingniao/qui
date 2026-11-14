@@ -7,22 +7,27 @@
           <th>服务器</th><th>状态</th><th v-for="field in columns" :key="field.key">{{ field.label }}</th><th v-if="owner">操作</th>
         </template>
         <template #body>
-          <tr v-for="row in rows" :key="row.node.id">
+          <tr v-for="(row, index) in rows" :key="row.node.id">
             <td v-if="owner"><input v-if="!row.node.deletedAt" type="checkbox" :aria-label="`选择 ${row.node.name}`" :checked="selected.includes(row.node.id)" @change="$emit('toggle', row.node.id)" /></td>
-            <td><RouterLink :to="`/nodes/${row.node.id}`" class="text-ios-blue font-semibold hover:underline">{{ row.node.name }}</RouterLink><p v-if="row.region" class="text-xs text-ios-secondary">{{ row.region }}</p></td>
+            <td><span class="mr-1.5 select-none" :title="countryTitle(row.country)">{{ row.country.flag }}</span><RouterLink :to="`/nodes/${row.node.id}`" class="text-ios-blue font-semibold hover:underline">{{ row.node.name }}</RouterLink><p v-if="row.region" class="text-xs text-ios-secondary">{{ row.region }}</p></td>
             <td><StatusBadge :status="row.status.tone" :label="row.status.label" /></td>
             <td v-for="field in visibleFields(row)" :key="field.key" class="text-xs font-mono tabular-nums whitespace-nowrap" :class="field.warning ? 'text-ios-orange' : 'text-ios-secondary'">
               <TrafficValue v-if="field.key === 'today' || field.key === 'month'" :bytes="field.bytes" /><span v-else>{{ field.value }}</span>
             </td>
-            <td v-if="owner"><ServerRowMenu :node="row.node" compact @install="$emit('install', row.node)" @delete="$emit('delete', row.node)" /></td>
+            <td v-if="owner" class="whitespace-nowrap">
+              <button v-if="reorderable && index > 0" type="button" class="text-xs text-ios-blue mr-2" @click="$emit('move', row.node.id, -1)">上移</button>
+              <button v-if="reorderable && index < rows.length - 1" type="button" class="text-xs text-ios-blue mr-2" @click="$emit('move', row.node.id, 1)">下移</button>
+              <ServerRowMenu :node="row.node" compact @install="$emit('install', row.node)" @delete="$emit('delete', row.node)" />
+            </td>
           </tr>
         </template>
       </DataTable>
     </div>
     <div class="space-y-4 lg:hidden">
-      <article v-for="row in rows" :key="row.node.id" class="panel-card p-4 space-y-3">
+      <article v-for="(row, index) in rows" :key="row.node.id" class="panel-card p-4 space-y-3">
         <div class="flex items-center gap-3">
           <input v-if="owner && !row.node.deletedAt" type="checkbox" :aria-label="`选择 ${row.node.name}`" :checked="selected.includes(row.node.id)" @change="$emit('toggle', row.node.id)" />
+          <span class="select-none" :title="countryTitle(row.country)">{{ row.country.flag }}</span>
           <RouterLink :to="`/nodes/${row.node.id}`" class="text-ios-blue font-semibold flex-1">{{ row.node.name }}</RouterLink>
           <StatusBadge :status="row.status.tone" :label="row.status.label" />
         </div>
@@ -35,6 +40,10 @@
             </dd>
           </div>
         </dl>
+        <div v-if="reorderable" class="flex justify-end gap-2">
+          <button v-if="index > 0" type="button" class="ios-btn-secondary !py-1 !px-2.5 text-xs" @click="$emit('move', row.node.id, -1)">上移</button>
+          <button v-if="index < rows.length - 1" type="button" class="ios-btn-secondary !py-1 !px-2.5 text-xs" @click="$emit('move', row.node.id, 1)">下移</button>
+        </div>
         <ServerRowMenu v-if="owner" :node="row.node" @install="$emit('install', row.node)" @delete="$emit('delete', row.node)" />
       </article>
     </div>
@@ -44,12 +53,13 @@
 import { computed } from 'vue';
 import type { NodeView } from '../api';
 import type { ServerField, ServerRow } from './serverListModel';
+import { countryTitle } from '../nodeMeta';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
 import TrafficValue from '../../../components/TrafficValue.vue';
 import ServerRowMenu from './ServerRowMenu.vue';
-const props = defineProps<{ rows: ServerRow[]; columns: ServerField[]; owner: boolean; selected: string[] }>();
-const emit = defineEmits<{ toggle: [id: string]; install: [node: NodeView]; delete: [node: NodeView] }>();
+const props = defineProps<{ rows: ServerRow[]; columns: ServerField[]; owner: boolean; selected: string[]; reorderable?: boolean }>();
+const emit = defineEmits<{ toggle: [id: string]; install: [node: NodeView]; delete: [node: NodeView]; move: [id: string, delta: -1 | 1] }>();
 const selectable = computed(() => props.rows.filter(row => !row.node.deletedAt));
 const allSelected = computed(() => selectable.value.length > 0 && selectable.value.every(row => props.selected.includes(row.node.id)));
 function visibleFields(row: ServerRow) { return row.fields.filter(field => props.columns.some(column => column.key === field.key)); }

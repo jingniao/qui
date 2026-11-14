@@ -8,49 +8,56 @@ import (
 )
 
 // applyOutboundSource pins every dialing outbound of a rendered configuration to
-// the node's configured outbound source address and interface: sendThrough on
-// the outbound, sockopt.interface for the socket, and a family strategy that
-// keeps a name resolving to the family of the source address. Blackhole
-// outbounds never dial and are left untouched. The check runs after the final
-// outbound list exists, so balancer members and probe targets are covered too.
+// its source address and interface: the outbound's own values, each falling
+// back to the node's (State.OutboundNetwork). An outbound derived from another,
+// such as a balancer member, carries the sourceID of the outbound it copies.
+// The step runs after the final outbound list exists, so balancer members and
+// probe targets are covered too.
 //
 // Known limitation: an outbound target that is an IP literal of the other
 // family (or a loopback address) cannot be reached from the pinned source
 // address and fails to connect.
-func applyOutboundSource(document *configDocument, network *desiredstate.Network) error {
-	if network == nil || network.OutboundSourceIP == "" && network.OutboundInterface == "" {
+func applyOutboundSource(document *configDocument, state desiredstate.State) error {
+	for index := range document.Outbounds {
+		outbound := &document.Outbounds[index]
+		if err := applyOutboundNetwork(outbound, state.OutboundNetwork(outbound.sourceID)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyOutboundNetwork writes sendThrough on the outbound, sockopt.interface
+// for the socket, and a family strategy that keeps a name resolving to the
+// family of the source address. Blackhole outbounds never dial.
+func applyOutboundNetwork(outbound *outboundConfig, network desiredstate.Network) error {
+	if outbound.Protocol == "blackhole" || network.OutboundSourceIP == "" && network.OutboundInterface == "" {
 		return nil
 	}
 	source, err := sourceAddress(network.OutboundSourceIP)
 	if err != nil {
 		return err
 	}
-	strategy := familyStrategy(source)
-	for index := range document.Outbounds {
-		outbound := &document.Outbounds[index]
-		if outbound.Protocol == "blackhole" {
-			continue
-		}
-		outbound.SendThrough = source
-		if network.OutboundInterface != "" {
-			sockopt(outbound).Interface = network.OutboundInterface
-		}
-		if strategy == "" {
-			continue
-		}
-		// Freedom resolves the target itself, and its settings carry the
-		// strategy; every other protocol takes it from the socket options.
-		if outbound.Protocol == "freedom" {
-			settings, err := freedomSettings(outbound.Settings)
-			if err != nil {
-				return err
-			}
-			settings["domainStrategy"] = strategy
-			outbound.Settings = settings
-			continue
-		}
-		sockopt(outbound).DomainStrategy = strategy
+	outbound.SendThrough = source
+	if network.OutboundInterface != "" {
+		sockopt(outbound).Interface = network.OutboundInterface
 	}
+	strategy := familyStrategy(source)
+	if strategy == "" {
+		return nil
+	}
+	// Freedom resolves the target itself, and its settings carry the strategy;
+	// every other protocol takes it from the socket options.
+	if outbound.Protocol == "freedom" {
+		settings, err := freedomSettings(outbound.Settings)
+		if err != nil {
+			return err
+		}
+		settings["domainStrategy"] = strategy
+		outbound.Settings = settings
+		return nil
+	}
+	sockopt(outbound).DomainStrategy = strategy
 	return nil
 }
 

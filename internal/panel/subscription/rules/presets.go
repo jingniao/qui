@@ -226,7 +226,7 @@ func metaPreset(id, name, description string, services []metaService) Preset {
 	return Preset{ID: id, Name: name, Description: description, Template: Template{
 		Preset:    id,
 		Client:    Client{Mode: "rule", MixedPort: 7890, LogLevel: "info"},
-		DNS:       DNS{Enable: true, EnhancedMode: "fake-ip", Nameservers: []string{"https://doh.pub/dns-query", "https://dns.alidns.com/dns-query"}, Fallback: []string{"https://dns.cloudflare.com/dns-query", "https://dns.google/dns-query"}},
+		DNS:       RecommendedDNS(),
 		Groups:    groups,
 		Providers: providers,
 		Rules:     rules,

@@ -77,6 +77,7 @@ const reloadAfterUpdate = ref(false);
 // The request this page follows: the one it submitted, or the one the panel reports
 // as pending/running when the card is opened again after the restart.
 const watchedRequestId = ref('');
+let disposed = false, polling = false, pollInFlight = false;
 let pollTimer: number | undefined, pollStartedAt = 0, lastStatusRendered = false;
 
 const latest = computed(() => state.value?.latest ?? null);
@@ -125,11 +126,12 @@ const resultTone = computed(() => finished.value?.state === 'succeeded' ? 'text-
 async function load(refresh: boolean, silent = false): Promise<PanelUpdateInfo | null> {
   try {
     const info = await settingsAPI.panelUpdate(refresh);
+    if (disposed) return null;
     state.value = info;
     error.value = '';
     return info;
   } catch (e) {
-    if (!silent) error.value = (e as Error).message;
+    if (!disposed && !silent) error.value = (e as Error).message;
     return null;
   }
 }
@@ -138,6 +140,7 @@ async function load(refresh: boolean, silent = false): Promise<PanelUpdateInfo |
 // so it is silent and the caller keeps polling.
 async function poll(): Promise<boolean> {
   const info = await load(false, true);
+  if (disposed || !polling) return false;
   const status = info?.status;
   if (!status || status.requestId !== watchedRequestId.value || status.state === 'running') return false;
   finished.value = status;
@@ -148,27 +151,40 @@ async function poll(): Promise<boolean> {
 }
 
 function stopPolling() {
+  polling = false;
   if (pollTimer !== undefined) window.clearTimeout(pollTimer);
   pollTimer = undefined;
   updating.value = false;
 }
 
-function startPolling() {
-  if (pollTimer !== undefined) return;
-  updating.value = true;
-  pollStartedAt = Date.now();
-  timeoutHint.value = '';
-  const tick = async () => {
-    pollTimer = undefined;
+async function tick() {
+  pollTimer = undefined;
+  if (disposed || !polling || pollInFlight || document.hidden) return;
+  pollInFlight = true;
+  try {
     if (await poll()) return;
+    if (disposed || !polling) return;
     if (Date.now() - pollStartedAt > POLL_LIMIT_MS) {
       stopPolling();
       timeoutHint.value = '长时间没有收到更新结果。请在服务器上执行 journalctl -u proxy-panel-update 查看更新器日志。';
       return;
     }
-    pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS);
-  };
-  pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS);
+    if (!document.hidden) pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS);
+  } finally { pollInFlight = false; }
+}
+function visibilityChanged() {
+  if (document.hidden) {
+    if (pollTimer !== undefined) window.clearTimeout(pollTimer);
+    pollTimer = undefined;
+  } else if (polling) { void tick(); }
+}
+function startPolling() {
+  if (disposed || polling) return;
+  polling = true;
+  updating.value = true;
+  pollStartedAt = Date.now();
+  timeoutHint.value = '';
+  if (!document.hidden) pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS);
 }
 
 // A pending request or a running update is followed even when another session
@@ -231,6 +247,7 @@ function recentlyFinished(status: PanelUpdateStatus): boolean {
 }
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', visibilityChanged);
   const info = await load(false);
   if (info?.status && !lastStatusRendered) {
     lastStatusRendered = true;
@@ -238,5 +255,5 @@ onMounted(async () => {
   }
   if (info) adoptRunning(info);
 });
-onUnmounted(stopPolling);
+onUnmounted(() => { disposed = true; stopPolling(); document.removeEventListener('visibilitychange', visibilityChanged); });
 </script>

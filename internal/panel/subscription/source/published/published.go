@@ -39,12 +39,18 @@ type Published interface {
 	Published(ctx context.Context, nodeID string) (desiredstate.State, error)
 }
 
+// CanvasEntries supplies business display metadata absent from runtime snapshots.
+type CanvasEntries interface {
+	CanvasEntryNames(context.Context) (map[string]string, error)
+}
+
 // Source is the "published" source.
 type Source struct {
-	Users     Users
-	Nodes     Nodes
-	Published Published
-	Relays    Relays
+	Users         Users
+	Nodes         Nodes
+	Published     Published
+	Relays        Relays
+	CanvasEntries CanvasEntries
 }
 
 // ID names the source in warnings, logs and origin fields.
@@ -73,6 +79,13 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 	}
 	endpoints := []proxy.Proxy{}
 	warnings := []proxy.Warning{}
+	var canvasNames map[string]string
+	if s.CanvasEntries != nil {
+		canvasNames, err = s.CanvasEntries.CanvasEntryNames(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	var relays []Relay
 	if s.Relays != nil {
 		relays, err = s.Relays.Relays(ctx)
@@ -139,6 +152,9 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 				if !ok {
 					continue
 				}
+				if name, created := canvasNames[inbound.ID]; created {
+					endpoint.Name = name
+				}
 				endpoints = append(endpoints, endpoint)
 				for _, relay := range relays {
 					if relay.InboundID != inbound.ID || !relay.Enabled || !relay.Visible {
@@ -158,7 +174,7 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 
 // uniqueNames makes the names of one subscription's own endpoints distinct: a
 // client identifies a server by its name, and a node may hold several inbounds
-// of one protocol. A name that occurs once stays "<node> · <protocol>"; every
+// of one protocol. A name that occurs once stays unchanged; every
 // endpoint of a colliding group names its port, which is unique within a node.
 func uniqueNames(endpoints []proxy.Proxy) {
 	counts := map[string]int{}
@@ -221,7 +237,7 @@ func build(n node.Node, inbound desiredstate.Inbound, credential user.Credential
 	settings := inbound.Settings
 	endpoint := proxy.Proxy{
 		Origin:     proxy.Origin{Source: "published", Ref: inbound.ID, Node: proxy.Ref{ID: n.ID, Name: n.Name}, Labels: labels},
-		Name:       n.Name + " · " + inbound.Protocol,
+		Name:       endpointName(n.Name, inbound.Protocol),
 		Server:     n.ConnectAddress(),
 		Port:       inbound.Port,
 		Protocol:   inbound.Protocol,

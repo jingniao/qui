@@ -15,6 +15,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { backupAPI, type Backup, type BackupRun, type RestorePreview } from '../backupApi';
 import { formatTime, isOwner } from '../../../app/auth';
@@ -97,6 +98,8 @@ function runStatus(status: string) { return ({ running: '执行中', success: '�
 async function loadRuns() { const serial = ++runRequest; try { const result = await backupAPI.runs(runPage.value); if (serial !== runRequest) return; runs.value = result.items; runTotal.value = result.total; runError.value = ''; } catch (e) { if (serial === runRequest) runError.value = (e as Error).message; } }
 function changeRunPage(value: number) { runPage.value = value; void loadRuns(); }
 function backupChanged() { void load(); void loadRuns(); }
-onMounted(() => { backupChanged(); window.addEventListener('proxy-backup-status', backupChanged); });
-onUnmounted(() => { loadRequest++; runRequest++; clearPassword(); clearImport(); clearRestorePreview(); window.removeEventListener('proxy-backup-status', backupChanged); });
+const refreshBackups = throttleTrailing(() => { if (!document.hidden) backupChanged(); }, 5000);
+function visibilityChanged() { if (!document.hidden) refreshBackups(); }
+onMounted(() => { backupChanged(); window.addEventListener('proxy-backup-status', refreshBackups); document.addEventListener('visibilitychange', visibilityChanged); });
+onUnmounted(() => { loadRequest++; runRequest++; clearPassword(); clearImport(); clearRestorePreview(); refreshBackups.cancel(); window.removeEventListener('proxy-backup-status', refreshBackups); document.removeEventListener('visibilitychange', visibilityChanged); });
 </script>

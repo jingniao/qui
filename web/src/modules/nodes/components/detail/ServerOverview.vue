@@ -67,7 +67,7 @@
         <!-- 地区 -->
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-0.5">
           <div class="text-xs text-ios-secondary font-medium">地区</div>
-          <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="regionDisplay">
+          <p class="text-xs sm:text-sm font-semibold text-ios-label truncate" :title="regionTitle">
             {{ regionDisplay }}
           </p>
         </div>
@@ -158,6 +158,12 @@
       <div class="space-y-3.5 sm:space-y-4 min-w-0">
         <!-- 节点概览 -->
         <ServerNodeSummary :node="node" @manage="$emit('tab', 'nodes')" @create="$emit('create')" />
+        <section class="panel-card p-4 space-y-2 text-sm">
+          <h2 class="text-base font-semibold">出站网络</h2>
+          <p>核心出站源 IP：{{ node.outboundSourceIp || '不绑定' }}</p>
+          <p v-if="outboundError" class="text-xs text-ios-red">{{ outboundError }}</p>
+          <p v-for="item in sourceOutbounds" :key="item.id" class="text-xs text-ios-secondary">单独指定源 IP 的出站：{{ item.name }} → {{ item.sourceIp }}</p>
+        </section>
 
         <!-- 协议能力 -->
         <section class="panel-card p-3.5 sm:p-4 space-y-2.5 bg-white">
@@ -219,10 +225,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted } from 'vue';
+import { proxyAPI, choices, type Outbound } from '../../../proxy/api';
+const sourceOutbounds = ref<Outbound[]>([]);
+const outboundError = ref('');
+onMounted(async () => {
+  try {
+    sourceOutbounds.value = (await choices((page, size) => proxyAPI.outbounds(props.node.id, page, size))).filter(item => item.sourceIp);
+  } catch (error) { outboundError.value = (error as Error).message; }
+});
 import type { MachineTrafficSummary, NodeView } from '../../api';
 import type { Revision } from '../../../system/deploymentApi';
-import { type NodeMeta, resolveCountryInfo, onGeoResolved, cleanRemark, formatPortRange } from '../../nodeMeta';
+import { type NodeMeta, resolveCountryInfo, countrySourceLabel, cleanRemark, formatPortRange } from '../../nodeMeta';
 import { hostMetrics, uptime } from '../../metrics';
 import { formatTime } from '../../../../app/auth';
 import { serverStatus, relativeHeartbeat } from '../serverListModel';
@@ -249,26 +263,23 @@ const props = defineProps<{
   latestRevision?: number;
 }>();
 
-const geoTick = ref(0);
-let unsubscribe: (() => void) | undefined;
-onMounted(() => {
-  unsubscribe = onGeoResolved(() => {
-    geoTick.value++;
-  });
-});
-onUnmounted(() => {
-  if (unsubscribe) unsubscribe();
+const countryInfo = computed(() => resolveCountryInfo({
+  region: props.meta?.region, countryCode: props.node.countryCode, name: props.node.name, hostname: props.node.hostname,
+}));
+
+// The Owner's own wording wins over the derived country name.
+const regionDisplay = computed(() => {
+  const adminRegion = props.meta?.region?.trim();
+  const info = countryInfo.value;
+  if (adminRegion) return info.source === 'admin_region' ? `${info.flag} ${adminRegion}` : adminRegion;
+  return info.source === 'fallback' ? '—' : `${info.flag} ${info.name}`;
 });
 
-const regionDisplay = computed(() => {
-  void geoTick.value;
-  const adminRegion = props.meta.region?.trim();
-  if (adminRegion) return adminRegion;
-  const info = resolveCountryInfo(props.meta?.region, props.node.publicIp, props.node.name, props.node.hostname);
-  if (info && info.code !== 'UN') {
-    return `${info.flag} ${info.name}`;
-  }
-  return '—';
+const regionTitle = computed(() => {
+  const info = countryInfo.value;
+  const unmatchedAdminText = !!props.meta?.region?.trim() && info.source !== 'admin_region';
+  if (unmatchedAdminText || info.source === 'fallback') return regionDisplay.value;
+  return `${regionDisplay.value}（${countrySourceLabel(info.source)}）`;
 });
 
 const heartbeatRelative = computed(() => {

@@ -45,12 +45,16 @@ const HopTable = "proxy_agent_hop"
 // MaxPortHops bounds one desired file so a single nft invocation stays small.
 const MaxPortHops = 32
 
+// FeatureExtraExempt declares support for additional source exemptions.
+const FeatureExtraExempt = "extra_exempt"
+
 // The helper protocol is two files in one directory. Their names and the field
 // set are fixed and minimal: an Agent that has updated itself writes
 // DesiredFileName and waits for StatusFileName, while the unit that answers may
 // still run the binary installed before that update. A new field may therefore
-// only be added once every deployed helper can ignore it, which is why the
-// desired file is decoded strictly.
+// only be sent when supported: extra_exempt_ipv4 and extra_exempt_ipv6 appear
+// only when needed. Old helpers decode strictly and reject them, so the Agent
+// writes them only after the helper receipt declares extra_exempt.
 const (
 	DesiredFileName = "desired.json"
 	StatusFileName  = "status.json"
@@ -59,12 +63,14 @@ const (
 // Desired is the helper input: the addresses the whole server must use and the
 // address of the node's own core outbound (A), which must not be rewritten.
 type Desired struct {
-	ID         string    `json:"id"`
-	IPv4       string    `json:"ipv4"`
-	IPv6       string    `json:"ipv6"`
-	ExemptIPv4 string    `json:"exempt_ipv4"`
-	ExemptIPv6 string    `json:"exempt_ipv6"`
-	PortHops   []PortHop `json:"port_hops,omitempty"`
+	ExtraExemptIPv4 []string  `json:"extra_exempt_ipv4,omitempty"`
+	ExtraExemptIPv6 []string  `json:"extra_exempt_ipv6,omitempty"`
+	ID              string    `json:"id"`
+	IPv4            string    `json:"ipv4"`
+	IPv6            string    `json:"ipv6"`
+	ExemptIPv4      string    `json:"exempt_ipv4"`
+	ExemptIPv6      string    `json:"exempt_ipv6"`
+	PortHops        []PortHop `json:"port_hops,omitempty"`
 }
 
 // PortHop is one Hysteria2 inbound's UDP range redirected to its listener.
@@ -76,9 +82,10 @@ type PortHop struct {
 
 // Status is the helper outcome for one Desired.ID.
 type Status struct {
-	ID    string `json:"id"`
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
+	Features []string `json:"features,omitempty"`
+	ID       string   `json:"id"`
+	OK       bool     `json:"ok"`
+	Error    string   `json:"error,omitempty"`
 }
 
 // Validate re-checks the desired state with the shared contract validator. The
@@ -99,6 +106,25 @@ func (d Desired) Validate() error {
 	if d.ExemptIPv6 != "" {
 		if err := (desiredstate.Network{HostSourceIPv6: d.ExemptIPv6}).Validate(); err != nil {
 			return fmt.Errorf("invalid exempt IPv6: %w", err)
+		}
+	}
+	if len(d.ExtraExemptIPv4) > 16 || len(d.ExtraExemptIPv6) > 16 {
+		return errors.New("too many extra exempt addresses (maximum 16 per family)")
+	}
+	for i, address := range d.ExtraExemptIPv4 {
+		if address == "" {
+			return fmt.Errorf("empty extra exempt IPv4 at index %d", i)
+		}
+		if err := (desiredstate.Network{HostSourceIPv4: address}).Validate(); err != nil {
+			return fmt.Errorf("invalid extra exempt IPv4 at index %d: %w", i, err)
+		}
+	}
+	for i, address := range d.ExtraExemptIPv6 {
+		if address == "" {
+			return fmt.Errorf("empty extra exempt IPv6 at index %d", i)
+		}
+		if err := (desiredstate.Network{HostSourceIPv6: address}).Validate(); err != nil {
+			return fmt.Errorf("invalid extra exempt IPv6 at index %d: %w", i, err)
 		}
 	}
 	if len(d.PortHops) > MaxPortHops {
@@ -182,14 +208,14 @@ func Render(desired Desired, interfaces InterfaceLookup) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(&rules, "    oifname %q ip saddr != { %s } snat ip to %s\n", name, sourceSet(ipv4, exemptIPv4), ipv4)
+			fmt.Fprintf(&rules, "    oifname %q ip saddr != { %s } snat ip to %s\n", name, sourceSet(ipv4, exemptIPv4, desired.ExtraExemptIPv4...), ipv4)
 		}
 		if ipv6 != "" {
 			name, err := interfaces(ipv6)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(&rules, "    oifname %q ip6 saddr != { %s } snat ip6 to %s\n", name, sourceSet(ipv6, exemptIPv6), ipv6)
+			fmt.Fprintf(&rules, "    oifname %q ip6 saddr != { %s } snat ip6 to %s\n", name, sourceSet(ipv6, exemptIPv6, desired.ExtraExemptIPv6...), ipv6)
 		}
 		rules.WriteString("  }\n")
 		rules.WriteString("}\n")
@@ -230,11 +256,17 @@ func canonicalAddress(value string) string {
 // core outbound address, so A wins for the traffic the core itself sends; the
 // caller only sets it for its own family. An exemption equal to the source is
 // omitted, so the rule never carries the same address twice.
-func sourceSet(source, exempt string) string {
-	if exempt == "" || exempt == source {
-		return source
+func sourceSet(source, exempt string, extra ...string) string {
+	addresses := []string{source}
+	seen := map[string]bool{source: true}
+	for _, value := range append([]string{exempt}, extra...) {
+		address := canonicalAddress(value)
+		if address != "" && !seen[address] {
+			addresses = append(addresses, address)
+			seen[address] = true
+		}
 	}
-	return source + ", " + exempt
+	return strings.Join(addresses, ", ")
 }
 
 // NftRun hands a rendered rule file to nft. It is injectable so the tests can
@@ -291,7 +323,7 @@ func RunHelper(ctx context.Context, directory string) error {
 		return err
 	}
 	applyErr := applyDesired(ctx, desired)
-	status := Status{ID: desired.ID, OK: applyErr == nil}
+	status := Status{ID: desired.ID, OK: applyErr == nil, Features: []string{FeatureExtraExempt}}
 	if applyErr != nil {
 		status.Error = applyErr.Error()
 	}

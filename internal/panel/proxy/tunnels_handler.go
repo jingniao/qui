@@ -44,6 +44,9 @@ func (h *Handler) tunnelMigrationReport(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) failTunnel(w http.ResponseWriter, err error) {
 	var e *tunnelError
 	if errors.As(err, &e) {
+		if e.Code == "inbound_has_relay_outbound" {
+			h.Auth.Logger.Error("proxy operation failed", "error", "inbound is referenced by a relay outbound", "details", e.Details)
+		}
 		httpapi.ErrorDetails(w, e.Status, e.Code, e.Message, e.Details)
 		return
 	}

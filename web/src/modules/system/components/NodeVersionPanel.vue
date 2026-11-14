@@ -35,7 +35,7 @@
             <span class="text-xs px-2 py-0.2 rounded-full bg-purple-100 text-purple-800 font-semibold">多核心协同共存</span>
           </div>
           <p class="text-xs text-ios-secondary mt-0.5 leading-relaxed">
-            支持 <strong>Xray-core</strong>（成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard）与 <strong>sing-box</strong>（新一代轻量 · Hysteria2 / TUIC / 自适应路由）。一台服务器可同时运行多个已上报启用的核心，入站按所选核心归属；添加、升级与移除的结果以 Agent 回执和下一次能力上报为准。
+            支持 <strong>Xray-core</strong>（成熟稳定 · VLESS / Trojan / Shadowsocks / WireGuard）与 <strong>sing-box</strong>（新一代轻量 · Hysteria2 / TUIC / 自适应路由）。一台服务器可同时运行多个已上报启用的核心，入站按所选核心归属；添加、升级与移除的结果以 Agent 回执和下一次能力上报为准。
           </p>
           <div v-if="isOwner" class="flex flex-wrap items-center gap-1.5 mt-1.5">
             <button v-for="item in CORE_ORDER" :key="item" type="button"
@@ -127,7 +127,7 @@
           <!-- Refresh Button -->
           <button
             type="button"
-            @click="load"
+            @click="load()"
             class="ios-search-btn shrink-0 !py-1.5"
             :disabled="loading"
             title="刷新数据"
@@ -147,7 +147,8 @@
     </div>
 
     <!-- State: Error, Loading, Empty -->
-    <ErrorState v-if="error" :message="error" @retry="load" />
+    <p v-if="error && nodes.length" role="status" class="text-sm text-ios-red">{{ error }}</p>
+    <ErrorState v-if="error && !nodes.length" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="loading && !nodes.length" />
     <EmptyState
       v-else-if="!filteredNodes.length"
@@ -181,7 +182,7 @@
             <div class="flex items-center gap-2.5">
               <div
                 class="w-7 h-7 rounded-lg bg-blue-50/90 border border-blue-100 text-xs font-bold font-mono text-ios-blue flex items-center justify-center shrink-0 shadow-2xs select-none"
-                :title="getCountryInfo(node).name"
+                :title="countryTitle(getCountryInfo(node))"
               >
                 {{ getCountryInfo(node).flag }}
               </div>
@@ -305,6 +306,7 @@
                 >
                   升级
                 </button>
+                <span v-else-if="isOwner" class="text-xs text-neutral-400">{{ upgradeUnavailableReason(node) }}</span>
               </template>
               <span v-else class="text-xs text-neutral-400">
                 需在服务器上运行一次 qui-update --component agent 启用网页升级
@@ -323,14 +325,15 @@
               </button>
               <template v-else>
                 <button
-                  v-if="!upgradeUnavailableReason(node)"
+                  v-if="isOwner && !upgradeUnavailableReason(node)"
                   type="button"
-                  @click="openUpgradeCore(node)"
+                  @click="handleUpgradeSingle(node)"
                   class="ios-action-btn-secondary"
                   title="升级代理内核版本"
                 >
                   升级
                 </button>
+                <span v-else-if="isOwner" class="text-xs text-neutral-400">{{ upgradeUnavailableReason(node) }}</span>
                 <button v-if="isOwner"
                   type="button"
                   @click="openCoreManagementModal(node)"
@@ -368,7 +371,7 @@
             <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
               <div
                 class="w-7 h-7 rounded-lg bg-blue-50/90 border border-blue-100 text-xs font-bold font-mono text-ios-blue flex items-center justify-center shrink-0 shadow-2xs select-none"
-                :title="getCountryInfo(node).name"
+                :title="countryTitle(getCountryInfo(node))"
               >
                 {{ getCountryInfo(node).flag }}
               </div>
@@ -529,6 +532,7 @@
                 </svg>
                 <span>升级</span>
               </button>
+              <div v-else-if="isOwner" class="text-xs text-neutral-400 flex items-center justify-center text-center">{{ upgradeUnavailableReason(node) }}</div>
             </template>
             <div v-else class="text-xs text-neutral-400 flex items-center justify-center text-center">
               需在服务器上运行一次 qui-update --component agent 启用网页升级
@@ -572,9 +576,9 @@
           <!-- When installed: [升级] (flex-1) + [编辑] (Click opens modal for Add/Delete cores) + [详情] -->
           <div v-else class="pt-2 border-t border-black/[0.04] flex items-center gap-2">
             <button
-              v-if="!upgradeUnavailableReason(node)"
+              v-if="isOwner && !upgradeUnavailableReason(node)"
               type="button"
-              @click="openUpgradeCore(node)"
+              @click="handleUpgradeSingle(node)"
               class="flex-1 py-2 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs text-center transition-all flex items-center justify-center gap-1.5"
               title="升级代理内核版本"
             >
@@ -583,6 +587,7 @@
               </svg>
               <span>升级</span>
             </button>
+            <span v-else-if="isOwner" class="flex-1 text-xs text-neutral-400 text-center">{{ upgradeUnavailableReason(node) }}</span>
 
             <!-- Unified [编辑] Button: opens Add & Delete Core Modal -->
             <button v-if="isOwner"
@@ -689,6 +694,17 @@
       confirm-text="开始全部升级"
       :is-danger="false"
       @confirm="executeBatchAgentUpgrade"
+    />
+
+    <!-- Baseline before upgrading a server that never published a configuration -->
+    <ConfirmDialog
+      v-model="baselineConfirmVisible"
+      title="先发布基础配置"
+      :message="baselineConfirmMessage"
+      warning-details="将先发布一份不含任何入站的基础配置（代理核心不会启动、不影响任何用户），节点确认后自动继续升级。"
+      confirm-text="发布并继续"
+      :is-danger="false"
+      @confirm="runBaselineThenContinue"
     />
 
     <!-- ============================================================ -->
@@ -823,7 +839,7 @@
                 <button
                   v-if="coreManagementTargetNode && !upgradeUnavailableReason(coreManagementTargetNode)"
                   type="button"
-                  @click="triggerCoreUpgradeFromModal(core)"
+                  @click="withBaseline([coreManagementTargetNode], () => triggerCoreUpgradeFromModal(core))"
                   class="py-1.5 px-3 rounded-xl bg-ios-blue/[0.08] text-ios-blue hover:bg-ios-blue/[0.15] font-semibold text-xs transition-all flex items-center gap-1"
                   title="升级该内核版本"
                 >
@@ -871,13 +887,14 @@
               <span>添加内核</span>
             </h4>
             <span
+              v-if="coreManagementTargetNode?.status !== 'pending'"
               class="text-xs px-2 py-0.5 rounded-full font-medium"
               :class="multiCoreSupported(coreManagementTargetNode) ? 'text-emerald-700 bg-emerald-50' : 'text-ios-orange bg-ios-orange/10'"
             >
               {{ multiCoreSupported(coreManagementTargetNode) ? 'Agent 已协商多核心' : 'Agent 未协商多核心' }}
             </span>
           </div>
-          <p v-if="!multiCoreSupported(coreManagementTargetNode)" class="p-3 rounded-xl bg-ios-orange/10 border border-ios-orange/20 text-xs text-ios-orange leading-relaxed">
+          <p v-if="coreManagementTargetNode?.status !== 'pending' && !multiCoreSupported(coreManagementTargetNode)" class="p-3 rounded-xl bg-ios-orange/10 border border-ios-orange/20 text-xs text-ios-orange leading-relaxed">
             该服务器上报的 Agent 未协商多核心支持（旧版 Agent），只能升级当前核心。请先在「版本与更新 › Agent」升级 Agent，重连后再添加第二个内核。
           </p>
 
@@ -895,36 +912,20 @@
               </p>
             </div>
 
-            <!-- Core Selection Cards -->
-            <div class="grid grid-cols-2 gap-2.5">
-              <button type="button" @click="selectAddCoreComp('xray')"
-                class="p-3 rounded-xl border text-left transition-all space-y-1.5"
-                :class="addCoreForm.component === 'xray' ? 'border-ios-blue bg-blue-50/50 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
-              >
-                <div class="flex items-center justify-between">
-                  <span class="font-bold text-sm text-ios-label">Xray-core</span>
-                  <span class="text-xs px-1.5 py-0.2 rounded bg-blue-100 text-ios-blue font-semibold">推荐</span>
-                </div>
-                <p class="text-xs text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / WireGuard</p>
-              </button>
-
-              <button type="button" @click="selectAddCoreComp('sing-box')"
-                class="p-3 rounded-xl border text-left transition-all space-y-1.5"
-                :class="addCoreForm.component === 'sing-box' ? 'border-ios-blue bg-blue-50/50 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
-              >
-                <div class="flex items-center justify-between">
-                  <span class="font-bold text-sm text-ios-label">sing-box</span>
-                  <span class="text-xs px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 font-semibold">轻量新代</span>
-                </div>
-                <p class="text-xs text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由</p>
-              </button>
+            <!-- Core selection, shared with the other install dialogs -->
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-white px-3 py-2 text-xs">
+              <label v-for="option in CORE_INSTALL_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label cursor-pointer">
+                <input v-model="pendingCores" type="checkbox" :value="option.name" class="accent-ios-blue" />
+                <span>{{ option.label }}</span>
+                <span v-if="option.hint" class="text-xs text-ios-tertiary">（{{ option.hint }}）</span>
+              </label>
             </div>
+            <p v-if="pendingCoreError" role="alert" class="text-xs text-ios-red">{{ pendingCoreError }}</p>
 
             <div class="space-y-1.5">
               <WebUpgradeOption v-model="pendingWebUpgrade" />
               <div class="flex items-center justify-between text-xs">
                 <span class="text-neutral-700 font-bold">一键安装命令</span>
-                <span class="text-xs text-ios-tertiary">指定默认核心 --core {{ addCoreForm.component }}</span>
               </div>
               <div v-if="pendingEnrollmentLoading" class="p-4 text-center text-ios-tertiary">正在生成注册命令…</div>
               <template v-else-if="pendingEnrollmentCommand">
@@ -948,7 +949,7 @@
                     <span class="font-bold text-sm text-ios-label">Xray-core</span>
                     <span class="text-xs px-1.5 py-0.2 rounded font-semibold bg-blue-100 text-ios-blue">推荐添加</span>
                   </div>
-                  <p class="text-xs text-ios-secondary leading-snug">成熟稳定 · VLESS / VMess / Trojan / Shadowsocks / WireGuard</p>
+                  <p class="text-xs text-ios-secondary leading-snug">成熟稳定 · VLESS / Trojan / Shadowsocks / WireGuard</p>
                 </button>
 
                 <button v-if="!isCoreInstalled('sing-box')" type="button" @click="selectAddCoreComp('sing-box')"
@@ -960,6 +961,17 @@
                     <span class="text-xs px-1.5 py-0.2 rounded font-semibold bg-purple-100 text-purple-700">新一代轻量</span>
                   </div>
                   <p class="text-xs text-ios-secondary leading-snug">现代轻量 · Hysteria2 / TUIC / 自适应路由分流</p>
+                </button>
+
+                <button v-if="addCoreOptions.includes('gost')" type="button" @click="selectAddCoreComp('gost')"
+                  class="p-3 rounded-xl border text-left transition-all space-y-1.5 relative"
+                  :class="addCoreForm.component === 'gost' ? 'border-ios-blue bg-blue-50/60 ring-2 ring-ios-blue/20' : 'border-black/[0.08] hover:border-black/20 bg-white'"
+                >
+                  <div class="flex items-center justify-between">
+                    <span class="font-bold text-sm text-ios-label">GOST</span>
+                    <span class="text-xs px-1.5 py-0.2 rounded font-semibold bg-emerald-100 text-emerald-700">固定 3.3.2</span>
+                  </div>
+                  <p class="text-xs text-ios-secondary leading-snug">只做端口转发与隧道 · 仅 linux/amd64</p>
                 </button>
               </div>
             </div>
@@ -975,8 +987,9 @@
               </div>
             </div>
 
-            <!-- Official releases: picking one fills version, URL and digest -->
-            <div>
+            <!-- Official releases: picking one fills version, URL and digest. GOST
+                 is pinned to one reviewed release, filled in automatically. -->
+            <div v-if="addCoreForm.component !== 'gost'">
               <div class="flex items-center justify-between mb-1.5">
                 <label class="text-neutral-600 font-medium">选择版本（自动填写地址与官方摘要）</label>
                 <button v-if="addCorePicker.state !== 'loading'" type="button" @click="loadCoreReleases(addCorePicker, addCoreForm, coreManagementTargetNode, true)" class="text-ios-blue hover:underline text-xs font-medium">刷新</button>
@@ -1198,7 +1211,7 @@
             <div class="space-y-1.5 pt-1 border-t border-black/[0.04]">
               <span class="text-neutral-500 font-medium block text-xs">支持协议矩阵:</span>
               <div class="flex flex-wrap gap-1">
-                <span v-for="p in ['VLESS', 'VMess', 'Trojan', 'Shadowsocks', 'SOCKS5', 'HTTP', 'WireGuard']" :key="p" class="px-1.5 py-0.5 rounded bg-blue-50 text-ios-blue font-bold text-xs">
+                <span v-for="p in ['VLESS', 'Trojan', 'Shadowsocks', 'SOCKS5', 'HTTP', 'WireGuard']" :key="p" class="px-1.5 py-0.5 rounded bg-blue-50 text-ios-blue font-bold text-xs">
                   {{ p }}
                 </span>
               </div>
@@ -1252,20 +1265,23 @@
 </template>
 
 <script setup lang="ts">
+import { needsBaseline, publishBaselineAndWait } from '../nodeBaseline';
 import { onMounted, onUnmounted, ref, reactive, computed } from 'vue';
 import { isOwner, formatTime } from '../../../app/auth';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { showToast } from '../../../app/api';
+import { deploymentAPI } from '../deploymentApi';
+import { CORE_INSTALL_OPTIONS, sortInstallCores, validateInstallCores } from '../../nodes/coreInstallOptions';
 import { APIError } from '../../../app/apiClient';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type AgentReleaseVersion } from '../../nodes/api';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../../nodes/installEndpoint';
 import { proxyAPI, type Inbound } from '../../proxy/api';
 import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
-import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
+import { getNodeMeta, resolveCountryInfo, countryTitle, type CountryInfo } from '../../nodes/nodeMeta';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { agentUpdatesAPI } from '../agentUpdatesApi';
 import { coreUpdatesAPI, type CoreRemoveTask, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
-import { coreReleasesAPI, defaultCoreSource, deriveAssetURL, DIGEST_SOURCE_LABELS, nodeArchitecture, nodeUsesMusl, pickAsset, quiSourceAllowed, type CoreRelease, type CoreReleaseAsset, type CoreSource } from '../coreReleases';
+import { coreReleaseFields, coreReleasesAPI, defaultCoreSource, deriveAssetURL, DIGEST_SOURCE_LABELS, nodeArchitecture, nodeUsesMusl, pickAsset, quiSourceAllowed, type CoreRelease, type CoreReleaseAsset, type CoreSource } from '../coreReleases';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
@@ -1510,13 +1526,43 @@ function getNodeAllProtocols(node: NodeView): string[] {
   return [...set].sort();
 }
 
+// A server without a confirmed revision is not refused here: upgrading it first
+// publishes a baseline configuration (see withBaseline).
 function upgradeUnavailableReason(node: NodeView): string {
   if (node.status === 'pending' || !node.agentVersion || !Number.isFinite(Date.parse(node.lastHeartbeat))) return '尚未收到 Agent 和心跳报告，请先完成登记';
   if (!node.enabled || node.deletedAt || (node.status !== 'online' && node.status !== 'degraded')) return '服务器需启用且在线后才能升级';
   const age = Date.now() - Date.parse(node.lastHeartbeat);
   if (age < -5000 || age >= 45000) return '心跳已过期，等待服务器上线';
-  if (!node.heartbeat?.current_revision) return '尚未上报当前配置版本，暂无法升级';
   return '';
+}
+
+// v1.5.5 item 11: Agent and core updates are bound to the node's confirmed
+// revision, which must be at least 1. A server that never published a
+// configuration first gets an empty baseline revision; once the node confirms
+// it, the original action continues with the refreshed node.
+const baselineConfirmVisible = ref(false);
+const baselineJob = ref<{ nodes: NodeView[]; next: () => void } | null>(null);
+const baselineConfirmMessage = computed(() => {
+  const names = (baselineJob.value?.nodes || []).map(node => `「${node.name}」`).join('、');
+  return `${names} 还没有发布过配置，需要先发布基础配置才能升级。`;
+});
+function withBaseline(targets: NodeView[], next: () => void) {
+  const pending = targets.filter(needsBaseline);
+  if (!pending.length) { next(); return; }
+  baselineJob.value = { nodes: pending, next };
+  baselineConfirmVisible.value = true;
+}
+async function runBaselineThenContinue() {
+  const job = baselineJob.value;
+  baselineJob.value = null;
+  if (!job) return;
+  showToast(`正在为 ${job.nodes.length} 台服务器发布基础配置…`);
+  const results = await Promise.allSettled(job.nodes.map(publishBaselineAndWait));
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') showToast(`${job.nodes[index].name}：${(result.reason as Error).message}`, 'error');
+  });
+  void load();
+  if (results.some(result => result.status === 'fulfilled')) job.next();
 }
 
 function detectArch(node?: NodeView | null): 'amd64' | 'arm64' | '' {
@@ -1572,7 +1618,10 @@ function isCoreInstalled(comp: CoreName): boolean {
 
 // An already enabled core is not offered again: the option is hidden instead of
 // shown greyed out (Owner rule).
-const addCoreOptions = computed(() => CORE_ORDER.filter(name => !isCoreInstalled(name)));
+// GOST is offered only where the Agent can install it: it reported
+// gost_core_supported and runs on linux/amd64 (multi-core is checked by the form).
+const addCoreOptions = computed(() => CORE_ORDER.filter(name => !isCoreInstalled(name)
+  && (name !== 'gost' || Boolean(coreManagementTargetNode.value?.gostCoreSupported && detectArch(coreManagementTargetNode.value) === 'amd64'))));
 
 function coreTasksOf(nodeId: string, component: string): CoreUpdateTask[] {
   return coreTasks.value.filter(task => task.nodeId === nodeId && task.component === component)
@@ -1820,10 +1869,8 @@ async function loadCoreReleases(picker: ReleasePicker, form: CoreFormFields, nod
 // no digest instead of guessing one.
 function applyCoreRelease(picker: ReleasePicker, form: CoreFormFields, item: CoreRelease, node: NodeView | null, quiet = false) {
   picker.selected = item;
-  form.version = item.version;
+  Object.assign(form, coreReleaseFields(item, node));
   const asset = pickAsset(item, node);
-  form.url = asset?.url ?? '';
-  form.sha256 = asset?.sha256 ?? '';
   picker.autoURL = form.url; picker.autoSHA = form.sha256;
   picker.digestSource = asset?.sha256 ? asset.digestSource : '';
   if (!asset && node && !quiet) {
@@ -1864,11 +1911,14 @@ function setAddCoreSource(source: CoreSource) {
   void loadCoreReleases(addCorePicker, addCoreForm, coreManagementTargetNode.value);
 }
 
-function selectAddCoreComp(comp: CoreName) {
+async function selectAddCoreComp(comp: CoreName) {
   addCoreForm.component = comp;
   addCoreForm.version = ''; addCoreForm.url = ''; addCoreForm.sha256 = '';
   addCorePicker.source = defaultCoreSource(comp, coreManagementTargetNode.value);
-  void loadCoreReleases(addCorePicker, addCoreForm, coreManagementTargetNode.value);
+  await loadCoreReleases(addCorePicker, addCoreForm, coreManagementTargetNode.value);
+  // GOST has exactly one pinned release; fill it in instead of offering a choice.
+  const pinned = addCorePicker.items[0];
+  if (comp === 'gost' && addCoreForm.component === 'gost' && pinned) applyCoreRelease(addCorePicker, addCoreForm, pinned, coreManagementTargetNode.value);
 }
 
 function onAddCoreCompChange() {
@@ -1894,6 +1944,10 @@ async function submitAddNewCore() {
 
   if (!addCoreForm.version || !addCoreForm.url || !/^[a-f0-9]{64}$/i.test(addCoreForm.sha256)) {
     showToast('请先选择一个版本；没有自动填好的项（地址或 SHA-256 摘要）请从官方发布页核对后手动填写', 'warning');
+    return;
+  }
+  if (needsBaseline(node)) {
+    withBaseline([node], () => void submitAddNewCore());
     return;
   }
 
@@ -1986,9 +2040,11 @@ const installEndpointGrpcHost = ref('');
 const installEndpointGrpcPort = ref<number | null>(null);
 const installEndpointFromSettings = ref(false);
 
+const pendingCores = ref<CoreName[]>(['xray']);
+const pendingCoreError = computed(() => validateInstallCores(pendingCores.value).error || '');
 const pendingEnrollmentCommand = computed(() => {
   const item = pendingEnrollment.value;
-  if (!item || !item.install?.version || !item.install?.caSha256) return '';
+  if (!item || !item.install?.version || !item.install?.caSha256 || pendingCoreError.value) return '';
   const host = installEndpointHost.value;
   const port = installEndpointPort.value;
   return installCommand({
@@ -1999,7 +2055,7 @@ const pendingEnrollmentCommand = computed(() => {
     grpcPort: installEndpointGrpcPort.value ?? item.install.grpcPort,
     caSha256: item.install.caSha256,
     token: item.enrollmentToken,
-    cores: [addCoreForm.component],
+    cores: sortInstallCores(pendingCores.value),
     webUpgrade: pendingWebUpgrade.value
   });
 });
@@ -2060,19 +2116,20 @@ function openUpgradeCoreForComponent(node: NodeView, comp: CoreName) {
 // Single node upgrade trigger
 function handleUpgradeSingle(node: NodeView) {
   if (!isOwner.value) return;
-  const revision = node.heartbeat?.current_revision;
-  if (!revision || node.status !== 'online') {
-    showToast(`服务器「${node.name}」当前未在线或尚未上报配置版本，暂无法升级`, 'warning');
+  const reason = upgradeUnavailableReason(node);
+  if (reason) {
+    showToast(`服务器「${node.name}」：${reason}`, 'warning');
     return;
   }
-
-  if (props.kind === 'agent') {
-    agentUpgradeTargetNode.value = node;
-    agentUpgradeDialogVisible.value = true;
-    void loadAgentReleases();
-  } else {
-    openUpgradeCore(node);
-  }
+  withBaseline([node], () => {
+    if (props.kind === 'agent') {
+      agentUpgradeTargetNode.value = node;
+      agentUpgradeDialogVisible.value = true;
+      void loadAgentReleases();
+    } else {
+      openUpgradeCore(node);
+    }
+  });
 }
 
 // Batch upgrade trigger (from the top-right "全部升级"). Core upgrades are per
@@ -2082,6 +2139,9 @@ async function upgradeAll() {
   if (!isOwner.value) return;
   try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
   catch (e) { showToast((e as Error).message, 'error'); return; }
+  withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && (props.kind !== 'agent' || node.agentUpdateSupported)), openBatchUpgrade);
+}
+function openBatchUpgrade() {
   const eligible = eligibleOnlineNodes.value;
   if (!eligible.length) {
     showToast('当前暂无满足升级条件的在线服务器 (需在线且已上报配置版本)', 'warning');
@@ -2111,7 +2171,11 @@ async function upgradeAllComponent(component: CoreName) {
   if (!isOwner.value) return;
   try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
   catch (e) { showToast((e as Error).message, 'error'); return; }
-  const targeted = eligibleOnlineNodes.value.filter(node => getNodeInstalledCores(node).some(core => core.component === component));
+  const runs = (node: NodeView) => getNodeInstalledCores(node).some(core => core.component === component);
+  withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && runs(node)), () => openComponentBatchUpgrade(component, runs));
+}
+function openComponentBatchUpgrade(component: CoreName, runs: (node: NodeView) => boolean) {
+  const targeted = eligibleOnlineNodes.value.filter(runs);
   if (!targeted.length) {
     showToast(`当前没有在线服务器运行 ${component}`, 'warning');
     return;
@@ -2263,11 +2327,36 @@ defineExpose({
 });
 
 let generation = 0;
+let refreshing = false;
 function nodeStatusChanged() {
-  if (!loading.value) void load();
+  if (!loading.value) void load(true);
 }
+async function refreshNodes() {
+  if (loading.value || refreshing || document.visibilityState !== 'visible') return;
+  refreshing = true;
+  const current = generation;
+  try {
+    const result = await nodeAPI.list(page.value, keyword.value);
+    if (current === generation) { nodes.value = result.items; total.value = result.total; error.value = ''; }
+  } catch (e) { if (current === generation) error.value = (e as Error).message; }
+  finally { refreshing = false; }
+}
+let tasksReading = false, tasksGeneration = 0;
+async function refreshTasks() {
+  if (!isOwner.value || props.kind !== 'core' || tasksReading || document.visibilityState !== 'visible') return;
+  tasksReading = true;
+  const current = tasksGeneration;
+  try { const tasks = await readAllCoreTasks(); if (current === tasksGeneration) coreTasks.value = tasks; }
+  catch (e) { if (current === tasksGeneration) error.value = (e as Error).message; }
+  finally { tasksReading = false; }
+}
+function visibilityChanged() {
+  if (document.visibilityState === 'visible') { void nodeStatusChanged(); void refreshTasks(); }
+}
+let refreshTimer: ReturnType<typeof setInterval>;
 const nodeStatusThrottled = throttleTrailing(() => nodeStatusChanged(), 5000);
-async function load() {
+async function load(silent = false) {
+  if (silent) return refreshNodes();
   const current = ++generation;
   loading.value = true;
   error.value = '';
@@ -2279,10 +2368,7 @@ async function load() {
     }
     // The per-(node, component) task rows make the "安装中 / 升级中" label possible
     // in the list and cards; they are read from the backend, never cached locally.
-    if (isOwner.value && props.kind === 'core') {
-      const tasks = await readAllCoreTasks().catch(() => null);
-      if (current === generation && tasks) coreTasks.value = tasks;
-    }
+    if (current === generation) void refreshTasks();
   } catch (e) {
     if (current === generation) error.value = (e as Error).message;
   } finally {
@@ -2333,7 +2419,7 @@ function coreHealthTone(node: NodeView): 'ok' | 'bad' | 'unknown' {
 }
 
 function getCountryInfo(node: NodeView): CountryInfo {
-  return resolveCountryInfo(node.name, node.publicIp || node.hostname);
+  return resolveCountryInfo({ region: getNodeMeta(node.id).region, countryCode: node.countryCode, name: node.name, hostname: node.hostname });
 }
 
 function formatOS(os?: string): string {
@@ -2391,12 +2477,17 @@ function statusCapsuleText(node: NodeView): string {
 }
 
 onMounted(() => {
+  refreshTimer = setInterval(visibilityChanged, 60000);
+  document.addEventListener('visibilitychange', visibilityChanged);
   void load();
   void loadUpgradeContext();
   window.addEventListener('proxy-node-status', nodeStatusThrottled);
 });
 
 onUnmounted(() => {
+  tasksGeneration++;
+  clearInterval(refreshTimer);
+  document.removeEventListener('visibilitychange', visibilityChanged);
   generation++;
   nodeStatusThrottled.cancel();
   window.removeEventListener('proxy-node-status', nodeStatusThrottled);

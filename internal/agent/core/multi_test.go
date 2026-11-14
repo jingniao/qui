@@ -27,11 +27,13 @@ type fakeMultiCore struct {
 	gate                    devicegate.Request
 	hooks                   RuntimeHooks
 	settings                []*pb.SettingsCombination
+	outboundSource          bool
 }
 
 func (f *fakeMultiCore) Name() string { return f.name }
 func (f *fakeMultiCore) DetectCapabilities(context.Context) (*pb.Capabilities, error) {
 	capabilities := &pb.Capabilities{CoreName: f.name, CoreVersion: "1.2.3"}
+	capabilities.OutboundSourceSupported = f.outboundSource
 	if len(f.settings) > 0 {
 		capabilities.ServerSettingsContractVersion, capabilities.ServerSettingsCombinations = 1, f.settings
 	}
@@ -97,7 +99,7 @@ func multiFixture(t *testing.T) (*MultiRuntime, *fakeMultiCore, *fakeMultiCore, 
 // the GOST settings contract version. The panel gates the G2 options on that field.
 func TestMultiCapabilitiesCarryTheGostContract(t *testing.T) {
 	events := []string{}
-	primary := &fakeMultiCore{name: "xray", events: &events}
+	primary := &fakeMultiCore{name: "xray", events: &events, outboundSource: true}
 	third := &fakeMultiCore{name: "gost", events: &events}
 	m, err := NewMultiRuntime(primary, third)
 	if err != nil {
@@ -109,6 +111,9 @@ func TestMultiCapabilitiesCarryTheGostContract(t *testing.T) {
 	}
 	if !capabilities.GetMultiCoreSupported() || len(capabilities.Cores) != 2 {
 		t.Fatalf("capabilities: %+v", capabilities)
+	}
+	if !capabilities.OutboundSourceSupported || !capabilities.Cores[0].OutboundSourceSupported || capabilities.Cores[1].OutboundSourceSupported {
+		t.Fatalf("outbound source capability lost: %+v", capabilities)
 	}
 	if capabilities.Cores[0].Name != "xray" || capabilities.Cores[0].GostContractVersion != 0 {
 		t.Fatalf("xray entry: %+v", capabilities.Cores[0])

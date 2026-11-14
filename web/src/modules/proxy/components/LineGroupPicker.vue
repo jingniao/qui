@@ -93,6 +93,8 @@
                 :{{ node.port }}
               </span>
             </div>
+            <EntryRouteSummary :summary="node.routeSummary" :show-scheme-link="false" />
+            <p v-if="node.server" class="text-xs font-mono text-ios-secondary break-all">{{ node.server }}:{{ node.port }}</p>
             <div class="flex items-center gap-2 text-xs text-ios-tertiary">
               <span>{{ node.sourceType === 'self_hosted' ? '所属服务器：' : '来源：' }}{{ node.sourceName }}</span>
               <span v-if="node.subscriptionVisible" class="text-ios-green">· 订阅可见</span>
@@ -117,12 +119,14 @@ import StatusBadge from '../../../components/StatusBadge.vue';
 import type { NodeGroup } from '../../nodes/groupsApi';
 import type { NodeView } from '../../nodes/api';
 import type { Inbound } from '../api';
+import EntryRouteSummary from './EntryRouteSummary.vue';
 
 export interface GroupPickerNode {
   id: string;
   name: string;
   protocol: string;
   port: number | string;
+  server?: string;
   sourceType: 'self_hosted' | 'subscription' | 'manual';
   sourceTypeName: string;
   sourceName: string;
@@ -133,6 +137,8 @@ export interface GroupPickerNode {
   enabled: boolean;
   subscriptionVisible?: boolean;
   internalRelay?: boolean;
+  routeSummary?: Inbound['routeSummary'];
+  invalid?: boolean;
 }
 
 const props = withDefaults(defineProps<{
@@ -200,7 +206,8 @@ const allCandidateNodes = computed<GroupPickerNode[]>(() => {
     status: ib.enabled ? 'active' : 'disabled',
     enabled: ib.enabled,
     subscriptionVisible: ib.subscriptionVisible,
-    internalRelay: ib.internalRelay
+    internalRelay: ib.internalRelay,
+    routeSummary: ib.internalRelay ? undefined : ib.routeSummary
   }));
 });
 

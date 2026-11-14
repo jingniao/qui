@@ -62,7 +62,7 @@ import AppDialog from '../../../../components/AppDialog.vue';
 import ConfigDiffViewer from '../../../../components/ConfigDiffViewer.vue';
 import LoadingSkeleton from '../../../../components/LoadingSkeleton.vue';
 import ErrorState from '../../../../components/ErrorState.vue';
-const props = defineProps<{ node: NodeView; latestRevision?: number; refresh: number }>();
+const props = defineProps<{ node: NodeView; latestRevision?: number; refresh: number; active: boolean }>();
 const emit = defineEmits<{ changed: []; published: [] }>();
 const items = ref<Revision[]>([]), page = ref(1), total = ref(0), pageLoading = ref(false);
 const filter = ref<RevisionFilter>('all'), filterChosen = ref(false), initialized = ref(false);
@@ -71,8 +71,8 @@ const visible = computed(() => filterRevisions(items.value, filter.value));
 const strip = computed(() => revisionStrip(props.node.heartbeat?.current_revision, props.latestRevision));
 let pageGeneration = 0;
 async function loadPage(next = page.value) {
-  if (!isOwner.value) return;
-  const current = ++pageGeneration; pageLoading.value = true; error.value = '';
+  if (!isOwner.value || !props.active) return;
+  const current = ++pageGeneration; pageLoading.value = !initialized.value || next !== page.value; error.value = '';
   try { const result = await deploymentAPI.nodeRevisions(props.node.id, next, 20); if (current !== pageGeneration) return; items.value = result.items; page.value = result.page; total.value = result.total; if (!initialized.value && !filterChosen.value) filter.value = defaultRevisionFilter(result.items); initialized.value = true; }
   catch (e) { if (current === pageGeneration) error.value = (e as Error).message; }
   finally { if (current === pageGeneration) pageLoading.value = false; }
@@ -103,7 +103,7 @@ async function loadDiff() {
   catch (e) { if (current === generation) diffError.value = (e as Error).message; }
   finally { if (current === generation) diffLoading.value = false; }
 }
-watch(() => props.refresh, () => { void loadPage(); }, { immediate: true });
+watch([() => props.refresh, () => props.active], () => { if (props.active) void loadPage(); }, { immediate: true });
 onUnmounted(() => { pageGeneration++; clearDiff(); });
 defineExpose({ publishCurrent });
 </script>

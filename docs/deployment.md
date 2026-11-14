@@ -193,7 +193,7 @@ systemctl enable --now proxy-panel.service
 
 `journalctl -u proxy-panel -f` 查看日志；程序只写 stdout，不写 `/var/log` 下的文件。
 
-面板安装脚本还会安装终端菜单 `/usr/local/bin/qui`（root 专用）。在面板主机的 SSH 会话里输入 `qui` 即可打开菜单：1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止、6. 更新（从 GitHub）、0. 退出。它只做这几件事，细节见[运维手册](operations.md)。
+安装脚本为面板与节点都发布终端菜单 `/usr/local/bin/qui`（root 专用）。有面板时显示：1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止、6. 更新（从 GitHub）、7. 查看／重置管理员登录地址、8. 卸载并清除全部数据、0. 退出。只装 Agent 时显示精简菜单：1. 更新、2. 卸载并清除全部数据、0. 退出，以及 Agent 状态与版本。菜单按本机 `.manifest` 判断组件；节点无需面板程序、配置或账号。细节见[运维手册](operations.md) §14。
 
 ## 4. 接入节点
 
@@ -289,7 +289,7 @@ systemctl enable --now proxy-agent.service
 
 **正常方式（面板与节点主机）：qui-update**
 
-`install.sh` 会把 `deploy/linux/update.sh` 装成 `/usr/local/bin/qui-update`（面板与节点主机都有；面板主机的 `qui` 菜单第 6 项也调用它）。
+`install.sh` 会把 `deploy/linux/update.sh` 装成 `/usr/local/bin/qui-update`（面板与节点主机都有；面板菜单第 6 项、Agent 精简菜单第 1 项调用它）。v1.5.5 同时发布 `qui` 与 `/usr/local/lib/proxycontrol/uninstall.sh`，均为 root:root 0755，不写入组件 manifest；本机卸载不依赖网络或另取发布归档。旧节点须经本机 `qui-update --component agent` 才取得这两个文件。
 
 ```sh
 qui-update                  # 安装 GitHub 上的最新发布
@@ -304,10 +304,10 @@ qui-update --version 1.0.9 --bundle proxy-control-1.3.1-linux-amd64.tar.gz --sum
 - 面板更新：先停止 `proxy-panel.service`，在停止状态下把数据库（以及存在的 `-wal`）复制到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<YYYYmmdd-HHMMSS>.db`（属主 `proxy-panel`、0600），再替换程序，最后按停止前的状态启动服务并打印状态。
 - 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，不指定组件仍从同一个归档更新两个组件，**先节点后面板**（保持历史行为）。指定 `--component panel` 或 `--component agent` 只更新该组件，未安装则报错；v1.1 必须先 `--component panel`，验收后再 `--component agent`。
 - `--bundle` 与 `--sums` 必须同时给出，并且必须用 `--version` 指定版本（`SHA256SUMS` 里核对的文件名带版本号）；核对方式与下载时完全相同。
-- **组件隔离**：版本检查、停止/启动、快照、日志及回滚只针对选中组件的程序、服务、安装记录和附属文件；共享的 `qui-update`、`service.sh` 仍随该次更新快照/恢复，开机恢复 hook 仍按原机制共享。面板更新及其回滚不替换 Agent 程序、单元、强制出站文件或记录，也不停止/启动 Agent；Agent 更新及其回滚不触碰面板程序、单元、`qui`、记录或数据库。`--component agent` 不能与 `--database` 合用。启动前仍会恢复任何已有的未完成更新，这不受本次组件选择限制。
+- **组件隔离**：版本检查、停止/启动、快照、日志及回滚只针对选中组件的程序、服务、安装记录和附属文件；共享的 `qui-update`、`qui`、`service.sh` 与本机 `uninstall.sh` 随该次更新快照/恢复，开机恢复 hook 按原机制共享。面板更新及其回滚不替换 Agent 程序、单元、强制出站文件或记录，也不停止/启动 Agent；Agent 更新及其回滚不触碰面板程序、单元、记录或数据库。`--component agent` 不能与 `--database` 合用。启动前仍会恢复任何已有的未完成更新，这不受本次组件选择限制。
 - **数据库备份**：面板备份先写成 `.partial` 文件，同步到磁盘并与原文件逐字节比较后才改名为最终名字，所以 `pre-update-*.db` 要么完整、要么不存在；断电不会留下看起来可用的半截备份。
 - **数据库预检**（面板，1.0.3 起）：停止并备份后，脚本用**目标版本**的程序执行 `proxy-panel --check-database <备份>`（只读，在私有副本上检查完整性与迁移记录）。目标版本打不开这份数据库（数据库里有它不认识的迁移，即降级跨过了迁移）时，什么都不替换，删掉刚才的备份，重新启动面板，并列出可以一起回退的 `pre-update-<目标版本>-*.db` 备份（见 5.1）。目标版本早于 1.0.3、不认识这个参数，或程序在本机无法执行时，跳过预检：旧面板遇到更新的数据库会拒绝启动，由健康检查与回滚兜底。
-- **回滚快照与进度日志**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`service.sh`，面板加 `qui`，节点加全部核心路径、Agent config、强制出站与调优的服务/触发器文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），再放入正在运行的 `qui-update` 与它的 `service.sh` 的副本，同步到磁盘后最后写进度日志 `journal`。日志记录组件、新旧版本、服务原来是否在运行、数据库备份路径和阶段：`prepared`（`install.sh` 运行前）→ `started`（新版本可能接触数据库之前）→ `committed`（健康检查通过）或 `restored`（回滚已放回文件与数据库）。每次写入都先写临时文件、同步、再改名，断电只会看到旧阶段或新阶段。保存不了快照或日志就不更新，并把服务启动回来。
+- **回滚快照与进度日志**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`qui`、`service.sh`、本机 `uninstall.sh`，节点加全部核心路径、Agent config、强制出站与调优的服务/触发器文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），再放入正在运行的 `qui-update` 与它的 `service.sh` 的副本，同步到磁盘后最后写进度日志 `journal`。日志记录组件、新旧版本、服务原来是否在运行、数据库备份路径和阶段：`prepared`（`install.sh` 运行前）→ `started`（新版本可能接触数据库之前）→ `committed`（健康检查通过）或 `restored`（回滚已放回文件与数据库）。每次写入都先写临时文件、同步、再改名，断电只会看到旧阶段或新阶段。保存不了快照或日志就不更新，并把服务启动回来；新发布的菜单或卸载脚本在快照中原本不存在时，回滚删除新增文件。
 - **健康检查**：原本在运行的服务更新后会被启动，并且要在 10 秒内保持运行、主进程 PID 不变才算成功（两种初始化系统都会在崩溃 5 秒后重启程序，崩溃循环在每次轮询时都可能显示为运行中，但 PID 会变）。成功时打印 `已更新到 X，服务运行正常（10 秒内无重启）`，记为 `committed` 并删除快照（先把目录改名为 `discard.*` 再删除，删到一半断电也不会被当成未完成的更新）。
 - **自动回滚**：`install.sh` 失败（即使已经替换了部分文件）、装上的程序版本不是目标版本、或新版本没有持续运行时，脚本停止服务，把快照里的文件放回（与快照相同的文件不动，所以导致失败的只读或 immutable 文件不会让恢复也失败），删除新版本多出的文件，再启动旧版本并做同样的健康检查，打印 `更新失败，已恢复到 <旧版本>`，退出码为 1。面板的数据库在阶段为 `started` 时（新面板可能已经迁移），或数据库与备份不一致时被恢复：先把当前数据库保留为 `failed-update-<目标版本>-<时间>.db`，再删除 `-wal`/`-shm` 并用更新前的备份原子替换。**回滚从不直接丢掉新版本写过的数据库**。
 - **中断后的自动恢复**：
@@ -403,13 +403,17 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 deploy/linux/uninstall.sh panel     # 或 agent
 ```
 
-`uninstall.sh` 会先停止服务，确认已经停下来：systemd 上要求 `ActiveState=inactive` 且 `Result=success`；OpenRC 上没有这两个属性，要求 `rc-service proxy-agent status` 为 `stopped`。然后删除程序、服务定义（systemd 单元，或 `/etc/init.d/proxy-agent`、`/etc/init.d/proxy-agent-host-network` 与 watcher 脚本）和安装记录，保留身份、配置、数据、备份与服务账号。它在 `/var/lib/proxycontrol-install/` 留下 `<component>.removed` 记录；再次安装必须加 `--reinstall`，否则脚本拒绝。面板与节点都卸载后，`qui-update`、`service.sh` 与开机恢复单元一起删除。
+`uninstall.sh` 会先停止服务，确认已经停下来：systemd 上要求 `ActiveState=inactive` 且 `Result=success`；OpenRC 上没有这两个属性，要求 `rc-service proxy-agent status` 为 `stopped`。然后删除程序、服务定义（systemd 单元，或 `/etc/init.d/proxy-agent`、`/etc/init.d/proxy-agent-host-network` 与 watcher 脚本）和安装记录，保留身份、配置、数据、备份与服务账号。Agent 先恢复调优，并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。它在 `/var/lib/proxycontrol-install/` 留下 `<component>.removed` 记录；再次安装必须加 `--reinstall`，否则脚本拒绝。最后一个组件卸载后，公共 `qui`、`qui-update`、`service.sh`、本机卸载脚本与开机恢复单元一起删除。
+
+彻底清除用 `qui` 的「卸载并清除全部数据」，或直接运行 `/usr/local/lib/proxycontrol/uninstall.sh all --purge`（也可将 all 换为 panel/agent）。all 按当前安装记录先 Agent 后面板，需终端依次输入 `y`、`purge`，无免确认参数；配置、状态目录、备份与账号会一起删除。不要先普通卸载再补 purge，已只剩 `.removed` 的组件不在 all 的选择范围。清理范围、防火墙匹配与失败处理见[运维手册](operations.md) §14。
 
 ## 7. 目录与权限
 
 | 路径 | 属主 / 权限 | 内容 |
 | --- | --- | --- |
 | `/usr/local/bin/proxy-panel`、`/usr/local/bin/proxy-agent` | root:root 0755 | 程序 |
+| `/usr/local/bin/qui` | root:root 0755 | 面板／节点共用菜单，按本机组件显示完整或精简菜单；不进 manifest，更新时快照 |
+| `/usr/local/lib/proxycontrol/uninstall.sh` | root:root 0755 | 本机普通卸载／`--purge` 入口；不进 manifest，更新时快照 |
 | `/etc/proxy-panel/config.yaml` | proxy-panel:proxy-panel 0600 | 面板配置 |
 | `/etc/proxy-panel/tls/` | proxy-panel:proxy-panel 0750 | Web TLS 证书与私钥 |
 | `/etc/proxy-agent/config.yaml` | proxy-agent:proxy-agent 0600 | 节点配置 |
@@ -429,7 +433,7 @@ deploy/linux/uninstall.sh panel     # 或 agent
 
 两个 systemd 单元都以专用非 root 账号运行，启用 `NoNewPrivileges`、`ProtectSystem=strict`、`PrivateTmp`、`ProtectHome`，只保留 `CAP_NET_BIND_SERVICE`。
 
-节点端另有两个固定单元：`proxy-agent-host-network.service`（oneshot，`User=proxy-agent`，只带 `CAP_NET_ADMIN`，`ReadWritePaths` 只放开 `/var/lib/proxy-agent/host-network`）和 `proxy-agent-host-network.path`（监视该目录的 `desired.json`；开机时由 oneshot 单元重放保留的规则）。`uninstall.sh agent` 会停止并删除这两个单元，并删除 nft 表 `inet proxy_agent_source`。
+节点端另有两个固定单元：`proxy-agent-host-network.service`（oneshot，`User=proxy-agent`，只带 `CAP_NET_ADMIN`，`ReadWritePaths` 只放开 `/var/lib/proxy-agent/host-network`）和 `proxy-agent-host-network.path`（监视该目录的 `desired.json`；开机时由 oneshot 单元重放保留的规则）。`uninstall.sh agent` 会停止并删除这两个单元，并删除 nft 表 `inet proxy_agent_source` 与 `inet proxy_agent_hop`。
 
 ## 8. 排错入口
 

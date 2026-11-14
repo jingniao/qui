@@ -166,23 +166,9 @@ npm run test:time
 # import refresh self-test runs the subscription page's real refresh actions
 # against injected API and reactive-state fixtures.
 step 'frontend self-tests'
-node web/scripts/qr-selftest.mjs
-node web/scripts/client-policy-selftest.mjs
-node web/scripts/portal-selftest.mjs
-node web/scripts/node-metrics-selftest.mjs
-node web/scripts/latency-chart-selftest.mjs
-node web/scripts/node-editor-selftest.mjs
-node web/scripts/import-refresh-selftest.mjs
-node web/scripts/tunnel-editor-selftest.mjs
-node web/scripts/tunnels-selftest.mjs
-node web/scripts/u1b-selftest.mjs
-node web/scripts/server-detail-selftest.mjs
-node web/scripts/ui-regression-selftest.mjs
-node web/scripts/canvas-library-selftest.mjs
-node web/scripts/node-address-selftest.mjs
-node web/scripts/certificates-selftest.mjs
-node web/scripts/publish-status-selftest.mjs
-node web/scripts/notifications-selftest.mjs
+for selftest in web/scripts/*-selftest.mjs; do
+  node "$selftest"
+done
 
 # The web gate ends here: build the panel exactly as a release does (the embed in
 # web/embed.go reads web/dist) and check that every asset index.html references is

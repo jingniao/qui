@@ -80,20 +80,22 @@ type Inbound struct {
 	Settings            ProtocolSettings `json:"settings"`
 }
 type Outbound struct {
-	ID             string           `json:"id"`
-	Protocol       string           `json:"protocol"`
-	Address        string           `json:"address,omitempty"`
-	Port           int              `json:"port,omitempty"`
-	Enabled        bool             `json:"enabled"`
-	CredentialID   string           `json:"credential_id,omitempty"`
-	TargetNodeID   string           `json:"target_node_id,omitempty"`
-	Settings       ProtocolSettings `json:"settings"`
-	FailurePolicy  string           `json:"failure_policy,omitempty"`
-	BackupTargetID string           `json:"backup_target_id,omitempty"`
-	SupportTCP     bool             `json:"support_tcp,omitempty"`
-	SupportUDP     bool             `json:"support_udp,omitempty"`
-	ProbeURL       string           `json:"probe_url,omitempty"`
-	ProbeInterval  int              `json:"probe_interval,omitempty"`
+	SourceIP        string           `json:"source_ip,omitempty"`
+	SourceInterface string           `json:"source_interface,omitempty"`
+	ID              string           `json:"id"`
+	Protocol        string           `json:"protocol"`
+	Address         string           `json:"address,omitempty"`
+	Port            int              `json:"port,omitempty"`
+	Enabled         bool             `json:"enabled"`
+	CredentialID    string           `json:"credential_id,omitempty"`
+	TargetNodeID    string           `json:"target_node_id,omitempty"`
+	Settings        ProtocolSettings `json:"settings"`
+	FailurePolicy   string           `json:"failure_policy,omitempty"`
+	BackupTargetID  string           `json:"backup_target_id,omitempty"`
+	SupportTCP      bool             `json:"support_tcp,omitempty"`
+	SupportUDP      bool             `json:"support_udp,omitempty"`
+	ProbeURL        string           `json:"probe_url,omitempty"`
+	ProbeInterval   int              `json:"probe_interval,omitempty"`
 }
 type ProtocolSettings struct {
 	Forward        *ForwardSettings   `json:"forward,omitempty"`
@@ -378,6 +380,12 @@ func (s State) Validate() error {
 	}
 	outbounds := map[string]bool{}
 	for _, outbound := range s.Outbounds {
+		if outbound.Protocol == "block" && (outbound.SourceIP != "" || outbound.SourceInterface != "") {
+			return errors.New("block outbound cannot bind a source")
+		}
+		if err := (Network{OutboundSourceIP: outbound.SourceIP, OutboundInterface: outbound.SourceInterface}).Validate(); err != nil {
+			return err
+		}
 		if err := add(outbound.ID); err != nil {
 			return err
 		}

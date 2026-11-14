@@ -40,6 +40,40 @@ type DNS struct {
 	EnhancedMode string   `json:"enhancedMode"`
 	Nameservers  []string `json:"nameservers"`
 	Fallback     []string `json:"fallback"`
+	// The fields below (v1.5.5 item 1) are written for mihomo only. They are
+	// omitted when empty, so a template saved before them keeps its bytes.
+	// DefaultNameservers are plain IPs that resolve the DoH host names,
+	// ProxyServerNameservers resolve proxy server names, FakeIPFilter lists the
+	// names that must get a real address.
+	DefaultNameservers     []string        `json:"defaultNameservers,omitempty"`
+	ProxyServerNameservers []string        `json:"proxyServerNameservers,omitempty"`
+	FakeIPFilter           []string        `json:"fakeIpFilter,omitempty"`
+	FallbackFilter         *FallbackFilter `json:"fallbackFilter,omitempty"`
+}
+
+// FallbackFilter decides when mihomo uses the fallback answer. Without it
+// mihomo applies geoip CN, which breaks every foreign name whenever the
+// fallback servers are unreachable directly.
+type FallbackFilter struct {
+	GeoIP     bool     `json:"geoip"`
+	GeoIPCode string   `json:"geoipCode,omitempty"`
+	IPCIDR    []string `json:"ipcidr,omitempty"`
+	Domain    []string `json:"domain,omitempty"`
+}
+
+// RecommendedDNS is the DNS of the 屏蔽回国 presets and of the editor's
+// "套用推荐 DNS" button: domestic DoH only and no fallback, because with
+// fake-ip a proxied name is resolved by the node.
+func RecommendedDNS() DNS {
+	domestic := []string{"https://doh.pub/dns-query", "https://dns.alidns.com/dns-query"}
+	return DNS{
+		Enable: true, EnhancedMode: "fake-ip",
+		Nameservers:            domestic,
+		Fallback:               []string{},
+		DefaultNameservers:     []string{"223.5.5.5", "119.29.29.29"},
+		ProxyServerNameservers: append([]string(nil), domestic...),
+		FakeIPFilter:           []string{"*.lan", "+.local", "+.localdomain", "localhost.ptlogin2.qq.com", "+.msftconnecttest.com", "+.msftncsi.com", "time.*.com", "+.pool.ntp.org", "+.stun.*.*"},
+	}
 }
 
 // Group is a client proxy group. A member is DIRECT, REJECT, another group's
@@ -48,14 +82,15 @@ type DNS struct {
 // imported proxies; @endpoint:<ref> selects an exact authorized endpoint.
 // Neither expression grants access by itself. Keywords filter proxy names only.
 type Group struct {
-	IncludeKeywords []string `json:"includeKeywords,omitempty"`
-	ExcludeKeywords []string `json:"excludeKeywords,omitempty"`
-	EmptyPolicy     string   `json:"emptyPolicy,omitempty"`
-	Name            string   `json:"name"`
-	Type            string   `json:"type"`
-	Members         []string `json:"members"`
-	TestURL         string   `json:"testUrl"`
-	IntervalSeconds int      `json:"intervalSeconds"`
+	IncludeKeywords  []string `json:"includeKeywords,omitempty"`
+	ExcludeKeywords  []string `json:"excludeKeywords,omitempty"`
+	ExcludeEndpoints []string `json:"excludeEndpoints,omitempty"`
+	EmptyPolicy      string   `json:"emptyPolicy,omitempty"`
+	Name             string   `json:"name"`
+	Type             string   `json:"type"`
+	Members          []string `json:"members"`
+	TestURL          string   `json:"testUrl"`
+	IntervalSeconds  int      `json:"intervalSeconds"`
 }
 
 // Provider is an external rule set the client fetches itself.
@@ -119,10 +154,11 @@ const (
 	MaxGroups       = 64
 	MaxRules        = 2000
 	MaxProviders    = 256
-	MaxMembers      = 256
+	MaxMembers      = 1000
 	MaxNameRunes    = 64
 	MaxPayloadBytes = 256
 	MaxDescription  = 120
 	MaxResolvers    = 16
+	MaxDNSNames     = 64
 	MaxRuleIDBytes  = 64
 )

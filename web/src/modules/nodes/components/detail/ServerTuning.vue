@@ -440,22 +440,27 @@ function time(value?:string|null) { return value ? formatTime(value) : '—'; }
 function stopPoll() { clearTimeout(timer); timer = undefined; }
 function schedulePoll() {
   stopPoll();
-  if (state.value?.status !== 'pending') return;
+  if (document.visibilityState !== 'visible' || state.value?.status !== 'pending') return;
   if (Date.now() >= deadline) { pollExpired.value = true; return; }
   timer = setTimeout(() => void refresh(), 3000);
 }
 
 async function loadRecommendations() {
+  const current = lifecycle;
   try {
-    recommendations.value = await nodeAPI.tuningRecommendations(props.node.id);
-  } catch {
-    // Graceful fallback
+    const result = await nodeAPI.tuningRecommendations(props.node.id);
+    if (current === lifecycle) recommendations.value = result;
+  } catch (e) {
+    if (current === lifecycle) error.value = '调优建议读取失败：' + (e as Error).message;
   }
 }
 
+let refreshing = false;
 async function refresh() {
+  if (refreshing || document.visibilityState !== 'visible') return;
+  refreshing = true;
   const cycle = lifecycle, ticket = ++reads, id = props.node.id;
-  loading.value = true; error.value = '';
+  loading.value = state.value === null; error.value = '';
   try {
     const [result] = await Promise.all([
       nodeAPI.tuning(id),
@@ -466,7 +471,7 @@ async function refresh() {
     state.value = result;
     if (initial) draft.value = tuningDraft(result.desired);
   } catch(e) { if (cycle === lifecycle && ticket === reads) error.value = '调优状态读取失败：' + (e as Error).message; }
-  finally { if (cycle === lifecycle && ticket === reads) { loading.value = false; schedulePoll(); } }
+  finally { if (cycle === lifecycle && ticket === reads) { refreshing = false; loading.value = false; schedulePoll(); } }
 }
 function confirm(clear:boolean) {
   if (!canEdit.value) return;
@@ -486,17 +491,21 @@ async function submit() {
   try {
     const result = await nodeAPI.saveTuning(props.node.id, input);
     if (cycle !== lifecycle) return;
+    reads++; refreshing = false;
     if (state.value) state.value = {...state.value, desired: input.settings, requestId: result.requestId, status: result.status};
     deadline = Date.now()+60000; pollExpired.value = false;
     await refresh();
   } catch(e) { if (cycle === lifecycle) { error.value = '请求失败（服务端为最终校验）：' + (e as Error).message; } }
   finally { if (cycle === lifecycle) sending.value = false; }
 }
-watch(() => props.node.lastHeartbeat, () => {
-  if (state.value && state.value.status !== 'pending' && !sending.value && !loading.value) void refresh();
-});
+function visibilityChanged() {
+  if (document.visibilityState === 'visible') void refresh();
+  else stopPoll();
+}
+const refreshTimer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 60000);
+document.addEventListener('visibilitychange', visibilityChanged);
 watch(() => props.node.id, () => {
-  lifecycle++; reads++; stopPoll(); state.value = null; draft.value = tuningDraft(); recommendations.value = null; selectedAdviceKeys.value = []; sending.value = false; dialog.value = false; confirmed = null; pollExpired.value = false; deadline = Date.now()+60000; void refresh();
+  lifecycle++; reads++; refreshing = false; stopPoll(); state.value = null; draft.value = tuningDraft(); recommendations.value = null; selectedAdviceKeys.value = []; sending.value = false; dialog.value = false; confirmed = null; pollExpired.value = false; deadline = Date.now()+60000; void refresh();
 }, {immediate:true});
-onUnmounted(() => { lifecycle++; stopPoll(); });
+onUnmounted(() => { lifecycle++; stopPoll(); clearInterval(refreshTimer); document.removeEventListener('visibilitychange', visibilityChanged); });
 </script>

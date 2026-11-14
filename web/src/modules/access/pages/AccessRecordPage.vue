@@ -27,6 +27,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { showToast } from '../../../app/api';
 import { ref, reactive, onMounted, watch } from 'vue'; import { useRoute } from 'vue-router'; import { accessAPI, type AccessRecord, type DomainRecord, type TrafficSummary, type AccessFilter, type AccountSummary } from '../api'; import { request, type Page } from '../../../app/apiClient'; import { authState, formatTime } from '../../../app/auth'; import { utcInput, localInput } from '../../../app/time'; import { userAPI, type ProxyUser } from '../../users/api'; import { type NodeView } from '../../nodes/api'; import { proxyAPI, choices, type ProxyChain, type Outbound } from '../../proxy/api'; import { policyAPI, type PolicyRecord } from '../../routing/api'; import PageHeader from '../../../components/PageHeader.vue'; import DataTable from '../../../components/DataTable.vue'; import Pagination from '../../../components/Pagination.vue'; import StatusBadge from '../../../components/StatusBadge.vue'; import TrafficValue from '../../../components/TrafficValue.vue'; import FormDrawer from '../../../components/FormDrawer.vue'; import ErrorState from '../../../components/ErrorState.vue'; import LoadingSkeleton from '../../../components/LoadingSkeleton.vue'; import EmptyState from '../../../components/EmptyState.vue';
 const accountSummary=ref<AccountSummary|null>(null); const route=useRoute(); const tabs=[{key:'all',label:'全部访问'},{key:'blocked',label:'已阻断'},{key:'stats',label:'域名统计'}]; const activeTab=ref(typeof route.query.tab==='string'&&tabs.some(tab=>tab.key===route.query.tab)?route.query.tab:'all');
 const records=ref<AccessRecord[]>([]); const domains=ref<DomainRecord[]>([]); const users=ref<ProxyUser[]>([]); const nodes=ref<NodeView[]>([]); const rules=ref<PolicyRecord[]>([]); const chains=ref<ProxyChain[]>([]); const outbounds=ref<Outbound[]>([]); const summary=ref<TrafficSummary|null>(null); const filters=reactive({domain:'',userId:'',nodeId:''}); const fromLocal=ref(''); const toLocal=ref(''); const page=ref(1); const total=ref(0); const loading=ref(false); const error=ref(''); const drawer=ref(false); const selected=ref<AccessRecord|null>(null); const actionNames:Record<string,string>={Direct:'直连',Proxy:'代理',Block:'阻断'};
@@ -36,7 +37,27 @@ function exitLabel(record:AccessRecord){if(localDirectExit(record))return '本�
 function exitSource(record:AccessRecord){if(localDirectExit(record))return '经本节点确认直接访问公网';return '按该节点路由规则与出口配置解析，跨节点中转不保证已抵达公网出口';}
 function switchTab(key:string){activeTab.value=key;page.value=1;load();}
 function selectedFilter():AccessFilter{return {...filters,from:fromLocal.value?utcInput(fromLocal.value):undefined,to:toLocal.value?utcInput(toLocal.value):undefined};}
-async function load(){if(loading.value)return;loading.value=true;try{const filter=selectedFilter();const result=activeTab.value==='stats'?await accessAPI.domains(filter,page.value):await accessAPI.list(filter,page.value,activeTab.value==='blocked');if(activeTab.value==='stats'){domains.value=result.items as DomainRecord[];records.value=[];}else{records.value=result.items as AccessRecord[];domains.value=[];}total.value=result.total;summary.value=await accessAPI.summary(filter); accountSummary.value=await accessAPI.accounts({ ...filter,domain:undefined });error.value='';}catch(e){error.value=(e as Error).message;}finally{loading.value=false;}}
+let generation = 0;
+async function load() {
+  const current = ++generation;
+  const tab = activeTab.value, currentPage = page.value, filter = selectedFilter();
+  loading.value = true;
+  try {
+    const [result, totals, accounts] = await Promise.all([
+      tab === 'stats' ? accessAPI.domains(filter, currentPage) : accessAPI.list(filter, currentPage, tab === 'blocked'),
+      accessAPI.summary(filter), accessAPI.accounts({ ...filter, domain: undefined })
+    ]);
+    if (current !== generation) return;
+    if (tab === 'stats') { domains.value = result.items as DomainRecord[]; records.value = []; }
+    else { records.value = result.items as AccessRecord[]; domains.value = []; }
+    total.value = result.total; summary.value = totals; accountSummary.value = accounts; error.value = '';
+  } catch (e) { if (current === generation) error.value = (e as Error).message; }
+  finally { if (current === generation) loading.value = false; }
+}
+watch(() => route.query.tab, value => {
+  const tab = typeof value === 'string' && tabs.some(item => item.key === value) ? value : 'all';
+  if (tab !== activeTab.value) switchTab(tab);
+});
 function search(){page.value=1;load();} function changePage(value:number){page.value=value;load();}
-onMounted(async()=>{const [u,n,r,c,o]=await Promise.all([userAPI.list(1,'',100),choices((p,s)=>request<Page<NodeView>>(`/nodes?page=${p}&pageSize=${s}`)),policyAPI.list(1,'',100),choices((p,s)=>proxyAPI.chains('',p,s)),proxyAPI.outbounds('',1,100)]);users.value=u.items;nodes.value=n;rules.value=r.items;chains.value=c;outbounds.value=o.items;await load();});
+onMounted(async()=>{void load();try {const [u,n,r,c,o]=await Promise.all([userAPI.list(1,'',100),choices((p,s)=>request<Page<NodeView>>(`/nodes?page=${p}&pageSize=${s}`)),policyAPI.list(1,'',100),choices((p,s)=>proxyAPI.chains('',p,s)),proxyAPI.outbounds('',1,100)]);users.value=u.items;nodes.value=n;rules.value=r.items;chains.value=c;outbounds.value=o.items;} catch(e) { showToast((e as Error).message, 'error'); }});
 </script>

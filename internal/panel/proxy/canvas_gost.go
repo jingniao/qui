@@ -150,6 +150,7 @@ func (r *canvasRelay) relayInput(host string) InboundInput {
 // with forwards and with the other cores exactly like any inbound.
 func (s *Service) relayPortTaken(ctx context.Context, plan *canvasPlan, relay *canvasRelay) (map[int]bool, error) {
 	taken := map[int]bool{}
+	canvasEntryPorts(plan, relay.exitNode, taken)
 	owned, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {
 		return nil, err

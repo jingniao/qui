@@ -32,7 +32,7 @@ func (s *Service) canvasSharedDependencies(ctx context.Context, p *canvasPlan) e
 			if !related {
 				continue
 			}
-			scheme.Layout, err = s.canvasDependencyLayout(ctx, scheme.Layout, wanted)
+			scheme.Layout, err = s.canvasDependencyLayout(ctx, scheme.ID, scheme.Layout, wanted)
 			if err != nil {
 				return err
 			}
@@ -61,7 +61,7 @@ func (s *Service) canvasSharedDependencies(ctx context.Context, p *canvasPlan) e
 	}
 	entries := map[string]bool{}
 	for _, entry := range p.entries {
-		entries[entry.existing.ID] = true
+		entries[entry.identity()] = true
 	}
 	for _, other := range others {
 		needed := map[string]bool{}
@@ -111,9 +111,9 @@ func (s *Service) canvasSharedDependencies(ctx context.Context, p *canvasPlan) e
 		}
 		for _, entry := range other.entries {
 			related := entry.edge != nil && edges[entry.edge.outboundName] != nil || entry.chain != nil && needed[entry.chain.name]
-			if related && !entries[entry.existing.ID] {
+			if related && entry.existing.ID != "" && !entries[entry.identity()] {
 				p.entries = append(p.entries, entry)
-				entries[entry.existing.ID] = true
+				entries[entry.identity()] = true
 				p.node(entry.existing.NodeID)
 			}
 		}
@@ -135,4 +135,11 @@ func (s *Service) canvasSharedDependencies(ctx context.Context, p *canvasPlan) e
 		}
 	}
 	return nil
+}
+
+func (e canvasEntry) identity() string {
+	if e.existing.ID != "" {
+		return "inbound:" + e.existing.ID
+	}
+	return e.schemeID + ":" + e.preview.InstanceID
 }

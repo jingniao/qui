@@ -1,4 +1,14 @@
 import { reactive } from 'vue';
+export interface RouteSummary {
+  type: 'direct' | 'relay' | 'custom' | 'tunnel';
+  schemeId?: string;
+  schemeName?: string;
+  bindingMode?: 'create' | 'reuse';
+  path: string[];
+  exitNodeId?: string;
+  // The drawing's route could not be resolved; path holds only the entry server.
+  pathIncomplete?: boolean;
+}
 // A forward target pool member (G2). The list is ordered: GOST dials it in that
 // order for `fifo` and alternates over it for `round`, whatever the listening port.
 export interface ForwardTarget { host: string; port: number; }
@@ -51,10 +61,10 @@ export interface ProtocolSettings { reality?: RealitySettings; xhttp?: XHTTPSett
 // reported (an official sing-box build without with_v2ray_api, for example).
 // `tlsSource` is the certificate source the row records; `certificateInfo` is the
 // panel's read-only summary of the certificate it holds for it.
-export interface Inbound { id: string; name: string; nodeId: string; protocol: string; core?: CoreName | ''; listen: string; port: number; enabled: boolean; subscriptionVisible: boolean; internalRelay: boolean; defaultOutbound: string; allowedUserIds: string[]; settings: ProtocolSettings; relayCredentialId?: string; tlsSource?: TLSSource; certificateId?: string; certificateInfo?: CertificateInfo | null; hasTlsKey: boolean; hasRealityKey?: boolean; hasWireGuardKey: boolean; wireGuardPublicKey?: string; userTrafficSupported?: boolean | null; deviceGateSupported?: boolean | null; createdAt: string; }
+export interface Inbound { readonly routeSummary?: RouteSummary; id: string; name: string; nodeId: string; protocol: string; core?: CoreName | ''; listen: string; port: number; enabled: boolean; subscriptionVisible: boolean; internalRelay: boolean; defaultOutbound: string; allowedUserIds: string[]; settings: ProtocolSettings; relayCredentialId?: string; tlsSource?: TLSSource; certificateId?: string; certificateInfo?: CertificateInfo | null; hasTlsKey: boolean; hasRealityKey?: boolean; hasWireGuardKey: boolean; wireGuardPublicKey?: string; userTrafficSupported?: boolean | null; deviceGateSupported?: boolean | null; createdAt: string; }
 export interface Outbound { id: string; name: string; nodeId: string; protocol: string; address: string; port: number; enabled: boolean; targetNodeId: string; targetInboundId: string; settings: ProtocolSettings; supportTcp: boolean; supportUdp: boolean; failurePolicy: string; backupOutboundId: string; hasCredential: boolean; hasWireGuardKey: boolean; wireGuardPublicKey?: string; createdAt: string; }
 export interface OutboundHealth { healthy: boolean; latencyMs: number; checkedAt: string; }
-export interface Outbound { probeUrl: string; probeInterval: number; health?: OutboundHealth; }
+export interface Outbound { sourceIp?: string; sourceInterface?: string; probeUrl: string; probeInterval: number; health?: OutboundHealth; }
 export interface GroupMember { outbound_id: string; priority: number; weight: number; }
 export interface OutboundGroup { id: string; name: string; nodeId: string; strategy: string; enabled: boolean; members: GroupMember[]; probeUrl: string; probeInterval: number; failurePolicy: string; backupOutboundId: string; createdAt: string; }
 export type GroupInput = Omit<OutboundGroup, 'id' | 'createdAt'>;
@@ -97,7 +107,7 @@ export const proxyAPI = {
   inbounds: (nodeId = '', page = 1, pageSize = 20) => request<Page<Inbound>>(`/inbounds?nodeId=${nodeId}&page=${page}&pageSize=${pageSize}`),
   outbounds: (nodeId = '', page = 1, pageSize = 20) => request<Page<Outbound>>(`/outbounds?nodeId=${nodeId}&page=${page}&pageSize=${pageSize}`),
   saveInbound: (id: string | null, value: InboundInput) => request<Inbound>(id ? `/inbounds/${id}` : '/inbounds', id ? 'PUT' : 'POST', value),
-  saveOutbound: (id: string | null, value: OutboundInput) => request<Outbound>(id ? `/outbounds/${id}` : '/outbounds', id ? 'PUT' : 'POST', value),
+  saveOutbound: (id: string | null, value: OutboundInput & Pick<Outbound, 'sourceIp' | 'sourceInterface'>) => request<Outbound>(id ? `/outbounds/${id}` : '/outbounds', id ? 'PUT' : 'POST', { ...value, sourceIp: value.protocol === 'block' ? '' : value.sourceIp || '', sourceInterface: value.protocol === 'block' ? '' : value.sourceInterface || '' }),
   deleteInbound: (id: string) => request(`/inbounds/${id}`, 'DELETE'),
   deleteOutbound: (id: string) => request(`/outbounds/${id}`, 'DELETE'),
   revision: (nodeId: string, summary: string) => request<{ id: number }>('/revisions/proxy', 'POST', { nodeId, summary })
@@ -138,7 +148,17 @@ export type LegacyCanvasConnectionKind = 'port_forward';
 export type CanvasTunnelProtocol = 'tls' | 'wireguard';
 export type LegacyCanvasTunnelProtocol = 'gost' | 'brook' | 'nftables';
 export type CanvasInstanceRef = `server:${string}` | `inbound:${string}` | `import:${string}` | `outbound:${string}`;
-export interface CanvasSchemeInstance { instanceId: string; ref: CanvasInstanceRef; x: number; y: number; role: CanvasInstanceRole; relayPortMode?: 'auto' | 'manual'; relayPort?: number; listenPort?: number; targetPort?: number; }
+export interface CanvasEntryBinding {
+  mode: 'create' | 'reuse'; inboundId?: string; protocol?: string; core?: string;
+  portMode: 'auto' | 'manual'; port?: number;
+  groupMode: 'exit_groups' | 'explicit' | 'none'; groupIds?: string[];
+}
+export interface CanvasPlanEntry {
+  instanceId: string; mode: string; nodeId: string; nodeName: string;
+  inboundId?: string; protocol: string; port: number; name: string; route: string;
+  groups: { id: string; name: string }[] | null; previousRoute?: string;
+}
+export interface CanvasSchemeInstance { instanceId: string; ref: CanvasInstanceRef; x: number; y: number; role: CanvasInstanceRole; entryBinding?: CanvasEntryBinding; relayPortMode?: 'auto' | 'manual'; relayPort?: number; listenPort?: number; targetPort?: number; }
 export interface CanvasSchemeConnection { tunnelId?: string; id: string; source: string; target: string; type: CanvasConnectionKind | LegacyCanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol | LegacyCanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; }
 export interface CanvasSchemeLayout { instances: CanvasSchemeInstance[]; connections: CanvasSchemeConnection[]; }
 export interface CanvasScheme { id: string; name: string; execution: CanvasExecution; layout: CanvasSchemeLayout; createdAt: string; updatedAt: string; publishedAt: string; publishedBatchId: string; }
@@ -154,13 +174,37 @@ export type CanvasSchemeUpdate = CanvasSchemeCreate & { updatedAt: string; };
 export interface CanvasPublishNode { nodeId: string; name: string; revision: number; status: string; }
 export interface CanvasPublishResult { batchId?: string; nodes: CanvasPublishNode[]; warnings: string[]; }
 
+export interface CanvasSchemeStatus {
+  draft: { dirty: boolean; updatedAt: string; publishedAt: string };
+  batch: { id?: string; status?: string; items: { nodeId: string; nodeName: string; status: string; revision?: number }[] };
+  nodes: { nodeId: string; nodeName: string; confirmedRevision?: number; expectedRevision?: number; confirmed: boolean }[];
+  entries: { instanceId: string; inboundId?: string; name?: string; mode?: string; state?: string; route?: string }[];
+  subscription: { ready: boolean; reasons: string[] };
+  probe: { status: 'untested' | 'reachable' | 'unreachable' | 'incomplete'; at?: string; results?: { inboundId: string; nodeId: string; status: string; at: string; attempted: number; lost: number; medianMs?: number; code: string }[] };
+}
+
+export interface CanvasRemoveInput { updatedAt: string; restoreTargets?: Record<string, string>; acknowledgeChanges?: boolean; }
+export interface CanvasRemoveReferrer { kind: string; id: string; name: string; }
+export interface CanvasRemoveEntry {
+  bindingId: string; instanceId: string; inboundId: string; nodeId: string; name: string;
+  protocol: string; core: string; listen: string; port: number; mode: string; action: string;
+  currentRoute: string; restoreTarget?: string; needsRestoreTarget: boolean; restoreReason?: string;
+  groups: { id: string; name: string }[] | null; changes: string[] | null; referrers: CanvasRemoveReferrer[] | null;
+}
+export interface CanvasRemoveObject extends CanvasTunnelObject { tunnelId: string; keep: boolean; referrers: CanvasRemoveReferrer[] | null; }
+export interface CanvasRemovePlan {
+  ok: boolean; schemeId: string; updatedAt: string; entries: CanvasRemoveEntry[];
+  objects: CanvasRemoveObject[]; nodes: string[]; changeDetectionRule: string;
+}
+export interface CanvasRemoveResult { schemeId: string; removed: boolean; publications: CanvasPublishResult[]; }
+
 export interface CanvasTunnelSchemeRef { id: string; name: string; }
 export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; candidateTunnels?: string[]; }
 export interface CanvasTunnelInput { name: string; source: string; target: string; type: CanvasConnectionKind | LegacyCanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol | LegacyCanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; updatedAt?: string; }
 export interface CanvasTunnelCredentials { generation: number; serverName: string; notAfter: string; fingerprint: string; }
 export interface CanvasTunnel extends CanvasTunnelInput { id: string; createdAt: string; updatedAt: string; schemes: CanvasTunnelSchemeRef[]; objects: CanvasTunnelObject[]; publishStatus: 'draft' | 'modified' | 'published'; credentials?: CanvasTunnelCredentials | null; }
 export interface CanvasTunnelPlanObject { kind: string; name: string; protocol?: string; port?: number; target?: string; }
-export interface CanvasTunnelPlan { ok: boolean; message?: string; servers: { nodeId: string; name: string; creates: CanvasTunnelPlanObject[]; updates: CanvasTunnelPlanObject[]; removes: CanvasTunnelPlanObject[] }[]; connections: { id: string; status: string; message: string }[]; conflicts: { nodeId: string; port: number; with: string; connectionId: string; reason?: string; objectId?: string }[]; warnings: string[]; tunnels: { tunnelId: string; affectedSchemes: CanvasTunnelSchemeRef[] }[]; }
+export interface CanvasTunnelPlan { ok: boolean; entries?: CanvasPlanEntry[]; message?: string; servers: { nodeId: string; name: string; creates: CanvasTunnelPlanObject[]; updates: CanvasTunnelPlanObject[]; removes: CanvasTunnelPlanObject[] }[]; connections: { id: string; status: string; message: string }[]; conflicts: { nodeId: string; port: number; with: string; connectionId: string; reason?: string; objectId?: string }[]; warnings: string[]; tunnels: { tunnelId: string; affectedSchemes: CanvasTunnelSchemeRef[] }[]; }
 export type CanvasTunnelReference = Pick<CanvasSchemeConnection, 'id' | 'source' | 'target'> & Partial<Omit<CanvasSchemeConnection, 'id' | 'source' | 'target' | 'tunnelId'>> & { tunnelId: string };
 export const canvasTunnelAPI = {
  list: () => request<{ items: CanvasTunnel[]; total: number }>('/canvas-tunnels'),
@@ -175,6 +219,10 @@ export const canvasTunnelAPI = {
 };
 
 export const canvasAPI = {
+  status: (id: string) => request<CanvasSchemeStatus>(`/canvas-schemes/${encodeURIComponent(id)}/status`),
+  removePlan: (id: string, value: CanvasRemoveInput) => request<CanvasRemovePlan>(`/canvas-schemes/${encodeURIComponent(id)}/remove-plan`, 'POST', value),
+  // Removal waits for both deployment phases and any rollback receipts.
+  remove: (id: string, value: CanvasRemoveInput) => request<CanvasRemoveResult>(`/canvas-schemes/${encodeURIComponent(id)}/remove`, 'POST', value, { timeoutMs: 3600000 }),
   plan: (id: string, layout?: CanvasSchemeWriteLayout) => request<CanvasTunnelPlan>(`/canvas-schemes/${encodeURIComponent(id)}/plan`, 'POST', { layout }),
   list: (page = 1, pageSize = 50) => request<Page<CanvasScheme>>(`/canvas-schemes?page=${page}&pageSize=${pageSize}`),
   get: (id: string) => request<CanvasScheme>(`/canvas-schemes/${encodeURIComponent(id)}`),
@@ -214,6 +262,7 @@ export function relaySchemeToCanvasInput(scheme: RelayScheme, context: CanvasSch
     x: Math.round(node.x) || 0,
     y: Math.round(node.y) || 0,
     role: node.role || 'relay',
+    ...(node.entryBinding ? { entryBinding: { ...node.entryBinding, ...(node.entryBinding.groupIds ? { groupIds: [...node.entryBinding.groupIds] } : {}) } } : {}),
     ...(node.resourceType === 'server' && (node.role === 'relay' || node.role === 'exit') ? {
       ...(node.relayPortMode ? { relayPortMode: node.relayPortMode } : {}),
       ...(node.relayPort !== undefined ? { relayPort: node.relayPort } : {})
@@ -323,6 +372,7 @@ export function canvasSchemeToRelayScheme(scheme: CanvasScheme, context: CanvasS
       x: instance.x,
       y: instance.y,
       role: instance.role,
+      ...(instance.entryBinding ? { entryBinding: { ...instance.entryBinding, ...(instance.entryBinding.groupIds ? { groupIds: [...instance.entryBinding.groupIds] } : {}) } } : {}),
       relayPortMode: instance.relayPortMode,
       relayPort: instance.relayPort,
       listenPort: instance.listenPort,
@@ -468,3 +518,18 @@ export function canvasTunnelReference(
     supportUdp: tunnel.supportUdp
   };
 }
+
+export interface CanvasLegacyBinding {
+  id: string; instanceId: string; inboundId: string; name: string; nodeId: string; nodeName: string;
+  mode: 'create' | 'reuse'; originalDefaultOutbound: string; currentDefaultOutbound: string;
+}
+export interface CanvasLegacyGroup {
+  empty?: boolean;
+  id: string; bindingIds: string[]; tunnelIds: string[]; bindings: CanvasLegacyBinding[]; tunnels: CanvasTunnel[];
+  referrers: CanvasRemoveReferrer[]; canReattach: boolean; canRemove: boolean; reattachReasons: string[]; removeReasons: string[];
+}
+export interface CanvasLegacyResources { detached: CanvasLegacyGroup[]; orphanTunnels: CanvasLegacyGroup[]; unowned: CanvasTunnelObject[]; }
+export const canvasLegacyAPI = {
+  list: () => request<CanvasLegacyResources>('/relay-schemes/legacy-resources'),
+  reattach: (value: { bindingIds?: string[]; tunnelIds?: string[]; name: string }) => request<{ schemeId: string }>('/relay-schemes/legacy-resources/reattach', 'POST', value),
+};

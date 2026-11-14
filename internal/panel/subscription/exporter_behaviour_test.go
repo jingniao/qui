@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"proxycontrol/internal/panel/subscription/format"
+	"proxycontrol/internal/panel/subscription/format/clash"
 	"proxycontrol/internal/panel/subscription/format/singbox"
 	"proxycontrol/internal/panel/subscription/format/uri"
 	"proxycontrol/internal/panel/subscription/proxy"
@@ -25,6 +26,75 @@ type singBoxDocument struct {
 			Certificate []string `json:"certificate"`
 		} `json:"tls"`
 	} `json:"outbounds"`
+}
+
+func TestSingBoxRealityGRPCOmissionWarningDoesNotExposeShortID(t *testing.T) {
+	shortID := "a1b2c3d4e5f60718"
+	endpoint := proxy.Proxy{
+		Name:       "Reality gRPC 节点",
+		Server:     "node.example",
+		Port:       443,
+		Protocol:   "vless",
+		Credential: proxy.Credential{Password: "11111111-1111-4111-8111-111111111111"},
+		Security:   "reality",
+		TLS:        &proxy.TLS{ServerName: "example.com", ClientFingerprint: "chrome"},
+		Reality:    &proxy.RealityOptions{PublicKey: "VddTg9EFbwIYD3ymir-1P0xUxP74eFM_9UmM1e7bEwY", ShortID: &shortID},
+		Transport:  &proxy.Transport{Type: "grpc", ServiceName: "service"},
+	}
+	output, err := (singbox.Exporter{}).Render(format.Profile{Proxies: []proxy.Proxy{endpoint}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document singBoxDocument
+	if err := json.Unmarshal(output.Body, &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Outbounds) != 0 {
+		t.Fatalf("sing-box must omit Reality gRPC, got %d outbounds", len(document.Outbounds))
+	}
+	if len(output.Warnings) != 1 {
+		t.Fatalf("expected one omission warning, got %+v", output.Warnings)
+	}
+	warning := output.Warnings[0]
+	if strings.Contains(warning.Message, shortID) {
+		t.Fatal("Reality Short ID leaked into omission warning")
+	}
+	if warning.Stage != "format" || warning.Ref != "sing-box" || warning.Message != "节点「"+endpoint.Name+"」：Reality＋gRPC 暂不支持" {
+		t.Fatalf("unexpected omission warning: %+v", warning)
+	}
+}
+
+func TestMihomoXHTTPHTTP11ALPNOmissionWarning(t *testing.T) {
+	endpoint := proxy.Proxy{
+		Name:       "xhttp 节点",
+		Server:     "node.example",
+		Port:       443,
+		Protocol:   "vless",
+		Credential: proxy.Credential{Password: "11111111-1111-4111-8111-111111111111"},
+		Security:   "tls",
+		TLS:        &proxy.TLS{ServerName: "example.com", ALPN: []string{"http/1.1"}},
+		Transport:  &proxy.Transport{Type: "xhttp", XHTTP: &proxy.XHTTPOptions{Mode: "auto"}},
+	}
+	output, err := (clash.Meta{}).Render(format.Profile{Proxies: []proxy.Proxy{endpoint}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(output.Body), endpoint.Server) {
+		t.Fatal("mihomo must omit the xhttp endpoint with HTTP/1.1 ALPN")
+	}
+	var omissionWarnings int
+	for _, warning := range output.Warnings {
+		if !strings.Contains(warning.Message, endpoint.Name) {
+			continue
+		}
+		omissionWarnings++
+		if warning.Stage != "format" || warning.Ref != "clash" || warning.Message != "节点「"+endpoint.Name+"」：xhttp 的 ALPN 只支持留空或 h2" {
+			t.Fatalf("unexpected ALPN omission warning: %+v", warning)
+		}
+	}
+	if omissionWarnings != 1 {
+		t.Fatalf("expected one named ALPN omission warning, got %+v", output.Warnings)
+	}
 }
 
 func TestQUICSubscriptionExportsUUIDPasswordTLSAndOptions(t *testing.T) {
@@ -111,7 +181,7 @@ func TestURIFormatsOmitQUICEndpointWithPinnedCA(t *testing.T) {
 		t.Fatalf("URI export must keep the endpoints a URI can carry: %q", list.Body)
 	}
 	// The omission is reported to the admin preview instead of vanishing.
-	if len(list.Warnings) != 2 || list.Warnings[0].Stage != "format" || list.Warnings[0].Ref != "uri" {
+	if len(list.Warnings) != 1 || list.Warnings[0].Stage != "format" || list.Warnings[0].Ref != "uri" {
 		t.Fatalf("omitted endpoints produced no warning: %+v", list.Warnings)
 	}
 	encoded, err := uri.Base64{}.Render(format.Profile{Proxies: proxies})

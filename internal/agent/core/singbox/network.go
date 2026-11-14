@@ -15,7 +15,7 @@ type domainResolver struct {
 }
 
 // applyOutboundSource pins the dialing outbounds and the outbound WireGuard
-// endpoints of a rendered configuration to the node's configured outbound
+// endpoints using their own values, inheriting each unset field from the node's
 // source address and interface: the family bind address, the interface, and a
 // resolver strategy that keeps names resolving to the family of the source
 // address. Block outbounds never dial and inbound WireGuard endpoints only
@@ -26,15 +26,14 @@ type domainResolver struct {
 // loopback address) cannot be reached from the pinned source address and fails
 // to connect.
 func applyOutboundSource(doc *document, state desiredstate.State) error {
-	network := state.Network
-	if network == nil || network.OutboundSourceIP == "" && network.OutboundInterface == "" {
-		return nil
-	}
-	bind, strategy, err := sourceBind(network.OutboundSourceIP)
-	if err != nil {
-		return err
-	}
-	dial := func(outbound *outbound) {
+	// Outbound tags are the desired outbound IDs (group members are referenced,
+	// not copied), so each outbound looks up its own binding by tag.
+	dial := func(outbound *outbound) error {
+		network := state.OutboundNetwork(outbound.Tag)
+		bind, strategy, err := sourceBind(network.OutboundSourceIP)
+		if err != nil {
+			return err
+		}
 		outbound.BindInterface = network.OutboundInterface
 		if bind == "inet4_bind_address" {
 			outbound.Inet4BindAddress = network.OutboundSourceIP
@@ -46,12 +45,15 @@ func applyOutboundSource(doc *document, state desiredstate.State) error {
 		if strategy != "" {
 			outbound.DomainResolver = &domainResolver{Server: "_panel_dns_", Strategy: strategy}
 		}
+		return nil
 	}
 	for index := range doc.Outbounds {
 		if !dialable(doc.Outbounds[index].Type) {
 			continue
 		}
-		dial(&doc.Outbounds[index])
+		if err := dial(&doc.Outbounds[index]); err != nil {
+			return err
+		}
 	}
 	// Only outbound WireGuard endpoints dial; an inbound endpoint is a listener.
 	outboundEndpoints := map[string]bool{}
@@ -65,11 +67,18 @@ func applyOutboundSource(doc *document, state desiredstate.State) error {
 			continue
 		}
 		endpoint := &doc.Endpoints[index]
+		network := state.OutboundNetwork(endpoint.Tag)
+		bind, strategy, err := sourceBind(network.OutboundSourceIP)
+		if err != nil {
+			return err
+		}
 		endpoint.BindInterface = network.OutboundInterface
 		if bind == "inet4_bind_address" {
 			endpoint.Inet4BindAddress = network.OutboundSourceIP
+			endpoint.Inet6BindAddress = ""
 		} else if bind == "inet6_bind_address" {
 			endpoint.Inet6BindAddress = network.OutboundSourceIP
+			endpoint.Inet4BindAddress = ""
 		}
 		if strategy != "" {
 			endpoint.DomainResolver = &domainResolver{Server: "_panel_dns_", Strategy: strategy}

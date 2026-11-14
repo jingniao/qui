@@ -81,10 +81,11 @@ func (c SettingsCombination) Valid() bool {
 // direction, security or transport — the same TLS listener is rendered either from
 // pasted PEM or from two paths.
 type CoreSettingsCapability struct {
-	Core             string                `json:"core"`
-	Version          uint32                `json:"settings_contract_version"`
-	Combinations     []SettingsCombination `json:"combinations,omitempty"`
-	CertificateFiles bool                  `json:"certificate_files,omitempty"`
+	OutboundSourceSupported bool                  `json:"outbound_source_supported,omitempty"`
+	Core                    string                `json:"core"`
+	Version                 uint32                `json:"settings_contract_version"`
+	Combinations            []SettingsCombination `json:"combinations,omitempty"`
+	CertificateFiles        bool                  `json:"certificate_files,omitempty"`
 }
 
 // Supports reports whether this exact core declared this exact combination at the

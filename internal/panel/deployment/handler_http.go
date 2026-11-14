@@ -40,6 +40,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/deployment-batches/{id}/rollback", h.Auth.Require(http.HandlerFunc(h.rollbackBatch), true))
 	mux.Handle("POST /api/v1/nodes/{id}/rollback", h.Auth.Require(http.HandlerFunc(h.rollbackNode), true))
 	mux.Handle("POST /api/v1/nodes/{id}/publish", h.Auth.Require(http.HandlerFunc(h.publishNode), true))
+	mux.Handle("POST /api/v1/nodes/{id}/baseline", h.Auth.Require(http.HandlerFunc(h.publishBaseline), true))
 }
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	page, size, err := httpapi.Pagination(r)

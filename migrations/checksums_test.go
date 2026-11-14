@@ -13,6 +13,11 @@ import (
 // ending) makes existing panels refuse to start and old backups fail to
 // restore. Add new migrations here; never change an existing entry.
 var applied = map[string]string{
+	"0148_canvas_entry_baseline.sql":                    "b47b40bdb5312a1a1b3faf619cc0f0e0b3b2e1ebe9b0be2e38800b6c024079d6",
+	"0147_imported_proxy_identity.sql":                  "f9203fba791228d20e1e46458a201aa5fb8bd5cfbe13a9fac377d433e758278e",
+	"0146_canvas_entry_bindings.sql":                    "f26735762b3600cd5865453035f3099a148f26d309b502d2f176a89ac26eae09",
+	"0145_outbound_source.sql":                          "7d92b0778d56dcf30fa1c6f18df9faaed0f0ea64175b386a29776d7ab2ef2600",
+	"0144_node_tags.sql":                                "97b49f9b8832462263b746d7595442bbe279465f4baa88825fc90b0c8133cbcb",
 	"0143_native_rule_sets.sql":                         "6174f6a14098490218e90c113b3653f7ef665a6ecc5c0e92c96cad1bdb4fa297",
 	"0142_builtin_rule_sets.sql":                        "f8dbe2a65e2b3d359bfdbfdcfea48679f74f221ac04893487c261dfd3e91f467",
 	"0141_tuning_recommendations.sql":                   "c5772f2801fd609d152783b53c7fdf1dd0271ebae37d1c44f94cf19aa30ef468",

@@ -74,6 +74,7 @@ func Detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	// The renderer emits ext:<file>:<tag> entries and the adapter points
 	// XRAY_LOCATION_ASSET at the downloaded files (v1.5.4 item 5).
 	caps.NativeRuleSetsSupported = true
+	caps.OutboundSourceSupported = true
 	caps.ServerSettingsCombinations = detectServerSettings(ctx, executable, match[1])
 	if len(caps.ServerSettingsCombinations) > 0 {
 		caps.ServerSettingsContractVersion = desiredstate.SettingsContractVersion

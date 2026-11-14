@@ -4,6 +4,8 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/hex"
+	"proxycontrol/pkg/contracts/netaddr"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -11,6 +13,48 @@ import (
 // ValidateClientSettings validates public connection settings without depending
 // on panel or Agent models. It returns only fixed safe codes and field paths.
 func ValidateClientSettings(p Proxy) (string, string) {
+	if q := p.QUIC; q != nil {
+		if (q.Obfs != "" || q.ObfsPassword != "") && p.Protocol != "hysteria2" {
+			return "invalid_protocol_combination", "entry"
+		}
+		if q.Obfs != "" && q.Obfs != "salamander" || q.Obfs == "" && q.ObfsPassword != "" || q.Obfs != "" && (q.ObfsPassword == "" || len(q.ObfsPassword) > 256 || strings.IndexFunc(q.ObfsPassword, unicode.IsControl) >= 0) {
+			return "unsupported_option", "entry"
+		}
+		if p.Protocol != "tuic" && p.Protocol != "hysteria2" {
+			return "invalid_protocol_combination", "entry"
+		}
+		if q.CongestionControl != "" && q.CongestionControl != "bbr" && q.CongestionControl != "cubic" && q.CongestionControl != "new_reno" {
+			return "unsupported_option", "entry"
+		}
+		if q.UDPRelayMode != "" && q.UDPRelayMode != "native" && q.UDPRelayMode != "quic" {
+			return "unsupported_option", "entry"
+		}
+		if q.UpMbps < 0 || q.DownMbps < 0 || q.HopInterval < 0 {
+			return "unsupported_option", "entry"
+		}
+		if p.Protocol == "tuic" && (q.HopPorts != "" || q.HopInterval != 0 || q.UpMbps != 0 || q.DownMbps != 0) || p.Protocol == "hysteria2" && (q.CongestionControl != "" || q.UDPRelayMode != "") {
+			return "invalid_protocol_combination", "entry"
+		}
+		if q.HopPorts != "" {
+			parts := strings.Split(q.HopPorts, "-")
+			if len(parts) != 2 {
+				return "unsupported_option", "entry"
+			}
+			start, e1 := strconv.Atoi(parts[0])
+			end, e2 := strconv.Atoi(parts[1])
+			if e1 != nil || e2 != nil || start < 1 || end > 65535 || start >= end || strconv.Itoa(start) != parts[0] || strconv.Itoa(end) != parts[1] {
+				return "unsupported_option", "entry"
+			}
+		}
+	}
+	if p.Transport != nil && p.Transport.Host != "" {
+		if p.Transport.Type != "ws" {
+			return "invalid_protocol_combination", "transport.host"
+		}
+		if len(p.Transport.Host) > 253 || !netaddr.ValidHostName(p.Transport.Host) {
+			return "invalid_endpoint", "transport.host"
+		}
+	}
 	if p.Protocol == "vless" && p.Flow != "" && p.Transport != nil && (p.Transport.Type == "grpc" || p.Transport.Type == "xhttp") {
 		return "invalid_protocol_combination", "flow"
 	}
@@ -134,15 +178,43 @@ func ValidateClientSettings(p Proxy) (string, string) {
 // ClientFormatSupportsSettings is the measured capability boundary. Valid public
 // settings may still be unrepresentable in a selected client format.
 func ClientFormatSupportsSettings(p Proxy, format string) bool {
+	return ClientFormatOmission(p, format) == ""
+}
+
+// ClientFormatOmission returns a fixed reason at the measured capability boundary.
+func ClientFormatOmission(p Proxy, format string) string {
+	if supportsClientSettings(p, format) {
+		return ""
+	}
+	if p.Transport != nil && p.Transport.Type == "xhttp" {
+		if format != "clash" && p.Transport.XHTTP != nil && p.Transport.XHTTP.Mode != "auto" {
+			return "xhttp_mode"
+		}
+		if p.TLS != nil && len(p.TLS.ALPN) != 0 && (len(p.TLS.ALPN) != 1 || p.TLS.ALPN[0] != "h2") {
+			return "xhttp_alpn"
+		}
+	}
+	if p.Security == "reality" {
+		if p.Transport != nil && p.Transport.Type == "grpc" {
+			return "reality_grpc"
+		}
+		if p.Flow != "xtls-rprx-vision" {
+			return "reality_no_vision"
+		}
+	}
+	return "unsupported_settings"
+}
+
+func supportsClientSettings(p Proxy, format string) bool {
 	if p.Transport != nil && p.Transport.Type == "xhttp" {
 		if format == "uri" || format == "base64" {
 			return true
 		}
-		if format != "clash" || p.Security != "reality" || p.Reality == nil || p.Reality.SpiderX != nil || p.Transport.XHTTP == nil {
+		if format != "clash" || (p.Security != "reality" && p.Security != "tls") || p.Transport.XHTTP == nil {
 			return false
 		}
 		mode := p.Transport.XHTTP.Mode
-		return mode == "auto" && p.TLS != nil && len(p.TLS.ALPN) == 1 && p.TLS.ALPN[0] == "h2"
+		return (mode == "auto" || mode == "stream-one" || mode == "packet-up" || mode == "stream-up") && (p.TLS == nil || len(p.TLS.ALPN) == 0 || len(p.TLS.ALPN) == 1 && p.TLS.ALPN[0] == "h2")
 	}
 	if p.Security != "reality" {
 		return true
@@ -153,5 +225,8 @@ func ClientFormatSupportsSettings(p Proxy, format string) bool {
 	if format != "clash" && format != "sing-box" {
 		return false
 	}
-	return p.Flow == "xtls-rprx-vision" && (p.Transport == nil || p.Transport.Type == "" || p.Transport.Type == "tcp") && p.Reality != nil && p.Reality.SpiderX == nil
+	if format == "clash" {
+		return p.Reality != nil && (p.Transport == nil || p.Transport.Type == "" || p.Transport.Type == "tcp" || p.Transport.Type == "grpc")
+	}
+	return p.Flow == "xtls-rprx-vision" && (p.Transport == nil || p.Transport.Type == "" || p.Transport.Type == "tcp") && p.Reality != nil
 }

@@ -5,8 +5,76 @@ import (
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"strings"
 	"testing"
 )
+
+func TestTunnelGostClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason     string
+		supported, multi bool
+		os               string
+		version          uint32
+		blocked          bool
+	}{
+		{"install", "", true, true, "linux/amd64", 0, false},
+		{"ok", "", true, true, "linux/amd64", 3, false},
+		{"contract", "契约不足", true, true, "linux/amd64", 2, false},
+		{"unsupported", "Agent 不支持", false, true, "linux/amd64", 0, false},
+		{"platform", "linux/amd64", true, true, "linux/arm64", 0, false},
+		{"multi", "多核心", true, false, "linux/amd64", 0, false},
+		{"pending", "添加或移除", true, true, "linux/amd64", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := node.Node{Enabled: true, GostCoreSupported: tc.supported, OS: tc.os, Capabilities: &pb.Capabilities{CoreName: "xray", MultiCoreSupported: tc.multi}}
+			if tc.version > 0 {
+				n.Capabilities.Cores = []*pb.CoreCapability{{Name: "gost", ForwardInboundSupported: true, GostContractVersion: tc.version}}
+			}
+			if tc.blocked {
+				n.CoreSelectionBlocked = []string{"gost"}
+			}
+			got, err := classifyTunnelGost(n, 3)
+			if tc.reason != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.reason) {
+					t.Fatal(got, err)
+				}
+				return
+			}
+			want := "needs_install"
+			if tc.version > 0 {
+				want = "ok"
+			}
+			if err != nil || got != want {
+				t.Fatal(got, err)
+			}
+		})
+	}
+}
+
+func TestTunnelPlanGostInstallAndPublishRequired(t *testing.T) {
+	p := newPublishPanel(t)
+	tunnelTestRange(t, p.canvasPanel, p.nodeA, p.nodeB, p.nodeC)
+	caps, err := json.Marshal(&pb.Capabilities{CoreName: "xray", MultiCoreSupported: true, ForwardInboundSupported: true, Cores: []*pb.CoreCapability{{Name: "xray", ForwardInboundSupported: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nid := range []string{p.nodeA, p.nodeB} {
+		if _, err := p.database.Exec("UPDATE nodes SET operating_system='linux/amd64',gost_core_supported=1,capabilities_json=? WHERE id=?", string(caps), nid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tunnel, err := p.service.SaveTunnel(p.ctx, "", tunnelTestInput(p.nodeA, p.nodeB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := PublishSelection{TunnelIDs: []string{tunnel.ID}}
+	plan, err := p.service.PlanTunnels(p.ctx, selection)
+	if err != nil || !plan.OK || len(plan.InstallGost) != 2 {
+		t.Fatal(plan, err)
+	}
+	_, err = p.service.PublishTunnels(p.ctx, selection, "owner", nil)
+	requireTunnelError(t, err, "gost_install_required")
+}
 
 func TestManagedTunnelCapabilitiesAndDerivedTarget(t *testing.T) {
 	p := newPublishPanel(t)

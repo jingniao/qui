@@ -29,6 +29,11 @@
     <BackupSchedulePanel v-else-if="activeTab === 'backup'" />
     <NotificationSettings v-else-if="isOwner && activeTab === 'notifications'" />
     <RuntimeSettingsPanel v-else :key="activeTab" :kind="runtimeTab" />
+    <!-- CC BY 4.0 attribution for the offline IP-to-country table behind server flags. -->
+    <p v-if="activeTab === 'info'" class="max-w-3xl text-xs text-ios-secondary">
+      服务器国旗按公网 IP 在面板本地识别，不向外部服务发送地址。IP Geolocation by
+      <a href="https://db-ip.com" target="_blank" rel="noopener noreferrer" class="text-ios-blue hover:underline">DB-IP</a>（CC BY 4.0）。
+    </p>
     <AdminEntryPanel v-if="isOwner && activeTab === 'security'" />
     <section v-if="isOwner && activeTab === 'base'" class="panel-card p-6 max-w-3xl space-y-5 text-sm">
       <div class="flex flex-wrap justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">节点安装连接地址</h2><button class="ios-btn-secondary" :disabled="endpointLoading || endpointSaving" @click="loadEndpoint">刷新已保存地址</button></div>
@@ -162,7 +167,8 @@ async function saveBase() {
   catch (e) { showToast((e as Error).message, 'error'); }
   finally { baseSaving.value = false; }
 }
-function settingsChanged() { if (baseSaved.value && (baseForm.platformName !== baseSaved.value.platformName || baseForm.timezone !== baseSaved.value.timezone)) { showToast('其他页面已更新基础设置。请核对时区并刷新后再提交', 'warning'); return; } void loadBase(); if (isOwner.value) void loadTuningAutoApply(); }
+let baseRefreshPending = false;
+function settingsChanged() { if (activeTab.value !== 'base') { baseRefreshPending = true; return; } baseRefreshPending = false; if (baseSaved.value && (baseForm.platformName !== baseSaved.value.platformName || baseForm.timezone !== baseSaved.value.timezone)) { showToast('其他页面已更新基础设置。请核对时区并刷新后再提交', 'warning'); return; } void loadBase(); if (isOwner.value) void loadTuningAutoApply(); }
 
 // Tuning Auto Apply
 const tuningAutoApplyEnabled = ref(false);
@@ -271,5 +277,16 @@ async function saveEndpoint() {
   }
 }
 onUnmounted(() => { baseRefreshGeneration++; endpointGeneration++; window.removeEventListener('proxy-system-settings', settingsChanged); });
-onMounted(() => { void load(); void loadBase(); if (isOwner.value) { void loadEndpoint(); void loadTuningAutoApply(); } window.addEventListener('proxy-system-settings', settingsChanged); });
+watch(activeTab, tab => {
+  if (tab === 'accessLog' && !saved.value) void load();
+  if (tab === 'base') {
+    if (baseRefreshPending) settingsChanged();
+    if (!baseSaved.value) void loadBase();
+    if (isOwner.value) {
+      if (!endpointSaved.value) void loadEndpoint();
+      if (tuningAutoApplyRevision.value === null) void loadTuningAutoApply();
+    }
+  }
+}, { immediate: true });
+onMounted(() => { window.addEventListener('proxy-system-settings', settingsChanged); });
 </script>

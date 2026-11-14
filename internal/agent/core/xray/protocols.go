@@ -263,7 +263,7 @@ func buildInbound(inbound desiredstate.Inbound, credentials map[string]desiredst
 	return "", nil, nil, errors.New("unsupported inbound protocol")
 }
 func buildOutbound(outbound desiredstate.Outbound, credentials map[string]desiredstate.Credential) (outboundConfig, error) {
-	result := outboundConfig{Tag: outbound.ID}
+	result := outboundConfig{Tag: outbound.ID, sourceID: outbound.ID}
 	credential := credentials[outbound.CredentialID]
 	transport, err := stream(outbound.Settings, false)
 	if err != nil {

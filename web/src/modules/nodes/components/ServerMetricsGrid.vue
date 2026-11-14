@@ -48,7 +48,10 @@ const current = computed(() => extractCurrentValues(currentUnavailable.value ? {
 let generation = 0, disposed = false;
 // Foreground loads (first read, node or range switch) clear the charts and show the
 // hint; background refreshes keep the old data until the new data arrives.
+let inFlight = false;
 async function load(foreground = false) {
+  if (!foreground && (inFlight || document.visibilityState !== 'visible')) return;
+  inFlight = true;
   const ticket = ++generation, id = props.node.id, hours = props.hours;
   const begun = beginMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, foreground);
   if (foreground) points.value = [];
@@ -60,13 +63,14 @@ async function load(foreground = false) {
     end.value = until; intervalSeconds.value = response.intervalSeconds;
     points.value = response.points.map(metricPoint).filter(p => Number.isFinite(p.time)).sort((a,b) => a.time-b.time);
   } catch (e) { if (!disposed && ticket === generation) { const failed = failMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, '历史指标读取失败：' + (e as Error).message); error.value = failed.error; } }
-  finally { if (!disposed && ticket === generation) loading.value = false; }
+  finally { if (!disposed && ticket === generation) { loading.value = false; inFlight = false; } }
 }
 // History is sampled once a minute, so heartbeat events must not trigger reads; only the timer does.
 watch([() => props.node.id, () => props.hours], () => { void load(true); }, { immediate: true });
+function visibilityChanged() { if (document.visibilityState === 'visible') void load(false); }
 let timer: ReturnType<typeof setInterval>;
-onMounted(() => { timer = setInterval(() => { void load(false); }, 60000); });
-onUnmounted(() => { disposed = true; generation++; clearInterval(timer); });
+onMounted(() => { document.addEventListener('visibilitychange', visibilityChanged); timer = setInterval(() => { void load(false); }, 60000); });
+onUnmounted(() => { disposed = true; generation++; clearInterval(timer); document.removeEventListener('visibilitychange', visibilityChanged); });
 function display(key: MetricKey, value: number | null | undefined) {
   if (value === null || value === undefined) {
     const latest = latestMeasured(key);

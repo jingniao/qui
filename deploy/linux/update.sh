@@ -361,12 +361,12 @@ component_files() {
     printf '%s\n' "$root/etc/init.d/proxy-$component"
   fi
   printf '%s\n' "$program_directory/qui-update" "$root/usr/local/lib/proxycontrol/service.sh"
+  printf '%s\n' "$program_directory/qui" "$root/usr/local/lib/proxycontrol/uninstall.sh"
   if [[ $component == panel ]]; then
     # The web-UI update bridge is part of a panel: install.sh publishes the helper and
     # the two units beside the terminal menu. A snapshot taken before they existed does
     # not contain them, and the restore then removes the ones the failed install created.
-    printf '%s\n' "$program_directory/qui" \
-      "$root/usr/local/lib/proxycontrol/panel-update-request" \
+    printf '%s\n' "$root/usr/local/lib/proxycontrol/panel-update-request" \
       "$root/etc/systemd/system/proxy-panel-update.service" \
       "$root/etc/systemd/system/proxy-panel-update.path"
   elif [[ $init_system == systemd ]]; then

@@ -275,7 +275,7 @@
 
         <!-- 右侧 (5列): 可用节点分组与节点列表 -->
         <section class="lg:col-span-5 panel-card p-5 sm:p-6 bg-white flex flex-col justify-between space-y-4">
-          <div>
+          <div class="flex-1 min-h-0 flex flex-col">
             <div class="flex items-center justify-between">
               <div>
                 <h3 class="text-ios-label tracking-normal text-base font-semibold leading-normal">可用节点</h3>
@@ -287,7 +287,9 @@
             </div>
 
             <!-- 可用节点明细列表 -->
-            <div class="mt-3.5 space-y-2 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+            <!-- 宽屏下列表填满卡片剩余高度（不撑高整行），超出时在卡片内滚动 -->
+            <div class="mt-3.5 relative lg:flex-1 lg:min-h-56">
+            <div class="space-y-2 max-h-96 lg:max-h-none lg:absolute lg:inset-0 overflow-y-auto pr-1 scrollbar-thin">
               <div
                 v-for="item in previewItems"
                 :key="item.inboundId + item.address + item.port"
@@ -314,6 +316,7 @@
               <div v-else-if="previewLoaded && previewItems.length === 0" class="text-center py-6 text-xs text-ios-tertiary">
                 暂无可用节点
               </div>
+            </div>
             </div>
           </div>
 
@@ -600,6 +603,7 @@
 </template>
 
 <script setup lang="ts">
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -998,66 +1002,97 @@ async function readPages<T>(fetchPage: (page: number) => Promise<{ items: T[]; t
   }
   return { items };
 }
+let userGeneration = 0;
+let loadingUser = false;
 async function load() {
+  const current = ++userGeneration;
+  loadingUser = true;
   const id = userId.value;
-  if (!id || route.name !== 'UserDetail') return;
+  if (!id || route.name !== 'UserDetail') { loadingUser = false; return; }
   error.value = '';
   try {
     const [u, gRes, nRes, ibRes] = await Promise.all([
-      userAPI.get(id),
+      userAPI.get(id).then(value => {
+        if (current === userGeneration) { user.value = value; loginEnabled.value = value.loginEnabled; }
+        return value;
+      }),
       readPages(page => groupAPI.list(page, 100)),
-      readPages(page => nodeAPI.list(page, '', false)),
+      readPages(page => nodeAPI.list(page, '', false, 100)),
       readPages(page => proxyAPI.inbounds('', page, 100))
     ]);
-    user.value = u;
-    loginEnabled.value = u.loginEnabled;
+    if (current !== userGeneration) return;
     groups.value = gRes.items;
     allNodes.value = nRes.items;
     memberInbounds.value = ibRes.items;
 
-    await loadSubscription();
+    void loadSubscription();
     void loadPortalContext();
     void userAPI.preview(id)
-      .then(result => { previewItems.value = result.items; previewFailed.value = false; })
-      .catch(() => { previewItems.value = []; previewFailed.value = true; })
-      .finally(() => { previewLoaded.value = true; });
+      .then(result => { if (current !== userGeneration) return; previewItems.value = result.items; previewFailed.value = false; })
+      .catch(() => { if (current !== userGeneration) return; previewItems.value = []; previewFailed.value = true; })
+      .finally(() => { if (current === userGeneration) previewLoaded.value = true; });
 
+    loadActivity(u, current);
+
+  } catch (e) {
+    if (current === userGeneration) error.value = (e as Error).message;
+  } finally { if (current === userGeneration) loadingUser = false; }
+}
+
+function loadActivity(u: NonNullable<typeof user.value>, current: number) {
     // 获取流量历史与请求
     void accessAPI.accounts({ userId: u.id }).then(summary => {
+      if (current !== userGeneration) return;
       trafficSummary.value = {
         uploadBytes: summary.uploadBytes || 0,
         downloadBytes: summary.downloadBytes || 0,
         observations: summary.observations || 0
       };
-    }).catch(() => {});
+    }).catch(() => { /* 后台刷新失败，保留上次数据。 */ });
 
     void accessAPI.list({ userId: u.id }, 1).then(res => {
+      if (current !== userGeneration) return;
       recentAccessList.value = res.items.slice(0, 10);
-    }).catch(() => {});
+    }).catch(() => { /* 后台刷新失败，保留上次数据。 */ });
 
     // 获取管理员对该用户的操作记录
     Promise.all([
       request<Page<Operation>>(`/operations?page=1&pageSize=10&keyword=${encodeURIComponent(u.username)}`),
       request<Page<Operation>>(`/operations?page=1&pageSize=10&keyword=${encodeURIComponent(u.id)}`)
     ]).then(([res1, res2]) => {
+      if (current !== userGeneration) return;
       const map = new Map<number, Operation>();
       for (const it of res1.items) map.set(it.id, it);
       for (const it of res2.items) map.set(it.id, it);
       const merged = Array.from(map.values());
       merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       userOperations.value = merged.slice(0, 10);
-    }).catch(() => {});
+    }).catch(() => { /* 后台刷新失败，保留上次数据。 */ });
 
-  } catch (e) {
-    error.value = (e as Error).message;
-  }
 }
 
+async function refreshUserStatus() {
+  if (document.hidden || loadingUser || !user.value) return;
+  const current = ++userGeneration;
+  try {
+    const result = await userAPI.get(userId.value);
+    if (current !== userGeneration) return;
+    const editingLogin = loginEnabled.value !== user.value?.loginEnabled;
+    user.value = result;
+    loadActivity(result, current);
+    if (!editingLogin) loginEnabled.value = result.loginEnabled;
+  } catch { /* 后台刷新失败，保留上次状态。 */ }
+}
+const refreshStatus = throttleTrailing(() => { void refreshUserStatus(); }, 5000);
+function visibilityChanged() { if (!document.hidden) refreshStatus(); }
 onMounted(() => {
   void load();
-  window.addEventListener('proxy-system-alert', load);
+  document.addEventListener('visibilitychange', visibilityChanged);
+  window.addEventListener('proxy-system-alert', refreshStatus);
 });
 onUnmounted(() => {
-  window.removeEventListener('proxy-system-alert', load);
+  userGeneration++; refreshStatus.cancel();
+  document.removeEventListener('visibilitychange', visibilityChanged);
+  window.removeEventListener('proxy-system-alert', refreshStatus);
 });
 </script>

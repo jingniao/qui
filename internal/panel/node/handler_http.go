@@ -65,6 +65,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/nodes/{id}/tuning/recommendations/dismiss", h.Auth.Require(http.HandlerFunc(h.dismissTuningRecommendation), true))
 	mux.Handle("GET /api/v1/system/tuning-auto-apply", h.Auth.Require(http.HandlerFunc(h.tuningAutoApply), true))
 	mux.Handle("PUT /api/v1/system/tuning-auto-apply", h.Auth.Require(http.HandlerFunc(h.putTuningAutoApply), true))
+	mux.Handle("GET /api/v1/system/server-order", h.Auth.Require(http.HandlerFunc(h.serverOrder), false))
+	mux.Handle("PUT /api/v1/system/server-order", h.Auth.Require(http.HandlerFunc(h.putServerOrder), true))
 	mux.Handle("GET /api/v1/nodes/{id}/latency-targets", h.Auth.Require(http.HandlerFunc(h.latencyTargets), false))
 	mux.Handle("PUT /api/v1/nodes/{id}/latency-targets", h.Auth.Require(http.HandlerFunc(h.latencyTargets), true))
 	mux.Handle("GET /api/v1/nodes/{id}/latency", h.Auth.Require(http.HandlerFunc(h.latency), false))
@@ -372,6 +374,14 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, ErrNodeNotPending) {
 		httpapi.Error(w, 409, "node_not_pending", err.Error())
+		return
+	}
+	if errors.Is(err, ErrServerOrderInvalid) || errors.Is(err, ErrNodeTagsInvalid) {
+		httpapi.Error(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if errors.Is(err, ErrServerOrderConflict) {
+		httpapi.Error(w, 409, "settings_conflict", err.Error())
 		return
 	}
 	if errors.Is(err, ErrNodeNotEnrolled) {

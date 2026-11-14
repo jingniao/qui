@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"proxycontrol/internal/agent/capability"
@@ -11,16 +12,25 @@ import (
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
-func reportCapabilities(s *capability.Sampler, c *capabilityState) *pb.Capabilities {
+func reportCapabilities(s *capability.Sampler, c *capabilityState, hostDirectory string) *pb.Capabilities {
 	result := c.Snapshot()
 	if len(result.Cores) == 0 && result.CoreName != "" {
-		result.Cores = []*pb.CoreCapability{{Name: result.CoreName, Version: result.CoreVersion, Protocols: result.Protocols, SingboxUserStats: result.SingboxUserStats, ForwardInboundSupported: result.ForwardInboundSupported, DeviceGateSupported: result.DeviceGateSupported, ObservationContractVersion: result.ObservationContractVersion, ServerSettingsContractVersion: result.ServerSettingsContractVersion, ServerSettingsCombinations: result.ServerSettingsCombinations, TlsCertificateFilesSupported: result.TlsCertificateFilesSupported, DomainKeywordSupported: result.DomainKeywordSupported, ExpandedPolicySupported: result.ExpandedPolicySupported, NativeRuleSetsSupported: result.NativeRuleSetsSupported}}
+		result.Cores = []*pb.CoreCapability{{Name: result.CoreName, Version: result.CoreVersion, Protocols: result.Protocols, SingboxUserStats: result.SingboxUserStats, ForwardInboundSupported: result.ForwardInboundSupported, DeviceGateSupported: result.DeviceGateSupported, ObservationContractVersion: result.ObservationContractVersion, ServerSettingsContractVersion: result.ServerSettingsContractVersion, ServerSettingsCombinations: result.ServerSettingsCombinations, TlsCertificateFilesSupported: result.TlsCertificateFilesSupported, DomainKeywordSupported: result.DomainKeywordSupported, ExpandedPolicySupported: result.ExpandedPolicySupported, NativeRuleSetsSupported: result.NativeRuleSetsSupported, OutboundSourceSupported: result.OutboundSourceSupported}}
 	}
 	result.Host = s.HostInfo()
 	result.TuningSupported = tuning.Supported()
 	result.PanelCatalogueSupported = true
 	result.PortHopSupported = hostnet.HelperInstalled()
+	result.HostSourceExtraExemptSupported = hostSourceExtraExemptSupported(hostDirectory, result.PortHopSupported)
 	return result
+}
+
+func hostSourceExtraExemptSupported(directory string, installed bool) bool {
+	if !installed {
+		return false
+	}
+	status, err := hostnet.ReadStatus(directory)
+	return err == nil && slices.Contains(status.Features, hostnet.FeatureExtraExempt)
 }
 
 // One in-flight request across sessions. Neither a reconnect nor a second

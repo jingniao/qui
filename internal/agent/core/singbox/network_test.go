@@ -15,6 +15,38 @@ import (
 	"proxycontrol/pkg/contracts/scheduler"
 )
 
+func TestOutboundSourceOverrides(t *testing.T) {
+	for _, tc := range []struct{ name, ip, iface, serverIP, serverIface, wantIP, wantIface string }{
+		{"ipv4", "192.0.2.1", "", "", "", "192.0.2.1", ""},
+		{"ipv6", "2001:db8::1", "", "", "", "2001:db8::1", ""},
+		{"inherit_interface", "192.0.2.1", "", "192.0.2.2", "eth0", "192.0.2.1", "eth0"},
+		{"inherit_ip", "", "eth1", "192.0.2.2", "eth0", "192.0.2.2", "eth1"},
+		{"inherit_both", "", "", "192.0.2.2", "eth0", "192.0.2.2", "eth0"},
+		{"unbound", "", "", "", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := desiredstate.State{Network: &desiredstate.Network{OutboundSourceIP: tc.serverIP, OutboundInterface: tc.serverIface}, Outbounds: []desiredstate.Outbound{{ID: "one", SourceIP: tc.ip, SourceInterface: tc.iface}, {ID: "two", SourceIP: "192.0.2.3"}}}
+			doc := document{Outbounds: []outbound{{Tag: "one", Type: "direct"}, {Tag: "two", Type: "direct"}, {Tag: "block", Type: "block"}, {Tag: "group", Type: "selector"}}}
+			if err := applyOutboundSource(&doc, state); err != nil {
+				t.Fatal(err)
+			}
+			first := doc.Outbounds[0]
+			if first.Inet4BindAddress+first.Inet6BindAddress != tc.wantIP || first.BindInterface != tc.wantIface {
+				t.Fatalf("unexpected binding: %+v", first)
+			}
+			if tc.wantIP != "" {
+				_, strategy, _ := sourceBind(tc.wantIP)
+				if first.DomainResolver == nil || first.DomainResolver.Strategy != strategy {
+					t.Fatal("wrong family strategy")
+				}
+			}
+			if doc.Outbounds[1].Inet4BindAddress != "192.0.2.3" || doc.Outbounds[2].BindInterface != "" || doc.Outbounds[3].BindInterface != "" {
+				t.Fatal("member or non-dialing binding mismatch")
+			}
+		})
+	}
+}
+
 // wgTestSecret is the fixed WireGuard private key the source-address scenarios
 // render, so the derived public key and the golden files are stable.
 const wgTestSecret = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="

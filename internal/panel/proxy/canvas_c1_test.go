@@ -85,7 +85,7 @@ func TestCanvasC1ProxyExits(t *testing.T) {
 				if in.NodeID == p.nodeB && in.Port != 32000 {
 					t.Fatalf("JP port %d", in.Port)
 				}
-				if in.NodeID == p.nodeC && in.Protocol != "socks5" {
+				if in.Protocol != "trojan" || in.Settings.Security != "tls" {
 					t.Fatalf("exit protocol %s", in.Protocol)
 				}
 			}

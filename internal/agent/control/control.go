@@ -881,7 +881,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		return nil
 	}
-	if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
+	if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
 		return err
 	}
 	logger.Info("node control connected", "node_id", state.NodeID)
@@ -903,7 +903,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			if err := updates.acknowledgeRemoval(removalResults[0]); err != nil {
 				return err
 			}
-			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
 				return err
 			}
 			removalResults = removalResults[1:]
@@ -943,13 +943,16 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 					// Publish and remember the core that now runs, so a later
 					// session does not report the version from process start.
 					capabilities.Store(fresh)
-					if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
+					if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
 						return err
 					}
 				}
 			}
 		}
 		for len(results) > 0 {
+			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
+				return err
+			}
 			result := results[0]
 			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_ApplyResult{ApplyResult: result}}); err != nil {
 				return err
@@ -1143,7 +1146,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		case <-certRescan.C:
 			timer.Stop()
 			if h := sampler.HostInfo(); h != nil && certWatch.changed(h.CertificateFiles) {
-				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities)}}); err != nil {
+				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
 					return err
 				}
 			}

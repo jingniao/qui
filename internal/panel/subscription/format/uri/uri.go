@@ -63,6 +63,7 @@ func (Base64) Render(profile format.Profile) (format.Output, error) {
 
 func renderList(exporterID string, proxies []proxy.Proxy) (format.Output, error) {
 	output := format.Output{}
+	var omissions proxy.OmissionWarnings
 	lines := []string{}
 	for _, endpoint := range proxies {
 		if endpoint.DialerProxy != "" || endpoint.ClientChain != "" {
@@ -76,7 +77,11 @@ func renderList(exporterID string, proxies []proxy.Proxy) (format.Output, error)
 			// token holder then lost every other link as well. Skipping it keeps
 			// the rest, and the sing-box format still lists it with its
 			// certificate.
-			output.Warnings = append(output.Warnings, proxy.FormatWarning(exporterID, "Endpoint omitted: URI cannot represent its certificate or transport settings"))
+			reason := proxy.ClientFormatOmission(endpoint, exporterID)
+			if pinnedCA(endpoint) != "" {
+				reason = "pinned_ca"
+			}
+			omissions.Add(endpoint.Name, reason)
 			continue
 		}
 		if err != nil {
@@ -89,11 +94,18 @@ func renderList(exporterID string, proxies []proxy.Proxy) (format.Output, error)
 		data = append(data, '\n')
 	}
 	output.Body = data
+	output.Warnings = append(output.Warnings, omissions.Warnings(exporterID)...)
 	return output, nil
 }
 
 // Link renders one proxy as a share URI.
 func Link(endpoint proxy.Proxy) (string, error) {
+	if endpoint.Security == "tls" && pinnedCA(endpoint) != "" {
+		switch endpoint.Protocol {
+		case "vless", "trojan", "http", "socks5":
+			return "", ErrUnrepresentable
+		}
+	}
 	if code, _ := proxy.ValidateClientSettings(endpoint); code != "" {
 		return "", errors.New("invalid subscription client settings")
 	}
@@ -124,6 +136,9 @@ func Link(endpoint proxy.Proxy) (string, error) {
 		query.Set("type", transport)
 		if transport == "ws" && endpoint.Transport != nil {
 			query.Set("path", endpoint.Transport.Path)
+			if endpoint.Transport.Host != "" {
+				query.Set("host", endpoint.Transport.Host)
+			}
 		}
 		if transport == "grpc" && endpoint.Transport != nil {
 			query.Set("serviceName", endpoint.Transport.ServiceName)
@@ -196,8 +211,15 @@ func Link(endpoint proxy.Proxy) (string, error) {
 		query := url.Values{}
 		query.Set("sni", tlsServerName(endpoint))
 		query.Set("alpn", "h3")
+		if endpoint.Protocol == "tuic" && endpoint.TLS != nil && len(endpoint.TLS.ALPN) > 0 {
+			query.Set("alpn", strings.Join(endpoint.TLS.ALPN, ","))
+		}
 		if q := endpoint.QUIC; q != nil {
 			if endpoint.Protocol == "hysteria2" {
+				if q.Obfs != "" {
+					query.Set("obfs", q.Obfs)
+					query.Set("obfs-password", q.ObfsPassword)
+				}
 				if q.UpMbps > 0 {
 					query.Set("upmbps", strconv.Itoa(q.UpMbps))
 				}

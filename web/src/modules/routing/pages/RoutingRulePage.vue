@@ -317,7 +317,9 @@ function getActionDotClass(type: string): string {
   }
 }
 
+let generation = 0;
 async function load() {
+  const current = ++generation;
   loading.value = true;
   try {
     const [result, sets, outs, gs, cs] = await Promise.all([
@@ -327,6 +329,7 @@ async function load() {
       choices((p, s) => proxyAPI.groups('', p, s)),
       choices((p, s) => proxyAPI.chains('', p, s))
     ]);
+    if (current !== generation) return;
     rules.value = result.items;
     total.value = result.total;
     services.value = sets.items;
@@ -335,9 +338,9 @@ async function load() {
     chains.value = cs;
     error.value = '';
   } catch (e) {
-    error.value = (e as Error).message;
+    if (current === generation) error.value = (e as Error).message;
   } finally {
-    loading.value = false;
+    if (current === generation) loading.value = false;
   }
 }
 

@@ -20,12 +20,18 @@ export interface NodeSettingsInput extends NodeNetworkSettings {
 export interface NodeView extends NodeNetworkSettings {
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';
   agentUpdateSupported: boolean;
+  // Server-group tags (v1.5.5 item 4); the panel always sends a list.
+  tags?: string[];
+  // The Agent can install GOST (Hello.gost_core_supported).
+  gostCoreSupported?: boolean;
   enabled: boolean; allowSubscription: boolean; maintenance: boolean; hostname: string; os: string; agentVersion: string; publicIp: string;
   tuningAdviceCount?: number;
   // Where the public address came from: manual means the Owner typed it and the
   // Agent never replaces it, auto means the panel filled it from detection, and
   // an empty source means there is no address at all.
   publicIpSource: '' | 'manual' | 'auto' | 'selected';
+  // ISO country code of publicIp from the panel's offline table, '' when unknown.
+  countryCode?: string;
   publicAddresses?: PublicAddress[];
   publicIpSelected?: string;
   publicIpSelectionMissing?: boolean;
@@ -93,7 +99,12 @@ export interface DeletionBlocker { kind: DeletionBlockerKind; id: string; name: 
 export interface DeletionPreview { mode: DeletionMode; blockers: DeletionBlocker[]; groups: string[]; lastHeartbeat: string; online: boolean; }
 export interface LatencyTargetsInput { custom: boolean; targetIds: string[]; }
 export interface LatencyTargetsSettings extends LatencyTargetsInput { defaultTargetIds: string[]; }
+// The Owner's saved order of the server list (v1.5.5 item 3). Revision 0 means
+// nothing saved yet; ids may still name servers deleted since the save.
+export interface ServerOrder { ids: string[]; revision: number; updatedAt?: string; updatedBy?: string; }
 export const nodeAPI = {
+  serverOrder: () => request<ServerOrder>('/system/server-order'),
+  saveServerOrder: (ids: string[], expectedRevision: number) => request<ServerOrder>('/system/server-order', 'PUT', { ids, expectedRevision }),
   metrics: (id: string, hours = 1) => request<NodeMetricsResponse>(`/nodes/${encodeURIComponent(id)}/metrics?hours=${hours}`),
   tuning: (id: string) => request<NodeTuning>(`/nodes/${encodeURIComponent(id)}/tuning`),
   saveTuning: (id: string, input: NodeTuningInput) => request<{requestId:string;status:'pending'}>(`/nodes/${encodeURIComponent(id)}/tuning`, 'PUT', input),

@@ -265,6 +265,14 @@ OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监�
 
 `desired.json` 是 Agent 下发的目标状态（含随机 `id`），`status.json` 是 helper 对同一 `id` 的结果；两者不一致说明 helper 未安装或尚未处理完。
 
+### 与出站单独源 IP 并用（v1.5.5）
+
+在「出站」为不同出口 IP 分别建立 Direct 出站，填写 `sourceIp/sourceInterface`，再把入站默认出站或节点策略指向对应出站，发布后生效。IP 与网卡分别继承服务器级核心设置，出站非空值优先；Block 不能绑定。缺少逐出站绑定能力时返回 `outbound_source_unsupported`，先升级 Agent。
+
+对应地址族启用了服务器强制出站，且出站有效源 IP 不同于服务器级核心源 IP 和强制地址时，Agent 把它加入 `extra_exempt_ipv4/extra_exempt_ipv6`，避免被整机 SNAT 改写。每族最多 16 个，去重排序；原单地址豁免保持。需要额外豁免但 helper 未上报支持时返回 `host_source_exempt_unsupported`，在节点运行 `qui-update --component agent` 更新本机 helper；网页升级 Agent 不会替换 helper 使用的 `/usr/local/bin/proxy-agent`。
+
+更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。已有 `desired.json` 会重放；helper 从未运行、没有回执时取得首次能力标记的流程 **待核实**。逐出站绑定的地址／网卡不存在时，切核前检查尚未覆盖，不能保证与服务器级设置一样返回 `network_unavailable`。降级旧 helper 前先清除需额外豁免的组合并发布，避免旧 helper 拒绝保留请求中的新字段。
+
 helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartLimitIntervalSec=0`，不受 systemd 默认的启动频率限制（10 秒内 5 次），path 单元因此不会以 `unit-start-limit-hit` 停止；OpenRC 的 watcher 不会因 helper 失败而退出。Agent 只有在 `status.json` 确认同一 `id` 的“清除”请求成功后，才把保留的清除请求视为已生效，否则重新发布并等待结果。早于此修复的版本可能已经停在这种状态（`systemctl status proxy-agent-host-network.path` 显示 `unit-start-limit-hit`）：升级时 `install.sh` 发现 oneshot 单元处于 `failed` 会 `reset-failed` 并重放一次保留的文件；不升级时可手动执行 `systemctl reset-failed proxy-agent-host-network.service proxy-agent-host-network.path && systemctl start proxy-agent-host-network.path proxy-agent-host-network.service`。
 
 ## 10. 核心与 Agent 更新
@@ -314,6 +322,12 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 - 面板一键导入与托管：面板提供 `GET /api/v1/agent-releases` 列出官方正式版；Owner 点击升级时，面板通过 `POST /api/v1/agent-releases/{version}/import` 自动拉取官方已签名清单与二进制产物，保存到 `<data_dir>/releases/agent-catalogue/` 签名目录，并向 `POST /api/v1/agent-updates` 入队。面板通过只读路由 `GET /agent-catalogue/`（仅开放白名单清单与二进制路径，严格限制目录穿越）向 Agent 托管该签名目录。
 - 节点自动协商：Agent 1.5.0 握手时上报 `Capabilities.panel_catalogue_supported = true`，并在 Welcome 消息中接收面板告知的目录端口（`agent_catalogue_port`）。Agent updater 默认目录回退到面板只读端口。
 - 兼容与离线签名：`cmd/release` 离线签名工具与配置中显式指定的自定义签名公钥 / 目录完全兼容保留。
+
+### 升级前发布基础配置（v1.5.5）
+
+在线但从未发布配置的节点，当前修订为 0。「版本与更新」升级 Agent、升级／添加代理核心时会提示先发布基础配置；确认后页面调用 `POST /api/v1/nodes/{id}/baseline`（Owner＋CSRF，`{confirmNodeId}`），等节点确认修订再排队原升级。单台与批量都使用此流程，Agent 网页升级仍须先启用。
+
+基础配置只含节点级必需设置（包括出站网络），不带草稿入站、出站资源、用户、策略或中转；无入站时核心不启动。发布历史说明为 `auto: baseline before upgrade`，操作日志为「升级前发布基础配置」。沿用正常发布校验与回滚，页面最多等待 3 分钟；失败或超时不排队该节点升级，可在节点发布历史查看失败原因。超时后先核对实际修订，再重试升级；页面停止等待不表示服务端发布已取消。已有确认修订无需基础配置，接口返回 `baseline_not_needed`；离线、占用或未启用网页升级等原因仍在页面显示。
 
 ### Agent 网页升级启用与退出
 
@@ -437,7 +451,7 @@ sysctl --system
 
 ## 14. 终端菜单 qui
 
-面板主机上安装的是 root 专用终端菜单 `/usr/local/bin/qui`（`deploy/linux/install.sh --panel` 安装；SSH 会话里输入 `qui` 打开）。菜单固定只有以下项目：
+面板与节点主机均安装 root 专用终端菜单 `/usr/local/bin/qui`，SSH 会话里输入 `qui` 打开。只装 Agent 时按安装记录显示精简菜单：「1. 更新（从 GitHub）」「2. 卸载并清除全部数据」及 Agent 状态与版本；有面板时显示下列完整菜单。旧节点须经本机 `qui-update --component agent` 安装新版菜单。
 
 | 菜单项 | 行为 |
 | --- | --- |
@@ -446,7 +460,7 @@ sysctl --system
 | 3 / 4 / 5. 重启 / 启动 / 停止 | 直接 `systemctl restart`、`systemctl start`、`systemctl stop proxy-panel.service` 并打印结果状态；启动或重启失败会提示 `journalctl -u proxy-panel -n 50`。服务本来就在运行或已停止时只提示，不重复操作。 |
 | 6. 更新（从 GitHub） | 运行 `/usr/local/bin/qui-update`：默认取 `https://github.com/jingniao/qui/releases/latest`（也可 `--version X.Y.Z` 或 `--version X.Y.Z-rc.N` 指定），下载归档与同一发布的 `SHA256SUMS` 并核对摘要，停止 `proxy-panel.service`，在停止状态下把数据库备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，再用归档里的 `deploy/linux/install.sh` 原地替换程序与单元，最后按停止前的状态启动服务，并要求它 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照与更新前的数据库（先把新版本的数据库保留为 `failed-update-*.db`），启动旧版本。按 Ctrl-C、SSH 断线或被 `kill` 时同样自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery` 在服务启动前完成回滚。目标版本打不开当前数据库（降级跨过了迁移）时不做任何替换，并列出可用 `--database` 一起回退的 `pre-update-*` 备份。只有回滚也失败时才保留快照并打印日志命令（细节见[部署与升级](deployment.md)第 5 节与 5.1）。 |
 
-菜单只调用上面这些固定操作，不提供 shell 或日志查看入口。
+完整菜单另有「7. 查看／重置管理员登录地址」（见[项目说明书 §27.18](../AGENTS.md#2718-系统设置管理员登录地址与门户字段v154)）与「8. 卸载并清除全部数据」。菜单只调用固定操作，不提供 shell 或日志查看入口。
 
 **非交互等价写法**（第 1 项的等价命令；面板已停止、以服务账号运行，两行分别是新用户名与口令，用户名为空行表示保持不变）：
 
@@ -456,6 +470,30 @@ printf '%s\n%s\n' 'owner-name' 'new-password' | \
   runuser -u proxy-panel -- /usr/local/bin/proxy-panel --config /etc/proxy-panel/config.yaml --set-owner-credentials
 systemctl start proxy-panel.service
 ```
+
+### 彻底卸载（qui 菜单／uninstall.sh --purge）
+
+在要清理的主机以 root 打开 `qui`，有面板选第 8 项、仅 Agent 选第 2 项，均调用本机脚本清理全部已安装组件。也可在终端直接指定范围：
+
+```sh
+/usr/local/lib/proxycontrol/uninstall.sh all --purge
+# 仅清理一个组件：将 all 换为 panel 或 agent
+```
+
+脚本随 v1.5.5 安装器发布；旧主机缺少脚本时先运行对应组件的 `qui-update`。它持有安装操作锁，列出组件、路径、目录大小、账号、nft 表及面板端口，必须依次输入 `y` 和 `purge`，无 `--yes`。直接使用 `--purge`，不要先普通卸载：all 只按现存 `.manifest` 选择组件，不能用来补清此前只剩 `.removed` 的卸载残余。
+
+| 范围 | 清理内容 |
+| --- | --- |
+| 面板 | 程序、服务与更新 helper；`/etc/proxy-panel`、`/var/lib/proxy-panel`（含数据库、备份、节点 CA 与发布目录）；服务账号与同名组 |
+| Agent | 先恢复调优基线，再删程序、服务、host-network/tuning helper、核心目录；`/etc/proxy-agent`、`/var/lib/proxy-agent`；两张 nft 表 `proxy_agent_source/proxy_agent_hop`；调优文件与快照、服务账号与同名组 |
+| 最后一个组件 | `qui`、`qui-update`、`/usr/local/lib/proxycontrol`、恢复单元及 `/var/lib/proxycontrol-install` |
+| 防火墙 | 从当前面板配置读取 HTTP/gRPC 端口，删除运行中的 ufw 或 firewalld 对应 TCP 放行规则；没有规则则跳过 |
+
+面板数据库与备份会一起删除，需要保留的备份先下载或移出清理目录；其他主机的节点继续运行最后成功配置，须逐台处理。节点本机清除不会在面板吊销身份，仍须在面板删除节点。journald/syslog 历史日志、其他主机和固定清理目录外的文件保留。
+
+前置阶段核对安装记录与摘要、停止组件并恢复调优；失败时不进入数据清理，但已经删掉的程序／单元不回滚。数据阶段逐项继续，失败项最终列出并退出 1，保留安装登记目录；账号仍有进程时会记失败，数据清理仍继续。防火墙没有保存规则来源，只按当前端口匹配，人工添加的同端口规则也可能被删除，历史旧端口需另行核对。systemd/OpenRC 下清除后重新安装的实机结果 **待核实**。
+
+不带 `--purge` 的 `uninstall.sh panel|agent` 保留配置、数据、备份、账号及 `.removed`，重装仍需 `--reinstall`；普通 Agent 卸载也删除上述两张 nft 表。
 
 ## 15. 删除节点
 
@@ -484,6 +522,14 @@ Owner 在用户详情开启门户登录并设置密码；代理凭据、订阅 T
 外部订阅通过导入对话框保存 HTTPS 来源并授权用户；缓存刷新不发生在 `/sub` 请求内。逐跳公网地址校验与固定 IP、2 MiB/15 秒上限限制抓取；失败来源只给 Owner 预览警告。导入内容加密保存，支持中立模型内的 URI/Base64/Clash 条目，不透传 VMess、Reality、插件、不安全 TLS 或未知字段。旧浏览器导入不自动迁移，须重导入并授权。客户端链仅 mihomo `dialer-proxy`，其他格式省略依赖链并警告；凭据/端点变化需重新选择画布引用。导入不进入 Agent、Revision、配额或设备限制；不能转为被管理的服务器隧道（L3、L5、L6）。
 
 qui sing-box 增加上游 `with_v2ray_api`，声明 `singbox_user_stats` 后逐用户字节计入原有共享额度，官方无标签构建仍仅节点总量。升级后 sing-box 用户可能更早达到额度，升级前核对用量、额度并告知用户。计数使用累计游标和 spool 重传，不重置核心计数。原生双用户载荷与 Xray 对比证据见[验收矩阵](v1-acceptance.md) §10.4，主机结果见 §11。
+
+### 16.1 单独导入节点改名／删除（v1.5.5）
+
+单独导入（content）在节点列表逐个修改名称或删除；订阅连接（url）节点随来源刷新，不能单独改名／删除。改名去首尾空白后为 1–200 UTF-8 字节，无控制字符且不能与已有节点同名；保存使用当前 revision，冲突时重读，不覆盖他人修改。稳定 ID 与连接凭据不变，但名称关键词策略可能变化，保存后查看候选及订阅预览。
+
+删除先读取影响预览：画布草稿或发布快照引用须先修改并发布方案；分组／客户端策略引用需确认同时移除，策略组删空会拒绝整笔操作。最后一个节点删除会清理空来源；同批其他节点不受影响。0147 将旧整源授权冻结为当时节点，分组按 `id:<id>` 管理；恢复后核对 `import_identity_report` 的悬空成员／引用，不按名称重新绑定、不恢复已撤销授权，不自动发布。
+
+当前限制：URL 来源后来刷新引入同名时，订阅汇总保留先出现端点、丢弃后者并警告，应核对节点数与链依赖；URI/Base64、Clash、sing-box 均使用新名称（sing-box 不输出客户端链）。不要以页面改名成功推断全部客户端显示已同步。
 
 ## 17. v1.1 元数据、探测、转发与重置周期
 
@@ -619,13 +665,15 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 以下为 v1.4 的行为，A1 实核、主机与浏览器验收结果待补。v1.3.1 及更早版本仍按第 20 节旧画布流程操作。
 
-1. 在各跳安装 GOST 并等待能力上报：两节点各跳契约至少 3，三节点至少 4；GOST 仅 linux/amd64，不能作主核心。为接收跳和规则入口设置服务器端口范围，或手填监听。接收跳须有公网地址或 connectHost 覆盖，防火墙放通前一跳到接收跳的 TCP 中继端口；规则入口按 network 放通 TCP/UDP。
+1. 各跳须能运行 GOST：两节点各跳契约至少 3，三节点至少 4；GOST 仅 linux/amd64，不能作主核心。v1.5.5 可由发布页面补装缺失的 GOST，仍要求 Agent 声明安装能力并协商多核心。为接收跳和规则入口设置服务器端口范围，或手填监听。接收跳须有公网地址或 connectHost 覆盖，防火墙放通前一跳到接收跳的 TCP 中继端口；规则入口按 network 放通 TCP/UDP。
 2. 在“节点配置 → 隧道管理 → 隧道”创建 entry → [mid] → exit，最多三台不同服务器，传输为 TLS＋mTLS。入口不另占隧道监听；每个接收跳一个共享监听，多规则复用，保存后端口固定。
 3. 在“规则”选择入口、监听端口、network 和隧道；不选隧道就是直接转发（有 GOST 优先用它，否则主 Xray/sing-box）。目标选 linked 用户入站或 manual host/port。linked 随目标公网地址/入站端口变化，出口即目标时用 127.0.0.1；manual 保持手填且不能对用户显示。也可在目标节点点“添加中转”选择已有隧道，创建由该目标节点持有的 linked 规则。
 4. 保存只是草稿。选择隧道/规则先查看计划中的服务器、端口、路由、顺序、冲突与警告，再发布；按 exit → mid → entry 应用，失败反向回滚。选择隧道会纳入规则，选择规则会纳入其隧道及必要拨号依赖；逐服务器核对 applied/unchanged/failed/rolled_back/skipped。重复无修改发布不创建修订或批次。
 5. linked 规则成功发布、启用且对用户可见后才追加中转订阅；用户须已获目标入站授权与已发布凭据。保留目标协议/凭据/TLS，显式原 server name，仅把地址/端口换成入口/规则监听，名称追加“经 入口节点”。UDP 协议须规则支持 UDP，其他须 TCP；导出器原有省略继续有效。Owner 的 shareLink 是合格用户的真实凭据预览，Viewer 恒为 null，草稿链接不代表已部署。
 
 目标公网地址/入站端口变更后，已发布规则显示 needs_publish；核对新目标再发布，草稿不会提前改变订阅快照。删除已发布规则/隧道变 pending_delete 且只读，旧端口声明、运行设置与订阅快照保留到移除成功；隧道须先移除所有引用规则。目标入站被引用时不能删除。
+
+计划 `installGost` 列出需补装的服务器，页面确认后逐台安装固定 GOST 3.3.2 并等能力上报出现 GOST，每台最多等 5 分钟，再提交隧道发布；任一台失败或超时均停止发布，已安装核心保留。直接调用发布 API 遇到缺失 GOST 返回 409 `gost_install_required`，不在请求内自动安装；页面遇到状态变化的 409 会更新名单，要求再次确认。发布成功后的 `gostRemovable` 列出无草稿或当前发布入站引用的 GOST，页面给出「版本与更新 → 代理核心」入口，由 Owner 手动移除。
 
 轮换使用 `POST /api/v1/tunnels/{id}/rotate-credentials`，带最新 updatedAt（Owner＋CSRF）；重新签发各段材料、标 modified，再计划/发布。三节点两段使用独立 CA/叶子证书。监听先切换再切拨号端，期间可中断，TCP 会话与 UDP 关联需客户端重建。不要按旧画布地址轮换已迁移对象；删除也不保证立即撤销离线节点的旧凭据。
 
@@ -635,6 +683,14 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 目标只能看到中继源地址，同一中继后的客户端在设备限制中合为一个来源；账户流量在目标计量，规则入口字节仅节点总量，中间/出口 relay 排除。UDP 经 TLS/TCP 封装，延迟可能受丢包和队头阻塞影响；监听健康不等于握手或目标可达，不承诺重启保留既有流或未测的 UDP 空闲寿命。
 
+
+### 21.1 中转方案撤除与遗留资源（v1.5.5）
+
+新建常用路径从「添加中转」选择入口、可选中间服务器和入口协议，再预览并创建发布；新入口默认加入出口入站所在合格分组。后端绑定支持复用已有入口并首次记录原出站，高级画布尚无 entryBinding 编辑入口；撤除弹窗可选恢复目标。节点列表路径摘要来自草稿；验收同时看六项状态与实际订阅，订阅总体条件不保证逐用户权限，历史 TCP 探测不证明代理全路径连通。
+
+撤除用「停用并移除」：先查看 remove-plan 的入口、分组、专用／共享对象和发布顺序，确认人工改动；复用入口的原恢复目标已失效时显式选目标。执行先停新入口或恢复复用入口并确认，再按入口→中间→出口停通道，确认后清理专用对象，共享引用保留。不要用删除单个内部监听代替整方案撤除。第二阶段取消后先确认通道回滚成功，再按配置历史手动恢复入口；当前无崩溃后补偿重放，须核对批次、当前修订与资源后再操作。
+
+「仅删除画布」不会停运行资源，绑定转 detached。打开遗留资源查看 detached 入口、孤立通道及未归属对象；重新挂接只重建草稿与归属，不发布。「完整撤除」先挂接再走同一撤除预览／执行，非连通或缺失端点须先处理；备份保留原出站记录，缺失目标不被改写为 direct。
 
 ## 22. 通知与告警（v1.5）
 

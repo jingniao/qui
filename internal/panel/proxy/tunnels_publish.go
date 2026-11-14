@@ -14,6 +14,7 @@ import (
 	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"proxycontrol/pkg/contracts/release"
 )
 
 type PublishSelection struct {
@@ -44,12 +45,48 @@ type PublishConflict struct {
 	UsedBy string `json:"usedBy"`
 }
 type PublishPlan struct {
-	OK        bool              `json:"ok"`
-	Message   string            `json:"message,omitempty"`
-	Servers   []PublishServer   `json:"servers"`
-	Conflicts []PublishConflict `json:"conflicts"`
-	Warnings  []string          `json:"warnings"`
+	InstallGost []GostInstallNode `json:"installGost"`
+	OK          bool              `json:"ok"`
+	Message     string            `json:"message,omitempty"`
+	Servers     []PublishServer   `json:"servers"`
+	Conflicts   []PublishConflict `json:"conflicts"`
+	Warnings    []string          `json:"warnings"`
 }
+type GostInstallNode struct {
+	NodeID string `json:"nodeId"`
+	Name   string `json:"name"`
+}
+
+func classifyTunnelGost(n node.Node, required uint32) (string, error) {
+	fail := func(reason string) (string, error) {
+		return "", tunnelFail("capability", 409, "服务器 "+n.Name+" "+reason)
+	}
+	if !n.Enabled || n.DeletedAt != "" {
+		return fail("不可用")
+	}
+	if node.CoreSelectionIsBlocked(n, "gost") {
+		return fail("GOST 组件正在添加或移除中")
+	}
+	core := node.SelectedCore(n.Capabilities, "gost")
+	if core != nil {
+		if !core.ForwardInboundSupported || core.GostContractVersion < required {
+			return fail(fmt.Sprintf("GOST 契约不足，需要契约 %d，请升级 Agent", required))
+		}
+		return "ok", nil
+	}
+	if !n.GostCoreSupported {
+		return fail("Agent 不支持 GOST，请先升级 Agent")
+	}
+	parts := strings.Split(n.OS, "/")
+	if len(parts) != 2 || !release.CoreAssetMatches("gost", parts[0], parts[1], "gost_3.3.2_linux_amd64.tar.gz") {
+		return fail("GOST 仅支持 linux/amd64")
+	}
+	if !n.Capabilities.GetMultiCoreSupported() {
+		return fail("Agent 未协商多核心支持，请升级 Agent")
+	}
+	return "needs_install", nil
+}
+
 type PublishServerResult struct {
 	NodeID   string `json:"nodeId"`
 	NodeName string `json:"nodeName"`
@@ -58,14 +95,16 @@ type PublishServerResult struct {
 	Message  string `json:"message,omitempty"`
 }
 type PublishResult struct {
-	BatchID string                `json:"batchId,omitempty"`
-	Servers []PublishServerResult `json:"servers"`
+	GostRemovable []GostInstallNode     `json:"gostRemovable"`
+	BatchID       string                `json:"batchId,omitempty"`
+	Servers       []PublishServerResult `json:"servers"`
 }
 
 // TunnelDeployer uses the same deployment batches as canvas, but waits for their
 // terminal results before advancing the captured business-object versions.
 type TunnelDeployer interface {
 	PublishTunnels(context.Context, string, string, []NodeSnapshot) (CanvasPublishResult, error)
+	GostRemovable(context.Context, string) (bool, error)
 }
 type managedInbound struct {
 	legacy bool
@@ -152,7 +191,7 @@ func (s *Service) PlanTunnels(ctx context.Context, selection PublishSelection) (
 }
 
 func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishSelection) (tunnelPublication, error) {
-	p := tunnelPublication{view: PublishPlan{OK: true, Servers: []PublishServer{}, Conflicts: []PublishConflict{}, Warnings: []string{}}}
+	p := tunnelPublication{view: PublishPlan{OK: true, InstallGost: []GostInstallNode{}, Servers: []PublishServer{}, Conflicts: []PublishConflict{}, Warnings: []string{}}}
 	r := s.Repository
 	selectedT := map[string]bool{}
 	selectedR := map[string]bool{}
@@ -311,9 +350,20 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 			if e != nil {
 				return p, e
 			}
-			core := node.SelectedCore(n.Capabilities, "gost")
-			if !n.Enabled || n.DeletedAt != "" || core == nil || !core.ForwardInboundSupported || core.GostContractVersion < required || node.CoreSelectionIsBlocked(n, "gost") {
-				return p, tunnelFail("capability", 409, fmt.Sprintf("服务器 %s 需要启用 GOST 且 Agent 支持契约 %d，请升级 Agent", n.Name, required))
+			classification, e := classifyTunnelGost(n, required)
+			if e != nil {
+				return p, e
+			}
+			if classification == "needs_install" {
+				found := false
+				for _, item := range p.view.InstallGost {
+					if item.NodeID == n.ID {
+						found = true
+					}
+				}
+				if !found {
+					p.view.InstallGost = append(p.view.InstallGost, GostInstallNode{NodeID: n.ID, Name: n.Name})
+				}
 			}
 		}
 		var next *desiredstate.GostHop
@@ -499,17 +549,24 @@ func (r *Repository) replaceManagedInbounds(ctx context.Context, remove, desired
 func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection, author string, users AccessReader) (PublishResult, error) {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
-	result := PublishResult{Servers: []PublishServerResult{}}
-	deploy, ok := s.Deploy.(TunnelDeployer)
-	if !ok {
-		return result, errors.New("tunnel deployment unavailable")
-	}
+	result := PublishResult{Servers: []PublishServerResult{}, GostRemovable: []GostInstallNode{}}
 	p, err := s.buildTunnelPublication(ctx, selection)
 	if err != nil {
 		return result, err
 	}
 	if !p.view.OK {
 		return result, tunnelFail("port_in_use", 409, p.view.Message)
+	}
+	if len(p.view.InstallGost) > 0 {
+		ids := []string{}
+		for _, item := range p.view.InstallGost {
+			ids = append(ids, item.NodeID)
+		}
+		return result, &tunnelError{Code: "gost_install_required", Status: 409, Message: "服务器 " + p.view.InstallGost[0].Name + " 需要先安装 GOST 3.3.2", Details: map[string]any{"nodeIds": ids}}
+	}
+	deploy, ok := s.Deploy.(TunnelDeployer)
+	if !ok {
+		return result, errors.New("tunnel deployment unavailable")
 	}
 	for i := range p.desired {
 		if p.desired[i].id == "" {
@@ -543,6 +600,7 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 				revision := n.Revision
 				item.Revision = &revision
 				item.Status = n.Status
+				item.Message = tunnelPublishFailureMessage(n)
 			}
 		}
 		if err != nil && item.Status == "unchanged" {
@@ -552,10 +610,8 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 		if item.Status != "applied" && item.Status != "unchanged" {
 			success = false
 			switch item.Status {
-			case "failed":
-				item.Message = "服务器配置发布失败"
-			case "rolled_back":
-				item.Message = "后续服务器失败，已回滚"
+			case "failed", "rolled_back":
+				// The original revision result above identifies the failure cause.
 			case "skipped":
 				item.Message = "发布中止，未下发"
 			default:
@@ -573,6 +629,15 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 	}
 	if err = s.Repository.finishTunnelPublication(ctx, p); err != nil {
 		return result, err
+	}
+	for _, server := range p.view.Servers {
+		removable, e := deploy.GostRemovable(ctx, server.NodeID)
+		if e != nil {
+			return result, e
+		}
+		if removable {
+			result.GostRemovable = append(result.GostRemovable, GostInstallNode{NodeID: server.NodeID, Name: server.NodeName})
+		}
 	}
 	return result, nil
 }
@@ -621,4 +686,20 @@ func (r *Repository) finishTunnelPublication(ctx context.Context, p tunnelPublic
 		}
 	}
 	return tx.Commit()
+}
+
+// Only the revision result code is exposed; Agent diagnostic text stays private.
+func tunnelPublishFailureMessage(n CanvasPublishNode) string {
+	message := ""
+	if n.AutomaticRollback {
+		message = "配置应用失败，已自动回滚"
+	} else if n.Status == "rolled_back" {
+		return "后续服务器失败，已回滚"
+	} else if n.Status == "failed" {
+		message = "服务器配置发布失败"
+	}
+	if message != "" && n.FailureCode != "" {
+		message += "（" + n.FailureCode + "）"
+	}
+	return message
 }

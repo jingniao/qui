@@ -174,6 +174,8 @@ Viewer 默认不能：
 - 灰色：离线
 - 蓝色：配置发布或更新中
 
+总览 `GET /api/v1/dashboard` 的 `nodeTraffic` 按未删除节点返回 `{nodeId,todayUpload,todayDownload,monthUpload,monthDownload,measured}`，从 `node_traffic_samples` 汇总面板时区当日与自然月的保留样本（半开区间，口径见第 21 节）。本月无样本时数值为 0、`measured=false`，页面显示“—”；节点流量卡片的「今日／本月」总量与排行共用这些数据，不读取心跳累计字节；排行百分比为占总量比例。四张卡片下方一行显示当前连接、在线用户估计与今日阻断（`counts.activeConnections/onlineUsers/todayBlocked`），任一启用节点未上报时前两项为「—」并提示「部分节点未测」。核心运行只计在线且已有配置修订的节点，全部 `heartbeat.cores` 健康才算正常；旧上报无 cores 时读 `core_healthy/core_error`。未发布配置单列，不计核心异常；待处理问题复用同一判断。
+
 # 9. 用户管理模块
 
 ## 9.1 用户信息
@@ -227,7 +229,7 @@ Reality/xhttp 直连的 Xray Windows 针对性检查覆盖认证、用户流量�
 
 节点组页面采用卡片布局，每组显示成员与授权用户数量；编辑打开分组管理弹窗，通过“授权账号”“组内节点”菜单管理成员和授权，顶部“分组设置”修改名称、用途与备注。“添加代理节点”选择弹窗按视口高度伸展，列表独立滚动。
 
-Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来自具体自建入站（`node_group_inbounds`）或导入（`node_group_imports`），不是服务器成员。导入 `proxy_key=''` 表示整个来源，否则用源内稳定键 `name|protocol`，不依赖刷新后的内容哈希 ID。
+Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来自具体自建入站（`node_group_inbounds`）或导入（`node_group_imports`），不是服务器成员。单独导入（`Kind=content`）的 `proxy_key` 为 `id:<id>`，不再接受整个来源；订阅连接（`Kind=url`）保持 `''` 表示整个来源、`name|protocol` 表示单个节点，不依赖刷新后的内容哈希 ID。导入成员上限 1000；候选及已选成员按同一身份显示当前名称、协议、地址与端口。
 
 `node_group_servers` 保存显式服务器，`node_group_members` 为显式服务器与入站所属服务器的去重并集，用于节点策略、服务器筛选与批量操作。显式服务器不授予凭据、订阅或门户可见性。仓储写入与事务触发器在入站移动/删除时维护并集，删除服务器也删显式成员；新入站不自动入组。
 
@@ -278,19 +280,33 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 - mihomo（`clash`，别名 `mihomo`、`clash-meta`）
 - legacy Clash（`clash-legacy`，别名 `clash-premium`）
 
-通用 URI 与 Base64 列表带不了固定证书，因此省略钉了 `trusted_ca_pem` 的 Hysteria2/TUIC 端点（不因此报错，其余链接照常输出）；这类端点由 sing-box 格式输出，并写入 `tls.certificate`。
+通用 URI 与 Base64 列表带不了固定证书，因此省略钉了 `trusted_ca_pem` 的 TLS VLESS/Trojan/HTTP/SOCKS5 及 Hysteria2/TUIC 端点（不因此报错，其余链接照常输出）；sing-box 写入 `tls.certificate`，mihomo 写入第一张 PEM 证书 DER 的 SHA-256 `fingerprint`，覆盖自签名 TLS。
 
-URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，不是完整客户端配置。mihomo 支持全局客户端规则、provider 与客户端链；legacy Clash 过滤 VLESS、Hysteria2、TUIC、WireGuard、GEOSITE 与 RULE-SET/provider，并给 Owner 预览警告。mihomo 可用证书指纹表达固定证书的 QUIC 端点。
+sing-box 仍是出站片段，不是完整客户端配置。mihomo 支持全局客户端规则、provider 与客户端链；legacy Clash 过滤 VLESS、Hysteria2、TUIC、WireGuard、GEOSITE 与 RULE-SET/provider，并给 Owner 预览警告。
 
 订阅路径是 Token → 用户 → 已发布节点及授权导入源 → 中立代理模型 → 格式导出器。`?format=` 优先，未知格式返回 400；其次按客户端 User-Agent（默认开启，不区分大小写，较长的匹配优先），再回退系统默认。v1.5.4 起匹配表：`clash`、`mihomo`、`clash.meta`、`clash-verge`、`clashmetaforandroid`、`flclash`、`clashx meta` → `clash`；`clashforwindows`、`clashx/` → `clash-legacy`；`sing-box`、`sfa/`、`sfi/`、`sfm/`、`sft/` → `sing-box`；`v2rayn`、`shadowrocket`、`nekobox`、`nekoray` → `base64`。这些字符串取自各客户端公开的写法，尚未逐一在真机上核实。用户详情与门户按客户端列出各格式链接，不带格式的链接标为「自动识别」。引用面板规则集时，规则集地址优先用「节点安装连接地址」里的面板地址与端口（第 27.14 节），未设置才按订阅请求拼出。一键导入协议仍待核实，现提供复制与二维码。响应包含流量、到期、更新间隔与下载文件名等订阅头。
 
 内置预设（`GET /api/v1/subscription-rules/presets`，新建配置时可选）除经典分流、基础代理、分流+去广告、白名单外，v1.5.2 增加「精简／标准／完整分流 · 屏蔽回国」（`meta-lite`／`meta-standard`／`meta-full`）：MetaCubeX meta-rules-dat 的 mrs 规则集，国内域名（`geolocation-cn`、geosite `cn`）与国内 IP（`cn`，no-resolve）直接 REJECT，不经过可切回 DIRECT 的组，国内域名规则排在所有服务规则之前。一个模板最多 256 个规则集（v1.5.2 前为 32），请求体仍为 1 MiB，超限提示「请求内容超过 1 MiB 上限」。mihomo 下载规则集同样走规则，节点全部不可用时规则集为空、屏蔽不生效。
 
+DNS 模板增加 `defaultNameservers`（仅 IP）、`proxyServerNameservers`、`fakeIpFilter`、`fallbackFilter{geoip,geoipCode,ipcidr,domain}`，仅 mihomo 输出 `default-nameserver`、`proxy-server-nameserver`、`fake-ip-filter`、`fallback-filter`；legacy 保留原四项 DNS 字段。三个「屏蔽回国」预设使用国内 DoH `https://doh.pub/dns-query` 与 `https://dns.alidns.com/dns-query` 作为 nameserver 与 proxy-server-nameserver，去掉 fallback，default-nameserver 为 `223.5.5.5`、`119.29.29.29`，附常用 fake-ip-filter。已保存配置不自动改写，可在编辑器「套用推荐 DNS」后保存；未启用的配置还须设为订阅模板，再由客户端更新订阅。启用 DNS、有 fallback 且未设置 filter 时，编辑器与订阅预览警告境外域名可能解析失败，保存不因此拒绝；当前 resolver 校验不接受 `#策略组` URL 后缀。
+
 全局模板存在 `system_settings.client_rules`，有版本冲突检查与预设，按用户授权展开 `@all`、`@nodeGroup:<id>`、`@source:<id>`；服务端生成 YAML。客户端规则不替代节点策略。外部源仅 HTTPS，逐跳解析并固定经校验的公网 IP，限制 2 MiB / 15 秒；抓取失败按类型（input、dns、address、redirect、tls、connect、deadline、http、size）返回固定代码与固定中文说明，不回显链接、Location、响应体或凭据。定时抓取加密缓存，订阅请求不抓取。导入节点仅用于客户端，不参与 Agent 发布、用户额度或设备门控。客户端链与格式边界见[协议矩阵](docs/protocol-support-matrix.md)。
 
 刷新返回结构化结果（S1）：`outcome` 为 `ok`/`partial`/`failed`，`counts` 含 `total`（= `accepted` + `rejected` + `duplicates`）、`accepted`、`rejected`、`duplicates`、`cached`、`usable`，未确定值为 null；每条目只计一次，多因条目按第一个原因计数。逐条原因最多 50 条且结果最多 32 KiB，超出置 `diagnosticsTruncated`。完整成功 200 `ok`；部分成功 200 `partial`，仍提交缓存且 `last_status=ok`、`last_error` 为空；抓取失败 502（超时 504）、内容无效或无可导入条目 422、输入错误 400、持久化失败 500、来源不存在 404，错误体 `details.result` 携带同一结果（仅限已完成的已分类结果）；请求在抓取进行中被取消时返回 503 固定文案“刷新已取消，来源状态保持不变”且不带结果，来源行、状态、缓存与订阅端点均不变。失败保留旧缓存行但 `last_status=failed`，该来源不进入订阅；`cached` 为现有行数，失败时 `usable=0`。`last_fetch_at` 是最近尝试，`last_success_at` 只在提交成功时更新；更换 URL 清空结果并回到 `pending`，不把旧结果当作新来源的结果。同一来源内 `name|protocol` 重复时保留文档顺序第一条，其余以 `duplicate_endpoint_key` 拒绝并附保留条目序号；完全相同的条目以 `duplicate_endpoint_content` 计为重复。诊断只含条目序号、协议、阶段、固定代码与固定文本，不含名称、UUID、密码或链接；手工刷新、定时刷新与粘贴导入共用同一分析路径。
 
-外部导入支持 SS2022、VLESS Reality TCP/gRPC 与 xhttp，仍只用于客户端，不进入 Agent 发布/账户额度/设备门控。统一公开模型区分证书指纹 `TLS.Fingerprint` 与客户端指纹 `TLS.ClientFingerprint`；Reality 只携带公钥、Short ID、SNI 与可表达的 SpiderX，xhttp 为独立 host/path/mode。URI/Base64 保留公开字段；mihomo 仅输出已测 Reality TCP Vision、Reality xhttp-auto 且 ALPN 恰为 [h2]；sing-box 仅输出已测 Reality TCP Vision、无 xhttp。其他有效组合逐条省略并警告，保留链依赖与 emptyPolicy。xhttp 模式必须明确为 auto/packet-up/stream-up/stream-one，ALPN 只允许空列表或 h2/http/1.1；未知 extra、H3 与未建模参数拒绝，不保存原始配置透传。新模型与最近结果受加密备份校验覆盖。
+外部导入支持 SS2022、VLESS Reality TCP/gRPC 与 xhttp，仍只用于客户端，不进入 Agent 发布/账户额度/设备门控。统一公开模型区分证书指纹 `TLS.Fingerprint` 与客户端指纹 `TLS.ClientFingerprint`；Reality 携带公钥、Short ID、SNI 与 SpiderX，xhttp 为独立 host/path/mode。URI/Base64 保留公开字段；mihomo 支持 Reality TCP（无 flow 或 Vision）、Reality gRPC、TLS/Reality xhttp 的 auto/packet-up/stream-up/stream-one，xhttp ALPN 须留空或恰为 [h2]。sing-box 仍仅输出 Reality TCP Vision，不输出 Reality gRPC/xhttp；SpiderX 不阻止导出，在 mihomo/sing-box 中不输出，URI/Base64 保留 spx。安全／传输组合的省略警告按原因分组列节点名，每组最多 10 个，其余汇总数量；链依赖与 emptyPolicy 继续生效。模型允许 xhttp ALPN 为空或 h2/http/1.1，未知 extra、H3 与未建模参数仍拒绝。TLS xhttp 的本轮真实客户端连通验证 **待核实**，不能沿用 Reality 的实测记录。新模型与最近结果受加密备份校验覆盖。
+
+新增导入参数：URI/YAML 的 WS Host（YAML 仅 Host/host，不同值冲突时拒绝）；TUIC URI 的 `congestion_control`、`udp_relay_mode`、`alpn`；Hysteria2 URI 的 `mport` 与 YAML 的 `ports/hop-interval/up/down`，以及两种输入的 salamander 混淆。跳跃只接受单段 `start-end`，带宽为正整数或整数加 Mbps；混淆密码随模型加密保存，刷新诊断不回显，Owner 的订阅正文预览仍包含客户端所需密码。TUIC YAML 的 congestion-controller/udp-relay-mode 尚未接入，QUIC 导出 ALPN 固定 h3。URI 忽略 `headerType=none`、insecure 别名的精确值 0、TUIC `disable_sni=0` 与 `ed`；YAML 忽略 tfo/ip-version/packet-encoding，udp-over-tcp:true 仍拒绝，未知字段不透传。
+
+中转端点复制目标 QUIC 设置后清空跳跃端口与间隔，仅连接入口规则端口，保留其他协议设置；直接端点不变。导入 mport 未给间隔时不会补自建入站的 30 秒默认值，其跨客户端可用性 **待核实**。
+
+客户端策略组可保存最多 256 个不重复的 `excludeEndpoints` 完整 `@endpoint:` 引用，只排除 `@all/@nodeGroup/@source` 动态来源展开出的端点；显式端点、DIRECT/REJECT 与其他组引用不受影响。排除后继续关键词过滤、去重与 emptyPolicy；预览用户当前没有该端点时警告，不据此认定资源已删除。地区组显示显式成员、支持删除与重复添加提示，解析成员可排除、已排除项可恢复；最后一个显式成员不能删除。单独导入使用 `@endpoint:import:<src>:id:<id>`，画布使用 `import:<id>`；订阅连接仍用来源 ID＋名称|协议，刷新后名称或协议变化会使旧精确引用失效。
+
+单独导入可真改名：去除首尾空白后须为 1–200 UTF-8 字节、无控制字符，与任何已有导入节点及自建订阅端点不重名；`expectedRevision` 防止覆盖并发修改。名称列与密封内容同事务更新，ID、连接参数、凭据和显式引用不变，名称关键词匹配结果可能变化。删除先预览：被画布草稿或客户端发布快照引用时阻止；分组及客户端策略精确引用须确认同时移除，策略组会被删空时拒绝；最后一个节点删除时连同空来源删除。订阅连接节点不能单独改名或删除；两类来源不能互换，单独导入不支持整批替换，粘贴创建新节点。
+
+0147 的一次性身份转换由 Go 事务解密并改写分组、客户端策略及画布草稿／发布快照；旧单独导入整源授权与 `@source` 冻结为当时节点，空来源不授权后来新增节点。悬空成员／引用保留失效状态并写报告，不猜测绑定。订阅汇总仍按名称保留首个端点、丢弃后续同名端点并警告，不做跨来源后缀消歧；订阅连接后来刷新引入同名时可能少一个节点。URI/Base64、Clash 端点及规则引用采用新名称；sing-box 中单独导入节点的 tag 为当前名称（重复时追加 `-<来源引用>`，仍重复追加 `-2` 等），订阅连接与自建端点 tag 不变；sing-box 本就不输出客户端链（省略并警告），链克隆保留内部链名 `chain-<方案>-<实例>` 以维持 mihomo 的 dialer-proxy 依赖。
+
+代理组「调整顺序」弹窗列全部组，不受页面筛选影响，支持拖动、上下移与置顶／置底；「推荐顺序」按主 select、自动组、用途／未分类、地区、MATCH 目标排列，同档保留原顺序。确定只改草稿，仍须保存；取消不改动，订阅 proxy-groups 按保存顺序输出。
 
 0132 增加 `client_policy_profiles` 服务端配置库，最多 50 个配置；Owner 通过 `/api/v1/client-policy-profiles` 管理，名称最多 64 字符、描述最多 500 字符，`uiMetadata` 为最多 64 KiB 的 JSON 对象且不进入订阅。`system_settings.client_policy_active` 只保存 `{profileId}`，`client_rules` 继续是订阅读取的活动快照，其 revision 为独立的 activeRevision。编辑使用配置 revision，编辑活动配置与启用还须匹配 activeRevision；启用即使内容相同也推进 activeRevision，未修改保存不推进版本。旧 PUT 同步活动配置与快照，旧 GET 继续允许 Viewer。初始化与恢复在无配置时复制既有快照或服务端默认模板，保留 activeRevision；备份校验指针与模板一致性。浏览器旧卡片经预览后按内容摘要幂等导入为未启用配置，全部成功才清除本地副本，不采用浏览器旧启用选择。设为订阅模板，客户端更新订阅后生效。成员支持 `@endpoint:inbound:<id>`、`@endpoint:relay:<rule id>` 和 `@endpoint:import:<source id>:<name|protocol>`，只从该用户授权且已通过订阅来源检查的端点解析，客户端链克隆跳不可精确选择。`includeKeywords/excludeKeywords` 由服务器展开时对代理名称做 NFKC 规范化、不区分大小写的字面子串筛选，空包含列表不限制，排除优先，不过滤内置动作或其他组。`emptyPolicy=direct/reject` 统一作用于授权展开和格式过滤后的空组，省略兼容 DIRECT；新地区组使用 `@all` 加包含关键词并默认 REJECT。Owner-only `GET /api/v1/client-policy-candidates?userId=<id>` 复用订阅授权管线，只返回端点引用、名称、协议、来源种类/名称和节点组 ID；省略用户时按仓储顺序选择首个有节点组授权的有效用户并标明 autoSelected，无合格用户返回空列表与诊断。页面仅展示授权候选，不在浏览器重复执行筛选；分组类别按名称存入 `uiMetadata.groupCategories`，重命名同步移动类别键与组/规则引用。Owner-only `POST /api/v1/client-policy-profiles/preview` 预览草稿 template 或已保存配置（profileId + profileRevision），两者互斥；要求 CSRF，只读且不记审计。草稿复用保存校验，失败返回 invalid_rules 及字段路径；已保存版本过期返回 409 stale_client_policy 及当前 revision。与候选接口共享自动选用户，无合格用户仍校验并返回空正文与诊断。预览与真实订阅共用渲染和单次 Expand，返回用户上下文、解析分组、全部警告、规范化模板 SHA-256 和 activeRevision；不签发 Token、不标记抓取，provider URL 为占位。旧用户 GET 预览仍用活动模板。页面未保存时预览草稿，否则预览当前配置；地区组解析成员使用同一接口。编辑器高级预览上下文可显式选择有效且已授权的用户，预览、解析与候选共用userId；默认仍自动选择，仅影响本次查看，不改活动模板或授权。分组编辑规则始终打开目标筛选列表，空状态可新增并预选该组，筛选时禁用全局拖拽排序；保存、启用或预览失败均保留草稿。共享规则集由 policy 模块持有，subscription/rules 唯一扫描全部已保存配置（含活动/未启用配置及启用/禁用规则），通过 platform/server 注入事务内读取。Owner-only `GET /api/v1/service-sets/{id}/references` 返回 nodePolicies 与 clientProfiles/rules；任何已保存引用均阻止删除（409 service_set_in_use，error 内附两类引用）。保存共享规则集立即写入，独立于配置草稿；禁用允许，保存响应附 references 与 warning。禁用后 `/sub/{token}/rules/{id}` 返回 404，客户端可能继续使用缓存或报告错误，不保证缓存规则立即停用。带 Lookup 保存时，启用的 RULE-SET 规则不能引用缺失或禁用的面板规则集；已保存模板读取只做结构校验，预览通过导出器警告路径提示缺失/禁用。节点、节点组和规则集选择项读取全部分页；自动预览用户由服务端分页选择，手动预览选择列表读取完整用户分页并由服务端重新校验。
 
@@ -301,6 +317,12 @@ URI、Base64 和 sing-box 保持旧输出兼容；sing-box 仍是出站片段，
 节点列表显示：
 
 节点名称；在线状态；公网 IP；操作系统；CPU 使用率；内存使用率；磁盘使用率；当前连接数；今日流量；Agent 版本；代理核心；核心版本；当前配置版本；最后心跳时间；本月整机流量（单张网卡的本期整机用量与可选额度，见第 21 节）。
+
+服务器列表监听节点状态 SSE，5 秒节流静默刷新节点列表；切回前台立即刷新，可见时每 30 秒刷新一次。元数据与流量补充数据仍在完整读取时更新。编辑弹窗先显示已有数据，再并行读取节点与元数据；加载期间禁止保存，新结果不覆盖用户已编辑的字段。
+
+服务器分组使用 `node_meta.tags_json`（0144）的标签，与订阅授权节点组独立。每台最多 10 个标签，每个 1–20 字符，去首尾空白、按大小写不敏感去重，禁止逗号与控制字符；列表按标签筛选并提供「未分组」，搜索包含标签。Owner 在无筛选的第一页可拖动卡片或上移／下移，顺序存于 `system_settings.server_order`，所有管理员共用；新服务器按原创建顺序追加，已删除 ID 跳过。标签与顺序不影响授权、订阅或配置发布。
+
+服务器名称前的国旗（v1.5.5 第 19 项）：面板用内嵌的离线 IP→国家表（`internal/panel/geoip`，由 DB-IP「IP to Country Lite」经 `scripts/geoipgen` 生成，CC BY 4.0，「系统设置 → 系统信息」署名）在读取节点时按 `publicIp` 查出 `countryCode`（ISO 3166-1 二位码，不入库、无迁移），私网、CGNAT、链路本地、域名或表中未分配时为空串。不向任何外部服务发送节点地址，表随面板版本更新，Agent 不包含该表。页面优先级：Owner 填写且能识别的「地区」＞ `countryCode` ＞ 服务器名称或主机名关键词 ＞ 🌐；悬停提示写明来源（管理员指定地区／按公网 IP 识别／按服务器名称识别）。服务器卡片、列表视图、服务器概览、「版本与更新」与节点列表的自建入站共用这一规则；导入节点只按名称识别。
 
 节点有两个地址字段（迁移 0135、0138）。`publicIp` 是公网地址：Agent 心跳（第 36 字段 `public_addresses`）上报当前机器的所有非回环公网全局单播地址（最多 16 个，包含网卡与对端源），面板在数据库保存为候选列表 `public_addresses_json` 并由接口暴露为 `publicAddresses` 数组；上报为空且库里为空时以控制连接的 gRPC 对端公网地址填入。Owner 可在节点设置里从候选地址列表中勾选 `publicIpSelected`，选定地址记为 `selected` 来源；设置里手填 IP 则记为 `manual`；清空则为 `auto` 自动推导（优先默认路由 IPv4，其次首个公网 IPv6，最后连接对端）。`publicIpSource` 取值统一为 `manual` / `selected` / `auto` / 空。若选定地址从当前心跳候选列表中消失，节点标记 `publicIpSelectionMissing=true` 提醒 Owner。节点登记接口支持可选 `connectHost`。`connectHost` 是 Owner 选的客户端连接地址（域名或 IP，无协议、端口与方括号），可再清空。
 
@@ -430,6 +452,10 @@ Block；Direct；备用出站；备用出口组；备用代理链。
 
 面板只校验语法（地址须为单播、`host_source_ipv4` 为 v4、`host_source_ipv6` 为 v6、网卡名符合 Linux 命名）；地址或网卡是否存在由节点在应用配置时判断，缺失时按临时失败码重试。
 
+v1.5.5 出站资源可单独设置 `sourceIp/sourceInterface`（0145；DesiredState 为 `Outbound.source_ip/source_interface`），发布后生效，Block 禁止填写。`OutboundNetwork` 对 IP 与网卡分别取「出站非空值 ＞ 服务器级核心设置 ＞ 不绑定」；只填 IP 仍继承服务器网卡。Xray 与 sing-box 按每个出站的有效值渲染，出口组成员沿用各自设置。启用出站填写任一字段时，保存、快照与发布都检查所有启用的 Xray/sing-box 核心，缺能力以 `outbound_source_unsupported` 拒绝，须升级 Agent。
+
+与服务器强制出站并用时，`ExtraHostExemptions` 收集启用出站的有效源 IP：仅在对应地址族已配置强制源地址、且该 IP 不同于服务器级核心源 IP 与强制源 IP 时追加豁免，去重排序，避免被 SNAT 改写。需要额外豁免但 helper 未声明能力时以 `host_source_exempt_unsupported` 拒绝，须在节点运行 `qui-update --component agent` 更新本机 helper，单独网页升级 Agent 不替换 helper 引导程序。Agent 在渲染、持久化修订和切换核心之前，按实际激活核心的可达出站检查有效源 IP／网卡；地址必须属于本机，指定网卡时还须属于该网卡。不存在或不匹配返回 `network_unavailable`，保留最后成功配置；禁用、不可达和 GOST 分支不参与逐出站检查。
+
 # 14. 协议转换中转
 
 中转分为隧道管理、节点“添加中转”和代理中转画布。隧道转发字节，不终止目标用户协议；画布由节点终止协议 A、按策略以协议 B 建立下一跳，用户凭据与节点间凭据隔离。
@@ -442,11 +468,23 @@ Block；Direct；备用出站；备用出口组；备用代理链。
 
 隧道/规则保存只写草稿；draft 从未发布，modified 为手动修改，needs_publish 为目标变化，published 为成功发布，pending_delete 为待发布移除且只读。未发布对象可直接删除；已发布对象保留行、旧监听声明及快照直到成功移除。隧道有规则引用时返回 tunnel_in_use（包括待删除规则）。
 
+隧道计划的 `installGost` 列出尚未安装但具备安装能力的服务器。发布 API 遇到这些节点返回 409 `gost_install_required`（`details.nodeIds`）；页面确认后逐台排队安装固定 GOST 3.3.2，等待能力上报出现 GOST（每台最多 5 分钟），全部就绪后再提交发布。安装失败或超时不发布，已装核心保留；状态变化导致 409 时页面更新名单，须再次确认。已安装但契约不足、平台或能力不支持、组件正在添加／移除时仍拒绝。无隧道的直接转发不触发补装。成功发布后 `gostRemovable` 提示没有草稿或当前发布入站引用的 GOST，可到「版本与更新 → 代理核心」手动移除，不自动删除。
+
 生成对象按 `tunnel_objects` 的 owner kind/ID 归属，不按名称认领；`port_claims` 保存节点级数字端口，改端口保留新旧声明直到成功发布。隧道和规则必须手填端口或从 `node_meta.port_range_start/end` 分配，无默认端口回退。自动建议不预留，保存时再查并声明，重发复用已保存端口；冲突语义见第 12 节。
 
 中转方案画布只创建代理中转（proxy_chain/tunnel，tls 或 wireguard）；出口可为 qui 用户入站或外部 SOCKS5/HTTP/Shadowsocks/Trojan/VLESS 出站。qui 入站出口生成专用内部监听和独立中转凭据，不改变原用户入站；外部出站属于前一跳服务器，作为最终出站且按 TCP/UDP 能力校验。relay/exit 实例的 relayPortMode/relayPort 优先于旧 tunnelPort；自动分配复用稳定端口，无范围时画布仍保留 TLS 8443 / WireGuard 51820，范围耗尽则失败。
 
 画布内部资源仍用 `canvas_tunnels/canvas_tunnel_objects` 的 ID 归属与共享依赖。旧 port_forward/gost 连接在迁移前只读保留，可删除，不可新增或改动；一次性转换及遗留原因见第 26.9、31 节。GOST 目标池、范围、限流与连接上限仍属普通 forward 入站（第 12 节），不由新画布创建。
+
+三步快速创建为「添加中转 → 选择入口与可选中间服务器、入口协议 → 创建并发布」，对应 `POST /relay-schemes/quick/plan` 与 `/relay-schemes/quick`。预览只读；执行复用画布规划、保存与出口→入口发布，默认新建普通用户入口、自动分配端口及凭据，新入口默认加入出口入站所在的合格分组，不额外授权用户。入口协议由用户选择；快速流程最多一个中间服务器，通道为 Trojan over TLS/TCP，独立中转凭据及一年有效期自签证书沿用内部中转生成器，不随出口用户入站协议改变；wireguard 通道及外部出站出口不变，更多编辑使用原无限画布。既有 TLS 画布（含 v1.5.5 前创建的方案）若内部通道曾沿用出口协议，下次发布会预览为内部监听／配套出站 update，保留对象 ID 与端口，按出口→入口切换，期间短暂中断；物化失败恢复原对象，运行失败沿用部署版本回滚。`requestId` 通过绑定记录防止重复创建，202 只表示已提交。
+
+后端入口绑定 `entryBinding.mode=create|reuse`（0146）：create 创建独立入站，reuse 接管已有普通入站并首次记录 `original_default_outbound`，后续发布不覆盖原值；记录已应用出站与入站唯一归属。旧入口缺恢复记录时须显式登记恢复目标。快速创建已有界面，高级画布尚无 entryBinding 编辑入口；撤除弹窗可选择恢复目标。节点列表隐藏内部监听，分组仍以具体用户入站授权；入站列表的只读 `routeSummary` 含 type（direct/relay/custom/tunnel）、方案、绑定模式、path 与出口节点。画布入口路径取关联画布草稿；缺引用、环路、分叉或损坏布局标 `pathIncomplete`。隧道／规则管理的入站使用 tunnel，显示「隧道转发」，出口取隧道出口跳或规则关联目标节点；摘要均不代表运行路径已确认。
+
+「停用并移除」先调用 `/canvas-schemes/{id}/remove-plan` 查看入口、分组、专用／共享资源与发布顺序，再以最新 `updatedAt` 调用 `/remove`；字段缺失或为空返回 400 `invalid_request`，有值但过期返回 409 `stale_scheme`，执行重新规划。先停用新建入口或恢复复用入口并等待确认，再按入口→中间→出口停用通道、确认后删除资源；最终事务同时删除该方案专用、已无对象且无其他方案引用的通道行，共享或外部引用资源保留，失败／取消不清理通道行。0148 起 create 入口保存创建时可编辑配置的分类 SHA-256 摘要及排序去重的分组 ID 集合（无凭据明文，不含动态用户授权）；有完整基线且配置、分组、已应用默认出站均未改动时无需确认，分组移除仍列为信息。人工改动及缺完整基线须显式确认，具体列出字段类别及增删分组；旧 NULL 基线不推断补齐，重新挂接保留原基线，reuse 仍恢复原出站。确认不能绕过外部引用；原恢复目标缺失或不可用时必须显式指定目标，不自动改 direct。第二阶段取消时须先确认通道回滚成功，再从配置历史手动恢复入口；当前没有崩溃后的数据库补偿重放。
+
+「仅删除画布」保留运行资源，绑定 `scheme_id` 置空、状态转 `detached`。`/relay-schemes/legacy-resources` 展示 detached 入口、孤立通道与未归属对象；`/reattach` 按持久端点重建连通草稿及归属，不自动发布。「完整撤除」先重新挂接，再走上述撤除预览和执行。无对象的历史空通道独立列出，不参与有资源的连通分组；无方案引用时 Owner 可用「清除空通道」直接调用现有通道删除接口，无需还原布局。
+
+`GET /canvas-schemes/{id}/status` 分六项：draft 为草稿与发布记录差异，batch 为部署批次结果，nodes 为各节点运行修订与期望修订的确认，entries 为入口绑定，subscription 为入口启用／可见、合格分组、地址及批次成功等总体订阅条件，probe 为精确匹配入口 IP／端口的历史 TCP 探测（无法关联时未探测）。总体订阅条件不代表每个用户有权限，TCP 探测不代表代理认证或全路径真实连通。
 
 # 15. 出口组模块
 
@@ -662,6 +700,10 @@ Owner＋CSRF 提交完整 settings/clear 和匹配 confirmNodeId → 校验白�
 
 success 仅证明镜像切换；须等 Capabilities.cores 出现组件才允许选择。进行中列入 core_selectionBlocked，保存/草稿渲染/发布拒绝 core_pending，不伪造能力。
 
+安装命令、身份恢复与待登记服务器的核心选项共用 Xray／sing-box／GOST；GOST 必须和 Xray 或 sing-box 同选并排在后面。已登记节点的「添加内核」按 GOST 安装能力与平台显示入口，固定版本、地址与摘要自动填写。隧道页面复用核心安装接口补装 GOST，发布后提示可移除的流程见第 14 节。
+
+从未发布配置的在线节点升级 Agent 或核心（含添加核心）前，页面确认后调用基础配置接口，等待节点确认修订再继续原升级。基础配置不读取草稿入站、出站资源、用户或策略，仅保留节点级出站网络等必需设置；无入站时核心不启动。发布说明为 `auto: baseline before upgrade`，仍走正常校验与失败回滚。页面等待最多 3 分钟，失败或超时不排队该节点的升级；已有确认修订直接沿用。升级合同仍要求修订 ≥1，其他不可升级原因在页面显示。
+
 移除使用 core_remove_tasks：Owner＋CSRF＋confirmNodeId＋当前确认修订 → POST /nodes/{id}/cores/{component}/remove，审计 remove_core → RemoveCoreCommand{id,component,revision} → 幂等保存 RemoveCoreResult/Ack。断线重发同身份，更晚修订已确认也接受迟到重放；移除回执**持久保存**至 Ack。
 
 | 拒绝码 | 条件 |
@@ -690,6 +732,8 @@ success 仅证明镜像切换；须等 Capabilities.cores 出现组件才允许�
 - TTL 设备门控：Xray 官方运行时规则 API / sing-box Clash 关连接，不发 Revision/不重启。
 - TCP-connect：只接受已解析 IP、端口、次数、超时、截止时间，Agent 再检，最多 10 次、每次 3 秒，无 shell。
 - 转发/中继：正常发布，旧能力拒绝；Xray dokodemo-door、sing-box direct override、GOST tcp/udp。无用户身份，不进订阅/额度/设备限制/域名归属。
+
+host-network 请求可带 `extra_exempt_ipv4/extra_exempt_ipv6`（每族最多 16 个，空列表省略）；原 `exempt_ipv4/exempt_ipv6` 仍表示服务器级核心源 IP。helper 把强制地址、原豁免与额外地址合并为 nft 源地址排除集合，回执 `status.json` 增加 `features:["extra_exempt"]`。Agent 只有在 helper 单元存在且读到该功能标记时才上报额外豁免能力；标记表示协议支持，独立于该次执行的 `ok`。旧 helper 严格解码，不能接收新字段；用本机 `qui-update --component agent` 更新，已有 `desired.json` 会重放。helper 从未运行、没有回执时如何取得首次能力标记 **待核实**，不能仅凭 Agent 版本认定支持。降级旧 helper 前须清除额外豁免组合并发布。
 
 GOST 目标按序写 forwarder.nodes（target-0…），selector={strategy,maxFails,failTimeout}；自行展开每端口/传输服务，addr 无范围。限速为 limiters[{name,limits:["$ <in> <out>"]}]＋service.limiter，连接上限为 climiters[{name,limits:["$ <n>"]}]＋service.climiter。ParseBase2Bytes 不收裸整数，速率写 `<整数字节>B`，唯 0 表不限；typed 输出校验引用/目标，避免未知 limiter 静默不限速。
 
@@ -927,6 +971,11 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0141 `tuning_recommendations` | 新增 `node_tuning_dismissals` 表（主键 `(node_id, key)`，列 `key` / `value` 记录不采纳的参数与推荐值，另存规则版本与时间，级联删除）；`node_meta` 扩充可空整数 `bandwidth_mbps`（1–100000 Mbps）；`system_settings` 新增 `tuning_auto_apply` 开关 |
 | 0142 `builtin_rule_sets` | 只写数据：新增 18 个内置规则集（`service-ads` … `service-private`，ID 或名称已存在则跳过）、为 25 个内置集合中尚无来源的写入 63 个 meta-rules-dat yaml 来源（ID `builtin-<集合>-<序号>`，`pending`）、更新 0009 集合仍为原文的描述，以及默认禁用的 `policy-block-china`（需内置 `service-cn` 存在）。不新增表，备份沿用 service_sets／service_set_sources／policies 的现有校验 |
 | 0143 `native_rule_sets` | 重建 `service_set_sources`：format 增加 `native`，新增 `xray_url`、`xray_tag`（默认空串；native 须 behavior 为 domain/ipcidr、两列非空且无缓存，非 native 两列须为空），原有行与索引保留；内置 `service-cn` 追加 `builtin-service-cn-native-1`（geosite cn）与 `-2`（geoip cn），已有原生来源或非内置集合时跳过 |
+| 0144 `node_tags` | `node_meta.tags_json`（文本 JSON，默认 `[]`，CHECK 要求合法 JSON 数组）；服务器分组标签，不改变节点组授权 |
+| 0145 `outbound_source` | `outbounds.source_ip`、`outbounds.source_interface`（文本，默认空串）；出站单独绑定源 IP／网卡，空值分别继承服务器设置 |
+| 0146 `canvas_entry_bindings` | 新增入口绑定表：方案外键删除置空，入站唯一且删除 RESTRICT，模式 create/reuse、原始／已应用默认出站、state、唯一 request_id、updated_at；方案内 instance_id 唯一，reuse 原出站非空；方案解绑触发 state=detached |
+| 0147 `imported_proxy_identity` | 新增 `import_identity_reconcile`（单行 id=1、done 初始 0）及 `import_identity_map`（主键 source_id/old_proxy_id、old_proxy_key、唯一 new_proxy_id）；`imported_proxies.revision` 非空默认 1。加密身份及引用由 Go 事务转换，SQL 不改写 payload |
+| 0148 `canvas_entry_baseline` | `canvas_entry_bindings` 新增可空 `creation_config_json`（固定字段类别的 SHA-256 摘要规范 JSON）及 `creation_groups_json`（排序去重的分组 ID 规范 JSON 数组）；旧行保持 NULL，不回填猜测 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -979,6 +1028,10 @@ GET    /api/v1/nodes/{id}/tuning/recommendations
 POST   /api/v1/nodes/{id}/tuning/recommendations/dismiss
 GET    /api/v1/system/tuning-auto-apply
 PUT    /api/v1/system/tuning-auto-apply
+GET    /api/v1/system/server-order
+PUT    /api/v1/system/server-order
+GET    /api/v1/nodes/{id}/meta
+PUT    /api/v1/nodes/{id}/meta
 GET    /api/v1/nodes/machine-traffic
 GET    /api/v1/nodes/{id}/machine-traffic
 GET    /api/v1/nodes/{id}/machine-traffic/settings
@@ -994,7 +1047,9 @@ GET    /api/v1/nodes/{id}/certificate-matches?domain=<域名>
 
 `GET /api/v1/nodes` 默认只返回未删除的节点；`?deleted=1` 只返回已删除的节点（Owner 与 Viewer 都可读）。`DELETE` 需要 Owner：未登记节点等同取消登记（记录移除），已登记节点执行逻辑删除，被引用时返回 409 `node_delete_blocked`，阻塞项（`blockers: [{kind,id,name}]`）位于错误体中（见第 11.3 节）。
 
-节点对象含 `publicIp`、`publicIpSource`（`manual`/`selected`/`auto`/空）、`publicAddresses` 候选数组、`publicIpSelected`、`publicIpSelectionMissing` 与 `connectHost`，含义与优先级见第 11.1 节。`PUT /api/v1/nodes/{id}` 的 `publicIp`、`publicIpSelected` 与 `connectHost` 都是可选字段（`publicIpSelected` 必须是候选列表中存在的合法地址，或空串表示回到自动推导）；`POST /api/v1/nodes/enrollment-token` 支持在生成注册码时传入可选的 `connectHost`：省略（或 JSON null）保留原值；`publicIp` 写非空 IP 记为手工并停用自动填写，写空串清除并恢复自动；`connectHost` 接受空串、IPv4/IPv6 字面量或域名（复用 `install_endpoint.host` 的 `^[A-Za-z0-9.-]+$` 与逐标签规则，落在 `netaddr.ValidHostName`），不接受协议、端口与方括号，非法值返回 400 `invalid_request`。保存仍记“修改节点”操作日志并要求 CSRF。
+服务器顺序 GET 允许 Owner/Viewer，返回 `{ids,revision,updatedAt,updatedBy}`；PUT 仅 Owner＋CSRF，体 `{ids,expectedRevision}`，最多 1000 个存在且未删除的不同节点 ID。顺序未变不推进版本；改动时版本不匹配返回 409 `settings_conflict`，成功记「调整服务器顺序」。元数据 GET/PUT 的 `tags` 为标签数组，省略或 null 保留原值、`[]` 清空，校验见第 11.1 节。节点对象也返回 `tags` 与 `gostCoreSupported`，后者来自 Hello 安装能力，不代表已安装 GOST。
+
+节点对象含 `publicIp`、`publicIpSource`（`manual`/`selected`/`auto`/空）、`publicAddresses` 候选数组、`publicIpSelected`、`publicIpSelectionMissing`、`connectHost` 与只读的 `countryCode`（按 `publicIp` 离线识别的国家二位码，未知为空串），含义与优先级见第 11.1 节。`PUT /api/v1/nodes/{id}` 的 `publicIp`、`publicIpSelected` 与 `connectHost` 都是可选字段（`publicIpSelected` 必须是候选列表中存在的合法地址，或空串表示回到自动推导）；`POST /api/v1/nodes/enrollment-token` 支持在生成注册码时传入可选的 `connectHost`：省略（或 JSON null）保留原值；`publicIp` 写非空 IP 记为手工并停用自动填写，写空串清除并恢复自动；`connectHost` 接受空串、IPv4/IPv6 字面量或域名（复用 `install_endpoint.host` 的 `^[A-Za-z0-9.-]+$` 与逐标签规则，落在 `netaddr.ValidHostName`），不接受协议、端口与方括号，非法值返回 400 `invalid_request`。保存仍记“修改节点”操作日志并要求 CSRF。
 
 原位身份恢复：`POST /api/v1/nodes/{id}/recovery-token`（Owner＋CSRF，体 `{expiresInSeconds,revokeNow}`，0 或省略为 900 秒、范围 300–3600）201 返回只出现一次的 `enrollmentToken`、`expiresAt`、`install` 与 `purpose:"recover"`；`GET /api/v1/nodes/{id}/recovery-status`（Owner）返回最近一条恢复记录，无记录为 404。未登记、禁用或已删除节点返回 409 `node_not_enrolled`，存在未完成任务返回 409 `node_recovery_blocked`，`blockers:[{kind,id,name}]` 在错误体中（见第 11.3 节）。
 
@@ -1060,7 +1115,10 @@ GET  /api/v1/revisions
 POST /api/v1/revisions
 POST /api/v1/revisions/{id}/deploy
 POST /api/v1/nodes/{id}/rollback
+POST /api/v1/nodes/{id}/baseline
 ```
+
+`POST /api/v1/nodes/{id}/baseline`（Owner＋CSRF，体 `{confirmNodeId}` 必须与路径一致）为启用且在线／降级、尚无已确认修订的节点发布升级基础配置，202 返回 `{revision,status:"pending"}`，记录「升级前发布基础配置」。离线返回 409 `node_offline`，已有确认修订返回 409 `baseline_not_needed`；其他部署占用沿用发布检查。接口只发基础配置，页面等确认后另行排队升级（第 22.2 节）。
 
 每节点、每核心操作：
 
@@ -1109,6 +1167,19 @@ Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /c
 `POST /api/v1/canvas-tunnels/{id}/rotate-credentials`（Owner ＋ CSRF，体为 `{updatedAt}`，操作日志“轮换隧道凭据”）仅用于仍属旧画布的 GOST 资源，签发新一代材料并标 modified；只读视图只给代数、服务器名、到期与指纹。已迁移对象使用第 27.13 节隧道管理接口。
 
 画布规划接口 `POST /api/v1/canvas-schemes/{id}/plan`（Owner，会话与 CSRF 同 publish）。无正文或 `{}` 规划已保存布局；`{"layout": <CanvasLayout>}` 规划未保存布局。返回 `ok`、按服务器的 `creates/updates/removes`、逐连接状态、监听端口冲突和警告；失败原因另有 `message`。接口仅读取，不写对象、方案、审计或 Revision。它复用发布的规划、生成对象识别、端口冲突与删除引用检查；客户端方案返回 `ok:false`，客户端已有 publish 路径不变。更新表示发布会执行同名对象的保存（不表示字段一定变化）；计划与执行之间状态变化仍可能导致发布失败。
+
+第 15、16 项新增接口均为 Owner 专用（Viewer 403），写方法含只读 POST 预览均要求 CSRF；以下路径省略 `/api/v1`：
+
+| 接口 | 结果与主要错误 |
+| --- | --- |
+| GET `/canvas-schemes/{id}/status` | 200 六项状态，404 `not_found`，读取故障 500；含义见第 14 节 |
+| POST `/canvas-schemes/{id}/remove-plan`、`/remove` | 预览 200；执行 200 `{schemeId,removed,publications}`。409 `canvas_remove_conflict` 的预览在 `error.details.details`；共同支持 409 `stale_scheme`、404 `not_found`、400 `invalid_request` |
+| POST `/relay-schemes/quick/plan`、`/relay-schemes/quick` | 预览 200（检查 `ok` 与冲突），创建 202 `{schemeId,publication,warnings}`；400 `invalid_request`、404 `not_found`、409 `stale_scheme/duplicate_scheme_name`，不返回 operationId 或预览令牌 |
+| GET `/relay-schemes/legacy-resources`、POST `/relay-schemes/legacy-resources/reattach` | 列表 200，挂接 201 `{schemeId}`；409 `canvas_legacy_conflict`，原因在 `error.reasons`；非连通选择为 400 `invalid_request` |
+| PUT `/imported-proxies/{id}` | `{name,expectedRevision}`，200 返回当前节点；400 `invalid_json/import_invalid_name`，404 `import_node_missing`，409 `stale/import_rename_unsupported/import_name_conflict`（附 conflicts），500 `import_rename_failed` |
+| GET `/imported-proxies/{id}/deletion-preview`、DELETE `/imported-proxies/{id}` | 预览引用；删除传 `expectedRevision` 与 `removeReferences`，事务重查引用。404 `import_node_missing`，409 `stale/import_delete_unsupported/import_in_use_by_canvas/import_referenced`（含策略删空），500 `import_delete_failed` |
+
+既有 DELETE `/canvas-schemes/{id}` 仅删除画布（204）；删除被中转出站引用的入站返回 409 `inbound_has_relay_outbound`，须先处理引用。规划中的冲突原因与 HTTP 错误码分开读取。
 
 延迟目标 GET 允许 Owner/Viewer，返回 `{custom,targetIds,defaultTargetIds}`；PUT 仅 Owner + CSRF，事务保存并记审计。超过 5 个返回 409 `node_target_limit`，未知目标返回 400 `unknown_target`，重复 ID 返回 400 `invalid_request`，已删除节点返回 404。延迟查询目标包含当前有效目标与查询范围内仍有采样的历史目标。
 
@@ -1183,6 +1254,8 @@ POST   /portal/subscription/reset
 | `POST /tunnels/publish` | 同一选择体 → `{batchId?,servers}`；逐节点 revision 可空，status 为 applied/unchanged/failed/rolled_back/skipped |
 | `GET /tunnels/migration-report` | Owner 专用，`{items:[{tunnelId,name,reason}]}`；单次转换记录，不是实时问题列表 |
 | `GET/POST /nodes/{id}/relays` | GET 返回 `{items:[{rule,shareLink}]}`；POST `{tunnelId,inboundId,portMode,listenPort?,subscriptionVisible,name?}` 创建本目标节点的 linked 规则，network=both；shareLink 权限见第 10.3 节 |
+
+隧道发布需补装 GOST 时，尚无已确认修订的服务器先发布基础配置，每 3 秒读取节点、最多等待 3 分钟，确认后用该修订排队安装；失败或超时保留逐服务器原因并中止隧道发布。发布结果区分本服务器应用失败后自动回滚（显示修订结果码，不显示 Agent 自由文本）与因后续服务器失败被反向回滚。
 
 端口错误：409 port_in_use（含 usedBy）、400 port_out_of_range、409 no_free_port（无范围或耗尽）。auto 无 listenPort 则保存时分配；带建议端口则空闲时保留，后续重发固定。pending_delete 只读并继续保留声明/引用。
 
@@ -1293,6 +1366,8 @@ Agent 目录更新能力与端口协商（v1.5.0）：
 - `Capabilities.port_hop_supported`（字段 28，bool）：Agent 声明 host-network helper 已安装，可维护 Hysteria2 跳跃表（第 12 节）。旧 Agent 不上报，面板在保存、快照与发布前三处拒绝跳跃入站。
 - `Capabilities.expanded_policy_supported`（字段 29，bool）与 `CoreCapability.expanded_policy_supported`（字段 14，bool）：逐核声明该核心的渲染器接受展开后最多 50000 条匹配的策略（v1.5.2；Xray 与 sing-box 上报为真，GOST 不渲染策略）。旧 Agent 不上报，面板对展开后超过 2000 条的策略按第 17 节拒绝。
 - `Capabilities.native_rule_sets_supported`（字段 30，bool）与 `CoreCapability.native_rule_sets_supported`（字段 15，bool）：逐核声明 Agent 会下载、该核心会渲染 `match.rule_sets`（v1.5.4；Xray 与 sing-box 上报为真，GOST 不渲染策略）。旧 Agent 不上报，面板不向它下发原生规则集，保存快照与发布前两处拒绝带规则集的状态。
+- `Capabilities.outbound_source_supported`（字段 31，bool）与 `CoreCapability.outbound_source_supported`（字段 16，bool）：按出站指定源 IP／网卡（v1.5.5），Xray、sing-box 上报，GOST 不渲染用户出站；门禁见第 13.1 节。
+- `Capabilities.host_source_extra_exempt_supported`（字段 32，bool）：host-network helper 的额外源 IP 豁免能力，由单元存在与回执 `features` 判断，不从版本号或逐核心能力推断（第 23 节）。
 - `HostInfo` 扩充字段 11–18：`virtualization`（11，string）、`tuning_keys`（12，repeated TuningKeyState）、`congestion_available`（13，repeated string）、`congestion_loadable`（14，repeated string）、`qdisc_available`（15，repeated string）、`qdisc_loadable`（16，repeated string）、`fd_limits`（17，repeated ProcessLimit，包含 soft 与 hard）、`sysctl_sources`（18，repeated SysctlSource，包含 key/value/file）。
 - `Heartbeat` 扩充 `tcp_out_segs`（字段 37，uint64）与 `tcp_retrans_segs`（字段 38，uint64），用于面板计算每分钟 TCP 重传率。
 - `TuningResult` 扩充 `initial`（字段 4，map<string, string>，回传 19 键初始快照值）。
@@ -1359,6 +1434,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 | /var/lib/proxy-panel/ | panel.db、identity/（节点 CA）、backups/、rulesets/、releases/ |
 | /var/lib/proxycontrol-install/ | root 0700；安装记录、operation.lock、update.lock、更新中的 rollback.*/（文件快照、updater、service.sh、journal） |
 | /usr/local/lib/proxycontrol/service.sh | systemd/OpenRC 共用服务封装 |
+| /usr/local/lib/proxycontrol/uninstall.sh | 本机卸载脚本；安装面板或 Agent 时均发布，root:root 0755，不进安装记录，由 qui-update 快照/回滚 |
 | /usr/local/lib/proxycontrol/update-recovery | 开机恢复；systemd 的 proxycontrol-update-recovery.service 或 OpenRC 同名单元，不记安装记录，排在 Agent/面板/强制出站之前 |
 | /usr/local/lib/proxycontrol/panel-update-request | 面板网页更新的 root helper；由 proxy-panel-update.path 触发，校验请求后运行 qui-update（第 27.15 节） |
 | /etc/systemd/system/proxy-panel-update.path、proxy-panel-update.service | 监视 /var/lib/proxy-panel/panel-update/request.json 并运行 helper；root oneshot，TimeoutStartSec=1800，不沙箱、不 PartOf 面板；随面板发布，不记安装记录 |
@@ -1374,9 +1450,9 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 | 路径 | 用途 |
 | --- | --- |
-| /usr/local/bin/proxy-agent、qui-update | Agent 引导镜像、更新器 |
+| /usr/local/bin/proxy-agent、qui、qui-update | Agent 引导镜像、root 菜单、更新器 |
 | /etc/proxy-agent/config.yaml、tls/ca.crt | 配置、受信面板 CA |
-| /etc/proxy-agent/certs/ | 入站可引用的证书与私钥文件（`file` 来源，第 12 节）。安装器以 root:proxy-agent 0750 幂等创建；卸载与配置一样保留 |
+| /etc/proxy-agent/certs/ | 入站可引用的证书与私钥文件（`file` 来源，第 12 节）。安装器以 root:proxy-agent 0750 幂等创建；普通卸载保留，`--purge` 随配置删除 |
 | /usr/local/lib/proxy-agent/<name> | 安装器核心二进制 |
 | /var/lib/proxy-agent/identity/ | 节点身份与证书 |
 | /var/lib/proxy-agent/revisions/、spool/、releases/ | 修订、缓存、Agent/核心镜像 |
@@ -1395,6 +1471,10 @@ GOST 固定官方 3.3.2 静态 linux/amd64（glibc/musl 同包），其他架构
 
 qui-update 快照/回滚全部核心路径、Agent config、记录、主服务/强制出站/调优文件，恢复依赖固定路径集合而非待替换记录。首次迁移操作见[部署](docs/deployment.md) §1、§5.0；v2 Agent 拒绝不支持 v2 的目标 installer 降级，失败仍可恢复原 v1 记录/config。uninstall 验证并删记录核心，保留配置/身份/状态，先清调优。验证范围见[验收矩阵](docs/v1-acceptance.md) §11–12。
 
+v1.5.5 面板与节点都安装 `/usr/local/bin/qui`，按本机安装记录显示菜单：只装 Agent 时仅「更新」「卸载并清除全部数据」，有面板时显示完整菜单并增加第 8 项清除。菜单调用本机 `uninstall.sh all --purge`；缺少脚本时提示先运行 `qui-update`。菜单与卸载脚本均不进 manifest，进入更新快照，最后一个组件普通卸载时才移除公共文件。
+
+`uninstall.sh panel|agent` 普通卸载保留配置、身份、数据、备份、账号与 `.removed`，Agent 卸载删除 `inet proxy_agent_source` 和 `inet proxy_agent_hop` 两张 nft 表。`uninstall.sh panel|agent --purge` 或 `uninstall.sh all --purge` 在普通卸载后继续清除对应组件数据与账号；all 按现存 manifest 先 Agent 后面板，终端须依次输入 `y` 与 `purge`，无免确认参数。最后一个组件清理后移除公共脚本与安装登记目录；journald/syslog 历史日志、其他主机的节点和固定目录外文件保留。清理范围、失败处理及普通卸载后残余的限制见[运维手册](docs/operations.md#彻底卸载qui-菜单uninstallsh---purge)。
+
 # 31. 备份与恢复
 
 v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects`、0130 的 `published_snapshot` 和 0131 的迁移标记/报告随归档保留并校验。旧归档先升级再运行一次性转换；新归档保留原有表及凭据，恢复仍把已发布对象标为 modified，须 Owner 显式发布。校验拒绝孤立或重复归属、缺失/冲突端口声明、损坏发布快照和迁移标记，不自动重建可能改变监听的声明。
@@ -1405,6 +1485,11 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | --- | --- |
 | client_policy_profiles、system_settings.client_policy_active/client_rules | 加密备份与恢复校验覆盖配置库、活动指针和模板快照；旧归档初始化配置库并保留 activeRevision，新归档校验指针与活动模板一致性 |
 | system_settings.install_endpoint | 随整库快照整体备份，无键白名单，不单独校验；恢复按归档值（该键无校验步骤，损坏值读出即报 invalid_settings），旧归档缺该键读作未设置、安装命令回落到浏览器地址 |
+| node_meta.tags_json | 随加密备份保留与恢复；0144 起按标签数量、长度、去重与规范形式校验，拒绝非规范数组；旧归档升级后默认空数组。服务器顺序 `system_settings.server_order` 随系统设置整体往返 |
+| outbounds.source_ip/source_interface | 随加密备份保留与恢复；0145 起校验地址、网卡语法及 Block 不得绑定，旧归档允许缺列、升级后为空；恢复不自动发布 |
+| canvas_entry_bindings（0146） | 随备份／清单保留，校验 create/reuse、applied/detached 与方案归属、入站存在、方案内实例唯一、原出站要求及路由编码；缺失原出站目标仍是合法恢复证据，撤除须另选目标。旧归档可无表；恢复不自动发布 |
+| canvas_entry_bindings.creation_config_json/creation_groups_json（0148） | 随整库备份及绑定清单保留；校验完整摘要字段、64 位小写十六进制 SHA-256、规范 JSON、非空去重排序分组 ID；两列同时 NULL 为合法旧基线，不要求历史分组仍存在。0148 前归档合法，升级后 NULL；恢复保持归档基线，重新挂接不覆盖，恢复不自动发布 |
+| import_identity_reconcile/map、imported_proxies.revision、system_settings.import_identity_report（0147） | 校验单次标记、映射目标及来源、revision≥1、报告 JSON、明文与密封名称／协议一致；允许明确悬空成员与悬空引用并写转换／恢复报告，done=1 不再接受 content 整源成员。旧归档先升级，在最终候选库协调身份；当前导入节点／授权与映射按恢复权威规则保留，不按名称配对、不复活旧授权，不重新抓取、不自动发布 |
 | node_latency_samples、定时探测队列、node_metric_samples | 不进便携备份：快照清空再 VACUUM，恢复候选再清空，不影响运行库样本；手动排队探测过期 |
 | scheduled 默认目标、node_latency_targets、latency_targets_custom | 属配置；兼容 0121 前归档并默认继承。进程内恢复保留当前自定义（含空表），补其新目标但不提升为系统默认 |
 | node_tuning | 备份/校验/清单包含；恢复以当前库为准，删归档独有行、保留当前期望/结果，pending→unconfirmed，不重发、不写宿主 sysctl；旧归档迁移后同处理，需核对 tuningCurrent |

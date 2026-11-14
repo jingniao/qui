@@ -5,9 +5,11 @@ umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 fail() { printf 'Uninstall refused: %s\n' "$*" >&2; exit 1; }
 if [[ ${1:-} == --help ]]; then
-  printf 'Usage: uninstall.sh panel|agent\nStops and removes only recorded service/binaries. All data and config are retained.\n'; exit 0
+  printf '用法：uninstall.sh panel|agent [--purge]\n      uninstall.sh all --purge\n普通卸载保留数据；--purge 交互确认后清除全部数据。\n'; exit 0
 fi
-[[ $# == 1 && ( $1 == panel || $1 == agent ) ]] || fail 'Use uninstall.sh panel|agent.'
+purge=false
+if [[ $# == 2 && $2 == --purge ]]; then purge=true; fi
+[[ ( $# == 1 && ( $1 == panel || $1 == agent ) ) || ( $# == 2 && $purge == true && ( $1 == panel || $1 == agent || $1 == all ) ) ]] || fail 'Use uninstall.sh panel|agent [--purge] or all --purge.'
 [[ $(uname -s) == Linux && $EUID == 0 ]] || fail 'Run locally as root on Linux.'
 # The init-system helpers (deploy/linux/service.sh) are sourced before anything is
 # removed, because the installed copy is deleted at the end of this script: an
@@ -21,6 +23,8 @@ if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol
 # shellcheck source=service.sh
 . "$service_library"
 init_system=$(detect_init) || fail 'Neither systemd nor OpenRC is running on this host.'
+requested=$1
+uninstall_component() {
 component=$1
 name=proxy-$component
 registry=/var/lib/proxycontrol-install
@@ -76,8 +80,6 @@ for tool in "${required_tools[@]}"; do command -v "$tool" >/dev/null || fail "Mi
 for path in /usr/local /usr/local/bin /usr/local/lib /usr/local/lib/proxy-agent /usr/local/lib/proxycontrol /var/lib "$registry" /run/lock "${init_directories[@]}"; do [[ ! -L $path ]] || fail "Symlinked destination: $path"; done
 [[ -d $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'No protected installation registry.'
 [[ ! -L $registry/operation.lock ]] || fail 'Symlinked installation lock.'
-exec 9>"$registry/operation.lock"
-flock -n 9 || fail 'Another installation operation is running.'
 [[ -f $record && ! -L $record && $(stat -c '%u:%a' "$record") == 0:600 ]] || fail 'Missing protected installation record.'
 [[ ! -e $removed && ! -L $removed ]] || fail 'Uninstall was already recorded; inspect retained files.'
 qui_record_cores "$record" "$component" || fail 'Installation is incomplete or unknown.'
@@ -191,14 +193,14 @@ fi
 install -o root -g root -m 0600 -- "$record" "$removed"
 rm -- "$unit" "$target"
 # /usr/local/bin/qui is not part of the recorded manifest, so it has no digest to
-# verify; it belongs to the panel program and goes away with it.
-if [[ $component == panel ]]; then rm -f -- "$qui"; fi
+# verify; it is shared by both components.
 # /usr/local/bin/qui-update and /usr/local/lib/proxycontrol/service.sh have no
 # digest either and are shared by both components, so they stay while the other
 # component is still installed and its scripts still source the library.
 other=panel
 if [[ $component == panel ]]; then other=agent; fi
-if [[ ! -e $registry/$other.manifest && ! -L $registry/$other.manifest ]]; then
+if ! $purge && [[ ! -e $registry/$other.manifest && ! -L $registry/$other.manifest ]]; then
+  rm -f -- "$qui" /usr/local/lib/proxycontrol/uninstall.sh
   rm -f -- "$update"
   rm -f -- "$library"
   # The boot-time hook and its service definition have nothing to recover once
@@ -214,10 +216,14 @@ fi
 if $host_network_units; then rm -- "$host_network_service" "$host_network_path"; fi
 for core in "${record_cores[@]}"; do rm -- "/usr/local/lib/proxy-agent/$core"; done
 service_reload_definitions
-# The enforced-source table belongs to this Agent, so removing it restores the
-# host's normal source selection. It may legitimately be absent.
-if [[ $component == agent ]] && command -v nft >/dev/null && nft list table inet proxy_agent_source >/dev/null 2>&1; then
-  nft delete table inet proxy_agent_source
+# The enforced-source and Hysteria2 port-hop tables belong to this Agent, so
+# removing them restores the host's normal routing. Either may be absent.
+if [[ $component == agent ]] && command -v nft >/dev/null; then
+  for table in proxy_agent_source proxy_agent_hop; do
+    if nft list table inet "$table" >/dev/null 2>&1; then
+      nft delete table inet "$table"
+    fi
+  done
 fi
 rm -- "$record"
 # What this script deliberately leaves behind differs per component: the panel
@@ -232,3 +238,120 @@ esac
 if [[ $component == agent ]]; then
   printf 'This does not revoke the node; delete it in the panel.\n'
 fi
+}
+
+registry=/var/lib/proxycontrol-install
+[[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'No protected installation registry.'
+[[ ! -L $registry/operation.lock ]] || fail 'Symlinked installation lock.'
+exec 9>"$registry/operation.lock"
+flock -n 9 || fail 'Another installation operation is running.'
+components=()
+if [[ $requested == all ]]; then
+  for component in agent panel; do
+    if [[ -e $registry/$component.manifest || -L $registry/$component.manifest ]]; then components+=("$component"); fi
+  done
+else
+  components+=("$requested")
+fi
+if ! $purge; then uninstall_component "$requested"; exit 0; fi
+[[ -t 0 ]] || fail '清除操作必须在终端交互确认。'
+failures=()
+cleaned=()
+paths=()
+ports=()
+for component in "${components[@]}"; do
+  paths+=("/etc/proxy-$component" "/var/lib/proxy-$component" "$registry/$component.removed")
+  printf '将卸载组件：%s；删除账号与同名组：proxy-%s\n' "$component" "$component"
+  if [[ $component == agent ]]; then
+    paths+=(/usr/local/lib/proxy-agent /etc/sysctl.d/99-proxy-tuning.conf /etc/sysctl.d/.proxy-tuning-snapshot.json)
+    printf '删除 nft 表：inet proxy_agent_source、inet proxy_agent_hop\n这不会在面板上吊销节点，请到面板删除该节点。\n'
+  else
+    [[ ! -L /etc/proxy-panel/config.yaml ]] || fail 'Symlinked panel configuration.'
+    for key in http_address grpc_address; do
+      value=$(sed -n "s/^[[:space:]]*$key[[:space:]]*:[[:space:]]*//p" /etc/proxy-panel/config.yaml)
+      value=${value%$'\r'}; value=${value#\"}; value=${value%\"}; value=${value#\'}; value=${value%\'}
+      port=${value##*:}
+      [[ $value == *:* && $port =~ ^[0-9]+$ ]] || fail "无法读取 $key 端口。"
+      ports+=("$port")
+      printf '删除 ufw/firewalld TCP 放行：%s/tcp\n' "$port"
+    done
+    printf '清除后所有节点失去管理，节点 Agent 会按最后一次成功的配置继续运行；数据库与备份会一起删除，需要保留请先下载备份或复制 backups 目录。\n'
+  fi
+done
+shared=true
+for component in agent panel; do
+  if [[ -e $registry/$component.manifest && $requested != all && $requested != "$component" ]]; then shared=false; fi
+done
+if $shared; then
+  paths+=(/usr/local/bin/qui-update /usr/local/bin/qui /usr/local/lib/proxycontrol "$registry")
+fi
+for path in "${paths[@]}"; do
+  printf '清除路径：%s ' "$path"
+  if [[ -e $path && ! -L $path ]]; then du -sh -- "$path"; else printf '(不存在或为符号链接)\n'; fi
+done
+printf '同时删除组件程序、服务、helper 单元与记录内核心；最后停用并删除 proxycontrol-update-recovery 单元。\n'
+read -r -p '确认卸载并清除全部数据？[y/N] ' answer || answer=''
+[[ $answer == y ]] || { printf '已取消\n'; exit 0; }
+read -r -p '请输入 purge：' answer || answer=''
+[[ $answer == purge ]] || { printf '已取消\n'; exit 0; }
+for path in "${paths[@]}"; do
+  [[ ! -L $path ]] || fail "拒绝清除符号链接：$path"
+done
+# Keep errexit active inside the shared uninstall body.
+trap 'printf "前置阶段失败：组件 %s，行 %s；数据清除尚未开始。已执行的程序/单元删除不会回滚。\n" "$component" "$LINENO" >&2' ERR
+set -E
+for component in "${components[@]}"; do uninstall_component "$component"; done
+trap - ERR
+remove_path() {
+  local path=$1
+  if [[ -L $path ]]; then failures+=("$path（符号链接）")
+  elif [[ -e $path ]]; then
+    if rm -rf -- "$path"; then cleaned+=("$path"); else failures+=("$path"); fi
+  fi
+}
+# Only an active firewall is touched, the same condition panel-install.sh used to
+# add the rules, and only a rule that is actually present is deleted: a missing
+# rule is not a failure.
+for port in "${ports[@]}"; do
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi '^Status: active'; then
+    if ufw status 2>/dev/null | grep -qE "^$port/tcp[[:space:]]"; then
+      ufw --force delete allow "$port/tcp" >/dev/null || failures+=("ufw $port/tcp")
+    fi
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    if firewall-cmd --permanent --query-port="$port/tcp" >/dev/null 2>&1; then
+      firewall-cmd --permanent --remove-port="$port/tcp" >/dev/null || failures+=("firewalld $port/tcp")
+      firewall-cmd --reload >/dev/null || failures+=("firewalld reload")
+    fi
+  fi
+done
+for component in "${components[@]}"; do
+  account=proxy-$component
+  if id "$account" >/dev/null 2>&1; then
+    if pgrep -u "$account" >/dev/null; then failures+=("账号 $account（仍有进程）"); continue; fi
+    if command -v userdel >/dev/null; then
+      if ! userdel "$account"; then failures+=("账号 $account"); fi
+    elif ! deluser "$account"; then failures+=("账号 $account"); fi
+  fi
+  if getent group "$account" >/dev/null; then
+    if command -v groupdel >/dev/null; then
+      if ! groupdel "$account"; then failures+=("组 $account"); fi
+    elif ! delgroup "$account"; then failures+=("组 $account"); fi
+  fi
+done
+if $shared; then
+  if ! service_disable proxycontrol-update-recovery; then failures+=(proxycontrol-update-recovery); fi
+  remove_path "$recovery_service"
+  service_reload_definitions || failures+=(service-reload)
+fi
+for path in "${paths[@]}"; do
+  [[ $path == "$registry" ]] || remove_path "$path"
+done
+# Release before removing the directory containing the lock.
+if $shared && [[ ${#failures[@]} == 0 ]]; then
+  flock -u 9
+  exec 9>&-
+  remove_path "$registry"
+fi
+printf 'journald/syslog 历史日志未删除，可按需用 journalctl --vacuum-time=... 自行处理。\n'
+if [[ ${#failures[@]} != 0 ]]; then printf '清除失败：%s\n' "${failures[@]}" >&2; exit 1; fi
+printf '清理清单：\n'; printf '  %s\n' "${cleaned[@]}"

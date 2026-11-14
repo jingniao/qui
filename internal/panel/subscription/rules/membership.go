@@ -8,9 +8,9 @@ import (
 )
 
 // EndpointRef derives a selectable identity before display-name renaming.
-// An imported proxy is keyed by name|protocol like node group imports, because
-// its Origin.Ref is a content hash that changes on refresh. Callers exclude
-// client-chain clones using Proxy.ClientChain.
+// Content imports use their stable Origin.Ref; URL imports retain name|protocol
+// because their row IDs change on refresh. Callers exclude client-chain clones
+// using Proxy.ClientChain.
 func EndpointRef(endpoint proxy.Proxy) string {
 	origin := endpoint.Origin
 	switch {
@@ -19,6 +19,9 @@ func EndpointRef(endpoint proxy.Proxy) string {
 	case origin.Source == "published":
 		return "inbound:" + origin.Ref
 	case strings.HasPrefix(origin.Source, "import:"):
+		if origin.ImportKind == "content" {
+			return origin.Source + ":id:" + origin.Ref
+		}
 		return origin.Source + ":" + endpoint.Name + "|" + endpoint.Protocol
 	default:
 		return ""

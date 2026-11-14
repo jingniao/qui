@@ -226,6 +226,7 @@ export interface ClientSettings {
 }
 
 export interface ClientProxyGroup {
+  excludeEndpoints?: string[];
   includeKeywords?: string[];
   excludeKeywords?: string[];
   emptyPolicy?: "direct" | "reject";
@@ -248,6 +249,10 @@ export interface ClientRule {
 }
 
 export interface RuleTemplateDNS {
+  defaultNameservers?: string[];
+  proxyServerNameservers?: string[];
+  fakeIpFilter?: string[];
+  fallbackFilter?: { geoip: boolean; geoipCode?: string; ipcidr?: string[]; domain?: string[] };
   enable: boolean;
   enhancedMode: string;
   nameservers: string[];
@@ -279,7 +284,7 @@ export interface RuleTemplate {
   preset: string;
   client: ClientSettings & { ipv6: boolean };
   dns: RuleTemplateDNS;
-  groups: { includeKeywords?: string[]; excludeKeywords?: string[]; emptyPolicy?: "direct" | "reject"; name: string; type: string; members: string[]; testUrl: string; intervalSeconds: number }[];
+  groups: { excludeEndpoints?: string[]; includeKeywords?: string[]; excludeKeywords?: string[]; emptyPolicy?: "direct" | "reject"; name: string; type: string; members: string[]; testUrl: string; intervalSeconds: number }[];
   providers: RuleTemplateProvider[];
   rules: { id: string; type: string; payload: string; target: string; noResolve: boolean; enabled: boolean; priority: number; description: string }[];
 }
@@ -346,7 +351,7 @@ export interface ClientPolicyPreview {
   templateDigest: string;
   activeRevision: number;
   context: { user?: { id: string; name: string }; autoSelected: boolean };
-  groups: { name: string; members: { kind: string; name: string }[] }[];
+  groups: { name: string; members: { kind: string; name: string; ref?: string }[] }[];
   warnings: { stage: string; ref: string; message: string }[];
   diagnostic?: string;
 }
@@ -423,6 +428,21 @@ export function parseGroupMembers(value: string): string[] {
   return members;
 }
 
+function normalizeDNS(dns: RuleTemplateDNS): RuleTemplateDNS {
+  const result = { ...dns };
+  for (const key of ['defaultNameservers', 'proxyServerNameservers', 'fakeIpFilter'] as const) {
+    if (!result[key]?.length) delete result[key];
+  }
+  if (result.fallbackFilter) {
+    result.fallbackFilter = { ...result.fallbackFilter };
+    for (const key of ['ipcidr', 'domain'] as const) {
+      if (!result.fallbackFilter[key]?.length) delete result.fallbackFilter[key];
+    }
+    if (!result.fallbackFilter.geoipCode) delete result.fallbackFilter.geoipCode;
+  }
+  return result;
+}
+
 export function toConfig(stored: StoredRuleTemplate): ClientPolicyConfig {
   const template = stored.template;
   return {
@@ -432,6 +452,7 @@ export function toConfig(stored: StoredRuleTemplate): ClientPolicyConfig {
     activePreset: template.preset,
     settings: { mode: template.client.mode, mixedPort: template.client.mixedPort, allowLan: template.client.allowLan, logLevel: template.client.logLevel },
     proxyGroups: template.groups.map(group => ({
+      ...(group.excludeEndpoints?.length ? { excludeEndpoints: group.excludeEndpoints } : {}),
       includeKeywords: group.includeKeywords,
       excludeKeywords: group.excludeKeywords,
       emptyPolicy: group.emptyPolicy,
@@ -442,7 +463,7 @@ export function toConfig(stored: StoredRuleTemplate): ClientPolicyConfig {
       interval: group.intervalSeconds || undefined
     })),
     rules: template.rules.map(rule => ({ ...rule, type: rule.type as ClientRuleType })),
-    extra: { ipv6: template.client.ipv6, dns: template.dns, providers: template.providers }
+    extra: { ipv6: template.client.ipv6, dns: normalizeDNS(template.dns), providers: template.providers }
   };
 }
 
@@ -450,12 +471,13 @@ export function fromConfig(config: ClientPolicyConfig): RuleTemplate {
   return {
     preset: config.activePreset || '',
     client: { ...config.settings, mixedPort: Number(config.settings.mixedPort), ipv6: config.extra.ipv6 },
-    dns: config.extra.dns,
+    dns: normalizeDNS(config.extra.dns),
     groups: config.proxyGroups.map(group => {
       const testing = group.type !== 'select';
       return {
         ...(group.includeKeywords?.length ? { includeKeywords: group.includeKeywords } : {}),
         ...(group.excludeKeywords?.length ? { excludeKeywords: group.excludeKeywords } : {}),
+        ...(group.excludeEndpoints?.length ? { excludeEndpoints: group.excludeEndpoints } : {}),
         ...(group.emptyPolicy ? { emptyPolicy: group.emptyPolicy } : {}),
         name: group.name.trim(),
         type: group.type,
@@ -487,7 +509,7 @@ export const clientPolicyAPI = {
   get: async (): Promise<ClientPolicyConfig> => toConfig(await request<StoredRuleTemplate>('/subscription-rules')),
   save: async (config: ClientPolicyConfig): Promise<ClientPolicyConfig> =>
     toConfig(await request<StoredRuleTemplate>('/subscription-rules', 'PUT', { template: fromConfig(config), expectedRevision: config.version })),
-  presets: () => request<{ items: RulePreset[] }>('/subscription-rules/presets'),
+  presets: () => request<{ items: RulePreset[]; recommendedDns?: RuleTemplateDNS }>('/subscription-rules/presets'),
   legacyDraft(): Pick<ClientPolicyConfig, 'settings' | 'proxyGroups' | 'rules'> | null {
     try {
       const raw = localStorage.getItem(LEGACY_POLICY_KEY);

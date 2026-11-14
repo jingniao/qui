@@ -8,6 +8,7 @@
         <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
       </select>
     </div>
+    <p v-for="outbound in outbounds.filter(item => item.sourceIp)" :key="outbound.id" class="text-xs text-ios-secondary">{{ outbound.name }} · 源 IP：{{ outbound.sourceIp }}</p>
     <ErrorState v-if="error" :message="error" @retry="load" /><EmptyState v-else-if="!outbounds.length" title="暂无自定义出站" description="每个节点默认具有 Direct 与 Block，其他出站可在此创建。" />
     <DataTable v-else><template #header><th>名称</th><th>节点</th><th>协议</th><th>目标</th><th>TCP / UDP</th><th>状态 / 探测</th><th>操作</th></template><template #body><tr v-for="outbound in outbounds" :key="outbound.id"><td class="p-4 font-semibold">{{ outbound.name }}</td><td>{{ nodes.find(node => node.id === outbound.nodeId)?.name || outbound.nodeId }}</td><td>{{ outbound.protocol }}</td><td class="text-xs">{{ outbound.targetNodeId ? nodes.find(node => node.id === outbound.targetNodeId)?.name || outbound.targetNodeId : outbound.address || '本地' }}<p>{{ outbound.port || '—' }} · {{ outbound.targetInboundId ? '内部中转' : '外部或本地出站' }}</p></td><td class="text-xs"><p v-if="outbound.wireGuardPublicKey" class="max-w-48 break-all font-mono" :title="outbound.wireGuardPublicKey">公钥：{{ outbound.wireGuardPublicKey }}</p>{{ outbound.supportTcp ? 'TCP' : '—' }} / {{ outbound.supportUdp ? 'UDP' : '—' }}</td><td><StatusBadge :status="outbound.enabled ? 'active' : 'disabled'" /><p class="text-xs text-gray-500 mt-2">{{ healthLabel(outbound, outbound.probeInterval) }}</p></td><td class="space-x-2"><button @click="openEdit(outbound)" class="ios-action-btn-primary">编辑</button><button @click="target = outbound; confirmVisible = true" class="ios-action-btn-danger">删除</button></td></tr></template><template #footer><Pagination :total="total" :current-page="page" :page-size="20" @update:page="changePage" /></template></DataTable>
     <FormDrawer v-model="drawer" :title="editing ? '编辑出站' : '创建出站'" :loading="saving" @confirm="save" confirm-text="保存草稿">
@@ -28,12 +29,28 @@
           <p v-if="mode === 'relay'" class="text-xs text-gray-500">系统为此中转链路独立生成凭据。请先生成并发布目标节点配置，再发布当前节点。</p>
         </template>
         <template v-if="!['direct', 'block'].includes(form.protocol)"><label class="block">探测 URL<input v-model="form.probeUrl" class="form-input-base mt-2" /></label><label class="block">探测间隔（秒）<input v-model.number="form.probeInterval" type="number" min="3" max="300" class="form-input-base mt-2" /></label><label class="block">连接不可用时<select v-model="form.failurePolicy" class="form-input-base mt-2"><option value="Block">阻断</option><option value="Direct">直连</option><option value="BackupOutbound">备用出站</option><option value="BackupOutboundGroup">备用出口组</option><option value="BackupProxyChain">备用代理链</option></select></label><label v-if="form.failurePolicy.startsWith('Backup')" class="block">备用目标<select v-model="form.backupOutboundId" class="form-input-base mt-2"><option value="">请选择</option><option v-for="backup in selectedBackups" :key="backup.id" :value="backup.id">{{ backup.name }}</option></select></label><p v-if="form.failurePolicy === 'Direct'" class="text-xs text-amber-700">此出站不可用时将从当前节点直连，固定出口策略建议使用阻断或备用出口。</p></template><label class="block"><input v-model="form.enabled" type="checkbox" /> 启用</label>
+        <details v-if="form.protocol !== 'block'" class="space-y-3">
+          <summary class="cursor-pointer text-sm">高级选项</summary>
+          <label class="block">出站源 IP<input v-model="sourceIp" list="outbound-source-addresses" class="form-input-base mt-2" /></label>
+          <datalist id="outbound-source-addresses"><option v-for="item in sourceNode?.publicAddresses || []" :key="item.address" :value="item.address" /></datalist>
+          <p v-if="!sourceIp" class="text-xs text-ios-secondary">沿用服务器设置：{{ sourceNode?.outboundSourceIp || '不绑定' }}</p>
+          <p v-if="sourceIpError" class="text-xs text-ios-red">{{ sourceIpError }}</p>
+          <label class="block">出站网卡<input v-model="sourceInterface" class="form-input-base mt-2" /></label>
+          <p v-if="!sourceInterface" class="text-xs text-ios-secondary">沿用服务器设置：{{ sourceNode?.outboundInterface || '不绑定' }}</p>
+          <p v-if="sourceInterfaceError" class="text-xs text-ios-red">{{ sourceInterfaceError }}</p>
+        </details>
       </div>
     </FormDrawer>
     <ConfirmDialog v-model="confirmVisible" title="删除出站草稿" :message="`删除 ${target?.name || ''}？被入站默认引用的出站不能删除，运行配置需重新发布。`" @confirm="remove" />
   </div>
 </template>
 <script setup lang="ts">
+import { ipv4, ipv6 } from '../../nodes/networkValidation';
+const sourceIp = ref('');
+const sourceInterface = ref('');
+const sourceNode = computed(() => nodes.value.find(node => node.id === form.nodeId));
+const sourceIpError = computed(() => sourceIp.value && !ipv4(sourceIp.value) && !ipv6(sourceIp.value) ? '请输入有效的 IPv4 或 IPv6 地址' : '');
+const sourceInterfaceError = computed(() => sourceInterface.value && !/^[A-Za-z0-9_.:-]{1,15}$/.test(sourceInterface.value) ? '网卡名须为 1–15 位字母、数字或 _ . : -' : '');
 import { ref, reactive, computed, onMounted, watch } from 'vue'; import { useRouter } from 'vue-router'; import { proxyAPI, protocolOptions, loadProtocolSupport, type Outbound, type OutboundInput, type Inbound, type OutboundGroup, type ProxyChain, choices, healthLabel, failureNames } from '../api'; import { request, type Page } from '../../../app/apiClient'; import { type NodeView } from '../../nodes/api'; import { showToast } from '../../../app/api'; import PageHeader from '../../../components/PageHeader.vue'; import DataTable from '../../../components/DataTable.vue'; import StatusBadge from '../../../components/StatusBadge.vue'; import Pagination from '../../../components/Pagination.vue'; import FormDrawer from '../../../components/FormDrawer.vue'; import ConfirmDialog from '../../../components/ConfirmDialog.vue'; import ErrorState from '../../../components/ErrorState.vue'; import EmptyState from '../../../components/EmptyState.vue';
 const allGroups = ref<OutboundGroup[]>([]); const allChains = ref<ProxyChain[]>([]); const allOutbounds = ref<Outbound[]>([]); const router = useRouter(); const outbounds = ref<Outbound[]>([]); const inbounds = ref<Inbound[]>([]); const nodes = ref<NodeView[]>([]); const nodeId = ref(''); const page = ref(1); const total = ref(0); const error = ref(''); const drawer = ref(false); const saving = ref(false); const editing = ref<Outbound | null>(null); const target = ref<Outbound | null>(null); const confirmVisible = ref(false); const mode = ref('external'); const wgAddress = ref('10.77.0.2/32'); const wgSecret = ref(''); const wgPublic = ref('');
 function defaults(): OutboundInput { return { name: '', nodeId: nodeId.value, protocol: 'direct', address: '', port: 0, enabled: true, targetNodeId: '', targetInboundId: '', username: '', secret: '', settings: {}, supportTcp: true, supportUdp: true, failurePolicy: 'Block', backupOutboundId: '', probeUrl: 'https://www.gstatic.com/generate_204', probeInterval: 30 }; }
@@ -44,6 +61,7 @@ function openEdit(outbound: Outbound) { editing.value = outbound; Object.assign(
 function protocolChanged() { form.settings = ['direct','block','wireguard'].includes(form.protocol) ? {} : { transport: ['hysteria2','tuic'].includes(form.protocol) ? 'quic' : 'tcp', quic: ['hysteria2','tuic'].includes(form.protocol) ? {} : undefined, security: ['trojan','hysteria2','tuic'].includes(form.protocol) ? 'tls' : 'none', method: form.protocol === 'shadowsocks' ? 'chacha20-ietf-poly1305' : undefined }; form.supportUdp = form.protocol !== 'http'; form.targetInboundId = ''; }
 async function save() {
   if (saving.value) return;
+  if (form.protocol !== 'block' && (sourceIpError.value || sourceInterfaceError.value)) return;
   saving.value = true;
   try {
     const value = JSON.parse(JSON.stringify(form)) as OutboundInput;
@@ -57,7 +75,7 @@ async function save() {
       value.settings = { wireguard: { ...previous, secret_key: wgSecret.value.trim(), addresses, peers, mtu: previous?.mtu ?? 1420 } };
     }
     if (!value.failurePolicy.startsWith('Backup')) value.backupOutboundId = '';
-    await proxyAPI.saveOutbound(editing.value?.id || null, value);
+    await proxyAPI.saveOutbound(editing.value?.id || null, { ...value, sourceIp: sourceIp.value, sourceInterface: sourceInterface.value });
     drawer.value = false;
     form.secret = ''; wgSecret.value = '';
     showToast('出站草稿已保存');
@@ -65,6 +83,7 @@ async function save() {
   } catch (e) { showToast((e as Error).message, 'error'); }
   finally { saving.value = false; }
 }
+watch(drawer, visible => { if (visible) { sourceIp.value = editing.value?.sourceIp || ''; sourceInterface.value = editing.value?.sourceInterface || ''; } }, { flush: 'sync' });
 async function remove() { if (!target.value) return; try { await proxyAPI.deleteOutbound(target.value.id); showToast('出站已删除'); await load(); } catch (e) { showToast((e as Error).message, 'error'); } }
 async function revision() { if (!nodeId.value) return; try { await proxyAPI.revision(nodeId.value, '更新节点代理出站'); await router.push('/system/revisions'); } catch (e) { showToast((e as Error).message, 'error'); } }
 watch(drawer, visible => { if (!visible) { form.secret = ''; wgSecret.value = ''; } }); onMounted(() => { loadProtocolSupport(); load(); });

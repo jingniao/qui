@@ -437,6 +437,46 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 	}
 	for key := range q {
 		switch key {
+		case "obfs", "obfs-password":
+			if p.QUIC == nil {
+				p.QUIC = &proxy.QUIC{}
+			}
+			if key == "obfs" {
+				p.QUIC.Obfs = q.Get(key)
+			} else {
+				p.QUIC.ObfsPassword = q.Get(key)
+			}
+		case "congestion_control", "udp_relay_mode", "mport":
+			if key == "mport" && p.Protocol != "hysteria2" || key != "mport" && p.Protocol != "tuic" {
+				return p, "invalid_protocol_combination", queryField(key)
+			}
+			if q.Get(key) == "" {
+				return p, "unsupported_option", fieldEntry
+			}
+			if p.QUIC == nil {
+				p.QUIC = &proxy.QUIC{}
+			}
+			switch key {
+			case "mport":
+				p.QUIC.HopPorts = q.Get(key)
+			case "congestion_control":
+				p.QUIC.CongestionControl = q.Get(key)
+			case "udp_relay_mode":
+				p.QUIC.UDPRelayMode = q.Get(key)
+			}
+		case "headerType":
+			if q.Get(key) != "none" {
+				return p, "unsupported_transport", queryField(key)
+			}
+		case "allowInsecure", "insecure", "allow_insecure":
+			if q.Get(key) != "0" {
+				return p, "insecure_tls", fieldTLSInsecure
+			}
+		case "disable_sni":
+			if p.Protocol != "tuic" || q.Get(key) != "0" {
+				return p, "unsupported_transport", queryField(key)
+			}
+		case "ed":
 		case "extra":
 			if len(q.Get(key)) > 4096 {
 				return p, "oversized_entry", "transport.xhttp.extra"
@@ -493,6 +533,9 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 			return p, "unsupported_transport", fieldType
 		}
 		p.Transport = &proxy.Transport{Type: transport, Path: q.Get("path"), ServiceName: q.Get("serviceName")}
+		if transport == "ws" {
+			p.Transport.Host = q.Get("host")
+		}
 		if transport == "xhttp" {
 			p.Transport.Path = ""
 			p.Transport.XHTTP = &proxy.XHTTPOptions{Host: q.Get("host"), Path: q.Get("path"), Mode: q.Get("mode")}
@@ -500,6 +543,9 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 	}
 	if q.Get("type") != "xhttp" {
 		for _, field := range []string{"host", "mode"} {
+			if field == "host" && q.Get("type") == "ws" {
+				continue
+			}
 			if _, present := q[field]; present {
 				return p, "invalid_protocol_combination", queryField(field)
 			}
@@ -541,7 +587,19 @@ func (Base64) analyze(content []byte, c *collector) {
 }
 
 type clashEntry struct {
-	XHTTP *struct {
+	Obfs              string    `yaml:"obfs"`
+	ObfsPassword      string    `yaml:"obfs-password"`
+	Ports             string    `yaml:"ports"`
+	HopInterval       int       `yaml:"hop-interval"`
+	Up                yaml.Node `yaml:"up"`
+	Down              yaml.Node `yaml:"down"`
+	CongestionControl string    `yaml:"congestion-controller"`
+	UDPRelayMode      string    `yaml:"udp-relay-mode"`
+	TFO               bool      `yaml:"tfo"`
+	IPVersion         string    `yaml:"ip-version"`
+	PacketEncoding    string    `yaml:"packet-encoding"`
+	UDPOverTCP        bool      `yaml:"udp-over-tcp"`
+	XHTTP             *struct {
 		Extra yaml.Node `yaml:"extra"`
 		Host  string    `yaml:"host"`
 		Path  string    `yaml:"path"`
@@ -570,6 +628,10 @@ type clashEntry struct {
 	Network    string   `yaml:"network"`
 	Flow       string   `yaml:"flow"`
 	WS         *struct {
+		Headers *struct {
+			Host      string `yaml:"Host"`
+			LowerHost string `yaml:"host"`
+		} `yaml:"headers"`
 		Path string `yaml:"path"`
 	} `yaml:"ws-opts"`
 	GRPC *struct {
@@ -616,6 +678,9 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 	if decoder.Decode(&entry) != nil {
 		return proxy.Proxy{}, "unsupported_option", fieldEntry
 	}
+	if entry.UDPOverTCP {
+		return proxy.Proxy{}, "unsupported_option", fieldEntry
+	}
 	if entry.XHTTP != nil && entry.XHTTP.Extra.Kind != 0 {
 		encoded, _ := yaml.Marshal(&entry.XHTTP.Extra)
 		if len(encoded) > 4096 {
@@ -624,6 +689,26 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 		return proxy.Proxy{}, "unsupported_option", "transport.xhttp.extra"
 	}
 	p := proxy.Proxy{Name: entry.Name, Protocol: entry.Type, Server: entry.Server, Port: entry.Port, Method: entry.Cipher, Flow: entry.Flow, Credential: proxy.Credential{Username: entry.Username, Password: entry.Password}}
+	if entry.CongestionControl != "" || entry.UDPRelayMode != "" {
+		if p.Protocol != "tuic" {
+			return p, "invalid_protocol_combination", fieldEntry
+		}
+		p.QUIC = &proxy.QUIC{CongestionControl: entry.CongestionControl, UDPRelayMode: entry.UDPRelayMode}
+	}
+	if entry.Obfs != "" || entry.ObfsPassword != "" || entry.Ports != "" || entry.HopInterval != 0 || entry.Up.Kind != 0 || entry.Down.Kind != 0 {
+		if p.Protocol != "hysteria2" {
+			return p, "invalid_protocol_combination", fieldEntry
+		}
+		up, err := bandwidth(entry.Up)
+		if err != nil {
+			return p, "unsupported_option", fieldEntry
+		}
+		down, err := bandwidth(entry.Down)
+		if err != nil {
+			return p, "unsupported_option", fieldEntry
+		}
+		p.QUIC = &proxy.QUIC{Obfs: entry.Obfs, ObfsPassword: entry.ObfsPassword, HopPorts: entry.Ports, HopInterval: entry.HopInterval, UpMbps: up, DownMbps: down}
+	}
 	if p.Protocol == "ss" {
 		p.Protocol = "shadowsocks"
 	}
@@ -668,6 +753,15 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 			return p, "unsupported_transport", fieldWSOpts
 		}
 		p.Transport = &proxy.Transport{Type: "ws", Path: entry.WS.Path}
+		if h := entry.WS.Headers; h != nil {
+			if h.Host != "" && h.LowerHost != "" && h.Host != h.LowerHost {
+				return p, "conflicting_alias", "transport.host"
+			}
+			p.Transport.Host = h.Host
+			if h.Host == "" {
+				p.Transport.Host = h.LowerHost
+			}
+		}
 	case "grpc":
 		if entry.GRPC == nil {
 			return p, "unsupported_transport", fieldGRPCOpts
@@ -689,4 +783,30 @@ func clashProxy(node yaml.Node) (proxy.Proxy, string, string) {
 		return p, code, field
 	}
 	return p, "", fieldNone
+}
+
+func bandwidth(n yaml.Node) (int, error) {
+	if n.Kind == 0 {
+		return 0, nil
+	}
+	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" && n.Tag != "!!int" {
+		return 0, ErrParse
+	}
+	s := n.Value
+	if n.Tag == "!!str" {
+		if !strings.HasSuffix(s, "Mbps") {
+			return 0, ErrParse
+		}
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "Mbps"), " ")
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, ErrParse
+		}
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil || v <= 0 {
+		return 0, ErrParse
+	}
+	return v, nil
 }

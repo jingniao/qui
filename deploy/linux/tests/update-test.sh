@@ -32,6 +32,9 @@
 # with exit status 0. QUI_UPDATE_TEST_KEEP=1 keeps the temporary directory.
 set -euo pipefail
 
+# Keep purge/menu regression coverage in the explicit check.sh update entry too.
+bash "$(dirname -- "$0")/purge-menu-test.sh"
+
 if [[ $(uname -s) != Linux || ${EUID} -ne 0 ]]; then
   printf 'SKIP update-test: needs Linux and root (uname -s %s, EUID %s).\n' \
     "$(uname -s)" "${EUID}"
@@ -263,10 +266,11 @@ install_everything() {
   install -m 0644 "$FAKE_SERVICE_SOURCE" "$library_dir/service.sh"
   printf '\n# service.sh of version %s, written by the fake install.sh\n' "$version" \
     >> "$library_dir/service.sh"
-  if [ "$component" = panel ]; then
     printf '#!/bin/sh\n# fake terminal menu of version %s\nexit 0\n' "$version" \
       > "$state/qui.tmp.new"
     install -m 0755 "$state/qui.tmp.new" "$bin_dir/qui"
+    install -m 0755 "$state/qui.tmp.new" "$library_dir/uninstall.sh"
+  if [ "$component" = panel ]; then
     # The web-UI update bridge: published by this version, absent from an older host. A
     # rollback therefore has to remove the three files, which is what the scenarios that
     # fail after this point check.
@@ -515,13 +519,13 @@ component_files_list() {
   fi
   printf '%s\n' "$ROOT/usr/local/bin/qui-update" \
     "$ROOT/usr/local/lib/proxycontrol/service.sh"
+  printf '%s\n' "$ROOT/usr/local/bin/qui" "$ROOT/usr/local/lib/proxycontrol/uninstall.sh"
   if [[ $component == panel ]]; then
     # The terminal menu and the web-UI update bridge, in the order component_files prints
     # them. The fake install.sh below publishes the bridge as the new version does, so a
     # scenario that fails after it starts proves that a rollback removes the three files
     # again instead of leaving them at the new version.
-    printf '%s\n' "$ROOT/usr/local/bin/qui" \
-      "$ROOT/usr/local/lib/proxycontrol/panel-update-request" \
+    printf '%s\n' "$ROOT/usr/local/lib/proxycontrol/panel-update-request" \
       "$ROOT/etc/systemd/system/proxy-panel-update.service" \
       "$ROOT/etc/systemd/system/proxy-panel-update.path"
   elif [[ $init == systemd ]]; then
@@ -1306,7 +1310,7 @@ scenario_19() {
       # Exclude the two shared files, but include the other program, unit,
       # manifest, panel menu or Agent host-network pair.
       snapshot_file_hashes "$other" "$dir/all-before.sha"
-      grep -vE '/(qui-update|service.sh)$' "$dir/all-before.sha" > "$dir/other-before.sha"
+      grep -vE '/(qui|qui-update|service.sh|uninstall.sh)$' "$dir/all-before.sha" > "$dir/other-before.sha"
       cp -- "$FAKE_PANEL_DB" "$dir/db-before"
       export FAKE_INSTALL=$outcome
       update_bundle 1.1.0-rc.1 --component "$selected"
@@ -1326,7 +1330,7 @@ scenario_19() {
         expect_same_tree 'selected files restored' "$dir/selected-before.sha" "$dir/selected-after.sha"
       fi
       snapshot_file_hashes "$other" "$dir/all-after.sha"
-      grep -vE '/(qui-update|service.sh)$' "$dir/all-after.sha" > "$dir/other-after.sha"
+      grep -vE '/(qui|qui-update|service.sh|uninstall.sh)$' "$dir/all-after.sha" > "$dir/other-after.sha"
       expect_same_tree 'other component untouched' "$dir/other-before.sha" "$dir/other-after.sha"
       expect_eq 'other version unchanged' 1.0.9 "$(program_version "$other")"
       if grep -E "^(start|stop|restart) proxy-$other$" "$FAKE_STATE/calls.log"; then

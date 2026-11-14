@@ -99,11 +99,22 @@ type document struct {
 }
 
 type dnsSection struct {
-	Enable       bool     `yaml:"enable"`
-	IPv6         bool     `yaml:"ipv6"`
-	EnhancedMode string   `yaml:"enhanced-mode,omitempty"`
-	Nameserver   []string `yaml:"nameserver,omitempty"`
-	Fallback     []string `yaml:"fallback,omitempty"`
+	Enable                bool            `yaml:"enable"`
+	IPv6                  bool            `yaml:"ipv6"`
+	EnhancedMode          string          `yaml:"enhanced-mode,omitempty"`
+	Nameserver            []string        `yaml:"nameserver,omitempty"`
+	Fallback              []string        `yaml:"fallback,omitempty"`
+	DefaultNameserver     []string        `yaml:"default-nameserver,omitempty"`
+	ProxyServerNameserver []string        `yaml:"proxy-server-nameserver,omitempty"`
+	FakeIPFilter          []string        `yaml:"fake-ip-filter,omitempty"`
+	FallbackFilter        *fallbackFilter `yaml:"fallback-filter,omitempty"`
+}
+
+type fallbackFilter struct {
+	GeoIP     bool     `yaml:"geoip"`
+	GeoIPCode string   `yaml:"geoip-code,omitempty"`
+	IPCIDR    []string `yaml:"ipcidr,omitempty"`
+	Domain    []string `yaml:"domain,omitempty"`
 }
 
 type group struct {
@@ -124,7 +135,8 @@ type ruleProvider struct {
 }
 
 type wsOptions struct {
-	Path string `yaml:"path,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Path    string            `yaml:"path,omitempty"`
 }
 
 type grpcOptions struct {
@@ -133,6 +145,8 @@ type grpcOptions struct {
 
 // clashProxy is one proxy in mihomo's field names; zero fields are omitted.
 type clashProxy struct {
+	Obfs                 string          `yaml:"obfs,omitempty"`
+	ObfsPassword         string          `yaml:"obfs-password,omitempty"`
 	XHTTPOptions         *xhttpOptions   `yaml:"xhttp-opts,omitempty"`
 	ClientFingerprint    string          `yaml:"client-fingerprint,omitempty"`
 	Reality              *realityOptions `yaml:"reality-opts,omitempty"`
@@ -184,6 +198,7 @@ var reserved = map[string]bool{"DIRECT": true, "REJECT": true, "REJECT-DROP": tr
 
 func render(set capabilities, profile format.Profile) (format.Output, error) {
 	output := format.Output{}
+	var omissions proxy.OmissionWarnings
 	warn := func(message string) {
 		output.Warnings = append(output.Warnings, proxy.FormatWarning(set.id, message))
 	}
@@ -206,8 +221,8 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 		if code, _ := proxy.ValidateClientSettings(endpoint); code != "" {
 			return format.Output{}, fmt.Errorf("invalid subscription client settings")
 		}
-		if !proxy.ClientFormatSupportsSettings(endpoint, set.id) {
-			warn("Endpoint omitted: client format cannot represent its security or transport settings; use a compatible URI client")
+		if reason := proxy.ClientFormatOmission(endpoint, set.id); reason != "" {
+			omissions.Add(endpoint.Name, reason)
 			continue
 		}
 		if (endpoint.DialerProxy != "" || endpoint.ClientChain != "") && set.id != "clash" {
@@ -275,6 +290,14 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 	}
 	if resolved.DNS.Enable {
 		doc.DNS = &dnsSection{Enable: true, IPv6: resolved.Client.IPv6, EnhancedMode: resolved.DNS.EnhancedMode, Nameserver: resolved.DNS.Nameservers, Fallback: resolved.DNS.Fallback}
+		if set.id == meta.id {
+			doc.DNS.DefaultNameserver = resolved.DNS.DefaultNameservers
+			doc.DNS.ProxyServerNameserver = resolved.DNS.ProxyServerNameservers
+			doc.DNS.FakeIPFilter = resolved.DNS.FakeIPFilter
+			if filter := resolved.DNS.FallbackFilter; filter != nil {
+				doc.DNS.FallbackFilter = &fallbackFilter{GeoIP: filter.GeoIP, GeoIPCode: filter.GeoIPCode, IPCIDR: filter.IPCIDR, Domain: filter.Domain}
+			}
+		}
 	}
 	for _, source := range resolved.Groups {
 		members := []string{}
@@ -395,6 +418,7 @@ func render(set capabilities, profile format.Profile) (format.Output, error) {
 		return format.Output{}, err
 	}
 	output.Body = body
+	output.Warnings = append(output.Warnings, omissions.Warnings(set.id)...)
 	return output, nil
 }
 
@@ -460,6 +484,9 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 		case "ws":
 			value.Network = "ws"
 			value.WSOptions = &wsOptions{Path: endpoint.Transport.Path}
+			if endpoint.Transport.Host != "" {
+				value.WSOptions.Headers = map[string]string{"Host": endpoint.Transport.Host}
+			}
 		case "grpc":
 			value.Network = "grpc"
 			value.GRPCOptions = &grpcOptions{ServiceName: endpoint.Transport.ServiceName}
@@ -482,6 +509,14 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 		}
 		value.Fingerprint = fingerprint
 		return nil
+	}
+	if endpoint.Security == "tls" {
+		switch endpoint.Protocol {
+		case "vless", "trojan", "http", "socks5":
+			if err := pin(); err != nil {
+				return value, err
+			}
+		}
 	}
 	switch endpoint.Protocol {
 	case "http":
@@ -514,6 +549,7 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 	case "hysteria2":
 		value.Type, value.Password, value.SNI, value.ALPN = "hysteria2", endpoint.Credential.Password, serverName(endpoint), []string{"h3"}
 		if q := endpoint.QUIC; q != nil {
+			value.Obfs, value.ObfsPassword = q.Obfs, q.ObfsPassword
 			if q.UpMbps > 0 {
 				value.Up = strconv.Itoa(q.UpMbps) + " Mbps"
 			}
@@ -529,7 +565,10 @@ func convert(endpoint proxy.Proxy) (clashProxy, error) {
 			return value, err
 		}
 	case "tuic":
-		value.Type, value.UUID, value.Password, value.SNI, value.ALPN, value.UDP = "tuic", endpoint.Credential.Username, endpoint.Credential.Password, serverName(endpoint), []string{"h3"}, true
+		value.Type, value.UUID, value.Password, value.SNI, value.UDP = "tuic", endpoint.Credential.Username, endpoint.Credential.Password, serverName(endpoint), true
+		if len(value.ALPN) == 0 {
+			value.ALPN = []string{"h3"}
+		}
 		if q := endpoint.QUIC; q != nil {
 			value.CongestionController, value.UDPRelayMode = q.CongestionControl, q.UDPRelayMode
 		}

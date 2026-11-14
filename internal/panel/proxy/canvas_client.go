@@ -5,6 +5,9 @@ import "errors"
 // ValidateClientLayout accepts one directed path. Branches, disconnected boxes
 // and cycles cannot be represented by a single dialer-proxy chain.
 func ValidateClientLayout(layout CanvasLayout) error {
+	if err := layout.validateEntryBindings(canvasExecutionClient); err != nil {
+		return err
+	}
 	if err := layout.validate(); err != nil {
 		return err
 	}

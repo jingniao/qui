@@ -67,15 +67,86 @@ func (layout CanvasLayout) MarshalJSON() ([]byte, error) {
 // shows (name, protocol, address, status) are derived from that reference when
 // it loads, so they are deliberately not stored here.
 type CanvasInstance struct {
-	InstanceID    string  `json:"instanceId"`
-	Ref           string  `json:"ref"`
-	X             float64 `json:"x"`
-	Y             float64 `json:"y"`
-	Role          string  `json:"role"`
-	ListenPort    *int    `json:"listenPort,omitempty"`
-	TargetPort    *int    `json:"targetPort,omitempty"`
-	RelayPortMode string  `json:"relayPortMode,omitempty"`
-	RelayPort     *int    `json:"relayPort,omitempty"`
+	EntryBinding  *CanvasEntryBinding `json:"entryBinding,omitempty"`
+	InstanceID    string              `json:"instanceId"`
+	Ref           string              `json:"ref"`
+	X             float64             `json:"x"`
+	Y             float64             `json:"y"`
+	Role          string              `json:"role"`
+	ListenPort    *int                `json:"listenPort,omitempty"`
+	TargetPort    *int                `json:"targetPort,omitempty"`
+	RelayPortMode string              `json:"relayPortMode,omitempty"`
+	RelayPort     *int                `json:"relayPort,omitempty"`
+}
+
+// CanvasEntryBinding describes a user entry; runtime ownership is stored separately.
+type CanvasEntryBinding struct {
+	Mode      string   `json:"mode"`
+	InboundID string   `json:"inboundId,omitempty"`
+	Protocol  string   `json:"protocol,omitempty"`
+	Core      string   `json:"core,omitempty"`
+	PortMode  string   `json:"portMode"`
+	Port      *int     `json:"port,omitempty"`
+	GroupMode string   `json:"groupMode"`
+	GroupIDs  []string `json:"groupIds,omitempty"`
+}
+
+func (layout CanvasLayout) validateEntryBindings(execution string) error {
+	for _, instance := range layout.Instances {
+		b := instance.EntryBinding
+		if b == nil {
+			continue
+		}
+		if execution != canvasExecutionServer || instance.Role != "entry" {
+			return errors.New("入口绑定仅适用于服务器执行方案的入口实例")
+		}
+		ref, err := parseCanvasRef(instance.Ref)
+		if err != nil {
+			return err
+		}
+		if ref.kind != "server" {
+			return errors.New("入口绑定必须引用服务器")
+		}
+		switch b.Mode {
+		case "create":
+			if strings.TrimSpace(b.Protocol) == "" {
+				return errors.New("新建入口必须选择协议")
+			}
+			if b.InboundID != "" {
+				return errors.New("新建入口不能指定入站 ID")
+			}
+		case "reuse":
+			if !validCanvasToken(b.InboundID) {
+				return errors.New("复用入口必须指定有效的入站 ID")
+			}
+		default:
+			return errors.New("入口绑定模式必须为 create 或 reuse")
+		}
+		if b.PortMode != "auto" && b.PortMode != "manual" {
+			return errors.New("入口端口模式必须为 auto 或 manual")
+		}
+		if b.PortMode == "manual" && b.Port == nil {
+			return errors.New("手动入口端口不能为空")
+		}
+		if b.PortMode == "auto" && b.Port != nil {
+			return errors.New("自动入口端口不能指定端口")
+		}
+		if b.Port != nil && (*b.Port < 1 || *b.Port > 65535) {
+			return errors.New("入口端口必须在 1–65535 之间")
+		}
+		if b.GroupMode != "exit_groups" && b.GroupMode != "explicit" && b.GroupMode != "none" {
+			return errors.New("入口分组模式必须为 exit_groups、explicit 或 none")
+		}
+		if b.GroupMode != "explicit" && len(b.GroupIDs) != 0 {
+			return errors.New("仅显式分组模式可以指定分组 ID")
+		}
+		for _, groupID := range b.GroupIDs {
+			if !validCanvasToken(groupID) {
+				return errors.New("入口分组 ID 无效")
+			}
+		}
+	}
+	return nil
 }
 
 // CanvasConnection is one directed arrow between two instances. TunnelProtocol
@@ -155,6 +226,9 @@ func canvasPort(label string, port *int) error {
 // validate refuses a layout that is not a well-formed directed graph, so the
 // canvas cannot store something its own editor could never draw.
 func (layout CanvasLayout) validate() error {
+	if err := layout.validateEntryBindings(canvasExecutionServer); err != nil {
+		return err
+	}
 	if len(layout.Instances) > canvasMaxInstances {
 		return fmt.Errorf("a canvas scheme holds at most %d instances", canvasMaxInstances)
 	}
@@ -301,6 +375,11 @@ func (s *Service) validateRefs(ctx context.Context, layout CanvasLayout) error {
 func (s *Service) SaveCanvasScheme(ctx context.Context, schemeID string, input CanvasSchemeInput) (CanvasScheme, error) {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
+	return s.saveCanvasScheme(ctx, schemeID, input)
+}
+
+// saveCanvasScheme requires canvasMu, so compound operations share one lock.
+func (s *Service) saveCanvasScheme(ctx context.Context, schemeID string, input CanvasSchemeInput) (CanvasScheme, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > canvasMaxNameBytes {
 		return CanvasScheme{}, fmt.Errorf("canvas scheme name must be 1 to %d bytes", canvasMaxNameBytes)
@@ -312,6 +391,9 @@ func (s *Service) SaveCanvasScheme(ctx context.Context, schemeID string, input C
 	}
 	if !canvasExecutions[input.Execution] {
 		return CanvasScheme{}, errors.New("invalid canvas scheme execution")
+	}
+	if err := input.Layout.validateEntryBindings(input.Execution); err != nil {
+		return CanvasScheme{}, err
 	}
 	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
 		return CanvasScheme{}, err

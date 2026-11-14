@@ -39,4 +39,7 @@ export const deploymentAPI = {
   // step; a refused deploy still leaves the draft and names it in the error.
   publishNode: (nodeId: string, summary: string) => request<{ revision: number; status: string }>(`/nodes/${encodeURIComponent(nodeId)}/publish`, 'POST', { summary }),
   deployRevision: (id: number) => request(`/revisions/${id}/deploy`, 'POST'),
+  // Publishes an empty baseline to an online node that never ran a configuration,
+  // so web upgrades (bound to a confirmed revision) can start (v1.5.5 item 11).
+  publishBaseline: (nodeId: string) => request<{ revision: number; status: string }>(`/nodes/${encodeURIComponent(nodeId)}/baseline`, 'POST', { confirmNodeId: nodeId }),
 };

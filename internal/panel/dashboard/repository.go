@@ -158,3 +158,41 @@ func (r *Repository) Trend(ctx context.Context, from, to time.Time) ([]Hour, err
 	}
 	return items, rows.Err()
 }
+
+// NodeTraffic is one live node's retained account traffic today and this month
+// (v1.5.5 item 9). Measured is false when the node has no sample this month.
+type NodeTraffic struct {
+	NodeID        string `json:"nodeId"`
+	TodayUpload   int64  `json:"todayUpload"`
+	TodayDownload int64  `json:"todayDownload"`
+	MonthUpload   int64  `json:"monthUpload"`
+	MonthDownload int64  `json:"monthDownload"`
+	Measured      bool   `json:"measured"`
+}
+
+// NodeTraffic sums node_traffic_samples per live node over the local month
+// [monthFrom, to) and the local day [dayFrom, to): the same samples and bounds
+// as the today total and /traffic/nodes/monthly, so the cards add up.
+func (r *Repository) NodeTraffic(ctx context.Context, dayFrom, monthFrom, to time.Time) ([]NodeTraffic, error) {
+	stamp := func(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05.000000000Z") }
+	rows, err := r.Database.QueryContext(ctx, `SELECT n.id,
+ coalesce(sum(CASE WHEN t.observed_at>=? THEN t.upload_bytes END),0),coalesce(sum(CASE WHEN t.observed_at>=? THEN t.download_bytes END),0),
+ coalesce(sum(t.upload_bytes),0),coalesce(sum(t.download_bytes),0),count(t.node_id)
+ FROM nodes n LEFT JOIN node_traffic_samples t ON t.node_id=n.id AND t.observed_at>=? AND t.observed_at<?
+ WHERE n.deleted_at IS NULL GROUP BY n.id ORDER BY n.created_at,n.id`, stamp(dayFrom), stamp(dayFrom), stamp(monthFrom), stamp(to))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NodeTraffic{}
+	for rows.Next() {
+		var item NodeTraffic
+		var samples int
+		if err := rows.Scan(&item.NodeID, &item.TodayUpload, &item.TodayDownload, &item.MonthUpload, &item.MonthDownload, &samples); err != nil {
+			return nil, err
+		}
+		item.Measured = samples > 0
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}

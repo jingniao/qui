@@ -184,16 +184,10 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	// The outbound source address and interface are node-local facts, not
 	// syntax: they are checked before rendering, and a missing address or
 	// interface is a temporary failure that the next attempt retries.
-	if state.Network != nil {
-		available := r.NetworkAvailable
-		if available == nil {
-			available = verifyNetworkAvailable
-		}
-		if err := available(*state.Network); err != nil {
-			result.Code = networkUnavailableCode
-			result.Message = err.Error()
-			return result, err
-		}
+	if err := r.verifyOutboundNetworks(state); err != nil {
+		result.Code = networkUnavailableCode
+		result.Message = err.Error()
+		return result, err
 	}
 	// Re-applying the retained revision is the one case where a render or
 	// validation failure must not be cached: the revision directory is the only

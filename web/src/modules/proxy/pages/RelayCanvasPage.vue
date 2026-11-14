@@ -25,6 +25,7 @@
         新建方案后即可从左侧资源库拖入服务器、自建节点或外部代理并连线；方案保存在面板，不随浏览器丢失。
       </p>
       <button type="button" class="ios-btn-primary mt-1" @click="createNewScheme">新建方案</button>
+      <button v-if="legacyCount" type="button" class="ios-btn-secondary" @click="legacyPanelOpen = true">遗留资源（{{ legacyCount }}）</button>
       </template>
     </div>
     <!-- 1. Top Integrated Studio Toolbar -->
@@ -93,7 +94,7 @@
             <!-- Live Status Indicator -->
             <div
               class="px-1.5 py-0.5 flex items-center gap-1.5 text-xs font-medium shrink-0 cursor-default"
-              :title="!currentScheme.published ? '当前方案为草稿（未发布）' : (currentScheme.hasUnpublishedChanges ? '当前方案有未发布的修改' : '当前方案已发布生效')"
+              :title="!currentScheme.published ? '当前方案为草稿（未发布）' : (currentScheme.hasUnpublishedChanges ? '当前方案有未发布的修改' : '已提交发布，部署与确认结果见方案状态')"
             >
               <span
                 class="w-1.5 h-1.5 rounded-full"
@@ -102,7 +103,7 @@
               <span
                 :class="!currentScheme.published ? 'text-ios-tertiary' : (currentScheme.hasUnpublishedChanges ? 'text-amber-700 font-semibold' : 'text-emerald-700 font-semibold')"
               >
-                {{ !currentScheme.published ? '草稿' : (currentScheme.hasUnpublishedChanges ? '未发布' : '已发布') }}
+                {{ !currentScheme.published ? '草稿' : (currentScheme.hasUnpublishedChanges ? '未发布' : '已提交') }}
               </span>
             </div>
 
@@ -187,7 +188,7 @@
                         class="w-1.5 h-1.5 rounded-full shrink-0"
                         :class="!s.published ? 'bg-neutral-400' : (s.hasUnpublishedChanges ? 'bg-amber-500' : 'bg-emerald-500')"
                       ></span>
-                      <span>{{ !s.published ? '草稿' : (s.hasUnpublishedChanges ? '未发布' : '已发布') }}</span>
+                      <span>{{ !s.published ? '草稿' : (s.hasUnpublishedChanges ? '未发布' : '已提交') }}</span>
                     </span>
 
                     <svg
@@ -205,6 +206,7 @@
 
               <!-- Popover Footer Action -->
               <div class="pt-1.5">
+                <button v-if="legacyCount" type="button" class="ios-btn-secondary w-full mb-2" @click="legacyPanelOpen = true; schemeDropdownOpen = false">遗留资源（{{ legacyCount }}）</button>
                 <button
                   type="button"
                   @click="createNewScheme(); schemeDropdownOpen = false"
@@ -887,6 +889,15 @@
               </select>
             </label>
 
+            <CanvasEntryEditor
+              v-if="currentScheme.executionLocation === 'server' && selectedNode.role === 'entry' && entryServerId"
+              :key="currentScheme.id + ':' + selectedNode.instanceId + ':' + entryServerId"
+              :node-id="entryServerId" :binding="selectedNode.entryBinding" :servers="servers" :inbounds="inbounds" :groups="entryGroups"
+              :exit-protocol="entryExitProtocol" :scheme-id="currentScheme.id"
+              :binding-state-ready="entryBindingStateReady" :binding-state-error="entryBindingStateError" :materialized-inbound-id="materializedEntryInboundId"
+              @apply="applyEntryBinding"
+            />
+
             <div v-if="selectedNode.resourceType === 'server' && selectedNode.role !== 'entry'" class="space-y-2 pt-2 border-t border-ios-separator">
               <PortControl :key="selectedNode.instanceId" :node-id="selectedNode.resourceId" :mode="selectedNode.relayPortMode || 'auto'" :port="selectedNode.relayPort" label="内部中转端口" page :owner="{ kind: 'canvas', id: currentScheme.id }" @update:mode="value => { selectedNode!.relayPortMode = value; saveDraft(); }" @update:port="value => { selectedNode!.relayPort = value; saveDraft(); }" />
             </div>
@@ -936,44 +947,36 @@
                 <span class="text-ios-tertiary">中转连线条数</span>
                 <span class="font-mono font-bold text-ios-label">{{ currentScheme.connections.length }}</span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-ios-tertiary">发布状态</span>
-                <span
-                  class="font-bold"
-                  :class="currentScheme.published ? 'text-emerald-600' : 'text-amber-600'"
-                >
-                  {{ publishing ? '发布中…' : (currentScheme.published ? '已发布生效' : '草稿 (未发布)') }}
-                </span>
+              <div v-if="currentScheme.executionLocation === 'client'" class="flex justify-between">
+                <span class="text-ios-tertiary">客户端发布</span>
+                <span>{{ currentScheme.published ? (currentScheme.hasUnpublishedChanges ? '有未发布修改' : '已发布到订阅') : '从未发布' }}</span>
               </div>
-            </div>
-
-            <div v-if="publishResult && publishResult.nodes.length" class="p-2.5 rounded-xl bg-neutral-50 border border-black/[0.06] space-y-1">
-              <div class="flex justify-between text-xs text-ios-tertiary">
-                <span>最近一次发布</span>
-                <span class="font-mono">{{ publishResult.batchId ? `批次 ${publishResult.batchId.slice(0, 8)}` : '单节点修订' }}</span>
-              </div>
-              <div v-for="node in publishResult.nodes" :key="node.nodeId" class="flex justify-between text-xs">
-                <span class="text-ios-label font-medium">{{ node.name || node.nodeId }}</span>
-                <span class="font-mono text-ios-secondary">#{{ node.revision }} · {{ publishStatusLabel(node.status) }}</span>
-              </div>
-              <div v-if="publishResult.warnings.length" class="text-amber-600 text-xs">{{ publishResult.warnings.join('；') }}</div>
             </div>
 
             <div class="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200/60 text-ios-blue text-xs leading-relaxed">
               💡 提示：点击画布中的任意节点或连线可在本面板编辑详细属性；从左侧将服务器或代理节点拖入即可快速扩展链路。
             </div>
 
+            <div v-if="currentScheme.id" class="space-y-2">
+              <button v-if="canRemoveScheme" type="button" class="w-full ios-btn-danger justify-center" :disabled="openingRemoval || publishing" @click="openRemoval">
+                {{ openingRemoval ? '读取影响预览…' : '停用并移除' }}
+              </button>
+              <p v-if="removalAvailabilityError" role="alert" class="text-sm text-ios-red">{{ removalAvailabilityError }}</p>
+            </div>
             <div v-if="currentScheme.id" class="pt-2">
               <button
                 type="button"
                 @click="confirmDeleteScheme = true"
-                class="w-full ios-btn-danger justify-center"
+                class="w-full ios-btn-secondary justify-center"
               >
-                删除此方案
+                仅删除画布
               </button>
+              <p class="text-xs text-ios-secondary">保留入口、分组和运行中的代理资源，只删除画布</p>
             </div>
           </div>
         </div>
+        <CanvasStatusCard v-if="currentScheme.id && currentScheme.executionLocation === 'server'" class="mt-4" :scheme-id="currentScheme.id" :version="currentScheme.serverUpdatedAt" :published-at="currentScheme.publishedAt" :refresh="statusRefresh" />
+        <p v-if="publishWarnings.length" class="mt-3 text-sm text-amber-700">{{ publishWarnings.join('；') }}</p>
       </div>
     </aside>
     </div>
@@ -983,6 +986,9 @@
     <AppDialog v-model="openPlanSummary" title="方案发布检查" :show-confirm="false">
       <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" :tunnel-names="tunnelNames" />
     </AppDialog>
+
+    <CanvasRemoveDialog v-if="removalScheme" :scheme="removalScheme" :servers="servers" @close="removalScheme = null" @removed="onSchemeRemoved" />
+    <LegacyResourcesPanel v-if="legacyPanelOpen && legacyResources" :resources="legacyResources" :servers="servers" :inbounds="inbounds" :outbounds="outbounds" @close="legacyPanelOpen = false" @changed="loadLegacyResources" @reattached="onLegacyReattached" />
 
     <!-- Schemes / Modals -->
     <AppDialog
@@ -1075,8 +1081,8 @@
     />
     <ConfirmDialog
       v-model="confirmDeleteScheme"
-      title="删除中转方案"
-      :message="`删除「${currentScheme.name}」？只删除画布方案，入站、出站与代理链不受影响。`"
+      title="仅删除画布"
+      :message="`删除「${currentScheme.name}」？保留入口、分组和运行中的代理资源，只删除画布。`"
       @confirm="removeScheme"
     />
   </div>
@@ -1085,6 +1091,12 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import CanvasConnectionDialog from '../components/relay/CanvasConnectionDialog.vue';
+import CanvasEntryEditor from '../components/relay/CanvasEntryEditor.vue';
+import CanvasRemoveDialog from '../components/relay/CanvasRemoveDialog.vue';
+import LegacyResourcesPanel from '../components/relay/LegacyResourcesPanel.vue';
+import { legacyResourceCount } from '../legacyResources';
+import { canvasLegacyAPI, type CanvasLegacyResources } from '../api';
+import CanvasStatusCard from '../components/relay/CanvasStatusCard.vue';
 import ExternalProxyDialog from '../components/relay/ExternalProxyDialog.vue';
 import PortControl from '../../tunnels/components/PortControl.vue';
 import TunnelPlanSummary from '../components/relay/TunnelPlanSummary.vue';
@@ -1099,6 +1111,7 @@ import { APIError } from '../../../app/apiClient';
 import { isOwner } from '../../../app/auth';
 import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { loadNodeMeta } from '../../nodes/nodeMeta';
 import {
   proxyAPI,
@@ -1108,9 +1121,9 @@ import {
   canvasSchemeToRelayScheme,
   relaySchemeToCanvasInput,
   selfHostedResourceId,
-  type CanvasPublishResult,
   type CanvasScheme,
   type CanvasSchemeContext,
+  type CanvasEntryBinding,
   type Outbound,
   type Inbound
 } from '../api';
@@ -1134,6 +1147,25 @@ const gestureCleanups = new Set<() => void>();
 const resourceSearch = ref('');
 const activeSchemeId = ref('');
 const schemeDropdownOpen = ref(false);
+const legacyResources = ref<CanvasLegacyResources | null>(null);
+const legacyPanelOpen = ref(false);
+const legacyCount = computed(() => legacyResources.value ? legacyResourceCount(legacyResources.value) : 0);
+async function loadLegacyResources() {
+  if (!isOwner.value) return;
+  try { legacyResources.value = await canvasLegacyAPI.list(); }
+  catch (error) { showToast(`读取遗留资源失败：${(error as Error).message}`, 'error'); }
+}
+async function onLegacyReattached(schemeId: string, remove: boolean) {
+  legacyPanelOpen.value = false;
+  await flushPendingSaves();
+  await reloadSchemes();
+  selectScheme(schemeId);
+  await loadLegacyResources();
+  if (remove) {
+    try { removalScheme.value = await canvasAPI.get(schemeId); }
+    catch (error) { showToast(`方案已重新挂接，读取撤除方案失败：${(error as Error).message}`, 'error'); }
+  } else { showToast('已重新挂接为方案草稿，运行配置保持不变', 'success'); }
+}
 
 function toggleSchemeDropdown() {
   schemeDropdownOpen.value = !schemeDropdownOpen.value;
@@ -1241,13 +1273,14 @@ const connectingMousePos = reactive({ x: 0, y: 0 });
 const editor = ref<{ key: number; connection?: CanvasConnection; source: CanvasNodeInstance; target: CanvasNodeInstance } | null>(null);
 const openPlanSummary = ref(false);
 const openPublishModal = ref(false);
-// The last publication's per-node result, as the server reported it.
-const publishResult = ref<CanvasPublishResult | null>(null);
+const publishWarnings = ref<string[]>([]);
+const statusRefresh = ref(0);
 const publishing = ref(false);
 
 // Data the canvas needs besides the schemes themselves: a reference is resolved
 // against these lists on load, so display fields are never stored on the server.
 const inbounds = ref<Inbound[]>([]);
+const entryGroups = ref<NodeGroup[]>([]);
 const outbounds = ref<Outbound[]>([]);
 // Schemes an earlier build kept in this browser, offered once for import.
 const pendingLocalSchemes = ref<RelayScheme[]>([]);
@@ -1263,6 +1296,91 @@ function canvasContext(): CanvasSchemeContext {
 // An empty display state is never added to the store or persisted.
 const emptyScheme: RelayScheme = { id: '', name: '', executionLocation: 'server', nodes: [], connections: [], published: false, updatedAt: '' };
 const currentScheme = computed<RelayScheme>(() => proxyNodeStore.schemes.find(s => s.id === activeSchemeId.value) || proxyNodeStore.schemes[0] || emptyScheme);
+const entryServerId = computed(() => selectedNode.value ? instanceNodeId(selectedNode.value) || '' : '');
+const entryBindingStateReady = ref(false);
+const entryBindingStateError = ref('');
+const materializedEntryInboundId = ref('');
+watch(() => [currentScheme.value.id, currentScheme.value.serverUpdatedAt, currentScheme.value.executionLocation, selectedNode.value?.instanceId, selectedNode.value?.role, entryServerId.value, statusRefresh.value, publishing.value], async (_, __, onCleanup) => {
+  let canceled = false;
+  onCleanup(() => { canceled = true; });
+  entryBindingStateReady.value = false;
+  entryBindingStateError.value = '';
+  materializedEntryInboundId.value = '';
+  const scheme = currentScheme.value;
+  const instanceId = selectedNode.value?.instanceId;
+  if (!scheme.id || scheme.executionLocation !== 'server' || selectedNode.value?.role !== 'entry' || !instanceId || !entryServerId.value || publishing.value) return;
+  try {
+    const [status, groups] = await Promise.all([
+      canvasAPI.status(scheme.id),
+      choices((page, size) => groupAPI.list(page, size)),
+    ]);
+    if (canceled) return;
+    materializedEntryInboundId.value = status.entries.find(entry => entry.instanceId === instanceId)?.inboundId || '';
+    entryGroups.value = groups;
+    entryBindingStateReady.value = true;
+  } catch (error) {
+    if (!canceled) entryBindingStateError.value = `读取入口绑定与实际分组失败：${(error as Error).message}`;
+  }
+}, { immediate: true, flush: 'sync' });
+const entryExitProtocol = computed(() => {
+  const exit = currentScheme.value.nodes.find(node => node.role === 'exit');
+  return inbounds.value.find(inbound => exit && selfHostedResourceId(inbound) === exit.resourceId)?.protocol || '';
+});
+function applyEntryBinding(nodeId: string, binding: CanvasEntryBinding) {
+  const instance = selectedNode.value;
+  if (!instance || instance.role !== 'entry' || currentScheme.value.executionLocation !== 'server') return;
+  const server = servers.value.find(node => node.id === nodeId)!;
+  instance.resourceType = 'server';
+  instance.resourceId = server.id;
+  instance.name = server.name;
+  instance.protocol = 'server';
+  instance.serverAddress = server.publicIp || '未设置公网 IP';
+  instance.status = canvasDisplayStatus(server.status);
+  instance.isManageable = true;
+  instance.entryBinding = binding;
+  delete instance.listenPort;
+  delete instance.targetPort;
+  saveDraft();
+}
+const removalScheme = ref<CanvasScheme | null>(null);
+const openingRemoval = ref(false);
+const canRemoveScheme = ref(false);
+const removalAvailabilityError = ref('');
+watch(() => [currentScheme.value.id, currentScheme.value.serverUpdatedAt, currentScheme.value.executionLocation, currentScheme.value.publishedAt], async (_, __, onCleanup) => {
+  let canceled = false;
+  onCleanup(() => { canceled = true; });
+  canRemoveScheme.value = false;
+  removalAvailabilityError.value = '';
+  const scheme = currentScheme.value;
+  if (!scheme.id || scheme.executionLocation !== 'server' || !scheme.serverUpdatedAt) return;
+  try {
+    const preview = await canvasAPI.removePlan(scheme.id, { updatedAt: scheme.serverUpdatedAt });
+    if (!canceled) canRemoveScheme.value = preview.entries.length > 0 || preview.objects.some(item => !item.keep);
+  } catch (error) {
+    if (!canceled) removalAvailabilityError.value = `读取撤除状态失败：${(error as Error).message}`;
+  }
+}, { immediate: true });
+async function openRemoval() {
+  if (openingRemoval.value || publishing.value) return;
+  openingRemoval.value = true;
+  const id = currentScheme.value.id;
+  try {
+    await flushPendingSaves();
+    removalScheme.value = await canvasAPI.get(id);
+  } catch (error) { showToast((error as Error).message, 'error'); }
+  finally { openingRemoval.value = false; }
+}
+async function onSchemeRemoved(id: string) {
+  removalScheme.value = null;
+  proxyNodeStore.schemes = proxyNodeStore.schemes.filter(scheme => scheme.id !== id);
+  selectedNode.value = null;
+  selectedConnection.value = null;
+  activeSchemeId.value = proxyNodeStore.schemes[0]?.id || '';
+  publishWarnings.value = [];
+  showToast('已停用并移除方案', 'success');
+  await reloadSchemes();
+  await loadLegacyResources();
+}
 watch(() => proxyNodeStore.schemes.map(s => s.id), ids => {
   if (!ids.includes(activeSchemeId.value)) activeSchemeId.value = ids[0] || '';
 }, { immediate: true });
@@ -1277,7 +1395,7 @@ const { plan, checking, error: planError, run: runPlan } = useTunnelPlan(
     return currentScheme.value.serverUpdatedAt ? canvasAPI.plan(currentScheme.value.id, planInput.value.layout) : null;
   }
 );
-watch(() => currentScheme.value.id, () => { editor.value = null; });
+watch(() => currentScheme.value.id, () => { editor.value = null; publishWarnings.value = []; });
 // A plan that reports a conflict blocks publishing: the server would refuse it too,
 // and the dialog says why instead of promising a check that will fail.
 const planBlocked = computed(() => !!plan.value && !checking.value && (!plan.value.ok || (plan.value.conflicts || []).length > 0));
@@ -1445,6 +1563,7 @@ async function removeScheme() {
   try {
     await flushPendingSaves();
     await deleteCanvasScheme(scheme.id);
+    await loadLegacyResources();
     selectedNode.value = null;
     selectedConnection.value = null;
     activeSchemeId.value = proxyNodeStore.schemes[0]?.id || '';
@@ -1724,6 +1843,9 @@ function saveDraft(immediate: boolean | Event = false): Promise<void> | void {
   const scheme = currentScheme.value;
   if (!scheme.id) return;
   for (const node of scheme.nodes) {
+    if (scheme.executionLocation !== 'server' || node.resourceType !== 'server' || node.role !== 'entry') {
+      delete node.entryBinding;
+    }
     if (node.resourceType !== 'server' || (node.role !== 'relay' && node.role !== 'exit')) {
       delete node.relayPortMode;
       delete node.relayPort;
@@ -1862,24 +1984,7 @@ function ignoreLocalSchemes() {
 
 // Publishing a server scheme makes the server create the relay objects the
 // drawing describes and deploy them through the normal batches, exit first and
-// entry last. The answer names each node's revision and status, which is what
-// the panel shows; nothing is fabricated before the server answers.
-const publishStatusNames: Record<string, string> = {
-  pending: '待应用',
-  waiting: '等待前置节点',
-  dispatching: '下发中',
-  dispatching_rollback: '回滚中',
-  applying: '应用中',
-  applied: '已生效',
-  success: '已生效',
-  failed: '失败',
-  rolled_back: '已回滚'
-};
-
-function publishStatusLabel(status: string): string {
-  return publishStatusNames[status] || status;
-}
-
+// entry last. Read deployment and confirmation separately from the status API.
 async function handleConfirmPublish() {
   openPublishModal.value = false;
   const scheme = currentScheme.value;
@@ -1913,16 +2018,14 @@ async function handleConfirmPublish() {
     saveQueue = flushed.catch(() => undefined);
     await flushed;
     const result = await canvasAPI.publish(scheme.id);
-    publishResult.value = result;
-    scheme.published = true;
-    scheme.hasUnpublishedChanges = false;
-    scheme.publishedAt = new Date().toISOString();
-    showToast(scheme.executionLocation === 'client' ? '客户端方案已发布到用户订阅' : `已发布到 ${result.nodes.length} 台服务器${result.batchId ? '' : '（单节点修订）'}`, 'success');
+    if (currentScheme.value.id === scheme.id) publishWarnings.value = result.warnings;
+    showToast(scheme.executionLocation === 'client' ? '客户端方案已发布到用户订阅' : `已提交 ${result.nodes.length} 台服务器的发布请求，请查看部署批次与节点确认`, 'success');
     await reloadSchemes();
   } catch (error) {
     showToast(`发布失败: ${(error as Error).message}`, 'error');
   } finally {
     publishing.value = false;
+    statusRefresh.value++;
   }
 }
 
@@ -1934,16 +2037,18 @@ async function loadWorkspace() {
   proxyNodeStore.subscriptions = [];
   try {
     // Read independent resources in one round; metadata is not needed to draw.
-    const [nodeRes, inboundRes, outboundRes, schemes] = await Promise.all([
+    const [nodeRes, inboundRes, outboundRes, schemes, groups] = await Promise.all([
       choices((page, size) => nodeAPI.list(page, '', false, size)),
       choices((page, size) => proxyAPI.inbounds('', page, size)),
       choices((page, size) => proxyAPI.outbounds('', page, size)),
       choices((page, size) => canvasAPI.list(page, size)),
+      choices((page, size) => groupAPI.list(page, size)),
       loadImports()
     ]);
     servers.value = nodeRes;
     inbounds.value = inboundRes;
     outbounds.value = outboundRes;
+    entryGroups.value = groups;
     await reloadSchemes(schemes);
     void Promise.all(nodeRes.map(node => loadNodeMeta(node.id, true))).catch(e => {
       showToast(`载入服务器元数据失败: ${(e as Error).message}`, 'error');
@@ -1956,6 +2061,7 @@ async function loadWorkspace() {
 }
 
 onMounted(async () => {
+  void loadLegacyResources();
   await loadWorkspace();
   // Schemes are stored by the server now; the browser keeps no copy of them.
   readLocalSchemes();

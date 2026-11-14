@@ -10,10 +10,20 @@ export type { ImportDiagnostic, ImportResult } from './proxyNodes';
 // `latestResult` is the bounded result of the last attempt; `lastSuccessAt` stays
 // empty until an attempt commits endpoints.
 export interface ImportSource { id: string; name: string; kind?: ImportSourceKind; intervalSeconds: number; lastFetchAt: string; lastSuccessAt: string; lastStatus: string; lastError: string; latestResult?: ImportResult | null; userIds: string[] }
-export interface ImportedProxy { id: string; sourceId: string; proxyKey: string; name: string; protocol: string; server: string; port: number }
+export interface ImportedProxy { id: string; sourceId: string; proxyKey: string; name: string; protocol: string; server: string; port: number; kind: ImportSourceKind; revision: number }
+export interface ImportDeletionPreview {
+  node: { id: string; name: string; protocol: string };
+  groups: { id: string; name: string }[];
+  clientPolicies: { profileId: string; profileName: string; groups: string[]; active: boolean }[];
+  canvases: { schemeId: string; schemeName: string }[];
+  lastInSource: boolean;
+}
 export interface SourceInput { name: string; intervalSeconds: number; userIds: string[]; url?: string; content?: string }
 export const importAPI = {
   proxies: () => request<{ items: ImportedProxy[] }>('/imported-proxies'),
+  rename: (id: string, input: { name: string; expectedRevision: number }) => request<ImportedProxy>(`/imported-proxies/${encodeURIComponent(id)}`, 'PUT', input),
+  deletionPreview: (id: string) => request<ImportDeletionPreview>(`/imported-proxies/${encodeURIComponent(id)}/deletion-preview`),
+  removeProxy: (id: string, input: { expectedRevision: number; removeReferences: boolean }) => request<void>(`/imported-proxies/${encodeURIComponent(id)}`, 'DELETE', input),
   list: () => request<{ items: ImportSource[] }>('/subscription-sources'),
   // The ID is the primary field. A pasted import is analysed by the same pipeline
   // as a fetch, so its bounded result comes back with the saved source; a source
@@ -79,5 +89,5 @@ export async function loadImports() {
   const [sources, proxies] = await Promise.all([importAPI.list(), importAPI.proxies()]);
   const kindOf = new Map(sources.items.map(source => [source.id, importSourceKind(source)]));
   proxyNodeStore.subscriptions = sources.items.map(s => ({ id:s.id, name:s.name, kind:importSourceKind(s), url:'已加密保存', nodeCount:proxies.items.filter(p => p.sourceId===s.id).length, autoUpdate:true, lastUpdated:s.lastFetchAt || '未拉取', usedTraffic:'—', totalTraffic:'—', userIds:s.userIds, intervalSeconds:s.intervalSeconds, lastStatus:s.lastStatus, lastError:s.lastError, lastFetchAt:s.lastFetchAt, lastSuccessAt:s.lastSuccessAt, latestResult:s.latestResult ?? null } satisfies SubscriptionItem));
-  proxyNodeStore.manualNodes = proxies.items.map(p => ({id:p.id, sourceId:p.sourceId, proxyKey:p.proxyKey, name:p.name, protocol:p.protocol, sourceType:proxySourceType(kindOf.get(p.sourceId) || 'url'), sourceName:sources.items.find(s=>s.id===p.sourceId)?.name || '导入来源', server:p.server, port:p.port, status:'untested', ...guessProtocolNetworks(p.protocol), createdAt:''}));
+  proxyNodeStore.manualNodes = proxies.items.map(p => ({id:p.id, sourceId:p.sourceId, proxyKey:p.proxyKey, revision:p.revision, name:p.name, protocol:p.protocol, sourceType:proxySourceType(kindOf.get(p.sourceId) || 'url'), sourceName:p.kind === 'content' ? '单独导入' : sources.items.find(s=>s.id===p.sourceId)?.name || '导入来源', server:p.server, port:p.port, status:'untested', ...guessProtocolNetworks(p.protocol), createdAt:''}));
 }

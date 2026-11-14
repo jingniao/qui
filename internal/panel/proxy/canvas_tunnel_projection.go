@@ -9,7 +9,7 @@ import (
 
 // Keep the connected relay component around a shared hop. Invalid unrelated
 // draft components must not block or enter another drawing's publication.
-func (s *Service) canvasDependencyLayout(ctx context.Context, layout CanvasLayout, wanted map[string]bool) (CanvasLayout, error) {
+func (s *Service) canvasDependencyLayout(ctx context.Context, schemeID string, layout CanvasLayout, wanted map[string]bool) (CanvasLayout, error) {
 	refs := map[string]string{}
 	for _, i := range layout.Instances {
 		refs[i.InstanceID] = i.Ref
@@ -64,6 +64,24 @@ func (s *Service) canvasDependencyLayout(ctx context.Context, layout CanvasLayou
 			include = include || nodes["server:"+nodeID]
 		}
 		if include {
+			if i.EntryBinding != nil {
+				record, err := s.Repository.CanvasEntryBinding(ctx, schemeID, i.InstanceID)
+				if errors.Is(err, ErrNotFound) {
+					i.EntryBinding = nil
+				} else if err != nil {
+					return result, err
+				} else {
+					inbound, err := s.Repository.Inbound(ctx, record.InboundID, false)
+					if err != nil {
+						return result, err
+					}
+					// Only published identity and settings participate in shared updates.
+					i.EntryBinding = &CanvasEntryBinding{Mode: record.Mode, Protocol: inbound.Protocol, Core: inbound.Core, PortMode: "auto", GroupMode: "none"}
+					if record.Mode == "reuse" {
+						i.EntryBinding.InboundID = inbound.ID
+					}
+				}
+			}
 			result.Instances = append(result.Instances, i)
 		}
 	}

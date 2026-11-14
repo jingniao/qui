@@ -42,6 +42,13 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 		}
 	}
 	cores := node.EnabledCores(c)
+	var name string
+	if err := tx.QueryRowContext(ctx, "SELECT name FROM nodes WHERE id=?", state.NodeID).Scan(&name); err != nil {
+		return err
+	}
+	if err := node.RequireOutboundSourceSupport(state, c, name); err != nil {
+		return err
+	}
 	if err := desiredstate.RequireKeywordSupport(state, node.KeywordCapabilities(cores)); err != nil {
 		return fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
 	}

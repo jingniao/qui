@@ -36,6 +36,7 @@ export interface TunnelRuleInput {
 export interface PortCheck { nodeId: string; port: number; free: boolean; usedBy?: { kind: 'inbound' | 'tunnel' | 'rule' | 'canvas'; id: string; name: string } }
 export interface PublishSelection { tunnelIds: string[]; ruleIds: string[] }
 export interface PublishPlan {
+  installGost?: { nodeId: string; name: string }[];
   ok: boolean; message?: string;
   servers: { nodeId: string; nodeName: string; order: number;
     listeners: { port: number; network: 'tcp' | 'udp' | 'both'; purpose: string }[];
@@ -43,6 +44,7 @@ export interface PublishPlan {
   conflicts: { nodeId: string; port: number; usedBy: string }[]; warnings: string[];
 }
 export interface PublishResult {
+  gostRemovable?: { nodeId: string; name: string }[];
   batchId?: string;
   servers: { nodeId: string; nodeName: string; revision: number | null; status: 'applied' | 'unchanged' | 'failed' | 'rolled_back' | 'skipped'; message?: string }[];
 }
@@ -87,7 +89,7 @@ export const nodeRelayAPI = {
 };
 export async function loadTunnelChoices(includeInbounds = true): Promise<{ nodes: Pick<NodeView, 'id' | 'name' | 'publicIp'>[]; inbounds: Pick<Inbound, 'id' | 'name' | 'nodeId' | 'port' | 'protocol'>[] }> {
   if (import.meta.env.DEV && mockEnabled()) return (await import('./mock')).mockChoices();
-  const [nodes, inbounds] = await Promise.all([choices((page) => nodeAPI.list(page, '')), includeInbounds ? choices((page, size) => proxyAPI.inbounds('', page, size)) : Promise.resolve([])]);
+  const [nodes, inbounds] = await Promise.all([choices((page, size) => nodeAPI.list(page, '', false, size)), includeInbounds ? choices((page, size) => proxyAPI.inbounds('', page, size)) : Promise.resolve([])]);
   return { nodes, inbounds };
 }
 export function tunnelError(error: unknown): string {

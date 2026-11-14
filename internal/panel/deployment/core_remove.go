@@ -87,41 +87,11 @@ func (r *Repository) QueueRemoveCore(ctx context.Context, audit ReleaseAccess, n
 	if err := nodeAvailable(ctx, tx, nodeID, ""); err != nil {
 		return conflict("core_pending")
 	}
-	used := map[string]bool{}
-	rows, err := tx.QueryContext(ctx, "SELECT id,core FROM inbounds WHERE node_id=?", nodeID)
+	ids, err := r.coreInboundIDs(ctx, tx, nodeID, component, c.CoreName, current)
 	if err != nil {
 		return CoreRemoveTask{}, err
 	}
-	for rows.Next() {
-		var id, core string
-		if err := rows.Scan(&id, &core); err != nil {
-			rows.Close()
-			return CoreRemoveTask{}, err
-		}
-		if core == component || core == "" && c.CoreName == component {
-			used[id] = true
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return CoreRemoveTask{}, err
-	}
-	state, err := r.stateInTransaction(ctx, tx, current)
-	if err != nil {
-		return CoreRemoveTask{}, err
-	}
-	for _, in := range state.Inbounds {
-		if in.Core == component || in.Core == "" && c.CoreName == component {
-			used[in.ID] = true
-		}
-	}
-	if len(used) > 0 {
-		ids := []string{}
-		for id := range used {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
+	if len(ids) > 0 {
 		return CoreRemoveTask{}, &CoreRemovalConflict{Code: "core_in_use", InboundIDs: ids}
 	}
 	taskID, err := id.New()
@@ -136,6 +106,45 @@ func (r *Repository) QueueRemoveCore(ctx context.Context, audit ReleaseAccess, n
 		return t, err
 	}
 	return t, tx.Commit()
+}
+
+// coreInboundIDs checks both draft and published inbounds.
+func (r *Repository) coreInboundIDs(ctx context.Context, tx *sql.Tx, nodeID, component, primary string, current int64) ([]string, error) {
+	used := map[string]bool{}
+	rows, err := tx.QueryContext(ctx, "SELECT id,core FROM inbounds WHERE node_id=?", nodeID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id, core string
+		if err := rows.Scan(&id, &core); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if core == component || core == "" && primary == component {
+			used[id] = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	state, err := r.stateInTransaction(ctx, tx, current)
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range state.Inbounds {
+		if in.Core == component || in.Core == "" && primary == component {
+			used[in.ID] = true
+		}
+	}
+	ids := []string{}
+	for id := range used {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 func (r *Repository) PendingRemoveCore(ctx context.Context, nodeID string) (*pb.RemoveCoreCommand, error) {
 	t, err := scanRemove(r.Database.QueryRowContext(ctx, "SELECT "+removeColumns+" FROM core_remove_tasks WHERE node_id=? AND status IN ('queued','running') ORDER BY updated_at,id LIMIT 1", nodeID))

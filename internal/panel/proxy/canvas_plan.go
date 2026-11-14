@@ -39,6 +39,7 @@ type CanvasPlanConflict struct {
 	ConnectionID string `json:"connectionId"`
 }
 type CanvasPlanResult struct {
+	Entries     []CanvasPlanEntry      `json:"entries"`
 	Tunnels     []CanvasTunnelImpact   `json:"tunnels"`
 	OK          bool                   `json:"ok"`
 	Servers     []CanvasPlanServer     `json:"servers"`
@@ -75,6 +76,12 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 	for _, relay := range plan.relays {
 		listeners = append(listeners, canvasListener{relay.exitNode, relay.name, "forward", relay.connectionID, relay.port, nil})
 	}
+	for _, entry := range plan.entries {
+		if entry.binding != nil && entry.binding.Mode == "create" && entry.existing.ID == "" {
+			e := entry.preview
+			listeners = append(listeners, canvasListener{e.NodeID, e.Name, e.Protocol, e.InstanceID, e.Port, nil})
+		}
+	}
 	owned, err := s.canvasOwnedInbounds(ctx, plan)
 	if err != nil {
 		return nil, err
@@ -107,6 +114,9 @@ func (s *Service) canvasListenerConflicts(ctx context.Context, plan *canvasPlan,
 		}
 		for _, o := range occupants {
 			// Exact names alone do not establish ownership: the same prefix/shape
+			if l.edge != nil && l.edge.upgradeOutbound.ID != "" && l.edge.adopt.ID == o.ID {
+				continue
+			}
 			// recognition used for pruning must also recognise this inbound.
 			isOwned := false
 			for _, item := range owned {
@@ -163,7 +173,19 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 	if layout != nil {
 		scheme.Layout = *layout
 	}
-	result := CanvasPlanResult{Tunnels: []CanvasTunnelImpact{}, OK: true, Servers: []CanvasPlanServer{}, Connections: []CanvasPlanConnection{}, Conflicts: []CanvasPlanConflict{}, Warnings: []string{}}
+	return s.planCanvas(ctx, scheme)
+}
+
+// PlanCanvas previews an in-memory scheme without saving a draft.
+func (s *Service) PlanCanvas(ctx context.Context, scheme CanvasScheme) (CanvasPlanResult, error) {
+	s.canvasMu.Lock()
+	defer s.canvasMu.Unlock()
+	return s.planCanvas(ctx, scheme)
+}
+
+// planCanvas requires canvasMu; callers can compose it without locking twice.
+func (s *Service) planCanvas(ctx context.Context, scheme CanvasScheme) (CanvasPlanResult, error) {
+	result := CanvasPlanResult{Entries: []CanvasPlanEntry{}, Tunnels: []CanvasTunnelImpact{}, OK: true, Servers: []CanvasPlanServer{}, Connections: []CanvasPlanConnection{}, Conflicts: []CanvasPlanConflict{}, Warnings: []string{}}
 	for _, c := range scheme.Layout.Connections {
 		result.Connections = append(result.Connections, CanvasPlanConnection{c.ID, "ok", "可发布"})
 	}
@@ -195,7 +217,7 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 		}
 		result.Tunnels = append(result.Tunnels, CanvasTunnelImpact{c.TunnelID, refs})
 	}
-	plan, err := s.canvasBuildPlan(ctx, scheme)
+	plan, err := s.canvasBuildPreviewPlan(ctx, scheme)
 	if err != nil {
 		result.OK = false
 		result.Message = err.Error()
@@ -213,7 +235,7 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 					one.Layout.Instances = append(one.Layout.Instances, instance)
 				}
 			}
-			if _, rowErr := s.canvasBuildPlan(ctx, one); rowErr != nil {
+			if _, rowErr := s.canvasBuildPreviewPlan(ctx, one); rowErr != nil {
 				result.Connections[i].Status = "error"
 				result.Connections[i].Message = rowErr.Error()
 				found = true
@@ -283,6 +305,7 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 		result.Tunnels = append(result.Tunnels, CanvasTunnelImpact{tunnelID, refs})
 		seenTunnels[tunnelID] = true
 	}
+	result.Warnings = append(result.Warnings, stale.warnings...)
 	result.Conflicts, err = s.canvasListenerConflicts(ctx, plan, stale)
 	if err != nil {
 		return result, err
@@ -358,6 +381,9 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 			return result, err
 		}
 		existing, err := s.Repository.canvasOutboundNamed(ctx, e.sourceNode, e.outboundName)
+		if errors.Is(err, ErrNotFound) && e.upgradeOutbound.ID != "" {
+			existing, err = e.upgradeOutbound, nil
+		}
 		action := "update"
 		if errors.Is(err, ErrNotFound) {
 			action = "create"
@@ -373,7 +399,7 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 			if targetErr != nil && !errors.Is(targetErr, ErrNotFound) {
 				return result, targetErr
 			}
-			if existing.Protocol != e.protocol || existing.TargetInboundID != target.ID {
+			if (existing.Protocol != e.protocol && existing.ID != e.upgradeOutbound.ID) || existing.TargetInboundID != target.ID {
 				failAll(fmt.Errorf("生成的出站 %s 已被手动修改，请删除它后重新发布", existing.Name))
 			}
 		}
@@ -394,25 +420,27 @@ func (s *Service) PlanCanvasScheme(ctx context.Context, schemeID string, layout 
 		add(c.nodes[0], CanvasPlanObject{Kind: "chain", Name: c.name}, action)
 	}
 	for _, e := range plan.entries {
-		target := e.existing.DefaultOutbound
-		switch {
-		case e.finalOutbound != "":
-			target = e.finalOutbound
-		case e.chain != nil:
-			target = e.chain.name
-			if existing, err := s.Repository.canvasChainNamed(ctx, e.chain.name); err == nil {
-				target = "chain:" + existing.ID
-			} else if !errors.Is(err, ErrNotFound) {
-				return result, err
+		if e.preview != nil {
+			result.Entries = append(result.Entries, *e.preview)
+			action := "create"
+			if e.existing.ID != "" {
+				action = "update"
+				if e.binding.Mode == "create" {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("已发布入口 %s 保持现有协议、端口和分组，本次仅更新路由", e.preview.Name))
+				}
+				if e.preview.PreviousRoute == e.preview.Route {
+					continue
+				}
+				result.Warnings = append(result.Warnings, fmt.Sprintf("入站 %s 将修改默认出站：%s → %s", e.preview.Name, e.preview.PreviousRoute, e.preview.Route))
 			}
-		case e.edge != nil:
-			target = e.edge.outboundName
-			if existing, err := s.Repository.canvasOutboundNamed(ctx, e.edge.sourceNode, e.edge.outboundName); err == nil {
-				target = existing.ID
-			} else if !errors.Is(err, ErrNotFound) {
-				return result, err
-			}
-		case stale.outbound[target] || stale.chainID[strings.TrimPrefix(target, "chain:")]:
+			add(e.preview.NodeID, CanvasPlanObject{"inbound", e.preview.Name, e.preview.Protocol, e.preview.Port, e.preview.Route}, action)
+			continue
+		}
+		target, err := s.canvasEntryRoute(ctx, e)
+		if err != nil {
+			return result, err
+		}
+		if e.finalOutbound == "" && e.chain == nil && e.edge == nil && (stale.outbound[target] || stale.chainID[strings.TrimPrefix(target, "chain:")]) {
 			target = "direct"
 			result.Warnings = append(result.Warnings, fmt.Sprintf("入站 %s 在方案中已没有出站连接，默认出站改为 direct", e.existing.Name))
 		}

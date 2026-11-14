@@ -97,6 +97,12 @@ func TestProfilePreview(t *testing.T) {
 		names := []string{}
 		for _, member := range group.Members {
 			names = append(names, member.Name)
+			if member.Kind == rules.KindProxy && !strings.HasPrefix(member.Ref, "inbound:") {
+				t.Fatalf("preview proxy has no stable endpoint reference: %+v", member)
+			}
+			if member.Kind != rules.KindProxy && member.Ref != "" {
+				t.Fatalf("non-proxy member has endpoint reference: %+v", member)
+			}
 		}
 		if group.Name != document.Groups[index].Name || !reflect.DeepEqual(names, document.Groups[index].Proxies) {
 			t.Fatal(group, document.Groups[index])

@@ -1,6 +1,6 @@
 import type { NodeView } from '../api';
 import { hostMetrics, nicRate } from '../metrics';
-import { calculateRemainingDays, formatRenewPrice, getNodeMeta } from '../nodeMeta';
+import { calculateRemainingDays, formatRenewPrice, getNodeMeta, parseRenewPrice, resolveCountryInfo, type CountryInfo, type NodeMeta } from '../nodeMeta';
 import { coreSummaryLabel, unhealthyCores } from '../coreSummary';
 
 export const statusOptions = [
@@ -33,7 +33,7 @@ export function relativeHeartbeat(value: string, now: number) {
   return `${Math.floor(seconds / 86400)} 天前`;
 }
 export interface ServerField { key: string; label: string; value: string; bytes?: number | null; warning?: boolean; }
-export interface ServerRow { node: NodeView; region: string; status: ReturnType<typeof serverStatus>; fields: ServerField[]; }
+export interface ServerRow { node: NodeView; region: string; country: CountryInfo; status: ReturnType<typeof serverStatus>; fields: ServerField[]; }
 const percent = (value?: number) => typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}%` : '—';
 const text = (value?: string | number) => value === undefined || value === null || value === '' ? '—' : String(value);
 export function serverRow(node: NodeView, now: number, today?: number, month?: number): ServerRow {
@@ -44,6 +44,7 @@ export function serverRow(node: NodeView, now: number, today?: number, month?: n
   const receive = nicRate(metrics, 'receive'), transmit = nicRate(metrics, 'transmit');
   const fields: ServerField[] = [
     { key: 'ip', label: '公网 IP', value: text(node.publicIp) },
+    { key: 'tags', label: '分组', value: node.tags?.length ? node.tags.join('、') : '—' },
     { key: 'cpu', label: 'CPU', value: percent(hb?.cpu_percent) },
     { key: 'memory', label: '内存', value: percent(hb?.memory_percent) },
     { key: 'disk', label: '磁盘', value: percent(hb?.disk_percent) },
@@ -61,5 +62,43 @@ export function serverRow(node: NodeView, now: number, today?: number, month?: n
     { key: 'os', label: '操作系统', value: text(node.capabilities?.host?.osPrettyName || node.os) },
     { key: 'remark', label: '备注', value: text(meta.remark) }
   ];
-  return { node, region: meta.region || '', status: serverStatus(node, now), fields };
+  const country = resolveCountryInfo({ region: meta.region, countryCode: node.countryCode, name: node.name, hostname: node.hostname });
+  return { node, region: meta.region || '', country, status: serverStatus(node, now), fields };
+}
+
+export interface ServerEditFormState {
+  name: string;
+  region: string;
+  remark: string;
+  renewDate: string;
+  renewCurrency: string;
+  renewPrice: string | number;
+  renewCycle: string;
+  enabled: boolean;
+  allowSubscription: boolean;
+  maintenance: boolean;
+  tags: string[];
+}
+
+// Merges latest node and meta into the current edit form, preserving any field
+// that the user has already touched since the drawer was opened.
+export function mergeLatestEditForm(
+  current: ServerEditFormState,
+  baseline: ServerEditFormState,
+  latestNode: { name: string; enabled: boolean; allowSubscription: boolean; maintenance: boolean },
+  latestMeta: Partial<NodeMeta>
+): void {
+  const parsed = parseRenewPrice(latestMeta.renewPrice, latestMeta.renewCurrency, latestMeta.renewCycle);
+  if (current.name === baseline.name) current.name = latestNode.name;
+  if (current.region === baseline.region) current.region = latestMeta.region || '';
+  if (current.remark === baseline.remark) current.remark = latestMeta.remark || '';
+  if (current.renewDate === baseline.renewDate) current.renewDate = latestMeta.renewDate || '';
+  if (current.renewCurrency === baseline.renewCurrency) current.renewCurrency = parsed.currency;
+  if (current.renewPrice === baseline.renewPrice) current.renewPrice = parsed.price;
+  if (current.renewCycle === baseline.renewCycle) current.renewCycle = parsed.cycle;
+  if (current.enabled === baseline.enabled) current.enabled = latestNode.enabled;
+  if (current.allowSubscription === baseline.allowSubscription) current.allowSubscription = latestNode.allowSubscription;
+  if (current.maintenance === baseline.maintenance) current.maintenance = latestNode.maintenance;
+  // Tags are always replaced, never mutated, so an untouched list is the same array.
+  if (current.tags === baseline.tags) current.tags = [...(latestMeta.tags ?? [])];
 }

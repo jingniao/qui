@@ -98,7 +98,7 @@ func (h *Handler) rulesSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rulesPresets(w http.ResponseWriter, r *http.Request) {
-	httpapi.JSON(w, 200, map[string]any{"items": rules.Presets()})
+	httpapi.JSON(w, 200, map[string]any{"items": rules.Presets(), "recommendedDns": rules.RecommendedDNS()})
 }
 
 // ruleProvider serves one panel service rule to a client as a mihomo rule

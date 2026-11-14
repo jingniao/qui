@@ -236,7 +236,7 @@ const disabledA = { ...userA, status: 'disabled', expiresAt: new Date(Date.now()
 const expiredA = { ...userA, expiresAt: '2000-01-01T00:00:00Z' };
 const quotaA = { ...userA, usedTraffic: 100 };
 const soonA = { ...userA, expiresAt: new Date(Date.now() + 3 * 86400000).toISOString() };
-const onlineA = { id: 'online', name: '在线节点', status: 'online', enabled: true, heartbeat: { core_healthy: true } };
+const onlineA = { id: 'online', name: '在线节点', status: 'online', enabled: true, heartbeat: { current_revision: 1, core_healthy: true } };
 const pendingA = { ...onlineA, id: 'pending', name: '新服务器', status: 'pending', heartbeat: {} };
 const revisionsA = [
   { id: 9, nodeId: 'recovered', status: 'success' }, { id: 2, nodeId: 'recovered', status: 'failed' },
@@ -249,7 +249,7 @@ const addressHelperA = await import('data:text/javascript;base64,' + Buffer.from
   { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }
 ).outputText).toString('base64'));
 const dashboardA = vueSubset('modules/dashboard/pages/DashboardPage.vue', [
-  'isNodeOnline', 'nodeStatusLabel', 'isUserActive', 'getUserExpiryLabel', 'getUserExpiryBadgeClass',
+  'isNodeOnline', 'hasPublishedConfig', 'isNodeCoreUnhealthy', 'userAttentionRank', 'nodeStatusLabel', 'isUserActive', 'getUserExpiryLabel', 'getUserExpiryBadgeClass',
   'activeUsersCount', 'warningUsersCount', 'adminOnlineNodesCount', 'healthyNodesCount', 'latestFailedRevisions', 'pendingIssues', 'formatGiB'
 ], {
   connectAddress: addressHelperA.connectAddress,
@@ -370,8 +370,11 @@ for (const patch of [
   { status: 'pending' }, { status: 'offline' }, { status: 'disabled' }, { status: 'applying' },
   { enabled: false }, { deletedAt: '2026-01-01' }, { agentVersion: '' }, { lastHeartbeat: '' },
   { lastHeartbeat: new Date(upgradeNow - 45000).toISOString() },
-  { lastHeartbeat: new Date(upgradeNow + 5001).toISOString() }, { heartbeat: {} }
+  { lastHeartbeat: new Date(upgradeNow + 5001).toISOString() }
 ]) assert.ok(reviewVersions.upgradeUnavailableReason({ ...liveUpgrade, status: 'degraded', ...patch }), JSON.stringify(patch));
+// v1.5.5 item 11: a node without a confirmed revision is upgradable; the page
+// publishes a baseline configuration first instead of hiding the action.
+assert.equal(reviewVersions.upgradeUnavailableReason({ ...liveUpgrade, heartbeat: {} }), '');
 for (const offset of [-44999, 5000]) assert.equal(reviewVersions.upgradeUnavailableReason({ ...liveUpgrade, status: 'degraded', lastHeartbeat: new Date(upgradeNow + offset).toISOString() }), '');
 console.log('PASS review 1: online/degraded upgrades, enrollment and heartbeat boundary guards');
 
@@ -433,11 +436,11 @@ const refreshSourceReview3 = detailReview3.slice(detailReview3.indexOf('const no
 const refreshCodeReview3 = ts.transpileModule(refreshSourceReview3 + '\nreturn { refreshNode, readNode, visibilityChanged, mount: () => mounted = true, unmount: () => mounted = false };', {
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None }
 }).outputText;
-let resolveNodeReview3, nodeCallsReview3 = 0;
+let resolveNodeReview3, nodeCallsReview3 = 0, supplementCallsReview3 = 0;
 const documentReview3 = { visibilityState: 'visible' }, nodeRefReview3 = { value: { id: 'n', status: 'offline' } };
-const refreshReview3 = new Function('nodeAPI', 'document', 'loading', 'route', 'generation', 'node', 'now', refreshCodeReview3)(
+const refreshReview3 = new Function('nodeAPI', 'document', 'loading', 'route', 'generation', 'node', 'now', 'error', 'loadSupplements', refreshCodeReview3)(
   { get: () => { nodeCallsReview3++; return new Promise(resolve => { resolveNodeReview3 = resolve; }); } },
-  documentReview3, { value: false }, { name: 'NodeDetail', params: { id: 'n' } }, 1, nodeRefReview3, { value: 0 }
+  documentReview3, { value: false }, { name: 'NodeDetail', params: { id: 'n' } }, 1, nodeRefReview3, { value: 0 }, { value: '' }, () => { supplementCallsReview3++; }
 );
 await refreshReview3.refreshNode();
 assert.equal(nodeCallsReview3, 0, 'no reads before mount');
@@ -445,8 +448,17 @@ refreshReview3.mount();
 documentReview3.visibilityState = 'hidden';
 await refreshReview3.refreshNode();
 assert.equal(nodeCallsReview3, 0, 'hidden pages do not poll');
+refreshReview3.visibilityChanged();
+assert.equal(supplementCallsReview3, 0, 'hidden timer does not load supplements');
 documentReview3.visibilityState = 'visible';
-const refreshPendingReview3 = refreshReview3.refreshNode();
+let heartbeatRefreshReview3;
+const heartbeatReview3 = vueSubset('modules/nodes/pages/NodeDetailPage.vue', ['nodeStatusChanged'], {
+  route: { params: { id: 'n' } }, nodeStatusMatches: () => true,
+  refreshNode: () => { heartbeatRefreshReview3 = refreshReview3.refreshNode(); },
+  load: () => { throw new Error('heartbeat must not trigger full load'); }
+});
+heartbeatReview3.nodeStatusChanged({});
+const refreshPendingReview3 = heartbeatRefreshReview3;
 await refreshReview3.refreshNode();
 const sharedReadReview3 = refreshReview3.readNode('n');
 assert.equal(nodeCallsReview3, 1, 'poll and full/SSE load share a pending read');
@@ -454,7 +466,9 @@ resolveNodeReview3({ id: 'n', status: 'online', lastHeartbeat: 'fresh' });
 await Promise.all([refreshPendingReview3, sharedReadReview3]);
 assert.equal(nodeRefReview3.value.status, 'online');
 assert.equal(nodeRefReview3.value.lastHeartbeat, 'fresh');
+assert.equal(supplementCallsReview3, 0, 'heartbeat refresh does not load supplements');
 refreshReview3.visibilityChanged();
+assert.equal(supplementCallsReview3, 1, 'visible refresh loads supplements');
 assert.equal(nodeCallsReview3, 2, 'visible transition reads immediately');
 refreshReview3.unmount();
 resolveNodeReview3({ id: 'n', status: 'offline' });
@@ -462,7 +476,7 @@ await new Promise(resolve => setImmediate(resolve));
 assert.equal(nodeRefReview3.value.status, 'online', 'unmounted view ignores pending result');
 await refreshReview3.refreshNode();
 assert.equal(nodeCallsReview3, 2);
-assert.match(detailReview3, /setInterval\(refreshNode, 15000\)/);
+assert.match(detailReview3, /setInterval\(visibilityChanged, 60000\)/);
 assert.match(detailReview3, /addEventListener\('visibilitychange', visibilityChanged\)/);
 assert.match(detailReview3, /clearInterval\(refreshTimer\)/);
 assert.match(detailReview3, /removeEventListener\('visibilitychange', visibilityChanged\)/);

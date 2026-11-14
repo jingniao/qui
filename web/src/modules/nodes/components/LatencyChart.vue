@@ -163,6 +163,8 @@ async function load() {
 
 watch(() => [props.nodeId, props.hours], () => { void load(); }, { immediate: true });
 
-const timer = setInterval(() => { if (!loading.value) void load(); }, 60000);
-onUnmounted(() => { generation++; clearInterval(timer); });
+function visibilityChanged() { if (document.visibilityState === 'visible' && !loading.value) void load(); }
+document.addEventListener('visibilitychange', visibilityChanged);
+const timer = setInterval(visibilityChanged, 60000);
+onUnmounted(() => { generation++; clearInterval(timer); document.removeEventListener('visibilitychange', visibilityChanged); });
 </script>

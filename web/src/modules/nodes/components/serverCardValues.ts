@@ -1,8 +1,8 @@
 import type { HostMetrics } from '../metrics';
 import { serverStatus } from './serverListModel';
-import { ref, onMounted, onUnmounted, type Ref } from 'vue';
+import type { Ref } from 'vue';
 import type { NodeView } from '../api';
-import { getNodeMeta, resolveCountryInfo, onGeoResolved, formatRenewPrice, calculateRemainingDays } from '../nodeMeta';
+import { getNodeMeta, resolveCountryInfo, countryTitle, formatRenewPrice, calculateRemainingDays } from '../nodeMeta';
 
 export function useServerCardValues(clockNow: Ref<number>) {
 function statusCapsuleText(node: NodeView): string { return serverStatus(node, clockNow.value).label; }
@@ -44,14 +44,14 @@ function formatSpeedParts(rateStr: string): { value: string; unit: string } {
   return { value: parts[0] || '—', unit: parts[1] || '' };
 }
 
-// Geo Country Flag & Region helpers
-const geoTick = ref(0);
-let unsubGeo: (() => void) | undefined;
-
+// Country flag shown before the server name (v1.5.5 item 19).
 function getNodeCountry(node: NodeView) {
-  void geoTick.value;
   const meta = getNodeMeta(node.id);
-  return resolveCountryInfo(meta.region, node.publicIp, node.name, node.hostname);
+  return resolveCountryInfo({ region: meta.region, countryCode: node.countryCode, name: node.name, hostname: node.hostname });
+}
+
+function getNodeCountryTitle(node: NodeView): string {
+  return countryTitle(getNodeCountry(node));
 }
 
 function getNodeRegion(node: NodeView): string {
@@ -77,8 +77,6 @@ function getRenewalInfo(node: NodeView) {
 }
 
 // Monthly machine traffic lives in MachineTrafficUsage (T1), not in the card model.
-onMounted(() => { unsubGeo = onGeoResolved(() => { geoTick.value++; }); });
-onUnmounted(() => { unsubGeo?.(); });
 
 return {
   statusCapsuleText,
@@ -89,6 +87,7 @@ return {
   barColor,
   formatSpeedParts,
   getNodeCountry,
+  getNodeCountryTitle,
   getNodeRegion,
   getRenewalDate,
   getRenewalPriceDisplay,

@@ -15,7 +15,8 @@ type CanvasTunnelImpact struct {
 // of tunnel identities avoids treating two drawings of the same path as a
 // disagreement, even when their instance and connection IDs differ.
 func (s *Service) canvasEntryRoutingConflict(ctx context.Context, scheme CanvasScheme, plan *canvasPlan) error {
-	routes := func(layout CanvasLayout) map[string]string {
+	routes := func(owner CanvasScheme) (map[string]string, error) {
+		layout := owner.Layout
 		refs := map[string]string{}
 		for _, i := range layout.Instances {
 			refs[i.InstanceID] = i.Ref
@@ -28,12 +29,33 @@ func (s *Service) canvasEntryRoutingConflict(ctx context.Context, scheme CanvasS
 		}
 		result := map[string]string{}
 		for _, entry := range layout.Instances {
-			if !strings.HasPrefix(entry.Ref, "inbound:") || entry.Role != "entry" {
+			if entry.Role != "entry" {
 				continue
 			}
-			var node string
-			_ = s.Repository.Database.QueryRowContext(ctx, "SELECT node_id FROM inbounds WHERE id=?", strings.TrimPrefix(entry.Ref, "inbound:")).Scan(&node)
-			ref := "server:" + node
+			inboundID := ""
+			if entry.EntryBinding != nil {
+				if entry.EntryBinding.Mode == "reuse" {
+					inboundID = entry.EntryBinding.InboundID
+				} else {
+					binding, err := s.Repository.CanvasEntryBinding(ctx, owner.ID, entry.InstanceID)
+					if errors.Is(err, ErrNotFound) {
+						continue
+					}
+					if err != nil {
+						return nil, err
+					}
+					inboundID = binding.InboundID
+				}
+			} else if strings.HasPrefix(entry.Ref, "inbound:") {
+				inboundID = strings.TrimPrefix(entry.Ref, "inbound:")
+			} else {
+				continue
+			}
+			inbound, err := s.Repository.Inbound(ctx, inboundID, false)
+			if err != nil {
+				return nil, err
+			}
+			ref := "server:" + inbound.NodeID
 			if len(outgoing[entry.Ref]) > 0 {
 				ref = entry.Ref
 			}
@@ -48,20 +70,33 @@ func (s *Service) canvasEntryRoutingConflict(ctx context.Context, scheme CanvasS
 				c := edges[0]
 				key := c.TunnelID
 				if key == "" {
-					key = "inline:" + scheme.ID + ":" + c.ID
+					key = "inline:" + owner.ID + ":" + c.ID
 				}
 				path = append(path, key)
 				ref = refs[c.Target]
 			}
-			if len(path) > 0 {
-				result[entry.Ref] = strings.Join(path, "/")
-			}
+			result[inboundID] = strings.Join(path, "/")
 		}
-		return result
+		return result, nil
 	}
-	current := routes(scheme.Layout)
+	current, err := routes(scheme)
+	if err != nil {
+		return err
+	}
 	if len(current) == 0 {
 		return nil
+	}
+	for inboundID := range current {
+		binding, err := s.Repository.CanvasEntryBindingByInbound(ctx, inboundID)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if binding.SchemeID == nil || *binding.SchemeID != scheme.ID {
+			return errors.New("entry_routing_conflict: inbound:" + inboundID + " already belongs to entry binding " + binding.ID)
+		}
 	}
 	schemes, _, err := s.Repository.CanvasSchemes(ctx, 1, 1000000)
 	if err != nil {
@@ -71,8 +106,12 @@ func (s *Service) canvasEntryRoutingConflict(ctx context.Context, scheme CanvasS
 		if other.ID == scheme.ID || other.Execution != "server" {
 			continue
 		}
-		for entry, path := range routes(other.Layout) {
-			if own, exists := current[entry]; exists && own != path {
+		otherRoutes, err := routes(other)
+		if err != nil {
+			return err
+		}
+		for entry, path := range otherRoutes {
+			if own, exists := current[entry]; exists && own != "" && path != "" && own != path {
 				return errors.New("entry_routing_conflict: " + entry + " is routed differently by scheme " + other.ID + " (" + other.Name + ")")
 			}
 		}
@@ -165,6 +204,18 @@ func (s *Service) canvasPublicationUnchanged(ctx context.Context, p *canvasPlan)
 		return false, nil
 	}
 	for _, entry := range p.entries {
+		if entry.binding != nil {
+			binding, err := s.Repository.CanvasEntryBinding(ctx, entry.schemeID, entry.preview.InstanceID)
+			if errors.Is(err, ErrNotFound) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if binding.AppliedDefaultOutbound != entry.existing.DefaultOutbound {
+				return false, nil
+			}
+		}
 		target := entry.existing.DefaultOutbound
 		if entry.finalOutbound != "" {
 			target = entry.finalOutbound

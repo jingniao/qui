@@ -89,10 +89,9 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 	if err != nil {
 		return desiredstate.State{}, nil, err
 	}
-	state := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: nodeID, Logging: desiredstate.Logging{DomainOnly: true}, Users: []desiredstate.User{}, Credentials: []desiredstate.Credential{}, Inbounds: []desiredstate.Inbound{}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}, {ID: "block", Protocol: "block", Enabled: true}}, OutboundGroups: []desiredstate.OutboundGroup{}, ProxyChains: []desiredstate.ProxyChain{}, Policies: []desiredstate.Policy{}}
 	// The node's outbound network settings travel with every published state;
 	// a node that configures none keeps the field absent.
-	state.Network = desiredstate.NetworkOrNil(n.OutboundSourceIP, n.OutboundInterface, n.HostSourceIPv4, n.HostSourceIPv6)
+	state := desiredstate.Baseline(nodeID, desiredstate.NetworkOrNil(n.OutboundSourceIP, n.OutboundInterface, n.HostSourceIPv4, n.HostSourceIPv6))
 	credentialSeen := map[string]bool{}
 	add := func(credential desiredstate.Credential) {
 		if !credentialSeen[credential.ID] {
@@ -121,7 +120,7 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		if !record.Enabled {
 			continue
 		}
-		outbound := desiredstate.Outbound{ID: record.ID, Protocol: record.Protocol, Address: record.Address, Port: record.Port, Enabled: true, CredentialID: record.CredentialID, TargetNodeID: record.TargetNodeID, Settings: record.Settings, FailurePolicy: record.FailurePolicy, BackupTargetID: record.BackupOutboundID, SupportTCP: record.SupportTCP, SupportUDP: record.SupportUDP, ProbeURL: record.ProbeURL, ProbeInterval: record.ProbeInterval}
+		outbound := desiredstate.Outbound{SourceIP: record.SourceIP, SourceInterface: record.SourceInterface, ID: record.ID, Protocol: record.Protocol, Address: record.Address, Port: record.Port, Enabled: true, CredentialID: record.CredentialID, TargetNodeID: record.TargetNodeID, Settings: record.Settings, FailurePolicy: record.FailurePolicy, BackupTargetID: record.BackupOutboundID, SupportTCP: record.SupportTCP, SupportUDP: record.SupportUDP, ProbeURL: record.ProbeURL, ProbeInterval: record.ProbeInterval}
 		if record.CredentialID != "" {
 			credential, err := s.Repository.Credential(ctx, record.CredentialID)
 			if err != nil {
@@ -249,6 +248,9 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		state.Policies = rules
 	}
 	cores := node.EnabledCores(n.Capabilities)
+	if err := node.RequireOutboundSourceSupport(state, n.Capabilities, n.Name); err != nil {
+		return state, enabled, err
+	}
 	if err := desiredstate.RequireKeywordSupport(state, node.KeywordCapabilities(cores)); err != nil {
 		return state, enabled, fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
 	}

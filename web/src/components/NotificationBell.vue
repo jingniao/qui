@@ -138,6 +138,8 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { notificationsAPI, severityTone, type Notification } from '../modules/system/notificationsApi';
+import { throttleTrailing } from '../app/nodeStatusEvents';
+import { showToast } from '../app/api';
 import { isOwner } from '../app/auth';
 
 defineProps<{
@@ -195,25 +197,30 @@ function formatTimeDisplay(at: string) {
   return `${m}-${d} ${h}:${min}`;
 }
 
-async function loadData() {
+let generation = 0;
+async function loadData(silent = false) {
+  const current = ++generation;
   try {
     loading.value = true;
     const res = await notificationsAPI.list(unreadFilter.value, 1, 20);
+    if (current !== generation) return;
     items.value = res.items || [];
     unreadCount.value = res.unread || 0;
-  } catch {
-    // Keep stale data on error
+  } catch (e) {
+    if (current === generation && !silent) showToast((e as Error).message, 'error');
   } finally {
-    loading.value = false;
+    if (current === generation) loading.value = false;
   }
 }
 
 async function loadUnreadOnly() {
+  const current = ++generation;
   try {
     const res = await notificationsAPI.list(false, 1, 1);
+    if (current !== generation) return;
     unreadCount.value = res.unread || 0;
   } catch {
-    // Ignore error
+    // 后台刷新失败时保留上次未读数量，不打断用户。
   }
 }
 
@@ -230,8 +237,11 @@ function setFilter(unread: boolean) {
 }
 
 async function markAllAsRead() {
+  generation++;
   try {
     await notificationsAPI.readAll();
+    generation++;
+    loading.value = false;
     unreadCount.value = 0;
     for (const it of items.value) {
       it.read = true;
@@ -239,8 +249,11 @@ async function markAllAsRead() {
     if (unreadFilter.value) {
       items.value = [];
     }
-  } catch {
-    // Ignore
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    loading.value = false;
+    if (isOpen.value) await loadData();
   }
 }
 
@@ -256,21 +269,27 @@ function handleClickOutside(event: MouseEvent) {
 }
 
 function handleNotificationEvent() {
+  if (document.hidden) return;
   if (isOpen.value) {
-    loadData();
+    loadData(true);
   } else {
     loadUnreadOnly();
   }
 }
 
+const refreshNotifications = throttleTrailing(handleNotificationEvent, 5000);
+function visibilityChanged() { if (!document.hidden) refreshNotifications(); }
 onMounted(() => {
   loadUnreadOnly();
+  document.addEventListener('visibilitychange', visibilityChanged);
   document.addEventListener('click', handleClickOutside);
-  window.addEventListener('proxy-notification', handleNotificationEvent);
+  window.addEventListener('proxy-notification', refreshNotifications);
 });
 
 onUnmounted(() => {
+  generation++; refreshNotifications.cancel();
+  document.removeEventListener('visibilitychange', visibilityChanged);
   document.removeEventListener('click', handleClickOutside);
-  window.removeEventListener('proxy-notification', handleNotificationEvent);
+  window.removeEventListener('proxy-notification', refreshNotifications);
 });
 </script>

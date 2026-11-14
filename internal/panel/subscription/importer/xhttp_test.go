@@ -63,14 +63,14 @@ func TestXHTTPFixturesRoundTripAndFormatFiltering(t *testing.T) {
 		}
 		expected := 0
 		if exporter.ID() == "clash" {
-			expected = 4
+			expected = len(entries)
 		}
 		// Count concrete endpoint server fields, rather than names repeated in groups.
 		marker := "server: 127.0.0.1"
 		if exporter.ID() == "sing-box" {
 			marker = `"server": "127.0.0.1"`
 		}
-		if count := strings.Count(string(out.Body), marker); count != expected || len(out.Warnings) < 11-expected {
+		if count := strings.Count(string(out.Body), marker); count != expected || (exporter.ID() != "clash" && len(out.Warnings) == 0) {
 			t.Fatalf("%s export count=%d expected=%d warnings=%d", exporter.ID(), count, expected, len(out.Warnings))
 		}
 		if exporter.ID() == "clash" && (!strings.Contains(string(out.Body), "xhttp-opts:") || !strings.Contains(string(out.Body), "transport.example.com")) {
@@ -155,8 +155,8 @@ func TestXHTTPTransportDetailsAndRejectPolicySurviveFiltering(t *testing.T) {
 	if len(again) != 1 || !reflect.DeepEqual(p, again[0]) {
 		t.Fatal("IPv6/path query escapes changed transport")
 	}
-	// No h2 evidence means no Mihomo xhttp output, even in auto mode.
-	p.TLS.ALPN = nil
+	// Unsupported ALPN still omits the endpoint.
+	p.TLS.ALPN = []string{"http/1.1"}
 	resolved := rules.Resolved{Groups: []rules.ResolvedGroup{{Name: "strict", Type: "select", EmptyPolicy: "reject", Members: []rules.Member{{Kind: rules.KindProxy, Name: p.Name}}}}}
 	out, err := (clash.Meta{}).Render(format.Profile{Proxies: []proxy.Proxy{p}, Rules: &resolved})
 	if err != nil || strings.Contains(string(out.Body), "2001:db8::1") || !strings.Contains(string(out.Body), "REJECT") {

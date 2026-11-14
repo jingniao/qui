@@ -81,7 +81,7 @@ func driveTunnelPublish(t *testing.T, h *gostHosts, selection proxy.PublishSelec
 						t.Fatal(err)
 					}
 					order = append(order, nodeID)
-					if err = h.repository.Result(ctx, nodeID, &pb.ApplyResult{Revision: state.Revision, Success: nodeID != failNode, RolledBack: nodeID == failNode, Code: "test"}); err != nil {
+					if err = h.repository.Result(ctx, nodeID, &pb.ApplyResult{Revision: state.Revision, Success: nodeID != failNode, RolledBack: nodeID == failNode, Code: "apply_failed"}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -203,6 +203,65 @@ func TestManagedTunnelPlanPublishNoopRotationAndRemoval(t *testing.T) {
 	}
 }
 
+func TestTunnelPublishGostRemovable(t *testing.T) {
+	for _, mode := range []string{"unused", "manual", "rule", "missing"} {
+		t.Run(mode, func(t *testing.T) {
+			h, tunnel, rule := managedTunnelFixture(t, false)
+			driveTunnelPublish(t, h, proxy.PublishSelection{RuleIDs: []string{rule.ID}}, "")
+			if mode == "manual" {
+				_, err := h.service.SaveInbound(h.ctx, "", proxy.InboundInput{Name: "manual", NodeID: h.alpine, Core: "gost", Protocol: "forward", Listen: "0.0.0.0", Port: 31000, Enabled: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Forward: &desiredstate.ForwardSettings{Host: "example.com", Port: 443, Network: "tcp"}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "rule" {
+				_, err := h.service.SaveTunnelRule(h.ctx, "", proxy.TunnelRuleInput{Name: "other", EntryNodeID: h.alpine, PortMode: "manual", ListenPort: portValue(31000), Network: "tcp", Target: proxy.TunnelTarget{Mode: "manual", Host: "example.com", Port: 443}, Enabled: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Publish the independent rule so its GOST inbound remains.
+				var rid string
+				if err := h.database.QueryRow("SELECT id FROM tunnel_rules WHERE name='other'").Scan(&rid); err != nil {
+					t.Fatal(err)
+				}
+				driveTunnelPublish(t, h, proxy.PublishSelection{RuleIDs: []string{rid}}, "")
+			}
+			if err := h.service.DeleteTunnelRule(h.ctx, rule.ID); err != nil {
+				t.Fatal(err)
+			}
+			driveTunnelPublish(t, h, proxy.PublishSelection{RuleIDs: []string{rule.ID}}, "")
+			if mode == "missing" {
+				n, err := h.service.Nodes.Get(h.ctx, h.alpine)
+				if err != nil {
+					t.Fatal(err)
+				}
+				n.Capabilities.Cores = n.Capabilities.Cores[:1]
+				raw, err := json.Marshal(n.Capabilities)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = h.database.Exec("UPDATE nodes SET capabilities_json=? WHERE id=?", string(raw), h.alpine); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := h.service.DeleteTunnel(h.ctx, tunnel.ID); err != nil {
+				t.Fatal(err)
+			}
+			result, _ := driveTunnelPublish(t, h, proxy.PublishSelection{TunnelIDs: []string{tunnel.ID}}, "")
+			got := map[string]bool{}
+			for _, item := range result.GostRemovable {
+				got[item.NodeID] = true
+				if item.Name == "" {
+					t.Fatal(item)
+				}
+			}
+			if !got[h.us2] || got[h.alpine] != (mode == "unused") || len(got) != map[bool]int{true: 2, false: 1}[mode == "unused"] {
+				t.Fatal(result)
+			}
+		})
+	}
+}
+
 func TestManagedRulePortClaimsReleaseOnlyAfterSuccessfulApply(t *testing.T) {
 	h, tunnel, rule := managedTunnelFixture(t, false)
 	selection := proxy.PublishSelection{RuleIDs: []string{rule.ID}}
@@ -219,6 +278,9 @@ func TestManagedRulePortClaimsReleaseOnlyAfterSuccessfulApply(t *testing.T) {
 	result, order := driveTunnelPublish(t, h, selection, h.alpine)
 	if len(order) != 1 || order[0] != h.alpine || result.Servers[len(result.Servers)-1].Status != "rolled_back" {
 		t.Fatal(result, order)
+	}
+	if got := result.Servers[len(result.Servers)-1].Message; got != "配置应用失败，已自动回滚（apply_failed）" {
+		t.Fatal(got)
 	}
 	for _, port := range []int{30001, 30002} {
 		c, e := h.service.Repository.CheckPort(h.ctx, h.alpine, port, nil)
@@ -256,8 +318,13 @@ func TestManagedTunnelFailureRollsBackInReverseAndKeepsClaims(t *testing.T) {
 	if !reflect.DeepEqual(order, expected) {
 		t.Fatal(order, expected)
 	}
-	if result.Servers[0].Status != "rolled_back" || result.Servers[1].Status != "rolled_back" || result.Servers[2].Status != "failed" {
+	if result.Servers[0].Status != "rolled_back" || result.Servers[1].Status != "rolled_back" || result.Servers[2].Status != "rolled_back" {
 		t.Fatal(result)
+	}
+	for i, want := range []string{"后续服务器失败，已回滚", "后续服务器失败，已回滚", "配置应用失败，已自动回滚（apply_failed）"} {
+		if result.Servers[i].Message != want {
+			t.Fatal(result.Servers)
+		}
 	}
 	stored, _ = h.service.Repository.Tunnel(h.ctx, tunnel.ID)
 	if stored.Status != "modified" || stored.PublishedVersion == stored.DraftVersion {

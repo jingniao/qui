@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -38,7 +39,7 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 			if e != nil {
 				return e
 			}
-			if owner == edge.tunnelID && i.NodeID == edge.targetNode && i.Protocol == edge.protocol && edge.autoPort {
+			if owner == edge.tunnelID && i.NodeID == edge.targetNode && (i.Protocol == edge.protocol || edge.protocol == "trojan" && i.InternalRelay) && edge.autoPort {
 				edge.port = i.Port
 				edge.autoPort = false
 				break
@@ -59,6 +60,7 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 			return err
 		}
 		taken := map[int]bool{}
+		canvasEntryPorts(plan, edge.targetNode, taken)
 		for _, other := range plan.edges {
 			if other != edge && other.targetNode == edge.targetNode && (!other.autoPort || other.portAllocated) {
 				taken[other.port] = true
@@ -91,4 +93,61 @@ func (s *Service) canvasAllocatePorts(ctx context.Context, plan *canvasPlan, nam
 		}
 	}
 	return nil
+}
+
+// Allocate user entries after shared dependencies have supplied all listeners.
+func (s *Service) canvasAllocateEntryPorts(ctx context.Context, plan *canvasPlan) error {
+	for index := range plan.entries {
+		entry := &plan.entries[index]
+		if entry.binding == nil || entry.binding.Mode != "create" || entry.existing.ID != "" {
+			continue
+		}
+		e := entry.preview
+		mode := "enabled"
+		if entry.binding.PortMode == "auto" {
+			mode = "all"
+		}
+		occupied, err := s.Repository.portOccupants(ctx, s.Repository.Database, e.NodeID, nil, mode)
+		if err != nil {
+			return err
+		}
+		taken := map[int]bool{}
+		canvasEntryPorts(plan, e.NodeID, taken)
+		for _, edge := range plan.edges {
+			if edge.targetNode == e.NodeID {
+				taken[edge.port] = true
+			}
+		}
+		for _, f := range plan.forwards {
+			if f.NodeID == e.NodeID {
+				for _, port := range desiredstate.ClaimedPorts(f.Port, f.Settings) {
+					taken[port] = true
+				}
+			}
+		}
+		for _, relay := range plan.relays {
+			if relay.exitNode == e.NodeID {
+				taken[relay.port] = true
+			}
+		}
+		if entry.binding.PortMode == "auto" {
+			ports, err := allocatePorts(ctx, s.Repository.Database, e.NodeID, 1, occupied, taken)
+			if err != nil {
+				return err
+			}
+			e.Port = ports[0]
+		} else if len(occupied[e.Port]) > 0 {
+			return fmt.Errorf("入口端口 %d 已被 %s 占用", e.Port, occupied[e.Port][0].Name)
+		}
+		// The common listener check diagnoses manual collisions within the plan.
+	}
+	return nil
+}
+
+func canvasEntryPorts(plan *canvasPlan, nodeID string, taken map[int]bool) {
+	for _, entry := range plan.entries {
+		if entry.binding != nil && entry.binding.Mode == "create" && entry.preview.NodeID == nodeID && entry.preview.Port != 0 {
+			taken[entry.preview.Port] = true
+		}
+	}
 }

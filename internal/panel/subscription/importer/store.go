@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -16,11 +17,15 @@ import (
 )
 
 type Store struct {
-	Database *sql.DB
-	Reader   *sql.DB
-	Vault    *vault.Vault
-	Fetcher  Fetcher
-	refresh  sync.Mutex
+	DeletionReferences DeletionReferences
+	Database           *sql.DB
+	Reader             *sql.DB
+	Vault              *vault.Vault
+	Fetcher            Fetcher
+	SelfBuiltNames     interface {
+		EndpointNames(context.Context, *sql.Tx) ([]string, error)
+	}
+	refresh sync.Mutex
 }
 
 // Subscription reads must not wait for the single writer connection. The
@@ -76,15 +81,24 @@ func (s *Store) Optional() bool { return true }
 // only reliable signal: last_fetch_at/status are written for both kinds. A value
 // that cannot be decrypted is reported as "url", the kind that owns a link.
 func (s *Store) sourceKind(sealed []byte) string {
-	raw, err := s.Vault.Open(sealed)
+	kind, err := s.sourceKindStrict(sealed)
 	if err != nil {
 		return sourceKindURL
 	}
+	return kind
+}
+
+// sourceKindStrict preserves vault errors for identity decisions and migration.
+func (s *Store) sourceKindStrict(sealed []byte) (string, error) {
+	raw, err := s.Vault.Open(sealed)
+	if err != nil {
+		return "", err
+	}
 	defer clear(raw)
 	if len(raw) == 0 {
-		return sourceKindContent
+		return sourceKindContent, nil
 	}
-	return sourceKindURL
+	return sourceKindURL, nil
 }
 
 func (s *Store) List(ctx context.Context) ([]Source, error) {
@@ -141,8 +155,13 @@ func (s *Store) Save(ctx context.Context, key string, in Input) (string, Result,
 	s.refresh.Lock()
 	defer s.refresh.Unlock()
 	prior := committedSource{}
+	var kind string
 	if key != "" {
-		state, _, err := s.sourceState(ctx, key)
+		state, sealed, err := s.sourceState(ctx, key)
+		if err != nil {
+			return "", Result{}, err
+		}
+		kind, err = s.sourceKindStrict(sealed)
 		if err != nil {
 			return "", Result{}, err
 		}
@@ -156,6 +175,12 @@ func (s *Store) Save(ctx context.Context, key string, in Input) (string, Result,
 	}
 	if key == "" && in.URL == "" && in.Content == "" {
 		return "", Result{}, ErrInput
+	}
+	if (kind == sourceKindContent && in.URL != "") || (kind == sourceKindURL && in.Content != "") {
+		return "", Result{Message: "不能切换导入来源类型，请新增导入来源"}, ErrSourceKindChange
+	}
+	if kind == sourceKindContent && in.Content != "" {
+		return "", Result{Message: "单独导入不支持整批替换，请新增导入节点"}, ErrContentReplace
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	if in.URL != "" && !ValidURL(in.URL) {
@@ -204,7 +229,7 @@ func (s *Store) Save(ctx context.Context, key string, in Input) (string, Result,
 	}
 	// userIds is accepted for wire compatibility; group grants alone authorize access.
 	if entries != nil {
-		if err = s.replace(ctx, tx, key, entries, stamp); err != nil {
+		if err = s.insertEntries(ctx, tx, key, entries, stamp, sourceKindContent); err != nil {
 			return fail(err)
 		}
 		// A pasted import commits at once, so its attempt time is also its success
@@ -226,10 +251,24 @@ func (s *Store) Save(ctx context.Context, key string, in Input) (string, Result,
 	return key, attempt, nil
 }
 func (s *Store) replace(ctx context.Context, tx *sql.Tx, key string, entries []proxy.Proxy, stamp string) error {
+	var sealed []byte
+	if err := tx.QueryRowContext(ctx, "SELECT url_encrypted FROM subscription_sources WHERE id=?", key).Scan(&sealed); err != nil {
+		return err
+	}
+	kind, err := s.sourceKindStrict(sealed)
+	if err != nil {
+		return err
+	}
+	if kind == sourceKindContent {
+		return ErrContentReplace
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM imported_proxies WHERE source_id=?", key); err != nil {
 		return err
 	}
-	// Content identities cannot silently retarget a published chain after reorder.
+	return s.insertEntries(ctx, tx, key, entries, stamp, sourceKindURL)
+}
+
+func (s *Store) insertEntries(ctx context.Context, tx *sql.Tx, key string, entries []proxy.Proxy, stamp, kind string) error {
 	seen := map[string]bool{}
 	for _, p := range entries {
 		raw, err := json.Marshal(p)
@@ -237,15 +276,22 @@ func (s *Store) replace(ctx context.Context, tx *sql.Tx, key string, entries []p
 			return err
 		}
 		encrypted, err := s.Vault.Seal(raw)
-		pid := key + "-" + id.Hash(string(raw))
+		digest := id.Hash(string(raw))
 		clear(raw)
 		if err != nil {
 			return err
 		}
-		if seen[pid] {
+		if seen[digest] {
 			continue
 		}
-		seen[pid] = true
+		seen[digest] = true
+		pid := key + "-" + digest
+		if kind == sourceKindContent {
+			pid, err = id.New()
+			if err != nil {
+				return err
+			}
+		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO imported_proxies(id,source_id,name,protocol,payload_encrypted,fetched_at) VALUES(?,?,?,?,?,?)", pid, key, p.Name, p.Protocol, encrypted, stamp); err != nil {
 			return err
 		}
@@ -353,6 +399,12 @@ var ErrContentSource = errors.New("import source has no subscription link")
 // oversized name, an out-of-range interval, no content at all, or both a link and
 // pasted content. Nothing was stored and no attempt happened.
 var ErrInput = errors.New("import source input is invalid")
+
+// ErrContentReplace requires a fresh import instead of replacing stable nodes.
+var ErrContentReplace = fmt.Errorf("%w: content sources cannot be replaced; create a new import", ErrInput)
+
+// ErrSourceKindChange prevents changing the identity semantics of a source.
+var ErrSourceKindChange = fmt.Errorf("%w: import source kind cannot be changed; create a new source", ErrInput)
 
 // ErrStore reports a failure of the panel's own storage: the source row exists but
 // its sealed payload cannot be opened. That is corruption or a wrong key, not a
@@ -502,10 +554,12 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Proxy, []proxy.Warning, error) {
-	rows, err := s.reader().QueryContext(ctx, `SELECT COALESCE(p.id,''),s.id,p.payload_encrypted,s.last_status,group_concat(DISTINCT g.id) FROM subscription_sources s
+	rows, err := s.reader().QueryContext(ctx, `SELECT COALESCE(p.id,''),s.id,p.payload_encrypted,s.last_status,
+ COALESCE(group_concat(DISTINCT CASE WHEN e.proxy_key='' OR e.proxy_key=p.name||'|'||p.protocol THEN g.id END),''),
+ COALESCE(group_concat(DISTINCT CASE WHEN e.proxy_key='id:'||p.id THEN g.id END),''),s.url_encrypted FROM subscription_sources s
  JOIN node_group_imports e ON e.source_id=s.id JOIN node_groups g ON g.id=e.group_id
  JOIN user_node_group_grants a ON a.group_id=g.id
- LEFT JOIN imported_proxies p ON p.source_id=s.id AND (e.proxy_key='' OR e.proxy_key=p.name||'|'||p.protocol)
+ LEFT JOIN imported_proxies p ON p.source_id=s.id AND (e.proxy_key='' OR e.proxy_key=p.name||'|'||p.protocol OR e.proxy_key='id:'||p.id)
  WHERE a.user_id=? AND g.enabled=1 AND g.subscription_visible=1 AND g.purpose IN ('subscription','mixed') GROUP BY s.id,p.id ORDER BY s.created_at,s.id,p.id`, viewer.UserID)
 	if err != nil {
 		return nil, nil, errors.New("imported proxy cache unavailable")
@@ -515,10 +569,11 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 	warnings := []proxy.Warning{}
 	failed := map[string]bool{}
 	notified := map[string]bool{}
+	kinds := map[string]string{}
 	for rows.Next() {
-		var key, src, status, groups string
-		var encrypted []byte
-		if err = rows.Scan(&key, &src, &encrypted, &status, &groups); err != nil {
+		var key, src, status, groups, idGroups string
+		var encrypted, sealedURL []byte
+		if err = rows.Scan(&key, &src, &encrypted, &status, &groups, &idGroups, &sealedURL); err != nil {
 			return nil, nil, errors.New("imported proxy cache unavailable")
 		}
 		if status != "ok" {
@@ -529,6 +584,25 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 			continue
 		}
 		if key == "" {
+			continue
+		}
+		kind, known := kinds[src]
+		if !known {
+			kind, err = s.sourceKindStrict(sealedURL)
+			if err != nil {
+				return nil, nil, err
+			}
+			kinds[src] = kind
+		}
+		// Only content sources accept ID grants. Legacy keys remain readable
+		// until the one-time identity conversion rewrites existing memberships.
+		if kind == sourceKindContent && idGroups != "" {
+			if groups != "" {
+				groups += ","
+			}
+			groups += idGroups
+		}
+		if groups == "" {
 			continue
 		}
 		if !notified[src] {
@@ -549,10 +623,14 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 			continue
 		}
 		labels := []string{}
+		seenGroups := map[string]bool{}
 		for _, id := range strings.Split(groups, ",") {
-			labels = append(labels, "nodeGroup:"+id)
+			if !seenGroups[id] {
+				labels = append(labels, "nodeGroup:"+id)
+				seenGroups[id] = true
+			}
 		}
-		p.Origin = proxy.Origin{Source: "import:" + src, Ref: key, Labels: labels}
+		p.Origin = proxy.Origin{Source: "import:" + src, Ref: key, Labels: labels, ImportKind: kind}
 		entries = append(entries, p)
 	}
 	if err = rows.Err(); err != nil {
@@ -581,17 +659,27 @@ func (s *Store) Names(ctx context.Context) (map[string]string, error) {
 
 // Items exposes metadata only to the canvas, never credentials or source URLs.
 func (s *Store) Items(ctx context.Context) ([]map[string]any, error) {
-	rows, err := s.reader().QueryContext(ctx, "SELECT id,source_id,name,protocol,payload_encrypted FROM imported_proxies ORDER BY source_id,id")
+	rows, err := s.reader().QueryContext(ctx, "SELECT p.id,p.source_id,p.name,p.protocol,p.payload_encrypted,s.url_encrypted,p.revision FROM imported_proxies p JOIN subscription_sources s ON s.id=p.source_id ORDER BY p.source_id,p.id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := []map[string]any{}
+	kinds := map[string]string{}
 	for rows.Next() {
 		var key, src, name, protocol string
-		var sealed []byte
-		if err = rows.Scan(&key, &src, &name, &protocol, &sealed); err != nil {
+		var revision int64
+		var sealed, sealedURL []byte
+		if err = rows.Scan(&key, &src, &name, &protocol, &sealed, &sealedURL, &revision); err != nil {
 			return nil, err
+		}
+		kind, known := kinds[src]
+		if !known {
+			kind, err = s.sourceKindStrict(sealedURL)
+			if err != nil {
+				return nil, err
+			}
+			kinds[src] = kind
 		}
 		raw, e := s.Vault.Open(sealed)
 		var p proxy.Proxy
@@ -602,7 +690,7 @@ func (s *Store) Items(ctx context.Context) ([]map[string]any, error) {
 		if e != nil {
 			return nil, errors.New("import metadata unavailable")
 		}
-		items = append(items, map[string]any{"id": key, "sourceId": src, "proxyKey": name + "|" + protocol, "name": name, "protocol": protocol, "server": p.Server, "port": p.Port})
+		items = append(items, importedItem(key, src, name, protocol, kind, revision, p))
 	}
 	return items, rows.Err()
 }

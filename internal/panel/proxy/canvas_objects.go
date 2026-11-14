@@ -75,12 +75,7 @@ type canvasReferrer struct{ Kind, ID, Name string }
 // a default outbound, a backup, a group member, a chain hop or final outbound,
 // or a relay target. Routing policies are checked by checkPolicyReference.
 func (r *Repository) canvasReferrers(ctx context.Context, id string) ([]canvasReferrer, error) {
-	rows, err := r.Database.QueryContext(ctx, `SELECT 'inbound', id, name FROM inbounds WHERE default_outbound IN (?1, 'chain:' || ?1)
-UNION ALL SELECT 'group', id, name FROM outbound_groups WHERE backup_outbound_id = ?1
-UNION ALL SELECT 'group', g.id, g.name FROM outbound_group_members m JOIN outbound_groups g ON g.id = m.group_id WHERE m.outbound_id = ?1
-UNION ALL SELECT 'outbound', id, name FROM outbounds WHERE backup_outbound_id = ?1 OR target_inbound_id = ?1
-UNION ALL SELECT 'chain', id, name FROM proxy_chains WHERE final_outbound_id = ?1 OR backup_target_id = ?1
-UNION ALL SELECT 'chain', c.id, c.name FROM proxy_chain_hops h JOIN proxy_chains c ON c.id = h.chain_id WHERE h.outbound_id = ?1 OR h.target_inbound_id = ?1`, id)
+	rows, err := r.Database.QueryContext(ctx, canvasReferrersQuery, id)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +90,14 @@ UNION ALL SELECT 'chain', c.id, c.name FROM proxy_chain_hops h JOIN proxy_chains
 	}
 	return result, rows.Err()
 }
+
+const canvasReferrersQuery = `SELECT 'inbound', id, name FROM inbounds WHERE default_outbound IN (?1, 'chain:' || ?1)
+UNION ALL SELECT 'group', id, name FROM outbound_groups WHERE backup_outbound_id = ?1
+UNION ALL SELECT 'group', g.id, g.name FROM outbound_group_members m JOIN outbound_groups g ON g.id = m.group_id WHERE m.outbound_id = ?1
+UNION ALL SELECT 'outbound', id, name FROM outbounds WHERE backup_outbound_id = ?1 OR target_inbound_id = ?1
+UNION ALL SELECT 'chain', id, name FROM proxy_chains WHERE final_outbound_id = ?1 OR backup_target_id = ?1
+UNION ALL SELECT 'chain', c.id, c.name FROM proxy_chain_hops h JOIN proxy_chains c ON c.id = h.chain_id WHERE h.outbound_id = ?1 OR h.target_inbound_id = ?1
+ORDER BY 1,2,3`
 
 // canvasSchemeNameTaken reports whether another scheme already uses the name.
 // Publishing derives every generated object's name from it, so two drawings with

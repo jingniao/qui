@@ -1,5 +1,9 @@
 let csrfToken = '';
-export function setCSRFToken(token: string) { csrfToken = token; }
+const pendingGets = new Map<string, Promise<unknown>>();
+export function setCSRFToken(token: string) {
+  if (token !== csrfToken) pendingGets.clear();
+  csrfToken = token;
+}
 
 export class APIError extends Error {
   // details carries the extra fields of the error body, e.g. the blockers of a
@@ -90,6 +94,24 @@ export function translateAPIMessage(message: string): string {
 }
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, options: { timeoutMs?: number } = {}): Promise<T> {
+  if (method !== 'GET' || body !== undefined) {
+    pendingGets.clear();
+    try { return await performRequest<T>(path, method, body, options); }
+    finally { pendingGets.clear(); }
+  }
+  const key = JSON.stringify([path, options.timeoutMs ?? 15000]);
+  let pending = pendingGets.get(key);
+  if (!pending) {
+    pending = performRequest<T>(path, method, body, options).finally(() => {
+      if (pendingGets.get(key) === pending) pendingGets.delete(key);
+    });
+    pendingGets.set(key, pending);
+  }
+  // Each consumer owns its editable objects; only the transport is shared.
+  return structuredClone(await pending) as T;
+}
+
+async function performRequest<T>(path: string, method: string, body: unknown, options: { timeoutMs?: number }): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (!['GET', 'HEAD'].includes(method) && csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -109,6 +131,12 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, o
 
 // Multipart uploads retain cookie/CSRF rules and let the browser set the boundary.
 export async function upload<T>(path: string, body: FormData, timeoutMs = 310000): Promise<T> {
+  pendingGets.clear();
+  try { return await performUpload<T>(path, body, timeoutMs); }
+  finally { pendingGets.clear(); }
+}
+
+async function performUpload<T>(path: string, body: FormData, timeoutMs: number): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
   let response: Response;

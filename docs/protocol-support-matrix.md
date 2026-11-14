@@ -4,6 +4,8 @@
 
 本表描述当前源码支持与上游边界，不替代运行证据。基础协议证据见[验收矩阵](v1-acceptance.md) §9.12、§10.4，v1.2 与 v1.3 实机结果见 §11–12。真实主机范围为 linux/amd64；arm64 仅做 qemu-user 模拟，正式浏览器走查未执行。
 
+v1.5.5 的单独导入改用稳定引用 `@endpoint:import:<source>:id:<id>`（画布 `import:<id>`），URL 来源仍用名称／协议；真改名进入 URI/Base64、Clash 与 sing-box（单独导入 tag 为当前名称，冲突加 `-<来源引用>`；sing-box 仍不输出客户端链）输出；后来刷新引入的同名端点由订阅汇总保留首个、丢弃后者并警告（见[计划 §16](v1.5.5-plan.md#16-单独导入节点支持直接改名去掉单节点的整个来源包装)）。
+
 v1.4 已发布，迁移头 0134。画布转发迁移不增加协议能力：普通转发保留原核心，两节点 GOST 保留单段材料，三节点须独立第二段材料及契约 4。规则默认订阅隐藏，目标公网地址及已发布用户入站端口唯一匹配才 linked，否则 manual。转换不改运行修订；遗留项由 Owner 读 migration-report，详见 [M1 报告](v1.4-m1-report.md)。A1 验收待补，不把旧两节点实机结论推广到新三节点路径。
 
 本表描述未修改的官方上游能力：Xray 26.x 官方发布核、sing-box 1.14.x 官方核及加上游标签的 qui 构建。fork 专有维度（`egress_proof`、`inbound_bytes`）已删除，不使用补丁核；账户统计和门控的新能力单独协商。
@@ -151,9 +153,9 @@ Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组
 | HTTP、SOCKS5、Shadowsocks、Trojan | 支持 | 支持 | 支持 | 支持 |
 | VLESS | 支持 | 支持 | 支持 | 省略并警告 |
 | 导入 SS2022 | 支持；规范明文百分号编码 userinfo | AES-128/256 单钥或双段身份；不输出 chacha | AES-256 单钥/双段、AES-128 单钥、chacha 单钥；省略 AES-128 双段 | 省略并警告 |
-| VLESS Reality TCP | 支持，无 flow / Vision | 仅已测 Vision | 仅已测 Vision | 省略并警告 |
-| VLESS Reality gRPC，无 flow | 支持 | 省略并警告 | 省略并警告 | 省略并警告 |
-| VLESS xhttp 四种模式 | 支持；空或 TCP ALPN，仅 h2/http/1.1 | 省略并警告 | 仅 Reality auto 且 ALPN 恰为 [h2] | 省略并警告 |
+| VLESS Reality TCP | 支持，无 flow / Vision | 仅 Vision | 无 flow / Vision | 省略并警告 |
+| VLESS Reality gRPC，无 flow | 支持 | 省略并警告 | 支持 | 省略并警告 |
+| VLESS xhttp 四种模式 | 支持；空或 TCP ALPN，仅 h2/http/1.1 | 省略并警告 | TLS / Reality，auto / packet-up / stream-up / stream-one；ALPN 留空或恰为 [h2] | 省略并警告 |
 | Hysteria2、TUIC | 支持；固定 CA 时省略 | 支持，含固定证书 | 支持，固定证书转指纹 | 省略并警告 |
 | WireGuard | 支持既有导出 | 支持既有导出 | 支持 | 省略并警告 |
 | 全局规则模板与外部来源 | 不适用 | 不适用（不是完整配置） | 支持规则、内置服务集及外部 provider（文本/YAML/MRS 格式，追加 RULE-SET 行） | 受限，无 GEOSITE/RULE-SET/provider |
@@ -162,9 +164,25 @@ Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组
 
 格式别名、预览警告与显式 `?format=` 优先规则见 AGENTS §10.3；UA 表仍为空，不能宣称客户端自动识别通过。每格式按自己能力过滤，不把不支持协议改写为另一协议。
 
-Hysteria2 端口跳跃（v1.5.0 §7）只在入站设置了跳跃段时输出，未设置时各格式输出逐字不变：mihomo（Clash Meta）写 `ports: "<start>-<end>"` 与 `hop-interval: <秒>`；sing-box 写 `server_ports: ["<start>:<end>"]` 与 `hop_interval: "<秒>s"`；URI 查询参数写 `mport=<start>-<end>`；legacy Clash 本来就不输出 Hysteria2。间隔默认 30 秒。左侧「Hysteria2、TUIC」行的省略规则对跳跃端点继续有效（固定 CA 的端点仍不进 URI/sing-box 片段）。
+v1.5.5 的上述 Reality/xhttp 行表示当前导出边界。SpiderX 不再导致节点省略，mihomo/sing-box 不输出它，URI/Base64 保留 `spx`。安全／传输省略警告按原因列节点名称，每组最多 10 个，超出汇总数量；链依赖与空组策略保持原有处理。规划实施记录包含 mihomo 的 Reality 实流验证，TLS xhttp 的本轮真实客户端连通验证 **待核实**。
 
-linked 中转端点来自规则成功发布快照，且须启用/对用户可见并通过目标入站授权与凭据检查；保留协议字段，仅换入口地址/端口，补显式原 TLS server name。命名为目标端点名追加 ` · 经 <入口节点>`，原端口消歧保留。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality/xhttp 中转保留目标公开参数与原 SNI；xhttp 限 TCP，并继续执行各格式省略边界。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
+自签名／固定 CA 的 TLS VLESS、Trojan、HTTP、SOCKS5 与 Hysteria2/TUIC 一样：mihomo 将第一张 PEM 证书 DER 的 SHA-256 写入 `fingerprint`，sing-box 写 `tls.certificate`，URI/Base64 省略端点并给预览警告。
+
+外部导入新增的参数按输入格式区分：
+
+| 参数 | URI | Clash YAML |
+| --- | --- | --- |
+| WebSocket Host | 支持 Host 映射 | 仅 `ws-opts.headers.Host/host`，两者不同值拒绝 |
+| TUIC | `congestion_control`、`udp_relay_mode`、`alpn` | congestion-controller/udp-relay-mode 尚未接入，仍拒绝 |
+| Hysteria2 跳跃与带宽 | `mport`，单段 start-end | `ports`、`hop-interval`、`up/down`；带宽为正整数或整数加 Mbps |
+| Hysteria2 混淆 | `obfs=salamander` 与密码 | `obfs: salamander` 与 `obfs-password` |
+| 可忽略参数 | `headerType=none`、insecure 别名值 0、TUIC `disable_sni=0`、`ed` | `tfo`、`ip-version`、`packet-encoding`；`udp-over-tcp:true` 仍拒绝 |
+
+其他未知字段仍拒绝，不保存原配置透传。QUIC 输出 ALPN 固定 h3，不承诺按导入 ALPN 原样输出；URI 导出的 upmbps/downmbps 尚不能原样回导。混淆密码随模型加密保存，刷新诊断不回显，Owner 正文预览与链接包含客户端所需密码。
+
+Hysteria2 端口跳跃（v1.5.0 §7）在自建入站设置了跳跃段时输出：mihomo（Clash Meta）写 `ports: "<start>-<end>"` 与 `hop-interval: <秒>`；sing-box 写 `server_ports: ["<start>:<end>"]` 与 `hop_interval: "<秒>s"`；URI 查询参数写 `mport=<start>-<end>`；legacy Clash 不输出 Hysteria2。自建入站间隔默认 30 秒；外部导入 mport 未给间隔时保留 0，mihomo 不写间隔、sing-box 写 0s，其跨客户端可用性 **待核实**。固定 CA 的跳跃端点仍不进 URI/Base64，sing-box 可输出。
+
+linked 中转端点来自规则成功发布快照，且须启用/对用户可见并通过目标入站授权与凭据检查；换入口地址/端口、补显式原 TLS server name，并清空目标 QUIC 跳跃端口与间隔，只连接规则端口，其他协议字段保留，直接端点不变。命名为目标端点名追加 ` · 经 <入口节点>`，原端口消歧保留。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality/xhttp 中转保留目标公开参数与原 SNI；xhttp 限 TCP，并继续执行各格式省略边界。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
 
 xhttp 前置 CDN 时节点看到边缘地址，源地址设备估计可能合并或分散客户端。目标看到中继源地址，设备限制把同一中继后的客户端合为一个来源；账户额度仍在目标计量，规则转发只计节点总量，中间/出口 relay 服务排除。
 

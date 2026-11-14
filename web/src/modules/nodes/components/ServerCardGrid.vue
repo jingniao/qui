@@ -3,11 +3,18 @@
       class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5"
     >
       <div
-        v-for="node in nodes"
+        v-for="(node, index) in nodes"
         :key="node.id"
         v-visible="node.id"
+        :draggable="reorderable"
+        @dragstart="onDragStart($event, node.id)"
+        @dragover.prevent="dropTarget = reorderable && dragging ? node.id : ''"
+        @dragleave="dropTarget = dropTarget === node.id ? '' : dropTarget"
+        @drop.prevent="onDrop(node.id)"
+        @dragend="dragging = ''; dropTarget = ''"
         @click="handleCardClick(node)"
         class="bg-white rounded-[24px] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-4 cursor-pointer group"
+        :class="{ 'ring-2 ring-ios-blue/40': dropTarget === node.id && dragging !== node.id, 'opacity-50': dragging === node.id }"
       >
         <!-- Card Top Details -->
         <div class="space-y-3.5">
@@ -16,7 +23,7 @@
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
               <span
                 class="text-xl shrink-0 select-none leading-none cursor-default"
-                :title="`${getNodeCountry(node).name} (${getNodeCountry(node).source === 'admin_region' ? '管理员指定地区' : 'IP归属识别'})`"
+                :title="getNodeCountryTitle(node)"
               >
                 {{ getNodeCountry(node).flag }}
               </span>
@@ -30,6 +37,9 @@
               </router-link>
               <span v-if="getNodeRegion(node)" class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-semibold text-neutral-600 shrink-0 truncate max-w-[80px]" :title="getNodeRegion(node)">
                 {{ getNodeRegion(node) }}
+              </span>
+              <span v-for="item in node.tags || []" :key="item" class="rounded bg-ios-blue/[0.08] px-1.5 py-0.5 text-xs font-semibold text-ios-blue shrink-0 truncate max-w-[96px]" :title="`服务器分组：${item}`">
+                {{ item }}
               </span>
               <span v-if="node.tuningAdviceCount && node.tuningAdviceCount > 0" class="rounded bg-amber-500/10 text-amber-600 border border-amber-500/20 px-1.5 py-0.5 text-xs font-semibold shrink-0" :title="`有 ${node.tuningAdviceCount} 条调优建议`">
                 调优建议 {{ node.tuningAdviceCount }}
@@ -219,10 +229,12 @@
           <!-- 1. 安装 -->
           <button
             type="button"
+            :disabled="isNodeReissuing(node.id)"
             @click.stop="emit('install', node)"
-            class="py-1.5 rounded-xl bg-[#ECFDF3] text-[#027A48] hover:bg-[#D1FADF] font-semibold text-xs text-center transition-colors"
+            class="py-1.5 rounded-xl bg-[#ECFDF3] text-[#027A48] hover:bg-[#D1FADF] font-semibold text-xs text-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1"
           >
-            安装
+            <span v-if="isNodeReissuing(node.id)" class="inline-block w-3 h-3 border-2 border-[#027A48] border-t-transparent rounded-full animate-spin"></span>
+            <span>{{ isNodeReissuing(node.id) ? '正在签发…' : '安装' }}</span>
           </button>
 
           <!-- 2. 编辑 -->
@@ -243,27 +255,47 @@
             删除
           </button>
         </div>
+        <button v-if="canAddRelay(node)" type="button" class="ios-btn-secondary w-full" @click.stop="emit('add-relay', node)">添加中转</button>
+        <!-- Order controls for touch screens, where native dragging is unavailable -->
+        <div v-if="reorderable" class="flex justify-end gap-1.5 -mt-2" @click.stop>
+          <button v-if="index > 0" type="button" class="px-2 py-1 rounded-lg bg-black/[0.04] text-neutral-600 hover:bg-black/[0.08] text-xs font-semibold" @click.stop="emit('move', node.id, -1)">上移</button>
+          <button v-if="index < nodes.length - 1" type="button" class="px-2 py-1 rounded-lg bg-black/[0.04] text-neutral-600 hover:bg-black/[0.08] text-xs font-semibold" @click.stop="emit('move', node.id, 1)">下移</button>
+        </div>
       </div>
     </div>
 </template>
 <script setup lang="ts">
-import { toRef } from 'vue';
+import { ref, toRef } from 'vue';
 import { useRouter } from 'vue-router';
 import type { MachineTrafficSummary, NodeView } from '../api';
 import { isOwner } from '../../../app/auth';
 import { hostMetrics, nicRate } from '../metrics';
 import { coreSummaryLabel } from '../coreSummary';
+import { isNodeReissuing } from '../coreInstallOptions';
 import { connectAddress } from '../nodeAddress';
 import MachineTrafficUsage from './MachineTrafficUsage.vue';
 import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';
 
-const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary> }>();
-const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView] }>();
+const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean; canAddRelay: (node: NodeView) => boolean }>();
+const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView]; 'add-relay': [node: NodeView]; move: [id: string, delta: -1 | 1]; reorder: [fromId: string, toId: string] }>();
 const router = useRouter();
 
+// Native drag and drop (no dependency); the page saves the new order.
+const dragging = ref(''), dropTarget = ref('');
+function onDragStart(event: DragEvent, id: string) {
+  if (!props.reorderable) return;
+  dragging.value = id;
+  event.dataTransfer?.setData('text/plain', id);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+}
+function onDrop(id: string) {
+  if (props.reorderable && dragging.value && dragging.value !== id) emit('reorder', dragging.value, id);
+  dragging.value = ''; dropTarget.value = '';
+}
+
 const { statusCapsuleClass, statusCapsuleText, statusDotClass, calculateRunningTime, formatPercent,
-  barColor, formatSpeedParts, getNodeCountry, getNodeRegion, getRenewalDate,
+  barColor, formatSpeedParts, getNodeCountry, getNodeCountryTitle, getNodeRegion, getRenewalDate,
   getRenewalPriceDisplay, getRenewalInfo } = useServerCardValues(toRef(props, 'clockNow'));
 const { vVisible, latencyTile, latencyStatus } = useServerCardLatency();
 

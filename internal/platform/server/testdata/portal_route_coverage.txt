@@ -9,6 +9,7 @@ DELETE /api/v1/certificates/{id}
 DELETE /api/v1/client-policy-profiles/{id}
 DELETE /api/v1/devices/{id}
 DELETE /api/v1/devices/{id}/credentials/{protocol}
+DELETE /api/v1/imported-proxies/{id}
 DELETE /api/v1/inbounds/{id}
 DELETE /api/v1/node-groups/{id}
 DELETE /api/v1/nodes/{id}
@@ -42,6 +43,7 @@ GET /api/v1/backups
 GET /api/v1/backups/{id}/download
 GET /api/v1/canvas-schemes
 GET /api/v1/canvas-schemes/{id}
+GET /api/v1/canvas-schemes/{id}/status
 GET /api/v1/canvas-tunnels
 GET /api/v1/canvas-tunnels/legacy-objects
 GET /api/v1/certificates
@@ -57,6 +59,7 @@ GET /api/v1/devices
 GET /api/v1/devices/{id}
 GET /api/v1/events
 GET /api/v1/imported-proxies
+GET /api/v1/imported-proxies/{id}/deletion-preview
 GET /api/v1/inbounds
 GET /api/v1/node-groups
 GET /api/v1/nodes
@@ -100,6 +103,7 @@ GET /api/v1/probe-targets
 GET /api/v1/protocol-support
 GET /api/v1/proxy-chains
 GET /api/v1/proxy-chains/{id}
+GET /api/v1/relay-schemes/legacy-resources
 GET /api/v1/releases
 GET /api/v1/restore-records
 GET /api/v1/revisions
@@ -122,6 +126,7 @@ GET /api/v1/system/install-endpoint
 GET /api/v1/system/panel-update
 GET /api/v1/system/runtime
 GET /api/v1/system/runtime-policy
+GET /api/v1/system/server-order
 GET /api/v1/system/storage-thresholds
 GET /api/v1/system/tuning-auto-apply
 GET /api/v1/traffic/accounts/daily
@@ -163,6 +168,8 @@ POST /api/v1/backups/{id}/verify
 POST /api/v1/canvas-schemes
 POST /api/v1/canvas-schemes/{id}/plan
 POST /api/v1/canvas-schemes/{id}/publish
+POST /api/v1/canvas-schemes/{id}/remove
+POST /api/v1/canvas-schemes/{id}/remove-plan
 POST /api/v1/canvas-tunnels
 POST /api/v1/canvas-tunnels/{id}/adopt
 POST /api/v1/canvas-tunnels/{id}/rotate-credentials
@@ -182,6 +189,7 @@ POST /api/v1/inbounds
 POST /api/v1/inbounds/{id}/reachability
 POST /api/v1/node-groups
 POST /api/v1/nodes/enrollment-token
+POST /api/v1/nodes/{id}/baseline
 POST /api/v1/nodes/{id}/cores/{component}/remove
 POST /api/v1/nodes/{id}/enrollment-token
 POST /api/v1/nodes/{id}/health-checks
@@ -206,6 +214,9 @@ POST /api/v1/portal/auth/logout
 POST /api/v1/portal/subscription/reset
 POST /api/v1/probe-targets
 POST /api/v1/proxy-chains
+POST /api/v1/relay-schemes/legacy-resources/reattach
+POST /api/v1/relay-schemes/quick
+POST /api/v1/relay-schemes/quick/plan
 POST /api/v1/releases
 POST /api/v1/revisions
 POST /api/v1/revisions/proxy
@@ -235,6 +246,7 @@ PUT /api/v1/canvas-schemes/{id}
 PUT /api/v1/canvas-tunnels/{id}
 PUT /api/v1/client-policy-profiles/{id}
 PUT /api/v1/devices/{id}
+PUT /api/v1/imported-proxies/{id}
 PUT /api/v1/inbounds/{id}
 PUT /api/v1/node-groups/{id}
 PUT /api/v1/nodes/{id}
@@ -260,6 +272,7 @@ PUT /api/v1/system/base
 PUT /api/v1/system/certificate-settings
 PUT /api/v1/system/install-endpoint
 PUT /api/v1/system/runtime-policy
+PUT /api/v1/system/server-order
 PUT /api/v1/system/storage-thresholds
 PUT /api/v1/system/tuning-auto-apply
 PUT /api/v1/tunnel-rules/{id}

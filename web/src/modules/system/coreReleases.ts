@@ -27,6 +27,20 @@ export const coreReleasesAPI = {
     request<CoreReleaseList>(`/core-releases?component=${encodeURIComponent(component)}&source=${source}${refresh ? '&refresh=1' : ''}`)
 };
 
+export function coreReleaseFields(item: CoreRelease, node: NodeView | null) {
+  const asset = pickAsset(item, node);
+  return { version: item.version, url: asset?.url ?? '', sha256: asset?.sha256 ?? '' };
+}
+
+export async function gostInstallRelease(node: NodeView) {
+  const list = await coreReleasesAPI.list('gost', 'official');
+  const release = list.items.find(item => item.version === '3.3.2');
+  if (!release) throw new Error('GOST 3.3.2 发布信息缺失');
+  const fields = coreReleaseFields(release, node);
+  if (!fields.url || !fields.sha256) throw new Error('没有适用于该服务器的 GOST 资产或摘要');
+  return fields;
+}
+
 export const DIGEST_SOURCE_LABELS: Record<CoreReleaseAsset['digestSource'], string> = {
   '': '',
   dgst: '官方 .dgst 校验文件',

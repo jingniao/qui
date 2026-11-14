@@ -57,7 +57,7 @@
       <button class="ios-search-btn shrink-0">查询</button>
     </form>
 
-    <ErrorState v-if="error" :message="error" @retry="load" />
+    <ErrorState v-if="error" :message="error" @retry="load()" />
     <LoadingSkeleton v-else-if="loading && !users.length" />
     <EmptyState v-else-if="!users.length && !displayAdmins.length" title="暂无用户" description="点击上方“新增用户”为内部成员开通专属代理账号与订阅。" />
 
@@ -275,6 +275,7 @@
 </template>
 
 <script setup lang="ts">
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { deviceLimitHelp, udpUnsupportedText } from "../../../app/deviceLimit";
 import type { DevicesOnline } from "../api";
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
@@ -445,23 +446,26 @@ async function executeAdminAction() {
   }
 }
 
-async function load() {
-  loading.value = true;
+let generation = 0;
+async function load(silent = false) {
+  const current = ++generation;
+  if (!silent) loading.value = true;
   try {
     const [result, groupResult, adminResult] = await Promise.all([
       userAPI.list(page.value, keyword.value),
-      groupAPI.list(1, 100).catch(() => ({ items: [], total: 0 })),
-      request<Page<AdminUser>>('/admins?page=1&pageSize=50').catch(() => ({ items: [], total: 0 }))
+      silent ? Promise.resolve({ items: groups.value }) : groupAPI.list(1, 100),
+      silent ? Promise.resolve({ items: admins.value }) : request<Page<AdminUser>>('/admins?page=1&pageSize=50')
     ]);
+    if (current !== generation) return;
     users.value = result.items;
     total.value = result.total;
     groups.value = groupResult.items;
     admins.value = adminResult.items || [];
     error.value = '';
   } catch (e) {
-    error.value = (e as Error).message;
+    if (current === generation) error.value = (e as Error).message;
   } finally {
-    loading.value = false;
+    if (current === generation) loading.value = false;
   }
 }
 
@@ -552,10 +556,13 @@ async function remove() {
   }
 }
 
+const refreshUsers = throttleTrailing(() => { if (!document.hidden && !loading.value) void load(true); }, 5000);
+function visibilityChanged() { if (!document.hidden) refreshUsers(); }
 onMounted(() => {
   load();
-  window.addEventListener('proxy-system-alert', load);
+  document.addEventListener('visibilitychange', visibilityChanged);
+  window.addEventListener('proxy-system-alert', refreshUsers);
 });
 
-onUnmounted(() => window.removeEventListener('proxy-system-alert', load));
+onUnmounted(() => { generation++; refreshUsers.cancel(); document.removeEventListener('visibilitychange', visibilityChanged); window.removeEventListener('proxy-system-alert', refreshUsers); });
 </script>

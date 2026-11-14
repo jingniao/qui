@@ -60,8 +60,13 @@ cleanup_top() {
 trap cleanup_top EXIT
 
 # --- Argument checks --------------------------------------------------------------
-# Only the argument checks run the installer itself: they stop long before the host
-# gate, so this works on any machine. refuse keeps the refusal text out of the report.
+# Execute the installer's real argument section only, ending before its host gate.
+# Valid arguments must never start installation, even when this test runs as root.
+argument_script=$TOP/arguments.sh
+host_gate=$(grep -nF '[[ $(uname -s) == Linux && $EUID -eq 0 ]]' "$installer")
+[[ $host_gate && $host_gate != *$'\n'* ]] || { printf 'node-install-test: expected one host gate\n' >&2; exit 1; }
+sed -n "1,$((${host_gate%%:*} - 1))p" "$installer" > "$argument_script"
+# refuse keeps the refusal text out of the report.
 refuse() { ( "$@" ) >/dev/null 2>&1; }
 token=AAAAAAAAAAAAAAAAAAAAAAAA
 zeros=$(printf '0%.0s' {1..64})
@@ -69,7 +74,7 @@ zeros=$(printf '0%.0s' {1..64})
 # The panel's two listeners cannot share one port. The command below is the one that
 # reached the gRPC port and failed at the certificate download instead.
 same_port() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --http-port 18880 \
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --http-port 18880 \
     --grpc-port 18880 --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
 }
 check 'identical --http-port and --grpc-port refused' 1 refuse same_port
@@ -80,26 +85,21 @@ case $(same_port || true) in
 esac
 # The same value spelled with a leading zero is still the same port.
 same_port_padded() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --http-port 0043 \
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --http-port 0043 \
     --grpc-port 43 --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
 }
 check 'a leading zero does not hide the same port' 1 refuse same_port_padded
-# Two different ports pass this check: the run continues into the host gate here,
-# which refuses a host that is not Linux root or has no init system, and either way
-# the message is no longer the port one.
+# Two different ports pass the complete argument section.
 different_ports() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --http-port 22550 \
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --http-port 22550 \
     --grpc-port 18880 --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
 }
-case $(different_ports || true) in
-  *'不能是同一个端口'*) check 'two different ports pass the port check' 1 true;;
-  *) check 'two different ports pass the port check' 0 true;;
-esac
+check 'two different ports pass the port check' 0 different_ports
 # The gRPC address may differ from the panel address (a panel whose Web side is a
 # CDN or reverse proxy); it has to pass the same host check and is otherwise used
 # verbatim as control_address and server_name.
 bad_grpc_host() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --grpc-host https://grpc.example.com \
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --grpc-host https://grpc.example.com \
     --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
 }
 check 'a gRPC address with a scheme is refused' 1 refuse bad_grpc_host
@@ -108,24 +108,21 @@ case $(bad_grpc_host || true) in
   *) check 'the refusal names --grpc-host' 1 true;;
 esac
 port_in_grpc_host() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --grpc-host grpc.example.com:443 \
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --grpc-host grpc.example.com:443 \
     --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
 }
 check 'a gRPC address with a port is refused' 1 refuse port_in_grpc_host
 different_grpc_host() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --grpc-host grpc.example.com \
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --grpc-host grpc.example.com \
     --ca-sha256 "$zeros" --token "$token" --core xray 2>&1
 }
-case $(different_grpc_host || true) in
-  *'Agent gRPC 地址只能是域名或 IPv4'*) check 'a valid gRPC host passes the host check' 1 true;;
-  *) check 'a valid gRPC host passes the host check' 0 true;;
-esac
+check 'a valid gRPC host passes the host check' 0 different_grpc_host
 
 # --web-upgrade takes no value and is accepted by argument parsing: with a bad port
 # pair the refusal is the port one, not "unknown argument"; a value after it is read
 # as the next (unknown) argument.
 web_upgrade_flag() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --http-port 18880 \
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --http-port 18880 \
     --grpc-port 18880 --ca-sha256 "$zeros" --token "$token" --core xray --web-upgrade 2>&1
 }
 case $(web_upgrade_flag || true) in
@@ -134,7 +131,7 @@ case $(web_upgrade_flag || true) in
   *) check '--web-upgrade is accepted by argument parsing' 1 true;;
 esac
 web_upgrade_with_value() {
-  bash "$installer" --version 1.4.1 --panel panel.example.com --web-upgrade yes 2>&1
+  bash "$argument_script" --version 1.4.1 --panel panel.example.com --web-upgrade yes 2>&1
 }
 case $(web_upgrade_with_value || true) in
   *'未知参数：yes'*) check '--web-upgrade takes no value' 0 true;;

@@ -28,7 +28,7 @@
     </form>
 
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <LoadingSkeleton v-else-if="loading" />
+    <LoadingSkeleton v-else-if="loading && !operations.length" />
     <EmptyState v-else-if="!operations.length" title="暂无操作记录" />
     <DataTable v-else>
       <template #header>
@@ -85,10 +85,12 @@ import EmptyState from '../../../components/EmptyState.vue';
 interface Operation { id: number; timestamp: string; operator: string; action: string; target: string; result: string; ip: string; }
 const operations = ref<Operation[]>([]); const page = ref(1); const total = ref(0); const keyword = ref(''); const loading = ref(false); const error = ref('');
 
+let generation = 0;
 async function load() {
+  const current = ++generation;
   loading.value = true; error.value = '';
-  try { const result = await request<Page<Operation>>(`/operations?page=${page.value}&pageSize=20&keyword=${encodeURIComponent(keyword.value)}`); operations.value = result.items; total.value = result.total; }
-  catch (e) { error.value = (e as Error).message; } finally { loading.value = false; }
+  try { const result = await request<Page<Operation>>(`/operations?page=${page.value}&pageSize=20&keyword=${encodeURIComponent(keyword.value)}`); if (current !== generation) return; operations.value = result.items; total.value = result.total; }
+  catch (e) { if (current === generation) error.value = (e as Error).message; } finally { if (current === generation) loading.value = false; }
 }
 function search() { page.value = 1; load(); }
 function changePage(value: number) { page.value = value; load(); }

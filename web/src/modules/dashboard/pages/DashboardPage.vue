@@ -16,7 +16,7 @@
 
         <button
           :disabled="loading"
-          @click="loadAll"
+          @click="loadAll()"
           class="ios-btn-secondary inline-flex items-center gap-1.5"
         >
           <svg :class="['w-3.5 h-3.5 text-ios-secondary', loading ? 'animate-spin' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -84,7 +84,9 @@
 
                 <div class="mt-3 flex items-baseline gap-1.5">
                   <span class="text-3xl font-bold text-ios-label tabular-nums tracking-normal">{{ healthyNodesCount }}</span>
-                  <span class="text-xs text-ios-tertiary font-medium">/ {{ allNodes.length }} 正常</span>
+                  <span class="text-xs text-ios-tertiary font-medium">/ {{ publishedNodesCount }} 正常</span>
+                </div>
+                <div v-if="unpublishedNodesCount" class="text-xs text-ios-tertiary mt-1">{{ unpublishedNodesCount }} 台未发布配置
                 </div>
               </div>
 
@@ -92,13 +94,13 @@
                 <span
                   :class="[
                     'inline-flex items-center gap-1.5 font-medium',
-                    healthyNodesCount === allNodes.length && allNodes.length > 0 ? 'text-emerald-600' : 'text-amber-600'
+                    unhealthyNodesCount === 0 ? 'text-emerald-600' : 'text-amber-600'
                   ]"
                 >
-                  <span :class="['w-1.5 h-1.5 rounded-full shrink-0', healthyNodesCount === allNodes.length && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-amber-500']"></span>
-                  {{ healthyNodesCount === allNodes.length && allNodes.length > 0 ? '状态健康' : `${allNodes.length - healthyNodesCount} 核心待检` }}
+                  <span :class="['w-1.5 h-1.5 rounded-full shrink-0', unhealthyNodesCount === 0 ? 'bg-emerald-500' : 'bg-amber-500']"></span>
+                  {{ unhealthyNodesCount === 0 ? '状态健康' : `${unhealthyNodesCount} 核心异常` }}
                 </span>
-                <span class="text-ios-tertiary tabular-nums text-xs font-medium">{{ allNodes.length > 0 ? Math.round((healthyNodesCount / allNodes.length) * 100) : 0 }}%</span>
+                <span class="text-ios-tertiary tabular-nums text-xs font-medium">{{ publishedNodesCount > 0 ? Math.round((healthyNodesCount / publishedNodesCount) * 100) : 0 }}%</span>
               </div>
             </div>
 
@@ -160,13 +162,21 @@
             </div>
           </div>
 
-          <!-- 2. 中部核心区：左侧待处理+节点列表 (7列) | 右侧节点流量排行 (5列) -->
+          <!-- 实时概况：当前连接、在线用户估计与今日阻断，不改动上方卡片 -->
+          <div v-if="live" class="panel-card bg-white px-5 py-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-ios-secondary">
+            <span>当前连接 <span class="font-semibold text-ios-label">{{ live.connections }}</span></span>
+            <span>在线用户{{ live.onlineUsers === '—' ? '' : '约' }} <span class="font-semibold text-ios-label">{{ live.onlineUsers }}</span>{{ live.onlineUsers === '—' ? '' : ' 人' }}</span>
+            <span>今日阻断 <span class="font-semibold text-ios-label">{{ live.blocked }}</span> 次</span>
+            <span v-if="live.partial" class="text-ios-orange">部分节点未测</span>
+          </div>
+
+          <!-- 2. 中部核心区：左侧待处理问题 (7列) | 右侧节点流量排行 (5列) -->
           <!-- 使用 items-stretch 让左右两栏底部完全水平对齐 -->
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-            <!-- 左侧主栏 (7列): 待处理问题 + 节点列表 -->
+            <!-- 左侧主栏 (7列): 待处理问题 -->
             <div class="lg:col-span-7 flex flex-col gap-6">
               <!-- 待处理问题 -->
-              <section class="panel-card p-5 sm:p-6 bg-white space-y-4">
+              <section class="panel-card p-5 sm:p-6 bg-white space-y-4 flex-1 flex flex-col">
                 <div class="flex items-center justify-between">
                   <div>
                     <div class="flex items-center gap-2">
@@ -230,7 +240,7 @@
                 </div>
 
                 <!-- 正常无异常状态 -->
-                <div v-else class="py-5 flex flex-col items-center justify-center text-center space-y-1.5">
+                <div v-else class="py-5 flex-1 flex flex-col items-center justify-center text-center space-y-1.5">
                   <div class="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs">
                     ✓
                   </div>
@@ -238,72 +248,12 @@
                   <p class="text-xs text-ios-tertiary">所有节点连接活跃、代理核心运行正常。</p>
                 </div>
               </section>
-
-              <!-- 节点列表 (在线情况) -->
-              <section class="panel-card p-5 sm:p-6 bg-white flex-1 flex flex-col justify-between space-y-4">
-                <div class="flex items-center justify-between">
-                  <div>
-                    <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">节点列表</h2>
-                    <p class="text-xs text-ios-tertiary mt-0.5">实时心跳与网络可用性监控</p>
-                  </div>
-                  <router-link to="/nodes" class="text-xs font-semibold text-ios-blue hover:underline">
-                    查看全部 &rarr;
-                  </router-link>
-                </div>
-
-                <EmptyState
-                  v-if="allNodes.length === 0"
-                  title="暂无节点"
-                  description="尚未连接节点服务器，请前往节点管理配置并注册 Agent。"
-                />
-
-                <!-- 2 列自适应网格卡片 (对称整洁，不留单卡空白) -->
-                <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 items-start">
-                  <div
-                    v-for="node in allNodes"
-                    :key="node.id"
-                    class="p-4 rounded-2xl border border-black/[0.06] bg-white hover:border-ios-blue/30 transition-all flex flex-col justify-between space-y-3 shadow-2xs group"
-                  >
-                    <div class="flex items-center justify-between gap-2">
-                      <router-link
-                        :to="`/nodes/${node.id}`"
-                        class="font-semibold text-sm text-ios-label group-hover:text-ios-blue truncate block"
-                        :title="node.name"
-                      >
-                        {{ node.name }}
-                      </router-link>
-
-                      <!-- Status Badge -->
-                      <span
-                        :class="[
-                          'text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 border inline-flex items-center gap-1',
-                          isNodeOnline(node)
-                            ? 'bg-emerald-50 text-emerald-600 border-emerald-200/80'
-                            : 'bg-rose-50 text-ios-red border-rose-200/80'
-                        ]"
-                      >
-                        <span :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(node) ? 'bg-emerald-500' : node.status === 'pending' ? 'bg-neutral-400' : 'bg-ios-red']"></span>
-                        {{ nodeStatusLabel(node) }}
-                      </span>
-                    </div>
-
-                    <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-secondary">
-                      <span class="tabular-nums text-xs truncate" :class="connectAddress(node) ? 'text-ios-tertiary' : 'text-ios-orange'">
-                        {{ connectAddress(node) || '未设置连接地址' }}
-                      </span>
-                      <span class="tabular-nums text-xs text-ios-tertiary shrink-0">
-                        {{ node.lastHeartbeat ? formatTime(node.lastHeartbeat).slice(11, 19) : '未同步' }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </section>
             </div>
 
             <!-- 右侧副栏 (5列): 节点流量 (优化后：层次丰富、结构饱满，消除空旷空白) -->
             <div class="lg:col-span-5 flex flex-col">
               <section class="panel-card p-5 sm:p-6 bg-white h-full flex flex-col justify-between space-y-4">
-                <!-- 头部：标题与时间维度切换 (累计 / 今日) -->
+                <!-- 头部：标题与时间维度切换 (本月 / 今日) -->
                 <div class="flex items-center justify-between">
                   <div>
                     <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">节点流量</h2>
@@ -313,15 +263,15 @@
                   <div class="inline-flex rounded-lg bg-black/[0.05] p-0.5 text-xs font-medium select-none">
                     <button
                       type="button"
-                      @click="nodeTrafficPeriod = 'total'"
+                      @click="nodeTrafficPeriod = 'month'"
                       :class="[
                         'px-2.5 py-0.5 rounded-md transition-all',
-                        nodeTrafficPeriod === 'total'
+                        nodeTrafficPeriod === 'month'
                           ? 'bg-white text-ios-blue shadow-2xs font-semibold'
                           : 'text-ios-tertiary hover:text-ios-label'
                       ]"
                     >
-                      累计
+                      本月
                     </button>
                     <button
                       type="button"
@@ -343,7 +293,7 @@
                   <div class="flex items-center justify-between">
                     <div>
                       <div class="text-xs text-ios-tertiary font-medium">
-                        {{ nodeTrafficPeriod === 'today' ? '今日吞吐总量' : '累计吞吐总量' }}
+                        {{ nodeTrafficPeriod === 'today' ? '今日吞吐总量' : '本月吞吐总量' }}
                       </div>
                       <div class="text-lg sm:text-xl font-bold text-ios-label tabular-nums tracking-normal mt-0.5">
                         <TrafficValue :bytes="displayTotalBytes" />
@@ -445,10 +395,10 @@
 
                         <div class="flex items-center gap-2 shrink-0">
                           <span class="text-ios-label text-xs font-semibold tabular-nums">
-                            <TrafficValue :bytes="item.traffic" />
+                            <TrafficValue v-if="item.measured" :bytes="item.traffic" /><span v-else>—</span>
                           </span>
                           <span class="tabular-nums text-ios-tertiary text-xs w-8 text-right font-medium">
-                            {{ item.percent }}%
+                            {{ item.share }}%
                           </span>
                         </div>
                       </div>
@@ -477,7 +427,7 @@
             </div>
           </div>
 
-          <!-- 3. 下部一排并列：用户用量与到期 (左) + 近期访问审计 (右) -->
+          <!-- 3. 下部一排并列：用户用量与到期 (左) + 近期阻断 (右) -->
           <!-- 使用 items-stretch 让两张卡片上下完全等高对齐 -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
             <!-- 用户用量与到期 -->
@@ -545,21 +495,21 @@
               </div>
             </section>
 
-            <!-- 近期访问审计 (仅 Owner 可见，与用户用量严格等高对齐) -->
+            <!-- 近期阻断 (仅 Owner 可见，与用户用量严格等高对齐；只列被拦截的访问) -->
             <section v-if="isOwner" class="panel-card p-5 sm:p-6 bg-white h-full flex flex-col justify-between space-y-4">
               <div class="flex items-center justify-between">
                 <div>
-                  <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">近期访问审计</h2>
-                  <p class="text-xs text-ios-tertiary mt-0.5">最近转发请求与拦截事件</p>
+                  <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">近期阻断</h2>
+                  <p class="text-xs text-ios-tertiary mt-0.5">最近被拦截的访问</p>
                 </div>
-                <router-link to="/access" class="text-xs font-semibold text-ios-blue hover:underline">
-                  完整审计 &rarr;
+                <router-link to="/access?tab=blocked" class="text-xs font-semibold text-ios-blue hover:underline">
+                  全部阻断 &rarr;
                 </router-link>
               </div>
 
               <!-- 暂无日志时的优雅等高占位 -->
               <div
-                v-if="!dashboard.recentAccess?.length && !dashboard.recentBlocked?.length"
+                v-if="!dashboard.recentBlocked?.length"
                 class="flex-1 min-h-[220px] rounded-2xl border border-dashed border-black/[0.08] flex flex-col items-center justify-center text-center p-6 space-y-2"
               >
                 <div class="w-10 h-10 rounded-2xl bg-black/[0.03] text-ios-tertiary flex items-center justify-center">
@@ -567,33 +517,23 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
-                <p class="text-sm font-semibold text-ios-label">暂无访问日志</p>
+                <p class="text-sm font-semibold text-ios-label">暂无阻断记录</p>
                 <p class="text-xs text-ios-tertiary max-w-xs leading-relaxed">
-                  代理核心处理流量时将自动上报转发与拦截审计事件。
+                  节点按策略拦截访问时会显示在这里。
                 </p>
               </div>
 
               <!-- 有日志时的紧凑列表 (flex-1 纵向撑满对齐) -->
               <div v-else class="space-y-2 divide-y divide-black/[0.04] flex-1">
                 <div
-                  v-for="(item, idx) in combinedRecentRecords"
+                  v-for="(item, idx) in dashboard.recentBlocked"
                   :key="idx"
                   class="pt-2.5 first:pt-0 flex items-center justify-between gap-2 text-xs"
                 >
                   <div class="min-w-0">
-                    <div class="flex items-center gap-1.5">
-                      <span
-                        :class="[
-                          'text-xs font-semibold px-1 py-0.2 rounded shrink-0',
-                          item.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-ios-red font-bold'
-                        ]"
-                      >
-                        {{ item.allowed ? '通过' : '阻断' }}
-                      </span>
-                      <p class="tabular-nums text-ios-label truncate font-medium text-xs">
-                        {{ item.domain || item.targetIp }}
-                      </p>
-                    </div>
+                    <p class="tabular-nums text-ios-label truncate font-medium text-xs">
+                      {{ item.domain || item.targetIp }}
+                    </p>
                     <p class="text-xs text-ios-tertiary truncate mt-0.5">
                       {{ item.userName || '匿名' }} · {{ item.nodeName }}
                     </p>
@@ -616,7 +556,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { dashboardAPI, type Dashboard, type Hour, type Recent } from '../api';
+import { liveSummary } from '../liveSummary';
 import { accessAPI } from '../../access/api';
+import { allPages } from '../../../app/pagination';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { unhealthyCoreLabel } from '../../nodes/coreSummary';
@@ -634,6 +576,7 @@ import ErrorState from '../../../components/ErrorState.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 
 const dashboard = ref<Dashboard | null>(null);
+const live = computed(() => dashboard.value ? liveSummary(dashboard.value.counts) : null);
 const allNodes = ref<NodeView[]>([]);
 const allUsers = ref<ProxyUser[]>([]);
 const allRevisions = ref<Revision[]>([]);
@@ -643,29 +586,6 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 // Dynamic Date & Auto-refresh String (panel timezone, not the browser's)
 const dateRefreshText = computed(() => `${panelDateLabel(new Date())} · 30s 自动刷新`);
-
-// Traffic Periods
-const traffic24h = ref<{ upload: number; download: number } | null>(null);
-const traffic7d = ref<{ upload: number; download: number } | null>(null);
-const trafficMonth = ref<{ upload: number; download: number } | null>(null);
-const trafficLimit = ref<number | null>(null);
-const usedTraffic = ref<number>(0);
-
-// Active Tab in Combined Traffic Card (Portal)
-const activeTrafficPeriod = ref<'24h' | '7d' | 'month'>('24h');
-
-// User Connection & Device State
-const currentUserOnlineConnections = ref<number | null>(null);
-const currentUserMaxConnections = ref<number>(0);
-const currentUserOnlineDevicesCount = ref<number>(0);
-const currentUserTotalDevicesCount = ref<number>(0);
-const latestActiveDeviceName = ref<string>('');
-
-const maxTraffic = computed(() => Math.max(1, ...(dashboard.value?.trend || []).map(h => h.upload + h.download)));
-
-function barWidth(hour: Hour) {
-  return ((hour.upload + hour.download) / maxTraffic.value * 100).toFixed(2) + '%';
-}
 
 // ==========================================
 // 1. 运行概况指标计算
@@ -683,9 +603,20 @@ const nodeStatusSubtitle = computed(() => [
   pendingNodesCount.value ? `${pendingNodesCount.value} 台待登记` : ''
 ].filter(Boolean).join(' · ') || '全部就绪');
 
-const healthyNodesCount = computed(() => {
-  return allNodes.value.filter(n => isNodeOnline(n) && n.heartbeat?.core_healthy === true && !n.heartbeat?.core_error).length;
-});
+function hasPublishedConfig(node: NodeView): boolean {
+  return isNodeOnline(node) && (node.heartbeat?.current_revision || 0) > 0;
+}
+
+function isNodeCoreUnhealthy(node: NodeView): boolean {
+  if (!hasPublishedConfig(node)) return false;
+  const cores = node.heartbeat?.cores;
+  return cores?.length ? cores.some(core => !core.healthy) : node.heartbeat?.core_healthy === false || !!node.heartbeat?.core_error;
+}
+
+const publishedNodesCount = computed(() => allNodes.value.filter(hasPublishedConfig).length);
+const unpublishedNodesCount = computed(() => allNodes.value.filter(n => isNodeOnline(n) && !hasPublishedConfig(n)).length);
+const unhealthyNodesCount = computed(() => allNodes.value.filter(isNodeCoreUnhealthy).length);
+const healthyNodesCount = computed(() => allNodes.value.filter(n => hasPublishedConfig(n) && !isNodeCoreUnhealthy(n) && (n.heartbeat?.cores?.length ? n.heartbeat.cores.every(core => core.healthy) : n.heartbeat?.core_healthy === true)).length);
 
 function nodeStatusLabel(node: NodeView): string {
   return isNodeOnline(node) ? '在线' : node.status === 'pending' ? '待登记' : '离线';
@@ -716,20 +647,20 @@ const todayUpload = computed(() => dashboard.value?.counts.todayUpload || 0);
 const todayDownload = computed(() => dashboard.value?.counts.todayDownload || 0);
 const todayTrafficTotal = computed(() => todayUpload.value + todayDownload.value);
 
-const nodeTrafficPeriod = ref<'total' | 'today'>('total');
+const nodeTrafficPeriod = ref<'month' | 'today'>('month');
 
 const displayUploadBytes = computed(() => {
   if (nodeTrafficPeriod.value === 'today') {
-    return dashboard.value?.counts.todayUpload || 0;
+    return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.todayUpload, 0) || 0;
   }
-  return allNodes.value.reduce((acc, n) => acc + (n.heartbeat?.upload_bytes || 0), 0);
+  return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.monthUpload, 0) || 0;
 });
 
 const displayDownloadBytes = computed(() => {
   if (nodeTrafficPeriod.value === 'today') {
-    return dashboard.value?.counts.todayDownload || 0;
+    return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.todayDownload, 0) || 0;
   }
-  return allNodes.value.reduce((acc, n) => acc + (n.heartbeat?.download_bytes || 0), 0);
+  return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.monthDownload, 0) || 0;
 });
 
 const displayTotalBytes = computed(() => {
@@ -750,16 +681,23 @@ const downloadRatioPercent = computed(() => {
 
 // 节点流量排行列表
 const sortedNodeTrafficList = computed(() => {
-  const list = allNodes.value.map(node => {
-    const t = (node.heartbeat?.upload_bytes || 0) + (node.heartbeat?.download_bytes || 0);
-    return { node, traffic: t, percent: 0 };
+  // A node the page has not loaded yet (the list loads separately) is skipped
+  // rather than rendered without a name.
+  const list = (dashboard.value?.nodeTraffic || []).flatMap(sample => {
+    const node = allNodes.value.find(n => n.id === sample.nodeId) || dashboard.value?.nodes.find(n => n.id === sample.nodeId);
+    if (!node) return [];
+    const t = nodeTrafficPeriod.value === 'today' ? sample.todayUpload + sample.todayDownload : sample.monthUpload + sample.monthDownload;
+    return [{ node, traffic: t, measured: sample.measured, percent: 0, share: 0 }];
   });
 
   list.sort((a, b) => b.traffic - a.traffic);
   const max = Math.max(1, list[0]?.traffic || 1);
+  // The bar is scaled to the busiest node; the printed figure is the share of the total.
+  const total = list.reduce((sum, item) => sum + item.traffic, 0);
   return list.slice(0, 5).map(item => ({
     ...item,
-    percent: item.traffic > 0 ? Math.min(100, Math.max(4, Math.round((item.traffic / max) * 100))) : 0
+    percent: item.traffic > 0 ? Math.min(100, Math.max(4, Math.round((item.traffic / max) * 100))) : 0,
+    share: total > 0 ? Math.round((item.traffic / total) * 100) : 0
   }));
 });
 
@@ -817,10 +755,10 @@ const pendingIssues = computed<PendingIssue[]>(() => {
   // B. 核心异常 (core_healthy === false 或 core_error)
   for (const n of allNodes.value) {
     if (n.deletedAt) continue;
-    if (n.heartbeat?.core_healthy === false || n.heartbeat?.core_error) {
+    if (isNodeCoreUnhealthy(n)) {
       issues.push({
         title: `代理核心异常: ${n.name}`,
-        desc: `核心状态未通过健康检查 (${n.heartbeat.core_error || '核心未运行'})。`,
+        desc: `核心状态未通过健康检查 (${n.heartbeat?.core_error || '核心未运行'})。`,
         tag: unhealthyCoreLabel(n) || n.capabilities?.core_name || '代理核心',
         level: 'danger',
         link: `/nodes/${n.id}`
@@ -846,6 +784,16 @@ const pendingIssues = computed<PendingIssue[]>(() => {
       issues.push({
         title: `用户流量耗尽: ${u.displayName || u.username}`,
         desc: `已消耗超出授权配额 (${formatGiB(u.usedTraffic)} / ${formatGiB(u.trafficLimit)})。`,
+        tag: `@${u.username}`,
+        level: 'warning',
+        link: `/users/${u.id}`
+      });
+    }
+    const rank = userAttentionRank(u, Date.now());
+    if (rank === 1 || rank === 2) {
+      issues.push({
+        title: `用户${rank === 1 ? '已过期' : '7 天内到期'}: ${u.displayName || u.username}`,
+        desc: getUserExpiryLabel(u),
         tag: `@${u.username}`,
         level: 'warning',
         link: `/users/${u.id}`
@@ -938,125 +886,12 @@ function getUserExpiryLabel(u: ProxyUser): string {
   return `有效 (余${diffDays}天)`;
 }
 
-// 审计访问记录组合
-const combinedRecentRecords = computed(() => {
-  const access = dashboard.value?.recentAccess || [];
-  const blocked = dashboard.value?.recentBlocked || [];
-  const combined = [
-    ...access.map(r => ({ ...r, allowed: true })),
-    ...blocked.map(r => ({ ...r, allowed: false }))
-  ];
-  combined.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-  return combined.slice(0, 5);
-});
-
-// ==========================================
-// PORTAL METRICS COMPUTATION
-// ==========================================
-const usedPercent = computed(() => {
-  if (!trafficLimit.value || trafficLimit.value <= 0) return 0;
-  return Math.min(100, Math.round((usedTraffic.value / trafficLimit.value) * 100));
-});
-
-const currentTrafficMetric = computed(() => {
-  if (activeTrafficPeriod.value === '7d') {
-    const t = traffic7d.value;
-    if (t === null || t === undefined) {
-      return {
-        periodLabel: '近 7 天流量',
-        total: null,
-        upload: null,
-        download: null
-      };
-    }
-    return {
-      periodLabel: '近 7 天流量',
-      total: t.upload + t.download,
-      upload: t.upload,
-      download: t.download
-    };
-  }
-  if (activeTrafficPeriod.value === 'month') {
-    const t = trafficMonth.value;
-    if (t === null || t === undefined) {
-      return {
-        periodLabel: '当月累计流量',
-        total: null,
-        upload: null,
-        download: null
-      };
-    }
-    return {
-      periodLabel: '当月累计流量',
-      total: t.upload + t.download,
-      upload: t.upload,
-      download: t.download
-    };
-  }
-  const t = traffic24h.value;
-  if (t === null || t === undefined) {
-    return {
-      periodLabel: '近 24 小时流量',
-      total: null,
-      upload: null,
-      download: null
-    };
-  }
-  return {
-    periodLabel: '近 24 小时流量',
-    total: t.upload + t.download,
-    upload: t.upload,
-    download: t.download
-  };
-});
-
-const userConnections = computed(() => {
-  return currentUserOnlineConnections.value;
-});
-
-const maxConnectionsLimit = computed(() => currentUserMaxConnections.value);
-const onlineDevicesCount = computed(() => currentUserOnlineDevicesCount.value);
-const totalDevicesCount = computed(() => Math.max(currentUserTotalDevicesCount.value, currentUserOnlineDevicesCount.value));
-
-const remainingTraffic = computed(() => {
-  if (trafficLimit.value && trafficLimit.value > 0) {
-    return Math.max(0, trafficLimit.value - usedTraffic.value);
-  }
-  return null;
-});
-
 // Data Loading
 async function loadTrafficData() {
-  const now = new Date();
-  const from24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const from7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const fromMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-
-  // Fetch nodes list
-  try {
-    const res = await nodeAPI.list(1, '', false);
-    allNodes.value = res.items;
-  } catch {
-    if (dashboard.value?.nodes) {
-      allNodes.value = dashboard.value.nodes;
-    }
-  }
-
-  // Fetch users & revisions if admin/owner
-  if (isOwner.value) {
-    try {
-      const [uRes] = await Promise.all([
-        userAPI.list(1, '', 50).catch(() => ({ items: [], total: 0 }))
-      ]);
-      allUsers.value = uRes.items;
-      if (dashboard.value?.revisions) {
-        allRevisions.value = dashboard.value.revisions;
-      }
-    } catch {
-      // ignore
-    }
-  }
-
+  await Promise.all([
+    allPages(page => nodeAPI.list(page, '', false, 100)).then(result => { allNodes.value = result.items; }).catch(e => showToast((e as Error).message, 'error')),
+    isOwner.value ? userAPI.list(1, '', 50).then(result => { allUsers.value = result.items; }).catch(e => showToast((e as Error).message, 'error')) : Promise.resolve()
+  ]);
 }
 
 async function loadDashboard() {
@@ -1071,24 +906,30 @@ async function loadDashboard() {
   }
 }
 
-async function loadAll() {
-  if (loading.value) return;
-  loading.value = true;
+let refreshing = false;
+async function loadAll(silent = false) {
+  if (refreshing) return;
+  refreshing = true;
+  if (!silent) loading.value = true;
   try {
     await Promise.all([loadDashboard(), loadTrafficData()]);
   } finally {
     loading.value = false;
+    refreshing = false;
   }
 }
 
+function visibilityChanged() { if (!document.hidden) void loadAll(true); }
 onMounted(() => {
   void loadAll();
+  document.addEventListener('visibilitychange', visibilityChanged);
   timer = setInterval(() => {
-    void loadAll();
+    if (!document.hidden) void loadAll(true);
   }, 30000);
 });
 
 onUnmounted(() => {
   if (timer) clearInterval(timer);
+  document.removeEventListener('visibilitychange', visibilityChanged);
 });
 </script>

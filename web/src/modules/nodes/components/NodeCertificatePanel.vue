@@ -41,8 +41,11 @@ const statusNames:Record<string,string>={unknown:'无法确认',valid:'有效',r
 const purposeNames={renewal:'证书续期',key_rotation:'私钥轮换',unknown:'身份更换类型无法确认'};
 const issuerNames:Record<string,string>={current:'当前签发 CA',unrecognized:'签发来源不匹配，需核对',unknown:'无法确认'};
 function label(item:CertificateObservation){const state=statusNames[item.status]||'无法确认';return item.integrity==='invalid'?`${state} · 证书记录不一致`:state;}
-async function load(){if(loading.value||stopped)return;const current=++generation;loading.value=true;try{const result=await nodeAPI.certificateStatus(props.node.id);if(current===generation){status.value=result;error.value='';}}catch(e){if(current===generation){status.value=null;error.value=(e as Error).message;}}finally{if(current===generation)loading.value=false;}}
+async function load(){if(loading.value||stopped||document.visibilityState !== 'visible')return;const current=++generation;loading.value=true;try{const result=await nodeAPI.certificateStatus(props.node.id);if(current===generation){status.value=result;error.value='';}}catch(e){if(current===generation){error.value=(e as Error).message;}}finally{if(current===generation)loading.value=false;}}
 watch(()=>props.node.id,()=>{generation++;loading.value=false;status.value=null;error.value='';void load();});
-watch(()=>[props.node.enabled,props.node.lastHeartbeat],()=>{void load();});
-onMounted(load);onUnmounted(()=>{stopped=true;generation++;});
+watch(()=>props.node.enabled,()=>{void load();});
+function visibilityChanged(){if(document.visibilityState === 'visible')void load();}
+const refreshTimer=setInterval(visibilityChanged,60000);
+document.addEventListener('visibilitychange',visibilityChanged);
+onMounted(load);onUnmounted(()=>{clearInterval(refreshTimer);document.removeEventListener('visibilitychange',visibilityChanged);stopped=true;generation++;});
 </script>

@@ -52,14 +52,18 @@ func (p *CanvasPublisher) PublishCanvas(ctx context.Context, name, author string
 		if err != nil {
 			return result, err
 		}
+		// Preserve the revision identity before starting work: callers that
+		// compensate a failed status read must still know what was submitted.
+		result.Nodes = append(result.Nodes, proxy.CanvasPublishNode{NodeID: snapshot.State.NodeID, Revision: revision.ID, Status: "draft"})
 		if err := p.Repository.Deploy(ctx, revision.ID); err != nil {
 			return result, err
 		}
+		result.Nodes[0].Status = "pending"
 		status, err := p.Repository.TargetStatus(ctx, snapshot.State.NodeID, revision.ID)
 		if err != nil {
 			return result, err
 		}
-		result.Nodes = append(result.Nodes, proxy.CanvasPublishNode{NodeID: snapshot.State.NodeID, Revision: revision.ID, Status: status})
+		result.Nodes[0].Status = status
 		return result, nil
 	}
 	batch, err := p.Repository.CreateBatch(ctx, "", name, author, retained)

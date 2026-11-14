@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/netip"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -53,8 +54,40 @@ func storeFixture(t *testing.T) (*Store, string, string) {
 func grantImport(t *testing.T, s *Store, userID, sourceID, proxyKey string) string {
 	t.Helper()
 	ctx := context.Background()
-	nodes := &node.Repository{Database: s.Database}
-	g, e := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "import " + sourceID + proxyKey, Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: sourceID, ProxyKey: proxyKey}}})
+	nodes := &node.Repository{Database: s.Database, Vault: s.Vault}
+	imports := []node.GroupImport{{SourceID: sourceID, ProxyKey: proxyKey}}
+	var sealedURL []byte
+	if err := s.Database.QueryRow("SELECT url_encrypted FROM subscription_sources WHERE id=?", sourceID).Scan(&sealedURL); err != nil {
+		t.Fatal(err)
+	}
+	kind, err := s.sourceKindStrict(sealedURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind == sourceKindContent {
+		// Existing fixtures select by name or all current content nodes; persist
+		// that selection using explicit IDs under the new write contract.
+		rows, err := s.Database.Query("SELECT id FROM imported_proxies WHERE source_id=? AND (?='' OR name||'|'||protocol=?) ORDER BY id", sourceID, proxyKey, proxyKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		imports = nil
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			imports = append(imports, node.GroupImport{SourceID: sourceID, ProxyKey: "id:" + id})
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+		if len(imports) == 0 {
+			t.Fatal("content fixture selected no nodes")
+		}
+	}
+	g, e := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "import " + sourceID + proxyKey, Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: imports})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -109,19 +142,33 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 	if err != nil || len(w) == 0 {
 		t.Fatal("failed first fetch lost warning")
 	}
-	if _, _, err = s.Save(ctx, key, Input{Name: "test import", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}}); err != nil {
+	// URL encryption and fetch failures belong to a separate URL source.
+	urlKey, _, err := s.Save(ctx, "", Input{Name: "test URL import", URL: "https://example.com/fixture", Interval: 60, UserIDs: []string{a}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.Database.QueryRow("SELECT url_encrypted FROM subscription_sources").Scan(&sealed); err != nil || bytes.Contains(sealed, []byte("example.com")) {
+	grantImport(t, s, a, urlKey, "")
+	if err = s.Database.QueryRow("SELECT url_encrypted FROM subscription_sources WHERE id=?", urlKey).Scan(&sealed); err != nil || bytes.Contains(sealed, []byte("example.com")) {
 		t.Fatal("URL not encrypted")
 	}
 	s.Fetcher.Resolver = &fakeResolver{answers: [][]netip.Addr{addresses("127.0.0.1")}}
-	if _, err = s.Refresh(ctx, key); !errors.Is(err, ErrFetch) {
+	if _, err = s.Refresh(ctx, urlKey); !errors.Is(err, ErrFetch) {
 		t.Fatalf("refresh error = %v, want ErrFetch", err)
 	}
 	items, err := s.List(ctx)
-	if err != nil || items[0].Status != "failed" {
+	if err != nil || len(items) != 2 || items[1].ID != urlKey || items[1].Status != "failed" {
 		t.Fatal("refresh failure not recorded")
+	}
+	p, w, err = source.NewRegistry(s).Collect(ctx, viewer)
+	if err != nil || len(p) != 0 || len(w) != 2 {
+		t.Fatalf("failed sources lost warnings: %+v %+v %v", p, w, err)
+	}
+	// Seed a legacy grant only to verify deletion still cascades it.
+	if _, err = s.Database.Exec("INSERT INTO user_source_grants(user_id,source_id) VALUES(?,?)", a, urlKey); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Delete(ctx, urlKey); err != nil {
+		t.Fatal(err)
 	}
 	if err = s.Delete(ctx, key); err != nil {
 		t.Fatal(err)
@@ -129,6 +176,9 @@ func TestEncryptedImportsGrantsRulesAndFailureWarning(t *testing.T) {
 	var count int
 	if err = s.Database.QueryRow("SELECT count(*) FROM user_source_grants").Scan(&count); err != nil || count != 0 {
 		t.Fatal("delete cascade")
+	}
+	if err = s.Database.QueryRow("SELECT count(*) FROM node_group_imports").Scan(&count); err != nil || count != 0 {
+		t.Fatal("group import delete cascade")
 	}
 }
 
@@ -221,13 +271,40 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	if len(chained) != 0 || len(w) == 0 {
 		t.Fatal("chain leaked across grants")
 	}
-	// Reorder does not retarget opaque canvas references.
-	if _, _, err = s.Save(ctx, key, Input{Name: "chain inputs", Content: "socks5://fixture:fixture@b.example.com:1080#B\nsocks5://fixture:fixture@a.example.com:1080#A", Interval: 60, UserIDs: []string{a}}); err != nil {
+	// Reimporting a reordered batch creates new identities; it cannot retarget
+	// the published snapshot, even once the new source is also granted.
+	before := identitySnapshot(t, s, key, true)
+	newKey, _, err := s.Save(ctx, "", Input{Name: "reordered inputs", Content: "socks5://fixture:fixture@b.example.com:1080#B\nsocks5://fixture:fixture@a.example.com:1080#A", Interval: 60, UserIDs: []string{a}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	reordered, _, _ := s.Proxies(ctx, viewer)
-	if len(reordered) != 2 || reordered[0].Origin.Ref != p[0].Origin.Ref {
-		t.Fatal("refresh changed stable identity")
+	if after := identitySnapshot(t, s, key, true); after != before {
+		t.Fatal("new batch changed the published source")
+	}
+	unchanged, _, err := s.Proxies(ctx, viewer)
+	if err != nil || !reflect.DeepEqual(unchanged, p) {
+		t.Fatalf("new batch inherited existing grants: %+v %v", unchanged, err)
+	}
+	newGroup := grantImport(t, s, a, newKey, "")
+	reimported, _, err := s.Proxies(ctx, viewer)
+	if err != nil || len(reimported) != 4 {
+		t.Fatalf("reimported inputs: %+v %v", reimported, err)
+	}
+	chained, w = s.Chains(ctx, reimported)
+	if len(chained) != 6 || len(w) != 0 || !reflect.DeepEqual(chained[4:], tunnel[2:]) {
+		t.Fatal("new batch retargeted the published chain", chained, w)
+	}
+	// A viewer granted only the new batch cannot use a chain of the old IDs.
+	if err = (&user.Repository{Database: s.Database, Vault: s.Vault}).Grant(ctx, b, newGroup, false); err != nil {
+		t.Fatal(err)
+	}
+	other, _, err = s.Proxies(ctx, source.Viewer{UserID: b, AllowedProtocols: []string{"socks5"}})
+	if err != nil || len(other) != 2 {
+		t.Fatalf("new batch grant: %+v %v", other, err)
+	}
+	chained, w = s.Chains(ctx, other)
+	if len(chained) != 2 || len(w) == 0 {
+		t.Fatal("same-name new nodes satisfied old chain grants", chained, w)
 	}
 }
 

@@ -517,6 +517,22 @@ func TestAgentReconnectsAfterCentralDatabaseReopen(t *testing.T) {
 	_, stopSecond := launch(second, address)
 	defer stopSecond()
 	waitOnline(&node.Repository{Database: database}, 4)
+	// Server receipt precedes the Agent's durable ACK; wait for that boundary
+	// before stopping the Agent so shutdown cannot race ACK persistence.
+	ackDeadline := time.Now().Add(8 * time.Second)
+	for {
+		state, err := identity.Load(filepath.Join(c.DataDirectory, "identity"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.LastAcked >= 4 {
+			break
+		}
+		if time.Now().After(ackDeadline) {
+			t.Fatalf("reconnected ACK not persisted before shutdown: %v", state)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	cancel()
 	select {
 	case err := <-done:

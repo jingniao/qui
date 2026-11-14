@@ -227,17 +227,20 @@ const providerModalVisible = ref(false);
 const selectedService = ref<ServiceSet | null>(null);
 const snippetCopied = ref(false);
 
+let generation = 0;
 async function load() {
+  const current = ++generation;
   loading.value = true;
   try {
     const result = await policyAPI.services(page.value);
+    if (current !== generation) return;
     services.value = result.items;
     total.value = result.total;
     error.value = '';
   } catch (e) {
-    error.value = (e as Error).message;
+    if (current === generation) error.value = (e as Error).message;
   } finally {
-    loading.value = false;
+    if (current === generation) loading.value = false;
   }
 }
 

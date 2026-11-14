@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -60,6 +61,10 @@ func (h *Handler) createProxyRevision(ctx context.Context, nodeID, summary, auth
 		return Revision{}, &apiFailure{Status: 503, Code: "unavailable", Message: "Proxy configuration unavailable"}
 	}
 	state, enabled, err := h.Proxy.SnapshotIntent(ctx, nodeID, h.Users)
+	var capability *node.CapabilityError
+	if errors.As(err, &capability) {
+		return Revision{}, &apiFailure{Status: 409, Code: capability.Code(), Message: capability.Message}
+	}
 	if err != nil {
 		return Revision{}, &apiFailure{Status: 400, Code: "invalid_request", Message: err.Error()}
 	}

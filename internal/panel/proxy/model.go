@@ -12,6 +12,7 @@ import (
 var ErrNotFound = errors.New("proxy configuration not found")
 
 type Inbound struct {
+	RouteSummary         *InboundRouteSummary          `json:"routeSummary,omitempty"`
 	ManagedBy            *PortOwner                    `json:"managedBy,omitempty"`
 	UserTrafficSupported *bool                         `json:"userTrafficSupported"`
 	DeviceGateSupported  *bool                         `json:"deviceGateSupported"`
@@ -57,6 +58,8 @@ type InboundInput struct {
 	CertificateID         string                        `json:"certificateId,omitempty"`
 }
 type Outbound struct {
+	SourceIP           string                        `json:"sourceIp"`
+	SourceInterface    string                        `json:"sourceInterface"`
 	ID                 string                        `json:"id"`
 	Name               string                        `json:"name"`
 	NodeID             string                        `json:"nodeId"`
@@ -81,6 +84,8 @@ type Outbound struct {
 	Health             *scheduler.Health             `json:"health,omitempty"`
 }
 type OutboundInput struct {
+	SourceIP         string                        `json:"sourceIp"`
+	SourceInterface  string                        `json:"sourceInterface"`
 	Name             string                        `json:"name"`
 	NodeID           string                        `json:"nodeId"`
 	Protocol         string                        `json:"protocol"`
@@ -175,6 +180,12 @@ func validateInboundInput(input InboundInput, generated bool) error {
 	return desiredstate.ValidateSettings(input.Protocol, input.Settings, true)
 }
 func ValidateOutbound(input OutboundInput) error {
+	if err := (desiredstate.Network{OutboundSourceIP: input.SourceIP, OutboundInterface: input.SourceInterface}).Validate(); err != nil {
+		return err
+	}
+	if strings.EqualFold(input.Protocol, "block") && (input.SourceIP != "" || input.SourceInterface != "") {
+		return errors.New("block outbound cannot bind a source")
+	}
 	if strings.TrimSpace(input.Name) == "" || len(input.Name) > 120 || input.NodeID == "" || !protocol(input.Protocol, true) {
 		return errors.New("invalid outbound name, node or protocol")
 	}

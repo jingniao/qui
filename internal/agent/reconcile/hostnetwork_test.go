@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,129 @@ import (
 	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
+
+func TestHostNetworkExtraExempt(t *testing.T) {
+	for _, tc := range []struct {
+		name                                  string
+		forced, source                        string
+		disabled, feature, missing, wantError bool
+		want                                  []string
+	}{
+		{name: "unforced", source: "198.51.100.2"},
+		{name: "server-source", forced: "198.51.100.1", source: "198.51.100.9"},
+		{name: "forced-source", forced: "198.51.100.1", source: "198.51.100.1"},
+		{name: "other-family", forced: "198.51.100.1", source: "2001:db8::2"},
+		{name: "disabled", forced: "198.51.100.1", source: "198.51.100.2", disabled: true},
+		{name: "sorted", forced: "198.51.100.1", source: "198.51.100.2", feature: true, want: []string{"198.51.100.2", "198.51.100.3"}},
+		{name: "old", forced: "198.51.100.1", source: "198.51.100.2", wantError: true},
+		{name: "missing", forced: "198.51.100.1", source: "198.51.100.2", missing: true, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			allowHostNetwork(t)
+			fakeHostNetworkDial(t, func(context.Context, string, string) error { return nil })
+			dir := t.TempDir()
+			if !tc.missing {
+				status := hostnet.Status{ID: "previous", OK: true}
+				if tc.feature {
+					status.Features = []string{hostnet.FeatureExtraExempt}
+				}
+				if err := hostnet.WriteStatus(dir, status); err != nil {
+					t.Fatal(err)
+				}
+			}
+			startFakeHostNetworkHelper(t, dir, func(hostnet.Desired) (bool, string) { return true, "" })
+			state := desiredstate.State{Network: &desiredstate.Network{HostSourceIPv4: tc.forced, OutboundSourceIP: "198.51.100.9"}}
+			for i, source := range []string{tc.source, tc.source} {
+				state.Outbounds = append(state.Outbounds, desiredstate.Outbound{ID: fmt.Sprint(i), Enabled: !tc.disabled, SourceIP: source})
+			}
+			if tc.feature {
+				state.Outbounds = append(state.Outbounds, desiredstate.Outbound{ID: "third", Enabled: true, SourceIP: "198.51.100.3"})
+			}
+			err := syncingManager(t, dir, "127.0.0.1:443").applyHostNetwork(context.Background(), state)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "qui-update --component agent") {
+					t.Fatalf("error = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			d, err := hostnet.ReadDesired(dir)
+			if tc.forced == "" {
+				if !os.IsNotExist(err) {
+					t.Fatalf("unexpected desired: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(d.ExtraExemptIPv4, tc.want) || len(d.ExtraExemptIPv6) != 0 {
+				t.Fatalf("extra exemptions: %+v", d)
+			}
+		})
+	}
+	t.Run("ipv6", func(t *testing.T) {
+		allowHostNetwork(t)
+		fakeHostNetworkDial(t, func(context.Context, string, string) error { return nil })
+		dir := t.TempDir()
+		if err := hostnet.WriteStatus(dir, hostnet.Status{ID: "previous", OK: true, Features: []string{hostnet.FeatureExtraExempt}}); err != nil {
+			t.Fatal(err)
+		}
+		startFakeHostNetworkHelper(t, dir, func(hostnet.Desired) (bool, string) { return true, "" })
+		state := desiredstate.State{
+			Network: &desiredstate.Network{HostSourceIPv6: "2001:db8::1", OutboundSourceIP: "2001:db8::9"},
+			Outbounds: []desiredstate.Outbound{
+				{ID: "v6", Enabled: true, SourceIP: "2001:db8::2"},
+			},
+		}
+		if err := syncingManager(t, dir, "[2001:db8::100]:443").applyHostNetwork(context.Background(), state); err != nil {
+			t.Fatal(err)
+		}
+		d, err := hostnet.ReadDesired(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(d.ExtraExemptIPv6, []string{"2001:db8::2"}) || len(d.ExtraExemptIPv4) != 0 {
+			t.Fatalf("extra exemptions: %+v", d)
+		}
+		if d.IPv6 != "2001:db8::1" || d.ExemptIPv6 != "2001:db8::9" {
+			t.Fatalf("server IPv6 source and exemption: %+v", d)
+		}
+	})
+	t.Run("too-many", func(t *testing.T) {
+		for _, family := range []int{4, 6} {
+			t.Run(fmt.Sprintf("ipv%d", family), func(t *testing.T) {
+				allowHostNetwork(t)
+				dir := t.TempDir()
+				if err := hostnet.WriteStatus(dir, hostnet.Status{ID: "previous", OK: true, Features: []string{hostnet.FeatureExtraExempt}}); err != nil {
+					t.Fatal(err)
+				}
+				network := &desiredstate.Network{HostSourceIPv4: "198.51.100.1"}
+				if family == 6 {
+					network = &desiredstate.Network{HostSourceIPv6: "2001:db8::1"}
+				}
+				state := desiredstate.State{Network: network}
+				for i := 0; i < 17; i++ {
+					source := fmt.Sprintf("198.51.100.%d", i+2)
+					if family == 6 {
+						source = fmt.Sprintf("2001:db8::%x", i+2)
+					}
+					state.Outbounds = append(state.Outbounds, desiredstate.Outbound{ID: fmt.Sprint(i), Enabled: true, SourceIP: source})
+				}
+				err := syncingManager(t, dir, "127.0.0.1:443").applyHostNetwork(context.Background(), state)
+				want := fmt.Sprintf("extra IPv%d exemptions exceed the limit of 16", family)
+				if err == nil || err.Error() != want {
+					t.Fatalf("error = %v, want %q", err, want)
+				}
+				if _, err := os.Stat(filepath.Join(dir, hostnet.DesiredFileName)); !os.IsNotExist(err) {
+					t.Fatalf("over-limit request must not be written: %v", err)
+				}
+			})
+		}
+	})
+}
 
 // allowHostNetwork makes the sync behave as on its only supported platform, so
 // the helper protocol is exercised on a development host as well.

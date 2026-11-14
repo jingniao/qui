@@ -19,7 +19,7 @@
           type="button"
           class="ios-btn-secondary inline-flex items-center gap-1.5"
           :disabled="loading"
-          @click="loadAll"
+          @click="loadAll()"
         >
           <svg
             v-if="loading"
@@ -441,14 +441,18 @@ function statusDotClass(tone: 'green' | 'yellow' | 'red' | 'gray' | 'blue'): str
   return map[tone] || map.gray;
 }
 
-async function loadAll() {
+let refreshing = false;
+let refreshAgain = false;
+async function loadAll(silent = false) {
+  if (refreshing) { refreshAgain = true; return; }
+  refreshing = true;
   const cur = ++generation;
-  loading.value = true;
+  if (!silent) loading.value = true;
   error.value = '';
 
   try {
     const [nodesRes, agentRes, coreRes, releaseRes] = await Promise.all([
-      allPages(page => nodeAPI.list(page, '', false)),
+      allPages(page => nodeAPI.list(page, '', false, 100)),
       allPages(page => agentUpdatesAPI.tasks(page, 100)),
       allPages(page => coreUpdatesAPI.tasks(page, 100)),
       allPages(page => coreUpdatesAPI.releases(page, 100))
@@ -466,8 +470,10 @@ async function loadAll() {
       error.value = (e as Error).message || '读取任务记录失败';
     }
   } finally {
+    refreshing = false;
     if (cur === generation) {
       loading.value = false;
+      if (refreshAgain && !document.hidden) { refreshAgain = false; void loadAll(true); }
     }
   }
 }
@@ -600,15 +606,18 @@ async function clearCoreTask(id: string) {
   }
 }
 
-const reloadOnNodeStatus = throttleTrailing(() => { void loadAll(); }, 5000);
+const reloadOnNodeStatus = throttleTrailing(() => { if (!document.hidden) void loadAll(true); }, 5000);
+function visibilityChanged() { if (!document.hidden) reloadOnNodeStatus(); }
 onMounted(() => {
   void loadAll();
   window.addEventListener('proxy-node-status', reloadOnNodeStatus);
+  document.addEventListener('visibilitychange', visibilityChanged);
 });
 
 onUnmounted(() => {
   generation++; attemptGeneration++;
   reloadOnNodeStatus.cancel();
   window.removeEventListener('proxy-node-status', reloadOnNodeStatus);
+  document.removeEventListener('visibilitychange', visibilityChanged);
 });
 </script>

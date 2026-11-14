@@ -35,6 +35,9 @@ func TestVersionParsing(t *testing.T) {
 // none of the account, gate or observation flags.
 func TestCapabilitiesAdvertiseOnlyForward(t *testing.T) {
 	capabilities := capabilitiesFor("3.3.2")
+	if capabilities.OutboundSourceSupported {
+		t.Fatal("gost advertised outbound source support")
+	}
 	if capabilities.CoreName != CoreName || capabilities.CoreVersion != "3.3.2" || !capabilities.ForwardInboundSupported {
 		t.Fatalf("capabilities: %+v", capabilities)
 	}

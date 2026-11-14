@@ -17,7 +17,7 @@ func TestGroupEntriesBackupRoundTrip(t *testing.T) {
 	if err := s.Database.QueryRow("SELECT id FROM nodes LIMIT 1").Scan(&server); err != nil {
 		t.Fatal(err)
 	}
-	nodes := &node.Repository{Database: s.Database}
+	nodes := &node.Repository{Database: s.Database, Vault: s.ConfigurationVault}
 	inbound, err := (&proxy.Service{Repository: &proxy.Repository{Database: s.Database, Vault: s.ConfigurationVault}, Nodes: nodes}).SaveInbound(ctx, "", proxy.InboundInput{Name: "entry", NodeID: server, Protocol: "http", Listen: "0.0.0.0", Port: 20000, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +26,11 @@ func TestGroupEntriesBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, ServerIDs: []string{server}, InboundIDs: []string{inbound.ID}, Imports: []node.GroupImport{{SourceID: src, ProxyKey: "A|http"}}})
+	var proxyID string
+	if err := s.Database.QueryRow("SELECT id FROM imported_proxies WHERE source_id=?", src).Scan(&proxyID); err != nil {
+		t.Fatal(err)
+	}
+	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, ServerIDs: []string{server}, InboundIDs: []string{inbound.ID}, Imports: []node.GroupImport{{SourceID: src, ProxyKey: "id:" + proxyID}}})
 	if err != nil {
 		t.Fatal(err)
 	}

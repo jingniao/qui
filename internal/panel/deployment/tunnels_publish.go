@@ -2,9 +2,34 @@ package deployment
 
 import (
 	"context"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
+	pb "proxycontrol/pkg/contracts/agentpb"
 	"time"
 )
+
+// GostRemovable shares the removal guard without queuing a removal.
+func (p *CanvasPublisher) GostRemovable(ctx context.Context, nodeID string) (bool, error) {
+	tx, err := p.Repository.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var raw []byte
+	var revision int64
+	if err = tx.QueryRowContext(ctx, "SELECT n.capabilities_json,s.revision FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=?", nodeID).Scan(&raw, &revision); err != nil {
+		return false, err
+	}
+	c := &pb.Capabilities{}
+	if err = storedJSON.Unmarshal(raw, c); err != nil {
+		return false, err
+	}
+	if node.SelectedCore(c, "gost") == nil {
+		return false, nil
+	}
+	ids, err := p.Repository.coreInboundIDs(ctx, tx, nodeID, "gost", c.CoreName, revision)
+	return len(ids) == 0 && err == nil, err
+}
 
 // PublishTunnels keeps creation, pruning, advance and reverse rollback in the
 // existing batch implementation. Only this adapter waits for terminal outcomes.
@@ -45,6 +70,21 @@ func (p *CanvasPublisher) PublishTunnels(ctx context.Context, name, author strin
 		if done {
 			for i := range result.Nodes {
 				n := &result.Nodes[i]
+				// Batch rollback changes item status, but the original target retains
+				// whether this node failed or successfully applied before a later failure.
+				if n.Status == "failed" || n.Status == "rollback" || n.Status == "rolled_back" || n.Status == "rollback_failed" {
+					var targetStatus, code string
+					if e := p.Repository.Database.QueryRowContext(ctx, "SELECT status,result_code FROM deployment_targets WHERE node_id=? AND revision=?", n.NodeID, n.Revision).Scan(&targetStatus, &code); e != nil {
+						return result, e
+					}
+					if targetStatus == "failed" || targetStatus == "rollback" {
+						n.FailureCode = code
+					}
+					if targetStatus == "rollback" {
+						n.AutomaticRollback = true
+						n.Status = "rollback"
+					}
+				}
 				switch n.Status {
 				case "success":
 					n.Status = "applied"

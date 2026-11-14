@@ -147,6 +147,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	if err != nil {
 		return nil, err
 	}
+	nodeRepository.Vault = configurationVault
 	users := &user.Repository{Database: database, Vault: configurationVault}
 	deployments := &deployment.Repository{Database: database, Vault: configurationVault}
 	s.nodeRepository = nodeRepository
@@ -311,11 +312,15 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	nodeHandler.Install = s.installInfo
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)
-	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates}, Nodes: nodeRepository}
+	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates}, Nodes: nodeRepository, EntryGroups: nodeRepository}
 	if err := proxyService.Repository.ReconcileCanvasTunnels(context.Background()); err != nil {
 		return nil, err
 	}
 	if err := proxyService.Repository.ReconcileCanvasForwards(context.Background()); err != nil {
+		return nil, err
+	}
+	identityStore := &importer.Store{Database: database, Vault: configurationVault}
+	if err := identityStore.ReconcileImportedIdentities(context.Background(), reconcileImportReferences); err != nil {
 		return nil, err
 	}
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
@@ -399,13 +404,14 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		Repository:     &subscription.Repository{Database: database, Reader: s.readPool, Vault: configurationVault},
 		Users:          &subscriptionUsers,
 		CandidateUsers: &subscriptionUsers,
-		Sources:        source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished, Relays: &published.RelayStore{Database: subscriptionReads}}),
+		Sources:        source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished, Relays: &published.RelayStore{Database: subscriptionReads}, CanvasEntries: &proxy.Repository{Database: subscriptionReads}}),
 		Formats:        subscriptionFormats,
 		Settings:       systemRepository,
 		Traffic:        s.accessRepository,
 		Rules:          &rules.Store{Database: subscriptionReads},
 	}
-	s.importStore = &importer.Store{Database: database, Reader: s.readPool, Vault: configurationVault}
+	s.importStore = &importer.Store{Database: database, Reader: s.readPool, Vault: configurationVault, SelfBuiltNames: published.EndpointNameStore{Vault: configurationVault, CanvasEntries: &proxy.Repository{Database: subscriptionReads}}}
+	s.importStore.DeletionReferences = importDeletionReferences{}
 	subscriptionService.Sources.Register(s.importStore)
 	subscriptionService.ClientChains = s.importStore
 	subscriptionService.ImportNames = s.importStore

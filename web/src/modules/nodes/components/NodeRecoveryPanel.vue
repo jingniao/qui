@@ -33,9 +33,11 @@
       <p>有效期至 {{ formatTime(result.expiresAt) }}。离开本页后无法再次查看；需要新码只能重新签发，重新签发会作废此码。</p>
       <CodePreview :code="result.enrollmentToken" title="一次性恢复码" />
       <div v-if="installAvailable" class="text-xs text-amber-900">运行内核
-        <div class="mt-1.5 flex flex-wrap items-center gap-3 rounded-xl bg-white px-3 py-2">
-          <label v-for="option in CORE_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label">
-            <input v-model="cores" type="checkbox" :value="option.name" class="accent-ios-blue" />{{ option.label }}
+        <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-white px-3 py-2">
+          <label v-for="option in CORE_INSTALL_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label cursor-pointer">
+            <input v-model="cores" type="checkbox" :value="option.name" class="accent-ios-blue" />
+            <span>{{ option.label }}</span>
+            <span v-if="option.hint" class="text-xs text-ios-tertiary">（{{ option.hint }}）</span>
           </label>
         </div>
       </div>
@@ -43,7 +45,7 @@
       <p v-if="installAvailable" class="text-xs">面板地址：<code class="font-mono">{{ host }}:{{ port }}</code>（{{ fromSettings ? '取自 系统设置 → 节点安装连接地址' : '当前浏览器地址' }}）；如需修改请到 系统设置 → 节点安装连接地址。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
       <p v-else-if="!installAvailable" class="text-sm">本地或开发构建无法生成一键命令，请在重装的主机上用恢复码手动登记。</p>
-      <p v-else-if="!cores.length" role="alert" class="text-sm text-ios-red">请至少选择一个运行内核。</p>
+      <p v-else-if="coreValidationError" role="alert" class="text-sm text-ios-red">{{ coreValidationError }}</p>
       <p v-else class="text-sm text-ios-red">面板地址无效，请在 系统设置 → 节点安装连接地址 中设置。</p>
       <p class="text-xs">主机若仍留有旧的 <code class="font-mono">/var/lib/proxy-agent</code>，Agent 会以已有身份拒绝登记；重装系统后无需额外处理。</p>
     </div>
@@ -67,6 +69,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type RecoveryStatus } from '../api';
+import { CORE_INSTALL_OPTIONS, sortInstallCores, validateInstallCores } from '../coreInstallOptions';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
 import { formatTime, isOwner } from '../../../app/auth';
 import { APIError } from '../../../app/apiClient';
@@ -77,7 +80,6 @@ import WebUpgradeOption from './WebUpgradeOption.vue';
 const props = defineProps<{ node: NodeView }>();
 // The reinstall keeps the cores the node ran before: that set is what the
 // installer has to place again, so it starts from the reported capabilities.
-const CORE_OPTIONS: { name: CoreName; label: string }[] = [{ name: 'xray', label: 'Xray' }, { name: 'sing-box', label: 'sing-box' }, { name: 'gost', label: 'GOST' }];
 const statusLabels: Record<string, string> = { issued: '已签发', consumed: '已核销', superseded: '已被新码取代', expired: '已过期' };
 const redeployLabels: Record<string, string> = { none: '—', pending: '等待节点上线', queued: '重新下发中', success: '重新下发成功', failed: '重新下发失败', not_needed: '无需下发' };
 const blockerLabels: Record<string, string> = { deployment_target: '待完成的发布', deployment_command: '待执行的节点操作', deployment_batch: '进行中的批量发布', agent_update: 'Agent 更新任务', core_update: '核心更新任务', core_remove: '核心移除任务', node_pause: '暂停/恢复任务' };
@@ -92,21 +94,27 @@ const confirmDetails = computed(() => revokeNow.value
   ? '已勾选“立即吊销当前证书”：签发后面板立即吊销现有证书并断开当前 Agent，节点在重新登记前保持离线。'
   : '当前证书在恢复核销时作废；恢复登记前旧 Agent 仍可连接。');
 const installAvailable = computed(() => Boolean(result.value?.install?.version && result.value?.install?.caSha256));
+
+const coreValidation = computed(() => validateInstallCores(cores.value));
+const coreValidationError = computed(() => coreValidation.value.error || '');
+
 const command = computed(() => {
   const item = result.value;
-  if (!item || !installAvailable.value || !cores.value.length) return '';
+  if (!item || !installAvailable.value || !coreValidation.value.valid) return '';
   if (!/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
   try {
+    const orderedCores = sortInstallCores(cores.value);
     return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
-      grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: [...cores.value], webUpgrade: webUpgrade.value });
+      grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: orderedCores, webUpgrade: webUpgrade.value });
   } catch { return ''; }
 });
 function blockerDetail(item: { kind: string; id: string; name: string }) {
   return item.kind === 'deployment_target' ? `配置 #${item.id}` : item.name || item.id;
 }
 function defaultCores(): CoreName[] {
-  const reported = (props.node.capabilities?.cores ?? []).map(core => core.name).filter(name => CORE_OPTIONS.some(option => option.name === name));
-  return reported.length ? [...new Set(reported)] : ['xray'];
+  const reported = (props.node.capabilities?.cores ?? []).map(core => core.name).filter((name): name is CoreName => CORE_INSTALL_OPTIONS.some(option => option.name === name));
+  const selected: CoreName[] = reported.length ? [...new Set(reported)] : ['xray'];
+  return sortInstallCores(selected);
 }
 let generation = 0, stopped = false;
 async function refresh() {
@@ -170,4 +178,3 @@ watch(() => [props.node.enabled, props.node.status], () => { void refresh(); });
 onMounted(refresh);
 onUnmounted(() => { stopped = true; generation++; });
 </script>
-

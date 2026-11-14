@@ -116,3 +116,45 @@ func TestDashboardReadDoesNotWriteAndStaleHeartbeatsAreOffline(t *testing.T) {
 		t.Fatal("stale degraded heartbeat counted as a current core fault", view, err)
 	}
 }
+
+func TestDashboardNodeTrafficTodayAndMonth(t *testing.T) {
+	service, database, nodeID := dashboardFixture(t)
+	ctx := context.Background()
+	// 2026-10-15 09:00 in Asia/Shanghai: the local day starts at 10-14T16:00Z
+	// and the local month at 09-30T16:00Z.
+	now := time.Date(2026, 10, 15, 1, 0, 0, 0, time.UTC)
+	service.Now = func() time.Time { return now }
+	idle, _, _, err := (&node.Repository{Database: database}).CreateEnrollment(ctx, "Idle node", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := &access.Repository{Database: database}
+	for id, at := range map[string]time.Time{
+		"today":      time.Date(2026, 10, 14, 17, 0, 0, 0, time.UTC),
+		"this-month": time.Date(2026, 9, 30, 17, 0, 0, 0, time.UTC),
+		"last-month": time.Date(2026, 9, 30, 15, 0, 0, 0, time.UTC),
+	} {
+		counter := traffic.Counter{CoreEpoch: "epoch-" + id, Revision: 1, CredentialID: "credential", UserID: "user", DeviceID: "device", Protocol: "vless", UploadBytes: 10, DownloadBytes: 20, ObservedAt: at}
+		if err := records.IngestTraffic(ctx, traffic.Batch{ID: id, NodeID: nodeID, Counters: []traffic.Counter{counter}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, err := service.Read(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byNode := map[string]NodeTraffic{}
+	for _, item := range view.NodeTraffic {
+		byNode[item.NodeID] = item
+	}
+	busy, quiet := byNode[nodeID], byNode[idle.ID]
+	if len(view.NodeTraffic) != 2 || busy.TodayUpload != 10 || busy.TodayDownload != 20 || busy.MonthUpload != 20 || busy.MonthDownload != 40 || !busy.Measured {
+		t.Fatalf("busy node traffic = %+v (%+v)", busy, view.NodeTraffic)
+	}
+	if busy.TodayUpload != view.Counts.TodayUpload || busy.TodayDownload != view.Counts.TodayDownload {
+		t.Fatalf("per-node today %+v does not add up to the total %+v", busy, view.Counts)
+	}
+	if quiet.Measured || quiet.MonthUpload != 0 || quiet.TodayDownload != 0 {
+		t.Fatalf("idle node traffic = %+v", quiet)
+	}
+}

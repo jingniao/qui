@@ -39,7 +39,17 @@ func TestImportAPIOwnerOnlyEncryptedAndSubscriptionReadsCache(t *testing.T) {
 	}
 	// K1 grants imports through group entries; source userIds is compatibility
 	// input only and must not authorize subscription access.
-	group, err := app.nodeRepository.SaveGroup(t.Context(), "", node.GroupInput{Name: "import access", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: saved.ID}, {SourceID: pending}}})
+	items, err := app.importStore.Items(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	imports := []node.GroupImport{{SourceID: pending}}
+	for _, item := range items {
+		if item["sourceId"] == saved.ID {
+			imports = append(imports, node.GroupImport{SourceID: saved.ID, ProxyKey: "id:" + item["id"].(string)})
+		}
+	}
+	group, err := app.nodeRepository.SaveGroup(t.Context(), "", node.GroupInput{Name: "import access", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: imports})
 	if err != nil {
 		t.Fatal(err)
 	}

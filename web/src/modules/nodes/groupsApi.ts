@@ -1,4 +1,5 @@
 import { request, type Page } from '../../app/apiClient';
+// content uses id:<proxy ID>; url keeps '' (whole source) or name|protocol.
 export interface GroupImport { sourceId: string; proxyKey: string }
 export interface NodeGroup { id: string; name: string; purpose: 'subscription' | 'relay' | 'egress' | 'mixed'; enabled: boolean; subscriptionVisible: boolean; nodeIds: string[]; inboundIds: string[]; imports: GroupImport[]; grantedUserIds: string[]; serverIds?: string[]; remark: string; createdAt: string; }
 export type GroupInput = Pick<NodeGroup, 'name' | 'purpose' | 'enabled' | 'subscriptionVisible' | 'remark' | 'inboundIds' | 'imports'> & { serverIds?: string[] };

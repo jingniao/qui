@@ -1,0 +1,2 @@
+ALTER TABLE outbounds ADD COLUMN source_ip TEXT NOT NULL DEFAULT '';
+ALTER TABLE outbounds ADD COLUMN source_interface TEXT NOT NULL DEFAULT '';

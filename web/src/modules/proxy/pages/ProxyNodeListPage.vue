@@ -1,5 +1,6 @@
 <template>
   <div class="space-y-6">
+    <InboundDeleteConflict :conflict="deleteConflict" />
     <!-- Top PageHeader with Unified Actions (Aligned with Server Page) -->
     <PageHeader
       title="节点配置"
@@ -146,6 +147,7 @@
 
         <!-- Speed Test -->
         <button
+          v-if="selfHostedNodes.length"
           type="button"
           @click="testAllNodes"
           :disabled="testingAll"
@@ -201,7 +203,7 @@
           <td class="p-4">
             <div class="flex items-center gap-2.5">
               <!-- Flag / Protocol Badge -->
-              <span class="text-xl shrink-0 select-none leading-none cursor-default" :title="getCountryInfo(node).name">
+              <span class="text-xl shrink-0 select-none leading-none cursor-default" :title="countryTitle(getCountryInfo(node))">
                 {{ getCountryInfo(node).flag }}
               </span>
               <div class="min-w-0">
@@ -220,6 +222,7 @@
                     :title="inboundBadge(node)!.title"
                   />
                 </div>
+                <EntryRouteSummary :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" />
                 <p v-if="node.sourceType !== 'self_hosted' && node.sourceId" class="text-xs text-ios-secondary">所属分组：{{ importedGroupNames(node) }}</p>
                 <p class="text-xs text-neutral-400 font-mono mt-0.5 truncate">
                   {{ networkLabel(node) }}
@@ -265,7 +268,7 @@
           <!-- 4. Relay Routes Summary Column -->
           <td class="text-xs">
             <div v-if="!relayCount(node)" class="text-neutral-400">
-              无中转 (直连)
+              无额外中转入口
             </div>
             <div v-else class="space-y-1">
               <div
@@ -305,12 +308,19 @@
 
           <!-- 6. Actions (Aligned with Server Page Buttons) -->
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
-            <button v-if="isOwner"
+            <button v-if="canAddRelay(node)"
               type="button"
               @click="handleAddRelay(node)"
               class="ios-action-btn-primary"
             >
               添加中转
+            </button>
+            <button v-if="canUseExistingTunnel(node)"
+              type="button"
+              @click="relayNode = node"
+              class="ios-action-btn-secondary"
+            >
+              使用已有隧道
             </button>
             <button
               type="button"
@@ -319,14 +329,14 @@
             >
               详情
             </button>
-            <button v-if="isOwner"
+            <button v-if="isOwner && node.sourceType !== 'subscription'"
               type="button"
               @click="openEditNode(node)"
               class="ios-action-btn-secondary"
             >
-              编辑
+              {{ node.sourceType === 'manual' ? '改名' : '编辑' }}
             </button>
-            <button v-if="isOwner"
+            <button v-if="isOwner && node.sourceType !== 'subscription'"
               type="button"
               @click="deleteNode(node)"
               class="ios-action-btn-danger"
@@ -363,7 +373,7 @@
             <div class="flex items-center gap-2 min-w-0">
               <span
                 class="text-xl shrink-0 select-none leading-none cursor-default"
-                :title="getCountryInfo(node).name"
+                :title="countryTitle(getCountryInfo(node))"
               >
                 {{ getCountryInfo(node).flag }}
               </span>
@@ -396,6 +406,8 @@
             </div>
           </div>
 
+          <EntryRouteSummary :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" />
+
           <!-- Row 2: Sub-info (Source · Transport · Latency) -->
           <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap">
             <span class="px-1.5 py-0.2 rounded text-xs font-semibold" :class="sourceCapsuleColor(node.sourceType)">
@@ -416,7 +428,7 @@
             </div>
             <div v-else class="bg-[#F8F9FA] rounded-xl px-3 py-1.5 border border-black/[0.03] flex items-center justify-between text-xs font-mono">
               <div class="flex items-center gap-1.5 min-w-0 truncate text-neutral-700">
-                <span class="text-neutral-400 font-sans text-xs shrink-0 font-medium">直连:</span>
+                <span class="text-neutral-400 font-sans text-xs shrink-0 font-medium">接入:</span>
                 <span class="truncate font-medium select-all" :title="node.server + ':' + node.port">
                   {{ node.server }}:{{ node.port }}
                 </span>
@@ -425,7 +437,7 @@
                 type="button"
                 @click="copyAddress(node.server + ':' + node.port)"
                 class="text-neutral-400 hover:text-ios-blue p-1 rounded-md hover:bg-black/5 transition-colors shrink-0 ml-1"
-                title="复制直连地址"
+                title="复制接入地址"
               >
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -510,7 +522,7 @@
         <!-- Row 5: Action Grid Buttons (Exact Same Style as Server Card Bottom Grid) -->
         <div class="pt-2 border-t border-black/[0.04] grid grid-cols-3 gap-1.5">
           <!-- 1. 添加中转 -->
-          <button v-if="isOwner"
+          <button v-if="canAddRelay(node)"
             type="button"
             @click="handleAddRelay(node)"
             class="py-1.5 rounded-xl bg-[#EFF8FF] text-[#175CD3] hover:bg-[#D1E9FF] font-semibold text-xs text-center transition-colors flex items-center justify-center gap-1"
@@ -529,7 +541,7 @@
           </button>
 
           <!-- 3. 更多操作下拉 -->
-          <div class="relative">
+          <div v-if="(isOwner && node.sourceType !== 'subscription') || (node.sourceType === 'self_hosted' && node.inboundId)" class="relative">
             <button
               type="button"
               @click.stop="toggleMoreDropdown(node.id)"
@@ -543,14 +555,22 @@
               v-if="activeMoreId === node.id"
               class="absolute right-0 bottom-full mb-1.5 w-32 bg-white rounded-xl shadow-lg border border-black/[0.08] py-1 z-30 text-xs"
             >
+              <button v-if="canUseExistingTunnel(node)"
+                type="button"
+                @click="relayNode = node; activeMoreId = null"
+                class="w-full text-left px-3 py-1.5 hover:bg-black/5 text-ios-label text-sm"
+              >
+                使用已有隧道
+              </button>
               <button v-if="isOwner"
                 type="button"
                 @click="openEditNode(node); activeMoreId = null"
                 class="w-full text-left px-3 py-1.5 hover:bg-black/5 text-ios-label"
               >
-                编辑节点
+                {{ node.sourceType === 'manual' ? '改名' : '编辑节点' }}
               </button>
               <button
+                v-if="node.sourceType === 'self_hosted' && node.inboundId"
                 type="button"
                 @click="testSingleNode(node); activeMoreId = null"
                 class="w-full text-left px-3 py-1.5 hover:bg-black/5 text-ios-label"
@@ -571,6 +591,9 @@
     </div>
 
 
+
+    <ImportedProxyDialog v-if="importAction" :node="importAction.node" :mode="importAction.mode"
+      @close="importAction = null" @saved="importAction = null; loadData()" />
 
     <!-- Modal 0: Node Details & Topology Restorability Evaluation -->
     <AppDialog
@@ -668,6 +691,7 @@
       </div>
     </AppDialog>
 
+    <QuickRelayDialog v-if="quickRelayInboundId" :servers="servers" :inbounds="serverInbounds" :groups="nodeGroups" :initial-exit-inbound-id="quickRelayInboundId" @close="quickRelayInboundId = ''" @created="loadData" />
     <AddRelayDialog v-if="relayNode" :node-id="relayNode.sourceId || ''" :node-name="relayNode.name" :inbounds="serverInbounds" :initial-inbound-id="relayNode.inboundId" :create-scheme="createRelayScheme" :copy="copyAddress" @close="relayNode = null" @saved="loadNodeRelays" />
     <NodeEditorDrawer v-if="openSelfHostedModal" :inbound="editingInbound" @close="openSelfHostedModal = false" @saved="loadData" />
 
@@ -823,8 +847,9 @@
           <!-- Submit Button -->
           <div class="flex justify-end pt-1">
             <button
+              v-if="newSubUrl.trim()"
               type="button"
-              :disabled="submittingSub || !newSubUrl.trim()"
+              :disabled="submittingSub"
               @click="addNewSubscription"
               class="ios-btn-primary inline-flex items-center gap-1.5 !py-1.5 px-4 disabled:opacity-40"
             >
@@ -839,25 +864,24 @@
         <!-- Source List Section -->
         <div class="space-y-3">
           <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary">
-            <span>已添加的导入来源（{{ proxyNodeStore.subscriptions.length }}）</span>
+            <span>已添加的机场订阅（{{ airportSubscriptions.length }}）</span>
             <span class="font-normal text-ios-tertiary">
-              机场订阅 {{ airportSubscriptions.length }} · 单独导入 {{ manualSources.length }}
+              单独导入节点请在节点列表中管理
             </span>
           </div>
 
           <!-- Empty State -->
           <div
-            v-if="!proxyNodeStore.subscriptions.length"
+            v-if="!airportSubscriptions.length"
             class="p-8 text-center text-xs text-ios-tertiary bg-black/[0.01] rounded-2xl border border-dashed border-black/[0.08]"
           >
             暂无已添加的机场订阅源，可在上方表单输入订阅链接添加
           </div>
 
-          <!-- Source Cards: airport subscriptions and single-content imports are
-               both listed here so a manual import stays editable and deletable. -->
+          <!-- Only URL subscriptions expose source-level management. -->
           <div v-else class="space-y-3 max-h-[380px] overflow-y-auto pr-1">
             <div
-              v-for="sub in proxyNodeStore.subscriptions"
+              v-for="sub in airportSubscriptions"
               :key="sub.id"
               class="p-4 bg-white rounded-2xl border transition-all space-y-3"
               :class="editingSubId === sub.id ? 'border-ios-blue shadow-sm ring-2 ring-ios-blue/10' : 'border-black/[0.08] shadow-xs hover:border-black/[0.14]'"
@@ -1080,61 +1104,27 @@
         </div>
       </div>
     </AppDialog>
-    <!-- Import result details: the bounded reasons of the last attempt. Rendered
-         from the stored result, so a failure with no recorded cause says so. -->
-    <AppDialog
-      v-if="importDetails"
-      :model-value="true"
-      :title="`导入结果 · ${importDetails.name}`"
-      :show-confirm="false"
-      @update:model-value="importDetails = null"
-    >
-      <div class="space-y-3 text-xs">
-        <p class="text-ios-secondary">{{ describeImportResult(importDetails.result) }}</p>
-        <p class="font-mono text-xs text-ios-tertiary">{{ importCountsLine(importDetails.result) }}</p>
-        <div v-if="importDetails.result.diagnostics.length" class="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
-          <div
-            v-for="(item, index) in importDetails.result.diagnostics"
-            :key="index"
-            class="p-2 rounded-xl bg-black/[0.02] border border-black/[0.06] space-y-0.5"
-          >
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span class="px-1.5 py-0.5 rounded-md bg-black/[0.04] text-xs font-mono">#{{ item.entryIndex + 1 }}</span>
-              <span v-if="item.protocol" class="text-xs text-ios-secondary font-mono">{{ item.protocol }}</span>
-              <span
-                class="px-1.5 py-0.5 rounded-md text-xs"
-                :class="item.stage === 'duplicate' ? 'bg-sky-500/10 text-sky-700' : 'bg-amber-500/10 text-amber-700'"
-              >
-                {{ item.stage === 'duplicate' ? '重复' : '解析' }}
-              </span>
-              <span class="text-xs text-ios-tertiary font-mono">{{ item.code }}</span>
-            </div>
-            <p class="text-xs leading-relaxed text-ios-label">{{ item.message }}</p>
-            <p v-if="item.field" class="text-xs text-ios-tertiary">字段：{{ item.field }}</p>
-            <p v-if="item.keptEntryIndex !== undefined" class="text-xs text-ios-tertiary">保留第 {{ item.keptEntryIndex + 1 }} 条</p>
-          </div>
-        </div>
-        <p v-else class="text-xs text-ios-tertiary">该次尝试没有逐条原因。</p>
-        <p v-if="importDetails.result.diagnosticsTruncated" class="text-xs text-amber-700">
-          原因过多，仅保留前 {{ importDetails.result.diagnostics.length }} 条。
-        </p>
-      </div>
-    </AppDialog>
+    <ImportResultDialog v-if="importDetails" :import-details="importDetails" @close="importDetails = null" />
   </div>
 </template>
 
 <script setup lang="ts">
+import InboundDeleteConflict from '../components/InboundDeleteConflict.vue';
+import ImportedProxyDialog from '../components/ImportedProxyDialog.vue';
+import { inboundDeleteConflict, type InboundConflict } from '../inboundDeleteConflict';
+const deleteConflict = ref<InboundConflict | null>(null);
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
 import { revisionResult } from '../../system/revisionResult';
 import type { InboundStateItem, InboundPublishState } from '../../system/deploymentApi';
 import AddRelayDialog from '../../tunnels/components/AddRelayDialog.vue';
+import QuickRelayDialog from '../components/QuickRelayDialog.vue';
+import { useNodeRelayActions } from '../useNodeRelayActions';
+import ImportResultDialog from '../components/ImportResultDialog.vue';
 import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
-import { nodeRelayAPI, type NodeRelay } from '../../tunnels/api';
-import { useRouter } from 'vue-router';
 import { authState } from '../../../app/auth';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
-import { importAPI, loadImports, airportSources, importSourceKind, describeImportResult, importCountsLine, failedImportResult } from '../importApi';
+import { importAPI, loadImports, airportSources, describeImportResult, importCountsLine, failedImportResult } from '../importApi';
 import type { ImportResult } from '../importApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
@@ -1150,24 +1140,22 @@ import { request } from '../../../app/apiClient';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { deploymentAPI } from '../../system/deploymentApi';
 import { proxyAPI, canvasAPI, type Inbound, loadProtocolSupport, choices } from '../api';
-import { resolveCountryInfo, type CountryInfo } from '../../nodes/nodeMeta';
+import { resolveCountryInfo, countryTitle, getNodeMeta, type CountryInfo } from '../../nodes/nodeMeta';
 import { connectAddress } from '../../nodes/nodeAddress';
+import { isUserEntry } from '../userEntries';
+import EntryRouteSummary from '../components/EntryRouteSummary.vue';
 import {
   proxyNodeStore,
   loadStoredData,
   saveManualNodes,
   saveSubscriptions,
   parseProxyLink,
-  getNodeRelayRoutes,
-  createDraftSchemeForEntryNode,
   loadCanvasSchemes,
   buildProxyLink,
   type ProxyNodeItem,
-  type SubscriptionItem,
-  type NodeRelayRoute
+  type SubscriptionItem
 } from '../proxyNodes';
 
-const router = useRouter();
 const loading = ref(false);
 
 // Display Mode: 'list' (Table, Default aligned with Server page) or 'grid' (Cards)
@@ -1182,6 +1170,7 @@ function setDisplayMode(mode: 'grid' | 'list') {
 
 const servers = ref<NodeView[]>([]);
 const serverInbounds = ref<Inbound[]>([]);
+const entryRouteSummaries = computed(() => new Map(serverInbounds.value.filter(isUserEntry).map(inbound => [inbound.id, inbound.routeSummary])));
 const editingInbound = ref<Inbound | null>(null);
 
 // Filter states
@@ -1215,14 +1204,13 @@ function toggleMoreDropdown(nodeId: string) {
   }
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('click', () => {
-    activeMoreId.value = null;
-  });
-}
+function closeMoreDropdown() { activeMoreId.value = null; }
+onMounted(() => window.addEventListener('click', closeMoreDropdown));
+onUnmounted(() => window.removeEventListener('click', closeMoreDropdown));
 
 // Modals
 const openDetailModal = ref(false);
+const importAction = ref<{ node: ProxyNodeItem; mode: 'rename' | 'delete' } | null>(null);
 const selectedDetailNode = ref<ProxyNodeItem | null>(null);
 
 function openNodeDetail(node: ProxyNodeItem) {
@@ -1258,7 +1246,6 @@ function openImportDetails(source: SubscriptionItem) {
 // as "url" are airport subscriptions, so the header count and the airport list
 // must not include content imports (which are 单独导入 and live in manualNodes).
 const airportSubscriptions = computed(() => airportSources(proxyNodeStore.subscriptions));
-const manualSources = computed(() => proxyNodeStore.subscriptions.filter(s => importSourceKind(s) === 'content'));
 const newSubName = ref('');
 const newSubUrl = ref('');
 const submittingSub = ref(false);
@@ -1273,7 +1260,7 @@ const editSubForm = reactive({
 
 function importedGroupNames(node: ProxyNodeItem): string {
   return nodeGroups.value.filter(g => g.imports?.some(item => item.sourceId === node.sourceId &&
-    (item.proxyKey === '' || item.proxyKey === node.proxyKey))).map(g => g.name).join('、') || '—';
+    ((node.sourceType === 'subscription' && item.proxyKey === '') || item.proxyKey === node.proxyKey))).map(g => g.name).join('、') || '—';
 }
 // Pagination
 const currentPage = ref(1);
@@ -1316,7 +1303,7 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
   const result: ProxyNodeItem[] = [];
   for (const srv of servers.value) {
     if (!srv.enabled || srv.deletedAt) continue;
-    const inbounds = serverInbounds.value.filter(ib => ib.nodeId === srv.id);
+    const inbounds = serverInbounds.value.filter(ib => ib.nodeId === srv.id && isUserEntry(ib));
     if (inbounds.length > 0) {
       for (const ib of inbounds) {
         let cleanName = (ib.name || '').trim();
@@ -1324,7 +1311,7 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
           cleanName = cleanName.slice(srv.name.length).replace(/^[·\s\-_]+/, '').trim();
         }
         const finalDisplayName = cleanName ? `${srv.name} · ${cleanName}` : `${srv.name} · ${ib.protocol.toUpperCase()}`;
-        const name = ib.internalRelay ? finalDisplayName + ' (内部中转)' : (ib.enabled ? finalDisplayName : finalDisplayName + ' (已停用)');
+        const name = ib.enabled ? finalDisplayName : finalDisplayName + ' (已停用)';
         const status = (srv.status === 'online' || srv.status === 'degraded') && ib.enabled ? 'online' : 'offline';
         // The panel holds the inbound, so the transports are read from it with the
         // same helper the server detail page uses, instead of guessing from the
@@ -1397,43 +1384,18 @@ function applyFilter() {
   currentPage.value = 1;
 }
 
-// Relay routes linkage helpers
-function getNodeRoutes(node: ProxyNodeItem): NodeRelayRoute[] {
-  return getNodeRelayRoutes(node, proxyNodeStore.schemes);
-}
-
-function goToEditRelayRoute(route: NodeRelayRoute) {
-  router.push({
-    path: '/proxy/relay',
-    query: {
-      schemeId: route.schemeId,
-      focusConnId: route.connectionId,
-      focusInstId: route.targetInstanceId
-    }
-  });
-}
-
-const relayNode = ref<ProxyNodeItem | null>(null);
-const nodeRelays = ref<Record<string, NodeRelay[]>>({});
-const relayErrors = ref<Record<string, string>>({});
-function relayCount(node: ProxyNodeItem) { return getNodeRoutes(node).length + linkedRelays(node).length; }
-function linkedRelays(node: ProxyNodeItem) { return node.sourceType === 'self_hosted' ? (nodeRelays.value[node.sourceId || ''] || []).filter(r => !node.inboundId || (r.rule.target.mode === 'linked' && r.rule.target.inboundId === node.inboundId)) : []; }
-async function loadNodeRelays() {
-  await Promise.all(servers.value.map(async node => {
-    try { nodeRelays.value[node.id] = (await nodeRelayAPI.list(node.id)).items; delete relayErrors.value[node.id]; }
-    catch (e) { relayErrors.value[node.id] = (e as Error).message; }
-  }));
-}
-function handleAddRelay(node: ProxyNodeItem) { if (isOwner.value) relayNode.value = node; }
-async function createRelayScheme() {
-  const node = relayNode.value!;
-  const { scheme, entryInstanceId } = await createDraftSchemeForEntryNode(node, { servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes });
-  await router.push({ path: '/proxy/relay', query: { schemeId: scheme.id, focusInstId: entryInstanceId } });
-}
+const {
+  relayNode, quickRelayInboundId, relayErrors, getNodeRoutes, goToEditRelayRoute,
+  relayCount, linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
+  handleAddRelay, createRelayScheme,
+} = useNodeRelayActions(isOwner, servers, serverInbounds);
 
 // Flag resolution helper
 function getCountryInfo(node: ProxyNodeItem): CountryInfo {
-  return resolveCountryInfo(node.name || node.server);
+  // Self-hosted inbounds take their server's flag; imported nodes only have a name.
+  const server = node.sourceType === 'self_hosted' ? servers.value.find(item => item.id === node.sourceId) : undefined;
+  if (server) return resolveCountryInfo({ region: getNodeMeta(server.id).region, countryCode: server.countryCode, name: server.name, hostname: server.hostname });
+  return resolveCountryInfo({ name: node.name, hostname: node.server });
 }
 
 // Styling helpers (Exact same status tones as Server Page)
@@ -1492,6 +1454,10 @@ function openCreateNodeModal() {
 
 function openEditNode(node: ProxyNodeItem) {
   if (!isOwner.value) return;
+  if (node.sourceType === 'manual') {
+    importAction.value = { node, mode: 'rename' };
+    return;
+  }
   if (node.sourceType === 'self_hosted' && node.onlyViaRelay) {
     showToast('内部中转入站请在中转搭建中管理', 'info');
     return;
@@ -1505,12 +1471,6 @@ function openEditNode(node: ProxyNodeItem) {
     }
     editingInbound.value = ib;
     openSelfHostedModal.value = true;
-  } else {
-    const source = proxyNodeStore.subscriptions.find(s => s.id === node.sourceId);
-    if (!source) { showToast('未找到节点来源，请刷新后重试', 'error'); return; }
-    showToast('该节点来自导入源，请编辑来源；更改会影响该来源的全部节点', 'info');
-    startEditSub(source);
-    openSubModal.value = true;
   }
 }
 
@@ -1580,7 +1540,12 @@ function showImportResult(name: string, result?: ImportResult) {
 }
 
 async function deleteNode(node: ProxyNodeItem) {
+  deleteConflict.value = null;
   if (!isOwner.value) return;
+  if (node.sourceType === 'manual') {
+    importAction.value = { node, mode: 'delete' };
+    return;
+  }
   if (node.sourceType === 'self_hosted' && !confirm(`确定要删除节点 [${node.name}] 吗？`)) return;
   if (node.sourceType === 'self_hosted') {
     if (node.inboundId) {
@@ -1598,13 +1563,12 @@ async function deleteNode(node: ProxyNodeItem) {
         }
         await loadData();
       } catch (e) {
+        deleteConflict.value = inboundDeleteConflict(e);
         showToast((e as Error).message, 'error');
       }
     } else {
       showToast('该自建节点为基础服务器实例，请在“服务器”模块中管理', 'error');
     }
-  } else {
-    if (node.sourceId) await deleteSubscription(node.sourceId);
   }
 }
 
@@ -1784,7 +1748,10 @@ function transportLabel(node: Pick<ProxyNodeItem, 'protocol' | 'settings'>): str
   return `${node.settings?.transport || 'tcp'}${node.settings?.security ? ' + ' + node.settings.security : ''}`;
 }
 
+let publishStateGeneration = 0;
 async function loadServerPublishStates() {
+  if (document.hidden) return;
+  const generation = ++publishStateGeneration;
   const currentNodes = displayMode.value === 'list' ? pagedNodes.value : filteredNodes.value;
   const serverIds = [...new Set(currentNodes.filter(n => n.sourceType === 'self_hosted' && n.sourceId).map(n => n.sourceId!))];
   if (!serverIds.length) return;
@@ -1799,6 +1766,7 @@ async function loadServerPublishStates() {
     })
   );
 
+  if (generation !== publishStateGeneration) return;
   const nextMap = new Map(inboundStateMap.value);
   for (const [id, items] of results) {
     for (const key of [...nextMap.keys()]) if (key.startsWith(`${id}/`)) nextMap.delete(key);
@@ -1811,17 +1779,21 @@ watch([pagedNodes, displayMode, servers], () => {
   loadServerPublishStates();
 }, { immediate: true });
 
+function publishVisibilityChanged() { if (!document.hidden) reloadPublishStatesOnNodeStatus(); }
 const reloadPublishStatesOnNodeStatus = throttleTrailing(() => { void loadServerPublishStates(); }, 5000);
 onMounted(() => {
   loadProtocolSupport();
   loadData();
-  window.addEventListener('proxy-deployment-status', loadServerPublishStates);
+  window.addEventListener('proxy-deployment-status', reloadPublishStatesOnNodeStatus);
   window.addEventListener('proxy-node-status', reloadPublishStatesOnNodeStatus);
+  document.addEventListener('visibilitychange', publishVisibilityChanged);
 });
 
 onUnmounted(() => {
+  publishStateGeneration++;
+  document.removeEventListener('visibilitychange', publishVisibilityChanged);
   reloadPublishStatesOnNodeStatus.cancel();
-  window.removeEventListener('proxy-deployment-status', loadServerPublishStates);
+  window.removeEventListener('proxy-deployment-status', reloadPublishStatesOnNodeStatus);
   window.removeEventListener('proxy-node-status', reloadPublishStatesOnNodeStatus);
 });
 </script>

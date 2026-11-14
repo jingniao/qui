@@ -12,7 +12,7 @@
           </svg>
           <span>刷新</span>
         </button>
-        <button v-if="isOwner" class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || !!error || busy" @click="createGroup">
+        <button v-if="isOwner && !error" class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs" :disabled="loading || busy" @click="createGroup">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
@@ -320,9 +320,10 @@
                   placeholder="选择待授权用户…"
                 />
                 <button
+                  v-if="grantUserId"
                   type="button"
                   class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1 shrink-0 shadow-2xs"
-                  :disabled="busy || !grantUserId"
+                  :disabled="busy"
                   @click="grantUser"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -406,7 +407,7 @@
                 </p>
               </div>
               <button
-                v-if="isOwner"
+                v-if="isOwner && hasAvailableNodes"
                 type="button"
                 class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
                 :disabled="busy"
@@ -420,6 +421,12 @@
             </div>
 
             <!-- 节点表格 -->
+            <p v-if="currentGroupNodes.some(node => node.invalid)" class="text-sm text-ios-orange">组内有失效成员，请逐个移出后保存。其他成员仍可编辑。</p>
+            <div v-if="pendingRemovedIds.length" class="flex flex-wrap items-center gap-3 text-sm">
+              <span>已移出 {{ pendingRemovedIds.length }} 个成员，尚未保存。</span>
+              <button class="ios-btn-primary" :disabled="busy" @click="saveRemovedMembers">保存成员变更</button>
+              <button class="ios-btn-secondary" :disabled="busy" @click="cancelRemovedMembers">取消变更</button>
+            </div>
             <div class="rounded-2xl border border-black/[0.06] overflow-hidden bg-white shadow-2xs">
               <DataTable v-if="currentGroupNodes.length" class="border-0 shadow-none rounded-none">
                 <template #header>
@@ -436,6 +443,11 @@
                     <td>
                       <span class="block text-sm font-semibold text-neutral-800">
                         {{ node.name }}
+                      </span>
+                      <EntryRouteSummary :summary="node.routeSummary" :show-scheme-link="isOwner" />
+                      <span v-if="node.server" class="block text-xs font-mono text-ios-secondary break-all">{{ node.server }}:{{ node.port }}</span>
+                      <span v-if="node.internalRelay" class="block text-xs text-ios-orange">
+                        内部监听（不应作为用户成员）
                       </span>
                       <span class="block text-xs text-neutral-400 truncate max-w-[220px]" :title="memberServerLabel(node)">
                         {{ memberServerLabel(node) }}
@@ -554,10 +566,13 @@ import { groupAPI, freshGroup, type NodeGroup } from '../../nodes/groupsApi';
 import { userAPI, type ProxyUser } from '../../users/api';
 import type { NodeView } from '../../nodes/api';
 import { choices, proxyAPI, type Inbound } from '../api';
-import { loadImports } from '../importApi';
+import { importSourceKind, loadImports } from '../importApi';
 import { proxyNodeStore } from '../proxyNodes';
 import { policyAPI, type PolicyRecord, type StoredRuleTemplate } from '../../routing/api';
-import { groupInput, importMemberId, isUserGroup, groupPurposeNames } from '../lineGroups';
+import { groupInput, importMemberId, isUserGroup, groupPurposeNames, assertValidImportMembers, invalidImportMembers } from '../lineGroups';
+import { importProxyKey, resolveImportMember } from '../importIdentity';
+import { isUserEntry } from '../userEntries';
+import EntryRouteSummary from '../components/EntryRouteSummary.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -585,6 +600,8 @@ const activeMenu = ref<'users' | 'nodes'>('users');
 const pickerOpen = ref(false);
 const pickerGroup = ref<NodeGroup | null>(null);
 const pickerError = ref('');
+const pendingRemovals = ref<Record<string, string[]>>({});
+const pendingRemovedIds = computed(() => selected.value ? pendingRemovals.value[selected.value.id] || [] : []);
 
 const serverMap = computed(() => {
   const map: Record<string, NodeView> = {};
@@ -607,8 +624,8 @@ function memberServerLabel(node: GroupPickerNode) {
   return node.sourceName || '—';
 }
 
-// All available nodes combining self-hosted inbounds and imported nodes
-const allAvailableNodes = computed<GroupPickerNode[]>(() => {
+// Keep internal listeners here so historical group members remain visible and removable.
+const allGroupNodes = computed<GroupPickerNode[]>(() => {
   const result: GroupPickerNode[] = [];
 
   // 1. Self-hosted Inbounds
@@ -626,27 +643,33 @@ const allAvailableNodes = computed<GroupPickerNode[]>(() => {
       status: ib.enabled ? 'active' : 'disabled',
       enabled: ib.enabled,
       subscriptionVisible: ib.subscriptionVisible,
-      internalRelay: ib.internalRelay
+      internalRelay: ib.internalRelay,
+      routeSummary: isUserEntry(ib) ? ib.routeSummary : undefined
     });
   }
 
   // Stable API membership keys survive content hash changes on refresh.
   for (const source of proxyNodeStore.subscriptions) {
+    if (importSourceKind(source) !== 'url') continue;
     result.push({ id: importMemberId({ sourceId: source.id, proxyKey: '' }),
       sourceId: source.id, proxyKey: '', name: source.name + '（整个来源）', protocol: '—', port: '—',
       sourceType: 'subscription', sourceTypeName: '整源', sourceName: source.name, status: 'active', enabled: true });
   }
   for (const node of proxyNodeStore.manualNodes) {
     if (!node.sourceId || node.proxyKey === undefined) continue;
-    const id = importMemberId({ sourceId: node.sourceId, proxyKey: node.proxyKey });
+    const proxyKey = importProxyKey({ id: node.id, proxyKey: node.proxyKey, kind: node.sourceType === 'manual' ? 'content' : 'url' });
+    const id = importMemberId({ sourceId: node.sourceId, proxyKey });
     if (result.some(item => item.id === id)) continue;
-    result.push({ id, sourceId: node.sourceId, proxyKey: node.proxyKey, name: node.name,
-      protocol: node.protocol, port: node.port, sourceType: 'subscription', sourceTypeName: '导入',
+    result.push({ id, sourceId: node.sourceId, proxyKey, name: node.name,
+      protocol: node.protocol, port: node.port, server: node.server, sourceType: node.sourceType,
+      sourceTypeName: node.sourceType === 'manual' ? '单独导入' : '机场导入',
       sourceName: node.sourceName || '—', status: 'active', enabled: true });
   }
 
   return result;
 });
+
+const allAvailableNodes = computed(() => allGroupNodes.value.filter(isUserEntry));
 
 const selected = computed(() => groups.value.find(group => group.id === route.query.group) || groups.value[0]);
 
@@ -656,13 +679,26 @@ function memberIds(group: NodeGroup) {
 function groupNodesFor(groupId: string): GroupPickerNode[] {
   const group = groups.value.find(item => item.id === groupId);
   if (!group) return [];
-  return memberIds(group).map(id => allAvailableNodes.value.find(item => item.id === id) || {
-    id, name: '失效成员（来源刷新后未找到）', protocol: '—', port: '—',
-    sourceType: 'subscription', sourceTypeName: '失效', sourceName: '—', status: 'disabled', enabled: false
+  return memberIds(group).filter(id => !pendingRemovals.value[groupId]?.includes(id)).map(id => {
+    const existing = allGroupNodes.value.find(item => item.id === id);
+    if (existing) return existing;
+    const member = group.imports.find(item => importMemberId(item) === id);
+    const source = proxyNodeStore.subscriptions.find(item => item.id === member?.sourceId);
+    const resolved = member ? resolveImportMember(member, proxyNodeStore.subscriptions, []) : null;
+    return {
+      id, name: resolved?.name || `已失效：${id}`, protocol: '—', port: '—',
+      sourceId: member?.sourceId, proxyKey: member?.proxyKey,
+      sourceType: importSourceKind(source) === 'content' ? 'manual' : 'subscription',
+      sourceTypeName: '失效', sourceName: source?.name || '—', status: 'disabled', enabled: false, invalid: true
+    };
   });
 }
 const currentGroupNodes = computed(() => selected.value ? groupNodesFor(selected.value.id) : []);
-const pickerNodeIds = computed(() => pickerGroup.value ? memberIds(pickerGroup.value) : []);
+const hasAvailableNodes = computed(() => allAvailableNodes.value.some(node =>
+  !currentGroupNodes.value.some(member => member.id === node.id)
+  && (node.sourceType !== 'self_hosted' || (node.enabled && node.subscriptionVisible))
+));
+const pickerNodeIds = computed(() => pickerGroup.value ? memberIds(pickerGroup.value).filter(id => !pendingRemovals.value[pickerGroup.value!.id]?.includes(id)) : []);
 
 const grantCandidates = computed(() => users.value.filter(user => !selected.value?.grantedUserIds?.includes(user.id)));
 
@@ -809,7 +845,7 @@ async function savePicker(ids: string[]) {
 
   try {
     const fresh = await freshGroup(group.id);
-    const input = groupInput(fresh);
+    const input = memberEditInput(fresh);
     for (const id of ids) {
       const candidate = allAvailableNodes.value.find(item => item.id === id);
       if (!candidate) throw new Error('候选节点已变化，请刷新后重试');
@@ -820,13 +856,15 @@ async function savePicker(ids: string[]) {
         if (!input.inboundIds.includes(id)) input.inboundIds.push(id);
       }
     }
+    assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
     await groupAPI.save(group.id, input);
+    delete pendingRemovals.value[group.id];
 
     pickerOpen.value = false;
     showToast(`已向分组添加 ${ids.length} 个代理节点`);
     await load();
   } catch (e) {
-    pickerError.value = `${(e as Error).message}。部分操作可能已完成，请核对后重试。`;
+    pickerError.value = (e as Error).message;
     await load();
     pickerGroup.value = groups.value.find(item => item.id === group.id) || null;
   } finally {
@@ -837,15 +875,44 @@ async function savePicker(ids: string[]) {
 function removeNode(nodeId: string) {
   const group = selected.value;
   if (!group) return;
+  if (invalidImportMembers(group.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes).length || pendingRemovedIds.value.length) {
+    pendingRemovals.value[group.id] = [...pendingRemovedIds.value, nodeId];
+    return;
+  }
 
   mutate(async () => {
     const fresh = await freshGroup(group.id);
     const input = groupInput(fresh);
     input.inboundIds = input.inboundIds.filter(id => id !== nodeId);
     input.imports = input.imports.filter(item => importMemberId(item) !== nodeId);
+    assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
     await groupAPI.save(group.id, input);
     showToast('节点已从分组中移出');
   });
+}
+
+function memberEditInput(group: NodeGroup) {
+  const input = groupInput(group);
+  const removed = pendingRemovals.value[group.id] || [];
+  input.inboundIds = input.inboundIds.filter(id => !removed.includes(id));
+  input.imports = input.imports.filter(member => !removed.includes(importMemberId(member)));
+  return input;
+}
+
+function saveRemovedMembers() {
+  const group = selected.value;
+  if (!group) return;
+  mutate(async () => {
+    const input = memberEditInput(await freshGroup(group.id));
+    assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
+    await groupAPI.save(group.id, input);
+    delete pendingRemovals.value[group.id];
+    showToast('成员变更已保存');
+  });
+}
+
+function cancelRemovedMembers() {
+  if (selected.value) delete pendingRemovals.value[selected.value.id];
 }
 
 const confirmOpen = ref(false);
@@ -891,6 +958,7 @@ async function saveServers() {
     if (fresh.serverIds === undefined || isUserGroup(fresh)) throw new Error('服务器成员能力或分组用途已变化，请刷新');
     const input = groupInput(fresh);
     input.serverIds = [...new Set([...fresh.serverIds.filter(id => !before.includes(id) || picked.includes(id)), ...picked.filter(id => !before.includes(id))])];
+    assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
     await groupAPI.save(group.id, input);
   });
 }

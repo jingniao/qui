@@ -26,7 +26,11 @@ type Relays interface {
 	Relays(context.Context) ([]Relay, error)
 }
 
-type RelayStore struct{ Database *sql.DB }
+type RelayStore struct {
+	Database interface {
+		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	}
+}
 
 func (s *RelayStore) Relays(ctx context.Context) ([]Relay, error) {
 	rows, err := s.Database.QueryContext(ctx, `SELECT published_snapshot FROM tunnel_rules WHERE published_snapshot IS NOT NULL ORDER BY id`)
@@ -67,6 +71,11 @@ func RelayEndpoint(endpoint proxy.Proxy, relay Relay) (proxy.Proxy, bool) {
 		endpoint.TLS = &tls
 	}
 	endpoint.Name += " · 经 " + relay.Entry.Name
+	if endpoint.QUIC != nil {
+		quic := *endpoint.QUIC
+		quic.HopPorts, quic.HopInterval = "", 0
+		endpoint.QUIC = &quic
+	}
 	endpoint.Server, endpoint.Port = relay.Server, relay.Port
 	endpoint.Origin.Ref, endpoint.Origin.Node = relay.ID, relay.Entry
 	endpoint.Origin.Relayed = true

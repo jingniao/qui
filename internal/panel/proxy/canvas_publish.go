@@ -29,15 +29,18 @@ var canvasTunnels = map[string]string{"tls": "trojan", "wireguard": "wireguard"}
 
 // CanvasPublishNode is one node's result in a canvas publication.
 type CanvasPublishNode struct {
-	NodeID   string `json:"nodeId"`
-	Name     string `json:"name"`
-	Revision int64  `json:"revision"`
-	Status   string `json:"status"`
+	AutomaticRollback bool   `json:"automaticRollback,omitempty"`
+	FailureCode       string `json:"failureCode,omitempty"`
+	NodeID            string `json:"nodeId"`
+	Name              string `json:"name"`
+	Revision          int64  `json:"revision"`
+	Status            string `json:"status"`
 }
 
 // CanvasPublishResult is what the canvas shows after publishing: the batch (or
 // the single revision) and each node's revision and status.
 type CanvasPublishResult struct {
+	Entries  []CanvasPlanEntry   `json:"entries,omitempty"`
 	BatchID  string              `json:"batchId,omitempty"`
 	Nodes    []CanvasPublishNode `json:"nodes"`
 	Warnings []string            `json:"warnings"`
@@ -71,7 +74,8 @@ type canvasEdge struct {
 	outboundID    string
 	// adopt is a stale inbound of the same scheme on this listener and protocol
 	// that the edge takes over instead of creating a new one.
-	adopt Inbound
+	adopt           Inbound
+	upgradeOutbound Outbound
 }
 
 // canvasChain is a managed path with two relay edges or an external final exit.
@@ -88,6 +92,9 @@ type canvasChain struct {
 // canvasEntry is a self-hosted inbound the scheme routes: its default outbound
 // becomes the edge, chain or external final outbound the drawing names.
 type canvasEntry struct {
+	schemeID      string
+	binding       *CanvasEntryBinding
+	preview       *CanvasPlanEntry
 	finalOutbound string
 	existing      Inbound
 	edge          *canvasEdge
@@ -158,11 +165,22 @@ func canvasDefaultPort(protocol string) int {
 // This is the server execution path. Client schemes use a separate client-only
 // snapshot. Stored legacy forwards remain publishable until their migration.
 func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*canvasPlan, error) {
+	p, err := s.canvasBuildPreviewPlan(ctx, scheme)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *Service) canvasBuildPreviewPlan(ctx context.Context, scheme CanvasScheme) (*canvasPlan, error) {
 	p, err := s.canvasBuildPlanInternal(ctx, scheme, true)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.canvasSharedDependencies(ctx, p); err != nil {
+		return nil, err
+	}
+	if err := s.canvasAllocateEntryPorts(ctx, p); err != nil {
 		return nil, err
 	}
 	if err := s.canvasCheckRelayCycles(ctx, p); err != nil {
@@ -173,9 +191,6 @@ func (s *Service) canvasBuildPlan(ctx context.Context, scheme CanvasScheme) (*ca
 func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasScheme, checkRoutes bool) (*canvasPlan, error) {
 	if scheme.Execution != canvasExecutionServer {
 		return nil, errors.New("客户端方案暂不支持发布")
-	}
-	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
-		return nil, err
 	}
 	layout, err := s.Repository.resolveCanvasLayout(ctx, scheme.Execution, scheme.Layout)
 	if err != nil {
@@ -323,7 +338,9 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			if !in.Enabled || in.Protocol == "forward" {
 				return nil, errors.New("出口入站已停用或不是代理协议")
 			}
-			protocol = in.Protocol
+			if tunnel != "tls" {
+				protocol = in.Protocol
+			}
 			core = in.Core
 		}
 		port := canvasDefaultPort(protocol)
@@ -349,6 +366,9 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			return nil, errors.New("外部代理出口不能与其他后继并用")
 		}
 	}
+	if err := s.canvasPlanEntries(ctx, layout, plan); err != nil {
+		return nil, err
+	}
 	names, err := s.canvasNodeNames(ctx, plan.nodes)
 	if err != nil {
 		return nil, err
@@ -358,6 +378,9 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 	}
 	for _, edge := range plan.edges {
 		edge.inboundName, edge.outboundName = canvasEdgeNames(edge.prefix, names[edge.sourceNode], names[edge.targetNode], edge.protocol, edge.port)
+		if err := s.canvasPlanTLSUpgrade(ctx, plan, edge); err != nil {
+			return nil, err
+		}
 		plan.owners[edge.inboundName] = edge.tunnelID
 		plan.owners[edge.outboundName] = edge.tunnelID
 		plan.inbounds[edge.inboundName] = true
@@ -404,31 +427,27 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			plan.owners[chain.name] = path[0].tunnelID
 		}
 	}
-	// Entry inbounds the drawing routes: a self-hosted inbound on the node a path
-	// starts from.
-	for _, instance := range layout.Instances {
-		ref, err := parseCanvasRef(instance.Ref)
-		if err != nil || ref.kind != "inbound" || instance.Role != "entry" {
-			continue
+	for index := range plan.entries {
+		entry := &plan.entries[index]
+		nodeID := entry.existing.NodeID
+		if entry.preview != nil {
+			nodeID = entry.preview.NodeID
 		}
-		// Revealed on purpose: publishing rewrites the inbound through
-		// SaveInbound, which needs its real settings to round-trip them.
-		inbound, err := s.Repository.Inbound(ctx, ref.id, true)
-		if err != nil {
-			return nil, err
-		}
-		plan.node(inbound.NodeID)
-		entry := canvasEntry{existing: inbound, finalOutbound: finals[inbound.NodeID]}
-		if chain, ok := plan.chainFor(inbound.NodeID); ok {
+		entry.finalOutbound = finals[nodeID]
+		if chain, ok := plan.chainFor(nodeID); ok {
 			entry.chain = chain
-		} else if edges := plan.edgesFrom(inbound.NodeID); len(edges) > 1 {
+		} else if edges := plan.edgesFrom(nodeID); len(edges) > 1 {
 			// Without a chain, one route per entry inbound is what the renderer can
 			// express; two would mean silently picking one of them.
-			return nil, fmt.Errorf("入站 %q 所在的服务器有多个出站目标，请改用两跳链路或为每个出口单独建一个方案", inbound.Name)
+			return nil, fmt.Errorf("入站 %q 所在的服务器有多个出站目标，请改用两跳链路或为每个出口单独建一个方案", entry.existing.Name)
 		} else if len(edges) == 1 {
 			entry.edge = edges[0]
 		}
-		plan.entries = append(plan.entries, entry)
+		if entry.preview != nil {
+			if err := s.canvasPlanEntryRoute(ctx, layout, entry, names); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if checkRoutes {
 		if err := s.canvasEntryRoutingConflict(ctx, scheme, plan); err != nil {

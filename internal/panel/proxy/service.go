@@ -22,11 +22,16 @@ type Nodes interface {
 	Get(context.Context, string) (node.Node, error)
 	SubscriptionGroups(context.Context, string) ([]string, error)
 }
+type CanvasEntryGroups interface {
+	Group(context.Context, string) (node.Group, error)
+	SaveGroup(context.Context, string, node.GroupInput) (node.Group, error)
+}
 type Service struct {
-	canvasMu   sync.Mutex
-	Repository *Repository
-	Nodes      Nodes
-	Policies   interface {
+	canvasMu    sync.Mutex
+	Repository  *Repository
+	Nodes       Nodes
+	EntryGroups CanvasEntryGroups
+	Policies    interface {
 		ForNode(context.Context, string) ([]desiredstate.Policy, error)
 	}
 	// Deploy publishes a canvas drawing through the Deployment module's own
@@ -339,6 +344,10 @@ func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInp
 		return Outbound{}, errors.New("node missing or disabled")
 	}
 	if err := ValidateOutboundCores(n.Capabilities, input.Protocol); err != nil {
+		return Outbound{}, err
+	}
+	sourceState := desiredstate.State{NodeID: input.NodeID, Network: desiredstate.NetworkOrNil(n.OutboundSourceIP, n.OutboundInterface, n.HostSourceIPv4, n.HostSourceIPv6), Outbounds: []desiredstate.Outbound{{ID: id, Enabled: input.Enabled, SourceIP: input.SourceIP, SourceInterface: input.SourceInterface}}}
+	if err := node.RequireOutboundSourceSupport(sourceState, n.Capabilities, n.Name); err != nil {
 		return Outbound{}, err
 	}
 	if id != "" {

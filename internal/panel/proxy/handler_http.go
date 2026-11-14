@@ -64,6 +64,10 @@ func (h *Handler) listInbounds(w http.ResponseWriter, r *http.Request) {
 		h.internal(w, err)
 		return
 	}
+	if err := h.Service.Repository.ProjectInboundRoutes(r.Context(), items); err != nil {
+		h.internal(w, err)
+		return
+	}
 	httpapi.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "pageSize": size})
 }
 func (h *Handler) listOutbounds(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +155,11 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, ErrNotFound) {
 		httpapi.Error(w, 404, "not_found", err.Error())
+		return
+	}
+	var capability *node.CapabilityError
+	if errors.As(err, &capability) {
+		httpapi.Error(w, 409, capability.Code(), capability.Message)
 		return
 	}
 	httpapi.Error(w, 400, "invalid_request", err.Error())

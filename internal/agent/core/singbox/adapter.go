@@ -672,6 +672,7 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	// The renderer emits local binary rule_set entries the Agent downloaded
 	// (v1.5.4 item 5).
 	capabilities.NativeRuleSetsSupported = true
+	capabilities.OutboundSourceSupported = true
 	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
 	if capabilities.DeviceGateSupported {
 		capabilities.ObservationContractVersion = 2

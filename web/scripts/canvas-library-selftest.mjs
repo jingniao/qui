@@ -150,6 +150,42 @@ assert.match(canvas, /<div v-if="currentScheme\.id" class="pt-2">\s*<button\s+ty
 
 // Null/missing arrays from historical rows must not discard an entire page.
 const schemeContext = { servers: [], inbounds: [], imported: [] };
+// Opening a quick-created scheme, moving its entry and saving must retain the
+// full binding contract. Both create and reuse layouts follow the same mapper.
+for (const binding of [
+  { mode: 'create', protocol: 'vless', core: 'xray', portMode: 'manual', port: 35005, groupMode: 'explicit', groupIds: ['group-a'] },
+  { mode: 'create', protocol: 'trojan', core: 'sing-box', portMode: 'auto', groupMode: 'exit_groups' },
+  { mode: 'reuse', inboundId: 'ib-1', portMode: 'auto', groupMode: 'none' }
+]) {
+  const stored = { id: 'bound', name: 'bound', execution: 'server', publishedAt: '', updatedAt: '', layout: { instances: [{ instanceId: 'entry', ref: 'server:srv-a', x: 1, y: 2, role: 'entry', entryBinding: binding }], connections: [] } };
+  const mapped = api.canvasSchemeToRelayScheme(stored, { servers, inbounds, imported: [] });
+  mapped.nodes[0].x = 300;
+  const saved = api.relaySchemeToCanvasInput(mapped, { servers, inbounds, imported: [] });
+  assert.deepEqual(saved.layout.instances[0].entryBinding, binding);
+  assert.equal(saved.layout.instances[0].x, 300);
+  // Editing a local explicit group list must not mutate the loaded API object.
+  if (mapped.nodes[0].entryBinding.groupIds) {
+    mapped.nodes[0].entryBinding.groupIds.push('group-b');
+    assert.deepEqual(binding.groupIds, ['group-a']);
+  }
+}
+const saveDraftSource = canvas.slice(canvas.indexOf('function saveDraft('), canvas.indexOf('// Canvas edits arrive per mousemove'));
+const entryLifecycle = await load(transpile(`
+  export const currentScheme = { value: { id: 'draft', executionLocation: 'server', nodes: [], published: false } };
+  const scheduleSave = () => {};
+  export ${saveDraftSource}
+`));
+for (const [execution, role, resourceType, shouldKeep] of [
+  ['server', 'entry', 'server', true], ['server', 'relay', 'server', false],
+  ['server', 'exit', 'server', false], ['client', 'entry', 'server', false],
+  ['server', 'entry', 'node', false]
+]) {
+  const node = { role, resourceType, entryBinding: { mode: 'reuse', inboundId: 'ib-1', portMode: 'auto', groupMode: 'none' } };
+  entryLifecycle.currentScheme.value.executionLocation = execution;
+  entryLifecycle.currentScheme.value.nodes = [node];
+  entryLifecycle.saveDraft();
+  assert.equal(!!node.entryBinding, shouldKeep, `${execution}/${role}/${resourceType} binding`);
+}
 for (const layout of [undefined, null, {}, { instances: null, connections: null }, { instances: [], connections: null }, { instances: null, connections: [] }]) {
   const mapped = api.canvasSchemeToRelayScheme({ id: 'old', name: 'old', execution: 'server', layout, publishedAt: '', updatedAt: '' }, schemeContext);
   assert.deepEqual(mapped.nodes, []);
@@ -235,12 +271,13 @@ assert.deepEqual(store.manualNodes.map(node => node.id), ['p1', 'p2']);
 assert.deepEqual(store.manualNodes.map(node => [node.supportTcp, node.supportUdp]), [[true, false], [true, true]]);
 assert.deepEqual(store.subscriptions.map(sub => sub.kind), ['url', 'content']);
 assert.equal(importApi.airportSources(store.subscriptions).length, 1);
-// The page's airport count/list comes from that filtered list, and the manual
-// sources stay manageable through the same source list.
+// Item 16: source management is URL-only; content nodes are managed individually.
 assert.ok(listPage.includes('机场订阅管理 ({{ airportSubscriptions.length }})'));
 assert.ok(listPage.includes('const airportSubscriptions = computed(() => airportSources(proxyNodeStore.subscriptions));'));
-assert.ok(listPage.includes("const manualSources = computed(() => proxyNodeStore.subscriptions.filter(s => importSourceKind(s) === 'content'));"));
-assert.ok(listPage.includes('已添加的导入来源（{{ proxyNodeStore.subscriptions.length }}）'));
+assert.ok(listPage.includes('v-for="sub in airportSubscriptions"'));
+assert.ok(!listPage.includes('v-for="sub in proxyNodeStore.subscriptions"'));
+assert.ok(listPage.includes('已添加的机场订阅（{{ airportSubscriptions.length }}）'));
+assert.ok(listPage.includes('<ImportedProxyDialog'));
 assert.ok(listPage.includes("v-if=\"sub.kind !== 'content'\""));
 assert.ok(listPage.includes('@click="deleteSubscription(sub.id)"'));
 // ------------------------------------------------- 5. narrow-screen studio layout

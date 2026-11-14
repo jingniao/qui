@@ -524,6 +524,7 @@ stage=$(mktemp -d "$registry/staging.XXXXXXXX")
 # install.sh anyway.
 publishing_started=false
 cleanup() {
+  rm -f -- "$stage/uninstall"
   if [[ -n $publishing_temporary ]]; then rm -f -- "$publishing_temporary"; fi
   if $publishing_started; then
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
@@ -538,12 +539,12 @@ install -o root -g root -m 0600 -- "$binary" "$stage/program"
 verify_binary "$stage/program" "$digest"
 install -o root -g root -m 0600 -- "$packaged_service" "$stage/unit"
 unit_digest=$(sha256sum -- "$stage/unit"); unit_digest=${unit_digest%% *}
-if [[ $component == panel ]]; then
   # The terminal menu is a plain script: it is staged and published like the
   # unit, and deliberately not part of the fixed installed-manifest format that
   # the other scripts read by line number.
   [[ -f $root/linux/qui.sh && ! -L $root/linux/qui.sh ]] || fail 'Missing packaged terminal menu script.'
   install -o root -g root -m 0600 -- "$root/linux/qui.sh" "$stage/qui"
+if [[ $component == panel ]]; then
   # The web-UI update bridge: a path unit arms a oneshot unit, which runs the helper that
   # is the only thing allowed to run the updater on the panel's behalf. Staged and
   # published like the terminal menu, and likewise not part of the install record.
@@ -574,6 +575,8 @@ install -o root -g root -m 0600 -- "$service_library" "$stage/service-library"
 # recovers, and without a journal they do nothing at all.
 [[ -f $root/linux/update-recovery.sh && ! -L $root/linux/update-recovery.sh ]] || fail 'Missing packaged update recovery script.'
 install -o root -g root -m 0600 -- "$root/linux/update-recovery.sh" "$stage/update-recovery"
+[[ -f $root/linux/uninstall.sh && ! -L $root/linux/uninstall.sh ]] || fail 'Missing packaged uninstall script.'
+install -o root -g root -m 0600 -- "$root/linux/uninstall.sh" "$stage/uninstall"
 install -o root -g root -m 0600 -- "$packaged_recovery_service" "$stage/update-recovery-service"
 host_network_service_digest=''
 host_network_path_digest=''
@@ -713,7 +716,7 @@ fi
 publishing_started=true
 publish "$stage/program" "$target" root root 0755
 publish "$stage/unit" "$unit" root root "$service_mode"
-if [[ $component == panel ]]; then publish "$stage/qui" "$qui" root root 0755; fi
+publish "$stage/qui" "$qui" root root 0755
 publish "$stage/qui-update" "$update" root root 0755
 # /usr/local/lib/proxycontrol holds the init-system library and the boot-time
 # update recovery hook; it is created here so an install that is not run from an
@@ -721,6 +724,7 @@ publish "$stage/qui-update" "$update" root root 0755
 install -d -o root -g root -m 0755 /usr/local/lib/proxycontrol
 publish "$stage/service-library" "$library" root root 0644
 publish "$stage/update-recovery" "$recovery" root root 0755
+publish "$stage/uninstall" /usr/local/lib/proxycontrol/uninstall.sh root root 0755
 # The recovery runs before every service of both components, so its definition is
 # published together with them: the systemd unit (0644) or the OpenRC init script
 # (0755), which is the mode the component's own definition gets as well.
@@ -795,14 +799,16 @@ if [[ -n $host_network_service_digest ]]; then
     # every call names the units.
     systemctl enable "${host_network_path##*/}" "${host_network_service##*/}"
     systemctl start "${host_network_path##*/}"
-    # An installation upgraded from a release without the start-limit fix can
-    # have the oneshot unit in the failed state, so nothing has been applied
-    # since the path unit hit its limit. Replaying the retained file once is what
-    # a boot does (and what restarting the OpenRC watcher does) and the outcome
-    # goes to status.json for the Agent. --no-block keeps a helper failure - a
-    # rule the host rejects, for instance - from failing this install.
-    if systemctl is-failed --quiet "${host_network_service##*/}"; then
-      systemctl reset-failed "${host_network_service##*/}"
+    # Replay the retained file once, as a boot does (and as restarting the OpenRC
+    # watcher does): an installation upgraded from a release without the
+    # start-limit fix can have the oneshot unit in the failed state, and an
+    # updated helper has to write a fresh status.json, whose feature list tells
+    # the Agent what the new helper accepts (v1.5.5 extra exemptions). The
+    # helper rewrites the same rules, so the replay changes nothing else.
+    # --no-block keeps a helper failure - a rule the host rejects, for instance -
+    # from failing this install.
+    if [[ -f /var/lib/proxy-agent/host-network/desired.json ]]; then
+      systemctl reset-failed "${host_network_service##*/}" 2>/dev/null || true
       systemctl start --no-block "${host_network_service##*/}"
     fi
   else

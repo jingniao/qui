@@ -2,8 +2,9 @@
 // WireGuard endpoints of the user's published servers, with no inbound, route or
 // DNS section.
 //
-// The document is byte-identical to the pre-1.1 output (acceptance A1.1). The
-// official sing-box apps cannot import the fragment as a profile; a complete
+// Published and URL endpoints retain their legacy tags; content imports use
+// their current names. The official
+// sing-box apps cannot import the fragment as a profile; a complete
 // profile format would be a separate exporter (`sing-box-profile`), not built
 // yet.
 package singbox
@@ -36,6 +37,7 @@ func (Exporter) UserAgents() []string { return []string{"sing-box", "sfa/", "sfi
 func (Exporter) UsesRules() bool { return false }
 
 type outbound struct {
+	Obfs              *obfs      `json:"obfs,omitempty"`
 	Type              string     `json:"type"`
 	Tag               string     `json:"tag"`
 	Server            string     `json:"server"`
@@ -56,10 +58,16 @@ type outbound struct {
 	HopInterval       string     `json:"hop_interval,omitempty"`
 }
 
+type obfs struct {
+	Type     string `json:"type"`
+	Password string `json:"password"`
+}
+
 type transport struct {
-	Type        string `json:"type"`
-	Path        string `json:"path,omitempty"`
-	ServiceName string `json:"service_name,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Type        string            `json:"type"`
+	Path        string            `json:"path,omitempty"`
+	ServiceName string            `json:"service_name,omitempty"`
 }
 
 type tls struct {
@@ -101,9 +109,13 @@ type wireguardPeer struct {
 
 func (Exporter) Render(profile format.Profile) (format.Output, error) {
 	output := format.Output{}
+	var omissions proxy.OmissionWarnings
 	outbounds := []outbound{}
 	endpoints := []wireguardEndpoint{}
-	for _, endpoint := range profile.Proxies {
+	outboundIndices := []int{}
+	endpointIndices := []int{}
+	rendered := make([]bool, len(profile.Proxies))
+	for i, endpoint := range profile.Proxies {
 		if endpoint.DialerProxy != "" || endpoint.ClientChain != "" {
 			output.Warnings = append(output.Warnings, proxy.FormatWarning("sing-box", "Client chain omitted: format does not support client chains"))
 			continue
@@ -117,7 +129,9 @@ func (Exporter) Render(profile format.Profile) (format.Output, error) {
 			if err != nil {
 				return format.Output{}, err
 			}
-			endpoints = append(endpoints, wireguardEndpoint{Type: "wireguard", Tag: endpoint.Origin.Node.Name + "-" + endpoint.Origin.Ref, Address: addresses, PrivateKey: endpoint.Credential.Password, MTU: peer.MTU, Peers: []wireguardPeer{{Address: endpoint.Server, Port: endpoint.Port, PublicKey: peer.ServerPublicKey, AllowedIPs: []string{"0.0.0.0/0", "::/0"}, KeepAlive: keepAlive}}})
+			endpoints = append(endpoints, wireguardEndpoint{Type: "wireguard", Tag: outboundTag(endpoint), Address: addresses, PrivateKey: endpoint.Credential.Password, MTU: peer.MTU, Peers: []wireguardPeer{{Address: endpoint.Server, Port: endpoint.Port, PublicKey: peer.ServerPublicKey, AllowedIPs: []string{"0.0.0.0/0", "::/0"}, KeepAlive: keepAlive}}})
+			endpointIndices = append(endpointIndices, i)
+			rendered[i] = true
 			continue
 		}
 		if endpoint.Protocol == "shadowsocks" && proxy.SS2022(endpoint.Method) {
@@ -132,13 +146,22 @@ func (Exporter) Render(profile format.Profile) (format.Output, error) {
 		}
 		value, err := renderOutbound(endpoint)
 		if errors.Is(err, errUnrepresentable) {
-			output.Warnings = append(output.Warnings, proxy.FormatWarning("sing-box", "Endpoint omitted: client format cannot represent its security or transport settings; use a compatible URI client"))
+			omissions.Add(endpoint.Name, proxy.ClientFormatOmission(endpoint, "sing-box"))
 			continue
 		}
 		if err != nil {
 			return format.Output{}, err
 		}
 		outbounds = append(outbounds, value)
+		outboundIndices = append(outboundIndices, i)
+		rendered[i] = true
+	}
+	tags := resolveTags(profile.Proxies, rendered)
+	for j, i := range outboundIndices {
+		outbounds[j].Tag = tags[i]
+	}
+	for j, i := range endpointIndices {
+		endpoints[j].Tag = tags[i]
 	}
 	body, err := json.MarshalIndent(struct {
 		Outbounds []outbound          `json:"outbounds"`
@@ -148,6 +171,7 @@ func (Exporter) Render(profile format.Profile) (format.Output, error) {
 		return format.Output{}, err
 	}
 	output.Body = body
+	output.Warnings = append(output.Warnings, omissions.Warnings("sing-box")...)
 	return output, nil
 }
 
@@ -158,7 +182,7 @@ func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
 	if !proxy.ClientFormatSupportsSettings(endpoint, "sing-box") || (endpoint.TLS != nil && endpoint.TLS.Fingerprint != "") {
 		return outbound{}, errUnrepresentable
 	}
-	value := outbound{Type: endpoint.Protocol, Tag: fmt.Sprintf("%s-%s-%s", endpoint.Origin.Node.Name, endpoint.Origin.Ref, endpoint.Protocol), Server: endpoint.Server, ServerPort: endpoint.Port}
+	value := outbound{Type: endpoint.Protocol, Tag: outboundTag(endpoint), Server: endpoint.Server, ServerPort: endpoint.Port}
 	switch endpoint.Protocol {
 	case "http":
 		value.Username = endpoint.Credential.Username
@@ -186,6 +210,9 @@ func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
 		return outbound{}, errors.New("protocol requires additional sing-box peer configuration")
 	}
 	if q := endpoint.QUIC; q != nil {
+		if q.Obfs != "" {
+			value.Obfs = &obfs{Type: q.Obfs, Password: q.ObfsPassword}
+		}
 		value.UpMbps = q.UpMbps
 		value.DownMbps = q.DownMbps
 		value.CongestionControl = q.CongestionControl
@@ -206,7 +233,7 @@ func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
 		if endpoint.Reality != nil {
 			value.TLS.Reality = &reality{Enabled: true, PublicKey: endpoint.Reality.PublicKey, ShortID: endpoint.Reality.ShortID}
 		}
-		if endpoint.Protocol == "hysteria2" || endpoint.Protocol == "tuic" {
+		if endpoint.Protocol == "hysteria2" || endpoint.Protocol == "tuic" && len(value.TLS.ALPN) == 0 {
 			value.TLS.ALPN = []string{"h3"}
 		}
 		if pinned := pinnedCA(endpoint); pinned != "" {
@@ -221,6 +248,9 @@ func renderOutbound(endpoint proxy.Proxy) (outbound, error) {
 				return outbound{}, errUnrepresentable
 			}
 			value.Transport = &transport{Type: kind, Path: endpoint.Transport.Path, ServiceName: endpoint.Transport.ServiceName}
+			if endpoint.Transport.Host != "" {
+				value.Transport.Headers = map[string]string{"Host": endpoint.Transport.Host}
+			}
 		}
 	}
 	return value, nil

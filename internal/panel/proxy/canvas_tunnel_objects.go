@@ -173,6 +173,10 @@ func (r *Repository) LegacyCanvasObjects(ctx context.Context) ([]CanvasTunnelObj
 	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
 		return nil, err
 	}
+	return r.legacyCanvasObjectsReadOnly(ctx)
+}
+
+func (r *Repository) legacyCanvasObjectsReadOnly(ctx context.Context) ([]CanvasTunnelObject, error) {
 	rows, err := r.Database.QueryContext(ctx, `SELECT 'inbound',i.id,i.node_id,i.name,i.port FROM inbounds i WHERE (i.internal_relay=1 OR i.protocol='forward') AND NOT EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='inbound' AND o.object_id=i.id)
  UNION ALL SELECT 'outbound',b.id,b.node_id,b.name,0 FROM outbounds b WHERE b.target_inbound_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='outbound' AND o.object_id=b.id)
  UNION ALL SELECT 'chain',c.id,COALESCE(json_extract(c.node_ids_json,'$[0]'),''),c.name,0 FROM proxy_chains c WHERE NOT EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='chain' AND o.object_id=c.id) ORDER BY 1,2`)
@@ -194,7 +198,7 @@ func (r *Repository) LegacyCanvasObjects(ctx context.Context) ([]CanvasTunnelObj
 	if err = rows.Close(); err != nil {
 		return nil, err
 	}
-	tunnels, err := r.CanvasTunnels(ctx)
+	tunnels, err := r.canvasTunnelsReadOnly(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +290,14 @@ func (s *Service) DeleteCanvasTunnel(ctx context.Context, tunnelID string) error
 	if warnings := s.canvasRemoveStale(ctx, stale); len(warnings) > 0 {
 		return errors.New(strings.Join(warnings, "; "))
 	}
-	_, err = s.Repository.Database.ExecContext(ctx, "DELETE FROM canvas_tunnels WHERE id=?", tunnelID)
+	return deleteCanvasTunnelRow(ctx, s.Repository.Database, tunnelID)
+}
+
+// Call only after reference checks and removal of all owned objects. Accept a
+// transaction so complete scheme removal can delete the row atomically.
+func deleteCanvasTunnelRow(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, tunnelID string) error {
+	_, err := db.ExecContext(ctx, "DELETE FROM canvas_tunnels WHERE id=?", tunnelID)
 	return err
 }

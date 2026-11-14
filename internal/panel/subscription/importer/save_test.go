@@ -140,9 +140,8 @@ func TestSaveUnusablePasteReturnsResult(t *testing.T) {
 	}
 }
 
-// A refused paste on an existing source changes nothing. The result must say so: it
-// keeps the old cache/usable counts and the old success time, and it never reads like
-// a fetch that excluded the source.
+// Existing sources refuse batch replacement or a kind switch before analysis.
+// The response has no attempt result, and the source and its usable cache stay intact.
 func TestSaveRejectedPasteKeepsExistingSource(t *testing.T) {
 	for _, kind := range []string{"content", "url"} {
 		t.Run(kind, func(t *testing.T) {
@@ -170,48 +169,26 @@ func TestSaveRejectedPasteKeepsExistingSource(t *testing.T) {
 				}
 			}
 			grantImport(t, s, userID, key, "")
-			before := sourceRow(t, s, key)
-			// An all-unsupported paste is refused before any write.
+			before := identitySnapshot(t, s, key, true)
+			// Even an unsupported paste is rejected as a forbidden source operation.
 			w := saveHTTP(s, key, Input{Name: "existing", Interval: 60, Content: "vmess://unsupported.example.com:443"})
-			if w.Code != http.StatusUnprocessableEntity {
+			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status %d: %s", w.Code, w.Body.String())
 			}
-			code, message, result := errorResult(t, w)
-			if code != "import_no_entries" || message != resultMessage("import_paste_unchanged", nil) {
+			wantMessage := "单独导入不支持整批替换，请新增导入节点"
+			if kind == "url" {
+				wantMessage = "不能切换导入来源类型，请新增导入来源"
+			}
+			code, message, _ := errorResult(t, w)
+			if code != "import_invalid_input" || message != wantMessage {
 				t.Fatalf("error body: %s", w.Body.String())
 			}
-			if result.Outcome != "failed" || result.Code != "import_paste_unchanged" || result.Stage != stageParse {
-				t.Fatalf("rejected paste result: %+v", result)
-			}
-			// The analysed entry is reported, but nothing is claimed as imported, and
-			// the counts describe the cache the source still serves.
-			if result.Counts.Accepted != 0 || result.Counts.Total == nil || *result.Counts.Total != 1 ||
-				result.Counts.Rejected == nil || *result.Counts.Rejected != 1 {
-				t.Fatalf("rejected paste counts: %+v", result.Counts)
-			}
-			if result.Counts.Cached == nil || *result.Counts.Cached != 1 || result.Counts.Usable == nil || *result.Counts.Usable != 1 {
-				t.Fatalf("rejected paste lied about the cache: %+v", result.Counts)
-			}
-			if len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "unsupported_protocol" {
-				t.Fatalf("rejected paste reasons: %+v", result.Diagnostics)
-			}
-			// The attempt stamp only has to be a readable moment: two correct
-			// efforts can land inside one clock resolution, so it is never
-			// compared against the last success.
-			if result.LastSuccessAt == nil || *result.LastSuccessAt != before.LastSuccess || !validStamp(result.AttemptedAt) {
-				t.Fatalf("rejected paste changed the success time: %+v", result)
-			}
-			for _, claim := range []string{"已从订阅中排除", "已抓取"} {
-				if strings.Contains(result.Message, claim) {
-					t.Fatalf("a refused paste claimed %q: %s", claim, result.Message)
-				}
-			}
-			if raw, marshalErr := json.Marshal(result); marshalErr != nil || ValidateResult(raw) != nil {
-				t.Fatalf("rejected paste result is not panel-shaped: %+v %v", result, marshalErr)
+			if strings.Contains(w.Body.String(), `"result"`) {
+				t.Fatalf("a refused source operation claimed an attempt: %s", w.Body.String())
 			}
 			// The row, its cache and its source kind are untouched, so its endpoints
 			// still serve a subscription.
-			if after := sourceRow(t, s, key); sourceLine(after) != sourceLine(before) {
+			if after := identitySnapshot(t, s, key, true); after != before {
 				t.Fatalf("a refused paste changed the source: %+v -> %+v", before, after)
 			}
 			assertCache(t, s, key, 1, "kept")
@@ -220,25 +197,6 @@ func TestSaveRejectedPasteKeepsExistingSource(t *testing.T) {
 			}
 		})
 	}
-}
-
-// sourceRow is the one source row a refused paste must not change.
-func sourceRow(t *testing.T, s *Store, key string) Source {
-	t.Helper()
-	items, err := s.List(context.Background())
-	if err != nil || len(items) != 1 || items[0].ID != key {
-		t.Fatalf("source row: %+v %v", items, err)
-	}
-	return items[0]
-}
-
-// sourceLine renders the parts of a row a refused paste must leave alone.
-func sourceLine(p Source) string {
-	result := ""
-	if p.LatestResult != nil {
-		result = p.LatestResult.Code
-	}
-	return strings.Join([]string{p.Kind, p.Status, p.Error, p.LastFetch, p.LastSuccess, result}, "|")
 }
 
 // Invalid input is a 400 before any attempt, so the answer carries no result; an
@@ -282,8 +240,8 @@ func TestSaveRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-// A paste whose write fails reports 500 with the state the source keeps, and the
-// storage error text never reaches the response.
+// A new paste whose write fails reports 500, leaves no partial source or nodes,
+// and preserves existing sources. Storage error text never reaches the response.
 func TestSavePersistenceFailureKeepsState(t *testing.T) {
 	s, _, _ := storeFixture(t)
 	ctx := context.Background()
@@ -291,8 +249,9 @@ func TestSavePersistenceFailureKeepsState(t *testing.T) {
 	if err != nil || first.Outcome != "ok" {
 		t.Fatalf("first paste: %+v %v", first, err)
 	}
+	before := identitySnapshot(t, s, key, true)
 	abortOn(t, s, "reject_save_commit", "BEFORE UPDATE OF last_status ON subscription_sources WHEN NEW.last_status='ok'")
-	w := saveHTTP(s, key, Input{Name: "paste", Interval: 60, Content: "socks5://fixture:fixture@example.com:1081#second\nsocks5://fixture:fixture@example.com:1082#third"})
+	w := saveHTTP(s, "", Input{Name: "new paste", Interval: 60, Content: "socks5://fixture:fixture@example.com:1081#second\nsocks5://fixture:fixture@example.com:1082#third"})
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -303,11 +262,11 @@ func TestSavePersistenceFailureKeepsState(t *testing.T) {
 	if result.Outcome != "failed" || result.Stage != stageCommit || result.Counts.Accepted != 0 || result.Counts.Total != nil {
 		t.Fatalf("commit result: %+v", result)
 	}
-	if result.Counts.Cached == nil || *result.Counts.Cached != 1 || result.Counts.Usable == nil || *result.Counts.Usable != 1 {
-		t.Fatalf("commit result lied about the cache: %+v", result.Counts)
+	if result.Counts.Cached != nil || result.Counts.Usable != nil {
+		t.Fatalf("failed new source claimed an existing cache: %+v", result.Counts)
 	}
-	if result.LastSuccessAt == nil || *result.LastSuccessAt != first.AttemptedAt {
-		t.Fatalf("commit result changed the success time: %+v", result)
+	if result.LastSuccessAt != nil {
+		t.Fatalf("failed new source claimed a previous success: %+v", result)
 	}
 	for _, leaked := range []string{"fixture abort", "HTTP 0", "INSERT INTO", "no such"} {
 		if strings.Contains(w.Body.String(), leaked) {
@@ -320,4 +279,11 @@ func TestSavePersistenceFailureKeepsState(t *testing.T) {
 		t.Fatalf("failed commit changed the source: %+v %v", items, err)
 	}
 	assertCache(t, s, key, 1, "first")
+	if after := identitySnapshot(t, s, key, true); after != before {
+		t.Fatal("failed new paste changed the existing source or nodes")
+	}
+	var count int
+	if err = s.Database.QueryRow("SELECT count(*) FROM imported_proxies").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("failed new paste left partial nodes: %d %v", count, err)
+	}
 }

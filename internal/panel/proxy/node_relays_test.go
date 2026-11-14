@@ -93,6 +93,10 @@ type relayReceipt struct {
 	apply func() error
 }
 
+func (r *relayReceipt) GostRemovable(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (r *relayReceipt) PublishTunnels(_ context.Context, _, _ string, snapshots []NodeSnapshot) (CanvasPublishResult, error) {
 	status := "applied"
 	if err := r.apply(); err != nil {

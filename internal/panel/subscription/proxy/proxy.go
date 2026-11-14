@@ -45,6 +45,8 @@ type Origin struct {
 	Ref     string
 	Node    Ref
 	Labels  []string
+	// ImportKind is runtime metadata and must not change cached JSON or its hash.
+	ImportKind string `json:"-"`
 }
 
 // HasLabel reports whether the origin carries the given label.
@@ -79,6 +81,7 @@ type TLS struct {
 
 // Transport is the stream transport a client dials through.
 type Transport struct {
+	Host        string        `json:",omitempty"`
 	XHTTP       *XHTTPOptions `json:",omitempty"`
 	Type        string
 	Path        string
@@ -99,6 +102,8 @@ type XHTTPOptions struct{ Host, Path, Mode string }
 
 // QUIC is the QUIC tuning a Hysteria2 or TUIC client can carry.
 type QUIC struct {
+	Obfs              string `json:",omitempty"`
+	ObfsPassword      string `json:",omitempty"`
 	UpMbps            int
 	DownMbps          int
 	CongestionControl string

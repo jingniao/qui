@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"proxycontrol/internal/panel/auth"
@@ -27,9 +28,43 @@ func (h *Handler) Register(mux *http.ServeMux) {
 		{"DELETE /api/v1/subscription-sources/{id}", h.remove},
 		{"POST /api/v1/subscription-sources/{id}/refresh", h.refresh},
 		{"GET /api/v1/imported-proxies", h.items},
+		{"PUT /api/v1/imported-proxies/{id}", h.rename},
+		{"GET /api/v1/imported-proxies/{id}/deletion-preview", h.deletionPreview},
+		{"DELETE /api/v1/imported-proxies/{id}", h.deleteProxy},
 	} {
 		mux.Handle(route.pattern, h.Auth.Require(route.handler, true))
 	}
+}
+func (h *Handler) rename(w http.ResponseWriter, r *http.Request) {
+	var in RenameInput
+	if httpapi.Decode(w, r, &in) != nil {
+		httpapi.Error(w, 400, "invalid_json", "请求内容无效，请检查字段与 JSON 格式")
+		return
+	}
+	item, err := h.Store.Rename(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		var conflict *NameConflictError
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			httpapi.Error(w, 404, "import_node_missing", "导入节点不存在或已被删除")
+		case errors.Is(err, ErrRenameUnsupported):
+			httpapi.Error(w, 409, "import_rename_unsupported", "订阅连接的节点名称跟随机场，不能改名")
+		case errors.Is(err, ErrRenameStale):
+			httpapi.Error(w, 409, "stale", "节点已被修改，请刷新后重试")
+		case errors.Is(err, ErrRenameName):
+			httpapi.Error(w, 400, "import_invalid_name", "名称须为 1–200 UTF-8 字节，且不能包含控制字符")
+		case errors.As(err, &conflict):
+			httpapi.ErrorDetails(w, 409, "import_name_conflict", "节点名称已存在，请使用其他名称", map[string]any{"conflicts": conflict.Conflicts})
+		default:
+			slog.ErrorContext(r.Context(), "rename imported proxy", "id", r.PathValue("id"), "error", err)
+			httpapi.Error(w, 500, "import_rename_failed", "导入节点改名失败")
+		}
+		return
+	}
+	if !h.record(w, r, "导入节点改名", r.PathValue("id")) {
+		return
+	}
+	httpapi.JSON(w, 200, item)
 }
 func (h *Handler) fail(w http.ResponseWriter) {
 	httpapi.Error(w, 400, "import_unavailable", "导入操作失败，请检查输入与来源状态")

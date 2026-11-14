@@ -147,8 +147,10 @@ func (r *Repository) attachCredentials(t *CanvasTunnel) {
 	t.Credentials = &CanvasTunnelCredentials{Generation: material.Generation, ServerName: material.ServerName, NotAfter: material.NotAfter, Fingerprint: material.Fingerprint}
 }
 
+const canvasTunnelSchemesQuery = `SELECT DISTINCT s.id,s.name FROM canvas_schemes s,json_each(s.layout_json,'$.connections') c WHERE s.execution='server' AND json_extract(c.value,'$.tunnelId')=? ORDER BY s.id`
+
 func (r *Repository) tunnelSchemes(ctx context.Context, tunnelID string) ([]CanvasSchemeRef, error) {
-	rows, err := r.Database.QueryContext(ctx, `SELECT DISTINCT s.id,s.name FROM canvas_schemes s,json_each(s.layout_json,'$.connections') c WHERE s.execution='server' AND json_extract(c.value,'$.tunnelId')=? ORDER BY s.id`, tunnelID)
+	rows, err := r.Database.QueryContext(ctx, canvasTunnelSchemesQuery, tunnelID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +169,10 @@ func (r *Repository) CanvasTunnels(ctx context.Context) ([]CanvasTunnel, error) 
 	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
 		return nil, err
 	}
+	return r.canvasTunnelsReadOnly(ctx)
+}
+
+func (r *Repository) canvasTunnelsReadOnly(ctx context.Context) ([]CanvasTunnel, error) {
 	rows, err := r.Database.QueryContext(ctx, "SELECT "+r.tunnelProjection()+" FROM canvas_tunnels ORDER BY created_at,id")
 	if err != nil {
 		return nil, err

@@ -15,6 +15,13 @@ import (
 func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author string, users AccessReader) (CanvasPublishResult, error) {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
+	return s.publishCanvasScheme(ctx, schemeID, author, users, nil, "")
+}
+
+// publishCanvasScheme requires canvasMu. Quick creation retains undo until the
+// deployment accepts the publication; ordinary canvas publication keeps its
+// existing compensation boundary.
+func (s *Service) publishCanvasScheme(ctx context.Context, schemeID, author string, users AccessReader, undo *canvasUndo, requestID string) (CanvasPublishResult, error) {
 	if users == nil {
 		return CanvasPublishResult{}, errors.New("access reader required")
 	}
@@ -58,25 +65,42 @@ func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author stri
 		return CanvasPublishResult{}, err
 	}
 	if unchanged {
+		stale, err := s.canvasStaleObjects(ctx, plan)
+		if err != nil {
+			return CanvasPublishResult{}, err
+		}
 		if err := s.Repository.markTunnelPublication(ctx, scheme.ID, scheme.PublishedBatchID, plan); err != nil {
 			return CanvasPublishResult{}, err
 		}
-		return CanvasPublishResult{Nodes: []CanvasPublishNode{}, Warnings: []string{}}, nil
+		return CanvasPublishResult{Entries: canvasPublishedEntries(plan), Nodes: []CanvasPublishNode{}, Warnings: append([]string{}, stale.warnings...)}, nil
 	}
-	warnings, err := s.canvasApplyPlan(ctx, plan)
+	var warnings []string
+	if undo == nil {
+		warnings, err = s.canvasApplyPlan(ctx, plan)
+	} else {
+		warnings, err = s.canvasApplyPlanWithUndo(ctx, plan, undo)
+	}
 	if err != nil {
 		return CanvasPublishResult{}, err
+	}
+	if requestID != "" {
+		// Quick creation has exactly one entry. Record the unique request before
+		// handing snapshots to deployment, including when its response is lost.
+		if _, err := s.Repository.Database.ExecContext(ctx, "UPDATE canvas_entry_bindings SET request_id=? WHERE scheme_id=?", requestID, schemeID); err != nil {
+			return CanvasPublishResult{}, err
+		}
 	}
 	snapshots, err := s.canvasSnapshots(ctx, plan, users)
 	if err != nil {
 		return CanvasPublishResult{}, err
 	}
 	result, err := s.Deploy.PublishCanvas(ctx, "方案发布 "+scheme.Name, author, snapshots)
+	result.Entries = canvasPublishedEntries(plan)
 	if err != nil {
-		return CanvasPublishResult{}, err
+		return result, err
 	}
 	if err := s.Repository.markTunnelPublication(ctx, scheme.ID, result.BatchID, plan); err != nil {
-		return CanvasPublishResult{}, err
+		return result, err
 	}
 	for index := range result.Nodes {
 		if n, err := s.Nodes.Get(ctx, result.Nodes[index].NodeID); err == nil {
@@ -87,7 +111,21 @@ func (s *Service) PublishCanvasScheme(ctx context.Context, schemeID, author stri
 		result.Warnings = []string{}
 	}
 	result.Warnings = append(result.Warnings, warnings...)
+	result.Entries = canvasPublishedEntries(plan)
 	return result, nil
+}
+
+func canvasPublishedEntries(plan *canvasPlan) []CanvasPlanEntry {
+	entries := []CanvasPlanEntry{}
+	for _, entry := range plan.entries {
+		if entry.preview != nil {
+			published := *entry.preview
+			published.InboundID = entry.existing.ID
+			published.Route = entry.existing.DefaultOutbound
+			entries = append(entries, published)
+		}
+	}
+	return entries
 }
 
 func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
@@ -161,6 +199,7 @@ func (s *Service) canvasSnapshots(ctx context.Context, plan *canvasPlan, users A
 // canvasStale is what the previous publication of a scheme generated and the
 // drawing no longer describes.
 type canvasStale struct {
+	warnings  []string
 	chains    []Chain
 	outbounds []Outbound
 	inbounds  []Inbound
@@ -183,6 +222,17 @@ type canvasStale struct {
 //
 // The warnings it returns are shown on the canvas next to the node results.
 func (s *Service) canvasApplyPlan(ctx context.Context, plan *canvasPlan) ([]string, error) {
+	undo := &canvasUndo{}
+	warnings, err := s.canvasApplyPlanWithUndo(ctx, plan, undo)
+	if err != nil {
+		if undoErr := undo.run(ctx); undoErr != nil {
+			return nil, fmt.Errorf("%w（撤销本次修改时出错：%v，请检查方案生成的对象）", err, undoErr)
+		}
+	}
+	return warnings, err
+}
+
+func (s *Service) canvasApplyPlanWithUndo(ctx context.Context, plan *canvasPlan, undo *canvasUndo) ([]string, error) {
 	stale, err := s.canvasStaleObjects(ctx, plan)
 	if err != nil {
 		return nil, err
@@ -206,14 +256,11 @@ func (s *Service) canvasApplyPlan(ctx context.Context, plan *canvasPlan) ([]stri
 	if err := s.canvasCheckReferences(ctx, plan, stale); err != nil {
 		return nil, err
 	}
-	undo := &canvasUndo{}
 	warnings, err := s.canvasEnsure(ctx, plan, stale, undo)
 	if err != nil {
-		if undoErr := undo.run(ctx); undoErr != nil {
-			return nil, fmt.Errorf("%w（撤销本次修改时出错：%v，请检查方案生成的对象）", err, undoErr)
-		}
 		return nil, err
 	}
+	warnings = append(warnings, stale.warnings...)
 	return append(warnings, s.canvasRemoveStale(ctx, stale)...), nil
 }
 
@@ -238,7 +285,7 @@ func (s *Service) canvasStaleObjects(ctx context.Context, plan *canvasPlan) (*ca
 		if !related {
 			continue
 		}
-		other.Layout, e = s.canvasDependencyLayout(ctx, other.Layout, plan.tunnelIDs)
+		other.Layout, e = s.canvasDependencyLayout(ctx, other.ID, other.Layout, plan.tunnelIDs)
 		if e != nil {
 			return nil, e
 		}
@@ -311,6 +358,9 @@ func (s *Service) canvasStaleObjects(ctx context.Context, plan *canvasPlan) (*ca
 			stale.inbounds = append(stale.inbounds, inbound)
 			stale.inbound[inbound.ID] = true
 		}
+	}
+	if err := s.canvasRetainEntryRoutes(ctx, plan, stale); err != nil {
+		return nil, err
 	}
 	return stale, nil
 }

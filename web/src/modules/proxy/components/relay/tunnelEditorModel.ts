@@ -1,5 +1,5 @@
 import type { CanvasConnection, CanvasNodeInstance, RelayScheme } from '../../proxyNodes';
-import type { CanvasConnectionKind, CanvasTunnel, CanvasTunnelInput } from '../../api';
+import type { CanvasConnectionKind, CanvasPlanEntry, CanvasTunnel, CanvasTunnelInput } from '../../api';
 
 export interface PlanObject {
   kind: string;
@@ -35,6 +35,7 @@ export interface PlanTunnel {
 
 export interface TunnelPlan {
   ok: boolean;
+  entries?: CanvasPlanEntry[] | null;
   servers: PlanServer[] | null;
   connections: { id: string; status: string; message: string }[] | null;
   conflicts: PlanConflict[] | null;

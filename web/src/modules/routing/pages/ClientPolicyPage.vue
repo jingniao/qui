@@ -462,9 +462,9 @@
               <div class="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  disabled
+                  v-if="clientConfig.proxyGroups.length >= 2"
                   class="ios-btn-secondary px-2.5 py-1.5 inline-flex items-center gap-1.5"
-                  title="客户端延迟测量未接入"
+                  @click="openGroupOrder"
                 >
                   <svg
                     class="w-3.5 h-3.5 text-neutral-600"
@@ -474,7 +474,7 @@
                   >
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
-                  <span>延迟未知</span>
+                  <span>调整顺序</span>
                 </button>
 
                 <button
@@ -826,6 +826,16 @@
                 <!-- 层级 2：地区分组核心 (优选胜出看板 + 关键词匹配) -->
                 <!-- ============================================== -->
                 <div v-else-if="item.category === 'region'" class="space-y-3">
+                  <div class="space-y-2">
+                    <p class="text-sm font-medium">已配置成员</p>
+                    <div class="flex flex-wrap gap-2">
+                      <span v-for="(member, mIdx) in getGroupMembers(item.group)" :key="mIdx" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm border" :class="formatMemberBadge(member).color">
+                        <span>{{ formatMemberBadge(member).icon }} {{ formatMemberBadge(member).label }}</span>
+                        <button type="button" class="p-0.5 rounded-full hover:bg-black/[0.08]" :aria-label="'移除成员 ' + formatMemberBadge(member).label" @click="removeGroupMember(item.group, mIdx)">✕</button>
+                      </span>
+                    </div>
+                    <p class="text-xs text-neutral-500">移除仅取消显式成员引用；同一节点仍可能由 @all 或其他来源展开。</p>
+                  </div>
                   <!-- 节点网格与健康测速看板 -->
                   <div class="space-y-1.5">
                     <div class="flex items-center justify-between text-xs">
@@ -837,11 +847,11 @@
                       </div>
                     </div>
                     <div v-if="resolvedGroupName === item.group.name" class="text-xs text-neutral-500 space-y-1">
+                      <p>解析结果中的 DIRECT 可能来自显式配置的直连，也可能来自无可用成员时的空组策略；移除显式直连不会改变空组策略。</p>
                       <p v-if="previewError" class="text-red-600">{{ previewError }}</p>
                       <p v-if="previewResult?.context.user">使用用户 {{ previewResult.context.user.name }} 的授权生成{{ previewResult.context.autoSelected ? '（自动选择）' : '' }}</p>
                       <p v-if="previewResult?.diagnostic">{{ previewResult.diagnostic }}</p>
                       <p v-for="(warning, index) in previewResult?.warnings" :key="index">{{ warning.stage }} · {{ warning.ref }}：{{ warning.message }}</p>
-                      <p v-for="member in previewResult?.groups.find(group => group.name === item.group.name)?.members" :key="member.kind + member.name">{{ member.kind }} · {{ member.name }}</p>
                     </div>
 
                     <!-- 节点网格 -->
@@ -939,12 +949,13 @@
                       />
                       <button type="button" class="ios-btn-secondary" @click="loadCandidates">刷新候选</button>
                     </div>
-                    <button type="button" class="text-xs text-ios-blue" @click="resolveGroupMembers(item.group.name)">解析成员</button>
+                    <p>待添加候选：勾选后点击「添加所选端点」；取消勾选只取消待添加选择，不会删除已配置成员。</p>
                     <p v-if="candidateError" class="text-red-600">{{ candidateError }}</p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-auto">
                       <label v-for="endpoint in candidates.items" :key="endpoint.ref" class="flex items-center gap-2 p-2 rounded-lg border border-black/[0.06]">
                         <input v-model="selectedEndpoints" type="checkbox" :value="endpoint.ref" />
                         <span>{{ endpoint.name }} · {{ endpoint.protocol }} · {{ { inbound: '自建入站', relay: '中转', import: '导入' }[endpoint.originKind] }} · {{ endpoint.originName }}</span>
+                        <span v-if="getGroupMembers(item.group).includes('@endpoint:' + endpoint.ref)" class="text-xs text-ios-blue shrink-0">已在组内</span>
                       </label>
                     </div>
                   </div>
@@ -1010,6 +1021,27 @@
                       >
                         🚀 DIRECT
                       </button>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-3 space-y-2">
+                  <button type="button" class="ios-btn-secondary" @click="resolveGroupMembers(item.group.name)">解析成员</button>
+                  <div v-if="resolvedGroupName === item.group.name" class="space-y-2 text-sm">
+                    <p v-if="previewError" class="text-ios-red">{{ previewError }}</p>
+                    <template v-if="item.category !== 'region'">
+                      <p v-for="(warning, index) in previewResult?.warnings" :key="index" class="text-xs text-ios-tertiary">{{ warning.stage }} · {{ warning.ref }}：{{ warning.message }}</p>
+                    </template>
+                    <div v-for="member in previewResult?.groups.find(group => group.name === item.group.name)?.members" :key="member.kind + member.name" class="flex flex-wrap items-center gap-2">
+                      <span>{{ member.kind }} · {{ member.name }}</span>
+                      <button v-if="canExcludeEndpoint(item.group, member)" type="button" class="ios-btn-secondary" @click="excludeGroupEndpoint(item.group, member)">从本组排除</button>
+                    </div>
+                  </div>
+                  <div v-if="item.group.excludeEndpoints?.length" class="space-y-2 text-sm">
+                    <h4 class="text-base font-semibold leading-normal">已排除</h4>
+                    <p class="text-xs text-ios-tertiary">仅排除动态来源中的节点，保存后生效；显式成员仍保留。</p>
+                    <div v-for="ref in item.group.excludeEndpoints" :key="ref" class="flex flex-wrap items-center gap-2">
+                      <span class="break-all">{{ endpointDisplayName(ref) }}</span>
+                      <button type="button" class="ios-btn-secondary" @click="restoreGroupEndpoint(item.group, ref)">恢复</button>
                     </div>
                   </div>
                 </div>
@@ -1443,7 +1475,10 @@
           <!-- 模块 4：DNS 设置 (DNS) -->
           <div v-else-if="activeModule === 'dns'" class="space-y-6">
             <div class="border-b border-black/[0.06] pb-3">
-              <h3 class="text-neutral-900 text-base font-semibold leading-normal">DNS 设置 (DNS Resolvers)</h3>
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="text-neutral-900 text-base font-semibold leading-normal">DNS 设置 (DNS Resolvers)</h3>
+                <button type="button" class="ios-btn-secondary px-3 py-2" @click="applyRecommendedDns">套用推荐 DNS</button>
+              </div>
               <p class="text-xs text-neutral-500 mt-0.5">dns 控制域名如何解析，例如使用哪些 DNS 服务器、是否启用 Fake-IP，以及是否为不同域名指定不同解析方式。</p>
             </div>
 
@@ -1553,6 +1588,40 @@
                 </button>
               </div>
             </div>
+
+            <template v-if="clientConfig.extra.dns.enable">
+              <p v-if="clientConfig.extra.dns.fallback.length && !clientConfig.extra.dns.fallbackFilter" class="text-sm text-amber-700">设置了 fallback 但没有 fallback 过滤，境外域名可能解析失败；建议点「套用推荐 DNS」。</p>
+              <div v-for="field in dnsAdvancedFields.filter(item => !filterListKeys.includes(item.key))" :key="field.key" class="panel-card p-5 space-y-3">
+                <h4 class="text-base font-semibold">{{ field.label }}</h4>
+                <div class="flex gap-2">
+                  <input v-model="dnsAdvancedInputs[field.key]" class="form-input-base flex-1" @keyup.enter="addAdvancedDns(field.key)" />
+                  <button type="button" class="ios-btn-secondary px-3 py-2" @click="addAdvancedDns(field.key)">添加</button>
+                </div>
+                <div v-for="(value, index) in dnsAdvancedList(field.key)" :key="index" class="flex justify-between text-sm">
+                  <span class="font-mono">{{ value }}</span>
+                  <button type="button" class="ios-btn-secondary" @click="removeAdvancedDns(field.key, index)">移除</button>
+                </div>
+              </div>
+              <div class="panel-card p-5 space-y-3">
+                <h4 class="text-base font-semibold">fallback 过滤</h4>
+                <label class="flex items-center gap-2 text-sm"><input type="checkbox" :checked="!!clientConfig.extra.dns.fallbackFilter" @change="toggleFallbackFilter" />启用 fallback 过滤</label>
+                <template v-if="clientConfig.extra.dns.fallbackFilter">
+                  <label class="flex items-center gap-2 text-sm"><input v-model="clientConfig.extra.dns.fallbackFilter.geoip" type="checkbox" @change="clientConfig.extra.dns.fallbackFilter.geoipCode = undefined; markDirty()" />geoip</label>
+                  <label v-if="clientConfig.extra.dns.fallbackFilter.geoip" class="block text-sm">国家代码（两位大写）<input v-model="clientConfig.extra.dns.fallbackFilter.geoipCode" class="form-input-base" @input="markDirty" /></label>
+                  <div v-for="field in dnsAdvancedFields.filter(item => filterListKeys.includes(item.key))" :key="field.key" class="space-y-2">
+                    <span class="text-sm font-medium">{{ field.label }}</span>
+                    <div class="flex gap-2">
+                      <input v-model="dnsAdvancedInputs[field.key]" class="form-input-base flex-1" @keyup.enter="addAdvancedDns(field.key)" />
+                      <button type="button" class="ios-btn-secondary px-3 py-2" @click="addAdvancedDns(field.key)">添加</button>
+                    </div>
+                    <div v-for="(value, index) in dnsAdvancedList(field.key)" :key="index" class="flex justify-between text-sm">
+                      <span class="font-mono">{{ value }}</span>
+                      <button type="button" class="ios-btn-secondary" @click="removeAdvancedDns(field.key, index)">移除</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
 
             <!-- Fallback 回退服务器列表 -->
             <div class="panel-card p-5 space-y-4 border border-black/[0.06]">
@@ -1860,6 +1929,27 @@
           </div>
         </div>
       </div>
+    </AppDialog>
+
+    <AppDialog v-model="groupOrderOpen" title="调整顺序" description="确定后还需保存策略才会生效" max-width="xl">
+      <button type="button" class="ios-btn-secondary" @click="recommendOrder">推荐顺序</button>
+      <div v-for="(group, index) in orderedGroups" :key="group.name"
+        draggable="true" class="flex flex-wrap items-center gap-2 rounded-xl border border-black/[0.08] p-3 text-sm cursor-move"
+        @dragstart="startGroupDrag($event, index)" @dragend="dragGroupIndex = null"
+        @dragover.prevent @drop.prevent="dropGroup(index)">
+        <span class="text-xs text-ios-tertiary">{{ index + 1 }}</span>
+        <span class="flex-1 min-w-0 break-words">{{ group.name }}</span>
+        <div class="flex flex-wrap gap-2">
+          <button v-if="index > 0" type="button" class="ios-btn-secondary text-xs" @click="reorderGroup(index, index - 1)">上移</button>
+          <button v-if="index < orderedGroups.length - 1" type="button" class="ios-btn-secondary text-xs" @click="reorderGroup(index, index + 1)">下移</button>
+          <button v-if="index > 0" type="button" class="ios-btn-secondary text-xs" @click="reorderGroup(index, 0)">置顶</button>
+          <button v-if="index < orderedGroups.length - 1" type="button" class="ios-btn-secondary text-xs" @click="reorderGroup(index, orderedGroups.length - 1)">置底</button>
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="ios-dialog-btn-secondary" @click="groupOrderOpen = false">取消</button>
+        <button type="button" class="ios-dialog-btn-primary" @click="confirmGroupOrder">确定</button>
+      </template>
     </AppDialog>
 
     <!-- Rule Edit / Create Drawer -->
@@ -2272,6 +2362,7 @@ import FormDrawer from '../../../components/FormDrawer.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import ServiceSetEditor from '../components/ServiceSetEditor.vue';
 import AppDialog from '../../../components/AppDialog.vue';
+import { recommendGroupOrder } from '../groupOrder';
 import AppSelect, { type SelectOption } from '../../../components/AppSelect.vue';
 
 // 已建好的策略配置接口与持久化 Key
@@ -2832,6 +2923,11 @@ async function loadCandidates() {
   }
 }
 
+function endpointDisplayName(ref: string): string {
+  const endpoint = candidates.value.items.find(item => '@endpoint:' + item.ref === ref);
+  return endpoint?.name || ref;
+}
+
 function setGroupKeywords(group: ClientProxyGroup, field: 'includeKeywords' | 'excludeKeywords', value: string) {
   group[field] = value.split(/[,，]+/).map(keyword => keyword.trim()).filter(Boolean);
   markDirty();
@@ -2872,8 +2968,7 @@ function formatExitLabel(name: string): { icon: string; title: string } {
   if (name === 'FALLBACK') return { icon: '🛡️', title: 'FALLBACK (故障转移)' };
   if (name === 'PROXY') return { icon: '🎯', title: 'PROXY (自选总控)' };
   if (name.startsWith('@endpoint:')) {
-    const endpoint = candidates.value.items.find(item => '@endpoint:' + item.ref === name);
-    return { icon: '🔗', title: endpoint?.name || name };
+    return { icon: '🔗', title: endpointDisplayName(name) };
   }
   if (name.startsWith('@nodeGroup:')) {
     const id = name.replace('@nodeGroup:', '');
@@ -3210,6 +3305,38 @@ function moveGroup(index: number, delta: number) {
   markDirty();
 }
 
+const groupOrderOpen = ref(false);
+const orderedGroups = ref<ClientProxyGroup[]>([]);
+const dragGroupIndex = ref<number | null>(null);
+function openGroupOrder() {
+  orderedGroups.value = [...clientConfig.value.proxyGroups];
+  dragGroupIndex.value = null;
+  groupOrderOpen.value = true;
+}
+function reorderGroup(from: number, to: number) {
+  const [group] = orderedGroups.value.splice(from, 1);
+  orderedGroups.value.splice(to, 0, group);
+}
+function startGroupDrag(event: DragEvent, index: number) {
+  dragGroupIndex.value = index;
+  event.dataTransfer!.effectAllowed = 'move';
+  event.dataTransfer!.setData('text/plain', String(index));
+}
+function dropGroup(index: number) {
+  if (dragGroupIndex.value !== null) reorderGroup(dragGroupIndex.value, index);
+  dragGroupIndex.value = null;
+}
+function recommendOrder() {
+  orderedGroups.value = recommendGroupOrder(orderedGroups.value, groupCategories.value, clientConfig.value.rules);
+}
+function confirmGroupOrder() {
+  if (orderedGroups.value.some((group, index) => group.name !== clientConfig.value.proxyGroups[index].name)) {
+    clientConfig.value.proxyGroups = [...orderedGroups.value];
+    markDirty();
+  }
+  groupOrderOpen.value = false;
+}
+
 function promptDeleteGroup(index: number) {
   deletingGroupIndex = index;
   const targetGroup = clientConfig.value.proxyGroups[index];
@@ -3251,6 +3378,10 @@ function getGroupMembers(group: { proxies?: string }): string[] {
 
 function removeGroupMember(group: { proxies?: string }, memberIndex: number) {
   const current = getGroupMembers(group);
+  if (current.length <= 1) {
+    showToast('每个策略组至少保留一个成员', 'info');
+    return;
+  }
   current.splice(memberIndex, 1);
   group.proxies = formatGroupMembers(current);
   markDirty();
@@ -3262,6 +3393,8 @@ function addGroupMemberDirect(group: { proxies?: string }, member: string) {
     current.push(member);
     group.proxies = current.join(', ');
     markDirty();
+  } else {
+    showToast('已添加', 'info');
   }
 }
 
@@ -3273,6 +3406,14 @@ function addCustomMember(group: { proxies?: string }, index: number) {
 }
 
 function formatMemberBadge(member: string) {
+  if (member.startsWith('@endpoint:')) {
+    return {
+      icon: '🔗',
+      label: endpointDisplayName(member),
+      color: 'bg-blue-50 text-blue-700 border-blue-200/80',
+      desc: '单个节点'
+    };
+  }
   if (member === '@all') {
     return {
       icon: '🌐',
@@ -3960,6 +4101,53 @@ function resetRuleFilters() {
 }
 
 // DNS 设置辅助
+const dnsAdvancedFields = [
+  { key: 'defaultNameservers', label: '默认 DNS（解析 DoH 主机名，只填 IP）' },
+  { key: 'proxyServerNameservers', label: '节点域名解析 DNS' },
+  { key: 'fakeIpFilter', label: 'fake-ip 过滤（不分配假地址的域名）' },
+  { key: 'ipcidr', label: 'fallback 过滤 IP 段列表' },
+  { key: 'domain', label: 'fallback 过滤域名列表' }
+] as const;
+type AdvancedDnsKey = typeof dnsAdvancedFields[number]['key'];
+// The fallback-filter lists live inside the filter block, shown only when it is on.
+const filterListKeys: readonly AdvancedDnsKey[] = ['ipcidr', 'domain'];
+const dnsAdvancedInputs = ref<Record<AdvancedDnsKey, string>>({ defaultNameservers: '', proxyServerNameservers: '', fakeIpFilter: '', ipcidr: '', domain: '' });
+function dnsAdvancedList(key: AdvancedDnsKey): string[] {
+  const dns = clientConfig.value.extra.dns;
+  return (key === 'ipcidr' || key === 'domain' ? dns.fallbackFilter?.[key] : dns[key]) || [];
+}
+function addAdvancedDns(key: AdvancedDnsKey) {
+  const value = dnsAdvancedInputs.value[key].trim();
+  if (!value) return;
+  const dns = clientConfig.value.extra.dns;
+  const owner = key === 'ipcidr' || key === 'domain' ? (dns.fallbackFilter ||= { geoip: false }) : dns;
+  const list = [...dnsAdvancedList(key)];
+  if (!list.includes(value)) list.push(value);
+  Object.assign(owner, { [key]: list });
+  dnsAdvancedInputs.value[key] = '';
+  markDirty();
+}
+function removeAdvancedDns(key: AdvancedDnsKey, index: number) {
+  dnsAdvancedList(key).splice(index, 1);
+  markDirty();
+}
+function toggleFallbackFilter() {
+  const dns = clientConfig.value.extra.dns;
+  if (dns.fallbackFilter) delete dns.fallbackFilter;
+  else dns.fallbackFilter = { geoip: false };
+  markDirty();
+}
+async function applyRecommendedDns() {
+  try {
+    const { recommendedDns } = await clientPolicyAPI.presets();
+    if (!recommendedDns) throw new Error('未取得推荐 DNS');
+    clientConfig.value.extra.dns = JSON.parse(JSON.stringify(recommendedDns));
+    markDirty();
+    showToast('已套用推荐 DNS，保存后生效');
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '获取推荐 DNS 失败', 'error');
+  }
+}
 const dnsNameserverInput = ref('');
 const dnsFallbackInput = ref('');
 
@@ -4336,6 +4524,25 @@ async function resolveGroupMembers(name: string) {
   await loadPreview();
 }
 
+function canExcludeEndpoint(group: ClientProxyGroup, member: { kind: string; ref?: string }): boolean {
+  return member.kind === 'proxy' && !!member.ref
+    && !getGroupMembers(group).includes('@endpoint:' + member.ref)
+    && !group.excludeEndpoints?.includes('@endpoint:' + member.ref);
+}
+
+function excludeGroupEndpoint(group: ClientProxyGroup, member: { kind: string; ref?: string }) {
+  if (!canExcludeEndpoint(group, member)) return;
+  group.excludeEndpoints = [...(group.excludeEndpoints || []), '@endpoint:' + member.ref];
+  markDirty();
+}
+
+function restoreGroupEndpoint(group: ClientProxyGroup, ref: string) {
+  const remaining = group.excludeEndpoints!.filter(value => value !== ref);
+  if (remaining.length) group.excludeEndpoints = remaining;
+  else delete group.excludeEndpoints;
+  markDirty();
+}
+
 watch(activeModule, (mod) => {
   if (mod === 'preview') {
     loadPreview();
@@ -4353,7 +4560,7 @@ function copyConfig() {
 }
 
 // 加载初始数据
-async function load() {
+async function loadConfiguration() {
   try {
     if (isOwner.value) {
       await loadSavedPolicies();
@@ -4370,6 +4577,9 @@ async function load() {
   } catch (e) {
     showToast('载入客户端策略失败: ' + (e as Error).message, 'error');
   }
+}
+
+async function loadChoices() {
   try {
     const [presetsResult, setsResult, nodesResult, groupsResult] = await Promise.all([
       clientPolicyAPI.presets(),
@@ -4384,10 +4594,12 @@ async function load() {
   } catch (e) {
     showToast('载入规则集与节点选择项失败: ' + (e as Error).message, 'error');
   }
-  if (isOwner.value) {
-    await loadCandidates();
-  }
+
 }
 
-onMounted(load);
+onMounted(() => {
+  void loadConfiguration();
+  void loadChoices();
+  if (isOwner.value) void loadCandidates();
+});
 </script>

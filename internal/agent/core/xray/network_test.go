@@ -14,6 +14,38 @@ import (
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
+func TestOutboundSourceOverrides(t *testing.T) {
+	for _, tc := range []struct{ name, ip, iface, serverIP, serverIface, wantIP, wantIface string }{
+		{"ipv4", "192.0.2.1", "", "", "", "192.0.2.1", ""},
+		{"ipv6", "2001:db8::1", "", "", "", "2001:db8::1", ""},
+		{"inherit_interface", "192.0.2.1", "", "192.0.2.2", "eth0", "192.0.2.1", "eth0"},
+		{"inherit_ip", "", "eth1", "192.0.2.2", "eth0", "192.0.2.2", "eth1"},
+		{"inherit_both", "", "", "192.0.2.2", "eth0", "192.0.2.2", "eth0"},
+		{"unbound", "", "", "", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := desiredstate.State{Network: &desiredstate.Network{OutboundSourceIP: tc.serverIP, OutboundInterface: tc.serverIface}, Outbounds: []desiredstate.Outbound{{ID: "one", SourceIP: tc.ip, SourceInterface: tc.iface}, {ID: "two", SourceIP: "192.0.2.3"}}}
+			doc := configDocument{Outbounds: []outboundConfig{{Tag: "one", sourceID: "one", Protocol: "freedom"}, {Tag: "_group_pool_000_", sourceID: "two", Protocol: "freedom"}, {Tag: "block", Protocol: "blackhole"}}}
+			if err := applyOutboundSource(&doc, state); err != nil {
+				t.Fatal(err)
+			}
+			first := doc.Outbounds[0]
+			if first.SendThrough != tc.wantIP {
+				t.Fatalf("source = %q, want %q", first.SendThrough, tc.wantIP)
+			}
+			if tc.wantIface != "" && (first.Stream == nil || first.Stream.Sockopt.Interface != tc.wantIface) {
+				t.Fatal("interface not inherited")
+			}
+			if tc.wantIP != "" && first.Settings.(map[string]any)["domainStrategy"] != familyStrategy(tc.wantIP) {
+				t.Fatal("wrong family strategy")
+			}
+			if doc.Outbounds[1].SendThrough != "192.0.2.3" || doc.Outbounds[2].SendThrough != "" {
+				t.Fatal("member or block source mismatch")
+			}
+		})
+	}
+}
+
 // wgTestSecret is the fixed WireGuard private key the source-address scenarios
 // render, so the derived public key and the golden files are stable.
 const wgTestSecret = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="

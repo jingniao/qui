@@ -39,7 +39,8 @@
 import { reactive, ref, watch } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import { groupAPI, freshGroup, type GroupInput, type NodeGroup } from '../../nodes/groupsApi';
-import { groupInput, isUserGroup } from '../lineGroups';
+import { groupInput, isUserGroup, assertValidImportMembers } from '../lineGroups';
+import { proxyNodeStore } from '../proxyNodes';
 
 const props = defineProps<{ modelValue: boolean; group: NodeGroup | null }>();
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; saved: [group: NodeGroup] }>();
@@ -64,6 +65,7 @@ async function save() {
   saving.value = true;
   try {
     const latest = props.group ? groupInput(await freshGroup(props.group.id)) : defaults();
+    assertValidImportMembers(latest.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
     const result = await groupAPI.save(props.group?.id || null, {
       ...latest, name: form.name.trim(), purpose: form.purpose, enabled: form.enabled, remark: form.remark,
       subscriptionVisible: isUserGroup(form) && form.subscriptionVisible

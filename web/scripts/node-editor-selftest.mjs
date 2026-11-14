@@ -690,8 +690,11 @@ const page = readFileSync(new URL('../src/modules/proxy/pages/ProxyNodeListPage.
 for (const action of ['openCreateNodeModal', 'openEditNode', 'deleteNode', 'handleAddRelay']) {
   const buttons = [...page.matchAll(/<button\b[^>]*>/g)].map(m => m[0]).filter(tag => tag.includes('@click=') && tag.includes(action));
   assert.ok(buttons.length, action + ' has a visible entry');
-  assert.ok(buttons.every(tag => /v-if="isOwner/.test(tag)), action + ' must be Owner-only');
+  // 添加中转 is gated by canAddRelay(), whose first check is the Owner role.
+  assert.ok(buttons.every(tag => /v-if="isOwner/.test(tag) || action === 'handleAddRelay' && /v-if="canAddRelay\(/.test(tag)), action + ' must be Owner-only');
 }
+const relayActions = readFileSync(new URL('../src/modules/proxy/useNodeRelayActions.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+assert.match(relayActions, /function canAddRelay\([^)]*\): boolean \{\n  if \(!isOwner\.value\) return false;/, 'canAddRelay must start with the Owner check');
 assert.match(page, /<PageHeader[\s\S]*title="节点配置"/);
 assert.match(page, /<NodeEditorDrawer/);
 const hash = value => createHash('sha256').update(value).digest('hex');

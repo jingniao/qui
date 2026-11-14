@@ -16,6 +16,13 @@ import (
 // an object the previous publication created.
 func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *canvasStale, undo *canvasUndo) ([]string, error) {
 	warnings := []string{}
+	for _, edge := range plan.edges {
+		if edge.upgradeOutbound.ID != "" {
+			if err := s.canvasUpgradeTLS(ctx, edge, undo); err != nil {
+				return warnings, err
+			}
+		}
+	}
 	for index, input := range plan.forwards {
 		existing, err := s.Repository.canvasInboundNamed(ctx, input.NodeID, input.Name)
 		if err != nil && !errors.Is(err, ErrNotFound) {
@@ -171,6 +178,15 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 	}
 	for index := range plan.entries {
 		entry := &plan.entries[index]
+		if entry.binding != nil {
+			if entry.edge == nil && entry.chain == nil && entry.finalOutbound == "" {
+				continue
+			}
+			if err := s.canvasEnsureEntry(ctx, entry, undo); err != nil {
+				return warnings, err
+			}
+			continue
+		}
 		current := entry.existing.DefaultOutbound
 		target := current
 		switch {

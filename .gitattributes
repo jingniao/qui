@@ -6,3 +6,5 @@ internal/agent/identity/testdata/store_write2/** -text
 # The subscription format fixtures are compared byte for byte against what the
 # exporters render, so their line endings must survive a checkout.
 internal/panel/subscription/testdata/** -text
+# The embedded IP-to-country table is generated binary data (scripts/geoipgen).
+internal/panel/geoip/country.bin.gz binary

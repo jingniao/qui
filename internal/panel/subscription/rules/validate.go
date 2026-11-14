@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,6 +152,22 @@ func Validate(ctx context.Context, template Template, lookup Lookup) error {
 			return fieldError(field+".members", "策略组需要 1 到 %d 个成员", MaxMembers)
 		}
 		seen := map[string]bool{}
+		if len(group.ExcludeEndpoints) > MaxMembers {
+			return fieldError(field+".excludeEndpoints", "排除端点最多 %d 个", MaxMembers)
+		}
+		for _, ref := range group.ExcludeEndpoints {
+			if seen[ref] {
+				return fieldError(field+".excludeEndpoints", "排除端点 %q 重复", ref)
+			}
+			seen[ref] = true
+			if !strings.HasPrefix(ref, MemberEndpoint) {
+				return fieldError(field+".excludeEndpoints", "无效的端点引用")
+			}
+			if err := validateMember(ctx, ref, group.Name, groups, lookup); err != nil {
+				return fieldError(field+".excludeEndpoints", "%s", err.Error())
+			}
+		}
+		seen = map[string]bool{}
 		for _, member := range group.Members {
 			if seen[member] {
 				return fieldError(field+".members", "成员 %q 重复", member)
@@ -250,6 +267,9 @@ func validateClient(client Client) error {
 }
 
 func validateDNS(dns DNS) error {
+	if err := validateDNSExtras(dns); err != nil {
+		return err
+	}
 	if !dns.Enable && len(dns.Nameservers) == 0 && len(dns.Fallback) == 0 && dns.EnhancedMode == "" {
 		return nil
 	}
@@ -270,6 +290,65 @@ func validateDNS(dns DNS) error {
 		}
 	}
 	return nil
+}
+
+// dnsNamePattern accepts a mihomo DNS name pattern: a host name whose labels
+// may be "*" (one label) or start with "+." (the name and its subdomains).
+var dnsNamePattern = regexp.MustCompile(`^(\+\.)?([A-Za-z0-9_*-]+\.)*[A-Za-z0-9_*-]+$`)
+
+// validateDNSExtras checks the mihomo-only DNS fields of v1.5.5.
+func validateDNSExtras(dns DNS) error {
+	for _, server := range dns.DefaultNameservers {
+		if _, err := netip.ParseAddr(server); err != nil {
+			return fieldError("dns.defaultNameservers", "%q：必须是 IP 地址", server)
+		}
+	}
+	if len(dns.DefaultNameservers) > MaxResolvers || len(dns.ProxyServerNameservers) > MaxResolvers {
+		return fieldError("dns", "最多 %d 个服务器", MaxResolvers)
+	}
+	for _, server := range dns.ProxyServerNameservers {
+		if err := validateResolver(server); err != nil {
+			return fieldError("dns.proxyServerNameservers", "%q：%s", server, err.Error())
+		}
+	}
+	names := map[string][]string{"dns.fakeIpFilter": dns.FakeIPFilter}
+	if filter := dns.FallbackFilter; filter != nil {
+		names["dns.fallbackFilter.domain"] = filter.Domain
+		if filter.GeoIP != (filter.GeoIPCode != "") || (filter.GeoIPCode != "" && !geoIPCode.MatchString(filter.GeoIPCode)) {
+			return fieldError("dns.fallbackFilter.geoipCode", "启用 geoip 时须填写两位大写国家代码，未启用时须留空")
+		}
+		if len(filter.IPCIDR) > MaxDNSNames {
+			return fieldError("dns.fallbackFilter.ipcidr", "最多 %d 项", MaxDNSNames)
+		}
+		for _, prefix := range filter.IPCIDR {
+			if _, err := netip.ParsePrefix(prefix); err != nil {
+				return fieldError("dns.fallbackFilter.ipcidr", "%q：必须是 CIDR", prefix)
+			}
+		}
+	}
+	for field, list := range names {
+		if len(list) > MaxDNSNames {
+			return fieldError(field, "最多 %d 项", MaxDNSNames)
+		}
+		for _, name := range list {
+			if len(name) > 253 || !dnsNamePattern.MatchString(name) {
+				return fieldError(field, "%q：必须是域名或通配写法（*.lan、+.local）", name)
+			}
+		}
+	}
+	return nil
+}
+
+var geoIPCode = regexp.MustCompile(`^[A-Z]{2}$`)
+
+// DNSFallbackWarning reports a DNS section whose fallback servers are used
+// without a fallback-filter: mihomo then replaces every foreign answer with the
+// fallback one, and those servers are often unreachable directly.
+func DNSFallbackWarning(dns DNS) string {
+	if dns.Enable && len(dns.Fallback) > 0 && dns.FallbackFilter == nil {
+		return "DNS 设置了 fallback 但没有 fallback-filter，境外域名可能解析失败；建议在客户端策略里套用推荐 DNS"
+	}
+	return ""
 }
 
 // validateResolver accepts a bare IP address (plain UDP) or a URL whose scheme
@@ -318,9 +397,16 @@ func validateMember(ctx context.Context, member, self string, groups map[string]
 			}
 		case "import":
 			source, key, _ := strings.Cut(rest, ":")
-			name, protocol, found := strings.Cut(key, "|")
-			if validID(source) && found && name != "" && protocol != "" && len(key) <= 1024 && printable(key) {
-				return nil
+			if validID(source) {
+				// A URL name can contain pipes, colons or an id: prefix.
+				// Its final |protocol suffix distinguishes it from a stable ID.
+				if separator := strings.LastIndexByte(key, '|'); separator >= 0 {
+					if separator > 0 && separator < len(key)-1 && len(key) <= 1024 && printable(key) {
+						return nil
+					}
+				} else if id, found := strings.CutPrefix(key, "id:"); found && validID(id) {
+					return nil
+				}
 			}
 		}
 		return fmt.Errorf("无效的端点引用")

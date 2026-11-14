@@ -382,6 +382,15 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateNodeMetaReset(ctx, database); err != nil {
 		return err
 	}
+	if err := validateNodeTags(ctx, database); err != nil {
+		return err
+	}
+	if err := validateOutboundSource(ctx, database); err != nil {
+		return err
+	}
+	if err := validateCanvasEntryBindings(ctx, database); err != nil {
+		return err
+	}
 	if err := validateNodeLatencyTargets(ctx, database); err != nil {
 		return err
 	}
@@ -619,6 +628,9 @@ func validateContents(ctx context.Context, work string) error {
 		return err
 	}
 	if err := validateAgentUpdates(ctx, database); err != nil {
+		return err
+	}
+	if err := validateImportIdentity(ctx, database, configurationVault); err != nil {
 		return err
 	}
 	return nil

@@ -40,7 +40,11 @@ func TestDatabaseRecoveryPreservesImportsWithoutResurrectingGrants(t *testing.T)
 	if newSource, _, err := store.Save(ctx, "", importer.Input{Name: "post-backup fixture", Content: "http://fixture:fixture@example.com:8080#new", Interval: 60, UserIDs: []string{f.user.ID}}); err != nil {
 		t.Fatal(err)
 	} else {
-		g, e := (&node.Repository{Database: f.source.Database}).SaveGroup(ctx, "", node.GroupInput{Name: "new import", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: newSource}}})
+		var proxyID string
+		if err := f.source.Database.QueryRow("SELECT id FROM imported_proxies WHERE source_id=?", newSource).Scan(&proxyID); err != nil {
+			t.Fatal(err)
+		}
+		g, e := (&node.Repository{Database: f.source.Database, Vault: f.source.ConfigurationVault}).SaveGroup(ctx, "", node.GroupInput{Name: "new import", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, Imports: []node.GroupImport{{SourceID: newSource, ProxyKey: "id:" + proxyID}}})
 		if e != nil {
 			t.Fatal(e)
 		}

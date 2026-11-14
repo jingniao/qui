@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/proxy"
 	"proxycontrol/internal/panel/subscription/source"
@@ -46,7 +47,13 @@ func TestCandidatesOwnerMetadataAndSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.database.Exec("INSERT INTO node_group_imports VALUES(?,?,'')", p.groups[0].ID, sourceID); err != nil {
+	items, err := imports.Items(ctx)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("imported items=%v error=%v", items, err)
+	}
+	importID := items[0]["id"].(string)
+	group := p.groups[0]
+	if _, err := p.nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: group.NodeIDs, Imports: []node.GroupImport{{SourceID: sourceID, ProxyKey: "id:" + importID}}}); err != nil {
 		t.Fatal(err)
 	}
 	owner, _ := sessionFor(t, p.database, "Owner")
@@ -88,7 +95,7 @@ func TestCandidatesOwnerMetadataAndSelection(t *testing.T) {
 			t.Fatal("missing group labels", item)
 		}
 		if item.OriginKind == "import" {
-			found = item.Ref == "import:"+sourceID+":US-import|socks5" && item.OriginName == "导入来源"
+			found = item.Ref == "import:"+sourceID+":id:"+importID && item.OriginName == "导入来源"
 		}
 		if item.OriginKind == "relay" {
 			relayFound = item.Ref == "relay:relay-rule" && item.OriginName == "中转入口"

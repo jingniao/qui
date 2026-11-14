@@ -17,7 +17,7 @@ func TestReportCapabilitiesKeepsTheScalarSettingsContract(t *testing.T) {
 		ServerSettingsContractVersion: 1,
 		ServerSettingsCombinations:    []*pb.SettingsCombination{{Protocol: "vless", Direction: "inbound", Security: "reality", Transport: "tcp"}},
 	})
-	report := reportCapabilities(capability.NewSampler(t.TempDir()), state)
+	report := reportCapabilities(capability.NewSampler(t.TempDir()), state, "")
 	if len(report.Cores) != 1 || report.Cores[0].Name != "xray" {
 		t.Fatalf("capabilities: %+v", report.Cores)
 	}
@@ -27,7 +27,7 @@ func TestReportCapabilitiesKeepsTheScalarSettingsContract(t *testing.T) {
 	if report.Cores[0].ServerSettingsCombinations[0].GetSecurity() != "reality" {
 		t.Fatalf("the combination was changed: %+v", report.Cores[0].ServerSettingsCombinations[0])
 	}
-	empty := reportCapabilities(capability.NewSampler(t.TempDir()), newCapabilityState(&pb.Capabilities{CoreName: "xray", CoreVersion: "26.3.27"}))
+	empty := reportCapabilities(capability.NewSampler(t.TempDir()), newCapabilityState(&pb.Capabilities{CoreName: "xray", CoreVersion: "26.3.27"}), "")
 	if len(empty.Cores) != 1 || empty.Cores[0].ServerSettingsContractVersion != 0 || len(empty.Cores[0].ServerSettingsCombinations) != 0 {
 		t.Fatalf("a report without a contract gained one: %+v", empty.Cores)
 	}

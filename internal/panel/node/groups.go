@@ -145,7 +145,7 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if !strings.Contains("|subscription|relay|egress|mixed|", "|"+input.Purpose+"|") {
 		return Group{}, errors.New("invalid node group purpose")
 	}
-	if len(input.ServerIDs) > 100 || len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.Imports) > 200 {
+	if len(input.ServerIDs) > 100 || len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.Imports) > 1000 {
 		return Group{}, errors.New("node group member limit exceeded")
 	}
 	if input.Purpose == "relay" || input.Purpose == "egress" {
@@ -284,14 +284,33 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 			return Group{}, errors.New("invalid or duplicate import member")
 		}
 		seen[key] = true
-		var exists int
-		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM subscription_sources WHERE id=?", item.SourceID).Scan(&exists); err != nil {
-			return Group{}, errors.New("import source does not exist")
+		var sealed []byte
+		if err := tx.QueryRowContext(ctx, "SELECT url_encrypted FROM subscription_sources WHERE id=?", item.SourceID).Scan(&sealed); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return Group{}, errors.New("import source does not exist")
+			}
+			return Group{}, err
 		}
-		if item.ProxyKey != "" {
-			if err := tx.QueryRowContext(ctx, "SELECT 1 FROM imported_proxies WHERE source_id=? AND name||'|'||protocol=? LIMIT 1", item.SourceID, item.ProxyKey).Scan(&exists); err != nil {
+		raw, err := r.Vault.Open(sealed)
+		if err != nil {
+			return Group{}, err
+		}
+		content := len(raw) == 0
+		clear(raw)
+		var exists int
+		if content {
+			if !strings.HasPrefix(item.ProxyKey, "id:") || len(item.ProxyKey) == len("id:") {
+				return Group{}, errors.New("content import member requires a stable proxy ID")
+			}
+			err = tx.QueryRowContext(ctx, "SELECT 1 FROM imported_proxies WHERE source_id=? AND id=?", item.SourceID, strings.TrimPrefix(item.ProxyKey, "id:")).Scan(&exists)
+		} else if item.ProxyKey != "" {
+			err = tx.QueryRowContext(ctx, "SELECT 1 FROM imported_proxies WHERE source_id=? AND name||'|'||protocol=? LIMIT 1", item.SourceID, item.ProxyKey).Scan(&exists)
+		}
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
 				return Group{}, errors.New("import proxy does not exist")
 			}
+			return Group{}, err
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_imports VALUES(?,?,?)", groupID, item.SourceID, item.ProxyKey); err != nil {
 			return Group{}, err

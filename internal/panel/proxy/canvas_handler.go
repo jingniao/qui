@@ -14,16 +14,60 @@ import (
 func (h *Handler) registerCanvas(mux *http.ServeMux) {
 	h.registerCanvasTunnels(mux)
 	for pattern, handler := range map[string]http.HandlerFunc{
-		"GET /api/v1/canvas-schemes":               h.canvasSchemes,
-		"GET /api/v1/canvas-schemes/{id}":          h.canvasScheme,
-		"POST /api/v1/canvas-schemes":              h.saveCanvasScheme,
-		"PUT /api/v1/canvas-schemes/{id}":          h.saveCanvasScheme,
-		"DELETE /api/v1/canvas-schemes/{id}":       h.deleteCanvasScheme,
-		"POST /api/v1/canvas-schemes/{id}/publish": h.publishCanvasScheme,
-		"POST /api/v1/canvas-schemes/{id}/plan":    h.planCanvasScheme,
+		"GET /api/v1/relay-schemes/legacy-resources":           h.canvasLegacyResources,
+		"POST /api/v1/relay-schemes/legacy-resources/reattach": h.reattachCanvasLegacy,
+		"POST /api/v1/relay-schemes/quick/plan":                h.planQuickCanvas,
+		"POST /api/v1/relay-schemes/quick":                     h.quickCanvas,
+		"GET /api/v1/canvas-schemes":                           h.canvasSchemes,
+		"GET /api/v1/canvas-schemes/{id}":                      h.canvasScheme,
+		"GET /api/v1/canvas-schemes/{id}/status":               h.canvasSchemeStatus,
+		"POST /api/v1/canvas-schemes":                          h.saveCanvasScheme,
+		"PUT /api/v1/canvas-schemes/{id}":                      h.saveCanvasScheme,
+		"DELETE /api/v1/canvas-schemes/{id}":                   h.deleteCanvasScheme,
+		"POST /api/v1/canvas-schemes/{id}/publish":             h.publishCanvasScheme,
+		"POST /api/v1/canvas-schemes/{id}/plan":                h.planCanvasScheme,
+		"POST /api/v1/canvas-schemes/{id}/remove-plan":         h.planRemoveCanvasScheme,
+		"POST /api/v1/canvas-schemes/{id}/remove":              h.removeCanvasScheme,
 	} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
+}
+
+func (h *Handler) planRemoveCanvasScheme(w http.ResponseWriter, r *http.Request) {
+	var input CanvasRemoveInput
+	if err := httpapi.Decode(w, r, &input); err != nil {
+		h.failCanvas(w, err)
+		return
+	}
+	result, err := h.Service.PlanRemoveCanvasScheme(r.Context(), r.PathValue("id"), input)
+	if err != nil {
+		h.failCanvas(w, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) removeCanvasScheme(w http.ResponseWriter, r *http.Request) {
+	var input CanvasRemoveInput
+	if err := httpapi.Decode(w, r, &input); err != nil {
+		h.failCanvas(w, err)
+		return
+	}
+	result, err := h.Service.RemoveCanvasScheme(r.Context(), r.PathValue("id"), input, auth.Actor(r.Context()).Username, h.Users)
+	if err != nil {
+		var conflict *CanvasRemoveConflict
+		if errors.As(err, &conflict) {
+			httpapi.ErrorDetails(w, http.StatusConflict, "canvas_remove_conflict", err.Error(), map[string]any{"details": conflict.Plan})
+		} else {
+			h.failCanvas(w, err)
+		}
+		return
+	}
+	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "停用并移除中转方案", r.PathValue("id"), "成功", r.RemoteAddr); err != nil {
+		h.internal(w, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) canvasSchemes(w http.ResponseWriter, r *http.Request) {

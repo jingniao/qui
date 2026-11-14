@@ -1,6 +1,6 @@
 <template>
   <section class="panel-card p-5 space-y-5">
-    <div class="flex justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">核心更新</h2><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新任务</button></div>
+    <div class="flex justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">核心更新</h2><button class="ios-btn-secondary" :disabled="loading" @click="load()">刷新任务</button></div>
     <p class="text-sm text-gray-600">选择版本后自动填写官方发布资产地址和官方公布的压缩包 SHA-256（Xray 取 .dgst 校验文件，sing-box 取 GitHub 发布页摘要，qui 构建取 SHA256SUMS），也可手动填写。节点会校验压缩包摘要、解压唯一的可执行文件、运行版本命令并在健康检查失败时自动回滚到上一核心。</p>
     <ErrorState v-if="error" :message="error" @retry="load" />
     <div class="grid md:grid-cols-2 gap-3 text-sm">
@@ -56,7 +56,6 @@ import { coreReleasesAPI, defaultCoreSource, deriveAssetURL, DIGEST_SOURCE_LABEL
 import { type NodeView } from '../../nodes/api';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
-import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import DataTable from '../../../components/DataTable.vue';
@@ -129,14 +128,17 @@ const revision = computed(() => selected.value?.heartbeat?.current_revision || 0
 const confirmMessage = computed(() => `确认升级 ${selected.value?.name || ''} 到 ${component.value} ${version.value}？连接可能中断，健康检查失败时节点会自动回滚到上一核心。`);
 let generation = 0;
 function nodeName(id: string) { return props.nodes.find(node => node.id === id)?.name || id; }
-async function load() {
-  const current = ++generation; loading.value = true;
+let reading = false;
+async function load(silent = false) {
+  if (silent && (reading || document.visibilityState !== 'visible')) return;
+  reading = true;
+  const current = ++generation; if (!silent) loading.value = true;
   try {
     const page = await coreUpdatesAPI.tasks(taskPage.value);
     if (current !== generation) return;
     tasks.value = page.items; taskTotal.value = page.total; error.value = '';
   } catch(e) { if (current === generation) error.value = (e as Error).message; }
-  finally { if (current === generation) loading.value = false; }
+  finally { if (current === generation) { loading.value = false; reading = false; } }
 }
 async function queue() {
   confirmation.value = false;
@@ -160,7 +162,8 @@ function status(value: string) {
   return ({ queued:'等待节点', running:'已下发，结果未确认', success:'已确认成功', rolled_back:'已恢复上一核心', rejected:'节点拒绝', failed_closed:'未确认，已关闭', cleared:'已清除' } as Record<string,string>)[value] || value;
 }
 function changeTaskPage(value: number) { taskPage.value = value; void load(); }
-const reloadOnNodeStatus = throttleTrailing(() => { void load(); }, 5000);
-onMounted(() => { void load(); window.addEventListener('proxy-node-status', reloadOnNodeStatus); });
-onUnmounted(() => { generation++; reloadOnNodeStatus.cancel(); window.removeEventListener('proxy-node-status', reloadOnNodeStatus); });
+function visibilityChanged() { if (document.visibilityState === 'visible') void load(true); }
+let timer: ReturnType<typeof setInterval>;
+onMounted(() => { void load(); timer = setInterval(visibilityChanged, 60000); document.addEventListener('visibilitychange', visibilityChanged); });
+onUnmounted(() => { generation++; clearInterval(timer); document.removeEventListener('visibilitychange', visibilityChanged); });
 </script>

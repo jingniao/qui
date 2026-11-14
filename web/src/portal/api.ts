@@ -44,7 +44,11 @@ async function request<T>(path: `/api/v1/portal/${string}`, method = 'GET', body
 }
 
 export const portalAPI = {
-  async session() { return portalState.session = await request<Session>('/api/v1/portal/auth/session'); },
+  async session() {
+    const session = portalState.session;
+    if (session?.isAuthenticated && session.expiresAt && Date.parse(session.expiresAt) > Date.now()) return session;
+    return portalState.session = await request<Session>('/api/v1/portal/auth/session');
+  },
   async login(username: string, password: string) {
     return portalState.session = await request<Session>('/api/v1/portal/auth/login', 'POST', { username, password });
   },

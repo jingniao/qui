@@ -23,6 +23,7 @@ type previewContext struct {
 type previewMember struct {
 	Kind string `json:"kind"`
 	Name string `json:"name"`
+	Ref  string `json:"ref,omitempty"`
 }
 
 type previewGroup struct {
@@ -112,7 +113,11 @@ func (h *Handler) profilePreview(w http.ResponseWriter, r *http.Request) {
 			for _, group := range rendered.Resolved.Groups {
 				item := previewGroup{Name: group.Name, Members: []previewMember{}}
 				for _, member := range group.Members {
-					item.Members = append(item.Members, previewMember{Kind: member.Kind, Name: member.Name})
+					value := previewMember{Kind: member.Kind, Name: member.Name}
+					if member.Kind == rules.KindProxy {
+						value.Ref = rendered.Resolved.EndpointRefs[member.Name]
+					}
+					item.Members = append(item.Members, value)
 				}
 				result.Groups = append(result.Groups, item)
 			}

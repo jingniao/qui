@@ -164,7 +164,7 @@ func (r *Repository) InboundAtListener(ctx context.Context, nodeID, protocol, li
 func (r *Repository) Outbound(ctx context.Context, outboundID string, reveal bool) (Outbound, error) {
 	var outbound Outbound
 	var encoded []byte
-	err := r.Database.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,address,port,enabled,coalesce(target_node_id,''),coalesce(target_inbound_id,''),credential_id,encrypted_settings,support_tcp,support_udp,CASE WHEN failure_policy_v2='' THEN failure_policy ELSE failure_policy_v2 END,backup_outbound_id,created_at,probe_url,probe_interval FROM outbounds WHERE id=?", outboundID).Scan(&outbound.ID, &outbound.Name, &outbound.NodeID, &outbound.Protocol, &outbound.Address, &outbound.Port, &outbound.Enabled, &outbound.TargetNodeID, &outbound.TargetInboundID, &outbound.CredentialID, &encoded, &outbound.SupportTCP, &outbound.SupportUDP, &outbound.FailurePolicy, &outbound.BackupOutboundID, &outbound.CreatedAt, &outbound.ProbeURL, &outbound.ProbeInterval)
+	err := r.Database.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,address,port,enabled,coalesce(target_node_id,''),coalesce(target_inbound_id,''),credential_id,encrypted_settings,support_tcp,support_udp,CASE WHEN failure_policy_v2='' THEN failure_policy ELSE failure_policy_v2 END,backup_outbound_id,created_at,probe_url,probe_interval,source_ip,source_interface FROM outbounds WHERE id=?", outboundID).Scan(&outbound.ID, &outbound.Name, &outbound.NodeID, &outbound.Protocol, &outbound.Address, &outbound.Port, &outbound.Enabled, &outbound.TargetNodeID, &outbound.TargetInboundID, &outbound.CredentialID, &encoded, &outbound.SupportTCP, &outbound.SupportUDP, &outbound.FailurePolicy, &outbound.BackupOutboundID, &outbound.CreatedAt, &outbound.ProbeURL, &outbound.ProbeInterval, &outbound.SourceIP, &outbound.SourceInterface)
 	if errors.Is(err, sql.ErrNoRows) {
 		return outbound, ErrNotFound
 	}
@@ -436,9 +436,9 @@ func (r *Repository) SaveOutbound(ctx context.Context, outboundID string, input 
 		return Outbound{}, err
 	}
 	if create {
-		_, err = tx.ExecContext(ctx, "INSERT INTO outbounds(id,name,node_id,protocol,address,port,enabled,target_node_id,target_inbound_id,credential_id,encrypted_settings,support_tcp,support_udp,failure_policy,backup_outbound_id,created_at,probe_url,probe_interval) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", outboundID, input.Name, input.NodeID, input.Protocol, input.Address, input.Port, input.Enabled, nullable(input.TargetNodeID), nullable(input.TargetInboundID), credentialID, encoded, input.SupportTCP, input.SupportUDP, legacyFailure(input.FailurePolicy, false), input.BackupOutboundID, created, input.ProbeURL, input.ProbeInterval)
+		_, err = tx.ExecContext(ctx, "INSERT INTO outbounds(id,name,node_id,protocol,address,port,enabled,target_node_id,target_inbound_id,credential_id,encrypted_settings,support_tcp,support_udp,failure_policy,backup_outbound_id,created_at,probe_url,probe_interval,source_ip,source_interface) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", outboundID, input.Name, input.NodeID, input.Protocol, input.Address, input.Port, input.Enabled, nullable(input.TargetNodeID), nullable(input.TargetInboundID), credentialID, encoded, input.SupportTCP, input.SupportUDP, legacyFailure(input.FailurePolicy, false), input.BackupOutboundID, created, input.ProbeURL, input.ProbeInterval, input.SourceIP, input.SourceInterface)
 	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE outbounds SET name=?,address=?,port=?,enabled=?,credential_id=?,encrypted_settings=?,support_tcp=?,support_udp=?,failure_policy=?,backup_outbound_id=?,probe_url=?,probe_interval=? WHERE id=?", input.Name, input.Address, input.Port, input.Enabled, credentialID, encoded, input.SupportTCP, input.SupportUDP, legacyFailure(input.FailurePolicy, false), input.BackupOutboundID, input.ProbeURL, input.ProbeInterval, outboundID)
+		_, err = tx.ExecContext(ctx, "UPDATE outbounds SET name=?,address=?,port=?,enabled=?,credential_id=?,encrypted_settings=?,support_tcp=?,support_udp=?,failure_policy=?,backup_outbound_id=?,probe_url=?,probe_interval=?,source_ip=?,source_interface=? WHERE id=?", input.Name, input.Address, input.Port, input.Enabled, credentialID, encoded, input.SupportTCP, input.SupportUDP, legacyFailure(input.FailurePolicy, false), input.BackupOutboundID, input.ProbeURL, input.ProbeInterval, input.SourceIP, input.SourceInterface, outboundID)
 	}
 	if err != nil {
 		return Outbound{}, err
@@ -563,9 +563,57 @@ func (r *Repository) DeleteInbound(ctx context.Context, id string) error {
 	if _, err := r.Inbound(ctx, id, false); err != nil {
 		return err
 	}
+	rows, err = r.Database.QueryContext(ctx, "SELECT id,name,node_id FROM outbounds WHERE target_inbound_id=? ORDER BY id", id)
+	if err != nil {
+		return err
+	}
+	outbounds := []map[string]string{}
+	for rows.Next() {
+		var outboundID, name, nodeID string
+		if err = rows.Scan(&outboundID, &name, &nodeID); err != nil {
+			rows.Close()
+			return err
+		}
+		outbounds = append(outbounds, map[string]string{"id": outboundID, "name": name, "nodeId": nodeID})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(outbounds) > 0 {
+		details := map[string]any{"outbounds": outbounds}
+		// The schemes whose server layout references a canvas tunnel owning one of
+		// these outbounds (the same reference tunnelSchemes follows).
+		rows, err = r.Database.QueryContext(ctx, `SELECT DISTINCT s.id,s.name FROM canvas_schemes s,json_each(s.layout_json,'$.connections') c
+ JOIN canvas_tunnel_objects o ON o.tunnel_id=json_extract(c.value,'$.tunnelId') AND o.object_kind='outbound'
+ JOIN outbounds b ON b.id=o.object_id
+ WHERE s.execution='server' AND b.target_inbound_id=? ORDER BY s.id`, id)
+		if err != nil {
+			return err
+		}
+		schemes := []map[string]string{}
+		for rows.Next() {
+			var schemeID, name string
+			if err = rows.Scan(&schemeID, &name); err != nil {
+				rows.Close()
+				return err
+			}
+			schemes = append(schemes, map[string]string{"id": schemeID, "name": name})
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(schemes) > 0 {
+			details["schemes"] = schemes
+		}
+		return &tunnelError{Code: "inbound_has_relay_outbound", Status: 409, Message: "该入站仍被中转出站引用，请先在所属中转方案中撤除，或先删除下列出站", Details: details}
+	}
 	_, err = r.Database.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", id)
 	if err != nil {
-		return errors.New("inbound is referenced by a relay outbound")
+		return err
 	}
 	return nil
 }

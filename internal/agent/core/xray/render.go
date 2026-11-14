@@ -53,6 +53,7 @@ type sniffing struct {
 	RouteOnly    bool     `json:"routeOnly"`
 }
 type outboundConfig struct {
+	sourceID    string
 	Settings    any             `json:"settings,omitempty"`
 	Stream      *streamSettings `json:"streamSettings,omitempty"`
 	Tag         string          `json:"tag"`
@@ -223,7 +224,7 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 			return rendered, err
 		}
 	}
-	if err := applyOutboundSource(&document, state.Network); err != nil {
+	if err := applyOutboundSource(&document, state); err != nil {
 		return rendered, err
 	}
 	// Every rendered rule has a stable unique tag so a failed CLI reload can

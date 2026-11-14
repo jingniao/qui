@@ -37,6 +37,7 @@ type View struct {
 	Revisions     []deployment.Revision `json:"revisions,omitempty"`
 	Chains        []proxy.Chain         `json:"chains,omitempty"`
 	NodeNames     map[string]string     `json:"nodeNames,omitempty"`
+	NodeTraffic   []NodeTraffic         `json:"nodeTraffic"`
 }
 
 func (s *Service) Read(ctx context.Context, owner bool) (View, error) {
@@ -61,6 +62,11 @@ func (s *Service) Read(ctx context.Context, owner bool) (View, error) {
 		return view, err
 	}
 	view.Nodes, _, err = s.Nodes.List(ctx, "", 1, 5, false)
+	if err != nil {
+		return view, err
+	}
+	monthFrom := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, location).UTC()
+	view.NodeTraffic, err = s.Repository.NodeTraffic(ctx, from, monthFrom, to)
 	if err != nil {
 		return view, err
 	}

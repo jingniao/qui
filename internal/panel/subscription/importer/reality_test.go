@@ -127,7 +127,7 @@ func TestRealityClashAndMeasuredExportCapabilities(t *testing.T) {
 	}
 	ordinary := proxy.Proxy{Name: "ordinary", Protocol: "socks5", Server: "example.org", Port: 1080}
 	_, grpc := Analyze([]byte(realityURI("grpc", "")))
-	for _, exporter := range []format.Exporter{clash.Meta{}, clash.Legacy{}, singbox.Exporter{}} {
+	for _, exporter := range []format.Exporter{clash.Legacy{}, singbox.Exporter{}} {
 		out, err := exporter.Render(format.Profile{Proxies: []proxy.Proxy{ordinary, grpc[0]}})
 		if err != nil || len(out.Warnings) == 0 || strings.Contains(string(out.Body), realityKey) || !strings.Contains(string(out.Body), "example.org") {
 			t.Fatalf("per-entry omission %s: %s %v", exporter.ID(), out.Body, err)
@@ -143,6 +143,8 @@ func TestRealityClashAndMeasuredExportCapabilities(t *testing.T) {
 	// A removed chain hop cannot leave a surviving dependent proxy or silently
 	// relax an explicit REJECT empty-group policy.
 	grpc[0].ClientChain = "fixture"
+	grpc[0].Transport = &proxy.Transport{Type: "xhttp", XHTTP: &proxy.XHTTPOptions{Mode: "auto"}}
+	grpc[0].TLS.ALPN = []string{"http/1.1"}
 	ordinary.DialerProxy = grpc[0].Name
 	ordinary.ClientChain = "fixture"
 	resolved := rules.Resolved{Groups: []rules.ResolvedGroup{{Name: "strict", Type: "select", EmptyPolicy: "reject", Members: []rules.Member{{Kind: rules.KindProxy, Name: ordinary.Name}}}}}

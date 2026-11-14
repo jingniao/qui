@@ -79,7 +79,16 @@ config_with_port() {
 }
 
 service_active() { systemctl is-active --quiet "$service"; }
-service_state() { systemctl is-active "$service" 2>/dev/null || true; }
+menu_service_state() { service_state "${service%.service}"; }
+
+uninstall_all() {
+  local script=/usr/local/lib/proxycontrol/uninstall.sh
+  if [[ -f $script && ! -L $script && $(stat -c '%u' "$script") == 0 ]]; then
+    "$script" all --purge
+  else
+    printf '本机缺少卸载脚本，请先运行一次 qui-update\n'
+  fi
+}
 
 # 1. Replace the Owner credentials. The panel must be stopped for the reset, so
 # the service is stopped briefly and started again afterwards when it was active
@@ -220,7 +229,7 @@ restart_panel() {
   else
     printf '重启 %s 失败；查看日志：journalctl -u %s -n 50\n' "$service" "$service"
   fi
-  printf '服务状态：%s\n' "$(service_state)"
+  printf '服务状态：%s\n' "$(menu_service_state)"
 }
 
 # 4. Start.
@@ -231,7 +240,7 @@ start_panel() {
   else
     printf '启动 %s 失败；查看日志：journalctl -u %s -n 50\n' "$service" "$service"
   fi
-  printf '服务状态：%s\n' "$(service_state)"
+  printf '服务状态：%s\n' "$(menu_service_state)"
 }
 
 # 5. Stop.
@@ -242,7 +251,7 @@ stop_panel() {
   else
     printf '停止 %s 失败；查看日志：journalctl -u %s -n 50\n' "$service" "$service"
   fi
-  printf '服务状态：%s\n' "$(service_state)"
+  printf '服务状态：%s\n' "$(menu_service_state)"
 }
 
 # 6. Update from GitHub. The packaged updater owns the whole flow, including the
@@ -255,8 +264,14 @@ update_panel() {
 }
 
 print_menu() {
+  if ! $has_panel; then
+    printf 'Agent 服务状态：%s\n' "$(menu_service_state)"
+    "$program" --version
+    printf '\n1. 更新（从 GitHub）\n2. 卸载并清除全部数据\n0. 退出\n\n'
+    return
+  fi
   printf '\033[1m%s\033[0m\n' '代理控制平台 终端菜单'
-  printf '服务状态：%s\n' "$(service_state)"
+  printf '服务状态：%s\n' "$(menu_service_state)"
   printf '当前程序版本：%s\n' "$("$program" --version 2>/dev/null || printf '未知')"
   printf '当前 Web 端口：%s\n' "$(read_value "$config" http_address || printf '未知')"
   printf '\n1. 修改管理员账号密码\n'
@@ -266,6 +281,7 @@ print_menu() {
   printf '5. 停止\n'
   printf '6. 更新（从 GitHub）\n'
   printf '7. 查看／重置管理员登录地址\n'
+  printf '8. 卸载并清除全部数据\n'
   printf '0. 退出\n\n'
 }
 
@@ -275,6 +291,15 @@ main() {
     print_menu
     printf '请选择：'
     if ! read -r choice; then printf '\n'; return 0; fi
+    if ! $has_panel; then
+      case $choice in
+        1) update_panel;;
+        2) uninstall_all;;
+        0) return 0;;
+        *) printf '无效选择：%s\n' "$choice";;
+      esac
+      continue
+    fi
     case $choice in
       1) reset_owner_credentials;;
       2) change_port;;
@@ -283,6 +308,7 @@ main() {
       5) stop_panel;;
       6) update_panel;;
       7) admin_login_entry;;
+      8) uninstall_all;;
       0) printf '再见。\n'; return 0;;
       *) printf '无效选择：%s\n' "$choice"; continue;;
     esac
@@ -293,11 +319,24 @@ main() {
 }
 
 [[ $(uname -s) == Linux && $EUID -eq 0 ]] || fail '请以 root 身份在 Linux 面板主机上运行。'
+has_panel=false
+[[ ! -f /var/lib/proxycontrol-install/panel.manifest ]] || has_panel=true
+if ! $has_panel; then
+  [[ -f /var/lib/proxycontrol-install/agent.manifest ]] || fail '本机没有安装面板或 Agent。'
+  service=proxy-agent
+  program=/usr/local/bin/proxy-agent
+fi
+library=/usr/local/lib/proxycontrol/service.sh
+[[ -f $library && ! -L $library && $(stat -c '%u' "$library") == 0 ]] || fail '缺少本机服务管理脚本。'
+source "$library"
+init_system=$(detect_init) || fail '无法识别服务管理系统。'
+if $has_panel; then
 for tool in systemctl runuser stat mktemp chown chmod install mv rm getent; do
   command -v "$tool" >/dev/null || fail "缺少命令：$tool"
 done
 [[ -x $program && ! -L $program ]] || fail "缺少程序：$program"
 [[ -f $config && ! -L $config ]] || fail "缺少配置文件：$config"
 getent passwd "$account" >/dev/null || fail "缺少服务账号：$account"
+fi
 
 main "$@"

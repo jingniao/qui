@@ -100,6 +100,9 @@ func TestSingboxReportsNativeRuleSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !capabilities.OutboundSourceSupported {
+		t.Fatal("outbound source unsupported")
+	}
 	if !capabilities.NativeRuleSetsSupported {
 		t.Fatal("native rule sets not reported")
 	}

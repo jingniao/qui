@@ -14,6 +14,8 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"modernc.org/sqlite"
+	"proxycontrol/internal/panel/geoip"
+	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
@@ -34,6 +36,7 @@ const (
 
 type Repository struct {
 	Database         *sql.DB
+	Vault            *vault.Vault
 	CertificateAudit interface {
 		RecordNodeCertificate(context.Context, *sql.Tx, string, string) error
 	}
@@ -43,35 +46,42 @@ type Repository struct {
 	AdviceSources AdviceSources
 }
 type Node struct {
-	CoreSelectionBlocked     []string         `json:"coreSelectionBlocked"`
-	AllowSubscription        bool             `json:"allowSubscription"`
-	Maintenance              bool             `json:"maintenance"`
-	TuningAdviceCount        int              `json:"tuningAdviceCount"`
-	PublicIPManual           bool             `json:"-"`
-	PublicAddresses          []PublicAddress  `json:"publicAddresses"`
-	PublicIPSelected         string           `json:"publicIpSelected"`
-	PublicIPSelectionMissing bool             `json:"publicIpSelectionMissing"`
-	ID                       string           `json:"id"`
-	Name                     string           `json:"name"`
-	Status                   string           `json:"status"`
-	Enabled                  bool             `json:"enabled"`
-	Hostname                 string           `json:"hostname"`
-	OS                       string           `json:"os"`
-	AgentVersion             string           `json:"agentVersion"`
-	PublicIP                 string           `json:"publicIp"`
-	PublicIPSource           string           `json:"publicIpSource"`
-	ConnectHost              string           `json:"connectHost"`
-	OutboundSourceIP         string           `json:"outboundSourceIp"`
-	OutboundInterface        string           `json:"outboundInterface"`
-	HostSourceIPv4           string           `json:"hostSourceIpv4"`
-	HostSourceIPv6           string           `json:"hostSourceIpv6"`
-	LastHeartbeat            string           `json:"lastHeartbeat"`
-	LastSequence             uint64           `json:"lastSequence"`
-	Capabilities             *pb.Capabilities `json:"capabilities"`
-	Heartbeat                *pb.Heartbeat    `json:"heartbeat"`
-	CreatedAt                string           `json:"createdAt"`
-	DeletedAt                string           `json:"deletedAt"`
-	AgentUpdateSupported     bool             `json:"agentUpdateSupported"`
+	CoreSelectionBlocked     []string        `json:"coreSelectionBlocked"`
+	AllowSubscription        bool            `json:"allowSubscription"`
+	Maintenance              bool            `json:"maintenance"`
+	TuningAdviceCount        int             `json:"tuningAdviceCount"`
+	PublicIPManual           bool            `json:"-"`
+	PublicAddresses          []PublicAddress `json:"publicAddresses"`
+	PublicIPSelected         string          `json:"publicIpSelected"`
+	PublicIPSelectionMissing bool            `json:"publicIpSelectionMissing"`
+	ID                       string          `json:"id"`
+	Name                     string          `json:"name"`
+	Status                   string          `json:"status"`
+	Enabled                  bool            `json:"enabled"`
+	Hostname                 string          `json:"hostname"`
+	OS                       string          `json:"os"`
+	AgentVersion             string          `json:"agentVersion"`
+	PublicIP                 string          `json:"publicIp"`
+	PublicIPSource           string          `json:"publicIpSource"`
+	// CountryCode is the ISO 3166-1 alpha-2 country of PublicIP from the
+	// embedded offline table (internal/panel/geoip), "" when unknown. Derived on
+	// read, never stored.
+	CountryCode          string           `json:"countryCode"`
+	ConnectHost          string           `json:"connectHost"`
+	OutboundSourceIP     string           `json:"outboundSourceIp"`
+	OutboundInterface    string           `json:"outboundInterface"`
+	HostSourceIPv4       string           `json:"hostSourceIpv4"`
+	HostSourceIPv6       string           `json:"hostSourceIpv6"`
+	LastHeartbeat        string           `json:"lastHeartbeat"`
+	LastSequence         uint64           `json:"lastSequence"`
+	Capabilities         *pb.Capabilities `json:"capabilities"`
+	Heartbeat            *pb.Heartbeat    `json:"heartbeat"`
+	CreatedAt            string           `json:"createdAt"`
+	DeletedAt            string           `json:"deletedAt"`
+	AgentUpdateSupported bool             `json:"agentUpdateSupported"`
+	Tags                 []string         `json:"tags"`
+	// GostCoreSupported is Hello.gost_core_supported: the Agent can install GOST.
+	GostCoreSupported bool `json:"gostCoreSupported"`
 }
 
 func timestamp(value time.Time) string { return value.UTC().Format("2006-01-02T15:04:05.000000000Z") }
@@ -386,7 +396,7 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected,coalesce((SELECT agent_supported FROM node_update_capabilities WHERE node_id=nodes.id),0)"
+const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected,coalesce((SELECT agent_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT tags_json FROM node_meta WHERE node_id=nodes.id),'[]'),gost_core_supported"
 
 type scanner interface{ Scan(...any) error }
 
@@ -396,10 +406,15 @@ var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func scan(row scanner) (Node, error) {
 	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}, PublicAddresses: []PublicAddress{}}
-	var capabilities, heartbeat, addrsJSON string
-	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported)
+	var capabilities, heartbeat, addrsJSON, tags string
+	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &tags, &n.GostCoreSupported)
 	if err != nil {
 		return n, err
+	}
+	// The list must not fail on one bad row; the database CHECK and backup
+	// validation keep stored tags well-formed.
+	if n.Tags, err = DecodeTags(tags); err != nil {
+		n.Tags = []string{}
 	}
 	if addrsJSON != "" && addrsJSON != "[]" {
 		_ = json.Unmarshal([]byte(addrsJSON), &n.PublicAddresses)
@@ -408,6 +423,7 @@ func scan(row scanner) (Node, error) {
 		n.PublicAddresses = []PublicAddress{}
 	}
 	n.PublicIPSource = publicIPSource(n.PublicIP, n.PublicIPSelected)
+	n.CountryCode = geoip.Country(n.PublicIP)
 	if n.PublicIPSelected != "" {
 		missing := true
 		for _, a := range n.PublicAddresses {

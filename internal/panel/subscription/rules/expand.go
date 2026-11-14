@@ -17,6 +17,8 @@ type Resolved struct {
 	Providers []ResolvedProvider
 	Rules     []ResolvedRule
 	Warnings  []proxy.Warning
+	// EndpointRefs maps selectable proxy names to stable endpoint identities for previews.
+	EndpointRefs map[string]string
 }
 
 // Member is a resolved group member or rule target. Proxy names and group names
@@ -82,15 +84,24 @@ func warning(message string) proxy.Warning {
 // the group's empty policy, with a warning for the Owner's preview.
 func Expand(template Template, proxies []proxy.Proxy) Resolved {
 	resolved := Resolved{Client: template.Client, DNS: template.DNS}
+	if message := DNSFallbackWarning(template.DNS); message != "" {
+		resolved.Warnings = append(resolved.Warnings, warning(message))
+	}
 	names := make([]string, 0, len(proxies))
 	byGroup := map[string][]string{}
 	byNode := map[string]string{}
 	byEndpoint := map[string][]string{}
+	endpointRefs := map[string]string{}
+	resolved.EndpointRefs = map[string]string{}
 	for _, endpoint := range proxies {
 		names = append(names, endpoint.Name)
+		endpointRefs[endpoint.Name] = MemberEndpoint + EndpointRef(endpoint)
 		if endpoint.ClientChain == "" {
 			ref := EndpointRef(endpoint)
 			byEndpoint[ref] = append(byEndpoint[ref], endpoint.Name)
+			if ref != "" {
+				resolved.EndpointRefs[endpoint.Name] = ref
+			}
 		}
 		for _, label := range endpoint.Origin.Labels {
 			if group, ok := strings.CutPrefix(label, "nodeGroup:"); ok {
@@ -108,6 +119,13 @@ func Expand(template Template, proxies []proxy.Proxy) Resolved {
 	for _, group := range template.Groups {
 		members := []Member{}
 		seen := map[Member]bool{}
+		excluded := map[string]bool{}
+		for _, ref := range group.ExcludeEndpoints {
+			excluded[ref] = true
+			if len(byEndpoint[strings.TrimPrefix(ref, MemberEndpoint)]) == 0 {
+				resolved.Warnings = append(resolved.Warnings, warning("组「"+group.Name+"」的排除项已不存在："+ref))
+			}
+		}
 		add := func(member Member) {
 			if member.Kind == KindProxy && !matchesKeywords(member.Name, group) {
 				return
@@ -117,17 +135,22 @@ func Expand(template Template, proxies []proxy.Proxy) Resolved {
 				members = append(members, member)
 			}
 		}
+		addDynamic := func(name string) {
+			if !excluded[endpointRefs[name]] {
+				add(Member{Kind: KindProxy, Name: name})
+			}
+		}
 		for _, member := range group.Members {
 			switch {
 			case member == MemberAll:
 				for _, name := range names {
-					add(Member{Kind: KindProxy, Name: name})
+					addDynamic(name)
 				}
 			case strings.HasPrefix(member, MemberNodeGroup):
 				// Only granted groups carry labels, so a group the user was
 				// not granted expands to nothing.
 				for _, name := range byGroup[strings.TrimPrefix(member, MemberNodeGroup)] {
-					add(Member{Kind: KindProxy, Name: name})
+					addDynamic(name)
 				}
 			case strings.HasPrefix(member, MemberEndpoint):
 				for _, name := range byEndpoint[strings.TrimPrefix(member, MemberEndpoint)] {
@@ -136,7 +159,7 @@ func Expand(template Template, proxies []proxy.Proxy) Resolved {
 			case strings.HasPrefix(member, MemberSource):
 				for _, endpoint := range proxies {
 					if endpoint.Origin.Source == "import:"+strings.TrimPrefix(member, MemberSource) {
-						add(Member{Kind: KindProxy, Name: endpoint.Name})
+						addDynamic(endpoint.Name)
 					}
 				}
 			case member == TargetDirect || member == TargetReject:

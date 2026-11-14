@@ -12,6 +12,8 @@ export interface NodeMeta {
   portRangeStart?: number | null;
   portRangeEnd?: number | null;
   bandwidthMbps?: number | null;
+  // Server-group tags (v1.5.5 item 4). Undefined leaves the stored tags as they are.
+  tags?: string[];
 }
 
 export const CURRENCY_LIST = [
@@ -109,7 +111,8 @@ export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void
     renewDate: meta.renewDate ?? '', renewCycle: meta.renewCycle ?? '',
     renewCurrency: meta.renewCurrency ?? '', renewPrice: String(meta.renewPrice ?? ''),
     renewNoticeDays: meta.renewNoticeDays ?? 7, portRangeStart: start, portRangeEnd: end,
-    bandwidthMbps: bandwidth
+    bandwidthMbps: bandwidth,
+    ...(meta.tags === undefined ? {} : { tags: meta.tags })
   });
   metadata[nodeId] = result.meta;
 }
@@ -252,11 +255,29 @@ export function countryCodeToFlag(code: string): string {
   return String.fromCodePoint(first, second);
 }
 
+export type CountrySource = 'admin_region' | 'ip_geo' | 'name_match' | 'fallback';
+
 export interface CountryInfo {
   code: string;
   name: string;
   flag: string;
-  source: 'admin_region' | 'ip_geo' | 'hostname_match' | 'fallback';
+  source: CountrySource;
+}
+
+const COUNTRY_SOURCE_LABELS: Record<CountrySource, string> = {
+  admin_region: '管理员指定地区',
+  ip_geo: '按公网 IP 识别',
+  name_match: '按服务器名称识别',
+  fallback: '未识别地区',
+};
+
+export function countrySourceLabel(source: CountrySource): string {
+  return COUNTRY_SOURCE_LABELS[source];
+}
+
+/** Hover text for a flag: "德国（按公网 IP 识别）". */
+export function countryTitle(info: CountryInfo): string {
+  return info.source === 'fallback' ? info.name : `${info.name}（${countrySourceLabel(info.source)}）`;
 }
 
 const REGION_RULES: Array<{ code: string; name: string; patterns: string[] }> = [
@@ -331,89 +352,63 @@ function matchTextRule(text?: string): { code: string; name: string } | null {
   return null;
 }
 
-const isPrivateIp = (ip: string) => {
-  return (
-    ip === '127.0.0.1' ||
-    ip === 'localhost' ||
-    ip.startsWith('10.') ||
-    ip.startsWith('192.168.') ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip) ||
-    ip.startsWith('169.254.') ||
-    ip === '::1'
-  );
-};
+const regionNames: Intl.DisplayNames | null = (() => {
+  try {
+    return new Intl.DisplayNames(['zh-CN'], { type: 'region' });
+  } catch {
+    return null;
+  }
+})();
 
-// Listeners for async IP geo updates
-const geoListeners: Array<(ip: string, code: string) => void> = [];
-export function onGeoResolved(listener: (ip: string, code: string) => void): () => void {
-  geoListeners.push(listener);
-  return () => {
-    const idx = geoListeners.indexOf(listener);
-    if (idx >= 0) geoListeners.splice(idx, 1);
-  };
+/** Chinese name for an ISO 3166-1 alpha-2 code; the curated table wins. */
+export function countryName(code: string): string {
+  const upper = code.toUpperCase();
+  const rule = REGION_RULES.find(r => r.code === upper);
+  if (rule) return rule.name;
+  try {
+    const name = regionNames?.of(upper);
+    if (name && name !== upper) return name;
+  } catch {
+    // Not a region code this browser knows; fall through.
+  }
+  return upper;
 }
 
-export function triggerIpLookup(_ip?: string): void {}
+export interface CountryInput {
+  /** Region typed by the Owner in the server editor (node_meta.region). */
+  region?: string;
+  /** Country of the public IP from the panel's offline table (node.countryCode). */
+  countryCode?: string;
+  name?: string;
+  hostname?: string;
+}
 
 /**
- * Resolve country info for a server.
- * Priority:
- * 1. Admin specified region (Highest priority)
- * 2. IP Geolocation (if recognized or cached)
- * 3. Server name or hostname keyword match
- * 4. Fallback default
+ * Resolve the flag shown next to a server name. Priority:
+ * 1. the region the Owner typed, so a wrong IP lookup can be corrected;
+ * 2. the country the panel resolved from the public IP (offline DB-IP table,
+ *    nothing is sent to an outside service);
+ * 3. a keyword in the server name or hostname;
+ * 4. 🌐 when nothing matches.
  */
-export function resolveCountryInfo(
-  adminRegion?: string,
-  ip?: string,
-  name?: string,
-  hostname?: string
-): CountryInfo {
-  // 1. Admin specified region (Highest Priority)
-  if (adminRegion && adminRegion.trim()) {
-    const match = matchTextRule(adminRegion);
+export function resolveCountryInfo(input: CountryInput): CountryInfo {
+  const region = input.region?.trim();
+  if (region) {
+    const match = matchTextRule(region);
     if (match) {
-      return {
-        code: match.code,
-        name: match.name,
-        flag: countryCodeToFlag(match.code),
-        source: 'admin_region'
-      };
+      return { code: match.code, name: match.name, flag: countryCodeToFlag(match.code), source: 'admin_region' };
     }
   }
 
-  // 2. IP Geolocation lookup
-  const cleanIp = (ip || '').trim();
-  if (cleanIp && !isPrivateIp(cleanIp)) {
-    const cachedCode = localStorage.getItem(`qui_ip_geo_${cleanIp}`);
-    if (cachedCode && cachedCode.length === 2) {
-      const rule = REGION_RULES.find(r => r.code === cachedCode.toUpperCase());
-      return {
-        code: cachedCode.toUpperCase(),
-        name: rule?.name || cachedCode.toUpperCase(),
-        flag: countryCodeToFlag(cachedCode),
-        source: 'ip_geo'
-      };
-    }
-    triggerIpLookup(cleanIp);
+  const code = (input.countryCode || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(code)) {
+    return { code, name: countryName(code), flag: countryCodeToFlag(code), source: 'ip_geo' };
   }
 
-  // 3. Fallback: server name or hostname match
-  const nameMatch = matchTextRule(name) || matchTextRule(hostname);
+  const nameMatch = matchTextRule(input.name) || matchTextRule(input.hostname);
   if (nameMatch) {
-    return {
-      code: nameMatch.code,
-      name: nameMatch.name,
-      flag: countryCodeToFlag(nameMatch.code),
-      source: 'hostname_match'
-    };
+    return { code: nameMatch.code, name: nameMatch.name, flag: countryCodeToFlag(nameMatch.code), source: 'name_match' };
   }
 
-  // 4. Default fallback
-  return {
-    code: '',
-    name: '未知地区',
-    flag: '🌐',
-    source: 'fallback'
-  };
+  return { code: '', name: '未知地区', flag: '🌐', source: 'fallback' };
 }

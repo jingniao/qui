@@ -437,6 +437,7 @@ const publicIpSourceText = computed(() => {
 // form copy, baseline and dirty flag instead of the basic-information snapshot.
 const machineForm = reactive<MachineTrafficForm>(formFromSettings(null));
 const machineBaseline = ref<MachineTrafficForm>(formFromSettings(null));
+let machineGeneration = 0;
 const machineSnapshot = computed<MachineTrafficForm>(() => ({
   method: machineForm.method,
   interfaceName: machineForm.interfaceName,
@@ -483,20 +484,24 @@ watch(() => props.node.id, () => {
 }, { immediate: true });
 
 watch(() => props.meta, (meta) => {
-  if (!meta) return;
   const price = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
-  Object.assign(metaForm, {
-    region: meta.region || '',
-    remark: meta.remark || '',
-    renewDate: meta.renewDate || '',
-    renewCurrency: price.currency,
-    renewPrice: price.price,
-    renewCycle: price.cycle,
-    renewNoticeDays: meta.renewNoticeDays ?? 7,
-    portRangeStart: meta.portRangeStart ?? undefined,
-    portRangeEnd: meta.portRangeEnd ?? undefined,
-    bandwidthMbps: meta.bandwidthMbps ?? undefined
-  });
+  const incoming = {
+    basic: { region: meta.region || '', remark: meta.remark || '',
+      portRangeStart: meta.portRangeStart ?? undefined, portRangeEnd: meta.portRangeEnd ?? undefined,
+      bandwidthMbps: meta.bandwidthMbps ?? undefined },
+    renewal: { renewDate: meta.renewDate || '', renewCurrency: price.currency,
+      renewPrice: price.price, renewCycle: price.cycle, renewNoticeDays: meta.renewNoticeDays ?? 7 }
+  };
+  // Merge per field: editing the name must not prevent late metadata from filling in.
+  for (const group of ['basic', 'renewal'] as const) {
+    const saved = baseline[group] as Record<string, unknown>;
+    for (const [key, value] of Object.entries(incoming[group])) {
+      if (Object.is((metaForm as Record<string, unknown>)[key], saved[key])) {
+        Object.assign(metaForm, { [key]: value });
+        saved[key] = value;
+      }
+    }
+  }
 });
 
 const snapshots = computed(() => ({
@@ -535,17 +540,7 @@ const loadedAddresses = computed<NodeAddress>(() => {
 
 defineExpose({ hasUnsaved });
 
-function ipv4(value: string) {
-  return value.split('.').length === 4 && value.split('.').every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255);
-}
-
-function ipv6(value: string) {
-  try {
-    return value.includes(':') && new URL(`http://[${value}]/`).hostname.startsWith('[');
-  } catch {
-    return false;
-  }
-}
+import { ipv4, ipv6 } from '../../networkValidation';
 
 function validateNetwork() {
   if (form.outboundSourceIp && !ipv4(form.outboundSourceIp) && !ipv6(form.outboundSourceIp)) {
@@ -648,12 +643,14 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
 
 async function saveMachineTraffic() {
   if (saving.value || !isOwner.value) return;
+  const current = ++machineGeneration;
   saving.value = 'machine';
+  const submitted = { ...machineSnapshot.value };
   errors.machine = '';
   try {
-    const saved = await nodeAPI.saveMachineTrafficSettings(props.node.id, payloadFromForm(machineSnapshot.value));
-    Object.assign(machineForm, formFromSettings(saved));
-    machineBaseline.value = { ...machineSnapshot.value };
+    const saved = await nodeAPI.saveMachineTrafficSettings(props.node.id, payloadFromForm(submitted));
+    if (current !== machineGeneration) return;
+    mergeMachineSettings(formFromSettings(saved), submitted);
     showToast('整机流量设置已保存');
     emit('changed');
   } catch (e) {
@@ -663,12 +660,20 @@ async function saveMachineTraffic() {
   }
 }
 
+function mergeMachineSettings(incoming: MachineTrafficForm, previous: MachineTrafficForm) {
+  for (const key of Object.keys(incoming) as (keyof MachineTrafficForm)[]) {
+    if (Object.is(machineForm[key], previous[key])) Object.assign(machineForm, { [key]: incoming[key] });
+  }
+  machineBaseline.value = { ...incoming };
+}
 async function loadMachineTraffic() {
+  const current = ++machineGeneration;
+  const id = props.node.id, previous = { ...machineBaseline.value };
   errors.machine = '';
   try {
-    const settings = await nodeAPI.machineTrafficSettings(props.node.id);
-    Object.assign(machineForm, formFromSettings(settings));
-    machineBaseline.value = { ...machineSnapshot.value };
+    const settings = await nodeAPI.machineTrafficSettings(id);
+    if (current !== machineGeneration || id !== props.node.id) return;
+    mergeMachineSettings(formFromSettings(settings), previous);
   } catch (e) {
     errors.machine = (e as Error).message;
   }

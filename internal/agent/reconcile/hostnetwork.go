@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"slices"
 	"time"
 
 	"proxycontrol/internal/agent/hostnet"
@@ -67,7 +68,7 @@ func (r *Reconciler) applyHostNetwork(ctx context.Context, state desiredstate.St
 	}
 	sync := r.HostNetworkSync
 	if sync == nil {
-		sync = r.syncHostNetwork
+		return r.syncHostNetworkState(ctx, state)
 	}
 	return sync(ctx, value)
 }
@@ -96,6 +97,14 @@ func collectPortHops(inbounds []desiredstate.Inbound) []hostnet.PortHop {
 // new outbound connections rolls the revision back instead of taking the node off
 // the control plane.
 func (r *Reconciler) syncHostNetwork(ctx context.Context, network desiredstate.Network) error {
+	return r.syncHostNetworkState(ctx, desiredstate.State{Network: &network})
+}
+
+func (r *Reconciler) syncHostNetworkState(ctx context.Context, state desiredstate.State) error {
+	var network desiredstate.Network
+	if state.Network != nil {
+		network = *state.Network
+	}
 	configured := network.HostSourceIPv4 != "" || network.HostSourceIPv6 != "" || len(r.HostNetworkPortHops) > 0
 	directory := r.HostNetworkDirectory
 	if directory == "" {
@@ -152,6 +161,22 @@ func (r *Reconciler) syncHostNetwork(ctx context.Context, network desiredstate.N
 		ExemptIPv4: exemptAddress(network.OutboundSourceIP, 4),
 		ExemptIPv6: exemptAddress(network.OutboundSourceIP, 6),
 		PortHops:   r.HostNetworkPortHops,
+	}
+	desired.ExtraExemptIPv4, desired.ExtraExemptIPv6 = desiredstate.ExtraHostExemptions(state)
+	for _, family := range hostNetworkFamilies(network) {
+		extra := desired.ExtraExemptIPv4
+		if family.family == 6 {
+			extra = desired.ExtraExemptIPv6
+		}
+		if len(extra) > 16 {
+			return fmt.Errorf("extra IPv%d exemptions exceed the limit of 16", family.family)
+		}
+	}
+	if len(desired.ExtraExemptIPv4)+len(desired.ExtraExemptIPv6) > 0 {
+		status, err := hostnet.ReadStatus(directory)
+		if err != nil || !slices.Contains(status.Features, hostnet.FeatureExtraExempt) {
+			return errors.New("the host-network helper is too old for extra exemptions; run qui-update --component agent once on the node")
+		}
 	}
 	if err := hostnet.WriteDesired(directory, desired); err != nil {
 		return err

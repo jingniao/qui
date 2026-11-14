@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
@@ -24,6 +25,54 @@ const (
 // interface exist locally. It is injectable so tests can simulate an address
 // that appears later; the default inspects the host.
 type networkAvailable func(desiredstate.Network) error
+
+// verifyOutboundNetworks checks the same effective bindings the native cores
+// render, before any runtime or retained revision is changed. The node binding
+// also applies to core-owned internal outbounds, so it is checked separately.
+func (r *Reconciler) verifyOutboundNetworks(state desiredstate.State) error {
+	available := r.NetworkAvailable
+	if available == nil {
+		available = verifyNetworkAvailable
+	}
+	if state.Network != nil {
+		if err := available(*state.Network); err != nil {
+			return err
+		}
+	}
+	outbounds := state.Outbounds
+	if _, multi := r.Adapter.(*core.MultiRuntime); multi {
+		// MultiRuntime renders only active cores and their reachable graphs.
+		// GOST does not render these source bindings or user outbounds.
+		outbounds = nil
+		seen := map[string]bool{}
+		for _, inbound := range state.Inbounds {
+			name := inbound.Core
+			if name == "" {
+				name = r.Adapter.Name()
+			}
+			if !inbound.Enabled || name == desiredstate.CoreGost || seen[name] {
+				continue
+			}
+			seen[name] = true
+			outbounds = append(outbounds, state.ForCore(name, r.Adapter.Name()).Outbounds...)
+		}
+	}
+	checked := map[desiredstate.Network]bool{}
+	for _, outbound := range outbounds {
+		if !outbound.Enabled || outbound.Protocol == "block" || outbound.SourceIP == "" && outbound.SourceInterface == "" {
+			continue
+		}
+		network := state.OutboundNetwork(outbound.ID)
+		if checked[network] {
+			continue
+		}
+		if err := available(network); err != nil {
+			return fmt.Errorf("outbound %s: %w", outbound.ID, err)
+		}
+		checked[network] = true
+	}
+	return nil
+}
 
 // verifyNetworkAvailable is the host check used unless a Reconciler injects its
 // own: the source address must be assigned to a local interface, the interface

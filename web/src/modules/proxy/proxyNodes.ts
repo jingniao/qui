@@ -1,6 +1,6 @@
 // proxyNodes.ts: Data management for unified proxy nodes & relay canvas schemas
 import { reactive } from 'vue';
-import { canvasAPI, canvasSchemeToRelayScheme, choices, relaySchemeToCanvasInput, type CanvasScheme, type CanvasSchemeContext } from './api';
+import { canvasAPI, canvasSchemeToRelayScheme, choices, relaySchemeToCanvasInput, type CanvasEntryBinding, type CanvasScheme, type CanvasSchemeContext } from './api';
 
 export type NodeSourceType = 'self_hosted' | 'subscription' | 'manual';
 // How an import source was stored by the panel: a fetched HTTPS subscription
@@ -56,6 +56,7 @@ export interface ProxyNodeItem {
   sourceName: string; // e.g. "香港 HKT" or "AmyTelecom 订阅" or "单独导入"
   sourceId?: string;
   proxyKey?: string;
+  revision?: number;
   inboundId?: string;   // Associated server ID or subscription ID
   server: string;
   port: number;
@@ -111,6 +112,7 @@ export interface CanvasNodeInstance {
   x: number;
   y: number;
   role: 'entry' | 'relay' | 'exit';
+  entryBinding?: CanvasEntryBinding;
   relayPortMode?: 'auto' | 'manual';
   relayPort?: number;
   listenPort?: number;

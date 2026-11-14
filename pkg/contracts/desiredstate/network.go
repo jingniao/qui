@@ -38,6 +38,37 @@ func NetworkOrNil(outboundSourceIP, outboundInterface, hostSourceIPv4, hostSourc
 	return &network
 }
 
+// OutboundNetwork is the source binding one outbound dials from (v1.5.5 item
+// 17): its own source IP and interface, each falling back to the node's core
+// outbound settings. An unknown ID (an internal outbound) gets the node's.
+func (s State) OutboundNetwork(id string) Network {
+	var network Network
+	if s.Network != nil {
+		network = *s.Network
+	}
+	for _, outbound := range s.Outbounds {
+		if outbound.ID != id {
+			continue
+		}
+		if outbound.SourceIP != "" {
+			network.OutboundSourceIP = outbound.SourceIP
+		}
+		if outbound.SourceInterface != "" {
+			network.OutboundInterface = outbound.SourceInterface
+		}
+		break
+	}
+	return network
+}
+
+// Baseline is the state every published configuration starts from: no users,
+// inbounds or policies, only the built-in direct and block outbounds and the
+// node's outbound network. Published as is (v1.5.5 item 11) it gives a node a
+// first confirmed revision without starting any proxy core.
+func Baseline(nodeID string, network *Network) State {
+	return State{SchemaVersion: 1, Revision: 1, NodeID: nodeID, Logging: Logging{DomainOnly: true}, Users: []User{}, Credentials: []Credential{}, Inbounds: []Inbound{}, Outbounds: []Outbound{{ID: "direct", Protocol: "direct", Enabled: true}, {ID: "block", Protocol: "block", Enabled: true}}, OutboundGroups: []OutboundGroup{}, ProxyChains: []ProxyChain{}, Policies: []Policy{}, Network: network}
+}
+
 // Validate checks the permanent syntax of the settings. It never resolves an
 // address or an interface: whether they exist is decided on the node when the
 // configuration is applied.

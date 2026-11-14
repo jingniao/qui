@@ -271,7 +271,7 @@ OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监�
 
 对应地址族启用了服务器强制出站，且出站有效源 IP 不同于服务器级核心源 IP 和强制地址时，Agent 把它加入 `extra_exempt_ipv4/extra_exempt_ipv6`，避免被整机 SNAT 改写。每族最多 16 个，去重排序；原单地址豁免保持。需要额外豁免但 helper 未上报支持时返回 `host_source_exempt_unsupported`，在节点运行 `qui-update --component agent` 更新本机 helper；网页升级 Agent 不会替换 helper 使用的 `/usr/local/bin/proxy-agent`。
 
-更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。已有 `desired.json` 会重放；helper 从未运行、没有回执时取得首次能力标记的流程 **待核实**。逐出站绑定的地址／网卡不存在时，切核前检查尚未覆盖，不能保证与服务器级设置一样返回 `network_unavailable`。降级旧 helper 前先清除需额外豁免的组合并发布，避免旧 helper 拒绝保留请求中的新字段。
+更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。已有 `desired.json` 会重放；helper 从未运行、没有回执时取得首次能力标记的流程 **待核实**。Agent 在渲染、修订持久化与切核之前，按激活核心的可达出站检查有效源 IP／网卡；地址不存在或不属于指定网卡时返回 `network_unavailable`，保留最后成功配置。降级旧 helper 前先清除需额外豁免的组合并发布，避免旧 helper 拒绝保留请求中的新字段。
 
 helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartLimitIntervalSec=0`，不受 systemd 默认的启动频率限制（10 秒内 5 次），path 单元因此不会以 `unit-start-limit-hit` 停止；OpenRC 的 watcher 不会因 helper 失败而退出。Agent 只有在 `status.json` 确认同一 `id` 的“清除”请求成功后，才把保留的清除请求视为已生效，否则重新发布并等待结果。早于此修复的版本可能已经停在这种状态（`systemctl status proxy-agent-host-network.path` 显示 `unit-start-limit-hit`）：升级时 `install.sh` 发现 oneshot 单元处于 `failed` 会 `reset-failed` 并重放一次保留的文件；不升级时可手动执行 `systemctl reset-failed proxy-agent-host-network.service proxy-agent-host-network.path && systemctl start proxy-agent-host-network.path proxy-agent-host-network.service`。
 
@@ -686,7 +686,7 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 ### 21.1 中转方案撤除与遗留资源（v1.5.5）
 
-新建常用路径从「添加中转」选择入口、可选中间服务器和入口协议，再预览并创建发布；新入口默认加入出口入站所在合格分组。后端绑定支持复用已有入口并首次记录原出站，高级画布尚无 entryBinding 编辑入口；撤除弹窗可选恢复目标。节点列表路径摘要来自草稿；验收同时看六项状态与实际订阅，订阅总体条件不保证逐用户权限，历史 TCP 探测不证明代理全路径连通。
+新建常用路径从「添加中转」选择入口、可选中间服务器和入口协议，再预览并创建发布；新入口默认加入出口入站所在合格分组。后端绑定支持复用已有入口并首次记录原出站，高级画布可编辑新建／复用入口并在保存布局时保留绑定，撤除弹窗可选恢复目标；本版真实浏览器交互尚未验收。节点列表路径摘要来自草稿；验收同时看六项状态与实际订阅，订阅总体条件不保证逐用户权限，历史 TCP 探测不证明代理全路径连通。
 
 撤除用「停用并移除」：先查看 remove-plan 的入口、分组、专用／共享对象和发布顺序，确认人工改动；复用入口的原恢复目标已失效时显式选目标。执行先停新入口或恢复复用入口并确认，再按入口→中间→出口停通道，确认后清理专用对象，共享引用保留。不要用删除单个内部监听代替整方案撤除。第二阶段取消后先确认通道回滚成功，再按配置历史手动恢复入口；当前无崩溃后补偿重放，须核对批次、当前修订与资源后再操作。
 

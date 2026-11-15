@@ -144,7 +144,7 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		// one older than the capability report, must not reach an Agent that would
 		// silently ignore the settings.
 		if err := ValidateInboundServerSettings(n.Capabilities, record.Core, record.Protocol, record.Settings); err != nil {
-			return state, enabled, fmt.Errorf("inbound %s: %w", record.ID, err)
+			return state, enabled, fmt.Errorf("入站「%s」（%s）：%w", record.Name, record.ID, err)
 		}
 		// An acme inbound is published with the pair read from the certificate
 		// library; one without a pair must fail the publication instead of reaching
@@ -237,6 +237,11 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		}
 		if len(inbound.CredentialIDs) == 0 && inbound.Protocol != "forward" {
 			inbound.Enabled = false
+		}
+		if inbound.Enabled {
+			if err := ValidateShadowsocksMethod(inbound.Protocol, inbound.Settings); err != nil {
+				return state, enabled, fmt.Errorf("入站「%s」（%s）：%w", record.Name, record.ID, err)
+			}
 		}
 		state.Inbounds = append(state.Inbounds, inbound)
 	}

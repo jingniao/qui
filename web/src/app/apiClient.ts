@@ -58,6 +58,7 @@ const messages: Record<string, string> = {
   rate_limited: '登录尝试次数过多，请在 15 分钟后重试。',
   owner_protected: 'Owner 账号受保护，不能禁用、删除或由其他账号重置。',
   conflict: '系统已初始化，或该用户名已经存在。',
+  password_changed: '密码已被其他请求修改，请使用新密码重新登录。',
   not_found: '目标记录不存在。',
   internal_error: '服务暂时无法完成操作，请稍后重试。',
   user_inactive: '用户或设备已禁用、到期，或流量额度已用完。',
@@ -85,6 +86,8 @@ const messages: Record<string, string> = {
   tuning_unsupported: '该 Agent 未声明服务器调优能力（需升级到支持调优的版本）。',
   invalid_tuning: '调优请求包含白名单以外的键或超出允许范围的取值。',
   tunnel_in_use: '该隧道仍被方案引用，请先移除这些引用。',
+  inbound_in_canvas_scheme: '该入站仍是中转方案的入口，请在所属方案中使用「停用并移除」。',
+  inbound_detached_entry: '该入站已脱离方案，请到中转方案 → 遗留资源中撤除。',
   object_owned: '该对象已由其他隧道认领，不能在此处接管。'
 };
 

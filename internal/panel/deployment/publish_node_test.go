@@ -197,6 +197,10 @@ func TestPublishNodeCreatesAndDeploysRevision(t *testing.T) {
 func TestPublishNodeKeepsDraftWhenDependencyNotReady(t *testing.T) {
 	p := newPublishPanel(t)
 	p.relayOutbound(p.nodeA, p.nodeB)
+	// An internal entry carries its own credential and remains enabled on render.
+	if _, err := p.handler.Proxy.(*proxy.Service).SaveInbound(p.ctx, "", proxy.InboundInput{Name: "relay entry", NodeID: p.nodeA, Protocol: "socks5", Listen: "127.0.0.1", Port: 1081, Enabled: true, InternalRelay: true, DefaultOutbound: "relay"}); err != nil {
+		t.Fatal(err)
+	}
 	cookie, csrf := p.session("Owner")
 	response := p.publish(p.nodeA, `{"summary":"Publish relay"}`, cookie, csrf)
 	if response.Code != 409 {

@@ -73,8 +73,8 @@
     <template v-else>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
       <EmptyState v-if="!filtered.length" title="没有匹配的服务器" description="请调整筛选条件，或新增服务器并完成登记。" />
-      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :machine-traffic="machineTraffic" :reorderable="canReorder" :can-add-relay="canAddRelay" @add-relay="openQuickRelay" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" @move="move" @reorder="reorder" />
-      <ServerInventory v-else :rows="pageRows" :columns="columns" :owner="isOwner" :selected="selected" :reorderable="canReorder" @toggle="toggle" @install="enrollment?.reissue($event)" @delete="deletion?.prompt($event)" @move="move" />
+      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :machine-traffic="machineTraffic" :reorderable="canReorder" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" @reorder="reorder" />
+      <ServerInventory v-else :rows="pageRows" :columns="columns" :owner="isOwner" :selected="selected" @toggle="toggle" @install="enrollment?.reissue($event)" @delete="deletion?.prompt($event)" />
       <p v-if="displayMode === 'list' && filtered.length && hiddenColumns.length" class="text-xs text-ios-tertiary">当前筛选的服务器均无可用数据，已隐藏：{{ hiddenColumns.join('、') }}。</p>
       <Pagination v-if="displayMode === 'list' && filtered.length > 20" :total="filtered.length" :current-page="page" :page-size="20" @update:page="changePage" />
     </template>
@@ -82,12 +82,11 @@
     <ServerQuickEdit v-if="isOwner" ref="quickEdit" :known-tags="tagChoices.tags.map(item => item.tag)" @changed="load" />
     <ServerEnrollment v-if="isOwner" ref="enrollment" @changed="load" />
     <ServerDeleteDialog v-if="isOwner" ref="deletion" @changed="load" />
-    <QuickRelayDialog v-if="isOwner && quickRelayNodeId" :servers="nodes" :inbounds="relayInbounds" :groups="relayGroups" :initial-entry-node-id="quickRelayNodeId" @close="quickRelayNodeId = ''" @created="load" />
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
 import ServerCardGrid from '../components/ServerCardGrid.vue';
 import ServerQuickEdit from '../components/ServerQuickEdit.vue';
 import ServerDisplayMode from '../components/ServerDisplayMode.vue';
@@ -98,12 +97,11 @@ import { localInput, utcInput } from '../../../app/time';
 import { request } from '../../../app/apiClient';
 import { nodeAPI, type MachineTrafficSummary, type NodeView } from '../api';
 import { groupAPI, type NodeGroup } from '../groupsApi';
-import { choices, proxyAPI, type Inbound } from '../../proxy/api';
-import QuickRelayDialog from '../../proxy/components/QuickRelayDialog.vue';
+import { choices } from '../../proxy/api';
 import { accessAPI } from '../../access/api';
 import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
 import { serverRow, serverStatus, statusOptions } from '../components/serverListModel';
-import { applyServerOrder, matchesTag, moveServer, reorderServer, tagOptions, UNTAGGED } from '../serverOrder';
+import { applyServerOrder, matchesTag, reorderServer, tagOptions, UNTAGGED } from '../serverOrder';
 import { APIError } from '../../../app/apiClient';
 import PageHeader from '../../../components/PageHeader.vue';
 import Pagination from '../../../components/Pagination.vue';
@@ -132,28 +130,6 @@ const nodes = ref<NodeView[]>([]), groups = ref<NodeGroup[]>([]);
 const loading = ref(false), error = ref(''), warnings = ref<string[]>([]), selected = ref<string[]>([]);
 const today = ref<Record<string, number>>({}), month = ref<Record<string, number>>({}), monthZone = ref('');
 const now = ref(Date.now());
-const quickRelayNodeId = ref('');
-const relayInbounds = ref<Inbound[]>([]), relayGroups = ref<NodeGroup[]>([]);
-const relayLoading = ref(false);
-function canAddRelay(node: NodeView) {
-  return isOwner.value && node.enabled && !node.deletedAt && serverStatus(node, now.value).key === 'online';
-}
-async function openQuickRelay(node: NodeView) {
-  if (!canAddRelay(node) || relayLoading.value) return;
-  relayLoading.value = true;
-  try {
-    const [inbounds, availableGroups] = await Promise.all([
-      choices((page, size) => proxyAPI.inbounds('', page, size)), choices(groupAPI.list)
-    ]);
-    relayInbounds.value = inbounds;
-    relayGroups.value = availableGroups;
-    quickRelayNodeId.value = node.id;
-  } catch (e) {
-    showToast(`读取中转选项失败：${(e as Error).message}`, 'error');
-  } finally { relayLoading.value = false; }
-}
-// Row menus are nested inside ServerInventory; keep the dialog owned by this page.
-provide('serverQuickRelay', { canOpen: canAddRelay, open: openQuickRelay });
 const enrollment = ref<InstanceType<typeof ServerEnrollment>>(), deletion = ref<InstanceType<typeof ServerDeleteDialog>>();
 function readQuery() {
   keyword.value = scalar(route.query.keyword);
@@ -194,31 +170,49 @@ const filtered = computed(() => ordered.value.filter(node => {
 }));
 // Ordering only a filtered subset or one page would be ambiguous, so it needs the
 // full, unfiltered first page.
-const canReorder = computed(() => isOwner.value && !deleted.value && !scalar(route.query.keyword).trim() && status.value === 'all' && adviceFilter.value === 'all' && !tag.value && page.value === 1 && filtered.value.length > 1);
+const canReorder = computed(() => ours() && isOwner.value && !deleted.value && !scalar(route.query.keyword).trim() && status.value === 'all' && adviceFilter.value === 'all' && !tag.value && page.value === 1 && filtered.value.length > 1);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let orderDirty = false;
+let orderSavePromise: Promise<void> | undefined;
 function setOrder(ids: string[]) {
   orderIds.value = ids;
+  orderDirty = true;
   // Quick successive moves are merged into one save.
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { void saveOrder(); }, 500);
 }
-async function saveOrder() {
-  const ids = ordered.value.filter(node => !node.deletedAt).map(node => node.id);
-  try {
-    const result = await nodeAPI.saveServerOrder(ids, savedOrder.value.revision);
-    savedOrder.value = { ids: result.ids, revision: result.revision };
-  } catch (e) {
-    const conflict = e instanceof APIError && e.status === 409;
-    showToast(conflict ? '服务器顺序已在别处修改，已重新读取' : `保存顺序失败：${(e as Error).message}`, 'error');
-    if (conflict) {
-      const latest = await nodeAPI.serverOrder().catch(() => null);
-      if (latest) savedOrder.value = { ids: latest.ids, revision: latest.revision };
+function saveOrder(): Promise<void> {
+  clearTimeout(saveTimer);
+  // Route leave must await the whole queue, including edits made during a PUT.
+  if (orderSavePromise) return orderSavePromise;
+  if (!orderDirty) return Promise.resolve();
+  orderSavePromise = persistOrder().finally(() => { orderSavePromise = undefined; });
+  return orderSavePromise;
+}
+async function persistOrder() {
+  while (orderDirty) {
+    orderDirty = false;
+    const ids = ordered.value.filter(node => !node.deletedAt).map(node => node.id);
+    try {
+      const result = await nodeAPI.saveServerOrder(ids, savedOrder.value.revision);
+      savedOrder.value = { ids: result.ids, revision: result.revision };
+    } catch (e) {
+      const conflict = e instanceof APIError && e.status === 409;
+      showToast(conflict ? '服务器顺序已在别处修改，已重新读取' : `保存顺序失败：${(e as Error).message}`, 'error');
+      if (conflict) {
+        try {
+          const latest = await nodeAPI.serverOrder();
+          savedOrder.value = { ids: latest.ids, revision: latest.revision };
+        } catch (readError) {
+          showToast(`服务器顺序读取失败：${(readError as Error).message}`, 'error');
+          orderDirty = false;
+        }
+      }
+      if (!orderDirty) orderIds.value = savedOrder.value.ids;
     }
-    orderIds.value = savedOrder.value.ids;
   }
 }
 function visibleIds() { return ordered.value.map(node => node.id); }
-function move(id: string, delta: -1 | 1) { setOrder(moveServer(visibleIds(), id, delta)); }
 function reorder(fromId: string, toId: string) { setOrder(reorderServer(visibleIds(), fromId, toId)); }
 const rows = computed(() => filtered.value.map(node => serverRow(node, now.value, today.value[node.id], month.value[node.id])));
 const columns = computed(() => (rows.value[0]?.fields || []).filter(field => rows.value.some(row => row.fields.some(item => item.key === field.key && item.value !== '—'))));
@@ -237,7 +231,7 @@ async function load() {
       nodeAPI.machineTrafficBatch()
     ]);
     void nodeAPI.serverOrder().then(order => {
-      if (current !== generation) return;
+      if (current !== generation || orderDirty || orderSavePromise || order.revision < savedOrder.value.revision) return;
       savedOrder.value = { ids: order.ids, revision: order.revision }; orderIds.value = order.ids;
     }).catch(e => {
       if (current === generation) warnings.value = [`服务器顺序读取失败：${(e as Error).message}`];
@@ -322,9 +316,13 @@ onMounted(() => {
   window.addEventListener('proxy-node-status', onNodeStatus);
   document.addEventListener('visibilitychange', onVisibilityChange);
 });
+onBeforeRouteLeave(async () => {
+  // The out-in layout creates a fresh queue when this page is entered again.
+  await saveOrder();
+});
 onUnmounted(() => {
   generation++;
-  clearTimeout(saveTimer);
+  void saveOrder();
   clearInterval(timer);
   clearInterval(fallbackTimer);
   throttledSilentRefresh.cancel();

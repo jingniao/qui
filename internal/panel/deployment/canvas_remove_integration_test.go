@@ -95,7 +95,8 @@ func TestCanvasRemovalRealBatchOrderAndFailureRecovery(t *testing.T) {
 						if h.revision(h.alpine) != previous {
 							t.Fatal("entry revision not restored")
 						}
-						want := []string{h.alpine, h.alpine, h.us2, "rollback:" + h.alpine, "rollback:" + h.alpine}
+						// The entry server stops the entry and drops its relay outbounds in one revision.
+						want := []string{h.alpine, h.us2, "rollback:" + h.alpine}
 						if !reflect.DeepEqual(order, want) {
 							t.Fatalf("order %v want %v", order, want)
 						}
@@ -106,7 +107,7 @@ func TestCanvasRemovalRealBatchOrderAndFailureRecovery(t *testing.T) {
 						if _, err = h.service.Repository.CanvasScheme(h.ctx, scheme.ID); !errors.Is(err, proxy.ErrNotFound) {
 							t.Fatalf("scheme retained: %v", err)
 						}
-						want := []string{h.alpine, h.alpine, h.us2}
+						want := []string{h.alpine, h.us2}
 						if !reflect.DeepEqual(order, want) {
 							t.Fatalf("order %v want %v", order, want)
 						}

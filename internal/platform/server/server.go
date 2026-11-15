@@ -72,6 +72,8 @@ type Server struct {
 	trafficService      *access.Service
 	nodeRepository      *node.Repository
 	deployments         *deployment.Repository
+	tunnelPublications  *proxy.Service
+	tunnelFinalizeWake  chan struct{}
 	readPool            *sql.DB
 	retentionWake       chan struct{}
 	backupWake          chan struct{}
@@ -324,6 +326,14 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		return nil, err
 	}
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
+	s.tunnelPublications = proxyService
+	s.tunnelFinalizeWake = make(chan struct{}, 1)
+	deployments.BatchChanged = func() {
+		select {
+		case s.tunnelFinalizeWake <- struct{}{}:
+		default:
+		}
+	}
 	policyService := &policy.Service{Repository: &policy.Repository{Database: database, Vault: configurationVault, ClientReferences: clientServiceReferences{}}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository,
 		NodeCapabilities: func(ctx context.Context, nodeID string) ([]desiredstate.CoreKeywordCapability, error) {
 			n, err := nodeRepository.Get(ctx, nodeID)
@@ -593,10 +603,14 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 			return err
 		}
 	}
+	if err := s.tunnelPublications.ReconcileTunnelPublications(ctx, true); err != nil {
+		s.Logger.Error("startup tunnel publication finalization failed", "error", err)
+	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(11)
+	jobs.Add(12)
 	defer func() { stopBackground(); jobs.Wait() }()
+	go func() { defer jobs.Done(); s.runTunnelFinalization(background) }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
 	// One worker owns issuance and renewal: it marks interrupted runs, sweeps
 	// hourly and issues one certificate at a time.

@@ -201,15 +201,19 @@ func applySwitch(ctx context.Context, previous, configuration core.RenderedConfi
 	if err := start(ctx, configuration); err != nil {
 		result.Code = "start_failed"
 		result.Message = "Xray startup or health check failed"
+		restoreErr := rulesets.RestoreBeforeRestart(ctx)
+		if restoreErr != nil {
+			result.Code = "rollback_failed"
+		}
 		if previous.Revision > 0 {
 			if rollbackErr := start(context.Background(), previous); rollbackErr != nil {
 				result.Code = "rollback_failed"
 				result.Message = "Xray failed and previous revision could not restart"
-				return fmt.Errorf("core startup and rollback failed")
+				return errors.Join(err, restoreErr, rollbackErr)
 			}
 			result.RolledBack = true
 		}
-		return errors.New(result.Message)
+		return errors.Join(err, restoreErr)
 	}
 	return nil
 }

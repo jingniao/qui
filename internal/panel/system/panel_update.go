@@ -160,8 +160,8 @@ type PanelUpdateService struct {
 	// set it; the zero value means time.Now.
 	Now func() time.Time
 
-	// mu guards the in-memory cache of the last successful lookup. A failed lookup
-	// is never cached, so a retry asks GitHub again.
+	// mu guards the release cache and serializes submission from the busy check
+	// through request publication. A failed lookup is never cached.
 	mu       sync.Mutex
 	cached   *PanelUpdateRelease
 	cachedAt time.Time
@@ -276,10 +276,14 @@ func parseReleaseVersion(value string) ([3]int, bool) {
 // latestRelease answers the newest official release, from the cache while it is
 // younger than panelUpdateCacheTTL and refresh is false.
 func (s *PanelUpdateService) latestRelease(ctx context.Context, refresh bool) (*PanelUpdateRelease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.latestReleaseLocked(ctx, refresh)
+}
+
+func (s *PanelUpdateService) latestReleaseLocked(ctx context.Context, refresh bool) (*PanelUpdateRelease, error) {
 	if !refresh {
-		s.mu.Lock()
 		cached, at := s.cached, s.cachedAt
-		s.mu.Unlock()
 		if cached != nil && s.now().Sub(at) < panelUpdateCacheTTL {
 			return cached, nil
 		}
@@ -288,9 +292,7 @@ func (s *PanelUpdateService) latestRelease(ctx context.Context, refresh bool) (*
 	if err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
 	s.cached, s.cachedAt = release, s.now()
-	s.mu.Unlock()
 	return release, nil
 }
 
@@ -385,6 +387,8 @@ func (s *PanelUpdateService) Submit(ctx context.Context, version, actor string) 
 	if reason := s.unsupportedReason(); reason != "" {
 		return PanelUpdateRequest{}, PanelUpdateUnsupportedError{Reason: reason}
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	status := s.readStatus()
 	if pending := s.outstandingRequest(status); pending != nil && !pending.Stalled {
 		return PanelUpdateRequest{}, ErrPanelUpdateBusy
@@ -392,7 +396,7 @@ func (s *PanelUpdateService) Submit(ctx context.Context, version, actor string) 
 	if status != nil && status.State == panelUpdateRunning && !status.Interrupted {
 		return PanelUpdateRequest{}, ErrPanelUpdateBusy
 	}
-	latest, err := s.latestRelease(ctx, false)
+	latest, err := s.latestReleaseLocked(ctx, false)
 	if err != nil {
 		return PanelUpdateRequest{}, ErrPanelUpdateCheckFailed
 	}

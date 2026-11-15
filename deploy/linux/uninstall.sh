@@ -242,6 +242,9 @@ fi
 
 registry=/var/lib/proxycontrol-install
 [[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'No protected installation registry.'
+[[ ! -L $registry/update.lock ]] || fail 'Symlinked update lock.'
+exec 8>"$registry/update.lock"
+flock -n 8 || fail '更新正在进行，请稍后再卸载。'
 [[ ! -L $registry/operation.lock ]] || fail 'Symlinked installation lock.'
 exec 9>"$registry/operation.lock"
 flock -n 9 || fail 'Another installation operation is running.'

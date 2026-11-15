@@ -12,7 +12,6 @@ import (
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription/source/published"
-	"proxycontrol/internal/platform/id"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
 )
@@ -95,6 +94,7 @@ type PublishServerResult struct {
 	Message  string `json:"message,omitempty"`
 }
 type PublishResult struct {
+	Status        string                `json:"status"`
 	GostRemovable []GostInstallNode     `json:"gostRemovable"`
 	BatchID       string                `json:"batchId,omitempty"`
 	Servers       []PublishServerResult `json:"servers"`
@@ -103,7 +103,9 @@ type PublishResult struct {
 // TunnelDeployer uses the same deployment batches as canvas, but waits for their
 // terminal results before advancing the captured business-object versions.
 type TunnelDeployer interface {
-	PublishTunnels(context.Context, string, string, []NodeSnapshot) (CanvasPublishResult, error)
+	CheckTunnelPublicationNodes(context.Context, *sql.Tx, []string) error
+	PublishTunnels(context.Context, string, string, string, []NodeSnapshot) (CanvasPublishResult, error)
+	TunnelPublicationResult(context.Context, string) (CanvasPublishResult, error)
 	GostRemovable(context.Context, string) (bool, error)
 }
 type managedInbound struct {
@@ -519,13 +521,20 @@ func (r *Repository) replaceManagedInbounds(ctx context.Context, remove, desired
 		return err
 	}
 	defer tx.Rollback()
+	if err = r.replaceManagedInboundsTx(ctx, tx, remove, desired); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) replaceManagedInboundsTx(ctx context.Context, tx *sql.Tx, remove, desired []managedInbound) error {
 	keep := map[string]bool{}
 	for _, in := range desired {
 		keep[in.id] = true
 	}
 	for _, in := range remove {
 		if !keep[in.id] {
-			if _, err = tx.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", in.id); err != nil {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", in.id); err != nil {
 				return err
 			}
 		}
@@ -535,7 +544,7 @@ func (r *Repository) replaceManagedInbounds(ctx context.Context, remove, desired
 		if e != nil {
 			return e
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core) VALUES(?,?,?,'forward',?,?,?,0,0,'direct','[]',?,'',?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,listen=excluded.listen,port=excluded.port,enabled=excluded.enabled,encrypted_settings=excluded.encrypted_settings,core=excluded.core`, in.id, in.input.Name, in.input.NodeID, in.input.Listen, in.input.Port, in.input.Enabled, encoded, timestamp(), in.input.Core)
+		_, err := tx.ExecContext(ctx, `INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core) VALUES(?,?,?,'forward',?,?,?,0,0,'direct','[]',?,'',?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,listen=excluded.listen,port=excluded.port,enabled=excluded.enabled,encrypted_settings=excluded.encrypted_settings,core=excluded.core`, in.id, in.input.Name, in.input.NodeID, in.input.Listen, in.input.Port, in.input.Enabled, encoded, timestamp(), in.input.Core)
 		if err != nil {
 			return err
 		}
@@ -543,56 +552,46 @@ func (r *Repository) replaceManagedInbounds(ctx context.Context, remove, desired
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection, author string, users AccessReader) (PublishResult, error) {
-	s.canvasMu.Lock()
-	defer s.canvasMu.Unlock()
-	result := PublishResult{Servers: []PublishServerResult{}, GostRemovable: []GostInstallNode{}}
-	p, err := s.buildTunnelPublication(ctx, selection)
-	if err != nil {
-		return result, err
-	}
-	if !p.view.OK {
-		return result, tunnelFail("port_in_use", 409, p.view.Message)
-	}
-	if len(p.view.InstallGost) > 0 {
-		ids := []string{}
-		for _, item := range p.view.InstallGost {
-			ids = append(ids, item.NodeID)
-		}
-		return result, &tunnelError{Code: "gost_install_required", Status: 409, Message: "服务器 " + p.view.InstallGost[0].Name + " 需要先安装 GOST 3.3.2", Details: map[string]any{"nodeIds": ids}}
-	}
+	result := PublishResult{Status: "publishing", Servers: []PublishServerResult{}, GostRemovable: []GostInstallNode{}}
 	deploy, ok := s.Deploy.(TunnelDeployer)
 	if !ok {
 		return result, errors.New("tunnel deployment unavailable")
 	}
-	for i := range p.desired {
-		if p.desired[i].id == "" {
-			p.desired[i].id, err = id.New()
-			if err != nil {
-				return result, err
-			}
+	s.canvasMu.Lock()
+	p, batchID, snapshots, err := s.prepareTunnelPublication(ctx, selection, author, users, deploy)
+	s.canvasMu.Unlock()
+	if err != nil {
+		if batchID != "" {
+			err = errors.Join(err, s.abortTunnelPreparation(context.WithoutCancel(ctx), batchID))
 		}
-	}
-	if err = s.Repository.replaceManagedInbounds(ctx, p.previous, p.desired); err != nil {
 		return result, err
 	}
-	restore := func() error {
-		return s.Repository.replaceManagedInbounds(context.WithoutCancel(ctx), p.desired, p.previous)
+	deployed, err := deploy.PublishTunnels(ctx, batchID, "隧道与规则发布", author, snapshots)
+	result.BatchID = batchID
+	work := context.WithoutCancel(ctx)
+	if err != nil {
+		// A failed start has no remote effects. Once started, only a persisted
+		// terminal outcome may restore the objects, even on a status-read error.
+		return result, errors.Join(err, s.abortTunnelPreparation(work, batchID))
 	}
-	snapshots := []NodeSnapshot{}
-	for _, server := range p.view.Servers {
-		state, intent, e := s.SnapshotIntent(ctx, server.NodeID, users)
-		if e != nil {
-			return result, errors.Join(e, restore())
+	finished, err := s.FinalizeTunnelPublication(work, batchID)
+	if err != nil {
+		return result, err
+	}
+	if finished {
+		deployed, err = deploy.TunnelPublicationResult(work, batchID)
+		if err != nil {
+			return result, err
 		}
-		snapshots = append(snapshots, NodeSnapshot{State: state, InboundIntent: intent, ExpandedOnly: true})
 	}
-	deployed, err := deploy.PublishTunnels(ctx, "隧道与规则发布", author, snapshots)
-	result.BatchID = deployed.BatchID
-	success := err == nil
+	result.Status = "success"
+	if !finished {
+		result.Status = "publishing"
+	}
 	for _, server := range p.view.Servers {
 		item := PublishServerResult{NodeID: server.NodeID, NodeName: server.NodeName, Status: "unchanged"}
 		for _, n := range deployed.Nodes {
@@ -601,37 +600,32 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 				item.Revision = &revision
 				item.Status = n.Status
 				item.Message = tunnelPublishFailureMessage(n)
+				if !finished {
+					item.Status = "publishing"
+					item.Message = "发布仍在进行"
+				}
 			}
 		}
-		if err != nil && item.Status == "unchanged" {
-			item.Status = "skipped"
-			item.Message = err.Error()
-		}
-		if item.Status != "applied" && item.Status != "unchanged" {
-			success = false
-			switch item.Status {
-			case "failed", "rolled_back":
-				// The original revision result above identifies the failure cause.
-			case "skipped":
+		if finished && item.Status != "applied" && item.Status != "unchanged" {
+			result.Status = "failed"
+			if item.Status == "skipped" {
 				item.Message = "发布中止，未下发"
-			default:
-				item.Status = "failed"
-				item.Message = "未确认发布结果，保留草稿与端口声明"
 			}
 		}
 		result.Servers = append(result.Servers, item)
 	}
-	if !success {
-		if e := restore(); e != nil {
-			return result, errors.Join(err, e)
+	if len(deployed.Nodes) == 0 {
+		// No changed node was queued. Preserve the existing no-op result/history.
+		if _, err = s.Repository.Database.ExecContext(work, "DELETE FROM deployment_batches WHERE id=? AND status='success' AND tunnel_finalized=1", batchID); err != nil {
+			return result, err
 		}
+		result.BatchID = ""
+	}
+	if result.Status != "success" {
 		return result, nil
 	}
-	if err = s.Repository.finishTunnelPublication(ctx, p); err != nil {
-		return result, err
-	}
 	for _, server := range p.view.Servers {
-		removable, e := deploy.GostRemovable(ctx, server.NodeID)
+		removable, e := deploy.GostRemovable(work, server.NodeID)
 		if e != nil {
 			return result, e
 		}
@@ -641,22 +635,35 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 	}
 	return result, nil
 }
-
 func (r *Repository) finishTunnelPublication(ctx context.Context, p tunnelPublication) error {
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err = r.finishTunnelPublicationTx(ctx, tx, p); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) finishTunnelPublicationTx(ctx context.Context, tx *sql.Tx, p tunnelPublication) error {
 	finish := func(table, kind, objectID, status string, version int64) error {
 		if status == "pending_delete" {
+			var current int64
+			if e := tx.QueryRowContext(ctx, "SELECT draft_version FROM "+table+" WHERE id=?", objectID).Scan(&current); e != nil {
+				return e
+			}
+			if current != version {
+				return tunnelFail("stale", 409, "发布期间草稿已改变，请重新发布")
+			}
 			if _, e := tx.ExecContext(ctx, "DELETE FROM port_claims WHERE owner_kind=? AND owner_id=?", kind, objectID); e != nil {
 				return e
 			}
 			_, e := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE id=? AND draft_version=?", objectID, version)
 			return e
 		}
-		res, e := tx.ExecContext(ctx, "UPDATE "+table+" SET status='published',published_version=draft_version,published_at=? WHERE id=? AND draft_version=?", timestamp(), objectID, version)
+		res, e := tx.ExecContext(ctx, "UPDATE "+table+" SET status=CASE WHEN draft_version=? THEN 'published' ELSE status END,published_version=?,published_at=? WHERE id=?", version, version, timestamp(), objectID)
 		if e != nil {
 			return e
 		}
@@ -667,25 +674,25 @@ func (r *Repository) finishTunnelPublication(ctx context.Context, p tunnelPublic
 		if count != 1 {
 			return tunnelFail("stale", 409, "发布期间草稿已改变，请重新发布")
 		}
-		_, e = tx.ExecContext(ctx, `DELETE FROM port_claims WHERE owner_kind=? AND owner_id=? AND NOT EXISTS(SELECT 1 FROM tunnel_objects o JOIN inbounds i ON i.id=o.object_id WHERE o.owner_id=? AND o.owner_kind=? AND i.node_id=port_claims.node_id AND i.port=port_claims.port)`, kind, objectID, objectID, strings.ReplaceAll(kind, "tunnel_hop", "tunnel"))
+		_, e = tx.ExecContext(ctx, `DELETE FROM port_claims WHERE owner_kind=? AND owner_id=? AND EXISTS(SELECT 1 FROM `+table+` WHERE id=? AND draft_version=?) AND NOT EXISTS(SELECT 1 FROM tunnel_objects o JOIN inbounds i ON i.id=o.object_id WHERE o.owner_id=? AND o.owner_kind=? AND i.node_id=port_claims.node_id AND i.port=port_claims.port)`, kind, objectID, objectID, version, objectID, strings.ReplaceAll(kind, "tunnel_hop", "tunnel"))
 		return e
 	}
 	for _, rule := range p.rules {
-		if err = finish("tunnel_rules", "rule", rule.ID, rule.Status, rule.DraftVersion); err != nil {
+		if err := finish("tunnel_rules", "rule", rule.ID, rule.Status, rule.DraftVersion); err != nil {
 			return err
 		}
 		if rule.Status != "pending_delete" {
-			if err = r.saveRelaySnapshot(ctx, tx, p.relays[rule.ID]); err != nil {
+			if err := r.saveRelaySnapshot(ctx, tx, p.relays[rule.ID]); err != nil {
 				return err
 			}
 		}
 	}
 	for _, t := range p.tunnels {
-		if err = finish("tunnels", "tunnel_hop", t.ID, t.Status, t.DraftVersion); err != nil {
+		if err := finish("tunnels", "tunnel_hop", t.ID, t.Status, t.DraftVersion); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Only the revision result code is exposed; Agent diagnostic text stays private.

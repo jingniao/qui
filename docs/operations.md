@@ -41,6 +41,8 @@ OpenRC 上 Agent 由 `supervise-daemon` 监管：进程退出后 5 秒重启，�
 
 面板通过一条 SSE（`GET /api/v1/events`）推送节点状态、发布状态、总览变化和告警，不轮询数据库。
 
+v1.5.6 待发布修复按角色过滤 SSE：Viewer 仅收到节点、发布、总览状态和 node_offline/cpu/memory/disk 四类监控通知。每 15 秒重新认证时更新角色，降权生效后不再发送 Owner 告警。
+
 ## 2. 备份与恢复
 
 **备份内容**：SQLite 一致性快照、系统配置、中央证书材料、规则集和必要密钥的加密副本。备份文件（`.pcb`）用备份口令加密，默认目录是 `<database 所在目录>/backups`（示例 `/var/lib/proxy-panel/backups`）。
@@ -271,7 +273,7 @@ OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监�
 
 对应地址族启用了服务器强制出站，且出站有效源 IP 不同于服务器级核心源 IP 和强制地址时，Agent 把它加入 `extra_exempt_ipv4/extra_exempt_ipv6`，避免被整机 SNAT 改写。每族最多 16 个，去重排序；原单地址豁免保持。需要额外豁免但 helper 未上报支持时返回 `host_source_exempt_unsupported`，在节点运行 `qui-update --component agent` 更新本机 helper；网页升级 Agent 不会替换 helper 使用的 `/usr/local/bin/proxy-agent`。
 
-更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。已有 `desired.json` 会重放；helper 从未运行、没有回执时取得首次能力标记的流程 **待核实**。Agent 在渲染、修订持久化与切核之前，按激活核心的可达出站检查有效源 IP／网卡；地址不存在或不属于指定网卡时返回 `network_unavailable`，保留最后成功配置。降级旧 helper 前先清除需额外豁免的组合并发布，避免旧 helper 拒绝保留请求中的新字段。
+更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。安装或升级会主动启动 helper：已有 `desired.json` 会重放；没有请求时写空 ID、`ok=true` 和 features 的初始回执，不改网络规则。systemd 与 OpenRC 安装器都等待首次回执写完，Agent 仍按请求 ID 确认配置和清除结果，空 ID 只用于能力声明。Agent 在渲染、修订持久化与切核之前，按激活核心的可达出站检查有效源 IP／网卡；地址不存在或不属于指定网卡时返回 `network_unavailable`，保留最后成功配置。降级旧 helper 前先清除需额外豁免的组合并发布，避免旧 helper 拒绝保留请求中的新字段。
 
 helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartLimitIntervalSec=0`，不受 systemd 默认的启动频率限制（10 秒内 5 次），path 单元因此不会以 `unit-start-limit-hit` 停止；OpenRC 的 watcher 不会因 helper 失败而退出。Agent 只有在 `status.json` 确认同一 `id` 的“清除”请求成功后，才把保留的清除请求视为已生效，否则重新发布并等待结果。早于此修复的版本可能已经停在这种状态（`systemctl status proxy-agent-host-network.path` 显示 `unit-start-limit-hit`）：升级时 `install.sh` 发现 oneshot 单元处于 `failed` 会 `reset-failed` 并重放一次保留的文件；不升级时可手动执行 `systemctl reset-failed proxy-agent-host-network.service proxy-agent-host-network.path && systemctl start proxy-agent-host-network.path proxy-agent-host-network.service`。
 
@@ -692,6 +694,10 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 「仅删除画布」不会停运行资源，绑定转 detached。打开遗留资源查看 detached 入口、孤立通道及未归属对象；重新挂接只重建草稿与归属，不发布。「完整撤除」先挂接再走同一撤除预览／执行，非连通或缺失端点须先处理；备份保留原出站记录，缺失目标不被改写为 direct。
 
+### v1.5.6 隧道发布收尾（待发布）
+
+隧道发布将业务收尾记录与生成对象持久保存（迁移 0149）。关闭页面或 HTTP 请求断开不取消已开始的发布；等待超过 300 秒返回 202、status=publishing 和 batchId，页面显示仍在发布。批次终态、周期扫描和面板重启调用同一幂等收尾，未收尾前保留节点与对象占用。成功才推进捕获版本和订阅快照；终态失败恢复生成对象。此规则适用于隧道管理发布，不改变画布撤除的既有限制。
+
 ## 22. 通知与告警（v1.5）
 
 ### 22.1 规则与评估
@@ -716,3 +722,5 @@ Owner 在「系统设置 → 通知」中配置外发渠道：
 - `channel_network`：网络连接失败（如 DNS 解析失败、TCP 连接被拒绝）。检查面板服务器的 DNS 配置与外部网络连通性。
 - `channel_http`：上游服务器返回 HTTP 4xx 或 5xx 错误响应（如 Webhook 接收端发生内部错误）。核对 Webhook 接收端服务日志。
 - `channel_rejected`：请求被拒绝或参数无效（例如 Telegram 返回 `{"ok": false, "description": "..."}`，如 Token 错误、Chat ID 不存在或机器人未加入群组；或 Webhook 使用了非 HTTPS 地址）。核对渠道 Token、Chat ID 与 URL 配置。
+
+投递校验（v1.5.6 待发布）：Telegram 的 2xx 响应必须为完整合法 JSON 且 ok=true；Webhook 的重定向目标也必须为 HTTPS。渠道读取、解密和投递结果保存错误写 WARN，仅记录渠道 ID 和固定错误码，不记录 Token、配置或上游正文。

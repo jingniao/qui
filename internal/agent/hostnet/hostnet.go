@@ -312,12 +312,12 @@ var applyDesired = func(ctx context.Context, desired Desired) error {
 	return Apply(ctx, desired, HostInterfaceLookup, RunNft)
 }
 
-// RunHelper is the --apply-host-network entry point. An absent desired file is a
-// successful no-op, so the unit can start at boot before the first publish.
+// RunHelper is the --apply-host-network entry point. Before the first publish,
+// it advertises its features without applying any network rules.
 func RunHelper(ctx context.Context, directory string) error {
 	desired, err := ReadDesired(directory)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return WriteStatus(directory, Status{OK: true, Features: []string{FeatureExtraExempt}})
 	}
 	if err != nil {
 		return err

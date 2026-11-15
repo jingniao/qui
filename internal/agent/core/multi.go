@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"proxycontrol/internal/agent/rulesets"
 	"sync"
 	"time"
 
@@ -100,14 +101,21 @@ func gostContract(name string) uint32 {
 // (v1.5.4 item 5). PrepareRuleSets downloads what a revision needs before it is
 // rendered; CleanupRuleSets removes files no given state references.
 type RuleSetPreparer interface {
-	PrepareRuleSets(context.Context, desiredstate.State) error
+	PrepareRuleSets(context.Context, desiredstate.State) (*rulesets.Update, error)
 	CleanupRuleSets(...desiredstate.State)
 }
 
 // PrepareRuleSets prepares the rule set files of every core that will run part
-// of s. The adapter set is fixed at construction, so no lock is held across the
-// downloads.
-func (m *MultiRuntime) PrepareRuleSets(ctx context.Context, s desiredstate.State) error {
+// of s. Snapshot membership under the lock; downloads do not hold up telemetry
+// or membership commands.
+func (m *MultiRuntime) PrepareRuleSets(ctx context.Context, s desiredstate.State) (*rulesets.Update, error) {
+	update := &rulesets.Update{}
+	type preparation struct {
+		preparer RuleSetPreparer
+		state    desiredstate.State
+	}
+	var pending []preparation
+	m.mu.Lock()
 	for _, name := range m.names {
 		preparer, ok := m.runtimes[name].(RuleSetPreparer)
 		if !ok {
@@ -121,11 +129,17 @@ func (m *MultiRuntime) PrepareRuleSets(ctx context.Context, s desiredstate.State
 		if !active {
 			continue
 		}
-		if err := preparer.PrepareRuleSets(ctx, part); err != nil {
-			return err
+		pending = append(pending, preparation{preparer, part})
+	}
+	m.mu.Unlock()
+	for _, item := range pending {
+		prepared, err := item.preparer.PrepareRuleSets(ctx, item.state)
+		update.Append(prepared)
+		if err != nil {
+			return update, err
 		}
 	}
-	return nil
+	return update, nil
 }
 
 // CleanupRuleSets removes, per core, the rule set files none of states needs.
@@ -293,6 +307,7 @@ func (m *MultiRuntime) Apply(ctx context.Context, c RenderedConfig) (ApplyResult
 		switched = append(switched, name)
 		if err != nil {
 			r.Code = "apply_failed"
+			restoreErr := rulesets.RestoreBeforeRestart(ctx)
 			undoCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
 			var undo error
@@ -306,10 +321,10 @@ func (m *MultiRuntime) Apply(ctx context.Context, c RenderedConfig) (ApplyResult
 				}
 			}
 			r.RolledBack = undo == nil
-			if undo != nil {
+			if restoreErr != nil || undo != nil {
 				r.Code = "rollback_failed"
 			}
-			return r, errors.Join(err, undo)
+			return r, errors.Join(err, restoreErr, undo)
 		}
 	}
 	m.initialized = true

@@ -160,6 +160,16 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 			updatePending += pending
 		}
 	}
+	// Archives predating 0149 have no finalization columns. Select by their
+	// recorded schema, just as other versioned inventory fields do below.
+	var tunnelFinalizationApplied int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0149_tunnel_publication_finalization.sql'").Scan(&tunnelFinalizationApplied); err != nil {
+		return Inventory{}, err
+	}
+	batchPending := "status IN ('deploying','rolling_back','rollback_failed')"
+	if tunnelFinalizationApplied != 0 {
+		batchPending += " OR tunnel_finalized=0"
+	}
 	for _, item := range []struct {
 		query  string
 		target *int64
@@ -167,7 +177,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 		{"SELECT count(*) FROM admins", &result.Totals.Admins}, {"SELECT count(*) FROM admins WHERE role='Owner' AND status='active'", &result.Totals.ActiveOwners}, {"SELECT count(*) FROM sessions", &result.Totals.Sessions},
 		{"SELECT count(*) FROM users", &result.Totals.Users}, {"SELECT count(*) FROM devices", &result.Totals.Devices}, {"SELECT count(*) FROM nodes", &result.Totals.Nodes}, {"SELECT count(*) FROM node_groups", &result.Totals.NodeGroups}, {"SELECT count(*) FROM policies", &result.Totals.Policies},
 		{"SELECT count(*) FROM config_revisions", &result.Totals.Revisions},
-		{"SELECT (SELECT count(*) FROM deployment_targets WHERE status='pending')+(SELECT count(*) FROM deployment_commands WHERE status='pending')+(SELECT count(*) FROM deployment_batches WHERE status IN ('deploying','rolling_back','rollback_failed'))", &result.Totals.PendingOperations},
+		{"SELECT (SELECT count(*) FROM deployment_targets WHERE status='pending')+(SELECT count(*) FROM deployment_commands WHERE status='pending')+(SELECT count(*) FROM deployment_batches WHERE " + batchPending + ")", &result.Totals.PendingOperations},
 	} {
 		if err := r.QueryRowContext(ctx, item.query).Scan(item.target); err != nil || *item.target < 0 {
 			return Inventory{}, errors.New("restore inventory query failed")

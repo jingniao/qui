@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"proxycontrol/internal/agent/rulesets"
 	"proxycontrol/pkg/contracts/tcpprobe"
 	"runtime"
 	"strings"
@@ -561,7 +562,7 @@ func (w *inventoryWatch) changed(files []*pb.CertificateFileSummary) bool {
 
 func session(ctx context.Context, client pb.AgentControlClient, state *identity.State, logger *slog.Logger, sampler *capability.Sampler, capabilities *capabilityState, version string, manager *reconcile.Reconciler, healthSource interface {
 	OutboundHealth() map[string]scheduler.Health
-}, telemetryQueue *spool.Spool, updates *coreUpdates, agents *agentUpdates, renewals ...func(context.Context) (bool, error)) error {
+}, telemetryQueue *spool.Spool, updates *coreUpdates, agents *agentUpdates, renewals ...func(context.Context) (bool, error)) (sessionErr error) {
 	stream, err := client.Connect(ctx)
 	if err != nil {
 		return err
@@ -728,10 +729,74 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		return updates.submit(message.GetCoreUpdateCommand())
 	}
+	type preparedApply struct {
+		key     string
+		desired desiredstate.State
+		files   *rulesets.Update
+		err     error
+	}
+	prepareCtx, cancelPrepare := context.WithCancel(ctx)
+	preparedReplies := make(chan preparedApply, 1)
+	preparing := false
+	var applyQueue []preparedApply
+	pendingApplies := map[string]bool{}
+	startPrepare := func() {
+		if preparing || len(applyQueue) == 0 {
+			return
+		}
+		prepared := applyQueue[0]
+		applyQueue = applyQueue[1:]
+		preparing = true
+		go func() {
+			prepared.files, prepared.err = manager.PrepareRuleSets(prepareCtx, prepared.desired)
+			preparedReplies <- prepared
+		}()
+	}
+	defer func() {
+		cancelPrepare()
+		if preparing {
+			prepared := <-preparedReplies
+			sessionErr = errors.Join(sessionErr, prepared.files.Rollback())
+		}
+	}()
+	finishApply := func(prepared preparedApply) {
+		preparing = false
+		delete(pendingApplies, prepared.key)
+		result := &pb.ApplyResult{Revision: prepared.desired.Revision}
+		if prepared.err != nil {
+			err := errors.Join(prepared.err, prepared.files.Rollback())
+			result.Code = "apply_failed"
+			if errors.Is(err, rulesets.ErrUnavailable) {
+				result.Code = rulesets.Code
+			}
+			logger.Warn("rule set preparation failed", "revision", prepared.desired.Revision, "error", err)
+		} else {
+			applied, err := manager.ApplyPrepared(ctx, prepared.desired, prepared.files)
+			result.Success, result.RolledBack, result.Code = applied.Success, applied.RolledBack, applied.Code
+			if err != nil {
+				if result.Code == "" {
+					result.Code = "apply_failed"
+				}
+				logger.Warn("apply failed", "revision", prepared.desired.Revision, "code", result.Code, "error", err)
+			}
+		}
+		results = append(results, result)
+		startPrepare()
+	}
 	apply := func(command *pb.ApplyCommand) {
+		key := string(command.DesiredStateJson)
+		if pendingApplies[key] {
+			return
+		}
 		desired, err := desiredstate.Decode(command.DesiredStateJson)
 		result := &pb.ApplyResult{Revision: desired.Revision, Code: "compile_failed"}
 		if err == nil {
+			if _, ok := manager.Adapter.(core.RuleSetPreparer); ok {
+				pendingApplies[key] = true
+				applyQueue = append(applyQueue, preparedApply{desired: desired, key: key})
+				startPrepare()
+				return
+			}
 			applied, applyErr := manager.Apply(ctx, desired)
 			result.Success = applied.Success
 			result.RolledBack = applied.RolledBack
@@ -895,6 +960,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	}
 	certRescan := time.NewTicker(certificateRescanInterval)
 	defer certRescan.Stop()
+heartbeatLoop:
 	for ctx.Err() == nil {
 		for len(removalResults) > 0 {
 			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_RemoveCoreResult{RemoveCoreResult: removalResults[0]}}); err != nil {
@@ -1139,88 +1205,100 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			}
 		}
 		timer := time.NewTimer(interval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-certRescan.C:
-			timer.Stop()
-			if h := sampler.HostInfo(); h != nil && certWatch.changed(h.CertificateFiles) {
-				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
+	waitForHeartbeat:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-certRescan.C:
+				timer.Stop()
+				if h := sampler.HostInfo(); h != nil && certWatch.changed(h.CertificateFiles) {
+					if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
+						return err
+					}
+				}
+				continue heartbeatLoop
+			case prepared := <-preparedReplies:
+				timer.Stop()
+				finishApply(prepared)
+				continue heartbeatLoop
+			case result := <-probeReplies:
+				timer.Stop()
+				lastProbe = result
+				probeID = ""
+				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TcpProbeResult{TcpProbeResult: result}}); err != nil {
 					return err
 				}
-			}
-		case result := <-probeReplies:
-			timer.Stop()
-			lastProbe = result
-			probeID = ""
-			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TcpProbeResult{TcpProbeResult: result}}); err != nil {
-				return err
-			}
-			continue
-		case result := <-tuningReplies:
-			timer.Stop()
-			tuningBusy = false
-			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TuningResult{TuningResult: result}}); err != nil {
-				return err
-			}
-			continue
-		case result := <-updateReplies:
-			timer.Stop()
-			// Sent at the top of the next iteration, where the pending head is
-			// delivered.
-			updates.push(result)
-			continue
-		case received := <-incoming:
-			timer.Stop()
-			if received.err != nil {
-				return received.err
-			}
-			if received.message.GetTcpProbeCommand() != nil {
-				probe(received.message)
-				continue
-			}
-			if received.message.GetRemoveCoreCommand() != nil {
-				removeCore(received.message)
-				continue
-			}
-			if received.message.GetTuningCommand() != nil {
-				tuningCommand(received.message)
-				continue
-			}
-			if received.message.GetDeviceGateCommand() != nil {
-				deviceGate(received.message)
-				continue
-			}
-			if command := received.message.GetHealthCheckCommand(); command != nil {
-				if received.message.NodeId != state.NodeID {
-					return errors.New("health node mismatch")
-				}
-				healthCheck(command)
-				continue
-			}
-			if received.message.GetRollbackCommand() != nil {
-				rollback(received.message.GetRollbackCommand())
-				continue
-			}
-			if received.message.GetCoreUpdateCommand() != nil {
-				if err := update(received.message); err != nil {
+				continue heartbeatLoop
+			case result := <-tuningReplies:
+				timer.Stop()
+				tuningBusy = false
+				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TuningResult{TuningResult: result}}); err != nil {
 					return err
 				}
-				continue
-			}
-			if received.message.GetAgentUpdateCommand() != nil {
-				if err := agentUpdate(received.message); err != nil {
-					return err
+				continue heartbeatLoop
+			case result := <-updateReplies:
+				timer.Stop()
+				// Sent at the top of the next iteration, where the pending head is
+				// delivered.
+				updates.push(result)
+				continue heartbeatLoop
+			case received := <-incoming:
+				if received.err == nil && received.message.GetApplyCommand() != nil && pendingApplies[string(received.message.GetApplyCommand().DesiredStateJson)] {
+					continue waitForHeartbeat
 				}
-				continue
+				timer.Stop()
+				if received.err != nil {
+					return received.err
+				}
+				if received.message.GetTcpProbeCommand() != nil {
+					probe(received.message)
+					continue heartbeatLoop
+				}
+				if received.message.GetRemoveCoreCommand() != nil {
+					removeCore(received.message)
+					continue heartbeatLoop
+				}
+				if received.message.GetTuningCommand() != nil {
+					tuningCommand(received.message)
+					continue heartbeatLoop
+				}
+				if received.message.GetDeviceGateCommand() != nil {
+					deviceGate(received.message)
+					continue heartbeatLoop
+				}
+				if command := received.message.GetHealthCheckCommand(); command != nil {
+					if received.message.NodeId != state.NodeID {
+						return errors.New("health node mismatch")
+					}
+					healthCheck(command)
+					continue heartbeatLoop
+				}
+				if received.message.GetRollbackCommand() != nil {
+					rollback(received.message.GetRollbackCommand())
+					continue heartbeatLoop
+				}
+				if received.message.GetCoreUpdateCommand() != nil {
+					if err := update(received.message); err != nil {
+						return err
+					}
+					continue heartbeatLoop
+				}
+				if received.message.GetAgentUpdateCommand() != nil {
+					if err := agentUpdate(received.message); err != nil {
+						return err
+					}
+					continue heartbeatLoop
+				}
+				if received.message.GetApplyCommand() != nil {
+					apply(received.message.GetApplyCommand())
+					continue heartbeatLoop
+				}
+				return errors.New("unexpected server message between heartbeats")
+			case <-timer.C:
+				break waitForHeartbeat
 			}
-			if received.message.GetApplyCommand() != nil {
-				apply(received.message.GetApplyCommand())
-				continue
-			}
-			return errors.New("unexpected server message between heartbeats")
-		case <-timer.C:
 		}
 	}
 	return ctx.Err()

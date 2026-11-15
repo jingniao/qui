@@ -9,6 +9,7 @@ fi
 [[ $EUID == 0 ]] || { printf 'purge-menu-test: needs root.\n'; exit 1; }
 repo=$(cd -- "$(dirname -- "$0")/../../.." && pwd -P)
 T=$(mktemp -d)
+chmod 0755 "$T"
 trap 'rm -rf -- "$T"' EXIT
 check() { local label=$1; shift; "$@" || { printf 'FAIL - %s\n' "$label"; exit 1; }; printf 'ok - %s\n' "$label"; }
 # Prefix every installation path, including paths embedded in quoted strings.
@@ -99,6 +100,12 @@ id() {
   [[ -f $R/account-${@: -1} ]] || return 1
   case $1 in -u|-g) echo 12345;; -gn) echo "${@: -1}";; esac
 }
+# Use the fixture's numeric service identity without creating a host account.
+runuser() {
+  [[ $1 == -u && $2 == proxy-panel && $3 == -- ]] || return 1
+  shift 3
+  setpriv --reuid 12345 --regid 12345 --clear-groups -- "$@"
+}
 # Numeric ownership needs no real service account in the host account database.
 install() {
   local argument
@@ -119,6 +126,15 @@ INSTALL_FAKES
 sequence=0
 for INIT in systemd openrc; do
   export INIT
+  setup panel
+  exec {update_lock_fd}>"$R/var/lib/proxycontrol-install/update.lock"
+  flock -n "$update_lock_fd"
+  run panel
+  check "$INIT uninstall refuses an active update" test "$status" != 0
+  check 'active update is identified' grep -q '更新正在进行' "$R/output"
+  check 'active update keeps the panel binary' test -x "$R/usr/local/bin/proxy-panel"
+  check 'active update keeps the installation record' test -f "$R/var/lib/proxycontrol-install/panel.manifest"
+  exec {update_lock_fd}>&-
   setup agent
   run agent
   check "$INIT ordinary uninstall" test "$status" = 0
@@ -176,6 +192,12 @@ for INIT in systemd openrc; do
     check 'install after purge restores service' test -f "$R/etc/systemd/system/proxy-panel.service"
     check 'install after purge restores manifest' grep -qx 'proxycontrol-install-v2' "$R/var/lib/proxycontrol-install/panel.manifest"
     check 'install after purge leaves no removed marker' test ! -e "$R/var/lib/proxycontrol-install/panel.removed"
+    check 'first install creates panel-owned database' test "$(stat -c '%u:%s' "$R/var/lib/proxy-panel/panel.db")" = 12345:0
+    check 'first install pins database path' grep -qx "$R/var/lib/proxy-panel/panel.db" "$R/var/lib/proxycontrol-install/panel.database"
+    check 'database record is root private' test "$(stat -c '%u:%a' "$R/var/lib/proxycontrol-install/panel.database")" = 0:600
+    printf 'EXISTING-DATABASE\n' > "$R/var/lib/proxy-panel/panel.db"
+    install_panel
+    check 'reinstall preserves database content' grep -qx 'EXISTING-DATABASE' "$R/var/lib/proxy-panel/panel.db"
   fi
   for answer in 'n\n' 'y\nno\n'; do
     setup agent

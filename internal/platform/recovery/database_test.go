@@ -98,7 +98,7 @@ func recoveryFixture(t *testing.T) *fixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := admins.CreateSession(ctx, "old-session", "owner", "local", time.Now().Add(time.Hour)); err != nil {
+	if err := admins.CreateSession(ctx, "old-session", "owner", "original-password-hash", "local", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	nodes := &node.Repository{Database: database}
@@ -214,10 +214,10 @@ func TestDatabaseRecoveryPreservesNewUsageReceiptsRevocationsAndDraftSnapshot(t 
 	if _, err := f.users.RotateCredential(ctx, f.device.ID, "http", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&auth.Repository{Database: database}).ChangePassword(ctx, "owner", "latest-password-hash"); err != nil {
+	if err := (&auth.Repository{Database: database}).ChangePassword(ctx, "owner", "latest-password-hash", "original-password-hash"); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&auth.Repository{Database: database}).CreateSession(ctx, "new-session", "owner", "local", time.Now().Add(time.Hour)); err != nil {
+	if err := (&auth.Repository{Database: database}).CreateSession(ctx, "new-session", "owner", "latest-password-hash", "local", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec("INSERT INTO backup_runs(id,kind,period_key,schedule_revision,status,attempts,claim_token,lease_until,last_attempt_at) VALUES('current-run','daily','2026-10-05',1,'running',1,'private-claim',?,?)", time.Now().Add(time.Hour).Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {

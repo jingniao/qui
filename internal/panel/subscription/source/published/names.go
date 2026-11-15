@@ -64,7 +64,7 @@ func (s EndpointNameStore) EndpointNames(ctx context.Context, tx *sql.Tx) ([]str
 		if createdName, created := canvasNames[inboundID]; created {
 			name = createdName
 		}
-		endpoints = append(endpoints, proxy.Proxy{Name: name, Port: port})
+		endpoints = append(endpoints, proxy.Proxy{Origin: proxy.Origin{Node: proxy.Ref{ID: nodeID}}, Name: name, Port: port})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func (s EndpointNameStore) EndpointNames(ctx context.Context, tx *sql.Tx) ([]str
 			if address := net.ParseIP(inbound.Listen); address == nil || address.IsLoopback() {
 				continue
 			}
-			endpoint := proxy.Proxy{Name: endpointName(nodeName, inbound.Protocol), Protocol: inbound.Protocol, Port: inbound.Port}
+			endpoint := proxy.Proxy{Origin: proxy.Origin{Node: proxy.Ref{ID: nodeID}}, Name: endpointName(nodeName, inbound.Protocol), Protocol: inbound.Protocol, Port: inbound.Port}
 			if name, created := canvasNames[inbound.ID]; created {
 				endpoint.Name = name
 			}

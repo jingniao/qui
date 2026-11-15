@@ -95,9 +95,9 @@ installer，防止降级丢失核心所有权；这不影响失败升级自动�
 
 ## 2. 构建发布包
 
-**构建工具链**：用官方安装的 Go（<https://go.dev/dl/>），版本按 `go.mod` 里的 `go` 指令（当前 `go 1.26.10`，即需要 Go 1.26.10 或更新，发行构建因此带上 Go 标准库的安全修复；仓库最后一次完整验证用的是 **Go 1.27.1**）。CI 通过 `actions/setup-go` 的 `go-version-file: go.mod` 读取同一个要求，Node 用 22 加锁定的依赖（`npm --prefix web ci`）。
+**构建工具链**：用官方安装的 Go（<https://go.dev/dl/>），版本按 `go.mod` 里的 `go` 指令（当前 `go 1.26.11`，即需要 Go 1.26.11 或更新，发行构建因此带上 Go 标准库的安全修复；仓库最后一次完整验证用的是 **Go 1.27.1**）。CI 通过 `actions/setup-go` 的 `go-version-file: go.mod` 读取同一个要求，Node 用 22 加锁定的依赖（`npm --prefix web ci`）。
 
-仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：发布构建从 `PATH` 读取工具。sing-box 构建另需 `git`、GNU `tar`、`gzip`、`sha256sum`、`readelf`，通过 `GOTOOLCHAIN=go1.26.10` 固定其工具链；它在临时目录克隆上游，不改本仓库的模块文件。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
+仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：发布构建从 `PATH` 读取工具。sing-box 构建另需 `git`、GNU `tar`、`gzip`、`sha256sum`、`readelf`，通过 `GOTOOLCHAIN=go1.26.11` 固定其工具链；它在临时目录克隆上游，不改本仓库的模块文件。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
 
 以下命令以 v1.3.1 为例，执行时替换为目标版本。
 
@@ -257,7 +257,7 @@ deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
 - `--core` 允许 `xray`、`sing-box` 或 `gost`。发布包内的 `VERSION` 自动确定 qui 来源版本；单独使用脚本时给出 `--core sing-box --qui-version X.Y.Z`，其中 X.Y.Z 必须与正在安装的 Agent 发布版本一致。显式版本与包内版本不符时拒绝；核心固定为 1.14.4-qui.1。官方来源也有固定默认版本，手工覆盖版本时使用对应核心后的 `--core-version`。
 - **GOST（v1.3 G1）**：`--core gost` 安装固定官方 3.3.2。只有 linux/amd64：脚本从 `https://github.com/go-gost/gost/releases/download/v3.3.2/gost_3.3.2_linux_amd64.tar.gz` 下载，核对同发布 `checksums.txt` 中唯一匹配条目与面板内固定的归档摘要 `162feb43…a9d18274`，解包后只接受根目录 `gost`，要求 `gost -V` 首行 `gost 3.3.2 (...)`。这是静态链接的单一归档，**glibc 与 Alpine/musl 共用同一个资产**，不需要 musl 专用包；其他架构（含 arm64）明确拒绝，即使上游发布了对应归档。`--core-source` 仍只影响 sing-box，GOST 永远取自官方固定版本，也不接受 `--core-url`/`--core-sha256` 覆盖。安装位置为 `/usr/local/lib/proxy-agent/gost`，没有独立服务单元（由 Agent 托管子进程），v2 安装记录写成 `core gost /usr/local/lib/proxy-agent/gost <二进制 sha256>`。
 - qui 来源只下载 `jingniao/qui` 的同版本资源和 `SHA256SUMS`，不接受覆盖 URL 或摘要。`--core-source official` 保留官方 URL 前缀、`--core-url`、`--core-sha256` 和 Xray `.dgst` 路径；没有可信摘要就不安装。
-- qui 构建使用未修改的上游 v1.14.4、go1.26.10、上游 non-naive 标签加 `with_v2ray_api`，CGO=0；同一架构的静态归档同时用于 glibc 和 musl。官方来源在 musl 主机仍选单独的 `-musl.tar.gz` 与摘要。
+- qui 构建使用未修改的上游 v1.14.4、go1.26.11、上游 non-naive 标签加 `with_v2ray_api`，CGO=0；同一架构的静态归档同时用于 glibc 和 musl。官方来源在 musl 主机仍选单独的 `-musl.tar.gz` 与摘要。
 - 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径不变，配置按多核心安装约定 写入完整 cores 集合和第一个核心的兼容旧键。
 - v1.2 多核心通过 Owner 的核心选择配合安装/更新步骤生效，安装器支持并存的 Xray 与 sing-box；新增核心用重复 `--core`，配置以 `cores` 为准。删除核心需另行核对配置与已发布入站，省略安装参数不会删除已有核心。切换前先处理目标核心不支持的入站（例如 Xray 不支持 Hysteria2/TUIC），发布并确认成功。从 v1.0.6 起，如果新核心编译或启动不了上一修订，Agent 记一条错误日志，让核心保持停止，但照常连上面板（节点显示核心不健康），收到能用的新修订后正常应用；重试间隔从 3 秒倍增到 1 分钟。修订文件校验失败等完整性错误仍会让 Agent 退出。v1.0.5 及更早版本在这种情况下会反复退出、连不上面板（[验收矩阵](v1-acceptance.md) 9.13）。
 - 脚本还会创建服务账号 `proxy-agent` 和目录 `/etc/proxy-agent`、`/etc/proxy-agent/tls`、`/var/lib/proxy-agent`，不启动服务。
@@ -343,6 +343,8 @@ bash "$rc_dir/deploy/linux/update.sh" --component panel --version "$rc_version" 
 版本比较使用 semver 优先级：`1.0.9 < 1.2.0-rc.1 < 1.2.0-rc.2 < 1.2.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。安装记录使用上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
 
 ### 5.1 面板降级与数据库回退
+
+v1.5.6 起，运行数据库路径固定在 `/var/lib/proxycontrol-install/panel.database`（root 0600），不改变 v2 manifest 格式。首次安装以面板账号独占创建空库并登记；旧安装首次更新自动校验真实路径位于 `/var/lib/proxy-panel/` 内、文件归面板账号所有，满足条件才登记并继续。配置与记录不一致时拒绝更新，Owner 须在 shell 核实实际数据库位置。状态、数据库和备份先在 root 0700 安装目录暂存，再原子发布，因此该安装目录与各目标目录必须在同一文件系统；不满足时明确拒绝，不退化为跨文件系统复制。
 
 数据库迁移不可逆：较新的面板执行过的迁移，较旧的面板不认识，会拒绝打开这份数据库（不会损坏它）。所以跨迁移降级面板时，必须同时换回一份**在目标版本上产生的**数据库，也就是当初从该版本升级时留下的 `pre-update-<目标版本>-*.db`。
 

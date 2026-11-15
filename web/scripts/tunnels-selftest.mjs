@@ -7,6 +7,7 @@ const transpile = text => ts.transpileModule(text, { compilerOptions: { target: 
 const dataURL = text => `data:text/javascript;base64,${Buffer.from(text).toString('base64')}`;
 const modelURL = dataURL(transpile(source('model.ts')));
 const m = await import(modelURL);
+assert.equal(m.resultLabels.publishing, '发布中');
 const tunnel = { id: 'a', name: '测试隧道', hops: [{ nodeName: 'HK' }, { nodeName: 'JP' }] };
 assert.equal(m.routeLabel(tunnel), 'HK → JP');
 assert.equal(m.routeLabel({ hops: [...tunnel.hops, { nodeName: 'US' }] }), 'HK → JP → US');

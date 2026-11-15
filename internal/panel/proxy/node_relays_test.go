@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -90,23 +91,39 @@ func TestNodeRelayHandlersAndInboundDeletion(t *testing.T) {
 
 type relayReceipt struct {
 	canvasDeployRecorder
-	apply func() error
+	apply    func() error
+	database *sql.DB
+	result   CanvasPublishResult
+}
+
+var _ TunnelDeployer = (*relayReceipt)(nil)
+
+func (r *relayReceipt) CheckTunnelPublicationNodes(context.Context, *sql.Tx, []string) error {
+	return nil
+}
+
+func (r *relayReceipt) TunnelPublicationResult(context.Context, string) (CanvasPublishResult, error) {
+	return r.result, nil
 }
 
 func (r *relayReceipt) GostRemovable(context.Context, string) (bool, error) {
 	return false, nil
 }
 
-func (r *relayReceipt) PublishTunnels(_ context.Context, _, _ string, snapshots []NodeSnapshot) (CanvasPublishResult, error) {
+func (r *relayReceipt) PublishTunnels(ctx context.Context, batchID, _, _ string, snapshots []NodeSnapshot) (CanvasPublishResult, error) {
 	status := "applied"
+	batchStatus := "success"
 	if err := r.apply(); err != nil {
 		status = "failed"
+		batchStatus = "failed"
 	}
-	result := CanvasPublishResult{}
+	result := CanvasPublishResult{BatchID: batchID}
 	for _, snapshot := range snapshots {
 		result.Nodes = append(result.Nodes, CanvasPublishNode{NodeID: snapshot.State.NodeID, Status: status, Revision: 1})
 	}
-	return result, nil
+	r.result = result
+	_, err := r.database.ExecContext(ctx, "UPDATE deployment_batches SET status=? WHERE id=?", batchStatus, batchID)
+	return result, err
 }
 
 func TestRelaySnapshotCapturedBeforeApplyAndRetainedOnFailure(t *testing.T) {
@@ -119,7 +136,7 @@ func TestRelaySnapshotCapturedBeforeApplyAndRetainedOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := &relayReceipt{apply: func() error {
+	receipt := &relayReceipt{database: p.database, apply: func() error {
 		return (&node.Repository{Database: p.database}).SetPublicIP(p.ctx, p.nodeB, "203.0.113.9")
 	}}
 	p.service.Deploy = receipt

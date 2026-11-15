@@ -8,8 +8,16 @@ const sharedPath = new URL('../src/modules/system/nodeBaseline.ts', import.meta.
 const shared = readFileSync(sharedPath, 'utf8').replace(/^import .*;\r?\n/gm, '').replaceAll('export ', '');
 assert.match(panel, /import \{ needsBaseline, publishBaselineAndWait \} from '\.\.\/nodeBaseline'/);
 assert.doesNotMatch(panel, /async function publishBaselineAndWait/);
-const flow = read('modules/tunnels/components/PublishFlow.vue');
-const publish = flow.slice(flow.indexOf('async function publish()'), flow.indexOf('</script>'));
+// Saving a tunnel applies it at once; GOST is installed first by applyTunnels.installGost.
+const flow = read('modules/tunnels/applyTunnels.ts');
+const install = flow.slice(flow.indexOf('export async function installGost('), flow.indexOf('function planProblem')).replace('export ', '');
+// publish() mirrors applyTunnelChanges: install, then publish only when every install succeeded.
+const publish = install + `
+async function publish() {
+  try { await installGost(plan.value.installGost, text => { progress.value = text; }); }
+  catch (e) { error.value = e.message; return; }
+  result.value = await tunnelAPI.publish(selection);
+}`;
 async function scenario(heartbeat, mode = 'success') {
   const calls = [], progress = { value: '' }, result = { value: null }, error = { value: '' }, installResults = { value: [] };
   let time = 0, reads = 0;
@@ -51,8 +59,8 @@ for (const mode of ['failed', 'timeout']) {
   const outcome = await scenario({ current_revision: 0 }, mode);
   assert.ok(!outcome.calls.includes('queue'));
   assert.ok(!outcome.calls.includes('publish'));
-  assert.match(outcome.error.value, /未发布隧道/);
-  assert.match(outcome.installResults.value[0], mode === 'failed' ? /apply_failed/ : /超时/);
+  assert.match(outcome.error.value, /未应用到服务器/);
+  assert.match(outcome.error.value, mode === 'failed' ? /apply_failed/ : /超时/);
   assert.ok(outcome.time <= 180000);
 }
 console.log('PASS tunnel baseline: zero/missing revision, confirmed revision, baseline failure and three-minute timeout');

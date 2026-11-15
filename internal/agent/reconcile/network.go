@@ -43,19 +43,7 @@ func (r *Reconciler) verifyOutboundNetworks(state desiredstate.State) error {
 	if _, multi := r.Adapter.(*core.MultiRuntime); multi {
 		// MultiRuntime renders only active cores and their reachable graphs.
 		// GOST does not render these source bindings or user outbounds.
-		outbounds = nil
-		seen := map[string]bool{}
-		for _, inbound := range state.Inbounds {
-			name := inbound.Core
-			if name == "" {
-				name = r.Adapter.Name()
-			}
-			if !inbound.Enabled || name == desiredstate.CoreGost || seen[name] {
-				continue
-			}
-			seen[name] = true
-			outbounds = append(outbounds, state.ForCore(name, r.Adapter.Name()).Outbounds...)
-		}
+		outbounds = state.ReachableOutbounds()
 	}
 	checked := map[desiredstate.Network]bool{}
 	for _, outbound := range outbounds {

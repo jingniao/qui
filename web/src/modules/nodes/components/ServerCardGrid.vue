@@ -3,7 +3,7 @@
       class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5"
     >
       <div
-        v-for="(node, index) in nodes"
+        v-for="node in nodes"
         :key="node.id"
         v-visible="node.id"
         :draggable="reorderable"
@@ -255,12 +255,6 @@
             删除
           </button>
         </div>
-        <button v-if="canAddRelay(node)" type="button" class="ios-btn-secondary w-full" @click.stop="emit('add-relay', node)">添加中转</button>
-        <!-- Order controls for touch screens, where native dragging is unavailable -->
-        <div v-if="reorderable" class="flex justify-end gap-1.5 -mt-2" @click.stop>
-          <button v-if="index > 0" type="button" class="px-2 py-1 rounded-lg bg-black/[0.04] text-neutral-600 hover:bg-black/[0.08] text-xs font-semibold" @click.stop="emit('move', node.id, -1)">上移</button>
-          <button v-if="index < nodes.length - 1" type="button" class="px-2 py-1 rounded-lg bg-black/[0.04] text-neutral-600 hover:bg-black/[0.08] text-xs font-semibold" @click.stop="emit('move', node.id, 1)">下移</button>
-        </div>
       </div>
     </div>
 </template>
@@ -277,8 +271,8 @@ import MachineTrafficUsage from './MachineTrafficUsage.vue';
 import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';
 
-const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean; canAddRelay: (node: NodeView) => boolean }>();
-const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView]; 'add-relay': [node: NodeView]; move: [id: string, delta: -1 | 1]; reorder: [fromId: string, toId: string] }>();
+const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean }>();
+const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView]; reorder: [fromId: string, toId: string] }>();
 const router = useRouter();
 
 // Native drag and drop (no dependency); the page saves the new order.

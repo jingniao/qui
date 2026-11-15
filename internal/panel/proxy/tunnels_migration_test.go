@@ -89,7 +89,7 @@ func TestCanvasForwardMigrationPreservesPublication(t *testing.T) {
 					t.Fatal(server)
 				}
 			}
-			p.service.Deploy = &relayReceipt{apply: func() error {
+			p.service.Deploy = &relayReceipt{database: p.database, apply: func() error {
 				if migrationSnapshots(t, p) != before {
 					t.Fatal("publish changed materialized desired state")
 				}

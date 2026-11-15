@@ -333,6 +333,68 @@ func TestCanvasLegacyRoutesOwnerAndCSRF(t *testing.T) {
 	}
 }
 
+// Two channels between the same servers make the whole group unrestorable, but the
+// page can hand the server a part of it: the entry with the channel it uses, then
+// the remaining channel on its own. Both parts reattach and can be removed.
+func TestCanvasLegacyParallelChannelsReattachPartByPart(t *testing.T) {
+	p := newPublishPanel(t)
+	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, "", []CanvasConnection{canvasTestHop("i-a", "i-b", 8443)})
+	layout.Instances[0].EntryBinding = &CanvasEntryBinding{Mode: "create", Protocol: "socks5", PortMode: "manual", Port: canvasTestPort(20000), GroupMode: "none"}
+	scheme := savePlanScheme(t, p, layout)
+	plan, err := p.service.canvasBuildPlan(p.ctx, scheme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.service.canvasApplyPlan(p.ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.service.Repository.DeleteCanvasScheme(p.ctx, scheme.ID); err != nil {
+		t.Fatal(err)
+	}
+	first, err := p.service.LegacyCanvasResources(p.ctx)
+	if err != nil || len(first.Detached) != 1 || len(first.Detached[0].Tunnels) != 1 {
+		t.Fatalf("resources %+v %v", first, err)
+	}
+	used := first.Detached[0].Tunnels[0]
+	extra, err := p.service.SaveCanvasTunnel(p.ctx, "", CanvasTunnelInput{Name: "parallel", Source: used.Source, Target: used.Target, Type: "proxy_chain", TunnelProtocol: "tls", SupportTCP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "parallel listener", NodeID: p.nodeB, Protocol: "socks5", Listen: "0.0.0.0", Port: 20031, Enabled: true, InternalRelay: true, DefaultOutbound: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.database.Exec("INSERT INTO canvas_tunnel_objects VALUES(?,'inbound',?)", extra.ID, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	resources, err := p.service.LegacyCanvasResources(p.ctx)
+	if err != nil || len(resources.Detached) != 1 {
+		t.Fatalf("resources %+v %v", resources, err)
+	}
+	g := resources.Detached[0]
+	if g.CanReattach || len(g.Tunnels) != 2 {
+		t.Fatalf("parallel group should not reattach whole: %+v", g)
+	}
+	part, err := p.service.ReattachCanvasLegacy(p.ctx, CanvasLegacyReattachInput{Name: "entry part", BindingIDs: g.BindingIDs, TunnelIDs: []string{used.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remove, err := p.service.PlanRemoveCanvasScheme(p.ctx, part.ID, CanvasRemoveInput{UpdatedAt: part.UpdatedAt, AcknowledgeChanges: true}); err != nil || !remove.OK {
+		t.Fatalf("entry part remove plan %+v %v", remove, err)
+	}
+	rest, err := p.service.LegacyCanvasResources(p.ctx)
+	if err != nil || len(rest.Detached) != 0 || len(rest.OrphanTunnels) != 1 || !rest.OrphanTunnels[0].CanReattach {
+		t.Fatalf("remaining %+v %v", rest, err)
+	}
+	other, err := p.service.ReattachCanvasLegacy(p.ctx, CanvasLegacyReattachInput{Name: "channel part", TunnelIDs: []string{extra.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remove, err := p.service.PlanRemoveCanvasScheme(p.ctx, other.ID, CanvasRemoveInput{UpdatedAt: other.UpdatedAt, AcknowledgeChanges: true}); err != nil || !remove.OK {
+		t.Fatalf("channel part remove plan %+v %v", remove, err)
+	}
+}
+
 func TestCanvasLegacyReattachThreeHopChainAndCreateBinding(t *testing.T) {
 	p := newPublishPanel(t)
 	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB, C: p.nodeC}, "", []CanvasConnection{canvasTestHop("i-a", "i-b", 8443), canvasTestHop("i-b", "i-c", 9443)})

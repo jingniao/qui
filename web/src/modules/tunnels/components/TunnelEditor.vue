@@ -1,5 +1,5 @@
 <template>
-  <FormDrawer :model-value="true" :title="tunnel ? '编辑隧道' : '创建隧道'" width="xl" confirm-text="保存草稿" :loading="saving" @update:model-value="() => { if (!saving) emit('close'); }" @confirm="save">
+  <FormDrawer :model-value="true" :title="tunnel ? '编辑隧道' : '创建隧道'" width="xl" confirm-text="保存并应用" :loading="saving" @update:model-value="() => { if (!saving) emit('close'); }" @confirm="save">
     <fieldset :disabled="saving" class="space-y-4">
       <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">名称</span><input v-model="form.name" class="form-input-base" /></label>
       <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">传输协议</span><input value="TLS（GOST 双向认证）" readonly class="form-input-base text-ios-secondary" /></label>
@@ -12,17 +12,16 @@
     </fieldset>
     <section v-if="linkedRules.length" class="space-y-2"><h4 class="text-ios-label text-base font-semibold leading-normal">关联规则</h4><p v-for="rule in linkedRules" :key="rule.id" class="text-sm text-ios-secondary">{{ rule.name }} · <span class="font-mono tabular-nums">{{ rule.entryNodeName }}:{{ rule.listenPort }}</span></p></section>
     <p v-if="error" class="text-sm text-ios-red" role="alert">{{ error }}</p>
-    <p class="text-xs text-ios-tertiary">保存只更新草稿。隧道服务器需要 GOST 核心，发布时会校验能力与端口。</p>
+    <p class="text-xs text-ios-tertiary">保存后立即下发到相关服务器（含使用该隧道的规则）。隧道服务器需要 GOST 核心，缺少时会自动安装。</p>
   </FormDrawer>
 </template>
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import PortControl from './PortControl.vue';
-import { tunnelAPI, tunnelError, type Tunnel, type TunnelInput, type TunnelRule } from '../api';
-import { showToast } from '../../../app/api';
+import { tunnelAPI, tunnelError, type PublishSelection, type Tunnel, type TunnelInput, type TunnelRule } from '../api';
 const props = defineProps<{ tunnel: Tunnel | null; nodes: { id: string; name: string }[]; linkedRules: TunnelRule[] }>();
-const emit = defineEmits<{ close: []; saved: [] }>();
+const emit = defineEmits<{ close: []; saved: [selection: PublishSelection] }>();
 const roleNames = { entry: '入口服务器', mid: '中间服务器', exit: '出口服务器' };
 const form = reactive<TunnelInput>({ name: props.tunnel?.name || '', transport: 'tls', updatedAt: props.tunnel?.updatedAt,
   hops: props.tunnel ? props.tunnel.hops.map(h => ({ role: h.role, nodeId: h.nodeId, portMode: h.portMode, listenPort: h.listenPort ?? undefined, connectHost: h.connectHost })) : [{ role: 'entry', nodeId: '', portMode: 'auto' }, { role: 'exit', nodeId: '', portMode: 'auto' }] });
@@ -44,8 +43,8 @@ async function save() {
     const checks = await Promise.all([...ports.values()].map(p => p.validate()));
     if (checks.some(ok => !ok)) return;
     const input = { ...form, name: form.name.trim(), hops: form.hops.map(h => h.role === 'entry' ? { role: h.role, nodeId: h.nodeId, portMode: h.portMode, connectHost: h.connectHost } : { ...h }) };
-    if (props.tunnel) await tunnelAPI.update(props.tunnel.id, input); else await tunnelAPI.create(input);
-    showToast('隧道草稿已保存'); emit('saved');
+    const saved = props.tunnel ? await tunnelAPI.update(props.tunnel.id, input) : await tunnelAPI.create(input);
+    emit('saved', { tunnelIds: [saved.id], ruleIds: [] });
   } catch (e) { error.value = tunnelError(e); } finally { saving.value = false; }
 }
 </script>

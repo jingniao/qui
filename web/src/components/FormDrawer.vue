@@ -133,6 +133,7 @@ const resolvedHeightClass = computed(() => {
 });
 
 function handleClose() {
+  if (props.loading) return;
   emit('update:modelValue', false);
   emit('close');
 }

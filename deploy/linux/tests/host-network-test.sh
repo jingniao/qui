@@ -36,6 +36,7 @@ script_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 service_unit=$script_dir/../../systemd/proxy-agent-host-network.service
 path_unit=$script_dir/../../systemd/proxy-agent-host-network.path
 watch_script=$script_dir/../../openrc/host-network-watch
+installer=$script_dir/../install.sh
 
 # systemd if it is the running init, OpenRC only when the watcher can do its job:
 # it hands the directory to busybox inotifyd.
@@ -89,6 +90,7 @@ cleanup() {
   set +e
   if [[ $init_system == systemd ]]; then
     systemctl stop "$path_name" "$service_name" >/dev/null 2>&1
+    systemctl disable --runtime "$path_name" "$service_name" >/dev/null 2>&1
     rm -f -- "/run/systemd/system/$service_name" "/run/systemd/system/$path_name"
     systemctl daemon-reload >/dev/null 2>&1
     systemctl reset-failed "$service_name" "$path_name" 2>/dev/null || true
@@ -104,8 +106,8 @@ trap cleanup EXIT
 # The fake stand-in for `proxy-agent --apply-host-network DIR`. It keeps the file
 # protocol of the real helper - read desired.json, answer status.json atomically -
 # but touches no nftables table: an address of 192.0.2.250 makes it fail, every
-# other request succeeds, an absent request is the successful no-op the real
-# helper performs at boot, and every answered request is counted in ../runs.
+# other request succeeds, an absent request writes the initial capability receipt,
+# and every answered desired request is counted in ../runs.
 cat > "$T/helper" <<'HELPER'
 #!/bin/sh
 set -eu
@@ -118,7 +120,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$directory" ] || exit 2
-[ -f "$directory/desired.json" ] || exit 0
+if [ ! -f "$directory/desired.json" ]; then
+  printf '{"id":"","ok":true,"features":["extra_exempt"]}\n' > "$directory/.status.tmp"
+  mv -f "$directory/.status.tmp" "$directory/status.json"
+  exit 0
+fi
 
 id=$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' "$directory/desired.json")
 printf '%s\n' "$id" >> "$directory/../runs"
@@ -133,6 +139,41 @@ mv -f "$directory/.status.tmp" "$directory/status.json"
 exit 0
 HELPER
 chmod 0755 -- "$T/helper"
+
+awk '/^service_enable proxycontrol-update-recovery$/ {startup=1} startup && /^if \[\[ -n \$host_network_service_digest \]\]; then$/ {copy=1} /^qui_write_record / {exit} copy' "$installer" > "$T/install-startup"
+
+# supervise-daemon returning from start is not a readiness acknowledgement.
+# Check the actual OpenRC installer branch before allowing the watcher to start.
+cat > "$T/openrc-bootstrap" <<'BOOTSTRAP'
+#!/usr/bin/env bash
+set -euo pipefail
+init_system=openrc
+host_network_service_digest=test
+data=${BOOTSTRAP_DATA:?}
+target=${BOOTSTRAP_HELPER:?}
+account=$(id -un)
+mkdir -p "$data/host-network"
+service_enable() { :; }
+service_is_active() { return 1; }
+service_start() {
+  test -f "$data/host-network/status.json"
+  grep -q '"features":\["extra_exempt"\]' "$data/host-network/status.json"
+  touch "$data/service-started"
+}
+source "${BOOTSTRAP_STARTUP:?}"
+BOOTSTRAP
+if BOOTSTRAP_DATA="$T/bootstrap-good" BOOTSTRAP_HELPER="$T/helper" BOOTSTRAP_STARTUP="$T/install-startup" bash "$T/openrc-bootstrap"; then
+  check 'OpenRC initial receipt exists before starting its watcher' ok
+else
+  check 'OpenRC initial receipt exists before starting its watcher' fail
+fi
+if BOOTSTRAP_DATA="$T/bootstrap-fail" BOOTSTRAP_HELPER=/bin/false BOOTSTRAP_STARTUP="$T/install-startup" bash "$T/openrc-bootstrap"; then
+  check 'OpenRC initial helper failure stops installation' fail
+elif [[ ! -e $T/bootstrap-fail/service-started ]]; then
+  check 'OpenRC initial helper failure stops installation' ok
+else
+  check 'OpenRC initial helper failure stops installation' fail
+fi
 
 # Publishing exactly like the Agent: one hidden temporary file renamed into place.
 publish_request() {
@@ -185,15 +226,19 @@ if [[ $init_system == systemd ]]; then
     -e '/^Group=/d' \
     -e '/^CapabilityBoundingSet=/d' \
     -e '/^AmbientCapabilities=/d' \
-    -e '/^\[Install\]/,$d' \
     "$service_unit" > "/run/systemd/system/$service_name"
   sed \
     -e "s|/var/lib/proxy-agent/host-network|$T/hn|g" \
     -e "s|^Unit=.*|Unit=$service_name|" \
-    -e '/^\[Install\]/,$d' \
     "$path_unit" > "/run/systemd/system/$path_name"
   systemctl daemon-reload
-  systemctl start "$path_name"
+  # Exercise the installer's actual helper startup block against isolated units.
+  # Enable them only for this boot; cleanup removes those temporary links too.
+  host_network_service_digest=test
+  host_network_service=$service_name
+  host_network_path=$path_name
+  source <(sed -e 's/systemctl enable /systemctl enable --runtime /g' \
+    -e "s|/var/lib/proxy-agent/host-network|$T/hn|g" "$T/install-startup")
 else
   sed \
     -e "s|^DIR=.*|DIR=$T/hn|" \
@@ -208,6 +253,12 @@ else
 fi
 
 printf 'host-network-test: %s, temporary directory %s\n' "$init_system" "$T"
+
+if wait_for_status '' 5 && status_ok && grep -q '"features":\["extra_exempt"\]' "$T/hn/status.json"; then
+  check 'first installation publishes capability receipt before any desired request' ok
+else
+  check 'first installation publishes capability receipt before any desired request' fail
+fi
 
 # Eight failing publishes. In the broken release the path unit stopped here and
 # the clear below never arrived, so an unanswered failing request is recorded but

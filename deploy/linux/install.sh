@@ -177,7 +177,7 @@ if [[ $init_system == openrc ]] && command -v apk >/dev/null; then
   apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables \
     || fail 'Installing the required Alpine packages failed: run "apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables" and retry.'
 fi
-required_tools=(install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir awk cp)
+required_tools=(install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir awk cp realpath runuser)
 if [[ $init_system == systemd ]]; then
   required_tools+=(systemctl)
 else
@@ -530,7 +530,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id" "$stage/panel-database"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
@@ -711,6 +711,29 @@ if [[ $component == panel ]]; then
   # to it; the helper writes nothing else that the panel could see. The root helper
   # replaces the status through a rename, so the directory stays 0700 for this account.
   install -d -o "$account" -g "$account" -m 0700 "$data/panel-update"
+  database_config=$etc/config.yaml
+  [[ -z $config_source ]] || database_config=$stage/config
+  database=$(sed -n 's/^database:[[:space:]]*//p' "$database_config")
+  if [[ ${#database} -ge 2 ]]; then
+    case $database in \"*\"|\'*\') database=${database:1:-1};; esac
+  fi
+  [[ $database == /* ]] || fail 'Panel database must be an absolute path.'
+  database_parent=$(realpath -e -- "${database%/*}") || fail 'Panel database directory does not exist.'
+  database_directory=$(realpath -e -- "$data")
+  [[ $database_parent == "$database_directory" || $database_parent == "$database_directory/"* ]] || fail 'Panel database must be under /var/lib/proxy-panel/.'
+  if [[ ! -e $database && ! -L $database ]]; then
+    # SQLite initializes the empty file on first start. Never truncate an existing DB.
+    runuser -u "$account" -- bash -c 'set -o noclobber; umask 077; : > "$1"' sh "$database" \
+      || fail 'Cannot create the initial panel database as the panel account.'
+  fi
+  [[ -f $database && ! -L $database ]] || fail 'Panel database must be a regular file, not a symlink.'
+  database=$(realpath -e -- "$database") || fail 'Cannot resolve panel database.'
+  [[ $database == "$database_directory/"* && $(stat -c '%u' "$database") == "$account_uid" ]] || fail 'Panel database path or owner is invalid.'
+  if [[ -e $registry/panel.database || -L $registry/panel.database ]]; then
+    [[ -f $registry/panel.database && ! -L $registry/panel.database && $(stat -c '%u:%a:%h' "$registry/panel.database") == 0:600:1 ]] || fail 'Unsafe panel database path record.'
+    [[ $(cat "$registry/panel.database") == "$database" ]] || fail 'Panel database differs from installation record; Owner must confirm the path in the shell.'
+  fi
+  printf '%s\n' "$database" > "$stage/panel-database"
 fi
 
 publishing_started=true
@@ -805,17 +828,25 @@ if [[ -n $host_network_service_digest ]]; then
     # updated helper has to write a fresh status.json, whose feature list tells
     # the Agent what the new helper accepts (v1.5.5 extra exemptions). The
     # helper rewrites the same rules, so the replay changes nothing else.
-    # --no-block keeps a helper failure - a rule the host rejects, for instance -
-    # from failing this install.
+    # --no-block keeps a retained rule the host rejects from failing this install.
+    # With no desired file, wait for the capability receipt so the Agent's first
+    # report already describes the newly installed helper. No rules are applied.
+    systemctl reset-failed "${host_network_service##*/}" 2>/dev/null || true
     if [[ -f /var/lib/proxy-agent/host-network/desired.json ]]; then
-      systemctl reset-failed "${host_network_service##*/}" 2>/dev/null || true
       systemctl start --no-block "${host_network_service##*/}"
+    else
+      systemctl start "${host_network_service##*/}"
     fi
   else
     # On OpenRC the watcher is one supervised service and there is no path unit:
     # it has to be in the default runlevel so a boot reapplies the retained rule,
     # and restarting it when it already runs is what makes an upgraded watcher
     # take effect. Both apply only what the panel publishes, as on systemd.
+    # The supervised start returns before the watcher runs. Publish the initial
+    # receipt synchronously without privileges or network changes first.
+    if [[ ! -f $data/host-network/desired.json ]]; then
+      runuser -u "$account" -- "$target" --apply-host-network "$data/host-network"
+    fi
     service_enable proxy-agent-host-network
     if service_is_active proxy-agent-host-network; then
       service_restart proxy-agent-host-network
@@ -828,6 +859,7 @@ fi
 qui_write_record "$stage/installed-manifest"
 chmod 0600 "$stage/installed-manifest"
 publish "$stage/installed-manifest" "$record" root root 0600
+if [[ $component == panel ]]; then publish "$stage/panel-database" "$registry/panel.database" root root 0600; fi
 if $reinstall; then rm -- "$removed"; sync -f -- "$registry"; fi
 verify_binary "$target" "$digest"
 publishing_started=false

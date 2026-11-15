@@ -108,9 +108,3 @@ func LoadAgent(path string) (config.Agent, error) {
 	}
 	return c, nil
 }
-
-func HasCores(c config.Agent) bool {
-	key, _ := filepath.Abs(c.DataDirectory)
-	_, ok := lists.Load(key)
-	return ok
-}

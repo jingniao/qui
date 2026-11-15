@@ -61,6 +61,7 @@ func TestCoreSourceRedirectPolicy(t *testing.T) {
 }
 
 func TestExtractZipRejectsUnsafeEntries(t *testing.T) {
+	fixedCoreNames(t)
 	cases := []struct {
 		name    string
 		entries []archiveEntry
@@ -72,6 +73,7 @@ func TestExtractZipRejectsUnsafeEntries(t *testing.T) {
 		{"duplicate", []archiveEntry{{name: "a/xray", data: []byte("x")}, {name: "a/xray", data: []byte("y")}}},
 		{"two candidates", []archiveEntry{{name: "a/xray", data: []byte("x")}, {name: "b/xray", data: []byte("y")}}},
 		{"missing binary", []archiveEntry{{name: "a/xray.txt", data: []byte("x")}}},
+		{"empty binary", []archiveEntry{{name: "xray", data: nil}}},
 		{"no entries", nil},
 	}
 	for _, item := range cases {
@@ -83,7 +85,7 @@ func TestExtractZipRejectsUnsafeEntries(t *testing.T) {
 		if _, err := extractCore("Xray-linux-64.zip", "xray", archive, directory); err == nil {
 			t.Fatalf("%s accepted", item.name)
 		}
-		if _, err := os.Stat(filepath.Join(directory, "core")); !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(filepath.Join(directory, "core"+coreExecutableSuffix())); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s left an extracted binary", item.name)
 		}
 	}

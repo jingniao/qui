@@ -3,6 +3,7 @@
     <p>{{ conflict.message }}</p>
     <ul><li v-for="outbound in conflict.outbounds" :key="outbound.id">{{ outbound.name }}</li></ul>
     <p v-for="scheme in conflict.schemes" :key="scheme.id">{{ scheme.name }} <RouterLink :to="{ path: '/proxy/relay', query: { schemeId: scheme.id } }" class="text-ios-blue">在画布中查看</RouterLink></p>
+    <RouterLink v-if="conflict.detached" to="/proxy/relay" class="text-ios-blue">前往中转方案 → 遗留资源</RouterLink>
   </div>
 </template>
 <script setup lang="ts">

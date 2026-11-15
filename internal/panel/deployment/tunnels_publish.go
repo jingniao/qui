@@ -2,11 +2,23 @@ package deployment
 
 import (
 	"context"
+	"database/sql"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"time"
 )
+
+// CheckTunnelPublicationNodes uses the caller's preparation transaction so the
+// existing deployment/update guards and the new reservation cannot interleave.
+func (p *CanvasPublisher) CheckTunnelPublicationNodes(ctx context.Context, tx *sql.Tx, nodes []string) error {
+	for _, nodeID := range nodes {
+		if err := nodeAvailable(ctx, tx, nodeID, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // GostRemovable shares the removal guard without queuing a removal.
 func (p *CanvasPublisher) GostRemovable(ctx context.Context, nodeID string) (bool, error) {
@@ -33,75 +45,93 @@ func (p *CanvasPublisher) GostRemovable(ctx context.Context, nodeID string) (boo
 
 // PublishTunnels keeps creation, pruning, advance and reverse rollback in the
 // existing batch implementation. Only this adapter waits for terminal outcomes.
-func (p *CanvasPublisher) PublishTunnels(ctx context.Context, name, author string, snapshots []proxy.NodeSnapshot) (proxy.CanvasPublishResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
-	defer cancel()
-	result, err := p.PublishCanvas(ctx, name, author, snapshots)
+func (p *CanvasPublisher) PublishTunnels(ctx context.Context, batchID, name, author string, snapshots []proxy.NodeSnapshot) (proxy.CanvasPublishResult, error) {
+	work := context.WithoutCancel(ctx)
+	result := proxy.CanvasPublishResult{BatchID: batchID, Nodes: []proxy.CanvasPublishNode{}}
+	retained, err := p.retainChangedSnapshots(work, snapshots)
 	if err != nil {
 		return result, err
 	}
+	if len(retained) == 0 {
+		_, err = p.Repository.Database.ExecContext(work, "UPDATE deployment_batches SET status='success' WHERE id=? AND status='draft'", batchID)
+		return result, err
+	}
+	if _, err = p.Repository.createBatch(work, batchID, "", name, author, retained); err != nil {
+		return result, err
+	}
+	if err = p.Repository.StartBatch(work, batchID); err != nil {
+		return result, err
+	}
+	return p.waitTunnelPublication(work, batchID)
+}
+
+func (p *CanvasPublisher) waitTunnelPublication(ctx context.Context, batchID string) (proxy.CanvasPublishResult, error) {
+	timeout := 300 * time.Second
+	if p.tunnelWaitTimeout != 0 {
+		timeout = p.tunnelWaitTimeout
+	}
+	wait, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		done := true
-		if result.BatchID != "" {
-			batch, e := p.Repository.Batch(ctx, result.BatchID)
-			if e != nil {
-				return result, e
-			}
-			done = batch.Status == "success" || batch.Status == "rolled_back" || batch.Status == "rollback_failed"
-			result.Nodes = nil
-			for _, item := range batch.Items {
-				result.Nodes = append(result.Nodes, proxy.CanvasPublishNode{NodeID: item.NodeID, Revision: item.Revision, Status: item.Status})
-			}
-		} else {
-			for i := range result.Nodes {
-				n := &result.Nodes[i]
-				status, e := p.Repository.TargetStatus(ctx, n.NodeID, n.Revision)
-				if e != nil {
-					return result, e
-				}
-				n.Status = status
-				if status != "success" && status != "failed" && status != "rollback" && status != "rolled_back" {
-					done = false
-				}
-			}
-		}
-		if done {
-			for i := range result.Nodes {
-				n := &result.Nodes[i]
-				// Batch rollback changes item status, but the original target retains
-				// whether this node failed or successfully applied before a later failure.
-				if n.Status == "failed" || n.Status == "rollback" || n.Status == "rolled_back" || n.Status == "rollback_failed" {
-					var targetStatus, code string
-					if e := p.Repository.Database.QueryRowContext(ctx, "SELECT status,result_code FROM deployment_targets WHERE node_id=? AND revision=?", n.NodeID, n.Revision).Scan(&targetStatus, &code); e != nil {
-						return result, e
-					}
-					if targetStatus == "failed" || targetStatus == "rollback" {
-						n.FailureCode = code
-					}
-					if targetStatus == "rollback" {
-						n.AutomaticRollback = true
-						n.Status = "rollback"
-					}
-				}
-				switch n.Status {
-				case "success":
-					n.Status = "applied"
-				case "waiting":
-					n.Status = "skipped"
-				case "rollback_failed":
-					n.Status = "failed"
-				case "rollback":
-					n.Status = "rolled_back"
-				}
-			}
-			return result, nil
+		result, done, err := p.tunnelPublicationResult(ctx, batchID)
+		if err != nil || done {
+			return result, err
 		}
 		select {
-		case <-ctx.Done():
-			return result, ctx.Err()
+		case <-wait.Done():
+			// Read once more with the live work context at the deadline boundary.
+			result, _, err = p.tunnelPublicationResult(ctx, batchID)
+			return result, err
 		case <-ticker.C:
 		}
 	}
+}
+
+func (p *CanvasPublisher) tunnelPublicationResult(ctx context.Context, batchID string) (proxy.CanvasPublishResult, bool, error) {
+	result := proxy.CanvasPublishResult{BatchID: batchID, Nodes: []proxy.CanvasPublishNode{}}
+	batch, err := p.Repository.Batch(ctx, batchID)
+	if err != nil {
+		return result, false, err
+	}
+	done := batch.Status == "success" || batch.Status == "failed" || batch.Status == "rolled_back" || batch.Status == "rollback_failed"
+	for _, item := range batch.Items {
+		n := proxy.CanvasPublishNode{NodeID: item.NodeID, Revision: item.Revision, Status: item.Status}
+		if !done {
+			n.Status = "publishing"
+			result.Nodes = append(result.Nodes, n)
+			continue
+		}
+		if n.Status == "failed" || n.Status == "rolled_back" || n.Status == "rollback_failed" {
+			var targetStatus, code string
+			if err = p.Repository.Database.QueryRowContext(ctx, "SELECT status,result_code FROM deployment_targets WHERE node_id=? AND revision=?", n.NodeID, n.Revision).Scan(&targetStatus, &code); err != nil {
+				return result, false, err
+			}
+			if targetStatus == "failed" || targetStatus == "rollback" {
+				n.FailureCode = code
+			}
+			if targetStatus == "rollback" {
+				n.AutomaticRollback = true
+				n.Status = "rollback"
+			}
+		}
+		switch n.Status {
+		case "success":
+			n.Status = "applied"
+		case "waiting":
+			n.Status = "skipped"
+		case "rollback_failed":
+			n.Status = "failed"
+		case "rollback":
+			n.Status = "rolled_back"
+		}
+		result.Nodes = append(result.Nodes, n)
+	}
+	return result, done, nil
+}
+
+func (p *CanvasPublisher) TunnelPublicationResult(ctx context.Context, batchID string) (proxy.CanvasPublishResult, error) {
+	result, _, err := p.tunnelPublicationResult(ctx, batchID)
+	return result, err
 }

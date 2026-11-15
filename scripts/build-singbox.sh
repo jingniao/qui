@@ -4,7 +4,7 @@ set -euo pipefail
 version=1.14.4
 tag=v$version
 commit=c005f35300ce76427dc285481ec5695f5b179cd2
-toolchain=go1.26.10
+toolchain=go1.26.11
 revision=1
 for tool in git go tar gzip sha256sum readelf; do
   command -v "$tool" >/dev/null || { printf 'Required build tool unavailable: %s\n' "$tool" >&2; exit 1; }

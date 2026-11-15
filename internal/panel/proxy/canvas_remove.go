@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 )
 
 type CanvasRemoveConflict struct{ Plan CanvasRemovePlan }
@@ -122,26 +123,12 @@ func (s *Service) RemoveCanvasScheme(ctx context.Context, schemeID string, input
 			return nil
 		})
 	}
-	if len(entryNodes) > 0 {
-		publication, e := s.publishCanvasRemovalPhase(ctx, deploy, plan.scheme.Name+"：停止或恢复入口", author, entryNodes, users)
-		result.Publications = append(result.Publications, publication)
-		if e != nil {
-			return fail(e)
-		}
-	}
-	if err = s.checkCanvasRemovalEntries(ctx, plan); err != nil {
-		return fail(err)
-	}
-	channelNodes := map[string]bool{}
 	channelStates := map[string]any{}
-	for _, object := range plan.Objects {
-		if object.Keep {
-			continue
-		}
+	disableChannel := func(object CanvasRemoveObject) error {
 		table := canvasRemoveTable(object.Kind)
 		state, e := s.canvasRemoveObjectState(ctx, object)
 		if e != nil {
-			return fail(e)
+			return e
 		}
 		switch value := state.(type) {
 		case Inbound:
@@ -156,11 +143,11 @@ func (s *Service) RemoveCanvasScheme(ctx context.Context, schemeID string, input
 		}
 		channelStates[object.Kind+":"+object.ID] = state
 		var enabled bool
-		if err = s.Repository.Database.QueryRowContext(ctx, "SELECT enabled FROM "+table+" WHERE id=?", object.ID).Scan(&enabled); err != nil {
-			return fail(err)
+		if e = s.Repository.Database.QueryRowContext(ctx, "SELECT enabled FROM "+table+" WHERE id=?", object.ID).Scan(&enabled); e != nil {
+			return e
 		}
-		if _, err = s.Repository.Database.ExecContext(ctx, "UPDATE "+table+" SET enabled=0 WHERE id=?", object.ID); err != nil {
-			return fail(err)
+		if _, e = s.Repository.Database.ExecContext(ctx, "UPDATE "+table+" SET enabled=0 WHERE id=?", object.ID); e != nil {
+			return e
 		}
 		undo.add(func(ctx context.Context) error {
 			res, e := s.Repository.Database.ExecContext(ctx, "UPDATE "+table+" SET enabled=? WHERE id=? AND enabled=0", enabled, object.ID)
@@ -176,6 +163,38 @@ func (s *Service) RemoveCanvasScheme(ctx context.Context, schemeID string, input
 			}
 			return nil
 		})
+		return nil
+	}
+	// Once its entry is stopped or restored, nothing on the entry server dials the
+	// scheme's own relay outbounds any more, so they go off in the same revision.
+	// Leaving them enabled made the entry phase depend on the next hop still running
+	// its internal listener: a scheme whose channel was already broken could never
+	// be removed (relay dependency not ready ... internal_inbound_unavailable).
+	for _, object := range plan.Objects {
+		if !object.Keep && object.Kind != "inbound" && seen[object.NodeID] {
+			if err = disableChannel(object); err != nil {
+				return fail(err)
+			}
+		}
+	}
+	if len(entryNodes) > 0 {
+		publication, e := s.publishCanvasRemovalPhase(ctx, deploy, plan.scheme.Name+"：停止或恢复入口", author, entryNodes, users)
+		result.Publications = append(result.Publications, publication)
+		if e != nil {
+			return fail(e)
+		}
+	}
+	if err = s.checkCanvasRemovalEntries(ctx, plan); err != nil {
+		return fail(err)
+	}
+	channelNodes := map[string]bool{}
+	for _, object := range plan.Objects {
+		if object.Keep || channelStates[object.Kind+":"+object.ID] != nil {
+			continue
+		}
+		if err = disableChannel(object); err != nil {
+			return fail(err)
+		}
 		channelNodes[object.NodeID] = true
 	}
 	nodes := []string{}
@@ -248,10 +267,26 @@ func (s *Service) RemoveCanvasScheme(ctx context.Context, schemeID string, input
 					after.InboundIDs = append(after.InboundIDs, id)
 				}
 			}
+			if len(after.InboundIDs) == len(before.InboundIDs) {
+				continue
+			}
 			if _, e = s.EntryGroups.SaveGroup(ctx, group.ID, after); e != nil {
 				return fail(e)
 			}
-			undo.add(func(ctx context.Context) error { _, e := s.EntryGroups.SaveGroup(ctx, group.ID, before); return e })
+			inboundID, groupID := entry.InboundID, group.ID
+			undo.add(func(ctx context.Context) error {
+				current, err := s.EntryGroups.Group(ctx, groupID)
+				if err != nil {
+					return err
+				}
+				if slices.Contains(current.InboundIDs, inboundID) {
+					return nil
+				}
+				input := canvasEntryGroupInput(current)
+				input.InboundIDs = append(append([]string{}, current.InboundIDs...), inboundID)
+				_, err = s.EntryGroups.SaveGroup(ctx, groupID, input)
+				return err
+			})
 		}
 	}
 	if err = s.finishCanvasRemoval(ctx, plan, guards); err != nil {

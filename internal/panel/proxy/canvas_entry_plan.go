@@ -108,6 +108,9 @@ func (s *Service) canvasPlanEntries(ctx context.Context, layout CanvasLayout, pl
 			if err != nil && !errors.Is(err, ErrNotFound) {
 				return err
 			}
+			if errors.Is(err, ErrNotFound) && b.Mode == "create" && (b.Protocol == "trojan" || b.Protocol == "hysteria2" || b.Protocol == "tuic") && n.ConnectAddress() == "" {
+				return fmt.Errorf("入口服务器「%s」未设置公网 IP 或客户端连接地址，无法为 %s 入口生成自签名证书", n.Name, b.Protocol)
+			}
 			if err == nil {
 				if record.Mode != b.Mode || b.Mode == "reuse" && record.InboundID != b.InboundID {
 					return errors.New("入口绑定已发布，不能切换绑定模式或入站")

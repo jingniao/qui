@@ -7,6 +7,7 @@ import (
 
 func rewindCanvasEntryBaseline(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindTunnelPublication(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0148_canvas_entry_baseline.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

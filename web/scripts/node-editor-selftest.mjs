@@ -28,6 +28,13 @@ const api = await load('../src/modules/proxy/components/node-editor/nodeEditorMo
 const { legacyList } = await load('./fixtures/node-editor-legacy.ts');
 const json = value => JSON.parse(JSON.stringify(value));
 
+// A create-mode canvas entry from an old archive can be repaired in the node editor.
+const brokenCanvasEntry = { id: 'canvas-entry', nodeId: 'server', name: 'A → B', protocol: 'shadowsocks', listen: '0.0.0.0', port: 35004, enabled: true, subscriptionVisible: true, internalRelay: false, defaultOutbound: 'relay', allowedUserIds: [], settings: {}, routeSummary: { type: 'relay', bindingMode: 'create', schemeId: 'scheme' } };
+const repairedCanvasEntry = api.buildPayload(api.createEditor('server', brokenCanvasEntry));
+assert.equal(repairedCanvasEntry.settings.method, 'chacha20-ietf-poly1305');
+assert.equal(repairedCanvasEntry.name, brokenCanvasEntry.name);
+assert.equal(repairedCanvasEntry.defaultOutbound, 'relay');
+
 // Frozen U3 protocolChanged/save logic, independent from the new builder.
 function legacyServer(form, addresses, mtu) {
   const value = json(form);

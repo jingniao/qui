@@ -249,18 +249,25 @@ func TestRunNftReportsAMissingBinary(t *testing.T) {
 	}
 }
 
-// TestRunHelperIsANoOpWithoutADesiredFile is the boot case: the unit starts
-// before the first publish and must succeed without calling nft.
+// Before the first publish the helper advertises its features without calling nft.
 func TestRunHelperIsANoOpWithoutADesiredFile(t *testing.T) {
 	calls := 0
 	restore := applyDesired
 	applyDesired = func(context.Context, Desired) error { calls++; return nil }
 	defer func() { applyDesired = restore }()
-	if err := RunHelper(context.Background(), t.TempDir()); err != nil {
+	directory := t.TempDir()
+	if err := RunHelper(context.Background(), directory); err != nil {
 		t.Fatalf("absent desired file failed the helper: %v", err)
 	}
 	if calls != 0 {
 		t.Fatal("the helper applied rules without a desired file")
+	}
+	status, err := ReadStatus(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ID != "" || !status.OK || status.Error != "" || !reflect.DeepEqual(status.Features, []string{FeatureExtraExempt}) {
+		t.Fatalf("initial helper capability receipt = %+v", status)
 	}
 }
 

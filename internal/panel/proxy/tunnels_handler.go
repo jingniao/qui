@@ -82,7 +82,11 @@ func (h *Handler) publishTunnels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.tunnelAudit(w, r, "发布隧道与规则", result.BatchID) {
-		httpapi.JSON(w, 200, result)
+		status := http.StatusOK
+		if result.Status == "publishing" {
+			status = http.StatusAccepted
+		}
+		httpapi.JSON(w, status, result)
 	}
 }
 func (h *Handler) listTunnels(w http.ResponseWriter, r *http.Request) {

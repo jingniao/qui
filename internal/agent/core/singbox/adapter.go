@@ -305,17 +305,21 @@ func applySwitch(ctx context.Context, previous, configuration core.RenderedConfi
 	}
 	if err := start(ctx, configuration); err != nil {
 		result.Code = "start_failed"
+		restoreErr := rulesets.RestoreBeforeRestart(ctx)
+		if restoreErr != nil {
+			result.Code = "rollback_failed"
+		}
 		if previous.Revision > 0 {
 			rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			rollbackErr := start(rollbackCtx, previous)
 			cancel()
 			if rollbackErr != nil {
 				result.Code = "rollback_failed"
-				return errors.New("sing-box start and rollback failed")
+				return errors.Join(err, restoreErr, rollbackErr)
 			}
 			result.RolledBack = true
 		}
-		return errors.New("sing-box startup or health check failed")
+		return errors.Join(err, restoreErr)
 	}
 	return nil
 }

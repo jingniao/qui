@@ -326,11 +326,6 @@ func activateStorageFormats(directory, nodeID string, reader agentstorage.Contra
 	return result, nil
 }
 
-// ActivateMultiCoreFormats records the configuration, revision map and component hold ABI.
-func ActivateMultiCoreFormats(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
-	return activateStorageFormats(directory, nodeID, reader, 3, 0)
-}
-
 // ActivateCoreInventoryFormats includes authenticated membership overlays and
 // per-core node aggregate counters, unreadable by checkpoint-only readers.
 func ActivateCoreInventoryFormats(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {

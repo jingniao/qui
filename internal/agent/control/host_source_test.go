@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"proxycontrol/internal/agent/hostnet"
 	"testing"
 )
@@ -28,5 +29,12 @@ func TestHostSourceExtraExemptSupported(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+	directory := t.TempDir()
+	if err := hostnet.RunHelper(context.Background(), directory); err != nil {
+		t.Fatal(err)
+	}
+	if !hostSourceExtraExemptSupported(directory, true) {
+		t.Fatal("fresh helper did not advertise extra exemptions before first publish")
 	}
 }

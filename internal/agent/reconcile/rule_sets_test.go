@@ -16,9 +16,9 @@ type ruleSetAdapter struct {
 	cleaned    [][]int64
 }
 
-func (a *ruleSetAdapter) PrepareRuleSets(context.Context, desiredstate.State) error {
+func (a *ruleSetAdapter) PrepareRuleSets(context.Context, desiredstate.State) (*rulesets.Update, error) {
 	a.prepared++
-	return a.prepareErr
+	return nil, a.prepareErr
 }
 
 func (a *ruleSetAdapter) CleanupRuleSets(states ...desiredstate.State) {

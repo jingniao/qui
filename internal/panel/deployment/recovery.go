@@ -27,7 +27,8 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 	}
 	for _, query := range []string{
 		"SELECT count(*) FROM config_revisions s LEFT JOIN restore_source.config_revisions c ON c.id=s.id WHERE c.id IS NULL OR c.encrypted_state<>s.encrypted_state",
-		"SELECT (SELECT count(*) FROM restore_source.deployment_targets WHERE status='pending')+(SELECT count(*) FROM restore_source.deployment_commands WHERE status='pending')+(SELECT count(*) FROM restore_source.deployment_batches WHERE status IN ('deploying','rolling_back','rollback_failed'))",
+		"SELECT (SELECT count(*) FROM restore_source.deployment_targets WHERE status='pending')+(SELECT count(*) FROM restore_source.deployment_commands WHERE status='pending')+(SELECT count(*) FROM restore_source.deployment_batches WHERE status IN ('deploying','rolling_back','rollback_failed') OR tunnel_finalized=0)",
+		"SELECT count(*) FROM deployment_batches WHERE tunnel_finalized=0",
 	} {
 		if err := db.AssertRecoveryNone(ctx, tx, query); err != nil {
 			return err
@@ -48,7 +49,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 	}
 	for _, item := range []struct{ table, columns string }{
 		{"deployment_targets", "revision,node_id,status,result_code,updated_at"},
-		{"deployment_batches", "id,chain_id,name,author,status,created_at"},
+		{"deployment_batches", "id,chain_id,name,author,status,created_at,tunnel_publication_json,tunnel_finalized"},
 		{"deployment_batch_items", "batch_id,position,node_id,revision,previous_revision,status,rollback_command_id"},
 		{"deployment_commands", "id,node_id,revision,operation,status,result_code,created_at"},
 		{"node_runtime_state", "node_id,revision"},

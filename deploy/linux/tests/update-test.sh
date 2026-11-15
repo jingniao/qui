@@ -1503,6 +1503,202 @@ scenario_24() {
 passes=0
 failed=0
 
+# Config-controlled paths must be rejected before service stop or database I/O.
+scenario_25() {
+  local attack target suffix
+  for attack in outside wrong-owner mismatch; do
+    new_scenario "scenario-25-$attack"
+    fake_reset
+    install_component panel 1.0.3
+    create_database
+    make_bundle 1.0.4
+    target=$ROOT/var/lib/proxy-panel/other.db
+    [[ $attack != outside ]] || target=$dir/private.db
+    printf 'PRIVATE-CONTENT\n' > "$target"
+    for suffix in -wal -shm; do printf 'PRIVATE-SIDECAR\n' > "$target$suffix"; done
+    [[ $attack != wrong-owner ]] || chown nobody:"$(id -gn nobody)" "$target"
+    if [[ $attack == mismatch ]]; then
+      printf '%s\n' "$FAKE_PANEL_DB" > "$REGISTRY/panel.database"
+      chmod 0600 "$REGISTRY/panel.database"
+    fi
+    printf 'database: %s\n' "$target" > "$ROOT/etc/proxy-panel/config.yaml"
+    update_bundle 1.0.4 --component panel
+    expect_status "$attack 路径被拒绝" 1 "$LAST_STATUS"
+    expect_eq "$attack 目标内容" PRIVATE-CONTENT "$(cat "$target")"
+    for suffix in -wal -shm; do expect_eq "$attack 保留 $suffix" PRIVATE-SIDECAR "$(cat "$target$suffix")"; done
+    expect_absent "$attack 不生成备份" "$BACKUPS"
+    expect_eq "$attack 保留版本" 1.0.3 "$(program_version panel)"
+    if grep -q '^stop proxy-panel' "$FAKE_STATE/calls.log"; then fail_note "$attack 不应停止面板"; fi
+  done
+}
+
+scenario_26() {
+  new_scenario scenario-26
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  update_bundle 1.0.4 --component panel
+  expect_status '旧安装自动迁移' 0 "$LAST_STATUS"
+  expect_eq '固定数据库路径' "$FAKE_PANEL_DB" "$(cat "$REGISTRY/panel.database")"
+  expect_eq '记录权限' 0:600 "$(stat -c '%u:%a' "$REGISTRY/panel.database")"
+}
+
+# Even a root-only WAL planted next to a valid database must not be read as root.
+scenario_27() {
+  new_scenario scenario-27
+  fake_reset
+  mkdir -p "$BACKUPS"
+  chmod 0755 "$TOP" "$dir" "$ROOT" "$ROOT/var" "$ROOT/var/lib"
+  chown daemon:daemon "$ROOT/var/lib/proxy-panel" "$BACKUPS"
+  create_database
+  chown daemon:daemon "$FAKE_PANEL_DB"
+  printf 'ROOT-PRIVATE-WAL\n' > "$FAKE_PANEL_DB-wal"
+  chmod 0600 "$FAKE_PANEL_DB-wal"
+  local status=0
+  (
+    export QUI_UPDATE_TEST_ACCOUNT=daemon
+    export LC_ALL=C
+    . "$update_script"
+    copy_database_atomic "$FAKE_PANEL_DB" "$BACKUPS/copy.db"
+  ) > "$dir/copy.out" 2>&1 || status=$?
+  expect_status '不能越权读取 WAL' 1 "$status"
+  expect_absent '失败不发布数据库' "$BACKUPS/copy.db"
+  expect_absent '失败不发布 WAL' "$BACKUPS/copy.db-wal"
+  expect_grep '保留底层权限错误' 'Permission denied' "$dir/copy.out"
+}
+
+scenario_28() {
+  new_scenario scenario-28
+  fake_reset
+  mkdir -p "$BACKUPS" "$dir/private"
+  chmod 0755 "$TOP" "$dir" "$ROOT" "$ROOT/var" "$ROOT/var/lib"
+  chown daemon:daemon "$ROOT/var/lib/proxy-panel" "$BACKUPS"
+  create_database
+  chown daemon:daemon "$FAKE_PANEL_DB"
+  printf 'ROOT-PRIVATE-TARGET\n' > "$dir/private/copy.db.partial"
+  local status=0
+  (
+    export QUI_UPDATE_TEST_ACCOUNT=daemon
+    . "$update_script"
+    attack_directory() {
+      [[ ! -f $dir/attacked ]] || return 0
+      runuser -u daemon -- sh -c 'mv -- "$1" "$1.saved" && ln -s -- "$2" "$1"' sh "$BACKUPS" "$dir/private"
+      touch "$dir/attacked"
+    }
+    mktemp() {
+      local created
+      created=$(command mktemp "$@") || return
+      [[ $created != *.partial ]] || attack_directory
+      printf '%s\n' "$created"
+    }
+    install() { attack_directory; command install "$@"; }
+    copy_database_atomic "$FAKE_PANEL_DB" "$BACKUPS/copy.db"
+  ) > "$dir/copy.out" 2>&1 || status=$?
+  expect_status '备份目录竞争后复制成功' 0 "$status"
+  expect_exists '目录竞争钩子执行' "$dir/attacked"
+  expect_eq '不覆盖私有目标' ROOT-PRIVATE-TARGET "$(cat "$dir/private/copy.db.partial")"
+  expect_eq '不改变私有目标属主' 0 "$(stat -c '%u' "$dir/private/copy.db.partial")"
+  expect_absent '不在替换目录发布备份' "$dir/private/copy.db"
+  expect_same '备份留在已固定目录' "$FAKE_PANEL_DB" "$BACKUPS.saved/copy.db"
+}
+
+scenario_29() {
+  local phase entry pending
+  for phase in prepared started; do
+    for entry in snapshot boot next-run; do
+      new_scenario "scenario-29-$phase-$entry"
+      fake_reset
+      install_component panel 1.0.3
+      create_database
+      make_bundle 1.0.4
+      if [[ $phase == prepared ]]; then export FAKE_INSTALL=kill-parent
+      else export FAKE_START_WRITES=1 FAKE_START_KILL=1 FAKE_TARGET=1.0.4; fi
+      update_bundle 1.0.4 --component panel
+      expect_status "$phase 中断" 137 "$LAST_STATUS"
+      expect_glob_exists "$phase 保留恢复快照" "$REGISTRY" 'rollback.*'
+      pending=$FOUND_GLOB
+      rm -- "$FAKE_PANEL_DB"
+      fake_reset
+      case $entry in
+        snapshot) run_snapshot_recovery "$pending";;
+        boot) run_boot_recovery;;
+        next-run) make_bundle 1.0.3; update_bundle 1.0.3 --component panel;;
+      esac
+      expect_status "$phase/$entry 缺失数据库恢复" 0 "$LAST_STATUS"
+      expect_same "$phase/$entry 还原原数据库" "$dir/original.db" "$FAKE_PANEL_DB"
+      expect_eq "$phase/$entry 旧程序恢复" 1.0.3 "$(program_version panel)"
+      expect_no_glob "$phase/$entry 清除快照" "$REGISTRY" 'rollback.*'
+    done
+  done
+}
+
+scenario_30() {
+  new_scenario scenario-30
+  fake_reset
+  install_component panel 1.0.4
+  create_database
+  chmod 0755 "$TOP" "$dir" "$ROOT" "$ROOT/var" "$ROOT/var/lib"
+  chown daemon:daemon "$ROOT/var/lib/proxy-panel" "$FAKE_PANEL_DB"
+  export QUI_UPDATE_TEST_ACCOUNT=daemon
+  mkdir -m 0700 "$dir/owner-private"
+  printf 'OWNER-OLD-SCHEMA\n' > "$dir/owner-private/downgrade.db"
+  printf 'OWNER-OLD-WAL\n' > "$dir/owner-private/downgrade.db-wal"
+  chmod 0600 "$dir/owner-private/"*
+  make_bundle 1.0.3
+  update_bundle 1.0.3 --component panel --database "$dir/owner-private/downgrade.db"
+  expect_status 'root 私有备份降级成功' 0 "$LAST_STATUS"
+  expect_eq '降级程序版本' 1.0.3 "$(program_version panel)"
+  expect_same '私有数据库恢复' "$dir/owner-private/downgrade.db" "$FAKE_PANEL_DB"
+  expect_same '私有 WAL 恢复' "$dir/owner-private/downgrade.db-wal" "$FAKE_PANEL_DB-wal"
+  expect_eq '恢复文件仍属于面板' "$(id -u daemon)" "$(stat -c '%u' "$FAKE_PANEL_DB")"
+  expect_eq '原备份权限不变' 0:600 "$(stat -c '%u:%a' "$dir/owner-private/downgrade.db")"
+}
+
+scenario_31() {
+  new_scenario scenario-31
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  chmod 0755 "$TOP" "$dir" "$ROOT" "$ROOT/var" "$ROOT/var/lib"
+  chown daemon:daemon "$ROOT/var/lib/proxy-panel" "$FAKE_PANEL_DB"
+  export QUI_UPDATE_TEST_ACCOUNT=daemon
+  make_bundle 1.0.4
+  export FAKE_INSTALL=kill-parent
+  update_bundle 1.0.4 --component panel
+  expect_status '比较失败场景中断' 137 "$LAST_STATUS"
+  expect_glob_exists '保留 prepared 快照' "$REGISTRY" 'rollback.*'
+  local pending=$FOUND_GLOB
+  chmod 000 "$FAKE_PANEL_DB"
+  : > "$FAKE_STATE/calls.log"
+  run_snapshot_recovery "$pending"
+  expect_status '数据库比较读取失败明确报错' 1 "$LAST_STATUS"
+  expect_exists '比较失败保留快照' "$pending"
+  expect_same '比较失败不覆盖数据库' "$dir/original.db" "$FAKE_PANEL_DB"
+  if grep -q '^start proxy-panel' "$FAKE_STATE/calls.log"; then fail_note '比较失败不应启动旧面板'; fi
+}
+
+scenario_32() {
+  new_scenario scenario-32
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  dd if=/dev/zero bs=1048576 count=1 >> "$FAKE_PANEL_DB" 2>/dev/null
+  cp -- "$FAKE_PANEL_DB" "$dir/original.db"
+  make_bundle 1.0.4
+  export FAKE_INSTALL=kill-parent
+  update_bundle 1.0.4 --component panel
+  expect_status '大数据库场景中断' 137 "$LAST_STATUS"
+  expect_glob_exists '保留 prepared 快照' "$REGISTRY" 'rollback.*'
+  local pending=$FOUND_GLOB
+  printf '\001' | dd of="$FAKE_PANEL_DB" bs=1 seek=24 conv=notrunc 2>/dev/null
+  fake_reset
+  run_snapshot_recovery "$pending"
+  expect_status '大数据库早期差异恢复成功' 0 "$LAST_STATUS"
+  expect_same '还原完整大数据库' "$dir/original.db" "$FAKE_PANEL_DB"
+  expect_no_glob '恢复后清除快照' "$REGISTRY" 'rollback.*'
+}
+
 run_scenario() {
   local name=$1 body=$2 status=0 reasons=''
   : > "$failure_file"
@@ -1533,6 +1729,14 @@ printf 'update-test: root %s, arch %s, update.sh %s\n' \
 run_scenario '22 multi-core rollback and boot recovery' scenario_22
 run_scenario '23 v1 single core to v2 migration' scenario_23
 run_scenario '24 panel web-UI update bridge in the file list' scenario_24
+run_scenario '25 unsafe config database paths' scenario_25
+run_scenario '26 legacy database path pinning' scenario_26
+run_scenario '27 panel account source reads' scenario_27
+run_scenario '28 backup directory replacement race' scenario_28
+run_scenario '29 missing database recovery' scenario_29
+run_scenario '30 owner private database downgrade' scenario_30
+run_scenario '31 database comparison errors' scenario_31
+run_scenario '32 large database early difference recovery' scenario_32
 run_scenario '1 success' scenario_1
 run_scenario '2 install fails after replacing' scenario_2
 run_scenario '3 unhealthy new version' scenario_3

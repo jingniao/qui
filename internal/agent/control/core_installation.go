@@ -36,8 +36,6 @@ func coreComponent(c config.Agent) string {
 	return c.CoreName
 }
 
-func coreComponentOriginal(c config.Agent) string { return configuration.Cores(c)[0].Name }
-
 func coreInstallationPending(state updater.Installation) bool {
 	return state.Phase == "switching" || state.Phase == "rolling_back" || state.Phase == "failed_closed"
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -26,7 +27,8 @@ import (
 // tunnel between two hosts no longer restarts every other host that relays
 // through them.
 type CanvasPublisher struct {
-	Repository *Repository
+	Repository        *Repository
+	tunnelWaitTimeout time.Duration
 }
 
 func (p *CanvasPublisher) PublishCanvas(ctx context.Context, name, author string, snapshots []proxy.NodeSnapshot) (proxy.CanvasPublishResult, error) {

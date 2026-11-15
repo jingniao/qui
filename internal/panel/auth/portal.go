@@ -23,9 +23,6 @@ func HashPassword(password string) (string, error) { return hashPassword(passwor
 // VerifyPassword reports whether the password matches the stored hash.
 func VerifyPassword(encoded, password string) bool { return verifyPassword(encoded, password) }
 
-// ValidatePassword applies the admin password rules.
-func ValidatePassword(password string) error { return validatePassword(password) }
-
 // NewToken returns a fresh random session token (43 URL-safe characters).
 func NewToken() (string, error) { return randomToken() }
 

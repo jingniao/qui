@@ -195,22 +195,9 @@ func (r *Repository) DeleteSession(ctx context.Context, tokenHash string) error 
 	return err
 }
 
-// DeleteOtherSessions ends every session of the user except the one given.
-func (r *Repository) DeleteOtherSessions(ctx context.Context, userID, keepTokenHash string) error {
-	_, err := r.Database.ExecContext(ctx, "DELETE FROM user_sessions WHERE user_id=? AND token_hash<>?", userID, keepTokenHash)
-	return err
-}
-
 // TouchLogin records a successful login.
 func (r *Repository) TouchLogin(ctx context.Context, userID string) error {
 	_, err := r.Database.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", timestamp(time.Now()), userID)
-	return err
-}
-
-// SetPassword replaces the stored hash without touching the login switch; the
-// change of password ends the other sessions in the caller.
-func (r *Repository) SetPassword(ctx context.Context, userID, passwordHash string) error {
-	_, err := r.Database.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", passwordHash, userID)
 	return err
 }
 

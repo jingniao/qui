@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 )
@@ -131,7 +132,7 @@ func (w *Worker) tick(ctx context.Context) {
 			continue
 		}
 		if w.Publish != nil {
-			w.Publish("notification", map[string]any{"id": saved.ID})
+			w.Publish("notification", map[string]any{"id": saved.ID, "kind": saved.Kind})
 		}
 		w.dispatchToChannels(ctx, saved)
 	}
@@ -201,7 +202,7 @@ func (w *Worker) Alert(ctx context.Context, data any) {
 		return
 	}
 	if w.Publish != nil {
-		w.Publish("notification", map[string]any{"id": saved.ID})
+		w.Publish("notification", map[string]any{"id": saved.ID, "kind": saved.Kind})
 	}
 	w.dispatchToChannels(ctx, saved)
 }
@@ -209,6 +210,7 @@ func (w *Worker) Alert(ctx context.Context, data any) {
 func (w *Worker) dispatchToChannels(ctx context.Context, n Notification) {
 	channels, err := w.Repository.Channels(ctx)
 	if err != nil {
+		w.warnChannelRead("", err)
 		return
 	}
 	for _, ch := range channels {
@@ -217,16 +219,20 @@ func (w *Worker) dispatchToChannels(ctx context.Context, n Notification) {
 		}
 		cfg, err := w.Repository.ChannelConfig(ctx, ch.ID)
 		if err != nil {
+			w.warnChannel(ch.ID, "channel_config_failed")
 			continue
 		}
 		code := w.Sender.Send(ctx, ch, cfg, n)
-		_ = w.Repository.RecordDelivery(ctx, ch.ID, code, time.Now())
+		if err := w.Repository.RecordDelivery(ctx, ch.ID, code, time.Now()); err != nil {
+			w.warnChannel(ch.ID, "channel_delivery_save_failed")
+		}
 	}
 }
 
 func (w *Worker) Test(ctx context.Context, channelID string) string {
 	channels, err := w.Repository.Channels(ctx)
 	if err != nil {
+		w.warnChannelRead(channelID, err)
 		return "channel_not_found"
 	}
 	var target Channel
@@ -244,6 +250,7 @@ func (w *Worker) Test(ctx context.Context, channelID string) string {
 
 	cfg, err := w.Repository.ChannelConfig(ctx, channelID)
 	if err != nil {
+		w.warnChannel(channelID, "channel_config_failed")
 		return "channel_not_found"
 	}
 
@@ -256,6 +263,26 @@ func (w *Worker) Test(ctx context.Context, channelID string) string {
 	}
 
 	code := w.Sender.Send(ctx, target, cfg, testNotif)
-	_ = w.Repository.RecordDelivery(ctx, channelID, code, time.Now())
+	if err := w.Repository.RecordDelivery(ctx, channelID, code, time.Now()); err != nil {
+		w.warnChannel(channelID, "channel_delivery_save_failed")
+	}
 	return code
+}
+
+func (w *Worker) warnChannelRead(channelID string, err error) {
+	var configErr *channelConfigError
+	if errors.As(err, &configErr) {
+		w.warnChannel(configErr.channelID, "channel_config_failed")
+		return
+	}
+	w.warnChannel(channelID, "channel_read_failed")
+}
+
+func (w *Worker) warnChannel(channelID, code string) {
+	logger := w.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	// Channel configuration and underlying errors may contain credentials.
+	logger.Warn("notification delivery failed", "channel_id", channelID, "code", code)
 }

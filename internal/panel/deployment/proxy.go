@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
@@ -79,19 +78,19 @@ func (h *Handler) checkRelayTargets(ctx context.Context, state desiredstate.Stat
 // path runs it: the revision endpoint, the one-step publication and a one-node
 // canvas publication.
 func checkRelayTargets(ctx context.Context, repository *Repository, state desiredstate.State) error {
-	for _, outbound := range state.Outbounds {
+	for _, outbound := range state.ReachableOutbounds() {
 		if outbound.TargetNodeID == "" || !outbound.Enabled {
 			continue
 		}
 		target, err := repository.Published(ctx, outbound.TargetNodeID)
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("relay target node must be deployed first")
+			return relayDependencyError(outbound, "请先发布目标节点", "target_not_published")
 		}
 		if err != nil {
 			return err
 		}
 		if reason := relayDependency(outbound, target); reason != "matched" {
-			return fmt.Errorf("%w: publish a matching target before source (%s)", ErrDependency, reason)
+			return relayDependencyError(outbound, "目标节点运行中的内部监听不匹配", reason)
 		}
 	}
 	return nil

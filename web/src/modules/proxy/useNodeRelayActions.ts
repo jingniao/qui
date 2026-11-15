@@ -32,6 +32,11 @@ const nodeRelays = ref<Record<string, NodeRelay[]>>({});
 const relayErrors = ref<Record<string, string>>({});
 function relayCount(node: ProxyNodeItem) { return getNodeRoutes(node).length + linkedRelays(node).length; }
 function linkedRelays(node: ProxyNodeItem) { return node.sourceType === 'self_hosted' ? (nodeRelays.value[node.sourceId || ''] || []).filter(r => !node.inboundId || (r.rule.target.mode === 'linked' && r.rule.target.inboundId === node.inboundId)) : []; }
+// A linked rule is listed under its target node's relays, so its entry inbound
+// does not need a row of its own in the node list.
+function isLinkedRelayRule(ruleId: string): boolean {
+  return Object.values(nodeRelays.value).some(items => items.some(r => r.rule.id === ruleId && r.rule.target.mode === 'linked'));
+}
 async function loadNodeRelays() {
   await Promise.all(servers.value.map(async node => {
     try { nodeRelays.value[node.id] = (await nodeRelayAPI.list(node.id)).items; delete relayErrors.value[node.id]; }
@@ -62,6 +67,6 @@ async function createRelayScheme() {
 return {
   relayNode, quickRelayInboundId, relayErrors, getNodeRoutes, goToEditRelayRoute,
   relayCount, linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
-  handleAddRelay, createRelayScheme,
+  handleAddRelay, createRelayScheme, isLinkedRelayRule,
 };
 }

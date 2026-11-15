@@ -517,6 +517,8 @@ func TestSyncHostNetworkRepublishesAClearTheHelperNeverConfirmed(t *testing.T) {
 		{name: "no status file", helper: true},
 		{name: "the same id failed", status: &hostnet.Status{ID: "previous", OK: false, Error: "test failure"}, helper: true},
 		{name: "another id succeeded", status: &hostnet.Status{ID: "earlier", OK: true}, helper: true},
+		{name: "initial capability receipt", status: &hostnet.Status{OK: true, Features: []string{hostnet.FeatureExtraExempt}}, helper: true},
+		{name: "initial receipt without helper", status: &hostnet.Status{OK: true, Features: []string{hostnet.FeatureExtraExempt}}},
 		{name: "no helper running"},
 	}
 	for _, test := range cases {

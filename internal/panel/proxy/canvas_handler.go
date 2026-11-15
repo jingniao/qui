@@ -154,6 +154,8 @@ func (h *Handler) publishCanvasScheme(w http.ResponseWriter, r *http.Request) {
 // scheme another canvas already changed is a conflict, not a bad request.
 func (h *Handler) failCanvas(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrRelayDependency):
+		httpapi.Error(w, 409, "dependency_not_ready", err.Error())
 	case errors.Is(err, ErrNotFound):
 		httpapi.Error(w, 404, "not_found", err.Error())
 	case errors.Is(err, ErrStaleScheme):

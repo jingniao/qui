@@ -136,7 +136,7 @@ function dispatch(path: string, method: string, body: unknown): unknown {
     if (parts[1] === 'publish') {
       const selection = body as PublishSelection, p = plan(selection), { ts, rs } = selected(selection);
       if (!p.ok) fail('port_in_use', '发布计划有冲突');
-      const result: PublishResult = { batchId: `mock-${sequence++}`, servers: p.servers.map(s => ({ nodeId: s.nodeId, nodeName: s.nodeName, revision: s.changes.length ? sequence : null, status: s.changes.length ? 'applied' : 'unchanged' })) };
+      const result: PublishResult = { status: 'success', batchId: `mock-${sequence++}`, servers: p.servers.map(s => ({ nodeId: s.nodeId, nodeName: s.nodeName, revision: s.changes.length ? sequence : null, status: s.changes.length ? 'applied' : 'unchanged' })) };
       for (const value of [...ts, ...rs].filter(v => v.status !== 'pending_delete')) { value.status = 'published'; value.publishedAt = now(); value.updatedAt = now(); }
       for (let i = retiredClaims.length - 1; i >= 0; i--) if ([...ts, ...rs].some(v => v.id === retiredClaims[i]!.usedBy.id)) retiredClaims.splice(i, 1);
       for (let i = tunnels.length - 1; i >= 0; i--) if (ts.includes(tunnels[i]!) && tunnels[i]!.status === 'pending_delete') tunnels.splice(i, 1);

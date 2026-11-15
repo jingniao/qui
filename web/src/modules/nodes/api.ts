@@ -13,8 +13,9 @@ export interface NodeNetworkSettings {
 // The body of PUT /api/v1/nodes/{id}: the node basics plus the outbound network.
 // The two address fields are optional because they carry meaning only when the
 // Owner changed them: a non-empty publicIp is stored as a manual value, and an
-// omitted field keeps whatever the panel holds.
-export interface NodeSettingsInput extends NodeNetworkSettings {
+// omitted field keeps whatever the panel holds. Network settings follow the
+// same omission semantics, so dialogs can submit only the fields they edit.
+export interface NodeSettingsInput extends Partial<NodeNetworkSettings> {
   id: string; name: string; enabled: boolean; publicIp?: string; publicIpSelected?: string; connectHost?: string; allowSubscription: boolean; maintenance: boolean;
 }
 export interface NodeView extends NodeNetworkSettings {

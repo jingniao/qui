@@ -75,6 +75,7 @@ new_case() {
   rm -rf -- "$root" "$state"
   mkdir -p -- "$request_directory" "$log_directory" "${updater%/*}" "$state"
   chmod 0700 -- "$request_directory"
+  chmod 0700 -- "$log_directory"
   printf '%s' "$installed" > "$version_file"
   : > "$calls_file"
   cat > "$panel" <<'FAKE_PANEL'
@@ -134,6 +135,7 @@ run_helper() {
     QUI_PANEL_UPDATE_ACCOUNT=$account \
     QUI_PANEL_UPDATE_PROGRAM=$panel \
     QUI_PANEL_UPDATE_UPDATER=$updater \
+    BASH_ENV=${HELPER_BASH_ENV:-} \
     bash "$helper" > "$TOP/helper.out" 2>&1 || status=$?
   LAST_STATUS=$status
   LAST_OUTPUT=$(cat -- "$TOP/helper.out")
@@ -174,9 +176,23 @@ check_mode() { # description path expected-mode
 }
 
 # Capability probes for the cases that need a real filesystem.
+# Use a real different UID/GID: root must exercise this case too, and nobody's
+# primary group is commonly named nogroup rather than nobody.
+other_account=''
+other_account_id=''
+other_account_gid=''
+for candidate in nobody daemon; do
+  if uid=$(id -u "$candidate" 2>/dev/null) && [[ $uid != "$account_id" ]]; then
+    other_account=$candidate
+    other_account_id=$uid
+    other_account_gid=$(id -g "$candidate")
+    break
+  fi
+done
 ownership_supported=false
-if printf 'x\n' > "$TOP/probe-owner" && chown 0:0 "$TOP/probe-owner" 2>/dev/null \
-  && [[ $(stat -c '%u' -- "$TOP/probe-owner") == 0 && $account_id != 0 ]]; then
+if [[ -n $other_account ]] && printf 'x\n' > "$TOP/probe-owner" \
+  && chown "$other_account_id:$other_account_gid" "$TOP/probe-owner" 2>/dev/null \
+  && [[ $(stat -c '%u' -- "$TOP/probe-owner") == "$other_account_id" ]]; then
   ownership_supported=true
 fi
 symlink_supported=false
@@ -190,14 +206,6 @@ if printf 'x\n' > "$TOP/probe-mode" && chmod 0600 "$TOP/probe-mode" 2>/dev/null 
   && [[ $(stat -c '%a' -- "$TOP/probe-mode") == 600 ]]; then
   modes_supported=true
 fi
-# An account other than the one running the test, for the wrong-owner case.
-other_account=''
-if $ownership_supported; then
-  for candidate in nobody daemon; do
-    if uid=$(id -u "$candidate" 2>/dev/null) && [[ $uid != "$account_id" ]]; then other_account=$candidate; break; fi
-  done
-fi
-
 check_rfc3339() { # description key
   local actual
   actual=$(status_value "$2")
@@ -284,7 +292,7 @@ fi
 if $ownership_supported && [[ -n $other_account ]]; then
   new_case 1.4.3
   write_request 1.5.0
-  chown "$other_account:$other_account" "$request_file"
+  chown "$other_account_id:$other_account_gid" "$request_file"
   run_helper
   check_status '不属于面板账号的请求被拒绝' code invalid_request
   check_updater_calls '不属于面板账号的请求不运行 qui-update' 0
@@ -420,6 +428,60 @@ if $symlink_supported; then
   fi
 else
   skip '不通过符号链接写入' '本机不能创建真正的符号链接'
+fi
+
+# Replace the temporary status path as the panel account immediately after mktemp.
+# A private root staging directory must make that replacement fail.
+if [[ $EUID == 0 ]] && command -v runuser >/dev/null && id nobody >/dev/null 2>&1; then
+  new_case 1.4.3
+  original_account=$account
+  account=nobody
+  chmod 0755 "$TOP" "$root" "$root/var" "$root/var/lib"
+  chown nobody:"$(id -gn nobody)" "$request_directory"
+  chmod 0700 "$log_directory"
+  printf 'private victim\n' > "$TOP/race-victim"
+  victim_owner=$(stat -c '%u:%g' "$TOP/race-victim")
+  cat > "$TOP/mktemp-hook" <<'HOOK'
+mktemp() {
+  local result
+  result=$(command mktemp "$@") || return
+  if [[ $result == *'/.status.'* ]]; then
+    runuser -u nobody -- sh -c 'rm -f -- "$1" && ln -s -- "$2" "$1"' sh "$result" "$RACE_VICTIM" 2>/dev/null || :
+    printf 'attempted\n' >> "$RACE_ATTEMPTS"
+  fi
+  printf '%s\n' "$result"
+}
+HOOK
+  export RACE_VICTIM=$TOP/race-victim RACE_ATTEMPTS=$TOP/race-attempts
+  HELPER_BASH_ENV=$TOP/mktemp-hook
+  FAKE_UPDATE_VERSION=1.5.0
+  write_request 1.5.0
+  chown nobody:"$(id -gn nobody)" "$request_file"
+  run_helper
+  unset HELPER_BASH_ENV
+  account=$original_account
+  check_status '临时路径竞争后仍写出状态' code succeeded
+  if [[ $(cat "$TOP/race-victim") == 'private victim' && $(stat -c '%u:%g' "$TOP/race-victim") == "$victim_owner" && -s $RACE_ATTEMPTS ]]; then
+    ok '面板账号不能替换 root 暂存状态文件'
+  else
+    not_ok '面板账号不能替换 root 暂存状态文件' '目标内容或属主改变，或钩子未运行'
+  fi
+fi
+
+# A rename must never turn into a copy across filesystems.
+if [[ -d /dev/shm && -w /dev/shm && $(stat -c '%d' /dev/shm) != $(stat -c '%d' "$TOP") ]]; then
+  new_case 1.4.3
+  shared_directory=$(mktemp -d /dev/shm/qui-panel-status.XXXXXXXX)
+  rmdir "$request_directory"
+  ln -s "$shared_directory" "$request_directory"
+  FAKE_UPDATE_VERSION=1.5.0
+  write_request 1.5.0
+  run_helper
+  check_exit '跨文件系统拒绝写状态' 1
+  check_absent '跨文件系统不写 status.json' "$status_file"
+  check_updater_calls '跨文件系统不运行更新器' 0
+  if [[ $LAST_OUTPUT == *'不在同一文件系统'* ]]; then ok '跨文件系统原因写入 journal 输出'; else not_ok '跨文件系统原因写入 journal 输出' "$LAST_OUTPUT"; fi
+  rm -rf -- "$shared_directory"
 fi
 
 printf '\npanel-update-helper-test: %s passed, %s failed, %s skipped\n' "$passes" "$failed" "$skipped"

@@ -40,6 +40,15 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
 
 export const CYCLE_LIST = ['/年', '/月', '/季', '/半年', '/2年', '/3年', '一次性'] as const;
 
+const CYCLE_PERIODS = [
+  { name: '3年', months: 36, days: 1095 },
+  { name: '2年', months: 24, days: 730 },
+  { name: '半年', months: 6, days: 182.5 },
+  { name: '年', months: 12, days: 365 },
+  { name: '季', months: 3, days: 91.25 },
+  { name: '月', months: 1, days: 30 },
+];
+
 const metadata = reactive<Record<string, NodeMeta>>({});
 export function getNodeMeta(nodeId: string): NodeMeta { return metadata[nodeId] || {}; }
 
@@ -208,16 +217,10 @@ export function calculateMonthlyExpenditure(meta?: NodeMeta): { value: string; c
   const parsed = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
   const num = parseFloat(parsed.price);
   if (!Number.isFinite(num) || num <= 0) return null;
-  let months = 1;
   const cycle = parsed.cycle;
-  if (cycle.includes('3年')) months = 36;
-  else if (cycle.includes('2年')) months = 24;
-  else if (cycle.includes('年')) months = 12;
-  else if (cycle.includes('半年')) months = 6;
-  else if (cycle.includes('季')) months = 3;
-  else if (cycle.includes('月')) months = 1;
-  else if (cycle.includes('一次性')) return null;
-  const monthly = num / months;
+  const period = CYCLE_PERIODS.find(item => cycle.includes(item.name));
+  if (!period) return null;
+  const monthly = num / period.months;
   const symbol = CURRENCY_SYMBOLS[parsed.currency] || parsed.currency;
   return { value: monthly.toFixed(2), currency: parsed.currency, symbol };
 }
@@ -229,16 +232,10 @@ export function calculateResidualValue(meta?: NodeMeta): { value: string; curren
   const parsed = parseRenewPrice(meta.renewPrice, meta.renewCurrency, meta.renewCycle);
   const num = parseFloat(parsed.price);
   if (!Number.isFinite(num) || num <= 0) return null;
-  let totalDays = 30;
   const cycle = parsed.cycle;
-  if (cycle.includes('3年')) totalDays = 365 * 3;
-  else if (cycle.includes('2年')) totalDays = 365 * 2;
-  else if (cycle.includes('年')) totalDays = 365;
-  else if (cycle.includes('半年')) totalDays = 182.5;
-  else if (cycle.includes('季')) totalDays = 91.25;
-  else if (cycle.includes('月')) totalDays = 30;
-  else if (cycle.includes('一次性')) return null;
-  const daily = num / totalDays;
+  const period = CYCLE_PERIODS.find(item => cycle.includes(item.name));
+  if (!period) return null;
+  const daily = num / period.days;
   const residual = Math.max(0, remaining.days * daily);
   const symbol = CURRENCY_SYMBOLS[parsed.currency] || parsed.currency;
   return { value: residual.toFixed(2), currency: parsed.currency, symbol };

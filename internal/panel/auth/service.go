@@ -317,7 +317,7 @@ func (s *Service) newSession(ctx context.Context, admin *Admin, ip string) (stri
 		duration = configured
 	}
 	expires := time.Now().UTC().Add(duration)
-	if err := s.Repository.CreateSession(ctx, tokenHash(token), admin.ID, ip, expires); err != nil {
+	if err := s.Repository.CreateSession(ctx, tokenHash(token), admin.ID, admin.PasswordHash, ip, expires); err != nil {
 		return "", Session{}, err
 	}
 	view, err := s.Session(ctx, token)
@@ -391,9 +391,6 @@ func (s *Service) UpdateAdmin(ctx context.Context, actor *Admin, id, displayName
 	if actor == nil || actor.Role != "Owner" {
 		return ErrUnauthorized
 	}
-	if actor == nil || actor.Role != "Owner" {
-		return ErrUnauthorized
-	}
 	admin, err := s.Repository.FindID(ctx, id)
 	if err != nil {
 		return err
@@ -418,9 +415,6 @@ func (s *Service) DeleteAdmin(ctx context.Context, actor *Admin, id, ip string) 
 	if actor == nil || actor.Role != "Owner" {
 		return ErrUnauthorized
 	}
-	if actor == nil || actor.Role != "Owner" {
-		return ErrUnauthorized
-	}
 	admin, err := s.Repository.FindID(ctx, id)
 	if err != nil {
 		return err
@@ -435,9 +429,6 @@ func (s *Service) DeleteAdmin(ctx context.Context, actor *Admin, id, ip string) 
 }
 
 func (s *Service) ChangePassword(ctx context.Context, actor *Admin, id, current, newPassword, ip string, reset bool) error {
-	if actor == nil {
-		return ErrUnauthorized
-	}
 	if actor == nil {
 		return ErrUnauthorized
 	}
@@ -456,7 +447,11 @@ func (s *Service) ChangePassword(ctx context.Context, actor *Admin, id, current,
 	if err != nil {
 		return err
 	}
-	if err := s.Repository.ChangePassword(ctx, id, hash); err != nil {
+	verifiedHash := admin.PasswordHash
+	if reset {
+		verifiedHash = ""
+	}
+	if err := s.Repository.ChangePassword(ctx, id, hash, verifiedHash); err != nil {
 		return err
 	}
 	return s.Audit.Record(ctx, actor.Username, "修改管理员密码", admin.Username, "成功", ip)

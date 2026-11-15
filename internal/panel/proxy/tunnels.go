@@ -191,8 +191,8 @@ func deriveTunnelTarget(ctx context.Context, q portDatabase, target TunnelTarget
 }
 func (r *Repository) TunnelRule(ctx context.Context, ruleID string) (TunnelRule, error) {
 	item, err := scanManagedRule(r.Database.QueryRowContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" WHERE r.id=?", ruleID))
-	if err == nil && item.Status != "pending_delete" {
-		item.Target, err = deriveTunnelTarget(ctx, r.Database, item.Target, item.TunnelID)
+	if err == nil {
+		err = r.deriveRuleTarget(ctx, &item)
 	}
 	return item, err
 }
@@ -202,15 +202,25 @@ func (r *Repository) TunnelRules(ctx context.Context, tunnelID, nodeID string) (
 		return nil, err
 	}
 	for i := range items {
-		if items[i].Status == "pending_delete" {
-			continue
-		}
-		items[i].Target, err = deriveTunnelTarget(ctx, r.Database, items[i].Target, items[i].TunnelID)
+		err = r.deriveRuleTarget(ctx, &items[i])
 		if err != nil {
 			return nil, err
 		}
 	}
 	return items, nil
+}
+
+func (r *Repository) deriveRuleTarget(ctx context.Context, item *TunnelRule) error {
+	target, err := deriveTunnelTarget(ctx, r.Database, item.Target, item.TunnelID)
+	if err != nil {
+		// Removal must remain readable even when its former target is gone.
+		if item.Status == "pending_delete" {
+			return nil
+		}
+		return err
+	}
+	item.Target = target
+	return nil
 }
 func (r *Repository) storedTunnelRules(ctx context.Context, tunnelID, nodeID string) ([]TunnelRule, error) {
 	rows, err := r.Database.QueryContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" WHERE (?='' OR r.tunnel_id=?) AND (?='' OR r.entry_node_id=?) ORDER BY r.created_at,r.id", tunnelID, tunnelID, nodeID, nodeID)
@@ -308,6 +318,9 @@ func releaseDraftClaims(ctx context.Context, tx *sql.Tx, kind, ownerID string, p
 func (s *Service) SaveTunnel(ctx context.Context, tunnelID string, input TunnelInput) (Tunnel, error) {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
+	if err := s.Repository.tunnelPublicationEditable(ctx, "tunnel", tunnelID); err != nil {
+		return Tunnel{}, err
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	if !managedName(input.Name) || input.Transport != "tls" || len(input.Hops) < 2 || len(input.Hops) > 3 {
 		return Tunnel{}, tunnelFail("invalid", 400, "隧道名称、传输或路径无效")
@@ -479,6 +492,14 @@ func (s *Service) SaveTunnelRule(ctx context.Context, ruleID string, input Tunne
 }
 
 func (s *Service) saveTunnelRule(ctx context.Context, ruleID string, input TunnelRuleInput, ownerNodeID *string) (TunnelRule, error) {
+	if err := s.Repository.tunnelPublicationEditable(ctx, "rule", ruleID); err != nil {
+		return TunnelRule{}, err
+	}
+	if input.TunnelID != nil {
+		if err := s.Repository.tunnelPublicationEditable(ctx, "tunnel", *input.TunnelID); err != nil {
+			return TunnelRule{}, err
+		}
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	if !managedName(input.Name) || !validPortMode(input.PortMode) || (input.Network != "tcp" && input.Network != "udp" && input.Network != "both") {
 		return TunnelRule{}, tunnelFail("invalid", 400, "规则名称、网络或端口模式无效")
@@ -599,11 +620,17 @@ func (s *Service) saveTunnelRule(ctx context.Context, ruleID string, input Tunne
 func (s *Service) DeleteTunnel(ctx context.Context, tunnelID string) error {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
+	if err := s.Repository.tunnelPublicationEditable(ctx, "tunnel", tunnelID); err != nil {
+		return err
+	}
 	return s.deleteManagedTunnel(ctx, "tunnels", "tunnel_hop", tunnelID)
 }
 func (s *Service) DeleteTunnelRule(ctx context.Context, ruleID string) error {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
+	if err := s.Repository.tunnelPublicationEditable(ctx, "rule", ruleID); err != nil {
+		return err
+	}
 	return s.deleteManagedTunnel(ctx, "tunnel_rules", "rule", ruleID)
 }
 func (s *Service) deleteManagedTunnel(ctx context.Context, table, kind, objectID string) error {
@@ -664,6 +691,9 @@ func (s *Service) deleteManagedTunnel(ctx context.Context, table, kind, objectID
 func (s *Service) RotateTunnelCredentials(ctx context.Context, tunnelID, updatedAt string) (Tunnel, error) {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
+	if err := s.Repository.tunnelPublicationEditable(ctx, "tunnel", tunnelID); err != nil {
+		return Tunnel{}, err
+	}
 	r := s.Repository
 	t, err := r.Tunnel(ctx, tunnelID)
 	if err != nil {

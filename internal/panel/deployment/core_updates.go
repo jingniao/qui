@@ -123,9 +123,6 @@ func supportsQuiCore(capabilities *pb.Capabilities) bool {
 	return capabilities != nil && (capabilities.SingboxUserStats || capabilities.MultiCoreSupported)
 }
 
-func coreUpdateAvailable(ctx context.Context, tx *sql.Tx, nodeID string) error {
-	return coreComponentAvailable(ctx, tx, nodeID, "")
-}
 func coreComponentAvailable(ctx context.Context, tx *sql.Tx, nodeID, component string) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM core_update_tasks WHERE node_id=? AND (?='' OR component=?) AND status IN ('queued','running'))+(SELECT count(*) FROM core_remove_tasks WHERE node_id=? AND (?='' OR component=?) AND status IN ('queued','running'))", nodeID, component, component, nodeID, component, component).Scan(&n); err != nil {

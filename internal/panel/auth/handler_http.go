@@ -215,6 +215,10 @@ func (h *Handler) password(w http.ResponseWriter, r *http.Request) {
 	}
 	actor := Actor(r.Context())
 	if err := h.Service.ChangePassword(r.Context(), actor, actor.ID, body.CurrentPassword, body.NewPassword, h.requestIP(r), false); err != nil {
+		if errors.Is(err, ErrConflict) {
+			httpapi.Error(w, 409, "password_changed", "Password has changed; sign in again")
+			return
+		}
 		h.fail(w, err)
 		return
 	}

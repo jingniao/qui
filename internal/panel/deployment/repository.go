@@ -23,6 +23,8 @@ type Repository struct {
 	// platform uses it to queue one quota reconciliation, which is a no-op when
 	// the node is already in sync. Optional and nil-safe.
 	Applied func(nodeID, operation string)
+	// BatchChanged wakes durable business finalizers after any committed receipt.
+	BatchChanged func()
 }
 type Revision struct {
 	ID         int64  `json:"id"`
@@ -325,6 +327,9 @@ func (r *Repository) Result(ctx context.Context, nodeID string, result *pb.Apply
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if r.BatchChanged != nil {
+		r.BatchChanged()
 	}
 	if result.Success {
 		r.notifyApplied(nodeID, "post-deploy")

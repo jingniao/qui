@@ -20,6 +20,18 @@
             <p v-if="group.referrers.length" class="text-ios-orange">引用者：{{ legacyReferrersText(group.referrers) }}</p>
             <p v-for="reason in legacyResourceActions(group).reasons" :key="reason" class="text-ios-secondary">{{ reason }}</p>
             <button v-if="legacyEmptyTunnelToDelete(group)" type="button" class="ios-btn-danger" :disabled="busy" @click="deleteEmptyTunnel(group)">清除空通道</button>
+            <template v-if="legacyResourceActions(group).partial">
+              <fieldset class="space-y-2 rounded-lg bg-ios-bg p-3" :disabled="busy">
+                <legend class="text-ios-secondary">整组无法还原，可只处理其中一部分（入口须连同它使用的通道）；剩下的资源之后单独处理。</legend>
+                <label v-for="binding in group.bindings" :key="binding.id" class="flex items-center gap-2"><input v-model="picks(group)[`binding:${binding.id}`]" type="checkbox" />入口：{{ binding.name }}</label>
+                <label v-for="tunnel in group.tunnels" :key="tunnel.id" class="flex items-center gap-2"><input v-model="picks(group)[`tunnel:${tunnel.id}`]" type="checkbox" />通道：{{ tunnel.name }}（{{ tunnel.objects.map(object => object.name).join('、') }}）</label>
+              </fieldset>
+              <label class="block space-y-1"><span>新方案名称</span><input v-model="names[group.id]" class="ios-input w-full" :disabled="busy" placeholder="请输入新方案名称" /></label>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="ios-btn-primary" :disabled="busy" @click="reattach(group, false, true)">挂接所选为方案</button>
+                <button type="button" class="ios-btn-danger" :disabled="busy" @click="reattach(group, true, true)">撤除所选</button>
+              </div>
+            </template>
             <template v-if="legacyResourceActions(group).showReattach">
               <label class="block space-y-1"><span>新方案名称</span><input v-model="names[group.id]" class="ios-input w-full" :disabled="busy" placeholder="请输入新方案名称" /></label>
               <div class="flex flex-wrap gap-2">
@@ -52,7 +64,7 @@ import { computed, reactive, ref } from 'vue';
 import AppDialog from '../../../../components/AppDialog.vue';
 import { APIError } from '../../../../app/apiClient';
 import { canvasLegacyAPI, canvasTunnelAPI, type CanvasLegacyResources, type CanvasLegacyGroup, type CanvasTunnelObject, type Inbound, type Outbound } from '../../api';
-import { legacyResourceActions, legacyResourceSections, legacyReferrersText, legacyEmptyTunnelToDelete } from '../../legacyResources';
+import { legacyDefaultSelection, legacyResourceActions, legacyResourceSections, legacyReferrersText, legacyEmptyTunnelToDelete } from '../../legacyResources';
 
 const props = defineProps<{ resources: CanvasLegacyResources; servers: { id: string; name: string }[]; inbounds: Inbound[]; outbounds: Outbound[] }>();
 const emit = defineEmits<{ close: []; changed: []; reattached: [schemeId: string, remove: boolean] }>();
@@ -75,14 +87,23 @@ function showError(cause: unknown) {
   const details = cause instanceof APIError && cause.code === 'canvas_legacy_conflict' ? cause.details as { reasons: string[] } : null;
   error.value = details ? details.reasons.join('\n') : (cause as Error).message;
 }
-async function reattach(group: CanvasLegacyGroup, remove: boolean) {
+// Per-group checkbox state for partial handling, seeded with the suggested part.
+const selections = reactive<Record<string, Record<string, boolean>>>({});
+function picks(group: CanvasLegacyGroup) {
+  return selections[group.id] ??= Object.fromEntries(legacyDefaultSelection(group).map(key => [key, true]));
+}
+async function reattach(group: CanvasLegacyGroup, remove: boolean, partial = false) {
   if (busy.value) return;
   const name = names[group.id]?.trim();
   if (!name) { error.value = '请输入新方案名称'; return; }
+  const chosen = partial ? Object.keys(picks(group)).filter(key => picks(group)[key]) : [];
+  const bindingIds = partial ? chosen.filter(key => key.startsWith('binding:')).map(key => key.slice(8)) : group.bindingIds;
+  const tunnelIds = partial ? chosen.filter(key => key.startsWith('tunnel:')).map(key => key.slice(7)) : group.tunnelIds;
+  if (!bindingIds.length && !tunnelIds.length) { error.value = '请至少选择一项资源'; return; }
   busy.value = true;
   error.value = '';
   try {
-    const result = await canvasLegacyAPI.reattach({ bindingIds: group.bindingIds, tunnelIds: group.tunnelIds, name });
+    const result = await canvasLegacyAPI.reattach({ bindingIds, tunnelIds, name });
     emit('reattached', result.schemeId, remove);
   } catch (cause) { showError(cause); }
   finally { busy.value = false; }

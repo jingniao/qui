@@ -371,8 +371,8 @@ func (s *SourceRefresher) Refresh(ctx context.Context, sourceID string) (Externa
 			code = fe.Code
 		}
 		if _, updateErr := s.Repository.Database.ExecContext(ctx,
-			`UPDATE service_set_sources SET last_status='failed', last_error_code=?, last_fetch_at=?, updated_at=? WHERE id=?`,
-			code, nowStr, nowStr, sourceID); updateErr != nil {
+			`UPDATE service_set_sources SET last_status='failed', last_error_code=?, last_fetch_at=?, updated_at=? WHERE id=? AND url=? AND format=? AND behavior=?`,
+			code, nowStr, nowStr, sourceID, url, format, behavior); updateErr != nil {
 			return ExternalSource{}, updateErr
 		}
 		return s.readSource(ctx, sourceID)
@@ -385,8 +385,8 @@ func (s *SourceRefresher) Refresh(ctx context.Context, sourceID string) (Externa
 			code = "parse_empty"
 		}
 		if _, updateErr := s.Repository.Database.ExecContext(ctx,
-			`UPDATE service_set_sources SET last_status='failed', last_error_code=?, last_fetch_at=?, updated_at=? WHERE id=?`,
-			code, nowStr, nowStr, sourceID); updateErr != nil {
+			`UPDATE service_set_sources SET last_status='failed', last_error_code=?, last_fetch_at=?, updated_at=? WHERE id=? AND url=? AND format=? AND behavior=?`,
+			code, nowStr, nowStr, sourceID, url, format, behavior); updateErr != nil {
 			return ExternalSource{}, updateErr
 		}
 		return s.readSource(ctx, sourceID)
@@ -415,15 +415,20 @@ func (s *SourceRefresher) Refresh(ctx context.Context, sourceID string) (Externa
 	}
 
 	entryCount := len(parsed.Domains) + len(parsed.Suffixes) + len(parsed.Keywords) + len(parsed.CIDRs)
-	if _, err := s.Repository.Database.ExecContext(ctx,
+	updated, err := s.Repository.Database.ExecContext(ctx,
 		`UPDATE service_set_sources
 		 SET last_status='ok', last_error_code='', last_fetch_at=?, last_success_at=?, entry_count=?, skipped_count=?, encrypted_cache=?, updated_at=?
-		 WHERE id=?`,
-		nowStr, nowStr, entryCount, skipped, sealed, nowStr, sourceID); err != nil {
+		 WHERE id=? AND url=? AND format=? AND behavior=?`,
+		nowStr, nowStr, entryCount, skipped, sealed, nowStr, sourceID, url, format, behavior)
+	if err != nil {
+		return ExternalSource{}, err
+	}
+	count, err := updated.RowsAffected()
+	if err != nil {
 		return ExternalSource{}, err
 	}
 
-	if changed && s.OnChange != nil {
+	if count > 0 && changed && s.OnChange != nil {
 		s.OnChange(serviceID)
 	}
 

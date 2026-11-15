@@ -71,19 +71,20 @@ func (s Sender) sendTelegram(ctx context.Context, client *http.Client, config Ch
 		return "channel_http"
 	}
 
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
 	if err != nil {
 		return "channel_network"
+	}
+	if len(bodyBytes) > 64*1024 {
+		return "channel_rejected"
 	}
 
 	var tgResp struct {
 		OK          bool   `json:"ok"`
 		Description string `json:"description"`
 	}
-	if err := json.Unmarshal(bodyBytes, &tgResp); err == nil {
-		if !tgResp.OK {
-			return "channel_rejected"
-		}
+	if err := json.Unmarshal(bodyBytes, &tgResp); err != nil || !tgResp.OK {
+		return "channel_rejected"
 	}
 	return ""
 }
@@ -100,6 +101,17 @@ func (s Sender) sendWebhook(ctx context.Context, client *http.Client, config Cha
 	u, err := url.Parse(config.URL)
 	if err != nil || config.Validate("webhook") != nil {
 		return "channel_rejected"
+	}
+	// Keep the caller's transport without mutating its client.
+	webhookClient := *client
+	webhookClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return errors.New("webhook redirect requires HTTPS")
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
 	}
 
 	payload := map[string]any{
@@ -148,7 +160,7 @@ func (s Sender) sendWebhook(ctx context.Context, client *http.Client, config Cha
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := webhookClient.Do(req)
 	if err != nil {
 		return classifyNetworkError(err)
 	}

@@ -20,7 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -180,21 +179,23 @@ func (f *Fetcher) client() *http.Client {
 	return &http.Client{Transport: transport, Timeout: downloadTimeout}
 }
 
-// Ensure makes every needed file exist below Dir(runtime). A cached file older
+// Ensure prepares every needed file below Dir(runtime). A cached file older
 // than its refresh interval is downloaded again; when that fails the cached copy
 // stays in use (WARN with the source id only). A missing file that cannot be
-// downloaded fails the call with ErrUnavailable. Files are written atomically.
-func (f *Fetcher) Ensure(ctx context.Context, runtime string, needs []Need) error {
+// downloaded fails the call with ErrUnavailable. Candidates stay in temporary
+// files until Update.Activate; the caller owns the update even on failure.
+func (f *Fetcher) Ensure(ctx context.Context, runtime string, needs []Need) (*Update, error) {
+	update := &Update{}
 	if len(needs) == 0 {
-		return nil
+		return update, nil
 	}
 	directory := Dir(runtime)
 	if err := os.MkdirAll(directory, 0700); err != nil {
-		return err
+		return update, err
 	}
 	for _, need := range needs {
 		if err := ctx.Err(); err != nil {
-			return err
+			return update, err
 		}
 		target := filepath.Join(directory, FileName(need.URL, need.SingBox))
 		info, statErr := os.Stat(target)
@@ -202,23 +203,23 @@ func (f *Fetcher) Ensure(ctx context.Context, runtime string, needs []Need) erro
 		if cached && f.now().Sub(info.ModTime()) < time.Duration(need.RefreshSeconds)*time.Second {
 			continue
 		}
-		err := f.download(ctx, directory, target, need)
+		err := f.download(ctx, directory, target, need, update)
 		if err == nil {
 			continue
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return update, ctx.Err()
 		}
 		if cached {
 			f.logger().Warn("rule set refresh failed; keeping the cached file", "rule_sets", strings.Join(need.IDs, ","))
 			continue
 		}
-		return fmt.Errorf("%w: %s", ErrUnavailable, strings.Join(need.IDs, ","))
+		return update, fmt.Errorf("%w: %s", ErrUnavailable, strings.Join(need.IDs, ","))
 	}
-	return nil
+	return update, nil
 }
 
-func (f *Fetcher) download(ctx context.Context, directory, target string, need Need) error {
+func (f *Fetcher) download(ctx context.Context, directory, target string, need Need, update *Update) error {
 	if !f.allowURL(need.URL, need.SingBox) {
 		return errors.New("rule set URL not allowed")
 	}
@@ -256,7 +257,11 @@ func (f *Fetcher) download(ctx context.Context, directory, target string, need N
 		return err
 	}
 	name := temporary.Name()
-	defer os.Remove(name)
+	defer func() {
+		if name != "" {
+			os.Remove(name)
+		}
+	}()
 	if err := temporary.Chmod(0600); err != nil {
 		temporary.Close()
 		return err
@@ -282,7 +287,9 @@ func (f *Fetcher) download(ctx context.Context, directory, target string, need N
 	if err := os.Chtimes(name, f.now(), f.now()); err != nil {
 		return err
 	}
-	return os.Rename(name, target)
+	update.files = append(update.files, replacement{target: target, temporary: name})
+	name = ""
+	return nil
 }
 
 // plausible is a cheap shape check so an error page never replaces a good copy:
@@ -307,7 +314,7 @@ func Cleanup(runtime string, keep map[string]bool) {
 		if entry.IsDir() || keep[name] {
 			continue
 		}
-		if fileNamePattern.MatchString(name) || strings.HasPrefix(name, ".tmp-") {
+		if fileNamePattern.MatchString(name) || fileNamePattern.MatchString(strings.TrimSuffix(name, ".prev")) || strings.HasPrefix(name, ".tmp-") {
 			os.Remove(filepath.Join(Dir(runtime), name))
 		}
 	}
@@ -322,14 +329,4 @@ func Keep(coreName string, states ...desiredstate.State) map[string]bool {
 		}
 	}
 	return keep
-}
-
-// SortedNames is a deterministic listing helper for tests and logs.
-func SortedNames(keep map[string]bool) []string {
-	names := make([]string, 0, len(keep))
-	for name := range keep {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }

@@ -220,20 +220,6 @@ func (t CanvasTunnel) gostRelay() bool {
 	return t.Type == "port_forward" && t.TunnelProtocol == "gost"
 }
 
-// loadGostMaterial reads and validates the sealed material of one tunnel. The
-// sealed bytes are returned too, so a caller can keep the column unchanged.
-func (r *Repository) loadGostMaterial(ctx context.Context, q tunnelDatabase, tunnelID string) (gostMaterial, error) {
-	var sealed []byte
-	err := q.QueryRowContext(ctx, "SELECT gost_material FROM canvas_tunnels WHERE id=?", tunnelID).Scan(&sealed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return gostMaterial{}, ErrNotFound
-	}
-	if err != nil {
-		return gostMaterial{}, err
-	}
-	return r.openGostMaterial(tunnelID, sealed)
-}
-
 func (r *Repository) openGostMaterial(tunnelID string, sealed []byte) (gostMaterial, error) {
 	if len(sealed) == 0 || r.Vault == nil {
 		return gostMaterial{}, ErrGostTunnelMaterial

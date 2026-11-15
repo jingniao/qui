@@ -765,7 +765,7 @@ export function simulateClientPolicy(
             hit = true;
             hitReason = `目标 IP ${addr} 命中服务规则【${set.name}】中的 IP 段。`;
           }
-        } else if ((set.domains || []).some(domain => domain.toLowerCase() === addr) || (set.suffixes || []).some(suffix => domainMatches(addr, suffix))) {
+        } else if ((set.domains || []).some(domain => domain.toLowerCase() === addr) || (set.suffixes || []).some(suffix => domainMatches(addr, suffix)) || (set.keywords || []).some(keyword => addr.includes(keyword.toLowerCase()))) {
           hit = true;
           hitReason = `目标域名 ${addr} 命中服务规则【${set.name}】。`;
         } else if ((set.cidrs || []).length) {

@@ -282,7 +282,7 @@ compute_go_scope() {
   ((go_scope_done)) && return 0
   go_scope_done=1
   local out line ip dir deps rel d dep seed f all=0
-  if ! out=$(go list -f '{{.ImportPath}}|{{.Dir}}|{{join .Deps " "}}' ./... 2>&1); then
+  if ! out=$(go list -f '{{.ImportPath}}|{{.Dir}}|{{join .Deps " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>&1); then
     printf 'go list 失败，无法确定受影响的包：\n%s\n' "$out" >&2
     exit 1
   fi
@@ -325,15 +325,20 @@ compute_go_scope() {
   if ((all)); then
     for ip in "${all_ip[@]}"; do affected[$ip]=1; done
   else
-    # One pass is enough: .Deps is transitive, so a package that reaches a seed
-    # through another package already lists the seed itself.
-    for ip in "${all_ip[@]}"; do
-      [[ -n ${affected[$ip]:-} ]] && continue
-      for dep in ${deps_of[$ip]}; do
-        if [[ -n ${affected[$dep]:-} ]]; then
-          affected[$ip]=1
-          break
-        fi
+    # TestImports/XTestImports list direct imports only. Repeat to include their
+    # dependencies regardless of the order go list returns the packages.
+    local added=1
+    while ((added)); do
+      added=0
+      for ip in "${all_ip[@]}"; do
+        [[ -n ${affected[$ip]:-} ]] && continue
+        for dep in ${deps_of[$ip]}; do
+          if [[ -n ${affected[$dep]:-} ]]; then
+            affected[$ip]=1
+            added=1
+            break
+          fi
+        done
       done
     done
   fi

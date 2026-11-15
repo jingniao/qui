@@ -87,7 +87,7 @@ func newGostHosts(t *testing.T) *gostHosts {
 // returns the chain they share.
 func (h *gostHosts) saveOrdinaryRelays() proxy.Chain {
 	h.t.Helper()
-	ukRelay, err := h.service.SaveInbound(h.ctx, "", proxy.InboundInput{Name: "relay uk", NodeID: h.uk, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35110, Enabled: true, InternalRelay: true, AllowedUserIDs: []string{}, DefaultOutbound: "direct"})
+	ukRelay, err := h.service.SaveInbound(h.ctx, "", proxy.InboundInput{Name: "relay uk", NodeID: h.uk, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35110, Enabled: true, InternalRelay: true, AllowedUserIDs: []string{}, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Method: "chacha20-ietf-poly1305"}})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -557,7 +557,7 @@ func TestCanvasPublishIncludesAnExpansionNodeWithItsOwnChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts.publish("ordinary relays", ordinary)
-	if _, err := hosts.service.SaveInbound(hosts.ctx, "", proxy.InboundInput{Name: "alpine entry", NodeID: hosts.alpine, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35310, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"}); err != nil {
+	if _, err := hosts.service.SaveInbound(hosts.ctx, "", proxy.InboundInput{Name: "alpine entry", NodeID: hosts.alpine, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35310, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Method: "chacha20-ietf-poly1305"}}); err != nil {
 		t.Fatal(err)
 	}
 	before := hosts.revision(hosts.alpine)
@@ -577,7 +577,7 @@ func TestCanvasPublishIncludesAnExpansionNodeWithItsOwnChange(t *testing.T) {
 func TestCanvasPublishIncludesAnExpansionNodeWithOnlyItsIntentChanged(t *testing.T) {
 	hosts := newGostHosts(t)
 	hosts.saveOrdinaryRelays()
-	spare, err := hosts.service.SaveInbound(hosts.ctx, "", proxy.InboundInput{Name: "alpine spare", NodeID: hosts.alpine, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35320, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
+	spare, err := hosts.service.SaveInbound(hosts.ctx, "", proxy.InboundInput{Name: "alpine spare", NodeID: hosts.alpine, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35320, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Method: "chacha20-ietf-poly1305"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +586,7 @@ func TestCanvasPublishIncludesAnExpansionNodeWithOnlyItsIntentChanged(t *testing
 		t.Fatal(err)
 	}
 	hosts.publish("ordinary relays", ordinary)
-	if _, err := hosts.service.SaveInbound(hosts.ctx, spare.ID, proxy.InboundInput{Name: "alpine spare", NodeID: hosts.alpine, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35320, Enabled: false, SubscriptionVisible: true, DefaultOutbound: "direct"}); err != nil {
+	if _, err := hosts.service.SaveInbound(hosts.ctx, spare.ID, proxy.InboundInput{Name: "alpine spare", NodeID: hosts.alpine, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 35320, Enabled: false, SubscriptionVisible: true, DefaultOutbound: "direct", Settings: desiredstate.ProtocolSettings{Method: "chacha20-ietf-poly1305"}}); err != nil {
 		t.Fatal(err)
 	}
 	state, intent, err := hosts.service.SnapshotIntent(hosts.ctx, hosts.alpine, hosts.users)

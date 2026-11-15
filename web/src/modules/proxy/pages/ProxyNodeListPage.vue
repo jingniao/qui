@@ -271,20 +271,21 @@
               无额外中转入口
             </div>
             <div v-else class="space-y-1">
-              <div
-                v-for="(r, idx) in getNodeRoutes(node)"
-                :key="idx"
-                class="flex items-center gap-1.5 cursor-pointer text-neutral-800 hover:text-ios-blue"
-                @click="goToEditRelayRoute(r)"
-                :title="'点击前往画布编辑此线路: ' + r.pathDisplay"
-              >
-                <span class="font-semibold truncate max-w-[150px]">{{ r.pathDisplay }}</span>
-                <span
-                  class="px-1 py-0.2 rounded text-xs font-bold shrink-0"
-                  :class="!r.published ? 'bg-neutral-100 text-neutral-600' : (r.hasUnpublishedChanges ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')"
+              <div v-for="(r, idx) in getNodeRoutes(node)" :key="idx">
+                <div
+                  class="flex items-center gap-1.5 cursor-pointer text-neutral-800 hover:text-ios-blue"
+                  @click="goToEditRelayRoute(r)"
+                  :title="'点击前往画布编辑此线路: ' + r.pathDisplay"
                 >
-                  {{ !r.published ? '草稿' : (r.hasUnpublishedChanges ? '未发布修改' : '已发布') }}
-                </span>
+                  <span class="font-semibold truncate max-w-[150px]">{{ r.pathDisplay }}</span>
+                  <span
+                    class="px-1 py-0.2 rounded text-xs font-bold shrink-0"
+                    :class="!r.published ? 'bg-neutral-100 text-neutral-600' : (r.hasUnpublishedChanges ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')"
+                  >
+                    {{ !r.published ? '草稿' : (r.hasUnpublishedChanges ? '未发布修改' : '已发布') }}
+                  </span>
+                </div>
+                <RelayRouteEntries :entries="routeEntries(r)" @copy="copyAddress" />
               </div>
             </div>
             <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" />
@@ -503,6 +504,7 @@
                       {{ !r.published ? '草稿' : (r.hasUnpublishedChanges ? '有未发布修改' : '已发布') }}
                     </span>
                   </div>
+                  <RelayRouteEntries :entries="routeEntries(r)" @copy="copyAddress" />
                 </div>
 
                 <button v-if="isOwner"
@@ -1122,6 +1124,8 @@ import QuickRelayDialog from '../components/QuickRelayDialog.vue';
 import { useNodeRelayActions } from '../useNodeRelayActions';
 import ImportResultDialog from '../components/ImportResultDialog.vue';
 import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
+import RelayRouteEntries from '../components/RelayRouteEntries.vue';
+import { nestRelayEntries } from '../nestedRelayEntries';
 import { authState } from '../../../app/auth';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { importAPI, loadImports, airportSources, describeImportResult, importCountsLine, failedImportResult } from '../importApi';
@@ -1138,6 +1142,7 @@ import { showToast } from '../../../app/api';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { request } from '../../../app/apiClient';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { serverStatus } from '../../nodes/components/serverListModel';
 import { deploymentAPI } from '../../system/deploymentApi';
 import { proxyAPI, canvasAPI, type Inbound, loadProtocolSupport, choices } from '../api';
 import { resolveCountryInfo, countryTitle, getNodeMeta, type CountryInfo } from '../../nodes/nodeMeta';
@@ -1153,6 +1158,7 @@ import {
   loadCanvasSchemes,
   buildProxyLink,
   type ProxyNodeItem,
+  type NodeRelayRoute,
   type SubscriptionItem
 } from '../proxyNodes';
 
@@ -1169,6 +1175,7 @@ function setDisplayMode(mode: 'grid' | 'list') {
 }
 
 const servers = ref<NodeView[]>([]);
+const now = ref(Date.now());
 const serverInbounds = ref<Inbound[]>([]);
 const entryRouteSummaries = computed(() => new Map(serverInbounds.value.filter(isUserEntry).map(inbound => [inbound.id, inbound.routeSummary])));
 const editingInbound = ref<Inbound | null>(null);
@@ -1268,6 +1275,7 @@ const pageSize = 12;
 
 // Load real data
 async function loadData() {
+  const generation = ++serverRefreshGeneration;
   loading.value = true;
   try {
     // Keep old browser data intact, but never mix its ungranted entries into
@@ -1278,7 +1286,7 @@ async function loadData() {
       choices((page, size) => nodeAPI.list(page, '', false, size)),
       choices((page, size) => proxyAPI.inbounds('', page, size))
     ]).then(([nodeRes, inboundRes]) => {
-      servers.value = nodeRes;
+      if (generation === serverRefreshGeneration) servers.value = nodeRes;
       serverInbounds.value = inboundRes;
       void loadNodeRelays();
     });
@@ -1312,7 +1320,7 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
         }
         const finalDisplayName = cleanName ? `${srv.name} · ${cleanName}` : `${srv.name} · ${ib.protocol.toUpperCase()}`;
         const name = ib.enabled ? finalDisplayName : finalDisplayName + ' (已停用)';
-        const status = (srv.status === 'online' || srv.status === 'degraded') && ib.enabled ? 'online' : 'offline';
+        const status = ['online', 'degraded'].includes(serverStatus(srv, now.value).key) && ib.enabled ? 'online' : 'offline';
         // The panel holds the inbound, so the transports are read from it with the
         // same helper the server detail page uses, instead of guessing from the
         // protocol name (that showed "TCP · UDP" for every self-hosted node).
@@ -1342,10 +1350,10 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
   return result;
 });
 
-// All aggregated nodes
-const allNodes = computed<ProxyNodeItem[]>(() => {
-  return [...selfHostedNodes.value, ...proxyNodeStore.manualNodes];
-});
+// All aggregated nodes. Entries made by a node's 添加中转 are listed in their exit node's 中转 section only.
+const relayNesting = computed(() => nestRelayEntries(selfHostedNodes.value, proxyNodeStore.manualNodes, serverInbounds.value, getNodeRoutes, isLinkedRelayRule));
+const routeEntries = (route: NodeRelayRoute) => relayNesting.value.entries.get(route.schemeId) || [];
+const allNodes = computed<ProxyNodeItem[]>(() => [...selfHostedNodes.value.filter(node => !relayNesting.value.hidden.has(node.id)), ...proxyNodeStore.manualNodes]);
 
 // Filtered nodes
 const filteredNodes = computed<ProxyNodeItem[]>(() => {
@@ -1387,7 +1395,7 @@ function applyFilter() {
 const {
   relayNode, quickRelayInboundId, relayErrors, getNodeRoutes, goToEditRelayRoute,
   relayCount, linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
-  handleAddRelay, createRelayScheme,
+  handleAddRelay, createRelayScheme, isLinkedRelayRule,
 } = useNodeRelayActions(isOwner, servers, serverInbounds);
 
 // Flag resolution helper
@@ -1423,6 +1431,7 @@ function statusDotClass(node: ProxyNodeItem): string {
 }
 
 function statusCapsuleText(node: ProxyNodeItem): string {
+  if (inboundStatusUnknown(node)) return '状态未知';
   if (notRunning(node)) return '未生效';
   if (node.status === 'online') return '在线';
   if (node.status === 'untested') return '未检测';
@@ -1712,9 +1721,13 @@ async function deleteSubscription(subId: string) {
 }
 
 // Publish state of each self-hosted inbound against the revision its server runs,
-// keyed by `<serverId>/<inboundId>`. A server whose states could not be read
-// simply has no entry, so its inbounds show no badge.
+// keyed by `<serverId>/<inboundId>`. Failed reads retain the snapshot but mark it unknown.
 const inboundStateMap = ref<Map<string, InboundStateItem>>(new Map());
+const inboundStateErrors = ref<Map<string, string>>(new Map());
+
+function inboundStatusUnknown(node: ProxyNodeItem): boolean {
+  return node.sourceType === 'self_hosted' && inboundStateErrors.value.has(node.sourceId!);
+}
 
 const inboundBadgeLook: Record<InboundPublishState, { label: string; tone: string }> = {
   effective: { label: '已生效', tone: 'green' },
@@ -1729,6 +1742,7 @@ function inboundState(node: ProxyNodeItem): InboundStateItem | undefined {
 }
 
 function inboundBadge(node: ProxyNodeItem) {
+  if (inboundStatusUnknown(node)) return { label: '状态未知', tone: 'yellow', title: inboundStateErrors.value.get(node.sourceId!) };
   const item = inboundState(node);
   if (!item) return undefined;
   const look = inboundBadgeLook[item.state];
@@ -1739,6 +1753,7 @@ function inboundBadge(node: ProxyNodeItem) {
 // A modified inbound still runs its old configuration, so only an inbound the
 // server does not run yet drops the server's online badge and latency.
 function notRunning(node: ProxyNodeItem): boolean {
+  if (inboundStatusUnknown(node)) return true;
   const state = inboundState(node)?.state;
   return state === 'unpublished' || state === 'pending';
 }
@@ -1760,28 +1775,48 @@ async function loadServerPublishStates() {
     serverIds.map(async (id) => {
       try {
         return [id, (await deploymentAPI.inboundStates(id)).items] as const;
-      } catch {
-        return [id, [] as InboundStateItem[]] as const;
+      } catch (error) {
+        return [id, error instanceof Error ? error.message : String(error)] as const;
       }
     })
   );
 
   if (generation !== publishStateGeneration) return;
   const nextMap = new Map(inboundStateMap.value);
+  const errors = new Map(inboundStateErrors.value);
   for (const [id, items] of results) {
+    if (typeof items === 'string') {
+      errors.set(id, `入站状态读取失败：${items}`);
+      continue;
+    }
+    errors.delete(id);
     for (const key of [...nextMap.keys()]) if (key.startsWith(`${id}/`)) nextMap.delete(key);
     for (const item of items) nextMap.set(`${id}/${item.inboundId}`, item);
   }
   inboundStateMap.value = nextMap;
+  inboundStateErrors.value = errors;
 }
 
 watch([pagedNodes, displayMode, servers], () => {
   loadServerPublishStates();
 }, { immediate: true });
 
+let serverRefreshGeneration = 0;
+async function refreshServersOnNodeStatus() {
+  if (document.hidden) return;
+  const generation = ++serverRefreshGeneration;
+  try {
+    const items = await choices((page, size) => nodeAPI.list(page, '', false, size));
+    if (generation === serverRefreshGeneration) servers.value = items;
+  } catch (error) {
+    if (generation === serverRefreshGeneration) showToast(`服务器状态读取失败：${(error as Error).message}`, 'error');
+  }
+}
 function publishVisibilityChanged() { if (!document.hidden) reloadPublishStatesOnNodeStatus(); }
-const reloadPublishStatesOnNodeStatus = throttleTrailing(() => { void loadServerPublishStates(); }, 5000);
+const reloadPublishStatesOnNodeStatus = throttleTrailing(() => { void refreshServersOnNodeStatus(); void loadServerPublishStates(); }, 5000);
+let statusClock: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
+  statusClock = setInterval(() => { now.value = Date.now(); }, 5000);
   loadProtocolSupport();
   loadData();
   window.addEventListener('proxy-deployment-status', reloadPublishStatesOnNodeStatus);
@@ -1790,6 +1825,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  clearInterval(statusClock);
+  serverRefreshGeneration++;
   publishStateGeneration++;
   document.removeEventListener('visibilitychange', publishVisibilityChanged);
   reloadPublishStatesOnNodeStatus.cancel();

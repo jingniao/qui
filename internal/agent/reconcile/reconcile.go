@@ -113,9 +113,42 @@ func NewControlOnly(directory, nodeID string, adapter core.Adapter) (*Reconciler
 func digest(data []byte) string      { hash := sha256.Sum256(data); return hex.EncodeToString(hash[:]) }
 func (r *Reconciler) Current() int64 { r.mu.Lock(); defer r.mu.Unlock(); return r.manifest.Revision }
 func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.ApplyResult, error) {
+	return r.apply(ctx, state, nil, false)
+}
+
+// PrepareRuleSets downloads candidates without changing live files or holding
+// the reconciler lock. The caller owns the returned update even on failure.
+func (r *Reconciler) PrepareRuleSets(ctx context.Context, state desiredstate.State) (*rulesets.Update, error) {
+	if state.NodeID != r.NodeID {
+		return nil, errors.New("DesiredState belongs to another node")
+	}
+	if err := state.Validate(); err != nil {
+		return nil, err
+	}
+	if preparer, ok := r.Adapter.(core.RuleSetPreparer); ok {
+		return preparer.PrepareRuleSets(ctx, state)
+	}
+	return nil, nil
+}
+
+// ApplyPrepared consumes candidates downloaded outside the control loop.
+func (r *Reconciler) ApplyPrepared(ctx context.Context, state desiredstate.State, update *rulesets.Update) (core.ApplyResult, error) {
+	return r.apply(ctx, state, update, true)
+}
+
+func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update *rulesets.Update, prepared bool) (result core.ApplyResult, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	result := core.ApplyResult{Revision: state.Revision}
+	committed := false
+	defer func() {
+		if !committed {
+			if err := update.Rollback(); err != nil {
+				result.Success, result.Code = false, "rollback_failed"
+				resultErr = errors.Join(resultErr, err)
+			}
+		}
+	}()
+	result = core.ApplyResult{Revision: state.Revision}
 	if r.anyCoreHold() || r.controlOnly {
 		return result, core.ErrReleaseRecovery
 	}
@@ -199,8 +232,9 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	// never reach the network and a revision that depends on a file that was
 	// never downloaded fails through the ordinary failure path. The failure
 	// is temporary (the next attempt downloads again), so it is not cached.
-	if preparer, ok := r.Adapter.(core.RuleSetPreparer); ok {
-		if err := preparer.PrepareRuleSets(ctx, state); err != nil {
+	if !prepared {
+		update, err = r.PrepareRuleSets(ctx, state)
+		if err != nil {
 			result.Code = "apply_failed"
 			if errors.Is(err, rulesets.ErrUnavailable) {
 				result.Code = rulesets.Code
@@ -209,11 +243,16 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 			return result, err
 		}
 	}
+	if err := update.Activate(); err != nil {
+		result.Code = "rule_set_activate_failed"
+		return result, err
+	}
+	ctx = update.Context(ctx)
 	rendered, err := r.Adapter.Render(ctx, state)
 	if err != nil {
 		result.Code = "render_failed"
 		result.Message = err.Error()
-		if !retainedRevision {
+		if !retainedRevision && !update.Changed() {
 			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
 				return result, saveErr
 			}
@@ -223,7 +262,7 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	if err := r.Adapter.Validate(ctx, rendered); err != nil {
 		result.Code = "validation_failed"
 		result.Message = err.Error()
-		if !retainedRevision {
+		if !retainedRevision && !update.Changed() {
 			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
 				return result, saveErr
 			}
@@ -270,7 +309,7 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 		if retainedRevision {
 			return result, err
 		}
-		if permanentFailure(result.Code) {
+		if permanentFailure(result.Code) && !update.Changed() {
 			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
 				return result, saveErr
 			}
@@ -289,6 +328,11 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	// restores the previous runtime and the previous rules on the host and is
 	// retried like any other temporary failure.
 	if err := r.applyHostNetwork(ctx, state); err != nil {
+		if restoreErr := update.Rollback(); restoreErr != nil {
+			result.Success = false
+			result.Code = "rollback_failed"
+			return result, errors.Join(err, restoreErr)
+		}
 		result.Success = false
 		result.Code = hostNetworkFailedCode
 		result.Message = err.Error()
@@ -343,6 +387,10 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 	if err != nil {
 		result.Success = false
 		result.Code = "persistence_failed"
+		if restoreErr := update.Rollback(); restoreErr != nil {
+			result.Code = "rollback_failed"
+			return result, errors.Join(err, restoreErr)
+		}
 		result.Message = "could not persist successful revision"
 		if previous.Revision > 0 {
 			rollbackErr := r.restoreRevision(ctx, previous.Revision)
@@ -363,6 +411,12 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 		return result, errors.New("could not persist successful revision")
 	}
 	r.manifest = next
+	committed = true
+	if err := update.Commit(); err != nil {
+		// The runtime, success receipt and manifest are already committed.
+		// Report cleanup errors separately without changing the apply result.
+		resultErr = fmt.Errorf("applied configuration but could not clean up rule set backups: %w", err)
+	}
 	r.renderedDigest = digest(rendered.Data)
 	r.cleanupRuleSets(state, next.Successful)
 	retained := map[int64]bool{}
@@ -373,11 +427,11 @@ func (r *Reconciler) Apply(ctx context.Context, state desiredstate.State) (core.
 		if !retained[id] {
 			path := filepath.Join(r.Directory, "revisions", strconv.FormatInt(id, 10))
 			if err := os.RemoveAll(path); err != nil {
-				return result, errors.New("applied configuration but could not prune old revision")
+				return result, errors.Join(resultErr, fmt.Errorf("applied configuration but could not prune old revision: %w", err))
 			}
 		}
 	}
-	return result, nil
+	return result, resultErr
 }
 
 // cleanupRuleSets removes rule set files that neither the new revision nor any

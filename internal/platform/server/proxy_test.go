@@ -74,15 +74,65 @@ func TestProxyHTTPPermissionPortAndRelayMasking(t *testing.T) {
 	if strings.Contains(response.Body.String(), "PRIVATE KEY") {
 		t.Fatal("relay output exposed private key")
 	}
+	var relay proxy.Outbound
+	if err := json.Unmarshal(response.Body.Bytes(), &relay); err != nil {
+		t.Fatal(err)
+	}
 	response = call("POST", "/api/v1/revisions/proxy", map[string]string{"nodeId": a.ID, "summary": "relay source"}, cookie, session.CSRFToken)
 	if response.Code != 201 {
 		t.Fatal(response.Body.String())
 	}
 	var revision deployment.Revision
 	json.Unmarshal(response.Body.Bytes(), &revision)
+	unreachableRevision := revision.ID
+	response = call("POST", "/api/v1/inbounds", proxy.InboundInput{Name: "A entry", NodeID: a.ID, Protocol: "vless", Listen: "0.0.0.0", Port: 8444, Enabled: true, SubscriptionVisible: true, DefaultOutbound: relay.ID}, cookie, session.CSRFToken)
+	if response.Code != 201 {
+		t.Fatal(response.Body.String())
+	}
+	var entry proxy.Inbound
+	if err := json.Unmarshal(response.Body.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Relay entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configurationVault, err := vault.Open(filepath.Join(app.Config.NodeIdentityDirectory, "configuration.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := &user.Repository{Database: app.Database, Vault: configurationVault}
+	u, err := users.Save(ctx, "", user.Input{Username: "relay_user", Status: "active", NodeGroupIDs: []string{group.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.CreateDevice(ctx, u.ID, user.DeviceInput{Name: "Client", Protocols: []string{"vless"}}); err != nil {
+		t.Fatal(err)
+	}
+	response = call("POST", "/api/v1/revisions/proxy", map[string]string{"nodeId": a.ID, "summary": "reachable relay source"}, cookie, session.CSRFToken)
+	if response.Code != 201 {
+		t.Fatal(response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &revision); err != nil {
+		t.Fatal(err)
+	}
+	deployments := &deployment.Repository{Database: app.Database, Vault: configurationVault}
+	state, err := deployments.State(ctx, revision.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Inbounds) != 1 || state.Inbounds[0].ID != entry.ID || !state.Inbounds[0].Enabled || len(state.Inbounds[0].CredentialIDs) == 0 || state.Inbounds[0].DefaultOutbound != relay.ID {
+		t.Fatal("relay source revision must contain an enabled, credentialed entry targeting the relay")
+	}
 	response = call("POST", "/api/v1/revisions/"+strconv.FormatInt(revision.ID, 10)+"/deploy", nil, cookie, session.CSRFToken)
-	if response.Code != 409 {
-		t.Fatal("source relay deployed before target")
+	if response.Code != 409 || !strings.Contains(response.Body.String(), "dependency_not_ready") || !strings.Contains(response.Body.String(), "target_not_published") {
+		t.Fatalf("source relay must be refused before target: status=%d body=%s", response.Code, response.Body.String())
+	}
+	// The earlier snapshot has no entry, so its unused relay must not block deployment.
+	response = call("POST", "/api/v1/revisions/"+strconv.FormatInt(unreachableRevision, 10)+"/deploy", nil, cookie, session.CSRFToken)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("unreachable relay refused: status=%d body=%s", response.Code, response.Body.String())
 	}
 	response = call("POST", "/api/v1/admins", map[string]string{"username": "viewer", "displayName": "Viewer", "password": "proxy-test-password-123", "role": "Viewer"}, cookie, session.CSRFToken)
 	if response.Code != 201 {

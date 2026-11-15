@@ -43,7 +43,8 @@ root=${QUI_PANEL_UPDATE_TEST_ROOT:-}
 request_directory=$root/var/lib/proxy-panel/panel-update
 request_file=$request_directory/request.json
 status_file=$request_directory/status.json
-log_file=$root/var/lib/proxycontrol-install/panel-update.log
+registry=$root/var/lib/proxycontrol-install
+log_file=$registry/panel-update.log
 updater=${QUI_PANEL_UPDATE_UPDATER:-$root/usr/local/bin/qui-update}
 panel_program=${QUI_PANEL_UPDATE_PROGRAM:-$root/usr/local/bin/proxy-panel}
 account=${QUI_PANEL_UPDATE_ACCOUNT:-proxy-panel}
@@ -93,19 +94,22 @@ is_newer() {
   [[ $(printf '%s\n%s\n' "$candidate" "$installed" | sort -V | tail -n 1) == "$candidate" ]]
 }
 
-# Write status.json atomically: a temporary file in the same directory renamed over the
-# target, so the panel never reads half a document and a symlink left at the target is
-# replaced instead of written through. The file is created by this root process and
-# handed to the panel account, which owns the directory but nothing else here.
+# Stage under the private root registry; the panel cannot replace a temporary name
+# between creation and write/chown. The pinned directory FD also survives the panel
+# renaming its request directory. Refuse cross-filesystem copies before writing.
 write_status() {
   local state=$1 code=$2 finished=$3
-  status_temporary=$(mktemp "$request_directory/.status.XXXXXXXX")
+  [[ $(stat -c '%d' "$registry") == $(stat -L -c '%d' "/proc/self/fd/$request_directory_fd") ]] || {
+    printf '面板更新状态无法写入：安装记录与请求目录不在同一文件系统。\n' >&2
+    return 1
+  }
+  status_temporary=$(mktemp "$registry/.status.XXXXXXXX")
   printf '{"requestId":"%s","version":"%s","previousVersion":"%s","state":"%s","code":"%s","startedAt":"%s","finishedAt":"%s"}\n' \
     "$request_id" "$request_version" "$previous_version" "$state" "$code" "$started_at" "$finished" \
     > "$status_temporary"
-  chown "$account_id:$account_gid" "$status_temporary"
+  chown -h "$account_id:$account_gid" "$status_temporary"
   chmod 0600 "$status_temporary"
-  mv -f -- "$status_temporary" "$status_file"
+  mv -T -- "$status_temporary" "/proc/self/fd/$request_directory_fd/status.json"
   status_temporary=''
 }
 
@@ -130,6 +134,16 @@ if ! account_id=$(id -u "$account") || ! account_gid=$(id -g "$account"); then
   printf '面板更新请求无法处理：服务账号 %s 不存在。\n' "$account" >&2
   exit 1
 fi
+
+[[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || {
+  printf '面板更新请求无法处理：安装记录目录必须为 root 0700。\n' >&2
+  exit 1
+}
+exec {request_directory_fd}< "$request_directory"
+[[ -d /proc/self/fd/$request_directory_fd && $(stat -L -c '%u' "/proc/self/fd/$request_directory_fd") == "$account_id" ]] || {
+  printf '面板更新请求无法处理：请求目录不属于面板账号。\n' >&2
+  exit 1
+}
 
 started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 [[ ! -L $request_file ]] || reject '请求文件是符号链接。'

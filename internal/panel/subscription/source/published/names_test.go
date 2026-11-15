@@ -40,6 +40,14 @@ func TestEndpointNamesUsesSubscriptionNames(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, nodeID := range []string{"node-aaaa", "node-bbbb"} {
+		if _, err := database.Exec(`INSERT INTO nodes(id,name,status,created_at) VALUES(?,'Twin','online','now')`, nodeID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES(?, 'Twin', ?, 'vless', '0.0.0.0', 443, 1, 1, 0, 'direct', '[]', x'00', 'now')`, nodeID+"-inbound", nodeID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -49,9 +57,17 @@ func TestEndpointNamesUsesSubscriptionNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Edge · trojan", "Edge · vless", "Edge · vless · 443", "Edge · vless · 8443"}
+	want := []string{"Edge · trojan", "Edge · vless", "Edge · vless · 443", "Edge · vless · 8443", "Twin · vless", "Twin · vless · 443 · node-a", "Twin · vless · 443 · node-b"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("names = %v, want %v", names, want)
+	}
+	endpoints := []proxy.Proxy{
+		{Name: "Twin · vless", Port: 443, Origin: proxy.Origin{Node: proxy.Ref{ID: "node-aaaa"}}},
+		{Name: "Twin · vless", Port: 443, Origin: proxy.Origin{Node: proxy.Ref{ID: "node-bbbb"}}},
+	}
+	uniqueNames(endpoints)
+	if endpoints[0].Name != "Twin · vless · 443 · node-a" || endpoints[1].Name != "Twin · vless · 443 · node-b" {
+		t.Fatalf("runtime names %+v", endpoints)
 	}
 }
 

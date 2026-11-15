@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -116,9 +117,7 @@ func ValidateInboundForwardOptions(c *pb.Capabilities, name string, settings des
 
 // ValidateInboundServerSettings refuses the self-hosted xhttp/Reality settings and
 // node-side certificate files unless the selected core has explicitly reported the
-// support they need (compatibility plan §13.3 item 3, v1.4.7 section 3). Legacy
-// combinations need no report, so every existing inbound keeps saving exactly as
-// before.
+// support they need (compatibility plan §13.3 item 3, v1.4.7 section 3).
 //
 // The previous report is the only evidence accepted: an Agent that has not
 // reported the core, an uninstalled core, version text, the VLESS protocol flag
@@ -139,4 +138,13 @@ func ValidateInboundServerSettings(c *pb.Capabilities, name, protocol string, se
 		return errors.New("the selected core is not reported enabled, so it cannot apply these settings")
 	}
 	return desiredstate.RequireInboundServerSettings(core.Name, node.SettingsContractCapability(core), protocol, settings)
+}
+
+// ValidateShadowsocksMethod is required on every save and on enabled rendered
+// inbounds before deployment. Disabled historical inbounds remain usable.
+func ValidateShadowsocksMethod(protocol string, settings desiredstate.ProtocolSettings) error {
+	if protocol == "shadowsocks" && strings.TrimSpace(settings.Method) == "" {
+		return errors.New("Shadowsocks 入站必须指定加密方法")
+	}
+	return nil
 }

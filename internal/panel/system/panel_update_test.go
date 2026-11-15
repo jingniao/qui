@@ -2,12 +2,55 @@ package system
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestPanelUpdateConcurrentSubmissionsOnlyOneSucceeds(t *testing.T) {
+	now := time.Now()
+	service := &PanelUpdateService{
+		Directory: t.TempDir(), CurrentVersion: "1.4.3",
+		cached: &PanelUpdateRelease{Version: "1.5.0"}, cachedAt: now,
+	}
+	beforeWrite := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	var calls atomic.Int32
+	service.Now = func() time.Time {
+		if calls.Add(1) == 2 {
+			close(beforeWrite)
+			<-releaseWrite
+		}
+		return now
+	}
+	first := make(chan error, 1)
+	go func() { _, err := service.Submit(context.Background(), "1.5.0", "owner"); first <- err }()
+	<-beforeWrite
+	second := make(chan error, 1)
+	go func() { _, err := service.Submit(context.Background(), "1.5.0", "owner"); second <- err }()
+	var secondErr error
+	returned := false
+	select {
+	case secondErr = <-second:
+		returned = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseWrite)
+	if err := <-first; err != nil {
+		t.Fatalf("first submission: %v", err)
+	}
+	if !returned {
+		secondErr = <-second
+	}
+	if !errors.Is(secondErr, ErrPanelUpdateBusy) {
+		t.Fatalf("concurrent submission = %v, want busy", secondErr)
+	}
+}
 
 // releaseStub stands in for the GitHub "latest release" endpoint: it counts the
 // requests so the cache and the refresh bypass are observable, and its answer can be

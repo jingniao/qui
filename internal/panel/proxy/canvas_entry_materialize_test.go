@@ -3,6 +3,7 @@ package proxy
 import (
 	"proxycontrol/internal/panel/node"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -122,7 +123,8 @@ func TestCanvasEntryMaterializeGroups(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := p.service.canvasApplyPlan(p.ctx, plan); err != nil {
+			undo := &canvasUndo{}
+			if _, err := p.service.canvasApplyPlanWithUndo(p.ctx, plan, undo); err != nil {
 				t.Fatal(err)
 			}
 			record, err := p.service.Repository.CanvasEntryBinding(p.ctx, scheme.ID, "i-a")
@@ -139,6 +141,25 @@ func TestCanvasEntryMaterializeGroups(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("groups %v want %v", got, want)
+			}
+			if mode == "explicit" {
+				group, err := p.service.EntryGroups.Group(p.ctx, "selected")
+				if err != nil {
+					t.Fatal(err)
+				}
+				input := canvasEntryGroupInput(group)
+				input.Remark = "edited during publication"
+				input.InboundIDs = append(input.InboundIDs, exit.ID)
+				if _, err := p.service.EntryGroups.SaveGroup(p.ctx, group.ID, input); err != nil {
+					t.Fatal(err)
+				}
+				if err := undo.run(p.ctx); err != nil {
+					t.Fatal(err)
+				}
+				group, err = p.service.EntryGroups.Group(p.ctx, "selected")
+				if err != nil || group.Remark != "edited during publication" || len(group.InboundIDs) != 2 || !slices.Contains(group.InboundIDs, exit.ID) || !slices.Contains(group.InboundIDs, p.inbound.ID) {
+					t.Fatalf("group after compensation %+v: %v", group, err)
+				}
 			}
 		})
 	}

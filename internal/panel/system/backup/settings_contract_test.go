@@ -39,6 +39,7 @@ func TestArchiveValidatesNewSettingsByProtocolAndDirection(t *testing.T) {
 		mutate   func(*desiredstate.ProtocolSettings)
 		valid    bool
 	}{
+		{name: "legacy_shadowsocks_without_method", protocol: "shadowsocks", valid: true, mutate: func(s *desiredstate.ProtocolSettings) { *s = desiredstate.ProtocolSettings{} }},
 		{name: "valid_reality", protocol: "vless", valid: true},
 		{name: "mismatched_key", protocol: "vless", mutate: func(s *desiredstate.ProtocolSettings) {
 			s.Reality.PublicKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))

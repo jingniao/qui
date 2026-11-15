@@ -67,7 +67,15 @@ func copyEntry(reader io.Reader, target string) error {
 		file.Close()
 		return ErrCoreArchive
 	}
-	if count < 1 || count > MaxCoreBinaryBytes || file.Sync() != nil || file.Close() != nil {
+	if count < 1 || count > MaxCoreBinaryBytes {
+		file.Close()
+		return ErrCoreArchive
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return ErrCoreArchive
+	}
+	if err := file.Close(); err != nil {
 		return ErrCoreArchive
 	}
 	return nil

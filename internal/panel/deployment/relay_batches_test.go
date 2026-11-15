@@ -19,6 +19,7 @@ func relaySourceAndTarget(states []desiredstate.State) []proxy.NodeSnapshot {
 	states[1].Inbounds[0].CredentialIDs = []string{credential.ID}
 	states[0].Credentials = []desiredstate.Credential{credential}
 	states[0].Outbounds = append(states[0].Outbounds, desiredstate.Outbound{ID: "next", Protocol: "socks5", Address: "127.0.0.1", Port: states[1].Inbounds[0].Port, TargetNodeID: states[1].NodeID, CredentialID: credential.ID, Enabled: true})
+	states[0].Inbounds[0].DefaultOutbound = "next"
 	return []proxy.NodeSnapshot{{State: states[0]}, {State: states[1]}}
 }
 
@@ -75,6 +76,8 @@ func TestBatchValidationAcceptsOnlyAnAlreadyPublishedLaterTarget(t *testing.T) {
 	// A self-target stays refused.
 	self := states[0]
 	self.Outbounds = append(self.Outbounds, desiredstate.Outbound{ID: "self", Protocol: "socks5", Address: "127.0.0.1", Port: self.Inbounds[0].Port, TargetNodeID: self.NodeID, CredentialID: "relay", Enabled: true})
+	self.Inbounds = append([]desiredstate.Inbound(nil), self.Inbounds...)
+	self.Inbounds[0].DefaultOutbound = "self"
 	if _, err := r.CreateBatch(ctx, "", "self target", "owner", []proxy.NodeSnapshot{{State: self}, {State: states[1]}}); !errors.Is(err, ErrDependency) {
 		t.Fatalf("a relay outbound targeting its own node was accepted: %v", err)
 	}

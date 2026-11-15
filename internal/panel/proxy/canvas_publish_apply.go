@@ -132,6 +132,19 @@ func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
 	return InboundInput{Core: inbound.Core, Name: inbound.Name, NodeID: inbound.NodeID, Protocol: inbound.Protocol, Listen: inbound.Listen, Port: inbound.Port, Enabled: inbound.Enabled, SubscriptionVisible: inbound.SubscriptionVisible, InternalRelay: inbound.InternalRelay, DefaultOutbound: defaultOutbound, AllowedUserIDs: inbound.AllowedUserIDs, Settings: inbound.Settings}
 }
 
+func outboundInputOf(outbound Outbound) OutboundInput {
+	// Empty Username/Secret retain the stored credential on an existing outbound.
+	return OutboundInput{
+		SourceIP: outbound.SourceIP, SourceInterface: outbound.SourceInterface,
+		Name: outbound.Name, NodeID: outbound.NodeID, Protocol: outbound.Protocol,
+		Address: outbound.Address, Port: outbound.Port, Enabled: outbound.Enabled,
+		TargetNodeID: outbound.TargetNodeID, TargetInboundID: outbound.TargetInboundID,
+		Settings: outbound.Settings, SupportTCP: outbound.SupportTCP, SupportUDP: outbound.SupportUDP,
+		FailurePolicy: outbound.FailurePolicy, BackupOutboundID: outbound.BackupOutboundID,
+		ProbeURL: outbound.ProbeURL, ProbeInterval: outbound.ProbeInterval,
+	}
+}
+
 // canvasSnapshots collects every node the publication depends on, dependencies
 // first. The relay component of each planned node is expanded once and keeps the
 // order RelaySnapshots produced; only the dependencies of this drawing order it.

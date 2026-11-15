@@ -70,6 +70,9 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 	}
 	for _, edge := range plan.edges {
 		input := InboundInput{Core: edge.core, Name: edge.inboundName, NodeID: edge.targetNode, Protocol: edge.protocol, Listen: "0.0.0.0", Port: edge.port, Enabled: true, InternalRelay: true, SubscriptionVisible: false, AllowedUserIDs: []string{}, DefaultOutbound: "direct"}
+		if input.Protocol == "shadowsocks" {
+			input.Settings.Method = "chacha20-ietf-poly1305"
+		}
 		existing, err := s.Repository.canvasInboundNamed(ctx, edge.targetNode, edge.inboundName)
 		switch {
 		case errors.Is(err, ErrNotFound) && edge.adopt.ID != "":
@@ -131,12 +134,20 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 			return warnings, fmt.Errorf("生成的出站 %s 已被手动修改，请删除它后重新发布", existing.Name)
 		}
 		previous := existing
+		input = outboundInputOf(existing)
+		input.Name = edge.outboundName
+		input.TargetInboundID = edge.inboundID
+		input.Protocol = edge.protocol
+		input.SupportTCP = edge.tcp
+		input.SupportUDP = edge.udp
+		input.FailurePolicy = "Block"
+		input.Enabled = true
 		outbound, err := s.SaveOutbound(ctx, existing.ID, input)
 		if err != nil {
 			return warnings, err
 		}
 		undo.add(func(ctx context.Context) error {
-			_, err := s.SaveOutbound(ctx, previous.ID, OutboundInput{Name: previous.Name, NodeID: previous.NodeID, Protocol: previous.Protocol, Enabled: previous.Enabled, TargetInboundID: previous.TargetInboundID, SupportTCP: previous.SupportTCP, SupportUDP: previous.SupportUDP, FailurePolicy: previous.FailurePolicy, BackupOutboundID: previous.BackupOutboundID, ProbeURL: previous.ProbeURL, ProbeInterval: previous.ProbeInterval})
+			_, err := s.SaveOutbound(ctx, previous.ID, outboundInputOf(previous))
 			return err
 		})
 		edge.outboundID = outbound.ID

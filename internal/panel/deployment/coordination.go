@@ -6,13 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"time"
 )
 
-var ErrDependency = errors.New("relay dependency not ready")
+var ErrDependency = proxy.ErrRelayDependency
 var ErrNodeBusy = errors.New("node is reserved by an active deployment or rollback")
 var ErrAgentUpdateUnsupported = errors.New("agent web upgrade is not enabled")
 
@@ -37,7 +38,9 @@ func operationAvailable(ctx context.Context, tx *sql.Tx, nodeID, ownBatch, compo
  (SELECT count(*) FROM deployment_targets WHERE node_id=? AND status='pending') +
  (SELECT count(*) FROM deployment_commands WHERE node_id=? AND status='pending') +
  (SELECT count(*) FROM deployment_batch_items i JOIN deployment_batches b ON b.id=i.batch_id
-  WHERE i.node_id=? AND b.id<>? AND b.status IN ('deploying','rolling_back','rollback_failed'))`, nodeID, nodeID, nodeID, ownBatch).Scan(&count)
+  WHERE i.node_id=? AND b.id<>? AND b.status IN ('deploying','rolling_back','rollback_failed')) +
+ (SELECT count(*) FROM deployment_batches b,json_each(b.tunnel_publication_json,'$.nodes') n
+  WHERE n.value=? AND b.id<>? AND b.tunnel_finalized=0)`, nodeID, nodeID, nodeID, ownBatch, nodeID, ownBatch).Scan(&count)
 	if err != nil {
 		return err
 	}
@@ -82,7 +85,7 @@ func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, 
 	if !enabled {
 		return fmt.Errorf("%w: source node is disabled", ErrDependency)
 	}
-	for _, outbound := range state.Outbounds {
+	for _, outbound := range state.ReachableOutbounds() {
 		if !outbound.Enabled || outbound.TargetNodeID == "" {
 			continue
 		}
@@ -90,17 +93,24 @@ func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, 
 			return err
 		}
 		if !enabled {
-			return fmt.Errorf("%w: target node is disabled", ErrDependency)
+			return relayDependencyError(outbound, "目标节点已停用", "target_node_disabled")
 		}
 		target, err := r.publishedStateInTransaction(ctx, tx, outbound.TargetNodeID)
+		if errors.Is(err, ErrDependency) {
+			return relayDependencyError(outbound, "请先发布目标节点", "target_not_published")
+		}
 		if err != nil {
 			return err
 		}
 		if reason := relayDependency(outbound, target); reason != "matched" {
-			return fmt.Errorf("%w: published relay target mismatch (%s)", ErrDependency, reason)
+			return relayDependencyError(outbound, "目标节点运行中的内部监听不匹配", reason)
 		}
 	}
 	return nil
+}
+
+func relayDependencyError(outbound desiredstate.Outbound, message, reason string) error {
+	return fmt.Errorf("%w: 中转出站「%s」→ 目标节点「%s」：%s (%s)", ErrDependency, outbound.ID, outbound.TargetNodeID, message, reason)
 }
 
 // RollbackNode accepts only a snapshot that this node successfully applied.

@@ -53,6 +53,10 @@ func TestTunnelGostClassification(t *testing.T) {
 
 func TestTunnelPlanGostInstallAndPublishRequired(t *testing.T) {
 	p := newPublishPanel(t)
+	p.service.Deploy = &relayReceipt{database: p.database, apply: func() error {
+		t.Fatal("GOST installation requirement must reject publication before dispatch")
+		return nil
+	}}
 	tunnelTestRange(t, p.canvasPanel, p.nodeA, p.nodeB, p.nodeC)
 	caps, err := json.Marshal(&pb.Capabilities{CoreName: "xray", MultiCoreSupported: true, ForwardInboundSupported: true, Cores: []*pb.CoreCapability{{Name: "xray", ForwardInboundSupported: true}}})
 	if err != nil {

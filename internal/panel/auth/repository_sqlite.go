@@ -86,7 +86,7 @@ func (r *Repository) FindID(ctx context.Context, id string) (*Admin, error) {
 	return a, err
 }
 
-func (r *Repository) CreateSession(ctx context.Context, hash, adminID, ip string, expires time.Time) error {
+func (r *Repository) CreateSession(ctx context.Context, hash, adminID, passwordHash, ip string, expires time.Time) error {
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -96,8 +96,16 @@ func (r *Repository) CreateSession(ctx context.Context, hash, adminID, ip string
 	if _, err = tx.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at <= ?", now); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO sessions(token_hash,admin_id,expires_at,created_at) VALUES(?,?,?,?)", hash, adminID, expires.UTC().Format("2006-01-02T15:04:05.000000000Z"), now); err != nil {
+	result, err := tx.ExecContext(ctx, "INSERT INTO sessions(token_hash,admin_id,expires_at,created_at) SELECT ?,id,?,? FROM admins WHERE id=? AND password_hash=? AND status='active'", hash, expires.UTC().Format("2006-01-02T15:04:05.000000000Z"), now, adminID, passwordHash)
+	if err != nil {
 		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrCredentials
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE admins SET last_login_at=?,login_ip=? WHERE id=?", now, ip, adminID); err != nil {
 		return err
@@ -184,14 +192,28 @@ func (r *Repository) DeleteAdmin(ctx context.Context, id string) error {
 	_, err := r.Database.ExecContext(ctx, "DELETE FROM admins WHERE id=? AND role='Viewer'", id)
 	return err
 }
-func (r *Repository) ChangePassword(ctx context.Context, id, hash string) error {
+func (r *Repository) ChangePassword(ctx context.Context, id, hash, verifiedHash string) error {
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "UPDATE admins SET password_hash=? WHERE id=?", hash, id); err != nil {
+	query := "UPDATE admins SET password_hash=? WHERE id=?"
+	args := []any{hash, id}
+	if verifiedHash != "" {
+		query += " AND password_hash=?"
+		args = append(args, verifiedHash)
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
 		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrConflict
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM sessions WHERE admin_id=?", id); err != nil {
 		return err

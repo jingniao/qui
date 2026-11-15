@@ -265,7 +265,7 @@ jobs:
           "$binary" version | tee "$RUNNER_TEMP/qui-singbox-version.txt"
           grep -q 'sing-box version 1.14.4' "$RUNNER_TEMP/qui-singbox-version.txt"
           grep -q with_v2ray_api "$RUNNER_TEMP/qui-singbox-version.txt"
-          grep -q go1.26.10 "$RUNNER_TEMP/qui-singbox-version.txt"
+          grep -q go1.26.11 "$RUNNER_TEMP/qui-singbox-version.txt"
           printf 'SINGBOX_BINARY=%s\n' "$binary" >> "$GITHUB_ENV"
       - name: Qui sing-box real-core tests (including Phase 9 stats, Xray parity and Phase 10 gates)
         if: ${{ !cancelled() }}

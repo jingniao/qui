@@ -13,7 +13,9 @@ import (
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/panel/subscription/source"
+	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/testutil/dbtest"
+	"proxycontrol/migrations"
 )
 
 func reconcileImportGroupReferences(ctx context.Context, tx *sql.Tx, resolve func(string, string) ([]string, bool), _ map[string]string) ([]string, error) {
@@ -179,6 +181,11 @@ func TestImportIdentityRestoreVersions(t *testing.T) {
 					}
 				}
 			})
+			// The archive retains its historical schema; the running panel that
+			// performs recovery has already applied the current migrations.
+			if err := db.Migrate(ctx, f.source.Database, migrations.Files); err != nil {
+				t.Fatal(err)
+			}
 			candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
 			if err != nil {
 				t.Fatal(err)

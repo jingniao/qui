@@ -105,6 +105,7 @@ active_database_source=''
 service_stopped=false
 # --database FILE: a database copy to install together with a downgrade.
 database_file=''
+staged_database=''
 # True when --version is older than the installed panel, which changes the messages
 # after a failure.
 downgrade=false
@@ -166,71 +167,132 @@ download() {
     || fail "下载失败：$1"
 }
 
-# Print the database path from the installed panel configuration, with the quotes YAML
-# allows around it removed. Shared by the backup and by the rollback, so both read the
-# same file the panel reads.
-database_path() {
+# Resolve the configured value only at the update boundary. Backup/recovery use the
+# root-owned record, never the panel-writable configuration.
+configured_database_path() {
   local database=''
   [[ -f $panel_config && ! -L $panel_config ]] || fail "缺少配置文件：$panel_config"
   database=$(read_value "$panel_config" database) || fail "配置里找不到 database：$panel_config"
   if [[ ${#database} -ge 2 ]]; then
-    case $database in
-      \"*\"|\'*\') database=${database:1:-1};;
-    esac
+    case $database in \"*\"|\'*\') database=${database:1:-1};; esac
   fi
-  [[ $database == /* ]] || fail '配置里的 database 必须是绝对路径。'
-  printf '%s\n' "$database"
+  validate_database_path "$database" "${1:-source}"
 }
 
-# Copy the panel database (and its write-ahead log) to DESTINATION so that an
-# interrupted copy never leaves something that looks like a usable backup: both files
-# are written under a .partial name, each is synced and compared with its source, and
-# only then is the log renamed first and the database second. The final names therefore
-# appear complete or not at all, and a truncated pre-update copy - the one thing a
-# rollback must never be given - cannot exist.
+validate_database_path() {
+  local database=$1 mode=${2:-source} resolved='' data_directory=''
+  if [[ $mode == target && ! -e $database && ! -L $database ]]; then
+    [[ $database == /* && ${database##*/} != . && ${database##*/} != .. ]] || fail "数据库必须是绝对文件路径：$database"
+    resolved=$(realpath -e -- "${database%/*}") || fail "无法解析数据库父目录：$database"
+    data_directory=$(realpath -e -- "$root/var/lib/proxy-panel") || fail '缺少面板数据目录。'
+    [[ $resolved == "$data_directory" || $resolved == "$data_directory/"* ]] || fail "数据库必须位于 /var/lib/proxy-panel/ 下：$database"
+    [[ $(stat -c '%u' -- "$resolved") == "$(id -u "$panel_account")" ]] || fail "数据库父目录不属于面板账号：$database"
+    printf '%s/%s\n' "$resolved" "${database##*/}"
+    return 0
+  fi
+  [[ $database == /* && -f $database && ! -L $database ]] || fail "数据库必须是绝对路径的普通文件：$database"
+  resolved=$(realpath -e -- "$database") || fail "无法解析数据库路径：$database"
+  data_directory=$(realpath -e -- "$root/var/lib/proxy-panel") || fail '缺少面板数据目录。'
+  [[ $resolved == "$data_directory/"* ]] || fail "数据库必须位于 /var/lib/proxy-panel/ 下：$database"
+  [[ $(stat -c '%u' -- "$resolved") == "$(id -u "$panel_account")" ]] || fail "数据库不属于面板账号：$database"
+  printf '%s\n' "$resolved"
+}
+
+database_path() {
+  local record=$registry/panel.database database=''
+  [[ -f $record && ! -L $record && $(stat -c '%u:%a:%h' "$record") == 0:600:1 ]] || fail "数据库路径记录必须为 root 0600 普通文件：$record"
+  database=$(cat -- "$record") || return 1
+  validate_database_path "$database" "${1:-source}"
+}
+
+ensure_database_record() {
+  local configured='' recorded='' temporary=''
+  if [[ -e $registry/panel.database || -L $registry/panel.database ]]; then
+    configured=$(configured_database_path target) || return 1
+    recorded=$(database_path target) || return 1
+    [[ $configured == "$recorded" ]] || fail '配置里的 database 与安装记录不一致；请 Owner 在 shell 中确认数据库路径并修正配置或安装记录。'
+  else
+    configured=$(configured_database_path) || return 1
+    temporary=$(mktemp "$registry/.panel-database.XXXXXXXX") || return 1
+    if ! printf '%s\n' "$configured" > "$temporary" || ! chmod 0600 "$temporary" \
+      || ! sync -f -- "$temporary" || ! mv -T -- "$temporary" "$registry/panel.database"; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+    sync -f -- "$registry" || return 1
+  fi
+}
+
+# Only the explicitly authorized CLI backup is read from root's private staging.
+read_database_source() {
+  if [[ -n $staged_database && ( $1 == "$staged_database" || $1 == "$staged_database-wal" ) ]]; then
+    cat -- "$1"
+  else
+    runuser -u "$panel_account" -- cat -- "$1"
+  fi
+}
+
+# Config-derived source reads run as the panel account. Stage and compare in root's private
+# registry, then rename into a pinned panel-owned directory on the same filesystem.
 copy_database_atomic() {
-  local source=$1 destination=$2 wal=$1-wal
-  local partial=$2.partial wal_partial=$2-wal.partial
-  partial_files+=("$partial" "$wal_partial")
-  if ! install -o "$panel_account" -g "$panel_account" -m 0600 -- "$source" "$partial" \
+  local source=$1 destination=$2 wal=$1-wal mode=${3:-backup}
+  local partial='' wal_partial='' destination_fd='' directory_path=${2%/*} name=${2##*/}
+  exec {destination_fd}< "$directory_path" || return 1
+  [[ -d /proc/self/fd/$destination_fd && $(stat -L -c '%u' "/proc/self/fd/$destination_fd") == "$(id -u "$panel_account")" ]] || {
+    printf '数据库目标目录不属于面板账号：%s\n' "$directory_path" >&2
+    exec {destination_fd}<&-
+    return 1
+  }
+  [[ $(stat -c '%d' "$registry") == $(stat -L -c '%d' "/proc/self/fd/$destination_fd") ]] || {
+    printf '数据库目标与安装记录目录不在同一文件系统：%s\n' "$directory_path" >&2
+    exec {destination_fd}<&-
+    return 1
+  }
+  partial=$(mktemp "$registry/database.XXXXXXXX.partial") || return 1
+  partial_files+=("$partial")
+  if ! read_database_source "$source" > "$partial" \
     || ! sync -f -- "$partial" \
-    || ! cmp -s -- "$source" "$partial"; then
+    || ! read_database_source "$source" | cmp -s -- - "$partial" \
+    || ! chown -h "$panel_account:$panel_account" "$partial" || ! chmod 0600 "$partial"; then
     rm -f -- "$partial"
+    exec {destination_fd}<&-
     printf '无法复制数据库：%s\n' "$source" >&2
     return 1
   fi
   if [[ -f $wal && ! -L $wal ]]; then
-    if ! install -o "$panel_account" -g "$panel_account" -m 0600 -- "$wal" "$wal_partial" \
+    wal_partial=$(mktemp "$registry/database.XXXXXXXX.partial") || return 1
+    partial_files+=("$wal_partial")
+    if ! read_database_source "$wal" > "$wal_partial" \
       || ! sync -f -- "$wal_partial" \
-      || ! cmp -s -- "$wal" "$wal_partial"; then
+      || ! read_database_source "$wal" | cmp -s -- - "$wal_partial" \
+      || ! chown -h "$panel_account:$panel_account" "$wal_partial" || ! chmod 0600 "$wal_partial"; then
       rm -f -- "$partial" "$wal_partial"
+      exec {destination_fd}<&-
       printf '无法复制数据库日志：%s\n' "$wal" >&2
       return 1
     fi
-    rm -f -- "$destination-wal"
-    if ! mv -T -- "$wal_partial" "$destination-wal"; then
-      rm -f -- "$partial"
-      printf '无法写入数据库备份日志：%s-wal\n' "$destination" >&2
-      return 1
-    fi
   fi
-  if ! mv -T -- "$partial" "$destination"; then
-    printf '无法写入数据库备份：%s\n' "$destination" >&2
-    return 1
+  if [[ $mode == restore ]]; then
+    rm -f -- "/proc/self/fd/$destination_fd/$name-wal" "/proc/self/fd/$destination_fd/$name-shm" || return 1
   fi
+  if [[ -n $wal_partial ]]; then
+    mv -T -- "$wal_partial" "/proc/self/fd/$destination_fd/$name-wal" || return 1
+  fi
+  mv -T -- "$partial" "/proc/self/fd/$destination_fd/$name" || return 1
   partial_files=()
-  sync -f -- "${destination%/*}"
+  sync -f -- "/proc/self/fd/$destination_fd" || return 1
+  exec {destination_fd}<&-
 }
 
 # Copy the panel database while the panel is stopped and print the copy's path.
-# The path comes from the installed configuration; the copy keeps the service
+# The path comes from the private installation record; the copy keeps the service
 # account as owner and 0600, so only root and the panel can read it.
 backup_database() {
   local previous=$1 database='' stamp='' destination=''
-  database=$(database_path)
+  database=$(database_path) || return 1
   [[ -f $database && ! -L $database ]] || fail "找不到数据库文件：$database"
   if [[ ! -d $backups ]]; then
-    install -d -o "$panel_account" -g "$panel_account" -m 0700 -- "$backups" \
+    runuser -u "$panel_account" -- mkdir -m 0700 -- "$backups" \
       || fail "无法创建备份目录：$backups"
   fi
   stamp=$(date +%Y%m%d-%H%M%S)
@@ -245,10 +307,10 @@ backup_database() {
 # database file is gone has nothing to keep.
 preserve_database() {
   local label=$1 database='' stamp='' destination=''
-  database=$(database_path) || return 1
+  database=$(database_path target) || return 1
   [[ -f $database && ! -L $database ]] || return 0
   if [[ ! -d $backups ]]; then
-    install -d -o "$panel_account" -g "$panel_account" -m 0700 -- "$backups" || return 1
+    runuser -u "$panel_account" -- mkdir -m 0700 -- "$backups" || return 1
   fi
   stamp=$(date +%Y%m%d-%H%M%S)
   destination=$backups/$label-$stamp.db
@@ -260,49 +322,50 @@ preserve_database() {
 # pages differ or because of the log files SQLite would replay onto them. This is what
 # tells a recovery that a panel did run although its journal never got past "prepared".
 database_differs() {
-  local backup=$1 database=''
-  database=$(database_path) || return 1
+  local backup=$1 database='' result=0
+  database=$(database_path target) || return 2
   [[ -f $database && ! -L $database ]] || return 0
-  cmp -s -- "$backup" "$database" || return 0
+  compare_database_source "$database" "$backup" || result=$?
+  case $result in 1) return 0;; 0) ;; *) return 2;; esac
   if [[ -f $backup-wal && ! -L $backup-wal ]]; then
     if [[ ! -f $database-wal || -L $database-wal ]]; then return 0; fi
-    cmp -s -- "$backup-wal" "$database-wal" || return 0
+    result=0
+    compare_database_source "$database-wal" "$backup-wal" || result=$?
+    case $result in 1) return 0;; 0) ;; *) return 2;; esac
     return 1
   fi
   if [[ -f $database-wal && ! -L $database-wal && -s $database-wal ]]; then return 0; fi
   return 1
 }
 
+# cmp: 0 equal, 1 different, 2 error. Source SIGPIPE is allowed only when cmp reports different.
+compare_database_source() {
+  local -a statuses
+  if runuser -u "$panel_account" -- cat -- "$1" | cmp -s -- - "$2"; then
+    statuses=("${PIPESTATUS[@]}")
+  else
+    statuses=("${PIPESTATUS[@]}")
+  fi
+  case ${statuses[1]} in
+    0) (( statuses[0] == 0 )) || return 2; return 0;;
+    1) (( statuses[0] == 0 || statuses[0] == 141 )) || return 2; return 1;;
+    *) return 2;;
+  esac
+}
+
 # Put the database copy back after a failed panel update. The new panel may already
 # have migrated the database, and migrations are not reversible, so the copy replaces
 # it: the log files of the stopped new version are removed first, otherwise SQLite
 # would replay the new version's pages onto the old file. Both files are replaced
-# through a temporary file in their own directory and one rename, so an interrupted
+# through a temporary file in the private root registry and one rename, so an interrupted
 # restore never leaves a half-written database behind.
 restore_database() {
-  local backup=$1 database='' temporary='' wal_temporary=''
+  local backup=$1 database=''
   [[ -f $backup && ! -L $backup ]] || { printf '没有可恢复的数据库备份：%s\n' "$backup" >&2; return 1; }
-  database=$(database_path) || return 1
-  rm -f -- "$database-wal" "$database-shm"
-  temporary=${database%/*}/.${database##*/}.restoring.$$
-  if ! install -o "$panel_account" -g "$panel_account" -m 0600 -- "$backup" "$temporary" \
-    || ! sync -f -- "$temporary" \
-    || ! mv -T -- "$temporary" "$database"; then
-    rm -f -- "$temporary"
+  database=$(database_path target) || return 1
+  if ! copy_database_atomic "$backup" "$database" restore; then
     printf '无法恢复数据库：%s\n' "$database" >&2
     return 1
-  fi
-  sync -f -- "${database%/*}"
-  if [[ -f $backup-wal && ! -L $backup-wal ]]; then
-    wal_temporary=${database%/*}/.${database##*/}.restoring-wal.$$
-    if ! install -o "$panel_account" -g "$panel_account" -m 0600 -- "$backup-wal" "$wal_temporary" \
-      || ! sync -f -- "$wal_temporary" \
-      || ! mv -T -- "$wal_temporary" "$database-wal"; then
-      rm -f -- "$wal_temporary"
-      printf '无法恢复数据库日志：%s-wal\n' "$backup" >&2
-      return 1
-    fi
-    sync -f -- "${database%/*}"
   fi
   # MESSAGE (optional second argument) names what was put in place: the pre-update copy
   # after a rollback, or the --database file of a downgrade.
@@ -513,7 +576,7 @@ remove_database_partials() {
   local file=''
   for file in "${partial_files[@]}"; do rm -f -- "$file"; done
   partial_files=()
-  for file in "$backups"/*.partial; do
+  for file in "$registry"/database.*.partial; do
     [[ -e $file || -L $file ]] || continue
     rm -f -- "$file"
   done
@@ -691,7 +754,14 @@ recover_snapshot() {
   if [[ $component == panel && -n $backup ]]; then
     case $phase in
       started) restore=true ;;
-      prepared) if database_differs "$backup"; then restore=true; fi ;;
+      prepared)
+        if database_differs "$backup"; then restore=true
+        else
+          case $? in
+            1) ;;
+            *) printf '数据库比较失败；保留快照，停止恢复。\n' >&2; return 1;;
+          esac
+        fi ;;
     esac
     if $restore; then
       printf '[%s] 恢复更新前的数据库 ...\n' "$name"
@@ -758,7 +828,7 @@ rollback_component() {
 take_update_lock() {
   local wait_seconds=$1 lock=$registry/update.lock waited=0
   [[ ! -L $lock ]] || fail "更新锁是符号链接，拒绝使用：$lock"
-  [[ -d $registry && ! -L $registry ]] || fail "缺少安装登记目录：$registry"
+  [[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail "安装登记目录必须为 root 0700：$registry"
   # Created under noclobber and 0600 like install.sh creates operation.lock: a lock file
   # that another user could prepare would be a way to block or to follow the update.
   if [[ ! -e $lock ]]; then
@@ -955,7 +1025,7 @@ update_component() {
           || report_failure "$name" "$previous" "$backup"
         exit 1
       fi
-      if ! restore_database "$database_file" '已换用 --database 指定的数据库'; then
+      if ! restore_database "$staged_database" '已换用 --database 指定的数据库'; then
         rollback_component "$component" "$previous" "$was_active" \
           '无法写入 --database 指定的数据库' \
           || report_failure "$name" "$previous" "$backup"
@@ -983,7 +1053,7 @@ update_component() {
     exit 1
   fi
   if [[ $component == panel && -n $database_file ]]; then
-    if ! restore_database "$database_file" '已换用 --database 指定的数据库'; then
+    if ! restore_database "$staged_database" '已换用 --database 指定的数据库'; then
       rollback_component "$component" "$previous" "$was_active" \
         '无法写入 --database 指定的数据库' \
         || report_failure "$name" "$previous" "$backup"
@@ -1237,7 +1307,7 @@ main() {
   # and sync are what the snapshot and its restore use; rc-service and rc-update are the
   # OpenRC equivalents of systemctl; flock guards the update lock
   # and realpath resolves --recover.
-  required_tools=(curl tar sha256sum install mktemp uname grep sed cp cmp mkdir mv sync chmod stat date rm flock sort realpath)
+  required_tools=(curl tar sha256sum install mktemp uname grep sed cp cmp mkdir mv sync chmod stat date rm flock sort realpath runuser id chown cat)
   if [[ $init_system == systemd ]]; then
     required_tools+=(systemctl)
   else
@@ -1261,6 +1331,9 @@ main() {
   # did not finish is completed or undone here, before the up-to-date check below can exit
   # and before anything is downloaded.
   take_update_lock 0
+  if [[ $selected_component != agent ]] && record_complete panel; then
+    ensure_database_record || fail '无法确认面板数据库路径，更新没有开始。'
+  fi
   recover_interrupted_updates
 
   # --database only makes sense together with an installed panel, a version to go down to
@@ -1371,10 +1444,17 @@ main() {
     if ! version_is_older "$version" "$installed_panel"; then
       fail '--database 只用于把面板降级到更旧的版本。'
     fi
+    # Root CLI explicitly authorizes this input, unlike the panel's configuration.
+    # Freeze it before preflight/stop/install; subsequent restores read only this copy.
+    staged_database=$directory/owner-database.db
+    install -m 0600 -- "$database_file" "$staged_database" || fail '无法暂存 --database 备份。'
+    if [[ -f $database_file-wal && ! -L $database_file-wal ]]; then
+      install -m 0600 -- "$database_file-wal" "$staged_database-wal" || fail '无法暂存 --database WAL。'
+    fi
     # Nothing has stopped yet, so a copy the target cannot use is refused while the panel
     # is still up.
     status=0
-    preflight_database "$database_file" || status=$?
+    preflight_database "$staged_database" || status=$?
     case $status in
       0) ;;
       2)
@@ -1383,7 +1463,7 @@ main() {
         # can open; every other verdict is refused with the report it printed.
         output=''
         status=0
-        output=$("$program_directory/proxy-panel" --check-database "$database_file" 2>&1) || status=$?
+        output=$("$program_directory/proxy-panel" --check-database "$staged_database" 2>&1) || status=$?
         if ((status != 0)); then
           printf '%s\n' "$output" >&2
           if ((status == 3)); then

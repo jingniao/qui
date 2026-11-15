@@ -175,7 +175,8 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 // uniqueNames makes the names of one subscription's own endpoints distinct: a
 // client identifies a server by its name, and a node may hold several inbounds
 // of one protocol. A name that occurs once stays unchanged; every
-// endpoint of a colliding group names its port, which is unique within a node.
+// endpoint of a colliding group names its port. If that still collides across
+// nodes, their IDs distinguish them.
 func uniqueNames(endpoints []proxy.Proxy) {
 	counts := map[string]int{}
 	for _, endpoint := range endpoints {
@@ -184,6 +185,15 @@ func uniqueNames(endpoints []proxy.Proxy) {
 	for index, endpoint := range endpoints {
 		if counts[endpoint.Name] > 1 {
 			endpoints[index].Name = endpoint.Name + " · " + strconv.Itoa(endpoint.Port)
+		}
+	}
+	counts = map[string]int{}
+	for _, endpoint := range endpoints {
+		counts[endpoint.Name]++
+	}
+	for index, endpoint := range endpoints {
+		if counts[endpoint.Name] > 1 {
+			endpoints[index].Name = endpoint.Name + " · " + endpoint.Origin.Node.ID[:min(6, len(endpoint.Origin.Node.ID))]
 		}
 	}
 }

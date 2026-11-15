@@ -161,17 +161,6 @@ func (s *Service) canvasNamedObjectConflicts(ctx context.Context, p *canvasPlan)
 	return result, nil
 }
 
-func (s *Service) checkCanvasNamedObjects(ctx context.Context, p *canvasPlan) error {
-	conflicts, err := s.canvasNamedObjectConflicts(ctx, p)
-	if err != nil {
-		return err
-	}
-	if len(conflicts) > 0 {
-		return errors.New(conflicts[0].Reason + ": " + conflicts[0].ObjectID)
-	}
-	return nil
-}
-
 func (s *Service) canvasOwnedChainName(ctx context.Context, path []*canvasEdge, fallback string) (string, error) {
 	if len(path) == 0 || path[0].tunnelID == "" {
 		return fallback, nil

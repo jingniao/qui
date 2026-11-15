@@ -38,12 +38,19 @@ func (r *Repository) Current(ctx context.Context, nodeID string) (int64, error) 
 	return revision, err
 }
 func (r *Repository) Batch(ctx context.Context, batchID string) (Batch, error) {
+	return readBatch(ctx, r.Database, batchID)
+}
+
+func readBatch(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, batchID string) (Batch, error) {
 	batch := Batch{Items: []BatchItem{}}
-	err := r.Database.QueryRowContext(ctx, "SELECT id,chain_id,name,author,status,created_at FROM deployment_batches WHERE id=?", batchID).Scan(&batch.ID, &batch.ChainID, &batch.Name, &batch.Author, &batch.Status, &batch.CreatedAt)
+	err := q.QueryRowContext(ctx, "SELECT id,chain_id,name,author,status,created_at FROM deployment_batches WHERE id=?", batchID).Scan(&batch.ID, &batch.ChainID, &batch.Name, &batch.Author, &batch.Status, &batch.CreatedAt)
 	if err != nil {
 		return batch, err
 	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT position,node_id,revision,previous_revision,status,rollback_command_id FROM deployment_batch_items WHERE batch_id=? ORDER BY position", batchID)
+	rows, err := q.QueryContext(ctx, "SELECT position,node_id,revision,previous_revision,status,rollback_command_id FROM deployment_batch_items WHERE batch_id=? ORDER BY position", batchID)
 	if err != nil {
 		return batch, err
 	}
@@ -100,7 +107,16 @@ func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author stri
 	if len(snapshots) < 2 || len(snapshots) > 64 {
 		return Batch{}, errors.New("batch must contain two to 64 dependency node snapshots")
 	}
-	batchID, err := id.New()
+	return r.createBatch(ctx, "", chainID, name, author, snapshots)
+}
+
+// An existing ID is a durable tunnel preparation, which also supports one node.
+func (r *Repository) createBatch(ctx context.Context, batchID, chainID, name, author string, snapshots []proxy.NodeSnapshot) (Batch, error) {
+	existing := batchID != ""
+	var err error
+	if !existing {
+		batchID, err = id.New()
+	}
 	if err != nil {
 		return Batch{}, err
 	}
@@ -112,8 +128,18 @@ func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author stri
 	if err := r.validateBatchDependencies(ctx, tx, snapshots); err != nil {
 		return Batch{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO deployment_batches(id,chain_id,name,author,status,created_at) VALUES(?,?,?,?,'draft',?)", batchID, chainID, name, author, now()); err != nil {
-		return Batch{}, err
+	if existing {
+		var prepared bool
+		if err := tx.QueryRowContext(ctx, "SELECT status='draft' AND json_extract(tunnel_publication_json,'$.phase')='preparing' AND tunnel_finalized=0 FROM deployment_batches WHERE id=?", batchID).Scan(&prepared); err != nil {
+			return Batch{}, err
+		}
+		if !prepared || len(snapshots) < 1 || len(snapshots) > 64 {
+			return Batch{}, errors.New("invalid tunnel batch preparation")
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO deployment_batches(id,chain_id,name,author,status,created_at) VALUES(?,?,?,?,'draft',?)", batchID, chainID, name, author, now()); err != nil {
+			return Batch{}, err
+		}
 	}
 	seen := map[string]bool{}
 	for position, snapshot := range snapshots {
@@ -161,13 +187,28 @@ func (r *Repository) CreateBatch(ctx context.Context, chainID, name, author stri
 			return Batch{}, err
 		}
 	}
+	if existing {
+		// A tunnel draft is not startable until ALL retained snapshots and this
+		// phase transition commit together. Empty/no-change preparations finish
+		// through PublishTunnels without ever becoming startable.
+		if _, err := tx.ExecContext(ctx, "UPDATE deployment_batches SET tunnel_publication_json=json_set(tunnel_publication_json,'$.phase','ready') WHERE id=?", batchID); err != nil {
+			return Batch{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return Batch{}, err
 	}
 	return r.Batch(ctx, batchID)
 }
 func (r *Repository) StartBatch(ctx context.Context, batchID string) error {
-	batch, err := r.Batch(ctx, batchID)
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Read status AND items under the start transaction; preparation can commit
+	// items between HTTP preflight and this operation.
+	batch, err := readBatch(ctx, tx, batchID)
 	if err != nil {
 		return err
 	}
@@ -177,22 +218,15 @@ func (r *Repository) StartBatch(ctx context.Context, batchID string) error {
 		}
 		return errors.New("batch cannot be redeployed")
 	}
-	tx, err := r.Database.BeginTx(ctx, nil)
-	if err != nil {
+	var ready bool
+	if err := tx.QueryRowContext(ctx, "SELECT tunnel_publication_json IS NULL OR (json_extract(tunnel_publication_json,'$.phase')='ready' AND tunnel_finalized=0) FROM deployment_batches WHERE id=?", batchID).Scan(&ready); err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	// Re-read under the transaction: two concurrent requests may have read the
-	// same draft before either started its transaction.
-	var status string
-	if err := tx.QueryRowContext(ctx, "SELECT status FROM deployment_batches WHERE id=?", batchID).Scan(&status); err != nil {
-		return err
+	if !ready {
+		return errors.New("tunnel batch preparation is not complete")
 	}
-	if status != "draft" {
-		if status == "deploying" || status == "success" {
-			return nil
-		}
-		return errors.New("batch cannot be redeployed")
+	if len(batch.Items) == 0 {
+		return errors.New("deployment batch has no prepared items")
 	}
 	stored := make([]proxy.NodeSnapshot, 0, len(batch.Items))
 	for _, item := range batch.Items {
@@ -455,6 +489,9 @@ func (r *Repository) CommandResult(ctx context.Context, nodeID string, result *p
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if r.BatchChanged != nil {
+		r.BatchChanged()
 	}
 	if result.Success {
 		r.notifyApplied(nodeID, "post-rollback")

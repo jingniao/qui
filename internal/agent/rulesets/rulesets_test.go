@@ -62,7 +62,7 @@ func (f *fixture) file(runtime string) string {
 
 func TestEnsureDownloadsAtomicallyWithPrivateModes(t *testing.T) {
 	f, runtime := newFixture(t), t.TempDir()
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); err != nil {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(f.file(runtime))
@@ -80,20 +80,20 @@ func TestEnsureDownloadsAtomicallyWithPrivateModes(t *testing.T) {
 		t.Fatal("expected one download")
 	}
 	// A fresh copy is not downloaded again.
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); err != nil || f.hits.Load() != 1 {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); err != nil || f.hits.Load() != 1 {
 		t.Fatalf("fresh copy downloaded again: %v %d", err, f.hits.Load())
 	}
 }
 
 func TestEnsureRefreshesAStaleFile(t *testing.T) {
 	f, runtime := newFixture(t), t.TempDir()
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); err != nil {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-2 * time.Hour)
 	os.Chtimes(f.file(runtime), old, old)
 	f.handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(srsBody(99)) }))
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); err != nil {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(f.file(runtime)); info.Size() != 102 {
@@ -103,13 +103,13 @@ func TestEnsureRefreshesAStaleFile(t *testing.T) {
 
 func TestEnsureKeepsAStaleFileWhenTheRefreshFails(t *testing.T) {
 	f, runtime := newFixture(t), t.TempDir()
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); err != nil {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-2 * time.Hour)
 	os.Chtimes(f.file(runtime), old, old)
 	f.handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", 500) }))
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); err != nil {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); err != nil {
 		t.Fatal("a failed refresh must keep the cached file:", err)
 	}
 	if info, _ := os.Stat(f.file(runtime)); info.Size() != 13 {
@@ -117,7 +117,7 @@ func TestEnsureKeepsAStaleFileWhenTheRefreshFails(t *testing.T) {
 	}
 	// An error page that returns 200 must not replace a good copy either.
 	f.handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("<html>")) }))
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); err != nil {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(f.file(runtime)); info.Size() != 13 {
@@ -128,7 +128,7 @@ func TestEnsureKeepsAStaleFileWhenTheRefreshFails(t *testing.T) {
 func TestEnsureFailsWithoutACacheAndWithoutADownload(t *testing.T) {
 	f, runtime := newFixture(t), t.TempDir()
 	f.handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", 500) }))
-	err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()})
+	err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
@@ -148,7 +148,7 @@ func TestEnsureRejectsAnOversizedBody(t *testing.T) {
 			}
 		}
 	}))
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); !errors.Is(err, ErrUnavailable) {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
 	if _, err := os.Stat(f.file(runtime)); err == nil {
@@ -172,7 +172,7 @@ func TestEnsureRefusesARedirectToADisallowedHost(t *testing.T) {
 	f.handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, redirected+srsPath, http.StatusFound)
 	}))
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{f.need()}); !errors.Is(err, ErrUnavailable) {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{f.need()}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
 	if target.Load() != 0 {
@@ -184,14 +184,14 @@ func TestEnsureRefusesAURLOutsideTheAllowlist(t *testing.T) {
 	f, runtime := newFixture(t), t.TempDir()
 	f.fetcher = &Fetcher{} // contract allowlist, which only knows the CDN hosts
 	need := f.need()
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{need}); !errors.Is(err, ErrUnavailable) {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{need}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
 	if f.hits.Load() != 0 {
 		t.Fatal("a URL outside the allowlist was fetched")
 	}
 	plain := Need{URL: "http://testingcf.jsdelivr.net" + srsPath, SingBox: true, RefreshSeconds: 3600}
-	if err := f.fetcher.Ensure(context.Background(), runtime, []Need{plain}); !errors.Is(err, ErrUnavailable) {
+	if err := ensureFiles(f.fetcher, context.Background(), runtime, []Need{plain}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("plain HTTP must be refused, got %v", err)
 	}
 }
@@ -229,4 +229,15 @@ func TestCleanupKeepsReferencedFilesOnly(t *testing.T) {
 			t.Fatalf("%s present=%v want %v", name, err == nil, want)
 		}
 	}
+}
+
+func ensureFiles(f *Fetcher, ctx context.Context, runtime string, needs []Need) error {
+	update, err := f.Ensure(ctx, runtime, needs)
+	if err == nil {
+		err = update.Activate()
+	}
+	if err != nil {
+		return errors.Join(err, update.Rollback())
+	}
+	return update.Commit()
 }

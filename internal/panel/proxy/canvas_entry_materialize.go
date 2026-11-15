@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/id"
@@ -19,6 +20,9 @@ func (s *Service) canvasEnsureEntry(ctx context.Context, entry *canvasEntry, und
 	created := previous.ID == ""
 	if created {
 		input := InboundInput{Name: entry.preview.Name, NodeID: entry.preview.NodeID, Protocol: entry.binding.Protocol, Core: entry.binding.Core, Listen: "0.0.0.0", Port: entry.preview.Port, Enabled: true, SubscriptionVisible: true, AllowedUserIDs: []string{}, DefaultOutbound: target}
+		if input.Protocol == "shadowsocks" {
+			input.Settings.Method = "chacha20-ietf-poly1305"
+		}
 		if input.Protocol == "trojan" || input.Protocol == "hysteria2" || input.Protocol == "tuic" {
 			input.TLSSource = TLSSourceSelfSigned
 		}
@@ -70,12 +74,33 @@ func (s *Service) canvasEnsureEntry(ctx context.Context, entry *canvasEntry, und
 				return err
 			}
 			before := canvasEntryGroupInput(group)
+			if slices.Contains(before.InboundIDs, entry.existing.ID) {
+				continue
+			}
 			input := before
 			input.InboundIDs = append(append([]string{}, group.InboundIDs...), entry.existing.ID)
 			if _, err := s.EntryGroups.SaveGroup(ctx, group.ID, input); err != nil {
 				return err
 			}
-			undo.add(func(ctx context.Context) error { _, err := s.EntryGroups.SaveGroup(ctx, group.ID, before); return err })
+			inboundID, groupID := entry.existing.ID, group.ID
+			undo.add(func(ctx context.Context) error {
+				current, err := s.EntryGroups.Group(ctx, groupID)
+				if err != nil {
+					return err
+				}
+				input := canvasEntryGroupInput(current)
+				input.InboundIDs = []string{}
+				for _, id := range current.InboundIDs {
+					if id != inboundID {
+						input.InboundIDs = append(input.InboundIDs, id)
+					}
+				}
+				if len(input.InboundIDs) == len(current.InboundIDs) {
+					return nil
+				}
+				_, err = s.EntryGroups.SaveGroup(ctx, groupID, input)
+				return err
+			})
 		}
 	}
 	entry.existing.DefaultOutbound = target

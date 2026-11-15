@@ -18,6 +18,16 @@ type Repository struct {
 	Vault    *vault.Vault
 }
 
+var viewerKindFilter = "kind IN ('" + strings.Join(viewerNotificationKinds[:], "','") + "')"
+
+type channelConfigError struct {
+	channelID string
+	err       error
+}
+
+func (e *channelConfigError) Error() string { return e.err.Error() }
+func (e *channelConfigError) Unwrap() error { return e.err }
+
 func (r *Repository) Rules(ctx context.Context) ([]Rule, error) {
 	rows, err := r.Database.QueryContext(ctx, "SELECT kind, enabled, threshold, duration_minutes, cooldown_minutes FROM notification_rules ORDER BY kind")
 	if err != nil {
@@ -95,7 +105,7 @@ func (r *Repository) List(ctx context.Context, viewer bool, unreadOnly bool, pag
 	var where []string
 	var args []any
 	if viewer {
-		where = append(where, "kind IN ('node_offline','cpu','memory','disk')")
+		where = append(where, viewerKindFilter)
 	}
 	if unreadOnly {
 		where = append(where, "(read_at IS NULL OR read_at = '')")
@@ -146,7 +156,7 @@ func (r *Repository) MarkAllRead(ctx context.Context) error {
 func (r *Repository) UnreadCount(ctx context.Context, viewer bool) (int, error) {
 	where := "(read_at IS NULL OR read_at = '')"
 	if viewer {
-		where += " AND kind IN ('node_offline','cpu','memory','disk')"
+		where += " AND " + viewerKindFilter
 	}
 	var count int
 	err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE "+where).Scan(&count)
@@ -172,7 +182,7 @@ func (r *Repository) Channels(ctx context.Context) ([]Channel, error) {
 		if ch.Kind == "webhook" {
 			cfg, err := r.openChannelConfig(encrypted)
 			if err != nil {
-				return nil, err
+				return nil, &channelConfigError{channelID: ch.ID, err: err}
 			}
 			ch.Format = cfg.WebhookFormat()
 		}

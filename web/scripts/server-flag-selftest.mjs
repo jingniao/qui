@@ -11,6 +11,16 @@ const metaSource = read('modules/nodes/nodeMeta.ts')
 const code = ts.transpileModule(metaSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 globalThis.localStorage = { getItem: () => null, removeItem() {}, setItem() {} };
 const meta = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const future = new Date();
+future.setDate(future.getDate() + 30);
+const renewDate = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${String(future.getDate()).padStart(2, '0')}`;
+for (const [cycle, months, days] of [['/半年', 6, 182.5], ['/年', 12, 365], ['/2年', 24, 730], ['/3年', 36, 1095], ['/季', 3, 91.25], ['/月', 1, 30]]) {
+  const value = { renewPrice: '120', renewCycle: cycle, renewDate };
+  assert.equal(meta.calculateMonthlyExpenditure(value).value, (120 / months).toFixed(2), cycle);
+  assert.equal(meta.calculateResidualValue(value).value, (120 * 30 / days).toFixed(2), cycle);
+}
+assert.equal(meta.calculateMonthlyExpenditure({ renewPrice: '120', renewCycle: '一次性' }), null);
+assert.equal(meta.calculateResidualValue({ renewPrice: '120', renewCycle: '一次性', renewDate }), null);
 
 // Priority: the Owner's region, then the IP country, then a name keyword.
 {

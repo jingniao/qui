@@ -70,37 +70,37 @@ func (r *Repository) validateBatchDependencies(ctx context.Context, tx *sql.Tx, 
 		positions[nodeID] = position
 	}
 	for position, snapshot := range snapshots {
-		for _, outbound := range snapshot.State.Outbounds {
+		for _, outbound := range snapshot.State.ReachableOutbounds() {
 			if !outbound.Enabled || outbound.TargetNodeID == "" {
 				continue
 			}
 			targetPosition, exists := positions[outbound.TargetNodeID]
 			if exists && targetPosition == position {
 				// The target must be another node.
-				return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
+				return relayDependencyError(outbound, "批次须先发布目标节点再发布来源节点", "target_not_published")
 			}
 			if !exists {
 				published, err := r.publishedStateInTransaction(ctx, tx, outbound.TargetNodeID)
 				if errors.Is(err, ErrDependency) {
-					return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
+					return relayDependencyError(outbound, "批次须先发布目标节点再发布来源节点", "target_not_published")
 				}
 				if err != nil {
 					return err
 				}
 				if reason := relayDependency(outbound, published); reason != "matched" {
-					return fmt.Errorf("%w: published relay target mismatch (%s)", ErrDependency, reason)
+					return relayDependencyError(outbound, "目标节点运行中的内部监听不匹配", reason)
 				}
 				continue
 			}
 			if reason := relayDependency(outbound, snapshots[targetPosition].State); reason != "matched" {
-				return fmt.Errorf("%w: captured batch relay mismatch (%s)", ErrDependency, reason)
+				return relayDependencyError(outbound, "批次中的目标内部监听不匹配", reason)
 			}
 			if targetPosition < position {
 				continue
 			}
 			published, err := r.publishedStateInTransaction(ctx, tx, outbound.TargetNodeID)
 			if errors.Is(err, ErrDependency) {
-				return fmt.Errorf("%w: batch must contain each relay target before its source", ErrDependency)
+				return relayDependencyError(outbound, "批次须先发布目标节点再发布来源节点", "target_not_published")
 			}
 			if err != nil {
 				return err
@@ -109,7 +109,7 @@ func (r *Repository) validateBatchDependencies(ctx context.Context, tx *sql.Tx, 
 			// relayDependency does not compare transport settings, and the source
 			// switches before the target is published.
 			if reason := relayDependency(outbound, published); reason != "matched" || !reflect.DeepEqual(relayListener(outbound, published), relayListener(outbound, snapshots[targetPosition].State)) {
-				return fmt.Errorf("%w: published relay target mismatch (%s)", ErrDependency, reason)
+				return relayDependencyError(outbound, "目标节点运行中的内部监听不匹配", reason)
 			}
 		}
 	}

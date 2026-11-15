@@ -136,7 +136,10 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	// are stored in the encrypted column as validated, but only for a core that
 	// has explicitly reported the combination.
 	if err := ValidateInboundServerSettings(n.Capabilities, input.Core, input.Protocol, input.Settings); err != nil {
-		return Inbound{}, err
+		return Inbound{}, fmt.Errorf("入站「%s」：%w", input.Name, err)
+	}
+	if err := ValidateShadowsocksMethod(input.Protocol, input.Settings); err != nil {
+		return Inbound{}, fmt.Errorf("入站「%s」（%s）：%w", input.Name, id, err)
 	}
 	// A hop range needs the Agent's host-network helper. An old Agent would
 	// silently drop the nft rules, so refuse the save as well as publication.

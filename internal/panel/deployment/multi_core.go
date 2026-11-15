@@ -37,8 +37,16 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 		// settings contract for this combination. An older Agent never declared it,
 		// so a deployment carrying these settings fails here instead of applying a
 		// configuration with the fields dropped.
-		if err := proxy.ValidateInboundServerSettings(c, in.Core, in.Protocol, in.Settings); err != nil {
-			return fmt.Errorf("inbound %s: %w", in.ID, err)
+		err := proxy.ValidateInboundServerSettings(c, in.Core, in.Protocol, in.Settings)
+		if err == nil && in.Enabled {
+			err = proxy.ValidateShadowsocksMethod(in.Protocol, in.Settings)
+		}
+		if err != nil {
+			var name string
+			if lookupErr := tx.QueryRowContext(ctx, "SELECT coalesce((SELECT name FROM inbounds WHERE id=?),?)", in.ID, in.ID).Scan(&name); lookupErr != nil {
+				return lookupErr
+			}
+			return fmt.Errorf("入站「%s」（%s）：%w", name, in.ID, err)
 		}
 	}
 	cores := node.EnabledCores(c)

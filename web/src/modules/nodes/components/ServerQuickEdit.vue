@@ -152,6 +152,7 @@ const editForm = reactive<ServerEditFormState>({
 let loadToken = 0;
 
 async function openEditDrawer(node: NodeView) {
+  if (editingSaving.value) return;
   if (node.deletedAt) {
     showToast('服务器已被删除', 'info');
     return;
@@ -206,37 +207,35 @@ async function openEditDrawer(node: NodeView) {
 
 async function saveEdit() {
   if (!editTarget.value || editingSaving.value || fetchingLatest.value) return;
+  const targetID = editTarget.value.id;
+  const form: ServerEditFormState = { ...editForm, tags: [...editForm.tags] };
   editingSaving.value = true;
   try {
-    const [latest, meta] = await Promise.all([nodeAPI.get(editTarget.value.id), loadNodeMeta(editTarget.value.id, true)]);
+    const [latest, meta] = await Promise.all([nodeAPI.get(targetID), loadNodeMeta(targetID, true)]);
     if (latest.deletedAt) {
       editDrawer.value = false;
       showToast('服务器已被删除', 'info');
       return;
     }
-    // The address fields are left out on purpose: this dialog does not edit them,
-    // and echoing the loaded public IP back would mark a detected address manual.
+    // Leave address and network settings out: this dialog does not edit them,
+    // and omitted fields retain the panel's current values.
     await nodeAPI.save({
-      id: editTarget.value.id,
-      name: editForm.name,
-      enabled: editForm.enabled,
-      allowSubscription: editForm.allowSubscription,
-      maintenance: editForm.maintenance,
-      outboundSourceIp: latest.outboundSourceIp || '',
-      outboundInterface: latest.outboundInterface || '',
-      hostSourceIpv4: latest.hostSourceIpv4 || '',
-      hostSourceIpv6: latest.hostSourceIpv6 || ''
+      id: targetID,
+      name: form.name,
+      enabled: form.enabled,
+      allowSubscription: form.allowSubscription,
+      maintenance: form.maintenance
     });
 
-    await saveNodeMeta(editTarget.value.id, {
+    await saveNodeMeta(targetID, {
       ...meta,
-      region: editForm.region.trim(),
-      remark: editForm.remark.trim(),
-      renewDate: editForm.renewDate,
-      renewCurrency: editForm.renewCurrency,
-      renewPrice: String(editForm.renewPrice).trim(),
-      renewCycle: editForm.renewCycle,
-      tags: editForm.tags
+      region: form.region.trim(),
+      remark: form.remark.trim(),
+      renewDate: form.renewDate,
+      renewCurrency: form.renewCurrency,
+      renewPrice: String(form.renewPrice).trim(),
+      renewCycle: form.renewCycle,
+      tags: form.tags
     });
 
     showToast('服务器设置已更新');

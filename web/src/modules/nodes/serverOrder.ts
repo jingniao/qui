@@ -14,15 +14,6 @@ export function applyServerOrder<T extends Ordered>(nodes: T[], ids: string[]): 
   return [...known, ...nodes.filter(node => !rank.has(node.id))];
 }
 
-// moveServer swaps a server with its neighbour; a move past either end is a no-op.
-export function moveServer(ids: string[], id: string, delta: -1 | 1): string[] {
-  const from = ids.indexOf(id), to = from + delta;
-  if (from < 0 || to < 0 || to >= ids.length) return ids;
-  const next = [...ids];
-  [next[from], next[to]] = [next[to], next[from]];
-  return next;
-}
-
 // reorderServer moves one server to the position of another (drag and drop).
 export function reorderServer(ids: string[], fromId: string, toId: string): string[] {
   const from = ids.indexOf(fromId), to = ids.indexOf(toId);

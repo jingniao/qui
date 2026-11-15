@@ -536,6 +536,20 @@ func (r *Repository) Bindings(ctx context.Context, inboundID string) ([]Binding,
 	return items, rows.Err()
 }
 func (r *Repository) DeleteInbound(ctx context.Context, id string) error {
+	binding, err := r.CanvasEntryBindingByInbound(ctx, id)
+	if err == nil {
+		if binding.SchemeID == nil {
+			return &tunnelError{Code: "inbound_detached_entry", Status: 409, Message: "该入站是已脱离方案的入口，请到中转方案 → 遗留资源中撤除"}
+		}
+		scheme, err := r.CanvasScheme(ctx, *binding.SchemeID)
+		if err != nil {
+			return err
+		}
+		return &tunnelError{Code: "inbound_in_canvas_scheme", Status: 409, Message: "该入站仍是中转方案的入口，请在所属中转方案中使用「停用并移除」", Details: map[string]any{"schemes": []map[string]string{{"id": scheme.ID, "name": scheme.Name}}}}
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return err
+	}
 	rows, err := r.Database.QueryContext(ctx, "SELECT id,name FROM tunnel_rules WHERE target_inbound_id=? ORDER BY id", id)
 	if err != nil {
 		return err

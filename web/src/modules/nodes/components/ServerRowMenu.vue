@@ -6,7 +6,6 @@
       <RouterLink :to="`/nodes/${node.id}?tab=config`" class="text-ios-blue">发布 / 回滚配置</RouterLink>
       <RouterLink :to="`/nodes/${node.id}?tab=testing`" class="text-ios-blue">线路探测</RouterLink>
       <RouterLink to="/nodes/versions" class="text-ios-blue">版本与更新</RouterLink>
-      <button v-if="quickRelay.canOpen(node)" type="button" class="ios-btn-secondary" @click="quickRelay.open(node)">添加中转</button>
       <button
         v-if="node.status === 'pending'"
         type="button"
@@ -22,10 +21,8 @@
   </details>
 </template>
 <script setup lang="ts">
-import { inject } from 'vue';
 import type { NodeView } from '../api';
 import { isNodeReissuing } from '../coreInstallOptions';
-const quickRelay = inject<{ canOpen: (node: NodeView) => boolean; open: (node: NodeView) => Promise<void> }>('serverQuickRelay')!;
 defineProps<{ node: NodeView; compact?: boolean }>();
 defineEmits<{ install: []; delete: [] }>();
 </script>

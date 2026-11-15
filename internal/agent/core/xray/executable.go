@@ -8,9 +8,9 @@ import (
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
-// PrepareRuleSets makes the native rule set files state's policies reference
-// available in this core's rulesets directory (v1.5.4 item 5).
-func (a *Adapter) PrepareRuleSets(ctx context.Context, state desiredstate.State) error {
+// PrepareRuleSets downloads candidates for the apply transaction. The caller
+// activates them before native validation and owns cleanup even on failure.
+func (a *Adapter) PrepareRuleSets(ctx context.Context, state desiredstate.State) (*rulesets.Update, error) {
 	return a.RuleSets.Ensure(ctx, a.Directory, rulesets.Needs("xray", state))
 }
 

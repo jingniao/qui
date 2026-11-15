@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -106,6 +108,39 @@ func TestCanvasRemoveCreateStopsEntryBeforeChannels(t *testing.T) {
 	}
 }
 
+// The entry phase must not carry an enabled relay outbound: the deployment checks
+// such an outbound against the next hop's running listener, so a scheme whose
+// channel was already broken could never be removed. The entry server drops the
+// scheme's outbounds together with the entry; only the next hop is left for phase 2.
+func TestCanvasRemoveEntryPhaseDisablesEntryServerOutbounds(t *testing.T) {
+	for _, mode := range []string{"create", "reuse"} {
+		t.Run(mode, func(t *testing.T) {
+			p, scheme, _, deploy := removeFixture(t, mode)
+			if _, err := p.service.RemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt, AcknowledgeChanges: true}, "owner", p.users); err != nil {
+				t.Fatal(err)
+			}
+			if len(deploy.phases) != 2 || len(deploy.phases[0]) != 1 || deploy.phases[0][0].State.NodeID != p.nodeA {
+				t.Fatalf("phases %+v", deploy.phases)
+			}
+			relays := 0
+			for _, outbound := range deploy.phases[0][0].State.Outbounds {
+				if outbound.TargetNodeID != "" {
+					relays++
+					if outbound.Enabled {
+						t.Fatalf("entry phase keeps relay outbound %s enabled", outbound.ID)
+					}
+				}
+			}
+			for _, snapshot := range deploy.phases[1] {
+				if snapshot.State.NodeID == p.nodeA {
+					t.Fatal("entry server republished in the channel phase")
+				}
+			}
+			t.Logf("relay outbounds in entry phase: %d", relays)
+		})
+	}
+}
+
 func TestCanvasRemoveReuseRestoresOriginal(t *testing.T) {
 	p, scheme, binding, _ := removeFixture(t, "reuse")
 	_, err := p.service.RemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt}, "owner", p.users)
@@ -184,6 +219,11 @@ func TestCanvasRemoveCancellationKeepsTunnelRows(t *testing.T) {
 
 func TestCanvasRemoveTunnelDeleteFailureRollsBackFinalTransaction(t *testing.T) {
 	p, scheme, binding, deploy := removeFixture(t, "create")
+	entryPlanGroup(t, p, "selected", "mixed", binding.InboundID)
+	groupEdit := fmt.Sprintf(`CREATE TRIGGER edit_group_during_removal AFTER DELETE ON node_group_inbounds WHEN OLD.inbound_id='%s' BEGIN UPDATE node_groups SET remark='edited during removal' WHERE id=OLD.group_id; INSERT INTO node_group_inbounds(group_id,inbound_id) VALUES(OLD.group_id,'%s'); END`, binding.InboundID, p.inbound.ID)
+	if _, err := p.database.Exec(groupEdit); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := p.database.Exec(`CREATE TRIGGER reject_tunnel_delete BEFORE DELETE ON canvas_tunnels BEGIN SELECT RAISE(ABORT,'controlled tunnel delete failure'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -200,5 +240,9 @@ func TestCanvasRemoveTunnelDeleteFailureRollsBackFinalTransaction(t *testing.T) 
 	in, err := p.service.Repository.Inbound(p.ctx, binding.InboundID, false)
 	if err != nil || !in.Enabled || deploy.rollbacks != 2 {
 		t.Fatalf("rollback %+v %v phases=%d", in, err, deploy.rollbacks)
+	}
+	group, err := p.service.EntryGroups.Group(p.ctx, "selected")
+	if err != nil || group.Remark != "edited during removal" || len(group.InboundIDs) != 2 || !slices.Contains(group.InboundIDs, binding.InboundID) || !slices.Contains(group.InboundIDs, p.inbound.ID) {
+		t.Fatalf("group after compensation %+v: %v", group, err)
 	}
 }

@@ -9,6 +9,18 @@ import (
 
 var ErrInvalid = errors.New("invalid notification input")
 
+var viewerNotificationKinds = [...]string{"node_offline", "cpu", "memory", "disk"}
+
+// ViewerCanReadKind shares the notification API allowlist with live events.
+func ViewerCanReadKind(kind string) bool {
+	for _, allowed := range viewerNotificationKinds {
+		if kind == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 type Rule struct {
 	Kind            string  `json:"kind"`
 	Enabled         bool    `json:"enabled"`

@@ -10,6 +10,7 @@ import (
 // archive written before them.
 func rewindPost0143(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindTunnelPublication(t, database)
 	for _, step := range []struct {
 		version string
 		queries []string

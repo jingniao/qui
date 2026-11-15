@@ -16,11 +16,24 @@ export function legacyResourceActions(group: CanvasLegacyGroup) {
   return {
     showReattach: group.canReattach,
     showRemove: group.canReattach && group.canRemove,
+    // A group that cannot be restored as a whole (for example two channels between
+    // the same servers) can still be handled part by part: the server accepts any
+    // connected, linear subset and reports why a selection is refused.
+    partial: !group.canReattach && !group.empty && group.bindings.length + group.tunnels.length > 1,
     reasons: [
       ...(!group.canReattach ? group.reattachReasons.map(reason => `无法重新挂接：${reason}`) : []),
       ...(!group.canRemove ? group.removeReasons.map(reason => `无法完整撤除：${reason}`) : []),
     ],
   };
+}
+
+// The suggested part: every entry plus the channels an entry currently routes to
+// (its default outbound is one of the channel's objects); without entries, the first channel.
+export function legacyDefaultSelection(group: CanvasLegacyGroup): string[] {
+  const routes = new Set(group.bindings.map(binding => binding.currentDefaultOutbound));
+  const tunnels = group.tunnels.filter(tunnel => tunnel.objects.some(object => object.kind === 'outbound' && routes.has(object.id)));
+  const chosen = group.bindings.length ? tunnels : group.tunnels.slice(0, 1);
+  return [...group.bindings.map(binding => `binding:${binding.id}`), ...chosen.map(tunnel => `tunnel:${tunnel.id}`)];
 }
 
 export function legacyEmptyTunnelToDelete(group: CanvasLegacyGroup): string | undefined {

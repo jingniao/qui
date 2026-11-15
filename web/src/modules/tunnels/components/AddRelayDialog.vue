@@ -13,7 +13,7 @@
       <p v-else class="text-sm text-ios-secondary">以当前节点为入口创建服务器方案，然后在画布添加中转服务器与代理出口。</p>
     </div>
     <div v-else class="space-y-3">
-      <p class="text-sm text-ios-green">规则草稿已保存，发布后生效。</p>
+      <p v-if="applyState" :class="applyState.ok ? 'text-ios-green' : saving ? 'text-ios-secondary' : 'text-ios-red'" class="text-sm" role="status" aria-live="polite">{{ applyState.text }}</p>
       <div v-if="created.shareLink" class="space-y-2"><p class="text-sm text-ios-label font-mono tabular-nums break-all">{{ created.shareLink }}</p><button class="ios-dialog-btn-secondary" @click="copy(created.shareLink)">复制链接</button></div>
       <p v-else class="text-sm text-ios-secondary">该格式无法表示</p>
     </div>
@@ -21,8 +21,8 @@
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
     <div class="flex justify-end gap-3">
       <button class="ios-dialog-btn-secondary" :disabled="saving" @click="emit('close')">关闭</button>
-      <PublishFlow v-if="created" :tunnels="tunnels" :rules="[created.rule]" :preselect="{ tunnelIds: [], ruleIds: [created.rule.id] }" dialog-button @published="emit('saved')" />
-      <button v-else class="ios-dialog-btn-primary" :disabled="saving || (mode === 'tunnel' && loading)" @click="save">{{ saving ? '处理中…' : mode === 'canvas' ? '创建并打开画布' : '保存草稿' }}</button>
+      <button v-if="created && applyState && !applyState.ok" class="ios-dialog-btn-primary" :disabled="saving" @click="applyCreated">重试</button>
+      <button v-else-if="!created" class="ios-dialog-btn-primary" :disabled="saving || (mode === 'tunnel' && loading)" @click="save">{{ saving ? '处理中…' : mode === 'canvas' ? '创建并打开画布' : '创建并应用' }}</button>
     </div>
   </FormDrawer>
 </template>
@@ -30,7 +30,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import PortControl from './PortControl.vue';
-import PublishFlow from './PublishFlow.vue';
+import { applyProblem, applyTunnelChanges } from '../applyTunnels';
 import { nodeRelayAPI, tunnelAPI, tunnelError, type Tunnel, type NodeRelay } from '../api';
 import { routeLabel } from '../model';
 import type { Inbound } from '../../proxy/api';
@@ -55,5 +55,18 @@ async function save() {
     created.value = await nodeRelayAPI.create(props.nodeId, { tunnelId: tunnelId.value, inboundId: inboundId.value, portMode: portMode.value, ...(listenPort.value === undefined ? {} : { listenPort: listenPort.value }), name: name.value.trim(), subscriptionVisible: subscriptionVisible.value });
     emit('saved');
   } catch (e) { error.value = tunnelError(e); } finally { saving.value = false; }
+  if (created.value) await applyCreated();
+}
+// The new rule is applied at once; a failure keeps the saved rule and offers 重试.
+const applyState = ref<{ ok: boolean; text: string } | null>(null);
+async function applyCreated() {
+  if (!created.value || saving.value) return;
+  saving.value = true; applyState.value = { ok: false, text: '正在应用…' };
+  try {
+    const result = await applyTunnelChanges({ tunnelIds: [], ruleIds: [created.value.rule.id] }, text => { applyState.value = { ok: false, text }; });
+    const problem = applyProblem(result);
+    applyState.value = problem ? { ok: result.status === 'publishing', text: result.status === 'publishing' ? problem : `应用失败，已恢复原配置：${problem}` } : { ok: true, text: '中转已创建并生效。' };
+  } catch (e) { applyState.value = { ok: false, text: `应用失败：${tunnelError(e)}。规则已保存，可重试。` }; }
+  finally { saving.value = false; emit('saved'); }
 }
 </script>

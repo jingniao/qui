@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/notification"
 	"sync"
 	"time"
 )
@@ -54,6 +55,7 @@ func (b *Bus) Subscribe(buffer int) (<-chan Event, func()) {
 
 func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 	return authentication.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role := auth.Actor(r.Context()).Role
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "Streaming unavailable", 500)
@@ -91,6 +93,7 @@ func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 				if err != nil || !session.IsAuthenticated {
 					return
 				}
+				role = session.CurrentUser.Role
 				fmt.Fprint(w, ": keepalive\n\n")
 				flusher.Flush()
 			case event := <-channel:
@@ -98,9 +101,26 @@ func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 				if err != nil {
 					continue
 				}
+				if role != "Owner" && !viewerCanRead(event.Type, data) {
+					continue
+				}
 				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, data)
 				flusher.Flush()
 			}
 		}
 	}), false)
+}
+
+func viewerCanRead(kind string, data []byte) bool {
+	switch kind {
+	case "node_status", "deployment_status", "dashboard_status":
+		return true
+	case "notification":
+		var payload struct {
+			Kind string `json:"kind"`
+		}
+		return json.Unmarshal(data, &payload) == nil && notification.ViewerCanReadKind(payload.Kind)
+	default:
+		return false
+	}
 }

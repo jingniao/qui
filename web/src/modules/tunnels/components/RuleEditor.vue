@@ -1,5 +1,5 @@
 <template>
-  <FormDrawer :model-value="true" :title="rule ? '编辑规则' : '创建规则'" width="xl" confirm-text="保存草稿" :loading="saving" @update:model-value="() => { if (!saving) emit('close'); }" @confirm="save">
+  <FormDrawer :model-value="true" :title="rule ? '编辑规则' : '创建规则'" width="xl" confirm-text="保存并应用" :loading="saving" @update:model-value="() => { if (!saving) emit('close'); }" @confirm="save">
     <fieldset :disabled="saving" class="space-y-4">
       <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">名称</span><input v-model="form.name" class="form-input-base" /></label>
       <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">隧道</span><select v-model="form.tunnelId" class="form-input-base" @change="tunnelChanged"><option :value="null">直接转发</option><option v-for="tunnel in tunnels.filter(t => t.status !== 'pending_delete')" :key="tunnel.id" :value="tunnel.id">{{ tunnel.name }} · {{ routeLabel(tunnel) }}</option></select></label>
@@ -20,18 +20,17 @@
       <label class="flex items-center gap-2 text-sm text-ios-secondary"><input v-model="form.enabled" type="checkbox" /> 启用</label>
     </fieldset>
     <p v-if="error" class="text-sm text-ios-red" role="alert">{{ error }}</p>
-    <p class="text-xs text-ios-tertiary">保存只更新草稿。关联目标地址由服务端派生；对用户可见的规则发布后才会加入订阅。</p>
+    <p class="text-xs text-ios-tertiary">保存后立即下发到相关服务器。关联目标地址由服务端派生；对用户可见的规则应用成功后加入订阅。</p>
   </FormDrawer>
 </template>
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import PortControl from './PortControl.vue';
-import { tunnelRuleAPI, tunnelError, type Tunnel, type TunnelRule, type TunnelRuleInput } from '../api';
+import { tunnelRuleAPI, tunnelError, type PublishSelection, type Tunnel, type TunnelRule, type TunnelRuleInput } from '../api';
 import { endpoint, routeLabel, validPort } from '../model';
-import { showToast } from '../../../app/api';
 const props = defineProps<{ rule: TunnelRule | null; tunnels: Tunnel[]; nodes: { id: string; name: string; publicIp: string }[]; inbounds: { id: string; nodeId: string; name: string; port: number; protocol: string }[] }>();
-const emit = defineEmits<{ close: []; saved: [] }>();
+const emit = defineEmits<{ close: []; saved: [selection: PublishSelection] }>();
 const form = reactive<TunnelRuleInput>({ name: props.rule?.name || '', entryNodeId: props.rule?.entryNodeId || '', portMode: props.rule?.portMode || 'auto', listenPort: props.rule?.listenPort,
   tunnelId: props.rule?.tunnelId || null, network: props.rule?.network || 'both', target: { mode: 'linked', inboundId: '' }, subscriptionVisible: props.rule?.subscriptionVisible || false, enabled: props.rule?.enabled ?? true, updatedAt: props.rule?.updatedAt });
 const targetMode = ref<'linked' | 'manual'>(props.rule?.target.mode || 'linked');
@@ -58,8 +57,8 @@ async function save() {
     if (!await portControl.value?.validate()) return;
     const input: TunnelRuleInput = { ...form, name: form.name.trim(), subscriptionVisible: targetMode.value === 'linked' && form.subscriptionVisible,
       target: targetMode.value === 'linked' ? { mode: 'linked', inboundId: inboundId.value } : { mode: 'manual', host: manualHost.value.trim(), port: manualPort.value } };
-    if (props.rule) await tunnelRuleAPI.update(props.rule.id, input); else await tunnelRuleAPI.create(input);
-    showToast('规则草稿已保存'); emit('saved');
+    const saved = props.rule ? await tunnelRuleAPI.update(props.rule.id, input) : await tunnelRuleAPI.create(input);
+    emit('saved', { tunnelIds: [], ruleIds: [saved.id] });
   } catch (e) { error.value = tunnelError(e); } finally { saving.value = false; }
 }
 </script>

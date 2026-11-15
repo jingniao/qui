@@ -49,6 +49,11 @@ function config(rules) {
 }
 const rule = (priority, type, payload, target, extra = {}) => ({ id: `r${priority}`, type, payload, target, enabled: true, priority, ...extra });
 const match = rule(999, 'MATCH', '', 'PROXY');
+for (const [host, expected] of [['VIDEO.example', 'DIRECT'], ['unrelated.example', 'PROXY'], ['1.2.3.4', 'PROXY']]) {
+  const result = api.simulateClientPolicy(host, 443, config([rule(1, 'RULE-SET', 'service:keywords', 'DIRECT'), match]),
+    [{ id: 'keywords', name: 'keywords', domains: [], suffixes: [], keywords: ['ViDeO', '1.2'], cidrs: [] }]);
+  check(`rule-set keyword ${host}`, result.target === expected);
+}
 
 const v6 = api.simulateClientPolicy('2001:db8::1', 443, config([rule(1, 'IP-CIDR6', '2001:db8::/32', 'DIRECT'), match]));
 check('IPv6 address matches IP-CIDR6', v6.matched && v6.target === 'DIRECT');

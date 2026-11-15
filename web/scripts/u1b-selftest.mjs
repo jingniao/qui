@@ -31,7 +31,10 @@ const relay = await component('modules/tunnels/components/AddRelayDialog.vue', {
 }, `export const calls = [];
   const tunnelError = e => e.message;
   const nodeRelayAPI = { create: async (nodeId, input) => { calls.push({ nodeId, input: JSON.parse(JSON.stringify(input)) }); return { rule: { id: 'new-rule' }, shareLink: null }; } };
-`, 'destinations, available, tunnels, tunnelId, entryNodeId, name, portControl, save, created');
+  export const applied = [];
+  const applyTunnelChanges = async selection => { applied.push(selection); return { status: 'success', servers: [] }; };
+  const applyProblem = () => '';
+`, 'destinations, available, tunnels, tunnelId, entryNodeId, name, portControl, save, created, applied, applyState');
 relay.tunnels.value = [
   { id: 'good', name: '香港到日本', status: 'published', hops: [{ nodeId: 'hk' }] },
   { id: 'deleting', status: 'pending_delete', hops: [{ nodeId: 'hk' }] },
@@ -50,13 +53,9 @@ assert.ok(!Object.hasOwn(relay.calls[0].input, 'listenPort'));
 assert.equal(relay.created.value.shareLink, null);
 assert.ok(relay.events.some(e => e[0] === 'saved'));
 
-const publish = await component('modules/tunnels/components/PublishFlow.vue', {
-  tunnels: [{ id: 'published', status: 'published' }, { id: 'remove-tunnel', status: 'pending_delete' }],
-  rules: [{ id: 'remove-rule', status: 'pending_delete' }, { id: 'draft-rule', status: 'draft' }],
-}, '', 'open, selection');
-publish.open();
-assert.deepEqual(publish.selection.tunnelIds, ['remove-tunnel']);
-assert.deepEqual(publish.selection.ruleIds, ['remove-rule', 'draft-rule']);
+// The created rule is applied at once, with no separate publish step.
+assert.deepEqual(relay.applied, [{ tunnelIds: [], ruleIds: ['new-rule'] }]);
+assert.equal(relay.applyState.value.ok, true);
 
 const legacy = await component('modules/proxy/components/relay/CanvasConnectionDialog.vue', {
   source: { instanceId: 'a' }, target: { instanceId: 'b' }, client: false,

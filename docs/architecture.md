@@ -67,7 +67,7 @@ Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查�
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码迁移头 `0149`（v1.5.6 待发布；最新正式版 v1.5.5 为 `0148`）；新结构见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码与最新正式版 v1.5.7 的迁移头均为 `0149`（v1.5.6 引入，v1.5.7 无迁移）；新结构见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |

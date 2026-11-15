@@ -1,6 +1,6 @@
-# v1.5.7 发布说明草稿
+# v1.5.7 发布说明
 
-**状态：代码与本地快速检查完成，完整 Linux 门禁与 GitHub check 尚未运行，未发布。** 无迁移，迁移头仍为 0149。来源为 v1.5.6 生产删除测试中发现的问题（E1–E4、E7–E9，见[删除测试记录](v1.5.5-production-relay-cleanup-test.md)第 6 节）与 Owner 的节点列表调整。
+**已于 2026-11-15 发布，tag `v1.5.7` → `bd4fe2f`。** 无迁移，迁移头仍为 0149。来源为 v1.5.6 生产删除测试中发现的问题（E1–E4、E7–E9，见[删除测试记录](v1.5.5-production-relay-cleanup-test.md)第 6 节）与 Owner 的节点列表调整。
 
 ## 修复内容
 
@@ -24,4 +24,17 @@
 
 无迁移，面板可网页更新。E7 属 Agent 改动：网页升级 Agent 目前因面板 Agent 目录端口对远程节点不可达而 `download_failed`（E6），可在节点本机运行 `qui-update --component agent`。
 
-本地已完成：Windows 快速检查（文本、前端类型检查与构建、全部前端自测、改动 Go 包及依赖包 vet／test）；E7 在 Linux 测试机用真实 Xray 26.3.27 运行 `internal/agent/core/xray` 与 `internal/agent/collector` 全部测试（含 VLESS／Trojan／Shadowsocks／HTTP／SOCKS5 访问身份实测）通过。完整 Linux 门禁、GitHub check、真实浏览器与生产 Cloudflare 路径验证尚未进行。
+本地已完成：Windows 快速检查（文本、前端类型检查与构建、全部前端自测、改动 Go 包及依赖包 vet／test）；E7 在 Linux 测试机用真实 Xray 26.3.27 运行 `internal/agent/core/xray` 与 `internal/agent/collector` 全部测试（含 VLESS／Trojan／Shadowsocks／HTTP／SOCKS5 访问身份实测）通过。本轮完整 Linux 门禁复验及 GitHub check 已通过，过程见下文；真实浏览器与生产 Cloudflare 路径验证尚未进行。
+
+## 发布验证
+
+- 固定提交 `bd4fe2fd6c27a102b5233869a9f493597643e3c7`，本地完整 Linux 门禁复验通过：首轮 1140 秒失败，唯一失败为 deployment 包的 `TestRealV14CompletionPaths/sing-box/P4-three-implicit-SNI`，`runtime.Apply` 返回 `exit status 1`，底层首因未定。该包只重跑一次，144 秒通过；原检查中断后的程序构建与部署脚本检查已补齐并通过，保留首轮 FAIL。真实核心 212 项通过（322 秒），无 DATA RACE。
+- [GitHub Check 43711133840](https://github.com/jingniao/qui/actions/runs/43711133840)：同 SHA、`full_gate=true`、`cores=true`，四分片、汇总与真实核均首次通过；官方／qui 套件 212／216 项通过。
+- [Release 43713949981](https://github.com/jingniao/qui/actions/runs/43713949981) 成功，发布时间 `2026-11-15T12:34:13Z`。13 个资产齐全，下载后校验 SHA256SUMS、GitHub 摘要、两架构归档版本与脚本、Agent 二进制对应关系及官方 Ed25519 签名，序号 `1005007`。
+- 详细记录见[发布验证记录](v1.5.7-acceptance.md)。原生 arm64 实机未运行。
+
+## 生产升级进度
+
+本次尚未执行生产升级。2026-11-15 12:25 UTC 的 SSH 只读基线：面板 1.5.6、迁移头 0149、`NRestarts=0`，配置摘要 `b02e21fbc9251bc3733d0a0a58273df1dd8a8e6a631481ec16653e7d5d1534a4`；德国 Agent 1.5.6，其余五台 1.5.5。德国／香港／台湾／zouter／美国 CC／shlii 修订分别为 83／84／85／86／61／62；CC 取样时显示离线，其余在线，已有核心上报均 healthy。
+
+当前可用德国面板与美国 CC 的 SSH 入口；Owner API 登录及其余远程节点连接方式待提供。按发布流程，新加密备份创建并校验后再升级；现有最新已校验加密备份为 11 月 14 日，尚未建立本轮恢复点。未修改防火墙、业务配置、账户或发布新修订。

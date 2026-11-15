@@ -1,6 +1,6 @@
-# v1.5.6 发布说明草稿
+# v1.5.6 发布说明
 
-**状态：代码与定向测试已完成，最终 Linux 门禁待授权，未发布。** 范围严格对应[审计修复规划](v1.5.6-audit-fix-plan.md)，包含迁移 **0149**。没有正式发布 SHA、tag、GitHub check 或生产升级记录。各项测试及未完成门禁见[验收记录](v1.5.6-acceptance.md)。
+**状态：已发布（2026-11-15，tag `v1.5.6` → `b624458`，迁移 0149，迁移头 0149）。** 范围对应[审计修复规划](v1.5.6-audit-fix-plan.md)，另含生产中转清理修复（R2／D1／D2）与 Owner 本轮界面调整；R1 空方法拒绝已在发布前撤销。门禁与发布见文末「发布」，生产面板已升级，Agent 未升级（见「生产升级」）。各项测试见[验收记录](v1.5.6-acceptance.md)。
 
 ## 修复内容
 
@@ -22,7 +22,7 @@ Go **1.26.11**，`golang.org/x/net v0.62.0`、`golang.org/x/crypto v0.59.0`；�
 
 t3 隔离 Debian 容器已验证真实认证更新 API → systemd helper → updater 的更新成功、受控失败回滚及旧安装路径登记；没有浏览器点击证据。90 秒限速下载实测先复现节点离线，再验证修复后 23/23 样本在线、最大观测心跳间隔 15.279 秒。
 
-最终 Linux 工作区门禁、发布提交上的完整门禁与 GitHub check 尚未完成，不能据此发布。本任务未暂存、提交、推送、发布或操作生产；另一个会话的生产升级记录不属于本版证据。
+发布提交上的完整门禁与 GitHub check 见文末「发布」。另一个会话的 v1.5.5 生产升级记录不属于本版证据。
 
 ## 生产中转清理问题修复（R1／R2／D1／D2）
 
@@ -39,3 +39,19 @@ t3 隔离 Debian 容器已验证真实认证更新 API → systemd helper → up
 - 隧道管理：去掉单独的「发布」按钮与确认弹窗；创建、修改、删除和轮换凭据保存后立即检查并下发（缺 GOST 时自动安装），失败保留草稿、显示原因，未生效的行提供「重试」；节点「使用已有隧道」创建后同样直接生效。
 
 本轮 Windows 离线验证：proxy、deployment、desiredstate、agent/reconcile、backup 五包测试及 vet 通过；vue-tsc、44 项前端自测、Vite 构建通过。首轮旧夹具失败及沙箱目录权限失败均保留在[验收记录](v1.5.6-acceptance.md)；权限相关检查经沙箱外离线重跑通过。未连接网络／生产，未运行浏览器、真实核心和 Linux 发布门禁，未提交。
+
+## 发布
+
+提交顺序：`8aa92ab`（发布内容）→ `6538a40`（撤销 R1 空方法拒绝）→ `b624458`（部署脚本测试在非 root／OpenRC 下可运行），均推送到 `main`。
+
+- `8aa92ab` 的本地 Linux 门禁失败：真实核三节点链测试因 R1 拒绝内部空方法 Shadowsocks 入站而失败，据此撤销 R1。
+- `6538a40` 的本地门禁与 GitHub check 失败：`panel-update-helper-test` 以非 root 运行时安装记录目录属主不符、`host-network-test` 在 OpenRC 上 `runuser` 无法执行 /run 下的 helper。`b624458` 只改测试夹具（非 root 时登记目录属主取当前用户；可执行文件放到 `/usr/local/lib/qui-hn-test.*`），Linux 上 nobody 68/0、root 72/0、7/7 通过。
+- `b624458`：本地完整 Linux 门禁 `GATE b624458 PASS total=1253s`（`QUI_GATE_SCOPE=full`）；GitHub `check` run 43681655857（`cores=true`、`full_gate=true`）第 1 次 `cores` 的 `TestRealV14CompletionPaths/xray/P4` 因 mihomo 端口被占用（`bind: address already in use`，已知偶发）失败，按流程整体重跑一次，第 2 次 `check` 与 `cores` 均成功。
+- tag `v1.5.6` → `b624458`；Release run 43684931965 成功，Release 于 2026-11-15 06:26:49Z 发布，13 个资产（安装脚本、amd64／arm64 面板与 Agent 及签名清单、qui sing-box 1.14.4 两架构及来源说明、`SHA256SUMS`）齐全。
+
+## 生产升级
+
+- 面板：2026-11-15 06:38:51–06:39:37 UTC 经「系统设置 → 系统信息 → 面板更新」由 1.5.5 升到 1.5.6，`status.json` 为 `succeeded`；迁移 0149 应用。升级后 6 台节点在线、修订与升级前一致（43／38／39／51／61／62）。
+- 恢复点：网页创建加密备份时，请求经 Cloudflare 超过 60 秒被切断（504，数据库 223.4 MiB），本次没有新的加密备份；恢复点为更新器生成的 `pre-update-1.5.5-*.db` 与 2026-11-14 已校验的加密备份。备份改为异步或绕开 60 秒限制列为后续事项。
+- Agent：Owner 于 07:10–07:12 UTC 导入官方 1.5.6 并排队网页升级。德国 netcup（面板本机）成功；香港、台湾、zouter、美国 CC、美国 shlii.io 均 `download_failed`，面板的 Agent 目录端口对这些节点不可达（11-14 同一路径曾成功）。这五台仍为 1.5.5，须放行目录端口或在节点本机运行 `qui-update --component agent`。
+- 升级后网页删除复测仍被美国 shlii.io 的 `validation_failed` 挡住，复测过程与新发现的 E1–E6 见[生产删除测试记录](v1.5.5-production-relay-cleanup-test.md)第 6 节；E1–E4 已在本地修复，待随下一版发布。

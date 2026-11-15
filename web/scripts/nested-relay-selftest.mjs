@@ -38,3 +38,39 @@ const viaImport = nestRelayEntries([created], [imported], inbounds, node => node
 assert.deepEqual([...viaImport.hidden], ['entry']);
 
 console.log('PASS nested relay entries: created entries fold under a listed exit, reused/orphan/manual-rule entries keep rows, linked rule entries fold');
+
+const hop = item('hop', 'in-hop');
+const hopBounds = [...inbounds, { id: 'in-hop', managedBy: { kind: 'tunnel', id: 't1' } }];
+assert.ok(nestRelayEntries([hop, manualRule], [], hopBounds, () => [], () => false).hidden.has('hop'));
+console.log('PASS tunnel hop listeners hidden; manual-target rule entries retained');
+
+const proxySource = readFileSync(new URL('../src/modules/proxy/proxyNodes.ts', import.meta.url), 'utf8');
+const routeBlock = proxySource.slice(proxySource.indexOf('export function getNodeRelayRoutes'), proxySource.indexOf('/**\n * Creates or retrieves'));
+const getNodeRelayRoutes = new Function(ts.transpileModule(routeBlock.replace('export ', '') + '\nreturn getNodeRelayRoutes;', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)();
+const first = { ...exit, sourceId: 'server-exit' };
+const second = { ...plain, sourceId: 'server-exit' };
+const scheme = { id: 's1', name: 'server exit', executionLocation: 'server', published: true, nodes: [
+  { instanceId: 'a', resourceType: 'server', resourceId: 'entry-server', role: 'entry', name: '入口' },
+  { instanceId: 'b', resourceType: 'server', resourceId: 'server-exit', role: 'exit', name: '出口' },
+], connections: [{ id: 'ab', sourceInstanceId: 'a', targetInstanceId: 'b' }] };
+const routeFor = (node, candidates) => getNodeRelayRoutes(node, [scheme], candidates);
+const nested = nestRelayEntries([hop, created, first, second], [], hopBounds, routeFor, () => false);
+assert.equal(nested.routes.get(first.id).length, 1);
+assert.equal(nested.routes.get(second.id).length, 0);
+assert.equal(nested.routes.get(first.id)[0].pathDisplay, '入口 → 出口');
+assert.equal(nested.routes.get(first.id)[0].statusDisplay, 'published');
+assert.ok(nested.hidden.has(created.id));
+const reversed = nestRelayEntries([second, first, created], [], inbounds, routeFor, () => false);
+assert.equal(reversed.routes.get(second.id).length, 1);
+assert.equal(reversed.routes.get(first.id).length, 0);
+const missing = nestRelayEntries([created], [], inbounds, routeFor, () => false);
+assert.equal(missing.hidden.has(created.id), false);
+console.log('PASS server-exit scheme uses first listed server card exactly once; entry folds only with a listed exit');
+
+const orphanHost = { ...orphan, sourceId: 'server-exit' };
+const withOrphan = nestRelayEntries([orphanHost, first, created], [], inbounds, routeFor, () => false);
+assert.equal(withOrphan.routes.get(orphanHost.id).length, 1);
+assert.equal(withOrphan.routes.get(first.id).length, 0);
+assert.equal(withOrphan.hidden.has(orphanHost.id), false);
+assert.equal(withOrphan.hidden.has(created.id), true);
+console.log('PASS retained orphan entry participates in server-card display order');

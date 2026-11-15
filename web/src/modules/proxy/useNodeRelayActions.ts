@@ -11,8 +11,8 @@ export function useNodeRelayActions(isOwner: Readonly<Ref<boolean>>, servers: Re
 const router = useRouter();
 
 // Relay routes linkage helpers
-function getNodeRoutes(node: ProxyNodeItem): NodeRelayRoute[] {
-  return getNodeRelayRoutes(node, proxyNodeStore.schemes);
+function getNodeRoutes(node: ProxyNodeItem, serverCards: ProxyNodeItem[] = []): NodeRelayRoute[] {
+  return getNodeRelayRoutes(node, proxyNodeStore.schemes, serverCards);
 }
 
 function goToEditRelayRoute(route: NodeRelayRoute) {

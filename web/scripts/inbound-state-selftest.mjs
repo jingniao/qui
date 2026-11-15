@@ -101,3 +101,40 @@ pendingInbounds[0]({ items: [] });
 await initialLoad;
 assert.equal(interleavedServers.value[0].status, 'offline', 'late loadData must not overwrite event server snapshot');
 console.log('PASS loadData/event server snapshot interleaving');
+
+// Execute the actual combined-status helper with the actual inbound state block.
+const statusBlock = list.slice(list.indexOf('const statusLook ='), list.indexOf('function copyAddress'));
+const combined = new Function('ref', 'revisionResult', ts.transpileModule(stateBlock + '\n' + statusBlock + '\nreturn { nodeStatus, inboundStateMap, inboundStateErrors };', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(value => ({ value }), value => value);
+for (const [reach, publish, failed, expected] of [
+  ['offline', 'unpublished', true, '状态未知'],
+  ['online', 'effective', true, '状态未知'],
+  ['offline', 'unpublished', false, '离线'],
+  ['offline', 'pending', false, '离线'],
+  ['offline', 'modified', false, '离线'],
+  ['error', 'effective', false, '离线'],
+  ['online', 'unpublished', false, '未生效'],
+  ['online', 'pending', false, '发布中'],
+  ['online', 'modified', false, '在线·有修改'],
+  ['online', 'effective', false, '在线'],
+]) {
+  combined.inboundStateMap.value.set('s/i', { state: publish });
+  combined.inboundStateErrors.value = failed ? new Map([['s', '读取失败']]) : new Map();
+  const result = combined.nodeStatus({ ...item, name: '入口', status: reach });
+  assert.equal(result.label, expected, `${reach}/${publish}/${failed}`);
+  assert.match(result.title, /服务器：/);
+  assert.ok(result.capsule && result.dot);
+}
+for (const sourceType of ['manual', 'subscription']) {
+  for (const [status, expected] of [['online', '在线'], ['untested', '未检测'], ['offline', '离线'], ['error', '离线']]) {
+    assert.equal(combined.nodeStatus({ ...item, sourceType, status }).label, expected);
+  }
+}
+const card = list.slice(list.indexOf('<!-- ================= Mode 2:'), list.indexOf('<!-- Row 3:'));
+const titleRow = card.slice(card.indexOf('<!-- Row 1:'), card.indexOf('<!-- Row 2:'));
+assert.doesNotMatch(titleRow, /inboundBadge|nodeStatus/);
+assert.match(card, /<EntryRouteSummary inline\s/);
+assert.equal((card.match(/nodeStatus\(node\)\.label/g) || []).length, 1);
+const table = list.slice(0, list.indexOf('<!-- ================= Mode 2:'));
+assert.doesNotMatch(table, /inboundBadge\(node\)/);
+assert.match(table, /nodeStatus\(node\)\.label/);
+console.log('PASS combined node status priorities and imported states; card merged line and table share one badge');

@@ -275,16 +275,18 @@ export async function deleteCanvasScheme(schemeId: string): Promise<void> {
  * Find all relay routes targeting the given exit node.
  * Traces back incoming connections to create path: e.g. "香港 → 日本", "上海 → 香港 → 日本"
  */
-export function getNodeRelayRoutes(node: ProxyNodeItem, schemes: RelayScheme[]): NodeRelayRoute[] {
+export function getNodeRelayRoutes(node: ProxyNodeItem, schemes: RelayScheme[], serverCards: ProxyNodeItem[] = []): NodeRelayRoute[] {
   const routes: NodeRelayRoute[] = [];
 
   for (const scheme of schemes) {
     // Find all node instances matching this node (by resourceId or by server/port/inbound)
     const exitInstances = scheme.nodes.filter(
-      inst =>
+      inst => inst.resourceType === 'server'
+        ? inst.role === 'exit' && serverCards.find(card => card.sourceType === 'self_hosted' && card.sourceId === inst.resourceId)?.id === node.id
+        : (
         inst.resourceId === node.id ||
         (node.inboundId && inst.resourceId === node.inboundId) ||
-        (!!node.server && node.port > 0 && inst.serverAddress === `${node.server}:${node.port}`)
+        (!!node.server && node.port > 0 && inst.serverAddress === `${node.server}:${node.port}`))
     );
 
     for (const exitInst of exitInstances) {

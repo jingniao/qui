@@ -147,7 +147,7 @@
 
         <!-- Speed Test -->
         <button
-          v-if="selfHostedNodes.length"
+          v-if="allNodes.some(node => node.sourceType === 'self_hosted')"
           type="button"
           @click="testAllNodes"
           :disabled="testingAll"
@@ -215,12 +215,6 @@
                   <span class="px-1.5 py-0.2 rounded text-xs font-semibold shrink-0" :class="sourceCapsuleColor(node.sourceType)">
                     {{ node.sourceName }}
                   </span>
-                  <StatusBadge
-                    v-if="inboundBadge(node)"
-                    :status="inboundBadge(node)!.tone"
-                    :label="inboundBadge(node)!.label"
-                    :title="inboundBadge(node)!.title"
-                  />
                 </div>
                 <EntryRouteSummary :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" />
                 <p v-if="node.sourceType !== 'self_hosted' && node.sourceId" class="text-xs text-ios-secondary">所属分组：{{ importedGroupNames(node) }}</p>
@@ -294,12 +288,9 @@
           <!-- 5. Real Status & Latency (Same as Server Page) -->
           <td>
             <div class="flex items-center gap-2">
-              <span
-                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 select-none"
-                :class="statusCapsuleClass(node)"
-              >
-                <span class="w-1.5 h-1.5 rounded-full" :class="statusDotClass(node)"></span>
-                <span>{{ statusCapsuleText(node) }}</span>
+              <span class="inline-flex shrink-0 select-none items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="nodeStatus(node).capsule" :title="nodeStatus(node).title">
+                <span class="h-1.5 w-1.5 rounded-full" :class="nodeStatus(node).dot"></span>
+                <span>{{ nodeStatus(node).label }}</span>
               </span>
               <span v-if="node.status === 'online' && node.latencyMs && !notRunning(node)" class="text-xs font-mono font-bold text-emerald-600">
                 {{ node.latencyMs }} ms
@@ -369,7 +360,7 @@
         class="bg-white rounded-[24px] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-4"
       >
         <div class="space-y-3.5">
-          <!-- Row 1: Flag · Name · Protocol & Server-style Status Capsule -->
+          <!-- Row 1: Flag · Name · Protocol -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2 min-w-0">
               <span
@@ -388,37 +379,24 @@
                 {{ node.protocol }}
               </span>
             </div>
-
-            <!-- Status Badge Capsule (Exact same class as Server Page) -->
-            <div class="flex items-center gap-1.5 shrink-0">
-              <StatusBadge
-                v-if="inboundBadge(node)"
-                :status="inboundBadge(node)!.tone"
-                :label="inboundBadge(node)!.label"
-                :title="inboundBadge(node)!.title"
-              />
-              <span
-                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 select-none"
-                :class="statusCapsuleClass(node)"
-              >
-                <span class="w-1.5 h-1.5 rounded-full" :class="statusDotClass(node)"></span>
-                <span>{{ statusCapsuleText(node) }}</span>
-              </span>
-            </div>
           </div>
 
-          <EntryRouteSummary :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" />
-
-          <!-- Row 2: Sub-info (Source · Transport · Latency) -->
-          <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap">
-            <span class="px-1.5 py-0.2 rounded text-xs font-semibold" :class="sourceCapsuleColor(node.sourceType)">
-              {{ node.sourceName }}
-            </span>
-            <span class="text-neutral-300">·</span>
-            <span>{{ transportLabel(node) }}</span>
-            <span v-if="node.status === 'online' && node.latencyMs && !notRunning(node)" class="text-neutral-300">·</span>
-            <span v-if="node.status === 'online' && node.latencyMs && !notRunning(node)" class="font-bold text-emerald-600">
-              {{ node.latencyMs }} ms
+          <!-- Row 2: route · source · transport · latency on one line, the combined status at its end -->
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-neutral-400 font-mono tracking-normal">
+              <EntryRouteSummary inline :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" class="min-w-0 font-sans" />
+              <span v-if="entryRouteSummaries.get(node.inboundId || '')" class="shrink-0 text-neutral-300">·</span>
+              <span class="shrink-0 px-1.5 py-0.2 rounded text-xs font-semibold" :class="sourceCapsuleColor(node.sourceType)">{{ node.sourceName }}</span>
+              <span class="shrink-0 text-neutral-300">·</span>
+              <span class="truncate" :title="transportLabel(node)">{{ transportLabel(node) }}</span>
+              <template v-if="node.status === 'online' && node.latencyMs && !notRunning(node)">
+                <span class="shrink-0 text-neutral-300">·</span>
+                <span class="shrink-0 font-bold text-emerald-600">{{ node.latencyMs }} ms</span>
+              </template>
+            </div>
+            <span class="inline-flex shrink-0 select-none items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="nodeStatus(node).capsule" :title="nodeStatus(node).title">
+              <span class="h-1.5 w-1.5 rounded-full" :class="nodeStatus(node).dot"></span>
+              <span>{{ nodeStatus(node).label }}</span>
             </span>
           </div>
 
@@ -1116,7 +1094,6 @@ import ImportedProxyDialog from '../components/ImportedProxyDialog.vue';
 import { inboundDeleteConflict, type InboundConflict } from '../inboundDeleteConflict';
 const deleteConflict = ref<InboundConflict | null>(null);
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue';
-import StatusBadge from '../../../components/StatusBadge.vue';
 import { revisionResult } from '../../system/revisionResult';
 import type { InboundStateItem, InboundPublishState } from '../../system/deploymentApi';
 import AddRelayDialog from '../../tunnels/components/AddRelayDialog.vue';
@@ -1351,7 +1328,9 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
 });
 
 // All aggregated nodes. Entries made by a node's 添加中转 are listed in their exit node's 中转 section only.
-const relayNesting = computed(() => nestRelayEntries(selfHostedNodes.value, proxyNodeStore.manualNodes, serverInbounds.value, getNodeRoutes, isLinkedRelayRule));
+const relayNesting = computed(() => nestRelayEntries(selfHostedNodes.value, proxyNodeStore.manualNodes, serverInbounds.value, computeNodeRoutes, isLinkedRelayRule));
+const getNodeRoutes = (node: ProxyNodeItem) => relayNesting.value.routes.get(node.id) || [];
+const relayCount = (node: ProxyNodeItem) => getNodeRoutes(node).length + linkedRelays(node).length;
 const routeEntries = (route: NodeRelayRoute) => relayNesting.value.entries.get(route.schemeId) || [];
 const allNodes = computed<ProxyNodeItem[]>(() => [...selfHostedNodes.value.filter(node => !relayNesting.value.hidden.has(node.id)), ...proxyNodeStore.manualNodes]);
 
@@ -1393,8 +1372,8 @@ function applyFilter() {
 }
 
 const {
-  relayNode, quickRelayInboundId, relayErrors, getNodeRoutes, goToEditRelayRoute,
-  relayCount, linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
+  relayNode, quickRelayInboundId, relayErrors, getNodeRoutes: computeNodeRoutes, goToEditRelayRoute,
+  linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
   handleAddRelay, createRelayScheme, isLinkedRelayRule,
 } = useNodeRelayActions(isOwner, servers, serverInbounds);
 
@@ -1418,24 +1397,28 @@ function sourceCapsuleColor(sourceType: string): string {
   return 'bg-blue-100 text-ios-blue';
 }
 
-function statusCapsuleClass(node: ProxyNodeItem): string {
-  if (node.status === 'online' && !notRunning(node)) {
-    return 'bg-[#E8F8F0] text-[#12B76A]';
-  }
-  return 'bg-neutral-100 text-neutral-500';
-}
-
-function statusDotClass(node: ProxyNodeItem): string {
-  if (node.status === 'online' && !notRunning(node)) return 'bg-[#12B76A]';
-  return 'bg-neutral-400';
-}
-
-function statusCapsuleText(node: ProxyNodeItem): string {
-  if (inboundStatusUnknown(node)) return '状态未知';
-  if (notRunning(node)) return '未生效';
-  if (node.status === 'online') return '在线';
-  if (node.status === 'untested') return '未检测';
-  return '离线';
+// One badge per node: the server's reachability and the inbound's publish state
+// combined, showing the state that needs attention; the tooltip names both.
+const statusLook = {
+  green: { capsule: 'bg-[#E8F8F0] text-[#12B76A]', dot: 'bg-[#12B76A]' },
+  yellow: { capsule: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },
+  blue: { capsule: 'bg-blue-50 text-blue-600', dot: 'bg-blue-500' },
+  red: { capsule: 'bg-red-50 text-red-600', dot: 'bg-red-500' },
+  gray: { capsule: 'bg-neutral-100 text-neutral-500', dot: 'bg-neutral-400' },
+};
+function nodeStatus(node: ProxyNodeItem): { label: string; capsule: string; dot: string; title: string } {
+  const reach = node.status === 'online' ? '在线' : node.status === 'untested' ? '未检测' : '离线';
+  const publish = inboundBadge(node);
+  const failure = publish?.title?.startsWith('最近一次发布失败') ? `；${publish.title}` : '';
+  const title = publish ? `服务器：${reach}；发布状态：${publish.label}${failure}` : `状态：${reach}`;
+  const pick = (label: string, tone: keyof typeof statusLook) => ({ label, title, ...statusLook[tone] });
+  if (inboundStatusUnknown(node)) return pick('状态未知', 'yellow');
+  if (node.status !== 'online' && node.status !== 'untested') return pick('离线', 'gray');
+  const state = inboundState(node)?.state;
+  if (state === 'unpublished') return pick('未生效', 'red');
+  if (state === 'pending') return pick('发布中', 'blue');
+  if (state === 'modified') return pick('在线·有修改', 'yellow');
+  return node.status === 'online' ? pick('在线', 'green') : pick('未检测', 'gray');
 }
 
 function copyAddress(text: string) {

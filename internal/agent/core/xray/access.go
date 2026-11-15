@@ -96,10 +96,26 @@ func attributeAccessRule(document *configDocument, selected target, ruleID, acco
 	return target{}, errors.New("access rule target unavailable")
 }
 
+// accessLogsAccount reports whether Xray writes the credential's email on the
+// access line for this inbound protocol. The collector then attributes the
+// account from the line itself, so the unattributed base rule appended below is
+// enough and no per-credential copy is needed. Each copy repeats the rule's
+// whole match list, including native rule-set references that Xray loads once
+// per reference: on a 256 MB container one policy with geosite/geoip cn copied
+// for every inbound and credential exhausted memory during native validation.
+// WireGuard has no email (its per-peer traffic counters read the cloned
+// outbounds) and HTTP/SOCKS5 attribute by username, so both keep their copies.
+func accessLogsAccount(protocol string) bool {
+	return protocol == "vless" || protocol == "trojan" || protocol == "shadowsocks"
+}
+
 func accessAccountRules(document *configDocument, base route, selected target, state desiredstate.State) ([]route, error) {
 	rules := []route{}
 	for _, inbound := range state.Inbounds {
 		if !inbound.Enabled || len(base.InboundTag) > 0 && !inList(base.InboundTag, inbound.ID) {
+			continue
+		}
+		if accessLogsAccount(inbound.Protocol) {
 			continue
 		}
 		for _, credential := range state.Credentials {

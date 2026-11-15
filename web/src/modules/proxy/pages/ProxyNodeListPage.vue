@@ -282,7 +282,7 @@
                 <RelayRouteEntries :entries="routeEntries(r)" @copy="copyAddress" />
               </div>
             </div>
-            <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" />
+            <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" variant="table" :is-owner="isOwner" :entry-address="relayEntryAddress" @copy="copyAddress" />
           </td>
 
           <!-- 5. Real Status & Latency (Same as Server Page) -->
@@ -494,7 +494,7 @@
                   编辑
                 </button>
               </div>
-              <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" />
+              <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" variant="card" :is-owner="isOwner" :entry-address="relayEntryAddress" @copy="copyAddress" />
             </div>
           </div>
         </div>
@@ -1102,7 +1102,7 @@ import { useNodeRelayActions } from '../useNodeRelayActions';
 import ImportResultDialog from '../components/ImportResultDialog.vue';
 import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
 import RelayRouteEntries from '../components/RelayRouteEntries.vue';
-import { nestRelayEntries } from '../nestedRelayEntries';
+import { nestRelayEntries, ruleEntryAddress } from '../nestedRelayEntries';
 import { authState } from '../../../app/auth';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { importAPI, loadImports, airportSources, describeImportResult, importCountsLine, failedImportResult } from '../importApi';
@@ -1329,6 +1329,7 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
 });
 
 // All aggregated nodes. Entries made by a node's 添加中转 are listed in their exit node's 中转 section only.
+const relayEntryAddress = (rule: Parameters<typeof ruleEntryAddress>[0]) => ruleEntryAddress(rule, selfHostedNodes.value, serverInbounds.value, servers.value);
 const relayNesting = computed(() => nestRelayEntries(selfHostedNodes.value, proxyNodeStore.manualNodes, serverInbounds.value, computeNodeRoutes, isLinkedRelayRule));
 const getNodeRoutes = (node: ProxyNodeItem) => relayNesting.value.routes.get(node.id) || [];
 const relayCount = (node: ProxyNodeItem) => getNodeRoutes(node).length + linkedRelays(node).length;

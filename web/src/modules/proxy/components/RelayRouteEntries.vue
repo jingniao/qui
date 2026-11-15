@@ -6,6 +6,6 @@
 </template>
 <script setup lang="ts">
 import type { ProxyNodeItem } from '../proxyNodes';
-defineProps<{ entries: ProxyNodeItem[] }>();
+defineProps<{ entries: Pick<ProxyNodeItem, 'id' | 'name' | 'server' | 'port'>[] }>();
 const emit = defineEmits<{ copy: [address: string] }>();
 </script>

@@ -1,5 +1,15 @@
 import type { Inbound } from './api';
+import type { TunnelRule } from '../tunnels/api';
+import type { NodeView } from '../nodes/api';
 import type { NodeRelayRoute, ProxyNodeItem } from './proxyNodes';
+
+export function ruleEntryAddress(rule: TunnelRule, selfHosted: ProxyNodeItem[], inbounds: Inbound[], servers: NodeView[]) {
+  const inbound = inbounds.find(item => item.managedBy?.kind === 'rule' && item.managedBy.id === rule.id);
+  const entry = inbound && selfHosted.find(item => item.inboundId === inbound.id);
+  if (entry) return { server: entry.server, port: entry.port };
+  const server = servers.find(item => item.id === rule.entryNodeId)?.publicIp;
+  return server ? { server, port: rule.listenPort } : undefined;
+}
 
 // Entries a node's 添加中转 created are shown only in their exit node's 中转
 // section of the node list: a relay scheme's newly created entry inbound, or the

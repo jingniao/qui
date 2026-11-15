@@ -1170,8 +1170,9 @@ function isRelayCollapsed(nodeId: string, routeCount: number): boolean {
   if (collapsedRelayState[nodeId] !== undefined) {
     return collapsedRelayState[nodeId];
   }
-  // Default: if has routes, expand; if 0 routes, keep collapsed to stay compact
-  return routeCount === 0;
+  // Owner 2026-11-15: every card starts collapsed; the header still shows the count.
+  void routeCount;
+  return true;
 }
 
 function toggleRelayCollapse(nodeId: string, routeCount: number) {

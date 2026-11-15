@@ -74,3 +74,12 @@ assert.equal(withOrphan.routes.get(first.id).length, 0);
 assert.equal(withOrphan.hidden.has(orphanHost.id), false);
 assert.equal(withOrphan.hidden.has(created.id), true);
 console.log('PASS retained orphan entry participates in server-card display order');
+
+// 中转线路 starts collapsed on every card (Owner 2026-11-15); the count stays in the header.
+{
+  const page = readFileSync(new URL('../src/modules/proxy/pages/ProxyNodeListPage.vue', import.meta.url), 'utf8');
+  const fn = page.slice(page.indexOf('function isRelayCollapsed'), page.indexOf('function toggleRelayCollapse'));
+  assert.match(fn, /return true;/);
+  assert.doesNotMatch(fn, /routeCount === 0/);
+  console.log('PASS relay routes start collapsed');
+}

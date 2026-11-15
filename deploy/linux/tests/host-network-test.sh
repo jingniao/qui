@@ -19,8 +19,9 @@
 #
 # Nothing of the real installation is touched: no proxy-agent unit, no
 # /var/lib/proxy-agent and no nftables table. The fake helper only writes files,
-# and everything it needs lives below one temporary directory below /run, which
-# the packaged units may write to without extra privileges.
+# its state lives below /run, which the packaged units may write to without
+# extra privileges. Executables live below /usr/local/lib, as in an installation:
+# /run may be mounted noexec.
 set -euo pipefail
 
 if [[ $(uname -s) != Linux ]]; then
@@ -73,6 +74,7 @@ test_id=$$
 service_name=qui-hn-test-$test_id.service
 path_name=qui-hn-test-$test_id.path
 watcher_pid=''
+executable_directory=''
 passes=0
 failed=0
 
@@ -100,15 +102,19 @@ cleanup() {
     if command -v pkill >/dev/null 2>&1; then pkill -f "$T/hn" 2>/dev/null || true; fi
   fi
   rm -rf -- "$T"
+  if [[ -n $executable_directory ]]; then rm -rf -- "$executable_directory"; fi
 }
 trap cleanup EXIT
+
+executable_directory=$(mktemp -d /usr/local/lib/qui-hn-test.XXXXXX)
+chmod 0755 -- "$executable_directory"
 
 # The fake stand-in for `proxy-agent --apply-host-network DIR`. It keeps the file
 # protocol of the real helper - read desired.json, answer status.json atomically -
 # but touches no nftables table: an address of 192.0.2.250 makes it fail, every
 # other request succeeds, an absent request writes the initial capability receipt,
 # and every answered desired request is counted in ../runs.
-cat > "$T/helper" <<'HELPER'
+cat > "$executable_directory/helper" <<'HELPER'
 #!/bin/sh
 set -eu
 
@@ -138,7 +144,7 @@ printf '{"id":"%s","ok":true}\n' "$id" > "$directory/.status.tmp"
 mv -f "$directory/.status.tmp" "$directory/status.json"
 exit 0
 HELPER
-chmod 0755 -- "$T/helper"
+chmod 0755 -- "$executable_directory/helper"
 
 awk '/^service_enable proxycontrol-update-recovery$/ {startup=1} startup && /^if \[\[ -n \$host_network_service_digest \]\]; then$/ {copy=1} /^qui_write_record / {exit} copy' "$installer" > "$T/install-startup"
 
@@ -162,7 +168,7 @@ service_start() {
 }
 source "${BOOTSTRAP_STARTUP:?}"
 BOOTSTRAP
-if BOOTSTRAP_DATA="$T/bootstrap-good" BOOTSTRAP_HELPER="$T/helper" BOOTSTRAP_STARTUP="$T/install-startup" bash "$T/openrc-bootstrap"; then
+if BOOTSTRAP_DATA="$T/bootstrap-good" BOOTSTRAP_HELPER="$executable_directory/helper" BOOTSTRAP_STARTUP="$T/install-startup" bash "$T/openrc-bootstrap"; then
   check 'OpenRC initial receipt exists before starting its watcher' ok
 else
   check 'OpenRC initial receipt exists before starting its watcher' fail
@@ -221,7 +227,7 @@ if [[ $init_system == systemd ]]; then
     -e "s|/var/lib/proxy-agent/host-network|$T/hn|g" \
     -e "s|/var/lib/proxy-agent|$T|g" \
     -e "s|^ReadWritePaths=.*|ReadWritePaths=$T/hn $T|" \
-    -e "s|^ExecStart=.*|ExecStart=/bin/sh $T/helper --apply-host-network $T/hn|" \
+    -e "s|^ExecStart=.*|ExecStart=/bin/sh $executable_directory/helper --apply-host-network $T/hn|" \
     -e '/^User=/d' \
     -e '/^Group=/d' \
     -e '/^CapabilityBoundingSet=/d' \
@@ -242,10 +248,10 @@ if [[ $init_system == systemd ]]; then
 else
   sed \
     -e "s|^DIR=.*|DIR=$T/hn|" \
-    -e "s|^HELPER=.*|HELPER=$T/helper|" \
-    "$watch_script" > "$T/watch"
-  chmod 0755 -- "$T/watch"
-  "$T/watch" &
+    -e "s|^HELPER=.*|HELPER=$executable_directory/helper|" \
+    "$watch_script" > "$executable_directory/watch"
+  chmod 0755 -- "$executable_directory/watch"
+  "$executable_directory/watch" &
   watcher_pid=$!
   # The watcher applies the retained file and then execs inotifyd; give the watch
   # a moment to arm so the first publish cannot fall into the gap.

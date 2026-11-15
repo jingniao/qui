@@ -135,8 +135,12 @@ if ! account_id=$(id -u "$account") || ! account_gid=$(id -g "$account"); then
   exit 1
 fi
 
-[[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || {
-  printf '面板更新请求无法处理：安装记录目录必须为 root 0700。\n' >&2
+# Only the isolated test installation may belong to the helper's effective uid.
+# The panel account override does not change the trusted registry owner.
+registry_owner=0
+if [[ -n $root ]]; then registry_owner=$EUID; fi
+[[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == "$registry_owner:700" ]] || {
+  printf '面板更新请求无法处理：安装记录目录必须为 uid %s 0700。\n' "$registry_owner" >&2
   exit 1
 }
 exec {request_directory_fd}< "$request_directory"

@@ -1,4 +1,5 @@
 import type { ReleaseEntry } from '../system/coreUpdatesApi';
+import type { DeletionPreview as CascadeDeletionPreview, DeletionResult } from '../../app/deletion';
 export interface CollectorLossStatus {measured?:boolean;status:"ok"|"unavailable";generation?:number;dropped_allowed_observations?:number;dropped_blocked_observations?:number;rejected_observations?:number;persistence_failures?:number;unconfirmed_processes?:number;baseline_at?:{seconds?:number;nanos?:number};checkpoint_at?:{seconds?:number;nanos?:number};counters_saturated?:boolean;coverage_incomplete?:boolean;end_confirmed?:boolean;}
 export interface TrafficSourceStatus {status:"busy"|"unavailable"|"unobserved"|"partial"|"covered"|"not_running"|"sampling_failed";core_epoch?:string;revision?:number;configured_sources?:number;observed_sources?:number;core_running?:boolean;observed_at?:{seconds?:number;nanos?:number};last_success_at?:{seconds?:number;nanos?:number};}
 import { request, type Page } from '../../app/apiClient';
@@ -21,6 +22,8 @@ export interface NodeSettingsInput extends Partial<NodeNetworkSettings> {
 export interface NodeView extends NodeNetworkSettings {
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';
   agentUpdateSupported: boolean;
+  relayCleanupPending: boolean;
+  relayCleanupCode: string;
   // Server-group tags (v1.5.5 item 4); the panel always sends a list.
   tags?: string[];
   // The Agent can install GOST (Hello.gost_core_supported).
@@ -97,7 +100,7 @@ export interface EnrollmentStatus {nodeId:string;observedAt:string;code:string;s
 export type DeletionMode = 'cancel' | 'delete' | 'deleted';
 export type DeletionBlockerKind = 'inbound' | 'outbound' | 'outbound_group' | 'outbound_target' | 'proxy_chain' | 'policy' | 'deployment_batch';
 export interface DeletionBlocker { kind: DeletionBlockerKind; id: string; name: string; }
-export interface DeletionPreview { mode: DeletionMode; blockers: DeletionBlocker[]; groups: string[]; lastHeartbeat: string; online: boolean; }
+export interface DeletionPreview extends CascadeDeletionPreview { mode?: DeletionMode; groups?: string[]; lastHeartbeat?: string; online?: boolean; }
 export interface LatencyTargetsInput { custom: boolean; targetIds: string[]; }
 export interface LatencyTargetsSettings extends LatencyTargetsInput { defaultTargetIds: string[]; }
 // The Owner's saved order of the server list (v1.5.5 item 3). Revision 0 means
@@ -150,7 +153,7 @@ requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<H
   machineTrafficBatch: () => request<MachineTrafficBatch>('/nodes/machine-traffic'),
   machineTrafficSettings: (id: string) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`),
   saveMachineTrafficSettings: (id: string, input: MachineTrafficSettings) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`, 'PUT', input),
-  deleteNode: (id: string) => request(`/nodes/${encodeURIComponent(id)}`, 'DELETE'),
+  deleteNode: (id: string) => request<DeletionResult | undefined>(`/nodes/${encodeURIComponent(id)}`, 'DELETE'),
   agentReleases: (refresh = false) => request<AgentReleaseVersion[]>(`/agent-releases${refresh ? '?refresh=1' : ''}`),
   importAgentRelease: (version: string) => request<ReleaseEntry[]>(`/agent-releases/${encodeURIComponent(version)}/import`, 'POST')
 };

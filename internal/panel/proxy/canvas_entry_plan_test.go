@@ -124,7 +124,7 @@ func TestCanvasEntryPlanCreateProtocolCapabilities(t *testing.T) {
 }
 
 func TestCanvasEntryPlanBindingPublication(t *testing.T) {
-	for _, mode := range []string{"create", "reuse"} {
+	for _, mode := range []string{"create"} {
 		t.Run(mode, func(t *testing.T) {
 			p := newPublishPanel(t)
 			binding := &CanvasEntryBinding{Mode: mode, Protocol: "socks5", PortMode: "manual", Port: canvasTestPort(20000), GroupMode: "none"}
@@ -374,27 +374,6 @@ func TestCanvasEntryPlanCreateGroups(t *testing.T) {
 	})
 }
 
-func TestCanvasEntryPlanReuse(t *testing.T) {
-	p := newPublishPanel(t)
-	if _, err := p.database.Exec("UPDATE inbounds SET default_outbound='block' WHERE id=?", p.inbound.ID); err != nil {
-		t.Fatal(err)
-	}
-	entryPlanGroup(t, p, "existing", "mixed", p.inbound.ID)
-	entryPlanGroup(t, p, "unselected", "subscription")
-	layout := entryPlanLayout(p, &CanvasEntryBinding{Mode: "reuse", InboundID: p.inbound.ID, PortMode: "auto", GroupMode: "none"})
-	result := entryPlanResult(t, p, layout)
-	if len(result.Entries) != 1 {
-		t.Fatalf("entries %+v", result.Entries)
-	}
-	e := result.Entries[0]
-	if e.InstanceID != "i-a" || e.Mode != "reuse" || e.NodeID != p.nodeA || e.InboundID != p.inbound.ID || e.Protocol != "socks5" || e.Port != 1080 || e.Name != "Entry" || e.PreviousRoute != "block" || e.Route != "[plan] Node A → Node B (trojan:8443) 中转出站" {
-		t.Fatalf("reuse preview %+v", e)
-	}
-	if len(e.Groups) != 1 || e.Groups[0].ID != "existing" || e.Groups[0].Name != "Group existing" {
-		t.Fatalf("reuse groups %+v", e.Groups)
-	}
-}
-
 func TestCanvasEntryPlanReuseRejectsInvalidInbound(t *testing.T) {
 	for _, kind := range []string{"internal relay", "other node", "deleted", "unsupported core"} {
 		t.Run(kind, func(t *testing.T) {
@@ -492,26 +471,6 @@ func TestCanvasEntryPlanSharedPendingEntries(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestCanvasEntryPlanSharedReuseStaysWithOwningScheme(t *testing.T) {
-	p := newPublishPanel(t)
-	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB, C: p.nodeC}, "", []CanvasConnection{canvasTestHop("i-a", "i-b", 8443), canvasTestHop("i-b", "i-c", 9443)})
-	layout.Instances[0].EntryBinding = &CanvasEntryBinding{Mode: "reuse", InboundID: p.inbound.ID, PortMode: "auto", GroupMode: "none"}
-	other := savePlanScheme(t, p, layout)
-	current := CanvasScheme{Name: "shared", Execution: "server", Layout: CanvasLayout{Instances: append([]CanvasInstance(nil), other.Layout.Instances[:2]...), Connections: append([]CanvasConnection(nil), other.Layout.Connections[:1]...)}}
-	current.Layout.Instances[0].EntryBinding = nil
-	result, err := p.service.PlanCanvas(p.ctx, current)
-	if err != nil || !result.OK || len(result.Entries) != 0 {
-		t.Fatalf("other scheme's reuse entered preview: %+v, %v", result, err)
-	}
-	for _, server := range result.Servers {
-		for _, object := range server.Updates {
-			if object.Kind == "inbound" && object.Name == p.inbound.Name {
-				t.Fatalf("other scheme's pending reuse changed routing: %+v", object)
-			}
-		}
 	}
 }
 

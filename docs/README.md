@@ -13,6 +13,7 @@
 | 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
 | 提交、门禁、发布与升级生产的步骤（交接用） | [发布流程手册](release-runbook.md) |
 | 完成标准、证据要求与实机验收结果 | [验收矩阵](v1-acceptance.md) |
+| v1.5.8 中转撤除、连带删除与待清理（Owner 已确认范围，未发布，迁移 0150） | [确认规划](v1.5.8-plan.md)、[发布说明](release-notes-1.5.8.md) |
 | v1.5.7 删除测试修复与节点列表调整（已发布 2026-11-15，tag → bd4fe2f；德国面板及 Agent 已网页升级，CC 修订冲突阻塞，其余暂缓） | [发布说明](release-notes-1.5.7.md)、[验证记录](v1.5.7-acceptance.md)、[生产删除测试记录](v1.5.5-production-relay-cleanup-test.md) |
 | v1.5.6 审计修复（已发布 2026-11-15，tag → b624458） | [确认规划](v1.5.6-audit-fix-plan.md)、[测试记录](v1.5.6-acceptance.md)、[发布说明](release-notes-1.5.6.md) |
 | v1.5.5 发布前验收：实机证据、收尾修复、原始失败与覆盖限制 | [发布前验收](v1.5.5-acceptance.md) |

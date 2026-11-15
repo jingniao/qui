@@ -559,6 +559,11 @@ func (s *Service) saveTunnelRule(ctx context.Context, ruleID string, input Tunne
 			return TunnelRule{}, tunnelFail("invalid", 400, "规则入口必须与隧道入口一致")
 		}
 	}
+	if input.Target.Mode == "linked" {
+		if err := rejectSchemeEntryInbound(ctx, tx, input.Target.InboundID); err != nil {
+			return TunnelRule{}, err
+		}
+	}
 	target, err := deriveTunnelTarget(ctx, tx, input.Target, input.TunnelID)
 	if err != nil {
 		return TunnelRule{}, err

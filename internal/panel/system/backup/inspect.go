@@ -391,6 +391,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateCanvasEntryBindings(ctx, database); err != nil {
 		return err
 	}
+	if err := validateRelayCleanup(ctx, database); err != nil {
+		return err
+	}
 	if err := validateNodeLatencyTargets(ctx, database); err != nil {
 		return err
 	}

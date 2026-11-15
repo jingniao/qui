@@ -80,8 +80,8 @@ func TestCanvasStatusBatchAndConfirmation(t *testing.T) {
 
 func TestCanvasStatusSubscriptionConditions(t *testing.T) {
 	p := newPublishPanel(t)
-	scheme := savePlanScheme(t, p, entryPlanLayout(p, &CanvasEntryBinding{Mode: "reuse", InboundID: p.inbound.ID, PortMode: "auto", GroupMode: "none"}))
-	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "i-a", InboundID: p.inbound.ID, Mode: "reuse", State: "applied", OriginalDefaultOutbound: "direct", AppliedDefaultOutbound: "direct"}); err != nil {
+	scheme := savePlanScheme(t, p, entryPlanLayout(p, &CanvasEntryBinding{Mode: "create", InboundID: p.inbound.ID, PortMode: "auto", GroupMode: "none"}))
+	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "i-a", InboundID: p.inbound.ID, Mode: "create", State: "applied", OriginalDefaultOutbound: "direct", AppliedDefaultOutbound: "direct"}); err != nil {
 		t.Fatal(err)
 	}
 	entryPlanGroup(t, p, "status-group", "subscription", p.inbound.ID)
@@ -147,7 +147,7 @@ func TestCanvasStatusHTTPPermissions(t *testing.T) {
 func TestCanvasStatusProbeMatchesRecordedEntryTCP(t *testing.T) {
 	p := newPublishPanel(t)
 	scheme := savePlanScheme(t, p, entryPlanLayout(p, nil))
-	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "probe-binding", SchemeID: &scheme.ID, InstanceID: "i-a", InboundID: p.inbound.ID, Mode: "reuse", State: "applied", OriginalDefaultOutbound: "direct"}); err != nil {
+	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "probe-binding", SchemeID: &scheme.ID, InstanceID: "i-a", InboundID: p.inbound.ID, Mode: "create", State: "applied", OriginalDefaultOutbound: "direct"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.database.Exec("INSERT INTO probe_targets(id,label,host,port) VALUES('probe-target','entry','changed.example',443)"); err != nil {

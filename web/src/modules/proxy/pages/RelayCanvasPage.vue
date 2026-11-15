@@ -25,7 +25,6 @@
         新建方案后即可从左侧资源库拖入服务器、自建节点或外部代理并连线；方案保存在面板，不随浏览器丢失。
       </p>
       <button type="button" class="ios-btn-primary mt-1" @click="createNewScheme">新建方案</button>
-      <button v-if="legacyCount" type="button" class="ios-btn-secondary" @click="legacyPanelOpen = true">遗留资源（{{ legacyCount }}）</button>
       </template>
     </div>
     <!-- 1. Top Integrated Studio Toolbar -->
@@ -206,7 +205,6 @@
 
               <!-- Popover Footer Action -->
               <div class="pt-1.5">
-                <button v-if="legacyCount" type="button" class="ios-btn-secondary w-full mb-2" @click="legacyPanelOpen = true; schemeDropdownOpen = false">遗留资源（{{ legacyCount }}）</button>
                 <button
                   type="button"
                   @click="createNewScheme(); schemeDropdownOpen = false"
@@ -959,20 +957,10 @@
 
             <div v-if="currentScheme.id" class="space-y-2">
               <button v-if="canRemoveScheme" type="button" class="w-full ios-btn-danger justify-center" :disabled="openingRemoval || publishing" @click="openRemoval">
-                {{ openingRemoval ? '读取影响预览…' : '停用并移除' }}
+                {{ openingRemoval ? '读取方案…' : '停用并移除' }}
               </button>
-              <p v-if="removalAvailabilityError" role="alert" class="text-sm text-ios-red">{{ removalAvailabilityError }}</p>
             </div>
-            <div v-if="currentScheme.id" class="pt-2">
-              <button
-                type="button"
-                @click="confirmDeleteScheme = true"
-                class="w-full ios-btn-secondary justify-center"
-              >
-                仅删除画布
-              </button>
-              <p class="text-xs text-ios-secondary">保留入口、分组和运行中的代理资源，只删除画布</p>
-            </div>
+
           </div>
         </div>
         <CanvasStatusCard v-if="currentScheme.id && currentScheme.executionLocation === 'server'" class="mt-4" :scheme-id="currentScheme.id" :version="currentScheme.serverUpdatedAt" :published-at="currentScheme.publishedAt" :refresh="statusRefresh" />
@@ -987,8 +975,7 @@
       <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" :tunnel-names="tunnelNames" />
     </AppDialog>
 
-    <CanvasRemoveDialog v-if="removalScheme" :scheme="removalScheme" :servers="servers" @close="removalScheme = null" @removed="onSchemeRemoved" @removing="onRemovalPending" />
-    <LegacyResourcesPanel v-if="legacyPanelOpen && legacyResources" :resources="legacyResources" :servers="servers" :inbounds="inbounds" :outbounds="outbounds" @close="legacyPanelOpen = false" @changed="loadLegacyResources" @reattached="onLegacyReattached" />
+    <CanvasRemoveDialog v-if="removalScheme" :scheme="removalScheme" @close="removalScheme = null" @removed="onSchemeRemoved" />
 
     <!-- Schemes / Modals -->
     <AppDialog
@@ -1079,12 +1066,7 @@
       confirm-text="忽略并删除"
       @confirm="ignoreLocalSchemes"
     />
-    <ConfirmDialog
-      v-model="confirmDeleteScheme"
-      title="仅删除画布"
-      :message="`删除「${currentScheme.name}」？保留入口、分组和运行中的代理资源，只删除画布。`"
-      @confirm="removeScheme"
-    />
+
   </div>
 </template>
 
@@ -1093,9 +1075,6 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import CanvasConnectionDialog from '../components/relay/CanvasConnectionDialog.vue';
 import CanvasEntryEditor from '../components/relay/CanvasEntryEditor.vue';
 import CanvasRemoveDialog from '../components/relay/CanvasRemoveDialog.vue';
-import LegacyResourcesPanel from '../components/relay/LegacyResourcesPanel.vue';
-import { legacyResourceCount } from '../legacyResources';
-import { canvasLegacyAPI, type CanvasLegacyResources } from '../api';
 import CanvasStatusCard from '../components/relay/CanvasStatusCard.vue';
 import ExternalProxyDialog from '../components/relay/ExternalProxyDialog.vue';
 import PortControl from '../../tunnels/components/PortControl.vue';
@@ -1122,6 +1101,7 @@ import {
   relaySchemeToCanvasInput,
   selfHostedResourceId,
   type CanvasScheme,
+  type CanvasRemoveResult,
   type CanvasSchemeContext,
   type CanvasEntryBinding,
   type Outbound,
@@ -1132,7 +1112,6 @@ import {
   loadCanvasSchemes,
   persistCanvasScheme,
   createCanvasScheme,
-  deleteCanvasScheme,
   LEGACY_SCHEMES_KEY,
   type ProxyNodeItem,
   type CanvasNodeInstance,
@@ -1147,26 +1126,6 @@ const gestureCleanups = new Set<() => void>();
 const resourceSearch = ref('');
 const activeSchemeId = ref('');
 const schemeDropdownOpen = ref(false);
-const legacyResources = ref<CanvasLegacyResources | null>(null);
-const legacyPanelOpen = ref(false);
-const legacyCount = computed(() => legacyResources.value ? legacyResourceCount(legacyResources.value) : 0);
-async function loadLegacyResources() {
-  if (!isOwner.value) return;
-  try { legacyResources.value = await canvasLegacyAPI.list(); }
-  catch (error) { showToast(`读取遗留资源失败：${(error as Error).message}`, 'error'); }
-}
-async function onLegacyReattached(schemeId: string, remove: boolean) {
-  legacyPanelOpen.value = false;
-  await flushPendingSaves();
-  await reloadSchemes();
-  selectScheme(schemeId);
-  await loadLegacyResources();
-  if (remove) {
-    try { removalScheme.value = await canvasAPI.get(schemeId); }
-    catch (error) { showToast(`方案已重新挂接，读取撤除方案失败：${(error as Error).message}`, 'error'); }
-  } else { showToast('已重新挂接为方案草稿，运行配置保持不变', 'success'); }
-}
-
 function toggleSchemeDropdown() {
   schemeDropdownOpen.value = !schemeDropdownOpen.value;
 }
@@ -1287,7 +1246,6 @@ const pendingLocalSchemes = ref<RelayScheme[]>([]);
 const schemesLoading = ref(true);
 const schemesLoadError = ref('');
 const confirmIgnoreLocal = ref(false);
-const confirmDeleteScheme = ref(false);
 
 function canvasContext(): CanvasSchemeContext {
   return { servers: servers.value, inbounds: inbounds.value, imported: proxyNodeStore.manualNodes, outbounds: outbounds.value };
@@ -1344,22 +1302,7 @@ function applyEntryBinding(nodeId: string, binding: CanvasEntryBinding) {
 }
 const removalScheme = ref<CanvasScheme | null>(null);
 const openingRemoval = ref(false);
-const canRemoveScheme = ref(false);
-const removalAvailabilityError = ref('');
-watch(() => [currentScheme.value.id, currentScheme.value.serverUpdatedAt, currentScheme.value.executionLocation, currentScheme.value.publishedAt], async (_, __, onCleanup) => {
-  let canceled = false;
-  onCleanup(() => { canceled = true; });
-  canRemoveScheme.value = false;
-  removalAvailabilityError.value = '';
-  const scheme = currentScheme.value;
-  if (!scheme.id || scheme.executionLocation !== 'server' || !scheme.serverUpdatedAt) return;
-  try {
-    const preview = await canvasAPI.removePlan(scheme.id, { updatedAt: scheme.serverUpdatedAt });
-    if (!canceled) canRemoveScheme.value = preview.entries.length > 0 || preview.objects.some(item => !item.keep);
-  } catch (error) {
-    if (!canceled) removalAvailabilityError.value = `读取撤除状态失败：${(error as Error).message}`;
-  }
-}, { immediate: true });
+const canRemoveScheme = computed(() => !!currentScheme.value.id && currentScheme.value.executionLocation === 'server' && !!currentScheme.value.serverUpdatedAt);
 async function openRemoval() {
   if (openingRemoval.value || publishing.value) return;
   openingRemoval.value = true;
@@ -1370,20 +1313,17 @@ async function openRemoval() {
   } catch (error) { showToast((error as Error).message, 'error'); }
   finally { openingRemoval.value = false; }
 }
-async function onSchemeRemoved(id: string) {
+async function onSchemeRemoved(result: CanvasRemoveResult) {
+  const id = result.schemeId;
   if (removalScheme.value?.id === id) removalScheme.value = null;
   proxyNodeStore.schemes = proxyNodeStore.schemes.filter(scheme => scheme.id !== id);
   selectedNode.value = null;
   selectedConnection.value = null;
   activeSchemeId.value = proxyNodeStore.schemes[0]?.id || '';
   publishWarnings.value = [];
-  showToast('已停用并移除方案', 'success');
+  const pending = result.pendingNodes.length ? `；以下节点离线或应用失败，将在恢复后自动清理：${result.pendingNodes.map(node => node.name).join('、')}` : '';
+  showToast(`已停用并移除方案${pending}`, 'success');
   await reloadSchemes();
-  await loadLegacyResources();
-}
-async function onRemovalPending(completion: Promise<string>) {
-  try { await onSchemeRemoved(await completion); }
-  catch (cause) { showToast((cause as Error).message, 'error'); }
 }
 watch(() => proxyNodeStore.schemes.map(s => s.id), ids => {
   if (!ids.includes(activeSchemeId.value)) activeSchemeId.value = ids[0] || '';
@@ -1557,23 +1497,6 @@ async function createNewScheme() {
     showToast('已创建新方案');
   } catch (error) {
     showToast(`创建方案失败: ${(error as Error).message}`, 'error');
-  }
-}
-
-// Deleting a scheme removes the drawing only: the objects it draws stay.
-async function removeScheme() {
-  const scheme = currentScheme.value;
-  if (!scheme.id) return;
-  try {
-    await flushPendingSaves();
-    await deleteCanvasScheme(scheme.id);
-    await loadLegacyResources();
-    selectedNode.value = null;
-    selectedConnection.value = null;
-    activeSchemeId.value = proxyNodeStore.schemes[0]?.id || '';
-    showToast('已删除方案');
-  } catch (error) {
-    showToast(`删除方案失败: ${(error as Error).message}`, 'error');
   }
 }
 
@@ -2065,7 +1988,6 @@ async function loadWorkspace() {
 }
 
 onMounted(async () => {
-  void loadLegacyResources();
   await loadWorkspace();
   // Schemes are stored by the server now; the browser keeps no copy of them.
   readLocalSchemes();

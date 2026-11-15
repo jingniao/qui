@@ -65,6 +65,8 @@ const messages: Record<string, string> = {
   subscription_unavailable: '订阅已失效或当前用户、设备不可用。',
   node_delete_not_allowed: '节点已登记，不能按取消登记处理。',
   node_in_use: '节点已被入站、出站、代理链、分流规则或发布记录引用，请先移除这些配置。',
+  inbound_delete_blocked: '入站仍被配置引用，请先处理下列项目。',
+  stale_scheme: '方案已被修改，请刷新后重试',
   node_delete_blocked: '节点仍被配置引用或有进行中的发布，请先处理下列项目。',
   node_recovery_blocked: '节点存在未完成任务，请先处理下列项目。',
   node_not_enrolled: '节点尚未登记或已禁用，不能签发恢复码。',
@@ -86,8 +88,6 @@ const messages: Record<string, string> = {
   tuning_unsupported: '该 Agent 未声明服务器调优能力（需升级到支持调优的版本）。',
   invalid_tuning: '调优请求包含白名单以外的键或超出允许范围的取值。',
   tunnel_in_use: '该隧道仍被方案引用，请先移除这些引用。',
-  inbound_in_canvas_scheme: '该入站仍是中转方案的入口，请在所属方案中使用「停用并移除」。',
-  inbound_detached_entry: '该入站已脱离方案，请到中转方案 → 遗留资源中撤除。',
   object_owned: '该对象已由其他隧道认领，不能在此处接管。'
 };
 

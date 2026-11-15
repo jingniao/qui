@@ -354,9 +354,9 @@ Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥�
 
 原位身份恢复（迁移 0134）：主机重装但身份仍属原节点时，Owner 在节点证书区签发一次性恢复码（默认 900 秒，允许 300–3600 秒，可勾选立即吊销现有证书），响应只返回一次，数据库只保存 SHA-256 并绑定当时的证书指纹。签发与核销都检查未完成任务，存在时返回 409 `node_recovery_blocked` 与 `blockers`。新 Agent 通过现有 `Enroll` RPC 核销恢复码，节点 ID、入站、出站、节点组、隧道、代理链与历史配置均保留，旧指纹随后永久作废（备份恢复也不复活），用它连接会被拒并记一条 WARN 日志 `node certificate refused`，当前已发布配置在新 Agent 首次能力上报后自动重新下发。Agent 二进制与安装脚本不变，操作见[运维](docs/operations.md) §5.1。
 
-未登记且无身份的节点取消登记时直接删除；已登记节点逻辑删除（`deleted_at`）、吊销证书、退出分组并从订阅/列表/选择器消失，保留流量与访问记录，不可重新启用，同服务器须新建节点登记。删除不停止远端 Agent/代理。
+未登记、无身份且未配置资源的节点取消登记时直接删除；已配置资源的待登记节点也走连带删除。已登记节点逻辑删除（`deleted_at`）、吊销证书、退出分组并从订阅/列表/选择器消失，保留流量与访问记录，不可重新启用，同服务器须新建节点登记。删除不停止远端 Agent/代理。
 
-删除前清理入站、出站（含其他节点指向它的出站）、出口组、链、规则引用并等待批量发布结束，否则 409 `node_delete_blocked` 列阻塞项；`GET /api/v1/nodes/{id}/deletion-preview` 可预览。删除同时关闭本节点待发布、核心/Agent 更新及排队健康检查。操作见[运维](docs/operations.md) §15。
+删除服务器连带删除其全部入站，以及涉及该服务器任一实例或隧道跳的全部方案、隧道与规则；外部手工出站、出口组、代理链、策略及受影响发布批次仍以 409 `node_delete_blocked` 列出 `error.blockers`。未收尾的隧道发布批次即使已 success/failed，仍作为 `deployment_batch` 阻塞，须等待收尾。`GET /api/v1/nodes/{id}/deletion-preview` 返回 `schemes/tunnels/rules:[{id,name}]`、`inbounds:[{id,name,nodeName}]` 与 `blockers:[{kind,id,name}]`，一次确认列明所有待删对象。删除成功返回 200 `{pendingNodes:[{nodeId,name,reason}]}`，表示受影响的其他节点仍待清理；离线或失败不阻止面板删除。删除同时关闭本节点待发布、核心/Agent 更新及排队健康检查，并在同一事务清除自身待清理行。操作见[运维](docs/operations.md) §15。
 
 ## 11.4 节点状态
 
@@ -404,9 +404,9 @@ v1.4 自建 VLESS 用户入站：Xray 支持 Reality TCP（无 flow/Vision）、
 
 订阅隐藏（`subscriptionVisible=false`）的用户入站不会获得用户凭据，发布后渲染为停用，编辑器对这种组合给出提示。
 
-隧道/规则生成入站返回 `managedBy:{kind,id,name}`，按 `tunnel_objects` 的 ID 归属管理；普通入站 PUT/DELETE 返回 409 `managed_by_tunnel`，须在隧道管理修改/删除并发布。目标入站被关联规则引用时，删除返回 409 `inbound_has_relays` 与 `rules:[{id,name}]`，包括尚待发布删除的规则。
+隧道/规则生成入站返回 `managedBy:{kind,id,name}`，按 `tunnel_objects` 的 ID 归属管理；普通入站 PUT/DELETE 返回 409 `managed_by_tunnel`，须在隧道管理修改/删除并发布。删除入站连带删除任何实例引用它的方案、它所属的入口方案、linked 到它的规则及失去全部规则的隧道。删除预览列出方案、隧道、规则、其他连带入站与阻塞引用，不重复列出直接选择的入站；一次确认后执行，成功返回 200 `{pendingNodes:[{nodeId,name,reason}]}`。手工中转出站、代理链等外部消费者及未收尾的受影响发布批次以 409 `inbound_delete_blocked` 阻止，原 `inbound_has_relay_outbound` 也统一为此码，明细在 `error.blockers:[{kind,id,name}]`；未收尾的隧道批次作为 `deployment_batch`，等待收尾后再删。任何有入口绑定的入站不得作为画布 inbound 实例或 linked 规则目标；保存、规划和发布共用校验，返回 400 `inbound_is_scheme_entry`。
 
-由画布创建或接管的入站不能在入站编辑器中改名：面板按 `canvas_tunnel_objects` 的归属行判定（不按名称前缀），普通保存若改了名字会被拒绝（“该入站由画布隧道管理，不能在入站编辑器中修改名称。”），画布自身的生成路径仍可改名并由回滚撤销。未归属的入站可以自由改名，即使名字看起来像生成的。入站接口不额外暴露画布归属，页面因此不额外提示。
+由画布创建的入站不能在入站编辑器中改名：面板按 `canvas_tunnel_objects` 的归属行判定（不按名称前缀），普通保存若改了名字会被拒绝（“该入站由画布隧道管理，不能在入站编辑器中修改名称。”），画布自身的生成路径仍可改名并由回滚撤销。未归属的入站可以自由改名，即使名字看起来像生成的。入站接口不额外暴露画布归属，页面因此不额外提示。
 
 端口转发（`forward`）在 GOST 核心上另有可选字段（设置契约版本 2）：`targets[]`（1–32 个有序 `{host,port}`，与旧 `host`/`port` 互斥）、`strategy`（`round` 轮询／`fifo` 主备，默认 `round`）、`max_fails`（1–100，默认 1）、`fail_timeout`（1–3600 秒的整数秒，默认 `5s`）、`port_end`（含尾端，`Inbound.Port` 为起端，最多 256 个端口）、`bandwidth_in_bps`／`bandwidth_out_bps`（0 或 1024–1000000000000 字节/秒，0 为不限）与 `max_connections`（0–100000，仅 TCP 服务；UDP-only 转发拒绝该字段）。这些字段按“是否出现”判定：显式写 0 或默认值也算已设置，Xray／sing-box 转发携带它们会被共同校验、面板保存/发布与 Agent 渲染三处一致拒绝，不会被静默丢弃；选择非 GOST 核心前必须先清除。渲染时 qui 自己展开端口（GOST 的 `addr` 不支持范围），每个（端口、传输）一个服务，名字为 `fwd-<入站ID>-<端口>-<tcp|udp>`，每个服务都带完整有序目标池与独立的选择器与限速/连接限值，不会把第 n 个目标映射到第 n 个端口。每节点最多渲染 1024 个生产服务。
 
@@ -470,7 +470,7 @@ v1.5.5 出站资源可单独设置 `sourceIp/sourceInterface`（0145；DesiredSt
 
 隧道为 entry → [mid] → exit，最多三台不同服务器、两段中继；仅 GOST relay over TLS＋mTLS。两节点要求各跳契约 ≥3，三节点各跳 ≥4；接收跳使用公网地址或 `connectHost`。每个接收跳为同一隧道的规则共享一个监听，中间只知道一个下一跳。分段独立密封 CA/叶子证书，私钥不进 API、计划或日志。
 
-规则指定入口监听、network=tcp/udp/both、可选隧道及最终目标；不选隧道即直接转发，优先用 GOST，否则主 Xray/sing-box。linked 关联用户入站，由目标服务器地址与入站端口派生，隧道出口就是目标服务器时用 127.0.0.1；manual 固定 host/port，不生成用户订阅。D8：目标公网地址或入站端口变化在同一事务递增草稿版本，已发布规则标为 needs_publish；读取派生新目标，上次成功发布快照保持不动。删除目标前须先发布移除关联规则。
+规则指定入口监听、network=tcp/udp/both、可选隧道及最终目标；不选隧道即直接转发，优先用 GOST，否则主 Xray/sing-box。linked 关联用户入站，由目标服务器地址与入站端口派生，隧道出口就是目标服务器时用 127.0.0.1；manual 固定 host/port，不生成用户订阅。D8：目标公网地址或入站端口变化在同一事务递增草稿版本，已发布规则标为 needs_publish；读取派生新目标，上次成功发布快照保持不动。删除目标时连带删除关联方案、规则及失去全部规则的隧道。
 
 节点“添加中转”可选择已有隧道，为本节点用户入站创建 linked 规则（隧道入口须为其他节点，ownerNodeId 为目标节点）；也可新建中转方案，以当前节点预选为代理入口。订阅与分享见第 10.3 节。
 
@@ -486,13 +486,17 @@ v1.5.5 出站资源可单独设置 `sourceIp/sourceInterface`（0145；DesiredSt
 
 三步快速创建为「添加中转 → 选择入口与可选中间服务器、入口协议 → 创建并发布」，对应 `POST /relay-schemes/quick/plan` 与 `/relay-schemes/quick`。预览只读；执行复用画布规划、保存与出口→入口发布，默认新建普通用户入口、自动分配端口及凭据，新入口默认加入出口入站所在的合格分组，不额外授权用户。入口协议由用户选择；快速流程最多一个中间服务器，通道为 Trojan over TLS/TCP，独立中转凭据及一年有效期自签证书沿用内部中转生成器，不随出口用户入站协议改变；wireguard 通道及外部出站出口不变，更多编辑使用原无限画布。既有 TLS 画布（含 v1.5.5 前创建的方案）若内部通道曾沿用出口协议，下次发布会预览为内部监听／配套出站 update，保留对象 ID 与端口，按出口→入口切换，期间短暂中断；物化失败恢复原对象，运行失败沿用部署版本回滚。`requestId` 通过绑定记录防止重复创建，202 只表示已提交。
 
-后端入口绑定 `entryBinding.mode=create|reuse`（0146）：create 创建独立入站，reuse 接管已有普通入站并首次记录 `original_default_outbound`，后续发布不覆盖原值；记录已应用出站与入站唯一归属。旧入口缺恢复记录时须显式登记恢复目标。快速创建固定新建入口，高级画布提供新建／复用入口编辑，保存布局保留 create/reuse 字段；撤除弹窗可选择恢复目标。本版真实浏览器交互尚未验收。节点列表隐藏内部监听与隧道的出口／中间监听（`managedBy.kind=tunnel`，只在隧道管理里出现）；方案新建（create）的入口只要出口节点的「中转线路」列出了该方案，就不单独成行，改在那里显示入口地址并可复制；出口为服务器的方案挂在该服务器在列表中的第一张自建节点卡片下（v1.5.7）；关联到节点的隧道规则，其入口同样只列在目标节点的「中转线路」里，与方案合计数量。复用（reuse）入口、方案已到不了列表中出口（含出口服务器在列表中没有卡片）的入口、手动目标规则的入口仍单独显示。v1.5.7 起卡片标题行只保留国旗、名称与协议，路线、来源、传输与延迟合为一行，服务器在线与入站发布状态合并为该行右端的一个标识（状态未知 ＞ 离线 ＞ 未生效 ＞ 发布中 ＞ 在线·有修改 ＞ 在线，悬停显示两者），列表视图状态列同用该标识；「中转线路」默认收起、标题显示数量。节点分组页照常把这些入口列为独立节点，分组仍以具体用户入站授权；入站列表的只读 `routeSummary` 含 type（direct/relay/custom/tunnel）、方案、绑定模式、path 与出口节点。画布入口路径取关联画布草稿；缺引用、环路、分叉或损坏布局标 `pathIncomplete`。隧道／规则管理的入站使用 tunnel，显示「隧道转发」，出口取隧道出口跳或规则关联目标节点；摘要均不代表运行路径已确认。
+入口绑定 `entryBinding.mode` 只接受 `create`，快速创建与高级画布一律新建独立入口。入口只属于一个方案，不允许其他方案或 linked 规则引用。0150 删除旧 reuse 绑定，保留对应普通入站及配置；历史无绑定的方案入口按新建入口处理，撤除时删除。
 
-「停用并移除」先调用 `/canvas-schemes/{id}/remove-plan` 查看入口、分组、专用／共享资源与发布顺序，再以最新 `updatedAt` 调用 `/remove`（v1.5.7 起撤除在面板后台运行、不随请求断开而取消或回滚，请求最多等 5 秒，未完成返回 202 `removing`，同一方案的重复请求复用进行中的撤除；`GET /canvas-schemes/{id}/remove-status` 返回 `idle`／`removing`／`succeeded`／`failed`，结果只存内存、面板重启后丢失；面板关闭时中止并持久化恢复命令，审计在后台完成时写入）；字段缺失或为空返回 400 `invalid_request`，有值但过期返回 409 `stale_scheme`，执行重新规划。先停用新建入口或恢复复用入口并等待确认（入口服务器上该方案专用的中转出站在同一修订里一并停用，因此下一跳监听已失效的方案也能撤除），再按中间→出口停用其余通道、确认后删除资源；最终事务同时删除该方案专用、已无对象且无其他方案引用的通道行，共享或外部引用资源保留，失败／取消不清理通道行。0148 起 create 入口保存创建时可编辑配置的分类 SHA-256 摘要及排序去重的分组 ID 集合（无凭据明文，不含动态用户授权）；有完整基线且配置、分组、已应用默认出站均未改动时无需确认，分组移除仍列为信息。人工改动及缺完整基线须显式确认，具体列出字段类别及增删分组；旧 NULL 基线不推断补齐，重新挂接保留原基线，reuse 仍恢复原出站。确认不能绕过外部引用；原恢复目标缺失或不可用时必须显式指定目标，不自动改 direct。第二阶段取消时须先确认通道回滚成功，再从配置历史手动恢复入口；当前没有崩溃后的数据库补偿重放。
+「停用并移除」一次确认后以 `{updatedAt}` 调用 `POST /api/v1/canvas-schemes/{id}/remove`，确认即执行完整撤除。`DELETE /api/v1/canvas-schemes/{id}` 保留为同义接口，请求体同样需要 `updatedAt`。面板在事务中立即删除方案、入口、专用内部监听、中转出站、规则及无引用通道，页面随即移除；共享或外部引用资源保留。200 返回 `{schemeId,removed:true,pendingNodes:[{nodeId,name,reason}]}`，版本过期返回 409 `stale_scheme`，方案不存在返回 404 `not_found`。旧 `remove-plan`、`remove-status`、遗留资源与重新挂接路由移除。
 
-节点列表不能直接删除仍有入口绑定的入站：现存方案须走「停用并移除」，已脱离方案须到「遗留资源」撤除，均返回 409。`pending_delete` 关联规则读取时尽力派生目标信息；派生失败保留存储目标，页面显示「目标已删除」／「—」，不影响其他行或保存／删除后立即应用。
+受影响节点登记到 `relay_cleanup_nodes`，只以已发布状态减去数据库中已删除对象生成清理修订，保留其他已发布字段与启用意图，不夹带草稿；作者 `auto`，摘要 `auto: relay cleanup`。在线节点立即下发，离线节点重连后自动下发；失败／回滚保留失败码，按 1／5／30 分钟、以后每 30 分钟重试直到成功，节点忙等待且不计失败。新撤除登记重置退避：`attempts=0`、清空失败码、下次时间设为当前时间；该节点的清理修订仍 pending 时保留修订并等待结束，再按新增删除生成下一次清理。面板启动与每分钟扫描待清理记录，重启后继续；发现逻辑删除节点时清除其待清理行。节点在清理成功前仍运行旧配置。服务器列表与详情显示「待清理」，API 返回 `relayCleanupPending` 与最近失败码 `relayCleanupCode`。
 
-「仅删除画布」保留运行资源，绑定 `scheme_id` 置空、状态转 `detached`。`/relay-schemes/legacy-resources` 展示 detached 入口、孤立通道与未归属对象；`/reattach` 按持久端点重建连通草稿及归属，不自动发布。「完整撤除」先重新挂接，再走上述撤除预览和执行。整组无法还原（例如同一对服务器之间有两条并行通道，被判为分叉／汇合）时，页面提供勾选，只挂接或撤除其中连通且成直线的一部分，默认勾选入口及其当前出站所在的通道；剩余资源留在遗留资源中另行处理。无对象的历史空通道独立列出，不参与有资源的连通分组；无方案引用时 Owner 可用「清除空通道」直接调用现有通道删除接口，无需还原布局。
+升级后启动时一次性删除脱离方案的入口、无方案引用的画布通道及其对象，并沿用待清理机制下发；完成标记保存到 `relay_cleanup_reconcile`。删除与登记、完成标记在同一事务中持久化。
+
+节点列表隐藏内部监听与隧道出口／中间监听（`managedBy.kind=tunnel`）；方案入口与 linked 规则入口收进出口节点的「中转线路」，默认收起并合计数量，显示入口地址与复制。出口为服务器时挂在该服务器第一张自建卡片下；列表无出口卡片、路径无法到达出口或规则为手动目标时入口仍单独显示。卡片标题行保留国旗与名称，协议名移到第二行；去掉「直连／中转／隧道转发」类型标签，只保留单独导入或订阅来源名标签。第二行展示协议、路线、传输、延迟及合并状态（状态未知 ＞ 离线 ＞ 未生效 ＞ 发布中 ＞ 在线·有修改 ＞ 在线），悬停显示服务器与发布状态，列表视图使用同一状态。
+
+节点分组仍以具体用户入站授权。只读 `routeSummary` 保留 type（direct/relay/custom/tunnel）、方案、绑定模式、path 与出口节点；路径来自草稿，缺引用、环路、分叉或损坏布局标 `pathIncomplete`，不代表运行路径已确认。`pending_delete` 关联规则读取时尽力派生目标，失败保留存储目标并显示「目标已删除」／「—」。
 
 `GET /canvas-schemes/{id}/status` 分六项：draft 为草稿与发布记录差异，batch 为部署批次结果，nodes 为各节点运行修订与期望修订的确认，entries 为入口绑定，subscription 为入口启用／可见、合格分组、地址及批次成功等总体订阅条件，probe 为精确匹配入口 IP／端口的历史 TCP 探测（无法关联时未探测）。总体订阅条件不代表每个用户有权限，TCP 探测不代表代理认证或全路径真实连通。
 
@@ -662,7 +666,7 @@ Xray 总量=账户计数＋已渲染 forward 的原生入站计数。渲染生�
 
 # 22. 配置发布与回滚
 
-草稿不直接覆盖运行配置：保存业务配置 → 生成 Revision → 校验用户/节点/能力 → DesiredState → Agent 编译 → 原生校验 → 保存/切换 → 健康检查 → 成功或自动回滚。 面板已终结（取消、失败或被取代）的目标再收到应用结果时确认并忽略、记一条 WARN，不断开控制连接；因撤除取消（`canvas_remove_canceled`）而 Agent 实际运行过的修订，其流量、访问记录与设备观测照常归属，未知或不属于本节点的修订仍拒绝（v1.5.7）。应用结果只在 Agent 会话内存里，会话在发出前断开会丢失；面板收到新的心跳且其成功修订等于待确认修订、核心健康时，按成功确认（与应用结果成功走同一路径，记 INFO「deployment confirmed by heartbeat」），其他情况仍等应用结果，失败、回滚与原因码只来自应用结果（v1.5.4）。
+草稿不直接覆盖运行配置：保存业务配置 → 生成 Revision → 校验用户/节点/能力 → DesiredState → Agent 编译 → 原生校验 → 保存/切换 → 健康检查 → 成功或自动回滚。 面板已终结（取消、失败或被取代）的目标再收到应用结果时确认并忽略、记一条 WARN，不断开控制连接；本节点已下发过的任何修订（`deployment_targets` 存在该节点该修订行且 `config_revisions` 存在该修订，不论状态或结果码），其流量、访问记录与设备观测照常归属，未知或不属于本节点的修订仍拒绝（v1.5.8）。应用结果只在 Agent 会话内存里，会话在发出前断开会丢失；面板收到新的心跳且其成功修订等于待确认修订、核心健康时，按成功确认（与应用结果成功走同一路径，记 INFO「deployment confirmed by heartbeat」），其他情况仍等应用结果，失败、回滚与原因码只来自应用结果（v1.5.4）。
 
 一条 Revision 覆盖全部核心，`core.json.enc` 按核心名保存 JSON；恢复从校验过的 DesiredState 重建，兼容旧单核心修订。所有活跃核心先校验，再按配置顺序切换，失败逆序补偿。每核 `runtime/<core>/` 隔离标记、accounting key、访问日志与临时文件，无启用入站则停止；旧 core_healthy 是逐核 AND，supervisor 分核恢复/退避。
 
@@ -988,6 +992,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0146 `canvas_entry_bindings` | 新增入口绑定表：方案外键删除置空，入站唯一且删除 RESTRICT，模式 create/reuse、原始／已应用默认出站、state、唯一 request_id、updated_at；方案内 instance_id 唯一，reuse 原出站非空；方案解绑触发 state=detached |
 | 0147 `imported_proxy_identity` | 新增 `import_identity_reconcile`（单行 id=1、done 初始 0）及 `import_identity_map`（主键 source_id/old_proxy_id、old_proxy_key、唯一 new_proxy_id）；`imported_proxies.revision` 非空默认 1。加密身份及引用由 Go 事务转换，SQL 不改写 payload |
 | 0148 `canvas_entry_baseline` | `canvas_entry_bindings` 新增可空 `creation_config_json`（固定字段类别的 SHA-256 摘要规范 JSON）及 `creation_groups_json`（排序去重的分组 ID 规范 JSON 数组）；旧行保持 NULL，不回填猜测 |
+| 0150 `relay_cleanup` | 新增每节点待清理表 `relay_cleanup_nodes`（原因、次数、失败码、下次时间、修订）与单行完成标记 `relay_cleanup_reconcile`；删除 reuse 绑定但保留普通入站，启动一次性清理残留并登记下发 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -995,7 +1000,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 
 # 27. API
 
-入站删除遇到画布入口绑定返回 409：`inbound_in_canvas_scheme` 附 `schemes[{id,name}]`，提示到所属方案「停用并移除」；`inbound_detached_entry` 提示到「中转方案 → 遗留资源」。节点列表持续显示冲突及跳转链接。画布撤除的中转依赖错误与发布一致返回 409 `dependency_not_ready`，保留具体出站、目标节点及固定原因码。v1.5.7（待门禁）：隧道发布遇到同类依赖错误同样返回 409 `dependency_not_ready`（v1.5.6 为 500）；撤除阶段被 Agent 拒绝或回滚返回 409 `remove_apply_failed`，文案为节点名与固定结果码，节点保留原配置（v1.5.6 为 400 且显示节点 ID）；撤除依赖失败的文案保留出站、目标节点与原因码。
+入站与服务器删除先预览连带删除明细；外部引用或未收尾的受影响发布批次分别返回 409 `inbound_delete_blocked`／`node_delete_blocked`，明细在 `error.blockers`；方案入口作为画布 inbound 实例或 linked 规则目标时，保存、规划和发布均返回 400 `inbound_is_scheme_entry`。撤除立即删除面板对象，节点离线或应用失败通过 `pendingNodes` 与服务器「待清理」状态体现。隧道发布依赖错误返回 409 `dependency_not_ready`，保留出站、目标节点与固定原因码。
 
 API 统一使用：
 
@@ -1061,7 +1066,7 @@ DELETE /api/v1/nodes/{id}
 GET    /api/v1/nodes/{id}/certificate-matches?domain=<域名>
 ```
 
-`GET /api/v1/nodes` 默认只返回未删除的节点；`?deleted=1` 只返回已删除的节点（Owner 与 Viewer 都可读）。`DELETE` 需要 Owner：未登记节点等同取消登记（记录移除），已登记节点执行逻辑删除，被引用时返回 409 `node_delete_blocked`，阻塞项（`blockers: [{kind,id,name}]`）位于错误体中（见第 11.3 节）。
+`GET /api/v1/nodes` 默认只返回未删除节点，`?deleted=1` 只返回已删除节点（Owner/Viewer 可读）；列表与详情含 `relayCleanupPending:boolean`、`relayCleanupCode`（可空）。删除预览返回 `{schemes:[{id,name}],tunnels:[{id,name}],rules:[{id,name}],inbounds:[{id,name,nodeName}],blockers:[{kind,id,name}]}`，另保留 `mode/groups/lastHeartbeat/online`；空白待登记节点为 cancel，已配置资源的待登记节点为 delete。`DELETE` 仅 Owner，执行第 11.3 节连带删除；成功 200 `{pendingNodes:[{nodeId,name,reason}]}`，重复删除和取消空白登记均返回 `{pendingNodes:[]}`。外部引用或未收尾批次阻止时返回 409 `node_delete_blocked` 与 `error.blockers`。
 
 服务器顺序 GET 允许 Owner/Viewer，返回 `{ids,revision,updatedAt,updatedBy}`；PUT 仅 Owner＋CSRF，体 `{ids,expectedRevision}`，最多 1000 个存在且未删除的不同节点 ID。顺序未变不推进版本；改动时版本不匹配返回 409 `settings_conflict`，成功记「调整服务器顺序」。元数据 GET/PUT 的 `tags` 为标签数组，省略或 null 保留原值、`[]` 清空，校验见第 11.1 节。节点对象也返回 `tags` 与 `gostCoreSupported`，后者来自 Hello 安装能力，不代表已安装 GOST。
 
@@ -1191,13 +1196,14 @@ Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /c
 | 接口 | 结果与主要错误 |
 | --- | --- |
 | GET `/canvas-schemes/{id}/status` | 200 六项状态，404 `not_found`，读取故障 500；含义见第 14 节 |
-| POST `/canvas-schemes/{id}/remove-plan`、`/remove`；GET `/canvas-schemes/{id}/remove-status` | 预览 200；执行 200 `{schemeId,removed,publications}`，5 秒内未完成或已有进行中的撤除时 202 `{schemeId,status:"removing"}`；状态 200 `{schemeId,state,error?,result?}`（v1.5.7）。409 `canvas_remove_conflict` 的预览在 `error.details.details`；共同支持 409 `stale_scheme`、404 `not_found`、400 `invalid_request` |
+| POST `/canvas-schemes/{id}/remove`、DELETE `/canvas-schemes/{id}` | 均为完整撤除，体必须含 `updatedAt`，其他字段忽略；200 `{schemeId,removed:true,pendingNodes:[{nodeId,name,reason}]}`；409 `stale_scheme`，404 `not_found` |
+| GET `/inbounds/{id}/deletion-preview`、`/nodes/{id}/deletion-preview` | 200 `{schemes:[{id,name}],tunnels:[{id,name}],rules:[{id,name}],inbounds:[{id,name,nodeName}],blockers:[{kind,id,name}]}` |
+| DELETE `/inbounds/{id}`、`/nodes/{id}` | 连带删除，成功 200 `{pendingNodes:[{nodeId,name,reason}]}`；阻塞时 409 `inbound_delete_blocked`／`node_delete_blocked`，明细在 `error.blockers` |
 | POST `/relay-schemes/quick/plan`、`/relay-schemes/quick` | 预览 200（检查 `ok` 与冲突），创建 202 `{schemeId,publication,warnings}`；400 `invalid_request`、404 `not_found`、409 `stale_scheme/duplicate_scheme_name`，不返回 operationId 或预览令牌 |
-| GET `/relay-schemes/legacy-resources`、POST `/relay-schemes/legacy-resources/reattach` | 列表 200，挂接 201 `{schemeId}`；409 `canvas_legacy_conflict`，原因在 `error.reasons`；非连通选择为 400 `invalid_request` |
 | PUT `/imported-proxies/{id}` | `{name,expectedRevision}`，200 返回当前节点；400 `invalid_json/import_invalid_name`，404 `import_node_missing`，409 `stale/import_rename_unsupported/import_name_conflict`（附 conflicts），500 `import_rename_failed` |
 | GET `/imported-proxies/{id}/deletion-preview`、DELETE `/imported-proxies/{id}` | 预览引用；删除传 `expectedRevision` 与 `removeReferences`，事务重查引用。404 `import_node_missing`，409 `stale/import_delete_unsupported/import_in_use_by_canvas/import_referenced`（含策略删空），500 `import_delete_failed` |
 
-既有 DELETE `/canvas-schemes/{id}` 仅删除画布（204）；删除被中转出站引用的入站返回 409 `inbound_has_relay_outbound`，须先处理引用。规划中的冲突原因与 HTTP 错误码分开读取。
+`entryBinding.mode` 只接受 `create`。入口归属校验在保存、规划和发布共用，违规返回 400 `inbound_is_scheme_entry`；其他规划冲突原因与 HTTP 错误码分开读取。删除预览的集合为空时均为 `[]`；错误体的 `error.blockers` 在前端为 `APIError.details.blockers`，无额外 `error.details` 嵌套。
 
 延迟目标 GET 允许 Owner/Viewer，返回 `{custom,targetIds,defaultTargetIds}`；PUT 仅 Owner + CSRF，事务保存并记审计。超过 5 个返回 409 `node_target_limit`，未知目标返回 400 `unknown_target`，重复 ID 返回 400 `invalid_request`，已删除节点返回 404。延迟查询目标包含当前有效目标与查询范围内仍有采样的历史目标。
 
@@ -1507,8 +1513,10 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | system_settings.install_endpoint | 随整库快照整体备份，无键白名单，不单独校验；恢复按归档值（该键无校验步骤，损坏值读出即报 invalid_settings），旧归档缺该键读作未设置、安装命令回落到浏览器地址 |
 | node_meta.tags_json | 随加密备份保留与恢复；0144 起按标签数量、长度、去重与规范形式校验，拒绝非规范数组；旧归档升级后默认空数组。服务器顺序 `system_settings.server_order` 随系统设置整体往返 |
 | outbounds.source_ip/source_interface | 随加密备份保留与恢复；0145 起校验地址、网卡语法及 Block 不得绑定，旧归档允许缺列、升级后为空；恢复不自动发布 |
-| canvas_entry_bindings（0146） | 随备份／清单保留，校验 create/reuse、applied/detached 与方案归属、入站存在、方案内实例唯一、原出站要求及路由编码；缺失原出站目标仍是合法恢复证据，撤除须另选目标。旧归档可无表；恢复不自动发布 |
-| canvas_entry_bindings.creation_config_json/creation_groups_json（0148） | 随整库备份及绑定清单保留；校验完整摘要字段、64 位小写十六进制 SHA-256、规范 JSON、非空去重排序分组 ID；两列同时 NULL 为合法旧基线，不要求历史分组仍存在。0148 前归档合法，升级后 NULL；恢复保持归档基线，重新挂接不覆盖，恢复不自动发布 |
+| canvas_entry_bindings（0146） | 随备份／清单保留，校验模式、状态、归属、入站、实例唯一及路由编码；旧归档可无表。旧 reuse 绑定在升级 0150 时删除，对应普通入站配置保留 |
+| canvas_entry_bindings.creation_config_json/creation_groups_json（0148） | 随整库备份及清单保留；校验完整分类摘要、64 位小写十六进制 SHA-256、规范 JSON、非空去重排序分组 ID；两列同时 NULL 为合法旧基线，0148 前归档升级后为 NULL |
+| relay_cleanup_nodes（0150） | 加密备份、清单及校验覆盖节点外键、非负次数、时间、失败码与可空正数修订；恢复保留待清理记录，由运行期重试器继续处理 |
+| relay_cleanup_reconcile（0150） | 加密备份、清单及校验覆盖 id=1 与 completed=0/1；恢复保留完成标记，未完成时由启动清理器处理 |
 | import_identity_reconcile/map、imported_proxies.revision、system_settings.import_identity_report（0147） | 校验单次标记、映射目标及来源、revision≥1、报告 JSON、明文与密封名称／协议一致；允许明确悬空成员与悬空引用并写转换／恢复报告，done=1 不再接受 content 整源成员。旧归档先升级，在最终候选库协调身份；当前导入节点／授权与映射按恢复权威规则保留，不按名称配对、不复活旧授权，不重新抓取、不自动发布 |
 | node_latency_samples、定时探测队列、node_metric_samples | 不进便携备份：快照清空再 VACUUM，恢复候选再清空，不影响运行库样本；手动排队探测过期 |
 | scheduled 默认目标、node_latency_targets、latency_targets_custom | 属配置；兼容 0121 前归档并默认继承。进程内恢复保留当前自定义（含空表），补其新目标但不提升为系统默认 |

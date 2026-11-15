@@ -7,10 +7,9 @@
       {{ plan.ok ? '计划检查通过' : '计划检查未通过，发布已被阻止' }}
     </p>
     <div v-for="entry in plan?.entries || []" :key="entry.instanceId" class="rounded-xl bg-ios-bg p-3 space-y-1">
-      <p class="font-semibold">{{ entry.mode === 'create' ? (entry.inboundId ? '方案独立入口' : '新建独立入口') : '复用现有入口' }}：{{ entry.nodeName }} · {{ entry.name }}</p>
+      <p class="font-semibold">{{ entry.inboundId ? '方案独立入口' : '新建独立入口' }}：{{ entry.nodeName }} · {{ entry.name }}</p>
       <p>{{ entry.protocol.toUpperCase() }} · <span class="font-mono tabular-nums">{{ entry.port }}</span></p>
       <p class="text-ios-secondary break-all">目标出站：{{ entry.route }}</p>
-      <p v-if="entry.mode === 'reuse'" class="text-ios-secondary break-all">本次发布前出站：{{ entry.previousRoute }}</p>
       <p class="text-ios-secondary">入口分组：{{ entry.groups?.map(group => group.name).join('、') || '不加入分组' }}</p>
     </div>
     <ul v-if="lines.length" class="space-y-2 text-ios-secondary">

@@ -35,6 +35,7 @@ const (
 )
 
 type Repository struct {
+	RelayDeletion    RelayDeletion
 	Database         *sql.DB
 	Vault            *vault.Vault
 	CertificateAudit interface {
@@ -46,6 +47,8 @@ type Repository struct {
 	AdviceSources AdviceSources
 }
 type Node struct {
+	RelayCleanupPending      bool            `json:"relayCleanupPending"`
+	RelayCleanupCode         string          `json:"relayCleanupCode"`
 	CoreSelectionBlocked     []string        `json:"coreSelectionBlocked"`
 	AllowSubscription        bool            `json:"allowSubscription"`
 	Maintenance              bool            `json:"maintenance"`
@@ -396,7 +399,7 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected,coalesce((SELECT agent_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT tags_json FROM node_meta WHERE node_id=nodes.id),'[]'),gost_core_supported"
+const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected,coalesce((SELECT agent_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT tags_json FROM node_meta WHERE node_id=nodes.id),'[]'),gost_core_supported,EXISTS(SELECT 1 FROM relay_cleanup_nodes WHERE node_id=nodes.id),coalesce((SELECT last_code FROM relay_cleanup_nodes WHERE node_id=nodes.id),'')"
 
 type scanner interface{ Scan(...any) error }
 
@@ -407,7 +410,7 @@ var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 func scan(row scanner) (Node, error) {
 	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}, PublicAddresses: []PublicAddress{}}
 	var capabilities, heartbeat, addrsJSON, tags string
-	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &tags, &n.GostCoreSupported)
+	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &tags, &n.GostCoreSupported, &n.RelayCleanupPending, &n.RelayCleanupCode)
 	if err != nil {
 		return n, err
 	}

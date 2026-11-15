@@ -11,8 +11,6 @@ import (
 func TestCanvasEntryBindingLayout(t *testing.T) {
 	for _, binding := range []string{
 		`{"mode":"create","protocol":"socks5","portMode":"auto","groupMode":"exit_groups"}`,
-		`{"mode":"reuse","inboundId":"inbound-1","portMode":"manual","port":1080,"groupMode":"explicit","groupIds":["g"]}`,
-		`{"mode":"reuse","inboundId":"inbound-1","core":"xray","portMode":"auto","groupMode":"none"}`,
 	} {
 		layout, err := decodeCanvasLayout([]byte(`{"instances":[{"instanceId":"entry","ref":"server:node","role":"entry","x":0,"y":0,"entryBinding":` + binding + `}],"connections":[]}`))
 		if err != nil {
@@ -94,7 +92,7 @@ func TestCanvasEntryBindingRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "entry", InboundID: p.inbound.ID, Mode: "reuse", OriginalDefaultOutbound: "direct", State: "active"}
+	b := CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "entry", InboundID: p.inbound.ID, Mode: "create", OriginalDefaultOutbound: "direct", State: "active"}
 	if err := r.InsertCanvasEntryBinding(p.ctx, b); err != nil {
 		t.Fatal(err)
 	}

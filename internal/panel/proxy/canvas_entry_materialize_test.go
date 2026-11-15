@@ -31,41 +31,13 @@ func TestCanvasEntryMaterializeCreateAndRepeat(t *testing.T) {
 		if inbound.Name != "Node A → Node B" || inbound.Protocol != "socks5" || inbound.Port != 20000 || inbound.InternalRelay || !inbound.SubscriptionVisible || inbound.DefaultOutbound == "direct" || inbound.DefaultOutbound != binding.AppliedDefaultOutbound {
 			t.Fatalf("inbound %+v binding %+v", inbound, binding)
 		}
-		removal, err := p.service.PlanRemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt})
-		if err != nil || !removal.OK || len(removal.Entries[0].Changes) != 0 {
-			t.Fatalf("advanced create baseline: %v ok=%v", err, removal.OK)
+		if binding.CreationConfigJSON == nil || binding.CreationGroupsJSON == nil {
+			t.Fatal("creation baseline missing")
 		}
 	}
 	var count int
 	if err := p.database.QueryRow("SELECT COUNT(*) FROM inbounds WHERE name='Node A → Node B'").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("count %d: %v", count, err)
-	}
-}
-
-func TestCanvasEntryMaterializeReuseOriginal(t *testing.T) {
-	p := newPublishPanel(t)
-	entryPlanGroup(t, p, "existing", "mixed", p.inbound.ID)
-	layout := entryPlanLayout(p, &CanvasEntryBinding{Mode: "reuse", InboundID: p.inbound.ID, PortMode: "auto", GroupMode: "none"})
-	scheme := savePlanScheme(t, p, layout)
-	for round := range 2 {
-		plan, err := p.service.canvasBuildPlan(p.ctx, scheme)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := p.service.canvasApplyPlan(p.ctx, plan); err != nil {
-			t.Fatal(err)
-		}
-		binding, err := p.service.Repository.CanvasEntryBinding(p.ctx, scheme.ID, "i-a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if binding.OriginalDefaultOutbound != "direct" || binding.AppliedDefaultOutbound == "direct" {
-			t.Fatalf("round %d binding %+v", round, binding)
-		}
-		groups, err := p.service.canvasEntryGroups(p.ctx, p.inbound.ID, false)
-		if err != nil || len(groups) != 1 || groups[0].ID != "existing" {
-			t.Fatalf("reuse groups %+v: %v", groups, err)
-		}
 	}
 }
 
@@ -169,7 +141,8 @@ func TestCanvasEntryMaterializeFailureUndo(t *testing.T) {
 	p := newPublishPanel(t)
 	p.service.EntryGroups = p.service.Nodes.(*node.Repository)
 	entryPlanGroup(t, p, "selected", "mixed", p.inbound.ID)
-	layout := entryPlanLayout(p, &CanvasEntryBinding{Mode: "reuse", InboundID: p.inbound.ID, PortMode: "auto", GroupMode: "none"})
+	layout := entryPlanLayout(p, nil)
+	layout.Instances[0].Ref = "inbound:" + p.inbound.ID
 	layout.Instances = append(layout.Instances, CanvasInstance{InstanceID: "new", Ref: "server:" + p.nodeA, Role: "entry", EntryBinding: &CanvasEntryBinding{Mode: "create", Protocol: "socks5", PortMode: "manual", Port: canvasTestPort(20000), GroupMode: "explicit", GroupIDs: []string{"selected"}}})
 	scheme := savePlanScheme(t, p, layout)
 	plan, err := p.service.canvasBuildPlan(p.ctx, scheme)

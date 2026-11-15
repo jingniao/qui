@@ -185,6 +185,9 @@ func (s *Service) PlanCanvas(ctx context.Context, scheme CanvasScheme) (CanvasPl
 
 // planCanvas requires canvasMu; callers can compose it without locking twice.
 func (s *Service) planCanvas(ctx context.Context, scheme CanvasScheme) (CanvasPlanResult, error) {
+	if err := s.validateCanvasEntryOwnership(ctx, scheme.Layout); err != nil {
+		return CanvasPlanResult{}, err
+	}
 	result := CanvasPlanResult{Entries: []CanvasPlanEntry{}, Tunnels: []CanvasTunnelImpact{}, OK: true, Servers: []CanvasPlanServer{}, Connections: []CanvasPlanConnection{}, Conflicts: []CanvasPlanConflict{}, Warnings: []string{}}
 	for _, c := range scheme.Layout.Connections {
 		result.Connections = append(result.Connections, CanvasPlanConnection{c.ID, "ok", "可发布"})

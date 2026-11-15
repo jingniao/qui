@@ -72,6 +72,7 @@ type Server struct {
 	trafficService      *access.Service
 	nodeRepository      *node.Repository
 	deployments         *deployment.Repository
+	relayCleanup        *deployment.RelayCleanupDeployer
 	tunnelPublications  *proxy.Service
 	tunnelFinalizeWake  chan struct{}
 	readPool            *sql.DB
@@ -159,6 +160,8 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.eventBus = eventBus
 	notify := func(id string) { eventBus.Publish("node_status", map[string]string{"nodeId": id}) }
 	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Logger: s.Logger, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
+	s.relayCleanup = deployment.NewRelayCleanupDeployer(deployments, nodeRepository, logger)
+	control.Deployment = &relayCleanupControl{Repository: deployments, cleanup: s.relayCleanup}
 	control.RecoveryRedeploy = func(ctx context.Context, id string) error {
 		revision, err := deployments.RedeployPublished(ctx, id, "recovery")
 		if err != nil {
@@ -321,6 +324,13 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	if err := proxyService.Repository.ReconcileCanvasForwards(context.Background()); err != nil {
 		return nil, err
 	}
+	if !existing {
+		if err := proxyService.ReconcileRelayCleanup(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	proxyService.RelayCleanupRequested = s.relayCleanup.Reconcile
+	nodeRepository.RelayDeletion = proxyService
 	identityStore := &importer.Store{Database: database, Vault: configurationVault}
 	if err := identityStore.ReconcileImportedIdentities(context.Background(), reconcileImportReferences); err != nil {
 		return nil, err
@@ -597,22 +607,25 @@ func (s *Server) closeReadPool() {
 }
 
 func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Listener) error {
-	defer s.tunnelPublications.StopCanvasRemovals()
-	stopRemovals := context.AfterFunc(ctx, s.tunnelPublications.StopCanvasRemovals)
-	defer stopRemovals()
 	defer s.closeReadPool()
 	if s.restoreStartup != nil {
 		if err := s.restoreStartup(ctx); err != nil {
 			return err
 		}
 	}
+	// A prepared restore is read-only until it takes ownership. Run the
+	// one-time cleanup only after that handoff and before starting workers.
+	if err := s.tunnelPublications.ReconcileRelayCleanup(ctx); err != nil {
+		return err
+	}
 	if err := s.tunnelPublications.ReconcileTunnelPublications(ctx, true); err != nil {
 		s.Logger.Error("startup tunnel publication finalization failed", "error", err)
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(12)
-	defer func() { stopBackground(); s.tunnelPublications.StopCanvasRemovals(); jobs.Wait() }()
+	jobs.Add(13)
+	defer func() { stopBackground(); jobs.Wait() }()
+	go func() { defer jobs.Done(); s.runRelayCleanup(background) }()
 	go func() { defer jobs.Done(); s.runTunnelFinalization(background) }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
 	// One worker owns issuance and renewal: it marks interrupted runs, sweeps
@@ -748,7 +761,6 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	s.health.Shutdown()
 	s.admission.stop()
-	s.tunnelPublications.StopCanvasRemovals()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.Config.ShutdownTimeout)
 	defer cancel()
 	var wg sync.WaitGroup

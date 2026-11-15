@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http/httptest"
@@ -122,27 +121,6 @@ func TestTunnelDependencyConflictHTTP(t *testing.T) {
 }
 
 // An Agent refusing a removal phase is a conflict naming the node, not a 400 with raw IDs.
-func TestCanvasRemovalApplyFailureHTTP(t *testing.T) {
-	publication := CanvasRemovePublication{CanvasPublishResult: CanvasPublishResult{Nodes: []CanvasPublishNode{
-		{NodeID: "n-ok", Name: "美国 CC", Status: "success"},
-		{NodeID: "n-bad", Name: "美国 shlii.io", Status: "failed", FailureCode: "validation_failed"},
-	}}}
-	err := removalApplyError(publication, errors.New("撤除节点 n-bad 状态 failed\nn-bad: validation_failed"))
-	w := httptest.NewRecorder()
-	(&Handler{}).failCanvas(w, err)
-	body := w.Body.String()
-	if w.Code != 409 || !strings.Contains(body, "remove_apply_failed") || !strings.Contains(body, "「美国 shlii.io」未能应用撤除配置（validation_failed）") || strings.Contains(body, "n-bad") {
-		t.Fatalf("%d %s", w.Code, body)
-	}
-	start := fmt.Errorf("%w: x", ErrRelayDependency)
-	if got := removalApplyError(CanvasRemovePublication{}, start); got != start {
-		t.Fatalf("start errors must pass through: %v", got)
-	}
-	if got := removalApplyError(publication, context.Canceled); !errors.Is(got, context.Canceled) {
-		t.Fatalf("cancel must pass through: %v", got)
-	}
-}
-
 func TestShadowsocksEmptyMethodSaveAndSnapshot(t *testing.T) {
 	p := newPublishPanel(t)
 	raw, err := protojson.Marshal(&pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "shadowsocks", Inbound: true, Outbound: true, Tcp: true}, {Protocol: "socks5", Inbound: true, Outbound: true, Tcp: true}}})
@@ -192,36 +170,28 @@ func TestShadowsocksEmptyMethodSaveAndSnapshot(t *testing.T) {
 	}
 }
 
-func TestDeleteCanvasBoundInboundConflict(t *testing.T) {
-	p := newPublishPanel(t)
-	scheme := savePlanScheme(t, p, entryPlanLayout(p, &CanvasEntryBinding{Mode: "create", Protocol: "socks5", PortMode: "manual", Port: canvasTestPort(20000), GroupMode: "none"}))
-	plan, err := p.service.canvasBuildPlan(p.ctx, scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.service.canvasApplyPlan(p.ctx, plan); err != nil {
-		t.Fatal(err)
-	}
-	binding, err := p.service.Repository.CanvasEntryBinding(p.ctx, scheme.ID, "i-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, code := range []string{"inbound_in_canvas_scheme", "inbound_detached_entry"} {
-		err := p.service.Repository.DeleteInbound(p.ctx, binding.InboundID)
-		var conflict *tunnelError
-		if !errors.As(err, &conflict) || conflict.Status != 409 || conflict.Code != code {
-			t.Fatalf("want 409 %s: %v", code, err)
-		}
-		response := httptest.NewRecorder()
-		(&Handler{}).fail(response, err)
-		if response.Code != 409 || !strings.Contains(response.Body.String(), code) {
-			t.Fatalf("%d %s", response.Code, response.Body.String())
-		}
-		if code == "inbound_in_canvas_scheme" {
-			if _, err := p.database.Exec("DELETE FROM canvas_schemes WHERE id=?", scheme.ID); err != nil {
+func TestDeleteCanvasBoundAndDetachedInbound(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("detached=%t", detached), func(t *testing.T) {
+			p, scheme, binding := cleanupFixture(t)
+			if detached {
+				if _, err := p.database.Exec("DELETE FROM canvas_schemes WHERE id=?", scheme.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := p.service.DeleteInbound(p.ctx, binding.InboundID); err != nil {
 				t.Fatal(err)
 			}
-		}
+			if _, err := p.service.Repository.Inbound(p.ctx, binding.InboundID, false); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("entry survived: %v", err)
+			}
+			if _, err := p.service.Repository.CanvasEntryBindingByInbound(p.ctx, binding.InboundID); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("binding survived: %v", err)
+			}
+			if _, err := p.service.Repository.CanvasScheme(p.ctx, scheme.ID); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("scheme survived: %v", err)
+			}
+		})
 	}
 }
 
@@ -264,13 +234,3 @@ func TestPendingDeleteRuleTargetListing(t *testing.T) {
 }
 
 // A dependency failure must keep naming the blocking outbound, target and reason.
-func TestRemovalPhaseMessageKeepsDependencyDetail(t *testing.T) {
-	cause := fmt.Errorf("%w: 中转出站「W-1f」→ 目标节点「cc」：目标节点运行中的内部监听不匹配 (internal_inbound_unavailable)", ErrRelayDependency)
-	got := removalPhaseMessage([]string{"美国 shlii.io"}, cause)
-	if !strings.Contains(got, "「美国 shlii.io」撤除依赖尚未就绪") || !strings.Contains(got, "中转出站「W-1f」") || !strings.Contains(got, "internal_inbound_unavailable") {
-		t.Fatal(got)
-	}
-	if got := removalPhaseMessage([]string{"a", "b"}, errors.New("x")); got != "服务器「a」、「b」撤除失败，请查看面板日志与节点配置历史" {
-		t.Fatal(got)
-	}
-}

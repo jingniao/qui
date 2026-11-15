@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <InboundDeleteConflict :conflict="deleteConflict" />
+    <InboundDeleteDialog ref="inboundDeleteDialog" @changed="loadData" />
     <!-- Top PageHeader with Unified Actions (Aligned with Server Page) -->
     <PageHeader
       title="节点配置"
@@ -191,7 +191,7 @@
     <DataTable v-else-if="displayMode === 'list'">
       <template #header>
         <th>节点名称</th>
-        <th>协议与传输</th>
+        <th>传输</th>
         <th>直连地址</th>
         <th>中转线路 (数量)</th>
         <th>真实状态 / 延迟</th>
@@ -211,12 +211,12 @@
                   <span class="font-bold text-base text-neutral-900 truncate tracking-normal" :title="node.name">
                     {{ node.name }}
                   </span>
-                  <!-- Source Capsule -->
-                  <span class="px-1.5 py-0.2 rounded text-xs font-semibold shrink-0" :class="sourceCapsuleColor(node.sourceType)">
-                    {{ node.sourceName }}
-                  </span>
                 </div>
-                <EntryRouteSummary :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" />
+                <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                  <span class="rounded bg-black/[0.04] px-1.5 py-0.5 font-mono font-bold uppercase text-neutral-700">{{ node.protocol }}</span>
+                  <span v-if="node.sourceType !== 'self_hosted'" class="px-1.5 py-0.5 rounded font-semibold" :class="sourceCapsuleColor(node.sourceType)">{{ node.sourceName }}</span>
+                  <EntryRouteSummary :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" :show-type="false" />
+                </div>
                 <p v-if="node.sourceType !== 'self_hosted' && node.sourceId" class="text-xs text-ios-secondary">所属分组：{{ importedGroupNames(node) }}</p>
                 <p class="text-xs text-neutral-400 font-mono mt-0.5 truncate">
                   {{ networkLabel(node) }}
@@ -228,9 +228,6 @@
           <!-- 2. Protocol & Transport -->
           <td>
             <div class="space-y-0.5">
-              <span class="px-2 py-0.5 rounded-lg text-xs font-mono font-semibold uppercase bg-black/[0.05] text-neutral-800">
-                {{ node.protocol }}
-              </span>
               <div class="text-xs text-neutral-400 font-mono">
                 {{ transportLabel(node) }}
               </div>
@@ -360,7 +357,7 @@
         class="bg-white rounded-[24px] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-4"
       >
         <div class="space-y-3.5">
-          <!-- Row 1: Flag · Name · Protocol -->
+          <!-- Row 1: Flag · Name -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2 min-w-0">
               <span
@@ -375,18 +372,15 @@
               >
                 {{ node.name }}
               </span>
-              <span class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-mono font-bold uppercase text-neutral-700 shrink-0">
-                {{ node.protocol }}
-              </span>
             </div>
           </div>
 
-          <!-- Row 2: route · source · transport · latency on one line, the combined status at its end -->
+          <!-- Row 2: protocol · imported source · route · transport · latency; status at the end -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-neutral-400 font-mono tracking-normal">
-              <EntryRouteSummary inline :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" class="min-w-0 font-sans" />
-              <span v-if="entryRouteSummaries.get(node.inboundId || '')" class="shrink-0 text-neutral-300">·</span>
-              <span class="shrink-0 px-1.5 py-0.2 rounded text-xs font-semibold" :class="sourceCapsuleColor(node.sourceType)">{{ node.sourceName }}</span>
+              <span class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-mono font-bold uppercase text-neutral-700 shrink-0">{{ node.protocol }}</span>
+              <span v-if="node.sourceType !== 'self_hosted'" class="shrink-0 px-1.5 py-0.5 rounded text-xs font-semibold" :class="sourceCapsuleColor(node.sourceType)">{{ node.sourceName }}</span>
+              <EntryRouteSummary inline :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" :show-type="false" class="min-w-0 font-sans" />
               <span class="shrink-0 text-neutral-300">·</span>
               <span class="truncate" :title="transportLabel(node)">{{ transportLabel(node) }}</span>
               <template v-if="node.status === 'online' && node.latencyMs && !notRunning(node)">
@@ -1089,10 +1083,9 @@
 </template>
 
 <script setup lang="ts">
-import InboundDeleteConflict from '../components/InboundDeleteConflict.vue';
+import InboundDeleteDialog from '../components/InboundDeleteDialog.vue';
 import ImportedProxyDialog from '../components/ImportedProxyDialog.vue';
-import { inboundDeleteConflict, type InboundConflict } from '../inboundDeleteConflict';
-const deleteConflict = ref<InboundConflict | null>(null);
+const inboundDeleteDialog = ref<InstanceType<typeof InboundDeleteDialog> | null>(null);
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue';
 import { revisionResult } from '../../system/revisionResult';
 import type { InboundStateItem, InboundPublishState } from '../../system/deploymentApi';
@@ -1270,13 +1263,20 @@ async function loadData() {
     });
     // Relay routes shown on this page come from the schemes the canvas stores on
     // the server. Fetch them alongside the resources, then resolve references.
-    const [schemes] = await Promise.all([
+    const results = await Promise.allSettled([
       choices((page, size) => canvasAPI.list(page, size)),
       resources,
       isOwner.value ? loadImports() : Promise.resolve(),
       isOwner.value ? choices(groupAPI.list).then(items => { nodeGroups.value = items; }) : Promise.resolve()
     ]);
-    await loadCanvasSchemes({ servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes }, schemes);
+    const labels = ['中转方案', '服务器与入站', '导入节点', '节点分组'];
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') showToast(`${labels[index]}读取失败：${(result.reason as Error).message}`, 'error');
+    });
+    const [schemes, resourceResult] = results;
+    if (schemes.status === 'fulfilled' && resourceResult.status === 'fulfilled') {
+      await loadCanvasSchemes({ servers: servers.value, inbounds: serverInbounds.value, imported: proxyNodeStore.manualNodes }, schemes.value);
+    }
   } catch (e) {
     showToast((e as Error).message, 'error');
   } finally {
@@ -1534,35 +1534,13 @@ function showImportResult(name: string, result?: ImportResult) {
 }
 
 async function deleteNode(node: ProxyNodeItem) {
-  deleteConflict.value = null;
   if (!isOwner.value) return;
   if (node.sourceType === 'manual') {
     importAction.value = { node, mode: 'delete' };
     return;
   }
-  if (node.sourceType === 'self_hosted' && !confirm(`确定要删除节点 [${node.name}] 吗？`)) return;
-  if (node.sourceType === 'self_hosted') {
-    if (node.inboundId) {
-      try {
-        await proxyAPI.deleteInbound(node.inboundId);
-        if (node.sourceId) {
-          try {
-            const r = await deploymentAPI.publishNode(node.sourceId, `删除自建入站: ${node.name}`);
-            showToast(`已保存并发布配置 #${r.revision}，节点确认后生效`);
-          } catch (e: any) {
-            showToast(`已保存，但发布失败：${e?.message || e}（可在服务器详情的配置版本中重试）`, 'error');
-          }
-        } else {
-          showToast('自建节点已删除');
-        }
-        await loadData();
-      } catch (e) {
-        deleteConflict.value = inboundDeleteConflict(e);
-        showToast((e as Error).message, 'error');
-      }
-    } else {
-      showToast('该自建节点为基础服务器实例，请在“服务器”模块中管理', 'error');
-    }
+  if (node.sourceType === 'self_hosted' && node.inboundId) {
+    await inboundDeleteDialog.value?.prompt({ id: node.inboundId, name: node.name });
   }
 }
 

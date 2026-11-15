@@ -76,7 +76,7 @@ for (const match of [...editorCode.matchAll(/^import .* from '([^']+)';$/gm)]) {
   editorCode = editorCode.replace(match[0], '');
 }
 editorCode = editorCode.replace('const props = defineProps();', '').replace('const emit = defineEmits();', '');
-const { entryEditor } = await import(`data:text/javascript;base64,${Buffer.from(editorImports.join('\n') + '\nexport function entryEditor(props, emit) {\n' + editorCode + '\nreturn { form, error, apply, resetForServer, resetForMode, reuseOptions, protocolKey, actualGroups };\n}').toString('base64')}`);
+const { entryEditor } = await import(`data:text/javascript;base64,${Buffer.from(editorImports.join('\n') + '\nexport function entryEditor(props, emit) {\n' + editorCode + '\nreturn { form, error, apply, resetForServer, resetForMode, protocolKey, actualGroups };\n}').toString('base64')}`);
 const events = [];
 const editorServers = ['a', 'b'].map(id => ({ ...server, id, name: id, enabled: true }));
 const editorInbounds = [
@@ -86,14 +86,12 @@ const editorInbounds = [
   { id: 'b-user', nodeId: 'b', enabled: true, core: 'xray', protocol: 'vless' }
 ];
 const editorProps = { bindingStateReady: true, nodeId: 'a', servers: editorServers, inbounds: editorInbounds, groups: [{ id: 'g1', enabled: true, purpose: 'subscription', inboundIds: [] }], exitProtocol: 'vless', schemeId: 'scheme' };
-const advanced = entryEditor({ ...editorProps, binding: { mode: 'reuse', inboundId: 'a-user', portMode: 'auto', groupMode: 'none' } }, (...event) => events.push(event));
+const advanced = entryEditor(editorProps, (...event) => events.push(event));
 assert.equal(advanced.error.value, '');
-assert.deepEqual(advanced.reuseOptions.value.map(item => item.id), ['a-user']);
 advanced.apply();
-assert.deepEqual(events.pop(), ['apply', 'a', { mode: 'reuse', inboundId: 'a-user', portMode: 'auto', groupMode: 'none' }]);
+assert.equal(events.pop()[2].mode, 'create');
+assert.equal(editorSource.includes('reuse'), false, 'entry editor only creates independent entries');
 advanced.form.nodeId = 'b'; advanced.resetForServer();
-assert.equal(advanced.form.inboundId, '', 'changing server clears the old reuse target');
-assert.equal(advanced.form.mode, 'create');
 assert.equal(advanced.protocolKey.value, 'xray:vless');
 advanced.form.groupMode = 'explicit'; advanced.form.groupIds = ['g1']; advanced.form.portMode = 'manual'; advanced.form.port = 35005;
 advanced.apply();
@@ -105,15 +103,7 @@ advanced.form.portMode = 'auto'; advanced.form.groupIds = ['missing'];
 assert.match(advanced.error.value, /分组/);
 advanced.form.groupMode = 'none'; advanced.apply();
 assert.deepEqual(events.pop()[2], { mode: 'create', protocol: 'vless', core: 'xray', portMode: 'auto', groupMode: 'none' }, 'auto and none omit stale port and group fields');
-advanced.form.mode = 'reuse'; advanced.resetForMode();
-assert.equal(advanced.form.protocol, '');
-assert.equal(advanced.form.port, undefined);
-advanced.form.inboundId = 'a-user'; advanced.apply();
-assert.equal(events.length, 0, 'cross-server reuse cannot be applied');
-advanced.form.inboundId = 'b-user'; advanced.apply();
-assert.deepEqual(events.pop()[2], { mode: 'reuse', inboundId: 'b-user', portMode: 'auto', groupMode: 'none' });
 assert.match(editorSource, /@change="resetForServer"/);
-assert.match(editorSource, /@change="resetForMode"/);
 const primaryBinding = { mode: 'create', protocol: 'vless', portMode: 'auto', groupMode: 'none' };
 const { reactive, nextTick } = await import('vue');
 const primaryProps = reactive({ ...editorProps, binding: primaryBinding, materializedInboundId: '', bindingStateError: '' });
@@ -143,7 +133,7 @@ primary.form.groupIds = ['g1'];
 primary.apply();
 assert.deepEqual(events.pop()[2].groupIds, ['g1'], 'unmaterialized instance remains editable in the same scheme');
 const noBinding = entryEditor(editorProps, (...event) => events.push(event));
-assert.equal(noBinding.form.mode, 'create');
+assert.equal('mode' in noBinding.form, false);
 assert.equal(noBinding.protocolKey.value, 'xray:vless', 'new entries preselect a supported exit protocol');
 assert.equal(noBinding.form.groupMode, 'exit_groups');
-console.log('PASS quick relay: request groups, retry identity, supported protocols, blocked cores, hop limit and advanced create/reuse editor');
+console.log('PASS quick relay: request groups, retry identity, supported protocols, blocked cores, hop limit and advanced create editor');

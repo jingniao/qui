@@ -36,7 +36,7 @@ func TestNodeDeletionPermissionsPreviewAndBlockers(t *testing.T) {
 	owner := budgetOwner(t, app)
 	ctx := context.Background()
 	nodeID := enrolledTestNode(t, app, "Delete me")
-	if _, err := app.Database.ExecContext(ctx, "INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES('i1','In',?,'socks5','127.0.0.1',1080,1,1,0,'direct','[]',x'00','x')", nodeID); err != nil {
+	if _, err := app.Database.ExecContext(ctx, "INSERT INTO outbounds(id,name,node_id,protocol,address,port,enabled,credential_id,encrypted_settings,support_tcp,support_udp,failure_policy,backup_outbound_id,created_at) VALUES('o1','手工出站',?,'direct','',0,1,'',x'00',1,1,'Block','','x')", nodeID); err != nil {
 		t.Fatal(err)
 	}
 	if response := owner.call("POST", "/api/v1/admins", map[string]any{"username": "node_viewer", "password": "viewer-test-password", "role": "Viewer"}); response.Code != 201 {
@@ -68,7 +68,7 @@ func TestNodeDeletionPermissionsPreviewAndBlockers(t *testing.T) {
 		Mode     string         `json:"mode"`
 		Blockers []node.Blocker `json:"blockers"`
 	}
-	if preview.Code != 200 || json.Unmarshal(preview.Body.Bytes(), &view) != nil || view.Mode != "delete" || len(view.Blockers) != 1 || view.Blockers[0].Kind != "inbound" || view.Blockers[0].Name != "In" {
+	if preview.Code != 200 || json.Unmarshal(preview.Body.Bytes(), &view) != nil || view.Mode != "delete" || len(view.Blockers) != 1 || view.Blockers[0].Kind != "outbound" || view.Blockers[0].Name != "手工出站" {
 		t.Fatalf("preview: %d %s", preview.Code, preview.Body.String())
 	}
 	blocked := owner.call("DELETE", "/api/v1/nodes/"+nodeID, nil)
@@ -79,7 +79,7 @@ func TestNodeDeletionPermissionsPreviewAndBlockers(t *testing.T) {
 			Blockers []node.Blocker `json:"blockers"`
 		} `json:"error"`
 	}
-	if blocked.Code != 409 || json.Unmarshal(blocked.Body.Bytes(), &failure) != nil || failure.Error.Code != "node_delete_blocked" || len(failure.Error.Blockers) != 1 || failure.Error.Blockers[0].Kind != "inbound" || failure.Error.Message == "" {
+	if blocked.Code != 409 || json.Unmarshal(blocked.Body.Bytes(), &failure) != nil || failure.Error.Code != "node_delete_blocked" || len(failure.Error.Blockers) != 1 || failure.Error.Blockers[0].Kind != "outbound" || failure.Error.Message == "" {
 		t.Fatalf("blocked delete: %d %s", blocked.Code, blocked.Body.String())
 	}
 	var deleted int
@@ -103,7 +103,7 @@ func TestNodeDeletionLogicalDeleteAndFollowUpRefusals(t *testing.T) {
 		t.Fatalf("preview: %d %s", preview.Code, preview.Body.String())
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if response := owner.call("DELETE", "/api/v1/nodes/"+nodeID, nil); response.Code != 204 {
+		if response := owner.call("DELETE", "/api/v1/nodes/"+nodeID, nil); response.Code != 200 || !strings.Contains(response.Body.String(), `"pendingNodes":[]`) {
 			t.Fatalf("delete %d: %d %s", attempt, response.Code, response.Body.String())
 		}
 	}
@@ -148,7 +148,7 @@ func TestNodeDeletionCancelsPendingNode(t *testing.T) {
 	if response := owner.call("GET", "/api/v1/nodes/"+n.ID+"/deletion-preview", nil); response.Code != 200 || !strings.Contains(response.Body.String(), `"mode":"cancel"`) {
 		t.Fatalf("pending preview: %d %s", response.Code, response.Body.String())
 	}
-	if response := owner.call("DELETE", "/api/v1/nodes/"+n.ID, nil); response.Code != 204 {
+	if response := owner.call("DELETE", "/api/v1/nodes/"+n.ID, nil); response.Code != 200 || !strings.Contains(response.Body.String(), `"pendingNodes":[]`) {
 		t.Fatalf("cancel: %d %s", response.Code, response.Body.String())
 	}
 	if _, err := repository.Get(context.Background(), n.ID); err == nil {

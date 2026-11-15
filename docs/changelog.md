@@ -2,6 +2,16 @@
 
 本文件保存版本与说明书修订历史；带日期的“待验收”“未发布”只描述当时状态。当前行为以[项目说明书](../AGENTS.md)为准，发布与运行证据见[验收矩阵](v1-acceptance.md)。
 
+**v1.5.8（未发布，迁移 0150；Owner 2026-11-15 确认范围）**：中转撤除、连带删除与待清理重试，见[规划](v1.5.8-plan.md)与[发布说明](release-notes-1.5.8.md)。门禁、GitHub check、Release 与生产验证待补。
+
+- 一次确认立即删除方案与专用对象；保留 `DELETE /api/v1/canvas-schemes/{id}`，与 `POST /api/v1/canvas-schemes/{id}/remove` 同为完整撤除，请求体均须含 `updatedAt`。移除旧 remove-plan、remove-status、遗留资源与重新挂接路由。
+- 按已发布状态生成清理修订，离线重连后下发，失败按 1／5／30 分钟及之后每 30 分钟重试；新撤除登记重置 `attempts=0`、清空失败码并立即重试，已有清理修订仍 pending 则先等结束再生成下一次。服务器显示「待清理」。
+- 删除入站／服务器连带删除相关方案、隧道和规则，确认框列出名称；两个 DELETE 均成功返回 200 `{pendingNodes:[...]}`。已配置资源的待登记节点也走连带删除，被删节点自身待清理行同步清除。
+- 外部引用统一以 409 `inbound_delete_blocked`／`node_delete_blocked` 阻塞，原 `inbound_has_relay_outbound` 归入前者，明细在 `error.blockers`；未收尾的受影响隧道发布批次作为 `deployment_batch` blocker，等待收尾后再删。
+- 入口仅新建且专属，禁止作为画布 inbound 实例或 linked 规则目标；保存、规划和发布共用 400 `inbound_is_scheme_entry` 校验。
+- 0150 新增待清理与单次清理标记表，删除 reuse 绑定但保留普通入站；启动清理残留，移除遗留资源页面与重新挂接。
+- 接受本节点已下发过的任何修订的数据；节点列表载入修复，卡片仅保留导入来源标签，协议移至第二行。
+
 **v1.5.7（2026-11-15，tag → `bd4fe2f`；无迁移，迁移头 0149）**：v1.5.6 生产删除测试发现的问题与 Owner 节点列表调整，见[发布说明](release-notes-1.5.7.md)。本地门禁复验通过（保留首轮 FAIL，deployment 包仅重跑一次，构建与部署尾段补齐），GitHub Check 43711133840 同 SHA 通过，Release 43713949981 与 13 个资产／签名序号 1005007 已核验；德国面板与 Agent 已经网页升到 1.5.7，美国 CC 的下载端口已按单一来源放行，仍因修订状态冲突离线而阻塞网页升级，其余四台暂缓。
 
 - 隧道发布依赖错误 409、撤除被拒 409 `remove_apply_failed`、遗留勾选区布局、提示「。。」（E1–E4）。

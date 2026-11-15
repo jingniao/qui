@@ -1,3 +1,4 @@
+import type { DeletionPreview, DeletionResult, PendingCleanupNode } from '../../app/deletion';
 import { reactive } from 'vue';
 export interface RouteSummary {
   type: 'direct' | 'relay' | 'custom' | 'tunnel';
@@ -108,7 +109,8 @@ export const proxyAPI = {
   outbounds: (nodeId = '', page = 1, pageSize = 20) => request<Page<Outbound>>(`/outbounds?nodeId=${nodeId}&page=${page}&pageSize=${pageSize}`),
   saveInbound: (id: string | null, value: InboundInput) => request<Inbound>(id ? `/inbounds/${id}` : '/inbounds', id ? 'PUT' : 'POST', value),
   saveOutbound: (id: string | null, value: OutboundInput & Pick<Outbound, 'sourceIp' | 'sourceInterface'>) => request<Outbound>(id ? `/outbounds/${id}` : '/outbounds', id ? 'PUT' : 'POST', { ...value, sourceIp: value.protocol === 'block' ? '' : value.sourceIp || '', sourceInterface: value.protocol === 'block' ? '' : value.sourceInterface || '' }),
-  deleteInbound: (id: string) => request(`/inbounds/${id}`, 'DELETE'),
+  inboundDeletionPreview: (id: string) => request<DeletionPreview>(`/inbounds/${encodeURIComponent(id)}/deletion-preview`),
+  deleteInbound: (id: string) => request<DeletionResult | undefined>(`/inbounds/${encodeURIComponent(id)}`, 'DELETE'),
   deleteOutbound: (id: string) => request(`/outbounds/${id}`, 'DELETE'),
   revision: (nodeId: string, summary: string) => request<{ id: number }>('/revisions/proxy', 'POST', { nodeId, summary })
 };
@@ -119,13 +121,19 @@ export function certificateMatches(nodeId: string, domain: string): Promise<Cert
 }
 
 export async function choices<T>(read: (page: number, size: number) => Promise<Page<T>>): Promise<T[]> {
-  const items: T[] = [];
-  for (let page = 1; ; page++) {
-    const result = await read(page, 100);
-    items.push(...result.items);
-    if (items.length >= result.total) return items;
-    if (!result.items.length) throw new Error('选项列表发生变化，请刷新后重试');
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    const items: T[] = [];
+    let total: number | undefined;
+    for (let page = 1; ; page++) {
+      const result = await read(page, 100);
+      if (total !== undefined && result.total !== total) break;
+      total = result.total;
+      items.push(...result.items);
+      if (items.length === total) return items;
+      if (!result.items.length || items.length > total) break;
+    }
   }
+  throw new Error('选项列表发生变化，请刷新后重试');
 }
 export const failureNames: Record<string, string> = { Block: '阻断', Direct: '直连', BackupOutbound: '备用出站', BackupOutboundGroup: '备用出口组', BackupProxyChain: '备用代理链', BackupChain: '备用代理链' };
 export const strategyNames: Record<string, string> = { primary: '主备', round_robin: '轮询', latency: '延迟优先' };
@@ -149,7 +157,7 @@ export type CanvasTunnelProtocol = 'tls' | 'wireguard';
 export type LegacyCanvasTunnelProtocol = 'gost' | 'brook' | 'nftables';
 export type CanvasInstanceRef = `server:${string}` | `inbound:${string}` | `import:${string}` | `outbound:${string}`;
 export interface CanvasEntryBinding {
-  mode: 'create' | 'reuse'; inboundId?: string; protocol?: string; core?: string;
+  mode: 'create'; inboundId?: string; protocol?: string; core?: string;
   portMode: 'auto' | 'manual'; port?: number;
   groupMode: 'exit_groups' | 'explicit' | 'none'; groupIds?: string[];
 }
@@ -183,22 +191,8 @@ export interface CanvasSchemeStatus {
   probe: { status: 'untested' | 'reachable' | 'unreachable' | 'incomplete'; at?: string; results?: { inboundId: string; nodeId: string; status: string; at: string; attempted: number; lost: number; medianMs?: number; code: string }[] };
 }
 
-export interface CanvasRemoveInput { updatedAt: string; restoreTargets?: Record<string, string>; acknowledgeChanges?: boolean; }
-export interface CanvasRemoveReferrer { kind: string; id: string; name: string; }
-export interface CanvasRemoveEntry {
-  bindingId: string; instanceId: string; inboundId: string; nodeId: string; name: string;
-  protocol: string; core: string; listen: string; port: number; mode: string; action: string;
-  currentRoute: string; restoreTarget?: string; needsRestoreTarget: boolean; restoreReason?: string;
-  groups: { id: string; name: string }[] | null; changes: string[] | null; referrers: CanvasRemoveReferrer[] | null;
-}
-export interface CanvasRemoveObject extends CanvasTunnelObject { tunnelId: string; keep: boolean; referrers: CanvasRemoveReferrer[] | null; }
-export interface CanvasRemovePlan {
-  ok: boolean; schemeId: string; updatedAt: string; entries: CanvasRemoveEntry[];
-  objects: CanvasRemoveObject[]; nodes: string[]; changeDetectionRule: string;
-}
-export interface CanvasRemoveResult { schemeId: string; removed: boolean; publications: CanvasPublishResult[]; }
-export interface CanvasRemovePending { schemeId: string; status: 'removing'; }
-export interface CanvasRemoveStatus { schemeId: string; state: 'idle' | 'removing' | 'succeeded' | 'failed'; error?: { code: string; message: string }; result?: CanvasRemoveResult; }
+export interface CanvasRemoveInput { updatedAt: string; }
+export interface CanvasRemoveResult { schemeId: string; removed: true; pendingNodes: PendingCleanupNode[]; }
 
 export interface CanvasTunnelSchemeRef { id: string; name: string; }
 export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; candidateTunnels?: string[]; }
@@ -222,17 +216,12 @@ export const canvasTunnelAPI = {
 
 export const canvasAPI = {
   status: (id: string) => request<CanvasSchemeStatus>(`/canvas-schemes/${encodeURIComponent(id)}/status`),
-  removePlan: (id: string, value: CanvasRemoveInput) => request<CanvasRemovePlan>(`/canvas-schemes/${encodeURIComponent(id)}/remove-plan`, 'POST', value),
-  // Removal waits for both deployment phases and any rollback receipts.
-  remove: (id: string, value: CanvasRemoveInput) => request<CanvasRemoveResult | CanvasRemovePending>(`/canvas-schemes/${encodeURIComponent(id)}/remove`, 'POST', value, { timeoutMs: 3600000 }),
-  removeStatus: (id: string) => request<CanvasRemoveStatus>(`/canvas-schemes/${encodeURIComponent(id)}/remove-status`),
+  remove: (id: string, value: CanvasRemoveInput) => request<CanvasRemoveResult>(`/canvas-schemes/${encodeURIComponent(id)}/remove`, 'POST', value),
   plan: (id: string, layout?: CanvasSchemeWriteLayout) => request<CanvasTunnelPlan>(`/canvas-schemes/${encodeURIComponent(id)}/plan`, 'POST', { layout }),
   list: (page = 1, pageSize = 50) => request<Page<CanvasScheme>>(`/canvas-schemes?page=${page}&pageSize=${pageSize}`),
   get: (id: string) => request<CanvasScheme>(`/canvas-schemes/${encodeURIComponent(id)}`),
   create: (value: CanvasSchemeCreate) => request<CanvasScheme>('/canvas-schemes', 'POST', value),
   update: (id: string, value: CanvasSchemeUpdate) => request<CanvasScheme>(`/canvas-schemes/${encodeURIComponent(id)}`, 'PUT', value),
-  // Deleting a scheme only deletes the drawing; the objects it draws stay.
-  delete: (id: string) => request<void>(`/canvas-schemes/${encodeURIComponent(id)}`, 'DELETE'),
   publish: (id: string) => request<CanvasPublishResult>(`/canvas-schemes/${encodeURIComponent(id)}/publish`, 'POST', {})
 };
 
@@ -521,18 +510,3 @@ export function canvasTunnelReference(
     supportUdp: tunnel.supportUdp
   };
 }
-
-export interface CanvasLegacyBinding {
-  id: string; instanceId: string; inboundId: string; name: string; nodeId: string; nodeName: string;
-  mode: 'create' | 'reuse'; originalDefaultOutbound: string; currentDefaultOutbound: string;
-}
-export interface CanvasLegacyGroup {
-  empty?: boolean;
-  id: string; bindingIds: string[]; tunnelIds: string[]; bindings: CanvasLegacyBinding[]; tunnels: CanvasTunnel[];
-  referrers: CanvasRemoveReferrer[]; canReattach: boolean; canRemove: boolean; reattachReasons: string[]; removeReasons: string[];
-}
-export interface CanvasLegacyResources { detached: CanvasLegacyGroup[]; orphanTunnels: CanvasLegacyGroup[]; unowned: CanvasTunnelObject[]; }
-export const canvasLegacyAPI = {
-  list: () => request<CanvasLegacyResources>('/relay-schemes/legacy-resources'),
-  reattach: (value: { bindingIds?: string[]; tunnelIds?: string[]; name: string }) => request<{ schemeId: string }>('/relay-schemes/legacy-resources/reattach', 'POST', value),
-};

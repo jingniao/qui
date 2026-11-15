@@ -535,101 +535,25 @@ func (r *Repository) Bindings(ctx context.Context, inboundID string) ([]Binding,
 	}
 	return items, rows.Err()
 }
+
+// DeleteInbound is the low-level deletion used by canvas rollback paths.
+// User-facing deletion goes through Service.DeleteInbound and its transaction.
 func (r *Repository) DeleteInbound(ctx context.Context, id string) error {
-	binding, err := r.CanvasEntryBindingByInbound(ctx, id)
-	if err == nil {
-		if binding.SchemeID == nil {
-			return &tunnelError{Code: "inbound_detached_entry", Status: 409, Message: "该入站是已脱离方案的入口，请到中转方案 → 遗留资源中撤除"}
-		}
-		scheme, err := r.CanvasScheme(ctx, *binding.SchemeID)
-		if err != nil {
-			return err
-		}
-		return &tunnelError{Code: "inbound_in_canvas_scheme", Status: 409, Message: "该入站仍是中转方案的入口，请在所属中转方案中使用「停用并移除」", Details: map[string]any{"schemes": []map[string]string{{"id": scheme.ID, "name": scheme.Name}}}}
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT id,name FROM tunnel_rules WHERE target_inbound_id=? ORDER BY id", id)
-	if err != nil {
-		return err
-	}
-	rules := []map[string]string{}
-	for rows.Next() {
-		var ruleID, name string
-		if err = rows.Scan(&ruleID, &name); err != nil {
-			rows.Close()
-			return err
-		}
-		rules = append(rules, map[string]string{"id": ruleID, "name": name})
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	if len(rules) > 0 {
-		return &tunnelError{Code: "inbound_has_relays", Status: 409, Message: "入站仍被中转规则使用", Details: map[string]any{"rules": rules}}
-	}
 	if err := r.refuseManagedInbound(ctx, id); err != nil {
 		return err
 	}
 	if _, err := r.Inbound(ctx, id, false); err != nil {
 		return err
 	}
-	rows, err = r.Database.QueryContext(ctx, "SELECT id,name,node_id FROM outbounds WHERE target_inbound_id=? ORDER BY id", id)
+	refs, err := r.canvasReferrers(ctx, id)
 	if err != nil {
 		return err
 	}
-	outbounds := []map[string]string{}
-	for rows.Next() {
-		var outboundID, name, nodeID string
-		if err = rows.Scan(&outboundID, &name, &nodeID); err != nil {
-			rows.Close()
-			return err
-		}
-		outbounds = append(outbounds, map[string]string{"id": outboundID, "name": name, "nodeId": nodeID})
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	if len(outbounds) > 0 {
-		details := map[string]any{"outbounds": outbounds}
-		// The schemes whose server layout references a canvas tunnel owning one of
-		// these outbounds (the same reference tunnelSchemes follows).
-		rows, err = r.Database.QueryContext(ctx, `SELECT DISTINCT s.id,s.name FROM canvas_schemes s,json_each(s.layout_json,'$.connections') c
- JOIN canvas_tunnel_objects o ON o.tunnel_id=json_extract(c.value,'$.tunnelId') AND o.object_kind='outbound'
- JOIN outbounds b ON b.id=o.object_id
- WHERE s.execution='server' AND b.target_inbound_id=? ORDER BY s.id`, id)
-		if err != nil {
-			return err
-		}
-		schemes := []map[string]string{}
-		for rows.Next() {
-			var schemeID, name string
-			if err = rows.Scan(&schemeID, &name); err != nil {
-				rows.Close()
-				return err
-			}
-			schemes = append(schemes, map[string]string{"id": schemeID, "name": name})
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		if len(schemes) > 0 {
-			details["schemes"] = schemes
-		}
-		return &tunnelError{Code: "inbound_has_relay_outbound", Status: 409, Message: "该入站仍被中转出站引用，请先在所属中转方案中撤除，或先删除下列出站", Details: details}
+	if len(refs) > 0 {
+		return &tunnelError{Code: "inbound_delete_blocked", Status: 409, Message: "入站仍被其他配置引用，请先处理以下引用", Details: map[string]any{"blockers": refs}}
 	}
 	_, err = r.Database.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", id)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 func (r *Repository) DeleteOutbound(ctx context.Context, id string) error {
 	if _, err := r.Outbound(ctx, id, false); err != nil {

@@ -42,6 +42,9 @@ func (r *Repository) CanvasEntryBindingByInbound(ctx context.Context, inboundID 
 }
 
 func (r *Repository) InsertCanvasEntryBinding(ctx context.Context, b CanvasEntryBindingRecord) error {
+	if b.Mode != "create" {
+		return errors.New("入口仅支持新建（create），不再支持复用现有入口")
+	}
 	_, err := r.Database.ExecContext(ctx, "INSERT INTO canvas_entry_bindings("+canvasEntryBindingColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", b.ID, b.SchemeID, b.InstanceID, b.InboundID, b.Mode, b.OriginalDefaultOutbound, b.AppliedDefaultOutbound, b.State, b.RequestID, timestamp(), b.CreationConfigJSON, b.CreationGroupsJSON)
 	return err
 }
@@ -69,11 +72,6 @@ func (r *Repository) applyCanvasEntryBinding(ctx context.Context, b CanvasEntryB
 	}
 	defer tx.Rollback()
 	if create {
-		if b.Mode == "reuse" {
-			if err := tx.QueryRowContext(ctx, "SELECT default_outbound FROM inbounds WHERE id=?", b.InboundID).Scan(&b.OriginalDefaultOutbound); err != nil {
-				return err
-			}
-		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO canvas_entry_bindings("+canvasEntryBindingColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", b.ID, b.SchemeID, b.InstanceID, b.InboundID, b.Mode, b.OriginalDefaultOutbound, target, "applied", b.RequestID, timestamp(), b.CreationConfigJSON, b.CreationGroupsJSON)
 	} else {
 		_, err = tx.ExecContext(ctx, "UPDATE canvas_entry_bindings SET applied_default_outbound=?,state='applied',updated_at=? WHERE id=?", target, timestamp(), b.ID)

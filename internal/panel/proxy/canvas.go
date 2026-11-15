@@ -115,12 +115,8 @@ func (layout CanvasLayout) validateEntryBindings(execution string) error {
 			if b.InboundID != "" {
 				return errors.New("新建入口不能指定入站 ID")
 			}
-		case "reuse":
-			if !validCanvasToken(b.InboundID) {
-				return errors.New("复用入口必须指定有效的入站 ID")
-			}
 		default:
-			return errors.New("入口绑定模式必须为 create 或 reuse")
+			return errors.New("入口仅支持新建（create），不再支持复用现有入口")
 		}
 		if b.PortMode != "auto" && b.PortMode != "manual" {
 			return errors.New("入口端口模式必须为 auto 或 manual")
@@ -335,6 +331,9 @@ func (layout CanvasLayout) validate() error {
 // longer has. Unresolved import references may stay in drafts; client
 // publication requires each imported ID to exist in the panel cache.
 func (s *Service) validateRefs(ctx context.Context, layout CanvasLayout) error {
+	if err := s.validateCanvasEntryOwnership(ctx, layout); err != nil {
+		return err
+	}
 	for _, instance := range layout.Instances {
 		ref, err := parseCanvasRef(instance.Ref)
 		if err != nil {

@@ -13,8 +13,8 @@ func TestInboundDeletionRelayOutboundConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := p.call("DELETE", "/api/v1/inbounds/"+p.inbound.ID, nil, owner, csrf)
-	assertTunnelHTTP(t, response, 409, "inbound_has_relay_outbound")
-	for _, value := range []string{outbound.ID, outbound.Name, p.nodeA} {
+	assertTunnelHTTP(t, response, 409, "inbound_delete_blocked")
+	for _, value := range []string{outbound.ID, outbound.Name, `"kind":"outbound"`, `"blockers"`} {
 		if !strings.Contains(response.Body.String(), value) {
 			t.Fatal(response.Body.String())
 		}
@@ -22,5 +22,5 @@ func TestInboundDeletionRelayOutboundConflict(t *testing.T) {
 	if err := p.service.Repository.DeleteOutbound(p.ctx, outbound.ID); err != nil {
 		t.Fatal(err)
 	}
-	assertTunnelHTTP(t, p.call("DELETE", "/api/v1/inbounds/"+p.inbound.ID, nil, owner, csrf), 204, "")
+	assertTunnelHTTP(t, p.call("DELETE", "/api/v1/inbounds/"+p.inbound.ID, nil, owner, csrf), 200, "")
 }

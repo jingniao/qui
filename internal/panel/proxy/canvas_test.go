@@ -252,8 +252,8 @@ func TestCanvasSchemeRoundTripAndAudit(t *testing.T) {
 		t.Fatalf("a draft update published the scheme: %+v", changed)
 	}
 
-	deleted := p.call("DELETE", "/api/v1/canvas-schemes/"+created.ID, nil, cookie, csrf)
-	if deleted.Code != 204 {
+	deleted := p.call("DELETE", "/api/v1/canvas-schemes/"+created.ID, map[string]any{"updatedAt": changed.UpdatedAt}, cookie, csrf)
+	if deleted.Code != 200 {
 		t.Fatalf("delete scheme: %d %s", deleted.Code, deleted.Body.String())
 	}
 	if missing := p.call("GET", "/api/v1/canvas-schemes/"+created.ID, nil, cookie, ""); missing.Code != 404 {
@@ -262,7 +262,7 @@ func TestCanvasSchemeRoundTripAndAudit(t *testing.T) {
 	if p.schemeCount() != 0 {
 		t.Fatal("deleted scheme left a row")
 	}
-	want := []string{"创建中转方案", "修改中转方案", "删除中转方案"}
+	want := []string{"创建中转方案", "修改中转方案", "停用并移除中转方案"}
 	if len(p.audit.actions) != len(want) {
 		t.Fatalf("audit actions: %v", p.audit.actions)
 	}
@@ -434,9 +434,8 @@ func TestCanvasSchemeRefusesInvalidDrawings(t *testing.T) {
 	}
 }
 
-// TestCanvasSchemeDeleteLeavesProxyObjects checks the promise of this step:
-// removing a drawing deletes the drawing and nothing else.
-func TestCanvasSchemeDeleteLeavesProxyObjects(t *testing.T) {
+// Unowned proxy objects survive complete scheme removal.
+func TestCanvasSchemeDeletePreservesUnownedObjects(t *testing.T) {
 	p := newCanvasPanel(t)
 	cookie, csrf := p.session("Owner")
 	outbound, err := p.service.SaveOutbound(p.ctx, "", OutboundInput{Name: "A to B", NodeID: p.nodeA, Protocol: "socks5", Enabled: true, TargetInboundID: p.inbound.ID, SupportTCP: true, SupportUDP: true})
@@ -455,7 +454,7 @@ func TestCanvasSchemeDeleteLeavesProxyObjects(t *testing.T) {
 	layout := p.layout()
 	layout["instances"] = append(layout["instances"].([]any), map[string]any{"instanceId": "inst-c", "ref": "import:manual-jp", "x": 720, "y": 200, "role": "exit"})
 	created := p.create("引用现有对象的方案", layout, cookie, csrf)
-	if response := p.call("DELETE", "/api/v1/canvas-schemes/"+created.ID, nil, cookie, csrf); response.Code != 204 {
+	if response := p.call("DELETE", "/api/v1/canvas-schemes/"+created.ID, map[string]any{"updatedAt": created.UpdatedAt}, cookie, csrf); response.Code != 200 {
 		t.Fatalf("delete scheme: %d %s", response.Code, response.Body.String())
 	}
 	inboundsAfter, outboundsAfter := counts()

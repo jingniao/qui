@@ -19,12 +19,17 @@ func TestCanvasManagedEntryMissingPathKeepsRoute(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "managed-entry", SchemeID: &scheme.ID, InstanceID: "i-in", InboundID: before.ID, Mode: "reuse", OriginalDefaultOutbound: "direct", AppliedDefaultOutbound: before.DefaultOutbound, State: "applied"}); err != nil {
+			if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "managed-entry", SchemeID: &scheme.ID, InstanceID: "i-in", InboundID: before.ID, Mode: "create", OriginalDefaultOutbound: "direct", AppliedDefaultOutbound: before.DefaultOutbound, State: "applied"}); err != nil {
 				t.Fatal(err)
 			}
 			layout.Connections = nil
 			if removeInstance {
 				layout.Instances = layout.Instances[:3]
+			} else {
+				// Bound entries may no longer be represented by inbound:<id>.
+				// Keep the instance using its server reference while checking that
+				// removing its path still preserves the managed entry's route.
+				layout.Instances[3].Ref = "server:" + p.nodeA
 			}
 			scheme, err = p.service.Repository.CanvasScheme(p.ctx, scheme.ID)
 			if err != nil {
@@ -84,7 +89,7 @@ func TestCanvasExistingEntryPreviewUsesCurrentGroups(t *testing.T) {
 }
 
 func TestCanvasBoundEntryMissingPathKeepsRoute(t *testing.T) {
-	for _, mode := range []string{"create", "reuse"} {
+	for _, mode := range []string{"create"} {
 		t.Run(mode, func(t *testing.T) {
 			p := newPublishPanel(t)
 			binding := &CanvasEntryBinding{Mode: mode, Protocol: "socks5", PortMode: "manual", Port: canvasTestPort(20000), GroupMode: "none"}

@@ -156,15 +156,8 @@ func TestQuickCanvasTLSAndUnchangedRemoval(t *testing.T) {
 			}
 		}
 	}
-	plan, err := p.service.PlanRemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !plan.OK || len(plan.Entries) != 1 || len(plan.Entries[0].Changes) != 0 {
-		t.Fatalf("unchanged removal: %+v", plan.Entries)
-	}
-	if len(plan.Entries[0].Groups) != 1 {
-		t.Fatal("group removal information missing")
+	if result, err := p.service.RemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt}, "owner", p.users); err != nil || !result.Removed {
+		t.Fatalf("remove %+v %v", result, err)
 	}
 }
 
@@ -228,77 +221,6 @@ func TestCanvasExternalExitsRemainUnchanged(t *testing.T) {
 	}
 }
 
-func TestCanvasTLSUserEntryBaseline(t *testing.T) {
-	p, input := quickCanvasFixture(t)
-	input.EntryProtocol = "trojan"
-	result, err := p.service.QuickCanvas(p.ctx, input, "Owner", p.users)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scheme, err := p.service.Repository.CanvasScheme(p.ctx, result.SchemeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := p.service.PlanRemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !plan.OK || len(plan.Entries[0].Changes) != 0 {
-		t.Fatalf("unchanged TLS entry: %v", plan.Entries[0].Changes)
-	}
-}
-
-func TestCanvasReattachPreservesCreationBaseline(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		t.Run(map[bool]string{false: "recorded", true: "unknown"}[legacy], func(t *testing.T) {
-			p, input := quickCanvasFixture(t)
-			result, err := p.service.QuickCanvas(p.ctx, input, "Owner", p.users)
-			if err != nil {
-				t.Fatal(err)
-			}
-			entryID := result.Publication.Entries[0].InboundID
-			if legacy {
-				if _, err = p.database.Exec("UPDATE canvas_entry_bindings SET creation_config_json=NULL,creation_groups_json=NULL WHERE inbound_id=?", entryID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			before, err := p.service.Repository.CanvasEntryBindingByInbound(p.ctx, entryID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = p.service.Repository.DeleteCanvasScheme(p.ctx, result.SchemeID); err != nil {
-				t.Fatal(err)
-			}
-			resources, err := p.service.LegacyCanvasResources(p.ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(resources.Detached) != 1 {
-				t.Fatal("missing detached group")
-			}
-			group := resources.Detached[0]
-			scheme, err := p.service.ReattachCanvasLegacy(p.ctx, CanvasLegacyReattachInput{Name: "reattached", BindingIDs: group.BindingIDs, TunnelIDs: group.TunnelIDs})
-			if err != nil {
-				t.Fatal(err)
-			}
-			after, err := p.service.Repository.CanvasEntryBindingByInbound(p.ctx, entryID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(before.CreationConfigJSON, after.CreationConfigJSON) || !reflect.DeepEqual(before.CreationGroupsJSON, after.CreationGroupsJSON) {
-				t.Fatal("reattach replaced baseline")
-			}
-			plan, err := p.service.PlanRemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if plan.OK == legacy {
-				t.Fatalf("legacy=%v removal ok=%v changes=%v", legacy, plan.OK, plan.Entries[0].Changes)
-			}
-		})
-	}
-}
-
 func TestCanvasBaselineNormalizationAndAuthorization(t *testing.T) {
 	p, input := quickCanvasFixture(t)
 	result, err := p.service.QuickCanvas(p.ctx, input, "Owner", p.users)
@@ -332,59 +254,5 @@ func TestCanvasBaselineNormalizationAndAuthorization(t *testing.T) {
 	}
 	if strings.Contains(first, "external-secret") || strings.Contains(first, "PRIVATE KEY") {
 		t.Fatal("baseline contains plaintext material")
-	}
-}
-
-func TestCanvasEntryBaselineChanges(t *testing.T) {
-	for _, kind := range []string{"port", "settings", "add-group", "remove-group", "legacy"} {
-		t.Run(kind, func(t *testing.T) {
-			p, input := quickCanvasFixture(t)
-			result, err := p.service.QuickCanvas(p.ctx, input, "Owner", p.users)
-			if err != nil {
-				t.Fatal(err)
-			}
-			scheme, err := p.service.Repository.CanvasScheme(p.ctx, result.SchemeID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			entryID := result.Publication.Entries[0].InboundID
-			want := ""
-			switch kind {
-			case "port":
-				_, err = p.database.Exec("UPDATE inbounds SET port=20009 WHERE id=?", entryID)
-				want = "端口"
-			case "settings":
-				in, e := p.service.Repository.Inbound(p.ctx, entryID, true)
-				if e != nil {
-					t.Fatal(e)
-				}
-				in.Settings.Transport = "ws"
-				_, err = p.service.Repository.SaveInbound(p.ctx, entryID, inboundInputOf(in, in.DefaultOutbound))
-				want = "协议设置"
-			case "add-group":
-				entryPlanGroup(t, p, "added", "mixed", entryID)
-				want = "新增分组"
-			case "remove-group":
-				_, err = p.database.Exec("DELETE FROM node_group_inbounds WHERE inbound_id=?", entryID)
-				want = "移出分组"
-			case "legacy":
-				_, err = p.database.Exec("UPDATE canvas_entry_bindings SET creation_config_json=NULL,creation_groups_json=NULL WHERE inbound_id=?", entryID)
-				want = "未记录"
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			plan, err := p.service.PlanRemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if plan.OK || !strings.Contains(strings.Join(plan.Entries[0].Changes, ";"), want) {
-				t.Fatalf("expected %s: %+v", want, plan.Entries)
-			}
-			plan, err = p.service.PlanRemoveCanvasScheme(p.ctx, scheme.ID, CanvasRemoveInput{UpdatedAt: scheme.UpdatedAt, AcknowledgeChanges: true})
-			if err != nil || !plan.OK {
-				t.Fatalf("confirmed removal: %v %+v", err, plan)
-			}
-		})
 	}
 }

@@ -40,13 +40,59 @@ type DeletionAudit interface {
 	RecordTx(context.Context, *sql.Tx, string, string, string, string, string) error
 }
 
+type DeletionItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type DeletionInbound struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	NodeName string `json:"nodeName"`
+}
+
+type DeletionImpact struct {
+	Schemes  []DeletionItem    `json:"schemes"`
+	Tunnels  []DeletionItem    `json:"tunnels"`
+	Rules    []DeletionItem    `json:"rules"`
+	Inbounds []DeletionInbound `json:"inbounds"`
+	Blockers []Blocker         `json:"blockers"`
+}
+
+type CleanupPendingNode struct {
+	NodeID string `json:"nodeId"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+type DeletionResult struct {
+	PendingNodes []CleanupPendingNode `json:"pendingNodes"`
+}
+
+// Apply checks the prepared ownership snapshot and removes relay resources in
+// the node transaction. Removed keys are kind+":"+id for preview filtering.
+type DeletionCascade struct {
+	Preview     DeletionImpact
+	Removed     map[string]bool
+	Apply       func(context.Context, *sql.Tx) error
+	AfterCommit func(context.Context) ([]CleanupPendingNode, error)
+}
+
+type RelayDeletion interface {
+	PrepareNodeDeletion(context.Context, string) (DeletionCascade, error)
+}
+
 // DeletionPreview describes what a delete would do and what stops it.
 type DeletionPreview struct {
-	Mode          string    `json:"mode"`
-	Blockers      []Blocker `json:"blockers"`
-	Groups        []string  `json:"groups"`
-	LastHeartbeat string    `json:"lastHeartbeat"`
-	Online        bool      `json:"online"`
+	DeletionImpact
+	Mode          string   `json:"mode"`
+	Groups        []string `json:"groups"`
+	LastHeartbeat string   `json:"lastHeartbeat"`
+	Online        bool     `json:"online"`
+}
+
+func emptyDeletionImpact() DeletionImpact {
+	return DeletionImpact{Schemes: []DeletionItem{}, Tunnels: []DeletionItem{}, Rules: []DeletionItem{}, Inbounds: []DeletionInbound{}, Blockers: []Blocker{}}
 }
 
 type rowQuery interface {
@@ -98,57 +144,110 @@ func nodeBlockers(ctx context.Context, q rowQuery, id string) ([]Blocker, error)
 // history row keeps its reference. Deleting an already deleted node changes
 // nothing.
 func (r *Repository) Delete(ctx context.Context, id string, tasks Tasks, audit DeletionAudit, actor, ip string) error {
+	_, err := r.DeleteWithResult(ctx, id, tasks, audit, actor, ip)
+	return err
+}
+
+func (r *Repository) DeleteWithResult(ctx context.Context, id string, tasks Tasks, audit DeletionAudit, actor, ip string) (DeletionResult, error) {
+	result := DeletionResult{PendingNodes: []CleanupPendingNode{}}
+	n, err := r.Get(ctx, id)
+	if err != nil {
+		return result, err
+	}
+	if n.DeletedAt != "" {
+		return result, nil
+	}
+	var cascade DeletionCascade
+	if r.RelayDeletion != nil {
+		cascade, err = r.RelayDeletion.PrepareNodeDeletion(ctx, id)
+		if err != nil {
+			return result, err
+		}
+	}
+
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return result, err
 	}
 	defer tx.Rollback()
 	var name, deleted string
 	err = tx.QueryRowContext(ctx, "SELECT name,coalesce(deleted_at,'') FROM nodes WHERE id=?", id).Scan(&name, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return result, ErrNotFound
 	}
 	if err != nil {
-		return err
+		return result, err
 	}
 	if deleted != "" {
-		return tx.Commit()
+		return result, tx.Commit()
+	}
+	// Refuse external consumers before deleting their inbound providers, so FK
+	// restrictions remain a structured blocker response rather than a SQL error.
+	before, err := nodeBlockers(ctx, tx, id)
+	if err != nil {
+		return result, err
+	}
+	remaining := []Blocker{}
+	for _, blocker := range before {
+		if !cascade.Removed[blocker.Kind+":"+blocker.ID] {
+			remaining = append(remaining, blocker)
+		}
+	}
+	remaining = mergeDeletionBlockers(remaining, cascade.Preview.Blockers)
+	if len(remaining) != 0 {
+		return result, &BlockedError{Items: remaining}
+	}
+	if cascade.Apply != nil {
+		if err := cascade.Apply(ctx, tx); err != nil {
+			return result, err
+		}
 	}
 	blockers, err := nodeBlockers(ctx, tx, id)
 	if err != nil {
-		return err
+		return result, err
 	}
+	blockers = mergeDeletionBlockers(blockers, cascade.Preview.Blockers)
 	if len(blockers) != 0 {
-		return &BlockedError{Items: blockers}
+		return result, &BlockedError{Items: blockers}
 	}
 	now := timestamp(time.Now())
 	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET deleted_at=?,enabled=0,allow_subscription=0,status='disabled' WHERE id=?", now, id); err != nil {
-		return err
+		return result, err
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE node_identities SET revoked_at=coalesce(revoked_at,?) WHERE node_id=?", now, id); err != nil {
-		return err
+		return result, err
 	}
 	// An enrollment code of a deleted node never works again, and a deleted node
 	// is not a member of any node group.
 	if _, err := tx.ExecContext(ctx, "DELETE FROM node_group_inbounds WHERE inbound_id IN (SELECT id FROM inbounds WHERE node_id=?)", id); err != nil {
-		return err
+		return result, err
 	}
-	for _, table := range []string{"node_enrollment_tokens", "node_certificate_renewals", "node_group_servers", "node_group_members"} {
+	for _, table := range []string{"node_enrollment_tokens", "node_certificate_renewals", "node_group_servers", "node_group_members", "relay_cleanup_nodes"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE node_id=?", id); err != nil {
-			return err
+			return result, err
 		}
 	}
 	if tasks != nil {
 		if err := tasks.CloseNodeTasks(ctx, tx, id); err != nil {
-			return err
+			return result, err
 		}
 	}
 	if audit != nil {
 		if err := audit.RecordTx(ctx, tx, actor, "删除节点", name+" ("+id+")", "成功", ip); err != nil {
-			return err
+			return result, err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+	if cascade.AfterCommit != nil {
+		pending, err := cascade.AfterCommit(ctx)
+		if err != nil {
+			return result, err
+		}
+		result.PendingNodes = append(result.PendingNodes, pending...)
+	}
+	return result, nil
 }
 
 // Preview reports how a delete would proceed and what currently stops it. It
@@ -158,7 +257,7 @@ func (r *Repository) Preview(ctx context.Context, id string) (DeletionPreview, e
 	if err != nil {
 		return DeletionPreview{}, err
 	}
-	preview := DeletionPreview{Mode: "delete", Blockers: []Blocker{}, Groups: []string{}, LastHeartbeat: n.LastHeartbeat, Online: n.Status == "online" || n.Status == "degraded"}
+	preview := DeletionPreview{DeletionImpact: emptyDeletionImpact(), Mode: "delete", Groups: []string{}, LastHeartbeat: n.LastHeartbeat, Online: n.Status == "online" || n.Status == "degraded"}
 	if n.DeletedAt != "" {
 		preview.Mode = "deleted"
 		return preview, nil
@@ -170,8 +269,28 @@ func (r *Repository) Preview(ctx context.Context, id string) (DeletionPreview, e
 	if n.Status == "pending" && identities == 0 {
 		preview.Mode = "cancel"
 	}
-	if preview.Blockers, err = nodeBlockers(ctx, r.Database, id); err != nil {
+	var cascade DeletionCascade
+	if r.RelayDeletion != nil {
+		cascade, err = r.RelayDeletion.PrepareNodeDeletion(ctx, id)
+		if err != nil {
+			return DeletionPreview{}, err
+		}
+		preview.DeletionImpact = cascade.Preview
+	}
+	blockers, err := nodeBlockers(ctx, r.Database, id)
+	if err != nil {
 		return DeletionPreview{}, err
+	}
+	for _, blocker := range blockers {
+		if cascade.Removed[blocker.Kind+":"+blocker.ID] {
+			continue
+		}
+		preview.Blockers = mergeDeletionBlockers(preview.Blockers, []Blocker{blocker})
+	}
+	// Once a pending server owns configuration, use the same atomic deletion
+	// as an enrolled server; bare enrollment cancellation cannot cascade it.
+	if preview.Mode == "cancel" && (len(preview.Inbounds)+len(preview.Schemes)+len(preview.Tunnels)+len(preview.Rules)+len(preview.Blockers) > 0) {
+		preview.Mode = "delete"
 	}
 	rows, err := r.Database.QueryContext(ctx, "SELECT g.name FROM node_groups g JOIN node_group_members m ON m.group_id=g.id WHERE m.node_id=? ORDER BY g.name", id)
 	if err != nil {
@@ -186,4 +305,20 @@ func (r *Repository) Preview(ctx context.Context, id string) (DeletionPreview, e
 		preview.Groups = append(preview.Groups, name)
 	}
 	return preview, rows.Err()
+}
+
+func mergeDeletionBlockers(items, additional []Blocker) []Blocker {
+	for _, item := range additional {
+		found := false
+		for _, current := range items {
+			if current.Kind == item.Kind && current.ID == item.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			items = append(items, item)
+		}
+	}
+	return items
 }

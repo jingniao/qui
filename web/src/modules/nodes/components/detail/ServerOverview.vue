@@ -9,7 +9,7 @@
       <div class="flex items-center justify-between border-b border-black/[0.05] pb-2.5 flex-wrap gap-2">
         <div class="flex items-center gap-2">
           <h2 class="text-ios-label text-base font-semibold leading-normal">基础信息</h2>
-          <StatusBadge :status="status.tone" :label="status.label" />
+          <StatusBadge :status="status.tone" :label="status.label" /><RelayCleanupBadge :node="node" />
           <span class="text-xs text-ios-secondary font-mono">
             {{ connections === '—' ? '活跃会话 —' : `${connections} 个活跃会话` }}
           </span>
@@ -244,6 +244,7 @@ import { revisionEventText } from './serverDetailModel';
 import { nodeCores } from '../../coreSummary';
 import type { NodeGroup } from '../../groupsApi';
 import StatusBadge from '../../../../components/StatusBadge.vue';
+import RelayCleanupBadge from '../RelayCleanupBadge.vue';
 import ServerNodeSummary from './ServerNodeSummary.vue';
 import ServerFinancialCards from './ServerFinancialCards.vue';
 import ServerSystemPanels from './ServerSystemPanels.vue';

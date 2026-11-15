@@ -7,6 +7,7 @@ import (
 
 func rewindTunnelPublication(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindRelayCleanup(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0149_tunnel_publication_finalization.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

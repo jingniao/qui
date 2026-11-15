@@ -48,6 +48,9 @@ func (s *Service) canvasPlanEntries(ctx context.Context, layout CanvasLayout, pl
 			plan.node(inbound.NodeID)
 		} else {
 			b := entry.binding
+			if b.Mode != "create" {
+				return errors.New("入口仅支持新建（create），不再支持复用现有入口")
+			}
 			n, err := s.Nodes.Get(ctx, ref.id)
 			if err != nil {
 				return err
@@ -56,52 +59,29 @@ func (s *Service) canvasPlanEntries(ctx context.Context, layout CanvasLayout, pl
 				return errors.New("入口服务器不存在、已删除或已停用")
 			}
 			entry.preview = &CanvasPlanEntry{InstanceID: instance.InstanceID, Mode: b.Mode, NodeID: n.ID, NodeName: n.Name, Groups: []CanvasPlanEntryGroup{}}
-			if b.Mode == "reuse" {
-				inbound, err := s.Repository.Inbound(ctx, b.InboundID, true)
-				if errors.Is(err, ErrNotFound) {
-					return errors.New("复用入站不存在或已删除")
-				}
-				if err != nil {
-					return err
-				}
-				if inbound.NodeID != n.ID || inbound.InternalRelay || inbound.Protocol == "forward" {
-					return errors.New("复用入口必须是入口服务器上的普通用户入站，不能使用内部中转入站")
-				}
-				if err := validateCanvasEntryCore(n, inbound.Core, inbound.Protocol); err != nil {
-					return err
-				}
-				entry.existing = inbound
-				entry.preview.InboundID, entry.preview.Protocol, entry.preview.Port = inbound.ID, inbound.Protocol, inbound.Port
-				entry.preview.Name, entry.preview.PreviousRoute = inbound.Name, inbound.DefaultOutbound
-				entry.preview.Groups, err = s.canvasEntryGroups(ctx, inbound.ID, false)
-				if err != nil {
-					return err
-				}
-			} else {
-				if err := validateCanvasEntryCore(n, b.Core, b.Protocol); err != nil {
-					return err
-				}
-				entry.preview.Protocol = b.Protocol
-				if b.PortMode == "manual" {
-					entry.preview.Port = *b.Port
-				}
-				if b.GroupMode == "explicit" {
-					seen := map[string]bool{}
-					for _, groupID := range b.GroupIDs {
-						if seen[groupID] {
-							continue
-						}
-						var group CanvasPlanEntryGroup
-						err := s.Repository.Database.QueryRowContext(ctx, "SELECT id,name FROM node_groups WHERE id=?", groupID).Scan(&group.ID, &group.Name)
-						if errors.Is(err, sql.ErrNoRows) {
-							return fmt.Errorf("入口分组 %s 不存在", groupID)
-						}
-						if err != nil {
-							return err
-						}
-						entry.preview.Groups = append(entry.preview.Groups, group)
-						seen[groupID] = true
+			if err := validateCanvasEntryCore(n, b.Core, b.Protocol); err != nil {
+				return err
+			}
+			entry.preview.Protocol = b.Protocol
+			if b.PortMode == "manual" {
+				entry.preview.Port = *b.Port
+			}
+			if b.GroupMode == "explicit" {
+				seen := map[string]bool{}
+				for _, groupID := range b.GroupIDs {
+					if seen[groupID] {
+						continue
 					}
+					var group CanvasPlanEntryGroup
+					err := s.Repository.Database.QueryRowContext(ctx, "SELECT id,name FROM node_groups WHERE id=?", groupID).Scan(&group.ID, &group.Name)
+					if errors.Is(err, sql.ErrNoRows) {
+						return fmt.Errorf("入口分组 %s 不存在", groupID)
+					}
+					if err != nil {
+						return err
+					}
+					entry.preview.Groups = append(entry.preview.Groups, group)
+					seen[groupID] = true
 				}
 			}
 			record, err := s.Repository.CanvasEntryBinding(ctx, plan.schemeID, instance.InstanceID)
@@ -112,7 +92,7 @@ func (s *Service) canvasPlanEntries(ctx context.Context, layout CanvasLayout, pl
 				return fmt.Errorf("入口服务器「%s」未设置公网 IP 或客户端连接地址，无法为 %s 入口生成自签名证书", n.Name, b.Protocol)
 			}
 			if err == nil {
-				if record.Mode != b.Mode || b.Mode == "reuse" && record.InboundID != b.InboundID {
+				if record.Mode != b.Mode {
 					return errors.New("入口绑定已发布，不能切换绑定模式或入站")
 				}
 				inbound, err := s.Repository.Inbound(ctx, record.InboundID, true)

@@ -51,7 +51,7 @@ export function canvasStatusItems(status: CanvasSchemeStatus): CanvasStatusItem[
       tone: status.entries.length ? 'neutral' : 'warning',
       details: status.entries.map(entry => [
         entry.name || entry.inboundId || entry.instanceId,
-        entry.mode === 'create' ? '新建独立入口' : entry.mode === 'reuse' ? '复用入口' : entry.mode,
+        entry.mode === 'create' ? '新建独立入口' : entry.mode,
         entry.state ? entryLabels[entry.state] || entry.state : undefined,
         entry.route ? `路由：${entry.route}` : undefined
       ].filter(Boolean).join(' · '))

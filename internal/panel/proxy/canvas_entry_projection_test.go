@@ -99,7 +99,7 @@ func TestCanvasEntryRouteSummaryRelayAndDetached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "entry", InboundID: p.inbound.ID, Mode: "reuse", OriginalDefaultOutbound: "direct", State: "applied"}); err != nil {
+	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "entry", InboundID: p.inbound.ID, Mode: "create", OriginalDefaultOutbound: "direct", State: "applied"}); err != nil {
 		t.Fatal(err)
 	}
 	items := []Inbound{p.inbound}
@@ -107,7 +107,7 @@ func TestCanvasEntryRouteSummaryRelayAndDetached(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := items[0].RouteSummary
-	if got.Type != "relay" || got.SchemeID != scheme.ID || got.SchemeName != "Three hops" || got.BindingMode != "reuse" || got.ExitNodeID != p.nodeC || !reflect.DeepEqual(got.Path, []string{"Node A", "Node B", "Node C"}) {
+	if got.Type != "relay" || got.SchemeID != scheme.ID || got.SchemeName != "Three hops" || got.BindingMode != "create" || got.ExitNodeID != p.nodeC || !reflect.DeepEqual(got.Path, []string{"Node A", "Node B", "Node C"}) {
 		t.Fatalf("summary: %+v", got)
 	}
 	if _, err := p.database.ExecContext(p.ctx, "UPDATE canvas_entry_bindings SET scheme_id=NULL,state='detached' WHERE id='binding'"); err != nil {
@@ -212,7 +212,7 @@ func TestCanvasEntryRouteSummaryBrokenDrawingDoesNotFailList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "entry", InboundID: p.inbound.ID, Mode: "reuse", OriginalDefaultOutbound: "direct", State: "applied"}); err != nil {
+	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "binding", SchemeID: &scheme.ID, InstanceID: "entry", InboundID: p.inbound.ID, Mode: "create", OriginalDefaultOutbound: "direct", State: "applied"}); err != nil {
 		t.Fatal(err)
 	}
 	// The exit server's reference disappears from the drawing's point of view.

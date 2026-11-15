@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net/url"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -42,8 +43,6 @@ func TestPrepareDatabasePreservesCanvasEntryBindings(t *testing.T) {
 			binding.CreationConfigJSON, binding.CreationGroupsJSON = &config, &groups
 			if state == "detached" {
 				binding.SchemeID = nil
-				binding.Mode = "reuse"
-				binding.OriginalDefaultOutbound = "missing-original-outbound"
 			}
 			if err := r.InsertCanvasEntryBinding(ctx, binding); err != nil {
 				t.Fatal(err)
@@ -77,6 +76,59 @@ func TestPrepareDatabasePreservesCanvasEntryBindings(t *testing.T) {
 	}
 	if got := canvasRecoveryRows(t, restored, "config_revisions", "deployment_batches", "deployment_batch_items", "deployment_targets", "deployment_commands", "node_runtime_state"); !reflect.DeepEqual(got, coordination) {
 		t.Fatalf("restore created or changed deployment execution: got %#v, want %#v", got, coordination)
+	}
+}
+
+func TestPrepareDatabasePre0150RemovesReuseBindingPreservesInbound(t *testing.T) {
+	ctx := context.Background()
+	var archived map[string][][]any
+	f := listeningFixture(t, func(f *fixture) {
+		r := &proxy.Repository{Database: f.source.Database, Vault: f.source.ConfigurationVault}
+		inbound, err := r.SaveInbound(ctx, "", proxy.InboundInput{Name: "historical reused entry", NodeID: f.node.ID, Protocol: "http", Listen: "127.0.0.1", Port: 18082, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "block"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewindRelayCleanup(t, f.source.Database)
+		// Historical archives predate the create-only repository API. Write the
+		// old persisted representation directly, including its original route.
+		if _, err := f.source.Database.Exec(`INSERT INTO canvas_entry_bindings
+(id,instance_id,inbound_id,mode,original_default_outbound,applied_default_outbound,state,updated_at)
+VALUES('old-reuse','entry',?,'reuse','direct','block','detached','2026-11-14T00:00:00Z')`, inbound.ID); err != nil {
+			t.Fatal(err)
+		}
+		assertInt(t, f.source.Database, "SELECT count(*) FROM canvas_entry_bindings WHERE mode='reuse'", 1)
+		assertInt(t, f.source.Database, "SELECT count(*) FROM schema_migrations WHERE version='0150_relay_cleanup.sql'", 0)
+		archived = canvasRecoveryRows(t, f.source.Database, "inbounds")
+	})
+	if err := db.Migrate(ctx, f.source.Database, migrations.Files); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inspect without db.Open/dbtest.Open, which would itself apply migrations
+	// and could mask a missing migration in the restore path.
+	databaseURI, err := db.URI(filepath.Join(candidate.Directory, "database", "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := url.Parse(databaseURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := uri.Query()
+	query.Set("mode", "ro")
+	uri.RawQuery = query.Encode()
+	restored, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	assertInt(t, restored, "SELECT count(*) FROM schema_migrations WHERE version='0150_relay_cleanup.sql'", 1)
+	assertInt(t, restored, "SELECT count(*) FROM canvas_entry_bindings WHERE id='old-reuse' OR mode='reuse'", 0)
+	if got := canvasRecoveryRows(t, restored, "inbounds"); !reflect.DeepEqual(got, archived) {
+		t.Fatalf("migration changed archived inbounds: got %#v, want %#v", got, archived)
 	}
 }
 

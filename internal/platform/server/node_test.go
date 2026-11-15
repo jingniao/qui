@@ -421,14 +421,14 @@ func TestNodeHTTPAuthorizationAndExpiredEnrollment(t *testing.T) {
 	if _, err := app.Database.Exec("INSERT INTO node_identities(node_id,certificate_pem,fingerprint,expires_at) VALUES(?,'pem','enrolled-fingerprint',?)", enrolled.Node.ID, time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05.000000000Z")); err != nil {
 		t.Fatal(err)
 	}
-	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken); response.Code != 204 {
+	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken); response.Code != 200 {
 		t.Fatalf("enrolled node was not deleted: %d %s", response.Code, response.Body.String())
 	}
 	var deleted int
 	if err := app.Database.QueryRow("SELECT (SELECT count(*) FROM node_identities WHERE node_id=? AND revoked_at IS NOT NULL)+(SELECT count(*) FROM nodes WHERE id=? AND deleted_at IS NOT NULL AND enabled=0)", enrolled.Node.ID, enrolled.Node.ID).Scan(&deleted); err != nil || deleted != 2 {
 		t.Fatalf("deleted node kept its identity or stayed enabled: %d %v", deleted, err)
 	}
-	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken); response.Code != 204 {
+	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken); response.Code != 200 {
 		t.Fatalf("second delete was not idempotent: %d", response.Code)
 	}
 }

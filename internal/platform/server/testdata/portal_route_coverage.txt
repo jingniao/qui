@@ -43,7 +43,6 @@ GET /api/v1/backups
 GET /api/v1/backups/{id}/download
 GET /api/v1/canvas-schemes
 GET /api/v1/canvas-schemes/{id}
-GET /api/v1/canvas-schemes/{id}/remove-status
 GET /api/v1/canvas-schemes/{id}/status
 GET /api/v1/canvas-tunnels
 GET /api/v1/canvas-tunnels/legacy-objects
@@ -62,6 +61,7 @@ GET /api/v1/events
 GET /api/v1/imported-proxies
 GET /api/v1/imported-proxies/{id}/deletion-preview
 GET /api/v1/inbounds
+GET /api/v1/inbounds/{id}/deletion-preview
 GET /api/v1/node-groups
 GET /api/v1/nodes
 GET /api/v1/nodes/machine-traffic
@@ -104,7 +104,6 @@ GET /api/v1/probe-targets
 GET /api/v1/protocol-support
 GET /api/v1/proxy-chains
 GET /api/v1/proxy-chains/{id}
-GET /api/v1/relay-schemes/legacy-resources
 GET /api/v1/releases
 GET /api/v1/restore-records
 GET /api/v1/revisions
@@ -170,7 +169,6 @@ POST /api/v1/canvas-schemes
 POST /api/v1/canvas-schemes/{id}/plan
 POST /api/v1/canvas-schemes/{id}/publish
 POST /api/v1/canvas-schemes/{id}/remove
-POST /api/v1/canvas-schemes/{id}/remove-plan
 POST /api/v1/canvas-tunnels
 POST /api/v1/canvas-tunnels/{id}/adopt
 POST /api/v1/canvas-tunnels/{id}/rotate-credentials
@@ -215,7 +213,6 @@ POST /api/v1/portal/auth/logout
 POST /api/v1/portal/subscription/reset
 POST /api/v1/probe-targets
 POST /api/v1/proxy-chains
-POST /api/v1/relay-schemes/legacy-resources/reattach
 POST /api/v1/relay-schemes/quick
 POST /api/v1/relay-schemes/quick/plan
 POST /api/v1/releases

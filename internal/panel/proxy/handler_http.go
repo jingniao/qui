@@ -22,7 +22,7 @@ type Handler struct {
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/inbounds/{id}/reachability", h.Auth.Require(http.HandlerFunc(h.reachability), true))
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/inbounds": h.listInbounds, "POST /api/v1/inbounds": h.saveInbound, "PUT /api/v1/inbounds/{id}": h.saveInbound, "DELETE /api/v1/inbounds/{id}": h.deleteInbound, "GET /api/v1/outbounds": h.listOutbounds, "POST /api/v1/outbounds": h.saveOutbound, "PUT /api/v1/outbounds/{id}": h.saveOutbound, "DELETE /api/v1/outbounds/{id}": h.deleteOutbound} {
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/inbounds": h.listInbounds, "GET /api/v1/inbounds/{id}/deletion-preview": h.previewInboundDeletion, "POST /api/v1/inbounds": h.saveInbound, "PUT /api/v1/inbounds/{id}": h.saveInbound, "DELETE /api/v1/inbounds/{id}": h.deleteInbound, "GET /api/v1/outbounds": h.listOutbounds, "POST /api/v1/outbounds": h.saveOutbound, "PUT /api/v1/outbounds/{id}": h.saveOutbound, "DELETE /api/v1/outbounds/{id}": h.deleteOutbound} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
 	// The protocol capability basis is read-only and non-sensitive, so both Owner
@@ -126,7 +126,8 @@ func (h *Handler) saveOutbound(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, status, outbound)
 }
 func (h *Handler) deleteInbound(w http.ResponseWriter, r *http.Request) {
-	if err := h.Service.Repository.DeleteInbound(r.Context(), r.PathValue("id")); err != nil {
+	result, err := h.Service.DeleteInbound(r.Context(), r.PathValue("id"))
+	if err != nil {
 		h.failTunnel(w, err)
 		return
 	}
@@ -134,7 +135,15 @@ func (h *Handler) deleteInbound(w http.ResponseWriter, r *http.Request) {
 		h.internal(w, err)
 		return
 	}
-	w.WriteHeader(204)
+	httpapi.JSON(w, 200, result)
+}
+func (h *Handler) previewInboundDeletion(w http.ResponseWriter, r *http.Request) {
+	preview, err := h.Service.PreviewInboundDeletion(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.failTunnel(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, preview)
 }
 func (h *Handler) deleteOutbound(w http.ResponseWriter, r *http.Request) {
 	if err := h.Service.DeleteOutbound(r.Context(), r.PathValue("id")); err != nil {

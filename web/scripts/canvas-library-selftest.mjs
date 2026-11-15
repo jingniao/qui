@@ -146,16 +146,14 @@ assert.equal(canvas.includes('bg-ios-background'), false);
 assert.ok(canvas.includes('v-if="schemesLoading || schemesLoadError || !currentScheme.id"'));
 assert.ok(canvas.includes('absolute inset-0 z-40 bg-[#F5F5F7]'));
 assert.ok(canvas.includes('v-else-if="!currentScheme.id"'));
-assert.match(canvas, /<div v-if="currentScheme\.id" class="pt-2">\s*<button\s+type="button"\s+@click="confirmDeleteScheme = true"/);
 
 // Null/missing arrays from historical rows must not discard an entire page.
 const schemeContext = { servers: [], inbounds: [], imported: [] };
 // Opening a quick-created scheme, moving its entry and saving must retain the
-// full binding contract. Both create and reuse layouts follow the same mapper.
+// full binding contract. Create layouts follow the same mapper.
 for (const binding of [
   { mode: 'create', protocol: 'vless', core: 'xray', portMode: 'manual', port: 35005, groupMode: 'explicit', groupIds: ['group-a'] },
-  { mode: 'create', protocol: 'trojan', core: 'sing-box', portMode: 'auto', groupMode: 'exit_groups' },
-  { mode: 'reuse', inboundId: 'ib-1', portMode: 'auto', groupMode: 'none' }
+  { mode: 'create', protocol: 'trojan', core: 'sing-box', portMode: 'auto', groupMode: 'exit_groups' }
 ]) {
   const stored = { id: 'bound', name: 'bound', execution: 'server', publishedAt: '', updatedAt: '', layout: { instances: [{ instanceId: 'entry', ref: 'server:srv-a', x: 1, y: 2, role: 'entry', entryBinding: binding }], connections: [] } };
   const mapped = api.canvasSchemeToRelayScheme(stored, { servers, inbounds, imported: [] });
@@ -180,7 +178,7 @@ for (const [execution, role, resourceType, shouldKeep] of [
   ['server', 'exit', 'server', false], ['client', 'entry', 'server', false],
   ['server', 'entry', 'node', false]
 ]) {
-  const node = { role, resourceType, entryBinding: { mode: 'reuse', inboundId: 'ib-1', portMode: 'auto', groupMode: 'none' } };
+  const node = { role, resourceType, entryBinding: { mode: 'create', protocol: 'vless', portMode: 'auto', groupMode: 'none' } };
   entryLifecycle.currentScheme.value.executionLocation = execution;
   entryLifecycle.currentScheme.value.nodes = [node];
   entryLifecycle.saveDraft();

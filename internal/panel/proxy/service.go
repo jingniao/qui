@@ -27,17 +27,12 @@ type CanvasEntryGroups interface {
 	SaveGroup(context.Context, string, node.GroupInput) (node.Group, error)
 }
 type Service struct {
-	removalMu      sync.Mutex
-	removalRuns    map[string]*canvasRemovalRun
-	removalContext context.Context
-	removalCancel  context.CancelFunc
-	removalJobs    sync.WaitGroup
-	removalClosed  bool
-	canvasMu       sync.Mutex
-	Repository     *Repository
-	Nodes          Nodes
-	EntryGroups    CanvasEntryGroups
-	Policies       interface {
+	RelayCleanupRequested func(context.Context) error
+	canvasMu              sync.Mutex
+	Repository            *Repository
+	Nodes                 Nodes
+	EntryGroups           CanvasEntryGroups
+	Policies              interface {
 		ForNode(context.Context, string) ([]desiredstate.Policy, error)
 	}
 	// Deploy publishes a canvas drawing through the Deployment module's own

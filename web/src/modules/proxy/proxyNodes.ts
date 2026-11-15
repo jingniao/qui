@@ -266,11 +266,6 @@ export async function createCanvasScheme(name: string, executionLocation: Execut
   return scheme;
 }
 
-export async function deleteCanvasScheme(schemeId: string): Promise<void> {
-  await canvasAPI.delete(schemeId);
-  proxyNodeStore.schemes = proxyNodeStore.schemes.filter(item => item.id !== schemeId);
-}
-
 /**
  * Find all relay routes targeting the given exit node.
  * Traces back incoming connections to create path: e.g. "香港 → 日本", "上海 → 香港 → 日本"

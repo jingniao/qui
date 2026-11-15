@@ -62,21 +62,25 @@ func TestNodeRelayHandlersAndInboundDeletion(t *testing.T) {
 		t.Fatal(response.Body.String())
 	}
 	response = p.call("DELETE", "/api/v1/inbounds/"+inbound.ID, nil, owner, csrf)
-	assertTunnelHTTP(t, response, 409, "inbound_has_relays")
-	if !strings.Contains(response.Body.String(), item.Rule.ID) {
+	assertTunnelHTTP(t, response, 200, "")
+	if !strings.Contains(response.Body.String(), `"pendingNodes":`) {
 		t.Fatal(response.Body.String())
 	}
-	if err = p.service.DeleteTunnelRule(p.ctx, item.Rule.ID); err != nil {
-		t.Fatal(err)
+	if _, err = p.service.Repository.TunnelRule(p.ctx, item.Rule.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("linked rule survived inbound deletion: %v", err)
 	}
-	assertTunnelHTTP(t, p.call("DELETE", "/api/v1/inbounds/"+inbound.ID, nil, owner, csrf), 204, "")
+	if _, err = p.service.Repository.Tunnel(p.ctx, tunnel.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty tunnel survived inbound deletion: %v", err)
+	}
 	if len(p.audit.actions) < 1 {
 		t.Fatal("missing audit")
 	}
-	if err = p.service.DeleteTunnel(p.ctx, tunnel.ID); err != nil {
+	// Published removals remain in the library but cannot accept new rules.
+	inbound, err = p.service.Repository.SaveInbound(p.ctx, "", InboundInput{Name: "replacement user", NodeID: p.nodeB, Protocol: "socks5", Listen: "0.0.0.0", Port: 1081, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Published removals remain in the library but cannot accept new rules.
+	input.InboundID = inbound.ID
 	tunnel, err = p.service.SaveTunnel(p.ctx, "", tunnelTestInput(p.nodeA, p.nodeB))
 	if err != nil {
 		t.Fatal(err)

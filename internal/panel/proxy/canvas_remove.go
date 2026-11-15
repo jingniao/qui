@@ -2,425 +2,79 @@ package proxy
 
 import (
 	"context"
+	"database/sql"
 	"errors"
-	"fmt"
+	"log/slog"
 	"reflect"
-	"slices"
-	"strings"
 )
 
-type CanvasRemoveConflict struct{ Plan CanvasRemovePlan }
-
-// Keep the original error for classification and logs; expose only names and
-// fixed outcome codes from the captured publication, never configuration data.
-type canvasRemovalPhaseError struct {
-	cause   error
-	message string
+type RelayCleanupNode struct {
+	NodeID string `json:"nodeId"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
 }
-
-func (e *canvasRemovalPhaseError) Error() string { return e.cause.Error() }
-func (e *canvasRemovalPhaseError) Unwrap() error { return e.cause }
-
-func (e *CanvasRemoveConflict) Error() string {
-	return "撤除需要确认人工改动或指定有效恢复目标"
-}
-
-// Previous revisions belong to the deployment adapter, never to the public API.
-type CanvasRemovePublication struct {
-	CanvasPublishResult
-	Previous map[string]int64 `json:"-"`
-}
-
-type CanvasRemovalDeployer interface {
-	PublishCanvasRemoval(context.Context, string, string, []NodeSnapshot) (CanvasRemovePublication, error)
-	RollbackCanvasRemoval(context.Context, CanvasRemovePublication) error
-}
-
-type CanvasRemovalCanceler interface {
-	CancelCanvasRemoval(context.Context, CanvasRemovePublication) error
-}
-
 type CanvasRemoveResult struct {
-	SchemeID     string                    `json:"schemeId"`
-	Removed      bool                      `json:"removed"`
-	Publications []CanvasRemovePublication `json:"publications"`
+	SchemeID     string             `json:"schemeId"`
+	Removed      bool               `json:"removed"`
+	PendingNodes []RelayCleanupNode `json:"pendingNodes"`
 }
 
-// RemoveCanvasScheme holds the same lock as save and publish. The entry phase
-// must be acknowledged by Agents before channels can stop. Physical deletion
-// happens only after both phases succeed, so undo restores existing identities.
+// Removal commits local ownership and durable cleanup work together. Agent
+// availability never controls whether the scheme can leave the database.
 func (s *Service) RemoveCanvasScheme(ctx context.Context, schemeID string, input CanvasRemoveInput, author string, users AccessReader) (CanvasRemoveResult, error) {
 	s.canvasMu.Lock()
-	defer s.canvasMu.Unlock()
-	result := CanvasRemoveResult{SchemeID: schemeID, Publications: []CanvasRemovePublication{}}
-	plan, err := s.planRemoveCanvasScheme(ctx, schemeID, input)
+	result := CanvasRemoveResult{SchemeID: schemeID, PendingNodes: []RelayCleanupNode{}}
+	plan, err := s.canvasRemovalScope(ctx, schemeID, input)
+	if err == nil {
+		var guards []canvasRemovalRow
+		guards, err = s.canvasRemovalRows(ctx, plan)
+		if err == nil {
+			err = s.finishCanvasRemoval(ctx, plan, guards)
+		}
+	}
+	s.canvasMu.Unlock()
 	if err != nil {
 		return result, err
 	}
-	if !plan.OK {
-		return result, &CanvasRemoveConflict{Plan: plan}
-	}
-	deploy, ok := s.Deploy.(CanvasRemovalDeployer)
-	if !ok || users == nil {
-		return result, errors.New("canvas removal deployment unavailable")
-	}
-	undo := &canvasUndo{}
-	fail := func(cause error) (CanvasRemoveResult, error) {
-		cleanup := context.WithoutCancel(ctx)
-		// Restore database intent before rollback receipts can trigger access reconciliation.
-		cause = errors.Join(cause, undo.run(cleanup))
-		for i := len(result.Publications) - 1; i >= 0; i-- {
-			if ctx.Err() == nil {
-				e := deploy.RollbackCanvasRemoval(ctx, result.Publications[i])
-				if e == nil {
-					continue
-				}
-				cause = errors.Join(cause, fmt.Errorf("撤除运行回滚失败：%w", e))
-				if ctx.Err() == nil {
-					break
-				} // Do not reopen an entry while its channel rollback failed.
-				// Shutdown interrupted a real-failure rollback wait. Persist recovery
-				// below rather than keeping shutdown waiting for an offline Agent.
-			}
-			if ctx.Err() != nil {
-				canceler, ok := deploy.(CanvasRemovalCanceler)
-				if !ok {
-					return result, errors.Join(cause, errors.New("撤除取消恢复服务不可用，方案保留"))
-				}
-				if e := canceler.CancelCanvasRemoval(cleanup, result.Publications[i]); e != nil {
-					cause = errors.Join(cause, e)
-					for earlier := i - 1; earlier >= 0; earlier-- {
-						phase := result.Publications[earlier]
-						for _, n := range phase.Nodes {
-							message := fmt.Sprintf("中断撤除方案 %s：通道回滚确认前保持入口停止；节点 %s 待恢复到修订 %d（入口撤除修订 %d，批次 %s），请在节点配置历史恢复", schemeID, n.NodeID, phase.Previous[n.NodeID], n.Revision, phase.BatchID)
-							cause = errors.Join(cause, errors.New(message))
-							// The HTTP client may already be gone. Keep the manual recovery
-							// target in the existing revision history, not only the response.
-							if _, writeErr := s.Repository.Database.ExecContext(cleanup, "UPDATE config_revisions SET summary=summary || ? WHERE id=?", "；"+message, n.Revision); writeErr != nil {
-								cause = errors.Join(cause, writeErr)
-							}
-						}
-					}
-					break
-				}
-				continue
-			}
+	result.Removed = true
+	if s.RelayCleanupRequested != nil {
+		// The transaction is already authoritative. A dispatcher failure leaves
+		// durable work for the minute/startup scan and is recorded in panel logs.
+		if err = s.RelayCleanupRequested(ctx); err != nil {
+			slog.Error("relay cleanup dispatch failed", "scheme_id", schemeID, "error", err)
 		}
-		return result, cause
 	}
-	entryNodes := []string{}
-	seen := map[string]bool{}
-	for _, entry := range plan.Entries {
-		if !seen[entry.NodeID] {
-			entryNodes = append(entryNodes, entry.NodeID)
-			seen[entry.NodeID] = true
-		}
-		before := entry.inbound
-		expectedEnabled, expectedRoute := before.Enabled, before.DefaultOutbound
-		if entry.Mode == "create" {
-			expectedEnabled = false
-			_, err = s.Repository.Database.ExecContext(ctx, "UPDATE inbounds SET enabled=0 WHERE id=?", entry.InboundID)
-		} else {
-			expectedRoute = entry.RestoreTarget
-			_, err = s.Repository.Database.ExecContext(ctx, "UPDATE inbounds SET default_outbound=? WHERE id=?", entry.RestoreTarget, entry.InboundID)
+	for _, id := range plan.Nodes {
+		var reason, code string
+		err = s.Repository.Database.QueryRowContext(ctx, "SELECT reason,last_code FROM relay_cleanup_nodes WHERE node_id=?", id).Scan(&reason, &code)
+		if err == sql.ErrNoRows {
+			continue
 		}
 		if err != nil {
-			return fail(err)
+			return result, err
 		}
-		undo.add(func(ctx context.Context) error {
-			res, e := s.Repository.Database.ExecContext(ctx, "UPDATE inbounds SET enabled=?,default_outbound=? WHERE id=? AND enabled=? AND default_outbound=?", before.Enabled, before.DefaultOutbound, before.ID, expectedEnabled, expectedRoute)
-			if e != nil {
-				return e
-			}
-			count, e := res.RowsAffected()
-			if e != nil {
-				return e
-			}
-			if count != 1 {
-				return fmt.Errorf("入口 %s 在撤除期间已修改，未覆盖其当前配置", before.ID)
-			}
-			return nil
-		})
-	}
-	channelStates := map[string]any{}
-	disableChannel := func(object CanvasRemoveObject) error {
-		table := canvasRemoveTable(object.Kind)
-		state, e := s.canvasRemoveObjectState(ctx, object)
+		n, e := s.Nodes.Get(ctx, id)
 		if e != nil {
-			return e
+			return result, e
 		}
-		switch value := state.(type) {
-		case Inbound:
-			value.Enabled = false
-			state = value
-		case Outbound:
-			value.Enabled = false
-			state = value
-		case Chain:
-			value.Enabled = false
-			state = value
-		}
-		channelStates[object.Kind+":"+object.ID] = state
-		var enabled bool
-		if e = s.Repository.Database.QueryRowContext(ctx, "SELECT enabled FROM "+table+" WHERE id=?", object.ID).Scan(&enabled); e != nil {
-			return e
-		}
-		if _, e = s.Repository.Database.ExecContext(ctx, "UPDATE "+table+" SET enabled=0 WHERE id=?", object.ID); e != nil {
-			return e
-		}
-		undo.add(func(ctx context.Context) error {
-			res, e := s.Repository.Database.ExecContext(ctx, "UPDATE "+table+" SET enabled=? WHERE id=? AND enabled=0", enabled, object.ID)
-			if e != nil {
-				return e
-			}
-			count, e := res.RowsAffected()
-			if e != nil {
-				return e
-			}
-			if count != 1 {
-				return fmt.Errorf("通道对象 %s 在撤除期间已修改，未覆盖其当前配置", object.ID)
-			}
-			return nil
-		})
-		return nil
-	}
-	// Once its entry is stopped or restored, nothing on the entry server dials the
-	// scheme's own relay outbounds any more, so they go off in the same revision.
-	// Leaving them enabled made the entry phase depend on the next hop still running
-	// its internal listener: a scheme whose channel was already broken could never
-	// be removed (relay dependency not ready ... internal_inbound_unavailable).
-	for _, object := range plan.Objects {
-		if !object.Keep && object.Kind != "inbound" && seen[object.NodeID] {
-			if err = disableChannel(object); err != nil {
-				return fail(err)
-			}
+		if n.Status != "online" && n.Status != "degraded" || code != "" {
+			result.PendingNodes = append(result.PendingNodes, RelayCleanupNode{NodeID: id, Name: n.Name, Reason: reason})
 		}
 	}
-	if len(entryNodes) > 0 {
-		publication, e := s.publishCanvasRemovalPhase(ctx, deploy, plan.scheme.Name+"：停止或恢复入口", author, entryNodes, users)
-		result.Publications = append(result.Publications, publication)
-		if e != nil {
-			return fail(e)
-		}
-	}
-	if err = s.checkCanvasRemovalEntries(ctx, plan); err != nil {
-		return fail(err)
-	}
-	channelNodes := map[string]bool{}
-	for _, object := range plan.Objects {
-		if object.Keep || channelStates[object.Kind+":"+object.ID] != nil {
-			continue
-		}
-		if err = disableChannel(object); err != nil {
-			return fail(err)
-		}
-		channelNodes[object.NodeID] = true
-	}
-	nodes := []string{}
-	for _, nodeID := range plan.Nodes {
-		if channelNodes[nodeID] {
-			nodes = append(nodes, nodeID)
-		}
-	}
-	if len(nodes) > 0 {
-		publication, e := s.publishCanvasRemovalPhase(ctx, deploy, plan.scheme.Name+"：清理通道", author, nodes, users)
-		result.Publications = append(result.Publications, publication)
-		if e != nil {
-			return fail(e)
-		}
-	}
-	if err = s.checkCanvasRemovalEntries(ctx, plan); err != nil {
-		return fail(err)
-	}
-	for _, object := range plan.Objects {
-		if object.Keep {
-			continue
-		}
-		current, e := s.canvasRemoveObjectState(ctx, object)
-		if e != nil {
-			return fail(e)
-		}
-		if !reflect.DeepEqual(current, channelStates[object.Kind+":"+object.ID]) {
-			return fail(fmt.Errorf("通道对象 %s 在撤除期间配置发生变化，请刷新影响预览", object.ID))
-		}
-	}
-	checkInput := input
-	checkInput.RestoreTargets = map[string]string{}
-	for _, entry := range plan.Entries {
-		if entry.Mode == "reuse" {
-			checkInput.RestoreTargets[entry.BindingID] = entry.RestoreTarget
-		}
-	}
-	current, e := s.planRemoveCanvasScheme(ctx, schemeID, checkInput)
-	if e != nil {
-		return fail(e)
-	}
-	if !current.OK {
-		return fail(&CanvasRemoveConflict{Plan: current})
-	}
-	if !reflect.DeepEqual(plan.Objects, current.Objects) || !reflect.DeepEqual(plan.unsharedTunnelIDs, current.unsharedTunnelIDs) {
-		return fail(errors.New("撤除期间通道引用发生变化，请刷新影响预览"))
-	}
-	guards, err := s.canvasRemovalRows(ctx, plan)
-	if err != nil {
-		return fail(err)
-	}
-	// Group writes retain the existing membership service and its authorization effects.
-	for _, entry := range plan.Entries {
-		if entry.Mode != "create" {
-			continue
-		}
-		for _, groupRef := range entry.Groups {
-			if s.EntryGroups == nil {
-				return fail(errors.New("入口分组写入服务未配置"))
-			}
-			group, e := s.EntryGroups.Group(ctx, groupRef.ID)
-			if e != nil {
-				return fail(e)
-			}
-			before := canvasEntryGroupInput(group)
-			after := before
-			after.InboundIDs = []string{}
-			for _, id := range before.InboundIDs {
-				if id != entry.InboundID {
-					after.InboundIDs = append(after.InboundIDs, id)
-				}
-			}
-			if len(after.InboundIDs) == len(before.InboundIDs) {
-				continue
-			}
-			if _, e = s.EntryGroups.SaveGroup(ctx, group.ID, after); e != nil {
-				return fail(e)
-			}
-			inboundID, groupID := entry.InboundID, group.ID
-			undo.add(func(ctx context.Context) error {
-				current, err := s.EntryGroups.Group(ctx, groupID)
-				if err != nil {
-					return err
-				}
-				if slices.Contains(current.InboundIDs, inboundID) {
-					return nil
-				}
-				input := canvasEntryGroupInput(current)
-				input.InboundIDs = append(append([]string{}, current.InboundIDs...), inboundID)
-				_, err = s.EntryGroups.SaveGroup(ctx, groupID, input)
-				return err
-			})
-		}
-	}
-	if err = s.finishCanvasRemoval(ctx, plan, guards); err != nil {
-		return fail(err)
-	}
-	result.Removed = true
 	return result, nil
 }
 
-func (s *Service) canvasRemoveObjectState(ctx context.Context, object CanvasRemoveObject) (any, error) {
-	switch object.Kind {
-	case "inbound":
-		return s.Repository.Inbound(ctx, object.ID, true)
-	case "outbound":
-		return s.Repository.Outbound(ctx, object.ID, true)
-	case "chain":
-		return s.Repository.Chain(ctx, object.ID)
-	}
-	return nil, errors.New("invalid canvas object kind")
-}
-
-func (s *Service) checkCanvasRemovalEntries(ctx context.Context, plan CanvasRemovePlan) error {
-	for _, entry := range plan.Entries {
-		current, err := s.Repository.Inbound(ctx, entry.InboundID, true)
-		if err != nil {
-			return err
-		}
-		expected := entry.inbound
-		if entry.Mode == "create" {
-			expected.Enabled = false
-		} else {
-			expected.DefaultOutbound = entry.RestoreTarget
-		}
-		if !reflect.DeepEqual(current, expected) {
-			return fmt.Errorf("入口 %s 在撤除期间配置发生变化，请刷新影响预览", entry.InboundID)
-		}
-		groups, err := s.canvasEntryGroups(ctx, entry.InboundID, false)
-		if err != nil {
-			return err
-		}
-		if !reflect.DeepEqual(groups, entry.Groups) {
-			return fmt.Errorf("入口 %s 在撤除期间分组发生变化，请刷新影响预览", entry.InboundID)
-		}
-	}
-	return nil
-}
-
-func canvasRemoveTable(kind string) string {
-	switch kind {
-	case "inbound":
-		return "inbounds"
-	case "outbound":
-		return "outbounds"
-	case "chain":
-		return "proxy_chains"
-	}
-	panic("invalid canvas object kind")
-}
-
-func (s *Service) publishCanvasRemovalPhase(ctx context.Context, deploy CanvasRemovalDeployer, name, author string, nodes []string, users AccessReader) (CanvasRemovePublication, error) {
-	snapshots := make([]NodeSnapshot, 0, len(nodes))
-	names := map[string]string{}
-	for _, nodeID := range nodes {
-		n, err := s.Nodes.Get(ctx, nodeID)
-		if err != nil {
-			return CanvasRemovePublication{}, err
-		}
-		names[nodeID] = n.Name
-		state, intent, err := s.SnapshotIntent(ctx, nodeID, users)
-		if err != nil {
-			return CanvasRemovePublication{}, err
-		}
-		snapshots = append(snapshots, NodeSnapshot{State: state, InboundIntent: intent})
-	}
-	publication, err := deploy.PublishCanvasRemoval(ctx, "撤除方案 "+name, author, snapshots)
-	for i := range publication.Nodes {
-		publication.Nodes[i].Name = names[publication.Nodes[i].NodeID]
-	}
-	err = removalApplyError(publication, err)
-	if err != nil && ctx.Err() == nil {
-		labels := make([]string, 0, len(nodes))
-		for _, id := range nodes {
-			labels = append(labels, names[id])
-		}
-		message := removalPhaseMessage(labels, err)
-		err = &canvasRemovalPhaseError{cause: err, message: message}
-	}
-	return publication, err
-}
-
-// removalApplyError replaces node IDs and batch IDs with the node names and
-// their fixed result codes when an Agent refused or rolled back the phase.
-// Start errors (dependency, availability) carry no node outcome and pass through.
-func removalApplyError(publication CanvasRemovePublication, err error) error {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
-	}
-	parts := []string{}
-	for _, n := range publication.Nodes {
-		if n.FailureCode == "" {
-			continue
-		}
-		label := n.Name
-		if label == "" {
-			label = n.NodeID
-		}
-		parts = append(parts, fmt.Sprintf("「%s」未能应用撤除配置（%s）", label, n.FailureCode))
-	}
-	if len(parts) == 0 {
-		return err
-	}
-	return fmt.Errorf("%w：%s，节点保留原配置", ErrRemovalApply, strings.Join(parts, "；"))
-}
-
 func (s *Service) finishCanvasRemoval(ctx context.Context, plan CanvasRemovePlan, guards []canvasRemovalRow) error {
+	// Guards were captured after the original ownership calculation. Recheck
+	// that calculation now: a consumer added before guard capture must not be
+	// accepted as a new baseline for deleting its provider.
+	current, err := s.canvasRemovalScope(ctx, plan.SchemeID, CanvasRemoveInput{UpdatedAt: plan.UpdatedAt})
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(plan, current) {
+		return errors.New("撤除资源引用已变化，请刷新后重试")
+	}
 	tx, err := s.Repository.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -428,42 +82,6 @@ func (s *Service) finishCanvasRemoval(ctx context.Context, plan CanvasRemovePlan
 	defer tx.Rollback()
 	if err = checkCanvasRemovalRows(ctx, tx, guards); err != nil {
 		return err
-	}
-	for _, entry := range plan.Entries {
-		if entry.Mode != "create" {
-			continue
-		}
-		var members int
-		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM node_group_inbounds WHERE inbound_id=?", entry.InboundID).Scan(&members); err != nil {
-			return err
-		}
-		if members != 0 {
-			return fmt.Errorf("入口 %s 在最终删除前新增了分组成员，请刷新影响预览", entry.InboundID)
-		}
-	}
-	// Bindings must go first because their inbound FK intentionally restricts deletion.
-	if _, err = tx.ExecContext(ctx, "DELETE FROM canvas_entry_bindings WHERE scheme_id=?", plan.SchemeID); err != nil {
-		return err
-	}
-	for _, entry := range plan.Entries {
-		if entry.Mode == "create" {
-			if _, err = tx.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", entry.InboundID); err != nil {
-				return err
-			}
-		}
-	}
-	for _, kind := range []string{"chain", "outbound", "inbound"} {
-		for _, object := range plan.Objects {
-			if object.Keep || object.Kind != kind {
-				continue
-			}
-			if _, err = tx.ExecContext(ctx, "DELETE FROM "+canvasRemoveTable(kind)+" WHERE id=?", object.ID); err != nil {
-				return err
-			}
-			if _, err = tx.ExecContext(ctx, "DELETE FROM canvas_tunnel_objects WHERE object_kind=? AND object_id=?", kind, object.ID); err != nil {
-				return err
-			}
-		}
 	}
 	res, err := tx.ExecContext(ctx, "DELETE FROM canvas_schemes WHERE id=? AND updated_at=?", plan.SchemeID, plan.UpdatedAt)
 	if err != nil {
@@ -476,35 +94,97 @@ func (s *Service) finishCanvasRemoval(ctx context.Context, plan CanvasRemovePlan
 	if count != 1 {
 		return ErrStaleScheme
 	}
-	for _, tunnelID := range plan.unsharedTunnelIDs {
-		var objects int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM canvas_tunnel_objects WHERE tunnel_id=?", tunnelID).Scan(&objects); err != nil {
+	// The scheme FK detaches its bindings; delete them before their restricted
+	// inbound FK. Group membership and relay-binding rows cascade with inbounds.
+	for _, entry := range plan.Entries {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM canvas_entry_bindings WHERE inbound_id=?", entry.InboundID); err != nil {
 			return err
 		}
-		if objects == 0 {
-			if err := deleteCanvasTunnelRow(ctx, tx, tunnelID); err != nil {
+	}
+	if err = deleteCanvasCleanupObjects(ctx, tx, plan.Objects); err != nil {
+		return err
+	}
+	for _, entry := range plan.Entries {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", entry.InboundID); err != nil {
+			return err
+		}
+	}
+	for _, id := range plan.unsharedTunnelIDs {
+		var count int
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM canvas_tunnel_objects WHERE tunnel_id=?", id).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			if err = deleteCanvasTunnelRow(ctx, tx, id); err != nil {
 				return err
 			}
+		}
+	}
+	for _, id := range plan.Nodes {
+		if err = registerRelayCleanup(ctx, tx, id); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// removalPhaseMessage is the user-facing text of a failed removal phase: node
-// names and fixed outcome codes only, never configuration data.
-func removalPhaseMessage(nodeNames []string, err error) string {
-	labels := make([]string, 0, len(nodeNames))
-	for _, name := range nodeNames {
-		labels = append(labels, "「"+name+"」")
+func deleteCanvasCleanupObjects(ctx context.Context, tx *sql.Tx, objects []CanvasRemoveObject) error {
+	credentials := map[string]bool{}
+	for _, object := range objects {
+		if object.Keep || object.Kind == "chain" {
+			continue
+		}
+		column := "credential_id"
+		if object.Kind == "inbound" {
+			column = "relay_credential_id"
+		}
+		var credentialID string
+		err := tx.QueryRowContext(ctx, "SELECT "+column+" FROM "+canvasRemoveTable(object.Kind)+" WHERE id=?", object.ID).Scan(&credentialID)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if credentialID != "" {
+			credentials[credentialID] = true
+		}
 	}
-	servers := "服务器" + strings.Join(labels, "、")
-	switch {
-	case errors.Is(err, ErrRemovalApply):
-		return strings.TrimPrefix(err.Error(), ErrRemovalApply.Error()+"：")
-	case errors.Is(err, ErrRelayDependency):
-		// Keep the outbound, target node and fixed reason code: they name the
-		// blocking relay (no credentials) and are what makes the conflict fixable.
-		return servers + "撤除依赖尚未就绪：" + strings.TrimPrefix(err.Error(), ErrRelayDependency.Error()+": ")
+	for _, kind := range []string{"chain", "outbound", "inbound"} {
+		for _, object := range objects {
+			if object.Keep || object.Kind != kind {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, "DELETE FROM "+canvasRemoveTable(kind)+" WHERE id=?", object.ID); err != nil {
+				return err
+			}
+		}
 	}
-	return servers + "撤除失败，请查看面板日志与节点配置历史"
+	for id := range credentials {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM relay_credentials WHERE id=?
+AND NOT EXISTS (SELECT 1 FROM inbounds WHERE relay_credential_id=relay_credentials.id)
+AND NOT EXISTS (SELECT 1 FROM outbounds WHERE credential_id=relay_credentials.id)
+AND NOT EXISTS (SELECT 1 FROM relay_bindings WHERE credential_id=relay_credentials.id)
+AND NOT EXISTS (SELECT 1 FROM proxy_chain_hops WHERE credential_id=relay_credentials.id)`, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func registerRelayCleanup(ctx context.Context, tx *sql.Tx, nodeID string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO relay_cleanup_nodes(node_id,reason,attempts,last_code,next_attempt_at,created_at,updated_at)
+VALUES(?,'relay cleanup',0,'',?,?,?) ON CONFLICT(node_id) DO UPDATE SET
+attempts=0,last_code='',next_attempt_at=excluded.next_attempt_at,updated_at=excluded.updated_at,
+revision_id=CASE WHEN EXISTS(SELECT 1 FROM deployment_targets WHERE node_id=excluded.node_id AND revision=relay_cleanup_nodes.revision_id AND status='pending') THEN relay_cleanup_nodes.revision_id ELSE NULL END`, nodeID, timestamp(), timestamp(), timestamp())
+	return err
+}
+
+func canvasRemoveTable(kind string) string {
+	switch kind {
+	case "inbound":
+		return "inbounds"
+	case "outbound":
+		return "outbounds"
+	case "chain":
+		return "proxy_chains"
+	}
+	panic("invalid canvas object kind")
 }

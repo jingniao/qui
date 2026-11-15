@@ -10,7 +10,7 @@
           <tr v-for="row in rows" :key="row.node.id">
             <td v-if="owner"><input v-if="!row.node.deletedAt" type="checkbox" :aria-label="`选择 ${row.node.name}`" :checked="selected.includes(row.node.id)" @change="$emit('toggle', row.node.id)" /></td>
             <td><span class="mr-1.5 select-none" :title="countryTitle(row.country)">{{ row.country.flag }}</span><RouterLink :to="`/nodes/${row.node.id}`" class="text-ios-blue font-semibold hover:underline">{{ row.node.name }}</RouterLink><p v-if="row.region" class="text-xs text-ios-secondary">{{ row.region }}</p></td>
-            <td><StatusBadge :status="row.status.tone" :label="row.status.label" /></td>
+            <td><StatusBadge :status="row.status.tone" :label="row.status.label" /><RelayCleanupBadge :node="row.node" class="ml-1.5" /></td>
             <td v-for="field in visibleFields(row)" :key="field.key" class="text-xs font-mono tabular-nums whitespace-nowrap" :class="field.warning ? 'text-ios-orange' : 'text-ios-secondary'">
               <TrafficValue v-if="field.key === 'today' || field.key === 'month'" :bytes="field.bytes" /><span v-else>{{ field.value }}</span>
             </td>
@@ -27,7 +27,7 @@
           <input v-if="owner && !row.node.deletedAt" type="checkbox" :aria-label="`选择 ${row.node.name}`" :checked="selected.includes(row.node.id)" @change="$emit('toggle', row.node.id)" />
           <span class="select-none" :title="countryTitle(row.country)">{{ row.country.flag }}</span>
           <RouterLink :to="`/nodes/${row.node.id}`" class="text-ios-blue font-semibold flex-1">{{ row.node.name }}</RouterLink>
-          <StatusBadge :status="row.status.tone" :label="row.status.label" />
+          <StatusBadge :status="row.status.tone" :label="row.status.label" /><RelayCleanupBadge :node="row.node" class="ml-1.5" />
         </div>
         <p v-if="row.region" class="text-xs text-ios-secondary">{{ row.region }}</p>
         <dl class="grid grid-cols-2 gap-3 text-sm">
@@ -50,6 +50,7 @@ import type { ServerField, ServerRow } from './serverListModel';
 import { countryTitle } from '../nodeMeta';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
+import RelayCleanupBadge from './RelayCleanupBadge.vue';
 import TrafficValue from '../../../components/TrafficValue.vue';
 import ServerRowMenu from './ServerRowMenu.vue';
 const props = defineProps<{ rows: ServerRow[]; columns: ServerField[]; owner: boolean; selected: string[] }>();

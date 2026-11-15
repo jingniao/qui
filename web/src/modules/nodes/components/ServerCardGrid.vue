@@ -49,6 +49,7 @@
               </span>
             </div>
 
+            <div class="flex items-center justify-end gap-1.5 flex-wrap shrink-0">
             <!-- Status Badge Capsule -->
             <span
               class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 select-none"
@@ -57,6 +58,8 @@
               <span class="w-1.5 h-1.5 rounded-full" :class="statusDotClass(node)"></span>
               <span>{{ statusCapsuleText(node) }}</span>
             </span>
+            <RelayCleanupBadge :node="node" />
+            </div>
           </div>
 
           <!-- Row 2: Sub-info (Address · Core Version · Running Time) -->
@@ -259,6 +262,7 @@
     </div>
 </template>
 <script setup lang="ts">
+import RelayCleanupBadge from './RelayCleanupBadge.vue';
 import { ref, toRef } from 'vue';
 import { useRouter } from 'vue-router';
 import type { MachineTrafficSummary, NodeView } from '../api';

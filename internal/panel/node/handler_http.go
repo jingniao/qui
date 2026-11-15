@@ -336,7 +336,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	// Deleting twice is a no-op.
 	if n.DeletedAt != "" {
-		w.WriteHeader(204)
+		httpapi.JSON(w, 200, DeletionResult{PendingNodes: []CleanupPendingNode{}})
 		return
 	}
 	// A pending node that never enrolled keeps its own path: the unused record is
@@ -347,22 +347,23 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 				h.fail(w, err)
 				return
 			}
-			w.WriteHeader(204)
+			httpapi.JSON(w, 200, DeletionResult{PendingNodes: []CleanupPendingNode{}})
 			if h.Notify != nil {
 				h.Notify(id)
 			}
 			return
-		} else if !errors.Is(err, ErrNodeEnrolled) {
+		} else if !errors.Is(err, ErrNodeEnrolled) && !errors.Is(err, ErrNodeInUse) {
 			h.fail(w, err)
 			return
 		}
-		// An Agent enrolled while this request was in flight: delete logically.
+		// An enrolled or configured pending server requires atomic logical deletion.
 	}
-	if err := h.Repository.Delete(r.Context(), id, h.Tasks, h.Audit, auth.Actor(r.Context()).Username, r.RemoteAddr); err != nil {
+	result, err := h.Repository.DeleteWithResult(r.Context(), id, h.Tasks, h.Audit, auth.Actor(r.Context()).Username, r.RemoteAddr)
+	if err != nil {
 		h.fail(w, err)
 		return
 	}
-	w.WriteHeader(204)
+	httpapi.JSON(w, 200, result)
 	if h.Notify != nil {
 		h.Notify(id)
 	}

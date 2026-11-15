@@ -17,7 +17,7 @@
         <h1 class="text-ios-label tracking-normal truncate text-xl font-bold leading-snug">
           {{ node?.name || '服务器详情' }}
         </h1>
-        <StatusBadge v-if="node" :status="status.tone" :label="status.label" class="shrink-0" />
+        <StatusBadge v-if="node" :status="status.tone" :label="status.label" class="shrink-0" /><RelayCleanupBadge v-if="node" :node="node" />
       </div>
     </div>
 
@@ -66,6 +66,7 @@ import { localInput, utcInput } from '../../../app/time';
 import ErrorState from '../../../components/ErrorState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
+import RelayCleanupBadge from '../components/RelayCleanupBadge.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import { serverStatus } from '../components/serverListModel';
 import { unhealthyCoreLabel } from '../coreSummary';

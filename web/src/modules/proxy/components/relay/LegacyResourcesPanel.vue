@@ -21,11 +21,12 @@
             <p v-for="reason in legacyResourceActions(group).reasons" :key="reason" class="text-ios-secondary">{{ reason }}</p>
             <button v-if="legacyEmptyTunnelToDelete(group)" type="button" class="ios-btn-danger" :disabled="busy" @click="deleteEmptyTunnel(group)">清除空通道</button>
             <template v-if="legacyResourceActions(group).partial">
-              <fieldset class="space-y-2 rounded-lg bg-ios-bg p-3" :disabled="busy">
-                <legend class="text-ios-secondary">整组无法还原，可只处理其中一部分（入口须连同它使用的通道）；剩下的资源之后单独处理。</legend>
-                <label v-for="binding in group.bindings" :key="binding.id" class="flex items-center gap-2"><input v-model="picks(group)[`binding:${binding.id}`]" type="checkbox" />入口：{{ binding.name }}</label>
-                <label v-for="tunnel in group.tunnels" :key="tunnel.id" class="flex items-center gap-2"><input v-model="picks(group)[`tunnel:${tunnel.id}`]" type="checkbox" />通道：{{ tunnel.name }}（{{ tunnel.objects.map(object => object.name).join('、') }}）</label>
-              </fieldset>
+              <!-- A plain group, not fieldset/legend: the legend's special box squeezed the first row into a narrow column. -->
+              <div role="group" :aria-label="partialHint" class="space-y-2 rounded-lg bg-ios-bg p-3">
+                <p class="text-ios-secondary">{{ partialHint }}</p>
+                <label v-for="binding in group.bindings" :key="binding.id" class="flex items-start gap-2"><input v-model="picks(group)[`binding:${binding.id}`]" type="checkbox" class="mt-1 shrink-0" :disabled="busy" /><span class="min-w-0 break-all">入口：{{ binding.name }}</span></label>
+                <label v-for="tunnel in group.tunnels" :key="tunnel.id" class="flex items-start gap-2"><input v-model="picks(group)[`tunnel:${tunnel.id}`]" type="checkbox" class="mt-1 shrink-0" :disabled="busy" /><span class="min-w-0 break-all">通道：{{ tunnel.name }}（{{ tunnel.objects.map(object => object.name).join('、') }}）</span></label>
+              </div>
               <label class="block space-y-1"><span>新方案名称</span><input v-model="names[group.id]" class="ios-input w-full" :disabled="busy" placeholder="请输入新方案名称" /></label>
               <div class="flex flex-wrap gap-2">
                 <button type="button" class="ios-btn-primary" :disabled="busy" @click="reattach(group, false, true)">挂接所选为方案</button>
@@ -73,6 +74,7 @@ const names = reactive<Record<string, string>>({});
 const adoptTargets = reactive<Record<string, string>>({});
 const busy = ref(false);
 const error = ref('');
+const partialHint = '整组无法还原，可只处理其中一部分（入口须连同它使用的通道）；剩下的资源之后单独处理。';
 const objectKinds = { inbound: '内部监听', outbound: '出站', chain: '代理链' };
 function nodeName(id: string) { return props.servers.find(node => node.id === id)?.name || id; }
 function routeName(route: string) { return route === 'direct' ? '直连' : route === 'block' ? '阻断' : props.outbounds.find(item => item.id === route)?.name || route || '未登记'; }

@@ -59,7 +59,7 @@ import TunnelEditor from '../components/TunnelEditor.vue';
 import RuleEditor from '../components/RuleEditor.vue';
 import PublishBadge from '../components/PublishBadge.vue';
 import { loadTunnelChoices, mockEnabled, tunnelAPI, tunnelRuleAPI, tunnelError, type PublishSelection, type Tunnel, type TunnelRule } from '../api';
-import { applyProblem, applyTunnelChanges } from '../applyTunnels';
+import { applyProblem, applyTunnelChanges, clause } from '../applyTunnels';
 import { ruleTargetLabel, endpoint, groupRules, routeLabel } from '../model';
 const route = useRoute(), rulesTab = computed(() => route.path === '/proxy/tunnel-rules');
 const tunnels = ref<Tunnel[]>([]), rules = ref<TunnelRule[]>([]);
@@ -80,12 +80,12 @@ async function apply(selection: PublishSelection, done: string) {
     const result = await applyTunnelChanges(selection, text => { applyNote.value = { tone: 'info', text }; });
     const problem = applyProblem(result);
     if (result.status === 'publishing') applyNote.value = { tone: 'warn', text: problem };
-    else if (problem) applyNote.value = { tone: 'error', text: `应用失败，已恢复原配置：${problem}。可修改后保存，或点「重试」。` };
+    else if (problem) applyNote.value = { tone: 'error', text: `应用失败，已恢复原配置：${clause(problem)}。可修改后保存，或点「重试」。` };
     else {
       applyNote.value = result.gostRemovable?.length ? { tone: 'info', text: `以下服务器的 GOST 已不再使用，可在「版本与更新 → 代理核心」中移除：${result.gostRemovable.map(s => s.name).join('、')}` } : null;
       showToast(done);
     }
-  } catch (e) { applyNote.value = { tone: 'error', text: `应用失败：${tunnelError(e)}。修改已保存，可点「重试」。` }; }
+  } catch (e) { applyNote.value = { tone: 'error', text: `应用失败：${clause(tunnelError(e))}。修改已保存，可点「重试」。` }; }
   finally { mutating.value = false; await load(); }
 }
 async function load() {

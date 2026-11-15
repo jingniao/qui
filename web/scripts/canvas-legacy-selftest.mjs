@@ -29,4 +29,8 @@ assert.deepEqual(legacyDefaultSelection(parallel), ['binding:b', 'tunnel:used'])
 assert.deepEqual(legacyDefaultSelection({ ...parallel, bindings: [] }), ['tunnel:old']);
 assert.equal(legacyResourceActions({ ...parallel, tunnels: [parallel.tunnels[0]], bindings: [] }).partial, false, 'a single resource has no parts');
 assert.equal(legacyResourceActions({ ...parallel, empty: true }).partial, false);
-console.log('PASS canvas legacy: group labels, resource count, action visibility, blocker reasons, referrers and part-by-part selection');
+// The part picker is a plain group: a fieldset legend squeezed the first row into a narrow column.
+const panel = readFileSync(new URL('../src/modules/proxy/components/relay/LegacyResourcesPanel.vue', import.meta.url), 'utf8');
+assert.doesNotMatch(panel, /<fieldset|<legend/);
+assert.match(panel, /role="group" :aria-label="partialHint"/);
+console.log('PASS canvas legacy: group labels, resource count, action visibility, blocker reasons, referrers, part-by-part selection and picker layout');

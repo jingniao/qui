@@ -76,7 +76,8 @@ func (p *CanvasPublisher) waitCanvasRemoval(ctx context.Context, result *proxy.C
 		}
 		if done {
 			if failure != nil {
-				for _, n := range result.Nodes {
+				for i := range result.Nodes {
+					n := &result.Nodes[i]
 					var code string
 					err := p.Repository.Database.QueryRowContext(ctx, "SELECT result_code FROM deployment_targets WHERE node_id=? AND revision=?", n.NodeID, n.Revision).Scan(&code)
 					if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -84,6 +85,9 @@ func (p *CanvasPublisher) waitCanvasRemoval(ctx context.Context, result *proxy.C
 					}
 					if code != "" {
 						failure = errors.Join(failure, fmt.Errorf("%s: %s", n.NodeID, code))
+						if n.Status != "success" && code != "success" {
+							n.FailureCode = code
+						}
 					}
 				}
 			}

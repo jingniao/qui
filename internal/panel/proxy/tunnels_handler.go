@@ -54,6 +54,12 @@ func (h *Handler) failTunnel(w http.ResponseWriter, err error) {
 		httpapi.Error(w, 404, "not_found", "对象不存在")
 		return
 	}
+	// Same contract as canvas publish/removal: the message names the outbound,
+	// target node and fixed reason code, never credentials.
+	if errors.Is(err, ErrRelayDependency) {
+		httpapi.Error(w, 409, "dependency_not_ready", err.Error())
+		return
+	}
 	h.internal(w, err)
 }
 

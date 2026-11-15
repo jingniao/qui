@@ -156,6 +156,8 @@ func (h *Handler) failCanvas(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrRelayDependency):
 		httpapi.Error(w, 409, "dependency_not_ready", err.Error())
+	case errors.Is(err, ErrRemovalApply):
+		httpapi.Error(w, 409, "remove_apply_failed", err.Error())
 	case errors.Is(err, ErrNotFound):
 		httpapi.Error(w, 404, "not_found", err.Error())
 	case errors.Is(err, ErrStaleScheme):

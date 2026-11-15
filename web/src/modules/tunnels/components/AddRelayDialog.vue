@@ -30,7 +30,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import PortControl from './PortControl.vue';
-import { applyProblem, applyTunnelChanges } from '../applyTunnels';
+import { applyProblem, applyTunnelChanges, clause } from '../applyTunnels';
 import { nodeRelayAPI, tunnelAPI, tunnelError, type Tunnel, type NodeRelay } from '../api';
 import { routeLabel } from '../model';
 import type { Inbound } from '../../proxy/api';
@@ -66,7 +66,7 @@ async function applyCreated() {
     const result = await applyTunnelChanges({ tunnelIds: [], ruleIds: [created.value.rule.id] }, text => { applyState.value = { ok: false, text }; });
     const problem = applyProblem(result);
     applyState.value = problem ? { ok: result.status === 'publishing', text: result.status === 'publishing' ? problem : `应用失败，已恢复原配置：${problem}` } : { ok: true, text: '中转已创建并生效。' };
-  } catch (e) { applyState.value = { ok: false, text: `应用失败：${tunnelError(e)}。规则已保存，可重试。` }; }
+  } catch (e) { applyState.value = { ok: false, text: `应用失败：${clause(tunnelError(e))}。规则已保存，可重试。` }; }
   finally { saving.value = false; emit('saved'); }
 }
 </script>

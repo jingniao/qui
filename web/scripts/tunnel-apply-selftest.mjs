@@ -9,7 +9,7 @@ class APIError extends Error { constructor(status, code) { super(code); this.sta
 const resultLabels = { applied: '已应用', unchanged: '无变更', failed: '失败', rolled_back: '已回滚', skipped: '已跳过', publishing: '发布中' };
 function load(tunnelAPI) {
   return new Function('APIError', 'nodeAPI', 'confirmedRevision', 'needsBaseline', 'publishBaselineAndWait', 'gostInstallRelease', 'coreUpdatesAPI', 'tunnelAPI', 'tunnelError', 'resultLabels',
-    code + '\nreturn { applyTunnelChanges, applyProblem };')(APIError, {}, () => 0, () => false, async () => {}, async () => ({}), {}, tunnelAPI, e => e.message, resultLabels);
+    code + '\nreturn { applyTunnelChanges, applyProblem, clause };')(APIError, {}, () => 0, () => false, async () => {}, async () => ({}), {}, tunnelAPI, e => e.message, resultLabels);
 }
 const selection = { tunnelIds: [], ruleIds: ['r'] };
 const ok = { ok: true, conflicts: [], warnings: [], servers: [] };
@@ -45,6 +45,13 @@ const ok = { ok: true, conflicts: [], warnings: [], servers: [] };
 }
 // The page has no separate publish step any more.
 const page = read('modules/tunnels/pages/TunnelsPage.vue');
+// Banners append their own sentence end, so a message's closing 。 is dropped once (no 「。。」).
+{
+  const { clause } = load({});
+  assert.equal(clause('服务暂时无法完成操作，请稍后重试。'), '服务暂时无法完成操作，请稍后重试');
+  assert.equal(clause('端口冲突'), '端口冲突');
+  assert.doesNotMatch(page, /\$\{tunnelError\(e\)\}。|\$\{problem\}。/);
+}
 assert.doesNotMatch(page, /PublishFlow|>发布</);
 assert.match(page, /@saved="selection => \{ editor = false; apply\(selection/);
 assert.match(read('modules/tunnels/components/TunnelEditor.vue'), /confirm-text="保存并应用"/);

@@ -69,3 +69,8 @@ export function applyProblem(result: PublishResult): string {
   const bad = result.servers.filter(s => s.status !== 'applied' && s.status !== 'unchanged');
   return bad.map(s => `${s.nodeName}：${s.message || resultLabels[s.status]}`).join('；');
 }
+
+/** Drops a message's own closing punctuation so the banner can append its own sentence. */
+export function clause(text: string): string {
+  return text.replace(/[。．.！!]+$/u, '');
+}

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http/httptest"
@@ -106,6 +107,39 @@ func TestCanvasDependencyConflictHTTP(t *testing.T) {
 	(&Handler{}).failCanvas(w, fmt.Errorf("撤除失败：%w", ErrRelayDependency))
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "dependency_not_ready") {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+// Tunnel publish starts its batch with the same relay dependency check; joined
+// with the preparation abort it must still surface as 409, not a bare 500.
+func TestTunnelDependencyConflictHTTP(t *testing.T) {
+	w := httptest.NewRecorder()
+	cause := fmt.Errorf("%w: 中转出站「out」→ 目标节点「node」：目标节点运行中的内部监听不匹配 (internal_inbound_unavailable)", ErrRelayDependency)
+	(&Handler{}).failTunnel(w, errors.Join(cause, nil))
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "dependency_not_ready") || !strings.Contains(w.Body.String(), "internal_inbound_unavailable") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+// An Agent refusing a removal phase is a conflict naming the node, not a 400 with raw IDs.
+func TestCanvasRemovalApplyFailureHTTP(t *testing.T) {
+	publication := CanvasRemovePublication{CanvasPublishResult: CanvasPublishResult{Nodes: []CanvasPublishNode{
+		{NodeID: "n-ok", Name: "美国 CC", Status: "success"},
+		{NodeID: "n-bad", Name: "美国 shlii.io", Status: "failed", FailureCode: "validation_failed"},
+	}}}
+	err := removalApplyError(publication, errors.New("撤除节点 n-bad 状态 failed\nn-bad: validation_failed"))
+	w := httptest.NewRecorder()
+	(&Handler{}).failCanvas(w, err)
+	body := w.Body.String()
+	if w.Code != 409 || !strings.Contains(body, "remove_apply_failed") || !strings.Contains(body, "「美国 shlii.io」未能应用撤除配置（validation_failed）") || strings.Contains(body, "n-bad") {
+		t.Fatalf("%d %s", w.Code, body)
+	}
+	start := fmt.Errorf("%w: x", ErrRelayDependency)
+	if got := removalApplyError(CanvasRemovePublication{}, start); got != start {
+		t.Fatalf("start errors must pass through: %v", got)
+	}
+	if got := removalApplyError(publication, context.Canceled); !errors.Is(got, context.Canceled) {
+		t.Fatalf("cancel must pass through: %v", got)
 	}
 }
 

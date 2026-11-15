@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 )
 
 type CanvasRemoveConflict struct{ Plan CanvasRemovePlan }
@@ -365,7 +366,31 @@ func (s *Service) publishCanvasRemovalPhase(ctx context.Context, deploy CanvasRe
 	for i := range publication.Nodes {
 		publication.Nodes[i].Name = names[publication.Nodes[i].NodeID]
 	}
-	return publication, err
+	return publication, removalApplyError(publication, err)
+}
+
+// removalApplyError replaces node IDs and batch IDs with the node names and
+// their fixed result codes when an Agent refused or rolled back the phase.
+// Start errors (dependency, availability) carry no node outcome and pass through.
+func removalApplyError(publication CanvasRemovePublication, err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	parts := []string{}
+	for _, n := range publication.Nodes {
+		if n.FailureCode == "" {
+			continue
+		}
+		label := n.Name
+		if label == "" {
+			label = n.NodeID
+		}
+		parts = append(parts, fmt.Sprintf("「%s」未能应用撤除配置（%s）", label, n.FailureCode))
+	}
+	if len(parts) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w：%s，节点保留原配置", ErrRemovalApply, strings.Join(parts, "；"))
 }
 
 func (s *Service) finishCanvasRemoval(ctx context.Context, plan CanvasRemovePlan, guards []canvasRemovalRow) error {

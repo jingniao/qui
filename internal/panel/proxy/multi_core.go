@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -138,13 +137,4 @@ func ValidateInboundServerSettings(c *pb.Capabilities, name, protocol string, se
 		return errors.New("the selected core is not reported enabled, so it cannot apply these settings")
 	}
 	return desiredstate.RequireInboundServerSettings(core.Name, node.SettingsContractCapability(core), protocol, settings)
-}
-
-// ValidateShadowsocksMethod is required on every save and on enabled rendered
-// inbounds before deployment. Disabled historical inbounds remain usable.
-func ValidateShadowsocksMethod(protocol string, settings desiredstate.ProtocolSettings) error {
-	if protocol == "shadowsocks" && strings.TrimSpace(settings.Method) == "" {
-		return errors.New("Shadowsocks 入站必须指定加密方法")
-	}
-	return nil
 }

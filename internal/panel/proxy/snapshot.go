@@ -238,11 +238,6 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		if len(inbound.CredentialIDs) == 0 && inbound.Protocol != "forward" {
 			inbound.Enabled = false
 		}
-		if inbound.Enabled {
-			if err := ValidateShadowsocksMethod(inbound.Protocol, inbound.Settings); err != nil {
-				return state, enabled, fmt.Errorf("入站「%s」（%s）：%w", record.Name, record.ID, err)
-			}
-		}
 		state.Inbounds = append(state.Inbounds, inbound)
 	}
 	if s.Policies != nil {

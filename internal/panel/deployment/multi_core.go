@@ -38,9 +38,6 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 		// so a deployment carrying these settings fails here instead of applying a
 		// configuration with the fields dropped.
 		err := proxy.ValidateInboundServerSettings(c, in.Core, in.Protocol, in.Settings)
-		if err == nil && in.Enabled {
-			err = proxy.ValidateShadowsocksMethod(in.Protocol, in.Settings)
-		}
 		if err != nil {
 			var name string
 			if lookupErr := tx.QueryRowContext(ctx, "SELECT coalesce((SELECT name FROM inbounds WHERE id=?),?)", in.ID, in.ID).Scan(&name); lookupErr != nil {

@@ -371,7 +371,7 @@ Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥�
 
 入站表示用户连接节点时使用的协议。
 
-Shadowsocks 入站保存时始终要求非空 `method`；`SnapshotIntent` 在凭据渲染后检查，发布、批次启动、回滚与重启仅拒绝最终渲染状态中启用的空方法入站，错误指出入站名称／ID。无凭据而渲染禁用的旧入站可发布，含禁用空方法入站的历史修订仍可重启或回滚；备份恢复继续接受旧记录。画布／快速中转新建入口默认使用 `chacha20-ietf-poly1305`；Trojan、Hysteria2、TUIC 沿用自签证书流程，缺公网 IP／客户端连接地址时在新建入口规划阶段拒绝；WireGuard 沿用保存时生成密钥与地址的流程。已绑定 create 入口可在节点编辑器补改协议设置，不改绑定关系、创建基线或既有名称锁规则。
+Shadowsocks 空 `method` 合法，Xray／sing-box 渲染器均默认使用 `chacha20-ietf-poly1305`；发布前撤销 R1 空方法拒绝，避免破坏合法内部中转入站。画布／快速中转新建入口默认使用 `chacha20-ietf-poly1305`；Trojan、Hysteria2、TUIC 沿用自签证书流程，缺公网 IP／客户端连接地址时在新建入口规划阶段拒绝；WireGuard 沿用保存时生成密钥与地址的流程。已绑定 create 入口可在节点编辑器补改协议设置，不改绑定关系、创建基线或既有名称锁规则。
 
 支持 HTTP CONNECT、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard（仅 Xray 入站）、Hysteria2/TUIC（仅 sing-box，需 QUIC 能力）与端口转发。VMess 与完整系统 TUN 不在当前支持表内；每核心范围以能力上报及[协议矩阵](docs/protocol-support-matrix.md)为准。
 

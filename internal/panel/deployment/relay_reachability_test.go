@@ -48,7 +48,7 @@ func TestRelayDependencyOnlyReachableOutbounds(t *testing.T) {
 	}
 }
 
-func TestPublishRejectsMissingShadowsocksMethod(t *testing.T) {
+func TestPublishAcceptsEmptyShadowsocksMethod(t *testing.T) {
 	ctx := context.Background()
 	r, states, _ := batchFixture(t)
 	state := states[0]
@@ -58,7 +58,7 @@ func TestPublishRejectsMissingShadowsocksMethod(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if err := validateStateCoresTx(ctx, tx, state); err == nil || !strings.Contains(err.Error(), "加密方法") || !strings.Contains(err.Error(), state.Inbounds[0].ID) {
+	if err := validateStateCoresTx(ctx, tx, state); err != nil {
 		t.Fatalf("pre-publish: %v", err)
 	}
 	state.Inbounds[0].Settings.Method = "chacha20-ietf-poly1305"
@@ -80,7 +80,7 @@ func TestShadowsocksHistoricalMethodOperations(t *testing.T) {
 				state.Inbounds[0].Enabled = enabled
 				state.Inbounds[0].CredentialIDs = []string{"ss-credential"}
 				state.Credentials = []desiredstate.Credential{{ID: "ss-credential", Protocol: "shadowsocks", Internal: true, Secret: "test-secret"}}
-				// Model a successfully applied historical revision, bypassing today's save gate.
+				// Model a successfully applied historical revision, preserving its original empty method.
 				raw, err := json.Marshal(state)
 				if err != nil {
 					t.Fatal(err)
@@ -118,12 +118,8 @@ func TestShadowsocksHistoricalMethodOperations(t *testing.T) {
 					}
 					err = r.StartBatch(ctx, batch.ID)
 				}
-				if enabled {
-					if err == nil || !strings.Contains(err.Error(), "加密方法") || !strings.Contains(err.Error(), state.Inbounds[0].ID) {
-						t.Fatalf("enabled %s: %v", operation, err)
-					}
-				} else if err != nil {
-					t.Fatalf("disabled %s: %v", operation, err)
+				if err != nil {
+					t.Fatalf("%s: %v", operation, err)
 				}
 			})
 		}

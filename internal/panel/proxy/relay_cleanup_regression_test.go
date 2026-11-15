@@ -109,7 +109,7 @@ func TestCanvasDependencyConflictHTTP(t *testing.T) {
 	}
 }
 
-func TestShadowsocksMissingMethodSaveSnapshotAndRepair(t *testing.T) {
+func TestShadowsocksEmptyMethodSaveAndSnapshot(t *testing.T) {
 	p := newPublishPanel(t)
 	raw, err := protojson.Marshal(&pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "shadowsocks", Inbound: true, Outbound: true, Tcp: true}, {Protocol: "socks5", Inbound: true, Outbound: true, Tcp: true}}})
 	if err != nil {
@@ -119,11 +119,7 @@ func TestShadowsocksMissingMethodSaveSnapshotAndRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := InboundInput{Name: "旧入口", NodeID: p.nodeA, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 20000, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"}
-	if _, err := p.service.SaveInbound(p.ctx, "", input); err == nil || !strings.Contains(err.Error(), "加密方法") || !strings.Contains(err.Error(), input.Name) {
-		t.Fatalf("save: %v", err)
-	}
-	// Restore and historical data remain readable: insert through the repository.
-	in, err := p.service.Repository.SaveInbound(p.ctx, "", input)
+	in, err := p.service.SaveInbound(p.ctx, "", input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +146,7 @@ func TestShadowsocksMissingMethodSaveSnapshotAndRepair(t *testing.T) {
 	if _, err := p.users.Save(p.ctx, "", user.Input{Username: "ss-user", Status: "active", NodeGroupIDs: []string{group.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := p.service.SnapshotIntent(p.ctx, p.nodeA, p.users); err == nil || !strings.Contains(err.Error(), "加密方法") || !strings.Contains(err.Error(), in.Name) || !strings.Contains(err.Error(), in.ID) {
+	if _, _, err := p.service.SnapshotIntent(p.ctx, p.nodeA, p.users); err != nil {
 		t.Fatalf("enabled snapshot: %v", err)
 	}
 	input.Settings = desiredstate.ProtocolSettings{Method: "chacha20-ietf-poly1305"}

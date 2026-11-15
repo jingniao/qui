@@ -64,6 +64,21 @@ func TestTCPProbeDispatchResultBindingAndExpiry(t *testing.T) {
 	if err != nil || command != nil {
 		t.Fatal(command, err)
 	}
+	if _, err := database.Exec("DELETE FROM node_tcp_probes WHERE id=?", c.Id); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.recordTCPProbe(ctx, n.ID, result); err != nil {
+		t.Fatal("pruned late receipt disconnected stream", err)
+	}
+	result.Attempted = 11
+	if err := r.recordTCPProbe(ctx, n.ID, result); err == nil {
+		t.Fatal("malformed pruned receipt accepted")
+	}
+	result.Attempted = 3
+	var count int
+	if err := database.QueryRow("SELECT count(*) FROM node_latency_samples").Scan(&count); err != nil || count != 0 {
+		t.Fatal("unattributable receipt stored", count, err)
+	}
 }
 
 func TestPanelReachabilityTCPAndTLS(t *testing.T) {

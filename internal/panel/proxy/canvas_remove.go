@@ -11,6 +11,16 @@ import (
 
 type CanvasRemoveConflict struct{ Plan CanvasRemovePlan }
 
+// Keep the original error for classification and logs; expose only names and
+// fixed outcome codes from the captured publication, never configuration data.
+type canvasRemovalPhaseError struct {
+	cause   error
+	message string
+}
+
+func (e *canvasRemovalPhaseError) Error() string { return e.cause.Error() }
+func (e *canvasRemovalPhaseError) Unwrap() error { return e.cause }
+
 func (e *CanvasRemoveConflict) Error() string {
 	return "撤除需要确认人工改动或指定有效恢复目标"
 }
@@ -60,6 +70,18 @@ func (s *Service) RemoveCanvasScheme(ctx context.Context, schemeID string, input
 		// Restore database intent before rollback receipts can trigger access reconciliation.
 		cause = errors.Join(cause, undo.run(cleanup))
 		for i := len(result.Publications) - 1; i >= 0; i-- {
+			if ctx.Err() == nil {
+				e := deploy.RollbackCanvasRemoval(ctx, result.Publications[i])
+				if e == nil {
+					continue
+				}
+				cause = errors.Join(cause, fmt.Errorf("撤除运行回滚失败：%w", e))
+				if ctx.Err() == nil {
+					break
+				} // Do not reopen an entry while its channel rollback failed.
+				// Shutdown interrupted a real-failure rollback wait. Persist recovery
+				// below rather than keeping shutdown waiting for an offline Agent.
+			}
 			if ctx.Err() != nil {
 				canceler, ok := deploy.(CanvasRemovalCanceler)
 				if !ok {
@@ -82,10 +104,6 @@ func (s *Service) RemoveCanvasScheme(ctx context.Context, schemeID string, input
 					break
 				}
 				continue
-			}
-			if e := deploy.RollbackCanvasRemoval(cleanup, result.Publications[i]); e != nil {
-				cause = errors.Join(cause, fmt.Errorf("撤除运行回滚失败：%w", e))
-				break // Do not reopen an entry while its channel rollback failed.
 			}
 		}
 		return result, cause
@@ -366,7 +384,16 @@ func (s *Service) publishCanvasRemovalPhase(ctx context.Context, deploy CanvasRe
 	for i := range publication.Nodes {
 		publication.Nodes[i].Name = names[publication.Nodes[i].NodeID]
 	}
-	return publication, removalApplyError(publication, err)
+	err = removalApplyError(publication, err)
+	if err != nil && ctx.Err() == nil {
+		labels := make([]string, 0, len(nodes))
+		for _, id := range nodes {
+			labels = append(labels, names[id])
+		}
+		message := removalPhaseMessage(labels, err)
+		err = &canvasRemovalPhaseError{cause: err, message: message}
+	}
+	return publication, err
 }
 
 // removalApplyError replaces node IDs and batch IDs with the node names and
@@ -461,4 +488,23 @@ func (s *Service) finishCanvasRemoval(ctx context.Context, plan CanvasRemovePlan
 		}
 	}
 	return tx.Commit()
+}
+
+// removalPhaseMessage is the user-facing text of a failed removal phase: node
+// names and fixed outcome codes only, never configuration data.
+func removalPhaseMessage(nodeNames []string, err error) string {
+	labels := make([]string, 0, len(nodeNames))
+	for _, name := range nodeNames {
+		labels = append(labels, "「"+name+"」")
+	}
+	servers := "服务器" + strings.Join(labels, "、")
+	switch {
+	case errors.Is(err, ErrRemovalApply):
+		return strings.TrimPrefix(err.Error(), ErrRemovalApply.Error()+"：")
+	case errors.Is(err, ErrRelayDependency):
+		// Keep the outbound, target node and fixed reason code: they name the
+		// blocking relay (no credentials) and are what makes the conflict fixable.
+		return servers + "撤除依赖尚未就绪：" + strings.TrimPrefix(err.Error(), ErrRelayDependency.Error()+": ")
+	}
+	return servers + "撤除失败，请查看面板日志与节点配置历史"
 }

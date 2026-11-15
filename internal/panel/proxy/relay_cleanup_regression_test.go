@@ -262,3 +262,15 @@ func TestPendingDeleteRuleTargetListing(t *testing.T) {
 		}
 	}
 }
+
+// A dependency failure must keep naming the blocking outbound, target and reason.
+func TestRemovalPhaseMessageKeepsDependencyDetail(t *testing.T) {
+	cause := fmt.Errorf("%w: 中转出站「W-1f」→ 目标节点「cc」：目标节点运行中的内部监听不匹配 (internal_inbound_unavailable)", ErrRelayDependency)
+	got := removalPhaseMessage([]string{"美国 shlii.io"}, cause)
+	if !strings.Contains(got, "「美国 shlii.io」撤除依赖尚未就绪") || !strings.Contains(got, "中转出站「W-1f」") || !strings.Contains(got, "internal_inbound_unavailable") {
+		t.Fatal(got)
+	}
+	if got := removalPhaseMessage([]string{"a", "b"}, errors.New("x")); got != "服务器「a」、「b」撤除失败，请查看面板日志与节点配置历史" {
+		t.Fatal(got)
+	}
+}

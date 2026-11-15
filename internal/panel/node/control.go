@@ -472,12 +472,20 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				}
 			}
 		}
+		ignoredApply := false
 		if result := message.GetApplyResult(); result != nil {
 			if c.Deployment == nil {
 				return status.Error(codes.FailedPrecondition, "deployment unavailable")
 			}
 			if err := c.Deployment.Result(ctx, id, result); err != nil {
-				return status.Error(codes.FailedPrecondition, "deployment result rejected")
+				var ignored *IgnoredDeploymentResult
+				if !errors.As(err, &ignored) {
+					return status.Error(codes.FailedPrecondition, "deployment result rejected")
+				}
+				ignoredApply = true
+				if c.Logger != nil {
+					c.Logger.Warn("finalized deployment result ignored", "node_id", id, "revision", result.Revision, "reason", ignored.Reason)
+				}
 			}
 		}
 		confirmedRevision := int64(0)
@@ -569,7 +577,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if c.Notify != nil && (message.GetHeartbeat() != nil || message.GetAgentUpdateResult() != nil || message.GetHealthCheckResult() != nil) {
 			c.Notify(id)
 		}
-		if result := message.GetApplyResult(); result != nil && c.DeploymentNotify != nil {
+		if result := message.GetApplyResult(); result != nil && !ignoredApply && c.DeploymentNotify != nil {
 			c.DeploymentNotify(result.Revision)
 		}
 		if confirmedRevision != 0 && c.DeploymentNotify != nil {

@@ -987,7 +987,7 @@
       <TunnelPlanSummary :plan="plan" :checking="checking" :error="planError" :tunnel-names="tunnelNames" />
     </AppDialog>
 
-    <CanvasRemoveDialog v-if="removalScheme" :scheme="removalScheme" :servers="servers" @close="removalScheme = null" @removed="onSchemeRemoved" />
+    <CanvasRemoveDialog v-if="removalScheme" :scheme="removalScheme" :servers="servers" @close="removalScheme = null" @removed="onSchemeRemoved" @removing="onRemovalPending" />
     <LegacyResourcesPanel v-if="legacyPanelOpen && legacyResources" :resources="legacyResources" :servers="servers" :inbounds="inbounds" :outbounds="outbounds" @close="legacyPanelOpen = false" @changed="loadLegacyResources" @reattached="onLegacyReattached" />
 
     <!-- Schemes / Modals -->
@@ -1371,7 +1371,7 @@ async function openRemoval() {
   finally { openingRemoval.value = false; }
 }
 async function onSchemeRemoved(id: string) {
-  removalScheme.value = null;
+  if (removalScheme.value?.id === id) removalScheme.value = null;
   proxyNodeStore.schemes = proxyNodeStore.schemes.filter(scheme => scheme.id !== id);
   selectedNode.value = null;
   selectedConnection.value = null;
@@ -1380,6 +1380,10 @@ async function onSchemeRemoved(id: string) {
   showToast('已停用并移除方案', 'success');
   await reloadSchemes();
   await loadLegacyResources();
+}
+async function onRemovalPending(completion: Promise<string>) {
+  try { await onSchemeRemoved(await completion); }
+  catch (cause) { showToast((cause as Error).message, 'error'); }
 }
 watch(() => proxyNodeStore.schemes.map(s => s.id), ids => {
   if (!ids.includes(activeSchemeId.value)) activeSchemeId.value = ids[0] || '';

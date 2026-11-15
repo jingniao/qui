@@ -1,5 +1,5 @@
 <template>
-  <AppDialog :model-value="true" title="停用并移除" max-width="2xl" @update:model-value="close">
+  <AppDialog :model-value="visible" title="停用并移除" max-width="2xl" @update:model-value="close">
     <div class="space-y-4 text-sm text-ios-label">
       <p class="font-semibold">{{ scheme.name }}</p>
       <p class="text-ios-orange">撤除期间相关用户连接会短暂中断</p>
@@ -51,10 +51,10 @@
           <label class="flex items-start gap-2"><input v-model="acknowledged" type="checkbox" :disabled="busy || loading" class="mt-1" />我已了解上述改动，继续撤除</label>
         </section>
       </template>
-      <p v-if="busy" role="status">正在等待服务器确认撤除，请勿离开页面…</p>
+      <p v-if="busy" role="status">撤除进行中，可关闭此窗口，完成后列表会自动刷新</p>
     </div>
     <template #footer>
-      <button type="button" class="ios-dialog-btn-secondary" :disabled="busy" @click="close">关闭</button>
+      <button type="button" class="ios-dialog-btn-secondary" @click="close">关闭</button>
       <button v-if="error && !busy" type="button" class="ios-dialog-btn-secondary" :disabled="loading" @click="loadPreview">刷新预览</button>
       <button v-if="canConfirm" type="button" class="ios-btn-danger" :disabled="busy || loading" @click="remove">{{ busy ? '撤除中…' : '确认停用并移除' }}</button>
     </template>
@@ -67,14 +67,16 @@ import AppDialog from '../../../../components/AppDialog.vue';
 import { APIError } from '../../../../app/apiClient';
 import { canvasAPI, choices, proxyAPI, type CanvasScheme, type CanvasRemovePlan, type Outbound, type ProxyChain } from '../../api';
 import { canvasRemoveView, canConfirmCanvasRemove, canvasRestoreOptions } from '../../canvasRemove';
+import { waitCanvasRemoval } from '../../canvasRemovePolling';
 
 const props = defineProps<{ scheme: CanvasScheme; servers: { id: string; name: string }[] }>();
-const emit = defineEmits<{ close: []; removed: [id: string] }>();
+const emit = defineEmits<{ close: []; removed: [id: string]; removing: [completion: Promise<string>] }>();
 const plan = ref<CanvasRemovePlan | null>(null);
 const targets = ref<Record<string, string>>({});
 const acknowledged = ref(false);
 const loading = ref(false);
 const busy = ref(false);
+const visible = ref(true);
 const refreshingTargets = ref(false);
 const previewValid = ref(false);
 const error = ref('');
@@ -88,7 +90,14 @@ function routeName(value: string) {
   return (value.startsWith('chain:') ? chains.value.find(item => item.id === value.slice(6))?.name : outbounds.value.find(item => item.id === value)?.name) || value;
 }
 function options(nodeId: string) { return canvasRestoreOptions(nodeId, outbounds.value, chains.value); }
-function close() { if (!busy.value) emit('close'); }
+function close() { emit('close'); }
+async function followRemoval(id: string) {
+  const completion = waitCanvasRemoval(id, canvasAPI);
+  // The parent owns completion, so closing/unmounting this dialog cannot lose
+  // the list refresh. This same promise drives the open dialog's error display.
+  emit('removing', completion);
+  await completion;
+}
 async function loadPreview() {
   if (loading.value || busy.value) return;
   targetRequest++;
@@ -140,11 +149,21 @@ async function remove() {
   busy.value = true;
   error.value = '';
   let stale = false;
+  const id = props.scheme.id;
+  const input = { updatedAt: plan.value.updatedAt, restoreTargets: { ...targets.value }, acknowledgeChanges: acknowledged.value };
+  const completion = (async () => {
+    const result = await canvasAPI.remove(id, input);
+    if ('status' in result && result.status === 'removing') return waitCanvasRemoval(result.schemeId, canvasAPI);
+    if (!('removed' in result) || !result.removed) throw new Error('服务器尚未确认方案已移除');
+    return result.schemeId;
+  })();
+  // Transfer ownership before even the short POST finishes: the user can close
+  // immediately, and Vue stops delivering component events after unmount.
+  emit('removing', completion);
   try {
-    const result = await canvasAPI.remove(props.scheme.id, { updatedAt: plan.value.updatedAt, restoreTargets: { ...targets.value }, acknowledgeChanges: acknowledged.value });
-    if (!result.removed) throw new Error('服务器尚未确认方案已移除');
-    emit('removed', result.schemeId);
+    await completion;
   } catch (cause) {
+    visible.value = true;
     if (cause instanceof APIError && cause.code === 'stale_scheme') {
       error.value = '方案已被修改，请刷新后重试';
       stale = true;
@@ -159,5 +178,17 @@ async function remove() {
   } finally { busy.value = false; }
   if (stale) await loadPreview();
 }
-onMounted(loadPreview);
+onMounted(async () => {
+  try {
+    const status = await canvasAPI.removeStatus(props.scheme.id);
+    if (status.state === 'succeeded') { emit('removed', props.scheme.id); return; }
+    if (status.state === 'removing') {
+      busy.value = true;
+      try { await followRemoval(props.scheme.id); }
+      finally { busy.value = false; }
+      return;
+    }
+    await loadPreview();
+  } catch (cause) { visible.value = true; error.value = (cause as Error).message; }
+});
 </script>

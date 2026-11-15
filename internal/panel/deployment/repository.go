@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -191,10 +192,11 @@ func (r *Repository) PublishedWithIntent(ctx context.Context, nodeID string) (de
 // control stream before the result could be sent, and the result of an apply
 // that finished on the broken session was lost, so the node never left
 // "pending" (v1.5.2, seen with a 15000-entry policy whose sing-box start took
-// about 30 seconds). A revision that failed or was rolled back stays refused.
+// about 30 seconds). A panel-cancelled removal may also have run successfully
+// before the rollback command reached the Agent; its real usage is attributable.
 func (r *Repository) AppliedState(ctx context.Context, nodeID string, revision int64) (desiredstate.State, error) {
 	var count int
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM deployment_targets WHERE node_id=? AND revision=? AND status IN ('success','pending')", nodeID, revision).Scan(&count); err != nil {
+	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM deployment_targets t JOIN config_revisions r ON r.id=t.revision WHERE t.node_id=? AND t.revision=? AND (t.status IN ('success','pending') OR (t.status='failed' AND t.result_code='canvas_remove_canceled'))", nodeID, revision).Scan(&count); err != nil {
 		return desiredstate.State{}, err
 	}
 	if count != 1 {
@@ -292,15 +294,15 @@ func (r *Repository) Result(ctx context.Context, nodeID string, result *pb.Apply
 		return err
 	}
 	defer tx.Rollback()
-	var previous string
-	if err := tx.QueryRowContext(ctx, "SELECT status FROM deployment_targets WHERE revision=? AND node_id=?", result.Revision, nodeID).Scan(&previous); err != nil {
+	var previous, previousCode string
+	if err := tx.QueryRowContext(ctx, "SELECT status,result_code FROM deployment_targets WHERE revision=? AND node_id=?", result.Revision, nodeID).Scan(&previous, &previousCode); err != nil {
 		return err
 	}
 	if previous != "pending" {
-		if previous == status {
+		if previous == status && previous == "success" {
 			return tx.Commit()
 		}
-		return errors.New("conflicting deployment result")
+		return &node.IgnoredDeploymentResult{Reason: previous + ":" + previousCode}
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE deployment_targets SET status=?,result_code=?,updated_at=? WHERE revision=? AND node_id=?", status, result.Code, now(), result.Revision, nodeID); err != nil {
 		return err

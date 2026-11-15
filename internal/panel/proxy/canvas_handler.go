@@ -2,11 +2,14 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
+	"strings"
+	"time"
 )
 
 // registerCanvas serves the relay canvas drawings. They are Owner-only: a
@@ -28,6 +31,7 @@ func (h *Handler) registerCanvas(mux *http.ServeMux) {
 		"POST /api/v1/canvas-schemes/{id}/plan":                h.planCanvasScheme,
 		"POST /api/v1/canvas-schemes/{id}/remove-plan":         h.planRemoveCanvasScheme,
 		"POST /api/v1/canvas-schemes/{id}/remove":              h.removeCanvasScheme,
+		"GET /api/v1/canvas-schemes/{id}/remove-status":        h.canvasRemovalStatus,
 	} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
@@ -50,24 +54,82 @@ func (h *Handler) planRemoveCanvasScheme(w http.ResponseWriter, r *http.Request)
 func (h *Handler) removeCanvasScheme(w http.ResponseWriter, r *http.Request) {
 	var input CanvasRemoveInput
 	if err := httpapi.Decode(w, r, &input); err != nil {
+		httpapi.Error(w, http.StatusBadRequest, "invalid_request", "撤除请求格式无效，请提交正确的参数")
+		return
+	}
+	id, actor, remote := r.PathValue("id"), auth.Actor(r.Context()).Username, r.RemoteAddr
+	if h.Service.CanvasRemovalStatus(id).State == "removing" {
+		httpapi.JSON(w, http.StatusAccepted, map[string]string{"schemeId": id, "status": "removing"})
+		return
+	}
+	// Reject stale input without waiting for another scheme's canvasMu. The
+	// executing removal still re-plans under that lock before mutating anything.
+	if strings.TrimSpace(input.UpdatedAt) == "" {
+		httpapi.Error(w, http.StatusBadRequest, "invalid_request", "缺少 updatedAt 字段")
+		return
+	}
+	scheme, err := h.Service.Repository.CanvasScheme(r.Context(), id)
+	if err != nil {
+		failure := canvasRemovalError(err)
+		status := http.StatusBadRequest
+		if errors.Is(err, ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		httpapi.Error(w, status, failure.Code, failure.Message)
+		return
+	}
+	if scheme.UpdatedAt != input.UpdatedAt {
+		h.failCanvas(w, ErrStaleScheme)
+		return
+	}
+	run, duplicate, err := h.Service.startCanvasRemoval(r.Context(), id, input, actor, h.Users, func(ctx context.Context, result CanvasRemoveResult, cause error) error {
+		outcome := "成功"
+		if cause != nil {
+			outcome = "失败：" + canvasRemovalError(cause).Message
+		}
+		return h.Audit.Record(ctx, actor, "停用并移除中转方案", id, outcome, remote)
+	})
+	if err != nil {
 		h.failCanvas(w, err)
 		return
 	}
-	result, err := h.Service.RemoveCanvasScheme(r.Context(), r.PathValue("id"), input, auth.Actor(r.Context()).Username, h.Users)
+	if duplicate {
+		httpapi.JSON(w, http.StatusAccepted, map[string]string{"schemeId": id, "status": "removing"})
+		return
+	}
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-run.done:
+	case <-timer.C:
+		httpapi.JSON(w, http.StatusAccepted, map[string]string{"schemeId": id, "status": "removing"})
+		return
+	case <-r.Context().Done():
+		return
+	}
+	result, err := run.result, run.err
 	if err != nil {
 		var conflict *CanvasRemoveConflict
 		if errors.As(err, &conflict) {
-			httpapi.ErrorDetails(w, http.StatusConflict, "canvas_remove_conflict", err.Error(), map[string]any{"details": conflict.Plan})
+			httpapi.ErrorDetails(w, http.StatusConflict, "canvas_remove_conflict", conflict.Error(), map[string]any{"details": conflict.Plan})
 		} else {
-			h.failCanvas(w, err)
+			failure := canvasRemovalError(err)
+			status := http.StatusBadRequest
+			switch failure.Code {
+			case "stale_scheme", "dependency_not_ready", "remove_apply_failed":
+				status = http.StatusConflict
+			case "not_found":
+				status = http.StatusNotFound
+			}
+			httpapi.Error(w, status, failure.Code, failure.Message)
 		}
 		return
 	}
-	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "停用并移除中转方案", r.PathValue("id"), "成功", r.RemoteAddr); err != nil {
-		h.internal(w, err)
-		return
-	}
 	httpapi.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) canvasRemovalStatus(w http.ResponseWriter, r *http.Request) {
+	httpapi.JSON(w, http.StatusOK, h.Service.CanvasRemovalStatus(r.PathValue("id")))
 }
 
 func (h *Handler) canvasSchemes(w http.ResponseWriter, r *http.Request) {

@@ -197,6 +197,8 @@ export interface CanvasRemovePlan {
   objects: CanvasRemoveObject[]; nodes: string[]; changeDetectionRule: string;
 }
 export interface CanvasRemoveResult { schemeId: string; removed: boolean; publications: CanvasPublishResult[]; }
+export interface CanvasRemovePending { schemeId: string; status: 'removing'; }
+export interface CanvasRemoveStatus { schemeId: string; state: 'idle' | 'removing' | 'succeeded' | 'failed'; error?: { code: string; message: string }; result?: CanvasRemoveResult; }
 
 export interface CanvasTunnelSchemeRef { id: string; name: string; }
 export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; candidateTunnels?: string[]; }
@@ -222,7 +224,8 @@ export const canvasAPI = {
   status: (id: string) => request<CanvasSchemeStatus>(`/canvas-schemes/${encodeURIComponent(id)}/status`),
   removePlan: (id: string, value: CanvasRemoveInput) => request<CanvasRemovePlan>(`/canvas-schemes/${encodeURIComponent(id)}/remove-plan`, 'POST', value),
   // Removal waits for both deployment phases and any rollback receipts.
-  remove: (id: string, value: CanvasRemoveInput) => request<CanvasRemoveResult>(`/canvas-schemes/${encodeURIComponent(id)}/remove`, 'POST', value, { timeoutMs: 3600000 }),
+  remove: (id: string, value: CanvasRemoveInput) => request<CanvasRemoveResult | CanvasRemovePending>(`/canvas-schemes/${encodeURIComponent(id)}/remove`, 'POST', value, { timeoutMs: 3600000 }),
+  removeStatus: (id: string) => request<CanvasRemoveStatus>(`/canvas-schemes/${encodeURIComponent(id)}/remove-status`),
   plan: (id: string, layout?: CanvasSchemeWriteLayout) => request<CanvasTunnelPlan>(`/canvas-schemes/${encodeURIComponent(id)}/plan`, 'POST', { layout }),
   list: (page = 1, pageSize = 50) => request<Page<CanvasScheme>>(`/canvas-schemes?page=${page}&pageSize=${pageSize}`),
   get: (id: string) => request<CanvasScheme>(`/canvas-schemes/${encodeURIComponent(id)}`),

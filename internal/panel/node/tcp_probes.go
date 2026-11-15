@@ -290,9 +290,26 @@ func (r *Repository) pendingTCPProbe(ctx context.Context, node string) (*pb.TCPP
 }
 
 func (r *Repository) recordTCPProbe(ctx context.Context, node string, result *pb.TCPProbeResult) error {
-	var raw, source string
-	if err := r.Database.QueryRowContext(ctx, "SELECT command_json,source FROM node_tcp_probes WHERE id=? AND node_id=?", result.Id, node).Scan(&raw, &source); err != nil {
+	var raw, source, owner string
+	if result == nil || result.Id == "" || len(result.Id) > 128 {
+		return errors.New("invalid TCP probe result")
+	}
+	if err := r.Database.QueryRowContext(ctx, "SELECT command_json,source,node_id FROM node_tcp_probes WHERE id=?", result.Id).Scan(&raw, &source, &owner); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Scheduled receipts are deleted on the next scheduler tick. A result
+			// may survive that deletion in a disconnected Agent's queue. Without
+			// its command we cannot attribute it: acknowledge and discard only,
+			// never create a latency sample or resurrect a probe from this receipt.
+			attempts := result.Attempted
+			if attempts > 10 || result.Code == "complete" && attempts == 0 {
+				return errors.New("invalid TCP probe result")
+			}
+			return tcpprobe.ValidateResult(&pb.TCPProbeCommand{Id: result.Id, Attempts: attempts}, result)
+		}
 		return err
+	}
+	if owner != node {
+		return errors.New("TCP probe result node mismatch")
 	}
 	var c pb.TCPProbeCommand
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {

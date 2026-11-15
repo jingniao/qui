@@ -43,6 +43,7 @@ GET /api/v1/backups
 GET /api/v1/backups/{id}/download
 GET /api/v1/canvas-schemes
 GET /api/v1/canvas-schemes/{id}
+GET /api/v1/canvas-schemes/{id}/remove-status
 GET /api/v1/canvas-schemes/{id}/status
 GET /api/v1/canvas-tunnels
 GET /api/v1/canvas-tunnels/legacy-objects

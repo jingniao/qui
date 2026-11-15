@@ -597,6 +597,9 @@ func (s *Server) closeReadPool() {
 }
 
 func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Listener) error {
+	defer s.tunnelPublications.StopCanvasRemovals()
+	stopRemovals := context.AfterFunc(ctx, s.tunnelPublications.StopCanvasRemovals)
+	defer stopRemovals()
 	defer s.closeReadPool()
 	if s.restoreStartup != nil {
 		if err := s.restoreStartup(ctx); err != nil {
@@ -609,7 +612,7 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
 	jobs.Add(12)
-	defer func() { stopBackground(); jobs.Wait() }()
+	defer func() { stopBackground(); s.tunnelPublications.StopCanvasRemovals(); jobs.Wait() }()
 	go func() { defer jobs.Done(); s.runTunnelFinalization(background) }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
 	// One worker owns issuance and renewal: it marks interrupted runs, sweeps
@@ -745,6 +748,7 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	s.health.Shutdown()
 	s.admission.stop()
+	s.tunnelPublications.StopCanvasRemovals()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.Config.ShutdownTimeout)
 	defer cancel()
 	var wg sync.WaitGroup

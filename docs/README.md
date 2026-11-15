@@ -13,7 +13,8 @@
 | 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
 | 提交、门禁、发布与升级生产的步骤（交接用） | [发布流程手册](release-runbook.md) |
 | 完成标准、证据要求与实机验收结果 | [验收矩阵](v1-acceptance.md) |
-| v1.5.6 审计修复（实施与测试中，未发布） | [确认规划](v1.5.6-audit-fix-plan.md)、[测试记录](v1.5.6-acceptance.md)、[发布说明草稿](release-notes-1.5.6.md) |
+| v1.5.7 删除测试修复与节点列表调整（门禁未运行，未发布） | [发布说明草稿](release-notes-1.5.7.md)、[生产删除测试记录](v1.5.5-production-relay-cleanup-test.md) |
+| v1.5.6 审计修复（已发布 2026-11-15，tag → b624458） | [确认规划](v1.5.6-audit-fix-plan.md)、[测试记录](v1.5.6-acceptance.md)、[发布说明](release-notes-1.5.6.md) |
 | v1.5.5 发布前验收：实机证据、收尾修复、原始失败与覆盖限制 | [发布前验收](v1.5.5-acceptance.md) |
 | v1.5.5 生产中转／隧道网页删除测试（2026-11-15）：全部删除失败与阻塞链（shlii 校验失败原因待查 → 依赖检查挡住删除；空 Shadowsocks 方法合法）、缺陷与修复方案 | [删除测试记录](v1.5.5-production-relay-cleanup-test.md) |
 | 1.2.0 发布说明 | [发布说明 1.2.0](release-notes-1.2.0.md) |

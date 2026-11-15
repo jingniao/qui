@@ -1,6 +1,6 @@
 # v1.5.8 发布说明
 
-**未发布。** 范围由 Owner 于 2026-11-15 确认，迁移 **0150**，迁移头 **0150**。见[确认规划](v1.5.8-plan.md)。发布提交、日期与生产结果待补。
+**已于 2026-11-15 发布，tag `v1.5.8` → `a1b100b`。** 迁移 **0150**，迁移头 **0150**。范围由 Owner 当日确认，见[确认规划](v1.5.8-plan.md)。下文时间均为 2026-11-15 UTC。
 
 ## 变更内容
 
@@ -24,18 +24,29 @@
 
 - 面板删除成功不代表远端立即停用；离线节点仍运行旧配置，失败节点须排障并等待清理成功。删除服务器不停止或卸载远端 Agent。
 - 清理只删除已发布对象，不夹带草稿；其他手工引用仍须先处理。固定下载域名以后变更时须逐台修改配置。
-- A1 的 Windows backup/server 全包曾受文件权限错误影响；A2 的 server 全包及最终删除接口窄测已通过，backup 全包与加密备份恢复往返仍待补。生产撤除、CC 恢复与浏览器验收结果待补，详见发布验证。
+- A1 的 Windows backup/server 全包曾受文件权限错误影响；A2 的 server 全包及最终删除接口窄测已通过。发布提交的完整 Linux 门禁与下述生产操作已有结果；这些记录不扩展为独立加密备份恢复往返或全面浏览器验收通过的结论。
 
 ## 发布验证
 
 ### 本地完整 Linux 门禁
 
-待补。
+- 发布提交 `a1b100b` 的本地 Linux 完整门禁：`GATE a1b100b PASS total=1220s`，真实核部分 332 秒通过。
+- 发布前未提交快照 `b3f53a6` 的门禁曾发现 `internal/platform/recovery` 10 个旧版本归档恢复测试失败：测试回退链遗漏 0150，另有一个测试仍写 reuse 绑定。仅修正测试，生产恢复代码无缺陷；保留该轮失败事实。
+- 实现由 Codex 完成：A1 撤除模型、A2 连带删除与入口归属、A3 修订接受、B 前端、C 文档；Claude 审查。审查后修正新撤除重置待清理退避、删除确认 blocker 类别前缀。
 
 ### 同 SHA GitHub check
 
-待补。
+[GitHub check 43738637967](https://github.com/jingniao/qui/actions/runs/43738637967) 与发布提交同 SHA。首次 `check (server)` 分片的 `TestReadsAndSubscriptionsAnswerWhileTheWriterIsBusy` 失败：持写事务时订阅内容用时 1.105 秒返回，超过 1 秒阈值。本版未改订阅读取路径，本地门禁同测试通过。按[发布手册 §4.2](release-runbook.md) 仅重跑失败任务一次，第 2 次运行通过（含 cores）。
 
-### Release、签名与生产验证
+### Release 与签名
 
-待补：发布提交／tag、资产与签名、德国网页升级；CC 重连和重新发布、shlii 停用「测试-直连-SS」（:35001）、生产方案一次撤除、待清理消退与残留清零；固定目录下载验证和临时防火墙规则撤除记录。
+[Release 43741437421](https://github.com/jingniao/qui/actions/runs/43741437421) 成功，发布时间 `2026-11-15T17:38:45Z`，tag `v1.5.8` → `a1b100b`，13 个资产。Agent 签名清单序号 `1005008`，使用官方公钥 `v1GzEWqRzysqZRFBryZStMCw4KeAkF3Vq2metTUlxTE=` 经 `go run ./cmd/release verify` 验证通过；amd64 摘要为 `adb2eafe01265b60c7ae196a242cbbe6aa97f8c1684640b88a0f6073cc7753b8`。
+
+## 生产升级
+
+- **面板网页更新**：17:41:35–17:42:22，德国面板由 1.5.7 升到 1.5.8，状态 `succeeded`；更新器自带更新前备份。
+- **CC 恢复在线**：1.5.8 面板接受美国 CC 修订 87 的积压数据后，CC 于 17:42:17 连上并保持在线；此前每 30 秒连上约 1 秒即因 `traffic batch rejected` 断开。面板显示 CC 第 90–97 版修订均成功，CC 与 shlii 全部入站状态均为「已生效」。原计划「重新发布 CC」因无差异未执行，避免额外一次核心重启。shlii 第 98 版在启用 35001／35004 时已成功，未出现内存不足，因此未停用「测试-直连-SS」（:35001）。
+- **方案撤除与节点清理**：一键撤除「测试中转-shlii-CC」和「清理-遗留-shlii-CC」，均返回 200 `removed:true,pendingNodes:[]`。随后 CC 修订 #100、#102 与 shlii 修订 #99、#101（`auto: relay cleanup`）均成功。中转方案清零，CC 内部监听 `trojan:35003`、`trojan:35004` 及 shlii 入口 :35004、:35000 全部删除，无节点待清理。升级后启动的一次性残留清理未删除任何对象：这些残留当时仍挂在方案上，随后由撤除删除。
+- **CC 固定下载目录**：经 Owner 授权 SSH 操作，17:01 前在 CC 用 Go 客户端 UA 经 `https://qui.lluu.de/agent-catalogue/` 下载 1.5.7 清单与完整安装包，21184674 字节、耗时 3 秒、SHA256 一致（此前经 22550 为 101 秒）。配置备份为 `/etc/proxy-agent/config.yaml.bak-20261115-catalogue`；追加 `updates.catalogue` 与官方公钥，`--check-config` 返回 `configuration valid` 后重启 Agent，CC 自身代理短暂中断。17:49:32 经网页下发 Agent 1.5.8 升级，17:49:49 成功：`installed_version=1.5.8`、`installed_sequence=1005008`，摘要与清单一致，下载经 443 完成。详见[固定目录实际结果](superpowers/specs/2026-11-15-agent-download-page-origin-design.md#实际结果2026-11-15utc)。
+- **当前实际版本**：面板 1.5.8；德国 netcup Agent 1.5.7；美国 CC Agent 1.5.8；其余四台（香港 阿里国际*1、台湾 wap、zouter、美国 shlii.io）Agent 均为 1.5.5，按 Owner 要求暂不处理。
+- **未完成：临时防火墙规则撤除**。德国防火墙在 14:38:30 添加的来源 `148.135.40.213/32` → TCP 22550 临时 ACCEPT 尚未删除。本机 SSH 到 `5.45.96.43` 被对端直接关闭（`Connection closed by 5.45.96.43 port 22`），需 Owner 恢复 SSH 访问或在 1Panel 中删除。规则仅运行时生效、未持久化，防火墙重载或重启后自动消失；CC 已不再需要它。

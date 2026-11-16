@@ -2,6 +2,7 @@ package system
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,6 +41,9 @@ func TestKilledBackupProcessRecoversJournalWithoutTouchingUnrelatedBackup(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
+			// A failed child prints its reason on stderr; keep it for the messages below.
+			var stderr bytes.Buffer
+			command.Stderr = &stderr
 			if err := command.Start(); err != nil {
 				t.Fatal(err)
 			}
@@ -65,12 +69,16 @@ func TestKilledBackupProcessRecoversJournalWithoutTouchingUnrelatedBackup(t *tes
 				if value == "" {
 					command.Process.Kill()
 					command.Wait()
-					t.Fatal("child never reached crash checkpoint")
+					t.Fatalf("child never reached crash checkpoint:\n%s", stderr.String())
 				}
-			case <-time.After(12 * time.Second):
+			// The deadline only catches a hung child. Before create-published the
+			// child writes a whole encrypted backup (a SQLite snapshot and
+			// 600000-round PBKDF2 key, all under -race in CI), which exceeded the
+			// former 12 s on loaded CI shards.
+			case <-time.After(90 * time.Second):
 				command.Process.Kill()
 				command.Wait()
-				t.Fatal("child checkpoint timed out")
+				t.Fatalf("child checkpoint timed out:\n%s", stderr.String())
 			}
 			// Kill this exact helper while its real process lock and operation
 			// journal are still active; no process-name or wildcard termination.

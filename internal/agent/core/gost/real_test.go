@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/agent/core"
+	"proxycontrol/internal/testutil"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
 )
@@ -146,17 +147,11 @@ func echoTarget(t *testing.T) int {
 	return port
 }
 
-// freePort reserves a loopback port and releases it for the forward. The revert of
-// that release is the settle gate's job, as it is for every other core.
+// freePort picks a loopback port outside the ephemeral range for the forward;
+// see testutil.FreePort for why released ":0" ports are not used.
 func freePort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	return port
+	return testutil.FreePort(t)
 }
 
 // forwardState is the desired state of one forward that serves TCP and UDP.

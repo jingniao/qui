@@ -6,28 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/agent/core/xray"
+	"proxycontrol/internal/testutil"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"testing"
 )
 
+// freePort picks a loopback port outside the ephemeral range; see
+// testutil.FreePort for why released ":0" ports are not used.
 func freePort(t *testing.T) int {
 	t.Helper()
-	for attempt := 0; attempt < 20; attempt++ {
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		port := listener.Addr().(*net.TCPAddr).Port
-		udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
-		if err == nil {
-			udp.Close()
-			listener.Close()
-			return port
-		}
-		listener.Close()
-	}
-	t.Fatal("could not select a test port free on TCP and UDP")
-	return 0
+	return testutil.FreePort(t)
 }
 func state(port int, revision int64) desiredstate.State {
 	return desiredstate.State{SchemaVersion: 1, Revision: revision, NodeID: "node-test", Logging: desiredstate.Logging{DomainOnly: true}, Inbounds: []desiredstate.Inbound{{ID: "socks", Protocol: "socks5", Listen: "127.0.0.1", Port: port, Enabled: true, DefaultOutbound: "direct"}}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}}}

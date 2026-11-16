@@ -13,6 +13,7 @@
 #   bash scripts/quick-check.sh --base <rev>          # e.g. --base HEAD~1, or a tag
 #   bash scripts/quick-check.sh --dry-run             # print the plan, run nothing
 #   bash scripts/quick-check.sh --allow-full-gate-later
+#   bash scripts/quick-check.sh --release --base <previous tag>
 #
 # Tiers, in the order they run:
 #   text       CR bytes and UTF-8 BOM in every changed text file (always on)
@@ -24,6 +25,13 @@
 # A change under migrations/ or .github/ can only be judged by the full gate: the
 # script then fails with "full gate required" unless --allow-full-gate-later says
 # the gate will run before the change is committed.
+#
+# --release is for the release batch, which is pushed and then gated in full on
+# Linux and GitHub (docs/release-runbook.md 2-4). It keeps the cheap checks that
+# would otherwise waste a gate run (text, web, bash -n and index modes, gofmt,
+# go vet - which also compiles every test file) and skips what the gate repeats:
+# go test, the deploy script tests and the real-core tier. It implies
+# --allow-full-gate-later.
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -36,6 +44,7 @@ usage() {
 base=HEAD
 dry_run=0
 allow_later=0
+release=0
 while (($#)); do
   case $1 in
     --base)
@@ -47,6 +56,11 @@ while (($#)); do
       shift
       ;;
     --allow-full-gate-later)
+      allow_later=1
+      shift
+      ;;
+    --release)
+      release=1
       allow_later=1
       shift
       ;;
@@ -234,7 +248,9 @@ tier_deploy() {
       printf 'bash -n %s\n' "$f"
     done
     pick_deploy_tests
-    if ((${#deploy_tests[@]})); then
+    if ((release)); then
+      printf '（--release：deploy/linux/tests 由发布门禁运行）\n'
+    elif ((${#deploy_tests[@]})); then
       printf 'bash deploy/linux/tests/%s\n' "${deploy_tests[@]}"
     fi
     printf '（同时检查 deploy/ 与 scripts/ 下 .sh 的索引模式）\n'
@@ -248,6 +264,10 @@ tier_deploy() {
   done
   step '索引模式（deploy/ 与 scripts/ 下的 .sh）'
   check_index_modes
+  if ((release)); then
+    printf '（--release：跳过 deploy/linux/tests，由发布门禁运行）\n'
+    return $rc
+  fi
   pick_deploy_tests
   for t in "${deploy_tests[@]}"; do
     step "bash deploy/linux/tests/$t"
@@ -413,10 +433,22 @@ tier_go() {
     printf '受影响包（%s 个）：\n' "${#go_affected_ip[@]}"
     printf '  %s\n' "${go_affected_ip[@]}"
     printf 'go vet %s\n' "${go_affected_ip[*]}"
-    printf 'go test -count=1 -timeout 30m %s%s\n' "$label" "${go_affected_ip[*]}"
+    if ((release)); then
+      printf '（--release：go test 由发布门禁运行）\n'
+    else
+      printf 'go test -count=1 -timeout 30m %s%s\n' "$label" "${go_affected_ip[*]}"
+    fi
     return 0
   fi
   gofmt_changed || rc=1
+  if ((release)); then
+    # go vet type-checks the test files too, so a test that no longer compiles
+    # still fails here instead of in the gate.
+    step "go vet（${#go_affected_ip[@]} 个包）"
+    go vet "${go_affected_ip[@]}" || rc=1
+    printf '（--release：跳过 go test，由发布门禁在 Linux 与 GitHub 上运行）\n'
+    return $rc
+  fi
   build_agent_fixture_if_needed
   step "go vet（${#go_affected_ip[@]} 个包）"
   go vet "${go_affected_ip[@]}" || rc=1
@@ -487,7 +519,7 @@ run_tier text tier_text
 if ((${#web[@]})); then run_tier web tier_web; fi
 if ((${#deploy[@]} || ${#scripts_sh[@]})); then run_tier deploy tier_deploy; fi
 if ((${#gof[@]})); then run_tier go tier_go; fi
-if ((realcore_wanted)); then run_tier real-core tier_realcore; fi
+if ((realcore_wanted && !release)); then run_tier real-core tier_realcore; fi
 
 tier_list=${tiers[*]}
 
@@ -499,7 +531,9 @@ if ((${#gate[@]})); then
     printf 'QUICK-CHECK FAIL %s 原因：full gate required\n' "$tier_list"
     exit 1
   fi
-  if ((!dry_run)); then
+  if ((!dry_run && release)); then
+    printf 'WARNING 已按 --release 放行：发布提交推送后须跑完整门禁。\n'
+  elif ((!dry_run)); then
     printf 'WARNING 已按 --allow-full-gate-later 放行：提交前仍须跑完整门禁。\n'
   fi
 fi

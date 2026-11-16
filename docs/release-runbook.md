@@ -31,6 +31,7 @@
 bash scripts/quick-check.sh                  # 与 HEAD 比较
 bash scripts/quick-check.sh --base <rev>     # 与指定提交比较，例如一批改动开始前
 bash scripts/quick-check.sh --dry-run        # 只打印将要执行的命令
+bash scripts/quick-check.sh --release --base <上一个 tag>   # 发布批次：只做快速检查，测试交给门禁
 ```
 
 改动文件 = `git diff --name-only <base>` 加上未跟踪文件，按命中的范围叠加执行，最后一行是 `QUICK-CHECK PASS` 或 `FAIL`：
@@ -43,6 +44,8 @@ bash scripts/quick-check.sh --dry-run        # 只打印将要执行的命令
 | Go | 改动包及其模块内依赖包的 `go vet` 和 `go test`（Windows 上带 `-p 1`） |
 | agent／proto／pkg／contracts 或真实核相关包 | 真实核测试：本机配好核心时直接跑，否则到 Linux 测试机跑 |
 | `migrations/**`、`.github/**` | 必须改跑完整门禁（第 4 节） |
+
+**发布批次用 `--release`（Owner 2026-11-16 批准）：** 一批改动要直接提交并跑完整门禁时，提交前只跑 `bash scripts/quick-check.sh --release --base <上一个 tag>`，不再在 Windows 上把受影响的包整包 `go test` 一遍（v1.5.9 时 62 个包约 20 分钟，和随后的门禁完全重复）。它保留 CR/BOM、前端类型检查/构建/自测、`bash -n` 与执行位、`gofmt` 和 `go vet`（`go vet` 会编译测试文件，测试编不过仍在这里发现），跳过 `go test`、`deploy/linux/tests` 与真实核测试，并隐含 `--allow-full-gate-later`；v1.5.9 的改动范围实测 71 秒。日常小改动仍用不带参数的形式。
 
 `deploy/linux/tests/` 里需要 Linux 或 root 的用例会自行跳过，它们在发布门禁里覆盖。quick-check 只证明受影响范围没坏；跨模块影响、`-race`、部署脚本实跑与真实核回归仍由第 4 节的完整门禁保证。
 
@@ -179,6 +182,7 @@ tag 推送触发 `release` 任务：先确认同 SHA 有成功的 `check`，再�
 | 环节 | 约 |
 | --- | --- |
 | 日常裁剪检查（`bash scripts/quick-check.sh`） | 2–10 分钟 |
+| 发布批次提交前（`quick-check.sh --release`） | 约 1–2 分钟（v1.5.9 范围实测 71 秒） |
 | 本地完整门禁（`scripts/check.sh` ＋ 真实核套件，同时运行） | 约 16–21 分钟（提速前约 51 分钟） |
 | GitHub `check` | 四片并行约 12–14 分钟，含 `cores` 约 14 分钟（2026-11-12 实测；提速前约 21–73 分钟），与本地门禁并行，不额外占用时间 |
 | 纯前端补丁的两条短门禁（第 4 节） | 预计约 5–10 分钟（尚无实测记录） |
@@ -190,7 +194,7 @@ tag 推送触发 `release` 任务：先确认同 SHA 有成功的 `check`，再�
 ## 9. 接手时的检查清单
 
 - [ ] `git status` 干净，或清楚每个未提交文件属于哪一批改动
-- [ ] 本批改动全部完成，`bash scripts/quick-check.sh` 打印 `QUICK-CHECK PASS`（第 2 节）
+- [ ] 本批改动全部完成，`bash scripts/quick-check.sh --release --base <上一个 tag>` 打印 `QUICK-CHECK PASS`（第 2 节；不再在 Windows 上整包跑测试）
 - [ ] 新增/改动的 `.sh` 在 git 里是 `100755`，否则已 `git update-index --chmod=+x`（第 0、3 节）
 - [ ] Owner 同意提交推送 → 推送工作分支并快进 `main`（第 3 节）
 - [ ] 推送后同时启动本地门禁 `GATE … PASS` 与 GitHub `check`，两者在同一 SHA 上通过（第 4、4.1 节）；偶发失败只重跑失败包一次并记录（第 4.2 节）

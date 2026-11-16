@@ -1,6 +1,6 @@
 # v1.6.0 发布说明
 
-**发布准备中。** 迁移 **0152**，迁移头 **0152**。范围见[规划](v1.6.0-plan.md)。
+**已于 2026-11-16 发布，tag `v1.6.0` → `4f09e0a`。** 迁移 **0152**，迁移头 **0152**。生产本次未升级。范围见[规划](v1.6.0-plan.md)。下文时间均为 2026-11-16 UTC。
 
 ## 变更内容
 
@@ -25,4 +25,31 @@
 
 ## 发布验证
 
-（发布后填写）
+### 实现与审查
+
+第 3 项（Reality 预设）与第 2.1 节后端由 Codex 实现、本人审查；Codex 之后连续无响应（含只要求回复一行的探测），其余部分由本人实现。审查中修正：导入刷新的故障注入测试改为注入到保留行的更新、路由覆盖清单补两条预设路由、服务器卡片只列关联规则（import 规则不再误挂在入口服务器下）、Hysteria2／TUIC 导入出站改为同时承载 TCP 与 UDP、经中间服务器的导入出口同样继承分组。
+
+### 真实核测试（Linux 测试机，提交前）
+
+- Xray 26.3.27：面板渲染的出站连接自建 Reality tcp／Vision／gRPC／xhttp 与 TLS xhttp 监听均取得源站响应，错误 Reality 公钥被拒。
+- sing-box 1.14.3：面板渲染的 Reality tcp／Vision 出站认证成功，错误公钥被拒。
+- 实际上报：Xray 5 个入站＋13 个出站组合，sing-box 2 个入站＋10 个出站组合。
+
+### 本地完整 Linux 门禁
+
+- 首个发布提交 `25621ba`：check 部分进行中即被取代；真实核部分 `internal/platform/server` 的 `TestRealUserCredentialSubscriptionAndRepublishedRevocation`（真实 Agent 20 秒内未完成修订 2）与 `internal/agent/core/singbox` 的 `TestOfficialXrayClientNativeSingboxUDPInteroperability/trojan`（Xray 启动失败）失败。渲染出的 Trojan 配置单独 `xray run -test` 通过；根因是 Xray 渲染每次都重新探测设置契约，v1.6.0 加入 13 个出站组合后每次发布约运行 24 次原生检查，负载下拖慢发布与启动。修正为按二进制（路径、版本、大小、修改时间）缓存完整探测结果，不完整的结果不缓存；两个失败测试与 sing-box 整包在测试机上通过后提交 `4f09e0a`，对新 SHA 重跑两条门禁。
+- 发布提交 `4f09e0a`：`GATE 4f09e0a PASS total=1279s`，真实核部分 342 秒，一次通过。
+
+### GitHub check
+
+- 运行 43880358349（`25621ba`）在修正提交后取消。
+- [运行 43883440815](https://github.com/jingniao/qui/actions/runs/43883440815)（`4f09e0a`，完整门禁＋cores）一次通过。
+
+### 发布记录
+
+- tag `v1.6.0` → `4f09e0a`，[Release 运行 43887293285](https://github.com/jingniao/qui/actions/runs/43887293285) 成功，14:44:29 UTC 发布，13 个资产齐全：两个平台的 `proxy-control`、`proxy-agent`（`.bin` 与签名清单）、`sing-box-1.14.4-qui.1`（含 provenance）、`SHA256SUMS`、`node-install.sh`、`panel-install.sh`。
+- amd64 Agent 签名清单：版本 1.6.0，序号 **1006000**，签名存在。
+
+## 生产
+
+本次未升级生产（面板 1.5.8）。

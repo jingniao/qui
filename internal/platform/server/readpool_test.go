@@ -89,7 +89,12 @@ func TestReadsAndSubscriptionsAnswerWhileTheWriterIsBusy(t *testing.T) {
 		if response.Code != probe.status {
 			t.Fatalf("%s: %d %s", probe.name, response.Code, response.Body.String())
 		}
-		if elapsed > time.Second {
+		// A read stuck behind the held writer waits for SQLite's 5 s busy
+		// timeout. Unblocked reads take ~0.3 s locally (the subscription
+		// includes the 250 ms best-effort fetch marker) but reached 1.07–1.11 s
+		// on race-enabled CI shards, so the bound separates the two cases
+		// without timing the runner.
+		if elapsed > 3*time.Second {
 			t.Fatalf("%s answered only after %s while a write transaction was held", probe.name, elapsed)
 		}
 		t.Logf("%s answered %d in %s", probe.name, response.Code, elapsed)

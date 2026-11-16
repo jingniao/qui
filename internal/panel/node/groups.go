@@ -307,7 +307,7 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 			return Group{}, err
 		}
 	}
-	// Only linked rules carry a subscription endpoint; manual targets never do.
+	// Linked and import rules carry subscription endpoints; manual targets do not.
 	seen = map[string]bool{}
 	for _, ruleID := range input.RelayIDs {
 		if seen[ruleID] {
@@ -315,8 +315,8 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 		}
 		seen[ruleID] = true
 		var exists int
-		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM tunnel_rules WHERE id=? AND target_mode='linked'", ruleID).Scan(&exists); err != nil {
-			return Group{}, errors.New("tunnel rule member does not exist or has no linked target")
+		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM tunnel_rules WHERE id=? AND target_mode IN ('linked','import')", ruleID).Scan(&exists); err != nil {
+			return Group{}, errors.New("tunnel rule member does not exist or has no subscription target")
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_relays(group_id,rule_id) VALUES(?,?)", groupID, ruleID); err != nil {
 			return Group{}, err

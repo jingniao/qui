@@ -51,6 +51,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/system/base", h.Auth.Require(http.HandlerFunc(h.base), true))
 	mux.Handle("PUT /api/v1/system/base", h.Auth.Require(http.HandlerFunc(h.saveBase), true))
 	mux.Handle("GET /api/v1/system/install-endpoint", h.Auth.Require(http.HandlerFunc(h.installEndpoint), true))
+	mux.Handle("GET /api/v1/system/reality-presets", h.Auth.Require(http.HandlerFunc(h.realityPresets), true))
+	mux.Handle("PUT /api/v1/system/reality-presets", h.Auth.Require(http.HandlerFunc(h.saveRealityPresets), true))
 	mux.Handle("PUT /api/v1/system/install-endpoint", h.Auth.Require(http.HandlerFunc(h.saveInstallEndpoint), true))
 	mux.Handle("GET /api/v1/system/admin-entry", h.Auth.Require(http.HandlerFunc(h.adminEntry), true))
 	mux.Handle("PUT /api/v1/system/admin-entry", h.Auth.Require(http.HandlerFunc(h.saveAdminEntry), true))
@@ -115,6 +117,14 @@ func (h *Handler) saveRetention(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 200, settings)
 }
 func (h *Handler) fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrRealityPresetsConflict) {
+		httpapi.Error(w, 409, "settings_conflict", err.Error())
+		return
+	}
+	if errors.Is(err, ErrRealityPresetsInvalid) {
+		httpapi.Error(w, 400, "invalid_settings", err.Error())
+		return
+	}
 	if errors.Is(err, ErrBaseConflict) {
 		httpapi.Error(w, 409, "settings_conflict", err.Error())
 		return

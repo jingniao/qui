@@ -262,10 +262,7 @@ func (s *Store) replace(ctx context.Context, tx *sql.Tx, key string, entries []p
 	if kind == sourceKindContent {
 		return ErrContentReplace
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM imported_proxies WHERE source_id=?", key); err != nil {
-		return err
-	}
-	return s.insertEntries(ctx, tx, key, entries, stamp, sourceKindURL)
+	return s.replaceImportEntries(ctx, tx, key, entries, stamp)
 }
 
 func (s *Store) insertEntries(ctx context.Context, tx *sql.Tx, key string, entries []proxy.Proxy, stamp, kind string) error {
@@ -292,7 +289,7 @@ func (s *Store) insertEntries(ctx context.Context, tx *sql.Tx, key string, entri
 				return err
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO imported_proxies(id,source_id,name,protocol,payload_encrypted,fetched_at) VALUES(?,?,?,?,?,?)", pid, key, p.Name, p.Protocol, encrypted, stamp); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO imported_proxies(id,source_id,name,protocol,payload_encrypted,fetched_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload_encrypted=excluded.payload_encrypted,fetched_at=excluded.fetched_at`, pid, key, p.Name, p.Protocol, encrypted, stamp); err != nil {
 			return err
 		}
 	}
@@ -636,7 +633,12 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 	if err = rows.Err(); err != nil {
 		return nil, nil, errors.New("imported proxy cache unavailable")
 	}
-	return entries, warnings, nil
+	rows.Close()
+	relays, err := s.importRelays(ctx, viewer)
+	if err != nil {
+		return nil, nil, err
+	}
+	return append(entries, relays...), warnings, nil
 }
 
 // Names supplies metadata for the client-policy editor without opening payloads.

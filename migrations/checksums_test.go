@@ -13,6 +13,7 @@ import (
 // ending) makes existing panels refuse to start and old backups fail to
 // restore. Add new migrations here; never change an existing entry.
 var applied = map[string]string{
+	"0152_tunnel_rule_import_target.sql":                "388d65bd5ba43124abfdcdfc7ee1f5e2c2c3850e97b1036db43878dfd0a7eed8",
 	"0151_node_group_relays.sql":                        "ee52396aa917737f03857c85fb0849e9d9f509cd510a948b526d575ebd14cef4",
 	"0150_relay_cleanup.sql":                            "6baae17fc6e5c33d8de1c988cd6bea8f524bee195bd13609eb6c01e9a20b4e24",
 	"0149_tunnel_publication_finalization.sql":          "1702d3e3e1d461c91d0ce38719e93d0d8df12075a61d1173ff20726113a99689",

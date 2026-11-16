@@ -418,6 +418,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateNodeGroupRelays(ctx, database); err != nil {
 		return err
 	}
+	if err := validateTunnelImportTargets(ctx, database); err != nil {
+		return err
+	}
 	if err := validateNodeGroupEntries(ctx, database); err != nil {
 		return err
 	}

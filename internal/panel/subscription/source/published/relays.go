@@ -17,6 +17,7 @@ type Relay struct {
 	ID                 string
 	Name               string `json:"-"`
 	InboundID          string
+	ImportID           string `json:"importId,omitempty"`
 	Entry              proxy.Ref
 	Server             string
 	Port               int
@@ -62,7 +63,9 @@ func (s *RelayStore) Relays(ctx context.Context) ([]Relay, error) {
 		if entryKnown && address != "" {
 			item.Server = address
 		}
-		items = append(items, item)
+		if item.ImportID == "" {
+			items = append(items, item)
+		}
 	}
 	return items, rows.Err()
 }

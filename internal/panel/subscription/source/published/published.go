@@ -125,7 +125,7 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 			}
 			granted := []grantedRelay{}
 			for _, relay := range relays {
-				if relay.InboundID != inbound.ID || !relay.Enabled || !relay.Visible {
+				if relay.ImportID != "" || relay.InboundID != inbound.ID || !relay.Enabled || !relay.Visible {
 					continue
 				}
 				relayLabels, err := s.relayLabels(ctx, relay.ID, viewer)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"proxycontrol/internal/panel/subscription/importtarget"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -38,6 +39,7 @@ type Tunnel struct {
 }
 type TunnelTarget struct {
 	Mode        string `json:"mode"`
+	ImportID    string `json:"importId,omitempty"`
 	NodeID      string `json:"nodeId,omitempty"`
 	NodeName    string `json:"nodeName,omitempty"`
 	InboundID   string `json:"inboundId,omitempty"`
@@ -143,13 +145,13 @@ func (r *Repository) Tunnels(ctx context.Context) ([]Tunnel, error) {
 	return items, nil
 }
 
-const managedRuleColumns = `r.id,r.name,r.entry_node_id,n.name,r.listen_port,r.port_mode,r.network,r.tunnel_id,t.name,r.target_mode,r.target_inbound_id,coalesce(r.target_host,''),coalesce(r.target_port,0),r.owner_node_id,r.subscription_visible,r.enabled,r.status,r.draft_version,r.published_version,r.published_at,r.created_at,r.updated_at`
+const managedRuleColumns = `r.id,r.name,r.entry_node_id,n.name,r.listen_port,r.port_mode,r.network,r.tunnel_id,t.name,r.target_mode,r.target_inbound_id,coalesce(r.target_host,''),coalesce(r.target_port,0),r.owner_node_id,r.subscription_visible,r.enabled,r.status,r.draft_version,r.published_version,r.published_at,r.created_at,r.updated_at,coalesce(r.target_import_id,'')`
 const managedRuleFrom = ` FROM tunnel_rules r JOIN nodes n ON n.id=r.entry_node_id LEFT JOIN tunnels t ON t.id=r.tunnel_id`
 
 func scanManagedRule(row interface{ Scan(...any) error }) (TunnelRule, error) {
 	var r TunnelRule
 	var inbound *string
-	err := row.Scan(&r.ID, &r.Name, &r.EntryNodeID, &r.EntryNodeName, &r.ListenPort, &r.PortMode, &r.Network, &r.TunnelID, &r.TunnelName, &r.Target.Mode, &inbound, &r.Target.Host, &r.Target.Port, &r.OwnerNodeID, &r.SubscriptionVisible, &r.Enabled, &r.Status, &r.DraftVersion, &r.PublishedVersion, &r.PublishedAt, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &r.Name, &r.EntryNodeID, &r.EntryNodeName, &r.ListenPort, &r.PortMode, &r.Network, &r.TunnelID, &r.TunnelName, &r.Target.Mode, &inbound, &r.Target.Host, &r.Target.Port, &r.OwnerNodeID, &r.SubscriptionVisible, &r.Enabled, &r.Status, &r.DraftVersion, &r.PublishedVersion, &r.PublishedAt, &r.CreatedAt, &r.UpdatedAt, &r.Target.ImportID)
 	if inbound != nil {
 		r.Target.InboundID = *inbound
 	}
@@ -158,7 +160,19 @@ func scanManagedRule(row interface{ Scan(...any) error }) (TunnelRule, error) {
 	}
 	return r, err
 }
-func deriveTunnelTarget(ctx context.Context, q portDatabase, target TunnelTarget, tunnelID *string) (TunnelTarget, error) {
+func (r *Repository) deriveTunnelTarget(ctx context.Context, q portDatabase, target TunnelTarget, tunnelID *string) (TunnelTarget, error) {
+	if target.Mode == "import" {
+		t := TunnelTarget{Mode: "import", ImportID: target.ImportID, NodeName: "目标已删除"}
+		endpoint, err := importtarget.Load(ctx, q, r.Vault, target.ImportID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return t, tunnelFail("import_target_deleted", 409, "导入节点目标已删除，请修改或删除规则")
+		}
+		if err != nil {
+			return t, err
+		}
+		t.Host, t.Port, t.Protocol, t.NodeName = endpoint.Server, endpoint.Port, endpoint.Protocol, endpoint.Name
+		return t, nil
+	}
 	if target.Mode != "linked" {
 		return TunnelTarget{Mode: target.Mode, Host: target.Host, Port: target.Port}, nil
 	}
@@ -211,8 +225,13 @@ func (r *Repository) TunnelRules(ctx context.Context, tunnelID, nodeID string) (
 }
 
 func (r *Repository) deriveRuleTarget(ctx context.Context, item *TunnelRule) error {
-	target, err := deriveTunnelTarget(ctx, r.Database, item.Target, item.TunnelID)
+	target, err := r.deriveTunnelTarget(ctx, r.Database, item.Target, item.TunnelID)
 	if err != nil {
+		var failure *tunnelError
+		if errors.As(err, &failure) && failure.Code == "import_target_deleted" {
+			item.Target = target
+			return nil
+		}
 		// Removal must remain readable even when its former target is gone.
 		if item.Status == "pending_delete" {
 			return nil
@@ -223,7 +242,11 @@ func (r *Repository) deriveRuleTarget(ctx context.Context, item *TunnelRule) err
 	return nil
 }
 func (r *Repository) storedTunnelRules(ctx context.Context, tunnelID, nodeID string) ([]TunnelRule, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" WHERE (?='' OR r.tunnel_id=?) AND (?='' OR r.entry_node_id=?) ORDER BY r.created_at,r.id", tunnelID, tunnelID, nodeID, nodeID)
+	return r.storedTunnelRulesColumns(ctx, tunnelID, nodeID, managedRuleColumns)
+}
+
+func (r *Repository) storedTunnelRulesColumns(ctx context.Context, tunnelID, nodeID, columns string) ([]TunnelRule, error) {
+	rows, err := r.Database.QueryContext(ctx, "SELECT "+columns+managedRuleFrom+" WHERE (?='' OR r.tunnel_id=?) AND (?='' OR r.entry_node_id=?) ORDER BY r.created_at,r.id", tunnelID, tunnelID, nodeID, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +457,7 @@ func (s *Service) SaveTunnel(ctx context.Context, tunnelID string, input TunnelI
 }
 
 func (s *Service) retargetTunnelRules(ctx context.Context, tx *sql.Tx, tunnelID, entry string) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id,entry_node_id,listen_port,port_mode,published_at,target_mode,coalesce(target_inbound_id,''),updated_at FROM tunnel_rules WHERE tunnel_id=? AND status<>'pending_delete'", tunnelID)
+	rows, err := tx.QueryContext(ctx, "SELECT id,entry_node_id,listen_port,port_mode,published_at,target_mode,coalesce(target_inbound_id,''),updated_at,coalesce(target_import_id,''),coalesce(target_host,''),coalesce(target_port,0) FROM tunnel_rules WHERE tunnel_id=? AND status<>'pending_delete'", tunnelID)
 	if err != nil {
 		return err
 	}
@@ -448,7 +471,7 @@ func (s *Service) retargetTunnelRules(ctx context.Context, tx *sql.Tx, tunnelID,
 	items := []linked{}
 	for rows.Next() {
 		var x linked
-		if err = rows.Scan(&x.id, &x.node, &x.port, &x.mode, &x.published, &x.target.Mode, &x.target.InboundID, &x.stamp); err != nil {
+		if err = rows.Scan(&x.id, &x.node, &x.port, &x.mode, &x.published, &x.target.Mode, &x.target.InboundID, &x.stamp, &x.target.ImportID, &x.target.Host, &x.target.Port); err != nil {
 			rows.Close()
 			return err
 		}
@@ -460,7 +483,7 @@ func (s *Service) retargetTunnelRules(ctx context.Context, tx *sql.Tx, tunnelID,
 		return err
 	}
 	for _, x := range items {
-		if _, err = deriveTunnelTarget(ctx, tx, x.target, &tunnelID); err != nil {
+		if _, err = s.Repository.deriveTunnelTarget(ctx, tx, x.target, &tunnelID); err != nil {
 			return err
 		}
 		if x.node != entry {
@@ -501,13 +524,16 @@ func (s *Service) saveTunnelRule(ctx context.Context, ruleID string, input Tunne
 		}
 	}
 	input.Name = strings.TrimSpace(input.Name)
+	if input.Target.Mode == "import" && input.Network == "" {
+		input.Network = "both"
+	}
 	if !managedName(input.Name) || !validPortMode(input.PortMode) || (input.Network != "tcp" && input.Network != "udp" && input.Network != "both") {
 		return TunnelRule{}, tunnelFail("invalid", 400, "规则名称、网络或端口模式无效")
 	}
 	if input.TunnelID != nil && *input.TunnelID == "" {
 		input.TunnelID = nil
 	}
-	if input.Target.Mode != "linked" && input.Target.Mode != "manual" {
+	if input.Target.Mode != "linked" && input.Target.Mode != "manual" && input.Target.Mode != "import" {
 		return TunnelRule{}, tunnelFail("invalid", 400, "目标模式无效")
 	}
 	if input.Target.Mode == "manual" {
@@ -564,7 +590,7 @@ func (s *Service) saveTunnelRule(ctx context.Context, ruleID string, input Tunne
 			return TunnelRule{}, err
 		}
 	}
-	target, err := deriveTunnelTarget(ctx, tx, input.Target, input.TunnelID)
+	target, err := r.deriveTunnelTarget(ctx, tx, input.Target, input.TunnelID)
 	if err != nil {
 		return TunnelRule{}, err
 	}
@@ -584,21 +610,23 @@ func (s *Service) saveTunnelRule(ctx context.Context, ruleID string, input Tunne
 	if err != nil {
 		return TunnelRule{}, err
 	}
-	var inbound, host, port any
+	var inbound, host, port, imported any
 	if input.Target.Mode == "linked" {
 		inbound = input.Target.InboundID
+	} else if input.Target.Mode == "import" {
+		imported = input.Target.ImportID
 	} else {
 		host = input.Target.Host
 		port = input.Target.Port
 	}
-	args := []any{input.Name, input.EntryNodeID, p, input.PortMode, input.Network, input.TunnelID, input.Target.Mode, inbound, host, port, input.SubscriptionVisible, input.Enabled}
+	args := []any{input.Name, input.EntryNodeID, p, input.PortMode, input.Network, input.TunnelID, input.Target.Mode, inbound, host, port, imported, input.SubscriptionVisible, input.Enabled}
 	if old.ID == "" {
 		args = append(args, ruleID, stamp, stamp)
-		_, err = tx.ExecContext(ctx, `INSERT INTO tunnel_rules(name,entry_node_id,listen_port,port_mode,network,tunnel_id,target_mode,target_inbound_id,target_host,target_port,subscription_visible,enabled,id,created_at,updated_at,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft')`, args...)
+		_, err = tx.ExecContext(ctx, `INSERT INTO tunnel_rules(name,entry_node_id,listen_port,port_mode,network,tunnel_id,target_mode,target_inbound_id,target_host,target_port,target_import_id,subscription_visible,enabled,id,created_at,updated_at,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft')`, args...)
 	} else {
 		args = append(args, managedStatus(old.PublishedAt), stamp, ruleID, input.UpdatedAt)
 		var result sql.Result
-		result, err = tx.ExecContext(ctx, `UPDATE tunnel_rules SET name=?,entry_node_id=?,listen_port=?,port_mode=?,network=?,tunnel_id=?,target_mode=?,target_inbound_id=?,target_host=?,target_port=?,subscription_visible=?,enabled=?,status=?,draft_version=draft_version+1,updated_at=? WHERE id=? AND updated_at=?`, args...)
+		result, err = tx.ExecContext(ctx, `UPDATE tunnel_rules SET name=?,entry_node_id=?,listen_port=?,port_mode=?,network=?,tunnel_id=?,target_mode=?,target_inbound_id=?,target_host=?,target_port=?,target_import_id=?,subscription_visible=?,enabled=?,status=?,draft_version=draft_version+1,updated_at=? WHERE id=? AND updated_at=?`, args...)
 		if err == nil {
 			n, e := result.RowsAffected()
 			if e != nil {

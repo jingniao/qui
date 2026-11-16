@@ -36,6 +36,7 @@ type DeletionPreview struct {
 	Groups         []DeletionGroup  `json:"groups"`
 	ClientPolicies []DeletionPolicy `json:"clientPolicies"`
 	Canvases       []DeletionCanvas `json:"canvases"`
+	Rules          []DeletionGroup  `json:"rules"`
 	LastInSource   bool             `json:"lastInSource"`
 }
 
@@ -54,7 +55,7 @@ type DeletionConflict struct {
 func (e *DeletionConflict) Error() string { return e.Message }
 
 func (s *Store) deletionPreviewTx(ctx context.Context, tx *sql.Tx, key string) (DeletionPreview, string, int64, error) {
-	result := DeletionPreview{Groups: []DeletionGroup{}, ClientPolicies: []DeletionPolicy{}, Canvases: []DeletionCanvas{}}
+	result := DeletionPreview{Groups: []DeletionGroup{}, ClientPolicies: []DeletionPolicy{}, Canvases: []DeletionCanvas{}, Rules: []DeletionGroup{}}
 	var src string
 	var revision int64
 	var sealed []byte
@@ -72,7 +73,26 @@ func (s *Store) deletionPreviewTx(ctx context.Context, tx *sql.Tx, key string) (
 	if err = tx.QueryRowContext(ctx, "SELECT count(*)=1 FROM imported_proxies WHERE source_id=?", src).Scan(&result.LastInSource); err != nil {
 		return result, src, revision, err
 	}
-	result.Groups, result.ClientPolicies, result.Canvases, err = s.DeletionReferences.Preview(ctx, tx, src, key)
+	rows, err := tx.QueryContext(ctx, `SELECT id,name FROM tunnel_rules WHERE (target_mode='import' AND target_import_id=?) OR json_extract(published_snapshot,'$.importId')=? ORDER BY id`, key, key)
+	if err != nil {
+		return result, src, revision, err
+	}
+	for rows.Next() {
+		var rule DeletionGroup
+		if err = rows.Scan(&rule.ID, &rule.Name); err != nil {
+			rows.Close()
+			return result, src, revision, err
+		}
+		result.Rules = append(result.Rules, rule)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return result, src, revision, err
+	}
+	if s.DeletionReferences != nil {
+		result.Groups, result.ClientPolicies, result.Canvases, err = s.DeletionReferences.Preview(ctx, tx, src, key)
+	}
 	return result, src, revision, err
 }
 
@@ -101,13 +121,16 @@ func (s *Store) DeleteProxy(ctx context.Context, key string, in DeleteInput) err
 	if revision != in.ExpectedRevision {
 		return ErrRenameStale
 	}
+	if len(preview.Rules) > 0 {
+		return &DeletionConflict{Code: "import_in_use_by_rule", Message: "节点被隧道规则引用，请先修改或删除规则", Details: map[string]any{"rules": preview.Rules}}
+	}
 	if len(preview.Canvases) > 0 {
 		return &DeletionConflict{Code: "import_in_use_by_canvas", Message: "节点被画布引用，请先修改并发布方案", Details: map[string]any{"canvases": preview.Canvases}}
 	}
 	if !in.RemoveReferences && (len(preview.Groups) > 0 || len(preview.ClientPolicies) > 0) {
 		return &DeletionConflict{Code: "import_referenced", Message: "节点被分组或客户端策略引用，请确认同时移除这些成员", Details: map[string]any{"groups": preview.Groups, "clientPolicies": preview.ClientPolicies}}
 	}
-	if in.RemoveReferences {
+	if in.RemoveReferences && s.DeletionReferences != nil {
 		if err = s.DeletionReferences.Remove(ctx, tx, src, key); err != nil {
 			return err
 		}

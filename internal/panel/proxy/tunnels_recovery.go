@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/platform/vault"
@@ -60,11 +61,24 @@ func ValidateTunnels(ctx context.Context, database *sql.DB, key *vault.Vault) er
 			}
 		}
 	}
-	rules, err := r.TunnelRules(ctx, "", "")
+	// Archives made before 0152 have no import target column. They are checked
+	// before the recovery pipeline migrates them to the current schema.
+	var importColumn int
+	if err = database.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('tunnel_rules') WHERE name='target_import_id'").Scan(&importColumn); err != nil {
+		return err
+	}
+	columns := managedRuleColumns
+	if importColumn == 0 {
+		columns = strings.Replace(columns, "coalesce(r.target_import_id,'')", "''", 1)
+	}
+	rules, err := r.storedTunnelRulesColumns(ctx, "", "", columns)
 	if err != nil {
 		return err
 	}
 	for _, rule := range rules {
+		if err = r.deriveRuleTarget(ctx, &rule); err != nil {
+			return err
+		}
 		if !managedName(rule.Name) || !validPortMode(rule.PortMode) {
 			return errors.New("invalid tunnel rule")
 		}

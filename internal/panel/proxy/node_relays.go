@@ -37,7 +37,7 @@ type RelayProxies interface {
 }
 
 func (r *Repository) NodeRelayRules(ctx context.Context, nodeID string) ([]TunnelRule, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" JOIN inbounds i ON i.id=r.target_inbound_id WHERE i.node_id=? ORDER BY r.created_at,r.id", nodeID)
+	rows, err := r.Database.QueryContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" LEFT JOIN inbounds i ON i.id=r.target_inbound_id WHERE (r.target_mode='linked' AND i.node_id=?) OR (r.target_mode='import' AND r.entry_node_id=?) ORDER BY r.created_at,r.id", nodeID, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (r *Repository) NodeRelayRules(ctx context.Context, nodeID string) ([]Tunne
 		return nil, err
 	}
 	for i := range items {
-		items[i].Target, err = deriveTunnelTarget(ctx, r.Database, items[i].Target, items[i].TunnelID)
+		err = r.deriveRuleTarget(ctx, &items[i])
 		if err != nil {
 			return nil, err
 		}
@@ -86,7 +86,7 @@ func (s *Service) CreateNodeRelay(ctx context.Context, nodeID string, input Node
 }
 
 func (r *Repository) relaySnapshot(ctx context.Context, q portDatabase, rule TunnelRule) (published.Relay, error) {
-	relay := published.Relay{ID: rule.ID, Name: strings.TrimSpace(rule.Name), InboundID: rule.Target.InboundID, Entry: subproxy.Ref{ID: rule.EntryNodeID, Name: rule.EntryNodeName}, Port: *rule.ListenPort, Network: rule.Network, DestinationPort: rule.Target.Port, Enabled: rule.Enabled, Visible: rule.SubscriptionVisible}
+	relay := published.Relay{ID: rule.ID, Name: strings.TrimSpace(rule.Name), InboundID: rule.Target.InboundID, ImportID: rule.Target.ImportID, Entry: subproxy.Ref{ID: rule.EntryNodeID, Name: rule.EntryNodeName}, Port: *rule.ListenPort, Network: rule.Network, DestinationAddress: rule.Target.Host, DestinationPort: rule.Target.Port, Enabled: rule.Enabled, Visible: rule.SubscriptionVisible}
 	// Clients dial the entry by its client connect address (connectHost, else
 	// public IP); the destination stays the target's public IP for TLS names.
 	err := q.QueryRowContext(ctx, "SELECT COALESCE(NULLIF(connect_host,''),public_ip) FROM nodes WHERE id=?", rule.EntryNodeID).Scan(&relay.Server)
@@ -106,7 +106,7 @@ func (r *Repository) saveRelaySnapshot(ctx context.Context, tx *sql.Tx, relay pu
 
 func (h *Handler) nodeRelay(ctx context.Context, rule TunnelRule, owner bool) (NodeRelay, error) {
 	result := NodeRelay{Rule: rule}
-	if !owner || h.RelayProxies == nil {
+	if !owner || h.RelayProxies == nil || rule.Target.Mode == "import" {
 		return result, nil
 	}
 	rows, err := h.Service.Repository.Database.QueryContext(ctx, "SELECT id FROM users ORDER BY id")

@@ -23,7 +23,7 @@ JOIN inbounds i ON i.id=e.inbound_id JOIN nodes n ON n.id=i.node_id WHERE n.dele
 		}
 	}
 	// Tunnel rule members (0151) follow the same rule: today's membership, for
-	// rules the restored data still holds with a linked target.
+	// rules the restored data still holds with a linked or import target.
 	var present int
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_group_relays'").Scan(&present); err != nil {
 		return err
@@ -32,6 +32,6 @@ JOIN inbounds i ON i.id=e.inbound_id JOIN nodes n ON n.id=i.node_id WHERE n.dele
 		return nil
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO node_group_relays(group_id,rule_id) SELECT e.group_id,e.rule_id FROM restore_source.node_group_relays e
-JOIN node_groups g ON g.id=e.group_id JOIN tunnel_rules t ON t.id=e.rule_id WHERE t.target_mode='linked'`)
+JOIN node_groups g ON g.id=e.group_id JOIN tunnel_rules t ON t.id=e.rule_id WHERE t.target_mode IN ('linked','import')`)
 	return err
 }

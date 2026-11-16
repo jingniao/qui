@@ -1,6 +1,26 @@
 import type { CoreName, NodeView } from '../nodes/api';
 import type { CanvasEntrySecurity, ProtocolSettings } from './api';
 import { serverSettingsReason, validateServerFields } from './components/node-editor/serverSettingsModel';
+import type { RealityPreset, RealityPresets } from '../system/settingsApi';
+import type { Inbound } from './api';
+import { defaultRealityPreset } from '../system/realityPresetModel';
+
+export function applyEntryRealityPreset(value: CanvasEntrySecurity, preset: RealityPreset, server: NodeView | undefined, core: CoreName | ''): CanvasEntrySecurity {
+  const result = { ...value, realityTarget: preset.handshakeTarget, realityServerName: preset.serverNames[0] };
+  if (!preset.transport && !preset.flow) return result;
+  const transport = preset.transport || value.transport || 'tcp';
+  const choice = entryTransportChoices(server, core, 'reality').find(item => item.transport === transport && item.flow === preset.flow);
+  return choice ? { ...result, transport: choice.transport, flow: choice.flow } : result;
+}
+
+export function resolveEntryReality(value: CanvasEntrySecurity, presets: RealityPresets | null, exit: Inbound | undefined, server: NodeView | undefined, core: CoreName | ''): CanvasEntrySecurity {
+  const preset = defaultRealityPreset(presets);
+  // Bound inputs keep their transport and Flow as well as their public fields.
+  const initial = preset && !value.realityTarget && !value.realityServerName ? applyEntryRealityPreset(value, preset, server, core) : value;
+  return { ...initial,
+    realityTarget: initial.realityTarget || preset?.handshakeTarget || exit?.settings.reality?.handshake_target || '',
+    realityServerName: initial.realityServerName || preset?.serverNames[0] || exit?.settings.reality?.server_names?.[0] || '' };
+}
 
 export function entrySettings(value: CanvasEntrySecurity): ProtocolSettings {
   return { security: value.security || 'none', transport: value.transport || 'tcp', flow: value.flow || '',

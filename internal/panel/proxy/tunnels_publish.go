@@ -257,7 +257,7 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 	for _, rule := range allRules {
 		if selectedR[rule.ID] {
 			if rule.Status != "pending_delete" {
-				rule.Target, err = deriveTunnelTarget(ctx, r.Database, rule.Target, rule.TunnelID)
+				rule.Target, err = r.deriveTunnelTarget(ctx, r.Database, rule.Target, rule.TunnelID)
 				if err != nil {
 					return p, err
 				}

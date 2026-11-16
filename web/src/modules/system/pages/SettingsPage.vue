@@ -35,6 +35,7 @@
       <a href="https://db-ip.com" target="_blank" rel="noopener noreferrer" class="text-ios-blue hover:underline">DB-IP</a>（CC BY 4.0）。
     </p>
     <AdminEntryPanel v-if="isOwner && activeTab === 'security'" />
+    <RealityPresetsPanel v-if="isOwner && activeTab === 'base'" />
     <section v-if="isOwner && activeTab === 'base'" class="panel-card p-6 max-w-3xl space-y-5 text-sm">
       <div class="flex flex-wrap justify-between items-center gap-3"><h2 class="text-base font-semibold leading-normal">节点安装连接地址</h2><button class="ios-btn-secondary" :disabled="endpointLoading || endpointSaving" @click="loadEndpoint">刷新已保存地址</button></div>
       <ErrorState v-if="endpointError" :message="endpointError" @retry="loadEndpoint" /><LoadingSkeleton v-else-if="!endpointSaved" />
@@ -99,6 +100,7 @@ import LatencyTargetsPanel from '../components/LatencyTargetsPanel.vue';
 import RuntimeSettingsPanel from '../components/RuntimeSettingsPanel.vue';
 import CertificatesPanel from '../components/CertificatesPanel.vue';
 import AdminEntryPanel from '../components/AdminEntryPanel.vue';
+import RealityPresetsPanel from '../components/RealityPresetsPanel.vue';
 import PanelUpdatePanel from '../components/PanelUpdatePanel.vue';
 import RetentionJobPanel from '../components/RetentionJobPanel.vue';
 import StorageObservationPanel from '../components/StorageObservationPanel.vue';

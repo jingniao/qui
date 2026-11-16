@@ -50,8 +50,8 @@
           <input v-model="s.reality.handshake_target" placeholder="例如 www.amd.com:443" class="form-input-base mt-2 font-mono" />
           <span class="block text-xs mt-1">填一个支持 TLS 1.3 与 HTTP/2 的境外常见 HTTPS 站点（不要用自己的域名，越靠近节点越好）；节点只把未通过认证的握手交给它。必须自行指定，不会自动选择。部分站点只适用于 sing-box，Xray 连接会失败；不确定时从常用目标中选择。</span>
         </label>
-        <label class="block">常用目标（可选）
-          <select :value="''" class="form-input-base mt-2 font-mono" @change="pickPreset"><option value="">选择后填入上面的握手目标</option><option v-for="preset in REALITY_HANDSHAKE_PRESETS" :key="preset" :value="preset">{{ preset }}</option></select>
+        <label class="block">Reality 预设（可选）
+          <select :value="''" class="form-input-base mt-2 font-mono" @change="pickPreset"><option value="">选择预设填入参数</option><option v-for="preset in presetChoices" :key="preset.value" :value="preset.value">{{ preset.label }}</option></select>
         </label>
         <label class="block">服务器名称 / SNI（每行一个）
           <span class="flex items-start gap-2 mt-2">
@@ -234,6 +234,8 @@
 </template>
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue';
+import { useRealityPresets } from '../../../system/realityPresets';
+import { applyRealityPreset, defaultRealityPreset, realityPresetChoices } from '../../../system/realityPresetModel';
 import type { NodeView } from '../../../nodes/api';
 import { certificateMatches as findCertificateMatches, type CertificateMatches, type TLSSource } from '../../api';
 import { certificatesAPI, type ManagedCertificate } from '../../../system/certificatesApi';
@@ -242,6 +244,14 @@ import { formatTime } from '../../../../app/auth';
 import { appendShortId, applyCertificateChoice, certificateChoices, certificateFilesSupported, certificatePathError, changeSecurity, changeTransport, applyXhttpSecurity, fillServerNamesFromTarget, flowChoices, internalRelaySettingsReason, randomXhttpPath, REALITY_HANDSHAKE_PRESETS, securityChoices, serverSettingsReason, sniFromTarget, SELF_SIGNED_REQUIRES_ADDRESS, tlsBlockShown, acmeAddressHint, tlsSourceChoices, tlsSourceFor, usableCertificates, transportChoices, visibleChoices, XHTTP_MODES, forcedTLS, forwardListenPorts, forwardPool, hasSecurity, hasTransport, relayMode, type CertificateChoice, type EditorState } from './nodeEditorModel';
 const props = defineProps<{ state: EditorState; gost?: boolean; server?: NodeView; certificates?: ManagedCertificate[] }>();
 const f = computed(() => props.state.form), s = computed(() => props.state.form.settings);
+const { presets, ready: presetsReady } = useRealityPresets();
+const presetChoices = computed(() => realityPresetChoices(presets.value));
+watch(() => [presetsReady.value, s.value.security, f.value.protocol], () => {
+  const preset = defaultRealityPreset(presets.value);
+  if (!props.state.original && f.value.protocol === 'vless' && s.value.security === 'reality' && s.value.reality && !s.value.reality.handshake_target && preset) {
+    f.value.settings = applyRealityPreset(s.value, preset, props.server, f.value.core || '');
+  }
+}, { immediate: true });
 // The TLS block is shown for both the TLS-only protocols and an explicit TLS
 // security; the certificate source inside it names the one material it presents.
 const tlsShown = computed(() => tlsBlockShown(f.value));
@@ -388,7 +398,9 @@ function fillSni() {
 function pickPreset(event: Event) {
   const select = event.target as HTMLSelectElement;
   const reality = s.value.reality;
-  if (reality && select.value) reality.handshake_target = select.value;
+  const preset = presets.value?.items.find(item => item.id === select.value);
+  if (reality && preset) f.value.settings = applyRealityPreset(s.value, preset, props.server, f.value.core || '');
+  else if (reality && select.value) reality.handshake_target = select.value;
   select.value = '';
 }
 function addShortId() { if (s.value.reality && shortIdCount.value < 16) s.value.reality.short_ids = appendShortId(s.value.reality.short_ids); }

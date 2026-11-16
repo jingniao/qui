@@ -238,7 +238,7 @@ Reality/xhttp 直连的 Xray Windows 针对性检查覆盖认证、用户流量�
 
 节点组页面采用卡片布局，每组显示成员与授权用户数量；编辑打开分组管理弹窗，通过“授权账号”“组内节点”菜单管理成员和授权，顶部“分组设置”修改名称、用途与备注。“添加代理节点”选择弹窗按视口高度伸展，列表独立滚动。
 
-Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来自具体自建入站（`node_group_inbounds`）、关联目标入站的隧道规则（`node_group_relays`，v1.5.9／0151）或导入（`node_group_imports`），不是服务器成员。隧道规则成员只给出该规则的「经入口」端点，入站成员只给出直连端点，两者互不连带，所以直连与每条隧道线路可以分别授权给不同的人；规则只转发字节，用户仍在目标入站认证，因此只拿到规则的用户也会在目标入站获得凭据，订阅不显示直连但不阻止其自行直连。新建规则不自动入组，须在分组里加入；升级 0151 时，已在组内的目标入站把它的关联规则一并写入同一组，订阅内容不变。规则删除（发布移除成功后删行）随外键移出所有分组。单独导入（`Kind=content`）的 `proxy_key` 为 `id:<id>`，不再接受整个来源；订阅连接（`Kind=url`）保持 `''` 表示整个来源、`name|protocol` 表示单个节点，不依赖刷新后的内容哈希 ID。导入成员上限 1000；候选及已选成员按同一身份显示当前名称、协议、地址与端口。
+Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来自具体自建入站（`node_group_inbounds`）、关联目标入站的隧道规则（`node_group_relays`，v1.5.9／0151）或导入（`node_group_imports`），不是服务器成员。隧道规则成员只给出该规则的「经入口」端点，入站成员只给出直连端点，两者互不连带，所以直连与每条隧道线路可以分别授权给不同的人；规则只转发字节，用户仍在目标入站认证，因此只拿到规则的用户也会在目标入站获得凭据，订阅不显示直连但不阻止其自行直连。新建规则不自动入组，须在分组里加入；升级 0151 时，已在组内的目标入站把它的关联规则一并写入同一组，订阅内容不变。规则删除（发布移除成功后删行）随外键移出所有分组。目标为导入节点的规则（`import`，v1.6.0／0152）同样可单独入组；导入节点不在面板管理的服务器上，这类规则不贡献凭据下发节点。单独导入（`Kind=content`）的 `proxy_key` 为 `id:<id>`，不再接受整个来源；订阅连接（`Kind=url`）保持 `''` 表示整个来源、`name|protocol` 表示单个节点，不依赖刷新后的内容哈希 ID。导入成员上限 1000；候选及已选成员按同一身份显示当前名称、协议、地址与端口。
 
 `node_group_servers` 保存显式服务器，`node_group_members` 为显式服务器与入站所属服务器的去重并集，用于节点策略、服务器筛选与批量操作。显式服务器不授予凭据、订阅或门户可见性。仓储写入与事务触发器在入站移动/删除时维护并集，删除服务器也删显式成员；新入站不自动入组。
 
@@ -278,6 +278,8 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 输出名称按节点与协议命名：同一节点同一协议有多个入站时追加端口（`节点 · 协议 · 端口`），只有一个时保持 `节点 · 协议`。地址缺失不再静默：订阅预览按节点给出 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告，`/sub` 本身只输出能连的端点。
 
 关联目标入站的中转规则按成功发布快照追加订阅端点；仅纳入已发布、启用且对用户可见、并且本人被授权的分组含有该规则（`node_group_relays`）的规则，目标入站仍须通过可用性、协议与已发布凭据检查，但不要求目标入站本身在用户的分组里。保留目标协议、凭据、传输与 TLS 等协议字段，仅把连接地址/端口换为入口地址/规则端口；入口地址取入口节点当前的客户端连接地址（`connectHost`，否则 `publicIp`，两者皆空时沿用发布快照里的地址）；原隐含 TLS server name 显式写为目标地址。名称取规则当前名称（「添加中转」默认「<目标节点> 经 <隧道>」），重名按端口消歧；地址与名称不属于节点运行配置，改动不需重新发布即进入订阅，旧格式 `<目标节点> · <协议> · 经 <入口节点>` 仅在规则名为空时使用。直接端点保持自身可见性。Hysteria2/TUIC/WireGuard 按 UDP、其余按 TCP 与规则 network 过滤；Reality/xhttp 保留目标公开参数与原 SNI，xhttp 限 TCP，格式继续按各自能力省略。
+
+目标为导入节点的规则（v1.6.0）由导入来源生成订阅端点：同样按成功发布快照、启用、对用户可见与 `node_group_relays` 授权筛选，不要求导入节点本身在用户分组里；取导入节点当前的公开参数与凭据（凭据刷新后订阅随之更新），仅把地址端口换为入口客户端连接地址与规则端口，原隐含 SNI 显式写为原服务器名，Hysteria2 清空跳跃端口，名称取规则名，引用为 `relay:<规则 ID>`。
 
 草稿修改与 D8 目标变化不推进订阅快照，pending_delete 仍保留上次快照，成功发布移除后才消失。0130 前无快照的规则须再次成功发布才进入订阅。节点中转 API 的 `shareLink` 仅 Owner 可得，使用首个有合格已发布凭据的用户生成预览；Viewer、无合格凭据或 URI 无法表达时为 null，草稿预览不代表已进入订阅。
 
@@ -386,6 +388,8 @@ v1.4 自建 VLESS 用户入站：Xray 支持 Reality TCP（无 flow/Vision）、
 
 一个节点可同时有多个入站。
 
+v1.6.0 起，节点编辑器的「Reality 预设」可一次填入系统预设的握手目标与服务器名称，并在所选核心支持时切换预设的传输／Flow；新建 VLESS 入站切到 Reality 时自动带入系统默认预设，已有入站不自动改写，未配置系统预设时沿用内置 5 个常用目标（仅填握手目标）。
+
 节点创建与编辑使用同一单页表单：基础信息、连接设置、协议设置、授权与订阅直接显示；基础信息提供“所属节点组”多选，创建时保存组归属，编辑时回填并可调整，不选则不加入任何组。高级选项及配置预览与变更默认折叠，保存成功后展开预览。协议与安全字段随选择和所属核心能力联动，编辑时所属服务器及协议锁定。底部提供保存草稿和保存并发布；校验或保存失败保留输入并定位错误。连接地址继续取服务器信息，本轮不增加独立的客户端地址/端口覆盖字段。
 
 入站配置主要包括：
@@ -471,11 +475,13 @@ v1.5.5 出站资源可单独设置 `sourceIp/sourceInterface`（0145；DesiredSt
 
 # 14. 协议转换中转
 
+v1.6.0 起，画布与快速中转的入口安全设置选择 Reality 时可选系统预设；默认值优先级为绑定已有值 ＞ 系统默认预设 ＞ 出口入站的 Reality 参数，预设传输／Flow 只在入口核心支持时应用，只读入口不显示预设下拉，不保存预设 ID。
+
 中转分为隧道管理、节点“添加中转”和代理中转画布。隧道转发字节，不终止目标用户协议；画布由节点终止协议 A、按策略以协议 B 建立下一跳，用户凭据与节点间凭据隔离。
 
 隧道为 entry → [mid] → exit，最多三台不同服务器、两段中继；仅 GOST relay over TLS＋mTLS。两节点要求各跳契约 ≥3，三节点各跳 ≥4；接收跳使用公网地址或 `connectHost`。每个接收跳为同一隧道的规则共享一个监听，中间只知道一个下一跳。分段独立密封 CA/叶子证书，私钥不进 API、计划或日志。
 
-规则指定入口监听、network=tcp/udp/both、可选隧道及最终目标；不选隧道即直接转发，优先用 GOST，否则主 Xray/sing-box。linked 关联用户入站，由目标服务器地址与入站端口派生，隧道出口就是目标服务器时用 127.0.0.1；manual 固定 host/port，不生成用户订阅。D8：目标公网地址或入站端口变化在同一事务递增草稿版本，已发布规则标为 needs_publish；读取派生新目标，上次成功发布快照保持不动。删除目标时连带删除关联方案、规则及失去全部规则的隧道。
+规则指定入口监听、network=tcp/udp/both、可选隧道及最终目标；不选隧道即直接转发，优先用 GOST，否则主 Xray/sing-box。linked 关联用户入站，由目标服务器地址与入站端口派生，隧道出口就是目标服务器时用 127.0.0.1；manual 固定 host/port，不生成用户订阅。import（v1.6.0，0152）指向导入节点 `importId`，目标 host/port 读取时从导入节点的已保存内容派生，network 默认 both，Hysteria2／TUIC 只走主端口；订阅连接刷新按「名称|协议」把规则改绑到新内容 ID，地址或端口变化时已发布规则标为 needs_publish（只换凭据不需重新发布）；导入节点被刷新删除时外键置空、规则保留并显示「目标已删除」，已发布规则标 needs_publish，计划／发布返回 409 `import_target_deleted`。D8：目标公网地址或入站端口变化在同一事务递增草稿版本，已发布规则标为 needs_publish；读取派生新目标，上次成功发布快照保持不动。删除目标时连带删除关联方案、规则及失去全部规则的隧道。
 
 节点“添加中转”可选择已有隧道，为本节点用户入站创建 linked 规则（隧道入口须为其他节点，ownerNodeId 为目标节点）；也可新建中转方案，以当前节点预选为代理入口。订阅与分享见第 10.3 节。
 
@@ -999,6 +1005,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0148 `canvas_entry_baseline` | `canvas_entry_bindings` 新增可空 `creation_config_json`（固定字段类别的 SHA-256 摘要规范 JSON）及 `creation_groups_json`（排序去重的分组 ID 规范 JSON 数组）；旧行保持 NULL，不回填猜测 |
 | 0150 `relay_cleanup` | 新增每节点待清理表 `relay_cleanup_nodes`（原因、次数、失败码、下次时间、修订）与单行完成标记 `relay_cleanup_reconcile`；删除 reuse 绑定但保留普通入站，启动一次性清理残留并登记下发 |
 | 0151 `node_group_relays` | 新增分组↔隧道规则成员表 `node_group_relays`（group_id、rule_id，两端外键级联删除，按 rule_id 建索引）；把已在组内的目标入站的全部关联规则写入同一组，保持升级前订阅不变 |
+| 0152 `tunnel_rule_import_target` | 重建 `tunnel_rules`：`target_mode` 增加 `import`，新增 `target_import_id`（引用 `imported_proxies`，删除置空）与索引；import 模式不带入站／host／port。重建前暂存 `node_group_relays` 成员并在之后写回，删除并按原文重建 0129 的两个目标失效触发器，新增导入目标被置空时的失效触发器 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1207,7 +1214,7 @@ Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /c
 | DELETE `/inbounds/{id}`、`/nodes/{id}` | 连带删除，成功 200 `{pendingNodes:[{nodeId,name,reason}]}`；阻塞时 409 `inbound_delete_blocked`／`node_delete_blocked`，明细在 `error.blockers` |
 | POST `/relay-schemes/quick/plan`、`/relay-schemes/quick` | 预览 200（检查 `ok` 与冲突），创建 202 `{schemeId,publication,warnings}`；400 `invalid_request`、404 `not_found`、409 `stale_scheme/duplicate_scheme_name`，不返回 operationId 或预览令牌 |
 | PUT `/imported-proxies/{id}` | `{name,expectedRevision}`，200 返回当前节点；400 `invalid_json/import_invalid_name`，404 `import_node_missing`，409 `stale/import_rename_unsupported/import_name_conflict`（附 conflicts），500 `import_rename_failed` |
-| GET `/imported-proxies/{id}/deletion-preview`、DELETE `/imported-proxies/{id}` | 预览引用；删除传 `expectedRevision` 与 `removeReferences`，事务重查引用。404 `import_node_missing`，409 `stale/import_delete_unsupported/import_in_use_by_canvas/import_referenced`（含策略删空），500 `import_delete_failed` |
+| GET `/imported-proxies/{id}/deletion-preview`、DELETE `/imported-proxies/{id}` | 预览引用；删除传 `expectedRevision` 与 `removeReferences`，事务重查引用。404 `import_node_missing`，409 `stale/import_delete_unsupported/import_in_use_by_rule/import_in_use_by_canvas/import_referenced`（含策略删空；被隧道规则的当前目标或发布快照引用时 `import_in_use_by_rule` 列出规则 `{id,name}`，预览增加 `rules`），500 `import_delete_failed` |
 
 `entryBinding.mode` 只接受 `create`。入口归属校验在保存、规划和发布共用，违规返回 400 `inbound_is_scheme_entry`；其他规划冲突原因与 HTTP 错误码分开读取。删除预览的集合为空时均为 `[]`；错误体的 `error.blockers` 在前端为 `APIError.details.blockers`，无额外 `error.details` 嵌套。
 
@@ -1369,6 +1376,19 @@ Webhook 四种格式：generic 保持原 `POST {kind,severity,title,body,node_id
 
 门户接口只做加法：`GET /api/v1/portal/me`（及会话 `currentUser`、Owner 门户预览）增加 `trafficResetCycle`（`none`/`monthly`/`30days`）与 `nextTrafficResetAt`（RFC3339 UTC，不重置时为 null，与流量重置调度同一计算）；`GET /api/v1/portal/nodes` 每项增加 `protocols`（本人订阅端点在该节点的协议，取自订阅同一授权与过滤管线）；`GET /api/v1/portal/subscription` 增加 `defaultFormat`（系统默认格式）。
 
+## 27.19 系统设置：Reality 预设（v1.6.0）
+
+值存于 `system_settings` 单一键 `reality_presets`：`{items:[{id,name,handshakeTarget,serverNames,transport,flow}],defaultId,revision,updatedAt,updatedBy}`，无迁移；键缺失时 `items=[]`、`revision=0`、其余字段为空，随整库快照备份与恢复。预设不含密钥与 Short ID，每个入站仍独立生成。
+
+| 接口 | 合同 |
+| --- | --- |
+| `GET /api/v1/system/reality-presets` | Owner 专用；返回上述完整对象 |
+| `PUT /api/v1/system/reality-presets` | Owner＋CSRF，体 `{items,defaultId,expectedRevision}`，拒绝未知字段；校验失败 400 `invalid_settings`，`expectedRevision` 不匹配 409 `settings_conflict`；内容未变化返回当前值，不推进 revision、不写日志；成功写“修改 Reality 预设”（target `reality_presets`） |
+
+最多 20 项，新增项 `id` 为空、由服务端生成，已有项保留 ID；名称去首尾空白后 1–64 个字符且不重名。`handshakeTarget` 与 `serverNames` 复用 `desiredstate.RealityServerSettings.ValidateHandshake()`；服务器名称须为 1–16 个具体 DNS 主机名，不接受 IP、通配符与带端口的名称，空列表自动取握手目标主机。`transport` 为 `''`／`tcp`／`xhttp`，`flow` 为 `''`／`xtls-rprx-vision`，Vision 仅配显式 `tcp`；`defaultId` 为空或引用存在项，新项保存后可设为默认。
+
+系统设置卡片支持添加、编辑、删除与设为默认，冲突提示刷新。各编辑器共享一次预设读取，读取失败按无预设行为处理，系统设置主动刷新与保存后更新缓存。节点编辑器与入口安全设置只复制公开参数，不关联预设 ID，之后修改预设不改写已存入站或绑定。
+
 # 28. gRPC 节点通信
 
 节点通信使用 Enroll 与双向流 Connect。
@@ -1517,13 +1537,15 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | --- | --- |
 | client_policy_profiles、system_settings.client_policy_active/client_rules | 加密备份与恢复校验覆盖配置库、活动指针和模板快照；旧归档初始化配置库并保留 activeRevision，新归档校验指针与活动模板一致性 |
 | system_settings.install_endpoint | 随整库快照整体备份，无键白名单，不单独校验；恢复按归档值（该键无校验步骤，损坏值读出即报 invalid_settings），旧归档缺该键读作未设置、安装命令回落到浏览器地址 |
+| system_settings.reality_presets | 随整库快照整体备份，无键白名单，不单独校验；恢复按归档值，损坏值读出即报 invalid_settings；旧归档缺该键读作空列表、revision 0 |
 | node_meta.tags_json | 随加密备份保留与恢复；0144 起按标签数量、长度、去重与规范形式校验，拒绝非规范数组；旧归档升级后默认空数组。服务器顺序 `system_settings.server_order` 随系统设置整体往返 |
 | outbounds.source_ip/source_interface | 随加密备份保留与恢复；0145 起校验地址、网卡语法及 Block 不得绑定，旧归档允许缺列、升级后为空；恢复不自动发布 |
 | canvas_entry_bindings（0146） | 随备份／清单保留，校验模式、状态、归属、入站、实例唯一及路由编码；旧归档可无表。旧 reuse 绑定在升级 0150 时删除，对应普通入站配置保留 |
 | canvas_entry_bindings.creation_config_json/creation_groups_json（0148） | 随整库备份及清单保留；校验完整分类摘要、64 位小写十六进制 SHA-256、规范 JSON、非空去重排序分组 ID；两列同时 NULL 为合法旧基线，0148 前归档升级后为 NULL |
 | relay_cleanup_nodes（0150） | 加密备份、清单及校验覆盖节点外键、非负次数、时间、失败码与可空正数修订；恢复保留待清理记录，由运行期重试器继续处理 |
 | relay_cleanup_reconcile（0150） | 加密备份、清单及校验覆盖 id=1 与 completed=0/1；恢复保留完成标记，未完成时由启动清理器处理 |
-| node_group_relays（0151） | 加密备份、清单（`nodeGroupRelays`）及校验覆盖分组与规则存在、规则必须为关联目标、每组不超过 500 条；0151 前归档合法。恢复与其他分组成员同规则：以当前库的成员为准，只保留恢复数据里仍存在且为关联目标的规则 |
+| node_group_relays（0151） | 加密备份、清单（`nodeGroupRelays`）及校验覆盖分组与规则存在、规则必须为关联目标或导入目标、每组不超过 500 条；0151 前归档合法。恢复与其他分组成员同规则：以当前库的成员为准，只保留恢复数据里仍存在且为关联目标或导入目标的规则 |
+| tunnel_rules.target_import_id（0152） | 随加密备份保留；校验 import 规则的 `target_import_id` 为空或指向存在的导入节点，0152 前归档合法；恢复不重新抓取导入来源 |
 | import_identity_reconcile/map、imported_proxies.revision、system_settings.import_identity_report（0147） | 校验单次标记、映射目标及来源、revision≥1、报告 JSON、明文与密封名称／协议一致；允许明确悬空成员与悬空引用并写转换／恢复报告，done=1 不再接受 content 整源成员。旧归档先升级，在最终候选库协调身份；当前导入节点／授权与映射按恢复权威规则保留，不按名称配对、不复活旧授权，不重新抓取、不自动发布 |
 | node_latency_samples、定时探测队列、node_metric_samples | 不进便携备份：快照清空再 VACUUM，恢复候选再清空，不影响运行库样本；手动排队探测过期 |
 | scheduled 默认目标、node_latency_targets、latency_targets_custom | 属配置；兼容 0121 前归档并默认继承。进程内恢复保留当前自定义（含空表），补其新目标但不提升为系统默认 |

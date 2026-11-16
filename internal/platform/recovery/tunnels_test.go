@@ -38,8 +38,9 @@ func rewindTunnelFixture(t *testing.T, database *sql.DB) {
 	}
 }
 func TestTunnelRestoreVersions(t *testing.T) {
-	for _, old := range []bool{false, true} {
-		t.Run(map[bool]string{false: "current", true: "pre0129"}[old], func(t *testing.T) {
+	for _, version := range []string{"current", "0151", "pre0129"} {
+		t.Run(version, func(t *testing.T) {
+			old := version == "pre0129"
 			ctx := context.Background()
 			var ruleID string
 			var tunnelID, fingerprint string
@@ -76,6 +77,9 @@ func TestTunnelRestoreVersions(t *testing.T) {
 					if _, err = f.source.Database.Exec("UPDATE " + table + " SET status='published',published_version=draft_version,published_at=updated_at"); err != nil {
 						t.Fatal(err)
 					}
+				}
+				if version == "0151" {
+					rewindTunnelImportTarget(t, f.source.Database)
 				}
 			})
 			if err := db.Migrate(ctx, f.source.Database, migrations.Files); err != nil {

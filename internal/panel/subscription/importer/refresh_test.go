@@ -339,7 +339,9 @@ func TestRefreshReplaceFailureReportsCommit(t *testing.T) {
 	if _, err = s.Refresh(ctx, key); err != nil {
 		t.Fatal(err)
 	}
-	abortOn(t, s, "reject_refresh_replace", "BEFORE DELETE ON imported_proxies")
+	// An unchanged node keeps its row (rules may reference it), so replace
+	// rewrites it with an upsert instead of deleting it; fail that write.
+	abortOn(t, s, "reject_refresh_replace", "BEFORE UPDATE ON imported_proxies")
 	result, err := s.Refresh(ctx, key)
 	if err == nil || errors.Is(err, ErrFetch) || errors.Is(err, ErrParse) || !strings.Contains(err.Error(), "fixture abort") {
 		t.Fatalf("persistence error hidden: %v", err)

@@ -7,6 +7,7 @@ async function moduleUrl(url, cache = new Map()) {
   let code = ts.transpileModule(readFileSync(url, 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext }
   }).outputText;
+  code = code.replace(/from 'vue'/g, `from '${import.meta.resolve('vue')}'`);
   const imports = [...new Set([...code.matchAll(/from\s+'([^']+)'/g)].map(match => match[1]).filter(spec => spec.startsWith('.')))];
   for (const spec of imports) {
     const child = new URL(spec, url);
@@ -191,6 +192,14 @@ for (const match of [...securityCode.matchAll(/^import .* from '([^']+)';$/gm)])
 securityCode = securityCode.replace('const props = defineProps();', '').replace('const emit = defineEmits();', '');
 const { securityEditor } = await import(`data:text/javascript;base64,${Buffer.from(securityImports.join('\n') + '\nexport function securityEditor(props, emit) {\n' + securityCode + '\nreturn { securities, transports, changeSecurity, changeTransport };\n}').toString('base64')}`);
 const secureProps = reactive({ modelValue: {}, protocol: 'vless', core: 'xray', server: secureServer, name: '入口', exit: { id: 'exit', protocol: 'vless', settings: { security: 'reality', reality: { handshake_target: 'www.example.com:443', server_names: ['www.example.com'] } } } });
+// Presets are loaded before defaults are chosen; use the real request with an
+// empty response for this legacy fallback scenario, without a network request.
+const presetsCache = await import(await moduleUrl(new URL('../src/modules/system/realityPresets.ts', import.meta.url)));
+const originalFetch = globalThis.fetch;
+try {
+  globalThis.fetch = async () => Response.json({ items: [], defaultId: '', revision: 0, updatedAt: '', updatedBy: '' });
+  await presetsCache.loadRealityPresets();
+} finally { globalThis.fetch = originalFetch; }
 const secureEditor = securityEditor(secureProps, (_, value) => { secureProps.modelValue = value; });
 assert.equal(secureProps.modelValue.security, 'reality', 'selector defaults to Reality');
 assert.equal(secureProps.modelValue.realityTarget, 'www.example.com:443', 'prefills exit public target');

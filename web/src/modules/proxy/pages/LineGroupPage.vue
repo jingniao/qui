@@ -449,6 +449,7 @@
                       <span v-if="node.internalRelay" class="block text-xs text-ios-orange">
                         内部监听（不应作为用户成员）
                       </span>
+                      <span v-if="node.note" class="block text-xs text-ios-orange">{{ node.note }}</span>
                       <span class="block text-xs text-neutral-400 truncate max-w-[220px]" :title="memberServerLabel(node)">
                         {{ memberServerLabel(node) }}
                       </span>
@@ -486,7 +487,7 @@
                       </span>
                     </td>
                     <td>
-                      <StatusBadge v-if="node.sourceType === 'self_hosted'" :status="node.enabled ? 'active' : 'disabled'" />
+                      <StatusBadge v-if="node.sourceType === 'self_hosted' || (node.sourceType === 'tunnel_relay' && !node.invalid)" :status="node.enabled ? 'active' : 'disabled'" />
                       <span v-else class="text-xs text-neutral-400">—</span>
                     </td>
                     <td v-if="isOwner">
@@ -569,7 +570,8 @@ import { choices, proxyAPI, type Inbound } from '../api';
 import { importSourceKind, loadImports } from '../importApi';
 import { proxyNodeStore } from '../proxyNodes';
 import { policyAPI, type PolicyRecord, type StoredRuleTemplate } from '../../routing/api';
-import { groupInput, importMemberId, isUserGroup, groupPurposeNames, assertValidImportMembers, invalidImportMembers } from '../lineGroups';
+import { groupInput, importMemberId, relayMemberId, isUserGroup, groupPurposeNames, assertValidImportMembers, invalidImportMembers } from '../lineGroups';
+import { tunnelRuleAPI, type TunnelRule } from '../../tunnels/api';
 import { importProxyKey, resolveImportMember } from '../importIdentity';
 import { isUserEntry } from '../userEntries';
 import EntryRouteSummary from '../components/EntryRouteSummary.vue';
@@ -580,6 +582,7 @@ const router = useRouter();
 const groups = ref<NodeGroup[]>([]);
 const servers = ref<NodeView[]>([]);
 const inbounds = ref<Inbound[]>([]);
+const tunnelRules = ref<TunnelRule[]>([]);
 const policies = ref<PolicyRecord[]>([]);
 const clientTemplate = ref<StoredRuleTemplate | null>(null);
 
@@ -614,12 +617,14 @@ const serverMap = computed(() => {
 function sourceBadgeClass(type: string) {
   if (type === 'self_hosted') return 'bg-emerald-50 text-emerald-700 border border-emerald-200/60';
   if (type === 'subscription') return 'bg-purple-50 text-purple-700 border border-purple-200/60';
+  if (type === 'tunnel_relay') return 'bg-orange-50 text-ios-orange border border-orange-200/60';
   return 'bg-blue-50 text-ios-blue border border-blue-200/60';
 }
 
 // Member names can repeat across servers, so the server (or import source) is shown
 // as a secondary line under the name instead of relying on the scrollable column.
 function memberServerLabel(node: GroupPickerNode) {
+  if (node.sourceType === 'tunnel_relay') return node.sourceName;
   if (node.serverId && serverMap.value[node.serverId]) return serverMap.value[node.serverId].name;
   return node.sourceName || '—';
 }
@@ -645,6 +650,32 @@ const allGroupNodes = computed<GroupPickerNode[]>(() => {
       subscriptionVisible: ib.subscriptionVisible,
       internalRelay: ib.internalRelay,
       routeSummary: isUserEntry(ib) ? ib.routeSummary : undefined
+    });
+  }
+
+  // Linked tunnel rules are members of their own: the user receives the rule's
+  // relayed endpoint, independently of the target inbound (direct endpoint).
+  for (const rule of tunnelRules.value) {
+    if (rule.target.mode !== 'linked') continue;
+    const target = rule.target;
+    const via = rule.tunnelName ? ` · 经 ${rule.tunnelName}` : '';
+    result.push({
+      id: relayMemberId(rule.id),
+      ruleId: rule.id,
+      name: rule.name,
+      protocol: target.protocol,
+      port: rule.listenPort,
+      sourceType: 'tunnel_relay',
+      sourceTypeName: '隧道转发',
+      sourceName: `${rule.entryNodeName} → ${target.nodeName}${via}`,
+      serverId: rule.entryNodeId,
+      status: rule.enabled ? 'active' : 'disabled',
+      enabled: rule.enabled,
+      subscriptionVisible: rule.subscriptionVisible,
+      pendingDelete: rule.status === 'pending_delete',
+      note: rule.status === 'pending_delete' ? '等待发布移除'
+        : !rule.publishedAt ? '尚未发布，订阅暂不包含'
+        : !rule.subscriptionVisible ? '规则未勾选「显示在订阅中」，订阅不包含' : undefined
     });
   }
 
@@ -674,7 +705,7 @@ const allAvailableNodes = computed(() => allGroupNodes.value.filter(isUserEntry)
 const selected = computed(() => groups.value.find(group => group.id === route.query.group) || groups.value[0]);
 
 function memberIds(group: NodeGroup) {
-  return [...(group.inboundIds || []), ...(group.imports || []).map(importMemberId)];
+  return [...(group.inboundIds || []), ...(group.relayIds || []).map(relayMemberId), ...(group.imports || []).map(importMemberId)];
 }
 function groupNodesFor(groupId: string): GroupPickerNode[] {
   const group = groups.value.find(item => item.id === groupId);
@@ -682,6 +713,11 @@ function groupNodesFor(groupId: string): GroupPickerNode[] {
   return memberIds(group).filter(id => !pendingRemovals.value[groupId]?.includes(id)).map(id => {
     const existing = allGroupNodes.value.find(item => item.id === id);
     if (existing) return existing;
+    const ruleId = (group.relayIds || []).find(item => relayMemberId(item) === id);
+    if (ruleId !== undefined) {
+      return { id, ruleId, name: `未找到的隧道线路：${ruleId}`, protocol: '—', port: '—', sourceType: 'tunnel_relay' as const,
+        sourceTypeName: '隧道转发', sourceName: '—', status: 'disabled' as const, enabled: false, invalid: true };
+    }
     const member = group.imports.find(item => importMemberId(item) === id);
     const source = proxyNodeStore.subscriptions.find(item => item.id === member?.sourceId);
     const resolved = member ? resolveImportMember(member, proxyNodeStore.subscriptions, []) : null;
@@ -697,6 +733,7 @@ const currentGroupNodes = computed(() => selected.value ? groupNodesFor(selected
 const hasAvailableNodes = computed(() => allAvailableNodes.value.some(node =>
   !currentGroupNodes.value.some(member => member.id === node.id)
   && (node.sourceType !== 'self_hosted' || (node.enabled && node.subscriptionVisible))
+  && (node.sourceType !== 'tunnel_relay' || (node.subscriptionVisible && !node.pendingDelete))
 ));
 const pickerNodeIds = computed(() => pickerGroup.value ? memberIds(pickerGroup.value).filter(id => !pendingRemovals.value[pickerGroup.value!.id]?.includes(id)) : []);
 
@@ -766,10 +803,12 @@ async function load() {
       choices((page, size) => policyAPI.list(page, '', size)),
       request<StoredRuleTemplate>('/subscription-rules'),
       loadImports(),
-      choices((page, size) => userAPI.list(page, '', size))
+      choices((page, size) => userAPI.list(page, '', size)),
+      tunnelRuleAPI.list().then(result => result.items)
     ]);
     [groups.value, servers.value, inbounds.value, policies.value, clientTemplate.value] = data;
     users.value = data[6];
+    tunnelRules.value = data[7];
     syncSelection();
   } catch (e) {
     error.value = (e as Error).message;
@@ -849,7 +888,11 @@ async function savePicker(ids: string[]) {
     for (const id of ids) {
       const candidate = allAvailableNodes.value.find(item => item.id === id);
       if (!candidate) throw new Error('候选节点已变化，请刷新后重试');
-      if (candidate.sourceId !== undefined && candidate.proxyKey !== undefined) {
+      if (candidate.ruleId !== undefined) {
+        if (!candidate.subscriptionVisible || candidate.pendingDelete) throw new Error('隧道线路不符合用户接入条件');
+        const relayIds = input.relayIds ?? (input.relayIds = []);
+        if (!relayIds.includes(candidate.ruleId)) relayIds.push(candidate.ruleId);
+      } else if (candidate.sourceId !== undefined && candidate.proxyKey !== undefined) {
         if (!input.imports.some(item => importMemberId(item) === id)) input.imports.push({ sourceId: candidate.sourceId, proxyKey: candidate.proxyKey });
       } else {
         if (!candidate.enabled || !candidate.subscriptionVisible || candidate.internalRelay) throw new Error('入站不符合用户接入条件');
@@ -884,6 +927,7 @@ function removeNode(nodeId: string) {
     const fresh = await freshGroup(group.id);
     const input = groupInput(fresh);
     input.inboundIds = input.inboundIds.filter(id => id !== nodeId);
+    input.relayIds = (input.relayIds || []).filter(id => relayMemberId(id) !== nodeId);
     input.imports = input.imports.filter(item => importMemberId(item) !== nodeId);
     assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
     await groupAPI.save(group.id, input);
@@ -895,6 +939,7 @@ function memberEditInput(group: NodeGroup) {
   const input = groupInput(group);
   const removed = pendingRemovals.value[group.id] || [];
   input.inboundIds = input.inboundIds.filter(id => !removed.includes(id));
+  input.relayIds = (input.relayIds || []).filter(id => !removed.includes(relayMemberId(id)));
   input.imports = input.imports.filter(member => !removed.includes(importMemberId(member)));
   return input;
 }

@@ -86,8 +86,10 @@ func (s *Service) CreateNodeRelay(ctx context.Context, nodeID string, input Node
 }
 
 func (r *Repository) relaySnapshot(ctx context.Context, q portDatabase, rule TunnelRule) (published.Relay, error) {
-	relay := published.Relay{ID: rule.ID, InboundID: rule.Target.InboundID, Entry: subproxy.Ref{ID: rule.EntryNodeID, Name: rule.EntryNodeName}, Port: *rule.ListenPort, Network: rule.Network, DestinationPort: rule.Target.Port, Enabled: rule.Enabled, Visible: rule.SubscriptionVisible}
-	err := q.QueryRowContext(ctx, "SELECT public_ip FROM nodes WHERE id=?", rule.EntryNodeID).Scan(&relay.Server)
+	relay := published.Relay{ID: rule.ID, Name: strings.TrimSpace(rule.Name), InboundID: rule.Target.InboundID, Entry: subproxy.Ref{ID: rule.EntryNodeID, Name: rule.EntryNodeName}, Port: *rule.ListenPort, Network: rule.Network, DestinationPort: rule.Target.Port, Enabled: rule.Enabled, Visible: rule.SubscriptionVisible}
+	// Clients dial the entry by its client connect address (connectHost, else
+	// public IP); the destination stays the target's public IP for TLS names.
+	err := q.QueryRowContext(ctx, "SELECT COALESCE(NULLIF(connect_host,''),public_ip) FROM nodes WHERE id=?", rule.EntryNodeID).Scan(&relay.Server)
 	if err == nil && rule.Target.Mode == "linked" {
 		err = q.QueryRowContext(ctx, "SELECT n.public_ip FROM inbounds i JOIN nodes n ON n.id=i.node_id WHERE i.id=?", rule.Target.InboundID).Scan(&relay.DestinationAddress)
 	}
@@ -138,10 +140,26 @@ func (h *Handler) nodeRelay(ctx context.Context, rule TunnelRule, owner bool) (N
 			return result, e
 		}
 		for _, endpoint := range endpoints {
-			if endpoint.Origin.Source != "published" || endpoint.Origin.Ref != rule.Target.InboundID {
+			if endpoint.Origin.Source != "published" {
 				continue
 			}
-			endpoint, ok := published.RelayEndpoint(endpoint, relay)
+			var ok bool
+			switch {
+			case !endpoint.Origin.Relayed && endpoint.Origin.Ref == rule.Target.InboundID:
+				endpoint, ok = published.RelayEndpoint(endpoint, relay)
+			case endpoint.Origin.Relayed && endpoint.Origin.Ref == rule.ID:
+				// A user granted only this rule has no direct endpoint; the
+				// published relayed one is re-pointed at the draft entry.
+				if relay.Server == "" {
+					return result, nil
+				}
+				endpoint.Server, endpoint.Port, ok = relay.Server, relay.Port, true
+				if relay.Name != "" {
+					endpoint.Name = relay.Name
+				}
+			default:
+				continue
+			}
 			if !ok {
 				return result, nil
 			}

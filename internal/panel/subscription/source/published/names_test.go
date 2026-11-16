@@ -124,7 +124,7 @@ func TestEndpointNamesIncludesRunningRevisionAndRelays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO tunnel_rules(id,name,entry_node_id,listen_port,port_mode,network,target_mode,target_inbound_id,subscription_visible,enabled,status,created_at,updated_at,published_snapshot) VALUES('relay','relay','n',9000,'auto','tcp','linked','a',1,1,'published','now','now',?)`, string(relay)); err != nil {
+	if _, err := database.Exec(`INSERT INTO tunnel_rules(id,name,entry_node_id,listen_port,port_mode,network,target_mode,target_inbound_id,subscription_visible,enabled,status,created_at,updated_at,published_snapshot) VALUES('relay','Edge 经 tunnel','n',9000,'auto','tcp','linked','a',1,1,'published','now','now',?)`, string(relay)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`UPDATE inbounds SET port=2080 WHERE id='a'`); err != nil {
@@ -139,8 +139,32 @@ func TestEndpointNamesIncludesRunningRevisionAndRelays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Edge · http", "Edge · socks5", "Edge · socks5 · 1080", "Edge · socks5 · 1081", "Edge · socks5 · 经 Entry"}
+	want := []string{"Edge · http", "Edge · socks5", "Edge · socks5 · 1080", "Edge · socks5 · 1081", "Edge 经 tunnel"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("names = %v, want %v", names, want)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	// Name and dial address follow the live rule and entry node; the entry's
+	// client connect address wins over its public IP, and an entry without any
+	// address keeps the published one.
+	store := &RelayStore{Database: database}
+	for _, tc := range []struct{ publicIP, connectHost, want string }{
+		{"", "", "203.0.113.1"},
+		{"198.51.100.1", "", "198.51.100.1"},
+		{"198.51.100.1", "edge.example", "edge.example"},
+	} {
+		if _, err := database.Exec(`UPDATE nodes SET public_ip=?,connect_host=? WHERE id='n'`, tc.publicIP, tc.connectHost); err != nil {
+			t.Fatal(err)
+		}
+		relays, err := store.Relays(ctx)
+		if err != nil || len(relays) != 1 || relays[0].Server != tc.want || relays[0].Name != "Edge 经 tunnel" {
+			t.Fatalf("relays %+v %v, want server %s", relays, err, tc.want)
+		}
+	}
+	endpoint, ok := RelayEndpoint(proxy.Proxy{Name: "Target · vless", Protocol: "vless"}, Relay{Name: "Edge 经 tunnel", Server: "edge.example", Port: 9000, Network: "both", Entry: proxy.Ref{Name: "Edge"}})
+	if !ok || endpoint.Name != "Edge 经 tunnel" || endpoint.Server != "edge.example" {
+		t.Fatalf("relayed endpoint %+v", endpoint)
 	}
 }

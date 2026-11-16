@@ -17,13 +17,18 @@ type QuickCanvasEntryGroups struct {
 }
 
 type QuickCanvasInput struct {
-	RequestID     string                 `json:"requestId"`
-	EntryNodeID   string                 `json:"entryNodeId"`
-	MiddleNodeIDs []string               `json:"middleNodeIds"`
-	ExitInboundID string                 `json:"exitInboundId"`
-	EntryProtocol string                 `json:"entryProtocol"`
-	EntryCore     string                 `json:"entryCore,omitempty"`
-	EntryGroups   QuickCanvasEntryGroups `json:"entryGroups"`
+	EntrySecurity          string                 `json:"entrySecurity,omitempty"`
+	EntryTransport         string                 `json:"entryTransport,omitempty"`
+	EntryFlow              string                 `json:"entryFlow,omitempty"`
+	EntryRealityTarget     string                 `json:"entryRealityTarget,omitempty"`
+	EntryRealityServerName string                 `json:"entryRealityServerName,omitempty"`
+	RequestID              string                 `json:"requestId"`
+	EntryNodeID            string                 `json:"entryNodeId"`
+	MiddleNodeIDs          []string               `json:"middleNodeIds"`
+	ExitInboundID          string                 `json:"exitInboundId"`
+	EntryProtocol          string                 `json:"entryProtocol"`
+	EntryCore              string                 `json:"entryCore,omitempty"`
+	EntryGroups            QuickCanvasEntryGroups `json:"entryGroups"`
 }
 
 type QuickCanvasResult struct {
@@ -58,7 +63,7 @@ func (s *Service) quickCanvasScheme(ctx context.Context, input QuickCanvasInput)
 	if groups.Mode == "" {
 		groups.Mode = "exit_groups"
 	}
-	layout := CanvasLayout{Instances: []CanvasInstance{{InstanceID: "entry", Ref: "server:" + input.EntryNodeID, Role: "entry", X: 40, Y: 120, EntryBinding: &CanvasEntryBinding{Mode: "create", Protocol: input.EntryProtocol, Core: input.EntryCore, PortMode: "auto", GroupMode: groups.Mode, GroupIDs: groups.GroupIDs}}}}
+	layout := CanvasLayout{Instances: []CanvasInstance{{InstanceID: "entry", Ref: "server:" + input.EntryNodeID, Role: "entry", X: 40, Y: 120, EntryBinding: &CanvasEntryBinding{Mode: "create", Protocol: input.EntryProtocol, Core: input.EntryCore, Security: input.EntrySecurity, Transport: input.EntryTransport, Flow: input.EntryFlow, RealityTarget: input.EntryRealityTarget, RealityServerName: input.EntryRealityServerName, PortMode: "auto", GroupMode: groups.Mode, GroupIDs: groups.GroupIDs}}}}
 	for index, nodeID := range input.MiddleNodeIDs {
 		if !validCanvasToken(nodeID) {
 			return CanvasScheme{}, errors.New("中间服务器 ID 无效")

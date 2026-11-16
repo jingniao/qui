@@ -26,6 +26,8 @@ type relayFixture struct {
 	protocol   string
 	relays     []Relay
 	groups     []string
+	// relayGroups overrides the rule membership; nil follows groups.
+	relayGroups []string
 }
 
 func (f *relayFixture) Credentials(context.Context, string, bool) ([]user.Credential, error) {
@@ -33,6 +35,12 @@ func (f *relayFixture) Credentials(context.Context, string, bool) ([]user.Creden
 }
 func (f *relayFixture) ExpandedNodes(context.Context, []string) ([]node.Node, error) {
 	return []node.Node{{ID: "destination", Name: "US", PublicIP: "destination.example", Capabilities: &pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: f.protocol, Inbound: true}}}}}, nil
+}
+func (f *relayFixture) UserRelayGroups(context.Context, string, string) ([]string, error) {
+	if f.relayGroups != nil {
+		return f.relayGroups, nil
+	}
+	return f.groups, nil
 }
 func (f *relayFixture) UserInboundGroups(context.Context, string, string) ([]string, error) {
 	return f.groups, nil
@@ -156,5 +164,43 @@ func TestRelayedSubscriptionFilters(t *testing.T) {
 	out, err := (uri.URI{}).Render(format.Profile{Proxies: p})
 	if err != nil || len(out.Body) != 0 {
 		t.Fatal(out, err)
+	}
+}
+
+// The direct endpoint and each tunnel rule endpoint follow their own group
+// membership: either may reach a user without the other.
+func TestRelayEndpointFollowsRuleMembership(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		inbound, relay      []string
+		wantDirect, wantRel bool
+	}{
+		{"both", []string{"group"}, []string{"group"}, true, true},
+		{"direct only", []string{"group"}, []string{}, true, false},
+		{"relay only", []string{}, []string{"group"}, false, true},
+		{"ungranted group", []string{}, []string{"other"}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRelayFixture("vless", desiredstate.ProtocolSettings{Security: "tls", ServerName: "tls.example"})
+			f.groups, f.relayGroups = tc.inbound, tc.relay
+			endpoints, err := relayProxies(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			direct, relayed := false, false
+			for _, endpoint := range endpoints {
+				if endpoint.Origin.Relayed {
+					relayed = true
+					if len(endpoint.Origin.Labels) != 1 || endpoint.Origin.Labels[0] != "nodeGroup:group" || endpoint.Server != "203.0.113.1" {
+						t.Fatalf("relayed endpoint %+v", endpoint)
+					}
+				} else {
+					direct = true
+				}
+			}
+			if direct != tc.wantDirect || relayed != tc.wantRel {
+				t.Fatalf("direct=%v relayed=%v endpoints=%+v", direct, relayed, endpoints)
+			}
+		})
 	}
 }

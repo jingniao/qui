@@ -64,7 +64,9 @@ func TestSingBoxRealityGRPCOmissionWarningDoesNotExposeShortID(t *testing.T) {
 	}
 }
 
-func TestMihomoXHTTPHTTP11ALPNOmissionWarning(t *testing.T) {
+// mihomo picks HTTP/1.1 for xhttp when ALPN is exactly [http/1.1] (any other
+// list is h2), so such an endpoint is exported with its ALPN, not omitted.
+func TestMihomoXHTTPHTTP11ALPNExported(t *testing.T) {
 	endpoint := proxy.Proxy{
 		Name:       "xhttp 节点",
 		Server:     "node.example",
@@ -79,21 +81,14 @@ func TestMihomoXHTTPHTTP11ALPNOmissionWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(output.Body), endpoint.Server) {
-		t.Fatal("mihomo must omit the xhttp endpoint with HTTP/1.1 ALPN")
+	body := string(output.Body)
+	if !strings.Contains(body, "server: "+endpoint.Server) || !strings.Contains(body, "network: xhttp") || !strings.Contains(body, "- http/1.1") {
+		t.Fatalf("mihomo must export the xhttp endpoint with HTTP/1.1 ALPN: %s", body)
 	}
-	var omissionWarnings int
 	for _, warning := range output.Warnings {
-		if !strings.Contains(warning.Message, endpoint.Name) {
-			continue
+		if strings.Contains(warning.Message, endpoint.Name) {
+			t.Fatalf("unexpected omission warning: %+v", warning)
 		}
-		omissionWarnings++
-		if warning.Stage != "format" || warning.Ref != "clash" || warning.Message != "节点「"+endpoint.Name+"」：xhttp 的 ALPN 只支持留空或 h2" {
-			t.Fatalf("unexpected ALPN omission warning: %+v", warning)
-		}
-	}
-	if omissionWarnings != 1 {
-		t.Fatalf("expected one named ALPN omission warning, got %+v", output.Warnings)
 	}
 }
 

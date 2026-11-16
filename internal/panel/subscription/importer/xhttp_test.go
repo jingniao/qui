@@ -155,17 +155,17 @@ func TestXHTTPTransportDetailsAndRejectPolicySurviveFiltering(t *testing.T) {
 	if len(again) != 1 || !reflect.DeepEqual(p, again[0]) {
 		t.Fatal("IPv6/path query escapes changed transport")
 	}
-	// Unsupported ALPN still omits the endpoint.
-	p.TLS.ALPN = []string{"http/1.1"}
+	// An omitted endpoint (legacy Clash carries no VLESS) keeps the REJECT.
+
 	resolved := rules.Resolved{Groups: []rules.ResolvedGroup{{Name: "strict", Type: "select", EmptyPolicy: "reject", Members: []rules.Member{{Kind: rules.KindProxy, Name: p.Name}}}}}
-	out, err := (clash.Meta{}).Render(format.Profile{Proxies: []proxy.Proxy{p}, Rules: &resolved})
+	out, err := (clash.Legacy{}).Render(format.Profile{Proxies: []proxy.Proxy{p}, Rules: &resolved})
 	if err != nil || strings.Contains(string(out.Body), "2001:db8::1") || !strings.Contains(string(out.Body), "REJECT") {
 		t.Fatal("xhttp omission relaxed explicit REJECT")
 	}
 	// A subsequent client-chain hop cannot outlive an omitted xhttp first hop.
 	p.ClientChain = "fixture"
 	next := proxy.Proxy{Name: "next", Protocol: "socks5", Server: "orphan.example.com", Port: 1080, DialerProxy: p.Name, ClientChain: "fixture"}
-	out, err = (clash.Meta{}).Render(format.Profile{Proxies: []proxy.Proxy{p, next}})
+	out, err = (clash.Legacy{}).Render(format.Profile{Proxies: []proxy.Proxy{p, next}})
 	if err != nil || strings.Contains(string(out.Body), "orphan.example.com") {
 		t.Fatal("xhttp filter left dependent chain hop")
 	}
@@ -245,6 +245,35 @@ func TestXHTTPRejectsNonTCPALPNAcrossImportAndExport(t *testing.T) {
 		}
 		if _, err := uri.Link(q); err != nil {
 			t.Fatal("valid TCP ALPN URI refused", err)
+		}
+	}
+}
+
+// mihomo picks the xhttp HTTP version from ALPN ([http/1.1] is HTTP/1.1,
+// anything else h2), so every admitted ALPN reaches Clash subscriptions with
+// its list intact; sing-box still has no xhttp and omits the endpoint.
+func TestXHTTPAnyAdmittedALPNReachesClash(t *testing.T) {
+	for _, base := range xhttpFixtures(t) {
+		for _, list := range [][]string{{"http/1.1"}, {"h2", "http/1.1"}} {
+			q := base
+			tls := *base.TLS
+			tls.ALPN = list
+			q.TLS = &tls
+			out, err := (clash.Meta{}).Render(format.Profile{Proxies: []proxy.Proxy{q}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := string(out.Body)
+			if strings.Count(body, "server: 127.0.0.1") != 1 || !strings.Contains(body, "network: xhttp") || !strings.Contains(body, "- http/1.1") || len(out.Warnings) != 0 {
+				t.Fatalf("%v: clash body=%s warnings=%v", list, body, out.Warnings)
+			}
+			if len(list) == 2 && !strings.Contains(body, "- h2") {
+				t.Fatalf("ALPN list shortened: %s", body)
+			}
+			out, err = (singbox.Exporter{}).Render(format.Profile{Proxies: []proxy.Proxy{q}})
+			if err != nil || strings.Contains(string(out.Body), `"server": "127.0.0.1"`) || len(out.Warnings) == 0 {
+				t.Fatalf("sing-box exported xhttp: %s %v", out.Body, err)
+			}
 		}
 	}
 }

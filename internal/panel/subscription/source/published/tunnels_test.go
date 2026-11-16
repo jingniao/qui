@@ -18,6 +18,9 @@ func (f forwardSubscriptionFixture) Credentials(context.Context, string, bool) (
 func (f forwardSubscriptionFixture) ExpandedNodes(context.Context, []string) ([]node.Node, error) {
 	return []node.Node{{ID: "entry", PublicIP: "203.0.113.1", Capabilities: &pb.Capabilities{CoreName: "gost", ForwardInboundSupported: true, Protocols: []*pb.ProtocolCapability{{Protocol: "forward", Inbound: true}}}}}, nil
 }
+func (f forwardSubscriptionFixture) UserRelayGroups(context.Context, string, string) ([]string, error) {
+	return []string{"group"}, nil
+}
 func (f forwardSubscriptionFixture) UserInboundGroups(context.Context, string, string) ([]string, error) {
 	return []string{"group"}, nil
 }

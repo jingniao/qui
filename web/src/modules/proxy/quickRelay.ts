@@ -13,6 +13,11 @@ export interface QuickRelayForm {
   exitInboundId: string;
   entryProtocol: string;
   entryCore: CoreName | '';
+  entrySecurity?: '' | 'none' | 'tls' | 'reality';
+  entryTransport?: '' | 'tcp' | 'xhttp';
+  entryFlow?: '' | 'xtls-rprx-vision';
+  entryRealityTarget?: string;
+  entryRealityServerName?: string;
   groupMode: QuickRelayGroupMode;
   groupIds: string[];
 }
@@ -23,6 +28,11 @@ export interface QuickRelayInput {
   exitInboundId: string;
   entryProtocol: string;
   entryCore?: CoreName;
+  entrySecurity?: QuickRelayForm['entrySecurity'];
+  entryTransport?: QuickRelayForm['entryTransport'];
+  entryFlow?: QuickRelayForm['entryFlow'];
+  entryRealityTarget?: string;
+  entryRealityServerName?: string;
   entryGroups: { mode: QuickRelayGroupMode; groupIds?: string[] };
 }
 export interface QuickRelayEntry {
@@ -55,6 +65,12 @@ export function buildQuickRelayInput(form: QuickRelayForm, requestId: string): Q
     exitInboundId: form.exitInboundId,
     entryProtocol: form.entryProtocol,
     ...(form.entryCore ? { entryCore: form.entryCore } : {}),
+    ...(form.entryProtocol === 'vless' ? {
+      ...(form.entrySecurity !== undefined ? { entrySecurity: form.entrySecurity } : {}),
+      ...(form.entryTransport ? { entryTransport: form.entryTransport } : {}),
+      ...(form.entryFlow ? { entryFlow: form.entryFlow } : {}),
+      ...(form.entrySecurity === 'reality' ? { entryRealityTarget: form.entryRealityTarget, entryRealityServerName: form.entryRealityServerName } : {})
+    } : {}),
     entryGroups: form.groupMode === 'explicit'
       ? { mode: form.groupMode, groupIds: [...form.groupIds] }
       : { mode: form.groupMode }

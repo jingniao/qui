@@ -403,7 +403,7 @@ func (d *quotaDeployer) scheduleTransition(ctx context.Context, transition user.
 		if err != nil {
 			return err
 		}
-		for _, nodeID := range group.NodeIDs {
+		for _, nodeID := range group.AccessNodeIDs() {
 			// Only nodes with a published revision can host an automatic
 			// revision. The Deployment module owns this read; the panel never
 			// queries deployment tables directly.

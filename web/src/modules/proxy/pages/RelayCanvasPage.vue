@@ -891,7 +891,7 @@
               v-if="currentScheme.executionLocation === 'server' && selectedNode.role === 'entry' && entryServerId"
               :key="currentScheme.id + ':' + selectedNode.instanceId + ':' + entryServerId"
               :node-id="entryServerId" :binding="selectedNode.entryBinding" :servers="servers" :inbounds="inbounds" :groups="entryGroups"
-              :exit-protocol="entryExitProtocol" :scheme-id="currentScheme.id"
+              :exit-protocol="entryExitProtocol" :exit-inbound="entryExitInbound" :scheme-id="currentScheme.id"
               :binding-state-ready="entryBindingStateReady" :binding-state-error="entryBindingStateError" :materialized-inbound-id="materializedEntryInboundId"
               @apply="applyEntryBinding"
             />
@@ -1280,10 +1280,11 @@ watch(() => [currentScheme.value.id, currentScheme.value.serverUpdatedAt, curren
     if (!canceled) entryBindingStateError.value = `读取入口绑定与实际分组失败：${(error as Error).message}`;
   }
 }, { immediate: true, flush: 'sync' });
-const entryExitProtocol = computed(() => {
+const entryExitInbound = computed(() => {
   const exit = currentScheme.value.nodes.find(node => node.role === 'exit');
-  return inbounds.value.find(inbound => exit && selfHostedResourceId(inbound) === exit.resourceId)?.protocol || '';
+  return inbounds.value.find(inbound => exit && selfHostedResourceId(inbound) === exit.resourceId);
 });
+const entryExitProtocol = computed(() => entryExitInbound.value?.protocol || '');
 function applyEntryBinding(nodeId: string, binding: CanvasEntryBinding) {
   const instance = selectedNode.value;
   if (!instance || instance.role !== 'entry' || currentScheme.value.executionLocation !== 'server') return;

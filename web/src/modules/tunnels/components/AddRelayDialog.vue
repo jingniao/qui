@@ -9,6 +9,7 @@
         <PortControl ref="portControl" v-model:mode="portMode" v-model:port="listenPort" :node-id="entryNodeId" />
         <label class="block space-y-1.5"><span class="text-xs font-medium text-ios-secondary">名称</span><input v-model="name" class="form-input-base" /></label>
         <label class="flex gap-2 items-center text-sm text-ios-secondary"><input v-model="subscriptionVisible" type="checkbox" />对用户可见</label>
+        <p class="text-xs text-ios-tertiary">创建后在「节点分组」里加入这条线路，被授权该分组的用户订阅才会包含它；直连与各条线路可以分给不同的人。</p>
       </fieldset>
       <p v-else class="text-sm text-ios-secondary">以当前节点为入口创建服务器方案，然后在画布添加中转服务器与代理出口。</p>
     </div>

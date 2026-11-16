@@ -9,10 +9,13 @@ export function groupInput(group: GroupInput): GroupInput {
     name: group.name, purpose: group.purpose, enabled: group.enabled,
     subscriptionVisible: group.subscriptionVisible, remark: group.remark,
     inboundIds: [...(group.inboundIds || [])], imports: (group.imports || []).map(item => ({ ...item })),
-    ...(group.serverIds !== undefined ? { serverIds: [...group.serverIds] } : {})
+    ...(group.serverIds !== undefined ? { serverIds: [...group.serverIds] } : {}),
+    // Omitted rule members are kept by the server; copy them when known.
+    ...(group.relayIds !== undefined ? { relayIds: [...group.relayIds] } : {})
   };
 }
 export const importMemberId = (item: GroupImport) => 'import:'+JSON.stringify([item.sourceId, item.proxyKey]);
+export const relayMemberId = (ruleId: string) => 'relay:' + ruleId;
 export function invalidImportMembers(imports: readonly GroupImport[], sources: readonly SubscriptionItem[], nodes: readonly ProxyNodeItem[]): GroupImport[] {
   return imports.filter(member => resolveImportMember(member, sources, nodes).invalid);
 }

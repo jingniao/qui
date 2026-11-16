@@ -20,7 +20,7 @@
       <label class="flex items-center gap-2 text-sm text-ios-secondary"><input v-model="form.enabled" type="checkbox" /> 启用</label>
     </fieldset>
     <p v-if="error" class="text-sm text-ios-red" role="alert">{{ error }}</p>
-    <p class="text-xs text-ios-tertiary">保存后立即下发到相关服务器。关联目标地址由服务端派生；对用户可见的规则应用成功后加入订阅。</p>
+    <p class="text-xs text-ios-tertiary">保存后立即下发到相关服务器。关联目标地址由服务端派生；对用户可见的规则应用成功后，还需在「节点分组」里加入这条线路，被授权该分组的用户订阅才会包含它。</p>
   </FormDrawer>
 </template>
 <script setup lang="ts">

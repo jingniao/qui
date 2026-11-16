@@ -137,6 +137,22 @@ func (r *RealityServerSettings) validate() error {
 	if !bytes.Equal(derived.PublicKey().Bytes(), publicKey) {
 		return errors.New("reality public key does not match the private key")
 	}
+	if err := r.ValidateHandshake(); err != nil {
+		return err
+	}
+	if len(r.ShortIDs) == 0 || len(r.ShortIDs) > MaxRealityShortIDs {
+		return errors.New("reality requires between one and sixteen short ids")
+	}
+	for _, id := range r.ShortIDs {
+		if !validShortID(id) {
+			return errors.New("invalid reality short id")
+		}
+	}
+	return nil
+}
+
+// ValidateHandshake validates the public target and names before keys and Short IDs exist.
+func (r *RealityServerSettings) ValidateHandshake() error {
 	if r.HandshakeTarget == "" {
 		return errors.New("reality requires the handshake target as host:port")
 	}
@@ -154,14 +170,6 @@ func (r *RealityServerSettings) validate() error {
 	for _, name := range r.ServerNames {
 		if !validServerName(name) {
 			return errors.New("invalid reality server name")
-		}
-	}
-	if len(r.ShortIDs) == 0 || len(r.ShortIDs) > MaxRealityShortIDs {
-		return errors.New("reality requires between one and sixteen short ids")
-	}
-	for _, id := range r.ShortIDs {
-		if !validShortID(id) {
-			return errors.New("invalid reality short id")
 		}
 	}
 	return nil

@@ -155,7 +155,7 @@ Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组
 | 导入 SS2022 | 支持；规范明文百分号编码 userinfo | AES-128/256 单钥或双段身份；不输出 chacha | AES-256 单钥/双段、AES-128 单钥、chacha 单钥；省略 AES-128 双段 | 省略并警告 |
 | VLESS Reality TCP | 支持，无 flow / Vision | 仅 Vision | 无 flow / Vision | 省略并警告 |
 | VLESS Reality gRPC，无 flow | 支持 | 省略并警告 | 支持 | 省略并警告 |
-| VLESS xhttp 四种模式 | 支持；空或 TCP ALPN，仅 h2/http/1.1 | 省略并警告 | TLS / Reality，auto / packet-up / stream-up / stream-one；ALPN 留空或恰为 [h2] | 省略并警告 |
+| VLESS xhttp 四种模式 | 支持；空或 TCP ALPN，仅 h2/http/1.1 | 省略并警告 | TLS / Reality，auto / packet-up / stream-up / stream-one；ALPN 为空、[h2]、[http/1.1] 或 [h2,http/1.1] 均原样输出（v1.5.9 起；mihomo 恰为 [http/1.1] 时用 HTTP/1.1，其余 h2） | 省略并警告 |
 | Hysteria2、TUIC | 支持；固定 CA 时省略 | 支持，含固定证书 | 支持，固定证书转指纹 | 省略并警告 |
 | WireGuard | 支持既有导出 | 支持既有导出 | 支持 | 省略并警告 |
 | 全局规则模板与外部来源 | 不适用 | 不适用（不是完整配置） | 支持规则、内置服务集及外部 provider（文本/YAML/MRS 格式，追加 RULE-SET 行） | 受限，无 GEOSITE/RULE-SET/provider |
@@ -182,7 +182,7 @@ v1.5.5 的上述 Reality/xhttp 行表示当前导出边界。SpiderX 不再导�
 
 Hysteria2 端口跳跃（v1.5.0 §7）在自建入站设置了跳跃段时输出：mihomo（Clash Meta）写 `ports: "<start>-<end>"` 与 `hop-interval: <秒>`；sing-box 写 `server_ports: ["<start>:<end>"]` 与 `hop_interval: "<秒>s"`；URI 查询参数写 `mport=<start>-<end>`；legacy Clash 不输出 Hysteria2。自建入站间隔默认 30 秒；外部导入 mport 未给间隔时保留 0，mihomo 不写间隔、sing-box 写 0s，其跨客户端可用性 **待核实**。固定 CA 的跳跃端点仍不进 URI/Base64，sing-box 可输出。
 
-linked 中转端点来自规则成功发布快照，且须启用/对用户可见并通过目标入站授权与凭据检查；换入口地址/端口、补显式原 TLS server name，并清空目标 QUIC 跳跃端口与间隔，只连接规则端口，其他协议字段保留，直接端点不变。命名为目标端点名追加 ` · 经 <入口节点>`，原端口消歧保留。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality/xhttp 中转保留目标公开参数与原 SNI；xhttp 限 TCP，并继续执行各格式省略边界。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
+linked 中转端点来自规则成功发布快照，且须启用/对用户可见、规则本身在用户的授权分组里（`node_group_relays`，不要求目标入站也在），并通过目标入站凭据检查；换入口地址（入口节点当前 `connectHost`，否则 `publicIp`）/规则端口、补显式原 TLS server name，并清空目标 QUIC 跳跃端口与间隔，只连接规则端口，其他协议字段保留，直接端点不变。命名取规则当前名称，重名按端口消歧；名称与入口地址改动不需重新发布。Hysteria2/TUIC/WireGuard 按 UDP，其余按 TCP 与规则 network 过滤；各格式继续执行上表省略规则。manual 不进订阅，草稿/needs_publish 不推进快照，pending_delete 保留快照直至移除成功。Reality/xhttp 中转保留目标公开参数与原 SNI；xhttp 限 TCP，并继续执行各格式省略边界。Owner shareLink 可含合格用户真实凭据，Viewer 恒 null。
 
 xhttp 前置 CDN 时节点看到边缘地址，源地址设备估计可能合并或分散客户端。目标看到中继源地址，设备限制把同一中继后的客户端合为一个来源；账户额度仍在目标计量，规则转发只计节点总量，中间/出口 relay 服务排除。
 

@@ -109,6 +109,9 @@ func (f *canvasNameFixture) Credentials(context.Context, string, bool) ([]user.C
 func (f *canvasNameFixture) ExpandedNodes(context.Context, []string) ([]node.Node, error) {
 	return []node.Node{{ID: "destination", Name: "US", PublicIP: "203.0.113.1", Capabilities: &pb.Capabilities{CoreName: "xray", Protocols: []*pb.ProtocolCapability{{Protocol: "socks5", Inbound: true}}}}}, nil
 }
+func (f *canvasNameFixture) UserRelayGroups(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
 func (f *canvasNameFixture) UserInboundGroups(context.Context, string, string) ([]string, error) {
 	return []string{"group"}, nil
 }

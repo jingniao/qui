@@ -9,6 +9,7 @@ import (
 // bindings, if needed, must be inserted afterwards: migration deleted them.
 func rewindRelayCleanup(t *testing.T, database *sql.DB) {
 	t.Helper()
+	rewindNodeGroupRelays(t, database)
 	var applied int
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0150_relay_cleanup.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

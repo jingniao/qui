@@ -32,6 +32,7 @@ type Users interface {
 type Nodes interface {
 	ExpandedNodes(ctx context.Context, groupIDs []string) ([]node.Node, error)
 	UserInboundGroups(ctx context.Context, inboundID, userID string) ([]string, error)
+	UserRelayGroups(ctx context.Context, ruleID, userID string) ([]string, error)
 }
 
 // Published reads a node's last successfully applied state.
@@ -115,7 +116,27 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 			if err != nil {
 				return nil, nil, err
 			}
-			if len(labels) == 0 {
+			// The direct endpoint follows the inbound's group membership and
+			// each tunnel rule endpoint follows its own, so a user may hold
+			// either without the other.
+			type grantedRelay struct {
+				relay  Relay
+				labels []string
+			}
+			granted := []grantedRelay{}
+			for _, relay := range relays {
+				if relay.InboundID != inbound.ID || !relay.Enabled || !relay.Visible {
+					continue
+				}
+				relayLabels, err := s.relayLabels(ctx, relay.ID, viewer)
+				if err != nil {
+					return nil, nil, err
+				}
+				if len(relayLabels) != 0 {
+					granted = append(granted, grantedRelay{relay, relayLabels})
+				}
+			}
+			if len(labels) == 0 && len(granted) == 0 {
 				continue
 			}
 			if inbound.Protocol == "forward" || !inbound.Enabled || !inbound.SubscriptionVisible || !viewer.AllowsProtocol(inbound.Protocol) {
@@ -155,12 +176,13 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 				if name, created := canvasNames[inbound.ID]; created {
 					endpoint.Name = name
 				}
-				endpoints = append(endpoints, endpoint)
-				for _, relay := range relays {
-					if relay.InboundID != inbound.ID || !relay.Enabled || !relay.Visible {
-						continue
-					}
-					if relayed, ok := RelayEndpoint(endpoint, relay); ok {
+				if len(labels) != 0 {
+					endpoints = append(endpoints, endpoint)
+				}
+				for _, item := range granted {
+					base := endpoint
+					base.Origin.Labels = item.labels
+					if relayed, ok := RelayEndpoint(base, item.relay); ok {
 						endpoints = append(endpoints, relayed)
 					}
 				}
@@ -206,13 +228,27 @@ func (s *Source) labels(ctx context.Context, nodeID string, viewer source.Viewer
 	if err != nil {
 		return nil, err
 	}
+	return grantedLabels(groups, viewer), nil
+}
+
+// relayLabels is labels for a tunnel rule member: the granted groups holding
+// the rule label its relayed endpoint.
+func (s *Source) relayLabels(ctx context.Context, ruleID string, viewer source.Viewer) ([]string, error) {
+	groups, err := s.Nodes.UserRelayGroups(ctx, ruleID, viewer.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return grantedLabels(groups, viewer), nil
+}
+
+func grantedLabels(groups []string, viewer source.Viewer) []string {
 	labels := []string{}
 	for _, groupID := range groups {
 		if viewer.GrantsGroup(groupID) {
 			labels = append(labels, "nodeGroup:"+groupID)
 		}
 	}
-	return labels, nil
+	return labels
 }
 
 // supportsInbound asks the core that runs the inbound (empty means the primary),

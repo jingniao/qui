@@ -143,12 +143,11 @@ func TestRealityClashAndMeasuredExportCapabilities(t *testing.T) {
 	// A removed chain hop cannot leave a surviving dependent proxy or silently
 	// relax an explicit REJECT empty-group policy.
 	grpc[0].ClientChain = "fixture"
-	grpc[0].Transport = &proxy.Transport{Type: "xhttp", XHTTP: &proxy.XHTTPOptions{Mode: "auto"}}
-	grpc[0].TLS.ALPN = []string{"http/1.1"}
 	ordinary.DialerProxy = grpc[0].Name
 	ordinary.ClientChain = "fixture"
 	resolved := rules.Resolved{Groups: []rules.ResolvedGroup{{Name: "strict", Type: "select", EmptyPolicy: "reject", Members: []rules.Member{{Kind: rules.KindProxy, Name: ordinary.Name}}}}}
-	out, err := (clash.Meta{}).Render(format.Profile{Proxies: []proxy.Proxy{grpc[0], ordinary}, Rules: &resolved})
+	// Legacy Clash carries no VLESS, so the Reality first hop is omitted.
+	out, err := (clash.Legacy{}).Render(format.Profile{Proxies: []proxy.Proxy{grpc[0], ordinary}, Rules: &resolved})
 	if err != nil || strings.Contains(string(out.Body), "example.org") || !strings.Contains(string(out.Body), "REJECT") {
 		t.Fatal("omission left an orphan or relaxed REJECT")
 	}

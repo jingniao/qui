@@ -136,4 +136,74 @@ const noBinding = entryEditor(editorProps, (...event) => events.push(event));
 assert.equal('mode' in noBinding.form, false);
 assert.equal(noBinding.protocolKey.value, 'xray:vless', 'new entries preselect a supported exit protocol');
 assert.equal(noBinding.form.groupMode, 'exit_groups');
-console.log('PASS quick relay: request groups, retry identity, supported protocols, blocked cores, hop limit and advanced create editor');
+const dialog = readFileSync(new URL('../src/modules/proxy/components/QuickRelayDialog.vue', import.meta.url), 'utf8');
+assert.match(dialog, /<select v-model="mode"[^>]*>[\s\S]*?代理中转[\s\S]*?纯转发[\s\S]*?<\/select>/, 'both relay modes are selectable');
+assert.match(dialog, /v-if="mode === 'proxy' && protocols.length"/, 'forwarding hides entry protocol');
+assert.match(dialog, /<label v-if="mode === 'proxy'"[^>]*>中间服务器/, 'forwarding hides middle server');
+assert.match(dialog, /v-if="mode === 'proxy' && plan"/, 'scheme preview is proxy-only');
+assert.match(dialog, /tunnelRuleAPI\.create\(\{[\s\S]*?network: 'both'[\s\S]*?target: \{ mode: 'linked', inboundId: form.exitInboundId \}/);
+assert.match(dialog, /const fresh = await freshGroup\(id\)/);
+assert.match(dialog, /const input = groupInput\(fresh\)/);
+assert.match(dialog, /input.relayIds = \[\.\.\.new Set\(\[\.\.\.\(input.relayIds \|\| \[\]\), rule.id\]\)\]/);
+assert.match(dialog, /await groupAPI.save\(id, input\)/);
+assert.match(dialog, /applyTunnelChanges\(\{ tunnelIds: \[\], ruleIds: \[rule.id\] \}/);
+assert.match(dialog, /no_free_port/);
+assert.match(dialog, /在隧道管理中查看/);
+const securityModel = await import(await moduleUrl(new URL('../src/modules/proxy/entrySecurity.ts', import.meta.url)));
+const { entrySecurityChoices, entryTransportChoices, defaultEntrySecurity, entryPlaintextWarning, entrySecurityError } = securityModel;
+const combinations = [
+  { protocol: 'vless', direction: 'inbound', security: 'reality', transport: 'tcp' },
+  { protocol: 'vless', direction: 'inbound', security: 'reality', transport: 'tcp', flow: 'xtls-rprx-vision' },
+  { protocol: 'vless', direction: 'inbound', security: 'reality', transport: 'xhttp' },
+  { protocol: 'vless', direction: 'inbound', security: 'tls', transport: 'xhttp' }
+];
+const secureServer = { ...editorServers[0], capabilities: { ...server.capabilities, cores: server.capabilities.cores.map(core => ({ ...core,
+  server_settings_contract_version: 1, server_settings_combinations: core.name === 'xray' ? combinations : combinations.filter(c => c.transport === 'tcp') })) } };
+assert.equal(defaultEntrySecurity(secureServer, 'xray').security, 'reality');
+assert.equal(defaultEntrySecurity(server, 'xray').security, 'tls', 'missing contract defaults to TLS');
+assert.deepEqual(entrySecurityChoices(server, 'xray').map(c => c.value), ['tls', 'none'], 'unreported Reality is hidden');
+assert.deepEqual(entryTransportChoices(secureServer, 'sing-box', 'reality').map(c => c.value), ['vision', 'tcp'], 'sing-box xhttp is hidden');
+assert.deepEqual(entryTransportChoices(secureServer, 'xray', 'reality').map(c => c.value), ['vision', 'tcp', 'xhttp']);
+assert.deepEqual(entryTransportChoices(secureServer, 'xray', 'none').map(c => c.value), ['tcp']);
+const secureForm = { ...form, entrySecurity: 'reality', entryTransport: 'tcp', entryFlow: 'xtls-rprx-vision', entryRealityTarget: 'www.example.com:443', entryRealityServerName: 'www.example.com' };
+const secureInput = buildQuickRelayInput(secureForm, 'secure-retry');
+for (const field of ['entrySecurity', 'entryTransport', 'entryFlow', 'entryRealityTarget', 'entryRealityServerName']) assert.equal(secureInput[field], secureForm[field]);
+assert.deepEqual(buildQuickRelayInput(secureForm, 'secure-retry'), secureInput);
+assert.equal('entrySecurity' in buildQuickRelayInput({ ...secureForm, entryProtocol: 'trojan' }, 'id'), false);
+assert.equal('entryRealityTarget' in buildQuickRelayInput({ ...secureForm, entrySecurity: 'tls' }, 'id'), false);
+for (const protocol of ['vless', 'http', 'socks5']) assert.match(entryPlaintextWarning('入口', protocol, 'none'), /使用不加密的.*容易被识别和干扰/);
+assert.equal(entryPlaintextWarning('入口', 'vless', 'reality'), '');
+assert.match(entrySecurityError(secureServer, 'xray', { security: 'reality' }), /握手目标/);
+assert.equal(entrySecurityError(secureServer, 'xray', { security: 'reality', realityTarget: 'www.example.com:443', realityServerName: 'www.example.com' }), '');
+assert.match(editorSource, /<EntrySecurityEditor/);
+assert.match(dialog, /<EntrySecurityEditor v-if="mode === 'proxy'"/);
+assert.match(dialog, /entrySecurityLabel\(entrySecurity\)/);
+const securityURL = new URL('../src/modules/proxy/components/relay/EntrySecurityEditor.vue', import.meta.url);
+const securitySource = readFileSync(securityURL, 'utf8');
+assert.match(securitySource, /v-if="protocol === 'vless'"/);
+assert.match(securitySource, /已发布入口的安全设置请在「节点列表」编辑该入站后发布/);
+let securityCode = ts.transpileModule(securitySource.split('<script setup lang="ts">')[1].split('</script>')[0], { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+const securityImports = [];
+for (const match of [...securityCode.matchAll(/^import .* from '([^']+)';$/gm)]) {
+  const target = match[1] === 'vue' ? import.meta.resolve('vue') : await moduleUrl(new URL(match[1] + '.ts', securityURL));
+  securityImports.push(match[0].replace(match[1], target)); securityCode = securityCode.replace(match[0], '');
+}
+securityCode = securityCode.replace('const props = defineProps();', '').replace('const emit = defineEmits();', '');
+const { securityEditor } = await import(`data:text/javascript;base64,${Buffer.from(securityImports.join('\n') + '\nexport function securityEditor(props, emit) {\n' + securityCode + '\nreturn { securities, transports, changeSecurity, changeTransport };\n}').toString('base64')}`);
+const secureProps = reactive({ modelValue: {}, protocol: 'vless', core: 'xray', server: secureServer, name: '入口', exit: { id: 'exit', protocol: 'vless', settings: { security: 'reality', reality: { handshake_target: 'www.example.com:443', server_names: ['www.example.com'] } } } });
+const secureEditor = securityEditor(secureProps, (_, value) => { secureProps.modelValue = value; });
+assert.equal(secureProps.modelValue.security, 'reality', 'selector defaults to Reality');
+assert.equal(secureProps.modelValue.realityTarget, 'www.example.com:443', 'prefills exit public target');
+assert.equal(secureProps.modelValue.realityServerName, 'www.example.com');
+secureEditor.changeTransport('xhttp');
+assert.equal(secureProps.modelValue.transport, 'xhttp');
+assert.equal(secureProps.modelValue.flow, '');
+secureEditor.changeSecurity('none');
+assert.deepEqual(secureProps.modelValue, { security: 'none', transport: 'tcp', flow: '' });
+secureProps.modelValue = {};
+await nextTick();
+assert.equal(secureProps.modelValue.security, 'reality', 'switching to another empty draft on the same server restores the recommended default');
+const readonlyEvents = [];
+securityEditor({ ...secureProps, readonly: true, modelValue: { security: 'none' } }, (...event) => readonlyEvents.push(event));
+assert.deepEqual(readonlyEvents, [], 'published entry emits no security changes');
+console.log('PASS quick relay: request groups, retry identity, protocols, advanced editor, forwarding, entry security defaults and capability filtering');

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -53,8 +54,25 @@ func TestNodeRelayRealCredentialShareAndPortal(t *testing.T) {
 		first = cb.Secret
 	}
 	link, err := url.Parse(*relay.ShareLink)
-	if err != nil || link.User.Username() != first || link.Host != "203.0.113.1:32001" {
+	if err != nil || link.User.Username() != first || link.Host != "203.0.113.1:32001" || link.Fragment != "Quota Node 经 HK to US" {
 		t.Fatal(relay.ShareLink, err)
+	}
+	// The entry's client connect address replaces its public IP for clients.
+	if _, err = f.app.Database.Exec("UPDATE nodes SET connect_host='hk.example' WHERE id=?", entry.ID); err != nil {
+		t.Fatal(err)
+	}
+	response = f.owner.call("GET", "/api/v1/nodes/"+f.nodeID+"/relays", nil)
+	var withHost struct {
+		Items []proxy.NodeRelay `json:"items"`
+	}
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &withHost) != nil || len(withHost.Items) != 1 || withHost.Items[0].ShareLink == nil {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if link, err = url.Parse(*withHost.Items[0].ShareLink); err != nil || link.Host != "hk.example:32001" {
+		t.Fatal(*withHost.Items[0].ShareLink, err)
+	}
+	if _, err = f.app.Database.Exec("UPDATE nodes SET connect_host='' WHERE id=?", entry.ID); err != nil {
+		t.Fatal(err)
 	}
 	firstID, otherSecret := a.ID, cb.Secret
 	if b.ID < a.ID {
@@ -107,10 +125,56 @@ func TestNodeRelayRealCredentialShareAndPortal(t *testing.T) {
 	if _, err = f.app.Database.Exec("UPDATE tunnel_rules SET published_snapshot=?,published_at=updated_at,published_version=draft_version,status='published' WHERE id=?", string(snapshot), relay.Rule.ID); err != nil {
 		t.Fatal(err)
 	}
+	// A published rule reaches users only as a node group member of its own.
 	response = portal.call("GET", "/api/v1/portal/nodes", nil)
-	if response.Code != 200 || !strings.Contains(response.Body.String(), "Quota Node · vless · 经 HK") || strings.Contains(response.Body.String(), ca.Secret) {
+	if response.Code != 200 || strings.Contains(response.Body.String(), "经 HK") {
 		t.Fatal(response.Code, response.Body.String())
 	}
+	group, err := f.app.nodeRepository.Group(f.ctx, f.groupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveGroup := func(inboundIDs, relayIDs []string) {
+		t.Helper()
+		body := map[string]any{"name": group.Name, "purpose": group.Purpose, "enabled": group.Enabled, "subscriptionVisible": group.SubscriptionVisible, "serverIds": group.ServerIDs, "inboundIds": inboundIDs, "imports": group.Imports, "relayIds": relayIDs, "remark": group.Remark}
+		response := f.owner.call("PUT", "/api/v1/node-groups/"+f.groupID, body)
+		var saved node.Group
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &saved) != nil || len(saved.RelayIDs) != len(relayIDs) {
+			t.Fatal(response.Code, response.Body.String())
+		}
+	}
+	saveGroup(group.InboundIDs, []string{relay.Rule.ID})
+	response = portal.call("GET", "/api/v1/portal/nodes", nil)
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "Quota Node 经 HK to US") || strings.Contains(response.Body.String(), ca.Secret) {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	// The rule alone, without the target inbound, still reaches the user and
+	// keeps their credential on the target server.
+	saveGroup([]string{}, []string{relay.Rule.ID})
+	var portalNodes struct {
+		Items []struct {
+			ID        string   `json:"id"`
+			Name      string   `json:"name"`
+			Protocols []string `json:"protocols"`
+		} `json:"items"`
+	}
+	response = portal.call("GET", "/api/v1/portal/nodes", nil)
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &portalNodes) != nil || len(portalNodes.Items) != 1 || portalNodes.Items[0].Name != "Quota Node 经 HK to US" {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	access, err := f.app.connectionObserver.Repository.AccessForGroups(f.ctx, []string{f.groupID})
+	if err != nil || len(access) != 2 {
+		t.Fatal(access, err)
+	}
+	for _, entry := range access {
+		if !slices.Contains(entry.InboundIDs, inbound.ID) {
+			t.Fatal("rule-only grant lost the target inbound credential", entry.InboundIDs)
+		}
+	}
+	if groups, err := f.app.nodeRepository.SubscriptionGroups(f.ctx, f.nodeID); err != nil || !slices.Contains(groups, f.groupID) {
+		t.Fatal(groups, err)
+	}
+	saveGroup(group.InboundIDs, []string{relay.Rule.ID})
 	// Draft changes cannot remove or move the deployed subscription endpoint.
 	if _, err = f.app.Database.Exec("UPDATE tunnel_rules SET subscription_visible=0,listen_port=32002,status='modified' WHERE id=?", relay.Rule.ID); err != nil {
 		t.Fatal(err)

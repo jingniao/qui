@@ -7,6 +7,7 @@ import (
 
 func rewindRelayCleanup(t *testing.T, db *sql.DB) {
 	t.Helper()
+	rewindNodeGroupRelays(t, db)
 	var applied int
 	if err := db.QueryRow("SELECT count(*) FROM schema_migrations WHERE version='0150_relay_cleanup.sql'").Scan(&applied); err != nil {
 		t.Fatal(err)

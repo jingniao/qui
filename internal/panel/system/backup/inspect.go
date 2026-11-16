@@ -415,6 +415,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateTCPProbes(ctx, database); err != nil {
 		return err
 	}
+	if err := validateNodeGroupRelays(ctx, database); err != nil {
+		return err
+	}
 	if err := validateNodeGroupEntries(ctx, database); err != nil {
 		return err
 	}

@@ -26,6 +26,26 @@ func (s *Service) canvasEnsureEntry(ctx context.Context, entry *canvasEntry, und
 		if input.Protocol == "trojan" || input.Protocol == "hysteria2" || input.Protocol == "tuic" {
 			input.TLSSource = TLSSourceSelfSigned
 		}
+		if input.Protocol == "vless" {
+			input.Settings = canvasEntrySettings(*entry.binding)
+			if input.Settings.Security == "tls" {
+				input.TLSSource = TLSSourceSelfSigned
+			}
+			if input.Settings.Reality != nil {
+				shortID, err := canvasEntryRandomHex(8)
+				if err != nil {
+					return err
+				}
+				input.Settings.Reality.ShortIDs = []string{shortID}
+			}
+			if input.Settings.XHTTP != nil {
+				path, err := canvasEntryRandomHex(5)
+				if err != nil {
+					return err
+				}
+				input.Settings.XHTTP.Path = "/" + path
+			}
+		}
 		saved, err := s.SaveInbound(ctx, "", input)
 		if err != nil {
 			return err
@@ -109,5 +129,5 @@ func (s *Service) canvasEnsureEntry(ctx context.Context, entry *canvasEntry, und
 }
 
 func canvasEntryGroupInput(g node.Group) node.GroupInput {
-	return node.GroupInput{Name: g.Name, Purpose: g.Purpose, Enabled: g.Enabled, SubscriptionVisible: g.SubscriptionVisible, ServerIDs: g.ServerIDs, InboundIDs: g.InboundIDs, Imports: g.Imports, Remark: g.Remark}
+	return node.GroupInput{Name: g.Name, Purpose: g.Purpose, Enabled: g.Enabled, SubscriptionVisible: g.SubscriptionVisible, ServerIDs: g.ServerIDs, InboundIDs: g.InboundIDs, RelayIDs: g.RelayIDs, Imports: g.Imports, Remark: g.Remark}
 }

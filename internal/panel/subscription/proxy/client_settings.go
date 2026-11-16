@@ -210,11 +210,18 @@ func supportsClientSettings(p Proxy, format string) bool {
 		if format == "uri" || format == "base64" {
 			return true
 		}
-		if format != "clash" || (p.Security != "reality" && p.Security != "tls") || p.Transport.XHTTP == nil {
+		if format != "clash" || p.Transport.XHTTP == nil {
+			return false
+		}
+		// mihomo picks the xhttp HTTP version from ALPN: exactly [http/1.1] is
+		// HTTP/1.1, anything else (empty, [h2], [h2 http/1.1]) is h2, so every
+		// ALPN the client model admits (h2, http/1.1) is expressible. The model
+		// itself admits only TLS or Reality security for xhttp.
+		if p.Security != "tls" && p.Security != "reality" {
 			return false
 		}
 		mode := p.Transport.XHTTP.Mode
-		return (mode == "auto" || mode == "stream-one" || mode == "packet-up" || mode == "stream-up") && (p.TLS == nil || len(p.TLS.ALPN) == 0 || len(p.TLS.ALPN) == 1 && p.TLS.ALPN[0] == "h2")
+		return mode == "auto" || mode == "stream-one" || mode == "packet-up" || mode == "stream-up"
 	}
 	if p.Security != "reality" {
 		return true

@@ -4,13 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"proxycontrol/internal/panel/subscription/proxy"
 )
 
 // Relay is the credential-free endpoint captured by a successful publication.
+// Name and Server are display/dial metadata, not runtime configuration:
+// RelayStore refreshes them from the rule name and the entry node's current
+// client connect address, so neither needs a republish to reach subscriptions.
 type Relay struct {
 	ID                 string
+	Name               string `json:"-"`
 	InboundID          string
 	Entry              proxy.Ref
 	Server             string
@@ -33,20 +38,29 @@ type RelayStore struct {
 }
 
 func (s *RelayStore) Relays(ctx context.Context) ([]Relay, error) {
-	rows, err := s.Database.QueryContext(ctx, `SELECT published_snapshot FROM tunnel_rules WHERE published_snapshot IS NOT NULL ORDER BY id`)
+	rows, err := s.Database.QueryContext(ctx, `SELECT r.published_snapshot,r.name,n.id IS NOT NULL,COALESCE(NULLIF(n.connect_host,''),n.public_ip,'')
+		FROM tunnel_rules r LEFT JOIN nodes n ON n.id=r.entry_node_id
+		WHERE r.published_snapshot IS NOT NULL ORDER BY r.id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := []Relay{}
 	for rows.Next() {
-		var raw string
-		if err = rows.Scan(&raw); err != nil {
+		var raw, name, address string
+		var entryKnown bool
+		if err = rows.Scan(&raw, &name, &entryKnown, &address); err != nil {
 			return nil, err
 		}
 		var item Relay
 		if err = json.Unmarshal([]byte(raw), &item); err != nil {
 			return nil, err
+		}
+		item.Name = strings.TrimSpace(name)
+		// An entry node without any address keeps the published one rather
+		// than silently dropping the endpoint.
+		if entryKnown && address != "" {
+			item.Server = address
 		}
 		items = append(items, item)
 	}
@@ -70,7 +84,11 @@ func RelayEndpoint(endpoint proxy.Proxy, relay Relay) (proxy.Proxy, bool) {
 		}
 		endpoint.TLS = &tls
 	}
-	endpoint.Name += " · 经 " + relay.Entry.Name
+	if relay.Name != "" {
+		endpoint.Name = relay.Name
+	} else {
+		endpoint.Name += " · 经 " + relay.Entry.Name
+	}
 	if endpoint.QUIC != nil {
 		quic := *endpoint.QUIC
 		quic.HopPorts, quic.HopInterval = "", 0

@@ -292,6 +292,7 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 			managed.ServiceName = input.Settings.ServiceName
 			managed.QUIC = input.Settings.QUIC
 			managed.XHTTP = input.Settings.XHTTP
+			managed.Flow = input.Settings.Flow
 			input.Settings = managed
 		}
 	}

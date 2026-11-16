@@ -25,6 +25,7 @@
             <option value="self_hosted">自建节点</option>
             <option value="subscription">机场导入节点</option>
             <option value="manual">单独导入节点</option>
+            <option value="tunnel_relay">隧道转发线路</option>
           </select>
           <select v-model="selectedProtocol" class="form-input-base" aria-label="协议筛选">
             <option value="">全部协议</option>
@@ -96,7 +97,7 @@
             <EntryRouteSummary :summary="node.routeSummary" :show-scheme-link="false" />
             <p v-if="node.server" class="text-xs font-mono text-ios-secondary break-all">{{ node.server }}:{{ node.port }}</p>
             <div class="flex items-center gap-2 text-xs text-ios-tertiary">
-              <span>{{ node.sourceType === 'self_hosted' ? '所属服务器：' : '来源：' }}{{ node.sourceName }}</span>
+              <span>{{ node.sourceType === 'self_hosted' ? '所属服务器：' : node.sourceType === 'tunnel_relay' ? '线路：' : '来源：' }}{{ node.sourceName }}</span>
               <span v-if="node.subscriptionVisible" class="text-ios-green">· 订阅可见</span>
             </div>
           </div>
@@ -127,7 +128,7 @@ export interface GroupPickerNode {
   protocol: string;
   port: number | string;
   server?: string;
-  sourceType: 'self_hosted' | 'subscription' | 'manual';
+  sourceType: 'self_hosted' | 'subscription' | 'manual' | 'tunnel_relay';
   sourceTypeName: string;
   sourceName: string;
   serverId?: string;
@@ -139,6 +140,12 @@ export interface GroupPickerNode {
   internalRelay?: boolean;
   routeSummary?: Inbound['routeSummary'];
   invalid?: boolean;
+  /** Linked tunnel rule ID for tunnel_relay members. */
+  ruleId?: string;
+  /** Rule awaiting removal by publication; it cannot be newly added. */
+  pendingDelete?: boolean;
+  /** Short member-list hint, e.g. a rule not yet in subscriptions. */
+  note?: string;
 }
 
 const props = withDefaults(defineProps<{
@@ -187,6 +194,7 @@ function serverName(serverId: string) {
 function sourceBadgeClass(type: string) {
   if (type === 'self_hosted') return 'bg-ios-green/10 text-ios-green';
   if (type === 'subscription') return 'bg-ios-purple/10 text-ios-purple';
+  if (type === 'tunnel_relay') return 'bg-ios-orange/10 text-ios-orange';
   return 'bg-ios-blue/10 text-ios-blue';
 }
 
@@ -262,6 +270,11 @@ const filteredNodes = computed(() => {
 });
 
 function disabledReason(node: GroupPickerNode): string {
+  if (node.sourceType === 'tunnel_relay') {
+    if (node.pendingDelete) return '规则正在等待发布移除';
+    if (!node.subscriptionVisible) return '规则未勾选「显示在订阅中」';
+    return '';
+  }
   if (node.sourceType !== 'self_hosted') return '';
   if (node.internalRelay) return '内部中转入站，不提供用户接入';
   if (!node.enabled) return '入站已停用';

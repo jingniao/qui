@@ -196,6 +196,10 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 	if err != nil {
 		return nil, err
 	}
+	layout, err = s.canvasIgnorePublishedEntrySecurity(ctx, scheme.ID, layout)
+	if err != nil {
+		return nil, err
+	}
 	if err := layout.validate(); err != nil {
 		return nil, err
 	}

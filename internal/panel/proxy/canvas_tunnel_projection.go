@@ -77,6 +77,7 @@ func (s *Service) canvasDependencyLayout(ctx context.Context, schemeID string, l
 					}
 					// Only published identity and settings participate in shared updates.
 					i.EntryBinding = &CanvasEntryBinding{Mode: record.Mode, Protocol: inbound.Protocol, Core: inbound.Core, PortMode: "auto", GroupMode: "none"}
+					canvasEntrySecurityFields(i.EntryBinding, inbound.Settings)
 					if record.Mode == "reuse" {
 						i.EntryBinding.InboundID = inbound.ID
 					}

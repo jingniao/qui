@@ -88,7 +88,17 @@ func (s *Service) canvasPlanEntries(ctx context.Context, layout CanvasLayout, pl
 			if err != nil && !errors.Is(err, ErrNotFound) {
 				return err
 			}
-			if errors.Is(err, ErrNotFound) && b.Mode == "create" && (b.Protocol == "trojan" || b.Protocol == "hysteria2" || b.Protocol == "tuic") && n.ConnectAddress() == "" {
+			if errors.Is(err, ErrNotFound) {
+				settings := canvasEntrySettings(*b)
+				if settingsErr := ValidateInboundServerSettings(n.Capabilities, b.Core, b.Protocol, settings); settingsErr != nil {
+					transport := settings.Transport
+					if transport == "" {
+						transport = "tcp"
+					}
+					return fmt.Errorf("入口服务器「%s」不支持 %s · %s · %s（flow=%s）组合：%w", n.Name, b.Protocol, settings.Security, transport, settings.Flow, settingsErr)
+				}
+			}
+			if errors.Is(err, ErrNotFound) && b.Mode == "create" && (b.Protocol == "trojan" || b.Protocol == "hysteria2" || b.Protocol == "tuic" || b.Protocol == "vless" && b.Security == "tls") && n.ConnectAddress() == "" {
 				return fmt.Errorf("入口服务器「%s」未设置公网 IP 或客户端连接地址，无法为 %s 入口生成自签名证书", n.Name, b.Protocol)
 			}
 			if err == nil {

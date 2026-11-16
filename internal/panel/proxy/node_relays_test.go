@@ -150,7 +150,7 @@ func TestRelaySnapshotCapturedBeforeApplyAndRetainedOnFailure(t *testing.T) {
 	}
 	store := &published.RelayStore{Database: p.database}
 	before, err := store.Relays(p.ctx)
-	if err != nil || len(before) != 1 || before[0].Server != "192.0.2.11" {
+	if err != nil || len(before) != 1 || before[0].Server != "203.0.113.9" {
 		t.Fatal(before, err)
 	}
 	rule, err = p.service.Repository.TunnelRule(p.ctx, rule.ID)
@@ -221,11 +221,15 @@ func TestRelaySnapshotKeepsPublishedAddressesUntilRepublish(t *testing.T) {
 		t.Fatal(draft, err)
 	}
 	after, err := store.Relays(p.ctx)
-	if err != nil || len(after) != 1 || after[0] != before[0] {
+	// The entry dial address follows the entry node live (it is not runtime
+	// configuration); the destination address and port stay frozen.
+	want := before[0]
+	want.Server = "203.0.113.9"
+	if err != nil || len(after) != 1 || after[0] != want {
 		t.Fatal(after, before, err)
 	}
 	endpoint, ok := published.RelayEndpoint(subproxy.Proxy{Name: "destination · vless", Protocol: "vless", TLS: &subproxy.TLS{}, Server: "203.0.113.10", Port: 1082}, after[0])
-	if !ok || endpoint.Server != "192.0.2.10" || endpoint.Port != 31000 || endpoint.TLS.ServerName != "192.0.2.11" {
+	if !ok || endpoint.Server != "203.0.113.9" || endpoint.Port != 31000 || endpoint.TLS.ServerName != "192.0.2.11" {
 		t.Fatal(endpoint)
 	}
 	finish(draft)

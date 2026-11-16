@@ -137,6 +137,9 @@ func newV14Fixture(t *testing.T, path, primary string) *v14Fixture {
 		wantPort = f.port(t)
 		rule, e := h.service.CreateNodeRelay(h.ctx, h.us2, proxy.NodeRelayInput{TunnelID: tunnel.ID, InboundID: entry.ID, PortMode: "manual", ListenPort: portValue(wantPort), SubscriptionVisible: true})
 		v14Must(t, e)
+		// A rule reaches subscriptions as a group member of its own (0151).
+		_, e = nodes.SaveGroup(h.ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}, RelayIDs: []string{rule.ID}})
+		v14Must(t, e)
 		selection := proxy.PublishSelection{RuleIDs: []string{rule.ID}}
 		result, _ := driveTunnelPublish(t, h, selection, "")
 		for _, s := range result.Servers {
@@ -257,7 +260,7 @@ func newV14Fixture(t *testing.T, path, primary string) *v14Fixture {
 		expectedName = "US · vless"
 	}
 	if strings.HasPrefix(path, "P4") {
-		expectedName = "US · vless · 经 HK"
+		expectedName = "US 经 " + path
 	}
 	if f.name != expectedName {
 		t.Fatalf("subscription name=%q want=%q", f.name, expectedName)

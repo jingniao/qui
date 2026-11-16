@@ -156,7 +156,14 @@ export type LegacyCanvasConnectionKind = 'port_forward';
 export type CanvasTunnelProtocol = 'tls' | 'wireguard';
 export type LegacyCanvasTunnelProtocol = 'gost' | 'brook' | 'nftables';
 export type CanvasInstanceRef = `server:${string}` | `inbound:${string}` | `import:${string}` | `outbound:${string}`;
-export interface CanvasEntryBinding {
+export interface CanvasEntrySecurity {
+  security?: '' | 'none' | 'tls' | 'reality';
+  transport?: '' | 'tcp' | 'xhttp';
+  flow?: '' | 'xtls-rprx-vision';
+  realityTarget?: string;
+  realityServerName?: string;
+}
+export interface CanvasEntryBinding extends CanvasEntrySecurity {
   mode: 'create'; inboundId?: string; protocol?: string; core?: string;
   portMode: 'auto' | 'manual'; port?: number;
   groupMode: 'exit_groups' | 'explicit' | 'none'; groupIds?: string[];

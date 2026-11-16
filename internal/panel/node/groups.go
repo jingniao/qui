@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ type GroupImport struct {
 type Group struct {
 	ServerIDs           []string      `json:"serverIds"`
 	InboundIDs          []string      `json:"inboundIds"`
+	RelayIDs            []string      `json:"relayIds"`
 	Imports             []GroupImport `json:"imports"`
 	GrantedUserIDs      []string      `json:"grantedUserIds"`
 	ID                  string        `json:"id"`
@@ -24,12 +26,17 @@ type Group struct {
 	Enabled             bool          `json:"enabled"`
 	SubscriptionVisible bool          `json:"subscriptionVisible"`
 	NodeIDs             []string      `json:"nodeIds"`
-	Remark              string        `json:"remark"`
-	CreatedAt           string        `json:"createdAt"`
+	// RelayNodeIDs are the servers running the target inbounds of RelayIDs.
+	// Users holding only a rule still need their credential there.
+	RelayNodeIDs []string `json:"relayNodeIds"`
+	Remark       string   `json:"remark"`
+	CreatedAt    string   `json:"createdAt"`
 }
 type GroupInput struct {
-	ServerIDs           []string      `json:"serverIds"`
-	InboundIDs          []string      `json:"inboundIds"`
+	ServerIDs  []string `json:"serverIds"`
+	InboundIDs []string `json:"inboundIds"`
+	// RelayIDs lists linked tunnel rules; nil keeps the saved rule members.
+	RelayIDs            []string      `json:"relayIds"`
 	Imports             []GroupImport `json:"imports"`
 	Name                string        `json:"name"`
 	Purpose             string        `json:"purpose"`
@@ -40,7 +47,7 @@ type GroupInput struct {
 }
 
 func (r *Repository) Group(ctx context.Context, id string) (Group, error) {
-	group := Group{ServerIDs: []string{}, NodeIDs: []string{}, InboundIDs: []string{}, Imports: []GroupImport{}, GrantedUserIDs: []string{}}
+	group := Group{ServerIDs: []string{}, NodeIDs: []string{}, RelayNodeIDs: []string{}, InboundIDs: []string{}, RelayIDs: []string{}, Imports: []GroupImport{}, GrantedUserIDs: []string{}}
 	err := r.Database.QueryRowContext(ctx, "SELECT id,name,purpose,enabled,subscription_visible,remark,created_at FROM node_groups WHERE id=?", id).Scan(&group.ID, &group.Name, &group.Purpose, &group.Enabled, &group.SubscriptionVisible, &group.Remark, &group.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return group, ErrNotFound
@@ -70,6 +77,7 @@ func (r *Repository) Group(ctx context.Context, id string) (Group, error) {
 	}{
 		{"SELECT node_id FROM node_group_servers WHERE group_id=? ORDER BY node_id", &group.ServerIDs},
 		{"SELECT inbound_id FROM node_group_inbounds WHERE group_id=? ORDER BY inbound_id", &group.InboundIDs},
+		{"SELECT rule_id FROM node_group_relays WHERE group_id=? ORDER BY rule_id", &group.RelayIDs},
 		{"SELECT user_id FROM user_node_group_grants WHERE group_id=? ORDER BY user_id", &group.GrantedUserIDs},
 	} {
 		rows, err := r.Database.QueryContext(ctx, q.sql, id)
@@ -102,7 +110,24 @@ func (r *Repository) Group(ctx context.Context, id string) (Group, error) {
 		}
 		group.Imports = append(group.Imports, v)
 	}
-	return group, rows.Err()
+	if err := rows.Err(); err != nil {
+		return group, err
+	}
+	rows.Close()
+	group.RelayNodeIDs, err = r.relayTargetNodes(ctx, id)
+	return group, err
+}
+
+// AccessNodeIDs lists every server a granted user may need a credential on:
+// the members and the target servers of the group's tunnel rules.
+func (g Group) AccessNodeIDs() []string {
+	ids := append([]string{}, g.NodeIDs...)
+	for _, id := range g.RelayNodeIDs {
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 func (r *Repository) Groups(ctx context.Context, page, size int) ([]Group, int, error) {
 	var count int
@@ -145,7 +170,7 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if !strings.Contains("|subscription|relay|egress|mixed|", "|"+input.Purpose+"|") {
 		return Group{}, errors.New("invalid node group purpose")
 	}
-	if len(input.ServerIDs) > 100 || len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.Imports) > 1000 {
+	if len(input.ServerIDs) > 100 || len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.RelayIDs) > 500 || len(input.Imports) > 1000 {
 		return Group{}, errors.New("node group member limit exceeded")
 	}
 	if input.Purpose == "relay" || input.Purpose == "egress" {
@@ -206,6 +231,11 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if legacy && input.Imports == nil {
 		input.Imports = previous.Imports
 	}
+	// Callers that predate rule members (old clients, canvas entry grouping)
+	// omit the field: their save must not drop the group's tunnel rules.
+	if input.RelayIDs == nil {
+		input.RelayIDs = previous.RelayIDs
+	}
 	if input.Purpose == "relay" || input.Purpose == "egress" {
 		input.NodeIDs = nil
 	}
@@ -244,7 +274,7 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if len(input.InboundIDs) > 500 {
 		return Group{}, errors.New("node group is limited to 500 inbounds")
 	}
-	for _, table := range []string{"node_group_inbounds", "node_group_imports", "node_group_servers", "node_group_members"} {
+	for _, table := range []string{"node_group_inbounds", "node_group_relays", "node_group_imports", "node_group_servers", "node_group_members"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE group_id=?", groupID); err != nil {
 			return Group{}, err
 		}
@@ -274,6 +304,21 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 			return Group{}, errors.New("inbound member does not exist")
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_inbounds VALUES(?,?)", groupID, inboundID); err != nil {
+			return Group{}, err
+		}
+	}
+	// Only linked rules carry a subscription endpoint; manual targets never do.
+	seen = map[string]bool{}
+	for _, ruleID := range input.RelayIDs {
+		if seen[ruleID] {
+			return Group{}, errors.New("duplicate tunnel rule member")
+		}
+		seen[ruleID] = true
+		var exists int
+		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM tunnel_rules WHERE id=? AND target_mode='linked'", ruleID).Scan(&exists); err != nil {
+			return Group{}, errors.New("tunnel rule member does not exist or has no linked target")
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO node_group_relays(group_id,rule_id) VALUES(?,?)", groupID, ruleID); err != nil {
 			return Group{}, err
 		}
 	}
@@ -346,7 +391,10 @@ func (r *Repository) ExpandedNodes(ctx context.Context, groupIDs []string) ([]No
 		if !group.Enabled || !group.SubscriptionVisible || group.Purpose != "subscription" && group.Purpose != "mixed" {
 			continue
 		}
-		for _, nodeID := range group.NodeIDs {
+		// A tunnel rule member publishes from its target inbound, so the
+		// target's server must be read even when the group holds no inbound
+		// there.
+		for _, nodeID := range group.AccessNodeIDs() {
 			if seen[nodeID] {
 				continue
 			}

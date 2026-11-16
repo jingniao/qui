@@ -237,7 +237,7 @@ Reality/xhttp 直连的 Xray Windows 针对性检查覆盖认证、用户流量�
 
 节点组页面采用卡片布局，每组显示成员与授权用户数量；编辑打开分组管理弹窗，通过“授权账号”“组内节点”菜单管理成员和授权，顶部“分组设置”修改名称、用途与备注。“添加代理节点”选择弹窗按视口高度伸展，列表独立滚动。
 
-Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来自具体自建入站（`node_group_inbounds`）或导入（`node_group_imports`），不是服务器成员。单独导入（`Kind=content`）的 `proxy_key` 为 `id:<id>`，不再接受整个来源；订阅连接（`Kind=url`）保持 `''` 表示整个来源、`name|protocol` 表示单个节点，不依赖刷新后的内容哈希 ID。导入成员上限 1000；候选及已选成员按同一身份显示当前名称、协议、地址与端口。
+Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来自具体自建入站（`node_group_inbounds`）、关联目标入站的隧道规则（`node_group_relays`，v1.5.9／0151）或导入（`node_group_imports`），不是服务器成员。隧道规则成员只给出该规则的「经入口」端点，入站成员只给出直连端点，两者互不连带，所以直连与每条隧道线路可以分别授权给不同的人；规则只转发字节，用户仍在目标入站认证，因此只拿到规则的用户也会在目标入站获得凭据，订阅不显示直连但不阻止其自行直连。新建规则不自动入组，须在分组里加入；升级 0151 时，已在组内的目标入站把它的关联规则一并写入同一组，订阅内容不变。规则删除（发布移除成功后删行）随外键移出所有分组。单独导入（`Kind=content`）的 `proxy_key` 为 `id:<id>`，不再接受整个来源；订阅连接（`Kind=url`）保持 `''` 表示整个来源、`name|protocol` 表示单个节点，不依赖刷新后的内容哈希 ID。导入成员上限 1000；候选及已选成员按同一身份显示当前名称、协议、地址与端口。
 
 `node_group_servers` 保存显式服务器，`node_group_members` 为显式服务器与入站所属服务器的去重并集，用于节点策略、服务器筛选与批量操作。显式服务器不授予凭据、订阅或门户可见性。仓储写入与事务触发器在入站移动/删除时维护并集，删除服务器也删显式成员；新入站不自动入组。
 
@@ -276,7 +276,7 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 
 输出名称按节点与协议命名：同一节点同一协议有多个入站时追加端口（`节点 · 协议 · 端口`），只有一个时保持 `节点 · 协议`。地址缺失不再静默：订阅预览按节点给出 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告，`/sub` 本身只输出能连的端点。
 
-关联目标入站的中转规则按成功发布快照追加订阅端点；仅纳入已发布、启用且对用户可见的规则，仍须通过目标入站的授权、可用性、协议与已发布凭据检查。保留目标协议、凭据、传输与 TLS 等协议字段，仅把连接地址/端口换为入口地址/规则端口；原隐含 TLS server name 显式写为目标地址。名称为 `<目标节点> · <协议> · 经 <入口节点>`（目标协议原有端口消歧保留），直接端点保持自身可见性。Hysteria2/TUIC/WireGuard 按 UDP、其余按 TCP 与规则 network 过滤；Reality/xhttp 保留目标公开参数与原 SNI，xhttp 限 TCP，格式继续按各自能力省略。
+关联目标入站的中转规则按成功发布快照追加订阅端点；仅纳入已发布、启用且对用户可见、并且本人被授权的分组含有该规则（`node_group_relays`）的规则，目标入站仍须通过可用性、协议与已发布凭据检查，但不要求目标入站本身在用户的分组里。保留目标协议、凭据、传输与 TLS 等协议字段，仅把连接地址/端口换为入口地址/规则端口；入口地址取入口节点当前的客户端连接地址（`connectHost`，否则 `publicIp`，两者皆空时沿用发布快照里的地址）；原隐含 TLS server name 显式写为目标地址。名称取规则当前名称（「添加中转」默认「<目标节点> 经 <隧道>」），重名按端口消歧；地址与名称不属于节点运行配置，改动不需重新发布即进入订阅，旧格式 `<目标节点> · <协议> · 经 <入口节点>` 仅在规则名为空时使用。直接端点保持自身可见性。Hysteria2/TUIC/WireGuard 按 UDP、其余按 TCP 与规则 network 过滤；Reality/xhttp 保留目标公开参数与原 SNI，xhttp 限 TCP，格式继续按各自能力省略。
 
 草稿修改与 D8 目标变化不推进订阅快照，pending_delete 仍保留上次快照，成功发布移除后才消失。0130 前无快照的规则须再次成功发布才进入订阅。节点中转 API 的 `shareLink` 仅 Owner 可得，使用首个有合格已发布凭据的用户生成预览；Viewer、无合格凭据或 URI 无法表达时为 null，草稿预览不代表已进入订阅。
 
@@ -302,7 +302,7 @@ DNS 模板增加 `defaultNameservers`（仅 IP）、`proxyServerNameservers`、`
 
 刷新返回结构化结果（S1）：`outcome` 为 `ok`/`partial`/`failed`，`counts` 含 `total`（= `accepted` + `rejected` + `duplicates`）、`accepted`、`rejected`、`duplicates`、`cached`、`usable`，未确定值为 null；每条目只计一次，多因条目按第一个原因计数。逐条原因最多 50 条且结果最多 32 KiB，超出置 `diagnosticsTruncated`。完整成功 200 `ok`；部分成功 200 `partial`，仍提交缓存且 `last_status=ok`、`last_error` 为空；抓取失败 502（超时 504）、内容无效或无可导入条目 422、输入错误 400、持久化失败 500、来源不存在 404，错误体 `details.result` 携带同一结果（仅限已完成的已分类结果）；请求在抓取进行中被取消时返回 503 固定文案“刷新已取消，来源状态保持不变”且不带结果，来源行、状态、缓存与订阅端点均不变。失败保留旧缓存行但 `last_status=failed`，该来源不进入订阅；`cached` 为现有行数，失败时 `usable=0`。`last_fetch_at` 是最近尝试，`last_success_at` 只在提交成功时更新；更换 URL 清空结果并回到 `pending`，不把旧结果当作新来源的结果。同一来源内 `name|protocol` 重复时保留文档顺序第一条，其余以 `duplicate_endpoint_key` 拒绝并附保留条目序号；完全相同的条目以 `duplicate_endpoint_content` 计为重复。诊断只含条目序号、协议、阶段、固定代码与固定文本，不含名称、UUID、密码或链接；手工刷新、定时刷新与粘贴导入共用同一分析路径。
 
-外部导入支持 SS2022、VLESS Reality TCP/gRPC 与 xhttp，仍只用于客户端，不进入 Agent 发布/账户额度/设备门控。统一公开模型区分证书指纹 `TLS.Fingerprint` 与客户端指纹 `TLS.ClientFingerprint`；Reality 携带公钥、Short ID、SNI 与 SpiderX，xhttp 为独立 host/path/mode。URI/Base64 保留公开字段；mihomo 支持 Reality TCP（无 flow 或 Vision）、Reality gRPC、TLS/Reality xhttp 的 auto/packet-up/stream-up/stream-one，xhttp ALPN 须留空或恰为 [h2]。sing-box 仍仅输出 Reality TCP Vision，不输出 Reality gRPC/xhttp；SpiderX 不阻止导出，在 mihomo/sing-box 中不输出，URI/Base64 保留 spx。安全／传输组合的省略警告按原因分组列节点名，每组最多 10 个，其余汇总数量；链依赖与 emptyPolicy 继续生效。模型允许 xhttp ALPN 为空或 h2/http/1.1，未知 extra、H3 与未建模参数仍拒绝。TLS xhttp 的本轮真实客户端连通验证 **待核实**，不能沿用 Reality 的实测记录。新模型与最近结果受加密备份校验覆盖。
+外部导入支持 SS2022、VLESS Reality TCP/gRPC 与 xhttp，仍只用于客户端，不进入 Agent 发布/账户额度/设备门控。统一公开模型区分证书指纹 `TLS.Fingerprint` 与客户端指纹 `TLS.ClientFingerprint`；Reality 携带公钥、Short ID、SNI 与 SpiderX，xhttp 为独立 host/path/mode。URI/Base64 保留公开字段；mihomo 支持 Reality TCP（无 flow 或 Vision）、Reality gRPC、TLS/Reality xhttp 的 auto/packet-up/stream-up/stream-one，xhttp ALPN 可为空、`[h2]`、`[http/1.1]` 或 `[h2,http/1.1]` 并原样输出（v1.5.9 起；mihomo 仅在恰为 `[http/1.1]` 时走 HTTP/1.1，其余走 h2）。sing-box 仍仅输出 Reality TCP Vision，不输出 Reality gRPC/xhttp；SpiderX 不阻止导出，在 mihomo/sing-box 中不输出，URI/Base64 保留 spx。安全／传输组合的省略警告按原因分组列节点名，每组最多 10 个，其余汇总数量；链依赖与 emptyPolicy 继续生效。模型允许 xhttp ALPN 为空或 h2/http/1.1，未知 extra、H3 与未建模参数仍拒绝。TLS xhttp 的本轮真实客户端连通验证 **待核实**，不能沿用 Reality 的实测记录。新模型与最近结果受加密备份校验覆盖。
 
 新增导入参数：URI/YAML 的 WS Host（YAML 仅 Host/host，不同值冲突时拒绝）；TUIC URI 的 `congestion_control`、`udp_relay_mode`、`alpn`；Hysteria2 URI 的 `mport` 与 YAML 的 `ports/hop-interval/up/down`，以及两种输入的 salamander 混淆。跳跃只接受单段 `start-end`，带宽为正整数或整数加 Mbps；混淆密码随模型加密保存，刷新诊断不回显，Owner 的订阅正文预览仍包含客户端所需密码。TUIC YAML 的 congestion-controller/udp-relay-mode 尚未接入，QUIC 导出 ALPN 固定 h3。URI 忽略 `headerType=none`、insecure 别名的精确值 0、TUIC `disable_sni=0` 与 `ed`；YAML 忽略 tfo/ip-version/packet-encoding，udp-over-tcp:true 仍拒绝，未知字段不透传。
 
@@ -334,7 +334,7 @@ DNS 模板增加 `defaultNameservers`（仅 IP）、`proxyServerNameservers`、`
 
 节点有两个地址字段（迁移 0135、0138）。`publicIp` 是公网地址：Agent 心跳（第 36 字段 `public_addresses`）上报当前机器的所有非回环公网全局单播地址（最多 16 个，包含网卡与对端源），面板在数据库保存为候选列表 `public_addresses_json` 并由接口暴露为 `publicAddresses` 数组；上报为空且库里为空时以控制连接的 gRPC 对端公网地址填入。Owner 可在节点设置里从候选地址列表中勾选 `publicIpSelected`，选定地址记为 `selected` 来源；设置里手填 IP 则记为 `manual`；清空则为 `auto` 自动推导（优先默认路由 IPv4，其次首个公网 IPv6，最后连接对端）。`publicIpSource` 取值统一为 `manual` / `selected` / `auto` / 空。若选定地址从当前心跳候选列表中消失，节点标记 `publicIpSelectionMissing=true` 提醒 Owner。节点登记接口支持可选 `connectHost`。`connectHost` 是 Owner 选的客户端连接地址（域名或 IP，无协议、端口与方括号），可再清空。
 
-客户端连接地址 = `connectHost` 非空则用它，否则用 `publicIp`；订阅、订阅预览与分享链接都按这个顺序，中转、隧道与画布继续用 `publicIp`，因为它们需要节点之间的地址。使用域名且入站 TLS 没有显式服务器名时，SNI 规则不变，不因连接地址是域名而新增 SNI。两者都为空时该节点不进订阅，订阅预览对每个这样的节点给出一条 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告（第 10.3 节）。
+客户端连接地址 = `connectHost` 非空则用它，否则用 `publicIp`；订阅、订阅预览与分享链接都按这个顺序（隧道规则订阅端点的入口地址也是客户端地址，同样按这个顺序），中转、隧道与画布的节点间连接继续用 `publicIp`，因为它们需要节点之间的地址。使用域名且入站 TLS 没有显式服务器名时，SNI 规则不变，不因连接地址是域名而新增 SNI。两者都为空时该节点不进订阅，订阅预览对每个这样的节点给出一条 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告（第 10.3 节）。
 
 ## 11.2 节点详情
 
@@ -403,6 +403,8 @@ v1.4 自建 VLESS 用户入站：Xray 支持 Reality TCP（无 flow/Vision）、
 - 默认出站
 
 用于节点间中转的内部入站，应设置为不在用户订阅中显示。
+
+画布及快速流程新建用户入口时，VLESS 可选 Reality（能力支持时默认推荐）、自签名 TLS 或不加密，并按所选核心能力选择 TCP、TCP Vision 或 xhttp；Trojan／Hysteria2／TUIC 保持自签名 TLS，Shadowsocks 保持 chacha20-ietf-poly1305。未带安全字段的旧 VLESS 草稿仍按不加密处理；VLESS 不加密及 HTTP／SOCKS5 入口均显示明文风险提示。
 
 订阅隐藏（`subscriptionVisible=false`）的用户入站不会获得用户凭据，发布后渲染为停用，编辑器对这种组合给出提示。
 
@@ -486,9 +488,9 @@ v1.5.5 出站资源可单独设置 `sourceIp/sourceInterface`（0145；DesiredSt
 
 画布内部资源仍用 `canvas_tunnels/canvas_tunnel_objects` 的 ID 归属与共享依赖。旧 port_forward/gost 连接在迁移前只读保留，可删除，不可新增或改动；一次性转换及遗留原因见第 26.9、31 节。GOST 目标池、范围、限流与连接上限仍属普通 forward 入站（第 12 节），不由新画布创建。
 
-三步快速创建为「添加中转 → 选择入口与可选中间服务器、入口协议 → 创建并发布」，对应 `POST /relay-schemes/quick/plan` 与 `/relay-schemes/quick`。预览只读；执行复用画布规划、保存与出口→入口发布，默认新建普通用户入口、自动分配端口及凭据，新入口默认加入出口入站所在的合格分组，不额外授权用户。入口协议由用户选择；快速流程最多一个中间服务器，通道为 Trojan over TLS/TCP，独立中转凭据及一年有效期自签证书沿用内部中转生成器，不随出口用户入站协议改变；wireguard 通道及外部出站出口不变，更多编辑使用原无限画布。既有 TLS 画布（含 v1.5.5 前创建的方案）若内部通道曾沿用出口协议，下次发布会预览为内部监听／配套出站 update，保留对象 ID 与端口，按出口→入口切换，期间短暂中断；物化失败恢复原对象，运行失败沿用部署版本回滚。`requestId` 通过绑定记录防止重复创建，202 只表示已提交。
+三步快速创建为「添加中转 → 选择入口与可选中间服务器、入口协议及安全方式 → 创建并发布」，对应 `POST /relay-schemes/quick/plan` 与 `/relay-schemes/quick`。预览只读；执行复用画布规划、保存与出口→入口发布，默认新建普通用户入口、自动分配端口及凭据，新入口默认加入出口入站所在的合格分组，不额外授权用户。入口协议与 VLESS 安全方式由用户选择，预览展示安全组合及明文警告；快速流程最多一个中间服务器，通道为 Trojan over TLS/TCP，独立中转凭据及一年有效期自签证书沿用内部中转生成器，不随出口用户入站协议改变；wireguard 通道及外部出站出口不变，更多编辑使用原无限画布。既有 TLS 画布（含 v1.5.5 前创建的方案）若内部通道曾沿用出口协议，下次发布会预览为内部监听／配套出站 update，保留对象 ID 与端口，按出口→入口切换，期间短暂中断；物化失败恢复原对象，运行失败沿用部署版本回滚。`requestId` 通过绑定记录防止重复创建，202 只表示已提交。
 
-入口绑定 `entryBinding.mode` 只接受 `create`，快速创建与高级画布一律新建独立入口。入口只属于一个方案，不允许其他方案或 linked 规则引用。0150 删除旧 reuse 绑定，保留对应普通入站及配置；历史无绑定的方案入口按新建入口处理，撤除时删除。
+入口绑定 `entryBinding.mode` 只接受 `create`，快速创建与高级画布一律新建独立入口。VLESS 新入口的 `security`（none／tls／reality，省略为 none）、`transport`（tcp／xhttp，省略为 tcp）、`flow`（空或 xtls-rprx-vision）、`realityTarget` 与 `realityServerName` 仅在绑定记录尚不存在时生效；其他协议不得携带这些字段。Reality 必填 host:port 握手目标与单个具体 DNS 名称，可从 VLESS Reality 出口预填公开参数；创建时自动生成 X25519 密钥对和 16 位小写十六进制 Short ID。xhttp 仅支持 TLS／Reality，自动生成 auto 模式与随机路径；Vision 仅支持 TCP + TLS／Reality。规划复用入站保存的逐核心设置契约检查，页面隐藏不可用组合；自签名 TLS 要求服务器有公网 IP 或客户端连接地址。绑定发布后，安全设置在方案中只读，须在「节点列表」编辑该入站后发布，方案重新发布不覆盖安全设置。入口只属于一个方案，不允许其他方案或 linked 规则引用。0150 删除旧 reuse 绑定，保留对应普通入站及配置；历史无绑定的方案入口按新建入口处理，撤除时删除。
 
 「停用并移除」一次确认后以 `{updatedAt}` 调用 `POST /api/v1/canvas-schemes/{id}/remove`，确认即执行完整撤除。`DELETE /api/v1/canvas-schemes/{id}` 保留为同义接口，请求体同样需要 `updatedAt`。面板在事务中立即删除方案、入口、专用内部监听、中转出站、规则及无引用通道，页面随即移除；共享或外部引用资源保留。200 返回 `{schemeId,removed:true,pendingNodes:[{nodeId,name,reason}]}`，版本过期返回 409 `stale_scheme`，方案不存在返回 404 `not_found`。旧 `remove-plan`、`remove-status`、遗留资源与重新挂接路由移除。
 
@@ -995,6 +997,7 @@ JSON 字段必须在 Go 中解析为明确的数据结构，不允许无结构�
 | 0147 `imported_proxy_identity` | 新增 `import_identity_reconcile`（单行 id=1、done 初始 0）及 `import_identity_map`（主键 source_id/old_proxy_id、old_proxy_key、唯一 new_proxy_id）；`imported_proxies.revision` 非空默认 1。加密身份及引用由 Go 事务转换，SQL 不改写 payload |
 | 0148 `canvas_entry_baseline` | `canvas_entry_bindings` 新增可空 `creation_config_json`（固定字段类别的 SHA-256 摘要规范 JSON）及 `creation_groups_json`（排序去重的分组 ID 规范 JSON 数组）；旧行保持 NULL，不回填猜测 |
 | 0150 `relay_cleanup` | 新增每节点待清理表 `relay_cleanup_nodes`（原因、次数、失败码、下次时间、修订）与单行完成标记 `relay_cleanup_reconcile`；删除 reuse 绑定但保留普通入站，启动一次性清理残留并登记下发 |
+| 0151 `node_group_relays` | 新增分组↔隧道规则成员表 `node_group_relays`（group_id、rule_id，两端外键级联删除，按 rule_id 建索引）；把已在组内的目标入站的全部关联规则写入同一组，保持升级前订阅不变 |
 
 备份校验、清单与恢复覆盖这些结构。恢复结束门户会话；当前安全状态、Token 与授权按模块的保守合并规则处理，不用旧备份恢复已撤销访问。排队探测在恢复时过期，运行能力待重新上报。
 
@@ -1090,7 +1093,7 @@ tuning PUT 请求 {settings:对象,clear:布尔,confirmNodeId:节点ID}，拒绝
 
 ## 27.5 节点组
 
-Owner 专用，写操作要求 CSRF。列表及保存响应保留原字段，新增 `inboundIds: string[]`、`imports: [{sourceId,proxyKey}]`、`grantedUserIds: string[]`；`nodeIds` 是只读派生服务器列表。POST/PUT 接受 `inboundIds`、`imports`（最多 500 个入站、200 个导入成员）；仅传 `nodeIds` 而未传 `inboundIds` 时，兼容展开服务器当前订阅可见、非中转的入站。显式空入站数组优先，未知字段仍拒绝。
+Owner 专用，写操作要求 CSRF。列表及保存响应保留原字段，新增 `inboundIds: string[]`、`imports: [{sourceId,proxyKey}]`、`grantedUserIds: string[]`；`nodeIds` 是只读派生服务器列表。POST/PUT 接受 `inboundIds`、`imports`（最多 500 个入站、200 个导入成员）与 `relayIds`（v1.5.9，最多 500 条且必须是关联目标入站的隧道规则；省略或 null 保留原值，`[]` 清空）；响应另含 `relayIds` 与只读 `relayNodeIds`（这些规则目标入站所在的服务器，凭据下发、额度自动版本与在线设备统计都按 `nodeIds` ∪ `relayNodeIds` 计算）；仅传 `nodeIds` 而未传 `inboundIds` 时，兼容展开服务器当前订阅可见、非中转的入站。显式空入站数组优先，未知字段仍拒绝。
 
 导入来源 API 继续接受但忽略 `userIds`；响应 `userIds` 为经有效分组可达该来源的去重用户集合（不代表其当前活跃或缓存可用）。`GET /imported-proxies` 项增加 `proxyKey: "name|protocol"`。`user_source_grants` 仅保留供旧备份兼容，不参与访问判断。
 
@@ -1519,6 +1522,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | canvas_entry_bindings.creation_config_json/creation_groups_json（0148） | 随整库备份及清单保留；校验完整分类摘要、64 位小写十六进制 SHA-256、规范 JSON、非空去重排序分组 ID；两列同时 NULL 为合法旧基线，0148 前归档升级后为 NULL |
 | relay_cleanup_nodes（0150） | 加密备份、清单及校验覆盖节点外键、非负次数、时间、失败码与可空正数修订；恢复保留待清理记录，由运行期重试器继续处理 |
 | relay_cleanup_reconcile（0150） | 加密备份、清单及校验覆盖 id=1 与 completed=0/1；恢复保留完成标记，未完成时由启动清理器处理 |
+| node_group_relays（0151） | 加密备份、清单（`nodeGroupRelays`）及校验覆盖分组与规则存在、规则必须为关联目标、每组不超过 500 条；0151 前归档合法。恢复与其他分组成员同规则：以当前库的成员为准，只保留恢复数据里仍存在且为关联目标的规则 |
 | import_identity_reconcile/map、imported_proxies.revision、system_settings.import_identity_report（0147） | 校验单次标记、映射目标及来源、revision≥1、报告 JSON、明文与密封名称／协议一致；允许明确悬空成员与悬空引用并写转换／恢复报告，done=1 不再接受 content 整源成员。旧归档先升级，在最终候选库协调身份；当前导入节点／授权与映射按恢复权威规则保留，不按名称配对、不复活旧授权，不重新抓取、不自动发布 |
 | node_latency_samples、定时探测队列、node_metric_samples | 不进便携备份：快照清空再 VACUUM，恢复候选再清空，不影响运行库样本；手动排队探测过期 |
 | scheduled 默认目标、node_latency_targets、latency_targets_custom | 属配置；兼容 0121 前归档并默认继承。进程内恢复保留当前自定义（含空表），补其新目标但不提升为系统默认 |

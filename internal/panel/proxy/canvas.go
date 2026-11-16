@@ -81,14 +81,19 @@ type CanvasInstance struct {
 
 // CanvasEntryBinding describes a user entry; runtime ownership is stored separately.
 type CanvasEntryBinding struct {
-	Mode      string   `json:"mode"`
-	InboundID string   `json:"inboundId,omitempty"`
-	Protocol  string   `json:"protocol,omitempty"`
-	Core      string   `json:"core,omitempty"`
-	PortMode  string   `json:"portMode"`
-	Port      *int     `json:"port,omitempty"`
-	GroupMode string   `json:"groupMode"`
-	GroupIDs  []string `json:"groupIds,omitempty"`
+	Security          string   `json:"security,omitempty"`
+	Transport         string   `json:"transport,omitempty"`
+	Flow              string   `json:"flow,omitempty"`
+	RealityTarget     string   `json:"realityTarget,omitempty"`
+	RealityServerName string   `json:"realityServerName,omitempty"`
+	Mode              string   `json:"mode"`
+	InboundID         string   `json:"inboundId,omitempty"`
+	Protocol          string   `json:"protocol,omitempty"`
+	Core              string   `json:"core,omitempty"`
+	PortMode          string   `json:"portMode"`
+	Port              *int     `json:"port,omitempty"`
+	GroupMode         string   `json:"groupMode"`
+	GroupIDs          []string `json:"groupIds,omitempty"`
 }
 
 func (layout CanvasLayout) validateEntryBindings(execution string) error {
@@ -117,6 +122,9 @@ func (layout CanvasLayout) validateEntryBindings(execution string) error {
 			}
 		default:
 			return errors.New("入口仅支持新建（create），不再支持复用现有入口")
+		}
+		if err := validateCanvasEntrySecurity(*b); err != nil {
+			return err
 		}
 		if b.PortMode != "auto" && b.PortMode != "manual" {
 			return errors.New("入口端口模式必须为 auto 或 manual")
@@ -390,6 +398,11 @@ func (s *Service) saveCanvasScheme(ctx context.Context, schemeID string, input C
 	}
 	if !canvasExecutions[input.Execution] {
 		return CanvasScheme{}, errors.New("invalid canvas scheme execution")
+	}
+	var bindingErr error
+	input.Layout, bindingErr = s.canvasIgnorePublishedEntrySecurity(ctx, schemeID, input.Layout)
+	if bindingErr != nil {
+		return CanvasScheme{}, bindingErr
 	}
 	if err := input.Layout.validateEntryBindings(input.Execution); err != nil {
 		return CanvasScheme{}, err

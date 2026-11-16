@@ -425,6 +425,11 @@ func (s *Service) planCanvas(ctx context.Context, scheme CanvasScheme) (CanvasPl
 	for _, e := range plan.entries {
 		if e.preview != nil {
 			result.Entries = append(result.Entries, *e.preview)
+			if e.existing.ID == "" {
+				if warning := canvasEntryPlaintextWarning(e.preview.Name, e.binding.Protocol, e.binding.Security); warning != "" {
+					result.Warnings = append(result.Warnings, warning)
+				}
+			}
 			action := "create"
 			if e.existing.ID != "" {
 				action = "update"

@@ -53,7 +53,7 @@ func (o *ConnectionObserver) ForUser(ctx context.Context, account User) (*int, e
 		if err != nil {
 			return nil, err
 		}
-		for _, nodeID := range group.NodeIDs {
+		for _, nodeID := range group.AccessNodeIDs() {
 			if seen[nodeID] {
 				continue
 			}

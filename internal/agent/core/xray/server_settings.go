@@ -11,11 +11,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"proxycontrol/internal/agent/core"
@@ -53,12 +55,31 @@ func validateServerCombinations(state desiredstate.State) error {
 	return nil
 }
 
+// probeCache keeps a complete probe report per installed binary. Render detects
+// capabilities on every publication, and the probe runs one native check per
+// combination (over twenty since v1.6.0), so it must not repeat for an
+// unchanged binary. A replaced core changes the key and is probed again; an
+// incomplete report (for example a check that timed out under load) is not
+// cached, so the next detection retries it.
+var probeCache sync.Map
+
 func detectServerSettings(ctx context.Context, executable, version string) []*pb.SettingsCombination {
-	return probeServerSettings(ctx, version, func(ctx context.Context, path string) error {
+	key := executable + "\x00" + version
+	if info, err := os.Stat(executable); err == nil {
+		key += fmt.Sprintf("\x00%d\x00%d", info.Size(), info.ModTime().UnixNano())
+	}
+	if cached, ok := probeCache.Load(key); ok {
+		return append([]*pb.SettingsCombination(nil), cached.([]*pb.SettingsCombination)...)
+	}
+	result := probeServerSettings(ctx, version, func(ctx context.Context, path string) error {
 		command := exec.CommandContext(ctx, executable, "run", "-test", "-config", path)
 		command.Stdout, command.Stderr = io.Discard, io.Discard
 		return command.Run()
 	})
+	if len(result) == len(serverSettingsCapability().Combinations) {
+		probeCache.Store(key, append([]*pb.SettingsCombination(nil), result...))
+	}
+	return result
 }
 
 func probeServerSettings(ctx context.Context, version string, check func(context.Context, string) error) []*pb.SettingsCombination {

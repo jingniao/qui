@@ -352,6 +352,10 @@ func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInp
 	if err := node.RequireOutboundSourceSupport(sourceState, n.Capabilities, n.Name); err != nil {
 		return Outbound{}, err
 	}
+	clientState := desiredstate.State{NodeID: input.NodeID, Outbounds: []desiredstate.Outbound{{ID: id, Protocol: input.Protocol, Settings: input.Settings}}}
+	if err := node.RequireOutboundClientSupport(clientState, n.Capabilities, n.Name); err != nil {
+		return Outbound{}, err
+	}
 	if id != "" {
 		old, err := s.Repository.Outbound(ctx, id, true)
 		if err != nil {

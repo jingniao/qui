@@ -116,6 +116,11 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 			return core.RenderedConfig{}, err
 		}
 	}
+	for _, outbound := range state.Outbounds {
+		if err := desiredstate.RequireOutboundSettings("sing-box", a.nativeServerSettings, outbound.Protocol, outbound.Settings); err != nil {
+			return core.RenderedConfig{}, err
+		}
+	}
 	options.wireGuardOutbound = a.nativeWireGuard
 	options.wireGuardInbound = a.nativeWireGuardInbound
 	if a.hooks.EnableStats {

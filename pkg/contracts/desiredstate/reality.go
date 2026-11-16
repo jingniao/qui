@@ -226,20 +226,28 @@ func validShortID(value string) bool {
 // combination keeps its existing behaviour.
 func validateServerSettings(protocol string, settings ProtocolSettings, inbound bool) error {
 	// A security or transport that names the new half without its settings is
-	// incomplete, whatever the other field is.
-	if settings.Security == SecurityReality && settings.Reality == nil {
+	// incomplete, whatever the other field is. A listener presents Reality's
+	// server half; an outbound dials with its client half (client_settings.go).
+	if settings.Security == SecurityReality && inbound && settings.Reality == nil {
 		return errors.New("reality security requires its server settings")
+	}
+	if settings.Security == SecurityReality && !inbound && settings.RealityClient == nil {
+		return errors.New("reality security requires its client settings")
 	}
 	if settings.Transport == TransportXHTTP && settings.XHTTP == nil {
 		return errors.New("xhttp transport requires its host, path and mode settings")
 	}
+	if settings.Reality != nil && !inbound {
+		return errors.New("reality server settings require an inbound")
+	}
 	if !settings.HasServerSettings() {
 		return nil
 	}
-	// M1 defines the server-private half only. An outbound carries client
-	// parameters, which the shared subscription/proxy model adds once (S3/S4).
-	if protocol != "vless" || !inbound {
-		return errors.New("xhttp and reality settings require a VLESS inbound")
+	if protocol != "vless" {
+		return errors.New("xhttp and reality settings require VLESS")
+	}
+	if !inbound && settings.Security != "tls" && settings.Security != SecurityReality {
+		return errors.New("xhttp requires TLS or Reality")
 	}
 	if settings.Method != "" || settings.WireGuard != nil || settings.QUIC != nil {
 		return errors.New("xhttp and reality settings cannot carry other protocol options")

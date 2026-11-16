@@ -54,6 +54,9 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 	if err := node.RequireOutboundSourceSupport(state, c, name); err != nil {
 		return err
 	}
+	if err := node.RequireOutboundClientSupport(state, c, name); err != nil {
+		return err
+	}
 	if err := desiredstate.RequireKeywordSupport(state, node.KeywordCapabilities(cores)); err != nil {
 		return fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
 	}

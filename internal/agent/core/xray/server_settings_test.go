@@ -19,6 +19,14 @@ func TestNativeProbeDoesNotAdvertiseFailedCombinations(t *testing.T) {
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			t.Fatal(err)
 		}
+		// Outbound probes carry no inbound; their stream decides the same way.
+		if len(doc.Inbounds) == 0 {
+			out := doc.Outbounds[0]
+			if out.Stream.Security == "tls" || out.Stream.Network == "grpc" {
+				return errors.New("unsupported native cell")
+			}
+			return nil
+		}
 		in := doc.Inbounds[0]
 		if in.Stream.Security == "tls" || in.Stream.Network == "grpc" {
 			return errors.New("unsupported native cell")
@@ -30,8 +38,17 @@ func TestNativeProbeDoesNotAdvertiseFailedCombinations(t *testing.T) {
 		seen[in.Stream.Security+"/"+in.Stream.Network+"/"+mode] = true
 		return nil
 	})
-	if len(report) != 3 {
-		t.Fatalf("expected exactly three native-supported combinations, got %d", len(report))
+	inbound, outbound := 0, 0
+	for _, c := range report {
+		if c.Direction == "outbound" {
+			outbound++
+		} else {
+			inbound++
+		}
+	}
+	// Outbound: vless none/ws, reality tcp, reality tcp vision and reality xhttp.
+	if inbound != 3 || outbound != 4 {
+		t.Fatalf("expected three inbound and four outbound native-supported combinations, got %d and %d", inbound, outbound)
 	}
 	for _, c := range report {
 		if c.Security == "tls" || c.Transport == "grpc" {

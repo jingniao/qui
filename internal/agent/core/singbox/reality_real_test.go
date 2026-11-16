@@ -55,7 +55,7 @@ func TestRealRealityTCPAuthenticatedHTTPAndRollback(t *testing.T) {
 				t.Fatalf("native probe did not authorize test combination: %v", err)
 			}
 			for _, combination := range caps.ServerSettingsCombinations {
-				if combination.Protocol != "vless" || combination.Direction != "inbound" || combination.Security != "reality" || combination.Transport != "tcp" {
+				if combination.Direction == "inbound" && (combination.Protocol != "vless" || combination.Security != "reality" || combination.Transport != "tcp") {
 					t.Fatal("native report advertised an unverified combination")
 				}
 			}

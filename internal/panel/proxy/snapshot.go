@@ -251,6 +251,9 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 	if err := node.RequireOutboundSourceSupport(state, n.Capabilities, n.Name); err != nil {
 		return state, enabled, err
 	}
+	if err := node.RequireOutboundClientSupport(state, n.Capabilities, n.Name); err != nil {
+		return state, enabled, err
+	}
 	if err := desiredstate.RequireKeywordSupport(state, node.KeywordCapabilities(cores)); err != nil {
 		return state, enabled, fmt.Errorf("%w: 该服务器的 Agent 不支持关键字规则，请先升级 Agent", desiredstate.ErrKeywordUnsupported)
 	}

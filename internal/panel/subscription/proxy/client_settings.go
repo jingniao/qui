@@ -1,9 +1,8 @@
 package proxy
 
 import (
-	"crypto/ecdh"
-	"encoding/base64"
 	"encoding/hex"
+	"proxycontrol/pkg/contracts/clienttls"
 	"proxycontrol/pkg/contracts/netaddr"
 	"strconv"
 	"strings"
@@ -98,9 +97,7 @@ func ValidateClientSettings(p Proxy) (string, string) {
 		if (p.Security != "tls" && p.Security != "reality") || (p.Protocol != "vless" && p.Protocol != "trojan") {
 			return "invalid_protocol_combination", "tls.clientFingerprint"
 		}
-		switch p.TLS.ClientFingerprint {
-		case "chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized":
-		default:
+		if !clienttls.ValidFingerprint(p.TLS.ClientFingerprint) {
 			return "invalid_fingerprint", "tls.clientFingerprint"
 		}
 	}
@@ -130,18 +127,8 @@ func ValidateClientSettings(p Proxy) (string, string) {
 		return "invalid_fingerprint", "tls.clientFingerprint"
 	}
 	r := p.Reality
-	key, err := base64.RawURLEncoding.DecodeString(r.PublicKey)
-	if err != nil || len(key) != 32 || base64.RawURLEncoding.EncodeToString(key) != r.PublicKey {
-		return "invalid_reality_key", "reality.publicKey"
-	}
-	// Reject low-order keys too: a syntactically valid all-zero public key cannot
-	// complete an X25519 handshake.
-	pub, err := ecdh.X25519().NewPublicKey(key)
-	private, _ := ecdh.X25519().NewPrivateKey([]byte("01234567890123456789012345678901"))
-	if err != nil {
-		return "invalid_reality_key", "reality.publicKey"
-	}
-	if _, err = private.ECDH(pub); err != nil {
+	// Low-order keys are refused too: they cannot complete an X25519 handshake.
+	if clienttls.ValidRealityPublicKey(r.PublicKey) != nil {
 		return "invalid_reality_key", "reality.publicKey"
 	}
 	if r.ShortID == nil {

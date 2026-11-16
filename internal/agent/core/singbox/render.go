@@ -52,7 +52,34 @@ type tlsOptions struct {
 	CertificatePath string          `json:"certificate_path,omitempty"`
 	KeyPath         string          `json:"key_path,omitempty"`
 	ALPN            []string        `json:"alpn,omitempty"`
+	UTLS            *utlsOptions    `json:"utls,omitempty"`
 	Reality         *realityOptions `json:"reality,omitempty"`
+	// realityClient is Reality's client half (v1.6.0). Its short_id is a single
+	// string where the server's is a list, so MarshalJSON emits it in place of
+	// Reality under the same key.
+	realityClient *realityClientOptions
+}
+
+type utlsOptions struct {
+	Enabled     bool   `json:"enabled"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+type realityClientOptions struct {
+	Enabled   bool   `json:"enabled"`
+	PublicKey string `json:"public_key"`
+	ShortID   string `json:"short_id,omitempty"`
+}
+
+func (t tlsOptions) MarshalJSON() ([]byte, error) {
+	type plain tlsOptions
+	if t.realityClient == nil {
+		return json.Marshal(plain(t))
+	}
+	return json.Marshal(struct {
+		plain
+		Reality *realityClientOptions `json:"reality"`
+	}{plain(t), t.realityClient})
 }
 
 type realityOptions struct {
@@ -67,9 +94,10 @@ type realityHandshake struct {
 	Port   int    `json:"server_port"`
 }
 type transportOptions struct {
-	Type        string `json:"type"`
-	Path        string `json:"path,omitempty"`
-	ServiceName string `json:"service_name,omitempty"`
+	Type        string            `json:"type"`
+	Path        string            `json:"path,omitempty"`
+	ServiceName string            `json:"service_name,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
 }
 type userOptions struct {
 	Name     string `json:"name,omitempty"`
@@ -592,7 +620,21 @@ func security(protocol string, settings desiredstate.ProtocolSettings, inbound b
 	if settings.WireGuard != nil {
 		return nil, nil, errors.New("unexpected WireGuard settings")
 	}
+	if !inbound {
+		if err := desiredstate.ValidateCoreClientSettings(desiredstate.CoreSingBox, settings); err != nil {
+			return nil, nil, err
+		}
+	}
 	var tls *tlsOptions
+	// Reality's client half needs uTLS in sing-box; the contract makes the
+	// fingerprint mandatory for it. SpiderX has no sing-box client field.
+	if r := settings.RealityClient; r != nil {
+		if inbound || protocol != "vless" {
+			return nil, nil, errors.New("sing-box Reality client settings require a VLESS outbound")
+		}
+		tls = &tlsOptions{Enabled: true, ServerName: settings.ServerName, UTLS: &utlsOptions{Enabled: true, Fingerprint: settings.ClientFingerprint},
+			realityClient: &realityClientOptions{Enabled: true, PublicKey: r.PublicKey, ShortID: r.ShortID}}
+	}
 	if settings.Reality != nil {
 		if !inbound || protocol != "vless" {
 			return nil, nil, errors.New("sing-box Reality server settings require a VLESS inbound")
@@ -617,9 +659,12 @@ func security(protocol string, settings desiredstate.ProtocolSettings, inbound b
 		if protocol == "socks5" || protocol == "shadowsocks" {
 			return nil, nil, errors.New("sing-box protocol does not support configured TLS layer")
 		}
-		tls = &tlsOptions{Enabled: true, ServerName: settings.ServerName}
+		tls = &tlsOptions{Enabled: true, ServerName: settings.ServerName, ALPN: settings.ALPN}
 		if protocol == "hysteria2" || protocol == "tuic" {
 			tls.ALPN = []string{"h3"}
+		}
+		if settings.ClientFingerprint != "" {
+			tls.UTLS = &utlsOptions{Enabled: true, Fingerprint: settings.ClientFingerprint}
 		}
 		if inbound {
 			// A node-side file pair is read by the core itself and proved usable
@@ -643,6 +688,9 @@ func security(protocol string, settings desiredstate.ProtocolSettings, inbound b
 			return nil, nil, errors.New("sing-box transport requires VLESS or Trojan")
 		}
 		transport = &transportOptions{Type: settings.Transport, Path: settings.Path, ServiceName: settings.ServiceName}
+		if settings.WSHost != "" {
+			transport.Headers = map[string]string{"Host": settings.WSHost}
+		}
 	}
 	return tls, transport, nil
 }

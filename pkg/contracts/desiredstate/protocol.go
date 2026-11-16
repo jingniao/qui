@@ -19,7 +19,7 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		if err := f.Validate(); err != nil {
 			return err
 		}
-		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" || settings.HasServerSettings() || settings.HasCertificateFiles() {
+		if settings.Transport != "" || settings.Security != "" || settings.WireGuard != nil || settings.QUIC != nil || settings.CertificatePEM != "" || settings.PrivateKeyPEM != "" || settings.TrustedCAPEM != "" || settings.Method != "" || settings.Flow != "" || settings.Path != "" || settings.ServiceName != "" || settings.ServerName != "" || settings.HasServerSettings() || settings.HasClientSettings() || settings.HasCertificateFiles() {
 			return errors.New("forward cannot carry proxy security or transport settings")
 		}
 		return nil
@@ -78,7 +78,7 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		}
 	}
 	if protocol == "direct" || protocol == "block" {
-		if settings.Security != "" || settings.Transport != "" || settings.WireGuard != nil || settings.HasServerSettings() {
+		if settings.Security != "" || settings.Transport != "" || settings.WireGuard != nil || settings.HasServerSettings() || settings.HasClientSettings() {
 			return errors.New("direct/block cannot use transport security")
 		}
 		return nil
@@ -99,6 +99,9 @@ func ValidateSettings(protocol string, settings ProtocolSettings, inbound bool) 
 		return err
 	}
 	if err := validateServerSettings(protocol, settings, inbound); err != nil {
+		return err
+	}
+	if err := validateClientSettings(protocol, settings, inbound); err != nil {
 		return err
 	}
 	if protocol == "trojan" && settings.Security != "tls" {

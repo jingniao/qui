@@ -30,6 +30,7 @@ type tlsSettings struct {
 	Certificates      []tlsCertificate `json:"certificates,omitempty"`
 	DisableSystemRoot bool             `json:"disableSystemRoot,omitempty"`
 	ALPN              []string         `json:"alpn,omitempty"`
+	Fingerprint       string           `json:"fingerprint,omitempty"`
 }
 type tlsCertificate struct {
 	Certificate     []string `json:"certificate,omitempty"`
@@ -40,15 +41,24 @@ type tlsCertificate struct {
 }
 type wsSettings struct {
 	Path string `json:"path"`
+	Host string `json:"host,omitempty"`
 }
 type grpcSettings struct {
 	ServiceName string `json:"serviceName"`
 }
+
+// realitySettings is either half: a listener renders the server fields, an
+// outbound the client fields (the pinned Xray reads both under one key).
 type realitySettings struct {
-	Target      string   `json:"target"`
-	ServerNames []string `json:"serverNames"`
-	PrivateKey  string   `json:"privateKey"`
-	ShortIDs    []string `json:"shortIds"`
+	Target      string   `json:"target,omitempty"`
+	ServerNames []string `json:"serverNames,omitempty"`
+	PrivateKey  string   `json:"privateKey,omitempty"`
+	ShortIDs    []string `json:"shortIds,omitempty"`
+	ServerName  string   `json:"serverName,omitempty"`
+	Fingerprint string   `json:"fingerprint,omitempty"`
+	PublicKey   string   `json:"publicKey,omitempty"`
+	ShortID     string   `json:"shortId,omitempty"`
+	SpiderX     string   `json:"spiderX,omitempty"`
 }
 type vlessAccount struct {
 	ID         string `json:"id"`
@@ -146,9 +156,12 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 		security = "none"
 	}
 	result := &streamSettings{Network: network, Security: security}
-	if security == desiredstate.SecurityReality {
+	if security == desiredstate.SecurityReality && inbound {
 		r := settings.Reality
 		result.Reality = &realitySettings{Target: r.HandshakeTarget, ServerNames: r.ServerNames, PrivateKey: r.PrivateKey, ShortIDs: r.ShortIDs}
+	} else if security == desiredstate.SecurityReality {
+		r := settings.RealityClient
+		result.Reality = &realitySettings{ServerName: settings.ServerName, Fingerprint: settings.ClientFingerprint, PublicKey: r.PublicKey, ShortID: r.ShortID, SpiderX: r.SpiderX}
 	}
 	if security == "tls" {
 		// The core reads these files itself, so their usability is proved here,
@@ -158,7 +171,7 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 				return nil, err
 			}
 		}
-		result.TLS = &tlsSettings{ServerName: settings.ServerName}
+		result.TLS = &tlsSettings{ServerName: settings.ServerName, ALPN: settings.ALPN, Fingerprint: settings.ClientFingerprint}
 		if inbound {
 			// A node-side file pair is read by the core itself; pasted material
 			// travels inline. The two cannot be mixed (desiredstate refuses it),
@@ -178,7 +191,7 @@ func stream(settings desiredstate.ProtocolSettings, inbound bool) (*streamSettin
 		copy := *settings.XHTTP
 		result.XHTTP = &copy
 	case "ws":
-		result.WS = &wsSettings{Path: settings.Path}
+		result.WS = &wsSettings{Path: settings.Path, Host: settings.WSHost}
 		if result.WS.Path == "" {
 			result.WS.Path = "/"
 		}

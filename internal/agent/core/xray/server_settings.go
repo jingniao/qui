@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"proxycontrol/internal/agent/core"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -31,6 +32,8 @@ func serverSettingsCapability() desiredstate.CoreSettingsCapability {
 		combinations = append(combinations, desiredstate.SettingsCombination{Protocol: "vless", Direction: desiredstate.DirectionInbound, Security: pair[0], Transport: pair[1]})
 	}
 	combinations = append(combinations, desiredstate.SettingsCombination{Protocol: "vless", Direction: desiredstate.DirectionInbound, Security: "reality", Transport: "tcp", Flow: "xtls-rprx-vision"})
+	// v1.6.0: the outbound renderer emits every client-field shape.
+	combinations = append(combinations, desiredstate.OutboundClientCombinations()...)
 	// The same renderer reads node-side certificate files, so the report the
 	// renderer checks itself against carries that bit too (detect.go reports it).
 	return desiredstate.CoreSettingsCapability{Core: "xray", Version: desiredstate.SettingsContractVersion, Combinations: combinations, CertificateFiles: true}
@@ -39,6 +42,11 @@ func serverSettingsCapability() desiredstate.CoreSettingsCapability {
 func validateServerCombinations(state desiredstate.State) error {
 	for _, inbound := range state.Inbounds {
 		if err := desiredstate.RequireInboundServerSettings("xray", serverSettingsCapability(), inbound.Protocol, inbound.Settings); err != nil {
+			return err
+		}
+	}
+	for _, outbound := range state.Outbounds {
+		if err := desiredstate.RequireOutboundSettings("xray", serverSettingsCapability(), outbound.Protocol, outbound.Settings); err != nil {
 			return err
 		}
 	}
@@ -85,6 +93,12 @@ func probeServerSettings(ctx context.Context, version string, check func(context
 	path := filepath.Join(directory, "probe.json")
 	result := []*pb.SettingsCombination{}
 	for _, c := range serverSettingsCapability().Combinations {
+		if c.Direction == desiredstate.DirectionOutbound {
+			if probeOutboundSettings(ctx, c, path, check) {
+				result = append(result, &pb.SettingsCombination{Protocol: c.Protocol, Direction: c.Direction, Security: c.Security, Transport: c.Transport, Flow: c.Flow})
+			}
+			continue
+		}
 		settings := desiredstate.ProtocolSettings{Security: c.Security, Transport: c.Transport, Flow: c.Flow}
 		if c.Security == "reality" {
 			settings.Reality = &desiredstate.RealityServerSettings{PrivateKey: base64.RawURLEncoding.EncodeToString(key.Bytes()), PublicKey: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), HandshakeTarget: "127.0.0.1:443", ServerNames: []string{"panel.invalid"}, ShortIDs: []string{"01"}}
@@ -134,3 +148,27 @@ func probeServerSettings(ctx context.Context, version string, check func(context
 }
 
 var errServerSettingsUnavailable = errors.New("installed Xray has not passed the xhttp/Reality settings probe")
+
+// probeOutboundSettings renders one outbound client combination with sample
+// values and runs the installed core's native check on it.
+func probeOutboundSettings(ctx context.Context, c desiredstate.SettingsCombination, path string, check func(context.Context, string) error) bool {
+	settings, err := core.ProbeClientSettings(c)
+	if err != nil {
+		return false
+	}
+	credential := desiredstate.Credential{ID: "probe", Protocol: c.Protocol, Secret: "6f1a1d4e-2f4a-4a4f-9d6e-3a1c0b7e5d21"}
+	outbound, err := buildOutbound(desiredstate.Outbound{ID: "settings-probe", Protocol: c.Protocol, Address: "127.0.0.1", Port: 1, Enabled: true, CredentialID: credential.ID, Settings: settings}, map[string]desiredstate.Credential{credential.ID: credential})
+	if err != nil {
+		return false
+	}
+	document := configDocument{Log: logConfig{Access: "none", Error: "none", Level: "none"}, Inbounds: []inboundConfig{}, Outbounds: []outboundConfig{outbound, {Tag: "direct", Protocol: "freedom"}}, Routing: routingConfig{DomainStrategy: "AsIs", Rules: []route{}}}
+	data, err := json.Marshal(document)
+	if err != nil || os.WriteFile(path, data, 0600) != nil {
+		clear(data)
+		return false
+	}
+	clear(data)
+	timeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return check(timeout, path) == nil
+}

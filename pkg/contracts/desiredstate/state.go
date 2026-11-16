@@ -112,12 +112,19 @@ type ProtocolSettings struct {
 	WireGuard      *WireGuardSettings `json:"wireguard,omitempty"`
 	QUIC           *QUICSettings      `json:"quic,omitempty"`
 
-	// Reality and XHTTP are the server-private halves of a self-hosted VLESS
-	// listener (phase M1, reality.go). They are inbound-only typed structures —
-	// never opaque passthrough — so the client-facing parameters stay in the
-	// shared subscription/proxy model and the two halves cannot be confused.
+	// Reality is the server-private half of a self-hosted VLESS listener (phase
+	// M1, reality.go) and is inbound-only. XHTTP is the typed xhttp transport of a
+	// VLESS inbound or outbound. Neither is opaque passthrough.
 	Reality *RealityServerSettings `json:"reality,omitempty"`
 	XHTTP   *XHTTPSettings         `json:"xhttp,omitempty"`
+
+	// The outbound client fields (v1.6.0, client_settings.go): the TLS details a
+	// server uses to dial an external endpoint such as an imported node.
+	// RealityClient is Reality's client half and never meets Reality above.
+	ALPN              []string               `json:"alpn,omitempty"`
+	ClientFingerprint string                 `json:"client_fingerprint,omitempty"`
+	WSHost            string                 `json:"ws_host,omitempty"`
+	RealityClient     *RealityClientSettings `json:"reality_client,omitempty"`
 
 	// CertificatePath and PrivateKeyPath name certificate files that already
 	// exist on the node (v1.4.7 section 3, certificates.go). They are inbound

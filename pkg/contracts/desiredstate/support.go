@@ -147,7 +147,7 @@ func ProtocolSupportTable() []ProtocolSupport {
 			Implemented:   identityStream,
 			Pending:       []string{DimSecurityReality, DimTransportXHTTP},
 			NotApplicable: []string{DimQUIC},
-			Source:        "ValidateSettings transport/flow/security; both official cores render VLESS with ws and grpc transports; Reality and xhttp are contract-only until the self-hosted renderers ship",
+			Source:        "ValidateSettings transport/flow/security; both official cores render VLESS with ws and grpc transports; self-hosted Reality/xhttp listeners and v1.6.0 outbound client fields (Reality client, xhttp, ALPN, uTLS, WebSocket host) are gated by each core's settings-contract report",
 		},
 		{
 			Protocol: "trojan", Direction: "both", Transport: []string{"tcp", "udp"}, AddressFamily: []string{"ipv4", "ipv6"}, Security: []string{"tls"},

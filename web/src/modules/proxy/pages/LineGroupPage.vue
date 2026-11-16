@@ -653,27 +653,29 @@ const allGroupNodes = computed<GroupPickerNode[]>(() => {
     });
   }
 
-  // Linked tunnel rules are members of their own: the user receives the rule's
-  // relayed endpoint, independently of the target inbound (direct endpoint).
+  // Linked and import-target tunnel rules are members of their own: the user
+  // receives the rule's relayed endpoint, independently of the target's direct one.
   for (const rule of tunnelRules.value) {
-    if (rule.target.mode !== 'linked') continue;
+    if (rule.target.mode === 'manual') continue;
     const target = rule.target;
     const via = rule.tunnelName ? ` · 经 ${rule.tunnelName}` : '';
+    const targetMissing = target.mode === 'import' && !target.protocol;
     result.push({
       id: relayMemberId(rule.id),
       ruleId: rule.id,
       name: rule.name,
-      protocol: target.protocol,
+      protocol: target.protocol || '—',
       port: rule.listenPort,
       sourceType: 'tunnel_relay',
       sourceTypeName: '隧道转发',
-      sourceName: `${rule.entryNodeName} → ${target.nodeName}${via}`,
+      sourceName: `${rule.entryNodeName} → ${target.mode === 'import' ? '导入 ' : ''}${target.nodeName}${via}`,
       serverId: rule.entryNodeId,
       status: rule.enabled ? 'active' : 'disabled',
       enabled: rule.enabled,
       subscriptionVisible: rule.subscriptionVisible,
       pendingDelete: rule.status === 'pending_delete',
       note: rule.status === 'pending_delete' ? '等待发布移除'
+        : targetMissing ? '导入节点已删除，订阅不包含'
         : !rule.publishedAt ? '尚未发布，订阅暂不包含'
         : !rule.subscriptionVisible ? '规则未勾选「显示在订阅中」，订阅不包含' : undefined
     });

@@ -16,22 +16,31 @@
       <p v-for="server in publishResult?.servers || []" :key="server.nodeId" class="text-ios-secondary">{{ server.nodeName }}：{{ resultLabels[server.status] }}<span v-if="server.message"> · {{ server.message }}</span></p>
       <p v-for="warning in groupFailures" :key="warning" class="text-ios-orange">{{ warning }}</p>
       <p v-if="error" role="alert" class="text-ios-red">{{ error }}</p>
-      <p class="text-xs text-ios-secondary">发布成功、开启订阅显示并加入已授权分组后，用户刷新客户端订阅即可获得这条线路；使用出口入站的协议和凭据。</p>
+      <p class="text-xs text-ios-secondary">发布成功、开启订阅显示并加入已授权分组后，用户刷新客户端订阅即可获得这条线路；使用{{ exitImport ? '导入节点' : '出口入站' }}的协议和凭据。</p>
     </div>
     <template v-else>
       <fieldset :disabled="saving" class="space-y-4 text-sm">
         <label class="block space-y-1.5 text-ios-secondary">中转方式
           <select v-model="mode" class="form-input-base">
-            <option value="proxy">代理中转（入口解开协议，经 Trojan/TLS 通道转给出口）</option>
+            <option v-if="!exitImport" value="proxy">代理中转（入口解开协议，经 Trojan/TLS 通道转给出口）</option>
             <option value="forward">纯转发（入口只转发数据，不解开协议）</option>
           </select>
         </label>
-        <label class="block space-y-1.5 text-ios-secondary">出口用户入站
-          <select v-model="form.exitInboundId" class="form-input-base">
-            <option value="">请选择出口入站</option>
-            <option v-for="inbound in exitOptions" :key="inbound.id" :value="inbound.id">{{ serverName(inbound.nodeId) }} · {{ inbound.name }} · {{ inbound.protocol.toUpperCase() }}</option>
+        <label class="block space-y-1.5 text-ios-secondary">{{ showImports ? '出口' : '出口用户入站' }}
+          <select v-model="exitKey" class="form-input-base">
+            <option value="">{{ showImports ? '请选择出口' : '请选择出口入站' }}</option>
+            <optgroup v-if="showImports" label="自建入站">
+              <option v-for="inbound in exitOptions" :key="inbound.id" :value="'inbound:' + inbound.id">{{ serverName(inbound.nodeId) }} · {{ inbound.name }} · {{ inbound.protocol.toUpperCase() }}</option>
+            </optgroup>
+            <template v-else>
+              <option v-for="inbound in exitOptions" :key="inbound.id" :value="'inbound:' + inbound.id">{{ serverName(inbound.nodeId) }} · {{ inbound.name }} · {{ inbound.protocol.toUpperCase() }}</option>
+            </template>
+            <optgroup v-if="showImports" label="导入节点">
+              <option v-for="item in importOptions" :key="item.id" :value="'import:' + item.id">{{ item.name }} · {{ item.protocol.toUpperCase() }} · {{ item.sourceName }}</option>
+            </optgroup>
           </select>
         </label>
+        <p v-if="exitImport && quicImport" class="text-xs text-ios-orange">Hysteria2／TUIC 只转发主端口，导入节点的跳跃端口不可用。</p>
         <label class="block space-y-1.5 text-ios-secondary">入口服务器
           <select v-model="form.entryNodeId" class="form-input-base">
             <option value="">请选择入口服务器</option>
@@ -79,7 +88,7 @@
           <div class="mt-3 space-y-3">
             <label class="block space-y-1.5 text-ios-secondary">{{ mode === 'forward' ? '这条线路加入的分组' : '新入口分组' }}
               <select v-model="form.groupMode" class="form-input-base">
-                <option value="exit_groups">加入出口入站所在分组</option>
+                <option value="exit_groups">{{ exitImport ? '加入包含该导入节点的分组' : '加入出口入站所在分组' }}</option>
                 <option value="explicit">指定分组</option>
                 <option value="none">不加入分组</option>
               </select>
@@ -93,7 +102,7 @@
           </div>
         </details>
       </fieldset>
-      <p v-if="!ready" class="text-sm text-ios-secondary">{{ mode === 'forward' ? '请选择不同的入口服务器和出口入站，填写名称、有效端口及指定的分组。' : '请选择不同的入口服务器和出口入站、入口协议，以及指定的分组。' }}</p>
+      <p v-if="!ready" class="text-sm text-ios-secondary">{{ mode === 'forward' ? '请选择入口服务器和出口（入口与出口入站须在不同服务器），填写名称、有效端口及指定的分组。' : '请选择不同的入口服务器和出口入站、入口协议，以及指定的分组。' }}</p>
       <p v-if="planning" role="status" class="text-sm text-ios-secondary">正在规划中转…</p>
       <section v-if="mode === 'proxy' && plan" class="space-y-3 text-sm" aria-label="创建与发布预览">
         <h4 class="text-base font-semibold">创建与发布预览</h4>
@@ -139,15 +148,24 @@ import { tunnelAPI, tunnelRuleAPI, tunnelError, type Tunnel, type TunnelRule, ty
 import { applyTunnelChanges } from '../../tunnels/applyTunnels';
 import { endpoint, routeLabel, resultLabels, validPort } from '../../tunnels/model';
 import { groupInput } from '../lineGroups';
+import { groupHasImport } from '../importIdentity';
+import type { ProxyNodeItem } from '../proxyNodes';
 import type { Inbound } from '../api';
 import { isUserEntry } from '../userEntries';
 import { buildQuickRelayInput, quickRelayProtocolChoices, MAX_QUICK_RELAY_MIDDLE_NODES, type QuickRelayForm, type QuickRelayPlan, type QuickRelayResult } from '../quickRelay';
 import { quickRelayAPI } from '../quickRelayApi';
 
-const props = defineProps<{ servers: NodeView[]; inbounds: Inbound[]; groups: NodeGroup[]; initialExitInboundId?: string; initialEntryNodeId?: string }>();
+// Imported nodes are not managed servers: they can only be a pure-forwarding exit
+// (a tunnel rule with an import target), so the proxy mode is hidden for them.
+const props = defineProps<{ servers: NodeView[]; inbounds: Inbound[]; groups: NodeGroup[]; imports?: ProxyNodeItem[]; initialExitInboundId?: string; initialExitImportId?: string; initialEntryNodeId?: string }>();
 const emit = defineEmits<{ close: []; created: [] }>();
 const router = useRouter();
-const mode = ref<'proxy' | 'forward'>('proxy');
+const mode = ref<'proxy' | 'forward'>(props.initialExitImportId ? 'forward' : 'proxy');
+const exitImportId = ref(props.initialExitImportId || '');
+const importOptions = computed(() => props.imports || []);
+const exitImport = computed(() => importOptions.value.find(item => item.id === exitImportId.value));
+const showImports = computed(() => mode.value === 'forward' && importOptions.value.length > 0);
+const quicImport = computed(() => exitImport.value?.protocol === 'hysteria2' || exitImport.value?.protocol === 'tuic');
 const forward = reactive({ name: '', tunnelId: null as string | null, portMode: 'auto' as 'auto' | 'manual', listenPort: undefined as number | undefined, subscriptionVisible: true });
 const nameEdited = ref(false), loadingTunnels = ref(false), tunnelLoadError = ref('');
 const tunnels = ref<Tunnel[]>([]), tunnelsLoaded = ref(false);
@@ -159,6 +177,16 @@ const plan = ref<QuickRelayPlan | null>(null), created = ref<QuickRelayResult | 
 const liveServers = computed(() => props.servers.filter(server => server.enabled && !server.deletedAt));
 const exitOptions = computed(() => props.inbounds.filter(inbound => isUserEntry(inbound) && inbound.protocol !== 'forward' && inbound.enabled && liveServers.value.some(server => server.id === inbound.nodeId)));
 const exit = computed(() => exitOptions.value.find(inbound => inbound.id === form.exitInboundId));
+const exitKey = computed({
+  get: () => exitImportId.value ? `import:${exitImportId.value}` : form.exitInboundId ? `inbound:${form.exitInboundId}` : '',
+  set: value => {
+    const [kind, id = ''] = value.split(/:(.*)/s);
+    exitImportId.value = kind === 'import' ? id : '';
+    form.exitInboundId = kind === 'inbound' ? id : '';
+  }
+});
+// The proxy mode has no import exits; leaving forward mode drops an import exit.
+watch(mode, value => { if (value === 'proxy') exitImportId.value = ''; });
 const entryOptions = computed(() => liveServers.value.filter(server => server.id !== exit.value?.nodeId && (mode.value === 'forward' || quickRelayProtocolChoices(server).length)));
 const middleOptions = computed(() => liveServers.value.filter(server => server.id !== form.entryNodeId && server.id !== exit.value?.nodeId));
 const groupOptions = computed(() => props.groups.filter(group => group.enabled && ['subscription', 'mixed'].includes(group.purpose)));
@@ -178,7 +206,8 @@ function serverName(id: string) { return props.servers.find(server => server.id 
 const routeName = computed(() => [form.entryNodeId, ...form.middleNodeIds, exit.value?.nodeId].filter((id): id is string => !!id).map(serverName).join(' → '));
 const availableTunnels = computed(() => tunnels.value.filter(tunnel => {
   const first = tunnel.hops[0], last = tunnel.hops.at(-1);
-  return tunnel.status !== 'pending_delete' && first?.role === 'entry' && first.nodeId === form.entryNodeId && last?.role === 'exit' && last.nodeId === exit.value?.nodeId;
+  // An imported target is dialled from the tunnel's exit, so any exit server fits.
+  return tunnel.status !== 'pending_delete' && first?.role === 'entry' && first.nodeId === form.entryNodeId && last?.role === 'exit' && (!!exitImport.value || last.nodeId === exit.value?.nodeId);
 }));
 const selectedTunnel = computed(() => availableTunnels.value.find(tunnel => tunnel.id === forward.tunnelId));
 const ruleAddress = computed(() => {
@@ -197,16 +226,17 @@ watch(mode, value => { if (value === 'forward' && !tunnelsLoaded.value && !loadi
 watch(availableTunnels, items => {
   if (forward.tunnelId && !items.some(tunnel => tunnel.id === forward.tunnelId)) forward.tunnelId = null;
 }, { flush: 'sync' });
-watch([() => form.entryNodeId, () => exit.value?.nodeId, () => selectedTunnel.value?.name], () => {
-  if (!nameEdited.value) forward.name = exit.value && form.entryNodeId ? `${serverName(exit.value.nodeId)} 经 ${selectedTunnel.value?.name || serverName(form.entryNodeId)}`.slice(0, 80) : '';
+watch([() => form.entryNodeId, () => exit.value?.nodeId, () => exitImport.value?.name, () => selectedTunnel.value?.name], () => {
+  const target = exitImport.value?.name || (exit.value && serverName(exit.value.nodeId));
+  if (!nameEdited.value) forward.name = target && form.entryNodeId ? `${target} 经 ${selectedTunnel.value?.name || serverName(form.entryNodeId)}`.slice(0, 80) : '';
 }, { immediate: true, flush: 'sync' });
-watch([() => form.entryNodeId, () => form.exitInboundId, mode], () => {
+watch([() => form.entryNodeId, () => form.exitInboundId, exitImportId, mode], () => {
   if (form.entryNodeId === exit.value?.nodeId) form.entryNodeId = '';
   form.middleNodeIds = form.middleNodeIds.filter(id => middleOptions.value.some(server => server.id === id));
   const choice = protocols.value.find(item => item.protocol === exit.value?.protocol);
   form.entryProtocol = choice?.protocol || ''; form.entryCore = choice?.core || '';
 }, { immediate: true, flush: 'sync' });
-const ready = computed(() => !!exit.value && entryOptions.value.some(server => server.id === form.entryNodeId) &&
+const ready = computed(() => (!!exit.value || (mode.value === 'forward' && !!exitImport.value)) && entryOptions.value.some(server => server.id === form.entryNodeId) &&
   (mode.value === 'forward'
     ? !loadingTunnels.value && !tunnelLoadError.value && !!forward.name.trim() && forward.name.length <= 80 &&
       (!forward.tunnelId || !!selectedTunnel.value) && (forward.portMode === 'auto' || validPort(forward.listenPort))
@@ -256,13 +286,16 @@ async function createForward() {
   saving.value = true; error.value = ''; groupFailures.value = [];
   const groups = form.groupMode === 'none' ? [] : form.groupMode === 'explicit'
     ? groupOptions.value.filter(group => form.groupIds.includes(group.id))
-    : props.groups.filter(group => ['subscription', 'mixed'].includes(group.purpose) && group.inboundIds.includes(form.exitInboundId));
+    : props.groups.filter(group => ['subscription', 'mixed'].includes(group.purpose) && (exitImport.value
+      ? groupHasImport(group, exitImport.value)
+      : group.inboundIds.includes(form.exitInboundId)));
   try {
     const rule = await tunnelRuleAPI.create({
       name: forward.name.trim(), entryNodeId: selectedTunnel.value ? selectedTunnel.value.hops[0]!.nodeId : form.entryNodeId,
       portMode: forward.portMode, ...(forward.portMode === 'manual' ? { listenPort: forward.listenPort } : {}),
       network: 'both', tunnelId: forward.tunnelId,
-      target: { mode: 'linked', inboundId: form.exitInboundId }, subscriptionVisible: forward.subscriptionVisible, enabled: true
+      target: exitImport.value ? { mode: 'import', importId: exitImport.value.id } : { mode: 'linked', inboundId: form.exitInboundId },
+      subscriptionVisible: forward.subscriptionVisible, enabled: true
     });
     createdRule.value = rule;
     for (const { id, name } of groups) {

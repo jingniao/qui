@@ -25,7 +25,15 @@ export function resolveImportMember<T extends ImportIdentity>(member: ImportMemb
     : { name: `已失效：${member.proxyKey}`, invalid: true };
 }
 
-export function importDeletionState(preview: { groups: readonly unknown[]; clientPolicies: readonly unknown[]; canvases: readonly unknown[] }, removeReferences: boolean): { needsRemoval: boolean; canConfirm: boolean } {
+// A group contains an imported node when it lists the whole URL source (empty
+// key) or this exact node; the panel's proxyKey is already `id:<id>` for content.
+export function groupHasImport(group: { imports: readonly ImportMember[] }, item: { sourceId?: string; proxyKey?: string }): boolean {
+  return group.imports.some(member => member.sourceId === item.sourceId && (member.proxyKey === '' || member.proxyKey === item.proxyKey));
+}
+
+// Canvases and tunnel rules must be changed first; groups and client policies can
+// be removed together with the node once the Owner confirms.
+export function importDeletionState(preview: { groups: readonly unknown[]; clientPolicies: readonly unknown[]; canvases: readonly unknown[]; rules?: readonly unknown[] }, removeReferences: boolean): { needsRemoval: boolean; canConfirm: boolean } {
   const needsRemoval = preview.groups.length > 0 || preview.clientPolicies.length > 0;
-  return { needsRemoval, canConfirm: preview.canvases.length === 0 && (!needsRemoval || removeReferences) };
+  return { needsRemoval, canConfirm: preview.canvases.length === 0 && !preview.rules?.length && (!needsRemoval || removeReferences) };
 }

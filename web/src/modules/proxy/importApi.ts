@@ -16,6 +16,7 @@ export interface ImportDeletionPreview {
   groups: { id: string; name: string }[];
   clientPolicies: { profileId: string; profileName: string; groups: string[]; active: boolean }[];
   canvases: { schemeId: string; schemeName: string }[];
+  rules: { id: string; name: string }[];
   lastInSource: boolean;
 }
 export interface SourceInput { name: string; intervalSeconds: number; userIds: string[]; url?: string; content?: string }

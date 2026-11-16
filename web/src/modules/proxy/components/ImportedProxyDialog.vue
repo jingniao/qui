@@ -21,6 +21,12 @@
             {{ policy.profileName }}（{{ policy.active ? '活动配置' : '非活动配置' }}）：{{ policy.groups.join('、') }}
           </li></ul>
         </div>
+        <div v-if="preview.rules?.length" class="space-y-2">
+          <p class="text-ios-red">节点被隧道规则引用，请先修改或删除以下规则后再删除。</p>
+          <ul class="list-disc pl-5"><li v-for="rule in preview.rules" :key="rule.id">
+            <RouterLink to="/proxy/tunnel-rules" class="text-ios-blue" @click="close">{{ rule.name }}</RouterLink>
+          </li></ul>
+        </div>
         <div v-if="preview.canvases.length" class="space-y-2">
           <p class="text-ios-red">节点被画布引用，请先修改并发布以下方案后再删除。</p>
           <ul class="list-disc pl-5"><li v-for="canvas in preview.canvases" :key="canvas.schemeId">
@@ -78,11 +84,15 @@ function failure(cause: unknown) {
     import_invalid_name: '名称须为 1–200 UTF-8 字节，且不能包含控制字符。',
     import_name_conflict: '节点名称已存在，请使用其他名称。',
     import_in_use_by_canvas: '节点被画布引用，请先修改并发布方案。',
+    import_in_use_by_rule: '节点被隧道规则引用，请先修改或删除规则。',
     import_rename_failed: '导入节点改名失败。',
     import_delete_failed: '删除导入节点失败。',
   };
   error.value = messages[cause.code] || cause.message;
   if (cause.code === 'import_name_conflict') conflicts.value = cause.details.conflicts as typeof conflicts.value;
+  if (preview.value && cause.code === 'import_in_use_by_rule') {
+    preview.value.rules = cause.details.rules as ImportDeletionPreview['rules'];
+  }
   if (preview.value && cause.code === 'import_in_use_by_canvas') {
     preview.value.canvases = cause.details.canvases as ImportDeletionPreview['canvases'];
   }

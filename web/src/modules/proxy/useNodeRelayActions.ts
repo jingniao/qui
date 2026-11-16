@@ -28,14 +28,25 @@ function goToEditRelayRoute(route: NodeRelayRoute) {
 
 const relayNode = ref<ProxyNodeItem | null>(null);
 const quickRelayInboundId = ref('');
+// An imported node can only be a pure-forwarding exit, so it opens the quick
+// dialog in forward mode instead of a server canvas it could never publish.
+const quickRelayImportId = ref('');
 const nodeRelays = ref<Record<string, NodeRelay[]>>({});
 const relayErrors = ref<Record<string, string>>({});
 function relayCount(node: ProxyNodeItem) { return getNodeRoutes(node).length + linkedRelays(node).length; }
-function linkedRelays(node: ProxyNodeItem) { return node.sourceType === 'self_hosted' ? (nodeRelays.value[node.sourceId || ''] || []).filter(r => !node.inboundId || (r.rule.target.mode === 'linked' && r.rule.target.inboundId === node.inboundId)) : []; }
-// A linked rule is listed under its target node's relays, so its entry inbound
-// does not need a row of its own in the node list.
+// A server's relay list also carries the import-target rules it is the entry of;
+// those belong under the imported node, never under the entry server's cards.
+function linkedRelays(node: ProxyNodeItem) {
+  if (node.sourceType !== 'self_hosted') {
+    const seen = new Set<string>();
+    return Object.values(nodeRelays.value).flat().filter(r => r.rule.target.mode === 'import' && r.rule.target.importId === node.id && !seen.has(r.rule.id) && seen.add(r.rule.id));
+  }
+  return (nodeRelays.value[node.sourceId || ''] || []).filter(r => r.rule.target.mode === 'linked' && (!node.inboundId || r.rule.target.inboundId === node.inboundId));
+}
+// A linked or import-target rule is listed under its target node's relays, so its
+// entry inbound does not need a row of its own in the node list.
 function isLinkedRelayRule(ruleId: string): boolean {
-  return Object.values(nodeRelays.value).some(items => items.some(r => r.rule.id === ruleId && r.rule.target.mode === 'linked'));
+  return Object.values(nodeRelays.value).some(items => items.some(r => r.rule.id === ruleId && r.rule.target.mode !== 'manual'));
 }
 async function loadNodeRelays() {
   await Promise.all(servers.value.map(async node => {
@@ -49,14 +60,14 @@ function canUseExistingTunnel(node: ProxyNodeItem): boolean {
 }
 function canAddRelay(node: ProxyNodeItem): boolean {
   if (!isOwner.value) return false;
-  if (node.sourceType !== 'self_hosted') return true;
+  if (node.sourceType !== 'self_hosted') return servers.value.some(server => server.enabled && !server.deletedAt);
   return canUseExistingTunnel(node) && servers.value.some(server => server.id === node.sourceId && server.enabled && !server.deletedAt) && servers.value.some(server =>
     server.id !== node.sourceId && server.enabled && !server.deletedAt && quickRelayProtocolChoices(server).length > 0);
 }
 function handleAddRelay(node: ProxyNodeItem) {
   if (!canAddRelay(node)) return;
   if (node.sourceType === 'self_hosted') quickRelayInboundId.value = node.inboundId!;
-  else relayNode.value = node;
+  else quickRelayImportId.value = node.id;
 }
 async function createRelayScheme() {
   const node = relayNode.value!;
@@ -65,7 +76,7 @@ async function createRelayScheme() {
 }
 
 return {
-  relayNode, quickRelayInboundId, relayErrors, getNodeRoutes, goToEditRelayRoute,
+  relayNode, quickRelayInboundId, quickRelayImportId, relayErrors, getNodeRoutes, goToEditRelayRoute,
   relayCount, linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
   handleAddRelay, createRelayScheme, isLinkedRelayRule,
 };

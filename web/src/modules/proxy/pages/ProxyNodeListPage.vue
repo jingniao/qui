@@ -665,7 +665,7 @@
       </div>
     </AppDialog>
 
-    <QuickRelayDialog v-if="quickRelayInboundId" :servers="servers" :inbounds="serverInbounds" :groups="nodeGroups" :initial-exit-inbound-id="quickRelayInboundId" @close="quickRelayInboundId = ''" @created="loadData" />
+    <QuickRelayDialog v-if="quickRelayInboundId || quickRelayImportId" :servers="servers" :inbounds="serverInbounds" :groups="nodeGroups" :imports="proxyNodeStore.manualNodes" :initial-exit-inbound-id="quickRelayInboundId" :initial-exit-import-id="quickRelayImportId" @close="quickRelayInboundId = ''; quickRelayImportId = ''" @created="loadData" />
     <AddRelayDialog v-if="relayNode" :node-id="relayNode.sourceId || ''" :node-name="relayNode.name" :inbounds="serverInbounds" :initial-inbound-id="relayNode.inboundId" :create-scheme="createRelayScheme" :copy="copyAddress" @close="relayNode = null" @saved="loadNodeRelays" />
     <NodeEditorDrawer v-if="openSelfHostedModal" :inbound="editingInbound" @close="openSelfHostedModal = false" @saved="loadData" />
 
@@ -1374,7 +1374,7 @@ function applyFilter() {
 }
 
 const {
-  relayNode, quickRelayInboundId, relayErrors, getNodeRoutes: computeNodeRoutes, goToEditRelayRoute,
+  relayNode, quickRelayInboundId, quickRelayImportId, relayErrors, getNodeRoutes: computeNodeRoutes, goToEditRelayRoute,
   linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
   handleAddRelay, createRelayScheme, isLinkedRelayRule,
 } = useNodeRelayActions(isOwner, servers, serverInbounds);

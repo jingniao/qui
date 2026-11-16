@@ -9,7 +9,8 @@ export function routeLabel(tunnel: Pick<Tunnel, 'hops'>) { return tunnel.hops.ma
 export function endpoint(host: string, port: number) { return `${host.includes(':') ? `[${host}]` : host}:${port}`; }
 export function ruleTargetLabel(target: TunnelRule['target']) {
   const address = target.host && target.port ? endpoint(target.host, target.port) : '—';
-  if (target.mode !== 'linked') return address;
+  if (target.mode === 'manual') return address;
+  if (target.mode === 'import') return target.protocol ? `导入节点 · ${target.nodeName} · ${target.protocol.toUpperCase()} · ${address}` : '导入节点 · 目标已删除';
   if (!target.protocol) return `目标已删除 · ${address}`;
   return `${target.nodeName || '—'} · ${target.inboundName || '—'} · ${target.protocol.toUpperCase()} · ${address}`;
 }

@@ -42,7 +42,7 @@ const rows = computed(() => props.relays.map(relay => {
   return { relay, entries: address ? [{ id: relay.rule.id, name: relay.rule.name, ...address }] : [] };
 }));
 function path(rule: TunnelRule) {
-  return [rule.entryNodeName, ...(rule.tunnelId ? ['经 ' + rule.tunnelName] : []), rule.target.mode === 'linked' ? rule.target.nodeName : rule.target.host].join(' → ');
+  return [rule.entryNodeName, ...(rule.tunnelId ? ['经 ' + rule.tunnelName] : []), rule.target.mode === 'manual' ? rule.target.host : rule.target.nodeName].join(' → ');
 }
 function statusTone(status: PublishStatus) {
   switch (status) {

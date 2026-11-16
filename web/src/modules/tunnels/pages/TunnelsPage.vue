@@ -37,7 +37,7 @@
       </section>
     </div>
     <TunnelEditor v-if="editor && !rulesTab" :tunnel="editingTunnel" :nodes="nodes" :linked-rules="rules.filter(r => r.tunnelId === editingTunnel?.id)" @close="editor = false" @saved="selection => { editor = false; apply(selection, '隧道已保存并生效'); }" />
-    <RuleEditor v-if="editor && rulesTab" :rule="editingRule" :tunnels="tunnels" :nodes="nodes" :inbounds="inbounds" @close="editor = false" @saved="selection => { editor = false; apply(selection, '规则已保存并生效'); }" />
+    <RuleEditor v-if="editor && rulesTab" :rule="editingRule" :tunnels="tunnels" :nodes="nodes" :inbounds="inbounds" :imports="imports" @close="editor = false" @saved="selection => { editor = false; apply(selection, '规则已保存并生效'); }" />
     <ConfirmDialog v-model="confirmVisible" :title="confirmAction?.kind === 'rotate' ? '轮换隧道凭据' : '删除'" :message="confirmMessage" @confirm="performAction" />
     <FormDrawer v-model="blockedVisible" title="隧道仍被规则使用" :show-footer="false"><p class="text-sm text-ios-secondary">请先移除以下规则对隧道的引用：</p><ul class="space-y-2 text-sm text-ios-label"><li v-for="r in blockers" :key="r.id">{{ r.name }}</li></ul><div class="flex justify-end"><button class="ios-dialog-btn-secondary" @click="blockedVisible = false">关闭</button></div></FormDrawer>
   </div>
@@ -63,7 +63,8 @@ import { applyProblem, applyTunnelChanges, clause } from '../applyTunnels';
 import { ruleTargetLabel, endpoint, groupRules, routeLabel } from '../model';
 const route = useRoute(), rulesTab = computed(() => route.path === '/proxy/tunnel-rules');
 const tunnels = ref<Tunnel[]>([]), rules = ref<TunnelRule[]>([]);
-const nodes = ref<Awaited<ReturnType<typeof loadTunnelChoices>>['nodes']>([]), inbounds = ref<Awaited<ReturnType<typeof loadTunnelChoices>>['inbounds']>([]);
+const nodes = ref<Awaited<ReturnType<typeof loadTunnelChoices>>['nodes']>([]), inbounds = ref<Awaited<ReturnType<typeof loadTunnelChoices>>['inbounds']>([])
+const imports = ref<Awaited<ReturnType<typeof loadTunnelChoices>>['imports']>([]);
 const loading = ref(true), error = ref(''), mutating = ref(false), editor = ref(false), editingTunnel = ref<Tunnel | null>(null), editingRule = ref<TunnelRule | null>(null);
 const tunnelFilter = ref(''), nodeFilter = ref('');
 const groups = computed(() => groupRules(rules.value.filter(r => (!nodeFilter.value || r.entryNodeId === nodeFilter.value) && (!tunnelFilter.value || (tunnelFilter.value === 'direct' ? !r.tunnelId : r.tunnelId === tunnelFilter.value))), tunnels.value));
@@ -90,7 +91,7 @@ async function apply(selection: PublishSelection, done: string) {
 }
 async function load() {
   loading.value = true; error.value = '';
-  try { const [ts, rs, choices] = await Promise.all([tunnelAPI.list(), tunnelRuleAPI.list(), loadTunnelChoices(isOwner.value)]); tunnels.value = ts.items; rules.value = rs.items; nodes.value = choices.nodes; inbounds.value = choices.inbounds; }
+  try { const [ts, rs, choices] = await Promise.all([tunnelAPI.list(), tunnelRuleAPI.list(), loadTunnelChoices(isOwner.value)]); tunnels.value = ts.items; rules.value = rs.items; nodes.value = choices.nodes; inbounds.value = choices.inbounds; imports.value = choices.imports; }
   catch (e) { error.value = tunnelError(e); } finally { loading.value = false; }
 }
 async function performAction() {

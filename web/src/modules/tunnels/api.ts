@@ -2,6 +2,7 @@
 import { request, APIError } from '../../app/apiClient';
 import { nodeAPI, type NodeView } from '../nodes/api';
 import { choices, proxyAPI, type Inbound } from '../proxy/api';
+import { importAPI, type ImportedProxy } from '../proxy/importApi';
 
 export type PublishStatus = 'draft' | 'modified' | 'published' | 'needs_publish' | 'pending_delete';
 export interface TunnelHop {
@@ -23,14 +24,16 @@ export interface TunnelRule {
   listenPort: number; portMode: 'auto' | 'manual'; network: 'tcp' | 'udp' | 'both';
   tunnelId: string | null; tunnelName: string | null;
   target: { mode: 'linked'; nodeId: string; nodeName: string; inboundId: string; inboundName: string; protocol: string; host: string; port: number }
-    | { mode: 'manual'; host: string; port: number };
+    | { mode: 'manual'; host: string; port: number }
+    // nodeName is the imported node's name, or 「目标已删除」 once a refresh removed it.
+    | { mode: 'import'; importId?: string; nodeName: string; protocol?: string; host: string; port: number };
   ownerNodeId: string | null; subscriptionVisible: boolean; enabled: boolean; status: PublishStatus;
   createdAt: string; updatedAt: string; publishedAt: string | null;
 }
 export interface TunnelRuleInput {
   name: string; entryNodeId: string; portMode: 'auto' | 'manual'; listenPort?: number;
   network: 'tcp' | 'udp' | 'both'; tunnelId: string | null;
-  target: { mode: 'linked'; inboundId: string } | { mode: 'manual'; host: string; port: number };
+  target: { mode: 'linked'; inboundId: string } | { mode: 'manual'; host: string; port: number } | { mode: 'import'; importId: string };
   subscriptionVisible: boolean; enabled: boolean; updatedAt?: string;
 }
 export interface PortCheck { nodeId: string; port: number; free: boolean; usedBy?: { kind: 'inbound' | 'tunnel' | 'rule' | 'canvas'; id: string; name: string } }
@@ -88,10 +91,12 @@ export const nodeRelayAPI = {
   list: (nodeId: string) => call<{ items: NodeRelay[] }>(`/nodes/${idPath(nodeId)}/relays`),
   create: (nodeId: string, input: NodeRelayInput) => call<NodeRelay>(`/nodes/${idPath(nodeId)}/relays`, 'POST', input),
 };
-export async function loadTunnelChoices(includeInbounds = true): Promise<{ nodes: Pick<NodeView, 'id' | 'name' | 'publicIp'>[]; inbounds: Pick<Inbound, 'id' | 'name' | 'nodeId' | 'port' | 'protocol'>[] }> {
-  if (import.meta.env.DEV && mockEnabled()) return (await import('./mock')).mockChoices();
-  const [nodes, inbounds] = await Promise.all([choices((page, size) => nodeAPI.list(page, '', false, size)), includeInbounds ? choices((page, size) => proxyAPI.inbounds('', page, size)) : Promise.resolve([])]);
-  return { nodes, inbounds };
+export type TunnelImportChoice = Pick<ImportedProxy, 'id' | 'name' | 'protocol' | 'server' | 'port'>;
+// Inbounds and imported nodes are Owner data; a Viewer gets only the server list.
+export async function loadTunnelChoices(includeOwnerData = true): Promise<{ nodes: Pick<NodeView, 'id' | 'name' | 'publicIp'>[]; inbounds: Pick<Inbound, 'id' | 'name' | 'nodeId' | 'port' | 'protocol'>[]; imports: TunnelImportChoice[] }> {
+  if (import.meta.env.DEV && mockEnabled()) return { imports: [], ...(await import('./mock')).mockChoices() };
+  const [nodes, inbounds, imports] = await Promise.all([choices((page, size) => nodeAPI.list(page, '', false, size)), includeOwnerData ? choices((page, size) => proxyAPI.inbounds('', page, size)) : Promise.resolve([]), includeOwnerData ? importAPI.proxies().then(result => result.items) : Promise.resolve([])]);
+  return { nodes, inbounds, imports };
 }
 export function tunnelError(error: unknown): string {
   if (error instanceof APIError && error.code === 'stale') return '数据已被修改，请刷新页面后重新编辑。';

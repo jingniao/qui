@@ -142,7 +142,7 @@ assert.match(dialog, /<select v-model="mode"[^>]*>[\s\S]*?代理中转[\s\S]*?�
 assert.match(dialog, /v-if="mode === 'proxy' && protocols.length"/, 'forwarding hides entry protocol');
 assert.match(dialog, /<label v-if="mode === 'proxy'"[^>]*>中间服务器/, 'forwarding hides middle server');
 assert.match(dialog, /v-if="mode === 'proxy' && plan"/, 'scheme preview is proxy-only');
-assert.match(dialog, /tunnelRuleAPI\.create\(\{[\s\S]*?network: 'both'[\s\S]*?target: \{ mode: 'linked', inboundId: form.exitInboundId \}/);
+assert.match(dialog, /tunnelRuleAPI\.create\(\{[\s\S]*?network: 'both'[\s\S]*?target: exitImport\.value \? \{ mode: 'import', importId: exitImport\.value\.id \} : \{ mode: 'linked', inboundId: form.exitInboundId \}/);
 assert.match(dialog, /const fresh = await freshGroup\(id\)/);
 assert.match(dialog, /const input = groupInput\(fresh\)/);
 assert.match(dialog, /input.relayIds = \[\.\.\.new Set\(\[\.\.\.\(input.relayIds \|\| \[\]\), rule.id\]\)\]/);

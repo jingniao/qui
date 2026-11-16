@@ -412,6 +412,18 @@ func (s *Service) planCanvas(ctx context.Context, scheme CanvasScheme) (CanvasPl
 		}
 		add(e.sourceNode, CanvasPlanObject{"outbound", e.outboundName, e.protocol, e.port, target}, action)
 	}
+	// The outbound an imported exit is dialled with; its credential never
+	// appears in the preview.
+	for _, x := range plan.importExits {
+		if !x.changed {
+			continue
+		}
+		action := "create"
+		if x.outboundID != "" {
+			action = "update"
+		}
+		add(x.sourceNode, CanvasPlanObject{"outbound", x.name, x.input.Protocol, x.input.Port, "导入节点 " + x.importName}, action)
+	}
 	for _, c := range plan.chains {
 		_, err := s.Repository.canvasChainNamed(ctx, c.name)
 		action := "update"

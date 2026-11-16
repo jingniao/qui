@@ -31,10 +31,28 @@ func (s *Service) validateCanvasExits(ctx context.Context, layout CanvasLayout) 
 	for _, c := range layout.Connections {
 		source, target := instances[c.Source], instances[c.Target]
 		sourceRef, _ := parseCanvasRef(source.Ref)
-		if sourceRef.kind == "outbound" || sourceRef.kind == "inbound" && source.Role == "exit" {
+		if sourceRef.kind == "outbound" || sourceRef.kind == "import" || sourceRef.kind == "inbound" && source.Role == "exit" {
 			return errors.New("出口不能作为中转连接的起点")
 		}
 		ref, _ := parseCanvasRef(target.Ref)
+		if ref.kind == "import" {
+			// The import itself is converted when the plan is built
+			// (canvasImportExitFor); only the connection shape is checked here.
+			if c.Type == "port_forward" || c.TunnelProtocol != "" && c.TunnelProtocol != "tls" && c.TunnelProtocol != "wireguard" {
+				return errors.New("导入节点出口只支持代理中转连接")
+			}
+			if !c.SupportTCP && !c.SupportUDP {
+				return errors.New("连接至少需要支持 TCP 或 UDP")
+			}
+			nodeID, err := s.canvasManagedNode(ctx, source)
+			if err != nil {
+				return err
+			}
+			if nodeID == "" {
+				return errors.New("导入节点出口的前一跳必须是服务器")
+			}
+			continue
+		}
 		if ref.kind != "outbound" {
 			continue
 		}

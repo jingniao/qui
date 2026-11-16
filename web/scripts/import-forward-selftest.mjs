@@ -32,7 +32,9 @@ assert.equal(ruleTargetLabel({ mode: 'import', importId: 'node-1', nodeName: '�
 assert.equal(ruleTargetLabel({ mode: 'import', nodeName: '目标已删除', host: '', port: 0 }), '导入节点 · 目标已删除');
 
 const dialog = read('../src/modules/proxy/components/QuickRelayDialog.vue');
-assert.match(dialog, /<option v-if="!exitImport" value="proxy">/, 'imported exits only offer pure forwarding');
+assert.match(dialog, /<option v-if="!exitImport \|\| convertible\(exitImport.id\)" value="proxy">/, 'the proxy mode needs a convertible import');
+assert.match(dialog, /mode\.value === 'forward' \? importOptions\.value : importOptions\.value\.filter\(item => convertible\(item\.id\)\)/, 'the proxy mode offers only convertible imports');
+assert.match(read('../src/modules/proxy/pages/RelayCanvasPage.vue'), /if \(server && importExitReasons\.value\?\.get\(n\.id\) !== ''\) return false;/, 'server canvases hide imports the panel cannot convert');
 assert.match(dialog, /mode: 'import', importId: exitImport\.value\.id/, 'the rule targets the imported node');
 assert.match(dialog, /groupHasImport\(group, exitImport\.value\)/, 'default groups are the ones containing the import');
 assert.match(dialog, /!!exitImport\.value \|\| last\.nodeId === exit\.value\?\.nodeId/, 'any tunnel exit can dial an imported target');

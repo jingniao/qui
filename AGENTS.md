@@ -301,11 +301,11 @@ sing-box 仍是出站片段，不是完整客户端配置。mihomo 支持全局�
 
 DNS 模板增加 `defaultNameservers`（仅 IP）、`proxyServerNameservers`、`fakeIpFilter`、`fallbackFilter{geoip,geoipCode,ipcidr,domain}`，仅 mihomo 输出 `default-nameserver`、`proxy-server-nameserver`、`fake-ip-filter`、`fallback-filter`；legacy 保留原四项 DNS 字段。三个「屏蔽回国」预设使用国内 DoH `https://doh.pub/dns-query` 与 `https://dns.alidns.com/dns-query` 作为 nameserver 与 proxy-server-nameserver，去掉 fallback，default-nameserver 为 `223.5.5.5`、`119.29.29.29`，附常用 fake-ip-filter。已保存配置不自动改写，可在编辑器「套用推荐 DNS」后保存；未启用的配置还须设为订阅模板，再由客户端更新订阅。启用 DNS、有 fallback 且未设置 filter 时，编辑器与订阅预览警告境外域名可能解析失败，保存不因此拒绝；当前 resolver 校验不接受 `#策略组` URL 后缀。
 
-全局模板存在 `system_settings.client_rules`，有版本冲突检查与预设，按用户授权展开 `@all`、`@nodeGroup:<id>`、`@source:<id>`；服务端生成 YAML。客户端规则不替代节点策略。外部源仅 HTTPS，逐跳解析并固定经校验的公网 IP，限制 2 MiB / 15 秒；抓取失败按类型（input、dns、address、redirect、tls、connect、deadline、http、size）返回固定代码与固定中文说明，不回显链接、Location、响应体或凭据。定时抓取加密缓存，订阅请求不抓取。导入节点仅用于客户端，不参与 Agent 发布、用户额度或设备门控。客户端链与格式边界见[协议矩阵](docs/protocol-support-matrix.md)。
+全局模板存在 `system_settings.client_rules`，有版本冲突检查与预设，按用户授权展开 `@all`、`@nodeGroup:<id>`、`@source:<id>`；服务端生成 YAML。客户端规则不替代节点策略。外部源仅 HTTPS，逐跳解析并固定经校验的公网 IP，限制 2 MiB / 15 秒；抓取失败按类型（input、dns、address、redirect、tls、connect、deadline、http、size）返回固定代码与固定中文说明，不回显链接、Location、响应体或凭据。定时抓取加密缓存，订阅请求不抓取。导入节点本身不下发到节点，不参与用户额度或设备门控；v1.6.0 起可作为服务器方案的最后一跳出口（面板在上一跳服务器生成出站，第 14 节）或纯转发规则的目标。客户端链与格式边界见[协议矩阵](docs/protocol-support-matrix.md)。
 
 刷新返回结构化结果（S1）：`outcome` 为 `ok`/`partial`/`failed`，`counts` 含 `total`（= `accepted` + `rejected` + `duplicates`）、`accepted`、`rejected`、`duplicates`、`cached`、`usable`，未确定值为 null；每条目只计一次，多因条目按第一个原因计数。逐条原因最多 50 条且结果最多 32 KiB，超出置 `diagnosticsTruncated`。完整成功 200 `ok`；部分成功 200 `partial`，仍提交缓存且 `last_status=ok`、`last_error` 为空；抓取失败 502（超时 504）、内容无效或无可导入条目 422、输入错误 400、持久化失败 500、来源不存在 404，错误体 `details.result` 携带同一结果（仅限已完成的已分类结果）；请求在抓取进行中被取消时返回 503 固定文案“刷新已取消，来源状态保持不变”且不带结果，来源行、状态、缓存与订阅端点均不变。失败保留旧缓存行但 `last_status=failed`，该来源不进入订阅；`cached` 为现有行数，失败时 `usable=0`。`last_fetch_at` 是最近尝试，`last_success_at` 只在提交成功时更新；更换 URL 清空结果并回到 `pending`，不把旧结果当作新来源的结果。同一来源内 `name|protocol` 重复时保留文档顺序第一条，其余以 `duplicate_endpoint_key` 拒绝并附保留条目序号；完全相同的条目以 `duplicate_endpoint_content` 计为重复。诊断只含条目序号、协议、阶段、固定代码与固定文本，不含名称、UUID、密码或链接；手工刷新、定时刷新与粘贴导入共用同一分析路径。
 
-外部导入支持 SS2022、VLESS Reality TCP/gRPC 与 xhttp，仍只用于客户端，不进入 Agent 发布/账户额度/设备门控。统一公开模型区分证书指纹 `TLS.Fingerprint` 与客户端指纹 `TLS.ClientFingerprint`；Reality 携带公钥、Short ID、SNI 与 SpiderX，xhttp 为独立 host/path/mode。URI/Base64 保留公开字段；mihomo 支持 Reality TCP（无 flow 或 Vision）、Reality gRPC、TLS/Reality xhttp 的 auto/packet-up/stream-up/stream-one，xhttp ALPN 可为空、`[h2]`、`[http/1.1]` 或 `[h2,http/1.1]` 并原样输出（v1.5.9 起；mihomo 仅在恰为 `[http/1.1]` 时走 HTTP/1.1，其余走 h2）。sing-box 仍仅输出 Reality TCP Vision，不输出 Reality gRPC/xhttp；SpiderX 不阻止导出，在 mihomo/sing-box 中不输出，URI/Base64 保留 spx。安全／传输组合的省略警告按原因分组列节点名，每组最多 10 个，其余汇总数量；链依赖与 emptyPolicy 继续生效。模型允许 xhttp ALPN 为空或 h2/http/1.1，未知 extra、H3 与未建模参数仍拒绝。TLS xhttp 的本轮真实客户端连通验证 **待核实**，不能沿用 Reality 的实测记录。新模型与最近结果受加密备份校验覆盖。
+外部导入支持 SS2022、VLESS Reality TCP/gRPC 与 xhttp，不进入账户额度/设备门控；作为服务器出口时按第 13.2 节转换，转换不了的类型只能用于客户端或纯转发。统一公开模型区分证书指纹 `TLS.Fingerprint` 与客户端指纹 `TLS.ClientFingerprint`；Reality 携带公钥、Short ID、SNI 与 SpiderX，xhttp 为独立 host/path/mode。URI/Base64 保留公开字段；mihomo 支持 Reality TCP（无 flow 或 Vision）、Reality gRPC、TLS/Reality xhttp 的 auto/packet-up/stream-up/stream-one，xhttp ALPN 可为空、`[h2]`、`[http/1.1]` 或 `[h2,http/1.1]` 并原样输出（v1.5.9 起；mihomo 仅在恰为 `[http/1.1]` 时走 HTTP/1.1，其余走 h2）。sing-box 仍仅输出 Reality TCP Vision，不输出 Reality gRPC/xhttp；SpiderX 不阻止导出，在 mihomo/sing-box 中不输出，URI/Base64 保留 spx。安全／传输组合的省略警告按原因分组列节点名，每组最多 10 个，其余汇总数量；链依赖与 emptyPolicy 继续生效。模型允许 xhttp ALPN 为空或 h2/http/1.1，未知 extra、H3 与未建模参数仍拒绝。TLS xhttp 的本轮真实客户端连通验证 **待核实**，不能沿用 Reality 的实测记录。新模型与最近结果受加密备份校验覆盖。
 
 新增导入参数：URI/YAML 的 WS Host（YAML 仅 Host/host，不同值冲突时拒绝）；TUIC URI 的 `congestion_control`、`udp_relay_mode`、`alpn`；Hysteria2 URI 的 `mport` 与 YAML 的 `ports/hop-interval/up/down`，以及两种输入的 salamander 混淆。跳跃只接受单段 `start-end`，带宽为正整数或整数加 Mbps；混淆密码随模型加密保存，刷新诊断不回显，Owner 的订阅正文预览仍包含客户端所需密码。TUIC YAML 的 congestion-controller/udp-relay-mode 尚未接入，QUIC 导出 ALPN 固定 h3。URI 忽略 `headerType=none`、insecure 别名的精确值 0、TUIC `disable_sni=0` 与 `ed`；YAML 忽略 tfo/ip-version/packet-encoding，udp-over-tcp:true 仍拒绝，未知字段不透传。
 
@@ -473,6 +473,12 @@ v1.5.5 出站资源可单独设置 `sourceIp/sourceInterface`（0145；DesiredSt
 
 与服务器强制出站并用时，`ExtraHostExemptions` 收集启用出站的有效源 IP：仅在对应地址族已配置强制源地址、且该 IP 不同于服务器级核心源 IP 与强制源 IP 时追加豁免，去重排序，避免被 SNAT 改写。需要额外豁免但 helper 未声明能力时以 `host_source_exempt_unsupported` 拒绝，须在节点运行 `qui-update --component agent` 更新本机 helper，单独网页升级 Agent 不替换 helper 引导程序。Agent 在渲染、持久化修订和切换核心之前，按实际激活核心的可达出站检查有效源 IP／网卡；地址必须属于本机，指定网卡时还须属于该网卡。不存在或不匹配返回 `network_unavailable`，保留最后成功配置；禁用、不可达和 GOST 分支不参与逐出站检查。
 
+## 13.2 出站客户端字段与导入节点转换（v1.6.0）
+
+出站可带只属于出站的客户端字段：`alpn`（仅 VLESS／Trojan 的 TLS／Reality，h2 与 http/1.1，最多 3 个）、`client_fingerprint`（uTLS，chrome／firefox／safari／ios／android／edge／360／qq／random／randomized，与订阅模型共用 `pkg/contracts/clienttls`）、`ws_host`（仅 ws 传输）与 `reality_client{public_key,short_id,spider_x}`（仅 VLESS Reality 出站，SNI 为 `server_name`、指纹必填，公钥须为可握手的 X25519 公钥）；出站 xhttp 复用 `xhttp{host,path,mode}`，须 TLS 或 Reality。入站带这些字段、出站带服务端私有 `reality` 均拒绝。旧 Agent 解码即拒绝未知字段，所以出站带任一客户端字段或 xhttp 时，保存出站、快照与发布前都要求该节点全部启用的 Xray／sing-box 核心上报对应的 `direction=outbound` 设置组合（`desiredstate.OutboundSettingsCombination`），禁用出站同样检查，缺失返回 `outbound_client_unsupported` 提示升级 Agent；经典组合（不带新字段的 none／TLS over tcp/ws/grpc）不需要上报。Agent 用自身渲染器与安装核心的原生校验逐项探测：Xray 上报 13 个组合（VLESS none／ws；VLESS TLS tcp／Vision／ws／grpc／xhttp；VLESS Reality tcp／Vision／grpc／xhttp；Trojan TLS tcp／ws／grpc），sing-box 上报 10 个（无 xhttp、Reality 仅 tcp，不输出 SpiderX）。
+
+导入节点转换（`proxy.ImportOutbound`）只做无损映射：SOCKS5、HTTP、Shadowsocks（四种 AEAD）、VLESS、Trojan、Hysteria2、TUIC，带 TLS 服务器名、固定 CA、ALPN（只保留 h2／http/1.1）、客户端指纹、Reality（缺指纹时用 chrome）、ws／grpc／xhttp；Hysteria2 跳跃端口丢弃、只连主端口。Shadowsocks 2022、证书指纹固定、跳过证书校验、Hysteria2 混淆、WireGuard 与其他传输一律不转换，返回固定原因码与中文说明。
+
 # 14. 协议转换中转
 
 v1.6.0 起，画布与快速中转的入口安全设置选择 Reality 时可选系统预设；默认值优先级为绑定已有值 ＞ 系统默认预设 ＞ 出口入站的 Reality 参数，预设传输／Flow 只在入口核心支持时应用，只读入口不显示预设下拉，不保存预设 ID。
@@ -491,7 +497,7 @@ v1.6.0 起，画布与快速中转的入口安全设置选择 Reality 时可选�
 
 生成对象按 `tunnel_objects` 的 owner kind/ID 归属，不按名称认领；`port_claims` 保存节点级数字端口，改端口保留新旧声明直到成功发布。隧道和规则必须手填端口或从 `node_meta.port_range_start/end` 分配，无默认端口回退。自动建议不预留，保存时再查并声明，重发复用已保存端口；冲突语义见第 12 节。
 
-中转方案画布只创建代理中转（proxy_chain/tunnel，tls 或 wireguard）；出口可为 qui 用户入站或外部 SOCKS5/HTTP/Shadowsocks/Trojan/VLESS 出站。qui 入站出口生成专用内部监听和独立中转凭据，不改变原用户入站；外部出站属于前一跳服务器，作为最终出站且按 TCP/UDP 能力校验。relay/exit 实例的 relayPortMode/relayPort 优先于旧 tunnelPort；自动分配复用稳定端口，无范围时画布仍保留 TLS 8443 / WireGuard 51820，范围耗尽则失败。
+中转方案画布只创建代理中转（proxy_chain/tunnel，tls 或 wireguard）；出口可为 qui 用户入站或外部 SOCKS5/HTTP/Shadowsocks/Trojan/VLESS 出站，v1.6.0 起也可为可转换的导入节点：只能作最后一跳，上一跳须为服务器，发布时在上一跳生成一个归连接画布隧道所有的出站（按隧道认领、不按名称），导入内容变化时方案状态「草稿」给出原因、下次发布更新该出站，普通出站编辑器修改或删除它返回 409 `managed_by_tunnel`，撤除方案时一并删除；服务器方案资源库按 `GET /api/v1/canvas-import-exits`（Owner，返回每个导入节点的原因与可做其上一跳的服务器）只列可转换的导入节点。快速流程以 `exitImportId` 代替 `exitInboundId` 时同样走这条路径，最后一跳按导入节点的 TCP／UDP 能力连接，「加入出口所在分组」取包含该导入节点的分组。qui 入站出口生成专用内部监听和独立中转凭据，不改变原用户入站；外部出站属于前一跳服务器，作为最终出站且按 TCP/UDP 能力校验。relay/exit 实例的 relayPortMode/relayPort 优先于旧 tunnelPort；自动分配复用稳定端口，无范围时画布仍保留 TLS 8443 / WireGuard 51820，范围耗尽则失败。
 
 画布内部资源仍用 `canvas_tunnels/canvas_tunnel_objects` 的 ID 归属与共享依赖。旧 port_forward/gost 连接在迁移前只读保留，可删除，不可新增或改动；一次性转换及遗留原因见第 26.9、31 节。GOST 目标池、范围、限流与连接上限仍属普通 forward 入站（第 12 节），不由新画布创建。
 
@@ -1212,7 +1218,7 @@ Owner 专用 GET/POST /canvas-tunnels、PUT/DELETE /canvas-tunnels/{id}、GET /c
 | POST `/canvas-schemes/{id}/remove`、DELETE `/canvas-schemes/{id}` | 均为完整撤除，体必须含 `updatedAt`，其他字段忽略；200 `{schemeId,removed:true,pendingNodes:[{nodeId,name,reason}]}`；409 `stale_scheme`，404 `not_found` |
 | GET `/inbounds/{id}/deletion-preview`、`/nodes/{id}/deletion-preview` | 200 `{schemes:[{id,name}],tunnels:[{id,name}],rules:[{id,name}],inbounds:[{id,name,nodeName}],blockers:[{kind,id,name}]}` |
 | DELETE `/inbounds/{id}`、`/nodes/{id}` | 连带删除，成功 200 `{pendingNodes:[{nodeId,name,reason}]}`；阻塞时 409 `inbound_delete_blocked`／`node_delete_blocked`，明细在 `error.blockers` |
-| POST `/relay-schemes/quick/plan`、`/relay-schemes/quick` | 预览 200（检查 `ok` 与冲突），创建 202 `{schemeId,publication,warnings}`；400 `invalid_request`、404 `not_found`、409 `stale_scheme/duplicate_scheme_name`，不返回 operationId 或预览令牌 |
+| POST `/relay-schemes/quick/plan`、`/relay-schemes/quick` | 预览 200（检查 `ok` 与冲突），创建 202 `{schemeId,publication,warnings}`；出口为 `exitInboundId` 或 `exitImportId` 之一（v1.6.0）；400 `invalid_request`、404 `not_found`、409 `stale_scheme/duplicate_scheme_name`，不返回 operationId 或预览令牌 |
 | PUT `/imported-proxies/{id}` | `{name,expectedRevision}`，200 返回当前节点；400 `invalid_json/import_invalid_name`，404 `import_node_missing`，409 `stale/import_rename_unsupported/import_name_conflict`（附 conflicts），500 `import_rename_failed` |
 | GET `/imported-proxies/{id}/deletion-preview`、DELETE `/imported-proxies/{id}` | 预览引用；删除传 `expectedRevision` 与 `removeReferences`，事务重查引用。404 `import_node_missing`，409 `stale/import_delete_unsupported/import_in_use_by_rule/import_in_use_by_canvas/import_referenced`（含策略删空；被隧道规则的当前目标或发布快照引用时 `import_in_use_by_rule` 列出规则 `{id,name}`，预览增加 `rules`），500 `import_delete_failed` |
 
@@ -1260,6 +1266,7 @@ GET    /canvas-tunnels/legacy-objects
 POST   /canvas-tunnels/{id}/adopt
 POST   /canvas-tunnels/{id}/rotate-credentials
 GET/POST /canvas-schemes
+GET    /canvas-import-exits
 PUT/DELETE /canvas-schemes/{id}
 POST   /canvas-schemes/{id}/publish
 POST   /portal/auth/login

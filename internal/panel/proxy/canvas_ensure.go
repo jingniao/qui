@@ -152,6 +152,11 @@ func (s *Service) canvasEnsure(ctx context.Context, plan *canvasPlan, stale *can
 		})
 		edge.outboundID = outbound.ID
 	}
+	// Imported exits get their generated outbounds before any chain or entry
+	// route names them (v1.6.0).
+	if err := s.canvasEnsureImportExits(ctx, plan, undo); err != nil {
+		return warnings, err
+	}
 	for index := range plan.chains {
 		chain := &plan.chains[index]
 		input := ChainInput{Name: chain.name, NodeIDs: chain.nodes, OutboundIDs: []string{}, FinalOutboundID: chain.finalOutbound, SupportTCP: chain.supportTCP, SupportUDP: chain.supportUDP, Enabled: true, FailurePolicy: "Block"}

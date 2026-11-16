@@ -18,6 +18,7 @@ func (h *Handler) registerCanvas(mux *http.ServeMux) {
 		"POST /api/v1/relay-schemes/quick/plan":    h.planQuickCanvas,
 		"POST /api/v1/relay-schemes/quick":         h.quickCanvas,
 		"GET /api/v1/canvas-schemes":               h.canvasSchemes,
+		"GET /api/v1/canvas-import-exits":          h.canvasImportExits,
 		"GET /api/v1/canvas-schemes/{id}":          h.canvasScheme,
 		"GET /api/v1/canvas-schemes/{id}/status":   h.canvasSchemeStatus,
 		"POST /api/v1/canvas-schemes":              h.saveCanvasScheme,
@@ -170,4 +171,15 @@ func (h *Handler) planCanvasScheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, 200, result)
+}
+
+// canvasImportExits tells the server canvas which imported nodes can end a
+// scheme (v1.6.0). It returns only IDs and fixed reasons, never endpoint data.
+func (h *Handler) canvasImportExits(w http.ResponseWriter, r *http.Request) {
+	items, err := h.Service.CanvasImportExits(r.Context())
+	if err != nil {
+		h.internal(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, map[string]any{"items": items})
 }

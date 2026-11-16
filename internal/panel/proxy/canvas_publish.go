@@ -115,6 +115,7 @@ type canvasPlan struct {
 	edges              []*canvasEdge
 	relays             []*canvasRelay
 	chains             []canvasChain
+	importExits        []*canvasImportExit
 	entries            []canvasEntry
 	inbounds           map[string]bool
 	outbounds          map[string]bool
@@ -249,12 +250,28 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			plan.node(sourceNode)
 			continue
 		}
+		if targetRef.kind == "import" {
+			if finals[sourceNode] != "" {
+				return nil, errors.New("每个节点只能配置一个外部出口")
+			}
+			exit, err := s.canvasImportExitFor(ctx, connection, sourceNode, targetRef.id, prefix)
+			if err != nil {
+				return nil, err
+			}
+			plan.importExits = append(plan.importExits, exit)
+			plan.owners[exit.name] = exit.tunnelID
+			plan.outbounds[exit.name] = true
+			finals[sourceNode] = exit.final()
+			finalTransports[sourceNode] = [2]bool{exit.input.SupportTCP, exit.input.SupportUDP}
+			plan.node(sourceNode)
+			continue
+		}
 		targetNode, err := s.canvasManagedNode(ctx, targetInstance)
 		if err != nil {
 			return nil, err
 		}
 		if sourceNode == "" || targetNode == "" {
-			return nil, fmt.Errorf("连接 %q 只能在两个受管服务器之间发布（客户端方案与导入节点在 U5 支持）", connection.ID)
+			return nil, fmt.Errorf("连接 %q 只能在两个受管服务器之间发布，导入节点与外部代理只能作为最后一跳出口", connection.ID)
 		}
 		if connection.Type == "port_forward" {
 			source, target := instances[connection.Source], instances[connection.Target]

@@ -341,6 +341,12 @@ func (s *Service) InboundAtListener(ctx context.Context, nodeID, protocol, liste
 	return s.Repository.InboundAtListener(ctx, nodeID, protocol, listen, port)
 }
 func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInput) (Outbound, error) {
+	return s.saveOutbound(ctx, id, input, false)
+}
+
+// Imported endpoint snapshots supply complete settings, including removal of
+// an old pinned CA. Ordinary editor writes still preserve omitted secrets.
+func (s *Service) saveOutbound(ctx context.Context, id string, input OutboundInput, replaceSettings bool) (Outbound, error) {
 	n, err := s.Nodes.Get(ctx, input.NodeID)
 	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Outbound{}, errors.New("node missing or disabled")
@@ -356,7 +362,7 @@ func (s *Service) SaveOutbound(ctx context.Context, id string, input OutboundInp
 	if err := node.RequireOutboundClientSupport(clientState, n.Capabilities, n.Name); err != nil {
 		return Outbound{}, err
 	}
-	if id != "" {
+	if id != "" && !replaceSettings {
 		old, err := s.Repository.Outbound(ctx, id, true)
 		if err != nil {
 			return Outbound{}, err

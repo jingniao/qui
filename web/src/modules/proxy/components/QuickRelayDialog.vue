@@ -22,7 +22,7 @@
       <fieldset :disabled="saving" class="space-y-4 text-sm">
         <label class="block space-y-1.5 text-ios-secondary">中转方式
           <select v-model="mode" class="form-input-base">
-            <option v-if="!exitImport" value="proxy">代理中转（入口解开协议，经 Trojan/TLS 通道转给出口）</option>
+            <option v-if="!exitImport || convertible(exitImport.id)" value="proxy">代理中转（入口解开协议，经 Trojan/TLS 通道转给出口）</option>
             <option value="forward">纯转发（入口只转发数据，不解开协议）</option>
           </select>
         </label>
@@ -36,7 +36,7 @@
               <option v-for="inbound in exitOptions" :key="inbound.id" :value="'inbound:' + inbound.id">{{ serverName(inbound.nodeId) }} · {{ inbound.name }} · {{ inbound.protocol.toUpperCase() }}</option>
             </template>
             <optgroup v-if="showImports" label="导入节点">
-              <option v-for="item in importOptions" :key="item.id" :value="'import:' + item.id">{{ item.name }} · {{ item.protocol.toUpperCase() }} · {{ item.sourceName }}</option>
+              <option v-for="item in availableImports" :key="item.id" :value="'import:' + item.id">{{ item.name }} · {{ item.protocol.toUpperCase() }} · {{ item.sourceName }}</option>
             </optgroup>
           </select>
         </label>
@@ -150,28 +150,41 @@ import { endpoint, routeLabel, resultLabels, validPort } from '../../tunnels/mod
 import { groupInput } from '../lineGroups';
 import { groupHasImport } from '../importIdentity';
 import type { ProxyNodeItem } from '../proxyNodes';
-import type { Inbound } from '../api';
+import { canvasAPI, type Inbound } from '../api';
 import { isUserEntry } from '../userEntries';
 import { buildQuickRelayInput, quickRelayProtocolChoices, MAX_QUICK_RELAY_MIDDLE_NODES, type QuickRelayForm, type QuickRelayPlan, type QuickRelayResult } from '../quickRelay';
 import { quickRelayAPI } from '../quickRelayApi';
 
-// Imported nodes are not managed servers: they can only be a pure-forwarding exit
-// (a tunnel rule with an import target), so the proxy mode is hidden for them.
+// Imported nodes are not managed servers. Pure forwarding reaches any of them
+// (a tunnel rule with an import target); the proxy mode needs one the panel can
+// convert into the last server's outbound (v1.6.0), so it is hidden otherwise.
 const props = defineProps<{ servers: NodeView[]; inbounds: Inbound[]; groups: NodeGroup[]; imports?: ProxyNodeItem[]; initialExitInboundId?: string; initialExitImportId?: string; initialEntryNodeId?: string }>();
 const emit = defineEmits<{ close: []; created: [] }>();
 const router = useRouter();
 const mode = ref<'proxy' | 'forward'>(props.initialExitImportId ? 'forward' : 'proxy');
-const exitImportId = ref(props.initialExitImportId || '');
 const importOptions = computed(() => props.imports || []);
-const exitImport = computed(() => importOptions.value.find(item => item.id === exitImportId.value));
-const showImports = computed(() => mode.value === 'forward' && importOptions.value.length > 0);
-const quicImport = computed(() => exitImport.value?.protocol === 'hysteria2' || exitImport.value?.protocol === 'tuic');
+const importExitReasons = ref<Map<string, string>>(new Map());
+const importExitNodes = ref<Map<string, string[]>>(new Map());
+if (importOptions.value.length) {
+  canvasAPI.importExits().then(result => { importExitNodes.value = new Map(result.items.map(item => [item.id, item.nodeIds])); importExitReasons.value = new Map(result.items.map(item => [item.id, item.reason])); }).catch(e => { error.value = `读取导入节点出口能力失败：${(e as Error).message}`; });
+}
+const convertible = (id: string) => {
+  const lastNode = form.middleNodeIds[form.middleNodeIds.length - 1] || form.entryNodeId;
+  return importExitReasons.value.get(id) === '' && (!lastNode || !!importExitNodes.value.get(id)?.includes(lastNode));
+};
+const availableImports = computed(() => mode.value === 'forward' ? importOptions.value : importOptions.value.filter(item => convertible(item.id)));
+const showImports = computed(() => availableImports.value.length > 0);
 const forward = reactive({ name: '', tunnelId: null as string | null, portMode: 'auto' as 'auto' | 'manual', listenPort: undefined as number | undefined, subscriptionVisible: true });
 const nameEdited = ref(false), loadingTunnels = ref(false), tunnelLoadError = ref('');
 const tunnels = ref<Tunnel[]>([]), tunnelsLoaded = ref(false);
 const createdRule = ref<TunnelRule | null>(null), publishResult = ref<PublishResult | null>(null);
 const progress = ref(''), groupFailures = ref<string[]>([]);
-const form = reactive<QuickRelayForm>({ entryNodeId: props.initialEntryNodeId || '', exitInboundId: props.initialExitInboundId || '', middleNodeIds: [], entryProtocol: '', entryCore: '', groupMode: 'exit_groups', groupIds: [] });
+const form = reactive<QuickRelayForm>({ entryNodeId: props.initialEntryNodeId || '', exitInboundId: props.initialExitInboundId || '', exitImportId: props.initialExitImportId || '', middleNodeIds: [], entryProtocol: '', entryCore: '', groupMode: 'exit_groups', groupIds: [] });
+const exitImportId = computed({ get: () => form.exitImportId || '', set: value => { form.exitImportId = value; } });
+const exitImport = computed(() => importOptions.value.find(item => item.id === exitImportId.value));
+const quicImport = computed(() => exitImport.value?.protocol === 'hysteria2' || exitImport.value?.protocol === 'tuic');
+// Leaving pure forwarding drops an import the proxy mode cannot use.
+watch([mode, importExitReasons], ([value]) => { if (value === 'proxy' && exitImportId.value && !convertible(exitImportId.value)) exitImportId.value = ''; });
 const saving = ref(false), planning = ref(false), error = ref('');
 const plan = ref<QuickRelayPlan | null>(null), created = ref<QuickRelayResult | null>(null), createdName = ref('');
 const liveServers = computed(() => props.servers.filter(server => server.enabled && !server.deletedAt));
@@ -185,8 +198,6 @@ const exitKey = computed({
     form.exitInboundId = kind === 'inbound' ? id : '';
   }
 });
-// The proxy mode has no import exits; leaving forward mode drops an import exit.
-watch(mode, value => { if (value === 'proxy') exitImportId.value = ''; });
 const entryOptions = computed(() => liveServers.value.filter(server => server.id !== exit.value?.nodeId && (mode.value === 'forward' || quickRelayProtocolChoices(server).length)));
 const middleOptions = computed(() => liveServers.value.filter(server => server.id !== form.entryNodeId && server.id !== exit.value?.nodeId));
 const groupOptions = computed(() => props.groups.filter(group => group.enabled && ['subscription', 'mixed'].includes(group.purpose)));
@@ -203,7 +214,7 @@ const protocolKey = computed({ get: () => form.entryProtocol ? `${form.entryCore
 } });
 const middleNodeId = computed({ get: () => form.middleNodeIds[0] || '', set: value => { form.middleNodeIds = value ? [value] : []; } });
 function serverName(id: string) { return props.servers.find(server => server.id === id)?.name || id; }
-const routeName = computed(() => [form.entryNodeId, ...form.middleNodeIds, exit.value?.nodeId].filter((id): id is string => !!id).map(serverName).join(' → '));
+const routeName = computed(() => [...[form.entryNodeId, ...form.middleNodeIds, exit.value?.nodeId].filter((id): id is string => !!id).map(serverName), ...(exitImport.value ? [exitImport.value.name] : [])].join(' → '));
 const availableTunnels = computed(() => tunnels.value.filter(tunnel => {
   const first = tunnel.hops[0], last = tunnel.hops.at(-1);
   // An imported target is dialled from the tunnel's exit, so any exit server fits.
@@ -233,10 +244,10 @@ watch([() => form.entryNodeId, () => exit.value?.nodeId, () => exitImport.value?
 watch([() => form.entryNodeId, () => form.exitInboundId, exitImportId, mode], () => {
   if (form.entryNodeId === exit.value?.nodeId) form.entryNodeId = '';
   form.middleNodeIds = form.middleNodeIds.filter(id => middleOptions.value.some(server => server.id === id));
-  const choice = protocols.value.find(item => item.protocol === exit.value?.protocol);
+  const choice = protocols.value.find(item => item.protocol === (exit.value?.protocol || exitImport.value?.protocol));
   form.entryProtocol = choice?.protocol || ''; form.entryCore = choice?.core || '';
 }, { immediate: true, flush: 'sync' });
-const ready = computed(() => (!!exit.value || (mode.value === 'forward' && !!exitImport.value)) && entryOptions.value.some(server => server.id === form.entryNodeId) &&
+const ready = computed(() => (!!exit.value || (!!exitImport.value && (mode.value === 'forward' || convertible(exitImport.value.id)))) && entryOptions.value.some(server => server.id === form.entryNodeId) &&
   (mode.value === 'forward'
     ? !loadingTunnels.value && !tunnelLoadError.value && !!forward.name.trim() && forward.name.length <= 80 &&
       (!forward.tunnelId || !!selectedTunnel.value) && (forward.portMode === 'auto' || validPort(forward.listenPort))

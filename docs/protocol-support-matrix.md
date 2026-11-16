@@ -65,6 +65,21 @@ Reality 的 X25519 私钥只进入加密设置/修订与安全 Agent 配置，�
 
 Xray Windows 针对性原生与认证 HTTP 检查覆盖上述 11 个服务端组合及用户统计，TCP/auto 另有门控、轮换和回滚检查。官方 sing-box 1.14.3 的 TCP 无 flow/Vision 通过原生、认证 HTTP、错误凭据及密钥回滚；无 with_v2ray_api 的用户流量仍未知。Linux 实核和精简开发验证通过，本地协议编辑器与五格式预览走查完成。生产后续已验证自建 VLESS TCP／Reality TCP Vision／xhttp-auto、关联中转订阅、外部导入三个受控端点的实际客户端流量，具体组合与网络路径见[协议客户端](vless-reality-client-verification.md)、[画布/P4](canvas-p2-p3-p4-client-verification.md)及[最终补充验收](final-v1.4-acceptance.md)。完整 race 与长测的最终状态以报告为准，不扩大上述组合，也不把 Windows 结果视为 Linux 结论；客户端每格式边界见 §7。
 
+### 出站客户端字段与导入节点出口（v1.6.0）
+
+出站可带 ALPN、uTLS 客户端指纹、WebSocket Host、Reality 客户端半边与 xhttp，用于服务器方案以导入节点为最后一跳出口（说明书第 13.2 节）。这些字段只在核心上报对应 `direction=outbound` 组合时可用：
+
+| 出站组合 | Xray | sing-box |
+| --- | --- | --- |
+| VLESS 无加密 + ws（Host） | 已实现 | 已实现 |
+| VLESS TLS + tcp／Vision／ws／grpc（ALPN、指纹） | 已实现 | 已实现 |
+| VLESS TLS + xhttp | 已实现 | 拒绝 |
+| VLESS Reality + tcp／Vision | 已实现 | 已实现（不输出 SpiderX） |
+| VLESS Reality + grpc／xhttp | 已实现 | 拒绝 |
+| Trojan TLS + tcp／ws／grpc（ALPN、指纹、Host） | 已实现 | 已实现 |
+
+Linux 真实核测试以面板渲染的出站连接自建 Reality（tcp／Vision／grpc／xhttp）与 TLS xhttp 监听并拒绝错误公钥（Xray 26.3.27、sing-box 1.14.3 Reality tcp／Vision）。不转换的导入类型：Shadowsocks 2022、证书指纹固定、跳过证书校验、Hysteria2 混淆、WireGuard 与其他传输。
+
 ### GOST（v1.3 G1）
 
 `pkg/contracts/desiredstate/support.go` 只在 `forward` 行里加入 `gost` 条目；其他每一行都不含 `gost` 键，因此 `proxy.ValidateCoreProtocol` 对已知核心遇到没有该键的行直接拒绝。「GOST 仅承载转发」由这张共享表加 `desiredstate.State.Validate` 一处判定，不另加重复的 SQL 协议规则；Web 入站核心选择器同样只为 `forward` 提供 GOST，并要求 `Capabilities.cores` 已确认该核心启用。

@@ -900,7 +900,8 @@
               <PortControl :key="selectedNode.instanceId" :node-id="selectedNode.resourceId" :mode="selectedNode.relayPortMode || 'auto'" :port="selectedNode.relayPort" label="内部中转端口" page :owner="{ kind: 'canvas', id: currentScheme.id }" @update:mode="value => { selectedNode!.relayPortMode = value; saveDraft(); }" @update:port="value => { selectedNode!.relayPort = value; saveDraft(); }" />
             </div>
             <div v-else-if="!selectedNode.isManageable" class="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/60 text-amber-800 text-xs leading-relaxed">
-              ⚠️ 提示：外部导入节点只能作为代理链终点或出站跳，无法部署 Agent 安装转发服务。
+              <template v-if="currentScheme.executionLocation === 'server'">⚠️ 提示：导入节点只能作为最后一跳出口。发布时在前一跳服务器生成一个出站，用导入节点的参数和凭据连接它；部分参数（如 Reality、xhttp）需要前一跳服务器的 Agent 为 1.6.0 及以上。</template>
+              <template v-else>⚠️ 提示：外部导入节点只能作为代理链终点或出站跳，无法部署 Agent 安装转发服务。</template>
             </div>
 
             <div class="pt-2">
@@ -1421,8 +1422,17 @@ const filteredServers = computed(() => {
 // Imported proxies are the only browser-side records; the self-hosted group is
 // built from the panel's inbounds, so it is never empty just because no import
 // exists. Both groups are filtered by the resource search.
+// A server scheme dials an imported exit through a generated outbound, so only
+// imports the panel can convert are offered there (v1.6.0); a client chain takes
+// every import. Until the answer arrives, server schemes offer none.
+const importExitReasons = ref<Map<string, string> | null>(null);
+function loadImportExits() {
+  canvasAPI.importExits().then(result => { importExitReasons.value = new Map(result.items.map(item => [item.id, item.reason])); }).catch(e => { importExitReasons.value = null; showToast(`读取导入节点出口能力失败：${(e as Error).message}`, 'error'); });
+}
 const importedNodes = computed(() => {
+  const server = currentScheme.value.executionLocation === 'server';
   return proxyNodeStore.manualNodes.filter(n => {
+    if (server && importExitReasons.value?.get(n.id) !== '') return false;
     if (resourceSearch.value.trim()) {
       const q = resourceSearch.value.trim().toLowerCase();
       return (n.name || '').toLowerCase().includes(q) || (n.server || '').includes(q);
@@ -1973,6 +1983,7 @@ async function loadWorkspace() {
       choices((page, size) => groupAPI.list(page, size)),
       loadImports()
     ]);
+    loadImportExits();
     servers.value = nodeRes;
     inbounds.value = inboundRes;
     outbounds.value = outboundRes;

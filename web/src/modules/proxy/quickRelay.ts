@@ -11,6 +11,8 @@ export interface QuickRelayForm {
   entryNodeId: string;
   middleNodeIds: string[];
   exitInboundId: string;
+  // An imported exit (v1.6.0); exactly one of the two exits is set.
+  exitImportId?: string;
   entryProtocol: string;
   entryCore: CoreName | '';
   entrySecurity?: '' | 'none' | 'tls' | 'reality';
@@ -26,6 +28,7 @@ export interface QuickRelayInput {
   entryNodeId: string;
   middleNodeIds: string[];
   exitInboundId: string;
+  exitImportId?: string;
   entryProtocol: string;
   entryCore?: CoreName;
   entrySecurity?: QuickRelayForm['entrySecurity'];
@@ -62,7 +65,8 @@ export function buildQuickRelayInput(form: QuickRelayForm, requestId: string): Q
     requestId,
     entryNodeId: form.entryNodeId,
     middleNodeIds: [...form.middleNodeIds],
-    exitInboundId: form.exitInboundId,
+    exitInboundId: form.exitImportId ? '' : form.exitInboundId,
+    ...(form.exitImportId ? { exitImportId: form.exitImportId } : {}),
     entryProtocol: form.entryProtocol,
     ...(form.entryCore ? { entryCore: form.entryCore } : {}),
     ...(form.entryProtocol === 'vless' ? {

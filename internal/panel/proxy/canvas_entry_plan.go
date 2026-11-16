@@ -232,7 +232,24 @@ func (s *Service) canvasPlanEntryRoute(ctx context.Context, layout CanvasLayout,
 	if entry.existing.ID == "" {
 		entry.preview.Name = strings.Join(nodeNames(names, path), " → ")
 	}
-	if entry.binding.GroupMode != "exit_groups" || last == nil {
+	if entry.binding.GroupMode != "exit_groups" {
+		return nil
+	}
+	// The path's last server may dial an imported exit; the entry then joins
+	// the groups that contain that import (v1.6.0).
+	lastNode := entry.preview.NodeID
+	if last != nil {
+		lastNode = last.targetNode
+	}
+	for _, c := range layout.Connections {
+		for _, instance := range layout.Instances {
+			if ref, _ := parseCanvasRef(instance.Ref); c.Target == instance.InstanceID && ref.kind == "import" && canvasConnectionFrom(layout, c, lastNode) {
+				entry.preview.Groups, err = s.canvasImportEntryGroups(ctx, ref.id)
+				return err
+			}
+		}
+	}
+	if last == nil {
 		return nil
 	}
 	for _, c := range layout.Connections {

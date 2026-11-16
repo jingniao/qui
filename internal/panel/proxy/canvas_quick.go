@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/subscription/importtarget"
 	"proxycontrol/internal/platform/httpapi"
 )
 
@@ -17,18 +18,21 @@ type QuickCanvasEntryGroups struct {
 }
 
 type QuickCanvasInput struct {
-	EntrySecurity          string                 `json:"entrySecurity,omitempty"`
-	EntryTransport         string                 `json:"entryTransport,omitempty"`
-	EntryFlow              string                 `json:"entryFlow,omitempty"`
-	EntryRealityTarget     string                 `json:"entryRealityTarget,omitempty"`
-	EntryRealityServerName string                 `json:"entryRealityServerName,omitempty"`
-	RequestID              string                 `json:"requestId"`
-	EntryNodeID            string                 `json:"entryNodeId"`
-	MiddleNodeIDs          []string               `json:"middleNodeIds"`
-	ExitInboundID          string                 `json:"exitInboundId"`
-	EntryProtocol          string                 `json:"entryProtocol"`
-	EntryCore              string                 `json:"entryCore,omitempty"`
-	EntryGroups            QuickCanvasEntryGroups `json:"entryGroups"`
+	EntrySecurity          string   `json:"entrySecurity,omitempty"`
+	EntryTransport         string   `json:"entryTransport,omitempty"`
+	EntryFlow              string   `json:"entryFlow,omitempty"`
+	EntryRealityTarget     string   `json:"entryRealityTarget,omitempty"`
+	EntryRealityServerName string   `json:"entryRealityServerName,omitempty"`
+	RequestID              string   `json:"requestId"`
+	EntryNodeID            string   `json:"entryNodeId"`
+	MiddleNodeIDs          []string `json:"middleNodeIds"`
+	ExitInboundID          string   `json:"exitInboundId"`
+	// ExitImportID ends the route at an imported node instead (v1.6.0): the last
+	// server dials it through a generated outbound. Exactly one exit is given.
+	ExitImportID  string                 `json:"exitImportId,omitempty"`
+	EntryProtocol string                 `json:"entryProtocol"`
+	EntryCore     string                 `json:"entryCore,omitempty"`
+	EntryGroups   QuickCanvasEntryGroups `json:"entryGroups"`
 }
 
 type QuickCanvasResult struct {
@@ -41,23 +45,19 @@ func (s *Service) quickCanvasScheme(ctx context.Context, input QuickCanvasInput)
 	if !validCanvasToken(input.RequestID) {
 		return CanvasScheme{}, errors.New("requestId 必填，须为不超过 128 字节的字母、数字、点、下划线或短横线")
 	}
-	if !validCanvasToken(input.EntryNodeID) || !validCanvasToken(input.ExitInboundID) {
-		return CanvasScheme{}, errors.New("请选择有效的入口服务器和出口入站")
+	if !validCanvasToken(input.EntryNodeID) || (input.ExitImportID == "") == (input.ExitInboundID == "") || input.ExitInboundID != "" && !validCanvasToken(input.ExitInboundID) || input.ExitImportID != "" && !validCanvasToken(input.ExitImportID) {
+		return CanvasScheme{}, errors.New("请选择有效的入口服务器和一个出口（出口入站或导入节点）")
 	}
 	if strings.TrimSpace(input.EntryProtocol) == "" {
 		return CanvasScheme{}, errors.New("新建入口必须选择协议")
-	}
-	exit, err := s.Repository.Inbound(ctx, input.ExitInboundID, false)
-	if err != nil {
-		return CanvasScheme{}, fmt.Errorf("读取出口入站失败：%w", err)
 	}
 	entryNode, err := s.Nodes.Get(ctx, input.EntryNodeID)
 	if err != nil {
 		return CanvasScheme{}, fmt.Errorf("读取入口服务器失败：%w", err)
 	}
-	exitNode, err := s.Nodes.Get(ctx, exit.NodeID)
+	exitRef, exitName, exitTCP, exitUDP, err := s.quickCanvasExit(ctx, input)
 	if err != nil {
-		return CanvasScheme{}, fmt.Errorf("读取出口服务器失败：%w", err)
+		return CanvasScheme{}, err
 	}
 	groups := input.EntryGroups
 	if groups.Mode == "" {
@@ -70,13 +70,18 @@ func (s *Service) quickCanvasScheme(ctx context.Context, input QuickCanvasInput)
 		}
 		layout.Instances = append(layout.Instances, CanvasInstance{InstanceID: fmt.Sprintf("middle-%d", index), Ref: "server:" + nodeID, Role: "relay", X: float64(320 + index*280), Y: 120, RelayPortMode: "auto"})
 	}
-	layout.Instances = append(layout.Instances, CanvasInstance{InstanceID: "exit", Ref: "inbound:" + exit.ID, Role: "exit", X: float64(320 + len(input.MiddleNodeIDs)*280), Y: 120})
+	layout.Instances = append(layout.Instances, CanvasInstance{InstanceID: "exit", Ref: exitRef, Role: "exit", X: float64(320 + len(input.MiddleNodeIDs)*280), Y: 120})
 	for index := 1; index < len(layout.Instances); index++ {
 		// Canvas defaults to TLS. TCP-only also accepts exits whose protocol
 		// cannot relay UDP; the ordinary planner enforces its chain hop limit.
-		layout.Connections = append(layout.Connections, CanvasConnection{ID: fmt.Sprintf("connection-%d", index), Source: layout.Instances[index-1].InstanceID, Target: layout.Instances[index].InstanceID, Type: "proxy_chain", TunnelProtocol: "tls", SupportTCP: true})
+		connection := CanvasConnection{ID: fmt.Sprintf("connection-%d", index), Source: layout.Instances[index-1].InstanceID, Target: layout.Instances[index].InstanceID, Type: "proxy_chain", TunnelProtocol: "tls", SupportTCP: true}
+		if index == len(layout.Instances)-1 && input.ExitImportID != "" {
+			// An imported exit is dialled by the last server; carry what it carries.
+			connection.SupportTCP, connection.SupportUDP = exitTCP, exitUDP
+		}
+		layout.Connections = append(layout.Connections, connection)
 	}
-	return CanvasScheme{Name: entryNode.Name + " → " + exitNode.Name, Execution: canvasExecutionServer, Layout: layout}, nil
+	return CanvasScheme{Name: entryNode.Name + " → " + exitName, Execution: canvasExecutionServer, Layout: layout}, nil
 }
 
 func (s *Service) PlanQuickCanvas(ctx context.Context, input QuickCanvasInput) (CanvasPlanResult, error) {
@@ -233,4 +238,29 @@ func (h *Handler) quickCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, http.StatusAccepted, result)
+}
+
+// quickCanvasExit resolves the route's exit: a self-hosted inbound, or an
+// imported node that must convert into a server outbound.
+func (s *Service) quickCanvasExit(ctx context.Context, input QuickCanvasInput) (ref, name string, tcp, udp bool, err error) {
+	if input.ExitImportID != "" {
+		endpoint, err := importtarget.Load(ctx, s.Repository.Database, s.Repository.Vault, input.ExitImportID)
+		if err != nil {
+			return "", "", false, false, fmt.Errorf("读取导入节点失败：%w", err)
+		}
+		out, code := ImportOutbound(endpoint)
+		if code != "" {
+			return "", "", false, false, fmt.Errorf("导入节点「%s」不能作为服务器出口：%s", endpoint.Name, ImportOutboundReason(code))
+		}
+		return "import:" + input.ExitImportID, endpoint.Name, out.SupportTCP, out.SupportUDP, nil
+	}
+	exit, err := s.Repository.Inbound(ctx, input.ExitInboundID, false)
+	if err != nil {
+		return "", "", false, false, fmt.Errorf("读取出口入站失败：%w", err)
+	}
+	exitNode, err := s.Nodes.Get(ctx, exit.NodeID)
+	if err != nil {
+		return "", "", false, false, fmt.Errorf("读取出口服务器失败：%w", err)
+	}
+	return "inbound:" + exit.ID, exitNode.Name, true, false, nil
 }

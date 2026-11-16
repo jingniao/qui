@@ -8,6 +8,11 @@ import (
 // An unchanged resource stamp alone does not make hand-edited server objects
 // unchanged. No-op publication also checks the fields the canvas would save.
 func (s *Service) canvasObjectsUnchanged(ctx context.Context, p *canvasPlan) (bool, error) {
+	for _, exit := range p.importExits {
+		if exit.changed {
+			return false, nil
+		}
+	}
 	outboundIDs := map[string]string{}
 	for _, edge := range p.edges {
 		in, err := s.Repository.canvasInboundNamed(ctx, edge.targetNode, edge.inboundName)

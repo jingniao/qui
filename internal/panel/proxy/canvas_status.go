@@ -15,9 +15,10 @@ import (
 )
 
 type CanvasStatusDraft struct {
-	Dirty       bool   `json:"dirty"`
-	UpdatedAt   string `json:"updatedAt"`
-	PublishedAt string `json:"publishedAt"`
+	Dirty       bool     `json:"dirty"`
+	UpdatedAt   string   `json:"updatedAt"`
+	PublishedAt string   `json:"publishedAt"`
+	Reasons     []string `json:"reasons,omitempty"`
 }
 
 type CanvasStatusBatchItem struct {
@@ -108,6 +109,11 @@ func (s *Service) CanvasSchemeStatus(ctx context.Context, schemeID string) (Canv
 		}
 		result.Draft.Dirty = updated.After(published)
 	}
+	result.Draft.Reasons, err = s.canvasImportDraftReasons(ctx, scheme)
+	if err != nil {
+		return result, err
+	}
+	result.Draft.Dirty = result.Draft.Dirty || len(result.Draft.Reasons) > 0
 	if scheme.PublishedBatchID != "" {
 		reader, ok := s.Deploy.(CanvasStatusReader)
 		if !ok {

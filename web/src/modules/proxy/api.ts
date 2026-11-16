@@ -190,7 +190,7 @@ export interface CanvasPublishNode { nodeId: string; name: string; revision: num
 export interface CanvasPublishResult { batchId?: string; nodes: CanvasPublishNode[]; warnings: string[]; }
 
 export interface CanvasSchemeStatus {
-  draft: { dirty: boolean; updatedAt: string; publishedAt: string };
+  draft: { dirty: boolean; updatedAt: string; publishedAt: string; reasons?: string[] };
   batch: { id?: string; status?: string; items: { nodeId: string; nodeName: string; status: string; revision?: number }[] };
   nodes: { nodeId: string; nodeName: string; confirmedRevision?: number; expectedRevision?: number; confirmed: boolean }[];
   entries: { instanceId: string; inboundId?: string; name?: string; mode?: string; state?: string; route?: string }[];
@@ -229,7 +229,9 @@ export const canvasAPI = {
   get: (id: string) => request<CanvasScheme>(`/canvas-schemes/${encodeURIComponent(id)}`),
   create: (value: CanvasSchemeCreate) => request<CanvasScheme>('/canvas-schemes', 'POST', value),
   update: (id: string, value: CanvasSchemeUpdate) => request<CanvasScheme>(`/canvas-schemes/${encodeURIComponent(id)}`, 'PUT', value),
-  publish: (id: string) => request<CanvasPublishResult>(`/canvas-schemes/${encodeURIComponent(id)}/publish`, 'POST', {})
+  publish: (id: string) => request<CanvasPublishResult>(`/canvas-schemes/${encodeURIComponent(id)}/publish`, 'POST', {}),
+  // Which imported nodes can end a server scheme; reason is empty when one can.
+  importExits: () => request<{ items: { id: string; reason: string; nodeIds: string[] }[] }>('/canvas-import-exits')
 };
 
 // Display data the canvas page has already loaded. Schemas stay loose so the

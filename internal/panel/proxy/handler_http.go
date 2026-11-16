@@ -105,6 +105,10 @@ func (h *Handler) saveInbound(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, status, inbound)
 }
 func (h *Handler) saveOutbound(w http.ResponseWriter, r *http.Request) {
+	if err := h.Service.Repository.refuseManagedImportOutbound(r.Context(), r.PathValue("id")); err != nil {
+		h.fail(w, err)
+		return
+	}
 	var input OutboundInput
 	if err := httpapi.Decode(w, r, &input); err != nil {
 		h.fail(w, err)
@@ -146,6 +150,10 @@ func (h *Handler) previewInboundDeletion(w http.ResponseWriter, r *http.Request)
 	httpapi.JSON(w, 200, preview)
 }
 func (h *Handler) deleteOutbound(w http.ResponseWriter, r *http.Request) {
+	if err := h.Service.Repository.refuseManagedImportOutbound(r.Context(), r.PathValue("id")); err != nil {
+		h.fail(w, err)
+		return
+	}
 	if err := h.Service.DeleteOutbound(r.Context(), r.PathValue("id")); err != nil {
 		h.fail(w, err)
 		return

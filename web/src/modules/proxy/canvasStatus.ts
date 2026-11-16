@@ -30,7 +30,8 @@ export function canvasStatusItems(status: CanvasSchemeStatus): CanvasStatusItem[
       tone: status.draft.dirty ? 'warning' : 'success',
       details: [
         `草稿更新：${status.draft.updatedAt}`,
-        status.draft.publishedAt ? `最近发布：${status.draft.publishedAt}` : '从未发布'
+        status.draft.publishedAt ? `最近发布：${status.draft.publishedAt}` : '从未发布',
+        ...(status.draft.reasons || [])
       ]
     },
     {

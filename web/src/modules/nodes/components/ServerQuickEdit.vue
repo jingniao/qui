@@ -2,7 +2,8 @@
     <FormDrawer
       v-model="editDrawer"
       title="编辑服务器"
-      description="修改服务器接入地址、维护状态、续费价格与扩展信息。"
+      width="lg"
+      description="修改服务器信息、续费价格、整机流量与维护状态。"
       :loading="editingSaving || fetchingLatest"
       @confirm="saveEdit"
     >
@@ -18,124 +19,34 @@
           {{ fetchError }}
         </div>
 
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">服务器名称</span>
-          <input v-model="editForm.name" maxlength="40" class="form-input-base mt-1" />
-        </label>
-        <label class="block">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-neutral-600">地区</span>
-            <span class="text-xs text-neutral-400">优先采用此地区展示国旗，留空则根据 IP 归属自动识别</span>
-          </div>
-          <input v-model="editForm.region" placeholder="例如 香港、日本东京、美国洛杉矶" class="form-input-base mt-1" />
-        </label>
-        <div class="block">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-neutral-600">服务器分组</span>
-            <span class="text-xs text-neutral-400">用于服务器列表筛选，最多 10 个</span>
-          </div>
-          <div v-if="editForm.tags.length" class="flex flex-wrap gap-1.5 mt-1.5">
-            <span v-for="item in editForm.tags" :key="item" class="inline-flex items-center gap-1 rounded-lg bg-ios-blue/[0.08] px-2 py-0.5 text-xs font-semibold text-ios-blue">
-              {{ item }}
-              <button type="button" class="text-ios-blue/70 hover:text-ios-blue" :aria-label="`删除标签 ${item}`" @click="editForm.tags = editForm.tags.filter(tag => tag !== item)">×</button>
-            </span>
-          </div>
-          <div class="flex gap-2 mt-1.5">
-            <input v-model="tagInput" list="server-tag-suggestions" placeholder="输入标签后回车，例如 香港、CN2" class="form-input-base flex-1" @keydown.enter.prevent="commitTag" />
-            <button type="button" class="ios-btn-secondary shrink-0" @click="commitTag">添加</button>
-          </div>
-          <datalist id="server-tag-suggestions">
-            <option v-for="item in knownTags.filter(tag => !editForm.tags.includes(tag))" :key="item" :value="item" />
-          </datalist>
-          <p v-if="tagError" class="text-xs text-ios-red mt-1">{{ tagError }}</p>
-        </div>
-        <label class="block">
-          <span class="text-xs font-medium text-neutral-600">服务器备注</span>
-          <textarea v-model="editForm.remark" rows="2" placeholder="填写服务器规格等备注信息" class="form-input-base mt-1"></textarea>
-        </label>
-
-        <div class="border-t border-black/[0.06] pt-3.5 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-neutral-800">续费与财务信息</span>
-            <span v-if="editForm.renewDate" class="text-xs text-neutral-500 font-mono">
-              到期状态：<span class="font-bold text-neutral-800">{{ calculateRemainingDays(editForm.renewDate).label }}</span>
-            </span>
-          </div>
-
-          <div class="space-y-3">
-            <label class="block">
-              <span class="text-xs font-medium text-neutral-600">续费到期日</span>
-              <input v-model="editForm.renewDate" type="date" class="form-input-base mt-1" />
-            </label>
-
-            <div class="block">
-              <span class="text-xs font-medium text-neutral-600">续费价格与周期</span>
-              <div class="flex items-center mt-1 rounded-xl border border-black/15 bg-white overflow-hidden shadow-2xs focus-within:ring-2 focus-within:ring-ios-blue/20 focus-within:border-ios-blue transition-all">
-                <select
-                  v-model="editForm.renewCurrency"
-                  class="bg-neutral-50 hover:bg-neutral-100 text-neutral-800 font-semibold px-3 py-2.5 border-r border-black/10 focus:outline-none shrink-0 cursor-pointer transition-colors text-sm"
-                >
-                  <option v-for="c in CURRENCY_LIST" :key="c.code" :value="c.code">{{ c.label }}</option>
-                </select>
-                <input
-                  v-model="editForm.renewPrice"
-                  type="number"
-                  step="any"
-                  min="0"
-                  placeholder="输入续费金额，例如 120"
-                  class="flex-1 min-w-0 px-3 py-2 font-mono font-medium text-neutral-900 placeholder:text-neutral-400 focus:outline-none bg-transparent text-sm"
-                />
-                <select
-                  v-model="editForm.renewCycle"
-                  class="bg-neutral-50 hover:bg-neutral-100 text-neutral-700 font-semibold px-3 py-2.5 border-l border-black/10 focus:outline-none shrink-0 cursor-pointer transition-colors text-sm"
-                >
-                  <option v-for="cycle in CYCLE_LIST" :key="cycle" :value="cycle">{{ cycle }}</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="border-t border-black/[0.06] pt-3 space-y-2">
-          <label class="flex items-center gap-2 cursor-pointer text-xs font-medium text-neutral-800">
-            <input v-model="editForm.enabled" type="checkbox" class="rounded border-black/20 text-ios-blue" />
-            <span>启用服务器控制连接</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer text-xs font-medium text-neutral-800">
-            <input v-model="editForm.allowSubscription" type="checkbox" class="rounded border-black/20 text-ios-blue" />
-            <span>允许用户订阅本服务器节点</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer text-xs font-medium text-neutral-800">
-            <input v-model="editForm.maintenance" type="checkbox" class="rounded border-black/20 text-ios-blue" />
-            <span>设为维护模式（暂时排除在订阅之外）</span>
-          </label>
-        </div>
+        <ServerFormFields ref="fields" :form="editForm" :connection="connectionForm" :traffic="machineForm" :known-tags="knownTags" />
       </div>
     </FormDrawer>
 
 </template>
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { nodeAPI, type NodeView } from '../api';
-import { getNodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice, calculateRemainingDays, CURRENCY_LIST, CYCLE_LIST } from '../nodeMeta';
+import { nodeAPI, type MachineTrafficSettings, type NodeView } from '../api';
+import { formFromSettings, payloadFromForm, type MachineTrafficForm } from '../machineTrafficModel';
+import { getNodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice } from '../nodeMeta';
 import { mergeLatestEditForm, type ServerEditFormState } from './serverListModel';
-import { addTag } from '../serverOrder';
+import { addressChanges } from '../nodeAddress';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import FormDrawer from '../../../components/FormDrawer.vue';
+import ServerFormFields from './ServerFormFields.vue';
+const fields = ref<InstanceType<typeof ServerFormFields>>();
 const emit = defineEmits<{ changed: [] }>();
 withDefaults(defineProps<{ knownTags?: string[] }>(), { knownTags: () => [] });
-const tagInput = ref(''), tagError = ref('');
-function commitTag() {
-  const result = addTag(editForm.tags, tagInput.value);
-  tagError.value = result.error || '';
-  if (!result.error) { editForm.tags = result.tags; tagInput.value = ''; }
-}
 const editDrawer = ref(false);
 const editingSaving = ref(false);
 const fetchingLatest = ref(false);
 const fetchError = ref('');
 const editTarget = ref<NodeView | null>(null);
+const machineForm = ref<MachineTrafficForm | null>(null);
+let machineBaseline: MachineTrafficSettings | null = null;
+const connectionForm = reactive({ connectHost: '', portRange: '' });
+let connectionBaseline = { ...connectionForm };
 const editForm = reactive<ServerEditFormState>({
   name: '',
   region: '',
@@ -162,7 +73,6 @@ async function openEditDrawer(node: NodeView) {
   editForm.name = node.name;
   editForm.region = cachedMeta.region || '';
   editForm.tags = [...(cachedMeta.tags ?? node.tags ?? [])];
-  tagInput.value = ''; tagError.value = '';
   editForm.remark = cachedMeta.remark || '';
   editForm.renewDate = cachedMeta.renewDate || '';
   editForm.renewCurrency = parsed.currency;
@@ -171,8 +81,14 @@ async function openEditDrawer(node: NodeView) {
   editForm.enabled = node.enabled;
   editForm.allowSubscription = node.allowSubscription;
   editForm.maintenance = node.maintenance;
+  connectionForm.connectHost = node.connectHost;
+  connectionForm.portRange = cachedMeta.portRangeStart ? `${cachedMeta.portRangeStart}-${cachedMeta.portRangeEnd}` : '';
+  connectionBaseline = { ...connectionForm };
+  machineForm.value = null;
+  machineBaseline = null;
 
   const baseline: ServerEditFormState = { ...editForm };
+  const connectionAtOpen = { ...connectionForm };
   editTarget.value = node;
   fetchingLatest.value = true;
   fetchError.value = '';
@@ -180,7 +96,13 @@ async function openEditDrawer(node: NodeView) {
 
   const currentToken = ++loadToken;
   try {
-    const [latest, meta] = await Promise.all([nodeAPI.get(node.id), loadNodeMeta(node.id, true)]);
+    const [latest, meta, machineSettings] = await Promise.all([
+      nodeAPI.get(node.id),
+      loadNodeMeta(node.id, true),
+      nodeAPI.machineTrafficSettings(node.id).catch((e: Error) => {
+        throw new Error(`读取整机流量设置失败：${e.message}`);
+      })
+    ]);
     if (currentToken !== loadToken || !editDrawer.value || editTarget.value?.id !== node.id) return;
     if (latest.deletedAt) {
       editDrawer.value = false;
@@ -189,6 +111,18 @@ async function openEditDrawer(node: NodeView) {
     }
     editTarget.value = latest;
     mergeLatestEditForm(editForm, baseline, latest, meta);
+    const incomingConnection = {
+      connectHost: latest.connectHost,
+      portRange: meta.portRangeStart ? `${meta.portRangeStart}-${meta.portRangeEnd}` : ''
+    };
+    for (const key of ['connectHost', 'portRange'] as const) {
+      if (Object.is(connectionForm[key], connectionAtOpen[key])) {
+        Object.assign(connectionForm, { [key]: incomingConnection[key] });
+      }
+    }
+    connectionBaseline = incomingConnection;
+    machineForm.value = formFromSettings(machineSettings, 'GB');
+    machineBaseline = machineSettings;
   } catch (e: unknown) {
     if (currentToken !== loadToken || !editDrawer.value || editTarget.value?.id !== node.id) return;
     const isNotFound = e instanceof APIError && e.status === 404;
@@ -207,28 +141,48 @@ async function openEditDrawer(node: NodeView) {
 
 async function saveEdit() {
   if (!editTarget.value || editingSaving.value || fetchingLatest.value) return;
+  if (!machineForm.value || !machineBaseline) {
+    showToast(fetchError.value || '整机流量设置尚未读取，请重新打开弹窗', 'error');
+    return;
+  }
   const targetID = editTarget.value.id;
   const form: ServerEditFormState = { ...editForm, tags: [...editForm.tags] };
+  const connection = { ...connectionForm };
+  const trafficForm = { ...machineForm.value };
   editingSaving.value = true;
   try {
-    const [latest, meta] = await Promise.all([nodeAPI.get(targetID), loadNodeMeta(targetID, true)]);
+    const { portRangeStart, portRangeEnd } = fields.value!.connectionSettings();
+    const range = connection.portRange.trim();
+    const rangeChanged = range !== connectionBaseline.portRange;
+    const traffic = payloadFromForm(trafficForm);
+    const trafficChanged = traffic.method !== machineBaseline.method
+      || traffic.allowanceBytes !== machineBaseline.allowanceBytes
+      || traffic.resetDay !== machineBaseline.resetDay;
+    const [latest, meta, latestTraffic] = await Promise.all([
+      nodeAPI.get(targetID),
+      loadNodeMeta(targetID, true),
+      trafficChanged ? nodeAPI.machineTrafficSettings(targetID).catch((e: Error) => {
+        throw new Error(`读取整机流量设置失败：${e.message}`);
+      }) : Promise.resolve(null)
+    ]);
     if (latest.deletedAt) {
       editDrawer.value = false;
       showToast('服务器已被删除', 'info');
       return;
     }
-    // Leave address and network settings out: this dialog does not edit them,
-    // and omitted fields retain the panel's current values.
+    // Only submit a changed client address; leave public IP and network settings untouched.
     await nodeAPI.save({
       id: targetID,
       name: form.name,
-      enabled: form.enabled,
-      allowSubscription: form.allowSubscription,
-      maintenance: form.maintenance
+      enabled: latest.enabled,
+      allowSubscription: latest.allowSubscription,
+      maintenance: form.maintenance,
+      ...addressChanges({ connectHost: connectionBaseline.connectHost }, { connectHost: connection.connectHost })
     });
 
     await saveNodeMeta(targetID, {
       ...meta,
+      ...(rangeChanged ? { portRangeStart, portRangeEnd } : {}),
       region: form.region.trim(),
       remark: form.remark.trim(),
       renewDate: form.renewDate,
@@ -237,6 +191,17 @@ async function saveEdit() {
       renewCycle: form.renewCycle,
       tags: form.tags
     });
+
+    if (latestTraffic) {
+      // The quick editor does not edit the interface; preserve its latest value.
+      const saved = await nodeAPI.saveMachineTrafficSettings(targetID, {
+        ...traffic,
+        interfaceName: latestTraffic.interfaceName
+      }).catch((e: Error) => {
+        throw new Error(`服务器基本信息已保存，整机流量设置保存失败：${e.message}`);
+      });
+      machineBaseline = saved;
+    }
 
     showToast('服务器设置已更新');
     editDrawer.value = false;

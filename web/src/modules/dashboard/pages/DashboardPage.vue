@@ -37,7 +37,7 @@
       <!-- ======================================================== -->
         <div class="space-y-6">
           <!-- 1. 运行概况：4 栏核心状态指标卡片 (高度与基线统一对齐) -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
             <!-- 节点状态 -->
             <div class="panel-card p-5 bg-white flex flex-col justify-between h-full">
               <div>
@@ -70,39 +70,8 @@
               </div>
             </div>
 
-            <!-- 代理核心 -->
-            <div class="panel-card p-5 bg-white flex flex-col justify-between h-full">
-              <div>
-                <div class="flex items-center justify-between">
-                  <span class="text-xs font-semibold text-ios-tertiary">核心运行</span>
-                  <div class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                    </svg>
-                  </div>
-                </div>
-
-                <div class="mt-3 flex items-baseline gap-1.5">
-                  <span class="text-3xl font-bold text-ios-label tabular-nums tracking-normal">{{ healthyNodesCount }}</span>
-                  <span class="text-xs text-ios-tertiary font-medium">/ {{ publishedNodesCount }} 正常</span>
-                </div>
-                <div v-if="unpublishedNodesCount" class="text-xs text-ios-tertiary mt-1">{{ unpublishedNodesCount }} 台未发布配置
-                </div>
-              </div>
-
-              <div class="mt-4 pt-3 border-t border-black/[0.04] flex items-center justify-between text-xs">
-                <span
-                  :class="[
-                    'inline-flex items-center gap-1.5 font-medium',
-                    unhealthyNodesCount === 0 ? 'text-emerald-600' : 'text-amber-600'
-                  ]"
-                >
-                  <span :class="['w-1.5 h-1.5 rounded-full shrink-0', unhealthyNodesCount === 0 ? 'bg-emerald-500' : 'bg-amber-500']"></span>
-                  {{ unhealthyNodesCount === 0 ? '状态健康' : `${unhealthyNodesCount} 核心异常` }}
-                </span>
-                <span class="text-ios-tertiary tabular-nums text-xs font-medium">{{ publishedNodesCount > 0 ? Math.round((healthyNodesCount / publishedNodesCount) * 100) : 0 }}%</span>
-              </div>
-            </div>
+            <!-- 服务器价值 -->
+            <ServerValueCard :nodes="allNodes" :nodes-error="nodesError" />
 
             <!-- 有效用户 -->
             <div class="panel-card p-5 bg-white flex flex-col justify-between h-full">
@@ -162,7 +131,7 @@
             </div>
           </div>
 
-          <!-- 实时概况：当前连接、在线用户估计与今日阻断，不改动上方卡片 -->
+          <!-- 实时概况：当前连接、在线用户估计与今日阻断 -->
           <div v-if="live" class="panel-card bg-white px-5 py-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-ios-secondary">
             <span>当前连接 <span class="font-semibold text-ios-label">{{ live.connections }}</span></span>
             <span>在线用户{{ live.onlineUsers === '—' ? '' : '约' }} <span class="font-semibold text-ios-label">{{ live.onlineUsers }}</span>{{ live.onlineUsers === '—' ? '' : ' 人' }}</span>
@@ -170,16 +139,14 @@
             <span v-if="live.partial" class="text-ios-orange">部分节点未测</span>
           </div>
 
-          <!-- 2. 中部核心区：左侧待处理问题 (7列) | 右侧节点流量排行 (5列) -->
-          <!-- 使用 items-stretch 让左右两栏底部完全水平对齐 -->
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-            <!-- 左侧主栏 (7列): 待处理问题 -->
-            <div class="lg:col-span-7 flex flex-col gap-6">
+          <!-- 2. 内容区：宽屏四列，与上方统计卡片对齐，窄屏依次换行 -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
+            <div class="min-w-0 flex flex-col">
               <!-- 待处理问题 -->
-              <section class="panel-card p-5 sm:p-6 bg-white space-y-4 flex-1 flex flex-col">
+              <section class="panel-card p-4 bg-white space-y-3 flex-1 flex flex-col">
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                       <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">待处理问题</h2>
                       <span
                         v-if="pendingIssues.length > 0"
@@ -199,11 +166,11 @@
                 </div>
 
                 <!-- 告警列表 -->
-                <div v-if="pendingIssues.length > 0" class="space-y-3">
+                <div v-if="pendingIssues.length > 0" class="space-y-2">
                   <div
                     v-for="(issue, idx) in pendingIssues"
                     :key="idx"
-                    class="p-4 rounded-2xl border transition-all flex items-start justify-between gap-3"
+                    class="p-3 rounded-2xl border transition-all flex flex-col items-stretch gap-2"
                     :class="issue.level === 'danger' ? 'bg-rose-50/50 border-rose-200/70' : 'bg-amber-50/50 border-amber-200/70'"
                   >
                     <div class="flex items-start gap-3 min-w-0">
@@ -220,10 +187,10 @@
                       </div>
 
                       <div class="min-w-0 space-y-1">
-                        <div class="font-semibold text-sm text-ios-label truncate">{{ issue.title }}</div>
+                        <div class="font-semibold text-sm text-ios-label break-words">{{ issue.title }}</div>
                         <p class="text-xs text-ios-secondary leading-relaxed">{{ issue.desc }}</p>
                         <div v-if="issue.tag" class="pt-0.5">
-                          <span class="inline-block px-2 py-0.5 rounded-md text-xs font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.04]">
+                          <span class="inline-block max-w-full break-all px-2 py-0.5 rounded-md text-xs font-medium bg-black/[0.04] text-ios-secondary border border-black/[0.04]">
                             {{ issue.tag }}
                           </span>
                         </div>
@@ -232,7 +199,7 @@
 
                     <router-link
                       :to="issue.link"
-                      class="ios-btn-secondary h-7 px-2.5 shrink-0 self-center"
+                      class="ios-btn-secondary h-7 px-2.5 shrink-0 self-end"
                     >
                       去处理 &rarr;
                     </router-link>
@@ -240,7 +207,7 @@
                 </div>
 
                 <!-- 正常无异常状态 -->
-                <div v-else class="py-5 flex-1 flex flex-col items-center justify-center text-center space-y-1.5">
+                <div v-else class="py-3 flex-1 flex flex-col items-center justify-center text-center space-y-1.5">
                   <div class="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs">
                     ✓
                   </div>
@@ -250,11 +217,11 @@
               </section>
             </div>
 
-            <!-- 右侧副栏 (5列): 节点流量 (优化后：层次丰富、结构饱满，消除空旷空白) -->
-            <div class="lg:col-span-5 flex flex-col">
-              <section class="panel-card p-5 sm:p-6 bg-white h-full flex flex-col justify-between space-y-4">
+            <!-- 节点流量 -->
+            <div class="min-w-0 flex flex-col">
+              <section class="panel-card p-4 bg-white h-full flex flex-col justify-between space-y-3">
                 <!-- 头部：标题与时间维度切换 (本月 / 今日) -->
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">节点流量</h2>
                     <p class="text-xs text-ios-tertiary mt-0.5">节点吞吐与用量分布</p>
@@ -289,13 +256,13 @@
                 </div>
 
                 <!-- 吞吐总量与上/下行分布盒子 -->
-                <div class="p-3.5 sm:p-4 rounded-2xl bg-[#F8F8FA] border border-black/[0.04] space-y-3">
-                  <div class="flex items-center justify-between">
-                    <div>
+                <div class="p-2 rounded-2xl bg-[#F8F8FA] border border-black/[0.04] space-y-1">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-baseline gap-x-2">
                       <div class="text-xs text-ios-tertiary font-medium">
                         {{ nodeTrafficPeriod === 'today' ? '今日吞吐总量' : '本月吞吐总量' }}
                       </div>
-                      <div class="text-lg sm:text-xl font-bold text-ios-label tabular-nums tracking-normal mt-0.5">
+                      <div class="text-lg sm:text-xl font-bold text-ios-label tabular-nums tracking-normal">
                         <TrafficValue :bytes="displayTotalBytes" />
                       </div>
                     </div>
@@ -343,7 +310,7 @@
                 </div>
 
                 <!-- 节点用量排行明细 (rows stay compact at their natural height) -->
-                <div class="flex-1 flex flex-col space-y-2.5">
+                <div class="flex-1 flex flex-col space-y-1.5">
                   <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary px-0.5">
                     <span>各节点用量排行</span>
                     <span class="text-xs text-ios-tertiary font-normal">实时监控</span>
@@ -355,55 +322,49 @@
                     description="尚未添加节点服务器，请前往节点管理配置。"
                   />
 
-                  <div v-else class="space-y-2">
+                  <div v-else class="space-y-1">
                     <div
                       v-for="(item, index) in sortedNodeTrafficList"
                       :key="item.node.id"
-                      class="p-2.5 rounded-xl border border-black/[0.04] bg-[#FAFAFA]/70 hover:bg-[#FAFAFA] transition-all space-y-1.5"
+                      class="px-2 py-1 rounded-xl border border-black/[0.04] bg-[#FAFAFA]/70 hover:bg-[#FAFAFA] transition-all grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 text-xs"
                     >
-                      <div class="flex items-center justify-between text-xs">
-                        <div class="flex items-center gap-2 min-w-0">
-                          <span
-                            :class="[
-                              'w-4 h-4 rounded text-xs font-bold flex items-center justify-center shrink-0',
-                              index === 0 ? 'bg-amber-100 text-amber-800' :
-                              index === 1 ? 'bg-slate-200 text-slate-700' :
-                              index === 2 ? 'bg-amber-50 text-amber-900 border border-amber-200/50' :
-                              'bg-black/[0.04] text-ios-tertiary'
-                            ]"
-                          >
-                            {{ index + 1 }}
-                          </span>
+                      <div class="flex items-center gap-1.5 min-w-0">
+                        <span
+                          :class="[
+                            'w-4 h-4 rounded text-xs font-bold flex items-center justify-center shrink-0',
+                            index === 0 ? 'bg-amber-100 text-amber-800' :
+                            index === 1 ? 'bg-slate-200 text-slate-700' :
+                            index === 2 ? 'bg-amber-50 text-amber-900 border border-amber-200/50' :
+                            'bg-black/[0.04] text-ios-tertiary'
+                          ]"
+                        >
+                          {{ index + 1 }}
+                        </span>
 
-                          <span
-                            :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(item.node) ? 'bg-emerald-500' : item.node.status === 'pending' ? 'bg-neutral-400' : 'bg-ios-red']"
-                            :title="nodeStatusLabel(item.node)"
-                          ></span>
+                        <span
+                          :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(item.node) ? 'bg-emerald-500' : item.node.status === 'pending' ? 'bg-neutral-400' : 'bg-ios-red']"
+                          :title="nodeStatusLabel(item.node)"
+                        ></span>
 
-                          <router-link
-                            :to="`/nodes/${item.node.id}`"
-                            class="font-medium text-ios-label hover:text-ios-blue truncate max-w-[130px] sm:max-w-[170px]"
-                            :title="item.node.name"
-                          >
-                            {{ item.node.name }}
-                          </router-link>
-
-                          <span class="tabular-nums text-xs truncate hidden sm:inline" :class="connectAddress(item.node) ? 'text-ios-tertiary' : 'text-ios-orange'">
-                            {{ connectAddress(item.node) || '未设置连接地址' }}
-                          </span>
-                        </div>
-
-                        <div class="flex items-center gap-2 shrink-0">
-                          <span class="text-ios-label text-xs font-semibold tabular-nums">
-                            <TrafficValue v-if="item.measured" :bytes="item.traffic" /><span v-else>—</span>
-                          </span>
-                          <span class="tabular-nums text-ios-tertiary text-xs w-8 text-right font-medium">
-                            {{ item.share }}%
-                          </span>
-                        </div>
+                        <router-link
+                          :to="`/nodes/${item.node.id}`"
+                          class="font-medium text-ios-label hover:text-ios-blue truncate"
+                          :title="item.node.name"
+                        >
+                          {{ item.node.name }}
+                        </router-link>
                       </div>
+                      <span class="text-ios-label text-xs font-semibold tabular-nums text-right">
+                        <TrafficValue v-if="item.measured" :bytes="item.traffic" /><span v-else>—</span>
+                      </span>
+                      <span class="min-w-0 tabular-nums truncate" :class="connectAddress(item.node) ? 'text-ios-tertiary' : 'text-ios-orange'" :title="connectAddress(item.node) || '未设置连接地址'">
+                        {{ connectAddress(item.node) || '未设置连接地址' }}
+                      </span>
+                      <span class="tabular-nums text-ios-tertiary text-xs text-right font-medium">
+                        {{ item.share }}%
+                      </span>
 
-                      <div class="w-full bg-black/[0.04] h-1.5 rounded-full overflow-hidden">
+                      <div class="col-span-2 w-full bg-black/[0.04] h-1 rounded-full overflow-hidden">
                         <div
                           class="bg-gradient-to-r from-ios-blue to-[#5856D6] h-full rounded-full transition-all duration-500"
                           :style="{ width: `${item.traffic > 0 ? item.percent : 0}%` }"
@@ -413,7 +374,7 @@
                   </div>
 
                   <!-- 底端辅助栏 -->
-                  <div class="pt-2.5 border-t border-black/[0.04] flex items-center justify-between text-xs text-ios-tertiary">
+                  <div class="pt-2 border-t border-black/[0.04] flex flex-wrap items-center justify-between gap-2 text-xs text-ios-tertiary">
                     <span class="flex items-center gap-1.5">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                       已接入 {{ allNodes.length }} 个节点
@@ -425,19 +386,14 @@
                 </div>
               </section>
             </div>
-          </div>
-
-          <!-- 3. 下部一排并列：用户用量与到期 (左) + 近期阻断 (右) -->
-          <!-- 使用 items-stretch 让两张卡片上下完全等高对齐 -->
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
             <!-- 用户用量与到期 -->
             <section
               :class="[
-                'panel-card p-5 sm:p-6 bg-white h-full flex flex-col justify-between space-y-4',
-                isOwner ? '' : 'lg:col-span-2'
+                'panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3',
+                isOwner ? '' : 'sm:col-span-2'
               ]"
             >
-              <div class="flex items-center justify-between">
+              <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">用户用量与到期</h2>
                   <p class="text-xs text-ios-tertiary mt-0.5">额度使用进度与续约提醒</p>
@@ -447,15 +403,15 @@
                 </router-link>
               </div>
 
-              <div v-if="allUsers.length === 0" class="text-xs text-ios-tertiary py-8 text-center flex-1 flex items-center justify-center">
+              <div v-if="allUsers.length === 0" class="text-xs text-ios-tertiary py-5 text-center flex-1 flex items-center justify-center">
                 暂无用户账户
               </div>
 
-              <div v-else class="space-y-2.5 flex-1 flex flex-col justify-start">
+              <div v-else class="space-y-2 flex-1 flex flex-col justify-start">
                 <div
                   v-for="u in topAttentionUsers"
                   :key="u.id"
-                  class="p-3 rounded-2xl border border-black/[0.04] bg-[#FAFAFA] space-y-2 text-xs"
+                  class="p-2.5 rounded-2xl border border-black/[0.04] bg-[#FAFAFA] space-y-1.5 text-xs"
                 >
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex items-center gap-2 truncate">
@@ -479,7 +435,7 @@
 
                   <!-- Quota progress bar -->
                   <div class="space-y-1">
-                    <div class="flex items-center justify-between text-xs text-ios-tertiary">
+                    <div class="flex flex-wrap items-center justify-between gap-x-2 text-xs text-ios-tertiary">
                       <span>已用: <TrafficValue :bytes="u.usedTraffic" /></span>
                       <span>{{ u.trafficLimit > 0 ? `配额: ${formatGiB(u.trafficLimit)}` : '不限限额' }}</span>
                     </div>
@@ -495,9 +451,9 @@
               </div>
             </section>
 
-            <!-- 近期阻断 (仅 Owner 可见，与用户用量严格等高对齐；只列被拦截的访问) -->
-            <section v-if="isOwner" class="panel-card p-5 sm:p-6 bg-white h-full flex flex-col justify-between space-y-4">
-              <div class="flex items-center justify-between">
+            <!-- 近期阻断 (仅 Owner 可见；只列被拦截的访问) -->
+            <section v-if="isOwner" class="panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">近期阻断</h2>
                   <p class="text-xs text-ios-tertiary mt-0.5">最近被拦截的访问</p>
@@ -510,7 +466,7 @@
               <!-- 暂无日志时的优雅等高占位 -->
               <div
                 v-if="!dashboard.recentBlocked?.length"
-                class="flex-1 min-h-[220px] rounded-2xl border border-dashed border-black/[0.08] flex flex-col items-center justify-center text-center p-6 space-y-2"
+                class="flex-1 min-h-[160px] rounded-2xl border border-dashed border-black/[0.08] flex flex-col items-center justify-center text-center p-4 space-y-2"
               >
                 <div class="w-10 h-10 rounded-2xl bg-black/[0.03] text-ios-tertiary flex items-center justify-center">
                   <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -524,11 +480,11 @@
               </div>
 
               <!-- 有日志时的紧凑列表 (flex-1 纵向撑满对齐) -->
-              <div v-else class="space-y-2 divide-y divide-black/[0.04] flex-1">
+              <div v-else class="space-y-1.5 divide-y divide-black/[0.04] flex-1">
                 <div
                   v-for="(item, idx) in dashboard.recentBlocked"
                   :key="idx"
-                  class="pt-2.5 first:pt-0 flex items-center justify-between gap-2 text-xs"
+                  class="pt-2 first:pt-0 flex items-center justify-between gap-2 text-xs"
                 >
                   <div class="min-w-0">
                     <p class="tabular-nums text-ios-label truncate font-medium text-xs">
@@ -569,6 +525,7 @@ import { panelDateLabel } from '../../../app/time';
 import { showToast } from '../../../app/api';
 import { generateQRCodeSVG } from '../../../app/qrcode';
 import PageHeader from '../../../components/PageHeader.vue';
+import ServerValueCard from '../components/ServerValueCard.vue';
 import TrafficValue from '../../../components/TrafficValue.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
@@ -578,6 +535,7 @@ import AppDialog from '../../../components/AppDialog.vue';
 const dashboard = ref<Dashboard | null>(null);
 const live = computed(() => dashboard.value ? liveSummary(dashboard.value.counts) : null);
 const allNodes = ref<NodeView[]>([]);
+const nodesError = ref('');
 const allUsers = ref<ProxyUser[]>([]);
 const allRevisions = ref<Revision[]>([]);
 const loading = ref(false);
@@ -612,11 +570,6 @@ function isNodeCoreUnhealthy(node: NodeView): boolean {
   const cores = node.heartbeat?.cores;
   return cores?.length ? cores.some(core => !core.healthy) : node.heartbeat?.core_healthy === false || !!node.heartbeat?.core_error;
 }
-
-const publishedNodesCount = computed(() => allNodes.value.filter(hasPublishedConfig).length);
-const unpublishedNodesCount = computed(() => allNodes.value.filter(n => isNodeOnline(n) && !hasPublishedConfig(n)).length);
-const unhealthyNodesCount = computed(() => allNodes.value.filter(isNodeCoreUnhealthy).length);
-const healthyNodesCount = computed(() => allNodes.value.filter(n => hasPublishedConfig(n) && !isNodeCoreUnhealthy(n) && (n.heartbeat?.cores?.length ? n.heartbeat.cores.every(core => core.healthy) : n.heartbeat?.core_healthy === true)).length);
 
 function nodeStatusLabel(node: NodeView): string {
   return isNodeOnline(node) ? '在线' : node.status === 'pending' ? '待登记' : '离线';
@@ -889,7 +842,7 @@ function getUserExpiryLabel(u: ProxyUser): string {
 // Data Loading
 async function loadTrafficData() {
   await Promise.all([
-    allPages(page => nodeAPI.list(page, '', false, 100)).then(result => { allNodes.value = result.items; }).catch(e => showToast((e as Error).message, 'error')),
+    allPages(page => nodeAPI.list(page, '', false, 100)).then(result => { allNodes.value = result.items; nodesError.value = ''; }).catch(e => { nodesError.value = (e as Error).message; showToast(nodesError.value, 'error'); }),
     isOwner.value ? userAPI.list(1, '', 50).then(result => { allUsers.value = result.items; }).catch(e => showToast((e as Error).message, 'error')) : Promise.resolve()
   ]);
 }

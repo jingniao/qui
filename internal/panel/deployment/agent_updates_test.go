@@ -195,3 +195,68 @@ func TestAgentUpdateValidationAndAuditLeaveNoPartialTask(t *testing.T) {
 		})
 	}
 }
+
+// PruneAgentReleases deletes older Agent releases nothing references, keeps the
+// catalogue row a task points to, and reports the files to keep: the newest
+// release plus any an unfinished task still needs.
+func TestPruneAgentReleasesKeepsNewestAndReferenced(t *testing.T) {
+	r, catalogue, _, nodeID, revision, old, keys := agentTaskFixture(t)
+	ctx := context.Background()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	save := func(version string, sequence int64) system.ReleaseEntry {
+		t.Helper()
+		manifest := old.Signed.Manifest
+		manifest.Version, manifest.Sequence = version, sequence
+		signed, err := release.Sign(manifest, private)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry, err := catalogue.SaveRelease(ctx, signed, public, "owner", "local")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return entry
+	}
+	unused := save("2.0.1", old.Signed.Manifest.Sequence+1)
+	if _, err := r.QueueAgentUpdate(ctx, catalogue, keys, nodeID, old.ID, "owner", "local", revision.ID); err != nil {
+		t.Fatal(err)
+	}
+	newest := save("2.0.2", old.Signed.Manifest.Sequence+2)
+	keep, err := catalogue.PruneAgentReleases(ctx)
+	if err != nil || len(keep) != 2 {
+		t.Fatalf("keep %+v %v", keep, err)
+	}
+	for _, m := range keep {
+		if m != old.Signed.Manifest && m != newest.Signed.Manifest {
+			t.Fatalf("kept %+v", m)
+		}
+	}
+	rows := func() map[string]bool {
+		got := map[string]bool{}
+		list, _, err := catalogue.ListReleases(ctx, 1, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range list {
+			got[entry.ID] = true
+		}
+		return got
+	}
+	if got := rows(); got[unused.ID] || !got[old.ID] || !got[newest.ID] {
+		t.Fatalf("catalogue rows %v", got)
+	}
+	// A finished task keeps its catalogue row but no longer needs the files.
+	if _, err := r.Database.Exec("UPDATE agent_update_tasks SET status='success'"); err != nil {
+		t.Fatal(err)
+	}
+	keep, err = catalogue.PruneAgentReleases(ctx)
+	if err != nil || len(keep) != 1 || keep[0] != newest.Signed.Manifest {
+		t.Fatalf("keep after finish %+v %v", keep, err)
+	}
+	if got := rows(); !got[old.ID] || !got[newest.ID] {
+		t.Fatalf("referenced row removed %v", got)
+	}
+}

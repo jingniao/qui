@@ -192,15 +192,15 @@
           </div>
           <p v-else class="text-xs text-ios-secondary">尚未上报运行内核</p>
           <div v-if="node.capabilities?.protocols?.length" class="flex flex-wrap gap-1.5">
-            <span
+            <ProtocolBadge
               v-for="p in node.capabilities.protocols"
               :key="p.protocol"
-              class="px-2 py-0.5 rounded-md text-xs font-mono font-medium"
-              :class="p.inbound && p.outbound ? 'bg-blue-50 text-ios-blue border border-blue-100/70' : (p.inbound ? 'bg-emerald-50 text-emerald-700 border border-emerald-100/70' : 'bg-neutral-100 text-neutral-600')"
+              :protocol="p.protocol"
+              compact
             >
               {{ p.protocol }}
               <span class="text-xs opacity-75 font-sans ml-0.5">{{ p.inbound && p.outbound ? '双向' : (p.inbound ? '入站' : '出站') }}</span>
-            </span>
+            </ProtocolBadge>
           </div>
           <p v-else class="text-xs text-ios-secondary">尚未上报协议能力</p>
         </section>
@@ -244,6 +244,7 @@ import { revisionEventText } from './serverDetailModel';
 import { nodeCores } from '../../coreSummary';
 import type { NodeGroup } from '../../groupsApi';
 import StatusBadge from '../../../../components/StatusBadge.vue';
+import ProtocolBadge from '../../../../components/ProtocolBadge.vue';
 import RelayCleanupBadge from '../RelayCleanupBadge.vue';
 import ServerNodeSummary from './ServerNodeSummary.vue';
 import ServerFinancialCards from './ServerFinancialCards.vue';

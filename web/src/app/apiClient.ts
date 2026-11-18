@@ -12,8 +12,6 @@ export class APIError extends Error {
 }
 
 const messages: Record<string, string> = {
-  'matched scope, address, port, network and active time window': '已匹配生效范围、目标地址、端口、网络与生效时间',
-  'no matching policy; inbound default rule': '未命中启用的策略，使用入站默认规则',
   'domain must be a hostname without path or URL': '域名必须为主机名，不能包含路径或 URL',
   'wildcard not allowed here': '此处不允许使用通配符',
   'invalid domain': '域名无效',
@@ -31,9 +29,6 @@ const messages: Record<string, string> = {
   'time window must have different start and end': '生效时间的开始与结束不能相同',
   'network must be all, tcp or udp': '网络必须为 all、tcp 或 udp',
   'invalid policy timezone': '策略时区无效',
-  'node, valid port and tcp/udp are required': '请选择节点、填写有效端口并选择 TCP 或 UDP',
-  'invalid target IP': '目标 IP 无效',
-  'domain or target IP required': '请填写域名或目标 IP',
   'invalid policy identity or priority': '策略标识或优先级无效',
   'policy scope exceeds limit': '策略生效范围超出数量限制',
   'invalid or duplicate policy scope': '策略生效范围无效或重复',
@@ -43,14 +38,6 @@ const messages: Record<string, string> = {
   'policy target required': '请选择策略目标',
   'invalid policy failover': '策略容灾方式无效',
   'backup target required': '请选择备用目标',
-  'simulation node not found': '模拟节点不存在',
-  'simulation device scope was removed in v1.1; simulate a user': 'v1.1 已移除设备范围，请按用户模拟',
-  'simulation user not found': '模拟用户不存在',
-  'user is disabled, expired or over quota at simulation time': '用户在模拟时间已禁用、到期或超额',
-  'simulation inbound not found on node': '该节点上不存在所选模拟入站',
-  'simulation outbound target unavailable': '模拟出站目标不可用',
-  'simulation chain target unavailable': '模拟代理链目标不可用',
-  'simulation outbound group unavailable': '模拟出口组不可用',
   invalid_credentials: '用户名或密码错误，或账号已被禁用。',
   unauthorized: '登录已过期，请重新登录。',
   forbidden: '当前账号没有执行此操作的权限。',

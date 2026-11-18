@@ -267,40 +267,6 @@ func (r *Repository) sealGostMaterial(tunnelID string, material gostMaterial) ([
 	return r.Vault.Seal(data)
 }
 
-// RotateCanvasTunnelCredentials replaces the credential set of one GOST tunnel and
-// marks it modified. The publication that follows deploys the exit node first and
-// the entry node second, so the relay keeps its old certificate for the length of
-// one deployment and the tunnel is interrupted briefly; nothing else is staged.
-func (s *Service) RotateCanvasTunnelCredentials(ctx context.Context, tunnelID, updatedAt string) (CanvasTunnel, error) {
-	s.canvasMu.Lock()
-	defer s.canvasMu.Unlock()
-	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
-		return CanvasTunnel{}, err
-	}
-	t, err := s.Repository.canvasTunnel(ctx, tunnelID)
-	if err != nil {
-		return CanvasTunnel{}, err
-	}
-	if !t.gostRelay() {
-		return CanvasTunnel{}, errors.New("only a GOST port_forward tunnel has credentials")
-	}
-	if t.UpdatedAt != updatedAt {
-		return CanvasTunnel{}, ErrStaleScheme
-	}
-	generation := int64(1)
-	if t.material != nil {
-		generation = t.material.Generation + 1
-	}
-	material, err := newGostMaterial(tunnelID, generation)
-	if err != nil {
-		return CanvasTunnel{}, err
-	}
-	if err := s.Repository.saveGostMaterial(ctx, s.Repository.Database, tunnelID, &material, nextCanvasStamp(t.UpdatedAt)); err != nil {
-		return CanvasTunnel{}, err
-	}
-	return s.Repository.canvasTunnel(ctx, tunnelID)
-}
-
 // syncGostMaterial keeps the sealed column in step with the tunnel kind: a GOST
 // port_forward tunnel gets a set the first time it is saved (so publication never
 // has to invent one), every other kind keeps none. A rotation replaces the set; an

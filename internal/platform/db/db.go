@@ -2,14 +2,12 @@ package db
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -75,11 +73,10 @@ func Migrate(ctx context.Context, database *sql.DB, files fs.FS) error {
  )`); err != nil {
 		return err
 	}
-	names, err := fs.Glob(files, "*.sql")
+	checksums, names, err := embeddedChecksums(files)
 	if err != nil {
 		return err
 	}
-	sort.Strings(names)
 	// Serialize competing process migrations, not only goroutines in this process.
 	conn, err := database.Conn(ctx)
 	if err != nil {
@@ -95,47 +92,28 @@ func Migrate(ctx context.Context, database *sql.DB, files fs.FS) error {
 			conn.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
-	known := make(map[string]bool, len(names))
-	for _, name := range names {
-		known[name] = true
-	}
-	rows, err := conn.QueryContext(ctx, "SELECT version FROM schema_migrations")
+	recorded, err := recordedMigrations(ctx, conn)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var version string
-		if err := rows.Scan(&version); err != nil {
-			rows.Close()
-			return err
-		}
-		if !known[version] {
-			rows.Close()
-			return fmt.Errorf("database migration %s is newer than or absent from this binary", version)
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
+	state := classifyMigrations(recorded, checksums)
+	switch {
+	case len(state.unknown) > 0:
+		return fmt.Errorf("database migration %s is newer than or absent from this binary", state.unknown[0])
+	case len(state.mismatched) > 0:
+		return fmt.Errorf("migration %s checksum mismatch; applied migrations are immutable", state.mismatched[0])
+	case state.outdated:
+		return ErrPredatesBaseline
 	}
 	for _, name := range names {
+		if state.applied[name] {
+			continue
+		}
 		data, err := fs.ReadFile(files, name)
 		if err != nil {
 			return err
 		}
-		checksum := fmt.Sprintf("%x", sha256.Sum256(data))
-		var stored string
-		err = conn.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE version = ?", name).Scan(&stored)
-		if err == nil {
-			if stored != checksum {
-				return fmt.Errorf("migration %s checksum mismatch; applied migrations are immutable", name)
-			}
-			continue
-		}
-		if err != sql.ErrNoRows {
-			return err
-		}
+		checksum := checksums[name]
 		if strings.TrimSpace(string(data)) == "" {
 			return fmt.Errorf("empty migration %s", name)
 		}

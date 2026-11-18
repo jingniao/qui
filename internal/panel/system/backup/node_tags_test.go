@@ -24,9 +24,4 @@ func TestValidateNodeTags(t *testing.T) {
 			t.Fatalf("%s accepted: %v", bad, err)
 		}
 	}
-	// An archive written before 0144 has no column and is valid.
-	rewindNodeTags(t, source.Database)
-	if err := validateNodeTags(ctx, source.Database); err != nil {
-		t.Fatalf("pre-0144 archive rejected: %v", err)
-	}
 }

@@ -257,19 +257,6 @@ func (s *Service) ResumePendingTraffic(ctx context.Context, now time.Time) error
 
 // Backup authentication does not repair a missing/damaged journal.
 func ValidatePendingTraffic(ctx context.Context, database *sql.DB, key *vault.Vault) error {
-	var present int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='traffic_pending_batches'").Scan(&present); err != nil {
-		return err
-	}
-	if present == 0 {
-		if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0048_traffic_pending_batches.sql'").Scan(&present); err != nil {
-			return err
-		}
-		if present != 0 {
-			return ErrInvalid
-		}
-		return nil
-	}
 	rows, err := database.QueryContext(ctx, "SELECT node_id,batch_id,digest,CASE WHEN length(encrypted_batch)<=1049600 THEN encrypted_batch END FROM traffic_pending_batches ORDER BY node_id,batch_id")
 	if err != nil {
 		return err

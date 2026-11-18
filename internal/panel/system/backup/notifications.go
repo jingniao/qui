@@ -11,13 +11,6 @@ import (
 )
 
 func validateNotifications(ctx context.Context, database *sql.DB, vault *vault.Vault) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0139_notifications.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	// 1. validate rules
 	rows, err := database.QueryContext(ctx, "SELECT kind, enabled, threshold, duration_minutes, cooldown_minutes FROM notification_rules")
 	if err != nil {

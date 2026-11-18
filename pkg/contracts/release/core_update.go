@@ -106,13 +106,6 @@ func strictUpdate(data []byte, maximum int, target any) error {
 	}
 	return nil
 }
-func DecodeUpdateRequest(data []byte) (UpdateRequest, error) {
-	var r UpdateRequest
-	if err := strictUpdate(data, MaxUpdateRequestBytes, &r); err != nil {
-		return r, err
-	}
-	return r, r.Validate()
-}
 func DecodeUpdateResult(data []byte) (UpdateResult, error) {
 	var r UpdateResult
 	if err := strictUpdate(data, MaxUpdateResultBytes, &r); err != nil {

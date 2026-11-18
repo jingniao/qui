@@ -5,31 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"proxycontrol/internal/panel/subscription/source/published"
 	"proxycontrol/internal/platform/vault"
 )
 
-// ValidateTunnels accepts pre-0129 archives and validates every persisted draft,
-// sealed credential set and claim before recovery migrates or serves a backup.
+// ValidateTunnels validates every persisted draft, sealed credential set and
+// claim before recovery serves a backup.
 func ValidateTunnels(ctx context.Context, database *sql.DB, key *vault.Vault) error {
-	if err := validateTunnelMigrationSchema(ctx, database); err != nil {
-		return err
-	}
-	var applied, present int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0129_tunnels.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('tunnels','tunnel_hops','tunnel_rules','port_claims','tunnel_objects')").Scan(&present); err != nil {
-		return err
-	}
-	if present != applied*5 {
-		return errors.New("tunnel schema mismatch")
-	}
-	if applied == 0 {
-		return nil
-	}
 	r := &Repository{Database: database, Vault: key}
 	tunnels, err := r.Tunnels(ctx)
 	if err != nil {
@@ -61,17 +44,7 @@ func ValidateTunnels(ctx context.Context, database *sql.DB, key *vault.Vault) er
 			}
 		}
 	}
-	// Archives made before 0152 have no import target column. They are checked
-	// before the recovery pipeline migrates them to the current schema.
-	var importColumn int
-	if err = database.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('tunnel_rules') WHERE name='target_import_id'").Scan(&importColumn); err != nil {
-		return err
-	}
-	columns := managedRuleColumns
-	if importColumn == 0 {
-		columns = strings.Replace(columns, "coalesce(r.target_import_id,'')", "''", 1)
-	}
-	rules, err := r.storedTunnelRulesColumns(ctx, "", "", columns)
+	rules, err := r.storedTunnelRules(ctx, "", "")
 	if err != nil {
 		return err
 	}
@@ -160,79 +133,24 @@ func ValidateTunnels(ctx context.Context, database *sql.DB, key *vault.Vault) er
 	if invalid != 0 {
 		return errors.New("port claim does not match owner listener")
 	}
-	var snapshots int
-	if err = database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0130_relay_subscription_snapshot.sql'").Scan(&snapshots); err != nil {
+	rows, err = database.QueryContext(ctx, "SELECT id,published_snapshot FROM tunnel_rules WHERE published_snapshot IS NOT NULL")
+	if err != nil {
 		return err
 	}
-	if snapshots != 0 {
-		rows, err := database.QueryContext(ctx, "SELECT id,published_snapshot FROM tunnel_rules WHERE published_snapshot IS NOT NULL")
-		if err != nil {
+	defer rows.Close()
+	for rows.Next() {
+		var id, raw string
+		if err = rows.Scan(&id, &raw); err != nil {
 			return err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var id, raw string
-			if err = rows.Scan(&id, &raw); err != nil {
-				return err
-			}
-			var snapshot published.Relay
-			if err = json.Unmarshal([]byte(raw), &snapshot); err != nil || snapshot.ID != id || snapshot.Port < 1 || snapshot.Port > 65535 || (snapshot.Network != "tcp" && snapshot.Network != "udp" && snapshot.Network != "both") {
-				return errors.New("invalid published tunnel snapshot")
-			}
+		var snapshot published.Relay
+		if err = json.Unmarshal([]byte(raw), &snapshot); err != nil || snapshot.ID != id || snapshot.Port < 1 || snapshot.Port > 65535 || (snapshot.Network != "tcp" && snapshot.Network != "udp" && snapshot.Network != "both") {
+			return errors.New("invalid published tunnel snapshot")
 		}
-		return rows.Err()
 	}
-	return nil
+	return rows.Err()
 }
 
-func validateTunnelMigrationSchema(ctx context.Context, database *sql.DB) error {
-	var snapshotApplied, snapshotColumn int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0130_relay_subscription_snapshot.sql'").Scan(&snapshotApplied); err != nil {
-		return err
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('tunnel_rules') WHERE name='published_snapshot'").Scan(&snapshotColumn); err != nil {
-		return err
-	}
-	if snapshotApplied != snapshotColumn {
-		return errors.New("tunnel publication snapshot schema mismatch")
-	}
-	var applied, present int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0131_canvas_forward_migration.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('canvas_forward_reconcile','tunnel_migration_report')").Scan(&present); err != nil {
-		return err
-	}
-	if present != applied*2 {
-		return errors.New("canvas forward migration schema mismatch")
-	}
-	if applied == 0 {
-		return nil
-	}
-	if snapshotApplied == 0 {
-		return errors.New("canvas forward migration requires tunnel snapshot schema")
-	}
-	var count int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM canvas_forward_reconcile WHERE id=1 AND done IN (0,1) AND json_valid(migrated_ids) AND json_type(migrated_ids)='array' AND (done=1 OR json_array_length(migrated_ids)=0)").Scan(&count); err != nil {
-		return err
-	}
-	if count != 1 {
-		return errors.New("invalid canvas forward migration marker")
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM canvas_forward_reconcile,json_each(migrated_ids) WHERE type<>'text' OR length(value)=0").Scan(&count); err != nil {
-		return err
-	}
-	if count != 0 {
-		return errors.New("invalid migrated tunnel identity")
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM tunnel_migration_report WHERE length(tunnel_id)=0 OR length(trim(name))=0 OR length(trim(reason))=0").Scan(&count); err != nil {
-		return err
-	}
-	if count != 0 {
-		return errors.New("invalid tunnel migration report")
-	}
-	return nil
-}
 func validatePortClaim(ctx context.Context, database *sql.DB, node string, port int, kind, owner string) error {
 	var count int
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM port_claims WHERE node_id=? AND port=? AND owner_kind=? AND owner_id=?", node, port, kind, owner).Scan(&count); err != nil {

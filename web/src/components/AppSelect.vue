@@ -51,6 +51,7 @@
     </button>
 
     <!-- 浮层下拉菜单 (Floating Dropdown Menu) -->
+    <Teleport to="body" :disabled="!teleport">
     <Transition
       enter-active-class="transition duration-150 ease-out"
       :enter-from-class="actualPlacement === 'top' ? 'transform scale-95 opacity-0 translate-y-1' : 'transform scale-95 opacity-0 -translate-y-1'"
@@ -61,14 +62,18 @@
     >
       <div
         v-if="isOpen"
+        ref="menuRef"
         :class="[
-          'absolute bg-white/95 backdrop-blur-md rounded-2xl border border-black/[0.08] shadow-xl p-1.5 z-50 overflow-y-auto space-y-0.5 text-xs text-left',
-          actualPlacement === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5',
-          align === 'right' ? 'right-0' : 'left-0',
-          hasDescriptions ? 'min-w-[240px] w-full' : 'w-full min-w-full',
+          'bg-white/95 backdrop-blur-md rounded-2xl border border-black/[0.08] shadow-xl p-1.5 overflow-y-auto space-y-0.5 text-xs text-left',
+          teleport ? 'fixed z-[70]' : 'absolute z-50',
+          !teleport && (actualPlacement === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'),
+          !teleport && (align === 'right' ? 'right-0' : 'left-0'),
+          teleport
+            ? (hasDescriptions ? 'min-w-[240px]' : '')
+            : (hasDescriptions ? 'min-w-[240px] w-full' : 'w-full min-w-full'),
           menuClass
         ]"
-        :style="{ maxHeight: dynamicMaxHeight + 'px' }"
+        :style="{ ...floatingStyle, maxHeight: dynamicMaxHeight + 'px' }"
       >
         <template v-for="(option, idx) in normalizedOptions" :key="String(option.value) + '-' + idx">
           <!-- 分组标题 (Group Header) -->
@@ -122,6 +127,7 @@
         </template>
       </div>
     </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -148,6 +154,8 @@ const props = withDefaults(
     placement?: 'auto' | 'top' | 'bottom';
     triggerClass?: string;
     menuClass?: string;
+    teleport?: boolean;
+    maxHeight?: number;
   }>(),
   {
     placeholder: '请选择…',
@@ -156,7 +164,9 @@ const props = withDefaults(
     align: 'left',
     placement: 'auto',
     triggerClass: '',
-    menuClass: ''
+    menuClass: '',
+    teleport: false,
+    maxHeight: 256
   }
 );
 
@@ -166,6 +176,8 @@ const emit = defineEmits<{
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
+const menuRef = ref<HTMLElement | null>(null);
+const floatingStyle = ref<Record<string, string>>({});
 const isOpen = ref(false);
 const highlightedIndex = ref(-1);
 const actualPlacement = ref<'top' | 'bottom'>('bottom');
@@ -174,14 +186,14 @@ const dynamicMaxHeight = ref<number>(256);
 function updatePlacement() {
   if (!containerRef.value) return;
 
-  if (props.placement === 'top') {
+  if (!props.teleport && props.placement === 'top') {
     actualPlacement.value = 'top';
-    dynamicMaxHeight.value = 256;
+    dynamicMaxHeight.value = props.maxHeight;
     return;
   }
-  if (props.placement === 'bottom') {
+  if (!props.teleport && props.placement === 'bottom') {
     actualPlacement.value = 'bottom';
-    dynamicMaxHeight.value = 256;
+    dynamicMaxHeight.value = props.maxHeight;
     return;
   }
 
@@ -190,7 +202,7 @@ function updatePlacement() {
   // 寻找最近的具有滚动或截断特性的父容器（如抽屉 body、弹窗、滚动面板）
   let parent = containerRef.value.parentElement;
   let scrollParent: HTMLElement | null = null;
-  while (parent && parent !== document.documentElement) {
+  while (!props.teleport && parent && parent !== document.documentElement) {
     const style = window.getComputedStyle(parent);
     const overflowY = style.overflowY;
     if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden') {
@@ -210,19 +222,31 @@ function updatePlacement() {
   const spaceBelow = bottomLimit - rect.bottom;
   const spaceAbove = rect.top - topLimit;
 
-  // 下拉列表期望的理想展示高度（约 200~260px）
-  const preferredHeight = 220;
+  // 浮层按配置限高计算窗口空间，普通菜单保留现有展开规则。
+  const preferredHeight = props.teleport ? props.maxHeight : 220;
 
   // 当下方剩余空间不足且上方空间大于下方，或下方剩余小于 180px 且上方足够时，自动向上弹出
-  if (
+  const opensAbove = props.placement === 'top' || (props.placement === 'auto' && (
     (spaceBelow < preferredHeight && spaceAbove > spaceBelow) ||
     (spaceBelow < 180 && spaceAbove >= 180)
-  ) {
+  ));
+  if (opensAbove) {
     actualPlacement.value = 'top';
-    dynamicMaxHeight.value = Math.max(120, Math.min(256, Math.floor(spaceAbove - 16)));
+    dynamicMaxHeight.value = props.teleport
+      ? Math.max(0, Math.min(props.maxHeight, Math.floor(spaceAbove - 16)))
+      : Math.max(120, Math.min(props.maxHeight, Math.floor(spaceAbove - 16)));
   } else {
     actualPlacement.value = 'bottom';
-    dynamicMaxHeight.value = Math.max(120, Math.min(256, Math.floor(spaceBelow - 16)));
+    dynamicMaxHeight.value = props.teleport
+      ? Math.max(0, Math.min(props.maxHeight, Math.floor(spaceBelow - 16)))
+      : Math.max(120, Math.min(props.maxHeight, Math.floor(spaceBelow - 16)));
+  }
+  if (props.teleport) {
+    floatingStyle.value = {
+      width: `${rect.width}px`,
+      ...(props.align === 'right' ? { right: `${window.innerWidth - rect.right}px` } : { left: `${rect.left}px` }),
+      ...(opensAbove ? { bottom: `${viewportHeight - rect.top + 6}px` } : { top: `${rect.bottom + 6}px` })
+    };
   }
 }
 
@@ -294,7 +318,8 @@ function selectHighlighted() {
 }
 
 function handleClickOutside(event: MouseEvent) {
-  if (containerRef.value && !containerRef.value.contains(event.target as Node)) {
+  if (containerRef.value && !containerRef.value.contains(event.target as Node)
+    && !menuRef.value?.contains(event.target as Node)) {
     closeDropdown();
   }
 }

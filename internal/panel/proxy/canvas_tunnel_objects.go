@@ -169,96 +169,6 @@ func legacyCanvasName(kind, name string) bool {
 	}
 	return false
 }
-func (r *Repository) LegacyCanvasObjects(ctx context.Context) ([]CanvasTunnelObject, error) {
-	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
-		return nil, err
-	}
-	return r.legacyCanvasObjectsReadOnly(ctx)
-}
-
-func (r *Repository) legacyCanvasObjectsReadOnly(ctx context.Context) ([]CanvasTunnelObject, error) {
-	rows, err := r.Database.QueryContext(ctx, `SELECT 'inbound',i.id,i.node_id,i.name,i.port FROM inbounds i WHERE (i.internal_relay=1 OR i.protocol='forward') AND NOT EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='inbound' AND o.object_id=i.id)
- UNION ALL SELECT 'outbound',b.id,b.node_id,b.name,0 FROM outbounds b WHERE b.target_inbound_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='outbound' AND o.object_id=b.id)
- UNION ALL SELECT 'chain',c.id,COALESCE(json_extract(c.node_ids_json,'$[0]'),''),c.name,0 FROM proxy_chains c WHERE NOT EXISTS(SELECT 1 FROM canvas_tunnel_objects o WHERE o.object_kind='chain' AND o.object_id=c.id) ORDER BY 1,2`)
-	if err != nil {
-		return nil, err
-	}
-	items := []CanvasTunnelObject{}
-	for rows.Next() {
-		var o CanvasTunnelObject
-		if err := rows.Scan(&o.Kind, &o.ID, &o.NodeID, &o.Name, &o.Port); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if legacyCanvasName(o.Kind, o.Name) {
-			o.CandidateTunnels = []string{}
-			items = append(items, o)
-		}
-	}
-	if err = rows.Close(); err != nil {
-		return nil, err
-	}
-	tunnels, err := r.canvasTunnelsReadOnly(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for n := range items {
-		for _, t := range tunnels {
-			if r.compatibleTunnelObject(ctx, t, items[n]) == nil {
-				items[n].CandidateTunnels = append(items[n].CandidateTunnels, t.ID)
-			}
-		}
-	}
-	return items, nil
-}
-
-func (r *Repository) compatibleTunnelObject(ctx context.Context, t CanvasTunnel, o CanvasTunnelObject) error {
-	return compatibleCanvasObject(ctx, r.Database, t, o)
-}
-
-func (r *Repository) AdoptCanvasObjects(ctx context.Context, tunnelID string, objects []CanvasTunnelObject) error {
-	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
-		return err
-	}
-	tx, err := r.Database.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	t, err := scanTunnel(tx.QueryRowContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels WHERE id=?", tunnelID))
-	if err != nil {
-		return err
-	}
-	if len(objects) == 0 || len(objects) > 100 {
-		return errors.New("objects must contain 1 to 100 entries")
-	}
-	seen := map[string]bool{}
-	for _, o := range objects {
-		key := o.Kind + ":" + o.ID
-		if seen[key] {
-			return errors.New("duplicate object")
-		}
-		seen[key] = true
-		if err := compatibleCanvasObject(ctx, tx, t, o); err != nil {
-			return err
-		}
-	}
-	for _, o := range objects {
-		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM canvas_tunnel_objects WHERE object_kind=? AND object_id=?", o.Kind, o.ID).Scan(&count); err != nil {
-			return err
-		}
-		if count != 0 {
-			return ErrCanvasObjectOwned
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO canvas_tunnel_objects VALUES(?,?,?)", tunnelID, o.Kind, o.ID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-var ErrCanvasObjectOwned = errors.New("object already belongs to a tunnel")
 
 type TunnelInUseError struct{ Schemes []CanvasSchemeRef }
 
@@ -266,9 +176,6 @@ func (e *TunnelInUseError) Error() string { return "tunnel_in_use" }
 func (s *Service) DeleteCanvasTunnel(ctx context.Context, tunnelID string) error {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
-	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
-		return err
-	}
 	if _, err := s.Repository.canvasTunnel(ctx, tunnelID); err != nil {
 		return err
 	}

@@ -137,7 +137,7 @@ const routes: RouteRecordRaw[] = [
         redirect: '/proxy/relay'
       },
 
-      // 5. Routing Module (Client Policies, Node Policies, Rule Sets, Simulator)
+      // 5. Routing Module (Client Policies, Node Policies, Rule Sets)
       {
         path: 'routing',
         redirect: '/routing/client'
@@ -179,12 +179,6 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'routing/websites',
         redirect: '/routing/rules'
-      },
-      {
-        path: 'routing/simulator',
-        name: 'PolicySimulator',
-        component: () => import('../modules/routing/pages/PolicySimulatorPage.vue'),
-        meta: { title: '策略模拟', parent: '分流控制' }
       },
 
       // 6. Access Records Module

@@ -486,7 +486,7 @@
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[140px]">{{ node.name }}</span>
-                  <span class="px-1 py-0.2 rounded text-xs font-mono uppercase bg-black/[0.05]">{{ node.protocol }}</span>
+                  <ProtocolBadge :protocol="node.protocol" compact class="uppercase" />
                 </div>
                 <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate">{{ node.server }}:{{ node.port }}</span>
@@ -530,7 +530,7 @@
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[140px]">{{ node.name }}</span>
-                  <span class="px-1 py-0.2 rounded text-xs font-mono uppercase bg-purple-100 text-purple-700">{{ node.protocol }}</span>
+                  <ProtocolBadge :protocol="node.protocol" compact class="uppercase" />
                 </div>
                 <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="truncate">{{ node.sourceName }}</span>
@@ -574,7 +574,7 @@
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[140px]">{{ node.name }}</span>
-                  <span class="px-1 py-0.2 rounded text-xs font-mono uppercase bg-blue-100 text-ios-blue">{{ node.protocol }}</span>
+                  <ProtocolBadge :protocol="node.protocol" compact class="uppercase" />
                 </div>
                 <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate">{{ node.server }}:{{ node.port }}</span>
@@ -1085,6 +1085,7 @@ import { selfHostedLibraryItems } from '../components/relay/canvasLibrary';
 import { tunnelConflictText, type TunnelPlan } from '../components/relay/tunnelEditorModel';
 import { useRoute } from 'vue-router';
 import AppDialog from '../../../components/AppDialog.vue';
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';

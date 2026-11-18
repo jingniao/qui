@@ -2,59 +2,10 @@ package user
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
-	"proxycontrol/internal/platform/db"
-	"proxycontrol/migrations"
+
 	"testing"
 	"time"
 )
-
-func TestTrafficResetRemarkMigrationFixtures(t *testing.T) {
-	ctx := context.Background()
-	uri, err := db.URI(filepath.Join(t.TempDir(), "migration.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	database, err := sql.Open("sqlite", uri)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	database.SetMaxOpenConns(1)
-	if err = db.Migrate(ctx, database, beforeMigration{FS: migrations.Files, stop: "0118_traffic_reset.sql"}); err != nil {
-		t.Fatal(err)
-	}
-	fixtures := []struct{ remark, cycle, want string }{
-		{"  原样\r\n备注\t ", "none", "  原样\r\n备注\t "},
-		{"[config:cycle=monthly;up=10;down=20] \n保留 末尾 ", "monthly", "保留 末尾 "},
-		{"[config:up=2;cycle=30days;down=3]备注", "30days", "备注"},
-		{"[config:cycle=invalid;up=0] \t", "none", ""},
-		{"[config:cycle=monthly;cycle=30days] x", "30days", "x"},
-		{"x[config:cycle=monthly] x", "none", "x[config:cycle=monthly] x"},
-		{"[config:cycle=monthly", "none", "[config:cycle=monthly"},
-	}
-	for i, f := range fixtures {
-		if _, err = database.Exec(`INSERT INTO users(id,username,display_name,status,max_devices,max_connections,protocols_json,remark,created_at) VALUES(?,?,?,'active',1,1,'["socks5"]',?,'2024-01-31T00:00:00.000000000Z')`, i, i, i, f.remark); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = db.Migrate(ctx, database, migrations.Files); err != nil {
-		t.Fatal(err)
-	}
-	for i, f := range fixtures {
-		var remark, cycle string
-		if err = database.QueryRow("SELECT remark,traffic_reset_cycle FROM users WHERE id=?", i).Scan(&remark, &cycle); err != nil {
-			t.Fatal(err)
-		}
-		if remark != f.want || cycle != f.cycle {
-			t.Fatalf("fixture %d: %q %s", i, remark, cycle)
-		}
-	}
-	if err = db.Migrate(ctx, database, migrations.Files); err != nil {
-		t.Fatal("repeat migration", err)
-	}
-}
 
 func TestTrafficResetCalendarFakeClock(t *testing.T) {
 	for _, test := range []struct{ anchor, now, cycle, want, zone string }{

@@ -65,6 +65,36 @@
 - **Separator 极细分割线**：`rgba(0, 0, 0, 0.08)` (`divide-ios-separator`)
 - **Backdrop 毛玻璃遮罩**：`bg-black/40 backdrop-blur-md`
 
+### 4. 代理协议专属色
+
+协议身份色集中定义于 `web/tailwind.config.js` 的 `colors.protocol`，映射维护于 `web/src/components/protocolColors.ts`，所有协议徽标复用 `ProtocolBadge`。正文颜色使用下表深色，背景为该色 10% 透明度，边框为 20%，保持 12px 字号；不随页面、来源、入站／出站方向改变协议颜色。协议名称始终保留，不能只靠颜色识别。核心身份色和按钮／状态语义色仍按各自规则维护。
+
+| 协议 | 专属色 | Token | 色值 |
+| --- | --- | --- | --- |
+| VLESS | 蓝色 | `protocol.vless` | `#0067C5` |
+| VMess | 莓紫 | `protocol.vmess` | `#9A496E` |
+| Trojan | 紫色 | `protocol.trojan` | `#8739B3` |
+| Shadowsocks | 靛蓝 | `protocol.shadowsocks` | `#4F46B8` |
+| WireGuard | 绿色 | `protocol.wireguard` | `#237747` |
+| SOCKS5 | 蓝绿 | `protocol.socks5` | `#007D80` |
+| HTTP | 琥珀 | `protocol.http` | `#986000` |
+| Hysteria2 | 玫红 | `protocol.hysteria2` | `#BB3463` |
+| TUIC | 湖蓝 | `protocol.tuic` | `#00789F` |
+| Forward（端口转发） | 橄榄 | `protocol.forward` | `#66752B` |
+| Direct（直连动作） | 青灰 | `protocol.direct` | `#52666D` |
+| Block（阻断动作） | 红色 | `protocol.block` | `#B73535` |
+
+`SS` 复用 Shadowsocks，`HY2` 复用 Hysteria2，`SOCKS` 复用 SOCKS5，`HTTP CONNECT` 复用 HTTP，`blackhole` 复用 Block，匹配不区分大小写；别名不分配新颜色。未登记的标识保留原有中性徽标，不自动占用预留色，也不代表新增协议支持。`ProtocolBadge` 默认保留胶囊形状，`compact` 用于原有紧凑矩形标签，`label` 或默认插槽可保留门户名称、方向等附加内容；原生选择框及说明正文保持原样。
+
+以下四个色位已登记但尚未分配。新增协议时明确选择一个色位，同时更新 Token、映射和本表，不按出现顺序自动分色，不改动已分配协议的颜色。
+
+| 预留色位 | Token | 色值 |
+| --- | --- | --- |
+| 珊瑚 | `protocol.reserved-coral` | `#AD4B2E` |
+| 薄荷 | `protocol.reserved-mint` | `#277B65` |
+| 钢蓝 | `protocol.reserved-steel` | `#536C98` |
+| 赭石 | `protocol.reserved-ochre` | `#886A39` |
+
 ---
 
 ## 三、文字排版与层级 (Typography & Hierarchy)
@@ -91,6 +121,7 @@
 ### 3. 渲染与可读性约束
 
 - 根字号 16px，正文默认 14px，正文行高 1.5；字号使用上表的 Tailwind 类，禁止任意字号和按 `em` 缩小辅助文字。流量单位固定为 12px，避免嵌入小号文本后继续缩小。
+- Owner 于 2026-11-18 明确允许服务器卡片标题行的网速数值与单位试用 10px 字号、12px 行高（`ServerCardGrid.vue`），作为上述最小字号与单位字号规则的局部例外；其他文字仍按标准字阶显示。
 - 默认字距为 `normal`，不对中文正文、标签和数据施加负字距。短英文分类可保留正字距。
 - 保留浏览器和操作系统的原生字体平滑，不全局强制 `antialiased`、`-webkit-font-smoothing` 或 `text-rendering: optimizeLegibility`。字体清晰度仍受系统缩放、浏览器缩放及屏幕像素密度影响，CSS 不保证消除所有锯齿。
 - 侧栏恢复原有半透明毛玻璃背景；导航 14px，普通项字重 400、选中项 600，一级分类保留 `tracking-wide` 字距。
@@ -172,6 +203,7 @@
   background-size: 1.15rem 1.15rem;
   padding-right: 2.25rem; /* 防止选项文字与右侧箭头重叠 */
   ```
+- **弹窗内的自定义菜单**：复用 `AppSelect`；需要跨过弹窗滚动区显示时启用 `teleport`，菜单挂载到 body 并显示在弹窗遮罩上方，依据窗口可用空间决定展开方向与高度，随滚动和窗口变化重新定位。默认最大高度为 256px；「新增服务器」和「编辑服务器」复用同一份 `ServerFormFields` 表单，弹窗宽度均为 `lg`，币种、续费周期与月流量计算类型统一使用该浮层，触发框和选项为 14px、普通字重。币种与续费周期菜单设为 360px，以容纳八种币种或七种周期，周期菜单向右对齐；月流量计算类型菜单最小宽度 224px，以显示完整选项。窗口空间不足时保留菜单内滚动，未启用的调用保留原有定位方式。
 
 ### 3. 复选框与单选框 (`input[type="checkbox"]`, `input[type="radio"]`)
 - **主题色**：`accent-color: #0071E3`。

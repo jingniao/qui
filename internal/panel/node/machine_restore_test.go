@@ -127,34 +127,6 @@ func TestMachineTrafficRestoreEmptyCurrentTableWins(t *testing.T) {
 	}
 }
 
-func TestMachineTrafficRestoreSourcePredatingTheMigration(t *testing.T) {
-	live := newMachineRestore(t)
-	id := live.nodeID
-	now := time.Now().UTC()
-	storeMachineDay(t, live.repository, id, "eth0", now.Format(MachineDayLayout), 50, 5)
-	archive := live.snapshot(t, "archive.db")
-	// A running database from before 0126 has none of the three tables: the
-	// archived history stays as the migrated candidate holds it.
-	source := live.snapshot(t, "source.db")
-	older, err := dbtest.Open(context.Background(), source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, query := range []string{"DROP TABLE node_machine_traffic_settings", "DROP TABLE node_machine_traffic_daily", "DROP TABLE node_machine_traffic_cursors", "DELETE FROM schema_migrations WHERE version='0126_node_machine_traffic.sql'"} {
-		if _, err := older.Exec(query); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := older.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		t.Fatal(err)
-	}
-	older.Close()
-	restored := restoreMachineTraffic(t, archive, source)
-	if rx, tx, rows := machineTotals(t, restored, id, "eth0"); rx != 50 || tx != 5 || rows != 1 {
-		t.Fatalf("the archived history was lost: %d %d %d", rx, tx, rows)
-	}
-}
-
 func TestMachineTrafficRestoreKeepsDeletedNodeRows(t *testing.T) {
 	live := newMachineRestore(t)
 	ctx := context.Background()

@@ -3,7 +3,6 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -35,12 +34,11 @@ type CanvasSchemeRef struct {
 	Name string `json:"name"`
 }
 type CanvasTunnelObject struct {
-	Kind             string   `json:"kind"`
-	ID               string   `json:"id"`
-	NodeID           string   `json:"nodeId"`
-	Name             string   `json:"name"`
-	Port             int      `json:"port"`
-	CandidateTunnels []string `json:"candidateTunnels,omitempty"`
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	NodeID string `json:"nodeId"`
+	Name   string `json:"name"`
+	Port   int    `json:"port"`
 }
 type CanvasTunnel struct {
 	CanvasTunnelInput
@@ -107,23 +105,8 @@ func scanTunnel(row interface{ Scan(...any) error }) (CanvasTunnel, error) {
 
 const tunnelColumns = "id,name,connection_json,source_ref,target_ref,inline_scheme_id,object_prefix,created_at,updated_at,published_version,allocated_port,gost_material"
 
-// tunnelColumnsBefore0128 is the same projection for an archive that has not
-// applied 0128_gost_tunnels.sql yet (every v1.2.0 backup ends at 0124): the
-// sealed credential column does not exist there, so it reads as absent instead
-// of failing the whole archive.
-const tunnelColumnsBefore0128 = "id,name,connection_json,source_ref,target_ref,inline_scheme_id,object_prefix,created_at,updated_at,published_version,allocated_port,NULL AS gost_material"
-
-// tunnelProjection selects the columns a tunnel read may use. Only the archive
-// validation sets archiveBeforeGostMaterial; a live database is always migrated.
-func (r *Repository) tunnelProjection() string {
-	if r.archiveBeforeGostMaterial {
-		return tunnelColumnsBefore0128
-	}
-	return tunnelColumns
-}
-
 func (r *Repository) canvasTunnel(ctx context.Context, tunnelID string) (CanvasTunnel, error) {
-	t, err := scanTunnel(r.Database.QueryRowContext(ctx, "SELECT "+r.tunnelProjection()+" FROM canvas_tunnels WHERE id=?", tunnelID))
+	t, err := scanTunnel(r.Database.QueryRowContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels WHERE id=?", tunnelID))
 	if err != nil {
 		return t, err
 	}
@@ -166,14 +149,11 @@ func (r *Repository) tunnelSchemes(ctx context.Context, tunnelID string) ([]Canv
 	return items, rows.Err()
 }
 func (r *Repository) CanvasTunnels(ctx context.Context) ([]CanvasTunnel, error) {
-	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
-		return nil, err
-	}
 	return r.canvasTunnelsReadOnly(ctx)
 }
 
 func (r *Repository) canvasTunnelsReadOnly(ctx context.Context) ([]CanvasTunnel, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+r.tunnelProjection()+" FROM canvas_tunnels ORDER BY created_at,id")
+	rows, err := r.Database.QueryContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels ORDER BY created_at,id")
 	if err != nil {
 		return nil, err
 	}
@@ -208,9 +188,6 @@ func (r *Repository) canvasTunnelsReadOnly(ctx context.Context) ([]CanvasTunnel,
 func (s *Service) SaveCanvasTunnel(ctx context.Context, tunnelID string, input CanvasTunnelInput) (CanvasTunnel, error) {
 	s.canvasMu.Lock()
 	defer s.canvasMu.Unlock()
-	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
-		return CanvasTunnel{}, err
-	}
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > canvasMaxNameBytes {
 		return CanvasTunnel{}, errors.New("tunnel name must be 1 to 80 bytes")
@@ -410,170 +387,4 @@ func (r *Repository) saveInlineTunnels(ctx context.Context, tx *sql.Tx, schemeID
 		input.Layout.Connections[n] = c
 	}
 	return nil
-}
-
-// ReconcileCanvasTunnels is one-shot and transactional. Only pre-migration,
-// published, exact current-name claims participate; duplicate claims adopt
-// nothing. No future drawing can retroactively acquire a deleted legacy owner.
-func (r *Repository) ReconcileCanvasTunnels(ctx context.Context) error {
-	var done int
-	if err := r.Database.QueryRowContext(ctx, "SELECT done FROM canvas_tunnel_reconcile WHERE id=1").Scan(&done); err != nil {
-		return err
-	}
-	if done == 1 {
-		return nil
-	}
-	tx, err := r.Database.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := tx.QueryRowContext(ctx, "SELECT done FROM canvas_tunnel_reconcile WHERE id=1").Scan(&done); err != nil {
-		return err
-	}
-	if done == 1 {
-		return nil
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT t.id,t.connection_json,t.source_ref,t.target_ref,t.object_prefix FROM canvas_tunnels t JOIN canvas_schemes s ON s.id=t.inline_scheme_id WHERE s.published_at<>'' AND s.execution='server'`)
-	if err != nil {
-		return err
-	}
-	type legacy struct{ id, raw, source, target, prefix string }
-	items := []legacy{}
-	for rows.Next() {
-		var x legacy
-		if err := rows.Scan(&x.id, &x.raw, &x.source, &x.target, &x.prefix); err != nil {
-			rows.Close()
-			return err
-		}
-		items = append(items, x)
-	}
-	if err = rows.Close(); err != nil {
-		return err
-	}
-	type claim struct{ tunnel, kind, id string }
-	claims := map[string][]claim{}
-	for _, x := range items {
-		var c CanvasConnection
-		if err := json.Unmarshal([]byte(x.raw), &c); err != nil {
-			return err
-		}
-		source := strings.TrimPrefix(x.source, "server:")
-		target := strings.TrimPrefix(x.target, "server:")
-		var a, b string
-		if err := tx.QueryRowContext(ctx, "SELECT name FROM nodes WHERE id=?", source).Scan(&a); errors.Is(err, sql.ErrNoRows) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, "SELECT name FROM nodes WHERE id=?", target).Scan(&b); errors.Is(err, sql.ErrNoRows) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		protocol := canvasTunnels[c.TunnelProtocol]
-		if c.TunnelProtocol == "" {
-			protocol = "trojan"
-		}
-		port := canvasDefaultPort(protocol)
-		if c.TunnelPort != nil {
-			port = *c.TunnelPort
-		}
-		if c.Type != "port_forward" && c.TunnelPort == nil {
-			rs, e := tx.QueryContext(ctx, "SELECT name,port FROM inbounds WHERE node_id=? AND protocol=? AND internal_relay=1", target, protocol)
-			if e != nil {
-				return e
-			}
-			matched := []int{}
-			for rs.Next() {
-				var name string
-				var candidate int
-				if e := rs.Scan(&name, &candidate); e != nil {
-					rs.Close()
-					return e
-				}
-				expected, _ := canvasEdgeNames(x.prefix, a, b, protocol, candidate)
-				if name == expected {
-					matched = append(matched, candidate)
-				}
-			}
-			if e := rs.Close(); e != nil {
-				return e
-			}
-			if len(matched) > 1 {
-				continue
-			}
-			if len(matched) == 1 {
-				port = matched[0]
-			}
-		}
-		in, out := canvasEdgeNames(x.prefix, a, b, protocol, port)
-		specs := []struct{ kind, table, node, name string }{{"inbound", "inbounds", target, in}, {"outbound", "outbounds", source, out}}
-		if c.Type == "port_forward" {
-			hash := sha256.Sum256([]byte(c.ID + ":" + source + ":" + target))
-			specs = specs[:1]
-			specs[0].node = source
-			specs[0].name = fmt.Sprintf("%sforward %x%s", x.prefix, hash[:8], canvasInboundSuffix)
-		}
-		for _, sp := range specs {
-			query := "SELECT id FROM " + sp.table + " WHERE node_id=? AND name=? AND protocol=?"
-			wantProtocol := protocol
-			if c.Type == "port_forward" {
-				wantProtocol = "forward"
-			}
-			args := []any{sp.node, sp.name, wantProtocol}
-			if sp.kind == "inbound" {
-				query += " AND (internal_relay=1 OR protocol='forward')"
-				if c.Type != "port_forward" {
-					query += " AND port=?"
-					args = append(args, port)
-				} else if c.ListenPort != nil {
-					query += " AND port=?"
-					args = append(args, *c.ListenPort)
-				}
-			} else {
-				query += " AND target_inbound_id IS NOT NULL"
-			}
-			rs, e := tx.QueryContext(ctx, query, args...)
-			if e != nil {
-				return e
-			}
-			matched := []string{}
-			for rs.Next() {
-				var object string
-				if e = rs.Scan(&object); e != nil {
-					rs.Close()
-					return e
-				}
-				matched = append(matched, object)
-			}
-			if e = rs.Close(); e != nil {
-				return e
-			}
-			if len(matched) == 1 {
-				object := matched[0]
-				key := sp.kind + ":" + object
-				claims[key] = append(claims[key], claim{x.id, sp.kind, object})
-			}
-		}
-	}
-	for _, cs := range claims {
-		if len(cs) != 1 {
-			continue
-		}
-		c := cs[0]
-		if _, err = tx.ExecContext(ctx, "INSERT INTO canvas_tunnel_objects(tunnel_id,object_kind,object_id) VALUES(?,?,?)", c.tunnel, c.kind, c.id); err != nil {
-			return err
-		}
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE canvas_tunnels SET published_version=updated_at WHERE id IN (SELECT t.id FROM canvas_tunnels t JOIN canvas_schemes s ON s.id=t.inline_scheme_id WHERE s.published_at<>'' AND (SELECT count(*) FROM canvas_tunnel_objects o WHERE o.tunnel_id=t.id)=CASE WHEN json_extract(t.connection_json,'$.type')='port_forward' THEN 1 ELSE 2 END)`); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE canvas_tunnels SET allocated_port=(SELECT i.port FROM canvas_tunnel_objects o JOIN inbounds i ON i.id=o.object_id WHERE o.object_kind='inbound' AND o.tunnel_id=canvas_tunnels.id AND i.protocol<>'forward') WHERE published_version<>''`); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, "UPDATE canvas_tunnel_reconcile SET done=1 WHERE id=1"); err != nil {
-		return err
-	}
-	return tx.Commit()
 }

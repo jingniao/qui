@@ -306,9 +306,7 @@
                   <span v-if="item.kind !== 'inbound'" class="text-xs px-1.5 py-0.5 rounded bg-black/[0.04] text-ios-secondary">
                     {{ item.kind === 'relay' ? '中转' : '导入' }}
                   </span>
-                  <span class="text-xs font-medium px-1.5 py-0.5 rounded bg-black/[0.04] text-ios-secondary">
-                    {{ item.protocol.toUpperCase() }}
-                  </span>
+                  <ProtocolBadge :protocol="item.protocol" compact class="uppercase" />
                 </div>
               </div>
 
@@ -378,9 +376,7 @@
                   {{ rec.domain || rec.target_ip }}
                 </td>
                 <td class="py-2.5 text-ios-secondary">
-                  <span class="px-1.5 py-0.5 rounded text-xs bg-black/[0.04] font-mono">
-                    {{ rec.inbound_protocol }}
-                  </span>
+                  <ProtocolBadge :protocol="rec.inbound_protocol" compact />
                 </td>
                 <td class="py-2.5">
                   <span
@@ -603,6 +599,7 @@
 </template>
 
 <script setup lang="ts">
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';

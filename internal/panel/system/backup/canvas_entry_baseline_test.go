@@ -31,7 +31,7 @@ func TestCanvasEntryBaselineArchiveValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			database := canvasBindingArchiveDB(t)
-			for _, q := range []string{"INSERT INTO schema_migrations VALUES('0148_canvas_entry_baseline.sql')", "ALTER TABLE canvas_entry_bindings ADD COLUMN creation_config_json TEXT", "ALTER TABLE canvas_entry_bindings ADD COLUMN creation_groups_json TEXT"} {
+			for _, q := range []string{"ALTER TABLE canvas_entry_bindings ADD COLUMN creation_config_json TEXT", "ALTER TABLE canvas_entry_bindings ADD COLUMN creation_groups_json TEXT"} {
 				if _, err := database.Exec(q); err != nil {
 					t.Fatal(err)
 				}

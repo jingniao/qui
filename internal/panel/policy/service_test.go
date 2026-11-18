@@ -11,7 +11,7 @@ import (
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/internal/testutil/dbtest"
 	"proxycontrol/pkg/contracts/desiredstate"
-	shared "proxycontrol/pkg/contracts/policy"
+	"slices"
 	"testing"
 	"time"
 )
@@ -52,20 +52,15 @@ func fixture(t *testing.T) (*Service, string, user.User, user.Device, node.Group
 	}
 	return &Service{Repository: &Repository{Database: database, Vault: configurationVault}, Nodes: nodes, Users: users, Proxies: &proxy.Repository{Database: database, Vault: configurationVault}, Settings: &system.Repository{Database: database}}, n.ID, u, device, group
 }
-func TestServiceSetsExpandAtPublicationAndMatchSimulator(t *testing.T) {
+func TestServiceSetsExpandAtPublication(t *testing.T) {
 	service, nodeID, u, _, group := fixture(t)
 	ctx := context.Background()
 	rule, err := service.Save(ctx, "", Input{Name: "Netflix blocked", Priority: 10, Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{u.ID}, GroupIDs: []string{group.ID}}, Match: desiredstate.Match{ServiceIDs: []string{"service-netflix"}, Ports: []string{"443"}, Network: "tcp"}, Action: desiredstate.Action{Type: "Block"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := shared.Request{NodeID: nodeID, UserID: u.ID, Domain: "www.netflix.com", Port: 443, Network: "tcp", Time: time.Now().UTC()}
-	decision, err := service.Simulate(ctx, request)
-	if err != nil || !decision.Matched || decision.PolicyID != rule.ID {
-		t.Fatal("simulator did not match expanded service", err)
-	}
 	snapshot, err := service.ForNode(ctx, nodeID)
-	if err != nil || len(snapshot) != 1 {
+	if err != nil || len(snapshot) != 1 || snapshot[0].ID != rule.ID {
 		t.Fatal(err)
 	}
 	if len(snapshot[0].Match.ServiceIDs) != 0 || len(snapshot[0].Scope.GroupIDs) != 0 || len(snapshot[0].Match.Suffixes) == 0 {
@@ -82,36 +77,24 @@ func TestServiceSetsExpandAtPublicationAndMatchSimulator(t *testing.T) {
 	if beforeAgain, _ := json.Marshal(snapshot); string(beforeAgain) != string(before) {
 		t.Fatal("service draft mutation altered existing snapshot")
 	}
-	decision, err = service.Simulate(ctx, request)
-	if err != nil || decision.Matched {
-		t.Fatal("updated draft did not affect next simulation", err)
-	}
-	request.Domain = "new-netflix.test"
-	decision, err = service.Simulate(ctx, request)
-	if err != nil || !decision.Matched {
-		t.Fatal("updated service draft missing", err)
+	next, err := service.ForNode(ctx, nodeID)
+	if err != nil || len(next) != 1 || !slices.Contains(next[0].Match.Suffixes, "new-netflix.test") {
+		t.Fatal("updated service draft not expanded into the next snapshot", next, err)
 	}
 	if err := service.Repository.DeleteService(ctx, builtin.ID); err == nil {
 		t.Fatal("builtin deletion accepted")
 	}
 }
 
-// v1.1 removed the device scope from policies and the simulator: both refuse it.
+// v1.1 removed the device scope from policies.
 func TestPolicyReferencesDefaultAndDeviceScopeRemoval(t *testing.T) {
-	service, nodeID, u, device, _ := fixture(t)
+	service, _, _, device, _ := fixture(t)
 	ctx := context.Background()
 	if _, err := service.Save(ctx, "", Input{Name: "Unknown user", Enabled: true, Scope: desiredstate.Scope{UserIDs: []string{"missing"}}, Action: desiredstate.Action{Type: "Block"}}); err == nil {
 		t.Fatal("unknown user scope accepted")
 	}
 	if _, err := service.Save(ctx, "", Input{Name: "Device scope", Enabled: true, Scope: desiredstate.Scope{DeviceIDs: []string{device.ID}}, Action: desiredstate.Action{Type: "Block"}}); err == nil {
 		t.Fatal("a device scope was accepted")
-	}
-	decision, err := service.Simulate(ctx, shared.Request{NodeID: nodeID, UserID: u.ID, Domain: "example.test", Port: 80, Network: "tcp"})
-	if err != nil || decision.Matched || decision.Action.Type != "Direct" {
-		t.Fatal("default rule incorrect", err)
-	}
-	if _, err := service.Simulate(ctx, shared.Request{NodeID: nodeID, UserID: u.ID, DeviceID: device.ID, Domain: "example.test", Port: 80, Network: "tcp"}); err == nil {
-		t.Fatal("a device simulation was accepted")
 	}
 	custom, err := service.Repository.SaveService(ctx, "", ServiceInput{Name: "Custom development", Enabled: true, Domains: []string{"git.example.test"}, CIDRs: []string{"192.0.2.0/24"}})
 	if err != nil {

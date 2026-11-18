@@ -109,10 +109,9 @@ type TunnelDeployer interface {
 	GostRemovable(context.Context, string) (bool, error)
 }
 type managedInbound struct {
-	legacy bool
-	owner  PortOwner
-	input  InboundInput
-	id     string
+	owner PortOwner
+	input InboundInput
+	id    string
 }
 type tunnelPublication struct {
 	relays   map[string]published.Relay
@@ -125,14 +124,6 @@ type tunnelPublication struct {
 
 func (r *Repository) managedBy(ctx context.Context, inboundID string) (*PortOwner, error) {
 	if inboundID == "" {
-		return nil, nil
-	}
-	var present int
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tunnel_objects'").Scan(&present); err != nil {
-		return nil, err
-	}
-	if present == 0 {
-		// Pre-0129 backup inspection has no managed tunnel objects.
 		return nil, nil
 	}
 	var o PortOwner
@@ -153,21 +144,18 @@ func (r *Repository) refuseManagedInbound(ctx context.Context, inboundID string)
 	return nil
 }
 func (r *Repository) managedInbounds(ctx context.Context, owner PortOwner) ([]managedInbound, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT object_id,EXISTS(SELECT 1 FROM canvas_forward_reconcile,json_each(migrated_ids) m WHERE m.value=owner_id) FROM tunnel_objects WHERE owner_kind=? AND owner_id=? ORDER BY object_id", owner.Kind, owner.ID)
+	rows, err := r.Database.QueryContext(ctx, "SELECT object_id FROM tunnel_objects WHERE owner_kind=? AND owner_id=? ORDER BY object_id", owner.Kind, owner.ID)
 	if err != nil {
 		return nil, err
 	}
 	ids := []string{}
-	legacy := map[string]bool{}
 	for rows.Next() {
 		var objectID string
-		var migrated bool
-		if err = rows.Scan(&objectID, &migrated); err != nil {
+		if err = rows.Scan(&objectID); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		ids = append(ids, objectID)
-		legacy[objectID] = migrated
 	}
 	err = rows.Err()
 	rows.Close()
@@ -180,7 +168,7 @@ func (r *Repository) managedInbounds(ctx context.Context, owner PortOwner) ([]ma
 		if e != nil {
 			return nil, e
 		}
-		result = append(result, managedInbound{legacy: legacy[objectID], owner: owner, id: objectID, input: inboundInputOf(in, in.DefaultOutbound)})
+		result = append(result, managedInbound{owner: owner, id: objectID, input: inboundInputOf(in, in.DefaultOutbound)})
 	}
 	return result, nil
 }
@@ -453,9 +441,6 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 		for _, old := range p.previous {
 			if old.owner.Kind == in.owner.Kind && old.owner.ID == in.owner.ID && old.input.NodeID == in.input.NodeID {
 				in.id = old.id
-				if old.legacy && migrationOwnerCurrent(p, in.owner) {
-					in.input = old.input
-				}
 				used[old.id] = true
 				break
 			}

@@ -43,7 +43,8 @@ usage() {
 用法：qui-update [--version X.Y.Z[-rc.N]] [--component panel|agent] [--yes] [--database FILE]
                  [--bundle FILE --sums FILE]
 
-  --version X.Y.Z[-rc.N] 安装指定发布版本（默认：GitHub 上的最新发布）
+  --version X.Y.Z[-rc.N] 安装指定发布版本（默认：GitHub 上的最新发布）；
+                    Agent 只能升级，低于已安装 Agent 的版本会被拒绝
   --component panel|agent  只更新指定的已安装组件（默认保持先 Agent 后面板）
   --yes             不询问确认，直接更新
   --database FILE   降级到更旧的面板版本时，同时把数据库换成该备份
@@ -399,7 +400,11 @@ report_failure() {
   local name=$1 previous=$2 backup=$3 selection=''
   [[ -z ${selected_component:-} ]] || selection=" --component $selected_component"
   printf '日志：%s\n' "$(service_log_hint "$name" || true)"
-  if qui_valid_release_version "$previous"; then
+  # The Agent cannot be moved back to an older release, so only the panel gets the
+  # downgrade hint.
+  if [[ $name == proxy-agent ]]; then
+    :
+  elif qui_valid_release_version "$previous"; then
     printf '降级：用 qui-update%s --version %s 装回旧版本。\n' "$selection" "$previous"
   else
     printf '降级：用 qui-update%s --version X.Y.Z 装回旧版本。\n' "$selection"
@@ -925,12 +930,6 @@ update_component() {
   local binary=$source_dir/bin/proxy-$1 digest='' previous='' backup='' installed=''
   local was_active=false status=0
   [[ $component == agent ]] && mode=--node
-  # An older target installer cannot carry v2's complete set forward. Refuse
-  # before stopping; using it would silently lose uninstall/update ownership.
-  if [[ $component == agent && $(sed -n '1p' "$registry/agent.manifest") == proxycontrol-install-v2 ]] \
-    && ! grep -q 'qui_write_record' "$source_dir/deploy/linux/install.sh"; then
-    fail 'Target installer cannot preserve install record v2; use a multi-core capable release.'
-  fi
   previous=$(installed_version "$component")
   if service_is_active "$name"; then was_active=true; fi
   # The globals the journal and the signal handler read are filled before the service
@@ -1188,7 +1187,7 @@ main() {
   local release='' tag='' expected='' actual='' up_to_date=true answer=''
   local components=() component tool file required service_library=''
   local selected_component=''
-  local recover_directory='' boot=false status=0 installed_panel='' output=''
+  local recover_directory='' boot=false status=0 installed_panel='' installed_agent='' output=''
   local snapshot_directory='' registry_directory='' log=''
   while (($#)); do
     case $1 in
@@ -1380,6 +1379,21 @@ main() {
     done
     exit 0
   fi
+
+  # The Agent only moves forward: a release older than the installed Agent is refused
+  # before anything is downloaded or stopped, whether it came from --version or from
+  # GitHub's latest release. A default run on a combined host updates the Agent too, so
+  # going back on the panel there needs --component panel. An installed version that
+  # cannot be read stays unordered and is not refused.
+  for component in "${components[@]}"; do
+    [[ $component == agent ]] || continue
+    installed_agent=$(installed_version agent)
+    version_is_older "$version" "$installed_agent" || continue
+    if [[ -z $selected_component ]] && record_complete panel; then
+      fail "不支持把 Agent 降级：目标版本 $version 低于已安装的 Agent $installed_agent。只回退面板请加 --component panel。"
+    fi
+    fail "不支持把 Agent 降级：目标版本 $version 低于已安装的 Agent $installed_agent。"
+  done
 
   # A panel older than the installed one cannot migrate the database back, so every
   # message about this run says so: report_failure prints the matching --database command

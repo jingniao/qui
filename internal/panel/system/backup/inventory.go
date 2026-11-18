@@ -11,13 +11,9 @@ import (
 
 type Totals struct {
 	RelayCleanupNodes       int64 `json:"relayCleanupNodes"`
-	RelayCleanupReconcile   int64 `json:"relayCleanupReconcile"`
-	ImportIdentityMap       int64 `json:"importIdentityMap"`
 	CanvasEntryBindings     int64 `json:"canvasEntryBindings"`
 	ClientPolicyProfiles    int64 `json:"clientPolicyProfiles"`
 	ClientPolicyActive      int64 `json:"clientPolicyActive"`
-	CanvasForwardReconcile  int64 `json:"canvasForwardReconcile"`
-	TunnelMigrationReport   int64 `json:"tunnelMigrationReport"`
 	Tunnels                 int64 `json:"tunnels"`
 	TunnelHops              int64 `json:"tunnelHops"`
 	TunnelObjects           int64 `json:"tunnelObjects"`
@@ -109,70 +105,32 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	for _, item := range []struct {
 		table string
 		count *int64
-	}{{"relay_cleanup_nodes", &result.Totals.RelayCleanupNodes}, {"relay_cleanup_reconcile", &result.Totals.RelayCleanupReconcile}, {"import_identity_map", &result.Totals.ImportIdentityMap}, {"canvas_entry_bindings", &result.Totals.CanvasEntryBindings}, {"client_policy_profiles", &result.Totals.ClientPolicyProfiles}, {"node_identity_recoveries", &result.Totals.NodeIdentityRecoveries}, {"node_identity_retirements", &result.Totals.NodeIdentityRetirements}, {"certificates", &result.Totals.Certificates}, {"canvas_forward_reconcile", &result.Totals.CanvasForwardReconcile}, {"tunnel_migration_report", &result.Totals.TunnelMigrationReport}, {"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_group_relays", &result.Totals.NodeGroupRelays}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}, {"notifications", &result.Totals.Notifications}, {"notification_channels", &result.Totals.NotificationChannels}} {
-		var present int
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&present); err != nil {
-			return Inventory{}, err
-		}
-		if present > 0 {
-			if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+item.table).Scan(item.count); err != nil {
-				return Inventory{}, err
-			}
-		}
-	}
-	var pendingTrafficTable int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='traffic_pending_batches'").Scan(&pendingTrafficTable); err != nil {
-		return Inventory{}, err
-	}
-	if pendingTrafficTable != 0 {
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM traffic_pending_batches").Scan(&result.Totals.PendingTrafficBatches); err != nil {
+	}{{"relay_cleanup_nodes", &result.Totals.RelayCleanupNodes}, {"canvas_entry_bindings", &result.Totals.CanvasEntryBindings}, {"client_policy_profiles", &result.Totals.ClientPolicyProfiles}, {"node_identity_recoveries", &result.Totals.NodeIdentityRecoveries}, {"node_identity_retirements", &result.Totals.NodeIdentityRetirements}, {"certificates", &result.Totals.Certificates}, {"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_group_relays", &result.Totals.NodeGroupRelays}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}, {"notifications", &result.Totals.Notifications}, {"notification_channels", &result.Totals.NotificationChannels}} {
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+item.table).Scan(item.count); err != nil {
 			return Inventory{}, err
 		}
 	}
-	// A backup taken before migration 0112 has no canvas table; the count stays
-	// zero instead of failing the inventory of an older archive.
-	var canvasTable int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='canvas_schemes'").Scan(&canvasTable); err != nil {
-		return Inventory{}, err
-	}
-	if canvasTable != 0 {
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM canvas_schemes").Scan(&result.Totals.CanvasSchemes); err != nil {
-			return Inventory{}, err
-		}
-	}
-	// As with canvas schemes, pre-0114 archives have no portal sessions.
-	var portalTable int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='user_sessions'").Scan(&portalTable); err != nil {
-		return Inventory{}, err
-	}
-	if portalTable != 0 {
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM user_sessions").Scan(&result.Totals.PortalSessions); err != nil {
+	for _, item := range []struct {
+		query  string
+		target *int64
+	}{
+		{"SELECT count(*) FROM traffic_pending_batches", &result.Totals.PendingTrafficBatches},
+		{"SELECT count(*) FROM canvas_schemes", &result.Totals.CanvasSchemes},
+		{"SELECT count(*) FROM user_sessions", &result.Totals.PortalSessions},
+	} {
+		if err := r.QueryRowContext(ctx, item.query).Scan(item.target); err != nil {
 			return Inventory{}, err
 		}
 	}
 	var updatePending int64
 	for _, table := range []string{"core_remove_tasks", "core_update_tasks", "agent_update_tasks"} {
-		var present, pending int64
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&present); err != nil {
+		var pending int64
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+table+" WHERE status IN ('queued','running','failed_closed')").Scan(&pending); err != nil {
 			return Inventory{}, err
 		}
-		if present != 0 {
-			if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+table+" WHERE status IN ('queued','running','failed_closed')").Scan(&pending); err != nil {
-				return Inventory{}, err
-			}
-			updatePending += pending
-		}
+		updatePending += pending
 	}
-	// Archives predating 0149 have no finalization columns. Select by their
-	// recorded schema, just as other versioned inventory fields do below.
-	var tunnelFinalizationApplied int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0149_tunnel_publication_finalization.sql'").Scan(&tunnelFinalizationApplied); err != nil {
-		return Inventory{}, err
-	}
-	batchPending := "status IN ('deploying','rolling_back','rollback_failed')"
-	if tunnelFinalizationApplied != 0 {
-		batchPending += " OR tunnel_finalized=0"
-	}
+	batchPending := "status IN ('deploying','rolling_back','rollback_failed') OR tunnel_finalized=0"
 	for _, item := range []struct {
 		query  string
 		target *int64
@@ -186,19 +144,8 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 			return Inventory{}, errors.New("restore inventory query failed")
 		}
 	}
-	for _, item := range []struct {
-		table, query string
-		target       *int64
-	}{{"backup_file_ops", "SELECT count(*) FROM backup_file_ops", &result.Totals.BackupFileOperations}, {"backup_runs", "SELECT count(*) FROM backup_runs WHERE status='running'", &result.Totals.RunningBackupJobs}} {
-		var exists int
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", item.table).Scan(&exists); err != nil {
-			return Inventory{}, err
-		}
-		if exists == 1 {
-			if err := r.QueryRowContext(ctx, item.query).Scan(item.target); err != nil {
-				return Inventory{}, err
-			}
-		}
+	if err := r.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM backup_file_ops),(SELECT count(*) FROM backup_runs WHERE status='running')").Scan(&result.Totals.BackupFileOperations, &result.Totals.RunningBackupJobs); err != nil {
+		return Inventory{}, err
 	}
 	result.Totals.PendingOperations += updatePending
 	if result.Totals.Users > 10000 || result.Totals.Nodes > 10000 {
@@ -242,23 +189,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	if err != nil {
 		return Inventory{}, err
 	}
-	var deviceLimitApplied int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0115_device_limit.sql'").Scan(&deviceLimitApplied); err != nil {
-		return Inventory{}, err
-	}
-	deviceColumn := "0"
-	if deviceLimitApplied != 0 {
-		deviceColumn = "device_limit"
-	}
-	var resetApplied int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0118_traffic_reset.sql'").Scan(&resetApplied); err != nil {
-		return Inventory{}, err
-	}
-	resetColumns := "'none','',''"
-	if resetApplied > 0 {
-		resetColumns = "traffic_reset_cycle,traffic_reset_anchor,traffic_reset_at"
-	}
-	rows, err = r.QueryContext(ctx, "SELECT id,status,used_traffic,traffic_limit,"+deviceColumn+","+resetColumns+" FROM users")
+	rows, err = r.QueryContext(ctx, "SELECT id,status,used_traffic,traffic_limit,device_limit,traffic_reset_cycle,traffic_reset_anchor,traffic_reset_at FROM users")
 	if err != nil {
 		return Inventory{}, err
 	}

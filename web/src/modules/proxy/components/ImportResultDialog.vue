@@ -18,7 +18,7 @@
           >
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="px-1.5 py-0.5 rounded-md bg-black/[0.04] text-xs font-mono">#{{ item.entryIndex + 1 }}</span>
-              <span v-if="item.protocol" class="text-xs text-ios-secondary font-mono">{{ item.protocol }}</span>
+              <ProtocolBadge v-if="item.protocol" :protocol="item.protocol" compact />
               <span
                 class="px-1.5 py-0.5 rounded-md text-xs"
                 :class="item.stage === 'duplicate' ? 'bg-sky-500/10 text-sky-700' : 'bg-amber-500/10 text-amber-700'"
@@ -41,6 +41,7 @@
 </template>
 
 <script setup lang="ts">
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import { describeImportResult, importCountsLine, type ImportResult } from '../importApi';
 

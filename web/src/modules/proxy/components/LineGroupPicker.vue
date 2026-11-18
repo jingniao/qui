@@ -87,9 +87,7 @@
               >
                 {{ node.sourceTypeName }}
               </span>
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono font-bold uppercase bg-ios-blue/10 text-ios-blue">
-                {{ node.protocol }}
-              </span>
+              <ProtocolBadge :protocol="node.protocol" compact class="uppercase" />
               <span class="text-xs font-mono text-ios-secondary">
                 :{{ node.port }}
               </span>
@@ -114,6 +112,7 @@
 </template>
 
 <script setup lang="ts">
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import { computed, ref, watch } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';

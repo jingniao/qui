@@ -34,6 +34,24 @@ export default {
         ]
       },
       colors: {
+        protocol: {
+          vless: '#0067C5',
+          vmess: '#9A496E',
+          trojan: '#8739B3',
+          shadowsocks: '#4F46B8',
+          wireguard: '#237747',
+          socks5: '#007D80',
+          http: '#986000',
+          hysteria2: '#BB3463',
+          tuic: '#00789F',
+          forward: '#66752B',
+          direct: '#52666D',
+          block: '#B73535',
+          'reserved-coral': '#AD4B2E',
+          'reserved-mint': '#277B65',
+          'reserved-steel': '#536C98',
+          'reserved-ochre': '#886A39'
+        },
         ios: {
           blue: '#0071E3',
           'blue-hover': '#0077ED',

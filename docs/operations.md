@@ -273,7 +273,7 @@ OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监�
 
 对应地址族启用了服务器强制出站，且出站有效源 IP 不同于服务器级核心源 IP 和强制地址时，Agent 把它加入 `extra_exempt_ipv4/extra_exempt_ipv6`，避免被整机 SNAT 改写。每族最多 16 个，去重排序；原单地址豁免保持。需要额外豁免但 helper 未上报支持时返回 `host_source_exempt_unsupported`，在节点运行 `qui-update --component agent` 更新本机 helper；网页升级 Agent 不会替换 helper 使用的 `/usr/local/bin/proxy-agent`。
 
-更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。安装或升级会主动启动 helper：已有 `desired.json` 会重放；没有请求时写空 ID、`ok=true` 和 features 的初始回执，不改网络规则。systemd 与 OpenRC 安装器都等待首次回执写完，Agent 仍按请求 ID 确认配置和清除结果，空 ID 只用于能力声明。Agent 在渲染、修订持久化与切核之前，按激活核心的可达出站检查有效源 IP／网卡；地址不存在或不属于指定网卡时返回 `network_unavailable`，保留最后成功配置。降级旧 helper 前先清除需额外豁免的组合并发布，避免旧 helper 拒绝保留请求中的新字段。
+更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。安装或升级会主动启动 helper：已有 `desired.json` 会重放；没有请求时写空 ID、`ok=true` 和 features 的初始回执，不改网络规则。systemd 与 OpenRC 安装器都等待首次回执写完，Agent 仍按请求 ID 确认配置和清除结果，空 ID 只用于能力声明。Agent 在渲染、修订持久化与切核之前，按激活核心的可达出站检查有效源 IP／网卡；地址不存在或不属于指定网卡时返回 `network_unavailable`，保留最后成功配置。
 
 helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartLimitIntervalSec=0`，不受 systemd 默认的启动频率限制（10 秒内 5 次），path 单元因此不会以 `unit-start-limit-hit` 停止；OpenRC 的 watcher 不会因 helper 失败而退出。Agent 只有在 `status.json` 确认同一 `id` 的“清除”请求成功后，才把保留的清除请求视为已生效，否则重新发布并等待结果。早于此修复的版本可能已经停在这种状态（`systemctl status proxy-agent-host-network.path` 显示 `unit-start-limit-hit`）：升级时 `install.sh` 发现 oneshot 单元处于 `failed` 会 `reset-failed` 并重放一次保留的文件；不升级时可手动执行 `systemctl reset-failed proxy-agent-host-network.service proxy-agent-host-network.path && systemctl start proxy-agent-host-network.path proxy-agent-host-network.service`。
 
@@ -321,7 +321,7 @@ helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartL
 **Agent 自身（签名目录）**：Agent 自更新仍然使用 Ed25519 签名清单，不改成 URL + SHA-256。v1.5.0 起支持面板驱动的官方签名版本一键升级：
 
 - 官方签名发布：GitHub Releases 附带官方 Ed25519 签名清单（CI release 任务使用 Repository Secret `AGENT_SIGNING_KEY` 签名），官方公钥出厂内置在面板与 Agent 中。面板配置 `release_keys` 留空时默认信任官方公钥；Agent 未显式配置 `updates.keys` 时默认信任官方公钥。
-- 面板一键导入与托管：面板提供 `GET /api/v1/agent-releases` 列出官方正式版；Owner 点击升级时，面板通过 `POST /api/v1/agent-releases/{version}/import` 自动拉取官方已签名清单与二进制产物，保存到 `<data_dir>/releases/agent-catalogue/` 签名目录，并向 `POST /api/v1/agent-updates` 入队。面板通过只读路由 `GET /agent-catalogue/`（仅开放白名单清单与二进制路径，严格限制目录穿越）向 Agent 托管该签名目录。
+- 面板一键导入与托管：面板提供 `GET /api/v1/agent-releases` 列出官方正式版；Owner 点击升级时，面板通过 `POST /api/v1/agent-releases/{version}/import` 自动拉取官方已签名清单与二进制产物，保存到 `<data_dir>/releases/agent-catalogue/` 签名目录，并向 `POST /api/v1/agent-updates` 入队。面板通过只读路由 `GET /agent-catalogue/`（仅开放白名单清单与二进制路径，严格限制目录穿越）向 Agent 托管该签名目录。v1.6.1 起只列出并导入 GitHub 最新正式版，导入成功后与面板启动时删除旧版本的清单与归档（未完成升级任务仍需要的除外），所以不能经网页把 Agent 降到旧版本。
 - 节点自动协商：Agent 1.5.0 握手时上报 `Capabilities.panel_catalogue_supported = true`，并在 Welcome 消息中接收面板告知的目录端口（`agent_catalogue_port`）。Agent updater 默认目录回退到面板只读端口。
 - 兼容与离线签名：`cmd/release` 离线签名工具与配置中显式指定的自定义签名公钥 / 目录完全兼容保留。
 
@@ -604,7 +604,7 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 > 自动网卡来自 IPv4 默认路由；策略路由或 IPv6-only 请手动选择。
 > 修改网卡会重新计算所选网卡的本期数据；修改面板时区不会重新分桶历史数据。
 
-同一次启动内中断的采集按时间比例分摊到跨过的日期，所以日行是估算，不保证与宿主或供应商逐日一致。没有本期日行或解析不到网卡时用量为未知，界面显示“—”，不显示为 0；已有日行但当前心跳过期时显示已测总量并标注“截至上次采样”。切换网卡或统计方式会按保留的日行重算本期，不删除数据；改额度只影响展示。修改面板时区后，之后的流量按新时区分日，已记录的日数据不重新分桶。三张机器表（`node_machine_traffic_settings`、`node_machine_traffic_daily`、`node_machine_traffic_cursors`）随加密备份保存，恢复以当前库的用量为准。
+同一次启动内中断的采集按时间比例分摊到跨过的日期，所以日行是估算，不保证与宿主或供应商逐日一致。没有本期日行或解析不到网卡时用量为未知，界面显示“—”，不显示为 0；已有日行但当前心跳过期时显示已测总量，详情标注“截至上次采样”，服务器卡片不显示这行说明。切换网卡或统计方式会按保留的日行重算本期，不删除数据；改额度只影响展示。修改面板时区后，之后的流量按新时区分日，已记录的日数据不重新分桶。三张机器表（`node_machine_traffic_settings`、`node_machine_traffic_daily`、`node_machine_traffic_cursors`）随加密备份保存，恢复以当前库的用量为准。
 
 ## 19. 多核心运维
 
@@ -631,7 +631,7 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 **发布与重启**：配置改动走正常发布；当前实现一次发布会重启该节点的**全部**核心，所以新增/修改 GOST 转发会短暂中断同节点 Xray 与 sing-box 的连接，反之亦然。GOST 进程崩溃只由它自己的 supervisor 槽位按既有退避恢复，不会重启其他核心。发布失败按第 10 节的回滚规则回到上一镜像/上一修订。
 
-**安装、更新与移除**：面板“服务器 → 代理核心 → 添加内核”选 GOST 会预填 3.3.2、固定 URL 与归档摘要，其它版本/摘要一律拒绝；排队还要求该 Agent 上报了 `Hello.gost_core_supported` 且平台是 linux/amd64。移除走“内核管理 → 移除”，前置条件与其他核心相同（当前草稿与已发布修订都没有 GOST 入站、不是最后一个核心）。**把 Agent 降级到 1.3 以下之前必须先移除 GOST**。
+**安装、更新与移除**：面板“服务器 → 代理核心 → 添加内核”选 GOST 会预填 3.3.2、固定 URL 与归档摘要，其它版本/摘要一律拒绝；排队还要求该 Agent 上报了 `Hello.gost_core_supported` 且平台是 linux/amd64。移除走“内核管理 → 移除”，前置条件与其他核心相同（当前草稿与已发布修订都没有 GOST 入站、不是最后一个核心）。
 
 **它永远不是主核心**：GOST 不能作为节点的第一个（主）核心；节点始终保留 Xray 或 sing-box 作为主核心，`--core gost` 单独使用或排在 xray/sing-box 之前的安装参数会被拒绝，`cores` 首项为 gost 的配置也一样；移除最后一个 Xray/sing-box 会被拒绝（`last_core`），因为 `core` 留空的入站与设备门控等都跟随主核心。GOST 只能是附加核心。
 
@@ -649,13 +649,13 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 ### 旧画布 GOST 中继（v1.3.x 操作）
 
-**v1.4 迁移说明**：C1 已禁止新建画布端口转发，M1 在面板启动和恢复时把安全的旧转发移入隧道管理。转换本身不下发配置、不改端口、不签发证书，规则默认不显示在订阅。Owner 可读取 `GET /api/v1/tunnels/migration-report`，按中文原因核对仍在画布的未发布连接、缺失归属、共享路径不一致、缺失服务器或端口冲突；一次性迁移不会在 Owner 修改后自动重试。先核对原服务器配置和对象归属，再通过正常管理与发布流程处理这些连接。恢复仍需显式发布，既有密封凭据保持不变。下面的画布操作说明对应已发布的 v1.3.x；v1.4 的转换范围与验证见 [M1 报告](v1.4-m1-report.md)。
+**v1.4 迁移说明**：C1 已禁止新建画布端口转发，M1 在面板启动和恢复时把安全的旧转发移入隧道管理。转换本身不下发配置、不改端口、不签发证书，规则默认不显示在订阅。v1.6.1 删除了转换代码与 migration-report 接口（v1.6.0 启动时已完成转换），仍在画布的旧连接按正常管理与发布流程处理。恢复仍需显式发布，既有密封凭据保持不变。下面的画布操作说明对应已发布的 v1.3.x；v1.4 的转换范围与验证见 [M1 报告](v1.4-m1-report.md)。
 
 在画布上把一条 `port_forward` 连接的协议选成 `gost`，按普通端口转发填源监听端口、目标地址/端口与 TCP/UDP，再发布即可。**两端服务器都必须装了 GOST 核心**（两侧都上报 GOST 核心与设置契约 3），出口服务器的端口范围里要有空闲端口给中继监听；端口由面板分配，规则与入站一致（AGENTS §12）。入口节点把这条转发的目标经出口节点的 `relay` 监听访问，中继用面板按隧道生成的双向 TLS 证书认证；证书存在面板库的密封列里，CA 私钥签发后即丢弃、有效期 10 年，界面只显示代数、服务器名、到期与指纹。
 
 **防火墙**：出口节点必须让入口节点能访问**中继监听端口**（TCP，端口范围里分配出的那个数字）。入口节点不需要对出口开放任何入站，也不需要放开 18880 之类的面板管理端口。
 
-**发布顺序与轮换**：GOST 隧道固定先发布出口（中继监听），再发布入口（拨它的链），批次回滚反向。隧道页面的“轮换凭据”（`POST /api/v1/canvas-tunnels/{id}/rotate-credentials`，带 `updatedAt`，Owner＋CSRF，记操作日志“轮换隧道凭据”）换掉整套 CA 与两张证书并把隧道标成 modified，由**下一次普通发布**完成切换；出口与入口两次部署之间隧道会中断几十秒到一分钟，这是可接受的代价。旧画布数据里没有凭据的隧道在第一次发布时自动补发一代，不改变发布状态。
+**发布顺序与轮换**：GOST 隧道固定先发布出口（中继监听），再发布入口（拨它的链），批次回滚反向。旧画布隧道的“轮换凭据”接口已在 v1.6.1 删除；需要换凭据时改用第 21 节隧道管理的轮换。旧画布数据里没有凭据的隧道在第一次发布时自动补发一代，不改变发布状态。
 
 **发布只覆盖改动的服务器**：画布发布只为本次绘制涉及的服务器创建版本（顺序仍是出口、中转、入口）；仅为中继依赖被纳入、且已运行相同配置与相同启用意图的服务器不再发布——没有新版本、没有部署目标、不重启核心，所以改 us2↔uk 的隧道不会再重启 alpine。想强制重发某台服务器，就改它的配置或从服务器页单独发布。`POST /api/v1/deployment-batches/relay` 这类显式中继批次仍发布全部成员。
 
@@ -679,7 +679,7 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 
 轮换使用 `POST /api/v1/tunnels/{id}/rotate-credentials`，带最新 updatedAt（Owner＋CSRF）；重新签发各段材料、标 modified，再计划/发布。三节点两段使用独立 CA/叶子证书。监听先切换再切拨号端，期间可中断，TCP 会话与 UDP 关联需客户端重建。不要按旧画布地址轮换已迁移对象；删除也不保证立即撤销离线节点的旧凭据。
 
-升级后由 Owner 读取 `GET /api/v1/tunnels/migration-report` 的 `{items:[{tunnelId,name,reason}]}`。逐项核对原画布、已发布修订、生成入站归属、端口/范围、目标地址及共享引用。未发布、缺失归属/服务器、目标池/范围或路径/端口冲突等留在旧画布；不猜测接管。报告是单次转换的持久记录，处理后不会自动重跑或消项；通过正常管理流程明确重建所需隧道/规则、预览计划，协调发布移除旧监听后再启用新监听。转换本身保留 ID、端口、材料与运行修订，默认订阅隐藏，首次无修改发布保持旧物化形态。旧归档恢复先升级再转换，新归档保留完成标记/原因；恢复标 modified，须显式发布。详见 [M1 报告](v1.4-m1-report.md)。
+v1.4 的一次性转换已在 v1.6.0 启动时完成；v1.6.1 删除了转换代码、其标记与报告及 `GET /api/v1/tunnels/migration-report`。仍留在旧画布的连接通过正常管理流程重建所需隧道/规则、预览计划后发布，不会自动接管。恢复标 modified，须显式发布。
 
 “中转方案”只建代理中转：可从节点“添加中转”新建并预选当前节点为入口，出口可选 qui 入站或外部代理出站。qui 入站出口使用独立内部监听/凭据；外部出站须属于前一跳且满足 TCP/UDP，HTTP 不支持 UDP。relay/exit 实例可填 relayPortMode/relayPort，优先旧 tunnelPort；未设范围才保留 8443/51820 默认。旧 port_forward/gost 连接在迁移前只读保留，可删除，不可新增或改动。
 

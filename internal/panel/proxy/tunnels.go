@@ -242,11 +242,7 @@ func (r *Repository) deriveRuleTarget(ctx context.Context, item *TunnelRule) err
 	return nil
 }
 func (r *Repository) storedTunnelRules(ctx context.Context, tunnelID, nodeID string) ([]TunnelRule, error) {
-	return r.storedTunnelRulesColumns(ctx, tunnelID, nodeID, managedRuleColumns)
-}
-
-func (r *Repository) storedTunnelRulesColumns(ctx context.Context, tunnelID, nodeID, columns string) ([]TunnelRule, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+columns+managedRuleFrom+" WHERE (?='' OR r.tunnel_id=?) AND (?='' OR r.entry_node_id=?) ORDER BY r.created_at,r.id", tunnelID, tunnelID, nodeID, nodeID)
+	rows, err := r.Database.QueryContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" WHERE (?='' OR r.tunnel_id=?) AND (?='' OR r.entry_node_id=?) ORDER BY r.created_at,r.id", tunnelID, tunnelID, nodeID, nodeID)
 	if err != nil {
 		return nil, err
 	}

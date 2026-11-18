@@ -10,13 +10,6 @@ import (
 )
 
 func validateNodePublicAddresses(ctx context.Context, database *sql.DB) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0138_node_public_addresses.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	rows, err := database.QueryContext(ctx, "SELECT public_addresses_json, public_ip_selected FROM nodes")
 	if err != nil {
 		return ErrArchive

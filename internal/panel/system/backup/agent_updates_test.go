@@ -81,27 +81,3 @@ func TestAgentArchiveInventoryAndConflictingUpdates(t *testing.T) {
 		t.Fatal("invalid Agent capability accepted")
 	}
 }
-
-func TestAgentArchiveLegacyAndMissingTables(t *testing.T) {
-	t.Parallel()
-	source, _, _ := sourceFixture(t)
-	database := source.Database
-	ctx := context.Background()
-	for _, query := range []string{"DROP TABLE agent_update_attempts", "DROP TABLE agent_update_tasks"} {
-		if _, err := database.Exec(query); err != nil {
-			t.Fatal(err)
-		}
-		if err := validateAgentUpdates(ctx, database); err == nil {
-			t.Fatal("missing migrated tables accepted")
-		}
-	}
-	if _, err := database.Exec("DELETE FROM schema_migrations WHERE version IN ('0036_agent_updates.sql','0037_agent_recovery.sql')"); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateAgentUpdates(ctx, database); err != nil {
-		t.Fatal("legacy archive rejected", err)
-	}
-	if _, err := ReadInventory(ctx, database); err != nil {
-		t.Fatal("legacy inventory rejected", err)
-	}
-}

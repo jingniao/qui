@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
-	shared "proxycontrol/pkg/contracts/policy"
 )
 
 type Handler struct {
@@ -16,7 +15,7 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/policies": h.list, "GET /api/v1/policies/{id}": h.get, "POST /api/v1/policies": h.save, "PUT /api/v1/policies/{id}": h.save, "DELETE /api/v1/policies/{id}": h.delete, "POST /api/v1/policies/simulate": h.simulate, "GET /api/v1/service-sets": h.services, "GET /api/v1/service-sets/{id}": h.getService, "GET /api/v1/service-sets/{id}/references": h.serviceReferences, "POST /api/v1/service-sets": h.saveService, "PUT /api/v1/service-sets/{id}": h.saveService, "DELETE /api/v1/service-sets/{id}": h.deleteService, "POST /api/v1/service-sets/{id}/sources/{sourceId}/refresh": h.refreshSource} {
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/policies": h.list, "GET /api/v1/policies/{id}": h.get, "POST /api/v1/policies": h.save, "PUT /api/v1/policies/{id}": h.save, "DELETE /api/v1/policies/{id}": h.delete, "GET /api/v1/service-sets": h.services, "GET /api/v1/service-sets/{id}": h.getService, "GET /api/v1/service-sets/{id}/references": h.serviceReferences, "POST /api/v1/service-sets": h.saveService, "PUT /api/v1/service-sets/{id}": h.saveService, "DELETE /api/v1/service-sets/{id}": h.deleteService, "POST /api/v1/service-sets/{id}/sources/{sourceId}/refresh": h.refreshSource} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
 }
@@ -81,19 +80,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
-func (h *Handler) simulate(w http.ResponseWriter, r *http.Request) {
-	var request shared.Request
-	if err := httpapi.Decode(w, r, &request); err != nil {
-		h.fail(w, err)
-		return
-	}
-	decision, err := h.Service.Simulate(r.Context(), request)
-	if err != nil {
-		h.fail(w, err)
-		return
-	}
-	httpapi.JSON(w, 200, decision)
-}
+
 func (h *Handler) services(w http.ResponseWriter, r *http.Request) {
 	page, size, err := httpapi.Pagination(r)
 	if err != nil {

@@ -8,13 +8,6 @@ import (
 )
 
 func validateOutboundSource(ctx context.Context, database *sql.DB) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0145_outbound_source.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	rows, err := database.QueryContext(ctx, "SELECT protocol,source_ip,source_interface FROM outbounds")
 	if err != nil {
 		return ErrArchive

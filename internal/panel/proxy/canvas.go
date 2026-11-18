@@ -407,9 +407,6 @@ func (s *Service) saveCanvasScheme(ctx context.Context, schemeID string, input C
 	if err := input.Layout.validateEntryBindings(input.Execution); err != nil {
 		return CanvasScheme{}, err
 	}
-	if err := s.Repository.ReconcileCanvasTunnels(ctx); err != nil {
-		return CanvasScheme{}, err
-	}
 	if input.Execution == canvasExecutionServer {
 		if err := s.validateCanvasLegacyConnections(ctx, schemeID, input.Layout); err != nil {
 			return CanvasScheme{}, err

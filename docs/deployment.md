@@ -2,7 +2,7 @@
 
 当前发布状态见[项目说明书](../AGENTS.md#当前状态)。先升级面板，再逐台升级 Agent。旧 1.0.9 Agent 保持发布、回滚与 Xray 流量兼容，但不接收设备门控或 qui sing-box 更新，界面显示部分执行。升级前备份数据库与身份目录；从 1.0.x 升级须核对 0113 合并设备对旧链接的影响，见[v1.2.0 发布说明](release-notes-1.2.0.md)。v1.3.0 增加 0126–0128，v1.3.1 无迁移；跨迁移降级必须使用匹配的升级前数据库，不能用旧程序直接打开新库。
 
-v1.4（v1.4.0 起正式发布）增加 0129–0134，启动/恢复在旧画布归属核对后一次性转换合格转发，保留端口、运行修订与密封材料；规则默认订阅隐藏。升级后由 Owner 核对 `GET /api/v1/tunnels/migration-report` 的遗留原因，详见[运维 §21](operations.md#21-隧道管理与中转方案v14)及[v1.4.0 发布说明](release-notes-1.4.0.md)。新隧道各跳须安装 GOST（linux/amd64），两节点契约 ≥3、三节点 ≥4；先等 Agent 能力上报再规划发布。隧道/规则没有默认端口，须先设端口范围或手填；仅画布保留无范围的旧默认。
+v1.4（v1.4.0 起正式发布）增加 0129–0134，启动/恢复在旧画布归属核对后一次性转换合格转发，保留端口、运行修订与密封材料；规则默认订阅隐藏。v1.6.1 起只能从 v1.6.0 或更新版本升级（迁移合并为基线，见[v1.6.1 规划](v1.6.1-plan.md)），原 migration-report 接口已删除；详见[运维 §21](operations.md#21-隧道管理与中转方案v14)及[v1.4.0 发布说明](release-notes-1.4.0.md)。新隧道各跳须安装 GOST（linux/amd64），两节点契约 ≥3、三节点 ≥4；先等 Agent 能力上报再规划发布。隧道/规则没有默认端口，须先设端口范围或手填；仅画布保留无范围的旧默认。
 
 核心来源显式参数为 `--core-source qui|official`：sing-box 默认 qui，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各自架构归档）；`official` 保留官方版本与 musl 专用归档及摘要。Xray 保持官方。qui 构建仅添加上游 `with_v2ray_api` 标签，其逐用户流量开始计入额度；切换前告知用户并核对额度。构建可复现性、原生核检查、Linux/arm64 实跑仍待 CI/Owner，不以脚本存在作为通过。
 
@@ -89,9 +89,9 @@ systemd；升级写 v2，第 11/12 行的含义保持不变。
 
 **首次迁移必须从已审核、已校验的新发布包运行新版 update.sh**，方式与第 5.0
 节相同，选 `--component agent`。旧主机上的 updater 不具备新增核心/config
-快照保护。记录变为 v2 后，新 updater 在停止 Agent 前拒绝不支持 v2 的目标
-installer，防止降级丢失核心所有权；这不影响失败升级自动恢复到快照中的 v1
-记录、旧 Agent 与原配置。故障、中断与重启演练见[验收矩阵](v1-acceptance.md) §9、§11；真实断电未验证。
+快照保护。失败升级自动恢复到快照中的 v1 记录、旧 Agent 与原配置。v1.6.1 起
+`qui-update` 不再把 Agent 装回更旧的版本（见第 5 节），因此不会用到不支持 v2 的旧
+installer。故障、中断与重启演练见[验收矩阵](v1-acceptance.md) §9、§11；真实断电未验证。
 
 ## 2. 构建发布包
 
@@ -340,7 +340,7 @@ bash "$rc_dir/deploy/linux/update.sh" --component panel --version "$rc_version" 
 
 校验或解包失败时停止，不执行下一行。RC1 到此为止，所有 Agent 保持 1.0.9。以后已安装新版更新器的组合主机可运行 `qui-update --component panel --version 1.2.0-rc.2 --bundle proxy-control-1.2.0-rc.2-linux-amd64.tar.gz --sums SHA256SUMS`；确认面板就绪后，再在每个节点主机（含组合主机）运行相同版本的 `--component agent`。仍为旧更新器的 Agent 主机须按上面的校验/解包方式运行归档内 update.sh，只把组件改为 agent。
 
-版本比较使用 semver 优先级：`1.0.9 < 1.2.0-rc.1 < 1.2.0-rc.2 < 1.2.0`。正式版回到同版本 RC 也是降级；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。安装记录使用上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
+版本比较使用 semver 优先级：`1.0.9 < 1.2.0-rc.1 < 1.2.0-rc.2 < 1.2.0`。正式版回到同版本 RC 也是降级。**v1.6.1 起 Agent 只能升级**：目标版本（`--version` 指定的，或省略时 GitHub 最新发布）低于已安装的 Agent 时，`qui-update` 在下载与停止服务之前拒绝（「不支持把 Agent 降级」）；组合主机省略 `--component` 时同样拒绝，只回退面板须加 `--component panel`。已安装 Agent 的版本读不出时不比较、不拒绝。升级失败时自动恢复原 Agent 不受影响。面板降级不变；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。安装记录使用上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
 
 ### 5.1 面板降级与数据库回退
 
@@ -386,7 +386,7 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 
 **发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
 
-**代理核心**：不走 `install.sh`。在面板“服务器 → 代理核心”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 可用于安装或显式替换/追加核心；省略不删除核心。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。**降级 Agent 到 1.3 以下之前必须先移除 GOST 核心**（“内核管理 → 移除”，会先确认没有入站使用它），否则旧 Agent 无法读取三种核心类型。
+**代理核心**：不走 `install.sh`。在面板“服务器 → 代理核心”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 可用于安装或显式替换/追加核心；省略不删除核心。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。
 
 ### 5.2 面板网页更新（未发布，v1.4.3 之后）
 

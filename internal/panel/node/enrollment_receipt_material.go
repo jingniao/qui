@@ -15,19 +15,6 @@ func readEnrollmentReceiptMaterial(ctx context.Context, q replacementReader, pre
 	if prefix != "" && prefix != "restore_source." {
 		return nil, ErrToken
 	}
-	var present, applied int
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM "+prefix+"sqlite_master WHERE type='table' AND name='node_enrollment_receipts'").Scan(&present); err != nil {
-		return nil, err
-	}
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM "+prefix+"schema_migrations WHERE version='0068_node_enrollment_receipts.sql'").Scan(&applied); err != nil {
-		return nil, err
-	}
-	if present == 0 && applied == 0 {
-		return nil, nil
-	}
-	if present != 1 || applied != 1 {
-		return nil, ErrToken
-	}
 	checks := []string{}
 	for _, field := range strings.Split(enrollmentReceiptColumns, ",") {
 		limit := "128"

@@ -11,7 +11,7 @@ import (
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
-	"proxycontrol/internal/panel/system/backup"
+
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -256,18 +256,6 @@ func TestTunnelPublicationPendingReservationsAndAtomicRetry(t *testing.T) {
 	}
 	reconcileTunnelPublications(t, h, true)
 	assertRulePublication(t, h, rule, true)
-}
-
-func TestTunnelPublicationInventoryBefore0149(t *testing.T) {
-	h, _, _ := managedTunnelFixture(t, false)
-	for _, query := range []string{"ALTER TABLE deployment_batches DROP COLUMN tunnel_publication_json", "ALTER TABLE deployment_batches DROP COLUMN tunnel_finalized", "DELETE FROM schema_migrations WHERE version='0149_tunnel_publication_finalization.sql'"} {
-		if _, err := h.database.Exec(query); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := backup.ReadInventory(h.ctx, h.database); err != nil {
-		t.Fatalf("pre0149 inventory failed: %v", err)
-	}
 }
 
 func TestTunnelPublicationCorruptBatchDoesNotBlockNext(t *testing.T) {

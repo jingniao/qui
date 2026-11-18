@@ -169,6 +169,7 @@ for (const field of tuning.tuningFields) {
 // 7. ServerCardGrid renders tuningAdviceCount
 const gridSource = readFileSync(new URL('../src/modules/nodes/components/ServerCardGrid.vue', import.meta.url), 'utf8');
 assert.ok(gridSource.includes('tuningAdviceCount'), 'ServerCardGrid must reference tuningAdviceCount');
+assert.ok(!gridSource.includes('coreSummaryLabel'), 'ServerCardGrid must not reference coreSummaryLabel');
 
 console.log('PASS P7 TASK 7: tuningRequest available filter, keyStatus 5 states, algorithmOptions, applyAdvice, 4 presets with LXC filter, 19 fields with help, ServerCardGrid badge');
 

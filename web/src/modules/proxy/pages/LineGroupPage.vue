@@ -305,39 +305,19 @@
                 <p v-if="!selected.enabled || !selected.subscriptionVisible" class="text-xs text-amber-600 mt-1 flex items-center gap-1">
                   <span>⚠️ 分组停用或订阅隐藏时，已授权用户无法通过订阅拉取接入此组节点。</span>
                 </p>
+                <p v-else-if="isOwner && isUserGroup(selected)" class="text-xs text-neutral-400 mt-0.5">
+                  勾选用户即可授权使用此分组，取消勾选则撤销授权，修改后立即保存。
+                </p>
                 <p v-else class="text-xs text-neutral-400 mt-0.5">
                   已授权用户可在其订阅客户端中获取并使用该分组下的所有节点。
                 </p>
               </div>
-
-              <!-- 添加授权快捷工具条 -->
-              <div v-if="isOwner && isUserGroup(selected)" class="flex items-center gap-2 shrink-0">
-                <AppSelect
-                  v-model="grantUserId"
-                  :options="grantCandidateOptions"
-                  size="sm"
-                  class="w-48 sm:w-56"
-                  placeholder="选择待授权用户…"
-                />
-                <button
-                  v-if="grantUserId"
-                  type="button"
-                  class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1 shrink-0 shadow-2xs"
-                  :disabled="busy"
-                  @click="grantUser"
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                  </svg>
-                  <span>添加授权</span>
-                </button>
-              </div>
             </div>
 
             <!-- 用户卡片网格 -->
-            <div v-if="grantedUsers.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div v-if="authorizationUsers.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div
-                v-for="user in grantedUsers"
+                v-for="user in authorizationUsers"
                 :key="user.id"
                 class="flex items-center justify-between p-3 rounded-xl border border-black/[0.06] bg-neutral-50/50 hover:bg-white hover:border-black/[0.12] hover:shadow-2xs transition-all"
               >
@@ -347,7 +327,7 @@
                   </div>
                   <div class="min-w-0">
                     <div class="flex items-center gap-1.5">
-                      <span class="text-xs font-semibold text-neutral-800 truncate" :title="user.displayName || user.username">
+                      <span class="text-sm font-semibold text-neutral-800 truncate" :title="user.displayName || user.username">
                         {{ user.displayName || user.username }}
                       </span>
                       <span
@@ -375,20 +355,20 @@
                   </div>
                 </div>
 
-                <button
-                  v-if="isOwner"
-                  type="button"
-                  class="h-7 px-2.5 rounded-lg border border-red-200/70 text-red-500 hover:text-red-700 hover:bg-red-50 text-xs font-medium transition-colors shrink-0"
+                <input
+                  v-if="isOwner && (isUserGroup(selected) || selected.grantedUserIds.includes(user.id))"
+                  type="checkbox"
+                  class="w-4 h-4 shrink-0 cursor-pointer"
+                  :checked="selected.grantedUserIds.includes(user.id)"
                   :disabled="busy"
-                  title="撤销该用户的分组授权"
-                  @click="askRevoke(user.id)"
-                >
-                  撤销
-                </button>
+                  :aria-label="`允许用户「${user.displayName || user.username}」使用此分组`"
+                  @change="toggleUserGrant(user.id, $event)"
+                />
+                <span v-else class="text-xs text-ios-secondary shrink-0">{{ selected.grantedUserIds.includes(user.id) ? '已授权' : '未授权' }}</span>
               </div>
             </div>
             <div v-else class="py-12 text-center text-xs text-neutral-400 bg-black/[0.01] rounded-2xl border border-dashed border-black/[0.08]">
-              暂无授权用户。请在上方选择用户并点击「添加授权」。
+              暂无用户，请先在用户管理中创建用户。
             </div>
           </div>
 
@@ -463,9 +443,7 @@
                       </span>
                     </td>
                     <td>
-                      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono font-bold uppercase bg-blue-50 text-ios-blue border border-blue-200/50">
-                        {{ node.protocol }}
-                      </span>
+                      <ProtocolBadge :protocol="node.protocol" compact class="uppercase" />
                     </td>
                     <td class="font-mono tabular-nums text-xs text-neutral-600">
                       {{ node.port }}
@@ -556,11 +534,11 @@ import { isOwner } from '../../../app/auth';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import AppDialog from '../../../components/AppDialog.vue';
-import AppSelect, { type SelectOption } from '../../../components/AppSelect.vue';
 import LineGroupEditor from '../components/LineGroupEditor.vue';
 import LineGroupPicker, { type GroupPickerNode } from '../components/LineGroupPicker.vue';
 import { groupAPI, freshGroup, type NodeGroup } from '../../nodes/groupsApi';
@@ -587,7 +565,6 @@ const policies = ref<PolicyRecord[]>([]);
 const clientTemplate = ref<StoredRuleTemplate | null>(null);
 
 const users = ref<ProxyUser[]>([]);
-const grantUserId = ref('');
 const serverSelection = ref<string[]>([]);
 const loading = ref(true);
 const error = ref('');
@@ -739,36 +716,13 @@ const hasAvailableNodes = computed(() => allAvailableNodes.value.some(node =>
 ));
 const pickerNodeIds = computed(() => pickerGroup.value ? memberIds(pickerGroup.value).filter(id => !pendingRemovals.value[pickerGroup.value!.id]?.includes(id)) : []);
 
-const grantCandidates = computed(() => users.value.filter(user => !selected.value?.grantedUserIds?.includes(user.id)));
-
-const grantCandidateOptions = computed<SelectOption[]>(() => {
-  return [
-    { value: '', label: '选择待授权用户…' },
-    ...grantCandidates.value.map(user => ({
-      value: user.id,
-      label: user.displayName ? `${user.displayName} (${user.username})` : user.username,
-      desc: user.status ? `用户状态: ${user.status}` : undefined
-    }))
-  ];
-});
-
-const grantedUsers = computed(() => {
+const authorizationUsers = computed(() => {
   const ids = selected.value?.grantedUserIds || [];
-  return ids.map(id => {
-    const user = users.value.find(u => u.id === id);
-    return {
-      id,
-      username: user?.username || '—',
-      displayName: user?.displayName,
-      status: user?.status,
-      expiresAt: user?.expiresAt
-    };
-  });
+  return [...users.value].sort((a, b) => Number(ids.includes(b.id)) - Number(ids.includes(a.id)));
 });
 
 watch(() => selected.value, group => {
   serverSelection.value = [...(group?.serverIds || [])];
-  grantUserId.value = '';
 });
 
 const filteredGroups = computed(() => {
@@ -980,21 +934,21 @@ function askDeleteGroup(group: NodeGroup) {
   confirmOpen.value = true;
 }
 
-async function grantUser() {
-  const group = selected.value, userId = grantUserId.value;
-  if (!group || !userId) return;
-  await mutate(() => userAPI.grantGroup(userId, group.id));
-  grantUserId.value = '';
-}
-function askRevoke(userId: string) {
+async function toggleUserGrant(userId: string, event: Event) {
   const group = selected.value;
   if (!group) return;
-  const user = users.value.find(u => u.id === userId);
-  const name = user?.displayName || user?.username || '该用户';
-  confirmTitle.value = '撤销分组授权';
-  confirmMessage.value = `确认撤销对“${name}”的分组授权？用户仍可通过其他已授权分组访问相同节点。`;
-  confirmedAction = () => userAPI.revokeGroup(userId, group.id);
-  confirmOpen.value = true;
+  const checkbox = event.target as HTMLInputElement;
+  const checked = checkbox.checked;
+  const granted = group.grantedUserIds.includes(userId);
+  checkbox.checked = granted;
+  if (!isUserGroup(group) && !granted) return;
+  await mutate(async () => {
+    if (checked) await userAPI.grantGroup(userId, group.id);
+    else await userAPI.revokeGroup(userId, group.id);
+    group.grantedUserIds = checked
+      ? [...group.grantedUserIds, userId]
+      : group.grantedUserIds.filter(id => id !== userId);
+  });
 }
 async function saveServers() {
   const group = selected.value;

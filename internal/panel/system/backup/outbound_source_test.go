@@ -22,8 +22,4 @@ func TestValidateOutboundSource(t *testing.T) {
 			t.Fatalf("%+v: %v", v, err)
 		}
 	}
-	rewindOutboundSource(t, source.Database)
-	if err := validateOutboundSource(ctx, source.Database); err != nil {
-		t.Fatal(err)
-	}
 }

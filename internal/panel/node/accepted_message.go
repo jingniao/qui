@@ -91,19 +91,6 @@ func validateAcceptedMessageMaterial(ctx context.Context, q interface {
 	if prefix != "" && prefix != "restore_source." {
 		return ErrSequence
 	}
-	var present, applied int
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM "+prefix+"sqlite_master WHERE type='table' AND name='node_accepted_messages'").Scan(&present); err != nil {
-		return err
-	}
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM "+prefix+"schema_migrations WHERE version='0066_node_accepted_messages.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if present == 0 && applied == 0 {
-		return nil
-	}
-	if present != 1 || applied != 1 {
-		return ErrSequence
-	}
 	rows, err := q.QueryContext(ctx, "SELECT a.node_id,CASE WHEN typeof(a.sequence)='integer' THEN a.sequence ELSE -1 END,CASE WHEN typeof(a.digest)='text' AND length(a.digest)=64 THEN a.digest ELSE '' END,CASE WHEN typeof(n.last_sequence)='integer' THEN n.last_sequence ELSE -1 END FROM "+prefix+"node_accepted_messages a LEFT JOIN "+prefix+"nodes n ON n.id=a.node_id ORDER BY a.node_id LIMIT 100001")
 	if err != nil {
 		return err
@@ -132,13 +119,6 @@ func preserveAcceptedMessageMaterialTx(ctx context.Context, tx *sql.Tx) error {
 	}
 	if err := validateAcceptedMessageMaterial(ctx, tx, "restore_source."); err != nil {
 		return err
-	}
-	var source int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_accepted_messages'").Scan(&source); err != nil {
-		return err
-	}
-	if source == 0 {
-		return db.AssertRecoveryNone(ctx, tx, "SELECT count(*) FROM node_accepted_messages")
 	}
 	return db.AssertRecoveryNone(ctx, tx, "SELECT count(*) FROM node_accepted_messages s LEFT JOIN restore_source.node_accepted_messages c ON c.node_id=s.node_id WHERE c.node_id IS NULL OR c.sequence<s.sequence OR c.sequence=s.sequence AND c.digest IS NOT s.digest")
 }

@@ -61,19 +61,6 @@ func ReadTrafficAccountingCompletion(ctx context.Context, q interface {
 // Fixed product validation. Legacy receipts without the new column remain
 // unknown; a table/migration mismatch is corrupt, not a completed receipt.
 func ValidateTrafficAccountingCompletion(ctx context.Context, database *sql.DB) error {
-	var column, applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('traffic_batches') WHERE name='accounting_completed_at'").Scan(&column); err != nil {
-		return err
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0059_traffic_accounting_completion.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if column == 0 && applied == 0 {
-		return nil
-	}
-	if column != 1 || applied != 1 {
-		return ErrInvalid
-	}
 	var invalid int
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM traffic_batches WHERE typeof(accounting_completed_at)<>'text' OR length(accounting_completed_at)>64").Scan(&invalid); err != nil {
 		return err

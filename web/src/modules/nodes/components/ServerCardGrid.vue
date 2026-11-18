@@ -13,20 +13,14 @@
         @drop.prevent="onDrop(node.id)"
         @dragend="dragging = ''; dropTarget = ''"
         @click="handleCardClick(node)"
-        class="bg-white rounded-[24px] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-4 cursor-pointer group"
-        :class="{ 'ring-2 ring-ios-blue/40': dropTarget === node.id && dragging !== node.id, 'opacity-50': dragging === node.id }"
+        class="rounded-[24px] px-5 py-4 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-3 cursor-pointer group"
+        :class="[serverStatus(node, clockNow).key === 'offline' ? 'bg-ios-fill' : 'bg-white', { 'ring-2 ring-ios-blue/40': dropTarget === node.id && dragging !== node.id, 'opacity-50': dragging === node.id }]"
       >
         <!-- Card Top Details -->
-        <div class="space-y-3.5">
-          <!-- Row 1: Name & Status Capsule -->
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-              <span
-                class="text-xl shrink-0 select-none leading-none cursor-default"
-                :title="getNodeCountryTitle(node)"
-              >
-                {{ getNodeCountry(node).flag }}
-              </span>
+        <div class="space-y-2.5">
+          <!-- Row 1: Name, Network Speed, Operating System & Country Flag -->
+          <div class="flex items-center justify-between gap-2" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 flex-1">
               <router-link
                 :to="`/nodes/${node.id}`"
                 @click.stop
@@ -49,31 +43,50 @@
               </span>
             </div>
 
-            <div class="flex items-center justify-end gap-1.5 flex-wrap shrink-0">
-            <!-- Status Badge Capsule -->
-            <span
-              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 select-none"
-              :class="statusCapsuleClass(node)"
-            >
-              <span class="w-1.5 h-1.5 rounded-full" :class="statusDotClass(node)"></span>
-              <span>{{ statusCapsuleText(node) }}</span>
-            </span>
-            <RelayCleanupBadge :node="node" />
+            <div class="flex items-center gap-2 shrink-0">
+              <RelayCleanupBadge :node="node" />
+              <div class="flex flex-col items-end text-[10px] leading-3 font-mono tabular-nums">
+                <div class="flex items-center gap-0.5" title="上传网速">
+                  <svg class="w-2.5 h-2.5 text-ios-green shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 15 6-6 6 6" />
+                  </svg>
+                  <span class="font-medium text-ios-label">{{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'transmit')).value }}</span>
+                  <span v-if="formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'transmit')).unit" class="text-ios-tertiary">
+                    {{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'transmit')).unit }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-0.5" title="下载网速">
+                  <svg class="w-2.5 h-2.5 text-ios-blue shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                  <span class="font-medium text-ios-label">{{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'receive')).value }}</span>
+                  <span v-if="formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'receive')).unit" class="text-ios-tertiary">
+                    {{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'receive')).unit }}
+                  </span>
+                </div>
+              </div>
+              <OperatingSystemIcon
+                v-if="node.capabilities?.host?.osPrettyName || node.os"
+                :name="node.capabilities?.host?.osPrettyName || node.os"
+              />
+              <span
+                class="text-xl shrink-0 select-none leading-none cursor-default"
+                :title="getNodeCountryTitle(node)"
+              >
+                {{ getNodeCountry(node).flag }}
+              </span>
             </div>
           </div>
 
-          <!-- Row 2: Sub-info (Address · Core Version · Running Time) -->
-          <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap">
+          <!-- Row 2: Sub-info (Address · Running Time) -->
+          <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <span :class="connectAddress(node) ? 'text-neutral-500' : 'text-ios-orange font-sans'">{{ connectAddress(node) || '未设置连接地址' }}</span>
             <span class="text-neutral-300">·</span>
-            <span>{{ coreSummaryLabel(node) }}</span>
-            <span class="text-neutral-300">·</span>
             <span>已运行 {{ calculateRunningTime(node) }}</span>
-            <span class="text-ios-secondary">{{ node.capabilities?.host?.osPrettyName || node.os || '—' }}</span>
           </div>
 
-          <!-- Row 3: CPU / 内存 / 磁盘 3栏微型仪表 -->
-          <div class="grid grid-cols-3 gap-3 pt-0.5">
+          <!-- Row 3: CPU / 内存 / 磁盘 / 流量 -->
+          <div class="grid grid-cols-4 gap-3 pt-0.5" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <!-- CPU -->
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
@@ -118,45 +131,7 @@
                 ></div>
               </div>
             </div>
-          </div>
-
-          <!-- Row 4: 网速与本月流量 (横向展示) -->
-          <div class="grid grid-cols-2 gap-2 pt-1 border-t border-black/[0.04] items-start">
-            <!-- 网速 -->
-            <div class="min-w-0">
-              <p class="text-xs text-neutral-400 font-medium">网速</p>
-              <div class="mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap text-xs font-mono tabular-nums">
-                <div class="flex items-center gap-0.5 shrink-0">
-                  <span class="text-emerald-600 font-bold text-xs shrink-0">↑</span>
-                  <span class="font-bold text-neutral-900 text-xs">
-                    {{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'transmit')).value }}
-                  </span>
-                  <span
-                    v-if="formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'transmit')).unit"
-                    class="text-xs text-neutral-400 font-normal shrink-0"
-                  >
-                    {{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'transmit')).unit }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-0.5 shrink-0">
-                  <span class="text-ios-blue font-bold text-xs shrink-0">↓</span>
-                  <span class="font-bold text-neutral-900 text-xs">
-                    {{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'receive')).value }}
-                  </span>
-                  <span
-                    v-if="formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'receive')).unit"
-                    class="text-xs text-neutral-400 font-normal shrink-0"
-                  >
-                    {{ formatSpeedParts(nicRate(hostMetrics(node, clockNow), 'receive')).unit }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 本月整机流量 (T1: 单张网卡的本期整机用量，已取代此处的代理流量读数) -->
-            <div class="min-w-0">
-              <MachineTrafficUsage compact :summary="machineTraffic[node.id]" />
-            </div>
+            <MachineTrafficUsage display="metric" :summary="machineTraffic[node.id]" />
           </div>
 
           <!-- Row 5: 延迟与测试点卡片 (3 个测试点) -->
@@ -166,7 +141,8 @@
               <span class="text-neutral-400 font-mono text-xs">{{ latencyStatus(node.id) }}</span>
             </div>
 
-            <div class="grid grid-cols-3 gap-1.5">
+            <div class="relative">
+            <div class="grid grid-cols-3 gap-1.5" :class="{ invisible: serverStatus(node, clockNow).key === 'offline' }">
               <div class="bg-[#F8F9FA] rounded-xl p-2 border border-black/[0.03] space-y-0.5">
                 <div class="flex items-center gap-1 text-xs text-neutral-500 font-medium truncate">
                   <span class="w-1.5 h-1.5 rounded-full bg-neutral-300 shrink-0"></span>
@@ -189,10 +165,15 @@
                 <p class="text-xs font-bold font-mono text-ios-tertiary">{{ latencyTile(node.id, 2).value }}</p>
               </div>
             </div>
+            <div
+              v-if="serverStatus(node, clockNow).key === 'offline'"
+              class="absolute inset-0 flex items-center justify-center text-sm font-semibold leading-normal text-ios-red pointer-events-none"
+            >已离线</div>
+            </div>
           </div>
 
           <!-- Row 6: 到期时间与续费价格 (Renewal Date & Price Info) -->
-          <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs">
+          <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <!-- Left: 到期时间与剩余天数 -->
             <div class="flex items-center gap-1.5 min-w-0">
               <span class="text-neutral-400 shrink-0">到期:</span>
@@ -227,6 +208,7 @@
         <div
           v-if="isOwner && !node.deletedAt"
           class="pt-2 border-t border-black/[0.05] grid grid-cols-3 gap-1.5"
+          :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }"
           @click.stop
         >
           <!-- 1. 安装 -->
@@ -263,17 +245,18 @@
 </template>
 <script setup lang="ts">
 import RelayCleanupBadge from './RelayCleanupBadge.vue';
+import OperatingSystemIcon from '../../../components/OperatingSystemIcon.vue';
 import { ref, toRef } from 'vue';
 import { useRouter } from 'vue-router';
 import type { MachineTrafficSummary, NodeView } from '../api';
 import { isOwner } from '../../../app/auth';
 import { hostMetrics, nicRate } from '../metrics';
-import { coreSummaryLabel } from '../coreSummary';
 import { isNodeReissuing } from '../coreInstallOptions';
 import { connectAddress } from '../nodeAddress';
 import MachineTrafficUsage from './MachineTrafficUsage.vue';
 import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';
+import { serverStatus } from './serverListModel';
 
 const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean }>();
 const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView]; reorder: [fromId: string, toId: string] }>();
@@ -292,7 +275,7 @@ function onDrop(id: string) {
   dragging.value = ''; dropTarget.value = '';
 }
 
-const { statusCapsuleClass, statusCapsuleText, statusDotClass, calculateRunningTime, formatPercent,
+const { calculateRunningTime, formatPercent,
   barColor, formatSpeedParts, getNodeCountry, getNodeCountryTitle, getNodeRegion, getRenewalDate,
   getRenewalPriceDisplay, getRenewalInfo } = useServerCardValues(toRef(props, 'clockNow'));
 const { vVisible, latencyTile, latencyStatus } = useServerCardLatency();

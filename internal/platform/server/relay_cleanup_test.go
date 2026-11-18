@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"testing"
-	"testing/fstest"
+
 	"time"
 
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -31,39 +31,5 @@ func TestRelayCleanupControlQueuesOnCommandPoll(t *testing.T) {
 	state, err := desiredstate.Decode(command.DesiredStateJson)
 	if err != nil || len(state.Inbounds) != 0 {
 		t.Fatalf("deleted inbound remains: %+v %v", state.Inbounds, err)
-	}
-	var completed int
-	if err := f.app.Database.QueryRowContext(ctx, "SELECT completed FROM relay_cleanup_reconcile WHERE id=1").Scan(&completed); err != nil || completed != 1 {
-		t.Fatalf("startup cleanup marker %d: %v", completed, err)
-	}
-}
-
-func TestRelayCleanupPreparedRestoreDefersWrites(t *testing.T) {
-	app := testServer(t)
-	ctx := context.Background()
-	if _, err := app.Database.ExecContext(ctx, "UPDATE relay_cleanup_reconcile SET completed=0"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := app.Database.ExecContext(ctx, "PRAGMA query_only=ON"); err != nil {
-		t.Fatal(err)
-	}
-	defer app.Database.ExecContext(ctx, "PRAGMA query_only=OFF")
-	prepared, err := newServer(app.Config, app.Database, fstest.MapFS{"index.html": {Data: []byte("panel")}}, app.Logger, true)
-	if err != nil {
-		t.Fatalf("read-only restore preparation: %v", err)
-	}
-	defer prepared.closeReadPool()
-	var completed int
-	if err := app.Database.QueryRowContext(ctx, "SELECT completed FROM relay_cleanup_reconcile WHERE id=1").Scan(&completed); err != nil || completed != 0 {
-		t.Fatalf("preparation changed cleanup marker %d: %v", completed, err)
-	}
-	if _, err := app.Database.ExecContext(ctx, "PRAGMA query_only=OFF"); err != nil {
-		t.Fatal(err)
-	}
-	if err := prepared.tunnelPublications.ReconcileRelayCleanup(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.Database.QueryRowContext(ctx, "SELECT completed FROM relay_cleanup_reconcile WHERE id=1").Scan(&completed); err != nil || completed != 1 {
-		t.Fatalf("handoff cleanup marker %d: %v", completed, err)
 	}
 }

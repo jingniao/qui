@@ -14,21 +14,6 @@ import (
 // cannot open it would restore a certificate phase D2 could never render; that is
 // the same reason the GOST tunnel material is checked here.
 func validateCertificates(ctx context.Context, db *sql.DB, configurationVault *vault.Vault) error {
-	var applied, present int
-	if db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0137_certificates.sql'").Scan(&applied) != nil ||
-		db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='certificates'").Scan(&present) != nil ||
-		present != applied {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
-	// The reference column arrives with the same migration, so an archive that
-	// applied it must also carry the column phase D2 writes.
-	var column int
-	if db.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('inbounds') WHERE name='certificate_id'").Scan(&column) != nil || column != 1 {
-		return ErrArchive
-	}
 	rows, err := db.QueryContext(ctx, "SELECT id,domains_json,status,not_before,not_after,last_error_code,last_attempt_at,next_attempt_at,attempts,auto_dns,CASE WHEN length(encrypted_material)<=1048576 THEN encrypted_material END,created_at,updated_at FROM certificates")
 	if err != nil {
 		return ErrArchive

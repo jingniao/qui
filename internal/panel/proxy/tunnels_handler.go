@@ -11,7 +11,6 @@ import (
 )
 
 func (h *Handler) registerTunnels(mux *http.ServeMux) {
-	mux.Handle("GET /api/v1/tunnels/migration-report", h.Auth.Require(http.HandlerFunc(h.tunnelMigrationReport), true))
 	for pattern, handler := range map[string]http.HandlerFunc{
 		"GET /api/v1/nodes/{id}/relays":                h.listNodeRelays,
 		"POST /api/v1/nodes/{id}/relays":               h.createNodeRelay,
@@ -33,14 +32,6 @@ func (h *Handler) registerTunnels(mux *http.ServeMux) {
 	}
 }
 
-func (h *Handler) tunnelMigrationReport(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Service.Repository.TunnelMigrationReport(r.Context())
-	if err != nil {
-		h.failTunnel(w, err)
-		return
-	}
-	httpapi.JSON(w, 200, map[string]any{"items": items})
-}
 func (h *Handler) failTunnel(w http.ResponseWriter, err error) {
 	var e *tunnelError
 	if errors.As(err, &e) {

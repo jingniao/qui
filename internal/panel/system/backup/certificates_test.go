@@ -125,22 +125,3 @@ SELECT 'inbound-1','edge',id,'vless','0.0.0.0',443,1,1,0,'direct','[]',x'01',?,'
 		t.Fatal("a dangling certificate reference was accepted")
 	}
 }
-
-// TestCertificateValidationAcceptsPre0137 keeps older archives restorable.
-func TestCertificateValidationAcceptsPre0137(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	source, _, _ := sourceFixture(t)
-	rewindCertificates(t, source.Database)
-	if err := validateCertificates(ctx, source.Database, source.ConfigurationVault); err != nil {
-		t.Fatalf("a pre-0137 archive was rejected: %v", err)
-	}
-	// A table without its migration, or a migration without the column, is an
-	// archive this build did not write.
-	if _, err := source.Database.Exec("CREATE TABLE certificates(id TEXT)"); err != nil {
-		t.Fatal(err)
-	}
-	if validateCertificates(ctx, source.Database, source.ConfigurationVault) == nil {
-		t.Fatal("a partial 0137 schema was accepted")
-	}
-}

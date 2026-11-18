@@ -34,13 +34,14 @@ const (
 	agentReleaseListLimit     = 8 << 20
 	agentReleaseFileLimit     = 64 << 20
 	agentReleaseManifestLimit = 64 << 10
-	agentReleaseKeep          = 5
+	agentReleaseKeep          = 1
 	agentReleaseDefaultAPI    = "https://api.github.com/repos/jingniao/qui"
 	agentReleaseUserAgent     = "qui-panel-agent-releases"
 )
 
 type AgentReleaseStore interface {
 	SaveRelease(ctx context.Context, signed release.Signed, key ed25519.PublicKey, author, ip string) (release.CatalogueEntry, error)
+	PruneAgentReleases(ctx context.Context) ([]release.Manifest, error)
 }
 
 type AgentReleaseVersion struct {
@@ -323,16 +324,24 @@ func (a *AgentReleases) Import(ctx context.Context, version, actor, ip string) (
 		return nil, fmt.Errorf("%w: %v", ErrAgentReleaseImport, err)
 	}
 
+	// Only the newest formal release is imported: the panel keeps no older Agent
+	// versions to roll back to (Prune removes them after each import).
 	var targetRel *ghRelease
 	for i := range releases {
 		rel := &releases[i]
-		if strings.TrimPrefix(rel.TagName, "v") == version && !rel.Draft && !rel.Prerelease {
-			targetRel = rel
-			break
+		if rel.Draft || rel.Prerelease {
+			continue
 		}
+		if _, formal := parseFormalVersion(strings.TrimPrefix(rel.TagName, "v")); !formal {
+			continue
+		}
+		if strings.TrimPrefix(rel.TagName, "v") == version {
+			targetRel = rel
+		}
+		break
 	}
 	if targetRel == nil {
-		return nil, fmt.Errorf("%w: release %s not found", ErrAgentReleaseImport, version)
+		return nil, fmt.Errorf("%w: release %s is not the latest formal release", ErrAgentReleaseImport, version)
 	}
 
 	assetsByName := make(map[string]ghReleaseAsset, len(targetRel.Assets))
@@ -435,5 +444,52 @@ func (a *AgentReleases) Import(ctx context.Context, version, actor, ip string) (
 	a.cache = cachedAgentReleases{}
 	a.mu.Unlock()
 
+	if err := a.Prune(ctx); err != nil {
+		return entries, fmt.Errorf("%w: prune older releases failed: %v", ErrAgentReleaseImport, err)
+	}
 	return entries, nil
+}
+
+// Prune deletes older Agent releases: catalogue rows no task references, and
+// every served manifest and artifact except the newest per platform and those an
+// unfinished update task still needs.
+func (a *AgentReleases) Prune(ctx context.Context) error {
+	if a.Store == nil {
+		return nil
+	}
+	keep, err := a.Store.PruneAgentReleases(ctx)
+	if err != nil || a.Directory == "" {
+		return err
+	}
+	manifests, artifacts := map[string]bool{}, map[string]bool{}
+	for _, m := range keep {
+		manifests[filepath.Join(m.OS, m.Architecture, strconv.FormatInt(m.Sequence, 10))] = true
+		artifacts[m.SHA256+".bin"] = true
+	}
+	root := filepath.Join(a.Directory, "proxy-agent")
+	platforms, _ := filepath.Glob(filepath.Join(root, "*", "*", "*"))
+	for _, dir := range platforms {
+		rel, err := filepath.Rel(root, dir)
+		if err != nil || manifests[rel] {
+			continue
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+	}
+	files, err := os.ReadDir(filepath.Join(a.Directory, "artifacts"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".bin") && !artifacts[file.Name()] {
+			if err := os.Remove(filepath.Join(a.Directory, "artifacts", file.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

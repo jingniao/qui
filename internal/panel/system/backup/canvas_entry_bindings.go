@@ -12,13 +12,10 @@ func validateCanvasEntryBindings(ctx context.Context, database *sql.DB) error {
 	if err := validateCanvasEntryBaselines(ctx, database); err != nil {
 		return err
 	}
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0146_canvas_entry_bindings.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
+	return validateCanvasEntryBindingRows(ctx, database)
+}
+
+func validateCanvasEntryBindingRows(ctx context.Context, database *sql.DB) error {
 	var invalid int
 	err := database.QueryRowContext(ctx, `SELECT count(*) FROM canvas_entry_bindings b
  LEFT JOIN inbounds i ON i.id=b.inbound_id LEFT JOIN canvas_schemes s ON s.id=b.scheme_id
@@ -58,13 +55,6 @@ func validateCanvasEntryBindings(ctx context.Context, database *sql.DB) error {
 }
 
 func validateCanvasEntryBaselines(ctx context.Context, database *sql.DB) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0148_canvas_entry_baseline.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	rows, err := database.QueryContext(ctx, "SELECT creation_config_json,creation_groups_json FROM canvas_entry_bindings")
 	if err != nil {
 		return ErrArchive

@@ -20,19 +20,6 @@ func validateStoredTrafficMaterial(ctx context.Context, q trafficMaterialReader,
 	if prefix != "" && prefix != "restore_source." {
 		return ErrTrafficMaterial
 	}
-	var present, applied int
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM "+prefix+"sqlite_master WHERE type='table' AND name='user_traffic_cursors'").Scan(&present); err != nil {
-		return err
-	}
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM "+prefix+"schema_migrations WHERE version='0015_account_traffic.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if present == 0 && applied == 0 {
-		return nil
-	} // Legacy format only, not zero-history evidence.
-	if present != 1 || applied != 1 {
-		return ErrTrafficMaterial
-	}
 	checks := []string{
 		"SELECT EXISTS(SELECT 1 FROM " + prefix + "users WHERE typeof(used_traffic)!='integer' OR used_traffic<0 OR typeof(traffic_limit)!='integer' OR traffic_limit<0)",
 		"SELECT EXISTS(SELECT 1 FROM " + prefix + "devices WHERE typeof(used_traffic)!='integer' OR used_traffic<0)",

@@ -5,12 +5,11 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/pkg/contracts/desiredstate"
-	shared "proxycontrol/pkg/contracts/policy"
 	"testing"
 	"time"
 )
 
-func TestGroupPolicyOwnershipTransportSimulationAndDeletion(t *testing.T) {
+func TestGroupPolicyOwnershipTransportAndDeletion(t *testing.T) {
 	s, nodeID, _, _, _ := fixture(t)
 	ctx := context.Background()
 	r := s.Proxies.(*proxy.Repository)
@@ -43,10 +42,6 @@ func TestGroupPolicyOwnershipTransportSimulationAndDeletion(t *testing.T) {
 	input.Scope.NodeIDs = []string{other.ID}
 	if _, err := s.Save(ctx, "", input); err == nil {
 		t.Fatal("group attached to another entry node")
-	}
-	decision, err := s.Simulate(ctx, shared.Request{NodeID: nodeID, Domain: "example.test", Port: 443, Network: "tcp"})
-	if err != nil || !decision.Matched || decision.SelectionStrategy != "round_robin" || len(decision.CandidatePaths) != 2 || decision.FinalEgressNodeID != "" {
-		t.Fatal("group simulator invented an exact connection choice", decision, err)
 	}
 	if err := proxies.DeleteGroup(ctx, group.ID); err == nil {
 		t.Fatal("deleted policy group target")

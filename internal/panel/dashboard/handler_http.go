@@ -7,8 +7,9 @@ import (
 )
 
 type Handler struct {
-	Service *Service
-	Auth    *auth.Handler
+	Service       *Service
+	ExchangeRates *ExchangeRateService
+	Auth          *auth.Handler
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -19,5 +20,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 			return
 		}
 		httpapi.JSON(w, 200, view)
+	}), false))
+	mux.Handle("GET /api/v1/dashboard/exchange-rates", h.Auth.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rates, err := h.ExchangeRates.Read(r.Context())
+		if err != nil {
+			httpapi.Error(w, http.StatusBadGateway, "exchange_rates_unavailable", err.Error())
+			return
+		}
+		httpapi.JSON(w, http.StatusOK, rates)
 	}), false))
 }

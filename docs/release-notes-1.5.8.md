@@ -48,5 +48,14 @@
 - **CC 恢复在线**：1.5.8 面板接受美国 CC 修订 87 的积压数据后，CC 于 17:42:17 连上并保持在线；此前每 30 秒连上约 1 秒即因 `traffic batch rejected` 断开。面板显示 CC 第 90–97 版修订均成功，CC 与 shlii 全部入站状态均为「已生效」。原计划「重新发布 CC」因无差异未执行，避免额外一次核心重启。shlii 第 98 版在启用 35001／35004 时已成功，未出现内存不足，因此未停用「测试-直连-SS」（:35001）。
 - **方案撤除与节点清理**：一键撤除「测试中转-shlii-CC」和「清理-遗留-shlii-CC」，均返回 200 `removed:true,pendingNodes:[]`。随后 CC 修订 #100、#102 与 shlii 修订 #99、#101（`auto: relay cleanup`）均成功。中转方案清零，CC 内部监听 `trojan:35003`、`trojan:35004` 及 shlii 入口 :35004、:35000 全部删除，无节点待清理。升级后启动的一次性残留清理未删除任何对象：这些残留当时仍挂在方案上，随后由撤除删除。
 - **CC 固定下载目录**：经 Owner 授权 SSH 操作，17:01 前在 CC 用 Go 客户端 UA 经 `https://qui.lluu.de/agent-catalogue/` 下载 1.5.7 清单与完整安装包，21184674 字节、耗时 3 秒、SHA256 一致（此前经 22550 为 101 秒）。配置备份为 `/etc/proxy-agent/config.yaml.bak-20261115-catalogue`；追加 `updates.catalogue` 与官方公钥，`--check-config` 返回 `configuration valid` 后重启 Agent，CC 自身代理短暂中断。17:49:32 经网页下发 Agent 1.5.8 升级，17:49:49 成功：`installed_version=1.5.8`、`installed_sequence=1005008`，摘要与清单一致，下载经 443 完成。详见[固定目录实际结果](superpowers/specs/2026-11-15-agent-download-page-origin-design.md#实际结果2026-11-15utc)。
-- **当前实际版本**：面板 1.5.8；德国 netcup Agent 1.5.7；美国 CC Agent 1.5.8；其余四台（香港 阿里国际*1、台湾 wap、zouter、美国 shlii.io）Agent 均为 1.5.5，按 Owner 要求暂不处理。
+- **2026-11-15 当次升级结束时的版本**：面板 1.5.8；德国 netcup Agent 1.5.7；美国 CC Agent 1.5.8；其余四台（香港 阿里国际*1、台湾 wap、zouter、美国 shlii.io）Agent 均为 1.5.5，按 Owner 要求暂不处理。
 - **未完成：临时防火墙规则撤除**。德国防火墙在 14:38:30 添加的来源 `148.135.40.213/32` → TCP 22550 临时 ACCEPT 尚未删除。本机 SSH 到 `5.45.96.43` 被对端直接关闭（`Connection closed by 5.45.96.43 port 22`），需 Owner 恢复 SSH 访问或在 1Panel 中删除。规则仅运行时生效、未持久化，防火墙重载或重启后自动消失；CC 已不再需要它。
+
+### shlii 补充升级（2026-11-16 UTC）
+
+- Owner 指定把美国 shlii.io（`38.244.50.17`，Alpine 3.21.10 / OpenRC）升级到 1.5.8。升级前启动器已为 1.5.8，受管 Agent 实际进程仍为 1.5.5；本次通过网页升级实际进程，未使用仍只更新启动器的 `qui-update`。
+- 在节点经 `https://qui.lluu.de/agent-catalogue/` 的 443 端口取得序号 `1005008` 的签名清单并完整下载 21184674 字节安装文件，HTTP 200，耗时 6.98 秒，SHA256 与本页官方发布摘要一致。预检下载文件随后删除。
+- 01:56:39 为 `/etc/proxy-agent/config.yaml` 追加固定下载目录、系统 CA 与官方签名公钥；原配置备份为 `/etc/proxy-agent/config.yaml.bak-20261116T015639Z-catalogue443`。候选配置检查通过后替换并重启服务，01:56:42 控制连接恢复。配置只增加 `updates`，未改控制地址、节点身份、代理核心或业务配置。原配置 SHA256 为 `44f95d6b9c3d02743756cf8701df58c25b1c76876a546406a80ad2b6eca7ef73`，新配置为 `3ed7cabf18ba8d996edd083bbcc41561bb7d1dcd18ab7af10f68245eca2d311b`。
+- 02:02 从网页向 shlii 单独下发 1.5.8 升级。02:02:31 新进程连接面板；02:05 实机读取 `/proc/<worker-pid>/exe --version` 为 `proxy-agent 1.5.8`，运行镜像 SHA256 为 `adb2eafe01265b60c7ae196a242cbbe6aa97f8c1684640b88a0f6073cc7753b8`，与签名清单一致，OpenRC 服务为 `started`。面板显示 Agent 1.5.8、在线、三个核心正常；运行与成功应用修订均为 #103，Xray 仍监听 TCP 35002。
+- 02:02:26 切换期间记录了 `traffic queue read failed` 与 `telemetry queue read failed` 两条 ERROR，原日志没有底层错误信息，具体原因未确定；02:02:31 重连后至 02:05 核验未见新增同类错误，不记为零错误升级。SSH 跳板会话两次中断，重连后核实配置、运行进程与面板状态，无重复下发升级。
+- 本次仅操作 shlii；其他节点与德国防火墙未修改。未运行项目测试任务，未提交或推送代码；`qui` 更新实际受管 Agent 的新功能仍待实现。

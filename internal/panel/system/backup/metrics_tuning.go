@@ -12,13 +12,6 @@ import (
 )
 
 func validateMetricsTuning(ctx context.Context, db *sql.DB) error {
-	var applied, present int
-	if db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0123_node_metrics_tuning.sql'").Scan(&applied) != nil || db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('node_metric_samples','node_tuning')").Scan(&present) != nil || present != applied*2 {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	rows, err := db.QueryContext(ctx, "SELECT node_id,at,cpu_percent,memory_percent,disk_percent,memory_used_bytes,swap_used_bytes,disk_used_bytes,load1,process_count,tcp_connections,udp_sockets,active_connections,rx_bytes_per_second,tx_bytes_per_second FROM node_metric_samples LIMIT 0")
 	if err != nil {
 		return ErrArchive

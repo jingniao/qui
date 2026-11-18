@@ -37,8 +37,8 @@ func TestOpenMigratesAndPersists(t *testing.T) {
 	}
 	defer database.Close()
 	var count int
-	if err := database.QueryRow("SELECT count(*) FROM app_metadata").Scan(&count); err != nil || count != 1 {
-		t.Fatalf("bootstrap repeated: %d %v", count, err)
+	if err := database.QueryRow("SELECT count(*) FROM service_sets WHERE id='service-cn'").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("baseline rows repeated: %d %v", count, err)
 	}
 	if err := database.QueryRow("PRAGMA integrity_check").Scan(&mode); err != nil || mode != "ok" {
 		t.Fatalf("integrity: %s %v", mode, err)

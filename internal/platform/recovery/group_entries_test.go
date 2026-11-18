@@ -25,7 +25,7 @@ func TestRecoveryKeepsCurrentGroupEntriesAndPortRange(t *testing.T) {
 			t.Fatal(err)
 		}
 		groupID = g.ID
-		if _, err = f.source.Database.Exec("INSERT INTO node_group_imports VALUES(?,?,?)", groupID, sourceID, ""); err != nil {
+		if _, err = f.source.Database.Exec("INSERT INTO node_group_imports SELECT ?,source_id,'id:'||id FROM imported_proxies WHERE source_id=? AND name='A'", groupID, sourceID); err != nil {
 			t.Fatal(err)
 		}
 		if err = f.users.Grant(ctx, f.user.ID, g.ID, false); err != nil {
@@ -38,7 +38,7 @@ func TestRecoveryKeepsCurrentGroupEntriesAndPortRange(t *testing.T) {
 	if _, err := f.nodes.SaveGroup(ctx, groupID, node.GroupInput{Name: "current entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, ServerIDs: []string{f.node.ID}, Imports: []node.GroupImport{}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.source.Database.Exec("INSERT INTO node_group_imports VALUES(?,?,?)", groupID, sourceID, "B|http"); err != nil {
+	if _, err := f.source.Database.Exec("INSERT INTO node_group_imports SELECT ?,source_id,'id:'||id FROM imported_proxies WHERE source_id=? AND name='B'", groupID, sourceID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.source.Database.Exec("UPDATE node_meta SET port_range_start=21000,port_range_end=21010 WHERE node_id=?", f.node.ID); err != nil {

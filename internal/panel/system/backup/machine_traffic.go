@@ -11,15 +11,6 @@ import (
 // daily rows and cursors are durable traffic data, not seven-day telemetry, so
 // they stay in the archive.
 func validateMachineTraffic(ctx context.Context, db *sql.DB) error {
-	var applied, present int
-	if db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0126_node_machine_traffic.sql'").Scan(&applied) != nil ||
-		db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('node_machine_traffic_settings','node_machine_traffic_daily','node_machine_traffic_cursors')").Scan(&present) != nil ||
-		present != applied*3 {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	// Every expected column is read even when the table is empty: the column
 	// layout is part of the schema this build wrote.
 	rows, err := db.QueryContext(ctx, "SELECT node_id,method,interface_name,allowance_bytes,reset_day FROM node_machine_traffic_settings")

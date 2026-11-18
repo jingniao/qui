@@ -13,9 +13,6 @@
           </svg>
           <span>创建节点策略</span>
         </router-link>
-        <router-link to="/routing/simulator?tab=node" class="ios-btn-secondary">
-          策略模拟
-        </router-link>
         <button
           v-if="isOwner"
           type="button"

@@ -46,7 +46,6 @@ GET /api/v1/canvas-schemes
 GET /api/v1/canvas-schemes/{id}
 GET /api/v1/canvas-schemes/{id}/status
 GET /api/v1/canvas-tunnels
-GET /api/v1/canvas-tunnels/legacy-objects
 GET /api/v1/certificates
 GET /api/v1/client-policy-candidates
 GET /api/v1/client-policy-profiles
@@ -54,6 +53,7 @@ GET /api/v1/client-policy-profiles/{id}
 GET /api/v1/core-releases
 GET /api/v1/core-updates
 GET /api/v1/dashboard
+GET /api/v1/dashboard/exchange-rates
 GET /api/v1/deployment-batches
 GET /api/v1/deployment-batches/{id}
 GET /api/v1/devices
@@ -141,7 +141,6 @@ GET /api/v1/traffic/reconciliation
 GET /api/v1/traffic/summary
 GET /api/v1/tunnel-rules
 GET /api/v1/tunnels
-GET /api/v1/tunnels/migration-report
 GET /api/v1/users
 GET /api/v1/users/{id}
 GET /api/v1/users/{id}/devices
@@ -172,8 +171,6 @@ POST /api/v1/canvas-schemes/{id}/plan
 POST /api/v1/canvas-schemes/{id}/publish
 POST /api/v1/canvas-schemes/{id}/remove
 POST /api/v1/canvas-tunnels
-POST /api/v1/canvas-tunnels/{id}/adopt
-POST /api/v1/canvas-tunnels/{id}/rotate-credentials
 POST /api/v1/certificates
 POST /api/v1/certificates/{id}/renew
 POST /api/v1/client-policy-profiles
@@ -209,7 +206,6 @@ POST /api/v1/notifications/read-all
 POST /api/v1/outbound-groups
 POST /api/v1/outbounds
 POST /api/v1/policies
-POST /api/v1/policies/simulate
 POST /api/v1/portal/auth/login
 POST /api/v1/portal/auth/logout
 POST /api/v1/portal/subscription/reset
@@ -217,7 +213,6 @@ POST /api/v1/probe-targets
 POST /api/v1/proxy-chains
 POST /api/v1/relay-schemes/quick
 POST /api/v1/relay-schemes/quick/plan
-POST /api/v1/releases
 POST /api/v1/revisions
 POST /api/v1/revisions/proxy
 POST /api/v1/revisions/user-access

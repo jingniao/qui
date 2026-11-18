@@ -5,10 +5,9 @@ import (
 	"testing"
 
 	"proxycontrol/pkg/contracts/desiredstate"
-	shared "proxycontrol/pkg/contracts/policy"
 )
 
-// A deleted node can neither join a policy scope nor be simulated.
+// A deleted node cannot join a policy scope.
 func TestDeletedNodeRejectedByPolicyScope(t *testing.T) {
 	service, nodeID, _, _, _ := fixture(t)
 	ctx := context.Background()
@@ -17,8 +16,5 @@ func TestDeletedNodeRejectedByPolicyScope(t *testing.T) {
 	}
 	if _, err := service.Save(ctx, "", Input{Name: "Deleted scope", Priority: 10, Enabled: true, Scope: desiredstate.Scope{NodeIDs: []string{nodeID}}, Match: desiredstate.Match{Domains: []string{"example.com"}}, Action: desiredstate.Action{Type: "Block"}}); err == nil {
 		t.Fatal("policy accepted a deleted node")
-	}
-	if _, err := service.Simulate(ctx, shared.Request{NodeID: nodeID, Domain: "example.com", Network: "tcp", Port: 443}); err == nil {
-		t.Fatal("simulation accepted a deleted node")
 	}
 }

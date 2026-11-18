@@ -73,19 +73,6 @@ func TestInspectRejectsInvalidV150Tables(t *testing.T) {
 	}
 }
 
-func TestInspectAcceptsPre0140Archive(t *testing.T) {
-	t.Parallel()
-	source, directory, _ := sourceFixture(t)
-	rewindServiceSetSources(t, source.Database)
-	created, err := source.Create(context.Background(), directory, "pre0140_archive_01", "owner", testPassword)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Inspect(context.Background(), directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestInspectAcceptsValidV150Tables(t *testing.T) {
 	t.Parallel()
 	source, directory, _ := sourceFixture(t)

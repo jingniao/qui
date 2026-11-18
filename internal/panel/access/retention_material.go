@@ -7,19 +7,6 @@ import (
 
 // Archive validation uses the module's same reader; it never starts cleanup.
 func ValidateRetentionMaterial(ctx context.Context, database *sql.DB) error {
-	var present, applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='access_retention_job'").Scan(&present); err != nil {
-		return err
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0056_access_retention_job.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if present == 0 && applied == 0 {
-		return nil
-	}
-	if present != 1 || applied != 1 {
-		return ErrInvalid
-	}
 	var count int
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM access_retention_job").Scan(&count); err != nil {
 		return err
@@ -39,19 +26,7 @@ func ValidateRetentionMaterial(ctx context.Context, database *sql.DB) error {
 }
 
 func ValidateSpaceMaintenanceMaterial(ctx context.Context, database *sql.DB) error {
-	var present, applied, count, bad int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='access_space_maintenance'").Scan(&present); err != nil {
-		return err
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0057_access_space_maintenance.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if present == 0 && applied == 0 {
-		return nil
-	}
-	if present != 1 || applied != 1 {
-		return ErrInvalid
-	}
+	var count, bad int
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM access_space_maintenance").Scan(&count); err != nil {
 		return err
 	}

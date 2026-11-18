@@ -35,7 +35,7 @@
 | node | `internal/panel/node` | 节点、节点组、注册码、证书、心跳、能力、健康检查、逻辑删除（`deleted_at` 与阻塞项检查） |
 | subscription | `internal/panel/subscription` | 按授权节点组展开并生成订阅 |
 | proxy | `internal/panel/proxy` | 入站、出站、出口组、代理链、协议校验、健康 |
-| policy | `internal/panel/policy` | 分流规则、服务集、网站控制、策略模拟 |
+| policy | `internal/panel/policy` | 分流规则、服务集、网站控制 |
 | deployment | `internal/panel/deployment` | 配置版本、差异、批量发布、回滚、核心与 Agent 更新任务 |
 | access | `internal/panel/access` | 域名访问记录、流量汇总、保留清理 |
 | dashboard | `internal/panel/dashboard` | 总览聚合（只读） |
@@ -144,7 +144,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 ## 8.1 存储与生命周期
 
-v1.4 的 0129 新增五张隧道/规则/归属/声明表，0130 增加规则发布快照。0131 的启动/恢复一次性事务将已发布且有明确 ID 归属的画布转发迁移为规则及可选两节点 GOST 隧道，只转移归属和声明，不写入站、运行修订或证书；规则默认订阅隐藏。目标公网地址与已发布用户入站端口唯一匹配才 linked，否则 manual。标记保留已迁移 ID，首次无修改发布复用旧物化输入；不确定连接留在画布，Owner 专用 migration-report 返回持久原因。完成后不自动重试，事务失败可重试。备份/恢复共用验证并保留声明、材料、报告与标记，恢复已发布对象标 modified，不自动下发；详见 [M1 报告](v1.4-m1-report.md)。
+v1.4 的 0129 新增五张隧道/规则/归属/声明表，0130 增加规则发布快照。0131 的启动/恢复一次性事务将已发布且有明确 ID 归属的画布转发迁移为规则及可选两节点 GOST 隧道，只转移归属和声明，不写入站、运行修订或证书；规则默认订阅隐藏。目标公网地址与已发布用户入站端口唯一匹配才 linked，否则 manual。标记保留已迁移 ID，首次无修改发布复用旧物化输入；不确定连接留在画布。v1.6.1 删除了这段转换代码、其标记与报告及 migration-report 接口（v1.6.0 启动时均已完成）。备份/恢复共用验证并保留声明与材料，恢复已发布对象标 modified，不自动下发；详见 [M1 报告](v1.4-m1-report.md)。
 
 0132 保存客户端策略配置库与活动快照；0133 为 `subscription_sources` 增加有界 `latest_result_json` 与 `last_success_at`，最近尝试与最近成功分开。部分成功提交可用缓存；失败保留旧行但排除该来源，写入失败保留原状态。旧归档缺这些列仍可恢复，不编造原因、不抓取或自动发布。协议公开字段与服务端私钥沿用既有加密备份/修订路径。
 

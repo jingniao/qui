@@ -74,8 +74,6 @@
           </button>
         </div>
 
-        <button class="ios-search-btn shrink-0">查询</button>
-
         <!-- Filter 1: Source -->
         <select v-model="filterSource" @change="applyFilter" class="form-input-base !w-auto py-2">
           <option value="all">全部来源</option>
@@ -213,7 +211,7 @@
                   </span>
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                  <span class="rounded bg-black/[0.04] px-1.5 py-0.5 font-mono font-bold uppercase text-neutral-700">{{ node.protocol }}</span>
+                  <ProtocolBadge :protocol="node.protocol" compact class="uppercase" />
                   <span v-if="node.sourceType !== 'self_hosted'" class="px-1.5 py-0.5 rounded font-semibold" :class="sourceCapsuleColor(node.sourceType)">{{ node.sourceName }}</span>
                   <EntryRouteSummary :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" :show-type="false" />
                 </div>
@@ -378,7 +376,7 @@
           <!-- Row 2: protocol · imported source · route · transport · latency; status at the end -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-neutral-400 font-mono tracking-normal">
-              <span class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-mono font-bold uppercase text-neutral-700 shrink-0">{{ node.protocol }}</span>
+              <ProtocolBadge :protocol="node.protocol" compact class="uppercase shrink-0" />
               <span v-if="node.sourceType !== 'self_hosted'" class="shrink-0 px-1.5 py-0.5 rounded text-xs font-semibold" :class="sourceCapsuleColor(node.sourceType)">{{ node.sourceName }}</span>
               <EntryRouteSummary inline :summary="entryRouteSummaries.get(node.inboundId || '')" :show-scheme-link="isOwner" :show-type="false" class="min-w-0 font-sans" />
               <span class="shrink-0 text-neutral-300">·</span>
@@ -584,7 +582,7 @@
           </div>
           <div class="flex justify-between items-center">
             <span class="text-neutral-500 font-medium">协议类型</span>
-            <span class="font-mono font-bold uppercase text-ios-blue">{{ selectedDetailNode.protocol }}</span>
+            <ProtocolBadge :protocol="selectedDetailNode.protocol" compact class="uppercase" />
           </div>
           <div class="flex justify-between items-center">
             <span class="text-neutral-500 font-medium">直连接入地址</span>
@@ -1101,6 +1099,7 @@ import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { importAPI, loadImports, airportSources, describeImportResult, importCountsLine, failedImportResult } from '../importApi';
 import type { ImportResult } from '../importApi';
 import PageHeader from '../../../components/PageHeader.vue';
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
 import AppDialog from '../../../components/AppDialog.vue';
@@ -1334,7 +1333,10 @@ const relayNesting = computed(() => nestRelayEntries(selfHostedNodes.value, prox
 const getNodeRoutes = (node: ProxyNodeItem) => relayNesting.value.routes.get(node.id) || [];
 const relayCount = (node: ProxyNodeItem) => getNodeRoutes(node).length + linkedRelays(node).length;
 const routeEntries = (route: NodeRelayRoute) => relayNesting.value.entries.get(route.schemeId) || [];
-const allNodes = computed<ProxyNodeItem[]>(() => [...selfHostedNodes.value.filter(node => !relayNesting.value.hidden.has(node.id)), ...proxyNodeStore.manualNodes]);
+const hiddenServerIds = computed(() => new Set(servers.value
+  .filter(server => server.maintenance || serverStatus(server, now.value).key === 'offline')
+  .map(server => server.id)));
+const allNodes = computed<ProxyNodeItem[]>(() => [...selfHostedNodes.value.filter(node => !relayNesting.value.hidden.has(node.id) && !hiddenServerIds.value.has(node.sourceId!)), ...proxyNodeStore.manualNodes]);
 
 // Filtered nodes
 const filteredNodes = computed<ProxyNodeItem[]>(() => {

@@ -7,4 +7,5 @@ export interface Recent { time:string; nodeName:string; userName:string; deviceN
 export interface Hour { time:string; upload:number; download:number; }
 export interface NodeTraffic { nodeId:string; todayUpload:number; todayDownload:number; monthUpload:number; monthDownload:number; measured:boolean; }
 export interface Dashboard { generatedAt:string; timezone:string; dayStart:string; counts:Counts; nodeTraffic:NodeTraffic[]; nodes:NodeView[]; trend:Hour[]; recentAccess?:Recent[]; recentBlocked?:Recent[]; revisions?:Revision[]; chains?:ProxyChain[]; nodeNames?:Record<string,string>; }
-export const dashboardAPI={get:()=>request<Dashboard>('/dashboard')};
+export interface ExchangeRates { base:string; updatedAt:string; nextUpdateAt:string; source:string; sourceUrl:string; rates:Record<string,number>; }
+export const dashboardAPI={get:()=>request<Dashboard>('/dashboard'), exchangeRates:()=>request<ExchangeRates>('/dashboard/exchange-rates')};

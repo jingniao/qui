@@ -8,7 +8,7 @@
     </p>
     <div v-for="entry in plan?.entries || []" :key="entry.instanceId" class="rounded-xl bg-ios-bg p-3 space-y-1">
       <p class="font-semibold">{{ entry.inboundId ? '方案独立入口' : '新建独立入口' }}：{{ entry.nodeName }} · {{ entry.name }}</p>
-      <p>{{ entry.protocol.toUpperCase() }} · <span class="font-mono tabular-nums">{{ entry.port }}</span></p>
+      <p><ProtocolBadge :protocol="entry.protocol" compact class="uppercase" /> · <span class="font-mono tabular-nums">{{ entry.port }}</span></p>
       <p class="text-ios-secondary break-all">目标出站：{{ entry.route }}</p>
       <p class="text-ios-secondary">入口分组：{{ entry.groups?.map(group => group.name).join('、') || '不加入分组' }}</p>
     </div>
@@ -32,6 +32,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import ProtocolBadge from '../../../../components/ProtocolBadge.vue';
 import { computed } from 'vue';
 import { planLines, tunnelConflictText, tunnelPlanLines, type PlanConflict, type TunnelPlan } from './tunnelEditorModel';
 const props = defineProps<{

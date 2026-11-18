@@ -116,22 +116,3 @@ func TestPortalBackupVerifierRejectsMissingOrCorrupt0114Material(t *testing.T) {
 		})
 	}
 }
-
-func TestPortalBackupVerifierAcceptsPre0114Material(t *testing.T) {
-	t.Parallel()
-	source, _, _ := sourceFixture(t)
-	ctx := context.Background()
-	// Model an older archive without changing any migration source or checksum.
-	for _, query := range []string{"DROP TABLE user_sessions", "ALTER TABLE users DROP COLUMN password_hash", "ALTER TABLE users DROP COLUMN login_enabled", "ALTER TABLE users DROP COLUMN last_login_at", "ALTER TABLE subscription_tokens DROP COLUMN encrypted_token", "DELETE FROM schema_migrations WHERE version='0114_end_user_accounts.sql'"} {
-		if _, err := source.Database.Exec(query); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := validatePortal(ctx, source.Database, source.ConfigurationVault); err != nil {
-		t.Fatal(err)
-	}
-	i, err := ReadInventory(ctx, source.Database)
-	if err != nil || i.Totals.PortalSessions != 0 {
-		t.Fatalf("pre-0114 inventory: %+v %v", i.Totals, err)
-	}
-}

@@ -30,26 +30,12 @@
           </button>
         </div>
 
-        <!-- Status Filter -->
-        <select v-model="status" class="ios-filter-select !w-auto" @change="applyFilters">
-          <option v-for="option in statusOptions" :key="option[0]" :value="option[0]">{{ option[1] }}</option>
-        </select>
-
-        <!-- Advice Filter -->
-        <select v-model="adviceFilter" class="ios-filter-select !w-auto" @change="applyFilters">
-          <option value="all">全部调优状态</option>
-          <option value="has_advice">有调优建议</option>
-        </select>
-
         <!-- Server group (tag) filter -->
         <select v-model="tag" class="ios-filter-select !w-auto" @change="applyFilters">
           <option value="">全部服务器分组</option>
           <option v-for="item in tagChoices.tags" :key="item.tag" :value="item.tag">{{ item.tag }}（{{ item.count }}）</option>
           <option v-if="tagChoices.tags.length" :value="UNTAGGED">未分组（{{ tagChoices.untagged }}）</option>
         </select>
-
-        <!-- Query Button -->
-        <button class="ios-search-btn shrink-0">查询</button>
 
         <!-- Refresh Button -->
         <button type="button" class="ios-search-btn shrink-0" :disabled="loading" @click="load" title="刷新服务器状态">
@@ -80,7 +66,7 @@
     </template>
     <ServerBulkActions v-if="isOwner && displayMode === 'list'" :selected="selectedNodes" :groups="groups" @clear="selected = []" @changed="load" />
     <ServerQuickEdit v-if="isOwner" ref="quickEdit" :known-tags="tagChoices.tags.map(item => item.tag)" @changed="load" />
-    <ServerEnrollment v-if="isOwner" ref="enrollment" @changed="load" />
+    <ServerEnrollment v-if="isOwner" ref="enrollment" :known-tags="tagChoices.tags.map(item => item.tag)" @changed="load" />
     <ServerDeleteDialog v-if="isOwner" ref="deletion" @changed="load" />
   </div>
 </template>
@@ -100,7 +86,7 @@ import { groupAPI, type NodeGroup } from '../groupsApi';
 import { choices } from '../../proxy/api';
 import { accessAPI } from '../../access/api';
 import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
-import { serverRow, serverStatus, statusOptions } from '../components/serverListModel';
+import { serverRow } from '../components/serverListModel';
 import { applyServerOrder, matchesTag, reorderServer, tagOptions, UNTAGGED } from '../serverOrder';
 import { APIError } from '../../../app/apiClient';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -125,7 +111,7 @@ function install(node: NodeView) {
 }
 const route = useRoute(), router = useRouter();
 const scalar = (value: unknown) => typeof value === 'string' ? value : '';
-const keyword = ref(''), status = ref('all'), adviceFilter = ref('all'), tag = ref(''), deleted = ref(false), page = ref(1);
+const keyword = ref(''), tag = ref(''), deleted = ref(false), page = ref(1);
 const nodes = ref<NodeView[]>([]), groups = ref<NodeGroup[]>([]);
 const loading = ref(false), error = ref(''), warnings = ref<string[]>([]), selected = ref<string[]>([]);
 const today = ref<Record<string, number>>({}), month = ref<Record<string, number>>({}), monthZone = ref('');
@@ -133,9 +119,6 @@ const now = ref(Date.now());
 const enrollment = ref<InstanceType<typeof ServerEnrollment>>(), deletion = ref<InstanceType<typeof ServerDeleteDialog>>();
 function readQuery() {
   keyword.value = scalar(route.query.keyword);
-  const raw = scalar(route.query.status);
-  status.value = statusOptions.some(option => option[0] === raw) ? raw : 'all';
-  adviceFilter.value = route.query.advice === 'has_advice' ? 'has_advice' : 'all';
   tag.value = scalar(route.query.tag);
   deleted.value = route.query.deleted === '1';
   const value = Number(route.query.page);
@@ -145,8 +128,7 @@ readQuery();
 function applyFilters() {
   selected.value = [];
   void router.replace({ query: { ...route.query, keyword: keyword.value.trim() || undefined,
-    status: status.value === 'all' ? undefined : status.value,
-    advice: adviceFilter.value === 'has_advice' ? 'has_advice' : undefined,
+    status: undefined, advice: undefined,
     tag: tag.value || undefined, group: undefined,
     deleted: deleted.value ? '1' : undefined, page: undefined } });
 }
@@ -164,13 +146,11 @@ const filtered = computed(() => ordered.value.filter(node => {
   const q = scalar(route.query.keyword).trim().toLowerCase();
   const meta = getNodeMeta(node.id);
   if (q && ![node.name, node.publicIp, node.connectHost, node.hostname, meta.region, meta.remark, ...(node.tags || [])].some(value => value?.toLowerCase().includes(q))) return false;
-  if (status.value !== 'all' && serverStatus(node, now.value).key !== status.value) return false;
-  if (adviceFilter.value === 'has_advice' && (!node.tuningAdviceCount || node.tuningAdviceCount <= 0)) return false;
   return matchesTag(node, tag.value);
 }));
 // Ordering only a filtered subset or one page would be ambiguous, so it needs the
 // full, unfiltered first page.
-const canReorder = computed(() => ours() && isOwner.value && !deleted.value && !scalar(route.query.keyword).trim() && status.value === 'all' && adviceFilter.value === 'all' && !tag.value && page.value === 1 && filtered.value.length > 1);
+const canReorder = computed(() => ours() && isOwner.value && !deleted.value && !scalar(route.query.keyword).trim() && !tag.value && page.value === 1 && filtered.value.length > 1);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let orderDirty = false;
 let orderSavePromise: Promise<void> | undefined;

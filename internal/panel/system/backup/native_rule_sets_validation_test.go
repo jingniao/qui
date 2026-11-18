@@ -38,19 +38,6 @@ func TestInspectAcceptsNativeRuleSetSources(t *testing.T) {
 	}
 }
 
-func TestInspectAcceptsPre0143Archive(t *testing.T) {
-	t.Parallel()
-	source, directory, _ := sourceFixture(t)
-	rewindNativeRuleSets(t, source.Database)
-	created, err := source.Create(context.Background(), directory, "pre0143_archive_01", "owner", testPassword)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Inspect(context.Background(), directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestInspectRejectsInvalidNativeRuleSetSources(t *testing.T) {
 	t.Parallel()
 	// The table's CHECKs already cover the shape; these pass them and fail the

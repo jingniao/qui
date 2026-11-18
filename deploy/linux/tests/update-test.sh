@@ -1699,6 +1699,36 @@ scenario_32() {
   expect_no_glob '恢复后清除快照' "$REGISTRY" 'rollback.*'
 }
 
+# 33. The Agent only moves forward: an older target is refused before anything stops,
+#     on an Agent-only host and in a default run on a combined host, while the panel of a
+#     combined host can still go back with --component panel.
+scenario_33() {
+  new_scenario scenario-33
+  fake_reset
+  install_component agent 1.0.4
+  make_bundle 1.0.3
+  snapshot_file_hashes agent "$dir/before.sha"
+  update_bundle 1.0.3
+  expect_status 'Agent 降级应被拒绝' 1 "$LAST_STATUS"
+  expect_grep '应说明不支持 Agent 降级' '不支持把 Agent 降级' "$dir/update.out"
+  expect_eq 'agent 版本不变' 1.0.4 "$(program_version agent)"
+  snapshot_file_hashes agent "$dir/after.sha"
+  expect_same_tree '不应改动 Agent 文件' "$dir/before.sha" "$dir/after.sha"
+  expect_eq '不应停止 Agent' '' "$(grep -F 'stop proxy-agent' "$FAKE_STATE/calls.log" || true)"
+  expect_no_glob '不应留下快照' "$REGISTRY" 'rollback.*'
+
+  install_component panel 1.0.4
+  create_database
+  update_bundle 1.0.3
+  expect_status '组合主机默认降级应被拒绝' 1 "$LAST_STATUS"
+  expect_grep '应提示只回退面板' '--component panel' "$dir/update.out"
+  expect_eq '组合主机不应停止服务' '' "$(grep -E '^stop ' "$FAKE_STATE/calls.log" || true)"
+  update_bundle 1.0.3 --component panel
+  expect_status '只回退面板应成功' 0 "$LAST_STATUS"
+  expect_eq 'panel 回到 1.0.3' 1.0.3 "$(program_version panel)"
+  expect_eq 'agent 仍为 1.0.4' 1.0.4 "$(program_version agent)"
+}
+
 run_scenario() {
   local name=$1 body=$2 status=0 reasons=''
   : > "$failure_file"
@@ -1737,6 +1767,7 @@ run_scenario '29 missing database recovery' scenario_29
 run_scenario '30 owner private database downgrade' scenario_30
 run_scenario '31 database comparison errors' scenario_31
 run_scenario '32 large database early difference recovery' scenario_32
+run_scenario '33 Agent downgrade refused' scenario_33
 run_scenario '1 success' scenario_1
 run_scenario '2 install fails after replacing' scenario_2
 run_scenario '3 unhealthy new version' scenario_3

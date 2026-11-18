@@ -23,26 +23,7 @@ func stripLatencySnapshot(ctx context.Context, path string) error {
 	}
 	defer database.Close()
 	database.SetMaxOpenConns(1)
-	var present int
-	if err = database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='node_latency_samples'").Scan(&present); err != nil {
-		return err
-	}
-	if present == 0 {
-		return nil
-	}
-	var metricsPresent int
-	if err = database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='node_metric_samples'").Scan(&metricsPresent); err != nil {
-		return err
-	}
-	if metricsPresent == 1 {
-		if _, err = database.ExecContext(ctx, "PRAGMA secure_delete=ON"); err != nil {
-			return err
-		}
-		if _, err = database.ExecContext(ctx, "DELETE FROM node_metric_samples"); err != nil {
-			return err
-		}
-	}
-	for _, q := range []string{"PRAGMA secure_delete=ON", "DELETE FROM node_latency_samples", "DELETE FROM node_tcp_probes WHERE source='scheduled'", "VACUUM"} {
+	for _, q := range []string{"PRAGMA secure_delete=ON", "DELETE FROM node_metric_samples", "DELETE FROM node_latency_samples", "DELETE FROM node_tcp_probes WHERE source='scheduled'", "VACUUM"} {
 		if _, err = database.ExecContext(ctx, q); err != nil {
 			return err
 		}
@@ -51,13 +32,6 @@ func stripLatencySnapshot(ctx context.Context, path string) error {
 }
 
 func validateLatency(ctx context.Context, database *sql.DB) error {
-	var applied, present int
-	if database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0120_latency_samples.sql'").Scan(&applied) != nil || database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='node_latency_samples'").Scan(&present) != nil || applied != present {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	var count int
 	if database.QueryRowContext(ctx, "SELECT count(*) FROM probe_targets WHERE scheduled NOT IN (0,1)").Scan(&count) != nil || count != 0 {
 		return ErrArchive

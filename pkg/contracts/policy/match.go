@@ -1,4 +1,4 @@
-// Package policy is the shared matching contract for simulation and compilation.
+// Package policy is the shared matching contract for policy validation and compilation.
 package policy
 
 import (
@@ -14,33 +14,6 @@ import (
 	_ "time/tzdata"
 	"unicode"
 )
-
-type Request struct {
-	UserID    string    `json:"userId"`
-	DeviceID  string    `json:"deviceId"`
-	NodeID    string    `json:"nodeId"`
-	GroupIDs  []string  `json:"groupIds"`
-	Domain    string    `json:"domain"`
-	TargetIP  string    `json:"targetIp"`
-	Port      int       `json:"port"`
-	Network   string    `json:"network"`
-	Time      time.Time `json:"time"`
-	InboundID string    `json:"inboundId"`
-}
-type Decision struct {
-	Matched           bool                        `json:"matched"`
-	PolicyID          string                      `json:"policyId"`
-	PolicyName        string                      `json:"policyName"`
-	Priority          int                         `json:"priority"`
-	Action            desiredstate.Action         `json:"action"`
-	Reason            string                      `json:"reason"`
-	Logging           *desiredstate.PolicyLogging `json:"logging,omitempty"`
-	Path              []string                    `json:"path,omitempty"`
-	OutboundProtocol  string                      `json:"outboundProtocol,omitempty"`
-	FinalEgressNodeID string                      `json:"finalEgressNodeId,omitempty"`
-	SelectionStrategy string                      `json:"selectionStrategy,omitempty"`
-	CandidatePaths    [][]string                  `json:"candidatePaths,omitempty"`
-}
 
 func Domain(value string, wildcard bool) (string, error) {
 	value = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".")
@@ -92,16 +65,7 @@ func Keyword(value string) (string, error) {
 func Pattern(value string) string {
 	return "^" + strings.ReplaceAll(regexp.QuoteMeta(value), `\*`, ".*") + "$"
 }
-func domainMatches(pattern, domain string) bool {
-	if domain == "" {
-		return false
-	}
-	if !strings.Contains(pattern, "*") {
-		return pattern == domain
-	}
-	matched, err := regexp.MatchString(Pattern(pattern), domain)
-	return err == nil && matched
-}
+
 func PortRange(value string) (int, int, error) {
 	parts := strings.Split(value, "-")
 	if len(parts) > 2 {
@@ -182,30 +146,6 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
-}
-func ScopeMatches(scope desiredstate.Scope, request Request) bool {
-	if len(scope.UserIDs) > 0 && !contains(scope.UserIDs, request.UserID) {
-		return false
-	}
-	if len(scope.DeviceIDs) > 0 && !contains(scope.DeviceIDs, request.DeviceID) {
-		return false
-	}
-	if len(scope.NodeIDs) > 0 && !contains(scope.NodeIDs, request.NodeID) {
-		return false
-	}
-	if len(scope.GroupIDs) > 0 {
-		found := false
-		for _, group := range request.GroupIDs {
-			if contains(scope.GroupIDs, group) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
 }
 
 // MaxMatchers bounds the entries an Owner writes into one policy or service
@@ -325,84 +265,7 @@ func validate(rule *desiredstate.Policy, maxMatchers int) error {
 	}
 	return nil
 }
-func ValidateRequest(request *Request) error {
-	if request.NodeID == "" || request.Port < 1 || request.Port > 65535 || request.Network != "tcp" && request.Network != "udp" {
-		return errors.New("node, valid port and tcp/udp are required")
-	}
-	if request.Domain != "" {
-		domain, err := Domain(request.Domain, false)
-		if err != nil {
-			return err
-		}
-		request.Domain = domain
-	}
-	if request.TargetIP != "" {
-		if address, err := netip.ParseAddr(request.TargetIP); err != nil {
-			return errors.New("invalid target IP")
-		} else {
-			request.TargetIP = address.Unmap().String()
-		}
-	}
-	if request.Domain == "" && request.TargetIP == "" {
-		return errors.New("domain or target IP required")
-	}
-	if request.Time.IsZero() {
-		request.Time = time.Now().UTC()
-	}
-	return nil
-}
-func Matches(rule desiredstate.Policy, request Request) bool {
-	if !rule.Enabled || !ScopeMatches(rule.Scope, request) || !TimeActive(rule, request.Time) {
-		return false
-	}
-	if rule.Match.Network != "" && rule.Match.Network != "all" && rule.Match.Network != request.Network {
-		return false
-	}
-	if len(rule.Match.Ports) > 0 {
-		found := false
-		for _, value := range rule.Match.Ports {
-			first, last, err := PortRange(value)
-			if err == nil && request.Port >= first && request.Port <= last {
-				found = true
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	hasAddress := len(rule.Match.Domains)+len(rule.Match.Suffixes)+len(rule.Match.Keywords)+len(rule.Match.CIDRs) > 0
-	if !hasAddress {
-		// Native rule sets are address conditions too; their lists are only on
-		// the node, so a policy with nothing else never matches here.
-		return len(rule.Match.ServiceIDs) == 0 && len(rule.Match.RuleSets) == 0
-	}
-	for _, domain := range rule.Match.Domains {
-		if domainMatches(domain, request.Domain) {
-			return true
-		}
-	}
-	for _, suffix := range rule.Match.Suffixes {
-		if request.Domain == suffix || strings.HasSuffix(request.Domain, "."+suffix) {
-			return true
-		}
-	}
-	for _, keyword := range rule.Match.Keywords {
-		if strings.Contains(strings.ToLower(request.Domain), keyword) {
-			return true
-		}
-	}
-	if address, err := netip.ParseAddr(request.TargetIP); err == nil {
-		for _, value := range rule.Match.CIDRs {
-			if prefix, err := netip.ParsePrefix(value); err == nil && prefix.Contains(address) {
-				return true
-			}
-			if target, err := netip.ParseAddr(value); err == nil && target == address {
-				return true
-			}
-		}
-	}
-	return false
-}
+
 func Sort(rules []desiredstate.Policy) []desiredstate.Policy {
 	ordered := append([]desiredstate.Policy(nil), rules...)
 	for index := range ordered {
@@ -424,12 +287,4 @@ func Sort(rules []desiredstate.Policy) []desiredstate.Policy {
 		return ordered[i].Priority < ordered[j].Priority
 	})
 	return ordered
-}
-func Simulate(rules []desiredstate.Policy, request Request, fallback desiredstate.Action) Decision {
-	for _, rule := range Sort(rules) {
-		if Matches(rule, request) {
-			return Decision{Matched: true, PolicyID: rule.ID, PolicyName: rule.Name, Priority: rule.Priority, Action: rule.Action, Reason: "matched scope, address, port, network and active time window", Logging: rule.Logging}
-		}
-	}
-	return Decision{Action: fallback, Reason: "no matching policy; inbound default rule"}
 }

@@ -7,13 +7,6 @@ import (
 )
 
 func validateIdentityRetirements(ctx context.Context, database *sql.DB) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0134_node_identity_recovery.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	var invalid int
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM node_identity_retirements r LEFT JOIN nodes n ON n.id=r.node_id WHERE n.id IS NULL OR length(r.fingerprint)<>64").Scan(&invalid); err != nil || invalid != 0 {
 		return ErrArchive

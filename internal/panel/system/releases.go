@@ -103,3 +103,39 @@ func (r *Repository) RecordTx(ctx context.Context, tx *sql.Tx, actor, action, ta
 	_, err := tx.ExecContext(ctx, "INSERT INTO admin_operations(timestamp,operator,action,target,result,ip) VALUES(?,?,?,?,?,?)", time.Now().UTC().Format(time.RFC3339Nano), actor, action, target, result, ip)
 	return err
 }
+
+// PruneAgentReleases keeps only the newest proxy-agent release per platform.
+// Older catalogue rows are deleted unless an update task still references them
+// (task history keeps its foreign key). It returns the manifests whose files the
+// panel must keep serving: the newest per platform and any release an
+// unfinished task may still download or recover from.
+func (r *Repository) PruneAgentReleases(ctx context.Context) ([]release.Manifest, error) {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	const older = `component='proxy-agent' AND release_sequence < (SELECT max(n.release_sequence) FROM release_catalogue n WHERE n.component='proxy-agent' AND n.operating_system=release_catalogue.operating_system AND n.architecture=release_catalogue.architecture)`
+	if _, err := tx.ExecContext(ctx, "DELETE FROM release_catalogue WHERE "+older+" AND NOT EXISTS(SELECT 1 FROM agent_update_tasks t WHERE t.release_id=release_catalogue.id)"); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT id,signed_json,created_by,created_at FROM release_catalogue WHERE component='proxy-agent' AND (NOT ("+older+") OR EXISTS(SELECT 1 FROM agent_update_tasks t WHERE t.release_id=release_catalogue.id AND t.status IN ('queued','running','failed_closed')))")
+	if err != nil {
+		return nil, err
+	}
+	var keep []release.Manifest
+	for rows.Next() {
+		entry, err := scanRelease(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		keep = append(keep, entry.Signed.Manifest)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return keep, tx.Commit()
+}

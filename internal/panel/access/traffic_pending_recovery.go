@@ -10,13 +10,6 @@ import (
 // union; a job absent from the newer snapshot can safely re-check the existing
 // module cursors, but absence alone is never treated as a completion receipt.
 func (r *Repository) PreservePendingTrafficRestoreTx(ctx context.Context, tx *sql.Tx) error {
-	var present int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='traffic_pending_batches'").Scan(&present); err != nil {
-		return err
-	}
-	if present == 0 {
-		return nil
-	}
 	if err := db.AssertRecoveryNone(ctx, tx, "SELECT count(*) FROM traffic_pending_batches s JOIN restore_source.traffic_pending_batches c ON c.node_id=s.node_id AND c.batch_id=s.batch_id WHERE c.digest<>s.digest"); err != nil {
 		return err
 	}

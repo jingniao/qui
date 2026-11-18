@@ -68,14 +68,8 @@ FROM restore_source.nodes c WHERE NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=c.
 	if _, err := tx.ExecContext(ctx, "UPDATE node_identities SET revoked_at=coalesce(revoked_at,?) WHERE NOT EXISTS(SELECT 1 FROM restore_source.node_identities c WHERE c.node_id=node_identities.node_id)", stamp); err != nil {
 		return err
 	}
-	var retirementsPresent int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_identity_retirements'").Scan(&retirementsPresent); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO node_identity_retirements(fingerprint,node_id,recovery_id,retired_at) SELECT fingerprint,node_id,recovery_id,retired_at FROM restore_source.node_identity_retirements"); err != nil {
 		return err
-	}
-	if retirementsPresent == 1 {
-		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO node_identity_retirements(fingerprint,node_id,recovery_id,retired_at) SELECT fingerprint,node_id,recovery_id,retired_at FROM restore_source.node_identity_retirements"); err != nil {
-			return err
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_identities(node_id,certificate_pem,fingerprint,expires_at,revoked_at)
 SELECT node_id,certificate_pem,fingerprint,expires_at,revoked_at FROM restore_source.node_identities WHERE 1
@@ -96,14 +90,8 @@ WHERE excluded.fingerprint NOT IN (SELECT fingerprint FROM node_identity_retirem
 	if err := db.CopyRecoveryTable(ctx, tx, "node_certificate_renewals", "node_id,previous_fingerprint,certificate_pem,fingerprint,expires_at,created_at"); err != nil {
 		return err
 	}
-	var receiptTable int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_accepted_messages'").Scan(&receiptTable); err != nil {
+	if err := db.CopyRecoveryTable(ctx, tx, "node_accepted_messages", "node_id,sequence,digest"); err != nil {
 		return err
-	}
-	if receiptTable == 1 {
-		if err := db.CopyRecoveryTable(ctx, tx, "node_accepted_messages", "node_id,sequence,digest"); err != nil {
-			return err
-		}
 	}
 	if err := finishEnrollments(); err != nil {
 		return err
@@ -133,35 +121,22 @@ ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark
 	}
 	// Machine traffic usage and cursors are current data: they follow the frozen
 	// running database, never the chosen snapshot, so a restore neither loses
-	// today's usage nor counts the same bytes twice. A source that predates 0126
-	// leaves the migrated candidate's archived rows untouched.
-	var machineTables int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name IN ('node_machine_traffic_settings','node_machine_traffic_daily','node_machine_traffic_cursors')").Scan(&machineTables); err != nil {
-		return err
-	}
-	if machineTables == 3 {
-		for _, item := range []struct{ table, columns string }{
-			{"node_machine_traffic_settings", "node_id,method,interface_name,allowance_bytes,reset_day"},
-			{"node_machine_traffic_daily", "node_id,interface_name,local_date,rx_bytes,tx_bytes"},
-			{"node_machine_traffic_cursors", "node_id,interface_name,boot_id,rx_bytes,tx_bytes,observed_at"},
-		} {
-			if err := db.CopyRecoveryTable(ctx, tx, item.table, item.columns); err != nil {
-				return err
-			}
+	// today's usage nor counts the same bytes twice.
+	for _, item := range []struct{ table, columns string }{
+		{"node_machine_traffic_settings", "node_id,method,interface_name,allowance_bytes,reset_day"},
+		{"node_machine_traffic_daily", "node_id,interface_name,local_date,rx_bytes,tx_bytes"},
+		{"node_machine_traffic_cursors", "node_id,interface_name,boot_id,rx_bytes,tx_bytes,observed_at"},
+	} {
+		if err := db.CopyRecoveryTable(ctx, tx, item.table, item.columns); err != nil {
+			return err
 		}
 	}
-	// Preserve current tuning state even when the chosen archive predates it.
-	var tuningPresent int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='node_tuning'").Scan(&tuningPresent); err != nil {
-		return err
-	}
+	// Preserve current tuning state.
 	if _, err := tx.ExecContext(ctx, "DELETE FROM node_tuning"); err != nil {
 		return err
 	}
-	if tuningPresent == 1 {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO node_tuning(node_id,desired_json,request_id,status,result_json,requested_at,updated_at) SELECT node_id,desired_json,request_id,CASE WHEN status='pending' THEN 'unconfirmed' ELSE status END,result_json,requested_at,CASE WHEN status='pending' THEN ? ELSE updated_at END FROM restore_source.node_tuning", stamp); err != nil {
-			return err
-		}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO node_tuning(node_id,desired_json,request_id,status,result_json,requested_at,updated_at) SELECT node_id,desired_json,request_id,CASE WHEN status='pending' THEN 'unconfirmed' ELSE status END,result_json,requested_at,CASE WHEN status='pending' THEN ? ELSE updated_at END FROM restore_source.node_tuning", stamp); err != nil {
+		return err
 	}
 	return nil
 }

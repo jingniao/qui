@@ -6,7 +6,7 @@
       <div class="space-y-1">
         <div>{{ node.name }} <small class="text-ios-tertiary">{{ node.region || '—' }}</small></div>
         <div v-if="node.protocols && node.protocols.length" class="flex flex-wrap gap-1">
-          <span v-for="p in node.protocols" :key="p" class="text-xs px-2 py-0.5 rounded-full bg-black/[0.05] text-ios-secondary">{{ protocolLabel(p) }}</span>
+          <ProtocolBadge v-for="p in node.protocols" :key="p" :protocol="p" :label="protocolLabel(p)" />
         </div>
       </div>
       <StatusBadge :status="node.online ? 'online' : 'offline'" />
@@ -16,6 +16,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import ProtocolBadge from '../components/ProtocolBadge.vue';
 import type { PortalNode } from './api';
 import { protocolLabel, sortNodes } from './format';
 const props = defineProps<{ items: PortalNode[] }>();

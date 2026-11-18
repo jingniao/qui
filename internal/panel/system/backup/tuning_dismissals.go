@@ -9,13 +9,6 @@ import (
 )
 
 func validateTuningDismissals(ctx context.Context, database *sql.DB) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0141_tuning_recommendations.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	rows, err := database.QueryContext(ctx, "SELECT d.key, d.value, n.id FROM node_tuning_dismissals d LEFT JOIN nodes n ON n.id=d.node_id")
 	if err != nil {
 		return ErrArchive

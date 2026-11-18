@@ -8,10 +8,9 @@ import (
 
 func TestFixedUpdateEnvelopeRejectsPathsScriptsDuplicatesAndUnprovenResults(t *testing.T) {
 	signed, _, _ := releaseFixture(t)
-	signed.Manifest.Component = "xray"
-	r := UpdateRequest{SchemaVersion: 1, ID: "upd_request", NodeID: "node-a", Revision: 8, Operation: "install", Release: signed}
+	r := AgentUpdateRequest{SchemaVersion: 1, ID: "upd_request", NodeID: "node-a", Revision: 8, Operation: "install", Release: signed}
 	data, _ := json.Marshal(r)
-	if _, err := DecodeUpdateRequest(data); err != nil {
+	if _, err := DecodeAgentUpdateRequest(data); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range [][]byte{
@@ -20,7 +19,7 @@ func TestFixedUpdateEnvelopeRejectsPathsScriptsDuplicatesAndUnprovenResults(t *t
 		append(append([]byte{}, data...), []byte(`{}`)...),
 		bytes.Replace(data, []byte(`"operation":"install"`), []byte(`"operation":"script"`), 1),
 	} {
-		if _, err := DecodeUpdateRequest(bad); err == nil {
+		if _, err := DecodeAgentUpdateRequest(bad); err == nil {
 			t.Fatal("arbitrary or ambiguous command accepted")
 		}
 	}

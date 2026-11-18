@@ -1,16 +1,6 @@
 <template>
-  <FormDrawer v-model="createOpen" title="新增服务器" description="① 填写服务器信息 → ② 在目标服务器执行一次性安装命令" :loading="creating" confirm-text="生成安装命令" @confirm="create">
-    <label class="block text-xs text-ios-secondary">服务器名称<input v-model.trim="name" maxlength="40" class="form-input-base mt-1.5" placeholder="例如 东京 01" /></label>
-    <label class="block text-xs text-ios-secondary mt-3">客户端连接地址（可选）<input v-model.trim="connectHost" maxlength="253" class="form-input-base mt-1.5 font-mono" placeholder="可填域名或 IP，留空使用公网 IP" /></label>
-    <details class="text-sm text-ios-secondary">
-      <summary class="cursor-pointer">续费信息（可选）</summary>
-      <div class="space-y-3 mt-3">
-        <label class="block">续费到期日<input v-model="renewDate" type="date" class="form-input-base" /></label>
-        <label class="block">币种<select v-model="currency" class="form-input-base"><option v-for="c in CURRENCY_LIST" :key="c.code" :value="c.code">{{ c.label }}</option></select></label>
-        <label class="block">续费价格<input v-model="price" type="number" min="0" step="any" class="form-input-base" /></label>
-        <label class="block">周期<select v-model="cycle" class="form-input-base"><option v-for="c in CYCLE_LIST" :key="c">{{ c }}</option></select></label>
-      </div>
-    </details>
+  <FormDrawer v-model="createOpen" title="新增服务器" width="lg" description="① 填写服务器信息 → ② 在目标服务器执行一次性安装命令" :loading="creating" confirm-text="生成安装命令" @confirm="create">
+    <ServerFormFields ref="fields" :form="form" :connection="connectionForm" :traffic="machineForm" :known-tags="knownTags" />
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
   </FormDrawer>
   <FormDrawer v-model="installOpen" title="一键安装命令" description="② 在服务器终端以 root 用户运行命令，完成 Agent 部署与证书信任配置。" :show-footer="false" width="2xl">
@@ -46,13 +36,15 @@
   </FormDrawer>
 </template>
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { enrollmentStage, type EnrollmentStage } from '../enrollmentStage';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../api';
 import { CORE_INSTALL_OPTIONS, sortInstallCores, validateInstallCores, setReissuingNodeId, reissuingNodeId } from '../coreInstallOptions';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
-import { validConnectHost } from '../nodeAddress';
-import { CURRENCY_LIST, CYCLE_LIST, saveNodeMeta } from '../nodeMeta';
+import { saveNodeMeta } from '../nodeMeta';
+import { formFromSettings, payloadFromForm } from '../machineTrafficModel';
+import type { ServerEditFormState } from './serverListModel';
+import ServerFormFields from './ServerFormFields.vue';
 import { formatTime } from '../../../app/auth';
 import { nodeStatusMatches } from '../../../app/nodeStatusEvents';
 import { showToast } from '../../../app/api';
@@ -60,9 +52,13 @@ import FormDrawer from '../../../components/FormDrawer.vue';
 import CodePreview from '../../../components/CodePreview.vue';
 import WebUpgradeOption from './WebUpgradeOption.vue';
 const emit = defineEmits<{ changed: [] }>();
+withDefaults(defineProps<{ knownTags?: string[] }>(), { knownTags: () => [] });
 
 const createOpen = ref(false), installOpen = ref(false), creating = ref(false);
-const name = ref(''), connectHost = ref(''), renewDate = ref(''), currency = ref('CNY'), price = ref(''), cycle = ref('/年');
+const fields = ref<InstanceType<typeof ServerFormFields>>();
+const form = reactive<ServerEditFormState>({ name: '', region: '', remark: '', renewDate: '', renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年', enabled: true, allowSubscription: true, maintenance: false, tags: [] });
+const connectionForm = reactive({ connectHost: '', portRange: '' });
+const machineForm = ref(formFromSettings(null, 'GB'));
 const error = ref(''), metaWarning = ref('');
 const enrollment = ref<Enrollment | null>(null);
 const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), webUpgrade = ref(false), fromSettings = ref(false);
@@ -176,21 +172,29 @@ function showInstall(item: Enrollment) {
 }
 async function create() {
   if (creating.value) return;
-  if (!name.value) { error.value = '请输入服务器名称'; return; }
-  if (connectHost.value && !validConnectHost(connectHost.value)) {
-    error.value = '客户端连接地址需为域名或 IP，不能包含协议、端口或方括号';
-    return;
-  }
+  if (!form.name.trim()) { error.value = '请输入服务器名称'; return; }
   creating.value = true; error.value = ''; metaWarning.value = '';
   try {
-    const item = await nodeAPI.enroll(name.value, connectHost.value.trim() || undefined);
-    // The enrollment succeeded: always show its token, even if optional metadata fails.
-    showInstall(item); createOpen.value = false;
+    const range = fields.value!.connectionSettings();
+    const traffic = payloadFromForm(machineForm.value);
+    const settings = { ...form, tags: [...form.tags] };
+    const item = await nodeAPI.enroll(settings.name.trim(), connectionForm.connectHost.trim() || undefined);
+    // Once created, keep the token available even if a following settings request fails.
     try {
-      await saveNodeMeta(item.node.id, { renewDate: renewDate.value, renewCurrency: currency.value,
-        renewPrice: price.value.trim(), renewCycle: cycle.value });
-    } catch (e) { metaWarning.value = `服务器已创建，续费信息未保存：${(e as Error).message}。请在详情设置中补填。`; }
-    name.value = ''; connectHost.value = ''; renewDate.value = ''; currency.value = 'CNY'; price.value = ''; cycle.value = '/年';
+      await saveNodeMeta(item.node.id, { region: settings.region.trim(), remark: settings.remark.trim(),
+        renewDate: settings.renewDate, renewCurrency: settings.renewCurrency,
+        renewPrice: String(settings.renewPrice).trim(), renewCycle: settings.renewCycle, tags: settings.tags, ...range });
+    } catch (e) { metaWarning.value = `服务器已创建，服务器信息保存失败：${(e as Error).message}。请在编辑服务器中补填。`; }
+    if (settings.maintenance) {
+      try {
+        await nodeAPI.save({ id: item.node.id, name: item.node.name, enabled: item.node.enabled,
+          allowSubscription: item.node.allowSubscription, maintenance: settings.maintenance });
+      } catch (e) { metaWarning.value += `${metaWarning.value ? '\n' : ''}维护模式保存失败：${(e as Error).message}。请在编辑服务器中重新设置。`; }
+    }
+    try {
+      await nodeAPI.saveMachineTrafficSettings(item.node.id, traffic);
+    } catch (e) { metaWarning.value += `${metaWarning.value ? '\n' : ''}整机流量设置保存失败：${(e as Error).message}。请在编辑服务器中重新设置。`; }
+    showInstall(item); createOpen.value = false;
     emit('changed');
   } catch (e) { error.value = (e as Error).message; }
   finally { creating.value = false; }
@@ -210,5 +214,12 @@ async function reissue(node: NodeView) {
   }
 }
 function installCode(id: string) { return enrollment.value?.node.id === id ? installAvailable.value ? command.value : enrollment.value.enrollmentToken : ''; }
-defineExpose({ installCode, open: () => { error.value = ''; connectHost.value = ''; createOpen.value = true; }, reissue });
+function open() {
+  error.value = '';
+  Object.assign(form, { name: '', region: '', remark: '', renewDate: '', renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年', enabled: true, allowSubscription: true, maintenance: false, tags: [] });
+  Object.assign(connectionForm, { connectHost: '', portRange: '' });
+  machineForm.value = formFromSettings(null, 'GB');
+  createOpen.value = true;
+}
+defineExpose({ installCode, open, reissue });
 </script>

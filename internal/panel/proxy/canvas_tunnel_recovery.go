@@ -9,18 +9,10 @@ import (
 )
 
 // ValidateCanvasTunnelMaterial checks the sealed GOST credential sets of an
-// archive without changing it. A pre-0128 archive has no column and is accepted;
-// a column that exists must open with the configuration key and hold a set that
-// still verifies, so a restore never installs a tunnel no publication can render.
-// It never returns the material itself.
+// archive without changing it: each must open with the configuration key and
+// hold a set that still verifies, so a restore never installs a tunnel no
+// publication can render. It never returns the material itself.
 func ValidateCanvasTunnelMaterial(ctx context.Context, database *sql.DB, configurationVault *vault.Vault) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0128_gost_tunnels.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if applied == 0 {
-		return nil
-	}
 	rows, err := database.QueryContext(ctx, "SELECT id,gost_material FROM canvas_tunnels WHERE gost_material IS NOT NULL")
 	if err != nil {
 		return err
@@ -40,29 +32,10 @@ func ValidateCanvasTunnelMaterial(ctx context.Context, database *sql.DB, configu
 	return rows.Err()
 }
 
-// ValidateCanvasTunnels is read-only and also accepts pre-0124 and pre-0128
-// archives. The recovery coordinator migrates and reconciles those archives
-// before serving.
+// ValidateCanvasTunnels is read-only.
 func ValidateCanvasTunnels(ctx context.Context, database *sql.DB) error {
-	var applied, present, material int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0124_canvas_tunnels.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('canvas_tunnels','canvas_tunnel_objects','canvas_tunnel_publications','canvas_tunnel_reconcile')").Scan(&present); err != nil {
-		return err
-	}
-	if present != applied*4 {
-		return errors.New("canvas tunnel schema mismatch")
-	}
-	if applied == 0 {
-		return nil
-	}
-	// An archive from before 0128 has tunnels but no sealed credential column.
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0128_gost_tunnels.sql'").Scan(&material); err != nil {
-		return err
-	}
-	r := &Repository{Database: database, archiveBeforeGostMaterial: material == 0}
-	rows, err := database.QueryContext(ctx, "SELECT "+r.tunnelProjection()+" FROM canvas_tunnels")
+	r := &Repository{Database: database}
+	rows, err := database.QueryContext(ctx, "SELECT "+tunnelColumns+" FROM canvas_tunnels")
 	if err != nil {
 		return err
 	}

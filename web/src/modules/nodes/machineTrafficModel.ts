@@ -21,10 +21,10 @@ export const MACHINE_TRAFFIC_METHODS: { value: MachineTrafficMethod; label: stri
 ];
 
 export const MACHINE_TRAFFIC_UNITS = ['GiB', 'TiB'] as const;
-export type MachineTrafficUnit = (typeof MACHINE_TRAFFIC_UNITS)[number];
-const UNIT_BYTES: Record<MachineTrafficUnit, number> = { GiB: 1024 ** 3, TiB: 1024 ** 4 };
+export type MachineTrafficUnit = (typeof MACHINE_TRAFFIC_UNITS)[number] | 'GB';
+const UNIT_BYTES: Record<MachineTrafficUnit, number> = { GB: 1000 ** 3, GiB: 1024 ** 3, TiB: 1024 ** 4 };
 
-/** Editable settings form; the allowance is entered as a number plus a binary unit. */
+/** Editable settings form; the allowance is entered as a number with its unit. */
 export interface MachineTrafficForm {
   method: MachineTrafficMethod;
   interfaceName: string;
@@ -94,9 +94,9 @@ function numberLabel(value: number): string {
   return String(Number(value.toFixed(3)));
 }
 
-export function formFromSettings(settings?: MachineTrafficSettings | null): MachineTrafficForm {
+export function formFromSettings(settings?: MachineTrafficSettings | null, fixedUnit?: MachineTrafficUnit): MachineTrafficForm {
   const allowance = settings?.allowanceBytes ?? null;
-  const unit = allowance ? unitFor(allowance) : 'GiB';
+  const unit = fixedUnit ?? (allowance ? unitFor(allowance) : 'GiB');
   return {
     method: settings?.method ?? 'sum',
     interfaceName: settings?.interfaceName ?? '',

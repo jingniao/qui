@@ -109,7 +109,7 @@
         <p class="text-ios-label break-words">经过服务器：{{ routeName }}</p>
         <div v-for="entry in plan.entries" :key="entry.instanceId" class="rounded-xl bg-ios-bg p-3 space-y-1">
           <p class="font-semibold break-words">新建入口：{{ entry.name }}</p>
-          <p>{{ entry.protocol === 'vless' ? entrySecurityLabel(entrySecurity) : entry.protocol.toUpperCase() }} · <span class="font-mono tabular-nums">{{ entry.port }}</span></p>
+          <p><ProtocolBadge :protocol="entry.protocol" :label="entry.protocol === 'vless' ? entrySecurityLabel(entrySecurity) : entry.protocol.toUpperCase()" compact /> · <span class="font-mono tabular-nums">{{ entry.port }}</span></p>
           <p class="text-ios-secondary">受影响分组：{{ entry.groups?.map(group => group.name).join('、') || '不加入分组' }}</p>
         </div>
         <div v-for="server in plan.servers" :key="server.nodeId" class="space-y-1">
@@ -135,6 +135,7 @@
 </template>
 
 <script setup lang="ts">
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import EntrySecurityEditor from './relay/EntrySecurityEditor.vue';
 import type { CanvasEntrySecurity } from '../api';

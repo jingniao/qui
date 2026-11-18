@@ -48,7 +48,7 @@
         <template #body>
           <tr v-for="item in outbounds" :key="item.id">
             <td>{{ item.name }}</td>
-            <td>{{ item.protocol }}</td>
+            <td><ProtocolBadge :protocol="item.protocol" compact /></td>
             <td class="font-mono tabular-nums">{{ item.address || '—' }}{{ item.port ? `:${item.port}` : '' }}</td>
             <td>{{ item.enabled ? '已启用' : '已停用' }}</td>
           </tr>

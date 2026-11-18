@@ -3,7 +3,7 @@ package backup
 import (
 	"context"
 	"errors"
-	"path/filepath"
+
 	"testing"
 )
 
@@ -41,34 +41,5 @@ func TestValidateTunnelImportTargets(t *testing.T) {
 	}
 	if err := validateTunnelImportTargets(ctx, s.Database); !errors.Is(err, ErrArchive) {
 		t.Fatalf("dangling import target accepted: %v", err)
-	}
-	if _, err := s.Database.Exec("UPDATE tunnel_rules SET target_import_id=NULL"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Database.Exec("DELETE FROM schema_migrations WHERE version='0152_tunnel_rule_import_target.sql'"); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateTunnelImportTargets(ctx, s.Database); !errors.Is(err, ErrArchive) {
-		t.Fatalf("0152 column without migration accepted: %v", err)
-	}
-}
-
-func Test0151ArchiveStillValidatesAndPreparesRestore(t *testing.T) {
-	s, directory, _ := sourceFixture(t)
-	ctx := context.Background()
-	rewindTunnelImportTarget(t, s.Database)
-	if err := validateTunnelImportTargets(ctx, s.Database); err != nil {
-		t.Fatalf("0151 archive rejected: %v", err)
-	}
-	created, err := s.Create(ctx, directory, "archive_0151_restore", "owner", testPassword)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := PrepareRestore(ctx, directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword, restoreTargetFixture(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := VerifyPreparedRestore(ctx, prepared.Directory, prepared.ManifestSHA256); err != nil {
-		t.Fatal(err)
 	}
 }

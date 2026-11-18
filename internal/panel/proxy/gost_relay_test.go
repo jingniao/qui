@@ -115,42 +115,6 @@ func TestGostTunnelPublishesTheExitBeforeTheEntry(t *testing.T) {
 	if exit.Settings.Forward.Relay.CertificatePEM == "" || entry.Settings.Forward.Hops[0].ClientCertPEM == "" {
 		t.Fatal("the publication did not carry the tunnel credentials")
 	}
-
-	// Rotating replaces the whole set: a new generation and fingerprint under the
-	// same synthetic server name, and the tunnel is modified until it is published
-	// again.
-	rotated, err := p.service.RotateCanvasTunnelCredentials(p.ctx, tunnel.ID, tunnel.UpdatedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rotated.Credentials == nil || rotated.Credentials.Generation != tunnel.Credentials.Generation+1 {
-		t.Fatalf("rotation %+v", rotated.Credentials)
-	}
-	if rotated.Credentials.Fingerprint == tunnel.Credentials.Fingerprint || rotated.Credentials.ServerName != tunnel.Credentials.ServerName {
-		t.Fatalf("rotation kept the old set: %+v", rotated.Credentials)
-	}
-	if rotated.PublishStatus != "modified" {
-		t.Fatalf("rotation left the tunnel %q", rotated.PublishStatus)
-	}
-	// The next publication is what installs the new set, and it still deploys the
-	// exit first.
-	if _, err := p.service.PublishCanvasScheme(p.ctx, scheme.ID, "Owner", p.users); err != nil {
-		t.Fatal(err)
-	}
-	if order := p.deployer.order[1]; len(order) != 2 || order[0] != p.nodeB || order[1] != p.nodeA {
-		t.Fatalf("rotation published %v, not exit then entry", order)
-	}
-	row, err := p.service.Repository.canvasTunnel(p.ctx, tunnel.ID)
-	if err != nil || row.material == nil {
-		t.Fatalf("sealed material %v", err)
-	}
-	exit, entry = generatedRelay(t, p, scheme.Name)
-	if exit.Settings.Forward.Relay.CertificatePEM != row.material.ServerCertPEM {
-		t.Fatal("the relay listener kept the old server certificate")
-	}
-	if entry.Settings.Forward.Hops[0].ClientCertPEM != row.material.ClientCertPEM || entry.Settings.Forward.Hops[0].CACertPEM != row.material.CACertPEM {
-		t.Fatal("the entry hop kept the old client credentials")
-	}
 }
 
 // When the two servers already share an ordinary relay, publishing a GOST tunnel

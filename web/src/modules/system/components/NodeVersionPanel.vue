@@ -61,28 +61,6 @@
     <!-- Search, Filter, Tabs & View Mode Toolbar (Integrated Unified Row) -->
     <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-2.5 flex-1">
-        <!-- Segmented Tabs (Agent vs 代理核心) when embedded -->
-        <div v-if="embedded" class="ios-segmented-container inline-flex shrink-0 mr-1" role="tablist" aria-label="程序类型">
-          <button
-            role="tab"
-            :aria-selected="currentTab === 'agents'"
-            class="ios-segmented-item whitespace-nowrap py-1.5 px-3.5"
-            :class="{ active: currentTab === 'agents' }"
-            @click="$emit('change-tab', 'agents')"
-          >
-            Agent
-          </button>
-          <button
-            role="tab"
-            :aria-selected="currentTab === 'cores'"
-            class="ios-segmented-item whitespace-nowrap py-1.5 px-3.5"
-            :class="{ active: currentTab === 'cores' }"
-            @click="$emit('change-tab', 'cores')"
-          >
-            代理核心
-          </button>
-        </div>
-
         <!-- Search Form -->
         <form @submit.prevent="search" class="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
           <!-- Search Input -->
@@ -92,7 +70,7 @@
             </svg>
             <input
               v-model="keyword"
-              :placeholder="kind === 'agent' ? '搜索名称、IP、Agent 版本或系统…' : '搜索名称、IP、核心名称或版本…'"
+              :placeholder="kind === 'all' ? '搜索名称、IP、Agent 或核心版本…' : kind === 'agent' ? '搜索名称、IP、Agent 版本或系统…' : '搜索名称、IP、核心名称或版本…'"
               class="ios-search-input !py-1.5"
             />
             <button
@@ -108,22 +86,6 @@
             </button>
           </div>
 
-          <!-- Status Filter Dropdown -->
-          <select v-model="statusFilter" @change="search" class="ios-filter-select !w-auto !py-1.5">
-            <option value="all">全部状态</option>
-            <option value="online">在线</option>
-            <option value="degraded">核心异常</option>
-            <option value="applying">发布中</option>
-            <option value="rollback">回滚中</option>
-            <option value="error">异常</option>
-            <option value="offline">离线</option>
-            <option value="pending">等待登记</option>
-            <option value="disabled">已停用</option>
-          </select>
-
-          <!-- Query Button -->
-          <button class="ios-search-btn shrink-0 !py-1.5">查询</button>
-
           <!-- Refresh Button -->
           <button
             type="button"
@@ -136,6 +98,9 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             <span>刷新</span>
+          </button>
+          <button v-if="kind === 'all'" type="button" @click="showCoreCatalogModal = true" class="ios-search-btn shrink-0 !py-1.5">
+            核心特性
           </button>
         </form>
       </div>
@@ -151,7 +116,7 @@
     <ErrorState v-if="error && !nodes.length" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="loading && !nodes.length" />
     <EmptyState
-      v-else-if="!filteredNodes.length"
+      v-else-if="!nodes.length"
       title="暂无匹配服务器"
       description="未找到符合条件的服务器节点记录，请调整筛选或稍后刷新。"
     />
@@ -162,8 +127,8 @@
         <th>服务器</th>
         <th>运行状态</th>
         <th>操作系统 / 架构</th>
+        <th v-if="kind !== 'core'">Agent 探针版本</th>
         <template v-if="kind === 'agent'">
-          <th>Agent 探针版本</th>
           <th>协同代理核心</th>
           <th>核心健康状况</th>
         </template>
@@ -176,7 +141,7 @@
         <th class="text-right pr-6">操作</th>
       </template>
       <template #body>
-        <tr v-for="node in filteredNodes" :key="node.id" class="hover:bg-black/[0.015] transition-colors">
+        <tr v-for="node in nodes" :key="node.id" class="hover:bg-black/[0.015] transition-colors">
           <!-- 1. 服务器名称与地区/IP -->
           <td class="p-4">
             <div class="flex items-center gap-2.5">
@@ -217,16 +182,16 @@
             </span>
           </td>
 
-          <!-- 4. Agent 模式专有列 -->
+          <!-- 4. Agent 版本 -->
+          <td v-if="kind !== 'core'">
+            <span
+              class="tabular-nums text-xs px-2 py-0.5 rounded-md"
+              :class="node.agentVersion ? 'font-bold bg-blue-50 text-ios-blue' : 'text-neutral-400 bg-neutral-100 font-normal'"
+            >
+              {{ node.agentVersion || '等待注册' }}
+            </span>
+          </td>
           <template v-if="kind === 'agent'">
-            <td>
-              <span
-                class="tabular-nums text-xs px-2 py-0.5 rounded-md"
-                :class="node.agentVersion ? 'font-bold bg-blue-50 text-ios-blue' : 'text-neutral-400 bg-neutral-100 font-normal'"
-              >
-                {{ node.agentVersion || '等待注册' }}
-              </span>
-            </td>
             <td class="text-xs text-ios-secondary tabular-nums">
               {{ coreVersion(node) }}
             </td>
@@ -277,13 +242,13 @@
             </td>
             <td>
               <div v-if="getNodeAllProtocols(node).length" class="flex flex-wrap gap-1">
-                <span
+                <ProtocolBadge
                   v-for="proto in getNodeAllProtocols(node)"
                   :key="proto"
-                  class="rounded bg-black/[0.04] px-1.5 py-0.2 text-xs font-bold uppercase text-neutral-700"
-                >
-                  {{ proto }}
-                </span>
+                  :protocol="proto"
+                  compact
+                  class="uppercase"
+                />
               </div>
               <span v-else class="text-xs text-ios-tertiary">尚未上报</span>
             </td>
@@ -296,7 +261,24 @@
 
           <!-- 7. 操作 -->
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
-            <template v-if="kind === 'agent'">
+            <template v-if="kind === 'all'">
+              <button
+                v-if="isOwner && node.agentUpdateSupported && !upgradeUnavailableReason(node)"
+                type="button"
+                @click="handleUpgradeSingle(node, 'agent')"
+                class="ios-action-btn-secondary"
+              >升级 Agent</button>
+              <button
+                v-if="isOwner && getNodeInstalledCores(node).length && !upgradeUnavailableReason(node)"
+                type="button"
+                @click="handleUpgradeSingle(node, 'core')"
+                class="ios-action-btn-secondary"
+              >升级核心</button>
+              <button v-if="isOwner" type="button" @click="openCoreManagementModal(node)" class="ios-action-btn-secondary">
+                {{ getNodeInstalledCores(node).length ? '编辑核心' : '添加内核' }}
+              </button>
+            </template>
+            <template v-else-if="kind === 'agent'">
               <template v-if="node.agentUpdateSupported">
                 <button v-if="isOwner && !upgradeUnavailableReason(node)"
                   type="button"
@@ -361,20 +343,20 @@
       class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5"
     >
       <div
-        v-for="node in filteredNodes"
+        v-for="node in nodes"
         :key="node.id"
         class="bg-white rounded-[24px] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-4"
       >
         <div class="space-y-3.5">
-          <!-- Row 1: Flag · Name · OS & Status Capsule -->
+          <!-- Row 1: Flag · Name · Status Capsule -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
-              <div
-                class="w-7 h-7 rounded-lg bg-blue-50/90 border border-blue-100 text-xs font-bold font-mono text-ios-blue flex items-center justify-center shrink-0 shadow-2xs select-none"
+              <span
+                class="text-xl shrink-0 select-none leading-none cursor-default"
                 :title="countryTitle(getCountryInfo(node))"
               >
                 {{ getCountryInfo(node).flag }}
-              </div>
+              </span>
               <router-link
                 :to="`/nodes/${node.id}`"
                 class="min-w-0 max-w-full font-bold text-lg text-neutral-900 truncate tracking-normal hover:text-ios-blue transition-colors"
@@ -382,12 +364,6 @@
               >
                 {{ node.name }}
               </router-link>
-              <span
-                class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-semibold uppercase text-neutral-600 shrink-0 border border-black/[0.04] truncate max-w-[90px]"
-                :title="node.os || 'Linux'"
-              >
-                {{ formatOS(node.os) }}
-              </span>
             </div>
 
             <!-- Status Badge Capsule -->
@@ -400,26 +376,10 @@
             </span>
           </div>
 
-          <!-- Row 2: Sub-info (IP & Last Heartbeat) -->
-          <div class="text-xs font-mono tabular-nums text-neutral-400 tracking-normal flex flex-wrap gap-x-2 gap-y-1 items-center justify-between pt-0.5">
-            <span class="flex items-center gap-1.5 text-neutral-600 truncate tabular-nums" :title="connectAddress(node)">
-              <svg class="w-3.5 h-3.5 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
-              </svg>
-              <span class="truncate" :class="connectAddress(node) ? '' : 'text-ios-orange font-sans'">{{ connectAddress(node) || '未设置连接地址' }}</span>
-            </span>
-            <span class="shrink-0 text-neutral-400 flex items-center gap-1 text-xs tabular-nums" :title="'最近心跳: ' + formatTime(node.lastHeartbeat)">
-              <svg class="w-3 h-3 text-neutral-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>{{ formatTime(node.lastHeartbeat) }}</span>
-            </span>
-          </div>
-
           <!-- Row 3: Information Box (Grey rounded panel) -->
           <div class="bg-[#F8F9FA] rounded-2xl p-3.5 border border-black/[0.03] space-y-2.5">
             <!-- AGENT MODE -->
-            <template v-if="kind === 'agent'">
+            <template v-if="kind !== 'core'">
               <div class="flex items-center justify-between text-xs">
                 <span class="text-neutral-500 font-medium">Agent 探针版本</span>
                 <span
@@ -429,6 +389,8 @@
                   {{ node.agentVersion || '等待上报' }}
                 </span>
               </div>
+            </template>
+            <template v-if="kind === 'agent'">
               <div class="flex items-center justify-between text-xs">
                 <span class="text-neutral-500 font-medium">协同代理核心</span>
                 <span
@@ -461,11 +423,11 @@
                     <span
                       v-for="c in getNodeInstalledCores(node)"
                       :key="c.component"
-                      class="font-mono tabular-nums px-2 py-0.5 rounded-lg text-xs font-semibold"
-                      :class="c.component === 'xray' ? 'text-ios-blue bg-blue-50/90 border border-blue-200/70' : 'text-purple-700 bg-purple-50/90 border border-purple-200/70'"
-                      :title="c.error || ''"
+                      class="font-mono tabular-nums px-2 py-0.5 rounded-lg text-xs font-semibold border max-w-full truncate cursor-default"
+                      :class="c.component === 'xray' ? 'text-ios-blue bg-ios-blue/[0.08] border-ios-blue/20' : c.component === 'sing-box' ? 'text-ios-purple bg-ios-purple/[0.08] border-ios-purple/20' : 'text-ios-orange bg-ios-orange/[0.08] border-ios-orange/20'"
+                      :title="`${c.name} ${c.version}${c.primary ? '（主核心）' : ''}${c.error ? '\n' + c.error : ''}`"
                     >
-                      {{ c.name }} {{ c.version }}<span v-if="c.primary" class="ml-1 text-xs font-semibold opacity-70">主</span>
+                      {{ c.version }}
                     </span>
                     <span
                       v-if="corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1])"
@@ -489,13 +451,13 @@
                 <div class="space-y-1 pt-0.5">
                   <div class="text-xs text-neutral-400 font-medium">支持网络协议:</div>
                   <div v-if="getNodeAllProtocols(node).length" class="flex flex-wrap gap-1">
-                    <span
+                    <ProtocolBadge
                       v-for="proto in getNodeAllProtocols(node)"
                       :key="proto"
-                      class="rounded bg-black/[0.04] px-1.5 py-0.2 text-xs font-bold uppercase text-neutral-700"
-                    >
-                      {{ proto }}
-                    </span>
+                      :protocol="proto"
+                      compact
+                      class="uppercase"
+                    />
                   </div>
                   <div v-else class="text-xs text-neutral-400 italic">尚未上报协议</div>
                 </div>
@@ -518,7 +480,25 @@
         </div>
 
         <!-- Row 4: Action Buttons (Apple HIG Precision) -->
-        <template v-if="kind === 'agent'">
+        <div v-if="kind === 'all'" class="pt-2 border-t border-black/[0.04] flex items-center gap-1.5 overflow-x-auto">
+          <button
+            v-if="isOwner && node.agentUpdateSupported && !upgradeUnavailableReason(node)"
+            type="button"
+            @click="handleUpgradeSingle(node, 'agent')"
+            class="ios-btn-secondary flex-1 !min-w-max !px-1.5 shrink-0 whitespace-nowrap !bg-ios-blue/[0.08] !text-ios-blue !border-transparent !shadow-none hover:!bg-ios-blue/[0.15]"
+          >升级 Agent</button>
+          <button
+            v-if="isOwner && getNodeInstalledCores(node).length && !upgradeUnavailableReason(node)"
+            type="button"
+            @click="handleUpgradeSingle(node, 'core')"
+            class="ios-btn-secondary flex-1 !min-w-max !px-1.5 shrink-0 whitespace-nowrap !bg-ios-purple/[0.08] !text-ios-purple !border-transparent !shadow-none hover:!bg-ios-purple/[0.15]"
+          >升级核心</button>
+          <button v-if="isOwner" type="button" @click="openCoreManagementModal(node)" class="ios-btn-secondary flex-1 !min-w-max !px-1.5 shrink-0 whitespace-nowrap !bg-ios-orange/[0.08] !text-ios-orange !border-transparent !shadow-none hover:!bg-ios-orange/[0.15]">
+            {{ getNodeInstalledCores(node).length ? '编辑核心' : '添加内核' }}
+          </button>
+          <router-link :to="`/nodes/${node.id}`" class="ios-btn-secondary flex-1 !min-w-max !px-1.5 shrink-0 whitespace-nowrap inline-flex items-center justify-center !bg-black/[0.04] !text-ios-secondary !border-transparent !shadow-none hover:!bg-black/[0.08]">详情</router-link>
+        </div>
+        <template v-else-if="kind === 'agent'">
           <div class="pt-2 border-t border-black/[0.04] grid grid-cols-2 gap-2.5">
             <template v-if="node.agentUpdateSupported">
               <button v-if="isOwner && !upgradeUnavailableReason(node)"
@@ -621,7 +601,7 @@
     <AppDialog
       v-model="agentUpgradeDialogVisible"
       :title="agentUpgradeTargetNode ? `升级 Agent - ${agentUpgradeTargetNode.name}` : '全部升级 Agent'"
-      :description="agentUpgradeTargetNode ? '选择官方签名版本进行升级。如果版本尚未导入面板，将自动下载并导入本地签名目录。' : '为全部支持的在线服务器批量升级到选定的 Agent 版本。'"
+      :description="agentUpgradeTargetNode ? '升级到最新的官方签名版本。尚未导入面板时会先自动下载并导入，面板只保留最新版本。' : '为全部支持的在线服务器批量升级到最新的 Agent 版本。'"
       max-width="lg"
       :show-confirm="false"
       cancel-text="关闭"
@@ -803,13 +783,13 @@
                   <p v-if="core.error" class="text-xs text-ios-red">{{ core.error }}</p>
                   <div class="flex flex-wrap items-center gap-1 pt-0.5">
                     <span class="text-xs text-neutral-400 mr-0.5">协议:</span>
-                    <span
+                    <ProtocolBadge
                       v-for="p in core.protocols"
                       :key="p"
-                      class="px-1.5 py-0.2 rounded bg-black/[0.04] text-neutral-700 font-bold text-xs uppercase"
-                    >
-                      {{ p }}
-                    </span>
+                      :protocol="p"
+                      compact
+                      class="uppercase"
+                    />
                     <span v-if="!core.protocols.length" class="text-xs text-neutral-400">—</span>
                   </div>
                   <p class="text-xs text-neutral-500">
@@ -1274,6 +1254,7 @@ import { deploymentAPI } from '../deploymentApi';
 import { CORE_INSTALL_OPTIONS, sortInstallCores, validateInstallCores } from '../../nodes/coreInstallOptions';
 import { APIError } from '../../../app/apiClient';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type AgentReleaseVersion } from '../../nodes/api';
+import { applyServerOrder } from '../../nodes/serverOrder';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../../nodes/installEndpoint';
 import { proxyAPI, type Inbound } from '../../proxy/api';
 import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
@@ -1285,6 +1266,7 @@ import { coreReleaseFields, coreReleasesAPI, defaultCoreSource, deriveAssetURL, 
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
+import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import Pagination from '../../../components/Pagination.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
@@ -1297,25 +1279,18 @@ import WebUpgradeOption from '../../nodes/components/WebUpgradeOption.vue';
 
 const props = withDefaults(
   defineProps<{
-    kind: 'agent' | 'core';
+    kind: 'agent' | 'core' | 'all';
     embedded?: boolean;
-    currentTab?: 'agents' | 'cores';
   }>(),
   {
-    embedded: false,
-    currentTab: 'agents'
+    embedded: false
   }
 );
-
-defineEmits<{
-  (e: 'change-tab', tab: string): void;
-}>();
 
 const nodes = ref<NodeView[]>([]);
 const total = ref(0);
 const page = ref(1);
 const keyword = ref('');
-const statusFilter = ref<'all' | 'online' | 'offline' | 'pending' | 'degraded' | 'applying' | 'rollback' | 'error' | 'disabled'>('all');
 const loading = ref(false);
 const error = ref('');
 
@@ -1428,11 +1403,11 @@ async function selectAgentVersionForUpgrade(versionItem: AgentReleaseVersion) {
 }
 const manualAgentNode = ref<NodeView | null>(null);
 const manualReleaseId = ref('');
-async function readAllNodes(): Promise<NodeView[]> {
-  const first = await nodeAPI.list(1, '');
+async function readAllNodes(keyword = ''): Promise<NodeView[]> {
+  const first = await nodeAPI.list(1, keyword);
   const list = [...first.items];
   for (let page = 2; list.length < first.total; page++) {
-    const next = await nodeAPI.list(page, '');
+    const next = await nodeAPI.list(page, keyword);
     if (!next.items.length) throw new Error('服务器分页读取不完整，请刷新重试');
     list.push(...next.items);
   }
@@ -2114,7 +2089,7 @@ function openUpgradeCoreForComponent(node: NodeView, comp: CoreName) {
 }
 
 // Single node upgrade trigger
-function handleUpgradeSingle(node: NodeView) {
+function handleUpgradeSingle(node: NodeView, kind: 'agent' | 'core' = props.kind === 'core' ? 'core' : 'agent') {
   if (!isOwner.value) return;
   const reason = upgradeUnavailableReason(node);
   if (reason) {
@@ -2122,7 +2097,7 @@ function handleUpgradeSingle(node: NodeView) {
     return;
   }
   withBaseline([node], () => {
-    if (props.kind === 'agent') {
+    if (kind === 'agent') {
       agentUpgradeTargetNode.value = node;
       agentUpgradeDialogVisible.value = true;
       void loadAgentReleases();
@@ -2135,20 +2110,24 @@ function handleUpgradeSingle(node: NodeView) {
 // Batch upgrade trigger (from the top-right "全部升级"). Core upgrades are per
 // component: the dialog picks one component and only servers that already run it
 // are queued.
-async function upgradeAll() {
+function upgradeAll() {
+  if (!isOwner.value) return;
+  return upgradeAllFor(props.kind === 'agent' ? 'agent' : 'core');
+}
+async function upgradeAllFor(kind: 'agent' | 'core') {
   if (!isOwner.value) return;
   try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
   catch (e) { showToast((e as Error).message, 'error'); return; }
-  withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && (props.kind !== 'agent' || node.agentUpdateSupported)), openBatchUpgrade);
+  withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && (kind !== 'agent' || node.agentUpdateSupported)), () => openBatchUpgrade(kind));
 }
-function openBatchUpgrade() {
+function openBatchUpgrade(kind: 'agent' | 'core') {
   const eligible = eligibleOnlineNodes.value;
   if (!eligible.length) {
     showToast('当前暂无满足升级条件的在线服务器 (需在线且已上报配置版本)', 'warning');
     return;
   }
 
-  if (props.kind === 'agent') {
+  if (kind === 'agent') {
     agentUpgradeTargetNode.value = null;
     agentUpgradeDialogVisible.value = true;
     void loadAgentReleases();
@@ -2320,6 +2299,7 @@ async function submitCoreAction() {
 
 defineExpose({
   upgradeAll,
+  upgradeAllFor,
   upgradeAllComponent,
   handleUpgradeSingle,
   openCoreManagementModal,
@@ -2336,14 +2316,18 @@ async function refreshNodes() {
   refreshing = true;
   const current = generation;
   try {
-    const result = await nodeAPI.list(page.value, keyword.value);
-    if (current === generation) { nodes.value = result.items; total.value = result.total; error.value = ''; }
+    const [servers, order] = await Promise.all([readAllNodes(keyword.value), nodeAPI.serverOrder()]);
+    if (current === generation) {
+      nodes.value = applyServerOrder(servers, order.ids).slice((page.value - 1) * 20, page.value * 20);
+      total.value = servers.length;
+      error.value = '';
+    }
   } catch (e) { if (current === generation) error.value = (e as Error).message; }
   finally { refreshing = false; }
 }
 let tasksReading = false, tasksGeneration = 0;
 async function refreshTasks() {
-  if (!isOwner.value || props.kind !== 'core' || tasksReading || document.visibilityState !== 'visible') return;
+  if (!isOwner.value || props.kind === 'agent' || tasksReading || document.visibilityState !== 'visible') return;
   tasksReading = true;
   const current = tasksGeneration;
   try { const tasks = await readAllCoreTasks(); if (current === tasksGeneration) coreTasks.value = tasks; }
@@ -2361,10 +2345,10 @@ async function load(silent = false) {
   loading.value = true;
   error.value = '';
   try {
-    const result = await nodeAPI.list(page.value, keyword.value);
+    const [servers, order] = await Promise.all([readAllNodes(keyword.value), nodeAPI.serverOrder()]);
     if (current === generation) {
-      nodes.value = result.items;
-      total.value = result.total;
+      nodes.value = applyServerOrder(servers, order.ids).slice((page.value - 1) * 20, page.value * 20);
+      total.value = servers.length;
     }
     // The per-(node, component) task rows make the "安装中 / 升级中" label possible
     // in the list and cards; they are read from the backend, never cached locally.
@@ -2385,15 +2369,6 @@ function changePage(value: number) {
   page.value = value;
   void load();
 }
-
-const filteredNodes = computed(() => {
-  return nodes.value.filter(n => {
-    if (statusFilter.value !== 'all' && n.status !== statusFilter.value) {
-      return false;
-    }
-    return true;
-  });
-});
 
 function coreVersion(node: NodeView) {
   return coreSummaryLabel(node);

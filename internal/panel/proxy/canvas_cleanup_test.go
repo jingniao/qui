@@ -74,35 +74,6 @@ func TestCanvasEntryReuseRejectedOnSaveAndPlan(t *testing.T) {
 	}
 }
 
-func TestRelayCleanupResidualRunsOnce(t *testing.T) {
-	p, scheme, binding := cleanupFixture(t)
-	if err := p.service.Repository.DeleteCanvasScheme(p.ctx, scheme.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.service.ReconcileRelayCleanup(p.ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.service.Repository.Inbound(p.ctx, binding.InboundID, false); !errors.Is(err, ErrNotFound) {
-		t.Fatal(err)
-	}
-	var count int
-	if err := p.database.QueryRow("SELECT count(*) FROM canvas_tunnels").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("tunnels %d %v", count, err)
-	}
-	if err := p.service.Repository.InsertCanvasEntryBinding(p.ctx, CanvasEntryBindingRecord{ID: "later-detached", InboundID: p.inbound.ID, InstanceID: "later", Mode: "create", State: "detached"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.database.Exec("CREATE TRIGGER reject_second_cleanup BEFORE DELETE ON canvas_entry_bindings BEGIN SELECT RAISE(ABORT,'second cleanup'); END"); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.service.ReconcileRelayCleanup(p.ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.service.Repository.CanvasEntryBindingByInbound(p.ctx, p.inbound.ID); err != nil {
-		t.Fatalf("completed cleanup ran again: %v", err)
-	}
-}
-
 func TestCanvasRemoveSharedTunnelPreserved(t *testing.T) {
 	p, scheme, binding := cleanupFixture(t)
 	shared, err := p.service.Repository.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "shared", Execution: "server", Layout: scheme.Layout})

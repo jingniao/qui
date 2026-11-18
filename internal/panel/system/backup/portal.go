@@ -13,16 +13,6 @@ import (
 // validatePortal requires the 0114 material only when the archive applied that
 // migration. Older archives are migrated by restore and remain valid inputs.
 func validatePortal(ctx context.Context, database *sql.DB, configurationVault *vault.Vault) error {
-	var applied, tables int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0114_end_user_accounts.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='user_sessions'").Scan(&tables); err != nil || applied != tables {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	}
 	// Reading the columns also detects a missing column in an empty table.
 	rows, err := database.QueryContext(ctx, "SELECT password_hash,login_enabled,last_login_at FROM users")
 	if err != nil {

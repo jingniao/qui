@@ -19,14 +19,13 @@ import (
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/desiredstate"
-	shared "proxycontrol/pkg/contracts/policy"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestRealPolicyPublicationToAgentMatchesDraftSimulator(t *testing.T) {
+func TestRealPolicyPublicationToAgent(t *testing.T) {
 	t.Parallel()
 	binaryPath := os.Getenv("XRAY_BINARY")
 	if binaryPath == "" {
@@ -81,15 +80,11 @@ func TestRealPolicyPublicationToAgentMatchesDraftSimulator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision, err := policies.Simulate(ctx, shared.Request{NodeID: n.ID, InboundID: inbound.ID, UserID: u.ID, Domain: "api.blocked.example", Port: 80, Network: "tcp"})
-	if err != nil || !decision.Matched || decision.PolicyID != rule.ID || decision.Action.Type != "Block" {
-		t.Fatal("draft simulation incorrect", err)
-	}
 	state, err := proxyService.Snapshot(ctx, n.ID, users)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Policies) != 1 {
+	if len(state.Policies) != 1 || state.Policies[0].ID != rule.ID {
 		t.Fatal("published snapshot omitted policy")
 	}
 	revision, err := deployments.Create(ctx, state, "owner", "user policy")

@@ -113,17 +113,6 @@
         </div>
       </div>
 
-    <section v-if="isOwner" class="panel-card p-5 space-y-4">
-      <h2 class="text-ios-label text-base font-semibold leading-normal">Agent 签名发布目录</h2>
-      <p v-if="!configured" class="text-sm text-ios-orange">中央尚未配置发布公钥</p>
-      <details v-if="configured" class="space-y-3"><summary class="text-sm cursor-pointer">登记签名 Agent 版本</summary>
-        <p class="text-xs text-ios-secondary">粘贴离线签名工具生成的完整 proxy-agent 清单。</p>
-        <textarea v-model="manifest" maxlength="16384" rows="6" class="form-input-base w-full font-mono text-xs" aria-label="签名 Agent 清单" />
-        <button class="ios-btn-primary" :disabled="registerBusy" @click="registerRelease">验证并登记</button>
-      </details>
-      <DataTable v-if="releasePageItems.length"><template #header><th>版本</th><th>平台</th><th>序列</th></template><template #body><tr v-for="r in releasePageItems" :key="r.id"><td>{{ r.signed.manifest.version }}</td><td>{{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</td><td>{{ r.signed.manifest.sequence }}</td></tr></template></DataTable>
-      <Pagination :total="releases.length" :current-page="releasePage" :page-size="20" @update:page="releasePage = $event" />
-    </section>
 
       <!-- 错误状态 -->
       <ErrorState v-if="error" :message="error" @retry="loadAll" />
@@ -347,25 +336,11 @@ const searchKeyword = ref('');
 const currentPage = ref(1);
 const pageSize = 20;
 
-const configured = ref(false), manifest = ref(''), registerBusy = ref(false);
-const releasePage = ref(1);
-const releasePageItems = computed(() => releases.value.slice((releasePage.value - 1) * 20, releasePage.value * 20));
 const clearConfirm = ref(false), clearTargetId = ref('');
 const recoveryTarget = ref<AgentUpdateTask | null>(null);
 const attemptTaskId = ref(''), attemptPage = ref(1), attemptTotal = ref(0), attemptError = ref(''), attemptLoading = ref(false);
 const attempts = ref<AgentUpdateAttempt[]>([]);
 let attemptGeneration = 0;
-async function registerRelease() {
-  if (!isOwner.value || registerBusy.value) return;
-  registerBusy.value = true;
-  try {
-    const signed = JSON.parse(manifest.value);
-    if (signed?.manifest?.component !== 'proxy-agent') throw new Error('请选择 proxy-agent 的签名清单');
-    await coreUpdatesAPI.register(signed); manifest.value = ''; releasePage.value = 1;
-    showToast('Agent 签名版本已验证并登记'); await loadAll();
-  } catch (e) { showToast((e as Error).message, 'error'); }
-  finally { registerBusy.value = false; }
-}
 function requestClear(id: string) { if (isOwner.value) { clearTargetId.value = id; clearConfirm.value = true; } }
 function confirmClear() { void clearCoreTask(clearTargetId.value); }
 function prepareRecovery(id: string) { recoveryTarget.value = agentTasks.value.find(t => t.id === id) || null; }
@@ -464,7 +439,6 @@ async function loadAll(silent = false) {
     agentTasks.value = agentRes.items || [];
     coreTasks.value = coreRes.items || [];
     releases.value = releaseRes.items || [];
-    configured.value = releaseRes.configured;
   } catch (e) {
     if (cur === generation) {
       error.value = (e as Error).message || '读取任务记录失败';

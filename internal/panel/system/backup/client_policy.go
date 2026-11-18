@@ -11,11 +11,6 @@ import (
 )
 
 func validateClientPolicies(ctx context.Context, database *sql.DB) error {
-	var applied, present int
-	if database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0132_client_policy_profiles.sql'").Scan(&applied) != nil ||
-		database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='client_policy_profiles'").Scan(&present) != nil || applied != present {
-		return ErrArchive
-	}
 	store := &rules.Store{Database: database}
 	stored, err := store.Read(ctx)
 	if err != nil {
@@ -23,12 +18,6 @@ func validateClientPolicies(ctx context.Context, database *sql.DB) error {
 	}
 	var pointer string
 	err = database.QueryRowContext(ctx, "SELECT value_json FROM system_settings WHERE key='client_policy_active'").Scan(&pointer)
-	if applied == 0 {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return ErrArchive
-		}
-		return nil
-	}
 	var active struct {
 		ProfileID string `json:"profileId"`
 	}

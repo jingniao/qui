@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -28,6 +27,10 @@ const (
 	// VerdictForeign means the file has no migration table, or a migration this
 	// binary knows carries a different checksum.
 	VerdictForeign Verdict = "foreign"
+	// VerdictOutdated means the database recorded only part of the legacy
+	// migrations: it was last opened by a panel older than v1.6.0, which has to
+	// upgrade it first (ErrPredatesBaseline).
+	VerdictOutdated Verdict = "outdated"
 	// VerdictDamaged means the file cannot be copied, opened, read as SQLite or
 	// fails its own integrity check.
 	VerdictDamaged Verdict = "damaged"
@@ -79,7 +82,7 @@ func inspect(ctx context.Context, database *sql.DB, files fs.FS) Inspection {
 	if !ok {
 		return Inspection{Verdict: VerdictDamaged, Integrity: message}
 	}
-	checksums, names, err := embeddedMigrations(files)
+	checksums, names, err := embeddedChecksums(files)
 	if err != nil {
 		return damaged(err)
 	}
@@ -87,50 +90,30 @@ func inspect(ctx context.Context, database *sql.DB, files fs.FS) Inspection {
 	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").Scan(&tables); err != nil {
 		return damaged(err)
 	}
-	applied := map[string]string{}
+	recorded := map[string]string{}
 	if tables > 0 {
-		rows, err := database.QueryContext(ctx, "SELECT version, checksum FROM schema_migrations")
-		if err != nil {
-			return damaged(err)
-		}
-		for rows.Next() {
-			var version, checksum string
-			if err := rows.Scan(&version, &checksum); err != nil {
-				rows.Close()
-				return damaged(err)
-			}
-			applied[version] = checksum
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
+		if recorded, err = recordedMigrations(ctx, database); err != nil {
 			return damaged(err)
 		}
 	}
-	inspection := Inspection{Integrity: "ok"}
-	for version := range applied {
+	// Applied migrations are immutable, so a different checksum means this is
+	// not a database of this product or it was edited by hand.
+	state := classifyMigrations(recorded, checksums)
+	inspection := Inspection{Integrity: "ok", Unknown: state.unknown, Mismatched: state.mismatched}
+	for version := range recorded {
 		inspection.Applied = append(inspection.Applied, version)
 	}
 	sort.Strings(inspection.Applied)
 	for _, name := range names {
-		checksum, known := applied[name]
-		switch {
-		case !known:
+		if !state.applied[name] {
 			inspection.Pending = append(inspection.Pending, name)
-		case checksum != checksums[name]:
-			// Applied migrations are immutable, so a different checksum means
-			// this is not a database of this product or it was edited by hand.
-			inspection.Mismatched = append(inspection.Mismatched, name)
-		}
-	}
-	for _, version := range inspection.Applied {
-		if _, known := checksums[version]; !known {
-			inspection.Unknown = append(inspection.Unknown, version)
 		}
 	}
 	switch {
 	case tables == 0 || len(inspection.Mismatched) > 0:
 		inspection.Verdict = VerdictForeign
+	case state.outdated:
+		inspection.Verdict = VerdictOutdated
 	case len(inspection.Unknown) > 0:
 		inspection.Verdict = VerdictNewer
 	default:
@@ -216,25 +199,6 @@ func integrityCheck(ctx context.Context, database *sql.DB) (string, bool, error)
 		return "integrity_check returned no rows", false, nil
 	}
 	return messages[0], len(messages) == 1 && messages[0] == "ok", nil
-}
-
-// embeddedMigrations reads the same names, order and checksum definition that
-// Migrate uses, so the comparison is the one startup would perform.
-func embeddedMigrations(files fs.FS) (map[string]string, []string, error) {
-	names, err := fs.Glob(files, "*.sql")
-	if err != nil {
-		return nil, nil, err
-	}
-	sort.Strings(names)
-	checksums := make(map[string]string, len(names))
-	for _, name := range names {
-		data, err := fs.ReadFile(files, name)
-		if err != nil {
-			return nil, nil, err
-		}
-		checksums[name] = fmt.Sprintf("%x", sha256.Sum256(data))
-	}
-	return checksums, names, nil
 }
 
 func damaged(err error) Inspection {

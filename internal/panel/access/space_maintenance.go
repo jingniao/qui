@@ -193,23 +193,6 @@ func (r *Repository) FinishSpaceMaintenance(ctx context.Context, attempt int64, 
 	return tx.Commit()
 }
 func (r *Repository) preserveSpaceMaintenanceRestoreTx(ctx context.Context, tx *sql.Tx) error {
-	var present, applied int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.sqlite_master WHERE type='table' AND name='access_space_maintenance'").Scan(&present); err != nil {
-		return err
-	}
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.schema_migrations WHERE version='0057_access_space_maintenance.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if present == 0 && applied == 0 {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM access_space_maintenance"); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO access_space_maintenance(id) VALUES(1)")
-		return err
-	}
-	if present != 1 || applied != 1 {
-		return ErrInvalid
-	}
 	if _, err := scanSpaceMaintenance(tx.QueryRowContext(ctx, "SELECT "+spaceMaintenanceColumns+" FROM restore_source.access_space_maintenance WHERE id=1")); err != nil {
 		return err
 	}

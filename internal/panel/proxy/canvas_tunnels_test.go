@@ -106,48 +106,6 @@ func TestCanvasK4EntryRoutingConflict(t *testing.T) {
 	}
 }
 
-func TestCanvasK4ExplicitAdoptLegacy(t *testing.T) {
-	p := newPublishPanel(t)
-	layout := canvasTestLayout(p, canvasTestSet{A: p.nodeA, B: p.nodeB}, "", []CanvasConnection{canvasTestHop("i-a", "i-b", 8443)})
-	old, _, err := p.publishScheme(t, "legacy-adopt", layout)
-	if err != nil {
-		t.Fatal(err)
-	}
-	canvasK4LegacyDatabase(t, p, old, true)
-	replacement, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: old.Name, Execution: "server", Layout: layout})
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy, err := p.service.Repository.LegacyCanvasObjects(p.ctx)
-	if err != nil || len(legacy) != 2 {
-		t.Fatal(legacy, err)
-	}
-	tunnelID := replacement.Layout.Connections[0].TunnelID
-	for _, o := range legacy {
-		if len(o.CandidateTunnels) != 1 || o.CandidateTunnels[0] != tunnelID {
-			t.Fatal(o)
-		}
-	}
-	if err := p.service.Repository.AdoptCanvasObjects(p.ctx, tunnelID, legacy); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.service.Repository.AdoptCanvasObjects(p.ctx, tunnelID, legacy); !errors.Is(err, ErrCanvasObjectOwned) {
-		t.Fatal(err)
-	}
-	plan, err := p.service.PlanCanvasScheme(p.ctx, replacement.ID, nil)
-	if err != nil || !plan.OK {
-		t.Fatal(plan, err)
-	}
-	for _, server := range plan.Servers {
-		if len(server.Creates)+len(server.Removes) > 0 {
-			t.Fatal(server)
-		}
-	}
-	if _, err := p.service.PublishCanvasScheme(p.ctx, replacement.ID, "Owner", p.users); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestCanvasK4TunnelAPIAndStrictReferences(t *testing.T) {
 	p := newCanvasPanel(t)
 	owner, csrf := p.session("Owner")
@@ -161,7 +119,7 @@ func TestCanvasK4TunnelAPIAndStrictReferences(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &tunnel); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/api/v1/canvas-tunnels", "/api/v1/canvas-tunnels/legacy-objects"} {
+	for _, path := range []string{"/api/v1/canvas-tunnels"} {
 		if response := p.call("GET", path, nil, viewer, vcsrf); response.Code != 403 {
 			t.Fatal(response.Code)
 		}
@@ -185,31 +143,7 @@ func TestCanvasK4TunnelAPIAndStrictReferences(t *testing.T) {
 	if _, err := p.service.SaveCanvasScheme(p.ctx, "", CanvasSchemeInput{Name: "client-ref", Execution: "client", Layout: layout}); err == nil {
 		t.Fatal("client accepted server reference")
 	}
-	if response := p.call("POST", "/api/v1/canvas-tunnels/"+tunnel.ID+"/adopt", map[string]any{"objects": []any{map[string]any{"kind": "unknown", "id": "bad"}}}, owner, csrf); response.Code != 400 {
-		t.Fatal(response.Code, response.Body.String())
-	}
 	if len(p.audit.actions) != 1 {
-		t.Fatal(p.audit.actions)
-	}
-	legacy, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "[orphan] API 中转入口", NodeID: p.nodeB, Protocol: "trojan", Listen: "0.0.0.0", Port: 8443, Enabled: true, InternalRelay: true, DefaultOutbound: "direct"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	objects := map[string]any{"objects": []any{map[string]any{"kind": "inbound", "id": legacy.ID}}}
-	path := "/api/v1/canvas-tunnels/" + tunnel.ID + "/adopt"
-	if response := p.call("POST", path, objects, viewer, vcsrf); response.Code != 403 {
-		t.Fatal(response.Code)
-	}
-	if response := p.call("POST", path, objects, owner, ""); response.Code != 403 {
-		t.Fatal(response.Code)
-	}
-	if response := p.call("POST", path, objects, owner, csrf); response.Code != 204 {
-		t.Fatal(response.Code, response.Body.String())
-	}
-	if response := p.call("POST", path, objects, owner, csrf); response.Code != 409 {
-		t.Fatal(response.Code, response.Body.String())
-	}
-	if len(p.audit.actions) != 2 || p.audit.actions[1] != "认领旧画布对象" {
 		t.Fatal(p.audit.actions)
 	}
 }

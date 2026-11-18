@@ -14,15 +14,11 @@ func TestValidateRelayCleanup(t *testing.T) {
 		valid        bool
 	}{
 		{"pending", "", true},
-		{"completed", "UPDATE relay_cleanup_reconcile SET completed=1", true},
 		{"missing_node", "UPDATE relay_cleanup_nodes SET node_id='missing'", false},
 		{"negative_attempts", "UPDATE relay_cleanup_nodes SET attempts=-1", false},
 		{"bad_timestamp", "UPDATE relay_cleanup_nodes SET next_attempt_at='invalid'", false},
 		{"empty_reason", "UPDATE relay_cleanup_nodes SET reason=''", false},
 		{"missing_revision", "UPDATE relay_cleanup_nodes SET revision_id=99", false},
-		{"missing_marker", "DELETE FROM relay_cleanup_reconcile", false},
-		{"invalid_marker", "UPDATE relay_cleanup_reconcile SET completed=2", false},
-		{"null_marker_id", "UPDATE relay_cleanup_reconcile SET id=NULL", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := sql.Open("sqlite", ":memory:")
@@ -31,9 +27,7 @@ func TestValidateRelayCleanup(t *testing.T) {
 			}
 			defer db.Close()
 			for _, q := range []string{
-				"CREATE TABLE schema_migrations(version TEXT)", "INSERT INTO schema_migrations VALUES('0150_relay_cleanup.sql')",
 				"CREATE TABLE nodes(id TEXT)", "INSERT INTO nodes VALUES('n')", "CREATE TABLE config_revisions(id INTEGER)", "INSERT INTO config_revisions VALUES(1)",
-				"CREATE TABLE relay_cleanup_reconcile(id INTEGER,completed INTEGER)", "INSERT INTO relay_cleanup_reconcile VALUES(1,0)",
 				"CREATE TABLE relay_cleanup_nodes(node_id TEXT,reason TEXT,attempts INTEGER,last_code TEXT,next_attempt_at TEXT,created_at TEXT,updated_at TEXT,revision_id INTEGER)",
 				"INSERT INTO relay_cleanup_nodes VALUES('n','removed',2,'apply_failed','2026-11-15T00:05:00Z','2026-11-15T00:00:00Z','2026-11-15T00:00:00Z',1)",
 			} {
@@ -61,9 +55,6 @@ func TestRelayCleanupBackupRestoreRoundTrip(t *testing.T) {
 SELECT id,'scheme removed',2,'apply_failed','2026-11-15T00:05:00Z','2026-11-15T00:00:00Z','2026-11-15T00:00:00Z',1 FROM nodes`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.Database.Exec("UPDATE relay_cleanup_reconcile SET completed=1"); err != nil {
-		t.Fatal(err)
-	}
 	created, err := source.Create(ctx, directory, "relay_cleanup_001", "owner", testPassword)
 	if err != nil {
 		t.Fatal(err)
@@ -86,15 +77,12 @@ SELECT id,'scheme removed',2,'apply_failed','2026-11-15T00:05:00Z','2026-11-15T0
 		t.Fatal(err)
 	}
 	var reason, code, next string
-	var attempts, revision, completed int
+	var attempts, revision int
 	if err := db.QueryRow("SELECT reason,attempts,last_code,next_attempt_at,revision_id FROM relay_cleanup_nodes").Scan(&reason, &attempts, &code, &next, &revision); err != nil || reason != "scheme removed" || attempts != 2 || code != "apply_failed" || next != "2026-11-15T00:05:00Z" || revision != 1 {
 		t.Fatal(reason, attempts, code, next, revision, err)
 	}
-	if err := db.QueryRow("SELECT completed FROM relay_cleanup_reconcile").Scan(&completed); err != nil || completed != 1 {
-		t.Fatal(completed, err)
-	}
 	inventory, err := ReadInventory(ctx, db)
-	if err != nil || inventory.Totals.RelayCleanupNodes != 1 || inventory.Totals.RelayCleanupReconcile != 1 {
+	if err != nil || inventory.Totals.RelayCleanupNodes != 1 {
 		t.Fatal(inventory.Totals, err)
 	}
 }

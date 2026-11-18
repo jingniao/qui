@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestDeviceLimitBackupRoundTripAndPre0115(t *testing.T) {
+func TestDeviceLimitBackupRoundTrip(t *testing.T) {
 	t.Parallel()
 	source, directory, _ := sourceFixture(t)
 	ctx := context.Background()
@@ -37,13 +37,5 @@ func TestDeviceLimitBackupRoundTripAndPre0115(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	for _, q := range []string{"ALTER TABLE users DROP COLUMN device_limit", "DELETE FROM schema_migrations WHERE version='0115_device_limit.sql'"} {
-		if _, err := source.Database.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := validateDeviceLimit(ctx, source.Database); err != nil {
-		t.Fatal("older archive refused", err)
 	}
 }

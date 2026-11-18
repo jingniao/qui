@@ -102,8 +102,7 @@ const displaySites = [
   'modules/dashboard/pages/DashboardPage.vue',
   'modules/proxy/components/node-editor/NodeEditorDrawer.vue',
   'modules/proxy/pages/ProxyNodeListPage.vue',
-  'modules/routing/pages/ClientPolicyPage.vue',
-  'modules/routing/pages/PolicySimulatorPage.vue'
+  'modules/routing/pages/ClientPolicyPage.vue'
 ];
 for (const path of displaySites) {
   const text = read(path);
@@ -121,10 +120,11 @@ for (const path of ['modules/proxy/api.ts', 'modules/proxy/components/relay/canv
   assert.doesNotMatch(text, /publicIp \|\| [^\n]*hostname/, path + ' must not fall back to the hostname');
   assert.doesNotMatch(text, /hostname \|\| '127\.0\.0\.1'/, path + ' must not invent a loopback address');
 }
-// The version page shows the address too, but keeps one hostname seed for the
-// region guess (resolveCountryInfo), which is not an address display.
+// The version page shows the address in its list view and core dialog (v1.6.1
+// dropped it from the cards), but keeps one hostname seed for the region guess
+// (resolveCountryInfo), which is not an address display.
 const versionPanel = read('modules/system/components/NodeVersionPanel.vue');
-assert.equal(versionPanel.match(/connectAddress\(/g).length, 5);
+assert.equal(versionPanel.match(/connectAddress\(/g).length, 2);
 assert.doesNotMatch(versionPanel, /publicIp \|\| [^\n]*hostname \|\| '[^']*地址/);
 // Both settings forms stopped echoing the loaded public IP back on every save.
 const settings = read('modules/nodes/components/detail/ServerSettings.vue');
@@ -132,7 +132,7 @@ assert.match(settings, /addressChanges\(loadedAddresses\.value, submitted\)/);
 assert.doesNotMatch(settings, /publicIp: submitted\.publicIp/);
 assert.doesNotMatch(settings, /v-model(\.trim)?="form\.publicIp"/);
 const enrollment = read('modules/nodes/components/ServerEnrollment.vue');
-assert.match(enrollment, /nodeAPI\.enroll\(name\.value,\s*connectHost\.value/);
+assert.match(enrollment, /nodeAPI\.enroll\([^,]+,\s*connectionForm\.connectHost/);
 assert.doesNotMatch(settings, /\.\.\.latest, \.\.\.change/);
 for (const label of ['已指定地址', '自动探测', '未探测到']) assert.ok(settings.includes(label), 'source hint ' + label);
 assert.doesNotMatch(read('modules/nodes/components/ServerQuickEdit.vue'), /publicIp: latest\.publicIp/);

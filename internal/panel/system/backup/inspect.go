@@ -16,7 +16,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
-	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,12 +24,12 @@ import (
 	"proxycontrol/internal/panel/proxy"
 	userledger "proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/config"
+	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/pki"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/migrations"
 	"proxycontrol/pkg/contracts/credential"
 	"proxycontrol/pkg/contracts/desiredstate"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -348,25 +347,12 @@ func validateContents(ctx context.Context, work string) error {
 			return ErrArchive
 		}
 	}
-	// A backup taken after migration 0112 must carry the canvas table. The list
-	// above may not hold it: an older backup is migrated forward when it is
-	// restored, so the table is required exactly when the archive applied it.
-	var canvasApplied, canvasTables int64
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0112_canvas_schemes.sql'").Scan(&canvasApplied); err != nil {
-		return ErrArchive
-	}
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='canvas_schemes'").Scan(&canvasTables); err != nil {
-		return ErrArchive
-	}
-	if canvasApplied != canvasTables {
-		return ErrArchive
-	}
 	if err := proxy.ValidateCanvasTunnels(ctx, database); err != nil {
 		return ErrArchive
 	}
 	// G3: a GOST tunnel's sealed credential set belongs to the archive, so a
 	// candidate that cannot open it would restore a tunnel no publication can
-	// render. Archives from before 0128 have no column and are accepted.
+	// render.
 	if err := proxy.ValidateCanvasTunnelMaterial(ctx, database, configurationVault); err != nil {
 		return ErrArchive
 	}
@@ -646,34 +632,9 @@ func validateContents(ctx context.Context, work string) error {
 }
 
 func validateMigrations(ctx context.Context, database *sql.DB) error {
-	names, err := fs.Glob(migrations.Files, "*.sql")
-	if err != nil {
-		return ErrArchive
-	}
-	sort.Strings(names)
-	rows, err := database.QueryContext(ctx, "SELECT version,checksum FROM schema_migrations ORDER BY version")
-	if err != nil {
-		return ErrArchive
-	}
-	defer rows.Close()
-	index := 0
-	for rows.Next() {
-		var version, checksum string
-		if err := rows.Scan(&version, &checksum); err != nil || index >= len(names) || version != names[index] {
-			return ErrArchive
-		}
-		data, err := fs.ReadFile(migrations.Files, version)
-		if err != nil {
-			return ErrArchive
-		}
-		digest := sha256.Sum256(data)
-		if checksum != hex.EncodeToString(digest[:]) {
-			return ErrArchive
-		}
-		index++
-	}
-	if err := rows.Err(); err != nil || index == 0 {
-		return ErrArchive
+	// Archives from before v1.6.0 fail here with db.ErrPredatesBaseline.
+	if err := db.ValidateMigrationPrefix(ctx, database, migrations.Files); err != nil {
+		return errors.Join(err, ErrArchive)
 	}
 	return nil
 }

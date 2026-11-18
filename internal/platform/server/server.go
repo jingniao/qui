@@ -74,6 +74,7 @@ type Server struct {
 	deployments         *deployment.Repository
 	relayCleanup        *deployment.RelayCleanupDeployer
 	tunnelPublications  *proxy.Service
+	agentReleases       *deployment.AgentReleases
 	tunnelFinalizeWake  chan struct{}
 	readPool            *sql.DB
 	retentionWake       chan struct{}
@@ -269,7 +270,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}
 	authHandler := &auth.Handler{Service: authService, Secure: !c.Development, Logger: logger, TrustedProxies: trustedProxies}
 	authHandler.Register(mux)
-	(&system.ReleaseHandler{Repository: systemRepository, Auth: authHandler, Keys: releaseKeys, ActorName: func(ctx context.Context) string { return auth.Actor(ctx).Username }}).Register(mux)
+	(&system.ReleaseHandler{Repository: systemRepository, Auth: authHandler}).Register(mux)
 	(&deployment.CoreUpdateHandler{Repository: deployments, Audit: systemRepository, Auth: authHandler}).Register(mux)
 	(&deployment.AgentUpdateHandler{Repository: deployments, Catalogue: systemRepository, Auth: authHandler, Keys: releaseKeys}).Register(mux)
 	agentCatalogueDir := filepath.Join(filepath.Dir(c.Database), "releases", "agent-catalogue")
@@ -278,6 +279,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		Store:     systemRepository,
 		Keys:      c.ReleaseKeys,
 	}
+	s.agentReleases = agentReleases
 	(&deployment.AgentReleaseHandler{Releases: agentReleases, Auth: authHandler, Audit: systemRepository}).Register(mux)
 	mux.Handle("GET /agent-catalogue/", deployment.CatalogueHandler(agentCatalogueDir))
 	s.systemHandler = &system.Handler{Repository: systemRepository, Backups: s.backupService, PanelUpdate: &system.PanelUpdateService{CurrentVersion: Version}, BackupChanged: func() {
@@ -318,23 +320,8 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	nodeHandler.Register(mux)
 	nodeHandler.RegisterGroups(mux)
 	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates}, Nodes: nodeRepository, EntryGroups: nodeRepository}
-	if err := proxyService.Repository.ReconcileCanvasTunnels(context.Background()); err != nil {
-		return nil, err
-	}
-	if err := proxyService.Repository.ReconcileCanvasForwards(context.Background()); err != nil {
-		return nil, err
-	}
-	if !existing {
-		if err := proxyService.ReconcileRelayCleanup(context.Background()); err != nil {
-			return nil, err
-		}
-	}
 	proxyService.RelayCleanupRequested = s.relayCleanup.Reconcile
 	nodeRepository.RelayDeletion = proxyService
-	identityStore := &importer.Store{Database: database, Vault: configurationVault}
-	if err := identityStore.ReconcileImportedIdentities(context.Background(), reconcileImportReferences); err != nil {
-		return nil, err
-	}
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
 	s.tunnelPublications = proxyService
 	s.tunnelFinalizeWake = make(chan struct{}, 1)
@@ -354,7 +341,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		},
 	}
 	proxyService.Policies = policyService
-	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: database, Connections: s.connectionStore}, Nodes: nodeRepository, Deployments: deployments, Proxies: proxyService.Repository, Settings: systemRepository}, Auth: authHandler}).Register(mux)
+	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: database, Connections: s.connectionStore}, Nodes: nodeRepository, Deployments: deployments, Proxies: proxyService.Repository, Settings: systemRepository}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
 	s.sourceRefresher = &policy.SourceRefresher{Repository: policyService.Repository, Fetcher: importer.Fetcher{Timeout: 15 * time.Second}, Vault: configurationVault}
 	(&policy.Handler{Service: policyService, Refresher: s.sourceRefresher, Auth: authHandler, Audit: systemRepository}).Register(mux)
@@ -613,10 +600,9 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 			return err
 		}
 	}
-	// A prepared restore is read-only until it takes ownership. Run the
-	// one-time cleanup only after that handoff and before starting workers.
-	if err := s.tunnelPublications.ReconcileRelayCleanup(ctx); err != nil {
-		return err
+	// Only the newest imported Agent release is kept (v1.6.1).
+	if err := s.agentReleases.Prune(ctx); err != nil {
+		s.Logger.Warn("agent release prune failed", "error", err)
 	}
 	if err := s.tunnelPublications.ReconcileTunnelPublications(ctx, true); err != nil {
 		s.Logger.Error("startup tunnel publication finalization failed", "error", err)

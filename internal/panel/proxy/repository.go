@@ -22,10 +22,6 @@ type Repository struct {
 	// Certificates is the stored certificate library an acme inbound reads its PEM
 	// pair from; nil on a repository that never reads such an inbound.
 	Certificates CertificateStore
-	// archiveBeforeGostMaterial marks a database read by the backup validation
-	// that has not applied 0128_gost_tunnels.sql: its tunnels have no sealed
-	// credential column. Live repositories never set it.
-	archiveBeforeGostMaterial bool
 }
 
 func timestamp() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z") }

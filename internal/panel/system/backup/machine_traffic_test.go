@@ -109,31 +109,3 @@ func TestMachineTrafficValidationRejectsMalformedRows(t *testing.T) {
 		}
 	}
 }
-
-// TestMachineTrafficValidationAcceptsPre0126 keeps older archives restorable.
-func TestMachineTrafficValidationAcceptsPre0126(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	source, _, _ := sourceFixture(t)
-	for _, statement := range []string{
-		"DROP TABLE node_machine_traffic_settings",
-		"DROP TABLE node_machine_traffic_daily",
-		"DROP TABLE node_machine_traffic_cursors",
-		"DELETE FROM schema_migrations WHERE version='0126_node_machine_traffic.sql'",
-	} {
-		if _, err := source.Database.Exec(statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := validateMachineTraffic(ctx, source.Database); err != nil {
-		t.Fatalf("a pre-0126 archive was rejected: %v", err)
-	}
-	// Tables without their migration, or a migration without all three tables,
-	// are an archive this build did not write.
-	if _, err := source.Database.Exec("CREATE TABLE node_machine_traffic_daily(node_id TEXT)"); err != nil {
-		t.Fatal(err)
-	}
-	if validateMachineTraffic(ctx, source.Database) == nil {
-		t.Fatal("a partial 0126 schema was accepted")
-	}
-}

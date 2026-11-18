@@ -250,7 +250,7 @@ const addressHelperA = await import('data:text/javascript;base64,' + Buffer.from
 ).outputText).toString('base64'));
 const dashboardA = vueSubset('modules/dashboard/pages/DashboardPage.vue', [
   'isNodeOnline', 'hasPublishedConfig', 'isNodeCoreUnhealthy', 'userAttentionRank', 'nodeStatusLabel', 'isUserActive', 'getUserExpiryLabel', 'getUserExpiryBadgeClass',
-  'activeUsersCount', 'warningUsersCount', 'adminOnlineNodesCount', 'healthyNodesCount', 'latestFailedRevisions', 'pendingIssues', 'formatGiB'
+  'activeUsersCount', 'warningUsersCount', 'adminOnlineNodesCount', 'latestFailedRevisions', 'pendingIssues', 'formatGiB'
 ], {
   connectAddress: addressHelperA.connectAddress,
   allUsers: { value: [userA, disabledA, expiredA, quotaA, soonA, { ...disabledA, usedTraffic: 100 }] },
@@ -270,7 +270,6 @@ assert.equal(dashboardA.nodeStatusLabel(pendingA), '待登记');
 assert.equal(dashboardA.isNodeOnline({ ...onlineA, status: 'degraded' }), true);
 for (const overrides of [{ enabled: false }, { deletedAt: '2026-01-01' }, { maintenance: true }, { status: 'offline' }]) assert.equal(dashboardA.isNodeOnline({ ...onlineA, ...overrides }), false);
 assert.equal(dashboardA.adminOnlineNodesCount.value, 2);
-assert.equal(dashboardA.healthyNodesCount.value, 1, 'missing health is unknown');
 assert.ok(dashboardA.pendingIssues.value.some(i => i.title === '节点待登记: 新服务器'));
 assert.deepEqual(dashboardA.latestFailedRevisions(revisionsA).map(r => r.id), [10, 8, 7]);
 const failedA = dashboardA.pendingIssues.value.filter(i => i.title.startsWith('配置发布失败'));
@@ -356,7 +355,7 @@ assert.match(versionsA.upgradeUnavailableReason(pendingA), /登记/);
 assert.match(versionsA.upgradeUnavailableReason({ ...onlineA, agentVersion: '1.0.9', lastHeartbeat: '' }), /心跳/);
 assert.equal((read(versionPathA).match(/v-if="(isOwner && )?!upgradeUnavailableReason\(node\)"/g) || []).length, 4, 'table and card upgrade actions are hidden before enrollment instead of disabled');
 const tasksA = read('modules/system/pages/TaskRecordPage.vue');
-assert.ok(tasksA.indexOf('Agent 签名发布目录') > tasksA.indexOf('共 <span'), 'release directory follows the header and filters');
+assert.ok(!tasksA.includes('Agent 签名发布目录') && !tasksA.includes('登记签名'), 'task records no longer list or register signed Agent releases');
 assert.match(read('layouts/MainLayout.vue'), /pt-16 lg:pt-0/);
 assert.match(read('layouts/MainLayout.vue'), /pt-16 lg:pt-8/);
 console.log('PASS walkthrough A shell/settings/versions/tasks: mobile clearance, fixed core target, restart wording, enrollment guard, K2 architecture and header order');
@@ -414,8 +413,6 @@ console.log('PASS review 4: header action updated to new config, save and rule e
 const apiReview3 = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(read('app/apiClient.ts'), {
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext }
 }).outputText).toString('base64'));
-assert.equal(apiReview3.translateAPIMessage('matched scope, address, port, network and active time window'), '已匹配生效范围、目标地址、端口、网络与生效时间');
-assert.equal(apiReview3.translateAPIMessage('no matching policy; inbound default rule'), '未命中启用的策略，使用入站默认规则');
 const matchContractReview3 = readFileSync(new URL('../../pkg/contracts/policy/match.go', import.meta.url), 'utf8');
 for (const [, message] of matchContractReview3.matchAll(/errors.New\("([^"]+)"\)/g)) {
   assert.notEqual(apiReview3.translateAPIMessage(message), message, 'translate shared validation: ' + message);
@@ -423,12 +420,11 @@ for (const [, message] of matchContractReview3.matchAll(/errors.New\("([^"]+)"\)
 for (const message of ['future backend reason', 'unknown validation message', '', 'toString']) assert.equal(apiReview3.translateAPIMessage(message), message);
 const originalFetchReview3 = globalThis.fetch;
 try {
-  for (const [message, expected] of [['invalid domain', '域名无效'], ['invalid target IP', '目标 IP 无效'], ['future validation', 'future validation']]) {
+  for (const [message, expected] of [['invalid domain', '域名无效'], ['future validation', 'future validation']]) {
     globalThis.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error: { code: 'invalid_request', message } }) });
-    await assert.rejects(apiReview3.request('/policies/simulate', 'POST', {}), error => error.message === expected);
+    await assert.rejects(apiReview3.request('/policies', 'POST', {}), error => error.message === expected);
   }
 } finally { globalThis.fetch = originalFetchReview3; }
-assert.match(read('modules/routing/pages/PolicySimulatorPage.vue'), /translateAPIMessage\(nodeDecision.reason/);
 console.log('PASS third round 1: Chinese policy reasons/validation, API error path and unknown text fallback');
 
 const detailReview3 = read('modules/nodes/pages/NodeDetailPage.vue');
@@ -489,7 +485,7 @@ assert.doesNotMatch(settingsReview3, /watch\(\(\) => props.node\s*,/);
 console.log('PASS third round 2: visible-only refresh, immediate resume, shared reads, unmount cleanup and independent settings edits');
 
 const dashboardReview3 = read('modules/dashboard/pages/DashboardPage.vue');
-const dashboardStatusReview3 = dashboardReview3.slice(dashboardReview3.indexOf('function isNodeOnline('), dashboardReview3.indexOf('const healthyNodesCount'));
+const dashboardStatusReview3 = dashboardReview3.slice(dashboardReview3.indexOf('function isNodeOnline('), dashboardReview3.indexOf('function nodeStatusLabel('));
 const dashboardCodeReview3 = ts.transpileModule(dashboardStatusReview3 + '\nreturn { offlineNodesCount, pendingNodesCount, nodeStatusSubtitle };', {
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None }
 }).outputText;

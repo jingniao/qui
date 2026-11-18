@@ -42,6 +42,26 @@ func (s *fakeAgentReleaseStore) SaveRelease(ctx context.Context, signed release.
 	return entry, nil
 }
 
+func (s *fakeAgentReleaseStore) PruneAgentReleases(ctx context.Context) ([]release.Manifest, error) {
+	newest := map[string]int64{}
+	for _, entry := range s.saved {
+		m := entry.Signed.Manifest
+		if key := m.OS + "/" + m.Architecture; m.Sequence > newest[key] {
+			newest[key] = m.Sequence
+		}
+	}
+	var kept []release.CatalogueEntry
+	var manifests []release.Manifest
+	for _, entry := range s.saved {
+		if m := entry.Signed.Manifest; m.Sequence == newest[m.OS+"/"+m.Architecture] {
+			kept = append(kept, entry)
+			manifests = append(manifests, m)
+		}
+	}
+	s.saved = kept
+	return manifests, nil
+}
+
 func generateSigningKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -412,5 +432,56 @@ func TestImportFailureIsFixedCode(t *testing.T) {
 	}
 	if strings.Contains(body, "upstream secret text") {
 		t.Fatalf("response leaked upstream text: %s", body)
+	}
+}
+
+// Only the newest release is imported, and importing it removes the files of the
+// release it replaces: the panel keeps no older Agent versions.
+func TestImportKeepsOnlyTheNewestRelease(t *testing.T) {
+	pub, priv := generateSigningKey(t)
+	oldBin, newBin := []byte("old agent"), []byte("new agent")
+	oldManifest, _ := createSignedAgentAsset(t, "1.5.0", "amd64", 1005000, priv, oldBin)
+	newManifest, _ := createSignedAgentAsset(t, "1.6.0", "amd64", 1006000, priv, newBin)
+	list := func(versions ...string) string {
+		var parts []string
+		for _, v := range versions {
+			parts = append(parts, fmt.Sprintf(`{"tag_name":"v%s","assets":[{"name":"proxy-agent-%s-linux-amd64.bin","browser_download_url":"/download/%s.bin"},{"name":"proxy-agent-%s-linux-amd64.manifest.json","browser_download_url":"/download/%s.json"}]}`, v, v, v, v, v))
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+	fake := &fakeGitHub{lists: map[string]string{"jingniao/qui": list("1.5.0")}, files: map[string]string{"/download/1.5.0.bin": string(oldBin), "/download/1.5.0.json": oldManifest, "/download/1.6.0.bin": string(newBin), "/download/1.6.0.json": newManifest}}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	dir := t.TempDir()
+	store := &fakeAgentReleaseStore{}
+	svc := &AgentReleases{Directory: dir, Store: store, Keys: []release.KeyPin{{PublicKey: base64.StdEncoding.EncodeToString(pub), Components: []string{"proxy-agent"}}}, Client: server.Client(), API: server.URL + "/repos/jingniao/qui"}
+	ctx := context.Background()
+	if _, err := svc.Import(ctx, "1.5.0", "owner", "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	fake.lists["jingniao/qui"] = list("1.6.0", "1.5.0")
+	if _, err := svc.Import(ctx, "1.5.0", "owner", "127.0.0.1"); !errors.Is(err, ErrAgentReleaseImport) {
+		t.Fatalf("an older release was importable: %v", err)
+	}
+	if _, err := svc.Import(ctx, "1.6.0", "owner", "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	oldSum, newSum := sha256.Sum256(oldBin), sha256.Sum256(newBin)
+	for path, want := range map[string]bool{
+		filepath.Join(dir, "proxy-agent", "linux", "amd64", "1005000"):        false,
+		filepath.Join(dir, "artifacts", hex.EncodeToString(oldSum[:])+".bin"): false,
+		filepath.Join(dir, "proxy-agent", "linux", "amd64", "1006000"):        true,
+		filepath.Join(dir, "artifacts", hex.EncodeToString(newSum[:])+".bin"): true,
+	} {
+		if _, err := os.Stat(path); (err == nil) != want {
+			t.Fatalf("%s present=%v, want %v", path, err == nil, want)
+		}
+	}
+	if len(store.saved) != 1 || store.saved[0].Signed.Manifest.Version != "1.6.0" {
+		t.Fatalf("catalogue kept %+v", store.saved)
+	}
+	versions, err := svc.List(ctx, true)
+	if err != nil || len(versions) != 1 || versions[0].Version != "1.6.0" {
+		t.Fatalf("list offered %+v %v", versions, err)
 	}
 }

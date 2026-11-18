@@ -6,19 +6,6 @@ import (
 )
 
 func (r *Repository) preserveTrafficCompletionRestoreTx(ctx context.Context, tx *sql.Tx) error {
-	var column, applied int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('traffic_batches','restore_source') WHERE name='accounting_completed_at'").Scan(&column); err != nil {
-		return err
-	}
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM restore_source.schema_migrations WHERE version='0059_traffic_accounting_completion.sql'").Scan(&applied); err != nil {
-		return err
-	}
-	if column == 0 && applied == 0 {
-		return nil
-	}
-	if column != 1 || applied != 1 {
-		return ErrInvalid
-	}
 	rows, err := tx.QueryContext(ctx, "SELECT node_id,batch_id,CASE WHEN typeof(digest)='text' AND length(digest)=64 THEN digest ELSE '' END,CASE WHEN typeof(received_at)='text' AND length(received_at) BETWEEN 1 AND 64 THEN received_at ELSE '' END,CASE WHEN typeof(accounting_completed_at)='text' AND length(accounting_completed_at)<=64 THEN accounting_completed_at ELSE NULL END FROM restore_source.traffic_batches WHERE accounting_completed_at<>''")
 	if err != nil {
 		return err

@@ -27,19 +27,27 @@ function savingEditor() {
     renewCurrency: 'USD', renewPrice: '20', renewCycle: '/月',
     enabled: true, allowSubscription: false, maintenance: true, tags: ['A tag'],
   });
+  const traffic = { method: 'sum', allowanceBytes: null, resetDay: 1 };
   const state = {
     editForm, editTarget: ref(nodeA), editDrawer: ref(true), editingSaving: ref(false),
-    fetchingLatest: ref(false), fetchError: ref(''), tagInput: ref(''), tagError: ref(''),
+    fetchingLatest: ref(false), fetchError: ref(''),
+    machineForm: ref({ ...traffic }), connectionForm: reactive({ connectHost: '', portRange: '' }),
+    fields: ref({ connectionSettings: () => ({ portRangeStart: null, portRangeEnd: null }) }),
     nodeAPI: {
       async get(id) { requests.push({ method: 'get', id }); await pending; return id === 'A' ? nodeA : nodeB; },
       async save(input) { requests.push({ method: 'save', id: input.id, input: structuredClone(input) }); },
+      async machineTrafficSettings(id) { requests.push({ method: 'machineTraffic', id }); await pending; return { ...traffic, interfaceName: '' }; },
+      async saveMachineTrafficSettings(id, input) { requests.push({ method: 'saveMachineTraffic', id, input }); return input; },
     },
     async loadNodeMeta(id) { requests.push({ method: 'loadMeta', id }); await pending; return { region: id, extra: `${id} metadata` }; },
     async saveNodeMeta(id, input) { requests.push({ method: 'saveMeta', id, input }); },
     getNodeMeta: () => ({}), parseRenewPrice: () => ({ currency: 'CNY', price: '', cycle: '/年' }),
+    formFromSettings: settings => ({ ...settings }), payloadFromForm: form => ({ method: form.method, allowanceBytes: form.allowanceBytes, resetDay: form.resetDay }),
+    addressChanges: (before, after) => before.connectHost === after.connectHost ? {} : { connectHost: after.connectHost },
     mergeLatestEditForm: () => {}, showToast: () => {}, emit: () => {}, APIError: class extends Error {},
   };
-  const editor = new Function(...Object.keys(state), `let loadToken = 0;\n${code}`)(...Object.values(state));
+  const prelude = `let loadToken = 0;\nlet machineBaseline = ${JSON.stringify(traffic)};\nlet connectionBaseline = { connectHost: '', portRange: '' };`;
+  const editor = new Function(...Object.keys(state), `${prelude}\n${code}`)(...Object.values(state));
   return { ...state, ...editor, requests, resume, nodeB };
 }
 
@@ -53,7 +61,10 @@ test('saving A ignores opening B and sends every request to A', async () => {
   assert.equal(editor.requests.find(request => request.method === 'save').input.name, 'Edited A');
 });
 
-test('saving uses the initial target and a deep form snapshot, omitting network settings', async () => {
+// The dialog has no enable or subscription switches (AGENTS.md §11.1): both are
+// taken from the node read at save time, and unchanged address, port range and
+// traffic settings are not resubmitted.
+test('saving uses the initial target, a deep form snapshot and the latest node switches', async () => {
   const editor = savingEditor();
   const saving = editor.saveEdit();
   editor.editTarget.value = editor.nodeB;
@@ -64,8 +75,9 @@ test('saving uses the initial target and a deep form snapshot, omitting network 
   await saving;
   assert.deepEqual(editor.requests.map(({ id }) => id), ['A', 'A', 'A', 'A']);
   assert.deepEqual(editor.requests.find(request => request.method === 'save').input, {
-    id: 'A', name: 'Edited A', enabled: true, allowSubscription: false, maintenance: true,
+    id: 'A', name: 'Edited A', enabled: true, allowSubscription: true, maintenance: true,
   });
+  assert.equal(editor.requests.some(request => request.method === 'saveMachineTraffic'), false);
   assert.deepEqual(editor.requests.find(request => request.method === 'saveMeta').input, {
     extra: 'A metadata', region: 'JP', remark: 'A note', renewDate: '2027-01-01',
     renewCurrency: 'USD', renewPrice: '20', renewCycle: '/月', tags: ['A tag'],

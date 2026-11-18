@@ -272,7 +272,7 @@ func checkDatabaseFile(ctx context.Context, path string) error {
 		return nil
 	case db.VerdictNewer:
 		return exitDatabaseNewer
-	case db.VerdictForeign:
+	case db.VerdictForeign, db.VerdictOutdated:
 		return exitDatabaseForeign
 	default:
 		return exitDatabaseDamaged

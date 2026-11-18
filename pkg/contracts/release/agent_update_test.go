@@ -28,9 +28,6 @@ func TestAgentCommandsStaySeparateFromCoreCommandsAndBindResults(t *testing.T) {
 	if parsed, err := DecodeAgentUpdateRequest(data); err != nil || parsed != r {
 		t.Fatal(parsed, err)
 	}
-	if _, err := DecodeUpdateRequest(data); err == nil {
-		t.Fatal("old core decoder accepted Agent executable")
-	}
 	core := r
 	core.Release.Manifest.Component = "xray"
 	coreData, _ := json.Marshal(core)

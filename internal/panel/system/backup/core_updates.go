@@ -11,125 +11,14 @@ import (
 )
 
 func validateCoreUpdates(ctx context.Context, database *sql.DB) error {
-	var present int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('release_catalogue','node_update_capabilities','core_update_tasks','core_update_attempts')").Scan(&present); err != nil {
-		return ErrArchive
-	}
-	if present == 0 {
-		var applied int
-		if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0035_core_updates.sql'").Scan(&applied); err != nil || applied != 0 {
-			return ErrArchive
-		}
-		return nil
-	}
-	// A pre-0107 archive still carries the attempt table; migrations run after
-	// the archive has been inspected, so both shapes must validate.
-	if present == 4 {
-		return validateLegacyCoreUpdates(ctx, database)
-	}
-	if present != 3 {
-		return ErrArchive
-	}
-	return validateDirectCoreUpdates(ctx, database)
-}
-
-// validateLegacyCoreUpdates inspects a pre-0107 archive: the signed catalogue
-// binding and the attempt table are still present.
-func validateLegacyCoreUpdates(ctx context.Context, database *sql.DB) error {
-	releases, err := legacyReleases(ctx, database)
+	releases, err := catalogueReleases(ctx, database)
 	if err != nil {
 		return err
 	}
-	var bad int
-	for _, query := range []string{
-		`SELECT count(*) FROM core_update_tasks t JOIN core_update_attempts a ON a.command_id=t.command_id WHERE (t.result_json IS NULL)<>(a.result_json IS NULL) OR t.result_json<>a.result_json`,
-		`SELECT count(*) FROM core_update_tasks t WHERE NOT EXISTS(SELECT 1 FROM deployment_targets d WHERE d.node_id=t.node_id AND d.revision=t.baseline_revision AND d.status='success')`,
-		`SELECT count(*) FROM core_update_tasks t WHERE generation<>(SELECT count(*) FROM core_update_attempts a WHERE a.task_id=t.id) OR NOT EXISTS(SELECT 1 FROM core_update_attempts a WHERE a.command_id=t.command_id AND a.task_id=t.id AND a.generation=t.generation) OR NOT EXISTS(SELECT 1 FROM core_update_attempts a WHERE a.command_id=t.original_command_id AND a.task_id=t.id AND a.operation='install' AND a.generation=1)`,
-	} {
-		if err := database.QueryRowContext(ctx, query).Scan(&bad); err != nil || bad != 0 {
-			return ErrArchive
-		}
-	}
-	rows, err := database.QueryContext(ctx, "SELECT t.node_id,t.baseline_revision,t.release_id,a.command_id,a.operation,a.request_json,a.result_json,t.status,t.command_id,t.original_command_id,a.generation,t.generation FROM core_update_attempts a JOIN core_update_tasks t ON t.id=a.task_id")
-	if err != nil {
-		return ErrArchive
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var nodeID, entryID, commandID, operation, status, current, original string
-		var revision, generation, maxGeneration int64
-		var requestData, resultData []byte
-		if rows.Scan(&nodeID, &revision, &entryID, &commandID, &operation, &requestData, &resultData, &status, &current, &original, &generation, &maxGeneration) != nil {
-			return ErrArchive
-		}
-		request, err := release.DecodeUpdateRequest(requestData)
-		entry, ok := releases[entryID]
-		if err != nil || !ok || request.NodeID != nodeID || request.ID != commandID || request.Revision != revision || request.Operation != operation || request.Release.Manifest != entry.Manifest {
-			return ErrArchive
-		}
-		if generation < 1 || generation > maxGeneration || operation == "install" && (generation != 1 || commandID != original) || operation == "recover" && (generation == 1 || request.OriginalID != original) {
-			return ErrArchive
-		}
-		if len(resultData) > 0 {
-			result, err := release.DecodeUpdateResult(resultData)
-			if err != nil || result.ID != commandID || result.NodeID != nodeID || result.Revision != revision || result.TargetDigest != entry.Manifest.SHA256 || result.Status == "success" && (result.InstalledVersion != request.Release.Manifest.Version || result.InstalledSequence != request.Release.Manifest.Sequence) || commandID == current && !coreResultMatches(status, result.Status) {
-				return ErrArchive
-			}
-		} else if commandID == current && status != "queued" && status != "running" {
-			return ErrArchive
-		}
-	}
-	return rows.Err()
-}
-
-// coreResultMatches reports whether a stored Agent result may belong to a task
-// status. A task the Owner cleared after the node reported is finished: its
-// result was stored first and keeps the terminal status the node sent, so it no
-// longer equals 'cleared'. Both decoders above already refuse a result that is
-// not terminal. Every other task status stores exactly its own result status.
-func coreResultMatches(status, resultStatus string) bool {
-	return status == "cleared" || status == resultStatus
-}
-
-func legacyReleases(ctx context.Context, database *sql.DB) (map[string]release.Signed, error) {
-	rows, err := database.QueryContext(ctx, "SELECT id,component,operating_system,architecture,release_sequence,version,digest,signed_json,signing_public_key,created_at FROM release_catalogue")
-	if err != nil {
-		return nil, ErrArchive
-	}
-	defer rows.Close()
-	releases := map[string]release.Signed{}
-	for rows.Next() {
-		var id, component, platform, arch, version, digest, pin, created string
-		var sequence int64
-		var data []byte
-		if rows.Scan(&id, &component, &platform, &arch, &sequence, &version, &digest, &data, &pin, &created) != nil {
-			return nil, ErrArchive
-		}
-		signed, err := release.Decode(data)
-		key, keyErr := base64.StdEncoding.DecodeString(pin)
-		at, timeErr := time.Parse(time.RFC3339Nano, created)
-		if err != nil || keyErr != nil || len(key) != ed25519.PublicKeySize || timeErr != nil || signed.Manifest.Component != component || signed.Manifest.OS != platform || signed.Manifest.Architecture != arch || signed.Manifest.Sequence != sequence || signed.Manifest.Version != version || signed.Manifest.SHA256 != digest || signed.Verify(release.Policy{Component: component, OS: platform, Architecture: arch, Now: at, Keys: map[string]release.TrustedKey{signed.KeyID: {PublicKey: key, Components: []string{component}}}}) != nil {
-			return nil, ErrArchive
-		}
-		releases[id] = signed
-	}
-	return releases, rows.Err()
-}
-
-func validateDirectCoreUpdates(ctx context.Context, database *sql.DB) error {
-	releases, err := legacyReleases(ctx, database)
-	if err != nil {
-		return err
-	}
-	// A GOST task can only exist in a schema that widened the component CHECK
-	// (0127) and it can only use the reviewed pin; an older archive carries none of
-	// these. The node's live Hello flag is not re-checked against the row: it is
-	// cleared by a restore while an unconfirmed task survives, so requiring it
-	// would make such an archive unvalidatable.
-	var gostSchema int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0127_gost_core.sql'").Scan(&gostSchema); err != nil {
-		return ErrArchive
-	}
+	// A GOST task can only use the reviewed pin. The node's live Hello flag is
+	// not re-checked against the row: it is cleared by a restore while an
+	// unconfirmed task survives, so requiring it would make such an archive
+	// unvalidatable.
 	rows, err := database.QueryContext(ctx, "SELECT id,node_id,baseline_revision,release_id,component,version,url,sha256,sequence,status,command_id,result_json FROM core_update_tasks")
 	if err != nil {
 		return ErrArchive
@@ -146,7 +35,7 @@ func validateDirectCoreUpdates(ctx context.Context, database *sql.DB) error {
 		if !release.CoreComponent(component) || sequence < 1 || revision < 1 || !release.ValidUpdateID(commandID) {
 			return ErrArchive
 		}
-		if component == "gost" && (gostSchema == 0 || !release.CorePinnedTarget(component, version, digest)) {
+		if component == "gost" && !release.CorePinnedTarget(component, version, digest) {
 			return ErrArchive
 		}
 		if component == "gost" {
@@ -183,4 +72,38 @@ func validateDirectCoreUpdates(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return rows.Err()
+}
+
+// coreResultMatches reports whether a stored Agent result may belong to a task
+// status. A task the Owner cleared after the node reported is finished: its
+// result was stored first and keeps the terminal status the node sent, so it no
+// longer equals 'cleared'. Both decoders above already refuse a result that is
+// not terminal. Every other task status stores exactly its own result status.
+func coreResultMatches(status, resultStatus string) bool {
+	return status == "cleared" || status == resultStatus
+}
+
+func catalogueReleases(ctx context.Context, database *sql.DB) (map[string]release.Signed, error) {
+	rows, err := database.QueryContext(ctx, "SELECT id,component,operating_system,architecture,release_sequence,version,digest,signed_json,signing_public_key,created_at FROM release_catalogue")
+	if err != nil {
+		return nil, ErrArchive
+	}
+	defer rows.Close()
+	releases := map[string]release.Signed{}
+	for rows.Next() {
+		var id, component, platform, arch, version, digest, pin, created string
+		var sequence int64
+		var data []byte
+		if rows.Scan(&id, &component, &platform, &arch, &sequence, &version, &digest, &data, &pin, &created) != nil {
+			return nil, ErrArchive
+		}
+		signed, err := release.Decode(data)
+		key, keyErr := base64.StdEncoding.DecodeString(pin)
+		at, timeErr := time.Parse(time.RFC3339Nano, created)
+		if err != nil || keyErr != nil || len(key) != ed25519.PublicKeySize || timeErr != nil || signed.Manifest.Component != component || signed.Manifest.OS != platform || signed.Manifest.Architecture != arch || signed.Manifest.Sequence != sequence || signed.Manifest.Version != version || signed.Manifest.SHA256 != digest || signed.Verify(release.Policy{Component: component, OS: platform, Architecture: arch, Now: at, Keys: map[string]release.TrustedKey{signed.KeyID: {PublicKey: key, Components: []string{component}}}}) != nil {
+			return nil, ErrArchive
+		}
+		releases[id] = signed
+	}
+	return releases, rows.Err()
 }

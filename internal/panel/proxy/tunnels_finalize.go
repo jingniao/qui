@@ -25,10 +25,9 @@ type tunnelPublicationObject struct {
 	Version int64
 }
 type tunnelPublicationInbound struct {
-	ID     string
-	Owner  PortOwner
-	Input  InboundInput
-	Legacy bool
+	ID    string
+	Owner PortOwner
+	Input InboundInput
 }
 type tunnelPublicationRecord struct {
 	Tunnels  []tunnelPublicationObject
@@ -53,10 +52,10 @@ func (r *Repository) encodeTunnelPublication(p tunnelPublication) ([]byte, error
 		envelope.Owners = append(envelope.Owners, PortOwner{Kind: "rule", ID: rule.ID})
 	}
 	for _, in := range p.previous {
-		record.Previous = append(record.Previous, tunnelPublicationInbound{in.id, in.owner, in.input, in.legacy})
+		record.Previous = append(record.Previous, tunnelPublicationInbound{in.id, in.owner, in.input})
 	}
 	for _, in := range p.desired {
-		record.Desired = append(record.Desired, tunnelPublicationInbound{in.id, in.owner, in.input, in.legacy})
+		record.Desired = append(record.Desired, tunnelPublicationInbound{in.id, in.owner, in.input})
 	}
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -91,10 +90,10 @@ func (r *Repository) decodeTunnelPublication(raw []byte) (tunnelPublication, err
 		p.rules = append(p.rules, TunnelRule{ID: rule.ID, Status: rule.Status, DraftVersion: rule.Version})
 	}
 	for _, in := range record.Previous {
-		p.previous = append(p.previous, managedInbound{id: in.ID, owner: in.Owner, input: in.Input, legacy: in.Legacy})
+		p.previous = append(p.previous, managedInbound{id: in.ID, owner: in.Owner, input: in.Input})
 	}
 	for _, in := range record.Desired {
-		p.desired = append(p.desired, managedInbound{id: in.ID, owner: in.Owner, input: in.Input, legacy: in.Legacy})
+		p.desired = append(p.desired, managedInbound{id: in.ID, owner: in.Owner, input: in.Input})
 	}
 	return p, nil
 }

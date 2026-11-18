@@ -202,7 +202,7 @@ export interface CanvasRemoveInput { updatedAt: string; }
 export interface CanvasRemoveResult { schemeId: string; removed: true; pendingNodes: PendingCleanupNode[]; }
 
 export interface CanvasTunnelSchemeRef { id: string; name: string; }
-export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; candidateTunnels?: string[]; }
+export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; }
 export interface CanvasTunnelInput { name: string; source: string; target: string; type: CanvasConnectionKind | LegacyCanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol | LegacyCanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; updatedAt?: string; }
 export interface CanvasTunnelCredentials { generation: number; serverName: string; notAfter: string; fingerprint: string; }
 export interface CanvasTunnel extends CanvasTunnelInput { id: string; createdAt: string; updatedAt: string; schemes: CanvasTunnelSchemeRef[]; objects: CanvasTunnelObject[]; publishStatus: 'draft' | 'modified' | 'published'; credentials?: CanvasTunnelCredentials | null; }
@@ -213,12 +213,7 @@ export const canvasTunnelAPI = {
  list: () => request<{ items: CanvasTunnel[]; total: number }>('/canvas-tunnels'),
  create: (value: CanvasTunnelInput) => request<CanvasTunnel>('/canvas-tunnels', 'POST', value),
  update: (id: string, value: CanvasTunnelInput & { updatedAt: string }) => request<CanvasTunnel>(`/canvas-tunnels/${encodeURIComponent(id)}`, 'PUT', value),
- delete: (id: string) => request<void>(`/canvas-tunnels/${encodeURIComponent(id)}`, 'DELETE'),
- legacyObjects: () => request<{ items: CanvasTunnelObject[]; total: number }>('/canvas-tunnels/legacy-objects'),
- adopt: (id: string, objects: Pick<CanvasTunnelObject, 'kind' | 'id'>[]) => request<void>(`/canvas-tunnels/${encodeURIComponent(id)}/adopt`, 'POST', { objects }),
- // G3: replace the credential set of a GOST tunnel; the next publication deploys
- // the exit node first and the entry node second.
- rotateCredentials: (id: string, updatedAt: string) => request<CanvasTunnel>(`/canvas-tunnels/${encodeURIComponent(id)}/rotate-credentials`, 'POST', { updatedAt })
+ delete: (id: string) => request<void>(`/canvas-tunnels/${encodeURIComponent(id)}`, 'DELETE')
 };
 
 export const canvasAPI = {

@@ -11,19 +11,6 @@ import (
 )
 
 func validateTCPProbes(ctx context.Context, db *sql.DB) error {
-	var applied int
-	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0119_tcp_probes.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	for _, table := range []string{"probe_targets", "node_tcp_probes"} {
-		var present int
-		if db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&present) != nil || present != applied {
-			return ErrArchive
-		}
-	}
-	if applied == 0 {
-		return nil
-	}
 	rows, err := db.QueryContext(ctx, "SELECT id,label,host,port,allow_non_public FROM probe_targets")
 	if err != nil {
 		return ErrArchive
@@ -67,16 +54,8 @@ func validateTCPProbes(ctx context.Context, db *sql.DB) error {
 	if rows.Err() != nil {
 		return ErrArchive
 	}
-	var latencyApplied int
-	if db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0120_latency_samples.sql'").Scan(&latencyApplied) != nil {
-		return ErrArchive
-	}
-	filter := ""
-	if latencyApplied != 0 {
-		filter = " WHERE source='manual'"
-	}
 	var count int
-	if db.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT count(*) AS n FROM node_tcp_probes"+filter+" GROUP BY node_id,target_id HAVING n>100)").Scan(&count) != nil || count != 0 {
+	if db.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT count(*) AS n FROM node_tcp_probes WHERE source='manual' GROUP BY node_id,target_id HAVING n>100)").Scan(&count) != nil || count != 0 {
 		return ErrArchive
 	}
 	return nil

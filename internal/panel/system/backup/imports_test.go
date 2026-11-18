@@ -53,21 +53,9 @@ func TestImportBackupVerifierAndInventory(t *testing.T) {
 		t.Fatal("corrupt imported payload accepted")
 	}
 }
-func TestImportBackupVerifierAcceptsPre0116(t *testing.T) {
-	t.Parallel()
-	s, _, _ := sourceFixture(t)
-	for _, q := range []string{"DROP TABLE user_source_grants", "DROP TABLE imported_proxies", "DROP TABLE subscription_sources", "ALTER TABLE canvas_schemes DROP COLUMN client_published_layout", "DELETE FROM schema_migrations WHERE version='0116_subscription_sources.sql'"} {
-		if _, err := s.Database.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := validateImports(context.Background(), s.Database, s.ConfigurationVault); err != nil {
-		t.Fatal(err)
-	}
-}
 
 // The stored result is validated: a payload this panel could not have written is
-// refused, and an archive taken before 0133 (no result columns) stays valid.
+// refused.
 func TestImportBackupVerifierValidatesResults(t *testing.T) {
 	t.Parallel()
 	s, _, _ := sourceFixture(t)
@@ -85,22 +73,6 @@ func TestImportBackupVerifierValidatesResults(t *testing.T) {
 	}
 	if err = validateImports(ctx, s.Database, s.ConfigurationVault); !errors.Is(err, ErrArchive) {
 		t.Fatalf("invalid result accepted: %v", err)
-	}
-	// A pre-0133 archive has neither column and must still verify.
-	for _, q := range []string{
-		"ALTER TABLE subscription_sources DROP COLUMN latest_result_json",
-		"ALTER TABLE subscription_sources DROP COLUMN last_success_at",
-		"DELETE FROM schema_migrations WHERE version='0133_subscription_source_results.sql'",
-	} {
-		if _, err := s.Database.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// 0134 postdates the archive as well, so the fixture drops its recovery
-	// objects too: a pre-0133 archive has neither them nor the new columns.
-	rewindIdentityRecovery(t, s.Database)
-	if err = validateImports(ctx, s.Database, s.ConfigurationVault); err != nil {
-		t.Fatalf("pre-0133 archive rejected: %v", err)
 	}
 }
 

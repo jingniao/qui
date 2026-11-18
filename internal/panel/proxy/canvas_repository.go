@@ -131,9 +131,6 @@ func (r *Repository) CanvasSchemes(ctx context.Context, page, size int) ([]Canva
 // the stored updated_at, so two canvases open on the same scheme cannot
 // overwrite each other silently.
 func (r *Repository) SaveCanvasScheme(ctx context.Context, schemeID string, input CanvasSchemeInput) (CanvasScheme, error) {
-	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
-		return CanvasScheme{}, err
-	}
 	input.Layout = input.Layout.normalized()
 	input.Layout.Connections = append([]CanvasConnection{}, input.Layout.Connections...)
 	data, err := json.Marshal(input.Layout)
@@ -198,9 +195,6 @@ func (r *Repository) SaveCanvasScheme(ctx context.Context, schemeID string, inpu
 // DeleteCanvasScheme removes the drawing only. Every proxy object a scheme may
 // describe stays exactly as it is.
 func (r *Repository) DeleteCanvasScheme(ctx context.Context, schemeID string) error {
-	if err := r.ReconcileCanvasTunnels(ctx); err != nil {
-		return err
-	}
 	result, err := r.Database.ExecContext(ctx, "DELETE FROM canvas_schemes WHERE id=?", schemeID)
 	if err != nil {
 		return err

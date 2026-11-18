@@ -15,16 +15,8 @@ func TestValidateCanvasEntryBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, q := range []string{"CREATE TABLE schema_migrations(version TEXT)", "CREATE TABLE inbounds(id TEXT)", "CREATE TABLE canvas_schemes(id TEXT)", "INSERT INTO inbounds VALUES('i')", "INSERT INTO canvas_schemes VALUES('s')"} {
-		if _, err := db.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
 	ctx := context.Background()
-	if err := validateCanvasEntryBindings(ctx, db); err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range []string{"INSERT INTO schema_migrations VALUES('0146_canvas_entry_bindings.sql')", "CREATE TABLE canvas_entry_bindings(mode TEXT,original_default_outbound TEXT,inbound_id TEXT,scheme_id TEXT,instance_id TEXT DEFAULT 'entry',state TEXT,applied_default_outbound TEXT DEFAULT '')"} {
+	for _, q := range []string{"CREATE TABLE inbounds(id TEXT)", "CREATE TABLE canvas_schemes(id TEXT)", "INSERT INTO inbounds VALUES('i')", "INSERT INTO canvas_schemes VALUES('s')", "CREATE TABLE canvas_entry_bindings(mode TEXT,original_default_outbound TEXT,inbound_id TEXT,scheme_id TEXT,instance_id TEXT DEFAULT 'entry',state TEXT,applied_default_outbound TEXT DEFAULT '')"} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +40,7 @@ func TestValidateCanvasEntryBindings(t *testing.T) {
 		if _, err := db.Exec("INSERT INTO canvas_entry_bindings(mode,original_default_outbound,inbound_id,scheme_id,state) VALUES(?,?,?,?,?)", tc.mode, tc.original, tc.inbound, tc.scheme, state); err != nil {
 			t.Fatal(err)
 		}
-		if err := validateCanvasEntryBindings(ctx, db); (err == nil) != tc.valid {
+		if err := validateCanvasEntryBindingRows(ctx, db); (err == nil) != tc.valid {
 			t.Fatalf("%+v: %v", tc, err)
 		}
 	}
@@ -117,8 +109,6 @@ func canvasBindingArchiveDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	for _, q := range []string{
-		"CREATE TABLE schema_migrations(version TEXT)",
-		"INSERT INTO schema_migrations VALUES('0146_canvas_entry_bindings.sql')",
 		"CREATE TABLE inbounds(id TEXT)", "INSERT INTO inbounds VALUES('i'),('i2')",
 		"CREATE TABLE canvas_schemes(id TEXT)", "INSERT INTO canvas_schemes VALUES('s'),('s2')",
 		"CREATE TABLE canvas_entry_bindings(mode TEXT,original_default_outbound TEXT,inbound_id TEXT,scheme_id TEXT,instance_id TEXT,state TEXT,applied_default_outbound TEXT)",
@@ -133,7 +123,7 @@ func canvasBindingArchiveDB(t *testing.T) *sql.DB {
 
 func assertCanvasBindingArchive(t *testing.T, db *sql.DB, valid bool) {
 	t.Helper()
-	err := validateCanvasEntryBindings(context.Background(), db)
+	err := validateCanvasEntryBindingRows(context.Background(), db)
 	if valid && err != nil {
 		t.Fatal(err)
 	}

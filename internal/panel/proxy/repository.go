@@ -17,14 +17,27 @@ import (
 )
 
 type Repository struct {
-	Database *sql.DB
-	Vault    *vault.Vault
+	DraftChanged func()
+	Database     *sql.DB
+	Vault        *vault.Vault
 	// Certificates is the stored certificate library an acme inbound reads its PEM
 	// pair from; nil on a repository that never reads such an inbound.
 	Certificates CertificateStore
 }
 
 func timestamp() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z") }
+func (r *Repository) notifyDraft() {
+	if r.DraftChanged != nil {
+		r.DraftChanged()
+	}
+}
+func (r *Repository) commitDraft(tx *sql.Tx) error {
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.notifyDraft()
+	return nil
+}
 func (r *Repository) encode(settings desiredstate.ProtocolSettings) ([]byte, error) {
 	data, err := json.Marshal(settings)
 	if err != nil {
@@ -340,6 +353,9 @@ func (r *Repository) saveInbound(ctx context.Context, inboundID string, input In
 	if err := tx.Commit(); err != nil {
 		return Inbound{}, err
 	}
+	if r.DraftChanged != nil {
+		r.DraftChanged()
+	}
 	return r.Inbound(ctx, inboundID, false)
 }
 func nullable(value string) any {
@@ -462,6 +478,7 @@ func (r *Repository) SaveOutbound(ctx context.Context, outboundID string, input 
 	if err := tx.Commit(); err != nil {
 		return Outbound{}, err
 	}
+	r.notifyDraft()
 	return r.Outbound(ctx, outboundID, false)
 }
 func (r *Repository) createCredential(ctx context.Context, tx *sql.Tx, protocol, username, secret string) (desiredstate.Credential, error) {
@@ -549,6 +566,9 @@ func (r *Repository) DeleteInbound(ctx context.Context, id string) error {
 		return &tunnelError{Code: "inbound_delete_blocked", Status: 409, Message: "入站仍被其他配置引用，请先处理以下引用", Details: map[string]any{"blockers": refs}}
 	}
 	_, err = r.Database.ExecContext(ctx, "DELETE FROM inbounds WHERE id=?", id)
+	if err == nil && r.DraftChanged != nil {
+		r.DraftChanged()
+	}
 	return err
 }
 func (r *Repository) DeleteOutbound(ctx context.Context, id string) error {
@@ -567,5 +587,8 @@ func (r *Repository) DeleteOutbound(ctx context.Context, id string) error {
 		return errors.New("outbound is referenced by an inbound, group, chain or backup")
 	}
 	_, err := r.Database.ExecContext(ctx, "DELETE FROM outbounds WHERE id=?", id)
+	if err == nil {
+		r.notifyDraft()
+	}
 	return err
 }

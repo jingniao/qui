@@ -20,6 +20,7 @@ import (
 
 type Nodes interface {
 	Get(context.Context, string) (node.Node, error)
+	GetForCoreSelection(context.Context, string) (node.Node, error)
 	SubscriptionGroups(context.Context, string) ([]string, error)
 }
 type CanvasEntryGroups interface {

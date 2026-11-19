@@ -57,9 +57,10 @@
       <button class="ios-search-btn shrink-0">查询</button>
     </form>
 
+    <ErrorState v-if="adminError" :message="adminError" @retry="load()" />
     <ErrorState v-if="error" :message="error" @retry="load()" />
-    <LoadingSkeleton v-else-if="loading && !users.length" />
-    <EmptyState v-else-if="!users.length && !displayAdmins.length" title="暂无用户" description="点击上方“新增用户”为内部成员开通专属代理账号与订阅。" />
+    <LoadingSkeleton v-else-if="(loading || optionsLoading) && !users.length && !displayAdmins.length" />
+    <EmptyState v-else-if="!users.length && !displayAdmins.length && !adminError" title="暂无用户" description="点击上方“新增用户”为内部成员开通专属代理账号与订阅。" />
 
     <!-- Unified Table: Admins + Proxy Users -->
     <DataTable v-else>
@@ -282,7 +283,6 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { userAPI, type ProxyUser, type UserInput } from '../api';
 import { createUserWithPortalLogin, portalLoginFailureMessage, portalPasswordError } from '../portalLogin';
-import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import type { AdminUser } from '../../../types';
 import { request, type Page } from '../../../app/apiClient';
 import { authState, isOwner, formatTime } from '../../../app/auth';
@@ -302,7 +302,8 @@ import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 
 const users = ref<ProxyUser[]>([]);
 const admins = ref<AdminUser[]>([]);
-const groups = ref<NodeGroup[]>([]);
+const optionsLoading = ref(false);
+const adminError = ref('');
 const total = ref(0);
 const page = ref(1);
 const keyword = ref('');
@@ -447,26 +448,30 @@ async function executeAdminAction() {
 }
 
 let generation = 0;
+let optionsGeneration = 0;
 async function load(silent = false) {
   const current = ++generation;
+  const currentOptions = silent ? optionsGeneration : ++optionsGeneration;
   if (!silent) loading.value = true;
+  if (!silent) { optionsLoading.value = true; adminError.value = ''; }
+  const options = silent ? Promise.resolve() : request<Page<AdminUser>>('/admins?page=1&pageSize=50').then(adminResult => {
+    if (currentOptions !== optionsGeneration) return;
+    admins.value = adminResult.items;
+  }).catch(e => {
+    if (currentOptions === optionsGeneration) adminError.value = `管理员读取失败：${(e as Error).message}`;
+  }).finally(() => { if (currentOptions === optionsGeneration) optionsLoading.value = false; });
   try {
-    const [result, groupResult, adminResult] = await Promise.all([
-      userAPI.list(page.value, keyword.value),
-      silent ? Promise.resolve({ items: groups.value }) : groupAPI.list(1, 100),
-      silent ? Promise.resolve({ items: admins.value }) : request<Page<AdminUser>>('/admins?page=1&pageSize=50')
-    ]);
+    const result = await userAPI.list(page.value, keyword.value);
     if (current !== generation) return;
     users.value = result.items;
     total.value = result.total;
-    groups.value = groupResult.items;
-    admins.value = adminResult.items || [];
     error.value = '';
   } catch (e) {
     if (current === generation) error.value = (e as Error).message;
   } finally {
     if (current === generation) loading.value = false;
   }
+  await options;
 }
 
 function search() {
@@ -564,5 +569,5 @@ onMounted(() => {
   window.addEventListener('proxy-system-alert', refreshUsers);
 });
 
-onUnmounted(() => { generation++; refreshUsers.cancel(); document.removeEventListener('visibilitychange', visibilityChanged); window.removeEventListener('proxy-system-alert', refreshUsers); });
+onUnmounted(() => { generation++; optionsGeneration++; refreshUsers.cancel(); document.removeEventListener('visibilitychange', visibilityChanged); window.removeEventListener('proxy-system-alert', refreshUsers); });
 </script>

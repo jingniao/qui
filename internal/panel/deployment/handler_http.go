@@ -23,11 +23,11 @@ type Handler struct {
 
 func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
 	mux.Handle("GET /api/v1/task-records", h.Auth.Require(http.HandlerFunc(reads.taskHistory), true))
-	mux.Handle("GET /api/v1/nodes/inbound-states", h.Auth.Require(http.HandlerFunc(h.inboundStatesBatch), false))
+	mux.Handle("GET /api/v1/nodes/inbound-states", h.Auth.Require(http.HandlerFunc(reads.inboundStatesBatch), false))
 	mux.Handle("GET /api/v1/runtime-topology", h.Auth.Require(http.HandlerFunc(h.publishedTopology), true))
 	mux.Handle("POST /api/v1/nodes/{id}/restart-core", h.Auth.Require(http.HandlerFunc(h.restartNode), true))
 	mux.Handle("GET /api/v1/nodes/{id}/restart-core", h.Auth.Require(http.HandlerFunc(h.restartTasks), true))
-	mux.Handle("GET /api/v1/nodes/{id}/inbound-states", h.Auth.Require(http.HandlerFunc(h.inboundStates), false))
+	mux.Handle("GET /api/v1/nodes/{id}/inbound-states", h.Auth.Require(http.HandlerFunc(reads.inboundStates), false))
 	mux.Handle("GET /api/v1/revisions", h.Auth.Require(http.HandlerFunc(reads.list), true))
 	mux.Handle("GET /api/v1/revisions/{id}/diff", h.Auth.Require(http.HandlerFunc(h.diff), true))
 	mux.Handle("POST /api/v1/revisions", h.Auth.Require(http.HandlerFunc(h.create), true))

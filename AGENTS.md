@@ -386,6 +386,8 @@ DNS 模板增加 `defaultNameservers`（仅 IP）、`proxyServerNameservers`、`
 
 ## 11.3 节点注册与删除
 
+服务器列表的安装入口对已登记节点签发绑定当前证书的原位恢复码，核销前旧证书仍有效。`node-install.sh --replace-agent` 在旧主机校验并准备发行文件、确认旧服务正常退出与最终采集后，用旧身份上传；面板确认最后交付后才清除固定的本机 Agent 数据目录并重新登记。面板配置与历史和本机入站证书保留，失败处理见[运维手册](docs/operations.md#51-原位恢复推荐)。
+
 Owner 建节点 → 一次性注册码 → 安装 Agent → 本地生成私钥并提交注册码/公钥/机器信息 → 中央签证并核销注册码 → mTLS 长连接。私钥不上传。
 
 注册对话框提供 `deploy/linux/node-install.sh` 一键命令：下载面板同版本 GitHub Release、核对 SHA256SUMS，以公网证书或面板提供的固定 SHA-256 建立证书信任，再登记启动，操作见[部署](docs/deployment.md) §4。命令里的面板地址、面板 Web 端口以及 Agent gRPC 地址与端口默认取系统设置里的“节点安装连接地址”（第 27.14 节），未设置或读取失败时回落到当前浏览器访问面板的地址，gRPC 端口回落到注册响应里的实际监听端口。三个生成该命令的对话框（新建服务器、原位身份恢复、版本页“添加内核”）共用这一默认值，对话框不再提供面板地址与端口输入框，只读显示本次命令使用的地址，需要修改时到系统设置里改；gRPC 地址与面板地址相同时不写 `--grpc-host`。三个对话框另有默认不勾选的「启用网页升级」，勾选才在命令末尾追加 `--web-upgrade`（第 23 节）。
@@ -1532,7 +1534,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 | /etc/systemd/system/proxy-panel-update.path、proxy-panel-update.service | 监视 /var/lib/proxy-panel/panel-update/request.json 并运行 helper；root oneshot，TimeoutStartSec=1800，不沙箱、不 PartOf 面板；随面板发布，不记安装记录 |
 | /var/lib/proxy-panel/panel-update/ | proxy-panel 0700；面板写 request.json，helper 写 status.json |
 
-日志写 stdout → journald，OpenRC 经 logger → syslog，不写 /var/log 文件。面板网页更新的更新器输出例外，只追加到 /var/lib/proxycontrol-install/panel-update.log（root 0600），拒绝原因留在 journalctl -u proxy-panel-update。更新前备份名为 pre-update-<版本>-<时间>.db，回滚保留 failed-update-<版本>-<时间>.db。
+面板日志写 stdout → journald，OpenRC 经 logger → syslog。Agent 本地待发布改动将运行日志统一写入状态目录的 `logs/agent.log` 与 `.1`–`.9`，每个最多 10 MiB，总计 100 MiB；监督进程接收工作进程 stderr，安装在主机上的引导程序也须更新并重启才生效，仅网页升级工作进程不够。日志故障明确报告到服务日志，继续排空子进程输出以保护代理运行，不改写到无上限文件；流量队列与旧系统日志不在清理范围，见[运维手册](docs/operations.md)。面板网页更新的更新器输出例外，只追加到 /var/lib/proxycontrol-install/panel-update.log（root 0600），拒绝原因留在 journalctl -u proxy-panel-update。更新前备份名为 pre-update-<版本>-<时间>.db，回滚保留 failed-update-<版本>-<时间>.db。
 
 自动申请证书（第 27.16 节）需要面板**出站** HTTPS 到 `api.cloudflare.com`（Token 校验与 DNS 记录）与 Let's Encrypt 的 `acme-v02.api.letsencrypt.org`／`acme-staging-v02.api.letsencrypt.org`。它不需要开放 80 端口，也不接受来自 CA 的入站连接：DNS-01 由面板自己写 TXT 记录，再用 `net.Resolver` 直接查该区域的权威名称服务器（UDP 53）。出站被阻断时的现象是固定错误码 `cloudflare_api_failed` 或 `acme_*_failed`，页面只给中文说明、不回显上游内容。
 

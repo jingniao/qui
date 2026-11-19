@@ -197,3 +197,27 @@ func TestInboundStates(t *testing.T) {
 		})
 	}
 }
+
+func TestInboundStatesReadWithoutAccessDirectory(t *testing.T) {
+	f := newUserAccessFixture(t)
+	ctx := context.Background()
+	state, intent, err := f.handler.EnsureUserAccess(ctx, UserAccessInput{NodeID: f.nodeID, Summary: "user access", Protocol: "socks5", Listen: "0.0.0.0", Port: 1080})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisions := &inboundStateFixture{ctx: ctx, nodeID: f.nodeID, repository: &Repository{Database: f.nodes.Database, Vault: f.proxies.Vault}}
+	revisions.revision(t, state, intent, "success", "", true)
+	f.handler.Repository = revisions.repository
+	f.handler.Users = nil
+	items, err := f.handler.readInboundStates(ctx, f.nodeID)
+	if err != nil || len(items) != 1 || items[0].State != InboundEffective {
+		t.Fatalf("running user inlet with no access directory: %+v, %v", items, err)
+	}
+	if _, err := f.nodes.Database.ExecContext(ctx, "UPDATE inbounds SET port=1081 WHERE node_id=?", f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	items, err = f.handler.readInboundStates(ctx, f.nodeID)
+	if err != nil || len(items) != 1 || items[0].State != InboundModified {
+		t.Fatalf("edited listener: %+v, %v", items, err)
+	}
+}

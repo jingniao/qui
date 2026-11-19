@@ -87,5 +87,5 @@ async function save() {
 watch(drawer, visible => { if (visible) { sourceIp.value = editing.value?.sourceIp || ''; sourceInterface.value = editing.value?.sourceInterface || ''; } }, { flush: 'sync' });
 async function remove() { if (!target.value) return; try { await proxyAPI.deleteOutbound(target.value.id); showToast('出站已删除'); await load(); } catch (e) { showToast((e as Error).message, 'error'); } }
 async function revision() { if (!nodeId.value) return; try { await proxyAPI.revision(nodeId.value, '更新节点代理出站'); await router.push('/system/revisions'); } catch (e) { showToast((e as Error).message, 'error'); } }
-watch(drawer, visible => { if (!visible) { form.secret = ''; wgSecret.value = ''; } }); onMounted(() => { loadProtocolSupport(); load(); });
+watch(drawer, visible => { if (!visible) { form.secret = ''; wgSecret.value = ''; } }); onMounted(() => { void loadProtocolSupport().catch(e => showToast((e as Error).message, 'error')); load(); });
 </script>

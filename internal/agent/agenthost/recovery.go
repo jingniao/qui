@@ -3,7 +3,6 @@ package agenthost
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -82,7 +81,7 @@ func (r *jobRunner) recoverJob(job agentjobs.Job, current updater.Installation) 
 		return release.UpdateResult{}, ErrState
 	}
 	images := filepath.Join(r.directory, "releases", "agent-installed")
-	driver, err := agentprocess.NewDriver(r.ctx, images, r.configPath, r.nodeID, revision, current.Current, nil, r.required, os.Stderr)
+	driver, err := agentprocess.NewDriver(r.ctx, images, r.configPath, r.nodeID, revision, current.Current, nil, r.required, r.logs)
 	if err != nil {
 		return jobResult(request, "failed_closed", "recovery_failed", current.Current), nil
 	}

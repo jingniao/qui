@@ -69,7 +69,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type RecoveryStatus } from '../api';
-import { CORE_INSTALL_OPTIONS, sortInstallCores, validateInstallCores } from '../coreInstallOptions';
+import { CORE_INSTALL_OPTIONS, sortInstallCores, reportedInstallCores, validateInstallCores } from '../coreInstallOptions';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
 import { formatTime, isOwner } from '../../../app/auth';
 import { APIError } from '../../../app/apiClient';
@@ -103,7 +103,7 @@ const command = computed(() => {
   if (!item || !installAvailable.value || !coreValidation.value.valid) return '';
   if (!/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
   try {
-    const orderedCores = sortInstallCores(cores.value);
+    const orderedCores = sortInstallCores(cores.value, props.node.capabilities?.core_name);
     return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
       grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: orderedCores, webUpgrade: webUpgrade.value });
   } catch { return ''; }
@@ -112,9 +112,7 @@ function blockerDetail(item: { kind: string; id: string; name: string }) {
   return item.kind === 'deployment_target' ? `配置 #${item.id}` : item.name || item.id;
 }
 function defaultCores(): CoreName[] {
-  const reported = (props.node.capabilities?.cores ?? []).map(core => core.name).filter((name): name is CoreName => CORE_INSTALL_OPTIONS.some(option => option.name === name));
-  const selected: CoreName[] = reported.length ? [...new Set(reported)] : ['xray'];
-  return sortInstallCores(selected);
+  return reportedInstallCores(props.node.capabilities);
 }
 let generation = 0, stopped = false;
 async function refresh() {

@@ -17,13 +17,14 @@ async function scenario({ failed = [], delayedInbounds = false } = {}) {
     if (kind === 'inbounds' && delayedInbounds) await new Promise(resolve => { releaseInbounds = resolve; });
     return { items: values };
   };
-  const load = new Function('loading', 'proxyNodeStore', 'choices', 'nodeAPI', 'proxyAPI', 'servers', 'serverInbounds', 'loadNodeRelays', 'canvasAPI', 'isOwner', 'loadImports', 'groupAPI', 'nodeGroups', 'loadCanvasSchemes', 'showToast', compile(`let serverRefreshGeneration = 0;\n${loadBlock}\nreturn loadData;`))(
+  const load = new Function('loading', 'proxyNodeStore', 'choices', 'inventory', 'servers', 'serverInbounds', 'loadNodeRelays', 'canvasAPI', 'isOwner', 'loadImports', 'nodeGroups', 'loadCanvasSchemes', 'showToast', compile(`let serverRefreshGeneration = 0, loadAgain = false, publishStateDisposed = false;\n${loadBlock}\nreturn loadData;`))(
     loading, store, async fetch => (await fetch(1, 100)).items,
-    { choices: () => read('servers', [{ id: 'server' }]) },
-    { inbounds: () => read('inbounds', [{ id: 'entry' }]) },
+    { readServers: async () => (await read('servers', [{ id: 'server' }])).items,
+      readInbounds: async () => (await read('inbounds', [{ id: 'entry' }])).items,
+      readGroups: async () => (await read('groups', [])).items },
     servers, inbounds, () => {},
     { list: () => read('schemes', [{ id: 'scheme' }]) },
-    { value: true }, () => read('imports', []), { list: () => read('groups', []) }, { value: [] },
+    { value: true }, () => read('imports', []), { value: [] },
     async (context, schemes) => { loaded.push({ context, schemes }); },
     message => errors.push(message));
   const pending = load();
@@ -59,7 +60,7 @@ assert.doesNotMatch(title, /node\.protocol/);
 assert.ok(secondLine.indexOf('node.protocol') < secondLine.indexOf('<EntryRouteSummary'));
 assert.match(secondLine, /v-if="node\.sourceType !== 'self_hosted'"[^>]*>\{\{ node\.sourceName \}\}/);
 assert.equal((source.match(/:show-type="false"/g) || []).length, 2, 'both views hide route type badges');
-assert.match(source, /<InboundDeleteDialog ref="inboundDeleteDialog" @changed="loadData"/);
+assert.match(source, /<InboundDeleteDialog ref="inboundDeleteDialog" @changed="queueDraftRefresh"/);
 assert.match(source, /inboundDeleteDialog\.value\?\.prompt\(\{ id: node\.inboundId, name: node\.name \}\)/);
 assert.doesNotMatch(source, /inboundDeleteConflict|proxyAPI\.deleteInbound|publishNode\(node\.sourceId/);
 console.log('PASS protocol second-line placement, imported source badges, shared cascade deletion dialog');

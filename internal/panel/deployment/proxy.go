@@ -22,6 +22,7 @@ import (
 type ProxyConfiguration interface {
 	Snapshot(context.Context, string, proxy.AccessReader) (desiredstate.State, error)
 	SnapshotIntent(context.Context, string, proxy.AccessReader) (desiredstate.State, []string, error)
+	InboundDraft(context.Context, string) (desiredstate.State, []string, error)
 	SaveInbound(context.Context, string, proxy.InboundInput) (proxy.Inbound, error)
 	InboundAtListener(context.Context, string, string, string, int) (proxy.Inbound, error)
 }

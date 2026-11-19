@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/agent/configuration"
@@ -103,6 +104,7 @@ func UpdateStatus(configPath, id string) (agentjobs.Job, error) {
 }
 
 type jobRunner struct {
+	logs                          io.Writer
 	ctx                           context.Context
 	configPath, directory, nodeID string
 	key                           []byte
@@ -193,7 +195,7 @@ func (r *jobRunner) restart(image updater.Image, revision int64) error {
 		if baseline.Request.Revision != revision {
 			return ErrState
 		}
-		p, err := agentprocess.StartControlOnly(r.ctx, images, image, r.configPath, r.nodeID, revision, r.required, os.Stderr)
+		p, err := agentprocess.StartControlOnly(r.ctx, images, image, r.configPath, r.nodeID, revision, r.required, r.logs)
 		if p != nil {
 			r.process = p
 		}
@@ -203,7 +205,7 @@ func (r *jobRunner) restart(image updater.Image, revision int64) error {
 		r.process = p
 		return nil
 	}
-	p, err := agentprocess.StartRetained(r.ctx, images, image, r.configPath, r.nodeID, revision, os.Stderr, probe.Contract.AgentUpdateProtocol == 1, probe.Contract.AgentRecoveryProtocol == 1)
+	p, err := agentprocess.StartRetained(r.ctx, images, image, r.configPath, r.nodeID, revision, r.logs, probe.Contract.AgentUpdateProtocol == 1, probe.Contract.AgentRecoveryProtocol == 1)
 	if p != nil {
 		r.process = p
 	}
@@ -229,7 +231,7 @@ func (r *jobRunner) restartProtected(image updater.Image, revision int64) error 
 	if err != nil || retained != revision {
 		return errors.Join(ErrState, err)
 	}
-	p, err := agentprocess.StartControlOnly(r.ctx, filepath.Join(r.directory, "releases", "agent-installed"), image, r.configPath, r.nodeID, revision, r.required, os.Stderr)
+	p, err := agentprocess.StartControlOnly(r.ctx, filepath.Join(r.directory, "releases", "agent-installed"), image, r.configPath, r.nodeID, revision, r.required, r.logs)
 	if p != nil {
 		r.process = p
 	}
@@ -437,7 +439,7 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 		_ = r.restartProtected(current.Current, revision)
 		return jobResult(request, "failed_closed", "installation_failed", current.Current), nil
 	}
-	driver, err := agentprocess.NewDriver(r.ctx, images, r.configPath, r.nodeID, revision, current.Current, &preflight.Image, r.required, os.Stderr)
+	driver, err := agentprocess.NewDriver(r.ctx, images, r.configPath, r.nodeID, revision, current.Current, &preflight.Image, r.required, r.logs)
 	if err != nil {
 		if restoreErr := r.restart(current.Current, revision); restoreErr != nil {
 			return jobResult(request, "failed_closed", "installation_failed", current.Current), nil

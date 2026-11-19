@@ -154,6 +154,12 @@ assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: '' }), /--gr
 // Web upgrade is opt-in: the flag is emitted only when asked, and each dialog starts
 // unchecked, resets on every new token and passes the choice into the command.
 assert.doesNotMatch(defaultCommand, /--web-upgrade/, 'web upgrade is not enabled by default');
+for (const view of ['modules/nodes/components/ServerEnrollment.vue','modules/nodes/components/NodeRecoveryPanel.vue']) {
+  assert.match(read(view), /sortInstallCores\(cores\.value, (?:reportedPrimary\.value|props\.node\.capabilities\?\.core_name)\)/, 'command generation preserves reported primary');
+}
+assert.match(nodesApi.installCommand({ ...install, cores:['sing-box','xray','gost'], replaceAgent:true }), /--core sing-box --core xray --core gost --replace-agent$/);
+assert.match(nodesApi.installCommand({ ...install, replaceAgent: true }), / --replace-agent$/);
+assert.doesNotMatch(nodesApi.installCommand(install), /--replace-agent/);
 assert.doesNotMatch(nodesApi.installCommand({ ...install, webUpgrade: false }), /--web-upgrade/, 'an unchecked box adds no flag');
 assert.match(nodesApi.installCommand({ ...install, webUpgrade: true }), / --core xray --web-upgrade$/, 'a checked box appends --web-upgrade');
 const webUpgradeOption = read('modules/nodes/components/WebUpgradeOption.vue');

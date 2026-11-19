@@ -107,8 +107,7 @@ function setDisplayMode(mode: 'grid' | 'list') {
 }
 const quickEdit = ref<InstanceType<typeof ServerQuickEdit>>();
 function install(node: NodeView) {
-  if (node.status === 'pending' && !node.deletedAt) void enrollment.value?.reissue(node);
-  else showToast('该服务器已登记；如需重装或升级请使用 qui-update（见部署文档）', 'info');
+  if (!node.deletedAt) void enrollment.value?.reissue(node);
 }
 const route = useRoute(), router = useRouter();
 const scalar = (value: unknown) => typeof value === 'string' ? value : '';

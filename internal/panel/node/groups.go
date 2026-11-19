@@ -368,6 +368,9 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if err := tx.Commit(); err != nil {
 		return Group{}, err
 	}
+	if r.GroupsChanged != nil {
+		r.GroupsChanged()
+	}
 	return r.Group(ctx, groupID)
 }
 func (r *Repository) DeleteGroup(ctx context.Context, id string) error {
@@ -375,6 +378,9 @@ func (r *Repository) DeleteGroup(ctx context.Context, id string) error {
 		return err
 	}
 	_, err := r.Database.ExecContext(ctx, "DELETE FROM node_groups WHERE id=?", id)
+	if err == nil && r.GroupsChanged != nil {
+		r.GroupsChanged()
+	}
 	return err
 }
 func (r *Repository) ExpandedNodes(ctx context.Context, groupIDs []string) ([]Node, error) {

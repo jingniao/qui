@@ -3,7 +3,7 @@
     <p v-if="loading" role="status" class="text-sm text-ios-secondary">正在读取服务器与入站…</p>
     <div v-else-if="loadError" class="space-y-2"><p role="alert" class="text-ios-red text-sm">{{ loadError }}</p><button class="ios-btn-secondary" @click="load">重试</button></div>
     <p v-if="error" ref="errorMessage" tabindex="-1" role="alert" class="text-sm text-ios-red outline-none">{{ error }}</p>
-    <fieldset :disabled="busy || loading || !!loadError || !!savedId" class="space-y-6">
+    <fieldset v-show="!loading && !loadError" :disabled="busy || loading || !!loadError || !!savedId" class="space-y-6">
       <section class="space-y-4">
         <h4 class="text-ios-label text-base font-semibold leading-normal">基础信息</h4>
         <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" placeholder="例如 Tokyo-vless-443" class="form-input-base mt-1.5" @input="autoName = false" /><span class="block text-xs mt-1">显示在入站列表、订阅名称与访问记录中；默认按「服务器-协议-端口」自动生成，手动修改后不再自动更新。</span></label>
@@ -79,7 +79,7 @@
         <p class="text-xs text-ios-secondary">启用节点：取消勾选后此入站不参与发布，已发布配置里的用户凭据随之移除。显示在授权用户订阅中：取消后仅供节点间中转使用，用户订阅与凭据都不再包含它。</p>
         <p v-if="!f.internalRelay && f.protocol !== 'forward' && !f.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
       </section>
-      <NodeAdvancedFields :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" :open="!!error" />
+      <NodeAdvancedFields :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" :open="advancedOpen || !!error" :ready="advancedReady === f.nodeId && !!f.nodeId" :error="advancedError" @toggle="toggleAdvanced" @retry="readAdvanced" />
       <details :open="!!savedId" class="rounded-2xl border border-ios-border p-4 text-sm">
         <summary class="cursor-pointer font-medium text-ios-label">配置预览与变更</summary>
         <div class="space-y-4 mt-4">
@@ -137,7 +137,7 @@ import { certificatesAPI, type ManagedCertificate } from '../../../system/certif
 import NodeProtocolFields from './NodeProtocolFields.vue';
 import NodeAdvancedFields from './NodeAdvancedFields.vue';
 import { withInboundMembership, buildPayload, coreOptions, coreReason, createEditor, changeProtocol, forwardListenPorts, forwardPool, gostForwardReady, portConflict, previewPayload, protocolChoices, protocolReason, randomPort, relayMode, serverEligible, validateStep, type EditorOrigin } from './nodeEditorModel';
-const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin }>(), { serverId: '', inbound: null, origin: 'list' });
+const props = withDefaults(defineProps<{ serverId?: string; inbound?: Inbound | null; origin?: EditorOrigin; serverChoices?: NodeView[] | Promise<NodeView[]>; inboundChoices?: Inbound[] | Promise<Inbound[]>; groupChoices?: NodeGroup[] | Promise<NodeGroup[]> }>(), { serverId: '', inbound: null, origin: 'list' });
 const emit = defineEmits<{ close: []; saved: [] }>();
 const route = useRoute();
 const state = reactive(createEditor(props.serverId || String(route.query.server || ''), props.inbound, props.origin));
@@ -147,6 +147,8 @@ const certificates = ref<ManagedCertificate[]>([]);
 const outbounds = ref<Outbound[]>([]), groups = ref<OutboundGroup[]>([]), chains = ref<ProxyChain[]>([]);
 const memberGroups = ref<NodeGroup[]>([]), selectedGroupIds = ref<string[]>([]);
 const initialGroupIds = ref<string[]>([]);
+const advancedOpen = ref(false), advancedReady = ref(''), advancedError = ref('');
+let advancedRead: { nodeId: string; promise: Promise<boolean> } | undefined;
 const autoName = ref(!props.inbound);
 const loading = ref(true), busy = ref(false), error = ref(''), loadError = ref(''), result = ref(''), resultTone = ref<PublishTone>('info'), savedId = ref('');
 let publishWatcher: PublishWatch | null = null;
@@ -204,6 +206,8 @@ watch(() => f.value.nodeId, async (newNodeId) => {
   if (loading.value) return;
   // The selected core belongs to the previous server; reset to its primary.
   f.value.core = '';
+  advancedReady.value = ''; advancedError.value = '';
+  if (advancedOpen.value && newNodeId) void readAdvanced();
   if (newNodeId) {
     loading.value = true; loadError.value = '';
     try { await loadServerResources(newNodeId); }
@@ -227,15 +231,39 @@ watch(() => f.value.nodeId, async (newNodeId) => {
 let disposed = false;
 onUnmounted(() => { disposed = true; f.value.settings.private_key_pem = ''; publishWatcher?.stop(); });
 async function loadServerResources(nodeId: string) {
-  const [ins, outs, gs, cs] = await Promise.all([
-    choices((p, s) => proxyAPI.inbounds(nodeId, p, s)),
-    choices((p, s) => proxyAPI.outbounds(nodeId, p, s)),
-    choices((p, s) => proxyAPI.groups(nodeId, p, s)),
-    choices((p, s) => proxyAPI.chains(nodeId, p, s)),
+  const [ins] = await Promise.all([
+    props.inboundChoices ? Promise.resolve(props.inboundChoices).then(rows => rows.filter(row => row.nodeId === nodeId)) : choices((p, s) => proxyAPI.inbounds(nodeId, p, s)),
     loadNodeMeta(nodeId, isOwner.value)
   ]);
   if (disposed || f.value.nodeId !== nodeId) return;
-  inbounds.value = ins; outbounds.value = outs; groups.value = gs; chains.value = cs;
+  inbounds.value = ins;
+}
+function toggleAdvanced(open: boolean) {
+  advancedOpen.value = open;
+  if (open && !advancedError.value) void readAdvanced();
+}
+async function readAdvanced(): Promise<boolean> {
+  const nodeId = f.value.nodeId;
+  if (!nodeId) return false;
+  if (advancedReady.value === nodeId) return true;
+  if (advancedRead?.nodeId === nodeId) return advancedRead.promise;
+  advancedError.value = '';
+  const promise: Promise<boolean> = Promise.all([
+    choices((p, s) => userAPI.choices(p, '', s)),
+    choices((p, s) => proxyAPI.outbounds(nodeId, p, s)),
+    choices((p, s) => proxyAPI.groups(nodeId, p, s)),
+    choices((p, s) => proxyAPI.chains(nodeId, p, s))
+  ]).then(([us, outs, gs, cs]) => {
+    if (disposed || advancedRead?.promise !== promise || f.value.nodeId !== nodeId) return false;
+    users.value = us; outbounds.value = outs; groups.value = gs; chains.value = cs;
+    advancedReady.value = nodeId;
+    return true;
+  }).catch(e => {
+    if (!disposed && advancedRead?.promise === promise && f.value.nodeId === nodeId) advancedError.value = `高级选项读取失败：${(e as Error).message}`;
+    return false;
+  }).finally(() => { if (advancedRead?.promise === promise) advancedRead = undefined; });
+  advancedRead = { nodeId, promise };
+  return promise;
 }
 async function load() {
   loading.value = true; loadError.value = '';
@@ -243,13 +271,12 @@ async function load() {
     const required = await Promise.allSettled([
       loadProtocolSupport(),
       isOwner.value ? certificatesAPI.list().then(value => { certificates.value = value; }) : Promise.resolve(),
-      choices((p, s) => userAPI.choices(p, '', s)).then(value => { users.value = value; }),
-      choices(groupAPI.list).then(value => {
+      Promise.resolve(props.groupChoices ?? choices(groupAPI.list)).then(value => {
         memberGroups.value = value;
         initialGroupIds.value = value.filter(g => g.inboundIds?.includes(props.inbound?.id || '')).map(g => g.id);
         selectedGroupIds.value = [...initialGroupIds.value];
       }),
-      choices((p, s) => nodeAPI.choices(p, '', s)).then(async value => {
+      Promise.resolve(props.serverChoices ?? choices((p, s) => nodeAPI.choices(p, '', s))).then(async value => {
         if (disposed) return;
         servers.value = value;
         if (!f.value.nodeId) f.value.nodeId = eligibleServers.value[0]?.id || '';
@@ -260,6 +287,7 @@ async function load() {
     const failed = required.find(item => item.status === 'rejected');
     if (failed?.status === 'rejected') throw failed.reason;
     if (disposed) return;
+    if (props.inbound?.allowedUserIds?.length) void readAdvanced();
     if (!props.inbound && f.value.nodeId) {
       const offered = protocolChoices(selectedServer.value, f.value.core, protocols.value, f.value.protocol);
       if (offered.length && !offered.includes(f.value.protocol)) changeProtocol(state, offered[0]);
@@ -286,6 +314,8 @@ async function save(publish: boolean) {
   if (busy.value || loading.value || loadError.value || !isOwner.value || savedId.value) return;
   busy.value = true; error.value = ''; result.value = '';
   try {
+    if (!check(1)) return;
+    if (!await readAdvanced()) { advancedOpen.value = true; return; }
     // Re-read before save; the live check is advisory and the API remains authoritative.
     inbounds.value = await choices((p, s) => proxyAPI.inbounds(f.value.nodeId, p, s));
     for (let n = 1; n <= 5; n++) if (!check(n)) return;

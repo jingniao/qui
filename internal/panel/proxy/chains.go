@@ -356,6 +356,7 @@ func (r *Repository) saveChain(ctx context.Context, chainID string, input ChainI
 	if err := tx.Commit(); err != nil {
 		return Chain{}, err
 	}
+	r.notifyDraft()
 	return r.Chain(ctx, chainID)
 }
 func (r *Repository) DeleteChain(ctx context.Context, chainID string) error {
@@ -374,5 +375,8 @@ func (r *Repository) DeleteChain(ctx context.Context, chainID string) error {
 		return errors.New("chain is referenced by an inbound or as a backup")
 	}
 	_, err := r.Database.ExecContext(ctx, "DELETE FROM proxy_chains WHERE id=?", chainID)
+	if err == nil {
+		r.notifyDraft()
+	}
 	return err
 }

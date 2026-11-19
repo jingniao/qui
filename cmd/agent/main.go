@@ -7,17 +7,22 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"proxycontrol/internal/agent/configuration"
 	"syscall"
 
 	"proxycontrol/internal/agent/agenthost"
 	"proxycontrol/internal/agent/control"
 	"proxycontrol/internal/agent/hostnet"
+	"proxycontrol/internal/agent/identity"
+	"proxycontrol/internal/agent/lifecycle"
 	"proxycontrol/internal/agent/tuning"
 	"proxycontrol/internal/platform/logging"
 	"proxycontrol/pkg/contracts/agentstorage"
@@ -45,6 +50,7 @@ type agentFlags struct {
 	tokenFile         *string
 	renewCertificate  *bool
 	rotateKey         *bool
+	drainTelemetry    *bool
 }
 
 func registerFlags(set *flag.FlagSet) *agentFlags {
@@ -64,6 +70,7 @@ func registerFlags(set *flag.FlagSet) *agentFlags {
 	f.enroll = set.Bool("enroll", false, "enroll this node with a one-time token and exit")
 	f.tokenFile = set.String("token-file", "", "file containing the one-time enrollment token")
 	f.renewCertificate = set.Bool("renew-node-certificate", false, "renew the stopped node certificate and confirm its activation")
+	f.drainTelemetry = set.Bool("drain-telemetry", false, "upload stopped Agent telemetry for a bound replacement and exit")
 	f.rotateKey = set.Bool("rotate-node-key", false, "rotate the stopped node private key and confirm its certificate")
 	return f
 }
@@ -82,7 +89,7 @@ func run() error {
 	return execute(set, f)
 }
 
-func execute(set *flag.FlagSet, f *agentFlags) error {
+func execute(set *flag.FlagSet, f *agentFlags) (resultErr error) {
 	if handled, err := executeLocalAgent(set, f.local, *f.path, version); handled {
 		return err
 	}
@@ -151,15 +158,35 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 	}
 	// Enrollment is a terminal operator mode: it enrolls this node and exits
 	// without starting the control worker. The systemd unit never passes it.
-	if *f.enroll {
-		valid := *f.path != "" && *f.tokenFile != "" && set.NArg() == 0
+	if *f.drainTelemetry && *f.check {
+		valid := *f.path != "" && set.NArg() == 0
 		set.Visit(func(o *flag.Flag) {
-			if o.Name != "config" && o.Name != "enroll" && o.Name != "token-file" {
+			if o.Name != "config" && o.Name != "drain-telemetry" && o.Name != "check-config" {
 				valid = false
 			}
 		})
 		if !valid {
-			return fmt.Errorf("enrollment requires only --config, --enroll and --token-file")
+			return errors.New("replacement preflight requires only --config, --drain-telemetry and --check-config")
+		}
+		c, err := configuration.LoadAgent(*f.path)
+		if err != nil {
+			return err
+		}
+		return control.CheckReplacementConfig(c)
+	}
+	if *f.enroll || *f.drainTelemetry {
+		operation := "enroll"
+		if *f.drainTelemetry {
+			operation = "drain-telemetry"
+		}
+		valid := *f.path != "" && *f.tokenFile != "" && set.NArg() == 0
+		set.Visit(func(o *flag.Flag) {
+			if o.Name != "config" && o.Name != operation && o.Name != "token-file" {
+				valid = false
+			}
+		})
+		if !valid {
+			return fmt.Errorf("%s requires only --config, --%s and --token-file", operation, operation)
 		}
 		token, err := readEnrollmentToken(*f.tokenFile)
 		if err != nil {
@@ -171,6 +198,28 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
+		if *f.drainTelemetry {
+			return control.DrainTelemetry(ctx, c, token, version, *f.tokenFile, func(ctx context.Context) error {
+				if _, err := fmt.Fprintln(os.Stdout, "old-agent-drained"); err != nil {
+					return err
+				}
+				detached := make(chan error, 1)
+				go func() {
+					var receipt string
+					_, err := fmt.Fscanln(os.Stdin, &receipt)
+					if err == nil && receipt != "detached" {
+						err = errors.New("installer did not detach the confirmed data directory")
+					}
+					detached <- err
+				}()
+				select {
+				case err := <-detached:
+					return err
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+		}
 		if err := control.Enroll(ctx, c, token, version); err != nil {
 			return err
 		}
@@ -251,20 +300,28 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 		fmt.Println("proxy-agent", version)
 		return nil
 	}
-	logOutput := os.Stdout
-	if *f.managed {
-		logOutput = os.Stderr
-	}
-	logger := logging.New(logOutput)
-	slog.SetDefault(logger)
 	c, err := configuration.LoadAgent(*f.path)
 	if err != nil {
 		return err
 	}
 	if *f.check {
-		logger.Info("configuration valid")
+		logging.New(os.Stdout).Info("configuration valid")
 		return nil
 	}
+	var logOutput io.Writer = os.Stderr
+	var workerLogs io.Writer = os.Stderr
+	if !*f.managed {
+		logs, err := openEnrolledLogs(c.DataDirectory)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, logs.Close()) }()
+		logOutput = logs
+		workerLogs = logs.WorkerOutput()
+	}
+	logger := logging.New(logOutput)
+	slog.SetDefault(logger)
+	defer slog.SetDefault(logging.New(os.Stderr))
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if *f.managed {
@@ -283,7 +340,35 @@ func execute(set *flag.FlagSet, f *agentFlags) error {
 		if *f.tokenFile != "" {
 			return fmt.Errorf("cannot enroll over supervised Agent state")
 		}
-		return agenthost.Run(ctx, *f.path, version, logger)
+		return agenthost.Run(ctx, *f.path, version, logger, workerLogs)
 	}
 	return control.Run(ctx, c, logger, version)
+}
+
+func openEnrolledLogs(directory string) (logs *logging.RotatingWriter, resultErr error) {
+	supervisor, err := lifecycle.TrySupervisor(directory)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		resultErr = errors.Join(resultErr, supervisor.Close())
+		if resultErr != nil && logs != nil {
+			resultErr = errors.Join(resultErr, logs.Close())
+			logs = nil
+		}
+	}()
+	owner, err := lifecycle.Try(directory)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, owner.Close()) }()
+	if _, err := identity.Load(filepath.Join(owner.Directory(), "identity")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errors.New("node is not enrolled; use --enroll --token-file with its one-time enrollment code")
+		}
+		return nil, err
+	}
+	return logging.OpenAgentLogs(filepath.Join(owner.Directory(), "logs"), func(err error) {
+		logging.New(os.Stderr).Error("Agent file logging failed; runtime logs unavailable until restart", "error", err)
+	})
 }

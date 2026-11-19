@@ -82,7 +82,7 @@ func (r *Repository) applyCanvasEntryBinding(ctx context.Context, b CanvasEntryB
 	if _, err := tx.ExecContext(ctx, "UPDATE inbounds SET default_outbound=? WHERE id=?", target, b.InboundID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return r.commitDraft(tx)
 }
 
 func (r *Repository) undoCanvasEntryBinding(ctx context.Context, bindingID, inboundID, route string, previous CanvasEntryBindingRecord, newBinding, createdInbound bool) error {
@@ -104,5 +104,5 @@ func (r *Repository) undoCanvasEntryBinding(ctx context.Context, bindingID, inbo
 			return err
 		}
 	}
-	return tx.Commit()
+	return r.commitDraft(tx)
 }

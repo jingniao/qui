@@ -54,6 +54,10 @@ func TestChainCapabilitiesDedicatedBindingAndSnapshotOrder(t *testing.T) {
 			t.Fatal("snapshots not exit first")
 		}
 		if snapshot.State.NodeID == f.nodeB {
+			draft, _, err := f.service.InboundDraft(ctx, f.nodeB)
+			if err != nil || len(draft.Inbounds) != 1 || draft.Inbounds[0].DefaultOutbound != "_chain_continue_"+chain.ID || draft.Inbounds[0].SubscriptionVisible {
+				t.Fatalf("middle listener lost its chain continuation or became visible: %+v, %v", draft.Inbounds, err)
+			}
 			matched := false
 			for _, outbound := range snapshot.State.Outbounds {
 				if outbound.ID == snapshot.State.Inbounds[0].DefaultOutbound && outbound.TargetNodeID == c.ID && outbound.Protocol == "socks5" && outbound.FailurePolicy == "Block" {

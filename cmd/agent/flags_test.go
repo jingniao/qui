@@ -3,10 +3,32 @@ package main
 import (
 	"flag"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 )
+
+func TestUnenrolledRuntimeLeavesEnrollmentDirectoryUntouched(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "agent.yaml")
+	data := filepath.Join(root, "data")
+	if err := os.WriteFile(path, []byte("development: true\ndata_directory: "+filepath.ToSlash(data)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	set := flag.NewFlagSet("agent", flag.ContinueOnError)
+	f := registerFlags(set)
+	if err := set.Parse([]string{"--config", path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := execute(set, f); err == nil || !strings.Contains(err.Error(), "not enrolled") {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(data, "logs")); !os.IsNotExist(err) {
+		t.Fatalf("unenrolled runtime created logs: %v", err)
+	}
+}
 
 // The Agent command line is a fixed, small surface. This test fails whenever a
 // flag is added, removed or renamed without updating the list, so the phase
@@ -28,6 +50,7 @@ func TestAgentFlagsAreExactlyTheSupportedSurface(t *testing.T) {
 		"check-config",
 		"config",
 		"control-only-contract",
+		"drain-telemetry",
 		"enroll",
 		"initialize-agent-history",
 		"install-agent-release",

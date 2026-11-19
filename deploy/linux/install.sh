@@ -55,6 +55,7 @@ if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol
 mode=''; binary=''; digest=''; config=''; core=''; core_version=''; core_digest=''; core_url=''; reinstall=false
 cores=(); declare -A core_versions=() core_digests=() core_urls=()
 core_source=qui; qui_version=''; core_bundle=''; core_sums=''
+replacement_token=''; replacement_manifest=''
 
 qui_release_version() {
   local value=$qui_version bundle_version
@@ -72,7 +73,7 @@ while (($#)); do
     --panel|--node)
       [[ -z $mode ]] || fail 'Choose exactly one of --panel and --node.'
       mode=$1; shift;;
-    --binary|--sha256|--config|--core|--core-version|--core-sha256|--core-url|--core-source|--qui-version|--core-bundle|--core-sums)
+    --binary|--sha256|--config|--core|--core-version|--core-sha256|--core-url|--core-source|--qui-version|--core-bundle|--core-sums|--replacement-token-file|--replacement-manifest)
       (($# >= 2)) || fail "Missing value for $1"
       case $1 in
         --binary) binary=$2;; --sha256) digest=${2,,};; --config) config=$2;;
@@ -87,6 +88,7 @@ while (($#)); do
         --core-sha256) [[ -n $core ]] || fail 'Put --core before its options.'; core_digests[$core]=${2,,};;
         --core-url) [[ -n $core ]] || fail 'Put --core before its options.'; core_urls[$core]=$2;;
         --core-source) core_source=$2;; --qui-version) qui_version=$2;;
+        --replacement-token-file) replacement_token=$2;; --replacement-manifest) replacement_manifest=$2;;
         --core-bundle) core_bundle=$2;; --core-sums) core_sums=$2;;
       esac
       shift 2;;
@@ -305,7 +307,12 @@ if [[ -e $record || -L $record ]]; then
 fi
 # Replacing a program under a running service is not an upgrade: the operator
 # stops the service, installs, and starts it again.
-service_is_active "$name" && fail "Stop $name before installing or upgrading (systemctl stop $name.service, or rc-service $name stop)."
+if [[ -n $replacement_token || -n $replacement_manifest ]]; then
+  [[ $component == agent && -f $record && -n $qui_version && -f $replacement_token && ! -L $replacement_token && -f $replacement_manifest && ! -L $replacement_manifest ]] || fail 'Replacement requires an installed Agent, release version, manifest and recovery token.'
+  [[ -z $config && $reinstall == false ]] || fail 'Cannot combine Agent replacement with --config or --reinstall.'
+else
+  service_is_active "$name" && fail "Stop $name before installing or upgrading (systemctl stop $name.service, or rc-service $name stop)."
+fi
 if [[ -e $removed || -L $removed ]]; then
   $reinstall || fail 'The component was uninstalled; use --reinstall after inspecting the retained record.'
   [[ -f $removed && ! -L $removed && $(stat -c '%u:%a:%h' "$removed") == 0:600:1 ]] || fail 'Unsafe retained uninstall record.'
@@ -689,6 +696,16 @@ if ! getent passwd "$account" >/dev/null; then
 fi
 [[ $(id -u "$account") != 0 && $(id -g "$account") != 0 && $(id -gn "$account") == "$account" ]] || fail 'Service account must be a dedicated non-root account.'
 account_uid=$(id -u "$account"); account_gid=$(id -g "$account")
+if [[ -n $replacement_token ]]; then
+  if command -v apk >/dev/null; then
+    apk add --no-cache jq openssl || fail 'Cannot install Agent replacement verification tools.'
+  else
+    ensure_command jq jq 'Agent release manifest'
+    ensure_command openssl openssl 'Agent release signature'
+  fi
+  . "$root/linux/agent-replace.sh"
+  replace_installed_agent "$stage/program" "$replacement_token" "$replacement_manifest" "$qui_version" "$(host_architecture)"
+fi
 if [[ $component == panel ]]; then
   install -d -o "$account" -g "$account" -m 0750 "$etc" "$etc/tls"
 else

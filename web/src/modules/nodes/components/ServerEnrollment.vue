@@ -15,12 +15,20 @@
         </div>
       </div>
       <p v-if="coreValidationError" role="alert" class="text-xs text-ios-red">{{ coreValidationError }}</p>
+      <fieldset v-if="recoveryId" class="space-y-2 text-sm">
+        <legend class="font-semibold">安装位置</legend>
+        <label class="mr-4 inline-flex items-center gap-1"><input v-model="replacementTarget" type="radio" value="current" /> 覆盖当前机器</label>
+        <label class="inline-flex items-center gap-1"><input v-model="replacementTarget" type="radio" value="new" /> 在新机器登记</label>
+      </fieldset>
+      <p v-if="recoveryId && replacementTarget === 'new'" role="note" class="text-sm text-ios-orange">请在干净的新机器执行。新 Agent 登记成功后旧证书立即失效。旧机队列仍留在旧机，此命令不会补传或清理旧机数据。</p>
+      <p v-else-if="recoveryId" role="note" class="text-sm text-ios-orange">请在旧 Agent 所在服务器运行。命令会停止代理，最后一批流量和访问记录经面板确认后，删除旧 Agent 的本机数据并重新登记。面板配置和历史保留。</p>
       <WebUpgradeOption v-model="webUpgrade" />
       <p class="text-xs text-ios-tertiary">面板地址：<code class="font-mono">{{ host }}:{{ port }}</code>（{{ fromSettings ? '取自 系统设置 → 节点安装连接地址' : '当前浏览器地址' }}）；如需修改请到 系统设置 → 节点安装连接地址。</p>
       <p class="text-xs text-ios-tertiary">Agent gRPC 地址与端口默认取面板地址与面板实际监听端口，可在 系统设置 → 节点安装连接地址 里覆盖。命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
       <CodePreview v-if="command" :code="command" title="一键安装命令" />
       <p v-else class="text-sm text-ios-red">面板地址无效，请在 系统设置 → 节点安装连接地址 中设置</p>
     </div>
+    <p v-else-if="recoveryId" role="alert" class="text-sm text-ios-red">当前面板缺少发布版本或证书摘要，无法生成重装命令。</p>
     <div v-else class="space-y-2">
       <CodePreview :code="enrollment?.enrollmentToken || ''" />
       <p class="text-xs text-ios-tertiary">本地 / 开发构建无法生成一键命令，请使用注册码手动登记。</p>
@@ -37,9 +45,9 @@
 </template>
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
-import { enrollmentStage, type EnrollmentStage } from '../enrollmentStage';
+import { enrollmentStage, recoveryEnrollmentStage, type EnrollmentStage } from '../enrollmentStage';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../api';
-import { CORE_INSTALL_OPTIONS, sortInstallCores, validateInstallCores, setReissuingNodeId, reissuingNodeId } from '../coreInstallOptions';
+import { CORE_INSTALL_OPTIONS, sortInstallCores, reportedInstallCores, validateInstallCores, setReissuingNodeId, reissuingNodeId } from '../coreInstallOptions';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
 import { saveNodeMeta } from '../nodeMeta';
 import { formFromSettings, payloadFromForm } from '../machineTrafficModel';
@@ -60,6 +68,9 @@ const form = reactive<ServerEditFormState>({ name: '', region: '', remark: '', r
 const connectionForm = reactive({ connectHost: '', portRange: '' });
 const machineForm = ref(formFromSettings(null, 'GB'));
 const error = ref(''), metaWarning = ref('');
+const recoveryId = ref('');
+const reportedPrimary = ref<CoreName>();
+const replacementTarget = ref<'current' | 'new'>('current');
 const enrollment = ref<Enrollment | null>(null);
 const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), webUpgrade = ref(false), fromSettings = ref(false);
 const installAvailable = computed(() => Boolean(enrollment.value?.install?.version && enrollment.value?.install?.caSha256));
@@ -71,11 +82,11 @@ const command = computed(() => {
   const item = enrollment.value;
   if (!item || !installAvailable.value || !/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
   if (!coreValidation.value.valid) return '';
-  const orderedCores = sortInstallCores(cores.value);
+  const orderedCores = sortInstallCores(cores.value, reportedPrimary.value);
   // grpcHost '' keeps the panel address; grpcPort 0 keeps the listening port the
   // enrollment response reported. Both are overridden only by the saved setting.
   return installCommand({ version: item.install.version, host: host.value, httpPort: port.value,
-    grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: orderedCores, webUpgrade: webUpgrade.value });
+    grpcHost: grpcHost.value, grpcPort: grpcPort.value || item.install.grpcPort, caSha256: item.install.caSha256, token: item.enrollmentToken, cores: orderedCores, webUpgrade: webUpgrade.value, replaceAgent: Boolean(recoveryId.value) && replacementTarget.value === 'current' });
 });
 // Each opening of the dialog gets its own number, so a late settings answer for
 // an earlier opening is ignored. This cannot compare `enrollment.value` with
@@ -104,6 +115,16 @@ async function checkStage() {
   const current = stageGeneration, id = stageNodeId;
   stageReading = current;
   try {
+    if (recoveryId.value) {
+      const recovery = await nodeAPI.recoveryStatus(id);
+      if (current !== stageGeneration) return;
+      const waiting = recoveryEnrollmentStage(recovery.status, recovery.id === recoveryId.value);
+      if (waiting) {
+        enrollmentStageInfo.value = waiting;
+        if (recovery.status !== 'issued' || recovery.id !== recoveryId.value) stopStageWatcher();
+        return;
+      }
+    }
     const node = await nodeAPI.get(id);
     if (current !== stageGeneration) return;
     const stage = enrollmentStage(node.status);
@@ -146,7 +167,10 @@ onUnmounted(() => {
 });
 
 let showGeneration = 0;
-function showInstall(item: Enrollment) {
+function showInstall(item: Enrollment, replacement = '', installedCores: CoreName[] = ['xray']) {
+  reportedPrimary.value = replacement ? installedCores[0] : undefined;
+  replacementTarget.value = 'current';
+  recoveryId.value = replacement;
   startStageWatcher(item.node.id);
   const current = ++showGeneration;
   enrollment.value = item;
@@ -158,7 +182,7 @@ function showInstall(item: Enrollment) {
   grpcHost.value = '';
   grpcPort.value = 0;
   fromSettings.value = false;
-  cores.value = ['xray'];
+  cores.value = installedCores;
   webUpgrade.value = false;
   installOpen.value = true;
   void resolveInstallEndpoint().then(endpoint => {
@@ -205,15 +229,19 @@ async function reissue(node: NodeView) {
   setReissuingNodeId(node.id);
   metaWarning.value = '';
   try {
-    const item = await nodeAPI.reissueEnrollment(node.id);
-    showInstall(item);
+    if (node.status === 'pending') {
+      showInstall(await nodeAPI.reissueEnrollment(node.id));
+    } else {
+      const item = await nodeAPI.issueRecovery(node.id, { revokeNow: false, expiresInSeconds: 3600 });
+      showInstall(item, item.recoveryId, reportedInstallCores(node.capabilities));
+    }
   }
   catch (e) { showToast((e as Error).message, 'error'); }
   finally {
     setReissuingNodeId(null);
   }
 }
-function installCode(id: string) { return enrollment.value?.node.id === id ? installAvailable.value ? command.value : enrollment.value.enrollmentToken : ''; }
+function installCode(id: string) { return enrollment.value?.node.id === id ? installAvailable.value ? command.value : recoveryId.value ? '' : enrollment.value.enrollmentToken : ''; }
 function open() {
   error.value = '';
   Object.assign(form, { name: '', region: '', remark: '', renewDate: '', renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年', enabled: true, allowSubscription: true, maintenance: false, tags: [] });

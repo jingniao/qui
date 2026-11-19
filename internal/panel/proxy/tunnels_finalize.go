@@ -162,7 +162,7 @@ func (s *Service) prepareTunnelPublication(ctx context.Context, selection Publis
 	if err = s.Repository.replaceManagedInboundsTx(ctx, tx, p.previous, p.desired); err != nil {
 		return p, "", nil, err
 	}
-	if err = tx.Commit(); err != nil {
+	if err = s.Repository.commitDraft(tx); err != nil {
 		return p, "", nil, err
 	}
 	snapshots := []NodeSnapshot{}
@@ -237,7 +237,7 @@ func (s *Service) FinalizeTunnelPublication(ctx context.Context, batchID string)
 	if _, err = tx.ExecContext(ctx, "UPDATE deployment_batches SET tunnel_finalized=1 WHERE id=? AND tunnel_finalized=0", batchID); err != nil {
 		return false, err
 	}
-	if err = tx.Commit(); err != nil {
+	if err = r.commitDraft(tx); err != nil {
 		return false, err
 	}
 	return true, nil

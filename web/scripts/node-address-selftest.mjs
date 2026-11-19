@@ -144,3 +144,7 @@ assert.deepEqual(stage.enrollmentStage('pending'), { label: '等待 Agent 登记
 assert.deepEqual(stage.enrollmentStage('online'), { label: '已上线', done: true });
 assert.equal(stage.enrollmentStage('offline').label, '已登记，等待连接');
 console.log('PASS P1 ENROLLMENT STAGE');
+
+assert.equal(stage.recoveryEnrollmentStage('issued', true)?.done, false);
+assert.equal(stage.recoveryEnrollmentStage('consumed', false)?.done, false);
+assert.equal(stage.recoveryEnrollmentStage('consumed', true), null);

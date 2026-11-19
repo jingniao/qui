@@ -66,4 +66,13 @@ assert.equal(mod.isNodeReissuing('n2'), false);
 mod.setReissuingNodeId(null);
 assert.equal(mod.isNodeReissuing('n1'), false);
 
+assert.deepEqual(mod.reportedInstallCores({core_name:'sing-box'}), ['sing-box']);
+assert.deepEqual(mod.reportedInstallCores({cores:[{name:'sing-box'}]}), ['sing-box']);
+assert.deepEqual(mod.reportedInstallCores({cores:[{name:'gost'},{name:'xray'}]}), ['xray','gost']);
+const singBoxPrimary = mod.reportedInstallCores({core_name:'sing-box', cores:[{name:'xray'},{name:'sing-box'},{name:'gost'}]});
+assert.deepEqual(singBoxPrimary, ['sing-box','xray','gost']);
+assert.deepEqual(mod.sortInstallCores(['gost','xray','sing-box'], singBoxPrimary[0]), singBoxPrimary);
+assert.deepEqual(mod.sortInstallCores(['gost','xray'], singBoxPrimary[0]), ['xray','gost']);
+assert.deepEqual(mod.reportedInstallCores({}), []);
+
 console.log('PASS CORE INSTALL OPTIONS: selftest passed successfully');

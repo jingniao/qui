@@ -161,6 +161,64 @@ func waitForWelcome(t *testing.T, stream *fakeAgentStream) {
 	}
 }
 
+type replacementStream struct {
+	*fakeAgentStream
+	accept metadata.MD
+	final  metadata.MD
+}
+
+func (s *replacementStream) SendHeader(md metadata.MD) error { s.accept = md; return nil }
+func (s *replacementStream) SetTrailer(md metadata.MD)       { s.final = md }
+func (s *replacementStream) Recv() (*pb.AgentMessage, error) {
+	if s.hello == nil {
+		return nil, io.EOF
+	}
+	return s.fakeAgentStream.Recv()
+}
+
+func TestReplacementDrainBoundToLiveRecoveryAndOldIdentity(t *testing.T) {
+	p := newRecoveryPanel(t)
+	n, leaf := enrolledAgentNode(t, p)
+	control := &Control{Repository: p.Repository, Authority: p.authority}
+	_, token, _, err := p.IssueRecovery(p.ctx, n.ID, "owner", time.Hour, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, digest string
+		allowed      bool
+	}{
+		{"wrong token", Hash("unrelated"), false}, {"matching recovery", Hash(token), true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := newFakeAgentStream(t, leaf, n.ID, "drain")
+			fake.ctx = metadata.NewIncomingContext(fake.ctx, metadata.Pairs(pb.ReplacementDrain, test.digest))
+			stream := &replacementStream{fakeAgentStream: fake}
+			err := control.Connect(stream)
+			if test.allowed {
+				if err != nil || len(stream.accept.Get(pb.ReplacementDrain)) != 1 || len(stream.final.Get(pb.ReplacementDrain)) != 1 {
+					t.Fatal(err, stream.accept, stream.final)
+				}
+			} else if err == nil || len(stream.final) != 0 {
+				t.Fatal("wrong token confirmed", err, stream.final)
+			}
+		})
+	}
+	request, _ := p.request(t, token, "replaced")
+	if _, err = control.Enroll(enrollmentPeer(), request); err != nil {
+		t.Fatal(err)
+	}
+	late := &pb.AgentMessage{NodeId: n.ID, MessageId: "old-heartbeat", Sequence: 1, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Heartbeat{Heartbeat: &pb.Heartbeat{}}}
+	if _, err := p.Repository.record(p.ctx, n.ID, pki.Fingerprint(leaf), late); !errors.Is(err, ErrIdentity) {
+		t.Fatalf("retired heartbeat wrote new runtime state: %v", err)
+	}
+	stream := &replacementStream{fakeAgentStream: newFakeAgentStream(t, leaf, n.ID, "after-recovery")}
+	stream.ctx = metadata.NewIncomingContext(stream.ctx, metadata.Pairs(pb.ReplacementDrain, Hash(token)))
+	if err = control.Connect(stream); status.Code(err) != codes.Unauthenticated || len(stream.final) != 0 {
+		t.Fatal("retired certificate confirmed", err, stream.final)
+	}
+}
+
 // Disconnect ends the live stream of a node, so the reinstalled Agent is not
 // refused as a duplicate connection, and the stale entry is not left behind.
 func TestDisconnectEndsLiveStreamAndAllowsReconnect(t *testing.T) {

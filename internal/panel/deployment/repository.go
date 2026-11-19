@@ -16,6 +16,8 @@ import (
 )
 
 type Repository struct {
+	// Queued informs displays only after a newly queued deployment commits.
+	Queued   func(revision int64)
 	Database *sql.DB
 	Vault    *vault.Vault
 	// Applied is called with the node ID and the operation name ("post-deploy"
@@ -258,7 +260,13 @@ func (r *Repository) Deploy(ctx context.Context, id int64) error {
 	if _, err := tx.ExecContext(ctx, "UPDATE config_revisions SET status='pending' WHERE id=?", id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if r.Queued != nil {
+		r.Queued(id)
+	}
+	return nil
 }
 func (r *Repository) Pending(ctx context.Context, nodeID string) (*pb.ApplyCommand, error) {
 	var id int64

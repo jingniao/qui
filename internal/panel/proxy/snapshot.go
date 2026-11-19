@@ -131,33 +131,15 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 		state.Outbounds = append(state.Outbounds, outbound)
 	}
 	for _, record := range inbounds {
-		// A component being added or removed is not selectable yet: its capability
-		// report is stale in both directions.
-		if node.CoreSelectionIsBlocked(n, record.Core) {
-			return state, enabled, fmt.Errorf("inbound %s: %w", record.ID, ErrCoreSelectionPending)
-		}
-		if err := ValidateInboundCore(n.Capabilities, record.Core, record.Protocol); err != nil {
+		inbound, err := renderInboundBase(n, record)
+		if err != nil {
 			return state, enabled, err
-		}
-		// A stored inbound is published only to a core that has declared the
-		// xhttp/Reality settings contract: a revision restored from a backup, or
-		// one older than the capability report, must not reach an Agent that would
-		// silently ignore the settings.
-		if err := ValidateInboundServerSettings(n.Capabilities, record.Core, record.Protocol, record.Settings); err != nil {
-			return state, enabled, fmt.Errorf("入站「%s」（%s）：%w", record.Name, record.ID, err)
-		}
-		// An acme inbound is published with the pair read from the certificate
-		// library; one without a pair must fail the publication instead of reaching
-		// a node without its certificate.
-		if record.TLSSource == TLSSourceACME && record.Settings.PrivateKeyPEM == "" {
-			return state, enabled, fmt.Errorf("inbound %s: 所选证书尚未签发成功，无法发布", record.ID)
 		}
 		// The intent is taken before the auto-disable below: an inbound the
 		// Owner enabled stays in it even while it has no users.
 		if record.Enabled {
 			enabled = append(enabled, record.ID)
 		}
-		inbound := desiredstate.Inbound{Core: record.Core, ID: record.ID, Protocol: record.Protocol, Listen: record.Listen, Port: record.Port, Enabled: record.Enabled, DefaultOutbound: record.DefaultOutbound, SubscriptionVisible: record.SubscriptionVisible, Settings: record.Settings, CredentialIDs: []string{}}
 		if record.InternalRelay {
 			if record.RelayCredentialID != "" {
 				credential, err := s.Repository.Credential(ctx, record.RelayCredentialID)
@@ -191,7 +173,6 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 					inbound.Settings.WireGuard.Peers = append(inbound.Settings.WireGuard.Peers, desiredstate.WireGuardPeer{PublicKey: public, AllowedIPs: binding.TunnelAddresses, CredentialID: credential.ID})
 				}
 			}
-			inbound.SubscriptionVisible = false
 		} else {
 			if inbound.Protocol == "wireguard" {
 				copy := *inbound.Settings.WireGuard
@@ -280,35 +261,67 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 			return state, enabled, err
 		}
 		state.ProxyChains = append(state.ProxyChains, chain.Desired())
-		for index, hop := range chain.Hops {
-			if hop.TargetNodeID != nodeID {
-				continue
-			}
-			next := chain.FinalOutboundID
-			if index+1 < len(chain.Hops) {
-				next = chain.Hops[index+1].OutboundID
-			}
-			for position := range state.Inbounds {
-				if state.Inbounds[position].ID == hop.TargetInboundID {
-					// Keep the chain's data and end-to-end health probe on the
-					// declared path. A standalone hop's Direct fallback must not
-					// silently turn this chain into a different exit.
-					continuation := next
-					for _, outbound := range state.Outbounds {
-						if outbound.ID == next && outbound.Protocol != "direct" && outbound.Protocol != "block" {
-							copy := outbound
-							copy.ID = "_chain_continue_" + chain.ID
-							copy.FailurePolicy = "Block"
-							copy.BackupTargetID = ""
-							state.Outbounds = append(state.Outbounds, copy)
-							continuation = copy.ID
-							break
-						}
+		applyChainContinuation(&state, nodeID, chain)
+	}
+	return state, enabled, state.Validate()
+}
+
+// Publication and the status projection share the access-independent listener fields.
+func renderInboundBase(n node.Node, record Inbound) (desiredstate.Inbound, error) {
+	// A component being added or removed is not selectable yet: its capability
+	// report is stale in both directions.
+	if node.CoreSelectionIsBlocked(n, record.Core) {
+		return desiredstate.Inbound{}, fmt.Errorf("inbound %s: %w", record.ID, ErrCoreSelectionPending)
+	}
+	if err := ValidateInboundCore(n.Capabilities, record.Core, record.Protocol); err != nil {
+		return desiredstate.Inbound{}, err
+	}
+	// A stored inbound is published only to a core that has declared the
+	// xhttp/Reality settings contract: a revision restored from a backup, or
+	// one older than the capability report, must not reach an Agent that would
+	// silently ignore the settings.
+	if err := ValidateInboundServerSettings(n.Capabilities, record.Core, record.Protocol, record.Settings); err != nil {
+		return desiredstate.Inbound{}, fmt.Errorf("入站「%s」（%s）：%w", record.Name, record.ID, err)
+	}
+	// An acme inbound is published with the pair read from the certificate
+	// library; one without a pair must fail the publication instead of reaching
+	// a node without its certificate.
+	if record.TLSSource == TLSSourceACME && record.Settings.PrivateKeyPEM == "" {
+		return desiredstate.Inbound{}, fmt.Errorf("inbound %s: 所选证书尚未签发成功，无法发布", record.ID)
+	}
+	inbound := desiredstate.Inbound{Core: record.Core, ID: record.ID, Protocol: record.Protocol, Listen: record.Listen, Port: record.Port, Enabled: record.Enabled, DefaultOutbound: record.DefaultOutbound, SubscriptionVisible: record.SubscriptionVisible && !record.InternalRelay, Settings: record.Settings, CredentialIDs: []string{}}
+	return inbound, nil
+}
+
+// A receiving chain hop overrides the listener's default outbound.
+func applyChainContinuation(state *desiredstate.State, nodeID string, chain Chain) {
+	for index, hop := range chain.Hops {
+		if hop.TargetNodeID != nodeID {
+			continue
+		}
+		next := chain.FinalOutboundID
+		if index+1 < len(chain.Hops) {
+			next = chain.Hops[index+1].OutboundID
+		}
+		for position := range state.Inbounds {
+			if state.Inbounds[position].ID == hop.TargetInboundID {
+				// Keep the chain's data and end-to-end health probe on the
+				// declared path. A standalone hop's Direct fallback must not
+				// silently turn this chain into a different exit.
+				continuation := next
+				for _, outbound := range state.Outbounds {
+					if outbound.ID == next && outbound.Protocol != "direct" && outbound.Protocol != "block" {
+						copy := outbound
+						copy.ID = "_chain_continue_" + chain.ID
+						copy.FailurePolicy = "Block"
+						copy.BackupTargetID = ""
+						state.Outbounds = append(state.Outbounds, copy)
+						continuation = copy.ID
+						break
 					}
-					state.Inbounds[position].DefaultOutbound = continuation
 				}
+				state.Inbounds[position].DefaultOutbound = continuation
 			}
 		}
 	}
-	return state, enabled, state.Validate()
 }

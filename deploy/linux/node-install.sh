@@ -52,6 +52,7 @@ usage() {
                         面板证书覆盖、且不经终止 TLS 的反向代理／CDN 的地址）
   --core xray|sing-box|gost  可重复，例如 --core xray --core sing-box（默认 xray）
   --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
+  --replace-agent       在旧 Agent 所在机器停止代理，上传最后数据。面板确认后删除旧 Agent 本机数据并重新登记。
   --web-upgrade         安装完成后启用 Agent 网页升级（默认不启用；之后也可在本机运行 qui-update --component agent 启用）
   --bundle FILE --sums FILE
                         离线安装：用本地发布归档与其 SHA256SUMS，不访问 GitHub
@@ -77,8 +78,10 @@ core_source=qui
 bundle_file=''
 sums_file=''
 web_upgrade=false
+replace_agent=false
 while (($#)); do
   case $1 in
+    --replace-agent) replace_agent=true; shift;;
     --web-upgrade) web_upgrade=true; shift;;
     --version|--panel|--grpc-host|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums|--core-source)
       (($# >= 2)) || fail "缺少 $1 的值。"
@@ -169,7 +172,9 @@ done
 # operations manual. A host that still runs the Agent service is refused as well,
 # because install.sh and enroll.sh both require the service to be stopped.
 identity_certificate=/var/lib/proxy-agent/identity/client.crt
-if [[ -e $identity_certificate || -L $identity_certificate ]]; then
+if $replace_agent; then
+  [[ -f $identity_certificate && ! -L $identity_certificate ]] || fail '重装需要原 Agent 身份。如前次命令已确认上传并清除本机数据，去掉 --replace-agent 继续安装登记。'
+elif [[ -e $identity_certificate || -L $identity_certificate ]]; then
   fail '本机已安装并登记 Agent；升级用 qui-update，重新登记见 docs/operations.md 第 5 节'
 fi
 # OpenRC has no is-active; the runscript's status is the equivalent verdict.
@@ -178,7 +183,7 @@ if [[ $init_system == systemd ]]; then
 else
   if rc-service proxy-agent status >/dev/null 2>&1; then agent_running=true; else agent_running=false; fi
 fi
-if $agent_running; then
+if $agent_running && ! $replace_agent; then
   fail '请先停止 proxy-agent 服务（systemctl stop proxy-agent.service 或 rc-service proxy-agent stop）再重跑本脚本。'
 fi
 
@@ -306,18 +311,23 @@ for core in "${cores[@]}"; do
   fi
   if [[ -n $core_digest ]]; then core_arguments+=(--core-sha256 "$core_digest"); fi
 done
-printf '\nInstalling Agent and cores: %s ...\n' "${cores[*]}"
-"$source_dir/deploy/linux/install.sh" --node --binary "$binary" --sha256 "$digest" "${core_arguments[@]}" \
-  || fail 'Agent 安装失败（原因见上面 install.sh 的输出）；install.sh 可能已经替换了部分文件，本机尚未登记，修正问题后可以直接重跑本脚本（install.sh 原地升级）。'
+install_agent() {
+  printf '\nInstalling Agent and cores: %s ...\n' "${cores[*]}"
+  if ! "$source_dir/deploy/linux/install.sh" --node --binary "$binary" --sha256 "$digest" "${core_arguments[@]}" "$@"; then
+    if $replace_agent; then fail 'Agent 重装失败，按上方停止、上传、清理或安装阶段的原始错误处理。'; fi
+    fail 'Agent 安装失败；修复 install.sh 报告的错误后重试。'
+  fi
+  install -d -o root -g proxy-agent -m 0750 /etc/proxy-agent/certs || fail '无法创建 /etc/proxy-agent/certs。'
+}
+if ! $replace_agent; then install_agent; fi
 
 config=/etc/proxy-agent/config.yaml
 ca_file=/etc/proxy-agent/tls/ca.crt
+if $replace_agent; then ca_file=$directory/replacement-ca.crt; fi
 # The Agent's own certificate directory (v1.4.7 section 3): an inbound may name a
 # certificate and key file from here instead of pasted material. install.sh
 # created it above; repeating it keeps the one-command install self-contained and
 # idempotent, because a re-run over an existing installation must not fail.
-install -d -o root -g proxy-agent -m 0750 /etc/proxy-agent/certs \
-  || fail '无法创建 /etc/proxy-agent/certs。'
 # 443 is the implicit HTTPS port of a URL, not the default: the default 22550 and
 # every other port has to be spelled out in the URL that fetches the CA.
 authority=$panel
@@ -330,6 +340,7 @@ printf '\n获取面板证书信任锚：%s\n' "$ca_url"
 # anchor is not installed, or enrollment never ran. Rerunning this script with the
 # same registration token works until it expires, so every failure here says so.
 retry_note='本机尚未登记：注册码未过期时可以原样重跑本脚本。'
+if $replace_agent; then retry_note='旧 Agent 数据保留，修复连接后重跑覆盖命令。'; fi
 
 # Explain a failed GET /install/ca.pem from curl's HTTP status ("000" when the
 # server never answered at all) and its exit code, so the operator reads which of
@@ -437,6 +448,7 @@ read_value() {
 # sed -i replaces the file through a temporary one, so the owner and mode of the
 # service configuration are recorded first and restored (and verified) after the
 # rewrite: the Agent runs as proxy-agent and reads this file itself.
+write_endpoint_config() {
 [[ -f $config && ! -L $config ]] || fail "缺少配置文件：$config（Agent 安装未完成）。"
 metadata=$(stat -c '%u:%g:%a' "$config")
 sed -i -e "s/^control_address:.*/control_address: $grpc_host:$grpc_port/" -e "s/^server_name:.*/server_name: $grpc_host/" "$config" \
@@ -448,6 +460,9 @@ chmod "$mode" -- "$config" || fail "无法恢复 $config 的权限。"
 [[ $(read_value "$config" control_address) == "$grpc_host:$grpc_port" ]] || fail "配置里的 control_address 不是 $grpc_host:$grpc_port：$config"
 [[ $(read_value "$config" server_name) == "$grpc_host" ]] || fail "配置里的 server_name 不是 $grpc_host：$config"
 printf '已写入 control_address: %s 与 server_name: %s。\n' "$grpc_host:$grpc_port" "$grpc_host"
+
+}
+if ! $replace_agent; then write_endpoint_config; fi
 
 # The enrollment that follows is the Agent's first real gRPC handshake: config.yaml
 # now names $grpc_host:$grpc_port and $ca_file is its trust anchor. Behind Cloudflare or
@@ -514,6 +529,13 @@ check_grpc_endpoint() {
     verdict=$(grpc_preflight_verdict "$status")
   else
     tls_checked=false
+    if ${replace_agent:-false}; then
+      # gRPC requires HTTP/2. openssl can verify TLS with ALPN even if curl lacks that feature.
+      local verify_name=(-verify_hostname "$grpc_host")
+      [[ ! $grpc_host =~ ^[0-9.]+$ ]] || verify_name=(-verify_ip "$grpc_host")
+      timeout 10 openssl s_client -alpn h2 -connect "$grpc_host:$grpc_port" -servername "$grpc_host" -CAfile "$ca_file" -verify_return_error "${verify_name[@]}" </dev/null >/dev/null || fail '重装前 gRPC TLS 预检失败。'
+      return
+    fi
     if tcp_reachable "$grpc_host" "$grpc_port"; then verdict=ok; else verdict=unreachable; fi
   fi
   case $verdict in
@@ -532,12 +554,27 @@ check_grpc_endpoint() {
       fail "无法连接面板的 gRPC 端口 $grpc_host:$grpc_port（$note）：本机到该端口没有通路——防火墙未放行、--grpc-host／--grpc-port 填错，或者这个主机名走的是不转发该端口的 CDN。登记要求 Agent 直连这个端口。$retry_note"
       ;;
     *)
+      if ${replace_agent:-false}; then fail "重装前 gRPC 预检失败（curl $status）。"; fi
       printf '警告：无法判断 Agent gRPC 端点 %s:%s 的状态（curl 退出码 %s），继续登记；若登记失败请核对 --grpc-host、--grpc-port 与面板证书。\n' "$grpc_host" "$grpc_port" "$status" >&2
       ;;
   esac
 }
 printf '\n检查 Agent gRPC 端点：https://%s:%s/\n' "$grpc_host" "$grpc_port"
 check_grpc_endpoint
+if $replace_agent; then
+  manifest_name=proxy-agent-$version-linux-$architecture.manifest.json
+  if [[ -n $bundle_file ]]; then
+    manifest=$(dirname -- "$bundle_file")/$manifest_name
+  else
+    manifest=$directory/$manifest_name
+    download "$base/$manifest_name" "$manifest"
+  fi
+  printf '%s:%s\n' "$grpc_host" "$grpc_port" > "$directory/replacement-endpoint"
+  printf '%s\n' "$token" > "$directory/recovery-token"
+  install_agent --replacement-token-file "$directory/recovery-token" --replacement-manifest "$manifest"
+  install -o root -g proxy-agent -m 0644 -- "$ca_file" /etc/proxy-agent/tls/ca.crt
+  write_endpoint_config
+fi
 
 # A run whose enrollment failed leaves its retry marker (enrollment-attempt.json)
 # and the private key it generated. The Agent binds both to that token and panel
@@ -550,7 +587,15 @@ check_grpc_endpoint
 data_directory=/var/lib/proxy-agent
 [[ ! -e $data_directory/enrollment-result.json && ! -L $data_directory/enrollment-result.json ]] \
   || fail '本机存在未完成确认的登记结果（enrollment-result.json）；处理方法见 docs/operations.md 第 5 节。'
-if [[ -e $data_directory/enrollment-attempt.json || -L $data_directory/enrollment-attempt.json ]]; then
+same_enrollment_attempt() {
+  local attempt=$1 digest
+  [[ -f $attempt && ! -L $attempt ]] || return 1
+  digest=$(printf '%s' "$token" | sha256sum) || fail '无法校验登记尝试。'
+  # identity.PrepareEnrollmentAttempt writes this exact compact field. The
+  # Agent itself authenticates the original control binding before reuse.
+  grep -Fq -- "\"tokenSha256\":\"${digest%% *}\"" "$attempt"
+}
+if [[ -e $data_directory/enrollment-attempt.json || -L $data_directory/enrollment-attempt.json ]] && ! same_enrollment_attempt "$data_directory/enrollment-attempt.json"; then
   retired=$(mktemp -d /var/lib/proxy-agent-enrollment-retired.XXXXXXXX) || fail '无法创建旧登记尝试的保留目录。'
   mv -- "$data_directory/enrollment-attempt.json" "$retired/" || fail '无法移走旧的登记尝试。'
   if [[ -e $data_directory/identity/client.key || -L $data_directory/identity/client.key ]]; then
@@ -567,7 +612,10 @@ printf '\n登记节点 ...\n'
 if ! "$source_dir/deploy/linux/enroll.sh" --token-file "$token_file"; then
   rm -f -- "$token_file"
   rmdir -- "$token_directory" 2>/dev/null || true
-  fail "节点登记失败；注册码可能已过期或已被使用。请确认本机能访问面板的 gRPC 端口（$grpc_host:$grpc_port，默认 18880），且 --grpc-host 与 --grpc-port 填写正确，然后在面板里新建节点注册，用新的安装命令重跑本脚本（本机尚未登记，可以重跑）。"
+  if $replace_agent; then
+    fail '旧数据已清除。保留当前登记尝试和私钥，在原机去掉命令的 --replace-agent 后重试。恢复码已失效或被其他机器核销时，从面板同一台服务器的安装入口选择「在新机器登记」重新签发。'
+  fi
+  fail "节点登记失败；注册码可能已过期或已被使用。请确认本机能访问面板的 gRPC 端口（$grpc_host:$grpc_port，默认 18880），且 --grpc-host 与 --grpc-port 填写正确，然后在面板里从原服务器的安装入口重新签发。在相同令牌下重试会沿用已生成的私钥。"
 fi
 rm -f -- "$token_file"
 rmdir -- "$token_directory" 2>/dev/null || true

@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -190,7 +191,11 @@ func (c *Control) Enroll(ctx context.Context, request *pb.EnrollRequest) (*pb.En
 	}
 	c.Runtime.afterCommit(id)
 	if purpose == "recover" {
-		c.Disconnect(id)
+		c.mu.Lock()
+		if live := c.connected[id]; live != nil && live.fingerprint != pki.Fingerprint(cert) {
+			live.cancel()
+		}
+		c.mu.Unlock()
 	}
 	return &pb.EnrollResponse{NodeId: id, CertificatePem: encoded, CaPem: c.Authority.PEM, ExpiresAt: timestamppb.New(cert.NotAfter)}, nil
 }
@@ -236,30 +241,57 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	entry := &liveStream{cancel: cancel, fingerprint: fingerprint}
 	c.connected[id] = entry
 	c.mu.Unlock()
-	if c.Connections != nil {
-		c.Connections.SetGateSupport(id, first.GetHello().DeviceGateSupported && c.DeviceGates != nil)
-	}
 	defer func() {
-		if c.Connections != nil {
-			c.Connections.SetGateSupport(id, false)
-		}
-		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if err := c.Repository.Offline(cleanup, id); err == nil {
-			c.Runtime.afterCommit(id)
-		} else if c.Logger != nil {
-			c.Logger.Error("persist offline node status", "node", id, "error", err)
-		}
-		c.Repository.unconfirmTuning(cleanup, id)
-		c.notifyHeartbeat(id)
 		c.mu.Lock()
 		if current := c.connected[id]; current == entry {
 			delete(c.connected, id)
 		}
 		c.mu.Unlock()
 	}()
-	if err := c.Repository.unconfirmTuning(ctx, id); err != nil {
-		return status.Error(codes.Internal, "tuning recovery failed")
+	// A recovery may have committed while this peer waited to send Hello.
+	if err := c.Repository.ValidateIdentity(ctx, id, fingerprint); err != nil {
+		return status.Error(codes.Unauthenticated, "node certificate revoked or unknown")
+	}
+	drainValues := metadata.ValueFromIncomingContext(ctx, pb.ReplacementDrain)
+	draining := len(drainValues) != 0
+	validateDrain := func() error {
+		if len(drainValues) != 1 || len(drainValues[0]) != 64 {
+			return status.Error(codes.InvalidArgument, "invalid recovery token digest")
+		}
+		if err := c.Repository.checkReplacementDrain(ctx, id, fingerprint, drainValues[0]); err != nil {
+			return status.Error(codes.FailedPrecondition, err.Error())
+		}
+		return nil
+	}
+	if draining {
+		if err := validateDrain(); err != nil {
+			return err
+		}
+		if err := stream.SendHeader(metadata.Pairs(pb.ReplacementDrain, "ready")); err != nil {
+			return err
+		}
+	}
+	if !draining {
+		if c.Connections != nil {
+			c.Connections.SetGateSupport(id, first.GetHello().DeviceGateSupported && c.DeviceGates != nil)
+		}
+		defer func() {
+			if c.Connections != nil {
+				c.Connections.SetGateSupport(id, false)
+			}
+			cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := c.Repository.Offline(cleanup, id); err == nil {
+				c.Runtime.afterCommit(id)
+			} else if c.Logger != nil {
+				c.Logger.Error("persist offline node status", "node", id, "error", err)
+			}
+			c.Repository.unconfirmTuning(cleanup, id)
+			c.notifyHeartbeat(id)
+		}()
+		if err := c.Repository.unconfirmTuning(ctx, id); err != nil {
+			return status.Error(codes.Internal, "tuning recovery failed")
+		}
 	}
 	sentTuningID := ""
 	last, err := c.Repository.HandshakeSequence(ctx, id, first.GetHello().LastAckedSequence)
@@ -269,17 +301,19 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if first.GetHello().LastAckedSequence > last {
 		return status.Error(codes.FailedPrecondition, "central sequence older than node state")
 	}
-	if err := c.Repository.AgentVersion(ctx, id, first.GetHello().AgentVersion); err != nil {
-		return status.Error(codes.Internal, "node version persistence failed")
-	}
-	c.Runtime.afterCommit(id)
 	restartSupported := first.GetHello().CoreRestartSupported
-	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET core_restart_supported=? WHERE id=?", restartSupported, id); err != nil {
-		return status.Error(codes.Internal, "restart capability persistence failed")
-	}
 	healthCheckSupported := first.GetHello().HealthCheckSupported
-	if err := c.Repository.healthCapability(ctx, id, healthCheckSupported); err != nil {
-		return status.Error(codes.Internal, "health capability persistence failed")
+	if !draining {
+		if err := c.Repository.AgentVersion(ctx, id, first.GetHello().AgentVersion); err != nil {
+			return status.Error(codes.Internal, "node version persistence failed")
+		}
+		c.Runtime.afterCommit(id)
+		if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET core_restart_supported=? WHERE id=?", restartSupported, id); err != nil {
+			return status.Error(codes.Internal, "restart capability persistence failed")
+		}
+		if err := c.Repository.healthCapability(ctx, id, healthCheckSupported); err != nil {
+			return status.Error(codes.Internal, "health capability persistence failed")
+		}
 	}
 	retirementRecorder, retirementOK := c.AccessRecorder.(interface {
 		NegotiateTrafficDelivery(context.Context, string, string, string, uint64, uint64) error
@@ -303,25 +337,29 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	// The GOST flag is the Agent's own statement that it can install and remove
 	// the GOST component, even while GOST is absent, so it is what gates a GOST
 	// install task; it is never inferred from the Agent version text.
-	gostSupported := first.GetHello().GostCoreSupported
-	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET multi_core_supported=?,node_traffic_supported=?,gost_core_supported=? WHERE id=?", multiSupported, nodeTrafficSupported, gostSupported, id); err != nil {
-		return status.Error(codes.Internal, "multi-core negotiation persistence failed")
-	}
 	updateSupported := first.GetHello().CoreUpdateSupported && c.CoreUpdates != nil
 	agentUpdateSupported := first.GetHello().AgentUpdateSupported && c.AgentUpdates != nil
 	agentRecoverySupported := agentUpdateSupported && first.GetHello().AgentRecoverySupported
-	if err := c.Repository.AgentUpdateSupport(ctx, id, agentUpdateSupported, agentRecoverySupported); err != nil {
-		return status.Error(codes.Internal, "Agent update capability persistence failed")
+	if !draining {
+		gostSupported := first.GetHello().GostCoreSupported
+		if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET multi_core_supported=?,node_traffic_supported=?,gost_core_supported=? WHERE id=?", multiSupported, nodeTrafficSupported, gostSupported, id); err != nil {
+			return status.Error(codes.Internal, "multi-core negotiation persistence failed")
+		}
+		if err := c.Repository.AgentUpdateSupport(ctx, id, agentUpdateSupported, agentRecoverySupported); err != nil {
+			return status.Error(codes.Internal, "Agent update capability persistence failed")
+		}
+		if err := c.Repository.CoreUpdateSupport(ctx, id, updateSupported); err != nil {
+			return status.Error(codes.Internal, "core update capability persistence failed")
+		}
+		// Closing a stale update waits until this connection stored fresh
+		// capabilities; see coreUpdateCapabilitiesStored.
 	}
-	if err := c.Repository.CoreUpdateSupport(ctx, id, updateSupported); err != nil {
-		return status.Error(codes.Internal, "core update capability persistence failed")
-	}
-	// Closing a stale update waits until this connection stored fresh
-	// capabilities; see coreUpdateCapabilitiesStored.
 	coreUpdates := &coreUpdateSession{}
 	settingsSession := &settingsContractSession{}
-	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=? WHERE id=?", first.GetHello().TcpProbeSupported, id); err != nil {
-		return status.Error(codes.Internal, "probe capability persistence failed")
+	if !draining {
+		if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=? WHERE id=?", first.GetHello().TcpProbeSupported, id); err != nil {
+			return status.Error(codes.Internal, "probe capability persistence failed")
+		}
 	}
 	serverSequence := uint64(0)
 	send := func(payload any) error {
@@ -383,7 +421,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 	}()
 	var changes <-chan struct{}
-	if c.GateChanges != nil {
+	if !draining && c.GateChanges != nil {
 		var cancel func()
 		changes, cancel = c.GateChanges()
 		defer cancel()
@@ -392,13 +430,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	defer refresh.Stop()
 	var gateDelivery deviceGateDelivery
 	sendGates := func() error {
-		if !first.GetHello().DeviceGateSupported || c.DeviceGates == nil {
+		if draining || !first.GetHello().DeviceGateSupported || c.DeviceGates == nil {
 			return nil
 		}
 		if c.Repository.ValidateIdentity(ctx, id, fingerprint) != nil {
 			return status.Error(codes.Unauthenticated, "node certificate revoked or disabled")
 		}
-		current, e := c.Repository.Get(ctx, id)
+		current, e := c.Repository.GetForCoreSelection(ctx, id)
 		if e != nil || !AnyGateSupported(current.Capabilities) {
 			return nil
 		}
@@ -427,6 +465,12 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		message, err := packet.message, packet.err
 		if errors.Is(err, io.EOF) {
+			if draining {
+				if err := validateDrain(); err != nil {
+					return err
+				}
+				stream.SetTrailer(metadata.Pairs(pb.ReplacementDrain, "confirmed"))
+			}
 			return nil
 		}
 		if err != nil {
@@ -434,6 +478,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		if err := c.Repository.ValidateIdentity(ctx, id, fingerprint); err != nil {
 			return status.Error(codes.Unauthenticated, "node certificate revoked or disabled")
+		}
+		if draining && message.GetTrafficConfirmation() == nil && message.GetTrafficBatch() == nil && message.GetAccessBatch() == nil {
+			return status.Error(codes.InvalidArgument, "only final telemetry is accepted during replacement")
 		}
 		if err := validateMessage(id, message); err != nil {
 			return status.Error(codes.InvalidArgument, err.Error())
@@ -602,7 +649,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			_ = c.Repository.Database.QueryRowContext(ctx, "SELECT capabilities_json FROM nodes WHERE id=?", id).Scan(&prev)
 			wasEmptyCaps = (prev == "" || prev == "{}")
 		}
-		accepted, err := c.Repository.Record(ctx, id, message)
+		accepted, err := c.Repository.record(ctx, id, fingerprint, message)
+		if errors.Is(err, ErrIdentity) {
+			return status.Error(codes.Unauthenticated, "node certificate retired during message processing")
+		}
 		if errors.Is(err, ErrSequence) {
 			return status.Error(codes.FailedPrecondition, err.Error())
 		}
@@ -648,6 +698,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if err := send(&pb.Ack{AgentSequence: accepted, AccessBatchId: accessBatchID, TrafficBatchId: trafficBatchID, TrafficQueueId: message.GetTrafficBatch().GetQueueId(), TrafficDeliverySeq: message.GetTrafficBatch().GetDeliverySeq()}); err != nil {
 			return err
 		}
+		if draining {
+			continue
+		}
 		// Gates are volatile, refreshed on the live stream, and never queued for
 		// an older peer. Reconnection starts a fresh refresh cycle.
 		if err := sendGates(); err != nil {
@@ -685,7 +738,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if command, err := c.Repository.pendingTuning(ctx, id); err != nil {
 			return status.Error(codes.Internal, "tuning command unavailable")
 		} else if command != nil && command.RequestId != sentTuningID {
-			current, err := c.Repository.Get(ctx, id)
+			current, err := c.Repository.GetForCoreSelection(ctx, id)
 			if err != nil {
 				return err
 			}

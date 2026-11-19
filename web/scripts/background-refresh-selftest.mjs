@@ -21,9 +21,14 @@ const detail = read('modules/users/pages/UserDetailPage.vue');
 const activity = detail.slice(detail.indexOf('function loadActivity('), detail.indexOf('const refreshStatus ='));
 const user = ref({ id: 'u', username: 'user', usedTraffic: 4 });
 const traffic = ref({ observations: 8 }), accesses = ref([{ id: 'a' }]), operations = ref([{ id: 7 }]);
-const run = new Function('accessAPI', 'request', 'trafficSummary', 'recentAccessList', 'userOperations', 'user', 'userId', 'userAPI', 'loginEnabled', 'document', 'showToast', compile('let userGeneration = 0, loadingUser = false;\n' + activity + '\nreturn { loadActivity, refreshUserStatus };'))(
-  { accounts: reject, list: reject }, reject, traffic, accesses, operations, user, ref('u'), { get: reject }, ref(false), { hidden: false }, (...args) => toasts.push(args));
+const activityToasts = [];
+const run = new Function('accessAPI', 'request', 'trafficSummary', 'recentAccessList', 'userOperations', 'user', 'userId', 'userAPI', 'loginEnabled', 'document', 'showToast', compile('let userGeneration = 0, activityGeneration = 0, loadingUser = false;\n' + activity + '\nreturn { loadActivity, refreshUserStatus };'))(
+  { accounts: reject, list: reject }, reject, traffic, accesses, operations, user, ref('u'), { get: reject }, ref(false), { hidden: false }, (...args) => activityToasts.push(args));
 run.loadActivity(user.value, 0); await tick(); await run.refreshUserStatus();
-assert.equal(toasts.length, 1, 'activity and status refresh errors are silent');
+assert.deepEqual(activityToasts.map(([message]) => message).sort(), [
+  '流量记录读取失败：offline', '访问记录读取失败：offline',
+  '操作记录读取失败：offline', '用户状态刷新失败：offline'
+].sort(), 'failed user sections report their original errors');
+assert.ok(activityToasts.every(([, kind]) => kind === 'error'));
 assert.deepEqual(traffic.value, { observations: 8 }); assert.deepEqual(accesses.value, [{ id: 'a' }]); assert.deepEqual(operations.value, [{ id: 7 }]); assert.equal(user.value.usedTraffic, 4);
-console.log('PASS background refresh: notification events and user reads preserve data without toasts; explicit reads report errors');
+console.log('PASS background refresh: notification events stay silent; user failures report original errors and preserve data');

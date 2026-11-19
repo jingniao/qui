@@ -1,7 +1,9 @@
 <template>
-  <details :open="open" class="rounded-2xl border border-ios-border p-4 text-sm text-ios-secondary">
+  <details :open="open" class="rounded-2xl border border-ios-border p-4 text-sm text-ios-secondary" @toggle="emit('toggle', ($event.target as HTMLDetailsElement).open)">
     <summary class="cursor-pointer font-medium">高级选项</summary>
-    <div class="space-y-4 mt-4">
+    <p v-if="error" role="alert" class="mt-4 text-ios-red">{{ error }} <button type="button" class="ios-btn-secondary" @click="emit('retry')">重试</button></p>
+    <p v-else-if="!ready" role="status" class="mt-4">正在读取出站与授权用户…</p>
+    <div v-else class="space-y-4 mt-4">
       <label class="block">监听地址<input v-model="form.listen" placeholder="例如 0.0.0.0 或 127.0.0.1" class="form-input-base mt-2 font-mono" />
         <span class="block text-xs mt-1">入站绑定的本地地址；一般保留 0.0.0.0（全部网卡），只想让本机或中转进程连接时填 127.0.0.1。</span>
       </label>
@@ -29,5 +31,6 @@
 import type { InboundInput, Outbound, OutboundGroup, ProxyChain } from '../../api';
 import type { UserChoice } from '../../../users/api';
 import { internalRelaySettingsReason } from './nodeEditorModel';
-defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: UserChoice[]; open?: boolean }>();
+defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: UserChoice[]; open?: boolean; ready: boolean; error: string }>();
+const emit = defineEmits<{ toggle: [open: boolean]; retry: [] }>();
 </script>

@@ -393,6 +393,8 @@ check 'a curl without HTTP/2 falls back to a TCP check' 1 preflight 127.0.0.1 1
 check 'the fallback is reported as a TCP-only result' 0 \
   grep -q 'TCP 连接被拒绝或超时' <<<"$(preflight 127.0.0.1 1 2>&1 || true)"
 
+bash "$script_dir/agent-replace-test.sh"
+
 # --- Summary ---------------------------------------------------------------------
 printf '\nnode-install-test: %s passed, %s failed\n' "$passes" "$failed"
 ((failed == 0)) || exit 1

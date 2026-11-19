@@ -38,6 +38,7 @@
           v-if="user"
           type="button"
           @click="openEdit"
+          :disabled="!choicesReady"
           class="ios-btn-primary inline-flex items-center gap-1.5"
         >
           <span>✏️</span> 编辑用户
@@ -49,6 +50,7 @@
     <LoadingSkeleton v-else-if="!user" />
 
     <template v-else>
+      <ErrorState v-if="choicesError" :message="choicesError" @retry="load" />
 
       <!-- 1. 用量概况 (4 KPI Cards) -->
       <section class="space-y-3">
@@ -253,8 +255,8 @@
               <span class="text-xs font-semibold">用户门户地址</span>
               <div class="flex flex-wrap gap-2">
                 <input readonly :value="portalUrl" class="form-input-base font-mono select-all max-w-sm" />
-                <button type="button" class="ios-btn-secondary" @click="copyText(portalUrl)">复制</button>
-                <button v-if="subUrl" type="button" class="ios-btn-secondary" @click="copyText(portalShareText(portalUrl, subUrl))">复制门户地址和订阅链接</button>
+                <button type="button" :disabled="!portalEndpointLoaded" class="ios-btn-secondary" @click="copyText(portalUrl)">复制</button>
+                <button v-if="subUrl" type="button" :disabled="!portalEndpointLoaded" class="ios-btn-secondary" @click="copyText(portalShareText(portalUrl, subUrl))">复制门户地址和订阅链接</button>
               </div>
               <p class="text-xs text-ios-secondary">用户在这个地址（面板根地址）用用户名和门户密码登录。</p>
             </div>
@@ -655,6 +657,8 @@ const previewItems = ref<Awaited<ReturnType<typeof userAPI.preview>>['items']>([
 const previewLoaded = ref(false);
 const previewFailed = ref(false);
 const error = ref('');
+const choicesError = ref('');
+const choicesReady = ref(false);
 
 // 订阅与二维码
 const subUrl = ref('');
@@ -665,31 +669,37 @@ const linkMessage = ref('');
 const loginEnabled = ref(false), loginPassword = ref(''), loginBusy = ref(false), revokeVisible = ref(false);
 const defaultFormat = ref('');
 const installEndpoint = ref<{ host: string; httpPort: number } | null>(null);
-const portalUrl = computed(() => portalAddress(installEndpoint.value, window.location.host));
+const portalEndpointLoaded = ref(false);
+const portalUrl = computed(() => portalEndpointLoaded.value ? portalAddress(installEndpoint.value, window.location.host) : '');
 const clientRows = computed(() =>
   orderedSubscriptionClients(subFormats.value.map(f => f.id), defaultFormat.value)
     .map(c => ({ ...c, url: subFormats.value.find(f => f.id === c.format)?.url ?? '' }))
     .filter(c => c.url));
 const defaultFormatLabel = computed(() => (defaultFormat.value ? subscriptionClient(defaultFormat.value).label : '系统默认格式'));
-async function loadPortalContext() {
-  const [policy, endpoint] = await Promise.all([
-    settingsAPI.runtimePolicy().then(r => r.policy.subscriptionFormat).catch(() => settingsAPI.subscriptionFormats().then(r => r.default).catch(() => '')),
-    settingsAPI.installEndpoint().catch(() => null)
+async function loadPortalContext(current = userGeneration) {
+  portalEndpointLoaded.value = false;
+  await Promise.all([
+    settingsAPI.runtimePolicy().then(policy => {
+      if (current === userGeneration) defaultFormat.value = policy.policy.subscriptionFormat;
+    }).catch(e => { if (current === userGeneration) showToast(`订阅格式设置读取失败：${(e as Error).message}`, 'error'); }),
+    settingsAPI.installEndpoint().then(endpoint => {
+      if (current === userGeneration) { installEndpoint.value = endpoint; portalEndpointLoaded.value = true; }
+    }).catch(e => { if (current === userGeneration) showToast(`门户地址设置读取失败：${(e as Error).message}`, 'error'); })
   ]);
-  defaultFormat.value = policy;
-  installEndpoint.value = endpoint;
 }
 function absoluteLink(path: string) { return new URL(path, window.location.origin).href; }
 function formatQR(path: string) {
   try { subQrSvg.value = generateQRCodeSVG(absoluteLink(path), 160); }
   catch { subQrSvg.value = ''; showToast('链接过长，无法生成二维码，请复制链接。', 'warning'); }
 }
-async function loadSubscription() {
+async function loadSubscription(id = userId.value, current = userGeneration) {
   subUrl.value = ''; subFormats.value = []; subQrSvg.value = ''; linkMessage.value = '';
   try {
-    const link = await request<{ path: string; formats: { id: string; url: string }[] }>(`/users/${userId.value}/subscription-link`);
+    const link = await request<{ path: string; formats: { id: string; url: string }[] }>(`/users/${id}/subscription-link`);
+    if (current !== userGeneration) return;
     subUrl.value = absoluteLink(link.path); subFormats.value = link.formats;
   } catch (e) {
+    if (current !== userGeneration) return;
     if (e instanceof APIError && e.code === 'link_not_recoverable') linkMessage.value = '重置后可查看';
     else if (e instanceof APIError && e.status === 404) linkMessage.value = '尚无订阅链接，请重置以创建';
     else linkMessage.value = (e as Error).message;
@@ -1007,70 +1017,84 @@ async function load() {
   const id = userId.value;
   if (!id || route.name !== 'UserDetail') { loadingUser = false; return; }
   error.value = '';
-  try {
-    const [u, gRes, nRes, ibRes] = await Promise.all([
-      userAPI.get(id).then(value => {
-        if (current === userGeneration) { user.value = value; loginEnabled.value = value.loginEnabled; }
-        return value;
-      }),
-      readPages(page => groupAPI.list(page, 100)),
-      readPages(page => nodeAPI.list(page, '', false, 100)),
-      readPages(page => proxyAPI.inbounds('', page, 100))
-    ]);
+  choicesError.value = '';
+  choicesReady.value = false;
+  const options = Promise.all([
+    readPages(page => groupAPI.list(page, 100)),
+    readPages(page => nodeAPI.choices(page, '', 100)),
+    readPages(page => proxyAPI.inbounds('', page, 100))
+  ]).then(([gRes, nRes, ibRes]) => {
     if (current !== userGeneration) return;
     groups.value = gRes.items;
     allNodes.value = nRes.items;
     memberInbounds.value = ibRes.items;
-
-    void loadSubscription();
-    void loadPortalContext();
-    void userAPI.preview(id)
-      .then(result => { if (current !== userGeneration) return; previewItems.value = result.items; previewFailed.value = false; })
-      .catch(() => { if (current !== userGeneration) return; previewItems.value = []; previewFailed.value = true; })
-      .finally(() => { if (current === userGeneration) previewLoaded.value = true; });
-
-    loadActivity(u, current);
+    choicesReady.value = true;
+  }).catch(e => {
+    if (current === userGeneration) choicesError.value = `授权节点与分组读取失败：${(e as Error).message}`;
+  });
+  try {
+    void loadPortalContext(current);
+    await userAPI.get(id).then(value => {
+        if (current === userGeneration) {
+          user.value = value; loginEnabled.value = value.loginEnabled;
+          void loadSubscription(id, current);
+          void userAPI.preview(id)
+            .then(result => { if (current !== userGeneration) return; previewItems.value = result.items; previewFailed.value = false; })
+            .catch(() => { if (current !== userGeneration) return; previewFailed.value = true; })
+            .finally(() => { if (current === userGeneration) previewLoaded.value = true; });
+          loadActivity(value, current);
+        }
+        return value;
+      });
 
   } catch (e) {
     if (current === userGeneration) error.value = (e as Error).message;
   } finally { if (current === userGeneration) loadingUser = false; }
+  await options;
 }
 
+let activityGeneration = 0;
 function loadActivity(u: NonNullable<typeof user.value>, current: number) {
+    const activity = ++activityGeneration;
+    const isCurrent = () => current === userGeneration && activity === activityGeneration;
+    const failed = (section: string, e: unknown) => {
+      if (isCurrent()) showToast(`${section}读取失败：${(e as Error).message}`, 'error');
+    };
     // 获取流量历史与请求
     void accessAPI.accounts({ userId: u.id }).then(summary => {
-      if (current !== userGeneration) return;
+      if (!isCurrent()) return;
       trafficSummary.value = {
         uploadBytes: summary.uploadBytes || 0,
         downloadBytes: summary.downloadBytes || 0,
         observations: summary.observations || 0
       };
-    }).catch(() => { /* 后台刷新失败，保留上次数据。 */ });
+    }).catch(e => failed('流量记录', e));
 
     void accessAPI.list({ userId: u.id }, 1).then(res => {
-      if (current !== userGeneration) return;
+      if (!isCurrent()) return;
       recentAccessList.value = res.items.slice(0, 10);
-    }).catch(() => { /* 后台刷新失败，保留上次数据。 */ });
+    }).catch(e => failed('访问记录', e));
 
     // 获取管理员对该用户的操作记录
     Promise.all([
       request<Page<Operation>>(`/operations?page=1&pageSize=10&keyword=${encodeURIComponent(u.username)}`),
       request<Page<Operation>>(`/operations?page=1&pageSize=10&keyword=${encodeURIComponent(u.id)}`)
     ]).then(([res1, res2]) => {
-      if (current !== userGeneration) return;
+      if (!isCurrent()) return;
       const map = new Map<number, Operation>();
       for (const it of res1.items) map.set(it.id, it);
       for (const it of res2.items) map.set(it.id, it);
       const merged = Array.from(map.values());
       merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       userOperations.value = merged.slice(0, 10);
-    }).catch(() => { /* 后台刷新失败，保留上次数据。 */ });
+    }).catch(e => failed('操作记录', e));
 
 }
 
 async function refreshUserStatus() {
   if (document.hidden || loadingUser || !user.value) return;
-  const current = ++userGeneration;
+  const current = userGeneration;
+  loadingUser = true;
   try {
     const result = await userAPI.get(userId.value);
     if (current !== userGeneration) return;
@@ -1078,7 +1102,9 @@ async function refreshUserStatus() {
     user.value = result;
     loadActivity(result, current);
     if (!editingLogin) loginEnabled.value = result.loginEnabled;
-  } catch { /* 后台刷新失败，保留上次状态。 */ }
+  } catch (e) {
+    if (current === userGeneration) showToast(`用户状态刷新失败：${(e as Error).message}`, 'error');
+  } finally { if (current === userGeneration) loadingUser = false; }
 }
 const refreshStatus = throttleTrailing(() => { void refreshUserStatus(); }, 5000);
 function visibilityChanged() { if (!document.hidden) refreshStatus(); }

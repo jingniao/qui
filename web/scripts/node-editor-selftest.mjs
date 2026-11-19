@@ -721,7 +721,7 @@ console.log('PASS NODE_EDITOR_INTEGRATION: Owner action permissions and import l
 // This checks failures without a browser, real backend, or a duplicate save flow.
 const setup = drawer.split('<script setup lang="ts">')[1].split('</script>')[0].replace(/^import .*;\n/gm, '');
 const setupCode = ts.transpileModule(setup, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
-function saveHarness(mode) {
+function saveHarness(mode, overrides = {}) {
   const calls = [], events = [];
   const deps = {
     computed, reactive, ref, watch: () => {}, onMounted: () => {}, onUnmounted: () => {},
@@ -733,7 +733,9 @@ function saveHarness(mode) {
     freshGroup: async id => ({ id, inboundIds: ['other-inbound'], imports: [{ sourceId: 'source', proxyKey: '' }] }),
     groupAPI: { save: async (id, value) => { calls.push(['group', id, value]); if (mode === 'group-error') throw Error('group refused'); } },
     choices: async read => (await read(1, 100)).items,
+    userAPI: { choices: async () => ({ items: [] }) },
     proxyAPI: {
+      outbounds: async () => ({ items: [] }), groups: async () => ({ items: [] }), chains: async () => ({ items: [] }),
       inbounds: async () => ({ items: [], total: 0 }),
       saveInbound: async (id, value) => {
         calls.push(['save', id, value]); if (mode === 'save-error') throw Error('save refused');
@@ -748,12 +750,39 @@ function saveHarness(mode) {
       return { revision: 42, status: 'queued' };
     } }
   };
-  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { save, state, servers, savedId, savedInbound, result, error, busy, loading, selectedGroupIds, initialGroupIds };`);
+  Object.assign(deps, overrides);
+  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { load, loadError, readAdvanced, advancedError, save, state, servers, savedId, savedInbound, result, error, busy, loading, selectedGroupIds, initialGroupIds };`);
   const view = run(deps);
   view.loading.value = false; // This harness exercises saving after required choices finish loading.
   view.servers.value = [server]; view.state.form.name = 'Tokyo-vless-1443'; view.state.form.port = 1443;
   return { ...view, calls, events };
 }
+const optionReads = [];
+const option = (name, items = []) => async () => { optionReads.push(name); return { items }; };
+const warm = saveHarness('load', {
+  defineProps: () => ({ serverId: '', inbound: null, origin: 'list', serverChoices: [server], inboundChoices: [], groupChoices: [] }),
+  protocolOptions: { inbound: ['vless'] }, loadProtocolSupport: async () => {},
+  nodeAPI: { choices: option('servers', [server]) }, groupAPI: { list: option('node groups') }, userAPI: { choices: option('users') },
+  certificatesAPI: { list: async () => [] }, loadNodeMeta: async () => {},
+  proxyAPI: { inbounds: option('inbounds'), outbounds: option('outbounds'), groups: option('egress groups'), chains: option('chains') }
+});
+await warm.load();
+assert.equal(warm.loadError.value, '');
+assert.equal(warm.state.form.nodeId, server.id);
+assert.deepEqual(optionReads.filter(name => ['servers', 'inbounds', 'node groups'].includes(name)), [], 'warm drawer must reuse complete list choices, including empty lists');
+assert.deepEqual(optionReads, [], 'closed advanced section needs no user or egress choices on first display');
+let failChoices = true;
+const retryChoices = saveHarness('options', { userAPI: { choices: async () => {
+  if (failChoices) throw Error('user directory offline');
+  return { items: [] };
+} } });
+await retryChoices.save(false);
+assert.match(retryChoices.advancedError.value, /user directory offline/);
+assert.deepEqual(retryChoices.calls, [], 'unavailable choices block submission');
+failChoices = false;
+await retryChoices.save(false);
+assert.deepEqual(retryChoices.calls.map(call => call[0]), ['save']);
+console.log('PASS drawer reuses three page lists, defers four advanced reads, and failed options block save until retry succeeds');
 assert.deepEqual(api.withInboundMembership(['other', 'saved'], 'saved', false), ['other']);
 assert.deepEqual(api.withInboundMembership(['other'], 'saved', true), ['other', 'saved']);
 const groupSave = saveHarness('groups'); groupSave.selectedGroupIds.value = ['group']; await groupSave.save(true);

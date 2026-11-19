@@ -391,7 +391,7 @@ func (s *Service) DeleteInbound(ctx context.Context, id string) (InboundDeleteRe
 		if err == nil {
 			err = s.applyRelayDeletion(ctx, tx, p)
 			if err == nil {
-				err = tx.Commit()
+				err = s.Repository.commitDraft(tx)
 			}
 			tx.Rollback()
 		}
@@ -423,6 +423,7 @@ func (s *Service) PrepareNodeDeletion(ctx context.Context, id string) (node.Dele
 		}
 	}
 	return node.DeletionCascade{Preview: p.preview, Removed: removed, Apply: func(ctx context.Context, tx *sql.Tx) error { return s.applyRelayDeletion(ctx, tx, p) }, AfterCommit: func(ctx context.Context) ([]node.CleanupPendingNode, error) {
+		s.Repository.notifyDraft()
 		items, err := s.deletionPendingNodes(ctx, p)
 		out := []node.CleanupPendingNode{}
 		for _, i := range items {

@@ -257,3 +257,32 @@ func (r *Repository) FinishRecoveryRedeploy(ctx context.Context, nodeID string, 
 	_, err := r.Database.ExecContext(ctx, "UPDATE node_identity_recoveries SET redeploy_state=?,redeploy_revision=?,redeploy_code=? WHERE node_id=? AND redeploy_state IN ('queued','pending')", state, revision, code, nodeID)
 	return err
 }
+
+func (r *Repository) checkReplacementDrain(ctx context.Context, nodeID, fingerprint, digest string) error {
+	tx, err := r.Database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var found int
+	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM node_enrollment_tokens t
+		JOIN node_identities i ON i.node_id=t.node_id AND i.fingerprint=t.bound_fingerprint
+		JOIN nodes n ON n.id=t.node_id
+		WHERE t.token_hash=? AND t.node_id=? AND t.purpose='recover' AND t.bound_fingerprint=?
+		AND t.consumed_at IS NULL AND t.expires_at>? AND i.revoked_at IS NULL AND i.expires_at>?
+		AND n.enabled=1 AND n.deleted_at IS NULL`, digest, nodeID, fingerprint, timestamp(time.Now()), timestamp(time.Now())).Scan(&found)
+	if err != nil {
+		return err
+	}
+	if found != 1 {
+		return errors.New("issued recovery token must match the stopped Agent identity")
+	}
+	blockers, err := recoveryBlockers(ctx, tx, nodeID)
+	if err != nil {
+		return err
+	}
+	if len(blockers) > 0 {
+		return &BlockedError{Items: blockers, Code: "node_recovery_blocked"}
+	}
+	return tx.Commit()
+}

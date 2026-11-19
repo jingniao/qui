@@ -125,7 +125,7 @@ func (s *Service) finishCanvasRemoval(ctx context.Context, plan CanvasRemovePlan
 			return err
 		}
 	}
-	return tx.Commit()
+	return s.Repository.commitDraft(tx)
 }
 
 func deleteCanvasCleanupObjects(ctx context.Context, tx *sql.Tx, objects []CanvasRemoveObject) error {

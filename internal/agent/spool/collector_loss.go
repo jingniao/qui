@@ -240,3 +240,21 @@ func (s *Spool) CheckpointCollectorLoss(ctx context.Context, process string, gen
 	}
 	return state, tx.Commit()
 }
+
+// ConfirmCollectorClosed reads the original authenticated shutdown checkpoint.
+// Beginning a new collector here would discard the very evidence being checked.
+func (s *Spool) ConfirmCollectorClosed(ctx context.Context, stopRequested time.Time) error {
+	tx, err := s.database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	state, err := s.readCollectorLoss(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !state.EndConfirmed || state.CheckpointAt.Before(stopRequested) {
+		return errors.New("final collector flush was not confirmed; original queue retained")
+	}
+	return tx.Commit()
+}

@@ -509,7 +509,7 @@ func (r *Repository) replaceManagedInbounds(ctx context.Context, remove, desired
 	if err = r.replaceManagedInboundsTx(ctx, tx, remove, desired); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return r.commitDraft(tx)
 }
 
 func (r *Repository) replaceManagedInboundsTx(ctx context.Context, tx *sql.Tx, remove, desired []managedInbound) error {

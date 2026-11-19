@@ -168,6 +168,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	displayAccess := &access.Repository{Database: s.readPool, Vault: configurationVault}
 	eventBus := &events.Bus{}
 	s.eventBus = eventBus
+	notifyDraft := func() { eventBus.Publish("proxy_draft", map[string]bool{"changed": true}) }
+	nodeRepository.GroupsChanged = notifyDraft
+	deployments.Queued = func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }
 	runtimeSnapshots, err := node.NewRuntimeSnapshots(s.readPool, func(snapshot node.RuntimeSnapshot) { eventBus.Publish("node_runtime", snapshot) })
 	if err != nil {
 		return nil, fmt.Errorf("initialize runtime snapshots: %w", err)
@@ -338,7 +341,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	nodeHandler.Install = s.installInfo
 	nodeHandler.Register(mux, &node.Handler{Repository: displayNodes, Runtime: runtimeSnapshots, Auth: authHandler})
 	nodeHandler.RegisterGroups(mux)
-	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates}, Nodes: nodeRepository, EntryGroups: nodeRepository}
+	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates, DraftChanged: notifyDraft}, Nodes: nodeRepository, EntryGroups: nodeRepository}
 	proxyService.RelayCleanupRequested = s.relayCleanup.Reconcile
 	nodeRepository.RelayDeletion = proxyService
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
@@ -400,7 +403,10 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		}
 		return time.LoadLocation(base.Timezone)
 	}
-	s.certificates.Renewed = s.certificateDeployer.renewed
+	s.certificates.Renewed = func(ctx context.Context, certificateID string) {
+		notifyDraft()
+		s.certificateDeployer.renewed(ctx, certificateID)
+	}
 	s.latencyScheduler = &node.LatencyScheduler{Repository: nodeRepository, Logger: logger}
 	s.cycleScheduler = &cycleScheduler{users: users, nodes: nodeRepository, settings: systemRepository, quota: s.quotaDeployer, now: time.Now, publish: eventBus.Publish}
 	users.TrafficApplied = s.quotaDeployer.evaluate
@@ -485,7 +491,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		}
 		return endpoint.Host, endpoint.HTTPPort
 	}}).Register(mux)
-	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux, &deployment.Handler{Repository: displayDeployments, Auth: authHandler})
+	displayCertificates := certificate.NewService(&certificate.Repository{Database: s.readPool, Vault: configurationVault})
+	displayProxy := &proxy.Service{Repository: &proxy.Repository{Database: s.readPool, Vault: configurationVault, Certificates: displayCertificates}, Nodes: displayNodes}
+	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux, &deployment.Handler{Repository: displayDeployments, Nodes: displayNodes, Proxy: displayProxy, Auth: authHandler})
 	notificationRepo := &notification.Repository{Database: database, Vault: configurationVault}
 	s.notificationWorker = &notification.Worker{
 		Repository: notificationRepo,

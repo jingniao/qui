@@ -31,6 +31,7 @@ export function connectEvents() {
     try { await refreshSession(); if (!authState.isAuthenticated) window.dispatchEvent(new Event('auth-expired')); } catch { /* EventSource retries temporary failures. */ }
   };
   connection.addEventListener('deployment_status', () => window.dispatchEvent(new Event('proxy-deployment-status')));
+  connection.addEventListener('proxy_draft', () => window.dispatchEvent(new Event('proxy-draft-changed')));
   connection.addEventListener('node_status', (event) => window.dispatchEvent(new CustomEvent('proxy-node-status', { detail: parseNodeStatusMessage((event as MessageEvent).data) })));
   connection.addEventListener('node_runtime', (event) => window.dispatchEvent(new CustomEvent('proxy-node-runtime', { detail: parseRuntimeSnapshotMessage((event as MessageEvent).data) })));
   connection.addEventListener('system_settings', () => { void refreshSettingsView().catch(() => {}); });

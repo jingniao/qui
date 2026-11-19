@@ -18,3 +18,10 @@ export function enrollmentStage(status: string | undefined): EnrollmentStage {
       return { label: `状态：${status || '未知'}`, done: false };
   }
 }
+
+export function recoveryEnrollmentStage(status: string, sameRecovery: boolean): EnrollmentStage | null {
+  if (!sameRecovery) return { label: '恢复码已被替换', done: false };
+  if (status === 'consumed') return null;
+  const labels: Record<string, string> = { issued: '等待新 Agent 登记', expired: '恢复码已过期', superseded: '恢复码已被替换' };
+  return { label: labels[status] || '无法确认恢复状态', done: false };
+}

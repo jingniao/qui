@@ -267,6 +267,9 @@ if [ -f deploy/linux/tests/node-install-test.sh ]; then
   bash -n -- deploy/linux/tests/node-install-test.sh
   bash deploy/linux/tests/node-install-test.sh
 fi
+# Replacement checks use temporary paths and service substitutes, never host services.
+bash -n -- deploy/linux/tests/agent-replace-test.sh
+bash deploy/linux/tests/agent-replace-test.sh
 # tuning-helper-test.sh activates the packaged tuning units against a fake helpe
 # below /run and never writes host sysctls; the other two are rootless.
 "${as_root[@]}" bash deploy/linux/tests/tuning-helper-test.sh

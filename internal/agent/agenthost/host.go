@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ import (
 
 // Run holds supervisor ownership for its lifetime. Initialization is explicit;
 // subsequent ordinary starts automatically honor the authenticated history.
-func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (resultErr error) {
+func Run(ctx context.Context, configPath, version string, logger *slog.Logger, logs io.Writer) (resultErr error) {
 	if configPath == "" {
 		return errors.New("supervised Agent requires an explicit configuration file")
 	}
@@ -159,7 +160,7 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 		if !r.Jobs || baselinePending && baseline.Request.Revision != revision || state.Phase == "failed_closed" && state.Revision != revision {
 			return ErrState
 		}
-		process, err = agentprocess.StartControlOnly(ctx, images, state.Current, configPath, node.NodeID, revision, required, os.Stderr)
+		process, err = agentprocess.StartControlOnly(ctx, images, state.Current, configPath, node.NodeID, revision, required, logs)
 		if err != nil {
 			return err
 		}
@@ -167,7 +168,7 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 		if revision != state.Revision {
 			return errors.New("pending Agent installation revision differs from retained state")
 		}
-		driver, err := agentprocess.NewDriver(ctx, images, configPath, node.NodeID, revision, state.Current, nil, required, os.Stderr)
+		driver, err := agentprocess.NewDriver(ctx, images, configPath, node.NodeID, revision, state.Current, nil, required, logs)
 		if err != nil {
 			return err
 		}
@@ -187,7 +188,7 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 			if readErr != nil || !found || retained.Phase != "failed_closed" || retained.Current != state.Current || !r.Jobs {
 				return errors.Join(err, readErr)
 			}
-			process, readErr = agentprocess.StartControlOnly(ctx, images, retained.Current, configPath, node.NodeID, revision, required, os.Stderr)
+			process, readErr = agentprocess.StartControlOnly(ctx, images, retained.Current, configPath, node.NodeID, revision, required, logs)
 			if readErr != nil {
 				return errors.Join(err, readErr)
 			}
@@ -195,7 +196,7 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 			process = driver.Process()
 		}
 	} else {
-		process, err = agentprocess.StartRetained(ctx, images, state.Current, configPath, node.NodeID, revision, os.Stderr, r.Jobs && probe.Contract.AgentUpdateProtocol == 1, r.Jobs && probe.Contract.AgentRecoveryProtocol == 1)
+		process, err = agentprocess.StartRetained(ctx, images, state.Current, configPath, node.NodeID, revision, logs, r.Jobs && probe.Contract.AgentUpdateProtocol == 1, r.Jobs && probe.Contract.AgentRecoveryProtocol == 1)
 		if err != nil {
 			return err
 		}
@@ -203,7 +204,7 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 	if process == nil {
 		return ErrState
 	}
-	runner := &jobRunner{ctx: ctx, configPath: configPath, directory: c.DataDirectory, nodeID: node.NodeID, key: key, required: required, reader: agentstorage.Current(version), history: history, process: process}
+	runner := &jobRunner{ctx: ctx, configPath: configPath, directory: c.DataDirectory, nodeID: node.NodeID, key: key, required: required, reader: agentstorage.Current(version), history: history, process: process, logs: logs}
 	defer func() { resultErr = errors.Join(resultErr, runner.releaseBootstrap()) }()
 	startupCleanup = false
 	defer func() {

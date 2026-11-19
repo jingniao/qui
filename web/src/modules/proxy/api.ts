@@ -84,17 +84,11 @@ export interface ProtocolSupport { protocol: string; direction: string; transpor
 export const protocolOptions = reactive({ inbound: [...inboundProtocols], outbound: [...outboundProtocols], loaded: false });
 export async function loadProtocolSupport() {
   if (protocolOptions.loaded) return;
-  try {
-    const result = await request<{ protocols: ProtocolSupport[] }>('/protocol-support');
-    const inbound = result.protocols.filter(item => item.direction === 'inbound' || item.direction === 'both').map(item => item.protocol);
-    const rest = result.protocols.filter(item => item.direction === 'outbound' || item.direction === 'both').map(item => item.protocol).filter(item => item !== 'direct' && item !== 'block');
-    const outbound = ['direct', 'block', ...rest];
-    if (inbound.length) protocolOptions.inbound = inbound;
-    if (outbound.length > 2) protocolOptions.outbound = outbound;
-    protocolOptions.loaded = true;
-  } catch {
-    // Keep the static fallback when the basis cannot be read.
-  }
+  const result = await request<{ protocols: ProtocolSupport[] }>('/protocol-support');
+  protocolOptions.inbound = result.protocols.filter(item => item.direction === 'inbound' || item.direction === 'both').map(item => item.protocol);
+  const rest = result.protocols.filter(item => item.direction === 'outbound' || item.direction === 'both').map(item => item.protocol).filter(item => item !== 'direct' && item !== 'block');
+  protocolOptions.outbound = ['direct', 'block', ...rest];
+  protocolOptions.loaded = true;
 }
 
 export const proxyAPI = {

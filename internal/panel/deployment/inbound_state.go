@@ -6,10 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/pkg/contracts/desiredstate"
-	"strings"
 )
 
 // Publish states of one inbound, relative to the revision its node runs.
@@ -50,6 +50,10 @@ type inboundAttempt struct {
 // automatic quota revisions publish those on their own, so they never make an
 // inbound count as modified. Read-only.
 func (r *Repository) InboundStates(ctx context.Context, nodeID string, draft desiredstate.State, draftIntent []string) ([]InboundState, error) {
+	items := make([]InboundState, 0, len(draft.Inbounds))
+	if len(draft.Inbounds) == 0 {
+		return items, nil
+	}
 	var running desiredstate.State
 	var runningIntent []string
 	var runningRevision int64
@@ -58,24 +62,34 @@ func (r *Repository) InboundStates(ctx context.Context, nodeID string, draft des
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	attempts, err := r.newestAttempts(ctx, nodeID, draft.Inbounds)
+	byID := make(map[string]desiredstate.Inbound, len(running.Inbounds))
+	for _, in := range running.Inbounds {
+		byID[in.ID] = in
+	}
+	wanted := map[string]bool{}
+	for _, want := range draft.Inbounds {
+		item := InboundState{InboundID: want.ID, State: InboundUnpublished}
+		if have, ok := byID[want.ID]; ok {
+			item.State = InboundModified
+			if enabledIntent(runningIntent, have) == slices.Contains(draftIntent, want.ID) && sameInboundRuntime(have, want) {
+				item.State = InboundEffective
+			}
+		}
+		items = append(items, item)
+		if item.State != InboundEffective {
+			wanted[want.ID] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return items, nil
+	}
+	attempts, err := r.newestAttempts(ctx, nodeID, wanted, running)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]InboundState, 0, len(draft.Inbounds))
-	for _, want := range draft.Inbounds {
-		item := InboundState{InboundID: want.ID, State: InboundUnpublished}
-		index := slices.IndexFunc(running.Inbounds, func(have desiredstate.Inbound) bool { return have.ID == want.ID })
-		if index >= 0 {
-			item.State = InboundModified
-			have := running.Inbounds[index]
-			if enabledIntent(runningIntent, have) == slices.Contains(draftIntent, want.ID) && sameInboundRuntime(have, want) {
-				item.State = InboundEffective
-				items = append(items, item)
-				continue
-			}
-		}
-		if attempt, ok := attempts[want.ID]; ok {
+	for i := range items {
+		item := &items[i]
+		if attempt, ok := attempts[item.InboundID]; ok {
 			switch {
 			case attempt.status == "pending" && attempt.revision > runningRevision:
 				item.State = InboundPending
@@ -87,7 +101,6 @@ func (r *Repository) InboundStates(ctx context.Context, nodeID string, draft des
 				}
 			}
 		}
-		items = append(items, item)
 	}
 	return items, nil
 }
@@ -120,7 +133,7 @@ func withoutAccess(inbound desiredstate.Inbound) desiredstate.Inbound {
 // newestAttempts finds, for each inbound, the node's newest deployment whose
 // revision carries it. Revisions are opened newest first and only until every
 // inbound has been found.
-func (r *Repository) newestAttempts(ctx context.Context, nodeID string, inbounds []desiredstate.Inbound) (map[string]inboundAttempt, error) {
+func (r *Repository) newestAttempts(ctx context.Context, nodeID string, wanted map[string]bool, running desiredstate.State) (map[string]inboundAttempt, error) {
 	rows, err := r.Database.QueryContext(ctx, "SELECT revision,status,result_code FROM deployment_targets WHERE node_id=? ORDER BY revision DESC LIMIT ?", nodeID, inboundStateHistory)
 	if err != nil {
 		return nil, err
@@ -139,18 +152,17 @@ func (r *Repository) newestAttempts(ctx context.Context, nodeID string, inbounds
 		return nil, err
 	}
 	rows.Close()
-	wanted := map[string]bool{}
-	for _, inbound := range inbounds {
-		wanted[inbound.ID] = true
-	}
 	found := map[string]inboundAttempt{}
 	for _, attempt := range history {
 		if len(found) == len(wanted) {
 			break
 		}
-		state, err := r.State(ctx, attempt.revision)
-		if err != nil {
-			return nil, err
+		state := running
+		if attempt.revision != running.Revision {
+			state, err = r.State(ctx, attempt.revision)
+			if err != nil {
+				return nil, err
+			}
 		}
 		for _, carried := range state.Inbounds {
 			if _, seen := found[carried.ID]; wanted[carried.ID] && !seen {
@@ -170,10 +182,10 @@ func (h *Handler) readInboundStates(ctx context.Context, nodeID string) ([]Inbou
 	if err != nil {
 		return nil, err
 	}
-	if h.Proxy == nil || h.Users == nil {
+	if h.Proxy == nil {
 		return nil, &apiFailure{Status: 503, Code: "unavailable", Message: "Proxy configuration unavailable"}
 	}
-	draft, intent, err := h.Proxy.SnapshotIntent(ctx, nodeID, h.Users)
+	draft, intent, err := h.Proxy.InboundDraft(ctx, nodeID)
 	if err != nil {
 		return nil, &apiFailure{Status: 409, Code: "snapshot_unavailable", Message: err.Error()}
 	}

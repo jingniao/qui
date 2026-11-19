@@ -144,6 +144,14 @@ func TestACMEInboundNeedsAnIssuedCertificate(t *testing.T) {
 	if id := storedCertificateID(t, f, saved.ID); !id.Valid || id.String != "valid" {
 		t.Fatalf("reference: %+v", id)
 	}
+	draft, _, err := f.service.InboundDraft(ctx, f.nodeA)
+	if err != nil || len(draft.Inbounds) != 1 || draft.Inbounds[0].Settings.CertificatePEM != certPEM || draft.Inbounds[0].Settings.PrivateKeyPEM != keyPEM {
+		t.Fatalf("status projection lost the referenced certificate: %v", err)
+	}
+	delete(library.material, "valid")
+	if _, _, err := f.service.InboundDraft(ctx, f.nodeA); err == nil {
+		t.Fatal("status projection concealed a missing certificate")
+	}
 }
 
 // Leaving the acme source drops the reference and does not freeze the library's

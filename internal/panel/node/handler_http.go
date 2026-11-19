@@ -316,7 +316,12 @@ func (h *Handler) issueRecovery(w http.ResponseWriter, r *http.Request) {
 	if h.Install != nil {
 		install = h.Install()
 	}
-	httpapi.JSON(w, 201, map[string]any{"node": n, "enrollmentToken": token, "expiresAt": expires, "install": install, "purpose": "recover"})
+	var recoveryID string
+	if err := h.Repository.Database.QueryRowContext(r.Context(), "SELECT id FROM node_identity_recoveries WHERE token_hash=?", Hash(token)).Scan(&recoveryID); err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.JSON(w, 201, map[string]any{"node": n, "enrollmentToken": token, "expiresAt": expires, "install": install, "purpose": "recover", "recoveryId": recoveryID})
 	if body.RevokeNow && h.Disconnect != nil {
 		h.Disconnect(n.ID)
 	}

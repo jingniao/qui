@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import type { CoreName } from './api';
+import type { CoreName, NodeView } from './api';
 
 export interface CoreInstallOption {
   name: CoreName;
@@ -41,9 +41,21 @@ export function validateInstallCores(cores: CoreName[]): { valid: boolean; error
 /**
  * 将内核按安装规范排序：Xray/sing-box 在前，GOST 永远排在最后（安装脚本要求 GOST 不能是首项）。
  */
-export function sortInstallCores(cores: Iterable<CoreName>): CoreName[] {
+export function sortInstallCores(cores: Iterable<CoreName>, primary?: string): CoreName[] {
   const set = new Set(cores);
-  return CORE_INSTALL_ORDER.filter(name => set.has(name));
+  const ordered = CORE_INSTALL_ORDER.filter(name => set.has(name));
+  if ((primary === 'sing-box' || primary === 'xray') && set.has(primary)) {
+    return [primary, ...ordered.filter(name => name !== primary)];
+  }
+  return ordered;
+}
+
+// The recovery response carries the token. The server list/detail carries the
+// last actual capability report, including the scalar core on older Agents.
+export function reportedInstallCores(capabilities: NodeView['capabilities']): CoreName[] {
+  const names = (capabilities?.cores ?? []).map(core => core.name);
+  if (!names.length && capabilities?.core_name) names.push(capabilities.core_name as CoreName);
+  return sortInstallCores(names, capabilities?.core_name);
 }
 
 // 记录当前正在重新签发注册码的待登记节点 ID

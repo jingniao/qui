@@ -36,6 +36,7 @@ const (
 )
 
 type Repository struct {
+	GroupsChanged    func()
 	RelayDeletion    RelayDeletion
 	Database         *sql.DB
 	Vault            *vault.Vault
@@ -276,6 +277,10 @@ func (r *Repository) AgentVersion(ctx context.Context, id, version string) error
 }
 
 func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMessage) (uint64, error) {
+	return r.record(ctx, id, "", message)
+}
+
+func (r *Repository) record(ctx context.Context, id, fingerprint string, message *pb.AgentMessage) (uint64, error) {
 	if message == nil || message.Sequence == 0 || message.Sequence > uint64(1<<63-1) {
 		return 0, ErrSequence
 	}
@@ -288,7 +293,18 @@ func (r *Repository) Record(ctx context.Context, id string, message *pb.AgentMes
 	var enabled bool
 	var storedPublicIP, storedAddrsJSON, storedSelected string
 	var publicIPManual bool
-	if err := tx.QueryRowContext(ctx, "SELECT "+sequenceMaterialSQL+",CASE WHEN typeof(enabled)='integer' AND enabled IN (0,1) THEN enabled ELSE NULL END,public_ip,public_ip_manual,public_addresses_json,public_ip_selected FROM nodes WHERE id=?", id).Scan(&last, &enabled, &storedPublicIP, &publicIPManual, &storedAddrsJSON, &storedSelected); err != nil {
+	query := "SELECT " + sequenceMaterialSQL + ",CASE WHEN typeof(enabled)='integer' AND enabled IN (0,1) THEN enabled ELSE NULL END,public_ip,public_ip_manual,public_addresses_json,public_ip_selected FROM nodes WHERE id=?"
+	args := []any{id}
+	if fingerprint != "" {
+		// Recheck in the sequence write transaction. An old heartbeat that
+		// raced recovery cannot put the newly enrolled node online.
+		query += " AND EXISTS (SELECT 1 FROM node_identities i WHERE i.node_id=nodes.id AND i.fingerprint=? AND i.revoked_at IS NULL)"
+		args = append(args, fingerprint)
+	}
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&last, &enabled, &storedPublicIP, &publicIPManual, &storedAddrsJSON, &storedSelected); err != nil {
+		if fingerprint != "" && errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrIdentity
+		}
 		return 0, err
 	}
 	if last > uint64(1<<63-1) {
@@ -459,6 +475,17 @@ func scan(row scanner) (Node, error) {
 	return n, nil
 }
 func (r *Repository) Get(ctx context.Context, id string) (Node, error) {
+	n, err := r.GetForCoreSelection(ctx, id)
+	if err != nil {
+		return n, err
+	}
+	items := []Node{n}
+	err = r.decorateTuningAdvice(ctx, items)
+	return items[0], err
+}
+
+// GetForCoreSelection includes pending core changes without computing host tuning advice.
+func (r *Repository) GetForCoreSelection(ctx context.Context, id string) (Node, error) {
 	n, err := scan(r.Database.QueryRowContext(ctx, "SELECT "+columns+" FROM nodes WHERE id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
@@ -466,9 +493,6 @@ func (r *Repository) Get(ctx context.Context, id string) (Node, error) {
 	if err == nil {
 		items := []Node{n}
 		err = r.decorateCoreSelection(ctx, items)
-		if err == nil {
-			err = r.decorateTuningAdvice(ctx, items)
-		}
 		n = items[0]
 	}
 	return n, err

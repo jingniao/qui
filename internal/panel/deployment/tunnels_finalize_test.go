@@ -152,6 +152,8 @@ func assertRulePublication(t *testing.T, h *gostHosts, rule proxy.TunnelRule, su
 
 func TestTunnelPublicationTimeoutThenFailure(t *testing.T) {
 	h, rule, result := interruptedRulePublication(t)
+	changes := 0
+	h.service.Repository.DraftChanged = func() { changes++ }
 	batch, err := h.repository.Batch(h.ctx, result.BatchID)
 	if err != nil || len(batch.Items) != 1 {
 		t.Fatalf("single changed node must be durable: %v %v", batch, err)
@@ -162,8 +164,14 @@ func TestTunnelPublicationTimeoutThenFailure(t *testing.T) {
 	}
 	reconcileTunnelPublications(t, h, false)
 	assertRulePublication(t, h, rule, false)
+	if changes != 1 {
+		t.Fatalf("compensation must notify its committed listener change once, got %d", changes)
+	}
 	reconcileTunnelPublications(t, h, false)
 	assertRulePublication(t, h, rule, false)
+	if changes != 1 {
+		t.Fatal("already finalized publication notified again")
+	}
 }
 
 func TestTunnelPublicationRestartBeforeFinalization(t *testing.T) {

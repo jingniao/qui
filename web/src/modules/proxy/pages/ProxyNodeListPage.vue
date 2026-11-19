@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <InboundDeleteDialog ref="inboundDeleteDialog" @changed="loadData" />
+    <InboundDeleteDialog ref="inboundDeleteDialog" @changed="queueDraftRefresh" />
     <!-- Top PageHeader with Unified Actions (Aligned with Server Page) -->
     <PageHeader
       title="节点配置"
@@ -665,7 +665,7 @@
 
     <QuickRelayDialog v-if="quickRelayInboundId || quickRelayImportId" :servers="servers" :inbounds="serverInbounds" :groups="nodeGroups" :imports="proxyNodeStore.manualNodes" :initial-exit-inbound-id="quickRelayInboundId" :initial-exit-import-id="quickRelayImportId" @close="quickRelayInboundId = ''; quickRelayImportId = ''" @created="loadData" />
     <AddRelayDialog v-if="relayNode" :node-id="relayNode.sourceId || ''" :node-name="relayNode.name" :inbounds="serverInbounds" :initial-inbound-id="relayNode.inboundId" :create-scheme="createRelayScheme" :copy="copyAddress" @close="relayNode = null" @saved="loadNodeRelays" />
-    <NodeEditorDrawer v-if="openSelfHostedModal" :inbound="editingInbound" @close="openSelfHostedModal = false" @saved="loadData" />
+    <NodeEditorDrawer v-if="openSelfHostedModal" :inbound="editingInbound" :server-choices="inventory.editor.servers" :inbound-choices="inventory.editor.inbounds" :group-choices="inventory.editor.groups" @close="openSelfHostedModal = false" @saved="queueDraftRefresh" />
 
     <!-- Modal 2: Import External Node -->
     <AppDialog
@@ -1095,7 +1095,7 @@ import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
 import RelayRouteEntries from '../components/RelayRouteEntries.vue';
 import { nestRelayEntries, ruleEntryAddress } from '../nestedRelayEntries';
 import { authState } from '../../../app/auth';
-import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
+import type { NodeGroup } from '../../nodes/groupsApi';
 import { importAPI, loadImports, airportSources, describeImportResult, importCountsLine, failedImportResult } from '../importApi';
 import type { ImportResult } from '../importApi';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -1108,12 +1108,14 @@ import { listenNetworks } from '../components/node-editor/nodeEditorModel';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import { showToast } from '../../../app/api';
-import { throttleTrailing } from '../../../app/nodeStatusEvents';
+import { throttleTrailing, nodeStatusEventChangesInventory } from '../../../app/nodeStatusEvents';
+import type { RuntimeSnapshot } from '../../nodes/runtimeSnapshots';
+import { proxyPageInventory } from '../proxyPageInventory';
 import { request } from '../../../app/apiClient';
-import { nodeAPI, type NodeView } from '../../nodes/api';
+import type { NodeView } from '../../nodes/api';
 import { serverStatus } from '../../nodes/components/serverListModel';
 import { deploymentAPI } from '../../system/deploymentApi';
-import { proxyAPI, canvasAPI, type Inbound, loadProtocolSupport, choices } from '../api';
+import { canvasAPI, type Inbound, choices, loadProtocolSupport } from '../api';
 import { resolveCountryInfo, countryTitle, getNodeMeta, type CountryInfo } from '../../nodes/nodeMeta';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { isUserEntry } from '../userEntries';
@@ -1144,6 +1146,7 @@ function setDisplayMode(mode: 'grid' | 'list') {
 }
 
 const servers = ref<NodeView[]>([]);
+const inventory = proxyPageInventory();
 const now = ref(Date.now());
 const serverInbounds = ref<Inbound[]>([]);
 const entryRouteSummaries = computed(() => new Map(serverInbounds.value.filter(isUserEntry).map(inbound => [inbound.id, inbound.routeSummary])));
@@ -1244,7 +1247,9 @@ const currentPage = ref(1);
 const pageSize = 12;
 
 // Load real data
+let loadAgain = false;
 async function loadData() {
+  if (loading.value) { loadAgain = true; return; }
   const generation = ++serverRefreshGeneration;
   loading.value = true;
   try {
@@ -1253,10 +1258,10 @@ async function loadData() {
     proxyNodeStore.manualNodes = [];
     proxyNodeStore.subscriptions = [];
     const resources = Promise.all([
-      choices((page, size) => nodeAPI.choices(page, '', size)),
-      choices((page, size) => proxyAPI.inbounds('', page, size))
-    ]).then(([nodeRes, inboundRes]) => {
-      if (generation === serverRefreshGeneration) servers.value = nodeRes;
+      inventory.readServers().then(nodeRes => { if (generation === serverRefreshGeneration) servers.value = nodeRes; }),
+      inventory.readInbounds()
+    ]).then(([, inboundRes]) => {
+      if (publishStateDisposed) return;
       serverInbounds.value = inboundRes;
       void loadNodeRelays();
     });
@@ -1266,8 +1271,9 @@ async function loadData() {
       choices((page, size) => canvasAPI.list(page, size)),
       resources,
       isOwner.value ? loadImports() : Promise.resolve(),
-      isOwner.value ? choices(groupAPI.list).then(items => { nodeGroups.value = items; }) : Promise.resolve()
+      isOwner.value ? inventory.readGroups().then(items => { nodeGroups.value = items; }) : Promise.resolve()
     ]);
+    if (publishStateDisposed) return;
     const labels = ['中转方案', '服务器与入站', '导入节点', '节点分组'];
     results.forEach((result, index) => {
       if (result.status === 'rejected') showToast(`${labels[index]}读取失败：${(result.reason as Error).message}`, 'error');
@@ -1280,6 +1286,7 @@ async function loadData() {
     showToast((e as Error).message, 'error');
   } finally {
     loading.value = false;
+    if (loadAgain && !publishStateDisposed) { loadAgain = false; void loadData(); }
   }
 }
 
@@ -1730,10 +1737,13 @@ function transportLabel(node: Pick<ProxyNodeItem, 'protocol' | 'settings'>): str
 
 let publishStateGeneration = 0;
 let publishStateReading = false, publishStateAgain = false, publishStateDisposed = false, requestedPublishKey = '', nextPublishKey = '';
+function visibleServerIds() {
+  const nodes = displayMode.value === 'list' ? pagedNodes.value : filteredNodes.value;
+  return new Set(nodes.filter(n => n.sourceType === 'self_hosted' && n.sourceId).map(n => n.sourceId!));
+}
 async function loadServerPublishStates() {
   if (document.hidden || publishStateDisposed) return;
-  const currentNodes = displayMode.value === 'list' ? pagedNodes.value : filteredNodes.value;
-  const serverIds = [...new Set(currentNodes.filter(n => n.sourceType === 'self_hosted' && n.sourceId).map(n => n.sourceId!))];
+  const serverIds = [...visibleServerIds()];
   nextPublishKey = [...serverIds].sort().join(',');
   if (publishStateReading) { publishStateAgain = true; return; }
   if (!serverIds.length) return;
@@ -1752,8 +1762,8 @@ async function loadServerPublishStates() {
 
   publishStateReading = false;
   const readAgain = publishStateAgain; publishStateAgain = false;
-  if (requestedPublishKey !== nextPublishKey) { void loadServerPublishStates(); return; }
   if (generation !== publishStateGeneration) return;
+  if (requestedPublishKey !== nextPublishKey) { void loadServerPublishStates(); return; }
   const nextMap = new Map(inboundStateMap.value);
   const errors = new Map(inboundStateErrors.value);
   for (const [id, items] of results) {
@@ -1770,7 +1780,11 @@ async function loadServerPublishStates() {
   if (readAgain) void loadServerPublishStates();
 }
 
-watch([pagedNodes, displayMode, servers], () => {
+function visiblePublishKey() {
+  const ids = visibleServerIds();
+  return servers.value.filter(node => ids.has(node.id)).map(node => node.id + '/' + (node.heartbeat?.current_revision || 0)).sort().join(',');
+}
+watch([visiblePublishKey, serverInbounds], () => {
   loadServerPublishStates();
 }, { immediate: true });
 
@@ -1779,21 +1793,40 @@ async function refreshServersOnNodeStatus() {
   if (document.hidden) return;
   const generation = ++serverRefreshGeneration;
   try {
-    const items = await choices((page, size) => nodeAPI.choices(page, '', size));
+    const items = await inventory.readServers();
     if (generation === serverRefreshGeneration) servers.value = items;
   } catch (error) {
     if (generation === serverRefreshGeneration) showToast(`服务器状态读取失败：${(error as Error).message}`, 'error');
   }
 }
-function publishVisibilityChanged() { if (!document.hidden) reloadPublishStatesOnNodeStatus(); }
-const reloadPublishStatesOnNodeStatus = throttleTrailing(() => { void refreshServersOnNodeStatus(); void loadServerPublishStates(); }, 5000);
+function onNodeRuntime(event: Event) {
+  if (inventory.applyEvent(servers.value, (event as CustomEvent<RuntimeSnapshot>).detail)) refreshInventory();
+}
+const refreshInventory = throttleTrailing(() => { void refreshServersOnNodeStatus(); void loadServerPublishStates(); }, 1000);
+const refreshDeployment = throttleTrailing(() => { void loadServerPublishStates(); }, 1000);
+function onNodeStatus(event: Event) {
+  if (nodeStatusEventChangesInventory(event)) refreshInventory();
+}
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+function queueDraftRefresh() {
+  clearTimeout(draftTimer);
+  if (!document.hidden) draftTimer = setTimeout(() => { void loadData(); }, 150);
+}
+function resyncInventory() { inventory.resetStream(); queueDraftRefresh(); }
+function publishVisibilityChanged() { if (!document.hidden) resyncInventory(); }
 let statusClock: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
-  statusClock = setInterval(() => { now.value = Date.now(); }, 5000);
-  loadProtocolSupport();
+  statusClock = setInterval(() => {
+    now.value = Date.now();
+    if (inboundStateErrors.value.size && !publishStateReading && [...visibleServerIds()].some(id => inboundStateErrors.value.has(id))) void loadServerPublishStates();
+  }, 5000);
+  if (isOwner.value) void loadProtocolSupport().catch(e => showToast(`协议支持表读取失败：${(e as Error).message}`, 'error'));
   loadData();
-  window.addEventListener('proxy-deployment-status', reloadPublishStatesOnNodeStatus);
-  window.addEventListener('proxy-node-status', reloadPublishStatesOnNodeStatus);
+  window.addEventListener('proxy-deployment-status', refreshDeployment);
+  window.addEventListener('proxy-draft-changed', queueDraftRefresh);
+  window.addEventListener('proxy-node-status', onNodeStatus);
+  window.addEventListener('proxy-node-runtime', onNodeRuntime);
+  window.addEventListener('proxy-node-runtime-open', resyncInventory);
   document.addEventListener('visibilitychange', publishVisibilityChanged);
 });
 
@@ -1803,8 +1836,12 @@ onUnmounted(() => {
   publishStateDisposed = true;
   publishStateGeneration++;
   document.removeEventListener('visibilitychange', publishVisibilityChanged);
-  reloadPublishStatesOnNodeStatus.cancel();
-  window.removeEventListener('proxy-deployment-status', reloadPublishStatesOnNodeStatus);
-  window.removeEventListener('proxy-node-status', reloadPublishStatesOnNodeStatus);
+  clearTimeout(draftTimer);
+  refreshInventory.cancel(); refreshDeployment.cancel();
+  window.removeEventListener('proxy-deployment-status', refreshDeployment);
+  window.removeEventListener('proxy-draft-changed', queueDraftRefresh);
+  window.removeEventListener('proxy-node-status', onNodeStatus);
+  window.removeEventListener('proxy-node-runtime', onNodeRuntime);
+  window.removeEventListener('proxy-node-runtime-open', resyncInventory);
 });
 </script>

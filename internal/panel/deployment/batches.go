@@ -264,7 +264,13 @@ func (r *Repository) StartBatch(ctx context.Context, batchID string) error {
 	if err := r.queueItem(ctx, tx, batchID, batch.Items[0]); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if r.Queued != nil {
+		r.Queued(batch.Items[0].Revision)
+	}
+	return nil
 }
 func (r *Repository) queueItem(ctx context.Context, tx *sql.Tx, batchID string, item BatchItem) error {
 	state, err := r.stateInTransaction(ctx, tx, item.Revision)

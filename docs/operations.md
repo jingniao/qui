@@ -24,7 +24,7 @@ Owner 于 2026-11-13 指定以下服务器为生产环境：
 | 访问记录 | 全部访问 / 已阻断，可按时间、节点、用户、域名筛选 |
 | 系统 → 配置版本 | 发布状态、差异、手动回滚入口 |
 | 系统 → 备份 | 备份列表、校验、恢复预览 |
-| `journalctl -u proxy-panel`、`journalctl -u proxy-agent` | 结构化日志（两个程序都写 stdout）；OpenRC 节点见下表 |
+| `journalctl -u proxy-panel`、`tail -n 200 /var/lib/proxy-agent/logs/agent.log` | 面板写系统日志；Agent 运行日志写有容量上限的文件，启动失败仍查看服务日志 |
 
 **节点服务管理（systemd 与 OpenRC 对照）**。节点 Agent 可以运行在 systemd（Debian、Ubuntu）或 OpenRC（Alpine，含 LXC）上，见[部署与升级](deployment.md)第 4.1 节；本手册其余部分写的 `systemctl`/`journalctl` 命令，在 OpenRC 节点上按此表替换：
 
@@ -34,10 +34,15 @@ Owner 于 2026-11-13 指定以下服务器为生产环境：
 | 启动 / 停止 / 重启 | `systemctl start\|stop\|restart proxy-agent` | `rc-service proxy-agent start\|stop\|restart` |
 | 开机启动 / 取消 | `systemctl enable\|disable proxy-agent` | `rc-update add\|del proxy-agent default` |
 | 全部服务 | `systemctl list-units 'proxy-agent*'` | `rc-status default` |
-| 日志 | `journalctl -u proxy-agent -n 200` | `grep -F proxy-agent /var/log/messages \| tail -n 200` |
+| 运行日志 | `tail -n 200 /var/lib/proxy-agent/logs/agent.log` | `tail -n 200 /var/lib/proxy-agent/logs/agent.log` |
+| 启动与日志写入故障 | `journalctl -u proxy-agent -n 200` | `grep -F proxy-agent /var/log/messages \| tail -n 200` |
 | 强制出站 helper | `systemctl status proxy-agent-host-network.path` | `rc-service proxy-agent-host-network status` |
 
 OpenRC 上 Agent 由 `supervise-daemon` 监管：进程退出后 5 秒重启，不设次数上限；`stop` 先发 TERM，最多等 90 秒，再发 KILL。
+
+**Agent 日志容量（本地待发布改动）**：运行日志位于配置 `DataDirectory` 下的 `logs/`（默认 `/var/lib/proxy-agent/logs/`），当前文件 `agent.log` 加 `agent.log.1`–`.9`，每个最多 10 MiB，总计最多 **100 MiB**，最旧文件自动轮换删除。受管模式由主进程统一收集自身和子 Agent 的 stderr，避免多进程各自拥有一份上限。此限制不包含流量持久队列、代理核心、安装/回滚文件，也不清理旧版本已经写入 journald/syslog 的历史。运行期间写入或轮转失败会向服务日志明确报错，停止文件日志写入并保留错误；代理运行继续，修复目录/磁盘问题后重启恢复日志。查看旧版本日志仍使用表中的服务日志命令。
+
+已有受管节点必须通过终端 `qui-update --component agent` 更新主机上的引导程序并重启服务，或使用本版本覆盖安装流程，日志限额才会生效；仅网页升级工作进程会继续使用旧监督进程的系统日志输出。网页显示的新 Agent 版本不能单独证明日志限额已生效，应核对 `logs/agent.log` 的实际写入。日志故障时父进程继续接收并丢弃子进程输出，避免管道中断导致代理退出，原始写入错误同时保留并报告。
 
 面板通过一条 SSE（`GET /api/v1/events`）推送节点状态、发布状态、总览变化和告警，不轮询数据库。
 
@@ -176,6 +181,17 @@ systemctl start proxy-agent.service
 不要把旧节点的私钥或数据目录拷到新节点上；`identity/` 里保存的是旧节点身份。
 
 ## 5.1 原位恢复（推荐）
+
+**原服务器仍运行 Agent 时**，在服务器列表点「安装」，复制带 `--replace-agent` 的命令，在旧服务器上以 root 执行。恢复码有效期一小时，生成命令后旧 Agent 仍可上报。新登记核销该码时才吊销原证书，服务器 ID、用户、服务器分组、配置修订与面板流量历史保留。
+
+安装器先校验发行包、Agent 官方签名和所选内核，检查 gRPC 端点，再停止服务。它用旧证书上传原始队列，校验每批访问记录和流量的确认、流量交付序号及面板的结束确认。未正常退出、本次采集未落盘、有未确认或隔离批次时，命令会报错并保留旧数据。上传过程中若已确认部分批次，原始队列与身份副本在 `/var/lib/proxy-agent/replacement-original.*`，当前队列保留可继续上报的进度。修复故障后先启动旧服务，再运行仍有效的命令或新生成一条。
+
+确认成功后，安装器在持有旧 Agent 进程锁时移出并删除整个 `/var/lib/proxy-agent`，包括身份、队列、运行修订、本地日志及受管更新历史。`/etc/proxy-agent/config.yaml` 的其他设置及 `/etc/proxy-agent/certs/` 的入站证书保留。脚本更新所选核心、面板端点和 CA 后重新登记；需要网页升级时在命令窗口勾选。自定义数据目录、符号链接、数据目录挂载及仍引用待删除文件的配置会报错。若已经看到“旧 Agent 本机数据已清除”，随后安装或登记失败，在原机去掉命令的 `--replace-agent` 重试；同一令牌会复用本次登记私钥，面板可向相同的请求重发已签发的证书；令牌过期或被另一台机器核销时，从原服务器的「安装 → 在新机器登记」重新签发。原机若已写入尚待确认的 `enrollment-result.json`，保留原材料，用同一发布包的 `deploy/linux/enroll.sh --token-file /root/qui-recovery-token` 接续。该文件由 root 以 0600 权限创建，只写原命令中的恢复码。接续成功后删除该令牌文件，用 `systemctl start proxy-agent.service` 或 `rc-service proxy-agent start` 启动已安装的服务。
+
+systemd 验证原主进程的退出码。OpenRC 要求主机已安装 `strace` 且允许观察本服务进程退出；只读取退出状态，不记录系统调用和信号。观察失败会保留运行中的旧服务。旧版 Agent 需要具备最终采样、加密队列和收集器关闭检查点，v1.7.2 已有这些机制。离线归档覆盖安装需将同版本、同架构的 Agent 签名清单放在归档旁。
+
+**干净的新机器接替时**，服务器列表的「安装 → 在新机器登记」用同一恢复码生成普通安装命令。它只在新机登记，旧机本地队列仍留在旧机，核销时原证书失效。节点详情另提供原位恢复流程。
+
 
 主机重装、但节点记录与业务配置仍要保留时走这条路：不新建节点记录，节点 ID、入站、出站、节点组、隧道、代理链与历史配置都不变。恢复码等同该节点的接管凭据——持有者可以领取该节点全部已下发配置，包括 Reality 私钥与用户凭据——默认 15 分钟（可选 15／30／60 分钟），只显示一次，面板只保存它的 SHA-256 并绑定当时证书指纹。
 

@@ -1,6 +1,6 @@
 # 提前准备展示数据：四批优化执行记录
 
-状态：四批本地实现完成，相关回归与浏览器冒烟通过。Owner 后续授权发布 v1.7.2，当前进入发布门禁流程，尚未部署生产；先前“不提交、不发布”的约束由本次发布授权替代，生产部署仍不在本次范围。Windows race 运行受工具链限制，本次将补齐完整 Linux 发布门禁，见[发布记录](../../release-notes-1.7.2.md)。
+状态：四批实现、相关回归与浏览器冒烟通过。Owner 后续授权发布 v1.7.2，发布提交 `aacf4db` 的完整 Linux 门禁和同 SHA GitHub 检查均通过；先前“不提交、不发布”的约束由本次发布授权替代，生产部署仍不在本次范围。v1.7.2 已正式发布，附件与签名核验通过，结果见[发布记录](../../release-notes-1.7.2.md)。
 
 ## 目标与契约
 
@@ -21,7 +21,7 @@
 
 - [x] 第 1 批：状态直推和卡片稳定，相关节点/Event/SSE/前端回归。
 - [x] 第 2 批：小时索引/回填/边界查询，重复、来源切换、压缩、溢出、恢复对账。
-- [x] 第 3 批：共享快照、错误可见、配置失效、生命周期与并发行为回归；race 工具运行受阻另列。
+- [x] 第 3 批：共享快照、错误可见、配置失效、生命周期与并发行为回归；发布阶段已补齐 Linux race。
 - [x] 第 4 批：总览拆分/列表详情复用、局部失败和后台恢复回归。
 - [x] 集成窄范围 Go 测试、前端自测和类型检查、独立审查。
 
@@ -29,7 +29,7 @@
 
 ## 决策记录
 
-- 继续在当前目录工作，遵守 Owner 先前选择；不创建工作树，不提交。
+- 继续在当前目录工作，遵守 Owner 先前选择；不创建工作树。实现阶段不提交，后续按 Owner 的 v1.7.2 发布授权提交并推送。
 - 当前 SSE 队列可丢事件，版本号不能发现最后一条事件丢失，必须保留轻量定期校准。
 - 心跳提交后的展示刷新只进入按节点合并的队列，生命周期受面板管理，不等待读取池，不拖住 Agent ACK。清单和元数据都成功后才消费失效标记，失败留待下一轮校准重试；清单另有 5 分钟核对，覆盖调优建议的时间窗口变化与丢失通知。
 - 前端同一服务代次只接受已见最新统计版本，同版本的总览／详情可以复用；新版本立即淘汰其他范围的旧缓存。配置失效回执及服务代次变化也会清缓存，迟到的旧请求不得恢复旧结果。
@@ -75,6 +75,7 @@
 | `internal/panel/node/machine_traffic.go`、`machine_period_test.go` | 整机统计在借用的同一读事务内执行，保留旧接口账期 |
 | `internal/panel/dashboard/service.go`、`repository.go`、`handler_http.go`、`service_test.go` | 基础内容／共享统计分开，保留旧 API；夏令时边界回归 |
 | `internal/platform/server/server.go`、`dashboard_test.go`、`display_reads_test.go` | 装配、工作线程生命周期和 HTTP／读池／恢复验证 |
+| `internal/platform/server/testdata/portal_route_coverage.txt`、`migrations/checksums_test.go` | 发布检查补齐四个新接口的权限覆盖登记及 0155 校验和，保留原拒绝断言与历史校验值 |
 | `web/src/app/statisticsCache.ts`、`useStatistics.ts` | 跨页面单次请求、统计年龄、配置失效、在途旧请求隔离 |
 | `web/src/app/events.ts`、`nodeStatusEvents.ts` | 运行快照事件分发与连接状态 |
 | `web/src/modules/dashboard/api.ts`、`pages/DashboardPage.vue` | 基础区先显示，统计单独更新，保留所有卡片 |
@@ -82,14 +83,14 @@
 | `web/src/modules/nodes/pages/NodeListPage.vue`、`NodeDetailPage.vue` | 清单共享统计、详情只读所需节点；快照校准与恢复 |
 | `web/src/modules/nodes/components/detail/ServerOverview.vue`、`ServerSettings.vue`、`ServerSystemPanels.vue` | 消费节点统计及设置成功后失效通知 |
 | `web/scripts/prepared-statistics-selftest.mjs`、`server-runtime-selftest.mjs` | 新行为回归，已由 `scripts/check.sh` 的通配循环自动收录 |
-| `web/scripts/server-list-refresh-selftest.mjs`、`server-perf-selftest.mjs` | 调整已有刷新验证，保留失败恢复和卡片断言 |
+| `web/scripts/server-list-refresh-selftest.mjs`、`server-perf-selftest.mjs`、`server-order-selftest.mjs` | 调整已有刷新验证与校准依赖，保留失败恢复、卡片和排序断言 |
 | `docs/architecture.md`、`docs/README.md`、本文件 | 工作区架构、导航与验证记录 |
 
 `ServerCardGrid.vue` 与 `docs/v1.7.0-performance-acceptance.md` 含任务开始前已有的卡片显示改动，保留原改动，不据此声称本次已部署。
 
 ## 验证范围与结果
 
-以下均针对当前未提交工作区，Go 1.26.11 / Windows amd64。未运行无关包测试或完整发布门禁。
+下表记录实现阶段的工作区验证，Go 1.26.11 / Windows amd64；当时未运行无关包测试或完整发布门禁。后续发布阶段在 `aacf4db` 上完成完整 Linux 门禁（876 秒，真实核心 306 秒）及 GitHub check 44525017037，均通过，详见[发布记录](../../release-notes-1.7.2.md)。
 
 | 检查 | 结果与覆盖 |
 | --- | --- |
@@ -102,13 +103,13 @@
 | Go 静态检查及构建 | 相关七个包的 `go vet`、改动 Go 文件 `gofmt -l`、`go build ./cmd/panel` 通过 |
 | 本机 Chrome 冒烟 | 独立临时数据库与开发面板，仅监听 127.0.0.1。主动延迟统计请求时，总览基础内容和待处理／节点流量／用户用量／近期阻断四块仍显示；服务器卡片、新建服务器弹窗、详情按节点请求统计均通过，0 浏览器 pageerror。本地离线节点是合成夹具，没有启动或连接 Agent |
 | 独立审查 | 两名审查者的末轮问题已修复并只读复核；含派生溢出不得阻断源入账、已删除节点历史、旧 API、ACK 解耦、清单重试、调优及跨范围缓存失效 |
-| 差异检查 | `git diff --check` 通过；未提交、推送、发布、部署或访问生产 |
+| 差异检查 | `git diff --check` 通过；实现阶段未提交、推送、发布、部署或访问生产，后续提交发布见文首状态 |
 
 测试过程保留真实失败：新增索引入口、展示溢出错误归属、整机失败保旧、夏令时边界、清单重试、调优失效、跨范围 `pending` 和 `ready→ready` 缓存问题先被回归暴露后修复。集成类型检查暴露联合类型未正确收窄，改为显式判断后通过。本机浏览器最初的断言使用了组件没有的 `dialog` 角色，并误把待登记节点当作可查询流量的节点；根据组件行为改用弹窗标题和独立的已登记离线夹具后通过，没有更改产品行为迁就夹具。
 
-**race 尚未完成**：尝试用现有 Zig 0.14.1 执行 statistics/node 的 `go test -race`，首次链接缺少 Windows 同步 API；显式链接现有同步库后进入执行阶段，但 ThreadSanitizer 在分配影子内存时返回 Windows 错误 87，测试主体没有运行。普通并发回归通过不能代替 race。后续发布前需在受支持的 Linux 环境跑相关 race 和完整发布门禁。
+**race 已在 Linux 发布门禁通过**：实现阶段曾尝试用现有 Zig 0.14.1 执行 statistics/node 的 `go test -race`，首次链接缺少 Windows 同步 API；显式链接现有同步库后进入执行阶段，但 ThreadSanitizer 在分配影子内存时返回 Windows 错误 87，测试主体没有运行。该 Windows 尝试不作为通过证据；后续 `aacf4db` 的完整 Linux 门禁已执行并通过全仓库 race。
 
-**未验收项**：生产首屏 P95、真实节点长时间后台恢复、真实上报压力下的迁移写锁等待、WAL／临时空间峰值。本次没有部署，所以没有新的生产前后对比。发布前需备份并在生产数据副本上补齐这些测量，不能用本机 2.71 ms 查询结果推算生产页面耗时。
+**未验收项**：生产首屏 P95、真实节点长时间后台恢复、真实上报压力下的迁移写锁等待、WAL／临时空间峰值。本次按 Owner 授权发布安装包，没有部署，所以没有新的生产前后对比。生产升级前需备份并在生产数据副本上补齐迁移压力测量，页面效果在获准部署后复测；不能用本机 2.71 ms 查询结果推算生产页面耗时。
 
 ## 参考来源
 

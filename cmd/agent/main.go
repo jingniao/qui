@@ -186,6 +186,9 @@ func execute(set *flag.FlagSet, f *agentFlags) (resultErr error) {
 			}
 		})
 		if !valid {
+			if operation == "enroll" {
+				return errors.New("enrollment requires only --config, --enroll and --token-file")
+			}
 			return fmt.Errorf("%s requires only --config, --%s and --token-file", operation, operation)
 		}
 		token, err := readEnrollmentToken(*f.tokenFile)

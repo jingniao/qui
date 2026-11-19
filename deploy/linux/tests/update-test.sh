@@ -186,6 +186,19 @@ service_healthy() {
 
 service_log_hint() { printf 'fake log of %s\n' "$1"; }
 
+# The Agent fixtures use ordinary mode; execute their status query within the
+# same isolated installation instead of requiring a real host service account.
+runuser() {
+  if [[ $# -lt 3 || $1 != -u || $2 != proxy-agent || $3 != -- ]]; then
+    command runuser "$@"
+    return $?
+  fi
+  [[ $# -ge 4 ]] || return 2
+  shift 3
+  [[ $1 == "$QUI_UPDATE_TEST_ROOT/usr/local/bin/proxy-agent" ]] || return 2
+  "$@"
+}
+
 # update.sh refuses to run without the tools of the init system it detected. That check
 # runs `command -v`, which also finds shell functions, so a host that has no OpenRC gets
 # the names without anything being installed on it.
@@ -373,6 +386,13 @@ write_program() {
     printf 'component=%s\n' "$component"
     printf 'version=%s\n' "$version"
     cat <<'FAKE_PROGRAM'
+if [ "$component" = agent ] && [ "${1:-}" = --config ]; then
+  shift 2
+  if [ "${1:-}" = --local-agent-status ] && { [ "$#" = 1 ] || { [ "$#" = 2 ] && [ "$2" = --local-agent-stopped ]; }; }; then
+    printf 'proxy-agent-local-v1 unmanaged - idle\n'
+    exit 0
+  fi
+fi
 case ${1:-} in
   --version) printf 'proxy-%s %s\n' "$component" "$version"; exit 0 ;;
   --check-database)

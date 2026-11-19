@@ -275,7 +275,7 @@ for selection in agent panel all; do
     printf '%b' "$choice\n${answer}${back}0\n" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
     check "$selection menu cancel exits zero" test "$status" = 0
     check 'menu cancel message' grep -q '已取消' "$R/menu-output"
-    check 'menu cancel returns to menu' test "$(grep -c fixture-version "$R/menu-output")" = 2
+    check 'menu cancel returns to menu' test "$(grep -c '^0\. 退出' "$R/menu-output")" = 2
   done
   c=$selection; [[ $c != all ]] || c=panel
   mv "$R/var/lib/proxy-$c" "$R/saved"
@@ -292,7 +292,7 @@ for selection in agent panel all; do
   cat "$R/menu-output"
   check "$selection menu purge exits zero" test "$status" = 0
   check 'menu purge removes registry' test ! -e "$R/var/lib/proxycontrol-install"
-  check 'successful purge does not redisplay menu' test "$(grep -c fixture-version "$R/menu-output")" = 1
+  check 'successful purge does not redisplay menu' test "$(grep -c '^0\. 退出' "$R/menu-output")" = 1
   check 'successful purge does not wait for Enter' bash -c '! grep -q "按 Enter 返回菜单" "$1"' _ "$R/menu-output"
 done
 printf 'purge-menu-test: passed\n'

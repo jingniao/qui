@@ -54,13 +54,25 @@ func ReadNodeTraffic(ctx context.Context, database *sql.DB, from, to time.Time, 
 		coarseTo = coarseTo.Truncate(time.Second).Add(time.Second)
 	}
 	coarseEnd := coarseTo.Format("2006-01-02T15:04:05")
-	// Normalize published UTC seconds/nanoseconds without floating-point rounding.
+	args := []any{coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID}
+	// The indexed bounds already select whole seconds exactly. Only fractional
+	// boundary seconds need normalization of published seconds/nanoseconds. CASE
+	// keeps that work out of the rest of the month, including inside the view.
+	const normalized = "(substr(observed_at,1,19)||'.'||substr((CASE WHEN substr(observed_at,20,1)='.' THEN substr(observed_at,21,length(observed_at)-21) ELSE '' END)||'000000000',1,9)||'Z')"
+	precise := ""
+	if from.Nanosecond() != 0 {
+		precise += " AND CASE WHEN observed_at<? THEN " + normalized + ">=? ELSE 1 END"
+		args = append(args, from.UTC().Truncate(time.Second).Add(time.Second).Format("2006-01-02T15:04:05"), from.UTC().Format("2006-01-02T15:04:05.000000000Z"))
+	}
+	if to.Nanosecond() != 0 {
+		precise += " AND CASE WHEN observed_at>=? THEN " + normalized + "<? ELSE 1 END"
+		args = append(args, to.UTC().Format("2006-01-02T15:04:05"), to.UTC().Format("2006-01-02T15:04:05.000000000Z"))
+	}
 	rows, err := tx.QueryContext(ctx, `WITH traffic AS (
  SELECT node_id,observed_at,upload_bytes,download_bytes,1 AS samples FROM node_traffic_samples WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
  UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_hourly WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
  ) SELECT node_id,`+bucket+`,sum(upload_bytes),sum(download_bytes),sum(samples) FROM traffic
- WHERE (substr(observed_at,1,19)||'.'||substr((CASE WHEN substr(observed_at,20,1)='.' THEN substr(observed_at,21,length(observed_at)-21) ELSE '' END)||'000000000',1,9)||'Z')>=?
- AND (substr(observed_at,1,19)||'.'||substr((CASE WHEN substr(observed_at,20,1)='.' THEN substr(observed_at,21,length(observed_at)-21) ELSE '' END)||'000000000',1,9)||'Z')<? AND (?='' OR node_id=?) GROUP BY `+group+` ORDER BY `+group, coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID, from.UTC().Format("2006-01-02T15:04:05.000000000Z"), to.UTC().Format("2006-01-02T15:04:05.000000000Z"), nodeID, nodeID)
+	 WHERE 1=1`+precise+` GROUP BY `+group+` ORDER BY `+group, args...)
 	if err != nil {
 		return nil, err
 	}

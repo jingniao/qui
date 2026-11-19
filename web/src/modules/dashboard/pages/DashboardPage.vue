@@ -143,6 +143,9 @@
             <span>今日阻断 <span class="font-semibold text-ios-label">{{ live.blocked }}</span> 次</span>
             <span v-if="live.partial" class="text-ios-orange">部分节点未测</span>
           </div>
+          <div v-else role="status" class="panel-card bg-white px-5 py-3 text-sm text-ios-secondary">
+            当前连接、在线用户与今日阻断：{{ error || '正在加载…' }}
+          </div>
 
           <!-- 2. 内容区：宽屏四列，与上方统计卡片对齐，窄屏依次换行 -->
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
@@ -219,6 +222,10 @@
                   <p class="text-xs font-semibold text-ios-label">运行健康，暂无待处理告警</p>
                   <p class="text-xs text-ios-tertiary">所有节点连接活跃、代理核心运行正常。</p>
                 </div>
+              </section>
+              <section v-else class="panel-card p-4 bg-white space-y-3 flex-1">
+                <h2 class="text-base font-semibold text-ios-label">待处理问题</h2>
+                <p role="status" class="text-sm text-ios-secondary">{{ error || nodesError || usersError || '正在加载…' }}</p>
               </section>
             </div>
 
@@ -396,6 +403,10 @@
                   </div>
                 </div>
               </section>
+              <section v-else class="panel-card p-4 bg-white space-y-3 flex-1">
+                <h2 class="text-base font-semibold text-ios-label">节点流量</h2>
+                <p role="status" class="text-sm text-ios-secondary">{{ error || nodesError || '正在加载…' }}</p>
+              </section>
             </div>
             <!-- 用户用量与到期 -->
             <section v-if="usersReady"
@@ -462,6 +473,11 @@
               </div>
             </section>
 
+            <section v-if="!usersReady" class="panel-card min-w-0 p-4 bg-white space-y-3">
+              <h2 class="text-base font-semibold text-ios-label">用户用量与到期</h2>
+              <p role="status" class="text-sm text-ios-secondary">{{ usersError || '正在加载…' }}</p>
+            </section>
+
             <!-- 近期阻断 (仅 Owner 可见；只列被拦截的访问) -->
             <section v-if="isOwner && dashboard" class="panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3">
               <div class="flex flex-wrap items-center justify-between gap-2">
@@ -510,6 +526,10 @@
                   </span>
                 </div>
               </div>
+            </section>
+            <section v-else-if="isOwner" class="panel-card min-w-0 p-4 bg-white space-y-3">
+              <h2 class="text-base font-semibold text-ios-label">近期阻断</h2>
+              <p role="status" class="text-sm text-ios-secondary">{{ error || '正在加载…' }}</p>
             </section>
           </div>
         </div>

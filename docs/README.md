@@ -4,7 +4,7 @@
 | --- | --- |
 | 产品需求、架构原则、字段口径与当前状态 | [项目说明书](../AGENTS.md) |
 | 项目首页 | [项目首页](../README.md) |
-| v1.7.3 发布：剩余页面加载、面板 CPU、Agent 覆盖与日志容量；无迁移，本次未部署 | [发布说明](release-notes-1.7.3.md) |
+| v1.7.3 已发布并部署面板与三台指定 Agent；页面/弹窗提速、CPU 降低但仍有热点；无迁移 | [发布说明](release-notes-1.7.3.md)、[生产部署与性能复测](v1.7.3-production-acceptance.md) |
 | 系统组成、模块边界和数据流 | [架构总览](architecture.md) |
 | 前端设计系统、视觉交互与按钮规范 | [设计系统规范](design-system.md) |
 | 并发设备限制的判定方式与执行范围 | [设备限制](device-limit.md) |
@@ -14,7 +14,7 @@
 | 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
 | 提交、门禁、发布与升级生产的步骤（交接用） | [发布流程手册](release-runbook.md) |
 | 完成标准、证据要求与实机验收结果 | [验收矩阵](v1-acceptance.md) |
-| 剩余页面加载、面板高 CPU、Agent 覆盖安装与日志上限（本地修改，未发布部署） | [实施与验证记录](remaining-loading-and-reinstall-verification.md) |
+| 剩余页面加载、面板高 CPU、Agent 覆盖安装与日志上限（已随 v1.7.3 发布，生产覆盖流程未测试） | [实施与验证记录](remaining-loading-and-reinstall-verification.md) |
 | 提前准备展示数据：运行状态推送、精确小时索引、共享统计、总览分区加载（v1.7.2 已发布，面板及三台指定 Agent 已部署；迁移 0155） | [实施与验证记录](superpowers/plans/2026-11-19-prepared-display-data.md)、[发布说明](release-notes-1.7.2.md)、[生产逐页复测](v1.7.2-production-acceptance.md) |
 | 流量存储整理：核心明细 7 天／UTC 小时历史、新回执双方确认后至少 24 小时淘汰（v1.7.0 发布，生产当前使用 v1.7.1） | [设计](superpowers/specs/2026-11-18-traffic-storage-retirement-design.md)、[实施记录](superpowers/plans/2026-11-18-traffic-storage-retirement.md) |
 | v1.7.1 总览慢查询、卡片加载、后台恢复状态、整机流量与终端升级修复（已发布并部署） | [发布说明](release-notes-1.7.1.md)、[逐页性能验收](v1.7.0-performance-acceptance.md) |

@@ -58,8 +58,9 @@
     <LoadingSkeleton v-else-if="loading && !nodes.length" />
     <template v-else>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
+      <p v-if="!statusFresh && nodes.length" role="status" class="text-sm text-ios-secondary">正在重新确认服务器状态，当前指标为上次读取的结果。</p>
       <EmptyState v-if="!filtered.length" title="没有匹配的服务器" description="请调整筛选条件，或新增服务器并完成登记。" />
-      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :machine-traffic="machineTraffic" :reorderable="canReorder" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" @reorder="reorder" />
+      <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :status-fresh="statusFresh" :machine-traffic="machineTraffic" :reorderable="canReorder" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" @reorder="reorder" />
       <ServerInventory v-else :rows="pageRows" :columns="columns" :owner="isOwner" :selected="selected" @toggle="toggle" @install="enrollment?.reissue($event)" @delete="deletion?.prompt($event)" />
       <p v-if="displayMode === 'list' && filtered.length && hiddenColumns.length" class="text-xs text-ios-tertiary">当前筛选的服务器均无可用数据，已隐藏：{{ hiddenColumns.join('、') }}。</p>
       <Pagination v-if="displayMode === 'list' && filtered.length > 20" :total="filtered.length" :current-page="page" :page-size="20" @update:page="changePage" />
@@ -116,6 +117,7 @@ const nodes = ref<NodeView[]>([]), groups = ref<NodeGroup[]>([]);
 const loading = ref(false), error = ref(''), warnings = ref<string[]>([]), selected = ref<string[]>([]);
 const today = ref<Record<string, number>>({}), month = ref<Record<string, number>>({}), monthZone = ref('');
 const now = ref(Date.now());
+const statusFresh = ref(false);
 const enrollment = ref<InstanceType<typeof ServerEnrollment>>(), deletion = ref<InstanceType<typeof ServerDeleteDialog>>();
 function readQuery() {
   keyword.value = scalar(route.query.keyword);
@@ -194,15 +196,16 @@ async function persistOrder() {
 }
 function visibleIds() { return ordered.value.map(node => node.id); }
 function reorder(fromId: string, toId: string) { setOrder(reorderServer(visibleIds(), fromId, toId)); }
-const rows = computed(() => filtered.value.map(node => serverRow(node, now.value, today.value[node.id], month.value[node.id])));
+const rows = computed(() => filtered.value.map(node => serverRow(node, now.value, today.value[node.id], month.value[node.id], statusFresh.value)));
 const columns = computed(() => (rows.value[0]?.fields || []).filter(field => rows.value.some(row => row.fields.some(item => item.key === field.key && item.value !== '—'))));
 const hiddenColumns = computed(() => (rows.value[0]?.fields || []).filter(field => !columns.value.some(item => item.key === field.key)).map(field => field.label));
 const pageRows = computed(() => rows.value.slice((page.value - 1) * 20, page.value * 20));
 const selectedNodes = computed(() => nodes.value.filter(node => selected.value.includes(node.id) && !node.deletedAt));
 function toggle(id: string) { selected.value = selected.value.includes(id) ? selected.value.filter(value => value !== id) : [...selected.value, id]; }
-let generation = 0, refreshing = false;
+let generation = 0, refreshing = false, visibilityGeneration = 0;
 async function load() {
   const current = ++generation;
+  const visibleGeneration = visibilityGeneration;
   loading.value = true; error.value = '';
   try {
     const supplements = Promise.allSettled([
@@ -219,7 +222,11 @@ async function load() {
     const servers = await choices((index, size) => nodeAPI.list(index, '', deleted.value, size));
     if (current !== generation) return;
     // Show the inventory immediately; optional traffic and metadata fill in later.
-    nodes.value = servers;
+    if (visibleGeneration === visibilityGeneration) {
+      nodes.value = servers;
+      now.value = Date.now();
+      statusFresh.value = document.visibilityState === 'visible';
+    }
     selected.value = selected.value.filter(id => servers.some(node => node.id === id && !node.deletedAt));
     const notices: string[] = [];
     // Midnight can fall in a DST gap in a few zones; fall back to UTC midnight then.
@@ -250,18 +257,23 @@ async function load() {
 }
 
 async function silentRefresh() {
-  if (loading.value || refreshing || document.visibilityState !== 'visible') return;
+  if ((loading.value && statusFresh.value) || refreshing || document.visibilityState !== 'visible') return;
   refreshing = true;
   const current = generation;
+  const visibleGeneration = visibilityGeneration;
   try {
     const servers = await choices((index, size) => nodeAPI.list(index, '', deleted.value, size));
-    if (current !== generation) return;
-    nodes.value = servers;
-    selected.value = selected.value.filter(id => servers.some(node => node.id === id && !node.deletedAt));
-    if (page.value > Math.max(1, Math.ceil(filtered.value.length / 20))) changePage(1);
+    if (current === generation && visibleGeneration === visibilityGeneration) {
+      nodes.value = servers;
+      now.value = Date.now();
+      statusFresh.value = document.visibilityState === 'visible';
+      selected.value = selected.value.filter(id => servers.some(node => node.id === id && !node.deletedAt));
+      if (page.value > Math.max(1, Math.ceil(filtered.value.length / 20))) changePage(1);
+    }
   } catch (e) {
-    if (current === generation) warnings.value = [(e as Error).message];
+    if (current === generation && visibleGeneration === visibilityGeneration) warnings.value = [(e as Error).message];
   } finally { refreshing = false; }
+  if (current === generation && visibleGeneration !== visibilityGeneration && document.visibilityState === 'visible') void silentRefresh();
 }
 
 const throttledSilentRefresh = throttleTrailing(() => {
@@ -275,6 +287,9 @@ function onNodeStatus() {
 function onVisibilityChange() {
   if (document.visibilityState === 'visible') {
     void silentRefresh();
+  } else {
+    visibilityGeneration++;
+    statusFresh.value = false;
   }
 }
 
@@ -287,7 +302,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let fallbackTimer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   void load();
-  timer = setInterval(() => { now.value = Date.now(); }, 5000);
+  timer = setInterval(() => { if (document.visibilityState === 'visible') now.value = Date.now(); }, 5000);
   fallbackTimer = setInterval(() => {
     if (document.visibilityState === 'visible') void silentRefresh();
   }, 30000);

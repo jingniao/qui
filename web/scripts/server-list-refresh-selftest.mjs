@@ -20,6 +20,25 @@ const transpiled = ts.transpileModule(`
 
 const { mergeLatestEditForm } = new Function(transpiled)();
 
+// A cached heartbeat must not turn the entire list offline while a foreground
+// refresh is pending. Exercise the actual status model and core-health helper.
+const coreSource = readFileSync(new URL('../src/modules/nodes/coreSummary.ts', import.meta.url), 'utf8');
+const coreCode = ts.transpileModule(coreSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { unhealthyCores } = await import(`data:text/javascript;base64,${Buffer.from(coreCode).toString('base64')}`);
+const statusSource = modelSrc.match(/export function serverStatus[\s\S]*?^}/m)?.[0];
+assert.ok(statusSource);
+const statusCode = ts.transpileModule(statusSource.replace('export ', '') + '\nreturn serverStatus;', { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+const serverStatus = new Function('unhealthyCores', statusCode)(unhealthyCores);
+const beforeHidden = Date.parse('2026-11-19T08:00:00Z');
+const cachedNode = { enabled: true, status: 'online', lastHeartbeat: new Date(beforeHidden).toISOString(), heartbeat: { core_healthy: true } };
+assert.equal(serverStatus(cachedNode, beforeHidden, true).key, 'online');
+assert.equal(serverStatus(cachedNode, beforeHidden + 600000, false).key, 'unknown', 'background age is not an offline observation');
+assert.equal(serverStatus(cachedNode, beforeHidden + 600000, false).label, '状态待更新');
+assert.equal(serverStatus({ ...cachedNode, lastHeartbeat: new Date(beforeHidden + 600000).toISOString() }, beforeHidden + 600000, true).key, 'online');
+assert.equal(serverStatus({ ...cachedNode, status: 'offline' }, beforeHidden + 600000, true).key, 'offline', 'a fresh offline response must remain offline');
+assert.equal(serverStatus({ ...cachedNode, status: 'pending' }, beforeHidden + 600000, false).key, 'pending');
+assert.equal(serverStatus({ ...cachedNode, enabled: false }, beforeHidden + 600000, false).key, 'disabled');
+
 // 1. Test mergeLatestEditForm
 {
   const baseline = {

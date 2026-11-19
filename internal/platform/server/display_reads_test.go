@@ -40,7 +40,7 @@ func TestDisplayReadsDoNotQueueBehindWriter(t *testing.T) {
 	defer held.Close()
 	for _, path := range []string{
 		"/api/v1/users/choices", "/api/v1/users/summaries", "/api/v1/users",
-		"/api/v1/nodes/choices", "/api/v1/nodes/meta", "/api/v1/nodes",
+		"/api/v1/nodes/choices", "/api/v1/nodes/meta", "/api/v1/nodes", "/api/v1/nodes/machine-traffic",
 		"/api/v1/task-records", "/api/v1/traffic/nodes/summary", "/api/v1/traffic/nodes/monthly", "/api/v1/dashboard",
 	} {
 		t.Run(path, func(t *testing.T) {

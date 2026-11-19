@@ -8,11 +8,12 @@ export const statusOptions = [
   ['offline', '离线'], ['pending', '待登记'], ['applying', '应用配置中'], ['rollback', '回滚中'],
   ['disabled', '已禁用'], ['error', '异常'], ['maintenance', '维护中'], ['deleted', '已删除']
 ];
-export function serverStatus(node: NodeView, now: number) {
+export function serverStatus(node: NodeView, now: number, snapshotFresh = true) {
   if (node.deletedAt) return { key: 'deleted', tone: 'disabled', label: '已删除' };
   if (!node.enabled || node.status === 'disabled') return { key: 'disabled', tone: 'disabled', label: '已禁用' };
   if (node.maintenance) return { key: 'maintenance', tone: 'maintenance', label: '维护中' };
   if (node.status === 'pending') return { key: 'pending', tone: 'disabled', label: '待登记' };
+  if (!snapshotFresh) return { key: 'unknown', tone: 'warning', label: '状态待更新' };
   const age = now - Date.parse(node.lastHeartbeat);
   const fresh = Number.isFinite(age) && age >= -5000 && age < 45000;
   if (fresh && (node.heartbeat?.core_healthy === false || unhealthyCores(node).length > 0)) return { key: 'core_error', tone: 'error', label: '核心异常' };
@@ -36,7 +37,7 @@ export interface ServerField { key: string; label: string; value: string; bytes?
 export interface ServerRow { node: NodeView; region: string; country: CountryInfo; status: ReturnType<typeof serverStatus>; fields: ServerField[]; }
 const percent = (value?: number) => typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}%` : '—';
 const text = (value?: string | number) => value === undefined || value === null || value === '' ? '—' : String(value);
-export function serverRow(node: NodeView, now: number, today?: number, month?: number): ServerRow {
+export function serverRow(node: NodeView, now: number, today?: number, month?: number, snapshotFresh = true): ServerRow {
   const meta = getNodeMeta(node.id);
   const metrics = hostMetrics(node, now);
   const hb = Object.keys(metrics).length ? node.heartbeat : undefined;
@@ -63,7 +64,7 @@ export function serverRow(node: NodeView, now: number, today?: number, month?: n
     { key: 'remark', label: '备注', value: text(meta.remark) }
   ];
   const country = resolveCountryInfo({ region: meta.region, countryCode: node.countryCode, name: node.name, hostname: node.hostname });
-  return { node, region: meta.region || '', country, status: serverStatus(node, now), fields };
+  return { node, region: meta.region || '', country, status: serverStatus(node, now, snapshotFresh), fields };
 }
 
 export interface ServerEditFormState {

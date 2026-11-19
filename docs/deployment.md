@@ -382,11 +382,11 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 
 `qui-update` 在 OpenRC 节点上同样可用：它通过 `/usr/local/lib/proxycontrol/service.sh` 停止和启动 `proxy-agent`，健康检查读取 supervise-daemon 记录的子进程 PID（`/run/openrc/options/proxy-agent/child_pid`）。
 
-节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 多核心安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；实际 Agent 可通过面板更新任务（服务器 → Agent 管理）切换。开发中的终端受管升级也复用同一安装事务，具体见下文；正式版 v1.6.1 的终端命令仍只更新引导程序。
+节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 多核心安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；实际 Agent 可通过面板更新任务（服务器 → Agent 管理）切换。v1.7.1 的终端受管升级也复用同一安装事务，具体见下文；v1.6.1 的旧终端命令只更新引导程序。
 
-### 受管 Agent 的终端升级（开发中，尚未发布）
+### 受管 Agent 的终端升级（v1.7.1）
 
-本功能随含新本地入口的后续版本发布后生效，适用于 systemd 与 Alpine/OpenRC。开启网页升级后，两种入口同时可用：网页更新实际 Agent；`qui` 更新菜单或 `qui-update --component agent` 更新引导程序并更新实际 Agent，终端无需面板管理员凭据，也不依赖面板下载目录在线。
+本功能随 v1.7.1 发布并在德国 systemd 节点实测，代码也支持 Alpine/OpenRC；本轮未做 Alpine 实机验收。开启网页升级后，两种入口同时可用：网页更新实际 Agent；`qui` 更新菜单或 `qui-update --component agent` 更新引导程序并更新实际 Agent，终端无需面板管理员凭据，也不依赖面板下载目录在线。
 
 已有安装首次迁移需要两次命令：先运行机器上原有的 `qui-update --component agent --version X.Y.Z` 装好新引导程序和脚本，再重复同一命令更新实际 Agent。`X.Y.Z` 要替换为包含本功能的后续正式版本，不能填写 v1.6.1。此后每次终端升级一次即可。直接从新归档运行新更新器时，旧引导程序缺少状态入口会明确拒绝，须先走上述迁移步骤。
 

@@ -13,7 +13,9 @@
 | 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
 | 提交、门禁、发布与升级生产的步骤（交接用） | [发布流程手册](release-runbook.md) |
 | 完成标准、证据要求与实机验收结果 | [验收矩阵](v1-acceptance.md) |
-| 流量存储整理：核心明细 7 天／UTC 小时历史、新回执双方确认后至少 24 小时淘汰（本地实现，未发布／未部署） | [设计](superpowers/specs/2026-11-18-traffic-storage-retirement-design.md)、[实施记录](superpowers/plans/2026-11-18-traffic-storage-retirement.md) |
+| 流量存储整理：核心明细 7 天／UTC 小时历史、新回执双方确认后至少 24 小时淘汰（v1.7.0 发布，生产当前使用 v1.7.1） | [设计](superpowers/specs/2026-11-18-traffic-storage-retirement-design.md)、[实施记录](superpowers/plans/2026-11-18-traffic-storage-retirement.md) |
+| v1.7.1 总览慢查询、卡片加载、后台恢复状态、整机流量与终端升级修复（已发布并部署） | [发布说明](release-notes-1.7.1.md)、[逐页性能验收](v1.7.0-performance-acceptance.md) |
+| v1.7.0 四批页面优化、流量存储与受管终端升级（已发布，迁移 0154） | [发布说明](release-notes-1.7.0.md) |
 | v1.6.1 以 v1.6.0 为最低版本精简代码：迁移合并为基线、删除一次性转换与旧归档兼容、删除策略模拟、总览服务器价值与界面调整（已发布 2026-11-18，tag → 306d393，迁移头 0153；生产未升级） | [规划](v1.6.1-plan.md)、[发布说明](release-notes-1.6.1.md)、[前端修改记录](v1.6.1-ui-changes.md) |
 | v1.6.0 服务器方案以导入节点为出口、出站客户端字段、导入节点的快速中转、系统 Reality 预设（已发布 2026-11-16，tag → 4f09e0a，迁移 0152；生产未升级） | [规划](v1.6.0-plan.md)、[发布说明](release-notes-1.6.0.md) |
 | v1.5.9 隧道规则单独授权、新入口安全方式、快速流程纯转发、Clash xhttp ALPN（已发布 2026-11-16，tag → d40ce7b，迁移 0151；生产未升级） | [规划](v1.5.9-plan.md)、[发布说明](release-notes-1.5.9.md) |

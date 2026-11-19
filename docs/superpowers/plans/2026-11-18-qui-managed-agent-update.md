@@ -125,3 +125,8 @@ Final: Ruling: 审查时文档仍在同步，最终文档一致性由实现者�
 | `docs/operations.md` | 运维状态、恢复方式及未发布说明 |
 | `docs/superpowers/specs/2026-11-16-qui-managed-agent-update-design.md` | 记录已批准设计及最终实现选择 |
 | `docs/superpowers/plans/2026-11-18-qui-managed-agent-update.md` | 实施清单、检查证据及审查处置记录 |
+
+
+## 2026-11-19 发布与生产记录
+
+v1.7.0 已发布并部署，生产面板与三台获准升级节点随后升至 v1.7.1。数据库增量自动缩容与 /tmp 扩容按 Owner 单独指令执行；保留旧回滚镜像时不提前启用不兼容的流量队列格式。终端签名接受遗漏、月流量查询与只读时区依赖已修复。发布门禁、真实终端验收、跳过节点与性能对比见[v1.7.1 发布说明](../../release-notes-1.7.1.md)及[生产验收](../../v1.7.0-performance-acceptance.md)。

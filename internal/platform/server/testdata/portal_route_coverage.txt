@@ -53,7 +53,9 @@ GET /api/v1/client-policy-profiles/{id}
 GET /api/v1/core-releases
 GET /api/v1/core-updates
 GET /api/v1/dashboard
+GET /api/v1/dashboard/base
 GET /api/v1/dashboard/exchange-rates
+GET /api/v1/dashboard/statistics
 GET /api/v1/deployment-batches
 GET /api/v1/deployment-batches/{id}
 GET /api/v1/devices
@@ -69,6 +71,7 @@ GET /api/v1/nodes/choices
 GET /api/v1/nodes/inbound-states
 GET /api/v1/nodes/machine-traffic
 GET /api/v1/nodes/meta
+GET /api/v1/nodes/runtime
 GET /api/v1/nodes/{id}
 GET /api/v1/nodes/{id}/certificate-matches
 GET /api/v1/nodes/{id}/certificate-status
@@ -116,6 +119,7 @@ GET /api/v1/runtime-topology
 GET /api/v1/service-sets
 GET /api/v1/service-sets/{id}
 GET /api/v1/service-sets/{id}/references
+GET /api/v1/statistics/nodes
 GET /api/v1/subscription-formats
 GET /api/v1/subscription-rules
 GET /api/v1/subscription-rules/presets

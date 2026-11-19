@@ -327,7 +327,7 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	}()
 	var candidate updater.Candidate
 	if strings.HasPrefix(request.ID, localJobPrefix) {
-		candidate, err = stageLocalCandidate(downloadCtx, r.directory, request.Release, policy)
+		candidate, err = r.acceptLocalCandidate(downloadCtx, request.Release, policy)
 	} else if r.prepared != nil && r.prepared.request == request {
 		candidate = r.prepared.candidate
 	} else {

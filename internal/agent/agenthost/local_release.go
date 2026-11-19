@@ -100,6 +100,20 @@ func stageLocalCandidate(ctx context.Context, directory string, signed release.S
 	return candidate, errors.Join(stageErr, file.Close())
 }
 
+func (r *jobRunner) acceptLocalCandidate(ctx context.Context, signed release.Signed, policy release.Policy) (updater.Candidate, error) {
+	candidate, err := stageLocalCandidate(ctx, r.directory, signed, policy)
+	if err != nil {
+		return updater.Candidate{}, err
+	}
+	// Match the catalogue download path: installation requires durable signed
+	// acceptance. Preview and bootstrap reservation only stage the candidate.
+	policy.Now = time.Now().UTC()
+	if err := r.history.Accept(ctx, signed, policy); err != nil {
+		return updater.Candidate{}, err
+	}
+	return candidate, nil
+}
+
 func (r *jobRunner) localStatus() (LocalAgentStatus, error) {
 	state, found, err := r.history.Installation("proxy-agent")
 	if err != nil || !found {

@@ -202,6 +202,7 @@ ON CONFLICT(node_id,key) DO UPDATE SET value=excluded.value,rules_version=exclud
 		h.fail(w, err)
 		return
 	}
+	h.Runtime.afterCommit(n.ID)
 
 	if h.Audit != nil {
 		_ = h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "不采纳调优建议", n.Name+" ("+n.ID+")", "成功", r.RemoteAddr)

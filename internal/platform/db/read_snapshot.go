@@ -15,6 +15,10 @@ type ReadSnapshot struct {
 	ctx  context.Context
 }
 
+// Transaction lends the existing transaction to readers that accept *sql.Tx.
+// Its lifetime and rollback remain owned by ReadSnapshot.Close.
+func (r *ReadSnapshot) Transaction() *sql.Tx { return r.tx }
+
 func BeginRead(ctx context.Context, pool *sql.DB) (*ReadSnapshot, error) {
 	done := readtiming.Start(ctx, "db_acquire")
 	conn, err := pool.Conn(ctx)

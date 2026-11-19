@@ -126,10 +126,10 @@ type MachineTrafficSummary struct {
 	LastObservedAt *string                `json:"lastObservedAt"`
 }
 
-// localDayStart returns the first instant of a local calendar day. Where a DST
+// LocalDayStart returns the first instant of a local calendar day. Where a DST
 // change skips midnight (e.g. America/Santiago), time.Date normalizes 00:00 back
 // into the previous day; the day then starts at the first hour that exists.
-func localDayStart(year int, month time.Month, day int, loc *time.Location) time.Time {
+func LocalDayStart(year int, month time.Month, day int, loc *time.Location) time.Time {
 	noon := time.Date(year, month, day, 12, 0, 0, 0, loc)
 	start := time.Date(noon.Year(), noon.Month(), noon.Day(), 0, 0, 0, 0, loc)
 	for start.Day() != noon.Day() {
@@ -142,7 +142,7 @@ func localDayStart(year int, month time.Month, day int, loc *time.Location) time
 // clamped to that month's last day.
 func machineAnchor(year int, month time.Month, day int, loc *time.Location) time.Time {
 	last := time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
-	return localDayStart(year, month, min(day, last), loc)
+	return LocalDayStart(year, month, min(day, last), loc)
 }
 
 // machinePeriod returns the half-open billing period containing now and its
@@ -172,7 +172,7 @@ func machineDayShares(delta uint64, from, to time.Time, loc *time.Location) map[
 	for at := from; ; {
 		local := at.In(loc)
 		day := local.Format(MachineDayLayout)
-		next := localDayStart(local.Year(), local.Month(), local.Day()+1, loc)
+		next := LocalDayStart(local.Year(), local.Month(), local.Day()+1, loc)
 		if !next.Before(to) {
 			shares[day] += remaining
 			return shares
@@ -376,17 +376,31 @@ func (r *Repository) machineTrafficSummaries(ctx context.Context, only string, n
 	if err != nil {
 		return nil, "", err
 	}
+	items, err := machineTrafficAt(ctx, tx, only, now, zone, false)
+	return items, zone, err
+}
+
+// MachineTrafficAt reads daily counters and settings in the caller's display
+// transaction, using the same clock and time zone as its other statistics.
+func MachineTrafficAt(ctx context.Context, tx *sql.Tx, now time.Time, zone string) ([]MachineTrafficSummary, error) {
+	return machineTrafficAt(ctx, tx, "", now, zone, true)
+}
+
+func machineTrafficAt(ctx context.Context, tx *sql.Tx, only string, now time.Time, zone string, throughToday bool) ([]MachineTrafficSummary, error) {
 	loc, err := time.LoadLocation(zone)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	nodes, order, err := machineTrafficNodes(ctx, tx, only)
 	if err != nil {
-		return nil, "", err
+		return nil, err
+	}
+	if len(order) == 0 {
+		return []MachineTrafficSummary{}, nil
 	}
 	stored, err := machineTrafficSettingsRows(ctx, tx, only)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	// One query covers the widest period of any node; each node then sums its
 	// own window, which differs when the reset days differ.
@@ -399,17 +413,20 @@ func (r *Repository) machineTrafficSummaries(ctx context.Context, only string, n
 		if from == "" || start.Format(MachineDayLayout) < from {
 			from = start.Format(MachineDayLayout)
 		}
-		if end.Format(MachineDayLayout) > to {
-			to = end.Format(MachineDayLayout)
-		}
+		to = max(to, end.Format(MachineDayLayout))
+	}
+	// These are local-day aggregates: include data committed through the
+	// current local date and omit later dates even if the clock moved back.
+	if throughToday {
+		to = now.In(loc).AddDate(0, 0, 1).Format(MachineDayLayout)
 	}
 	daily, err := machineDailyRows(ctx, tx, only, from, to)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	cursors, err := machineCursors(ctx, tx, only)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	items := make([]MachineTrafficSummary, 0, len(order))
 	for _, id := range order {
@@ -442,10 +459,10 @@ func (r *Repository) machineTrafficSummaries(ctx context.Context, only string, n
 			}
 			var ok bool
 			if rx, ok = addMachineBytes(rx, uint64(row.rx)); !ok {
-				return nil, "", ErrMachineTrafficOverflow
+				return nil, ErrMachineTrafficOverflow
 			}
 			if tx, ok = addMachineBytes(tx, uint64(row.tx)); !ok {
-				return nil, "", ErrMachineTrafficOverflow
+				return nil, ErrMachineTrafficOverflow
 			}
 			rows++
 		}
@@ -456,7 +473,7 @@ func (r *Repository) machineTrafficSummaries(ctx context.Context, only string, n
 		rxText, txText := strconv.FormatInt(rx, 10), strconv.FormatInt(tx, 10)
 		used, err := machineUsed(settings.Method, rx, tx)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		summary.RxBytes, summary.TxBytes, summary.UsedBytes = &rxText, &txText, &used
 		// Known rows stay visible while the server is offline or just rebooted;
@@ -467,7 +484,7 @@ func (r *Repository) machineTrafficSummaries(ctx context.Context, only string, n
 		}
 		items = append(items, summary)
 	}
-	return items, zone, tx.Commit()
+	return items, nil
 }
 
 // machineSettingsFor returns the stored settings of one node, or the defaults

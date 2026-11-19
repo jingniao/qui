@@ -60,7 +60,63 @@ mergeMachine({ method: 'interface', interfaceName: 'eth0', resetDay: 15 }, machi
 assert.equal(machineDraft.interfaceName, '用户编辑');
 assert.equal(machineDraft.resetDay, 15);
 const list = read('nodes/pages/NodeListPage.vue');
-assert.match(list, /finally \{ refreshing = false; \}/, 'silent list refresh releases its lock');
+const listRefresh = list.match(/async function silentRefresh\(\) \{[\s\S]*?^}/m)?.[0];
+const calibration = list.match(/async function calibrateRuntime\(\) \{[\s\S]*?^}/m)?.[0];
+const confirmation = list.match(/function confirmInventory\(invalidation: number\) \{[\s\S]*?^}/m)?.[0];
+assert.ok(listRefresh && calibration && confirmation, 'found the static and runtime refresh functions');
+const listRefreshCode = ts.transpileModule(`
+  const document = { visibilityState: 'visible' }, deleted = { value: false }, inventoryWarnings = { value: [] };
+  const isOwner = { value: true };
+  const now = { value: 0 }, statusFresh = { value: false };
+  let refreshingInventory = false, calibrating = false;
+  let inventoryInvalidation = 1, inventoryConfirmed = 0, lastInventorySuccess = 0;
+  const staticInventoryInterval = 5 * 60 * 1000;
+  let staticInventoryTimer;
+  const recheckStaticInventory = () => {}, setTimeout = () => 1, clearTimeout = () => {};
+  let inventoryRead = 0, visibilityGeneration = 0, runtimeRead = 0;
+  let inventory = [], inventoryScope, scheduledStatic;
+  const runtime = { generation: '', inventoryRevision: 0, calibrate: snapshot => snapshot.generation === 'generation' };
+  const console = { error: logError };
+  const ours = () => true, choices = reader => reader(1, 20);
+  const refreshStaticInventory = () => {}, throttledSilentRefresh = () => { scheduledStatic = silentRefresh(); };
+  const updateVisibleInventory = () => showInventory(inventory);
+  ${listRefresh}
+  ${calibration}
+  ${confirmation}
+  return { silentRefresh, calibrateRuntime, inventoryWarnings, statusFresh, waitForStatic: () => scheduledStatic };
+`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+let staticCalls = 0, metaCalls = 0, runtimeCalls = 0;
+const shown = [], runtimeErrors = [];
+const listReads = new Function('nodeAPI', 'request', 'loadNodeMetadata', 'showInventory', 'logError', listRefreshCode)(
+  { list: async () => { if (++staticCalls === 1) throw new Error('static failure'); return [{ id: 'n1' }]; } },
+  async path => {
+    assert.equal(path, '/nodes/runtime');
+    if (++runtimeCalls === 1) throw new Error('runtime failure');
+    return { generation: 'generation', items: [] };
+  },
+  async () => { if (++metaCalls === 2) throw new Error('meta failure'); },
+  inventory => shown.push(inventory),
+  (_, error) => runtimeErrors.push(error.message),
+);
+await listReads.silentRefresh();
+assert.match(listReads.inventoryWarnings.value[0], /static failure/);
+assert.equal(staticCalls, 1, 'static failure does not retry immediately');
+await listReads.calibrateRuntime();
+assert.equal(listReads.statusFresh.value, false, 'failed calibration keeps the display clock frozen');
+assert.deepEqual(runtimeErrors, ['runtime failure']);
+await listReads.calibrateRuntime();
+assert.equal(runtimeCalls, 2, 'runtime calibration can retry after a failed request');
+assert.equal(listReads.statusFresh.value, true);
+await listReads.waitForStatic();
+assert.equal(staticCalls, 2, 'calibration retries a failed static request');
+assert.deepEqual(shown.at(-1), [{ id: 'n1' }], 'successful list data may display before a metadata retry');
+assert.match(listReads.inventoryWarnings.value[0], /meta failure/);
+await listReads.calibrateRuntime();
+await listReads.waitForStatic();
+assert.equal(staticCalls, 3, 'failed metadata leaves the inventory refresh pending');
+assert.deepEqual(listReads.inventoryWarnings.value, [], 'successful retry clears only inventory warnings');
+await listReads.calibrateRuntime();
+assert.equal(staticCalls, 3, 'a complete static refresh consumes the pending invalidation');
 for (const path of ['nodes/components/ServerMetricsGrid.vue', 'nodes/components/LatencyChart.vue', 'nodes/components/NodeRestartPanel.vue', 'nodes/components/NodeHealthPanel.vue', 'nodes/components/ServerEnrollment.vue', 'nodes/components/detail/ServerTuning.vue', 'system/components/NodeVersionPanel.vue', 'system/components/CoreUpdatesPanel.vue']) {
   const source = read(path);
   assert.match(source, /document.visibilityState/, path + ' pauses hidden reads');

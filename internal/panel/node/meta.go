@@ -204,6 +204,7 @@ func (h *Handler) putMeta(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	h.Runtime.afterCommit(r.PathValue("id"))
 	h.getMeta(w, r)
 }
 

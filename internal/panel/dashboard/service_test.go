@@ -64,6 +64,7 @@ func TestDashboardSystemTimezoneDayAndViewerPrivateFields(t *testing.T) {
 	if err := records.Ingest(ctx, contract.Batch{ID: "blocked", NodeID: nodeID, Records: []contract.Rollup{record}}, now); err != nil {
 		t.Fatal(err)
 	}
+
 	view, err := service.Read(ctx, true)
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +100,7 @@ func TestDashboardReadDoesNotWriteAndStaleHeartbeatsAreOffline(t *testing.T) {
 	}
 	var before int64
 	database.QueryRow("SELECT total_changes()").Scan(&before)
+
 	view, err := service.Read(ctx, true)
 	if err != nil || view.Counts.OnlineNodes != 0 || view.Counts.OfflineNodes != 1 || view.Nodes[0].Status != "offline" {
 		t.Fatal("stale heartbeat remains online", view, err)
@@ -139,6 +141,7 @@ func TestDashboardNodeTrafficTodayAndMonth(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	view, err := service.Read(ctx, false)
 	if err != nil {
 		t.Fatal(err)
@@ -156,5 +159,65 @@ func TestDashboardNodeTrafficTodayAndMonth(t *testing.T) {
 	}
 	if quiet.Measured || quiet.MonthUpload != 0 || quiet.TodayDownload != 0 {
 		t.Fatalf("idle node traffic = %+v", quiet)
+	}
+}
+
+func TestDashboardBaseIndependentOfStatisticsAndViewerPrivacy(t *testing.T) {
+	service, database, _ := dashboardFixture(t)
+	if _, err := database.Exec("DROP VIEW node_traffic_samples"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.Base(context.Background(), false)
+	if err != nil || view.Counts.TotalNodes != 1 || len(view.Nodes) != 1 {
+		t.Fatal(view, err)
+	}
+	data, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"trend", "nodeTraffic", "todayUpload", "todayDownload", "trafficObservations", "recentAccess", "revisions"} {
+		if strings.Contains(string(data), `"`+key+`"`) {
+			t.Fatalf("base contains %s: %s", key, data)
+		}
+	}
+}
+
+func TestPublishedDashboardIncludesCurrentSecondWithoutMachineStatistics(t *testing.T) {
+	service, database, id := dashboardFixture(t)
+	now := time.Date(2026, 11, 18, 8, 15, 0, 0, time.UTC)
+	service.Now = func() time.Time { return now }
+	if _, err := database.Exec("INSERT INTO core_traffic_samples(node_id,core,epoch,observed_at,upload_bytes,download_bytes) VALUES(?,'xray','current',?,5,3)", id, now.Add(500*time.Millisecond).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec("ALTER TABLE node_machine_traffic_daily RENAME TO unavailable_machine"); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := service.Read(context.Background(), false)
+	if err != nil || v.Counts.TodayUpload != 5 || v.Counts.TodayDownload != 3 || v.Counts.TrafficObservations != 1 || len(v.Trend) != 1 || v.Trend[0].Upload != 5 || len(v.NodeTraffic) != 1 || v.NodeTraffic[0].MonthUpload != 5 {
+		t.Fatal(v, err)
+	}
+}
+
+func TestDashboardBaseSkippedMidnightPreservesPublishedBoundary(t *testing.T) {
+	service, database, id := dashboardFixture(t)
+	if _, err := database.Exec(`UPDATE system_settings SET value_json='"America/Santiago"' WHERE key='timezone'`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 6, 16, 0, 0, 0, time.UTC)
+	service.Now = func() time.Time { return now }
+	ctx := context.Background()
+	previousEvening := time.Date(2026, 9, 6, 3, 30, 0, 0, time.UTC)
+	record := contract.Rollup{Bucket: previousEvening, NodeID: id, Revision: 1, InboundProtocol: "vless", Domain: "example.org", TargetPort: 443, Network: "tcp", Action: "Block", Allowed: false, Connections: 2}
+	if err := (&access.Repository{Database: database}).Ingest(ctx, contract.Batch{ID: "previous-evening", NodeID: id, Records: []contract.Rollup{record}}, now); err != nil {
+		t.Fatal(err)
+	}
+	base, err := service.Base(ctx, false)
+	if err != nil || !base.DayStart.Equal(time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC)) || base.Counts.TodayBlocked != 0 {
+		t.Errorf("new endpoint included previous local day: %v %d %v", base.DayStart, base.Counts.TodayBlocked, err)
+	}
+	old, err := service.Read(ctx, false)
+	if err != nil || !old.DayStart.Equal(time.Date(2026, 9, 6, 3, 0, 0, 0, time.UTC)) || old.Counts.TodayBlocked != 2 {
+		t.Fatalf("published endpoint changed: %v %d %v", old.DayStart, old.Counts.TodayBlocked, err)
 	}
 }

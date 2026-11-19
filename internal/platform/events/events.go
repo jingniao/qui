@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/notification"
 	"sync"
 	"time"
@@ -101,7 +102,7 @@ func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 				if err != nil {
 					continue
 				}
-				if role != "Owner" && !viewerCanRead(event.Type, data) {
+				if role != "Owner" && !viewerCanRead(event, data) {
 					continue
 				}
 				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, data)
@@ -111,10 +112,13 @@ func (b *Bus) Handler(authentication *auth.Handler) http.Handler {
 	}), false)
 }
 
-func viewerCanRead(kind string, data []byte) bool {
-	switch kind {
+func viewerCanRead(event Event, data []byte) bool {
+	switch event.Type {
 	case "node_status", "deployment_status", "dashboard_status":
 		return true
+	case "node_runtime":
+		_, safe := event.Data.(node.RuntimeSnapshot)
+		return safe
 	case "notification":
 		var payload struct {
 			Kind string `json:"kind"`

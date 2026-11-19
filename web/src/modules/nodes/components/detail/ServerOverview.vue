@@ -147,9 +147,9 @@
       :node="node"
       :metrics="metrics"
       :now="now"
-      :today="today"
-      :month="month"
+      :node-traffic="nodeTraffic"
       :machine-traffic="machineTraffic"
+      :statistics-notice="statisticsNotice"
     />
 
     <!-- Bottom Section: Services & Configurations (Balanced 2-Column Grid) -->
@@ -235,6 +235,7 @@ onMounted(async () => {
   } catch (error) { outboundError.value = (error as Error).message; }
 });
 import type { MachineTrafficSummary, NodeView } from '../../api';
+import type { NodeTraffic } from '../../../../app/statisticsCache';
 import type { Revision } from '../../../system/deploymentApi';
 import { type NodeMeta, resolveCountryInfo, countrySourceLabel, cleanRemark, formatPortRange } from '../../nodeMeta';
 import { hostMetrics, uptime } from '../../metrics';
@@ -257,9 +258,9 @@ const props = defineProps<{
   node: NodeView;
   meta: NodeMeta;
   now: number;
-  today?: number;
-  month?: number;
+  nodeTraffic?: NodeTraffic;
   machineTraffic?: MachineTrafficSummary | null;
+  statisticsNotice: string;
   revisions: Revision[];
   groups?: NodeGroup[];
   latestRevision?: number;

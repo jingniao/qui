@@ -1,5 +1,7 @@
 export interface HostMetrics {
   host_uptime_seconds?: number;
+  receive_bytes_per_second?: number;
+  transmit_bytes_per_second?: number;
   core_started_at?: { seconds?: number; nanos?: number };
   interfaces?: { name: string; receive_bytes?: number; transmit_bytes?: number; receive_bytes_per_second?: number; transmit_bytes_per_second?: number }[];
   tcp_congestion_control?: string;
@@ -12,6 +14,8 @@ export function uptime(value?: number): string {
 }
 
 export function nicRate(metrics: HostMetrics, direction: 'receive' | 'transmit'): string {
+  const aggregate = direction === 'receive' ? metrics.receive_bytes_per_second : metrics.transmit_bytes_per_second;
+  if (aggregate !== undefined) return `${(aggregate / 1048576).toFixed(2)} MiB/s`;
   const values = metrics.interfaces?.map(nic => direction === 'receive' ? nic.receive_bytes_per_second : nic.transmit_bytes_per_second);
   if (!values?.length || values.some(value => value === undefined || !Number.isFinite(value))) return '—';
   return `${(values.reduce<number>((total, value) => total + (value ?? 0), 0) / 1048576).toFixed(2)} MiB/s`;

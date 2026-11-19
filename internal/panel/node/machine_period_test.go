@@ -227,6 +227,18 @@ func TestMachineSummaryWithoutRouteIsUnknown(t *testing.T) {
 	}
 }
 
+func TestPublishedMachineSummaryReadsWholeBillingPeriod(t *testing.T) {
+	r, id := machineFixture(t)
+	now := time.Date(2026, 11, 10, 4, 0, 0, 0, time.UTC)
+	storeMachineSettings(t, r, id, MachineTrafficSettings{Method: machineMethodSum, InterfaceName: "eth0", ResetDay: 1})
+	storeMachineDay(t, r, id, "eth0", "2026-11-10", 11, 2)
+	storeMachineDay(t, r, id, "eth0", "2026-11-11", 7, 3)
+	summary := machineSummary(t, r, id, now)
+	if summary.UsedBytes == nil || *summary.UsedBytes != "23" {
+		t.Fatal("published billing-period endpoint lost a stored day", summary)
+	}
+}
+
 func TestMachineSummaryMethodsAndResetSlices(t *testing.T) {
 	now := time.Date(2026, 11, 10, 4, 0, 0, 0, time.UTC)
 	r, id := machineFixture(t)

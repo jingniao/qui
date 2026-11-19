@@ -3,9 +3,8 @@ package dashboard
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"proxycontrol/internal/panel/access"
-	"sort"
+	"proxycontrol/internal/panel/statistics"
+	"proxycontrol/internal/platform/db"
 	"time"
 
 	"proxycontrol/internal/panel/connections"
@@ -18,7 +17,37 @@ type Repository struct {
 	Database    *sql.DB
 	Connections *connections.Store
 }
-type Counts struct {
+
+func (r *Repository) publishedTraffic(ctx context.Context, dayStart, monthStart, to time.Time) (statistics.ProxyData, error) {
+	tx, err := db.BeginRead(ctx, r.Database)
+	if err != nil {
+		return statistics.ProxyData{}, err
+	}
+	defer tx.Close()
+	rows, err := tx.QueryContext(ctx, "SELECT id FROM nodes WHERE deleted_at IS NULL ORDER BY created_at,id")
+	if err != nil {
+		return statistics.ProxyData{}, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return statistics.ProxyData{}, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return statistics.ProxyData{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return statistics.ProxyData{}, err
+	}
+	return statistics.ReadProxyAt(ctx, tx, dayStart, monthStart, to, ids)
+}
+
+type BaseCounts struct {
 	TotalNodes          int    `json:"totalNodes"`
 	OnlineNodes         int    `json:"onlineNodes"`
 	OfflineNodes        int    `json:"offlineNodes"`
@@ -31,10 +60,13 @@ type Counts struct {
 	MeasuredUsers       int    `json:"measuredUsers"`
 	MeasuredDevices     int    `json:"measuredDevices"`
 	MeasuredConnections int64  `json:"measuredConnections"`
-	TodayUpload         int64  `json:"todayUpload"`
-	TodayDownload       int64  `json:"todayDownload"`
 	TodayBlocked        int64  `json:"todayBlocked"`
-	TrafficObservations int64  `json:"trafficObservations"`
+}
+type Counts struct {
+	BaseCounts
+	TodayUpload         int64 `json:"todayUpload"`
+	TodayDownload       int64 `json:"todayDownload"`
+	TrafficObservations int64 `json:"trafficObservations"`
 }
 type Recent struct {
 	Time        string `json:"time"`
@@ -47,14 +79,9 @@ type Recent struct {
 	Allowed     bool   `json:"allowed"`
 	Connections int64  `json:"connections"`
 }
-type Hour struct {
-	Time     string `json:"time"`
-	Upload   int64  `json:"upload"`
-	Download int64  `json:"download"`
-}
 
-func (r *Repository) Counts(ctx context.Context, from, to, now time.Time) (Counts, error) {
-	result := Counts{}
+func (r *Repository) Counts(ctx context.Context, from, to, now time.Time) (BaseCounts, error) {
+	result := BaseCounts{}
 	threshold := now.Add(-45 * time.Second).UTC().Format("2006-01-02T15:04:05.000000000Z")
 	err := r.Database.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN enabled=1 AND status='online' AND last_heartbeat>=? THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='offline' OR (status IN ('online','degraded') AND last_heartbeat<?)) THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='error' OR (status='degraded' AND last_heartbeat>=?)) THEN 1 ELSE 0 END),0) FROM nodes WHERE deleted_at IS NULL`, threshold, threshold, threshold).Scan(&result.TotalNodes, &result.OnlineNodes, &result.OfflineNodes, &result.AbnormalNodes)
 	if err != nil {
@@ -84,15 +111,6 @@ func (r *Repository) Counts(ctx context.Context, from, to, now time.Time) (Count
 		result.OnlineUsers = &users
 		result.OnlineDevices = &devices
 		result.ActiveConnections = &connections
-	}
-	totals, err := access.ReadNodeTraffic(ctx, r.Database, from, to, "", false)
-	if err != nil {
-		return result, err
-	}
-	for _, v := range totals {
-		result.TodayUpload += v.Upload
-		result.TodayDownload += v.Download
-		result.TrafficObservations += v.Samples
 	}
 	err = r.Database.QueryRowContext(ctx, "SELECT coalesce(sum(connections),0) FROM access_rollups WHERE allowed=0 AND bucket>=? AND bucket<?", from.UTC().Format("2006-01-02T15:04:05Z"), to.UTC().Format("2006-01-02T15:04:05Z")).Scan(&result.TodayBlocked)
 	return result, err
@@ -144,80 +162,6 @@ func (r *Repository) Recent(ctx context.Context, blocked bool) ([]Recent, error)
 		var item Recent
 		if err := rows.Scan(&item.Time, &item.NodeName, &item.UserName, &item.DeviceName, &item.Domain, &item.TargetIP, &item.Action, &item.Allowed, &item.Connections); err != nil {
 			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *Repository) Trend(ctx context.Context, from, to time.Time) ([]Hour, error) {
-	totals, err := access.ReadNodeTraffic(ctx, r.Database, from, to, "", true)
-	if err != nil {
-		return nil, err
-	}
-	hours := map[string]Hour{}
-	for _, v := range totals {
-		h := hours[v.Bucket]
-		h.Time = v.Bucket
-		h.Upload += v.Upload
-		h.Download += v.Download
-		hours[v.Bucket] = h
-	}
-	items := []Hour{}
-	for _, v := range hours {
-		items = append(items, v)
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Time < items[j].Time })
-	return items, nil
-}
-
-// NodeTraffic is one live node's retained account traffic today and this month
-// (v1.5.5 item 9). Measured is false when the node has no sample this month.
-type NodeTraffic struct {
-	NodeID        string `json:"nodeId"`
-	TodayUpload   int64  `json:"todayUpload"`
-	TodayDownload int64  `json:"todayDownload"`
-	MonthUpload   int64  `json:"monthUpload"`
-	MonthDownload int64  `json:"monthDownload"`
-	Measured      bool   `json:"measured"`
-	HistoryError  string `json:"historyError,omitempty"`
-}
-
-// NodeTraffic sums node_traffic_samples per live node over the local month
-// [monthFrom, to) and the local day [dayFrom, to): the same samples and bounds
-// as the today total and /traffic/nodes/monthly, so the cards add up.
-func (r *Repository) NodeTraffic(ctx context.Context, dayFrom, monthFrom, to time.Time) ([]NodeTraffic, error) {
-	today, err := access.ReadNodeTraffic(ctx, r.Database, dayFrom, to, "", false)
-	if err != nil {
-		return nil, err
-	}
-	month, monthErr := access.ReadNodeTraffic(ctx, r.Database, monthFrom, to, "", false)
-	if monthErr != nil && !errors.Is(monthErr, access.ErrTrafficResolution) {
-		return nil, monthErr
-	}
-	byDay := map[string]access.NodeTrafficTotal{}
-	byMonth := map[string]access.NodeTrafficTotal{}
-	for _, v := range today {
-		byDay[v.NodeID] = v
-	}
-	for _, v := range month {
-		byMonth[v.NodeID] = v
-	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT id FROM nodes WHERE deleted_at IS NULL ORDER BY created_at,id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []NodeTraffic{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		d, m := byDay[id], byMonth[id]
-		item := NodeTraffic{NodeID: id, TodayUpload: d.Upload, TodayDownload: d.Download, MonthUpload: m.Upload, MonthDownload: m.Download, Measured: m.Samples > 0}
-		if monthErr != nil {
-			item.HistoryError = monthErr.Error()
 		}
 		items = append(items, item)
 	}

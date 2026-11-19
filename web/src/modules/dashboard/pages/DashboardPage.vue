@@ -16,7 +16,7 @@
 
         <button
           :disabled="loading"
-          @click="loadAll()"
+          @click="refreshAll"
           class="ios-btn-secondary inline-flex items-center gap-1.5"
         >
           <svg :class="['w-3.5 h-3.5 text-ios-secondary', loading ? 'animate-spin' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -27,12 +27,12 @@
       </template>
     </PageHeader>
 
-    <ErrorState v-if="error" :message="error" @retry="loadAll" />
-    <LoadingSkeleton v-if="!dashboard && !nodesReady && !usersReady" />
+    <ErrorState v-if="error" :message="error" @retry="refreshAll" />
+    <LoadingSkeleton v-if="!dashboard && !nodesReady && !usersReady && !statistics && !error" />
     <p v-if="nodesError" role="alert" class="text-sm text-ios-red">{{ nodesError }}</p>
     <p v-if="usersError" role="alert" class="text-sm text-ios-red">{{ usersError }}</p>
 
-    <template v-if="dashboard || nodesReady || usersReady">
+    <template v-if="dashboard || nodesReady || usersReady || statistics">
       <!-- ======================================================== -->
       <!-- 模式一：ADMIN (后台总览)                                   -->
       <!-- 严格对齐各模块高度、外缘边界与排版基线                         -->
@@ -110,8 +110,7 @@
             </div>
 
             <!-- 今日流量 -->
-            <LoadingSkeleton v-if="!dashboard" />
-            <div v-else class="panel-card p-5 bg-white flex flex-col justify-between h-full">
+            <div class="panel-card p-5 bg-white flex flex-col justify-between h-full">
               <div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-semibold text-ios-tertiary">今日流量</span>
@@ -133,6 +132,7 @@
                 <span>↑ <TrafficValue :bytes="todayUpload" /></span>
                 <span>↓ <TrafficValue :bytes="todayDownload" /></span>
               </div>
+              <p v-if="statisticsNotice" role="status" class="mt-1 text-xs text-ios-secondary">{{ statisticsNotice }}</p>
             </div>
           </div>
 
@@ -151,8 +151,8 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
             <div class="min-w-0 flex flex-col">
               <!-- 待处理问题 -->
-              <section v-if="dashboard && nodesReady && usersReady" class="panel-card p-4 bg-white space-y-3 flex-1 flex flex-col">
-                <div class="flex items-center justify-between">
+              <section v-if="dashboard && nodesReady && usersReady" class="panel-card p-4 bg-white space-y-3 h-[480px] min-h-0 overflow-hidden flex flex-col">
+                <div class="flex items-center justify-between shrink-0">
                   <div>
                     <div class="flex flex-wrap items-center gap-2">
                       <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">待处理问题</h2>
@@ -174,7 +174,7 @@
                 </div>
 
                 <!-- 告警列表 -->
-                <div v-if="pendingIssues.length > 0" class="space-y-2">
+                <div v-if="pendingIssues.length > 0" class="space-y-2 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
                   <div
                     v-for="(issue, idx) in pendingIssues"
                     :key="idx"
@@ -223,7 +223,7 @@
                   <p class="text-xs text-ios-tertiary">所有节点连接活跃、代理核心运行正常。</p>
                 </div>
               </section>
-              <section v-else class="panel-card p-4 bg-white space-y-3 flex-1">
+              <section v-else class="panel-card p-4 bg-white space-y-3 h-[480px] overflow-y-auto">
                 <h2 class="text-base font-semibold text-ios-label">待处理问题</h2>
                 <p role="status" class="text-sm text-ios-secondary">{{ error || nodesError || usersError || '正在加载…' }}</p>
               </section>
@@ -231,9 +231,9 @@
 
             <!-- 节点流量 -->
             <div class="min-w-0 flex flex-col">
-              <section v-if="dashboard && nodesReady" class="panel-card p-4 bg-white h-full flex flex-col justify-between space-y-3">
+              <section v-if="statistics && nodesReady" class="panel-card p-4 bg-white h-[480px] min-h-0 overflow-hidden flex flex-col space-y-3">
                 <!-- 头部：标题与时间维度切换 (本月 / 今日) -->
-                <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center justify-between gap-2 shrink-0">
                   <div>
                     <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">节点流量</h2>
                     <p class="text-xs text-ios-tertiary mt-0.5">节点吞吐与用量分布</p>
@@ -268,7 +268,7 @@
                 </div>
 
                 <!-- 吞吐总量与上/下行分布盒子 -->
-                <div class="p-2 rounded-2xl bg-[#F8F8FA] border border-black/[0.04] space-y-1">
+                <div class="p-2 rounded-2xl bg-[#F8F8FA] border border-black/[0.04] space-y-1 shrink-0">
                   <div class="flex flex-wrap items-center justify-between gap-2">
                     <div class="flex flex-wrap items-baseline gap-x-2">
                       <div class="text-xs text-ios-tertiary font-medium">
@@ -323,8 +323,8 @@
                 </div>
 
                 <!-- 节点用量排行明细 (rows stay compact at their natural height) -->
-                <div class="flex-1 flex flex-col space-y-1.5">
-                  <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary px-0.5">
+                <div class="flex-1 min-h-0 flex flex-col space-y-1.5">
+                  <div class="flex items-center justify-between text-xs font-semibold text-ios-secondary px-0.5 shrink-0">
                     <span>各节点用量排行</span>
                     <span class="text-xs text-ios-tertiary font-normal">实时监控</span>
                   </div>
@@ -340,7 +340,7 @@
                     description="尚未添加节点服务器，请前往节点管理配置。"
                   />
 
-                  <div v-else class="space-y-1">
+                  <div v-else class="space-y-1 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
                     <div
                       v-for="(item, index) in sortedNodeTrafficList"
                       :key="item.node.id"
@@ -392,7 +392,7 @@
                   </div>
 
                   <!-- 底端辅助栏 -->
-                  <div class="pt-2 border-t border-black/[0.04] flex flex-wrap items-center justify-between gap-2 text-xs text-ios-tertiary">
+                  <div class="pt-2 border-t border-black/[0.04] flex flex-wrap items-center justify-between gap-2 text-xs text-ios-tertiary shrink-0">
                     <span class="flex items-center gap-1.5">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                       已接入 {{ allNodes.length }} 个节点
@@ -403,19 +403,19 @@
                   </div>
                 </div>
               </section>
-              <section v-else class="panel-card p-4 bg-white space-y-3 flex-1">
+              <section v-else class="panel-card p-4 bg-white space-y-3 h-[480px] overflow-y-auto">
                 <h2 class="text-base font-semibold text-ios-label">节点流量</h2>
-                <p role="status" class="text-sm text-ios-secondary">{{ error || nodesError || '正在加载…' }}</p>
+                <p role="status" class="text-sm text-ios-secondary">{{ nodesError || statisticsNotice || '正在加载…' }}</p>
               </section>
             </div>
             <!-- 用户用量与到期 -->
             <section v-if="usersReady"
               :class="[
-                'panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3',
+                'panel-card min-w-0 p-4 bg-white h-[480px] min-h-0 overflow-hidden flex flex-col space-y-3',
                 isOwner ? '' : 'sm:col-span-2'
               ]"
             >
-              <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div>
                   <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">用户用量与到期</h2>
                   <p class="text-xs text-ios-tertiary mt-0.5">额度使用进度与续约提醒</p>
@@ -429,7 +429,7 @@
                 暂无用户账户
               </div>
 
-              <div v-else class="space-y-2 flex-1 flex flex-col justify-start">
+              <div v-else class="space-y-2 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
                 <div
                   v-for="u in topAttentionUsers"
                   :key="u.id"
@@ -473,14 +473,14 @@
               </div>
             </section>
 
-            <section v-if="!usersReady" class="panel-card min-w-0 p-4 bg-white space-y-3">
+            <section v-if="!usersReady" class="panel-card min-w-0 p-4 bg-white space-y-3 h-[480px] overflow-y-auto">
               <h2 class="text-base font-semibold text-ios-label">用户用量与到期</h2>
               <p role="status" class="text-sm text-ios-secondary">{{ usersError || '正在加载…' }}</p>
             </section>
 
             <!-- 近期阻断 (仅 Owner 可见；只列被拦截的访问) -->
-            <section v-if="isOwner && dashboard" class="panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3">
-              <div class="flex flex-wrap items-center justify-between gap-2">
+            <section v-if="isOwner && dashboard" class="panel-card min-w-0 p-4 bg-white h-[480px] min-h-0 overflow-hidden flex flex-col space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div>
                   <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">近期阻断</h2>
                   <p class="text-xs text-ios-tertiary mt-0.5">最近被拦截的访问</p>
@@ -507,7 +507,7 @@
               </div>
 
               <!-- 有日志时的紧凑列表 (flex-1 纵向撑满对齐) -->
-              <div v-else class="space-y-1.5 divide-y divide-black/[0.04] flex-1">
+              <div v-else class="space-y-1.5 divide-y divide-black/[0.04] flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
                 <div
                   v-for="(item, idx) in dashboard.recentBlocked"
                   :key="idx"
@@ -527,7 +527,7 @@
                 </div>
               </div>
             </section>
-            <section v-else-if="isOwner" class="panel-card min-w-0 p-4 bg-white space-y-3">
+            <section v-else-if="isOwner" class="panel-card min-w-0 p-4 bg-white space-y-3 h-[480px] overflow-y-auto">
               <h2 class="text-base font-semibold text-ios-label">近期阻断</h2>
               <p role="status" class="text-sm text-ios-secondary">{{ error || '正在加载…' }}</p>
             </section>
@@ -542,16 +542,17 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { dashboardAPI, type Dashboard, type Hour, type Recent } from '../api';
+import { useRoute } from 'vue-router';
+import { dashboardAPI, type DashboardBase } from '../api';
 import { liveSummary } from '../liveSummary';
-import { accessAPI } from '../../access/api';
 import { allPages } from '../../../app/pagination';
+import { useStatistics } from '../../../app/useStatistics';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { unhealthyCoreLabel } from '../../nodes/coreSummary';
 import { userAPI, type UserSummary } from '../../users/api';
-import { deploymentAPI, type Revision } from '../../system/deploymentApi';
-import { authState, isOwner, formatTime } from '../../../app/auth';
+import type { Revision } from '../../system/deploymentApi';
+import { isOwner, formatTime } from '../../../app/auth';
 import { panelDateLabel } from '../../../app/time';
 import { showToast } from '../../../app/api';
 import { generateQRCodeSVG } from '../../../app/qrcode';
@@ -563,7 +564,9 @@ import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 
-const dashboard = ref<Dashboard | null>(null);
+const dashboard = ref<DashboardBase | null>(null);
+const route = useRoute();
+const { data: statistics, notice: statisticsNotice, refresh: refreshStatistics } = useStatistics(() => route.name === 'Dashboard' ? '' : undefined);
 const live = computed(() => dashboard.value ? liveSummary(dashboard.value.counts) : null);
 const allNodes = ref<NodeView[]>([]);
 const nodesError = ref('');
@@ -628,27 +631,27 @@ const warningUsersCount = computed(() => {
   }).length;
 });
 
-const todayUpload = computed(() => dashboard.value?.counts.todayUpload || 0);
-const todayDownload = computed(() => dashboard.value?.counts.todayDownload || 0);
-const todayTrafficTotal = computed(() => todayUpload.value + todayDownload.value);
+const todayUpload = computed(() => statistics.value?.todayUpload);
+const todayDownload = computed(() => statistics.value?.todayDownload);
+const todayTrafficTotal = computed(() => statistics.value ? statistics.value.todayUpload + statistics.value.todayDownload : undefined);
 
 const nodeTrafficPeriod = ref<'month' | 'today'>('month');
 const nodeTrafficError = computed(() => nodeTrafficPeriod.value === 'month'
-  ? dashboard.value?.nodeTraffic.find(n => n.historyError)?.historyError || ''
+  ? statistics.value?.nodeTraffic.find(n => n.historyError)?.historyError || ''
   : '');
 
 const displayUploadBytes = computed(() => {
   if (nodeTrafficPeriod.value === 'today') {
-    return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.todayUpload, 0) || 0;
+    return statistics.value?.todayUpload ?? 0;
   }
-  return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.monthUpload, 0) || 0;
+  return statistics.value?.nodeTraffic.reduce((sum, n) => sum + n.monthUpload, 0) ?? 0;
 });
 
 const displayDownloadBytes = computed(() => {
   if (nodeTrafficPeriod.value === 'today') {
-    return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.todayDownload, 0) || 0;
+    return statistics.value?.todayDownload ?? 0;
   }
-  return dashboard.value?.nodeTraffic.reduce((sum, n) => sum + n.monthDownload, 0) || 0;
+  return statistics.value?.nodeTraffic.reduce((sum, n) => sum + n.monthDownload, 0) ?? 0;
 });
 
 const displayTotalBytes = computed(() => {
@@ -671,11 +674,11 @@ const downloadRatioPercent = computed(() => {
 const sortedNodeTrafficList = computed(() => {
   // A node the page has not loaded yet (the list loads separately) is skipped
   // rather than rendered without a name.
-  const list = (dashboard.value?.nodeTraffic || []).flatMap(sample => {
+  const list = (statistics.value?.nodeTraffic || []).flatMap(sample => {
     const node = allNodes.value.find(n => n.id === sample.nodeId) || dashboard.value?.nodes.find(n => n.id === sample.nodeId);
     if (!node) return [];
     const t = nodeTrafficPeriod.value === 'today' ? sample.todayUpload + sample.todayDownload : sample.monthUpload + sample.monthDownload;
-    return [{ node, traffic: t, measured: sample.measured, percent: 0, share: 0 }];
+    return [{ node, traffic: t, measured: nodeTrafficPeriod.value === 'today' ? sample.todayMeasured : sample.measured, percent: 0, share: 0 }];
   });
 
   list.sort((a, b) => b.traffic - a.traffic);
@@ -884,10 +887,8 @@ async function loadTrafficData() {
 
 async function loadDashboard() {
   try {
-    dashboard.value = await dashboardAPI.get();
-    if (dashboard.value?.revisions) {
-      allRevisions.value = dashboard.value.revisions;
-    }
+    dashboard.value = await dashboardAPI.base();
+    allRevisions.value = dashboard.value.revisions ?? [];
     error.value = '';
   } catch (e) {
     error.value = (e as Error).message;
@@ -908,6 +909,10 @@ async function loadAll(silent = false) {
 }
 
 function visibilityChanged() { if (!document.hidden) void loadAll(true); }
+function refreshAll() {
+  void loadAll();
+  void refreshStatistics(true);
+}
 onMounted(() => {
   void loadAll();
   document.addEventListener('visibilitychange', visibilityChanged);

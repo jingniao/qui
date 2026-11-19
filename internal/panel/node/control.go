@@ -55,7 +55,11 @@ type Control struct {
 	RecoveryRedeploy func(context.Context, string) error
 	CataloguePort    func(context.Context) uint32
 	Notify           func(string)
-	DashboardNotify  func()
+	// HeartbeatNotify keeps the legacy event for consumers of heartbeat and
+	// disconnect notifications without invalidating the server inventory.
+	HeartbeatNotify func(string)
+	Runtime         *RuntimeSnapshots
+	DashboardNotify func()
 
 	// Logger receives one warning per refused node certificate, so an operator
 	// can see an old Agent still presenting a replaced certificate. Optional;
@@ -184,6 +188,7 @@ func (c *Control) Enroll(ctx context.Context, request *pb.EnrollRequest) (*pb.En
 		}
 		return nil, status.Error(codes.Internal, "enrollment failed")
 	}
+	c.Runtime.afterCommit(id)
 	if purpose == "recover" {
 		c.Disconnect(id)
 	}
@@ -240,11 +245,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		c.Repository.Offline(cleanup, id)
-		c.Repository.unconfirmTuning(cleanup, id)
-		if c.Notify != nil {
-			c.Notify(id)
+		if err := c.Repository.Offline(cleanup, id); err == nil {
+			c.Runtime.afterCommit(id)
+		} else if c.Logger != nil {
+			c.Logger.Error("persist offline node status", "node", id, "error", err)
 		}
+		c.Repository.unconfirmTuning(cleanup, id)
+		c.notifyHeartbeat(id)
 		c.mu.Lock()
 		if current := c.connected[id]; current == entry {
 			delete(c.connected, id)
@@ -265,6 +272,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if err := c.Repository.AgentVersion(ctx, id, first.GetHello().AgentVersion); err != nil {
 		return status.Error(codes.Internal, "node version persistence failed")
 	}
+	c.Runtime.afterCommit(id)
 	restartSupported := first.GetHello().CoreRestartSupported
 	if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET core_restart_supported=? WHERE id=?", restartSupported, id); err != nil {
 		return status.Error(codes.Internal, "restart capability persistence failed")
@@ -601,6 +609,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if err != nil {
 			return status.Error(codes.Internal, "message persistence failed")
 		}
+		if message.Sequence > lastSequence && (message.GetHeartbeat() != nil || message.GetCapabilities() != nil) {
+			c.Runtime.afterCommit(id)
+		}
 		if message.GetCapabilities() != nil && c.RecoveryRedeploy != nil {
 			if claimed, claimErr := c.Repository.ClaimRecoveryRedeploy(ctx, id); claimErr == nil && claimed {
 				// The redeploy records its own outcome (success, pending,
@@ -618,7 +629,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.Internal, "stale core update closure failed")
 			}
 		}
-		if c.Notify != nil && (message.GetHeartbeat() != nil || message.GetAgentUpdateResult() != nil || message.GetHealthCheckResult() != nil) {
+		if message.GetHeartbeat() != nil {
+			c.notifyHeartbeat(id)
+		}
+		if c.Notify != nil && (message.GetAgentUpdateResult() != nil || message.GetHealthCheckResult() != nil) {
 			c.Notify(id)
 		}
 		if result := message.GetApplyResult(); result != nil && !ignoredApply && c.DeploymentNotify != nil {

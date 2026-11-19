@@ -39,10 +39,13 @@
 | deployment | `internal/panel/deployment` | 配置版本、差异、批量发布、回滚、核心与 Agent 更新任务 |
 | access | `internal/panel/access` | 域名访问记录、流量汇总、保留清理 |
 | dashboard | `internal/panel/dashboard` | 总览聚合（只读） |
+| statistics | `internal/panel/statistics` | 后台准备同一读取快照下的日／月／趋势／整机统计，供总览和服务器页面共享 |
 | connections | `internal/panel/connections` | 面板内存中的实时连接快照（不落库） |
 | system | `internal/panel/system` | 系统设置、备份、恢复、发布公钥、保留策略 |
 
 约束：每个模块只通过自己的 Repository 修改所属数据；配置发布统一经 Deployment；Dashboard 只查询（见 AGENTS 第 24 节）。
+
+工作区新增的展示读取链路尚未发布部署，详见[四批实施记录](superpowers/plans/2026-11-19-prepared-display-data.md)。运行状态以白名单快照和 SSE 更新，浏览器定期校准；恢复连接时保持已有卡片，确认真实离线后才显示离线。统计由后台每 30 秒准备，总览基础内容独立读取；统计错误和数据年龄显式返回，旧结果不参与额度判断。代理流量的 `traffic_sample_hours` 是迁移 0155 新增的可重建索引，完整小时走索引、边界走原始样本；未完成回填时仍执行原精确查询。原始账本、来源切换和去重语义不变，已压缩历史的精度限制也不变。
 
 ## 4. Agent 模块
 

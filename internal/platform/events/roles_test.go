@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/platform/events"
 	"proxycontrol/internal/testutil/dbtest"
@@ -83,6 +84,8 @@ func TestSSERoleFilteringAndReauthentication(t *testing.T) {
 					{"system.alert", map[string]string{"alert": "certificate_deploy_failed"}, false},
 					{"deployment_status", map[string]int{"revision": 1}, true},
 					{"dashboard_status", map[string]bool{"changed": true}, true},
+					{"node_runtime", node.RuntimeSnapshot{Generation: "panel-epoch", Node: node.RuntimeNode{NodeID: "server", Revision: 1, Status: "online"}}, true},
+					{"node_runtime", map[string]string{"unexpected": "private"}, false},
 					{"notification", map[string]any{"id": 1, "kind": "node_offline"}, true},
 					{"notification", map[string]any{"id": 2, "kind": "cpu"}, true},
 					{"notification", map[string]any{"id": 3, "kind": "memory"}, true},

@@ -39,6 +39,7 @@ import (
 	"proxycontrol/internal/panel/policy"
 	"proxycontrol/internal/panel/portal"
 	"proxycontrol/internal/panel/proxy"
+	"proxycontrol/internal/panel/statistics"
 	"proxycontrol/internal/panel/subscription"
 	"proxycontrol/internal/panel/subscription/format"
 	"proxycontrol/internal/panel/subscription/importer"
@@ -71,6 +72,7 @@ type Server struct {
 	Authority           *pki.Authority
 	accessRepository    *access.Repository
 	trafficService      *access.Service
+	statistics          *statistics.Service
 	nodeRepository      *node.Repository
 	deployments         *deployment.Repository
 	relayCleanup        *deployment.RelayCleanupDeployer
@@ -97,6 +99,7 @@ type Server struct {
 	sourceRefresher     *policy.SourceRefresher
 	notificationWorker  *notification.Worker
 	eventBus            *events.Bus
+	runtimeSnapshots    *node.RuntimeSnapshots
 	startedAt           time.Time
 }
 
@@ -165,8 +168,17 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	displayAccess := &access.Repository{Database: s.readPool, Vault: configurationVault}
 	eventBus := &events.Bus{}
 	s.eventBus = eventBus
+	runtimeSnapshots, err := node.NewRuntimeSnapshots(s.readPool, func(snapshot node.RuntimeSnapshot) { eventBus.Publish("node_runtime", snapshot) })
+	if err != nil {
+		return nil, fmt.Errorf("initialize runtime snapshots: %w", err)
+	}
+	s.runtimeSnapshots = runtimeSnapshots
 	notify := func(id string) { eventBus.Publish("node_status", map[string]string{"nodeId": id}) }
-	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Logger: s.Logger, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
+	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Runtime: runtimeSnapshots,
+		HeartbeatNotify: func(id string) {
+			eventBus.Publish("node_status", map[string]any{"nodeId": id, "inventoryChanged": false})
+		},
+		Logger: s.Logger, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
 	s.relayCleanup = deployment.NewRelayCleanupDeployer(deployments, nodeRepository, logger)
 	control.Deployment = &relayCleanupControl{Repository: deployments, cleanup: s.relayCleanup}
 	control.RecoveryRedeploy = func(ctx context.Context, id string) error {
@@ -322,9 +334,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.certificates.Logger = logger
 	(&certificate.Handler{Service: s.certificates, Auth: authHandler, Actor: func(ctx context.Context) string { return auth.Actor(ctx).Username }}).Register(mux)
 	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository, BaseSettings: systemRepository}).Register(mux, &access.Handler{Repository: displayAccess, Auth: authHandler, BaseSettings: systemRepository})
-	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments, Disconnect: control.Disconnect, Certificates: s.certificates}
+	nodeHandler := &node.Handler{Repository: nodeRepository, Runtime: runtimeSnapshots, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments, Disconnect: control.Disconnect, Certificates: s.certificates}
 	nodeHandler.Install = s.installInfo
-	nodeHandler.Register(mux, &node.Handler{Repository: displayNodes, Auth: authHandler})
+	nodeHandler.Register(mux, &node.Handler{Repository: displayNodes, Runtime: runtimeSnapshots, Auth: authHandler})
 	nodeHandler.RegisterGroups(mux)
 	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates}, Nodes: nodeRepository, EntryGroups: nodeRepository}
 	proxyService.RelayCleanupRequested = s.relayCleanup.Reconcile
@@ -348,7 +360,8 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		},
 	}
 	proxyService.Policies = policyService
-	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: s.readPool, Connections: s.connectionStore}, Nodes: displayNodes, Deployments: displayDeployments, Proxies: &proxy.Repository{Database: s.readPool, Vault: configurationVault}, Settings: systemRepository}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
+	s.statistics = statistics.New(s.readPool, displayNodes)
+	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: s.readPool, Connections: s.connectionStore}, Nodes: displayNodes, Deployments: displayDeployments, Proxies: &proxy.Repository{Database: s.readPool, Vault: configurationVault}, Settings: systemRepository, Statistics: s.statistics}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
 	s.sourceRefresher = &policy.SourceRefresher{Repository: policyService.Repository, Fetcher: importer.Fetcher{Timeout: 15 * time.Second}, Vault: configurationVault}
 	(&policy.Handler{Service: policyService, Refresher: s.sourceRefresher, Auth: authHandler, Audit: systemRepository}).Register(mux)
@@ -629,8 +642,10 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(13)
+	jobs.Add(15)
 	defer func() { stopBackground(); jobs.Wait() }()
+	go func() { defer jobs.Done(); s.runtimeSnapshots.Run(background, s.Logger) }()
+	go func() { defer jobs.Done(); s.statistics.Run(background) }()
 	go func() { defer jobs.Done(); s.runRelayCleanup(background) }()
 	go func() { defer jobs.Done(); s.runTunnelFinalization(background) }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
@@ -676,6 +691,11 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 			if err == nil {
 				var more bool
 				more, err = s.accessRepository.AdvanceTrafficStorage(cleanup, time.Now().UTC())
+				pending = pending || more
+			}
+			if err == nil {
+				var more bool
+				more, err = access.PrepareNodeTrafficHours(cleanup, s.Database, 16)
 				pending = pending || more
 			}
 			cancel()

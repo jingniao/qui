@@ -1,15 +1,32 @@
+import type { RuntimeSnapshot } from '../modules/nodes/runtimeSnapshots';
+
 // Helpers for the `proxy-node-status` window event. The event detail carries the
 // node ID from the SSE message; an empty detail means "any/all nodes".
-export function nodeStatusDetail(nodeId: unknown): { nodeId: string } {
-  return { nodeId: typeof nodeId === 'string' ? nodeId : '' };
+type NodeStatusDetail = { nodeId: string; inventoryChanged?: false };
+export function nodeStatusDetail(nodeId: unknown, inventoryChanged?: unknown): NodeStatusDetail {
+  const id = typeof nodeId === 'string' ? nodeId : '';
+  return inventoryChanged === false ? { nodeId: id, inventoryChanged: false } : { nodeId: id };
 }
 
-export function parseNodeStatusMessage(data: unknown): { nodeId: string } {
+export function parseNodeStatusMessage(data: unknown): NodeStatusDetail {
   if (typeof data !== 'string' || !data) return nodeStatusDetail('');
   try {
-    const parsed = JSON.parse(data) as { nodeId?: unknown } | null;
-    return nodeStatusDetail(parsed?.nodeId);
+    const parsed = JSON.parse(data) as { nodeId?: unknown; inventoryChanged?: unknown } | null;
+    return nodeStatusDetail(parsed?.nodeId, parsed?.inventoryChanged);
   } catch { return nodeStatusDetail(''); }
+}
+
+export function nodeStatusEventChangesInventory(event: Event): boolean {
+  return (event as CustomEvent<NodeStatusDetail>).detail?.inventoryChanged !== false;
+}
+
+export function parseRuntimeSnapshotMessage(data: string): RuntimeSnapshot {
+  const snapshot = JSON.parse(data) as RuntimeSnapshot;
+  if (typeof snapshot?.generation !== 'string' || !Number.isSafeInteger(snapshot.inventoryRevision) ||
+      typeof snapshot.node?.nodeId !== 'string' || !Number.isSafeInteger(snapshot.node.revision)) {
+    throw new Error('Invalid node_runtime event');
+  }
+  return snapshot;
 }
 
 export function nodeStatusEventNodeId(event: Event | null | undefined): string {

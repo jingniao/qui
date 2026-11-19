@@ -28,12 +28,22 @@ func ReadNodeTraffic(ctx context.Context, database *sql.DB, from, to time.Time, 
 		return nil, err
 	}
 	defer tx.Close()
+	return ReadNodeTrafficSnapshot(ctx, tx, from, to, nodeID, hourly)
+}
+
+// ReadNodeTrafficSnapshot lets related display totals share a transaction and
+// cutoff. The caller owns the snapshot; this function never commits or closes it.
+func ReadNodeTrafficSnapshot(ctx context.Context, tx *db.ReadSnapshot, from, to time.Time, nodeID string, hourly bool) ([]NodeTrafficTotal, error) {
+	return readNodeTrafficSnapshot(ctx, tx, from, to, nodeID, hourly, true)
+}
+
+func readNodeTrafficSnapshot(ctx context.Context, tx *db.ReadSnapshot, from, to time.Time, nodeID string, hourly, useIndex bool) ([]NodeTrafficTotal, error) {
 	for _, boundary := range []time.Time{from, to} {
 		if boundary.Equal(boundary.Truncate(time.Hour)) {
 			continue
 		}
 		var count int
-		err = tx.QueryRowContext(ctx, "SELECT count(*) FROM core_traffic_hourly WHERE bucket=? AND (?='' OR node_id=?)", timestamp(boundary.Truncate(time.Hour)), nodeID, nodeID).Scan(&count)
+		err := tx.QueryRowContext(ctx, "SELECT count(*) FROM core_traffic_hourly WHERE bucket=? AND (?='' OR node_id=?)", timestamp(boundary.Truncate(time.Hour)), nodeID, nodeID).Scan(&count)
 		if err != nil {
 			return nil, err
 		}
@@ -55,6 +65,43 @@ func ReadNodeTraffic(ctx context.Context, database *sql.DB, from, to time.Time, 
 	}
 	coarseEnd := coarseTo.Format("2006-01-02T15:04:05")
 	args := []any{coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID}
+	source := `SELECT node_id,observed_at,upload_bytes,download_bytes,1 AS samples FROM node_traffic_samples WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_hourly WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)`
+	fullFrom, fullTo := from.UTC().Truncate(time.Hour), to.UTC().Truncate(time.Hour)
+	if !from.Equal(fullFrom) {
+		fullFrom = fullFrom.Add(time.Hour)
+	}
+	if useIndex && fullFrom.Before(fullTo) {
+		var ready bool
+		if err := tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM traffic_sample_hours WHERE ready=0)`).Scan(&ready); err != nil {
+			return nil, err
+		}
+		// Unprepared databases deliberately retain the original exact query.
+		// Full-hour rows replace, never supplement, the same raw time range.
+		if ready {
+			var overflow bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM traffic_sample_hours h
+ WHERE h.bucket>=? AND h.bucket<? AND (?='' OR h.node_id=?) AND h.overflow=1
+ AND (h.source='core' OR NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=h.node_id AND n.epoch=h.epoch||'.node')))`, timestamp(fullFrom), timestamp(fullTo), nodeID, nodeID).Scan(&overflow); err != nil {
+				return nil, err
+			}
+			if overflow {
+				return nil, fmt.Errorf("node traffic hour overflow")
+			}
+			source = `SELECT h.node_id,h.bucket AS observed_at,h.upload_bytes,h.download_bytes,h.samples FROM traffic_sample_hours h
+ WHERE h.bucket>=? AND h.bucket<? AND (?='' OR h.node_id=?) AND h.samples>0
+ AND (h.source='core' OR NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=h.node_id AND n.epoch=h.epoch||'.node'))
+ UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM node_traffic_samples
+ WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM node_traffic_samples
+ WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_hourly WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)`
+			args = []any{timestamp(fullFrom), timestamp(fullTo), nodeID, nodeID,
+				coarseFrom, fullFrom.Format("2006-01-02T15:04:05"), nodeID, nodeID,
+				fullTo.Format("2006-01-02T15:04:05"), coarseEnd, nodeID, nodeID,
+				coarseFrom, coarseEnd, nodeID, nodeID}
+		}
+	}
 	// The indexed bounds already select whole seconds exactly. Only fractional
 	// boundary seconds need normalization of published seconds/nanoseconds. CASE
 	// keeps that work out of the rest of the month, including inside the view.
@@ -68,10 +115,7 @@ func ReadNodeTraffic(ctx context.Context, database *sql.DB, from, to time.Time, 
 		precise += " AND CASE WHEN observed_at>=? THEN " + normalized + "<? ELSE 1 END"
 		args = append(args, to.UTC().Format("2006-01-02T15:04:05"), to.UTC().Format("2006-01-02T15:04:05.000000000Z"))
 	}
-	rows, err := tx.QueryContext(ctx, `WITH traffic AS (
- SELECT node_id,observed_at,upload_bytes,download_bytes,1 AS samples FROM node_traffic_samples WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
- UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_hourly WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
- ) SELECT node_id,`+bucket+`,sum(upload_bytes),sum(download_bytes),sum(samples) FROM traffic
+	rows, err := tx.QueryContext(ctx, `WITH traffic AS (`+source+`) SELECT node_id,`+bucket+`,sum(upload_bytes),sum(download_bytes),sum(samples) FROM traffic
 	 WHERE 1=1`+precise+` GROUP BY `+group+` ORDER BY `+group, args...)
 	if err != nil {
 		return nil, err

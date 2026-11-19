@@ -176,6 +176,8 @@
 
       <!-- Lower 3-Column Sub-grid: 总流量 / 上行 / 下行（代理流量，非整机流量） -->
       <p class="text-xs text-ios-tertiary font-medium">代理流量 · 本月（保留记录）</p>
+      <p v-if="statisticsNotice" role="status" class="text-xs text-ios-secondary">{{ statisticsNotice }}</p>
+      <p v-if="nodeTraffic?.historyError" role="status" class="text-xs text-ios-orange">本月流量无法精确计算（{{ nodeTraffic.historyError }}）</p>
       <div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-xs text-ios-tertiary font-medium">总流量</div>
@@ -186,15 +188,15 @@
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-xs text-ios-tertiary font-medium">上行</div>
-          <p class="text-xs font-semibold text-emerald-600 tabular-nums break-words" :title="formatCompactBytes(uploadBytes)">
-            ↑ {{ formatCompactBytes(uploadBytes) }}
+          <p class="text-xs font-semibold text-emerald-600 tabular-nums break-words" :title="formatCompactBytes(monthlyTraffic?.monthUpload)">
+            ↑ {{ formatCompactBytes(monthlyTraffic?.monthUpload) }}
           </p>
         </div>
 
         <div class="bg-black/[0.02] border border-black/[0.04] rounded-xl p-2.5 space-y-1">
           <div class="text-xs text-ios-tertiary font-medium">下行</div>
-          <p class="text-xs font-semibold text-ios-blue tabular-nums break-words" :title="formatCompactBytes(downloadBytes)">
-            ↓ {{ formatCompactBytes(downloadBytes) }}
+          <p class="text-xs font-semibold text-ios-blue tabular-nums break-words" :title="formatCompactBytes(monthlyTraffic?.monthDownload)">
+            ↓ {{ formatCompactBytes(monthlyTraffic?.monthDownload) }}
           </p>
         </div>
       </div>
@@ -204,6 +206,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import type { NodeTraffic } from '../../../../app/statisticsCache';
 import type { MachineTrafficSummary, NodeView } from '../../api';
 import type { HostMetrics } from '../../metrics';
 import { nicRate } from '../../metrics';
@@ -214,9 +217,9 @@ const props = defineProps<{
   node: NodeView;
   metrics: HostMetrics;
   now: number;
-  today?: number;
-  month?: number;
+  nodeTraffic?: NodeTraffic;
   machineTraffic?: MachineTrafficSummary | null;
+  statisticsNotice: string;
 }>();
 
 const host = computed(() => props.node.capabilities?.host);
@@ -309,14 +312,9 @@ const downloadRatioPercent = computed(() => {
   return 100 - uploadRatioPercent.value;
 });
 
+const monthlyTraffic = computed(() => props.nodeTraffic?.measured && !props.nodeTraffic.historyError ? props.nodeTraffic : undefined);
 const totalTrafficDisplay = computed(() => {
-  const total = totalBytes.value;
-  if (total !== undefined) {
-    return formatBytes(total);
-  }
-  if (props.month !== undefined && props.month > 0) {
-    return `${formatBytes(props.month)} (本月)`;
-  }
-  return '—';
+  const month = monthlyTraffic.value;
+  return formatBytes(month ? month.monthUpload + month.monthDownload : undefined);
 });
 </script>

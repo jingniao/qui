@@ -36,7 +36,7 @@
       </template>
       <template v-else>
         <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : '服务器离线' }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
-        <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :meta="meta" :now="now" :today="today" :month="month" :machine-traffic="machineTraffic" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
+        <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :meta="meta" :now="now" :node-traffic="nodeTraffic" :machine-traffic="machineTraffic" :statistics-notice="trafficStatus" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
         <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id + ':' + nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
         <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :active="activeTab === 'revisions'" :latest-revision="latestRevision" @changed="load" @published="published" />
@@ -53,15 +53,12 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
-import { nodeAPI, type MachineTrafficSummary, type NodeView } from '../api';
+import { nodeAPI, type NodeView } from '../api';
 import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
-import { choices } from '../../proxy/api';
-import { accessAPI } from '../../access/api';
-import { request } from '../../../app/apiClient';
 import { isOwner } from '../../../app/auth';
 import { nodeStatusMatches } from '../../../app/nodeStatusEvents';
-import { localInput, utcInput } from '../../../app/time';
+import { useStatistics } from '../../../app/useStatistics';
 import ErrorState from '../../../components/ErrorState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
@@ -139,7 +136,6 @@ onBeforeRouteUpdate((to, from) => {
   return to.params.id !== from.params.id || to.query.tab !== from.query.tab ? canLeave() : true;
 });
 
-const today = ref<number>(), month = ref<number>(), machineTraffic = ref<MachineTrafficSummary | null>(null);
 const meta = computed(() => node.value ? getNodeMeta(node.value.id) : {});
 const latestRevision = computed(() => revisions.value.length ? Math.max(...revisions.value.map(rev => rev.id)) : undefined);
 const tabs = computed(() => [
@@ -157,6 +153,16 @@ const activeTab = computed(() => {
   const key = aliases[raw] || raw;
   return tabs.value.some(tab => tab.key === key) ? key : 'overview';
 });
+const { data: statistics, notice: statisticsNotice } = useStatistics(() => {
+  const current = node.value;
+  if (route.name === 'NodeDetail' && current && current.id === route.params.id && !current.deletedAt && !pending.value && activeTab.value === 'overview') {
+    return current.id;
+  }
+  return undefined;
+});
+const nodeTraffic = computed(() => statistics.value?.nodeTraffic[0]);
+const machineTraffic = computed(() => statistics.value?.machineTraffic[0]);
+const trafficStatus = computed(() => [statisticsNotice.value, statistics.value?.machineError && `整机流量读取失败（${statistics.value.machineError}）`].filter(Boolean).join('；'));
 
 function selectTab(tab: string) {
   if (route.name !== 'NodeDetail' || tab === activeTab.value) return;
@@ -244,28 +250,13 @@ async function loadSupplements() {
         return fallback;
       }
     };
-    let dayStart: string;
-    try {
-      dayStart = utcInput(localInput(new Date().toISOString()).slice(0, 10) + 'T00:00');
-    } catch {
-      const utc = new Date();
-      utc.setUTCHours(0, 0, 0, 0);
-      dayStart = utc.toISOString();
-    }
-    const [revisionResult, daily, monthly, machine] = await Promise.all([
+    const [revisionResult] = await Promise.all([
       isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), revisions.value) : Promise.resolve([]),
-      optional('今日流量读取失败', accessAPI.accounts({ nodeId: id, from: dayStart, to: new Date().toISOString() }), null),
-      optional('本月流量读取失败', request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly'), null),
-      optional('本月整机流量读取失败', nodeAPI.machineTraffic(id), machineTraffic.value),
       optional('元数据读取失败', loadNodeMeta(id, isOwner.value), null)
     ]);
     if (current !== generation || ticket !== supplementGeneration) return;
     revisions.value = revisionResult;
     revisionRefresh.value++;
-    if (daily) today.value = daily.observations > 0 ? daily.uploadBytes + daily.downloadBytes : undefined;
-    const item = monthly?.items.find(item => item.nodeId === id);
-    month.value = item ? item.uploadBytes + item.downloadBytes : undefined;
-    machineTraffic.value = machine;
     warnings.value = notices;
   } finally {
     if (ticket === supplementGeneration) {
@@ -291,9 +282,6 @@ watch(() => route.params.id, () => {
   unpublished.value = false;
   node.value = null;
   revisions.value = [];
-  today.value = undefined;
-  month.value = undefined;
-  machineTraffic.value = null;
   warnings.value = [];
   void load();
 });

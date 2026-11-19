@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"proxycontrol/migrations"
 )
@@ -80,7 +81,7 @@ func TestMigrateAcceptsCompleteLegacyChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := versions(t, database)
-	if len(got) != len(legacyMigrations)+2 || got[len(got)-1] != "0154_traffic_storage_retirement.sql" {
+	if len(got) != len(legacyMigrations)+3 || got[len(got)-1] != "0155_traffic_display_hours.sql" {
 		t.Fatalf("recorded %d versions, last %v", len(got), got[len(got)-1:])
 	}
 	for _, v := range got {
@@ -97,6 +98,56 @@ func TestMigrateAcceptsCompleteLegacyChain(t *testing.T) {
 	}
 	if err := Migrate(ctx, database, migrations.Files); err != nil {
 		t.Fatal("second run:", err)
+	}
+}
+
+func TestTrafficDisplayMigrationPreservesExistingSamples(t *testing.T) {
+	ctx := context.Background()
+	uri, err := URI(filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	database.SetMaxOpenConns(1)
+	prior := fstest.MapFS{}
+	for _, name := range []string{BaselineMigration, "0153_drop_one_shot_markers.sql", "0154_traffic_storage_retirement.sql"} {
+		data, err := migrations.Files.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prior[name] = &fstest.MapFile{Data: data}
+	}
+	if err := Migrate(ctx, database, prior); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO nodes(id,name,status,created_at) VALUES('n','n','online','2026-11-19T00:00:00Z');
+ INSERT INTO core_traffic_samples(node_id,core,epoch,observed_at,upload_bytes,download_bytes) VALUES('n','xray','e.node','2026-11-19T00:00:01Z',7,13),('n','xray','e.node','2026-11-19T00:00:02Z',11,17);
+ INSERT INTO account_traffic_samples(node_id,epoch,credential_id,observed_at,user_id,device_id,upload_bytes,download_bytes) VALUES('n','e','c','2026-11-19T00:00:03Z','u','d',5,9);`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, database, migrations.Files); err != nil {
+		t.Fatal(err)
+	}
+	var buckets, ready, up, down int64
+	if err := database.QueryRow(`SELECT count(*),sum(ready) FROM traffic_sample_hours`).Scan(&buckets, &ready); err != nil || buckets != 2 || ready != 0 {
+		t.Fatalf("unprepared index: %d/%d %v", buckets, ready, err)
+	}
+	if err := database.QueryRow(`SELECT sum(upload_bytes),sum(download_bytes) FROM core_traffic_samples`).Scan(&up, &down); err != nil || up != 18 || down != 30 {
+		t.Fatalf("source changed: %d/%d %v", up, down, err)
+	}
+	// Updates before backfill stay unprepared rather than publishing partial sums.
+	if _, err := database.Exec(`UPDATE core_traffic_samples SET upload_bytes=upload_bytes+1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT sum(ready),sum(upload_bytes) FROM traffic_sample_hours`).Scan(&ready, &up); err != nil || ready != 0 || up != 0 {
+		t.Fatalf("partial index exposed: %d/%d %v", ready, up, err)
+	}
+	if err := Migrate(ctx, database, migrations.Files); err != nil {
+		t.Fatalf("repeat migration: %v", err)
 	}
 }
 

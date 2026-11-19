@@ -79,13 +79,24 @@ function orderPage(api) {
   const guard = page.match(/onBeforeRouteLeave\([\s\S]*?\n\}\);/)?.[0] || '';
   const names = ['orderIds', 'savedOrder', 'ordered', 'nodeAPI', 'showToast', 'APIError', 'setTimeout', 'clearTimeout', 'onBeforeRouteLeave'];
   const values = [ids, saved, { get value() { return ids.value.map(id => ({ id })); } }, api, () => {}, APIError, () => 1, () => {}, fn => { leave = fn; }];
-  const refs = { loading: false, error: '', isOwner: false, deleted: false, nodes: [], selected: [], warnings: [], groups: [], today: {}, month: {}, machineTraffic: {}, monthZone: '', page: 1, filtered: [] };
-  for (const [name, value] of Object.entries(refs)) { names.push(name); values.push({ value }); }
+  const refs = { loading: false, error: '', isOwner: false, deleted: false, nodes: [], selected: [], warnings: [], inventoryWarnings: [], groups: [], today: {}, month: {}, machineTraffic: {}, monthZone: '', page: 1, filtered: [] };
+  const boundRefs = Object.fromEntries(Object.entries(refs).map(([name, value]) => [name, { value }]));
+  for (const [name, value] of Object.entries(boundRefs)) { names.push(name); values.push(value); }
   names.push('choices', 'groupAPI', 'request', 'utcInput', 'localInput', 'changePage');
   values.push(async fetch => (await fetch()).items, {}, async () => ({ items: [], timezone: 'UTC' }), x => x, x => x, () => {});
-  const code = ts.transpileModule(block + '\n' + loadBlock + '\n' + guard, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+  // Runtime calibration has its own behavioral suite. This sorting fixture has
+  // an empty inventory and no pending runtime changes, but still executes the
+  // page's real load/confirmation functions and checks their error channels.
+  names.push('calibrateRuntime', 'loadNodeMetadata', 'runtime');
+  values.push(async () => {}, async () => {}, { generation: '' });
+  const inventory = 'let inventory = []; let inventoryScope; let lastMembershipCheck = "";';
+  const code = ts.transpileModule(block + '\n' + inventory + '\n' + loadBlock + '\n' + guard, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
   const result = new Function(...names, code + '\nreturn { setOrder, saveOrder, load };')(...values);
-  return { ...result, ids, saved, leave: () => leave() };
+  return { ...result, load: async () => {
+    await result.load();
+    assert.equal(boundRefs.error.value, '', 'sorting fixture must complete the real page load');
+    assert.deepEqual(boundRefs.inventoryWarnings.value, [], 'metadata fixture must load successfully');
+  }, ids, saved, leave: () => leave() };
 }
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const oldRead = deferred();

@@ -10,6 +10,11 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 	if err := validateTrafficStorageTx(ctx, tx, "restore_source."); err != nil {
 		return err
 	}
+	// Bulk source replacement must not maintain a previous database's derived
+	// totals. Rebuild from the final restored sources before enabling fast reads.
+	if _, err := tx.ExecContext(ctx, "UPDATE traffic_sample_hours SET ready=0"); err != nil {
+		return err
+	}
 	if err := r.preserveSpaceMaintenanceRestoreTx(ctx, tx); err != nil {
 		return err
 	}
@@ -37,6 +42,9 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	if err := validateTrafficStorageTx(ctx, tx, ""); err != nil {
+		return err
+	}
+	if err := resetTrafficHoursTx(ctx, tx); err != nil {
 		return err
 	}
 	if err := r.preserveTrafficCompletionRestoreTx(ctx, tx); err != nil {

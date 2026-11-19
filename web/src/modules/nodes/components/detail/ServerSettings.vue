@@ -389,6 +389,7 @@ import { nodeAPI, type NodeView, type NodeSettingsInput } from '../../api';
 import { type NodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice, calculateRemainingDays, CURRENCY_LIST, CYCLE_LIST } from '../../nodeMeta';
 import { isOwner } from '../../../../app/auth';
 import { showToast } from '../../../../app/api';
+import { invalidateStatistics } from '../../../../app/useStatistics';
 import NodeRestartPanel from '../NodeRestartPanel.vue';
 import CoreUpdatesPanel from '../../../system/components/CoreUpdatesPanel.vue';
 import ConfirmDialog from '../../../../components/ConfirmDialog.vue';
@@ -650,6 +651,7 @@ async function saveMachineTraffic() {
   errors.machine = '';
   try {
     const saved = await nodeAPI.saveMachineTrafficSettings(props.node.id, payloadFromForm(submitted));
+    invalidateStatistics();
     if (current !== machineGeneration) return;
     mergeMachineSettings(formFromSettings(saved), submitted);
     showToast('整机流量设置已保存');

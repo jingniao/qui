@@ -33,6 +33,8 @@ func TestDisplayReadsDoNotQueueBehindWriter(t *testing.T) {
 			t.Fatalf("create display user: %d %s", response.Code, response.Body.String())
 		}
 	}
+	stop := startTestStatistics(t, app)
+	defer stop()
 	held, err := app.Database.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +44,7 @@ func TestDisplayReadsDoNotQueueBehindWriter(t *testing.T) {
 		"/api/v1/users/choices", "/api/v1/users/summaries", "/api/v1/users",
 		"/api/v1/nodes/choices", "/api/v1/nodes/meta", "/api/v1/nodes", "/api/v1/nodes/machine-traffic",
 		"/api/v1/task-records", "/api/v1/traffic/nodes/summary", "/api/v1/traffic/nodes/monthly", "/api/v1/dashboard",
+		"/api/v1/dashboard/base", "/api/v1/dashboard/statistics", "/api/v1/statistics/nodes",
 	} {
 		t.Run(path, func(t *testing.T) {
 			// Race instrumentation makes opening SQLite read connections costly.

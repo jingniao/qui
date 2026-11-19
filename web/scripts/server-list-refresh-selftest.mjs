@@ -31,13 +31,31 @@ const statusCode = ts.transpileModule(statusSource.replace('export ', '') + '\nr
 const serverStatus = new Function('unhealthyCores', statusCode)(unhealthyCores);
 const beforeHidden = Date.parse('2026-11-19T08:00:00Z');
 const cachedNode = { enabled: true, status: 'online', lastHeartbeat: new Date(beforeHidden).toISOString(), heartbeat: { core_healthy: true } };
-assert.equal(serverStatus(cachedNode, beforeHidden, true).key, 'online');
-assert.equal(serverStatus(cachedNode, beforeHidden + 600000, false).key, 'unknown', 'background age is not an offline observation');
-assert.equal(serverStatus(cachedNode, beforeHidden + 600000, false).label, '状态待更新');
-assert.equal(serverStatus({ ...cachedNode, lastHeartbeat: new Date(beforeHidden + 600000).toISOString() }, beforeHidden + 600000, true).key, 'online');
-assert.equal(serverStatus({ ...cachedNode, status: 'offline' }, beforeHidden + 600000, true).key, 'offline', 'a fresh offline response must remain offline');
-assert.equal(serverStatus({ ...cachedNode, status: 'pending' }, beforeHidden + 600000, false).key, 'pending');
-assert.equal(serverStatus({ ...cachedNode, enabled: false }, beforeHidden + 600000, false).key, 'disabled');
+const listSource = readFileSync(new URL('../src/modules/nodes/pages/NodeListPage.vue', import.meta.url), 'utf8');
+const clockBody = listSource.match(/timer = setInterval\(\(\) => \{([^]*?)\}, 5000\)/)?.[1];
+assert.ok(clockBody, 'found the actual display clock callback');
+const tick = new Function('document', 'now', 'statusFresh', clockBody);
+const clock = { value: beforeHidden };
+const freshness = { value: false };
+tick({ visibilityState: 'hidden' }, clock, freshness);
+assert.equal(clock.value, beforeHidden, 'hidden page keeps the display clock');
+tick({ visibilityState: 'visible' }, clock, freshness);
+assert.equal(clock.value, beforeHidden, 'returning to the page keeps the clock until a fresh response');
+assert.equal(serverStatus(cachedNode, clock.value).key, 'online', 'online card retains its last confirmed appearance');
+assert.equal(serverStatus({ ...cachedNode, status: 'offline' }, clock.value).key, 'offline', 'already offline card stays offline during refresh');
+assert.doesNotMatch(listSource, /正在重新确认服务器状态|:status-fresh=/, 'refresh does not replace the displayed snapshot');
+const cardSource = readFileSync(new URL('../src/modules/nodes/components/ServerCardGrid.vue', import.meta.url), 'utf8');
+assert.doesNotMatch(cardSource, /状态待更新|statusFresh|unknown/, 'latency tiles are not replaced while refreshing');
+freshness.value = true;
+tick({ visibilityState: 'visible' }, clock, freshness);
+assert.ok(clock.value > beforeHidden, 'successful refresh allows the display clock to advance');
+assert.equal(serverStatus({ ...cachedNode, lastHeartbeat: new Date(clock.value).toISOString() }, clock.value).key, 'online');
+assert.equal(serverStatus({ ...cachedNode, status: 'offline' }, clock.value).key, 'offline', 'a fresh offline response must remain offline');
+assert.equal(serverStatus({ ...cachedNode, status: 'offline', lastHeartbeat: new Date(clock.value).toISOString(), heartbeat: { core_healthy: false } }, clock.value).key,
+  'offline', 'a confirmed disconnect supersedes the previous core error');
+assert.equal(serverStatus(cachedNode, clock.value).key, 'offline', 'fresh responses with expired heartbeats still show offline');
+assert.equal(serverStatus({ ...cachedNode, status: 'pending' }, clock.value).key, 'pending');
+assert.equal(serverStatus({ ...cachedNode, enabled: false }, clock.value).key, 'disabled');
 
 // 1. Test mergeLatestEditForm
 {
@@ -118,10 +136,13 @@ assert.equal(serverStatus({ ...cachedNode, enabled: false }, beforeHidden + 6000
   assert.match(pageSource, /30000/, 'has 30s interval for fallback timer');
   assert.match(pageSource, /document\.visibilityState\s*===\s*['"]visible['"]/, 'checks visibilityState for fallback timer');
 
-  // silentRefresh must not trigger full loading or reload meta/traffic
-  assert.match(pageSource, /async function silentRefresh\(\)/, 'defines silentRefresh function');
-  assert.doesNotMatch(pageSource, /silentRefresh[\s\S]*?loadNodeMeta/, 'silentRefresh must not reload node metadata');
-  assert.doesNotMatch(pageSource, /silentRefresh[\s\S]*?accounts/, 'silentRefresh must not reload accounts/traffic');
+  // Routine calibration reads only the live snapshot. Static invalidation has
+  // its own path for changes to inventory membership or metadata.
+  const calibration = pageSource.match(/async function calibrateRuntime\(\)[\s\S]*?^}/m)?.[0] || '';
+  assert.match(calibration, /request<RuntimeSnapshotList>\('\/nodes\/runtime'\)/, 'calibration reads the runtime snapshot');
+  assert.doesNotMatch(calibration, /nodeAPI\.list|loadNodeMeta|\/traffic\//, 'calibration does not read inventory, metadata or traffic');
+  const scheduledCalibration = pageSource.match(/fallbackTimer = setInterval\([\s\S]*?}, 30000\)/)?.[0] || '';
+  assert.match(scheduledCalibration, /document\.visibilityState === 'visible'.*calibrateRuntime\(\)/, 'visible timer calibrates the runtime snapshot');
 }
 
 // 3. Component inspection: ServerQuickEdit.vue

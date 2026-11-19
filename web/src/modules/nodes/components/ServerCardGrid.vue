@@ -14,12 +14,12 @@
         @dragend="dragging = ''; dropTarget = ''"
         @click="handleCardClick(node)"
         class="rounded-[24px] px-5 py-4 shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between space-y-3 cursor-pointer group"
-        :class="[serverStatus(node, clockNow, statusFresh).key === 'offline' ? 'bg-ios-fill' : 'bg-white', { 'ring-2 ring-ios-blue/40': dropTarget === node.id && dragging !== node.id, 'opacity-50': dragging === node.id }]"
+        :class="[serverStatus(node, clockNow).key === 'offline' ? 'bg-ios-fill' : 'bg-white', { 'ring-2 ring-ios-blue/40': dropTarget === node.id && dragging !== node.id, 'opacity-50': dragging === node.id }]"
       >
         <!-- Card Top Details -->
         <div class="space-y-2.5">
           <!-- Row 1: Name, Network Speed, Operating System & Country Flag -->
-          <div class="flex items-center justify-between gap-2" :class="{ grayscale: serverStatus(node, clockNow, statusFresh).key === 'offline' }">
+          <div class="flex items-center justify-between gap-2" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 flex-1">
               <router-link
                 :to="`/nodes/${node.id}`"
@@ -79,14 +79,14 @@
           </div>
 
           <!-- Row 2: Sub-info (Address · Running Time) -->
-          <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap" :class="{ grayscale: serverStatus(node, clockNow, statusFresh).key === 'offline' }">
+          <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <span :class="connectAddress(node) ? 'text-neutral-500' : 'text-ios-orange font-sans'">{{ connectAddress(node) || '未设置连接地址' }}</span>
             <span class="text-neutral-300">·</span>
             <span>已运行 {{ calculateRunningTime(node) }}</span>
           </div>
 
           <!-- Row 3: CPU / 内存 / 磁盘 / 流量 -->
-          <div class="grid grid-cols-4 gap-3 pt-0.5" :class="{ grayscale: serverStatus(node, clockNow, statusFresh).key === 'offline' }">
+          <div class="grid grid-cols-4 gap-3 pt-0.5" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <!-- CPU -->
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
@@ -142,7 +142,7 @@
             </div>
 
             <div class="relative">
-            <div class="grid grid-cols-3 gap-1.5" :class="{ invisible: ['offline', 'unknown'].includes(serverStatus(node, clockNow, statusFresh).key) }">
+            <div class="grid grid-cols-3 gap-1.5" :class="{ invisible: serverStatus(node, clockNow).key === 'offline' }">
               <div class="bg-[#F8F9FA] rounded-xl p-2 border border-black/[0.03] space-y-0.5">
                 <div class="flex items-center gap-1 text-xs text-neutral-500 font-medium truncate">
                   <span class="w-1.5 h-1.5 rounded-full bg-neutral-300 shrink-0"></span>
@@ -166,15 +166,14 @@
               </div>
             </div>
             <div
-              v-if="['offline', 'unknown'].includes(serverStatus(node, clockNow, statusFresh).key)"
-              class="absolute inset-0 flex items-center justify-center text-sm font-semibold leading-normal pointer-events-none"
-              :class="statusFresh ? 'text-ios-red' : 'text-ios-secondary'"
-            >{{ statusFresh ? '已离线' : '状态待更新' }}</div>
+              v-if="serverStatus(node, clockNow).key === 'offline'"
+              class="absolute inset-0 flex items-center justify-center text-sm font-semibold leading-normal pointer-events-none text-ios-red"
+            >已离线</div>
             </div>
           </div>
 
           <!-- Row 6: 到期时间与续费价格 (Renewal Date & Price Info) -->
-          <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs" :class="{ grayscale: serverStatus(node, clockNow, statusFresh).key === 'offline' }">
+          <div class="pt-2 border-t border-black/[0.04] flex items-center justify-between text-xs" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <!-- Left: 到期时间与剩余天数 -->
             <div class="flex items-center gap-1.5 min-w-0">
               <span class="text-neutral-400 shrink-0">到期:</span>
@@ -209,7 +208,7 @@
         <div
           v-if="isOwner && !node.deletedAt"
           class="pt-2 border-t border-black/[0.05] grid grid-cols-3 gap-1.5"
-          :class="{ grayscale: serverStatus(node, clockNow, statusFresh).key === 'offline' }"
+          :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }"
           @click.stop
         >
           <!-- 1. 安装 -->
@@ -259,7 +258,7 @@ import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';
 import { serverStatus } from './serverListModel';
 
-const props = defineProps<{ nodes: NodeView[]; clockNow: number; statusFresh: boolean; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean }>();
+const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean }>();
 const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView]; reorder: [fromId: string, toId: string] }>();
 const router = useRouter();
 

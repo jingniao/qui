@@ -36,6 +36,7 @@ type Handler struct {
 	Audit        auditLog
 	Auth         *auth.Handler
 	Notify       func(string)
+	Runtime      *RuntimeSnapshots
 	Disconnect   func(string)
 	Certificates CertificateLibrary
 	// Tasks closes a deleted node's own coordination rows; the deployment module
@@ -56,6 +57,7 @@ type Handler struct {
 func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
 	mux.Handle("GET /api/v1/nodes/meta", h.Auth.Require(http.HandlerFunc(reads.metadata), false))
 	mux.Handle("GET /api/v1/nodes/choices", h.Auth.Require(http.HandlerFunc(reads.choices), false))
+	mux.Handle("GET /api/v1/nodes/runtime", h.Auth.Require(http.HandlerFunc(reads.runtimeSnapshots), false))
 	mux.Handle("GET /api/v1/nodes/machine-traffic", h.Auth.Require(http.HandlerFunc(reads.machineTrafficBatch), false))
 	mux.Handle("GET /api/v1/nodes/{id}/machine-traffic", h.Auth.Require(http.HandlerFunc(reads.machineTraffic), false))
 	mux.Handle("GET /api/v1/nodes/{id}/machine-traffic/settings", h.Auth.Require(http.HandlerFunc(h.machineTrafficSettings), false))
@@ -156,6 +158,7 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	h.Runtime.afterCommit(n.ID)
 	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "创建节点注册码", n.Name, "成功", r.RemoteAddr); err != nil {
 		h.fail(w, err)
 		return
@@ -246,6 +249,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	h.Runtime.afterCommit(r.PathValue("id"))
 	if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "修改节点", body.Name, "成功", r.RemoteAddr); err != nil {
 		h.fail(w, err)
 		return
@@ -345,6 +349,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	// removed and its registration code stops working.
 	if n.Status == "pending" {
 		if err := h.Repository.CancelEnrollment(r.Context(), id); err == nil {
+			h.Runtime.afterCommit(id)
 			if err := h.Audit.Record(r.Context(), auth.Actor(r.Context()).Username, "取消节点登记", n.Name+" ("+n.ID+")", "成功", r.RemoteAddr); err != nil {
 				h.fail(w, err)
 				return
@@ -365,6 +370,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	h.Runtime.afterCommit(id)
 	httpapi.JSON(w, 200, result)
 	if h.Notify != nil {
 		h.Notify(id)

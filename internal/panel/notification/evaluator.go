@@ -59,15 +59,10 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 				dur := time.Duration(r.DurationMinutes) * time.Minute
 				offlineDur := snap.Now.Sub(node.LastHeartbeat)
 				if !node.LastHeartbeat.IsZero() && offlineDur >= dur {
-					cooldown := time.Duration(r.CooldownMinutes) * time.Minute
 					minutes := int(offlineDur.Minutes())
-					shouldSend := false
+					// An offline episode fires once, regardless of the cooldown.
+					// Its persisted active state is cleared only on recovery.
 					if !st.Active {
-						shouldSend = true
-					} else if cooldown > 0 && snap.Now.Sub(st.LastNotified) >= cooldown {
-						shouldSend = true
-					}
-					if shouldSend {
 						events = append(events, Event{
 							Kind:      "node_offline",
 							Severity:  "critical",
@@ -79,14 +74,12 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 						})
 						st.Key = key
 						st.Active = true
-						if !st.Active || st.Since.IsZero() {
-							st.Since = snap.Now
-						}
+						st.Since = snap.Now
 						st.LastNotified = snap.Now
 						next[key] = st
 					}
 				}
-			} else if node.Status == "online" {
+			} else if node.Status == "online" || node.Status == "degraded" {
 				if st.Active {
 					events = append(events, Event{
 						Kind:      "node_offline",

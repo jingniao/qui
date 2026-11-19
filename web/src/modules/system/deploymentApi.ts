@@ -25,6 +25,7 @@ export type InboundPublishState = 'effective' | 'modified' | 'pending' | 'unpubl
 export interface InboundStateItem { inboundId: string; state: InboundPublishState; code?: string; revision?: number; }
 
 export const deploymentAPI = {
+  inboundStatesBatch: (nodeIds: string[]) => request<{ items: { nodeId: string; items: InboundStateItem[]; error?: string }[] }>(`/nodes/inbound-states?nodeIds=${encodeURIComponent(nodeIds.join(','))}`),
   inboundStates: (nodeId: string) => request<{ items: InboundStateItem[] }>(`/nodes/${encodeURIComponent(nodeId)}/inbound-states`),
   diff: (revision: number, baseRevision?: number) => request<RevisionDiff>(`/revisions/${revision}/diff${baseRevision === undefined ? '' : '?baseRevision=' + baseRevision}`),
   batches: (page: number) => request<Page<DeploymentBatch>>(`/deployment-batches?page=${page}&pageSize=20`),

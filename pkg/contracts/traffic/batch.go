@@ -27,9 +27,27 @@ type Counter struct {
 	ObservedAt    time.Time `json:"observed_at"`
 }
 type Batch struct {
+	Delivery Delivery  `json:"-"`
 	ID       string    `json:"id"`
 	NodeID   string    `json:"node_id"`
 	Counters []Counter `json:"counters"`
+}
+
+// Delivery belongs to the authenticated transport envelope. It never changes
+// the immutable JSON payload or the digest of an already queued batch.
+type Delivery struct {
+	QueueID  string
+	Sequence int64
+}
+
+func (d Delivery) Validate() error {
+	if d.QueueID == "" && d.Sequence == 0 {
+		return nil
+	}
+	if !validID(d.QueueID) || d.Sequence < 1 {
+		return errors.New("invalid traffic delivery identity")
+	}
+	return nil
 }
 
 func validID(value string) bool {

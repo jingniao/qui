@@ -53,12 +53,14 @@ type Handler struct {
 	GroupAccessChanged func(ctx context.Context, groupID string, userIDs []string, reason string)
 }
 
-func (h *Handler) Register(mux *http.ServeMux) {
-	mux.Handle("GET /api/v1/nodes/machine-traffic", h.Auth.Require(http.HandlerFunc(h.machineTrafficBatch), false))
-	mux.Handle("GET /api/v1/nodes/{id}/machine-traffic", h.Auth.Require(http.HandlerFunc(h.machineTraffic), false))
+func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
+	mux.Handle("GET /api/v1/nodes/meta", h.Auth.Require(http.HandlerFunc(reads.metadata), false))
+	mux.Handle("GET /api/v1/nodes/choices", h.Auth.Require(http.HandlerFunc(reads.choices), false))
+	mux.Handle("GET /api/v1/nodes/machine-traffic", h.Auth.Require(http.HandlerFunc(reads.machineTrafficBatch), false))
+	mux.Handle("GET /api/v1/nodes/{id}/machine-traffic", h.Auth.Require(http.HandlerFunc(reads.machineTraffic), false))
 	mux.Handle("GET /api/v1/nodes/{id}/machine-traffic/settings", h.Auth.Require(http.HandlerFunc(h.machineTrafficSettings), false))
 	mux.Handle("PUT /api/v1/nodes/{id}/machine-traffic/settings", h.Auth.Require(http.HandlerFunc(h.putMachineTrafficSettings), true))
-	mux.Handle("GET /api/v1/nodes/{id}/metrics", h.Auth.Require(http.HandlerFunc(h.metrics), false))
+	mux.Handle("GET /api/v1/nodes/{id}/metrics", h.Auth.Require(http.HandlerFunc(reads.metrics), false))
 	mux.Handle("GET /api/v1/nodes/{id}/tuning", h.Auth.Require(http.HandlerFunc(h.tuning), false))
 	mux.Handle("PUT /api/v1/nodes/{id}/tuning", h.Auth.Require(http.HandlerFunc(h.tuning), true))
 	mux.Handle("GET /api/v1/nodes/{id}/tuning/recommendations", h.Auth.Require(http.HandlerFunc(h.tuningRecommendations), false))
@@ -76,7 +78,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/probe-targets/{target}", h.Auth.Require(http.HandlerFunc(h.deleteProbeTarget), true))
 	mux.Handle("GET /api/v1/nodes/{id}/tcp-probes", h.Auth.Require(http.HandlerFunc(h.tcpProbes), false))
 	mux.Handle("POST /api/v1/nodes/{id}/tcp-probes", h.Auth.Require(http.HandlerFunc(h.tcpProbes), true))
-	mux.Handle("GET /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(h.getMeta), false))
+	mux.Handle("GET /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(reads.getMeta), false))
 	mux.Handle("PUT /api/v1/nodes/{id}/meta", h.Auth.Require(http.HandlerFunc(h.putMeta), true))
 	mux.Handle("GET /api/v1/nodes/{id}/enrollment-status", h.Auth.Require(http.HandlerFunc(h.enrollmentStatus), true))
 	mux.Handle("GET /api/v1/nodes/{id}/certificate-status", h.Auth.Require(http.HandlerFunc(h.certificateStatus), true))
@@ -84,8 +86,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/nodes/{id}/health-checks", h.Auth.Require(http.HandlerFunc(h.requestHealthCheck), true))
 	mux.Handle("GET /api/v1/nodes/{id}/health-checks", h.Auth.Require(http.HandlerFunc(h.listHealthChecks), true))
 	mux.Handle("GET /api/v1/nodes/{id}/deletion-preview", h.Auth.Require(http.HandlerFunc(h.deletionPreview), true))
-	mux.Handle("GET /api/v1/nodes", h.Auth.Require(http.HandlerFunc(h.list), false))
-	mux.Handle("GET /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.get), false))
+	mux.Handle("GET /api/v1/nodes", h.Auth.Require(http.HandlerFunc(reads.list), false))
+	mux.Handle("GET /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(reads.get), false))
 	mux.Handle("POST /api/v1/nodes/enrollment-token", h.Auth.Require(http.HandlerFunc(h.enroll), true))
 	mux.Handle("POST /api/v1/nodes/{id}/enrollment-token", h.Auth.Require(http.HandlerFunc(h.reissueEnrollment), true))
 	mux.Handle("PUT /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.update), true))

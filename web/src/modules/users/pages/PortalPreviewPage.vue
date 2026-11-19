@@ -16,16 +16,16 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { userAPI, type ProxyUser } from '../api';
+import { userAPI, type UserChoice } from '../api';
 import { request } from '../../../app/apiClient';
 import type { Snapshot } from '../../../portal/api';
 import PortalLayout from '../../../portal/PortalLayout.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
-const route = useRoute(), users = ref<ProxyUser[]>([]), selected = ref(''), snapshot = ref<Snapshot>(), error = ref(''), loading = ref(false), page = ref(1), total = ref(0);
+const route = useRoute(), users = ref<UserChoice[]>([]), selected = ref(''), snapshot = ref<Snapshot>(), error = ref(''), loading = ref(false), page = ref(1), total = ref(0);
 let generation = 0;
 async function list(target: number) {
-  try { const result = await userAPI.list(target, '', 50); users.value = result.items; total.value = result.total; page.value = target; }
+  try { const result = await userAPI.choices(target, '', 50); users.value = result.items; total.value = result.total; page.value = target; }
   catch (e) { error.value = (e as Error).message; }
 }
 async function load() {
@@ -36,7 +36,7 @@ async function load() {
   catch (e) { if (current === generation) error.value = (e as Error).message; }
   finally { if (current === generation) loading.value = false; }
 }
-onMounted(async () => { await list(1); if (typeof route.query.user === 'string') { selected.value = route.query.user; await load(); } });
+onMounted(() => { if (typeof route.query.user === 'string') selected.value = route.query.user; void load(); void list(1); });
 </script>
 
 <style scoped>

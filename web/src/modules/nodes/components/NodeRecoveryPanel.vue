@@ -4,7 +4,7 @@
       <h3 class="text-base font-semibold leading-normal">原位身份恢复</h3>
       <button class="ios-btn-secondary" :disabled="statusLoading" @click="refresh">刷新恢复状态</button>
     </div>
-    <p class="text-xs text-ios-secondary">主机重装后不必新建服务器记录：签发一次性恢复码，在重装的主机上运行下面的安装命令重新登记。节点 ID、入站、出站、节点组、隧道、代理链与历史配置原样保留，旧证书随核销永久作废，已发布配置会在新 Agent 首次能力上报后自动重新下发。</p>
+    <p class="text-xs text-ios-secondary">主机重装后不必新建服务器记录：签发一次性恢复码，在重装的主机上运行下面的安装命令重新登记。节点 ID、入站、出站、节点组、隧道、代理链与历史配置原样保留，旧证书随核销永久作废，已发布配置会在新 Agent 首次能力上报后自动重新下发。流量旧收据与封存进度保留；核销后允许新队列登记，保留匹配的原队列也可继续。</p>
     <div class="grid gap-3 sm:grid-cols-2">
       <label class="text-xs text-ios-secondary">恢复码有效期
         <select v-model.number="ttl" class="form-input-base mt-1.5">
@@ -89,7 +89,7 @@ const error = ref(''), statusError = ref(''), noRecovery = ref(false);
 const result = ref<(Enrollment & { purpose: string }) | null>(null), status = ref<RecoveryStatus | null>(null);
 const blockers = ref<{ kind: string; id: string; name: string }[]>([]);
 const ttlLabel = computed(() => ttl.value === 1800 ? '30 分钟' : ttl.value === 3600 ? '60 分钟' : '15 分钟');
-const confirmMessage = computed(() => `为服务器 ${props.node.name} 签发恢复码。恢复码等同该节点的接管凭据：拿到它的人可以领取该节点全部已下发配置，包括 Reality 私钥与用户凭据。有效期 ${ttlLabel.value}，只显示一次，面板只保存哈希。`);
+const confirmMessage = computed(() => `为服务器 ${props.node.name} 签发恢复码。恢复码等同该节点的接管凭据：拿到它的人可以领取该节点全部已下发配置，包括 Reality 私钥与用户凭据。有效期 ${ttlLabel.value}，只显示一次，面板只保存哈希。核销将封存旧流量队列，允许恢复主机登记新队列；已有统计与旧收据保留。`);
 const confirmDetails = computed(() => revokeNow.value
   ? '已勾选“立即吊销当前证书”：签发后面板立即吊销现有证书并断开当前 Agent，节点在重新登记前保持离线。'
   : '当前证书在恢复核销时作废；恢复登记前旧 Agent 仍可连接。');

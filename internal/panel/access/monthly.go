@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"proxycontrol/internal/platform/httpapi"
 	"time"
@@ -22,20 +23,27 @@ func (r *Repository) MonthlyNodes(ctx context.Context, now time.Time, zone strin
 	}
 	local := now.In(location)
 	from := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, location)
-	rows, err := r.Database.QueryContext(ctx, `SELECT n.id,coalesce(sum(t.upload_bytes),0),coalesce(sum(t.download_bytes),0)
- FROM nodes n LEFT JOIN node_traffic_samples t ON t.node_id=n.id AND t.observed_at>=? AND t.observed_at<?
- WHERE n.deleted_at IS NULL GROUP BY n.id ORDER BY n.id`, from.UTC().Format("2006-01-02T15:04:05.000000000Z"), from.AddDate(0, 1, 0).UTC().Format("2006-01-02T15:04:05.000000000Z"))
+	totals, err := ReadNodeTraffic(ctx, r.Database, from, from.AddDate(0, 1, 0), "", false)
+	if err != nil {
+		return nil, err
+	}
+	byNode := map[string]NodeTrafficTotal{}
+	for _, item := range totals {
+		byNode[item.NodeID] = item
+	}
+	rows, err := r.Database.QueryContext(ctx, "SELECT id FROM nodes WHERE deleted_at IS NULL ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := []NodeMonth{}
 	for rows.Next() {
-		var item NodeMonth
-		if err = rows.Scan(&item.NodeID, &item.UploadBytes, &item.DownloadBytes); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, item)
+		v := byNode[id]
+		items = append(items, NodeMonth{NodeID: id, UploadBytes: v.Upload, DownloadBytes: v.Download})
 	}
 	return items, rows.Err()
 }
@@ -47,6 +55,10 @@ func (h *Handler) monthlyNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.Repository.MonthlyNodes(r.Context(), time.Now(), zone)
 	if err != nil {
+		if errors.Is(err, ErrTrafficResolution) {
+			httpapi.Error(w, 422, "traffic_history_resolution", err.Error())
+			return
+		}
 		h.fail(w)
 		return
 	}

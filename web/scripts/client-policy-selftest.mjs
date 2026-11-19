@@ -102,7 +102,7 @@ const state = {
   previewGeneration: 0, candidateGeneration: 0,
   previewUserId: ref(''), previewUsers: ref([]), previewUsersLoaded: ref(false), loadingPreviewUsers: ref(false), previewUsersError: ref(''),
   candidates: ref({ items: [], autoSelected: true }), candidateError: ref(''), selectedEndpoints: ref([]), allPages,
-  userAPI: { list: async () => ({ items: [], total: 0 }) },
+  userAPI: { summaries: async () => ({ items: [], total: 0 }) },
   isDirty: ref(true), editingPolicyId: ref('inactive'), clientConfig: ref(api.toConfig({ template: membershipTemplate, revision: 4, updatedAt: '', updatedBy: '' })),
   previewResult: ref(null), previewError: ref(''), previewFormat: ref('clash'), resolvedGroupName: ref(''),
   activeModule: ref('groups'), ruleSearchKeyword: ref('search'), ruleTargetFilter: ref(''), ruleTypeFilter: ref('DOMAIN'),
@@ -144,8 +144,8 @@ check('preview choices exclude disabled, expired, over-quota and ungranted accou
   { status: 'disabled' }, { expiresAt: '2000-01-01T00:00:00Z' }, { expiresAt: 'invalid' }, { trafficLimit: 1, usedTraffic: 1 }, { nodeGroupIds: [] }
 ].every(change => !run.eligiblePreviewUser({ ...eligibleUser, ...change })));
 const previewUserPages = [];
-state.userAPI.list = async (page, keyword, size) => {
-  previewUserPages.push([page, keyword, size]);
+state.userAPI.summaries = async (page, size) => {
+  previewUserPages.push([page, '', size]);
   return { items: page === 1 ? Array.from({ length: 100 }, () => ({ ...eligibleUser, status: 'disabled' })) : [eligibleUser], total: 101 };
 };
 await run.loadPreviewUsers();
@@ -154,10 +154,10 @@ state.clientPolicyProfilesAPI.preview = async input => { client.calls.push(input
 const userDraft = structuredClone(state.clientConfig.value);
 await run.changePreviewUser();
 check('changing preview context refreshes candidates and resolved members without changing the draft', state.candidates.value.items[0].ref === 'selected-user' && state.previewResult.value.body === 'selected-user' && isDeepStrictEqual(state.clientConfig.value, userDraft) && state.isDirty.value);
-state.userAPI.list = async () => ({ items: [], total: 0 });
+state.userAPI.summaries = async () => ({ items: [], total: 0 });
 await run.loadPreviewUsers();
 check('a user that is no longer eligible returns to automatic context consistently', state.previewUserId.value === '' && state.candidates.value.autoSelected && state.previewResult.value.body === 'automatic');
-state.userAPI.list = async () => { throw new Error('user-list-failed'); };
+state.userAPI.summaries = async () => { throw new Error('user-list-failed'); };
 await run.loadPreviewUsers();
 check('user-list failure reports the error and keeps the draft', state.previewUsersError.value.includes('user-list-failed') && !state.loadingPreviewUsers.value && isDeepStrictEqual(state.clientConfig.value, userDraft));
 const pendingCandidates = [];
@@ -194,7 +194,7 @@ check('selectors load all 205 results through existing pagination', everyItem.it
 let incomplete = false;
 try { await allPages(async page => ({ items: page === 1 ? [1] : [], total: 2 })); } catch { incomplete = true; }
 check('incomplete pagination reports an error', incomplete);
-check('node, group and rule-set selectors use complete pagination', page.includes("allPages(page => nodeAPI.list(page, ''))") && page.includes('allPages(page => groupAPI.list(page, 100))') && !page.includes('policyAPI.services(1, 100)'));
+check('node, group and rule-set selectors use complete pagination', page.includes("allPages(page => nodeAPI.choices(page, '', 100))") && page.includes('allPages(page => groupAPI.list(page, 100))') && !page.includes('policyAPI.services(1, 100)'));
 class TestAPIError extends Error { constructor(status, details) { super('规则集仍被引用'); this.status = status; this.details = details; } }
 const sharedRefs = { nodePolicies: [{ id: 'node', name: '节点策略', enabled: false }], clientProfiles: [{ id: 'profile', name: '配置', active: false, rules: [{ id: 'off', enabled: false }] }] };
 // The rule-set dialog lives in one shared component used by both pages.

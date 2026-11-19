@@ -19,7 +19,7 @@ async function scenario({ failed = [], delayedInbounds = false } = {}) {
   };
   const load = new Function('loading', 'proxyNodeStore', 'choices', 'nodeAPI', 'proxyAPI', 'servers', 'serverInbounds', 'loadNodeRelays', 'canvasAPI', 'isOwner', 'loadImports', 'groupAPI', 'nodeGroups', 'loadCanvasSchemes', 'showToast', compile(`let serverRefreshGeneration = 0;\n${loadBlock}\nreturn loadData;`))(
     loading, store, async fetch => (await fetch(1, 100)).items,
-    { list: () => read('servers', [{ id: 'server' }]) },
+    { choices: () => read('servers', [{ id: 'server' }]) },
     { inbounds: () => read('inbounds', [{ id: 'entry' }]) },
     servers, inbounds, () => {},
     { list: () => read('schemes', [{ id: 'scheme' }]) },

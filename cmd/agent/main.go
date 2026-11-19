@@ -29,6 +29,7 @@ var version = "dev"
 // the operator modes plus the supervisor, managed-worker and image-probe flags
 // the Agent self-update path itself invokes.
 type agentFlags struct {
+	local             *localAgentFlags
 	path              *string
 	check             *bool
 	showVersion       *bool
@@ -48,6 +49,7 @@ type agentFlags struct {
 
 func registerFlags(set *flag.FlagSet) *agentFlags {
 	f := &agentFlags{}
+	f.local = registerLocalAgentFlags(set)
 	f.path = set.String("config", "", "YAML configuration file")
 	f.check = set.Bool("check-config", false, "validate configuration and exit")
 	f.showVersion = set.Bool("version", false, "show version")
@@ -81,6 +83,9 @@ func run() error {
 }
 
 func execute(set *flag.FlagSet, f *agentFlags) error {
+	if handled, err := executeLocalAgent(set, f.local, *f.path, version); handled {
+		return err
+	}
 	if *f.applyTuning != "" {
 		exclusive := set.NArg() == 0
 		set.Visit(func(o *flag.Flag) {

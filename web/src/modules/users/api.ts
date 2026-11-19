@@ -24,6 +24,9 @@ export interface ProxyUser {
   onlineConnections: number | null;
 }
 
+export type UserSummary = Pick<ProxyUser, 'id' | 'username' | 'displayName' | 'status' | 'expiresAt' | 'trafficLimit' | 'usedTraffic' | 'nodeGroupIds'>;
+export type UserChoice = Pick<ProxyUser, 'id' | 'username' | 'displayName' | 'status'>;
+
 export interface UserInput {
  trafficResetCycle?: 'none' | 'monthly' | '30days';
  trafficResetAnchor?: string;
@@ -56,6 +59,8 @@ export const protocols = ['http', 'socks5', 'shadowsocks', 'vless', 'trojan', 'w
 
 export interface DevicesOnline { items: { address: string; allowed: boolean; active: boolean; firstSeen: string; lastSeen: string; nodes: string[] }[]; onlineDevices: number | null; deviceLimit: number; deviceLimitEnforced: boolean; deviceLimitUnsupportedNodes: string[]; deviceLimitUdpUnsupportedProtocols?: string[] | null; }
 export const userAPI = {
+  summaries: (page: number, pageSize = 100) => request<Page<UserSummary>>(`/users/summaries?page=${page}&pageSize=${pageSize}`),
+  choices: (page: number, keyword = '', pageSize = 100) => request<Page<UserChoice>>(`/users/choices?page=${page}&pageSize=${pageSize}&keyword=${encodeURIComponent(keyword)}`),
   grantGroup: (userId: string, groupId: string) => request<void>(`/users/${encodeURIComponent(userId)}/node-groups/${encodeURIComponent(groupId)}`, 'POST'),
   revokeGroup: (userId: string, groupId: string) => request<void>(`/users/${encodeURIComponent(userId)}/node-groups/${encodeURIComponent(groupId)}`, 'DELETE'),
  devicesOnline: (id: string) => request<DevicesOnline>(`/users/${id}/devices-online`),

@@ -13,7 +13,7 @@
     </PageHeader>
 
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <LoadingSkeleton v-else-if="loading" />
+    <LoadingSkeleton v-else-if="loading && !detailReady" />
 
     <form v-else @submit.prevent="save" class="space-y-6">
       <!-- 1. 基础信息 -->
@@ -259,7 +259,7 @@
         <router-link to="/routing/rules" class="ios-btn-secondary">
           取消
         </router-link>
-        <button :disabled="saving" class="ios-btn-primary disabled:opacity-40">
+        <button :disabled="saving || loading" class="ios-btn-primary disabled:opacity-40">
           {{ saving ? '保存中…' : '保存节点策略草稿' }}
         </button>
       </div>
@@ -274,7 +274,7 @@ import { policyAPI, defaults, input, type PolicyInput, type ServiceSet } from '.
 import { request, type Page } from '../../../app/apiClient';
 import { authState } from '../../../app/auth';
 import { showToast } from '../../../app/api';
-import { userAPI, type ProxyUser } from '../../users/api';
+import { userAPI, type UserChoice } from '../../users/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { type NodeView } from '../../nodes/api';
 import { proxyAPI, type Outbound, type OutboundGroup, type ProxyChain, choices, failureNames } from '../../proxy/api';
@@ -309,27 +309,36 @@ const domainsText = ref('');
 const suffixesText = ref('');
 const cidrsText = ref('');
 const portsText = ref('');
-const users = ref<ProxyUser[]>([]);
+const users = ref<UserChoice[]>([]);
 const nodes = ref<NodeView[]>([]);
 const groups = ref<NodeGroup[]>([]);
 const services = ref<ServiceSet[]>([]);
 const outbounds = ref<Outbound[]>([]);
 const loading = ref(false);
+const detailReady = ref(false);
 const saving = ref(false);
 const error = ref('');
 
 async function load() {
-  loading.value = true;
+  loading.value = true; detailReady.value = false;
   try {
-    const [u, n, g, s, o, og, pc, policy] = await Promise.all([
-      userAPI.list(1, '', 100),
-      request<Page<NodeView>>('/nodes?page=1&pageSize=100'),
+    const [u, n, g, s, o, og, pc] = await Promise.all([
+      userAPI.choices(1, '', 100),
+      request<Page<NodeView>>('/nodes/choices?page=1&pageSize=100'),
       groupAPI.list(1, 100),
       policyAPI.services(1, 100),
       proxyAPI.outbounds('', 1, 100),
       choices((p, s) => proxyAPI.groups('', p, s)),
       choices((p, s) => proxyAPI.chains('', p, s)),
-      editingId.value ? policyAPI.get(editingId.value) : Promise.resolve(null)
+      (editingId.value ? policyAPI.get(editingId.value) : Promise.resolve(null)).then(policy => {
+        Object.assign(form, policy ? input(policy) : defaults());
+        if (!policy) form.timezone = authState.timezone;
+        domainsText.value = form.match.domains?.join('\n') || '';
+        suffixesText.value = form.match.suffixes?.join('\n') || '';
+        cidrsText.value = form.match.cidrs?.join('\n') || '';
+        portsText.value = form.match.ports?.join(',') || '';
+        detailReady.value = true;
+      })
     ]);
     users.value = u.items;
     nodes.value = n.items;
@@ -339,17 +348,6 @@ async function load() {
     outboundGroups.value = og;
     chains.value = pc;
 
-    if (policy) {
-      Object.assign(form, input(policy));
-    } else {
-      Object.assign(form, defaults());
-      form.timezone = authState.timezone;
-    }
-
-    domainsText.value = form.match.domains?.join('\n') || '';
-    suffixesText.value = form.match.suffixes?.join('\n') || '';
-    cidrsText.value = form.match.cidrs?.join('\n') || '';
-    portsText.value = form.match.ports?.join(',') || '';
     error.value = '';
   } catch (e) {
     error.value = (e as Error).message;
@@ -366,7 +364,7 @@ function lines(value: string) {
 }
 
 async function save() {
-  if (saving.value) return;
+  if (saving.value || loading.value || error.value) return;
   saving.value = true;
   try {
     const value: PolicyInput = JSON.parse(JSON.stringify(form));

@@ -17,17 +17,21 @@ import (
 // to start after a control-only recovery. An independent Agent has no retained
 // image and is checked against its original authenticated storage floor.
 func CheckCoreAccountingActivation(ctx context.Context, directory, nodeID, version string) error {
-	return checkFormatActivation(ctx, directory, nodeID, version, false)
+	return checkFormatActivation(ctx, directory, nodeID, version, false, false)
 }
 
 // raiseWrites sets the write formats activation would persist: core accounting
 // always, and the multi-core configuration, spool, desired-state and release
 // hold formats when multi is set.
-func raiseWrites(c *agentstorage.Contract, multi bool) {
+func raiseWrites(c *agentstorage.Contract, multi, trafficDelivery bool) {
+	if trafficDelivery {
+		c.Formats.Spool.Write = agentstorage.TrafficDeliveryFormat
+		return
+	}
 	c.Formats.CoreAccounting.Write = agentstorage.CoreAccountingFormat
 	if multi {
 		c.Formats.Configuration.Write = 4
-		c.Formats.Spool.Write = 6
+		c.Formats.Spool.Write = max(c.Formats.Spool.Write, 6)
 		c.Formats.DesiredState.Write = 3
 		c.Formats.ReleaseHold.Write = 3
 	}
@@ -49,7 +53,7 @@ func raiseFormats(ctx context.Context, directory, nodeID string, reader, require
 	if err != nil {
 		return ErrState
 	}
-	raiseWrites(&target, true)
+	raiseWrites(&target, true, false)
 	if target.Validate() != nil {
 		return ErrState
 	}
@@ -64,9 +68,9 @@ func raiseFormats(ctx context.Context, directory, nodeID string, reader, require
 }
 
 func CheckMultiCoreActivation(ctx context.Context, directory, nodeID, version string) error {
-	return checkFormatActivation(ctx, directory, nodeID, version, true)
+	return checkFormatActivation(ctx, directory, nodeID, version, true, false)
 }
-func checkFormatActivation(ctx context.Context, directory, nodeID, version string, multi bool) error {
+func checkFormatActivation(ctx context.Context, directory, nodeID, version string, multi, trafficDelivery bool) error {
 	active, err := Active(directory)
 	if err != nil {
 		return err
@@ -84,7 +88,7 @@ func checkFormatActivation(ctx context.Context, directory, nodeID, version strin
 		if err != nil {
 			return ErrState
 		}
-		raiseWrites(&raising, multi)
+		raiseWrites(&raising, multi, trafficDelivery)
 		baseline := required
 		if multi {
 			baseline = running
@@ -120,9 +124,35 @@ func checkFormatActivation(ctx context.Context, directory, nodeID, version strin
 	if err != nil {
 		return err
 	}
-	raiseWrites(&required, multi)
+	raiseWrites(&required, multi, trafficDelivery)
 	if required.Validate() != nil {
 		return ErrState
 	}
 	return updater.CheckIdentityActivation(ctx, updater.HistoryOptions{Directory: filepath.Join(directory, "agent-release-history"), Checkpoint: filepath.Join(directory, "identity", "agent-release-checkpoint.enc"), NodeID: nodeID, Key: key}, filepath.Join(directory, "releases", "agent-installed"), r.Baseline, required)
+}
+
+func CheckTrafficDeliveryActivation(ctx context.Context, directory, nodeID, version string) error {
+	return checkFormatActivation(ctx, directory, nodeID, version, false, true)
+}
+
+func raiseTrafficDeliveryFormat(ctx context.Context, directory, nodeID string, reader, required agentstorage.Contract, history *updater.History, images string, baseline updater.Image, jobsIdle bool) error {
+	if required.Formats.Spool.Write >= agentstorage.TrafficDeliveryFormat {
+		return nil
+	}
+	if !jobsIdle {
+		return ErrState
+	}
+	target, err := agentstorage.WithRequiredWriter(reader, required)
+	if err != nil {
+		return err
+	}
+	target.Formats.Spool.Write = agentstorage.TrafficDeliveryFormat
+	if target.Validate() != nil {
+		return ErrState
+	}
+	if err = history.CheckActivation(ctx, images, baseline, target); err != nil {
+		return err
+	}
+	_, err = storage.ActivateTrafficDeliveryFormat(directory, nodeID, reader)
+	return err
 }

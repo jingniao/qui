@@ -17,6 +17,13 @@
     <p class="text-gray-500">计数、阶段或原时间关系矛盾时拒绝读取；成功标签不能替代完整记录。时钟倒退时保留原状态，需核对后接续。</p>
     <p v-if="sample.maintenance.errorCode" class="text-amber-700">空间维护或存储暂不可用，后台会重试；访问清理已提交进度保留。请核对数据库与磁盘，不删除收据或游标。</p>
    </div>
+   <div class="rounded-lg bg-gray-50 p-3 space-y-2">
+    <p>流量整理：已合并 {{ sample.trafficStorage.compactedSamples.toLocaleString() }} 条核心明细，已淘汰 {{ sample.trafficStorage.retiredReceipts.toLocaleString() }} 张新协议收据。</p>
+    <p>最近成功：{{ sample.trafficStorage.lastSuccessAt ? formatTime(sample.trafficStorage.lastSuccessAt) : '尚无成功记录' }}。</p>
+    <p v-if="sample.trafficStorage.errorCode" class="text-amber-700">流量整理失败，原始数据和已提交进度保留，请查看服务日志。</p>
+    <p v-for="queue in sample.trafficQueues" :key="queue.nodeId">{{ queue.name }}：{{ queueLabels[queue.status] }}；完成 {{ queue.completed }}，节点确认 {{ queue.confirmed }}，已封存 {{ queue.retired }}。</p>
+    <p>核心详细记录保留 7 天，旧记录合并为小时用量；新收据双方确认至少 24 小时后淘汰，旧协议收据继续保留。</p>
+   </div>
    <table class="w-full text-left"><thead><tr><th class="py-2">数据</th><th>行数</th><th>保留边界</th></tr></thead><tbody><tr v-for="item in sample.tables" :key="item.kind"><td class="py-2">{{ names[item.kind] || '待核对数据' }}</td><td>{{ item.atLeast ? '至少 ' : '' }}{{ item.rows.toLocaleString() }}</td><td>{{ retentionNames[item.retention] }}</td></tr></tbody></table>
    <p class="text-gray-500">每类最多读取 {{ sample.countLimit.toLocaleString() }} 行，达到上限只显示下界，不能当作实际总量。主数据库页包含其他业务数据，不是访问模块单独占用；不含 WAL、共享内存、备份和磁盘剩余空间。</p>
   </div>
@@ -33,7 +40,7 @@
    </div>
    <p v-if="thresholdNotice" class="text-blue-700">{{ thresholdNotice }}</p>
   </div>
-  <p class="text-xs text-gray-500">按期限清理不会删除日汇总、批次收据或累计消费游标。增量模式在清理完成后每次最多回收32个空闲页，不改变旧数据库格式；可复用页和清理成功不代表文件已经缩小，不含 WAL 收缩证明。</p>
+  <p class="text-xs text-gray-500">访问期限清理保留日汇总和累计消费游标；流量回执仅按双方确认进度淘汰。增量模式在清理完成后每次最多回收32个空闲页，不改变旧数据库格式；可复用页和清理成功不代表文件已经缩小，不含 WAL 收缩证明。</p>
   <ConfirmDialog v-model="thresholdConfirming" title="保存存储容量告警阈值" :message="`将以主库已分配大小为基准，把提示阈值设为 ${bytes(warningBytes)}、严重阈值设为 ${bytes(criticalBytes)}。仅影响展示级别，不执行任何删除或维护。`" confirm-text="确认保存" @confirm="saveThresholds" />
  </section>
 </template>
@@ -44,8 +51,9 @@ import { formatTime } from '../../../app/auth';
 import ErrorState from '../../../components/ErrorState.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 const sample=ref<StorageObservation|null>(null),loading=ref(false),error=ref('');let generation=0,stopped=false;
-const names:Record<string,string>={domain_minutes:'访问分钟记录',domain_hours:'访问记录小时流量',account_hours:'账户小时流量',account_samples:'账户采样明细',domain_days:'访问记录日流量',account_days:'账户日汇总',access_receipts:'访问批次原收据',account_receipts:'账户批次原收据',account_cursors:'账户累计游标'};
-const retentionNames={policy:'按保留策略清理',long_term:'长期保留',replay_protection:'幂等与消费保护，保留'};
+const queueLabels:Record<string,string>={recovery_pending:'旧队列已封存，等待恢复节点',legacy:'旧协议，保留收据',gap:'有未完成编号，暂缓淘汰',confirmation_pending:'等待节点确认',ready:'已确认，按窗口整理'};
+const names:Record<string,string>={domain_minutes:'访问分钟记录',domain_hours:'访问记录小时流量',account_hours:'账户小时流量',account_samples:'账户采样明细',domain_days:'访问记录日流量',account_days:'账户日汇总',access_receipts:'访问批次原收据',account_receipts:'流量批次原收据',account_cursors:'账户累计游标',core_samples:'核心流量明细',core_hours:'核心历史小时用量'};
+const retentionNames={policy:'按保留策略清理',long_term:'长期保留',seven_days:'7 天详细记录',confirmed_window:'新协议确认后至少 24 小时；旧协议保留',replay_protection:'幂等与消费保护，保留'};
 const reclaimModes={none:'旧格式不支持在线增量回收，保留空闲页供复用',full:'数据库原生自动回收，实际文件缩小仍需观察',incremental:'支持有界增量回收，实际文件缩小仍需观察'};
 const warningLabels={unknown:'未配置，不判断安全或超限',ok:'低于提示阈值',warning:'已达到提示阈值',critical:'已达到严重阈值'};
 const thresholds=ref<StorageThresholds|null>(null),thresholdError=ref(''),thresholdNotice=ref('');

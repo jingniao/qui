@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"proxycontrol/internal/platform/db"
 	"strings"
 	"time"
 
@@ -477,16 +478,30 @@ func (r *Repository) Get(ctx context.Context, id string) (Node, error) {
 // ones. Every picker uses the default list, so a deleted node disappears from
 // them without a separate query.
 func (r *Repository) List(ctx context.Context, keyword string, page, size int, deleted bool) ([]Node, int, error) {
+	return r.list(ctx, keyword, page, size, deleted, true)
+}
+
+// Choices preserves capabilities and core selection constraints without computing tuning advice.
+func (r *Repository) Choices(ctx context.Context, keyword string, page, size int) ([]Node, int, error) {
+	return r.list(ctx, keyword, page, size, false, false)
+}
+
+func (r *Repository) list(ctx context.Context, keyword string, page, size int, deleted, advice bool) ([]Node, int, error) {
+	tx, err := db.BeginRead(ctx, r.Database)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Close()
 	var count int
 	search := "%" + keyword + "%"
 	scope := "deleted_at IS NULL"
 	if deleted {
 		scope = "deleted_at IS NOT NULL"
 	}
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE "+scope+" AND (name LIKE ? OR public_ip LIKE ?)", search, search).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE "+scope+" AND (name LIKE ? OR public_ip LIKE ?)", search, search).Scan(&count); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+columns+" FROM nodes WHERE "+scope+" AND (name LIKE ? OR public_ip LIKE ?) ORDER BY created_at,id LIMIT ? OFFSET ?", search, search, size, (page-1)*size)
+	rows, err := tx.QueryContext(ctx, "SELECT "+columns+" FROM nodes WHERE "+scope+" AND (name LIKE ? OR public_ip LIKE ?) ORDER BY created_at,id LIMIT ? OFFSET ?", search, search, size, (page-1)*size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -502,8 +517,14 @@ func (r *Repository) List(ctx context.Context, keyword string, page, size int, d
 	err = rows.Err()
 	rows.Close()
 	if err == nil {
-		err = r.decorateCoreSelection(ctx, items)
-		if err == nil {
+		selection, readErr := tx.QueryContext(ctx, coreSelectionQuery)
+		if readErr != nil {
+			return nil, 0, readErr
+		}
+		err = decorateCoreSelectionRows(selection, items)
+		selection.Close()
+		tx.Close()
+		if err == nil && advice {
 			err = r.decorateTuningAdvice(ctx, items)
 		}
 	}

@@ -54,6 +54,9 @@ func (r *Repository) IngestTraffic(ctx context.Context, batch traffic.Batch, now
 		return err
 	}
 	defer tx.Rollback()
+	if err := checkTrafficDeliveryTx(ctx, tx, batch.NodeID, batch.Delivery); err != nil {
+		return err
+	}
 	material, err := readCurrentTrafficReceipt(ctx, tx, batch.NodeID, batch.ID)
 	if err == nil {
 		if material.Digest != digest {
@@ -117,7 +120,7 @@ func (r *Repository) IngestTraffic(ctx context.Context, batch traffic.Batch, now
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO traffic_batches(node_id,batch_id,digest,received_at) VALUES(?,?,?,?)", batch.NodeID, batch.ID, digest, timestamp(now)); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO traffic_batches(node_id,batch_id,digest,received_at,queue_id,delivery_seq) VALUES(?,?,?,?,?,?)", batch.NodeID, batch.ID, digest, timestamp(now), batch.Delivery.QueueID, batch.Delivery.Sequence); err != nil {
 		return err
 	}
 	return tx.Commit()

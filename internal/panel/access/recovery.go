@@ -7,6 +7,9 @@ import (
 )
 
 func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
+	if err := validateTrafficStorageTx(ctx, tx, "restore_source."); err != nil {
+		return err
+	}
 	if err := r.preserveSpaceMaintenanceRestoreTx(ctx, tx); err != nil {
 		return err
 	}
@@ -19,7 +22,10 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 	for _, item := range []struct{ table, columns string }{
 		{"node_traffic_cursors", "node_id,epoch,credential_id,core,revision,upload_bytes,download_bytes,observed_at"},
 		{"core_traffic_samples", "node_id,core,epoch,observed_at,upload_bytes,download_bytes"},
-		{"access_batches", "node_id,batch_id,digest,received_at"}, {"traffic_batches", "node_id,batch_id,digest,received_at"},
+		{"core_traffic_hourly", "node_id,core,bucket,upload_bytes,download_bytes,samples"},
+		{"traffic_storage_job", "id,compacted_samples,retired_receipts,updated_at,last_success_at,error_code"},
+		{"traffic_delivery_queues", "node_id,queue_id,completed_seq,confirmed_seq,retired_seq,candidate_seq,candidate_at,updated_at,closed_at,recovery_id"},
+		{"access_batches", "node_id,batch_id,digest,received_at"}, {"traffic_batches", "node_id,batch_id,digest,received_at,accounting_completed_at,queue_id,delivery_seq"},
 		{"access_rollups", "id,bucket,node_id,user_id,device_id,domain,target_ip,allowed,dimensions_json,connections,upload_bytes,download_bytes,traffic_known"},
 		{"traffic_hourly", "bucket,node_id,user_id,device_id,upload_bytes,download_bytes"}, {"traffic_daily", "bucket,node_id,user_id,device_id,upload_bytes,download_bytes"},
 		{"traffic_cursors", "node_id,epoch,credential_id,upload_bytes,download_bytes,observed_at,user_id,device_id,revision"},
@@ -29,6 +35,9 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 		if err := db.CopyRecoveryTable(ctx, tx, item.table, item.columns); err != nil {
 			return err
 		}
+	}
+	if err := validateTrafficStorageTx(ctx, tx, ""); err != nil {
+		return err
 	}
 	if err := r.preserveTrafficCompletionRestoreTx(ctx, tx); err != nil {
 		return err

@@ -22,20 +22,21 @@ type Handler struct {
 	}
 }
 
-func (h *Handler) Register(mux *http.ServeMux) {
-	mux.Handle("GET /api/v1/traffic/nodes/monthly", h.Auth.Require(http.HandlerFunc(h.monthlyNodes), false))
+func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
+	mux.Handle("GET /api/v1/traffic/nodes/summary", h.Auth.Require(http.HandlerFunc(reads.nodeSummaries), false))
+	mux.Handle("GET /api/v1/traffic/nodes/monthly", h.Auth.Require(http.HandlerFunc(reads.monthlyNodes), false))
 	mux.Handle("GET /api/v1/access-retention-job", h.Auth.Require(http.HandlerFunc(h.retentionJob), true))
 	mux.Handle("GET /api/v1/access-storage-observation", h.Auth.Require(http.HandlerFunc(h.storageObservation), true))
-	mux.Handle("GET /api/v1/access-records", h.Auth.Require(http.HandlerFunc(h.list), true))
-	mux.Handle("GET /api/v1/access-records/blocked", h.Auth.Require(http.HandlerFunc(h.list), true))
-	mux.Handle("GET /api/v1/access-records/domains", h.Auth.Require(http.HandlerFunc(h.domains), true))
+	mux.Handle("GET /api/v1/access-records", h.Auth.Require(http.HandlerFunc(reads.list), true))
+	mux.Handle("GET /api/v1/access-records/blocked", h.Auth.Require(http.HandlerFunc(reads.list), true))
+	mux.Handle("GET /api/v1/access-records/domains", h.Auth.Require(http.HandlerFunc(reads.domains), true))
 	mux.Handle("GET /api/v1/traffic/reconciliation", h.Auth.Require(http.HandlerFunc(h.pendingTraffic), true))
-	mux.Handle("GET /api/v1/traffic/summary", h.Auth.Require(http.HandlerFunc(h.summary), false))
-	mux.Handle("GET /api/v1/traffic/hourly", h.Auth.Require(http.HandlerFunc(h.traffic), false))
-	mux.Handle("GET /api/v1/traffic/daily", h.Auth.Require(http.HandlerFunc(h.traffic), false))
-	mux.Handle("GET /api/v1/traffic/accounts/summary", h.Auth.Require(http.HandlerFunc(h.accountTraffic), false))
-	mux.Handle("GET /api/v1/traffic/accounts/hourly", h.Auth.Require(http.HandlerFunc(h.accountTraffic), false))
-	mux.Handle("GET /api/v1/traffic/accounts/daily", h.Auth.Require(http.HandlerFunc(h.accountTraffic), false))
+	mux.Handle("GET /api/v1/traffic/summary", h.Auth.Require(http.HandlerFunc(reads.summary), false))
+	mux.Handle("GET /api/v1/traffic/hourly", h.Auth.Require(http.HandlerFunc(reads.traffic), false))
+	mux.Handle("GET /api/v1/traffic/daily", h.Auth.Require(http.HandlerFunc(reads.traffic), false))
+	mux.Handle("GET /api/v1/traffic/accounts/summary", h.Auth.Require(http.HandlerFunc(reads.accountTraffic), false))
+	mux.Handle("GET /api/v1/traffic/accounts/hourly", h.Auth.Require(http.HandlerFunc(reads.accountTraffic), false))
+	mux.Handle("GET /api/v1/traffic/accounts/daily", h.Auth.Require(http.HandlerFunc(reads.accountTraffic), false))
 }
 
 func (h *Handler) pendingTraffic(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +70,10 @@ func (h *Handler) accountTraffic(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/v1/traffic/accounts/summary" {
 		result, err := h.Repository.AccountSummary(r.Context(), filter)
 		if err != nil {
+			if errors.Is(err, ErrTrafficResolution) {
+				httpapi.Error(w, 422, "traffic_history_resolution", err.Error())
+				return
+			}
 			h.fail(w)
 			return
 		}

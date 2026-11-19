@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"proxycontrol/internal/platform/readtiming"
 )
 
 type ErrorBody struct {
@@ -13,6 +15,9 @@ type ErrorBody struct {
 }
 
 func JSON(w http.ResponseWriter, status int, value any) {
+	if timed, ok := w.(interface{ TimingContext() context.Context }); ok {
+		defer readtiming.Start(timed.TimingContext(), "response_encode_write")()
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)

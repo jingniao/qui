@@ -109,7 +109,7 @@
         </div>
 
         <div class="text-xs text-gray-500 self-center">
-          共 <span class="font-medium text-gray-800">{{ filteredTasks.length }}</span> 条任务记录
+          共 <span class="font-medium text-gray-800">{{ total }}</span> 条任务记录
         </div>
       </div>
 
@@ -267,10 +267,10 @@
         <template #footer>
           <div class="p-4 border-t border-gray-100 flex items-center justify-between">
             <span class="text-xs text-gray-500">
-              第 {{ currentPage }} 页，共 {{ totalPages }} 页 ({{ filteredTasks.length }} 条记录)
+              第 {{ currentPage }} 页，共 {{ totalPages }} 页 ({{ total }} 条记录)
             </span>
             <Pagination
-              :total="filteredTasks.length"
+              :total="total"
               :current-page="currentPage"
               :page-size="pageSize"
               @update:page="currentPage = $event"
@@ -283,8 +283,8 @@
 </template>
 
 <script setup lang="ts">
-import { allPages } from '../../../app/pagination';
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { request, type Page } from '../../../app/apiClient';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
@@ -297,9 +297,9 @@ import { formatTime, isOwner } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { agentUpdatesAPI, type AgentUpdateAttempt, type AgentUpdateTask } from '../agentUpdatesApi';
-import { coreUpdatesAPI, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
+import { coreUpdatesAPI } from '../coreUpdatesApi';
 import { updateResultLabel, updateResultGuidance } from '../updateResultText';
-import { nodeAPI, type NodeView } from '../../nodes/api';
+
 
 interface UnifiedTask {
   id: string;
@@ -324,10 +324,13 @@ interface UnifiedTask {
 const loading = ref(false);
 const error = ref('');
 const busyId = ref('');
-const nodes = ref<NodeView[]>([]);
-const agentTasks = ref<AgentUpdateTask[]>([]);
-const coreTasks = ref<CoreUpdateTask[]>([]);
-const releases = ref<ReleaseEntry[]>([]);
+interface TaskRecord {
+  id: string; source: 'agent' | 'core'; component: string; nodeId: string; nodeName: string;
+  revision: number; targetVersion: string; status: string; updatedAt: string;
+  result?: AgentUpdateTask['result']; recovery?: AgentUpdateTask;
+}
+const records = ref<TaskRecord[]>([]);
+const total = ref(0);
 
 const filterType = ref<'all' | 'agent' | 'xray' | 'sing-box'>('all');
 const filterStatus = ref<'all' | 'running' | 'queued' | 'success' | 'rolled_back' | 'failed'>('all');
@@ -343,7 +346,7 @@ const attempts = ref<AgentUpdateAttempt[]>([]);
 let attemptGeneration = 0;
 function requestClear(id: string) { if (isOwner.value) { clearTargetId.value = id; clearConfirm.value = true; } }
 function confirmClear() { void clearCoreTask(clearTargetId.value); }
-function prepareRecovery(id: string) { recoveryTarget.value = agentTasks.value.find(t => t.id === id) || null; }
+function prepareRecovery(id: string) { recoveryTarget.value = records.value.find(t => t.id === id)?.recovery || null; }
 async function recoverAgent() {
   const target = recoveryTarget.value; recoveryTarget.value = null;
   if (!target || !isOwner.value || busyId.value) return;
@@ -366,8 +369,7 @@ async function loadAttempts() {
 let generation = 0;
 
 function nodeName(id: string): string {
-  const n = nodes.value.find(node => node.id === id);
-  return n?.name || id;
+  return records.value.find(task => task.nodeId === id)?.nodeName || id;
 }
 
 function mapStatusMeta(status: string, source: 'agent' | 'core'): {
@@ -416,9 +418,10 @@ function statusDotClass(tone: 'green' | 'yellow' | 'red' | 'gray' | 'blue'): str
   return map[tone] || map.gray;
 }
 
-let refreshing = false;
+let refreshing = false, disposed = false;
 let refreshAgain = false;
 async function loadAll(silent = false) {
+  if (disposed) return;
   if (refreshing) { refreshAgain = true; return; }
   refreshing = true;
   const cur = ++generation;
@@ -426,19 +429,13 @@ async function loadAll(silent = false) {
   error.value = '';
 
   try {
-    const [nodesRes, agentRes, coreRes, releaseRes] = await Promise.all([
-      allPages(page => nodeAPI.list(page, '', false, 100)),
-      allPages(page => agentUpdatesAPI.tasks(page, 100)),
-      allPages(page => coreUpdatesAPI.tasks(page, 100)),
-      allPages(page => coreUpdatesAPI.releases(page, 100))
-    ]);
-
+    const params = new URLSearchParams({ page: String(currentPage.value), pageSize: String(pageSize), type: filterType.value, status: filterStatus.value, keyword: searchKeyword.value });
+    const result = await request<Page<TaskRecord>>('/task-records?' + params);
     if (cur !== generation) return;
-
-    nodes.value = nodesRes.items || [];
-    agentTasks.value = agentRes.items || [];
-    coreTasks.value = coreRes.items || [];
-    releases.value = releaseRes.items || [];
+    total.value = result.total;
+    const lastPage = Math.max(1, Math.ceil(result.total / pageSize));
+    if (currentPage.value > lastPage) { currentPage.value = lastPage; return; }
+    records.value = result.items;
   } catch (e) {
     if (cur === generation) {
       error.value = (e as Error).message || '读取任务记录失败';
@@ -447,124 +444,29 @@ async function loadAll(silent = false) {
     refreshing = false;
     if (cur === generation) {
       loading.value = false;
-      if (refreshAgain && !document.hidden) { refreshAgain = false; void loadAll(true); }
     }
+    if (refreshAgain && !document.hidden) { refreshAgain = false; void loadAll(); }
   }
 }
 
 // 统一合并 Agent 与 Core 的升级任务
-const allTasks = computed<UnifiedTask[]>(() => {
-  const releaseMap: Record<string, string> = {};
-  for (const rel of releases.value) {
-    if (rel.signed?.manifest?.version) {
-      releaseMap[rel.id] = rel.signed.manifest.version;
-    }
-  }
-
-  const list: UnifiedTask[] = [];
-
-  // Agent updates
-  for (const t of agentTasks.value) {
-    const meta = mapStatusMeta(t.status, 'agent');
-    const version = releaseMap[t.releaseId] || t.result?.installed_version || '—';
-    list.push({
-      id: t.id,
-      source: 'agent',
-      component: 'agent',
-      nodeId: t.nodeId,
-      nodeName: nodeName(t.nodeId),
-      revision: t.revision,
-      targetVersion: version === '—' ? version : version.startsWith('v') ? version : `v${version}`,
-      status: t.status,
-      statusLabel: meta.label,
-      statusTone: meta.tone,
-      resultCode: t.result?.code,
-      resultLabel: updateResultLabel(t.result?.code),
-      resultGuidance: updateResultGuidance(t.result?.code),
-      installedVersion: t.result?.installed_version,
-      updatedAt: t.updatedAt,
-      timestamp: new Date(t.updatedAt).getTime() || 0,
-      canClear: false
-    });
-  }
-
-  // Core updates
-  for (const t of coreTasks.value) {
-    const meta = mapStatusMeta(t.status, 'core');
-    list.push({
-      id: t.id,
-      source: 'core',
-      component: t.component || 'xray',
-      nodeId: t.nodeId,
-      nodeName: nodeName(t.nodeId),
-      revision: t.revision,
-      targetVersion: `${t.component} ${t.version}`,
-      status: t.status,
-      statusLabel: meta.label,
-      statusTone: meta.tone,
-      resultCode: t.result?.code,
-      resultLabel: updateResultLabel(t.result?.code),
-      resultGuidance: updateResultGuidance(t.result?.code),
-      installedVersion: t.result?.installed_version,
-      updatedAt: t.updatedAt,
-      timestamp: new Date(t.updatedAt).getTime() || 0,
-      canClear: t.status !== 'cleared'
-    });
-  }
-
-  // 按更新时间倒序排序 (最新任务排在最前)
-  return list.sort((a, b) => b.timestamp - a.timestamp);
+const allTasks = computed<UnifiedTask[]>(() => records.value.map(t => {
+  const meta = mapStatusMeta(t.status, t.source);
+  return { ...t, statusLabel: meta.label, statusTone: meta.tone,
+    resultCode: t.result?.code, resultLabel: updateResultLabel(t.result?.code),
+    resultGuidance: updateResultGuidance(t.result?.code), installedVersion: t.result?.installed_version,
+    timestamp: Date.parse(t.updatedAt), canClear: t.source === 'core' && t.status !== 'cleared' };
+}));
+const filteredTasks = allTasks;
+const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1);
+const paginatedTasks = allTasks;
+let filterTimer: ReturnType<typeof setTimeout> | undefined;
+watch([filterType, filterStatus, searchKeyword], () => {
+  generation++;
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => { if (currentPage.value !== 1) currentPage.value = 1; else void loadAll(); }, 250);
 });
-
-// 过滤后的任务列表
-const filteredTasks = computed(() => {
-  let result = allTasks.value;
-
-  // 类型过滤
-  if (filterType.value !== 'all') {
-    if (filterType.value === 'agent') {
-      result = result.filter(t => t.source === 'agent');
-    } else {
-      result = result.filter(t => t.component.toLowerCase() === filterType.value);
-    }
-  }
-
-  // 状态过滤
-  if (filterStatus.value !== 'all') {
-    if (filterStatus.value === 'running') {
-      result = result.filter(t => t.status === 'running');
-    } else if (filterStatus.value === 'queued') {
-      result = result.filter(t => t.status === 'queued');
-    } else if (filterStatus.value === 'success') {
-      result = result.filter(t => t.status === 'success');
-    } else if (filterStatus.value === 'rolled_back') {
-      result = result.filter(t => t.status === 'rolled_back');
-    } else if (filterStatus.value === 'failed') {
-      result = result.filter(t => ['rejected', 'failed_closed'].includes(t.status));
-    }
-  }
-
-  // 关键字过滤
-  if (searchKeyword.value) {
-    const kw = searchKeyword.value.toLowerCase();
-    result = result.filter(
-      t =>
-        t.nodeName.toLowerCase().includes(kw) ||
-        t.targetVersion.toLowerCase().includes(kw) ||
-        t.statusLabel.toLowerCase().includes(kw) ||
-        (t.installedVersion && t.installedVersion.toLowerCase().includes(kw))
-    );
-  }
-
-  return result;
-});
-
-const totalPages = computed(() => Math.ceil(filteredTasks.value.length / pageSize) || 1);
-
-const paginatedTasks = computed(() => {
-  const start = (currentPage.value - 1) * pageSize;
-  return filteredTasks.value.slice(start, start + pageSize);
-});
+watch(currentPage, () => { generation++; void loadAll(); });
 
 async function clearCoreTask(id: string) {
   if (busyId.value || !isOwner.value) return;
@@ -589,7 +491,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  disposed = true;
   generation++; attemptGeneration++;
+  clearTimeout(filterTimer);
   reloadOnNodeStatus.cancel();
   window.removeEventListener('proxy-node-status', reloadOnNodeStatus);
   document.removeEventListener('visibilitychange', visibilityChanged);

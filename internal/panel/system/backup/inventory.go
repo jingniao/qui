@@ -10,6 +10,8 @@ import (
 )
 
 type Totals struct {
+	CoreTrafficHours        int64 `json:"coreTrafficHours,omitempty"`
+	TrafficDeliveryQueues   int64 `json:"trafficDeliveryQueues,omitempty"`
 	RelayCleanupNodes       int64 `json:"relayCleanupNodes"`
 	CanvasEntryBindings     int64 `json:"canvasEntryBindings"`
 	ClientPolicyProfiles    int64 `json:"clientPolicyProfiles"`
@@ -146,6 +148,18 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	}
 	if err := r.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM backup_file_ops),(SELECT count(*) FROM backup_runs WHERE status='running')").Scan(&result.Totals.BackupFileOperations, &result.Totals.RunningBackupJobs); err != nil {
 		return Inventory{}, err
+	}
+	var trafficStoragePresent int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='core_traffic_hourly'").Scan(&trafficStoragePresent); err != nil {
+		return result, err
+	}
+	if trafficStoragePresent > 0 {
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM core_traffic_hourly").Scan(&result.Totals.CoreTrafficHours); err != nil {
+			return result, err
+		}
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM traffic_delivery_queues").Scan(&result.Totals.TrafficDeliveryQueues); err != nil {
+			return result, err
+		}
 	}
 	result.Totals.PendingOperations += updatePending
 	if result.Totals.Users > 10000 || result.Totals.Nodes > 10000 {

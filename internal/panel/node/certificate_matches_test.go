@@ -62,7 +62,7 @@ func newCertMatchesPanel(t *testing.T, lib CertificateLibrary) *certMatchesPanel
 		Certificates: lib,
 	}
 	mux := http.NewServeMux()
-	handler.Register(mux)
+	handler.Register(mux, handler)
 	return &certMatchesPanel{mux: mux, repository: handler.Repository, database: database, handler: handler}
 }
 

@@ -21,8 +21,9 @@
       </template>
     </PageHeader>
 
+    <p v-if="loading && groups.length" role="status" class="text-sm text-ios-secondary">正在读取分组成员与操作选项…</p>
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <div v-else-if="loading" role="status" class="flex items-center justify-center p-12 text-sm text-neutral-400 gap-2">
+    <div v-else-if="loading && !groups.length" role="status" class="flex items-center justify-center p-12 text-sm text-neutral-400 gap-2">
       <svg class="w-4 h-4 animate-spin text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
       </svg>
@@ -33,7 +34,7 @@
       title="暂无节点分组"
       description="将代理节点加入分组，可在分流控制与策略中统一引用。"
     />
-    <div v-else class="space-y-4">
+    <div v-else :inert="loading || undefined" class="space-y-4">
       <!-- 顶部搜索工具栏与统计 -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div class="relative flex items-center max-w-xs w-full">
@@ -542,7 +543,7 @@ import AppDialog from '../../../components/AppDialog.vue';
 import LineGroupEditor from '../components/LineGroupEditor.vue';
 import LineGroupPicker, { type GroupPickerNode } from '../components/LineGroupPicker.vue';
 import { groupAPI, freshGroup, type NodeGroup } from '../../nodes/groupsApi';
-import { userAPI, type ProxyUser } from '../../users/api';
+import { userAPI, type UserChoice } from '../../users/api';
 import type { NodeView } from '../../nodes/api';
 import { choices, proxyAPI, type Inbound } from '../api';
 import { importSourceKind, loadImports } from '../importApi';
@@ -564,7 +565,7 @@ const tunnelRules = ref<TunnelRule[]>([]);
 const policies = ref<PolicyRecord[]>([]);
 const clientTemplate = ref<StoredRuleTemplate | null>(null);
 
-const users = ref<ProxyUser[]>([]);
+const users = ref<UserChoice[]>([]);
 const serverSelection = ref<string[]>([]);
 const loading = ref(true);
 const error = ref('');
@@ -753,13 +754,13 @@ async function load() {
   error.value = '';
   try {
     const data = await Promise.all([
-      choices(groupAPI.list),
-      choices((page, size) => request<Page<NodeView>>(`/nodes?page=${page}&pageSize=${size}`)),
+      choices(groupAPI.list).then(value => { groups.value = value; syncSelection(); return value; }),
+      choices((page, size) => request<Page<NodeView>>(`/nodes/choices?page=${page}&pageSize=${size}`)),
       choices((page, size) => proxyAPI.inbounds('', page, size)),
       choices((page, size) => policyAPI.list(page, '', size)),
       request<StoredRuleTemplate>('/subscription-rules'),
       loadImports(),
-      choices((page, size) => userAPI.list(page, '', size)),
+      choices((page, size) => userAPI.choices(page, '', size)),
       tunnelRuleAPI.list().then(result => result.items)
     ]);
     [groups.value, servers.value, inbounds.value, policies.value, clientTemplate.value] = data;

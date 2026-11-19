@@ -387,7 +387,25 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 			return err
 		}
 	}
+	// Preserve the queue format while any retained image cannot read the new
+	// authenticated delivery ledger. Managed workers use the supervisor's floor.
+	if !controlOnly && requiredStorage.Formats.Spool.Write < agentstorage.TrafficDeliveryFormat {
+		if err := checkFloorRaise(agenthost.CheckTrafficDeliveryActivation); err != nil {
+			logger.Info("traffic receipt retirement not activated; keeping rollback-readable spool format", "error", err)
+		} else {
+			requiredStorage, err = storage.ActivateTrafficDeliveryFormat(c.DataDirectory, state.NodeID, storageContract)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	telemetryQueue, queueErr := spool.OpenBound(ctx, filepath.Join(c.DataDirectory, "spool"), state.NodeID, 0, filepath.Join(state.Directory, "spool-store.json.enc"), nil)
+	if queueErr == nil && requiredStorage.Formats.Spool.Write >= agentstorage.TrafficDeliveryFormat {
+		if err := telemetryQueue.PrepareTrafficDelivery(ctx); err != nil {
+			telemetryQueue.Close()
+			return err
+		}
+	}
 	hooks := core.RuntimeHooks{}
 	var collectorStatus func() *pb.CollectorStatus
 	if queueErr != nil {
@@ -607,7 +625,16 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	for _, core := range detected.GetCores() {
 		deviceGates = deviceGates || core.GetDeviceGateSupported()
 	}
-	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{NodeTrafficSupported: true, MultiCoreSupported: detected.GetMultiCoreSupported(), GostCoreSupported: gost.Supported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: deviceGates, BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
+	deliveryState := spool.TrafficDeliveryState{}
+	retirementCapable := telemetryQueue != nil && telemetryQueue.TrafficDeliverySupported()
+	if retirementCapable {
+		var err error
+		deliveryState, err = telemetryQueue.TrafficDeliveryState(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{TrafficRetirementSupported: retirementCapable, TrafficQueueId: deliveryState.QueueID, TrafficConfirmedSeq: uint64(deliveryState.Confirmed), TrafficIssuedSeq: uint64(deliveryState.Issued), NodeTrafficSupported: true, MultiCoreSupported: detected.GetMultiCoreSupported(), GostCoreSupported: gost.Supported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: deviceGates, BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
 		return err
 	}
 	welcome, err := receive()
@@ -616,6 +643,18 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 	}
 	if welcome.NodeId != state.NodeID || welcome.GetWelcome() == nil {
 		return errors.New("invalid Welcome")
+	}
+	trafficRetirement := welcome.GetWelcome().TrafficRetirementSupported
+	if deliveryState.Active && !trafficRetirement {
+		return errors.New("panel no longer supports the active traffic delivery queue; restore matching panel")
+	}
+	if trafficRetirement {
+		if telemetryQueue == nil {
+			return errors.New("traffic delivery queue missing")
+		}
+		if err := telemetryQueue.EnableTrafficDelivery(ctx); err != nil {
+			return err
+		}
 	}
 	sequence := welcome.GetWelcome().LastAcceptedSequence
 	if sequence >= uint64(1<<63-1) {
@@ -830,7 +869,8 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		}
 		results = append(results, &pb.ApplyResult{Revision: command.Revision, CommandId: command.CommandId, Core: command.Core, Success: success, Code: code})
 	}
-	send := func(message *pb.AgentMessage) error {
+	var send func(*pb.AgentMessage) error
+	send = func(message *pb.AgentMessage) error {
 		accessBatchID := ""
 		trafficBatchID := ""
 		if payload := message.GetAccessBatch(); payload != nil {
@@ -846,6 +886,14 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				return err
 			}
 			trafficBatchID = batch.ID
+			if trafficRetirement {
+				d, err := telemetryQueue.TrafficEnvelope(ctx, batch.ID)
+				if err != nil {
+					return err
+				}
+				payload.QueueId = d.QueueID
+				payload.DeliverySeq = uint64(d.Sequence)
+			}
 		}
 		if sequence >= uint64(1<<63-1) {
 			return errors.New("persistent message sequence exhausted")
@@ -942,7 +990,20 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			if telemetryQueue == nil {
 				return errors.New("traffic queue unavailable")
 			}
-			return telemetryQueue.AckTraffic(ctx, trafficBatchID, message.GetTrafficBatch().BatchJson)
+			if trafficRetirement && (ack.TrafficQueueId != message.GetTrafficBatch().QueueId || ack.TrafficDeliverySeq != message.GetTrafficBatch().DeliverySeq) {
+				return errors.New("traffic acknowledgment delivery identity mismatch")
+			}
+			if err := telemetryQueue.AckTraffic(ctx, trafficBatchID, message.GetTrafficBatch().BatchJson); err != nil {
+				return err
+			}
+			if trafficRetirement {
+				d, err := telemetryQueue.TrafficDeliveryState(ctx)
+				if err != nil {
+					return err
+				}
+				return send(&pb.AgentMessage{Payload: &pb.AgentMessage_TrafficConfirmation{TrafficConfirmation: &pb.TrafficConfirmation{QueueId: d.QueueID, ConfirmedSeq: uint64(d.Confirmed)}}})
+			}
+			return nil
 		}
 		return nil
 	}

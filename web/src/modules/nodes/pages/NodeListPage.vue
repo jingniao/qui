@@ -85,7 +85,7 @@ import { nodeAPI, type MachineTrafficSummary, type NodeView } from '../api';
 import { groupAPI, type NodeGroup } from '../groupsApi';
 import { choices } from '../../proxy/api';
 import { accessAPI } from '../../access/api';
-import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
+import { getNodeMeta, loadNodeMetadata } from '../nodeMeta';
 import { serverRow } from '../components/serverListModel';
 import { applyServerOrder, matchesTag, reorderServer, tagOptions, UNTAGGED } from '../serverOrder';
 import { APIError } from '../../../app/apiClient';
@@ -227,22 +227,20 @@ async function load() {
     try { dayStart = utcInput(localInput(new Date().toISOString()).slice(0, 10) + 'T00:00'); }
     catch { const utc = new Date(); utc.setUTCHours(0, 0, 0, 0); dayStart = utc.toISOString(); }
     const dayEnd = new Date().toISOString();
-    const details = await Promise.all(servers.map(async node => {
-      const [meta, traffic] = await Promise.allSettled([
-        loadNodeMeta(node.id, isOwner.value), accessAPI.accounts({ nodeId: node.id, from: dayStart, to: dayEnd })
-      ]);
-      if (meta.status === 'rejected') notices.push(`${node.name} 元数据读取失败`);
-      if (traffic.status === 'rejected') notices.push(`${node.name} 今日流量读取失败`);
-      return { id: node.id, failed: traffic.status === 'rejected', bytes: traffic.status === 'fulfilled' && traffic.value.observations > 0 ? traffic.value.uploadBytes + traffic.value.downloadBytes : undefined };
-    }));
+    const [metaResult, trafficResult] = await Promise.allSettled([
+      loadNodeMetadata(isOwner.value, deleted.value),
+      request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number; observations: number }[] }>(`/traffic/nodes/summary?from=${encodeURIComponent(dayStart)}&to=${encodeURIComponent(dayEnd)}`)
+    ]);
+    if (metaResult.status === 'rejected') notices.push(`元数据读取失败：${(metaResult.reason as Error).message}`);
+    if (trafficResult.status === 'rejected') notices.push(`今日流量读取失败：${(trafficResult.reason as Error).message}`);
     const [groupResult, monthly, machine] = await supplements;
     if (current !== generation) return;
     if (groupResult.status === 'rejected') notices.push(`节点分组读取失败：${(groupResult.reason as Error).message}`);
     if (monthly.status === 'rejected') notices.push(`本月流量读取失败：${(monthly.reason as Error).message}`);
     if (machine.status === 'rejected') notices.push(`本月整机流量读取失败：${(machine.reason as Error).message}`);
     groups.value = groupResult.status === 'fulfilled' ? groupResult.value : groups.value;
-    for (const item of details) { if (!item.failed) { if (item.bytes === undefined) delete today.value[item.id]; else today.value[item.id] = item.bytes; } }
-    month.value = monthly.status === 'fulfilled' ? Object.fromEntries(monthly.value.items.map(item => [item.nodeId, item.uploadBytes + item.downloadBytes])) : month.value;
+    if (trafficResult.status === 'fulfilled') today.value = Object.fromEntries(trafficResult.value.items.filter(item => item.observations > 0).map(item => [item.nodeId, item.uploadBytes + item.downloadBytes]));
+    month.value = monthly.status === 'fulfilled' ? Object.fromEntries(monthly.value.items.map(item => [item.nodeId, item.uploadBytes + item.downloadBytes])) : {};
     machineTraffic.value = machine.status === 'fulfilled' ? Object.fromEntries(machine.value.items.map(item => [item.nodeId, item])) : machineTraffic.value;
     monthZone.value = monthly.status === 'fulfilled' ? monthly.value.timezone : monthZone.value;
     warnings.value = notices;

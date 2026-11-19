@@ -1093,7 +1093,7 @@ import { isOwner } from '../../../app/auth';
 import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
-import { loadNodeMeta } from '../../nodes/nodeMeta';
+import { loadNodeMetadata } from '../../nodes/nodeMeta';
 import {
   proxyAPI,
   choices,
@@ -1974,25 +1974,24 @@ async function loadWorkspace() {
   // U5 reads the granted source metadata from the panel, not browser records.
   proxyNodeStore.manualNodes = [];
   proxyNodeStore.subscriptions = [];
+    void loadNodeMetadata(true).catch(e => {
+      showToast(`载入服务器元数据失败: ${(e as Error).message}`, 'error');
+    });
   try {
     // Read independent resources in one round; metadata is not needed to draw.
-    const [nodeRes, inboundRes, outboundRes, schemes, groups] = await Promise.all([
-      choices((page, size) => nodeAPI.list(page, '', false, size)),
+    const [nodeRes, inboundRes, outboundRes, schemes] = await Promise.all([
+      choices((page, size) => nodeAPI.choices(page, '', size)),
       choices((page, size) => proxyAPI.inbounds('', page, size)),
       choices((page, size) => proxyAPI.outbounds('', page, size)),
       choices((page, size) => canvasAPI.list(page, size)),
-      choices((page, size) => groupAPI.list(page, size)),
       loadImports()
     ]);
     loadImportExits();
     servers.value = nodeRes;
     inbounds.value = inboundRes;
     outbounds.value = outboundRes;
-    entryGroups.value = groups;
     await reloadSchemes(schemes);
-    void Promise.all(nodeRes.map(node => loadNodeMeta(node.id, true))).catch(e => {
-      showToast(`载入服务器元数据失败: ${(e as Error).message}`, 'error');
-    });
+
   } catch (e) {
     schemesLoadError.value = `载入画布资源失败: ${(e as Error).message}`;
     schemesLoading.value = false;

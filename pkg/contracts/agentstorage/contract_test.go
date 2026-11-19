@@ -8,6 +8,13 @@ import (
 
 func TestReplacementKeepsRequiredWritesAndFallbackReadability(t *testing.T) {
 	current := Current("1.0.0")
+	legacy := current
+	legacy.Formats.Spool.ReadMax = 6
+	trafficWriter := current
+	trafficWriter.Formats.Spool.Write = TrafficDeliveryFormat
+	if CheckReplacement(legacy, trafficWriter) == nil {
+		t.Fatal("traffic delivery format stranded a legacy rollback image")
+	}
 	next := current
 	next.AgentVersion = "1.1.0"
 	if err := CheckReplacement(current, next); err != nil {

@@ -36,6 +36,9 @@ func TestBoundStoreLossAndReplacementCannotInitializeAnEmptyLedger(t *testing.T)
 		t.Run(fault, func(t *testing.T) {
 			ctx := context.Background()
 			s, directory, witness := boundFixture(t)
+			if s.bound.head.Version != 1 || s.TrafficDeliverySupported() {
+				t.Fatal("opening a queue changed the format before rollback compatibility was proven")
+			}
 			if err := s.SaveTraffic(ctx, []traffic.Counter{sample("epoch", 300)}); err != nil {
 				t.Fatal(err)
 			}
@@ -157,6 +160,12 @@ func TestBoundStoreWitnessAheadOfDatabaseAndTamperRemainClosed(t *testing.T) {
 func TestMultipleStoreHandlesSerializeAccountingCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	s, directory, _ := boundFixture(t)
+	if err := s.PrepareTrafficDelivery(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !s.TrafficDeliverySupported() {
+		t.Fatal("explicitly activated queue did not adopt the authenticated delivery format")
+	}
 	other, err := Open(ctx, directory, "node", 0)
 	if err != nil {
 		t.Fatal(err)

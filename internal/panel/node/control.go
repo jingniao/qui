@@ -273,6 +273,23 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if err := c.Repository.healthCapability(ctx, id, healthCheckSupported); err != nil {
 		return status.Error(codes.Internal, "health capability persistence failed")
 	}
+	retirementRecorder, retirementOK := c.AccessRecorder.(interface {
+		NegotiateTrafficDelivery(context.Context, string, string, string, uint64, uint64) error
+		ConfirmTrafficDelivery(context.Context, string, string, uint64) error
+		RequireTrafficProtocol(context.Context, string, bool) error
+	})
+	trafficRetirementSupported := retirementOK && first.GetHello().TrafficRetirementSupported
+	if retirementOK {
+		if err := retirementRecorder.RequireTrafficProtocol(ctx, id, trafficRetirementSupported); err != nil {
+			return status.Error(codes.FailedPrecondition, err.Error())
+		}
+		if trafficRetirementSupported {
+			hello := first.GetHello()
+			if err := retirementRecorder.NegotiateTrafficDelivery(ctx, id, hello.TrafficQueueId, fingerprint, hello.TrafficConfirmedSeq, hello.TrafficIssuedSeq); err != nil {
+				return status.Error(codes.FailedPrecondition, err.Error())
+			}
+		}
+	}
 	multiSupported := first.GetHello().MultiCoreSupported
 	nodeTrafficSupported := first.GetHello().NodeTrafficSupported && c.AccessRecorder != nil
 	// The GOST flag is the Agent's own statement that it can install and remove
@@ -336,7 +353,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if c.CataloguePort != nil {
 		cataloguePort = c.CataloguePort(ctx)
 	}
-	if err := send(&pb.Welcome{MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: "", AgentCataloguePort: cataloguePort}); err != nil {
+	if err := send(&pb.Welcome{TrafficRetirementSupported: trafficRetirementSupported, MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: "", AgentCataloguePort: cataloguePort}); err != nil {
 		return err
 	}
 	type gatePacket struct {
@@ -439,7 +456,27 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.FailedPrecondition, "access batch rejected")
 			}
 		}
+		if confirmation := message.GetTrafficConfirmation(); confirmation != nil {
+			if confirmation.QueueId != first.GetHello().TrafficQueueId {
+				return status.Error(codes.FailedPrecondition, "traffic_delivery_conflict: confirmation differs from negotiated identity")
+			}
+			if !trafficRetirementSupported {
+				return status.Error(codes.FailedPrecondition, "traffic retirement not negotiated")
+			}
+			if err := retirementRecorder.ConfirmTrafficDelivery(ctx, id, confirmation.QueueId, confirmation.ConfirmedSeq); err != nil {
+				return status.Error(codes.FailedPrecondition, err.Error())
+			}
+		}
 		if batch := message.GetTrafficBatch(); batch != nil {
+			if trafficRetirementSupported && batch.QueueId != first.GetHello().TrafficQueueId {
+				return status.Error(codes.FailedPrecondition, "traffic_delivery_conflict: queue differs from negotiated identity")
+			}
+			if trafficRetirementSupported && (batch.QueueId == "" || batch.DeliverySeq == 0) {
+				return status.Error(codes.FailedPrecondition, "traffic delivery identity missing")
+			}
+			if !trafficRetirementSupported && (batch.QueueId != "" || batch.DeliverySeq != 0) {
+				return status.Error(codes.FailedPrecondition, "traffic retirement not negotiated")
+			}
 			if c.AccessRecorder == nil {
 				return status.Error(codes.FailedPrecondition, "traffic recorder unavailable")
 			}
@@ -455,6 +492,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			trafficBatchID, err = c.AccessRecorder.RecordTraffic(ctx, id, batch, message.Sequence > lastSequence)
 			if err != nil {
 				c.logBatchRejection(id, "traffic", decoded.ID, err)
+				var coded interface{ RejectionReason() (string, int64) }
+				if errors.As(err, &coded) {
+					reason, _ := coded.RejectionReason()
+					if reason == "traffic_delivery_retired" || reason == "traffic_delivery_conflict" {
+						return status.Error(codes.FailedPrecondition, reason+": retain the original node queue and restore matching state")
+					}
+				}
 				return status.Error(codes.FailedPrecondition, "traffic batch rejected")
 			}
 		}
@@ -587,7 +631,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			c.DashboardNotify()
 		}
 
-		if err := send(&pb.Ack{AgentSequence: accepted, AccessBatchId: accessBatchID, TrafficBatchId: trafficBatchID}); err != nil {
+		if err := send(&pb.Ack{AgentSequence: accepted, AccessBatchId: accessBatchID, TrafficBatchId: trafficBatchID, TrafficQueueId: message.GetTrafficBatch().GetQueueId(), TrafficDeliverySeq: message.GetTrafficBatch().GetDeliverySeq()}); err != nil {
 			return err
 		}
 		// Gates are volatile, refreshed on the live stream, and never queued for
@@ -761,6 +805,12 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 			return errors.New("invalid traffic batch size")
 		}
 		return nil
+	}
+	if confirmation := message.GetTrafficConfirmation(); confirmation != nil {
+		if confirmation.ConfirmedSeq > math.MaxInt64 {
+			return errors.New("invalid traffic confirmation progress")
+		}
+		return (traffic.Delivery{QueueID: confirmation.QueueId, Sequence: 1}).Validate()
 	}
 	if message.GetFinalUsageBatch() != nil {
 		// Old Agents may still emit final-usage batches. The concept is removed,

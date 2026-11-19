@@ -21,15 +21,23 @@ var (
 	ErrProfileLimit    = errors.New("client policy limit reached")
 )
 
+type ProfileCard struct {
+	Mode             string `json:"mode"`
+	MixedPort        int    `json:"mixedPort"`
+	GroupCount       int    `json:"groupCount"`
+	EnabledRuleCount int    `json:"enabledRuleCount"`
+}
+
 type ProfileSummary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Revision    int64  `json:"revision"`
-	CreatedAt   string `json:"createdAt"`
-	CreatedBy   string `json:"createdBy"`
-	UpdatedAt   string `json:"updatedAt"`
-	UpdatedBy   string `json:"updatedBy"`
+	Card        *ProfileCard `json:"card,omitempty"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Revision    int64        `json:"revision"`
+	CreatedAt   string       `json:"createdAt"`
+	CreatedBy   string       `json:"createdBy"`
+	UpdatedAt   string       `json:"updatedAt"`
+	UpdatedBy   string       `json:"updatedBy"`
 }
 
 type Profile struct {
@@ -232,15 +240,26 @@ func (s *Store) Profiles(ctx context.Context, page, size int) (ProfileList, erro
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM client_policy_profiles").Scan(&list.Total); err != nil {
 		return list, err
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT id,name,description,revision,created_at,created_by,updated_at,updated_by FROM client_policy_profiles ORDER BY created_at,id LIMIT ? OFFSET ?", size, (page-1)*size)
+	rows, err := tx.QueryContext(ctx, "SELECT id,name,description,revision,created_at,created_by,updated_at,updated_by,template_json FROM client_policy_profiles ORDER BY created_at,id LIMIT ? OFFSET ?", size, (page-1)*size)
 	if err != nil {
 		return list, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p ProfileSummary
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Revision, &p.CreatedAt, &p.CreatedBy, &p.UpdatedAt, &p.UpdatedBy); err != nil {
+		var encoded string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Revision, &p.CreatedAt, &p.CreatedBy, &p.UpdatedAt, &p.UpdatedBy, &encoded); err != nil {
 			return list, err
+		}
+		var template Template
+		if err := json.Unmarshal([]byte(encoded), &template); err != nil {
+			return list, err
+		}
+		p.Card = &ProfileCard{Mode: template.Client.Mode, MixedPort: template.Client.MixedPort, GroupCount: len(template.Groups)}
+		for _, rule := range template.Rules {
+			if rule.Enabled {
+				p.Card.EnabledRuleCount++
+			}
 		}
 		list.Items = append(list.Items, p)
 	}

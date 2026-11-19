@@ -27,7 +27,7 @@
 </template>
 <script setup lang="ts">
 import type { InboundInput, Outbound, OutboundGroup, ProxyChain } from '../../api';
-import type { ProxyUser } from '../../../users/api';
+import type { UserChoice } from '../../../users/api';
 import { internalRelaySettingsReason } from './nodeEditorModel';
-defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: ProxyUser[]; open?: boolean }>();
+defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: UserChoice[]; open?: boolean }>();
 </script>

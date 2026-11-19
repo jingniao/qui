@@ -748,8 +748,9 @@ function saveHarness(mode) {
       return { revision: 42, status: 'queued' };
     } }
   };
-  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { save, state, servers, savedId, savedInbound, result, error, busy, selectedGroupIds, initialGroupIds };`);
+  const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${setupCode}\nreturn { save, state, servers, savedId, savedInbound, result, error, busy, loading, selectedGroupIds, initialGroupIds };`);
   const view = run(deps);
+  view.loading.value = false; // This harness exercises saving after required choices finish loading.
   view.servers.value = [server]; view.state.form.name = 'Tokyo-vless-1443'; view.state.form.port = 1443;
   return { ...view, calls, events };
 }

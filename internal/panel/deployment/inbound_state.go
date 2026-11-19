@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"slices"
 
-	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"strings"
 )
 
 // Publish states of one inbound, relative to the revision its node runs.
@@ -161,30 +161,61 @@ func (r *Repository) newestAttempts(ctx context.Context, nodeID string, inbounds
 	return found, nil
 }
 
-func (h *Handler) inboundStates(w http.ResponseWriter, r *http.Request) {
-	nodeID := r.PathValue("id")
-	n, err := h.Nodes.Get(r.Context(), nodeID)
-	if err != nil || n.DeletedAt != "" {
-		if err == nil || errors.Is(err, node.ErrNotFound) {
-			httpapi.Error(w, 404, "not_found", "Node not found")
-		} else {
-			h.fail(w, err)
-		}
-		return
+func (h *Handler) readInboundStates(ctx context.Context, nodeID string) ([]InboundState, error) {
+	var exists int
+	err := h.Nodes.Database.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=? AND deleted_at IS NULL", nodeID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, &apiFailure{Status: 404, Code: "not_found", Message: "Node not found"}
+	}
+	if err != nil {
+		return nil, err
 	}
 	if h.Proxy == nil || h.Users == nil {
-		h.fail(w, &apiFailure{Status: 503, Code: "unavailable", Message: "Proxy configuration unavailable"})
-		return
+		return nil, &apiFailure{Status: 503, Code: "unavailable", Message: "Proxy configuration unavailable"}
 	}
-	draft, intent, err := h.Proxy.SnapshotIntent(r.Context(), nodeID, h.Users)
+	draft, intent, err := h.Proxy.SnapshotIntent(ctx, nodeID, h.Users)
 	if err != nil {
-		httpapi.Error(w, 409, "snapshot_unavailable", err.Error())
-		return
+		return nil, &apiFailure{Status: 409, Code: "snapshot_unavailable", Message: err.Error()}
 	}
-	items, err := h.Repository.InboundStates(r.Context(), nodeID, draft, intent)
+	return h.Repository.InboundStates(ctx, nodeID, draft, intent)
+}
+
+func (h *Handler) inboundStates(w http.ResponseWriter, r *http.Request) {
+	items, err := h.readInboundStates(r.Context(), r.PathValue("id"))
 	if err != nil {
 		h.fail(w, err)
 		return
+	}
+	httpapi.JSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) inboundStatesBatch(w http.ResponseWriter, r *http.Request) {
+	ids := strings.Split(r.URL.Query().Get("nodeIds"), ",")
+	if len(ids) > 200 {
+		httpapi.Error(w, 400, "invalid_request", "Too many node IDs")
+		return
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id == "" || len(id) > 128 || seen[id] {
+			httpapi.Error(w, 400, "invalid_request", "Invalid or duplicate node ID")
+			return
+		}
+		seen[id] = true
+	}
+	type entry struct {
+		NodeID string         `json:"nodeId"`
+		Items  []InboundState `json:"items"`
+		Error  string         `json:"error,omitempty"`
+	}
+	items := []entry{}
+	for _, id := range ids {
+		states, err := h.readInboundStates(r.Context(), id)
+		item := entry{NodeID: id, Items: states}
+		if err != nil {
+			item.Error = err.Error()
+		}
+		items = append(items, item)
 	}
 	httpapi.JSON(w, 200, map[string]any{"items": items})
 }

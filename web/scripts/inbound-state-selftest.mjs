@@ -7,11 +7,11 @@ const list = read('modules/proxy/pages/ProxyNodeListPage.vue');
 
 // The node list labels each inbound from its own publish state, not from the
 // server's latest revision.
-assert.match(list, /deploymentAPI\.inboundStates\(/);
+assert.match(list, /deploymentAPI\.inboundStatesBatch\(/);
 assert.doesNotMatch(list, /serverPublishState|nodeRevisions/);
 for (const label of ['已生效', '有未发布修改', '发布中', '未生效']) assert.ok(list.includes(`'${label}'`), label);
 assert.match(list, /最近一次发布失败/);
-assert.match(read('modules/system/deploymentApi.ts'), /inboundStates: .*\/inbound-states/);
+assert.match(read('modules/system/deploymentApi.ts'), /inboundStatesBatch: .*\/nodes\/inbound-states/);
 
 // Hysteria2 and TUIC are QUIC, whatever the TCP transport field defaults to.
 assert.doesNotMatch(list, /settings\?\.transport \|\| 'tcp'\}\}/);
@@ -36,7 +36,7 @@ const stateBlock = list.slice(list.indexOf('const inboundStateMap ='), list.inde
 const compiledState = ts.transpileModule(stateBlock, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 const item = { sourceType: 'self_hosted', sourceId: 's', inboundId: 'i', status: 'online' };
 let fail = false;
-const stateAPI = { inboundStates: async () => { if (fail) throw new Error('read failed'); return { items: [{ inboundId: 'i', state: 'unpublished' }] }; } };
+const stateAPI = { inboundStatesBatch: async () => { if (fail) throw new Error('read failed'); return { items: [{ nodeId: 's', items: [{ inboundId: 'i', state: 'unpublished' }] }] }; } };
 const state = new Function('ref', 'document', 'displayMode', 'pagedNodes', 'filteredNodes', 'deploymentAPI', 'revisionResult', 'showToast', compiledState + '\nreturn { loadServerPublishStates, inboundState, inboundBadge, notRunning, inboundStatusUnknown };')(
   value => ({ value }), { hidden: false }, { value: 'list' }, { value: [item] }, { value: [item] }, stateAPI, value => value, () => {});
 assert.equal(state.inboundBadge(item), undefined, 'not-yet-loaded inbound has no unknown badge');
@@ -53,7 +53,7 @@ await state.loadServerPublishStates();
 assert.equal(state.inboundBadge(item).label, '未生效');
 assert.match(list, /serverStatus\(srv,\s*now\.value\)/, 'proxy list shares heartbeat expiry with server list');
 const refresh = list.match(/async function refreshServersOnNodeStatus\(\)[\s\S]*?\n}/)?.[0] || '';
-assert.match(refresh, /nodeAPI\.list/);
+assert.match(refresh, /nodeAPI\.choices/);
 assert.match(list, /throttleTrailing\([\s\S]*refreshServersOnNodeStatus/);
 console.log('PASS inbound read failure retention, recovery, shared status and server refresh');
 
@@ -72,7 +72,7 @@ const refreshErrors = [];
 let refreshFail = false, reads = 0;
 const refreshState = new Function('document', 'choices', 'nodeAPI', 'servers', 'showToast', ts.transpileModule('let serverRefreshGeneration = 0;\n' + refresh + '\nreturn refreshServersOnNodeStatus;', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(
   { hidden: false }, async fetch => (await fetch(1, 100)).items,
-  { list: async () => { reads++; if (refreshFail) throw new Error('servers failed'); return { items: [{ id: 'new' }] }; } }, servers, error => refreshErrors.push(error));
+  { choices: async () => { reads++; if (refreshFail) throw new Error('servers failed'); return { items: [{ id: 'new' }] }; } }, servers, error => refreshErrors.push(error));
 await refreshState();
 assert.equal(reads, 1);
 assert.deepEqual(servers.value, [{ id: 'new' }]);
@@ -89,7 +89,7 @@ let snapshot = [{ id: 's', status: 'online' }];
 const interleavedServers = { value: [] };
 const interleaved = new Function('loading', 'proxyNodeStore', 'choices', 'nodeAPI', 'proxyAPI', 'servers', 'serverInbounds', 'loadNodeRelays', 'canvasAPI', 'isOwner', 'loadCanvasSchemes', 'showToast', 'document', ts.transpileModule('let serverRefreshGeneration = 0;\n' + loadData + '\n' + refresh + '\nreturn { loadData, refreshServersOnNodeStatus };', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(
   { value: false }, {}, async fetch => (await fetch()).items,
-  { list: async () => ({ items: snapshot }) }, { inbounds: () => new Promise(resolve => pendingInbounds.push(resolve)) },
+  { choices: async () => ({ items: snapshot }) }, { inbounds: () => new Promise(resolve => pendingInbounds.push(resolve)) },
   interleavedServers, { value: [] }, () => {}, { list: async () => ({ items: [] }) }, { value: false }, async () => {}, error => { throw new Error(error); }, { hidden: false });
 const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 const initialLoad = interleaved.loadData();

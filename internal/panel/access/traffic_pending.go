@@ -48,6 +48,9 @@ func (r *Repository) SavePendingTraffic(ctx context.Context, batch traffic.Batch
 		return err
 	}
 	defer tx.Rollback()
+	if err := checkTrafficDeliveryTx(ctx, tx, batch.NodeID, batch.Delivery); err != nil {
+		return err
+	}
 	var stored string
 	err = tx.QueryRowContext(ctx, "SELECT digest FROM traffic_pending_batches WHERE node_id=? AND batch_id=?", batch.NodeID, batch.ID).Scan(&stored)
 	if err == nil {
@@ -66,7 +69,7 @@ func (r *Repository) SavePendingTraffic(ctx context.Context, batch traffic.Batch
 	if count >= 10000 || size+int64(len(sealed)) > 64<<20 {
 		return errors.New("pending traffic journal capacity reached; retain node batch")
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO traffic_pending_batches(node_id,batch_id,digest,encrypted_batch,created_at) VALUES(?,?,?,?,?)", batch.NodeID, batch.ID, digest, sealed, timestamp(now)); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO traffic_pending_batches(node_id,batch_id,digest,encrypted_batch,created_at,queue_id,delivery_seq) VALUES(?,?,?,?,?,?,?)", batch.NodeID, batch.ID, digest, sealed, timestamp(now), batch.Delivery.QueueID, batch.Delivery.Sequence); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -142,6 +145,9 @@ func (r *Repository) CompletePendingTraffic(ctx context.Context, batch traffic.B
 		if count, err := deleted.RowsAffected(); err != nil || count != 1 {
 			return ErrReceiptMaterial
 		}
+	}
+	if err := advanceTrafficCompletionTx(ctx, tx, batch.NodeID, batch.Delivery.QueueID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -237,6 +243,9 @@ func (s *Service) ResumePendingTraffic(ctx context.Context, now time.Time) error
 			return errors.Join(failures, err)
 		}
 		batch, decodeErr := decodePendingTraffic(s.Repository.Vault, key.node, key.batch, key.digest, sealed)
+		if decodeErr == nil {
+			decodeErr = s.Repository.Database.QueryRowContext(ctx, "SELECT queue_id,delivery_seq FROM traffic_pending_batches WHERE node_id=? AND batch_id=?", key.node, key.batch).Scan(&batch.Delivery.QueueID, &batch.Delivery.Sequence)
+		}
 		code := "material_invalid"
 		if decodeErr == nil {
 			code = "accounting_pending"

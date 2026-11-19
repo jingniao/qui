@@ -269,7 +269,10 @@ export interface StoredRuleTemplate {
   updatedBy: string;
 }
 
+export interface ClientPolicyCard { mode: string; mixedPort: number; groupCount: number; enabledRuleCount: number; }
+
 export interface ClientPolicySummary {
+  card: ClientPolicyCard;
   id: string;
   name: string;
   description: string;

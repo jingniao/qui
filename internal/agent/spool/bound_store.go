@@ -48,7 +48,7 @@ func storeLock(path string) *sync.Mutex {
 
 // The witness is outside the queue directory, under the node identity. Losing
 // or replacing only the queue cannot silently construct a fresh budget ledger.
-func OpenBound(ctx context.Context, directory, nodeID string, limit int64, witnessPath string, expected []desiredstate.User) (*Spool, error) {
+func openBound(ctx context.Context, directory, nodeID string, limit int64, witnessPath string, expected []desiredstate.User) (*Spool, error) {
 	directory, dirErr := filepath.Abs(directory)
 	if dirErr != nil {
 		return nil, dirErr
@@ -190,7 +190,7 @@ func (s *Spool) decodeHead(payload []byte) (storeHead, error) {
 		return head, ErrStoreIntegrity
 	}
 	identifier, err := base64.RawURLEncoding.DecodeString(head.StoreID)
-	if decoder.Decode(&struct{}{}) != io.EOF || head.Version != 1 || head.NodeID != s.nodeID || err != nil || len(identifier) != 32 || head.Generation > math.MaxInt64 || len(head.Digest) != 64 || !filepath.IsAbs(head.Witness) {
+	if decoder.Decode(&struct{}{}) != io.EOF || (head.Version != 1 && head.Version != 2) || head.NodeID != s.nodeID || err != nil || len(identifier) != 32 || head.Generation > math.MaxInt64 || len(head.Digest) != 64 || !filepath.IsAbs(head.Witness) {
 		return head, ErrStoreIntegrity
 	}
 	if _, err := hex.DecodeString(head.Digest); err != nil {
@@ -229,7 +229,7 @@ func (s *Spool) verifyBound(ctx context.Context, tx *sql.Tx) error {
 	if err != nil || witness != head {
 		return ErrStoreIntegrity
 	}
-	digest, budgeted, err := criticalDigest(ctx, tx)
+	digest, budgeted, err := criticalDigestVersion(ctx, tx, head.Version)
 	if err != nil || digest != head.Digest || budgeted && !head.Budgeted {
 		return ErrStoreIntegrity
 	}
@@ -358,7 +358,7 @@ func (s *Spool) commitAccounting(ctx context.Context, tx *sql.Tx) error {
 	if s.bound == nil {
 		return tx.Commit()
 	}
-	digest, budgeted, err := criticalDigest(ctx, tx)
+	digest, budgeted, err := criticalDigestVersion(ctx, tx, s.bound.head.Version)
 	if err != nil {
 		return err
 	}

@@ -223,7 +223,7 @@ func Ensure(directory, nodeID string, current agentstorage.Contract) (agentstora
 }
 
 func ActivateSuccessReceiptFormat(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
-	return activateStorageFormats(directory, nodeID, reader, 2, 0)
+	return activateStorageFormats(directory, nodeID, reader, 2, 0, 0)
 }
 
 // ActivateCoreAccountingFormat is one-way activation of the durable core-run
@@ -231,15 +231,15 @@ func ActivateSuccessReceiptFormat(directory, nodeID string, reader agentstorage.
 // image must be able to read what the new process writes; otherwise the raise is
 // refused and no marker is written over an older, unreadable format.
 func ActivateCoreAccountingFormat(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
-	return activateStorageFormats(directory, nodeID, reader, 0, agentstorage.CoreAccountingFormat)
+	return activateStorageFormats(directory, nodeID, reader, 0, agentstorage.CoreAccountingFormat, 0)
 }
-func activateStorageFormats(directory, nodeID string, reader agentstorage.Contract, configuration, coreAccounting int) (agentstorage.Contract, error) {
-	connections := configuration == 0 && coreAccounting == 0
+func activateStorageFormats(directory, nodeID string, reader agentstorage.Contract, configuration, coreAccounting, spoolFormat int) (agentstorage.Contract, error) {
+	connections := configuration == 0 && coreAccounting == 0 && spoolFormat == 0
 	required, present, err := Check(directory, nodeID, reader)
-	if err != nil || !present || (connections && !agentstorage.SupportsConnectionFormats(reader)) || (configuration > 0 && reader.Formats.Configuration.ReadMax < configuration) || (coreAccounting > 0 && reader.Formats.CoreAccounting.ReadMax < coreAccounting) {
+	if err != nil || !present || (connections && !agentstorage.SupportsConnectionFormats(reader)) || (configuration > 0 && reader.Formats.Configuration.ReadMax < configuration) || (coreAccounting > 0 && reader.Formats.CoreAccounting.ReadMax < coreAccounting) || (spoolFormat > 0 && reader.Formats.Spool.ReadMax < spoolFormat) {
 		return agentstorage.Contract{}, ErrStorage
 	}
-	if connections && required.Formats.DesiredState.Write >= 2 && required.Formats.Spool.Write >= 5 || configuration > 0 && required.Formats.Configuration.Write >= configuration || coreAccounting > 0 && required.Formats.CoreAccounting.Write >= coreAccounting {
+	if connections && required.Formats.DesiredState.Write >= 2 && required.Formats.Spool.Write >= 5 || configuration > 0 && required.Formats.Configuration.Write >= configuration || coreAccounting > 0 && required.Formats.CoreAccounting.Write >= coreAccounting || spoolFormat > 0 && required.Formats.Spool.Write >= spoolFormat {
 		return required, nil
 	}
 	next, err := agentstorage.WithRequiredWriter(reader, required)
@@ -249,12 +249,14 @@ func activateStorageFormats(directory, nodeID string, reader agentstorage.Contra
 	if configuration > 0 {
 		next.Formats.Configuration.Write = configuration
 		if configuration >= 4 {
-			next.Formats.Spool.Write = 6
+			next.Formats.Spool.Write = max(next.Formats.Spool.Write, 6)
 		}
 		if configuration >= 3 {
 			next.Formats.DesiredState.Write = 3
 			next.Formats.ReleaseHold.Write = 3
 		}
+	} else if spoolFormat > 0 {
+		next.Formats.Spool.Write = spoolFormat
 	} else if coreAccounting > 0 {
 		next.Formats.CoreAccounting.Write = coreAccounting
 	} else {
@@ -329,5 +331,10 @@ func activateStorageFormats(directory, nodeID string, reader agentstorage.Contra
 // ActivateCoreInventoryFormats includes authenticated membership overlays and
 // per-core node aggregate counters, unreadable by checkpoint-only readers.
 func ActivateCoreInventoryFormats(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
-	return activateStorageFormats(directory, nodeID, reader, 4, 0)
+	return activateStorageFormats(directory, nodeID, reader, 4, 0, 0)
+}
+
+// ActivateTrafficDeliveryFormat follows the retained-image compatibility proof.
+func ActivateTrafficDeliveryFormat(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
+	return activateStorageFormats(directory, nodeID, reader, 0, 0, agentstorage.TrafficDeliveryFormat)
 }

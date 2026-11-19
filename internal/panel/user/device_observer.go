@@ -2,7 +2,9 @@ package user
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"proxycontrol/internal/panel/connections"
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -121,33 +123,63 @@ func (o *DeviceObserver) Reset(ctx context.Context, userID string) {
 	}
 	o.Changed()
 }
+
+type deviceViewNode struct {
+	node        node.Node
+	state       desiredstate.State
+	credentials map[string]string
+}
+
+// Views shares published configuration decoding only within this request.
+func (o *DeviceObserver) Views(ctx context.Context, users []User) ([]DevicesOnline, error) {
+	nodes := []deviceViewNode{}
+	if o != nil && len(users) > 0 {
+		for page := 1; ; page++ {
+			batch, total, err := o.Nodes.Choices(ctx, "", page, 200)
+			if err != nil {
+				return nil, err
+			}
+			for _, n := range batch {
+				state, err := o.States.Published(ctx, n.ID)
+				if errors.Is(err, sql.ErrNoRows) {
+					continue
+				}
+				if err != nil {
+					return nil, err
+				}
+				nodes = append(nodes, deviceViewNode{n, state, entryCredentials(state)})
+			}
+			if page*200 >= total {
+				break
+			}
+		}
+	}
+	views := make([]DevicesOnline, len(users))
+	for i, u := range users {
+		views[i] = o.viewPrepared(u, nodes)
+	}
+	return views, nil
+}
+
 func (o *DeviceObserver) View(ctx context.Context, u User) (DevicesOnline, error) {
+	views, err := o.Views(ctx, []User{u})
+	if err != nil {
+		return DevicesOnline{}, err
+	}
+	return views[0], nil
+}
+
+func (o *DeviceObserver) viewPrepared(u User, nodes []deviceViewNode) DevicesOnline {
 	v := DevicesOnline{Items: []connections.DeviceView{}, DeviceLimit: u.DeviceLimit, UnsupportedNodes: []string{}, UDPUnsupported: []string{}}
 	if o == nil {
-		return v, nil
+		return v
 	}
 	v.Items, _, v.OnlineDevices = o.Admission.State(u.ID, u.DeviceLimit)
-	nodes := []node.Node{}
-	var err error
-	for page := 1; ; page++ {
-		batch, total, e := o.Nodes.List(ctx, "", page, 200, false)
-		if e != nil {
-			err = e
-			break
-		}
-		nodes = append(nodes, batch...)
-		if len(nodes) >= total {
-			break
-		}
-	}
-	if err != nil {
-		return v, err
-	}
-	for _, n := range nodes {
-		state, e := o.States.Published(ctx, n.ID)
+	for _, prepared := range nodes {
+		n, state, credentials := prepared.node, prepared.state, prepared.credentials
 		holds := false
-		if e == nil {
-			for _, uid := range entryCredentials(state) {
+		if len(credentials) > 0 {
+			for _, uid := range credentials {
 				if uid == u.ID {
 					holds = true
 					break
@@ -165,7 +197,7 @@ func (o *DeviceObserver) View(ctx context.Context, u User) (DevicesOnline, error
 			}
 			serves := false
 			for _, cid := range in.CredentialIDs {
-				if entryCredentials(state)[cid] == u.ID {
+				if credentials[cid] == u.ID {
 					serves = true
 				}
 			}
@@ -191,10 +223,11 @@ func (o *DeviceObserver) View(ctx context.Context, u User) (DevicesOnline, error
 			v.UnsupportedNodes = append(v.UnsupportedNodes, n.Name)
 		}
 	}
+
 	sort.Strings(v.UnsupportedNodes)
 	sort.Strings(v.UDPUnsupported)
 	v.Enforced = len(v.UnsupportedNodes) == 0
-	return v, nil
+	return v
 }
 func (o *DeviceObserver) Command(ctx context.Context, nodeID string) (*pb.DeviceGateCommand, error) {
 	state, err := o.States.Published(ctx, nodeID)

@@ -21,7 +21,7 @@ const markerName = "agent-supervisor.enc"
 const pendingPath = "identity/agent-supervision-init.pending"
 
 func managedPaths() []string {
-	return []string{"identity/" + markerName, "identity/agent-release-checkpoint.enc", "agent-release-history", "releases/agent-installed", "releases/agent-candidates", "agent-jobs", "identity/agent-jobs-checkpoint.enc"}
+	return []string{"identity/" + markerName, "identity/agent-release-checkpoint.enc", "agent-release-history", "releases/agent-installed", "releases/agent-candidates", "releases/agent-local-candidates", "agent-jobs", "identity/agent-jobs-checkpoint.enc"}
 }
 
 // CleanupInterrupted only removes uncommitted initialization, never completed

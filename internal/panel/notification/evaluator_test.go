@@ -184,7 +184,7 @@ func TestCooldownSuppressesRepeat(t *testing.T) {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
 
-	// 2. 10 minutes later (still offline, but cooldown is 30m) -> suppressed
+	// 2. Still in the same offline episode -> no repeat
 	snap2 := Snapshot{
 		Now: now.Add(10 * time.Minute),
 		Nodes: []NodeSnapshot{
@@ -193,10 +193,10 @@ func TestCooldownSuppressesRepeat(t *testing.T) {
 	}
 	events, states = Evaluate(rules, snap2, states)
 	if len(events) != 0 {
-		t.Fatalf("expected cooldown to suppress repeat alert, got %+v", events)
+		t.Fatalf("expected the active offline episode to suppress repeat alert, got %+v", events)
 	}
 
-	// 3. 31 minutes later -> cooldown expired, repeats alert
+	// 3. The cooldown has expired, but the same offline episode still fires once
 	snap3 := Snapshot{
 		Now: now.Add(31 * time.Minute),
 		Nodes: []NodeSnapshot{
@@ -204,8 +204,8 @@ func TestCooldownSuppressesRepeat(t *testing.T) {
 		},
 	}
 	events, states = Evaluate(rules, snap3, states)
-	if len(events) != 1 || events[0].Resolved {
-		t.Fatalf("expected repeated alert after cooldown expiry, got %+v", events)
+	if len(events) != 0 {
+		t.Fatalf("expected no repeated offline alert after cooldown expiry, got %+v", events)
 	}
 }
 

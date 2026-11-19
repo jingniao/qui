@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"proxycontrol/internal/platform/readtiming"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,12 +112,11 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		logger = slog.Default()
 	}
 	s := &Server{Config: c, Database: database, Logger: logger, health: health.NewServer(), retentionWake: make(chan struct{}, 1), startedAt: time.Now().UTC()}
-	// The read-only pool keeps login, subscriptions and lists responsive while
-	// the single writer connection is busy. A pool that cannot be opened only
-	// costs that isolation, so it never fails startup.
+	// Display routes require a separate read-only pool; a broken pool must not
+	// silently route them back behind the writer.
 	readPool, err := db.OpenReadPool(context.Background(), c.Database, db.ReadPoolConnections)
 	if err != nil {
-		logger.Warn("read-only database pool unavailable; using the writer connection for reads", "error", err)
+		return nil, fmt.Errorf("open read-only database pool: %w", err)
 	} else {
 		s.readPool = readPool
 	}
@@ -157,6 +157,12 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.nodeRepository = nodeRepository
 	s.deployments = deployments
 	s.accessRepository = &access.Repository{Database: database, Vault: configurationVault}
+	// Display-only repositories are never passed to writers, quota reconciliation,
+	// publication snapshot construction, or backup/restore mutations.
+	displayNodes := &node.Repository{Database: s.readPool, Vault: configurationVault, AdviceSources: &serverAdviceSources{db: s.readPool}}
+	displayUsers := &user.Repository{Database: s.readPool, Vault: configurationVault}
+	displayDeployments := &deployment.Repository{Database: s.readPool, Vault: configurationVault}
+	displayAccess := &access.Repository{Database: s.readPool, Vault: configurationVault}
 	eventBus := &events.Bus{}
 	s.eventBus = eventBus
 	notify := func(id string) { eventBus.Publish("node_status", map[string]string{"nodeId": id}) }
@@ -314,10 +320,10 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.certificates.Publish = eventBus.Publish
 	s.certificates.Logger = logger
 	(&certificate.Handler{Service: s.certificates, Auth: authHandler, Actor: func(ctx context.Context) string { return auth.Actor(ctx).Username }}).Register(mux)
-	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository, BaseSettings: systemRepository}).Register(mux)
+	(&access.Handler{Repository: s.accessRepository, Auth: authHandler, Service: s.trafficService, Audit: systemRepository, BaseSettings: systemRepository}).Register(mux, &access.Handler{Repository: displayAccess, Auth: authHandler, BaseSettings: systemRepository})
 	nodeHandler := &node.Handler{Repository: nodeRepository, Audit: systemRepository, Auth: authHandler, Notify: notify, Authority: authority, Tasks: deployments, Disconnect: control.Disconnect, Certificates: s.certificates}
 	nodeHandler.Install = s.installInfo
-	nodeHandler.Register(mux)
+	nodeHandler.Register(mux, &node.Handler{Repository: displayNodes, Auth: authHandler})
 	nodeHandler.RegisterGroups(mux)
 	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates}, Nodes: nodeRepository, EntryGroups: nodeRepository}
 	proxyService.RelayCleanupRequested = s.relayCleanup.Reconcile
@@ -341,7 +347,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		},
 	}
 	proxyService.Policies = policyService
-	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: database, Connections: s.connectionStore}, Nodes: nodeRepository, Deployments: deployments, Proxies: proxyService.Repository, Settings: systemRepository}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
+	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: s.readPool, Connections: s.connectionStore}, Nodes: displayNodes, Deployments: displayDeployments, Proxies: &proxy.Repository{Database: s.readPool, Vault: configurationVault}, Settings: systemRepository}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
 	s.sourceRefresher = &policy.SourceRefresher{Repository: policyService.Repository, Fetcher: importer.Fetcher{Timeout: 15 * time.Second}, Vault: configurationVault}
 	(&policy.Handler{Service: policyService, Refresher: s.sourceRefresher, Auth: authHandler, Audit: systemRepository}).Register(mux)
@@ -389,7 +395,10 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// reports it applied.
 	deployments.Applied = s.quotaDeployer.reconcileNode
 	userHandler := &user.Handler{Repository: users, Auth: authHandler, Audit: systemRepository, Nodes: nodeRepository, QuotaChanged: s.quotaDeployer.evaluateUser, ExpiryRenewed: s.quotaDeployer.renewExpiry, AccessRemoved: s.quotaDeployer.accessRemoved, AccessChanged: s.quotaDeployer.accessChanged, Observations: s.connectionObserver, Devices: devices}
-	userHandler.Register(mux)
+	userHandler.Register(mux, &user.Handler{Repository: displayUsers, Auth: authHandler,
+		Observations: &user.ConnectionObserver{Repository: displayUsers, Nodes: displayNodes, Store: s.connectionStore},
+		Devices:      &user.DeviceObserver{Repository: displayUsers, Nodes: displayNodes, States: displayDeployments, Store: s.connectionStore, Admission: devices.Admission},
+	})
 	// A saved or deleted node group changes which inbounds its granted users
 	// may reach, so their credentials follow through the same scheduler.
 	nodeHandler.GroupAccessChanged = s.quotaDeployer.groupAccessChanged
@@ -462,7 +471,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		}
 		return endpoint.Host, endpoint.HTTPPort
 	}}).Register(mux)
-	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux)
+	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux, &deployment.Handler{Repository: displayDeployments, Auth: authHandler})
 	notificationRepo := &notification.Repository{Database: database, Vault: configurationVault}
 	s.notificationWorker = &notification.Worker{
 		Repository: notificationRepo,
@@ -509,7 +518,17 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		}
 		return system.DefaultAdminEntry
 	}))
-	s.HTTP = &http.Server{Addr: c.HTTPAddress, Handler: s.admission.wrap(securityHeaders(mux, !c.Development)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	var handler http.Handler = mux
+	if value, set := os.LookupEnv("QUI_READ_TIMING"); set {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, fmt.Errorf("QUI_READ_TIMING: %w", err)
+		}
+		if enabled {
+			handler = readtiming.Middleware(handler, logger)
+		}
+	}
+	s.HTTP = &http.Server{Addr: c.HTTPAddress, Handler: s.admission.wrap(securityHeaders(handler, !c.Development)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	if !c.Development {
 		s.HTTP.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13}
 		if existing {
@@ -653,9 +672,14 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 		for {
 			cleanup, cancel := context.WithTimeout(background, 10*time.Second)
 			pending, err := s.accessRepository.AdvanceRetention(cleanup, time.Now().UTC())
+			if err == nil {
+				var more bool
+				more, err = s.accessRepository.AdvanceTrafficStorage(cleanup, time.Now().UTC())
+				pending = pending || more
+			}
 			cancel()
 			if err != nil && background.Err() == nil {
-				s.Logger.Error("access retention cleanup failed")
+				s.Logger.Error("access and traffic storage cleanup failed", "error", err)
 			}
 			var spaceErr error
 			if err == nil && !pending && background.Err() == nil {

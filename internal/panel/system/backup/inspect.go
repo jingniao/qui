@@ -607,6 +607,9 @@ func validateContents(ctx context.Context, work string) error {
 		return ErrArchive
 	}
 
+	if err := access.ValidateTrafficStorage(ctx, database); err != nil {
+		return ErrArchive
+	}
 	if err := access.ValidateTrafficAccountingCompletion(ctx, database); err != nil {
 		return ErrArchive
 	}

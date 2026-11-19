@@ -119,7 +119,7 @@ func (p *publishPanel) session(role string) (*http.Cookie, string) {
 func (p *publishPanel) publish(nodeID, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 	p.t.Helper()
 	mux := http.NewServeMux()
-	p.handler.Register(mux)
+	p.handler.Register(mux, p.handler)
 	request := httptest.NewRequest("POST", "/api/v1/nodes/"+nodeID+"/publish", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	if cookie != nil {

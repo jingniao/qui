@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/platform/readtiming"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -148,20 +150,32 @@ func (r *Repository) InboundIntent(ctx context.Context, id int64) ([]string, err
 }
 
 func (r *Repository) State(ctx context.Context, id int64) (desiredstate.State, error) {
-	var sealed []byte
-	if err := r.Database.QueryRowContext(ctx, "SELECT encrypted_state FROM config_revisions WHERE id=?", id).Scan(&sealed); err != nil {
-		return desiredstate.State{}, err
-	}
-	data, err := r.Vault.Open(sealed)
+	tx, err := db.BeginRead(ctx, r.Database)
 	if err != nil {
 		return desiredstate.State{}, err
 	}
+	var sealed []byte
+	err = tx.QueryRowContext(ctx, "SELECT encrypted_state FROM config_revisions WHERE id=?", id).Scan(&sealed)
+	tx.Close()
+	if err != nil {
+		return desiredstate.State{}, err
+	}
+	done := readtiming.Start(ctx, "config_decrypt")
+	data, err := r.Vault.Open(sealed)
+	done()
+	if err != nil {
+		return desiredstate.State{}, err
+	}
+	defer readtiming.Start(ctx, "config_decode")()
 	return desiredstate.Decode(data)
 }
 
 func (r *Repository) Published(ctx context.Context, nodeID string) (desiredstate.State, error) {
-	state, _, err := r.PublishedWithIntent(ctx, nodeID)
-	return state, err
+	var revision int64
+	if err := r.Database.QueryRowContext(ctx, "SELECT revision FROM node_runtime_state WHERE node_id=?", nodeID).Scan(&revision); err != nil {
+		return desiredstate.State{}, err
+	}
+	return r.State(ctx, revision)
 }
 
 // PublishedWithIntent is Published plus the inbound intent recorded with the

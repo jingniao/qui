@@ -299,7 +299,7 @@ qui-update --version 1.0.9 --bundle proxy-control-1.3.1-linux-amd64.tar.gz --sum
                             # 离线：用本地归档与其 SHA256SUMS，不访问 GitHub
 ```
 
-- 它从 `https://github.com/jingniao/qui/releases` 下载 `proxy-control-<版本>-linux-<架构>.tar.gz` 和同一发布的 `SHA256SUMS`，按文件名核对归档的 SHA-256 后才解包，然后调用归档里的 `deploy/linux/install.sh` 原地替换程序、systemd 单元和脚本（`qui`、`qui-update`）；配置、节点身份与数据库都不动。**摘要只证明下载内容与仓库发布一致，信任仍建立在 GitHub 仓库本身**：它不下载也不执行别的东西。
+- 它从 `https://github.com/jingniao/qui/releases` 下载 `proxy-control-<版本>-linux-<架构>.tar.gz` 和同一发布的 `SHA256SUMS`，按文件名核对归档的 SHA-256 后才解包，然后调用归档里的 `deploy/linux/install.sh` 原地替换程序、systemd 单元和脚本（`qui`、`qui-update`）；配置、节点身份与数据库都不动。**摘要只证明下载内容与仓库发布一致，信任仍建立在 GitHub 仓库本身**。本地受管升级功能还会取得官方 Agent 签名清单，独立验证实际 Agent，见下文「受管 Agent 的终端升级」。
 - 版本只接受 `X.Y.Z` 或 `X.Y.Z-rc.N`（三个版本段均无前导零，N 为无前导零的正整数），拒绝其他预发布标签与 build metadata。显式 `--version 1.2.0-rc.1` 在线下载使用标签 `v1.2.0-rc.1`，资产名为 `proxy-control-1.2.0-rc.1-linux-<架构>.tar.gz`；离线使用同名归档与配套 `SHA256SUMS`，摘要校验不变。未指定版本仍取 GitHub 最新正式发布，不自动选择 RC：`vX.Y.Z-rc.N` 标签由发布任务标为 GitHub 预发布（pre-release），`releases/latest` 不会返回它。
 - 面板更新：先停止 `proxy-panel.service`，在停止状态下把数据库（以及存在的 `-wal`）复制到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<YYYYmmdd-HHMMSS>.db`（属主 `proxy-panel`、0600），再替换程序，最后按停止前的状态启动服务并打印状态。
 - 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，不指定组件仍从同一个归档更新两个组件，**先节点后面板**（保持历史行为）。指定 `--component panel` 或 `--component agent` 只更新该组件，未安装则报错；v1.1 必须先 `--component panel`，验收后再 `--component agent`。
@@ -382,7 +382,29 @@ systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent st
 
 `qui-update` 在 OpenRC 节点上同样可用：它通过 `/usr/local/lib/proxycontrol/service.sh` 停止和启动 `proxy-agent`，健康检查读取 supervise-daemon 记录的子进程 PID（`/run/openrc/options/proxy-agent/child_pid`）。
 
-节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 多核心安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；Agent 自身升级要走面板的 Agent 更新任务（服务器 → Agent 管理），它按签名清单校验，并在失败时回滚。
+节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 多核心安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；实际 Agent 可通过面板更新任务（服务器 → Agent 管理）切换。开发中的终端受管升级也复用同一安装事务，具体见下文；正式版 v1.6.1 的终端命令仍只更新引导程序。
+
+### 受管 Agent 的终端升级（开发中，尚未发布）
+
+本功能随含新本地入口的后续版本发布后生效，适用于 systemd 与 Alpine/OpenRC。开启网页升级后，两种入口同时可用：网页更新实际 Agent；`qui` 更新菜单或 `qui-update --component agent` 更新引导程序并更新实际 Agent，终端无需面板管理员凭据，也不依赖面板下载目录在线。
+
+已有安装首次迁移需要两次命令：先运行机器上原有的 `qui-update --component agent --version X.Y.Z` 装好新引导程序和脚本，再重复同一命令更新实际 Agent。`X.Y.Z` 要替换为包含本功能的后续正式版本，不能填写 v1.6.1。此后每次终端升级一次即可。直接从新归档运行新更新器时，旧引导程序缺少状态入口会明确拒绝，须先走上述迁移步骤。
+
+终端在停止服务前验证签名信任、组件、平台、版本、大小、SHA256 和存储兼容性。实际 Agent 通过数据目录内 `agent-local.sock`（0600，仅服务账号和 root 可访问）请求唯一监督进程，继续使用原加密任务日志、生命周期锁、健康检查与失败回滚。网页任务与终端实际安装在同一监督进程中串行执行；已有任务、恢复未完成或服务停止时拒绝更新。修订为 0 时须先在面板发布基础配置。
+
+引导重启前也会在监督进程中取得任务日志的排他保留，暂停其轮询，避免预检之后被另一个更新插入。该保留随服务停止或终端子进程管道关闭释放，终端异常退出不会留下持久占用。本地原任务中断后若需要恢复，重跑原目标版本的命令会先绑定原任务完成恢复，再继续升级；其他任务和网页来源的恢复仍明确拒绝覆盖。已经恢复成功的历史失败不会继续阻挡终端升级。
+
+引导程序与实际 Agent 分两个阶段提交。第二阶段失败时，更新器非零退出并保留原始错误；已更新的引导程序保留，实际 Agent 按受管日志恢复原镜像。中断后先检查服务，再重跑同版本命令；不能仅凭引导程序已经是目标版本判断升级完成。目标低于引导程序或实际 Agent 的任一个版本时拒绝降级。`qui` 分别显示引导和实际运行版本；服务停止时只显示受管安装版本。
+
+受管节点离线更新须额外提供配套签名清单，候选程序取自本地归档。将下列 `X.Y.Z` 换为包含此功能的目标正式版本：
+
+```sh
+qui-update --component agent --version X.Y.Z \
+  --bundle proxy-control-X.Y.Z-linux-amd64.tar.gz --sums SHA256SUMS \
+  --agent-manifest proxy-agent-X.Y.Z-linux-amd64.manifest.json
+```
+
+清单缺失或与归档不匹配时在停止前失败，全程不联网补取。已认证的本地候选保存在 `releases/agent-local-candidates/`，`local-` 任务中断续做只读取该缓存；缓存损坏或缺失会明确报错，保留任务结果和安装记录。普通非受管节点沿用现有 `--bundle` / `--sums` 行为。
 
 **发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
 

@@ -9,7 +9,7 @@ const detail = read('nodes/pages/NodeDetailPage.vue');
 const heartbeat = detail.match(/function nodeStatusChanged\(event: Event\) \{([\s\S]*?)\n\}/)[1];
 assert.doesNotMatch(heartbeat, /\bload\(/, 'heartbeat must not reload supplements');
 assert.match(heartbeat, /refreshNode/);
-assert.ok(detail.indexOf('node.value = server;', detail.indexOf('async function load()')) < detail.indexOf('const [groupResult'), 'render node before optional reads');
+assert.ok(detail.indexOf('node.value = server;', detail.indexOf('async function load()')) < detail.indexOf('void loadSupplements();', detail.indexOf('async function load()')), 'render node before optional reads');
 const refreshSource = detail.slice(detail.indexOf('const nodeRequests ='), detail.indexOf('async function load()'));
 const refreshCode = ts.transpileModule(refreshSource + '\nreturn { refreshNode, visibilityChanged, mount: () => mounted = true, unmount: () => mounted = false };', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 let calls = 0, resolveRead, supplementCalls = 0;

@@ -27,16 +27,24 @@ const coreSelectionQuery = `SELECT t.node_id,t.component FROM core_update_tasks 
  UNION SELECT node_id,component FROM core_remove_tasks WHERE status IN ('queued','running')`
 
 func (r *Repository) decorateCoreSelection(ctx context.Context, nodes []Node) error {
-	byID := map[string]*Node{}
-	for i := range nodes {
-		nodes[i].CoreSelectionBlocked = []string{}
-		byID[nodes[i].ID] = &nodes[i]
-	}
 	rows, err := r.Database.QueryContext(ctx, coreSelectionQuery)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
+	return decorateCoreSelectionRows(rows, nodes)
+}
+
+func decorateCoreSelectionRows(rows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}, nodes []Node) error {
+	byID := map[string]*Node{}
+	for i := range nodes {
+		nodes[i].CoreSelectionBlocked = []string{}
+		byID[nodes[i].ID] = &nodes[i]
+	}
 	for rows.Next() {
 		var id, core string
 		if err := rows.Scan(&id, &core); err != nil {

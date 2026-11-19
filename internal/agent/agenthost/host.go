@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/agent/configuration"
+	"runtime"
 	"time"
 
 	"proxycontrol/internal/agent/agentjobs"
@@ -135,6 +136,13 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 			return err
 		}
 	}
+	if !controlOnly {
+		if err := raiseTrafficDeliveryFormat(ctx, c.DataDirectory, node.NodeID, agentstorage.Current(version), required, history, images, r.Baseline, jobsIdle); err != nil {
+			logger.Info("traffic receipt retirement not activated; retained rollback images or pending jobs require the previous spool format", "error", err)
+		} else if required, _, err = storage.Check(c.DataDirectory, node.NodeID, agentstorage.Current(version)); err != nil {
+			return err
+		}
+	}
 	if err := workerOwner.Close(); err != nil {
 		return err
 	}
@@ -196,6 +204,7 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 		return ErrState
 	}
 	runner := &jobRunner{ctx: ctx, configPath: configPath, directory: c.DataDirectory, nodeID: node.NodeID, key: key, required: required, reader: agentstorage.Current(version), history: history, process: process}
+	defer func() { resultErr = errors.Join(resultErr, runner.releaseBootstrap()) }()
 	startupCleanup = false
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -205,6 +214,16 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 		}
 	}()
 	logger.Info("supervised Agent runtime started", "agent_version", state.Current.Version, "degraded", process.Degraded())
+	var localRequests <-chan localCall
+	var localFailures <-chan error
+	if runtime.GOOS == "linux" {
+		endpoint, err := listenLocal(ctx, c.DataDirectory)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, endpoint.close()) }()
+		localRequests, localFailures = endpoint.requests, endpoint.failures
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	lastJobError := ""
@@ -212,13 +231,30 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger) (
 		select {
 		case <-ctx.Done():
 			return nil
+		case err := <-localFailures:
+			return fmt.Errorf("local Agent endpoint failed: %w", err)
+		case call := <-localRequests:
+			status, err := runner.handleLocal(call.request, call.lease)
+			response := localResponse{Status: status}
+			if err != nil {
+				response.Error = err.Error()
+				logger.Error("local Agent operation failed", "operation", call.request.Operation, "error", err)
+			}
+			call.answer <- response
+			if runner.process == nil {
+				return errors.New("local Agent update left no confirmed runtime")
+			}
+		case <-runner.bootstrapDone:
+			if err := runner.releaseBootstrap(); err != nil {
+				return err
+			}
 		case <-runner.process.Done():
 			if ctx.Err() != nil {
 				return nil
 			}
 			return errors.Join(fmt.Errorf("supervised Agent runtime exited unexpectedly"), runner.process.Wait())
 		case <-ticker.C:
-			if r.Jobs {
+			if r.Jobs && runner.bootstrapStore == nil {
 				if err := runner.poll(); err != nil {
 					if ctx.Err() != nil {
 						return nil

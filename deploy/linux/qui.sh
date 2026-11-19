@@ -265,16 +265,43 @@ update_panel() {
   "$updater"
 }
 
+print_agent_versions() {
+  local agent_program=/usr/local/bin/proxy-agent output='' magic='' state='' version='' ready='' extra=''
+  local options=(--local-agent-status)
+  printf 'Agent 引导程序：'
+  if ! "$agent_program" --version; then
+    printf '无法读取引导程序版本。\n' >&2
+    return
+  fi
+  if ! service_is_active proxy-agent; then options+=(--local-agent-stopped); fi
+  if ! output=$(runuser -u proxy-agent -- "$agent_program" --config /etc/proxy-agent/config.yaml "${options[@]}"); then
+    printf '实际 Agent 版本读取失败；旧安装须先更新引导程序。\n' >&2
+    return
+  fi
+  read -r magic state version ready extra <<< "$output"
+  if [[ $magic != proxy-agent-local-v1 || -n $extra ]]; then
+    printf '实际 Agent 状态格式不匹配：%s\n' "$output" >&2
+    return
+  fi
+  case $state in
+    running) printf '实际运行的 Agent：%s\n' "$version";;
+    installed) printf '受管 Agent 安装版本：%s（服务未运行）\n' "$version";;
+    unmanaged) printf 'Agent：普通模式，终端更新安装程序。\n';;
+    *) printf '无法识别实际 Agent 状态：%s\n' "$output" >&2;;
+  esac
+}
+
 print_menu() {
   if ! $has_panel; then
     printf 'Agent 服务状态：%s\n' "$(menu_service_state)"
-    "$program" --version
+    print_agent_versions
     printf '\n1. 更新（从 GitHub）\n2. 卸载并清除全部数据\n0. 退出\n\n'
     return
   fi
   printf '\033[1m%s\033[0m\n' '代理控制平台 终端菜单'
   printf '服务状态：%s\n' "$(menu_service_state)"
   printf '当前程序版本：%s\n' "$("$program" --version 2>/dev/null || printf '未知')"
+  if [[ -f /var/lib/proxycontrol-install/agent.manifest ]]; then print_agent_versions; fi
   printf '当前 Web 端口：%s\n' "$(read_value "$config" http_address || printf '未知')"
   printf '\n1. 修改管理员账号密码\n'
   printf '2. 修改端口\n'

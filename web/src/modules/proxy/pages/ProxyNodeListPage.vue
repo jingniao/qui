@@ -1253,7 +1253,7 @@ async function loadData() {
     proxyNodeStore.manualNodes = [];
     proxyNodeStore.subscriptions = [];
     const resources = Promise.all([
-      choices((page, size) => nodeAPI.list(page, '', false, size)),
+      choices((page, size) => nodeAPI.choices(page, '', size)),
       choices((page, size) => proxyAPI.inbounds('', page, size))
     ]).then(([nodeRes, inboundRes]) => {
       if (generation === serverRefreshGeneration) servers.value = nodeRes;
@@ -1729,23 +1729,30 @@ function transportLabel(node: Pick<ProxyNodeItem, 'protocol' | 'settings'>): str
 }
 
 let publishStateGeneration = 0;
+let publishStateReading = false, publishStateAgain = false, publishStateDisposed = false, requestedPublishKey = '', nextPublishKey = '';
 async function loadServerPublishStates() {
-  if (document.hidden) return;
-  const generation = ++publishStateGeneration;
+  if (document.hidden || publishStateDisposed) return;
   const currentNodes = displayMode.value === 'list' ? pagedNodes.value : filteredNodes.value;
   const serverIds = [...new Set(currentNodes.filter(n => n.sourceType === 'self_hosted' && n.sourceId).map(n => n.sourceId!))];
+  nextPublishKey = [...serverIds].sort().join(',');
+  if (publishStateReading) { publishStateAgain = true; return; }
   if (!serverIds.length) return;
+  publishStateReading = true; requestedPublishKey = nextPublishKey;
+  const generation = ++publishStateGeneration;
+  const results: (readonly [string, InboundStateItem[] | string])[] = [];
+  try {
+    // The endpoint validates at most 200 IDs per request.
+    for (let offset = 0; offset < serverIds.length; offset += 200) {
+      const batch = await deploymentAPI.inboundStatesBatch(serverIds.slice(offset, offset + 200));
+      results.push(...batch.items.map(item => [item.nodeId, item.error || item.items] as const));
+    }
+  } catch (e) {
+    results.push(...serverIds.map(id => [id, (e as Error).message] as const));
+  }
 
-  const results = await Promise.all(
-    serverIds.map(async (id) => {
-      try {
-        return [id, (await deploymentAPI.inboundStates(id)).items] as const;
-      } catch (error) {
-        return [id, error instanceof Error ? error.message : String(error)] as const;
-      }
-    })
-  );
-
+  publishStateReading = false;
+  const readAgain = publishStateAgain; publishStateAgain = false;
+  if (requestedPublishKey !== nextPublishKey) { void loadServerPublishStates(); return; }
   if (generation !== publishStateGeneration) return;
   const nextMap = new Map(inboundStateMap.value);
   const errors = new Map(inboundStateErrors.value);
@@ -1760,6 +1767,7 @@ async function loadServerPublishStates() {
   }
   inboundStateMap.value = nextMap;
   inboundStateErrors.value = errors;
+  if (readAgain) void loadServerPublishStates();
 }
 
 watch([pagedNodes, displayMode, servers], () => {
@@ -1771,7 +1779,7 @@ async function refreshServersOnNodeStatus() {
   if (document.hidden) return;
   const generation = ++serverRefreshGeneration;
   try {
-    const items = await choices((page, size) => nodeAPI.list(page, '', false, size));
+    const items = await choices((page, size) => nodeAPI.choices(page, '', size));
     if (generation === serverRefreshGeneration) servers.value = items;
   } catch (error) {
     if (generation === serverRefreshGeneration) showToast(`服务器状态读取失败：${(error as Error).message}`, 'error');
@@ -1792,6 +1800,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearInterval(statusClock);
   serverRefreshGeneration++;
+  publishStateDisposed = true;
   publishStateGeneration++;
   document.removeEventListener('visibilitychange', publishVisibilityChanged);
   reloadPublishStatesOnNodeStatus.cancel();

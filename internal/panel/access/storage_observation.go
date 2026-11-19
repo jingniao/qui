@@ -20,6 +20,8 @@ type StorageTableObservation struct {
 }
 
 type StorageObservation struct {
+	TrafficStorage             TrafficStorageProgress    `json:"trafficStorage"`
+	TrafficQueues              []TrafficQueueObservation `json:"trafficQueues"`
 	ObservedAt                 time.Time                 `json:"observedAt"`
 	CountLimit                 int64                     `json:"countLimit"`
 	MainDatabaseAllocatedBytes int64                     `json:"mainDatabaseAllocatedBytes"`
@@ -53,8 +55,10 @@ func (r *Repository) StorageObservation(ctx context.Context) (StorageObservation
 		{"traffic_daily", "domain_days", "long_term"},
 		{"account_traffic_daily", "account_days", "long_term"},
 		{"access_batches", "access_receipts", "replay_protection"},
-		{"traffic_batches", "account_receipts", "replay_protection"},
+		{"traffic_batches", "account_receipts", "confirmed_window"},
 		{"traffic_cursors", "account_cursors", "replay_protection"},
+		{"core_traffic_samples", "core_samples", "seven_days"},
+		{"core_traffic_hourly", "core_hours", "long_term"},
 	} {
 		item := StorageTableObservation{Kind: entry.kind, Retention: entry.retention}
 		// Never accept a table name from input; LIMIT caps the actual row scan.
@@ -120,6 +124,9 @@ func (r *Repository) StorageObservation(ctx context.Context) (StorageObservation
 		default:
 			result.WarningLevel = "ok"
 		}
+	}
+	if err := observeTrafficStorage(ctx, tx, &result); err != nil {
+		return result, err
 	}
 	if err := tx.Commit(); err != nil {
 		return result, err

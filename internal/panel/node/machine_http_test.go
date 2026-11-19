@@ -100,7 +100,7 @@ func newMachineHTTPFixture(t *testing.T) *machineHTTPFixture {
 	repository := &Repository{Database: database, Timezone: func(context.Context, *sql.Tx) (string, error) { return "Asia/Shanghai", nil }}
 	handler := &Handler{Repository: repository, Audit: audit, Auth: &auth.Handler{Service: service, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}}
 	mux := http.NewServeMux()
-	handler.Register(mux)
+	handler.Register(mux, handler)
 	n, _, _, err := repository.CreateEnrollment(context.Background(), "machine", time.Hour)
 	if err != nil {
 		t.Fatal(err)

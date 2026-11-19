@@ -171,6 +171,7 @@ func (p *PreparedRestore) Serve(ctx context.Context) error {
 	defer httpListener.Close()
 	defer grpcListener.Close()
 	defer readonly.Close()
+	defer app.closeReadPool()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -197,6 +198,9 @@ func (p *PreparedRestore) Close() error {
 	}
 	p.consumed = true
 	var err error
+	if p.app != nil {
+		p.app.closeReadPool()
+	}
 	if p.readonly != nil {
 		err = errors.Join(err, p.readonly.Close())
 	}

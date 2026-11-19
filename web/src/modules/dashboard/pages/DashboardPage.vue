@@ -28,9 +28,11 @@
     </PageHeader>
 
     <ErrorState v-if="error" :message="error" @retry="loadAll" />
-    <LoadingSkeleton v-else-if="!dashboard" />
+    <LoadingSkeleton v-if="!dashboard && !nodesReady && !usersReady" />
+    <p v-if="nodesError" role="alert" class="text-sm text-ios-red">{{ nodesError }}</p>
+    <p v-if="usersError" role="alert" class="text-sm text-ios-red">{{ usersError }}</p>
 
-    <template v-else>
+    <template v-if="dashboard || nodesReady || usersReady">
       <!-- ======================================================== -->
       <!-- 模式一：ADMIN (后台总览)                                   -->
       <!-- 严格对齐各模块高度、外缘边界与排版基线                         -->
@@ -39,7 +41,8 @@
           <!-- 1. 运行概况：4 栏核心状态指标卡片 (高度与基线统一对齐) -->
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
             <!-- 节点状态 -->
-            <div class="panel-card p-5 bg-white flex flex-col justify-between h-full">
+            <LoadingSkeleton v-if="!nodesReady" />
+            <div v-else class="panel-card p-5 bg-white flex flex-col justify-between h-full">
               <div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-semibold text-ios-tertiary">节点状态</span>
@@ -71,10 +74,11 @@
             </div>
 
             <!-- 服务器价值 -->
-            <ServerValueCard :nodes="allNodes" :nodes-error="nodesError" />
+            <ServerValueCard v-if="nodesReady" :nodes="allNodes" :nodes-error="nodesError" />
 
             <!-- 有效用户 -->
-            <div class="panel-card p-5 bg-white flex flex-col justify-between h-full">
+            <LoadingSkeleton v-if="!usersReady" />
+            <div v-else class="panel-card p-5 bg-white flex flex-col justify-between h-full">
               <div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-semibold text-ios-tertiary">有效用户</span>
@@ -106,7 +110,8 @@
             </div>
 
             <!-- 今日流量 -->
-            <div class="panel-card p-5 bg-white flex flex-col justify-between h-full">
+            <LoadingSkeleton v-if="!dashboard" />
+            <div v-else class="panel-card p-5 bg-white flex flex-col justify-between h-full">
               <div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-semibold text-ios-tertiary">今日流量</span>
@@ -143,7 +148,7 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
             <div class="min-w-0 flex flex-col">
               <!-- 待处理问题 -->
-              <section class="panel-card p-4 bg-white space-y-3 flex-1 flex flex-col">
+              <section v-if="dashboard && nodesReady && usersReady" class="panel-card p-4 bg-white space-y-3 flex-1 flex flex-col">
                 <div class="flex items-center justify-between">
                   <div>
                     <div class="flex flex-wrap items-center gap-2">
@@ -219,7 +224,7 @@
 
             <!-- 节点流量 -->
             <div class="min-w-0 flex flex-col">
-              <section class="panel-card p-4 bg-white h-full flex flex-col justify-between space-y-3">
+              <section v-if="dashboard && nodesReady" class="panel-card p-4 bg-white h-full flex flex-col justify-between space-y-3">
                 <!-- 头部：标题与时间维度切换 (本月 / 今日) -->
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -263,24 +268,25 @@
                         {{ nodeTrafficPeriod === 'today' ? '今日吞吐总量' : '本月吞吐总量' }}
                       </div>
                       <div class="text-lg sm:text-xl font-bold text-ios-label tabular-nums tracking-normal">
-                        <TrafficValue :bytes="displayTotalBytes" />
+                        <span v-if="nodeTrafficError">—</span><TrafficValue v-else :bytes="displayTotalBytes" />
                       </div>
                     </div>
                     <div class="flex items-center gap-3 text-xs">
                       <div class="text-right">
                         <span class="text-xs text-ios-tertiary block font-medium">↑ 上行</span>
-                        <span class="font-semibold text-ios-label tabular-nums"><TrafficValue :bytes="displayUploadBytes" /></span>
+                        <span class="font-semibold text-ios-label tabular-nums"><span v-if="nodeTrafficError">—</span><TrafficValue v-else :bytes="displayUploadBytes" /></span>
                       </div>
                       <div class="w-px h-6 bg-black/[0.08]"></div>
                       <div class="text-right">
                         <span class="text-xs text-ios-tertiary block font-medium">↓ 下行</span>
-                        <span class="font-semibold text-ios-label tabular-nums"><TrafficValue :bytes="displayDownloadBytes" /></span>
+                        <span class="font-semibold text-ios-label tabular-nums"><span v-if="nodeTrafficError">—</span><TrafficValue v-else :bytes="displayDownloadBytes" /></span>
                       </div>
                     </div>
                   </div>
 
+                  <p v-if="nodeTrafficError" role="status" class="text-sm text-ios-secondary">{{ nodeTrafficError }}</p>
                   <!-- 比例指示条 -->
-                  <div class="space-y-1">
+                  <div v-else class="space-y-1">
                     <div class="w-full bg-black/[0.05] h-2 rounded-full overflow-hidden flex">
                       <template v-if="displayTotalBytes > 0">
                         <div
@@ -317,7 +323,12 @@
                   </div>
 
                   <EmptyState
-                    v-if="allNodes.length === 0"
+                    v-if="nodeTrafficError"
+                    title="本月流量无法精确计算"
+                    :description="nodeTrafficError"
+                  />
+                  <EmptyState
+                    v-else-if="allNodes.length === 0"
                     title="暂无节点"
                     description="尚未添加节点服务器，请前往节点管理配置。"
                   />
@@ -387,7 +398,7 @@
               </section>
             </div>
             <!-- 用户用量与到期 -->
-            <section
+            <section v-if="usersReady"
               :class="[
                 'panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3',
                 isOwner ? '' : 'sm:col-span-2'
@@ -452,7 +463,7 @@
             </section>
 
             <!-- 近期阻断 (仅 Owner 可见；只列被拦截的访问) -->
-            <section v-if="isOwner" class="panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3">
+            <section v-if="isOwner && dashboard" class="panel-card min-w-0 p-4 bg-white h-full flex flex-col justify-between space-y-3">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 class="text-ios-label tracking-normal text-base font-semibold leading-normal">近期阻断</h2>
@@ -518,7 +529,7 @@ import { allPages } from '../../../app/pagination';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { unhealthyCoreLabel } from '../../nodes/coreSummary';
-import { userAPI, type ProxyUser } from '../../users/api';
+import { userAPI, type UserSummary } from '../../users/api';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
 import { authState, isOwner, formatTime } from '../../../app/auth';
 import { panelDateLabel } from '../../../app/time';
@@ -536,7 +547,8 @@ const dashboard = ref<Dashboard | null>(null);
 const live = computed(() => dashboard.value ? liveSummary(dashboard.value.counts) : null);
 const allNodes = ref<NodeView[]>([]);
 const nodesError = ref('');
-const allUsers = ref<ProxyUser[]>([]);
+const nodesReady = ref(false), usersReady = ref(false), usersError = ref('');
+const allUsers = ref<UserSummary[]>([]);
 const allRevisions = ref<Revision[]>([]);
 const loading = ref(false);
 const error = ref('');
@@ -575,7 +587,7 @@ function nodeStatusLabel(node: NodeView): string {
   return isNodeOnline(node) ? '在线' : node.status === 'pending' ? '待登记' : '离线';
 }
 
-function isUserActive(u: ProxyUser): boolean {
+function isUserActive(u: UserSummary): boolean {
   return u.status === 'active' && (!u.expiresAt || Date.parse(u.expiresAt) > Date.now())
     && !(u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit);
 }
@@ -601,6 +613,9 @@ const todayDownload = computed(() => dashboard.value?.counts.todayDownload || 0)
 const todayTrafficTotal = computed(() => todayUpload.value + todayDownload.value);
 
 const nodeTrafficPeriod = ref<'month' | 'today'>('month');
+const nodeTrafficError = computed(() => nodeTrafficPeriod.value === 'month'
+  ? dashboard.value?.nodeTraffic.find(n => n.historyError)?.historyError || ''
+  : '');
 
 const displayUploadBytes = computed(() => {
   if (nodeTrafficPeriod.value === 'today') {
@@ -761,7 +776,7 @@ const pendingIssues = computed<PendingIssue[]>(() => {
 // 3. 用户用量与到期提醒
 // ==========================================
 // 关注顺序：超额 → 已过期 → 7 天内到期 → 其余按用量百分比；禁用账号排最后。
-function userAttentionRank(u: ProxyUser, now: number): number {
+function userAttentionRank(u: UserSummary, now: number): number {
   if (u.status !== 'active') return 4;
   if (u.trafficLimit > 0 && u.usedTraffic >= u.trafficLimit) return 0;
   const expiry = u.expiresAt ? Date.parse(u.expiresAt) : NaN;
@@ -788,7 +803,7 @@ const topAttentionUsers = computed(() => {
   return users.slice(0, 4);
 });
 
-function userUsagePercent(u: ProxyUser): number {
+function userUsagePercent(u: UserSummary): number {
   if (!u.trafficLimit || u.trafficLimit <= 0) return 0;
   return Math.min(100, Math.round((u.usedTraffic / u.trafficLimit) * 100));
 }
@@ -808,7 +823,7 @@ function latestFailedRevisions(revisions: Revision[]): Revision[] {
   return [...latest.values()].filter(r => r.status === 'failed' || r.resultCode === 'error').sort((a, b) => b.id - a.id);
 }
 
-function getUserExpiryBadgeClass(u: ProxyUser): string {
+function getUserExpiryBadgeClass(u: UserSummary): string {
   if (u.status !== 'active') return 'bg-black/[0.03] text-ios-secondary';
   if (u.trafficLimit && u.usedTraffic >= u.trafficLimit) {
     return 'bg-rose-50 text-ios-red border border-rose-200/80';
@@ -826,7 +841,7 @@ function getUserExpiryBadgeClass(u: ProxyUser): string {
   return 'bg-emerald-50 text-emerald-600 border border-emerald-200/80';
 }
 
-function getUserExpiryLabel(u: ProxyUser): string {
+function getUserExpiryLabel(u: UserSummary): string {
   if (u.status !== 'active') return '已停用';
   if (u.expiresAt && Date.parse(u.expiresAt) <= Date.now()) return '已过期';
   if (u.trafficLimit && u.usedTraffic >= u.trafficLimit) {
@@ -842,8 +857,8 @@ function getUserExpiryLabel(u: ProxyUser): string {
 // Data Loading
 async function loadTrafficData() {
   await Promise.all([
-    allPages(page => nodeAPI.list(page, '', false, 100)).then(result => { allNodes.value = result.items; nodesError.value = ''; }).catch(e => { nodesError.value = (e as Error).message; showToast(nodesError.value, 'error'); }),
-    isOwner.value ? userAPI.list(1, '', 50).then(result => { allUsers.value = result.items; }).catch(e => showToast((e as Error).message, 'error')) : Promise.resolve()
+    allPages(page => nodeAPI.choices(page, '', 100)).then(result => { allNodes.value = result.items; nodesError.value = ''; nodesReady.value = true; }).catch(e => { nodesError.value = (e as Error).message; showToast(nodesError.value, 'error'); }),
+    isOwner.value ? allPages(page => userAPI.summaries(page, 100)).then(result => { allUsers.value = result.items; usersError.value = ''; usersReady.value = true; }).catch(e => { usersError.value = (e as Error).message; }) : Promise.resolve().then(() => { usersReady.value = true; })
   ]);
 }
 

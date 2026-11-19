@@ -70,7 +70,7 @@ func newReissuePanel(t *testing.T) *reissuePanel {
 		Auth:       &auth.Handler{Service: service, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
 	}
 	mux := http.NewServeMux()
-	handler.Register(mux)
+	handler.Register(mux, handler)
 	return &reissuePanel{mux: mux, repository: handler.Repository, database: database}
 }
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"proxycontrol/internal/platform/readtiming"
 	"regexp"
 	"strings"
 	"sync"
@@ -395,6 +396,7 @@ func (s *CoreReleaseService) sha256sums(ctx context.Context, repo, tag string) m
 }
 
 func (s *CoreReleaseService) get(ctx context.Context, target string, limit int64, accept string) ([]byte, error) {
+	defer readtiming.Start(ctx, "external_http")()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err

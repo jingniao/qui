@@ -3,7 +3,7 @@
     <p v-if="loading" role="status" class="text-sm text-ios-secondary">正在读取服务器与入站…</p>
     <div v-else-if="loadError" class="space-y-2"><p role="alert" class="text-ios-red text-sm">{{ loadError }}</p><button class="ios-btn-secondary" @click="load">重试</button></div>
     <p v-if="error" ref="errorMessage" tabindex="-1" role="alert" class="text-sm text-ios-red outline-none">{{ error }}</p>
-    <fieldset v-if="!loading && !loadError" :disabled="busy || !!savedId" class="space-y-6">
+    <fieldset :disabled="busy || loading || !!loadError || !!savedId" class="space-y-6">
       <section class="space-y-4">
         <h4 class="text-ios-label text-base font-semibold leading-normal">基础信息</h4>
         <label class="block text-xs text-ios-secondary">节点名称<input v-model="f.name" placeholder="例如 Tokyo-vless-443" class="form-input-base mt-1.5" @input="autoName = false" /><span class="block text-xs mt-1">显示在入站列表、订阅名称与访问记录中；默认按「服务器-协议-端口」自动生成，手动修改后不再自动更新。</span></label>
@@ -130,7 +130,7 @@ import { getNodePortRange, loadNodeMeta } from '../../../nodes/nodeMeta';
 import { connectAddress } from '../../../nodes/nodeAddress';
 import { groupAPI, freshGroup, type NodeGroup } from '../../../nodes/groupsApi';
 import { groupInput } from '../../lineGroups';
-import { userAPI, type ProxyUser } from '../../../users/api';
+import { userAPI, type UserChoice } from '../../../users/api';
 import { deploymentAPI } from '../../../system/deploymentApi';
 import { watchPublish, type PublishTone, type PublishWatch } from '../../../system/publishProgress';
 import { certificatesAPI, type ManagedCertificate } from '../../../system/certificatesApi';
@@ -142,7 +142,7 @@ const emit = defineEmits<{ close: []; saved: [] }>();
 const route = useRoute();
 const state = reactive(createEditor(props.serverId || String(route.query.server || ''), props.inbound, props.origin));
 const f = computed(() => state.form);
-const servers = ref<NodeView[]>([]), inbounds = ref<Inbound[]>([]), users = ref<ProxyUser[]>([]);
+const servers = ref<NodeView[]>([]), inbounds = ref<Inbound[]>([]), users = ref<UserChoice[]>([]);
 const certificates = ref<ManagedCertificate[]>([]);
 const outbounds = ref<Outbound[]>([]), groups = ref<OutboundGroup[]>([]), chains = ref<ProxyChain[]>([]);
 const memberGroups = ref<NodeGroup[]>([]), selectedGroupIds = ref<string[]>([]);
@@ -201,11 +201,14 @@ watch(() => [f.value.nodeId, f.value.protocol, f.value.port, selectedServer.valu
   if (autoName.value && selectedServer.value) f.value.name = `${selectedServer.value.name}-${f.value.protocol}-${f.value.port}`;
 });
 watch(() => f.value.nodeId, async (newNodeId) => {
+  if (loading.value) return;
   // The selected core belongs to the previous server; reset to its primary.
   f.value.core = '';
   if (newNodeId) {
-    try { await loadNodeMeta(newNodeId, isOwner.value); }
-    catch (e) { error.value = `端口范围读取失败：${(e as Error).message}`; return; }
+    loading.value = true; loadError.value = '';
+    try { await loadServerResources(newNodeId); }
+    catch (e) { loadError.value = (e as Error).message; return; }
+    finally { loading.value = false; }
     if (disposed || f.value.nodeId !== newNodeId) return;
   }
   if (!state.original && newNodeId) {
@@ -217,33 +220,51 @@ watch(() => f.value.nodeId, async (newNodeId) => {
     if (range) {
       try {
         f.value.port = randomPort(f.value, inbounds.value, '', Math.random, range);
-      } catch {}
+      } catch (e) { error.value = (e as Error).message; }
     }
   }
 });
 let disposed = false;
 onUnmounted(() => { disposed = true; f.value.settings.private_key_pem = ''; publishWatcher?.stop(); });
+async function loadServerResources(nodeId: string) {
+  const [ins, outs, gs, cs] = await Promise.all([
+    choices((p, s) => proxyAPI.inbounds(nodeId, p, s)),
+    choices((p, s) => proxyAPI.outbounds(nodeId, p, s)),
+    choices((p, s) => proxyAPI.groups(nodeId, p, s)),
+    choices((p, s) => proxyAPI.chains(nodeId, p, s)),
+    loadNodeMeta(nodeId, isOwner.value)
+  ]);
+  if (disposed || f.value.nodeId !== nodeId) return;
+  inbounds.value = ins; outbounds.value = outs; groups.value = gs; chains.value = cs;
+}
 async function load() {
   loading.value = true; loadError.value = '';
   try {
-    await loadProtocolSupport();
-    if (isOwner.value) certificates.value = await certificatesAPI.list();
-    const data = await Promise.all([choices((p, s) => nodeAPI.list(p, '', false, s)), choices((p, s) => proxyAPI.inbounds('', p, s)), choices((p, s) => userAPI.list(p, '', s)), choices((p, s) => proxyAPI.outbounds('', p, s)), choices((p, s) => proxyAPI.groups('', p, s)), choices((p, s) => proxyAPI.chains('', p, s)), choices(groupAPI.list)]);
+    const required = await Promise.allSettled([
+      loadProtocolSupport(),
+      isOwner.value ? certificatesAPI.list().then(value => { certificates.value = value; }) : Promise.resolve(),
+      choices((p, s) => userAPI.choices(p, '', s)).then(value => { users.value = value; }),
+      choices(groupAPI.list).then(value => {
+        memberGroups.value = value;
+        initialGroupIds.value = value.filter(g => g.inboundIds?.includes(props.inbound?.id || '')).map(g => g.id);
+        selectedGroupIds.value = [...initialGroupIds.value];
+      }),
+      choices((p, s) => nodeAPI.choices(p, '', s)).then(async value => {
+        if (disposed) return;
+        servers.value = value;
+        if (!f.value.nodeId) f.value.nodeId = eligibleServers.value[0]?.id || '';
+        else if (!eligibleServers.value.some(s => s.id === f.value.nodeId)) error.value = '预选服务器不可用，请选择其他已登记服务器';
+        if (f.value.nodeId) await loadServerResources(f.value.nodeId);
+      })
+    ]);
+    const failed = required.find(item => item.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
     if (disposed) return;
-    [servers.value, inbounds.value, users.value, outbounds.value, groups.value, chains.value] = data;
-    memberGroups.value = data[6];
-    initialGroupIds.value = memberGroups.value.filter(g => g.inboundIds?.includes(props.inbound?.id || '')).map(g => g.id);
-    selectedGroupIds.value = [...initialGroupIds.value];
-    if (!f.value.nodeId) f.value.nodeId = eligibleServers.value[0]?.id || '';
-    else if (!eligibleServers.value.some(s => s.id === f.value.nodeId)) error.value = '预选服务器不可用，请选择其他已登记服务器';
-    if (f.value.nodeId) await loadNodeMeta(f.value.nodeId, isOwner.value);
     if (!props.inbound && f.value.nodeId) {
+      const offered = protocolChoices(selectedServer.value, f.value.core, protocols.value, f.value.protocol);
+      if (offered.length && !offered.includes(f.value.protocol)) changeProtocol(state, offered[0]);
       const range = getNodePortRange(f.value.nodeId);
-      if (range) {
-        try {
-          f.value.port = randomPort(f.value, inbounds.value, '', Math.random, range);
-        } catch {}
-      }
+      if (range) f.value.port = randomPort(f.value, inbounds.value, '', Math.random, range);
     }
   } catch (e) { if (!disposed) loadError.value = (e as Error).message; }
   finally { if (!disposed) loading.value = false; }
@@ -262,11 +283,11 @@ async function copySavedPublicKey() {
   catch { keyCopyStatus.value = '未能复制，请在公钥框中选择并手动复制'; }
 }
 async function save(publish: boolean) {
-  if (busy.value || !isOwner.value || savedId.value) return;
+  if (busy.value || loading.value || loadError.value || !isOwner.value || savedId.value) return;
   busy.value = true; error.value = ''; result.value = '';
   try {
     // Re-read before save; the live check is advisory and the API remains authoritative.
-    inbounds.value = await choices((p, s) => proxyAPI.inbounds('', p, s));
+    inbounds.value = await choices((p, s) => proxyAPI.inbounds(f.value.nodeId, p, s));
     for (let n = 1; n <= 5; n++) if (!check(n)) return;
     const value = buildPayload(state, selectedServer.value);
     const saved = await proxyAPI.saveInbound(state.original?.id || null, value);

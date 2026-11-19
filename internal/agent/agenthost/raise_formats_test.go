@@ -59,6 +59,9 @@ func TestRaiseFormatsRefusesWhileJobsPending(t *testing.T) {
 	if err := raiseFormats(context.Background(), root, "node", contract, required, nil, "", updater.Image{}, false); !errors.Is(err, ErrState) {
 		t.Fatalf("pending jobs accepted: %v", err)
 	}
+	if err := raiseTrafficDeliveryFormat(context.Background(), root, "node", contract, required, nil, "", updater.Image{}, false); !errors.Is(err, ErrState) {
+		t.Fatalf("traffic format raised during pending update: %v", err)
+	}
 	after, _, err := storage.Check(root, "node", contract)
 	if err != nil || after != required {
 		t.Fatalf("floor changed: %v", err)

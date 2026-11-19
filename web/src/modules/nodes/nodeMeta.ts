@@ -85,6 +85,16 @@ export function getRandomPortForNode(
 
 export async function loadNodeMeta(nodeId: string, _owner: boolean): Promise<NodeMeta> {
   let result = await request<{ meta: NodeMeta; present: boolean }>('/nodes/'+encodeURIComponent(nodeId)+'/meta');
+  return acceptNodeMeta(nodeId, result, _owner);
+}
+
+export async function loadNodeMetadata(owner: boolean, deleted = false): Promise<Record<string, NodeMeta>> {
+  const result = await request<{ items: { nodeId: string; meta: NodeMeta; present: boolean }[] }>('/nodes/meta' + (deleted ? '?deleted=1' : ''));
+  const entries = await Promise.all(result.items.map(async item => [item.nodeId, await acceptNodeMeta(item.nodeId, item, owner)] as const));
+  return Object.fromEntries(entries);
+}
+
+async function acceptNodeMeta(nodeId: string, result: { meta: NodeMeta; present: boolean }, _owner: boolean): Promise<NodeMeta> {
   // Preserve the existing one-time financial metadata import; port ranges are API-owned.
   if (_owner) {
     const key = 'qui_node_meta_' + nodeId, raw = localStorage.getItem(key);

@@ -110,7 +110,11 @@ func (m Meta) Validate() error {
 	return nil
 }
 func (r *Repository) Meta(ctx context.Context, id string) (Meta, bool, error) {
-	if _, err := r.Get(ctx, id); err != nil {
+	var exists int
+	if err := r.Database.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=?", id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = ErrNotFound
+		}
 		return Meta{}, false, err
 	}
 	m := Meta{RenewNoticeDays: 7, Tags: []string{}}

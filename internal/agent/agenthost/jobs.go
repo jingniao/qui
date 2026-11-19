@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"proxycontrol/internal/agent/configuration"
 	"runtime"
+	"strings"
 	"time"
 
 	"proxycontrol/internal/agent/agentjobs"
@@ -52,6 +53,9 @@ func openJobs(configPath string) (*agentjobs.Store, config.Agent, error) {
 // QueueUpdate is a local fixed operation. It records a signed request only;
 // the supervised parent performs downloads and actual process switching.
 func QueueUpdate(configPath, id string, revision int64, signed release.Signed) (release.AgentUpdateRequest, error) {
+	if strings.HasPrefix(id, localJobPrefix) {
+		return release.AgentUpdateRequest{}, errors.New("local- Agent update IDs are reserved for local signed installations")
+	}
 	store, c, err := openJobs(configPath)
 	if err != nil {
 		return release.AgentUpdateRequest{}, err
@@ -108,6 +112,9 @@ type jobRunner struct {
 	process                       *agentprocess.Process
 	fingerprint                   string
 	prepared                      *preparedAgent
+	localError                    error
+	bootstrapStore                *agentjobs.Store
+	bootstrapDone                 <-chan struct{}
 }
 
 type preparedAgent struct {
@@ -243,7 +250,9 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 		return release.UpdateResult{}, ErrState
 	}
 	if request.Operation == "recover" {
-		return r.recoverJob(job, current)
+		result, err := r.recoverJob(job, current)
+		r.recordLocalFailure(request.ID, err)
+		return result, err
 	}
 	if original, found, err := r.history.InstallationRequest(request.ID); err != nil {
 		return release.UpdateResult{}, err
@@ -292,15 +301,10 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	if err != nil || !os.SameFile(a, b) {
 		return reject("scope_mismatch")
 	}
-	updates, ok, err := EffectiveUpdates(c)
-	if err != nil || !ok {
-		return reject("trust_failed")
-	}
-	keys, err := release.PinnedKeys(updates.Keys)
+	policy, err := localPolicy(c)
 	if err != nil {
 		return reject("trust_failed")
 	}
-	policy := release.Policy{Component: "proxy-agent", OS: runtime.GOOS, Architecture: runtime.GOARCH, Now: time.Now().UTC(), Keys: keys}
 	if err := r.history.Check(request.Release, policy); err != nil {
 		return reject("trust_failed")
 	}
@@ -310,15 +314,6 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	if err != nil || observed != request.Revision {
 		return reject("scope_mismatch")
 	}
-	trust, err := updates.TrustConfig()
-	if err != nil {
-		return reject("trust_failed")
-	}
-	downloader, err := updater.NewDownloader(updates.Catalogue, trust)
-	if err != nil {
-		return reject("download_failed")
-	}
-	defer downloader.Close()
 	downloadCtx, cancelDownload := context.WithCancel(r.ctx)
 	watchDone := make(chan struct{})
 	workerDone := r.process.Done()
@@ -331,9 +326,30 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 		}
 	}()
 	var candidate updater.Candidate
-	if r.prepared != nil && r.prepared.request == request {
+	if strings.HasPrefix(request.ID, localJobPrefix) {
+		candidate, err = stageLocalCandidate(downloadCtx, r.directory, request.Release, policy)
+	} else if r.prepared != nil && r.prepared.request == request {
 		candidate = r.prepared.candidate
 	} else {
+		updates, ok, trustErr := EffectiveUpdates(c)
+		if trustErr != nil || !ok {
+			close(watchDone)
+			cancelDownload()
+			return reject("trust_failed")
+		}
+		trust, trustErr := updates.TrustConfig()
+		if trustErr != nil {
+			close(watchDone)
+			cancelDownload()
+			return reject("trust_failed")
+		}
+		downloader, downloadErr := updater.NewDownloader(updates.Catalogue, trust)
+		if downloadErr != nil {
+			close(watchDone)
+			cancelDownload()
+			return reject("download_failed")
+		}
+		defer downloader.Close()
 		candidate, err = downloader.FetchExpected(downloadCtx, filepath.Join(r.directory, "releases", "agent-candidates"), request.Release.Manifest, policy, r.history)
 		if err == nil {
 			r.prepared = &preparedAgent{request: request, candidate: candidate}
@@ -342,6 +358,7 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	close(watchDone)
 	cancelDownload()
 	if err != nil {
+		r.recordLocalFailure(request.ID, err)
 		if r.ctx.Err() != nil {
 			return release.UpdateResult{}, r.ctx.Err()
 		}
@@ -436,6 +453,7 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 		}
 	}
 	installed, applyErr := installer.Apply(r.ctx, driver, request.ID, revision, candidate, policy)
+	r.recordLocalFailure(request.ID, applyErr)
 	r.process = driver.Process()
 	if r.process != nil && r.process.Stopping() && !r.process.Stopped() {
 		return release.UpdateResult{}, errors.Join(agentprocess.ErrStopUnconfirmed, applyErr)

@@ -26,11 +26,20 @@ func accountWhere(filter Filter, from, to string, column string) (string, []any)
 }
 func (r *Repository) AccountSummary(ctx context.Context, filter Filter) (AccountSummary, error) {
 	var result AccountSummary
+	if filter.UserID == "" && filter.DeviceID == "" {
+		items, err := ReadNodeTraffic(ctx, r.Database, filter.From, filter.To, filter.NodeID, false)
+		if err != nil {
+			return result, err
+		}
+		for _, item := range items {
+			result.UploadBytes += item.Upload
+			result.DownloadBytes += item.Download
+			result.Observations += item.Samples
+		}
+		return result, nil
+	}
 	where, args := accountWhere(filter, filter.From.UTC().Format("2006-01-02T15:04:05.000000000Z"), filter.To.UTC().Format("2006-01-02T15:04:05.000000000Z"), "observed_at")
 	sampleTable := "account_traffic_samples"
-	if filter.UserID == "" && filter.DeviceID == "" {
-		sampleTable = "node_traffic_samples"
-	}
 	err := r.Database.QueryRowContext(ctx, "SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0),count(*) FROM "+sampleTable+where, args...).Scan(&result.UploadBytes, &result.DownloadBytes, &result.Observations)
 	return result, err
 }

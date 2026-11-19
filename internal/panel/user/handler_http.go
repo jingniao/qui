@@ -40,23 +40,39 @@ type Handler struct {
 	Devices      *DeviceObserver
 }
 
-func (h *Handler) observe(ctx context.Context, account *User) {
+func (h *Handler) observe(ctx context.Context, account *User) error {
+	items := []User{*account}
+	if err := h.observeMany(ctx, items); err != nil {
+		return err
+	}
+	*account = items[0]
+	return nil
+}
+
+func (h *Handler) observeMany(ctx context.Context, items []User) error {
 	if h.Devices != nil {
-		if view, err := h.Devices.View(ctx, *account); err == nil {
-			account.OnlineDevices = view.OnlineDevices
-			account.DeviceLimitEnforced = view.Enforced
-			account.DeviceLimitUnsupportedNodes = view.UnsupportedNodes
-			account.DeviceLimitUDPUnsupported = view.UDPUnsupported
+		views, err := h.Devices.Views(ctx, items)
+		if err != nil {
+			return err
+		}
+		for i, view := range views {
+			items[i].OnlineDevices = view.OnlineDevices
+			items[i].DeviceLimitEnforced = view.Enforced
+			items[i].DeviceLimitUnsupportedNodes = view.UnsupportedNodes
+			items[i].DeviceLimitUDPUnsupported = view.UDPUnsupported
 		}
 	}
-	if h.Observations == nil {
-		return
+	if h.Observations != nil {
+		groups := map[string]node.Group{}
+		for i := range items {
+			count, err := h.Observations.forUser(ctx, items[i], groups)
+			if err != nil {
+				return err
+			}
+			items[i].OnlineConnections = count
+		}
 	}
-	count, err := h.Observations.ForUser(ctx, *account)
-	if err != nil {
-		return
-	}
-	account.OnlineConnections = count
+	return nil
 }
 
 func (h *Handler) quotaChanged(ctx context.Context, userID string) {
@@ -83,10 +99,12 @@ func (h *Handler) accessChanged(ctx context.Context, userID, username, reason st
 	}
 }
 
-func (h *Handler) Register(mux *http.ServeMux) {
+func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
+	mux.Handle("GET /api/v1/users/summaries", h.Auth.Require(http.HandlerFunc(reads.summaries), true))
+	mux.Handle("GET /api/v1/users/choices", h.Auth.Require(http.HandlerFunc(reads.choices), true))
 	mux.Handle("GET /api/v1/users/{id}/devices-online", h.Auth.Require(http.HandlerFunc(h.devicesOnline), true))
 	mux.Handle("POST /api/v1/users/{id}/devices-online/reset", h.Auth.Require(http.HandlerFunc(h.devicesOnline), true))
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/users": h.list, "POST /api/v1/users": h.save, "GET /api/v1/users/{id}": h.get, "PUT /api/v1/users/{id}": h.save, "DELETE /api/v1/users/{id}": h.delete, "POST /api/v1/users/{id}/credentials/reset": h.resetCredentials, "POST /api/v1/users/{id}/node-groups/{groupId}": h.grant, "DELETE /api/v1/users/{id}/node-groups/{groupId}": h.grant, "POST /api/v1/users/{id}/reset-traffic": h.resetTraffic} {
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/users": reads.list, "POST /api/v1/users": h.save, "GET /api/v1/users/{id}": reads.get, "PUT /api/v1/users/{id}": h.save, "DELETE /api/v1/users/{id}": h.delete, "POST /api/v1/users/{id}/credentials/reset": h.resetCredentials, "POST /api/v1/users/{id}/node-groups/{groupId}": h.grant, "DELETE /api/v1/users/{id}/node-groups/{groupId}": h.grant, "POST /api/v1/users/{id}/reset-traffic": h.resetTraffic} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
 	// v1.1 manages access per user; the device API is gone. Its routes answer
@@ -137,8 +155,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	for index := range items {
-		h.observe(r.Context(), &items[index])
+	if err := h.observeMany(r.Context(), items); err != nil {
+		h.fail(w, err)
+		return
 	}
 	httpapi.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "pageSize": size})
 }
@@ -148,7 +167,10 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	h.observe(r.Context(), &user)
+	if err := h.observe(r.Context(), &user); err != nil {
+		h.fail(w, err)
+		return
+	}
 	httpapi.JSON(w, 200, user)
 }
 func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +211,10 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		status = 201
 	}
-	h.observe(r.Context(), &user)
+	if err := h.observe(r.Context(), &user); err != nil {
+		h.fail(w, err)
+		return
+	}
 	httpapi.JSON(w, status, user)
 }
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {

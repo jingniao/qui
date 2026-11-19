@@ -114,6 +114,9 @@ func (s *Spool) SaveTraffic(ctx context.Context, counters []traffic.Counter) err
 		if _, err := tx.ExecContext(ctx, "INSERT INTO traffic_batches(id,payload) VALUES(?,?)", batch.id, batch.payload); err != nil {
 			return err
 		}
+		if err := s.numberTrafficTx(ctx, tx, batch.id); err != nil {
+			return err
+		}
 	}
 	return s.commitAccounting(ctx, tx)
 }
@@ -167,16 +170,21 @@ func (s *Spool) AckTraffic(ctx context.Context, batchID string, sent ...[]byte) 
 	if batchID == "" || len(batchID) > 128 {
 		return errors.New("invalid traffic acknowledgement")
 	}
-	tx, err := s.database.BeginTx(ctx, nil)
+	unlock := s.accountingLock()
+	defer unlock()
+	tx, err := s.database.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := s.verifyBound(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.validateQueuedAckTx(ctx, tx, "traffic", batchID, sent); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM traffic_batches WHERE id=?", batchID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return s.commitAccounting(ctx, tx)
 }

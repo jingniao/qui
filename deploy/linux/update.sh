@@ -41,7 +41,7 @@ fail() { printf '更新被拒绝：%s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<USAGE
 用法：qui-update [--version X.Y.Z[-rc.N]] [--component panel|agent] [--yes] [--database FILE]
-                 [--bundle FILE --sums FILE]
+                 [--bundle FILE --sums FILE [--agent-manifest FILE]]
 
   --version X.Y.Z[-rc.N] 安装指定发布版本（默认：GitHub 上的最新发布）；
                     Agent 只能升级，低于已安装 Agent 的版本会被拒绝
@@ -55,6 +55,8 @@ usage() {
   --sums FILE       离线更新：与该归档配套的 SHA256SUMS
                     （两个参数必须同时给出，并同时用 --version 指定版本；此时不
                     访问 GitHub，摘要校验与下载时完全相同）
+  --agent-manifest FILE  受管 Agent 离线更新所需的配套官方签名清单
+                    （仅与 --bundle/--sums 一起使用；普通节点不需要）
   --recover DIR     内部使用：恢复一个被中断的更新（[--boot] 由开机单元调用）
 
 脚本从 https://github.com/$repository/releases 下载归档与 SHA256SUMS，校验摘要
@@ -112,6 +114,18 @@ staged_database=''
 downgrade=false
 # Backup files written through a .partial name that the signal handler has to remove.
 partial_files=()
+# The bootstrap transaction and managed installation have separate commit points.
+# Local candidates survive in the Agent's data directory; these public release
+# input copies are only for the unprivileged verifier, and can always be removed.
+managed_agent=false
+agent_runtime_version=''
+agent_runtime_state=''
+agent_runtime_ready=''
+agent_inputs=''
+managed_installing=false
+agent_guard_pid=''
+agent_guard_read=''
+agent_guard_write=''
 
 # Read both the legacy fixed-core v1 and the multi-core v2 install records.
 record_complete() {
@@ -143,6 +157,120 @@ installed_version() {
     "proxy-$component "*) printf '%s' "${output#proxy-$component }";;
     *) printf '未知';;
   esac
+}
+
+agent_cli() {
+  runuser -u proxy-agent -- "$program_directory/proxy-agent" \
+    --config "$root/etc/proxy-agent/config.yaml" "$@"
+}
+
+agent_read_status() {
+  local output='' magic='' extra='' options=(--local-agent-status)
+  if ! service_is_active proxy-agent; then options+=(--local-agent-stopped); fi
+  if ! output=$(agent_cli "${options[@]}"); then
+    printf '无法确认实际 Agent 版本；旧安装请先用已安装的 qui-update 更新引导程序，再重跑同版本命令。\n' >&2
+    return 1
+  fi
+  read -r magic agent_runtime_state agent_runtime_version agent_runtime_ready extra <<< "$output"
+  [[ $magic == proxy-agent-local-v1 && -z $extra ]] || {
+    printf 'Agent 本地状态格式不匹配：%s\n' "$output" >&2
+    return 1
+  }
+  case $agent_runtime_state in
+    unmanaged) managed_agent=false;;
+    running|installed) managed_agent=true;;
+    *) printf 'Agent 本地状态未知：%s\n' "$output" >&2; return 1;;
+  esac
+}
+
+prepare_managed_release() {
+  local manifest=$1 binary=$2
+  agent_inputs=$(mktemp -d "${TMPDIR:-/var/tmp}/qui-agent.XXXXXXXX") \
+    || fail '无法准备 Agent 校验输入目录。'
+  chown proxy-agent:proxy-agent -- "$agent_inputs" || fail '无法设置 Agent 校验目录属主。'
+  install -o proxy-agent -g proxy-agent -m 0600 -- "$manifest" "$agent_inputs/manifest.json" \
+    || fail '无法准备 Agent 签名清单。'
+  install -o proxy-agent -g proxy-agent -m 0600 -- "$binary" "$agent_inputs/proxy-agent" \
+    || fail '无法准备 Agent 候选程序。'
+  # The installed, already trusted bootstrap verifies the candidate. Only its
+  # supervisor may then probe the verified immutable image, before any stop.
+  agent_cli --check-agent-release --agent-manifest "$agent_inputs/manifest.json" \
+    --agent-binary "$agent_inputs/proxy-agent" --agent-version "$version" \
+    || fail '受管 Agent 签名、兼容性或升级状态检查失败；服务未停止。'
+}
+
+reserve_agent_bootstrap() {
+  local output=''
+  # The supervisor holds the existing jobs locks while this coprocess keeps its
+  # pipe open. It cannot poll a queued web update across the bootstrap stop.
+  # A killed shell closes the non-inherited coproc pipe and releases the lease.
+  coproc QUI_AGENT_GUARD {
+    agent_cli --reserve-agent-bootstrap --agent-manifest "$agent_inputs/manifest.json" \
+      --agent-binary "$agent_inputs/proxy-agent" --agent-version "$version"
+  }
+  agent_guard_pid=${QUI_AGENT_GUARD_PID:-}
+  agent_guard_read=${QUI_AGENT_GUARD[0]:-}
+  agent_guard_write=${QUI_AGENT_GUARD[1]:-}
+  [[ -n $agent_guard_pid && -n $agent_guard_read && -n $agent_guard_write ]] \
+    || fail '无法启动引导程序更新的排他保留。'
+  if ! read -r output <&"$agent_guard_read"; then
+    fail '未取得引导程序更新保留，服务未停止。'
+  fi
+  [[ $output == 'proxy-agent-bootstrap-v1 reserved' ]] \
+    || fail "引导程序更新保留格式不匹配：$output"
+}
+
+release_agent_bootstrap() {
+  local status=0
+  if [[ -n $agent_guard_write ]]; then
+    exec {agent_guard_write}>&-
+    agent_guard_write=''
+  fi
+  if [[ -n $agent_guard_read ]]; then
+    exec {agent_guard_read}<&-
+    agent_guard_read=''
+  fi
+  if [[ -n $agent_guard_pid ]]; then
+    wait "$agent_guard_pid" || status=$?
+    agent_guard_pid=''
+  fi
+  if ((status != 0)); then
+    printf '引导程序更新保留异常退出（%s），请检查服务与任务状态。\n' "$status" >&2
+    return "$status"
+  fi
+}
+
+install_managed_release() {
+  local output='' waited=0
+  # The bootstrap commit must precede this call. Signal handling must not restore
+  # its old shell snapshot over the managed installer's newer durable journal.
+  [[ -z $active_component && -z $snapshot ]] || fail '引导程序事务尚未提交，不能开始实际 Agent 安装。'
+  managed_installing=true
+  printf '[proxy-agent] 更新实际 Agent 到 %s ...\n' "$version"
+  # A stable supervisor PID does not by itself prove its worker/socket is ready.
+  # Wait for that explicit readiness after the bootstrap service restart.
+  until output=$(agent_cli --local-agent-status 2>&1); do
+    if ((waited >= 30)) || ! service_is_active proxy-agent; then
+      printf '%s\n' "$output" >&2
+      fail "引导程序已是 $(installed_version agent)，实际 Agent 入口未就绪；请检查服务后重跑命令。"
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if ! agent_cli --install-agent-release --agent-manifest "$agent_inputs/manifest.json" \
+    --agent-binary "$agent_inputs/proxy-agent" --agent-version "$version"; then
+    printf '[proxy-agent] 引导程序版本：%s；实际 Agent 更新失败，以上错误和受管安装记录已保留。\n' "$(installed_version agent)" >&2
+    if agent_read_status; then
+      printf '[proxy-agent] 当前实际 Agent：%s（%s）。\n' "$agent_runtime_version" "$agent_runtime_state" >&2
+    fi
+    return 1
+  fi
+  service_healthy proxy-agent 10 || fail '实际 Agent 切换后服务未保持稳定，请检查受管安装记录和服务日志。'
+  agent_read_status || fail '无法核实升级后的实际 Agent 版本。'
+  [[ $agent_runtime_state == running && $agent_runtime_ready == ready && $agent_runtime_version == "$version" ]] \
+    || fail "实际 Agent 版本核验失败：$agent_runtime_version（$agent_runtime_state/$agent_runtime_ready）。"
+  managed_installing=false
+  printf '[proxy-agent] 引导程序 %s；实际 Agent %s，服务运行正常。\n' "$(installed_version agent)" "$agent_runtime_version"
 }
 
 # Print the digest SHA256SUMS lists for exactly this file name; returns 1 when
@@ -932,6 +1060,14 @@ update_component() {
   [[ $component == agent ]] && mode=--node
   previous=$(installed_version "$component")
   if service_is_active "$name"; then was_active=true; fi
+  if [[ $component == agent && $managed_agent == true ]]; then
+    # Recheck after download and the human confirmation, immediately before the
+    # bootstrap restart. Actual switching performs its own atomic queue reserve.
+    agent_read_status || fail '无法重新确认受管 Agent 状态。'
+    [[ $agent_runtime_state == running && ( $agent_runtime_ready == ready || $agent_runtime_ready == local-recovery ) ]] \
+      || fail '受管 Agent 状态已变化，取消引导程序更新。'
+    reserve_agent_bootstrap
+  fi
   # The globals the journal and the signal handler read are filled before the service
   # stops, so a signal from here on finds a complete picture of what is being replaced.
   active_component=$component
@@ -948,6 +1084,12 @@ update_component() {
   # is harmless.
   service_stopped=true
   service_stop "$name" || fail "无法停止 $name，未做任何修改。"
+  if [[ $component == agent && $managed_agent == true ]]; then
+    if ! release_agent_bootstrap; then
+      restore_service_after_stop
+      fail '引导程序排他保留未正常结束，更新没有开始。'
+    fi
+  fi
   if [[ $component == panel ]]; then
     # backup_database runs in a command substitution, so a fail inside it only ends that
     # subshell; this status check is what keeps a failed backup from leaving the panel
@@ -1069,7 +1211,7 @@ update_component() {
     if [[ $component == agent ]]; then
       agent_enable_web_upgrade || true
       if [[ -f ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervisor.enc && ! -e ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervision-init.pending && ! -L ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervision-init.pending ]]; then
-        printf '[%s] 引导程序已更新到 %s；节点实际运行的 Agent 版本由面板的 Agent 管理决定。\n' "$name" "$version"
+        printf '[%s] 引导程序已更新到 %s；实际 Agent 将由本机受管安装事务核验。\n' "$name" "$version"
       else
         printf '[%s] 已更新到 %s，服务运行正常（10 秒内无重启）；网页升级未启用。\n' "$name" "$version"
       fi
@@ -1105,6 +1247,10 @@ on_signal() {
     if [[ -f $log && ! -L $log ]]; then exec >>"$log" 2>&1 || true; fi
   fi
   printf '\n更新被中断（%s）...\n' "$signal"
+  release_agent_bootstrap
+  if $managed_installing; then
+    printf '引导程序阶段已提交；实际 Agent 的任务和结果保留在节点受管日志中，请检查服务后重跑命令。\n'
+  fi
   # The private copy preflight_database runs, if the signal came during the check.
   rm -f -- "$registry"/.check-panel.* 2>/dev/null
   if [[ -n $snapshot && -f $snapshot/journal ]]; then
@@ -1183,12 +1329,12 @@ recover_interrupted_updates() {
 # new inode, so this is the second line of defence rather than the only one. The call is
 # guarded by a comparison with $0 because the tests source this file instead of running it.
 main() {
-  local assume_yes=false bundle_file='' sums_file='' arch='' base='' bundle=''
+  local assume_yes=false bundle_file='' sums_file='' agent_manifest_file='' arch='' base='' bundle=''
   local release='' tag='' expected='' actual='' up_to_date=true answer=''
   local components=() component tool file required service_library=''
   local selected_component=''
   local recover_directory='' boot=false status=0 installed_panel='' installed_agent='' output=''
-  local snapshot_directory='' registry_directory='' log=''
+  local snapshot_directory='' registry_directory='' log='' has_agent=false
   while (($#)); do
     case $1 in
       --component)
@@ -1202,6 +1348,9 @@ main() {
         (($# >= 2)) || fail "缺少 $1 的值。"
         if [[ $1 == --bundle ]]; then bundle_file=$2; else sums_file=$2; fi
         shift 2;;
+      --agent-manifest)
+        (($# >= 2)) || fail '缺少 --agent-manifest 的值。'
+        agent_manifest_file=$2; shift 2;;
       --database)
         (($# >= 2)) || fail '缺少 --database 的值。'
         database_file=$2; shift 2;;
@@ -1219,7 +1368,7 @@ main() {
   # with update options would be ambiguous.
   if [[ -n $recover_directory || $boot == true ]]; then
     [[ -n $recover_directory ]] || fail '--boot 只能与 --recover 一起使用。'
-    if [[ -n $selected_component || -n $version || -n $database_file || -n $bundle_file || -n $sums_file || $assume_yes == true ]]; then
+    if [[ -n $selected_component || -n $version || -n $database_file || -n $bundle_file || -n $sums_file || -n $agent_manifest_file || $assume_yes == true ]]; then
       fail '--recover 不能与更新参数一起使用。'
     fi
   fi
@@ -1232,6 +1381,11 @@ main() {
     for file in "$bundle_file" "$sums_file"; do
       [[ -f $file && ! -L $file ]] || fail "离线更新的文件必须是普通文件，不能是符号链接：$file"
     done
+  fi
+  if [[ -n $agent_manifest_file ]]; then
+    [[ -n $bundle_file ]] || fail '--agent-manifest 仅用于 --bundle/--sums 离线更新。'
+    [[ -f $agent_manifest_file && ! -L $agent_manifest_file ]] \
+      || fail '--agent-manifest 必须是普通文件，不能是符号链接。'
   fi
 
   [[ $(uname -s) == Linux && $EUID -eq 0 ]] || fail '请以 root 身份在 Linux 上运行。'
@@ -1323,6 +1477,10 @@ main() {
   done
   [[ -z $selected_component ]] || record_complete "$selected_component" || fail "指定组件未安装：$selected_component"
   [[ ${#components[@]} -gt 0 ]] || fail "这台主机上没有有效的安装记录：$registry"
+  for component in "${components[@]}"; do
+    [[ $component != agent ]] || has_agent=true
+  done
+  [[ -z $agent_manifest_file || $has_agent == true ]] || fail '--agent-manifest 必须用于 Agent 更新。'
 
   # One update at a time, taken before this run writes a snapshot, a service definition or
   # the database: the registry is what the next run reads to finish what an interrupted one
@@ -1334,6 +1492,19 @@ main() {
     ensure_database_record || fail '无法确认面板数据库路径，更新没有开始。'
   fi
   recover_interrupted_updates
+
+  if $has_agent; then
+    agent_read_status || fail '无法读取本机 Agent 升级状态。'
+    if $managed_agent; then
+      [[ $agent_runtime_state == running ]] || fail '受管 Agent 服务已停止；请先启动服务再升级。'
+      [[ $agent_runtime_ready != baseline-required ]] || fail '请先在面板为该节点发布基础配置，再更新 Agent。'
+      [[ $agent_runtime_ready == ready || $agent_runtime_ready == local-recovery ]] \
+        || fail '受管 Agent 已有任务、恢复未完成或服务异常；请先处理再升级。'
+      if [[ -n $bundle_file && -z $agent_manifest_file ]]; then
+        fail '受管 Agent 离线更新必须提供 --agent-manifest FILE；不会联网补取清单。'
+      fi
+    fi
+  fi
 
   # --database only makes sense together with an installed panel, a version to go down to
   # and a copy that was taken while that panel was stopped. It is checked here, before
@@ -1367,6 +1538,9 @@ main() {
   up_to_date=true
   for component in "${components[@]}"; do
     [[ $(installed_version "$component") == "$version" ]] || up_to_date=false
+    if [[ $component == agent && $managed_agent == true && ( $agent_runtime_version != "$version" || $agent_runtime_ready != ready ) ]]; then
+      up_to_date=false
+    fi
   done
   if $up_to_date; then
     printf '已是最新版本 %s。\n' "$version"
@@ -1388,11 +1562,15 @@ main() {
   for component in "${components[@]}"; do
     [[ $component == agent ]] || continue
     installed_agent=$(installed_version agent)
-    version_is_older "$version" "$installed_agent" || continue
-    if [[ -z $selected_component ]] && record_complete panel; then
-      fail "不支持把 Agent 降级：目标版本 $version 低于已安装的 Agent $installed_agent。只回退面板请加 --component panel。"
+    if version_is_older "$version" "$installed_agent"; then
+      if [[ -z $selected_component ]] && record_complete panel; then
+        fail "不支持把 Agent 降级：目标版本 $version 低于已安装的引导程序 $installed_agent。只回退面板请加 --component panel。"
+      fi
+      fail "不支持把 Agent 降级：目标版本 $version 低于已安装的引导程序 $installed_agent。"
     fi
-    fail "不支持把 Agent 降级：目标版本 $version 低于已安装的 Agent $installed_agent。"
+    if $managed_agent && version_is_older "$version" "$agent_runtime_version"; then
+      fail "不支持把 Agent 降级：目标版本 $version 低于实际 Agent $agent_runtime_version。"
+    fi
   done
 
   # A panel older than the installed one cannot migrate the database back, so every
@@ -1409,7 +1587,14 @@ main() {
   # Only the temporary download directory is removed by the trap: a rollback snapshot is
   # removed by the update that took it, or kept for the operator when the rollback itself
   # did not come up.
-  cleanup() { if [[ -n $directory ]]; then rm -rf -- "$directory"; fi; }
+  cleanup() {
+    local original_status=$? guard_status=0
+    release_agent_bootstrap || guard_status=$?
+    if [[ -n $agent_inputs ]]; then rm -rf -- "$agent_inputs"; fi
+    if [[ -n $directory ]]; then rm -rf -- "$directory"; fi
+    if ((original_status == 0 && guard_status != 0)); then return "$guard_status"; fi
+    return "$original_status"
+  }
   trap cleanup EXIT
   directory=$(mktemp -d) || fail '无法创建临时目录。'
   # The running script and the library it sourced are staged here, because take_snapshot
@@ -1449,6 +1634,14 @@ main() {
       [[ -f $source_dir/$required && ! -L $source_dir/$required ]] || fail "归档里缺少 $required。"
     done
   done
+
+  if $managed_agent; then
+    if [[ -z $bundle_file ]]; then
+      agent_manifest_file=$directory/proxy-agent-$version-linux-$arch.manifest.json
+      download "$base/proxy-agent-$version-linux-$arch.manifest.json" "$agent_manifest_file"
+    fi
+    prepare_managed_release "$agent_manifest_file" "$source_dir/bin/proxy-agent"
+  fi
 
   # --database moves the panel down a version together with a copy from before the newer
   # one ran: a copy the target cannot open, or a target that is not older, would either
@@ -1493,6 +1686,9 @@ main() {
   printf '\n目标版本：%s\n' "$version"
   for component in "${components[@]}"; do
     printf 'proxy-%s：%s → %s\n' "$component" "$(installed_version "$component")" "$version"
+    if [[ $component == agent && $managed_agent == true ]]; then
+      printf '实际 Agent：%s → %s\n' "$agent_runtime_version" "$version"
+    fi
   done
   printf '归档 SHA256 与 SHA256SUMS 一致：%s\n' "$expected"
   if [[ -n $database_file ]]; then
@@ -1506,18 +1702,28 @@ main() {
     read -r answer || answer=''
     case $answer in
       y|Y) ;;
-      *) printf '已取消，未做任何修改。\n'; exit 0;;
+      *) printf '已取消更新。\n'; exit 0;;
     esac
   fi
 
   for component in "${components[@]}"; do
-    update_component "$component"
+    if [[ $component != agent || $(installed_version agent) != "$version" ]]; then
+      update_component "$component"
+    fi
+    if [[ $component == agent && $managed_agent == true ]]; then
+      install_managed_release || exit 1
+    fi
   done
 
   printf '\n更新完成：\n'
   for component in "${components[@]}"; do
-    printf 'proxy-%s %s（服务状态：%s）\n' "$component" "$(installed_version "$component")" \
-      "$(service_state "proxy-$component" || true)"
+    if [[ $component == agent && $managed_agent == true ]]; then
+      printf 'proxy-agent 引导程序 %s；实际 Agent %s（服务状态：%s）\n' \
+        "$(installed_version agent)" "$agent_runtime_version" "$(service_state proxy-agent || true)"
+    else
+      printf 'proxy-%s %s（服务状态：%s）\n' "$component" "$(installed_version "$component")" \
+        "$(service_state "proxy-$component" || true)"
+    fi
   done
 }
 

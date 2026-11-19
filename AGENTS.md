@@ -178,7 +178,7 @@ Viewer 默认不能：
 
 服务器剩余价值卡片展示总价值、月均支出、剩余价值，默认折算为 CNY，可切换服务器续费表单支持的 CNY／USD／EUR／HKD／GBP／JPY／TWD／SGD。统计全部未删除服务器，含离线、维护与停用服务器；总价值按各服务器登记的单个续费周期价格合计，月均支出与剩余价值沿用服务器详情的周期与天数估算。未填价格不计入，零价格按零处理；一次性费用不计月均支出，且不估算剩余价值；周期付费已到期时剩余价值为零。缺少日期或不支持的周期明确标注未计入台数，某项没有可计价服务器时显示「—」。
 
-汇率接口 `GET /api/v1/dashboard/exchange-rates` 允许 Owner／Viewer 登录后读取，固定请求 `https://open.er-api.com/v6/latest/CNY`，返回 `{base,updatedAt,nextUpdateAt,source,sourceUrl,rates}`，rates 仅含上述八种币种，含义为 1 CNY 可兑换的金额。供应商为 ExchangeRate-API，无密钥；请求不携带服务器或用户数据。面板按供应商下一次更新时间缓存于内存，过期后重新读取；HTTP、格式、币种或日期异常返回 502 `exchange_rates_unavailable` 与原始错误原因，不使用固定汇率或过期缓存。前端以「原金额 ÷ 原币种汇率 × 展示币种汇率」统一换算，显示实际汇率日期（面板时区）及来源链接；「今日汇率」为供应商最新日汇率，不代表实时交易报价。总览每次刷新服务器列表时刷新财务数据，列表、元数据或汇率读取失败时在卡片中显示错误，不影响其他总览模块。
+汇率接口 `GET /api/v1/dashboard/exchange-rates` 允许 Owner／Viewer 登录后读取，固定请求 `https://open.er-api.com/v6/latest/CNY`，返回 `{base,updatedAt,nextUpdateAt,source,sourceUrl,rates}`，rates 仅含上述八种币种，含义为 1 CNY 可兑换的金额。供应商为 ExchangeRate-API，无密钥；请求不携带服务器或用户数据。面板按供应商下一次更新时间缓存于内存，过期后重新读取；HTTP、格式、币种或日期异常返回 502 `exchange_rates_unavailable` 与原始错误原因，不使用固定汇率或过期缓存。前端以「原金额 ÷ 原币种汇率 × 展示币种汇率」统一换算，显示实际汇率日期（面板时区）及来源链接；卡片与其他统计卡片同一结构：大字为剩余价值并附总值，分隔线下一行为月均支出与已计价台数，币种选择位于标题行右侧；汇率表、汇率日期与来源、未计入台数及三项数值说明默认不显示，悬停或键盘聚焦大字时以浮层完整显示，不改变卡片高度；「今日汇率」为供应商最新日汇率，不代表实时交易报价。财务数据（汇率与各服务器续费信息）按面板时区每天读取一次，缓存在浏览器内存中，离开再回到总览不重复读取；新增服务器即时补读，读取失败不缓存、下次刷新重试，浏览器刷新页面会重新读取；列表、元数据或汇率读取失败时在卡片中显示错误，不影响其他总览模块。
 
 主要展示：
 
@@ -192,7 +192,7 @@ Viewer 默认不能：
 - 灰色：离线
 - 蓝色：配置发布或更新中
 
-总览 `GET /api/v1/dashboard` 的 `nodeTraffic` 按未删除节点返回 `{nodeId,todayUpload,todayDownload,monthUpload,monthDownload,measured}`，从 `node_traffic_samples` 汇总面板时区当日与自然月的保留样本（半开区间，口径见第 21 节）。本月无样本时数值为 0、`measured=false`，页面显示“—”；节点流量卡片的「今日／本月」总量与排行共用这些数据，不读取心跳累计字节；排行百分比为占总量比例。四张卡片下方一行显示当前连接、在线用户估计与今日阻断（`counts.activeConnections/onlineUsers/todayBlocked`），任一启用节点未上报时前两项为「—」并提示「部分节点未测」。待处理问题的核心异常判断只检查在线且已有配置修订的节点，优先读取 `heartbeat.cores`，旧上报无 cores 时读 `core_healthy/core_error`；未发布配置不计核心异常。
+总览 `GET /api/v1/dashboard` 的 `nodeTraffic` 按未删除节点返回 `{nodeId,todayUpload,todayDownload,monthUpload,monthDownload,measured,historyError?}`，通过 access 统一读取 `node_traffic_samples` 与核心小时汇总，计算面板时区当日与自然月的保留样本（半开区间，口径见第 21 节）。本月无样本时数值为 0、`measured=false`，页面显示“—”；月份边界切入已合并小时则带 `historyError`，该月总量、比例与排行显示不可用，今日仍可读；节点流量卡片的「今日／本月」总量与排行共用这些数据，不读取心跳累计字节；排行百分比为占总量比例。四张卡片下方一行显示当前连接、在线用户估计与今日阻断（`counts.activeConnections/onlineUsers/todayBlocked`），任一启用节点未上报时前两项为「—」并提示「部分节点未测」。待处理问题的核心异常判断只检查在线且已有配置修订的节点，优先读取 `heartbeat.cores`，旧上报无 cores 时读 `core_healthy/core_error`；未发布配置不计核心异常。
 
 # 9. 用户管理模块
 
@@ -690,11 +690,15 @@ YouTube → Direct
 
 离线缓存，重连补传，收到 Ack 才删。满时先淘汰最旧允许记录，优先保留阻断与流量。同一流量或访问记录批次（访问记录自 v1.5.4 起）被面板连续拒绝 3 次则隔离、保留且不淘汰，后续批次继续；1 小时后或 Agent 重启重试。面板拒收批次时记一条 WARN「agent batch rejected」（节点、种类、批次 ID、固定原因码、修订号，同一节点同类同原因每分钟最多一条），不记录用户名或域名。删除用户/旧设备前产生的批次按其修订与凭据墓碑归属，只累加仍存在的用户/身份。
 
-**代理月流量**：按面板时区半开月区间汇总保留样本，`scope=retained_account_samples`。HourlyDays 清理后不能还原完整历史月份（L9），不得拼累计心跳/UTC 日桶冒充完整月份。
+**代理月流量**：按面板时区半开月区间汇总节点流量，保留已发布的 `scope=retained_account_samples` 接口值。迁移 0154 后合并核心小时历史；旧版已清理的账户回退样本不能补回（L9），不得拼累计心跳/UTC 日桶冒充完整月份。边界切入已有 UTC 小时汇总返回 422 `traffic_history_resolution`，附可查询整点。
 
 **核心/节点总量**：Hello/Welcome 双方协商 `node_traffic_supported`（面板须有 AccessRecorder），Agent 额外上传每核心累计 `traffic.Counter{kind:"node"}`；未协商则整批 FailedPrecondition。校验 core=xray/sing-box/gost、credential_id=node、epoch 后缀 .node、当前已确认修订、字节非负且 ≤1 PiB。
 
 按（节点、epoch、node）保存游标、计算增量写 `core_traffic_samples`，批次幂等，多核心 epoch 互不淘汰。`node_traffic_samples` 仅在同 epoch 无 node 游标时回退账户样本，避免重复；总量用于今日/月节点与访问审计节点汇总，绝不进入用户额度，用户维度只取账户计数。官方 sing-box 无 with_v2ray_api 时用户未知。
+
+**流量存储整理（本地实现，未发布／未部署）**：迁移 0154 增加 `core_traffic_hourly`、`traffic_storage_job`、`traffic_delivery_queues` 及回执／pending 的固定交付身份。核心明细保留至少 7 天，完整过期小时每批 500 行在同事务合并、删除和记录进度；迟到增量下轮补入小时。统一查询沿用 node 游标的账户回退去重，历史原始样本数用汇总 `samples`，用户维度与额度不变。
+
+Hello/Welcome 明确协商 `traffic_retirement_supported`；Agent bound spool v2 认证固定 queue_id、编号、队列原文与删除进度。控制消息序号不当作交付编号。面板保存连续完成 C、节点持久删除确认 A、已淘汰 R（R≤A≤C）；冻结候选后至少等 24 小时，每批最多 500 条淘汰，缺口或 pending 阻止跨越。旧无编号回执保留，切换后拒绝旧协议。仅显式身份恢复核销可在同事务封存旧队列并授权新队列；按 `(node_id,queue_id)` 保留旧检查点、每节点唯一活动队列，完整原 spool 仍可校验连续性后继续原队列。`seq≤R` 返回 `traffic_delivery_retired`，Agent 保留原队列；身份或进度冲突返回 `traffic_delivery_conflict`。节点逻辑删除继续保留历史。整理随现有生命周期停止／恢复，不自动 VACUUM，删除先产生可复用页。状态在访问存储增长观察展示。详见[设计](docs/superpowers/specs/2026-11-18-traffic-storage-retirement-design.md)。
 
 Xray 总量=账户计数＋已渲染 forward 的原生入站计数。渲染生成 tag 白名单，额外查询 `inbound>>>`（Reset_=false），仅接受白名单精确 uplink/downlink，忽略用户入站/管理 API/其他入站，避免重算。sing-box 取核心总量（含转发）；旧 Agent 缺失转发字节不补记。forward 无用户身份，不进额度、设备计数或域名归属。
 
@@ -1386,7 +1390,7 @@ POST   /api/v1/notification-channels/{id}/test
 
 `GET /api/v1/notifications` 支持 Owner 与 Viewer：Viewer 角色仅返回允许的 4 类监控通知（`node_offline`、`cpu`、`memory`、`disk`），Owner 可查看全部通知（含 `public_ip`、`machine_traffic`、`system_alert`）；支持 `unread=1` 只看未读与分页参数，返回 `{items,total,unread}`。
 `POST /api/v1/notifications/read-all`：仅限 Owner＋CSRF，批量将全部未读通知标记为已读。
-`GET /api/v1/notification-rules` 与 `PUT /api/v1/notification-rules`：仅限 Owner，PUT 要求 CSRF。体 `{items:[Rule]}` 进行完整规则替换，包含 7 类规则的启用开关、阈值、持续分钟与冷却分钟，非法值返回 400 `invalid_request`，记操作日志“修改通知规则”。
+`GET /api/v1/notification-rules` 与 `PUT /api/v1/notification-rules`：仅限 Owner，PUT 要求 CSRF。体 `{items:[Rule]}` 进行完整规则替换，包含 7 类规则的启用开关、阈值、持续分钟与冷却分钟；node_offline 每轮离线超过持续时间只通知一次，恢复心跳（online/degraded）后只通知一次，持续离线不因冷却到期重发，持久状态跨面板重启保留。离线规则原 cooldownMinutes 字段继续保存但不参与重提醒，界面显示“离线一次，恢复一次”；其他规则冷却行为不变。非法值返回 400 `invalid_request`，记操作日志“修改通知规则”。
 `GET /api/v1/notification-channels`：仅限 Owner，返回渠道列表；Webhook 项增加非敏感 `format`，不包含配置明文。`last4` 仍只显示 Telegram Token 或 Webhook URL 的末 4 位，不显示签名密钥摘要。
 `POST /api/v1/notification-channels`、`PUT /api/v1/notification-channels/{id}`、`DELETE /api/v1/notification-channels/{id}`：仅限 Owner＋CSRF。支持 `telegram`（Bot Token、Chat ID）与 `webhook`（须为 HTTPS URL）。Webhook 的 `config.format` 支持 `generic`、`wecom`、`dingtalk`、`feishu`；新建或旧配置为空时等同 `generic`，无需迁移。`config.secret` 为可选签名密钥，仅钉钉和飞书允许，最多 1024 字节；Telegram 不允许设置 format/secret。未知字段拒绝，记操作日志“修改通知渠道”。
 
@@ -1532,6 +1536,10 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 ## 30.2 节点端
 
+终端与网页同时升级实际 Agent 的本地功能已实现于工作区，尚未发布/部署（设计见[方案](docs/superpowers/specs/2026-11-16-qui-managed-agent-update-design.md)）。含此功能的版本中，`qui` / `qui-update --component agent` 先提交引导程序升级，再通过现有监督进程更新实际 Agent；网页升级继续可用。两种实际安装复用原加密任务日志、生命周期锁、签名、健康检查和失败回滚。本地 socket 为数据目录内 `agent-local.sock`（0600），只接受固定状态/预检/签名安装请求，不提供命令执行；本地签名候选存于 `releases/agent-local-candidates/`，`local-` ID 为本地安装保留，续做不走网络目录。受管服务停止、没有基础配置或已有升级/恢复时拒绝更新。终端检查引导程序和实际版本，任一高于目标均拒绝降级；第二阶段失败保留新版引导程序，实际 Agent 按受管日志回滚，命令非零退出。旧更新器首次迁移需运行两次同目标版本命令，此后一次。离线受管升级须在 bundle/sums 之外提供 `--agent-manifest FILE`；缺失或不匹配在停止前失败。完整步骤见[部署说明](docs/deployment.md#受管-agent-的终端升级开发中尚未发布)。
+
+引导重启前由监督进程持有任务日志排他保留并暂停任务轮询；保留由终端管道及私有连接维持，服务停止或终端异常退出即释放。本地任务中断需恢复时，可重跑原目标版本命令，程序先按原任务身份执行已有恢复事务，再继续安装；原失败与恢复结果均保留。只检查尚未解决的失败，已经恢复成功的历史失败不继续阻挡升级。其他未完成任务和网页来源恢复不被本地新安装覆盖。
+
 | 路径 | 用途 |
 | --- | --- |
 | /usr/local/bin/proxy-agent、qui、qui-update | Agent 引导镜像、root 菜单、更新器 |
@@ -1584,7 +1592,7 @@ v1.4 开发分支：`tunnels/tunnel_hops/tunnel_rules/port_claims/tunnel_objects
 | scheduled 默认目标、node_latency_targets、latency_targets_custom | 属配置；兼容 0121 前归档并默认继承。进程内恢复保留当前自定义（含空表），补其新目标但不提升为系统默认 |
 | node_tuning | 备份/校验/清单包含；恢复以当前库为准，删归档独有行、保留当前期望/结果，pending→unconfirmed，不重发、不写宿主 sysctl；旧归档迁移后同处理，需核对 tuningCurrent |
 | 多核心配置/任务 | inbounds.core、nodes 的 multi_core_supported/node_traffic_supported/gost_core_supported、health_checks/restart_requests.core、core_update_tasks.adding、core_remove_tasks 纳入备份；validateMultiCore 要求结果 JSON 与 id/component/revision/code/status 一致，不能同组件同时排添加/移除。移除表清空后复制归档，queued/running 更新/移除均变 unconfirmed、不重发；能力位待重连刷新 |
-| node_traffic_cursors、core_traffic_samples | 随访问数据恢复，避免同段字节重复计量 |
+| node_traffic_cursors、core_traffic_samples、core_traffic_hourly、traffic_storage_job、traffic_delivery_queues、流量回执及 pending 的交付身份（0154） | 加密快照保留，清单计数和材料校验覆盖新表；有当前冻结库时先认证并迁移证据副本，统计、游标、回执完成／封存进度整组以当前事实为准，pending 并集冲突则拒绝安装，不能复活 R 以内数据；无当前库时仅具有归档实际证据 |
 | canvas_tunnels.gost_material | 随加密备份且纳入校验，原样恢复不重签；不自动发布，界面 modified，Owner 下次发布才下发 |
 | tunnels、tunnel_hops、tunnel_rules（含 published_snapshot） | 加密备份/清单/校验覆盖；保留端口、版本与密封材料，不重签；恢复已发布对象标 modified，须 Owner 显式发布 |
 | port_claims、tunnel_objects | 保留 ID 归属与历史声明；拒绝孤立/重复归属、缺失或冲突声明，不自动重分配 |

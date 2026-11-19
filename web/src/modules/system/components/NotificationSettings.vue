@@ -84,7 +84,8 @@
               </td>
               <!-- Cooldown -->
               <td class="py-3 px-3">
-                <div class="flex items-center gap-1">
+                <span v-if="rule.kind === 'node_offline'" class="text-xs text-ios-tertiary">离线一次，恢复一次</span>
+                <div v-else class="flex items-center gap-1">
                   <input
                     type="number"
                     min="0"
@@ -356,7 +357,7 @@ function ruleKindLabel(kind: string): string {
 
 function ruleKindDesc(kind: string): string {
   switch (kind) {
-    case 'node_offline': return '节点超过指定时间没有心跳上报';
+    case 'node_offline': return '超过持续时间后通知一次，心跳恢复后再通知一次';
     case 'cpu': return '节点 CPU 使用率持续超过阈值';
     case 'memory': return '节点内存使用率持续超过阈值';
     case 'disk': return '节点磁盘使用率超过阈值';

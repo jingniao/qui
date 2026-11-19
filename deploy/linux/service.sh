@@ -209,7 +209,7 @@ agent_web_upgrade_failed() {
   backup="$data/web-upgrade-failed-$stamp"
   mkdir -p -- "$backup" && chmod 0700 -- "$backup"
   for path in "$data/identity/agent-supervisor.enc" "$data/identity/agent-release-checkpoint.enc" \
-    "$data/agent-release-history" "$data/releases/agent-installed" "$data/releases/agent-candidates" \
+    "$data/agent-release-history" "$data/releases/agent-installed" "$data/releases/agent-candidates" "$data/releases/agent-local-candidates" \
     "$data/agent-jobs" "$data/identity/agent-jobs-checkpoint.enc" "$data/identity/agent-supervision-init.pending"; do
     [[ -e $path || -L $path ]] || continue
     mv -- "$path" "$backup/" || true

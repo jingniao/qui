@@ -241,12 +241,12 @@
           </div>
 
           <!-- 核心更新折叠面板 -->
-          <details ref="coreDetails" class="rounded-xl border border-black/[0.05] p-2.5 bg-black/[0.01]">
+          <details @toggle="coreUpdatesOpened ||= ($event.target as HTMLDetailsElement).open" ref="coreDetails" class="rounded-xl border border-black/[0.05] p-2.5 bg-black/[0.01]">
             <summary class="cursor-pointer text-xs font-medium text-ios-secondary hover:text-ios-blue transition-colors select-none">
               核心更新选项
             </summary>
             <div class="pt-2">
-              <CoreUpdatesPanel :nodes="[node]" :fixed-node-id="node.id" />
+              <CoreUpdatesPanel v-if="coreUpdatesOpened" :nodes="[node]" :fixed-node-id="node.id" />
             </div>
           </details>
 
@@ -401,6 +401,7 @@ import {
 import { addressChanges, validConnectHost, candidateLabel, type NodeAddress } from '../../nodeAddress';
 
 const coreDetails = ref<HTMLDetailsElement>();
+const coreUpdatesOpened = ref(false);
 
 const props = defineProps<{ node: NodeView; meta: NodeMeta }>();
 const emit = defineEmits<{ changed: []; install: []; delete: [] }>();

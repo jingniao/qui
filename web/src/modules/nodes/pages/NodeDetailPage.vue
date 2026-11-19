@@ -36,7 +36,7 @@
       </template>
       <template v-else>
         <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : '服务器离线' }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
-        <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :groups="groups" :meta="meta" :now="now" :today="today" :month="month" :machine-traffic="machineTraffic" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
+        <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :meta="meta" :now="now" :today="today" :month="month" :machine-traffic="machineTraffic" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
         <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id + ':' + nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
         <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :active="activeTab === 'revisions'" :latest-revision="latestRevision" @changed="load" @published="published" />
@@ -54,7 +54,6 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { nodeAPI, type MachineTrafficSummary, type NodeView } from '../api';
-import { groupAPI, type NodeGroup } from '../groupsApi';
 import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
 import { choices } from '../../proxy/api';
@@ -86,7 +85,7 @@ import ServerDeleteDialog from '../components/ServerDeleteDialog.vue';
 
 const route = useRoute(), router = useRouter();
 const node = ref<NodeView | null>(null), error = ref(''), loading = ref(false), warnings = ref<string[]>([]);
-const groups = ref<NodeGroup[]>([]), revisions = ref<Revision[]>([]), now = ref(Date.now());
+const revisions = ref<Revision[]>([]), now = ref(Date.now());
 const status = computed(() => node.value ? detailState(node.value, now.value) === 'pending' ? { tone: 'disabled', label: '待登记' } : serverStatus(node.value, now.value) : { tone: 'offline', label: '读取中' });
 const pending = computed(() => node.value && detailState(node.value, now.value) === 'pending');
 const offline = computed(() => node.value && detailState(node.value, now.value) === 'offline');
@@ -228,10 +227,14 @@ async function load() {
 
 let supplementGeneration = 0, supplementReading = false;
 async function loadSupplements() {
-  if (supplementReading || !node.value || document.visibilityState !== 'visible') return;
+  if (supplementReading || !node.value || document.visibilityState !== 'visible' || !['overview', 'settings'].includes(activeTab.value)) return;
   supplementReading = true;
-  const id = node.value.id, current = generation, ticket = ++supplementGeneration;
+  const id = node.value.id, current = generation, ticket = ++supplementGeneration, startedTab = activeTab.value;
   try {
+    if (activeTab.value === 'settings') {
+      try { await loadNodeMeta(id, isOwner.value); } catch (e) { if (current === generation) warnings.value = [(e as Error).message]; }
+      return;
+    }
     const notices: string[] = [];
     const optional = async <T,>(label: string, promise: Promise<T>, fallback: T): Promise<T> => {
       try {
@@ -249,8 +252,7 @@ async function loadSupplements() {
       utc.setUTCHours(0, 0, 0, 0);
       dayStart = utc.toISOString();
     }
-    const [groupResult, revisionResult, daily, monthly, machine] = await Promise.all([
-      isOwner.value ? optional('节点分组读取失败', choices(groupAPI.list), groups.value) : Promise.resolve([]),
+    const [revisionResult, daily, monthly, machine] = await Promise.all([
       isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), revisions.value) : Promise.resolve([]),
       optional('今日流量读取失败', accessAPI.accounts({ nodeId: id, from: dayStart, to: new Date().toISOString() }), null),
       optional('本月流量读取失败', request<{ items: { nodeId: string; uploadBytes: number; downloadBytes: number }[]; timezone: string }>('/traffic/nodes/monthly'), null),
@@ -258,16 +260,22 @@ async function loadSupplements() {
       optional('元数据读取失败', loadNodeMeta(id, isOwner.value), null)
     ]);
     if (current !== generation || ticket !== supplementGeneration) return;
-    groups.value = groupResult;
     revisions.value = revisionResult;
     revisionRefresh.value++;
     if (daily) today.value = daily.observations > 0 ? daily.uploadBytes + daily.downloadBytes : undefined;
     const item = monthly?.items.find(item => item.nodeId === id);
-    if (monthly) month.value = item ? item.uploadBytes + item.downloadBytes : undefined;
+    month.value = item ? item.uploadBytes + item.downloadBytes : undefined;
     machineTraffic.value = machine;
     warnings.value = notices;
-  } finally { if (ticket === supplementGeneration) supplementReading = false; }
+  } finally {
+    if (ticket === supplementGeneration) {
+      supplementReading = false;
+      if (current === generation && startedTab !== activeTab.value) void loadSupplements();
+    }
+  }
 }
+
+watch(activeTab, () => { void loadSupplements(); });
 
 // Only this node's status events (or the empty "all nodes" event) refresh the page.
 function nodeStatusChanged(event: Event) {
@@ -282,7 +290,6 @@ watch(() => route.params.id, () => {
   editorOpen.value = false;
   unpublished.value = false;
   node.value = null;
-  groups.value = [];
   revisions.value = [];
   today.value = undefined;
   month.value = undefined;

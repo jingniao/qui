@@ -85,25 +85,25 @@
             <div>
               <span class="text-xs text-neutral-400 block">模式</span>
               <span class="text-xs font-bold text-neutral-800 uppercase mt-0.5 block truncate">
-                {{ formatModeName(policy.config.settings.mode) }}
+                {{ formatModeName(policy.card.mode) }}
               </span>
             </div>
             <div>
               <span class="text-xs text-neutral-400 block">策略组</span>
               <span class="text-xs font-bold text-neutral-800 mt-0.5 block">
-                {{ policy.config.proxyGroups.length }} 个
+                {{ policy.card.groupCount }} 个
               </span>
             </div>
             <div>
               <span class="text-xs text-neutral-400 block">规则数</span>
               <span class="text-xs font-bold text-neutral-800 mt-0.5 block">
-                {{ policy.config.rules.filter(r => r.enabled).length }} 条
+                {{ policy.card.enabledRuleCount }} 条
               </span>
             </div>
           </div>
 
           <div class="flex items-center justify-between text-xs text-neutral-400 pt-0.5 font-mono">
-            <span>端口: {{ policy.config.settings.mixedPort }}</span>
+            <span>端口: {{ policy.card.mixedPort }}</span>
             <span>{{ formatDateTime(policy.updatedAt) }}</span>
           </div>
         </div>
@@ -2328,7 +2328,7 @@
 
 <script setup lang="ts">
 import { allPages } from '../../../app/pagination';
-import { ref, computed, onMounted, h, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, h, watch } from 'vue';
 import {
   clientPolicyAPI,
   clientPolicyProfilesAPI,
@@ -2353,7 +2353,7 @@ import {
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
-import { userAPI, type ProxyUser } from '../../users/api';
+import { userAPI, type UserSummary } from '../../users/api';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
 import { authState, formatTime } from '../../../app/auth';
@@ -2380,7 +2380,8 @@ export interface SavedClientPolicy {
 const SAVED_POLICIES_KEY = 'qui_client_saved_policies_v2';
 const ACTIVE_POLICY_ID_KEY = 'qui_client_active_policy_id_v2';
 
-const savedPolicies = ref<SavedClientPolicy[]>([]);
+type PolicyCard = Omit<SavedClientPolicy, 'config' | 'uiMetadata'> & { card: { mode: string; mixedPort: number; groupCount: number; enabledRuleCount: number } };
+const savedPolicies = ref<PolicyCard[]>([]);
 const activePolicyId = ref<string>('');
 const activeRevision = ref(0);
 const editingActiveRevision = ref<number | undefined>();
@@ -2392,7 +2393,7 @@ const editingPolicyId = ref<string | null>(null);
 const policyNameInput = ref('');
 const policyDescInput = ref('');
 const setAsActiveOnSave = ref(false);
-const deletingPolicy = ref<SavedClientPolicy | null>(null);
+const deletingPolicy = ref<PolicyCard | null>(null);
 const confirmDeletePolicyVisible = ref(false);
 const showVersionDialog = ref(false);
 
@@ -2492,14 +2493,14 @@ const modulesList = [
   }
 ];
 
-function policyCard(profile: ClientPolicyProfile): SavedClientPolicy {
-  return { ...profile, config: toConfig(profile) };
+function policyCard(profile: ClientPolicyProfile): SavedClientPolicy & PolicyCard {
+  const config = toConfig(profile);
+  return { ...profile, config, card: { mode: config.settings.mode, mixedPort: config.settings.mixedPort, groupCount: config.proxyGroups.length, enabledRuleCount: config.rules.filter(r => r.enabled).length } };
 }
 
 async function loadSavedPolicies() {
   const list = await clientPolicyProfilesAPI.list();
-  const profiles = await Promise.all(list.items.map(item => clientPolicyProfilesAPI.get(item.id)));
-  savedPolicies.value = profiles.map(item => policyCard(item.profile));
+  savedPolicies.value = list.items;
   activePolicyId.value = list.activeProfileId;
   activeRevision.value = list.activeRevision;
 }
@@ -2556,7 +2557,17 @@ async function importLegacyCards() {
   importing.value = false;
 }
 
-function editPolicy(policy: SavedClientPolicy) {
+let editGeneration = 0;
+onUnmounted(() => { editGeneration++; });
+watch(configModalVisible, visible => { if (!visible) editGeneration++; });
+async function editPolicy(summary: PolicyCard) {
+  const current = ++editGeneration;
+  let policy: SavedClientPolicy;
+  try {
+    const result = await clientPolicyProfilesAPI.get(summary.id);
+    if (current !== editGeneration) return;
+    policy = acceptProfile(result);
+  } catch (e) { if (current === editGeneration) profileFailure(e); return; }
   editingPolicyId.value = policy.id;
   editingActiveRevision.value = policy.id === activePolicyId.value ? activeRevision.value : undefined;
   conflictVersion.value = '';
@@ -2567,13 +2578,13 @@ function editPolicy(policy: SavedClientPolicy) {
   draftMetadata.value = JSON.parse(JSON.stringify(policy.uiMetadata));
   groupCategories.value = { ...(draftMetadata.value.groupCategories as typeof groupCategories.value || {}) };
   originalSnapshot.value = JSON.stringify(policy.config);
-  isDirty.value = false;
+  isDirty.value = false; loaded.value = true;
   modalMode.value = 'edit';
   activeModule.value = 'settings';
   configModalVisible.value = true;
 }
 
-async function enablePolicy(policy: SavedClientPolicy) {
+async function enablePolicy(policy: PolicyCard) {
   if (activePolicyId.value === policy.id) return;
   saving.value = true;
   try {
@@ -2586,7 +2597,7 @@ async function enablePolicy(policy: SavedClientPolicy) {
   }
 }
 
-function promptDeletePolicy(policy: SavedClientPolicy) {
+function promptDeletePolicy(policy: PolicyCard) {
   if (savedPolicies.value.length <= 1) {
     showToast('至少需要保留一个策略配置，无法删除全部配置', 'warning');
     return;
@@ -2632,6 +2643,7 @@ function openNewConfigModal() {
 
   originalSnapshot.value = JSON.stringify(clientConfig.value);
   isDirty.value = false;
+  editGeneration++; loaded.value = true;
   modalMode.value = 'create';
   activeModule.value = 'settings';
   configModalVisible.value = true;
@@ -2860,13 +2872,13 @@ const candidateError = ref('');
 const draftMetadata = ref<Record<string, unknown>>({});
 const groupCategories = ref<Record<string, 'service' | 'region' | 'other'>>({});
 const previewUserId = ref('');
-const previewUsers = ref<ProxyUser[]>([]);
+const previewUsers = ref<UserSummary[]>([]);
 const previewUsersLoaded = ref(false);
 const loadingPreviewUsers = ref(false);
 const previewUsersError = ref('');
 let candidateGeneration = 0;
 
-function eligiblePreviewUser(user: ProxyUser) {
+function eligiblePreviewUser(user: UserSummary) {
   return user.status === 'active' && user.nodeGroupIds.length > 0
     && (!user.expiresAt || Date.parse(user.expiresAt) > Date.now())
     && !(user.trafficLimit > 0 && user.usedTraffic >= user.trafficLimit);
@@ -2876,7 +2888,7 @@ async function loadPreviewUsers() {
   loadingPreviewUsers.value = true;
   previewUsersError.value = '';
   try {
-    const result = await allPages(page => userAPI.list(page, '', 100));
+    const result = await allPages(page => userAPI.summaries(page, 100));
     previewUsers.value = result.items.filter(eligiblePreviewUser);
     previewUsersLoaded.value = true;
     if (previewUserId.value && !previewUsers.value.some(user => user.id === previewUserId.value)) {
@@ -4561,10 +4573,13 @@ function copyConfig() {
 
 // 加载初始数据
 async function loadConfiguration() {
+  const current = editGeneration;
   try {
     if (isOwner.value) {
       await loadSavedPolicies();
-      const active = savedPolicies.value.find(item => item.id === activePolicyId.value)!;
+      const result = await clientPolicyProfilesAPI.get(activePolicyId.value);
+      if (current !== editGeneration) return;
+      const active = acceptProfile(result);
       clientConfig.value = JSON.parse(JSON.stringify(active.config));
       previewLegacyCards();
     } else {
@@ -4584,7 +4599,7 @@ async function loadChoices() {
     const [presetsResult, setsResult, nodesResult, groupsResult] = await Promise.all([
       clientPolicyAPI.presets(),
       allPages(page => policyAPI.services(page, 100)),
-      allPages(page => nodeAPI.list(page, '')),
+      allPages(page => nodeAPI.choices(page, '', 100)),
       allPages(page => groupAPI.list(page, 100))
     ]);
     presetTemplates.value = presetsResult.items;

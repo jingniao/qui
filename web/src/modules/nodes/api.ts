@@ -107,6 +107,7 @@ export interface LatencyTargetsSettings extends LatencyTargetsInput { defaultTar
 // nothing saved yet; ids may still name servers deleted since the save.
 export interface ServerOrder { ids: string[]; revision: number; updatedAt?: string; updatedBy?: string; }
 export const nodeAPI = {
+  choices: (page: number, keyword = '', pageSize = 100) => request<Page<NodeView>>(`/nodes/choices?page=${page}&pageSize=${pageSize}&keyword=${encodeURIComponent(keyword)}`),
   serverOrder: () => request<ServerOrder>('/system/server-order'),
   saveServerOrder: (ids: string[], expectedRevision: number) => request<ServerOrder>('/system/server-order', 'PUT', { ids, expectedRevision }),
   metrics: (id: string, hours = 1) => request<NodeMetricsResponse>(`/nodes/${encodeURIComponent(id)}/metrics?hours=${hours}`),

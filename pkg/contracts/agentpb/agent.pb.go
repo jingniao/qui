@@ -679,22 +679,26 @@ func (x *EnrollResponse) GetExpiresAt() *timestamppb.Timestamp {
 }
 
 type Hello struct {
-	state                     protoimpl.MessageState `protogen:"open.v1"`
-	LastAckedSequence         uint64                 `protobuf:"varint,1,opt,name=last_acked_sequence,json=lastAckedSequence,proto3" json:"last_acked_sequence,omitempty"`
-	AgentVersion              string                 `protobuf:"bytes,2,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
-	BudgetRetirementSupported bool                   `protobuf:"varint,3,opt,name=budget_retirement_supported,json=budgetRetirementSupported,proto3" json:"budget_retirement_supported,omitempty"`
-	CoreUpdateSupported       bool                   `protobuf:"varint,4,opt,name=core_update_supported,json=coreUpdateSupported,proto3" json:"core_update_supported,omitempty"`
-	AgentUpdateSupported      bool                   `protobuf:"varint,5,opt,name=agent_update_supported,json=agentUpdateSupported,proto3" json:"agent_update_supported,omitempty"`
-	AgentRecoverySupported    bool                   `protobuf:"varint,6,opt,name=agent_recovery_supported,json=agentRecoverySupported,proto3" json:"agent_recovery_supported,omitempty"`
-	HealthCheckSupported      bool                   `protobuf:"varint,7,opt,name=health_check_supported,json=healthCheckSupported,proto3" json:"health_check_supported,omitempty"`
-	CoreRestartSupported      bool                   `protobuf:"varint,8,opt,name=core_restart_supported,json=coreRestartSupported,proto3" json:"core_restart_supported,omitempty"`
-	DeviceGateSupported       bool                   `protobuf:"varint,9,opt,name=device_gate_supported,json=deviceGateSupported,proto3" json:"device_gate_supported,omitempty"`
-	TcpProbeSupported         bool                   `protobuf:"varint,10,opt,name=tcp_probe_supported,json=tcpProbeSupported,proto3" json:"tcp_probe_supported,omitempty"`
-	MultiCoreSupported        bool                   `protobuf:"varint,11,opt,name=multi_core_supported,json=multiCoreSupported,proto3" json:"multi_core_supported,omitempty"`
-	NodeTrafficSupported      bool                   `protobuf:"varint,12,opt,name=node_traffic_supported,json=nodeTrafficSupported,proto3" json:"node_traffic_supported,omitempty"`
-	GostCoreSupported         bool                   `protobuf:"varint,13,opt,name=gost_core_supported,json=gostCoreSupported,proto3" json:"gost_core_supported,omitempty"`
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	state                      protoimpl.MessageState `protogen:"open.v1"`
+	LastAckedSequence          uint64                 `protobuf:"varint,1,opt,name=last_acked_sequence,json=lastAckedSequence,proto3" json:"last_acked_sequence,omitempty"`
+	AgentVersion               string                 `protobuf:"bytes,2,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	BudgetRetirementSupported  bool                   `protobuf:"varint,3,opt,name=budget_retirement_supported,json=budgetRetirementSupported,proto3" json:"budget_retirement_supported,omitempty"`
+	CoreUpdateSupported        bool                   `protobuf:"varint,4,opt,name=core_update_supported,json=coreUpdateSupported,proto3" json:"core_update_supported,omitempty"`
+	AgentUpdateSupported       bool                   `protobuf:"varint,5,opt,name=agent_update_supported,json=agentUpdateSupported,proto3" json:"agent_update_supported,omitempty"`
+	AgentRecoverySupported     bool                   `protobuf:"varint,6,opt,name=agent_recovery_supported,json=agentRecoverySupported,proto3" json:"agent_recovery_supported,omitempty"`
+	HealthCheckSupported       bool                   `protobuf:"varint,7,opt,name=health_check_supported,json=healthCheckSupported,proto3" json:"health_check_supported,omitempty"`
+	CoreRestartSupported       bool                   `protobuf:"varint,8,opt,name=core_restart_supported,json=coreRestartSupported,proto3" json:"core_restart_supported,omitempty"`
+	DeviceGateSupported        bool                   `protobuf:"varint,9,opt,name=device_gate_supported,json=deviceGateSupported,proto3" json:"device_gate_supported,omitempty"`
+	TcpProbeSupported          bool                   `protobuf:"varint,10,opt,name=tcp_probe_supported,json=tcpProbeSupported,proto3" json:"tcp_probe_supported,omitempty"`
+	MultiCoreSupported         bool                   `protobuf:"varint,11,opt,name=multi_core_supported,json=multiCoreSupported,proto3" json:"multi_core_supported,omitempty"`
+	NodeTrafficSupported       bool                   `protobuf:"varint,12,opt,name=node_traffic_supported,json=nodeTrafficSupported,proto3" json:"node_traffic_supported,omitempty"`
+	GostCoreSupported          bool                   `protobuf:"varint,13,opt,name=gost_core_supported,json=gostCoreSupported,proto3" json:"gost_core_supported,omitempty"`
+	TrafficRetirementSupported bool                   `protobuf:"varint,14,opt,name=traffic_retirement_supported,json=trafficRetirementSupported,proto3" json:"traffic_retirement_supported,omitempty"`
+	TrafficQueueId             string                 `protobuf:"bytes,15,opt,name=traffic_queue_id,json=trafficQueueId,proto3" json:"traffic_queue_id,omitempty"`
+	TrafficConfirmedSeq        uint64                 `protobuf:"varint,16,opt,name=traffic_confirmed_seq,json=trafficConfirmedSeq,proto3" json:"traffic_confirmed_seq,omitempty"`
+	TrafficIssuedSeq           uint64                 `protobuf:"varint,17,opt,name=traffic_issued_seq,json=trafficIssuedSeq,proto3" json:"traffic_issued_seq,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *Hello) Reset() {
@@ -816,6 +820,34 @@ func (x *Hello) GetGostCoreSupported() bool {
 		return x.GostCoreSupported
 	}
 	return false
+}
+
+func (x *Hello) GetTrafficRetirementSupported() bool {
+	if x != nil {
+		return x.TrafficRetirementSupported
+	}
+	return false
+}
+
+func (x *Hello) GetTrafficQueueId() string {
+	if x != nil {
+		return x.TrafficQueueId
+	}
+	return ""
+}
+
+func (x *Hello) GetTrafficConfirmedSeq() uint64 {
+	if x != nil {
+		return x.TrafficConfirmedSeq
+	}
+	return 0
+}
+
+func (x *Hello) GetTrafficIssuedSeq() uint64 {
+	if x != nil {
+		return x.TrafficIssuedSeq
+	}
+	return 0
 }
 
 type ProtocolCapability struct {
@@ -3201,6 +3233,7 @@ type AgentMessage struct {
 	//	*AgentMessage_TcpProbeResult
 	//	*AgentMessage_TuningResult
 	//	*AgentMessage_RemoveCoreResult
+	//	*AgentMessage_TrafficConfirmation
 	Payload       isAgentMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3449,6 +3482,15 @@ func (x *AgentMessage) GetRemoveCoreResult() *RemoveCoreResult {
 	return nil
 }
 
+func (x *AgentMessage) GetTrafficConfirmation() *TrafficConfirmation {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentMessage_TrafficConfirmation); ok {
+			return x.TrafficConfirmation
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Payload interface {
 	isAgentMessage_Payload()
 }
@@ -3529,6 +3571,10 @@ type AgentMessage_RemoveCoreResult struct {
 	RemoveCoreResult *RemoveCoreResult `protobuf:"bytes,28,opt,name=remove_core_result,json=removeCoreResult,proto3,oneof"`
 }
 
+type AgentMessage_TrafficConfirmation struct {
+	TrafficConfirmation *TrafficConfirmation `protobuf:"bytes,29,opt,name=traffic_confirmation,json=trafficConfirmation,proto3,oneof"`
+}
+
 func (*AgentMessage_Hello) isAgentMessage_Payload() {}
 
 func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
@@ -3566,6 +3612,8 @@ func (*AgentMessage_TcpProbeResult) isAgentMessage_Payload() {}
 func (*AgentMessage_TuningResult) isAgentMessage_Payload() {}
 
 func (*AgentMessage_RemoveCoreResult) isAgentMessage_Payload() {}
+
+func (*AgentMessage_TrafficConfirmation) isAgentMessage_Payload() {}
 
 type ObservationBatch struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -3783,6 +3831,7 @@ type Welcome struct {
 	MultiCoreSupported                  bool                   `protobuf:"varint,20,opt,name=multi_core_supported,json=multiCoreSupported,proto3" json:"multi_core_supported,omitempty"`
 	NodeTrafficSupported                bool                   `protobuf:"varint,21,opt,name=node_traffic_supported,json=nodeTrafficSupported,proto3" json:"node_traffic_supported,omitempty"`
 	AgentCataloguePort                  uint32                 `protobuf:"varint,22,opt,name=agent_catalogue_port,json=agentCataloguePort,proto3" json:"agent_catalogue_port,omitempty"`
+	TrafficRetirementSupported          bool                   `protobuf:"varint,23,opt,name=traffic_retirement_supported,json=trafficRetirementSupported,proto3" json:"traffic_retirement_supported,omitempty"`
 	unknownFields                       protoimpl.UnknownFields
 	sizeCache                           protoimpl.SizeCache
 }
@@ -3969,6 +4018,13 @@ func (x *Welcome) GetAgentCataloguePort() uint32 {
 		return x.AgentCataloguePort
 	}
 	return 0
+}
+
+func (x *Welcome) GetTrafficRetirementSupported() bool {
+	if x != nil {
+		return x.TrafficRetirementSupported
+	}
+	return false
 }
 
 type DeviceGateCommand struct {
@@ -4329,6 +4385,8 @@ type Ack struct {
 	ObservationCoreEpoch  string                 `protobuf:"bytes,6,opt,name=observation_core_epoch,json=observationCoreEpoch,proto3" json:"observation_core_epoch,omitempty"`
 	ObservationToSequence uint64                 `protobuf:"varint,7,opt,name=observation_to_sequence,json=observationToSequence,proto3" json:"observation_to_sequence,omitempty"`
 	EgressProofId         string                 `protobuf:"bytes,8,opt,name=egress_proof_id,json=egressProofId,proto3" json:"egress_proof_id,omitempty"`
+	TrafficQueueId        string                 `protobuf:"bytes,9,opt,name=traffic_queue_id,json=trafficQueueId,proto3" json:"traffic_queue_id,omitempty"`
+	TrafficDeliverySeq    uint64                 `protobuf:"varint,10,opt,name=traffic_delivery_seq,json=trafficDeliverySeq,proto3" json:"traffic_delivery_seq,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -4417,6 +4475,20 @@ func (x *Ack) GetEgressProofId() string {
 		return x.EgressProofId
 	}
 	return ""
+}
+
+func (x *Ack) GetTrafficQueueId() string {
+	if x != nil {
+		return x.TrafficQueueId
+	}
+	return ""
+}
+
+func (x *Ack) GetTrafficDeliverySeq() uint64 {
+	if x != nil {
+		return x.TrafficDeliverySeq
+	}
+	return 0
 }
 
 type RuntimeSourceBatch struct {
@@ -4554,6 +4626,8 @@ func (x *AccessBatch) GetBatchJson() []byte {
 type TrafficBatch struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	BatchJson     []byte                 `protobuf:"bytes,1,opt,name=batch_json,json=batchJson,proto3" json:"batch_json,omitempty"`
+	QueueId       string                 `protobuf:"bytes,2,opt,name=queue_id,json=queueId,proto3" json:"queue_id,omitempty"`
+	DeliverySeq   uint64                 `protobuf:"varint,3,opt,name=delivery_seq,json=deliverySeq,proto3" json:"delivery_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4595,6 +4669,72 @@ func (x *TrafficBatch) GetBatchJson() []byte {
 	return nil
 }
 
+func (x *TrafficBatch) GetQueueId() string {
+	if x != nil {
+		return x.QueueId
+	}
+	return ""
+}
+
+func (x *TrafficBatch) GetDeliverySeq() uint64 {
+	if x != nil {
+		return x.DeliverySeq
+	}
+	return 0
+}
+
+type TrafficConfirmation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	QueueId       string                 `protobuf:"bytes,1,opt,name=queue_id,json=queueId,proto3" json:"queue_id,omitempty"`
+	ConfirmedSeq  uint64                 `protobuf:"varint,2,opt,name=confirmed_seq,json=confirmedSeq,proto3" json:"confirmed_seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrafficConfirmation) Reset() {
+	*x = TrafficConfirmation{}
+	mi := &file_agent_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrafficConfirmation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrafficConfirmation) ProtoMessage() {}
+
+func (x *TrafficConfirmation) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrafficConfirmation.ProtoReflect.Descriptor instead.
+func (*TrafficConfirmation) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *TrafficConfirmation) GetQueueId() string {
+	if x != nil {
+		return x.QueueId
+	}
+	return ""
+}
+
+func (x *TrafficConfirmation) GetConfirmedSeq() uint64 {
+	if x != nil {
+		return x.ConfirmedSeq
+	}
+	return 0
+}
+
 type ApplyCommand struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	DesiredStateJson []byte                 `protobuf:"bytes,1,opt,name=desired_state_json,json=desiredStateJson,proto3" json:"desired_state_json,omitempty"`
@@ -4604,7 +4744,7 @@ type ApplyCommand struct {
 
 func (x *ApplyCommand) Reset() {
 	*x = ApplyCommand{}
-	mi := &file_agent_proto_msgTypes[48]
+	mi := &file_agent_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4616,7 +4756,7 @@ func (x *ApplyCommand) String() string {
 func (*ApplyCommand) ProtoMessage() {}
 
 func (x *ApplyCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[48]
+	mi := &file_agent_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4629,7 +4769,7 @@ func (x *ApplyCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyCommand.ProtoReflect.Descriptor instead.
 func (*ApplyCommand) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{48}
+	return file_agent_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ApplyCommand) GetDesiredStateJson() []byte {
@@ -4654,7 +4794,7 @@ type ApplyResult struct {
 
 func (x *ApplyResult) Reset() {
 	*x = ApplyResult{}
-	mi := &file_agent_proto_msgTypes[49]
+	mi := &file_agent_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4666,7 +4806,7 @@ func (x *ApplyResult) String() string {
 func (*ApplyResult) ProtoMessage() {}
 
 func (x *ApplyResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[49]
+	mi := &file_agent_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4679,7 +4819,7 @@ func (x *ApplyResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyResult.ProtoReflect.Descriptor instead.
 func (*ApplyResult) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{49}
+	return file_agent_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ApplyResult) GetRevision() int64 {
@@ -4743,7 +4883,7 @@ type OutboundHealth struct {
 
 func (x *OutboundHealth) Reset() {
 	*x = OutboundHealth{}
-	mi := &file_agent_proto_msgTypes[50]
+	mi := &file_agent_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4755,7 +4895,7 @@ func (x *OutboundHealth) String() string {
 func (*OutboundHealth) ProtoMessage() {}
 
 func (x *OutboundHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[50]
+	mi := &file_agent_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4768,7 +4908,7 @@ func (x *OutboundHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OutboundHealth.ProtoReflect.Descriptor instead.
 func (*OutboundHealth) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{50}
+	return file_agent_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *OutboundHealth) GetOutboundId() string {
@@ -4808,7 +4948,7 @@ type OutboundHealthBatch struct {
 
 func (x *OutboundHealthBatch) Reset() {
 	*x = OutboundHealthBatch{}
-	mi := &file_agent_proto_msgTypes[51]
+	mi := &file_agent_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4820,7 +4960,7 @@ func (x *OutboundHealthBatch) String() string {
 func (*OutboundHealthBatch) ProtoMessage() {}
 
 func (x *OutboundHealthBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[51]
+	mi := &file_agent_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4833,7 +4973,7 @@ func (x *OutboundHealthBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OutboundHealthBatch.ProtoReflect.Descriptor instead.
 func (*OutboundHealthBatch) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{51}
+	return file_agent_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *OutboundHealthBatch) GetItems() []*OutboundHealth {
@@ -4855,7 +4995,7 @@ type RollbackCommand struct {
 
 func (x *RollbackCommand) Reset() {
 	*x = RollbackCommand{}
-	mi := &file_agent_proto_msgTypes[52]
+	mi := &file_agent_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4867,7 +5007,7 @@ func (x *RollbackCommand) String() string {
 func (*RollbackCommand) ProtoMessage() {}
 
 func (x *RollbackCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[52]
+	mi := &file_agent_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4880,7 +5020,7 @@ func (x *RollbackCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackCommand.ProtoReflect.Descriptor instead.
 func (*RollbackCommand) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{52}
+	return file_agent_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *RollbackCommand) GetCommandId() string {
@@ -4939,7 +5079,7 @@ type ServerMessage struct {
 
 func (x *ServerMessage) Reset() {
 	*x = ServerMessage{}
-	mi := &file_agent_proto_msgTypes[53]
+	mi := &file_agent_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4951,7 +5091,7 @@ func (x *ServerMessage) String() string {
 func (*ServerMessage) ProtoMessage() {}
 
 func (x *ServerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[53]
+	mi := &file_agent_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4964,7 +5104,7 @@ func (x *ServerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
 func (*ServerMessage) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{53}
+	return file_agent_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ServerMessage) GetNodeId() string {
@@ -5204,7 +5344,7 @@ type RemoveCoreCommand struct {
 
 func (x *RemoveCoreCommand) Reset() {
 	*x = RemoveCoreCommand{}
-	mi := &file_agent_proto_msgTypes[54]
+	mi := &file_agent_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5216,7 +5356,7 @@ func (x *RemoveCoreCommand) String() string {
 func (*RemoveCoreCommand) ProtoMessage() {}
 
 func (x *RemoveCoreCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[54]
+	mi := &file_agent_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5229,7 +5369,7 @@ func (x *RemoveCoreCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveCoreCommand.ProtoReflect.Descriptor instead.
 func (*RemoveCoreCommand) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{54}
+	return file_agent_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *RemoveCoreCommand) GetId() string {
@@ -5266,7 +5406,7 @@ type RemoveCoreResult struct {
 
 func (x *RemoveCoreResult) Reset() {
 	*x = RemoveCoreResult{}
-	mi := &file_agent_proto_msgTypes[55]
+	mi := &file_agent_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5278,7 +5418,7 @@ func (x *RemoveCoreResult) String() string {
 func (*RemoveCoreResult) ProtoMessage() {}
 
 func (x *RemoveCoreResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[55]
+	mi := &file_agent_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5291,7 +5431,7 @@ func (x *RemoveCoreResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveCoreResult.ProtoReflect.Descriptor instead.
 func (*RemoveCoreResult) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{55}
+	return file_agent_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *RemoveCoreResult) GetId() string {
@@ -5340,7 +5480,7 @@ type TuningCommand struct {
 
 func (x *TuningCommand) Reset() {
 	*x = TuningCommand{}
-	mi := &file_agent_proto_msgTypes[56]
+	mi := &file_agent_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5352,7 +5492,7 @@ func (x *TuningCommand) String() string {
 func (*TuningCommand) ProtoMessage() {}
 
 func (x *TuningCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[56]
+	mi := &file_agent_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5365,7 +5505,7 @@ func (x *TuningCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TuningCommand.ProtoReflect.Descriptor instead.
 func (*TuningCommand) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{56}
+	return file_agent_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *TuningCommand) GetRequestId() string {
@@ -5401,7 +5541,7 @@ type TuningKeyResult struct {
 
 func (x *TuningKeyResult) Reset() {
 	*x = TuningKeyResult{}
-	mi := &file_agent_proto_msgTypes[57]
+	mi := &file_agent_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5413,7 +5553,7 @@ func (x *TuningKeyResult) String() string {
 func (*TuningKeyResult) ProtoMessage() {}
 
 func (x *TuningKeyResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[57]
+	mi := &file_agent_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5426,7 +5566,7 @@ func (x *TuningKeyResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TuningKeyResult.ProtoReflect.Descriptor instead.
 func (*TuningKeyResult) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{57}
+	return file_agent_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *TuningKeyResult) GetKey() string {
@@ -5470,7 +5610,7 @@ type TuningResult struct {
 
 func (x *TuningResult) Reset() {
 	*x = TuningResult{}
-	mi := &file_agent_proto_msgTypes[58]
+	mi := &file_agent_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5482,7 +5622,7 @@ func (x *TuningResult) String() string {
 func (*TuningResult) ProtoMessage() {}
 
 func (x *TuningResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[58]
+	mi := &file_agent_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5495,7 +5635,7 @@ func (x *TuningResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TuningResult.ProtoReflect.Descriptor instead.
 func (*TuningResult) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{58}
+	return file_agent_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *TuningResult) GetRequestId() string {
@@ -5542,7 +5682,7 @@ type TCPProbeCommand struct {
 
 func (x *TCPProbeCommand) Reset() {
 	*x = TCPProbeCommand{}
-	mi := &file_agent_proto_msgTypes[59]
+	mi := &file_agent_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5554,7 +5694,7 @@ func (x *TCPProbeCommand) String() string {
 func (*TCPProbeCommand) ProtoMessage() {}
 
 func (x *TCPProbeCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[59]
+	mi := &file_agent_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5567,7 +5707,7 @@ func (x *TCPProbeCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TCPProbeCommand.ProtoReflect.Descriptor instead.
 func (*TCPProbeCommand) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{59}
+	return file_agent_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *TCPProbeCommand) GetId() string {
@@ -5632,7 +5772,7 @@ type TCPProbeResult struct {
 
 func (x *TCPProbeResult) Reset() {
 	*x = TCPProbeResult{}
-	mi := &file_agent_proto_msgTypes[60]
+	mi := &file_agent_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5644,7 +5784,7 @@ func (x *TCPProbeResult) String() string {
 func (*TCPProbeResult) ProtoMessage() {}
 
 func (x *TCPProbeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[60]
+	mi := &file_agent_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5657,7 +5797,7 @@ func (x *TCPProbeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TCPProbeResult.ProtoReflect.Descriptor instead.
 func (*TCPProbeResult) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{60}
+	return file_agent_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *TCPProbeResult) GetId() string {
@@ -5707,7 +5847,7 @@ type HealthCheckCommand struct {
 
 func (x *HealthCheckCommand) Reset() {
 	*x = HealthCheckCommand{}
-	mi := &file_agent_proto_msgTypes[61]
+	mi := &file_agent_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5719,7 +5859,7 @@ func (x *HealthCheckCommand) String() string {
 func (*HealthCheckCommand) ProtoMessage() {}
 
 func (x *HealthCheckCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[61]
+	mi := &file_agent_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5732,7 +5872,7 @@ func (x *HealthCheckCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckCommand.ProtoReflect.Descriptor instead.
 func (*HealthCheckCommand) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{61}
+	return file_agent_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *HealthCheckCommand) GetId() string {
@@ -5777,7 +5917,7 @@ type HealthCheckResult struct {
 
 func (x *HealthCheckResult) Reset() {
 	*x = HealthCheckResult{}
-	mi := &file_agent_proto_msgTypes[62]
+	mi := &file_agent_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5789,7 +5929,7 @@ func (x *HealthCheckResult) String() string {
 func (*HealthCheckResult) ProtoMessage() {}
 
 func (x *HealthCheckResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[62]
+	mi := &file_agent_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5802,7 +5942,7 @@ func (x *HealthCheckResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckResult.ProtoReflect.Descriptor instead.
 func (*HealthCheckResult) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{62}
+	return file_agent_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *HealthCheckResult) GetId() string {
@@ -5908,7 +6048,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fcertificate_pem\x18\x02 \x01(\fR\x0ecertificatePem\x12\x15\n" +
 	"\x06ca_pem\x18\x03 \x01(\fR\x05caPem\x129\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xa8\x05\n" +
+	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xf6\x06\n" +
 	"\x05Hello\x12.\n" +
 	"\x13last_acked_sequence\x18\x01 \x01(\x04R\x11lastAckedSequence\x12#\n" +
 	"\ragent_version\x18\x02 \x01(\tR\fagentVersion\x12>\n" +
@@ -5923,7 +6063,11 @@ const file_agent_proto_rawDesc = "" +
 	" \x01(\bR\x11tcpProbeSupported\x120\n" +
 	"\x14multi_core_supported\x18\v \x01(\bR\x12multiCoreSupported\x124\n" +
 	"\x16node_traffic_supported\x18\f \x01(\bR\x14nodeTrafficSupported\x12.\n" +
-	"\x13gost_core_supported\x18\r \x01(\bR\x11gostCoreSupported\"\x8a\x01\n" +
+	"\x13gost_core_supported\x18\r \x01(\bR\x11gostCoreSupported\x12@\n" +
+	"\x1ctraffic_retirement_supported\x18\x0e \x01(\bR\x1atrafficRetirementSupported\x12(\n" +
+	"\x10traffic_queue_id\x18\x0f \x01(\tR\x0etrafficQueueId\x122\n" +
+	"\x15traffic_confirmed_seq\x18\x10 \x01(\x04R\x13trafficConfirmedSeq\x12,\n" +
+	"\x12traffic_issued_seq\x18\x11 \x01(\x04R\x10trafficIssuedSeq\"\x8a\x01\n" +
 	"\x12ProtocolCapability\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x18\n" +
 	"\ainbound\x18\x02 \x01(\bR\ainbound\x12\x1a\n" +
@@ -6212,7 +6356,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x10ReplayHeadStatus\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12;\n" +
 	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"observedAt\"\xed\r\n" +
+	"observedAt\"\xce\x0e\n" +
 	"\fAgentMessage\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
@@ -6239,7 +6383,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x12egress_proof_batch\x18\x19 \x01(\v2'.proxycontrol.agent.v1.EgressProofBatchH\x00R\x10egressProofBatch\x12Q\n" +
 	"\x10tcp_probe_result\x18\x1a \x01(\v2%.proxycontrol.agent.v1.TCPProbeResultH\x00R\x0etcpProbeResult\x12J\n" +
 	"\rtuning_result\x18\x1b \x01(\v2#.proxycontrol.agent.v1.TuningResultH\x00R\ftuningResult\x12W\n" +
-	"\x12remove_core_result\x18\x1c \x01(\v2'.proxycontrol.agent.v1.RemoveCoreResultH\x00R\x10removeCoreResultB\t\n" +
+	"\x12remove_core_result\x18\x1c \x01(\v2'.proxycontrol.agent.v1.RemoveCoreResultH\x00R\x10removeCoreResult\x12_\n" +
+	"\x14traffic_confirmation\x18\x1d \x01(\v2*.proxycontrol.agent.v1.TrafficConfirmationH\x00R\x13trafficConfirmationB\t\n" +
 	"\apayload\"1\n" +
 	"\x10ObservationBatch\x12\x1d\n" +
 	"\n" +
@@ -6252,7 +6397,7 @@ const file_agent_proto_rawDesc = "" +
 	"\rsnapshot_json\x18\x02 \x01(\fR\fsnapshotJson\"z\n" +
 	"\x10ConnectionStatus\x12#\n" +
 	"\rsnapshot_json\x18\x01 \x01(\fR\fsnapshotJson\x12A\n" +
-	"\x05cores\x18\x02 \x03(\v2+.proxycontrol.agent.v1.CoreConnectionStatusR\x05cores\"\x94\n" +
+	"\x05cores\x18\x02 \x03(\v2+.proxycontrol.agent.v1.CoreConnectionStatusR\x05cores\"\xd6\n" +
 	"\n" +
 	"\aWelcome\x124\n" +
 	"\x16last_accepted_sequence\x18\x01 \x01(\x04R\x14lastAcceptedSequence\x12<\n" +
@@ -6277,7 +6422,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x15device_gate_supported\x18\x13 \x01(\bR\x13deviceGateSupported\x120\n" +
 	"\x14multi_core_supported\x18\x14 \x01(\bR\x12multiCoreSupported\x124\n" +
 	"\x16node_traffic_supported\x18\x15 \x01(\bR\x14nodeTrafficSupported\x120\n" +
-	"\x14agent_catalogue_port\x18\x16 \x01(\rR\x12agentCataloguePort\"6\n" +
+	"\x14agent_catalogue_port\x18\x16 \x01(\rR\x12agentCataloguePort\x12@\n" +
+	"\x1ctraffic_retirement_supported\x18\x17 \x01(\bR\x1atrafficRetirementSupported\"6\n" +
 	"\x11DeviceGateCommand\x12!\n" +
 	"\frequest_json\x18\x01 \x01(\fR\vrequestJson\"7\n" +
 	"\x12AgentUpdateCommand\x12!\n" +
@@ -6299,7 +6445,7 @@ const file_agent_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x12\n" +
 	"\x04code\x18\x03 \x01(\tR\x04code\x12!\n" +
-	"\freceipt_json\x18\x04 \x01(\fR\vreceiptJson\"\xf2\x02\n" +
+	"\freceipt_json\x18\x04 \x01(\fR\vreceiptJson\"\xce\x03\n" +
 	"\x03Ack\x12%\n" +
 	"\x0eagent_sequence\x18\x01 \x01(\x04R\ragentSequence\x12&\n" +
 	"\x0faccess_batch_id\x18\x02 \x01(\tR\raccessBatchId\x12(\n" +
@@ -6308,7 +6454,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x14runtime_source_epoch\x18\x05 \x01(\tR\x12runtimeSourceEpoch\x124\n" +
 	"\x16observation_core_epoch\x18\x06 \x01(\tR\x14observationCoreEpoch\x126\n" +
 	"\x17observation_to_sequence\x18\a \x01(\x04R\x15observationToSequence\x12&\n" +
-	"\x0fegress_proof_id\x18\b \x01(\tR\regressProofId\"5\n" +
+	"\x0fegress_proof_id\x18\b \x01(\tR\regressProofId\x12(\n" +
+	"\x10traffic_queue_id\x18\t \x01(\tR\x0etrafficQueueId\x120\n" +
+	"\x14traffic_delivery_seq\x18\n" +
+	" \x01(\x04R\x12trafficDeliverySeq\"5\n" +
 	"\x12RuntimeSourceBatch\x12\x1f\n" +
 	"\vsource_json\x18\x01 \x01(\fR\n" +
 	"sourceJson\"0\n" +
@@ -6317,10 +6466,15 @@ const file_agent_proto_rawDesc = "" +
 	"usage_json\x18\x01 \x01(\fR\tusageJson\",\n" +
 	"\vAccessBatch\x12\x1d\n" +
 	"\n" +
-	"batch_json\x18\x01 \x01(\fR\tbatchJson\"-\n" +
+	"batch_json\x18\x01 \x01(\fR\tbatchJson\"k\n" +
 	"\fTrafficBatch\x12\x1d\n" +
 	"\n" +
-	"batch_json\x18\x01 \x01(\fR\tbatchJson\"<\n" +
+	"batch_json\x18\x01 \x01(\fR\tbatchJson\x12\x19\n" +
+	"\bqueue_id\x18\x02 \x01(\tR\aqueueId\x12!\n" +
+	"\fdelivery_seq\x18\x03 \x01(\x04R\vdeliverySeq\"U\n" +
+	"\x13TrafficConfirmation\x12\x19\n" +
+	"\bqueue_id\x18\x01 \x01(\tR\aqueueId\x12#\n" +
+	"\rconfirmed_seq\x18\x02 \x01(\x04R\fconfirmedSeq\"<\n" +
 	"\fApplyCommand\x12,\n" +
 	"\x12desired_state_json\x18\x01 \x01(\fR\x10desiredStateJson\"\xd5\x01\n" +
 	"\vApplyResult\x12\x1a\n" +
@@ -6452,7 +6606,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 	return file_agent_proto_rawDescData
 }
 
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 67)
 var file_agent_proto_goTypes = []any{
 	(*NodeRootRetirementConfirmation)(nil),    // 0: proxycontrol.agent.v1.NodeRootRetirementConfirmation
 	(*NodeRootRetirementAcknowledgement)(nil), // 1: proxycontrol.agent.v1.NodeRootRetirementAcknowledgement
@@ -6502,63 +6656,64 @@ var file_agent_proto_goTypes = []any{
 	(*FinalUsageBatch)(nil),                   // 45: proxycontrol.agent.v1.FinalUsageBatch
 	(*AccessBatch)(nil),                       // 46: proxycontrol.agent.v1.AccessBatch
 	(*TrafficBatch)(nil),                      // 47: proxycontrol.agent.v1.TrafficBatch
-	(*ApplyCommand)(nil),                      // 48: proxycontrol.agent.v1.ApplyCommand
-	(*ApplyResult)(nil),                       // 49: proxycontrol.agent.v1.ApplyResult
-	(*OutboundHealth)(nil),                    // 50: proxycontrol.agent.v1.OutboundHealth
-	(*OutboundHealthBatch)(nil),               // 51: proxycontrol.agent.v1.OutboundHealthBatch
-	(*RollbackCommand)(nil),                   // 52: proxycontrol.agent.v1.RollbackCommand
-	(*ServerMessage)(nil),                     // 53: proxycontrol.agent.v1.ServerMessage
-	(*RemoveCoreCommand)(nil),                 // 54: proxycontrol.agent.v1.RemoveCoreCommand
-	(*RemoveCoreResult)(nil),                  // 55: proxycontrol.agent.v1.RemoveCoreResult
-	(*TuningCommand)(nil),                     // 56: proxycontrol.agent.v1.TuningCommand
-	(*TuningKeyResult)(nil),                   // 57: proxycontrol.agent.v1.TuningKeyResult
-	(*TuningResult)(nil),                      // 58: proxycontrol.agent.v1.TuningResult
-	(*TCPProbeCommand)(nil),                   // 59: proxycontrol.agent.v1.TCPProbeCommand
-	(*TCPProbeResult)(nil),                    // 60: proxycontrol.agent.v1.TCPProbeResult
-	(*HealthCheckCommand)(nil),                // 61: proxycontrol.agent.v1.HealthCheckCommand
-	(*HealthCheckResult)(nil),                 // 62: proxycontrol.agent.v1.HealthCheckResult
-	nil,                                       // 63: proxycontrol.agent.v1.Heartbeat.TuningCurrentEntry
-	nil,                                       // 64: proxycontrol.agent.v1.TuningCommand.SettingsEntry
-	nil,                                       // 65: proxycontrol.agent.v1.TuningResult.InitialEntry
-	(*timestamppb.Timestamp)(nil),             // 66: google.protobuf.Timestamp
+	(*TrafficConfirmation)(nil),               // 48: proxycontrol.agent.v1.TrafficConfirmation
+	(*ApplyCommand)(nil),                      // 49: proxycontrol.agent.v1.ApplyCommand
+	(*ApplyResult)(nil),                       // 50: proxycontrol.agent.v1.ApplyResult
+	(*OutboundHealth)(nil),                    // 51: proxycontrol.agent.v1.OutboundHealth
+	(*OutboundHealthBatch)(nil),               // 52: proxycontrol.agent.v1.OutboundHealthBatch
+	(*RollbackCommand)(nil),                   // 53: proxycontrol.agent.v1.RollbackCommand
+	(*ServerMessage)(nil),                     // 54: proxycontrol.agent.v1.ServerMessage
+	(*RemoveCoreCommand)(nil),                 // 55: proxycontrol.agent.v1.RemoveCoreCommand
+	(*RemoveCoreResult)(nil),                  // 56: proxycontrol.agent.v1.RemoveCoreResult
+	(*TuningCommand)(nil),                     // 57: proxycontrol.agent.v1.TuningCommand
+	(*TuningKeyResult)(nil),                   // 58: proxycontrol.agent.v1.TuningKeyResult
+	(*TuningResult)(nil),                      // 59: proxycontrol.agent.v1.TuningResult
+	(*TCPProbeCommand)(nil),                   // 60: proxycontrol.agent.v1.TCPProbeCommand
+	(*TCPProbeResult)(nil),                    // 61: proxycontrol.agent.v1.TCPProbeResult
+	(*HealthCheckCommand)(nil),                // 62: proxycontrol.agent.v1.HealthCheckCommand
+	(*HealthCheckResult)(nil),                 // 63: proxycontrol.agent.v1.HealthCheckResult
+	nil,                                       // 64: proxycontrol.agent.v1.Heartbeat.TuningCurrentEntry
+	nil,                                       // 65: proxycontrol.agent.v1.TuningCommand.SettingsEntry
+	nil,                                       // 66: proxycontrol.agent.v1.TuningResult.InitialEntry
+	(*timestamppb.Timestamp)(nil),             // 67: google.protobuf.Timestamp
 }
 var file_agent_proto_depIdxs = []int32{
-	66, // 0: proxycontrol.agent.v1.NodeRootRetirementAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
-	66, // 1: proxycontrol.agent.v1.CATrustAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
-	66, // 2: proxycontrol.agent.v1.CertificateRenewal.expires_at:type_name -> google.protobuf.Timestamp
-	66, // 3: proxycontrol.agent.v1.EnrollResponse.expires_at:type_name -> google.protobuf.Timestamp
+	67, // 0: proxycontrol.agent.v1.NodeRootRetirementAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
+	67, // 1: proxycontrol.agent.v1.CATrustAcknowledgement.confirmed_at:type_name -> google.protobuf.Timestamp
+	67, // 2: proxycontrol.agent.v1.CertificateRenewal.expires_at:type_name -> google.protobuf.Timestamp
+	67, // 3: proxycontrol.agent.v1.EnrollResponse.expires_at:type_name -> google.protobuf.Timestamp
 	11, // 4: proxycontrol.agent.v1.Capabilities.protocols:type_name -> proxycontrol.agent.v1.ProtocolCapability
 	20, // 5: proxycontrol.agent.v1.Capabilities.host:type_name -> proxycontrol.agent.v1.HostInfo
 	14, // 6: proxycontrol.agent.v1.Capabilities.cores:type_name -> proxycontrol.agent.v1.CoreCapability
 	12, // 7: proxycontrol.agent.v1.Capabilities.server_settings_combinations:type_name -> proxycontrol.agent.v1.SettingsCombination
 	11, // 8: proxycontrol.agent.v1.CoreCapability.protocols:type_name -> proxycontrol.agent.v1.ProtocolCapability
 	12, // 9: proxycontrol.agent.v1.CoreCapability.server_settings_combinations:type_name -> proxycontrol.agent.v1.SettingsCombination
-	66, // 10: proxycontrol.agent.v1.CoreStatus.started_at:type_name -> google.protobuf.Timestamp
+	67, // 10: proxycontrol.agent.v1.CoreStatus.started_at:type_name -> google.protobuf.Timestamp
 	24, // 11: proxycontrol.agent.v1.CoreStatus.traffic_source_status:type_name -> proxycontrol.agent.v1.TrafficSourceStatus
-	66, // 12: proxycontrol.agent.v1.CertificateFileSummary.not_after:type_name -> google.protobuf.Timestamp
+	67, // 12: proxycontrol.agent.v1.CertificateFileSummary.not_after:type_name -> google.protobuf.Timestamp
 	16, // 13: proxycontrol.agent.v1.HostInfo.certificate_files:type_name -> proxycontrol.agent.v1.CertificateFileSummary
 	17, // 14: proxycontrol.agent.v1.HostInfo.tuning_keys:type_name -> proxycontrol.agent.v1.TuningKeyState
 	19, // 15: proxycontrol.agent.v1.HostInfo.fd_limits:type_name -> proxycontrol.agent.v1.ProcessLimit
 	18, // 16: proxycontrol.agent.v1.HostInfo.sysctl_sources:type_name -> proxycontrol.agent.v1.SysctlSource
-	66, // 17: proxycontrol.agent.v1.Heartbeat.active_connections_observed_at:type_name -> google.protobuf.Timestamp
+	67, // 17: proxycontrol.agent.v1.Heartbeat.active_connections_observed_at:type_name -> google.protobuf.Timestamp
 	27, // 18: proxycontrol.agent.v1.Heartbeat.spool_status:type_name -> proxycontrol.agent.v1.SpoolStatus
 	25, // 19: proxycontrol.agent.v1.Heartbeat.collector_status:type_name -> proxycontrol.agent.v1.CollectorStatus
 	24, // 20: proxycontrol.agent.v1.Heartbeat.traffic_source_status:type_name -> proxycontrol.agent.v1.TrafficSourceStatus
-	66, // 21: proxycontrol.agent.v1.Heartbeat.core_started_at:type_name -> google.protobuf.Timestamp
+	67, // 21: proxycontrol.agent.v1.Heartbeat.core_started_at:type_name -> google.protobuf.Timestamp
 	23, // 22: proxycontrol.agent.v1.Heartbeat.interfaces:type_name -> proxycontrol.agent.v1.InterfaceCounters
-	63, // 23: proxycontrol.agent.v1.Heartbeat.tuning_current:type_name -> proxycontrol.agent.v1.Heartbeat.TuningCurrentEntry
+	64, // 23: proxycontrol.agent.v1.Heartbeat.tuning_current:type_name -> proxycontrol.agent.v1.Heartbeat.TuningCurrentEntry
 	15, // 24: proxycontrol.agent.v1.Heartbeat.cores:type_name -> proxycontrol.agent.v1.CoreStatus
 	22, // 25: proxycontrol.agent.v1.Heartbeat.public_addresses:type_name -> proxycontrol.agent.v1.PublicAddress
-	66, // 26: proxycontrol.agent.v1.TrafficSourceStatus.observed_at:type_name -> google.protobuf.Timestamp
-	66, // 27: proxycontrol.agent.v1.TrafficSourceStatus.last_success_at:type_name -> google.protobuf.Timestamp
-	66, // 28: proxycontrol.agent.v1.CollectorStatus.started_at:type_name -> google.protobuf.Timestamp
-	66, // 29: proxycontrol.agent.v1.CollectorStatus.observed_at:type_name -> google.protobuf.Timestamp
-	66, // 30: proxycontrol.agent.v1.CollectorStatus.last_flush_at:type_name -> google.protobuf.Timestamp
-	66, // 31: proxycontrol.agent.v1.CollectorStatus.last_flush_success_at:type_name -> google.protobuf.Timestamp
+	67, // 26: proxycontrol.agent.v1.TrafficSourceStatus.observed_at:type_name -> google.protobuf.Timestamp
+	67, // 27: proxycontrol.agent.v1.TrafficSourceStatus.last_success_at:type_name -> google.protobuf.Timestamp
+	67, // 28: proxycontrol.agent.v1.CollectorStatus.started_at:type_name -> google.protobuf.Timestamp
+	67, // 29: proxycontrol.agent.v1.CollectorStatus.observed_at:type_name -> google.protobuf.Timestamp
+	67, // 30: proxycontrol.agent.v1.CollectorStatus.last_flush_at:type_name -> google.protobuf.Timestamp
+	67, // 31: proxycontrol.agent.v1.CollectorStatus.last_flush_success_at:type_name -> google.protobuf.Timestamp
 	26, // 32: proxycontrol.agent.v1.CollectorStatus.persisted_loss:type_name -> proxycontrol.agent.v1.CollectorLossStatus
-	66, // 33: proxycontrol.agent.v1.CollectorLossStatus.baseline_at:type_name -> google.protobuf.Timestamp
-	66, // 34: proxycontrol.agent.v1.CollectorLossStatus.checkpoint_at:type_name -> google.protobuf.Timestamp
-	66, // 35: proxycontrol.agent.v1.SpoolStatus.observed_at:type_name -> google.protobuf.Timestamp
+	67, // 33: proxycontrol.agent.v1.CollectorLossStatus.baseline_at:type_name -> google.protobuf.Timestamp
+	67, // 34: proxycontrol.agent.v1.CollectorLossStatus.checkpoint_at:type_name -> google.protobuf.Timestamp
+	67, // 35: proxycontrol.agent.v1.SpoolStatus.observed_at:type_name -> google.protobuf.Timestamp
 	29, // 36: proxycontrol.agent.v1.SpoolStatus.final_usage_head:type_name -> proxycontrol.agent.v1.ReplayHeadStatus
 	29, // 37: proxycontrol.agent.v1.SpoolStatus.runtime_source_head:type_name -> proxycontrol.agent.v1.ReplayHeadStatus
 	29, // 38: proxycontrol.agent.v1.SpoolStatus.access_ack:type_name -> proxycontrol.agent.v1.ReplayHeadStatus
@@ -6569,15 +6724,15 @@ var file_agent_proto_depIdxs = []int32{
 	28, // 43: proxycontrol.agent.v1.SpoolStatus.traffic_ack_history:type_name -> proxycontrol.agent.v1.ReplayAckHistoryStatus
 	28, // 44: proxycontrol.agent.v1.SpoolStatus.final_usage_ack_history:type_name -> proxycontrol.agent.v1.ReplayAckHistoryStatus
 	28, // 45: proxycontrol.agent.v1.SpoolStatus.runtime_source_ack_history:type_name -> proxycontrol.agent.v1.ReplayAckHistoryStatus
-	66, // 46: proxycontrol.agent.v1.ReplayAckHistoryStatus.recorded_at:type_name -> google.protobuf.Timestamp
-	66, // 47: proxycontrol.agent.v1.ReplayAckHistoryStatus.observed_at:type_name -> google.protobuf.Timestamp
-	66, // 48: proxycontrol.agent.v1.ReplayHeadStatus.observed_at:type_name -> google.protobuf.Timestamp
-	66, // 49: proxycontrol.agent.v1.AgentMessage.timestamp:type_name -> google.protobuf.Timestamp
+	67, // 46: proxycontrol.agent.v1.ReplayAckHistoryStatus.recorded_at:type_name -> google.protobuf.Timestamp
+	67, // 47: proxycontrol.agent.v1.ReplayAckHistoryStatus.observed_at:type_name -> google.protobuf.Timestamp
+	67, // 48: proxycontrol.agent.v1.ReplayHeadStatus.observed_at:type_name -> google.protobuf.Timestamp
+	67, // 49: proxycontrol.agent.v1.AgentMessage.timestamp:type_name -> google.protobuf.Timestamp
 	10, // 50: proxycontrol.agent.v1.AgentMessage.hello:type_name -> proxycontrol.agent.v1.Hello
 	21, // 51: proxycontrol.agent.v1.AgentMessage.heartbeat:type_name -> proxycontrol.agent.v1.Heartbeat
 	13, // 52: proxycontrol.agent.v1.AgentMessage.capabilities:type_name -> proxycontrol.agent.v1.Capabilities
-	49, // 53: proxycontrol.agent.v1.AgentMessage.apply_result:type_name -> proxycontrol.agent.v1.ApplyResult
-	51, // 54: proxycontrol.agent.v1.AgentMessage.outbound_health:type_name -> proxycontrol.agent.v1.OutboundHealthBatch
+	50, // 53: proxycontrol.agent.v1.AgentMessage.apply_result:type_name -> proxycontrol.agent.v1.ApplyResult
+	52, // 54: proxycontrol.agent.v1.AgentMessage.outbound_health:type_name -> proxycontrol.agent.v1.OutboundHealthBatch
 	46, // 55: proxycontrol.agent.v1.AgentMessage.access_batch:type_name -> proxycontrol.agent.v1.AccessBatch
 	47, // 56: proxycontrol.agent.v1.AgentMessage.traffic_batch:type_name -> proxycontrol.agent.v1.TrafficBatch
 	45, // 57: proxycontrol.agent.v1.AgentMessage.final_usage_batch:type_name -> proxycontrol.agent.v1.FinalUsageBatch
@@ -6586,51 +6741,52 @@ var file_agent_proto_depIdxs = []int32{
 	40, // 60: proxycontrol.agent.v1.AgentMessage.core_update_result:type_name -> proxycontrol.agent.v1.CoreUpdateResult
 	38, // 61: proxycontrol.agent.v1.AgentMessage.agent_update_result:type_name -> proxycontrol.agent.v1.AgentUpdateResult
 	34, // 62: proxycontrol.agent.v1.AgentMessage.connection_status:type_name -> proxycontrol.agent.v1.ConnectionStatus
-	62, // 63: proxycontrol.agent.v1.AgentMessage.health_check_result:type_name -> proxycontrol.agent.v1.HealthCheckResult
+	63, // 63: proxycontrol.agent.v1.AgentMessage.health_check_result:type_name -> proxycontrol.agent.v1.HealthCheckResult
 	31, // 64: proxycontrol.agent.v1.AgentMessage.observation_batch:type_name -> proxycontrol.agent.v1.ObservationBatch
 	32, // 65: proxycontrol.agent.v1.AgentMessage.egress_proof_batch:type_name -> proxycontrol.agent.v1.EgressProofBatch
-	60, // 66: proxycontrol.agent.v1.AgentMessage.tcp_probe_result:type_name -> proxycontrol.agent.v1.TCPProbeResult
-	58, // 67: proxycontrol.agent.v1.AgentMessage.tuning_result:type_name -> proxycontrol.agent.v1.TuningResult
-	55, // 68: proxycontrol.agent.v1.AgentMessage.remove_core_result:type_name -> proxycontrol.agent.v1.RemoveCoreResult
-	33, // 69: proxycontrol.agent.v1.ConnectionStatus.cores:type_name -> proxycontrol.agent.v1.CoreConnectionStatus
-	66, // 70: proxycontrol.agent.v1.OutboundHealth.checked_at:type_name -> google.protobuf.Timestamp
-	50, // 71: proxycontrol.agent.v1.OutboundHealthBatch.items:type_name -> proxycontrol.agent.v1.OutboundHealth
-	66, // 72: proxycontrol.agent.v1.ServerMessage.timestamp:type_name -> google.protobuf.Timestamp
-	35, // 73: proxycontrol.agent.v1.ServerMessage.welcome:type_name -> proxycontrol.agent.v1.Welcome
-	43, // 74: proxycontrol.agent.v1.ServerMessage.ack:type_name -> proxycontrol.agent.v1.Ack
-	48, // 75: proxycontrol.agent.v1.ServerMessage.apply_command:type_name -> proxycontrol.agent.v1.ApplyCommand
-	52, // 76: proxycontrol.agent.v1.ServerMessage.rollback_command:type_name -> proxycontrol.agent.v1.RollbackCommand
-	41, // 77: proxycontrol.agent.v1.ServerMessage.budget_retirement_command:type_name -> proxycontrol.agent.v1.BudgetRetirementCommand
-	39, // 78: proxycontrol.agent.v1.ServerMessage.core_update_command:type_name -> proxycontrol.agent.v1.CoreUpdateCommand
-	37, // 79: proxycontrol.agent.v1.ServerMessage.agent_update_command:type_name -> proxycontrol.agent.v1.AgentUpdateCommand
-	61, // 80: proxycontrol.agent.v1.ServerMessage.health_check_command:type_name -> proxycontrol.agent.v1.HealthCheckCommand
-	36, // 81: proxycontrol.agent.v1.ServerMessage.device_gate_command:type_name -> proxycontrol.agent.v1.DeviceGateCommand
-	59, // 82: proxycontrol.agent.v1.ServerMessage.tcp_probe_command:type_name -> proxycontrol.agent.v1.TCPProbeCommand
-	56, // 83: proxycontrol.agent.v1.ServerMessage.tuning_command:type_name -> proxycontrol.agent.v1.TuningCommand
-	54, // 84: proxycontrol.agent.v1.ServerMessage.remove_core_command:type_name -> proxycontrol.agent.v1.RemoveCoreCommand
-	64, // 85: proxycontrol.agent.v1.TuningCommand.settings:type_name -> proxycontrol.agent.v1.TuningCommand.SettingsEntry
-	57, // 86: proxycontrol.agent.v1.TuningResult.keys:type_name -> proxycontrol.agent.v1.TuningKeyResult
-	65, // 87: proxycontrol.agent.v1.TuningResult.initial:type_name -> proxycontrol.agent.v1.TuningResult.InitialEntry
-	66, // 88: proxycontrol.agent.v1.TCPProbeCommand.deadline:type_name -> google.protobuf.Timestamp
-	66, // 89: proxycontrol.agent.v1.HealthCheckCommand.deadline:type_name -> google.protobuf.Timestamp
-	66, // 90: proxycontrol.agent.v1.HealthCheckResult.observed_at:type_name -> google.protobuf.Timestamp
-	8,  // 91: proxycontrol.agent.v1.AgentControl.Enroll:input_type -> proxycontrol.agent.v1.EnrollRequest
-	30, // 92: proxycontrol.agent.v1.AgentControl.Connect:input_type -> proxycontrol.agent.v1.AgentMessage
-	6,  // 93: proxycontrol.agent.v1.AgentControl.RenewCertificate:input_type -> proxycontrol.agent.v1.CertificateRequest
-	4,  // 94: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:input_type -> proxycontrol.agent.v1.CATrustConfirmation
-	2,  // 95: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementRequest
-	0,  // 96: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementConfirmation
-	9,  // 97: proxycontrol.agent.v1.AgentControl.Enroll:output_type -> proxycontrol.agent.v1.EnrollResponse
-	53, // 98: proxycontrol.agent.v1.AgentControl.Connect:output_type -> proxycontrol.agent.v1.ServerMessage
-	7,  // 99: proxycontrol.agent.v1.AgentControl.RenewCertificate:output_type -> proxycontrol.agent.v1.CertificateRenewal
-	5,  // 100: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:output_type -> proxycontrol.agent.v1.CATrustAcknowledgement
-	3,  // 101: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementResponse
-	1,  // 102: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementAcknowledgement
-	97, // [97:103] is the sub-list for method output_type
-	91, // [91:97] is the sub-list for method input_type
-	91, // [91:91] is the sub-list for extension type_name
-	91, // [91:91] is the sub-list for extension extendee
-	0,  // [0:91] is the sub-list for field type_name
+	61, // 66: proxycontrol.agent.v1.AgentMessage.tcp_probe_result:type_name -> proxycontrol.agent.v1.TCPProbeResult
+	59, // 67: proxycontrol.agent.v1.AgentMessage.tuning_result:type_name -> proxycontrol.agent.v1.TuningResult
+	56, // 68: proxycontrol.agent.v1.AgentMessage.remove_core_result:type_name -> proxycontrol.agent.v1.RemoveCoreResult
+	48, // 69: proxycontrol.agent.v1.AgentMessage.traffic_confirmation:type_name -> proxycontrol.agent.v1.TrafficConfirmation
+	33, // 70: proxycontrol.agent.v1.ConnectionStatus.cores:type_name -> proxycontrol.agent.v1.CoreConnectionStatus
+	67, // 71: proxycontrol.agent.v1.OutboundHealth.checked_at:type_name -> google.protobuf.Timestamp
+	51, // 72: proxycontrol.agent.v1.OutboundHealthBatch.items:type_name -> proxycontrol.agent.v1.OutboundHealth
+	67, // 73: proxycontrol.agent.v1.ServerMessage.timestamp:type_name -> google.protobuf.Timestamp
+	35, // 74: proxycontrol.agent.v1.ServerMessage.welcome:type_name -> proxycontrol.agent.v1.Welcome
+	43, // 75: proxycontrol.agent.v1.ServerMessage.ack:type_name -> proxycontrol.agent.v1.Ack
+	49, // 76: proxycontrol.agent.v1.ServerMessage.apply_command:type_name -> proxycontrol.agent.v1.ApplyCommand
+	53, // 77: proxycontrol.agent.v1.ServerMessage.rollback_command:type_name -> proxycontrol.agent.v1.RollbackCommand
+	41, // 78: proxycontrol.agent.v1.ServerMessage.budget_retirement_command:type_name -> proxycontrol.agent.v1.BudgetRetirementCommand
+	39, // 79: proxycontrol.agent.v1.ServerMessage.core_update_command:type_name -> proxycontrol.agent.v1.CoreUpdateCommand
+	37, // 80: proxycontrol.agent.v1.ServerMessage.agent_update_command:type_name -> proxycontrol.agent.v1.AgentUpdateCommand
+	62, // 81: proxycontrol.agent.v1.ServerMessage.health_check_command:type_name -> proxycontrol.agent.v1.HealthCheckCommand
+	36, // 82: proxycontrol.agent.v1.ServerMessage.device_gate_command:type_name -> proxycontrol.agent.v1.DeviceGateCommand
+	60, // 83: proxycontrol.agent.v1.ServerMessage.tcp_probe_command:type_name -> proxycontrol.agent.v1.TCPProbeCommand
+	57, // 84: proxycontrol.agent.v1.ServerMessage.tuning_command:type_name -> proxycontrol.agent.v1.TuningCommand
+	55, // 85: proxycontrol.agent.v1.ServerMessage.remove_core_command:type_name -> proxycontrol.agent.v1.RemoveCoreCommand
+	65, // 86: proxycontrol.agent.v1.TuningCommand.settings:type_name -> proxycontrol.agent.v1.TuningCommand.SettingsEntry
+	58, // 87: proxycontrol.agent.v1.TuningResult.keys:type_name -> proxycontrol.agent.v1.TuningKeyResult
+	66, // 88: proxycontrol.agent.v1.TuningResult.initial:type_name -> proxycontrol.agent.v1.TuningResult.InitialEntry
+	67, // 89: proxycontrol.agent.v1.TCPProbeCommand.deadline:type_name -> google.protobuf.Timestamp
+	67, // 90: proxycontrol.agent.v1.HealthCheckCommand.deadline:type_name -> google.protobuf.Timestamp
+	67, // 91: proxycontrol.agent.v1.HealthCheckResult.observed_at:type_name -> google.protobuf.Timestamp
+	8,  // 92: proxycontrol.agent.v1.AgentControl.Enroll:input_type -> proxycontrol.agent.v1.EnrollRequest
+	30, // 93: proxycontrol.agent.v1.AgentControl.Connect:input_type -> proxycontrol.agent.v1.AgentMessage
+	6,  // 94: proxycontrol.agent.v1.AgentControl.RenewCertificate:input_type -> proxycontrol.agent.v1.CertificateRequest
+	4,  // 95: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:input_type -> proxycontrol.agent.v1.CATrustConfirmation
+	2,  // 96: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementRequest
+	0,  // 97: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:input_type -> proxycontrol.agent.v1.NodeRootRetirementConfirmation
+	9,  // 98: proxycontrol.agent.v1.AgentControl.Enroll:output_type -> proxycontrol.agent.v1.EnrollResponse
+	54, // 99: proxycontrol.agent.v1.AgentControl.Connect:output_type -> proxycontrol.agent.v1.ServerMessage
+	7,  // 100: proxycontrol.agent.v1.AgentControl.RenewCertificate:output_type -> proxycontrol.agent.v1.CertificateRenewal
+	5,  // 101: proxycontrol.agent.v1.AgentControl.ConfirmCATrust:output_type -> proxycontrol.agent.v1.CATrustAcknowledgement
+	3,  // 102: proxycontrol.agent.v1.AgentControl.PrepareNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementResponse
+	1,  // 103: proxycontrol.agent.v1.AgentControl.ConfirmNodeRootRetirement:output_type -> proxycontrol.agent.v1.NodeRootRetirementAcknowledgement
+	98, // [98:104] is the sub-list for method output_type
+	92, // [92:98] is the sub-list for method input_type
+	92, // [92:92] is the sub-list for extension type_name
+	92, // [92:92] is the sub-list for extension extendee
+	0,  // [0:92] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -6661,8 +6817,9 @@ func file_agent_proto_init() {
 		(*AgentMessage_TcpProbeResult)(nil),
 		(*AgentMessage_TuningResult)(nil),
 		(*AgentMessage_RemoveCoreResult)(nil),
+		(*AgentMessage_TrafficConfirmation)(nil),
 	}
-	file_agent_proto_msgTypes[53].OneofWrappers = []any{
+	file_agent_proto_msgTypes[54].OneofWrappers = []any{
 		(*ServerMessage_Welcome)(nil),
 		(*ServerMessage_Ack)(nil),
 		(*ServerMessage_ApplyCommand)(nil),
@@ -6676,14 +6833,14 @@ func file_agent_proto_init() {
 		(*ServerMessage_TuningCommand)(nil),
 		(*ServerMessage_RemoveCoreCommand)(nil),
 	}
-	file_agent_proto_msgTypes[60].OneofWrappers = []any{}
+	file_agent_proto_msgTypes[61].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   66,
+			NumMessages:   67,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -20,6 +20,9 @@ const MaxContractBytes = 8192
 // refused before the newer marker is written, never silently downgraded.
 const CoreAccountingFormat = 4
 
+// TrafficDeliveryFormat authenticates numbered traffic queues (store head v2).
+const TrafficDeliveryFormat = 7
+
 var ErrContract = errors.New("agent storage contract is invalid or incompatible")
 var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+\-]{0,63}$`)
 
@@ -58,7 +61,7 @@ func version(n int) Format { return Format{ReadMax: n, Write: n} }
 // the release keeps starting. The write is raised only after those images are
 // proven readable, as CheckMultiCoreActivation does for format 4.
 func Current(agentVersion string) Contract {
-	return Contract{SchemaVersion: 1, Component: "proxy-agent", AgentVersion: agentVersion, OS: runtime.GOOS, Architecture: runtime.GOARCH, ManagedProtocol: 1, AgentUpdateProtocol: 1, AgentRecoveryProtocol: 1, Formats: Formats{Configuration: Format{ReadMax: 5, Write: 1}, Identity: Format{ReadMax: 2, Write: 2}, DesiredState: Format{ReadMax: 4, Write: 1}, Spool: Format{ReadMax: 6, Write: 4}, CoreAccounting: Format{ReadMax: CoreAccountingFormat, Write: 2}, ReleaseHistory: version(3), UpdateJournal: version(2), ReleaseHold: Format{ReadMax: 3, Write: 2}}}
+	return Contract{SchemaVersion: 1, Component: "proxy-agent", AgentVersion: agentVersion, OS: runtime.GOOS, Architecture: runtime.GOARCH, ManagedProtocol: 1, AgentUpdateProtocol: 1, AgentRecoveryProtocol: 1, Formats: Formats{Configuration: Format{ReadMax: 5, Write: 1}, Identity: Format{ReadMax: 2, Write: 2}, DesiredState: Format{ReadMax: 4, Write: 1}, Spool: Format{ReadMax: TrafficDeliveryFormat, Write: 4}, CoreAccounting: Format{ReadMax: CoreAccountingFormat, Write: 2}, ReleaseHistory: version(3), UpdateJournal: version(2), ReleaseHold: Format{ReadMax: 3, Write: 2}}}
 }
 
 // Optional formats preserve legacy writes until connection protection or

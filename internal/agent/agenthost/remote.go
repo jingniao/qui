@@ -6,6 +6,7 @@ import (
 	"proxycontrol/internal/agent/agentjobs"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/pkg/contracts/release"
+	"strings"
 )
 
 func nodeJobs(c config.Agent, nodeID string, startup ...context.Context) (*agentjobs.Store, error) {
@@ -61,7 +62,7 @@ func OriginalRemoteResult(c config.Agent, nodeID string, request release.AgentUp
 // signing trust is independently enforced by the parent, including rejection
 // results when panel and node pins differ. No executable path is accepted.
 func QueueRemoteUpdate(c config.Agent, nodeID string, r release.AgentUpdateRequest, recovery ...bool) (agentjobs.Job, error) {
-	if r.Validate() != nil || r.NodeID != nodeID || r.Operation != "install" && !(r.Operation == "recover" && len(recovery) > 0 && recovery[0]) {
+	if r.Validate() != nil || r.NodeID != nodeID || strings.HasPrefix(r.ID, localJobPrefix) || r.Operation != "install" && !(r.Operation == "recover" && len(recovery) > 0 && recovery[0]) {
 		return agentjobs.Job{}, release.ErrUpdate
 	}
 	s, err := nodeJobs(c, nodeID)

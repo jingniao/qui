@@ -36,6 +36,10 @@ type ConnectionObserver struct {
 // a report and yields 0. Only the nodes in the user's granted groups count, and
 // only while their snapshot is fresh.
 func (o *ConnectionObserver) ForUser(ctx context.Context, account User) (*int, error) {
+	return o.forUser(ctx, account, map[string]node.Group{})
+}
+
+func (o *ConnectionObserver) forUser(ctx context.Context, account User, cache map[string]node.Group) (*int, error) {
 	if o == nil || o.Store == nil {
 		return nil, nil
 	}
@@ -46,13 +50,18 @@ func (o *ConnectionObserver) ForUser(ctx context.Context, account User) (*int, e
 	seen := map[string]bool{}
 	snapshots := []traffic.ConnectionSnapshot{}
 	for _, groupID := range groups {
-		group, err := o.Nodes.Group(ctx, groupID)
+		group, found := cache[groupID]
+		var err error
+		if !found {
+			group, err = o.Nodes.Group(ctx, groupID)
+		}
 		if errors.Is(err, node.ErrNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
+		cache[groupID] = group
 		for _, nodeID := range group.AccessNodeIDs() {
 			if seen[nodeID] {
 				continue

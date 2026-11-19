@@ -12,7 +12,7 @@ import (
 func (p *publishPanel) baseline(nodeID, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 	p.t.Helper()
 	mux := http.NewServeMux()
-	p.handler.Register(mux)
+	p.handler.Register(mux, p.handler)
 	request := httptest.NewRequest("POST", "/api/v1/nodes/"+nodeID+"/baseline", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.AddCookie(cookie)

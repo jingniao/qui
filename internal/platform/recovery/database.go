@@ -173,7 +173,33 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 		if result.SHA256 != evidence.SHA256 {
 			return ErrEvidence
 		}
-		if err := db.AttachRecoverySource(ctx, candidateDatabase, filepath.Join(evidenceWork, "database", "panel.db")); err != nil {
+		// Migrate a pinned working copy, never the authenticated frozen evidence.
+		migratedSource := filepath.Join(evidenceWork, "migrated-source")
+		var sourceFile archive.File
+		for _, item := range result.Manifest.Files {
+			if item.Name == "database/panel.db" {
+				sourceFile = item
+				break
+			}
+		}
+		if sourceFile.Name == "" {
+			return ErrEvidence
+		}
+		if err := copyPinned(ctx, evidenceWork, migratedSource, sourceFile); err != nil {
+			return err
+		}
+		sourcePath := filepath.Join(migratedSource, "database", "panel.db")
+		sourceDatabase, err := db.Open(ctx, sourcePath)
+		if err != nil {
+			return err
+		}
+		var sourceBusy, sourcePages, sourceCheckpointed int
+		err = sourceDatabase.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&sourceBusy, &sourcePages, &sourceCheckpointed)
+		closeErr := sourceDatabase.Close()
+		if err != nil || closeErr != nil || sourceBusy != 0 {
+			return errors.Join(ErrEvidence, err, closeErr)
+		}
+		if err := db.AttachRecoverySource(ctx, candidateDatabase, sourcePath); err != nil {
 			return err
 		}
 		defer candidateDatabase.ExecContext(context.Background(), "DETACH DATABASE "+db.RecoverySchema)
@@ -188,7 +214,7 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 		}
 		manifest.Snapshot = snapshot.Totals
 		// Read the attached immutable source through an independent reader. All
-		// modules below read the same authenticated evidence file.
+		// modules below read the pinned evidence copy after its schema migration.
 		observed, err := archive.InventoryFromVerifiedDirectory(ctx, evidenceWork)
 		if err != nil {
 			return err

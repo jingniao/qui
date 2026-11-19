@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"math"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
@@ -19,6 +20,13 @@ func (s *Service) RecordTraffic(ctx context.Context, nodeID string, message *pb.
 	}
 	if batch.NodeID != nodeID {
 		return "", reject("node_mismatch", 0)
+	}
+	if message.DeliverySeq > math.MaxInt64 {
+		return "", ErrTrafficDelivery
+	}
+	batch.Delivery = traffic.Delivery{QueueID: message.QueueId, Sequence: int64(message.DeliverySeq)}
+	if err := s.Repository.prepareTrafficDelivery(ctx, batch); err != nil {
+		return "", err
 	}
 	if err := s.recordDecodedTraffic(ctx, batch, allowNew); err != nil {
 		return "", err

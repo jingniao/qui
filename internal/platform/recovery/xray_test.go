@@ -179,9 +179,11 @@ func TestRealXrayContinuesOfflineAndReplaysTrafficAfterCentralRestore(t *testing
 	defer queue.Close()
 	deadline = time.Now().Add(15 * time.Second)
 	var pending traffic.Batch
+	var pendingQueue string
+	var pendingSequence uint64
 	for {
 		var payload []byte
-		if err := queue.QueryRow("SELECT payload FROM traffic_batches ORDER BY rowid LIMIT 1").Scan(&payload); err == nil {
+		if err := queue.QueryRow("SELECT b.payload,s.queue_id,b.delivery_seq FROM traffic_batches b CROSS JOIN traffic_delivery_state s WHERE s.id=1 AND s.active=1 ORDER BY b.rowid LIMIT 1").Scan(&payload, &pendingQueue, &pendingSequence); err == nil {
 			plain, err := key.Open(payload)
 			if err != nil {
 				t.Fatal(err)
@@ -192,6 +194,9 @@ func TestRealXrayContinuesOfflineAndReplaysTrafficAfterCentralRestore(t *testing
 				t.Fatal(err)
 			}
 			pending = batch
+			if pendingQueue == "" || pendingSequence == 0 {
+				t.Fatal("offline batch has no delivery envelope")
+			}
 			break
 		}
 		if time.Now().After(deadline) {
@@ -274,7 +279,7 @@ func TestRealXrayContinuesOfflineAndReplaysTrafficAfterCentralRestore(t *testing
 	users := &user.Repository{Database: database, Vault: f.source.ConfigurationVault}
 	deployments := &deployment.Repository{Database: database, Vault: f.source.ConfigurationVault}
 	data, _ := json.Marshal(pending)
-	if _, err := (&access.Service{Repository: &access.Repository{Database: database}, Snapshots: deployments, Users: users}).RecordTraffic(ctx, f.node.ID, &pb.TrafficBatch{BatchJson: data}, false); err != nil {
+	if _, err := (&access.Service{Repository: &access.Repository{Database: database}, Snapshots: deployments, Users: users}).RecordTraffic(ctx, f.node.ID, &pb.TrafficBatch{BatchJson: data, QueueId: pendingQueue, DeliverySeq: pendingSequence}, false); err != nil {
 		t.Fatal("acknowledged offline batch could not replay", err)
 	}
 	assertInt(t, database, "SELECT used_traffic FROM users WHERE id=?", beforeReplay, f.user.ID)

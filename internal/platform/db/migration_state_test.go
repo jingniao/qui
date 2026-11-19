@@ -80,7 +80,7 @@ func TestMigrateAcceptsCompleteLegacyChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := versions(t, database)
-	if len(got) != len(legacyMigrations)+1 || got[len(got)-1] != "0153_drop_one_shot_markers.sql" {
+	if len(got) != len(legacyMigrations)+2 || got[len(got)-1] != "0154_traffic_storage_retirement.sql" {
 		t.Fatalf("recorded %d versions, last %v", len(got), got[len(got)-1:])
 	}
 	for _, v := range got {

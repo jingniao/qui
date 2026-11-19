@@ -2,9 +2,7 @@ package user
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"proxycontrol/internal/panel/connections"
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -134,24 +132,10 @@ type deviceViewNode struct {
 func (o *DeviceObserver) Views(ctx context.Context, users []User) ([]DevicesOnline, error) {
 	nodes := []deviceViewNode{}
 	if o != nil && len(users) > 0 {
-		for page := 1; ; page++ {
-			batch, total, err := o.Nodes.Choices(ctx, "", page, 200)
-			if err != nil {
-				return nil, err
-			}
-			for _, n := range batch {
-				state, err := o.States.Published(ctx, n.ID)
-				if errors.Is(err, sql.ErrNoRows) {
-					continue
-				}
-				if err != nil {
-					return nil, err
-				}
-				nodes = append(nodes, deviceViewNode{n, state, entryCredentials(state)})
-			}
-			if page*200 >= total {
-				break
-			}
+		var err error
+		nodes, err = loadDeviceViewNodes(ctx, o.Nodes, o.States)
+		if err != nil {
+			return nil, err
 		}
 	}
 	views := make([]DevicesOnline, len(users))

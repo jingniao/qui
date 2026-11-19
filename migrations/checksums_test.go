@@ -14,8 +14,9 @@ import (
 // restore. Add new migrations here; never change an existing entry. The
 // checksums of the legacy files 0001-0152 live in internal/platform/db.
 var applied = map[string]string{
-	"0152_baseline.sql":              "2fd1bd9883fb0ce5d6070009aae29bf1f6b6175961c513e2e373b207afc83b4e",
-	"0153_drop_one_shot_markers.sql": "ebd5e3740de73b16e8a6645607ed01d2033ab36cdb034d74200dea8d3c6d7ccd",
+	"0154_traffic_storage_retirement.sql": "b013f88d2f4099a10681e0e05b8a718e3c699792ab86e22b14a4b847bc0f91c6",
+	"0152_baseline.sql":                   "2fd1bd9883fb0ce5d6070009aae29bf1f6b6175961c513e2e373b207afc83b4e",
+	"0153_drop_one_shot_markers.sql":      "ebd5e3740de73b16e8a6645607ed01d2033ab36cdb034d74200dea8d3c6d7ccd",
 }
 
 func TestAppliedMigrationsAreImmutable(t *testing.T) {

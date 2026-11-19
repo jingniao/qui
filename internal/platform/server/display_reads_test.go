@@ -44,7 +44,11 @@ func TestDisplayReadsDoNotQueueBehindWriter(t *testing.T) {
 		"/api/v1/task-records", "/api/v1/traffic/nodes/summary", "/api/v1/traffic/nodes/monthly", "/api/v1/dashboard",
 	} {
 		t.Run(path, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			// Race instrumentation makes opening SQLite read connections costly.
+			// Check writer-pool contention directly; this deadline only bounds a
+			// broken request and is not a page-performance threshold.
+			waiting := app.Database.Stats().WaitCount
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
 			req.AddCookie(owner.cookie)
@@ -52,6 +56,9 @@ func TestDisplayReadsDoNotQueueBehindWriter(t *testing.T) {
 			start := time.Now()
 			app.HTTP.Handler.ServeHTTP(response, req)
 			t.Logf("elapsed=%s status=%d", time.Since(start), response.Code)
+			if got := app.Database.Stats().WaitCount; got != waiting {
+				t.Fatalf("display read waited for the pinned writer: %d new waits", got-waiting)
+			}
 			if response.Code != http.StatusOK {
 				t.Fatalf("display read blocked or failed: %s", response.Body.String())
 			}

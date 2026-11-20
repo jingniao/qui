@@ -19,15 +19,23 @@
 
 ## 验证与限制
 
-实施阶段的定向回归及独立审查通过，详见[验证记录](remaining-performance-and-tuning-verification.md)。发布提交前检查、本地完整 Linux 门禁和同 SHA GitHub 检查的结果将在发布后补入。
+实施阶段的定向回归及独立审查通过，详见[验证记录](remaining-performance-and-tuning-verification.md)。发布提交前检查通过，包含前端类型检查、构建、自测、脚本语法、文件格式与 Go 静态检查。
+
+发布提交 `2ef7c72edfa14f8c4a31a666952b72f2e54947fa` 的本地完整 Linux 门禁一次通过：`GATE 2ef7c72 PASS total=843s`，常规检查 843 秒、真实核心 315 秒，包含竞态、恢复、模块包及安装脚本检查。同 SHA 的 [GitHub check 44693534484](https://github.com/jingniao/qui/actions/runs/44693534484) 全部成功，包含四个分片、官方与 qui 真实核心及两种架构发布包试构建。
 
 首轮快速检查发现两处自测提取代码未同步（用户详情遗漏 `observeUserDenial` 依赖、代理节点处理函数与后继函数不再相邻），补齐测试接线后原断言通过。首个发布候选 `fd2a3be` 的本地真实核心及 GitHub 服务端检查发现新批量接口 `GET /api/v1/nodes/relay-rules` 未登记到权限覆盖清单；将其按后台接口纳入原有逐路由隔离检查后，两项定向测试通过。没有放宽权限或跳过断言，首轮失败保留。
+
+首轮本地记录为 `GATE fd2a3be FAIL total=835s`，除权限清单外，竞态套件中的 `TestRealCumulativeUserCountersAndManagementPortIsolation` 还出现一次下载计数 12191、未达到两次请求合计 24000 的失败。同一 SHA 的真实核心套件及修正提交的完整竞态套件均通过；该测试与 Xray 计数代码没有修改，具体瞬时失败原因未确定。[首轮 GitHub 44692135045](https://github.com/jingniao/qui/actions/runs/44692135045) 的服务端分片因权限清单失败，其余三个分片成功；新提交接替后停止旧轮剩余核心构建，保留失败与取消记录。
 
 真实 Ubuntu 缺模块主机从下载、安装、发行版触发器到最终启用的完整过程，以及原生 OpenRC 开机尚未验证。现有证据包括已启用 BBR 的受控节点、容器受限失败、实际权限探测、真实 dpkg 私有数据库和组合启动事务；不能把这些替代完整 Ubuntu 安装验证。
 
 ## 发布记录
 
-待发布门禁通过后记录 tag、发布运行及附件/签名核验结果。
+tag `v1.7.4` → `2ef7c72edfa14f8c4a31a666952b72f2e54947fa`。[Release 工作流 44696461868](https://github.com/jingniao/qui/actions/runs/44696461868) 成功，于 **2026-11-20T07:46:00Z** [正式发布 v1.7.4](https://github.com/jingniao/qui/releases/tag/v1.7.4)。
+
+13 个附件已实际下载，大小、GitHub SHA-256 与 `SHA256SUMS` 全部通过。两个安装脚本、包内安装/升级脚本及新增调优服务单元与 tag 源码一致。amd64/arm64 Agent 清单通过仓库官方 Ed25519 公钥验证，版本 1.7.4、签名序号 **1007004**；压缩包中的 Agent 与签名二进制一致，面板和 Agent 的架构、干净源码提交均匹配发布标签。
+
+amd64 面板与 Agent 在隔离 Linux 测试机执行 `--version`，分别返回 `proxy-panel 1.7.4` 和 `proxy-agent 1.7.4`，未启动服务。arm64 完成静态与签名核验，未执行原生主机验收。
 
 ## 生产环境
 

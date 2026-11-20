@@ -154,9 +154,16 @@ if [[ $init_system == systemd ]]; then
   host_network_files=(proxy-agent-host-network.service proxy-agent-host-network.path)
   host_network_service=/etc/systemd/system/proxy-agent-host-network.service
   host_network_path=/etc/systemd/system/proxy-agent-host-network.path
-  tuning_files=(proxy-agent-tuning.service proxy-agent-tuning.path)
+  tuning_files=(proxy-agent-tuning.service proxy-agent-tuning.path proxy-agent-tuning-probe.service proxy-agent-tuning-probe-reset.service)
+  tuning_probe=/etc/systemd/system/proxy-agent-tuning-probe.service
+  tuning_probe_reset=/etc/systemd/system/proxy-agent-tuning-probe-reset.service
   tuning_service=/etc/systemd/system/proxy-agent-tuning.service
   tuning_path=/etc/systemd/system/proxy-agent-tuning.path
+  module_units=false
+  if [[ $component == agent ]] && grep -Eq '^ID=("ubuntu"|ubuntu)$' /etc/os-release; then
+    module_units=true
+    tuning_files+=(proxy-agent-tuning-modules.service proxy-agent-tuning-modules.path)
+  fi
   recovery_service=/etc/systemd/system/proxycontrol-update-recovery.service
 else
   service_directory=$root/openrc
@@ -537,7 +544,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id" "$stage/panel-database"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/tuning-probe" "$stage/tuning-probe-reset" "$stage/tuning-probe-digests" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id" "$stage/panel-database"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
@@ -545,6 +552,9 @@ trap cleanup EXIT
 install -o root -g root -m 0600 -- "$binary" "$stage/program"
 verify_binary "$stage/program" "$digest"
 install -o root -g root -m 0600 -- "$packaged_service" "$stage/unit"
+if ${module_units:-false}; then
+  printf '\n[Unit]\nWants=proxy-agent-tuning-modules.path\nAfter=proxy-agent-tuning-modules.path\n' >> "$stage/unit"
+fi
 unit_digest=$(sha256sum -- "$stage/unit"); unit_digest=${unit_digest%% *}
   # The terminal menu is a plain script: it is staged and published like the
   # unit, and deliberately not part of the fixed installed-manifest format that
@@ -592,6 +602,14 @@ tuning_path_digest=''
 if [[ $component == agent ]]; then
   install -o root -g root -m 0600 -- "$service_directory/${tuning_files[0]}" "$stage/tuning-service"
   install -o root -g root -m 0600 -- "$service_directory/${tuning_files[1]}" "$stage/tuning-path"
+  if [[ $init_system == systemd ]]; then
+    install -o root -g root -m 0600 -- "$service_directory/${tuning_files[2]}" "$stage/tuning-probe"
+    install -o root -g root -m 0600 -- "$service_directory/${tuning_files[3]}" "$stage/tuning-probe-reset"
+    sha256sum -- "$stage/tuning-probe" "$stage/tuning-probe-reset" | awk '{print $1}' > "$stage/tuning-probe-digests"
+    if $module_units; then
+      sha256sum -- "$service_directory/${tuning_files[4]}" "$service_directory/${tuning_files[5]}" | awk '{print $1}' >> "$stage/tuning-probe-digests"
+    fi
+  fi
   tuning_service_digest=$(sha256sum -- "$stage/tuning-service"); tuning_service_digest=${tuning_service_digest%% *}
   tuning_path_digest=$(sha256sum -- "$stage/tuning-path"); tuning_path_digest=${tuning_path_digest%% *}
   # On systemd these are the oneshot unit and the path unit that arms it; on
@@ -802,16 +820,31 @@ service_reload_definitions
 if [[ $component == agent ]]; then
   publish "$stage/tuning-service" "$tuning_service" root root "$service_mode"
   publish "$stage/tuning-path" "$tuning_path" root root "$service_mode"
-  service_reload_definitions
   if [[ $init_system == systemd ]]; then
+    publish "$stage/tuning-probe-reset" "$tuning_probe_reset" root root "$service_mode"
+    publish "$stage/tuning-probe" "$tuning_probe" root root "$service_mode"
+    if ${module_units:-false}; then
+      for unitname in proxy-agent-tuning-modules.service proxy-agent-tuning-modules.path; do
+        publish "$service_directory/$unitname" "/etc/systemd/system/$unitname" root root "$service_mode"
+      done
+    fi
+    publish "$stage/tuning-probe-digests" "$registry/agent.tuning-probe-digests" root root 0600
+  fi
+  service_reload_definitions
+  qui_invalidate_tuning_probe "$data/tuning"
+  if [[ $init_system == systemd ]]; then
+    systemctl start proxy-agent-tuning-probe.service || printf '调优权限探测失败，请查看 proxy-agent-tuning-probe.service 日志。\n' >&2
     systemctl enable proxy-agent-tuning.path proxy-agent-tuning.service
     systemctl start proxy-agent-tuning.path
     if systemctl is-failed --quiet proxy-agent-tuning.service; then
       systemctl reset-failed proxy-agent-tuning.service
-      systemctl start --no-block proxy-agent-tuning.service
+      # A future publish may retry; probing must never replay a failed profile.
     fi
   else
     service_enable proxy-agent-tuning
+    # The supervised watcher probes with its bounded capabilities on every start.
+    # Only boot replays a retained profile; an install/upgrade must not apply it.
+    qui_skip_tuning_replay /run/proxy-agent-tuning
     if service_is_active proxy-agent-tuning; then service_restart proxy-agent-tuning; else service_start proxy-agent-tuning; fi
   fi
 fi

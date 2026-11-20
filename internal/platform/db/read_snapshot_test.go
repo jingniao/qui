@@ -56,7 +56,25 @@ func TestReadSnapshotIsolationCancellationAndRelease(t *testing.T) {
 		t.Fatalf("new snapshot %q: %v", value, err)
 	}
 	next.Close()
-	if reader.Stats().OpenConnections != 0 {
-		t.Fatal("idle read connection retained")
+	if stats := reader.Stats(); stats.OpenConnections != 1 || stats.Idle != 1 || stats.InUse != 0 || stats.MaxIdleClosed != 0 {
+		t.Fatalf("finished snapshots did not reuse the reader: %+v", stats)
+	}
+
+	active, cancelActive := context.WithCancel(ctx)
+	defer cancelActive()
+	abandoned, err := BeginRead(active, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer abandoned.Close()
+	if err = abandoned.QueryRowContext(active, "SELECT value_json FROM system_settings WHERE key='snapshot'").Scan(&value); err != nil || value != "2" {
+		t.Fatalf("cancelable snapshot %q: %v", value, err)
+	}
+	cancelActive()
+	abandoned.Close()
+	afterCancel, cancelAfter := context.WithTimeout(ctx, time.Second)
+	defer cancelAfter()
+	if err = reader.QueryRowContext(afterCancel, "SELECT value_json FROM system_settings WHERE key='snapshot'").Scan(&value); err != nil || value != "2" {
+		t.Fatalf("reader unavailable after canceling a snapshot: %q: %v", value, err)
 	}
 }

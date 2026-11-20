@@ -4,10 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
-
-	tuningcontract "proxycontrol/pkg/contracts/tuning"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -44,6 +41,20 @@ func TestVirtualization(t *testing.T) {
 			t.Fatalf("got %q, want openvz", got)
 		}
 	})
+	for path, identity := range map[string]string{"run/systemd/container": "lxc", "proc/self/uid_map": "userns"} {
+		t.Run(identity, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, "sys/class/dmi/id/sys_vendor"), "QEMU")
+			value := "lxc\n"
+			if identity == "userns" {
+				value = "0 100000 65536\n"
+			}
+			writeFile(t, filepath.Join(root, path), value)
+			if got := detectVirtualization(root); got != identity {
+				t.Fatalf("got %q, want %s", got, identity)
+			}
+		})
+	}
 	t.Run("kvm", func(t *testing.T) {
 		root := t.TempDir()
 		writeFile(t, filepath.Join(root, "sys/class/dmi/id/sys_vendor"), "QEMU\n")
@@ -64,91 +75,6 @@ func TestVirtualization(t *testing.T) {
 			t.Fatalf("got %q, want unknown", got)
 		}
 	})
-}
-
-func TestKeyStates(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "proc/sys/net/ipv4/tcp_ecn"), "2\n")
-	writeFile(t, filepath.Join(root, "proc/self/mountinfo"), "20 1 0:19 / /proc/sys rw,nosuid,nodev,noexec,relatime - proc proc rw\n")
-	states := tuningKeyStates(root)
-	if len(states) != 19 {
-		t.Fatalf("got %d states, want 19", len(states))
-	}
-	var ecn, somax *struct{ present, writable bool }
-	for _, st := range states {
-		if st.Key == "net.ipv4.tcp_ecn" {
-			ecn = &struct{ present, writable bool }{st.Present, st.Writable}
-		}
-		if st.Key == "net.core.somaxconn" {
-			somax = &struct{ present, writable bool }{st.Present, st.Writable}
-		}
-	}
-	if ecn == nil || !ecn.present || !ecn.writable {
-		t.Fatalf("expected tcp_ecn present and writable, got %+v", ecn)
-	}
-	if somax == nil || somax.present || somax.writable {
-		t.Fatalf("expected somaxconn absent and not writable, got %+v", somax)
-	}
-
-	writeFile(t, filepath.Join(root, "proc/self/mountinfo"), "20 1 0:19 / /proc/sys ro,nosuid - proc proc ro\n")
-	for _, st := range tuningKeyStates(root) {
-		if st.Key == "net.ipv4.tcp_ecn" && (!st.Present || st.Writable) {
-			t.Fatalf("expected read-only mount to mark tcp_ecn non-writable, got %+v", st)
-		}
-	}
-}
-
-func TestKeyStatesMountOverrides(t *testing.T) {
-	for _, tc := range []struct {
-		name, mounts string
-		fs, net      bool
-	}{
-		{"readonly_fs", "20 1 0:19 / /proc/sys rw - proc proc rw\n21 20 0:19 /fs /proc/sys/fs ro - proc proc rw\n", false, true},
-		{"lxc_proc_mixed", "21 20 0:19 /net /proc/sys/net rw - proc proc rw\n20 1 0:19 / /proc/sys ro - proc proc rw\n", false, true},
-		{"readonly_sys", "20 1 0:19 / /proc/sys ro - proc proc rw\n", false, false},
-		{"unrelated_mount", "20 1 0:19 / /other ro - proc proc ro\n", true, true},
-		{"missing_mountinfo", "", true, true},
-		{"readonly_proc_superblock", "20 1 0:19 / /proc rw - proc proc ro\n", false, false},
-		{"readonly_fs_superblock", "20 1 0:19 / /proc/sys rw - proc proc rw\n21 20 0:19 /fs /proc/sys/fs rw - proc proc ro\n", false, true},
-		{"prefix_boundary", "20 1 0:19 / /proc/sys/ne ro - proc proc ro\n", true, true},
-		{"stacked_sys_ro_over_rw", "20 1 0:19 / /proc/sys rw - proc proc rw\n22 20 0:19 / /proc/sys ro - proc proc rw\n23 22 0:19 /net /proc/sys/net rw - proc proc rw\n", false, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			for _, k := range tuningcontract.Keys() {
-				writeFile(t, filepath.Join(root, "proc/sys", strings.ReplaceAll(k, ".", "/")), "1\n")
-			}
-			if tc.mounts != "" {
-				writeFile(t, filepath.Join(root, "proc/self/mountinfo"), tc.mounts)
-			}
-			for _, st := range tuningKeyStates(root) {
-				if !st.Present {
-					t.Errorf("%s should be present", st.Key)
-				}
-				want := tc.net
-				if st.Key == "fs.file-max" {
-					want = tc.fs
-				}
-				if st.Writable != want {
-					t.Errorf("%s writable=%v, want %v", st.Key, st.Writable, want)
-				}
-			}
-		})
-	}
-}
-
-func TestProcPathReadOnlyPrefixBoundary(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "proc/self/mountinfo"), "20 1 0:19 / /proc/sys/net ro - proc proc rw\n")
-	mounts := procMounts(root)
-	for _, path := range []string{"/proc/sys/net", "/proc/sys/net/ipv4/tcp_ecn"} {
-		if !procPathReadOnly(mounts, path) {
-			t.Errorf("%s should be read-only", path)
-		}
-	}
-	if procPathReadOnly(mounts, "/proc/sys/network/key") {
-		t.Fatal("/proc/sys/net must not cover /proc/sys/network")
-	}
 }
 
 func TestAlgorithms(t *testing.T) {

@@ -28,9 +28,9 @@
     </form>
 
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <LoadingSkeleton v-else-if="loading && !operations.length" />
-    <EmptyState v-else-if="!operations.length" title="暂无操作记录" />
-    <DataTable v-else>
+    <LoadingSkeleton v-if="loading && !display.ready" />
+    <EmptyState v-else-if="display.ready && !operations.length" title="暂无操作记录" />
+    <DataTable v-else-if="display.ready">
       <template #header>
         <th>时间</th>
         <th>操作人</th>
@@ -72,6 +72,7 @@
 </template>
 
 <script setup lang="ts">
+import { retainedQuery } from '../../../app/retainedQuery';
 import { ref, onMounted } from 'vue';
 import { request, type Page } from '../../../app/apiClient';
 import { formatTime } from '../../../app/auth';
@@ -86,11 +87,13 @@ interface Operation { id: number; timestamp: string; operator: string; action: s
 const operations = ref<Operation[]>([]); const page = ref(1); const total = ref(0); const keyword = ref(''); const loading = ref(false); const error = ref('');
 
 let generation = 0;
+const display = retainedQuery(() => { operations.value = []; total.value = 0; });
 async function load() {
+  display.begin(page.value, keyword.value);
   const current = ++generation;
   loading.value = true; error.value = '';
-  try { const result = await request<Page<Operation>>(`/operations?page=${page.value}&pageSize=20&keyword=${encodeURIComponent(keyword.value)}`); if (current !== generation) return; operations.value = result.items; total.value = result.total; }
-  catch (e) { if (current === generation) error.value = (e as Error).message; } finally { if (current === generation) loading.value = false; }
+  try { const result = await request<Page<Operation>>(`/operations?page=${page.value}&pageSize=20&keyword=${encodeURIComponent(keyword.value)}`); if (current !== generation) return; display.ready = true; operations.value = result.items; total.value = result.total; }
+  catch (e) { if (current === generation) { display.reject(e); error.value = (e as Error).message; } } finally { if (current === generation) loading.value = false; }
 }
 function search() { page.value = 1; load(); }
 function changePage(value: number) { page.value = value; load(); }

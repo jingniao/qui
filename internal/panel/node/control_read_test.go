@@ -10,7 +10,10 @@ import (
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
-type countingAdvice struct{ reads atomic.Int32 }
+type countingAdvice struct {
+	reads    atomic.Int32
+	rttReads atomic.Int32
+}
 
 func (a *countingAdvice) HasQUICInbound(context.Context, string) (bool, error) {
 	a.reads.Add(1)
@@ -22,6 +25,7 @@ func (a *countingAdvice) RelayRole(context.Context, string) (bool, error) {
 }
 func (a *countingAdvice) MedianRTT(context.Context, string) (*float64, error) {
 	a.reads.Add(1)
+	a.rttReads.Add(1)
 	return nil, nil
 }
 

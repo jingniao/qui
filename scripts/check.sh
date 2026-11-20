@@ -220,6 +220,9 @@ go build -o bin/proxy-panel ./cmd/panel
 step 'build the agent'
 go build -o bin/proxy-agent ./cmd/agent
 
+step 'fixed Ubuntu module package checks'
+python3 -IB internal/agent/tuning/module_package_test.py
+
 # The deploy scripts are the only way an operator installs, upgrades or removes a
 # host, so a syntax error in one of them is caught here rather than at the first
 # install. The POSIX scripts are parsed by sh (dash on the CI runner) one file at
@@ -270,6 +273,9 @@ fi
 # Replacement checks use temporary paths and service substitutes, never host services.
 bash -n -- deploy/linux/tests/agent-replace-test.sh
 bash deploy/linux/tests/agent-replace-test.sh
+bash -n -- deploy/linux/tests/tuning-module-uninstall-busy.sh
+bash deploy/linux/tests/tuning-module-uninstall-busy.sh
+# The argument-driven recovery fixture runs in TestTuningProbeLifecycle above.
 # tuning-helper-test.sh activates the packaged tuning units against a fake helpe
 # below /run and never writes host sysctls; the other two are rootless.
 "${as_root[@]}" bash deploy/linux/tests/tuning-helper-test.sh

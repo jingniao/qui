@@ -173,13 +173,13 @@ for init_system in systemd openrc; do
   printf new-gost > "$root/usr/local/lib/proxy-agent/gost"
   printf partial-record > "$registry/agent.manifest"
   printf changed-config > "$root/etc/proxy-agent/config.yaml"
-  check "$init_system production restore loop" restore_snapshot agent
+  check "$init_system production restore loop" restore_snapshot agent interactive
   check "$init_system Xray restored" test "$(cat "$root/usr/local/lib/proxy-agent/xray")" = original-xray
   check "$init_system sing-box restored" test "$(cat "$root/usr/local/lib/proxy-agent/sing-box")" = original-sing-box
   check "$init_system gost restored" test "$(cat "$root/usr/local/lib/proxy-agent/gost")" = original-gost
   check "$init_system config restored" cmp -s "$T/new" "$root/etc/proxy-agent/config.yaml"
   check "$init_system record restored" cmp -s "$T/three" "$registry/agent.manifest"
-  check "$init_system idempotent restore" restore_snapshot agent
+  check "$init_system idempotent restore" restore_snapshot agent interactive
 done
 
 # The panel's web-UI update bridge is part of the panel snapshot, and a bridge that a failed
@@ -203,7 +203,7 @@ printf new-panel > "$root/usr/local/bin/proxy-panel"
 printf '#!/bin/sh\n' > "$root/usr/local/lib/proxycontrol/panel-update-request"
 printf '# new service unit\n' > "$root/etc/systemd/system/proxy-panel-update.service"
 printf '# new path unit\n' > "$root/etc/systemd/system/proxy-panel-update.path"
-check 'panel production restore loop' restore_snapshot panel
+check 'panel production restore loop' restore_snapshot panel interactive
 check 'panel binary restored' test "$(cat "$root/usr/local/bin/proxy-panel")" = original-panel
 check 'new update helper removed' test ! -e "$root/usr/local/lib/proxycontrol/panel-update-request"
 check 'new update service unit removed' test ! -e "$root/etc/systemd/system/proxy-panel-update.service"
@@ -222,7 +222,7 @@ while IFS= read -r path; do
   cp -p "$path" "$snapshot/files$path"
 done < <(component_files panel)
 : > "$systemctl_calls"
-check 'panel restore of a bridging release' restore_snapshot panel
+check 'panel restore of a bridging release' restore_snapshot panel interactive
 if grep -qx -- 'disable --now proxy-panel-update.path' "$systemctl_calls"; then
   printf 'FAIL - the update path unit must not be disabled when the snapshot has it\n' >&2; exit 1
 fi

@@ -26,6 +26,11 @@ respawn_max=0
 output_logger="logger -t proxy-agent-tuning -p daemon.info"
 error_logger="logger -t proxy-agent-tuning -p daemon.err"
 start_pre() {
+  # Invalidate before the supervisor tries to exec the bounded watcher. Only
+  # the Agent account may resolve this path in its writable request directory.
+  runuser -u proxy-agent -- rm -f -- /var/lib/proxy-agent/tuning/probe.json || return 1
+  checkpath --directory --owner root:root --mode 0711 /run/proxy-agent-tuning || return 1
+  rm -f /run/proxy-agent-tuning/probe-finished || return 1
   # A future capability must not silently broaden a root helper's bounding set.
   # cat, not read: BusyBox read is byte-wise and integer sysctls end at a
   # non-zero offset, so read reports a failure here and the service never starts.
@@ -35,6 +40,21 @@ start_pre() {
     eerror "Unknown Linux capability set; tuning helper stays stopped"
     return 1
   fi
+}
+start_post() {
+  # supervise-daemon starts asynchronously. Let the first capability report read the receipt.
+  attempts=0
+  while [ "$attempts" -lt 50 ]; do
+    if [ -e /run/proxy-agent-tuning/probe-finished ]; then
+      case $(cat /run/proxy-agent-tuning/probe-finished) in
+        ready) return 0 ;;
+        failed) ewarn "Tuning probe failed; check the watcher log"; return 0 ;;
+      esac
+    fi
+    sleep 0.1
+    attempts=$((attempts+1))
+  done
+  ewarn "Tuning probe has not finished; check the watcher log"
 }
 depend() {
   need localmount

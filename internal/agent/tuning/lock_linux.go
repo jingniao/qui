@@ -8,7 +8,11 @@ import (
 )
 
 func openDesired(root *os.Root) (*os.File, error) {
-	return root.OpenFile("desired.json", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	return openRequest(root, "desired.json")
+}
+
+func openRequest(root *os.Root, name string) (*os.File, error) {
+	return root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 }
 
 func lock(path string) (func(), error) {

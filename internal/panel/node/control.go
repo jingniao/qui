@@ -742,7 +742,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			if err != nil {
 				return err
 			}
-			if current.Capabilities.GetTuningSupported() {
+			if command.InstallMissingModules && !current.Capabilities.GetHost().GetTuningModuleInstallSupported() {
+				if err := c.Repository.unconfirmTuning(ctx, id); err != nil {
+					return status.Error(codes.Internal, "cannot retire unsupported module request")
+				}
+			} else if current.Capabilities.GetTuningSupported() {
 				sentTuningID = command.RequestId
 				if err = send(command); err != nil {
 					return err

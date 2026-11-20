@@ -31,6 +31,11 @@ func productionPanel(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := secured.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return secured
 }
 

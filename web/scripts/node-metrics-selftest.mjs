@@ -17,7 +17,7 @@ console.log('PASS AU3.1: absent 1.0.9 metrics, first NIC sample and stale heartb
 
 const metaSource = readFileSync(new URL('../src/modules/nodes/nodeMeta.ts', import.meta.url), 'utf8')
   .replace("import { reactive } from 'vue';", 'const reactive = value => value;')
-  .replace("import { request } from '../../app/apiClient';", 'const request = (...args) => globalThis.nodeMetaRequest(...args);');
+  .replace("import { invalidatesRead, request, requestScope } from '../../app/apiClient';", 'const requestScope = () => 1, invalidatesRead = () => false; const request = (...args) => globalThis.nodeMetaRequest(...args);');
 const metaCode = ts.transpileModule(metaSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const metadata = await import(`data:text/javascript;base64,${Buffer.from(metaCode).toString('base64')}`);
 const local = new Map();

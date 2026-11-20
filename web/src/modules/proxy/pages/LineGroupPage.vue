@@ -23,18 +23,18 @@
 
     <p v-if="loading && groups.length" role="status" class="text-sm text-ios-secondary">正在读取分组成员与操作选项…</p>
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <div v-else-if="loading && !groups.length" role="status" class="flex items-center justify-center p-12 text-sm text-neutral-400 gap-2">
+    <div v-if="loading && !groupsReady" role="status" class="flex items-center justify-center p-12 text-sm text-neutral-400 gap-2">
       <svg class="w-4 h-4 animate-spin text-ios-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
       </svg>
       <span>正在加载节点分组…</span>
     </div>
     <EmptyState
-      v-else-if="!groups.length"
+      v-else-if="groupsReady && !groups.length"
       title="暂无节点分组"
       description="将代理节点加入分组，可在分流控制与策略中统一引用。"
     />
-    <div v-else :inert="loading || undefined" class="space-y-4">
+    <div v-else-if="groupsReady" :inert="loading || !!error || undefined" class="space-y-4">
       <!-- 顶部搜索工具栏与统计 -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div class="relative flex items-center max-w-xs w-full">
@@ -527,6 +527,8 @@
 </template>
 
 <script setup lang="ts">
+import { readTogether } from '../../../app/readTogether';
+import { invalidatesRead } from '../../../app/apiClient';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { request, type Page } from '../../../app/apiClient';
@@ -749,12 +751,19 @@ const references = computed(() => {
   ];
 });
 
+const groupsReady = ref(false);
+let readGeneration = 0;
 async function load() {
+  const current = ++readGeneration;
+  let revoked = false;
   loading.value = true;
   error.value = '';
   try {
-    const data = await Promise.all([
-      choices(groupAPI.list).then(value => { groups.value = value; syncSelection(); return value; }),
+    const data = await readTogether([
+      choices(groupAPI.list).then(items => {
+        if (!revoked && current === readGeneration && !groupsReady.value) { groups.value = items; groupsReady.value = true; syncSelection(); }
+        return items;
+      }),
       choices((page, size) => request<Page<NodeView>>(`/nodes/choices?page=${page}&pageSize=${size}`)),
       choices((page, size) => proxyAPI.inbounds('', page, size)),
       choices((page, size) => policyAPI.list(page, '', size)),
@@ -763,14 +772,22 @@ async function load() {
       choices((page, size) => userAPI.choices(page, '', size)),
       tunnelRuleAPI.list().then(result => result.items)
     ]);
+    if (current !== readGeneration) return;
+    groupsReady.value = true;
     [groups.value, servers.value, inbounds.value, policies.value, clientTemplate.value] = data;
     users.value = data[6];
     tunnelRules.value = data[7];
     syncSelection();
   } catch (e) {
+    if (current !== readGeneration) return;
+    if (invalidatesRead(e)) {
+      revoked = true;
+      groupsReady.value = false; groups.value = []; servers.value = []; inbounds.value = [];
+      policies.value = []; users.value = []; tunnelRules.value = []; clientTemplate.value = null;
+    }
     error.value = (e as Error).message;
   } finally {
-    loading.value = false;
+    if (current === readGeneration) loading.value = false;
   }
 }
 
@@ -930,6 +947,7 @@ function askDeleteGroup(group: NodeGroup) {
     if (selected.value?.id === group.id) {
       groupModalVisible.value = false;
     }
+    groups.value = groups.value.filter(row => row.id !== group.id);
     showToast('节点分组已删除');
   };
   confirmOpen.value = true;

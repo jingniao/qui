@@ -12,18 +12,18 @@
       <select v-model="nodeFilter" class="ios-filter-select" aria-label="按入口节点筛选"><option value="">全部入口节点</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.name }}</option></select>
     </div>
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <p v-else-if="loading" class="text-sm text-ios-tertiary">加载中…</p>
-    <div v-else-if="!rulesTab">
+    <p v-if="loading && !ready" class="text-sm text-ios-tertiary">加载中…</p>
+    <div v-if="ready && !rulesTab">
       <EmptyState v-if="!tunnels.length" title="暂无隧道" description="创建入口到出口的加密隧道，再添加转发规则。" />
       <DataTable v-else><template #header><th>名称 / 路径</th><th>传输</th><th>接收端口</th><th>规则数</th><th>状态</th><th v-if="isOwner">操作</th></template>
         <template #body><tr v-for="t in tunnels" :key="t.id">
           <td class="p-4"><p class="text-base font-semibold text-ios-label">{{ t.name }}</p><p class="text-sm text-ios-secondary mt-0.5">{{ routeLabel(t) }}</p></td><td>TLS</td>
           <td class="font-mono tabular-nums text-xs"><p v-for="h in t.hops.filter(h => h.role !== 'entry')" :key="h.role">{{ h.nodeName }}:{{ h.listenPort }}</p></td><td class="font-mono tabular-nums">{{ t.ruleCount }}</td><td><PublishBadge :status="t.status" /></td>
-          <td v-if="isOwner"><div class="flex gap-2"><button v-if="t.status !== 'published'" class="ios-action-btn-primary" :disabled="mutating" @click="apply({ tunnelIds: [t.id], ruleIds: [] }, t.status === 'pending_delete' ? '隧道已删除' : '隧道已生效')">重试</button><template v-if="t.status !== 'pending_delete'"><button class="ios-action-btn-primary" :disabled="mutating" @click="editingTunnel = t; editor = true">编辑</button><button class="ios-action-btn-secondary" :disabled="mutating" @click="ask({ kind: 'rotate', tunnel: t })">轮换凭据</button><button class="ios-action-btn-danger" :disabled="mutating" @click="ask({ kind: 'tunnel', tunnel: t })">删除</button></template></div></td>
+          <td v-if="isOwner"><div class="flex gap-2"><button v-if="t.status !== 'published'" class="ios-action-btn-primary" :disabled="mutating || loading || !!error" @click="apply({ tunnelIds: [t.id], ruleIds: [] }, t.status === 'pending_delete' ? '隧道已删除' : '隧道已生效')">重试</button><template v-if="t.status !== 'pending_delete'"><button class="ios-action-btn-primary" :disabled="mutating || loading || !!error" @click="editingTunnel = t; editor = true">编辑</button><button class="ios-action-btn-secondary" :disabled="mutating || loading || !!error" @click="ask({ kind: 'rotate', tunnel: t })">轮换凭据</button><button class="ios-action-btn-danger" :disabled="mutating || loading || !!error" @click="ask({ kind: 'tunnel', tunnel: t })">删除</button></template></div></td>
         </tr></template>
       </DataTable>
     </div>
-    <div v-else class="space-y-5">
+    <div v-else-if="ready" class="space-y-5">
       <EmptyState v-if="!groups.length" title="暂无规则" description="创建转发规则，或调整筛选条件。" />
       <section v-for="group in groups" :key="group.id || 'direct'" class="space-y-3">
         <h3 class="text-ios-label text-lg font-semibold leading-snug">{{ group.name }} <span class="text-sm font-normal text-ios-secondary">{{ group.route }}</span></h3>
@@ -31,7 +31,7 @@
           <template #body><tr v-for="r in group.rules" :key="r.id">
             <td class="p-4"><p class="text-base font-semibold text-ios-label">{{ r.name }}</p><p class="text-sm text-ios-secondary mt-0.5"><span class="font-mono tabular-nums">{{ r.entryNodeName }}:{{ r.listenPort }}</span> → {{ r.tunnelName ? `经 ${r.tunnelName}` : '直接转发' }} → <span>{{ ruleTargetLabel(r.target) }}</span></p><p class="text-xs text-ios-tertiary">{{ r.network.toUpperCase() }}</p></td>
             <td>{{ nodes.find(n => n.id === r.ownerNodeId)?.name || r.ownerNodeId || '—' }}</td><td>{{ r.subscriptionVisible ? '可见' : '隐藏' }}</td><td><StatusBadge :status="r.enabled ? 'active' : 'disabled'" /></td><td><PublishBadge :status="r.status" /></td>
-            <td v-if="isOwner"><div class="flex gap-2"><button v-if="r.status !== 'published'" class="ios-action-btn-primary" :disabled="mutating" @click="apply({ tunnelIds: [], ruleIds: [r.id] }, r.status === 'pending_delete' ? '规则已删除' : '规则已生效')">重试</button><template v-if="r.status !== 'pending_delete'"><button class="ios-action-btn-primary" :disabled="mutating" @click="editingRule = r; editor = true">编辑</button><button class="ios-action-btn-danger" :disabled="mutating" @click="ask({ kind: 'rule', rule: r })">删除</button></template></div></td>
+            <td v-if="isOwner"><div class="flex gap-2"><button v-if="r.status !== 'published'" class="ios-action-btn-primary" :disabled="mutating || loading || !!error" @click="apply({ tunnelIds: [], ruleIds: [r.id] }, r.status === 'pending_delete' ? '规则已删除' : '规则已生效')">重试</button><template v-if="r.status !== 'pending_delete'"><button class="ios-action-btn-primary" :disabled="mutating || loading || !!error" @click="editingRule = r; editor = true">编辑</button><button class="ios-action-btn-danger" :disabled="mutating || loading || !!error" @click="ask({ kind: 'rule', rule: r })">删除</button></template></div></td>
           </tr></template>
         </DataTable>
       </section>
@@ -43,10 +43,11 @@
   </div>
 </template>
 <script setup lang="ts">
+import { readTogether } from '../../../app/readTogether';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { isOwner } from '../../../app/auth';
-import { APIError } from '../../../app/apiClient';
+import { APIError, invalidatesRead } from '../../../app/apiClient';
 import { showToast } from '../../../app/api';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
@@ -84,15 +85,29 @@ async function apply(selection: PublishSelection, done: string) {
     else if (problem) applyNote.value = { tone: 'error', text: `应用失败，已恢复原配置：${clause(problem)}。可修改后保存，或点「重试」。` };
     else {
       applyNote.value = result.gostRemovable?.length ? { tone: 'info', text: `以下服务器的 GOST 已不再使用，可在「版本与更新 → 代理核心」中移除：${result.gostRemovable.map(s => s.name).join('、')}` } : null;
+      tunnels.value = tunnels.value.filter(row => row.status !== 'pending_delete' || !selection.tunnelIds.includes(row.id));
+      rules.value = rules.value.filter(row => row.status !== 'pending_delete' || !selection.ruleIds.includes(row.id));
       showToast(done);
     }
   } catch (e) { applyNote.value = { tone: 'error', text: `应用失败：${clause(tunnelError(e))}。修改已保存，可点「重试」。` }; }
   finally { mutating.value = false; await load(); }
 }
+const ready = ref(false);
+let loadGeneration = 0;
 async function load() {
+  const current = ++loadGeneration;
   loading.value = true; error.value = '';
-  try { const [ts, rs, choices] = await Promise.all([tunnelAPI.list(), tunnelRuleAPI.list(), loadTunnelChoices(isOwner.value)]); tunnels.value = ts.items; rules.value = rs.items; nodes.value = choices.nodes; inbounds.value = choices.inbounds; imports.value = choices.imports; }
-  catch (e) { error.value = tunnelError(e); } finally { loading.value = false; }
+  try { const [ts, rs, choices] = await readTogether([tunnelAPI.list(), tunnelRuleAPI.list(), loadTunnelChoices(isOwner.value)]); if (current !== loadGeneration) return;
+    ready.value = true; tunnels.value = ts.items; rules.value = rs.items; nodes.value = choices.nodes; inbounds.value = choices.inbounds; imports.value = choices.imports; }
+  catch (e) {
+    if (current !== loadGeneration) return;
+    if (invalidatesRead(e)) {
+      ready.value = false;
+      tunnels.value = []; rules.value = []; nodes.value = []; imports.value = []; inbounds.value = [];
+      editor.value = false;
+    }
+    error.value = tunnelError(e);
+  } finally { if (current === loadGeneration) loading.value = false; }
 }
 async function performAction() {
   const action = confirmAction.value;
@@ -103,12 +118,16 @@ async function performAction() {
   try {
     if (action.kind === 'rule') {
       await tunnelRuleAPI.remove(action.rule.id);
+      if (action.rule.status === 'draft') rules.value = rules.value.filter(row => row.id !== action.rule.id);
+      else action.rule.status = 'pending_delete';
       if (action.rule.status !== 'draft') next = [{ tunnelIds: [], ruleIds: [action.rule.id] }, '规则已删除'];
     } else if (action.kind === 'rotate') {
       await tunnelAPI.rotate(action.tunnel.id, action.tunnel.updatedAt);
       next = [{ tunnelIds: [action.tunnel.id], ruleIds: [] }, '凭据已轮换并生效'];
     } else {
       await tunnelAPI.remove(action.tunnel.id);
+      if (action.tunnel.status === 'draft') tunnels.value = tunnels.value.filter(row => row.id !== action.tunnel.id);
+      else action.tunnel.status = 'pending_delete';
       if (action.tunnel.status !== 'draft') next = [{ tunnelIds: [action.tunnel.id], ruleIds: [] }, '隧道已删除'];
     }
     if (!next) { showToast('已删除'); await load(); }

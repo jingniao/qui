@@ -12,6 +12,7 @@ import (
 	"proxycontrol/internal/platform/httpapi"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/tuning"
+	"regexp"
 	"time"
 )
 
@@ -28,19 +29,20 @@ func ValidateTuning(settings map[string]string, clear bool) error {
 }
 
 type TuningView struct {
-	Supported   bool              `json:"supported"`
-	Desired     map[string]string `json:"desired"`
-	RequestID   *string           `json:"requestId"`
-	Status      string            `json:"status"`
-	Result      json.RawMessage   `json:"result"`
-	RequestedAt *string           `json:"requestedAt"`
-	UpdatedAt   *string           `json:"updatedAt"`
-	Current     map[string]string `json:"current"`
-	Initial     map[string]string `json:"initial"`
+	Supported             bool              `json:"supported"`
+	Desired               map[string]string `json:"desired"`
+	RequestID             *string           `json:"requestId"`
+	Status                string            `json:"status"`
+	Result                json.RawMessage   `json:"result"`
+	RequestedAt           *string           `json:"requestedAt"`
+	UpdatedAt             *string           `json:"updatedAt"`
+	InstallMissingModules bool              `json:"installMissingModules"`
+	Current               map[string]string `json:"current"`
+	Initial               map[string]string `json:"initial"`
 }
 
 func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
-	n, err := h.Repository.Get(r.Context(), r.PathValue("id"))
+	n, err := h.Repository.GetForCoreSelection(r.Context(), r.PathValue("id"))
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -56,7 +58,7 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 		}
 		var desired string
 		var result *string
-		err = h.Repository.Database.QueryRowContext(r.Context(), "SELECT desired_json,request_id,status,result_json,requested_at,updated_at FROM node_tuning WHERE node_id=?", n.ID).Scan(&desired, &v.RequestID, &v.Status, &result, &v.RequestedAt, &v.UpdatedAt)
+		err = h.Repository.Database.QueryRowContext(r.Context(), "SELECT desired_json,request_id,status,result_json,requested_at,updated_at,install_missing_modules FROM node_tuning WHERE node_id=?", n.ID).Scan(&desired, &v.RequestID, &v.Status, &result, &v.RequestedAt, &v.UpdatedAt, &v.InstallMissingModules)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			h.fail(w, err)
 			return
@@ -78,9 +80,10 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Settings      map[string]string `json:"settings"`
-		Clear         bool              `json:"clear"`
-		ConfirmNodeID string            `json:"confirmNodeId"`
+		Settings              map[string]string `json:"settings"`
+		Clear                 bool              `json:"clear"`
+		ConfirmNodeID         string            `json:"confirmNodeId"`
+		InstallMissingModules bool              `json:"installMissingModules"`
 	}
 	if err = httpapi.Decode(w, r, &input); err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
@@ -96,6 +99,21 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 	}
 	if !n.Capabilities.GetTuningSupported() {
 		httpapi.Error(w, 409, "tuning_unsupported", "node does not support tuning")
+		return
+	}
+	host := n.Capabilities.GetHost()
+	if input.InstallMissingModules {
+		if !host.GetTuningModuleInstallSupported() || host.GetTuningProbeStatus() != "ready" {
+			httpapi.Error(w, 409, "tuning_module_install_unsupported", "此节点未报告 Ubuntu 当前内核模块补装能力")
+			return
+		}
+		if input.Clear || !tuning.HasModuleTarget(input.Settings) {
+			httpapi.Error(w, 400, "invalid_tuning", "补装只适用于 BBR 或 fq")
+			return
+		}
+	}
+	if err := tuning.CheckProbe(input.Settings, host.GetTuningProbeStatus(), host.GetTuningKeys()); err != nil {
+		httpapi.Error(w, 409, "tuning_probe_unavailable", err.Error())
 		return
 	}
 	if !n.Enabled || (n.Status != "online" && n.Status != "degraded") {
@@ -129,8 +147,8 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 409, "node_offline", "node must be online")
 		return
 	}
-	res, err := tx.ExecContext(r.Context(), `INSERT INTO node_tuning(node_id,desired_json,request_id,status,requested_at,updated_at) VALUES(?,?,?,'pending',?,?)
- ON CONFLICT(node_id) DO UPDATE SET desired_json=excluded.desired_json,request_id=excluded.request_id,status='pending',result_json=NULL,requested_at=excluded.requested_at,updated_at=excluded.updated_at WHERE node_tuning.status<>'pending'`, n.ID, string(raw), requestID, now, now)
+	res, err := tx.ExecContext(r.Context(), `INSERT INTO node_tuning(node_id,desired_json,request_id,status,requested_at,updated_at,install_missing_modules) VALUES(?,?,?,'pending',?,?,?)
+ ON CONFLICT(node_id) DO UPDATE SET desired_json=excluded.desired_json,request_id=excluded.request_id,status='pending',result_json=NULL,requested_at=excluded.requested_at,updated_at=excluded.updated_at,install_missing_modules=excluded.install_missing_modules WHERE node_tuning.status<>'pending'`, n.ID, string(raw), requestID, now, now, input.InstallMissingModules)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -160,14 +178,15 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 
 func (r *Repository) pendingTuning(ctx context.Context, node string) (*pb.TuningCommand, error) {
 	var raw, id string
-	err := r.Database.QueryRowContext(ctx, "SELECT desired_json,request_id FROM node_tuning WHERE node_id=? AND status='pending'", node).Scan(&raw, &id)
+	var install bool
+	err := r.Database.QueryRowContext(ctx, "SELECT desired_json,request_id,install_missing_modules FROM node_tuning WHERE node_id=? AND status='pending'", node).Scan(&raw, &id, &install)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	c := &pb.TuningCommand{RequestId: id}
+	c := &pb.TuningCommand{RequestId: id, InstallMissingModules: install}
 	if err = json.Unmarshal([]byte(raw), &c.Settings); err != nil {
 		return nil, err
 	}
@@ -222,6 +241,15 @@ func ValidateTuningResult(r *pb.TuningResult) error {
 		return errors.New("invalid tuning result")
 	}
 	seen := map[string]bool{}
+	if len(r.InstalledModulePackages) > 2 {
+		return errors.New("invalid module package count")
+	}
+	for _, name := range r.InstalledModulePackages {
+		if len(name) > 160 || !modulePackageName.MatchString(name) || seen[name] {
+			return errors.New("invalid module package receipt")
+		}
+		seen[name] = true
+	}
 	for _, k := range r.Keys {
 		if k == nil || seen[k.Key] || len(k.Value) > 256 || len(k.Error) > 1024 {
 			return errors.New("invalid tuning key result")
@@ -241,3 +269,5 @@ func ValidateTuningResult(r *pb.TuningResult) error {
 	}
 	return nil
 }
+
+var modulePackageName = regexp.MustCompile(`^linux-modules-(extra-)?[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-z0-9][a-z0-9-]*$`)

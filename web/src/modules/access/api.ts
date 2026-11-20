@@ -13,9 +13,11 @@ export interface AccountSummary { uploadBytes: number; downloadBytes: number; ob
 export interface AccessFilter { nodeId?: string; userId?: string; deviceId?: string; domain?: string; from?: string; to?: string; }
 
 function query(filter: AccessFilter, page?: number) { const params = new URLSearchParams(); for (const [key,value] of Object.entries(filter)) if(value) params.set(key,value); if(page){params.set('page',String(page));params.set('pageSize','20');} return params.toString(); }
+export function accountSummaryPath(filter: AccessFilter) { return `/traffic/accounts/summary?${query(filter)}`; }
+export function accessRecordsPath(filter: AccessFilter, page: number, blocked = false) { return `/access-records${blocked ? '/blocked' : ''}?${query(filter, page)}`; }
 export const accessAPI = {
-  accounts: (filter: AccessFilter) => request<AccountSummary>(`/traffic/accounts/summary?${query(filter)}`),
-  list: (filter: AccessFilter, page: number, blocked = false) => request<Page<AccessRecord>>(`/access-records${blocked ? '/blocked' : ''}?${query(filter,page)}`),
+  accounts: (filter: AccessFilter) => request<AccountSummary>(accountSummaryPath(filter)),
+  list: (filter: AccessFilter, page: number, blocked = false) => request<Page<AccessRecord>>(accessRecordsPath(filter, page, blocked)),
   domains: (filter: AccessFilter, page: number) => request<Page<DomainRecord>>(`/access-records/domains?${query(filter,page)}`),
   summary: (filter: AccessFilter) => request<TrafficSummary>(`/traffic/summary?${query(filter)}`),
 };

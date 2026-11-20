@@ -9,7 +9,7 @@
       <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
       <p v-if="!isOwner" class="text-sm text-ios-secondary">当前权限无法读取入站与出站配置，请联系 Owner。</p>
       <template v-else>
-        <p v-if="loading" class="text-sm text-ios-secondary">正在读取节点…</p>
+        <p v-if="loading && !inboundReady" class="text-sm text-ios-secondary">正在读取节点…</p>
         <DataTable v-else-if="inbounds.length">
           <template #header>
             <th>节点 / 协议</th>
@@ -32,12 +32,13 @@
             </tr>
           </template>
         </DataTable>
-        <EmptyState v-else-if="!error" title="此服务器尚未创建节点" description="创建节点以配置用户接入协议与端口"><template #action><button v-if="isOwner && !node.deletedAt" class="ios-btn-primary" @click="$emit('edit', null)">+ 新建节点</button></template></EmptyState>
+        <EmptyState v-else-if="inboundReady" title="此服务器尚未创建节点" description="创建节点以配置用户接入协议与端口"><template #action><button v-if="isOwner && !node.deletedAt" class="ios-btn-primary" @click="$emit('edit', null)">+ 新建节点</button></template></EmptyState>
       </template>
     </section>
     <details v-if="isOwner" class="panel-card p-6 space-y-4">
-      <summary class="cursor-pointer font-semibold text-ios-label">出站（{{ outbounds.length }}，只读）</summary>
-      <p v-if="!outbounds.length" class="text-sm text-ios-secondary">此服务器尚无出站配置。</p>
+      <summary class="cursor-pointer font-semibold text-ios-label">出站（{{ outboundReady ? outbounds.length : '—' }}，只读）</summary>
+      <p v-if="!outboundReady" class="text-sm text-ios-secondary">尚未取得出站配置。</p>
+      <p v-else-if="!outbounds.length" class="text-sm text-ios-secondary">此服务器尚无出站配置。</p>
       <DataTable v-else>
         <template #header>
           <th>名称</th>
@@ -57,8 +58,9 @@
       <router-link to="/proxy/nodes" class="text-sm text-ios-blue">前往节点列表</router-link>
     </details>
     <details v-if="isOwner" class="panel-card p-6 space-y-4">
-      <summary class="cursor-pointer font-semibold text-ios-label">出口组（{{ exits.length }}，只读）</summary>
-      <p v-if="!exits.length" class="text-sm text-ios-secondary">此服务器尚无出口组。</p>
+      <summary class="cursor-pointer font-semibold text-ios-label">出口组（{{ exitsReady ? exits.length : '—' }}，只读）</summary>
+      <p v-if="!exitsReady" class="text-sm text-ios-secondary">尚未取得出口组。</p>
+      <p v-else-if="!exits.length" class="text-sm text-ios-secondary">此服务器尚无出口组。</p>
       <ul v-else class="space-y-3 text-sm text-ios-secondary">
         <li v-for="exit in exits" :key="exit.id">{{ exit.name }} · {{ strategyNames[exit.strategy] || '—' }} · {{ exit.members.length }} 个出站 · {{ exit.enabled ? '已启用' : '已停用' }}</li>
       </ul>
@@ -66,9 +68,10 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue';
+import { ref, watch, onUnmounted, type Ref } from 'vue';
 import type { NodeView } from '../../api';
 import { proxyAPI, choices, strategyNames, type Inbound, type Outbound, type OutboundGroup } from '../../../proxy/api';
+import { invalidatesRead } from '../../../../app/apiClient';
 import { isOwner } from '../../../../app/auth';
 import { listenNetworks } from '../../../proxy/components/node-editor/nodeEditorModel';
 import { coreLabel, isCoreName } from '../../coreSummary';
@@ -76,7 +79,7 @@ import EmptyState from '../../../../components/EmptyState.vue';
 import StatusBadge from '../../../../components/StatusBadge.vue';
 import ProtocolBadge from '../../../../components/ProtocolBadge.vue';
 import DataTable from '../../../../components/DataTable.vue';
-const props = defineProps<{ node: NodeView; unpublished?: boolean }>();
+const props = defineProps<{ node: NodeView; refresh: number; unpublished?: boolean }>();
 const emit = defineEmits<{ edit: [item: Inbound | null]; publish: []; saved: [] }>();
 const busy = ref(false);
 function inboundCoreName(item: Inbound): string {
@@ -99,16 +102,31 @@ async function toggle(item: Inbound) {
 }
 const inbounds = ref<Inbound[]>([]), outbounds = ref<Outbound[]>([]), exits = ref<OutboundGroup[]>([]), error = ref(''), loading = ref(false);
 let generation = 0;
-watch(() => props.node.id, async id => {
+const inboundReady = ref(false), outboundReady = ref(false), exitsReady = ref(false);
+async function readSection<T>(pending: Promise<T[]>, rows: Ref<T[]>, ready: Ref<boolean>, current: number) {
+  try {
+    const items = await pending;
+    if (current !== generation) return;
+    rows.value = items; ready.value = true;
+  } catch (e) {
+    if (current === generation && invalidatesRead(e)) { rows.value = []; ready.value = false; }
+    throw e;
+  }
+}
+watch([() => props.node.id, isOwner, () => props.refresh], async ([id, owner], [previousId, previousOwner]) => {
   const current = ++generation;
-  inbounds.value = []; outbounds.value = []; exits.value = []; error.value = '';
-  if (!isOwner.value) return;
+  if (id !== previousId || owner !== previousOwner) {
+    inbounds.value = []; outbounds.value = []; exits.value = []; inboundReady.value = false; outboundReady.value = false; exitsReady.value = false;
+  }
+  error.value = '';
+  if (!owner) return;
   loading.value = true;
-  const results = await Promise.allSettled([choices((page, size) => proxyAPI.inbounds(id, page, size)), choices((page, size) => proxyAPI.outbounds(id, page, size)), choices((page, size) => proxyAPI.groups(id, page, size))]);
+  const results = await Promise.allSettled([
+    readSection(choices((page, size) => proxyAPI.inbounds(id, page, size)), inbounds, inboundReady, current),
+    readSection(choices((page, size) => proxyAPI.outbounds(id, page, size)), outbounds, outboundReady, current),
+    readSection(choices((page, size) => proxyAPI.groups(id, page, size)), exits, exitsReady, current)
+  ]);
   if (current !== generation) return;
-  if (results[0].status === 'fulfilled') inbounds.value = results[0].value;
-  if (results[1].status === 'fulfilled') outbounds.value = results[1].value;
-  if (results[2].status === 'fulfilled') exits.value = results[2].value;
   error.value = results.filter(result => result.status === 'rejected').map(result => (result as PromiseRejectedResult).reason.message).join('；');
   loading.value = false;
 }, { immediate: true });

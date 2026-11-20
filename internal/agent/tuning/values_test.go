@@ -25,3 +25,12 @@ func TestValidateAcceptsLoadableAlgorithm(t *testing.T) {
 		t.Fatal("expected unavailable fq without module in module-aware root to be rejected")
 	}
 }
+
+func TestModuleDiscoveryRequiresRunningKernel(t *testing.T) {
+	root := t.TempDir()
+	put(t, sysPath(root, "net.ipv4.tcp_available_congestion_control"), "reno cubic\n")
+	put(t, filepath.Join(root, "lib/modules/other/kernel/net/ipv4/tcp_bbr.ko"), "")
+	if err := Validate(map[string]string{"net.ipv4.tcp_congestion_control": "bbr"}, root); err == nil {
+		t.Fatal("accepted another kernel's BBR module without the running kernel release")
+	}
+}

@@ -66,5 +66,5 @@ start_pre() {
 depend() {
   need net
   use logger dns
-  after firewall
+  after firewall proxy-agent-tuning
 }

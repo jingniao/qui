@@ -2,6 +2,7 @@ package capability
 
 import (
 	"bufio"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -87,7 +88,21 @@ func (s *Sampler) HostInfo() *pb.HostInfo {
 	h.CertificateFiles = CertificateInventory(desiredstate.CertificateDirectory, time.Now())
 	h.CertificateInventorySupported = true
 	h.Virtualization = detectVirtualization("/")
-	h.TuningKeys = tuningKeyStates("/")
+	keys, err := tuning.ReadProbe(tuning.Directory, "/proc/sys", "/")
+	if err != nil {
+		h.TuningProbeStatus = err.Error()
+		if tuning.Supported() {
+			slog.Warn("tuning helper probe unavailable", "error", err)
+		}
+	} else {
+		h.TuningProbeStatus = "ready"
+		h.TuningKeys = keys
+		if err := tuning.ModuleSupport(tuning.Directory, "/proc/sys", "/"); err != nil {
+			h.TuningModuleInstallError = err.Error()
+		} else {
+			h.TuningModuleInstallSupported = true
+		}
+	}
 	h.CongestionAvailable, h.CongestionLoadable, h.QdiscAvailable, h.QdiscLoadable = algorithms("/", h.KernelVersion)
 	h.FdLimits = processLimits("/", os.Getpid())
 	h.SysctlSources = sysctlSources("/")

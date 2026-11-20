@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { request, APIError } from '../../app/apiClient';
+import { readTogether } from '../../app/readTogether';
 import { nodeAPI, type NodeView } from '../nodes/api';
 import { choices, proxyAPI, type Inbound } from '../proxy/api';
 import { importAPI, type ImportedProxy } from '../proxy/importApi';
@@ -54,6 +55,7 @@ export interface PublishResult {
 }
 export interface NodeRelay { rule: TunnelRule; shareLink: string | null }
 export interface NodeRelayInput { tunnelId: string; inboundId: string; portMode: 'auto' | 'manual'; listenPort?: number; subscriptionVisible: boolean; name?: string }
+export interface NodeRelayRuleGroup { nodeId: string; rules: TunnelRule[]; error?: { code: string; message: string } }
 
 // Contract assumptions (no additional endpoints):
 // - ports/check can report the object's own claim; editors match usedBy.kind/id.
@@ -89,13 +91,14 @@ export const portAPI = {
 };
 export const nodeRelayAPI = {
   list: (nodeId: string) => call<{ items: NodeRelay[] }>(`/nodes/${idPath(nodeId)}/relays`),
+  listRules: (nodeIds: string[]) => call<{ items: NodeRelayRuleGroup[] }>(`/nodes/relay-rules?${new URLSearchParams({ nodeIds: nodeIds.join(',') })}`),
   create: (nodeId: string, input: NodeRelayInput) => call<NodeRelay>(`/nodes/${idPath(nodeId)}/relays`, 'POST', input),
 };
 export type TunnelImportChoice = Pick<ImportedProxy, 'id' | 'name' | 'protocol' | 'server' | 'port'>;
 // Inbounds and imported nodes are Owner data; a Viewer gets only the server list.
 export async function loadTunnelChoices(includeOwnerData = true): Promise<{ nodes: Pick<NodeView, 'id' | 'name' | 'publicIp'>[]; inbounds: Pick<Inbound, 'id' | 'name' | 'nodeId' | 'port' | 'protocol'>[]; imports: TunnelImportChoice[] }> {
   if (import.meta.env.DEV && mockEnabled()) return { imports: [], ...(await import('./mock')).mockChoices() };
-  const [nodes, inbounds, imports] = await Promise.all([choices((page, size) => nodeAPI.list(page, '', false, size)), includeOwnerData ? choices((page, size) => proxyAPI.inbounds('', page, size)) : Promise.resolve([]), includeOwnerData ? importAPI.proxies().then(result => result.items) : Promise.resolve([])]);
+  const [nodes, inbounds, imports] = await readTogether([choices((page, size) => nodeAPI.list(page, '', false, size)), includeOwnerData ? choices((page, size) => proxyAPI.inbounds('', page, size)) : Promise.resolve([]), includeOwnerData ? importAPI.proxies().then(result => result.items) : Promise.resolve([])]);
   return { nodes, inbounds, imports };
 }
 export function tunnelError(error: unknown): string {

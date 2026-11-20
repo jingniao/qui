@@ -126,7 +126,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// A construction that fails after this point must not leak the pool.
 	defer func() {
 		if resultErr != nil {
-			s.closeReadPool()
+			resultErr = errors.Join(resultErr, s.Close())
 		}
 	}()
 	s.backupWake = make(chan struct{}, 1)
@@ -625,17 +625,19 @@ func (s *Server) healthHTTP(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 200, map[string]string{"status": "ok", "service": "proxy-panel"})
 }
 
-func (s *Server) closeReadPool() {
+// Close releases the server's read pool, including before Serve starts.
+// Call it only before Serve or after Serve returns. The caller owns the writer.
+func (s *Server) Close() error {
 	if s.readPool == nil {
-		return
+		return nil
 	}
 	pool := s.readPool
 	s.readPool = nil
-	pool.Close()
+	return pool.Close()
 }
 
-func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Listener) error {
-	defer s.closeReadPool()
+func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Listener) (resultErr error) {
+	defer func() { resultErr = errors.Join(resultErr, s.Close()) }()
 	if s.restoreStartup != nil {
 		if err := s.restoreStartup(ctx); err != nil {
 			return err

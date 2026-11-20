@@ -7,7 +7,7 @@ import ts from 'typescript';
 const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8');
 const metaSource = read('modules/nodes/nodeMeta.ts')
   .replace("import { reactive } from 'vue';", 'const reactive = value => value;')
-  .replace("import { request } from '../../app/apiClient';", 'const request = async () => ({});');
+  .replace("import { invalidatesRead, request, requestScope } from '../../app/apiClient';", 'const requestScope = () => 1, invalidatesRead = () => false; const request = async () => ({});');
 const code = ts.transpileModule(metaSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 globalThis.localStorage = { getItem: () => null, removeItem() {}, setItem() {} };
 const meta = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);

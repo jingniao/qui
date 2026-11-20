@@ -36,10 +36,10 @@ try {
 console.log('PASS navigation GET: concurrency, isolated values, no cache, mutation/session boundaries, timeout and failure cleanup');
 const access = read('modules/access/pages/AccessRecordPage.vue');
 assert.match(access, /const current = \+\+generation/);
-assert.match(access, /Promise\.all\([\s\S]*accessAPI\.summary/);
+assert.match(access, /readTogether\([\s\S]*accessAPI\.summary/);
 assert.doesNotMatch(access, /if\(loading.value\)return/);
 const portal = read('portal/PortalPage.vue');
-assert.match(portal, /watch\(range/);
+assert.match(portal, /@range="selectRange"/);
 assert.match(portal, /defineAsyncComponent/);
 assert.match(read('modules/system/pages/TaskRecordPage.vue'), /document\.hidden/);
 assert.match(read('modules/dashboard/pages/DashboardPage.vue'), /visibilitychange/);

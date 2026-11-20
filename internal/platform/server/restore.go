@@ -142,7 +142,7 @@ func (p *PreparedRestore) Database() *sql.DB {
 
 // Serve starts only after the coordinator has committed the file journal.
 // The caller must retain panelstore ownership until Serve and Close finish.
-func (p *PreparedRestore) Serve(ctx context.Context) error {
+func (p *PreparedRestore) Serve(ctx context.Context) (resultErr error) {
 	p.mu.Lock()
 	if p.consumed {
 		p.mu.Unlock()
@@ -170,8 +170,8 @@ func (p *PreparedRestore) Serve(ctx context.Context) error {
 	p.mu.Unlock()
 	defer httpListener.Close()
 	defer grpcListener.Close()
-	defer readonly.Close()
-	defer app.closeReadPool()
+	defer func() { resultErr = errors.Join(resultErr, readonly.Close()) }()
+	defer func() { resultErr = errors.Join(resultErr, app.Close()) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func (p *PreparedRestore) Close() error {
 	p.consumed = true
 	var err error
 	if p.app != nil {
-		p.app.closeReadPool()
+		err = p.app.Close()
 	}
 	if p.readonly != nil {
 		err = errors.Join(err, p.readonly.Close())

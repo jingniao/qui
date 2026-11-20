@@ -96,7 +96,7 @@ console.log('PASS retained orphan entry participates in server-card display orde
   assert.match(component, /隧道转发/);
   assert.match(component, /v-if="variant === 'card' && isOwner"/);
   assert.match(component, /@click\.stop="router.push\('\/proxy\/tunnel-rules'\)"/);
-  assert.match(component, /publishStatuses\[relay.rule.status\].label/);
+  assert.match(component, /publishStatuses\[rule.status\].label/);
   assert.match(component, /RelayRouteEntries/);
   assert.match(page, /variant="card"/);
   assert.match(page, /variant="table"/);

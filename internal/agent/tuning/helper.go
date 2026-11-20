@@ -402,16 +402,21 @@ func RunHelper(directory string) error {
 	}
 	// No secrets: status must be readable by the unprivileged Agent. The parent
 	// directory is 0700 and owned by that Agent; the root snapshot stays private.
+	probeErr := writeProbe(root)
 	if err := writeStatusRoot(root, r); err != nil {
-		return err
+		return errors.Join(err, probeErr)
 	}
 	if r.Status == "failed" {
-		return errors.New("tuning apply failed; see status.json")
+		return errors.Join(errors.New("tuning apply failed; see status.json"), probeErr)
 	}
-	return nil
+	return probeErr
 }
 
 func writeStatusRoot(root *os.Root, result *pb.TuningResult) error {
+	return writeReceipt(root, "status.json", result)
+}
+
+func writeReceipt(root *os.Root, destination string, result any) error {
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return err
@@ -435,7 +440,7 @@ func writeStatusRoot(root *os.Root, result *pb.TuningResult) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err = root.Rename(name, "status.json"); err != nil {
+	if err = root.Rename(name, destination); err != nil {
 		return err
 	}
 	dir, err := root.Open(".")

@@ -12,6 +12,7 @@
 //      toolbar wraps instead of clipping (desktop geometry stays at xl, with a
 //      truncated scheme name at exactly 1280 px).
 import assert from 'node:assert/strict';
+import { readTogether } from './retained-query-fixture.mjs';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
@@ -143,7 +144,17 @@ assert.ok(canvas.includes('该自建入站尚未载入，请刷新后重试'));
 // `bg-ios-background` is not a defined Tailwind colour (nothing was painted), and
 // the inspector used to show 方案名称/删除此方案 for a scheme that does not exist.
 assert.equal(canvas.includes('bg-ios-background'), false);
-assert.ok(canvas.includes('v-if="schemesLoading || schemesLoadError || !currentScheme.id"'));
+const overlay = canvas.match(/<div\s+v-if="([^"]+)"\s+class="absolute inset-0 z-40/)[1];
+const selection = canvas.match(/const currentScheme = computed<RelayScheme>\(\(\) => ([^\n]+)\);/)[1];
+function canvasCovered(confirmed, loading, error) {
+  const currentScheme = new Function('schemesConfirmed', 'activeSchemeId', 'proxyNodeStore', 'emptyScheme', 'return ' + selection)(
+    { value: confirmed }, { value: 'A' }, { schemes: [{ id: 'A' }] }, { id: '' });
+  return new Function('schemesLoading', 'schemesLoadError', 'currentScheme', 'return !!(' + overlay + ')')(loading, error, currentScheme);
+}
+assert.equal(canvasCovered(false, true, ''), true, 'first read cannot reveal a scheme from an earlier mount');
+assert.equal(canvasCovered(true, true, ''), false, 'the authorized scheme stays visible while refreshing');
+assert.equal(canvasCovered(true, false, 'timeout'), false, 'a transient error keeps the authorized canvas');
+assert.equal(canvasCovered(false, false, 'denied'), true, 'denied content stays covered');
 assert.ok(canvas.includes('absolute inset-0 z-40 bg-[#F5F5F7]'));
 assert.ok(canvas.includes('v-else-if="!currentScheme.id"'));
 
@@ -170,6 +181,7 @@ for (const binding of [
 const saveDraftSource = canvas.slice(canvas.indexOf('function saveDraft('), canvas.indexOf('// Canvas edits arrive per mousemove'));
 const entryLifecycle = await load(transpile(`
   export const currentScheme = { value: { id: 'draft', executionLocation: 'server', nodes: [], published: false } };
+  const workspaceLocked = { value: false };
   const scheduleSave = () => {};
   export ${saveDraftSource}
 `));
@@ -200,11 +212,40 @@ assert.deepEqual(nullableMetadata.connections, []);
 assert.match(proxyNodesSource, /canvasAPI\.create\(\{ name, execution: executionLocation, layout: \{ instances: \[\], connections: \[\] \}/);
 assert.match(canvas, /v-else-if="schemesLoadError"[\s\S]*?@click="loadWorkspace">重试<\/button>[\s\S]*?<template v-else>[\s\S]*?暂无中转方案/);
 assert.match(canvas, /async function createNewScheme\(\) \{\s*if \(schemesLoading\.value \|\| schemesLoadError\.value\) return;/);
+// A replaced workspace must not receive selection or toasts from its old create.
+const createSource = canvas.slice(canvas.indexOf('async function createNewScheme'), canvas.indexOf('// ----------------- Drag & Drop'));
+const creating = await load(transpile(`
+  const schemesLoading = {value:false}, schemesLoadError = {value:''}, proxyNodeStore = {schemes:[]};
+  const selectedNode = {value:null}, selectedConnection = {value:null}, canvasContext = () => ({});
+  export const activeSchemeId = {value:'current'}, toasts = [];
+  let workspaceGeneration = 0;
+  const currentWorkspace = ticket => workspaceGeneration === ticket;
+  export const replaceWorkspace = () => ++workspaceGeneration;
+  export let finish, fail;
+  const createCanvasScheme = () => new Promise((resolve,reject) => {finish=resolve; fail=reject});
+  const showToast = (...args) => toasts.push(args);
+  ${createSource}
+  export { createNewScheme };
+`));
+const oldSuccess = creating.createNewScheme();
+creating.replaceWorkspace(); creating.finish({id:'old'}); await oldSuccess;
+assert.equal(creating.activeSchemeId.value, 'current'); assert.deepEqual(creating.toasts, []);
+const oldFailure = creating.createNewScheme();
+creating.replaceWorkspace(); creating.fail(new Error('old failure')); await oldFailure;
+assert.deepEqual(creating.toasts, [], 'an old create error must not notify the replacement workspace');
+
 // Exercise the real reload function: failure persists until a successful retry,
 // including when an older populated store is still present behind the overlay.
 const reloadSource = canvas.slice(canvas.indexOf('async function reloadSchemes('), canvas.indexOf('// An earlier build kept schemes in this browser. Offer them once;'));
 const reloadHarness = await load(transpile(`
   export const schemesLoading = { value: true }, schemesLoadError = { value: '' };
+  const schemesConfirmed = { value: false };
+  let workspaceGeneration = 0;
+  const currentWorkspace = t => t === workspaceGeneration;
+  const currentScheme = { value: { nodes: [], connections: [] } };
+  const selectedNode = { value: null }, selectedConnection = { value: null }, editor = { value: null };
+  const invalidatesRead = () => false;
+  const choices = async () => [];
   export let fail = true;
   export function recover() { fail = false; }
   const canvasContext = () => ({}), showToast = () => {};
@@ -223,11 +264,16 @@ assert.equal(reloadHarness.schemesLoadError.value, '');
 // proxyNodes.ts (store + guess) and importApi.ts are transpiled with their
 // runtime imports stubbed; loadImports then runs against fake panel responses.
 const proxyNodes = await load(transpile(read('proxyNodes.ts'), source => source
+  .replace("import { requestScope } from '../../app/apiClient';", 'const requestScope = () => 0;')
   .replace("import { reactive } from 'vue';", 'const reactive = value => value;')
   .replace(/import \{[^}]*\} from '\.\/api';/, 'const canvasAPI = {}; const canvasSchemeToRelayScheme = () => ({}); const choices = async () => []; const relaySchemeToCanvasInput = () => ({});')));
 globalThis.__proxyNodes = proxyNodes;
+globalThis.__readTogether = readTogether;
 const importApi = await load(transpile(importApiSource, source => source
-  .replace("import { request } from '../../app/apiClient';", 'const request = async () => ({});')
+  .replace("import { readTogether } from '../../app/readTogether';", 'const readTogether = globalThis.__readTogether;')
+  .replace(/import \{[^}]*\} from '\.\.\/\.\.\/app\/apiClient';/, 'const request = async () => ({}), forgetPendingGet = () => {}, invalidatesRead = () => false;')
+  .replace(/import \{[^}]*\} from '\.\.\/\.\.\/app\/auth';/, 'const adminReadScope = { value: "owner" }, isOwner = { value: true };')
+  .replace("import { watch } from 'vue';", 'const watch = () => {};')
   .replace(/import \{[^}]*\} from '\.\/proxyNodes';/, 'const { guessProtocolNetworks, proxyNodeStore } = globalThis.__proxyNodes;')));
 
 assert.equal(importApi.proxySourceType('content'), 'manual');

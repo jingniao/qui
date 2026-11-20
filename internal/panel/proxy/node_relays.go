@@ -36,8 +36,11 @@ type RelayProxies interface {
 	Proxies(context.Context, string, string) ([]subproxy.Proxy, []subproxy.Warning, error)
 }
 
+const nodeRelayJoin = managedRuleFrom + " LEFT JOIN inbounds i ON i.id=r.target_inbound_id"
+const nodeRelayNodeID = "CASE r.target_mode WHEN 'linked' THEN i.node_id WHEN 'import' THEN r.entry_node_id END"
+
 func (r *Repository) NodeRelayRules(ctx context.Context, nodeID string) ([]TunnelRule, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" LEFT JOIN inbounds i ON i.id=r.target_inbound_id WHERE (r.target_mode='linked' AND i.node_id=?) OR (r.target_mode='import' AND r.entry_node_id=?) ORDER BY r.created_at,r.id", nodeID, nodeID)
+	rows, err := r.Database.QueryContext(ctx, "SELECT "+managedRuleColumns+nodeRelayJoin+" WHERE "+nodeRelayNodeID+"=? ORDER BY r.created_at,r.id", nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,12 +59,127 @@ func (r *Repository) NodeRelayRules(ctx context.Context, nodeID string) ([]Tunne
 		return nil, err
 	}
 	for i := range items {
-		err = r.deriveRuleTarget(ctx, &items[i])
+		err = r.deriveRuleTarget(ctx, r.Database, &items[i])
 		if err != nil {
 			return nil, err
 		}
 	}
 	return items, nil
+}
+
+type nodeRelayRuleError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type nodeRelayRuleGroup struct {
+	NodeID string              `json:"nodeId"`
+	Rules  []TunnelRule        `json:"rules"`
+	Error  *nodeRelayRuleError `json:"error,omitempty"`
+}
+
+// An empty non-nil group is a known live node with no associated rules.
+func readNodeRelayRuleGroups(ctx context.Context, tx *sql.Tx, ids string) (map[string][]TunnelRule, error) {
+	groups := make(map[string][]TunnelRule)
+	rows, err := tx.QueryContext(ctx, "SELECT id FROM nodes WHERE coalesce(deleted_at,'')='' AND id IN (SELECT value FROM json_each(?))", ids)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var nodeID string
+		if err = rows.Scan(&nodeID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		groups[nodeID] = []TunnelRule{}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err = tx.QueryContext(ctx, "SELECT "+managedRuleColumns+","+nodeRelayNodeID+nodeRelayJoin+" WHERE "+nodeRelayNodeID+" IN (SELECT value FROM json_each(?)) ORDER BY r.created_at,r.id", ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var nodeID string
+		rule, err := scanManagedRule(rows, &nodeID)
+		if err != nil {
+			return nil, err
+		}
+		if rules, exists := groups[nodeID]; exists {
+			groups[nodeID] = append(rules, rule)
+		}
+	}
+	return groups, rows.Err()
+}
+
+func (h *Handler) readNodeRelayRules(ctx context.Context, ids []string) ([]nodeRelayRuleGroup, error) {
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	h.Service.canvasMu.Lock()
+	defer h.Service.canvasMu.Unlock()
+	repository := h.Service.Repository
+	tx, err := repository.Database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	groups, err := readNodeRelayRuleGroups(ctx, tx, string(encoded))
+	if err != nil {
+		return nil, err
+	}
+	items := make([]nodeRelayRuleGroup, 0, len(ids))
+	for _, id := range ids {
+		rules, exists := groups[id]
+		item := nodeRelayRuleGroup{NodeID: id, Rules: rules}
+		if !exists {
+			item.Error = &nodeRelayRuleError{Code: "not_found", Message: "对象不存在"}
+		}
+		for i := range rules {
+			if err := repository.deriveRuleTarget(ctx, tx, &rules[i]); err != nil {
+				var failure *tunnelError
+				switch {
+				case errors.As(err, &failure):
+					item.Error = &nodeRelayRuleError{Code: failure.Code, Message: failure.Message}
+				case errors.Is(err, ErrNotFound):
+					item.Error = &nodeRelayRuleError{Code: "not_found", Message: "对象不存在"}
+				default:
+					h.Auth.Logger.Error("node relay rules read failed", "node_id", id, "error", err)
+					item.Error = &nodeRelayRuleError{Code: "internal_error", Message: "Proxy operation failed"}
+				}
+				break
+			}
+		}
+		if item.Error != nil {
+			item.Rules = []TunnelRule{}
+		}
+		items = append(items, item)
+	}
+	return items, tx.Commit()
+}
+
+func (h *Handler) listNodeRelayRules(w http.ResponseWriter, r *http.Request) {
+	ids := strings.Split(r.URL.Query().Get("nodeIds"), ",")
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id == "" || len(id) > 128 || seen[id] {
+			httpapi.Error(w, 400, "invalid_request", "Invalid or duplicate node ID")
+			return
+		}
+		seen[id] = true
+	}
+	items, err := h.readNodeRelayRules(r.Context(), ids)
+	if err != nil {
+		h.internal(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, map[string]any{"items": items})
 }
 
 func (s *Service) CreateNodeRelay(ctx context.Context, nodeID string, input NodeRelayInput) (TunnelRule, error) {

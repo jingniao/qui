@@ -29,7 +29,8 @@
               >
                 {{ node.name }}
               </router-link>
-              <span v-if="getNodeRegion(node)" class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-semibold text-neutral-600 shrink-0 truncate max-w-[80px]" :title="getNodeRegion(node)">
+              <span v-if="!hasNodeMeta(node.id)" class="text-xs text-ios-tertiary" aria-label="地区尚未读取">—</span>
+              <span v-else-if="getNodeRegion(node)" class="rounded bg-black/[0.04] px-1.5 py-0.5 text-xs font-semibold text-neutral-600 shrink-0 truncate max-w-[80px]" :title="getNodeRegion(node)">
                 {{ getNodeRegion(node) }}
               </span>
               <span v-for="item in node.tags || []" :key="item" class="rounded bg-ios-blue/[0.08] px-1.5 py-0.5 text-xs font-semibold text-ios-blue shrink-0 truncate max-w-[96px]" :title="`服务器分组：${item}`">
@@ -187,7 +188,7 @@
                   ({{ getRenewalInfo(node).label }})
                 </span>
               </span>
-              <span v-else class="text-neutral-400 font-mono">未设置</span>
+              <span v-else class="text-neutral-400 font-mono">{{ hasNodeMeta(node.id) ? '未设置' : '—' }}</span>
             </div>
 
             <!-- Right: 续费价格 -->
@@ -252,6 +253,7 @@ import type { MachineTrafficSummary, NodeView } from '../api';
 import { isOwner } from '../../../app/auth';
 import { hostMetrics, nicRate } from '../metrics';
 import { isNodeReissuing } from '../coreInstallOptions';
+import { hasNodeMeta } from '../nodeMeta';
 import { connectAddress } from '../nodeAddress';
 import MachineTrafficUsage from './MachineTrafficUsage.vue';
 import { useServerCardValues } from './serverCardValues';

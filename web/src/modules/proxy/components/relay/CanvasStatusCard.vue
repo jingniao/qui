@@ -5,8 +5,8 @@
       <button type="button" class="text-sm text-ios-blue font-medium active:scale-[0.98]" :disabled="loading" @click="refreshKey++">刷新</button>
     </div>
     <p v-if="loading" role="status" class="text-ios-secondary">正在读取方案状态…</p>
-    <p v-else-if="error" role="alert" class="text-ios-red break-words">{{ error }}</p>
-    <dl v-else class="divide-y divide-black/[0.06]">
+    <p v-if="error" role="alert" class="text-ios-red break-words">{{ error }}</p>
+    <dl v-if="status" class="divide-y divide-black/[0.06]">
       <div v-for="item in items" :key="item.key" class="py-2 space-y-1">
         <dt class="font-medium text-ios-label">{{ item.label }}</dt>
         <dd :class="toneClasses[item.tone]">{{ item.value }}</dd>
@@ -23,6 +23,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, onUnmounted } from 'vue';
+import { invalidatesRead } from '../../../../app/apiClient';
 import { canvasAPI, type CanvasSchemeStatus } from '../../api';
 import { canvasBatchInProgress, canvasStatusItems } from '../../canvasStatus';
 import { pollCanvasStatus } from '../../canvasStatusPolling';
@@ -50,7 +51,7 @@ watch(() => [props.schemeId, props.version, props.publishedAt, props.refresh, re
   const stop = pollCanvasStatus(
     () => canvasAPI.status(id),
     value => { status.value = value; loading.value = false; },
-    cause => { error.value = `读取方案状态失败：${(cause as Error).message}`; loading.value = false; },
+    cause => { if (invalidatesRead(cause)) status.value = null; error.value = `读取方案状态失败：${(cause as Error).message}`; loading.value = false; },
     canvasBatchInProgress
   );
   // Vue runs this cleanup on a scheme/version change and when unmounting.

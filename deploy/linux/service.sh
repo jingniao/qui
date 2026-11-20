@@ -275,6 +275,20 @@ service_log_hint() {
   esac
 }
 
+# The request directory belongs to the Agent and may be renamed by that user.
+# Drop root before resolving or removing its receipt. This also works when the
+# installed helper is an old version or its executable cannot start.
+qui_invalidate_tuning_probe() {
+  local receipt=$1/probe.json
+  if [[ -e $receipt || -L $receipt ]]; then
+    runuser -u proxy-agent -- rm -f -- "$receipt"
+  fi
+}
+
+qui_skip_tuning_replay() {
+  install -d -m 0711 -o root -g root "$1" && touch "$1/skip-replay"
+}
+
 # Release versions shared by the installers, release builder and updater.
 # Keep the standalone node-install.sh validator identical (it runs before download).
 qui_valid_release_version() {

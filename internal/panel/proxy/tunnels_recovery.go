@@ -49,7 +49,7 @@ func ValidateTunnels(ctx context.Context, database *sql.DB, key *vault.Vault) er
 		return err
 	}
 	for _, rule := range rules {
-		if err = r.deriveRuleTarget(ctx, &rule); err != nil {
+		if err = r.deriveRuleTarget(ctx, r.Database, &rule); err != nil {
 			return err
 		}
 		if !managedName(rule.Name) || !validPortMode(rule.PortMode) {

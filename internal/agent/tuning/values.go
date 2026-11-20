@@ -49,30 +49,26 @@ func hasKernelModule(root, subdir, modName string) (moduleTreePresent bool, foun
 				}
 			}
 		}
-		var modDirs []string
-		if kernel != "" {
-			d := filepath.Join(base, "lib/modules", kernel)
-			if info, err := os.Stat(d); err == nil && info.IsDir() {
-				modDirs = append(modDirs, d)
-			}
-		} else if matches, err := filepath.Glob(filepath.Join(base, "lib/modules/*")); err == nil {
-			modDirs = append(modDirs, matches...)
+		if kernel == "" {
+			continue
 		}
-		for _, modDir := range modDirs {
-			moduleTreePresent = true
-			if raw, err := os.ReadFile(filepath.Join(modDir, "modules.builtin")); err == nil {
-				for _, line := range strings.Split(string(raw), "\n") {
-					b := filepath.Base(strings.TrimSpace(line))
-					name, _, _ := strings.Cut(b, ".ko")
-					if name == modName {
-						return true, true
-					}
+		modDir := filepath.Join(base, "lib/modules", kernel)
+		if info, err := os.Stat(modDir); err != nil || !info.IsDir() {
+			continue
+		}
+		moduleTreePresent = true
+		if raw, err := os.ReadFile(filepath.Join(modDir, "modules.builtin")); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				b := filepath.Base(strings.TrimSpace(line))
+				name, _, _ := strings.Cut(b, ".ko")
+				if name == modName {
+					return true, true
 				}
 			}
-			pattern := filepath.Join(modDir, "kernel", subdir, modName+".ko*")
-			if matches, err := filepath.Glob(pattern); err == nil && len(matches) > 0 {
-				return true, true
-			}
+		}
+		pattern := filepath.Join(modDir, "kernel", subdir, modName+".ko*")
+		if matches, err := filepath.Glob(pattern); err == nil && len(matches) > 0 {
+			return true, true
 		}
 	}
 	return moduleTreePresent, false
@@ -90,13 +86,16 @@ func Validate(settings map[string]string, root string) error {
 			}
 			if !contains(string(raw), v) {
 				if _, ok := hasKernelModule(root, "net/ipv4", "tcp_"+v); !ok {
-					return fmt.Errorf("%s: algorithm unavailable", k)
+					return fmt.Errorf("%s: %s is not registered and tcp_%s was not found for the running kernel", k, v, v)
 				}
 			}
 		}
 		if k == "net.core.default_qdisc" && v != "pfifo_fast" {
+			if current, err := os.ReadFile(sysPath(root, k)); err == nil && strings.TrimSpace(string(current)) == v {
+				continue
+			}
 			if present, ok := hasKernelModule(root, "net/sched", "sch_"+v); present && !ok {
-				return fmt.Errorf("%s: algorithm unavailable", k)
+				return fmt.Errorf("%s: sch_%s was not found for the running kernel", k, v)
 			}
 		}
 	}
@@ -139,11 +138,18 @@ type Desired struct {
 }
 
 func (d Desired) Validate(root string) error {
+	if err := d.validateEnvelope(); err != nil {
+		return err
+	}
+	return Validate(d.Settings, root)
+}
+
+func (d Desired) validateEnvelope() error {
 	if d.RequestID == "" || len(d.RequestID) > 128 || strings.ContainsAny(d.RequestID, "\r\n\x00") {
 		return errors.New("invalid request id")
 	}
 	if d.Clear && len(d.Settings) > 0 {
 		return errors.New("clear must have no settings")
 	}
-	return Validate(d.Settings, root)
+	return nil
 }

@@ -405,7 +405,7 @@ func (r *Repository) ExpandedNodes(ctx context.Context, groupIDs []string) ([]No
 				continue
 			}
 			seen[nodeID] = true
-			node, err := r.Get(ctx, nodeID)
+			node, err := r.GetForCoreSelection(ctx, nodeID)
 			if err != nil {
 				return nil, err
 			}

@@ -169,17 +169,24 @@ export interface LatencyResponse {
 }
 
 // New camelCase observations use protobuf JSON: uint64 values are decimal strings.
+export interface TuningKeyState { key: string; present?: boolean; writable?: boolean; probeError?: string; probe_error?: string }
 export interface HostInfo {
   cpuModel?:string; cpuCores?:number; architecture?:string; kernelVersion?:string; memoryTotalBytes?:string; swapTotalBytes?:string; diskTotalBytes?:string; osPrettyName?:string;
   virtualization?: string;
-  tuningKeys?: { key: string; present: boolean; writable: boolean }[];
+  tuningProbeStatus?: string;
+  tuning_probe_status?: string;
+  tuningModuleInstallSupported?: boolean;
+  tuning_module_install_supported?: boolean;
+  tuningModuleInstallError?: string;
+  tuning_module_install_error?: string;
+  tuningKeys?: TuningKeyState[];
   congestionAvailable?: string[];
   congestionLoadable?: string[];
   qdiscAvailable?: string[];
   qdiscLoadable?: string[];
   sysctlSources?: { key: string; file: string; value: string }[];
   fdLimits?: { name: string; soft: string | number; hard: string | number }[];
-  tuning_keys?: { key: string; present: boolean; writable: boolean }[];
+  tuning_keys?: TuningKeyState[];
   congestion_available?: string[];
   congestion_loadable?: string[];
   qdisc_available?: string[];
@@ -215,7 +222,7 @@ export interface NodeMetricPoint {
   tcpRetransPercent?:number|null; samples:number;
 }
 export interface NodeMetricsResponse { intervalSeconds:number; sampleSeconds:60; points:NodeMetricPoint[]; }
-export interface NodeTuningInput { settings:Record<string,string>; clear:boolean; confirmNodeId:string; }
+export interface NodeTuningInput { settings:Record<string,string>; clear:boolean; confirmNodeId:string; installMissingModules?:boolean; }
 // Machine traffic of one server: durable daily rows of one selected interface,
 // bucketed in the panel zone. Byte totals are decimal strings so an int64 never
 // passes through a rounded Number.
@@ -232,8 +239,9 @@ export interface MachineTrafficSummary {
 export interface MachineTrafficBatch { items: MachineTrafficSummary[]; timezone: string; }
 export interface NodeTuning {
   supported:boolean; desired:Record<string,string>; requestId:string|null;
+  installMissingModules?:boolean;
   status:'pending'|'applied'|'cleared'|'failed'|'unconfirmed';
-  result:{requestId?:string;status?:string;keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null;
+  result:{requestId?:string;status?:string;installedModulePackages?:string[];keys?:{key?:string;value?:string;applied?:boolean;error?:string}[]}|null;
   requestedAt:string|null; updatedAt:string|null; current:Record<string,string>;
   initial?:Record<string,string>;
 }

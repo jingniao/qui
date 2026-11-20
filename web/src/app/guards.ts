@@ -3,6 +3,11 @@ import { authState, ensureSession } from './auth';
 import { adminEntryPage } from './adminEntry';
 import { portalGuard } from '../portal/guard';
 
+export function viewerCanOpen(path: string) {
+  return ['/dashboard', '/nodes', '/proxy/tunnels', '/proxy/tunnel-rules', '/403', '/404'].includes(path)
+    || (path !== '/nodes/versions' && /^\/nodes\/[^/]+$/.test(path));
+}
+
 export async function setupNavigationGuards(to: RouteLocationNormalized, _from: RouteLocationNormalized, next: NavigationGuardNext) {
   if (to.path.startsWith('/portal/')) {
     const result = await portalGuard(to);
@@ -20,8 +25,6 @@ export async function setupNavigationGuards(to: RouteLocationNormalized, _from: 
   if (authState.isInitialized && to.path === '/setup') return next(authState.isAuthenticated ? '/dashboard' : '/');
   if (!authState.isAuthenticated && !publicPaths.includes(to.path)) return next('/');
   if (authState.isAuthenticated && (to.path === '/' || to.path === loginPath)) return next('/dashboard');
-  if (authState.currentUser?.role === 'Viewer' &&
-      !['/dashboard', '/nodes', '/proxy/tunnels', '/proxy/tunnel-rules', '/403', '/404'].includes(to.path) &&
-      !(to.path !== '/nodes/versions' && /^\/nodes\/[^/]+$/.test(to.path))) return next('/403');
+  if (authState.currentUser?.role === 'Viewer' && !viewerCanOpen(to.path)) return next('/403');
   next();
 }

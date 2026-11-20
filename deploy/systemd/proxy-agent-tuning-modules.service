@@ -1,0 +1,29 @@
+[Unit]
+Description=Prepare exact Ubuntu modules for the running kernel
+After=proxycontrol-update-recovery.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/proxy-agent --install-tuning-modules
+StateDirectory=qui-tuning-modules
+StateDirectoryMode=0755
+TimeoutStartSec=infinity
+UMask=0022
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_SETUID CAP_SETGID
+SystemCallFilter=~@module @reboot @mount @swap @raw-io
+InaccessiblePaths=-/run/systemd/private -/run/systemd/notify -/run/systemd/shutdown -/run/systemd/ask-password -/run/dbus -/dev/initctl -/run/initctl
+InaccessiblePaths=-/usr/sbin/service -/usr/sbin/invoke-rc.d -/etc/init.d
+# dpkg requires an executable start-stop-daemon on PATH. Package scripts
+# invoking it inside this unit always receive failure.
+BindReadOnlyPaths=/usr/bin/false:/usr/sbin/start-stop-daemon
+# dpkg configures only the verified local archives and processes their normal
+# release-specific hooks (including depmod, initramfs and boot menu updates).
+ReadWritePaths=/var/lib/dpkg /var/log /boot /usr/lib/modules /usr/share/doc -/usr/lib/modprobe.d -/usr/lib/linux -/var/lib/initramfs-tools -/var/lib/grub
+ReadOnlyPaths=-/boot/vmlinuz-%v

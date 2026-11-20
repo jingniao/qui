@@ -11,7 +11,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/portal', redirect: '/portal/overview' },
   { path: '/portal/client', redirect: '/portal/overview' },
   { path: '/portal/:section(overview|subscription|nodes|traffic|account)', component: () => import('../portal/PortalLayout.vue'), meta: { title: '我的账号' } },
-  { path: '/portal-preview', component: () => import('../modules/users/pages/PortalPreviewPage.vue'), meta: { title: '用户门户预览' } },
+  { path: '/portal-preview', component: () => import('../modules/users/pages/PortalPreviewPage.vue'), meta: { title: '用户门户预览', adminPage: true } },
   // The admin login page exists only on the page load the panel marked as the
   // admin login path (see app/adminEntry.ts).
   ...(adminEntryPage ? [{ path: adminEntryPage, name: 'Login', component: () => import('../modules/auth/pages/LoginPage.vue'), meta: { title: '登录' } }] : []),
@@ -38,6 +38,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: MainLayout,
+    meta: { adminPage: true },
     children: [
       // 1. Dashboard
       {

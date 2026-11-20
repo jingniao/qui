@@ -1,4 +1,5 @@
 // proxyNodes.ts: Data management for unified proxy nodes & relay canvas schemas
+import { requestScope } from '../../app/apiClient';
 import { reactive } from 'vue';
 import { canvasAPI, canvasSchemeToRelayScheme, choices, relaySchemeToCanvasInput, type CanvasEntryBinding, type CanvasScheme, type CanvasSchemeContext } from './api';
 
@@ -260,7 +261,9 @@ export async function persistCanvasScheme(scheme: RelayScheme, context: CanvasSc
 }
 
 export async function createCanvasScheme(name: string, executionLocation: ExecutionLocation, context: CanvasSchemeContext): Promise<RelayScheme> {
+  const scope = requestScope();
   const saved = await canvasAPI.create({ name, execution: executionLocation, layout: { instances: [], connections: [] } });
+  if (scope !== requestScope()) throw new Error('管理会话已变更，请重新读取方案');
   const scheme = canvasSchemeToRelayScheme(saved, context);
   proxyNodeStore.schemes.push(scheme);
   return scheme;

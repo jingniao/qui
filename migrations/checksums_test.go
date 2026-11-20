@@ -14,6 +14,7 @@ import (
 // restore. Add new migrations here; never change an existing entry. The
 // checksums of the legacy files 0001-0152 live in internal/platform/db.
 var applied = map[string]string{
+	"0156_tuning_module_intent.sql":       "3ab73b186b85ef499db571868851c63536129f44740b1e21690645dfe075fa9c",
 	"0155_traffic_display_hours.sql":      "4a30c9c18f70dfc8ec965118c27aaf7dc7f39ac2e9d74911ca41f53f0df34bdb",
 	"0154_traffic_storage_retirement.sql": "b013f88d2f4099a10681e0e05b8a718e3c699792ab86e22b14a4b847bc0f91c6",
 	"0152_baseline.sql":                   "2fd1bd9883fb0ce5d6070009aae29bf1f6b6175961c513e2e373b207afc83b4e",

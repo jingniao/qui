@@ -36,11 +36,11 @@
       </template>
       <template v-else>
         <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : '服务器离线' }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
-        <ServerOverview v-if="activeTab === 'overview'" :key="node.id + ':' + nodeRefresh" :node="node" :meta="meta" :now="now" :node-traffic="nodeTraffic" :machine-traffic="machineTraffic" :statistics-notice="trafficStatus" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
-        <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id + ':' + nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
+        <ServerOverview v-if="activeTab === 'overview'" :key="node.id" :node="node" :meta="meta" :now="now" :node-traffic="nodeTraffic" :machine-traffic="machineTraffic" :statistics-notice="trafficStatus" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
+        <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id" :refresh="nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
         <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :active="activeTab === 'revisions'" :latest-revision="latestRevision" @changed="load" @published="published" />
-        <ServerTuning v-if="activeTab === 'tuning'" :key="node.id" :node="node" :is-owner="isOwner" />
+        <ServerTuning v-if="activeTab === 'tuning' && !node.deletedAt" :key="node.id" :node="node" :is-owner="isOwner" @refresh-node="refreshNode" />
         <NodeEditorDrawer v-if="editorOpen && isOwner" :server-id="node.id" :inbound="editing" origin="server" @close="editorOpen = false" @saved="nodeSaved" />
       </template>
       <ServerSettings v-if="activeTab === 'settings' && isOwner" ref="settingsPanel" :key="node.id" :node="node" :meta="meta" @changed="load" @install="enrollment?.reissue(node)" @delete="deletion?.prompt(node)" />
@@ -51,6 +51,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { invalidatesRead } from '../../../app/apiClient';
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { nodeAPI, type NodeView } from '../api';
@@ -203,7 +204,7 @@ async function refreshNode() {
     now.value = Date.now();
     error.value = '';
   } catch (e) {
-    if (mounted && current === generation) error.value = (e as Error).message;
+    if (mounted && current === generation) { if (invalidatesRead(e)) node.value = null; error.value = (e as Error).message; }
   } finally {
     refreshing = false;
   }
@@ -225,7 +226,7 @@ async function load() {
     node.value = server;
     void loadSupplements();
   } catch (e) {
-    if (current === generation) error.value = (e as Error).message;
+    if (current === generation) { if (invalidatesRead(e)) node.value = null; error.value = (e as Error).message; }
   } finally {
     if (current === generation) loading.value = false;
   }

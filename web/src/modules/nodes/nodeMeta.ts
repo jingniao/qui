@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import { request } from '../../app/apiClient';
+import { invalidatesRead, request, requestScope } from '../../app/apiClient';
 
 export interface NodeMeta {
   remark?: string;
@@ -49,8 +49,34 @@ const CYCLE_PERIODS = [
   { name: '月', months: 1, days: 30 },
 ];
 
-const metadata = reactive<Record<string, NodeMeta>>({});
-export function getNodeMeta(nodeId: string): NodeMeta { return metadata[nodeId] || {}; }
+let metadataScope = requestScope(), sequence = 0;
+type MetaChange = { sequence: number; denied?: unknown };
+const nodeChanges = new Map<string, MetaChange>();
+let deniedBatch: MetaChange | undefined;
+let metadata = reactive<Record<string, NodeMeta>>({});
+function currentMetadata() {
+  const scope = requestScope();
+  if (scope !== metadataScope) {
+    metadata = reactive({}); metadataScope = scope;
+    nodeChanges.clear(); deniedBatch = undefined;
+  }
+  return metadata;
+}
+function requireMetaScope(scope: number) {
+  if (scope !== requestScope()) throw new Error('管理会话已变更，请重新读取服务器元数据');
+}
+function latestChange(nodeId: string) {
+  const node = nodeChanges.get(nodeId);
+  return deniedBatch && (!node || deniedBatch.sequence > node.sequence) ? deniedBatch : node;
+}
+function newerMeta(nodeId: string, ticket: number): NodeMeta | undefined {
+  const cache = currentMetadata(), latest = latestChange(nodeId);
+  if (!latest || latest.sequence <= ticket) return;
+  if (latest.denied) throw latest.denied;
+  return cache[nodeId];
+}
+export function hasNodeMeta(nodeId: string): boolean { return nodeId in currentMetadata(); }
+export function getNodeMeta(nodeId: string): NodeMeta { return currentMetadata()[nodeId] || {}; }
 
 export function cleanRemark(remark?: string): string { return (remark || '').trim(); }
 
@@ -59,7 +85,7 @@ export function formatPortRange(meta?: NodeMeta | null): string {
 }
 
 export function getNodePortRange(nodeId?: string): { start: number; end: number } | null {
-  const meta = nodeId ? metadata[nodeId] : undefined;
+  const meta = nodeId ? currentMetadata()[nodeId] : undefined;
   return meta?.portRangeStart && meta?.portRangeEnd ? { start: meta.portRangeStart, end: meta.portRangeEnd } : null;
 }
 
@@ -84,17 +110,42 @@ export function getRandomPortForNode(
 }
 
 export async function loadNodeMeta(nodeId: string, _owner: boolean): Promise<NodeMeta> {
-  let result = await request<{ meta: NodeMeta; present: boolean }>('/nodes/'+encodeURIComponent(nodeId)+'/meta');
-  return acceptNodeMeta(nodeId, result, _owner);
+  const scope = requestScope(), ticket = ++sequence;
+  try {
+    const result = await request<{ meta: NodeMeta; present: boolean }>('/nodes/'+encodeURIComponent(nodeId)+'/meta');
+    return await acceptNodeMeta(nodeId, result, _owner, scope, ticket);
+  } catch (error) {
+    if (scope === requestScope() && invalidatesRead(error)) {
+      const cache = currentMetadata();
+      if ((latestChange(nodeId)?.sequence ?? 0) <= ticket) {
+        delete cache[nodeId];
+        nodeChanges.set(nodeId, { sequence: ticket, denied: error });
+      }
+    }
+    throw error;
+  }
 }
 
 export async function loadNodeMetadata(owner: boolean, deleted = false): Promise<Record<string, NodeMeta>> {
-  const result = await request<{ items: { nodeId: string; meta: NodeMeta; present: boolean }[] }>('/nodes/meta' + (deleted ? '?deleted=1' : ''));
-  const entries = await Promise.all(result.items.map(async item => [item.nodeId, await acceptNodeMeta(item.nodeId, item, owner)] as const));
+  const scope = requestScope(), ticket = ++sequence;
+  const result = await request<{ items: { nodeId: string; meta: NodeMeta; present: boolean }[] }>('/nodes/meta' + (deleted ? '?deleted=1' : '')).catch(error => {
+    if (scope === requestScope() && invalidatesRead(error)) {
+      const cache = currentMetadata();
+      for (const id of Object.keys(cache)) {
+        if ((latestChange(id)?.sequence ?? 0) <= ticket) delete cache[id];
+      }
+      if (!deniedBatch || deniedBatch.sequence <= ticket) deniedBatch = { sequence: ticket, denied: error };
+    }
+    throw error;
+  });
+  const entries = await Promise.all(result.items.map(async item => [item.nodeId, await acceptNodeMeta(item.nodeId, item, owner, scope, ticket)] as const));
   return Object.fromEntries(entries);
 }
 
-async function acceptNodeMeta(nodeId: string, result: { meta: NodeMeta; present: boolean }, _owner: boolean): Promise<NodeMeta> {
+async function acceptNodeMeta(nodeId: string, result: { meta: NodeMeta; present: boolean }, _owner: boolean, scope: number, ticket: number): Promise<NodeMeta> {
+  requireMetaScope(scope);
+  const newer = newerMeta(nodeId, ticket);
+  if (newer) return newer;
   // Preserve the existing one-time financial metadata import; port ranges are API-owned.
   if (_owner) {
     const key = 'qui_node_meta_' + nodeId, raw = localStorage.getItem(key);
@@ -107,9 +158,13 @@ async function acceptNodeMeta(nodeId: string, result: { meta: NodeMeta; present:
         renewNoticeDays: legacy.renewNoticeDays ?? 7, importOnly: true
       });
     }
+    requireMetaScope(scope);
+    const edited = newerMeta(nodeId, ticket);
+    if (edited) return edited;
     if (raw) localStorage.removeItem(key);
   }
-  metadata[nodeId] = result.meta;
+  currentMetadata()[nodeId] = result.meta;
+  nodeChanges.set(nodeId, { sequence: ticket });
   return result.meta;
 }
 
@@ -125,6 +180,7 @@ export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void
   if (bandwidth !== null && (!Number.isInteger(bandwidth) || bandwidth < 1 || bandwidth > 100000)) {
     throw new Error('请填写有效的线路带宽（1–100000 Mbps），或留空');
   }
+  const scope = requestScope();
   const result = await request<{ meta: NodeMeta }>('/nodes/'+encodeURIComponent(nodeId)+'/meta', 'PUT', {
     region: meta.region ?? '', remark: (meta.remark || '').trim(),
     renewDate: meta.renewDate ?? '', renewCycle: meta.renewCycle ?? '',
@@ -133,7 +189,10 @@ export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void
     bandwidthMbps: bandwidth,
     ...(meta.tags === undefined ? {} : { tags: meta.tags })
   });
-  metadata[nodeId] = result.meta;
+  requireMetaScope(scope);
+  currentMetadata()[nodeId] = result.meta;
+  // Every read dispatched before this accepted save can describe the old row.
+  nodeChanges.set(nodeId, { sequence: ++sequence });
 }
 
 export function parseRenewPrice(

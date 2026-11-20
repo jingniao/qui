@@ -583,6 +583,18 @@ qui sing-box 增加上游 `with_v2ray_api`，声明 `singbox_user_stats` 后逐�
 
 ## 18. 主机观测、续证与调优 helper
 
+**Ubuntu 当前内核的 BBR / fq 模块**。服务器详情中，Owner 勾选本次按需补装，再选 BBR 或 fq 并确认。若算法已经注册、内建或有可加载文件，Agent 直接应用参数。缺少设置入口、不可写、容器共享内核、旧 helper 或未支持的发行版会显示原因。首版要求 amd64/arm64 Ubuntu 宿主、systemd、系统 Python 3.9+、APT/dpkg、Canonical archive keyring，以及能证明运行构建的 `/proc/version_signature` 和已安装镜像包。现有内核无法提供目标时由 Owner 决定是否更换。
+
+补装服务从临时 APT 配置的 Ubuntu main 官方仓库查询，与运行 release、构建版本和架构精确匹配 `linux-modules-<release>` 或 `linux-modules-extra-<release>`。服务核对签名索引摘要、归档身份和模块文件清单，持有 dpkg 前端锁确认依赖已满足后，仅向 dpkg 提交核实过的本地归档。厂商的维护脚本可更新当前内核模块索引、initramfs 和引导菜单。包处理和参数应用各有回执，前者完成后 Agent 重新检查模块，后者逐键读回。参数失败时页面保留已配置包的名称。
+
+用请求 ID 对照 `journalctl -u proxy-agent-tuning-modules.service`、root 管理的 `/var/lib/qui-tuning-modules/status.json` 及原 sysctl 回执。包锁占用、网络或签名错误、精确版本不在索引、依赖变动、包配置失败各有具体原因。包配置中断时先在宿主运行 `dpkg --audit` 检查实际状态。包阶段等待最长 15 分钟，随后参数阶段独立等待 30 秒。超时后检查本机回执和下一次心跳，重新补装需要新的 Owner 请求。
+
+**包服务中断后，回执一直为 `finished=false`。** 同一次开机内，新请求会等待这份回执。让 Owner 暂停提交调优请求，由宿主管理员按以下步骤收尾。
+
+1. 执行 `systemctl show proxy-agent-tuning-modules.service -p ActiveState -p Job`。仅当 `ActiveState` 为 `inactive` 或 `failed`，且 `Job` 为空或 0 时继续。运行 `dpkg --audit`，如报告配置或触发器未完成，先处理报告中的问题，再确认包状态正常。
+2. 读取 `/var/lib/proxy-agent/tuning/module-request.json` 和 `/var/lib/qui-tuning-modules/status.json`。确认两份文件的 `id`、`boot`、`release`、`targets` 完全一致，包括目标顺序；`boot` 必须等于 `cat /proc/sys/kernel/random/boot_id` 的输出，`release` 必须等于 `uname -r` 的输出，且回执仍为 `finished=false`。文件缺失或身份不符时，停止收尾，对照该单元日志排查请求来源。
+3. 仅在上述条件全部满足时执行 `systemctl start proxy-agent-tuning-modules.service`。固定 helper 将相同 ID 的中断记录写为终态，跳过安装。此次命令返回失败符合预期。重新读取 root 回执，确认仍是刚核对的 ID，且 `finished=true`、`error` 为“此前包操作中断，配置状态未确认；请检查 dpkg --audit”。确认后由 Owner 决定是否提交新请求。
+
 Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）。每节点每分钟保留最后一条新鲜心跳，7 天清理；≤12 小时原始点，>12 小时分桶步长 ceil(hours×60/720)×60 秒。响应 intervalSeconds 为桶步长、sampleSeconds 固定 60、points 缺测为 null；桶内只平均已测值，不补零。非 lo 接口速率合计是宿主流量，可能跨接口重复计数。HostInfo 和 heartbeat 可空指标随节点详情提供，缺测不得当作 0。
 
 `GET /api/v1/nodes/{id}/tuning` 返回期望 desired、操作 status、逐键 result、末次心跳 current 与面板计算的 keyStatus。Owner 通过带 CSRF 的 PUT 提交完整字符串 settings、clear 和匹配 confirmNodeId；新 profile 省略旧键会恢复其初始值。clear=true 只能带空 settings，空 profile 同样清除。只接受 19 个固定 sysctl 键（`pkg/contracts/tuning`）和 Agent 相同边界；tcp_rmem/tcp_wmem 仅填最大整数。无能力返回 409 tuning_unsupported，离线/过期心跳返回 409 node_offline，同节点 pending 返回 409 tuning_busy。成功受理 202 仅表示排队，操作日志为“修改服务器调优”。
@@ -603,7 +615,11 @@ Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）
 
 调优是 Owner 发起的固定特权操作。Agent 将 request_id、settings、clear 写入 /var/lib/proxy-agent/tuning/desired.json（0600），helper 返回同目录 status.json。status 为 applied/cleared/failed，keys 为逐键读回值与错误；30 秒未等到匹配 request_id 只表示结果未确认，不能宣称没有应用。请求 ID 须唯一，不自动重试未确认的变更。
 
-- systemd：查看 `systemctl status proxy-agent-tuning.path proxy-agent-tuning.service`、`journalctl -u proxy-agent-tuning`；path 应保持运行，oneshot 执行完为 inactive 正常。反复失败后仍应接收新请求。
+固定入口 `--probe-tuning /var/lib/proxy-agent/tuning` 在实际 helper 权限下逐一以写模式打开并关闭 19 个 sysctl，保留值不变。结果原子写入 `probe.json`，记录本次启动标识、执行探测的 helper 的 SHA-256 和逐键错误。worker 以固定安装路径的程序核对摘要。更新器回滚到旧 helper 后，即使旧程序遗留同一次启动的回执，也会显示权限未就绪。systemd 每次启动探测前先由独立的 proxy-agent-tuning-probe-reset.service 以 Agent 身份清除旧回执。OpenRC 在启动前清除旧回执，watcher 每次启动或被监管器重新拉起时写入 root 管理的探测状态，只有就绪时 worker 才接受该回执。安装与启动时探测一次，每次真实调优结束后重新探测。新 Agent 收不到本次启动的完整结果时，面板会显示原因并禁用新参数设置。旧 Agent 沿用原权限估算。网页只更新受管 worker 的机器，还需更新本机固定 helper 和启动单元。
+
+页面的「一键应用」先确认完整配置，再显示请求 ID 和 Agent 回执。面板受理后显示等待执行。状态读取与建议读取独立，手动刷新或收到执行结果会重读节点能力。`net.core.default_qdisc` 是系统默认排队算法，已有网卡的实际排队算法由网卡配置决定。
+
+- systemd：查看 `systemctl status proxy-agent-tuning-probe.service proxy-agent-tuning.path proxy-agent-tuning.service`、`journalctl -u proxy-agent-tuning`；path 应保持运行，oneshot 执行完为 inactive 正常。反复失败后仍应接收新请求。
 - OpenRC：查看 `rc-service proxy-agent-tuning status`、syslog 的 proxy-agent-tuning；检查 `/usr/local/lib/proxy-agent/tuning-watch`、busybox inotifyd 与启动运行级。
 - 检查 desired/status 的 request_id 是否一致及 keys 错误；算法必须已在 tcp_available_congestion_control 中或其内核模块存在于 `/lib/modules/$(uname -r)/kernel/net/ipv4`（qdisc 为 `/lib/modules/$(uname -r)/kernel/net/sched`）。helper 不调用 modprobe，不调用 shell 或 sysctl 命令，当内核模块文件存在时直接写入内核 procfs。容器只读 procfs、权限不足、内核不支持或读回不符均报告失败，并尝试恢复全部原值；恢复失败也逐键记错，须管理员核对真实 sysctl。
 - `/etc/sysctl.d/99-proxy-tuning.conf` 保存成功配置；root 0600 的 `.proxy-tuning-snapshot.json` 保存首次应用前原值，不由 Agent 写。空 profile/clear 删除配置并恢复原值。卸载先停 watcher、恢复快照，恢复失败保留程序并中止卸载。不要手动删除快照来处理失败。

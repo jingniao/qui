@@ -3,7 +3,7 @@
   <div class="flex justify-between gap-3"><h3 class="text-base font-semibold leading-normal">访问存储增长观察</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">读取规模</button></div>
   <p class="text-xs text-gray-500">按需读取有界行数，不持续扫描全部历史数据。</p>
   <ErrorState v-if="error" :message="error" @retry="load" />
-  <p v-if="loading" class="text-xs text-gray-500">正在读取存储规模…</p>
+  <p v-if="loading && !sample" class="text-xs text-gray-500">正在读取存储规模…</p>
   <div v-if="sample" class="text-xs space-y-3">
    <p>观察时间：{{ formatTime(sample.observedAt) }}</p>
    <p>中央主数据库已分配：{{ bytes(sample.mainDatabaseAllocatedBytes) }}；其中可复用页：{{ bytes(sample.mainDatabaseReusableBytes) }}。</p>
@@ -47,6 +47,7 @@
 <script setup lang="ts">
 import { computed,onMounted,onUnmounted,ref } from 'vue';
 import { saveStorageThresholdsAPI,storageObservationAPI,storageThresholdsAPI,type StorageObservation,type SpaceMaintenanceJob,type StorageThresholds } from '../storageObservationApi';
+import { invalidatesRead } from '../../../app/apiClient';
 import { formatTime } from '../../../app/auth';
 import ErrorState from '../../../components/ErrorState.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
@@ -65,7 +66,22 @@ const criticalBytes=computed(()=>Math.round((criticalMiB.value||0)*MiB));
 const thresholdInputValid=computed(()=>{const w=warningBytes.value,c=criticalBytes.value;return w>=MiB && c>w;});
 function bytes(value:number){return (value/(1024*1024)).toFixed(1)+' MiB';}
 function maintenanceLabel(value:SpaceMaintenanceJob){return {idle:'尚无维护尝试',running:'开始已记录，结束结果尚未确认；不能据此判断当前仍在执行',skipped:'本轮未执行增量操作，保留原数据库模式',success:'本轮增量维护流程已完成，不代表全库缩减',error:'本轮维护失败，保留原清理结果'}[value.status] || '记录需核对';}
-async function load(){if(loading.value)return;const current=++generation;loading.value=true;error.value='';sample.value=null;try{const result=await storageObservationAPI();if(current===generation && !stopped)sample.value=result;}catch(e){if(current===generation && !stopped)error.value=(e as Error).message;}finally{if(current===generation && !stopped)loading.value=false;}}
+async function load() {
+  if (loading.value) return;
+  const current = ++generation;
+  loading.value = true;
+  error.value = '';
+  try {
+    const result = await storageObservationAPI();
+    if (current === generation) sample.value = result;
+  } catch (e) {
+    if (current !== generation) return;
+    if (invalidatesRead(e)) sample.value = null;
+    error.value = (e as Error).message;
+  } finally {
+    if (current === generation) loading.value = false;
+  }
+}
 async function loadThresholds(){thresholdError.value='';try{const result=await storageThresholdsAPI();if(stopped)return;thresholds.value=result;warningMiB.value=result.warningBytes?Math.round(result.warningBytes/MiB):null;criticalMiB.value=result.criticalBytes?Math.round(result.criticalBytes/MiB):null;}catch(e){if(!stopped){thresholdError.value=(e as Error).message;thresholds.value=null;}}}
 async function saveThresholds(){thresholdConfirming.value=false;if(savingThresholds.value||!thresholdInputValid.value)return;savingThresholds.value=true;thresholdError.value='';thresholdNotice.value='';try{const current=thresholds.value;const result=await saveStorageThresholdsAPI({warningBytes:warningBytes.value,criticalBytes:criticalBytes.value,expectedRevision:current?current.revision:0});if(stopped)return;thresholds.value=result;thresholdNotice.value='阈值已保存；刷新存储观察后按新阈值显示告警级别。';}catch(e){if(!stopped){thresholdError.value=(e as Error).message;thresholdNotice.value='结果未确认，请重新读取阈值，不自动重试。';}}finally{if(!stopped)savingThresholds.value=false;}}
 onMounted(()=>{void loadThresholds();});

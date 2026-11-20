@@ -47,9 +47,9 @@
     </PageHeader>
 
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <LoadingSkeleton v-else-if="!user" />
+    <LoadingSkeleton v-if="!user && !error" />
 
-    <template v-else>
+    <template v-if="user">
       <ErrorState v-if="choicesError" :message="choicesError" @retry="load" />
 
       <!-- 1. 用量概况 (4 KPI Cards) -->
@@ -208,7 +208,7 @@
             <div class="mt-4 p-3.5 rounded-2xl bg-[#F8F8FA] border border-black/[0.05] space-y-2">
               <div class="flex items-center justify-between text-xs text-ios-tertiary font-medium">
                 <span>{{ AUTO_SUBSCRIPTION_LABEL }}</span>
-                <span v-if="!subUrl" class="text-xs">重置后可查看</span>
+                <span v-if="!subUrl" class="text-xs">{{ subscriptionEmptyHint }}</span>
               </div>
               <p class="text-xs text-ios-secondary">按客户端 User-Agent 识别，识别不了时返回系统默认格式（{{ defaultFormatLabel }}）</p>
               <div class="flex items-center gap-2">
@@ -216,7 +216,7 @@
                   :value="subUrl"
                   readonly
                   class="form-input-base font-mono select-all bg-white"
-                  placeholder="重置后可查看"
+                  :placeholder="subscriptionEmptyHint"
                 />
                 <button
                   v-if="subUrl"
@@ -229,7 +229,10 @@
               </div>
             </div>
 
-            <p v-if="linkMessage" class="text-xs text-ios-secondary mt-3">{{ linkMessage }}</p>
+            <div v-if="linkMessage" class="mt-3 flex flex-wrap items-center gap-2 text-xs text-ios-secondary">
+              <p>{{ linkMessage }}</p>
+              <button v-if="linkReadFailed" type="button" class="ios-btn-secondary" @click="load">重新读取</button>
+            </div>
             <div v-for="format in clientRows" :key="format.format" class="mt-3 space-y-1.5">
               <div>
                 <span class="text-xs font-semibold">{{ format.label }}</span>
@@ -312,7 +315,10 @@
                 </div>
               </div>
 
-              <p v-if="previewFailed" class="text-center py-6 text-xs text-ios-orange">节点列表读取失败</p>
+              <div v-if="previewFailed" class="text-center py-6 text-xs text-ios-orange">
+                <p>节点列表读取失败</p>
+                <button type="button" class="ios-btn-secondary mt-2" @click="load">重新读取</button>
+              </div>
               <div v-else-if="previewLoaded && previewItems.length === 0" class="text-center py-6 text-xs text-ios-tertiary">
                 暂无可用节点
               </div>
@@ -603,7 +609,7 @@
 <script setup lang="ts">
 import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
-import { ref, computed, reactive, onMounted, onUnmounted } from 'vue';
+import { ref, computed, reactive, watch, onMounted, onUnmounted, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   userAPI,
@@ -617,8 +623,8 @@ import { portalAddress, portalShareText } from '../portalLogin';
 import { proxyAPI, type Inbound } from '../../proxy/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
-import { accessAPI, type AccessRecord } from '../../access/api';
-import { request, APIError, type Page } from '../../../app/apiClient';
+import { accessAPI, accountSummaryPath, accessRecordsPath, type AccessRecord } from '../../access/api';
+import { request, forgetPendingGet, APIError, type Page } from '../../../app/apiClient';
 import { authState, formatTime } from '../../../app/auth';
 import { localInput, utcInput, formatMinuteParts } from '../../../app/time';
 import { generateQRCodeSVG } from '../../../app/qrcode';
@@ -666,6 +672,9 @@ const subQrSvg = ref('');
 const subRotating = ref(false);
 const subFormats = ref<{ id: string; url: string }[]>([]);
 const linkMessage = ref('');
+const linkReadFailed = ref(false);
+const resetProfileRetryRequired = ref(false);
+const subscriptionEmptyHint = computed(() => resetProfileRetryRequired.value || linkReadFailed.value ? '重试后可查看' : '重置后可查看');
 const loginEnabled = ref(false), loginPassword = ref(''), loginBusy = ref(false), revokeVisible = ref(false);
 const defaultFormat = ref('');
 const installEndpoint = ref<{ host: string; httpPort: number } | null>(null);
@@ -677,14 +686,13 @@ const clientRows = computed(() =>
     .filter(c => c.url));
 const defaultFormatLabel = computed(() => (defaultFormat.value ? subscriptionClient(defaultFormat.value).label : '系统默认格式'));
 async function loadPortalContext(current = userGeneration) {
-  portalEndpointLoaded.value = false;
   await Promise.all([
     settingsAPI.runtimePolicy().then(policy => {
       if (current === userGeneration) defaultFormat.value = policy.policy.subscriptionFormat;
-    }).catch(e => { if (current === userGeneration) showToast(`订阅格式设置读取失败：${(e as Error).message}`, 'error'); }),
+    }).catch(e => { if (current === userGeneration && !invalidateDeniedUser(e)) showToast(`订阅格式设置读取失败：${(e as Error).message}`, 'error'); }),
     settingsAPI.installEndpoint().then(endpoint => {
       if (current === userGeneration) { installEndpoint.value = endpoint; portalEndpointLoaded.value = true; }
-    }).catch(e => { if (current === userGeneration) showToast(`门户地址设置读取失败：${(e as Error).message}`, 'error'); })
+    }).catch(e => { if (current === userGeneration && !invalidateDeniedUser(e)) showToast(`门户地址设置读取失败：${(e as Error).message}`, 'error'); })
   ]);
 }
 function absoluteLink(path: string) { return new URL(path, window.location.origin).href; }
@@ -692,32 +700,47 @@ function formatQR(path: string) {
   try { subQrSvg.value = generateQRCodeSVG(absoluteLink(path), 160); }
   catch { subQrSvg.value = ''; showToast('链接过长，无法生成二维码，请复制链接。', 'warning'); }
 }
-async function loadSubscription(id = userId.value, current = userGeneration) {
+let subscriptionGeneration = 0;
+function subscriptionLinkPath(id: string) { return `/users/${id}/subscription-link`; }
+function clearSubscription(id: string) {
+  subscriptionGeneration++;
+  if (id) forgetPendingGet(subscriptionLinkPath(id));
   subUrl.value = ''; subFormats.value = []; subQrSvg.value = ''; linkMessage.value = '';
+  linkReadFailed.value = false;
+}
+async function loadSubscription(id: string, current: number, primary: Promise<ProxyUser | null>) {
+  const subscription = ++subscriptionGeneration;
+  const isCurrent = () => current === userGeneration && subscription === subscriptionGeneration;
   try {
-    const link = await request<{ path: string; formats: { id: string; url: string }[] }>(`/users/${id}/subscription-link`);
-    if (current !== userGeneration) return;
-    subUrl.value = absoluteLink(link.path); subFormats.value = link.formats;
+    const link = await request<{ path: string; formats: { id: string; url: string }[] }>(subscriptionLinkPath(id));
+    if (!(await primary) || !isCurrent()) return;
+    const url = absoluteLink(link.path);
+    if (subUrl.value !== url) subQrSvg.value = '';
+    subUrl.value = url; subFormats.value = link.formats; linkMessage.value = '';
+    linkReadFailed.value = false;
   } catch (e) {
-    if (current !== userGeneration) return;
-    if (e instanceof APIError && e.code === 'link_not_recoverable') linkMessage.value = '重置后可查看';
-    else if (e instanceof APIError && e.status === 404) linkMessage.value = '尚无订阅链接，请重置以创建';
-    else linkMessage.value = (e as Error).message;
+    if (!isCurrent() || invalidateDeniedUser(e)) return;
+    if (e instanceof APIError && (e.status === 404 || e.code === 'link_not_recoverable')) {
+      clearSubscription(id);
+      linkMessage.value = e.code === 'link_not_recoverable' ? '重置后可查看' : '尚无订阅链接，请重置以创建';
+      return;
+    }
+    linkMessage.value = (e as Error).message;
+    linkReadFailed.value = true;
   }
 }
 async function saveLogin() {
-  loginBusy.value = true;
-  try {
-    await userAPI.setLogin(userId.value, loginEnabled.value, loginPassword.value || undefined);
-    loginPassword.value = ''; await load(); showToast('登录设置已保存');
-  } catch (e) { showToast((e as Error).message, 'error'); }
-  finally { loginBusy.value = false; }
+  await writeUser(u => userAPI.setLogin(u.id, loginEnabled.value, loginPassword.value || undefined), async () => {
+    loginPassword.value = '';
+    showToast('登录设置已保存');
+    await load();
+  }, loginBusy);
 }
 async function revokeSessions() {
-  loginBusy.value = true;
-  try { await request(`/users/${userId.value}/sessions`, 'DELETE'); revokeVisible.value = false; showToast('所有门户会话已撤销'); }
-  catch (e) { showToast((e as Error).message, 'error'); }
-  finally { loginBusy.value = false; }
+  await writeUser(u => request(`/users/${u.id}/sessions`, 'DELETE'), () => {
+    revokeVisible.value = false;
+    showToast('所有门户会话已撤销');
+  }, loginBusy);
 }
 
 // 流量历史统计与访问
@@ -826,30 +849,26 @@ function applyRenewDays(days: number) {
 }
 
 async function submitRenew() {
-  if (!user.value) return;
-  renewBusy.value = true;
-  try {
+  await writeUser(async u => {
     const updatedExpiry = renewTargetTime.value ? utcInput(renewTargetTime.value) : '';
-    await userAPI.save(user.value.id, {
-      username: user.value.username,
-      trafficResetCycle: user.value.trafficResetCycle,
-      trafficResetAnchor: user.value.trafficResetAnchor,
-      displayName: user.value.displayName,
-      status: user.value.status,
+    await userAPI.save(u.id, {
+      username: u.username,
+      trafficResetCycle: u.trafficResetCycle,
+      trafficResetAnchor: u.trafficResetAnchor,
+      displayName: u.displayName,
+      status: u.status,
       expiresAt: updatedExpiry,
-      trafficLimit: user.value.trafficLimit,
- deviceLimit: user.value.deviceLimit,
-      nodeGroupIds: user.value.nodeGroupIds,
-      remark: user.value.remark
+      trafficLimit: u.trafficLimit,
+      deviceLimit: u.deviceLimit,
+      nodeGroupIds: u.nodeGroupIds,
+      remark: u.remark
     });
+    return updatedExpiry;
+  }, async (_, updatedExpiry) => {
     showToast(`续期成功，服务有效期已延长至 ${formatTime(updatedExpiry)}`);
     renewDialogOpen.value = false;
     await load();
-  } catch (e) {
-    showToast((e as Error).message, 'error');
-  } finally {
-    renewBusy.value = false;
-  }
+  }, renewBusy);
 }
 
 // 重置密码弹窗状态
@@ -861,19 +880,17 @@ function openPasswordDialog() {
 }
 
 async function submitResetPassword() {
-  if (!user.value) return;
-  passwordBusy.value = true;
-  try {
-    // One call re-issues every credential and queues the automatic revision;
-    // the old settings stop working once the nodes have applied it.
-    await userAPI.resetCredentials(user.value.id);
+  // Old credentials stop working after the nodes apply the automatic revision.
+  await writeUser(u => userAPI.resetCredentials(u.id), async ({ id }) => {
+    clearSubscription(id);
+    clearPreview(id);
     showToast('连接凭证已重置，节点应用新配置后旧凭证失效');
     passwordDialogOpen.value = false;
-  } catch (e) {
-    showToast((e as Error).message, 'error');
-  } finally {
-    passwordBusy.value = false;
-  }
+    const current = userGeneration;
+    const primary = confirmPrimaryAfterReset(id, current);
+    void loadPreview(id, current, primary);
+    await loadSubscription(id, current, primary);
+  }, passwordBusy);
 }
 
 // 清零流量
@@ -884,33 +901,24 @@ function confirmResetTraffic() {
 }
 
 async function submitResetTraffic() {
-  if (!user.value) return;
-  try {
-    await userAPI.resetTraffic(user.value.id);
-    showToast(`用户 ${user.value.username} 已用流量已清零`);
+  await writeUser(u => userAPI.resetTraffic(u.id), async u => {
+    showToast(`用户 ${u.username} 已用流量已清零`);
     resetTrafficVisible.value = false;
     await load();
-  } catch (e) {
-    showToast((e as Error).message, 'error');
-  }
+  });
 }
 
 // 重置订阅 Token
 const rotateConfirmVisible = ref(false);
 
 async function doRotateSubscription() {
-  if (!user.value) return;
-  subRotating.value = true;
-  try {
-    await userAPI.rotateToken(user.value.id);
+  await writeUser(u => userAPI.rotateToken(u.id), async ({ id }) => {
+    clearSubscription(id);
     rotateConfirmVisible.value = false;
-    await loadSubscription();
     showToast('专属订阅 Token 重置成功，旧链接已失效');
-  } catch (e) {
-    showToast('重置订阅失败: ' + (e as Error).message, 'error');
-  } finally {
-    subRotating.value = false;
-  }
+    const current = userGeneration;
+    await loadSubscription(id, current, confirmPrimaryAfterReset(id, current));
+  }, subRotating, '重置订阅失败：');
 }
 
 async function rotateSubscription() {
@@ -924,16 +932,13 @@ const expiresLocal = ref('');
 const trafficGiB = ref(0);
 let originalTrafficGiB = 0;
 
-const form = reactive<UserInput>({
-  username: '',
-  displayName: '',
-  status: 'active',
-  expiresAt: '',
-  trafficLimit: 0,
- deviceLimit: 0,
-  nodeGroupIds: [],
-  remark: ''
-});
+function emptyUserForm(): UserInput {
+  return {
+    username: '', displayName: '', status: 'active', expiresAt: '', trafficLimit: 0,
+    trafficResetCycle: 'none', trafficResetAnchor: '', deviceLimit: 0, nodeGroupIds: [], remark: ''
+  };
+}
+const form = reactive(emptyUserForm());
 
 const formMeta = reactive<UserMeta>({
   resetCycle: 'none',
@@ -960,24 +965,18 @@ function openEdit() {
 }
 
 async function save() {
-  if (!user.value) return;
-  saving.value = true;
-  try {
+  await writeUser(u => {
     form.expiresAt = expiresLocal.value ? utcInput(expiresLocal.value) : '';
-    form.trafficLimit = trafficGiB.value === originalTrafficGiB ? (user.value.trafficLimit) : (trafficGiB.value > 0 ? Math.round(trafficGiB.value * 1073741824) : 0);
+    form.trafficLimit = trafficGiB.value === originalTrafficGiB ? (u.trafficLimit) : (trafficGiB.value > 0 ? Math.round(trafficGiB.value * 1073741824) : 0);
     form.remark = formMeta.rawRemark;
     form.trafficResetCycle = formMeta.resetCycle;
-    if (form.trafficResetCycle !== user.value.trafficResetCycle) form.trafficResetAnchor = '';
-
-    await userAPI.save(user.value.id, form);
+    if (form.trafficResetCycle !== u.trafficResetCycle) form.trafficResetAnchor = '';
+    return userAPI.save(u.id, form);
+  }, async () => {
     showToast('用户配置保存成功');
     drawer.value = false;
     await load();
-  } catch (e) {
-    showToast((e as Error).message, 'error');
-  } finally {
-    saving.value = false;
-  }
+  }, saving);
 }
 
 async function copyText(text: string) {
@@ -1010,19 +1009,171 @@ async function readPages<T>(fetchPage: (page: number) => Promise<{ items: T[]; t
   return { items };
 }
 let userGeneration = 0;
+let userLifetime = 0;
+let activityGeneration = 0;
+let previewGeneration = 0;
+let activeUserId = '';
 let loadingUser = false;
+const noPrimaryUser = Promise.resolve(null);
+let primaryUserRead: Promise<ProxyUser | null> = noPrimaryUser;
+const userOperationReadPaths = new Set<string>();
+
+async function writeUser<T>(write: (account: ProxyUser) => Promise<T>, saved: (account: ProxyUser, result: T) => void | Promise<void>, busy?: Ref<boolean>, errorPrefix = '') {
+  const account = user.value;
+  if (!account) return;
+  const lifetime = userLifetime;
+  const isCurrent = () => lifetime === userLifetime && account.id === userId.value;
+  if (busy) busy.value = true;
+  try {
+    const result = await write(account);
+    if (isCurrent()) await saved(account, result);
+  } catch (e) {
+    if (isCurrent() && !invalidateDeniedUser(e)) showToast(`${errorPrefix}${(e as Error).message}`, 'error');
+  } finally {
+    if (busy && isCurrent()) busy.value = false;
+  }
+}
+
+function clearPreview(id: string) {
+  previewGeneration++;
+  if (id) forgetPendingGet(`/users/${id}/subscription-preview`);
+  previewItems.value = [];
+  previewLoaded.value = false;
+  previewFailed.value = false;
+}
+
+function invalidateUser(message = '') {
+  userLifetime++;
+  userGeneration++;
+  loadingUser = false;
+  primaryUserRead = noPrimaryUser;
+  resetProfileRetryRequired.value = false;
+  const id = activeUserId;
+  activeUserId = '';
+  if (id) {
+    forgetPendingGet(`/users/${id}`);
+    forgetPendingGet(accountSummaryPath({ userId: id }));
+    forgetPendingGet(accessRecordsPath({ userId: id }, 1));
+    for (const path of userOperationReadPaths) forgetPendingGet(path);
+    userOperationReadPaths.clear();
+  }
+  clearSubscription(id);
+  clearPreview(id);
+  user.value = null;
+  loginEnabled.value = false;
+  loginPassword.value = '';
+  drawer.value = false;
+  renewDialogOpen.value = false;
+  passwordDialogOpen.value = false;
+  resetTrafficVisible.value = false;
+  revokeVisible.value = false;
+  rotateConfirmVisible.value = false;
+  saving.value = false;
+  renewBusy.value = false;
+  passwordBusy.value = false;
+  loginBusy.value = false;
+  subRotating.value = false;
+  Object.assign(form, emptyUserForm());
+  Object.assign(formMeta, { resetCycle: 'none', rawRemark: '' });
+  expiresLocal.value = '';
+  renewTargetTime.value = '';
+  trafficGiB.value = 0;
+  originalTrafficGiB = 0;
+  defaultFormat.value = '';
+  installEndpoint.value = null;
+  portalEndpointLoaded.value = false;
+  groups.value = []; allNodes.value = []; memberInbounds.value = [];
+  choicesReady.value = false;
+  choicesError.value = '';
+  trafficSummary.value = { uploadBytes: 0, downloadBytes: 0, observations: 0 };
+  recentAccessList.value = []; userOperations.value = [];
+  error.value = message;
+}
+
+function invalidateDeniedUser(e: unknown, primary = false) {
+  if (!(e instanceof APIError) || (e.status !== 401 && e.status !== 403 && !(primary && e.status === 404))) return false;
+  invalidateUser(e.message);
+  return true;
+}
+
+function observeUserDenial(isCurrent: () => boolean) {
+  return (e: unknown): never => {
+    if (isCurrent()) invalidateDeniedUser(e);
+    throw e;
+  };
+}
+
+async function loadPrimaryUser(id: string, current: number, purpose: 'page' | 'status' | 'reset' = 'page') {
+  try {
+    const result = await userAPI.get(id);
+    if (current !== userGeneration) return null;
+    const editingLogin = purpose !== 'page' && loginEnabled.value !== user.value?.loginEnabled;
+    user.value = result;
+    if (!editingLogin) loginEnabled.value = result.loginEnabled;
+    if (purpose === 'page') resetProfileRetryRequired.value = false;
+    if (!resetProfileRetryRequired.value) error.value = '';
+    return result;
+  } catch (e) {
+    if (current === userGeneration && !invalidateDeniedUser(e, true)) {
+      const message = (e as Error).message;
+      if (purpose === 'status') showToast(`用户状态刷新失败：${message}`, 'error');
+      else if (purpose === 'reset' || resetProfileRetryRequired.value) {
+        resetProfileRetryRequired.value = true;
+        error.value = `无法确认用户资料（${message}）。点击重试可重新读取新订阅数据。`;
+      } else error.value = message;
+    }
+    return null;
+  } finally {
+    if (current === userGeneration) loadingUser = false;
+  }
+}
+
+async function confirmPrimaryAfterReset(id: string, current: number): Promise<ProxyUser | null> {
+  const previous = primaryUserRead;
+  const confirmed = await previous;
+  if (current !== userGeneration) return null;
+  if (previous !== primaryUserRead) return confirmPrimaryAfterReset(id, current);
+  if (confirmed) return confirmed;
+  loadingUser = true;
+  const primary = primaryUserRead = loadPrimaryUser(id, current, 'reset');
+  return primary;
+}
+
+async function loadPreview(id: string, current: number, primary: Promise<ProxyUser | null>) {
+  const preview = ++previewGeneration;
+  const isCurrent = () => current === userGeneration && preview === previewGeneration;
+  try {
+    const result = await userAPI.preview(id);
+    if (!(await primary) || !isCurrent()) return;
+    previewItems.value = result.items;
+    previewFailed.value = false;
+    previewLoaded.value = true;
+  } catch (e) {
+    if (!isCurrent() || invalidateDeniedUser(e)) return;
+    previewFailed.value = true;
+    previewLoaded.value = true;
+  }
+}
+
 async function load() {
+  const id = userId.value;
+  if (!id || route.name !== 'UserDetail') return;
+  if (activeUserId !== id) invalidateUser();
+  activeUserId = id;
   const current = ++userGeneration;
   loadingUser = true;
-  const id = userId.value;
-  if (!id || route.name !== 'UserDetail') { loadingUser = false; return; }
-  error.value = '';
+  if (!resetProfileRetryRequired.value) error.value = '';
   choicesError.value = '';
-  choicesReady.value = false;
+  const primary = primaryUserRead = loadPrimaryUser(id, current);
+  void loadPortalContext(current);
+  void loadSubscription(id, current, primary);
+  void loadPreview(id, current, primary);
+  loadActivity(id, current, primary);
+  const denied = observeUserDenial(() => current === userGeneration);
   const options = Promise.all([
-    readPages(page => groupAPI.list(page, 100)),
-    readPages(page => nodeAPI.choices(page, '', 100)),
-    readPages(page => proxyAPI.inbounds('', page, 100))
+    readPages(page => groupAPI.list(page, 100)).catch(denied),
+    readPages(page => nodeAPI.choices(page, '', 100)).catch(denied),
+    readPages(page => proxyAPI.inbounds('', page, 100)).catch(denied)
   ]).then(([gRes, nRes, ibRes]) => {
     if (current !== userGeneration) return;
     groups.value = gRes.items;
@@ -1030,91 +1181,73 @@ async function load() {
     memberInbounds.value = ibRes.items;
     choicesReady.value = true;
   }).catch(e => {
-    if (current === userGeneration) choicesError.value = `授权节点与分组读取失败：${(e as Error).message}`;
+    if (current !== userGeneration) return;
+    choicesReady.value = false;
+    choicesError.value = `授权节点与分组读取失败：${(e as Error).message}`;
   });
-  try {
-    void loadPortalContext(current);
-    await userAPI.get(id).then(value => {
-        if (current === userGeneration) {
-          user.value = value; loginEnabled.value = value.loginEnabled;
-          void loadSubscription(id, current);
-          void userAPI.preview(id)
-            .then(result => { if (current !== userGeneration) return; previewItems.value = result.items; previewFailed.value = false; })
-            .catch(() => { if (current !== userGeneration) return; previewFailed.value = true; })
-            .finally(() => { if (current === userGeneration) previewLoaded.value = true; });
-          loadActivity(value, current);
-        }
-        return value;
-      });
-
-  } catch (e) {
-    if (current === userGeneration) error.value = (e as Error).message;
-  } finally { if (current === userGeneration) loadingUser = false; }
-  await options;
+  await Promise.all([primary, options]);
 }
 
-let activityGeneration = 0;
-function loadActivity(u: NonNullable<typeof user.value>, current: number) {
-    const activity = ++activityGeneration;
-    const isCurrent = () => current === userGeneration && activity === activityGeneration;
-    const failed = (section: string, e: unknown) => {
-      if (isCurrent()) showToast(`${section}读取失败：${(e as Error).message}`, 'error');
+function loadActivity(id: string, current: number, primary: Promise<ProxyUser | null>) {
+  const activity = ++activityGeneration;
+  const isCurrent = () => current === userGeneration && activity === activityGeneration;
+  const failed = (section: string, e: unknown) => {
+    if (isCurrent() && !invalidateDeniedUser(e)) showToast(`${section}读取失败：${(e as Error).message}`, 'error');
+  };
+  void accessAPI.accounts({ userId: id }).then(async summary => {
+    if (!(await primary) || !isCurrent()) return;
+    trafficSummary.value = {
+      uploadBytes: summary.uploadBytes || 0,
+      downloadBytes: summary.downloadBytes || 0,
+      observations: summary.observations || 0
     };
-    // 获取流量历史与请求
-    void accessAPI.accounts({ userId: u.id }).then(summary => {
-      if (!isCurrent()) return;
-      trafficSummary.value = {
-        uploadBytes: summary.uploadBytes || 0,
-        downloadBytes: summary.downloadBytes || 0,
-        observations: summary.observations || 0
-      };
-    }).catch(e => failed('流量记录', e));
+  }).catch(e => failed('流量记录', e));
 
-    void accessAPI.list({ userId: u.id }, 1).then(res => {
-      if (!isCurrent()) return;
-      recentAccessList.value = res.items.slice(0, 10);
-    }).catch(e => failed('访问记录', e));
+  void accessAPI.list({ userId: id }, 1).then(async res => {
+    if (!(await primary) || !isCurrent()) return;
+    recentAccessList.value = res.items.slice(0, 10);
+  }).catch(e => failed('访问记录', e));
 
-    // 获取管理员对该用户的操作记录
-    Promise.all([
-      request<Page<Operation>>(`/operations?page=1&pageSize=10&keyword=${encodeURIComponent(u.username)}`),
-      request<Page<Operation>>(`/operations?page=1&pageSize=10&keyword=${encodeURIComponent(u.id)}`)
-    ]).then(([res1, res2]) => {
-      if (!isCurrent()) return;
-      const map = new Map<number, Operation>();
-      for (const it of res1.items) map.set(it.id, it);
-      for (const it of res2.items) map.set(it.id, it);
-      const merged = Array.from(map.values());
-      merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      userOperations.value = merged.slice(0, 10);
-    }).catch(e => failed('操作记录', e));
-
+  // 操作记录需要主资料中的用户名。
+  void primary.then(async u => {
+    if (!u || !isCurrent()) return;
+    const paths = [u.username, u.id].map(keyword => `/operations?page=1&pageSize=10&keyword=${encodeURIComponent(keyword)}`);
+    for (const path of paths) userOperationReadPaths.add(path);
+    const denied = observeUserDenial(isCurrent);
+    const [res1, res2] = await Promise.all(paths.map(path => request<Page<Operation>>(path).catch(denied)));
+    if (!isCurrent()) return;
+    const map = new Map<number, Operation>();
+    for (const it of res1.items) map.set(it.id, it);
+    for (const it of res2.items) map.set(it.id, it);
+    const merged = Array.from(map.values());
+    merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    userOperations.value = merged.slice(0, 10);
+  }).catch(e => failed('操作记录', e));
 }
 
 async function refreshUserStatus() {
   if (document.hidden || loadingUser || !user.value) return;
   const current = userGeneration;
+  const id = user.value.id;
   loadingUser = true;
-  try {
-    const result = await userAPI.get(userId.value);
-    if (current !== userGeneration) return;
-    const editingLogin = loginEnabled.value !== user.value?.loginEnabled;
-    user.value = result;
-    loadActivity(result, current);
-    if (!editingLogin) loginEnabled.value = result.loginEnabled;
-  } catch (e) {
-    if (current === userGeneration) showToast(`用户状态刷新失败：${(e as Error).message}`, 'error');
-  } finally { if (current === userGeneration) loadingUser = false; }
+  const primary = primaryUserRead = loadPrimaryUser(id, current, 'status');
+  if (await primary && current === userGeneration) loadActivity(id, current, primary);
 }
 const refreshStatus = throttleTrailing(() => { void refreshUserStatus(); }, 5000);
 function visibilityChanged() { if (!document.hidden) refreshStatus(); }
+watch([() => route.name, userId], ([name, id]) => {
+  if (activeUserId && (name !== 'UserDetail' || activeUserId !== id)) invalidateUser();
+}, { flush: 'sync' });
+watch(() => authState.currentUser?.role, (role, previous) => {
+  if (previous === 'Owner' && role !== 'Owner') invalidateUser('当前账号没有执行此操作的权限。');
+}, { flush: 'sync' });
 onMounted(() => {
   void load();
   document.addEventListener('visibilitychange', visibilityChanged);
   window.addEventListener('proxy-system-alert', refreshStatus);
 });
 onUnmounted(() => {
-  userGeneration++; refreshStatus.cancel();
+  invalidateUser(); refreshStatus.cancel();
   document.removeEventListener('visibilitychange', visibilityChanged);
   window.removeEventListener('proxy-system-alert', refreshStatus);
 });

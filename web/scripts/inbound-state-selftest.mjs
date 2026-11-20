@@ -23,21 +23,21 @@ const listener = list.match(/window\.addEventListener\('proxy-node-status', (\w+
 const nodeStatusHandler = list.match(/function onNodeStatus\(event: Event\)[\s\S]*?\n}/)?.[0] || '';
 let heartbeatsRead = 0;
 const countRead = () => { heartbeatsRead++; };
-const handleStatus = new Function('reloadPublishStatesOnNodeStatus', 'nodeStatusEventChangesInventory', 'refreshInventory', ts.transpileModule(nodeStatusHandler, {}).outputText + '\nreturn ' + listener)(
-  countRead, event => event.detail.inventoryChanged !== false, countRead);
+const handleStatus = new Function('nodeStatusEventChangesInventory', 'onInventoryChanged', ts.transpileModule(nodeStatusHandler, {}).outputText + '\nreturn ' + listener)(
+  event => event.detail.inventoryChanged !== false, countRead);
 for (let i = 0; i < 12; i++) handleStatus({ detail: { nodeId: 'server', inventoryChanged: false } });
 assert.equal(heartbeatsRead, 0, 'ordinary heartbeats must cause zero static/configuration reads');
 handleStatus({ detail: { nodeId: 'server' } });
 assert.equal(heartbeatsRead, 1, 'configuration inventory change refreshes choices');
-const keyCode = ['visibleServerIds', 'visiblePublishKey'].map(name => list.match(new RegExp('function ' + name + '\\(\\)[\\s\\S]*?\\n}'))[0]).join('\n');
-const bindWatch = list.match(/watch\(\[visiblePublishKey, serverInbounds\][\s\S]*?\{ immediate: true \}\);/)[0];
+const keyCode = ['visibleServerIds', 'visibleServerKey', 'serverRevisionKey'].map(name => list.match(new RegExp('function ' + name + '\\(\\)[\\s\\S]*?\\n}'))[0]).join('\n');
+const bindWatch = list.match(/watch\(\[visibleServerKey, serverRevisionKey, serverInbounds\][\s\S]*?\{ immediate: true \}\);/)[0];
 const watchServers = ref([{ id: 'server', heartbeat: { current_revision: 7 } }]);
 const visibleNodes = ref([{ sourceId: 'server', sourceType: 'self_hosted' }]);
 const draftRows = ref([]);
-let configurationReads = 0;
-new Function('displayMode', 'pagedNodes', 'filteredNodes', 'servers', 'serverInbounds', 'watch', 'loadServerPublishStates',
+let configurationReads = 0, configurationInvalidations = 0;
+new Function('displayMode', 'pagedNodes', 'filteredNodes', 'servers', 'serverInbounds', 'watch', 'loadServerPublishStates', 'publishStateReads',
   ts.transpileModule(keyCode + '\n' + bindWatch, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(
-  ref('list'), visibleNodes, visibleNodes, watchServers, draftRows, watch, () => configurationReads++);
+  ref('list'), visibleNodes, visibleNodes, watchServers, draftRows, watch, () => configurationReads++, { invalidate: () => configurationInvalidations++ });
 for (let beat = 0; beat < 12; beat++) {
   watchServers.value = [{ id: 'server', heartbeat: { current_revision: 7, cpu_percent: beat } }];
   visibleNodes.value = [...visibleNodes.value];
@@ -49,6 +49,10 @@ await nextTick();
 draftRows.value = [{ id: 'draft' }];
 await nextTick();
 assert.equal(configurationReads, 3, 'confirmed revision and changed drafts each refresh status');
+visibleNodes.value = [];
+await nextTick();
+assert.equal(configurationReads, 4, 'changing the selection updates the visible nodes');
+assert.equal(configurationInvalidations, 3, 'selection changes leave the current data generation intact');
 
 // The node list labels each inbound from its own publish state, not from the
 // server's latest revision.
@@ -77,38 +81,112 @@ for (const path of ['modules/proxy/pages/ProxyNodeListPage.vue', 'modules/system
   assert.doesNotMatch(read(path), /已应用且健康/, path);
 }
 
-const stateBlock = list.slice(list.indexOf('const inboundStateMap ='), list.indexOf('watch([visiblePublishKey'));
-const compiledState = ts.transpileModule(stateBlock, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const stateBlock = list.slice(list.indexOf('const inboundStateMap ='), list.indexOf('let serverRefreshGeneration'));
+const publishEvent = list.match(/function onDeploymentStatus\(\)[\s\S]*?\n}/)[0];
+const draftEvent = list.match(/let draftTimer:[\s\S]*?\n}/)[0];
+const transpile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const schedulerSource = read('modules/proxy/inboundStateReads.ts').replace(/^import type .*;\r?\n/m, '').replace('export function', 'function');
+const createInboundStateReads = new Function(transpile(schedulerSource) + '\nreturn createInboundStateReads;')();
+const buildState = new Function('ref', 'document', 'displayMode', 'pagedNodes', 'filteredNodes', 'servers', 'serverInbounds',
+  'deploymentAPI', 'revisionResult', 'createInboundStateReads', 'watch', 'setTimeout', 'clearTimeout', 'loadData',
+  transpile(stateBlock + '\n' + publishEvent + '\n' + draftEvent) + `
+  const refreshDeployment = () => { void loadServerPublishStates(); };
+  return { loadServerPublishStates, inboundState, inboundBadge, notRunning, inboundStatusUnknown, onDeploymentStatus, queueDraftRefresh,
+    dispose: publishStateReads.dispose };
+  `);
+const stateHarness = (nodes, api, { serverList, drafts, schedule = () => {} } = {}) => buildState(
+  ref, { hidden: false }, ref('list'), nodes, nodes, serverList, drafts, api, value => value, createInboundStateReads,
+  serverList ? watch : () => {}, schedule, () => {}, async () => {});
+
 const item = { sourceType: 'self_hosted', sourceId: 's', inboundId: 'i', status: 'online' };
 let fail = false;
 const stateAPI = { inboundStatesBatch: async () => { if (fail) throw new Error('read failed'); return { items: [{ nodeId: 's', items: [{ inboundId: 'i', state: 'unpublished' }] }] }; } };
-const state = new Function('ref', 'document', 'displayMode', 'pagedNodes', 'filteredNodes', 'deploymentAPI', 'revisionResult', 'showToast', compiledState + '\nreturn { loadServerPublishStates, inboundState, inboundBadge, notRunning, inboundStatusUnknown };')(
-  value => ({ value }), { hidden: false }, { value: 'list' }, { value: [item] }, { value: [item] }, stateAPI, value => value, () => {});
+const state = stateHarness(ref([item]), stateAPI);
 assert.equal(state.inboundBadge(item), undefined, 'not-yet-loaded inbound has no unknown badge');
 assert.equal(state.notRunning(item), false, 'not-yet-loaded inbound retains server status');
 await state.loadServerPublishStates();
 assert.equal(state.inboundState(item).state, 'unpublished');
 fail = true;
-await state.loadServerPublishStates();
+state.onDeploymentStatus();
+await Promise.resolve();
 assert.equal(state.inboundState(item)?.state, 'unpublished', 'read failure retains old state');
 assert.equal(state.inboundBadge(item).label, '状态未知');
 assert.equal(state.inboundStatusUnknown(item), true, 'read failure marks status unknown');
 fail = false;
-await state.loadServerPublishStates();
+await state.loadServerPublishStates(['s']);
 assert.equal(state.inboundBadge(item).label, '未生效');
-// A same-inventory invalidation requests a follow-up read, but must not starve
-// the result already in flight (including its error) during repeated events.
-const overlapping = [];
-stateAPI.inboundStatesBatch = () => new Promise((resolve, reject) => overlapping.push({ resolve, reject }));
-const firstOverlap = state.loadServerPublishStates();
-await state.loadServerPublishStates();
-overlapping[0].resolve({ items: [{ nodeId: 's', items: [{ inboundId: 'i', state: 'applied' }] }] });
-await firstOverlap;
-assert.equal(state.inboundState(item).state, 'applied', 'same-set result appears before follow-up finishes');
-assert.equal(overlapping.length, 2, 'events coalesce into one follow-up');
-overlapping[1].reject(new Error('follow-up failed'));
-await new Promise(resolve => setTimeout(resolve, 0));
-assert.equal(state.inboundStatusUnknown(item), true, 'follow-up error remains visible');
+
+const selectedNodes = ref(Array.from({ length: 10 }, (_, index) => ({
+  sourceType: 'self_hosted', sourceId: 'node-' + index, inboundId: 'inbound',
+})));
+const deferredBatches = requests => ({ inboundStatesBatch: ids => new Promise((resolve, reject) => requests.push({ ids, resolve, reject })) });
+const requests = [];
+const scheduleState = stateHarness(selectedNodes, deferredBatches(requests));
+const resolveBatch = (request, state = 'effective') => request.resolve({ items: request.ids.map(nodeId => ({ nodeId, items: [{ inboundId: 'inbound', state }] })) });
+const originalNodes = selectedNodes.value;
+const ten = scheduleState.loadServerPublishStates();
+selectedNodes.value = originalNodes.slice(0, 9);
+await scheduleState.loadServerPublishStates();
+resolveBatch(requests[0]);
+await ten;
+assert.equal(requests.length, 1, 'shrinking an in-flight 10-node read to nine does not send a second request');
+assert.equal(scheduleState.inboundState(originalNodes[8])?.state, 'effective', 'a visible node receives the in-flight result');
+const extra = { sourceType: 'self_hosted', sourceId: 'node-10', inboundId: 'inbound' };
+selectedNodes.value = [...originalNodes, extra];
+const expanded = scheduleState.loadServerPublishStates();
+assert.deepEqual(requests[1].ids, ['node-10'], 'expanding the selection requests only a new node');
+const other = { ...extra, sourceId: 'node-11' };
+selectedNodes.value = [extra, other];
+await scheduleState.loadServerPublishStates();
+requests[1].resolve({ items: [{ nodeId: extra.sourceId, items: null, error: 'read failed for one node' }] });
+await expanded;
+assert.equal(scheduleState.inboundBadge(extra).label, '状态未知');
+assert.deepEqual(requests[2].ids, ['node-11'], 'an expansion during a request reads only the uncovered node');
+resolveBatch(requests[2]);
+await Promise.resolve();
+assert.equal(requests.length, 3, 'per-node failures wait for an explicit retry');
+const retry = scheduleState.loadServerPublishStates([extra.sourceId]);
+assert.deepEqual(requests[3].ids, ['node-10'], 'retry leaves the successful node alone');
+resolveBatch(requests[3]);
+await retry;
+assert.equal(scheduleState.inboundBadge(extra).label, '已生效');
+
+for (const [label, invalidate] of [
+  ['confirmed revision', (_state, servers) => { servers.value[0].heartbeat.current_revision++; }],
+  ['draft snapshot', (_state, _servers, drafts) => { drafts.value = [{ id: 'changed-draft' }]; }],
+  ['draft or certificate event', state => { state.queueDraftRefresh(); }],
+  ['deployment event', state => { state.onDeploymentStatus(); }],
+]) {
+  const pending = [];
+  const serverList = ref([{ id: extra.sourceId, heartbeat: { current_revision: 7 } }]);
+  const drafts = ref([]);
+  const timers = [];
+  const harness = stateHarness(ref([extra]), deferredBatches(pending), { serverList, drafts, schedule: cb => timers.push(cb) });
+  assert.equal(pending.length, 1, label);
+  invalidate(harness, serverList, drafts);
+  await nextTick();
+  resolveBatch(pending[0], 'pending');
+  await Promise.resolve();
+  assert.equal(harness.inboundBadge(extra), undefined, label + ' drops an obsolete response');
+  if (timers.length) { timers[0](); await Promise.resolve(); }
+  assert.equal(pending.length, 2, label + ' schedules one fresh response');
+  resolveBatch(pending[1]);
+  await Promise.resolve();
+  assert.equal(harness.inboundBadge(extra).label, '已生效', label);
+  harness.dispose();
+}
+
+const ending = [];
+const unmounted = stateHarness(ref([extra]), deferredBatches(ending));
+const first = unmounted.loadServerPublishStates();
+unmounted.onDeploymentStatus();
+unmounted.dispose();
+ending[0].reject(new Error('response after unmount'));
+await first;
+assert.equal(unmounted.inboundBadge(extra), undefined, 'an obsolete failure cannot be applied after unmount');
+assert.equal(ending.length, 1, 'disposing cancels queued reads');
+assert.match(list, /onUnmounted\(\(\) => \{[\s\S]*?publishStateReads\.dispose\(\)/);
+
 assert.match(list, /serverStatus\(srv,\s*now\.value\)/, 'proxy list shares heartbeat expiry with server list');
 const refresh = list.match(/async function refreshServersOnNodeStatus\(\)[\s\S]*?\n}/)?.[0] || '';
 assert.match(refresh, /inventory\.readServers/);
@@ -159,9 +237,10 @@ await initialLoad;
 assert.equal(interleavedServers.value[0].status, 'offline', 'late loadData must not overwrite event server snapshot');
 console.log('PASS loadData/event server snapshot interleaving');
 
-// Execute the actual combined-status helper with the actual inbound state block.
+// Execute the actual combined-status helper with its inbound display state.
 const statusBlock = list.slice(list.indexOf('const statusLook ='), list.indexOf('function copyAddress'));
-const combined = new Function('ref', 'revisionResult', ts.transpileModule(stateBlock + '\n' + statusBlock + '\nreturn { nodeStatus, inboundStateMap, inboundStateErrors };', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(value => ({ value }), value => value);
+const displayState = stateBlock.slice(0, stateBlock.indexOf('let publishStateDisposed'));
+const combined = new Function('ref', 'revisionResult', transpile(displayState + '\n' + statusBlock + '\nreturn { nodeStatus, inboundStateMap, inboundStateErrors };'))(value => ({ value }), value => value);
 for (const [reach, publish, failed, expected] of [
   ['offline', 'unpublished', true, '状态未知'],
   ['online', 'effective', true, '状态未知'],

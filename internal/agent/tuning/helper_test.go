@@ -1,7 +1,9 @@
 package tuning
 
 import (
+	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +12,121 @@ import (
 
 	tuningcontract "proxycontrol/pkg/contracts/tuning"
 )
+
+func TestProbeOpensWithoutChangingValuesAndRejectsStaleBoot(t *testing.T) {
+	h := fakeHelper(t)
+	dir := t.TempDir()
+	helper := filepath.Join(dir, installedHelperPath)
+	put(t, helper, "bootstrap")
+	missing := "net.core.default_qdisc"
+	if err := os.Remove(sysPath(h.ProcRoot, missing)); err != nil {
+		t.Fatal(err)
+	}
+	put(t, filepath.Join(h.ProcRoot, "kernel/random/boot_id"), "boot-a")
+	before := Current(h.ProcRoot)
+	report, err := collectProbe(h.ProcRoot, helper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(before, Current(h.ProcRoot)) {
+		t.Fatal("probe wrote sysctls")
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, filepath.Join(dir, "probe.json"), string(raw))
+	keys, err := ReadProbe(dir, h.ProcRoot, dir)
+	if err != nil || len(keys) != 19 {
+		t.Fatal(keys, err)
+	}
+	for _, k := range keys {
+		if k.Key == missing {
+			if k.Present || k.Writable || !strings.Contains(k.ProbeError, "缺少入口") {
+				t.Fatal(k)
+			}
+		} else if !k.Present || !k.Writable || k.ProbeError != "" {
+			t.Fatal(k)
+		}
+	}
+	put(t, filepath.Join(h.ProcRoot, "kernel/random/boot_id"), "boot-b")
+	if _, err = ReadProbe(dir, h.ProcRoot, dir); err == nil {
+		t.Fatal("accepted stale boot")
+	}
+	report.Keys = report.Keys[:18]
+	report.BootID = "boot-b"
+	raw, _ = json.Marshal(report)
+	put(t, filepath.Join(dir, "probe.json"), string(raw))
+	if _, err = ReadProbe(dir, h.ProcRoot, dir); err == nil {
+		t.Fatal("accepted incomplete probe")
+	}
+}
+
+func TestProbeRejectsLegacyUpdaterHelperReplacement(t *testing.T) {
+	h := fakeHelper(t)
+	dir := t.TempDir()
+	put(t, filepath.Join(h.ProcRoot, "kernel/random/boot_id"), "unchanged-boot")
+	helper := filepath.Join(dir, installedHelperPath)
+	put(t, helper, "candidate")
+	report, err := collectProbe(h.ProcRoot, helper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, filepath.Join(dir, "probe.json"), string(raw))
+	if keys, err := ReadProbe(dir, h.ProcRoot, dir); err != nil || len(keys) != 19 {
+		t.Fatal(keys, err)
+	}
+	// A released updater restores an older bootstrap, preserving its timestamps.
+	// It does not know that the new same-boot receipt should be invalidated.
+	old := filepath.Join(dir, "rollback")
+	put(t, old, "old-agent")
+	info, err := os.Stat(helper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(old, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(old, helper); err != nil {
+		t.Fatal(err)
+	}
+	if keys, err := ReadProbe(dir, h.ProcRoot, dir); err == nil || len(keys) != 0 {
+		t.Fatal("stale rights survived rollback of fixed helper")
+	}
+}
+
+func TestOpenRCProbeReadiness(t *testing.T) {
+	h := fakeHelper(t)
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "usr/local/bin/proxy-agent")
+	put(t, helper, "bootstrap")
+	put(t, filepath.Join(h.ProcRoot, "kernel/random/boot_id"), "unchanged-boot")
+	report, err := collectProbe(h.ProcRoot, helper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, filepath.Join(dir, "probe.json"), string(raw))
+	if err := os.MkdirAll(filepath.Join(dir, "run/openrc"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"missing", "pending", "failed", "ready"} {
+		if state != "missing" {
+			put(t, filepath.Join(dir, "run/proxy-agent-tuning/probe-finished"), state+"\n")
+		}
+		keys, err := ReadProbe(dir, h.ProcRoot, dir)
+		if (err == nil) != (state == "ready") || (len(keys) == 19) != (state == "ready") {
+			t.Fatalf("OpenRC %s: keys=%d err=%v", state, len(keys), err)
+		}
+	}
+}
 
 func TestKernelWriteAndReadbackFailuresRollback(t *testing.T) {
 	for _, mismatch := range []bool{false, true} {

@@ -133,11 +133,11 @@ for (const action of ['addNewSubscription', 'saveEditSub', 'updateSubscription']
     await failed.actions[action](failed.saved);
     assert.ok(failed.calls.includes('refresh:saved'), `${action} refreshes the saved source`);
     assert.equal(failed.calls.at(-1), 'reload', `${action} reloads on refresh failure`);
-    assert.deepEqual(failed.toasts, [{
+    assert.deepEqual(failed.toasts, [...(reloadFails ? [{ message: '导入列表读取失败：reload failed', kind: 'error' }] : []), {
       message: '订阅来源返回 HTTP 403；该来源的节点已从订阅中排除；本次导入 0 · 缓存 8 · 可用于订阅 0',
       kind: 'error',
     }], `${action} states the real upstream status`);
-    assert.ok(!failed.toasts[0].message.includes('HTTP 0'), `${action} never reports HTTP 0`);
+    assert.ok(failed.toasts.every(toast => !toast.message.includes('HTTP 0')), `${action} never reports HTTP 0`);
     assert.equal(failed.state.editingSubId.value, 'saved', `${action} preserves editing context`);
     assert.equal(failed.state.submittingSub.value, false);
     assert.equal(failed.state.savingSub.value, false);
@@ -221,7 +221,7 @@ for (const action of ['addNewSubscription', 'saveEditSub', 'updateSubscription']
   const reloadFails = fixture({ reloadFails: true, create: { result: attempt({ sourceId: '' }) } });
   await reloadFails.actions.saveManualNodeModal();
   assert.deepEqual(reloadFails.calls, ['create', 'reload'], 'a reload failure does not save twice');
-  assert.deepEqual(reloadFails.toasts, [{ message: '已更新：导入 1 个节点', kind: 'success' }], 'a saved import stays a success');
+  assert.deepEqual(reloadFails.toasts, [{ message: '导入已保存，列表读取失败：reload failed', kind: 'error' }, { message: '已更新：导入 1 个节点', kind: 'success' }], 'a saved import stays a success');
   assert.equal(reloadFails.state.openImportNodeModal.value, false);
 }
 

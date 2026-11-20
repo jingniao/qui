@@ -1,0 +1,7 @@
+[Unit]
+Description=Watch explicit Ubuntu BBR/fq module requests
+PartOf=proxy-agent.service
+
+[Path]
+PathChanged=/var/lib/proxy-agent/tuning/module-request.json
+Unit=proxy-agent-tuning-modules.service

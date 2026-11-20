@@ -569,7 +569,12 @@ component_files() {
     printf '%s\n' "$root/etc/systemd/system/proxy-agent-host-network.service" \
       "$root/etc/systemd/system/proxy-agent-host-network.path" \
       "$root/etc/systemd/system/proxy-agent-tuning.service" \
-      "$root/etc/systemd/system/proxy-agent-tuning.path"
+      "$root/etc/systemd/system/proxy-agent-tuning.path" \
+      "$root/etc/systemd/system/proxy-agent-tuning-probe.service" \
+      "$root/etc/systemd/system/proxy-agent-tuning-probe-reset.service" \
+      "$root/etc/systemd/system/proxy-agent-tuning-modules.service" \
+      "$root/etc/systemd/system/proxy-agent-tuning-modules.path" \
+      "$registry/agent.tuning-probe-digests"
   else
     printf '%s\n' "$root/etc/init.d/proxy-agent-host-network" \
       "$root/usr/local/lib/proxy-agent/host-network-watch" \
@@ -742,20 +747,34 @@ remove_install_staging() {
 # agent's watcher is restarted so the previous watcher runs instead of the one the
 # failed install started.
 restore_snapshot() {
-  local component=$1 path source temporary
+  local component=$1 mode=$2 path source temporary probe_unit
+  local job_options=()
+  if [[ $mode == boot ]]; then job_options=(--no-block); fi
   [[ -n $snapshot && -d $snapshot ]] || { printf '没有可恢复的快照。\n' >&2; return 1; }
   # Do not leave a new root watcher running when rolling back to a release
   # without tuning. Stop before replacing its binary or unit definitions.
   if [[ $component == agent ]]; then
     if [[ $init_system == systemd && -f $root/etc/systemd/system/proxy-agent-tuning.service ]]; then
-      systemctl stop proxy-agent-tuning.path proxy-agent-tuning.service || return 1
+      # During boot the recovery unit precedes these jobs. Leave retained
+      # units queued, and cancel only jobs for definitions that disappear.
+      for probe_unit in proxy-agent-tuning-modules.path proxy-agent-tuning-probe.service proxy-agent-tuning-probe-reset.service; do
+        path=$root/etc/systemd/system/$probe_unit
+        if [[ -f $path && ( $mode != boot || ! -f $snapshot/files$path ) ]]; then
+          systemctl stop "${job_options[@]}" "$probe_unit" || return 1
+        fi
+      done
+      if [[ $mode != boot || ! -f $snapshot/files$root/etc/systemd/system/proxy-agent-tuning.service ]]; then
+        systemctl stop "${job_options[@]}" proxy-agent-tuning.path proxy-agent-tuning.service || return 1
+      fi
       if [[ ! -f $snapshot/files$root/etc/systemd/system/proxy-agent-tuning.service ]]; then
         systemctl disable proxy-agent-tuning.path proxy-agent-tuning.service || return 1
       fi
     elif [[ $init_system == openrc && -f $root/etc/init.d/proxy-agent-tuning ]]; then
-      if service_is_active proxy-agent-tuning; then service_stop proxy-agent-tuning || return 1; fi
+      if [[ $mode != boot ]] && service_is_active proxy-agent-tuning; then service_stop proxy-agent-tuning || return 1; fi
       if [[ ! -f $snapshot/files$root/etc/init.d/proxy-agent-tuning ]]; then service_disable proxy-agent-tuning || return 1; fi
     fi
+    # Even a restored legacy helper must retire the candidate's same-boot receipt.
+    qui_invalidate_tuning_probe "$root/var/lib/proxy-agent/tuning" || return 1
   fi
   # An update started from the panel's web UI runs inside proxy-panel-update.service, so
   # the restore must not stop the unit it is running in: only the path unit is disabled,
@@ -794,13 +813,17 @@ restore_snapshot() {
     sync -f -- "${path%/*}"
   done < <(component_files "$component")
   service_reload_definitions || return 1
-  if [[ $init_system == openrc && $component == agent ]] && service_is_active proxy-agent-host-network; then
+  if [[ $init_system == openrc && $component == agent && $mode != boot ]] && service_is_active proxy-agent-host-network; then
     service_restart proxy-agent-host-network || return 1
   fi
   if [[ $component == agent ]]; then
     if [[ $init_system == systemd && -f $root/etc/systemd/system/proxy-agent-tuning.path ]]; then
-      systemctl start proxy-agent-tuning.path || return 1
-    elif [[ $init_system == openrc && -f $root/etc/init.d/proxy-agent-tuning ]]; then
+      if [[ -f $root/etc/systemd/system/proxy-agent-tuning-probe.service ]]; then
+        systemctl start "${job_options[@]}" proxy-agent-tuning-probe.service || printf '恢复后的调优权限探测失败。\n' >&2
+      fi
+      systemctl start "${job_options[@]}" proxy-agent-tuning.path || return 1
+    elif [[ $init_system == openrc && $mode != boot && -f $root/etc/init.d/proxy-agent-tuning ]]; then
+      qui_skip_tuning_replay "$root/run/proxy-agent-tuning" || return 1
       service_start proxy-agent-tuning || return 1
     fi
   fi
@@ -879,7 +902,7 @@ recover_snapshot() {
     # usually leaves behind. A refusal is reported, not fatal: the files go back anyway.
     service_stop "$name" || printf '[%s] 停止 %s 失败。\n' "$name" "$name"
   fi
-  if ! restore_snapshot "$component"; then
+  if ! restore_snapshot "$component" "$mode"; then
     printf '[%s] 无法恢复更新前的文件：快照保留在 %s。\n' "$name" "$directory_arg"
     return 1
   fi

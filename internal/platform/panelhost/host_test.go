@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/platform/config"
+	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/panelstore"
 	"proxycontrol/internal/platform/restoretasks"
 	"proxycontrol/internal/testutil/dbtest"
@@ -22,6 +24,41 @@ import (
 	"testing/fstest"
 	"time"
 )
+
+func TestStartupFailureClosesReadPool(t *testing.T) {
+	root := t.TempDir()
+	c := config.DefaultPanel()
+	c.Database = filepath.Join(root, "panel.db")
+	c.NodeIdentityDirectory = filepath.Join(root, "identity")
+	c.HTTPAddress = "127.0.0.1:0"
+	c.GRPCAddress = "127.0.0.1:0"
+	owner, err := panelstore.Try(c.Database, c.NodeIdentityDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	c.Database, c.NodeIdentityDirectory = owner.Database, owner.IdentityDirectory
+	ctx := context.Background()
+	files := fstest.MapFS{"index.html": {Data: []byte("UI")}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := Run(ctx, owner, c, filepath.Join(root, "missing.yaml"), files, logger); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected missing configuration path, got %v", err)
+	}
+
+	database, err := db.Open(ctx, c.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.ExecContext(ctx, "PRAGMA busy_timeout=0"); err != nil {
+		t.Fatal(err)
+	}
+	// Changing the journal mode requires all other SQLite connections to be closed.
+	var mode string
+	if err := database.QueryRowContext(ctx, "PRAGMA journal_mode=DELETE").Scan(&mode); err != nil || mode != "delete" {
+		t.Fatalf("failed startup left the database in use: mode %q: %v", mode, err)
+	}
+}
 
 func TestManagedHTTPRestoreRebuildsServicePreservesUsageAndRevokesSession(t *testing.T) {
 	t.Parallel()

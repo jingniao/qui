@@ -15,14 +15,11 @@ const ReadPoolConnections = 4
 
 // OpenReadPool opens a second, read-only pool on an existing WAL database. It
 // never migrates, writes or checkpoints: the writer pool created by Open stays
-// the only writer. Queries through this pool may miss a write that committed a
-// moment ago, so callers must use it only for reads that tolerate a stale
-// snapshot, never on a read-then-write path.
+// the only writer. Reads see the committed data as of the start of their
+// snapshot. Callers must use the writer for read-then-write paths.
 //
-// The pool holds no idle connections: a read opens its own connection and
-// releases it, so the panel keeps no file handle open between queries. The
-// point of the pool is that a read never waits for the single writer
-// connection, not connection reuse, and the panel's read volume is small.
+// The pool keeps up to two idle connections to reuse their SQLite setup across
+// reads. The owner must close it before replacing the database files.
 func OpenReadPool(ctx context.Context, path string, connections int) (*sql.DB, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -46,7 +43,7 @@ func OpenReadPool(ctx context.Context, path string, connections int) (*sql.DB, e
 		connections = 1
 	}
 	database.SetMaxOpenConns(connections)
-	database.SetMaxIdleConns(0)
+	database.SetMaxIdleConns(min(2, connections))
 	if err := database.PingContext(ctx); err != nil {
 		database.Close()
 		return nil, err

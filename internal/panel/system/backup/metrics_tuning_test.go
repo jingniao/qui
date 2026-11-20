@@ -61,7 +61,7 @@ func TestK2bArchiveRejectsInvalidTuningReceipt(t *testing.T) {
 	t.Parallel()
 	source, _, _ := sourceFixture(t)
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := source.Database.Exec(`INSERT INTO node_tuning SELECT id,'{}','request','failed','{"requestId":"request","status":"failed","keys":[{"key":"unknown","applied":true}]}',?,? FROM nodes`, stamp, stamp)
+	_, err := source.Database.Exec(`INSERT INTO node_tuning(node_id,desired_json,request_id,status,result_json,requested_at,updated_at) SELECT id,'{}','request','failed','{"requestId":"request","status":"failed","keys":[{"key":"unknown","applied":true}]}',?,? FROM nodes`, stamp, stamp)
 	if err != nil {
 		t.Fatal(err)
 	}

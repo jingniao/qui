@@ -167,7 +167,7 @@ func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	n, err := h.Repository.Get(r.Context(), r.PathValue("id"))
+	n, err := h.Repository.GetForCoreSelection(r.Context(), r.PathValue("id"))
 	if err != nil {
 		h.fail(w, err)
 		return

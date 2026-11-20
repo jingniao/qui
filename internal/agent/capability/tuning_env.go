@@ -28,6 +28,21 @@ func detectVirtualization(root string) string {
 			return "openvz"
 		}
 	}
+	if raw, err := os.ReadFile(filepath.Join(root, "run/systemd/container")); err == nil {
+		switch strings.TrimSpace(string(raw)) {
+		case "lxc", "lxc-libvirt":
+			return "lxc"
+		case "docker", "podman", "systemd-nspawn":
+			return strings.TrimSpace(string(raw))
+		}
+	}
+	// A restricted UID mapping identifies a user namespace even when host DMI says KVM.
+	if raw, err := os.ReadFile(filepath.Join(root, "proc/self/uid_map")); err == nil {
+		fields := strings.Fields(string(raw))
+		if len(fields) >= 3 && (len(fields) != 3 || fields[0] != "0" || fields[1] != "0" || fields[2] != "4294967295") {
+			return "userns"
+		}
+	}
 	for _, name := range []string{"sys_vendor", "product_name"} {
 		if raw, err := os.ReadFile(filepath.Join(root, "sys/class/dmi/id", name)); err == nil {
 			s := strings.ToUpper(string(raw))
@@ -57,58 +72,6 @@ func detectVirtualization(root string) string {
 		}
 	}
 	return "unknown"
-}
-
-type procMount struct {
-	path     string
-	readOnly bool
-}
-
-func procMounts(root string) []procMount {
-	raw, _ := os.ReadFile(filepath.Join(root, "proc/self/mountinfo"))
-	var mounts []procMount
-	for _, line := range strings.Split(string(raw), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 6 || fields[4] != "/proc" && !strings.HasPrefix(fields[4], "/proc/") {
-			continue
-		}
-		ro := slices.Contains(strings.Split(fields[5], ","), "ro")
-		if idx := slices.Index(fields, "-"); idx >= 0 && idx+3 < len(fields) {
-			ro = ro || slices.Contains(strings.Split(fields[idx+3], ","), "ro")
-		}
-		mounts = append(mounts, procMount{path: fields[4], readOnly: ro})
-	}
-	return mounts
-}
-
-func procPathReadOnly(mounts []procMount, path string) bool {
-	// mountinfo lists mounts in mount order, so a later mount stacked on the
-	// same point (>=) is the one that is visible.
-	longest, ro := 0, false
-	for _, mount := range mounts {
-		if len(mount.path) >= longest && (path == mount.path || strings.HasPrefix(path, mount.path+"/")) {
-			longest, ro = len(mount.path), mount.readOnly
-		}
-	}
-	return ro
-}
-
-func tuningKeyStates(root string) []*pb.TuningKeyState {
-	mounts := procMounts(root)
-	keys := tuningcontract.Keys()
-	out := make([]*pb.TuningKeyState, 0, len(keys))
-	for _, k := range keys {
-		// mountinfo uses namespace paths, independent of the fixture root.
-		p := "/proc/sys/" + strings.ReplaceAll(k, ".", "/")
-		info, err := os.Stat(filepath.Join(root, p))
-		present := err == nil && !info.IsDir()
-		out = append(out, &pb.TuningKeyState{
-			Key:      k,
-			Present:  present,
-			Writable: present && !procPathReadOnly(mounts, p),
-		})
-	}
-	return out
 }
 
 func algorithms(root, kernel string) (ccAvail, ccLoad, qAvail, qLoad []string) {

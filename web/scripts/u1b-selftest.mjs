@@ -175,6 +175,7 @@ for (const index of [0, 2, 3]) {
 const draftSaver = await load(`
   export const scheme = ${JSON.stringify(scheme)};
   const currentScheme = { value: scheme };
+  const workspaceLocked = { value: false };
   export const saved = [];
   const scheduleSave = value => saved.push(structuredClone(value));
   ${read('modules/proxy/pages/RelayCanvasPage.vue').split('function saveDraft(')[1].split('// Canvas edits arrive')[0].replace(/^/, 'export function saveDraft(')}

@@ -117,14 +117,24 @@ function plan(selection: PublishSelection): PublishPlan {
   return { ok: !conflicts.length, servers: [...map.values()].sort((a, b) => a.order - b.order), conflicts, warnings: ['演示发布不连接真实 Agent。'] };
 }
 function shareLink(rule: TunnelRule) { return rule.target.mode === 'linked' ? `${rule.target.protocol}://demo@${endpoint(node(rule.entryNodeId).publicIp, rule.listenPort)}#${encodeURIComponent(rule.name)}` : null; }
+function nodeRelayRules(nodeId: string) {
+  return rules.filter(rule => rule.target.mode === 'linked' ? rule.target.nodeId === nodeId : rule.target.mode === 'import' && rule.entryNodeId === nodeId);
+}
 function dispatch(path: string, method: string, body: unknown): unknown {
   const url = new URL(path, 'https://mock.invalid'), parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   if (parts[0] === 'nodes') {
+    if (parts[1] === 'relay-rules' && parts.length === 2 && method === 'GET') {
+      const ids = (url.searchParams.get('nodeIds') || '').split(',');
+      if (new Set(ids).size !== ids.length || ids.some(id => !id || id.length > 128)) fail('invalid_request', 'Invalid or duplicate node ID', {}, 400);
+      return { items: ids.map(nodeId => nodes.some(item => item.id === nodeId)
+        ? { nodeId, rules: nodeRelayRules(nodeId) }
+        : { nodeId, rules: [], error: { code: 'not_found', message: '对象不存在' } }) };
+    }
     const nodeId = parts[1]!; node(nodeId);
     if (parts[2] === 'ports' && parts[3] === 'check') return check(nodeId, Number(url.searchParams.get('port')));
     if (parts[2] === 'ports' && parts[3] === 'allocate') return allocate(nodeId, (body as { count?: number }).count);
     if (parts[2] === 'relays') {
-      if (method === 'GET') return { items: rules.filter(r => r.target.mode === 'linked' && r.target.nodeId === nodeId).map(rule => ({ rule, shareLink: shareLink(rule) })) };
+      if (method === 'GET') return { items: nodeRelayRules(nodeId).map(rule => ({ rule, shareLink: shareLink(rule) })) };
       const input = body as NodeRelayInput, inbound = inbounds.find(i => i.id === input.inboundId && i.nodeId === nodeId) || fail('not_found', '该节点无此入站', {}, 404);
       const tunnel = tunnels.find(t => t.id === input.tunnelId) || fail('not_found', '隧道不存在', {}, 404);
       const rule = saveRule({ name: input.name || `${node(nodeId).name} 中转`, entryNodeId: tunnel.hops[0]!.nodeId, portMode: input.portMode, listenPort: input.listenPort, network: 'both', tunnelId: tunnel.id, target: { mode: 'linked', inboundId: inbound.id }, subscriptionVisible: input.subscriptionVisible, enabled: true });

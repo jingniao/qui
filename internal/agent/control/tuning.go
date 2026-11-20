@@ -2,7 +2,9 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/internal/agent/tuning"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	tuningcontract "proxycontrol/pkg/contracts/tuning"
 )
 
 func reportCapabilities(s *capability.Sampler, c *capabilityState, hostDirectory string) *pb.Capabilities {
@@ -38,9 +41,9 @@ func hostSourceExtraExemptSupported(directory string, installed bool) bool {
 var tuningSlot = make(chan struct{}, 1)
 
 func applyTuning(ctx context.Context, c *pb.TuningCommand) *pb.TuningResult {
-	return runTuning(ctx, c, tuning.Directory, "/proc/sys", tuning.Supported())
+	return runTuning(ctx, c, tuning.Directory, "/proc/sys", "/", tuning.Supported())
 }
-func runTuning(ctx context.Context, c *pb.TuningCommand, directory, proc string, supported bool) *pb.TuningResult {
+func runTuning(ctx context.Context, c *pb.TuningCommand, directory, proc, hostRoot string, supported bool) *pb.TuningResult {
 	result := &pb.TuningResult{RequestId: c.RequestId, Status: "failed"}
 	fail := func(err error) *pb.TuningResult {
 		result.Keys = []*pb.TuningKeyResult{{Error: err.Error()}}
@@ -53,14 +56,41 @@ func runTuning(ctx context.Context, c *pb.TuningCommand, directory, proc string,
 		return fail(err)
 	}
 	desired := tuning.Desired{RequestID: c.RequestId, Settings: c.Settings, Clear: c.Clear}
-	if err := desired.Validate(proc); err != nil {
-		return fail(err)
+	if len(c.Settings) > 0 {
+		keys, err := tuning.ReadProbe(directory, proc, hostRoot)
+		if err != nil {
+			return fail(err)
+		}
+		if err := tuningcontract.CheckProbe(c.Settings, "ready", keys); err != nil {
+			return fail(err)
+		}
 	}
 	select {
 	case tuningSlot <- struct{}{}:
 		defer func() { <-tuningSlot }()
 	default:
 		return fail(fmt.Errorf("tuning request in progress"))
+	}
+	if c.InstallMissingModules || tuningcontract.HasModuleTarget(c.Settings) {
+		wait, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		packages, err := tuning.PrepareModules(wait, desired, directory, proc, hostRoot, c.InstallMissingModules)
+		cancel()
+		result.InstalledModulePackages = packages
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if c.InstallMissingModules {
+		keys, err := tuning.ReadProbe(directory, proc, hostRoot)
+		if err != nil {
+			return fail(err)
+		}
+		if err = tuningcontract.CheckProbe(c.Settings, "ready", keys); err != nil {
+			return fail(err)
+		}
+	}
+	if err := desired.Validate(proc); err != nil {
+		return fail(err)
 	}
 	if err := tuning.WriteDesired(directory, desired); err != nil {
 		return fail(err)
@@ -70,12 +100,17 @@ func runTuning(ctx context.Context, c *pb.TuningCommand, directory, proc string,
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if status, err := tuning.ReadStatus(directory); err == nil && status.RequestId == c.RequestId {
+		status, readErr := tuning.ReadStatus(directory)
+		if readErr == nil && status.RequestId == c.RequestId {
+			status.InstalledModulePackages = result.InstalledModulePackages
 			return status
 		}
 		select {
 		case <-wait.Done():
-			return fail(fmt.Errorf("tuning status unconfirmed: %w", wait.Err()))
+			if errors.Is(readErr, os.ErrNotExist) {
+				readErr = nil
+			}
+			return fail(fmt.Errorf("tuning status unconfirmed: %w", errors.Join(wait.Err(), readErr)))
 		case <-ticker.C:
 		}
 	}

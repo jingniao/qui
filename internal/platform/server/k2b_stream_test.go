@@ -79,7 +79,12 @@ func TestK2bTuningFixedOperationOverAuthenticatedStream(t *testing.T) {
 	send(&pb.Capabilities{TuningSupported: true, Host: &pb.HostInfo{CpuModel: "fixture"}})
 	send(&pb.Heartbeat{})
 	path := "/api/v1/nodes/" + n.ID + "/tuning"
-	body := map[string]any{"settings": map[string]string{"net.core.somaxconn": "128"}, "clear": false, "confirmNodeId": n.ID}
+	if w := owner.call("PUT", path, map[string]any{"settings": map[string]string{"net.core.default_qdisc": "fq"}, "installMissingModules": true, "confirmNodeId": n.ID}); w.Code != 409 {
+		t.Fatal("old agent must explicitly reject installing modules", w.Code, w.Body.String())
+	}
+	host := &pb.HostInfo{TuningModuleInstallSupported: true, TuningProbeStatus: "ready", TuningKeys: []*pb.TuningKeyState{{Key: "net.core.default_qdisc", Present: true, Writable: true}, {Key: "net.core.somaxconn", Present: true, Writable: true}}}
+	send(&pb.Capabilities{TuningSupported: true, Host: host})
+	body := map[string]any{"settings": map[string]string{"net.core.default_qdisc": "fq"}, "installMissingModules": true, "confirmNodeId": n.ID}
 	if w := owner.call("PUT", path, body); w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -92,19 +97,23 @@ func TestK2bTuningFixedOperationOverAuthenticatedStream(t *testing.T) {
 		t.Fatal(command, e)
 	}
 	c := command.GetTuningCommand()
+	if !c.InstallMissingModules || c.Settings["net.core.default_qdisc"] != "fq" {
+		t.Fatal("lost explicit module request", c)
+	}
 	// The panel must continue accepting heartbeats while the helper is working.
 	send(&pb.Heartbeat{})
-	send(&pb.TuningResult{RequestId: c.RequestId, Status: "applied", Keys: []*pb.TuningKeyResult{{Key: "net.core.somaxconn", Value: "128", Applied: true}}})
+	send(&pb.TuningResult{RequestId: c.RequestId, Status: "applied", Keys: []*pb.TuningKeyResult{{Key: "net.core.default_qdisc", Value: "fq", Applied: true}}, InstalledModulePackages: []string{"linux-modules-6.8.0-100-generic"}})
 	var status string
 	if err = app.Database.QueryRow("SELECT status FROM node_tuning WHERE node_id=?", n.ID).Scan(&status); err != nil || status != "applied" {
 		t.Fatal(status, err)
 	}
+	body = map[string]any{"settings": map[string]string{"net.core.somaxconn": "128"}, "confirmNodeId": n.ID}
 	if w := owner.call("PUT", path, body); w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	send(&pb.Heartbeat{})
 	command, e = stream.Recv()
-	if e != nil || command.GetTuningCommand() == nil || command.GetTuningCommand().RequestId == c.RequestId {
+	if e != nil || command.GetTuningCommand() == nil || command.GetTuningCommand().RequestId == c.RequestId || command.GetTuningCommand().InstallMissingModules {
 		t.Fatal(command, e)
 	}
 	stream.CloseSend()

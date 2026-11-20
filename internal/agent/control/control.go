@@ -1298,6 +1298,9 @@ heartbeatLoop:
 				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TuningResult{TuningResult: result}}); err != nil {
 					return err
 				}
+				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_Capabilities{Capabilities: reportCapabilities(sampler, capabilities, manager.HostNetworkDirectory)}}); err != nil {
+					return err
+				}
 				continue heartbeatLoop
 			case result := <-updateReplies:
 				timer.Stop()

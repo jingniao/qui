@@ -33,12 +33,12 @@ async function request<T>(path: `/api/v1/portal/${string}`, method = 'GET', body
       portalState.session = null;
       window.location.assign('/');
     }
-    throw new Error(response.status === 401 && path.endsWith('/auth/password') ? '当前密码错误。' :
+    throw Object.assign(new Error(response.status === 401 && path.endsWith('/auth/password') ? '当前密码错误。' :
       response.status === 401 && path.endsWith('/auth/login') ? '用户名或密码错误。' :
       response.status === 401 ? '登录已失效，请重新登录。' :
       response.status === 429 ? '请求过多，请 15 分钟后再试。' :
       data.error?.code === 'invalid_request' ? '输入无效，请检查密码是否符合要求（12 至 128 个字符）。' :
-      data.error?.code === 'subscription_unavailable' ? '账号已禁用、到期或额度已用完，暂时无法重置订阅。' : '请求失败，请稍后重试。');
+      data.error?.code === 'subscription_unavailable' ? '账号已禁用、到期或额度已用完，暂时无法重置订阅。' : '请求失败，请稍后重试。'), { status: response.status });
   }
   return response.status === 204 ? undefined as T : response.json();
 }

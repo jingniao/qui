@@ -53,18 +53,18 @@
     </div>
     <p v-if="isOwner && !canReorder && filtered.length > 1" class="text-xs text-ios-tertiary -mt-3">清除筛选并回到第一页后可调整服务器顺序。</p>
 
-    <p v-if="error && nodes.length" role="status" class="text-sm text-ios-red">{{ error }}</p>
-    <ErrorState v-if="error && !nodes.length" :message="error" @retry="load" />
-    <LoadingSkeleton v-else-if="loading && !nodes.length" />
+    <p v-if="error && inventoryScope === deleted" role="status" class="text-sm text-ios-red">{{ error }}</p>
+    <ErrorState v-if="error && inventoryScope !== deleted" :message="error" @retry="load" />
+    <LoadingSkeleton v-else-if="loading && inventoryScope !== deleted" />
     <template v-else>
       <p v-if="warnings.length || inventoryWarnings.length" role="status" class="text-sm text-ios-orange">{{ [...warnings, ...inventoryWarnings].join('；') }}</p>
       <p v-if="filtered.length && statisticsNotice" role="status" class="text-xs text-ios-secondary">{{ statisticsNotice }}</p>
       <p v-if="filtered.length && displayMode === 'grid' && statistics?.machineError" role="status" class="text-xs text-ios-orange">整机流量读取失败（{{ statistics.machineError }}）</p>
       <p v-if="statisticsHistoryError" role="status" class="text-xs text-ios-orange">本月流量无法精确计算（{{ statisticsHistoryError }}）</p>
-      <EmptyState v-if="!filtered.length" title="没有匹配的服务器" description="请调整筛选条件，或新增服务器并完成登记。" />
+      <p v-if="awaitingFilterMetadata" role="status" class="text-sm text-ios-secondary">{{ inventoryWarnings.length ? '部分服务器的地区或备注尚未读取，筛选结果待确认。' : '正在读取用于筛选的地区和备注…' }}</p>
+      <EmptyState v-else-if="!filtered.length" title="没有匹配的服务器" description="请调整筛选条件，或新增服务器并完成登记。" />
       <ServerCardGrid v-else-if="displayMode === 'grid'" :nodes="filtered" :clock-now="now" :machine-traffic="machineTraffic" :reorderable="canReorder" @install="install" @edit="quickEdit?.open($event)" @delete="deletion?.prompt($event)" @reorder="reorder" />
       <ServerInventory v-else :rows="pageRows" :columns="columns" :owner="isOwner" :selected="selected" @toggle="toggle" @install="enrollment?.reissue($event)" @delete="deletion?.prompt($event)" />
-      <p v-if="displayMode === 'list' && filtered.length && hiddenColumns.length" class="text-xs text-ios-tertiary">当前筛选的服务器均无可用数据，已隐藏：{{ hiddenColumns.join('、') }}。</p>
       <Pagination v-if="displayMode === 'list' && filtered.length > 20" :total="filtered.length" :current-page="page" :page-size="20" @update:page="changePage" />
     </template>
     <ServerBulkActions v-if="isOwner && displayMode === 'list'" :selected="selectedNodes" :groups="groups" @clear="selected = []" @changed="load" />
@@ -82,12 +82,12 @@ import ServerDisplayMode from '../components/ServerDisplayMode.vue';
 import { showToast } from '../../../app/api';
 import { isOwner } from '../../../app/auth';
 import { nodeStatusEventChangesInventory, throttleTrailing } from '../../../app/nodeStatusEvents';
-import { APIError, request } from '../../../app/apiClient';
+import { APIError, invalidatesRead, request } from '../../../app/apiClient';
 import { useStatistics } from '../../../app/useStatistics';
 import { nodeAPI, type NodeView } from '../api';
 import { groupAPI, type NodeGroup } from '../groupsApi';
 import { choices } from '../../proxy/api';
-import { getNodeMeta, loadNodeMetadata } from '../nodeMeta';
+import { getNodeMeta, hasNodeMeta, loadNodeMetadata } from '../nodeMeta';
 import { serverRow } from '../components/serverListModel';
 import { applyServerOrder, matchesTag, reorderServer, tagOptions, UNTAGGED } from '../serverOrder';
 import { applyRuntimeSnapshot, RuntimeFeed, type RuntimeSnapshot, type RuntimeSnapshotList } from '../runtimeSnapshots';
@@ -146,6 +146,7 @@ const savedOrder = ref<{ ids: string[]; revision: number }>({ ids: [], revision:
 const orderIds = ref<string[]>([]);
 const ordered = computed(() => applyServerOrder(nodes.value, orderIds.value));
 const tagChoices = computed(() => tagOptions(nodes.value));
+const awaitingFilterMetadata = computed(() => Boolean(scalar(route.query.keyword).trim()) && nodes.value.some(node => !hasNodeMeta(node.id)));
 const filtered = computed(() => ordered.value.filter(node => {
   const q = scalar(route.query.keyword).trim().toLowerCase();
   const meta = getNodeMeta(node.id);
@@ -207,14 +208,13 @@ const rows = computed(() => filtered.value.map(node => {
 const statisticsHistoryError = computed(() => displayMode.value === 'list'
   ? filtered.value.map(node => trafficByNode.value.get(node.id)?.historyError).find(Boolean)
   : undefined);
-const columns = computed(() => (rows.value[0]?.fields || []).filter(field => rows.value.some(row => row.fields.some(item => item.key === field.key && item.value !== '—'))));
-const hiddenColumns = computed(() => (rows.value[0]?.fields || []).filter(field => !columns.value.some(item => item.key === field.key)).map(field => field.label));
+const columns = computed(() => rows.value[0]?.fields || []);
 const pageRows = computed(() => rows.value.slice((page.value - 1) * 20, page.value * 20));
 const selectedNodes = computed(() => nodes.value.filter(node => selected.value.includes(node.id) && !node.deletedAt));
 function toggle(id: string) { selected.value = selected.value.includes(id) ? selected.value.filter(value => value !== id) : [...selected.value, id]; }
 const runtime = new RuntimeFeed();
 let inventory: NodeView[] = [];
-let inventoryScope: boolean | undefined;
+const inventoryScope = ref<boolean>();
 let lastMembershipCheck = '';
 let generation = 0, inventoryRead = 0, visibilityGeneration = 0, runtimeRead = 0;
 let refreshingInventory = false, calibrating = false;
@@ -234,7 +234,7 @@ function updateVisibleInventory() {
   });
   selected.value = selected.value.filter(id => nodes.value.some(node => node.id === id && !node.deletedAt));
   if (page.value > Math.max(1, Math.ceil(filtered.value.length / 20))) changePage(1);
-  if (inventoryScope !== deleted.value || !runtime.generation || runtime.matchesInventory(inventory.map(node => node.id), deleted.value)) return;
+  if (inventoryScope.value !== deleted.value || !runtime.generation || runtime.matchesInventory(inventory.map(node => node.id), deleted.value)) return;
   const revision = `${runtime.generation}:${runtime.inventoryRevision}:${deleted.value}`;
   if (lastMembershipCheck !== revision) {
     lastMembershipCheck = revision;
@@ -251,23 +251,27 @@ async function load() {
   loading.value = true; error.value = '';
   try {
     const groupsRead = Promise.allSettled([isOwner.value ? choices(groupAPI.list) : Promise.resolve([] as NodeGroup[])]);
-    void nodeAPI.serverOrder().then(order => {
-      if (current !== generation || orderDirty || orderSavePromise || order.revision < savedOrder.value.revision) return;
-      savedOrder.value = { ids: order.ids, revision: order.revision }; orderIds.value = order.ids;
-    }).catch(e => {
-      if (current === generation) warnings.value = [`服务器顺序读取失败：${(e as Error).message}`];
-    });
-    const servers = await choices((index, size) => nodeAPI.list(index, '', deleted.value, size));
+    const [serverResult, orderResult] = await Promise.allSettled([
+      choices((index, size) => nodeAPI.list(index, '', deleted.value, size)),
+      nodeAPI.serverOrder()
+    ]);
+    if (serverResult.status === 'rejected') throw serverResult.reason;
+    const servers = serverResult.value;
     if (current !== generation) return;
-    // Show the inventory immediately; metadata and statistics load independently.
+    const notices: string[] = [];
+    if (orderResult.status === 'rejected') notices.push(`服务器顺序读取失败：${(orderResult.reason as Error).message}`);
+    else if (!orderDirty && !orderSavePromise && orderResult.value.revision >= savedOrder.value.revision) {
+      savedOrder.value = orderResult.value;
+      orderIds.value = orderResult.value.ids;
+    }
+    warnings.value = [...notices];
     if (read === inventoryRead && visibleGeneration === visibilityGeneration) {
       inventory = servers;
-      inventoryScope = deleted.value;
+      inventoryScope.value = deleted.value;
       updateVisibleInventory();
     } else if (read === inventoryRead) {
       refreshStaticInventory();
     }
-    const notices: string[] = [];
     const [metaResult] = await Promise.allSettled([loadNodeMetadata(isOwner.value, deleted.value)]);
     if (read === inventoryRead && visibleGeneration === visibilityGeneration) {
       inventoryWarnings.value = metaResult.status === 'rejected' ? [`元数据读取失败：${(metaResult.reason as Error).message}`] : [];
@@ -282,6 +286,7 @@ async function load() {
   } catch (e) {
     if (current === generation) {
       if (read === inventoryRead) inventoryInvalidation++;
+      if (invalidatesRead(e)) { inventory = []; nodes.value = []; inventoryScope.value = undefined; selected.value = []; }
       error.value = (e as Error).message;
     }
   }
@@ -303,6 +308,7 @@ function recheckStaticInventory() {
 
 async function silentRefresh() {
   if (!ours() || document.visibilityState !== 'visible' || refreshingInventory || inventoryInvalidation === inventoryConfirmed) return;
+  if (inventoryScope.value !== deleted.value) { if (!loading.value) void load(); return; }
   refreshingInventory = true;
   const read = ++inventoryRead;
   const invalidation = inventoryInvalidation;
@@ -316,9 +322,12 @@ async function silentRefresh() {
     const notices: string[] = [];
     if (servers.status === 'fulfilled') {
       inventory = servers.value;
-      inventoryScope = deleted.value;
+      inventoryScope.value = deleted.value;
       updateVisibleInventory();
-    } else notices.push(`服务器清单读取失败：${(servers.reason as Error).message}`);
+    } else {
+      if (invalidatesRead(servers.reason)) { inventory = []; nodes.value = []; inventoryScope.value = undefined; selected.value = []; }
+      notices.push(`服务器清单读取失败：${(servers.reason as Error).message}`);
+    }
     if (metadata.status === 'rejected') notices.push(`元数据读取失败：${(metadata.reason as Error).message}`);
     inventoryWarnings.value = notices;
     if (!notices.length) confirmInventory(invalidation);
@@ -421,7 +430,7 @@ function onVisibilityChange() {
 watch(() => route.query, () => {
   const wasDeleted = deleted.value;
   readQuery();
-  if (ours() && wasDeleted !== deleted.value) void load();
+  if (ours() && wasDeleted !== deleted.value) { nodes.value = []; inventory = []; void load(); }
 });
 let timer: ReturnType<typeof setInterval> | undefined;
 let fallbackTimer: ReturnType<typeof setInterval> | undefined;

@@ -135,7 +135,7 @@ ON CONFLICT(node_id) DO UPDATE SET region=excluded.region,remark=excluded.remark
 	if _, err := tx.ExecContext(ctx, "DELETE FROM node_tuning"); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO node_tuning(node_id,desired_json,request_id,status,result_json,requested_at,updated_at) SELECT node_id,desired_json,request_id,CASE WHEN status='pending' THEN 'unconfirmed' ELSE status END,result_json,requested_at,CASE WHEN status='pending' THEN ? ELSE updated_at END FROM restore_source.node_tuning", stamp); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO node_tuning(node_id,desired_json,request_id,status,result_json,requested_at,updated_at,install_missing_modules) SELECT node_id,desired_json,request_id,CASE WHEN status='pending' THEN 'unconfirmed' ELSE status END,result_json,requested_at,CASE WHEN status='pending' THEN ? ELSE updated_at END,install_missing_modules FROM restore_source.node_tuning", stamp); err != nil {
 		return err
 	}
 	return nil

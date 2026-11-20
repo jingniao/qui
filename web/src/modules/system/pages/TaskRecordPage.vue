@@ -118,19 +118,19 @@
       <ErrorState v-if="error" :message="error" @retry="loadAll" />
 
       <!-- 加载中 -->
-      <div v-else-if="loading && !allTasks.length" class="py-12">
+      <div v-if="!display.ready && !error" class="py-12">
         <LoadingSkeleton />
       </div>
 
       <!-- 空记录 -->
       <EmptyState
-        v-else-if="!filteredTasks.length"
+        v-else-if="display.ready && !filteredTasks.length"
         title="暂无任务记录"
         :description="allTasks.length ? '没有匹配当前筛选条件的任务记录。' : '当前尚无 Agent 探针或代理核心的升级执行历史。'"
       />
 
       <!-- 统一任务列表 -->
-      <DataTable v-else min-width="min-w-[860px]">
+      <DataTable v-else-if="display.ready" min-width="min-w-[860px]">
         <template #header>
           <th class="w-32">任务类型</th>
           <th class="w-48">目标服务器</th>
@@ -283,6 +283,7 @@
 </template>
 
 <script setup lang="ts">
+import { retainedQuery } from '../../../app/retainedQuery';
 import { request, type Page } from '../../../app/apiClient';
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -418,10 +419,13 @@ function statusDotClass(tone: 'green' | 'yellow' | 'red' | 'gray' | 'blue'): str
   return map[tone] || map.gray;
 }
 
+const display = retainedQuery(() => { records.value = []; total.value = 0; });
+function beginQuery() { display.begin(currentPage.value, filterType.value, filterStatus.value, searchKeyword.value); }
 let refreshing = false, disposed = false;
 let refreshAgain = false;
 async function loadAll(silent = false) {
   if (disposed) return;
+  beginQuery();
   if (refreshing) { refreshAgain = true; return; }
   refreshing = true;
   const cur = ++generation;
@@ -435,9 +439,10 @@ async function loadAll(silent = false) {
     total.value = result.total;
     const lastPage = Math.max(1, Math.ceil(result.total / pageSize));
     if (currentPage.value > lastPage) { currentPage.value = lastPage; return; }
-    records.value = result.items;
+    display.ready = true; records.value = result.items;
   } catch (e) {
     if (cur === generation) {
+      display.reject(e);
       error.value = (e as Error).message || '读取任务记录失败';
     }
   } finally {
@@ -462,7 +467,7 @@ const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1);
 const paginatedTasks = allTasks;
 let filterTimer: ReturnType<typeof setTimeout> | undefined;
 watch([filterType, filterStatus, searchKeyword], () => {
-  generation++;
+  generation++; beginQuery(); error.value = '';
   clearTimeout(filterTimer);
   filterTimer = setTimeout(() => { if (currentPage.value !== 1) currentPage.value = 1; else void loadAll(); }, 250);
 });

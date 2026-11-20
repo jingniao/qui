@@ -734,6 +734,8 @@ Xray 总量=账户计数＋已渲染 forward 的原生入站计数。渲染生�
 
 ## 22.0 服务器调优与推荐应用流程
 
+Owner 可为单次 BBR 或 fq 请求勾选“按需补装”。仅已报告 `host.tuning_module_install_supported` 并确认目标键可写的 Ubuntu/systemd 节点接受 `installMissingModules: true`。0156 将此意图按请求保存在 `node_tuning.install_missing_modules`，旧数据和自动推荐默认为 false。Agent 对缺少的目标单独等待模块包回执，随后按原流程应用并读回参数。面板同时显示执行过的包和参数结果。容器和其他发行版由宿主处理，新内核由 Owner 决定。支持范围和故障处理见[运维手册](docs/operations.md#18-主机观测续证与调优-helper)。
+
 调优白名单固定为 19 个 sysctl 键（`pkg/contracts/tuning`），禁止任意 shell、modprobe 或外部命令。root helper 直接操作 procfs 并原子写入 `/etc/sysctl.d/99-proxy-tuning.conf`，通过 `/etc/sysctl.d/.proxy-tuning-snapshot.json` 保存首次应用前的基线原值，失败自动回滚，清空调优恢复基线。当内核模块存在时，helper 允许将未直接加载的可用算法（如 `bbr`、`cake`）直接写入内核 procfs，并在回执的 `initial` 字典中返回完整 19 键初始值快照。
 
 面板基于纯规则引擎（`internal/panel/node/tuningadvice`，`RulesVersion = "2026.11-1"`）为节点提供调优建议：综合评估节点虚拟化类型、可用及可加载算法、总内存大小、线路带宽（`node_meta.bandwidth_mbps`）、最近 24 小时探测 RTT 中位数、是否启用 QUIC/Hysteria2 入站以及是否承担中继角色，推荐最优拥塞控制算法、排队规则、缓冲上限及核心网络参数。每条建议具有级别（`suggested`/`optional`）与详细说明。
@@ -1335,6 +1337,7 @@ POST   /portal/subscription/reset
 | `POST /tunnels/plan` | `{tunnelIds:[],ruleIds:[]}` → `{ok,servers,conflicts,warnings,message?}`，仅读取 |
 | `POST /tunnels/publish` | 同一选择体 → `{batchId?,servers}`；逐节点 revision 可空，status 为 applied/unchanged/failed/rolled_back/skipped |
 | `GET/POST /nodes/{id}/relays` | GET 返回 `{items:[{rule,shareLink}]}`；POST `{tunnelId,inboundId,portMode,listenPort?,subscriptionVisible,name?}` 创建本目标节点的 linked 规则，network=both；shareLink 权限见第 10.3 节 |
+| `GET /nodes/relay-rules?nodeIds=id1,id2` | 代理节点列表按请求顺序批量读取中转规则，返回 `{items:[{nodeId,rules,error?:{code,message}}]}`，不生成分享链接；不存在或已删除的节点返回逐节点 `not_found` |
 
 隧道发布需补装 GOST 时，尚无已确认修订的服务器先发布基础配置，每 3 秒读取节点、最多等待 3 分钟，确认后用该修订排队安装；失败或超时保留逐服务器原因并中止隧道发布。发布结果区分本服务器应用失败后自动回滚（显示修订结果码，不显示 Agent 自由文本）与因后续服务器失败被反向回滚。
 
@@ -1561,7 +1564,7 @@ Welcome；DesiredState；ApplyCommand；RollbackCommand；HealthCommand；Certif
 
 强制出站 helper：proxy-agent-host-network.service（oneshot，仅 CAP_NET_ADMIN）执行 `proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，.path 监视并开机重放，只维护 nft 表 inet proxy_agent_source 与 inet proxy_agent_hop（Hysteria2 端口跳跃，第 12 节）；卸载删除表/单元。OpenRC 的 /etc/init.d/proxy-agent-host-network 监管 /usr/local/lib/proxy-agent/host-network-watch（busybox inotifyd）。Agent 本身由 systemd 或 /etc/init.d/proxy-agent 的 supervise-daemon 管理。
 
-调优 helper：Agent 写 0600 请求；root oneshot proxy-agent-tuning.service/.path 执行 `--apply-tuning /var/lib/proxy-agent/tuning`。CAP_NET_ADMIN＋CAP_DAC_OVERRIDE（读写 Agent 0700/0600 目录），fs.file-max 靠 root 权限。helper 与 Agent 可读模块目录以判断可加载算法，模块加载系统调用被 SystemCallFilter=~@module 过滤，能力集不含 CAP_SYS_MODULE。systemd 仅开放固定 procfs 键、/etc/sysctl.d、请求目录；OpenRC 的 proxy-agent-tuning 监管 tuning-watch，无文件系统命名空间隔离。root 0600 的 /etc/sysctl.d/.proxy-tuning-snapshot.json 保存原值/管理键，flock 串行，按 request_id 回逐键结果，Agent 最多等 30 秒，超时未确认。clear/空配置删 99-proxy-tuning.conf 并恢复原值；卸载先恢复再移单元。写入拒绝即失败，不扩权；当内核模块存在时，允许将可加载算法直接写入内核 procfs。主机信息随能力刷新，不可读心跳值未知；磁盘与 disk_percent 均指状态目录文件系统。
+调优 helper：Agent 写 0600 请求；root oneshot proxy-agent-tuning.service/.path 执行 `--apply-tuning /var/lib/proxy-agent/tuning`。独立 proxy-agent-tuning-probe.service 以相同权限执行固定 `--probe-tuning`，只以写模式打开并关闭 19 个键。systemd 每次探测前先运行仅以 proxy-agent 身份清除旧回执的 proxy-agent-tuning-probe-reset.service。OpenRC 启动前同样以 Agent 身份清除旧回执，受限 watcher 每次启动或被重新拉起都先标记待探测，worker 还会核对由 root 管理的完成状态。Agent 读取当前 boot 的完整 probe.json，并核对固定 helper 二进制摘要，未就绪则报告实际原因并停止接受新参数，旧 Agent 标注为估算。应用终态重报能力，页面按请求 ID 显示状态及逐键错误。CAP_NET_ADMIN＋CAP_DAC_OVERRIDE（读写 Agent 0700/0600 目录），fs.file-max 靠 root 权限。helper 与 Agent 可读模块目录以判断可加载算法，模块加载系统调用被 SystemCallFilter=~@module 过滤，能力集不含 CAP_SYS_MODULE。systemd 仅开放固定 procfs 键、/etc/sysctl.d、请求目录；OpenRC 的 proxy-agent-tuning 监管 tuning-watch，无文件系统命名空间隔离。root 0600 的 /etc/sysctl.d/.proxy-tuning-snapshot.json 保存原值/管理键，flock 串行，按 request_id 回逐键结果，Agent 最多等 30 秒，超时未确认。clear/空配置删 99-proxy-tuning.conf 并恢复原值；卸载先恢复再移单元。写入拒绝即失败，不扩权；当内核模块存在时，允许将可加载算法直接写入内核 procfs。主机信息随能力刷新，不可读心跳值未知；磁盘与 disk_percent 均指状态目录文件系统。
 
 install.sh/node-install.sh 可重复 `--core xray --core sing-box --core gost`，新装缺省仅 Xray。显式安装将顶层规范为 cores 列表，保留首项 core_name/core_path 供旧 Agent，其余配置/身份不变；手工版本/URL/摘要紧跟对应核心。升级不带核心参数保留全部记录核心与 config 原文；显式参数只替换/追加，省略不删除。`--core-source qui|official` 仅 sing-box，维持架构/libc、官方 musl 与同版本 qui 选项。
 

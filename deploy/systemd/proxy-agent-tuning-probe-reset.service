@@ -1,0 +1,13 @@
+[Unit]
+Description=Discard the previous Proxy Control tuning probe receipt
+
+[Service]
+Type=oneshot
+User=proxy-agent
+Group=proxy-agent
+ExecStart=/bin/rm -f -- /var/lib/proxy-agent/tuning/probe.json
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=-/var/lib/proxy-agent/tuning

@@ -77,6 +77,10 @@ assert.equal(dataF2[4].x,4.5*minute,'the gap marker sits between the neighbours'
 assert.deepEqual(history.seriesData([point(0,null)],'cpu',60).map(p=>p.y),[null]);
 assert.deepEqual(history.seriesData([point(0,1),point(90000,2),point(90000+90001,3)],'cpu',60).map(p=>p.y),[1,2,null,3],'exactly 1.5 x the step stays joined, beyond it breaks');
 const tuning = await loadF2Model('detail/serverTuningModel.ts');
+const moduleHost = {tuningProbeStatus:'ready', tuningModuleInstallSupported:true, congestionAvailable:['reno']};
+assert.ok(tuning.algorithmOptions('cc', moduleHost, undefined, true).some(o => o.value === 'bbr' && o.label.includes('补装')));
+assert.ok(!tuning.algorithmOptions('cc', moduleHost).some(o => o.value === 'bbr'));
+assert.ok(!tuning.algorithmOptions('cc', moduleHost, undefined, true).some(o => o.value === 'bbr3'));
 for (const [status,label] of Object.entries({pending:'等待 Agent 执行',applied:'已应用',cleared:'已清除',failed:'执行失败',unconfirmed:'结果未确认'})) assert.equal(tuning.tuningStatus(status),label);
 assert.equal(tuning.tuningStatus('future'),'未知状态');
 assert.deepEqual(tuning.tuningRequest('node-a',{'net.core.somaxconn':'128','net.core.default_qdisc':''}),{settings:{'net.core.somaxconn':'128'},clear:false,confirmNodeId:'node-a'});
@@ -189,6 +193,94 @@ for (const key of ['net.ipv4.tcp_rmem', 'net.ipv4.tcp_wmem']) {
 
 // Execute the component's actual host-derived computed values with fixture data.
 const tuningSfc = readFileSync(new URL('../src/modules/nodes/components/detail/ServerTuning.vue', import.meta.url), 'utf8');
+// Run the compiled button bindings with deferred network replies. No browser
+// timers or remote node are needed to distinguish a click, a 202 and a receipt.
+{
+  const Vue = await import('vue');
+  const { parse, compileScript } = await import('@vue/compiler-sfc');
+  const { renderToString } = await import('@vue/server-renderer');
+  const source = compileScript(parse(tuningSfc).descriptor, { id: 'tuning', inlineTemplate: true }).content;
+  const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+  const after = () => new Promise(resolve => setImmediate(resolve));
+  const advice = deferred(), send = deferred(), status = deferred(), stale = deferred(), next = deferred();
+  const key = 'net.ipv4.tcp_congestion_control', omitted = 'net.core.rmem_max';
+  const previous = { supported: true, desired: { [key]: 'bbr', [omitted]: '8388608' }, requestId: 'old', status: 'failed', result: { requestId:'old', status:'failed', keys:[{ error:'old-error' }] }, current: {}, requestedAt: null, updatedAt: null };
+  let statusReads = 0, adviceReads = 0, submitted, currentTree, backgroundRead, poll, now = Date.now();
+  const delayedFailure = deferred();
+  const api = { tuning: () => [Promise.resolve(previous), stale.promise, status.promise, delayedFailure.promise, next.promise][statusReads++],
+    tuningRecommendations: () => { adviceReads++; return advice.promise; },
+    saveTuning: (_, input) => { submitted = input; return send.promise; } };
+  const dialog = { name:'ConfirmDialog', render: () => null };
+  const apiClient = await import(await tsModuleUrl(new URL('../src/app/apiClient.ts', import.meta.url)));
+  const require = name => ({ 'vue':Vue, '../../../../app/auth': { isOwner:Vue.ref(true), formatTime:v=>v },
+    '../../../../app/api': { showToast:()=>{} }, '../../../../app/apiClient': apiClient, '../../api':{nodeAPI:api},
+    './serverTuningModel': tuning, '../../../../components/ConfirmDialog.vue':{default:dialog} })[name];
+  const exports = {};
+  new Function('require','exports','document','setInterval','setTimeout','clearTimeout','Date',code)(require,exports,
+    {visibilityState:'visible', addEventListener(){}}, callback=>{backgroundRead=callback;return 1;}, callback=>{poll=callback;return 1;}, ()=>{}, class extends Date { static now(){return now;} });
+  const props = { node:{id:'n', name:'test', capabilities:{ host: { tuningKeys:[{ key, present:true, writable:true }], congestionAvailable:['reno'], tuningModuleInstallSupported:true, tuningProbeStatus:'ready' } } }, isOwner:true };
+  let render;
+  const instance = { setup() {
+    render = exports.default.setup(props, {expose(){},emit(){}});
+    return () => { currentTree = render({}, []); return currentTree; };
+  }};
+  async function view() {
+    // Keep the original setup state between renders, including in-flight promises.
+    const app = Vue.createSSRApp(render ? {render(){currentTree=render({},[]); return currentTree;}} : instance);
+    const html = await renderToString(app);
+    function find(v, predicate) {
+      if (!v || typeof v !== 'object') return;
+      if (predicate(v)) return v;
+      if (Array.isArray(v.children)) for (const child of v.children) { const found=find(child,predicate); if(found)return found; }
+    }
+    return { html, find: pred => find(currentTree,pred) };
+  }
+  await view(); await after();
+  let page = await view();
+  const checkbox = page.find(v => v.type === 'input' && v.props?.type === 'checkbox' && v.props['onUpdate:modelValue']);
+  assert.match(page.html, /本次允许按需补装 Ubuntu/);
+  checkbox.props['onUpdate:modelValue'](true);
+  page = await view();
+  const button = page.find(v => v.type === 'button' && String(v.children).includes('一键应用'));
+  assert.ok(button && !button.props.disabled, 'slow recommendations must not delay loaded state or its apply button');
+  backgroundRead(); // This GET started before submission and must not overwrite its result.
+  button.props.onClick(); page = await view();
+  const confirmation = page.find(v => v.type === dialog);
+  assert.equal(confirmation.props.modelValue, true);
+  assert.match(confirmation.props.message, /允许安装与运行内核完全匹配/);
+  assert.match(confirmation.props.message, /net\.core\.rmem_max/, 'filtered previous key will revert');
+  confirmation.props.onConfirm(); page=await view();
+  assert.match(page.html, /正在发送/);
+  assert.deepEqual(submitted.settings, {[key]:'bbr'});
+  assert.equal(submitted.installMissingModules,true);
+  send.resolve({requestId:'new',status:'pending'}); await after(); page=await view();
+  assert.match(page.html, /等待 Agent 执行/); assert.match(page.html, /new/);
+  assert.doesNotMatch(page.html,/old-error/);
+  stale.resolve(previous); await after(); page=await view();
+  assert.match(page.html, /等待 Agent 执行/); assert.doesNotMatch(page.html, /old-error/);
+  status.resolve({...previous, requestId:'owner-b',status:'pending',result:null,installMissingModules:true});
+  await after(); page=await view();
+  assert.match(page.html, /new[^<]*owner-b/, 'an authoritative later read must show which request superseded the pending one');
+  now += (15*60+29)*1000;
+  poll();
+  delayedFailure.reject(new Error('node unavailable')); await after();
+  assert.equal(statusReads,4,'a failed read is retried within the module and sysctl budget');
+  now += 1000; poll(); backgroundRead(); await after();
+  assert.equal(statusReads,4,'module timeout must stop short and periodic polling');
+  page = await view();
+  assert.match(page.html, /结果未确认/);
+  page.find(v => v.type === 'button' && String(v.children).includes('刷新状态')).props.onClick();
+  assert.equal(statusReads,5,'manual refresh can still obtain the late receipt');
+  next.resolve({...previous, requestId:'owner-b', result:{requestId:'owner-b',status:'failed',keys:[{error:'actual kernel error'}]}});
+  await after(); page=await view();
+  assert.match(page.html.slice(0,page.html.indexOf('白名单参数')), /owner-b[^<]*actual kernel error/);
+  assert.equal(page.find(v => v.type === 'button' && String(v.children).includes('一键应用')).props.disabled, false);
+  assert.equal(adviceReads,1,'progress must not re-read recommendations');
+  advice.reject(new Error('advice stalled')); await after(); page=await view();
+  assert.match(page.html,/advice stalled/); assert.match(page.html.slice(0,page.html.indexOf('白名单参数')), /actual kernel error/);
+  console.log('PASS tuning button: confirmed settings, accepted request, kernel error and independent advice');
+}
 const hostComputeds = tuningSfc.slice(tuningSfc.indexOf('const hostInfo ='), tuningSfc.indexOf('const essentialFields ='));
 const hostJs = ts.transpileModule(hostComputeds, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 const { computed } = await import('vue');
@@ -200,6 +292,8 @@ const restricted = { tuningKeys: [
   { key: cc, present: true, writable: true }, { key: qdisc, present: true, writable: true },
   { key: rmem, present: true, writable: false }, { key: 'net.core.wmem_max', present: false, writable: true }
 ], congestionAvailable: ['cubic'], congestionLoadable: ['bbr3'], qdiscAvailable: ['fq_codel'] };
+assert.deepEqual([...(tuningHost({tuningProbeStatus: 'boot mismatch'}).availableKeys ?? ['all selectable'])], [], 'new worker with unusable probe must block editing');
+assert.deepEqual(tuning.algorithmOptions('cc', {tuningProbeStatus:'ready'}), [], 'new worker must not invent available algorithms');
 const available = tuningHost(restricted).availableKeys;
 assert.deepEqual([...available], [cc, qdisc]);
 assert.equal(tuning.keyStatus(rmem, {}, restricted), 'unavailable');
@@ -234,10 +328,10 @@ const script = tuningSfc.split('<script setup lang="ts">')[1].split('</script>')
 const tree = ts.createSourceFile('ServerTuning.ts', script, ts.ScriptTarget.Latest, true);
 const handlers = tree.statements.filter(s => ts.isFunctionDeclaration(s) && ['confirm', 'submit', 'dismissAdvice'].includes(s.name?.text)).map(s => s.getText(tree)).join('\n');
 const handlersJs = ts.transpileModule(handlers, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
-const errors = { value: '' }, errorDraft = { value: { 'net.core.somaxconn': 'bad' } };
-const handlerHarness = new Function('error', 'draft', 'tuningRequest', handlersJs.replace(/^/, 'let confirmed = null; const props = {node: {id: "n"}}, canEdit = {value: true}, clearing = {}, dialog = {}, availableKeys = {}, hostInfo = {}, sending = {}, lifecycle = 0, state = {value: null}; const stopPoll = () => {}, refresh = async () => {}, loadRecommendations = async () => {}, showToast = () => {}; const nodeAPI = {saveTuning: async () => {throw new Error("save rejected");}, dismissTuningRecommendation: async () => {throw new Error("advice rejected");}};\n') + '\nreturn {confirm, submit, dismissAdvice};')(errors, errorDraft, tuning.tuningRequest);
+const errors = { value: '' }, adviceError = { value: '' }, errorDraft = { value: { 'net.core.somaxconn': 'bad' } };
+const handlerHarness = new Function('error', 'adviceError', 'draft', 'tuningRequest', handlersJs.replace(/^/, 'let reads = 0, refreshing = false; const confirmed = {value:null}, readError = {value:""}, replacedRequest = {value:""}; const props = {node: {id: "n"}}, canEdit = {value: true}, clearing = {}, dialog = {}, availableKeys = {}, hostInfo = {}, installModules = {value:false}, sending = {}, lifecycle = 0, state = {value: null}; const stopPoll = () => {}, refresh = async () => {}, loadRecommendations = async () => {}, showToast = () => {}; const nodeAPI = {saveTuning: async () => {throw new Error("save rejected");}, dismissTuningRecommendation: async () => {throw new Error("advice rejected");}};\n') + '\nreturn {confirm, submit, dismissAdvice};')(errors, adviceError, errorDraft, tuning.tuningRequest);
 handlerHarness.confirm(false); assert.match(errors.value, /参数超出允许范围/);
 errorDraft.value = { 'net.core.somaxconn': '128' };
 handlerHarness.confirm(false); await handlerHarness.submit(); assert.match(errors.value, /save rejected/);
-await handlerHarness.dismissAdvice({ key: cc, value: 'bbr3' }); assert.match(errors.value, /advice rejected/);
+await handlerHarness.dismissAdvice({ key: cc, value: 'bbr3' }); assert.match(adviceError.value, /advice rejected/);
 console.log('PASS AUDIT A06–A10/A15: vector maximum, writable filter, host algorithms, filtered merges, process fd limits, honest consistency status and visible errors');

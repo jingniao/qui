@@ -1770,6 +1770,7 @@ run_scenario() {
 }
 
 write_fake_service_library "$TOP/harness/service.sh"
+sed -n '/^qui_invalidate_tuning_probe()/,/^}/p; /^qui_skip_tuning_replay()/,/^}/p' "$repo_dir/deploy/linux/service.sh" >> "$TOP/harness/service.sh"
 sed -n '/^# Release versions shared/,$p' "$repo_dir/deploy/linux/service.sh" >> "$TOP/harness/service.sh"
 write_fake_install "$TOP/harness/install.sh"
 

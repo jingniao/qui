@@ -9,7 +9,7 @@ const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts
 async function scenario({ failed = [], delayedInbounds = false } = {}) {
   const errors = [], loaded = [], reads = [];
   const loading = { value: false }, servers = { value: [] }, inbounds = { value: [] };
-  const store = { manualNodes: [], subscriptions: [] };
+  const store = { manualNodes: [{ id: 'confirmed-import' }], subscriptions: [{ id: 'confirmed-source' }] };
   let releaseInbounds;
   const read = async (kind, values) => {
     reads.push(kind);
@@ -31,6 +31,8 @@ async function scenario({ failed = [], delayedInbounds = false } = {}) {
   for (let i = 0; i < 10; i++) await Promise.resolve();
   assert.deepEqual(new Set(reads), new Set(['servers', 'inbounds', 'schemes', 'imports', 'groups']));
   if (delayedInbounds) {
+    assert.deepEqual(store.manualNodes.map(node => node.id), ['confirmed-import'], 'refresh keeps confirmed imports while resources are pending');
+    assert.deepEqual(store.subscriptions.map(source => source.id), ['confirmed-source']);
     assert.equal(loaded.length, 0, 'scheme resolution waits for inbounds');
     releaseInbounds();
   }

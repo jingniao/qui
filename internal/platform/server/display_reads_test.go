@@ -20,7 +20,7 @@ import (
 // when SQLite itself is not locked. No artificial database or HTTP mock is used.
 func TestDisplayReadsDoNotQueueBehindWriter(t *testing.T) {
 	app := testServer(t)
-	defer app.closeReadPool()
+	defer app.Close()
 	owner := flowOwner(t, app)
 	for i := 0; i < 13; i++ {
 		if _, _, _, err := app.nodeRepository.CreateEnrollment(context.Background(), fmt.Sprintf("display-node-%d", i), time.Hour); err != nil {
@@ -84,7 +84,7 @@ func TestDisplayReadsDoNotQueueBehindWriter(t *testing.T) {
 
 func TestDisplayReadTimingStagesAndFailure(t *testing.T) {
 	app := testServer(t)
-	defer app.closeReadPool()
+	defer app.Close()
 	owner := flowOwner(t, app)
 	var output bytes.Buffer
 	handler := readtiming.Middleware(app.HTTP.Handler, slog.New(slog.NewJSONHandler(&output, nil)))
@@ -126,7 +126,9 @@ func TestPreparedRestoreReopensDisplayReadsAndClosesPool(t *testing.T) {
 	app := testServer(t)
 	owner := flowOwner(t, app)
 	oldPool := app.readPool
-	app.closeReadPool()
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := app.Database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +143,9 @@ func TestPreparedRestoreReopensDisplayReadsAndClosesPool(t *testing.T) {
 	if err = oldPool.Ping(); err == nil {
 		t.Fatal("old read pool still usable")
 	}
+	if stats := oldPool.Stats(); stats.OpenConnections != 0 {
+		t.Fatalf("old read pool retained connections: %+v", stats)
+	}
 	req := httptest.NewRequest("GET", "/api/v1/nodes/choices", nil)
 	req.AddCookie(owner.cookie)
 	response := httptest.NewRecorder()
@@ -152,11 +157,17 @@ func TestPreparedRestoreReopensDisplayReadsAndClosesPool(t *testing.T) {
 	if _, err = reopened.Exec("DELETE FROM nodes"); err == nil {
 		t.Fatal("restored reader accepted a write")
 	}
+	if stats := reopened.Stats(); stats.Idle == 0 || stats.InUse != 0 {
+		t.Fatalf("restored read pool did not return its connections: %+v", stats)
+	}
 	if err = prepared.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err = reopened.Ping(); err == nil {
 		t.Fatal("prepared restore leaked its read pool")
+	}
+	if stats := reopened.Stats(); stats.OpenConnections != 0 {
+		t.Fatalf("prepared restore retained reader connections: %+v", stats)
 	}
 	canceledPreparation, err := PrepareRestore(context.Background(), configuration, fstest.MapFS{"index.html": {Data: []byte("panel")}}, app.Logger)
 	if err != nil {
@@ -182,5 +193,8 @@ func TestPreparedRestoreReopensDisplayReadsAndClosesPool(t *testing.T) {
 	}
 	if err = canceledPool.Ping(); err == nil {
 		t.Fatal("canceled restore startup leaked its read pool")
+	}
+	if stats := canceledPool.Stats(); stats.OpenConnections != 0 {
+		t.Fatalf("canceled restore retained reader connections: %+v", stats)
 	}
 }

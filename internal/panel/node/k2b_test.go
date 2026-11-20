@@ -201,11 +201,11 @@ func TestK2bTuningWhitelistAndReceipts(t *testing.T) {
 	r, id := latencyFixture(t)
 	ctx := context.Background()
 	stamp := timestamp(time.Now())
-	if _, err := r.Database.Exec("INSERT INTO node_tuning VALUES(?,?,'req','pending',NULL,?,?)", id, `{"net.core.somaxconn":"128"}`, stamp, stamp); err != nil {
+	if _, err := r.Database.Exec("INSERT INTO node_tuning(node_id,desired_json,request_id,status,requested_at,updated_at) VALUES(?,?,'req','pending',?,?)", id, `{"net.core.somaxconn":"128"}`, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
 	c, err := r.pendingTuning(ctx, id)
-	if err != nil || c.RequestId != "req" || c.Settings["net.core.somaxconn"] != "128" {
+	if err != nil || c.RequestId != "req" || c.InstallMissingModules || c.Settings["net.core.somaxconn"] != "128" {
 		t.Fatal(c, err)
 	}
 	if err = r.unconfirmTuning(ctx, id); err != nil {

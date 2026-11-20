@@ -1,7 +1,7 @@
 [Unit]
 Description=Proxy Control node agent
-After=network-online.target
-Wants=network-online.target
+After=network-online.target proxy-agent-tuning-probe.service
+Wants=network-online.target proxy-agent-tuning-probe.service
 
 [Service]
 Type=simple

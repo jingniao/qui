@@ -59,11 +59,11 @@
 
     <ErrorState v-if="adminError" :message="adminError" @retry="load()" />
     <ErrorState v-if="error" :message="error" @retry="load()" />
-    <LoadingSkeleton v-else-if="(loading || optionsLoading) && !users.length && !displayAdmins.length" />
-    <EmptyState v-else-if="!users.length && !displayAdmins.length && !adminError" title="暂无用户" description="点击上方“新增用户”为内部成员开通专属代理账号与订阅。" />
+    <LoadingSkeleton v-if="(loading || optionsLoading) && !display.ready && !displayAdmins.length" />
+    <EmptyState v-else-if="display.ready && !users.length && !displayAdmins.length && !adminError && !optionsLoading" title="暂无用户" description="点击上方“新增用户”为内部成员开通专属代理账号与订阅。" />
 
     <!-- Unified Table: Admins + Proxy Users -->
-    <DataTable v-else>
+    <DataTable v-else-if="display.ready || displayAdmins.length">
       <template #header>
         <th>用户名</th>
         <th>状态</th>
@@ -276,6 +276,8 @@
 </template>
 
 <script setup lang="ts">
+import { invalidatesRead } from '../../../app/apiClient';
+import { retainedQuery, removePageItem } from '../../../app/retainedQuery';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { deviceLimitHelp, udpUnsupportedText } from "../../../app/deviceLimit";
 import type { DevicesOnline } from "../api";
@@ -439,6 +441,7 @@ async function executeAdminAction() {
       await request(`/admins/${admin.id}/revoke-sessions`, 'POST');
     } else {
       await request(`/admins/${admin.id}`, 'DELETE');
+      admins.value = admins.value.filter(row => row.id !== admin.id);
     }
     showToast('操作完成');
     await load();
@@ -448,9 +451,11 @@ async function executeAdminAction() {
 }
 
 let generation = 0;
+const display = retainedQuery(() => { users.value = []; total.value = 0; });
 let optionsGeneration = 0;
 async function load(silent = false) {
   const current = ++generation;
+  display.begin(page.value, keyword.value);
   const currentOptions = silent ? optionsGeneration : ++optionsGeneration;
   if (!silent) loading.value = true;
   if (!silent) { optionsLoading.value = true; adminError.value = ''; }
@@ -458,16 +463,19 @@ async function load(silent = false) {
     if (currentOptions !== optionsGeneration) return;
     admins.value = adminResult.items;
   }).catch(e => {
-    if (currentOptions === optionsGeneration) adminError.value = `管理员读取失败：${(e as Error).message}`;
+    if (currentOptions === optionsGeneration) {
+      if (invalidatesRead(e)) admins.value = [];
+      adminError.value = `管理员读取失败：${(e as Error).message}`;
+    }
   }).finally(() => { if (currentOptions === optionsGeneration) optionsLoading.value = false; });
   try {
     const result = await userAPI.list(page.value, keyword.value);
     if (current !== generation) return;
-    users.value = result.items;
+    display.ready = true; users.value = result.items;
     total.value = result.total;
     error.value = '';
   } catch (e) {
-    if (current === generation) error.value = (e as Error).message;
+    if (current === generation) { display.reject(e); error.value = (e as Error).message; }
   } finally {
     if (current === generation) loading.value = false;
   }
@@ -553,7 +561,9 @@ async function save() {
 async function remove() {
   if (!removeTarget.value) return;
   try {
-    await userAPI.delete(removeTarget.value.id);
+    const id = removeTarget.value.id;
+    await userAPI.delete(id);
+    removePageItem(users, total, page, id, 20);
     showToast('用户已删除');
     await load();
   } catch (e) {

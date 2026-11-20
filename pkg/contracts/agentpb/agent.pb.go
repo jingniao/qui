@@ -1644,6 +1644,7 @@ type TuningKeyState struct {
 	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	Present       bool                   `protobuf:"varint,2,opt,name=present,proto3" json:"present,omitempty"`
 	Writable      bool                   `protobuf:"varint,3,opt,name=writable,proto3" json:"writable,omitempty"`
+	ProbeError    string                 `protobuf:"bytes,4,opt,name=probe_error,json=probeError,proto3" json:"probe_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1697,6 +1698,13 @@ func (x *TuningKeyState) GetWritable() bool {
 		return x.Writable
 	}
 	return false
+}
+
+func (x *TuningKeyState) GetProbeError() string {
+	if x != nil {
+		return x.ProbeError
+	}
+	return ""
 }
 
 type SysctlSource struct {
@@ -1839,6 +1847,9 @@ type HostInfo struct {
 	QdiscLoadable                 []string                  `protobuf:"bytes,16,rep,name=qdisc_loadable,json=qdiscLoadable,proto3" json:"qdisc_loadable,omitempty"`
 	FdLimits                      []*ProcessLimit           `protobuf:"bytes,17,rep,name=fd_limits,json=fdLimits,proto3" json:"fd_limits,omitempty"`
 	SysctlSources                 []*SysctlSource           `protobuf:"bytes,18,rep,name=sysctl_sources,json=sysctlSources,proto3" json:"sysctl_sources,omitempty"`
+	TuningProbeStatus             string                    `protobuf:"bytes,19,opt,name=tuning_probe_status,json=tuningProbeStatus,proto3" json:"tuning_probe_status,omitempty"`
+	TuningModuleInstallSupported  bool                      `protobuf:"varint,20,opt,name=tuning_module_install_supported,json=tuningModuleInstallSupported,proto3" json:"tuning_module_install_supported,omitempty"`
+	TuningModuleInstallError      string                    `protobuf:"bytes,21,opt,name=tuning_module_install_error,json=tuningModuleInstallError,proto3" json:"tuning_module_install_error,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -1997,6 +2008,27 @@ func (x *HostInfo) GetSysctlSources() []*SysctlSource {
 		return x.SysctlSources
 	}
 	return nil
+}
+
+func (x *HostInfo) GetTuningProbeStatus() string {
+	if x != nil {
+		return x.TuningProbeStatus
+	}
+	return ""
+}
+
+func (x *HostInfo) GetTuningModuleInstallSupported() bool {
+	if x != nil {
+		return x.TuningModuleInstallSupported
+	}
+	return false
+}
+
+func (x *HostInfo) GetTuningModuleInstallError() string {
+	if x != nil {
+		return x.TuningModuleInstallError
+	}
+	return ""
 }
 
 type Heartbeat struct {
@@ -5470,12 +5502,13 @@ func (x *RemoveCoreResult) GetCode() string {
 }
 
 type TuningCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Settings      map[string]string      `protobuf:"bytes,2,rep,name=settings,proto3" json:"settings,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Clear         bool                   `protobuf:"varint,3,opt,name=clear,proto3" json:"clear,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	RequestId             string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Settings              map[string]string      `protobuf:"bytes,2,rep,name=settings,proto3" json:"settings,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Clear                 bool                   `protobuf:"varint,3,opt,name=clear,proto3" json:"clear,omitempty"`
+	InstallMissingModules bool                   `protobuf:"varint,4,opt,name=install_missing_modules,json=installMissingModules,proto3" json:"install_missing_modules,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *TuningCommand) Reset() {
@@ -5525,6 +5558,13 @@ func (x *TuningCommand) GetSettings() map[string]string {
 func (x *TuningCommand) GetClear() bool {
 	if x != nil {
 		return x.Clear
+	}
+	return false
+}
+
+func (x *TuningCommand) GetInstallMissingModules() bool {
+	if x != nil {
+		return x.InstallMissingModules
 	}
 	return false
 }
@@ -5599,13 +5639,14 @@ func (x *TuningKeyResult) GetError() string {
 
 // status is applied, cleared, or failed. A failed transaction rolls back all keys.
 type TuningResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	Keys          []*TuningKeyResult     `protobuf:"bytes,3,rep,name=keys,proto3" json:"keys,omitempty"`
-	Initial       map[string]string      `protobuf:"bytes,4,rep,name=initial,proto3" json:"initial,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Status                  string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Keys                    []*TuningKeyResult     `protobuf:"bytes,3,rep,name=keys,proto3" json:"keys,omitempty"`
+	Initial                 map[string]string      `protobuf:"bytes,4,rep,name=initial,proto3" json:"initial,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	InstalledModulePackages []string               `protobuf:"bytes,5,rep,name=installed_module_packages,json=installedModulePackages,proto3" json:"installed_module_packages,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *TuningResult) Reset() {
@@ -5662,6 +5703,13 @@ func (x *TuningResult) GetKeys() []*TuningKeyResult {
 func (x *TuningResult) GetInitial() map[string]string {
 	if x != nil {
 		return x.Initial
+	}
+	return nil
+}
+
+func (x *TuningResult) GetInstalledModulePackages() []string {
+	if x != nil {
+		return x.InstalledModulePackages
 	}
 	return nil
 }
@@ -6149,11 +6197,13 @@ const file_agent_proto_rawDesc = "" +
 	"\tdns_names\x18\x04 \x03(\tR\bdnsNames\x12!\n" +
 	"\fip_addresses\x18\x05 \x03(\tR\vipAddresses\x127\n" +
 	"\tnot_after\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\x12-\n" +
-	"\x12fingerprint_sha256\x18\a \x01(\tR\x11fingerprintSha256\"X\n" +
+	"\x12fingerprint_sha256\x18\a \x01(\tR\x11fingerprintSha256\"y\n" +
 	"\x0eTuningKeyState\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x18\n" +
 	"\apresent\x18\x02 \x01(\bR\apresent\x12\x1a\n" +
-	"\bwritable\x18\x03 \x01(\bR\bwritable\"J\n" +
+	"\bwritable\x18\x03 \x01(\bR\bwritable\x12\x1f\n" +
+	"\vprobe_error\x18\x04 \x01(\tR\n" +
+	"probeError\"J\n" +
 	"\fSysctlSource\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
 	"\x04file\x18\x02 \x01(\tR\x04file\x12\x14\n" +
@@ -6161,7 +6211,7 @@ const file_agent_proto_rawDesc = "" +
 	"\fProcessLimit\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04soft\x18\x02 \x01(\x04R\x04soft\x12\x12\n" +
-	"\x04hard\x18\x03 \x01(\x04R\x04hard\"\x8d\a\n" +
+	"\x04hard\x18\x03 \x01(\x04R\x04hard\"\xc3\b\n" +
 	"\bHostInfo\x12\x1b\n" +
 	"\tcpu_model\x18\x01 \x01(\tR\bcpuModel\x12\x1b\n" +
 	"\tcpu_cores\x18\x02 \x01(\x05R\bcpuCores\x12\"\n" +
@@ -6182,7 +6232,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fqdisc_available\x18\x0f \x03(\tR\x0eqdiscAvailable\x12%\n" +
 	"\x0eqdisc_loadable\x18\x10 \x03(\tR\rqdiscLoadable\x12@\n" +
 	"\tfd_limits\x18\x11 \x03(\v2#.proxycontrol.agent.v1.ProcessLimitR\bfdLimits\x12J\n" +
-	"\x0esysctl_sources\x18\x12 \x03(\v2#.proxycontrol.agent.v1.SysctlSourceR\rsysctlSources\"\x80\x13\n" +
+	"\x0esysctl_sources\x18\x12 \x03(\v2#.proxycontrol.agent.v1.SysctlSourceR\rsysctlSources\x12.\n" +
+	"\x13tuning_probe_status\x18\x13 \x01(\tR\x11tuningProbeStatus\x12E\n" +
+	"\x1ftuning_module_install_supported\x18\x14 \x01(\bR\x1ctuningModuleInstallSupported\x12=\n" +
+	"\x1btuning_module_install_error\x18\x15 \x01(\tR\x18tuningModuleInstallError\"\x80\x13\n" +
 	"\tHeartbeat\x12$\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01H\x00R\n" +
 	"cpuPercent\x88\x01\x01\x12*\n" +
@@ -6533,12 +6586,13 @@ const file_agent_proto_rawDesc = "" +
 	"\tcomponent\x18\x02 \x01(\tR\tcomponent\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x03R\brevision\x12\x18\n" +
 	"\asuccess\x18\x04 \x01(\bR\asuccess\x12\x12\n" +
-	"\x04code\x18\x05 \x01(\tR\x04code\"\xd1\x01\n" +
+	"\x04code\x18\x05 \x01(\tR\x04code\"\x89\x02\n" +
 	"\rTuningCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12N\n" +
 	"\bsettings\x18\x02 \x03(\v22.proxycontrol.agent.v1.TuningCommand.SettingsEntryR\bsettings\x12\x14\n" +
-	"\x05clear\x18\x03 \x01(\bR\x05clear\x1a;\n" +
+	"\x05clear\x18\x03 \x01(\bR\x05clear\x126\n" +
+	"\x17install_missing_modules\x18\x04 \x01(\bR\x15installMissingModules\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"i\n" +
@@ -6546,13 +6600,14 @@ const file_agent_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x18\n" +
 	"\aapplied\x18\x03 \x01(\bR\aapplied\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x89\x02\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\xc5\x02\n" +
 	"\fTuningResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12:\n" +
 	"\x04keys\x18\x03 \x03(\v2&.proxycontrol.agent.v1.TuningKeyResultR\x04keys\x12J\n" +
-	"\ainitial\x18\x04 \x03(\v20.proxycontrol.agent.v1.TuningResult.InitialEntryR\ainitial\x1a:\n" +
+	"\ainitial\x18\x04 \x03(\v20.proxycontrol.agent.v1.TuningResult.InitialEntryR\ainitial\x12:\n" +
+	"\x19installed_module_packages\x18\x05 \x03(\tR\x17installedModulePackages\x1a:\n" +
 	"\fInitialEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf0\x01\n" +

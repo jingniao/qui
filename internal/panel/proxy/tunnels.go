@@ -148,10 +148,11 @@ func (r *Repository) Tunnels(ctx context.Context) ([]Tunnel, error) {
 const managedRuleColumns = `r.id,r.name,r.entry_node_id,n.name,r.listen_port,r.port_mode,r.network,r.tunnel_id,t.name,r.target_mode,r.target_inbound_id,coalesce(r.target_host,''),coalesce(r.target_port,0),r.owner_node_id,r.subscription_visible,r.enabled,r.status,r.draft_version,r.published_version,r.published_at,r.created_at,r.updated_at,coalesce(r.target_import_id,'')`
 const managedRuleFrom = ` FROM tunnel_rules r JOIN nodes n ON n.id=r.entry_node_id LEFT JOIN tunnels t ON t.id=r.tunnel_id`
 
-func scanManagedRule(row interface{ Scan(...any) error }) (TunnelRule, error) {
+func scanManagedRule(row interface{ Scan(...any) error }, extra ...any) (TunnelRule, error) {
 	var r TunnelRule
 	var inbound *string
-	err := row.Scan(&r.ID, &r.Name, &r.EntryNodeID, &r.EntryNodeName, &r.ListenPort, &r.PortMode, &r.Network, &r.TunnelID, &r.TunnelName, &r.Target.Mode, &inbound, &r.Target.Host, &r.Target.Port, &r.OwnerNodeID, &r.SubscriptionVisible, &r.Enabled, &r.Status, &r.DraftVersion, &r.PublishedVersion, &r.PublishedAt, &r.CreatedAt, &r.UpdatedAt, &r.Target.ImportID)
+	fields := []any{&r.ID, &r.Name, &r.EntryNodeID, &r.EntryNodeName, &r.ListenPort, &r.PortMode, &r.Network, &r.TunnelID, &r.TunnelName, &r.Target.Mode, &inbound, &r.Target.Host, &r.Target.Port, &r.OwnerNodeID, &r.SubscriptionVisible, &r.Enabled, &r.Status, &r.DraftVersion, &r.PublishedVersion, &r.PublishedAt, &r.CreatedAt, &r.UpdatedAt, &r.Target.ImportID}
+	err := row.Scan(append(fields, extra...)...)
 	if inbound != nil {
 		r.Target.InboundID = *inbound
 	}
@@ -206,7 +207,7 @@ func (r *Repository) deriveTunnelTarget(ctx context.Context, q portDatabase, tar
 func (r *Repository) TunnelRule(ctx context.Context, ruleID string) (TunnelRule, error) {
 	item, err := scanManagedRule(r.Database.QueryRowContext(ctx, "SELECT "+managedRuleColumns+managedRuleFrom+" WHERE r.id=?", ruleID))
 	if err == nil {
-		err = r.deriveRuleTarget(ctx, &item)
+		err = r.deriveRuleTarget(ctx, r.Database, &item)
 	}
 	return item, err
 }
@@ -216,7 +217,7 @@ func (r *Repository) TunnelRules(ctx context.Context, tunnelID, nodeID string) (
 		return nil, err
 	}
 	for i := range items {
-		err = r.deriveRuleTarget(ctx, &items[i])
+		err = r.deriveRuleTarget(ctx, r.Database, &items[i])
 		if err != nil {
 			return nil, err
 		}
@@ -224,8 +225,8 @@ func (r *Repository) TunnelRules(ctx context.Context, tunnelID, nodeID string) (
 	return items, nil
 }
 
-func (r *Repository) deriveRuleTarget(ctx context.Context, item *TunnelRule) error {
-	target, err := r.deriveTunnelTarget(ctx, r.Database, item.Target, item.TunnelID)
+func (r *Repository) deriveRuleTarget(ctx context.Context, q portDatabase, item *TunnelRule) error {
+	target, err := r.deriveTunnelTarget(ctx, q, item.Target, item.TunnelID)
 	if err != nil {
 		var failure *tunnelError
 		if errors.As(err, &failure) && failure.Code == "import_target_deleted" {

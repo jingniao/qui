@@ -1,5 +1,14 @@
 let csrfToken = '';
+let adminScope = 0;
+export function advanceRequestScope() { adminScope++; }
+export function requestScope() { return adminScope; }
 const pendingGets = new Map<string, Promise<unknown>>();
+function pendingGetKey(path: string, timeoutMs = 15000) {
+  return JSON.stringify([adminScope, path, timeoutMs]);
+}
+export function forgetPendingGet(path: string, timeoutMs?: number) {
+  pendingGets.delete(pendingGetKey(path, timeoutMs));
+}
 export function setCSRFToken(token: string) {
   if (token !== csrfToken) pendingGets.clear();
   csrfToken = token;
@@ -9,6 +18,11 @@ export class APIError extends Error {
   // details carries the extra fields of the error body, e.g. the blockers of a
   // refused node deletion.
   constructor(public status: number, public code: string, message: string, public details: Record<string, unknown> = {}) { super(message); }
+}
+
+// A denied or removed resource must also disappear from retained page data.
+export function invalidatesRead(error: unknown): boolean {
+  return error instanceof APIError && [401, 403, 404].includes(error.status);
 }
 
 const messages: Record<string, string> = {
@@ -89,7 +103,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, o
     try { return await performRequest<T>(path, method, body, options); }
     finally { pendingGets.clear(); }
   }
-  const key = JSON.stringify([path, options.timeoutMs ?? 15000]);
+  const key = pendingGetKey(path, options.timeoutMs);
   let pending = pendingGets.get(key);
   if (!pending) {
     pending = performRequest<T>(path, method, body, options).finally(() => {
@@ -102,6 +116,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, o
 }
 
 async function performRequest<T>(path: string, method: string, body: unknown, options: { timeoutMs?: number }): Promise<T> {
+  const scope = adminScope;
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (!['GET', 'HEAD'].includes(method) && csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -113,7 +128,7 @@ async function performRequest<T>(path: string, method: string, body: unknown, op
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     const code = data.error?.code || 'request_failed';
-    if (response.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('auth-expired'));
+    if (response.status === 401 && scope === adminScope && !path.startsWith('/auth/')) window.dispatchEvent(new Event('auth-expired'));
     throw new APIError(response.status, code, messages[code] || translateAPIMessage(data.error?.message || '请求失败'), data.error || {});
   }
   return response.status === 204 ? undefined as T : response.json();
@@ -127,6 +142,7 @@ export async function upload<T>(path: string, body: FormData, timeoutMs = 310000
 }
 
 async function performUpload<T>(path: string, body: FormData, timeoutMs: number): Promise<T> {
+  const scope = adminScope;
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
   let response: Response;
@@ -134,7 +150,7 @@ async function performUpload<T>(path: string, body: FormData, timeoutMs: number)
   catch { throw new APIError(0, 'unavailable', '上传未完成，请检查连接并刷新备份列表确认结果。'); }
   if (!response.ok) {
     const data = await response.json().catch(() => ({})); const code = data.error?.code || 'request_failed';
-    if (response.status === 401) window.dispatchEvent(new Event('auth-expired'));
+    if (response.status === 401 && scope === adminScope) window.dispatchEvent(new Event('auth-expired'));
     throw new APIError(response.status, code, messages[code] || translateAPIMessage(data.error?.message || '上传失败'));
   }
   return response.json();

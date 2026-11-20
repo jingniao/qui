@@ -34,23 +34,25 @@ var version = "dev"
 // the operator modes plus the supervisor, managed-worker and image-probe flags
 // the Agent self-update path itself invokes.
 type agentFlags struct {
-	local             *localAgentFlags
-	path              *string
-	check             *bool
-	showVersion       *bool
-	describeStorage   *bool
-	storageVersion    *int
-	describeControl   *bool
-	applyHostNetwork  *string
-	applyTuning       *string
-	managed           *bool
-	supervise         *bool
-	initializeHistory *bool
-	enroll            *bool
-	tokenFile         *string
-	renewCertificate  *bool
-	rotateKey         *bool
-	drainTelemetry    *bool
+	local                *localAgentFlags
+	path                 *string
+	check                *bool
+	showVersion          *bool
+	describeStorage      *bool
+	storageVersion       *int
+	describeControl      *bool
+	applyHostNetwork     *string
+	applyTuning          *string
+	probeTuning          *string
+	installTuningModules *bool
+	managed              *bool
+	supervise            *bool
+	initializeHistory    *bool
+	enroll               *bool
+	tokenFile            *string
+	renewCertificate     *bool
+	rotateKey            *bool
+	drainTelemetry       *bool
 }
 
 func registerFlags(set *flag.FlagSet) *agentFlags {
@@ -64,6 +66,8 @@ func registerFlags(set *flag.FlagSet) *agentFlags {
 	f.describeControl = set.Bool("control-only-contract", false, "show fixed control-only worker capability and exit")
 	f.applyHostNetwork = set.String("apply-host-network", "", "apply the enforced outbound source of a helper directory and exit")
 	f.applyTuning = set.String("apply-tuning", "", "apply the fixed sysctl profile of a helper directory and exit")
+	f.probeTuning = set.String("probe-tuning", "", "probe write access to the fixed sysctl whitelist and exit")
+	f.installTuningModules = set.Bool("install-tuning-modules", false, "process the fixed Ubuntu BBR/fq module request and exit")
 	f.managed = set.Bool("managed-worker", false, "run with a local authenticated supervisor handshake")
 	f.supervise = set.Bool("supervise", false, "run the authenticated installed Agent under supervision")
 	f.initializeHistory = set.Bool("initialize-agent-history", false, "explicitly adopt this Agent as the initial supervised version")
@@ -90,8 +94,20 @@ func run() error {
 }
 
 func execute(set *flag.FlagSet, f *agentFlags) (resultErr error) {
+	if *f.installTuningModules {
+		if set.NArg() != 0 || set.NFlag() != 1 {
+			return errors.New("--install-tuning-modules must be used alone")
+		}
+		return tuning.RunModuleHelper()
+	}
 	if handled, err := executeLocalAgent(set, f.local, *f.path, version); handled {
 		return err
+	}
+	if *f.probeTuning != "" {
+		if set.NArg() != 0 || set.NFlag() != 1 {
+			return fmt.Errorf("--probe-tuning cannot be combined with other flags")
+		}
+		return tuning.RunProbe(*f.probeTuning)
 	}
 	if *f.applyTuning != "" {
 		exclusive := set.NArg() == 0

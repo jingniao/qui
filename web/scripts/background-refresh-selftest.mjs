@@ -18,13 +18,14 @@ assert.equal(toasts.length, 0, 'open bell background errors are silent');
 assert.deepEqual(items.value, [{ id: 'old' }]); assert.equal(unreadCount.value, 3);
 await h.loadData(); assert.equal(toasts.length, 1, 'explicit reads still report failure');
 const detail = read('modules/users/pages/UserDetailPage.vue');
+const primary = detail.slice(detail.indexOf('function observeUserDenial('), detail.indexOf('async function loadPreview('));
 const activity = detail.slice(detail.indexOf('function loadActivity('), detail.indexOf('const refreshStatus ='));
 const user = ref({ id: 'u', username: 'user', usedTraffic: 4 });
 const traffic = ref({ observations: 8 }), accesses = ref([{ id: 'a' }]), operations = ref([{ id: 7 }]);
 const activityToasts = [];
-const run = new Function('accessAPI', 'request', 'trafficSummary', 'recentAccessList', 'userOperations', 'user', 'userId', 'userAPI', 'loginEnabled', 'document', 'showToast', compile('let userGeneration = 0, activityGeneration = 0, loadingUser = false;\n' + activity + '\nreturn { loadActivity, refreshUserStatus };'))(
-  { accounts: reject, list: reject }, reject, traffic, accesses, operations, user, ref('u'), { get: reject }, ref(false), { hidden: false }, (...args) => activityToasts.push(args));
-run.loadActivity(user.value, 0); await tick(); await run.refreshUserStatus();
+const run = new Function('accessAPI', 'request', 'trafficSummary', 'recentAccessList', 'userOperations', 'user', 'userAPI', 'loginEnabled', 'document', 'showToast', 'invalidateDeniedUser', compile('let userGeneration = 0, activityGeneration = 0, loadingUser = false, primaryUserRead;\nconst resetProfileRetryRequired = { value: false }, userOperationReadPaths = new Set();\n' + primary + activity + '\nreturn { loadActivity, refreshUserStatus };'))(
+  { accounts: reject, list: reject }, reject, traffic, accesses, operations, user, { get: reject }, ref(false), { hidden: false }, (...args) => activityToasts.push(args), () => false);
+run.loadActivity(user.value.id, 0, Promise.resolve(user.value)); await tick(); await run.refreshUserStatus();
 assert.deepEqual(activityToasts.map(([message]) => message).sort(), [
   '流量记录读取失败：offline', '访问记录读取失败：offline',
   '操作记录读取失败：offline', '用户状态刷新失败：offline'

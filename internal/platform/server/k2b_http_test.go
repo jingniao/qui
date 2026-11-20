@@ -51,6 +51,15 @@ func TestK2bHTTPPermissionsValidationAndAudit(t *testing.T) {
 	} {
 		check("PUT", base+"/tuning", bad, 400, "")
 	}
+	for _, tc := range []struct{ host, reason string }{{`{"tuningProbeStatus":"boot mismatch"}`, "boot mismatch"}, {`{"tuningProbeStatus":"ready","tuningKeys":[{"key":"net.core.somaxconn","present":true,"probeError":"permission denied"}]}`, "permission denied"}} {
+		if _, err = app.Database.Exec("UPDATE nodes SET capabilities_json=? WHERE id=?", `{"tuningSupported":true,"host":`+tc.host+"}", n.ID); err != nil {
+			t.Fatal(err)
+		}
+		check("PUT", base+"/tuning", body, 409, tc.reason)
+	}
+	if _, err = app.Database.Exec(`UPDATE nodes SET capabilities_json='{"tuningSupported":true}' WHERE id=?`, n.ID); err != nil {
+		t.Fatal(err)
+	}
 	check("PUT", base+"/tuning", body, 202, "pending")
 	check("PUT", base+"/tuning", body, 409, "tuning_busy")
 	var count int

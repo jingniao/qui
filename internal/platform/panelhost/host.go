@@ -92,15 +92,15 @@ func Run(ctx context.Context, owner *panelstore.Ownership, c config.Panel, confi
 	if err != nil {
 		return err
 	}
-	defer func() { httpListener.Close(); grpcListener.Close() }()
+	defer httpListener.Close()
+	defer grpcListener.Close()
 	c.HTTPAddress = httpListener.Addr().String()
 	c.GRPCAddress = grpcListener.Addr().String()
 	app, err := server.New(c, database, files, logger)
 	if err != nil {
-		httpListener.Close()
-		grpcListener.Close()
 		return err
 	}
+	defer func() { resultErr = errors.Join(resultErr, app.Close()) }()
 	key, err := os.ReadFile(filepath.Join(c.NodeIdentityDirectory, "configuration.key"))
 	if err != nil {
 		return err
@@ -201,10 +201,11 @@ func Run(ctx context.Context, owner *panelstore.Ownership, c config.Panel, confi
 					return errors.Join(restoreErr, err)
 				}
 			}
-			app, err = server.New(c, database, files, logger)
+			reopened, err := server.New(c, database, files, logger)
 			if err != nil {
 				return errors.Join(restoreErr, err)
 			}
+			app = reopened
 			httpListener, grpcListener, err = listeners(c)
 			if err != nil {
 				return errors.Join(restoreErr, err)

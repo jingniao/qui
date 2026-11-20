@@ -74,7 +74,8 @@ const listRefreshCode = ts.transpileModule(`
   let staticInventoryTimer;
   const recheckStaticInventory = () => {}, setTimeout = () => 1, clearTimeout = () => {};
   let inventoryRead = 0, visibilityGeneration = 0, runtimeRead = 0;
-  let inventory = [], inventoryScope, scheduledStatic;
+  let inventory = [], scheduledStatic;
+  const inventoryScope = { value: false }, loading = { value: false }, invalidatesRead = () => false;
   const runtime = { generation: '', inventoryRevision: 0, calibrate: snapshot => snapshot.generation === 'generation' };
   const console = { error: logError };
   const ours = () => true, choices = reader => reader(1, 20);

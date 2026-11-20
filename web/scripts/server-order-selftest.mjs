@@ -88,24 +88,27 @@ function orderPage(api) {
   // an empty inventory and no pending runtime changes, but still executes the
   // page's real load/confirmation functions and checks their error channels.
   names.push('calibrateRuntime', 'loadNodeMetadata', 'runtime');
-  values.push(async () => {}, async () => {}, { generation: '' });
-  const inventory = 'let inventory = []; let inventoryScope; let lastMembershipCheck = "";';
+  values.push(async () => {}, async () => {}, { generation: '', get: () => undefined });
+  names.push('applyRuntimeSnapshot');
+  values.push(node => node);
+  const inventory = 'let inventory = []; const inventoryScope = { value: undefined }; let lastMembershipCheck = "";';
   const code = ts.transpileModule(block + '\n' + inventory + '\n' + loadBlock + '\n' + guard, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
   const result = new Function(...names, code + '\nreturn { setOrder, saveOrder, load };')(...values);
   return { ...result, load: async () => {
     await result.load();
     assert.equal(boundRefs.error.value, '', 'sorting fixture must complete the real page load');
     assert.deepEqual(boundRefs.inventoryWarnings.value, [], 'metadata fixture must load successfully');
-  }, ids, saved, leave: () => leave() };
+  }, ids, saved, nodes: boundRefs.nodes, warnings: boundRefs.warnings, leave: () => leave() };
 }
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const oldRead = deferred();
 const late = orderPage({ serverOrder: () => oldRead.promise, list: async () => ({ items: [] }), machineTrafficBatch: async () => ({ items: [] }), saveServerOrder: async ids => ({ ids, revision: 5 }) });
-await late.load();
+const lateLoading = late.load();
+await tick();
 late.setOrder(['b', 'a']);
 await late.saveOrder();
 oldRead.resolve({ ids: ['a', 'b'], revision: 4 });
-await tick();
+await lateLoading;
 let reviewFailures = 0;
 try {
   assert.deepEqual(late.ids.value, ['b', 'a'], 'late old GET must not undo saved order');
@@ -146,3 +149,17 @@ try {
   console.log('PASS route departure drains queue before fresh instance return');
 } catch (error) { reviewFailures++; console.error(error); }
 assert.equal(reviewFailures, 0, 'C6 review sorting regressions');
+
+const delayedOrder = deferred();
+const cold = orderPage({ serverOrder: () => delayedOrder.promise, list: async () => ({ items: [{ id: 'a' }, { id: 'b' }] }) });
+const firstLoad = cold.load();
+await tick();
+assert.deepEqual(cold.nodes.value, [], 'do not paint unsorted inventory while its order is pending');
+delayedOrder.resolve({ ids: ['b', 'a'], revision: 5 });
+await firstLoad;
+assert.deepEqual(cold.ids.value, ['b', 'a']);
+assert.deepEqual(cold.nodes.value.map(node => node.id), ['a', 'b']);
+const failedOrder = orderPage({ serverOrder: async () => { throw new Error('order unavailable'); }, list: async () => ({ items: [] }) });
+await failedOrder.load();
+assert.match(failedOrder.warnings.value.join(' '), /order unavailable/);
+console.log('PASS first inventory and order commit together; order failure remains visible');

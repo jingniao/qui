@@ -5,14 +5,127 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"proxycontrol/internal/panel/node"
 	subproxy "proxycontrol/internal/panel/subscription/proxy"
 	"proxycontrol/internal/panel/subscription/source/published"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
+
+type failingRelayShareSource struct{ calls int }
+
+func (s *failingRelayShareSource) Proxies(context.Context, string, string) ([]subproxy.Proxy, []subproxy.Warning, error) {
+	s.calls++
+	return nil, nil, errors.New("share generation unavailable")
+}
+
+func TestNodeRelayBatchDisplaysRulesWithoutShares(t *testing.T) {
+	p := newCanvasPanel(t)
+	tunnelTestRange(t, p, p.nodeA, p.nodeB)
+	owner, _ := p.session("Owner")
+	viewer, _ := p.session("Viewer")
+	source := &failingRelayShareSource{}
+	p.handler.RelayProxies = source
+	if _, err := p.database.Exec("INSERT INTO users(id,username,display_name,status,max_devices,max_connections,protocols_json,created_at) VALUES('share-user','share-user','Share user','active',1,1,'[]','now')"); err != nil {
+		t.Fatal(err)
+	}
+	tunnel, err := p.service.SaveTunnel(p.ctx, "", tunnelTestInput(p.nodeA, p.nodeB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "user", NodeID: p.nodeB, Protocol: "socks5", Listen: "0.0.0.0", Port: 1081, Enabled: true, DefaultOutbound: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.service.CreateNodeRelay(p.ctx, p.nodeB, NodeRelayInput{TunnelID: tunnel.ID, InboundID: inbound.ID, PortMode: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.database.Exec("INSERT INTO tunnel_rules(id,name,entry_node_id,listen_port,port_mode,network,target_mode,subscription_visible,enabled,created_at,updated_at,status) VALUES('missing-import','Imported relay',?,31000,'manual','both','import',1,1,'now','now','pending_delete')", p.nodeA); err != nil {
+		t.Fatal(err)
+	}
+	nodes := &node.Repository{Database: p.database}
+	empty, _, _, err := nodes.CreateEnrollment(p.ctx, "Empty", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, _, _, err := nodes.CreateEnrollment(p.ctx, "Deleted", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.database.Exec("UPDATE nodes SET deleted_at='now' WHERE id=?", deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	type entry struct {
+		NodeID string
+		Rules  []TunnelRule
+		Error  *struct{ Code string }
+	}
+	ids := []string{p.nodeA, p.nodeB, empty.ID, "missing", deleted.ID}
+	path := "/api/v1/nodes/relay-rules?nodeIds=" + strings.Join(ids, ",")
+	assertTunnelHTTP(t, p.call("GET", path, nil, nil, ""), 401, "unauthorized")
+	legacyPath := "/api/v1/nodes/" + p.nodeB + "/relays"
+	assertTunnelHTTP(t, p.call("GET", legacyPath, nil, owner, ""), 500, "internal_error")
+	if source.calls != 1 {
+		t.Fatalf("legacy route called share generation %d times", source.calls)
+	}
+	first := p.call("GET", path, nil, owner, "")
+	assertTunnelHTTP(t, first, 200, "")
+	second := p.call("GET", path, nil, viewer, "")
+	assertTunnelHTTP(t, second, 200, "")
+	if source.calls != 1 || strings.Contains(first.Body.String(), "shareLink") || second.Body.String() != first.Body.String() {
+		t.Fatalf("share calls=%d, Owner=%s, Viewer=%s", source.calls, first.Body.String(), second.Body.String())
+	}
+	var result struct{ Items []entry }
+	if err = json.Unmarshal(first.Body.Bytes(), &result); err != nil || len(result.Items) != len(ids) {
+		t.Fatal(first.Body.String(), err)
+	}
+	for i, item := range result.Items {
+		if item.NodeID != ids[i] {
+			t.Fatal(item.NodeID, ids[i])
+		}
+		if i >= 3 {
+			if item.Error == nil || item.Error.Code != "not_found" || len(item.Rules) != 0 {
+				t.Fatal(first.Body.String())
+			}
+			continue
+		}
+		response := p.call("GET", "/api/v1/nodes/"+item.NodeID+"/relays", nil, viewer, "")
+		assertTunnelHTTP(t, response, 200, "")
+		var legacy struct{ Items []NodeRelay }
+		if err = json.Unmarshal(response.Body.Bytes(), &legacy); err != nil {
+			t.Fatal(response.Body.String(), err)
+		}
+		want := make([]TunnelRule, 0, len(legacy.Items))
+		for _, relay := range legacy.Items {
+			want = append(want, relay.Rule)
+		}
+		if item.Error != nil || !reflect.DeepEqual(item.Rules, want) {
+			t.Fatalf("node %s: rules=%+v want=%+v error=%+v", item.NodeID, item.Rules, want, item.Error)
+		}
+	}
+
+	// One invalid target makes its old list fail, but must not hide another node's rules.
+	if _, err = p.database.Exec("UPDATE inbounds SET internal_relay=1 WHERE id=?", inbound.ID); err != nil {
+		t.Fatal(err)
+	}
+	broken := p.call("GET", path, nil, viewer, "")
+	assertTunnelHTTP(t, broken, 200, "")
+	result.Items = nil
+	if err = json.Unmarshal(broken.Body.Bytes(), &result); err != nil || len(result.Items) != len(ids) {
+		t.Fatal(broken.Body.String(), err)
+	}
+	if len(result.Items[0].Rules) != 1 || result.Items[0].Error != nil || len(result.Items[1].Rules) != 0 || result.Items[1].Error == nil || result.Items[1].Error.Code != "invalid" {
+		t.Fatal(broken.Body.String())
+	}
+	for _, malformed := range []string{"", p.nodeA + "," + p.nodeA, p.nodeA + ","} {
+		assertTunnelHTTP(t, p.call("GET", "/api/v1/nodes/relay-rules?nodeIds="+malformed, nil, owner, ""), 400, "invalid_request")
+	}
+}
 
 func TestNodeRelayHandlersAndInboundDeletion(t *testing.T) {
 	p := newCanvasPanel(t)

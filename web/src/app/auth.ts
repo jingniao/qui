@@ -1,6 +1,6 @@
-import { reactive, computed } from 'vue';
+import { reactive, computed, watch } from 'vue';
 import type { AdminUser } from '../types';
-import { request, setCSRFToken } from './apiClient';
+import { request, setCSRFToken, advanceRequestScope, requestScope } from './apiClient';
 
 interface SessionView {
   isAuthenticated: boolean;
@@ -15,6 +15,7 @@ export const authState = reactive({
   isAuthenticated: false,
   isInitialized: false,
   currentUser: null as AdminUser | null,
+  loginGeneration: 0,
   ready: false,
   error: '',
   sseStatus: 'disconnected' as 'connected' | 'reconnecting' | 'disconnected',
@@ -35,8 +36,14 @@ function apply(session: SessionView) {
 }
 
 export async function refreshSession() {
-  try { apply(await request<SessionView>('/auth/session')); }
-  catch (error) { authState.error = (error as Error).message; authState.ready = false; throw error; }
+  const scope = requestScope();
+  try {
+    const session = await request<SessionView>('/auth/session');
+    if (scope === requestScope()) apply(session);
+  } catch (error) {
+    if (scope !== requestScope()) return;
+    authState.error = (error as Error).message; authState.ready = false; throw error;
+  }
 }
 export async function ensureSession() {
   if (authState.ready) return;
@@ -44,7 +51,9 @@ export async function ensureSession() {
   return loading;
 }
 export async function login(username: string, password: string) {
-  apply(await request<SessionView>('/auth/login', 'POST', { username, password }));
+  const session = await request<SessionView>('/auth/login', 'POST', { username, password });
+  authState.loginGeneration++;
+  apply(session);
 }
 export async function completeSetup(token: string, username: string, password: string, platformName: string, timezone: string) {
   apply(await request<SessionView>('/auth/setup', 'POST', { token, username, password, platformName, timezone }));
@@ -64,6 +73,9 @@ export async function changePassword(currentPassword: string, newPassword: strin
   clearSession();
 }
 export const isOwner = computed(() => authState.currentUser?.role === 'Owner');
+export const adminReadScope = computed(() => authState.isAuthenticated && authState.currentUser
+  ? JSON.stringify([authState.currentUser.id, authState.currentUser.role, authState.loginGeneration]) : '');
+watch(adminReadScope, advanceRequestScope, { flush: 'sync' });
 export const isAdmin = isOwner;
 export const isViewer = computed(() => authState.currentUser?.role === 'Viewer');
 

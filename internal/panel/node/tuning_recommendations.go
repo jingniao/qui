@@ -81,9 +81,13 @@ func (r *Repository) nodeRecommendations(ctx context.Context, n Node) Recommenda
 	_ = r.Database.QueryRowContext(ctx, "SELECT bandwidth_mbps FROM node_meta WHERE node_id=?", n.ID).Scan(&bandwidth)
 
 	// 3. Query AdviceSources
-	hasQUIC, _ := r.adviceSources().HasQUICInbound(ctx, n.ID)
-	relay, _ := r.adviceSources().RelayRole(ctx, n.ID)
-	medianRTT, _ := r.adviceSources().MedianRTT(ctx, n.ID)
+	adviceSources := r.adviceSources()
+	hasQUIC, _ := adviceSources.HasQUICInbound(ctx, n.ID)
+	relay, _ := adviceSources.RelayRole(ctx, n.ID)
+	var medianRTT *float64
+	if bandwidth != nil && *bandwidth > 0 {
+		medianRTT, _ = adviceSources.MedianRTT(ctx, n.ID)
+	}
 
 	// 4. Build Inputs
 	host := n.Capabilities.Host
@@ -152,7 +156,7 @@ func (r *Repository) decorateTuningAdvice(ctx context.Context, nodes []Node) err
 }
 
 func (h *Handler) tuningRecommendations(w http.ResponseWriter, r *http.Request) {
-	n, err := h.Repository.Get(r.Context(), r.PathValue("id"))
+	n, err := h.Repository.GetForCoreSelection(r.Context(), r.PathValue("id"))
 	if err != nil {
 		h.fail(w, err)
 		return

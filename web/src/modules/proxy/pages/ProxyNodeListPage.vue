@@ -256,7 +256,7 @@
 
           <!-- 4. Relay Routes Summary Column -->
           <td class="text-xs">
-            <div v-if="!relayCount(node)" class="text-neutral-400">
+            <div v-if="!relayCount(node) && relayListReady(node)" class="text-neutral-400">
               无额外中转入口
             </div>
             <div v-else class="space-y-1">
@@ -277,7 +277,7 @@
                 <RelayRouteEntries :entries="routeEntries(r)" @copy="copyAddress" />
               </div>
             </div>
-            <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" variant="table" :is-owner="isOwner" :entry-address="relayEntryAddress" @copy="copyAddress" />
+            <NodeRelayList :relays="linkedRelays(node)" :error="relayError(node)" variant="table" :is-owner="isOwner" :entry-address="relayEntryAddress" @copy="copyAddress" />
           </td>
 
           <!-- 5. Real Status & Latency (Same as Server Page) -->
@@ -447,7 +447,7 @@
 
             <!-- Expanded Routes Content -->
             <div v-show="!isRelayCollapsed(node.id, relayCount(node))" class="space-y-1.5">
-              <div v-if="!relayCount(node)" class="bg-[#F8F9FA] rounded-xl p-2 text-center text-xs text-neutral-400 border border-black/[0.03]">
+              <div v-if="!relayCount(node) && relayListReady(node)" class="bg-[#F8F9FA] rounded-xl p-2 text-center text-xs text-neutral-400 border border-black/[0.03]">
                 无中转线路 · 支持直连接入
               </div>
               <div
@@ -486,8 +486,11 @@
                   编辑
                 </button>
               </div>
-              <NodeRelayList :relays="linkedRelays(node)" :error="relayErrors[node.sourceId || '']" variant="card" :is-owner="isOwner" :entry-address="relayEntryAddress" @copy="copyAddress" />
+              <NodeRelayList :relays="linkedRelays(node)" :error="relayError(node)" variant="card" :is-owner="isOwner" :entry-address="relayEntryAddress" @copy="copyAddress" />
             </div>
+            <p v-if="relayError(node) && isRelayCollapsed(node.id, relayCount(node))" class="text-xs text-ios-red">
+              关联规则加载失败：{{ relayError(node) }}
+            </p>
           </div>
         </div>
 
@@ -1090,6 +1093,7 @@ import type { InboundStateItem, InboundPublishState } from '../../system/deploym
 import AddRelayDialog from '../../tunnels/components/AddRelayDialog.vue';
 import QuickRelayDialog from '../components/QuickRelayDialog.vue';
 import { useNodeRelayActions } from '../useNodeRelayActions';
+import { createInboundStateReads } from '../inboundStateReads';
 import ImportResultDialog from '../components/ImportResultDialog.vue';
 import NodeRelayList from '../../tunnels/components/NodeRelayList.vue';
 import RelayRouteEntries from '../components/RelayRouteEntries.vue';
@@ -1253,10 +1257,6 @@ async function loadData() {
   const generation = ++serverRefreshGeneration;
   loading.value = true;
   try {
-    // Keep old browser data intact, but never mix its ungranted entries into
-    // the server-owned U5 list.
-    proxyNodeStore.manualNodes = [];
-    proxyNodeStore.subscriptions = [];
     const resources = Promise.all([
       inventory.readServers().then(nodeRes => { if (generation === serverRefreshGeneration) servers.value = nodeRes; }),
       inventory.readInbounds()
@@ -1383,7 +1383,7 @@ function applyFilter() {
 }
 
 const {
-  relayNode, quickRelayInboundId, quickRelayImportId, relayErrors, getNodeRoutes: computeNodeRoutes, goToEditRelayRoute,
+  relayNode, quickRelayInboundId, quickRelayImportId, relayError, relayListReady, getNodeRoutes: computeNodeRoutes, goToEditRelayRoute,
   linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
   handleAddRelay, createRelayScheme, isLinkedRelayRule,
 } = useNodeRelayActions(isOwner, servers, serverInbounds);
@@ -1516,9 +1516,7 @@ async function saveManualNodeModal() {
     const created = await importAPI.create({name, content:quickLinkInput.value.trim(), intervalSeconds:refreshSeconds.value, userIds:[]});
     quickLinkInput.value='';
     openImportNodeModal.value=false;
-    // A reload failure cannot undo a saved import, so it never becomes an error and
-    // never causes a second save.
-    await loadImports().catch(() => {});
+    await loadImports().catch(e => showToast(`导入已保存，列表读取失败：${(e as Error).message}`, 'error'));
     // A pasted import runs through the same analyzer as a fetch, so its result is
     // the toast; a partial or failed paste opens the bounded reasons directly,
     // because a content source has no card of its own.
@@ -1567,13 +1565,9 @@ function cancelEditSub() {
 
 async function refreshSubscriptionSource(id: string) {
   try {
-    const result = await importAPI.refresh(id);
-    await loadImports();
-    return result;
-  } catch (e) {
-    // Refresh may have saved a failed result. Keep its error if reloading also fails.
-    await loadImports().catch(() => {});
-    throw e;
+    return await importAPI.refresh(id);
+  } finally {
+    await loadImports().catch(e => showToast(`导入列表读取失败：${(e as Error).message}`, 'error'));
   }
 }
 
@@ -1735,57 +1729,38 @@ function transportLabel(node: Pick<ProxyNodeItem, 'protocol' | 'settings'>): str
   return `${node.settings?.transport || 'tcp'}${node.settings?.security ? ' + ' + node.settings.security : ''}`;
 }
 
-let publishStateGeneration = 0;
-let publishStateReading = false, publishStateAgain = false, publishStateDisposed = false, requestedPublishKey = '', nextPublishKey = '';
+let publishStateDisposed = false;
 function visibleServerIds() {
   const nodes = displayMode.value === 'list' ? pagedNodes.value : filteredNodes.value;
   return new Set(nodes.filter(n => n.sourceType === 'self_hosted' && n.sourceId).map(n => n.sourceId!));
 }
-async function loadServerPublishStates() {
-  if (document.hidden || publishStateDisposed) return;
-  const serverIds = [...visibleServerIds()];
-  nextPublishKey = [...serverIds].sort().join(',');
-  if (publishStateReading) { publishStateAgain = true; return; }
-  if (!serverIds.length) return;
-  publishStateReading = true; requestedPublishKey = nextPublishKey;
-  const generation = ++publishStateGeneration;
-  const results: (readonly [string, InboundStateItem[] | string])[] = [];
-  try {
-    // The endpoint validates at most 200 IDs per request.
-    for (let offset = 0; offset < serverIds.length; offset += 200) {
-      const batch = await deploymentAPI.inboundStatesBatch(serverIds.slice(offset, offset + 200));
-      results.push(...batch.items.map(item => [item.nodeId, item.error || item.items] as const));
-    }
-  } catch (e) {
-    results.push(...serverIds.map(id => [id, (e as Error).message] as const));
-  }
-
-  publishStateReading = false;
-  const readAgain = publishStateAgain; publishStateAgain = false;
-  if (generation !== publishStateGeneration) return;
-  if (requestedPublishKey !== nextPublishKey) { void loadServerPublishStates(); return; }
+const publishStateReads = createInboundStateReads(ids => deploymentAPI.inboundStatesBatch(ids), results => {
   const nextMap = new Map(inboundStateMap.value);
   const errors = new Map(inboundStateErrors.value);
-  for (const [id, items] of results) {
-    if (typeof items === 'string') {
-      errors.set(id, `入站状态读取失败：${items}`);
+  for (const { nodeId, items, error } of results) {
+    if (error !== undefined) {
+      errors.set(nodeId, `入站状态读取失败：${error}`);
       continue;
     }
-    errors.delete(id);
-    for (const key of [...nextMap.keys()]) if (key.startsWith(`${id}/`)) nextMap.delete(key);
-    for (const item of items) nextMap.set(`${id}/${item.inboundId}`, item);
+    errors.delete(nodeId);
+    for (const key of nextMap.keys()) if (key.startsWith(`${nodeId}/`)) nextMap.delete(key);
+    for (const item of items) nextMap.set(`${nodeId}/${item.inboundId}`, item);
   }
   inboundStateMap.value = nextMap;
   inboundStateErrors.value = errors;
-  if (readAgain) void loadServerPublishStates();
+}, () => !document.hidden);
+function loadServerPublishStates(retryIds: readonly string[] = []) {
+  return publishStateReads.load([...visibleServerIds()], retryIds);
 }
-
-function visiblePublishKey() {
-  const ids = visibleServerIds();
-  return servers.value.filter(node => ids.has(node.id)).map(node => node.id + '/' + (node.heartbeat?.current_revision || 0)).sort().join(',');
+function visibleServerKey() {
+  return [...visibleServerIds()].sort().join(',');
 }
-watch([visiblePublishKey, serverInbounds], () => {
-  loadServerPublishStates();
+function serverRevisionKey() {
+  return servers.value.map(node => node.id + '/' + (node.heartbeat?.current_revision || 0)).sort().join(',');
+}
+watch([visibleServerKey, serverRevisionKey, serverInbounds], ([, revisions, drafts], [, previousRevisions, previousDrafts]) => {
+  if (revisions !== previousRevisions || drafts !== previousDrafts) publishStateReads.invalidate();
+  void loadServerPublishStates();
 }, { immediate: true });
 
 let serverRefreshGeneration = 0;
@@ -1800,29 +1775,44 @@ async function refreshServersOnNodeStatus() {
   }
 }
 function onNodeRuntime(event: Event) {
-  if (inventory.applyEvent(servers.value, (event as CustomEvent<RuntimeSnapshot>).detail)) refreshInventory();
+  if (inventory.applyEvent(servers.value, (event as CustomEvent<RuntimeSnapshot>).detail)) onInventoryChanged();
 }
 const refreshInventory = throttleTrailing(() => { void refreshServersOnNodeStatus(); void loadServerPublishStates(); }, 1000);
 const refreshDeployment = throttleTrailing(() => { void loadServerPublishStates(); }, 1000);
+function onInventoryChanged() {
+  publishStateReads.invalidate();
+  refreshInventory();
+}
 function onNodeStatus(event: Event) {
-  if (nodeStatusEventChangesInventory(event)) refreshInventory();
+  if (nodeStatusEventChangesInventory(event)) onInventoryChanged();
+}
+function onDeploymentStatus() {
+  publishStateReads.invalidate();
+  refreshDeployment();
 }
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
 function queueDraftRefresh() {
+  publishStateReads.invalidate();
   clearTimeout(draftTimer);
-  if (!document.hidden) draftTimer = setTimeout(() => { void loadData(); }, 150);
+  if (!document.hidden) draftTimer = setTimeout(() => {
+    void loadData().finally(() => { void loadServerPublishStates(); });
+  }, 150);
 }
+defineExpose({ refresh: queueDraftRefresh });
 function resyncInventory() { inventory.resetStream(); queueDraftRefresh(); }
 function publishVisibilityChanged() { if (!document.hidden) resyncInventory(); }
 let statusClock: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   statusClock = setInterval(() => {
     now.value = Date.now();
-    if (inboundStateErrors.value.size && !publishStateReading && [...visibleServerIds()].some(id => inboundStateErrors.value.has(id))) void loadServerPublishStates();
+    if (inboundStateErrors.value.size) {
+      const failed = [...visibleServerIds()].filter(id => inboundStateErrors.value.has(id));
+      if (failed.length) void loadServerPublishStates(failed);
+    }
   }, 5000);
   if (isOwner.value) void loadProtocolSupport().catch(e => showToast(`协议支持表读取失败：${(e as Error).message}`, 'error'));
   loadData();
-  window.addEventListener('proxy-deployment-status', refreshDeployment);
+  window.addEventListener('proxy-deployment-status', onDeploymentStatus);
   window.addEventListener('proxy-draft-changed', queueDraftRefresh);
   window.addEventListener('proxy-node-status', onNodeStatus);
   window.addEventListener('proxy-node-runtime', onNodeRuntime);
@@ -1834,11 +1824,11 @@ onUnmounted(() => {
   clearInterval(statusClock);
   serverRefreshGeneration++;
   publishStateDisposed = true;
-  publishStateGeneration++;
+  publishStateReads.dispose();
   document.removeEventListener('visibilitychange', publishVisibilityChanged);
   clearTimeout(draftTimer);
   refreshInventory.cancel(); refreshDeployment.cancel();
-  window.removeEventListener('proxy-deployment-status', refreshDeployment);
+  window.removeEventListener('proxy-deployment-status', onDeploymentStatus);
   window.removeEventListener('proxy-draft-changed', queueDraftRefresh);
   window.removeEventListener('proxy-node-status', onNodeStatus);
   window.removeEventListener('proxy-node-runtime', onNodeRuntime);

@@ -5,7 +5,7 @@
          usable panels, and it is the only interactive surface until a scheme
          exists (dragging into a non-existent scheme would edit nothing). -->
     <div
-      v-if="schemesLoading || schemesLoadError || !currentScheme.id"
+      v-if="!currentScheme.id"
       class="absolute inset-0 z-40 bg-[#F5F5F7] flex flex-col items-center justify-center gap-3 px-6 text-center"
       role="status"
     >
@@ -27,6 +27,9 @@
       <button type="button" class="ios-btn-primary mt-1" @click="createNewScheme">新建方案</button>
       </template>
     </div>
+    <p v-if="currentScheme.id && schemesLoadError" role="alert" class="px-4 py-2 text-sm text-ios-red bg-white">
+      {{ schemesLoadError }} <button class="ios-btn-secondary" @click="loadWorkspace">重试</button>
+    </p>
     <!-- 1. Top Integrated Studio Toolbar -->
     <!-- The single 56 px row only works when the studio really is desktop wide. The
          shell sidebar takes 272 px, so at a 1120 px viewport the studio is ~850 px
@@ -35,7 +38,7 @@
          (1280 px) the bar therefore grows and wraps into rows (icon labels keep
          title/aria-label); from xl up it is one row again, and the scheme name
          truncates (max-width + title tooltip) instead of overlapping the actions. -->
-    <header class="px-3 sm:px-4 py-2 min-h-[3.5rem] xl:h-14 xl:py-0 bg-white/95 backdrop-blur-md border-b border-black/[0.08] flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-3 gap-y-2 shrink-0 shadow-2xs z-30">
+    <header :inert="workspaceLocked || undefined" class="px-3 sm:px-4 py-2 min-h-[3.5rem] xl:h-14 xl:py-0 bg-white/95 backdrop-blur-md border-b border-black/[0.08] flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-3 gap-y-2 shrink-0 shadow-2xs z-30">
       <!-- Left: Panel Toggle & Scheme Switcher -->
       <div class="flex flex-wrap xl:flex-nowrap items-center gap-2.5 min-w-0 xl:flex-1">
         <!-- Toggle Left Library Button -->
@@ -349,7 +352,7 @@
     </header>
 
     <!-- 2. Main Studio Workspace (Left Library + Canvas + Right Inspector) -->
-    <div class="flex-1 flex min-h-0 overflow-hidden relative">
+    <div :inert="workspaceLocked || undefined" class="flex-1 flex min-h-0 overflow-hidden relative">
       <!-- Below xl both panels are overlay drawers, so this backdrop is what closes
            them and gives the canvas back. z-[25] keeps it above the canvas controls
            (z-20) and below the drawers (z-30); the no-scheme overlay (z-40) still
@@ -918,9 +921,6 @@
           </div>
 
           <!-- Global Scheme Inspector -->
-          <div v-else-if="schemesLoading || schemesLoadError" role="status">
-            {{ schemesLoadError || '正在载入中转方案…' }}
-          </div>
           <div v-else-if="!currentScheme.id" class="p-4 rounded-xl bg-black/[0.02] border border-dashed border-black/[0.08] text-xs text-ios-tertiary leading-relaxed">
             暂无中转方案：请先点击「新建方案」。方案名称、发布状态与删除操作只对已存在的方案生效。
           </div>
@@ -970,6 +970,7 @@
     </aside>
     </div>
 
+    <template v-if="!workspaceLocked">
     <CanvasConnectionDialog v-if="editor" :key="editor.key" :connection="editor.connection" :source="editor.source" :target="editor.target" :outbounds="outbounds" :client="currentScheme.executionLocation === 'client'" :persist="persistConnection" @close="closeEditor" />
     <ExternalProxyDialog v-if="externalProxyOpen" :nodes="externalOwnerNodes" :initial-node-id="externalOwnerId" @close="externalProxyOpen = false" @created="placeExternalProxy" />
     <AppDialog v-model="openPlanSummary" title="方案发布检查" :show-confirm="false">
@@ -1067,11 +1068,13 @@
       confirm-text="忽略并删除"
       @confirm="ignoreLocalSchemes"
     />
+    </template>
 
   </div>
 </template>
 
 <script setup lang="ts">
+import { readTogether } from '../../../app/readTogether';
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import CanvasConnectionDialog from '../components/relay/CanvasConnectionDialog.vue';
 import CanvasEntryEditor from '../components/relay/CanvasEntryEditor.vue';
@@ -1088,7 +1091,7 @@ import AppDialog from '../../../components/AppDialog.vue';
 import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import { showToast } from '../../../app/api';
-import { APIError } from '../../../app/apiClient';
+import { APIError, invalidatesRead, requestScope } from '../../../app/apiClient';
 import { isOwner } from '../../../app/auth';
 import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
@@ -1247,6 +1250,13 @@ const outbounds = ref<Outbound[]>([]);
 const pendingLocalSchemes = ref<RelayScheme[]>([]);
 const schemesLoading = ref(true);
 const schemesLoadError = ref('');
+const schemesConfirmed = ref(false);
+const workspaceLocked = computed(() => schemesLoading.value || !!schemesLoadError.value);
+const workspaceScope = requestScope();
+let workspaceGeneration = 0, workspaceDisposed = false;
+function currentWorkspace(ticket: number) {
+  return !workspaceDisposed && workspaceScope === requestScope() && ticket === workspaceGeneration;
+}
 const confirmIgnoreLocal = ref(false);
 
 function canvasContext(): CanvasSchemeContext {
@@ -1255,7 +1265,7 @@ function canvasContext(): CanvasSchemeContext {
 
 // An empty display state is never added to the store or persisted.
 const emptyScheme: RelayScheme = { id: '', name: '', executionLocation: 'server', nodes: [], connections: [], published: false, updatedAt: '' };
-const currentScheme = computed<RelayScheme>(() => proxyNodeStore.schemes.find(s => s.id === activeSchemeId.value) || proxyNodeStore.schemes[0] || emptyScheme);
+const currentScheme = computed<RelayScheme>(() => (schemesConfirmed.value && (proxyNodeStore.schemes.find(s => s.id === activeSchemeId.value) || proxyNodeStore.schemes[0])) || emptyScheme);
 const entryServerId = computed(() => selectedNode.value ? instanceNodeId(selectedNode.value) || '' : '');
 const entryBindingStateReady = ref(false);
 const entryBindingStateError = ref('');
@@ -1317,6 +1327,7 @@ async function openRemoval() {
   finally { openingRemoval.value = false; }
 }
 async function onSchemeRemoved(result: CanvasRemoveResult) {
+  if (!currentWorkspace(workspaceGeneration)) return;
   const id = result.schemeId;
   if (removalScheme.value?.id === id) removalScheme.value = null;
   proxyNodeStore.schemes = proxyNodeStore.schemes.filter(scheme => scheme.id !== id);
@@ -1498,16 +1509,19 @@ function switchScheme() {
 
 async function createNewScheme() {
   if (schemesLoading.value || schemesLoadError.value) return;
+  const ticket = workspaceGeneration;
   try {
     const usedNames = new Set(proxyNodeStore.schemes.map(s => s.name));
     let number = 1;
     while (usedNames.has('未命名方案 ' + number)) number++;
     const scheme = await createCanvasScheme('未命名方案 ' + number, 'server', canvasContext());
+    if (!currentWorkspace(ticket)) return;
     activeSchemeId.value = scheme.id;
     selectedNode.value = null;
     selectedConnection.value = null;
     showToast('已创建新方案');
   } catch (error) {
+    if (!currentWorkspace(ticket)) return;
     showToast(`创建方案失败: ${(error as Error).message}`, 'error');
   }
 }
@@ -1780,6 +1794,10 @@ function validateScheme() { void checkScheme(); }
 
 function saveDraft(immediate: boolean | Event = false): Promise<void> | void {
   const scheme = currentScheme.value;
+  if (workspaceLocked.value) {
+    if (immediate === true) throw new Error('方案已失效，请重新读取');
+    return;
+  }
   if (!scheme.id) return;
   for (const node of scheme.nodes) {
     if (scheme.executionLocation !== 'server' || node.resourceType !== 'server' || node.role !== 'entry') {
@@ -1814,7 +1832,10 @@ let saveQueue: Promise<void> = Promise.resolve();
 let queuedWrites = 0;
 function enqueueWrite(write: () => Promise<void>): Promise<void> {
   queuedWrites++;
-  const result = saveQueue.then(write).finally(() => { queuedWrites--; });
+  const result = saveQueue.then(() => {
+    if (requestScope() !== workspaceScope || workspaceLocked.value) throw new Error('方案已失效，请重新读取');
+    return write();
+  }).finally(() => { queuedWrites--; });
   saveQueue = result.catch(() => undefined);
   return result;
 }
@@ -1857,16 +1878,26 @@ async function persistScheme(scheme: RelayScheme) {
   }
 }
 
-async function reloadSchemes(prefetched?: CanvasScheme[]) {
+async function reloadSchemes(prefetched?: CanvasScheme[], ticket = ++workspaceGeneration) {
+  if (!currentWorkspace(ticket)) return;
   schemesLoading.value = true;
   schemesLoadError.value = '';
   try {
-    await loadCanvasSchemes(canvasContext(), prefetched);
+    const schemes = prefetched ?? await choices((page, size) => canvasAPI.list(page, size));
+    if (!currentWorkspace(ticket)) return;
+    await loadCanvasSchemes(canvasContext(), schemes);
+    if (!currentWorkspace(ticket)) return;
+    schemesConfirmed.value = true;
+    selectedNode.value = currentScheme.value.nodes.find(item => item.instanceId === selectedNode.value?.instanceId) || null;
+    selectedConnection.value = currentScheme.value.connections.find(item => item.id === selectedConnection.value?.id) || null;
+    editor.value = null;
   } catch (error) {
+    if (!currentWorkspace(ticket)) return;
+    if (invalidatesRead(error)) schemesConfirmed.value = false;
     schemesLoadError.value = `载入中转方案失败: ${(error as Error).message}`;
     showToast(schemesLoadError.value, 'error');
   } finally {
-    schemesLoading.value = false;
+    if (currentWorkspace(ticket)) schemesLoading.value = false;
   }
 }
 
@@ -1925,6 +1956,7 @@ function ignoreLocalSchemes() {
 // drawing describes and deploy them through the normal batches, exit first and
 // entry last. Read deployment and confirmation separately from the status API.
 async function handleConfirmPublish() {
+  if (workspaceLocked.value) return;
   openPublishModal.value = false;
   const scheme = currentScheme.value;
 
@@ -1969,30 +2001,31 @@ async function handleConfirmPublish() {
 }
 
 async function loadWorkspace() {
+  const ticket = ++workspaceGeneration;
   schemesLoading.value = true;
   schemesLoadError.value = '';
-  // U5 reads the granted source metadata from the panel, not browser records.
-  proxyNodeStore.manualNodes = [];
-  proxyNodeStore.subscriptions = [];
-    void loadNodeMetadata(true).catch(e => {
-      showToast(`载入服务器元数据失败: ${(e as Error).message}`, 'error');
-    });
+  void loadNodeMetadata(true).catch(e => {
+    if (currentWorkspace(ticket)) showToast(`载入服务器元数据失败: ${(e as Error).message}`, 'error');
+  });
   try {
     // Read independent resources in one round; metadata is not needed to draw.
-    const [nodeRes, inboundRes, outboundRes, schemes] = await Promise.all([
+    const [nodeRes, inboundRes, outboundRes, schemes] = await readTogether([
       choices((page, size) => nodeAPI.choices(page, '', size)),
       choices((page, size) => proxyAPI.inbounds('', page, size)),
       choices((page, size) => proxyAPI.outbounds('', page, size)),
       choices((page, size) => canvasAPI.list(page, size)),
       loadImports()
     ]);
+    if (!currentWorkspace(ticket)) return;
     loadImportExits();
     servers.value = nodeRes;
     inbounds.value = inboundRes;
     outbounds.value = outboundRes;
-    await reloadSchemes(schemes);
+    await reloadSchemes(schemes, ticket);
 
   } catch (e) {
+    if (!currentWorkspace(ticket)) return;
+    if (invalidatesRead(e)) schemesConfirmed.value = false;
     schemesLoadError.value = `载入画布资源失败: ${(e as Error).message}`;
     schemesLoading.value = false;
     showToast(schemesLoadError.value, 'error');
@@ -2001,6 +2034,7 @@ async function loadWorkspace() {
 
 onMounted(async () => {
   await loadWorkspace();
+  if (!currentWorkspace(workspaceGeneration)) return;
   // Schemes are stored by the server now; the browser keeps no copy of them.
   readLocalSchemes();
 
@@ -2049,6 +2083,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  workspaceDisposed = true;
   for (const cleanup of [...gestureCleanups]) cleanup();
   void flushPendingSaves();
   window.removeEventListener('beforeunload', warnUnsaved);

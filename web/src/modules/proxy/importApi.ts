@@ -1,4 +1,7 @@
-import { request } from '../../app/apiClient';
+import { readTogether } from '../../app/readTogether';
+import { watch } from 'vue';
+import { adminReadScope, isOwner } from '../../app/auth';
+import { APIError, forgetPendingGet, invalidatesRead, request, requestScope } from '../../app/apiClient';
 import { guessProtocolNetworks, proxyNodeStore, type ImportResult, type ImportSourceKind, type NodeSourceType, type SubscriptionItem } from './proxyNodes';
 
 export type { ImportDiagnostic, ImportResult } from './proxyNodes';
@@ -24,14 +27,31 @@ export const importAPI = {
   proxies: () => request<{ items: ImportedProxy[] }>('/imported-proxies'),
   rename: (id: string, input: { name: string; expectedRevision: number }) => request<ImportedProxy>(`/imported-proxies/${encodeURIComponent(id)}`, 'PUT', input),
   deletionPreview: (id: string) => request<ImportDeletionPreview>(`/imported-proxies/${encodeURIComponent(id)}/deletion-preview`),
-  removeProxy: (id: string, input: { expectedRevision: number; removeReferences: boolean }) => request<void>(`/imported-proxies/${encodeURIComponent(id)}`, 'DELETE', input),
+  async removeProxy(id: string, input: { expectedRevision: number; removeReferences: boolean }) {
+    const scope = requestScope();
+    await request<void>(`/imported-proxies/${encodeURIComponent(id)}`, 'DELETE', input);
+    if (scope !== requestScope()) return;
+    importGeneration++;
+    const sourceId = proxyNodeStore.manualNodes.find(node => node.id === id)?.sourceId;
+    proxyNodeStore.manualNodes = proxyNodeStore.manualNodes.filter(node => node.id !== id);
+    const count = proxyNodeStore.manualNodes.filter(node => node.sourceId === sourceId).length;
+    proxyNodeStore.subscriptions = proxyNodeStore.subscriptions.flatMap(source =>
+      source.id !== sourceId ? [source] : count ? [{ ...source, nodeCount: count }] : []);
+  },
   list: () => request<{ items: ImportSource[] }>('/subscription-sources'),
   // The ID is the primary field. A pasted import is analysed by the same pipeline
   // as a fetch, so its bounded result comes back with the saved source; a source
   // saved without content (a link, or a rename) has no result.
   create: (input: SourceInput) => request<{id:string; result?: ImportResult}>('/subscription-sources', 'POST', input),
   update: (id: string, input: SourceInput) => request<{id:string; result?: ImportResult}>(`/subscription-sources/${encodeURIComponent(id)}`, 'PUT', input),
-  remove: (id: string) => request(`/subscription-sources/${encodeURIComponent(id)}`, 'DELETE'),
+  async remove(id: string) {
+    const scope = requestScope();
+    await request(`/subscription-sources/${encodeURIComponent(id)}`, 'DELETE');
+    if (scope !== requestScope()) return;
+    importGeneration++;
+    proxyNodeStore.subscriptions = proxyNodeStore.subscriptions.filter(source => source.id !== id);
+    proxyNodeStore.manualNodes = proxyNodeStore.manualNodes.filter(node => node.sourceId !== id);
+  },
   // A refresh answers with the attempt's result; a failed attempt answers with an
   // error whose details carry the same result.
   refresh: (id: string) => request<ImportResult>(`/subscription-sources/${encodeURIComponent(id)}/refresh`, 'POST', undefined, {timeoutMs:20000}),
@@ -86,8 +106,28 @@ export function airportSources<T extends { kind?: string }>(sources: readonly T[
   return sources.filter(source => importSourceKind(source) === 'url');
 }
 
+let importGeneration = 0;
+function clearImports() {
+  importGeneration++;
+  forgetPendingGet('/subscription-sources');
+  forgetPendingGet('/imported-proxies');
+  proxyNodeStore.subscriptions = [];
+  proxyNodeStore.manualNodes = [];
+}
+watch(adminReadScope, () => {
+  clearImports();
+  proxyNodeStore.schemes = [];
+}, { flush: 'sync', immediate: true });
+
 export async function loadImports() {
-  const [sources, proxies] = await Promise.all([importAPI.list(), importAPI.proxies()]);
+  if (!adminReadScope.value || !isOwner.value) throw new APIError(403, 'forbidden', '当前账号无权读取导入节点');
+  const current = ++importGeneration;
+  const rejectRead = (error: unknown): never => {
+    if (current === importGeneration && invalidatesRead(error)) clearImports();
+    throw error;
+  };
+  const [sources, proxies] = await readTogether([importAPI.list().catch(rejectRead), importAPI.proxies().catch(rejectRead)]);
+  if (current !== importGeneration) return;
   const kindOf = new Map(sources.items.map(source => [source.id, importSourceKind(source)]));
   proxyNodeStore.subscriptions = sources.items.map(s => ({ id:s.id, name:s.name, kind:importSourceKind(s), url:'已加密保存', nodeCount:proxies.items.filter(p => p.sourceId===s.id).length, autoUpdate:true, lastUpdated:s.lastFetchAt || '未拉取', usedTraffic:'—', totalTraffic:'—', userIds:s.userIds, intervalSeconds:s.intervalSeconds, lastStatus:s.lastStatus, lastError:s.lastError, lastFetchAt:s.lastFetchAt, lastSuccessAt:s.lastSuccessAt, latestResult:s.latestResult ?? null } satisfies SubscriptionItem));
   proxyNodeStore.manualNodes = proxies.items.map(p => ({id:p.id, sourceId:p.sourceId, proxyKey:p.proxyKey, revision:p.revision, name:p.name, protocol:p.protocol, sourceType:proxySourceType(kindOf.get(p.sourceId) || 'url'), sourceName:p.kind === 'content' ? '单独导入' : sources.items.find(s=>s.id===p.sourceId)?.name || '导入来源', server:p.server, port:p.port, status:'untested', ...guessProtocolNetworks(p.protocol), createdAt:''}));

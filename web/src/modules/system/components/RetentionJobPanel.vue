@@ -2,7 +2,7 @@
  <section class="panel-card p-5 space-y-3">
   <div class="flex justify-between gap-3"><h3 class="text-base font-semibold leading-normal">保留清理进度</h3><button class="ios-btn-secondary" :disabled="loading" @click="load">刷新状态</button></div>
   <ErrorState v-if="error" :message="error" @retry="load" />
-  <p v-if="loading" class="text-xs text-gray-500">正在读取持久清理记录…</p>
+  <p v-if="loading && !job" class="text-xs text-gray-500">正在读取持久清理记录…</p>
   <div v-if="job" class="space-y-2 text-xs">
    <p :class="job.errorCode ? 'text-amber-700' : 'text-gray-600'">{{ state(job) }}</p>
    <p v-if="job.generation">第 {{ job.generation }} 轮 · {{ phase(job.phase) }} · 每批最多 {{ job.batchRows }} 行</p>
@@ -20,10 +20,26 @@
 <script setup lang="ts">
 import { onMounted,onUnmounted,ref } from 'vue';
 import { retentionJobAPI,type RetentionJob } from '../retentionJobApi';
+import { invalidatesRead } from '../../../app/apiClient';
 import { formatTime } from '../../../app/auth';
 import ErrorState from '../../../components/ErrorState.vue';
 const job=ref<RetentionJob|null>(null),loading=ref(false),error=ref('');let generation=0,stopped=false;
-async function load(){const current=++generation;loading.value=true;error.value='';job.value=null;try{const result=await retentionJobAPI();if(current===generation && !stopped)job.value=result;}catch(e){if(current===generation && !stopped)error.value=(e as Error).message;}finally{if(current===generation)loading.value=false;}}
+async function load() {
+  if (loading.value) return;
+  const current = ++generation;
+  loading.value = true;
+  error.value = '';
+  try {
+    const result = await retentionJobAPI();
+    if (current === generation) job.value = result;
+  } catch (e) {
+    if (current !== generation) return;
+    if (invalidatesRead(e)) job.value = null;
+    error.value = (e as Error).message;
+  } finally {
+    if (current === generation) loading.value = false;
+  }
+}
 function state(value:RetentionJob){if(value.errorCode)return '最近清理尝试失败，保留已提交进度';return ({idle:'尚未开始清理',running:'本轮清理未完成，等待后台接续',error:'本轮清理失败，等待后台重试',success:'上次整轮清理已提交'} as Record<string,string>)[value.status] || '记录状态需核对';}
 function phase(value:number){return ['允许访问记录','阻断访问记录','域名小时流量','账户小时流量','账户流量明细','本轮已完成'][value] || '阶段需核对';}
 onMounted(load);onUnmounted(()=>{stopped=true;generation++;});

@@ -109,9 +109,13 @@ func TestReadPoolIsClosedWithTheServer(t *testing.T) {
 	if pool == nil {
 		t.Fatal("read-only pool was not opened")
 	}
-	app.closeReadPool()
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := pool.PingContext(context.Background()); err == nil {
 		t.Fatal("read-only pool still answers after close")
 	}
-	app.closeReadPool()
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
 }

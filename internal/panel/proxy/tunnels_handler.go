@@ -13,6 +13,7 @@ import (
 func (h *Handler) registerTunnels(mux *http.ServeMux) {
 	for pattern, handler := range map[string]http.HandlerFunc{
 		"GET /api/v1/nodes/{id}/relays":                h.listNodeRelays,
+		"GET /api/v1/nodes/relay-rules":                h.listNodeRelayRules,
 		"POST /api/v1/nodes/{id}/relays":               h.createNodeRelay,
 		"POST /api/v1/tunnels/plan":                    h.planTunnels,
 		"POST /api/v1/tunnels/publish":                 h.publishTunnels,

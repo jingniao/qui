@@ -15,11 +15,11 @@ func TestK2bRestorePreservesCurrentTuningWithoutResend(t *testing.T) {
 	ctx := context.Background()
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	f := listeningFixture(t, func(f *fixture) {
-		if _, err := f.source.Database.Exec(`INSERT INTO node_tuning SELECT id,'{"net.core.somaxconn":"128"}','snapshot','pending',NULL,?,? FROM nodes`, stamp, stamp); err != nil {
+		if _, err := f.source.Database.Exec(`INSERT INTO node_tuning(node_id,desired_json,request_id,status,requested_at,updated_at) SELECT id,'{"net.core.somaxconn":"128"}','snapshot','pending',?,? FROM nodes`, stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if _, err := f.source.Database.Exec(`UPDATE node_tuning SET desired_json='{"net.core.somaxconn":"256"}',request_id='current'; INSERT INTO node_metric_samples(node_id,at,cpu_percent) SELECT id,?,0 FROM nodes`, stamp); err != nil {
+	if _, err := f.source.Database.Exec(`UPDATE node_tuning SET desired_json='{"net.core.default_qdisc":"fq"}',install_missing_modules=1,request_id='current'; INSERT INTO node_metric_samples(node_id,at,cpu_percent) SELECT id,?,0 FROM nodes`, stamp); err != nil {
 		t.Fatal(err)
 	}
 	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
@@ -31,7 +31,7 @@ func TestK2bRestorePreservesCurrentTuningWithoutResend(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	assertInt(t, restored, "SELECT count(*) FROM node_tuning WHERE request_id='current' AND status='unconfirmed' AND desired_json=?", 1, `{"net.core.somaxconn":"256"}`)
+	assertInt(t, restored, "SELECT count(*) FROM node_tuning WHERE request_id='current' AND install_missing_modules=1 AND status='unconfirmed' AND desired_json=?", 1, `{"net.core.default_qdisc":"fq"}`)
 	assertInt(t, restored, "SELECT count(*) FROM node_metric_samples", 0)
 }
 
@@ -40,7 +40,7 @@ func TestK2bRestoreDoesNotReviveSnapshotOnlyTuning(t *testing.T) {
 	ctx := context.Background()
 	f := listeningFixture(t, func(f *fixture) {
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
-		if _, err := f.source.Database.Exec(`INSERT INTO node_tuning SELECT id,'{}','snapshot','pending',NULL,?,? FROM nodes`, stamp, stamp); err != nil {
+		if _, err := f.source.Database.Exec(`INSERT INTO node_tuning(node_id,desired_json,request_id,status,requested_at,updated_at) SELECT id,'{}','snapshot','pending',?,? FROM nodes`, stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 	})

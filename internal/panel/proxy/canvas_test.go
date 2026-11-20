@@ -53,6 +53,7 @@ type canvasPanel struct {
 	database *sql.DB
 	service  *Service
 	mux      http.Handler
+	handler  *Handler
 	audit    *canvasAudit
 	nodeA    string
 	nodeB    string
@@ -99,7 +100,7 @@ func newCanvasPanel(t *testing.T) *canvasPanel {
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	return &canvasPanel{t: t, ctx: ctx, database: database, service: service, mux: mux, audit: audit, nodeA: first.ID, nodeB: second.ID, inbound: inbound}
+	return &canvasPanel{t: t, ctx: ctx, database: database, service: service, mux: mux, handler: handler, audit: audit, nodeA: first.ID, nodeB: second.ID, inbound: inbound}
 }
 
 // session inserts one administrator with a live session and returns the cookie

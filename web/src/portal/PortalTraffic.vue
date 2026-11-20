@@ -2,7 +2,7 @@
   <section class="panel-card p-6 space-y-4">
     <div class="flex flex-wrap justify-between gap-2">
       <h2 class="text-base font-semibold leading-normal">流量趋势</h2>
-      <select v-if="!preview" :value="range" class="form-input-base max-w-40" @change="emit('range', ($event.target as HTMLSelectElement).value as Range)">
+      <select v-if="!preview" :value="range" class="form-input-base max-w-40" @change="chooseRange">
         <option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option>
       </select>
     </div>
@@ -26,6 +26,12 @@ Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, L
 const CHART_COLORS = { blue: '#0071E3', green: '#34C759', tick: '#6E6E73', grid: 'rgba(0, 0, 0, 0.08)', tooltipBg: '#1D1D1F' } as const;
 type Range = '24h' | '7d' | '30d';
 const props = defineProps<{ traffic: Traffic; range: Range; preview?: boolean }>();
+function chooseRange(event: Event) {
+  const select = event.target as HTMLSelectElement;
+  const next = select.value as Range;
+  select.value = props.range;
+  emit('range', next);
+}
 const emit = defineEmits<{ (e: 'range', value: Range): void }>();
 const canvas = ref<HTMLCanvasElement>();
 let chart: Chart | undefined;

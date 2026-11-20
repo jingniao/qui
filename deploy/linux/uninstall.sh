@@ -50,6 +50,9 @@ if [[ $init_system == systemd ]]; then
   host_network_path=/etc/systemd/system/proxy-agent-host-network.path
   tuning_service=/etc/systemd/system/proxy-agent-tuning.service
   tuning_path=/etc/systemd/system/proxy-agent-tuning.path
+  tuning_probe=/etc/systemd/system/proxy-agent-tuning-probe.service
+  tuning_probe_reset=/etc/systemd/system/proxy-agent-tuning-probe-reset.service
+  tuning_probe_digests=$registry/agent.tuning-probe-digests
   # The panel's web-UI update bridge: a path unit arms a root oneshot unit that runs the
   # installed updater. Both are systemd definitions, like the panel itself, so the OpenRC
   # branch below has no counterpart to name.
@@ -119,10 +122,31 @@ if [[ $component == agent && -n $(sed -n '11p' "$record") && -n $(sed -n '12p' "
   tuning_units=true
   verify_owned "$tuning_service" "$(sed -n '11p' "$record")"
   verify_owned "$tuning_path" "$(sed -n '12p' "$record")"
+  if [[ $init_system == systemd && ( -e $tuning_probe_digests || -L $tuning_probe_digests || -e $tuning_probe || -L $tuning_probe || -e $tuning_probe_reset || -L $tuning_probe_reset ) ]]; then
+    [[ -f $tuning_probe_digests && ! -L $tuning_probe_digests && $(stat -c '%u:%a' "$tuning_probe_digests") == 0:600 ]] || fail 'Missing protected tuning probe digests.'
+    verify_owned "$tuning_probe" "$(sed -n '1p' "$tuning_probe_digests")"
+    verify_owned "$tuning_probe_reset" "$(sed -n '2p' "$tuning_probe_digests")"
+    if [[ -e /etc/systemd/system/proxy-agent-tuning-modules.service || -e /etc/systemd/system/proxy-agent-tuning-modules.path || -n $(sed -n '3p' "$tuning_probe_digests") ]]; then
+      verify_owned /etc/systemd/system/proxy-agent-tuning-modules.service "$(sed -n '3p' "$tuning_probe_digests")"
+      verify_owned /etc/systemd/system/proxy-agent-tuning-modules.path "$(sed -n '4p' "$tuning_probe_digests")"
+    fi
+  fi
 fi
 for i in "${!record_cores[@]}"; do
   verify_owned "/usr/local/lib/proxy-agent/${record_cores[i]}" "${record_digests[i]}"
 done
+# Disarm only package activation before checking its running/queued job. If
+# dpkg is busy, restore the watcher and leave the running Agent untouched.
+if $tuning_units && [[ $init_system == systemd && -f /etc/systemd/system/proxy-agent-tuning-modules.path ]]; then
+  watcher_state=$(systemctl show proxy-agent-tuning-modules.path -p ActiveState --value)
+  systemctl stop proxy-agent-tuning-modules.path
+  if ! pkg_state=$(systemctl show proxy-agent-tuning-modules.service -p ActiveState --value) ||
+     ! pkg_job=$(systemctl show proxy-agent-tuning-modules.service -p Job --value) ||
+     [[ ( $pkg_state != inactive && $pkg_state != failed ) || ( -n $pkg_job && $pkg_job != 0 ) ]]; then
+    if [[ $watcher_state == active || $watcher_state == activating ]]; then systemctl start proxy-agent-tuning-modules.path; fi
+    fail 'Wait for the current module package operation before uninstall.'
+  fi
+fi
 # A failed stop is not a clean handoff: never delete the program underneath it.
 if [[ $init_system == systemd ]]; then
   systemctl stop "$name.service"
@@ -158,6 +182,12 @@ fi
 if $tuning_units; then
   if [[ $init_system == systemd ]]; then
     systemctl disable --now proxy-agent-tuning.path
+    if [[ -f /etc/systemd/system/proxy-agent-tuning-modules.path ]]; then
+      rm -- /etc/systemd/system/proxy-agent-tuning-modules.path /etc/systemd/system/proxy-agent-tuning-modules.service
+      rm -f -- /var/lib/qui-tuning-modules/status.json
+      if [[ -d /var/lib/qui-tuning-modules ]]; then rmdir -- /var/lib/qui-tuning-modules; fi
+    fi
+    if [[ -f $tuning_probe ]]; then systemctl stop proxy-agent-tuning-probe.service proxy-agent-tuning-probe-reset.service; fi
     systemctl stop proxy-agent-tuning.service
     systemctl disable proxy-agent-tuning.service
   else
@@ -175,7 +205,9 @@ if $tuning_units; then
   [[ -d /var/lib/proxy-agent/tuning && ! -L /var/lib/proxy-agent/tuning ]] || fail 'Unsafe tuning directory.'
   mv -T -- "$tuning_clear/desired.json" /var/lib/proxy-agent/tuning/desired.json
   mv -T -- "$tuning_clear/status.json" /var/lib/proxy-agent/tuning/status.json
+  rm -f -- "$tuning_clear/probe.json"
   rmdir -- "$tuning_clear"
+  if [[ $init_system == systemd && -f $tuning_probe ]]; then rm -- "$tuning_probe" "$tuning_probe_reset" "$tuning_probe_digests"; fi
   rm -- "$tuning_service" "$tuning_path"
 fi
 # The panel's update bridge has no digest either: it is a packaged script and two units

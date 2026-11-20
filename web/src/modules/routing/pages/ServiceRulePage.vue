@@ -34,15 +34,15 @@
 
     <!-- Table States -->
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <LoadingSkeleton v-else-if="loading && !services.length" />
+    <LoadingSkeleton v-if="loading && !display.ready" />
     <EmptyState
-      v-else-if="!services.length"
+      v-else-if="display.ready && !services.length"
       title="暂无规则集"
       description="点击右上角“创建规则集”即可维护统一的域名和 IP 集合。"
     />
 
     <!-- Rule Sets Table -->
-    <DataTable v-else>
+    <DataTable v-else-if="display.ready">
       <template #header>
         <th>规则集名称</th>
         <th>来源 / 版本</th>
@@ -196,6 +196,7 @@
 </template>
 
 <script setup lang="ts">
+import { retainedQuery, removePageItem } from '../../../app/retainedQuery';
 import { ref, computed, onMounted } from 'vue';
 import { policyAPI, type ServiceSet } from '../api';
 import { formatTime } from '../../../app/auth';
@@ -228,17 +229,19 @@ const selectedService = ref<ServiceSet | null>(null);
 const snippetCopied = ref(false);
 
 let generation = 0;
+const display = retainedQuery(() => { services.value = []; total.value = 0; });
 async function load() {
+  display.begin(page.value);
   const current = ++generation;
-  loading.value = true;
+  loading.value = true; error.value = '';
   try {
     const result = await policyAPI.services(page.value);
     if (current !== generation) return;
-    services.value = result.items;
+    display.ready = true; services.value = result.items;
     total.value = result.total;
     error.value = '';
   } catch (e) {
-    if (current === generation) error.value = (e as Error).message;
+    if (current === generation) { display.reject(e); error.value = (e as Error).message; }
   } finally {
     if (current === generation) loading.value = false;
   }
@@ -307,7 +310,9 @@ function promptDelete(service: ServiceSet) {
 async function remove() {
   if (!target.value) return;
   try {
-    await policyAPI.deleteService(target.value.id);
+    const id = target.value.id;
+    await policyAPI.deleteService(id);
+    removePageItem(services, total, page, id, 20);
     showToast('规则集已删除');
     await load();
   } catch (e) {

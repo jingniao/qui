@@ -3,7 +3,7 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-ios-label text-base font-semibold leading-normal">机器监控</h2>
       <div class="ios-segmented-container flex">
-        <button v-for="range in ranges" :key="range" type="button" class="ios-segmented-item" :class="{ active: hours === range }" @click="emit('update:hours', range)">{{ range === 168 ? '7D' : range + 'H' }}</button>
+        <button v-for="range in ranges" :key="range" type="button" class="ios-segmented-item" :class="{ active: displayedHours === range }" @click="emit('update:hours', range)">{{ range === 168 ? '7D' : range + 'H' }}</button>
       </div>
     </div>
     <p class="text-xs text-ios-secondary">服务端历史 · 每分钟采样 · 保留 7 天 · 长范围为分桶平均值。网络速率为主机网卡流量，可能包含多接口重复计数；缺测处断线，悬停可读各时刻数值。</p>
@@ -13,7 +13,7 @@
       <section v-for="card in cards" :key="card.id" class="panel-card p-4 space-y-3">
         <div class="flex justify-between text-sm gap-2"><h3 class="text-ios-label text-base font-semibold leading-normal">{{ card.title }}</h3><span class="font-mono text-ios-label">{{ headline(card) }}</span></div>
         <MetricLineChart v-if="card.hasData" :label="card.title + '历史采样'" :datasets="card.datasets" :axes="card.axes" :x-min="start" :x-max="end" />
-        <p v-else class="text-xs text-ios-tertiary py-6">— · 暂无历史测量</p>
+        <p v-else class="h-44 flex items-center text-xs text-ios-tertiary">{{ !measuredNode ? (error || '正在读取历史指标…') : '— · 暂无历史测量' }}</p>
         <p v-if="current[card.primary] === null && (currentUnavailable || latestMeasured(card.primary) === null)" class="text-xs text-ios-secondary">{{ currentUnavailable ? '服务器离线，当前值不可用' : '暂无读数' }}</p>
         <p class="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-ios-tertiary">
           <span class="tabular-nums" :title="`${formatTime(rangeStartIso)} – ${formatTime(rangeEndIso)}`">{{ rangeLabel }}</span>
@@ -24,6 +24,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { invalidatesRead } from '../../../app/apiClient';
 import { formatTime } from '../../../app/auth';
 import { computed, defineAsyncComponent, ref, watch, onMounted, onUnmounted } from 'vue';
 import { nodeAPI, type NodeView } from '../api';
@@ -36,7 +37,8 @@ const emit = defineEmits<{ 'update:hours': [hours: number] }>();
 const ranges = [1, 6, 12, 24, 168];
 const points = ref<SystemMetricPoint[]>([]), intervalSeconds = ref(60), loading = ref(false), error = ref('');
 const end = ref(Date.now());
-const start = computed(() => end.value - props.hours * 3600000);
+const measuredNode = ref(''), displayedHours = ref(props.hours);
+const start = computed(() => end.value - displayedHours.value * 3600000);
 const rangeStartIso = computed(() => new Date(start.value).toISOString());
 const rangeEndIso = computed(() => new Date(end.value).toISOString());
 const rangeLabel = computed(() => formatMetricRange(start.value, end.value));
@@ -46,24 +48,30 @@ const currentUnavailable = computed(() => {
 });
 const current = computed(() => extractCurrentValues(currentUnavailable.value ? { ...props.node, lastHeartbeat: '' } : props.node, props.now));
 let generation = 0, disposed = false;
-// Foreground loads (first read, node or range switch) clear the charts and show the
-// hint; background refreshes keep the old data until the new data arrives.
+// Keep the displayed window and its points together until the new read succeeds.
 let inFlight = false;
 async function load(foreground = false) {
   if (!foreground && (inFlight || document.visibilityState !== 'visible')) return;
   inFlight = true;
   const ticket = ++generation, id = props.node.id, hours = props.hours;
-  const begun = beginMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, foreground);
-  if (foreground) points.value = [];
+  if (measuredNode.value !== id) {
+    points.value = []; measuredNode.value = ''; displayedHours.value = hours;
+  }
+  const begun = beginMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, !measuredNode.value);
   loading.value = begun.loading; error.value = begun.error;
   const until = Date.now();
   try {
     const response = await nodeAPI.metrics(id, hours);
     if (disposed || ticket !== generation) return;
+    measuredNode.value = id; displayedHours.value = hours;
     end.value = until; intervalSeconds.value = response.intervalSeconds;
     points.value = response.points.map(metricPoint).filter(p => Number.isFinite(p.time)).sort((a,b) => a.time-b.time);
-  } catch (e) { if (!disposed && ticket === generation) { const failed = failMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, '历史指标读取失败：' + (e as Error).message); error.value = failed.error; } }
-  finally { if (!disposed && ticket === generation) { loading.value = false; inFlight = false; } }
+  } catch (e) {
+    if (disposed || ticket !== generation) return;
+    if (invalidatesRead(e)) { points.value = []; measuredNode.value = ''; }
+    const failed = failMetricsLoad({ points: points.value, loading: loading.value, error: error.value }, '历史指标读取失败：' + (e as Error).message);
+    error.value = failed.error;
+  } finally { if (!disposed && ticket === generation) { loading.value = false; inFlight = false; } }
 }
 // History is sampled once a minute, so heartbeat events must not trigger reads; only the timer does.
 watch([() => props.node.id, () => props.hours], () => { void load(true); }, { immediate: true });

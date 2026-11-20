@@ -4,11 +4,26 @@
 set -eu
 DIR=/var/lib/proxy-agent/tuning
 HELPER=/usr/local/bin/proxy-agent
+RUN=/run/proxy-agent-tuning
+report_probe_state() {
+  # Root-owned 0711 directory; the worker can read this single status file.
+  (umask 022; printf '%s\n' "$1" > "$RUN/.probe-finished")
+  mv -f "$RUN/.probe-finished" "$RUN/probe-finished"
+}
 apply_desired() {
   "$HELPER" --apply-tuning "$DIR" || printf 'tuning: apply failed; see status.json\n' >&2
 }
 case $# in
-  0) apply_desired; exec /sbin/inotifyd "$0" "$DIR:wy" ;;
+  0)
+    report_probe_state pending
+    if "$HELPER" --probe-tuning "$DIR"; then
+      report_probe_state ready
+    else
+      printf 'tuning: probe failed; see helper error above\n' >&2
+      report_probe_state failed
+    fi
+    if [ -f "$RUN/skip-replay" ]; then rm "$RUN/skip-replay"; else apply_desired; fi
+    exec /sbin/inotifyd "$0" "$DIR:wy" ;;
   3) if [ "$3" = desired.json ]; then apply_desired; fi ;;
   *) exit 2 ;;
 esac

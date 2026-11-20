@@ -67,15 +67,15 @@
 
     <!-- Table States -->
     <ErrorState v-if="error" :message="error" @retry="load" />
-    <LoadingSkeleton v-else-if="loading && !rules.length" />
+    <LoadingSkeleton v-if="loading && !display.ready" />
     <EmptyState
-      v-else-if="!rules.length"
+      v-else-if="display.ready && !rules.length"
       title="暂无节点策略"
       description="未命中任何自定义策略时，流量将使用各节点入站配置的默认出站路由。"
     />
 
     <!-- Rules Table -->
-    <DataTable v-else>
+    <DataTable v-else-if="display.ready">
       <template #header>
         <th>优先级 / 策略名称</th>
         <th>生效范围 (Scope)</th>
@@ -198,6 +198,8 @@
 </template>
 
 <script setup lang="ts">
+import { readTogether } from '../../../app/readTogether';
+import { retainedQuery, removePageItem } from '../../../app/retainedQuery';
 import { ref, onMounted } from 'vue';
 import { policyAPI, input, actionNames, type PolicyRecord, type ServiceSet } from '../api';
 import { proxyAPI, type Outbound, type OutboundGroup, type ProxyChain, choices } from '../../proxy/api';
@@ -315,11 +317,13 @@ function getActionDotClass(type: string): string {
 }
 
 let generation = 0;
+const display = retainedQuery(() => { rules.value = []; total.value = 0; });
 async function load() {
+  display.begin(page.value, keyword.value);
   const current = ++generation;
-  loading.value = true;
+  loading.value = true; error.value = '';
   try {
-    const [result, sets, outs, gs, cs] = await Promise.all([
+    const [result, sets, outs, gs, cs] = await readTogether([
       policyAPI.list(page.value, keyword.value),
       policyAPI.services(1, 100),
       proxyAPI.outbounds('', 1, 100),
@@ -327,7 +331,7 @@ async function load() {
       choices((p, s) => proxyAPI.chains('', p, s))
     ]);
     if (current !== generation) return;
-    rules.value = result.items;
+    display.ready = true; rules.value = result.items;
     total.value = result.total;
     services.value = sets.items;
     outbounds.value = outs.items;
@@ -335,7 +339,7 @@ async function load() {
     chains.value = cs;
     error.value = '';
   } catch (e) {
-    if (current === generation) error.value = (e as Error).message;
+    if (current === generation) { display.reject(e); error.value = (e as Error).message; }
   } finally {
     if (current === generation) loading.value = false;
   }
@@ -361,7 +365,9 @@ async function execute() {
   if (!target.value) return;
   try {
     if (operation.value === 'delete') {
-      await policyAPI.delete(target.value.id);
+      const id = target.value.id;
+      await policyAPI.delete(id);
+      removePageItem(rules, total, page, id, 20);
     } else {
       await policyAPI.save(target.value.id, { ...input(target.value), enabled: !target.value.enabled });
     }

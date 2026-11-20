@@ -408,7 +408,7 @@ qui-update --component agent --version X.Y.Z \
 
 清单缺失或与归档不匹配时在停止前失败，全程不联网补取。已认证的本地候选保存在 `releases/agent-local-candidates/`，`local-` 任务中断续做只读取该缓存；缓存损坏或缺失会明确报错，保留任务结果和安装记录。普通非受管节点沿用现有 `--bundle` / `--sums` 行为。
 
-### Agent 网页完整升级（v1.7.5 实施中）
+### Agent 网页完整升级（v1.7.5）
 
 新网页任务由独立 root 服务在节点本机固定执行 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`，包含与终端相同的引导组件和实际 Agent 两阶段更新、官方来源下载、校验、安装、健康检查及失败恢复。节点需要能访问终端使用的 GitHub 来源；新任务不读取面板 Agent 文件目录，也不支持网页离线包。
 

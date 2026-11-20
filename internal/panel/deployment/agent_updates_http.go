@@ -17,7 +17,9 @@ type AgentUpdateHandler struct {
 
 func (h *AgentUpdateHandler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/agent-updates", h.Auth.Require(http.HandlerFunc(h.list), true))
-	mux.Handle("POST /api/v1/agent-updates", h.Auth.Require(http.HandlerFunc(h.queue), true))
+	mux.Handle("POST /api/v1/agent-updates", h.Auth.Require(http.HandlerFunc(h.systemQueue), true))
+	mux.Handle("POST /api/v1/agent-updates/{id}/retry", h.Auth.Require(http.HandlerFunc(h.systemRetry), true))
+	mux.Handle("GET /api/v1/agent-updates/{id}/logs", h.Auth.Require(http.HandlerFunc(h.systemLogs), true))
 	mux.Handle("POST /api/v1/agent-updates/{id}/recover", h.Auth.Require(http.HandlerFunc(h.recover), true))
 	mux.Handle("GET /api/v1/agent-updates/{id}/attempts", h.Auth.Require(http.HandlerFunc(h.attempts), true))
 }
@@ -27,6 +29,20 @@ func (h *AgentUpdateHandler) attempts(w http.ResponseWriter, r *http.Request) {
 	page, size, err := httpapi.Pagination(r)
 	if err != nil {
 		httpapi.Error(w, 400, "invalid_request", "分页参数无效")
+		return
+	}
+	var system bool
+	if err := h.Repository.Database.QueryRowContext(r.Context(), "SELECT EXISTS(SELECT 1 FROM agent_system_update_tasks WHERE id=?)", r.PathValue("id")).Scan(&system); err != nil {
+		httpapi.Error(w, 500, "internal_error", err.Error())
+		return
+	}
+	if system {
+		items, total, err := h.Repository.ListAgentSystemAttempts(r.Context(), r.PathValue("id"), page, size)
+		if err != nil {
+			httpapi.Error(w, 409, "agent_update_conflict", err.Error())
+			return
+		}
+		httpapi.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "pageSize": size})
 		return
 	}
 	items, total, err := h.Repository.ListAgentUpdateAttempts(r.Context(), r.PathValue("id"), page, size)
@@ -57,7 +73,7 @@ func (h *AgentUpdateHandler) list(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, 400, "invalid_request", "分页参数无效")
 		return
 	}
-	items, total, err := h.Repository.ListAgentUpdates(r.Context(), page, size)
+	items, total, err := h.Repository.ListAllAgentUpdates(r.Context(), page, size)
 	if err != nil {
 		httpapi.Error(w, 500, "internal_error", "暂时无法读取 Agent 升级任务")
 		return

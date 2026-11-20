@@ -26,6 +26,7 @@ type Relay struct {
 	DestinationPort    int
 	Enabled            bool
 	Visible            bool
+	RouteNodeIDs       []string `json:"routeNodeIds,omitempty"`
 }
 
 type Relays interface {
@@ -40,7 +41,7 @@ type RelayStore struct {
 
 func (s *RelayStore) Relays(ctx context.Context) ([]Relay, error) {
 	rows, err := s.Database.QueryContext(ctx, `SELECT r.published_snapshot,r.name,n.id IS NOT NULL,COALESCE(NULLIF(n.connect_host,''),n.public_ip,'')
-		FROM tunnel_rules r LEFT JOIN nodes n ON n.id=r.entry_node_id
+		FROM tunnel_rules r LEFT JOIN nodes n ON n.id=json_extract(r.published_snapshot,'$.Entry.ID')
 		WHERE r.published_snapshot IS NOT NULL ORDER BY r.id`)
 	if err != nil {
 		return nil, err

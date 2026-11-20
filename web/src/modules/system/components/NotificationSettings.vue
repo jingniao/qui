@@ -357,7 +357,7 @@ function ruleKindLabel(kind: string): string {
 
 function ruleKindDesc(kind: string): string {
   switch (kind) {
-    case 'node_offline': return '超过持续时间后通知一次，心跳恢复后再通知一次';
+    case 'node_offline': return '持续时间同时用于页面离线判断；取消勾选仅关闭离线与恢复通知';
     case 'cpu': return '节点 CPU 使用率持续超过阈值';
     case 'memory': return '节点内存使用率持续超过阈值';
     case 'disk': return '节点磁盘使用率超过阈值';

@@ -25,17 +25,25 @@ const localJobPrefix = "local-"
 // LocalAgentStatus separates an authenticated installed image from a live worker.
 // Only the supervisor can report Running. Stopped inspection never claims it.
 type LocalAgentStatus struct {
-	NodeID   string        `json:"node_id"`
-	Revision int64         `json:"revision"`
-	Current  updater.Image `json:"current"`
-	Running  bool          `json:"running"`
-	Ready    bool          `json:"ready"`
-	Recovery bool          `json:"local_recovery"`
+	NodeID       string                    `json:"node_id"`
+	Revision     int64                     `json:"revision"`
+	Current      updater.Image             `json:"current"`
+	Running      bool                      `json:"running"`
+	Ready        bool                      `json:"ready"`
+	Recovery     bool                      `json:"local_recovery"`
+	Installation *LocalInstallationOutcome `json:"installation,omitempty"`
+	Receipt      *LocalInstallReceipt      `json:"receipt,omitempty"`
+}
+
+type LocalInstallationOutcome struct {
+	OriginalError string                            `json:"originalError"`
+	Recovery      release.AgentSystemUpdateRecovery `json:"recovery"`
 }
 
 type localRequest struct {
 	Operation string         `json:"operation"`
 	Release   release.Signed `json:"release"`
+	RequestID string         `json:"request_id,omitempty"`
 }
 
 type localResponse struct {

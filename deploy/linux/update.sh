@@ -37,7 +37,39 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 repository=jingniao/qui
 
-fail() { printf '更新被拒绝：%s\n' "$*" >&2; exit 1; }
+# Root's web bridge alone supplies this inherited descriptor. Reports describe
+# execution facts; the ordinary terminal uses the very same branches below.
+update_stage=request_check
+update_error=''
+report_json() {
+  local value=$1 number character escaped
+  value=${value//\\/\\\\}; value=${value//\"/\\\"}
+  for ((number=1; number<32; number++)); do
+    printf -v character '%b' "\\$(printf '%03o' "$number")"
+    printf -v escaped '\\u%04x' "$number"
+    value=${value//"$character"/"$escaped"}
+  done
+  printf '"%s"' "$value"
+}
+report_update() {
+  [[ -n ${QUI_UPDATE_REPORT_FD:-} ]] || return 0
+  [[ $QUI_UPDATE_REPORT_FD =~ ^[3-8]$ ]] || { printf 'Invalid update report descriptor.\n' >&2; exit 1; }
+  printf '{"stage":"%s","state":"%s","exitCode":%s,"error":%s}\n' \
+    "$update_stage" "$1" "${2:-null}" "$(report_json "${3:-}")" >&"$QUI_UPDATE_REPORT_FD"
+}
+report_stage() { update_stage=$1; report_update running; }
+report_terminal() {
+  local status=$1
+  update_stage=terminal
+  if ((status == 0)); then report_update success "$status"; else report_update failed "$status"; fi
+  if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD"; fi
+}
+fail() { update_error=$*; report_update failed null "$*"; printf '更新被拒绝：%s\n' "$*" >&2; exit 1; }
+if [[ $# == 1 && $1 == --system-update-contract ]]; then
+  printf 'proxy-agent-system-update-v1\n'
+  exit 0
+fi
+trap 'report_terminal "$?"' EXIT
 usage() {
   cat <<USAGE
 用法：qui-update [--version X.Y.Z[-rc.N]] [--component panel|agent] [--yes] [--database FILE]
@@ -161,7 +193,7 @@ installed_version() {
 
 agent_cli() {
   runuser -u proxy-agent -- "$program_directory/proxy-agent" \
-    --config "$root/etc/proxy-agent/config.yaml" "$@"
+    --config "$root/etc/proxy-agent/config.yaml" "$@" 3>&- 4>&- 5>&- 6>&- 7>&- 8>&-
 }
 
 agent_read_status() {
@@ -242,6 +274,7 @@ release_agent_bootstrap() {
 
 install_managed_release() {
   local output='' waited=0
+  report_stage agent_install
   # The bootstrap commit must precede this call. Signal handling must not restore
   # its old shell snapshot over the managed installer's newer durable journal.
   [[ -z $active_component && -z $snapshot ]] || fail '引导程序事务尚未提交，不能开始实际 Agent 安装。'
@@ -257,19 +290,52 @@ install_managed_release() {
     sleep 1
     waited=$((waited + 1))
   done
-  if ! agent_cli --install-agent-release --agent-manifest "$agent_inputs/manifest.json" \
-    --agent-binary "$agent_inputs/proxy-agent" --agent-version "$version"; then
+  local install_status=0
+  local install_options=()
+  if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
+    # Bind the original managed request before Queue or Apply. The root event
+    # journal outlives the bootstrap snapshot and the disposable input directory.
+    local local_request="local-system-$(cat /proc/sys/kernel/random/uuid)" local_digest local_manifest
+    local_digest=$(sha256sum "$agent_inputs/proxy-agent"); local_digest=${local_digest%% *}
+    local_manifest=$(base64 -w 0 "$agent_inputs/manifest.json")
+    printf '{"stage":"managed_request","state":"bound","exitCode":null,"error":"%s:%s:%s"}\n' "$local_request" "$local_digest" "$local_manifest" >&"$QUI_UPDATE_REPORT_FD"
+    sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD"
+    install_options=(--agent-install-request-id "$local_request")
+  fi
+  if output=$(agent_cli --install-agent-release --agent-manifest "$agent_inputs/manifest.json" \
+    --agent-binary "$agent_inputs/proxy-agent" --agent-version "$version" "${install_options[@]}" 2>&1); then
+    printf '%s\n' "$output"
+  else
+    install_status=$?
+    printf '%s\n' "$output" >&2
+    local original_json='' recovery_json='' recovery_error_json='' recovery_state=not_attempted
+    original_json=$(sed -n 's/^proxy-agent-install-original-error-v1 //p' <<< "$output")
+    recovery_json=$(sed -n 's/^proxy-agent-install-recovery-v1 //p' <<< "$output")
+    if [[ -n $original_json && $original_json != '""' && -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
+      printf '{"stage":"agent_install","state":"failed","exitCode":%s,"error":%s}\n' "$install_status" "$original_json" >&"$QUI_UPDATE_REPORT_FD"
+    else report_update failed "$install_status" "$output"; fi
+    if [[ -n $recovery_json && -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
+      recovery_error_json=${recovery_json#*,\"error\":}; recovery_error_json=${recovery_error_json%\}}
+      if [[ $recovery_json == *'"attempted":true'* ]]; then
+        recovery_state=unknown
+        if [[ $recovery_json == *'"success":true'* ]]; then recovery_state=success
+        elif [[ $recovery_json == *'"success":false'* ]]; then recovery_state=failed; fi
+      fi
+      printf '{"stage":"managed_recovery","state":"%s","exitCode":null,"error":%s}\n' "$recovery_state" "$recovery_error_json" >&"$QUI_UPDATE_REPORT_FD"
+    fi
     printf '[proxy-agent] 引导程序版本：%s；实际 Agent 更新失败，以上错误和受管安装记录已保留。\n' "$(installed_version agent)" >&2
     if agent_read_status; then
       printf '[proxy-agent] 当前实际 Agent：%s（%s）。\n' "$agent_runtime_version" "$agent_runtime_state" >&2
     fi
     return 1
   fi
+  report_stage agent_health
   service_healthy proxy-agent 10 || fail '实际 Agent 切换后服务未保持稳定，请检查受管安装记录和服务日志。'
   agent_read_status || fail '无法核实升级后的实际 Agent 版本。'
   [[ $agent_runtime_state == running && $agent_runtime_ready == ready && $agent_runtime_version == "$version" ]] \
     || fail "实际 Agent 版本核验失败：$agent_runtime_version（$agent_runtime_state/$agent_runtime_ready）。"
   managed_installing=false
+  report_update success
   printf '[proxy-agent] 引导程序 %s；实际 Agent %s，服务运行正常。\n' "$(installed_version agent)" "$agent_runtime_version"
 }
 
@@ -292,8 +358,11 @@ sums_digest() {
 # --no-insecure overrides a -k that a curl wrapper or alias may add in front of
 # the arguments, so nothing is fetched without a verified certificate.
 download() {
-  curl --no-insecure -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 5 --output "$2" -- "$1" \
-    || fail "下载失败：$1"
+  local status=0 output=''
+  if output=$(curl --no-insecure -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-redirs 5 --output "$2" -- "$1" 2>&1); then return 0; else status=$?; fi
+  printf '%s\n' "$output" >&2
+  report_update failed "$status" "$output"
+  fail "下载失败：$1（curl 退出码 $status）"
 }
 
 # Resolve the configured value only at the update boundary. Backup/recovery use the
@@ -582,6 +651,12 @@ component_files() {
       "$root/usr/local/lib/proxy-agent/tuning-watch"
   fi
   if [[ $component == agent ]]; then
+    printf '%s\n' "$root/usr/local/lib/proxycontrol/agent-update-request"
+    if [[ $init_system == systemd ]]; then
+      printf '%s\n' "$root/etc/systemd/system/proxy-agent-update.service" "$root/etc/systemd/system/proxy-agent-update.path"
+    else
+      printf '%s\n' "$root/etc/init.d/proxy-agent-update" "$root/usr/local/lib/proxy-agent/agent-update-watch"
+    fi
     printf '%s\n' "$root/usr/local/lib/proxy-agent/xray" "$root/usr/local/lib/proxy-agent/sing-box" "$root/usr/local/lib/proxy-agent/gost" "$root/etc/proxy-agent/config.yaml"
   fi
   printf '%s\n' "$registry/$component.manifest"
@@ -788,6 +863,13 @@ restore_snapshot() {
     systemctl disable --now proxy-panel-update.path \
       || printf '[%s] 无法停用 proxy-panel-update.path，仍继续恢复更新前的文件。\n' "$component"
   fi
+  if [[ $component == agent && $init_system == systemd && -f $root/etc/systemd/system/proxy-agent-update.path && ! -f $snapshot/files$root/etc/systemd/system/proxy-agent-update.path ]]; then
+    systemctl disable --now proxy-agent-update.path || return 1
+  elif [[ $component == agent && $init_system == openrc && -f $root/etc/init.d/proxy-agent-update && ! -f $snapshot/files$root/etc/init.d/proxy-agent-update ]]; then
+    # Do not terminate a current root runner with the service that owns it.
+    service_disable proxy-agent-update || return 1
+    if [[ -z ${QUI_UPDATE_REPORT_FD:-} && $mode != boot ]] && service_is_active proxy-agent-update; then service_stop proxy-agent-update || return 1; fi
+  fi
   while IFS= read -r path; do
     source=$snapshot/files$path
     if [[ ! -e $source && ! -L $source ]]; then
@@ -817,6 +899,11 @@ restore_snapshot() {
     service_restart proxy-agent-host-network || return 1
   fi
   if [[ $component == agent ]]; then
+    if [[ $init_system == systemd && -f $root/etc/systemd/system/proxy-agent-update.path ]]; then
+      systemctl start "${job_options[@]}" proxy-agent-update.path || return 1
+    elif [[ $init_system == openrc && $mode != boot && -f $root/etc/init.d/proxy-agent-update ]] && ! service_is_active proxy-agent-update; then
+      service_start proxy-agent-update || return 1
+    fi
     if [[ $init_system == systemd && -f $root/etc/systemd/system/proxy-agent-tuning.path ]]; then
       if [[ -f $root/etc/systemd/system/proxy-agent-tuning-probe.service ]]; then
         systemctl start "${job_options[@]}" proxy-agent-tuning-probe.service || printf '恢复后的调优权限探测失败。\n' >&2
@@ -969,8 +1056,23 @@ recover_snapshot() {
 rollback_component() {
   local component=$1 previous=$2 was_active=$3 reason=$4
   local name=proxy-$1
+  report_update failed null "$reason"
+  report_stage recovery
   printf '\n[%s] %s：回滚到 %s ...\n' "$name" "$reason" "$previous"
-  recover_snapshot "$snapshot" interactive
+  local recovery_status=0 recovery_output='' recovery_report=''
+  recovery_report=$(mktemp "$registry/.recovery-report.XXXXXXXX") || return 1
+  if recover_snapshot "$snapshot" interactive > "$recovery_report" 2>&1; then
+    cat -- "$recovery_report"
+    rm -f -- "$recovery_report"
+    report_update success
+  else
+    recovery_status=$?
+    recovery_output=$(cat -- "$recovery_report")
+    printf '%s\n' "$recovery_output" >&2
+    rm -f -- "$recovery_report"
+    report_update failed "$recovery_status" "$recovery_output"
+    return "$recovery_status"
+  fi
 }
 
 # Take the update lock before anything that writes to the registry, the service
@@ -1079,7 +1181,8 @@ preflight_database() {
 update_component() {
   local component=$1 name=proxy-$1 mode=--panel
   local binary=$source_dir/bin/proxy-$1 digest='' previous='' backup='' installed=''
-  local was_active=false status=0
+  local was_active=false status=0 install_output=''
+  report_stage bootstrap_install
   [[ $component == agent ]] && mode=--node
   previous=$(installed_version "$component")
   if service_is_active "$name"; then was_active=true; fi
@@ -1160,10 +1263,19 @@ update_component() {
     restore_service_after_stop
     fail "[$name] 无法写入回滚快照的进度日志，更新没有开始。"
   fi
+  if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
+    printf '{"stage":"snapshot_prepared","state":"running","exitCode":null,"error":%s}\n' "$(report_json "$snapshot")" >&"$QUI_UPDATE_REPORT_FD"
+    sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD"
+  fi
   digest=$(sha256sum -- "$binary"); digest=${digest%% *}
   # QUI_UPDATE tells install.sh this is an update: it is run from an update that
   # starts the service itself and skips its first-install hint.
-  if ! QUI_UPDATE=1 "$source_dir/deploy/linux/install.sh" "$mode" --binary "$binary" --sha256 "$digest"; then
+  if install_output=$(QUI_UPDATE=1 "$source_dir/deploy/linux/install.sh" "$mode" --binary "$binary" --sha256 "$digest" 2>&1); then
+    printf '%s\n' "$install_output"
+  else
+    status=$?
+    printf '%s\n' "$install_output" >&2
+    report_update failed "$status" "$install_output"
     # The journal still says "prepared", so a panel rollback puts the files back and only
     # restores the database when the new panel got to it anyway.
     rollback_component "$component" "$previous" "$was_active" 'install.sh 失败' \
@@ -1225,6 +1337,7 @@ update_component() {
     fi
   fi
   printf '[%s] 启动 %s 并检查十秒内是否重启 ...\n' "$name" "$name"
+  report_stage bootstrap_health
   if service_start "$name" && service_healthy "$name" 10; then
     service_stopped=false
     if ! journal_write committed; then
@@ -1242,6 +1355,7 @@ update_component() {
       printf '[%s] 已更新到 %s，服务运行正常（10 秒内无重启）。\n' "$name" "$version"
     fi
     active_component=''
+    report_update success
     return 0
   fi
   printf '[%s] 新版本 %s 没有持续运行。\n' "$name" "$version"
@@ -1262,6 +1376,8 @@ on_signal() {
   local signal=$1 log=$registry/interrupted-update.log
   trap '' INT TERM HUP
   set +e
+  report_update failed null "Updater received SIG$signal during $update_stage."
+  report_stage "signal_${signal,,}"
   if [[ $signal == HUP ]]; then
     if [[ ! -e $log ]]; then
       (set -o noclobber; : > "$log") 2>/dev/null || true
@@ -1279,7 +1395,8 @@ on_signal() {
   if [[ -n $snapshot && -f $snapshot/journal ]]; then
     # A snapshot with a journal knows what was already replaced, so the one recovery
     # routine decides how much of the update has to be undone.
-    recover_snapshot "$snapshot" signal
+    report_stage recovery
+    if recover_snapshot "$snapshot" signal; then report_update success; else report_update failed "$?" 'Interrupted updater recovery failed; original recovery output is retained in the task log.'; fi
   else
     # No journal means install.sh never started: a partial snapshot only has to be
     # removed, and the service that this run stopped goes back up.
@@ -1339,7 +1456,7 @@ recover_interrupted_updates() {
     if [[ ! -f $updater || -L $updater ]]; then
       fail "快照 $pending 没有 updater，无法恢复（请检查后手工处理）。"
     fi
-    PROXYCONTROL_UPDATE_LOCKED=1 bash "$updater" --recover "$pending" \
+    PROXYCONTROL_UPDATE_LOCKED=1 QUI_UPDATE_REPORT_FD= bash "$updater" --recover "$pending" 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- \
       || fail "恢复被中断的更新失败：$pending（请查看上面的输出，快照未删除）"
   done
 }
@@ -1615,7 +1732,8 @@ main() {
     release_agent_bootstrap || guard_status=$?
     if [[ -n $agent_inputs ]]; then rm -rf -- "$agent_inputs"; fi
     if [[ -n $directory ]]; then rm -rf -- "$directory"; fi
-    if ((original_status == 0 && guard_status != 0)); then return "$guard_status"; fi
+    if ((original_status == 0 && guard_status != 0)); then original_status=$guard_status; fi
+    report_terminal "$original_status"
     return "$original_status"
   }
   trap cleanup EXIT
@@ -1640,11 +1758,13 @@ main() {
     install -m 0600 -- "$sums_file" "$directory/SHA256SUMS" || fail '无法复制离线 SHA256SUMS。'
     printf '使用离线归档 %s 与其 SHA256SUMS。\n' "${bundle_file##*/}"
   else
+    report_stage download
     printf '下载 %s ...\n' "$bundle.tar.gz"
     download "$base/$bundle.tar.gz" "$directory/$bundle.tar.gz"
     download "$base/SHA256SUMS" "$directory/SHA256SUMS"
   fi
 
+  report_stage verification
   expected=$(sums_digest "$bundle.tar.gz") || fail "SHA256SUMS 里没有 $bundle.tar.gz 的条目。"
   actual=$(sha256sum -- "$directory/$bundle.tar.gz"); actual=${actual%% *}
   [[ $actual == "$expected" ]] || fail "归档 SHA256 与 SHA256SUMS 不一致：$bundle.tar.gz"
@@ -1663,6 +1783,7 @@ main() {
       agent_manifest_file=$directory/proxy-agent-$version-linux-$arch.manifest.json
       download "$base/proxy-agent-$version-linux-$arch.manifest.json" "$agent_manifest_file"
     fi
+    report_stage preflight
     prepare_managed_release "$agent_manifest_file" "$source_dir/bin/proxy-agent"
   fi
 

@@ -27,10 +27,10 @@ func (s candidateRelay) Proxies(_ context.Context, viewer source.Viewer) ([]prox
 	return []proxy.Proxy{{Name: "已发布中转", Protocol: "socks5", Server: "relay-private.example", Credential: proxy.Credential{Password: "relay-password"}, Origin: proxy.Origin{Source: "published", Relayed: true, Ref: "relay-rule", Node: proxy.Ref{ID: "entry", Name: "中转入口"}, Labels: []string{"nodeGroup:" + s.groupID}}}}, nil, nil
 }
 
-func (candidateClones) Chains(_ context.Context, endpoints []proxy.Proxy) ([]proxy.Proxy, []proxy.Warning) {
+func (candidateClones) Chains(_ context.Context, endpoints []proxy.Proxy) ([]proxy.Proxy, []proxy.Warning, error) {
 	clone := endpoints[0]
 	clone.Name, clone.ClientChain = "chain-hidden", "chain"
-	return append(endpoints, clone), nil
+	return append(endpoints, clone), nil, nil
 }
 
 func TestCandidatesOwnerMetadataAndSelection(t *testing.T) {

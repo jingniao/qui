@@ -149,7 +149,13 @@ func (r *jobRunner) poll() error {
 		r.fingerprint = fingerprint
 		return nil
 	}
+	r.localError = nil
 	result, err := r.execute(*job)
+	if strings.HasPrefix(job.Request.ID, localJobPrefix) && r.localError != nil {
+		if saveErr := r.persistLocalOutcome(job.Request.ID, r.localInstallationOutcome(&result)); saveErr != nil {
+			return errors.Join(err, saveErr)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -288,33 +294,34 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 		}
 		return jobResult(request, "failed_closed", "installation_failed", current.Current), nil
 	}
-	reject := func(code string) (release.UpdateResult, error) {
+	reject := func(code string, causes ...error) (release.UpdateResult, error) {
+		r.recordLocalFailure(request.ID, errors.Join(causes...))
 		return jobResult(request, "rejected", code, updater.Image{}), nil
 	}
 	c, err := configuration.LoadAgent(r.configPath)
 	if err != nil {
-		return reject("trust_failed")
+		return reject("trust_failed", err)
 	}
 	a, err := os.Stat(c.DataDirectory)
 	if err != nil {
-		return reject("scope_mismatch")
+		return reject("scope_mismatch", err)
 	}
 	b, err := os.Stat(r.directory)
 	if err != nil || !os.SameFile(a, b) {
-		return reject("scope_mismatch")
+		return reject("scope_mismatch", errors.Join(errors.New("configured Agent data directory differs from the authenticated supervisor directory"), err))
 	}
 	policy, err := localPolicy(c)
 	if err != nil {
-		return reject("trust_failed")
+		return reject("trust_failed", err)
 	}
 	if err := r.history.Check(request.Release, policy); err != nil {
-		return reject("trust_failed")
+		return reject("trust_failed", err)
 	}
 	// This live snapshot can reject stale scope without disrupting service.
 	// Authorization is checked again under ownership after the worker drains.
 	observed, err := reconcile.InspectCurrent(r.directory, r.nodeID, r.key)
 	if err != nil || observed != request.Revision {
-		return reject("scope_mismatch")
+		return reject("scope_mismatch", errors.Join(fmt.Errorf("authenticated revision %d differs from requested revision %d", observed, request.Revision), err))
 	}
 	downloadCtx, cancelDownload := context.WithCancel(r.ctx)
 	watchDone := make(chan struct{})
@@ -385,11 +392,11 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	}
 	preflight, err := updater.PreflightAgent(r.ctx, images, candidate, policy, r.required)
 	if err != nil || preflight.Contract.ManagedProtocol != 1 || preflight.Contract.AgentUpdateProtocol != 1 {
-		return reject("preflight_failed")
+		return reject("preflight_failed", errors.Join(errors.New("candidate Agent preflight or managed update contract rejected"), err))
 	}
 	policy.Now = time.Now().UTC()
 	if err := request.Release.Verify(policy); err != nil {
-		return reject("trust_failed")
+		return reject("trust_failed", err)
 	}
 	if r.process == nil {
 		return release.UpdateResult{}, ErrState
@@ -424,7 +431,7 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 		return release.UpdateResult{}, errors.Join(inspectErr, identityErr, closeErr)
 	}
 	if stopErr != nil {
-		_ = r.restartProtected(current.Current, revision)
+		r.recordLocalFailure(request.ID, errors.Join(stopErr, r.restartProtected(current.Current, revision)))
 		return jobResult(request, "failed_closed", "installation_failed", current.Current), nil
 	}
 	if revision != request.Revision {
@@ -436,17 +443,19 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	// The Worker may have activated a format after the download's preview.
 	// It is stopped now; re-read the authenticated floor before installation.
 	if err := r.refreshRequired(); err != nil {
-		_ = r.restartProtected(current.Current, revision)
+		r.recordLocalFailure(request.ID, errors.Join(err, r.restartProtected(current.Current, revision)))
 		return jobResult(request, "failed_closed", "installation_failed", current.Current), nil
 	}
 	driver, err := agentprocess.NewDriver(r.ctx, images, r.configPath, r.nodeID, revision, current.Current, &preflight.Image, r.required, r.logs)
 	if err != nil {
+		r.recordLocalFailure(request.ID, err)
 		if restoreErr := r.restart(current.Current, revision); restoreErr != nil {
+			r.recordLocalFailure(request.ID, restoreErr)
 			return jobResult(request, "failed_closed", "installation_failed", current.Current), nil
 		}
 		return reject("preflight_failed")
 	}
-	installer := &updater.Installer{History: r.history, Directory: images}
+	installer := &updater.Installer{History: r.history, Directory: images, RecordFailure: r.persistLocalCause}
 	driver.EnableAgentUpdates()
 	if preflight.Contract.AgentRecoveryProtocol == 1 {
 		originalProbe, probeErr := updater.ProbeAgentImage(r.ctx, images, current.Current, r.required)

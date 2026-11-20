@@ -222,6 +222,19 @@ if [[ $component == panel && -n $panel_update_helper ]]; then
   systemctl disable "${panel_update_service##*/}" 2>/dev/null || true
   rm -f -- "$panel_update_service" "$panel_update_path" "$panel_update_helper"
 fi
+if [[ $component == agent && -f /usr/local/lib/proxycontrol/agent-update-request ]]; then
+  if [[ $init_system == systemd ]]; then
+    systemctl disable --now proxy-agent-update.path
+    systemctl stop proxy-agent-update.service
+    rm -f -- /etc/systemd/system/proxy-agent-update.path /etc/systemd/system/proxy-agent-update.service
+  else
+    service_stop proxy-agent-update
+    service_disable proxy-agent-update
+    rm -f -- /etc/init.d/proxy-agent-update /usr/local/lib/proxy-agent/agent-update-watch
+  fi
+  rm -f -- /usr/local/lib/proxycontrol/agent-update-request
+  # Root acceptance, output and recovery records remain after uninstall.
+fi
 install -o root -g root -m 0600 -- "$record" "$removed"
 rm -- "$unit" "$target"
 # /usr/local/bin/qui is not part of the recorded manifest, so it has no digest to
@@ -274,6 +287,17 @@ fi
 
 registry=/var/lib/proxycontrol-install
 [[ -d $registry && ! -L $registry && $(stat -c '%u:%a' "$registry") == 0:700 ]] || fail 'No protected installation registry.'
+if [[ -d $registry/agent-system-updates ]]; then
+  [[ ! -L $registry/agent-system-updates && ! -L $registry/agent-system-updates/bridge.lock ]] || fail 'Unsafe Agent system update registry.'
+  exec 7>"$registry/agent-system-updates/bridge.lock"
+  flock -n 7 || fail 'Agent root update executor is still running; wait for its final receipt before uninstall.'
+  for attempt in "$registry/agent-system-updates"/*; do
+    [[ -d $attempt && ! -L $attempt ]] || continue
+    [[ -f $attempt/request.json ]] || continue
+    [[ -f $attempt/result.json ]] || fail "Agent update has no final receipt: $attempt"
+    if grep -q '"status":"unconfirmed"' "$attempt/result.json"; then fail "Agent update result is unconfirmed: $attempt"; fi
+  done
+fi
 [[ ! -L $registry/update.lock ]] || fail 'Symlinked update lock.'
 exec 8>"$registry/update.lock"
 flock -n 8 || fail '更新正在进行，请稍后再卸载。'

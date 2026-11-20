@@ -360,7 +360,7 @@
                         </span>
 
                         <span
-                          :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(item.node) ? 'bg-emerald-500' : item.node.status === 'pending' ? 'bg-neutral-400' : 'bg-ios-red']"
+                          :class="['w-1.5 h-1.5 rounded-full shrink-0', isNodeOnline(item.node) ? 'bg-emerald-500' : serverStatus(item.node, statusNow).key === 'reconnecting' ? 'bg-amber-500' : item.node.status === 'pending' ? 'bg-neutral-400' : 'bg-ios-red']"
                           :title="nodeStatusLabel(item.node)"
                         ></span>
 
@@ -550,10 +550,12 @@ import { useStatistics } from '../../../app/useStatistics';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { unhealthyCoreLabel } from '../../nodes/coreSummary';
+import { serverStatus } from '../../nodes/components/serverListModel';
 import { userAPI, type UserSummary } from '../../users/api';
 import type { Revision } from '../../system/deploymentApi';
 import { isOwner, formatTime } from '../../../app/auth';
 import { panelDateLabel } from '../../../app/time';
+import { nodeStatusEventChangesInventory, throttleTrailing } from '../../../app/nodeStatusEvents';
 import { showToast } from '../../../app/api';
 import { generateQRCodeSVG } from '../../../app/qrcode';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -576,6 +578,8 @@ const allRevisions = ref<Revision[]>([]);
 const loading = ref(false);
 const error = ref('');
 let timer: ReturnType<typeof setInterval> | null = null;
+let statusTimer: ReturnType<typeof setInterval> | null = null;
+const statusNow = ref(Date.now());
 
 // Dynamic Date & Auto-refresh String (panel timezone, not the browser's)
 const dateRefreshText = computed(() => `${panelDateLabel(new Date())} · 30s 自动刷新`);
@@ -585,14 +589,16 @@ const dateRefreshText = computed(() => `${panelDateLabel(new Date())} · 30s 自
 // ==========================================
 function isNodeOnline(node: NodeView): boolean {
   if (!node.enabled || node.deletedAt || node.maintenance) return false;
-  return node.status === 'online' || node.status === 'degraded';
+  return ['online', 'degraded', 'core_error'].includes(serverStatus(node, statusNow.value).key);
 }
 
 const adminOnlineNodesCount = computed(() => allNodes.value.filter(isNodeOnline).length);
-const offlineNodesCount = computed(() => allNodes.value.filter(n => n.enabled && n.status !== 'pending' && !isNodeOnline(n)).length);
+const offlineNodesCount = computed(() => allNodes.value.filter(n => n.enabled && n.status !== 'pending' && !isNodeOnline(n) && serverStatus(n, statusNow.value).key !== 'reconnecting').length);
+const reconnectingNodesCount = computed(() => allNodes.value.filter(n => serverStatus(n, statusNow.value).key === 'reconnecting').length);
 const pendingNodesCount = computed(() => allNodes.value.filter(n => n.status === 'pending').length);
 const nodeStatusSubtitle = computed(() => [
   offlineNodesCount.value ? `${offlineNodesCount.value} 台离线` : '',
+  reconnectingNodesCount.value ? `${reconnectingNodesCount.value} 台等待恢复` : '',
   pendingNodesCount.value ? `${pendingNodesCount.value} 台待登记` : ''
 ].filter(Boolean).join(' · ') || '全部就绪');
 
@@ -607,7 +613,7 @@ function isNodeCoreUnhealthy(node: NodeView): boolean {
 }
 
 function nodeStatusLabel(node: NodeView): string {
-  return isNodeOnline(node) ? '在线' : node.status === 'pending' ? '待登记' : '离线';
+  return serverStatus(node, statusNow.value).label;
 }
 
 function isUserActive(u: UserSummary): boolean {
@@ -732,7 +738,18 @@ const pendingIssues = computed<PendingIssue[]>(() => {
       });
       continue;
     }
-    if (n.status === 'offline') {
+    const display = serverStatus(n, statusNow.value);
+    if (display.key === 'reconnecting') {
+      issues.push({
+        title: `节点等待恢复: ${n.name}`,
+        desc: display.label,
+        tag: connectAddress(n) || '未设置连接地址',
+        level: 'warning',
+        link: `/nodes/${n.id}`
+      });
+      continue;
+    }
+    if (display.key === 'offline') {
       issues.push({
         title: `节点离线: ${n.name}`,
         desc: '节点离线，心跳中断。',
@@ -878,9 +895,21 @@ function getUserExpiryLabel(u: UserSummary): string {
 }
 
 // Data Loading
+let displayRead: Promise<void> | null = null, displayReadAgain = false;
+function loadDisplayNodes() {
+  if (displayRead) { displayReadAgain = true; return displayRead; }
+  displayRead = allPages(page => nodeAPI.choices(page, '', 100))
+    .then(result => { allNodes.value = result.items; nodesError.value = ''; nodesReady.value = true; })
+    .catch(e => { nodesError.value = (e as Error).message; showToast(nodesError.value, 'error'); })
+    .finally(() => {
+      displayRead = null;
+      if (displayReadAgain) { displayReadAgain = false; void loadDisplayNodes(); }
+    });
+  return displayRead;
+}
 async function loadTrafficData() {
   await Promise.all([
-    allPages(page => nodeAPI.choices(page, '', 100)).then(result => { allNodes.value = result.items; nodesError.value = ''; nodesReady.value = true; }).catch(e => { nodesError.value = (e as Error).message; showToast(nodesError.value, 'error'); }),
+    loadDisplayNodes(),
     isOwner.value ? allPages(page => userAPI.summaries(page, 100)).then(result => { allUsers.value = result.items; usersError.value = ''; usersReady.value = true; }).catch(e => { usersError.value = (e as Error).message; }) : Promise.resolve().then(() => { usersReady.value = true; })
   ]);
 }
@@ -909,6 +938,8 @@ async function loadAll(silent = false) {
 }
 
 function visibilityChanged() { if (!document.hidden) void loadAll(true); }
+const refreshDisplayNodes = throttleTrailing(() => { if (!document.hidden) void loadDisplayNodes(); }, 1000);
+function onNodeStatus(event: Event) { if (nodeStatusEventChangesInventory(event)) refreshDisplayNodes(); }
 function refreshAll() {
   void loadAll();
   void refreshStatistics(true);
@@ -916,13 +947,19 @@ function refreshAll() {
 onMounted(() => {
   void loadAll();
   document.addEventListener('visibilitychange', visibilityChanged);
+  window.addEventListener('proxy-node-status', onNodeStatus);
+  statusTimer = setInterval(() => { if (!document.hidden) statusNow.value = Date.now(); }, 5000);
   timer = setInterval(() => {
     if (!document.hidden) void loadAll(true);
   }, 30000);
 });
 
 onUnmounted(() => {
+  displayReadAgain = false;
   if (timer) clearInterval(timer);
+  if (statusTimer) clearInterval(statusTimer);
+  refreshDisplayNodes.cancel();
   document.removeEventListener('visibilitychange', visibilityChanged);
+  window.removeEventListener('proxy-node-status', onNodeStatus);
 });
 </script>

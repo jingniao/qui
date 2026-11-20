@@ -19,7 +19,7 @@ func (s *Store) importRelays(ctx context.Context, viewer source.Viewer) ([]proxy
 		group_concat(DISTINCT g.id)
 		FROM tunnel_rules r JOIN node_group_relays e ON e.rule_id=r.id
 		JOIN node_groups g ON g.id=e.group_id JOIN user_node_group_grants a ON a.group_id=g.id
-		LEFT JOIN nodes n ON n.id=r.entry_node_id
+		LEFT JOIN nodes n ON n.id=json_extract(r.published_snapshot,'$.Entry.ID')
 		WHERE a.user_id=? AND r.published_snapshot IS NOT NULL
 		AND g.enabled=1 AND g.subscription_visible=1 AND g.purpose IN ('subscription','mixed')
 		AND COALESCE(json_extract(r.published_snapshot,'$.importId'),'')<>''

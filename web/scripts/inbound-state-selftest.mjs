@@ -197,7 +197,7 @@ console.log('PASS inbound read failure retention, recovery, shared status and se
 const statusSource = read('modules/nodes/components/serverListModel.ts').match(/export function serverStatus[\s\S]*?\n}/)[0];
 const serverStatus = new Function('unhealthyCores', ts.transpileModule(statusSource.replace('export ', '') + '\nreturn serverStatus;', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(() => []);
 const clock = Date.parse('2026-11-14T12:00:00Z');
-const mapping = list.match(/const status = .*ib.enabled.*;/)[0];
+const mapping = list.match(/const state = serverStatus.*;\s*const status = .*ib.enabled.*;/)[0];
 const mapStatus = new Function('srv', 'now', 'ib', 'serverStatus', mapping + '\nreturn status;');
 for (const [age, expected] of [[0, 'online'], [44999, 'online'], [45000, 'offline'], [-5001, 'offline']]) {
   const srv = { enabled: true, status: 'online', lastHeartbeat: new Date(clock - age).toISOString() };

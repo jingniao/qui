@@ -263,7 +263,7 @@
           <td class="text-right pr-6 space-x-1.5 whitespace-nowrap">
             <template v-if="kind === 'all'">
               <button
-                v-if="isOwner && node.agentUpdateSupported && !upgradeUnavailableReason(node)"
+                v-if="isOwner && node.agentSystemUpdateSupported && !upgradeUnavailableReason(node)"
                 type="button"
                 @click="handleUpgradeSingle(node, 'agent')"
                 class="ios-action-btn-secondary"
@@ -279,7 +279,7 @@
               </button>
             </template>
             <template v-else-if="kind === 'agent'">
-              <template v-if="node.agentUpdateSupported">
+              <template v-if="node.agentSystemUpdateSupported">
                 <button v-if="isOwner && !upgradeUnavailableReason(node)"
                   type="button"
                   @click="handleUpgradeSingle(node)"
@@ -291,7 +291,7 @@
                 <span v-else-if="isOwner" class="text-xs text-neutral-400">{{ upgradeUnavailableReason(node) }}</span>
               </template>
               <span v-else class="text-xs text-neutral-400">
-                需在服务器上运行一次 qui-update --component agent 启用网页升级
+                {{ agentMigrationReason(node) }}
               </span>
             </template>
             <template v-else>
@@ -482,7 +482,7 @@
         <!-- Row 4: Action Buttons (Apple HIG Precision) -->
         <div v-if="kind === 'all'" class="pt-2 border-t border-black/[0.04] flex items-center gap-1.5 overflow-x-auto">
           <button
-            v-if="isOwner && node.agentUpdateSupported && !upgradeUnavailableReason(node)"
+            v-if="isOwner && node.agentSystemUpdateSupported && !upgradeUnavailableReason(node)"
             type="button"
             @click="handleUpgradeSingle(node, 'agent')"
             class="ios-btn-secondary flex-1 !min-w-max !px-1.5 shrink-0 whitespace-nowrap !bg-ios-blue/[0.08] !text-ios-blue !border-transparent !shadow-none hover:!bg-ios-blue/[0.15]"
@@ -500,7 +500,7 @@
         </div>
         <template v-else-if="kind === 'agent'">
           <div class="pt-2 border-t border-black/[0.04] grid grid-cols-2 gap-2.5">
-            <template v-if="node.agentUpdateSupported">
+            <template v-if="node.agentSystemUpdateSupported">
               <button v-if="isOwner && !upgradeUnavailableReason(node)"
                 type="button"
                 @click="handleUpgradeSingle(node)"
@@ -515,7 +515,7 @@
               <div v-else-if="isOwner" class="text-xs text-neutral-400 flex items-center justify-center text-center">{{ upgradeUnavailableReason(node) }}</div>
             </template>
             <div v-else class="text-xs text-neutral-400 flex items-center justify-center text-center">
-              需在服务器上运行一次 qui-update --component agent 启用网页升级
+              {{ agentMigrationReason(node) }}
             </div>
 
             <router-link
@@ -601,12 +601,13 @@
     <AppDialog
       v-model="agentUpgradeDialogVisible"
       :title="agentUpgradeTargetNode ? `升级 Agent - ${agentUpgradeTargetNode.name}` : '全部升级 Agent'"
-      :description="agentUpgradeTargetNode ? '升级到最新的官方签名版本。尚未导入面板时会先自动下载并导入，面板只保留最新版本。' : '为全部支持的在线服务器批量升级到最新的 Agent 版本。'"
+      description="服务器将运行 qui-update --component agent --version 所选版本 --yes，沿用终端的下载、校验、完整安装与恢复流程。结果和完整输出可在任务记录中查看。"
       max-width="lg"
       :show-confirm="false"
       cancel-text="关闭"
     >
       <div class="space-y-3">
+        <div v-if="agentUpgradeErrors.length" role="alert" class="text-sm text-red-700 whitespace-pre-wrap break-words">{{ agentUpgradeErrors.join('\n') }}</div>
         <div v-if="agentUpgradeLoading" class="py-8 text-center text-sm text-neutral-400 flex flex-col items-center justify-center gap-2">
           <svg class="w-5 h-5 text-ios-blue animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -626,15 +627,9 @@
             <div class="space-y-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="font-bold text-sm text-neutral-900">v{{ item.version }}</span>
-                <span
-                  class="px-1.5 py-0.5 rounded text-2xs font-semibold uppercase tracking-wider"
-                  :class="item.imported ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-neutral-100 text-neutral-600'"
-                >
-                  {{ item.imported ? '已导入' : '未导入' }}
-                </span>
               </div>
               <div class="text-xs text-neutral-500 flex items-center gap-2 flex-wrap">
-                <span>支持架构: {{ item.architectures.join(', ') || 'linux/amd64, linux/arm64' }}</span>
+                <span>支持架构: {{ item.architectures.join(', ') || '发布信息未提供' }}</span>
                 <span v-if="item.publishedAt">· {{ formatTime(item.publishedAt) }}</span>
               </div>
             </div>
@@ -642,40 +637,14 @@
               type="button"
               :disabled="agentUpgradeBusy"
               @click="selectAgentVersionForUpgrade(item)"
-              class="shrink-0 py-1.5 px-3 rounded-xl text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-50"
-              :class="item.imported ? 'bg-ios-blue text-white hover:bg-blue-600' : 'bg-neutral-900 text-white hover:bg-black'"
+              class="shrink-0 py-1.5 px-3 rounded-xl text-sm font-semibold bg-ios-blue text-white hover:bg-blue-600 transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              {{ item.imported ? (agentUpgradeTargetNode ? '升级' : '全部升级') : (agentUpgradeTargetNode ? '导入并升级' : '导入并全部升级') }}
+              {{ agentUpgradeTargetNode ? '升级' : '全部升级' }}
             </button>
           </div>
         </div>
       </div>
     </AppDialog>
-    <AppDialog :model-value="!!manualAgentNode" @update:model-value="v => { if (!v) manualAgentNode = null; }" title="手动选择 Agent 发布平台" description="节点架构未知或无完全匹配的版本，请核对目标主机后明确选择。" @confirm="prepareManualAgent">
-      <select v-model="manualReleaseId" class="form-input-base"><option value="">选择已签名版本与平台</option><option v-for="r in agentReleases.filter(r => r.signed.manifest.component === 'proxy-agent')" :key="r.id" :value="r.id">{{ r.signed.manifest.version }} · {{ r.signed.manifest.os }}/{{ r.signed.manifest.architecture }}</option></select>
-    </AppDialog>
-    <!-- Dialog 1: Single Agent Upgrade Confirmation -->
-    <ConfirmDialog
-      v-model="singleAgentConfirmVisible"
-      title="升级 Agent"
-      :message="singleAgentConfirmMessage"
-      warning-details="系统将下发经过签名验证的最新版本，由 Agent 校验、切换并上报结果。原有节点身份与已用额度保持不变。"
-      confirm-text="确认升级"
-      :is-danger="false"
-      @confirm="executeSingleAgentUpgrade"
-    />
-
-    <!-- Dialog 2: Batch Agent Upgrade Confirmation -->
-    <ConfirmDialog
-      v-model="batchAgentConfirmVisible"
-      title="全部升级 Agent"
-      :message="batchAgentConfirmMessage"
-      warning-details="系统将依次为全部符合条件的在线服务器下发最新 Agent 升级任务。离线服务器需等待重新上线。"
-      confirm-text="开始全部升级"
-      :is-danger="false"
-      @confirm="executeBatchAgentUpgrade"
-    />
-
     <!-- Baseline before upgrading a server that never published a configuration -->
     <ConfirmDialog
       v-model="baselineConfirmVisible"
@@ -1260,8 +1229,9 @@ import { proxyAPI, type Inbound } from '../../proxy/api';
 import { blockedCores, coreLabel, coreSummaryLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
 import { getNodeMeta, resolveCountryInfo, countryTitle, type CountryInfo } from '../../nodes/nodeMeta';
 import { connectAddress } from '../../nodes/nodeAddress';
+import { serverStatus } from '../../nodes/components/serverListModel';
 import { agentUpdatesAPI } from '../agentUpdatesApi';
-import { coreUpdatesAPI, type CoreRemoveTask, type CoreUpdateTask, type ReleaseEntry } from '../coreUpdatesApi';
+import { coreUpdatesAPI, type CoreRemoveTask, type CoreUpdateTask } from '../coreUpdatesApi';
 import { coreReleaseFields, coreReleasesAPI, defaultCoreSource, deriveAssetURL, DIGEST_SOURCE_LABELS, nodeArchitecture, nodeUsesMusl, pickAsset, quiSourceAllowed, type CoreRelease, type CoreReleaseAsset, type CoreSource } from '../coreReleases';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
@@ -1304,30 +1274,22 @@ function setDisplayMode(mode: 'grid' | 'list') {
   localStorage.setItem(`qui_${props.kind}_display_mode`, mode);
 }
 
-// Upgrade Context: Catalog Releases & Recent Core Tasks
-const agentReleases = ref<ReleaseEntry[]>([]);
+// Agent releases select the terminal updater target; core management stays separate.
 const showCoreCatalogModal = ref(false);
 
-const latestAgentRelease = computed(() => {
-  const list = agentReleases.value.filter(r => r.signed?.manifest?.component === 'proxy-agent');
-  if (!list.length) return null;
-  return list.slice().sort((a, b) => (b.signed?.manifest?.sequence || 0) - (a.signed?.manifest?.sequence || 0))[0];
-});
-
-function findLatestAgentReleaseForNode(node: NodeView, releases: ReleaseEntry[]): ReleaseEntry | undefined {
-  const platform = nodePlatform(node);
-  if (!platform) return undefined;
-  return releases.filter(r => r.signed.manifest.component === 'proxy-agent' && r.signed.manifest.os + '/' + r.signed.manifest.architecture === platform)
-    .sort((a,b) => b.signed.manifest.sequence - a.signed.manifest.sequence)[0];
-}
 const agentUpgradeDialogVisible = ref(false);
 const agentUpgradeTargetNode = ref<NodeView | null>(null);
 const agentReleaseList = ref<AgentReleaseVersion[]>([]);
 const agentUpgradeLoading = ref(false);
 const agentUpgradeBusy = ref(false);
+const agentUpgradeErrors = ref<string[]>([]);
+function agentMigrationReason(node: NodeView): string {
+  return [node.agentSystemUpdateError, '请在终端运行 qui-update --component agent；旧更新器可能需再次运行，直到完整网页升级就绪'].filter(Boolean).join('；');
+}
 
 async function loadAgentReleases(refresh = false) {
   agentUpgradeLoading.value = true;
+  agentUpgradeErrors.value = [];
   try {
     agentReleaseList.value = await nodeAPI.agentReleases(refresh);
   } catch (e) {
@@ -1337,72 +1299,32 @@ async function loadAgentReleases(refresh = false) {
   }
 }
 
-function findAgentReleaseForNode(node: NodeView, version: string, entries: ReleaseEntry[]): ReleaseEntry | undefined {
-  const platform = nodePlatform(node);
-  if (!platform) return undefined;
-  return entries.find(r =>
-    r.signed?.manifest?.component === 'proxy-agent' &&
-    r.signed?.manifest?.version === version &&
-    (r.signed?.manifest?.os + '/' + r.signed?.manifest?.architecture) === platform
-  );
-}
-
 async function selectAgentVersionForUpgrade(versionItem: AgentReleaseVersion) {
   if (agentUpgradeBusy.value) return;
   agentUpgradeBusy.value = true;
   try {
-    let entries: ReleaseEntry[] = [];
-    if (!versionItem.imported) {
-      entries = await nodeAPI.importAgentRelease(versionItem.version);
-      versionItem.imported = true;
-      await loadUpgradeContext();
-    } else {
-      await loadUpgradeContext();
-      entries = agentReleases.value;
-    }
-
-    if (agentUpgradeTargetNode.value) {
-      const node = agentUpgradeTargetNode.value;
-      const targetRel = findAgentReleaseForNode(node, versionItem.version, entries);
-      if (!targetRel) {
-        throw new Error(`找不到与服务器平台匹配的 ${versionItem.version} 版本`);
-      }
-      await agentUpdatesAPI.queue(node.id, targetRel.id, node.heartbeat!.current_revision!);
-      showToast(`已向「${node.name}」下发 Agent 升级任务 (v${versionItem.version})`);
-      agentUpgradeDialogVisible.value = false;
-    } else {
-      const eligible = eligibleAgentOnlineNodes.value;
-      if (!eligible.length) {
-        throw new Error('没有符合升级条件的在线服务器');
-      }
-      let success = 0;
-      let failed = 0;
-      for (const node of eligible) {
-        try {
-          const targetRel = findAgentReleaseForNode(node, versionItem.version, entries);
-          if (!targetRel) throw new Error('无完全匹配的平台版本');
-          await agentUpdatesAPI.queue(node.id, targetRel.id, node.heartbeat!.current_revision!);
-          success++;
-        } catch {
-          failed++;
-        }
-      }
-      if (success > 0) {
-        showToast(`已成功向 ${success} 台在线服务器下发 Agent 升级任务${failed ? ` (${failed} 台失败)` : ''}`);
-        agentUpgradeDialogVisible.value = false;
-      } else {
-        showToast('批量升级任务下发失败，请检查各节点状态与版本配置', 'error');
+    const targets = agentUpgradeTargetNode.value ? [agentUpgradeTargetNode.value] : eligibleAgentOnlineNodes.value;
+    if (!targets.length) throw new Error('没有支持完整网页升级的在线服务器');
+    let success = 0;
+    const failures: string[] = [];
+    for (const node of targets) {
+      try {
+        await agentUpdatesAPI.queue(node.id, versionItem.version, node.heartbeat!.current_revision!);
+        success++;
+      } catch (e) {
+        failures.push(`${node.name}：${(e as Error).message}`);
       }
     }
+    agentUpgradeErrors.value = failures;
+    if (success) showToast(`已下发 ${success} 台服务器的 Agent v${versionItem.version} 完整升级任务，请在任务记录中查看结果`);
+    if (!failures.length) agentUpgradeDialogVisible.value = false;
     void load();
   } catch (e) {
-    showToast((e as Error).message, 'error');
+    agentUpgradeErrors.value = [(e as Error).message];
   } finally {
     agentUpgradeBusy.value = false;
   }
 }
-const manualAgentNode = ref<NodeView | null>(null);
-const manualReleaseId = ref('');
 async function readAllNodes(keyword = ''): Promise<NodeView[]> {
   const first = await nodeAPI.list(1, keyword);
   const list = [...first.items];
@@ -1415,44 +1337,12 @@ async function readAllNodes(keyword = ''): Promise<NodeView[]> {
 }
 const batchNodes = ref<NodeView[]>([]);
 
-async function loadUpgradeContext() {
-  if (!isOwner.value) return;
-  try {
-    const first = await coreUpdatesAPI.releases(1, 100);
-    const list = [...first.items];
-    for (let page = 2; list.length < first.total; page++) {
-      const next = await coreUpdatesAPI.releases(page, 100);
-      if (!next.items.length) throw new Error('发布目录分页不完整');
-      list.push(...next.items);
-    }
-    agentReleases.value = list;
-  } catch (e) { error.value = (e as Error).message; showToast(error.value, 'error'); }
-}
-
-// Single Agent Upgrade Dialog State
-const singleAgentConfirmVisible = ref(false);
-const singleAgentConfirmTarget = ref<{ node: NodeView; release: ReleaseEntry; revision: number } | null>(null);
-
-const singleAgentConfirmMessage = computed(() => {
-  const t = singleAgentConfirmTarget.value;
-  if (!t) return '';
-  return `确认将服务器「${t.node.name}」的 Agent 升级为最新版本 v${t.release.signed.manifest.version}？（当前版本: ${t.node.agentVersion || '未上报'}，配置版本 #${t.revision}）`;
-});
-
-// Batch Agent Upgrade Dialog State
-const batchAgentConfirmVisible = ref(false);
-
 const eligibleOnlineNodes = computed(() => {
   return batchNodes.value.filter(n => n.status === 'online' && n.heartbeat?.current_revision);
 });
 
 const eligibleAgentOnlineNodes = computed(() => {
-  return eligibleOnlineNodes.value.filter(n => n.agentUpdateSupported);
-});
-
-const batchAgentConfirmMessage = computed(() => {
-  const count = eligibleAgentOnlineNodes.value.length;
-  return `确认遍历全部 ${count} 台符合条件的在线服务器，按各自 os/arch 下发最新签名版本？无完全匹配版本的服务器会跳过并报告原因，请逐台手动选择。`;
+  return eligibleOnlineNodes.value.filter(n => n.agentSystemUpdateSupported && !upgradeUnavailableReason(n));
 });
 
 // ========================================================
@@ -1547,13 +1437,6 @@ function detectArch(node?: NodeView | null): 'amd64' | 'arm64' | '' {
   if (arch === 'amd64' || arch === 'arm64') return arch;
   const platform = String(caps?.platform || node.os || '');
   return platform.endsWith('/amd64') ? 'amd64' : platform.endsWith('/arm64') ? 'arm64' : '';
-}
-function nodePlatform(node: NodeView): string {
-  const caps = node.capabilities as Record<string, unknown>;
-  if (typeof caps?.platform === 'string' && /^[^/]+\/[^/]+$/.test(caps.platform)) return caps.platform;
-  if (/^[^/]+\/[^/]+$/.test(node.os || '')) return node.os;
-  const os = String(caps?.os || node.os || '');
-  return detectArch(node) && os === 'linux' ? os + '/' + detectArch(node) : '';
 }
 function requireCoreTarget(node: NodeView, component: CoreName) {
   if (!isOwner.value) throw new Error('只有 Owner 可以管理内核');
@@ -2116,9 +1999,9 @@ function upgradeAll() {
 }
 async function upgradeAllFor(kind: 'agent' | 'core') {
   if (!isOwner.value) return;
-  try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
+  try { batchNodes.value = await readAllNodes(); }
   catch (e) { showToast((e as Error).message, 'error'); return; }
-  withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && (kind !== 'agent' || node.agentUpdateSupported)), () => openBatchUpgrade(kind));
+  withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && (kind !== 'agent' || node.agentSystemUpdateSupported)), () => openBatchUpgrade(kind));
 }
 function openBatchUpgrade(kind: 'agent' | 'core') {
   const eligible = eligibleOnlineNodes.value;
@@ -2148,7 +2031,7 @@ function openBatchUpgrade(kind: 'agent' | 'core') {
 // Per-component batch entry: upgrade only the servers that run this component.
 async function upgradeAllComponent(component: CoreName) {
   if (!isOwner.value) return;
-  try { batchNodes.value = await readAllNodes(); await loadUpgradeContext(); }
+  try { batchNodes.value = await readAllNodes(); }
   catch (e) { showToast((e as Error).message, 'error'); return; }
   const runs = (node: NodeView) => getNodeInstalledCores(node).some(core => core.component === component);
   withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && runs(node)), () => openComponentBatchUpgrade(component, runs));
@@ -2165,59 +2048,6 @@ function openComponentBatchUpgrade(component: CoreName, runs: (node: NodeView) =
   coreForm.component = component;
   selectCoreComponent(component);
   coreDialogVisible.value = true;
-}
-
-// Execute single Agent upgrade
-function prepareManualAgent() {
-  const node = manualAgentNode.value, release = agentReleases.value.find(r => r.id === manualReleaseId.value);
-  if (!node || !release || !node.heartbeat?.current_revision) { showToast('请选择已签名版本', 'warning'); return; }
-  singleAgentConfirmTarget.value = { node, release, revision: node.heartbeat.current_revision };
-  manualAgentNode.value = null; singleAgentConfirmVisible.value = true;
-}
-async function executeSingleAgentUpgrade() {
-  if (!isOwner.value) return;
-  const target = singleAgentConfirmTarget.value;
-  singleAgentConfirmTarget.value = null;
-  if (!target) return;
-
-  try {
-    await agentUpdatesAPI.queue(target.node.id, target.release.id, target.revision);
-    showToast(`已向「${target.node.name}」下发 Agent 升级任务 (v${target.release.signed.manifest.version})`);
-    void load();
-    void loadUpgradeContext();
-  } catch (e) {
-    showToast((e as Error).message, 'error');
-  }
-}
-
-// Execute batch Agent upgrade
-async function executeBatchAgentUpgrade() {
-  if (!isOwner.value) return;
-  batchAgentConfirmVisible.value = false;
-  const eligible = eligibleOnlineNodes.value;
-  if (!eligible.length || !latestAgentRelease.value) return;
-
-  let success = 0;
-  let failed = 0;
-  for (const node of eligible) {
-    const rel = findLatestAgentReleaseForNode(node, agentReleases.value);
-    try {
-      if (!rel) throw new Error('无完全匹配的平台版本，请逐台手动选择');
-      await agentUpdatesAPI.queue(node.id, rel.id, node.heartbeat!.current_revision!);
-      success++;
-    } catch (e) {
-      showToast(node.name + '：' + (e as Error).message, 'error');
-      failed++;
-    }
-  }
-
-  if (success > 0) {
-    showToast(`已成功向 ${success} 台在线服务器下发 Agent 升级任务${failed ? ` (${failed} 台失败)` : ''}`);
-  } else {
-    showToast(`批量升级任务下发失败，请检查各节点状态与版本配置`, 'error');
-  }
-  void load();
-  void loadUpgradeContext();
 }
 
 // Submit Core upgrade action (single node, or per-component batch)
@@ -2289,7 +2119,6 @@ async function submitCoreAction() {
 
     coreDialogVisible.value = false;
     void load();
-    void loadUpgradeContext();
   } catch (e) {
     showToast((e as Error).message, 'error');
   } finally {
@@ -2308,11 +2137,14 @@ defineExpose({
 
 let generation = 0;
 let refreshing = false;
+let refreshAgain = false;
 function nodeStatusChanged() {
-  if (!loading.value) void load(true);
+  if (loading.value || refreshing) { refreshAgain = true; return; }
+  void load(true);
 }
 async function refreshNodes() {
   if (loading.value || refreshing || document.visibilityState !== 'visible') return;
+  refreshAgain = false;
   refreshing = true;
   const current = generation;
   try {
@@ -2323,7 +2155,10 @@ async function refreshNodes() {
       error.value = '';
     }
   } catch (e) { if (current === generation) error.value = (e as Error).message; }
-  finally { refreshing = false; }
+  finally {
+    refreshing = false;
+    if (refreshAgain) nodeStatusChanged();
+  }
 }
 let tasksReading = false, tasksGeneration = 0;
 async function refreshTasks() {
@@ -2338,6 +2173,8 @@ function visibilityChanged() {
   if (document.visibilityState === 'visible') { void nodeStatusChanged(); void refreshTasks(); }
 }
 let refreshTimer: ReturnType<typeof setInterval>;
+let statusTimer: ReturnType<typeof setInterval>;
+const statusNow = ref(Date.now());
 const nodeStatusThrottled = throttleTrailing(() => nodeStatusChanged(), 5000);
 async function load(silent = false) {
   if (silent) return refreshNodes();
@@ -2356,7 +2193,10 @@ async function load(silent = false) {
   } catch (e) {
     if (current === generation) error.value = (e as Error).message;
   } finally {
-    if (current === generation) loading.value = false;
+    if (current === generation) {
+      loading.value = false;
+      if (refreshAgain) nodeStatusChanged();
+    }
   }
 }
 
@@ -2412,56 +2252,47 @@ function formatOS(os?: string): string {
 }
 
 function getNodeStatusTone(node: NodeView): 'active' | 'error' | 'warning' {
-  if (node.status === 'online') return 'active';
-  if (node.status === 'offline' || node.status === 'error') return 'error';
+  const display = serverStatus(node, statusNow.value);
+  if (display.key === 'online') return 'active';
+  if (display.key === 'offline' || display.tone === 'error') return 'error';
   return 'warning';
 }
 
 function statusCapsuleClass(node: NodeView): string {
-  if (node.status === 'online') return 'bg-[#E8F8F0] text-[#12B76A]';
-  if (node.status === 'offline') return 'bg-neutral-100 text-neutral-500';
-  if (node.status === 'error') return 'bg-red-50 text-red-600';
-  if (node.status === 'degraded') return 'bg-amber-50 text-amber-700';
-  if (node.status === 'applying' || node.status === 'rollback') return 'bg-blue-50 text-ios-blue';
-  if (node.status === 'pending') return 'bg-neutral-100 text-neutral-500';
-  if (node.status === 'disabled') return 'bg-neutral-100 text-neutral-500';
+  const display = serverStatus(node, statusNow.value);
+  if (display.tone === 'online') return 'bg-[#E8F8F0] text-[#12B76A]';
+  if (display.tone === 'error') return 'bg-red-50 text-red-600';
+  if (display.tone === 'warning') return 'bg-amber-50 text-amber-700';
+  if (display.tone === 'applying') return 'bg-blue-50 text-ios-blue';
   return 'bg-neutral-100 text-neutral-500';
 }
 
 function statusDotClass(node: NodeView): string {
-  if (node.status === 'online') return 'bg-[#12B76A]';
-  if (node.status === 'offline') return 'bg-neutral-400';
-  if (node.status === 'error') return 'bg-red-500';
-  if (node.status === 'degraded') return 'bg-amber-500';
-  if (node.status === 'applying' || node.status === 'rollback') return 'bg-ios-blue';
-  if (node.status === 'pending') return 'bg-neutral-400';
-  if (node.status === 'disabled') return 'bg-neutral-400';
+  const display = serverStatus(node, statusNow.value);
+  if (display.tone === 'online') return 'bg-[#12B76A]';
+  if (display.tone === 'error') return 'bg-red-500';
+  if (display.tone === 'warning') return 'bg-amber-500';
+  if (display.tone === 'applying') return 'bg-ios-blue';
   return 'bg-neutral-400';
 }
 
 function statusCapsuleText(node: NodeView): string {
-  if (node.status === 'online') return '在线';
-  if (node.status === 'degraded') return '核心异常';
-  if (node.status === 'applying') return '发布中';
-  if (node.status === 'rollback') return '回滚中';
-  if (node.status === 'error') return '异常';
-  if (node.status === 'offline') return '离线';
-  if (node.status === 'pending') return '等待登记';
-  if (node.status === 'disabled') return '已停用';
-  return node.status;
+  return serverStatus(node, statusNow.value).label;
 }
 
 onMounted(() => {
   refreshTimer = setInterval(visibilityChanged, 60000);
+  statusTimer = setInterval(() => { if (!document.hidden) statusNow.value = Date.now(); }, 5000);
   document.addEventListener('visibilitychange', visibilityChanged);
   void load();
-  void loadUpgradeContext();
   window.addEventListener('proxy-node-status', nodeStatusThrottled);
 });
 
 onUnmounted(() => {
   tasksGeneration++;
+  refreshAgain = false;
   clearInterval(refreshTimer);
+  clearInterval(statusTimer);
   document.removeEventListener('visibilitychange', visibilityChanged);
   generation++;
   nodeStatusThrottled.cancel();

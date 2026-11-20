@@ -35,7 +35,7 @@
         <p v-else-if="activeTab !== 'settings'" class="text-sm text-ios-secondary">服务器待登记，完成 Agent 安装并等待首次心跳后可查看此页。</p>
       </template>
       <template v-else>
-        <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : '服务器离线' }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
+        <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : status.label }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
         <ServerOverview v-if="activeTab === 'overview'" :key="node.id" :node="node" :meta="meta" :now="now" :node-traffic="nodeTraffic" :machine-traffic="machineTraffic" :statistics-notice="trafficStatus" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
         <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id" :refresh="nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
@@ -190,10 +190,12 @@ function readNode(id: string): Promise<NodeView> {
   nodeRequests.set(id, promise);
   return promise;
 }
-let refreshing = false, mounted = false;
+let refreshing = false, mounted = false, refreshAgain = false;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
-async function refreshNode() {
-  if (!mounted || document.visibilityState !== 'visible' || loading.value || refreshing || route.name !== 'NodeDetail') return;
+async function refreshNode(queue = false) {
+  if (!mounted || document.visibilityState !== 'visible' || route.name !== 'NodeDetail') return;
+  if (loading.value || refreshing) { if (queue) refreshAgain = true; return; }
+  refreshAgain = false;
   const id = String(route.params.id || ''), current = generation;
   refreshing = true;
   try {
@@ -207,6 +209,7 @@ async function refreshNode() {
     if (mounted && current === generation) { if (invalidatesRead(e)) node.value = null; error.value = (e as Error).message; }
   } finally {
     refreshing = false;
+    if (refreshAgain) void refreshNode();
   }
 }
 function visibilityChanged() {
@@ -228,7 +231,10 @@ async function load() {
   } catch (e) {
     if (current === generation) { if (invalidatesRead(e)) node.value = null; error.value = (e as Error).message; }
   } finally {
-    if (current === generation) loading.value = false;
+    if (current === generation) {
+      loading.value = false;
+      if (refreshAgain) void refreshNode();
+    }
   }
 }
 
@@ -271,7 +277,7 @@ watch(activeTab, () => { void loadSupplements(); });
 
 // Only this node's status events (or the empty "all nodes" event) refresh the page.
 function nodeStatusChanged(event: Event) {
-  if (nodeStatusMatches(event, String(route.params.id || ''))) void refreshNode();
+  if (nodeStatusMatches(event, String(route.params.id || ''))) void refreshNode(true);
 }
 
 watch(() => route.params.id, () => {

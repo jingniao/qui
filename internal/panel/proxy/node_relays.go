@@ -10,6 +10,7 @@ import (
 
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/subscription/availability"
 	"proxycontrol/internal/panel/subscription/format/uri"
 	subproxy "proxycontrol/internal/panel/subscription/proxy"
 	"proxycontrol/internal/panel/subscription/source/published"
@@ -204,7 +205,7 @@ func (s *Service) CreateNodeRelay(ctx context.Context, nodeID string, input Node
 }
 
 func (r *Repository) relaySnapshot(ctx context.Context, q portDatabase, rule TunnelRule) (published.Relay, error) {
-	relay := published.Relay{ID: rule.ID, Name: strings.TrimSpace(rule.Name), InboundID: rule.Target.InboundID, ImportID: rule.Target.ImportID, Entry: subproxy.Ref{ID: rule.EntryNodeID, Name: rule.EntryNodeName}, Port: *rule.ListenPort, Network: rule.Network, DestinationAddress: rule.Target.Host, DestinationPort: rule.Target.Port, Enabled: rule.Enabled, Visible: rule.SubscriptionVisible}
+	relay := published.Relay{ID: rule.ID, Name: strings.TrimSpace(rule.Name), InboundID: rule.Target.InboundID, ImportID: rule.Target.ImportID, Entry: subproxy.Ref{ID: rule.EntryNodeID, Name: rule.EntryNodeName}, Port: *rule.ListenPort, Network: rule.Network, DestinationAddress: rule.Target.Host, DestinationPort: rule.Target.Port, Enabled: rule.Enabled, Visible: rule.SubscriptionVisible, RouteNodeIDs: []string{rule.EntryNodeID}}
 	// Clients dial the entry by its client connect address (connectHost, else
 	// public IP); the destination stays the target's public IP for TLS names.
 	err := q.QueryRowContext(ctx, "SELECT COALESCE(NULLIF(connect_host,''),public_ip) FROM nodes WHERE id=?", rule.EntryNodeID).Scan(&relay.Server)
@@ -216,6 +217,17 @@ func (r *Repository) relaySnapshot(ctx context.Context, q portDatabase, rule Tun
 func (r *Repository) saveRelaySnapshot(ctx context.Context, tx *sql.Tx, relay published.Relay) error {
 	data, err := json.Marshal(relay)
 	if err != nil {
+		return err
+	}
+	digest, err := availability.RelayDigest(data)
+	if err != nil {
+		return err
+	}
+	ids := append([]string(nil), relay.RouteNodeIDs...)
+	// The successful rule snapshot owns these hops and the target reference.
+	// Filter proves the target's current continuation after publication.
+	if err = availability.Save(ctx, tx, availability.Dependencies{Ref: "relay:" + relay.ID, OwnerNodeID: relay.Entry.ID,
+		PublicationID: "relay-snapshot:" + digest, SourceDigest: digest, NodeIDs: ids, PathNodeIDs: relay.RouteNodeIDs, TargetInboundID: relay.InboundID}); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE tunnel_rules SET published_snapshot=? WHERE id=?", string(data), relay.ID)

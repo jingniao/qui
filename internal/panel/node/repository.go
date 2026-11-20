@@ -71,20 +71,25 @@ type Node struct {
 	// CountryCode is the ISO 3166-1 alpha-2 country of PublicIP from the
 	// embedded offline table (internal/panel/geoip), "" when unknown. Derived on
 	// read, never stored.
-	CountryCode          string           `json:"countryCode"`
-	ConnectHost          string           `json:"connectHost"`
-	OutboundSourceIP     string           `json:"outboundSourceIp"`
-	OutboundInterface    string           `json:"outboundInterface"`
-	HostSourceIPv4       string           `json:"hostSourceIpv4"`
-	HostSourceIPv6       string           `json:"hostSourceIpv6"`
-	LastHeartbeat        string           `json:"lastHeartbeat"`
-	LastSequence         uint64           `json:"lastSequence"`
-	Capabilities         *pb.Capabilities `json:"capabilities"`
-	Heartbeat            *pb.Heartbeat    `json:"heartbeat"`
-	CreatedAt            string           `json:"createdAt"`
-	DeletedAt            string           `json:"deletedAt"`
-	AgentUpdateSupported bool             `json:"agentUpdateSupported"`
-	Tags                 []string         `json:"tags"`
+	CountryCode       string `json:"countryCode"`
+	ConnectHost       string `json:"connectHost"`
+	OutboundSourceIP  string `json:"outboundSourceIp"`
+	OutboundInterface string `json:"outboundInterface"`
+	HostSourceIPv4    string `json:"hostSourceIpv4"`
+	HostSourceIPv6    string `json:"hostSourceIpv6"`
+	LastHeartbeat     string `json:"lastHeartbeat"`
+	// OfflineAfterSeconds controls display only; control availability stays independent.
+	OfflineAfterSeconds        int              `json:"offlineAfterSeconds"`
+	LastSequence               uint64           `json:"lastSequence"`
+	Capabilities               *pb.Capabilities `json:"capabilities"`
+	Heartbeat                  *pb.Heartbeat    `json:"heartbeat"`
+	CreatedAt                  string           `json:"createdAt"`
+	DeletedAt                  string           `json:"deletedAt"`
+	AgentSystemUpdateSupported bool             `json:"agentSystemUpdateSupported"`
+	AgentSystemUpdateError     string           `json:"agentSystemUpdateError"`
+	AgentBootstrapVersion      string           `json:"agentBootstrapVersion"`
+	AgentUpdateSupported       bool             `json:"agentUpdateSupported"`
+	Tags                       []string         `json:"tags"`
 	// GostCoreSupported is Hello.gost_core_supported: the Agent can install GOST.
 	GostCoreSupported bool `json:"gostCoreSupported"`
 }
@@ -416,7 +421,7 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected,coalesce((SELECT agent_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT tags_json FROM node_meta WHERE node_id=nodes.id),'[]'),gost_core_supported,EXISTS(SELECT 1 FROM relay_cleanup_nodes WHERE node_id=nodes.id),coalesce((SELECT last_code FROM relay_cleanup_nodes WHERE node_id=nodes.id),'')"
+const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected,coalesce((SELECT agent_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT tags_json FROM node_meta WHERE node_id=nodes.id),'[]'),gost_core_supported,EXISTS(SELECT 1 FROM relay_cleanup_nodes WHERE node_id=nodes.id),coalesce((SELECT last_code FROM relay_cleanup_nodes WHERE node_id=nodes.id),''),(SELECT duration_minutes*60 FROM notification_rules WHERE kind='node_offline'),coalesce((SELECT agent_system_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT agent_system_error FROM node_update_capabilities WHERE node_id=nodes.id),''),coalesce((SELECT agent_bootstrap_version FROM node_update_capabilities WHERE node_id=nodes.id),'')"
 
 type scanner interface{ Scan(...any) error }
 
@@ -427,7 +432,7 @@ var storedJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 func scan(row scanner) (Node, error) {
 	n := Node{Capabilities: &pb.Capabilities{}, Heartbeat: &pb.Heartbeat{}, PublicAddresses: []PublicAddress{}}
 	var capabilities, heartbeat, addrsJSON, tags string
-	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &tags, &n.GostCoreSupported, &n.RelayCleanupPending, &n.RelayCleanupCode)
+	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &capabilities, &heartbeat, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &tags, &n.GostCoreSupported, &n.RelayCleanupPending, &n.RelayCleanupCode, &n.OfflineAfterSeconds, &n.AgentSystemUpdateSupported, &n.AgentSystemUpdateError, &n.AgentBootstrapVersion)
 	if err != nil {
 		return n, err
 	}

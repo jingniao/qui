@@ -63,6 +63,9 @@ var ErrFormat = format.ErrUnknown
 // ErrSettings reports that the subscription settings could not be read.
 var ErrSettings = errors.New("subscription settings unavailable")
 
+// ErrRoutes preserves a primary source/route error through preview handlers.
+var ErrRoutes = errors.New("subscription routes unavailable")
+
 // DefaultFormats is the format registry of v1.1: URI list, Base64 URI list, the
 // sing-box fragment and the two Clash profiles (mihomo and legacy Clash).
 func DefaultFormats() *format.Registry {
@@ -83,7 +86,10 @@ type Service struct {
 	Formats           *format.Registry
 	Settings          Settings
 	Traffic           Traffic
-	CandidateUsers    interface {
+	Availability      interface {
+		Filter(context.Context, []proxy.Proxy) ([]proxy.Proxy, []proxy.Warning, error)
+	}
+	CandidateUsers interface {
 		List(context.Context, string, int, int) ([]user.User, int, error)
 	}
 	ImportNames interface {
@@ -92,7 +98,7 @@ type Service struct {
 	// Rules supplies the client rule template exporters with rules render.
 	Rules        RuleTemplates
 	ClientChains interface {
-		Chains(context.Context, []proxy.Proxy) ([]proxy.Proxy, []proxy.Warning)
+		Chains(context.Context, []proxy.Proxy) ([]proxy.Proxy, []proxy.Warning, error)
 	}
 }
 
@@ -164,13 +170,25 @@ func (s *Service) Proxies(ctx context.Context, userID, deviceID string) ([]proxy
 }
 
 func (s *Service) collect(ctx context.Context, viewer source.Viewer) ([]proxy.Proxy, []proxy.Warning, error) {
+	viewer.RouteAvailability = s.Availability != nil
 	p, w, err := s.sources().Collect(ctx, viewer)
-	if err == nil && s.ClientChains != nil {
+	if err != nil {
+		return nil, w, fmt.Errorf("%w: %w", ErrRoutes, err)
+	}
+	if err == nil && s.Availability != nil {
 		var raised []proxy.Warning
-		p, raised = s.ClientChains.Chains(ctx, p)
+		p, raised, err = s.Availability.Filter(ctx, p)
 		w = append(w, raised...)
 	}
-	return p, w, err
+	if err == nil && s.ClientChains != nil {
+		var raised []proxy.Warning
+		p, raised, err = s.ClientChains.Chains(ctx, p)
+		w = append(w, raised...)
+	}
+	if err != nil {
+		return nil, w, fmt.Errorf("%w: %w", ErrRoutes, err)
+	}
+	return p, w, nil
 }
 
 // account validates the account and its device and reports the source view.

@@ -249,8 +249,8 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	if _, err = s.Database.Exec("INSERT INTO canvas_schemes(id,name,execution,layout_json,client_published_layout,created_at,updated_at,published_at) VALUES('test-chain','chain','client','{}',?,?,?,?)", string(raw), "now", "now", "now"); err != nil {
 		t.Fatal(err)
 	}
-	chained, w := s.Chains(ctx, p)
-	if len(chained) != 4 || len(w) != 0 || chained[3].DialerProxy != chained[2].Name {
+	chained, w, err := s.Chains(ctx, p)
+	if err != nil || len(chained) != 4 || len(w) != 0 || chained[3].DialerProxy != chained[2].Name {
 		t.Fatal("published snapshot not rendered")
 	}
 	// The merged UI emits tunnel; it retains the exact client dialer-proxy semantics.
@@ -259,16 +259,16 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	if _, err = s.Database.Exec("UPDATE canvas_schemes SET client_published_layout=? WHERE id='test-chain'", string(raw)); err != nil {
 		t.Fatal(err)
 	}
-	tunnel, tunnelWarnings := s.Chains(ctx, p)
-	if len(tunnelWarnings) != 0 || len(tunnel) != len(chained) || tunnel[3].DialerProxy != chained[3].DialerProxy || tunnel[2].Name != chained[2].Name {
+	tunnel, tunnelWarnings, err := s.Chains(ctx, p)
+	if err != nil || len(tunnelWarnings) != 0 || len(tunnel) != len(chained) || tunnel[3].DialerProxy != chained[3].DialerProxy || tunnel[2].Name != chained[2].Name {
 		t.Fatal("tunnel alias changed client chain", tunnel, tunnelWarnings)
 	}
 	other, _, err := s.Proxies(ctx, source.Viewer{UserID: b, AllowedProtocols: []string{"socks5"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	chained, w = s.Chains(ctx, other)
-	if len(chained) != 0 || len(w) == 0 {
+	chained, w, err = s.Chains(ctx, other)
+	if err != nil || len(chained) != 0 || len(w) == 0 {
 		t.Fatal("chain leaked across grants")
 	}
 	// Reimporting a reordered batch creates new identities; it cannot retarget
@@ -290,8 +290,8 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	if err != nil || len(reimported) != 4 {
 		t.Fatalf("reimported inputs: %+v %v", reimported, err)
 	}
-	chained, w = s.Chains(ctx, reimported)
-	if len(chained) != 6 || len(w) != 0 || !reflect.DeepEqual(chained[4:], tunnel[2:]) {
+	chained, w, err = s.Chains(ctx, reimported)
+	if err != nil || len(chained) != 6 || len(w) != 0 || !reflect.DeepEqual(chained[4:], tunnel[2:]) {
 		t.Fatal("new batch retargeted the published chain", chained, w)
 	}
 	// A viewer granted only the new batch cannot use a chain of the old IDs.
@@ -302,8 +302,8 @@ func TestClientChainUsesPublishedSnapshotAndAllGrants(t *testing.T) {
 	if err != nil || len(other) != 2 {
 		t.Fatalf("new batch grant: %+v %v", other, err)
 	}
-	chained, w = s.Chains(ctx, other)
-	if len(chained) != 2 || len(w) == 0 {
+	chained, w, err = s.Chains(ctx, other)
+	if err != nil || len(chained) != 2 || len(w) == 0 {
 		t.Fatal("same-name new nodes satisfied old chain grants", chained, w)
 	}
 }

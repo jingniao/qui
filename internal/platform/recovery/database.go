@@ -241,6 +241,9 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 			func() error { return (&system.Repository{}).PrepareRestoreTx(ctx, tx, stamp, plan.Source.ID) },
 			func() error { return (&deployment.Repository{}).PrepareCoreUpdatesRestoreTx(ctx, tx) },
 			func() error { return (&certificate.Repository{}).PrepareRestoreTx(ctx, tx, stamp) },
+			func() error {
+				return (&proxy.Repository{Vault: current.ConfigurationVault}).PrepareSubscriptionDependenciesRestoreTx(ctx, tx)
+			},
 		} {
 			if err := step(); err != nil {
 				return fmt.Errorf("recovery module %d: %w", index, err)

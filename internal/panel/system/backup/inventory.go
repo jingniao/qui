@@ -10,53 +10,57 @@ import (
 )
 
 type Totals struct {
-	CoreTrafficHours        int64 `json:"coreTrafficHours,omitempty"`
-	TrafficDeliveryQueues   int64 `json:"trafficDeliveryQueues,omitempty"`
-	RelayCleanupNodes       int64 `json:"relayCleanupNodes"`
-	CanvasEntryBindings     int64 `json:"canvasEntryBindings"`
-	ClientPolicyProfiles    int64 `json:"clientPolicyProfiles"`
-	ClientPolicyActive      int64 `json:"clientPolicyActive"`
-	Tunnels                 int64 `json:"tunnels"`
-	TunnelHops              int64 `json:"tunnelHops"`
-	TunnelObjects           int64 `json:"tunnelObjects"`
-	TunnelRules             int64 `json:"tunnelRules"`
-	PortClaims              int64 `json:"portClaims"`
-	CoreRemoveTasks         int64 `json:"coreRemoveTasks"`
-	NodeTrafficCursors      int64 `json:"nodeTrafficCursors"`
-	CoreTrafficSamples      int64 `json:"coreTrafficSamples"`
-	CanvasTunnels           int64 `json:"canvasTunnels"`
-	CanvasTunnelObjects     int64 `json:"canvasTunnelObjects"`
-	MetricSamples           int64 `json:"metricSamples"`
-	NodeTuning              int64 `json:"nodeTuning"`
-	NodeGroupServers        int64 `json:"nodeGroupServers"`
-	NodeGroupInbounds       int64 `json:"nodeGroupInbounds"`
-	NodeGroupImports        int64 `json:"nodeGroupImports"`
-	NodeGroupRelays         int64 `json:"nodeGroupRelays"`
-	NodeLatencyTargets      int64 `json:"nodeLatencyTargets"`
-	LatencySamples          int64 `json:"latencySamples"`
-	ProbeTargets            int64 `json:"probeTargets"`
-	TCPProbes               int64 `json:"tcpProbes"`
-	NodeMeta                int64 `json:"nodeMeta"`
-	PendingTrafficBatches   int64 `json:"pendingTrafficBatches,omitempty"`
-	Admins                  int64 `json:"admins"`
-	ActiveOwners            int64 `json:"activeOwners"`
-	Sessions                int64 `json:"sessions"`
-	PortalSessions          int64 `json:"portalSessions"`
-	SubscriptionSources     int64 `json:"subscriptionSources"`
-	ImportedProxies         int64 `json:"importedProxies"`
-	SourceGrants            int64 `json:"sourceGrants"`
-	Users                   int64 `json:"users"`
-	Devices                 int64 `json:"devices"`
-	Nodes                   int64 `json:"nodes"`
-	NodeGroups              int64 `json:"nodeGroups"`
-	Policies                int64 `json:"policies"`
-	Revisions               int64 `json:"revisions"`
-	CanvasSchemes           int64 `json:"canvasSchemes"`
-	PendingOperations       int64 `json:"pendingOperations"`
-	BackupFileOperations    int64 `json:"backupFileOperations"`
-	RunningBackupJobs       int64 `json:"runningBackupJobs"`
-	NodeIdentityRecoveries  int64 `json:"nodeIdentityRecoveries,omitempty"`
-	NodeIdentityRetirements int64 `json:"nodeIdentityRetirements,omitempty"`
+	SubscriptionRoutes        int64 `json:"subscriptionRoutes,omitempty"`
+	CoreTrafficHours          int64 `json:"coreTrafficHours,omitempty"`
+	TrafficDeliveryQueues     int64 `json:"trafficDeliveryQueues,omitempty"`
+	RelayCleanupNodes         int64 `json:"relayCleanupNodes"`
+	CanvasEntryBindings       int64 `json:"canvasEntryBindings"`
+	ClientPolicyProfiles      int64 `json:"clientPolicyProfiles"`
+	ClientPolicyActive        int64 `json:"clientPolicyActive"`
+	Tunnels                   int64 `json:"tunnels"`
+	TunnelHops                int64 `json:"tunnelHops"`
+	TunnelObjects             int64 `json:"tunnelObjects"`
+	TunnelRules               int64 `json:"tunnelRules"`
+	PortClaims                int64 `json:"portClaims"`
+	AgentSystemUpdateTasks    int64 `json:"agentSystemUpdateTasks,omitempty"`
+	AgentSystemUpdateAttempts int64 `json:"agentSystemUpdateAttempts,omitempty"`
+	AgentSystemUpdateLogs     int64 `json:"agentSystemUpdateLogs,omitempty"`
+	CoreRemoveTasks           int64 `json:"coreRemoveTasks"`
+	NodeTrafficCursors        int64 `json:"nodeTrafficCursors"`
+	CoreTrafficSamples        int64 `json:"coreTrafficSamples"`
+	CanvasTunnels             int64 `json:"canvasTunnels"`
+	CanvasTunnelObjects       int64 `json:"canvasTunnelObjects"`
+	MetricSamples             int64 `json:"metricSamples"`
+	NodeTuning                int64 `json:"nodeTuning"`
+	NodeGroupServers          int64 `json:"nodeGroupServers"`
+	NodeGroupInbounds         int64 `json:"nodeGroupInbounds"`
+	NodeGroupImports          int64 `json:"nodeGroupImports"`
+	NodeGroupRelays           int64 `json:"nodeGroupRelays"`
+	NodeLatencyTargets        int64 `json:"nodeLatencyTargets"`
+	LatencySamples            int64 `json:"latencySamples"`
+	ProbeTargets              int64 `json:"probeTargets"`
+	TCPProbes                 int64 `json:"tcpProbes"`
+	NodeMeta                  int64 `json:"nodeMeta"`
+	PendingTrafficBatches     int64 `json:"pendingTrafficBatches,omitempty"`
+	Admins                    int64 `json:"admins"`
+	ActiveOwners              int64 `json:"activeOwners"`
+	Sessions                  int64 `json:"sessions"`
+	PortalSessions            int64 `json:"portalSessions"`
+	SubscriptionSources       int64 `json:"subscriptionSources"`
+	ImportedProxies           int64 `json:"importedProxies"`
+	SourceGrants              int64 `json:"sourceGrants"`
+	Users                     int64 `json:"users"`
+	Devices                   int64 `json:"devices"`
+	Nodes                     int64 `json:"nodes"`
+	NodeGroups                int64 `json:"nodeGroups"`
+	Policies                  int64 `json:"policies"`
+	Revisions                 int64 `json:"revisions"`
+	CanvasSchemes             int64 `json:"canvasSchemes"`
+	PendingOperations         int64 `json:"pendingOperations"`
+	BackupFileOperations      int64 `json:"backupFileOperations"`
+	RunningBackupJobs         int64 `json:"runningBackupJobs"`
+	NodeIdentityRecoveries    int64 `json:"nodeIdentityRecoveries,omitempty"`
+	NodeIdentityRetirements   int64 `json:"nodeIdentityRetirements,omitempty"`
 
 	// Machine traffic is durable host accounting, separate from proxy traffic.
 	MachineTrafficSettings int64 `json:"machineTrafficSettings"`
@@ -101,6 +105,15 @@ type Reader interface {
 
 func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	result := Inventory{Nodes: map[string]NodeRecord{}, Identities: map[string]IdentityRecord{}, Users: map[string]UserRecord{}}
+	var routeIndexApplied int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0158_subscription_route_dependencies.sql'").Scan(&routeIndexApplied); err != nil {
+		return Inventory{}, err
+	}
+	if routeIndexApplied == 1 {
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM subscription_route_dependencies").Scan(&result.Totals.SubscriptionRoutes); err != nil {
+			return Inventory{}, err
+		}
+	}
 	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM system_settings WHERE key='client_policy_active'").Scan(&result.Totals.ClientPolicyActive); err != nil {
 		return Inventory{}, err
 	}
@@ -125,6 +138,24 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 		}
 	}
 	var updatePending int64
+	var systemPresent int
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0157_agent_system_updates.sql'").Scan(&systemPresent); err != nil {
+		return Inventory{}, err
+	}
+	if systemPresent > 0 {
+		for _, item := range []struct {
+			table string
+			count *int64
+		}{{"agent_system_update_tasks", &result.Totals.AgentSystemUpdateTasks}, {"agent_system_update_attempts", &result.Totals.AgentSystemUpdateAttempts}, {"agent_system_update_logs", &result.Totals.AgentSystemUpdateLogs}} {
+			if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+item.table).Scan(item.count); err != nil {
+				return Inventory{}, err
+			}
+		}
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM agent_system_update_tasks WHERE status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1)").Scan(&updatePending); err != nil {
+			return Inventory{}, err
+		}
+	}
+
 	for _, table := range []string{"core_remove_tasks", "core_update_tasks", "agent_update_tasks"} {
 		var pending int64
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+table+" WHERE status IN ('queued','running','failed_closed')").Scan(&pending); err != nil {

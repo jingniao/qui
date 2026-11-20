@@ -12,3 +12,8 @@ func (r *Repository) AgentUpdateSupport(ctx context.Context, nodeID string, supp
 	_, err := r.Database.ExecContext(ctx, "INSERT INTO node_update_capabilities(node_id,core_supported,agent_supported,agent_recovery_supported) VALUES(?,0,?,?) ON CONFLICT(node_id) DO UPDATE SET agent_supported=excluded.agent_supported,agent_recovery_supported=excluded.agent_recovery_supported", nodeID, supported, canRecover)
 	return err
 }
+
+func (r *Repository) AgentSystemUpdateSupport(ctx context.Context, nodeID string, supported bool, reason, bootstrap string) error {
+	_, err := r.Database.ExecContext(ctx, "INSERT INTO node_update_capabilities(node_id,core_supported,agent_system_supported,agent_system_error,agent_bootstrap_version) VALUES(?,0,?,?,?) ON CONFLICT(node_id) DO UPDATE SET agent_system_supported=excluded.agent_system_supported,agent_system_error=excluded.agent_system_error,agent_bootstrap_version=excluded.agent_bootstrap_version", nodeID, supported, reason, bootstrap)
+	return err
+}

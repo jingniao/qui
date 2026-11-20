@@ -32,6 +32,7 @@ func recoveryBlockers(ctx context.Context, q rowQuery, id string) ([]Blocker, er
 		{"deployment_target", "deployment_targets", "SELECT CAST(revision AS TEXT),'' FROM deployment_targets WHERE node_id=? AND status='pending'"},
 		{"deployment_command", "deployment_commands", "SELECT id,operation FROM deployment_commands WHERE node_id=? AND status='pending'"},
 		{"deployment_batch", "deployment_batches", "SELECT DISTINCT b.id,b.name FROM deployment_batches b JOIN deployment_batch_items i ON i.batch_id=b.id WHERE i.node_id=? AND b.status IN ('deploying','rolling_back','rollback_failed')"},
+		{"agent_system_update", "agent_system_update_tasks", "SELECT id,status FROM agent_system_update_tasks WHERE node_id=? AND (status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1))"},
 		{"agent_update", "agent_update_tasks", "SELECT id,status FROM agent_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed')"},
 		{"core_update", "core_update_tasks", "SELECT id,status FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed')"},
 		{"core_remove", "core_remove_tasks", "SELECT id,component FROM core_remove_tasks WHERE node_id=? AND status IN ('queued','running')"},
@@ -89,7 +90,7 @@ func (r *Repository) IssueRecovery(ctx context.Context, nodeID, owner string, tt
 	var n Node
 	var caps, hb string
 	var fingerprint, addrsJSON, tags string
-	err = tx.QueryRowContext(ctx, "SELECT "+columns+",coalesce((SELECT fingerprint FROM node_identities WHERE node_id=nodes.id),'') FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &caps, &hb, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &tags, &n.GostCoreSupported, &n.RelayCleanupPending, &n.RelayCleanupCode, &fingerprint)
+	err = tx.QueryRowContext(ctx, "SELECT "+columns+",coalesce((SELECT fingerprint FROM node_identities WHERE node_id=nodes.id),'') FROM nodes WHERE id=?", nodeID).Scan(&n.ID, &n.Name, &n.Status, &n.Enabled, &n.Hostname, &n.OS, &n.AgentVersion, &n.PublicIP, &n.OutboundSourceIP, &n.OutboundInterface, &n.HostSourceIPv4, &n.HostSourceIPv6, &n.LastHeartbeat, &n.LastSequence, &caps, &hb, &n.CreatedAt, &n.AllowSubscription, &n.Maintenance, &n.DeletedAt, &n.PublicIPManual, &n.ConnectHost, &addrsJSON, &n.PublicIPSelected, &n.AgentUpdateSupported, &tags, &n.GostCoreSupported, &n.RelayCleanupPending, &n.RelayCleanupCode, &n.OfflineAfterSeconds, &n.AgentSystemUpdateSupported, &n.AgentSystemUpdateError, &n.AgentBootstrapVersion, &fingerprint)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, "", expires, ErrNotFound
 	}

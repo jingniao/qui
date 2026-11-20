@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"proxycontrol/internal/panel/proxy"
+	"proxycontrol/internal/panel/subscription/availability"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
@@ -471,6 +472,11 @@ func (r *Repository) CommandResult(ctx context.Context, nodeID string, result *p
 			if _, err := tx.ExecContext(ctx, "INSERT INTO node_runtime_state(node_id,revision) VALUES(?,?) ON CONFLICT(node_id) DO UPDATE SET revision=excluded.revision", nodeID, revision); err != nil {
 				return err
 			}
+		}
+	}
+	if result.Success {
+		if err := availability.CaptureNodeTx(ctx, tx, r.Vault, nodeID); err != nil {
+			return err
 		}
 	}
 	var batchID string

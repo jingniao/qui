@@ -281,7 +281,7 @@ func TestRelaySnapshotCapturedBeforeApplyAndRetainedOnFailure(t *testing.T) {
 		t.Fatal(result, err)
 	}
 	after, err := store.Relays(p.ctx)
-	if err != nil || len(after) != 1 || after[0] != before[0] {
+	if err != nil || len(after) != 1 || !reflect.DeepEqual(after[0], before[0]) {
 		t.Fatal(after, err)
 	}
 }
@@ -338,7 +338,7 @@ func TestRelaySnapshotKeepsPublishedAddressesUntilRepublish(t *testing.T) {
 	// configuration); the destination address and port stay frozen.
 	want := before[0]
 	want.Server = "203.0.113.9"
-	if err != nil || len(after) != 1 || after[0] != want {
+	if err != nil || len(after) != 1 || !reflect.DeepEqual(after[0], want) {
 		t.Fatal(after, before, err)
 	}
 	endpoint, ok := published.RelayEndpoint(subproxy.Proxy{Name: "destination · vless", Protocol: "vless", TLS: &subproxy.TLS{}, Server: "203.0.113.10", Port: 1082}, after[0])
@@ -362,7 +362,7 @@ func TestRelaySnapshotKeepsPublishedAddressesUntilRepublish(t *testing.T) {
 		t.Fatal(listed, err)
 	}
 	remaining, err := store.Relays(p.ctx)
-	if err != nil || len(remaining) != 1 || remaining[0] != after[0] {
+	if err != nil || len(remaining) != 1 || !reflect.DeepEqual(remaining[0], after[0]) {
 		t.Fatal(remaining, err)
 	}
 	if err = r.finishTunnelPublication(p.ctx, tunnelPublication{rules: []TunnelRule{pending}}); err != nil {

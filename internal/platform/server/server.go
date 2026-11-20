@@ -41,6 +41,7 @@ import (
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/statistics"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/availability"
 	"proxycontrol/internal/panel/subscription/format"
 	"proxycontrol/internal/panel/subscription/importer"
 	"proxycontrol/internal/panel/subscription/rules"
@@ -238,6 +239,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.GRPC = grpc.NewServer(options...)
 	control.CoreUpdates = deployments
 	control.AgentUpdates = deployments
+	control.AgentSystemUpdates = deployments
 	pb.RegisterAgentControlServer(s.GRPC, control)
 	healthpb.RegisterHealthServer(s.GRPC, s.health)
 	mux := http.NewServeMux()
@@ -342,6 +344,9 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	nodeHandler.Register(mux, &node.Handler{Repository: displayNodes, Runtime: runtimeSnapshots, Auth: authHandler})
 	nodeHandler.RegisterGroups(mux)
 	proxyService := &proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault, Certificates: s.certificates, DraftChanged: notifyDraft}, Nodes: nodeRepository, EntryGroups: nodeRepository}
+	if err := proxyService.Repository.RebuildSubscriptionDependencies(context.Background()); err != nil {
+		logger.Error("subscription route dependency rebuild failed", "error", err)
+	}
 	proxyService.RelayCleanupRequested = s.relayCleanup.Reconcile
 	nodeRepository.RelayDeletion = proxyService
 	proxyService.Deploy = &deployment.CanvasPublisher{Repository: deployments}
@@ -438,6 +443,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	subscriptionPublished.Database = subscriptionReads
 	subscriptionService := &subscription.Service{
 		Repository:     &subscription.Repository{Database: database, Reader: s.readPool, Vault: configurationVault},
+		Availability:   &availability.Store{Database: subscriptionReads, Vault: configurationVault},
 		Users:          &subscriptionUsers,
 		CandidateUsers: &subscriptionUsers,
 		Sources:        source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished, Relays: &published.RelayStore{Database: subscriptionReads}, CanvasEntries: &proxy.Repository{Database: subscriptionReads}}),
@@ -448,7 +454,8 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}
 	s.importStore = &importer.Store{Database: database, Reader: s.readPool, Vault: configurationVault, SelfBuiltNames: published.EndpointNameStore{Vault: configurationVault, CanvasEntries: &proxy.Repository{Database: subscriptionReads}}}
 	s.importStore.DeletionReferences = importDeletionReferences{}
-	subscriptionService.Sources.Register(s.importStore)
+	subscriptionService.Sources.Register(s.importStore.CachedSource())
+	subscriptionService.Sources.Register(s.importStore.RelaySource())
 	subscriptionService.ClientChains = s.importStore
 	subscriptionService.ImportNames = s.importStore
 	(&importer.Handler{Store: s.importStore, Auth: authHandler, Audit: systemRepository}).Register(mux)
@@ -508,6 +515,16 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		Worker:     s.notificationWorker,
 		Auth:       authHandler,
 		Audit:      systemRepository,
+		RulesChanged: func(ctx context.Context) error {
+			// Publish revised display thresholds before readers reload inventory,
+			// so a retained runtime snapshot cannot restore the old threshold.
+			if _, err := runtimeSnapshots.List(ctx); err != nil {
+				return err
+			}
+			eventBus.Publish("node_status", map[string]string{"nodeId": ""})
+			eventBus.Publish("dashboard_status", map[string]bool{"changed": true})
+			return nil
+		},
 	}).Register(mux)
 	mux.Handle("GET /api/v1/events", eventBus.Handler(authHandler))
 	mux.Handle("GET /api/v1/operations", authHandler.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

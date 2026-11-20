@@ -4,6 +4,7 @@
 | --- | --- |
 | 产品需求、架构原则、字段口径与当前状态 | [项目说明书](../AGENTS.md) |
 | 项目首页 | [项目首页](../README.md) |
+| v1.7.5 实施与发布检查中；离线时限、完整 Agent 升级与订阅整条线路过滤；迁移 0157–0158 | [发布说明](release-notes-1.7.5.md)、[实施与验证记录](v1.7.5-verification.md) |
 | v1.7.4 已发布、未部署；读取与刷新优化、调优权限探测和 Ubuntu 当前内核模块补装；迁移 0156 | [发布说明](release-notes-1.7.4.md)、[验证记录](remaining-performance-and-tuning-verification.md) |
 | v1.7.3 已发布并部署面板与三台指定 Agent；页面/弹窗提速、CPU 降低但仍有热点；无迁移 | [发布说明](release-notes-1.7.3.md)、[生产部署与性能复测](v1.7.3-production-acceptance.md) |
 | 系统组成、模块边界和数据流 | [架构总览](architecture.md) |

@@ -58,5 +58,9 @@ func validateAgentUpdates(ctx context.Context, database *sql.DB) error {
 			return ErrArchive
 		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	return validateAgentSystemUpdates(ctx, database)
 }

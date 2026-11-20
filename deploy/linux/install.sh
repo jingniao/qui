@@ -159,6 +159,9 @@ if [[ $init_system == systemd ]]; then
   tuning_probe_reset=/etc/systemd/system/proxy-agent-tuning-probe-reset.service
   tuning_service=/etc/systemd/system/proxy-agent-tuning.service
   tuning_path=/etc/systemd/system/proxy-agent-tuning.path
+  agent_update_files=(proxy-agent-update.service proxy-agent-update.path)
+  agent_update_service=/etc/systemd/system/proxy-agent-update.service
+  agent_update_path=/etc/systemd/system/proxy-agent-update.path
   module_units=false
   if [[ $component == agent ]] && grep -Eq '^ID=("ubuntu"|ubuntu)$' /etc/os-release; then
     module_units=true
@@ -175,6 +178,9 @@ else
   tuning_files=(proxy-agent-tuning tuning-watch)
   tuning_service=/etc/init.d/proxy-agent-tuning
   tuning_path=/usr/local/lib/proxy-agent/tuning-watch
+  agent_update_files=(proxy-agent-update agent-update-watch)
+  agent_update_service=/etc/init.d/proxy-agent-update
+  agent_update_path=/usr/local/lib/proxy-agent/agent-update-watch
   recovery_service=/etc/init.d/proxycontrol-update-recovery
 fi
 if [[ $init_system == openrc ]] && command -v apk >/dev/null; then
@@ -538,6 +544,7 @@ stage=$(mktemp -d "$registry/staging.XXXXXXXX")
 # install.sh anyway.
 publishing_started=false
 cleanup() {
+  rm -f -- "$stage/agent-update-request" "$stage/agent-update-service" "$stage/agent-update-path"
   rm -f -- "$stage/uninstall"
   if [[ -n $publishing_temporary ]]; then rm -f -- "$publishing_temporary"; fi
   if $publishing_started; then
@@ -600,6 +607,9 @@ host_network_path_digest=''
 tuning_service_digest=''
 tuning_path_digest=''
 if [[ $component == agent ]]; then
+  install -o root -g root -m 0600 -- "$root/linux/agent-update-request.sh" "$stage/agent-update-request"
+  install -o root -g root -m 0600 -- "$service_directory/${agent_update_files[0]}" "$stage/agent-update-service"
+  install -o root -g root -m 0600 -- "$service_directory/${agent_update_files[1]}" "$stage/agent-update-path"
   install -o root -g root -m 0600 -- "$service_directory/${tuning_files[0]}" "$stage/tuning-service"
   install -o root -g root -m 0600 -- "$service_directory/${tuning_files[1]}" "$stage/tuning-path"
   if [[ $init_system == systemd ]]; then
@@ -783,6 +793,18 @@ install -d -o root -g root -m 0755 /usr/local/lib/proxycontrol
 publish "$stage/service-library" "$library" root root 0644
 publish "$stage/update-recovery" "$recovery" root root 0755
 publish "$stage/uninstall" /usr/local/lib/proxycontrol/uninstall.sh root root 0755
+if [[ $component == agent ]]; then
+  # The request directory belongs to the Agent. Never follow its writable
+  # names with root's mkdir/chown during a later installation.
+  runuser -u "$account" -- mkdir -p -- "$data/system-update"
+  runuser -u "$account" -- chmod 0700 -- "$data/system-update"
+  [[ ! -L /var/lib/proxy-agent-update && ! -L $registry/agent-system-updates ]] || fail 'Symlinked Agent update publication or registry directory.'
+  install -d -o root -g "$account" -m 0750 /var/lib/proxy-agent-update
+  install -d -o root -g root -m 0700 "$registry/agent-system-updates"
+  publish "$stage/agent-update-request" /usr/local/lib/proxycontrol/agent-update-request root root 0755
+  publish "$stage/agent-update-service" "$agent_update_service" root root "$service_mode"
+  publish "$stage/agent-update-path" "$agent_update_path" root root "$service_mode"
+fi
 # The recovery runs before every service of both components, so its definition is
 # published together with them: the systemd unit (0644) or the OpenRC init script
 # (0755), which is the mode the component's own definition gets as well.
@@ -853,6 +875,18 @@ fi
 # update in progress (it would wait for qui-update's lock and then give up). It
 # only has work at boot; on every other boot it finds no journal.
 service_enable proxycontrol-update-recovery
+if [[ $component == agent ]]; then
+  # Never restart the runner/watcher during its own complete Agent update.
+  # The active runner has pinned its script; only the packaged files change.
+  service_reload_definitions
+  if [[ $init_system == systemd ]]; then
+    systemctl enable proxy-agent-update.path
+    systemctl start proxy-agent-update.path
+  else
+    service_enable proxy-agent-update
+    if ! service_is_active proxy-agent-update; then service_start proxy-agent-update; fi
+  fi
+fi
 if [[ $component == panel ]]; then
   # Only the path unit is enabled: the oneshot unit it arms runs when the panel writes a
   # request, and starting the path unit does not evaluate the request file that is

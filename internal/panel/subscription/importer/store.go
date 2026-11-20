@@ -551,6 +551,10 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Proxy, []proxy.Warning, error) {
+	return s.proxies(ctx, viewer, true)
+}
+
+func (s *Store) proxies(ctx context.Context, viewer source.Viewer, includeRelays bool) ([]proxy.Proxy, []proxy.Warning, error) {
 	rows, err := s.reader().QueryContext(ctx, `SELECT COALESCE(p.id,''),s.id,p.payload_encrypted,s.last_status,
  COALESCE(group_concat(DISTINCT CASE WHEN e.proxy_key='' OR e.proxy_key=p.name||'|'||p.protocol THEN g.id END),''),
  COALESCE(group_concat(DISTINCT CASE WHEN e.proxy_key='id:'||p.id THEN g.id END),''),s.url_encrypted FROM subscription_sources s
@@ -634,9 +638,12 @@ func (s *Store) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Prox
 		return nil, nil, errors.New("imported proxy cache unavailable")
 	}
 	rows.Close()
+	if !includeRelays {
+		return entries, warnings, nil
+	}
 	relays, err := s.importRelays(ctx, viewer)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, &source.FatalError{Err: err}
 	}
 	return append(entries, relays...), warnings, nil
 }

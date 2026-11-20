@@ -266,6 +266,12 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 		if e != nil {
 			return p, e
 		}
+		relay.RouteNodeIDs = []string{rule.EntryNodeID}
+		if rule.TunnelID != nil {
+			for _, hop := range included[*rule.TunnelID].Hops {
+				relay.RouteNodeIDs = append(relay.RouteNodeIDs, hop.NodeID)
+			}
+		}
 		p.relays[rule.ID] = relay
 	}
 	servers := map[string]*PublishServer{}
@@ -668,6 +674,10 @@ func (r *Repository) finishTunnelPublicationTx(ctx context.Context, tx *sql.Tx, 
 		}
 		if rule.Status != "pending_delete" {
 			if err := r.saveRelaySnapshot(ctx, tx, p.relays[rule.ID]); err != nil {
+				return err
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM subscription_route_dependencies WHERE endpoint_ref=?", "relay:"+rule.ID); err != nil {
 				return err
 			}
 		}

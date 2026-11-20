@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch the fixed Agent system update request
+After=proxycontrol-update-recovery.service
+Wants=proxy-agent-update.service
+
+[Path]
+PathChanged=/var/lib/proxy-agent/system-update/request.json
+Unit=proxy-agent-update.service
+
+[Install]
+WantedBy=multi-user.target

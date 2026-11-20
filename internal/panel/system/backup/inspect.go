@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -358,6 +359,9 @@ func validateContents(ctx context.Context, work string) error {
 	}
 	if err := proxy.ValidateTunnels(ctx, database, configurationVault); err != nil {
 		return ErrArchive
+	}
+	if err := proxy.ValidateSubscriptionDependencies(ctx, database, configurationVault); err != nil {
+		return fmt.Errorf("%w: subscription route dependencies: %w", ErrArchive, err)
 	}
 	if err := validatePortal(ctx, database, configurationVault); err != nil {
 		return err

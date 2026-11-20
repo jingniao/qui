@@ -1,11 +1,15 @@
 <template>
   <div class="space-y-6">
+    <ConfirmDialog :model-value="!!retryTarget" @update:model-value="v => { if (!v) retryTarget = null; }" title="重新尝试完整升级" :message="retryTarget ? `确认重新为「${nodeName(retryTarget.nodeId)}」运行终端升级流程？上次失败记录和输出会保留。` : ''" @confirm="retryAgent" />
+    <AppDialog :model-value="!!detailTarget" @update:model-value="v => { if (!v) detailTarget = null; }" title="Agent 完整升级详情" :show-confirm="false" max-width="xl">
+      <AgentSystemUpdateDetails v-if="activeDetail" :key="activeDetail.taskId + activeDetail.attemptId" :task-id="activeDetail.taskId" :attempt-id="activeDetail.attemptId" :phase="activeDetail.phase" :dispatch-error="activeDetail.dispatchError" :result="activeDetail.result" />
+    </AppDialog>
     <ConfirmDialog v-model="clearConfirm" title="清除核心更新任务" message="确认清除此任务？清除不会卸载核心，也不能代替节点结果确认。" @confirm="confirmClear" />
     <ConfirmDialog :model-value="!!recoveryTarget" @update:model-value="v => { if (!v) recoveryTarget = null; }" title="恢复 Agent 更新任务" :message="recoveryTarget ? '确认对服务器「' + nodeName(recoveryTarget.nodeId) + '」的原任务发起恢复？请先核对尝试记录与节点日志；运行中任务的结果尚未确认。' : ''" @confirm="recoverAgent" />
     <AppDialog :model-value="!!attemptTaskId" @update:model-value="v => { if (!v) attemptTaskId = ''; }" title="Agent 更新尝试记录" :show-confirm="false">
       <ErrorState v-if="attemptError" :message="attemptError" @retry="loadAttempts" />
       <LoadingSkeleton v-else-if="attemptLoading" />
-      <DataTable v-else-if="attempts.length"><template #header><th>代次 / 操作</th><th>状态</th><th>结果</th></template><template #body><tr v-for="a in attempts" :key="a.commandId"><td>{{ a.generation }} · {{ a.operation }} {{ a.current ? '（当前）' : '' }}</td><td>{{ a.status }}</td><td>{{ updateResultLabel(a.result?.code) }}</td></tr></template></DataTable>
+      <DataTable v-else-if="attempts.length"><template #header><th>代次 / 操作</th><th>状态</th><th>结果</th></template><template #body><tr v-for="a in attempts" :key="a.commandId"><td>{{ a.generation }} · {{ a.operation }} {{ a.current ? '（当前）' : '' }}</td><td>{{ a.status }}</td><td><template v-if="attemptMode === 'system'"><p class="whitespace-pre-wrap break-words">{{ a.systemResult?.error || a.dispatchError || a.phase || a.status }}</p><button class="ios-action-btn-secondary" @click="showSystemDetail(attemptTaskId, a.commandId, a.phase, a.systemResult, a.dispatchError)">详情与输出</button></template><template v-else>{{ updateResultLabel(a.result?.code) }}</template></td></tr></template></DataTable>
       <EmptyState v-else title="暂无尝试记录" />
       <Pagination :total="attemptTotal" :current-page="attemptPage" :page-size="20" @update:page="changeAttemptPage" />
     </AppDialog>
@@ -79,7 +83,8 @@
               class="form-input-base py-1.5 pl-3 pr-8 rounded-lg appearance-none bg-white cursor-pointer"
             >
               <option value="all">全部状态</option>
-              <option value="running">执行中 / 待确认</option>
+              <option value="running">执行中</option>
+              <option value="unconfirmed">结果待确认</option>
               <option value="queued">等待节点</option>
               <option value="success">升级成功</option>
               <option value="rolled_back">已回退 / 恢复</option>
@@ -155,7 +160,7 @@
                 <svg class="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                 </svg>
-                Agent 探针
+                {{ task.mode === 'system' ? 'Agent 完整升级' : 'Agent 探针' }}
               </span>
               <span
                 v-else-if="task.component === 'xray'"
@@ -258,8 +263,10 @@
               </button>
               <span v-else-if="task.source !== 'agent'" class="text-xs text-ios-tertiary">—</span>
               <div v-if="isOwner && task.source === 'agent'" class="flex gap-2 justify-end">
-                <button class="ios-action-btn-secondary" @click="openAttempts(task.id)">尝试记录</button>
-                <button v-if="['running', 'failed_closed'].includes(task.status)" class="ios-action-btn-secondary" :disabled="!!busyId" @click="prepareRecovery(task.id)">恢复</button>
+                <button class="ios-action-btn-secondary" @click="openAttempts(task.id, task.mode)">尝试记录</button>
+                <button v-if="task.mode === 'system'" class="ios-action-btn-secondary" @click="openSystemDetail(task.id)">详情与输出</button>
+                <button v-if="task.mode === 'system' && task.status === 'failed'" class="ios-action-btn-secondary" :disabled="!!busyId" @click="prepareRetry(task.id)">重试</button>
+                <button v-if="task.mode !== 'system' && ['running', 'failed_closed'].includes(task.status)" class="ios-action-btn-secondary" :disabled="!!busyId" @click="prepareRecovery(task.id)">恢复</button>
               </div>
             </td>
           </tr>
@@ -297,7 +304,8 @@ import ErrorState from '../../../components/ErrorState.vue';
 import { formatTime, isOwner } from '../../../app/auth';
 import { showToast } from '../../../app/api';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
-import { agentUpdatesAPI, type AgentUpdateAttempt, type AgentUpdateTask } from '../agentUpdatesApi';
+import { agentUpdatesAPI, type AgentUpdateAttempt, type AgentUpdateTask, type AgentSystemUpdateResult } from '../agentUpdatesApi';
+import AgentSystemUpdateDetails from '../components/AgentSystemUpdateDetails.vue';
 import { coreUpdatesAPI } from '../coreUpdatesApi';
 import { updateResultLabel, updateResultGuidance } from '../updateResultText';
 
@@ -320,6 +328,7 @@ interface UnifiedTask {
   updatedAt: string;
   timestamp: number;
   canClear: boolean;
+  mode?: 'system' | 'worker';
 }
 
 const loading = ref(false);
@@ -329,12 +338,13 @@ interface TaskRecord {
   id: string; source: 'agent' | 'core'; component: string; nodeId: string; nodeName: string;
   revision: number; targetVersion: string; status: string; updatedAt: string;
   result?: AgentUpdateTask['result']; recovery?: AgentUpdateTask;
+  mode?: 'system' | 'worker'; phase?: string; dispatchError?: string; systemResult?: AgentSystemUpdateResult; systemUpdate?: AgentUpdateTask;
 }
 const records = ref<TaskRecord[]>([]);
 const total = ref(0);
 
 const filterType = ref<'all' | 'agent' | 'xray' | 'sing-box'>('all');
-const filterStatus = ref<'all' | 'running' | 'queued' | 'success' | 'rolled_back' | 'failed'>('all');
+const filterStatus = ref<'all' | 'running' | 'unconfirmed' | 'queued' | 'success' | 'rolled_back' | 'failed'>('all');
 const searchKeyword = ref('');
 
 const currentPage = ref(1);
@@ -342,6 +352,15 @@ const pageSize = 20;
 
 const clearConfirm = ref(false), clearTargetId = ref('');
 const recoveryTarget = ref<AgentUpdateTask | null>(null);
+const retryTarget = ref<AgentUpdateTask | null>(null);
+const detailTarget = ref<{ taskId: string; attemptId: string; phase?: string; dispatchError?: string; result?: AgentSystemUpdateResult } | null>(null);
+const activeDetail = computed(() => {
+  const selected = detailTarget.value;
+  if (!selected) return null;
+  const task = records.value.find(t => t.id === selected.taskId);
+  return task?.systemUpdate?.commandId === selected.attemptId ? { ...selected, phase: task.phase, dispatchError: task.dispatchError, result: task.systemResult } : selected;
+});
+const attemptMode = ref<'system' | 'worker'>('worker');
 const attemptTaskId = ref(''), attemptPage = ref(1), attemptTotal = ref(0), attemptError = ref(''), attemptLoading = ref(false);
 const attempts = ref<AgentUpdateAttempt[]>([]);
 let attemptGeneration = 0;
@@ -356,7 +375,21 @@ async function recoverAgent() {
   catch (e) { showToast((e as Error).message, 'error'); }
   finally { busyId.value = ''; }
 }
-function openAttempts(id: string) { attemptTaskId.value = id; attemptPage.value = 1; void loadAttempts(); }
+function prepareRetry(id: string) { retryTarget.value = records.value.find(t => t.id === id)?.systemUpdate || null; }
+async function retryAgent() {
+  const target = retryTarget.value; retryTarget.value = null;
+  if (!target || !isOwner.value || busyId.value) return;
+  busyId.value = target.id;
+  try { await agentUpdatesAPI.retry(target); showToast('已创建新的完整升级尝试'); await loadAll(); }
+  catch (e) { showToast((e as Error).message, 'error'); }
+  finally { busyId.value = ''; }
+}
+function showSystemDetail(taskId: string, attemptId: string, phase?: string, result?: AgentSystemUpdateResult, dispatchError?: string) { detailTarget.value = { taskId, attemptId, phase, result, dispatchError }; }
+function openSystemDetail(id: string) {
+  const task = records.value.find(t => t.id === id);
+  if (task?.systemUpdate) showSystemDetail(id, task.systemUpdate.commandId, task.phase, task.systemResult, task.dispatchError);
+}
+function openAttempts(id: string, mode?: 'system' | 'worker') { attemptMode.value = mode || 'worker'; attemptTaskId.value = id; attemptPage.value = 1; void loadAttempts(); }
 function changeAttemptPage(page: number) { attemptPage.value = page; void loadAttempts(); }
 async function loadAttempts() {
   const token = ++attemptGeneration;
@@ -382,6 +415,10 @@ function mapStatusMeta(status: string, source: 'agent' | 'core'): {
       return { label: '升级成功', tone: 'green' };
     case 'running':
       return { label: '下发中，待确认', tone: 'blue' };
+    case 'unconfirmed':
+      return { label: '结果待确认', tone: 'yellow' };
+    case 'failed':
+      return { label: '升级失败', tone: 'red' };
     case 'queued':
       return { label: '等待节点', tone: 'yellow' };
     case 'rolled_back':
@@ -458,8 +495,8 @@ async function loadAll(silent = false) {
 const allTasks = computed<UnifiedTask[]>(() => records.value.map(t => {
   const meta = mapStatusMeta(t.status, t.source);
   return { ...t, statusLabel: meta.label, statusTone: meta.tone,
-    resultCode: t.result?.code, resultLabel: updateResultLabel(t.result?.code),
-    resultGuidance: updateResultGuidance(t.result?.code), installedVersion: t.result?.installed_version,
+    resultCode: t.result?.code, resultLabel: t.mode === 'system' ? (t.systemResult?.error || t.dispatchError || t.phase || meta.label) : updateResultLabel(t.result?.code),
+    resultGuidance: t.mode === 'system' ? [t.systemResult?.serviceError, t.systemResult?.logError, t.systemResult?.persistenceError].filter(Boolean).join('；') : updateResultGuidance(t.result?.code), installedVersion: t.mode === 'system' ? t.systemResult?.installedVersion.version : t.result?.installed_version,
     timestamp: Date.parse(t.updatedAt), canClear: t.source === 'core' && t.status !== 'cleared' };
 }));
 const filteredTasks = allTasks;

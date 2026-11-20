@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/subscription/availability"
 	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/readtiming"
 	"proxycontrol/internal/platform/vault"
@@ -330,6 +331,11 @@ func (r *Repository) Result(ctx context.Context, nodeID string, result *pb.Apply
 	}
 	if result.Success {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO node_runtime_state(node_id,revision) VALUES(?,?) ON CONFLICT(node_id) DO UPDATE SET revision=excluded.revision", nodeID, result.Revision); err != nil {
+			return err
+		}
+	}
+	if result.Success {
+		if err := availability.CaptureNodeTx(ctx, tx, r.Vault, nodeID); err != nil {
 			return err
 		}
 	}

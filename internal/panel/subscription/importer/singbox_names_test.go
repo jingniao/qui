@@ -44,8 +44,8 @@ func TestSingBoxRenameContentAndChainPreservesClashNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries, warnings := s.Chains(ctx, entries)
-	if len(entries) != 4 || len(warnings) != 0 {
+	entries, warnings, err := s.Chains(ctx, entries)
+	if err != nil || len(entries) != 4 || len(warnings) != 0 {
 		t.Fatalf("chains=%v warnings=%v", entries, warnings)
 	}
 	for _, p := range entries {

@@ -287,12 +287,14 @@ Owner 在节点组页授权用户，原用户授权 API 保留。用户接入来
 5. 展开启用、订阅可见且用途为 subscription/mixed 的授权分组，取得具体入站与导入成员。
 6. 去除重复节点。
 7. 过滤禁用节点。
-8. 过滤维护中节点。
+8. 按成功发布的实际完整线路，过滤任一受管跳处于维护或确认离线的整条线路；离线使用第 27.11 节的持续时间，等待恢复期间保留。
 9. 过滤不允许订阅的节点。
 10. 仅保留组内可用入站；入站非空 `allowedUserIds` 仍须包含本人，订阅还须核对已发布凭据。凭据渲染按入站授权，同服务器其他入站不自动获得用户凭据。
 11. （兼容保留，不再过滤）。
 12. 仅保留节点有客户端连接地址（`connectHost`，否则 `publicIp`，见第 11.1 节）的入站；没有地址的节点不产生端点。
 13. 输出订阅内容。
+
+线路依赖索引由成功配置、已收尾发布快照及密封发布记录证明，不读取未发布的隧道跳草稿。入口、中间、出口及其后续固定链均参与判断；纯导入端点没有受管机器身份时不按 IP 推断状态。依赖材料缺失或损坏明确报错，不默认为可用或返回假成功空订阅。此过滤只作用于订阅与预览，不改变凭据、发布或节点运行配置。
 
 输出名称按节点与协议命名：同一节点同一协议有多个入站时追加端口（`节点 · 协议 · 端口`），只有一个时保持 `节点 · 协议`。地址缺失不再静默：订阅预览按节点给出 `节点「<名称>」未设置连接地址，订阅不包含它的入站` 警告，`/sub` 本身只输出能连的端点。
 
@@ -1218,12 +1220,20 @@ POST /api/v1/core-updates/{id}/clear
 GET  /api/v1/agent-releases                      # Owner；?refresh=1，只返回 GitHub 最新的官方签名 Agent 正式版
 POST /api/v1/agent-releases/{version}/import     # Owner+CSRF；只接受最新正式版，导入清单与归档到面板只读目录后删除旧版本（v1.6.1）
 GET  /api/v1/releases                            # Owner；已导入的签名 Agent 版本（只读，v1.6.1 删除手工登记 POST）
+POST /api/v1/agent-updates                       # Owner+CSRF；{nodeId,confirmNodeId,revision,targetVersion}，新任务运行本机完整终端流程
+GET  /api/v1/agent-updates                       # Owner；完整升级与历史工作进程任务，mode区分system/worker
+GET  /api/v1/agent-updates/{id}/attempts          # Owner；保留各次尝试的真实结果
+GET  /api/v1/agent-updates/{id}/logs              # Owner；attemptId/offset分页；download=1下载输出，日志错误明确暴露
+POST /api/v1/agent-updates/{id}/retry             # Owner+CSRF；仅明确失败的完整升级任务可重试，校验原任务及尝试
+POST /api/v1/agent-updates/{id}/recover           # Owner+CSRF；仅历史工作进程任务沿用原恢复协议
 GET  /agent-catalogue/...                        # 只读托管 Agent 签名清单与归档，严格白名单防穿越
 POST /api/v1/nodes/{id}/cores/{component}/remove    # Owner+CSRF；{confirmNodeId,revision}
 GET  /api/v1/nodes/{id}/cores/{component}/removals  # 最近 100 个移除任务
 ```
 
 `restart-core` 的 `core` 必须属于 `Capabilities.cores`，否则 409 `restart_conflict`（核心不可用）；`core` 留空仍是整节点重启，历史回滚也仍是整节点操作。回滚到使用已移除核心的修订同样返回 409，消息与补救方式见第 22.2 节。
+
+v1.7.5 网页 Agent 升级固定调用节点本机 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`，完整沿用终端下载来源、信任与安装/恢复流程。新任务不导入面板 Agent 文件；旧任务继续原协议。节点返回实际探测的 `agentSystemUpdateSupported`、`agentSystemUpdateError` 和 `agentBootstrapVersion`，未就绪时提示终端迁移。任务分别保存基础组件、已安装/运行 Agent、两阶段结果、原始错误、退出码与恢复证据，日志分块持久化并确认；未知结果保持待确认，不自动重复执行。首次启用及两阶段边界见 [v1.7.5 发布说明](docs/release-notes-1.7.5.md)。
 
 ## 27.10 用户订阅
 
@@ -1234,6 +1244,8 @@ GET /sub/{token}?format=sing-box
 ```
 
 ## 27.11 实时状态
+
+管理后台服务器、节点配置、详情、总览和版本页的离线展示共用通知规则 `node_offline.durationMinutes`（默认 3 分钟），从最后有效心跳开始计时。控制连接断开或心跳超过原有 45 秒有效期后，尚未达到该持续时间时显示“连接中断，等待恢复”，节点卡片保留；达到后显示离线，节点配置页沿用隐藏离线服务器节点的规则。0 分钟表示确认断线或心跳过期后立即离线，没有有效历史心跳不延长等待期。节点读取及 `node_runtime` 快照提供只读 `offlineAfterSeconds`，保留原始 `status` 供控制可用性判断；通知规则缺失时读取失败，不补默认值。保存规则后同步刷新运行快照并广播状态事件。通知启用开关只控制离线与恢复通知，不影响展示时限；写操作准入、核心健康和实时指标仍遵守原有连接与心跳有效期。
 
 ```text
 GET /api/v1/events

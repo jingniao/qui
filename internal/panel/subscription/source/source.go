@@ -8,17 +8,26 @@ package source
 
 import (
 	"context"
+	"errors"
 
 	"proxycontrol/internal/panel/subscription/proxy"
 )
 
+// FatalError prevents an optional external source from hiding a failure in a
+// successfully published managed relay served by that same source.
+type FatalError struct{ Err error }
+
+func (e *FatalError) Error() string { return e.Err.Error() }
+func (e *FatalError) Unwrap() error { return e.Err }
+
 // Viewer is the account a subscription is rendered for. It carries only what a
 // source needs to filter its own proxies.
 type Viewer struct {
-	UserID           string
-	DeviceID         string
-	AllowedProtocols []string
-	NodeGroupIDs     []string
+	RouteAvailability bool
+	UserID            string
+	DeviceID          string
+	AllowedProtocols  []string
+	NodeGroupIDs      []string
 }
 
 // AllowsProtocol reports whether the account may use the protocol.
@@ -105,6 +114,10 @@ func (r *Registry) Collect(ctx context.Context, viewer Viewer) ([]proxy.Proxy, [
 	for _, item := range r.sources {
 		produced, raised, err := item.Proxies(ctx, viewer)
 		if err != nil {
+			var fatal *FatalError
+			if errors.As(err, &fatal) {
+				return nil, warnings, err
+			}
 			optional, ok := item.(Optional)
 			if !ok || !optional.Optional() {
 				return nil, warnings, err

@@ -42,6 +42,8 @@ func TestAgentFlagsAreExactlyTheSupportedSurface(t *testing.T) {
 	sort.Strings(got)
 	want := []string{
 		"agent-binary",
+		"agent-install-receipt",
+		"agent-install-request-id",
 		"agent-manifest",
 		"agent-version",
 		"apply-host-network",
@@ -66,6 +68,7 @@ func TestAgentFlagsAreExactlyTheSupportedSurface(t *testing.T) {
 		"storage-contract",
 		"storage-contract-version",
 		"supervise",
+		"system-update-identity",
 		"token-file",
 		"version",
 	}

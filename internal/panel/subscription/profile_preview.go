@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"errors"
 	"net/http"
 
 	"proxycontrol/internal/panel/subscription/rules"
@@ -104,6 +105,11 @@ func (h *Handler) profilePreview(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rendered, err := h.Service.render(r.Context(), userID, "", result.Format, "", nil, template)
 		if err != nil {
+			if errors.Is(err, ErrRoutes) {
+				h.Auth.Logger.Error("subscription route preview failed", "error", err)
+				httpapi.Error(w, 503, "subscription_routes_unavailable", err.Error())
+				return
+			}
 			h.fail(w, err)
 			return
 		}

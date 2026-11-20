@@ -32,8 +32,9 @@ func processStopUnconfirmed(driver Driver) bool {
 }
 
 type Installer struct {
-	History   *History
-	Directory string
+	History       *History
+	Directory     string
+	RecordFailure func(string, error) error
 }
 
 func (i *Installer) Apply(ctx context.Context, driver Driver, id string, revision int64, candidate Candidate, policy release.Policy) (Installation, error) {
@@ -136,15 +137,36 @@ func (i *Installer) Apply(ctx context.Context, driver Driver, id string, revisio
 	}
 	return i.rollback(driver, id, err)
 }
+
+// InstallationFailure preserves the original activation failure independently
+// from the real rollback outcome. Unwrap retains the existing errors.Is/As
+// behavior for callers of the common terminal and web installation path.
+type InstallationFailure struct {
+	Original          error
+	Recovery          error
+	RecoverySucceeded bool
+}
+
+func (e *InstallationFailure) Error() string { return errors.Join(e.Original, e.Recovery).Error() }
+func (e *InstallationFailure) Unwrap() []error {
+	if e.Recovery == nil {
+		return []error{e.Original}
+	}
+	return []error{e.Original, e.Recovery}
+}
+
 func (i *Installer) rollback(driver Driver, id string, cause error) (Installation, error) {
+	if i.RecordFailure != nil {
+		cause = errors.Join(cause, i.RecordFailure(id, cause))
+	}
 	if err := driver.Hold(); err != nil {
-		return Installation{}, errors.Join(cause, err, driver.Stop(context.Background()))
+		return Installation{}, &InstallationFailure{Original: cause, Recovery: errors.Join(err, driver.Stop(context.Background()))}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	s, err := i.History.TransitionInstallation(ctx, id, "rolling_back")
 	if err != nil {
-		return s, errors.Join(cause, err, driver.Stop(ctx))
+		return s, &InstallationFailure{Original: cause, Recovery: errors.Join(err, driver.Stop(ctx))}
 	}
 	path, err := ResolveImage(ctx, i.Directory, s.Component, s.Current)
 	if err == nil {
@@ -156,7 +178,7 @@ func (i *Installer) rollback(driver Driver, id string, cause error) (Installatio
 		err = errors.Join(err, driver.Stop(ctx))
 	}
 	if phase == "failed_closed" && processStopUnconfirmed(driver) {
-		return s, errors.Join(cause, err, ErrProcessStopUnconfirmed)
+		return s, &InstallationFailure{Original: cause, Recovery: errors.Join(err, ErrProcessStopUnconfirmed)}
 	}
 	final, saveErr := i.History.TransitionInstallation(ctx, id, phase)
 	if saveErr != nil {
@@ -167,7 +189,11 @@ func (i *Installer) rollback(driver Driver, id string, cause error) (Installatio
 			saveErr = errors.Join(err, driver.Stop(ctx))
 		}
 	}
-	return final, errors.Join(cause, err, saveErr)
+	recoveryErr := errors.Join(err, saveErr)
+	if cause == nil && recoveryErr == nil {
+		return final, nil
+	}
+	return final, &InstallationFailure{Original: cause, Recovery: recoveryErr, RecoverySucceeded: recoveryErr == nil && phase == "rolled_back"}
 }
 
 // ApplyImage performs the supervised switch for a locally verified direct-URL

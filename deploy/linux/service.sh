@@ -77,7 +77,7 @@ service_start() {
   init_system_known || return 1
   case $init_system in
     systemd) systemctl start "$name.service";;
-    openrc) rc-service "$name" start 9>&-;;
+    openrc) rc-service "$name" start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-;;
   esac
 }
 
@@ -95,7 +95,7 @@ service_restart() {
   init_system_known || return 1
   case $init_system in
     systemd) systemctl restart "$name.service";;
-    openrc) rc-service "$name" restart 9>&-;;
+    openrc) rc-service "$name" restart 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-;;
   esac
 }
 

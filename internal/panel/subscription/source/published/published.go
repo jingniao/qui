@@ -74,7 +74,14 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 			active[credential.ID] = credential
 		}
 	}
-	nodes, err := s.Nodes.ExpandedNodes(ctx, viewer.NodeGroupIDs)
+	var nodes []node.Node
+	if subscriptionNodes, ok := s.Nodes.(interface {
+		ExpandedSubscriptionNodes(context.Context, []string) ([]node.Node, error)
+	}); ok && viewer.RouteAvailability {
+		nodes, err = subscriptionNodes.ExpandedSubscriptionNodes(ctx, viewer.NodeGroupIDs)
+	} else {
+		nodes, err = s.Nodes.ExpandedNodes(ctx, viewer.NodeGroupIDs)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -224,7 +231,15 @@ func uniqueNames(endpoints []proxy.Proxy) {
 // Only granted groups are labelled: a rule template expands @nodeGroup with them,
 // and it must never expand to a group the account cannot use.
 func (s *Source) labels(ctx context.Context, nodeID string, viewer source.Viewer) ([]string, error) {
-	groups, err := s.Nodes.UserInboundGroups(ctx, nodeID, viewer.UserID)
+	var groups []string
+	var err error
+	if reader, ok := s.Nodes.(interface {
+		SubscriptionInboundGroups(context.Context, string, string) ([]string, error)
+	}); ok && viewer.RouteAvailability {
+		groups, err = reader.SubscriptionInboundGroups(ctx, nodeID, viewer.UserID)
+	} else {
+		groups, err = s.Nodes.UserInboundGroups(ctx, nodeID, viewer.UserID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +249,15 @@ func (s *Source) labels(ctx context.Context, nodeID string, viewer source.Viewer
 // relayLabels is labels for a tunnel rule member: the granted groups holding
 // the rule label its relayed endpoint.
 func (s *Source) relayLabels(ctx context.Context, ruleID string, viewer source.Viewer) ([]string, error) {
-	groups, err := s.Nodes.UserRelayGroups(ctx, ruleID, viewer.UserID)
+	var groups []string
+	var err error
+	if reader, ok := s.Nodes.(interface {
+		SubscriptionRelayGroups(context.Context, string, string) ([]string, error)
+	}); ok && viewer.RouteAvailability {
+		groups, err = reader.SubscriptionRelayGroups(ctx, ruleID, viewer.UserID)
+	} else {
+		groups, err = s.Nodes.UserRelayGroups(ctx, ruleID, viewer.UserID)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -384,6 +384,17 @@ func (r *Repository) DeleteGroup(ctx context.Context, id string) error {
 	return err
 }
 func (r *Repository) ExpandedNodes(ctx context.Context, groupIDs []string) ([]Node, error) {
+	return r.expandedNodes(ctx, groupIDs, false)
+}
+
+// ExpandedSubscriptionNodes leaves maintenance for the subscription's route
+// availability view, so its preview can explain the excluded complete route.
+// Access/credential snapshots retain ExpandedNodes' existing admission rules.
+func (r *Repository) ExpandedSubscriptionNodes(ctx context.Context, groupIDs []string) ([]Node, error) {
+	return r.expandedNodes(ctx, groupIDs, true)
+}
+
+func (r *Repository) expandedNodes(ctx context.Context, groupIDs []string, subscription bool) ([]Node, error) {
 	seen := map[string]bool{}
 	nodes := []Node{}
 	for _, groupID := range groupIDs {
@@ -400,7 +411,28 @@ func (r *Repository) ExpandedNodes(ctx context.Context, groupIDs []string) ([]No
 		// A tunnel rule member publishes from its target inbound, so the
 		// target's server must be read even when the group holds no inbound
 		// there.
-		for _, nodeID := range group.AccessNodeIDs() {
+		ids := group.AccessNodeIDs()
+		if subscription {
+			rows, err := r.Database.QueryContext(ctx, `SELECT DISTINCT i.node_id FROM node_group_relays e JOIN tunnel_rules t ON t.id=e.rule_id
+				JOIN inbounds i ON i.id=json_extract(t.published_snapshot,'$.InboundID') WHERE e.group_id=? AND t.published_snapshot IS NOT NULL`, groupID)
+			if err != nil {
+				return nil, err
+			}
+			for rows.Next() {
+				var id string
+				if err = rows.Scan(&id); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				ids = append(ids, id)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, nodeID := range ids {
 			if seen[nodeID] {
 				continue
 			}
@@ -409,7 +441,7 @@ func (r *Repository) ExpandedNodes(ctx context.Context, groupIDs []string) ([]No
 			if err != nil {
 				return nil, err
 			}
-			if !node.Enabled || node.Status == "disabled" || !node.AllowSubscription || node.Maintenance {
+			if !node.Enabled || node.Status == "disabled" || !node.AllowSubscription || node.Maintenance && !subscription {
 				continue
 			}
 			nodes = append(nodes, node)

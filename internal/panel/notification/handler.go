@@ -1,6 +1,7 @@
 package notification
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -9,10 +10,11 @@ import (
 )
 
 type Handler struct {
-	Repository *Repository
-	Worker     *Worker
-	Auth       *auth.Handler
-	Audit      auth.Audit
+	Repository   *Repository
+	Worker       *Worker
+	Auth         *auth.Handler
+	Audit        auth.Audit
+	RulesChanged func(context.Context) error
 }
 
 func (h *Handler) recordAudit(r *http.Request, action, target string) {
@@ -115,6 +117,12 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.recordAudit(r, "修改通知规则", "notification_rules")
+	if h.RulesChanged != nil {
+		if err := h.RulesChanged(r.Context()); err != nil {
+			httpapi.Error(w, http.StatusInternalServerError, "display_refresh_failed", "通知规则已保存，刷新节点展示失败："+err.Error())
+			return
+		}
+	}
 	httpapi.JSON(w, http.StatusOK, map[string]any{
 		"items": req.Items,
 	})

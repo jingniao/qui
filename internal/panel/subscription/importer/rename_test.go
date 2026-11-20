@@ -234,8 +234,8 @@ func TestRenameImportedProxyPreservesCanvasReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chained, warnings := s.Chains(ctx, entries)
-	if len(chained) != 4 || len(warnings) != 0 || chained[3].DialerProxy != chained[2].Name {
+	chained, warnings, err := s.Chains(ctx, entries)
+	if err != nil || len(chained) != 4 || len(warnings) != 0 || chained[3].DialerProxy != chained[2].Name {
 		t.Fatalf("chain=%v warnings=%v", chained, warnings)
 	}
 }

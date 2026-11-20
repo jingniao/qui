@@ -92,13 +92,13 @@
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
                 <span class="text-neutral-400 font-medium">CPU</span>
-                <span class="font-bold text-neutral-800 font-mono tabular-nums">{{ formatPercent(node.heartbeat?.cpu_percent) }}</span>
+                <span class="font-bold text-neutral-800 font-mono tabular-nums">{{ formatPercent(measuredHeartbeat(node)?.cpu_percent) }}</span>
               </div>
               <div class="h-1 w-full bg-black/[0.05] rounded-full overflow-hidden">
                 <div
                   class="h-full rounded-full transition-all duration-300"
-                  :class="barColor(node.heartbeat?.cpu_percent)"
-                  :style="{ width: `${Math.min(node.heartbeat?.cpu_percent ?? 0, 100)}%` }"
+                  :class="barColor(measuredHeartbeat(node)?.cpu_percent)"
+                  :style="{ width: `${Math.min(measuredHeartbeat(node)?.cpu_percent ?? 0, 100)}%` }"
                 ></div>
               </div>
             </div>
@@ -107,13 +107,13 @@
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
                 <span class="text-neutral-400 font-medium">内存</span>
-                <span class="font-bold text-neutral-800 font-mono tabular-nums">{{ formatPercent(node.heartbeat?.memory_percent) }}</span>
+                <span class="font-bold text-neutral-800 font-mono tabular-nums">{{ formatPercent(measuredHeartbeat(node)?.memory_percent) }}</span>
               </div>
               <div class="h-1 w-full bg-black/[0.05] rounded-full overflow-hidden">
                 <div
                   class="h-full rounded-full transition-all duration-300"
-                  :class="barColor(node.heartbeat?.memory_percent)"
-                  :style="{ width: `${Math.min(node.heartbeat?.memory_percent ?? 0, 100)}%` }"
+                  :class="barColor(measuredHeartbeat(node)?.memory_percent)"
+                  :style="{ width: `${Math.min(measuredHeartbeat(node)?.memory_percent ?? 0, 100)}%` }"
                 ></div>
               </div>
             </div>
@@ -122,13 +122,13 @@
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
                 <span class="text-neutral-400 font-medium">磁盘</span>
-                <span class="font-bold text-neutral-800 font-mono tabular-nums">{{ formatPercent(node.heartbeat?.disk_percent) }}</span>
+                <span class="font-bold text-neutral-800 font-mono tabular-nums">{{ formatPercent(measuredHeartbeat(node)?.disk_percent) }}</span>
               </div>
               <div class="h-1 w-full bg-black/[0.05] rounded-full overflow-hidden">
                 <div
                   class="h-full rounded-full transition-all duration-300"
-                  :class="barColor(node.heartbeat?.disk_percent)"
-                  :style="{ width: `${Math.min(node.heartbeat?.disk_percent ?? 0, 100)}%` }"
+                  :class="barColor(measuredHeartbeat(node)?.disk_percent)"
+                  :style="{ width: `${Math.min(measuredHeartbeat(node)?.disk_percent ?? 0, 100)}%` }"
                 ></div>
               </div>
             </div>
@@ -143,7 +143,7 @@
             </div>
 
             <div class="relative">
-            <div class="grid grid-cols-3 gap-1.5" :class="{ invisible: serverStatus(node, clockNow).key === 'offline' }">
+            <div class="grid grid-cols-3 gap-1.5" :class="{ invisible: ['offline', 'reconnecting'].includes(serverStatus(node, clockNow).key) }">
               <div class="bg-[#F8F9FA] rounded-xl p-2 border border-black/[0.03] space-y-0.5">
                 <div class="flex items-center gap-1 text-xs text-neutral-500 font-medium truncate">
                   <span class="w-1.5 h-1.5 rounded-full bg-neutral-300 shrink-0"></span>
@@ -167,9 +167,10 @@
               </div>
             </div>
             <div
-              v-if="serverStatus(node, clockNow).key === 'offline'"
-              class="absolute inset-0 flex items-center justify-center text-sm font-semibold leading-normal pointer-events-none text-ios-red"
-            >已离线</div>
+              v-if="['offline', 'reconnecting'].includes(serverStatus(node, clockNow).key)"
+              class="absolute inset-0 flex items-center justify-center text-sm font-semibold leading-normal pointer-events-none"
+              :class="serverStatus(node, clockNow).key === 'offline' ? 'text-ios-red' : 'text-ios-orange'"
+            >{{ serverStatus(node, clockNow).key === 'offline' ? '已离线' : '连接中断，等待恢复' }}</div>
             </div>
           </div>
 
@@ -263,6 +264,9 @@ import { serverStatus } from './serverListModel';
 const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean }>();
 const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView]; reorder: [fromId: string, toId: string] }>();
 const router = useRouter();
+function measuredHeartbeat(node: NodeView) {
+  return Object.keys(hostMetrics(node, props.clockNow)).length ? node.heartbeat : undefined;
+}
 
 // Native drag and drop (no dependency); the page saves the new order.
 const dragging = ref(''), dropTarget = ref('');

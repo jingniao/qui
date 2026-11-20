@@ -20,8 +20,13 @@ export interface NodeSettingsInput extends Partial<NodeNetworkSettings> {
   id: string; name: string; enabled: boolean; publicIp?: string; publicIpSelected?: string; connectHost?: string; allowSubscription: boolean; maintenance: boolean;
 }
 export interface NodeView extends NodeNetworkSettings {
+  // Display grace period from the node_offline rule, independent of notification enablement.
+  offlineAfterSeconds: number;
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';
   agentUpdateSupported: boolean;
+  agentSystemUpdateSupported: boolean;
+  agentSystemUpdateError: string;
+  agentBootstrapVersion: string;
   relayCleanupPending: boolean;
   relayCleanupCode: string;
   // Server-group tags (v1.5.5 item 4); the panel always sends a list.

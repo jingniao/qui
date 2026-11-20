@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+name="Proxy Control complete Agent update"
+description="Watch fixed complete Agent update requests as an independent root service"
+supervisor="supervise-daemon"
+command="/usr/local/lib/proxy-agent/agent-update-watch"
+command_user="root:root"
+umask=077
+respawn_delay=5
+respawn_max=0
+output_logger="logger -t proxy-agent-update -p daemon.info"
+error_logger="logger -t proxy-agent-update -p daemon.err"
+depend() {
+  need localmount
+  after proxycontrol-update-recovery
+  use net logger
+}

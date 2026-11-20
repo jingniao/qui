@@ -100,6 +100,7 @@
         <select v-model="filterStatus" @change="applyFilter" class="form-input-base !w-auto py-2">
           <option value="all">全部状态</option>
           <option value="online">在线</option>
+          <option value="reconnecting">等待恢复</option>
           <option value="untested">未检测</option>
           <option value="offline">离线</option>
         </select>
@@ -1160,7 +1161,7 @@ const editingInbound = ref<Inbound | null>(null);
 const searchKeyword = ref('');
 const filterSource = ref<'all' | 'self_hosted' | 'subscription' | 'manual'>('all');
 const filterProtocol = ref<string>('all');
-const filterStatus = ref<'all' | 'online' | 'untested' | 'offline'>('all');
+const filterStatus = ref<'all' | 'online' | 'untested' | 'offline' | 'reconnecting'>('all');
 
 // Collapsed states for relay routes accordion in card view
 const collapsedRelayState = reactive<Record<string, boolean>>({});
@@ -1304,7 +1305,8 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
         }
         const finalDisplayName = cleanName ? `${srv.name} · ${cleanName}` : `${srv.name} · ${ib.protocol.toUpperCase()}`;
         const name = ib.enabled ? finalDisplayName : finalDisplayName + ' (已停用)';
-        const status = ['online', 'degraded'].includes(serverStatus(srv, now.value).key) && ib.enabled ? 'online' : 'offline';
+        const state = serverStatus(srv, now.value).key;
+        const status = !ib.enabled ? 'offline' : state === 'reconnecting' ? 'reconnecting' : ['online', 'degraded'].includes(state) ? 'online' : 'offline';
         // The panel holds the inbound, so the transports are read from it with the
         // same helper the server detail page uses, instead of guessing from the
         // protocol name (that showed "TCP · UDP" for every self-hosted node).
@@ -1418,11 +1420,12 @@ const statusLook = {
   gray: { capsule: 'bg-neutral-100 text-neutral-500', dot: 'bg-neutral-400' },
 };
 function nodeStatus(node: ProxyNodeItem): { label: string; capsule: string; dot: string; title: string } {
-  const reach = node.status === 'online' ? '在线' : node.status === 'untested' ? '未检测' : '离线';
+  const reach = node.status === 'reconnecting' ? '连接中断，等待恢复' : node.status === 'online' ? '在线' : node.status === 'untested' ? '未检测' : '离线';
   const publish = inboundBadge(node);
   const failure = publish?.title?.startsWith('最近一次发布失败') ? `；${publish.title}` : '';
   const title = publish ? `服务器：${reach}；发布状态：${publish.label}${failure}` : `状态：${reach}`;
   const pick = (label: string, tone: keyof typeof statusLook) => ({ label, title, ...statusLook[tone] });
+  if (node.status === 'reconnecting') return pick(reach, 'yellow');
   if (inboundStatusUnknown(node)) return pick('状态未知', 'yellow');
   if (node.status !== 'online' && node.status !== 'untested') return pick('离线', 'gray');
   const state = inboundState(node)?.state;
@@ -1802,7 +1805,11 @@ defineExpose({ refresh: queueDraftRefresh });
 function resyncInventory() { inventory.resetStream(); queueDraftRefresh(); }
 function publishVisibilityChanged() { if (!document.hidden) resyncInventory(); }
 let statusClock: ReturnType<typeof setInterval> | undefined;
+let inventoryClock: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
+  // Calibrate persisted heartbeats and display thresholds even if an SSE event
+  // is lost. The same visible-only read handles live inventory notifications.
+  inventoryClock = setInterval(() => { void refreshServersOnNodeStatus(); }, 60000);
   statusClock = setInterval(() => {
     now.value = Date.now();
     if (inboundStateErrors.value.size) {
@@ -1822,6 +1829,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearInterval(statusClock);
+  clearInterval(inventoryClock);
   serverRefreshGeneration++;
   publishStateDisposed = true;
   publishStateReads.dispose();

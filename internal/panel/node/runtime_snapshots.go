@@ -30,15 +30,16 @@ type RuntimeSnapshotList struct {
 }
 
 type RuntimeNode struct {
-	NodeID        string           `json:"nodeId"`
-	Revision      uint64           `json:"revision"`
-	Removed       bool             `json:"removed,omitempty"`
-	Status        string           `json:"status,omitempty"`
-	Enabled       bool             `json:"enabled"`
-	Maintenance   bool             `json:"maintenance"`
-	DeletedAt     string           `json:"deletedAt"`
-	LastHeartbeat string           `json:"lastHeartbeat"`
-	Heartbeat     RuntimeHeartbeat `json:"heartbeat"`
+	NodeID              string           `json:"nodeId"`
+	Revision            uint64           `json:"revision"`
+	Removed             bool             `json:"removed,omitempty"`
+	Status              string           `json:"status,omitempty"`
+	Enabled             bool             `json:"enabled"`
+	Maintenance         bool             `json:"maintenance"`
+	DeletedAt           string           `json:"deletedAt"`
+	LastHeartbeat       string           `json:"lastHeartbeat"`
+	OfflineAfterSeconds int              `json:"offlineAfterSeconds"`
+	Heartbeat           RuntimeHeartbeat `json:"heartbeat"`
 }
 
 type RuntimeHeartbeat struct {
@@ -81,6 +82,7 @@ type runtimeSource struct {
 	enabled, maintenance                 bool
 	heartbeat, primaryCore, inventory    string
 	multiCore                            bool
+	offlineAfterSeconds                  int
 }
 
 type runtimeEntry struct {
@@ -99,7 +101,8 @@ const runtimeSelect = `SELECT n.id,n.status,n.enabled,n.maintenance,coalesce(n.d
  coalesce(json_extract(n.heartbeat_json,'$.tuningCurrent'),json_extract(n.heartbeat_json,'$.tuning_current')),
  (SELECT json_group_array(json_array(key,value,rules_version)) FROM (
    SELECT key,value,rules_version FROM node_tuning_dismissals WHERE node_id=n.id ORDER BY key)),
- (SELECT last_code FROM relay_cleanup_nodes WHERE node_id=n.id))
+ (SELECT last_code FROM relay_cleanup_nodes WHERE node_id=n.id)),
+ (SELECT duration_minutes*60 FROM notification_rules WHERE kind='node_offline')
  FROM nodes n LEFT JOIN node_meta m ON m.node_id=n.id`
 
 func NewRuntimeSnapshots(database *sql.DB, publish func(RuntimeSnapshot)) (*RuntimeSnapshots, error) {
@@ -116,7 +119,7 @@ func NewRuntimeSnapshots(database *sql.DB, publish func(RuntimeSnapshot)) (*Runt
 func scanRuntime(row scanner, now time.Time) (runtimeSource, error) {
 	var source runtimeSource
 	err := row.Scan(&source.id, &source.status, &source.enabled, &source.maintenance, &source.deletedAt, &source.lastHeartbeat,
-		&source.heartbeat, &source.primaryCore, &source.multiCore, &source.inventory)
+		&source.heartbeat, &source.primaryCore, &source.multiCore, &source.inventory, &source.offlineAfterSeconds)
 	if err == nil && (source.status == "online" || source.status == "degraded") {
 		when, parseErr := time.Parse(time.RFC3339Nano, source.lastHeartbeat)
 		if parseErr != nil || !freshHeartbeat(when, now) {
@@ -179,7 +182,7 @@ func (s *RuntimeSnapshots) prepare(source runtimeSource) (runtimeEntry, error) {
 	}
 	return runtimeEntry{source: source, node: RuntimeNode{
 		NodeID: source.id, Status: source.status, Enabled: source.enabled, Maintenance: source.maintenance,
-		DeletedAt: source.deletedAt, LastHeartbeat: source.lastHeartbeat, Heartbeat: metrics,
+		DeletedAt: source.deletedAt, LastHeartbeat: source.lastHeartbeat, Heartbeat: metrics, OfflineAfterSeconds: source.offlineAfterSeconds,
 	}}, nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/agent/rulesets"
+	"proxycontrol/internal/agent/systemupdate"
 	"proxycontrol/pkg/contracts/tcpprobe"
 	"runtime"
 	"strings"
@@ -634,7 +635,9 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			return err
 		}
 	}
-	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{TrafficRetirementSupported: retirementCapable, TrafficQueueId: deliveryState.QueueID, TrafficConfirmedSeq: uint64(deliveryState.Confirmed), TrafficIssuedSeq: uint64(deliveryState.Issued), NodeTrafficSupported: true, MultiCoreSupported: detected.GetMultiCoreSupported(), GostCoreSupported: gost.Supported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: deviceGates, BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
+	systemClient := systemupdate.New(filepath.Dir(state.Directory), state.NodeID)
+	systemProbe := systemClient.Probe(ctx, manager.Current())
+	if err := stream.Send(&pb.AgentMessage{NodeId: state.NodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{TrafficRetirementSupported: retirementCapable, TrafficQueueId: deliveryState.QueueID, TrafficConfirmedSeq: uint64(deliveryState.Confirmed), TrafficIssuedSeq: uint64(deliveryState.Issued), NodeTrafficSupported: true, MultiCoreSupported: detected.GetMultiCoreSupported(), GostCoreSupported: gost.Supported(), LastAckedSequence: state.LastAcked, AgentVersion: version, TcpProbeSupported: true, HealthCheckSupported: true, CoreRestartSupported: true, DeviceGateSupported: deviceGates, BudgetRetirementSupported: false, CoreUpdateSupported: updates != nil, AgentUpdateSupported: agents != nil, AgentSystemUpdateSupported: systemProbe.Supported, AgentSystemUpdateError: systemProbe.Reason, AgentBootstrapVersion: systemProbe.BootstrapVersion, AgentRecoverySupported: agents != nil && agents.recovery}}}); err != nil {
 		return err
 	}
 	welcome, err := receive()
@@ -949,6 +952,17 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 				}
 				continue
 			}
+			if response.GetAgentSystemUpdateCommand() != nil {
+				if !welcome.GetWelcome().AgentSystemUpdateSupported || response.NodeId != state.NodeID {
+					return errors.New("system update was not negotiated")
+				}
+				if err := systemClient.Submit(response.GetAgentSystemUpdateCommand(), manager.Current()); err != nil {
+					if recordErr := systemClient.SubmissionError(response.GetAgentSystemUpdateCommand(), err); recordErr != nil {
+						return errors.Join(err, recordErr)
+					}
+				}
+				continue
+			}
 			if response.GetAgentUpdateCommand() != nil {
 				if err := agentUpdate(response); err != nil {
 					return err
@@ -965,6 +979,11 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 			return errors.New("invalid sequence acknowledgment")
 		}
 		ack := response.GetAck()
+		if data := ack.AgentSystemUpdateAckJson; len(data) > 0 {
+			if err := systemClient.Acknowledge(data); err != nil {
+				return err
+			}
+		}
 		if ack.AccessBatchId != accessBatchID || ack.TrafficBatchId != trafficBatchID {
 			return errors.New("acknowledgment does not match the sent telemetry identity")
 		}
@@ -1040,6 +1059,23 @@ heartbeatLoop:
 				return err
 			}
 			healthResults = healthResults[1:]
+		}
+		{
+			for {
+				event, err := systemClient.Next()
+				if err != nil {
+					return err
+				}
+				if event == nil {
+					break
+				}
+				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_AgentSystemUpdateEvent{AgentSystemUpdateEvent: event}}); err != nil {
+					return err
+				}
+				if len(event.ResultJson) > 0 && !systemProbe.Supported {
+					return errors.New("system update completed; reconnecting to probe the independent root service")
+				}
+			}
 		}
 		for len(agentResults) > 0 {
 			if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_AgentUpdateResult{AgentUpdateResult: agentResults[0]}}); err != nil {
@@ -1348,6 +1384,17 @@ heartbeatLoop:
 						return err
 					}
 					continue heartbeatLoop
+				}
+				if received.message.GetAgentSystemUpdateCommand() != nil {
+					if !welcome.GetWelcome().AgentSystemUpdateSupported || received.message.NodeId != state.NodeID {
+						return errors.New("system update was not negotiated")
+					}
+					if err := systemClient.Submit(received.message.GetAgentSystemUpdateCommand(), manager.Current()); err != nil {
+						if recordErr := systemClient.SubmissionError(received.message.GetAgentSystemUpdateCommand(), err); recordErr != nil {
+							return errors.Join(err, recordErr)
+						}
+					}
+					continue waitForHeartbeat
 				}
 				if received.message.GetAgentUpdateCommand() != nil {
 					if err := agentUpdate(received.message); err != nil {

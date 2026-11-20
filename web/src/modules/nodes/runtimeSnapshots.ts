@@ -7,7 +7,7 @@ type RuntimeHeartbeat = Pick<NodeView['heartbeat'], 'cpu_percent' | 'memory_perc
 };
 
 type RuntimeNode = { nodeId: string; revision: number } & (
-  { removed: true } | (Pick<NodeView, 'status' | 'enabled' | 'maintenance' | 'deletedAt' | 'lastHeartbeat'> & {
+  { removed: true } | (Pick<NodeView, 'status' | 'enabled' | 'maintenance' | 'deletedAt' | 'lastHeartbeat' | 'offlineAfterSeconds'> & {
     removed?: false;
     heartbeat: RuntimeHeartbeat;
   })
@@ -90,5 +90,5 @@ export function applyRuntimeSnapshot(base: NodeView, node?: RuntimeNode): NodeVi
   if (!node) return base;
   if (node.removed === true) return null;
   return { ...base, status: node.status, enabled: node.enabled, maintenance: node.maintenance,
-    deletedAt: node.deletedAt, lastHeartbeat: node.lastHeartbeat, heartbeat: node.heartbeat };
+    deletedAt: node.deletedAt, lastHeartbeat: node.lastHeartbeat, heartbeat: node.heartbeat, offlineAfterSeconds: node.offlineAfterSeconds };
 }

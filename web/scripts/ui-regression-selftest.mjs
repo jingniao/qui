@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
+import { ref } from 'vue';
 const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8');
 assert.match(read('app/router.ts'), /router\.beforeEach\(setupNavigationGuards\)/, 'navigation guard must be registered');
 assert.doesNotMatch(read('modules/nodes/components/serverMetricsModel.ts'), /Math\.sin|431\s*\*\s*1024|1021\s*\*\s*1024|processes\s*[:=]\s*111|111\s*processes/, 'metrics must never use fabricated samples');
@@ -242,7 +243,16 @@ const disabledA = { ...userA, status: 'disabled', expiresAt: new Date(Date.now()
 const expiredA = { ...userA, expiresAt: '2000-01-01T00:00:00Z' };
 const quotaA = { ...userA, usedTraffic: 100 };
 const soonA = { ...userA, expiresAt: new Date(Date.now() + 3 * 86400000).toISOString() };
-const onlineA = { id: 'online', name: '在线节点', status: 'online', enabled: true, heartbeat: { current_revision: 1, core_healthy: true } };
+const statusNowA = ref(Date.now());
+const coreSummaryA = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(
+  read('modules/nodes/coreSummary.ts'),
+  { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }
+).outputText).toString('base64'));
+const serverStatusSourceA = read('modules/nodes/components/serverListModel.ts').match(/export function serverStatus[\s\S]*?\n}/)[0];
+const serverStatusA = new Function('unhealthyCores', ts.transpileModule(serverStatusSourceA.replace('export ', '') + '\nreturn serverStatus;', {
+  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None }
+}).outputText)(coreSummaryA.unhealthyCores);
+const onlineA = { id: 'online', name: '在线节点', status: 'online', enabled: true, lastHeartbeat: new Date(statusNowA.value).toISOString(), offlineAfterSeconds: 0, heartbeat: { current_revision: 1, core_healthy: true } };
 const pendingA = { ...onlineA, id: 'pending', name: '新服务器', status: 'pending', heartbeat: {} };
 const revisionsA = [
   { id: 9, nodeId: 'recovered', status: 'success' }, { id: 2, nodeId: 'recovered', status: 'failed' },
@@ -259,6 +269,7 @@ const dashboardA = vueSubset('modules/dashboard/pages/DashboardPage.vue', [
   'activeUsersCount', 'warningUsersCount', 'adminOnlineNodesCount', 'latestFailedRevisions', 'pendingIssues', 'formatGiB'
 ], {
   connectAddress: addressHelperA.connectAddress,
+  serverStatus: serverStatusA, statusNow: statusNowA,
   allUsers: { value: [userA, disabledA, expiredA, quotaA, soonA, { ...disabledA, usedTraffic: 100 }] },
   allNodes: { value: [onlineA, pendingA, { ...onlineA, id: 'unknown', heartbeat: {} }] },
   allRevisions: { value: revisionsA }, dashboard: { value: { nodeNames: { named: '名称映射' } } }, unhealthyCoreLabel: () => ''
@@ -345,7 +356,7 @@ assert.doesNotMatch(read('modules/nodes/components/NodeRestartPanel.vue'), /授�
 const versionPathA = 'modules/system/components/NodeVersionPanel.vue';
 const versionLoading = { value: true };
 let versionStatusReads = 0;
-const versionStatus = vueSubset(versionPathA, ['nodeStatusChanged'], {
+const versionStatus = vueSubset(versionPathA, ['refreshing', 'refreshAgain', 'nodeStatusChanged'], {
   loading: versionLoading, load: () => { versionStatusReads++; }
 });
 for (let i = 0; i < 1000; i++) versionStatus.nodeStatusChanged();
@@ -496,8 +507,8 @@ const dashboardCodeReview3 = ts.transpileModule(dashboardStatusReview3 + '\nretu
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None }
 }).outputText;
 const dashboardNodesReview3 = { value: [] };
-const dashboardCountsReview3 = new Function('computed', 'allNodes', dashboardCodeReview3)(fn => ({ get value() { return fn(); } }), dashboardNodesReview3);
-const dashboardNodeReview3 = (status, extra = {}) => ({ status, enabled: true, ...extra });
+const dashboardCountsReview3 = new Function('computed', 'allNodes', 'serverStatus', 'statusNow', dashboardCodeReview3)(fn => ({ get value() { return fn(); } }), dashboardNodesReview3, serverStatusA, statusNowA);
+const dashboardNodeReview3 = (status, extra = {}) => ({ status, enabled: true, lastHeartbeat: new Date(statusNowA.value).toISOString(), offlineAfterSeconds: 0, ...extra });
 for (const [rows, subtitle, offline, pending] of [
   [[dashboardNodeReview3('offline'), dashboardNodeReview3('pending'), dashboardNodeReview3('pending')], '1 台离线 · 2 台待登记', 1, 2],
   [[dashboardNodeReview3('pending'), dashboardNodeReview3('pending')], '2 台待登记', 0, 2],
@@ -755,25 +766,30 @@ console.log('PASS P1 USERS: no per-user protocol control');
 
 const nodeVersionPanel = read('modules/system/components/NodeVersionPanel.vue');
 assert.doesNotMatch(nodeVersionPanel, /中央尚未配置发布公钥/, 'no warnings about unconfigured release keys');
-assert.match(nodeVersionPanel, /importAgentRelease\(/, 'NodeVersionPanel imports official releases');
-assert.match(nodeVersionPanel, /agentUpdateSupported/, 'reads agentUpdateSupported capability');
-assert.match(nodeVersionPanel, /需在服务器上运行一次 qui-update --component agent 启用网页升级/, 'shows hint when Agent web upgrade is disabled');
+assert.doesNotMatch(nodeVersionPanel, /importAgentRelease\(/, 'complete upgrades do not import panel-hosted Agent files');
+assert.match(nodeVersionPanel, /agentSystemUpdateSupported/, 'reads the real complete-update capability');
+assert.match(nodeVersionPanel, /请在终端运行 qui-update --component agent；旧更新器可能需再次运行/, 'shows the terminal migration command and repeated-update requirement');
 const nodesApiP2 = read('modules/nodes/api.ts');
-assert.match(nodesApiP2, /agentUpdateSupported:\s*boolean/, 'NodeView includes agent update support');
+assert.match(nodesApiP2, /agentSystemUpdateSupported:\s*boolean/, 'NodeView includes complete update support');
 assert.match(nodesApiP2, /agentReleases/, 'nodeAPI exposes agentReleases');
 assert.match(nodesApiP2, /importAgentRelease/, 'nodeAPI exposes importAgentRelease');
-console.log('PASS P2 AGENT: one-click signed Agent upgrade and capability check');
+console.log('PASS P2 AGENT: complete Agent upgrade capability, terminal migration and retained legacy catalogue API');
 
-// A13: the chosen release must match both version and platform.
-const releaseFinderSource = nodeVersionPanel.slice(nodeVersionPanel.indexOf('function findAgentReleaseForNode('), nodeVersionPanel.indexOf('async function selectAgentVersionForUpgrade('));
-const releaseFinderJs = ts.transpileModule(releaseFinderSource, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
-const findRelease = new Function('nodePlatform', releaseFinderJs + '\nreturn findAgentReleaseForNode;')(node => node.platform);
-const release = (version, architecture = 'amd64', component = 'proxy-agent') => ({ signed: { manifest: { version, architecture, component, os: 'linux' } } });
-const wrong = release('1.4.6'), correct = release('1.5.0');
-assert.equal(findRelease({ platform: 'linux/amd64' }, '1.5.0', [wrong]), undefined);
-assert.equal(findRelease({ platform: 'linux/amd64' }, '1.5.0', [wrong, release('1.5.0', 'arm64'), correct]), correct);
-assert.equal(findRelease({}, '1.5.0', [correct]), undefined);
-assert.equal(findRelease({ platform: 'linux/amd64' }, '1.5.0', [release('1.5.0', 'amd64', 'proxy-panel')]), undefined);
+// A13: the chosen version reaches the common updater; platform and signed
+// component enforcement belong to the node's real installation path.
+const agentUpdateApiSource = read('modules/system/agentUpdatesApi.ts');
+const agentBridgeSource = readFileSync(new URL('../../deploy/linux/agent-update-request.sh', import.meta.url), 'utf8');
+const terminalUpdateSource = readFileSync(new URL('../../deploy/linux/update.sh', import.meta.url), 'utf8');
+const localReleaseSource = readFileSync(new URL('../../internal/agent/agenthost/local_release.go', import.meta.url), 'utf8');
+const manifestSource = readFileSync(new URL('../../pkg/contracts/release/manifest.go', import.meta.url), 'utf8');
+assert.match(nodeVersionPanel, /agentUpdatesAPI\.queue\(node\.id, versionItem\.version, node\.heartbeat!\.current_revision!\)/, 'queues the selected version and expected revision');
+assert.match(agentUpdateApiSource, /confirmNodeId: nodeId, targetVersion, revision/, 'request carries the selected version without a panel release ID');
+assert.match(agentBridgeSource, /\/usr\/local\/bin\/qui-update --component agent --version "\$target" --yes/, 'root executes the common updater with the selected version');
+assert.match(terminalUpdateSource, /case \$\(uname -m\) in\s+x86_64\) arch=amd64;;\s+aarch64\|arm64\) arch=arm64;;\s+\*\) fail/, 'unknown node architectures are refused');
+assert.match(terminalUpdateSource, /download "\$base\/proxy-agent-\$version-linux-\$arch\.manifest\.json"/, 'manifest download matches exact target version and node platform');
+assert.match(localReleaseSource, /signed\.Manifest\.Version != version/, 'local installation refuses a different signed version');
+assert.match(localReleaseSource, /Component: "proxy-agent", OS: runtime\.GOOS, Architecture: runtime\.GOARCH/, 'trust policy uses actual node platform and Agent component');
+assert.match(manifestSource, /s\.Manifest\.Component != policy\.Component \|\| s\.Manifest\.OS != policy\.OS \|\| s\.Manifest\.Architecture != policy\.Architecture/, 'signature policy refuses foreign components and platforms');
 for (const file of ['components/NotificationBell.vue', 'modules/routing/pages/ClientPolicyPage.vue', 'modules/system/components/NotificationSettings.vue']) {
   for (const match of read(file).matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)) {
     assert.ok(Number(match[1]) >= 12, file + ' must not contain an arbitrary font size below 12px');

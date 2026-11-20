@@ -1,0 +1,14 @@
+[Unit]
+Description=Proxy Control complete Agent update
+After=network-online.target proxycontrol-update-recovery.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/lib/proxycontrol/agent-update-request
+UMask=0077
+TimeoutStartSec=0
+# This independent cgroup survives proxy-agent's stop and restart.
+KillMode=control-group

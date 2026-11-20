@@ -5,7 +5,7 @@ import { coreSummaryLabel, unhealthyCores } from '../coreSummary';
 
 export const statusOptions = [
   ['all', '全部状态'], ['online', '在线'], ['degraded', '降级'], ['core_error', '核心异常'],
-  ['offline', '离线'], ['pending', '待登记'], ['applying', '应用配置中'], ['rollback', '回滚中'],
+  ['reconnecting', '等待恢复'], ['offline', '离线'], ['pending', '待登记'], ['applying', '应用配置中'], ['rollback', '回滚中'],
   ['disabled', '已禁用'], ['error', '异常'], ['maintenance', '维护中'], ['deleted', '已删除']
 ];
 export function serverStatus(node: NodeView, now: number) {
@@ -13,12 +13,16 @@ export function serverStatus(node: NodeView, now: number) {
   if (!node.enabled || node.status === 'disabled') return { key: 'disabled', tone: 'disabled', label: '已禁用' };
   if (node.maintenance) return { key: 'maintenance', tone: 'maintenance', label: '维护中' };
   if (node.status === 'pending') return { key: 'pending', tone: 'disabled', label: '待登记' };
-  if (node.status === 'offline') return { key: 'offline', tone: 'offline', label: '离线' };
   const age = now - Date.parse(node.lastHeartbeat);
   const fresh = Number.isFinite(age) && age >= -5000 && age < 45000;
+  if (node.status === 'offline' || (!fresh && node.status !== 'error')) {
+    if (Number.isFinite(age) && age >= -5000 && age < node.offlineAfterSeconds * 1000) {
+      return { key: 'reconnecting', tone: 'warning', label: '连接中断，等待恢复' };
+    }
+    return { key: 'offline', tone: 'offline', label: '离线' };
+  }
   if (fresh && (node.heartbeat?.core_healthy === false || unhealthyCores(node).length > 0)) return { key: 'core_error', tone: 'error', label: '核心异常' };
   if (node.status === 'error') return { key: 'error', tone: 'error', label: '异常' };
-  if (!fresh) return { key: 'offline', tone: 'offline', label: '离线' };
   const labels = { online: '在线', degraded: '降级', applying: '应用配置中', rollback: '回滚中' };
   return { key: node.status, tone: node.status === 'degraded' ? 'warning' : node.status === 'rollback' ? 'applying' : node.status,
     label: labels[node.status as keyof typeof labels] || '离线' };

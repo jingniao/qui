@@ -62,7 +62,7 @@ export interface ProxyNodeItem {
   server: string;
   port: number;
   protocol: string;    // 'vless' | 'vmess' | 'shadowsocks' | 'trojan' | 'hysteria2' | 'tuic' | 'wireguard' | 'socks5' | 'http'
-  status: 'online' | 'offline' | 'untested' | 'error';
+  status: 'online' | 'offline' | 'untested' | 'error' | 'reconnecting';
   latencyMs?: number;
   lastChecked?: string;
   supportTcp: boolean;
@@ -108,7 +108,7 @@ export interface CanvasNodeInstance {
   name: string;
   protocol: string;
   serverAddress: string;
-  status: 'online' | 'offline' | 'untested' | 'error';
+  status: 'online' | 'offline' | 'untested' | 'error' | 'reconnecting';
   isManageable: boolean;  // True if it's an owned server with Agent; False if external/imported
   x: number;
   y: number;

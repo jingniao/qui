@@ -81,15 +81,17 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 				}
 			} else if node.Status == "online" || node.Status == "degraded" {
 				if st.Active {
-					events = append(events, Event{
-						Kind:      "node_offline",
-						Severity:  "resolved",
-						NodeID:    node.ID,
-						Title:     fmt.Sprintf("节点「%s」离线恢复", node.Name),
-						Body:      "心跳已恢复正常",
-						DedupeKey: key,
-						Resolved:  true,
-					})
+					if ok {
+						events = append(events, Event{
+							Kind:      "node_offline",
+							Severity:  "resolved",
+							NodeID:    node.ID,
+							Title:     fmt.Sprintf("节点「%s」离线恢复", node.Name),
+							Body:      "心跳已恢复正常",
+							DedupeKey: key,
+							Resolved:  true,
+						})
+					}
 					st.Active = false
 					delete(next, key)
 				}

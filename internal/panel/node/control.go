@@ -43,6 +43,10 @@ type Control struct {
 		CoreUpdateResult(context.Context, string, *pb.CoreUpdateResult) error
 		CloseStaleCoreUpdates(context.Context, string) error
 	}
+	AgentSystemUpdates interface {
+		PendingAgentSystemUpdate(context.Context, string) (*pb.AgentSystemUpdateCommand, error)
+		AgentSystemUpdateEvent(context.Context, string, *pb.AgentSystemUpdateEvent) ([]byte, error)
+	}
 	AgentUpdates interface {
 		PendingAgentUpdate(context.Context, string) (*pb.AgentUpdateCommand, error)
 		AgentUpdateResult(context.Context, string, *pb.AgentUpdateResult) error
@@ -338,12 +342,16 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	// the GOST component, even while GOST is absent, so it is what gates a GOST
 	// install task; it is never inferred from the Agent version text.
 	updateSupported := first.GetHello().CoreUpdateSupported && c.CoreUpdates != nil
+	systemSupported := first.GetHello().AgentSystemUpdateSupported && c.AgentSystemUpdates != nil
 	agentUpdateSupported := first.GetHello().AgentUpdateSupported && c.AgentUpdates != nil
 	agentRecoverySupported := agentUpdateSupported && first.GetHello().AgentRecoverySupported
 	if !draining {
 		gostSupported := first.GetHello().GostCoreSupported
 		if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET multi_core_supported=?,node_traffic_supported=?,gost_core_supported=? WHERE id=?", multiSupported, nodeTrafficSupported, gostSupported, id); err != nil {
 			return status.Error(codes.Internal, "multi-core negotiation persistence failed")
+		}
+		if err := c.Repository.AgentSystemUpdateSupport(ctx, id, systemSupported, first.GetHello().AgentSystemUpdateError, first.GetHello().AgentBootstrapVersion); err != nil {
+			return status.Error(codes.Internal, err.Error())
 		}
 		if err := c.Repository.AgentUpdateSupport(ctx, id, agentUpdateSupported, agentRecoverySupported); err != nil {
 			return status.Error(codes.Internal, "Agent update capability persistence failed")
@@ -390,6 +398,8 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			message.Payload = &pb.ServerMessage_RemoveCoreCommand{RemoveCoreCommand: p}
 		case *pb.CoreUpdateCommand:
 			message.Payload = &pb.ServerMessage_CoreUpdateCommand{CoreUpdateCommand: p}
+		case *pb.AgentSystemUpdateCommand:
+			message.Payload = &pb.ServerMessage_AgentSystemUpdateCommand{AgentSystemUpdateCommand: p}
 		case *pb.AgentUpdateCommand:
 			message.Payload = &pb.ServerMessage_AgentUpdateCommand{AgentUpdateCommand: p}
 		}
@@ -399,7 +409,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if c.CataloguePort != nil {
 		cataloguePort = c.CataloguePort(ctx)
 	}
-	if err := send(&pb.Welcome{TrafficRetirementSupported: trafficRetirementSupported, MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: "", AgentCataloguePort: cataloguePort}); err != nil {
+	if err := send(&pb.Welcome{TrafficRetirementSupported: trafficRetirementSupported, MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentSystemUpdateSupported: systemSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: "", AgentCataloguePort: cataloguePort}); err != nil {
 		return err
 	}
 	type gatePacket struct {
@@ -643,6 +653,17 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				return status.Error(codes.FailedPrecondition, "health observation rejected")
 			}
 		}
+		var systemAck []byte
+		if event := message.GetAgentSystemUpdateEvent(); event != nil {
+			if c.AgentSystemUpdates == nil {
+				return status.Error(codes.FailedPrecondition, "system updates unavailable")
+			}
+			var err error
+			systemAck, err = c.AgentSystemUpdates.AgentSystemUpdateEvent(ctx, id, event)
+			if err != nil {
+				return status.Error(codes.FailedPrecondition, err.Error())
+			}
+		}
 		var wasEmptyCaps bool
 		if message.GetCapabilities() != nil {
 			var prev string
@@ -682,7 +703,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if message.GetHeartbeat() != nil {
 			c.notifyHeartbeat(id)
 		}
-		if c.Notify != nil && (message.GetAgentUpdateResult() != nil || message.GetHealthCheckResult() != nil) {
+		if c.Notify != nil && (message.GetAgentUpdateResult() != nil || message.GetHealthCheckResult() != nil || message.GetAgentSystemUpdateEvent() != nil) {
 			c.Notify(id)
 		}
 		if result := message.GetApplyResult(); result != nil && !ignoredApply && c.DeploymentNotify != nil {
@@ -695,7 +716,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			c.DashboardNotify()
 		}
 
-		if err := send(&pb.Ack{AgentSequence: accepted, AccessBatchId: accessBatchID, TrafficBatchId: trafficBatchID, TrafficQueueId: message.GetTrafficBatch().GetQueueId(), TrafficDeliverySeq: message.GetTrafficBatch().GetDeliverySeq()}); err != nil {
+		if err := send(&pb.Ack{AgentSequence: accepted, AgentSystemUpdateAckJson: systemAck, AccessBatchId: accessBatchID, TrafficBatchId: trafficBatchID, TrafficQueueId: message.GetTrafficBatch().GetQueueId(), TrafficDeliverySeq: message.GetTrafficBatch().GetDeliverySeq()}); err != nil {
 			return err
 		}
 		if draining {
@@ -705,6 +726,18 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		// an older peer. Reconnection starts a fresh refresh cycle.
 		if err := sendGates(); err != nil {
 			return err
+		}
+		if systemSupported && message.GetAgentSystemUpdateEvent() == nil {
+			command, err := c.AgentSystemUpdates.PendingAgentSystemUpdate(ctx, id)
+			if err != nil {
+				return status.Error(codes.Internal, err.Error())
+			}
+			if command != nil {
+				if err := send(command); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		// Agent requests reserve the node before other executable commands.
 		if agentUpdateSupported && message.GetAgentUpdateResult() == nil {
@@ -854,6 +887,12 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 	if batch := message.GetAccessBatch(); batch != nil {
 		if len(batch.BatchJson) == 0 || len(batch.BatchJson) > 1<<20 {
 			return errors.New("invalid access batch size")
+		}
+		return nil
+	}
+	if event := message.GetAgentSystemUpdateEvent(); event != nil {
+		if len(event.ProgressJson)+len(event.ResultJson)+len(event.LogChunkJson) > 1<<20 {
+			return errors.New("system update event exceeds transport limit")
 		}
 		return nil
 	}

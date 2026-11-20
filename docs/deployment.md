@@ -408,6 +408,16 @@ qui-update --component agent --version X.Y.Z \
 
 清单缺失或与归档不匹配时在停止前失败，全程不联网补取。已认证的本地候选保存在 `releases/agent-local-candidates/`，`local-` 任务中断续做只读取该缓存；缓存损坏或缺失会明确报错，保留任务结果和安装记录。普通非受管节点沿用现有 `--bundle` / `--sums` 行为。
 
+### Agent 网页完整升级（v1.7.5 实施中）
+
+新网页任务由独立 root 服务在节点本机固定执行 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`，包含与终端相同的引导组件和实际 Agent 两阶段更新、官方来源下载、校验、安装、健康检查及失败恢复。节点需要能访问终端使用的 GitHub 来源；新任务不读取面板 Agent 文件目录，也不支持网页离线包。
+
+已有机器先在终端完成新安装组件迁移；旧更新器可能需要重复同一版本的命令。网页依据实际 root 桥接探测结果显示入口，未就绪时显示具体原因和终端命令。历史工作进程升级任务仍按原请求查询及恢复。
+
+systemd 使用独立的 `proxy-agent-update.path` / `proxy-agent-update.service`，OpenRC 使用独立 watcher 与 `proxy-agent-update` 服务；运行副本不随 Agent 停止或文件替换退出。root 接收材料位于 `/var/lib/proxycontrol-install/agent-system-updates/`，向 Agent 发布的只读结果和输出位于 `/var/lib/proxy-agent-update/`。中断后读取原执行及恢复证据，不自动重跑结果未知的任务。
+
+「系统管理 → 任务记录」保留每次尝试、失败阶段、原始错误、退出码、引导/安装/运行版本、服务与恢复结果，并支持分页读取、复制已读输出和下载完整输出。日志缺段或持久化失败明确显示；结果待确认时继续阻止冲突操作。完整结果与发布验证见 [v1.7.5 实施记录](v1.7.5-verification.md)。
+
 **发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
 
 **代理核心**：不走 `install.sh`。在面板“服务器 → 代理核心”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 可用于安装或显式替换/追加核心；省略不删除核心。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。

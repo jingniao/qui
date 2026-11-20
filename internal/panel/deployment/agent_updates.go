@@ -31,7 +31,7 @@ const agentTaskColumns = "id,node_id,release_id,baseline_revision,status,generat
 
 func (r *Repository) AgentUpdateReserved(ctx context.Context, nodeID string) (bool, error) {
 	var reserved bool
-	err := r.Database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed'))", nodeID).Scan(&reserved)
+	err := r.Database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed') UNION ALL SELECT 1 FROM agent_system_update_tasks WHERE node_id=? AND (status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1)))", nodeID, nodeID).Scan(&reserved)
 	return reserved, err
 }
 
@@ -53,7 +53,7 @@ func scanAgentTask(row interface{ Scan(...any) error }) (AgentUpdateTask, error)
 }
 func agentUpdateAvailable(ctx context.Context, tx *sql.Tx, nodeID string) error {
 	var n int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM agent_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed')", nodeID).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM agent_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed'))+(SELECT count(*) FROM agent_system_update_tasks WHERE node_id=? AND (status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1)))", nodeID, nodeID).Scan(&n); err != nil {
 		return err
 	}
 	if n != 0 {

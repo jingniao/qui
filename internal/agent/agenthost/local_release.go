@@ -42,7 +42,7 @@ func localCandidates(directory string) string {
 // LocalRelease verifies the signed raw executable before the supervisor ever
 // probes it. The durable, content-addressed candidate also serves interrupted
 // local jobs; neither this path nor its restart path consults a network catalogue.
-func LocalRelease(ctx context.Context, configPath, manifestPath, binaryPath, version string, install bool) (LocalAgentStatus, error) {
+func LocalRelease(ctx context.Context, configPath, manifestPath, binaryPath, version string, install bool, requestIDs ...string) (LocalAgentStatus, error) {
 	c, signed, err := prepareLocalInput(ctx, configPath, manifestPath, binaryPath, version)
 	if err != nil {
 		return LocalAgentStatus{}, err
@@ -51,7 +51,14 @@ func LocalRelease(ctx context.Context, configPath, manifestPath, binaryPath, ver
 	if install {
 		operation = "install"
 	}
-	return callLocal(ctx, c.DataDirectory, localRequest{Operation: operation, Release: signed})
+	requestID := ""
+	if len(requestIDs) > 0 {
+		requestID = requestIDs[0]
+		if !install || !localRequestID.MatchString(requestID) {
+			return LocalAgentStatus{}, errors.New("invalid fixed local installation request ID")
+		}
+	}
+	return callLocal(ctx, c.DataDirectory, localRequest{Operation: operation, Release: signed, RequestID: requestID})
 }
 
 func prepareLocalInput(ctx context.Context, configPath, manifestPath, binaryPath, version string) (config.Agent, release.Signed, error) {
@@ -210,11 +217,53 @@ func (r *jobRunner) prepareLocal(signed release.Signed) (LocalAgentStatus, error
 // install never run concurrently. Store.Queue additionally reserves against a
 // web request arriving while this preflight is in progress.
 func (r *jobRunner) handleLocal(request localRequest, lease <-chan struct{}) (status LocalAgentStatus, resultErr error) {
+	if request.Operation == "receipt" {
+		receipt, err := r.localInstallReceipt(request.RequestID)
+		if err == nil && receipt.Request.Release != request.Release {
+			return status, errors.New("original local receipt signed material differs")
+		}
+		return LocalAgentStatus{Receipt: receipt}, err
+	}
 	if request.Operation == "status" {
 		return r.localStatus()
 	}
 	if request.Operation != "check" && request.Operation != "install" && request.Operation != "reserve" {
 		return status, errors.New("unsupported local Agent operation")
+	}
+	if request.RequestID != "" {
+		if request.Operation != "install" || !localRequestID.MatchString(request.RequestID) {
+			return status, errors.New("invalid fixed local installation request")
+		}
+		store, err := agentjobs.Open(jobsOptions(r.directory, r.nodeID, r.key))
+		if err != nil {
+			return status, err
+		}
+		job, exists := store.Get(request.RequestID)
+		closeErr := store.Close()
+		if closeErr != nil {
+			return status, closeErr
+		}
+		if exists {
+			if job.Request.Release != request.Release || job.Request.NodeID != r.nodeID {
+				return status, errors.New("fixed local request ID names different signed material")
+			}
+			receipt, err := r.localInstallReceipt(request.RequestID)
+			if err != nil {
+				return status, err
+			}
+			status, err = r.localStatus()
+			status.Receipt = receipt
+			if receipt.Outcome != nil {
+				status.Installation = receipt.Outcome
+			}
+			if receipt.Result == nil {
+				return status, errors.Join(err, errors.New("original fixed local installation has no confirmed result; inspect its original receipt"))
+			}
+			if receipt.Result.Status != "success" {
+				return status, errors.Join(err, errors.New("original fixed local installation did not succeed; inspect its original receipt"))
+			}
+			return status, err
+		}
 	}
 	status, err := r.prepareLocal(request.Release)
 	if err != nil || request.Operation == "check" {
@@ -250,6 +299,20 @@ func (r *jobRunner) handleLocal(request localRequest, lease <-chan struct{}) (st
 	}
 	manifest := request.Release.Manifest
 	if status.Current.Version == manifest.Version && status.Current.SHA256 == manifest.SHA256 {
+		if request.RequestID != "" {
+			queued := release.AgentUpdateRequest{SchemaVersion: 1, ID: request.RequestID, NodeID: r.nodeID, Revision: status.Revision, Operation: "install", Release: request.Release}
+			store, err := agentjobs.Open(jobsOptions(r.directory, r.nodeID, r.key))
+			if err != nil {
+				return status, err
+			}
+			if err = store.Queue(queued); err == nil {
+				err = store.MarkStarted(queued)
+			}
+			if err == nil {
+				err = store.Finish(queued, jobResult(queued, "success", "success", status.Current))
+			}
+			return status, errors.Join(err, store.Close())
+		}
 		return status, nil
 	}
 	nonce := make([]byte, 16)
@@ -257,13 +320,18 @@ func (r *jobRunner) handleLocal(request localRequest, lease <-chan struct{}) (st
 		return status, err
 	}
 	queued := release.AgentUpdateRequest{SchemaVersion: 1, ID: localJobPrefix + hex.EncodeToString(nonce), NodeID: r.nodeID, Revision: status.Revision, Operation: "install", Release: request.Release}
+	if request.RequestID != "" {
+		queued.ID = request.RequestID
+	}
 	result, err := r.runLocalJob(queued)
 	if err != nil {
+		status.Installation = r.localInstallationOutcome(result)
 		return status, err
 	}
 	status, err = r.localStatus()
+	status.Installation = r.localInstallationOutcome(result)
 	if err != nil {
-		return status, err
+		return status, errors.Join(r.localError, err)
 	}
 	if result.Status != "success" {
 		return status, errors.Join(fmt.Errorf("本地 Agent 升级失败：%s (%s)，当前版本 %s", result.Status, result.Code, status.Current.Version), r.localError)
@@ -275,6 +343,7 @@ func (r *jobRunner) handleLocal(request localRequest, lease <-chan struct{}) (st
 }
 
 func (r *jobRunner) runLocalJob(request release.AgentUpdateRequest) (*release.UpdateResult, error) {
+	r.localError = nil
 	store, err := agentjobs.Open(jobsOptions(r.directory, r.nodeID, r.key))
 	if err != nil {
 		return nil, err
@@ -282,7 +351,6 @@ func (r *jobRunner) runLocalJob(request release.AgentUpdateRequest) (*release.Up
 	if err := errors.Join(store.Queue(request), store.Close()); err != nil {
 		return nil, err
 	}
-	r.localError = nil
 	if err := r.poll(); err != nil {
 		return nil, err
 	}
@@ -371,7 +439,32 @@ func localVersionOlder(target, current string) (bool, error) {
 
 func (r *jobRunner) recordLocalFailure(id string, err error) {
 	if strings.HasPrefix(id, localJobPrefix) && err != nil {
-		r.localError = err
+		r.localError = errors.Join(r.localError, err)
 		slog.Error("local Agent update failed", "id", id, "error", err)
 	}
+}
+
+func (r *jobRunner) localInstallationOutcome(result *release.UpdateResult) *LocalInstallationOutcome {
+	outcome := &LocalInstallationOutcome{}
+	if r.localError != nil {
+		outcome.OriginalError = r.localError.Error()
+	}
+	var failure *updater.InstallationFailure
+	if errors.As(r.localError, &failure) {
+		if failure.Original != nil {
+			outcome.OriginalError = failure.Original.Error()
+		} else {
+			outcome.OriginalError = ""
+		}
+		outcome.Recovery.Attempted = true
+		succeeded := failure.RecoverySucceeded
+		outcome.Recovery.Success = &succeeded
+		if failure.Recovery != nil {
+			outcome.Recovery.Error = failure.Recovery.Error()
+		}
+	} else if result != nil && result.Status == "rolled_back" {
+		succeeded := true
+		outcome.Recovery.Attempted, outcome.Recovery.Success = true, &succeeded
+	}
+	return outcome
 }

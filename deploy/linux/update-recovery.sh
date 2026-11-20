@@ -31,6 +31,7 @@
 # Plain POSIX shell, because this runs before anything else on an Alpine node
 # (busybox ash) as well as on Debian and Ubuntu (dash).
 set -u
+umask 077
 
 # Test-only prefix for the one absolute path this script touches, so
 # deploy/linux/tests/update-test.sh can exercise it without touching a real
@@ -54,7 +55,23 @@ for directory in "$registry"/rollback.*; do
     continue
   fi
   printf '处理被中断的更新：%s\n' "$directory"
-  if ! /bin/bash "$directory/updater" --recover "$directory" --boot; then
+  # This receipt belongs to the original snapshot, not to a reconstructed
+  # installation. The root web bridge can reconcile an interrupted reporting
+  # process from an actual boot recovery outcome without replaying an upgrade.
+  receipts=$registry/recovery-receipts
+  if [ -L "$receipts" ]; then printf 'Unsafe recovery receipt directory: %s\n' "$receipts" >&2; failed=1; continue; fi
+  mkdir -p -- "$receipts" || { failed=1; continue; }
+  chmod 0700 -- "$receipts" || { failed=1; continue; }
+  receipt=$receipts/${directory##*/}
+  recovery_status=0
+  if /bin/bash "$directory/updater" --recover "$directory" --boot > "$receipt.log.partial" 2>&1; then :; else recovery_status=$?; fi
+  cat -- "$receipt.log.partial"
+  mv -f -- "$receipt.log.partial" "$receipt.log" || { failed=1; continue; }
+  printf '%s\n' "$recovery_status" > "$receipt.status.partial"
+  sync -f -- "$receipt.log" || { failed=1; continue; }
+  mv -f -- "$receipt.status.partial" "$receipt.status" || { failed=1; continue; }
+  sync -f -- "$receipts" || { failed=1; continue; }
+  if [ "$recovery_status" -ne 0 ]; then
     printf '恢复被中断的更新失败，快照保留在 %s\n' "$directory" >&2
     failed=1
   fi

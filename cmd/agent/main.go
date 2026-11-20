@@ -23,6 +23,7 @@ import (
 	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/agent/lifecycle"
+	"proxycontrol/internal/agent/reconcile"
 	"proxycontrol/internal/agent/tuning"
 	"proxycontrol/internal/platform/logging"
 	"proxycontrol/pkg/contracts/agentstorage"
@@ -38,6 +39,7 @@ type agentFlags struct {
 	path                 *string
 	check                *bool
 	showVersion          *bool
+	systemUpdateIdentity *bool
 	describeStorage      *bool
 	storageVersion       *int
 	describeControl      *bool
@@ -61,6 +63,7 @@ func registerFlags(set *flag.FlagSet) *agentFlags {
 	f.path = set.String("config", "", "YAML configuration file")
 	f.check = set.Bool("check-config", false, "validate configuration and exit")
 	f.showVersion = set.Bool("version", false, "show version")
+	f.systemUpdateIdentity = set.Bool("system-update-identity", false, "read the enrolled node identity and authenticated configuration revision")
 	f.describeStorage = set.Bool("storage-contract", false, "show fixed storage compatibility contract and exit")
 	f.storageVersion = set.Int("storage-contract-version", 1, "storage descriptor query version (1 or 2)")
 	f.describeControl = set.Bool("control-only-contract", false, "show fixed control-only worker capability and exit")
@@ -94,6 +97,37 @@ func run() error {
 }
 
 func execute(set *flag.FlagSet, f *agentFlags) (resultErr error) {
+	if *f.systemUpdateIdentity {
+		valid := *f.path != "" && set.NArg() == 0
+		set.Visit(func(o *flag.Flag) { valid = valid && (o.Name == "config" || o.Name == "system-update-identity") })
+		if !valid {
+			return errors.New("--system-update-identity requires only --config")
+		}
+		c, err := configuration.LoadAgent(*f.path)
+		if err != nil {
+			return err
+		}
+		node, err := identity.Load(filepath.Join(c.DataDirectory, "identity"))
+		if err != nil {
+			return err
+		}
+		key, err := os.ReadFile(filepath.Join(c.DataDirectory, "configuration.key"))
+		if err != nil {
+			return err
+		}
+		defer clear(key)
+		if len(key) != 32 {
+			return errors.New("configuration key must contain exactly 32 bytes")
+		}
+		revision, err := reconcile.InspectCurrent(c.DataDirectory, node.NodeID, key)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			NodeID   string `json:"nodeId"`
+			Revision int64  `json:"revision"`
+		}{node.NodeID, revision})
+	}
 	if *f.installTuningModules {
 		if set.NArg() != 0 || set.NFlag() != 1 {
 			return errors.New("--install-tuning-modules must be used alone")

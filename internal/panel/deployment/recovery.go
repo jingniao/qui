@@ -11,6 +11,8 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	for _, query := range []string{
+		"SELECT count(*) FROM restore_source.agent_system_update_tasks WHERE status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1)",
+		"SELECT count(*) FROM agent_system_update_tasks WHERE status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1)",
 		"SELECT count(*) FROM restore_source.agent_update_tasks WHERE status IN ('queued','running','failed_closed')",
 		"SELECT count(*) FROM agent_update_tasks t LEFT JOIN restore_source.agent_update_tasks c ON c.id=t.id WHERE t.status IN ('queued','running','failed_closed') AND (c.id IS NULL OR c.status IN ('queued','running','failed_closed') OR c.node_id<>t.node_id OR c.original_command_id<>t.original_command_id OR c.baseline_revision<>t.baseline_revision)",
 		"SELECT count(*) FROM restore_source.core_update_tasks WHERE status IN ('queued','running')",
@@ -20,7 +22,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 			return err
 		}
 	}
-	for _, table := range []string{"agent_update_attempts", "agent_update_tasks", "core_update_tasks", "core_remove_tasks"} {
+	for _, table := range []string{"agent_system_update_logs", "agent_system_update_attempts", "agent_system_update_tasks", "agent_update_attempts", "agent_update_tasks", "core_update_tasks", "core_remove_tasks"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
@@ -72,6 +74,11 @@ func (r *Repository) PrepareCoreUpdatesRestoreTx(ctx context.Context, tx *sql.Tx
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE core_remove_tasks SET status='unconfirmed',updated_at=? WHERE status IN ('queued','running')", now()); err != nil {
 		return err
+	}
+	for _, item := range []struct{ table, columns string }{{"agent_system_update_tasks", systemTaskColumns}, {"agent_system_update_attempts", "attempt_id,task_id,generation,request_json,progress_json,result_json,log_sequence,log_offset,created_at,dispatch_error_json"}, {"agent_system_update_logs", "attempt_id,sequence,offset,sha256,content"}} {
+		if err := db.CopyRecoveryTable(ctx, tx, item.table, item.columns); err != nil {
+			return err
+		}
 	}
 	if err := db.CopyRecoveryTable(ctx, tx, "agent_update_tasks", agentTaskColumns); err != nil {
 		return err

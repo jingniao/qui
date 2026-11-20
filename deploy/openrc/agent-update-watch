@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+# Both watcher and runner are children of this root service, never proxy-agent.
+# install.sh keeps this process alive while it replaces the packaged files.
+if [ "$#" -eq 0 ]; then
+  /usr/local/lib/proxycontrol/agent-update-request
+  exec /sbin/inotifyd "$0" /var/lib/proxy-agent/system-update:wy
+fi
+if [ "$#" -eq 3 ] && [ "$3" = request.json ]; then
+  /usr/local/lib/proxycontrol/agent-update-request
+fi

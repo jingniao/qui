@@ -9,6 +9,13 @@ import (
 // transaction, so the node cannot leave a pending operation behind. Multi-node
 // batches are never touched: an active batch blocks the deletion instead.
 func (r *Repository) CloseNodeTasks(ctx context.Context, tx *sql.Tx, nodeID string) error {
+	var active int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM agent_system_update_tasks WHERE node_id=? AND (status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1))", nodeID).Scan(&active); err != nil {
+		return err
+	}
+	if active != 0 {
+		return ErrNodeBusy
+	}
 	revisions, err := pendingTargetRevisions(ctx, tx, nodeID)
 	if err != nil {
 		return err

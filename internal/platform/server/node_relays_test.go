@@ -121,7 +121,7 @@ func TestNodeRelayRealCredentialShareAndPortal(t *testing.T) {
 	}
 	// Successful-publication persistence is tested in proxy; seed that receipt
 	// here to exercise the real subscription database reader and portal route.
-	snapshot, _ := json.Marshal(published.Relay{ID: relay.Rule.ID, InboundID: inbound.ID, Entry: subproxy.Ref{ID: entry.ID, Name: "HK"}, Server: "203.0.113.1", Port: 32001, DestinationAddress: "203.0.113.2", DestinationPort: inbound.Port, Network: "both", Enabled: true, Visible: true})
+	snapshot, _ := json.Marshal(published.Relay{ID: relay.Rule.ID, InboundID: inbound.ID, Entry: subproxy.Ref{ID: entry.ID, Name: "HK"}, Server: "203.0.113.1", Port: 32001, DestinationAddress: "203.0.113.2", DestinationPort: inbound.Port, Network: "both", Enabled: true, Visible: true, RouteNodeIDs: []string{entry.ID, f.nodeID}})
 	if _, err = f.app.Database.Exec("UPDATE tunnel_rules SET published_snapshot=?,published_at=updated_at,published_version=draft_version,status='published' WHERE id=?", string(snapshot), relay.Rule.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +129,12 @@ func TestNodeRelayRealCredentialShareAndPortal(t *testing.T) {
 	response = portal.call("GET", "/api/v1/portal/nodes", nil)
 	if response.Code != 200 || strings.Contains(response.Body.String(), "经 HK") {
 		t.Fatal(response.Code, response.Body.String())
+	}
+	// Missing route proof on an ungranted rule must not affect this portal.
+	// Once granted, its seeded successful snapshot needs the same index as a
+	// real receipt; rebuild it through the production publication-proof reader.
+	if err = f.app.tunnelPublications.Repository.RebuildSubscriptionDependencies(f.ctx); err != nil {
+		t.Fatal(err)
 	}
 	group, err := f.app.nodeRepository.Group(f.ctx, f.groupID)
 	if err != nil {

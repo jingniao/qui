@@ -936,9 +936,27 @@ restore_snapshot() {
 # boot the service is neither stopped (a stop job would cancel the start systemd queued
 # for it) nor started (the boot unit is ordered before the services, so they start after
 # it), and the journal is left at "restored" for a boot that finds it there.
+forward_install_output() {
+  local status=$1
+  if [[ -f $snapshot/install-output.log ]]; then
+    if [[ ! -f $snapshot/install-output-forwarded ]]; then
+      if ((status == 0)); then cat -- "$snapshot/install-output.log"
+      else cat -- "$snapshot/install-output.log" >&2; fi || return 1
+      : > "$snapshot/install-output-forwarded" || return 1
+    fi
+    sync -f -- "$snapshot/install-output-forwarded"
+  fi
+}
+finish_recovered_snapshot() {
+  if (($1 != 0)); then
+    printf '恢复步骤已执行，但安装输出转发失败；快照保留在 %s。\n' "$snapshot" >&2
+    return 1
+  fi
+  dispose_snapshot
+}
 recover_snapshot() {
   local directory_arg=$1 mode=$2 name='' component='' previous='' target='' was_active=false
-  local backup='' phase='' preserved='' restore=false
+  local backup='' phase='' preserved='' restore=false output_status=${3:-0}
   local journal_component='' journal_previous='' journal_target='' journal_phase=''
   local journal_was_active='' journal_backup='' journal_database_source=''
   if [[ ! -d $directory_arg || -L $directory_arg ]]; then
@@ -961,9 +979,15 @@ recover_snapshot() {
   active_backup=$backup
   active_database_source=$journal_database_source
   name=proxy-$component
+  # A killed updater never forwarded its direct install child's captured output.
+  # Replay it before recovery can dispose of the only durable copy.
+  if ! forward_install_output 1; then
+    output_status=1
+    printf '[%s] 安装输出转发或确认保存失败；继续恢复文件、数据库和服务，快照将保留在 %s。\n' "$name" "$snapshot" >&2
+  fi
   case $phase in
     committed)
-      dispose_snapshot
+      finish_recovered_snapshot "$output_status" || return 1
       printf '[%s] 更新到 %s 的步骤此前已经完成，无需恢复。\n' "$name" "$target"
       return 0
       ;;
@@ -978,7 +1002,7 @@ recover_snapshot() {
         fi
         service_stopped=false
       fi
-      dispose_snapshot
+      finish_recovered_snapshot "$output_status" || return 1
       printf '[%s] 已恢复到 %s。\n' "$name" "$previous"
       return 0
       ;;
@@ -1023,19 +1047,19 @@ recover_snapshot() {
     printf '[%s] 无法记录恢复进度；下次运行会重新恢复（重复恢复是安全的）。\n' "$name"
   fi
   if [[ $mode == boot ]]; then
-    dispose_snapshot
+    finish_recovered_snapshot "$output_status" || return 1
     printf '[%s] 已恢复到 %s（开机时完成被中断的更新回滚）。\n' "$name" "$previous"
     return 0
   fi
   if ! $was_active; then
-    dispose_snapshot
+    finish_recovered_snapshot "$output_status" || return 1
     printf '[%s] 已恢复到 %s；服务原本未运行，未启动。\n' "$name" "$previous"
     printf '[%s] 服务状态：%s\n' "$name" "$(service_state "$name" || true)"
     return 0
   fi
   if service_start "$name" && service_healthy "$name" 10; then
     service_stopped=false
-    dispose_snapshot
+    finish_recovered_snapshot "$output_status" || return 1
     printf '[%s] 已恢复到 %s，服务运行正常（10 秒内无重启）。\n' "$name" "$previous"
     printf '[%s] 服务状态：%s\n' "$name" "$(service_state "$name" || true)"
     return 0
@@ -1061,7 +1085,7 @@ rollback_component() {
   printf '\n[%s] %s：回滚到 %s ...\n' "$name" "$reason" "$previous"
   local recovery_status=0 recovery_output='' recovery_report=''
   recovery_report=$(mktemp "$registry/.recovery-report.XXXXXXXX") || return 1
-  if recover_snapshot "$snapshot" interactive > "$recovery_report" 2>&1; then
+  if recover_snapshot "$snapshot" interactive "${install_output_status:-0}" > "$recovery_report" 2>&1; then
     cat -- "$recovery_report"
     rm -f -- "$recovery_report"
     report_update success
@@ -1181,7 +1205,7 @@ preflight_database() {
 update_component() {
   local component=$1 name=proxy-$1 mode=--panel
   local binary=$source_dir/bin/proxy-$1 digest='' previous='' backup='' installed=''
-  local was_active=false status=0 install_output=''
+  local was_active=false status=0 install_output='' install_output_status=0
   report_stage bootstrap_install
   [[ $component == agent ]] && mode=--node
   previous=$(installed_version "$component")
@@ -1270,12 +1294,26 @@ update_component() {
   digest=$(sha256sum -- "$binary"); digest=${digest%% *}
   # QUI_UPDATE tells install.sh this is an update: it is run from an update that
   # starts the service itself and skips its first-install hint.
-  if install_output=$(QUI_UPDATE=1 "$source_dir/deploy/linux/install.sh" "$mode" --binary "$binary" --sha256 "$digest" 2>&1); then
-    printf '%s\n' "$install_output"
-  else
-    status=$?
-    printf '%s\n' "$install_output" >&2
-    report_update failed "$status" "$install_output"
+  # Keep install.sh a direct child: its interruption and the update transaction
+  # must have the same parent. Capture bytes in the root-owned snapshot instead
+  # of introducing a command-substitution process between them.
+  status=0
+  QUI_UPDATE=1 "$source_dir/deploy/linux/install.sh" "$mode" --binary "$binary" --sha256 "$digest" \
+    > "$snapshot/install-output.log" 2>&1 || status=$?
+  if ! forward_install_output "$status"; then
+    install_output_status=1
+    report_update failed null 'Unable to forward preserved install.sh output.'
+    rollback_component "$component" "$previous" "$was_active" '无法读取已保存的 install.sh 输出' \
+      || report_failure "$name" "$previous" "$backup"
+    exit 1
+  fi
+  if ((status != 0)); then
+    if install_output=$(cat -- "$snapshot/install-output.log"); then
+      report_update failed "$status" "$install_output"
+    else
+      install_output_status=1
+      report_update failed "$status" 'install.sh failed; its preserved output could not be read.'
+    fi
     # The journal still says "prepared", so a panel rollback puts the files back and only
     # restores the database when the new panel got to it anyway.
     rollback_component "$component" "$previous" "$was_active" 'install.sh 失败' \

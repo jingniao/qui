@@ -1,6 +1,6 @@
 # 部署与升级
 
-当前发布状态见[项目说明书](project-spec.md#当前状态)，日常运维见[运维手册](operations.md)。升级顺序为**先面板，再逐台 Agent**；升级前备份数据库与身份目录，跨迁移降级面板必须使用匹配的升级前数据库。当前基线只接受从 **v1.7.5** 或更新版本升级与恢复（数据库须含迁移 `0158`，见[代码精简](code-simplification.md)）；更低版本 Agent 在控制连接时被拒绝，须先在终端升级。
+当前发布状态见[项目说明书](project-spec.md#当前状态)，日常运维见[运维手册](operations.md)。升级顺序为**先面板，再逐台 Agent**；升级前备份数据库与身份目录，跨迁移降级面板必须使用匹配的升级前数据库。当前基线只接受从 **v1.7.5** 或更新版本升级与恢复（数据库须含迁移 `0158`，见[v1.7.6 发布说明](release-notes-1.7.6.md)）；更低版本 Agent 在控制连接时被拒绝，须先在终端升级。
 
 核心来源显式参数为 `--core-source qui|official`：sing-box 默认 `qui`，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各架构归档），仅在官方非 naive 标签基础上增加 `with_v2ray_api`，其逐用户流量计入额度；`official` 保留官方版本与 musl 专用归档及摘要。Xray 与 GOST（仅 linux/amd64，固定 3.3.2）保持官方来源。Linux/amd64 的 systemd 与 Alpine/OpenRC 已实机验证；arm64 不能沿用 amd64 结论。
 

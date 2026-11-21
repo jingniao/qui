@@ -6,9 +6,9 @@
 
 支持用户门户与节点组订阅、分流和域名级访问控制、协议中转/代理链、设备限制、用户额度、主机观测与整机月流量。节点可同时运行官方 Xray、官方或 qui 的未修改上游 sing-box 构建，以及仅做端口转发/加密中继的 GOST 3.3.2。中央失联时保留最后成功配置，配置失败自动回滚。
 
-最新正式版 **v1.7.5**（2026-11-20 UTC，tag `56698e4`，发布迁移头 **0158**）：共用离线时限、网页完整 Agent 升级、订阅整条线路可用性过滤。发布门禁与附件核验见[发布说明](docs/release-notes-1.7.5.md)及[验证记录](docs/v1.7.5-verification.md)。新桥接独立 systemd/OpenRC 生命周期、断电与重启组合实机验收仍未运行。
+最新正式版 **v1.7.6**（2026-11-21 UTC，tag `4120282`，发布迁移头 **0158**）：代码与文档精简，最低兼容 v1.7.5，保留有效数据及在途任务。发布门禁、23 条测试删除与附件核验见[发布说明](docs/release-notes-1.7.6.md)。既有实机未验收边界见[实施决定](docs/implementation-decisions.md)。
 
-本轮[代码精简](docs/code-simplification.md)尚未发布；后续最低兼容版本按 Owner 决定为 **v1.7.5**。逐版本摘要见[变更记录](docs/changelog.md)，产品规则见[项目说明书](docs/project-spec.md)，协作要求见 [AGENTS.md](AGENTS.md)。
+最低兼容版本按 Owner 决定为 **v1.7.5**。逐版本摘要见[变更记录](docs/changelog.md)，产品规则见[项目说明书](docs/project-spec.md)，协作要求见 [AGENTS.md](AGENTS.md)。
 
 | 任务 | 入口 |
 | --- | --- |

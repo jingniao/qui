@@ -1,17 +1,14 @@
 package deployment
 
 import (
-	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
-	"proxycontrol/pkg/contracts/release"
 )
 
 type AgentUpdateHandler struct {
 	Repository *Repository
 	Catalogue  ReleaseAccess
-	Keys       map[string]release.TrustedKey
 	Auth       *auth.Handler
 }
 
@@ -79,26 +76,4 @@ func (h *AgentUpdateHandler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "pageSize": size})
-}
-func (h *AgentUpdateHandler) queue(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		NodeID        string `json:"nodeId"`
-		ReleaseID     string `json:"releaseId"`
-		Revision      int64  `json:"revision"`
-		ConfirmNodeID string `json:"confirmNodeId"`
-	}
-	if httpapi.Decode(w, r, &input) != nil || input.NodeID == "" || input.NodeID != input.ConfirmNodeID {
-		httpapi.Error(w, 400, "invalid_request", "请确认目标节点和当前配置版本")
-		return
-	}
-	task, err := h.Repository.QueueAgentUpdate(r.Context(), h.Catalogue, h.Keys, input.NodeID, input.ReleaseID, auth.Actor(r.Context()).Username, r.RemoteAddr, input.Revision)
-	if err != nil {
-		if errors.Is(err, ErrAgentUpdateUnsupported) {
-			httpapi.Error(w, 409, "agent_update_unsupported", "该节点尚未启用网页升级，请先在服务器上运行一次 qui-update --component agent")
-			return
-		}
-		httpapi.Error(w, 409, "agent_update_conflict", "节点能力、已发布配置、版本信任或运行中操作存在冲突")
-		return
-	}
-	httpapi.JSON(w, 202, task)
 }

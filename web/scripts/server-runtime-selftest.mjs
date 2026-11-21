@@ -70,6 +70,10 @@ assert.equal(feed.calibrate({ generation: 'second', inventoryRevision: 1, revisi
 assert.equal(feed.get('alpha').revision, 2);
 assert.equal(feed.generation, 'second');
 assert.equal(feed.get('beta'), undefined);
+assert.equal(feed.project(base).status, first.status, 'the calibrated runtime remains authoritative over stale HTTP state');
+base.id = 'beta';
+assert.equal(feed.project(base), null, 'an object absent from the confirmed inventory cannot be revived by a late HTTP response');
+base.id = 'alpha';
 
 assert.equal(nodeStatusEventChangesInventory({ detail: parseNodeStatusMessage('{"nodeId":"alpha","inventoryChanged":false}') }), false);
 assert.equal(nodeStatusEventChangesInventory({ detail: parseNodeStatusMessage('{"nodeId":"alpha"}') }), true);

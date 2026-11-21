@@ -77,8 +77,6 @@ export function seriesStats(points: LatencyPoint[]): SeriesStats {
   };
 }
 
-export const targetStats = seriesStats;
-
 export function formatStatsMean(meanMs: number | null): string {
   if (meanMs === null) return '—';
   return `${Math.round(meanMs)}ms`;

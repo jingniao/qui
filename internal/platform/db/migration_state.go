@@ -16,8 +16,8 @@ import (
 const BaselineMigration = "0152_baseline.sql"
 
 // ErrPredatesBaseline is returned for a database that recorded only part of
-// the legacy chain: it was last opened by a panel older than v1.6.0.
-var ErrPredatesBaseline = errors.New("database predates v1.6.0; upgrade to v1.6.0 and start it once before installing this version")
+// the supported schema: the existing panel must have reached v1.7.5.
+var ErrPredatesBaseline = errors.New("database predates v1.7.5; upgrade to v1.7.5 and start it once before installing this version")
 
 // migrationState compares the schema_migrations rows of one database with the
 // migrations a binary carries.
@@ -96,6 +96,9 @@ func classifyMigrations(recorded, checksums map[string]string) migrationState {
 			state.outdated = true
 		}
 	}
+	if _, required := checksums["0158_subscription_route_dependencies.sql"]; required && len(recorded) > 0 && !state.applied["0158_subscription_route_dependencies.sql"] {
+		state.outdated = true
+	}
 	sort.Strings(state.unknown)
 	sort.Strings(state.mismatched)
 	return state
@@ -103,7 +106,7 @@ func classifyMigrations(recorded, checksums map[string]string) migrationState {
 
 // ValidateMigrationPrefix checks that a database (a backup archive) applied an
 // unbroken prefix of files with matching checksums, starting at the baseline.
-// Databases from before v1.6.0 return ErrPredatesBaseline.
+// Databases from before v1.7.5 return ErrPredatesBaseline.
 func ValidateMigrationPrefix(ctx context.Context, q queryer, files fs.FS) error {
 	checksums, names, err := embeddedChecksums(files)
 	if err != nil {

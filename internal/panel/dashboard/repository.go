@@ -3,11 +3,15 @@ package dashboard
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/statistics"
 	"proxycontrol/internal/platform/db"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"proxycontrol/internal/panel/connections"
+	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/traffic"
 )
 
@@ -82,12 +86,55 @@ type Recent struct {
 
 func (r *Repository) Counts(ctx context.Context, from, to, now time.Time) (BaseCounts, error) {
 	result := BaseCounts{}
-	threshold := now.Add(-45 * time.Second).UTC().Format("2006-01-02T15:04:05.000000000Z")
-	err := r.Database.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN enabled=1 AND status='online' AND last_heartbeat>=? THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='offline' OR (status IN ('online','degraded') AND last_heartbeat<?)) THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN enabled=1 AND (status='error' OR (status='degraded' AND last_heartbeat>=?)) THEN 1 ELSE 0 END),0) FROM nodes WHERE deleted_at IS NULL`, threshold, threshold, threshold).Scan(&result.TotalNodes, &result.OnlineNodes, &result.OfflineNodes, &result.AbnormalNodes)
+	var offlineAfterSeconds int
+	if err := r.Database.QueryRowContext(ctx, "SELECT duration_minutes*60 FROM notification_rules WHERE kind='node_offline'").Scan(&offlineAfterSeconds); err != nil {
+		return result, err
+	}
+	rows, err := r.Database.QueryContext(ctx, "SELECT id,status,enabled,maintenance,last_heartbeat,heartbeat_json,capabilities_json FROM nodes WHERE deleted_at IS NULL")
 	if err != nil {
 		return result, err
 	}
-	if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE enabled=1 AND deleted_at IS NULL").Scan(&result.ExpectedNodes); err != nil {
+	defer rows.Close()
+	for rows.Next() {
+		n := node.Node{OfflineAfterSeconds: offlineAfterSeconds, Heartbeat: &pb.Heartbeat{}, Capabilities: &pb.Capabilities{}}
+		var heartbeat, capabilities string
+		if err := rows.Scan(&n.ID, &n.Status, &n.Enabled, &n.Maintenance, &n.LastHeartbeat, &heartbeat, &capabilities); err != nil {
+			return result, err
+		}
+		decode := protojson.UnmarshalOptions{DiscardUnknown: true}
+		if err := decode.Unmarshal([]byte(heartbeat), n.Heartbeat); err != nil {
+			return result, fmt.Errorf("dashboard node %s heartbeat: %w", n.ID, err)
+		}
+		if err := decode.Unmarshal([]byte(capabilities), n.Capabilities); err != nil {
+			return result, fmt.Errorf("dashboard node %s capabilities: %w", n.ID, err)
+		}
+		// Match node reads' single-core report normalization before display.
+		if !n.Capabilities.MultiCoreSupported {
+			n.Capabilities.Cores = node.EnabledCores(n.Capabilities)
+			if n.Capabilities.CoreName != "" && n.Heartbeat.CoreHealthy != nil {
+				n.Heartbeat.Cores = []*pb.CoreStatus{{Name: n.Capabilities.CoreName, Healthy: n.Heartbeat.GetCoreHealthy(), Error: n.Heartbeat.CoreError, StartedAt: n.Heartbeat.CoreStartedAt, TrafficSourceStatus: n.Heartbeat.TrafficSourceStatus}}
+			}
+		}
+		result.TotalNodes++
+		if n.Enabled {
+			result.ExpectedNodes++
+		}
+		switch node.DisplayStatus(n, now) {
+		case "online":
+			result.OnlineNodes++
+		case "degraded", "core_error":
+			result.OnlineNodes++
+			result.AbnormalNodes++
+		case "offline":
+			result.OfflineNodes++
+		case "error":
+			result.AbnormalNodes++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return result, err
+	}
+	if err := rows.Close(); err != nil {
 		return result, err
 	}
 	snapshots := []traffic.ConnectionSnapshot{}

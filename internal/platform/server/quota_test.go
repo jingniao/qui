@@ -42,7 +42,30 @@ func newQuotaFixture(t *testing.T) *quotaFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	groupResponse := owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Quota Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}})
+	groupResponse := owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Quota Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{pending.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if groupResponse.Code != 201 {
 		t.Fatalf("node group: %d %s", groupResponse.Code, groupResponse.Body.String())
 	}
@@ -54,7 +77,30 @@ func newQuotaFixture(t *testing.T) *quotaFixture {
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
 	}
-	if response := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}}); response.Code != 200 {
+	if response := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{pending.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()}); response.Code != 200 {
 		t.Fatal(response.Body.String())
 	}
 	return &quotaFixture{app: app, owner: owner, ctx: ctx, nodeID: pending.ID, groupID: group.ID}
@@ -845,7 +891,7 @@ func TestQuotaStartupPassLeavesInSyncNodeAlone(t *testing.T) {
 // builds the revision from the published state's own user list, and the regular
 // render takes over again once it works.
 func TestQuotaInvalidDraftFallsBackToPublishedUsers(t *testing.T) {
-	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
+	// Not parallel: its deadlines failed under parallel -race load.
 	f := newQuotaFixture(t)
 	account, credential := f.addUser(t, "invalid_draft_user", "")
 	f.publish(t)
@@ -959,7 +1005,30 @@ func (f *quotaFixture) quickAccess(t *testing.T, protocol, listen string, port i
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.app.nodeRepository.SaveGroup(f.ctx, g.ID, node.GroupInput{Name: g.Name, Purpose: g.Purpose, Enabled: g.Enabled, SubscriptionVisible: g.SubscriptionVisible, NodeIDs: []string{f.nodeID}}); err != nil {
+	if _, err = f.app.nodeRepository.SaveGroup(f.ctx, g.ID, node.GroupInput{Name: g.Name, Purpose: g.Purpose, Enabled: g.Enabled, SubscriptionVisible: g.SubscriptionVisible, InboundIDs: func() []string {
+		selected := []string{f.nodeID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := f.app.nodeRepository.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()}); err != nil {
 		t.Fatal(err)
 	}
 	response = f.owner.call("POST", "/api/v1/revisions/user-access", deployment.UserAccessInput{NodeID: f.nodeID, Summary: "Quick user access", Protocol: protocol, Listen: listen, Port: port})

@@ -16,7 +16,7 @@
         </div>
 
         <div class="flex items-center gap-3 text-xs text-ios-secondary">
-          <span class="flex items-center gap-1.5" :title="'心跳报告: ' + (node.lastHeartbeat ? formatTime(node.lastHeartbeat) : '从晚上报')">
+          <span class="flex items-center gap-1.5" :title="'心跳报告: ' + (statusNode?.lastHeartbeat ? formatTime(statusNode.lastHeartbeat) : '从晚上报')">
             <span class="w-1.5 h-1.5 rounded-full" :class="status.tone === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-300'"></span>
             <span>{{ heartbeatRelative }}</span>
           </span>
@@ -256,6 +256,8 @@ import { connectAddress } from '../../nodeAddress';
 
 const props = defineProps<{
   node: NodeView;
+  displayNode?: NodeView | null;
+  statusNow?: number;
   meta: NodeMeta;
   now: number;
   nodeTraffic?: NodeTraffic;
@@ -286,8 +288,8 @@ const regionTitle = computed(() => {
 });
 
 const heartbeatRelative = computed(() => {
-  if (props.node.lastHeartbeat) {
-    return relativeHeartbeat(props.node.lastHeartbeat, props.now);
+  if (statusNode.value?.lastHeartbeat) {
+    return relativeHeartbeat(statusNode.value.lastHeartbeat, props.statusNow ?? props.now);
   }
   return '—';
 });
@@ -312,7 +314,8 @@ const connections = computed(() => {
   return h?.active_connections_measured && h.active_connections_scope === 'proxy_user_sessions_v1' && props.node.enabled && h.core_healthy === true && props.now - at >= -5000 && props.now - at < 45000 ? String(h.active_connections ?? 0) : '—';
 });
 
-const status = computed(() => serverStatus(props.node, props.now));
+const statusNode = computed(() => props.displayNode === undefined ? props.node : props.displayNode);
+const status = computed(() => statusNode.value ? serverStatus(statusNode.value, props.statusNow ?? props.now) : { key: 'deleted', tone: 'disabled', label: '已删除' });
 // Where the stored public address came from, so "no address yet" and "the Owner
 // pinned this one" do not read the same (§11.1).
 const publicIpSourceText = computed(() => {

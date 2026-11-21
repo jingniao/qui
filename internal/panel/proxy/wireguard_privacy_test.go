@@ -12,7 +12,30 @@ import (
 func TestUserWireGuardSnapshotOnlyContainsPeerPublicKey(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	group, err := f.nodes.SaveGroup(ctx, "", node.GroupInput{Name: "User WG", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{f.nodeA}})
+	group, err := f.nodes.SaveGroup(ctx, "", node.GroupInput{Name: "User WG", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{f.nodeA}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := f.nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +50,30 @@ func TestUserWireGuardSnapshotOnlyContainsPeerPublicKey(t *testing.T) {
 	if _, err := f.service.SaveInbound(ctx, "", InboundInput{Name: "WG user entry", NodeID: f.nodeA, Protocol: "wireguard", Listen: "0.0.0.0", Port: 51820, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{f.nodeA}}); err != nil {
+	if _, err := f.nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{f.nodeA}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := f.nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()}); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := f.service.Snapshot(ctx, f.nodeA, f.users)

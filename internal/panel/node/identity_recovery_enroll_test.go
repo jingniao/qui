@@ -117,7 +117,7 @@ type fakeAgentStream struct {
 
 func newFakeAgentStream(t *testing.T, leaf *x509.Certificate, nodeID, messageID string) *fakeAgentStream {
 	t.Helper()
-	stream := &fakeAgentStream{ctx: agentPeer(t, leaf), release: make(chan struct{}), welcome: make(chan struct{}), hello: &pb.AgentMessage{NodeId: nodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.4.0"}}}}
+	stream := &fakeAgentStream{ctx: agentPeer(t, leaf), release: make(chan struct{}), welcome: make(chan struct{}), hello: &pb.AgentMessage{NodeId: nodeID, MessageId: messageID, Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5"}}}}
 	t.Cleanup(func() { close(stream.release) })
 	return stream
 }

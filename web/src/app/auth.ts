@@ -68,22 +68,10 @@ export function clearSession() {
   authState.currentUser = null;
   setCSRFToken('');
 }
-export async function changePassword(currentPassword: string, newPassword: string) {
-  await request('/auth/password', 'PUT', { currentPassword, newPassword });
-  clearSession();
-}
 export const isOwner = computed(() => authState.currentUser?.role === 'Owner');
 export const adminReadScope = computed(() => authState.isAuthenticated && authState.currentUser
   ? JSON.stringify([authState.currentUser.id, authState.currentUser.role, authState.loginGeneration]) : '');
 watch(adminReadScope, advanceRequestScope, { flush: 'sync' });
-export const isAdmin = isOwner;
 export const isViewer = computed(() => authState.currentUser?.role === 'Viewer');
 
-export function formatTime(value: string) {
-  if (!value) return '从未';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
-    timeZone: authState.timezone, dateStyle: 'short', timeStyle: 'medium', hour12: false
-  }).format(date);
-}
-
+export { formatTime } from './time';

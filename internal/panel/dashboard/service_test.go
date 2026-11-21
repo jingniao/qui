@@ -95,27 +95,72 @@ func TestDashboardReadDoesNotWriteAndStaleHeartbeatsAreOffline(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	service.Now = func() time.Time { return now }
-	if _, err := database.Exec("UPDATE nodes SET status='online',last_heartbeat=? WHERE id=?", now.Add(-time.Minute).Format("2006-01-02T15:04:05.000000000Z"), nodeID); err != nil {
-		t.Fatal(err)
-	}
-	var before int64
-	database.QueryRow("SELECT total_changes()").Scan(&before)
-
-	view, err := service.Read(ctx, true)
-	if err != nil || view.Counts.OnlineNodes != 0 || view.Counts.OfflineNodes != 1 || view.Nodes[0].Status != "offline" {
-		t.Fatal("stale heartbeat remains online", view, err)
-	}
-	var after int64
-	database.QueryRow("SELECT total_changes()").Scan(&after)
-	if before != after {
-		t.Fatal("dashboard query modified business data")
-	}
-	if _, err := database.Exec("UPDATE nodes SET status='degraded' WHERE id=?", nodeID); err != nil {
-		t.Fatal(err)
-	}
-	view, err = service.Read(ctx, true)
-	if err != nil || view.Counts.OfflineNodes != 1 || view.Counts.AbnormalNodes != 0 || view.Nodes[0].Status != "offline" {
-		t.Fatal("stale degraded heartbeat counted as a current core fault", view, err)
+	for _, c := range []struct {
+		name, status, heartbeat, capabilities, display string
+		age                                            time.Duration
+		duration                                       int
+		enabled, maintenance                           bool
+		online, offline, abnormal                      int
+	}{
+		{name: "waiting for recovery", status: "online", age: time.Minute, duration: 3, enabled: true, display: "reconnecting"},
+		{name: "freshness boundary", status: "online", age: 45 * time.Second, duration: 3, enabled: true, display: "reconnecting"},
+		{name: "future heartbeat", status: "online", age: -6 * time.Second, duration: 3, enabled: true, offline: 1, display: "offline"},
+		{name: "duration boundary", status: "online", age: 3 * time.Minute, duration: 3, enabled: true, offline: 1, display: "offline"},
+		{name: "zero duration", status: "online", age: time.Minute, duration: 0, enabled: true, offline: 1, display: "offline"},
+		{name: "fresh with zero duration", status: "online", duration: 0, enabled: true, online: 1, display: "online"},
+		{name: "disconnected with fresh heartbeat", status: "offline", age: time.Second, duration: 3, enabled: true, display: "reconnecting"},
+		{name: "degraded waiting", status: "degraded", age: time.Minute, duration: 3, enabled: true, display: "reconnecting"},
+		{name: "degraded offline", status: "degraded", age: 3 * time.Minute, duration: 3, enabled: true, offline: 1, display: "offline"},
+		{name: "degraded online", status: "degraded", duration: 3, enabled: true, online: 1, abnormal: 1, display: "degraded"},
+		{name: "core fault online", status: "degraded", heartbeat: `{"core_healthy":false}`, duration: 3, enabled: true, online: 1, abnormal: 1, display: "core_error"},
+		{name: "per-core fault online", status: "online", heartbeat: `{"cores":[{"name":"xray","healthy":false}]}`, duration: 3, enabled: true, online: 1, abnormal: 1, display: "core_error"},
+		{name: "single-core scalar health overrides core list", status: "online", heartbeat: `{"core_healthy":true,"cores":[{"name":"xray","healthy":false}]}`, duration: 3, enabled: true, online: 1, display: "online"},
+		{name: "single-core capability health stays unknown", status: "online", capabilities: `{"core_name":"xray","cores":[{"name":"xray","healthy":false}]}`, duration: 3, enabled: true, online: 1, display: "online"},
+		{name: "single-core ignores secondary capability", status: "online", capabilities: `{"core_name":"xray","cores":[{"name":"xray"},{"name":"sing-box","healthy":false}]}`, duration: 3, enabled: true, online: 1, display: "online"},
+		{name: "multi-core retains capability health", status: "online", capabilities: `{"core_name":"xray","multi_core_supported":true,"cores":[{"name":"xray","healthy":false}]}`, duration: 3, enabled: true, online: 1, abnormal: 1, display: "core_error"},
+		{name: "error retains explicit state", status: "error", age: 3 * time.Minute, duration: 3, enabled: true, abnormal: 1, display: "error"},
+		{name: "maintenance", status: "online", age: 3 * time.Minute, duration: 3, enabled: true, maintenance: true, display: "maintenance"},
+		{name: "disabled", status: "online", age: 3 * time.Minute, duration: 3, display: "disabled"},
+		{name: "pending", status: "pending", age: 3 * time.Minute, duration: 3, enabled: true, display: "pending"},
+	} {
+		heartbeat := c.heartbeat
+		if heartbeat == "" {
+			heartbeat = "{}"
+		}
+		capabilities := c.capabilities
+		if capabilities == "" {
+			capabilities = `{"core_name":"xray"}`
+		}
+		if _, err := database.Exec("UPDATE notification_rules SET duration_minutes=? WHERE kind='node_offline'", c.duration); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec("UPDATE nodes SET status=?,last_heartbeat=?,enabled=?,maintenance=?,heartbeat_json=?,capabilities_json=? WHERE id=?", c.status, now.Add(-c.age).Format("2006-01-02T15:04:05.000000000Z"), c.enabled, c.maintenance, heartbeat, capabilities, nodeID); err != nil {
+			t.Fatal(err)
+		}
+		var before int64
+		if err := database.QueryRow("SELECT total_changes()").Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		view, err := service.Read(ctx, true)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if view.Counts.OnlineNodes != c.online || view.Counts.OfflineNodes != c.offline || view.Counts.AbnormalNodes != c.abnormal {
+			t.Fatalf("%s: counts = %+v", c.name, view.Counts)
+		}
+		if got := node.DisplayStatus(view.Nodes[0], now); got != c.display {
+			t.Fatalf("%s: display = %s, want %s", c.name, got, c.display)
+		}
+		if c.age >= time.Minute && (c.status == "online" || c.status == "degraded") && view.Nodes[0].Status != "offline" {
+			t.Fatalf("%s: raw control status = %s, want offline", c.name, view.Nodes[0].Status)
+		}
+		var after int64
+		if err := database.QueryRow("SELECT total_changes()").Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if before != after {
+			t.Fatal("dashboard query modified business data")
+		}
 	}
 }
 

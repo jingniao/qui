@@ -13,6 +13,7 @@ import (
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription"
+	"proxycontrol/internal/panel/subscription/availability"
 	"proxycontrol/internal/panel/subscription/proxy"
 	"proxycontrol/internal/panel/user"
 )
@@ -185,6 +186,7 @@ func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 		}
 	}
 	direct := directProtocols(endpoints)
+	now := time.Now()
 	items := make([]Node, 0, len(nodes))
 	for _, n := range nodes {
 		allowed, err := s.Nodes.UserHasNode(ctx, n.ID, id)
@@ -198,19 +200,58 @@ func (s *Service) GrantedNodes(ctx context.Context, id string) ([]Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, Node{ID: n.ID, Name: n.Name, Region: meta.Region, Online: n.Status == "online", Protocols: sortedProtocols(direct[n.ID])})
+		status := node.DisplayStatus(n, now)
+		items = append(items, Node{ID: n.ID, Name: n.Name, Region: meta.Region, Status: status, Online: displayOnline(status), Protocols: sortedProtocols(direct[n.ID])})
 	}
 	if subscribed {
 		for _, endpoint := range endpoints {
 			if !endpoint.Origin.Relayed {
 				continue
 			}
-			entry, err := s.Nodes.Get(ctx, endpoint.Origin.Node.ID)
+			status, err := s.relayDisplayStatus(ctx, endpoint, now)
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, Node{ID: endpoint.Origin.Ref, Name: endpoint.Name, Online: entry.Status == "online", Protocols: sortedProtocols([]string{endpoint.Protocol})})
+			items = append(items, Node{ID: endpoint.Origin.Ref, Name: endpoint.Name, Status: status, Online: displayOnline(status), Protocols: sortedProtocols([]string{endpoint.Protocol})})
 		}
 	}
 	return items, nil
+}
+
+func displayOnline(status string) bool {
+	return status == "online" || status == "degraded" || status == "core_error"
+}
+
+// The entry and every managed dependency contribute their current display
+// state; a recently disconnected downstream node must not leave a relay online.
+func (s *Service) relayDisplayStatus(ctx context.Context, endpoint proxy.Proxy, now time.Time) (string, error) {
+	dependencies, err := availability.Read(ctx, s.Nodes.Database, "relay:"+endpoint.Origin.Ref)
+	if err != nil {
+		return "", err
+	}
+	ids := append([]string{endpoint.Origin.Node.ID}, dependencies.PathNodeIDs...)
+	if dependencies.TargetInboundID != "" {
+		graph, err := availability.LoadGraph(ctx, s.Nodes.Database, s.Nodes.Vault)
+		if err != nil {
+			return "", err
+		}
+		targets, err := graph.Route(dependencies.TargetInboundID)
+		if err != nil {
+			return "", err
+		}
+		ids = append(ids, targets...)
+	}
+	priority := []string{"online", "degraded", "core_error", "error", "applying", "rollback", "pending", "reconnecting", "offline", "maintenance", "disabled", "deleted"}
+	status := "online"
+	for _, id := range availability.Unique(ids) {
+		n, err := s.Nodes.GetForCoreSelection(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		current := node.DisplayStatus(n, now)
+		if slices.Index(priority, current) > slices.Index(priority, status) {
+			status = current
+		}
+	}
+	return status, nil
 }

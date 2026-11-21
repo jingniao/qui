@@ -30,8 +30,6 @@ export interface NodeCore {
   primary: boolean;
 }
 
-export const CORE_NAMES: CoreName[] = ['xray', 'sing-box', 'gost'];
-
 export function isCoreName(value: unknown): value is CoreName {
   return value === 'xray' || value === 'sing-box' || value === 'gost';
 }
@@ -91,10 +89,6 @@ export function nodeCores(node?: NodeView | null): NodeCore[] {
   });
 }
 
-export function reportedCoreNames(node?: NodeView | null): CoreName[] {
-  return nodeCores(node).map(core => core.name);
-}
-
 export function primaryCoreName(node?: NodeView | null): CoreName | '' {
   return nodeCores(node).find(core => core.primary)?.name || '';
 }
@@ -127,17 +121,4 @@ export function unhealthyCores(node?: NodeView | null): NodeCore[] {
 
 export function unhealthyCoreLabel(node?: NodeView | null): string {
   return unhealthyCores(node).map(core => core.label).join('、');
-}
-
-// Union of the inbound protocols the node's reported cores advertise.
-export function coreProtocols(node?: NodeView | null): string[] {
-  const set = new Set<string>();
-  for (const core of nodeCores(node)) for (const item of core.protocols) if (item.inbound || item.outbound) set.add(item.protocol);
-  return [...set].sort();
-}
-
-// Core names shown in an inbound editor: the reported cores, or nothing when the
-// node has not reported capabilities yet.
-export function selectableCores(node?: NodeView | null): NodeCore[] {
-  return nodeCores(node);
 }

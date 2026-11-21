@@ -1,4 +1,3 @@
-import type { ReleaseEntry } from '../system/coreUpdatesApi';
 import type { DeletionPreview as CascadeDeletionPreview, DeletionResult } from '../../app/deletion';
 export interface CollectorLossStatus {measured?:boolean;status:"ok"|"unavailable";generation?:number;dropped_allowed_observations?:number;dropped_blocked_observations?:number;rejected_observations?:number;persistence_failures?:number;unconfirmed_processes?:number;baseline_at?:{seconds?:number;nanos?:number};checkpoint_at?:{seconds?:number;nanos?:number};counters_saturated?:boolean;coverage_incomplete?:boolean;end_confirmed?:boolean;}
 export interface TrafficSourceStatus {status:"busy"|"unavailable"|"unobserved"|"partial"|"covered"|"not_running"|"sampling_failed";core_epoch?:string;revision?:number;configured_sources?:number;observed_sources?:number;core_running?:boolean;observed_at?:{seconds?:number;nanos?:number};last_success_at?:{seconds?:number;nanos?:number};}
@@ -91,16 +90,7 @@ export function installCommand(input: { version: string; host: string; httpPort:
   return `${bootstrap}curl --no-insecure -fsSL https://github.com/${releaseRepository}/releases/download/v${input.version}/node-install.sh | bash -s -- --version ${input.version} --panel ${input.host}${grpcHostFlag}${portFlags} --ca-sha256 ${input.caSha256} --token ${input.token}${coreFlags}${input.replaceAgent ? ' --replace-agent' : ''}${input.webUpgrade ? ' --web-upgrade' : ''}`;
 }
 
-export interface HealthCheck { core?:CoreName|""; id:string;nodeId:string;revision:number;status:"queued"|"complete"|"expired";createdAt:string;deadline:string;result?:{healthy?:boolean;code:string;observed_at?:{seconds?:number;nanos?:number}}; }
 export interface RestartTask {core?:CoreName|"";commandId:string;revision:number;status:"pending"|"success"|"failed";code:string;createdAt:string;}
-export interface CertificateObservation {issuer?:string;fingerprint?:string;notBefore?:string;expiresAt?:string;status:string;integrity:'consistent'|'invalid';revokedAt?:string;}
-export interface CertificateStatus {identitySnapshotDigest:string;signingCAFingerprint?:string;currentSigningAvailable:boolean;nodeId:string;enabled:boolean;observedAt:string;active:CertificateObservation|null;pending:(CertificateObservation&{createdAt:string;purpose:'renewal'|'key_rotation'|'unknown';sourceMatches:boolean})|null;}
-export interface PublishedTopology {
-  nodeId:string;revision:number;reportedRevision:number;observation:'unknown'|'disabled'|'fresh_control'|'stale_control'|'revision_mismatch';snapshot:'unpublished'|'available'|'unavailable';
-  relays:{outboundId:string;targetNodeId:string;protocol:string;targetRevision:number;dependency:'unpublished'|'missing_node'|'disabled'|'unavailable'|'matched'|'mismatch';dependencyDetail?:string}[];
-  chains:{id:string;node_ids:string[];outbound_ids:string[];failover:string;final_outbound_id?:string;backup_target_id?:string}[];
-}
-export interface EnrollmentStatus {nodeId:string;observedAt:string;code:string;summary:string;receiptState:string;originalFingerprint?:string;originalCreatedAt?:string;originalExpiresAt?:string;currentCertificate:CertificateObservation;currentIdentityMatches:boolean;currentCertificateValid:boolean;enabled:boolean;identityRevoked:boolean;lastSequence:number;pendingRenewal:boolean;tokenState:string;tokenExpiresAt?:string;centralReplayConditionsMatch:boolean;localInstallationConfirmed:boolean;stateRecoveryConfirmed:boolean;nextSteps:string[];}
 // What a delete would do, and what still references the node.
 export type DeletionMode = 'cancel' | 'delete' | 'deleted';
 export type DeletionBlockerKind = 'inbound' | 'outbound' | 'outbound_group' | 'outbound_target' | 'proxy_chain' | 'policy' | 'deployment_batch';
@@ -131,14 +121,10 @@ export const nodeAPI = {
     label: target.label, host: target.host, port: target.port, allowNonPublic: target.allowNonPublic, scheduled: target.scheduled
   }),
   deleteProbeTarget: (id: string) => request(`/probe-targets/${encodeURIComponent(id)}`, 'DELETE'),
-	enrollmentStatus:(id:string)=>request<EnrollmentStatus>(`/nodes/${encodeURIComponent(id)}/enrollment-status`),
-	certificateStatus:(id:string)=>request<CertificateStatus>(`/nodes/${encodeURIComponent(id)}/certificate-status`),
 	issueRecovery:(id:string,body:{expiresInSeconds?:number;revokeNow?:boolean})=>request<Enrollment & {purpose:string;recoveryId:string}>(`/nodes/${encodeURIComponent(id)}/recovery-token`,'POST',body),
 	recoveryStatus:(id:string)=>request<RecoveryStatus>(`/nodes/${encodeURIComponent(id)}/recovery-status`),
 restartTasks:(id:string)=>request<{items:RestartTask[]}>(`/nodes/${encodeURIComponent(id)}/restart-core`),
 restartCore:(id:string,expectedRevision:number,core:CoreName|""="")=>request<RestartTask>(`/nodes/${encodeURIComponent(id)}/restart-core`,"POST",{expectedRevision,confirmNodeId:id,core}),
-healthChecks:(id:string)=>request<{items:HealthCheck[]}>(`/nodes/${encodeURIComponent(id)}/health-checks`),
-requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<HealthCheck>(`/nodes/${encodeURIComponent(id)}/health-checks`,"POST",{expectedRevision,core}),
   list: (page: number, keyword: string, deleted = false, pageSize = 20) => request<Page<NodeView>>(`/nodes?page=${page}&pageSize=${pageSize}&keyword=${encodeURIComponent(keyword)}${deleted ? '&deleted=1' : ''}`),
   get: (id: string) => request<NodeView>(`/nodes/${encodeURIComponent(id)}`),
   enroll: (name: string, connectHost?: string) => request<Enrollment>('/nodes/enrollment-token', 'POST', { name, ...(connectHost ? { connectHost } : {}) }),
@@ -156,12 +142,10 @@ requestHealth:(id:string,expectedRevision:number,core:CoreName|""="")=>request<H
   revoke: (id: string) => request(`/nodes/${id}/revoke-certificate`, 'POST'),
   deletionPreview: (id: string) => request<DeletionPreview>(`/nodes/${encodeURIComponent(id)}/deletion-preview`),
   machineTraffic: (id: string) => request<MachineTrafficSummary>(`/nodes/${encodeURIComponent(id)}/machine-traffic`),
-  machineTrafficBatch: () => request<MachineTrafficBatch>('/nodes/machine-traffic'),
   machineTrafficSettings: (id: string) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`),
   saveMachineTrafficSettings: (id: string, input: MachineTrafficSettings) => request<MachineTrafficSettings>(`/nodes/${encodeURIComponent(id)}/machine-traffic/settings`, 'PUT', input),
   deleteNode: (id: string) => request<DeletionResult | undefined>(`/nodes/${encodeURIComponent(id)}`, 'DELETE'),
-  agentReleases: (refresh = false) => request<AgentReleaseVersion[]>(`/agent-releases${refresh ? '?refresh=1' : ''}`),
-  importAgentRelease: (version: string) => request<ReleaseEntry[]>(`/agent-releases/${encodeURIComponent(version)}/import`, 'POST')
+  agentReleases: (refresh = false) => request<AgentReleaseVersion[]>(`/agent-releases${refresh ? '?refresh=1' : ''}`)
 };
 
 export interface ProbeTarget { id: string; label: string; host: string; port: number; allowNonPublic: boolean; scheduled: boolean; }
@@ -241,7 +225,6 @@ export interface MachineTrafficSummary {
   rxBytes: string | null; txBytes: string | null; usedBytes: string | null;
   status: 'measured' | 'stale' | 'unknown'; lastObservedAt: string | null;
 }
-export interface MachineTrafficBatch { items: MachineTrafficSummary[]; timezone: string; }
 export interface NodeTuning {
   supported:boolean; desired:Record<string,string>; requestId:string|null;
   installMissingModules?:boolean;

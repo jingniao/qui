@@ -15,7 +15,6 @@ import (
 
 var ErrDependency = proxy.ErrRelayDependency
 var ErrNodeBusy = errors.New("node is reserved by an active deployment or rollback")
-var ErrAgentUpdateUnsupported = errors.New("agent web upgrade is not enabled")
 
 // An active batch reserves all its nodes, including nodes waiting for their
 // turn. The reservation is represented by the persisted batch itself.

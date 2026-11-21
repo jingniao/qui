@@ -69,13 +69,17 @@ assert.match(guess.slice(0, guess.indexOf('// Simple protocol parser')), /suppor
 // ------------------------------------------------------------- 2. canvas library
 // api.ts is transpiled with its runtime imports stubbed so the real
 // canvasInstanceRef / selfHostedResourceId are the ones under test.
+const coreSummaryURL = 'data:text/javascript;base64,' + Buffer.from(transpile(read('../nodes/coreSummary.ts'))).toString('base64');
+const serverStatusSource = read('../nodes/components/serverListModel.ts').match(/export function serverStatus[\s\S]*?\n}/)[0];
+const serverStatusURL = 'data:text/javascript;base64,' + Buffer.from(transpile(`import { unhealthyCores } from ${JSON.stringify(coreSummaryURL)};\n${serverStatusSource}`)).toString('base64');
 const api = await load(transpile(read('api.ts'), source => source
+  .replace("'../nodes/components/serverListModel'", JSON.stringify(serverStatusURL))
   .replace("import { reactive } from 'vue';", 'const reactive = value => value;')
   .replace("import { request, type Page } from '../../app/apiClient';", 'const request = async () => ({});')));
 globalThis.__canvasApi = api;
 const library = await load(transpile(
   read('components/relay/canvasLibrary.ts')
-    .replace(/import\s*\{\s*selfHostedResourceId\s*\}\s*from\s*'\.\.\/\.\.\/api';/, 'const { selfHostedResourceId } = globalThis.__canvasApi;')
+    .replace(/import\s*\{[^}]*\}\s*from\s*'\.\.\/\.\.\/api';/, 'const { canvasServerDisplayStatus, selfHostedResourceId } = globalThis.__canvasApi;')
 ));
 
 const servers = [
@@ -84,7 +88,7 @@ const servers = [
   { id: 'srv-off', name: 'OLD-01', publicIp: '198.51.100.1', status: 'online', enabled: false },
   { id: 'srv-empty', name: 'NONE-01', status: 'online', enabled: true },
   { id: 'srv-gone', name: 'GONE-01', publicIp: '198.51.100.2', status: 'online', enabled: true, deletedAt: '2026-10-01T00:00:00Z' }
-];
+].map(server => ({ ...server, lastHeartbeat: new Date().toISOString(), offlineAfterSeconds: 300 }));
 const inbounds = [
   { id: 'ib-1', nodeId: 'srv-a', name: 'HK-01 vless', protocol: 'vless', port: 443, enabled: true, internalRelay: false },
   { id: 'ib-2', nodeId: 'srv-a', name: 'SS', protocol: 'shadowsocks', port: 8388, enabled: false, internalRelay: false },
@@ -101,7 +105,7 @@ assert.deepEqual(items.map(item => item.name), ['HK-01 · vless', 'HK-01 · SS (
 // library shows; a connect host is a client-only address (AGENTS.md §14) and a
 // node with no public address shows the empty state instead.
 assert.deepEqual(items.map(item => item.server), ['203.0.113.9', '203.0.113.9', '未设置公网 IP', '未设置公网 IP']);
-assert.deepEqual(items.map(item => item.status), ['online', 'offline', 'online', 'online']);
+assert.deepEqual(items.map(item => item.status), ['online', 'disabled', 'degraded', 'online']);
 assert.deepEqual(items.map(item => item.enabled), [true, false, true, true]);
 assert.deepEqual(items.map(item => item.port), [443, 8388, 8443, 446]);
 assert.deepEqual(items.map(item => item.internalRelay), [false, false, true, false]);
@@ -124,7 +128,7 @@ assert.deepEqual(library.selfHostedLibraryItems([], inbounds), []);
 
 // The page must use that helper and keep the drop bound to the inbound.
 const canvas = read('pages/RelayCanvasPage.vue');
-assert.ok(canvas.includes('selfHostedLibraryItems(servers.value, inbounds.value, resourceSearch.value)'));
+assert.ok(canvas.includes('selfHostedLibraryItems(displayServers.value, inbounds.value, resourceSearch.value, statusNow.value)'));
 assert.equal(canvas.includes(".filter(n => n.sourceType === 'self_hosted')"), false);
 assert.ok(canvas.includes('entryBound: true'));
 assert.ok(canvas.includes('const entryBound = draggedPayload.entryBound === true && currentScheme.value.executionLocation === \'server\';'));
@@ -236,7 +240,7 @@ assert.deepEqual(creating.toasts, [], 'an old create error must not notify the r
 
 // Exercise the real reload function: failure persists until a successful retry,
 // including when an older populated store is still present behind the overlay.
-const reloadSource = canvas.slice(canvas.indexOf('async function reloadSchemes('), canvas.indexOf('// An earlier build kept schemes in this browser. Offer them once;'));
+const reloadSource = canvas.slice(canvas.indexOf('async function reloadSchemes('), canvas.indexOf('// Publishing a server scheme makes the server create the relay objects'));
 const reloadHarness = await load(transpile(`
   export const schemesLoading = { value: true }, schemesLoadError = { value: '' };
   const schemesConfirmed = { value: false };

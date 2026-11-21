@@ -1,8 +1,8 @@
 # 架构总览
 
-本文描述当前实现的模块与数据流；运行证据见[验收矩阵](v1-acceptance.md) §11–12，已完成设计见[归档](archive/README.md)。
+本文描述当前实现的模块与数据流；已完成设计见[归档](archive/README.md)。
 
-产品定位与完整需求见 [项目说明书](../AGENTS.md)；本节只写“代码里现在是什么”。与源码冲突时以源码为准。
+产品定位与完整需求见 [项目说明书](project-spec.md)；本节只写“代码里现在是什么”。与源码冲突时以源码为准。
 
 ## 1. 组成
 
@@ -43,9 +43,9 @@
 | connections | `internal/panel/connections` | 面板内存中的实时连接快照（不落库） |
 | system | `internal/panel/system` | 系统设置、备份、恢复、发布公钥、保留策略 |
 
-约束：每个模块只通过自己的 Repository 修改所属数据；配置发布统一经 Deployment；Dashboard 只查询（见 AGENTS 第 24 节）。
+约束：每个模块只通过自己的 Repository 修改所属数据；配置发布统一经 Deployment；Dashboard 只查询（见[项目说明书 §24](project-spec.md#24-中央端模块设计)）。
 
-v1.7.2 新增的展示读取链路已发布并部署到生产面板，详见[四批实施记录](superpowers/plans/2026-11-19-prepared-display-data.md)及[发布记录](release-notes-1.7.2.md)。运行状态以白名单快照和 SSE 更新，浏览器定期校准；恢复连接时保持已有卡片，确认真实离线后才显示离线。统计由后台每 30 秒准备，总览基础内容独立读取；统计错误和数据年龄显式返回，旧结果不参与额度判断。代理流量的 `traffic_sample_hours` 是迁移 0155 新增的可重建索引，完整小时走索引、边界走原始样本；未完成回填时仍执行原精确查询。原始账本、来源切换和去重语义不变，已压缩历史的精度限制也不变。
+展示读取链路（见[实施决定](implementation-decisions.md#2026-11-19-prepared-display-data)）：运行状态以白名单快照和 SSE 更新，浏览器定期校准，恢复连接时保持已有卡片、确认真实离线后才显示离线。统计由后台每 30 秒准备，总览基础内容独立读取；统计错误和数据年龄显式返回，旧结果不参与额度判断。代理流量的 `traffic_sample_hours` 是可重建小时索引，完整小时走索引、边界走原始样本；未完成回填时仍执行原精确查询，原始账本、来源切换、去重语义与已压缩历史的精度限制不变。
 
 ## 4. Agent 模块
 
@@ -70,7 +70,7 @@ Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查�
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码与最新正式版 v1.7.2 的迁移头均为 `0155`（可重建流量展示小时索引）；存储与生命周期见第 8.1 节。已应用迁移的校验和被 `migrations/checksums_test.go` 固定，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码与最新正式版 **v1.7.5** 的迁移头均为 **`0158`**（迁移文件 `0152_baseline.sql` 至 `0158_subscription_route_dependencies.sql`）；存储与生命周期见第 8.1 节。已应用迁移（`0152–0158`）的校验和由 `migrations/checksums_test.go` 固定，历史 `0001–0152` 校验和保存在 `internal/platform/db`，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |
@@ -83,7 +83,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 | 访问与流量 | `access_rollups`、`traffic_hourly`、`traffic_daily`、`node_status_snapshots` |
 | 系统 | `system_settings`、`backups` |
 
-协议特有字段保存在 JSON 列（如密封 JSON `inbounds.encrypted_settings`、`policies.match_json`、`nodes.capabilities_json`），Go 侧必须解析为明确结构，不做无结构透传（AGENTS 第 26 节）。
+协议特有字段保存在 JSON 列（如密封 JSON `inbounds.encrypted_settings`、`policies.match_json`、`nodes.capabilities_json`），Go 侧必须解析为明确结构，不做无结构透传（见[项目说明书 §26](project-spec.md#26-数据库设计)）。
 
 ## 6. 关键流程
 
@@ -91,9 +91,9 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **配置发布与回滚**：Owner 保存业务配置 → 生成 Revision（`POST /api/v1/revisions`）→ 部署（`POST /api/v1/revisions/{id}/deploy`）→ Agent 渲染并校验核心原生配置 → 切换核心 → 健康检查 → 失败自动回滚到上一成功版本。代理链按“先出口、后中转、最后入口”发布，回滚反向（`internal/panel/deployment/relay_batches.go`）。
 
-**自动额度版本**：`internal/platform/server/quota.go` 将用户访问变化按节点合并（60 秒），以已发布状态为基线替换用户凭据并创建 Revision。当前草稿的用户/入站绑定可以被带出；入站启用意图继承基线，不自动启用 Owner 禁用的入站。目标包括当前授权节点与已发布状态仍持有凭据的节点。完整重试、恢复和对账规则见[项目说明书](../AGENTS.md) §22.1。
+**自动额度版本**：`internal/platform/server/quota.go` 将用户访问变化按节点合并（60 秒），以已发布状态为基线替换用户凭据并创建 Revision。当前草稿的用户/入站绑定可以被带出；入站启用意图继承基线，不自动启用 Owner 禁用的入站。目标包括当前授权节点与已发布状态仍持有凭据的节点。完整重试、恢复和对账规则见[项目说明书](project-spec.md) §22.1。
 
-**订阅**：Token → 用户 → 来源（已发布节点、授权导入缓存）→ 中立代理模型 → 注册导出器（uri/base64/sing-box/clash/clash-legacy）。一个用户一个隐藏身份与共享链接，新 Token 以哈希查找、vault 加密副本供再次查看；旧 Token 无副本需重置。显式 format 优先，其次已验证 UA 表（当前为空），最后系统默认。sing-box 仍是片段；固定证书的 QUIC 在 URI/Base64 中省略，在 sing-box 中带证书、mihomo 中带指纹。全局规则模板按授权展开，不改节点策略；导入仅用于客户端，定时 HTTPS 固定公网 IP 抓取并加密缓存，不在订阅请求中联网。只有 mihomo 输出客户端链。
+**订阅**：Token → 用户 → 来源（已发布节点、授权导入缓存）→ 中立代理模型 → 注册导出器（uri/base64/sing-box/clash/clash-legacy）。一个用户一个隐藏身份与共享链接，新 Token 以哈希查找、vault 加密副本供再次查看；旧 Token 无副本需重置。显式 format 优先，其次客户端 UA 匹配表（尚未逐一完成真机验证），最后系统默认。sing-box 仍是片段；固定证书的 QUIC 在 URI/Base64 中省略，在 sing-box 中带证书、mihomo 中带指纹。全局规则模板按授权展开，不改节点策略；导入仅用于客户端，定时 HTTPS 固定公网 IP 抓取并加密缓存，不在订阅请求中联网。只有 mihomo 输出客户端链。
 
 外部导入使用有界结构化结果与加密缓存，订阅请求不抓取来源。公开模型统一承载 Reality 公钥/Short ID、独立客户端 TLS 指纹与 xhttp host/path/mode；证书指纹不复用为客户端指纹。导出器按格式逐端点省略，复用链依赖清理与 emptyPolicy。自建服务端 Reality 私钥留在加密设置/修订中，经已安装核心原生探测和 Agent 精确能力契约进入发布；订阅只从成功修订映射公开字段，中转保留目标 SNI。
 
@@ -121,19 +121,15 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 | 端 | 路径 | 内容 |
 | --- | --- | --- |
-| 中央 | `/usr/local/bin/proxy-panel` | 程序 |
-| 中央 | `/usr/local/bin/qui` | root 终端菜单（改管理员口令、改 Web 端口、重启/启停、更新） |
-| 两端 | `/usr/local/bin/qui-update` | 从 GitHub Release 下载并核对摘要后原地升级（面板先备份数据库） |
-| 中央 | `/etc/proxy-panel/config.yaml`、`/etc/proxy-panel/tls/` | 配置与 Web TLS 材料 |
+| 中央 | `/usr/local/bin/proxy-panel`、`/usr/local/bin/qui` | 面板程序与 root 终端菜单 |
+| 中央 | `/etc/proxy-panel/` | `config.yaml` 与 `tls/`（Web TLS 材料） |
 | 中央 | `/var/lib/proxy-panel/` | `panel.db`、`identity/`（节点 CA）、`backups/` |
-| 节点 | `/usr/local/bin/proxy-agent` | 程序（引导镜像） |
-| 节点 | `/etc/proxy-agent/config.yaml`、`/etc/proxy-agent/tls/ca.crt` | 配置与受信中央 CA（校验面板控制连接证书，即面板 Web 证书） |
-| 节点 | `/var/lib/proxy-agent/` | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/` |
-| 节点 | `/var/lib/proxy-agent/host-network/` | `desired.json`、`status.json`：服务器强制出站的 helper 目录 |
-| 节点 | `/usr/local/lib/proxy-agent/<core>` | 安装脚本放置的核心（sing-box 可为 qui 构建） |
-| 两端 | `/var/lib/proxycontrol-install/` | 安装记录与操作锁 |
+| 节点 | `/usr/local/bin/proxy-agent`、`/usr/local/lib/proxy-agent/<core>` | Agent 引导镜像与安装器放置的代理核心 |
+| 节点 | `/etc/proxy-agent/` | `config.yaml` 与 `tls/ca.crt`（受信中央 CA） |
+| 节点 | `/var/lib/proxy-agent/` | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/`、`host-network/` |
+| 两端 | `/usr/local/bin/qui-update`、`/var/lib/proxycontrol-install/` | 原地升级脚本、安装记录与操作锁 |
 
-日志：两个程序都写 stdout，由 systemd 收集到 journald（`internal/platform/logging`），不写 `/var/log` 下的文件；OpenRC 经 `logger` 写 syslog。
+完整路径、属主与权限见[部署与升级 §7](deployment.md#7-目录与权限)。日志由两个程序直接写 stdout，systemd 收集至 journald（`internal/platform/logging`），OpenRC 经 `logger` 写 syslog，不写 `/var/log` 下的独立文件。
 
 ## 8. 能力边界
 
@@ -147,24 +143,22 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 ## 8.1 存储与生命周期
 
-v1.4 的 0129 新增五张隧道/规则/归属/声明表，0130 增加规则发布快照。0131 的启动/恢复一次性事务将已发布且有明确 ID 归属的画布转发迁移为规则及可选两节点 GOST 隧道，只转移归属和声明，不写入站、运行修订或证书；规则默认订阅隐藏。目标公网地址与已发布用户入站端口唯一匹配才 linked，否则 manual。标记保留已迁移 ID，首次无修改发布复用旧物化输入；不确定连接留在画布。v1.6.1 删除了这段转换代码、其标记与报告及 migration-report 接口（v1.6.0 启动时均已完成）。备份/恢复共用验证并保留声明与材料，恢复已发布对象标 modified，不自动下发；详见 [M1 报告](v1.4-m1-report.md)。
+隧道与转发规则由 `tunnels`、`tunnel_hops`、`tunnel_rules`（含无凭据 `published_snapshot`）、`tunnel_objects` 与 `port_claims` 持久化。备份与恢复共用校验并保留端口声明与密封材料；恢复后已发布对象标记为 `modified`，不自动下发。
 
-0132 保存客户端策略配置库与活动快照；0133 为 `subscription_sources` 增加有界 `latest_result_json` 与 `last_success_at`，最近尝试与最近成功分开。部分成功提交可用缓存；失败保留旧行但排除该来源，写入失败保留原状态。旧归档缺这些列仍可恢复，不编造原因、不抓取或自动发布。协议公开字段与服务端私钥沿用既有加密备份/修订路径。
-
-客户端配置库以独立 profile revision 管理编辑，活动模板以 activeRevision 管理启用与订阅快照。精确 `@endpoint` 引用、名称关键词和 `emptyPolicy` 在服务端按用户授权展开，预览与真实订阅共用同一展开和导出路径；`uiMetadata` 仅保存编辑器展示信息。共享规则集引用检查通过应用层注入仓储事务读取，检查全部已保存配置（含未启用配置）；不依赖浏览器内存或浏览器重新筛选授权候选。
+客户端策略配置库（`client_policy_profiles`）以独立 profile revision 管理编辑，活动模板以 `activeRevision` 管理启用与订阅快照；`subscription_sources` 分开保存有界 `latest_result_json` 与 `last_success_at`，部分成功提交可用缓存，失败保留旧行但排除该来源，写入失败保留原状态。精确 `@endpoint` 引用、名称关键词与 `emptyPolicy` 在服务端按用户授权展开，预览与真实订阅共用同一展开和导出路径；`uiMetadata` 仅保存编辑器展示信息。共享规则集引用检查通过应用层注入仓储事务读取全部已保存配置（含未启用配置），不依赖浏览器筛选。协议公开字段与服务端私钥沿用既有加密备份与修订路径。
 
 编辑器的高级预览上下文可选择有效且有授权的用户，自动选择仍为默认；同一上下文传给草稿／已保存预览、解析成员和候选接口，仅影响查看，不修改活动模板或用户授权。画布规划与发布前共用中转图检查，按实际出站保存顺序模拟新增／替换边，包含既有启用业务出站和尚未移除的旧归属边。
 
-用户隐藏身份、门户、导入与设备限制之外，数据库还保存节点目标/指标/调优、多核心任务与计量、共享隧道及归属、整机流量和 GOST 密封材料。表结构与升级兼容规则由[项目说明书](../AGENTS.md) §26、§31 维护；各版本迁移变更见[变更记录](changelog.md)。恢复结束门户会话，探测任务过期，未确认的调优/组件操作不自动重发。
+用户隐藏身份、门户、导入与设备限制之外，数据库还保存节点目标/指标/调优、多核心任务与计量、共享隧道及归属、整机流量和 GOST 密封材料。表结构与升级兼容规则由[项目说明书](project-spec.md) §26、§31 维护；各版本迁移变更见[变更记录](changelog.md)。恢复结束门户会话，探测任务过期，未确认的调优/组件操作不自动重发。
 
-定时导入、续费提醒、重置周期和额度对账均随面板停止/进程内恢复取消并等待结束。重置以面板时区本地日运算保留月锚点、夹紧短月；恢复保留当前重置边界。可选心跳增加宿主/核心 uptime、网卡计数及只读 sysctl，旧 Agent 缺字段显示未知。月节点流量由 access 统一合并本地月界内的 node_traffic_samples 去重视图与核心 UTC 小时历史；接口 scope 仍为 `retained_account_samples`，旧版已删账户回退数据仍无法补回（L9）。迁移 0154 后核心原始数据保留 7 天，旧小时原子汇总后删除，游标长期保留；历史非整小时边界返回精度错误。该代理样本口径与整机月流量不同；UDP 门控及无用户身份转发限制见[设备限制](device-limit.md)和[协议矩阵](protocol-support-matrix.md)。
+定时导入、续费提醒、重置周期和额度对账均随面板停止/进程内恢复取消并等待结束。重置以面板时区本地日运算保留月锚点、夹紧短月；恢复保留当前重置边界。可选心跳增加宿主/核心 uptime、网卡计数及只读 sysctl，旧 Agent 缺字段显示未知。月节点流量由 access 统一合并本地月界内的 `node_traffic_samples` 去重视图与核心 UTC 小时历史；接口 scope 仍为 `retained_account_samples`，旧版已删账户回退数据仍无法补回（L9）。核心原始数据保留 7 天，旧小时原子汇总后删除，游标长期保留；历史非整小时边界返回精度错误。该代理样本口径与整机月流量不同；UDP 门控及无用户身份转发限制见[设备限制](device-limit.md)和[协议矩阵](protocol-support-matrix.md)。
 
 ## 9. 不在本版范围
 
-微服务、外部消息队列、容器编排、HTTPS 中间人解密、网页内容审计、任意远程命令、无限多跳代理链等明确不做项见 AGENTS 第 35 节。当前状态与进度见[项目说明书](../AGENTS.md) 的“当前状态”，历史阶段划分见历史文档[轻量重构计划](archive/lightweight-refactor-plan.md)。
+微服务、外部消息队列、容器编排、HTTPS 中间人解密、网页内容审计、任意远程命令、无限多跳代理链等明确不做项见[项目说明书 §35](project-spec.md#35-明确不做)。当前状态与进度见[项目说明书](project-spec.md) 的“当前状态”。
 
-## 流量回执与核心历史整理（0154，v1.7.0 已发布）
+## 流量回执与核心历史整理
 
 access 拥有核心小时汇总、统一节点查询和回执检查点；Agent bound spool v2 认证队列身份、固定编号、原文及持久删除事实，control 只传交付身份与确认。完成、确认、封存使用独立于控制连接的连续编号；两端协商后切换，旧回执继续保留。候选双方确认段至少等待 24 小时后分批原子删除回执并推进封存进度，缺口和待续输入阻止跨越。队列表按节点和队列身份保留各代检查点，每节点唯一活动队列；只有显式身份恢复核销可关闭旧队列、授权新队列，普通握手拒绝换身份。恢复把统计、游标、回执及封存状态作为一组保留当前冻结库事实，旧冻结证据认证后迁移副本再读取，冲突暴露为恢复失败。调度复用既有访问清理生命周期，停止和恢复等待同一后台循环。
 
-详见[设计与边界](superpowers/specs/2026-11-18-traffic-storage-retirement-design.md)及[实施记录](superpowers/plans/2026-11-18-traffic-storage-retirement.md)。
+详见[实施决定](implementation-decisions.md#2026-11-18-traffic-storage-retirement)。

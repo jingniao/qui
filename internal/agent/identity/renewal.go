@@ -19,13 +19,6 @@ func (s *State) RenewalDue(at time.Time) (bool, error) {
 	}
 	return !at.Before(certificate.NotBefore.Add(30*24*time.Hour)) || !certificate.NotAfter.After(at.Add(14*24*time.Hour)), nil
 }
-func (s *State) CertificateFingerprint() (string, error) {
-	cert, err := s.currentCertificate()
-	if err != nil {
-		return "", err
-	}
-	return pki.Fingerprint(cert), nil
-}
 
 func (s *State) currentCertificate() (*x509.Certificate, error) {
 	data, key, err := s.Material()

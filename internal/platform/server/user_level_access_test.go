@@ -72,7 +72,30 @@ func TestStartupReconciliationAfterUserLevelMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	groupResponse := f.owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Second Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{second.ID}})
+	groupResponse := f.owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Second Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{second.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := f.app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if groupResponse.Code != 201 {
 		t.Fatalf("second group: %d %s", groupResponse.Code, groupResponse.Body.String())
 	}
@@ -84,7 +107,30 @@ func TestStartupReconciliationAfterUserLevelMigration(t *testing.T) {
 	if inboundResponse.Code != 201 {
 		t.Fatalf("second inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
 	}
-	if r := f.owner.call("PUT", "/api/v1/node-groups/"+secondGroup.ID, node.GroupInput{Name: secondGroup.Name, Purpose: secondGroup.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{second.ID}}); r.Code != 200 {
+	if r := f.owner.call("PUT", "/api/v1/node-groups/"+secondGroup.ID, node.GroupInput{Name: secondGroup.Name, Purpose: secondGroup.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{second.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := f.app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()}); r.Code != 200 {
 		t.Fatal(r.Body.String())
 	}
 	userResponse := f.owner.call("POST", "/api/v1/users", user.Input{Username: "migrated_user", DisplayName: "Migrated", Status: "active", AllowedProtocols: []string{"vless"}, NodeGroupIDs: []string{secondGroup.ID}})
@@ -219,7 +265,30 @@ func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T)
 	}
 	defer stopNow()
 
-	groupResponse := owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Legacy entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}})
+	groupResponse := owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Legacy entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{pending.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if groupResponse.Code != 201 {
 		t.Fatalf("node group: %d %s", groupResponse.Code, groupResponse.Body.String())
 	}
@@ -237,7 +306,30 @@ func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T)
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
 	}
-	if r := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}}); r.Code != 200 {
+	if r := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{pending.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()}); r.Code != 200 {
 		t.Fatal(r.Body.String())
 	}
 	// The baseline holds no user credential; the second revision adds the identity's

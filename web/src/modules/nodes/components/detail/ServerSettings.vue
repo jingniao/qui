@@ -622,7 +622,7 @@ async function save(group: 'basic' | 'renewal' | 'access' | 'network') {
         : { ...settingsBody(latest, latest.name), ...submitted });
     }
     if (group === 'basic' || group === 'renewal') {
-      const latestMeta = await loadNodeMeta(props.node.id, true);
+      const latestMeta = await loadNodeMeta(props.node.id);
       const metaChange = group === 'basic' ? {
         region: submitted.region,
         remark: submitted.remark,

@@ -27,8 +27,7 @@ func TestFailedDeleteDoesNotRevokeAccess(t *testing.T) {
 		return recorder.Code
 	}
 
-	// The user and the device both have to exist first, so the ids below are
-	// the only reason the deletes fail.
+	// Keep a real user and device to check that failed deletes leave them intact.
 	account, err := repository.Save(ctx, "", userInput())
 	if err != nil {
 		t.Fatal(err)
@@ -40,8 +39,10 @@ func TestFailedDeleteDoesNotRevokeAccess(t *testing.T) {
 	if code := remove(handler.delete, "missing"); code != 404 {
 		t.Fatalf("deleting an unknown user: %d", code)
 	}
-	// The device API is gone since v1.1: the route answers 410 and touches nothing.
-	if code := remove(devicesRemoved, device.ID); code != 410 {
+	// The removed device API has no registered route and touches nothing.
+	mux := http.NewServeMux()
+	handler.Register(mux, handler)
+	if code := remove(mux.ServeHTTP, device.ID); code != 404 {
 		t.Fatalf("deleting a device: %d", code)
 	}
 	if len(removals) != 0 {

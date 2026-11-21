@@ -107,15 +107,6 @@ func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
 	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/users": reads.list, "POST /api/v1/users": h.save, "GET /api/v1/users/{id}": reads.get, "PUT /api/v1/users/{id}": h.save, "DELETE /api/v1/users/{id}": h.delete, "POST /api/v1/users/{id}/credentials/reset": h.resetCredentials, "POST /api/v1/users/{id}/node-groups/{groupId}": h.grant, "DELETE /api/v1/users/{id}/node-groups/{groupId}": h.grant, "POST /api/v1/users/{id}/reset-traffic": h.resetTraffic} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}
-	// v1.1 manages access per user; the device API is gone. Its routes answer
-	// 410 so a stale caller gets a clear error instead of a 404 or a write.
-	for _, pattern := range []string{"GET /api/v1/users/{id}/devices", "POST /api/v1/users/{id}/devices", "GET /api/v1/devices", "GET /api/v1/devices/{id}", "PUT /api/v1/devices/{id}", "DELETE /api/v1/devices/{id}", "POST /api/v1/devices/{id}/credentials/{protocol}/reset", "DELETE /api/v1/devices/{id}/credentials/{protocol}"} {
-		mux.Handle(pattern, h.Auth.Require(http.HandlerFunc(devicesRemoved), true))
-	}
-}
-
-func devicesRemoved(w http.ResponseWriter, _ *http.Request) {
-	httpapi.Error(w, 410, "devices_removed", "设备管理已在 v1.1 移除：权限、凭据与订阅按用户管理")
 }
 
 // resetCredentials re-issues every proxy credential of the user. The old

@@ -31,6 +31,7 @@
     <LoadingSkeleton v-if="!dashboard && !nodesReady && !usersReady && !statistics && !error" />
     <p v-if="nodesError" role="alert" class="text-sm text-ios-red">{{ nodesError }}</p>
     <p v-if="usersError" role="alert" class="text-sm text-ios-red">{{ usersError }}</p>
+    <p v-if="runtime.error.value" role="status" class="text-sm text-ios-orange">{{ runtime.error.value }}</p>
 
     <template v-if="dashboard || nodesReady || usersReady || statistics">
       <!-- ======================================================== -->
@@ -63,10 +64,10 @@
                 <span
                   :class="[
                     'inline-flex items-center gap-1.5 font-medium',
-                    offlineNodesCount === 0 && pendingNodesCount === 0 && allNodes.length > 0 ? 'text-emerald-600' : 'text-ios-red'
+                    nodeStatusTone === 'online' ? 'text-emerald-600' : nodeStatusTone === 'warning' ? 'text-amber-600' : 'text-ios-red'
                   ]"
                 >
-                  <span :class="['w-1.5 h-1.5 rounded-full shrink-0', offlineNodesCount === 0 && pendingNodesCount === 0 && allNodes.length > 0 ? 'bg-emerald-500' : 'bg-ios-red']"></span>
+                  <span :class="['w-1.5 h-1.5 rounded-full shrink-0', nodeStatusTone === 'online' ? 'bg-emerald-500' : nodeStatusTone === 'warning' ? 'bg-amber-500' : 'bg-ios-red']"></span>
                   {{ nodeStatusSubtitle }}
                 </span>
                 <span class="text-ios-tertiary tabular-nums text-xs font-medium">{{ allNodes.length > 0 ? Math.round((adminOnlineNodesCount / allNodes.length) * 100) : 0 }}%</span>
@@ -541,6 +542,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatBytes } from '../../../app/bytes';
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { dashboardAPI, type DashboardBase } from '../api';
@@ -548,6 +550,7 @@ import { liveSummary } from '../liveSummary';
 import { allPages } from '../../../app/pagination';
 import { useStatistics } from '../../../app/useStatistics';
 import { nodeAPI, type NodeView } from '../../nodes/api';
+import { useNodeRuntime } from '../../nodes/useNodeRuntime';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { unhealthyCoreLabel } from '../../nodes/coreSummary';
 import { serverStatus } from '../../nodes/components/serverListModel';
@@ -570,7 +573,12 @@ const dashboard = ref<DashboardBase | null>(null);
 const route = useRoute();
 const { data: statistics, notice: statisticsNotice, refresh: refreshStatistics } = useStatistics(() => route.name === 'Dashboard' ? '' : undefined);
 const live = computed(() => dashboard.value ? liveSummary(dashboard.value.counts) : null);
-const allNodes = ref<NodeView[]>([]);
+const inventoryNodes = ref<NodeView[]>([]);
+const runtime = useNodeRuntime({ onInventoryChanged: () => refreshDisplayNodes() });
+const allNodes = computed(() => inventoryNodes.value.flatMap(node => {
+  const display = runtime.project(node);
+  return display ? [display] : [];
+}));
 const nodesError = ref('');
 const nodesReady = ref(false), usersReady = ref(false), usersError = ref('');
 const allUsers = ref<UserSummary[]>([]);
@@ -578,8 +586,7 @@ const allRevisions = ref<Revision[]>([]);
 const loading = ref(false);
 const error = ref('');
 let timer: ReturnType<typeof setInterval> | null = null;
-let statusTimer: ReturnType<typeof setInterval> | null = null;
-const statusNow = ref(Date.now());
+const statusNow = runtime.statusNow;
 
 // Dynamic Date & Auto-refresh String (panel timezone, not the browser's)
 const dateRefreshText = computed(() => `${panelDateLabel(new Date())} · 30s 自动刷新`);
@@ -593,13 +600,21 @@ function isNodeOnline(node: NodeView): boolean {
 }
 
 const adminOnlineNodesCount = computed(() => allNodes.value.filter(isNodeOnline).length);
-const offlineNodesCount = computed(() => allNodes.value.filter(n => n.enabled && n.status !== 'pending' && !isNodeOnline(n) && serverStatus(n, statusNow.value).key !== 'reconnecting').length);
+const offlineNodesCount = computed(() => allNodes.value.filter(n => serverStatus(n, statusNow.value).key === 'offline').length);
 const reconnectingNodesCount = computed(() => allNodes.value.filter(n => serverStatus(n, statusNow.value).key === 'reconnecting').length);
-const pendingNodesCount = computed(() => allNodes.value.filter(n => n.status === 'pending').length);
+const pendingNodesCount = computed(() => allNodes.value.filter(n => serverStatus(n, statusNow.value).key === 'pending').length);
+const maintenanceNodesCount = computed(() => allNodes.value.filter(n => serverStatus(n, statusNow.value).key === 'maintenance').length);
+const disabledNodesCount = computed(() => allNodes.value.filter(n => serverStatus(n, statusNow.value).key === 'disabled').length);
+const abnormalNodesCount = computed(() => allNodes.value.filter(n => ['error', 'core_error', 'degraded'].includes(serverStatus(n, statusNow.value).key)).length);
+const nodeStatusTone = computed(() => offlineNodesCount.value || abnormalNodesCount.value ? 'error'
+  : reconnectingNodesCount.value || pendingNodesCount.value || maintenanceNodesCount.value || disabledNodesCount.value ? 'warning' : 'online');
 const nodeStatusSubtitle = computed(() => [
   offlineNodesCount.value ? `${offlineNodesCount.value} 台离线` : '',
   reconnectingNodesCount.value ? `${reconnectingNodesCount.value} 台等待恢复` : '',
-  pendingNodesCount.value ? `${pendingNodesCount.value} 台待登记` : ''
+  pendingNodesCount.value ? `${pendingNodesCount.value} 台待登记` : '',
+  maintenanceNodesCount.value ? `${maintenanceNodesCount.value} 台维护中` : '',
+  disabledNodesCount.value ? `${disabledNodesCount.value} 台已禁用` : '',
+  abnormalNodesCount.value ? `${abnormalNodesCount.value} 台异常` : ''
 ].filter(Boolean).join(' · ') || '全部就绪');
 
 function hasPublishedConfig(node: NodeView): boolean {
@@ -681,7 +696,8 @@ const sortedNodeTrafficList = computed(() => {
   // A node the page has not loaded yet (the list loads separately) is skipped
   // rather than rendered without a name.
   const list = (statistics.value?.nodeTraffic || []).flatMap(sample => {
-    const node = allNodes.value.find(n => n.id === sample.nodeId) || dashboard.value?.nodes.find(n => n.id === sample.nodeId);
+    const cachedNode = dashboard.value?.nodes.find(n => n.id === sample.nodeId);
+    const node = allNodes.value.find(n => n.id === sample.nodeId) || (cachedNode ? runtime.project(cachedNode) : null);
     if (!node) return [];
     const t = nodeTrafficPeriod.value === 'today' ? sample.todayUpload + sample.todayDownload : sample.monthUpload + sample.monthDownload;
     return [{ node, traffic: t, measured: nodeTrafficPeriod.value === 'today' ? sample.todayMeasured : sample.measured, percent: 0, share: 0 }];
@@ -849,8 +865,7 @@ function userUsagePercent(u: UserSummary): number {
 }
 
 function formatGiB(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 GiB';
-  return (bytes / 1073741824).toFixed(1) + ' GiB';
+  return bytes <= 0 ? '0 GiB' : formatBytes(bytes, 1, 'GiB');
 }
 
 function latestFailedRevisions(revisions: Revision[]): Revision[] {
@@ -899,7 +914,7 @@ let displayRead: Promise<void> | null = null, displayReadAgain = false;
 function loadDisplayNodes() {
   if (displayRead) { displayReadAgain = true; return displayRead; }
   displayRead = allPages(page => nodeAPI.choices(page, '', 100))
-    .then(result => { allNodes.value = result.items; nodesError.value = ''; nodesReady.value = true; })
+    .then(result => { inventoryNodes.value = result.items; nodesError.value = ''; nodesReady.value = true; })
     .catch(e => { nodesError.value = (e as Error).message; showToast(nodesError.value, 'error'); })
     .finally(() => {
       displayRead = null;
@@ -948,7 +963,6 @@ onMounted(() => {
   void loadAll();
   document.addEventListener('visibilitychange', visibilityChanged);
   window.addEventListener('proxy-node-status', onNodeStatus);
-  statusTimer = setInterval(() => { if (!document.hidden) statusNow.value = Date.now(); }, 5000);
   timer = setInterval(() => {
     if (!document.hidden) void loadAll(true);
   }, 30000);
@@ -957,7 +971,6 @@ onMounted(() => {
 onUnmounted(() => {
   displayReadAgain = false;
   if (timer) clearInterval(timer);
-  if (statusTimer) clearInterval(statusTimer);
   refreshDisplayNodes.cancel();
   document.removeEventListener('visibilitychange', visibilityChanged);
   window.removeEventListener('proxy-node-status', onNodeStatus);

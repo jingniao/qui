@@ -8,19 +8,11 @@
 // `inbound:<inboundId>` reference when the scheme is saved — the same shape the
 // node list's "添加中转" draft uses for a self-hosted target.
 import type { Inbound } from '../../api';
-import type { ProxyNodeItem } from '../../proxyNodes';
-import { selfHostedResourceId } from '../../api';
+import type { CanvasNodeInstance } from '../../proxyNodes';
+import { canvasServerDisplayStatus, selfHostedResourceId, type CanvasServerRef } from '../../api';
 
 // Only the fields the library reads; NodeView satisfies this.
-export interface CanvasLibraryServerRef {
-  id: string;
-  name: string;
-  publicIp?: string;
-  connectHost?: string;
-  status?: string;
-  enabled?: boolean;
-  deletedAt?: string;
-}
+export type CanvasLibraryServerRef = CanvasServerRef;
 
 export interface SelfHostedLibraryItem {
   // `self-<nodeId>-<inboundId>`; canvasInstanceRef maps it to `inbound:<id>`.
@@ -31,7 +23,7 @@ export interface SelfHostedLibraryItem {
   server: string;
   port: number;
   protocol: string;
-  status: ProxyNodeItem['status'];
+  status: CanvasNodeInstance['status'];
   // A switched-off inbound may still be referenced by a saved scheme, but it
   // carries no traffic: the library shows it and refuses the drop.
   enabled: boolean;
@@ -44,7 +36,8 @@ export interface SelfHostedLibraryItem {
 export function selfHostedLibraryItems(
   servers: readonly CanvasLibraryServerRef[],
   inbounds: readonly Inbound[],
-  search = ''
+  search = '',
+  now = Date.now()
 ): SelfHostedLibraryItem[] {
   const query = search.trim().toLowerCase();
   const items: SelfHostedLibraryItem[] = [];
@@ -66,7 +59,6 @@ export function selfHostedLibraryItems(
       // a client uses (AGENTS.md §14): a connect host may resolve through a CDN,
       // and one node cannot reach another through it.
       const address = (server.publicIp || '').trim() || '未设置公网 IP';
-      const live = (server.status === 'online' || server.status === 'degraded') && inbound.enabled;
       const item: SelfHostedLibraryItem = {
         id: selfHostedResourceId(inbound),
         inboundId: inbound.id,
@@ -75,7 +67,7 @@ export function selfHostedLibraryItems(
         server: address,
         port: inbound.port,
         protocol: inbound.protocol,
-        status: live ? 'online' : 'offline',
+        status: inbound.enabled ? canvasServerDisplayStatus(server, now) : 'disabled',
         enabled: inbound.enabled,
         internalRelay: inbound.internalRelay,
         searchText: [name, address, String(inbound.port), inbound.protocol]

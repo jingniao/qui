@@ -14,10 +14,10 @@ export function revisionStrip(running?: number, latest?: number) {
 export function basicFacts(fields: (readonly [string, unknown])[]) {
   return fields.filter((field): field is [string, string | number] => field[1] !== undefined && field[1] !== null && String(field[1]).trim() !== '' && field[1] !== '—');
 }
-export function detailState(node: Pick<NodeView, 'status' | 'agentVersion' | 'lastHeartbeat'>, now: number) {
+// Registration controls the setup guide; serverStatus owns runtime availability.
+export function detailState(node: Pick<NodeView, 'status' | 'agentVersion'>) {
   if (node.status === 'pending' || !node.agentVersion) return 'pending';
-  const age = now - Date.parse(node.lastHeartbeat);
-  return node.status === 'offline' || !Number.isFinite(age) || age < -5000 || age >= 45000 ? 'offline' : 'ready';
+  return 'ready';
 }
 function stable(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';

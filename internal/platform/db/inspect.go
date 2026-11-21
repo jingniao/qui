@@ -27,9 +27,8 @@ const (
 	// VerdictForeign means the file has no migration table, or a migration this
 	// binary knows carries a different checksum.
 	VerdictForeign Verdict = "foreign"
-	// VerdictOutdated means the database recorded only part of the legacy
-	// migrations: it was last opened by a panel older than v1.6.0, which has to
-	// upgrade it first (ErrPredatesBaseline).
+	// VerdictOutdated means the database has not reached v1.7.5.
+	// Upgrade it through v1.7.5 first (ErrPredatesBaseline).
 	VerdictOutdated Verdict = "outdated"
 	// VerdictDamaged means the file cannot be copied, opened, read as SQLite or
 	// fails its own integrity check.

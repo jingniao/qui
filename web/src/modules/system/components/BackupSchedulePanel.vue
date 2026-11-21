@@ -20,6 +20,7 @@
   </section>
 </template>
 <script setup lang="ts">
+import { formatBytes } from '../../../app/bytes';
 import { computed, reactive, ref, watch, onMounted, onUnmounted } from 'vue';
 import { settingsAPI, type BackupSchedule, type BackupRetentionPreview } from '../settingsApi';
 import { formatTime } from '../../../app/auth';
@@ -31,7 +32,7 @@ const saved = ref<BackupSchedule | null>(null), loading = ref(false), saving = r
 const form = reactive({ enabled: false, time: '03:00', dailyKeep: 7, weeklyKeep: 4, monthlyKeep: 3 }); let generation = 0;
 const preview = ref<BackupRetentionPreview | null>(null), previewLoading = ref(false), previewError = ref(''); let previewGeneration = 0;
 const kindNames = {daily:'每日',weekly:'每周',monthly:'每月'};
-function size(bytes:number) { return bytes >= 1024*1024*1024 ? `${(bytes/(1024*1024*1024)).toFixed(2)} GiB` : bytes >= 1024*1024 ? `${(bytes/(1024*1024)).toFixed(2)} MiB` : `${bytes.toLocaleString()} B`; }
+function size(bytes:number) { return bytes < 1024*1024 ? `${bytes.toLocaleString()} B` : formatBytes(bytes, 2, bytes >= 1024*1024*1024 ? 'GiB' : 'MiB'); }
 function clearPreview() { previewGeneration++; preview.value = null; previewLoading.value = false; previewError.value = ''; confirmation.value = false; }
 function validPolicy() { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(form.time) || [form.dailyKeep,form.weeklyKeep,form.monthlyKeep].some(value=>!Number.isInteger(value)||value<1||value>365)) { showToast('请填写有效时间及 1～365 的保留数量','error'); return false; } return true; }
 async function readPreview() {

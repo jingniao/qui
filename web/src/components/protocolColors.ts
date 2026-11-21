@@ -23,4 +23,5 @@ export const PROTOCOL_COLOR_ALIASES: Readonly<Record<string, string>> = {
   blackhole: 'block'
 };
 
-export const RESERVED_PROTOCOL_COLORS = ['coral', 'mint', 'steel', 'ochre'] as const;
+// Reserved colour slots not yet assigned to a protocol (docs/design-system.md §2.4):
+// coral, mint, steel, ochre. Assign one only when a new protocol is registered.

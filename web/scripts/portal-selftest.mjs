@@ -132,7 +132,8 @@ function load(file, replacements = []) {
   for (const [from, to] of replacements) code = code.replace(from, to);
   return import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 }
-const fmt = await load('format.ts');
+const bytesCode = ts.transpileModule(readFileSync(path.join(root, '../app/bytes.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+const fmt = await load('format.ts', [["from '../app/bytes'", "from 'data:text/javascript;base64," + Buffer.from(bytesCode).toString('base64') + "'"]]);
 assert.equal(fmt.formatBytes(0), '0 B');
 assert.equal(fmt.formatBytes(512), '512 B');
 assert.equal(fmt.formatBytes(1536), '1.50 KiB');

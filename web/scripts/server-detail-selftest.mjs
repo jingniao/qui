@@ -33,14 +33,14 @@ assert.equal(revisionStrip(0, 0).state, 'unknown');
 assert.deepEqual(basicFacts([['blank', ' '], ['nil', null], ['missing', undefined], ['dash', '—'], ['host', 'node-a'], ['zero', 0]]), [['host', 'node-a'], ['zero', 0]]);
 const now = Date.parse('2026-10-28T12:00:00Z');
 const node = { status: 'online', agentVersion: '1.1', lastHeartbeat: new Date(now).toISOString() };
-assert.equal(detailState(node, now), 'ready');
-assert.equal(detailState({ ...node, status: 'pending' }, now), 'pending');
-assert.equal(detailState({ ...node, agentVersion: '' }, now), 'pending');
-assert.equal(detailState({ ...node, status: 'offline' }, now), 'offline');
-assert.equal(detailState(node, now + 44999), 'ready');
-assert.equal(detailState(node, now + 45000), 'offline');
-assert.equal(detailState({ ...node, lastHeartbeat: '' }, now), 'offline');
-assert.equal(detailState(node, now - 5001), 'offline');
+assert.equal(detailState(node), 'ready');
+assert.equal(detailState({ ...node, status: 'pending' }), 'pending');
+assert.equal(detailState({ ...node, agentVersion: '' }), 'pending');
+assert.equal(detailState({ ...node, status: 'offline' }), 'ready', 'a registered offline server keeps its detail tabs; serverStatus owns availability');
+assert.equal(detailState({ ...node, lastHeartbeat: new Date(now - 44999).toISOString() }), 'ready');
+assert.equal(detailState({ ...node, lastHeartbeat: new Date(now - 45000).toISOString() }), 'ready', 'the 45-second metric cutoff does not control detail registration state');
+assert.equal(detailState({ ...node, lastHeartbeat: '' }), 'ready');
+assert.equal(detailState({ ...node, lastHeartbeat: new Date(now + 5001).toISOString() }), 'ready');
 assert.equal(isDirty({ a: 1, b: { x: 2 } }, { b: { x: 2 }, a: 1 }), false);
 assert.equal(isDirty({ name: 'new' }, { name: 'old' }), true);
 assert.equal(isDirty({ unset: undefined }, {}), false);
@@ -54,7 +54,9 @@ console.log('All server-detail self-tests passed');
 // F2: K2 host observations, nullable historical buckets and tuning contract.
 async function loadF2Model(path, transform = s => s) {
   const input = transform(readFileSync(new URL('../src/modules/nodes/components/' + path, import.meta.url), 'utf8'));
-  const js = ts.transpileModule(input, {compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.ESNext}}).outputText;
+  const bytesCode = ts.transpileModule(readFileSync(new URL('../src/app/bytes.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+  const linked = input.replace("from '../../../app/bytes'", "from 'data:text/javascript;base64," + Buffer.from(bytesCode).toString('base64') + "'");
+  const js = ts.transpileModule(linked, {compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.ESNext}}).outputText;
   return import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
 }
 const host = await loadF2Model('hostObservationModel.ts');

@@ -86,9 +86,7 @@ func (r *Repository) AccessIdentity(ctx context.Context, userID string) (Device,
 
 // EnsureAccessIdentity makes the user's identity exist and hold exactly one
 // active credential per allowed protocol: a missing one is issued, one for a
-// protocol the user no longer may use is revoked, and any second device (only
-// possible from a database older than migration 0113 restored without it) is
-// removed with its credentials tombstoned. It reports whether anything changed,
+// protocol the user no longer may use is revoked. It reports whether anything changed,
 // so the caller can queue the automatic revision.
 func (r *Repository) EnsureAccessIdentity(ctx context.Context, userID string) (bool, error) {
 	tx, err := r.Database.BeginTx(ctx, nil)
@@ -145,15 +143,6 @@ func (r *Repository) ensureAccessIdentityTx(ctx context.Context, tx *sql.Tx, use
 		changed = true
 	}
 	identity := devices[0]
-	for _, extra := range devices[1:] {
-		if err := recordDeviceCredentialTombstonesTx(ctx, tx, extra.id); err != nil {
-			return false, err
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM devices WHERE id=?", extra.id); err != nil {
-			return false, err
-		}
-		changed = true
-	}
 	if identity.status != "active" {
 		// A device could be disabled before v1.1. The user's own status now
 		// decides access; a disabled identity would silently lock the user out.

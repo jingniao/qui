@@ -51,7 +51,7 @@ assert.equal(state.error.value, '预览失败');
 
 for (const path of [
   'components/DeletionDetails.vue', 'modules/proxy/components/InboundDeleteDialog.vue',
-  'modules/proxy/pages/InboundListPage.vue', 'modules/proxy/pages/ProxyNodeListPage.vue',
+  'modules/proxy/pages/ProxyNodeListPage.vue',
   'modules/proxy/pages/RelayCanvasPage.vue', 'modules/proxy/components/EntryRouteSummary.vue',
   'modules/proxy/components/relay/CanvasEntryEditor.vue', 'modules/proxy/components/relay/CanvasRemoveDialog.vue',
   'modules/proxy/components/relay/TunnelPlanSummary.vue',

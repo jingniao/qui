@@ -1,14 +1,6 @@
 <template>
   <div class="space-y-6 pb-16">
     <div v-if="conflictVersion" role="alert" class="panel-card p-4 text-sm text-amber-800">{{ conflictVersion }}</div>
-    <div v-if="legacyCards.length" class="panel-card p-4 space-y-3">
-      <p class="text-sm font-semibold">导入本地配置预览（{{ legacyCards.length }} 个，均作为未启用配置导入）</p>
-      <ul class="text-xs space-y-1">
-        <li v-for="card in legacyCards" :key="card.id">{{ card.name }} · {{ card.config.proxyGroups.length }} 个代理组 · {{ card.config.rules.length }} 条规则 · {{ importResults[card.id] || '等待导入' }}</li>
-      </ul>
-      <button class="ios-btn-secondary" :disabled="importing" @click="importLegacyCards">{{ importing ? '正在导入' : '导入本地配置' }}</button>
-      <p class="text-xs text-neutral-500">全部成功后清除本地副本；本地启用选择不会改变服务器订阅模板。</p>
-    </div>
     <!-- Header -->
     <PageHeader
       title="客户端策略"
@@ -2193,49 +2185,7 @@
 
 
     <!-- Rule-Provider Dialog (同步自图2) -->
-    <AppDialog
-      v-model="providerModalVisible"
-      :title="`规则集【${selectedService?.name || ''}】的 Clash / Mihomo 引用`"
-      :show-footer="false"
-      class="max-w-2xl"
-    >
-      <div class="space-y-4">
-        <p class="text-xs text-neutral-500 leading-relaxed">
-          在「客户端策略」中用 <code class="font-mono text-ios-blue">RULE-SET</code> 选择此规则集后，用户的 Clash / mihomo 订阅会自动带上对应的 rule-provider，无需手工配置。地址以用户自己的订阅 Token 鉴权，下列信息供手工配置时参考：
-        </p>
-
-        <div class="relative">
-          <pre class="bg-neutral-900 text-neutral-100 p-4 rounded-2xl text-xs font-mono overflow-x-auto leading-relaxed">{{ providerYamlSnippet }}</pre>
-          <button
-            type="button"
-            @click="copySnippet"
-            class="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium backdrop-blur-md transition-colors"
-          >
-            {{ snippetCopied ? '已复制！' : '复制代码' }}
-          </button>
-        </div>
-
-        <div class="space-y-1.5 pt-1">
-          <span class="text-xs font-medium text-neutral-600">直接 URL 地址:</span>
-          <div class="flex items-center gap-2">
-            <input
-              readonly
-              :value="providerDirectUrl"
-              class="form-input-base font-mono text-neutral-700 bg-neutral-50"
-            />
-            <button type="button" @click="copyUrl" class="ios-btn-secondary shrink-0 py-2">
-              复制 URL
-            </button>
-          </div>
-        </div>
-
-        <div class="flex justify-end pt-2">
-          <button type="button" @click="providerModalVisible = false" class="ios-btn-secondary">
-            关闭
-          </button>
-        </div>
-      </div>
-    </AppDialog>
+    <ServiceProviderDialog v-model="providerModalVisible" :service="selectedService" />
 
     <ServiceSetEditor
       v-model="serviceEditorOpen"
@@ -2327,6 +2277,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatTime as panelTime } from '../../../app/time';
 import { allPages } from '../../../app/pagination';
 import { ref, computed, onMounted, onUnmounted, h, watch } from 'vue';
 import {
@@ -2361,6 +2312,7 @@ import PageHeader from '../../../components/PageHeader.vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import ServiceSetEditor from '../components/ServiceSetEditor.vue';
+import ServiceProviderDialog from '../components/ServiceProviderDialog.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import { recommendGroupOrder } from '../groupOrder';
 import AppSelect, { type SelectOption } from '../../../components/AppSelect.vue';
@@ -2377,8 +2329,6 @@ export interface SavedClientPolicy {
   uiMetadata: Record<string, unknown>;
 }
 
-const SAVED_POLICIES_KEY = 'qui_client_saved_policies_v2';
-const ACTIVE_POLICY_ID_KEY = 'qui_client_active_policy_id_v2';
 
 type PolicyCard = Omit<SavedClientPolicy, 'config' | 'uiMetadata'> & { card: { mode: string; mixedPort: number; groupCount: number; enabledRuleCount: number } };
 const savedPolicies = ref<PolicyCard[]>([]);
@@ -2386,9 +2336,6 @@ const activePolicyId = ref<string>('');
 const activeRevision = ref(0);
 const editingActiveRevision = ref<number | undefined>();
 const conflictVersion = ref('');
-const legacyCards = ref<SavedClientPolicy[]>([]);
-const importResults = ref<Record<string, string>>({});
-const importing = ref(false);
 const editingPolicyId = ref<string | null>(null);
 const policyNameInput = ref('');
 const policyDescInput = ref('');
@@ -2525,36 +2472,6 @@ function profileFailure(error: unknown) {
   } else {
     showToast((error as Error).message, 'error');
   }
-}
-
-function previewLegacyCards() {
-  try {
-    const raw = localStorage.getItem(SAVED_POLICIES_KEY);
-    if (raw) legacyCards.value = JSON.parse(raw);
-  } catch {
-    showToast('本地配置无法解析，请检查浏览器保存的数据', 'error');
-  }
-}
-
-async function importLegacyCards() {
-  importing.value = true;
-  for (const card of legacyCards.value) {
-    try {
-      const content = { name: card.name, description: card.description, template: fromConfig(card.config), uiMetadata: card.uiMetadata || {} };
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(content)));
-      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-      acceptProfile(await clientPolicyProfilesAPI.create({ ...content, importKey: card.id + ':' + hash }));
-      importResults.value[card.id] = '导入成功';
-    } catch (error) {
-      importResults.value[card.id] = '导入失败：' + (error as Error).message;
-    }
-  }
-  if (legacyCards.value.every(card => importResults.value[card.id] === '导入成功')) {
-    localStorage.removeItem(SAVED_POLICIES_KEY);
-    localStorage.removeItem(ACTIVE_POLICY_ID_KEY);
-    showToast('全部本地配置已导入，服务器订阅模板保持原选择');
-  }
-  importing.value = false;
 }
 
 let editGeneration = 0;
@@ -2835,22 +2752,8 @@ function formatModeName(mode: string): string {
   }
 }
 
-function formatDateTime(iso: string): string {
-  if (!iso) return '未保存';
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
-  } catch {
-    return iso;
-  }
+function formatDateTime(value?: string): string {
+  return value ? panelTime(value) : '未保存';
 }
 
 // 代理组管理（用途分组 + 地区分组分层拓扑架构）
@@ -4213,45 +4116,12 @@ function removeDnsFallback(idx: number) {
 // 规则集 Provider 弹窗与配置查看 (完全同步自图2)
 const providerModalVisible = ref(false);
 const selectedService = ref<ServiceSet | null>(null);
-const snippetCopied = ref(false);
 
 function openProviderModal(service: ServiceSet) {
   selectedService.value = service;
   providerModalVisible.value = true;
 }
 
-const providerDirectUrl = computed(() => {
-  if (!selectedService.value) return '';
-  return `${window.location.origin}/sub/<订阅 Token>/rules/${selectedService.value.id}`;
-});
-
-const providerYamlSnippet = computed(() => {
-  if (!selectedService.value) return '';
-  return [
-    `名称: qui-service-${selectedService.value.id}`,
-    '类型: http · behavior: classical · format: text',
-    `地址: ${providerDirectUrl.value}`,
-    '刷新: 86400 秒'
-  ].join('\n');
-});
-
-function copySnippet() {
-  if (!providerYamlSnippet.value) return;
-  navigator.clipboard.writeText(providerYamlSnippet.value);
-  snippetCopied.value = true;
-  showToast('规则集引用信息已复制');
-  setTimeout(() => {
-    snippetCopied.value = false;
-  }, 2500);
-}
-
-function copyUrl() {
-  if (!providerDirectUrl.value) return;
-  navigator.clipboard.writeText(providerDirectUrl.value);
-  showToast('Provider URL 已复制');
-}
-
-// 规则集编辑 / 创建：对话框由共享组件 ServiceSetEditor 提供
 const serviceEditorOpen = ref(false);
 const serviceEditorTarget = ref<ServiceSet | null>(null);
 const serviceEditorClone = ref(false);
@@ -4581,7 +4451,6 @@ async function loadConfiguration() {
       if (current !== editGeneration) return;
       const active = acceptProfile(result);
       clientConfig.value = JSON.parse(JSON.stringify(active.config));
-      previewLegacyCards();
     } else {
       clientConfig.value = await clientPolicyAPI.get();
     }

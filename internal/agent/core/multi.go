@@ -243,25 +243,6 @@ func (m *MultiRuntime) render(ctx context.Context, s desiredstate.State) (Render
 	return r, err
 }
 
-// DecodeCoreConfigs reads both the additive core map and legacy native JSON.
-// Rendered metadata is reconstructed from the authenticated desired snapshot.
-func DecodeCoreConfigs(data []byte, primary string) (map[string]json.RawMessage, error) {
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(data, &object); err != nil || object == nil {
-		return nil, errors.New("invalid core revision")
-	}
-	multi := true
-	for name := range object {
-		if !KnownName(name) {
-			multi = false
-		}
-	}
-	if multi {
-		return object, nil
-	}
-	return map[string]json.RawMessage{primary: append([]byte(nil), data...)}, nil
-}
-
 func (m *MultiRuntime) Validate(ctx context.Context, c RenderedConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

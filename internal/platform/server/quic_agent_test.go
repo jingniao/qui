@@ -76,7 +76,30 @@ func TestActualQUICAgentPublishedDeviceSubscriptionAndNativeClient(t *testing.T)
 					t.Error("QUIC Agent did not stop")
 				}
 			}()
-			group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "QUIC entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}})
+			group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "QUIC entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+				selected := []string{n.ID}
+				ids := []string{}
+				for _, serverID := range selected {
+					rows, err := nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for rows.Next() {
+						var inboundID string
+						if err := rows.Scan(&inboundID); err != nil {
+							rows.Close()
+							t.Fatal(err)
+						}
+						ids = append(ids, inboundID)
+					}
+					if err := rows.Err(); err != nil {
+						rows.Close()
+						t.Fatal(err)
+					}
+					rows.Close()
+				}
+				return ids
+			}()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -131,7 +154,30 @@ func TestActualQUICAgentPublishedDeviceSubscriptionAndNativeClient(t *testing.T)
 			if response.Code != 201 {
 				t.Fatal("QUIC HTTP draft failed", response.Code, response.Body.String())
 			}
-			if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}}); err != nil {
+			if _, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+				selected := []string{n.ID}
+				ids := []string{}
+				for _, serverID := range selected {
+					rows, err := nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for rows.Next() {
+						var inboundID string
+						if err := rows.Scan(&inboundID); err != nil {
+							rows.Close()
+							t.Fatal(err)
+						}
+						ids = append(ids, inboundID)
+					}
+					if err := rows.Err(); err != nil {
+						rows.Close()
+						t.Fatal(err)
+					}
+					rows.Close()
+				}
+				return ids
+			}()}); err != nil {
 				t.Fatal(err)
 			}
 			response = owner.call("POST", "/api/v1/revisions/proxy", map[string]any{"nodeId": n.ID, "summary": "QUIC publish"})

@@ -54,6 +54,7 @@ type MetaChange = { sequence: number; denied?: unknown };
 const nodeChanges = new Map<string, MetaChange>();
 let deniedBatch: MetaChange | undefined;
 let metadata = reactive<Record<string, NodeMeta>>({});
+export const nodeFinanceRevisions = reactive<Record<string, number>>({});
 function currentMetadata() {
   const scope = requestScope();
   if (scope !== metadataScope) {
@@ -109,11 +110,11 @@ export function getRandomPortForNode(
   return min + Math.floor(random() * span);
 }
 
-export async function loadNodeMeta(nodeId: string, _owner: boolean): Promise<NodeMeta> {
+export async function loadNodeMeta(nodeId: string): Promise<NodeMeta> {
   const scope = requestScope(), ticket = ++sequence;
   try {
     const result = await request<{ meta: NodeMeta; present: boolean }>('/nodes/'+encodeURIComponent(nodeId)+'/meta');
-    return await acceptNodeMeta(nodeId, result, _owner, scope, ticket);
+    return await acceptNodeMeta(nodeId, result, scope, ticket);
   } catch (error) {
     if (scope === requestScope() && invalidatesRead(error)) {
       const cache = currentMetadata();
@@ -126,7 +127,7 @@ export async function loadNodeMeta(nodeId: string, _owner: boolean): Promise<Nod
   }
 }
 
-export async function loadNodeMetadata(owner: boolean, deleted = false): Promise<Record<string, NodeMeta>> {
+export async function loadNodeMetadata(deleted = false): Promise<Record<string, NodeMeta>> {
   const scope = requestScope(), ticket = ++sequence;
   const result = await request<{ items: { nodeId: string; meta: NodeMeta; present: boolean }[] }>('/nodes/meta' + (deleted ? '?deleted=1' : '')).catch(error => {
     if (scope === requestScope() && invalidatesRead(error)) {
@@ -138,31 +139,14 @@ export async function loadNodeMetadata(owner: boolean, deleted = false): Promise
     }
     throw error;
   });
-  const entries = await Promise.all(result.items.map(async item => [item.nodeId, await acceptNodeMeta(item.nodeId, item, owner, scope, ticket)] as const));
+  const entries = await Promise.all(result.items.map(async item => [item.nodeId, await acceptNodeMeta(item.nodeId, item, scope, ticket)] as const));
   return Object.fromEntries(entries);
 }
 
-async function acceptNodeMeta(nodeId: string, result: { meta: NodeMeta; present: boolean }, _owner: boolean, scope: number, ticket: number): Promise<NodeMeta> {
+async function acceptNodeMeta(nodeId: string, result: { meta: NodeMeta; present: boolean }, scope: number, ticket: number): Promise<NodeMeta> {
   requireMetaScope(scope);
   const newer = newerMeta(nodeId, ticket);
   if (newer) return newer;
-  // Preserve the existing one-time financial metadata import; port ranges are API-owned.
-  if (_owner) {
-    const key = 'qui_node_meta_' + nodeId, raw = localStorage.getItem(key);
-    if (raw && !result.present) {
-      const legacy = JSON.parse(raw) as NodeMeta;
-      const price = parseRenewPrice(legacy.renewPrice, legacy.renewCurrency, legacy.renewCycle);
-      result = await request('/nodes/'+encodeURIComponent(nodeId)+'/meta', 'PUT', {
-        region: legacy.region ?? '', remark: legacy.remark ?? '', renewDate: legacy.renewDate ?? '',
-        renewCycle: price.cycle, renewCurrency: price.currency, renewPrice: price.price,
-        renewNoticeDays: legacy.renewNoticeDays ?? 7, importOnly: true
-      });
-    }
-    requireMetaScope(scope);
-    const edited = newerMeta(nodeId, ticket);
-    if (edited) return edited;
-    if (raw) localStorage.removeItem(key);
-  }
   currentMetadata()[nodeId] = result.meta;
   nodeChanges.set(nodeId, { sequence: ticket });
   return result.meta;
@@ -181,6 +165,9 @@ export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void
     throw new Error('请填写有效的线路带宽（1–100000 Mbps），或留空');
   }
   const scope = requestScope();
+  const financeKeys = ['renewPrice', 'renewCurrency', 'renewCycle', 'renewDate'] as const;
+  const previous = currentMetadata()[nodeId];
+  const previousFinance = financeKeys.map(key => String(previous?.[key] ?? ''));
   const result = await request<{ meta: NodeMeta }>('/nodes/'+encodeURIComponent(nodeId)+'/meta', 'PUT', {
     region: meta.region ?? '', remark: (meta.remark || '').trim(),
     renewDate: meta.renewDate ?? '', renewCycle: meta.renewCycle ?? '',
@@ -190,9 +177,11 @@ export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void
     ...(meta.tags === undefined ? {} : { tags: meta.tags })
   });
   requireMetaScope(scope);
+  const financeChanged = financeKeys.some((key, index) => previousFinance[index] !== String(result.meta[key] ?? ''));
   currentMetadata()[nodeId] = result.meta;
   // Every read dispatched before this accepted save can describe the old row.
   nodeChanges.set(nodeId, { sequence: ++sequence });
+  if (financeChanged) nodeFinanceRevisions[nodeId] = (nodeFinanceRevisions[nodeId] ?? 0) + 1;
 }
 
 export function parseRenewPrice(

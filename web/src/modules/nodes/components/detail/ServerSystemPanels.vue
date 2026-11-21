@@ -205,6 +205,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatBytes } from '../../../../app/bytes';
 import { computed } from 'vue';
 import type { NodeTraffic } from '../../../../app/statisticsCache';
 import type { MachineTrafficSummary, NodeView } from '../../api';
@@ -277,14 +278,6 @@ const memoryPercentColor = computed(() => {
   return 'bg-purple-500';
 });
 
-function formatBytes(bytes?: number): string {
-  if (bytes === undefined || bytes === null || !Number.isFinite(bytes)) return '—';
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
 
 function formatCompactBytes(bytes?: number): string {
   if (bytes === undefined || bytes === null || !Number.isFinite(bytes)) return '—';

@@ -73,14 +73,6 @@ func ReadStatus(directory string) (*pb.TuningResult, error) {
 	err = json.Unmarshal(raw, r)
 	return r, err
 }
-func readDesired(directory string) (Desired, error) {
-	root, err := requestRoot(directory)
-	if err != nil {
-		return Desired{}, err
-	}
-	defer root.Close()
-	return readDesiredRoot(root)
-}
 
 // Pin the Agent-controlled directory for this invocation. Root's traversal
 // protection prevents a symlink/rename race escaping into another host path.

@@ -59,7 +59,7 @@ func signedRequest(t *testing.T) ([]byte, *x509.CertificateRequest) {
 func (p *recoveryPanel) request(t *testing.T, token, hostname string) (*pb.EnrollRequest, *x509.CertificateRequest) {
 	t.Helper()
 	encoded, csr := signedRequest(t)
-	return &pb.EnrollRequest{EnrollmentToken: token, Hostname: hostname, OperatingSystem: "Linux", AgentVersion: "1.4.0", CsrPem: encoded}, csr
+	return &pb.EnrollRequest{EnrollmentToken: token, Hostname: hostname, OperatingSystem: "Linux", AgentVersion: "1.7.5", CsrPem: encoded}, csr
 }
 
 // attempt is one enrollment the panel can consume: the request and the

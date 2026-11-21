@@ -107,7 +107,7 @@ func (p *rulesPanel) do(t *testing.T, method, path, body string, cookie *http.Co
 
 func saveBody(t *testing.T, template rules.Template, expected int64) string {
 	t.Helper()
-	data, err := json.Marshal(map[string]any{"template": template, "expectedRevision": expected})
+	data, err := json.Marshal(map[string]any{"name": "rules-api", "template": template, "uiMetadata": map[string]any{}, "expectedRevision": expected + 1, "expectedActiveRevision": expected})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,27 +129,32 @@ func TestRulesAPI(t *testing.T) {
 	if response := p.do(t, "GET", "/api/v1/subscription-rules/presets", "", viewer, ""); response.Code != 200 || !strings.Contains(response.Body.String(), `"whitelist"`) {
 		t.Fatalf("presets: %d", response.Code)
 	}
+	list, err := p.handler.Profiles.Profiles(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profilePath := "/api/v1/client-policy-profiles/" + list.ActiveProfileID
 	minimal := rules.Presets()[1].Template
-	if response := p.do(t, "PUT", "/api/v1/subscription-rules", saveBody(t, minimal, 0), viewer, viewerCSRF); response.Code != 403 {
+	if response := p.do(t, "PUT", profilePath, saveBody(t, minimal, 0), viewer, viewerCSRF); response.Code != 403 {
 		t.Fatalf("viewer save: %d", response.Code)
 	}
-	saved := p.do(t, "PUT", "/api/v1/subscription-rules", saveBody(t, minimal, 0), owner, csrf)
-	if saved.Code != 200 || !strings.Contains(saved.Body.String(), `"revision":1`) {
+	saved := p.do(t, "PUT", profilePath, saveBody(t, minimal, 0), owner, csrf)
+	if saved.Code != 200 || !strings.Contains(saved.Body.String(), `"revision":2`) || !strings.Contains(saved.Body.String(), `"activeRevision":1`) {
 		t.Fatalf("owner save: %d %s", saved.Code, saved.Body.String())
 	}
 	if len(p.audit.actions) != 1 {
 		t.Fatalf("audit %v", p.audit.actions)
 	}
-	if response := p.do(t, "PUT", "/api/v1/subscription-rules", saveBody(t, rules.Presets()[2].Template, 0), owner, csrf); response.Code != 409 || !strings.Contains(response.Body.String(), "stale_rules") {
+	if response := p.do(t, "PUT", profilePath, saveBody(t, rules.Presets()[2].Template, 0), owner, csrf); response.Code != 409 || !strings.Contains(response.Body.String(), "stale_client_policy") {
 		t.Fatalf("stale save: %d %s", response.Code, response.Body.String())
 	}
 	broken := rules.Presets()[2].Template
 	broken.Rules[0].Payload = "a,b"
-	response := p.do(t, "PUT", "/api/v1/subscription-rules", saveBody(t, broken, 1), owner, csrf)
+	response := p.do(t, "PUT", profilePath, saveBody(t, broken, 1), owner, csrf)
 	if response.Code != 400 || !strings.Contains(response.Body.String(), `"field":"rules[0].payload"`) {
 		t.Fatalf("invalid save: %d %s", response.Code, response.Body.String())
 	}
-	if response := p.do(t, "PUT", "/api/v1/subscription-rules", `{"template":{"unknown":1},"expectedRevision":1}`, owner, csrf); response.Code != 400 {
+	if response := p.do(t, "PUT", profilePath, `{"template":{"unknown":1},"expectedRevision":1}`, owner, csrf); response.Code != 400 {
 		t.Fatalf("unknown field: %d", response.Code)
 	}
 }

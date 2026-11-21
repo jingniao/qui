@@ -155,6 +155,9 @@ func (c *Control) Enroll(ctx context.Context, request *pb.EnrollRequest) (*pb.En
 	if request == nil || len(request.EnrollmentToken) == 0 || len(request.EnrollmentToken) > 128 || len(request.Hostname) > 128 || len(request.OperatingSystem) > 256 || len(request.AgentVersion) > 64 {
 		return nil, status.Error(codes.InvalidArgument, "invalid enrollment metadata")
 	}
+	if !release.SupportedAgentVersion(request.AgentVersion) {
+		return nil, status.Error(codes.FailedPrecondition, "Agent 1.7.5 or newer is required; upgrade the Agent from its terminal first")
+	}
 	client, ok := peer.FromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "TLS required")
@@ -233,6 +236,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	}
 	if first.NodeId != id || first.GetHello() == nil || first.Sequence != 0 || first.MessageId == "" || len(first.MessageId) > 128 || first.Timestamp == nil || first.Timestamp.CheckValid() != nil || len(first.GetHello().AgentVersion) > 64 {
 		return status.Error(codes.InvalidArgument, "first message must be Hello for authenticated node")
+	}
+	if !release.SupportedAgentVersion(first.GetHello().AgentVersion) {
+		return status.Error(codes.FailedPrecondition, "Agent 1.7.5 or newer is required; upgrade the Agent from its terminal first")
 	}
 	c.mu.Lock()
 	if c.connected == nil {
@@ -398,10 +404,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			message.Payload = &pb.ServerMessage_RemoveCoreCommand{RemoveCoreCommand: p}
 		case *pb.CoreUpdateCommand:
 			message.Payload = &pb.ServerMessage_CoreUpdateCommand{CoreUpdateCommand: p}
-		case *pb.AgentSystemUpdateCommand:
-			message.Payload = &pb.ServerMessage_AgentSystemUpdateCommand{AgentSystemUpdateCommand: p}
 		case *pb.AgentUpdateCommand:
 			message.Payload = &pb.ServerMessage_AgentUpdateCommand{AgentUpdateCommand: p}
+		case *pb.AgentSystemUpdateCommand:
+			message.Payload = &pb.ServerMessage_AgentSystemUpdateCommand{AgentSystemUpdateCommand: p}
 		}
 		return stream.Send(message)
 	}
@@ -739,7 +745,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 				continue
 			}
 		}
-		// Agent requests reserve the node before other executable commands.
+		// Existing worker requests retain their node reservation until completion.
 		if agentUpdateSupported && message.GetAgentUpdateResult() == nil {
 			command, err := c.AgentUpdates.PendingAgentUpdate(ctx, id)
 			if err != nil {

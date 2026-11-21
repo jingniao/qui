@@ -353,11 +353,6 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 				return err
 			}
 		}
-		if NewRuntime == nil {
-			if err := core.MigratePrimaryRuntime(filepath.Join(c.DataDirectory, "runtime"), configuredCores[0].Name); err != nil {
-				return err
-			}
-		}
 	}
 	newManager := reconcile.New
 	if controlOnly {

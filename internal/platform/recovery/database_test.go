@@ -125,7 +125,30 @@ func recoveryFixture(t *testing.T) *fixture {
 	if err := identity.SaveEnrollment(agentDirectory, n.ID, encoded, authority.PEM); err != nil {
 		t.Fatal(err)
 	}
-	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}})
+	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{n.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +576,30 @@ func TestDatabaseRecoveryRetainsLaterAllocationsAndCredentialRotation(t *testing
 		t.Fatal(err)
 	}
 	// Represent a post-snapshot allocation context (node group granted).
-	newGroup, err := f.nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Later entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{newNode.ID}})
+	newGroup, err := f.nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Later entries", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{newNode.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := f.nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if err != nil {
 		t.Fatal(err)
 	}

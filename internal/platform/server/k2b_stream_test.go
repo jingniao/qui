@@ -33,7 +33,7 @@ func TestK2bTuningFixedOperationOverAuthenticatedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := pb.NewAgentControlClient(trustedClient(t, address, app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "probe-test"})
+	response, err := pb.NewAgentControlClient(trustedClient(t, address, app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestK2bTuningFixedOperationOverAuthenticatedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{}}}); err != nil {
+	if err = stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if w, e := stream.Recv(); e != nil || w.GetWelcome() == nil {
@@ -137,7 +137,7 @@ func TestK2bTuningFixedOperationOverAuthenticatedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = reconnected.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "reconnect", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: seq}}}); err != nil {
+	if err = reconnected.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "reconnect", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5", LastAckedSequence: seq}}}); err != nil {
 		t.Fatal(err)
 	}
 	if welcome, e := reconnected.Recv(); e != nil || welcome.GetWelcome() == nil {

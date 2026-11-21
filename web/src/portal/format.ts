@@ -1,14 +1,7 @@
 // Small shared helpers for the user portal pages.
 
-/** Binary units with automatic scaling: B / KiB / MiB / GiB / TiB. */
-export function formatBytes(value: number | null | undefined, decimals = 2): string {
-  if (value == null || !Number.isFinite(value)) return '—';
-  if (value <= 0) return '0 B';
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const i = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
-  const scaled = value / Math.pow(1024, i);
-  return `${scaled.toFixed(i === 0 ? 0 : decimals)} ${units[i]}`;
-}
+import { formatBytes as formatByteSize } from '../app/bytes';
+export const formatBytes = (value: number | null | undefined, decimals = 2) => formatByteSize(value, decimals, undefined, 'TiB');
 
 /** Whole days from `now` until `value` (rounded up); null when there is no date. Negative when past. */
 export function daysLeft(value: string | null | undefined, now = Date.now()): number | null {

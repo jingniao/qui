@@ -1,7 +1,6 @@
 package desiredstate
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
@@ -24,27 +23,6 @@ func TestServerSettingsRefuseUnknownFields(t *testing.T) {
 		if _, err := Decode([]byte(document)); err == nil {
 			t.Fatalf("opaque settings accepted: %s", document)
 		}
-	}
-}
-
-// M1 stores and validates the settings, but no Agent renderer exists yet: the
-// render entry must refuse them, not drop them.
-func TestAgentRendererRefusesServerSettings(t *testing.T) {
-	state := State{Inbounds: []Inbound{{ID: "vless-in", Protocol: "vless", Settings: ProtocolSettings{Security: SecurityReality, Reality: testReality(t)}}}}
-	if err := ValidateServerSettingsRenderer(state); !errors.Is(err, ErrServerSettingsRendererPending) {
-		t.Fatalf("inbound settings reached the renderer: %v", err)
-	}
-	xhttp := State{Inbounds: []Inbound{{ID: "xhttp-in", Protocol: "vless", Settings: ProtocolSettings{Transport: TransportXHTTP, XHTTP: testXHTTP()}}}}
-	if err := ValidateServerSettingsRenderer(xhttp); !errors.Is(err, ErrServerSettingsRendererPending) {
-		t.Fatalf("xhttp settings reached the renderer: %v", err)
-	}
-	outbound := State{Outbounds: []Outbound{{ID: "out", Protocol: "vless", Settings: ProtocolSettings{Security: SecurityReality, Reality: testReality(t)}}}}
-	if err := ValidateServerSettingsRenderer(outbound); !errors.Is(err, ErrServerSettingsRendererPending) {
-		t.Fatalf("outbound settings reached the renderer: %v", err)
-	}
-	legacy := State{Inbounds: []Inbound{{ID: "vless-in", Protocol: "vless", Settings: ProtocolSettings{Security: "tls"}}}}
-	if err := ValidateServerSettingsRenderer(legacy); err != nil {
-		t.Fatalf("legacy state refused: %v", err)
 	}
 }
 

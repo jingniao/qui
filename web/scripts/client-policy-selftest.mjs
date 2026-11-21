@@ -55,9 +55,9 @@ check('profile save sends both independent versions and opaque metadata', client
 check('activation uses its CAS endpoint without resending a template', client.calls[5].path.endsWith('/activate') && client.calls[5].body.expectedRevision === 3 && client.calls[5].body.expectedActiveRevision === 9 && !('template' in client.calls[5].body));
 check('delete carries the profile version', client.calls[6].method === 'DELETE' && client.calls[6].path.endsWith('?expectedRevision=3'));
 const page = readFileSync(path.resolve(here, '..', 'src', 'modules', 'routing', 'pages', 'ClientPolicyPage.vue'), 'utf8');
-const conflictHandler = page.slice(page.indexOf('function profileFailure('), page.indexOf('function previewLegacyCards('));
+const conflictHandler = page.slice(page.indexOf('function profileFailure('), page.indexOf('let editGeneration'));
 check('conflicts retain drafts and display the current server version', conflictHandler.includes('error.details.activeRevision') && conflictHandler.includes('草稿已保留') && !conflictHandler.includes('load(') && !conflictHandler.includes('clientConfig.value ='));
-check('cards no longer write localStorage and imports hash content', !page.includes('localStorage.setItem(') && page.includes("crypto.subtle.digest('SHA-256'") && page.includes('legacyCards.value.every'));
+check('cards use server profiles without browser draft imports', !page.includes('localStorage') && !page.includes('legacyCards') && page.includes('clientPolicyProfilesAPI.create('));
 check('new profiles use the complete server preset', page.includes('template: JSON.parse(JSON.stringify(standard.template))') && page.includes('设为订阅模板，客户端更新订阅后生效'));
 check('membership controls persist filters and display server authority', page.includes('setGroupKeywords') && page.includes('最终成员以服务器展开为准') && page.includes('实际出口未知'));
 check('region matching is not duplicated in the page', !page.includes('groupKeywordFilters') && !page.includes('getMatchedNodesForGroup') && !page.includes('applyMatchedNodesToGroup'));

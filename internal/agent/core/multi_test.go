@@ -297,20 +297,6 @@ func TestMultiHealthKeepsTheAdapterReason(t *testing.T) {
 		t.Fatalf("healthy cores reported a reason: %v", err)
 	}
 }
-func TestRevisionCoreMapAndLegacy(t *testing.T) {
-	for _, tc := range []struct {
-		data  string
-		count int
-	}{{`{"xray":{"inbounds":[]},"sing-box":{"inbounds":[]}}`, 2}, {`{"inbounds":[],"routing":{}}`, 1}, {`{}`, 0}} {
-		configs, err := DecodeCoreConfigs([]byte(tc.data), "xray")
-		if err != nil || len(configs) != tc.count {
-			t.Fatalf("%s %v %v", tc.data, configs, err)
-		}
-	}
-	if _, err := DecodeCoreConfigs([]byte(`null`), "xray"); err == nil {
-		t.Fatal("accepted null")
-	}
-}
 func TestNodePortAllocator(t *testing.T) {
 	p := &PortAllocator{}
 	if err := p.ReserveInbounds([]int{10001, 10002}); err != nil {

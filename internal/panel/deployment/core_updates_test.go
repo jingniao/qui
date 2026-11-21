@@ -304,11 +304,7 @@ func TestCoreUpdateClosedAsSuccessStillAcceptsTheReceipt(t *testing.T) {
 	}
 }
 
-// TestCoreUpdateUndispatchableLegacyTaskIsClosed covers the row migration 0107
-// backfills for a historical task: it keeps status 'queued' with an empty direct
-// URL, so no schema-2 command can be built from it. The task must be closed
-// terminally with a reason instead of failing the node's control stream on every
-// reconnect, and the node's update slot must stay usable afterwards.
+// Corrupt tasks expose their validation error and retain their original evidence.
 func TestCoreUpdateUndispatchableLegacyTaskIsClosed(t *testing.T) {
 	r, catalogue, nodeID, revision := coreNodeFixture(t, runtime.GOOS+"/"+runtime.GOARCH, "xray")
 	ctx := context.Background()
@@ -318,19 +314,22 @@ func TestCoreUpdateUndispatchableLegacyTaskIsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	command, err := r.PendingCoreUpdate(ctx, nodeID)
-	if err != nil || command != nil {
-		t.Fatalf("undispatchable task not closed quietly: %+v %v", command, err)
+	if err == nil || command != nil {
+		t.Fatalf("undispatchable task did not expose its error: %+v %v", command, err)
 	}
 	items, total, err := r.ListCoreUpdates(ctx, 1, 20)
 	if err != nil || total != 1 || len(items) != 1 {
 		t.Fatalf("task list: %+v %d %v", items, total, err)
 	}
 	legacy := items[0]
-	if legacy.Status != "failed_closed" || legacy.Result == nil || legacy.Result.Status != "failed_closed" || legacy.Result.Code != legacyCoreUpdateCode || legacy.Result.NodeID != nodeID || legacy.Result.Revision != revision.ID {
-		t.Fatalf("legacy task closed without a reason: %+v", legacy)
+	if legacy.Status != "queued" || legacy.Result != nil || legacy.NodeID != nodeID || legacy.Revision != revision.ID {
+		t.Fatalf("invalid task evidence changed: %+v", legacy)
 	}
-	if again, err := r.PendingCoreUpdate(ctx, nodeID); err != nil || again != nil {
-		t.Fatalf("closed task still dispatched: %+v %v", again, err)
+	if again, err := r.PendingCoreUpdate(ctx, nodeID); err == nil || again != nil {
+		t.Fatalf("invalid task error was swallowed: %+v %v", again, err)
+	}
+	if _, err := r.ClearCoreUpdate(ctx, catalogue, legacy.ID, "owner", "local"); err != nil {
+		t.Fatal(err)
 	}
 	queued, err := r.QueueCoreUpdate(ctx, catalogue, nodeID, "owner", "local", revision.ID, coreTarget("26.3.27", coreAssetURLForTest(), strings.Repeat("ab", 32)))
 	if err != nil {

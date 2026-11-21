@@ -36,7 +36,6 @@ func recoveryBlockers(ctx context.Context, q rowQuery, id string) ([]Blocker, er
 		{"agent_update", "agent_update_tasks", "SELECT id,status FROM agent_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed')"},
 		{"core_update", "core_update_tasks", "SELECT id,status FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed')"},
 		{"core_remove", "core_remove_tasks", "SELECT id,component FROM core_remove_tasks WHERE node_id=? AND status IN ('queued','running')"},
-		{"node_pause", "node_pause_tasks", "SELECT id,status FROM node_pause_tasks WHERE node_id=? AND status IN ('pausing','resuming')"},
 	}
 	for _, item := range queries {
 		var present int

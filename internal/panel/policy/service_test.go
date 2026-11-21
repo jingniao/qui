@@ -37,7 +37,30 @@ func fixture(t *testing.T) (*Service, string, user.User, user.Device, node.Group
 	if _, err := (&proxy.Service{Repository: &proxy.Repository{Database: database, Vault: configurationVault}, Nodes: nodes}).SaveInbound(ctx, "", proxy.InboundInput{Name: "policy entry", NodeID: n.ID, Protocol: "socks5", Listen: "0.0.0.0", Port: 1080, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"}); err != nil {
 		t.Fatal(err)
 	}
-	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Policy group", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}})
+	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Policy group", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{n.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if err != nil {
 		t.Fatal(err)
 	}

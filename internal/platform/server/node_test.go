@@ -95,7 +95,7 @@ func TestNodeEnrollmentIdentityAndDuplicateMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "test"}
+	request := &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"}
 	bad := proto.Clone(request).(*pb.EnrollRequest)
 	bad.CsrPem = []byte("not a CSR")
 	if _, err := client.Enroll(ctx, bad); status.Code(err) != codes.InvalidArgument {
@@ -147,7 +147,7 @@ func TestNodeEnrollmentIdentityAndDuplicateMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream.Send(&pb.AgentMessage{NodeId: pending.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{}}})
+	stream.Send(&pb.AgentMessage{NodeId: pending.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5"}}})
 	welcome, err := stream.Recv()
 	if err != nil || welcome.GetWelcome() == nil {
 		t.Fatal("missing Welcome", err)
@@ -226,7 +226,7 @@ func TestNodeRejectsConflictingDuplicateSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enrollment, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "test"})
+	enrollment, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestNodeRejectsConflictingDuplicateSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream.Send(&pb.AgentMessage{NodeId: pending.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{}}})
+	stream.Send(&pb.AgentMessage{NodeId: pending.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5"}}})
 	if _, err := stream.Recv(); err != nil {
 		t.Fatal("missing Welcome", err)
 	}

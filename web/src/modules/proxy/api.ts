@@ -38,7 +38,8 @@ import { request, type Page } from '../../app/apiClient';
 // Types only: the canvas module owns these shapes and imports this file for the
 // API, so a type-only import keeps the runtime dependency one-way.
 import type { CanvasConnection, CanvasNodeInstance, ExecutionLocation, ProxyNodeItem, RelayScheme } from './proxyNodes';
-import type { CoreName } from '../nodes/api';
+import type { CoreName, NodeView } from '../nodes/api';
+import { serverStatus } from '../nodes/components/serverListModel';
 export interface WireGuardPeer { public_key: string; endpoint?: string; allowed_ips: string[]; keep_alive?: number; credential_id?: string; }
 // Reality private keys stay on the server; this editor accepts only public data.
 export interface RealitySettings { public_key?: string; handshake_target: string; server_names: string[]; short_ids: string[]; }
@@ -68,10 +69,8 @@ export interface OutboundHealth { healthy: boolean; latencyMs: number; checkedAt
 export interface Outbound { sourceIp?: string; sourceInterface?: string; probeUrl: string; probeInterval: number; health?: OutboundHealth; }
 export interface GroupMember { outbound_id: string; priority: number; weight: number; }
 export interface OutboundGroup { id: string; name: string; nodeId: string; strategy: string; enabled: boolean; members: GroupMember[]; probeUrl: string; probeInterval: number; failurePolicy: string; backupOutboundId: string; createdAt: string; }
-export type GroupInput = Omit<OutboundGroup, 'id' | 'createdAt'>;
 export interface ChainHop { position: number; sourceNodeId: string; targetNodeId: string; outboundId: string; targetInboundId: string; credentialId: string; protocol: string; failurePolicy: string; }
 export interface ProxyChain { id: string; name: string; nodeIds: string[]; outboundIds: string[]; hops: ChainHop[]; finalOutboundId: string; supportTcp: boolean; supportUdp: boolean; enabled: boolean; failurePolicy: string; backupTargetId: string; createdAt: string; }
-export type ChainInput = Omit<ProxyChain, 'id' | 'createdAt' | 'hops'>;
 export type InboundInput = Pick<Inbound, 'name' | 'nodeId' | 'protocol' | 'listen' | 'port' | 'enabled' | 'subscriptionVisible' | 'internalRelay' | 'defaultOutbound' | 'allowedUserIds' | 'settings'> & { core?: CoreName | ''; rotateRealityKey?: boolean; tlsSource?: TLSSource; certificateId?: string; regenerateCertificate?: boolean };
 export type OutboundInput = Pick<Outbound, 'name' | 'nodeId' | 'protocol' | 'address' | 'port' | 'enabled' | 'targetNodeId' | 'targetInboundId' | 'settings' | 'supportTcp' | 'supportUdp' | 'failurePolicy' | 'backupOutboundId' | 'probeUrl' | 'probeInterval'> & { username: string; secret: string; };
 export const inboundProtocols = ['http', 'socks5', 'shadowsocks', 'vless', 'trojan', 'wireguard', 'hysteria2', 'tuic'];
@@ -93,20 +92,13 @@ export async function loadProtocolSupport() {
 
 export const proxyAPI = {
   groups: (nodeId = '', page = 1, pageSize = 20) => request<Page<OutboundGroup>>(`/outbound-groups?nodeId=${encodeURIComponent(nodeId)}&page=${page}&pageSize=${pageSize}`),
-  saveGroup: (id: string | null, value: GroupInput) => request<OutboundGroup>(id ? `/outbound-groups/${encodeURIComponent(id)}` : '/outbound-groups', id ? 'PUT' : 'POST', value),
-  deleteGroup: (id: string) => request(`/outbound-groups/${encodeURIComponent(id)}`, 'DELETE'),
   chains: (nodeId = '', page = 1, pageSize = 20) => request<Page<ProxyChain>>(`/proxy-chains?nodeId=${encodeURIComponent(nodeId)}&page=${page}&pageSize=${pageSize}`),
-  chain: (id: string) => request<ProxyChain>(`/proxy-chains/${encodeURIComponent(id)}`),
-  saveChain: (id: string | null, value: ChainInput) => request<ProxyChain>(id ? `/proxy-chains/${encodeURIComponent(id)}` : '/proxy-chains', id ? 'PUT' : 'POST', value),
-  deleteChain: (id: string) => request(`/proxy-chains/${encodeURIComponent(id)}`, 'DELETE'),
   inbounds: (nodeId = '', page = 1, pageSize = 20) => request<Page<Inbound>>(`/inbounds?nodeId=${nodeId}&page=${page}&pageSize=${pageSize}`),
   outbounds: (nodeId = '', page = 1, pageSize = 20) => request<Page<Outbound>>(`/outbounds?nodeId=${nodeId}&page=${page}&pageSize=${pageSize}`),
   saveInbound: (id: string | null, value: InboundInput) => request<Inbound>(id ? `/inbounds/${id}` : '/inbounds', id ? 'PUT' : 'POST', value),
   saveOutbound: (id: string | null, value: OutboundInput & Pick<Outbound, 'sourceIp' | 'sourceInterface'>) => request<Outbound>(id ? `/outbounds/${id}` : '/outbounds', id ? 'PUT' : 'POST', { ...value, sourceIp: value.protocol === 'block' ? '' : value.sourceIp || '', sourceInterface: value.protocol === 'block' ? '' : value.sourceInterface || '' }),
   inboundDeletionPreview: (id: string) => request<DeletionPreview>(`/inbounds/${encodeURIComponent(id)}/deletion-preview`),
-  deleteInbound: (id: string) => request<DeletionResult | undefined>(`/inbounds/${encodeURIComponent(id)}`, 'DELETE'),
-  deleteOutbound: (id: string) => request(`/outbounds/${id}`, 'DELETE'),
-  revision: (nodeId: string, summary: string) => request<{ id: number }>('/revisions/proxy', 'POST', { nodeId, summary })
+  deleteInbound: (id: string) => request<DeletionResult | undefined>(`/inbounds/${encodeURIComponent(id)}`, 'DELETE')
 };
 
 // Section 6: read-only lookup of the certificates covering one domain on one node.
@@ -131,12 +123,6 @@ export async function choices<T>(read: (page: number, size: number) => Promise<P
 }
 export const failureNames: Record<string, string> = { Block: '阻断', Direct: '直连', BackupOutbound: '备用出站', BackupOutboundGroup: '备用出口组', BackupProxyChain: '备用代理链', BackupChain: '备用代理链' };
 export const strategyNames: Record<string, string> = { primary: '主备', round_robin: '轮询', latency: '延迟优先' };
-export function healthLabel(outbound?: Outbound, interval = 30) {
-  if (!outbound?.health) return '尚无探测结果';
-  const checked = Date.parse(outbound.health.checkedAt);
-  if (!Number.isFinite(checked) || Date.now() - checked > Math.max(interval * 3, 15) * 1000) return '探测结果已过期';
-  return outbound.health.healthy ? `可用 · ${outbound.health.latencyMs} ms` : '探测失败';
-}
 
 // ----------------- Relay canvas schemes (U2b) -----------------
 // The server stores a drawing, not a deployment: instances reference a node, an
@@ -171,7 +157,7 @@ export interface CanvasSchemeInstance { instanceId: string; ref: CanvasInstanceR
 export interface CanvasSchemeConnection { tunnelId?: string; id: string; source: string; target: string; type: CanvasConnectionKind | LegacyCanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol | LegacyCanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; }
 export interface CanvasSchemeLayout { instances: CanvasSchemeInstance[]; connections: CanvasSchemeConnection[]; }
 export interface CanvasScheme { id: string; name: string; execution: CanvasExecution; layout: CanvasSchemeLayout; createdAt: string; updatedAt: string; publishedAt: string; publishedBatchId: string; }
-export interface CanvasSchemeWriteLayout { instances: CanvasSchemeInstance[]; connections: (CanvasSchemeConnection | CanvasTunnelReference)[]; }
+export interface CanvasSchemeWriteLayout { instances: CanvasSchemeInstance[]; connections: CanvasSchemeConnection[]; }
 export interface CanvasSchemeCreate { name: string; execution: CanvasExecution; layout: CanvasSchemeWriteLayout; }
 // updatedAt is the optimistic-concurrency token: an update must send the value
 // the last read returned, otherwise the server answers 409 stale_scheme.
@@ -196,19 +182,8 @@ export interface CanvasRemoveInput { updatedAt: string; }
 export interface CanvasRemoveResult { schemeId: string; removed: true; pendingNodes: PendingCleanupNode[]; }
 
 export interface CanvasTunnelSchemeRef { id: string; name: string; }
-export interface CanvasTunnelObject { kind: 'inbound' | 'outbound' | 'chain'; id: string; nodeId: string; name: string; port: number; }
-export interface CanvasTunnelInput { name: string; source: string; target: string; type: CanvasConnectionKind | LegacyCanvasConnectionKind; tunnelProtocol?: CanvasTunnelProtocol | LegacyCanvasTunnelProtocol; tunnelPort?: number; listenPort?: number; targetHost?: string; targetPort?: number; supportTcp: boolean; supportUdp: boolean; updatedAt?: string; }
-export interface CanvasTunnelCredentials { generation: number; serverName: string; notAfter: string; fingerprint: string; }
-export interface CanvasTunnel extends CanvasTunnelInput { id: string; createdAt: string; updatedAt: string; schemes: CanvasTunnelSchemeRef[]; objects: CanvasTunnelObject[]; publishStatus: 'draft' | 'modified' | 'published'; credentials?: CanvasTunnelCredentials | null; }
 export interface CanvasTunnelPlanObject { kind: string; name: string; protocol?: string; port?: number; target?: string; }
 export interface CanvasTunnelPlan { ok: boolean; entries?: CanvasPlanEntry[]; message?: string; servers: { nodeId: string; name: string; creates: CanvasTunnelPlanObject[]; updates: CanvasTunnelPlanObject[]; removes: CanvasTunnelPlanObject[] }[]; connections: { id: string; status: string; message: string }[]; conflicts: { nodeId: string; port: number; with: string; connectionId: string; reason?: string; objectId?: string }[]; warnings: string[]; tunnels: { tunnelId: string; affectedSchemes: CanvasTunnelSchemeRef[] }[]; }
-export type CanvasTunnelReference = Pick<CanvasSchemeConnection, 'id' | 'source' | 'target'> & Partial<Omit<CanvasSchemeConnection, 'id' | 'source' | 'target' | 'tunnelId'>> & { tunnelId: string };
-export const canvasTunnelAPI = {
- list: () => request<{ items: CanvasTunnel[]; total: number }>('/canvas-tunnels'),
- create: (value: CanvasTunnelInput) => request<CanvasTunnel>('/canvas-tunnels', 'POST', value),
- update: (id: string, value: CanvasTunnelInput & { updatedAt: string }) => request<CanvasTunnel>(`/canvas-tunnels/${encodeURIComponent(id)}`, 'PUT', value),
- delete: (id: string) => request<void>(`/canvas-tunnels/${encodeURIComponent(id)}`, 'DELETE')
-};
 
 export const canvasAPI = {
   status: (id: string) => request<CanvasSchemeStatus>(`/canvas-schemes/${encodeURIComponent(id)}/status`),
@@ -225,8 +200,8 @@ export const canvasAPI = {
 
 // Display data the canvas page has already loaded. Schemas stay loose so the
 // node list and the canvas can both pass what they hold.
-export interface CanvasServerRef { id: string; name: string; publicIp?: string; hostname?: string; status?: string; }
-export interface CanvasSchemeContext { servers: CanvasServerRef[]; inbounds: Inbound[]; imported: ProxyNodeItem[]; outbounds?: Outbound[]; }
+export type CanvasServerRef = Pick<NodeView, 'id' | 'name' | 'publicIp' | 'hostname' | 'status' | 'enabled' | 'maintenance' | 'deletedAt' | 'lastHeartbeat' | 'offlineAfterSeconds' | 'heartbeat' | 'capabilities'>;
+export interface CanvasSchemeContext { servers: CanvasServerRef[]; inbounds: Inbound[]; imported: ProxyNodeItem[]; outbounds?: Outbound[]; statusNow?: number; }
 
 // A self-hosted node is identified as self-<nodeId>-<inboundId>. Base64url ids
 // contain '-', so the string cannot be split reliably; matching the inbound the
@@ -280,10 +255,12 @@ export function relaySchemeToCanvasInput(scheme: RelayScheme, context: CanvasSch
 // The status a canvas box shows comes from the node it references, not from the
 // scheme: the server never stores it.
 export function canvasDisplayStatus(status?: string): CanvasNodeInstance['status'] {
-  if (status === 'online' || status === 'degraded' || status === 'applying') return 'online';
-  if (status === 'offline' || status === 'disabled' || status === 'pending') return 'offline';
-  if (status === 'error' || status === 'rollback') return 'error';
+  if (status === 'online' || status === 'offline' || status === 'degraded' || status === 'core_error' || status === 'error' || status === 'applying' || status === 'rollback' || status === 'pending' || status === 'deleted' || status === 'reconnecting' || status === 'maintenance' || status === 'disabled') return status;
   return 'untested';
+}
+
+export function canvasServerDisplayStatus(server: CanvasServerRef | undefined, now: number): CanvasNodeInstance['status'] {
+  return server ? canvasDisplayStatus(serverStatus(server as NodeView, now).key) : 'deleted';
 }
 
 interface CanvasReferenceDisplay {
@@ -310,7 +287,7 @@ function canvasReferenceDisplay(ref: string, context: CanvasSchemeContext): Canv
       // Canvas and relay endpoints dial the public address, never the address a
       // client uses (AGENTS.md §14).
       serverAddress: (server?.publicIp || '').trim() || '未设置公网 IP',
-      status: canvasDisplayStatus(server?.status),
+      status: canvasServerDisplayStatus(server, context.statusNow ?? Date.now()),
       isManageable: true
     };
   }
@@ -322,7 +299,7 @@ function canvasReferenceDisplay(ref: string, context: CanvasSchemeContext): Canv
     const inbound = context.inbounds.find(item => item.id === identifier);
     const server = inbound ? context.servers.find(item => item.id === inbound.nodeId) : undefined;
     if (!inbound) {
-      return { resourceId: `inbound-${identifier}`, resourceType: 'node', name: '已删除的入站', protocol: '', serverAddress: '', status: 'offline', isManageable: true };
+      return { resourceId: `inbound-${identifier}`, resourceType: 'node', name: '已删除的入站', protocol: '', serverAddress: '', status: 'deleted', isManageable: true };
     }
     let label = (inbound.name || '').trim();
     if (server?.name && label.startsWith(server.name)) label = label.slice(server.name.length).replace(/^[·\s\-_]+/, '').trim();
@@ -335,7 +312,7 @@ function canvasReferenceDisplay(ref: string, context: CanvasSchemeContext): Canv
       name: server?.name ? `${server.name} · ${name}` : name,
       protocol: inbound.protocol,
       serverAddress: address ? `${address}:${inbound.port}` : '未设置公网 IP',
-      status: inbound.enabled ? canvasDisplayStatus(server?.status) : 'offline',
+      status: !server ? 'deleted' : inbound.enabled ? canvasServerDisplayStatus(server, context.statusNow ?? Date.now()) : 'disabled',
       isManageable: true
     };
   }
@@ -396,115 +373,5 @@ export function canvasSchemeToRelayScheme(scheme: CanvasScheme, context: CanvasS
     publishedAt: scheme.publishedAt,
     updatedAt: scheme.updatedAt,
     serverUpdatedAt: scheme.updatedAt
-  };
-}
-
-// ----------------- Shared canvas tunnels (K4 / F4) -----------------
-// A tunnel resource names its endpoints by node reference (`server:<nodeId>`), so
-// one tunnel can be referenced from any server scheme without copying parameters.
-// These helpers are pure: the page resolves node names and deleted references.
-export function canvasTunnelNodeId(ref: string): string {
-  const separator = ref.indexOf(':');
-  return separator < 0 ? '' : ref.slice(separator + 1);
-}
-
-export function canvasTunnelRef(nodeId: string): string {
-  return `server:${nodeId}`;
-}
-
-export function canvasTunnelKindLabel(type: CanvasConnectionKind | LegacyCanvasConnectionKind): string {
-  if (type === 'port_forward') return '端口转发';
-  if (type === 'proxy_chain') return '加密中转';
-  return '加密隧道';
-}
-
-export function canvasTunnelNetworkLabel(supportTcp: boolean, supportUdp: boolean): string {
-  if (supportTcp && supportUdp) return 'TCP / UDP';
-  return supportTcp ? 'TCP' : supportUdp ? 'UDP' : '—';
-}
-
-export function canvasTunnelProtocolName(tunnel: Pick<CanvasTunnel, 'tunnelProtocol'>): string {
-  return (tunnel.tunnelProtocol || 'tls').toUpperCase();
-}
-
-export function canvasTunnelPublishStatusLabel(status: CanvasTunnel['publishStatus']): string {
-  if (status === 'published') return '已发布';
-  if (status === 'modified') return '有未发布修改';
-  return '草稿';
-}
-
-// One library row: what the tunnel connects, what it carries and where it is used.
-export interface CanvasTunnelLibraryItem {
-  id: string;
-  name: string;
-  title: string;
-  subtitle: string;
-  sourceName: string;
-  targetName: string;
-  sourceRef: string;
-  targetRef: string;
-  type: CanvasConnectionKind | LegacyCanvasConnectionKind;
-  publishStatus: CanvasTunnel['publishStatus'];
-  schemeNames: string[];
-  objectCount: number;
-  searchText: string;
-}
-
-export function canvasTunnelLibraryItem(tunnel: CanvasTunnel, nameOfNode: (nodeId: string) => string): CanvasTunnelLibraryItem {
-  const sourceName = nameOfNode(canvasTunnelNodeId(tunnel.source)) || '已删除的服务器';
-  const targetName = nameOfNode(canvasTunnelNodeId(tunnel.target)) || '已删除的服务器';
-  const network = canvasTunnelNetworkLabel(tunnel.supportTcp, tunnel.supportUdp);
-  let subtitle: string;
-  if (tunnel.type === 'port_forward') {
-    const host = tunnel.targetHost || targetName;
-    subtitle = `端口转发 :${tunnel.listenPort ?? '—'} → ${host}:${tunnel.targetPort ?? '—'} · ${network}`;
-  } else {
-    subtitle = `${canvasTunnelKindLabel(tunnel.type)} ${canvasTunnelProtocolName(tunnel)} :${tunnel.tunnelPort ?? '—'} · ${network}`;
-  }
-  const schemeNames = tunnel.schemes.map(scheme => scheme.name);
-  return {
-    id: tunnel.id,
-    name: tunnel.name,
-    title: `${sourceName} → ${targetName}`,
-    subtitle,
-    sourceName,
-    targetName,
-    sourceRef: tunnel.source,
-    targetRef: tunnel.target,
-    type: tunnel.type,
-    publishStatus: tunnel.publishStatus,
-    schemeNames,
-    objectCount: tunnel.objects.length,
-    searchText: [tunnel.name, sourceName, targetName, subtitle, ...schemeNames].join(' ').toLowerCase()
-  };
-}
-
-// Shown before a resource edit is saved: PUT re-targets every referencing scheme.
-export function canvasTunnelAffectedText(schemes: CanvasTunnelSchemeRef[]): string {
-  if (!schemes.length) return '当前没有方案引用此隧道，保存只修改资源本身';
-  return `将影响 ${schemes.length} 个方案：${schemes.map(scheme => scheme.name).join('、')}`;
-}
-
-// The arrow that points at a shared tunnel. Parameters are copies of the resource
-// so the drawing stays readable; the server keeps the resource authoritative.
-export function canvasTunnelReference(
-  tunnel: CanvasTunnel,
-  connectionId: string,
-  sourceInstanceId: string,
-  targetInstanceId: string
-): CanvasTunnelReference {
-  return {
-    id: connectionId,
-    tunnelId: tunnel.id,
-    source: sourceInstanceId,
-    target: targetInstanceId,
-    type: tunnel.type,
-    ...(tunnel.tunnelProtocol ? { tunnelProtocol: tunnel.tunnelProtocol } : {}),
-    ...(tunnel.tunnelPort !== undefined ? { tunnelPort: tunnel.tunnelPort } : {}),
-    ...(tunnel.listenPort !== undefined ? { listenPort: tunnel.listenPort } : {}),
-    ...(tunnel.targetHost ? { targetHost: tunnel.targetHost } : {}),
-    ...(tunnel.targetPort !== undefined ? { targetPort: tunnel.targetPort } : {}),
-    supportTcp: tunnel.supportTcp,
-    supportUdp: tunnel.supportUdp
   };
 }

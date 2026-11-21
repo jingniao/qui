@@ -448,16 +448,6 @@ func (a *Adapter) TrafficSourceStatus() *pb.TrafficSourceStatus {
 	return status
 }
 
-// serviceNames is the set of every rendered service name, which the settle gate
-// uses to compare what the child actually bound.
-func serviceNames(config Config) map[string]bool {
-	names := map[string]bool{}
-	for _, service := range config.Services {
-		names[service.Name] = true
-	}
-	return names
-}
-
 // writePrivate creates a 0600 file through a random name, syncs it and returns the
 // path. A caller that keeps the file renames it; everything else removes it.
 func writePrivate(directory, pattern string, data []byte) (string, error) {

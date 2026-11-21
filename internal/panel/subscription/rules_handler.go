@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/subscription/rules"
 	"proxycontrol/internal/platform/httpapi"
 )
@@ -43,7 +42,6 @@ var ErrServiceRuleNotFound = errors.New("service rule not found")
 // secret); only the Owner may change it.
 func (h *Handler) registerRules(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/subscription-rules", h.Auth.Require(http.HandlerFunc(h.rulesRead), false))
-	mux.Handle("PUT /api/v1/subscription-rules", h.Auth.Require(http.HandlerFunc(h.rulesSave), true))
 	mux.Handle("GET /api/v1/subscription-rules/presets", h.Auth.Require(http.HandlerFunc(h.rulesPresets), false))
 	mux.HandleFunc("GET /sub/{token}/rules/{id}", h.ruleProvider)
 }
@@ -57,42 +55,6 @@ func (h *Handler) rulesRead(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.internal(w, err)
 		return
-	}
-	httpapi.JSON(w, 200, stored)
-}
-
-func (h *Handler) rulesSave(w http.ResponseWriter, r *http.Request) {
-	if h.Rules == nil {
-		httpapi.Error(w, 503, "unavailable", "Rule template unavailable")
-		return
-	}
-	var body struct {
-		Template         rules.Template `json:"template"`
-		ExpectedRevision int64          `json:"expectedRevision"`
-	}
-	if err := httpapi.Decode(w, r, &body); err != nil {
-		httpapi.Error(w, 400, "invalid_request", err.Error())
-		return
-	}
-	actor := auth.Actor(r.Context()).Username
-	stored, changed, err := h.Rules.Save(r.Context(), body.Template, body.ExpectedRevision, actor)
-	var field *rules.FieldError
-	switch {
-	case errors.As(err, &field):
-		httpapi.ErrorDetails(w, 400, "invalid_rules", field.Message, map[string]any{"field": field.Field})
-		return
-	case errors.Is(err, rules.ErrConflict):
-		httpapi.ErrorDetails(w, 409, "stale_rules", "规则模板已在其他地方修改，请刷新后再保存", map[string]any{"revision": stored.Revision})
-		return
-	case err != nil:
-		h.internal(w, err)
-		return
-	}
-	if changed {
-		if err := h.Audit.Record(r.Context(), actor, "修改订阅规则模板", "client_rules", "成功", r.RemoteAddr); err != nil {
-			h.internal(w, err)
-			return
-		}
 	}
 	httpapi.JSON(w, 200, stored)
 }

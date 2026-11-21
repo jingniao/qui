@@ -8,7 +8,7 @@ export interface Profile {
   /** Added in v1.5.4; absent on an older panel. */
   trafficResetCycle?: string; nextTrafficResetAt?: string | null;
 }
-export interface PortalNode { id: string; name: string; region: string; online: boolean; /** absent on an older panel */ protocols?: string[]; }
+export interface PortalNode { id: string; name: string; region: string; status: string; online: boolean; /** absent on an older panel */ protocols?: string[]; }
 export interface Subscription { state: 'ready' | 'missing' | 'not_recoverable'; path?: string; formats?: { id: string; url: string }[]; defaultFormat?: string; }
 export interface Snapshot { me: Profile; nodes: { items: PortalNode[] }; subscription: Subscription; }
 export interface Session { isAuthenticated: boolean; currentUser: Profile; csrfToken: string; expiresAt?: string; }

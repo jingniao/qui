@@ -9,13 +9,6 @@ import (
 )
 
 func validateAgentSystemUpdates(ctx context.Context, database *sql.DB) error {
-	var applied int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0157_agent_system_updates.sql'").Scan(&applied); err != nil {
-		return ErrArchive
-	}
-	if applied == 0 {
-		return nil
-	} // Published pre-1.7.5 archives are migrated on restore.
 	for _, query := range []string{
 		"SELECT count(*) FROM node_update_capabilities WHERE agent_system_supported NOT IN (0,1) OR agent_system_error IS NULL OR agent_bootstrap_version IS NULL",
 		"SELECT count(*) FROM agent_system_update_tasks t WHERE generation<>(SELECT count(*) FROM agent_system_update_attempts a WHERE a.task_id=t.id) OR NOT EXISTS(SELECT 1 FROM agent_system_update_attempts a WHERE a.attempt_id=t.attempt_id AND a.task_id=t.id AND a.generation=t.generation)",

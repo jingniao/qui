@@ -233,39 +233,3 @@ func CoreSupportFor(core, protocol string) (CoreSupport, bool) {
 	support, ok := row.Cores[core]
 	return support, ok
 }
-
-// CoreSupportsInbound reports whether one official core can terminate an
-// inbound of this protocol.
-func CoreSupportsInbound(core, protocol string) bool {
-	support, ok := CoreSupportFor(core, protocol)
-	return ok && support.Inbound
-}
-
-// CoreSupportsOutbound reports whether one official core can open an outbound
-// of this protocol.
-func CoreSupportsOutbound(core, protocol string) bool {
-	support, ok := CoreSupportFor(core, protocol)
-	return ok && support.Outbound
-}
-
-// SupportedInboundProtocols returns the ordered inbound protocol basis.
-func SupportedInboundProtocols() []string {
-	result := []string{}
-	for _, row := range ProtocolSupportTable() {
-		if row.Direction == "inbound" || row.Direction == "both" {
-			result = append(result, row.Protocol)
-		}
-	}
-	return result
-}
-
-// SupportedOutboundProtocols returns the ordered outbound protocol basis.
-func SupportedOutboundProtocols() []string {
-	result := []string{}
-	for _, row := range ProtocolSupportTable() {
-		if row.Direction == "outbound" || row.Direction == "both" {
-			result = append(result, row.Protocol)
-		}
-	}
-	return result
-}

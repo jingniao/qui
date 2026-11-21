@@ -53,7 +53,7 @@ func TestCandidatesOwnerMetadataAndSelection(t *testing.T) {
 	}
 	importID := items[0]["id"].(string)
 	group := p.groups[0]
-	if _, err := p.nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: group.NodeIDs, Imports: []node.GroupImport{{SourceID: sourceID, ProxyKey: "id:" + importID}}}); err != nil {
+	if _, err := p.nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, ServerIDs: group.ServerIDs, InboundIDs: group.InboundIDs, Imports: []node.GroupImport{{SourceID: sourceID, ProxyKey: "id:" + importID}}}); err != nil {
 		t.Fatal(err)
 	}
 	owner, _ := sessionFor(t, p.database, "Owner")

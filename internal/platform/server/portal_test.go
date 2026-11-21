@@ -430,7 +430,7 @@ func TestPortalEveryEndpointUsesOnlySessionUser(t *testing.T) {
 		if _, err := app.Database.Exec("INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES(?, 'portal entry',?,'http','0.0.0.0',1080,1,1,0,'direct','[]',x'01','now')", n.ID, n.ID); err != nil {
 			t.Fatal(err)
 		}
-		g, err := app.nodeRepository.SaveGroup(context.Background(), "", node.GroupInput{Name: u.Username + "_group", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{n.ID}})
+		g, err := app.nodeRepository.SaveGroup(context.Background(), "", node.GroupInput{Name: u.Username + "_group", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: []string{n.ID}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -441,6 +441,37 @@ func TestPortalEveryEndpointUsesOnlySessionUser(t *testing.T) {
 			if _, err := app.Database.Exec("INSERT INTO "+entry.table+"(bucket,node_id,user_id,device_id,upload_bytes,download_bytes) VALUES(?,?,?,'',?,?)", entry.bucket, n.ID, u.ID, (i+1)*111, (i+1)*222); err != nil {
 				t.Fatal(err)
 			}
+		}
+	}
+	for _, c := range []struct {
+		status, heartbeat, display string
+		age                        time.Duration
+		online                     bool
+	}{
+		{status: "online", display: "online", online: true},
+		{status: "offline", age: time.Minute, display: "reconnecting"},
+		{status: "online", age: 4 * time.Minute, display: "offline"},
+		{status: "degraded", display: "degraded", online: true},
+		{status: "degraded", heartbeat: `{"core_healthy":false}`, display: "core_error", online: true},
+		{status: "error", age: 4 * time.Minute, display: "error"},
+		{status: "pending", display: "pending"},
+	} {
+		heartbeat := c.heartbeat
+		if heartbeat == "" {
+			heartbeat = "{}"
+		}
+		if _, err := app.Database.Exec("UPDATE nodes SET status=?,last_heartbeat=?,heartbeat_json=? WHERE name=?", c.status, time.Now().UTC().Add(-c.age).Format(time.RFC3339Nano), heartbeat, b.Username+"_node"); err != nil {
+			t.Fatal(err)
+		}
+		r := bc.call("GET", "/api/v1/portal/nodes", nil)
+		var granted struct {
+			Items []portal.Node `json:"items"`
+		}
+		if err := json.Unmarshal(r.Body.Bytes(), &granted); err != nil || r.Code != 200 || len(granted.Items) != 1 {
+			t.Fatalf("%s: portal nodes = %d %s, %v", c.display, r.Code, r.Body, err)
+		}
+		if granted.Items[0].Status != c.display || granted.Items[0].Online != c.online {
+			t.Fatalf("%s: portal node = %+v", c.display, granted.Items[0])
 		}
 	}
 	for _, path := range []string{"/auth/session", "/me", "/nodes", "/subscription", "/traffic?range=7d", "/traffic?range=30d", "/traffic?range=24h"} {

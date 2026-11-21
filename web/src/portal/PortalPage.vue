@@ -13,7 +13,7 @@
 </template>
 <script setup lang="ts">
 import { readTogether } from '../app/readTogether';
-import { ref, watch, computed, defineAsyncComponent, onUnmounted } from 'vue';
+import { ref, watch, computed, defineAsyncComponent, onMounted, onUnmounted } from 'vue';
 import { portalAPI, type Snapshot, type Traffic, type Profile, type Subscription, type PortalNode } from './api';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingSkeleton from '../components/LoadingSkeleton.vue';
@@ -72,5 +72,17 @@ function selectRange(next: typeof range.value) {
   range.value = next;
   if (!props.preview && props.section === 'traffic') void loadTraffic();
 }
-onUnmounted(() => { generation++; trafficGeneration++; });
+function refreshNodes() {
+  if (!props.preview && props.section === 'nodes' && !document.hidden && !loading.value) void load();
+}
+let nodeTimer: ReturnType<typeof setInterval>;
+onMounted(() => {
+  nodeTimer = setInterval(refreshNodes, 30000);
+  document.addEventListener('visibilitychange', refreshNodes);
+});
+onUnmounted(() => {
+  generation++; trafficGeneration++;
+  clearInterval(nodeTimer);
+  document.removeEventListener('visibilitychange', refreshNodes);
+});
 </script>

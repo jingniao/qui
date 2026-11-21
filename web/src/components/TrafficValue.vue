@@ -7,6 +7,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { byteParts } from '../app/bytes';
 
 const props = withDefaults(
   defineProps<{
@@ -18,15 +19,5 @@ const props = withDefaults(
   }
 );
 
-const formatted = computed(() => {
-  const b = props.bytes;
-  if (b === null || b === undefined) return { value: '—', unit: '' };
-  if (b === 0) return { value: '0', unit: 'B' };
-  if (!b) return { value: '0', unit: 'B' };
-  const k = 1024;
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
-  const i = Math.floor(Math.log(b) / Math.log(k));
-  const val = (b / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2);
-  return { value: val, unit: sizes[i] };
-});
+const formatted = computed(() => byteParts(props.bytes, 2));
 </script>

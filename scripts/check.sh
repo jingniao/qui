@@ -60,7 +60,7 @@ printf 'GATE SCOPE %s\n' "$scope"
 
 # Shards: QUI_CHECK_SHARD splits the gate so GitHub can run it as parallel jobs.
 # `go test -race ./...` is as slow as its slowest package, so the slow packages
-# get shards of their own (docs/build-speedup-plan.md 2.3):
+# get shards of their own:
 #
 #   server   internal/platform/server
 #   backup   internal/panel/system/backup, internal/platform/recovery
@@ -105,7 +105,7 @@ esac
 # go test already runs up to GOMAXPROCS packages at a time, and every package
 # here keeps its own temporary directory and its own ephemeral ports, so do not
 # add -p 1: it would serialise the race run. Most tests of the slow packages call
-# t.Parallel (docs/build-speedup-plan.md 3); -parallel 3 caps them at three per
+# t.Parallel; -parallel 3 caps them at three per
 # package, because the default (GOMAXPROCS) let several slow packages run some 60
 # race tests at once on 10 cores, and tests that wait on deadlines failed under
 # that load. 13 tests stay serial and say why in a "Not parallel" comment.

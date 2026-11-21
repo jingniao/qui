@@ -30,6 +30,7 @@
     <p v-if="currentScheme.id && schemesLoadError" role="alert" class="px-4 py-2 text-sm text-ios-red bg-white">
       {{ schemesLoadError }} <button class="ios-btn-secondary" @click="loadWorkspace">重试</button>
     </p>
+    <p v-if="runtimeError || resourcesRefreshError" role="alert" class="px-4 py-2 text-sm text-amber-700 bg-white">{{ runtimeError || resourcesRefreshError }}</p>
     <!-- 1. Top Integrated Studio Toolbar -->
     <!-- The single 56 px row only works when the studio really is desktop wide. The
          shell sidebar takes 272 px, so at a 1120 px viewport the studio is ~850 px
@@ -257,15 +258,6 @@
           </button>
         </div>
 
-        <!-- Local migration notice -->
-        <div
-          v-if="pendingLocalSchemes.length"
-          class="hidden 2xl:flex items-center gap-1.5 px-2 py-0.5 rounded-xl bg-amber-50 border border-amber-200/70 text-xs text-amber-800 shrink-0"
-        >
-          <span>发现本地方案 {{ pendingLocalSchemes.length }} 个</span>
-          <button type="button" @click="importLocalSchemes" class="font-bold text-amber-900 hover:underline">导入</button>
-          <button type="button" @click="confirmIgnoreLocal = true" class="text-amber-700 hover:underline">忽略</button>
-        </div>
       </div>
 
       <!-- Right: Action Buttons & Inspector Toggle -->
@@ -434,13 +426,13 @@
                 v-for="srv in filteredServers"
                 :key="'srv-' + srv.id"
                 draggable="true"
-                @dragstart="onDragStart($event, { type: 'server', id: srv.id, name: srv.name, server: srv.publicIp || '未设置公网 IP', protocol: 'server', status: srv.status === 'online' ? 'online' : 'offline', isManageable: true })"
+                @dragstart="onDragStart($event, { type: 'server', id: srv.id, name: srv.name, server: srv.publicIp || '未设置公网 IP', protocol: 'server', status: serverDisplayStatus(srv), isManageable: true })"
                 class="p-2 rounded-xl border border-black/[0.04] hover:border-ios-blue/40 hover:bg-blue-50/30 cursor-grab active:cursor-grabbing transition-all select-none group"
                 :title="'地址: ' + (srv.publicIp || '未设置公网 IP')"
               >
                 <div class="flex items-center justify-between gap-1">
                   <span class="font-semibold text-ios-label truncate max-w-[150px]">{{ srv.name }}</span>
-                  <span class="w-1.5 h-1.5 rounded-full" :class="srv.status === 'online' ? 'bg-emerald-500' : 'bg-neutral-400'"></span>
+                  <span class="text-xs" :class="canvasStatusLook(serverDisplayStatus(srv)).color">{{ canvasStatusLook(serverDisplayStatus(srv)).label }}</span>
                 </div>
                 <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate" :class="srv.publicIp ? '' : 'text-ios-orange font-sans'">{{ srv.publicIp || '未设置公网 IP' }}</span>
@@ -493,8 +485,8 @@
                 </div>
                 <div class="flex items-center justify-between text-xs text-ios-tertiary mt-0.5">
                   <span class="font-mono truncate">{{ node.server }}:{{ node.port }}</span>
-                  <span :class="node.status === 'online' ? 'text-emerald-600' : 'text-neutral-400'">
-                    {{ node.status === 'online' ? '在线' : (node.enabled ? '未检测' : '已停用') }}
+                  <span :class="canvasStatusLook(node.status).color">
+                    {{ node.enabled ? canvasStatusLook(node.status).label : '已停用' }}
                   </span>
                 </div>
               </div>
@@ -739,6 +731,7 @@
               <div class="text-xs font-mono text-ios-secondary truncate">
                 {{ item.serverAddress }}
               </div>
+              <div class="text-xs" :class="canvasStatusLook(item.status).color">{{ canvasStatusLook(item.status).label }}</div>
               <div v-if="item.listenPort" class="text-xs font-mono text-ios-blue">
                 监听端口: {{ item.listenPort }}
               </div>
@@ -1061,13 +1054,6 @@
       </template>
     </AppDialog>
 
-    <ConfirmDialog
-      v-model="confirmIgnoreLocal"
-      title="忽略本地方案"
-      message="忽略后将从本浏览器删除这些方案，服务器上已有的方案不受影响。"
-      confirm-text="忽略并删除"
-      @confirm="ignoreLocalSchemes"
-    />
     </template>
 
   </div>
@@ -1097,12 +1083,13 @@ import { loadImports } from '../importApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { loadNodeMetadata } from '../../nodes/nodeMeta';
+import { useNodeRuntime } from '../../nodes/useNodeRuntime';
+import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import {
   proxyAPI,
   choices,
   canvasAPI,
-  canvasDisplayStatus,
-  canvasSchemeToRelayScheme,
+  canvasServerDisplayStatus,
   relaySchemeToCanvasInput,
   selfHostedResourceId,
   type CanvasScheme,
@@ -1117,7 +1104,6 @@ import {
   loadCanvasSchemes,
   persistCanvasScheme,
   createCanvasScheme,
-  LEGACY_SCHEMES_KEY,
   type ProxyNodeItem,
   type CanvasNodeInstance,
   type CanvasConnection,
@@ -1126,6 +1112,10 @@ import {
 
 const route = useRoute();
 const servers = ref<NodeView[]>([]);
+const { statusNow, error: runtimeError, project } = useNodeRuntime({ onInventoryChanged: () => refreshResources() });
+const displayServers = computed(() => servers.value.map(project).filter((node): node is NodeView => node !== null));
+const resourcesRefreshError = ref('');
+const refreshResources = throttleTrailing(() => { void refreshCanvasResources(); }, 1000);
 const canvasViewport = ref<HTMLElement | null>(null);
 const gestureCleanups = new Set<() => void>();
 const resourceSearch = ref('');
@@ -1247,7 +1237,6 @@ const inbounds = ref<Inbound[]>([]);
 const entryGroups = ref<NodeGroup[]>([]);
 const outbounds = ref<Outbound[]>([]);
 // Schemes an earlier build kept in this browser, offered once for import.
-const pendingLocalSchemes = ref<RelayScheme[]>([]);
 const schemesLoading = ref(true);
 const schemesLoadError = ref('');
 const schemesConfirmed = ref(false);
@@ -1257,11 +1246,44 @@ let workspaceGeneration = 0, workspaceDisposed = false;
 function currentWorkspace(ticket: number) {
   return !workspaceDisposed && workspaceScope === requestScope() && ticket === workspaceGeneration;
 }
-const confirmIgnoreLocal = ref(false);
 
 function canvasContext(): CanvasSchemeContext {
-  return { servers: servers.value, inbounds: inbounds.value, imported: proxyNodeStore.manualNodes, outbounds: outbounds.value };
+  return { servers: displayServers.value, inbounds: inbounds.value, imported: proxyNodeStore.manualNodes, outbounds: outbounds.value, statusNow: statusNow.value };
 }
+
+function serverDisplayStatus(server: NodeView) {
+  return canvasServerDisplayStatus(server, statusNow.value);
+}
+function canvasStatusLook(status: CanvasNodeInstance['status']) {
+  if (status === 'online') return { label: '在线', color: 'text-emerald-600' };
+  if (status === 'reconnecting') return { label: '连接中断，等待恢复', color: 'text-amber-700' };
+  if (status === 'maintenance') return { label: '维护中', color: 'text-amber-700' };
+  if (status === 'degraded') return { label: '降级', color: 'text-amber-700' };
+  if (status === 'applying') return { label: '应用配置中', color: 'text-blue-600' };
+  if (status === 'rollback') return { label: '回滚中', color: 'text-blue-600' };
+  if (status === 'core_error') return { label: '核心异常', color: 'text-red-600' };
+  if (status === 'pending') return { label: '待登记', color: 'text-neutral-400' };
+  if (status === 'deleted') return { label: '已删除', color: 'text-neutral-400' };
+  if (status === 'disabled') return { label: '已禁用', color: 'text-neutral-400' };
+  if (status === 'error') return { label: '异常', color: 'text-red-600' };
+  return { label: status === 'offline' ? '离线' : '未检测', color: 'text-neutral-400' };
+}
+
+// Runtime display fields never enter the layout or the draft save queue.
+watch(() => [displayServers.value, statusNow.value, inbounds.value, proxyNodeStore.schemes], () => {
+  for (const scheme of proxyNodeStore.schemes) {
+    for (const instance of scheme.nodes) {
+      const nodeId = instanceNodeId(instance);
+      if (!nodeId) {
+        if (instance.isManageable) instance.status = 'deleted';
+        continue;
+      }
+      const server = displayServers.value.find(node => node.id === nodeId);
+      const inbound = instance.resourceType === 'node' ? inbounds.value.find(item => selfHostedResourceId(item) === instance.resourceId) : undefined;
+      instance.status = !server ? 'deleted' : inbound && !inbound.enabled ? 'disabled' : canvasServerDisplayStatus(server, statusNow.value);
+    }
+  }
+});
 
 // An empty display state is never added to the store or persisted.
 const emptyScheme: RelayScheme = { id: '', name: '', executionLocation: 'server', nodes: [], connections: [], published: false, updatedAt: '' };
@@ -1306,7 +1328,7 @@ function applyEntryBinding(nodeId: string, binding: CanvasEntryBinding) {
   instance.name = server.name;
   instance.protocol = 'server';
   instance.serverAddress = server.publicIp || '未设置公网 IP';
-  instance.status = canvasDisplayStatus(server.status);
+  instance.status = canvasServerDisplayStatus(project(server) ?? undefined, statusNow.value);
   instance.isManageable = true;
   instance.entryBinding = binding;
   delete instance.listenPort;
@@ -1422,7 +1444,7 @@ function placeExternalProxy(outbound: Outbound) {
 
 // Filtered resources
 const filteredServers = computed(() => {
-  return servers.value.filter(s => {
+  return displayServers.value.filter(s => {
     if (resourceSearch.value.trim()) {
       const q = resourceSearch.value.trim().toLowerCase();
       return (s.name || '').toLowerCase().includes(q) || (s.publicIp || '').includes(q);
@@ -1453,7 +1475,7 @@ const importedNodes = computed(() => {
   });
 });
 
-const selfHostedNodes = computed(() => selfHostedLibraryItems(servers.value, inbounds.value, resourceSearch.value));
+const selfHostedNodes = computed(() => selfHostedLibraryItems(displayServers.value, inbounds.value, resourceSearch.value, statusNow.value));
 
 const subscriptionNodes = computed(() => {
   return importedNodes.value.filter(n => n.sourceType === 'subscription');
@@ -1901,57 +1923,6 @@ async function reloadSchemes(prefetched?: CanvasScheme[], ticket = ++workspaceGe
   }
 }
 
-// An earlier build kept schemes in this browser. Offer them once; the key is
-// only removed after a complete import or an explicit ignore.
-function readLocalSchemes() {
-  try {
-    const raw = localStorage.getItem(LEGACY_SCHEMES_KEY);
-    if (!raw) {
-      pendingLocalSchemes.value = [];
-      return;
-    }
-    const stored: RelayScheme[] = JSON.parse(raw);
-    const pending = Array.isArray(stored) ? stored.filter(item => !proxyNodeStore.schemes.some(existing => existing.name === item.name)) : [];
-    pendingLocalSchemes.value = pending;
-    if (!pending.length) localStorage.removeItem(LEGACY_SCHEMES_KEY);
-  } catch {
-    pendingLocalSchemes.value = [];
-    localStorage.removeItem(LEGACY_SCHEMES_KEY);
-  }
-}
-
-async function importLocalSchemes() {
-  const failed: RelayScheme[] = [];
-  let imported = 0;
-  for (const scheme of pendingLocalSchemes.value) {
-    if (proxyNodeStore.schemes.some(item => item.name === scheme.name)) continue;
-    try {
-      const stored = await canvasAPI.create({ name: scheme.name, execution: scheme.executionLocation, layout: { instances: [], connections: [] } });
-      const local = canvasSchemeToRelayScheme(stored, canvasContext());
-      local.nodes = scheme.nodes;
-      local.connections = scheme.connections;
-      await persistCanvasScheme(local, canvasContext());
-      imported += 1;
-    } catch (error) {
-      failed.push(scheme);
-      showToast(`导入方案「${scheme.name}」失败: ${(error as Error).message}`, 'error');
-    }
-  }
-  pendingLocalSchemes.value = failed;
-  if (!failed.length) localStorage.removeItem(LEGACY_SCHEMES_KEY);
-  await reloadSchemes();
-  if (!proxyNodeStore.schemes.some(item => item.id === activeSchemeId.value)) {
-    activeSchemeId.value = proxyNodeStore.schemes[0]?.id || '';
-  }
-  if (imported) showToast(`已导入 ${imported} 个本地方案`);
-}
-
-function ignoreLocalSchemes() {
-  localStorage.removeItem(LEGACY_SCHEMES_KEY);
-  pendingLocalSchemes.value = [];
-  showToast('已忽略本地方案');
-}
-
 // Publishing a server scheme makes the server create the relay objects the
 // drawing describes and deploy them through the normal batches, exit first and
 // entry last. Read deployment and confirmation separately from the status API.
@@ -2000,11 +1971,32 @@ async function handleConfirmPublish() {
   }
 }
 
+let resourcesRefreshGeneration = 0;
+async function refreshCanvasResources() {
+  if (document.hidden || workspaceDisposed) return;
+  const generation = ++resourcesRefreshGeneration;
+  try {
+    const [nodeRes, inboundRes, outboundRes] = await readTogether([
+      choices((page, size) => nodeAPI.choices(page, '', size)),
+      choices((page, size) => proxyAPI.inbounds('', page, size)),
+      choices((page, size) => proxyAPI.outbounds('', page, size))
+    ]);
+    if (workspaceDisposed || generation !== resourcesRefreshGeneration) return;
+    servers.value = nodeRes;
+    inbounds.value = inboundRes;
+    outbounds.value = outboundRes;
+    resourcesRefreshError.value = '';
+  } catch (error) {
+    if (!workspaceDisposed && generation === resourcesRefreshGeneration) resourcesRefreshError.value = `画布资源同步失败：${(error as Error).message}`;
+  }
+}
+
 async function loadWorkspace() {
+  resourcesRefreshGeneration++;
   const ticket = ++workspaceGeneration;
   schemesLoading.value = true;
   schemesLoadError.value = '';
-  void loadNodeMetadata(true).catch(e => {
+  void loadNodeMetadata().catch(e => {
     if (currentWorkspace(ticket)) showToast(`载入服务器元数据失败: ${(e as Error).message}`, 'error');
   });
   try {
@@ -2036,7 +2028,6 @@ onMounted(async () => {
   await loadWorkspace();
   if (!currentWorkspace(workspaceGeneration)) return;
   // Schemes are stored by the server now; the browser keeps no copy of them.
-  readLocalSchemes();
 
   const qSchemeId = route.query.schemeId as string | undefined;
   const qFocusConnId = route.query.focusConnId as string | undefined;
@@ -2084,6 +2075,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   workspaceDisposed = true;
+  resourcesRefreshGeneration++;
+  refreshResources.cancel();
   for (const cleanup of [...gestureCleanups]) cleanup();
   void flushPendingSaves();
   window.removeEventListener('beforeunload', warnUnsaved);

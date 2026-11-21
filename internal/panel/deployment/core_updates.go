@@ -232,33 +232,6 @@ func coreUpdateRequest(t CoreUpdateTask) (release.CoreUpdateRequest, error) {
 	return request, request.Validate()
 }
 
-// legacyCoreUpdateCode is the result code recorded when a stored task cannot be
-// compiled into a schema-2 command, which is what migration 0107 leaves behind
-// for a historical task: its direct URL is empty. The code reuses the "original
-// update history is unusable" meaning the panel already explains to the Owner.
-const legacyCoreUpdateCode = "history_invalid"
-
-// closeUndispatchableCoreUpdate closes a reserved task that no longer forms a
-// valid command. The node keeps asking for its active task on every reconnect,
-// so the task is closed once, with the reason, instead of failing the control
-// stream forever.
-func (r *Repository) closeUndispatchableCoreUpdate(ctx context.Context, t CoreUpdateTask) error {
-	result := release.UpdateResult{ID: t.CommandID, NodeID: t.NodeID, Revision: t.Revision, TargetDigest: t.SHA256, Status: "failed_closed", Code: legacyCoreUpdateCode}
-	// A row the old schema never validated (for example an unusable digest) is
-	// closed without a result payload, because the panel refuses to read back a
-	// result it cannot verify.
-	var payload any
-	if result.ValidateCore() == nil {
-		data, err := json.Marshal(result)
-		if err != nil {
-			return err
-		}
-		payload = data
-	}
-	_, err := r.Database.ExecContext(ctx, "UPDATE core_update_tasks SET status='failed_closed',result_json=?,updated_at=? WHERE command_id=? AND status IN ('queued','running')", payload, now(), t.CommandID)
-	return err
-}
-
 // PendingCoreUpdate hands the reserved command to the node and marks it running.
 // Queued work is dispatched before a running command is re-sent, so two
 // components never starve each other while a reconnect still retries the same
@@ -273,7 +246,7 @@ func (r *Repository) PendingCoreUpdate(ctx context.Context, nodeID string) (*pb.
 	}
 	request, err := coreUpdateRequest(t)
 	if err != nil {
-		return nil, r.closeUndispatchableCoreUpdate(ctx, t)
+		return nil, err
 	}
 	data, err := json.Marshal(request)
 	if err != nil {

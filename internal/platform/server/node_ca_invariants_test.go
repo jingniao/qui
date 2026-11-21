@@ -135,14 +135,14 @@ func TestEnrollmentTokenIsSingleUse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: firstCSR, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "test"}); err != nil {
+		if _, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: firstCSR, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"}); err != nil {
 			t.Fatalf("first enrollment: %v", err)
 		}
 		secondCSR, err := identity.CSR(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: secondCSR, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "test"}); status.Code(err) != codes.Unauthenticated {
+		if _, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: secondCSR, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"}); status.Code(err) != codes.Unauthenticated {
 			t.Fatalf("consumed enrollment token accepted a second identity: %v", err)
 		}
 	}

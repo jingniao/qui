@@ -49,3 +49,12 @@ export function utcInput(value: string) {
   throw new Error('所选时区中不存在该时间，请调整到期时间');
 }
 
+
+export function formatTime(value: string) {
+  if (!value) return '从未';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
+    timeZone: authState.timezone, dateStyle: 'short', timeStyle: 'medium', hour12: false
+  }).format(date);
+}
+

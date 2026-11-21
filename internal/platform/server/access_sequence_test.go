@@ -56,7 +56,7 @@ func TestAccessMTLSLostAcknowledgementReplayAndStaleSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := first.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{}}}); err != nil {
+	if err := first.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := first.Recv(); err != nil {
@@ -101,7 +101,7 @@ func TestAccessMTLSLostAcknowledgementReplayAndStaleSequence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		second.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "rehello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: 0}}})
+		second.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "rehello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5", LastAckedSequence: 0}}})
 		welcome, err = second.Recv()
 		if status.Code(err) != codes.AlreadyExists || time.Now().After(deadline) {
 			break

@@ -255,8 +255,10 @@ test('review: a delayed canvas creation cannot enter another administrator’s s
 
 test('review: stale single and batch metadata responses cannot roll back an accepted edit or erase it', () => taskModules(async load => {
   const meta = await load('/src/modules/nodes/nodeMeta.ts');
-  let delayed;
-  globalThis.fetch = (_, { method }) => method === 'PUT' ? Response.json({ meta: { region: 'saved' } }) : delayed.promise;
+  let delayed, pendingSave, failSave = false;
+  globalThis.fetch = (_, { method, body }) => method === 'PUT'
+    ? failSave ? Response.json({}, { status: 503 }) : pendingSave ? pendingSave.promise : Response.json({ meta: JSON.parse(body) })
+    : delayed.promise;
   for (const batch of [false, true]) for (const denied of [false, true]) {
     delayed = deferred(); const old = batch ? meta.loadNodeMetadata(false) : meta.loadNodeMeta('s', false);
     await meta.saveNodeMeta('s', { region: 'saved' });
@@ -264,6 +266,30 @@ test('review: stale single and batch metadata responses cannot roll back an acce
     delayed.resolve(denied ? Response.json({}, { status: 403 }) : Response.json(batch ? { items: [item] } : item));
     await old.catch(() => {}); assert.equal(meta.getNodeMeta('s').region, 'saved', JSON.stringify({ batch, denied }));
   }
+  assert.equal(meta.nodeFinanceRevisions?.s ?? 0, 0, 'nonfinancial edits do not refresh financial data');
+  await meta.saveNodeMeta('s', { ...meta.getNodeMeta('s'), renewPrice: '12', renewCurrency: 'CNY', renewCycle: '/年', renewDate: '2027-01-01' });
+  assert.equal(meta.nodeFinanceRevisions?.s, 1, 'adding pricing refreshes once');
+  for (const [key, value] of [['renewPrice', '24'], ['renewCurrency', 'USD'], ['renewCycle', '/月'], ['renewDate', '2027-02-01']]) {
+    const before = meta.nodeFinanceRevisions.s;
+    await meta.saveNodeMeta('s', { ...meta.getNodeMeta('s'), [key]: value });
+    assert.equal(meta.nodeFinanceRevisions.s, before + 1, key + ' refreshes once');
+  }
+  const before = meta.nodeFinanceRevisions.s;
+  await meta.saveNodeMeta('s', { ...meta.getNodeMeta('s'), region: 'changed' });
+  assert.equal(meta.nodeFinanceRevisions.s, before, 'unrelated edits keep the financial cache');
+  await meta.saveNodeMeta('s', { ...meta.getNodeMeta('s'), renewPrice: '', renewCurrency: '', renewCycle: '', renewDate: '' });
+  assert.equal(meta.nodeFinanceRevisions.s, before + 1, 'clearing pricing refreshes once');
+  const raced = { ...meta.getNodeMeta('s'), renewPrice: '36', renewCurrency: 'USD' };
+  pendingSave = deferred(); delayed = deferred();
+  const saving = meta.saveNodeMeta('s', raced);
+  const reading = meta.loadNodeMeta('s', false);
+  delayed.resolve(Response.json({ meta: raced, present: true })); await reading;
+  pendingSave.resolve(Response.json({ meta: raced })); await saving;
+  pendingSave = undefined;
+  assert.equal(meta.nodeFinanceRevisions.s, before + 2, 'a new GET before the save response cannot suppress its financial refresh');
+  failSave = true;
+  await assert.rejects(meta.saveNodeMeta('s', { ...meta.getNodeMeta('s'), renewPrice: '30' }));
+  assert.equal(meta.nodeFinanceRevisions.s, before + 2, 'failed saves do not refresh financial data');
 }));
 
 test('review: deleting the last row on page two reloads page one and preserves a correct total on failure', async () => {

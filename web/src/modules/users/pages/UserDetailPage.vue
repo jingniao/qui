@@ -607,6 +607,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatBytes } from '../../../app/bytes';
 import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { ref, computed, reactive, watch, onMounted, onUnmounted, type Ref } from 'vue';
@@ -809,8 +810,8 @@ const availableNodes = computed(() => {
   return allNodes.value.filter(n => grantedNodes.has(n.id) && !n.deletedAt && n.enabled && !n.maintenance && n.allowSubscription);
 });
 
-function formatGiB(bytes: number) {
-  return (bytes / 1073741824).toFixed(1) + ' GiB';
+function formatGiB(bytes: number): string {
+  return formatBytes(bytes, 1, 'GiB');
 }
 
 function getGroupName(groupId: string): string {

@@ -31,7 +31,7 @@ assert.doesNotMatch(router, /path:\s*'\/login'/, 'the admin login must not be a 
 assert.match(router, /adminEntryPage \? \[\{ path: adminEntryPage/, 'admin login route must come from the marked page load');
 assert.match(router, /\{ path: '\/', name: 'PortalLogin'/, 'the site root must be the user login');
 assert.ok(router.indexOf("name: 'PortalLogin'") < router.indexOf('component: MainLayout'), 'the user login route must precede MainLayout');
-assert.match(router, /\{ path: '\/portal\/login', redirect: '\/' \}/, '/portal/login must redirect to /');
+assert.doesNotMatch(router, /path: '\/portal\/login'/, 'obsolete portal login alias is retired');
 console.log('PASS router serves the user login at / and the admin login only at the marked path');
 
 const guards = readFileSync(join(root, 'web/src/app/guards.ts'), 'utf8');

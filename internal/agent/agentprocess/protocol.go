@@ -93,10 +93,6 @@ func readFrame(reader *bufio.Reader, target any) error {
 	return nil
 }
 
-func Confirm(r Request, node string, revision int64, version string, output io.Writer) error {
-	return ConfirmHealth(r, node, revision, version, true, output)
-}
-
 func ConfirmHealth(r Request, node string, revision int64, version string, healthy bool, output io.Writer) error {
 	if r.ControlOnly && healthy {
 		return ErrHandshake

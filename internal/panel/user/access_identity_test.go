@@ -6,7 +6,6 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"time"
 )
 
 // Since v1.1 each user has one access identity. Credentials of two users are
@@ -116,8 +115,7 @@ func TestConcurrentCallsKeepOneIdentity(t *testing.T) {
 
 // A5.6 (repository part): a user is created with one credential per allowed
 // protocol; a protocol change issues the new one and revokes the removed one; a
-// reset re-issues every credential; a second device left over from an older
-// database is removed with its credentials tombstoned.
+// reset re-issues every credential; repeated device creation reuses the identity.
 func TestAccessIdentityFollowsTheUser(t *testing.T) {
 	ctx := context.Background()
 	repository := testRepository(t)
@@ -165,21 +163,22 @@ func TestAccessIdentityFollowsTheUser(t *testing.T) {
 	if len(reset) != len(AllProtocols) || reset["socks5"] == changed["socks5"] || reset["vless"] == changed["vless"] {
 		t.Fatalf("credentials after the reset: %v (before %v)", reset, changed)
 	}
-	stamp := timestamp(time.Now())
-	if _, err := repository.Database.Exec(`INSERT INTO devices(id,user_id,name,status,created_at) VALUES('extra-device',?,'old phone','active',?)`, u.ID, stamp); err != nil {
+	identity, err = repository.AccessIdentity(ctx, u.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.Database.Exec(`INSERT INTO credentials(id,user_id,device_id,protocol,username,encrypted_secret,status,created_at) VALUES('extra-credential',?,'extra-device','socks5','x',x'00','active',?)`, u.ID, stamp); err != nil {
-		t.Fatal(err)
+	again, err := repository.CreateDevice(ctx, u.ID, DeviceInput{Name: "another device", Protocols: []string{"socks5"}})
+	if err != nil || again.ID != identity.ID {
+		t.Fatalf("created a second identity: %v %v", again.ID, err)
 	}
-	if changed, err := repository.EnsureAccessIdentity(ctx, u.ID); err != nil || !changed {
-		t.Fatalf("the extra device was not removed: %t %v", changed, err)
+	if changed, err := repository.EnsureAccessIdentity(ctx, u.ID); err != nil || changed {
+		t.Fatalf("consistent identity changed: %t %v", changed, err)
 	}
 	var devices, tombstones int
 	repository.Database.QueryRow("SELECT count(*) FROM devices WHERE user_id=?", u.ID).Scan(&devices)
-	repository.Database.QueryRow(`SELECT count(*) FROM credential_tombstones WHERE credential_id='extra-credential' AND device_id='extra-device'`).Scan(&tombstones)
-	if devices != 1 || tombstones != 1 {
-		t.Fatalf("devices %d, tombstones %d", devices, tombstones)
+	repository.Database.QueryRow("SELECT count(*) FROM credential_tombstones WHERE credential_id='extra-credential'").Scan(&tombstones)
+	if devices != 1 || tombstones != 0 {
+		t.Fatalf("devices %d, unexpected tombstones %d", devices, tombstones)
 	}
 }
 

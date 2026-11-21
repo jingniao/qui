@@ -47,6 +47,7 @@
         </button>
       </template>
     </PageHeader>
+    <p v-if="runtimeError" role="alert" class="text-sm text-amber-700">{{ runtimeError }}</p>
 
     <!-- Search & Filter Bar (Aligned with Server & User Pages) -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -100,7 +101,14 @@
         <select v-model="filterStatus" @change="applyFilter" class="form-input-base !w-auto py-2">
           <option value="all">全部状态</option>
           <option value="online">在线</option>
+          <option value="degraded">降级</option>
           <option value="reconnecting">等待恢复</option>
+          <option value="core_error">核心异常</option>
+          <option value="error">异常</option>
+          <option value="applying">应用配置中</option>
+          <option value="rollback">回滚中</option>
+          <option value="pending">待登记</option>
+          <option value="disabled">已停用</option>
           <option value="untested">未检测</option>
           <option value="offline">离线</option>
         </select>
@@ -1085,6 +1093,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatTime as panelTime } from '../../../app/time';
 import InboundDeleteDialog from '../components/InboundDeleteDialog.vue';
 import ImportedProxyDialog from '../components/ImportedProxyDialog.vue';
 const inboundDeleteDialog = ref<InstanceType<typeof InboundDeleteDialog> | null>(null);
@@ -1114,7 +1123,7 @@ import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import { showToast } from '../../../app/api';
 import { throttleTrailing, nodeStatusEventChangesInventory } from '../../../app/nodeStatusEvents';
-import type { RuntimeSnapshot } from '../../nodes/runtimeSnapshots';
+import { useNodeRuntime } from '../../nodes/useNodeRuntime';
 import { proxyPageInventory } from '../proxyPageInventory';
 import { request } from '../../../app/apiClient';
 import type { NodeView } from '../../nodes/api';
@@ -1152,7 +1161,8 @@ function setDisplayMode(mode: 'grid' | 'list') {
 
 const servers = ref<NodeView[]>([]);
 const inventory = proxyPageInventory();
-const now = ref(Date.now());
+const { statusNow, error: runtimeError, project } = useNodeRuntime({ onInventoryChanged });
+const displayServers = computed(() => servers.value.map(project).filter((node): node is NodeView => node !== null));
 const serverInbounds = ref<Inbound[]>([]);
 const entryRouteSummaries = computed(() => new Map(serverInbounds.value.filter(isUserEntry).map(inbound => [inbound.id, inbound.routeSummary])));
 const editingInbound = ref<Inbound | null>(null);
@@ -1161,7 +1171,7 @@ const editingInbound = ref<Inbound | null>(null);
 const searchKeyword = ref('');
 const filterSource = ref<'all' | 'self_hosted' | 'subscription' | 'manual'>('all');
 const filterProtocol = ref<string>('all');
-const filterStatus = ref<'all' | 'online' | 'untested' | 'offline' | 'reconnecting'>('all');
+const filterStatus = ref<string>('all');
 
 // Collapsed states for relay routes accordion in card view
 const collapsedRelayState = reactive<Record<string, boolean>>({});
@@ -1294,7 +1304,7 @@ async function loadData() {
 // Map self-hosted server inbounds into ProxyNodeItem with clean naming
 const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
   const result: ProxyNodeItem[] = [];
-  for (const srv of servers.value) {
+  for (const srv of displayServers.value) {
     if (!srv.enabled || srv.deletedAt) continue;
     const inbounds = serverInbounds.value.filter(ib => ib.nodeId === srv.id && isUserEntry(ib));
     if (inbounds.length > 0) {
@@ -1305,7 +1315,8 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
         }
         const finalDisplayName = cleanName ? `${srv.name} · ${cleanName}` : `${srv.name} · ${ib.protocol.toUpperCase()}`;
         const name = ib.enabled ? finalDisplayName : finalDisplayName + ' (已停用)';
-        const state = serverStatus(srv, now.value).key;
+        const displayStatus = serverStatus(srv, statusNow.value);
+        const state = displayStatus.key;
         const status = !ib.enabled ? 'offline' : state === 'reconnecting' ? 'reconnecting' : ['online', 'degraded'].includes(state) ? 'online' : 'offline';
         // The panel holds the inbound, so the transports are read from it with the
         // same helper the server detail page uses, instead of guessing from the
@@ -1323,6 +1334,7 @@ const selfHostedNodes = computed<ProxyNodeItem[]>(() => {
           port: ib.port || 443,
           protocol: ib.protocol || 'vless',
           status: status,
+          displayStatus: ib.enabled ? displayStatus : { key: 'disabled', tone: 'disabled', label: '已停用' },
           latencyMs: undefined,
           supportTcp: networks.includes('tcp'),
           supportUdp: networks.includes('udp'),
@@ -1342,8 +1354,8 @@ const relayNesting = computed(() => nestRelayEntries(selfHostedNodes.value, prox
 const getNodeRoutes = (node: ProxyNodeItem) => relayNesting.value.routes.get(node.id) || [];
 const relayCount = (node: ProxyNodeItem) => getNodeRoutes(node).length + linkedRelays(node).length;
 const routeEntries = (route: NodeRelayRoute) => relayNesting.value.entries.get(route.schemeId) || [];
-const hiddenServerIds = computed(() => new Set(servers.value
-  .filter(server => server.maintenance || serverStatus(server, now.value).key === 'offline')
+const hiddenServerIds = computed(() => new Set(displayServers.value
+  .filter(server => server.maintenance || serverStatus(server, statusNow.value).key === 'offline')
   .map(server => server.id)));
 const allNodes = computed<ProxyNodeItem[]>(() => [...selfHostedNodes.value.filter(node => !relayNesting.value.hidden.has(node.id) && !hiddenServerIds.value.has(node.sourceId!)), ...proxyNodeStore.manualNodes]);
 
@@ -1364,13 +1376,7 @@ const filteredNodes = computed<ProxyNodeItem[]>(() => {
     if (filterProtocol.value !== 'all' && node.protocol.toLowerCase() !== filterProtocol.value.toLowerCase()) {
       return false;
     }
-    if (filterStatus.value !== 'all') {
-      if (filterStatus.value === 'offline' && (node.status === 'offline' || node.status === 'error')) {
-        // match
-      } else if (node.status !== filterStatus.value) {
-        return false;
-      }
-    }
+    if (filterStatus.value !== 'all' && (node.displayStatus?.key ?? node.status) !== filterStatus.value) return false;
     return true;
   });
 });
@@ -1420,11 +1426,15 @@ const statusLook = {
   gray: { capsule: 'bg-neutral-100 text-neutral-500', dot: 'bg-neutral-400' },
 };
 function nodeStatus(node: ProxyNodeItem): { label: string; capsule: string; dot: string; title: string } {
-  const reach = node.status === 'reconnecting' ? '连接中断，等待恢复' : node.status === 'online' ? '在线' : node.status === 'untested' ? '未检测' : '离线';
+  const reach = node.displayStatus?.label ?? (node.status === 'reconnecting' ? '连接中断，等待恢复' : node.status === 'online' ? '在线' : node.status === 'untested' ? '未检测' : '离线');
   const publish = inboundBadge(node);
   const failure = publish?.title?.startsWith('最近一次发布失败') ? `；${publish.title}` : '';
   const title = publish ? `服务器：${reach}；发布状态：${publish.label}${failure}` : `状态：${reach}`;
   const pick = (label: string, tone: keyof typeof statusLook) => ({ label, title, ...statusLook[tone] });
+  if (node.displayStatus && node.displayStatus.key !== 'online') {
+    const tone = node.displayStatus.tone;
+    return pick(reach, tone === 'error' ? 'red' : tone === 'warning' || tone === 'maintenance' ? 'yellow' : tone === 'applying' ? 'blue' : 'gray');
+  }
   if (node.status === 'reconnecting') return pick(reach, 'yellow');
   if (inboundStatusUnknown(node)) return pick('状态未知', 'yellow');
   if (node.status !== 'online' && node.status !== 'untested') return pick('离线', 'gray');
@@ -1627,10 +1637,8 @@ function formatInterval(seconds?: number) {
 }
 
 // Attempt and success stamps arrive as RFC3339 UTC strings.
-function formatImportTime(value?: string) {
-  if (!value) return '—';
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
+function formatImportTime(value?: string): string {
+  return value ? panelTime(value) : '—';
 }
 
 // A failure recorded before results existed cannot name a cause; say so instead
@@ -1759,7 +1767,7 @@ function visibleServerKey() {
   return [...visibleServerIds()].sort().join(',');
 }
 function serverRevisionKey() {
-  return servers.value.map(node => node.id + '/' + (node.heartbeat?.current_revision || 0)).sort().join(',');
+  return displayServers.value.map(node => node.id + '/' + (node.heartbeat?.current_revision || 0)).sort().join(',');
 }
 watch([visibleServerKey, serverRevisionKey, serverInbounds], ([, revisions, drafts], [, previousRevisions, previousDrafts]) => {
   if (revisions !== previousRevisions || drafts !== previousDrafts) publishStateReads.invalidate();
@@ -1776,9 +1784,6 @@ async function refreshServersOnNodeStatus() {
   } catch (error) {
     if (generation === serverRefreshGeneration) showToast(`服务器状态读取失败：${(error as Error).message}`, 'error');
   }
-}
-function onNodeRuntime(event: Event) {
-  if (inventory.applyEvent(servers.value, (event as CustomEvent<RuntimeSnapshot>).detail)) onInventoryChanged();
 }
 const refreshInventory = throttleTrailing(() => { void refreshServersOnNodeStatus(); void loadServerPublishStates(); }, 1000);
 const refreshDeployment = throttleTrailing(() => { void loadServerPublishStates(); }, 1000);
@@ -1802,7 +1807,7 @@ function queueDraftRefresh() {
   }, 150);
 }
 defineExpose({ refresh: queueDraftRefresh });
-function resyncInventory() { inventory.resetStream(); queueDraftRefresh(); }
+function resyncInventory() { queueDraftRefresh(); }
 function publishVisibilityChanged() { if (!document.hidden) resyncInventory(); }
 let statusClock: ReturnType<typeof setInterval> | undefined;
 let inventoryClock: ReturnType<typeof setInterval> | undefined;
@@ -1811,7 +1816,6 @@ onMounted(() => {
   // is lost. The same visible-only read handles live inventory notifications.
   inventoryClock = setInterval(() => { void refreshServersOnNodeStatus(); }, 60000);
   statusClock = setInterval(() => {
-    now.value = Date.now();
     if (inboundStateErrors.value.size) {
       const failed = [...visibleServerIds()].filter(id => inboundStateErrors.value.has(id));
       if (failed.length) void loadServerPublishStates(failed);
@@ -1822,8 +1826,6 @@ onMounted(() => {
   window.addEventListener('proxy-deployment-status', onDeploymentStatus);
   window.addEventListener('proxy-draft-changed', queueDraftRefresh);
   window.addEventListener('proxy-node-status', onNodeStatus);
-  window.addEventListener('proxy-node-runtime', onNodeRuntime);
-  window.addEventListener('proxy-node-runtime-open', resyncInventory);
   document.addEventListener('visibilitychange', publishVisibilityChanged);
 });
 
@@ -1839,7 +1841,5 @@ onUnmounted(() => {
   window.removeEventListener('proxy-deployment-status', onDeploymentStatus);
   window.removeEventListener('proxy-draft-changed', queueDraftRefresh);
   window.removeEventListener('proxy-node-status', onNodeStatus);
-  window.removeEventListener('proxy-node-runtime', onNodeRuntime);
-  window.removeEventListener('proxy-node-runtime-open', resyncInventory);
 });
 </script>

@@ -7,9 +7,7 @@ const routes: RouteRecordRaw[] = [
   // The site root is the user portal login (v1.5.4). It must stay ahead of the
   // MainLayout route below, which shares the path '/'.
   { path: '/', name: 'PortalLogin', component: () => import('../portal/LoginPage.vue'), meta: { title: '用户登录' } },
-  { path: '/portal/login', redirect: '/' },
   { path: '/portal', redirect: '/portal/overview' },
-  { path: '/portal/client', redirect: '/portal/overview' },
   { path: '/portal/:section(overview|subscription|nodes|traffic|account)', component: () => import('../portal/PortalLayout.vue'), meta: { title: '我的账号' } },
   { path: '/portal-preview', component: () => import('../modules/users/pages/PortalPreviewPage.vue'), meta: { title: '用户门户预览', adminPage: true } },
   // The admin login page exists only on the page load the panel marked as the
@@ -56,25 +54,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '用户', parent: '用户管理' }
       },
       {
-        path: 'users/admins',
-        redirect: '/users'
-      },
-      {
         path: 'users/:id',
         name: 'UserDetail',
         component: () => import('../modules/users/pages/UserDetailPage.vue'),
         meta: { title: '用户详情', parent: '用户管理' }
       },
-      {
-        path: 'devices',
-        redirect: '/users'
-      },
-      {
-        path: 'subscriptions',
-        redirect: '/users'
-      },
 
-      { path: 'system/admins', redirect: '/users' },
       { path: 'nodes/versions', component: () => import('../modules/nodes/pages/NodeVersionsPage.vue'), meta: { title: '版本与更新', parent: '服务器' } },
       { path: 'proxy/groups', component: () => import('../modules/proxy/pages/LineGroupPage.vue'), meta: { title: '节点分组', parent: '节点配置' } },
       { path: 'proxy/tunnels', component: () => import('../modules/tunnels/pages/TunnelsPage.vue'), meta: { title: '隧道管理', parent: '节点配置' } },
@@ -92,14 +77,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../modules/nodes/pages/NodeDetailPage.vue'),
         meta: { title: '服务器详情', parent: '服务器' }
       },
-      { path: 'node-groups', redirect: '/proxy/groups' },
-      { path: 'topology', redirect: '/proxy/relay' },
 
       // 4. Proxy Module (Unified Node List & Relay Canvas)
-      {
-        path: 'proxy',
-        redirect: '/proxy/nodes'
-      },
       {
         path: 'proxy/nodes',
         name: 'ProxyNodeList',
@@ -112,37 +91,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../modules/proxy/pages/RelayCanvasPage.vue'),
         meta: { title: '中转方案', parent: '节点配置', fluid: true }
       },
-      // Backward Compatibility Redirects
-      {
-        path: 'proxy/inbounds',
-        redirect: '/proxy/nodes'
-      },
-      {
-        path: 'proxy/outbounds',
-        redirect: '/proxy/nodes'
-      },
-      {
-        path: 'proxy/outbound-groups',
-        redirect: '/proxy/nodes'
-      },
-      {
-        path: 'proxy/chains',
-        redirect: '/proxy/relay'
-      },
-      {
-        path: 'proxy/chains/new',
-        redirect: '/proxy/relay'
-      },
-      {
-        path: 'proxy/chains/:id/edit',
-        redirect: '/proxy/relay'
-      },
 
       // 5. Routing Module (Client Policies, Node Policies, Rule Sets)
-      {
-        path: 'routing',
-        redirect: '/routing/client'
-      },
       {
         path: 'routing/client',
         name: 'ClientPolicy',
@@ -173,14 +123,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../modules/routing/pages/ServiceRulePage.vue'),
         meta: { title: '规则集', parent: '分流控制' }
       },
-      {
-        path: 'routing/rule-sets',
-        redirect: '/routing/services'
-      },
-      {
-        path: 'routing/websites',
-        redirect: '/routing/rules'
-      },
 
       // 6. Access Records Module
       {
@@ -192,30 +134,10 @@ const routes: RouteRecordRaw[] = [
 
       // 7. System Module
       {
-        path: 'system/agents',
-        redirect: '/system/tasks'
-      },
-      {
-        path: 'system/cores',
-        redirect: '/system/tasks'
-      },
-      {
-        path: 'system/revisions',
-        redirect: '/nodes'
-      },
-      {
         path: 'system/tasks',
         name: 'SystemTaskList',
         component: () => import('../modules/system/pages/TaskRecordPage.vue'),
         meta: { title: '任务记录', parent: '系统管理' }
-      },
-      {
-        path: 'system/task-records',
-        redirect: '/system/tasks'
-      },
-      {
-        path: 'system/updates',
-        redirect: '/system/tasks'
       },
       {
         path: 'system/backups',
@@ -253,11 +175,6 @@ export const router = createRouter({
   }
 });
 
-router.beforeEach((to) => {
-  if (to.path === '/nodes' && (to.query.tab === 'agents' || to.query.tab === 'cores')) {
-    return { path: '/nodes/versions', query: { ...to.query }, hash: to.hash };
-  }
-});
 router.beforeEach(setupNavigationGuards);
 
 // Pages are lazy chunks with hashed names. After the panel is upgraded, a tab

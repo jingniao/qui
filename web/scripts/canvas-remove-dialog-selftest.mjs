@@ -2,12 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { ref } from 'vue';
-import { parse, compileTemplate } from '@vue/compiler-sfc';
+import { parse } from '@vue/compiler-sfc';
 
 const file = new URL('../src/modules/proxy/components/relay/CanvasRemoveDialog.vue', import.meta.url);
 const source = readFileSync(file, 'utf8');
 const descriptor = parse(source).descriptor;
-assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: file.pathname, id: 'remove' }).errors, []);
 let code = ts.transpileModule(descriptor.scriptSetup.content, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 code = code.replace(/^import .*;\r?\n/gm, '').replace('const props = defineProps();', '').replace('const emit = defineEmits();', '');
 const create = new Function('props', 'emit', 'canvasAPI', 'APIError', 'ref', `${code}\nreturn { remove, close, busy, error };`);

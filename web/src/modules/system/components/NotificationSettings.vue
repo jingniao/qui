@@ -326,6 +326,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatTime as panelTime } from '../../../app/time';
 import { ref, reactive, onMounted } from 'vue';
 import { showToast } from '../../../app/api';
 import AppDialog from '../../../components/AppDialog.vue';
@@ -459,14 +460,8 @@ function deliveryCodeClass(code: string): string {
   return 'text-ios-red font-medium';
 }
 
-function formatTimestamp(ts: string): string {
-  try {
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return ts;
-    return d.toLocaleString();
-  } catch {
-    return ts;
-  }
+function formatTimestamp(value?: string): string {
+  return value ? panelTime(value) : '从未';
 }
 
 async function loadChannels() {

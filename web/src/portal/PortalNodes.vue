@@ -9,7 +9,7 @@
           <ProtocolBadge v-for="p in node.protocols" :key="p" :protocol="p" :label="protocolLabel(p)" />
         </div>
       </div>
-      <StatusBadge :status="node.online ? 'online' : 'offline'" />
+      <StatusBadge :status="node.status" kind="node" />
     </div>
   </section>
 </template>

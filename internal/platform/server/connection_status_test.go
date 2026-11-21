@@ -51,7 +51,7 @@ func TestConnectionStatusIsAdvisoryAndNeverBreaksTheStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enrollment, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "test"})
+	enrollment, err := client.Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestConnectionStatusIsAdvisoryAndNeverBreaksTheStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := stream.Send(&pb.AgentMessage{NodeId: pending.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{}}}); err != nil {
+	if err := stream.Send(&pb.AgentMessage{NodeId: pending.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if welcome, err := stream.Recv(); err != nil || welcome.GetWelcome() == nil {

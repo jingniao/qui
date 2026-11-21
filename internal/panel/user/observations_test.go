@@ -140,17 +140,15 @@ func TestForUserNeedsAnEntryForTheUser(t *testing.T) {
 // for older backups, but even a count above it raises no alert.
 func TestObserverNoLongerAlertsOnTheRetiredLimit(t *testing.T) {
 	ctx := context.Background()
-	_, observer, _, _, credentialID := seedObservedUser(t, 5)
-	alerts := 0
-	observer.Publish = func(string, any) { alerts++ }
+	_, observer, _, account, credentialID := seedObservedUser(t, 5)
 	for _, count := range []uint64{3, 9, 2, 12} {
 		if err := observer.Store.Record("n1", observationSnapshot("n1", credentialID, count)); err != nil {
 			t.Fatal(err)
 		}
-		observer.Evaluate(ctx, "n1")
-	}
-	if alerts != 0 {
-		t.Fatalf("the retired limit raised %d alerts", alerts)
+		observed, err := observer.ForUser(ctx, account)
+		if err != nil || observed == nil || *observed != int(count) {
+			t.Fatalf("retired limit changed observed count: %v %v", observed, err)
+		}
 	}
 }
 

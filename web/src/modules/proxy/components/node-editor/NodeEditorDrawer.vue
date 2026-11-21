@@ -233,7 +233,7 @@ onUnmounted(() => { disposed = true; f.value.settings.private_key_pem = ''; publ
 async function loadServerResources(nodeId: string) {
   const [ins] = await Promise.all([
     props.inboundChoices ? Promise.resolve(props.inboundChoices).then(rows => rows.filter(row => row.nodeId === nodeId)) : choices((p, s) => proxyAPI.inbounds(nodeId, p, s)),
-    loadNodeMeta(nodeId, isOwner.value)
+    loadNodeMeta(nodeId)
   ]);
   if (disposed || f.value.nodeId !== nodeId) return;
   inbounds.value = ins;

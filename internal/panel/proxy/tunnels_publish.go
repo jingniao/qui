@@ -504,20 +504,6 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 	return p, nil
 }
 
-// replaceManagedInbounds is one atomic reconciliation, including ID ownership.
-// It never touches ordinary or canvas objects, even if their names match.
-func (r *Repository) replaceManagedInbounds(ctx context.Context, remove, desired []managedInbound) error {
-	tx, err := r.Database.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err = r.replaceManagedInboundsTx(ctx, tx, remove, desired); err != nil {
-		return err
-	}
-	return r.commitDraft(tx)
-}
-
 func (r *Repository) replaceManagedInboundsTx(ctx context.Context, tx *sql.Tx, remove, desired []managedInbound) error {
 	keep := map[string]bool{}
 	for _, in := range desired {
@@ -625,17 +611,6 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 		}
 	}
 	return result, nil
-}
-func (r *Repository) finishTunnelPublication(ctx context.Context, p tunnelPublication) error {
-	tx, err := r.Database.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err = r.finishTunnelPublicationTx(ctx, tx, p); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func (r *Repository) finishTunnelPublicationTx(ctx context.Context, tx *sql.Tx, p tunnelPublication) error {

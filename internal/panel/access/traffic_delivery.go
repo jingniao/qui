@@ -143,7 +143,9 @@ func (r *Repository) prepareTrafficDelivery(ctx context.Context, b traffic.Batch
 	for _, table := range []string{"traffic_batches", "traffic_pending_batches"} {
 		var batch, stored, queue string
 		var seq int64
-		err = tx.QueryRowContext(ctx, "SELECT batch_id,digest,queue_id,delivery_seq FROM "+table+" WHERE node_id=? AND (batch_id=? OR (queue_id=? AND delivery_seq=?)) LIMIT 1", b.NodeID, b.ID, b.Delivery.QueueID, b.Delivery.Sequence).Scan(&batch, &stored, &queue, &seq)
+		// Keep legacy batch lookup on the primary key and positive delivery
+		// lookup on its partial index, without scanning this node's receipts.
+		err = tx.QueryRowContext(ctx, "SELECT batch_id,digest,queue_id,delivery_seq FROM "+table+" WHERE node_id=? AND batch_id=? UNION ALL SELECT batch_id,digest,queue_id,delivery_seq FROM "+table+" WHERE node_id=? AND queue_id=? AND delivery_seq=? AND delivery_seq>0 LIMIT 1", b.NodeID, b.ID, b.NodeID, b.Delivery.QueueID, b.Delivery.Sequence).Scan(&batch, &stored, &queue, &seq)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -171,8 +173,9 @@ func advanceTrafficCompletionTx(ctx context.Context, tx *sql.Tx, node, queue str
 	if err != nil {
 		return err
 	}
-	// Bounded passes avoid holding the writer for a large repaired backlog.
-	rows, err := tx.QueryContext(ctx, "SELECT delivery_seq,accounting_completed_at FROM traffic_batches WHERE node_id=? AND queue_id=? AND delivery_seq>? ORDER BY delivery_seq LIMIT 500", node, queue, completed)
+	// completed is nonnegative; spelling out the partial-index predicate also
+	// keeps bounded passes ordered by delivery sequence without a receipt scan.
+	rows, err := tx.QueryContext(ctx, "SELECT delivery_seq,accounting_completed_at FROM traffic_batches WHERE node_id=? AND queue_id=? AND delivery_seq>? AND delivery_seq>0 ORDER BY delivery_seq LIMIT 500", node, queue, completed)
 	if err != nil {
 		return err
 	}

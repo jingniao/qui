@@ -6,6 +6,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"proxycontrol/internal/platform/db"
+	"proxycontrol/migrations"
 	"proxycontrol/pkg/contracts/release"
 	"strings"
 	"testing"
@@ -48,11 +52,28 @@ func TestAgentArchiveInventoryAndConflictingUpdates(t *testing.T) {
 	data, _ = json.Marshal(request)
 	exec("INSERT INTO agent_update_tasks VALUES('agent-task',?,'agent-release',?,'queued',1,'aup_test','aup_test','owner',?,?,NULL)", nodeID, revision, at.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano))
 	exec("INSERT INTO agent_update_attempts VALUES('aup_test','agent-task',1,'install',?,NULL,?)", data, at.Format(time.RFC3339Nano))
+	// Reopen the supported 1.7.5 migration prefix with a real pending task.
+	// Startup must preserve its status, original command and immutable request.
+	exec("DELETE FROM schema_migrations WHERE version='0159_retire_worker_agent_updates.sql'")
+	if err := db.Migrate(ctx, database, migrations.Files); err != nil {
+		t.Fatal("migration rejected a valid 1.7.5 queued Agent task", err)
+	}
+	var storedStatus, storedCommand string
+	var storedRequest []byte
+	if err := database.QueryRow("SELECT t.status,t.command_id,a.request_json FROM agent_update_tasks t JOIN agent_update_attempts a ON a.command_id=t.command_id WHERE t.id='agent-task'").Scan(&storedStatus, &storedCommand, &storedRequest); err != nil || storedStatus != "queued" || storedCommand != "aup_test" || string(storedRequest) != string(data) {
+		t.Fatal("migration changed pending Agent execution evidence", storedStatus, storedCommand, err)
+	}
 	if err := validateAgentUpdates(ctx, database); err != nil {
 		t.Fatal("valid pending Agent archive rejected", err)
 	}
 	for _, status := range []string{"queued", "running", "failed_closed", "success", "rejected", "rolled_back"} {
 		exec("UPDATE agent_update_tasks SET status=?", status)
+		if err := db.Migrate(ctx, database, migrations.Files); err != nil {
+			t.Fatalf("migration rejected retained %s Agent task: %v", status, err)
+		}
+		if err := database.QueryRow("SELECT status FROM agent_update_tasks WHERE id='agent-task'").Scan(&storedStatus); err != nil || storedStatus != status {
+			t.Fatalf("migration changed %s Agent task to %s: %v", status, storedStatus, err)
+		}
 		inventory, err := ReadInventory(ctx, database)
 		if err != nil {
 			t.Fatal(err)
@@ -66,6 +87,31 @@ func TestAgentArchiveInventoryAndConflictingUpdates(t *testing.T) {
 		}
 	}
 	exec("UPDATE agent_update_tasks SET status='running'")
+	// Recovery migrates the authenticated snapshot before merging current
+	// completions. A valid snapshot must still open while its task is running.
+	directory := t.TempDir()
+	created, err := source.Create(ctx, directory, "running_agent_175", "owner", testPassword)
+	if err != nil {
+		t.Fatal("running Agent task could not be backed up", err)
+	}
+	_, err = Examine(ctx, directory, filepath.Join(directory, created.Manifest.ID+".pcb"), testPassword, func(_ Result, work string) error {
+		snapshot, err := db.Open(ctx, filepath.Join(work, "database", "panel.db"))
+		if err != nil {
+			return err
+		}
+		defer snapshot.Close()
+		var status string
+		if err := snapshot.QueryRow("SELECT status FROM agent_update_tasks WHERE id='agent-task'").Scan(&status); err != nil {
+			return err
+		}
+		if status != "running" {
+			return fmt.Errorf("snapshot changed running Agent task to %s", status)
+		}
+		return validateAgentUpdates(ctx, snapshot)
+	})
+	if err != nil {
+		t.Fatal("valid 1.7.5 running-task snapshot cannot be migrated", err)
+	}
 	exec("INSERT INTO core_update_tasks(id,node_id,baseline_revision,release_id,component,version,url,sha256,sequence,status,command_id,created_by,created_at,updated_at) SELECT 'core-task',node_id,baseline_revision,release_id,'xray','26.3.27','',printf('%064d',0),1,'running','core-command',created_by,created_at,updated_at FROM agent_update_tasks")
 	if err := validateAgentUpdates(ctx, database); err == nil {
 		t.Fatal("simultaneous active updates accepted")

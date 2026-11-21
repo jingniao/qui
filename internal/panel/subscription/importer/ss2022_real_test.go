@@ -99,7 +99,7 @@ func ssNative(t *testing.T, binary string, args ...string) {
 
 // The existing real-core package selector discovers this test through the core
 // environment variables. No binary is downloaded here. The gate supplies the
-// digest-verified versions pinned in v1.4-s0-evidence.md. Each request needs both
+// digest-verified versions pinned in docs/protocol-support-matrix.md. Each request needs both
 // a unique origin response and a server-side authenticated Shadowsocks log; a
 // wrong-key control must fail without hitting the origin. URI-provider cases feed
 // the actual canonical text to Mihomo, rather than re-parsing it in the panel.

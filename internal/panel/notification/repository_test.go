@@ -211,31 +211,29 @@ func TestStateRoundTrip(t *testing.T) {
 	repo, _ := newTestRepo(t)
 	ctx := context.Background()
 
-	_, ok, err := repo.State(ctx, "none")
-	if err != nil || ok {
-		t.Fatalf("expected not ok, got ok=%v, err=%v", ok, err)
+	if states, err := repo.States(ctx); err != nil || len(states) != 0 {
+		t.Fatalf("expected empty states, got %v, err=%v", states, err)
 	}
 
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	s := State{Key: "k1", Active: true, Since: now, LastNotified: now, Value: "val"}
-	if err := repo.SaveState(ctx, s); err != nil {
+	if err := repo.SaveStates(ctx, map[string]State{"k1": s}); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok, err := repo.State(ctx, "k1")
+	states, err := repo.States(ctx)
+	got, ok := states["k1"]
 	if err != nil || !ok {
 		t.Fatalf("expected ok, got ok=%v, err=%v", ok, err)
 	}
-	if got.Key != "k1" || !got.Active || got.Value != "val" {
+	if got.Key != "k1" || !got.Active || got.Value != "val" || !got.Since.Equal(now) {
 		t.Fatalf("state mismatch: %+v", got)
 	}
 
-	if err := repo.DeleteState(ctx, "k1"); err != nil {
+	if err := repo.SaveStates(ctx, map[string]State{}); err != nil {
 		t.Fatal(err)
 	}
-
-	_, ok, err = repo.State(ctx, "k1")
-	if err != nil || ok {
-		t.Fatalf("expected deleted, got ok=%v", ok)
+	if states, err := repo.States(ctx); err != nil || len(states) != 0 {
+		t.Fatalf("expected deleted, got %v, err=%v", states, err)
 	}
 }

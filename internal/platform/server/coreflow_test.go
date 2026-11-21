@@ -232,7 +232,30 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 	}
 
 	// Step 3: user, device, subscription node group, VLESS inbound, policies.
-	groupResponse := owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Core Flow Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}})
+	groupResponse := owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Core Flow Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{pending.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if groupResponse.Code != 201 {
 		t.Fatalf("node group: %d %s", groupResponse.Code, groupResponse.Body.String())
 	}
@@ -272,7 +295,30 @@ func TestCoreFlowEnrollDeploySubscriptionTelemetryAndBackup(t *testing.T) {
 	if inboundResponse.Code != 201 {
 		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
 	}
-	if r := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{pending.ID}}); r.Code != 200 {
+	if r := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := []string{pending.ID}
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()}); r.Code != 200 {
 		t.Fatal(r.Body.String())
 	}
 	policyResponse := owner.call("POST", "/api/v1/policies", map[string]any{"name": "Flow block", "priority": 10, "enabled": true, "scope": desiredstate.Scope{NodeIDs: []string{pending.ID}}, "match": desiredstate.Match{Domains: []string{"blocked.example"}}, "action": desiredstate.Action{Type: "Block"}})

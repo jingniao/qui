@@ -23,7 +23,7 @@ import (
 // mTLS streams must keep acknowledging old/replayed peers while withholding
 // both apply and rollback until this connection reports the exact combination.
 func TestSettingsDispatchAfterReconnectAndCapabilityWithdrawal(t *testing.T) {
-	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
+	// Not parallel: its deadlines failed under parallel -race load.
 	for _, operation := range []string{"apply", "rollback", "rollback_empty"} {
 		t.Run(operation, func(t *testing.T) {
 			rollback := operation != "apply"
@@ -42,7 +42,7 @@ func TestSettingsDispatchAfterReconnectAndCapabilityWithdrawal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			response, err := pb.NewAgentControlClient(trustedClient(t, address, app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "settings", OperatingSystem: "linux/amd64", AgentVersion: "settings-test"})
+			response, err := pb.NewAgentControlClient(trustedClient(t, address, app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "settings", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,7 +62,7 @@ func TestSettingsDispatchAfterReconnectAndCapabilityWithdrawal(t *testing.T) {
 			}
 			hello := func(last uint64) {
 				t.Helper()
-				if err := stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: last}}}); err != nil {
+				if err := stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5", LastAckedSequence: last}}}); err != nil {
 					t.Fatal(err)
 				}
 				message, err := stream.Recv()
@@ -142,7 +142,7 @@ func TestSettingsDispatchAfterReconnectAndCapabilityWithdrawal(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: 1}}}); err != nil {
+				if err := stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5", LastAckedSequence: 1}}}); err != nil {
 					t.Fatal(err)
 				}
 				message, err := stream.Recv()

@@ -1,91 +1,58 @@
 # 运维手册
 
-升级顺序为面板先、Agent 后；支持 systemd 与 Alpine/OpenRC。本文给出操作规则，实机证据与未验证项见[验收矩阵](v1-acceptance.md) §11–12；未找到专项证据的操作保留“待实机”标记。安装与目录约定见[部署与升级](deployment.md)。
+升级顺序为面板先、Agent 后；支持 systemd 与 Alpine/OpenRC。本文给出日常运维、故障排查与恢复步骤；安装与升级机制见[部署与升级](deployment.md)，产品行为与接口契约见[项目说明书](project-spec.md)。
 
 ## 当前生产环境
 
-Owner 于 2026-11-13 指定以下服务器为生产环境：
+Owner 于 2026-11-13 指定以下服务器为生产环境（实际变更前须先核实当前运行版本与备份状态）：
 
 | 项目 | 当前登记 |
 | --- | --- |
-| 服务器 | `5.45.96.43`（德国 netcup） |
-| 面板地址 | `https://qui.lluu.de` |
-| 管理员登录 | 自定义地址，不写入文档；Owner 登录后在「系统设置」里查看；忘记时在服务器上用 `qui` 菜单「查看／重置管理员登录地址」（需先停止面板），见说明书第 27.18 节 |
+| 服务器 / 面板地址 | `5.45.96.43`（德国 netcup） / `https://qui.lluu.de` |
+| 管理员登录 | 自定义地址不入文档；Owner 登录后在「系统设置」查看，忘记时用服务器 `qui` 菜单重置（需停面板），见[说明书 §27.18](project-spec.md#2718-系统设置管理员登录地址与门户字段v154) |
 | 用户门户 | `https://qui.lluu.de/` |
-
-该服务器按生产环境执行运维与变更流程。早期发布说明中“非生产”的描述为当时的环境用途；us2／uk／Alpine 的升级与验收证据保留为历史记录，不用于推断当前服务器的版本、配置或节点清单。本次登记未执行服务器变更，运行版本与备份状态应在实际操作前核实。
 
 ## 1. 日常检查
 
-| 位置 | 看什么 |
-| --- | --- |
-| 总览 | 在线节点/用户/设备、今日流量、阻断次数、异常节点、最近访问与阻断域名、最近发布结果 |
-| 节点 | 在线状态、资源、Agent 与核心版本、当前配置版本、出站网络（核心出站源 IP/网卡、服务器强制出站）、最后心跳 |
-| 访问记录 | 全部访问 / 已阻断，可按时间、节点、用户、域名筛选 |
-| 系统 → 配置版本 | 发布状态、差异、手动回滚入口 |
-| 系统 → 备份 | 备份列表、校验、恢复预览 |
-| `journalctl -u proxy-panel`、`tail -n 200 /var/lib/proxy-agent/logs/agent.log` | 面板写系统日志；Agent 运行日志写有容量上限的文件，启动失败仍查看服务日志 |
+日常巡检关注：总览（在线数/今日流量/阻断/异常节点）、节点页（状态/版本/出站网络/心跳）、访问记录、系统 → 配置版本与备份、面板日志（`journalctl -u proxy-panel`）与 Agent 运行日志（`/var/lib/proxy-agent/logs/agent.log`）。面板通过单条 SSE（`GET /api/v1/events`）按角色推送状态与告警（Viewer 仅收监控类通知，每 15 秒重验角色）。
 
-**节点服务管理（systemd 与 OpenRC 对照）**。节点 Agent 可以运行在 systemd（Debian、Ubuntu）或 OpenRC（Alpine，含 LXC）上，见[部署与升级](deployment.md)第 4.1 节；本手册其余部分写的 `systemctl`/`journalctl` 命令，在 OpenRC 节点上按此表替换：
+**节点服务管理（systemd 与 OpenRC 对照）**（部署见[部署与升级 §4.1](deployment.md#41-alpine--openrc-节点)）：
 
 | 操作 | systemd | OpenRC |
 | --- | --- | --- |
 | 状态 | `systemctl status proxy-agent` | `rc-service proxy-agent status`（`started` / `stopped` / `crashed`） |
-| 启动 / 停止 / 重启 | `systemctl start\|stop\|restart proxy-agent` | `rc-service proxy-agent start\|stop\|restart` |
-| 开机启动 / 取消 | `systemctl enable\|disable proxy-agent` | `rc-update add\|del proxy-agent default` |
+| 启停 / 重启 | `systemctl start\|stop\|restart proxy-agent` | `rc-service proxy-agent start\|stop\|restart` |
+| 开机自启 / 取消 | `systemctl enable\|disable proxy-agent` | `rc-update add\|del proxy-agent default` |
 | 全部服务 | `systemctl list-units 'proxy-agent*'` | `rc-status default` |
 | 运行日志 | `tail -n 200 /var/lib/proxy-agent/logs/agent.log` | `tail -n 200 /var/lib/proxy-agent/logs/agent.log` |
 | 启动与日志写入故障 | `journalctl -u proxy-agent -n 200` | `grep -F proxy-agent /var/log/messages \| tail -n 200` |
 | 强制出站 helper | `systemctl status proxy-agent-host-network.path` | `rc-service proxy-agent-host-network status` |
 
-OpenRC 上 Agent 由 `supervise-daemon` 监管：进程退出后 5 秒重启，不设次数上限；`stop` 先发 TERM，最多等 90 秒，再发 KILL。
+OpenRC 由 `supervise-daemon` 监管：退出 5 秒重启；`stop` 先发 TERM，最多等 90 秒后发 KILL。
 
-**Agent 日志容量（本地待发布改动）**：运行日志位于配置 `DataDirectory` 下的 `logs/`（默认 `/var/lib/proxy-agent/logs/`），当前文件 `agent.log` 加 `agent.log.1`–`.9`，每个最多 10 MiB，总计最多 **100 MiB**，最旧文件自动轮换删除。受管模式由主进程统一收集自身和子 Agent 的 stderr，避免多进程各自拥有一份上限。此限制不包含流量持久队列、代理核心、安装/回滚文件，也不清理旧版本已经写入 journald/syslog 的历史。运行期间写入或轮转失败会向服务日志明确报错，停止文件日志写入并保留错误；代理运行继续，修复目录/磁盘问题后重启恢复日志。查看旧版本日志仍使用表中的服务日志命令。
-
-已有受管节点必须通过终端 `qui-update --component agent` 更新主机上的引导程序并重启服务，或使用本版本覆盖安装流程，日志限额才会生效；仅网页升级工作进程会继续使用旧监督进程的系统日志输出。网页显示的新 Agent 版本不能单独证明日志限额已生效，应核对 `logs/agent.log` 的实际写入。日志故障时父进程继续接收并丢弃子进程输出，避免管道中断导致代理退出，原始写入错误同时保留并报告。
-
-面板通过一条 SSE（`GET /api/v1/events`）推送节点状态、发布状态、总览变化和告警，不轮询数据库。
-
-v1.5.6 待发布修复按角色过滤 SSE：Viewer 仅收到节点、发布、总览状态和 node_offline/cpu/memory/disk 四类监控通知。每 15 秒重新认证时更新角色，降权生效后不再发送 Owner 告警。
+**Agent 日志容量（100 MiB 上限）**：运行日志位于 `<DataDirectory>/logs/`（默认 `/var/lib/proxy-agent/logs/`），含 `agent.log` 及 `.1`–`.9`，单文件 10 MiB、总计上限 **100 MiB**，最旧自动轮换删除（受管模式由主进程统一收集自身和子 Agent stderr）。此上限不含本地 spool、核心、安装/回滚文件或网页完整升级日志，不清理历史 journald/syslog。写入/轮转失败向服务日志报错并停写文件，父进程继续丢弃子进程输出防止代理退出，修好后重启恢复；已有受管节点须经终端 `qui-update --component agent` 更新引导并重启后核对 `logs/agent.log` 写入才算生效。
 
 ## 2. 备份与恢复
 
-**备份内容**：SQLite 一致性快照、系统配置、中央证书材料、规则集和必要密钥的加密副本。备份文件（`.pcb`）用备份口令加密，默认目录是 `<database 所在目录>/backups`（示例 `/var/lib/proxy-panel/backups`）。
-
-**自动备份**：系统 → 备份里设置计划，默认每天 `03:00` 执行，保留 **7 个每日、4 个每周、3 个每月**（`internal/panel/system/backup_schedule.go` 的默认策略）。计划需要配置备份口令，口令加密保存在数据库里。
-
-**手工备份 / 校验 / 预览**：面板按钮对应 `POST /api/v1/backups`、`POST /api/v1/backups/{id}/verify`、`POST /api/v1/backups/{id}/restore-preview`。外部备份可用 `POST /api/v1/backups/import` 导入，`GET /api/v1/backups/{id}/download` 导出。
-
-**恢复（面板运行中）**：走恢复预览 + `POST /api/v1/backups/{id}/restore`，面板会写入离线候选库、校验完整性、检查迁移校验和，然后在重启后切换。恢复记录见 `GET /api/v1/restore-records`。
-
-**恢复（面板已停）**：命令行的恢复会先恢复再继续提供服务：
+- **内容与计划**：加密备份（`.pcb`，默认 `<database 目录>/backups`，示例 `/var/lib/proxy-panel/backups`）含 SQLite 一致性快照、系统配置、中央证书/ACME/Cloudflare 凭据、规则集与密钥。默认每日 `03:00` 自动备份，保留 **7 每日 / 4 每周 / 3 每月**（口令加密存库）。面板支持手工备份、校验、预览、导入/导出及在线恢复（`POST /api/v1/backups/{id}/restore`，重启切换，记录见 `GET /api/v1/restore-records`）。
+- **离线命令行恢复**（面板已停，恢复后直接继续提供服务；`--restore-backup` 与 `--restore-password-file` 须成对并显式给 `--config`，口令文件 ≤514 字节且仅属主可读，当前库空/缺失或校验失败拒绝替换）：
 
 ```sh
 systemctl stop proxy-panel.service
 /usr/local/bin/proxy-panel --config /etc/proxy-panel/config.yaml \
   --restore-backup /var/lib/proxy-panel/backups/<id>.pcb \
   --restore-password-file /root/backup-password
-```
-
-- `--restore-backup` 与 `--restore-password-file` 必须成对出现；恢复必须显式给出 `--config`，不能与 `--version` 或 `--check-config` 同时使用。
-- 口令文件必须是 ≤514 字节的普通文件，权限只对属主可读。
-- 当前数据库缺失或为空时恢复会拒绝，不会凭空新建一个空库。
-- 恢复前的完整性检查和迁移校验和不通过就拒绝替换。
-
-**中断的恢复安装**：用只读检查命令查看保留的安装日志，不做恢复也不启动服务：
-
-```sh
+# 只读排查中断的恢复安装（不启动服务）：
 /usr/local/bin/proxy-panel --config /etc/proxy-panel/config.yaml \
   --inspect-restore-installation --restore-installation-report /root/install-report.json
 ```
 
-**恢复后的预期差异**：所有管理员会话被清除（必须重新登录）；管理员口令按恢复点写回（恢复点之后的改密会被覆盖），恢复点之外的 Viewer 被禁用；恢复点之后新建的代理用户与设备被禁用而不删除（恢复预览的 `usersRemoved` 计的就是这些用户），其凭据被撤销，已用流量不回退；恢复点里不存在的节点证书被标记撤销，节点状态回到 `offline`/`pending`，需要重新连接。
+- **恢复后预期差异**：清除全部管理员与门户会话；管理员口令回退到恢复点，恢复点后新建 Viewer 与代理用户/设备被禁用（凭据撤销、已用流量不回退）；恢复点外节点证书被吊销并回到 `offline`/`pending`。
 
 ## 3. 节点证书
 
-- 节点证书由面板节点 CA 签发，默认有效期 90 天（`internal/platform/pki/authority.go`）。
-- **自动续期**：证书进入到期前 14 天，Agent 会在控制连接上自动续期（`internal/agent/control/renewal.go`）；失败时最多每小时重试一次，期间继续使用当前证书。
-- **手工续期 / 密钥轮换**（节点停机时）：
+- 面板节点 CA 签发 90 天证书；满 30 天或余期 ≤14 天由 Agent 在控制连接自动续期（原私钥，失败每小时重试）。仅支持格式 2 身份存储（`identity/client.crt` + `client.key`），旧格式启动被拒需重新登记。吊销单证用 `POST /api/v1/nodes/{id}/revoke-certificate`。
+- **手工续期 / 密钥轮换**（停服执行，面板须可达；中断直接重跑同一命令，待提交材料在 `identity/pending-key-rotation.enc`）：
 
 ```sh
 systemctl stop proxy-agent.service
@@ -94,377 +61,178 @@ deploy/linux/renew-certificate.sh --rotate-key   # 轮换私钥并签发新证�
 systemctl start proxy-agent.service
 ```
 
-  脚本要求安装记录完整、二进制摘要未变、服务已停止、`/etc/proxy-agent/config.yaml` 与 `/var/lib/proxy-agent` 存在，并且面板可达（续期在控制通道上完成）。**中断的续期或轮换，重跑同一条命令即可**：轮换把完整证书对保存在待提交日志（`identity/pending-key-rotation.enc`）里，重跑会从该日志完成提交；崩溃后若 `client.key` 与 `client.crt` 不匹配，`tls.X509KeyPair` 会直接失败，Agent 不会用错配材料。
+## 3.1 入站 TLS 证书：节点文件与续期
 
-- **吊销单个证书**：面板节点页的 `POST /api/v1/nodes/{id}/revoke-certificate`；被吊销的证书在 mTLS 上被拒绝，需要重新登记。
-- **身份存储格式**：当前只支持一种格式（写 2 / 读最大 2，`identity/client.crt` + `identity/client.key`）。若节点上保存的是已删除的旧格式（例如旧代码下轮换过密钥的节点，格式 3），Agent 启动会被拒绝并提示 `stored agent identity format N is no longer supported; re-enroll this node`，该节点必须重新登记。
+- **节点文件（`inbounds.tls_source=file`）**：证书与私钥仅限 `/etc/proxy-agent/certs/`（`root:proxy-agent 0750`，卸载保留），面板只存绝对路径（≤256 字节、无 `..`）。Agent 每 5 分钟重扫并上报摘要（不含私钥），应用时经 `EvalSymlinks` 校验目录、可读性、密钥对与未过期，失败回滚；私钥宽于 `0640` 记 WARN。**外部工具（certbot/acme.sh）续期后，须在「节点详情 → 重启核心」手动重启核心生效**，勿改名轮换路径。加密备份仅存路径，不含节点文件。
+- **自签名（`self_signed`）**：按连接地址（其次公网 IP）签发，用户入站 10 年、内部中转 1 年；改连接地址后需在编辑器重新生成（否则 `coverageWarning` 提示）。
 
-## 3.1 入站 TLS 证书：节点文件与续期（v1.4.7 C1）
+## 3.2 Cloudflare API Token 与自动申请
 
-入站的证书来源记在 `inbounds.tls_source`：`paste` 粘贴内容、`self_signed` 面板自签、`file` 节点上的文件、`acme` 引用面板自己申请的证书（第 3.2 节），入站只存证书 ID、不存 PEM。
+面板通过 Cloudflare DNS-01 向 Let's Encrypt 申请与续期证书（见[项目说明书 §27.16](project-spec.md#2716-系统管理证书与-cloudflare-dns-01)），在「系统管理 → 证书管理 / 设置」及 API 均可管理，入站选 `acme` 引用。
 
-**节点文件**（`file`）：
+- **最小权限 Token**：禁用 Global API Key，不授 `Zone:Zone` / `Zone:Zone Settings`；在 Cloudflare 创建 Custom Token，Permissions 仅给 `Zone → DNS → Edit`，Zone Resources 仅选目标区域。保存前经 `/user/tokens/verify` 校验（无效返 `cloudflare_token_invalid`），保存后仅显示末 4 位。
+- **staging 与自动 DNS**：先选 `staging` 测通申请/续期再切 `production`（换 CA/邮箱重注册 ACME 账户）。自动 DNS 仅对非通配域名写指向节点**公网 IP** 的 A/AAAA，强制 `proxied=false`（灰云，橙云不支持 UDP）、`ttl=1`；缺公网 IP 返 `dns_node_address_missing`。
+- **退避与发布窗口**：失败按 1h → 6h → 24h 退避（`acme_rate_limited` 勿连续重试）；到期前 30 天续期，余 <7 天失败每日触发一次 `system.alert`。续期后仅在低峰窗口 `deployStartHour`–`deployEndHour`（默认面板时区 3–6 点，每小时检查）自动发布 `auto: certificate <域名> renewed`（会短暂重启节点全部核心）；连续 3 次失败停止并报 `certificate_deploy_failed`，修好后手动发布一次恢复。
+- **恢复与出站**：备份含证书库、Token 与 ACME 密钥，恢复后不自动重申，中断任务按退避重试。面板须出站可达 `api.cloudflare.com`、Let's Encrypt API 与 UDP 53（无需开 80 端口）。
 
-- 文件只能放在 `/etc/proxy-agent/certs/`（安装器以 root:proxy-agent 0750 幂等创建，卸载保留），由 Owner 自己放进去并保证 Agent 账号可读；面板只保存两个绝对路径，不复制也不转存私钥。
-- 保存规则：仅 TLS 入站；必须同时填证书与私钥；与粘贴的 PEM 互斥；路径必须绝对、已规范、≤256 字节、位于上述目录且不含 `..`；出站永不携带。
-- Agent 在应用配置时用 `filepath.EvalSymlinks` 解析两个路径，确认解析结果仍在该目录、文件可读、`tls.LoadX509KeyPair` 成功且叶子证书未过期；任一不满足就拒绝应用，按普通失败规则回滚到上一次成功的配置。私钥权限宽于 0640 只记一条 WARN（`journalctl -u proxy-agent` 里的 `certificate private key is readable beyond its owner and group`）。
-- 证书文件过期或丢失时，下一次应用失败并保留原配置；Agent 重启后仍保留的修订若引用过期或缺失的文件就无法渲染，该核心停到文件恢复为止，请在到期前续期再重启核心。
-- 首次使用需要 Agent 已上报 `tls_certificate_files_supported`；旧 Agent 保存这类入站会直接被面板拒绝，先升级 Agent。
-- 把证书与私钥放进该目录后，Agent 每 5 分钟重扫并在变化时重新上报能力，因此最多 5 分钟（或重启 Agent）后，编辑器的「查找证书」就能按域名列出它们；删除文件后同样最多 5 分钟从结果里消失。面板只读证书摘要，不读取也不上报私钥内容。
+## 4. 手工轮换面板节点 CA
 
-**续期**：证书由 certbot、acme.sh 等外部工具续期后，**由 Owner 在「节点详情 → 重启核心」重启一次该节点的核心**，新证书才会生效。本版不做文件监视、也不会自动重启核心；sing-box 与 Xray 是否会自动重新加载同名文件中的新证书，须在 Linux 实机上验证后再改这段说明。**不要把证书文件改名轮换**：入站记录的是固定路径，改名等于让下次发布找不到文件。
-
-**自签名**（`self_signed`）：面板按节点客户端连接地址（连接地址优先，其次公网 IP）签发，用户入站有效期 10 年，内部中转 1 年。证书、私钥与可信 CA 都写进入站设置，客户端通过订阅钉住它：sing-box 格式写 `tls.certificate`，mihomo 写 fingerprint，URI/Base64 会省略钉了 CA 的 Hysteria2/TUIC。改了连接地址后可在编辑器里请求重新生成（`regenerateCertificate`），否则沿用已发的证书，读取接口的 `certificateInfo.coverageWarning` 会提示证书已不覆盖当前地址。
-
-**备份**：面板备份与恢复只带上两个路径（`tls_source` 与设置里的路径），不包含节点文件本身；恢复后仍需保证节点上文件存在，否则发布会被 Agent 拒绝。
-
-## 3.2 Cloudflare API Token 与自动申请（v1.4.7 D1）
-
-面板可以自己向 Let's Encrypt 申请证书并自动续期（说明书 §27.16）。签发过程写在面板上：面板写 Cloudflare 的 TXT 记录完成 DNS-01，再等权威名称服务器生效，然后才向 CA 提交。入站选择来源 `acme` 并指定证书即可使用（需要证书已签发成功）；页面（D3）之前，证书库与设置只有接口可用。
-
-**建一个最小权限的 Token**（不要用 Global API Key，也不要给 Token 任何 `Zone:Zone`、`Zone:Zone Settings` 权限）：
-
-1. Cloudflare 控制台 → My Profile → API Tokens → Create Token → Custom token。
-2. Permissions 只加一项：`Zone` → `DNS` → `Edit`。
-3. Zone Resources 只选真正要签发的那一个（或几个）区域，不要给全部区域。
-4. 创建后复制一次，粘贴到「Cloudflare API Token」；面板保存前会调 `GET /user/tokens/verify` 验证，无效直接拒绝（`cloudflare_token_invalid`）。保存后接口只回末 4 位，Token 本身不再出现。
-
-**先用 staging**：CA 选 `staging`，申请一个测试域名走一遍「申请 → 续期」。staging 签发的是客户端不信任的证书，只用来验证 Token、区域与 DNS 生效；确认无误后改成 `production` 再正式申请。切换 CA 或邮箱时面板会重新注册 ACME 账户（旧的留在 CA 上，不影响使用）。
-
-**自动 DNS**：勾选后，面板把每个非通配域名的 A/AAAA 记录指向所选节点的**公网 IP**（不是连接地址，因为连接地址可能正是这个域名），`proxied=false`（灰云，橙云不支持 UDP，Hysteria2/TUIC 会失效）、`ttl=1`（自动）。节点没有公网 IP 时这一步直接失败（`dns_node_address_missing`），先在节点设置里填好或等心跳自动填上。
-
-**速率与退避**：Let's Encrypt 对正式环境的同一组域名有「每周重复证书」与「每账户每小时」的限制，测试时请用 staging。面板失败后按 1 小时 → 6 小时 → 24 小时退避重试，记录固定错误码（页面显示对应中文）；被 CA 限流时是 `acme_rate_limited`，需要等窗口过去，不要连着点「续期」。到期前 30 天开始续期，剩余不足 7 天仍失败时会发一条 `system.alert` 并记一条“证书续期失败”操作日志，每张证书每天最多一次。
-
-**续期后的发布窗口**：证书续期成功后，面板会为用到它的节点（入站来源 `acme`）自动生成并部署一个配置版本（说明 `auto: certificate <域名> renewed`），只替换证书与私钥。这次发布和任何发布一样会重启该节点的全部核心，现有连接会短暂中断，所以只在低峰窗口内进行：设置里的 `deployStartHour`–`deployEndHour`（面板时区，默认 3–6 点，结束小时不含，开始大于结束表示跨零点；通过 `PUT /api/v1/system/certificate-settings` 修改）。窗口外续期好的证书先留在证书库，窗口打开后（每小时检查一次）才下发，旧证书在到期前一直可用，所以窗口不要设得太窄。自动发布只处理续期（证书名称不变）；把入站改选另一张证书必须由 Owner 手动发布。节点正忙则下次检查再来；节点离线则重连后收到；部署失败或节点回滚的节点在下一个窗口重试。同一节点连续 3 次失败后面板停止重试，发布一条 `system.alert`（`certificate_deploy_failed`）并在操作日志记“证书自动发布失败”：先看该节点的最新修订与 Agent 日志，修好后手动发布一次即可（手动发布已带新证书，自动发布不会重复）；下一次续期出新证书时会重新开始自动发布。面板重启后第一次检查会找回重启前已续期、尚未下发的证书。
-
-**恢复**：证书库、Cloudflare Token 与 ACME 账户密钥都在加密备份里（密封值原样往返）。恢复后不会自动重新申请；签发中被打断的行变成 `failed`/`interrupted`，按退避在下一个调度周期重试。恢复后如果换了域名或 Token，先更新设置再续期。
-
-**出站要求**：面板需要能访问 `api.cloudflare.com`、`acme-v02.api.letsencrypt.org`／`acme-staging-v02.api.letsencrypt.org`，并用 UDP 53 查询权威名称服务器；不需要开放 80 端口。
-
-## 4. 手工轮换面板节点 CA **[待实机]**
-
-面板只持有一个节点 CA，加载或创建都在 `node_identity_directory`（示例 `/var/lib/proxy-panel/identity`）。轮换是本地文件操作：
+面板唯一节点 CA 位于 `node_identity_directory`（示例 `/var/lib/proxy-panel/identity`）：
 
 1. 停止面板：`systemctl stop proxy-panel.service`。
-2. 备份身份目录：`ca.crt`、`ca.key`、`configuration.key`（`configuration.key` 用于解密本机保存的敏感材料，必须一起备份）。
-3. 删除 `ca.crt` 与 `ca.key`，保留 `configuration.key`。
-4. 启动面板：`pki.LoadOrCreate` 会生成新的自签名节点 CA，gRPC 端口从此只信任新 CA，**所有旧证书立即被拒绝**。
-5. 逐节点恢复：按第 5 节「复用同一台机器重新登记」的完整步骤处理（只清空 `identity/` 不够）。**不需要**替换 `/etc/proxy-agent/tls/ca.crt`：它校验的是面板 Web 证书，而轮换节点 CA 不改 Web 证书。只有面板 Web 证书换了签发 CA 时才用 `deploy/linux/node-ca.sh --trust <new-ca.crt>` 替换它（该脚本只替换这个文件、把旧文件保留为 `ca.crt.previous` 并用 openssl 校验新 CA，不动节点身份）。
-6. 全部节点回来后，再删除第 2 步备份的旧 CA 文件。
+2. 备份 `ca.crt`、`ca.key` 与 `configuration.key`（解密本机敏感材料必须一起备份），删除 `ca.crt` 与 `ca.key`、**保留 `configuration.key`**。可用 `deploy/linux/panel-ca.sh --inspect` 查看，`--rotate BACKUP_DIRECTORY` 校验属主/权限（非符号链接、`0700`）并自动备份后删除 CA。
+3. 启动面板自动生成新节点 CA，**所有旧节点证书立即被拒**。
+4. 逐节点恢复：面板禁用旧记录、新建节点并生成注册码，节点侧按第 5 节「复用同一台机器重新登记」处理并加回节点组重新发布。**无需替换 `/etc/proxy-agent/tls/ca.crt`**（它校验面板 Web 证书；仅换 Web 证书签发 CA 时运行 `deploy/linux/node-ca.sh --trust <new-ca.crt>`）。
+5. 全部节点恢复后删除旧 CA 备份。（普通注册码仅用于启用且未登记的节点；普通重装请用第 5.1 节原位恢复。）
 
-**普通注册码不能复用到已登记的节点记录**：
+## 5. 替换丢失或失陷的节点
 
-- 注册码只在节点记录**启用**时可用（`internal/panel/node/repository.go:106` 的查询与 `repository.go:126` 的核销更新都要求 `nodes.enabled=1`），被禁用的节点不能登记；
-- `node_identities.node_id` 是主键，普通登记时是 `INSERT`（`repository.go:137`），所以**同一个节点 ID 无法用注册码二次登记**（恢复码走的是替换路径，见第 5.1 节）；
-- 面板只支持逻辑删除节点（见第 15 节）；被删除的节点记录仍保留，但不能再登记。
+仅用于**主机失陷**或**面板节点 CA 轮换**（普通重装走第 5.1 节）：在面板**禁用**旧节点（mTLS 立即拒绝）→ 新建节点并生成注册码 → 按[部署与升级](deployment.md#4-接入节点)安装登记并更新节点组/出站/代理链引用后重新发布。
 
-因此只有两种情况仍需新建节点记录：**面板节点 CA 轮换**（第 4 节，旧证书全部失效）或**主机失陷**（旧身份不可信）。主机只是重装、身份仍属原节点时请改用第 5.1 节的原位恢复，不要新建记录。确实需要新建记录时按下面的步骤操作：在面板新建节点、生成注册码，节点侧按第 5 节「复用同一台机器重新登记」的步骤处理（只清空 `/var/lib/proxy-agent/identity` 不够：其中的 `identity.json` 会让 Agent 以 `node is already enrolled` 拒绝登记，受管状态与 spool 也会拒绝）。旧节点记录请禁用，避免它继续计入在线节点；新节点需要重新加入原节点组并重新发布配置。
+**复用同一台机器重新登记**（只删 `identity/` 会因受管状态与旧 spool 报错）：
 
-仓库里的 `deploy/linux/panel-ca.sh` 执行与上面第 2–3 步等价的备份与删除：`--inspect` 只打印现状，`--rotate BACKUP_DIRECTORY` 备份 `ca.crt`、`ca.key`、`configuration.key` 并用 SHA256 校验后删除 CA 文件。它要求身份目录不是符号链接、权限恰好 `0700`、属主是 root 或面板服务账号 `proxy-panel`（打包安装在 `/var/lib/proxy-panel/identity` 上是后者），三个材料文件的属主必须与身份目录一致；服务必须已停止。它的用法文本和结尾提示都写明轮换后节点要以新记录回来。
-
-## 5. 替换丢失或失陷的节点 **[待实机]**
-
-主机只是重装、节点身份仍归原节点时，不要新建记录：按第 5.1 节的原位恢复处理，节点 ID 与全部业务配置都会保留。以下流程用于主机失陷、旧身份不可信，或面板节点 CA 轮换后必须换记录的情况。
-
-1. 面板里**禁用**旧节点：这会让它的证书在 mTLS 上被拒绝（`internal/panel/node/repository.go:151` 的 `ValidateIdentity` 要求节点启用；`TestDisabledNodeIsRefusedAtMTLS` 覆盖该行为）。
-2. 新建节点记录并生成一次性注册码。
-3. 按[部署与升级](deployment.md)第 4 节安装并登记新节点，然后把它加入原节点组并重新发布配置。
-
-**复用同一台机器重新登记**（主机失陷、CA 轮换后按此做；只是重装则用第 5.1 节）：只清空 `/var/lib/proxy-agent/identity` 不够 —— 受管 Agent 状态（`agent-release-history`、`releases/agent-installed`、`agent-jobs` 等，见 `internal/agent/agenthost/state.go:30`）会让登记以 `cannot enroll over supervised Agent state` 被拒绝，spool 队列也绑定旧节点 ID（`spool identity or schema mismatch`，`internal/agent/spool/spool.go:129`）。步骤：
-
-1. `systemctl stop proxy-agent`；
-2. 把整个数据目录移作备份：`mv /var/lib/proxy-agent /var/lib/proxy-agent.old-$(date +%Y%m%d)` —— 旧节点尚未上传的遥测与访问记录会随目录一起丢弃；备份只用于排查，确认无误后删除；
-3. 重跑安装脚本（见[部署与升级](deployment.md)第 4 节）：`deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256>`。它会重建 `/var/lib/proxy-agent`，属主 `proxy-agent`、权限 `0700`（`deploy/linux/install.sh:310`）；
-4. 登记：`deploy/linux/enroll.sh --token-file FILE`；
-5. 在面板把新节点加回原节点组，并把引用旧节点的出站 / 出口组成员 / 代理链改指新节点，然后发布配置。
-
-不要把旧节点的私钥或数据目录拷到新节点上；`identity/` 里保存的是旧节点身份。
+1. 停服：`systemctl stop proxy-agent`（OpenRC 用 `rc-service proxy-agent stop`）。
+2. 移走整个数据目录备份排查：`mv /var/lib/proxy-agent /var/lib/proxy-agent.old-$(date +%Y%m%d)`（未上传遥测丢弃，确认后删除）。
+3. 重装并登记：`deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256>`，再运行 `deploy/linux/enroll.sh --token-file FILE`。
+4. 在面板加回节点组、修正引用并发布。严禁拷贝旧 `identity/` 到新节点。
 
 ## 5.1 原位恢复（推荐）
 
-**原服务器仍运行 Agent 时**，在服务器列表点「安装」，复制带 `--replace-agent` 的命令，在旧服务器上以 root 执行。恢复码有效期一小时，生成命令后旧 Agent 仍可上报。新登记核销该码时才吊销原证书，服务器 ID、用户、服务器分组、配置修订与面板流量历史保留。
+保留原节点 ID、入站/出站、节点组、隧道与历史配置；恢复码等同接管凭据（只显示一次，面板仅存 SHA-256 并绑定原证书指纹）。
 
-安装器先校验发行包、Agent 官方签名和所选内核，检查 gRPC 端点，再停止服务。它用旧证书上传原始队列，校验每批访问记录和流量的确认、流量交付序号及面板的结束确认。未正常退出、本次采集未落盘、有未确认或隔离批次时，命令会报错并保留旧数据。上传过程中若已确认部分批次，原始队列与身份副本在 `/var/lib/proxy-agent/replacement-original.*`，当前队列保留可继续上报的进度。修复故障后先启动旧服务，再运行仍有效的命令或新生成一条。
+### 路径 A：原服务器仍运行旧 Agent（`--replace-agent`）
 
-确认成功后，安装器在持有旧 Agent 进程锁时移出并删除整个 `/var/lib/proxy-agent`，包括身份、队列、运行修订、本地日志及受管更新历史。`/etc/proxy-agent/config.yaml` 的其他设置及 `/etc/proxy-agent/certs/` 的入站证书保留。脚本更新所选核心、面板端点和 CA 后重新登记；需要网页升级时在命令窗口勾选。自定义数据目录、符号链接、数据目录挂载及仍引用待删除文件的配置会报错。若已经看到“旧 Agent 本机数据已清除”，随后安装或登记失败，在原机去掉命令的 `--replace-agent` 重试；同一令牌会复用本次登记私钥，面板可向相同的请求重发已签发的证书；令牌过期或被另一台机器核销时，从原服务器的「安装 → 在新机器登记」重新签发。原机若已写入尚待确认的 `enrollment-result.json`，保留原材料，用同一发布包的 `deploy/linux/enroll.sh --token-file /root/qui-recovery-token` 接续。该文件由 root 以 0600 权限创建，只写原命令中的恢复码。接续成功后删除该令牌文件，用 `systemctl start proxy-agent.service` 或 `rc-service proxy-agent start` 启动已安装的服务。
+服务器列表点「安装」，复制带 `--replace-agent` 的命令（码有效期 1 小时）以 root 运行：
 
-systemd 验证原主进程的退出码。OpenRC 要求主机已安装 `strace` 且允许观察本服务进程退出；只读取退出状态，不记录系统调用和信号。观察失败会保留运行中的旧服务。旧版 Agent 需要具备最终采样、加密队列和收集器关闭检查点，v1.7.2 已有这些机制。离线归档覆盖安装需将同版本、同架构的 Agent 签名清单放在归档旁。
+1. 安装器校验发行包、签名、核心与 gRPC 端点后停服，用旧证书补传队列并逐批确认访问/流量 ACK、交付序号与结束确认；任一异常或存在隔离批次即报错并保留旧数据。
+2. 确认后持进程锁清空 `/var/lib/proxy-agent`（保留 `/etc/proxy-agent/config.yaml` 其他项与 `/etc/proxy-agent/certs/`），安装核心并重新登记，核销时吊销旧证（自定义数据目录/符号链接/挂载点会拒绝）。
+3. **中断接续**：部分批次已确认中断时，原队列与身份副本在 `/var/lib/proxy-agent/replacement-original.*`，修好后先启旧服再重跑；若已提示“旧 Agent 本机数据已清除”随后失败，去掉 `--replace-agent` 原机重跑（复用私钥）；若已有待确认 `enrollment-result.json`，保留原材料，将恢复码写入 root `0600` 文件 `/root/qui-recovery-token`，用同发布包运行 `deploy/linux/enroll.sh --token-file /root/qui-recovery-token`，成功后删文件并启服。
+4. OpenRC 须已装 `strace` 观察原进程退出码；离线覆盖安装须将同版本同架构签名清单放归档旁。
 
-**干净的新机器接替时**，服务器列表的「安装 → 在新机器登记」用同一恢复码生成普通安装命令。它只在新机登记，旧机本地队列仍留在旧机，核销时原证书失效。节点详情另提供原位恢复流程。
+### 路径 B：主机重装或干净新机器接替
 
+1. 「节点详情 → 节点证书 → **原位身份恢复**」（或列表「安装 → 在新机器登记」）选有效期（15/30/60 分钟），不希望旧机续连时勾选“立即吊销当前证书”。有未完成发布/更新/移除任务返 409 `node_recovery_blocked`；未登记/禁用/已删返 409 `node_not_enrolled`。
+2. 新机以 root 运行生成的 `node-install.sh`（复用旧机且留有 `/var/lib/proxy-agent` 先按第 5 节移走）。
+3. **恢复前勿运行 `uninstall.sh agent`**：残留 `/var/lib/proxycontrol-install/agent.removed` 会让 `node-install.sh` 拒绝安装。若已触发，确认 `/var/lib/proxycontrol-install` 为 root `0700` 后执行 `mv /var/lib/proxycontrol-install/agent.removed /root/agent.removed.bak` 再重跑，或改用同发布包 `deploy/linux/install.sh --node … --reinstall`。
+4. 确认节点页变为“已核销”并完成重下发（失败查 `redeploy_code` 后手工发布）。旧证指纹永久作废（备份恢复不复活），旧机重连记 WARN `node certificate refused`。
 
-主机重装、但节点记录与业务配置仍要保留时走这条路：不新建节点记录，节点 ID、入站、出站、节点组、隧道、代理链与历史配置都不变。恢复码等同该节点的接管凭据——持有者可以领取该节点全部已下发配置，包括 Reality 私钥与用户凭据——默认 15 分钟（可选 15／30／60 分钟），只显示一次，面板只保存它的 SHA-256 并绑定当时证书指纹。
-
-1. 面板进入该节点详情 → 节点证书 → **原位身份恢复**，选择有效期。旧 Agent 仍在线且不希望它继续连接时勾选“立即吊销当前证书”：签发即吊销证书并断开当前连接，节点在重新登记前保持离线；不勾选则旧证书在核销时才作废。
-2. 点“签发恢复码”并在确认弹窗核对风险，复制一次性恢复码与下方生成的 `node-install.sh` 安装命令（选择与原节点一致的运行内核）。
-3. 在重装的主机上以 root 运行该命令，它就是[部署与升级](deployment.md)第 4 节的安装＋登记，只是令牌换成恢复码。主机若仍留有旧的 `/var/lib/proxy-agent`，先按第 5 节「复用同一台机器重新登记」把整个目录移作备份，否则 Agent 会以已有身份或受管状态拒绝登记。**若重装前对主机跑过 `deploy/linux/uninstall.sh agent`，这条命令不会成功，而且不是恢复码的问题**：卸载会在 `/var/lib/proxycontrol-install/` 留下 `agent.removed`（旧安装记录的副本），`install.sh` 因此以 `The component was uninstalled; use --reinstall after inspecting the retained record.` 拒绝，而 `node-install.sh` 不能传 `--reinstall`。最小处理是先核对 `/var/lib/proxycontrol-install/agent.removed`（目录 `/var/lib/proxycontrol-install` 须仍是 root 属主、权限 `0700`），用 `mv /var/lib/proxycontrol-install/agent.removed /root/agent.removed.bak` 把它移出该目录，再原样重跑同一条命令；也可改用同一发布包的 `deploy/linux/install.sh --node … --reinstall`。因此原位恢复前不要跑 `uninstall.sh`：真正的系统重装，或按上面那样把 `/var/lib/proxy-agent` 整个移作备份，都不会留下这个标记。
-4. 回到本页确认结果：节点重新上线、恢复状态变为“已核销”，重新下发显示“等待节点上线”→“重新下发中”→“重新下发成功”（`r<版本>` 为新生效版本；从未成功部署过的节点显示“无需下发”）。失败时先看 `redeploy_code` 与发布记录，再用现有流程手工发布；原版本历史不会被改写。
-5. 旧证书在核销时作废，指纹写入永久作废表，用旧证书连接会被 mTLS 拒绝；备份恢复也不会复活它。面板为每次拒绝记一条 WARN 日志 `node certificate refused`（含节点 ID、证书指纹与来源地址），旧 Agent 仍在重连时可直接在日志里发现。
-
-节点存在未完成的发布、待执行的节点操作、进行中的批量发布、Agent／核心更新或移除、暂停/恢复任务时，签发返回 409 `node_recovery_blocked`，界面按类列出阻断项，处理后可重新签发（旧码随之作废）。节点未登记、已禁用或已删除时返回 409 `node_not_enrolled`。
-
-**面板在反向代理或 Cloudflare 后面时的一键安装**：Agent 的 gRPC 必须直连面板，mTLS 无法经过 Cloudflare 或终止 TLS 的反向代理。`--panel` 用 DNS-only（灰云）主机名或面板的 IPv4，它要直达面板并被面板**自己的**证书覆盖；`--http-port` 是面板自己的 Web 端口（默认 22550），不是代理的 443；两个端口都要在防火墙放行。`node-install.sh` 的失败信息就是按这个口径写的：`--http-port` 与 `--grpc-port` 相同会立即拒绝；下载 `/install/ca.pem` 收到 HTTP 415 说明 `--http-port` 指向了 gRPC 端口，404 说明该端口是开发模式面板或没转发该路径的别的 Web 服务；装好信任锚后脚本会用它与 gRPC 地址（`--grpc-host`，省略时即 `--panel`）预检 gRPC 端点，证书不匹配（curl 60/51/58 等）会在登记前中止并提示改用直连地址，端口不可达（6/7/28）单独报告。信任锚的取法只看**面板自己的证书**：脚本按 `--ca-sha256` 核对 `GET /install/ca.pem` 的字节后，再用 `openssl verify` 检查这张证书本身是否链到系统 CA 包；Web 一侧是 Cloudflare 或终止 TLS 的反向代理时，连接看到的是边缘公网证书、面板自己的证书仍是自签，此时安装的是取回的面板证书，而不是系统 CA 包。这些失败都发生在登记之前，注册码未过期时可以原样重跑。面板地址、Agent gRPC 地址与两者端口都在「系统管理 → 系统设置 → 基础设置 → 节点安装连接地址」保存一次，之后生成的命令都用它；gRPC 地址留空表示与面板地址相同。
+> **面板在 Cloudflare / 反向代理后**：Agent gRPC 必须直连面板（灰云或 IPv4），`--http-port` 填面板自身 Web 端口（默认 22550），安装器仅验面板自身证书；在「系统设置 → 节点安装连接地址」统一配置，预检错误见[部署与升级](deployment.md#一键安装推荐)。
 
 ## 6. 额度与连接限制（软执行）
 
-**每用户一个额度**（D3）：`users.traffic_limit` / `users.used_traffic`，跨所有节点累计；没有每节点预算、没有核内字节配额。
+规则与接口见[项目说明书 §22.1](project-spec.md#221-自动额度版本) 与[设备限制](device-limit.md)。运维要点：
 
-- 采样与上报：Agent 每 5 秒从核心统计采样写入本地 spool；心跳（面板指定 **15 秒**，`internal/panel/node/control.go` 的 `HeartbeatInterval`）里上传流量批次，面板收到 ACK 后才删除本地批次。
-- 判定：用户处于 `quota_exceeded`（已用 ≥ 额度）、`expired`（到期）或 `disabled` 时，面板自动创建并部署一个**只调整用户访问面**的配置版本，把该用户的凭据从节点配置中移除；恢复（提额、清零、续期、启用）同样触发一次自动版本。
-- 删除：删除用户或设备后，面板同样自动发布一个移除其凭据的版本（描述为 `auto: user <name> deleted` 或 `auto: user <name> device deleted`），无需 Owner 重新发布；目标是已发布状态里仍持有该用户凭据的节点，节点已一致时不产生版本。删除前产生、尚未上传的流量仍按凭据墓碑入账。
-- 合并与去重：同一节点上的转换在 60 秒窗口内合并成一次发布（`internal/platform/server/quota.go`）；自动版本以节点**已发布**状态为基线（`mergeUserAccess`），除用户与入站的绑定取自当前草稿（这类未发布编辑可能被带出）外，未发布的 Owner 编辑不会被顺带推下去；中转凭据、出站、出口组、代理链与分流规则始终按已发布状态。
-- 入站的启用状态：渲染器会把「没有任何用户凭据」的入站写成 `enabled=false`，所以已发布状态本身分不清「Owner 禁用了它」和「它暂时没有用户」。每个版本因此另外记下 Owner 当时启用的入站集合（`config_revisions.inbound_enabled_json`，迁移 `0111_inbound_enabled_intent.sql`），自动版本**原样继承**基线版本的这份记录：凭据回到一个已发布状态下被禁用的入站时，只有记录里说 Owner 曾启用它才重新启用；记录缺失（本列之前发布的版本，列为 NULL）时保守处理，保持禁用，等 Owner 下一次发布决定。
-- 目标节点：该用户**当前授权**的节点，加上**已发布状态里仍持有该用户凭据**的节点（例如授权已移除但尚未发布），所以禁用也能到达这类节点。
-- **超额窗口**：在**正常路径**上（节点在线、读取与发布都成功、没有其他部署占用该节点），超限到被切断之间最多有一个上报周期（当前 15 秒）＋最长 60 秒合并窗口＋发布耗时（Agent 应用并重启核心的时间），每次重试再加一个窗口。这段时间内的流量仍会放行，并且会计入 `used_traffic`。这是被接受的取舍。
-- **核心重启**：每次自动额度版本和其他版本一样会在该节点重启核心（先停旧核心再起新核心），该节点上**所有用户**的既有连接都会短暂中断；60 秒合并窗口限制了重启频率。
-- 面板重启不会引发发布风暴：状态机启动时先从数据库播种，只有状态**变化**才触发（`internal/panel/user/quota.go`）；启动后还会对每个有已发布状态的节点对账一次（`quotaDeployer.recover`），只为「用户访问面与节点正在运行的配置不一致」的节点创建版本，因此面板停机期间变成不活跃的用户、以及合并窗口里丢失的工作都会被补上；如果这次启动对账读不到状态（读取失败），面板会在每个 tick 重跑一次，直到一次完整读完为止。
-- **失败重试与放弃**：节点繁忙或等待 Agent 结果只等下一个窗口，不算失败；读取、创建、部署失败，或 Agent 上报失败/回滚，则用**当前已发布状态**重新生成版本重试，连续 **3** 次失败后停止并告警 Owner：`system.alert`（`alert=user_access_failed`）＋系统 → 操作日志里的「自动额度发布失败」记录（面板日志 `automatic quota revision gave up`，可 `journalctl -u proxy-panel | grep "automatic quota revision gave up"` 查看）。
-- **草稿无法渲染时的兜底**：Owner 已保存的草稿整体渲染失败时，自动版本退回按已发布状态生成，只移除不活跃用户（日志 `automatic quota revision rendered from the published state alone`），恢复类转换要等草稿能再次渲染。
-- 每用户额度统计 Xray 节点，以及上报 `singbox_user_stats` 能力的 sing-box 节点流量。官方 sing-box 无 `with_v2ray_api` 的构建仍仅提供节点总量；用户被授权这类节点时，用户页会给出提示（D5）。
-
-**v1.1 并发设备限制取代 D2 的旧 UI/API**：`deviceLimit` 范围 0–100，升级默认 0（不限）。在用户详情查看估计在线设备、部分执行节点与掩码地址，必要时由 Owner 重置准入顺序。跨入口节点按 IPv4 与 IPv6 /64 去重、先到先得；活跃 60 秒，失活后保留 120 秒再释放。限制不是物理设备识别：NAT 少算、双栈与切网多算，超限约延迟一个心跳加投递时间。
-
-Xray 通过运行时规则阻止新连接，保留既有连接；sing-box 联接用户日志与 Clash 源 IP/端口，每约 2 秒关闭匹配连接。门控不发布 Revision、不重启核心。旧 Agent、缺观测能力或失败节点明确显示部分执行；面板断联 3 分钟租约过期放行。WireGuard 一次一个设备、不计数；Xray SOCKS5 UDP 不携带用户，不能限制。sing-box 的 SOCKS5、Shadowsocks、Hysteria2、TUIC UDP 均不支持设备限制（L8），这些入站的 TCP 仍受限制。详见 [设备限制](device-limit.md)。面板完整源地址只在内存，Owner 与门户分别展示 /24、/48 掩码，不入库、日志或备份；节点调用 Xray 官方 CLI 使用的临时 JSON 为 0600，返回即删除。
-
-**续期刷新**：延长一个仍在活跃状态的用户到期时间不会产生“状态转换”，但 Agent 会按自己保存的到期时间切断用户，所以面板在到期时间被修改时会直接为该用户排队一次刷新（`reason=renewed`，不发告警）；如果这次修改同时跨越了活跃边界，则按上面的转换流程处理并发出告警。
-
-**时间窗与到期的延迟（1.4 取舍）**：Agent 定时重渲染（时间窗规则）或应用失败时，会保持上一成功配置继续服务，并在下一个周期重试，不会退回全阻断、也不会停核心（`internal/agent/reconcile/schedule.go`）。所以时间窗阻断或到期**可能被推迟**到下一次成功渲染为止；同理，面板侧自动版本失败时，节点仍运行旧配置。
+- **超额窗口与核心重启**：Agent 每 5 秒采样、每 15 秒心跳上报；面板在 **60 秒**窗口合并同节点用户变化并基于已发布状态自动下发（不带草稿，继承 `inbound_enabled_json`）。超限到切断最长有「15s＋60s＋发布耗时」窗口，且每次自动版本会短暂重启核心。
+- **删除/续期与故障兜底**：删用户/设备自动发移除版本（未上传流量按墓碑入账）；修改活跃用户到期自动刷新（`reason=renewed`）；面板重启自动对账补发。连续 3 次失败放弃并触发 `user_access_failed` 告警（查 `journalctl -u proxy-panel | grep "automatic quota revision gave up"`）。草稿渲染失败时退回仅按已发布状态移除不活跃用户；时间窗重渲染失败保旧配置重试。仅上报 `singbox_user_stats` 的 sing-box 计入用户额度。
+- **并发设备限制**：运行时规则/断连门控，**不发布配置、不重启核心**；面板断联 3 分钟租约过期放行。NAT 少算、双栈/切网多算；WireGuard 不计数，Xray SOCKS5 UDP 与 sing-box SOCKS5/SS/Hysteria2/TUIC UDP 不支持设备限制（TCP 仍受限）。
 
 ## 7. 访问记录与流量
 
-- 记录粒度：分钟时间桶 × 用户 × 设备 × 入口节点 × 域名/IP × 规则 × 动作 × 配置出口，含连接数；同一分钟内同一组合只写一条。
-- **每域名字节是可空字段**（D4）：官方核无法提供每域名精确字节，未知时列为 NULL，页面显示“—”。未知不写零。
-- **配置出口**：页面上的“配置出口”是该节点按策略解析出的出站或出口组所选成员，表示**配置**而非跨节点实际到达的出口节点；跨中转链路的实际出口无法确认。只有本节点直连路由能确认出口节点，页面会区分标注。
-- **sing-box 的访问来源是核心日志**：上游 Clash API `/connections` 只列出仍打开的连接、且不含用户，所以 Agent 读核心日志（渲染时提高到 debug 级别）来获得每条连接的用户、目标、命中规则索引和出站，包括被拒绝的连接（`internal/agent/collector/singbox.go`）。
-- **Xray 的访问日志**在 Agent 运行时目录 `/var/lib/proxy-agent/runtime/xray/access.log`：它是瞬时文件：Agent 以约 100 ms 轮询跟随，**读到就立刻清空**，核心停止时再清一次，因为明文 HTTP 行会带上 URL 路径与查询串；超过 **20 MiB** 仍会截断作为兜底，避免写满磁盘（`internal/agent/core/xray/access_log.go`）。检查大小与清空之间新追加的一行可能丢失（轻微少计，不会把路径留在磁盘上）。备份节点目录时不需要保留它。
-- 本地缓存：spool 上限 **100 MiB**（`internal/agent/spool/spool.go` 的 `DefaultLimit`），容量不足时按“允许访问的记录最旧优先”淘汰，阻断记录与流量记录优先保留；断线期间继续缓存，恢复后批量补传并按 ACK 删除。
-- 保留策略：默认允许访问 30 天、阻断记录 90 天、小时流量 90 天，日流量长期保留（`pkg/contracts/access/retention.go`），可在系统 → 设置里调整。
+字段与保留策略见[项目说明书 §26.7](project-spec.md#267-访问记录和流量)。运维要点：
+
+- **Xray 访问日志**（`/var/lib/proxy-agent/runtime/xray/access.log`）：瞬时文件，每 ~100 ms 读后清空（停核再清），超 **20 MiB** 截断；备份无需保留。sing-box 从 debug 级别核心日志提取访问记录。
+- **本地 spool 与保留**：spool 上限 **100 MiB**，满时优先淘汰最旧允许记录、保阻断与流量，断线续传按 ACK 删除。默认保留允许 30 天、阻断 90 天、小时流量 90 天、日流量长期；每域名字节未知为 NULL（显示“—”），跨中转“配置出口”不代表确认实际出口。
 
 ## 8. 出口组与代理链
 
-| 策略 | Xray | sing-box |
-| --- | --- | --- |
-| `primary`（主备） | 由 Agent 在节点上选择当前成员，只渲染选中成员（上游没有“首健康”策略） | 同左 |
-| `round_robin`（轮询） | 渲染 `routing.balancers` 的 `roundRobin` + `observatory` + `fallbackTag` | 渲染 `urltest` |
-| `latency`（延迟优先） | 由 Agent 选择（leastPing 语义） | 渲染 `urltest` |
-| `weighted`（权重） | 已移除 | 已移除 |
-
-迁移 `0104_egress_weighted_to_round_robin.sql` 把旧的权重出口组改写为 `round_robin`；读取旧配置版本时 `weighted` 也按 `round_robin` 解释。失败处理按配置执行，固定出口失败**不会隐式 Direct**。代理链发布顺序为先出口、后中转、最后入口，回滚反向。
+策略语义见[项目说明书](project-spec.md)。支持 `primary`（Agent 选首健康成员）、`round_robin`（Xray `roundRobin`+observatory / sing-box `urltest`）、`latency`（延迟优先）；`weighted` 已移除（旧版按 `round_robin` 解释）。固定出口失败**不隐式 Direct**；代理链按「出口 → 中转 → 入口」发布，失败反向回滚。
 
 ## 9. 节点出站网络
 
-“节点详情 → 节点设置 → 出站网络”里的四个字段是两条独立能力，改动都在**发布配置后生效**；留空保存表示清除该值。
+> 注：旧示例配置（`deploy/examples/agent.yaml`、`panel.yaml`）中提及的签名发布下载与公钥配置仅适用于旧版工作进程自更新；现行 Agent 更新与排障见第 10 节与[部署与升级](deployment.md)。
+
+「节点详情 → 节点设置 → 出站网络」含两条独立能力，均在**下一次发布后生效**（留空清除）：
 
 | | A 核心出站源 IP / 网卡 | B 服务器强制出站 IPv4 / IPv6 |
 | --- | --- | --- |
-| 改变什么 | 代理核心为被代理流量打开的套接字 | 经该网卡新建的每个出站连接（Agent、apt、DNS、cron、容器、显式绑定的套接字） |
-| 机制 | 核内配置：Xray `sendThrough` + `streamSettings.sockopt.interface`；sing-box `inet4/inet6_bind_address` + `bind_interface` | 专用 nft 表 `inet proxy_agent_source` 的 postrouting SNAT（优先级 90，先于 Docker 等 srcnat 链） |
-| 权限 | 无 | 仅独立 oneshot 单元持有 `CAP_NET_ADMIN`，Agent 与核心始终没有 |
-| 平台 | 任意 | 仅 Linux（≥ 5.2，需 nftables） |
+| 影响 / 机制 | 代理核心拨号套接字（Xray `sendThrough`/`sockopt.interface`；sing-box `inet4/6_bind_address`/`bind_interface`） | 经该网卡新建的全部出站连接（nft 表 `inet proxy_agent_source` postrouting SNAT，优先级 90） |
+| 权限 / 平台 | 无特权 / 任意平台 | 仅独立 helper 持 `CAP_NET_ADMIN` / Linux ≥ 5.2 + nftables |
 
-- **A 豁免于 B**：A 配置的源地址从 B 的规则里排除，被代理的流量仍用 A 的源地址发出。
-- A 只作用于渲染出的拨号出站：出口组成员同样固定，sing-box 的 `selector`/`urltest` 组本身不带拨号字段（上游不接受），入站 WireGuard 端点只监听、不改写；目标是**另一族的字面量 IP** 时连接失败（源地址已固定到某一族）。
-- **NAT 在连接的第一个包上决定**：规则变化后，已建立的连接保持旧源地址直到重连；对入站用户连接（用户 → 代理监听端口）的回包不做转换。
-- 其他网卡（LAN、隧道）不转换；**只转换配置了地址的地址族**：双栈主机请同时填写 IPv4 和 IPv6，未填写的地址族不会被改写（面板在只填一个时提示）。
-- 清除：四个字段留空并保存、再发布一次，helper 删除 `inet proxy_agent_source` 表；`uninstall.sh agent` 同样删除该表。没有配置 B 的节点不调用 helper，未装 nftables 的旧安装照常工作。
-- 失败码：`network_unavailable`（A 的源地址或网卡在节点上不存在）与 `host_network_failed`（helper 未安装、执行失败，或改完后新连接连不上面板）都是**临时**失败码，节点保留上一成功配置并重试；B 失败时本次发布回滚到上一版本（规则一并还原）。
-
-排查：
+- A 自动豁免于 B；NAT 在首包决定，不改写已建连接与入站回包；双栈主机须同时填 IPv4/IPv6。
+- **逐出站源 IP（`sourceIp`/`sourceInterface`）**：Direct 出站可覆盖服务器级设置（缺能力返 `outbound_source_unsupported`）；启用 B 时自动加入 `extra_exempt_ipv4/6`（每族 ≤16），返 `host_source_exempt_unsupported` 须升级本机 helper（`qui-update --component agent` 或 v1.7.5 完整网页升级）并核对 `status.json` 的 `features` 含 `extra_exempt`。`network_unavailable` / `host_network_failed` 均回滚保旧配置。
 
 ```sh
 nft list table inet proxy_agent_source
 systemctl status proxy-agent-host-network.service proxy-agent-host-network.path
 journalctl -u proxy-agent-host-network -n 100
-journalctl -u proxy-agent -n 200
 cat /var/lib/proxy-agent/host-network/desired.json /var/lib/proxy-agent/host-network/status.json
+# 旧版连续失败触发 unit-start-limit-hit 时手动恢复：
+systemctl reset-failed proxy-agent-host-network.service proxy-agent-host-network.path
+systemctl start proxy-agent-host-network.path proxy-agent-host-network.service
 ```
 
-OpenRC 节点上，helper 由 `proxy-agent-host-network` 服务运行：它监管 `host-network-watch`，后者在服务启动时应用一次已保留的 `desired.json`，之后由 busybox `inotifyd` 在 Agent 发布新文件时再运行 helper。排查时把上面的 `systemctl`/`journalctl` 换成 `rc-service proxy-agent-host-network status` 与 `grep -F proxy-agent-host-network /var/log/messages`。重启该服务（`rc-service proxy-agent-host-network restart`）会重放一次保留的规则，作用相当于开机。
-
-`desired.json` 是 Agent 下发的目标状态（含随机 `id`），`status.json` 是 helper 对同一 `id` 的结果；两者不一致说明 helper 未安装或尚未处理完。
-
-### 与出站单独源 IP 并用（v1.5.5）
-
-在「出站」为不同出口 IP 分别建立 Direct 出站，填写 `sourceIp/sourceInterface`，再把入站默认出站或节点策略指向对应出站，发布后生效。IP 与网卡分别继承服务器级核心设置，出站非空值优先；Block 不能绑定。缺少逐出站绑定能力时返回 `outbound_source_unsupported`，先升级 Agent。
-
-对应地址族启用了服务器强制出站，且出站有效源 IP 不同于服务器级核心源 IP 和强制地址时，Agent 把它加入 `extra_exempt_ipv4/extra_exempt_ipv6`，避免被整机 SNAT 改写。每族最多 16 个，去重排序；原单地址豁免保持。需要额外豁免但 helper 未上报支持时返回 `host_source_exempt_unsupported`，在节点运行 `qui-update --component agent` 更新本机 helper；v1.7.5 完整网页升级会随终端相同范围更新 helper 使用的 `/usr/local/bin/proxy-agent`；旧式工作进程任务不会替换该文件。
-
-更新后检查 `status.json` 的 `features` 含 `extra_exempt`，再确认节点能力 `host_source_extra_exempt_supported` 与 nft 排除集合。安装或升级会主动启动 helper：已有 `desired.json` 会重放；没有请求时写空 ID、`ok=true` 和 features 的初始回执，不改网络规则。systemd 与 OpenRC 安装器都等待首次回执写完，Agent 仍按请求 ID 确认配置和清除结果，空 ID 只用于能力声明。Agent 在渲染、修订持久化与切核之前，按激活核心的可达出站检查有效源 IP／网卡；地址不存在或不属于指定网卡时返回 `network_unavailable`，保留最后成功配置。
-
-helper 连续失败不会让后续发布失效：oneshot 单元设置了 `StartLimitIntervalSec=0`，不受 systemd 默认的启动频率限制（10 秒内 5 次），path 单元因此不会以 `unit-start-limit-hit` 停止；OpenRC 的 watcher 不会因 helper 失败而退出。Agent 只有在 `status.json` 确认同一 `id` 的“清除”请求成功后，才把保留的清除请求视为已生效，否则重新发布并等待结果。早于此修复的版本可能已经停在这种状态（`systemctl status proxy-agent-host-network.path` 显示 `unit-start-limit-hit`）：升级时 `install.sh` 发现 oneshot 单元处于 `failed` 会 `reset-failed` 并重放一次保留的文件；不升级时可手动执行 `systemctl reset-failed proxy-agent-host-network.service proxy-agent-host-network.path && systemctl start proxy-agent-host-network.path proxy-agent-host-network.service`。
+OpenRC 替换为 `rc-service proxy-agent-host-network status|restart` 与 `grep -F proxy-agent-host-network /var/log/messages`。`desired.json` 与 `status.json` 的 `id` 不一致表示 helper 未运行或未完成。
 
 ## 10. 核心与 Agent 更新
 
-多核心安装：新节点默认单 Xray，需要两核时传
-`--core xray --core sing-box`；两个安装器都支持重复参数。手工
-`--core-version/--core-url/--core-sha256` 跟在对应 `--core` 后，
-`--core-source` 全局选择 sing-box 来源。升级不传核心参数会保留全部安装核心，
-显式传入只替换/追加，省略不表示删除。新 Agent 配置使用 `cores: [{name, path}]`，
-旧 `core_name/core_path` 保留为第一个核心的兼容值；显式安装核心时会将核心路径规范化到
-`/usr/local/lib/proxy-agent/<name>`，其他设置保留；无核心参数的升级保留已有 config（包括兼容旧键）原样。首次迁移从校验过的新发布包
-运行新版 update.sh，旧 updater 不含多核心和 config 快照保护。
+安装、多核心参数、RC 规则与终端升级/降级见[部署与升级 §5](deployment.md#5-升级) 与[多核心安装](deployment.md#多核心安装)。日常排障要点：
 
-记录 v2 继续读取 v1，第 10 行 init、第 11/12 行 调优摘要保持含义；
-第 13 行起每行 `core <name> <absolute-path> <sha256>`。新 qui-update 将全部
-核心、Agent config、记录、主服务、强制出站与调优文件一起快照/恢复，进度日志
-沿用原格式；v2 Agent 记录遇到不支持它的旧目标 installer 时，在停服务前拒绝。
-卸载逐一校验并移除所有记录核心，保留状态数据，仍先恢复 sysctl 原值再删
-调优单元。完整格式、离线参数与回退边界见[部署说明](deployment.md#多核心安装)。
+- **sing-box 统计提示**：切到带 `with_v2ray_api` 的 qui sing-box 后，下次发布启用本地逐用户统计并计入共享额度，升级前核对用户额度。
+- **代理核心更新排障**：面板经 `GET /api/v1/core-releases` 读官方摘要并校验平台/URL；Agent 仅认官方域名（≤3 跳重定向），先验 SHA-256 再解包，健康失败自动回滚。查状态用 `GET /api/v1/core-updates`，卡住或损坏任务由重连关闭或 Owner 核对后 `POST /api/v1/core-updates/{id}/clear`。
+- **升级前基础配置**：在线且修订为 0 的节点触发升级前会经 `POST /api/v1/nodes/{id}/baseline` 下发仅含节点设置的基线配置（`auto: baseline before upgrade`，页面等最多 3 分钟；超时先核对实际修订再重试）。
+- **Agent 完整系统升级（v1.7.5）排障**：
+  - 网页由节点独立 root 服务固定执行 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`（不受 Agent/浏览器/面板重启中断），按本机 root probe 回执开放按钮；缺桥接服务须先终端升级。
+  - **路径与日志**：请求 `/var/lib/proxy-agent/system-update/request.json`；root 受理 `/var/lib/proxycontrol-install/agent-system-updates/<attempt-id>/`；只读状态/输出 `/var/lib/proxy-agent-update/<attempt-id>/`。日志分块 ACK，**不入 100 MiB 轮转且无自动截断**，确认终态留证后再清理。
+  - **断电与 `unconfirmed`**：提交引导快照后断电，桥接核验 PID/启动时间/boot ID 后经只读 `--agent-install-receipt ID --agent-manifest FILE` 收敛终态；缺退出收据保持「结果待确认」，阻塞发布/核心更新/删除接替/备份恢复，绝不按耗时或版本号猜成功；明确失败且满足恢复条件才可重提同目标。`dispatchError` 仅表示本机投递失败。既有旧工作进程任务按原回执收尾，不再新建。
+- **退出受管模式**：停服后将 `internal/agent/agenthost/state.go` 所列受管路径（含 `releases/agent-local-candidates/`）移走备份再启服；遗留 `agent-local.sock` 下次监督启动自动清理。
 
+### 面板网页更新
 
-节点安装时，`--core sing-box` 默认使用与 Agent 同一 qui 发布的静态
-`sing-box-1.14.4-qui.1-linux-(amd64|arm64).tar.gz`，按发布的 `SHA256SUMS`
-校验；glibc 与 musl 使用同一个归档。`node-install.sh --core-source official`
-保留官方 1.14.3 路径和四组固定摘要，手工 `install.sh` 的官方路径仍支持
-`--core-version`、`--core-url`、`--core-sha256`。手工 qui 路径需要
-`--qui-version X.Y.Z` 与 Agent 发布版本一致；离线文件参数见[部署说明](deployment.md)。
-
-核心更新合约接受严格的 qui 资源 URL：
-`https://github.com/jingniao/qui/releases/download/<tag>/sing-box-<ver>-qui.<n>-linux-(amd64|arm64).tar.gz`。
-运行时版本号仍是上游版本（如 1.14.4），qui 修订号写在归档名和 provenance 文件中。
-该来源只对上报 `singbox_user_stats` 能力的 Agent 开放；面板表单与排队校验
-使用同一能力门控。旧 Agent 未上报该字段时仍仅能使用官方来源。
-
-**v1.1 升级后的额度变化**：新版 Agent 检测到 `with_v2ray_api` 后，下一次
-渲染/发布配置会在随机空闲的 `127.0.0.1` 端口启用每用户统计。原来未计入
-用户额度的 sing-box 流量从此开始计入，可能触发已有额度的自动停用版本；
-升级前请核对用户额度。统计不追补启用前的流量。此 API 只有本机信任边界，
-不应对外转发其端口；代理入站也会阻断访问该端口。Clash API 继续用于节点
-总量；没有该构建标签的官方核心保留 D5。
-
-**代理核心（面板驱动，直接 URL + SHA-256）**：服务器 → 代理核心里选 `组件 / 稳定版本号`，官方 GitHub 发布资源 URL 与归档 SHA-256 会按所选版本自动填写，也可以照旧手工粘贴。自动填写的数据来自 `GET /api/v1/core-releases`（Owner，见[项目说明书](../AGENTS.md) §22.2）：面板只读厂商公布的摘要（Xray 的 `.dgst`、GitHub 资产摘要、我们自己的 `SHA256SUMS`），从不自行计算，两处公布值不一致或缺失时留空由人核对。面板在入队时校验组件、纯发布版本号、摘要格式、URL 前缀和资源名与节点平台是否匹配（`internal/panel/deployment/core_updates.go`）。Agent 侧再次校验：URL 只接受官方前缀，重定向最多 3 跳且只允许 `github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`；先校验归档摘要再解包；解包拒绝符号链接、路径穿越和多余候选；版本不匹配或健康检查失败时回滚到上一镜像（`internal/agent/updater/core_source.go`、`internal/agent/control/core_updates.go`）。排队、状态和结果见 `GET /api/v1/core-updates`；卡住的任务在节点重连时关闭，Owner 也可用 `POST /api/v1/core-updates/{id}/clear` 关闭。旧任务（无 URL）按 `failed_closed/history_invalid` 关闭。
-
-**Agent 自身（v1.7.5 完整系统升级）**：网页确认正式版本后，节点上的独立 root 服务固定运行 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`。节点直接访问终端使用的 GitHub 发布来源，下载归档与 `SHA256SUMS`，沿用相同校验、预检、全局安装锁、系统文件快照、服务检查、实际 Agent 签名和失败恢复；本轮不增加网页离线包上传。新任务不导入或使用面板签名下载目录，也不回退到旧工作进程更新方式。
-
-节点必须先经终端安装包含此桥接的版本；旧更新器按已有要求可能需要同版本重跑一次。网页根据 root 服务本次 probe 的真实回执启用按钮，缺少 updater、独立 watcher 或身份/修订不符时显示具体原因和终端迁移命令。版本字符串和文件存在都不足以开启完整升级。旧签名目录任务保留读取、回执补传与原恢复入口，不能用来创建新任务。
-
-第二阶段调用受管安装前，更新器在 root 任务事件中持久绑定原本机 request ID、候选摘要和完整签名清单。引导快照已经提交后断电，桥接先核实原进程的 PID、启动时间和 boot ID，再通过监督进程的只读 `--agent-install-receipt ID --agent-manifest FILE` 查询原任务和对应安装历史；此入口不要求 worker Ready，也不启动安装或恢复。原激活错误在回滚前加密保存，执行结果和恢复错误在原任务结束前另存于既有 `releases/agent-local-candidates`，不改变已发布 jobs/spool 格式。原受管安装已有真实终态时收敛外层中断记录；缺少原更新器退出收据仍保留空退出码和中断失败，不凭当前版本猜测整套成功。收据不足继续保持待确认，查询错误进入任务阶段；缺少最终日志收据时明确标记日志完整性未知。
-
-任务详情显示目标、阶段、原始错误、更新器及已知子命令退出码、引导/安装/运行版本、各自读取错误和恢复结果。引导更新成功后实际 Agent 更新失败时保留新版引导，页面分别显示真实版本。升级由独立 systemd/OpenRC 服务执行，Agent 重启、浏览器退出或面板重启不会取消。节点中断且原执行/恢复收据不足时保留「结果待确认」和原阶段，阻塞发布、核心更新、节点删除/接替及备份恢复；不会按等待时间猜成功，也不会重复执行未知任务。只有明确失败且恢复条件满足时，Owner 可创建固定原目标的新尝试。
-
-本机通道为 `/var/lib/proxy-agent/system-update/request.json`；root 受理材料在 `/var/lib/proxycontrol-install/agent-system-updates/<attempt-id>/`，对 Agent 发布的只读状态与本次输出在 `/var/lib/proxy-agent-update/<attempt-id>/`。日志按连续字节和 SHA256 分块，面板事务保存后 ACK，断连重复补传会校验原内容。网页完整下载只在输出完整、没有日志错误时开放；未齐或写入失败会明确报错。Agent 只在确认收到后推进本地位置，root 原输出和面板任务日志继续保留，未加入普通 Agent 日志的 100 MiB 轮转；这类升级材料没有自动静默截断或淘汰，磁盘写失败按实际错误暴露。清理前先确认任务收尾并保存需要的证据。
-
-本机投递错误独立保存为 `dispatchError`，不会冒充 root 最终安装结论；后续受理和真正结果仍可继续补传。备份包含新任务、尝试、日志及能力字段，恢复时完整核对；能力在恢复后清零，等待节点重新 probe。
-
-### 升级前发布基础配置（v1.5.5）
-
-在线但从未发布配置的节点，当前修订为 0。「版本与更新」升级 Agent、升级／添加代理核心时会提示先发布基础配置；确认后页面调用 `POST /api/v1/nodes/{id}/baseline`（Owner＋CSRF，`{confirmNodeId}`），等节点确认修订再排队原升级。单台与批量都使用此流程，Agent 网页升级仍须先启用。
-
-基础配置只含节点级必需设置（包括出站网络），不带草稿入站、出站资源、用户、策略或中转；无入站时核心不启动。发布历史说明为 `auto: baseline before upgrade`，操作日志为「升级前发布基础配置」。沿用正常发布校验与回滚，页面最多等待 3 分钟；失败或超时不排队该节点升级，可在节点发布历史查看失败原因。超时后先核对实际修订，再重试升级；页面停止等待不表示服务端发布已取消。已有确认修订无需基础配置，接口返回 `baseline_not_needed`；离线、占用或未启用网页升级等原因仍在页面显示。
-
-### Agent 网页升级启用与退出
-
-普通节点运行 `qui-update --component agent`（服务须已运行）即可启用网页升级；服务未运行时先启动再重跑。面板 Agent 管理页出现“升级”按钮表示已启用。≤1.4.7 主机上已安装的 qui-update 是旧脚本，不含启用步骤，所以第一次 `qui-update --component agent` 只把 Agent 升到 1.5.0，需要再运行一次 `qui-update --component agent` 才会启用网页升级，面板上的提示会一直显示到启用为止；新装（node-install.sh）自动启用。失败证据保存在 `/var/lib/proxy-agent/web-upgrade-failed-<UTC时间>/`，节点会退回普通模式。手动退出受管模式：停服务，把受管路径移作备份后启动；旧引导程序遇到已提高的存储格式会明确拒绝启动，应装回足够新的版本。
-
-### 终端与网页同时升级 Agent（v1.7.1）
-
-v1.6.1 的 `qui-update --component agent` 只更新引导程序。v1.7.1 支持同时保留终端和网页：终端更新引导程序及实际 Agent；1.7.1–1.7.4 的网页仅更新实际 Agent。v1.7.5 新任务统一使用上节完整系统升级，已有旧任务继续按原模式处理。已有安装首次迁移须用原更新器装新引导程序，再重跑一次相同目标版本的命令；此后终端升级一次即可。步骤与离线签名参数见[部署与升级](deployment.md#受管-agent-的终端升级v171)。
-
-终端要求受管服务已运行、已有基础配置，且没有待处理升级或恢复。签名和兼容性检查在停止前完成，实际切换继续走原安装历史和失败回滚。第二阶段失败会保留新版引导程序并非零退出；查看终端原始错误和 `journalctl -u proxy-agent`（OpenRC 查看 `/var/log/messages`）中的本地升级记录。终端断开后，已排队任务仍由监督进程完成并记录结果；重跑命令前先看服务状态。
-
-本地原任务中断后需要恢复时是上述门禁的例外：使用原目标版本的清单和归档重跑，程序先按原任务身份恢复，再继续本次安装；更换目标版本会提示先收尾原任务。网页来源的恢复继续走网页。当前就绪判断只检查未解决的失败，历史上已经恢复成功的失败不会造成永久 busy。引导重启的排他保留由终端管道维持，终端异常退出或服务停止后释放。
-
-`qui` 分别显示引导程序版本和实际 Agent 版本。服务停止时显示「受管 Agent 安装版本」，不会把磁盘版本标成正在运行。手动退出受管模式时，受管路径清单以 `internal/agent/agenthost/state.go` 为准，包含新增的 `releases/agent-local-candidates/`；停服后的遗留 `agent-local.sock` 为运行时 socket，下一次监督进程启动时会在生命周期锁内清理。
-
-### RC 更新与组合主机的组件选择
-
-`qui-update --component panel|agent` 只更新指定的已安装组件；不指定仍先 Agent 后面板。组合主机先运行 `--component panel`，确认后再 `--component agent`。`qui` 菜单更新项仍使用默认方式，组合主机升级应使用命令行组件选择。RC 版本必须是 `X.Y.Z-rc.N`（N 为无前导零的正整数），比较顺序为 `1.0.9 < 1.3.1-rc.1 < 1.3.1-rc.2 < 1.3.1`；线上显式指定 RC 使用同名 v 标签，离线仍必须同时提供 bundle/sums。旧版更新器不能识别新参数，首次更新从已审核并校验的 RC 归档运行新版 update.sh，完整命令见[部署与升级 §5.0](deployment.md#50-rc-与旧更新器的首次升级)。
-
-组件的回滚/恢复不替换或重启另一个组件，共享更新脚本与服务库随本次更新恢复；进入新更新前仍先处理已有未完成日志。面板数据库的备份、只读预检与跨迁移回退不变；`--database` 不能用于 `--component agent`。锁、10 秒健康窗口、systemd/OpenRC 和断电恢复机制均不变。RC1/RC2 仍 awaiting Owner approval，未执行。
-
-### 面板网页更新 **[待实机]**
-
-「系统设置 → 系统信息 → 面板更新」只由 root 侧两个单元执行，面板本身以无特权账号只写一个请求文件（第 27.15 节）。检查与排错：
+「系统设置 → 系统信息 → 面板更新」由无特权面板写请求、root 单元执行（见[说明书 §27.15](project-spec.md#2715-系统管理面板网页更新)）：
 
 ```sh
 systemctl status proxy-panel-update.path proxy-panel-update.service
 journalctl -u proxy-panel-update -n 100
-tail -n 100 /var/lib/proxycontrol-install/panel-update.log   # root 0600，更新器输出
+tail -n 100 /var/lib/proxycontrol-install/panel-update.log
 cat /var/lib/proxy-panel/panel-update/request.json /var/lib/proxy-panel/panel-update/status.json
 ```
 
-- `proxy-panel-update.path` 是常驻的监视单元（正常的 `active (waiting)` 表示请求会被执行），`proxy-panel-update.service` 是每次请求运行一次的 `oneshot`（上限 1800 秒）。path 单元被停掉时网页提交仍然成功，但没有任何东西会执行：`systemctl start proxy-panel-update.path` 恢复即可；单元被 `reset-failed` 过也一样。
-- helper 在“拒绝请求”和“更新失败”时都退出 0（结果是写进 `status.json` 给面板看的），**非 0 退出只表示它连结果都没能记下**，这时按 journal 的报错修（目录/账号/权限）。
-- `status.json` 的 `code` 是唯一判据：
+`proxy-panel-update.path` 应为 `active (waiting)`（停掉时 `systemctl start` 即可）。helper 拒绝/失败均退出 0 并写 `status.json`，**非 0 退出表示未能写回执**，按 journal 查权限。
 
-| code | 含义与处置 |
+| `status.json` `code` | 含义与处置 |
 | --- | --- |
-| `running` | 正在更新，面板会短暂重启；等它变成别的码 |
-| `succeeded` | 已换版并通过 10 秒健康检查 |
-| `invalid_request` | 请求文件不合法（非普通文件、属主不是 proxy-panel、超过 4096 字节、requestId 或版本号不合规）；原因在 journal，重新在网页提交即可 |
-| `not_newer` | 目标版本不新于已安装版本；通常说明面板已经更新过，刷新页面 |
-| `update_failed` | `qui-update` 失败并已自动回滚；原因在 `panel-update.log` |
-| `version_mismatch` | 更新后程序报告的版本与请求不符（已被回滚）；看 `panel-update.log` 与 `pre-update-*` 备份 |
+| `running` / `succeeded` | 更新中（面板短暂重启） / 已换版并通过 10 秒健康检查 |
+| `invalid_request` / `not_newer` | 请求非法（查 journal 重提） / 目标不新于当前版本（刷新核对） |
+| `update_failed` / `version_mismatch` | `qui-update` 失败或版本不符并已自动回滚，查 `panel-update.log` 与 `pre-update-*` 备份 |
 
-- `pending.stalled`：请求写进目录但 helper 超过 10 分钟没有给出结果（path 单元没在跑是常见原因）。此时面板不再把它当作“正在更新”，可以直接重新提交。
-- `status.interrupted`：`running` 持续超过 35 分钟，通常是更新过程中主机重启或被强制断电。开机恢复（`proxycontrol-update-recovery`）会先处理上次中断的更新；确认面板已经起来、`proxy-panel --version` 正常之后，直接重新提交即可。更新期间面板被 `qui-update` 停掉是正常现象：这两个单元不对面板设 `PartOf`/`BindsTo`，不会被一起停掉。
-- **备份与回滚和手工 `qui-update --component panel` 完全一致**：更新前把数据库备份为 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间>.db`；新版本 10 秒内重启、版本不符或 `install.sh` 失败都会回滚到旧程序，并把新版本写过的数据库保留为 `failed-update-<目标版本>-<时间>.db`。要指定版本、降级或跨迁移回退，仍用命令行 [`--version`/`--database`](deployment.md#51-面板降级与数据库回退)。
-- `uninstall.sh panel` 会先停用 path 单元，再删除两个单元与 helper，保留请求目录与 `panel-update.log`。重装后能力随 `install.sh` 一起回来；已有面板仍需先用 shell 跑一次 `qui-update`。
+`pending.stalled`（超 10 分钟无回执）可直接重提；`status.interrupted`（`running` 超 35 分钟，多为断电）待开机单元 `proxycontrol-update-recovery` 恢复并确认 `proxy-panel --version` 正常后重提。更新前库备份至 `/var/lib/proxy-panel/backups/pre-update-*.db`，失败新库留为 `failed-update-*.db`；降级/跨迁移回退用命令行 [`--version`/`--database`](deployment.md#52-面板降级与数据库回退)。
 
-## Hysteria2 端口跳跃（v1.5.0）
+## 11. Hysteria2 端口跳跃
 
-入站编辑器里的「端口跳跃」只在节点 Agent 上报 `port_hop_supported`（host-network helper 已安装）时出现；旧 Agent 先升级。填写起始/结束端口与间隔（5–300 秒，默认 30），跳跃段最多 10000 个端口，不能包含入站自身端口，也不能与同节点其他入站的端口或跳跃段重叠。
-
-**防火墙与 NAT**：节点防火墙必须放行整段 UDP；服务商只映射了部分端口的 NAT 主机（例如只放行 21411–21419）必须把跳跃段限制在放行的端口内，否则客户端连不上。跳跃段由 helper 用 nftables `redirect` 转到入站监听端口，入站本身仍只监听单个端口。
-
-**排查**：
+节点上报 `port_hop_supported`（已装 host-network helper）后可配置端口跳跃：间隔 5–300 秒（默认 30），最多 10000 端口，不得含入站自身端口或与同节点其他端口/跳跃段重叠。防火墙须放行整段 UDP（NAT 主机须限制在已映射端口内），helper 用 nftables `redirect` 转至单监听端口。订阅输出见[协议矩阵](protocol-support-matrix.md)。
 
 ```sh
-nft list table inet proxy_agent_hop     # 规则与计数器；无输出表示当前没有跳跃入站
+nft list table inet proxy_agent_hop     # 无输出表示当前无跳跃入站
 journalctl -u proxy-agent-host-network -n 100
 cat /var/lib/proxy-agent/host-network/desired.json /var/lib/proxy-agent/host-network/status.json
 ```
 
-删除最后一个跳跃入站并发布后，`nft list tables` 不应再有 `proxy_agent_hop`；回滚到含跳跃的修订会恢复。helper 单元由 `.path` 监视 desired 文件，重启 Agent 或主机后规则按最后成功修订重放；必要时 `systemctl restart proxy-agent-host-network.path`。订阅输出见[协议矩阵](protocol-support-matrix.md)：mihomo `ports`/`hop-interval`、sing-box `server_ports`/`hop_interval`、URI `mport`；legacy Clash 不输出 Hysteria2。
-
-## 11. 已移除的运维操作（不要再找这些命令）
-
-精简重构删掉了以下 Agent 本地运维模式（Phase 9/12 删除，`cmd/agent` 现在只有 14 个参数，含服务器强制出站的 `--apply-host-network`）。它们**不再存在**，对应的替代做法如下：
-
-| 已移除的操作 | 现在怎么做 |
-| --- | --- |
-| spool 密钥恢复模式 | 没有 CLI。Agent 打开 spool 时若 `queue.db` 在而 `spool.key` 缺失会报 `spool encryption key missing`，并因遥测队列不可用而不启动核心（日志：`telemetry queue unavailable; proxy remains blocked`）。请从备份恢复 `/var/lib/proxy-agent/spool/spool.key`；密钥确实不可恢复时，把整个 `spool/` 目录移走让 Agent 建新队列，代价是丢弃尚未上传的记录。 |
-| spool 数据库候选安装 | 没有“候选库”概念，也没有安装模式。spool 只使用自己的 `queue.db`，面板迁移不会作用于它；旧格式库在打开时忽略已删除的表并继续排空。 |
-| 登记结果恢复模式 | 没有 CLI。登记中断时重新登记：确认面板上节点启用、生成新注册码，必要时清空节点本地身份后执行 `deploy/linux/enroll.sh --token-file FILE`。 |
-| 已确认 Agent 镜像恢复 | 没有 CLI。受管 Agent 启动时按安装历史自行决定回滚并释放限制；需要换回旧版本时，用签名目录重新排队一次该版本。 |
-| supervisor 巡检模式 | 没有 CLI。看 `systemctl status proxy-agent.service`、`journalctl -u proxy-agent`，以及面板节点页显示的 Agent 版本和状态。 |
+删除最后跳跃入站并发布后 `proxy_agent_hop` 表自动移除；重启后按最后成功修订重放（必要时 `systemctl restart proxy-agent-host-network.path`）。
 
 ## 12. 登录与安全取舍
 
-- 登录失败限制：同一来源 IP 或同一用户名在 15 分钟内失败 **5 次**即被拒绝（`internal/panel/auth/service.go` 的 `loginAttemptLimit`、`loginAttemptWindow`）。限流器在内存里，重启面板即清空。
-- **Owner 可能被锁 15 分钟**：桶按用户名和 IP 划分，因此任何人都能用 5 次错误尝试把 Owner 锁在门外 15 分钟。这是 1～10 人内部使用的被接受取舍；必要时重启面板即可清除限制。
-- 面板位于受信反向代理之后时，配置 `server.trusted_proxies` 才会采信转发头；否则只认直连对端地址。
-- 其他固定项：会话 Cookie 与 CSRF 校验、HTTPS、订阅 Token 只保存哈希、审计操作日志（`GET /api/v1/operations`）、备份口令加密保存。
+- **登录限流**：同 IP 或同用户名 15 分钟失败 **5 次**即拒（内存计数，重启清空）。Owner 亦可能被他人锁 15 分钟，必要时重启 `proxy-panel.service` 解除。
+- **代理头与固定安全项**：面板在受信反代后须配 `server.trusted_proxies` 才信转发头。会话 Cookie+CSRF、HTTPS、订阅 Token 哈希、操作审计（`GET /api/v1/operations`）与加密备份口令默认开启。
 
 ## 13. 常见故障
 
 | 现象 | 检查 |
 | --- | --- |
-| 节点显示离线 | `systemctl status proxy-agent`、`journalctl -u proxy-agent`、节点到面板 gRPC 端口（默认 18880）的连通性、`/etc/proxy-agent/tls/ca.crt` 是否是签发面板 Web 证书的 CA 且与 `server_name` 匹配 |
-| 节点连上就断开 | 节点是否被禁用、证书是否过期或被吊销、Agent 版本是否低于面板要求 |
-| 节点突然离线，Agent 每 30 秒重复 `invalid spool capacity observation` | 本地队列的容量观测被面板拒绝（1.3.1 之前是 spool pragma 只对一条连接生效的缺陷），见下面“节点因 spool 容量观测离线”；临时处置是重启 Agent |
-| 发布后节点回滚 | 系统 → 配置版本看差异与失败原因；核心原生校验失败、端口冲突、健康检查失败都会自动回滚并保留上一成功版本 |
-| 出站源地址未生效或发布失败 | 是否已发布配置（字段改动只在下一次发布生效）；`nft list table inet proxy_agent_source`；`systemctl status proxy-agent-host-network`、`journalctl -u proxy-agent-host-network`；失败码 `network_unavailable` / `host_network_failed` 见第 9 节 |
-| 用户仍能上网但已超限 | 自动版本尚未完成（最长一个上报周期＋60 秒＋发布耗时），或节点离线未收到版本 |
-| 核心反复重启，日志有 `core listener did not answer … i/o timeout` | 宿主 conntrack 表是否已满（内核日志 `nf_conntrack: table full`），见下面“conntrack 表满”；这是主机设置，不是面板或 Agent 的缺陷 |
-| 访问记录为空 | Agent 是否上报（`journalctl -u proxy-agent` 里的遥测错误）、核心是否在跑、保留策略是否已清理该时间范围 |
-| 额度/在线数显示“未知” | sing-box 节点没有 `singbox_user_stats` 能力时仅提供节点流量（D5）；每用户在线数仍为未知，或核心不支持/未启用对应统计（D2），或该用户在 Xray 节点上没有在线条目（例如只用 WireGuard） |
-| 备份恢复失败 | 口令是否正确、备份是否完整（先 `verify`）、当前库是否被其他进程占用（恢复要求面板停止写入） |
+| 节点离线 | `systemctl status proxy-agent`、`logs/agent.log` / 服务日志、面板 gRPC（默认 18880）连通性、`/etc/proxy-agent/tls/ca.crt` 与 `server_name` |
+| 节点连上即断 | 节点是否禁用、证书过期/吊销、Agent 版本低于面板要求 |
+| `spool encryption key missing` 阻塞启动 | 从备份恢复 `/var/lib/proxy-agent/spool/spool.key`；无法恢复时移走整个 `spool/` 重建队列（未传记录丢失） |
+| 发布回滚 / 出站源未生效 | 系统 → 配置版本看失败原因；出站网络需发布生效，核对 `nft list table inet proxy_agent_source` 与 helper（第 9 节） |
+| 超限仍可上网 / 访问为空 / 额度未知 | 合并窗口（≤15s＋60s＋发布耗时）或离线；查 Agent 遥测与保留策略；sing-box 缺 `singbox_user_stats` 或协议无观测 |
+| 核心反复重启报 `i/o timeout` | 宿主 `nf_conntrack` 表满，见下方处置 |
+| 备份恢复失败 | 核对口令、先 `verify`、确认无其他进程占用库 |
 
-**conntrack 表满（主机设置，不是面板或 Agent 的缺陷）**
+### conntrack 表满（主机内核参数）
 
-- 症状：内核日志反复出现 `nf_conntrack: table full, dropping packet`，Agent 日志出现 `core unhealthy; restored last successful configuration`，同一行带 `core listener did not answer ... i/o timeout`；表现为核心被反复重启、连接偶发失败。uk-node 在 v1.3.0 的 RC-D 里因此 5 分钟内重启 Xray 10 次（见[发布说明 1.3.0](release-notes-1.3.0.md) 的已知限制）。
-- 检查（root）：
+内核日志报 `nf_conntrack: table full, dropping packet` 且 Agent 报 `core unhealthy; restored last successful configuration`（带 `i/o timeout`）时在宿主检查并扩容（LXC 需在宿主机调整；conntrack 不在调优 helper 的 **19 个固定键**内，不随面板或 `qui-update` 变更）：
 
 ```sh
 cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max
 dmesg | grep -c 'table full'
-journalctl -u proxy-agent | grep -c 'core unhealthy'
-```
-
-- 处理：提高上限与桶数，然后让 sysctl 生效。两个值要一致（桶数决定哈希表分片），写进 `/etc/modprobe.d` 的 `hashsize` 只在模块加载时生效，已加载时以 sysctl 为准：
-
-```sh
 cat >/etc/sysctl.d/90-conntrack.conf <<'EOF'
 net.netfilter.nf_conntrack_max = 131072
 net.netfilter.nf_conntrack_buckets = 32768
@@ -473,31 +241,23 @@ printf 'options nf_conntrack hashsize=32768\n' >/etc/modprobe.d/nf_conntrack.con
 sysctl --system
 ```
 
-- 结果（2026-11-03，uk-node，Owner 批准）：`nf_conntrack_max` 7680 → 131072、`nf_conntrack_buckets` 32768 后，此前累计的 920 条 `table full` 不再增长，负载下 count 稳定在约 4.6k–7.4k，核心重启归零（v1.3.0 主机 RC-E 期间 0 次 `core unhealthy; restored`）。逐项见[验收矩阵](v1-acceptance.md) §12。
-- 注意：LXC/容器内改的是**宿主机**的设置，容器里可能只读或被宿主策略拒绝。conntrack 不在服务器调优 helper 的 13 个固定键里，因此不由面板下发，也不随 `qui-update` 或恢复备份改变。
+### 读取耗时诊断（`QUI_READ_TIMING`）
 
-**节点因 spool 容量观测离线（v1.3.1 已修复）**
-
-- 症状：Agent 日志每 30 秒重复一对 `node control connected` 与 `WARN control channel disconnected … invalid spool capacity observation`（`journalctl -u proxy-agent`），面板上该节点一直离线。2026-11-03 的 alpine-node 即此现象（约 05:07Z 起离线，06:50Z 重启 Agent 后恢复）。
-- 原因：本地队列（SQLite）的 `journal_mode`／`journal_size_limit`／`max_page_count` 属于**单条连接**，1.3.1 之前只在打开时设过一次；`database/sql` 在语句被中断（spool 取样有 1 秒截止时间，负载下可能触发）后换一条连接，新连接带着 SQLite 默认页上限，Agent 上报的数据库容量变成 17,592,186,036,224 B，面板按 `spool.DiskLimit`／`DatabaseLimit` 校验时拒绝**每一次**控制会话。队列容量上限同时也没有真正生效。
-- 处置：升级到 v1.3.1 或更高（pragma 写进每条连接的 DSN）。**1.3.1 之前**的版本临时重启 Agent（`systemctl restart proxy-agent`；Alpine 为 `rc-service proxy-agent restart`）即可恢复连接，但只是缓解，负载下可能再次发生。队列里的记录不会因此丢失，恢复后照常补传。
+排查只读接口慢响应时，临时为 `proxy-panel.service` 设环境变量 `QUI_READ_TIMING=true`（`strconv.ParseBool` 解析，默认关闭，非法值致启动失败），排查完清除并重启：仅向面板日志记录请求序号、路由模板、状态码与阶段耗时（`db_acquire`/`db_begin`/`sql`/`db_end`/`config_decrypt`/`config_decode`/`external_http`/`response_encode_write`），**不记 SQL、参数、Token、配置或密钥**。注意：`db_acquire` 含建连与排队，`sql` 计数为 `Query`/`Next`/`Scan`/`Close` 调用次数而非语句数，缺失阶段为未覆盖/未执行而非 0，总耗时差额不全归 CPU。
 
 ## 14. 终端菜单 qui
 
-面板与节点主机均安装 root 专用终端菜单 `/usr/local/bin/qui`，SSH 会话里输入 `qui` 打开。只装 Agent 时按安装记录显示精简菜单：「1. 更新（从 GitHub）」「2. 卸载并清除全部数据」及 Agent 状态与版本；有面板时显示下列完整菜单。旧节点须经本机 `qui-update --component agent` 安装新版菜单。
-
-v1.7.1 的本地受管更新菜单分别显示引导程序、实际 Agent 的版本；同机安装面板和 Agent 时也显示这两项。其首次迁移、停止状态与失败行为见上文「终端与网页同时升级 Agent」。
+root 专用菜单 `/usr/local/bin/qui`（仅装 Agent 显示精简菜单：更新、彻底卸载及引导/实际 Agent 版本；含面板显示完整 8 项，不提供 shell 或日志入口）：
 
 | 菜单项 | 行为 |
 | --- | --- |
-| 1. 修改管理员账号密码 | 依次提示新用户名（留空保持不变）和两次新密码，确认后**短暂停止** `proxy-panel.service`，再以服务账号身份运行 `proxy-panel --config /etc/proxy-panel/config.yaml --set-owner-credentials`（用户名与口令两行从标准输入读入，口令不进 argv、不回显），然后按停止前的状态把服务启动回来。口令策略由程序校验，错误原样显示；成功后**所有 Owner 会话立即失效**，必须重新登录。 |
-| 2. 修改端口 | 只改 `http_address` 的端口，`grpc_address`（节点连接）不动：校验端口是 1-65535 的整数且与当前不同，端口与 `grpc_address` 相同时给一行提示；在 `/etc/proxy-panel` 里生成候选文件，先让程序 `--check-config` 校验，通过后把原文件备份为 `/etc/proxy-panel/config.yaml.bak`（属主与 0600 权限和原来一致）再原子替换；校验或备份失败时删除候选文件、保留原配置。最后询问是否立即重启，并提示放行防火墙与含旧端口的订阅链接需要用户刷新。 |
-| 3 / 4 / 5. 重启 / 启动 / 停止 | 直接 `systemctl restart`、`systemctl start`、`systemctl stop proxy-panel.service` 并打印结果状态；启动或重启失败会提示 `journalctl -u proxy-panel -n 50`。服务本来就在运行或已停止时只提示，不重复操作。 |
-| 6. 更新（从 GitHub） | 运行 `/usr/local/bin/qui-update`：默认取 `https://github.com/jingniao/qui/releases/latest`（也可 `--version X.Y.Z` 或 `--version X.Y.Z-rc.N` 指定），下载归档与同一发布的 `SHA256SUMS` 并核对摘要，停止 `proxy-panel.service`，在停止状态下把数据库备份到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间戳>.db`，替换前把会被替换的文件快照到 `/var/lib/proxycontrol-install/rollback.*`，再用归档里的 `deploy/linux/install.sh` 原地替换程序与单元，最后按停止前的状态启动服务，并要求它 10 秒内不重启；`install.sh` 失败、版本不符或新版本没有持续运行时自动恢复快照与更新前的数据库（先把新版本的数据库保留为 `failed-update-*.db`），启动旧版本。按 Ctrl-C、SSH 断线或被 `kill` 时同样自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery` 在服务启动前完成回滚。目标版本打不开当前数据库（降级跨过了迁移）时不做任何替换，并列出可用 `--database` 一起回退的 `pre-update-*` 备份。只有回滚也失败时才保留快照并打印日志命令（细节见[部署与升级](deployment.md)第 5 节与 5.1）。 |
+| 1. 修改管理员账号密码 | 短停面板，经 stdin 运行 `--set-owner-credentials`（口令不进 argv/回显），恢复服务；**所有 Owner 会话立即失效** |
+| 2. 修改端口 | 仅改 `http_address`（不动 `grpc_address`），`--check-config` 通过后备份 `config.yaml.bak`（0600）原子替换 |
+| 3 / 4 / 5. 启停重启 | `systemctl restart\|start\|stop proxy-panel.service` |
+| 6. 更新（从 GitHub） | 运行 `/usr/local/bin/qui-update`，校验 `SHA256SUMS`、备份库/快照并自动回滚（见[部署与升级 §5](deployment.md#5-升级)、[§5.2](deployment.md#52-面板降级与数据库回退)） |
+| 7 / 8. 登录地址 / 彻底卸载 | 查看/重置管理员登录地址（需停面板，[§27.18](project-spec.md#2718-系统设置管理员登录地址与门户字段v154)） / 调用 `uninstall.sh --purge` |
 
-完整菜单另有「7. 查看／重置管理员登录地址」（见[项目说明书 §27.18](../AGENTS.md#2718-系统设置管理员登录地址与门户字段v154)）与「8. 卸载并清除全部数据」。菜单只调用固定操作，不提供 shell 或日志查看入口。
-
-**非交互等价写法**（第 1 项的等价命令；面板已停止、以服务账号运行，两行分别是新用户名与口令，用户名为空行表示保持不变）：
+**非交互改密**（面板已停，两行为新用户名与口令，首行空保持原用户名）：
 
 ```sh
 systemctl stop proxy-panel.service
@@ -508,151 +268,65 @@ systemctl start proxy-panel.service
 
 ### 彻底卸载（qui 菜单／uninstall.sh --purge）
 
-在要清理的主机以 root 打开 `qui`，有面板选第 8 项、仅 Agent 选第 2 项，均调用本机脚本清理全部已安装组件。也可在终端直接指定范围：
+以 root 走 `qui` 菜单或直接执行（依次输入 `y` 与 `purge`，无 `--yes`；**勿先普通卸载**，`all` 仅按现存 `.manifest` 清理，不补清 `.removed`；普通卸载保留数据/备份/账号与 `.removed`，重装需 `--reinstall`）：
 
 ```sh
-/usr/local/lib/proxycontrol/uninstall.sh all --purge
-# 仅清理一个组件：将 all 换为 panel 或 agent
+/usr/local/lib/proxycontrol/uninstall.sh all --purge   # 单组件换为 panel 或 agent
 ```
 
-脚本随 v1.5.5 安装器发布；旧主机缺少脚本时先运行对应组件的 `qui-update`。它持有安装操作锁，列出组件、路径、目录大小、账号、nft 表及面板端口，必须依次输入 `y` 和 `purge`，无 `--yes`。直接使用 `--purge`，不要先普通卸载：all 只按现存 `.manifest` 选择组件，不能用来补清此前只剩 `.removed` 的卸载残余。
-
-| 范围 | 清理内容 |
-| --- | --- |
-| 面板 | 程序、服务与更新 helper；`/etc/proxy-panel`、`/var/lib/proxy-panel`（含数据库、备份、节点 CA 与发布目录）；服务账号与同名组 |
-| Agent | 先恢复调优基线，再删程序、服务、host-network/tuning helper、核心目录；`/etc/proxy-agent`、`/var/lib/proxy-agent`；两张 nft 表 `proxy_agent_source/proxy_agent_hop`；调优文件与快照、服务账号与同名组 |
-| 最后一个组件 | `qui`、`qui-update`、`/usr/local/lib/proxycontrol`、恢复单元及 `/var/lib/proxycontrol-install` |
-| 防火墙 | 从当前面板配置读取 HTTP/gRPC 端口，删除运行中的 ufw 或 firewalld 对应 TCP 放行规则；没有规则则跳过 |
-
-面板数据库与备份会一起删除，需要保留的备份先下载或移出清理目录；其他主机的节点继续运行最后成功配置，须逐台处理。节点本机清除不会在面板吊销身份，仍须在面板删除节点。journald/syslog 历史日志、其他主机和固定清理目录外的文件保留。
-
-前置阶段核对安装记录与摘要、停止组件并恢复调优；失败时不进入数据清理，但已经删掉的程序／单元不回滚。数据阶段逐项继续，失败项最终列出并退出 1，保留安装登记目录；账号仍有进程时会记失败，数据清理仍继续。防火墙没有保存规则来源，只按当前端口匹配，人工添加的同端口规则也可能被删除，历史旧端口需另行核对。systemd/OpenRC 下清除后重新安装的实机结果 **待核实**。
-
-不带 `--purge` 的 `uninstall.sh panel|agent` 保留配置、数据、备份、账号及 `.removed`，重装仍需 `--reinstall`；普通 Agent 卸载也删除上述两张 nft 表。
+- **清理范围**：面板清程序/单元/helper、`/etc/proxy-panel`、`/var/lib/proxy-panel`（含库/备份/CA）与账号；Agent 先恢复调优基线，再清程序/单元/helper/核心、`/etc/proxy-agent`、`/var/lib/proxy-agent`、两张 nft 表（`proxy_agent_source`/`proxy_agent_hop`）与账号；最后组件一并清 `qui`/`qui-update`/`/usr/local/lib/proxycontrol`/恢复单元与 `/var/lib/proxycontrol-install`；按当前 HTTP/gRPC 端口移除运行中 ufw/firewalld 对应 TCP 规则（同端口人工规则可能一并删除）。
+- 清理前先导出面板备份；节点本机清理不在面板吊销身份，仍须在面板删节点；前置校验/调优恢复失败中止数据清理，数据阶段账号有残留进程报失败退出 1。
 
 ## 15. 删除节点
 
-删除是**逻辑删除**：节点记录保留（`nodes.deleted_at`），证书立即吊销，节点退出所有节点组、不再出现在订阅与列表中，历史流量与访问记录保留，且不能再次启用。未登记、没有身份且未配置资源的节点走“取消登记”，记录直接移除；已配置资源的待登记节点也走连带删除。
+删除为**逻辑删除**（保历史流量/访问，立即吊销证书并退出分组/订阅，不可再启用；空白未登记节点直接“取消登记”移除）：
 
-1. 打开「删除」或 `GET /api/v1/nodes/{id}/deletion-preview`，核对 `schemes/tunnels/rules:[{id,name}]`、`inbounds:[{id,name,nodeName}]` 与 `blockers:[{kind,id,name}]`。预览保留 `mode/groups/lastHeartbeat/online`；空白待登记节点 mode 为 cancel，已配置资源的为 delete。该服务器全部入站，以及涉及任一实例或隧道跳的方案、隧道和规则会连带删除，确认框列出每项名称。
-2. 处理 blockers 中的外部手工出站、出口组、代理链、策略引用及受影响发布批次；有阻塞时删除返回 409 `node_delete_blocked`，明细在 `error.blockers`。未收尾的隧道发布即使批次已 success/failed，仍作为 `deployment_batch` 阻塞，等待收尾后再删。
-3. 按需让离线节点先复连，补传 `/var/lib/proxy-agent/spool` 中的访问和流量记录；删除后未上报记录将丢失。
-4. 在服务器上停止或卸载 Agent（`systemctl stop proxy-agent`，或按[部署与升级](deployment.md)卸载）。删除只吊销证书，无法停止远端代理进程。
-5. 一次确认后面板立即连带删除，关闭该节点待发布配置、核心/Agent 更新与排队健康检查，并在同一事务清除该节点自身的待清理行。`DELETE /api/v1/nodes/{id}` 成功返回 200 `{pendingNodes:[{nodeId,name,reason}]}`；重复删除或取消空白登记返回 `{pendingNodes:[]}`。受影响的其他节点按已发布状态删去对象并下发，离线／失败节点重连或后台重试后清理。按第 21.1 节核对服务器「待清理」标签与失败码。
+1. 查「删除」预览（`GET /api/v1/nodes/{id}/deletion-preview`），先解除 `blockers`（手工出站/出口组/代理链/策略/未收尾 `deployment_batch`，否则返 409 `node_delete_blocked`）。
+2. 如需保离线节点未传数据，先复连补传 `/var/lib/proxy-agent/spool`；在节点停服或卸载 Agent（主机失联可直接删）。
+3. 确认删除后按第 21.1 节核对关联节点「待清理」标签。重新接入同机须按第 5 节建新节点并更新引用。
 
-**服务器已经丢失 / 无法登录**时：直接删除即可，不需要先停机；删除后该节点不会再出现在订阅中，旧证书在 mTLS 上被拒绝。
+## 16. 账号、订阅与客户端策略
 
-**重新接入同一台服务器**：删除后不能复用原节点记录（也不能重新登记），请按第 5 节“复用同一台机器重新登记”作为**新节点**接入，并把引用旧节点的出站、出口组成员与代理链改指新节点后重新发布。新节点需要重新加入原节点组。
+模型与接口见[项目说明书 §27.10](project-spec.md#2710-用户订阅)、[§27.12](project-spec.md#2712-门户订阅观测与画布接口)。运维要点：
 
-## 16. v1.1 账号、订阅与客户端策略
+- **门户与订阅**：门户入口为 `/`。代理凭据、订阅 Token 与登录密码相互独立；关登录/改密/撤销会话/重置订阅链接立即生效（同步撤销 provider `/sub/{token}/rules/{id}`），重置代理凭据经自动版本生效；备份恢复结束所有门户会话。
+- **格式与模板**：显式格式参数优先；开启 UA 识别按内置 UA 匹配表判定，未知回退默认格式。全局模板冲突返 409 需重读合并。
+- **外部导入与额度**：HTTPS 来源抓取强制逐跳公网校验与 2 MiB/15 秒上限，刷新不在 `/sub` 请求内；导入加密存储，不入 Agent/修订/额度/设备限制。启用 `singbox_user_stats` 后流量计入共享额度，升级前核对。
+- **16.1 单独导入改名/删除**：`content` 节点支持逐个改名（乐观锁防覆盖）与删除（画布引用须先改并发布，策略组删空被拒）；`url` 节点随源刷新不支持单删/改名，刷新同名保留先出现端点并告警。
+- **16.2 维护与离线过滤**：订阅与预览按**整条已发布线路**评估（含出口组全部已发布候选与备用路径，外部导入无心跳但中转仍查全部受管跳）；维护开关保存即生效，离线统一按最后有效心跳与 `node_offline.duration_minutes` 判定（0 分钟须已断线或心跳过期）。过滤不动运行配置、不断现有连接，客户端刷新订阅生效；依赖索引重建缺加密发布材料时明确报错而不返回静默空订阅。
 
-Owner 在用户详情开启门户登录并设置密码；代理凭据、订阅 Token、登录密码是三种不同操作。门户从 `/portal/login` 进入，显示本人状态、授权节点、流量、共享订阅与账号；被禁用/到期/超额仍可登录看原因，但不能取订阅。关闭登录、改密码或撤销会话立即生效；恢复备份结束门户会话。Owner 预览只读，不签发 Token。Viewer 留在后台只读视图。
+## 17. 元数据、探测、转发与重置周期
 
-每用户一个共享链接，无设备新增/改名/删除。新 Token 可再次查看、复制或生成二维码，旧 Token 显示不可恢复时需显式确认重置。重置链接立即撤销旧链接；重置凭据通过自动版本替换代理设置，节点成功应用前旧设置仍可能使用。0113 移除多余设备及其链接，主身份链接保留，升级前通知受影响用户。历史记录仍保留内部设备 ID，页面隐藏设备列与筛选。
+字段与接口见[项目说明书 §27.12](project-spec.md#2712-门户订阅观测与画布接口)。运维要点：
 
-在“客户端策略”编辑唯一全局模板，选择预设后保存为独立副本。服务端校验组引用、循环与最终 MATCH，按用户授权展开 `@all`、节点组及导入来源；保存遇到 409 时重新读取并合并，不覆盖别人的新版本。用用户/格式预览看过滤警告；客户端模板不覆盖服务器节点策略。provider 是订阅 Token 授权的 `/sub/{token}/rules/{id}` classical 文本，撤销旧链接也撤销 provider。格式从注册表读取；mihomo 完整规则、legacy 受限，URI/Base64 无规则，sing-box 仍是片段。
-
-格式显式参数优先。UA 开关已有，但可信匹配表因 Phase 0 A.7 未完成而为空；未知 UA 使用默认格式。当前只提供复制与二维码，不宣称未核实的一键导入协议。使用前选好显式格式，不依赖尚未验收的识别。
-
-外部订阅通过导入对话框保存 HTTPS 来源并授权用户；缓存刷新不发生在 `/sub` 请求内。逐跳公网地址校验与固定 IP、2 MiB/15 秒上限限制抓取；失败来源只给 Owner 预览警告。导入内容加密保存，支持中立模型内的 URI/Base64/Clash 条目，不透传 VMess、Reality、插件、不安全 TLS 或未知字段。旧浏览器导入不自动迁移，须重导入并授权。客户端链仅 mihomo `dialer-proxy`，其他格式省略依赖链并警告；凭据/端点变化需重新选择画布引用。导入不进入 Agent、Revision、配额或设备限制；不能转为被管理的服务器隧道（L3、L5、L6）。
-
-qui sing-box 增加上游 `with_v2ray_api`，声明 `singbox_user_stats` 后逐用户字节计入原有共享额度，官方无标签构建仍仅节点总量。升级后 sing-box 用户可能更早达到额度，升级前核对用量、额度并告知用户。计数使用累计游标和 spool 重传，不重置核心计数。原生双用户载荷与 Xray 对比证据见[验收矩阵](v1-acceptance.md) §10.4，主机结果见 §11。
-
-### 16.1 单独导入节点改名／删除（v1.5.5）
-
-单独导入（content）在节点列表逐个修改名称或删除；订阅连接（url）节点随来源刷新，不能单独改名／删除。改名去首尾空白后为 1–200 UTF-8 字节，无控制字符且不能与已有节点同名；保存使用当前 revision，冲突时重读，不覆盖他人修改。稳定 ID 与连接凭据不变，但名称关键词策略可能变化，保存后查看候选及订阅预览。
-
-删除先读取影响预览：画布草稿或发布快照引用须先修改并发布方案；分组／客户端策略引用需确认同时移除，策略组删空会拒绝整笔操作。最后一个节点删除会清理空来源；同批其他节点不受影响。0147 将旧整源授权冻结为当时节点，分组按 `id:<id>` 管理；恢复后核对 `import_identity_report` 的悬空成员／引用，不按名称重新绑定、不恢复已撤销授权，不自动发布。
-
-当前限制：URL 来源后来刷新引入同名时，订阅汇总保留先出现端点、丢弃后者并警告，应核对节点数与链依赖；URI/Base64、Clash、sing-box 均使用新名称（sing-box 不输出客户端链）。不要以页面改名成功推断全部客户端显示已同步。
-
-### 16.2 订阅线路的维护与离线过滤（v1.7.5）
-
-订阅和 Owner 预览按整条已发布线路判断：入口、中间跳、隧道出口、自建目标及其固定后续链路中，任一受管服务器维护或确认离线，整条线路都会被排除。直连节点只受自身及其实际固定出站路径影响；无关直连和独立线路保留。默认出口为出口组时，该组所有已发布候选路径都算作这个订阅入口的相关依赖，任一受管候选不可用即排除整个入口，不重写运行组选路。出站、出口组和固定链声明的已发布备用路径同样计入；Direct/Block 不增加受管依赖，域名策略路径不在本次扩展范围。客户端执行链缺少任一组成端点时整体省略。外部导入节点没有受管心跳身份，不按域名或 IP 猜测离线；通向导入出口的中转仍检查全部已知受管跳。
-
-维护开关保存后，下次生成订阅立即生效。离线按最后有效心跳和通知规则 `node_offline.duration_minutes` 统一计算，规则的通知开关只控制通知。短暂断开且仍在持续时间内时保留线路；达到阈值后排除，恢复有效心跳后下一次拉取重新包含。0 分钟仍先判断控制断开或心跳过期，正常上报的机器继续保留。原有用户授权、分组、协议、已发布凭据和订阅可见性条件继续生效。
-
-迁移 0158 新增面板侧的成功线路依赖索引。普通入站与服务器画布从 Agent 已确认的加密配置读取；隧道规则按成功发布捕获的逐规则机器路径读取，目标之后的固定路径递归读取其当前已确认配置。修改草稿、待删除和失败发布均不会提前切换路径。旧规则从匹配的成功加密发布日志和其中的 GOST TLS 身份重建，材料不足时日志列出具体规则；相关订阅和预览明确失败，面板管理界面仍可启动处理。数据库或规则读取错误不会返回成功空订阅。备份校验会核对依赖证明，恢复按保留下来的成功材料重建索引。
-
-预览警告列出被排除的线路、服务器及维护/离线原因。所有订阅格式共用过滤后的端点集合；客户端须更新订阅才能取得变化。过滤不下发新配置、不回收凭据、不停止核心，也不主动断开已有连接。外部缓存来源仍可独立报错；已发布的导入出口中转使用主订阅源错误路径。
-
-## 17. v1.1 元数据、探测、转发与重置周期
-
-分组迁移（0122）：节点分组改为具体入站及导入代理。升级前备份；原服务器成员只展开迁移时订阅可见、非内部中转的入站，后建入站须手动加入分组。原来源授权迁移为“导入 · 来源名”分组，同名时加唯一后缀，用户授权随迁；`user_source_grants` 保留但不再生效。来源接口 `userIds` 输入被忽略，输出从有效分组推导。导入单项按 `name|protocol` 匹配，同名同协议条目共享权限；名称或协议改变后不再匹配，选择整个来源则自动包含刷新后的全部代理。缓存条目暂时消失时成员记录保留，不自动转成来源授权。
-
-`node_group_members` 是入站所属服务器的派生索引，供服务器视图、节点策略及批量操作使用；订阅、门户可用服务器与凭据渲染按具体入站及其 `allowedUserIds` 过滤，服务器订阅开关继续生效。进程内恢复沿用当前分组、成员和用户授权，缺失入站不恢复引用，避免旧备份恢复已撤销访问；旧归档先迁移 0122。额度与删除用户仍覆盖已发布状态里持有其凭据的服务器。
-
-节点元数据 `portRangeStart/portRangeEnd` 同时设置或同时为空，1–65535。升级提取备注末尾有效 `[ports:A-B]`，无效后缀保留。自动分配按数字端口跳过所有入站（含禁用/范围）、持久声明与本计划占用，不区分 TCP/UDP；显式端口不受范围限制。v1.4 隧道/规则无范围且未手填时返回 no_free_port；仅画布保留 TLS 8443 / WireGuard 51820 默认，已设范围耗尽仍报错。端口建议不预留，保存时再检查；手动保存可复用禁用入站端口，但 port_claims 始终占用。ports/check 仍报告禁用入站，供编辑器提示。
-
-服务器详情可保存地区、备注、续费日期、周期、价格、币种与提醒天数。首次 Owner 读取可导入本机旧元数据一次；服务器已有值优先，失败保留本机数据，Viewer 不导入。到期窗口内通过持久化每日标记发送 `system.alert`，不是支付或自动续费。宿主/核心 uptime、网卡速率和只读 sysctl 来自实际观测，旧 Agent、首个样本或过期心跳显示“—”；基础调优和恢复已获 Owner 批准，由固定白名单 helper 执行。月节点流量按面板时区合并 node_traffic_samples 与核心小时历史；旧版已清理的账户回退样本不能补回（L9），历史边界切入 UTC 汇总小时会提示精度不足。
-
-在节点测试位置配置具名主机/端口并发起 TCP 探测；非公网目标必须 Owner 显式允许。面板解析并校验全部 IP，Agent 再校验字面量地址、次数与期限；最多 10 次、每次 3 秒，每节点同时一个待执行请求，历史每节点/目标最多 100 条。结果的丢失率指 TCP 建连失败比例，中位数只取成功尝试；全失败显示未知中位数。代理列表“连通性”从面板主机测自建入站首个解析地址的 TCP/已配置的可信 TLS，不关闭证书验证，不测带宽或 UDP/QUIC，也不改变节点可用状态（L10）。
-
-定时 TCP 检测由面板每 1 分钟排队：目标开启 `scheduled` 表示系统默认（系统最多 5 个，超限保存返回 409 `scheduled_target_limit`）；节点默认继承，可用 `GET/PUT /api/v1/nodes/{id}/latency-targets` 配置每节点最多 5 个自定义目标，`custom=true,targetIds=[]` 停止该节点监测，`custom=false` 清除自定义目标并继承系统默认。GET 允许 Owner/Viewer，PUT 需要 Owner + CSRF，超过 5 个返回 409 `node_target_limit`，未知目标返回 400 `unknown_target`，重复 ID 返回 400 `invalid_request`。节点须启用、未删除、支持探测且 45 秒内有心跳。每次 3 次建连、每次 3000 ms，沿用公网地址校验及 Owner 的非公网许可。手动请求优先，等待已发出的单条探测完成或 2 分钟期限结束，不受定时队列的 `probe_pending` 阻挡。定时数据独立保存 7 天，不占手动的 100 条历史；`GET /api/v1/nodes/{id}/latency?hours=24` 支持 1–168 小时，Owner/Viewer 可读，目标写操作仅 Owner。现有 Agent 只上报 `medianMs`，均值和极值字段为 null；全部失败记录 sent=3、failed=3，耗时为 null。删除目标同时删除采样，已删除节点的采样不再提供查询。便携备份不含延迟采样和定时任务，保留系统默认、节点自定义目标与继承开关；0121 之前归档可恢复并迁移为继承默认。进程内恢复沿用当前节点目标设置及所需目标引用；恢复后等待新采样。查询目标包含当前有效目标和范围内有采样的历史目标。间隔固定，不提供设置项。
-
-普通端口转发在入站设置源监听、目标与 TCP/UDP，通过节点发布部署；v1.4 的规则在隧道管理创建，画布不再新增转发。需 Agent 声明 forward 能力；Xray 为 `dokodemo-door`，sing-box 为 `direct` override，GOST 为原生转发。转发不带用户身份，不直接进入订阅/用户额度/设备限制/域名归属；关联规则可另外生成目标用户入站的中转订阅（第 21 节）。转发字节只进节点/核心总量，relay 搬运服务排除。
-
-画布生成/接管入站按 `canvas_tunnel_objects` 的 ID 归属，普通编辑不能改名；不按名字前缀识别。v1.4 隧道/规则生成入站另由 `tunnel_objects` 管理，返回 managedBy，普通 PUT/DELETE 均为 409 managed_by_tunnel，须回隧道管理修改并发布。普通入站删除先通过 `GET /api/v1/inbounds/{id}/deletion-preview` 核对连带方案、隧道、规则、其他入站及 blockers；直接选择的入站不重复列出。`DELETE /api/v1/inbounds/{id}` 成功返回 200 `{pendingNodes:[{nodeId,name,reason}]}`；手工中转出站、代理链等外部引用统一返回 409 `inbound_delete_blocked`（包括原 `inbound_has_relay_outbound`），明细在 `error.blockers:[{kind,id,name}]`。
-
-用户重置周期可选不重置、每月或每 30 个本地日，存储独立周期、锚点与已处理边界；每月保留原日号、短月夹紧，下月恢复原锚点，30 日按面板时区日历运算而非固定秒数。调度器清零使用量，恢复活跃通过原额度自动发布。0118 迁移闭合的旧 `[config:…]` 前缀并去除旧 up/down 限速元数据；每用户限速已移除（L1），普通备注保留。恢复保守保留当前重置边界，避免旧备份再次清零；停止/恢复取消并等待调度任务。月末、时区与重启边界有假时钟测试，Linux/浏览器观察仍待 Owner。
+- **端口与入站删除**：`portRangeStart`/`portRangeEnd` 须成对；隧道/规则无范围且未手填返 `no_free_port`。隧道托管入站返 `managedBy`，普通编辑/删除返 409 `managed_by_tunnel`；普通入站删除先查 `deletion-preview`，外部引用返 409 `inbound_delete_blocked`。
+- **TCP 探测与延迟**：非公网目标须 Owner 允许；定时探测固定每分钟 1 次（系统默认与单节点自定义均最多 5 个，节点须 45 秒内有心跳），采样留 7 天且**不进便携备份**（仅存目标配置）。列表“连通性”从面板测 TCP/可信 TLS，不测 UDP/QUIC。
+- **转发与重置周期**：端口转发无用户身份，字节仅进节点/核心总量（relay 排除）。重置周期支持不重置、每月（短月夹紧、次月回锚点）或每 30 个面板时区日历日；备份恢复保守留当前边界，防旧备份重复清零。
 
 ## 18. 主机观测、续证与调优 helper
 
-**Ubuntu 当前内核的 BBR / fq 模块**。服务器详情中，Owner 勾选本次按需补装，再选 BBR 或 fq 并确认。若算法已经注册、内建或有可加载文件，Agent 直接应用参数。缺少设置入口、不可写、容器共享内核、旧 helper 或未支持的发行版会显示原因。首版要求 amd64/arm64 Ubuntu 宿主、systemd、系统 Python 3.9+、APT/dpkg、Canonical archive keyring，以及能证明运行构建的 `/proc/version_signature` 和已安装镜像包。现有内核无法提供目标时由 Owner 决定是否更换。
+### Ubuntu 当前内核 BBR / fq 模块补装与中断恢复
 
-补装服务从临时 APT 配置的 Ubuntu main 官方仓库查询，与运行 release、构建版本和架构精确匹配 `linux-modules-<release>` 或 `linux-modules-extra-<release>`。服务核对签名索引摘要、归档身份和模块文件清单，持有 dpkg 前端锁确认依赖已满足后，仅向 dpkg 提交核实过的本地归档。厂商的维护脚本可更新当前内核模块索引、initramfs 和引导菜单。包处理和参数应用各有回执，前者完成后 Agent 重新检查模块，后者逐键读回。参数失败时页面保留已配置包的名称。
+仅支持 amd64/arm64 Ubuntu systemd 宿主（Python 3.9+、APT/dpkg、Canonical keyring、`/proc/version_signature` 与镜像包可核验），从临时 APT 配置拉取精确匹配的 `linux-modules(-extra)-<release>` 验签持锁安装（包阶段等 15 分钟、参数 30 秒）。按请求 ID 查 `journalctl -u proxy-agent-tuning-modules.service` 与 `/var/lib/qui-tuning-modules/status.json`，中断先查 `dpkg --audit`。
 
-用请求 ID 对照 `journalctl -u proxy-agent-tuning-modules.service`、root 管理的 `/var/lib/qui-tuning-modules/status.json` 及原 sysctl 回执。包锁占用、网络或签名错误、精确版本不在索引、依赖变动、包配置失败各有具体原因。包配置中断时先在宿主运行 `dpkg --audit` 检查实际状态。包阶段等待最长 15 分钟，随后参数阶段独立等待 30 秒。超时后检查本机回执和下一次心跳，重新补装需要新的 Owner 请求。
+**包服务中断后回执一直为 `finished=false`**：同次开机内新请求会等待该回执。暂停提交调优请求，由宿主管理员收尾：
 
-**包服务中断后，回执一直为 `finished=false`。** 同一次开机内，新请求会等待这份回执。让 Owner 暂停提交调优请求，由宿主管理员按以下步骤收尾。
+1. 运行 `systemctl show proxy-agent-tuning-modules.service -p ActiveState -p Job`，仅当 `ActiveState` 为 `inactive`/`failed` 且 `Job` 为空/0 时继续；运行 `dpkg --audit`，先修完未完成配置/触发器并确认包状态正常。
+2. 核对 `/var/lib/proxy-agent/tuning/module-request.json` 与 `/var/lib/qui-tuning-modules/status.json`：`id`、`boot`、`release`、`targets`（含顺序）完全一致，`boot` 等于 `cat /proc/sys/kernel/random/boot_id`，`release` 等于 `uname -r`，且仍 `finished=false`；任一不符立即停止并查日志。
+3. 条件全满足时执行 `systemctl start proxy-agent-tuning-modules.service`（固定 helper 写入中断终态并跳过安装，命令报错属预期）；复查 root 回执确认为 `finished=true` 后再由 Owner 决定是否重提。
 
-1. 执行 `systemctl show proxy-agent-tuning-modules.service -p ActiveState -p Job`。仅当 `ActiveState` 为 `inactive` 或 `failed`，且 `Job` 为空或 0 时继续。运行 `dpkg --audit`，如报告配置或触发器未完成，先处理报告中的问题，再确认包状态正常。
-2. 读取 `/var/lib/proxy-agent/tuning/module-request.json` 和 `/var/lib/qui-tuning-modules/status.json`。确认两份文件的 `id`、`boot`、`release`、`targets` 完全一致，包括目标顺序；`boot` 必须等于 `cat /proc/sys/kernel/random/boot_id` 的输出，`release` 必须等于 `uname -r` 的输出，且回执仍为 `finished=false`。文件缺失或身份不符时，停止收尾，对照该单元日志排查请求来源。
-3. 仅在上述条件全部满足时执行 `systemctl start proxy-agent-tuning-modules.service`。固定 helper 将相同 ID 的中断记录写为终态，跳过安装。此次命令返回失败符合预期。重新读取 root 回执，确认仍是刚核对的 ID，且 `finished=true`、`error` 为“此前包操作中断，配置状态未确认；请检查 dpkg --audit”。确认后由 Owner 决定是否提交新请求。
+### 主机指标、自动续证与 sysctl 调优排障
 
-Owner/Viewer 可读 `GET /api/v1/nodes/{id}/metrics?hours=1..168`（默认 24）。每节点每分钟保留最后一条新鲜心跳，7 天清理；≤12 小时原始点，>12 小时分桶步长 ceil(hours×60/720)×60 秒。响应 intervalSeconds 为桶步长、sampleSeconds 固定 60、points 缺测为 null；桶内只平均已测值，不补零。非 lo 接口速率合计是宿主流量，可能跨接口重复计数。HostInfo 和 heartbeat 可空指标随节点详情提供，缺测不得当作 0。
+指标、推荐引擎与看板见[项目说明书 §22.0](project-spec.md#220-服务器调优与推荐应用流程)。运维要点：
 
-`GET /api/v1/nodes/{id}/tuning` 返回期望 desired、操作 status、逐键 result、末次心跳 current 与面板计算的 keyStatus。Owner 通过带 CSRF 的 PUT 提交完整字符串 settings、clear 和匹配 confirmNodeId；新 profile 省略旧键会恢复其初始值。clear=true 只能带空 settings，空 profile 同样清除。只接受 19 个固定 sysctl 键（`pkg/contracts/tuning`）和 Agent 相同边界；tcp_rmem/tcp_wmem 仅填最大整数。无能力返回 409 tuning_unsupported，离线/过期心跳返回 409 node_offline，同节点 pending 返回 409 tuning_busy。成功受理 202 仅表示排队，操作日志为“修改服务器调优”。
+- **自动续证**：原私钥，满 30 天或余 ≤14 天在控制连接续期（失败退避 1 小时，离线不跑，90 天期不变）。
+- **19 个固定 sysctl 键**：仅认 `pkg/contracts/tuning` 白名单（`tcp_rmem`/`tcp_wmem` 仅填最大整数）。请求写 `/var/lib/proxy-agent/tuning/desired.json`（0600），回执写 `status.json`；断流或 30 秒超时转 `unconfirmed`，**不自动重发**，核对心跳 `current`、日志与 `status.json` 后由 Owner 决定。启动/调优后以 `--probe-tuning` 实测写权限并写入带 boot ID 与 helper SHA-256 的 `probe.json`，未就绪时面板禁设新参数。
+- **持久化与快照**：配置落 `/etc/sysctl.d/99-proxy-tuning.conf`，首次原值存 root `0600` `.proxy-tuning-snapshot.json`（**严禁手删快照**）；清空/卸载按快照恢复，恢复失败中止卸载。便携备份排 `node_metric_samples`，恢复保当前库调优行并将 `pending` 置 `unconfirmed`，不改宿主 sysctl。
+- **排查**：systemd 看 `systemctl status proxy-agent-tuning-probe.service proxy-agent-tuning.path proxy-agent-tuning.service` 与 `journalctl -u proxy-agent-tuning`；OpenRC 看 `rc-service proxy-agent-tuning status` 与 `/var/log/messages`；核对 `desired.json`/`status.json` 的 `request_id` 与逐键错（helper 不调 `modprobe`/`sysctl`）。隔离验证：`sudo bash deploy/linux/tests/tuning-helper-test.sh`。
 
-等待结果期间其他心跳照常确认；断流后 pending 变为 unconfirmed，不自动换 ID 或重发。unconfirmed 时先查看后续 current、节点日志及 helper status.json，再由 Owner 明确提交新操作，不能根据本地期望宣称已成功或未应用。应用成功也要按实际读回值核对。
+### 整机月流量
 
-调优状态看板与参数来源：
-- 状态板汇总展示：拥塞控制与排队规则当前值、各状态键数量（`panel` 实测匹配面板期望、`drift` 发生偏离、`external` 外部配置管理、`unavailable` 键不可用、`default` 系统默认）、进程文件句柄限制（Agent 与核心子进程 soft/hard）、虚拟化类型（none/kvm/lxc/openvz 等，LXC 提示“容器内看不到 net.core.*，由宿主决定”）、最后一次应用结果及“重启后保持”（当开机标识 bootId 变化后 drift 为 0 即认定重启后保持）。
-- 来源识别与漂移：Agent 探测 `/etc/sysctl.d/*.conf` 与 `/etc/sysctl.conf` 中的显式条目。当某参数实测值与期望不同时，状态显示为 `drift` 并明确标明外部来源文件；参数表提供“纳入面板管理”按钮，可一键将外部生效的值吸纳进草稿。
-- 调优建议引擎：基于节点内存、线路带宽（`node_meta.bandwidth_mbps`）、虚拟化、RTT 中位数、入站协议及中继角色给出推荐项。Owner 可勾选并点击“采用所选”填入草稿，或点击“不采纳”隐藏该建议（当推荐值变化后会重新展示）。系统设置支持“新服务器上线后自动应用调优推荐”，开启后首次上报能力的全新节点会自动采纳推荐值。
-- 资源监控：曲线图增加“TCP 重传率”（根据心跳 `tcp_out_segs` 与 `tcp_retrans_segs` 跨分钟增量计算，无段发送时为空，不绘制为 0）。
-
-便携备份排除 node_metric_samples，快照删除后压实；恢复再次清空采样。node_tuning 随备份保存，但恢复合并保留当前库的调优行，删除仅在归档存在的行，pending 变为 unconfirmed，不下发旧操作。恢复不会修改服务器 sysctl，恢复后重新核对观测。面板自动续证准入已与 对齐：证书满 30 天或剩余不超过 14 天，沿用原密钥与现有确认流程。
-
-主机信息随 Capabilities 重发刷新；磁盘总量/用量与 disk_percent 都取 Agent 状态目录所在文件系统。load、进程数、TCP 全状态套接字数、UDP 套接字数及内存/交换/磁盘字节来自 Linux 实际读取，失败不填。tuning_current 是完整当前值，tcp_rmem/tcp_wmem 含三个整数；下发这两个键时只填最大值，前两个值保持应用时的现值。
-
-自动续证使用原私钥，证书满 30 天或余期不超过 14 天即在连接内尝试；失败退避 1 小时，离线不执行。面板须支持相同的自动续证准入，否则旧面板会返回 renewal is not due；90 天签发期不变。
-
-调优是 Owner 发起的固定特权操作。Agent 将 request_id、settings、clear 写入 /var/lib/proxy-agent/tuning/desired.json（0600），helper 返回同目录 status.json。status 为 applied/cleared/failed，keys 为逐键读回值与错误；30 秒未等到匹配 request_id 只表示结果未确认，不能宣称没有应用。请求 ID 须唯一，不自动重试未确认的变更。
-
-固定入口 `--probe-tuning /var/lib/proxy-agent/tuning` 在实际 helper 权限下逐一以写模式打开并关闭 19 个 sysctl，保留值不变。结果原子写入 `probe.json`，记录本次启动标识、执行探测的 helper 的 SHA-256 和逐键错误。worker 以固定安装路径的程序核对摘要。更新器回滚到旧 helper 后，即使旧程序遗留同一次启动的回执，也会显示权限未就绪。systemd 每次启动探测前先由独立的 proxy-agent-tuning-probe-reset.service 以 Agent 身份清除旧回执。OpenRC 在启动前清除旧回执，watcher 每次启动或被监管器重新拉起时写入 root 管理的探测状态，只有就绪时 worker 才接受该回执。安装与启动时探测一次，每次真实调优结束后重新探测。新 Agent 收不到本次启动的完整结果时，面板会显示原因并禁用新参数设置。旧 Agent 沿用原权限估算。网页只更新受管 worker 的机器，还需更新本机固定 helper 和启动单元。
-
-页面的「一键应用」先确认完整配置，再显示请求 ID 和 Agent 回执。面板受理后显示等待执行。状态读取与建议读取独立，手动刷新或收到执行结果会重读节点能力。`net.core.default_qdisc` 是系统默认排队算法，已有网卡的实际排队算法由网卡配置决定。
-
-- systemd：查看 `systemctl status proxy-agent-tuning-probe.service proxy-agent-tuning.path proxy-agent-tuning.service`、`journalctl -u proxy-agent-tuning`；path 应保持运行，oneshot 执行完为 inactive 正常。反复失败后仍应接收新请求。
-- OpenRC：查看 `rc-service proxy-agent-tuning status`、syslog 的 proxy-agent-tuning；检查 `/usr/local/lib/proxy-agent/tuning-watch`、busybox inotifyd 与启动运行级。
-- 检查 desired/status 的 request_id 是否一致及 keys 错误；算法必须已在 tcp_available_congestion_control 中或其内核模块存在于 `/lib/modules/$(uname -r)/kernel/net/ipv4`（qdisc 为 `/lib/modules/$(uname -r)/kernel/net/sched`）。helper 不调用 modprobe，不调用 shell 或 sysctl 命令，当内核模块文件存在时直接写入内核 procfs。容器只读 procfs、权限不足、内核不支持或读回不符均报告失败，并尝试恢复全部原值；恢复失败也逐键记错，须管理员核对真实 sysctl。
-- `/etc/sysctl.d/99-proxy-tuning.conf` 保存成功配置；root 0600 的 `.proxy-tuning-snapshot.json` 保存首次应用前原值，不由 Agent 写。空 profile/clear 删除配置并恢复原值。卸载先停 watcher、恢复快照，恢复失败保留程序并中止卸载。不要手动删除快照来处理失败。
-
-systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者读取 Agent 的 0600 请求并写入其 0700 目录），fs.file-max 靠 root 文件权限；/proc/sys 默认只读，只开放 19 个固定键。OpenRC 同为 root/CAP_NET_ADMIN + CAP_DAC_OVERRIDE，但缺少 systemd 文件系统隔离。若宿主策略拒绝写入，保留失败结果；不扩权。Linux/root 与 OpenRC 的主机结果见[验收矩阵](v1-acceptance.md) §11；可运行 `sudo bash deploy/linux/tests/tuning-helper-test.sh` 验证隔离的触发/重放流程，Go tuning 测试用假 proc 验证应用/恢复，不改宿主。
-
-### 整机月流量（v1.3 T1）
-
-每台服务器可以按所选单张网卡统计本期的整机网络用量，用来与供应商的月流量额度对照。它是整机流量，不等于代理流量，也不进入用户额度、订阅或计费。Agent 每个心跳上报各非 lo 网卡的累计字节、`bootId` 与 IPv4 默认路由网卡，面板在同一心跳事务里按（服务器、网卡、面板时区日期）写入日行并长期保留；首次采样、主机重启或网卡计数回退只重建基线。
-
-设置位于“服务器详情 → 设置 → 整机流量”，单独保存（操作日志“服务器流量设置”），不需要发布配置、不影响节点运行：
-
-- 统计方式：入站 + 出站（`sum`，默认）、仅出站（`outbound`）、入站与出站取较大值（`max`；取本期两个方向合计的较大值，不是每日最大值的合计）。
-- 统计网卡：留空为自动，即最近上报心跳的 IPv4 默认路由网卡，界面显示“自动（eth0）”或“自动（—）”；也可以填写明确网卡名，离线或尚未上报的网卡同样可以配置，统计到数据后才有数值。
-- 额度：可选，1 字节以上的整数，界面按 GiB/TiB 输入；只用于展示与进度条，不限速、不停用服务、不告警。
-- 流量重置日：1–31，默认 1；短月份按该月最后一天（1 月 31 日 → 2 月 28/29 日 → 3 月 31 日）。周期是半开区间，边界瞬间开始新周期；重置不清零计数、不删除日行，只改变汇总区间。
-
-查询：Owner/Viewer 都可读 `GET /api/v1/nodes/{id}/machine-traffic` 与批量 `GET /api/v1/nodes/machine-traffic`；设置用 `GET/PUT /api/v1/nodes/{id}/machine-traffic/settings`，PUT 仅 Owner 且要求 CSRF，四个字段整体替换（清除额度时显式传 `allowanceBytes: null`）。服务器列表的“本月整机流量”与详情页的系统卡片共用同一份摘要；详情页另一个“代理流量”是账户样本口径，两者不能互相替代。
+按所选单张网卡统计整机用量（位于「服务器详情 → 设置 → 整机流量」，`sum`/`outbound`/`max`、自动或指定网卡、展示额度、1–31 重置日；无需发布、不入用户额度/订阅；三张表随备份保存，恢复以当前库为准）。
 
 口径与限制（全文；界面提示只显示摘要）：
 
@@ -663,142 +337,53 @@ systemd helper 是 root oneshot，能力上界为 CAP_NET_ADMIN + CAP_DAC_OVERRI
 > 自动网卡来自 IPv4 默认路由；策略路由或 IPv6-only 请手动选择。
 > 修改网卡会重新计算所选网卡的本期数据；修改面板时区不会重新分桶历史数据。
 
-同一次启动内中断的采集按时间比例分摊到跨过的日期，所以日行是估算，不保证与宿主或供应商逐日一致。没有本期日行或解析不到网卡时用量为未知，界面显示“—”，不显示为 0；已有日行但当前心跳过期时显示已测总量，详情标注“截至上次采样”，服务器卡片不显示这行说明。切换网卡或统计方式会按保留的日行重算本期，不删除数据；改额度只影响展示。修改面板时区后，之后的流量按新时区分日，已记录的日数据不重新分桶。三张机器表（`node_machine_traffic_settings`、`node_machine_traffic_daily`、`node_machine_traffic_cursors`）随加密备份保存，恢复以当前库的用量为准。
+无本期日行或无法解析网卡时显示“—”而非 0；心跳过期但有日行时详情标注“截至上次采样”。
 
 ## 19. 多核心运维
 
-**看节点到底有几个核心**：`GET /api/v1/nodes/{id}` 的 `capabilities.cores` 是 Agent 报告为**启用**的核心清单（`name/version/protocols/singbox_user_stats/forward_inbound_supported/device_gate_supported/observation_contract_version`），`heartbeat.cores` 是逐核心运行状态（`name/healthy/error/started_at/traffic_source_status`）。未上报 `multi_core_supported` 的旧 Agent 仍显示一个核心（`capabilities.core_name`），缺失的观测保持缺省而不是 `false`。`core_selectionBlocked` 列出当前**不可选**的组件（正在添加或移除）。
-
-**给入站指定核心**：入站表单的 `core` 留空表示“当前主核心”，不要为了跟主核心显式绑定而填值——主核心换人后空值会跟着走，显式值不会。保存与发布都会按该核心的能力拒绝不支持的协议、转发入站、WireGuard 与设备门控；同一节点的监听端口在所有核心与端口转发之间**唯一**（同一数字端口即使传输不同也不能复用）。
-
-**添加缺失核心**：服务器 → 代理核心，`POST /api/v1/core-updates`，`component` 填 `xray`、`sing-box` 或 `gost`，并带当前已确认修订、官方（或严格匹配的 qui）资源 URL 与归档 SHA-256；对话框里选一个版本就会按这台服务器的架构与 C 库填好 URL 与官方公布的摘要，批量升级按每台各自解析，手改过就按填写的值提交。GOST 的版本、URL 与摘要固定，见第 20 节。每个（节点、组件）同时只有一个活跃任务，不同组件可以同时排队。任务 `success` 只表示镜像切换成功；只有下一次能力上报里出现该组件，它才会从 `core_selectionBlocked` 消失并可选为入站核心。
-
-**移除核心**：先删掉该组件上的所有入站（包括禁用的），发布并确认该修订，然后 `POST /api/v1/nodes/{id}/cores/{component}/remove`（带 `confirmNodeId` 与当前已确认修订）。拒绝码：`core_in_use`（错误体 `inboundIds` 列出仍占用该组件的入站）、`core_pending`（该组件正在添加/移除或有部署占用）、`last_core`（最后一个启用核心不能移除）、`revision_mismatch`（提交的修订不是当前已确认修订）。断线后用同一 id 重发即可，回执幂等；在能力上报确认之前该组件仍然显示。安装器拥有的二进制不会被 Agent 删除，只会被禁用，重新安装同组件即重新启用。移除成功时 Agent 还会删除该核心的 `runtime/<组件>/`（运行标记、accounting key、访问日志等）：确认退出之后才删，退出未确认（`ErrCoreStopUnconfirmed`）时目录、清单与镜像都保留，所以看到该目录存在且移除报这个码，说明进程没退干净，别手工 rm。`cores.json.enc`、更新历史与安装器二进制保留；重新添加同一组件会建全新的运行目录。移除后要回滚到使用该组件的历史修订会被拒绝（`rollback refused: …`），必须先装回组件或发布一份显式指定核心的新修订。
-
-**逐核心重启/健康检查**：`POST /api/v1/nodes/{id}/restart-core` 与 `/health-checks` 的 `core` 留空是整节点操作，填 `xray`/`sing-box`/`gost` 只作用于该核心；历史回滚始终是整节点。执行结果在 `GET` 同名路径的历史里带 `core`。
-
-**按核心计量**：协商了 `node_traffic_supported` 的 Agent 上报核心/节点总量，包含 Xray 的已渲染转发与 sing-box/GOST 转发字节，不与账户样本重复相加。用户额度只计账户流量，官方 sing-box 缺用户统计标签时仍未知；旧 Agent 未计入的转发字节不补记。累计游标、epoch 与统计源规则见[项目说明书](../AGENTS.md) §21。
-
+契约见[项目说明书 §22.2](project-spec.md#222-核心更新与移除)。入站 `core` 留空跟随主核心，同节点端口跨所有核心与转发全局唯一。添加核心（`POST /api/v1/core-updates`）须待能力上报后才解除 `core_selectionBlocked`。移除核心前须删尽该核入站（含禁用）并发布确认，再 `POST /api/v1/nodes/{id}/cores/{component}/remove`（拒码 `core_in_use`/`core_pending`/`last_core`/`revision_mismatch`）；安装器二进制只禁用不删，**报 `ErrCoreStopUnconfirmed` 表示进程未退干净，勿手工 `rm` `runtime/<组件>/`**，移除后回滚到依赖该核的旧修订被拒。`restart-core`/`health-checks` 指定 `core` 仅作用于单核，回滚始终整节点；各核转发字节计入节点总量。
 
 ## 20. GOST 运维
 
-**它是什么**：GOST 是第三种核心类型，只做端口转发（`forward` 入站，TCP/UDP），固定官方 3.3.2，只有 linux/amd64。它不承载用户：没有凭据、订阅、额度、设备门控与域名记录，凡是在页面上找不到“GOST 用户”的入口，都是设计如此，不是缺页。
-
-**装在哪里、怎么跑**：二进制 `/usr/local/lib/proxy-agent/gost`（安装器持有，Agent 只禁用不删除）；Agent 把该修订的原生 JSON 生成为 `<Agent 状态目录>/runtime/gost/config.yaml` 后启动子进程，没有独立的 systemd/OpenRC 单元。日志级别固定 `warn`、格式 `text`（默认级别会按连接刷屏并淹没 journald），子进程 stderr 只保留最近 4 KiB 作为失败原因。空闲常驻内存约 45 MB（G0 实测口径），远高于 Xray 与 sing-box，因此只在确实需要转发的节点上安装。指标只走运行时目录内私有 unix socket `runtime/gost/metrics.sock`（配置里写成 `unix://…`），不开放 HTTP、pprof 或任何公开监听；该 socket 提供节点累计字节，供节点总量使用。
-
-**健康怎么读**：GOST 的“健康”只表示**运行期转发可用**——确切子进程存活 ＋ 每个生产 TCP 监听可拨通 ＋ 每个生产 UDP socket 归属该子进程。失败会带 `core.ErrListenerUnavailable` 并在错误里点名监听地址，逐核心健康与错误码见节点详情与 `GET /api/v1/nodes/{id}/health-checks`。两点不要误读：指标读取失败只改统计源状态，不判核心不健康；**目标 IP 是否可达不属于核心健康**，`tcp-probes` 与手工验证才说明目标状态。
-
-**发布与重启**：配置改动走正常发布；当前实现一次发布会重启该节点的**全部**核心，所以新增/修改 GOST 转发会短暂中断同节点 Xray 与 sing-box 的连接，反之亦然。GOST 进程崩溃只由它自己的 supervisor 槽位按既有退避恢复，不会重启其他核心。发布失败按第 10 节的回滚规则回到上一镜像/上一修订。
-
-**安装、更新与移除**：面板“服务器 → 代理核心 → 添加内核”选 GOST 会预填 3.3.2、固定 URL 与归档摘要，其它版本/摘要一律拒绝；排队还要求该 Agent 上报了 `Hello.gost_core_supported` 且平台是 linux/amd64。移除走“内核管理 → 移除”，前置条件与其他核心相同（当前草稿与已发布修订都没有 GOST 入站、不是最后一个核心）。
-
-**它永远不是主核心**：GOST 不能作为节点的第一个（主）核心；节点始终保留 Xray 或 sing-box 作为主核心，`--core gost` 单独使用或排在 xray/sing-box 之前的安装参数会被拒绝，`cores` 首项为 gost 的配置也一样；移除最后一个 Xray/sing-box 会被拒绝（`last_core`），因为 `core` 留空的入站与设备门控等都跟随主核心。GOST 只能是附加核心。
-
-
-### GOST 转发的池、端口范围与限流
-
-目标池、端口范围与限速只在**节点配置 → 编辑转发入站**里配置；新隧道规则为单目标单端口，画布不再创建转发。字段与校验：
-
-- 目标池 `targets`：1–32 个有序 `{host,port}`；与旧的单一 `host`/`port` 互斥。`round` 轮询，`fifo` 主备（默认 `round`）。`max_fails` 1–100（默认 1），`fail_timeout` 为 1–3600 的整数秒（默认 `5s`）。
-- 端口范围 `port_end`：含尾端，起端是入站的监听端口，最多 256 个端口。GOST 的 `addr` 不支持范围，所以 Agent 把范围展开成**每个端口一个服务**（`tcp,udp` 再乘 2），每个服务都带完整的目标池与自己的选择器/限速/连接上限；单节点最多 1024 个生产服务。
-- 限速 `bandwidth_in_bps`／`bandwidth_out_bps`：字节/秒，0 表示该方向不限，否则 1024–1000000000000。界面按 KiB/s 输入。GOST 用 `ParseBase2Bytes` 解析，裸整数会被拒绝，因此渲染为 `<整数字节>B`（`0` 是上游唯一特殊处理的“不限”）。限速按**每个展开后的服务**各自生效，不共享额度。
-- 连接上限 `max_connections`：0–100000，只统计 **TCP 并发连接**；UDP-only 转发不允许设置（G0 只测量了 TCP 并发）。Agent 的监听健康检查每次也会短暂建立一个连接（GOST 随之连一次目标），会暂时占用一个名额，所以上限很小（如 1–2）时偶尔会有一个连接因此被关闭，上限请留出余量。
-
-**行为与限制**：主备（`fifo`）切换不是无损的——每个失败窗口内客户端会遇到**一次**被接受后关闭的请求，之后才走备用目标；轮询（`round`）同样会在标记失败后才避开坏目标。超过连接上限的连接同样是“先接受再关闭”，所以监控上表现为短连接失败而不是拒绝握手。目标全部不可用时转发仍会接受连接然后失败，健康检查不因此判核心不健康（核心只检查自己的监听），请用 `tcp-probes` 或真实流量验证目标。修改这些设置后发布配置会重启该节点的**全部**核心（含 Xray 与 sing-box），既有连接短暂中断。转发字节只计入节点总量（AGENTS §21 的 GOST 段），不进入用户额度、设备限制或域名记录。
-
-### 旧画布 GOST 中继（v1.3.x 操作）
-
-**v1.4 迁移说明**：C1 已禁止新建画布端口转发，M1 在面板启动和恢复时把安全的旧转发移入隧道管理。转换本身不下发配置、不改端口、不签发证书，规则默认不显示在订阅。v1.6.1 删除了转换代码与 migration-report 接口（v1.6.0 启动时已完成转换），仍在画布的旧连接按正常管理与发布流程处理。恢复仍需显式发布，既有密封凭据保持不变。下面的画布操作说明对应已发布的 v1.3.x；v1.4 的转换范围与验证见 [M1 报告](v1.4-m1-report.md)。
-
-在画布上把一条 `port_forward` 连接的协议选成 `gost`，按普通端口转发填源监听端口、目标地址/端口与 TCP/UDP，再发布即可。**两端服务器都必须装了 GOST 核心**（两侧都上报 GOST 核心与设置契约 3），出口服务器的端口范围里要有空闲端口给中继监听；端口由面板分配，规则与入站一致（AGENTS §12）。入口节点把这条转发的目标经出口节点的 `relay` 监听访问，中继用面板按隧道生成的双向 TLS 证书认证；证书存在面板库的密封列里，CA 私钥签发后即丢弃、有效期 10 年，界面只显示代数、服务器名、到期与指纹。
-
-**防火墙**：出口节点必须让入口节点能访问**中继监听端口**（TCP，端口范围里分配出的那个数字）。入口节点不需要对出口开放任何入站，也不需要放开 18880 之类的面板管理端口。
-
-**发布顺序与轮换**：GOST 隧道固定先发布出口（中继监听），再发布入口（拨它的链），批次回滚反向。旧画布隧道的“轮换凭据”接口已在 v1.6.1 删除；需要换凭据时改用第 21 节隧道管理的轮换。旧画布数据里没有凭据的隧道在第一次发布时自动补发一代，不改变发布状态。
-
-**发布只覆盖改动的服务器**：画布发布只为本次绘制涉及的服务器创建版本（顺序仍是出口、中转、入口）；仅为中继依赖被纳入、且已运行相同配置与相同启用意图的服务器不再发布——没有新版本、没有部署目标、不重启核心，所以改 us2↔uk 的隧道不会再重启 alpine。想强制重发某台服务器，就改它的配置或从服务器页单独发布。`POST /api/v1/deployment-batches/relay` 这类显式中继批次仍发布全部成员。
-
-**删除不等于远程撤销**：删除隧道不会给节点发撤销消息，**离线节点上仍在生效的旧凭据不会被撤销**，直到它重新连接并收到新配置（或手工移除那个中转监听入站）。要立刻断开时，先发布一份不含该隧道的配置并确认出口节点已停掉中继，再删除隧道。
-
-**排查**：入口连不上中继时，先看出口节点 GOST 子进程的警告行（`journalctl -u proxy-agent` 里的 `tls: client didn't provide a certificate`）——这句话同时表示“没带证书”和“证书不是这条隧道的 CA 签的”；再确认中继端口在防火墙放通、两端 GOST 都在运行。
+- **定位与资源**：固定官方 3.3.2（仅 `linux/amd64`），仅做 TCP/UDP 转发，**无用户/订阅/额度/设备门控/域名记录**，**永远不能作主核心**。二进制 `/usr/local/lib/proxy-agent/gost`，配置 `<DataDirectory>/runtime/gost/config.yaml`，无独立单元；日志固定 `warn/text`（stderr 4 KiB），空闲约 45 MB，指标走私有 `runtime/gost/metrics.sock`。
+- **健康与重启**：健康仅查进程与本机监听（指标错或目标不通不判不健康，测目标用 `tcp-probes`）。发布会重启同节点**全部核心**；GOST 崩溃独立退避拉起。
+- **目标池/端口范围/限流**（节点转发入站）：`targets` ≤32（`round`/`fifo`，`fifo` 切换与超限均为先接后关）；`port_end` ≤256 端口（单节点 ≤1024 生产服务），限速与 TCP `max_connections`（UDP-only 禁用）均按展开后单服务计，健康检查短暂占 1 连接名额。转发字节仅进节点总量（见[项目说明书](project-spec.md)）。
 
 ## 21. 隧道管理与中转方案（v1.4）
 
-以下为 v1.4 的行为，A1 实核、主机与浏览器验收结果待补。v1.3.1 及更早版本仍按第 20 节旧画布流程操作。
+配置与接口见[项目说明书 §27.13](project-spec.md#2713-隧道管理与节点中转)。各跳须 `linux/amd64` 且可跑 GOST（两跳契约 ≥3、三跳 ≥4），接收跳设公网地址/`connectHost` 并放通前跳 TCP 中继端口，入口按 network 放通；发布页可逐台补装缺失 GOST 3.3.2（单台等 5 分钟，直接调 API 返 409 `gost_install_required`），闲置 GOST 见 `gostRemovable`。先预览再按 `exit → mid → entry` 发布（失败反滚）；目标变动标 `needs_publish`，删除已发布对象先标 `pending_delete`；发布持久收尾，超 300 秒返 202（`status=publishing`），重启自动幂等完成。轮换凭据（`POST /api/v1/tunnels/{id}/rotate-credentials`）须重发且会短暂中断会话；删除不保证立即撤销离线节点旧凭据。目标仅见中继源 IP（设备限制合为一来源），账户流量在目标计量，UDP 经 TLS/TCP 封装可能受队头阻塞。
 
-1. 各跳须能运行 GOST：两节点各跳契约至少 3，三节点至少 4；GOST 仅 linux/amd64，不能作主核心。v1.5.5 可由发布页面补装缺失的 GOST，仍要求 Agent 声明安装能力并协商多核心。为接收跳和规则入口设置服务器端口范围，或手填监听。接收跳须有公网地址或 connectHost 覆盖，防火墙放通前一跳到接收跳的 TCP 中继端口；规则入口按 network 放通 TCP/UDP。
-2. 在“节点配置 → 隧道管理 → 隧道”创建 entry → [mid] → exit，最多三台不同服务器，传输为 TLS＋mTLS。入口不另占隧道监听；每个接收跳一个共享监听，多规则复用，保存后端口固定。
-3. 在“规则”选择入口、监听端口、network 和隧道；不选隧道就是直接转发（有 GOST 优先用它，否则主 Xray/sing-box）。目标选 linked 用户入站或 manual host/port。linked 随目标公网地址/入站端口变化，出口即目标时用 127.0.0.1；manual 保持手填且不能对用户显示。也可在目标节点点“添加中转”选择已有隧道，创建由该目标节点持有的 linked 规则。
-4. 保存只是草稿。选择隧道/规则先查看计划中的服务器、端口、路由、顺序、冲突与警告，再发布；按 exit → mid → entry 应用，失败反向回滚。选择隧道会纳入规则，选择规则会纳入其隧道及必要拨号依赖；逐服务器核对 applied/unchanged/failed/rolled_back/skipped。重复无修改发布不创建修订或批次。
-5. linked 规则成功发布、启用且对用户可见后才追加中转订阅；用户须已获目标入站授权与已发布凭据。保留目标协议/凭据/TLS，显式原 server name，仅把地址/端口换成入口/规则监听，名称追加“经 入口节点”。UDP 协议须规则支持 UDP，其他须 TCP；导出器原有省略继续有效。Owner 的 shareLink 是合格用户的真实凭据预览，Viewer 恒为 null，草稿链接不代表已部署。
+### 21.1 中转方案撤除与待清理
 
-目标公网地址/入站端口变更后，已发布规则显示 needs_publish；核对新目标再发布，草稿不会提前改变订阅快照。删除已发布规则/隧道变 pending_delete 且只读，旧端口声明、运行设置与订阅快照保留到移除成功；隧道须先移除所有引用规则。删除目标入站会连带删除以它为出口的方案、linked 规则及失去全部规则的隧道；其他引用以 `inbound_delete_blocked` 列出。
+撤除用 `POST /api/v1/canvas-schemes/{id}/remove`（带 `{updatedAt}`），外部引用或未收尾 `deployment_batch` 返 409，确认后立即删方案并下发 `auto: relay cleanup` 修订（只移除已删对象）。离线重连自动清，失败按 1/5/30 分钟退避重试（之后每 30 分钟，面板重启继续）。排查看「待清理」标签、`relayCleanupPending`/`relayCleanupCode` 与面板日志 `relay cleanup attempt failed`，勿以页面消失推定远端已停。
 
-计划 `installGost` 列出需补装的服务器，页面确认后逐台安装固定 GOST 3.3.2 并等能力上报出现 GOST，每台最多等 5 分钟，再提交隧道发布；任一台失败或超时均停止发布，已安装核心保留。直接调用发布 API 遇到缺失 GOST 返回 409 `gost_install_required`，不在请求内自动安装；页面遇到状态变化的 409 会更新名单，要求再次确认。发布成功后的 `gostRemovable` 列出无草稿或当前发布入站引用的 GOST，页面给出「版本与更新 → 代理核心」入口，由 Owner 手动移除。
+## 22. 通知与告警
 
-轮换使用 `POST /api/v1/tunnels/{id}/rotate-credentials`，带最新 updatedAt（Owner＋CSRF）；重新签发各段材料、标 modified，再计划/发布。三节点两段使用独立 CA/叶子证书。监听先切换再切拨号端，期间可中断，TCP 会话与 UDP 关联需客户端重建。不要按旧画布地址轮换已迁移对象；删除也不保证立即撤销离线节点的旧凭据。
+每 60 秒评估一次：`node_offline` 每轮离线/恢复各一次（管理后台与订阅过滤共用持续时间，0 分钟须已断线/过期）；`cpu`/`memory`/`disk`、`public_ip`、`machine_traffic` 与 `system_alert` 沿用默认 30 分钟冷却，恢复不受限。渠道支持 Telegram Bot（2xx 须合法 JSON 且 `ok=true`）与 HTTPS Webhook（重定向亦须 HTTPS）；WARN 仅记渠道 ID 与错误码，不记 Token/正文：
 
-v1.4 的一次性转换已在 v1.6.0 启动时完成；v1.6.1 删除了转换代码、其标记与报告及 `GET /api/v1/tunnels/migration-report`。仍留在旧画布的连接通过正常管理流程重建所需隧道/规则、预览计划后发布，不会自动接管。恢复标 modified，须显式发布。
+| 错误码 | 含义与排查 |
+| --- | --- |
+| `channel_timeout` / `channel_network` | 超时（默认 10s）或 DNS/TCP 失败，查面板出站连通、DNS 与防火墙 |
+| `channel_http` / `channel_rejected` | 上游 4xx/5xx 查接收端日志；被拒（Telegram `ok=false` 或非 HTTPS）核对 Token/Chat ID/URL |
 
-“中转方案”只建代理中转：可从节点“添加中转”新建并预选当前节点为入口，出口可选 qui 入站或外部代理出站。qui 入站出口使用独立内部监听/凭据；外部出站须属于前一跳且满足 TCP/UDP，HTTP 不支持 UDP。relay/exit 实例可填 relayPortMode/relayPort，优先旧 tunnelPort；未设范围才保留 8443/51820 默认。旧 port_forward/gost 连接在迁移前只读保留，可删除，不可新增或改动。
+## 流量存储自动整理
 
-目标只能看到中继源地址，同一中继后的客户端在设备限制中合为一个来源；账户流量在目标计量，规则入口字节仅节点总量，中间/出口 relay 排除。UDP 经 TLS/TCP 封装，延迟可能受丢包和队头阻塞影响；监听健康不等于握手或目标可达，不承诺重启保留既有流或未测的 UDP 空闲寿命。
+- **核心明细**：留最近 7 天，超期按 UTC 整点合并小时汇总（不删累计位置，迟到下轮合并，接口返 `traffic_history_resolution`）。
+- **编号回执与冲突**：面板入库且节点确认本机持久删除后再留 ≥24 小时，每批 ≤500 条淘汰（隔离缺口延长保留）。升级先面板后 Agent，已切节点拒无编号上报。遇 `traffic_delivery_retired`/`traffic_delivery_conflict` **严禁删队列或换编号绕过**，须保原 `queue.db`/`spool.key`/独立 witness 恢复整组状态；真重装走恢复码登记在同事务封旧授新。
+- **观察与门禁**：「访问存储增长观察」看进度与缺口；不自动 `VACUUM`（删后释复用页，文件体积不立降）。启用编号队列须基线、当前与上一 Agent 回滚镜像全支持 spool ABI 7，否则日志提示未启用，严禁手改 floor 或删回滚镜像强启。
 
+## 历史未结记录与恢复材料保护（2026-11-20 文档核对）
 
-### 21.1 中转方案撤除与待清理（v1.5.8）
+以下仅索引仓库最后记录，当前是否仍存在未重新连接生产核实。核实前不把历史未结标成已完成，也不直接重做原操作。
 
-「添加中转」选择入口、可选中间服务器与入口协议，再预览并创建发布；入口一律新建，默认加入出口入站所在合格分组。任何有入口绑定的入站不得作为画布 inbound 实例或 linked 规则目标，保存、规划和发布共用校验，返回 400 `inbound_is_scheme_entry`。节点列表路径摘要来自草稿，验收须同时看六项状态、实际订阅和真实连通。
+| 记录 | 已有事实与缺失证据 |
+| --- | --- |
+| 美国 CC → 德国 TCP 22550 临时放行 | 2026-11-15 14:38:30 UTC 新增来源 `148.135.40.213/32` 单条临时 ACCEPT，未持久化，重载／重启可能已消失；CC 后改走域名 443，不再需要。最后记录因 SSH 被对端关闭未撤，仓库没有后续撤除回执。 |
+| UK → Alpine NAT 隧道 | 2026-11-07 16:18 UTC Owner 删除后当时为 `pending_delete`，Alpine 仍监听 21411，需成功发布移除才结束；未见同 ID 完成回执。DDNS 当时指向不同 SSH 身份，未发送凭据；不能据旧地址访问或猜测现状。 |
+| 明文 VLESS :35000 回程异常 | 2026-11-16 只读发现的新方案场景，当次未改配置，未见后续修订或关闭回执；前一天已撤的两个测试方案不作为关闭证据。 |
 
-撤除用「停用并移除」，一次确认后发送 `POST /api/v1/canvas-schemes/{id}/remove`，体为 `{updatedAt}`。`DELETE /api/v1/canvas-schemes/{id}` 保留，语义同完整撤除，请求体同样需要 `updatedAt`；旧 `remove-plan`、`remove-status`、遗留资源与重新挂接路由移除。面板立即删除方案及专用入口、内部监听、出站、规则与无引用通道，保留共享或外部引用资源；成功返回 200 `{schemeId,removed:true,pendingNodes:[{nodeId,name,reason}]}`。不再选择恢复目标或勾选人工改动，确认即包含这些改动。删除入站或服务器也执行连带删除，先通过删除预览逐项核对名称；外部引用及未收尾的受影响发布批次仍以 409 `inbound_delete_blocked`／`node_delete_blocked` 阻止，明细在 `error.blockers`，其中 `deployment_batch` 须等收尾后再删。
+- **生产机 `/tmp` 1 GiB 在线扩容未重启验证**：v1.7.0 升级期间已将生产机 `/tmp` 从 482 MiB 在线扩至 1 GiB 并写入持久挂载配置，但尚未执行重启验证。
 
-「待清理」表示面板对象已删除，受影响节点尚未确认移除旧运行对象。清理器只从已发布状态删去数据库中已删除的对象，不发布其他草稿；修订作者为 `auto`，摘要为 `auto: relay cleanup`。在线即下发，离线重连后自动下发；应用失败或回滚在 1／5／30 分钟后重试，之后每 30 分钟重试，面板重启后继续。新撤除登记将 `attempts` 归零、清空失败码并立即重试；该节点的清理修订仍 pending 时，先等其结束，再按新增删除生成下一次清理，避免并行修订冲突。重试器发现逻辑删除节点时清除其待清理行。成功前远端仍可能运行旧配置。
+CC 旧修订 61／87 积压断连与两项旧测试方案删除阻塞已由后续记录解决；测试机模块清理与 Telegram 手机收件未核对属历史验证末态，不推定为生产任务。
 
-排查时先看服务器列表／详情的「待清理」标签，再读节点 API 的 `relayCleanupPending` 与 `relayCleanupCode`，按最近失败码核对连接、核心校验与应用结果。在面板日志查 `relay cleanup attempt failed`，结合节点和修订定位；离线时先恢复控制连接，应用失败时处理对应故障并等待重试。不要以方案已从页面消失认定远端已清空。
-
-迁移 0150 删除旧 reuse 绑定，保留普通入站配置；升级启动时一次性清理脱离方案的入口、无方案引用的画布通道及其对象，登记待清理并保存完成标记。遗留资源页面与重新挂接操作移除。升级前备份，升级后逐台核对待清理是否消退及旧监听是否移除。
-
-### v1.5.6 隧道发布收尾（待发布）
-
-隧道发布将业务收尾记录与生成对象持久保存（迁移 0149）。关闭页面或 HTTP 请求断开不取消已开始的发布；等待超过 300 秒返回 202、status=publishing 和 batchId，页面显示仍在发布。批次终态、周期扫描和面板重启调用同一幂等收尾，未收尾前保留节点与对象占用。成功才推进捕获版本和订阅快照；终态失败恢复生成对象。此规则适用于隧道管理发布，不改变画布撤除的既有限制。
-
-## 22. 通知与告警（v1.5）
-
-### 22.1 规则与评估
-
-通知模块（`internal/panel/notification`）由后台工作循环每 60 秒运行一次规则评估：
-- **节点离线（`node_offline`）**：节点处于 offline 状态且达到持续时间（默认 3 分钟）没有心跳时通知一次，持续离线不重发；心跳恢复（online 或 degraded）后通知一次，再次离线开始新一轮。去重状态持久保存，面板重启后沿用。管理后台离线展示共用此持续时间，从最后有效心跳计时；连接断开或心跳超过 45 秒有效期、但未达到设置时间时显示“连接中断，等待恢复”，节点配置页保留卡片，到时才按离线隐藏。取消勾选仅关闭离线与恢复通知，持续时间仍生效；关闭期间恢复会清理该轮离线状态。0 分钟表示确认断线或心跳过期后立即离线。保存规则后刷新已有页面的节点状态，通知发送仍以后台评估周期为准。发布、调优等操作及实时指标继续使用原有连接与 45 秒心跳检查。
-- **CPU / 内存 / 磁盘占用（`cpu` / `memory` / `disk`）**：在指定持续窗口（默认 5 分钟，磁盘 0 分钟即单次采样）内，全部非空采样均达到或超过阈值（默认 90%）时触发告警；指标回落至阈值以下时发送恢复通知。
-- **公网 IP 变化（`public_ip`）**：探测到节点上报的候选公网地址与记录值不同时触发通知（首次启动记录 baseline，不发通知）。
-- **整机流量超额（`machine_traffic`）**：节点当前计费周期的整机用量达到额度阈值（默认 100%）时触发告警；重置周期后回落发恢复通知。
-- **系统告警（`system_alert`）**：自动接入内部 `system.alert` 事件（证书续期失败、证书发布失败、服务器续费提醒、自动额度发布失败等）。
-
-**冷却控制**：节点离线固定每轮“离线一次、恢复一次”，不使用冷却重提醒；旧配置中的冷却值保留但不参与离线判断。其他规则沿用冷却时间（默认 30 分钟）控制重复告警；恢复通知（`resolved`）不受冷却限制。
-
-### 22.2 渠道配置与排查
-
-Owner 在「系统设置 → 通知」中配置外发渠道：
-- **Telegram Bot**：配置 `Bot Token` 与目标 `Chat ID`。面板通过 HTTPS POST 调用 Telegram Bot API `sendMessage` 发送通知。
-- **Webhook**：配置目标 URL（必须为 HTTPS）。面板向目标 Webhook 发送 JSON 格式告警消息。
-
-**投递错误码与排查**：
-- `channel_timeout`：向外部平台发起连接或等待响应超时（默认 10 秒超时限制）。检查面板服务器的网络出站连接及上游响应速度。
-- `channel_network`：网络连接失败（如 DNS 解析失败、TCP 连接被拒绝）。检查面板服务器的 DNS 配置与外部网络连通性。
-- `channel_http`：上游服务器返回 HTTP 4xx 或 5xx 错误响应（如 Webhook 接收端发生内部错误）。核对 Webhook 接收端服务日志。
-- `channel_rejected`：请求被拒绝或参数无效（例如 Telegram 返回 `{"ok": false, "description": "..."}`，如 Token 错误、Chat ID 不存在或机器人未加入群组；或 Webhook 使用了非 HTTPS 地址）。核对渠道 Token、Chat ID 与 URL 配置。
-
-投递校验（v1.5.6 待发布）：Telegram 的 2xx 响应必须为完整合法 JSON 且 ok=true；Webhook 的重定向目标也必须为 HTTPS。渠道读取、解密和投递结果保存错误写 WARN，仅记录渠道 ID 和固定错误码，不记录 Token、配置或上游正文。
-
-## 流量存储自动整理（0154，v1.7.0 发布）
-
-核心流量像电表明细：保留最近 7 天，旧明细按 UTC 小时合成一条，累计计量位置不删。旧数据迟到仍正常记增量，再由下一轮整理合并。小时合并后不能精确回答半小时或任意秒边界；接口返回 `traffic_history_resolution` 和可选择的 UTC 整点。总览月份不可读时显示原因，今日仍能读取。用户用量、额度和采样频率不变。
-
-新流量回执像带连续编号的收据：面板处理完成、节点确认已从本地持久删除后，再等至少 24 小时才淘汰。后台每批最多处理 500 条；隔离缺口可能延长保留时间。旧 Agent／无编号历史回执继续保留。应先升级面板，再升级 Agent 才能协商新协议；已切换节点不接受无编号上报。`traffic_delivery_retired` 或 `traffic_delivery_conflict` 表示队列与面板证据冲突，保留原 queue.db、spool.key 和独立 witness，恢复匹配的整组状态，禁止通过删队列或换编号绕过。主机确实重装时，通过现有节点恢复码完成登记，核销会在同事务保留并关闭旧队列，授权新队列；若匹配的旧 spool 完整保留，也可经连续性校验继续原队列。普通重连没有换队列权限。
-
-在「访问存储增长观察」读取合并样本数、已淘汰回执数、最后成功时间和各节点的确认／缺口状态。整理失败查看服务日志，原始数据和已提交进度保留。备份恢复包含汇总、交付身份与封存状态，有当前库时整组沿用冻结库事实；旧格式冻结证据先校验再迁移副本，原始证据不改，冲突拒绝安装。节点逻辑删除继续保留历史。
-
-功能不自动执行 VACUUM；旧数据库删除后主要得到可复用页，文件大小不会立即下降。本地代码实现不代表生产已应用，也不代表旧回执已经可清理。
-
-
-### v1.7.0 流量队列与自动回滚
-
-新版编号队列的启用要求原始基线、当前和上一 Agent 回滚镜像都支持 spool ABI 7。仍保留旧镜像时，日志明确记录回执淘汰未启用，继续原流量上报，不清除旧回执；不能手工修改格式 floor 或删除回滚镜像来强行启用。面板的历史核心明细整理和页面性能优化独立生效。
+恢复任务保护：既有 worker `queued`/`running`/`failed_closed`、`queued recover` 及原命令/尝试/迟到回执继续保留并按真实结果收尾；完整系统更新 `queued`/`running`/`unconfirmed` 或恢复未成功的失败持续占用节点。root 收据、原 RequestID/签名材料、未 ACK 日志与本地队列不因文档清理删除。隧道发布持久补偿、`relay_cleanup_nodes` 与流量 pending/游标/检查点继续按各模块规则恢复；无回执、超时、版本相同均不能代替完成证明。

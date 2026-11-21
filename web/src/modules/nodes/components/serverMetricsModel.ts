@@ -1,3 +1,4 @@
+import { formatBytes as formatByteSize } from '../../../app/bytes';
 import { authState } from '../../../app/auth';
 import type { NodeMetricPoint, NodeView } from '../api';
 import { hostMetrics } from '../metrics';
@@ -18,24 +19,10 @@ export interface SystemMetricPoint {
   swapBytes: number | null;
   diskBytes: number | null;
 }
-export function formatBytes(bytes: number | null | undefined, decimals = 1): string {
-  if (bytes == null) return '—';
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const k = 1024;
-  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
-  const val = bytes / Math.pow(k, i);
-  return `${val.toFixed(i === 0 ? 0 : decimals)} ${units[i]}`;
-}
+export const formatBytes = (bytes: number | null | undefined, decimals = 1) => formatByteSize(bytes, decimals, undefined, 'TiB');
 
 export function formatRate(bytesPerSec: number | null | undefined, decimals = 1): string {
-  if (bytesPerSec == null) return '—';
-  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '0 B/s';
-  const units = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'];
-  const k = 1024;
-  const i = Math.min(units.length - 1, Math.floor(Math.log(bytesPerSec) / Math.log(k)));
-  const val = bytesPerSec / Math.pow(k, i);
-  return `${val.toFixed(i === 0 ? 0 : decimals)} ${units[i]}`;
+  return bytesPerSec == null ? '—' : formatByteSize(bytesPerSec, decimals, undefined, 'GiB') + '/s';
 }
 
 function timeParts(timestamp: number): Record<string, string> {
@@ -182,12 +169,6 @@ export function extractCurrentValues(node: NodeView, now = Date.now()): Omit<Sys
 }
 // Legacy live-heartbeat adapter retained for consumers.
 // Only append a fresh, distinct heartbeat observed while this component is open.
-export function sampleHeartbeat(node: NodeView, now: number): SystemMetricPoint | null {
-  const time = Date.parse(node.lastHeartbeat);
-  if (!Number.isFinite(time) || now - time < -5000 || now - time >= 45000) return null;
-  return { time, ...extractCurrentValues(node, now) };
-}
-
 function decimal(value: unknown): number | null {
   return typeof value === 'string' && /^\d+$/.test(value) ? measured(Number(value)) : null;
 }

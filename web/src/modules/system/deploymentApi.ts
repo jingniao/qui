@@ -4,15 +4,6 @@ export interface Revision {
   id: number; author: string; summary: string; status: string; createdAt: string;
   nodeId: string; resultCode: string; batchId?: string;
 }
-export interface BatchItem {
-  position: number; nodeId: string; revision: number; previousRevision: number;
-  status: string; rollbackCommandId?: string;
-}
-export interface DeploymentBatch {
-  id: string; chainId: string; name: string; author: string; status: string;
-  createdAt: string; items: BatchItem[];
-}
-export interface ChainChoice { id: string; name: string; enabled: boolean; nodeIds: string[]; }
 export interface RevisionChange {
   category: string; id: string; kind: 'added' | 'removed' | 'modified';
   field: string; before: string; after: string; hidden: boolean;
@@ -26,14 +17,7 @@ export interface InboundStateItem { inboundId: string; state: InboundPublishStat
 
 export const deploymentAPI = {
   inboundStatesBatch: (nodeIds: string[]) => request<{ items: { nodeId: string; items: InboundStateItem[]; error?: string }[] }>(`/nodes/inbound-states?nodeIds=${encodeURIComponent(nodeIds.join(','))}`),
-  inboundStates: (nodeId: string) => request<{ items: InboundStateItem[] }>(`/nodes/${encodeURIComponent(nodeId)}/inbound-states`),
   diff: (revision: number, baseRevision?: number) => request<RevisionDiff>(`/revisions/${revision}/diff${baseRevision === undefined ? '' : '?baseRevision=' + baseRevision}`),
-  batches: (page: number) => request<Page<DeploymentBatch>>(`/deployment-batches?page=${page}&pageSize=20`),
-  chains: () => request<Page<ChainChoice>>('/proxy-chains?page=1&pageSize=100'),
-  createBatch: (chainId: string, summary: string) => request<DeploymentBatch>('/deployment-batches', 'POST', { chainId, summary }),
-  createRelayBatch: (nodeId: string, summary: string) => request<DeploymentBatch>('/deployment-batches/relay', 'POST', { nodeId, summary }),
-  deployBatch: (id: string) => request<DeploymentBatch>(`/deployment-batches/${encodeURIComponent(id)}/deploy`, 'POST'),
-  rollbackBatch: (id: string) => request<DeploymentBatch>(`/deployment-batches/${encodeURIComponent(id)}/rollback`, 'POST'),
   rollbackNode: (nodeId: string, revision: number) => request(`/nodes/${encodeURIComponent(nodeId)}/rollback`, 'POST', { revision }),
   nodeRevisions: (nodeId: string, page = 1, pageSize = 20) => request<Page<Revision>>(`/revisions?nodeId=${encodeURIComponent(nodeId)}&page=${page}&pageSize=${pageSize}`),
   // Creates the node's revision from its business data and publishes it in one

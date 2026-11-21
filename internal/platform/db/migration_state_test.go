@@ -54,6 +54,25 @@ func legacyDatabase(t *testing.T, keep func(string) bool, done int) *sql.DB {
 			t.Fatal(err)
 		}
 	}
+	if keep == nil && done == 1 {
+		// This is a 1.7.5 database upgraded from the original per-file history.
+		for _, name := range []string{"0153_drop_one_shot_markers.sql", "0154_traffic_storage_retirement.sql", "0155_traffic_display_hours.sql", "0156_tuning_module_intent.sql", "0157_agent_system_updates.sql", "0158_subscription_route_dependencies.sql"} {
+			data, err := migrations.Files.ReadFile(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.ExecContext(ctx, string(data)); err != nil {
+				t.Fatal(err)
+			}
+			checksums, _, err := embeddedChecksums(migrations.Files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.ExecContext(ctx, "INSERT INTO schema_migrations VALUES(?,?,'2026-11-20T00:00:00Z')", name, checksums[name]); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	return database
 }
 
@@ -129,6 +148,22 @@ func TestTrafficDisplayMigrationPreservesExistingSamples(t *testing.T) {
  INSERT INTO account_traffic_samples(node_id,epoch,credential_id,observed_at,user_id,device_id,upload_bytes,download_bytes) VALUES('n','e','c','2026-11-19T00:00:03Z','u','d',5,9);`); err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"0155_traffic_display_hours.sql", "0156_tuning_module_intent.sql", "0157_agent_system_updates.sql", "0158_subscription_route_dependencies.sql"} {
+		data, err := migrations.Files.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.ExecContext(ctx, string(data)); err != nil {
+			t.Fatal(err)
+		}
+		checksums, _, err := embeddedChecksums(migrations.Files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.ExecContext(ctx, "INSERT INTO schema_migrations VALUES(?,?,'2026-11-20T00:00:00Z')", name, checksums[name]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := Migrate(ctx, database, migrations.Files); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +206,7 @@ func TestMigrateRefusesPartialLegacyChain(t *testing.T) {
 func TestMigrateRefusesUnfinishedOneShotConversion(t *testing.T) {
 	database := legacyDatabase(t, nil, 0)
 	err := Migrate(context.Background(), database, migrations.Files)
-	if err == nil || !strings.Contains(err.Error(), "start_v1_6_0_once_before_upgrading") {
+	if !errors.Is(err, ErrPredatesBaseline) {
 		t.Fatalf("migrate: %v", err)
 	}
 	var markers int

@@ -21,10 +21,12 @@
       </div>
     </div>
 
+    <p v-if="runtimeError" role="status" class="rounded-xl bg-ios-orange/10 p-3 text-sm text-ios-orange">{{ runtimeError }}</p>
     <ErrorState v-if="error && !node" :message="error" @retry="load" />
     <LoadingSkeleton v-else-if="!node" />
+    <p v-else-if="!displayNode" role="status" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">服务器已删除或不存在。</p>
     <template v-else>
-      <p v-if="node.heartbeat?.core_healthy === false" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : `最后心跳报告核心 ${unhealthyCoreLabel(node) || node.capabilities?.core_name || '代理核心'} 未通过健康检查，请检查该核心的程序与配置发布结果。` }}</p>
+      <p v-if="status.key === 'core_error'" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat?.core_healthy === false && node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : `最后心跳报告核心 ${unhealthyCoreLabel(displayNode) || node.capabilities?.core_name || '代理核心'} 未通过健康检查，请检查该核心的程序与配置发布结果。` }}</p>
       <p v-if="error" role="status" class="text-sm text-ios-red">{{ error }}</p>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
       <nav class="ios-segmented-container inline-flex overflow-x-auto max-w-full -mt-0.5" aria-label="服务器详情页签">
@@ -35,8 +37,8 @@
         <p v-else-if="activeTab !== 'settings'" class="text-sm text-ios-secondary">服务器待登记，完成 Agent 安装并等待首次心跳后可查看此页。</p>
       </template>
       <template v-else>
-        <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ node.deletedAt ? '服务器已删除' : !node.enabled ? '服务器已禁用' : status.label }} · 最后心跳 {{ formatTime(node.lastHeartbeat) }}</p>
-        <ServerOverview v-if="activeTab === 'overview'" :key="node.id" :node="node" :meta="meta" :now="now" :node-traffic="nodeTraffic" :machine-traffic="machineTraffic" :statistics-notice="trafficStatus" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
+        <p v-if="offline" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">{{ status.label }} · 最后心跳 {{ formatTime(displayNode.lastHeartbeat) }}</p>
+        <ServerOverview v-if="activeTab === 'overview'" :key="node.id" :node="node" :display-node="displayNode" :status-now="statusNow" :meta="meta" :now="now" :node-traffic="nodeTraffic" :machine-traffic="machineTraffic" :statistics-notice="trafficStatus" :revisions="revisions" :latest-revision="latestRevision" @changed="load" @tab="selectTab" @create="openEditor(null)" />
         <ServerNodes v-else-if="activeTab === 'nodes'" :key="node.id" :refresh="nodeRefresh" :node="node" :unpublished="unpublished" @edit="openEditor" @saved="nodeSaved" @publish="revisionsPanel?.publishCurrent()" />
         <ServerMonitoring v-else-if="activeTab === 'monitoring'" :key="node.id" :node="node" :now="now" />
         <ServerRevisions v-show="activeTab === 'revisions'" :key="node.id" ref="revisionsPanel" :node="node" :refresh="revisionRefresh" :active="activeTab === 'revisions'" :latest-revision="latestRevision" @changed="load" @published="published" />
@@ -56,6 +58,7 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { nodeAPI, type NodeView } from '../api';
 import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
+import { useNodeRuntime } from '../useNodeRuntime';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
 import { isOwner } from '../../../app/auth';
 import { nodeStatusMatches } from '../../../app/nodeStatusEvents';
@@ -84,9 +87,12 @@ import ServerDeleteDialog from '../components/ServerDeleteDialog.vue';
 const route = useRoute(), router = useRouter();
 const node = ref<NodeView | null>(null), error = ref(''), loading = ref(false), warnings = ref<string[]>([]);
 const revisions = ref<Revision[]>([]), now = ref(Date.now());
-const status = computed(() => node.value ? detailState(node.value, now.value) === 'pending' ? { tone: 'disabled', label: '待登记' } : serverStatus(node.value, now.value) : { tone: 'offline', label: '读取中' });
-const pending = computed(() => node.value && detailState(node.value, now.value) === 'pending');
-const offline = computed(() => node.value && detailState(node.value, now.value) === 'offline');
+const runtime = useNodeRuntime({ onInventoryChanged: () => { void refreshNode(true); } });
+const { statusNow, error: runtimeError } = runtime;
+const displayNode = computed(() => node.value ? runtime.project(node.value) : null);
+const status = computed(() => !node.value ? { key: 'loading', tone: 'offline', label: '读取中' } : !displayNode.value ? { key: 'deleted', tone: 'disabled', label: '已删除' } : serverStatus(displayNode.value, statusNow.value));
+const pending = computed(() => displayNode.value && detailState(displayNode.value) === 'pending');
+const offline = computed(() => ['offline', 'reconnecting', 'disabled', 'deleted'].includes(status.value.key));
 const editorOpen = ref(false), editing = ref<Inbound | null>(null), unpublished = ref(false), nodeRefresh = ref(0), revisionRefresh = ref(0);
 
 function openEditor(item: Inbound | null) {
@@ -245,7 +251,7 @@ async function loadSupplements() {
   const id = node.value.id, current = generation, ticket = ++supplementGeneration, startedTab = activeTab.value;
   try {
     if (activeTab.value === 'settings') {
-      try { await loadNodeMeta(id, isOwner.value); } catch (e) { if (current === generation) warnings.value = [(e as Error).message]; }
+      try { await loadNodeMeta(id); } catch (e) { if (current === generation) warnings.value = [(e as Error).message]; }
       return;
     }
     const notices: string[] = [];
@@ -259,7 +265,7 @@ async function loadSupplements() {
     };
     const [revisionResult] = await Promise.all([
       isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), revisions.value) : Promise.resolve([]),
-      optional('元数据读取失败', loadNodeMeta(id, isOwner.value), null)
+      optional('元数据读取失败', loadNodeMeta(id), null)
     ]);
     if (current !== generation || ticket !== supplementGeneration) return;
     revisions.value = revisionResult;

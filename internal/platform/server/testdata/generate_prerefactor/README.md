@@ -2,8 +2,10 @@
 
 `prerefactor_backup.pcb` (in the parent `testdata/` directory) is an encrypted
 panel backup produced by the pre-refactor baseline commit `de6a681`. It lets
+`TestPreBaselineBackupIsRefused` in
 `internal/platform/server/prerefactor_backup_test.go` prove that a backup taken
-before the Phase 9 receipt-archive removal still restores on current code.
+before the current supported baseline is explicitly refused. The fixture is
+negative evidence; current code does not restore this old archive.
 
 Regenerate it only if the fixture is lost or the test data must change, and
 always from a worktree at `de6a681` that has the **original bytes** of
@@ -12,9 +14,8 @@ always from a worktree at `de6a681` that has the **original bytes** of
 Those two migrations were rewritten with CRLF when the baseline was imported,
 which changed their SHA-256. `db.Open` and backup validation compare the
 embedded migration bytes against `schema_migrations.checksum`, so a baseline
-that still holds the CRLF bytes cannot produce a fixture that restores. See
-`docs/archive/lightweight-refactor-plan.md`, "Finding during Phase 9: migration bytes
-changed at baseline import".
+that still holds the CRLF bytes cannot produce a fixture that restores without
+first restoring their original LF bytes.
 
 ## Steps
 
@@ -27,7 +28,8 @@ git worktree add --detach /path/to/qui-baseline de6a681
 # 2. Copy the original migration bytes in (0004 and 0036 only).
 cp migrations/0004_deployment.sql migrations/0036_agent_updates.sql /path/to/qui-baseline/migrations/
 
-# 3. Confirm they match migrations/checksums_test.go:
+# 3. Confirm they match the legacy 0001-0152 checksums in internal/platform/db
+#    (migrations/checksums_test.go pins 0152-0158):
 #    0004_deployment.sql  = ba7844bdf512fe40916f44976280e061fe4f3f2177c5c373cac04f46328bc55c
 #    0036_agent_updates.sql = f176741d723494a046bd28649297fc9ca2b500e1480bf605132c4661ca81d698
 

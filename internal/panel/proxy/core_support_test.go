@@ -65,7 +65,7 @@ func TestNodeCoreProtocolSupportRejectsUpstreamUnsupportedDirections(t *testing.
 
 // GOST carries forward inbounds only. The panel resolves the selected enabled
 // core and refuses every other protocol from the same matrix row, so adding a
-// forward row alone would not be enough (docs/v1.3-design-gost.md 3.4).
+// forward row alone would not be enough (docs/project-spec.md §14; docs/protocol-support-matrix.md §3).
 func TestGostCoreIsForwardOnly(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()

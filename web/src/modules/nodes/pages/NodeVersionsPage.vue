@@ -28,11 +28,7 @@
       </template>
     </PageHeader>
 
-    <NodeVersionPanel
-      ref="panelRef"
-      kind="all"
-      embedded
-    />
+    <NodeVersionPanel ref="panelRef" />
   </div>
 </template>
 

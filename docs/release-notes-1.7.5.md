@@ -1,6 +1,6 @@
 # v1.7.5 发布说明
 
-状态：已正式发布 v1.7.5，未部署生产。
+状态：已正式发布 v1.7.5（发布当时未部署生产；后续生产观察见[项目说明书](project-spec.md#当前状态)）。
 
 ## 内容
 
@@ -26,7 +26,7 @@
 
 Owner 仅允许现有测试和发布门禁。本次不新增测试方法、测试实体、mock 或独立实机验证场景。实际检查、首轮失败与发布附件核验见下文；未运行的场景不计为通过。
 
-当前检查及逐文件用途见 [实施与验证记录](v1.7.5-verification.md)。
+详细首错与复验过程见[实施与验证记录](v1.7.5-verification.md)。
 
 ## 发布验证与记录
 
@@ -40,10 +40,10 @@ amd64 面板与 Agent 在隔离 Linux 测试机仅执行 `--version`，分别返
 
 ## 生产环境
 
-本次只发布，未部署生产，未修改生产配置。
+发布当时未部署生产，未修改生产配置（后续生产观察见[项目说明书](project-spec.md#当前状态)）。
 
 ## 设计与实施依据
 
-- [离线持续时间](superpowers/specs/2026-11-20-node-offline-duration-design.md)
-- [网页与终端 Agent 升级统一](superpowers/specs/2026-11-20-agent-terminal-web-update-design.md)、[实施计划](superpowers/plans/2026-11-20-agent-terminal-web-update.md)
-- [订阅完整线路可用性](superpowers/specs/2026-11-20-subscription-route-availability-design.md)、[实施计划](superpowers/plans/2026-11-20-subscription-route-availability.md)
+- [离线持续时间](implementation-decisions.md#2026-11-20-node-offline-duration)
+- [网页与终端 Agent 升级统一](implementation-decisions.md#2026-11-20-agent-terminal-web-update)
+- [订阅完整线路可用性](implementation-decisions.md#2026-11-20-subscription-route-availability)

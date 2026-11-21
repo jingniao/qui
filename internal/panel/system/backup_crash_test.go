@@ -20,7 +20,7 @@ import (
 )
 
 func TestKilledBackupProcessRecoversJournalWithoutTouchingUnrelatedBackup(t *testing.T) {
-	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
+	// Not parallel: its deadlines failed under parallel -race load.
 	for _, checkpoint := range []string{"create-published", "delete-prepared", "delete-committed", "staging"} {
 		t.Run(checkpoint, func(t *testing.T) {
 			ctx := context.Background()

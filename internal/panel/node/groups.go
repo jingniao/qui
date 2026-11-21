@@ -42,7 +42,6 @@ type GroupInput struct {
 	Purpose             string        `json:"purpose"`
 	Enabled             bool          `json:"enabled"`
 	SubscriptionVisible bool          `json:"subscriptionVisible"`
-	NodeIDs             []string      `json:"nodeIds"`
 	Remark              string        `json:"remark"`
 }
 
@@ -170,7 +169,7 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 	if !strings.Contains("|subscription|relay|egress|mixed|", "|"+input.Purpose+"|") {
 		return Group{}, errors.New("invalid node group purpose")
 	}
-	if len(input.ServerIDs) > 100 || len(input.NodeIDs) > 100 || len(input.InboundIDs) > 500 || len(input.RelayIDs) > 500 || len(input.Imports) > 1000 {
+	if len(input.ServerIDs) > 100 || len(input.InboundIDs) > 500 || len(input.RelayIDs) > 500 || len(input.Imports) > 1000 {
 		return Group{}, errors.New("node group member limit exceeded")
 	}
 	if input.Purpose == "relay" || input.Purpose == "egress" {
@@ -207,69 +206,11 @@ func (r *Repository) SaveGroup(ctx context.Context, groupID string, input GroupI
 		}
 		return Group{}, err
 	}
-	// Omission preserves explicit servers. Legacy bulk leave filters them too.
-	legacy := input.InboundIDs == nil && input.NodeIDs != nil
 	if input.ServerIDs == nil {
 		input.ServerIDs = previous.ServerIDs
-		if input.Purpose == "relay" || input.Purpose == "egress" {
-			if input.NodeIDs != nil {
-				input.ServerIDs = input.NodeIDs
-			}
-		} else if legacy {
-			input.ServerIDs = []string{}
-			for _, id := range previous.ServerIDs {
-				for _, selected := range input.NodeIDs {
-					if id == selected {
-						input.ServerIDs = append(input.ServerIDs, id)
-						break
-					}
-				}
-			}
-		}
 	}
-	// Old bulk clients cannot represent imports: retain omitted imports.
-	if legacy && input.Imports == nil {
-		input.Imports = previous.Imports
-	}
-	// Callers that predate rule members (old clients, canvas entry grouping)
-	// omit the field: their save must not drop the group's tunnel rules.
 	if input.RelayIDs == nil {
 		input.RelayIDs = previous.RelayIDs
-	}
-	if input.Purpose == "relay" || input.Purpose == "egress" {
-		input.NodeIDs = nil
-	}
-	// Legacy subscription servers expand once; they are never access grants.
-	if input.InboundIDs == nil && input.NodeIDs != nil {
-		input.InboundIDs = []string{}
-		seen := map[string]bool{}
-		for _, nodeID := range input.NodeIDs {
-			if seen[nodeID] {
-				return Group{}, errors.New("duplicate node group member")
-			}
-			seen[nodeID] = true
-			var exists int
-			if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE id=? AND deleted_at IS NULL", nodeID).Scan(&exists); err != nil {
-				return Group{}, errors.New("node group member does not exist")
-			}
-			rows, err := tx.QueryContext(ctx, "SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", nodeID)
-			if err != nil {
-				return Group{}, err
-			}
-			for rows.Next() {
-				var id string
-				if err = rows.Scan(&id); err != nil {
-					rows.Close()
-					return Group{}, err
-				}
-				input.InboundIDs = append(input.InboundIDs, id)
-			}
-			err = rows.Err()
-			rows.Close()
-			if err != nil {
-				return Group{}, err
-			}
-		}
 	}
 	if len(input.InboundIDs) > 500 {
 		return Group{}, errors.New("node group is limited to 500 inbounds")

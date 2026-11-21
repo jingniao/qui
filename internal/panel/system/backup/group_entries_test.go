@@ -36,7 +36,7 @@ func TestGroupEntriesBackupRoundTrip(t *testing.T) {
 	}
 	// Current bulk UI sends only nodeIds, preserving existing imports and
 	// explicit server membership while expanding the server's eligible inbounds.
-	group, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, NodeIDs: []string{server}})
+	group, err = nodes.SaveGroup(ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, ServerIDs: group.ServerIDs, InboundIDs: group.InboundIDs, Imports: group.Imports})
 	if err != nil || len(group.Imports) != 1 || len(group.ServerIDs) != 1 || len(group.InboundIDs) != 1 {
 		t.Fatal("legacy bulk save lost entries", group, err)
 	}

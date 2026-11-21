@@ -1,60 +1,41 @@
 # 部署与升级
 
-当前发布状态见[项目说明书](../AGENTS.md#当前状态)。先升级面板，再逐台升级 Agent。旧 1.0.9 Agent 保持发布、回滚与 Xray 流量兼容，但不接收设备门控或 qui sing-box 更新，界面显示部分执行。升级前备份数据库与身份目录；从 1.0.x 升级须核对 0113 合并设备对旧链接的影响，见[v1.2.0 发布说明](release-notes-1.2.0.md)。v1.3.0 增加 0126–0128，v1.3.1 无迁移；跨迁移降级必须使用匹配的升级前数据库，不能用旧程序直接打开新库。
+当前发布状态见[项目说明书](project-spec.md#当前状态)，日常运维见[运维手册](operations.md)。升级顺序为**先面板，再逐台 Agent**；升级前备份数据库与身份目录，跨迁移降级面板必须使用匹配的升级前数据库。当前基线只接受从 **v1.7.5** 或更新版本升级与恢复（数据库须含迁移 `0158`，见[代码精简](code-simplification.md)）；更低版本 Agent 在控制连接时被拒绝，须先在终端升级。
 
-v1.4（v1.4.0 起正式发布）增加 0129–0134，启动/恢复在旧画布归属核对后一次性转换合格转发，保留端口、运行修订与密封材料；规则默认订阅隐藏。v1.6.1 起只能从 v1.6.0 或更新版本升级（迁移合并为基线，见[v1.6.1 规划](v1.6.1-plan.md)），原 migration-report 接口已删除；详见[运维 §21](operations.md#21-隧道管理与中转方案v14)及[v1.4.0 发布说明](release-notes-1.4.0.md)。新隧道各跳须安装 GOST（linux/amd64），两节点契约 ≥3、三节点 ≥4；先等 Agent 能力上报再规划发布。隧道/规则没有默认端口，须先设端口范围或手填；仅画布保留无范围的旧默认。
-
-核心来源显式参数为 `--core-source qui|official`：sing-box 默认 qui，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各自架构归档）；`official` 保留官方版本与 musl 专用归档及摘要。Xray 保持官方。qui 构建仅添加上游 `with_v2ray_api` 标签，其逐用户流量开始计入额度；切换前告知用户并核对额度。构建可复现性、原生核检查、Linux/arm64 实跑仍待 CI/Owner，不以脚本存在作为通过。
-
-Owner 已授权并执行 v1.4 离线 RC 验收：先面板后 Agent 升级到 rc.1，随后面板单独升级至 rc.2，记录见[主机报告](v1.4-a1-host-report.md)与[rc.2 收尾](v1.4-rc2-closeout.md)。新版 `qui-update` 的 `X.Y.Z-rc.N` 与 `--component panel` 已在实际 Linux/root 更新中通过健康窗口；旧安装上的更新器不支持这些参数时，首次 RC 更新须从审核过的归档运行新版更新器，见第 5 节。此为已授权执行记录，不代表正式版发布完成。
-
-更新时间：2026-10-22（节点 Agent 支持 Alpine / OpenRC）。本文命令取自 `deploy/linux/*.sh`、`deploy/systemd/*.service`、`deploy/openrc/*`、`cmd/panel` 和 `cmd/agent` 的实际参数（`go run ./cmd/panel -h`、`go run ./cmd/agent -h`），文件名与路径取自 `deploy/examples/*.yaml` 和安装脚本。
-
-Linux/amd64 的 systemd 与 Alpine/OpenRC 主机安装、更新和运行已有分版本实机证据，具体范围及限制见[验收矩阵](v1-acceptance.md)。arm64 不能沿用 amd64 结论。日常运维见[运维手册](operations.md)。
+核心来源显式参数为 `--core-source qui|official`：sing-box 默认 `qui`，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各架构归档），仅在官方非 naive 标签基础上增加 `with_v2ray_api`，其逐用户流量计入额度；`official` 保留官方版本与 musl 专用归档及摘要。Xray 与 GOST（仅 linux/amd64，固定 3.3.2）保持官方来源。Linux/amd64 的 systemd 与 Alpine/OpenRC 已实机验证；arm64 不能沿用 amd64 结论。
 
 ## 1. 前置条件
 
 - Linux（`x86_64` 或 `aarch64`/`arm64`），以 root 本地执行脚本。
-- 初始化系统：
+- **初始化系统**：
   - **面板**需要 systemd（Debian、Ubuntu 等）；在 OpenRC 主机上 `install.sh --panel` 会被拒绝。
-  - **节点 Agent** 支持 systemd，也支持 **OpenRC**（Alpine 3.19+，OpenRC ≥ 0.45，含没有 systemd 的 LXC 容器）。脚本按 `/run/systemd/system` 或 `/run/openrc` 自动判断，两者都没有就拒绝；对应的服务定义分别是 `deploy/systemd/` 与 `deploy/openrc/`，细节见第 4.1 节。
-- 面板需要一对 Web TLS 证书：非开发模式下 `tls.certificate` 与 `tls.key` 是必填项（`internal/platform/config/config.go`）。证书不由本项目签发，用你自己的 PKI 或 ACME 工具生成。
-- 节点需要签发面板 Web 证书的 CA 文件（第 1 条的 `tls.certificate`；面板的 gRPC 端口 18880 默认也用同一张证书），默认放在 `/etc/proxy-agent/tls/ca.crt`，`server_name` 必须与该证书匹配。
-- 节点若要使用服务器强制出站源地址，需要 nftables（Linux ≥ 5.2）。`install.sh --node` 在 systemd 主机上缺少 `nft` 时用发行版的包管理器（apt / dnf / yum）安装 `nftables`，装不上就拒绝安装；在 Alpine 上它随下一条的 apk 依赖一起安装。
-- 在 Alpine（OpenRC 且有 `apk`）上，`install.sh --node` 先执行 `apk add --no-cache bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables`（已装的包不变），因此后面的命令与 Debian 上相同。
-- `install.sh` 会检查它用到的命令是否存在，缺失即拒绝：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 上另加 `systemctl`，OpenRC 上另加 `rc-service rc-update openrc-run`。安装核心时还需要 `unzip`（Xray zip）或 `tar`（sing-box tar.gz），下载需要 `curl` 或 `wget`。最小化安装的 Debian/Ubuntu 没有 `unzip`：systemd 主机上缺少时，`install.sh` 像 `nftables` 一样用 apt / dnf / yum 安装它（实测：debootstrap minbase 的 Debian 13）。
-- 脚本里所有需要校验证书的 `curl` 调用都带 `--no-insecure`。它会覆盖 curl 包装脚本或别名加在前面的 `-k`：实测有一台 Alpine LXC 的 `/usr/bin/curl` 被换成了 `curl.orig -k "$@"`。
+  - **节点 Agent** 支持 systemd 与 **OpenRC**（Alpine 3.19+，OpenRC ≥ 0.45，含无 systemd 的 LXC 容器）。脚本按 `/run/systemd/system` 或 `/run/openrc` 自动判断，两者均不存在时拒绝；服务定义位于 `deploy/systemd/` 与 `deploy/openrc/`，详见第 4.1 节。
+- **面板 TLS 证书**：非开发模式下 `tls.certificate` 与 `tls.key` 必填（`internal/platform/config/config.go`），由自有 PKI 或 ACME 生成。
+- **节点受信 CA**：节点需要签发面板 Web 证书的 CA（面板 gRPC 端口默认 18880 共用同一证书），默认路径 `/etc/proxy-agent/tls/ca.crt`，`server_name` 须与证书匹配。
+- **依赖与工具**：
+  - 服务器强制出站源地址需要 nftables（Linux ≥ 5.2）。systemd 主机缺少 `nft` 或 `unzip`（最小化 Debian/Ubuntu 常见）时，`install.sh --node` 通过 apt/dnf/yum 安装，失败则拒绝。
+  - Alpine（OpenRC + `apk`）上 `install.sh --node` 自动补装 `bash curl ca-certificates coreutils findutils grep sed tar unzip shadow runuser nftables`。
+  - `install.sh` 启动前检查必需命令：`install sha256sum od stat getent useradd groupadd flock id tr sed chmod rm mktemp rmdir sync mv ln dirname find grep head mkdir`，systemd 另需 `systemctl`，OpenRC 另需 `rc-service rc-update openrc-run`，核心解包需 `unzip`（Xray）/ `tar`（sing-box），下载需 `curl` 或 `wget`。
+  - 所有需校验证书的 `curl` 调用均带 `--no-insecure`，避免被本地包装脚本注入的 `-k` 覆盖。
 
 ### 多核心安装
 
-`install.sh --node` 与 `node-install.sh` 接受重复的 `--core`，例如
-`--core xray --core sing-box`（v1.3 起还可以加 `--core gost`）；不指定时，新节点只安装 Xray。重复同名核心或
-未知核心会被拒绝。v1.2 支持 Xray、sing-box；GOST 自 v1.3 起加入安装合约，仅 linux/amd64。
+`install.sh --node` 与 `node-install.sh` 接受重复的 `--core`（允许 `xray`、`sing-box`、`gost`），不指定时新节点仅安装 Xray；重复同名核心、未知核心或非 linux/amd64 安装 GOST 会被拒绝。
 
 ```sh
-# 已解包并校验的同版本发布目录中；先停止已有 Agent 服务。
+# 在已解包并校验的同版本发布目录中；先停止已有 Agent 服务
 deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <agent-sha256> \
-  --core xray --core sing-box --qui-version <qui-version>
+  --core xray --core sing-box --qui-version <version>
 
-# 一键安装：原有面板地址、证书指纹、token、版本参数照常，追加两个核心。
-bash node-install.sh --version <qui-version> --panel <panel-host> \
+# 一键安装追加多核心
+bash node-install.sh --version <version> --panel <panel-host> \
   --ca-sha256 <panel-cert-sha256> --token <registration-token> \
   --core xray --core sing-box
 ```
 
-`--core-source qui|official` 只决定 sing-box 来源，全局生效，默认 qui；Xray
-始终官方。默认版本为 Xray 26.3.27、qui sing-box 1.14.4-qui.1，官方 sing-box
-1.14.3。官方 sing-box 继续按架构/libc 固定摘要，Alpine 使用 musl 归档；qui
-静态构建按同一发布的 SHA256SUMS 校验。手工覆盖参数 `--core-version`、
-`--core-url`、`--core-sha256` 作用于它们前面最近的 `--core`，例如
-`--core xray --core-version 26.3.27 --core sing-box --core-source official`。
-离线 qui sing-box 仍需 `--core-bundle FILE --core-sums FILE`，一键脚本从
-Agent bundle 同目录选择对应架构的 sing-box 包；Xray 与官方 sing-box 保持原有
-下载路径，Agent 离线 bundle 不代表这些上游核心也能离线安装。
-
-核心分别安装到 `/usr/local/lib/proxy-agent/xray` 与
-`/usr/local/lib/proxy-agent/sing-box`。首次安装或显式传入核心时规范化 Agent 的三个
-顶层配置项，其余配置、身份与数据保留：
+- 默认固定版本：Xray `26.3.27`、qui sing-box `1.14.4-qui.1`、官方 sing-box `1.14.3`、GOST `3.3.2`（仅 linux/amd64，静态单一归档，glibc 与 musl 共用，不接受 `--core-url`/`--core-sha256` 覆盖）。
+- `--core-source qui|official` 仅影响 sing-box（默认 `qui`）。`--core-version`、`--core-url`、`--core-sha256` 作用于紧邻其前的 `--core`。离线安装 qui sing-box 使用 `--core-bundle FILE --core-sums FILE`（一键安装自动从 `--bundle` 同目录选取对应架构归档与 `--sums`）；Xray 与官方 sing-box 仍走上游下载路径。
+- 核心安装在 `/usr/local/lib/proxy-agent/<core>`。首次安装或显式传入 `--core` 时规范化顶层配置，其余配置与状态保留：
 
 ```yaml
 core_name: xray
@@ -66,65 +47,32 @@ cores:
     path: /usr/local/lib/proxy-agent/sing-box
 ```
 
-`cores` 是新 Agent 的完整核心集合；两个旧键对应集合中的第一个核心，保留给
-旧 Agent 兼容。升级不传 `--core` 时保留所有记录的核心及其摘要，不重新下载，已有 config 保持原样（旧单核心配置继续由 Agent 兼容读取）；
-显式传入核心时替换/追加这些核心，未列出的已安装核心仍保留，不能用省略参数
-删除核心。显式安装核心时，已有自定义核心路径会规范化到安装器管理的上述路径；操作前检查配置。
-手工运行 install.sh 前自行备份；需要自动回滚时使用新版 qui-update。
-
-安装记录 v2 格式：第 1 行为 `proxycontrol-install-v2`；第 2–4 行仍为组件、
-程序摘要、主服务文件摘要；第 5/6 行留空；第 7 行为 `installed`；第 8/9 行
-为强制出站服务/触发器摘要；第 10 行始终为 `systemd` 或 `openrc`；第 11/12
-行为调优服务/触发器摘要（不适用时空行）。第 13 行起每核心一行：
-`core <name> /usr/local/lib/proxy-agent/<name> <sha256>`。面板也写 v2，保留全部
-12 行但没有核心条目。继续读取 v1 的第 5/6 行单核心和摘要，缺省 init 行视为
-systemd；升级写 v2，第 11/12 行的含义保持不变。
-
-新版 qui-update 的节点快照包含两个核心路径、Agent config、完整安装记录与
-原有 Agent/强制出站/调优文件。固定路径集合让失败或断电恢复不依赖正在替换的
-记录；新产生而快照中不存在的文件会被删除，已有文件和配置一起恢复。进度日志、
-锁、服务健康窗口和数据库回滚机制沿用原流程。卸载按 v1/v2 记录逐一校验并删除
-全部安装核心，继续保留配置、身份、revisions、spool、releases 等状态数据，
-并保留 的先清除调优再删除服务规则。
-
-**首次迁移必须从已审核、已校验的新发布包运行新版 update.sh**，方式与第 5.0
-节相同，选 `--component agent`。旧主机上的 updater 不具备新增核心/config
-快照保护。失败升级自动恢复到快照中的 v1 记录、旧 Agent 与原配置。v1.6.1 起
-`qui-update` 不再把 Agent 装回更旧的版本（见第 5 节），因此不会用到不支持 v2 的旧
-installer。故障、中断与重启演练见[验收矩阵](v1-acceptance.md) §9、§11；真实断电未验证。
+- 升级不传 `--core` 时保留已记录的全部核心与原配置；显式传入 `--core` 仅替换或追加指定核心，不会删除未列出的核心，且会将自定义路径规范化到 `/usr/local/lib/proxy-agent/`。
+- **v2 安装记录格式**（`/var/lib/proxycontrol-install/{panel,agent}.manifest`）：第 1 行 `proxycontrol-install-v2`；第 2–4 行为组件、二进制摘要、主服务文件摘要；第 5/6 行留空；第 7 行 `installed`；第 8/9 行为强制出站服务/触发器摘要；第 10 行为 `systemd` 或 `openrc`；第 11/12 行为调优服务/触发器摘要（不适用时留空）；第 13 行起每核心一行 `core <name> /usr/local/lib/proxy-agent/<name> <sha256>`。面板写前 12 行，无核心条目。脚本兼容读取 v1 单核心记录（缺第 10 行视为 systemd），升级后统一写 v2。
+- `qui-update` 节点快照覆盖全部核心路径、Agent 配置、完整安装记录以及强制出站/调优单元；卸载按记录逐一校验删除核心并保留状态数据。`qui-update` 拒绝将 Agent 降级到更低版本。
 
 ## 2. 构建发布包
 
-**构建工具链**：用官方安装的 Go（<https://go.dev/dl/>），版本按 `go.mod` 里的 `go` 指令（当前 `go 1.26.11`，即需要 Go 1.26.11 或更新，发行构建因此带上 Go 标准库的安全修复；仓库最后一次完整验证用的是 **Go 1.27.1**）。CI 通过 `actions/setup-go` 的 `go-version-file: go.mod` 读取同一个要求，Node 用 22 加锁定的依赖（`npm --prefix web ci`）。
-
-仓库里可能出现的 `.tools/`（Go 工具链、`protoc`、缓存）只是作者本机的产物，**不是构建前提**：发布构建从 `PATH` 读取工具。sing-box 构建另需 `git`、GNU `tar`、`gzip`、`sha256sum`、`readelf`，通过 `GOTOOLCHAIN=go1.26.11` 固定其工具链；它在临时目录克隆上游，不改本仓库的模块文件。只有 `scripts/generate-proto.sh` 会在存在时优先用 `.tools/protoc`，否则回退到 `PATH` 上的 `protoc`。
-
-以下命令以 v1.3.1 为例，执行时替换为目标版本。
+**工具链**：官方 Go（版本按 `go.mod`，当前 `go 1.26.11` 或更新）、Node 22（`npm --prefix web ci`）。构建从 `PATH` 读取工具（`.tools/` 仅作本机缓存，非前提）；sing-box 构建另需 `git`、GNU `tar`、`gzip`、`sha256sum`、`readelf`，并以 `GOTOOLCHAIN=go1.26.11` 在临时目录克隆构建。
 
 ```sh
-VERSION=1.3.1 bash scripts/build-release.sh
+VERSION=1.7.5 bash scripts/build-release.sh
 ```
 
-- `SKIP_NPM_CI=1` 复用已安装的前端依赖；sing-box 构建仍需克隆固定上游标签及下载其所需模块/工具链。`OUTPUT_DIRECTORY=/abs/path` 改变输出目录，默认 `dist/`。
-- 产物：两种架构的 `proxy-control-<version>-linux-<arch>.tar.gz`、`sing-box-1.14.4-qui.1-linux-<arch>.tar.gz`、各自的 sing-box `.provenance.txt` 和覆盖这些文件的 `SHA256SUMS`。
-- qui 程序包内含 `VERSION`、`bin/proxy-panel`、`bin/proxy-agent` 与 `deploy/{linux,systemd,openrc,examples}`；同一个归档既能装 Debian/Ubuntu，也能装 Alpine。sing-box 包使用单层目录加 `sing-box` 可执行文件的上游布局。
-- 归档可复现：成员按名称排序、所有时间戳取源码提交时间（可用 `SOURCE_DATE_EPOCH` 覆盖）、属主统一为 root，gzip 不带时间戳，所以同一提交两次构建得到相同的 `SHA256SUMS`。
-- 脚本不运行测试、不部署。
+- `SKIP_NPM_CI=1` 复用已安装前端依赖；`OUTPUT_DIRECTORY=/abs/path` 指定输出目录（默认 `dist/`）。
+- 产物：双架构 `proxy-control-<version>-linux-<arch>.tar.gz`、`sing-box-1.14.4-qui.1-linux-<arch>.tar.gz`、`.provenance.txt` 及 `SHA256SUMS`。程序包内含 `VERSION`、`bin/proxy-panel`、`bin/proxy-agent`、`deploy/{linux,systemd,openrc,examples}`，单包同时适用 Debian/Ubuntu 与 Alpine。
+- 归档按提交时间可复现（支持 `SOURCE_DATE_EPOCH`），脚本不运行测试也不部署。
 
-**门禁**：日常改动先跑按范围裁剪的 `bash scripts/quick-check.sh`（约 2–10 分钟：Markdown 只查 CR/BOM，`web/**` 跑类型检查/构建/自测，`deploy/**` 与 `scripts/*.sh` 跑 `bash -n` 与相关脚本测试并告警缺失的 `100755`，Go 对改动的 `.go` 跑 `gofmt -l` 并跑改动包及其模块内依赖包的 vet/test，agent／proto／pkg／contracts 与真实核相关包跑真实核测试，`migrations/**`、`.github/**` 直接要求完整门禁）；发布批次提交前改用 `quick-check.sh --release`，只做快速检查与 `go vet`，测试全部交给随后的门禁；完整的 Linux 门禁每个版本在发布提交上执行一次，并与同一 SHA 的 GitHub `check` 并行，步骤见[发布流程手册](release-runbook.md)第 2、4 节。完整门禁即 `bash scripts/check.sh` 与真实核套件，本地封装 `~/.qui-local/gate.sh` 让两段同时运行（2026-11-12 实测合计 977 秒，此前串行约 51 分钟）。`check.sh` 的 `go test -race` 使用测试数据库模板（`internal/testutil/dbtest`）、慢包测试并行并限 `-parallel 3`；GitHub `check` 按 `QUI_CHECK_SHARD` 分四片并行，汇总任务仍名为 `check`，见[构建与门禁提速](build-speedup-plan.md)。前者包含前端构建/自测、`go vet`、`go test -race`、程序构建和部署脚本检查，需要 root 或 sudo。后者使用已校验的 Xray 26.3.27、sing-box 1.14.3、qui sing-box、mihomo 与 GOST 3.3.2，设置对应二进制/数据环境变量后执行：
+**门禁**：日常改动跑增量检查 `bash scripts/quick-check.sh`（发布批次提交前用 `--release`）；完整 Linux 门禁与真实核套件在发布提交上运行并与 GitHub `check` 并行（纯前端补丁经 `scripts/gate-scope.sh` 自动走短门禁）：
 
 ```sh
 bash scripts/check.sh
 bash scripts/ci-real-core-test.sh -p 4 -count=1 -timeout 60m $(scripts/real-core-packages.sh)
 ```
 
-选包脚本从测试源码中的 `XRAY_BINARY`、`SINGBOX_BINARY`、`MIHOMO_BINARY`、`MIHOMO_HOME`、`GOST_BINARY` 自动选出当前 8 个包；缺核心导致的跳过不算通过。不要给全量 race 门禁加 `-p 1`。
+完整流程、分片与重跑规则见[发布手册](release-runbook.md)与 `.github/workflows/check.yml`。
 
-**纯前端补丁的短门禁：** 发布提交与上一个 `v*` 标签相比只改了 `web/**`（不含 `.go`）、`docs/**` 与根目录 `*.md` 时，`scripts/gate-scope.sh` 输出 `web`，`scripts/check.sh` 只跑前端依赖安装、构建（含类型检查）、`test:time`、全部前端自测，再构建面板并核对 `web/dist/index.html` 引用的资源都已嵌入，跳过 `go vet`、`go test -race`、Agent 构建与部署脚本测试；本地封装同时跳过真实核套件。其他任何改动或无法判定时输出 `full`。`QUI_GATE_SCOPE=full` 强制完整门禁（GitHub 每周运行固定设置，手动派发可勾选 `full_gate`）；没有 git 历史的目录（如 `git archive` 解包）判为 `full`，除非调用方像 `~/.qui-local/gate.sh` 那样在有历史处算好后传入 `QUI_GATE_SCOPE=web`。规则与测试见 `scripts/gate-scope.sh`、`deploy/linux/tests/gate-scope-test.sh`。
-
-GitHub Actions `check` 对每个发布提交手动派发（完整门禁约 21–51 分钟，检出完整历史以判定范围），另每周运行；`cores` 只在每周或手动输入 `cores=true` 时运行。`v*` 标签只构建发布，并要求同 SHA 已有成功 `check`。qui sing-box 可复现构建按构建脚本摘要缓存。入口以 `.github/workflows/check.yml` 和 `scripts/` 为准，历史耗时见[变更记录](changelog.md)。
-
-本地开发（仅开发环境）：
+**本地开发（仅开发环境）**：
 
 ```sh
 npm --prefix web ci
@@ -133,22 +81,20 @@ go run ./cmd/panel --config deploy/examples/panel.dev.yaml
 go run ./cmd/agent --config deploy/examples/agent.dev.yaml
 ```
 
-本地开发统一访问 `http://127.0.0.1:8080`：运行 `npm --prefix web run dev` 启动 Vite，页面与热更新 WebSocket 共用 8080；API、订阅与健康检查转发到 `panel.dev.yaml` 的后端 `127.0.0.1:8081`。Vite 固定端口，8080 被占用时直接报错，不自动切换。gRPC 为 `127.0.0.1:9443`，状态在 `state/`。
-
-Vite 开发入口监听 `0.0.0.0:8080`，同一局域网可通过 `http://<开发机局域网 IP>:8080` 访问，页面、API 与热更新保持同一地址。Windows 防火墙须允许相应局域网访问 TCP 8080；后端 8081 仍只监听本机回环。
+开发入口固定监听 `0.0.0.0:8080`（`npm --prefix web run dev`，端口冲突直接报错），API/订阅/健康检查转发至后端 `127.0.0.1:8081`，gRPC 为 `127.0.0.1:9443`，状态目录在 `state/`。
 
 ## 3. 安装面板
 
-在解包目录内执行（脚本要求同级的 `systemd/` 与 `examples/`）：
+在解包目录内执行（要求同级 `systemd/` 与 `examples/`）：
 
 ```sh
-tar -xzf proxy-control-1.3.1-linux-amd64.tar.gz
-cd proxy-control-1.3.1-linux-amd64
+tar -xzf proxy-control-1.7.5-linux-amd64.tar.gz
+cd proxy-control-1.7.5-linux-amd64
 sha256sum bin/proxy-panel
 deploy/linux/install.sh --panel --binary bin/proxy-panel --sha256 <sha256>
 ```
 
-`install.sh --help` 的完整参数：
+`install.sh --help` 完整参数：
 
 ```text
 Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
@@ -169,15 +115,14 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
   --reinstall            install again after uninstall.sh removed the service
 ```
 
-面板安装脚本会：
-
-1. 校验二进制是 64 位小端 ELF、架构与主机匹配、SHA256 与 `--sha256` 一致；
-2. 创建服务账号 `proxy-panel` 与目录 `/etc/proxy-panel`、`/etc/proxy-panel/tls`、`/var/lib/proxy-panel`（0700）；
+面板安装脚本执行：
+1. 校验 64 位小端 ELF、主机架构与 `--sha256`；
+2. 创建 `proxy-panel` 账号及 `/etc/proxy-panel`、`/etc/proxy-panel/tls`、`/var/lib/proxy-panel`（0700）；
 3. 安装 `/usr/local/bin/proxy-panel` 与 `/etc/systemd/system/proxy-panel.service`；
-4. **首次安装**时把配置模板写到 `/etc/proxy-panel/config.yaml`（0600）；
-5. 写入安装记录 `/var/lib/proxycontrol-install/panel.manifest`，不启动任何服务。
+4. **首次安装**写入 `/etc/proxy-panel/config.yaml`（0600）；
+5. 写入 `/var/lib/proxycontrol-install/panel.manifest`，不自动启动服务。
 
-安装后：
+安装后配置证书、检查并启动：
 
 ```sh
 install -o proxy-panel -g proxy-panel -m 0600 your-server.crt /etc/proxy-panel/tls/server.crt
@@ -187,251 +132,176 @@ $EDITOR /etc/proxy-panel/config.yaml          # http_address / grpc_address / da
 systemctl enable --now proxy-panel.service
 ```
 
-配置字段与示例见 `deploy/examples/panel.yaml`。`node_identity_directory`（示例 `/var/lib/proxy-panel/identity`）是面板自己的节点 CA 目录，首次启动时自动创建，不要指向网络共享目录。
+配置示例见 `deploy/examples/panel.yaml`。`node_identity_directory`（默认 `/var/lib/proxy-panel/identity`）由面板首次启动自动创建，不要放在网络共享目录。
 
-**首次创建 Owner**：数据库里还没有管理员时，面板生成一次性安装令牌，在日志里以 WARN 打印一次（`first-run setup token`），并写入 `<database 所在目录>/setup-token`（0600）。用浏览器打开 `https://<host>/`，在初始化页面粘贴该令牌并设置 Owner 用户名、密码、平台名称和时区；成功后令牌与文件立即失效。令牌校验在 PBKDF2 之前完成，错误令牌不会消耗 CPU。
-
-`journalctl -u proxy-panel -f` 查看日志；程序只写 stdout，不写 `/var/log` 下的文件。
-
-安装脚本为面板与节点都发布终端菜单 `/usr/local/bin/qui`（root 专用）。有面板时显示：1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止、6. 更新（从 GitHub）、7. 查看／重置管理员登录地址、8. 卸载并清除全部数据、0. 退出。只装 Agent 时显示精简菜单：1. 更新、2. 卸载并清除全部数据、0. 退出，以及 Agent 状态与版本。菜单按本机 `.manifest` 判断组件；节点无需面板程序、配置或账号。细节见[运维手册](operations.md) §14。
+- **首次创建 Owner**：数据库无管理员时，面板以 WARN 打印一次性 `first-run setup token` 并写入 `<database 目录>/setup-token`（0600）。打开 `https://<host>/` 粘贴令牌设置 Owner、平台名称与时区，完成后令牌与文件立即失效。
+- **日志**：面板只写 stdout，使用 `journalctl -u proxy-panel -f` 查看（不写 `/var/log`）。节点 Agent 运行日志自 v1.7.3 起写入 `/var/lib/proxy-agent/logs/agent.log`（轮转上限 100 MiB），`journalctl -u proxy-agent` / syslog 仅接收启动与日志写入错误。
+- **终端菜单 `/usr/local/bin/qui`**（root 专用）：面板主机显示 `1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止、6. 更新（从 GitHub）、7. 查看／重置管理员登录地址、8. 卸载并清除全部数据、0. 退出`；仅装 Agent 时显示精简菜单（`1. 更新、2. 卸载并清除全部数据、0. 退出` 及状态/版本）。详见[运维手册](operations.md) §14。
 
 ## 4. 接入节点
 
-已登记且旧 Agent 仍可运行的服务器，从服务器列表的「安装」生成带 `--replace-agent` 的专用命令。命令会中断该机代理，最后上传经面板逐批确认后才清除本机 Agent 数据并重新登记。准备条件、清理范围及失败后重试见[运维手册第 5.1 节](operations.md#51-原位恢复推荐)。
+已登记且旧 Agent 仍可运行的服务器，从服务器列表「安装」生成带 `--replace-agent` 的原位恢复命令；准备条件、清理范围及重试规则见[运维手册第 5.1 节](operations.md#51-原位恢复推荐)。
 
-**第 1 步（面板）**：在“节点”页创建节点记录，生成一次性注册码。注册码只能使用一次；节点记录被禁用时注册码不可用。创建成功后对话框同时给出**一键安装命令**，把它粘贴到新服务器的 root shell 里执行即可完成安装、登记与启动。命令里的面板地址与面板 Web 端口默认取「系统设置 → 基础设置 → 节点安装连接地址」（Owner 保存一次即可复用；未设置时用当前浏览器地址），Agent gRPC 地址与端口默认取面板地址与面板实际监听端口，也可在同一处单独设置。
+**第 1 步（面板）**：在「节点」页新建节点，获取一次性注册码与**一键安装命令**（仅正式版本 `X.Y.Z` 且非开发模式显示）。命令里的面板地址、Web 端口与 Agent gRPC 地址/端口默认取「系统设置 → 基础设置 → 节点安装连接地址」。
 
 ### 一键安装（推荐）
 
 ```sh
 if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; \
 elif ! command -v curl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; \
-curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.3.1/node-install.sh | bash -s -- \
-  --version 1.0.9 --panel panel.example.com --http-port 22550 --grpc-port 18880 \
+curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.7.5/node-install.sh | bash -s -- \
+  --version 1.7.5 --panel panel.example.com --http-port 22550 --grpc-port 18880 \
   --ca-sha256 <面板显示的 64 位小写十六进制> --token <一次性注册码> --core xray
 ```
 
-- 开头的 `if … fi;` 只补齐这条命令自己需要的工具：Alpine 上用 apk 安装 bash 与 curl（原版 Alpine 两者都没有，root 的登录 shell 是 busybox ash）；Debian/Ubuntu 上只在没有 curl 时用 apt 安装（最小化安装可能没有）；已经具备时什么也不做。它在 ash、dash 与 bash 里都合法，同一条命令可以直接粘贴到 Debian、Ubuntu 和 Alpine（含 LXC）的 root shell 里。
-- **离线安装**：在 `node-install.sh` 后加 `--bundle <proxy-control-<版本>-linux-<架构>.tar.gz> --sums <SHA256SUMS>`（两个必须同时给出），脚本就改用本地文件而不访问 GitHub 下载归档。本地归档仍要按 `SHA256SUMS` 核对；Xray 核心仍从官方发布地址下载。
-
-- 命令由面板生成：版本是面板自身的版本，端口取自 `grpc_address`，摘要是面板 Web 证书信任锚的 SHA-256。只有**正式发布版本**（X.Y.Z）且面板以非开发模式运行时对话框才显示该命令，否则提示按下面的手工步骤安装。
-- `node-install.sh` 从 `https://github.com/jingniao/qui/releases/download/v<版本>/` 下载与面板**同版本**的归档和 `SHA256SUMS`，核对摘要后安装 Agent。Xray 仍用官方 26.3.27；`--core sing-box` 默认取同一 qui 发布的 `sing-box-1.14.4-qui.1-linux-<架构>.tar.gz`，用该发布的 `SHA256SUMS` 校验。必须先有与面板一致的发布。`--core-source official` 保留官方 sing-box 1.14.3 和按架构、libc 固定摘要的行为。
-- 面板证书信任按以下规则建立：先尝试用系统 CA 包（即随后会被安装为节点 CA 的那个文件，`--cacert` 指定，并带 `--no-insecure`）下载 `https://<面板>/install/ca.pem`，并要求它的 SHA-256 等于 `--ca-sha256`，不一致立即中止（可能中间人攻击，或面板地址/端口填错）。下载成功后还要检查**取回的那张证书本身**是否链到系统 CA 包：只有它本身受公网 CA 信任（例如 Let's Encrypt，其中间证书会轮换）时，才把系统 CA 包（`/etc/ssl/certs/ca-certificates.crt` 或 `/etc/pki/tls/certs/ca-bundle.crt`）安装为 `/etc/proxy-agent/tls/ca.crt`；若取回的证书是自签或私有 CA（Web 一侧是 CDN 或终止 TLS 的反向代理时就是这样，连接用的是边缘公网证书，而面板自己的证书不是），脚本按固定 SHA-256 核对后直接把这张面板证书安装为节点 CA，供 Agent 直连 gRPC 使用。连接下载失败则改用 `curl -k` 取回该文件，同样要求 SHA-256 等于 `--ca-sha256`。
-- 之后脚本把 `control_address` 与 `server_name` 写入 `/etc/proxy-agent/config.yaml`（保持原属主与权限），用一次性注册码登记，最后启用并启动 Agent：systemd 上是 `systemctl enable` + `start proxy-agent.service`，OpenRC 上是 `rc-update add proxy-agent default` + `rc-service proxy-agent start`。
-- 注册码只能用一次且会过期；它出现在新服务器的 shell 历史里，登记成功后请清理该历史。节点**登记成功前**可以重跑这条命令：会原地升级 Agent 并用新的注册码重新登记，登记要求本机能访问面板的 gRPC 端口（默认 18880）；已登记的主机再跑会被拒绝，升级用 `qui-update`。
-- 安装失败（例如缺少依赖）时脚本报告 `Agent 安装失败（原因见上面 install.sh 的输出）`：`install.sh` 可能已经替换了部分文件，但本机尚未登记，修正原因后直接重跑同一条命令即可。`install.sh` 不会留下暂存目录或 `.installing` 临时文件。
-- **面板在反向代理／Cloudflare 后面时**：Agent 的 gRPC 必须直连面板，mTLS 无法经过 Cloudflare 或终止 TLS 的反向代理。`--panel` 要用 DNS-only（灰云）主机名或面板的 IPv4，直达面板且被面板**自己的**证书覆盖；`--http-port` 是面板自己的 Web 端口（默认 22550），不是代理的 443；两个端口都要放行。脚本会先按 `--ca-sha256` 核对 `GET /install/ca.pem` 的字节（公网 CA 分支也核对，防止代理或别的面板冒充），并检查取回的证书本身是否受公网 CA 信任——Web 边缘证书是公网的并不代表面板自己的证书也是，后者才是 Agent 直连 gRPC 时看到的证书，所以这种情形下装的是取回的面板证书而不是系统 CA 包；装好信任锚后再用它与 gRPC 地址预检端点：证书不被该信任锚验证或不覆盖该名字（curl 60/51/58 等）就在登记前中止并说明；端口不可达（6/7/28）单独报告；`--http-port` 指向 gRPC 端口时下载阶段会以 HTTP 415 说明；`--http-port` 与 `--grpc-port` 相同则直接拒绝。面板地址与 gRPC 地址/端口可在「系统设置 → 节点安装连接地址」保存一次；Web 走 CDN、gRPC 单独暴露时，在设置里另填 `Agent gRPC 地址`（命令写 `--grpc-host`），该名字同样要被面板自己的证书覆盖并直达面板。
-- 失败的登记会留下重试标记 `/var/lib/proxy-agent/enrollment-attempt.json` 和它生成的私钥。Agent 把这两个文件绑定到原注册码与面板，不允许换绑。所以重跑时，只要本机既没有证书也没有 `enrollment-result.json`，脚本就把它们移到 `/var/lib/proxy-agent-enrollment-retired.XXXXXXXX/`（root 0700，**不删除**），再用新注册码登记；新登记成功后可以删除该目录。存在 `enrollment-result.json` 时，面板可能已经签发过证书，脚本拒绝继续，处理方法见运维手册第 5 节。
+- 开头 `if … fi;` 在 ash/dash/bash 均合法，仅补齐 Alpine 的 `bash`/`curl` 或最小化 Debian/Ubuntu 的 `curl`。
+- **离线安装**：附加 `--bundle <proxy-control-<version>-linux-<arch>.tar.gz> --sums <SHA256SUMS>` 改用本地归档；qui sing-box 从同目录选取，Xray/官方 sing-box 仍走上游下载。
+- **证书信任与反向代理／Cloudflare**：脚本先按 `--ca-sha256` 核对 `GET /install/ca.pem`；仅当取回的面板证书本身链到公网 CA 时安装系统 CA 包，自签或私有 CA（含 Web 经 CDN/反代终止 TLS 的场景）直接安装该面板证书为 `/etc/proxy-agent/tls/ca.crt`，随后立即对 gRPC 端点预检。Agent 的 gRPC 必须直连面板，不能经 Cloudflare 橙云或终止 TLS 的反代：`--panel`（或 `--grpc-host`）须为直达面板且被面板自有证书覆盖的 DNS-only 主机名或 IPv4，`--http-port` 为面板自身 Web 端口（默认 22550，且不得与 `--grpc-port` 相同）。
+- **登记与重跑**：登记前失败可直接重跑（未生成证书与 `enrollment-result.json` 时，旧重试标记与私钥移入 `/var/lib/proxy-agent-enrollment-retired.XXXXXXXX/`，root 0700，不删除）；已存在 `enrollment-result.json` 时拒绝覆盖，按[运维手册](operations.md)第 5 节处理。登记成功后请清理 shell 历史中的一次性注册码；已登记节点升级走 `qui-update`。
 
 ### 4.1 Alpine / OpenRC 节点
 
-一键安装与手工安装在 Alpine 上用同一套脚本，区别只在服务定义与服务管理命令：
+一键与手工安装共用脚本，区别仅在服务定义与管理：
 
 | 作用 | systemd | OpenRC |
 | --- | --- | --- |
 | Agent 服务 | `/etc/systemd/system/proxy-agent.service` | `/etc/init.d/proxy-agent`（`supervise-daemon`） |
-| 强制出站源地址 | `proxy-agent-host-network.service`（oneshot）+ `.path`（监视 `desired.json`） | `/etc/init.d/proxy-agent-host-network`，监管 `/usr/local/lib/proxy-agent/host-network-watch`：启动时先应用一次已保留的 `desired.json`（相当于开机重放），再用 busybox `inotifyd` 等待 Agent 发布新文件 |
-| 低端口能力 | `AmbientCapabilities=CAP_NET_BIND_SERVICE` | `capabilities="^cap_net_bind_service"`（ambient，核心继承） |
-| 强制出站 helper 能力 | `AmbientCapabilities=CAP_NET_ADMIN` | `capabilities="^cap_net_admin"` |
-| 崩溃重启 | `Restart=on-failure`，`RestartSec=5` | `respawn_delay=5`，`respawn_max=0` |
-| 停止 | `TimeoutStopSec=90`，`KillMode=mixed` | `retry="TERM/90/KILL/5"`，`rc_cgroup_cleanup="yes"` |
-| 日志 | journald（`journalctl -u proxy-agent`） | `logger` → syslog（`/var/log/messages`，标签 `proxy-agent`、`proxy-agent-host-network`） |
+| 强制出站源地址 | `proxy-agent-host-network.service` + `.path` | `/etc/init.d/proxy-agent-host-network` + `host-network-watch`（`inotifyd`） |
+| 低端口 / 出站能力 | `AmbientCapabilities=CAP_NET_BIND_SERVICE` / `CAP_NET_ADMIN` | `capabilities="^cap_net_bind_service"` / `"^cap_net_admin"` |
+| 崩溃重启与停止 | `Restart=on-failure`（5s）、`TimeoutStopSec=90`、`KillMode=mixed` | `respawn_delay=5`、`retry="TERM/90/KILL/5"`、`rc_cgroup_cleanup="yes"` |
+| 运行日志 / 启动故障 | `/var/lib/proxy-agent/logs/agent.log`（100 MiB）；启动错误见 `journalctl -u proxy-agent` | `/var/lib/proxy-agent/logs/agent.log`（100 MiB）；启动错误见 `/var/log/messages`（`logger`） |
 | 开机启动 | `systemctl enable` | `rc-update add … default` |
 
-- 两个服务都以 `proxy-agent` 账号运行，带 `no_new_privs`，`umask=077`，`directory=/var/lib/proxy-agent`。systemd 单元里的 `ProtectSystem`、`ProtectHome`、`PrivateTmp`、`ProtectKernel*`、`ProtectControlGroups`、`RestrictSUIDSGID`、`ReadWritePaths` 在 OpenRC 里没有对应项，所以 OpenRC 节点没有这层文件系统隔离。
-- 代理核心以 `Pdeathsig=SIGKILL` 启动（`internal/agent/core/procattr_linux.go`）。supervise-daemon 只向 Agent 本身发信号，所以 Agent 被杀或崩溃时由内核杀掉核心，不会留下占着端口的孤儿核心（systemd 上同样生效，与 `KillMode=mixed` 不冲突）。
-- `/etc/machine-id`：Agent 判断上一次核心是否退出时要用 machine-id、boot_id 和 pid 命名空间三者，原版 Alpine 没有 machine-id。缺失或无效时，`install.sh --node` 在 OpenRC 上会创建它：优先复制有效的 `/var/lib/dbus/machine-id`，否则写 32 位随机十六进制，root 0444。已有的有效文件不改，systemd 主机上不碰。
-- 安装记录 `agent.manifest` 第 10 行写 `openrc`；没有第 10 行表示 systemd。`uninstall.sh` 发现记录与本机初始化系统不一致时拒绝执行。
-- `install.sh` 还会安装 `/usr/local/lib/proxycontrol/service.sh`（两种初始化系统通用的服务命令库，systemd 主机也装），供 `qui-update` 与单独拷出的脚本使用。
-- 服务管理命令见[运维手册](operations.md)第 1 节。
+- 均以 `proxy-agent` 运行（`no_new_privs`、`umask=077`）；OpenRC 无 systemd 的 `ProtectSystem`/`PrivateTmp` 等文件系统隔离。
+- 核心以 `Pdeathsig=SIGKILL` 启动，避免 Agent 退出后遗留占端口的孤儿核心。
+- OpenRC 缺失有效 `/etc/machine-id` 时由 `install.sh --node` 自动补写（root 0444）；`agent.manifest` 第 10 行记为 `openrc`。服务命令对照见[运维手册](operations.md)第 1 节。
 
-### 手工安装（备选）
+### 4.2 调优 helper 与自动续证
 
-**第 2 步（节点）**：安装 Agent，需要时同时安装官方核心。
+- **内核调优 helper**：Agent 安装创建 `/var/lib/proxy-agent/tuning/`（`proxy-agent` 0700）及 `proxy-agent-tuning.service`/`.path`（OpenRC 为 `proxy-agent-tuning` 与 `tuning-watch`），安装时启用并支持开机重放。主程序无调优特权，独立 root helper 仅持 `CAP_NET_ADMIN` + `CAP_DAC_OVERRIDE`，固定写入 **19** 个 sysctl 键（`fs.file-max` 用 root 权限）；systemd 默认将 `/proc/sys` 设为只读并仅放开白名单。生效文件为 `/etc/sysctl.d/99-proxy-tuning.conf`，原值快照为 root 0600 的 `.proxy-tuning-snapshot.json`（不得放入 Agent 可写目录）。卸载前先恢复快照，失败中止卸载；`qui-update` 快照覆盖上述单元。详见[运维手册第 18 节](operations.md#18-主机观测续证与调优-helper)。
+- **Ubuntu 调优模块补装（仅 Ubuntu/systemd）**：安装器额外发布 `proxy-agent-tuning-modules.path` / `.service`（root 0644，由 Agent 主单元拉起，无独立开机启用项），内嵌 Python 脚本调用宿主 `/usr/bin/python3`（≥3.9）、APT/dpkg 与 `systemd-detect-virt`。升级或卸载前应等待进行中的 dpkg 事务完成。
+- **证书自动续期**：面板签发 90 天节点证书；满 30 天或余期不超过 14 天时，Agent 在控制连接内用原密钥自动续证。
+
+### 4.3 手工安装（备选）
+
+**第 2 步（节点）**：安装 Agent 与所需核心：
 
 ```sh
-tar -xzf proxy-control-1.3.1-linux-amd64.tar.gz
-cd proxy-control-1.3.1-linux-amd64
+tar -xzf proxy-control-1.7.5-linux-amd64.tar.gz
+cd proxy-control-1.7.5-linux-amd64
 deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <sha256> \
   --core xray --core-version 26.3.27
 ```
 
-- `--core` 允许 `xray`、`sing-box` 或 `gost`。发布包内的 `VERSION` 自动确定 qui 来源版本；单独使用脚本时给出 `--core sing-box --qui-version X.Y.Z`，其中 X.Y.Z 必须与正在安装的 Agent 发布版本一致。显式版本与包内版本不符时拒绝；核心固定为 1.14.4-qui.1。官方来源也有固定默认版本，手工覆盖版本时使用对应核心后的 `--core-version`。
-- **GOST（v1.3 G1）**：`--core gost` 安装固定官方 3.3.2。只有 linux/amd64：脚本从 `https://github.com/go-gost/gost/releases/download/v3.3.2/gost_3.3.2_linux_amd64.tar.gz` 下载，核对同发布 `checksums.txt` 中唯一匹配条目与面板内固定的归档摘要 `162feb43…a9d18274`，解包后只接受根目录 `gost`，要求 `gost -V` 首行 `gost 3.3.2 (...)`。这是静态链接的单一归档，**glibc 与 Alpine/musl 共用同一个资产**，不需要 musl 专用包；其他架构（含 arm64）明确拒绝，即使上游发布了对应归档。`--core-source` 仍只影响 sing-box，GOST 永远取自官方固定版本，也不接受 `--core-url`/`--core-sha256` 覆盖。安装位置为 `/usr/local/lib/proxy-agent/gost`，没有独立服务单元（由 Agent 托管子进程），v2 安装记录写成 `core gost /usr/local/lib/proxy-agent/gost <二进制 sha256>`。
-- qui 来源只下载 `jingniao/qui` 的同版本资源和 `SHA256SUMS`，不接受覆盖 URL 或摘要。`--core-source official` 保留官方 URL 前缀、`--core-url`、`--core-sha256` 和 Xray `.dgst` 路径；没有可信摘要就不安装。
-- qui 构建使用未修改的上游 v1.14.4、go1.26.11、上游 non-naive 标签加 `with_v2ray_api`，CGO=0；同一架构的静态归档同时用于 glibc 和 musl。官方来源在 musl 主机仍选单独的 `-musl.tar.gz` 与摘要。
-- 离线一键安装 qui sing-box：把同发布的核心归档放在 `--bundle` 旁边，`--sums` 必须同时列出 Agent 包和核心归档。手工安装可用 `--core-bundle FILE --core-sums FILE`；仍核对精确文件名的唯一摘要条目。核心安装路径不变，配置按多核心安装约定 写入完整 cores 集合和第一个核心的兼容旧键。
-- v1.2 多核心通过 Owner 的核心选择配合安装/更新步骤生效，安装器支持并存的 Xray 与 sing-box；新增核心用重复 `--core`，配置以 `cores` 为准。删除核心需另行核对配置与已发布入站，省略安装参数不会删除已有核心。切换前先处理目标核心不支持的入站（例如 Xray 不支持 Hysteria2/TUIC），发布并确认成功。从 v1.0.6 起，如果新核心编译或启动不了上一修订，Agent 记一条错误日志，让核心保持停止，但照常连上面板（节点显示核心不健康），收到能用的新修订后正常应用；重试间隔从 3 秒倍增到 1 分钟。修订文件校验失败等完整性错误仍会让 Agent 退出。v1.0.5 及更早版本在这种情况下会反复退出、连不上面板（[验收矩阵](v1-acceptance.md) 9.13）。
-- 脚本还会创建服务账号 `proxy-agent` 和目录 `/etc/proxy-agent`、`/etc/proxy-agent/tls`、`/var/lib/proxy-agent`，不启动服务。
-- 脚本还会创建 `/var/lib/proxy-agent/host-network`（0700，服务器强制出站的 helper 目录），安装并启用两个固定单元：`proxy-agent-host-network.service`（oneshot，`proxy-agent --apply-host-network /var/lib/proxy-agent/host-network`，只带 `CAP_NET_ADMIN`）与监视 `desired.json` 的 `proxy-agent-host-network.path`。它们只维护一个 nft 表 `inet proxy_agent_source`，不改变主机上的其他规则。
+- 单独运行脚本装 qui sing-box 时须传 `--qui-version <version>` 且与包内 `VERSION` 一致；GOST（`--core gost`）固定官方 3.3.2（归档摘要 `162feb43…a9d18274`），仅 linux/amd64，以 Agent 子进程运行，无独立服务单元。
+- 脚本同时创建 `proxy-agent` 账号、目录及强制出站单元（`proxy-agent-host-network.{service,path}`，仅维护 nft 表 `inet proxy_agent_source`），不启动 Agent 服务。若后续核心编译或启动失败，Agent 仍保持与面板连接并上报不健康，待下发可用修订后恢复。
 
-**第 3 步（节点）**：配置控制地址与受信 CA。
+**第 3 步（节点）**：放置面板 Web CA 与配置：
 
 ```sh
 install -o root -g proxy-agent -m 0644 /path/to/web-ca.crt /etc/proxy-agent/tls/ca.crt
 $EDITOR /etc/proxy-agent/config.yaml     # control_address / server_name / core_name / core_path
 ```
 
-`ca.crt` 必须是签发面板 Web 证书（`tls.certificate`，含其证书链的顶层）的 CA；它由你自己的 PKI/ACME 提供，不是 `/var/lib/proxy-panel/identity/ca.crt`。后者是面板**节点 CA**，只签发节点客户端证书，登记时由面板下发到 Agent 的 `identity/`，不需要手工安装。面板 Web 证书换了签发 CA 时，用 `deploy/linux/node-ca.sh --trust` 替换本文件（见[运维手册](operations.md)）。配置示例见 `deploy/examples/agent.yaml`。
+`ca.crt` 须为签发面板 Web 证书的 CA，**不是** `/var/lib/proxy-panel/identity/ca.crt`（节点 CA 由登记流程自动下发）。面板 Web CA 变更时用 `deploy/linux/node-ca.sh --trust` 更新（见[运维手册](operations.md)）。
 
-**第 4 步（节点）**：登记。
+**第 4 步（节点）**：登记并启动：
 
 ```sh
 deploy/linux/enroll.sh --token-file /root/node1.token
 systemctl enable --now proxy-agent.service
-# OpenRC（Alpine）：
-# rc-update add proxy-agent default && rc-service proxy-agent start
+# OpenRC：rc-update add proxy-agent default && rc-service proxy-agent start
 ```
 
-`enroll.sh` 会校验：token 文件是普通文件、大小 ≤512 字节、权限 0600/0400、只有一个硬链接；安装记录完整且二进制摘要未变；`proxy-agent.service` 处于停止状态；`/etc/proxy-agent/config.yaml` 与 `/var/lib/proxy-agent` 存在。它把 token 复制成 `proxy-agent` 可读的临时文件，以 `--config /etc/proxy-agent/config.yaml --enroll --token-file <临时文件>` 调用 Agent，登记成功后退出，不启动核心或服务。源 token 文件保留，确认登记成功后请自行安全删除。
+`enroll.sh` 校验 token 文件（普通文件、≤512 字节、0600/0400、单硬链接）、安装记录完整、服务已停止后完成登记；确认成功后安全删除原 token 文件。
 
-**第 5 步（面板）**：在“代理 → 入站/出站”和“分流”里配置该节点的入站与规则，然后创建并发布配置版本（`POST /api/v1/revisions`、`POST /api/v1/revisions/{id}/deploy`）。发布前节点只上报状态，不代理流量。
+**第 5 步（面板）**：配置入站/出站与分流并发布配置版本；发布前节点只上报状态，不代理流量。
 
 ## 5. 升级
 
-**正常方式（面板与节点主机）：qui-update**
-
-`install.sh` 会把 `deploy/linux/update.sh` 装成 `/usr/local/bin/qui-update`（面板与节点主机都有；面板菜单第 6 项、Agent 精简菜单第 1 项调用它）。v1.5.5 同时发布 `qui` 与 `/usr/local/lib/proxycontrol/uninstall.sh`，均为 root:root 0755，不写入组件 manifest；本机卸载不依赖网络或另取发布归档。旧节点须经本机 `qui-update --component agent` 才取得这两个文件。
+**标准方式：`qui-update`**（`/usr/local/bin/qui-update`，面板与节点主机均由 `install.sh` 安装；同时发布 `/usr/local/bin/qui` 与 `/usr/local/lib/proxycontrol/uninstall.sh`，均不进 manifest、随更新快照）：
 
 ```sh
-qui-update                  # 安装 GitHub 上的最新发布
-qui-update --version 1.0.1  # 指定版本
-qui-update --yes            # 不询问确认
-qui-update --version 1.0.9 --bundle proxy-control-1.3.1-linux-amd64.tar.gz --sums SHA256SUMS
-                            # 离线：用本地归档与其 SHA256SUMS，不访问 GitHub
+qui-update                       # 安装 GitHub 最新正式发布
+qui-update --version 1.7.5       # 指定版本（支持 X.Y.Z 或 X.Y.Z-rc.N）
+qui-update --component panel     # 仅更新面板（或 --component agent）
+qui-update --yes                 # 免确认
+qui-update --version 1.7.5 --bundle proxy-control-1.7.5-linux-amd64.tar.gz --sums SHA256SUMS
+                                 # 离线：本地归档与 SHA256SUMS，不访问 GitHub
 ```
 
-- 它从 `https://github.com/jingniao/qui/releases` 下载 `proxy-control-<版本>-linux-<架构>.tar.gz` 和同一发布的 `SHA256SUMS`，按文件名核对归档的 SHA-256 后才解包，然后调用归档里的 `deploy/linux/install.sh` 原地替换程序、systemd 单元和脚本（`qui`、`qui-update`）；配置、节点身份与数据库都不动。**摘要只证明下载内容与仓库发布一致，信任仍建立在 GitHub 仓库本身**。本地受管升级功能还会取得官方 Agent 签名清单，独立验证实际 Agent，见下文「受管 Agent 的终端升级」。
-- 版本只接受 `X.Y.Z` 或 `X.Y.Z-rc.N`（三个版本段均无前导零，N 为无前导零的正整数），拒绝其他预发布标签与 build metadata。显式 `--version 1.2.0-rc.1` 在线下载使用标签 `v1.2.0-rc.1`，资产名为 `proxy-control-1.2.0-rc.1-linux-<架构>.tar.gz`；离线使用同名归档与配套 `SHA256SUMS`，摘要校验不变。未指定版本仍取 GitHub 最新正式发布，不自动选择 RC：`vX.Y.Z-rc.N` 标签由发布任务标为 GitHub 预发布（pre-release），`releases/latest` 不会返回它。
-- 面板更新：先停止 `proxy-panel.service`，在停止状态下把数据库（以及存在的 `-wal`）复制到 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<YYYYmmdd-HHMMSS>.db`（属主 `proxy-panel`、0600），再替换程序，最后按停止前的状态启动服务并打印状态。
-- 节点更新：节点主机用 SSH 登录后运行同一条命令（需要 root）。同一台主机同时装有面板与节点时，不指定组件仍从同一个归档更新两个组件，**先节点后面板**（保持历史行为）。指定 `--component panel` 或 `--component agent` 只更新该组件，未安装则报错；v1.1 必须先 `--component panel`，验收后再 `--component agent`。
-- `--bundle` 与 `--sums` 必须同时给出，并且必须用 `--version` 指定版本（`SHA256SUMS` 里核对的文件名带版本号）；核对方式与下载时完全相同。
-- **组件隔离**：版本检查、停止/启动、快照、日志及回滚只针对选中组件的程序、服务、安装记录和附属文件；共享的 `qui-update`、`qui`、`service.sh` 与本机 `uninstall.sh` 随该次更新快照/恢复，开机恢复 hook 按原机制共享。面板更新及其回滚不替换 Agent 程序、单元、强制出站文件或记录，也不停止/启动 Agent；Agent 更新及其回滚不触碰面板程序、单元、记录或数据库。`--component agent` 不能与 `--database` 合用。启动前仍会恢复任何已有的未完成更新，这不受本次组件选择限制。
-- **数据库备份**：面板备份先写成 `.partial` 文件，同步到磁盘并与原文件逐字节比较后才改名为最终名字，所以 `pre-update-*.db` 要么完整、要么不存在；断电不会留下看起来可用的半截备份。
-- **数据库预检**（面板，1.0.3 起）：停止并备份后，脚本用**目标版本**的程序执行 `proxy-panel --check-database <备份>`（只读，在私有副本上检查完整性与迁移记录）。目标版本打不开这份数据库（数据库里有它不认识的迁移，即降级跨过了迁移）时，什么都不替换，删掉刚才的备份，重新启动面板，并列出可以一起回退的 `pre-update-<目标版本>-*.db` 备份（见 5.1）。目标版本早于 1.0.3、不认识这个参数，或程序在本机无法执行时，跳过预检：旧面板遇到更新的数据库会拒绝启动，由健康检查与回滚兜底。
-- **回滚快照与进度日志**：服务停止后、`install.sh` 运行前，脚本把这次可能被替换的文件（程序、主服务定义、`qui-update`、`qui`、`service.sh`、本机 `uninstall.sh`，节点加全部核心路径、Agent config、强制出站与调优的服务/触发器文件，以及安装记录）用 `cp -a` 复制到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），再放入正在运行的 `qui-update` 与它的 `service.sh` 的副本，同步到磁盘后最后写进度日志 `journal`。日志记录组件、新旧版本、服务原来是否在运行、数据库备份路径和阶段：`prepared`（`install.sh` 运行前）→ `started`（新版本可能接触数据库之前）→ `committed`（健康检查通过）或 `restored`（回滚已放回文件与数据库）。每次写入都先写临时文件、同步、再改名，断电只会看到旧阶段或新阶段。保存不了快照或日志就不更新，并把服务启动回来；新发布的菜单或卸载脚本在快照中原本不存在时，回滚删除新增文件。
-- **健康检查**：原本在运行的服务更新后会被启动，并且要在 10 秒内保持运行、主进程 PID 不变才算成功（两种初始化系统都会在崩溃 5 秒后重启程序，崩溃循环在每次轮询时都可能显示为运行中，但 PID 会变）。成功时打印 `已更新到 X，服务运行正常（10 秒内无重启）`，记为 `committed` 并删除快照（先把目录改名为 `discard.*` 再删除，删到一半断电也不会被当成未完成的更新）。
-- **自动回滚**：`install.sh` 失败（即使已经替换了部分文件）、装上的程序版本不是目标版本、或新版本没有持续运行时，脚本停止服务，把快照里的文件放回（与快照相同的文件不动，所以导致失败的只读或 immutable 文件不会让恢复也失败），删除新版本多出的文件，再启动旧版本并做同样的健康检查，打印 `更新失败，已恢复到 <旧版本>`，退出码为 1。面板的数据库在阶段为 `started` 时（新面板可能已经迁移），或数据库与备份不一致时被恢复：先把当前数据库保留为 `failed-update-<目标版本>-<时间>.db`，再删除 `-wal`/`-shm` 并用更新前的备份原子替换。**回滚从不直接丢掉新版本写过的数据库**。
-- **中断后的自动恢复**：
-  - **Ctrl-C、`kill`（SIGTERM）、SSH 断线（SIGHUP）**：脚本捕获信号，按进度日志执行同一套回滚并启动旧版本，退出码 130、143、129。SSH 断线时终端已经不在，输出写入 `/var/lib/proxycontrol-install/interrupted-update.log`。快照建立前收到信号时只删除半成品，并把已停止的服务启动回来。
-  - **`kill -9`、断电、系统崩溃**：进度日志留在磁盘上。开机时 `proxycontrol-update-recovery`（systemd oneshot 单元，或 OpenRC 的同名初始化脚本，由 `install.sh` 安装并启用）在 `proxy-agent`、`proxy-panel` 与强制出站单元**之前**运行，用快照里自带的那份 `qui-update`（正是写下这份日志的版本）恢复文件，必要时恢复数据库，然后由初始化系统照常启动服务。没有进度日志时它什么也不做。输出写入 `/var/lib/proxycontrol-install/update-recovery.log` 与系统日志。恢复时它还会删除被杀掉的 `install.sh` 留下的 `staging.*` 暂存目录（只在 `install.sh` 的锁空闲时）。
-  - **没有重启**（例如 `kill -9` 后直接重跑）：下一次运行 `qui-update` 会先发现未完成的更新、完成恢复，然后才开始新的更新。
-  - 恢复是幂等的：恢复本身再被打断，下次会从进度日志继续，结果一致。
-- 同时只能运行一个 `qui-update`（`/var/lib/proxycontrol-install/update.lock`），第二个会被拒绝。
-- 只有回滚本身没能让旧版本恢复健康时，脚本才保留快照目录并打印它的路径与日志命令（systemd：`journalctl -u proxy-<组件> -n 50`；OpenRC：`grep -F 'proxy-agent' /var/log/messages | tail -n 50`）；下一次运行或下一次开机会再试。
-- 回滚保护由**正在运行的** `qui-update` 提供：从 1.0.1 升级时运行的是 1.0.1 的 `qui-update`（没有快照与健康检查），从 1.0.2 升级时没有进度日志、信号处理与开机恢复；这些从 1.0.3 起的更新才有。旧版 `qui-update` 留下的无日志快照目录会被保留并提示，可检查后手工删除。
-- 替换文件的是**目标版本**的 `install.sh`：降级到 1.0.1 或更早时，它失败后仍会留下 `/var/lib/proxycontrol-install/staging.*` 与 `.<文件名>.installing.*` 临时文件（回滚本身不受影响），确认回滚成功后可以手工删除。
-- 断电保护依赖 `sync`（`syncfs`）把快照、日志与备份落盘；它保护不了会谎报写入完成的磁盘或虚拟化存储。
-- 更新前备份（`pre-update-*`）与回滚保留的数据库（`failed-update-*`）不会自动清理，确认不再需要后可手工删除。
-- **先更新面板，再更新节点**；面板升级期间节点继续用旧配置运行。
+- **下载与校验**：从 GitHub Releases 拉取归档与 `SHA256SUMS` 校验后调用归档内 `install.sh` 原地替换程序、单元与脚本，保留配置、身份与数据库。受管 Agent 同时验证官方 Ed25519 签名清单（见第 5.3 节）。
+- **顺序与组件隔离**：先面板，再逐台节点。同机同时装有面板与节点时，省略 `--component` 默认先节点后面板；指定 `--component panel|agent` 后版本检查、启停、快照与回滚仅作用于该组件（共享工具随本次更新快照/恢复；`--component agent` 不可与 `--database` 合用）。
+- **数据库备份与预检（面板）**：停服后以 `.partial` + fsync + 逐字节校验备份至 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间>.db`（0600），再用目标程序只读执行 `--check-database <备份>`；跨迁移降级未带匹配备份时直接中止并列出可用备份。
+- **快照、健康检查与自动回滚**：停服后、`install.sh` 前把可能替换的文件与运行中的 `qui-update`/`service.sh` 副本快照到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700）并写阶段日志 `journal`（`prepared` → `started` → `committed`/`restored`）。启动后须 10 秒内 PID 不变才提交并清理快照；失败自动回滚并保留新版本写过的库为 `failed-update-<目标版本>-<时间>.db`。
+- **中断与开机恢复**：Ctrl-C / `SIGTERM` / `SIGHUP`（断线输出写 `/var/lib/proxycontrol-install/interrupted-update.log`）触发自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery`（在服务启动前运行，输出写 `update-recovery.log`）或下一次 `qui-update` 幂等完成恢复。互斥锁为 `/var/lib/proxycontrol-install/update.lock`。`pre-update-*` 与 `failed-update-*` 需确认无用后手工清理。
 
-### 5.0 RC 与旧更新器的首次升级
+### 5.1 RC 与组件选择
 
-旧版已安装的 `qui-update` 无法解析 RC 或组件参数。首次使用时，在 root shell 中从放有**已审核**归档与配套 SHA256SUMS 的目录执行下面的命令；先校验再解包，运行归档里的新版更新器（同目录的新版 service.sh 会被采用），仍由它执行备份、预检、快照、日志和回滚。不能只把 RC 改名为正式版本或直接运行 install.sh 绕过更新保护。以下为 amd64，其他架构须替换资产后缀；RC 编号由 Owner 指定。
+- 版本仅接受 `X.Y.Z` 或 `X.Y.Z-rc.N`（无前导零），按 semver 比较（`1.7.5-rc.1 < 1.7.5-rc.2 < 1.7.5`）。RC 标签为 GitHub pre-release，省略 `--version` 时不会自动选中。
+- 安装 RC 或单独升级某一组件：
 
 ```sh
-rc_version='1.2.0-rc.1'
-arch=amd64
-rc_dir="proxy-control-${rc_version}-linux-${arch}"
-bundle="${rc_dir}.tar.gz"
-test -f "$bundle" || exit 1
-awk -v file="$bundle" '$2 == file { print }' SHA256SUMS | sha256sum --check --strict || exit 1
-tar -xzf "$bundle" || exit 1
-bash "$rc_dir/deploy/linux/update.sh" --component panel --version "$rc_version" --bundle "$bundle" --sums SHA256SUMS
+qui-update --component panel --version 1.7.5-rc.1
+qui-update --component agent --version 1.7.5-rc.1
+# 离线 RC：先校验 SHA256SUMS 再附加 --bundle / --sums
+qui-update --component panel --version 1.7.5-rc.1 \
+  --bundle proxy-control-1.7.5-rc.1-linux-amd64.tar.gz --sums SHA256SUMS
 ```
 
-校验或解包失败时停止，不执行下一行。RC1 到此为止，所有 Agent 保持 1.0.9。以后已安装新版更新器的组合主机可运行 `qui-update --component panel --version 1.2.0-rc.2 --bundle proxy-control-1.2.0-rc.2-linux-amd64.tar.gz --sums SHA256SUMS`；确认面板就绪后，再在每个节点主机（含组合主机）运行相同版本的 `--component agent`。仍为旧更新器的 Agent 主机须按上面的校验/解包方式运行归档内 update.sh，只把组件改为 agent。
+- **Agent 不可降级**：目标版本低于已安装 Agent（引导程序或实际运行版本任一）时，`qui-update` 在下载与停服前拒绝；组合主机只回退面板须显式加 `--component panel`。升级失败时的自动回滚不受此限制。
 
-版本比较使用 semver 优先级：`1.0.9 < 1.2.0-rc.1 < 1.2.0-rc.2 < 1.2.0`。正式版回到同版本 RC 也是降级。**v1.6.1 起 Agent 只能升级**：目标版本（`--version` 指定的，或省略时 GitHub 最新发布）低于已安装的 Agent 时，`qui-update` 在下载与停止服务之前拒绝（「不支持把 Agent 降级」）；组合主机省略 `--component` 时同样拒绝，只回退面板须加 `--component panel`。已安装 Agent 的版本读不出时不比较、不拒绝。升级失败时自动恢复原 Agent 不受影响。面板降级不变；跨迁移仍须通过目标程序的 `--check-database` 检查，必要时使用 `--component panel --database <匹配备份>`。RC 本身不增加安装记录中的程序版本字段；实际版本仍读取程序的 `--version`。安装记录使用上文 v2，继续读取 v1；恢复进度日志仍为 journal-v1。
+### 5.2 面板降级与数据库回退
 
-### 5.1 面板降级与数据库回退
-
-v1.5.6 起，运行数据库路径固定在 `/var/lib/proxycontrol-install/panel.database`（root 0600），不改变 v2 manifest 格式。首次安装以面板账号独占创建空库并登记；旧安装首次更新自动校验真实路径位于 `/var/lib/proxy-panel/` 内、文件归面板账号所有，满足条件才登记并继续。配置与记录不一致时拒绝更新，Owner 须在 shell 核实实际数据库位置。状态、数据库和备份先在 root 0700 安装目录暂存，再原子发布，因此该安装目录与各目标目录必须在同一文件系统；不满足时明确拒绝，不退化为跨文件系统复制。
-
-数据库迁移不可逆：较新的面板执行过的迁移，较旧的面板不认识，会拒绝打开这份数据库（不会损坏它）。所以跨迁移降级面板时，必须同时换回一份**在目标版本上产生的**数据库，也就是当初从该版本升级时留下的 `pre-update-<目标版本>-*.db`。
+运行数据库路径固定登记在 `/var/lib/proxycontrol-install/panel.database`（root 0600），暂存与目标目录须在同一文件系统。数据库迁移不可逆，跨迁移降级面板必须提供目标版本时期的 `pre-update-<目标版本>-*.db`：
 
 ```sh
-qui-update --version 1.0.3                       # 先试：没有跨迁移就直接降级成功；
-                                                 # 跨了迁移会被拒绝并列出可用备份
-qui-update --version 1.0.3 --database /var/lib/proxy-panel/backups/pre-update-1.0.3-20261023-145040.db
+qui-update --component panel --version <目标版本>
+qui-update --component panel --version <目标版本> \
+  --database /var/lib/proxy-panel/backups/pre-update-<目标版本>-<时间戳>.db
 ```
 
-- `--database` 只用于把面板降级到更旧的版本（`--version` 必须低于已安装的面板版本），文件必须是普通文件。
-- 动手前（服务还没停）先检查这份文件：目标版本支持 `--check-database` 时由它判断能否打开；目标版本更旧时，由已安装的面板检查文件的完整性与迁移记录。不通过就拒绝。
-- 确认信息里会显示文件与它的时间。**这份备份之后写入面板的数据都会丢失**：新建的用户与设备、之后登记的节点（需要重新登记）、配置与发布记录、流量与访问记录。
-- 过程：停止面板 → 照常备份当前数据库（`pre-update-<当前版本>-*.db`，降级失败或以后想回到新版本时用它）→ 快照与进度日志 → 安装旧程序 → 把 `--database` 指定的文件原子复制为面板数据库（原文件不变）→ 启动并做健康检查。任何一步失败或被中断，都会恢复新版本的文件和降级前的数据库。
-- 降级没有跨过迁移时不需要 `--database`。不带它的降级如果因数据库失败，回滚后也会打印同样的备份列表。
+- `--database` 仅允许用于降级，停服前先做完整性与迁移预检；**备份时间点之后写入的数据会丢失**。降级前仍会照常备份当前库；任何失败均回滚至降级前状态。
 
-以下手动步骤用于离线环境，或需要用自己构建的归档时。
-
-**面板**
+**手工离线替换（仅无 `qui-update` 保护的备选）**：先停服再运行 `install.sh`（服务运行中脚本拒绝替换；已有 `config.yaml` 不会被 `--config` 覆盖）：
 
 ```sh
+# 面板
 systemctl stop proxy-panel.service
 deploy/linux/install.sh --panel --binary bin/proxy-panel --sha256 <new-sha256>
 systemctl start proxy-panel.service
-```
 
-升级会替换程序、systemd 单元和安装记录，服务账号、目录、配置与数据保持不变。**`--config` 在 `/etc/proxy-panel/config.yaml` 已存在时被忽略**（`install.sh` 只在首次安装写配置）；要改配置请直接编辑该文件。脚本拒绝在服务运行中替换程序。
-
-**节点**
-
-```sh
-systemctl stop proxy-agent.service          # OpenRC：rc-service proxy-agent stop
+# 节点（OpenRC 换为 rc-service proxy-agent stop/start）
+systemctl stop proxy-agent.service
 deploy/linux/install.sh --node --binary bin/proxy-agent --sha256 <new-sha256>
-systemctl start proxy-agent.service         # OpenRC：rc-service proxy-agent start
+systemctl start proxy-agent.service
 ```
 
-`qui-update` 在 OpenRC 节点上同样可用：它通过 `/usr/local/lib/proxycontrol/service.sh` 停止和启动 `proxy-agent`，健康检查读取 supervise-daemon 记录的子进程 PID（`/run/openrc/options/proxy-agent/child_pid`）。
+注意：`install.sh --node` 只替换引导镜像 `/usr/local/bin/proxy-agent`，不改变受管运行目录 `/var/lib/proxy-agent/releases/agent-installed/`；受管节点升级请使用 `qui-update --component agent` 或面板任务。
 
-节点升级保留 `identity/`、`revisions/`、`spool/`，`config.yaml` 在无核心参数时保持原样，显式安装核心时仅规范化顶层核心配置，详见 多核心安装说明。注意：`install.sh` 只替换 `/usr/local/bin/proxy-agent`（引导镜像）。已受管的节点运行时使用 `/var/lib/proxy-agent/releases/agent-installed/` 下的镜像，**重跑 `install.sh` 不会改变该镜像**；实际 Agent 可通过面板更新任务（服务器 → Agent 管理）切换。v1.7.1 的终端受管升级也复用同一安装事务，具体见下文；v1.6.1 的旧终端命令只更新引导程序。
+### 5.3 Agent 终端升级与网页完整升级
 
-### 受管 Agent 的终端升级（v1.7.1）
-
-本功能随 v1.7.1 发布并在德国 systemd 节点实测，代码也支持 Alpine/OpenRC；本轮未做 Alpine 实机验收。开启网页升级后，两种入口同时可用：网页更新实际 Agent；`qui` 更新菜单或 `qui-update --component agent` 更新引导程序并更新实际 Agent，终端无需面板管理员凭据，也不依赖面板下载目录在线。
-
-已有安装首次迁移需要两次命令：先运行机器上原有的 `qui-update --component agent --version X.Y.Z` 装好新引导程序和脚本，再重复同一命令更新实际 Agent。`X.Y.Z` 要替换为包含本功能的后续正式版本，不能填写 v1.6.1。此后每次终端升级一次即可。直接从新归档运行新更新器时，旧引导程序缺少状态入口会明确拒绝，须先走上述迁移步骤。
-
-终端在停止服务前验证签名信任、组件、平台、版本、大小、SHA256 和存储兼容性。实际 Agent 通过数据目录内 `agent-local.sock`（0600，仅服务账号和 root 可访问）请求唯一监督进程，继续使用原加密任务日志、生命周期锁、健康检查与失败回滚。网页任务与终端实际安装在同一监督进程中串行执行；已有任务、恢复未完成或服务停止时拒绝更新。修订为 0 时须先在面板发布基础配置。
-
-引导重启前也会在监督进程中取得任务日志的排他保留，暂停其轮询，避免预检之后被另一个更新插入。该保留随服务停止或终端子进程管道关闭释放，终端异常退出不会留下持久占用。本地原任务中断后若需要恢复，重跑原目标版本的命令会先绑定原任务完成恢复，再继续升级；其他任务和网页来源的恢复仍明确拒绝覆盖。已经恢复成功的历史失败不会继续阻挡终端升级。
-
-引导程序与实际 Agent 分两个阶段提交。第二阶段失败时，更新器非零退出并保留原始错误；已更新的引导程序保留，实际 Agent 按受管日志恢复原镜像。中断后先检查服务，再重跑同版本命令；不能仅凭引导程序已经是目标版本判断升级完成。目标低于引导程序或实际 Agent 的任一个版本时拒绝降级。`qui` 分别显示引导和实际运行版本；服务停止时只显示受管安装版本。
-
-受管节点离线更新须额外提供配套签名清单，候选程序取自本地归档。将下列 `X.Y.Z` 换为包含此功能的目标正式版本：
+- **启用与退出网页升级**：`node-install.sh` 默认不启用网页升级；带 `--web-upgrade` 时在首次健康启动后自动完成初始化，未带时可在节点本机运行一次 `qui-update --component agent` 启用（最长等 60 秒写出存储基线；初始化失败将受管路径移至 `/var/lib/proxy-agent/web-upgrade-failed-<UTC>/` 并保持普通模式）。手动退出受管模式：停服、移走受管目录再启动即可回到引导版本（若存储格式已升级，旧引导会拒绝启动，须换新版本）。
+- **终端受管升级**：`qui-update --component agent` 或 `qui` 菜单先校验官方签名清单、组件、平台、版本、SHA256 与存储兼容性，再通过 `/var/lib/proxy-agent/agent-local.sock`（0600）在监督进程内与网页任务串行执行，分两阶段提交引导程序与实际 Agent（第二阶段失败时保留新引导并回滚实际 Agent；修订为 0 须先发布基础配置）。离线受管升级另需 `--agent-manifest`：
 
 ```sh
-qui-update --component agent --version X.Y.Z \
-  --bundle proxy-control-X.Y.Z-linux-amd64.tar.gz --sums SHA256SUMS \
-  --agent-manifest proxy-agent-X.Y.Z-linux-amd64.manifest.json
+qui-update --component agent --version 1.7.5 \
+  --bundle proxy-control-1.7.5-linux-amd64.tar.gz --sums SHA256SUMS \
+  --agent-manifest proxy-agent-1.7.5-linux-amd64.manifest.json
 ```
 
-清单缺失或与归档不匹配时在停止前失败，全程不联网补取。已认证的本地候选保存在 `releases/agent-local-candidates/`，`local-` 任务中断续做只读取该缓存；缓存损坏或缺失会明确报错，保留任务结果和安装记录。普通非受管节点沿用现有 `--bundle` / `--sums` 行为。
+- **网页完整升级（v1.7.5+）**：独立 root 桥接服务（systemd：`proxy-agent-update.{path,service}`；OpenRC：watcher + `proxy-agent-update`）在本机执行 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`，覆盖引导与实际 Agent 两阶段更新、校验与失败恢复；节点需能访问 GitHub，不支持网页离线包。桥接材料位于 `/var/lib/proxycontrol-install/agent-system-updates/`，只读结果与输出位于 `/var/lib/proxy-agent-update/`。面板按实测桥接就绪状态展示入口，任务输出与阶段记录见「系统管理 → 任务记录」；验证详情见[v1.7.5 验证记录](v1.7.5-verification.md)。
+- **代理核心更新**：在面板「服务器 → 代理核心」填写稳定版本、官方 URL 与 SHA-256 下发（GOST 仅预填固定 3.3.2，仅 linux/amd64），Agent 校验切换、失败自动回滚。
 
-### Agent 网页完整升级（v1.7.5）
+### 5.4 面板网页更新
 
-新网页任务由独立 root 服务在节点本机固定执行 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`，包含与终端相同的引导组件和实际 Agent 两阶段更新、官方来源下载、校验、安装、健康检查及失败恢复。节点需要能访问终端使用的 GitHub 来源；新任务不读取面板 Agent 文件目录，也不支持网页离线包。
+Owner 在「系统管理 → 系统设置 → 系统信息 → 面板更新」可一键升级到最新正式版（合同见[项目说明书](project-spec.md) §27.15，排障见[运维手册](operations.md)）：
 
-已有机器先在终端完成新安装组件迁移；旧更新器可能需要重复同一版本的命令。网页依据实际 root 桥接探测结果显示入口，未就绪时显示具体原因和终端命令。历史工作进程升级任务仍按原请求查询及恢复。
+- 依赖 `install.sh` 发布的 `panel-update-request` helper 与 `proxy-panel-update.{path,service}`；仅支持正式版（开发版与 RC 禁用），要求面板直连 `api.github.com` 与 `github.com`。
+- 仅安装最新正式版，不支持选版本或降级；内部走与 `qui-update --component panel` 相同的备份、10 秒健康检查与自动回滚，期间页面短断重连。
+- 只更新面板，不更新 Agent；同机含 Agent 时须另行升级 Agent。
 
-systemd 使用独立的 `proxy-agent-update.path` / `proxy-agent-update.service`，OpenRC 使用独立 watcher 与 `proxy-agent-update` 服务；运行副本不随 Agent 停止或文件替换退出。root 接收材料位于 `/var/lib/proxycontrol-install/agent-system-updates/`，向 Agent 发布的只读结果和输出位于 `/var/lib/proxy-agent-update/`。中断后读取原执行及恢复证据，不自动重跑结果未知的任务。
-
-「系统管理 → 任务记录」保留每次尝试、失败阶段、原始错误、退出码、引导/安装/运行版本、服务与恢复结果，并支持分页读取、复制已读输出和下载完整输出。日志缺段或持久化失败明确显示；结果待确认时继续阻止冲突操作。完整结果与发布验证见 [v1.7.5 实施记录](v1.7.5-verification.md)。
-
-**发布新版本**：在仓库里推一个 `vX.Y.Z` 标签即可。CI 的 `release` 任务（`.github/workflows/check.yml`，`needs: check`，只在 `refs/tags/v*` 上运行）会拒绝不是 `vMAJOR.MINOR.PATCH` 的标签，用 `scripts/build-release.sh` 构建两个架构的归档与 `SHA256SUMS`，再用 `gh release create` 建发布并附上这些文件。`qui-update` 默认安装最新发布，所以打标签就等于发布。
-
-**代理核心**：不走 `install.sh`。在面板“服务器 → 代理核心”里填写组件、稳定版本号、官方 GitHub 发布资源 URL 和归档 SHA-256；面板排队下发，Agent 在节点上再次校验摘要、解包、切换，并在健康检查失败时回滚到上一镜像。`install.sh --core` 可用于安装或显式替换/追加核心；省略不删除核心。GOST 例外：版本、URL 与归档摘要都是固定值（3.3.2 / `gost_3.3.2_linux_amd64.tar.gz` / `162feb43…a9d18274`），面板的“添加内核 → GOST”会预填这三项，其他组合一律拒绝；只有上报了 `Hello.gost_core_supported` 且平台为 linux/amd64 的 Agent 才能排队。
-
-### 5.2 面板网页更新（未发布，v1.4.3 之后）
-
-面板装好后即可在「系统管理 → 系统设置 → 系统信息 → 面板更新」（仅 Owner）里检查并安装最新正式版，不必再登录服务器；机制与文件合同见[项目说明书](../AGENTS.md) §27.15。
-
-- **前提**：这台面板必须已经用 shell 跑过一次 `qui-update`。`panel-update-request` helper 与 `proxy-panel-update.path`/`proxy-panel-update.service` 两个单元由 `install.sh` 随面板程序一起发布，升级到带该功能的版本之后才会有；旧面板的卡片显示 `helper_missing` 并直接给出该命令。开发版本与 `-rc.N` 候选版不支持网页更新（`dev_build`），仍只能用 `qui-update`。
-- **出网要求**：面板主机需能直连 `https://api.github.com`（读取 `releases/latest`，结果缓存 10 分钟，卡片上的「检查更新」强制刷新）与 `https://github.com`（更新器下载归档与 `SHA256SUMS`）。完全离线的主机没有网页更新，仍用手工 `--bundle`/`--sums`。
-- **只能装最新正式版**：没有版本选择、没有降级、没有 rc，面板也只会往请求文件里放一个版本号。发布新版本后点「检查更新」获取新版本号，再点「更新到 vX.Y.Z」并确认。
-- **过程与 `qui-update --component panel` 相同**：先把数据库备份成预更新备份、替换程序与单元、做 10 秒健康检查，失败自动回滚（见本节与 5.1 的备份/回滚规则）。期间面板服务会重启，页面断开十几到几十秒后自行重连并显示结果。
-- **只更新面板，不更新节点 Agent**。同一台主机同时装有面板与 Agent 时，先网页更新面板，再按本节用 `qui-update --component agent` 更新 Agent。
-- 提交后没有人执行、结果码含义、`stalled`/`interrupted` 的处置见[运维手册](operations.md)的“面板网页更新”。
+推送 `vX.Y.Z` 标签触发 GitHub `release` 工作流构建双架构归档、签名清单与 `SHA256SUMS`，发布步骤见[发布手册](release-runbook.md)。
 
 ## 6. 卸载
 
@@ -439,37 +309,38 @@ systemd 使用独立的 `proxy-agent-update.path` / `proxy-agent-update.service`
 deploy/linux/uninstall.sh panel     # 或 agent
 ```
 
-`uninstall.sh` 会先停止服务，确认已经停下来：systemd 上要求 `ActiveState=inactive` 且 `Result=success`；OpenRC 上没有这两个属性，要求 `rc-service proxy-agent status` 为 `stopped`。然后删除程序、服务定义（systemd 单元，或 `/etc/init.d/proxy-agent`、`/etc/init.d/proxy-agent-host-network` 与 watcher 脚本）和安装记录，保留身份、配置、数据、备份与服务账号。Agent 先恢复调优，并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。它在 `/var/lib/proxycontrol-install/` 留下 `<component>.removed` 记录；再次安装必须加 `--reinstall`，否则脚本拒绝。最后一个组件卸载后，公共 `qui`、`qui-update`、`service.sh`、本机卸载脚本与开机恢复单元一起删除。
+普通卸载先确认服务已完全停止（systemd：`ActiveState=inactive` 且 `Result=success`；OpenRC：`stopped`），再删除程序、服务定义与安装记录，保留身份、配置、数据、备份与账号。Agent 卸载先恢复内核调优快照并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。卸载后写入 `/var/lib/proxycontrol-install/<component>.removed`（重装须带 `--reinstall`）；最后一个组件卸载后一并移除公共 `qui`、`qui-update`、`service.sh`、本机卸载脚本与开机恢复单元。
 
-彻底清除用 `qui` 的「卸载并清除全部数据」，或直接运行 `/usr/local/lib/proxycontrol/uninstall.sh all --purge`（也可将 all 换为 panel/agent）。all 按当前安装记录先 Agent 后面板，需终端依次输入 `y`、`purge`，无免确认参数；配置、状态目录、备份与账号会一起删除。不要先普通卸载再补 purge，已只剩 `.removed` 的组件不在 all 的选择范围。清理范围、防火墙匹配与失败处理见[运维手册](operations.md) §14。
+彻底清除使用 `qui`「卸载并清除全部数据」或 `/usr/local/lib/proxycontrol/uninstall.sh all --purge`（也可指定 `panel`/`agent`）：按记录先 Agent 后面板，须交互依次输入 `y`、`purge`（无免确认参数），删除配置、状态、备份与账号；不要先普通卸载再补 `--purge`。详见[运维手册](operations.md) §14。
 
 ## 7. 目录与权限
 
 | 路径 | 属主 / 权限 | 内容 |
 | --- | --- | --- |
-| `/usr/local/bin/proxy-panel`、`/usr/local/bin/proxy-agent` | root:root 0755 | 程序 |
-| `/usr/local/bin/qui` | root:root 0755 | 面板／节点共用菜单，按本机组件显示完整或精简菜单；不进 manifest，更新时快照 |
-| `/usr/local/lib/proxycontrol/uninstall.sh` | root:root 0755 | 本机普通卸载／`--purge` 入口；不进 manifest，更新时快照 |
+| `/usr/local/bin/proxy-panel`、`/usr/local/bin/proxy-agent` | root:root 0755 | 面板与 Agent 引导程序 |
+| `/usr/local/bin/qui`、`/usr/local/bin/qui-update` | root:root 0755 | 共用终端菜单与更新器（不进 manifest，更新时快照） |
+| `/usr/local/lib/proxycontrol/uninstall.sh` | root:root 0755 | 本机普通卸载／`--purge` 入口（不进 manifest，更新时快照） |
+| `/usr/local/lib/proxycontrol/service.sh` | root:root 0644 | systemd/OpenRC 通用服务命令库 |
+| `/usr/local/lib/proxycontrol/update-recovery` | root:root 0755 | 开机恢复脚本（由 `proxycontrol-update-recovery` 调用） |
+| `/etc/systemd/system/proxycontrol-update-recovery.service` 或 `/etc/init.d/proxycontrol-update-recovery` | root:root 0644 / 0755 | 开机恢复单元，排在主服务与强制出站单元之前 |
 | `/etc/proxy-panel/config.yaml` | proxy-panel:proxy-panel 0600 | 面板配置 |
-| `/etc/proxy-panel/tls/` | proxy-panel:proxy-panel 0750 | Web TLS 证书与私钥 |
+| `/etc/proxy-panel/tls/` | proxy-panel:proxy-panel 0750 | 面板 Web TLS 证书与私钥 |
 | `/etc/proxy-agent/config.yaml` | proxy-agent:proxy-agent 0600 | 节点配置 |
-| `/etc/proxy-agent/tls/ca.crt` | root:proxy-agent 0644 | 受信中央 CA（签发面板 Web 证书的 CA） |
-| `/var/lib/proxy-panel/` | proxy-panel:proxy-panel 0700 | `panel.db`、`identity/`、`backups/` |
-| `/var/lib/proxy-agent/` | proxy-agent:proxy-agent 0700 | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/` |
-| `/var/lib/proxy-agent/host-network/` | proxy-agent:proxy-agent 0700 | `desired.json`、`status.json`（服务器强制出站，只有 helper 单元能写） |
-| `/var/lib/proxycontrol-install/` | root:root 0700 | 安装记录、操作锁（`operation.lock`）与更新锁（`update.lock`）；更新进行中时还有 `rollback.*/`（快照、`updater`、`service.sh`、`journal`）；`update-recovery.log`、`interrupted-update.log`（开机恢复与断线中断的输出） |
-| `/usr/local/lib/proxycontrol/update-recovery` | root:root 0755 | 开机时完成被中断的 `qui-update`（由下面的单元调用） |
-| `/etc/systemd/system/proxycontrol-update-recovery.service` 或 `/etc/init.d/proxycontrol-update-recovery` | root:root 0644 / 0755 | 开机恢复单元，排在 `proxy-agent`、`proxy-panel` 与强制出站单元之前；没有进度日志时不做任何事。不记入安装记录，回滚到旧版本也保留 |
-| `/var/lib/proxy-panel/backups/` | proxy-panel:proxy-panel 0700 | `pre-update-<版本>-<时间>.db`（更新前备份）、`failed-update-<版本>-<时间>.db`（回滚时保留的新版本数据库） |
-| `/usr/local/lib/proxy-agent/<core>` | root:root 0755 | 安装脚本放置的核心 |
-| `/usr/local/lib/proxycontrol/service.sh` | root:root 0644 | 两种初始化系统通用的服务命令库（`qui-update`、`uninstall.sh` 等使用） |
-| `/etc/init.d/proxy-agent`、`/etc/init.d/proxy-agent-host-network` | root:root 0755 | 仅 OpenRC：Agent 与强制出站 watcher 服务 |
-| `/usr/local/lib/proxy-agent/host-network-watch` | root:root 0755 | 仅 OpenRC：强制出站 watcher（busybox `inotifyd`） |
-| `/etc/machine-id` | root:root 0444 | 仅在 OpenRC 主机缺失时由 `install.sh --node` 创建 |
+| `/etc/proxy-agent/tls/ca.crt` | root:proxy-agent 0644 | 受信面板 Web CA |
+| `/etc/proxy-agent/certs/` | root:proxy-agent 0750 | 节点本地入站 TLS 证书目录（卸载保留） |
+| `/var/lib/proxy-panel/` | proxy-panel:proxy-panel 0700 | `panel.db`、`identity/`、`backups/`（含 `pre-update-*` / `failed-update-*`） |
+| `/var/lib/proxy-agent/` | proxy-agent:proxy-agent 0700 | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/`、`agent-local.sock` |
+| `/var/lib/proxy-agent/logs/` | proxy-agent:proxy-agent 0700 | Agent 运行日志 `agent.log`–`agent.log.9`（轮转总上限 100 MiB） |
+| `/var/lib/proxy-agent/host-network/` | proxy-agent:proxy-agent 0700 | 强制出站 `desired.json`、`status.json` |
+| `/var/lib/proxy-agent/tuning/` | proxy-agent:proxy-agent 0700 | 内核调优 helper 通信目录 |
+| `/var/lib/proxy-agent-update/` | root:proxy-agent | 网页完整升级向 Agent 发布的只读结果与输出 |
+| `/var/lib/proxycontrol-install/` | root:root 0700 | 安装记录、`panel.database`、`operation.lock`、`update.lock`、`rollback.*/`、`agent-system-updates/`、恢复日志 |
+| `/usr/local/lib/proxy-agent/<core>` | root:root 0755 | 安装器部署的代理核心 |
+| `/etc/sysctl.d/99-proxy-tuning.conf` | root:root 0644 | 调优生效配置（原值快照 `.proxy-tuning-snapshot.json` 为 root 0600） |
+| `/etc/init.d/proxy-agent*`、`/usr/local/lib/proxy-agent/*-watch` | root:root 0755 | 仅 OpenRC：Agent、强制出站、调优与更新服务及 watcher |
+| `/etc/machine-id` | root:root 0444 | 仅 OpenRC 缺失时由 `install.sh --node` 创建 |
 
-两个 systemd 单元都以专用非 root 账号运行，启用 `NoNewPrivileges`、`ProtectSystem=strict`、`PrivateTmp`、`ProtectHome`，只保留 `CAP_NET_BIND_SERVICE`。
-
-节点端另有两个固定单元：`proxy-agent-host-network.service`（oneshot，`User=proxy-agent`，只带 `CAP_NET_ADMIN`，`ReadWritePaths` 只放开 `/var/lib/proxy-agent/host-network`）和 `proxy-agent-host-network.path`（监视该目录的 `desired.json`；开机时由 oneshot 单元重放保留的规则）。`uninstall.sh agent` 会停止并删除这两个单元，并删除 nft 表 `inet proxy_agent_source` 与 `inet proxy_agent_hop`。
+主 systemd 单元以专用非 root 账号运行，启用 `NoNewPrivileges`、`ProtectSystem=strict`、`PrivateTmp`、`ProtectHome`，仅保留 `CAP_NET_BIND_SERVICE`。强制出站 helper 单元（`proxy-agent-host-network.{service,path}`）以 `User=proxy-agent` + `CAP_NET_ADMIN` 运行，仅放开 `/var/lib/proxy-agent/host-network` 写入。
 
 ## 8. 排错入口
 
@@ -480,34 +351,16 @@ deploy/linux/uninstall.sh panel     # 或 agent
 /usr/local/bin/proxy-agent --version
 systemctl status proxy-panel.service proxy-agent.service
 journalctl -u proxy-panel -n 200
-journalctl -u proxy-agent -n 200
+tail -n 200 /var/lib/proxy-agent/logs/agent.log     # Agent 运行日志（100 MiB 轮转）
+journalctl -u proxy-agent -n 200                    # Agent 启动与日志写入错误
 ss -lntp
 # OpenRC 节点：
 rc-status default
 rc-service proxy-agent status
-grep -F proxy-agent /var/log/messages | tail -n 200
+grep -F proxy-agent /var/log/messages | tail -n 200 # OpenRC 启动与日志写入错误
 ```
 
-- 面板起不来：先跑 `--check-config`；非开发模式下证书/私钥缺失、`database` 落在网络路径都会被拒绝。
-- 节点登记失败：确认服务已停止、token 文件权限与硬链接数正确、安装记录未被改动、`/etc/proxy-agent/tls/ca.crt` 是签发面板 Web 证书的 CA 且与 `server_name` 匹配。面板在反向代理或 Cloudflare 后面时，Web 一侧看到的是 CDN 的公网证书、而 Agent 直连 gRPC 端口看到的是面板自己的证书：此时 `--panel` 必须换成直达面板并被面板证书覆盖的地址（DNS-only 灰云域名或 IPv4），`--http-port` 用面板自己的 Web 端口。`node-install.sh` 现在会在登记前用刚安装的信任锚预检 gRPC 端点，证书不匹配（curl 60/51/58 等）或不可达（6/7/28）时先中止并说明原因，不再只给出笼统的登记失败。
-- 节点连上后立刻断开：检查面板里该节点是否被禁用、证书是否过期或被吊销（见[运维手册](operations.md)）。
-- 更新被打断或开机后版本不对：看 `/var/lib/proxycontrol-install/update-recovery.log`、`interrupted-update.log`，以及 `journalctl -u proxycontrol-update-recovery`（OpenRC：`rc-service proxycontrol-update-recovery status` 与 `/var/log/messages`）。`/var/lib/proxycontrol-install/rollback.*` 仍在说明恢复没有完成，再运行一次 `qui-update` 会先重试恢复。
-- 面板起不来且怀疑数据库版本：`proxy-panel --check-database /var/lib/proxy-panel/backups/<文件>.db` 只读检查一份**停止状态**的数据库副本，输出 `database: compatible|newer|foreign|damaged`（退出码 0/3/4/5）；`newer` 表示数据库来自更新的面板，需按 5.1 带 `--database` 降级。
-
-## 调优 helper 与自动续证
-
-Ubuntu/systemd 的 Agent 安装器额外发布 `proxy-agent-tuning-modules.path` 和 `.service`，权限均为 root:0644。新 Agent 主单元拉起 path，随 Agent 停止。两份补装单元均无独立开机启用项。固定引导程序内嵌 Python 标准库脚本，使用宿主已有的 `/usr/bin/python3`（3.9 及以上）、APT、dpkg、Ubuntu archive keyring 和 systemd-detect-virt。仅更新网页受管 worker 的节点须另外更新固定引导程序和单元才能报告能力。新更新器把补装单元纳入快照和恢复，旧 v1.7.3 更新器回滚时可能遗留文件，恢复的旧主单元没有拉起 path 的依赖，旧引导程序也不识别包任务入口。升级或卸载前应等待已开始的 dpkg 事务结束。
-
-### Agent 网页升级启用
-
-`node-install.sh` 默认不启用网页升级：只有带 `--web-upgrade`（安装命令对话框勾选「启用网页升级」）时，登记并首次健康启动后才会自动执行 `qui-update --component agent` 的等价初始化，不带则在结尾提示，需要时在节点本机运行一次 `qui-update --component agent`；已有节点升级后由 `qui-update --component agent` 在健康检查并记录 committed 后启用。≤1.4.7 主机上已安装的 qui-update 是旧脚本，不含启用步骤，所以第一次 `qui-update --component agent` 只把 Agent 升到 1.5.0，需要再运行一次 `qui-update --component agent` 才会启用网页升级，面板上的提示会一直显示到启用为止；新装（node-install.sh）仅带 `--web-upgrade` 时自动启用。面板 Agent 管理页出现“升级”按钮即为确认。启用步骤会先等待（最长 60 秒）Agent 首次正常启动写出存储基线，超时则跳过并提示稍后重跑 `qui-update --component agent`，不会停止服务。初始化失败会把受管路径移到 `/var/lib/proxy-agent/web-upgrade-failed-<UTC时间>/`，节点继续普通模式运行。手动退出受管模式：停止服务，将上述受管路径移到备份目录，再启动服务；节点回到引导程序版本，若存储格式已被新版本提高，旧引导程序会明确拒绝启动，此时需先安装足够新的版本。
-
-Agent 安装与一键安装新增 `/var/lib/proxy-agent/tuning/`（Agent 所有、0700），systemd 的 proxy-agent-tuning.service/.path 或 OpenRC 的 proxy-agent-tuning 与 tuning-watch；安装时启用并布防，开机重放保留请求。主程序仍无调优特权，独立 root helper 带 CAP_NET_ADMIN + CAP_DAC_OVERRIDE（后者用于 Agent 的 0700/0600 文件协议），固定写入 13 个 sysctl；fs.file-max 使用 root 文件权限。systemd 将 /proc/sys 默认设为只读，仅开放白名单文件；OpenRC 没有对应的文件系统隔离。无需 sysctl 二进制或新依赖，不加载拥塞控制模块；容器/内核拒绝时失败并恢复，不补权限。
-
-成功配置为 `/etc/sysctl.d/99-proxy-tuning.conf`，原值快照为 root 0600 的 `.proxy-tuning-snapshot.json`。不要把该快照放进 Agent 可写目录。卸载使用安装记录第 11/12 行校验新增单元，停止触发器后先恢复快照；失败中止卸载。qui-update 文件快照覆盖新增单元和 watcher，回滚到旧版本时恢复/移除对应文件。具体排障见[运维手册第 18 节](operations.md#18-主机观测续证与调优-helper)。
-
-证书改为满 30 天或余期不超过 14 天时在控制连接内用原密钥续证；面板仍签发 90 天证书。先升级支持该准入条件的面板，再升级 Agent，旧面板会拒绝过早的自动续证。HostInfo 与新增心跳字段均为增量协议，旧 Agent 的未知数据由面板显示“—”。
-
-## 0134 Agent 原位身份恢复
-
-v1.4 新增恢复 enrollment token、旧指纹永久作废表、恢复审计状态和已发布配置自动重发。旧 Agent 通过现有 Enroll RPC 直接兼容；跨迁移降级仍需匹配备份。
+- **面板起不来**：先跑 `--check-config`；非开发模式下证书缺失或 `database` 位于网络共享路径会被拒绝。怀疑数据库版本过新时，对停止状态的副本运行 `proxy-panel --check-database <副本>.db`，输出 `database: compatible|newer|foreign|damaged`（退出码 0/3/4/5）；`newer` 须按第 5.2 节带 `--database` 降级。
+- **节点登记失败**：确认服务已停、token 权限与硬链接合法、安装记录完整、`/etc/proxy-agent/tls/ca.crt` 签发面板 Web 证书且覆盖 `server_name`。面板在反代/Cloudflare 后面时，须用直达面板的 DNS-only 地址或 IPv4 与面板自身 Web 端口；`node-install.sh` 会在登记前预检 gRPC 端点并报出证书（curl 60/51/58）或连通性错误（6/7/28）。
+- **节点连上即断开**：核查面板里节点是否被禁用、证书是否过期或已吊销（见[运维手册](operations.md)）。
+- **更新中断或重启后版本不对**：检查 `/var/lib/proxycontrol-install/update-recovery.log`、`interrupted-update.log` 与 `proxycontrol-update-recovery` 日志；若仍存在 `rollback.*`，再次运行 `qui-update` 会先重试恢复。

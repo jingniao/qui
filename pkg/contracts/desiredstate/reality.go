@@ -5,7 +5,6 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -62,27 +61,6 @@ type RealityServerSettings struct {
 	HandshakeTarget string   `json:"handshake_target"`
 	ServerNames     []string `json:"server_names,omitempty"`
 	ShortIDs        []string `json:"short_ids,omitempty"`
-}
-
-// ErrServerSettingsRendererPending marks settings this build stores and validates
-// but cannot render yet (Xray in M2, sing-box in M4).
-var ErrServerSettingsRendererPending = errors.New("xhttp/Reality settings cannot be rendered by this Agent yet")
-
-// ValidateServerSettingsRenderer refuses a state that carries the M1 settings at
-// the Agent's render entry, so a structurally valid but unrenderable listener can
-// never be applied with these fields silently ignored.
-func ValidateServerSettingsRenderer(state State) error {
-	for _, inbound := range state.Inbounds {
-		if inbound.Settings.HasServerSettings() {
-			return fmt.Errorf("inbound %s: %w", inbound.ID, ErrServerSettingsRendererPending)
-		}
-	}
-	for _, outbound := range state.Outbounds {
-		if outbound.Settings.HasServerSettings() {
-			return fmt.Errorf("outbound %s: %w", outbound.ID, ErrServerSettingsRendererPending)
-		}
-	}
-	return nil
 }
 
 // HasServerSettings reports whether one settings block carries the server

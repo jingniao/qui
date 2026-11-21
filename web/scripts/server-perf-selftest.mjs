@@ -118,7 +118,7 @@ assert.equal(staticCalls, 3, 'failed metadata leaves the inventory refresh pendi
 assert.deepEqual(listReads.inventoryWarnings.value, [], 'successful retry clears only inventory warnings');
 await listReads.calibrateRuntime();
 assert.equal(staticCalls, 3, 'a complete static refresh consumes the pending invalidation');
-for (const path of ['nodes/components/ServerMetricsGrid.vue', 'nodes/components/LatencyChart.vue', 'nodes/components/NodeRestartPanel.vue', 'nodes/components/NodeHealthPanel.vue', 'nodes/components/ServerEnrollment.vue', 'nodes/components/detail/ServerTuning.vue', 'system/components/NodeVersionPanel.vue', 'system/components/CoreUpdatesPanel.vue']) {
+for (const path of ['nodes/components/ServerMetricsGrid.vue', 'nodes/components/LatencyChart.vue', 'nodes/components/NodeRestartPanel.vue', 'nodes/components/ServerEnrollment.vue', 'nodes/components/detail/ServerTuning.vue', 'system/components/NodeVersionPanel.vue', 'system/components/CoreUpdatesPanel.vue']) {
   const source = read(path);
   assert.match(source, /document.visibilityState/, path + ' pauses hidden reads');
   assert.match(source, /addEventListener\('visibilitychange'/, path + ' resumes on return');
@@ -129,7 +129,6 @@ const changedVue = [
   'nodes/components/detail/ServerSettings.vue', 'nodes/components/detail/ServerTuning.vue',
   'nodes/components/detail/ServerRevisions.vue', 'nodes/components/ServerMetricsGrid.vue',
   'nodes/components/LatencyChart.vue', 'nodes/components/NodeRestartPanel.vue',
-  'nodes/components/NodeHealthPanel.vue', 'nodes/components/NodeCertificatePanel.vue',
   'nodes/components/ServerEnrollment.vue', 'system/components/NodeVersionPanel.vue',
   'system/components/CoreUpdatesPanel.vue'
 ];

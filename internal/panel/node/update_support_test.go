@@ -44,7 +44,7 @@ func TestAgentRecoveryCapabilityReconnectionClearsOldGrant(t *testing.T) {
 	if err := database.QueryRow("SELECT agent_recovery_supported FROM node_update_capabilities WHERE node_id=?", n.ID).Scan(&recovery); err != nil || recovery {
 		t.Fatal("old peer retained recovery permission", err)
 	}
-	data, err := proto.Marshal(&pb.Hello{AgentUpdateSupported: true})
+	data, err := proto.Marshal(&pb.Hello{AgentVersion: "1.7.5", AgentUpdateSupported: true})
 	if err != nil {
 		t.Fatal(err)
 	}

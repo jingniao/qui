@@ -88,7 +88,7 @@ func ValidateShadowsocks(method, password string) (ShadowsocksCredential, error)
 	return c, nil
 }
 
-// Omission is the pinned measured format matrix (v1.4-s0-evidence.md §8).
+// Omission is the pinned measured format matrix (docs/protocol-support-matrix.md).
 // Empty means representable. Validation errors are separate: corrupted data must
 // not be mistaken for a normal client capability omission.
 func (c ShadowsocksCredential) Omission(format string) string {

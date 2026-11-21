@@ -138,7 +138,30 @@ func runThreeAgentChain(t *testing.T, binaryPath, coreName string) {
 		listener.Close()
 		return value
 	}
-	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, NodeIDs: nodeIDs[:1]})
+	group, err := nodes.SaveGroup(ctx, "", node.GroupInput{Name: "Entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
+		selected := nodeIDs[:1]
+		ids := []string{}
+		for _, serverID := range selected {
+			rows, err := nodes.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var inboundID string
+				if err := rows.Scan(&inboundID); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				ids = append(ids, inboundID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+		return ids
+	}()})
 	if err != nil {
 		t.Fatal(err)
 	}

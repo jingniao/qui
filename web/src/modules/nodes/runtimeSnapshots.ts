@@ -26,6 +26,12 @@ export class RuntimeFeed {
 
   get(id: string) { return this.items.get(id); }
 
+  project(base: NodeView): NodeView | null {
+    const node = this.items.get(base.id);
+    if (this.generation && !node) return null;
+    return applyRuntimeSnapshot(base, node);
+  }
+
   matchesInventory(ids: string[], deleted: boolean): boolean {
     const expected = new Set<string>();
     for (const node of this.items.values()) {

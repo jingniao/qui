@@ -133,49 +133,7 @@
     </DataTable>
 
     <!-- Rule-Provider Dialog -->
-    <AppDialog
-      v-model="providerModalVisible"
-      :title="`规则集【${selectedService?.name || ''}】的 Clash / Mihomo 引用`"
-      :show-footer="false"
-      class="max-w-2xl"
-    >
-      <div class="space-y-4">
-        <p class="text-xs text-neutral-500 leading-relaxed">
-          在「客户端策略」中用 <code class="font-mono text-ios-blue">RULE-SET</code> 选择此规则集后，用户的 Clash / mihomo 订阅会自动带上对应的 rule-provider，无需手工配置。地址以用户自己的订阅 Token 鉴权，下列信息供手工配置时参考：
-        </p>
-
-        <div class="relative">
-          <pre class="bg-neutral-900 text-neutral-100 p-4 rounded-2xl text-xs font-mono overflow-x-auto leading-relaxed">{{ providerYamlSnippet }}</pre>
-          <button
-            type="button"
-            @click="copySnippet"
-            class="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium backdrop-blur-md transition-colors"
-          >
-            {{ snippetCopied ? '已复制！' : '复制代码' }}
-          </button>
-        </div>
-
-        <div class="space-y-1.5 pt-1">
-          <span class="text-xs font-medium text-neutral-600">直接 URL 地址:</span>
-          <div class="flex items-center gap-2">
-            <input
-              readonly
-              :value="providerDirectUrl"
-              class="form-input-base font-mono text-neutral-700 bg-neutral-50"
-            />
-            <button type="button" @click="copyUrl" class="ios-btn-secondary shrink-0 py-2">
-              复制 URL
-            </button>
-          </div>
-        </div>
-
-        <div class="flex justify-end pt-2">
-          <button type="button" @click="providerModalVisible = false" class="ios-btn-secondary">
-            关闭
-          </button>
-        </div>
-      </div>
-    </AppDialog>
+    <ServiceProviderDialog v-model="providerModalVisible" :service="selectedService" />
 
     <ServiceSetEditor
       v-model="editorOpen"
@@ -197,7 +155,7 @@
 
 <script setup lang="ts">
 import { retainedQuery, removePageItem } from '../../../app/retainedQuery';
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { policyAPI, type ServiceSet } from '../api';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
@@ -205,12 +163,12 @@ import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import Pagination from '../../../components/Pagination.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
-import AppDialog from '../../../components/AppDialog.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import ServiceSetEditor from '../components/ServiceSetEditor.vue';
+import ServiceProviderDialog from '../components/ServiceProviderDialog.vue';
 
 const services = ref<ServiceSet[]>([]);
 const page = ref(1);
@@ -226,7 +184,6 @@ const confirmVisible = ref(false);
 
 const providerModalVisible = ref(false);
 const selectedService = ref<ServiceSet | null>(null);
-const snippetCopied = ref(false);
 
 let generation = 0;
 const display = retainedQuery(() => { services.value = []; total.value = 0; });
@@ -322,41 +279,12 @@ async function remove() {
 
 function openProviderModal(service: ServiceSet) {
   selectedService.value = service;
-  snippetCopied.value = false;
   providerModalVisible.value = true;
 }
 
 // The provider is served with the user's own subscription token (the old
 // address was an Owner-only JSON API no client could fetch). Its name comes from
 // the id, so two services with similar names never share a cache file.
-const providerDirectUrl = computed(() => {
-  if (!selectedService.value) return '';
-  return `${window.location.origin}/sub/<订阅 Token>/rules/${selectedService.value.id}`;
-});
-
-const providerYamlSnippet = computed(() => {
-  if (!selectedService.value) return '';
-  return [
-    `名称: qui-service-${selectedService.value.id}`,
-    '类型: http · behavior: classical · format: text',
-    `地址: ${providerDirectUrl.value}`,
-    '刷新: 86400 秒'
-  ].join('\n');
-});
-
-function copySnippet() {
-  navigator.clipboard.writeText(providerYamlSnippet.value);
-  snippetCopied.value = true;
-  showToast('规则集引用信息已复制');
-  setTimeout(() => {
-    snippetCopied.value = false;
-  }, 2500);
-}
-
-function copyUrl() {
-  navigator.clipboard.writeText(providerDirectUrl.value);
-  showToast('Provider URL 已复制');
-}
 
 onMounted(load);
 </script>

@@ -1,6 +1,7 @@
 // proxyNodes.ts: Data management for unified proxy nodes & relay canvas schemas
 import { requestScope } from '../../app/apiClient';
 import { reactive } from 'vue';
+import type { serverStatus } from '../nodes/components/serverListModel';
 import { canvasAPI, canvasSchemeToRelayScheme, choices, relaySchemeToCanvasInput, type CanvasEntryBinding, type CanvasScheme, type CanvasSchemeContext } from './api';
 
 export type NodeSourceType = 'self_hosted' | 'subscription' | 'manual';
@@ -63,6 +64,7 @@ export interface ProxyNodeItem {
   port: number;
   protocol: string;    // 'vless' | 'vmess' | 'shadowsocks' | 'trojan' | 'hysteria2' | 'tuic' | 'wireguard' | 'socks5' | 'http'
   status: 'online' | 'offline' | 'untested' | 'error' | 'reconnecting';
+  displayStatus?: ReturnType<typeof serverStatus>;
   latencyMs?: number;
   lastChecked?: string;
   supportTcp: boolean;
@@ -108,7 +110,7 @@ export interface CanvasNodeInstance {
   name: string;
   protocol: string;
   serverAddress: string;
-  status: 'online' | 'offline' | 'untested' | 'error' | 'reconnecting';
+  status: 'online' | 'offline' | 'untested' | 'error' | 'reconnecting' | 'maintenance' | 'disabled' | 'pending' | 'deleted' | 'degraded' | 'core_error' | 'applying' | 'rollback';
   isManageable: boolean;  // True if it's an owned server with Agent; False if external/imported
   x: number;
   y: number;
@@ -174,9 +176,6 @@ export interface NodeRelayRoute {
 
 const STORAGE_KEY_SUBS = 'qui_proxy_subscriptions';
 const STORAGE_KEY_MANUAL_NODES = 'qui_proxy_manual_nodes';
-// Schemes moved to the server in U2b. The key is only read once, by the canvas,
-// to offer importing what an earlier build stored in this browser.
-export const LEGACY_SCHEMES_KEY = 'qui_relay_schemes_v3';
 
 // Demo records seeded by earlier builds. Browsers that ran those builds still hold them in
 // localStorage, so drop them once on load and persist the cleaned list.
@@ -218,9 +217,6 @@ export function loadStoredData() {
       proxyNodeStore.manualNodes = [];
     }
 
-    // Relay schemes live on the server (U2b). A browser that still holds the
-    // copy an earlier build left in localStorage keeps it until the canvas
-    // offers to import it, so nothing here reads or writes scheme storage.
     proxyNodeStore.schemes = [];
   } catch (e) {
     console.error('Error loading proxy stored data:', e);

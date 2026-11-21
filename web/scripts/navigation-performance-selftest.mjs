@@ -25,6 +25,7 @@ try {
   const failed = request('/fail'), failedAgain = request('/fail');
   const failures = Promise.allSettled([failed, failedAgain]); calls[9].reject(new Error('offline'));
   assert.ok((await failures).every(result => result.status === 'rejected'));
+  assert.ok((await failures).every(result => /offline/.test(result.reason.message)), 'network failures preserve the original reason');
   const retry = request('/fail'); assert.equal(calls.length, 11); finish(10); await retry;
   const saving = request('/change', 'POST', {});
   const duringWrite = request('/same');
@@ -32,6 +33,23 @@ try {
   const afterWrite = request('/same');
   assert.equal(calls.length, 14, 'write completion must invalidate reads started during the write');
   finish(12); finish(13); await Promise.all([duringWrite, afterWrite]);
+  for (const [response, patterns] of [
+    [Response.json({ error: { code: 'exchange_rates_unavailable', message: '汇率服务未返回有效的 USD 汇率' } }, { status: 502 }), [/汇率服务未返回有效的 USD 汇率/]],
+    [new Response('<html><head><title>502 Bad Gateway</title></head><body>proxy error</body></html>', { status: 502, headers: { 'Content-Type': 'text/html' } }), [/dashboard\/exchange-rates/, /HTTP 502/, /HTML/, /502 Bad Gateway/]],
+    [new Response('upstream connection reset', { status: 502 }), [/HTTP 502/, /upstream connection reset/]],
+    [new Response('', { status: 503 }), [/HTTP 503/, /响应正文为空/]],
+    [new Response('{broken', { status: 502, headers: { 'Content-Type': 'application/json' } }), [/HTTP 502/, /JSON/, /broken/]],
+    [Response.json({}, { status: 502 }), [/HTTP 502/, /未提供错误详情/]]
+  ]) {
+    const index = calls.length;
+    const result = request('/dashboard/exchange-rates');
+    calls[index].resolve(response);
+    await assert.rejects(result, error => {
+      assert.equal(error.status, response.status);
+      for (const pattern of patterns) assert.match(error.message, pattern);
+      return true;
+    });
+  }
 } finally { globalThis.fetch = originalFetch; }
 console.log('PASS navigation GET: concurrency, isolated values, no cache, mutation/session boundaries, timeout and failure cleanup');
 const access = read('modules/access/pages/AccessRecordPage.vue');

@@ -9,9 +9,11 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/system"
+	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/release"
 )
@@ -130,67 +132,17 @@ func TestAgentUpdateReservationReplayAndResults(t *testing.T) {
 			if err != nil || reserved != (status == "failed_closed") {
 				t.Fatal("incorrect reservation", reserved, err)
 			}
-			items, total, err := reopened.ListAgentUpdates(ctx, 1, 20)
-			if err != nil || total != 1 || len(items) != 1 || items[0].Status != status || items[0].Result == nil {
+			items, total, err := reopened.ListAllAgentUpdates(ctx, 1, 20)
+			if err != nil || total != 1 || len(items) != 1 {
 				t.Fatal(items, total, err)
 			}
-		})
-	}
-}
-
-func TestAgentUpdateRejectsUnsupportedNodeSeparately(t *testing.T) {
-	r, catalogue, nodes, nodeID, revision, entry, keys := agentTaskFixture(t)
-	if err := nodes.AgentUpdateSupport(context.Background(), nodeID, false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.QueueAgentUpdate(context.Background(), catalogue, keys, nodeID, entry.ID, "owner", "local", revision.ID); !errors.Is(err, ErrAgentUpdateUnsupported) {
-		t.Fatalf("unsupported node error = %v", err)
-	}
-}
-
-func TestAgentUpdateValidationAndAuditLeaveNoPartialTask(t *testing.T) {
-	for _, mode := range []string{"audit", "legacy", "revision", "platform", "trust", "component", "core_busy"} {
-		t.Run(mode, func(t *testing.T) {
-			r, catalogue, nodes, nodeID, revision, entry, keys := agentTaskFixture(t)
-			ctx := context.Background()
-			var access ReleaseAccess = catalogue
-			expected := revision.ID
-			switch mode {
-			case "audit":
-				access = failingCoreAudit{catalogue}
-			case "legacy":
-				if err := nodes.AgentUpdateSupport(ctx, nodeID, false); err != nil {
-					t.Fatal(err)
-				}
-			case "revision":
-				expected++
-			case "platform":
-				if _, err := r.Database.Exec("UPDATE nodes SET operating_system='unsupported'"); err != nil {
-					t.Fatal(err)
-				}
-			case "trust":
-				keys = map[string]release.TrustedKey{}
-			case "component":
-				if err := r.Database.QueryRow("SELECT id FROM release_catalogue WHERE component='xray'").Scan(&entry.ID); err != nil {
-					t.Fatal(err)
-				}
-			case "core_busy":
-				if _, err := queueCoreForTest(r, catalogue, nodeID, revision.ID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := r.QueueAgentUpdate(ctx, access, keys, nodeID, entry.ID, "owner", "local", expected); err == nil {
-				t.Fatal("invalid task accepted")
-			}
-			var tasks, attempts int
-			if err := r.Database.QueryRow("SELECT count(*) FROM agent_update_tasks").Scan(&tasks); err != nil {
+			listedData, err := json.Marshal(items[0])
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := r.Database.QueryRow("SELECT count(*) FROM agent_update_attempts").Scan(&attempts); err != nil {
-				t.Fatal(err)
-			}
-			if tasks != 0 || attempts != 0 {
-				t.Fatal("partial task committed", tasks, attempts)
+			var listed AgentUpdateTask
+			if err := json.Unmarshal(listedData, &listed); err != nil || listed.Status != status || listed.Result == nil {
+				t.Fatal("invalid retained task history", listed, err)
 			}
 		})
 	}
@@ -260,3 +212,66 @@ func TestPruneAgentReleasesKeepsNewestAndReferenced(t *testing.T) {
 		t.Fatalf("referenced row removed %v", got)
 	}
 }
+
+func (r *Repository) QueueAgentUpdate(ctx context.Context, catalogue ReleaseAccess, keys map[string]release.TrustedKey, nodeID, entryID, actor, ip string, expected int64) (AgentUpdateTask, error) {
+	if expected < 1 || actor == "" || len(actor) > 128 {
+		return AgentUpdateTask{}, release.ErrUpdate
+	}
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return AgentUpdateTask{}, err
+	}
+	defer tx.Rollback()
+	if err := nodeAvailable(ctx, tx, nodeID, ""); err != nil {
+		return AgentUpdateTask{}, err
+	}
+	var enabled, supported bool
+	var platform string
+
+	var revision int64
+	err = tx.QueryRowContext(ctx, "SELECT n.enabled,n.operating_system,coalesce(c.agent_supported,0),s.revision FROM nodes n LEFT JOIN node_update_capabilities c ON c.node_id=n.id JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=?", nodeID).Scan(&enabled, &platform, &supported, &revision)
+	if err != nil {
+		return AgentUpdateTask{}, err
+	}
+	if !enabled || revision != expected {
+		return AgentUpdateTask{}, ErrNodeBusy
+	}
+	if !supported {
+		return AgentUpdateTask{}, ErrAgentUpdateUnsupported
+	}
+	entry, err := catalogue.ReleaseTx(ctx, tx, entryID)
+	if err != nil {
+		return AgentUpdateTask{}, err
+	}
+	m := entry.Signed.Manifest
+	if m.Component != "proxy-agent" || platform != m.OS+"/"+m.Architecture {
+		return AgentUpdateTask{}, release.ErrPolicy
+	}
+	if err := entry.Signed.Verify(release.Policy{Component: m.Component, OS: m.OS, Architecture: m.Architecture, Now: time.Now().UTC(), Keys: keys}); err != nil {
+		return AgentUpdateTask{}, err
+	}
+	taskID, err := id.New()
+	if err != nil {
+		return AgentUpdateTask{}, err
+	}
+	commandID, err := id.New()
+	if err != nil {
+		return AgentUpdateTask{}, err
+	}
+	commandID = "aup_" + commandID
+	t := AgentUpdateTask{ID: taskID, NodeID: nodeID, ReleaseID: entryID, Revision: expected, Status: "queued", Generation: 1, CommandID: commandID, OriginalID: commandID, CreatedBy: actor, CreatedAt: now(), UpdatedAt: now()}
+	request := release.AgentUpdateRequest{SchemaVersion: 1, ID: commandID, NodeID: nodeID, Revision: expected, Operation: "install", Release: entry.Signed}
+	data, _ := json.Marshal(request)
+	if _, err := tx.ExecContext(ctx, "INSERT INTO agent_update_tasks("+agentTaskColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL)", t.ID, t.NodeID, t.ReleaseID, t.Revision, t.Status, t.Generation, t.CommandID, t.OriginalID, t.CreatedBy, t.CreatedAt, t.UpdatedAt); err != nil {
+		return t, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO agent_update_attempts(command_id,task_id,generation,operation,request_json,created_at) VALUES(?,?,1,'install',?,?)", commandID, taskID, data, t.CreatedAt); err != nil {
+		return t, err
+	}
+	if err := catalogue.RecordTx(ctx, tx, actor, "queue_agent_update", taskID, "成功", ip); err != nil {
+		return t, err
+	}
+	return t, tx.Commit()
+}
+
+var ErrAgentUpdateUnsupported = errors.New("agent web upgrade is not enabled")

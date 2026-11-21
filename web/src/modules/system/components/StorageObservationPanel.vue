@@ -45,6 +45,7 @@
  </section>
 </template>
 <script setup lang="ts">
+import { formatBytes } from '../../../app/bytes';
 import { computed,onMounted,onUnmounted,ref } from 'vue';
 import { saveStorageThresholdsAPI,storageObservationAPI,storageThresholdsAPI,type StorageObservation,type SpaceMaintenanceJob,type StorageThresholds } from '../storageObservationApi';
 import { invalidatesRead } from '../../../app/apiClient';
@@ -64,7 +65,7 @@ const MiB=1024*1024;
 const warningBytes=computed(()=>Math.round((warningMiB.value||0)*MiB));
 const criticalBytes=computed(()=>Math.round((criticalMiB.value||0)*MiB));
 const thresholdInputValid=computed(()=>{const w=warningBytes.value,c=criticalBytes.value;return w>=MiB && c>w;});
-function bytes(value:number){return (value/(1024*1024)).toFixed(1)+' MiB';}
+function bytes(value:number){return formatBytes(value, 1, 'MiB');}
 function maintenanceLabel(value:SpaceMaintenanceJob){return {idle:'尚无维护尝试',running:'开始已记录，结束结果尚未确认；不能据此判断当前仍在执行',skipped:'本轮未执行增量操作，保留原数据库模式',success:'本轮增量维护流程已完成，不代表全库缩减',error:'本轮维护失败，保留原清理结果'}[value.status] || '记录需核对';}
 async function load() {
   if (loading.value) return;

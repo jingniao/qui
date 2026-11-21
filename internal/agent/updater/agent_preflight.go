@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -73,31 +73,15 @@ func ProbeAgentImage(parent context.Context, directory string, image Image, curr
 	if err != nil {
 		return AgentPreflight{}, errors.Join(ErrAgentPreflight, err)
 	}
-	stdout, stderr, err := runAgentProbe(ctx, path, "--storage-contract")
+	stdout, stderr, err := runAgentProbe(ctx, path, "--storage-contract", "--storage-contract-version=2")
 	if err != nil || len(stderr) != 0 {
-		return AgentPreflight{}, ErrAgentPreflight
+		return AgentPreflight{}, errors.Join(ErrAgentPreflight, err, fmt.Errorf("storage contract v2 probe: stderr=%q", stderr))
 	}
 	descriptor, err := agentstorage.Decode(stdout)
-	if err != nil || descriptor.AgentVersion != image.Version || descriptor.OS != runtime.GOOS || descriptor.Architecture != runtime.GOARCH {
-		return AgentPreflight{}, ErrAgentPreflight
+	if err != nil {
+		return AgentPreflight{}, errors.Join(ErrAgentPreflight, err)
 	}
-	extended, diagnostic, probeErr := runAgentProbe(ctx, path, "--storage-contract", "--storage-contract-version=2")
-	if probeErr == nil {
-		if len(diagnostic) != 0 {
-			return AgentPreflight{}, ErrAgentPreflight
-		}
-		next, err := agentstorage.Decode(extended)
-		if err != nil {
-			return AgentPreflight{}, ErrAgentPreflight
-		}
-		base, nextBase := descriptor, next
-		base.AgentRecoveryProtocol = 0
-		nextBase.AgentRecoveryProtocol = 0
-		if base != nextBase {
-			return AgentPreflight{}, ErrAgentPreflight
-		}
-		descriptor = next
-	} else if !legacyProbeFlag(probeErr, extended, diagnostic) || ctx.Err() != nil {
+	if descriptor.AgentVersion != image.Version || descriptor.OS != runtime.GOOS || descriptor.Architecture != runtime.GOARCH || descriptor.AgentRecoveryProtocol != 1 {
 		return AgentPreflight{}, ErrAgentPreflight
 	}
 	// Verify the image again after the probe; the report never replaces signed
@@ -105,17 +89,9 @@ func ProbeAgentImage(parent context.Context, directory string, image Image, curr
 	if _, err := ResolveImage(ctx, directory, "proxy-agent", image); err != nil {
 		return AgentPreflight{}, errors.Join(ErrAgentPreflight, err)
 	}
-	controlOnly := false
-	if descriptor.AgentRecoveryProtocol == 1 {
-		out, diagnostic, err := runAgentProbe(ctx, path, "--control-only-contract")
-		if err == nil {
-			if len(diagnostic) != 0 || string(out) != "proxy-agent-control-only-v1 "+image.Version+"\n" {
-				return AgentPreflight{}, ErrAgentPreflight
-			}
-			controlOnly = true
-		} else if !unknownProbeFlag(err, out, diagnostic, "control-only-contract") || ctx.Err() != nil {
-			return AgentPreflight{}, ErrAgentPreflight
-		}
+	out, diagnostic, err := runAgentProbe(ctx, path, "--control-only-contract")
+	if err != nil || len(diagnostic) != 0 || string(out) != "proxy-agent-control-only-v1 "+image.Version+"\n" {
+		return AgentPreflight{}, errors.Join(ErrAgentPreflight, err, fmt.Errorf("control-only contract probe: stdout=%q stderr=%q", out, diagnostic))
 	}
 	if _, err := ResolveImage(ctx, directory, "proxy-agent", image); err != nil {
 		return AgentPreflight{}, err
@@ -124,7 +100,7 @@ func ProbeAgentImage(parent context.Context, directory string, image Image, curr
 	if err != nil {
 		return AgentPreflight{}, ErrAgentPreflight
 	}
-	return AgentPreflight{Image: image, Contract: descriptor, ControlOnly: controlOnly}, nil
+	return AgentPreflight{Image: image, Contract: descriptor, ControlOnly: true}, nil
 }
 
 func runAgentProbe(ctx context.Context, path string, args ...string) ([]byte, []byte, error) {
@@ -144,13 +120,4 @@ func runAgentProbe(ctx context.Context, path string, args ...string) ([]byte, []
 		return nil, nil, ErrAgentPreflight
 	}
 	return stdout.data.Bytes(), stderr.data.Bytes(), err
-}
-
-func legacyProbeFlag(err error, stdout, stderr []byte) bool {
-	return unknownProbeFlag(err, stdout, stderr, "storage-contract-version")
-}
-
-func unknownProbeFlag(err error, stdout, stderr []byte, name string) bool {
-	var exit *exec.ExitError
-	return errors.As(err, &exit) && exit.ExitCode() == 2 && len(stdout) == 0 && strings.HasPrefix(string(stderr), "flag provided but not defined: -"+name+"\n")
 }

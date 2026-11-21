@@ -13,26 +13,9 @@ import (
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/panelstore"
 	"proxycontrol/internal/platform/server"
-	"proxycontrol/web"
 	"reflect"
 	"strings"
 )
-
-// InstallCandidate is an offline operation. All HTTP/gRPC/background writers
-// must be stopped. It rechecks evidence under a SQLite write freeze, closes
-// the owned database, installs files, verifies target configuration, and commits
-// their journal. Starting services and accepting new writes is a later step.
-func InstallCandidate(ctx context.Context, owner *panelstore.Ownership, current archive.Source, candidate DatabaseCandidate, prepared archive.PreparedRestore, password string) error {
-	return installCandidate(ctx, owner, current, candidate, prepared, password, nil)
-}
-
-func installCandidate(ctx context.Context, owner *panelstore.Ownership, current archive.Source, candidate DatabaseCandidate, prepared archive.PreparedRestore, password string, checkpoint func(string)) (resultErr error) {
-	runtime, err := installAndPrepare(ctx, owner, current, candidate, prepared, password, web.Files(), nil, checkpoint)
-	if runtime != nil {
-		err = errors.Join(err, runtime.Close())
-	}
-	return err
-}
 
 // InstallAndPrepare validates and holds both listening sockets before journal
 // commitment. Serve on the returned reservation may start only after success;

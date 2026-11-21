@@ -46,7 +46,7 @@ func TestDeviceGateNegotiationOldAgentsAndReconnect(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			response, err := pb.NewAgentControlClient(trustedClient(t, address, f.app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "gate-test"})
+			response, err := pb.NewAgentControlClient(trustedClient(t, address, f.app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +65,7 @@ func TestDeviceGateNegotiationOldAgentsAndReconnect(t *testing.T) {
 				t.Fatal(err)
 			}
 			hello := func(last uint64) {
-				if err := stream.Send(&pb.AgentMessage{NodeId: f.nodeID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{LastAckedSequence: last, DeviceGateSupported: mode.hello}}}); err != nil {
+				if err := stream.Send(&pb.AgentMessage{NodeId: f.nodeID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5", LastAckedSequence: last, DeviceGateSupported: mode.hello}}}); err != nil {
 					t.Fatal(err)
 				}
 				welcome, err := stream.Recv()

@@ -124,7 +124,7 @@ assert.match(versionPanel, /revision_mismatch/, 'revision_mismatch is explained'
 assert.match(versionPanel, /移除中/, 'a component stays listed as 移除中 until capabilities confirm the removal');
 assert.match(versionPanel, /multiCoreSupported\(/, '添加内核 is offered only for Agents that negotiated multi-core support');
 assert.match(versionPanel, /coreBatchTargets/, 'batch upgrades are per component');
-assert.match(versionPanel, /upgradeAllComponent/, 'a per-component batch entry exists');
+assert.match(versionPanel, /defineExpose\(\{ upgradeAllFor \}\)/, 'the combined version page exposes its batch entry');
 assert.match(versionPanel, /result\?\.code|result\?\.installed_version|result\?\.code/, 'task results are shown from the backend, never assumed');
 assert.match(versionPanel, /coreBatchComponentLocked/, 'the per-component batch keeps its component fixed');
 console.log('PASS F3 CORES: per-core data, no local core state, real add/upgrade/remove APIs, refusals explained, per-component batch');
@@ -155,7 +155,7 @@ assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: '' }), /--gr
 // Web upgrade is opt-in: the flag is emitted only when asked, and each dialog starts
 // unchecked, resets on every new token and passes the choice into the command.
 assert.doesNotMatch(defaultCommand, /--web-upgrade/, 'web upgrade is not enabled by default');
-for (const view of ['modules/nodes/components/ServerEnrollment.vue','modules/nodes/components/NodeRecoveryPanel.vue']) {
+for (const view of ['modules/nodes/components/ServerEnrollment.vue']) {
   assert.match(read(view), /sortInstallCores\(cores\.value, (?:reportedPrimary\.value|props\.node\.capabilities\?\.core_name)\)/, 'command generation preserves reported primary');
 }
 assert.match(nodesApi.installCommand({ ...install, cores:['sing-box','xray','gost'], replaceAgent:true }), /--core sing-box --core xray --core gost --replace-agent$/);
@@ -166,7 +166,7 @@ assert.match(nodesApi.installCommand({ ...install, webUpgrade: true }), / --core
 const webUpgradeOption = read('modules/nodes/components/WebUpgradeOption.vue');
 assert.match(webUpgradeOption, /<input v-model="enabled" type="checkbox"[^>]*\/>启用网页升级/, 'the shared option is the 启用网页升级 checkbox');
 assert.match(webUpgradeOption, /class="mt-1 text-ios-tertiary"/, 'the helper line sits under the checkbox');
-for (const [file, ref_] of [['modules/nodes/components/ServerEnrollment.vue', 'webUpgrade'], ['modules/nodes/components/NodeRecoveryPanel.vue', 'webUpgrade'], ['modules/system/components/NodeVersionPanel.vue', 'pendingWebUpgrade']]) {
+for (const [file, ref_] of [['modules/nodes/components/ServerEnrollment.vue', 'webUpgrade'], ['modules/system/components/NodeVersionPanel.vue', 'pendingWebUpgrade']]) {
   const source = read(file);
   assert.match(source, new RegExp(`<WebUpgradeOption [^>]*v-model="${ref_}"`), file + ' shows the web upgrade option');
   assert.match(source, new RegExp(`${ref_} = ref\\(false\\)`), file + ' starts unchecked');
@@ -177,7 +177,7 @@ console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated 
 
 // The panel address of the install command is saved once in 系统设置 → 节点安装
 // 连接地址 (system_settings key install_endpoint) instead of being edited per
-// server; all three dialogs resolve it through one helper and fall back to the
+// server; both dialogs resolve it through one helper and fall back to the
 // browser address when it is unset.
 assert.match(read('modules/nodes/installEndpoint.ts'), /settingsAPI\.installEndpoint\(/, 'the install endpoint comes from the settings API');
 assert.match(read('modules/nodes/installEndpoint.ts'), /window\.location\.hostname/, 'the fallback stays the browser address');
@@ -185,13 +185,13 @@ assert.match(read('modules/nodes/installEndpoint.ts'), /saved\.grpcHost/, 'the s
 // A ref stores a reactive proxy, so `enrollment.value !== item` is always true and
 // silently discarded the saved install endpoint in the enrollment dialog.
 assert.doesNotMatch(read('modules/nodes/components/ServerEnrollment.vue'), /enrollment\.value\s*!==\s*item/, 'the enrollment dialog must not compare the reactive ref with the raw enrollment');
-for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/nodes/components/NodeRecoveryPanel.vue', 'modules/system/components/NodeVersionPanel.vue']) {
+for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/system/components/NodeVersionPanel.vue']) {
   const source = read(file);
   assert.match(source, /resolveInstallEndpoint\(/, file + ' must default to the saved install endpoint');
   assert.match(source, /grpcHost: /, file + ' must pass the resolved Agent gRPC address into the command');
   assert.doesNotMatch(source, /window\.location\.hostname/, file + ' must not read the browser address directly');
 }
-for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/nodes/components/NodeRecoveryPanel.vue']) {
+for (const file of ['modules/nodes/components/ServerEnrollment.vue']) {
   const source = read(file);
   assert.doesNotMatch(source, /v-model\.trim="host"/, file + ' must not offer a per-dialog panel address input');
   assert.doesNotMatch(source, /v-model\.number="port"/, file + ' must not offer a per-dialog panel port input');
@@ -200,7 +200,7 @@ for (const file of ['modules/nodes/components/ServerEnrollment.vue', 'modules/no
 assert.match(read('modules/system/pages/SettingsPage.vue'), /saveInstallEndpoint\(/, '系统设置 saves the install endpoint');
 assert.match(read('modules/system/pages/SettingsPage.vue'), /Agent gRPC 地址/, '系统设置 edits the Agent gRPC address');
 assert.match(read('modules/system/pages/SettingsPage.vue'), /Agent gRPC 端口/, '系统设置 edits the Agent gRPC port');
-console.log('PASS F3 ENDPOINT: one saved panel address feeds all three install dialogs, browser address only as fallback');
+console.log('PASS F3 ENDPOINT: one saved panel address feeds both install dialogs, browser address only as fallback');
 
 // The editor's local port check follows the Agent's node-wide numeric rule: a TCP
 // and a UDP inbound can NOT share a port number (an earlier change allowed it).
@@ -264,10 +264,13 @@ const addressHelperA = await import('data:text/javascript;base64,' + Buffer.from
   read('modules/nodes/nodeAddress.ts'),
   { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }
 ).outputText).toString('base64'));
+const bytesCode = ts.transpileModule(read('app/bytes.ts'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+const byteFormattingA = await import('data:text/javascript;base64,' + Buffer.from(bytesCode).toString('base64'));
 const dashboardA = vueSubset('modules/dashboard/pages/DashboardPage.vue', [
   'isNodeOnline', 'hasPublishedConfig', 'isNodeCoreUnhealthy', 'userAttentionRank', 'nodeStatusLabel', 'isUserActive', 'getUserExpiryLabel', 'getUserExpiryBadgeClass',
   'activeUsersCount', 'warningUsersCount', 'adminOnlineNodesCount', 'latestFailedRevisions', 'pendingIssues', 'formatGiB'
 ], {
+  formatBytes: byteFormattingA.formatBytes,
   connectAddress: addressHelperA.connectAddress,
   serverStatus: serverStatusA, statusNow: statusNowA,
   allUsers: { value: [userA, disabledA, expiredA, quotaA, soonA, { ...disabledA, usedTraffic: 100 }] },
@@ -304,6 +307,7 @@ const hostCodeA = ts.transpileModule(read('modules/nodes/metrics.ts'), { compile
 globalThis.walkthroughHostMetrics = (await import('data:text/javascript;base64,' + Buffer.from(hostCodeA).toString('base64'))).hostMetrics;
 const metricsSourceA = read('modules/nodes/components/serverMetricsModel.ts')
   .replace("import { authState } from '../../../app/auth';", 'const authState = globalThis.walkthroughAuth;')
+  .replace("from '../../../app/bytes'", "from 'data:text/javascript;base64," + Buffer.from(bytesCode).toString('base64') + "'")
   .replace("import { hostMetrics } from '../metrics';", 'const hostMetrics = globalThis.walkthroughHostMetrics;');
 const metricsCodeA = ts.transpileModule(metricsSourceA, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const metricsA = await import('data:text/javascript;base64,' + Buffer.from(metricsCodeA).toString('base64'));
@@ -364,13 +368,13 @@ assert.equal(versionStatusReads, 0, 'SSE bursts must not supersede an in-flight 
 versionLoading.value = false;
 versionStatus.nodeStatusChanged();
 assert.equal(versionStatusReads, 1, 'the next status event refreshes the idle version list');
-const versionsA = vueSubset(versionPathA, ['detectArch', 'upgradeUnavailableReason']);
+const versionsA = vueSubset(versionPathA, ['detectArch', 'upgradeUnavailableReason', 'agentSystemUpdateHint']);
 assert.equal(versionsA.detectArch({ capabilities: { host: { architecture: 'arm64' }, architecture: 'amd64' } }), 'arm64');
 assert.equal(versionsA.detectArch({ capabilities: { architecture: 'amd64' } }), 'amd64');
 assert.equal(versionsA.detectArch({ capabilities: {} }), '');
 assert.match(versionsA.upgradeUnavailableReason(pendingA), /登记/);
 assert.match(versionsA.upgradeUnavailableReason({ ...onlineA, agentVersion: '1.0.9', lastHeartbeat: '' }), /心跳/);
-assert.equal((read(versionPathA).match(/v-if="(isOwner && )?!upgradeUnavailableReason\(node\)"/g) || []).length, 4, 'table and card upgrade actions are hidden before enrollment instead of disabled');
+assert.equal((read(versionPathA).match(/v-if="isOwner && (node\.agentSystemUpdateSupported|getNodeInstalledCores\(node\)\.length) && !upgradeUnavailableReason\(node, operationNow\)"/g) || []).length, 4, 'table and card upgrade actions require their capability and current admission clock before enrollment');
 const tasksA = read('modules/system/pages/TaskRecordPage.vue');
 assert.ok(!tasksA.includes('Agent 签名发布目录') && !tasksA.includes('登记签名'), 'task records no longer list or register signed Agent releases');
 assert.match(read('layouts/MainLayout.vue'), /pt-16 lg:pt-0/);
@@ -438,7 +442,7 @@ for (const message of ['future backend reason', 'unknown validation message', ''
 const originalFetchReview3 = globalThis.fetch;
 try {
   for (const [message, expected] of [['invalid domain', '域名无效'], ['future validation', 'future validation']]) {
-    globalThis.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error: { code: 'invalid_request', message } }) });
+    globalThis.fetch = async () => Response.json({ error: { code: 'invalid_request', message } }, { status: 400 });
     await assert.rejects(apiReview3.request('/policies', 'POST', {}), error => error.message === expected);
   }
 } finally { globalThis.fetch = originalFetchReview3; }
@@ -512,9 +516,10 @@ const dashboardNodeReview3 = (status, extra = {}) => ({ status, enabled: true, l
 for (const [rows, subtitle, offline, pending] of [
   [[dashboardNodeReview3('offline'), dashboardNodeReview3('pending'), dashboardNodeReview3('pending')], '1 台离线 · 2 台待登记', 1, 2],
   [[dashboardNodeReview3('pending'), dashboardNodeReview3('pending')], '2 台待登记', 0, 2],
-  [[dashboardNodeReview3('online'), dashboardNodeReview3('degraded')], '全部就绪', 0, 0],
+  [[dashboardNodeReview3('online'), dashboardNodeReview3('degraded')], '1 台异常', 0, 0],
   [[dashboardNodeReview3('offline')], '1 台离线', 1, 0],
-  [[dashboardNodeReview3('offline', { enabled: false }), dashboardNodeReview3('online', { maintenance: true })], '1 台离线', 1, 0],
+  [[dashboardNodeReview3('offline', { enabled: false }), dashboardNodeReview3('online', { maintenance: true })], '1 台维护中 · 1 台已禁用', 0, 0],
+  [[dashboardNodeReview3('pending', { enabled: false }), dashboardNodeReview3('pending', { maintenance: true })], '1 台维护中 · 1 台已禁用', 0, 0],
   [[], '全部就绪', 0, 0]
 ]) {
   dashboardNodesReview3.value = rows;
@@ -769,11 +774,16 @@ assert.doesNotMatch(nodeVersionPanel, /中央尚未配置发布公钥/, 'no warn
 assert.doesNotMatch(nodeVersionPanel, /importAgentRelease\(/, 'complete upgrades do not import panel-hosted Agent files');
 assert.match(nodeVersionPanel, /agentSystemUpdateSupported/, 'reads the real complete-update capability');
 assert.match(nodeVersionPanel, /请在终端运行 qui-update --component agent；旧更新器可能需再次运行/, 'shows the terminal migration command and repeated-update requirement');
+assert.equal((nodeVersionPanel.match(/v-if="isOwner && agentSystemUpdateHint\(node\)"/g) || []).length, 2, 'table and card show the same actionable migration reason to the owner');
+assert.equal(versionsA.agentSystemUpdateHint({ ...onlineA, agentVersion: '1.7.5', agentSystemUpdateSupported: true, agentSystemUpdateError: 'old probe error' }), '', 'a supported Agent does not show an obsolete failure');
+assert.equal(versionsA.agentSystemUpdateHint({ ...pendingA, agentVersion: '', agentSystemUpdateSupported: false }), '', 'pending enrollment keeps its installation flow');
+assert.equal(versionsA.agentSystemUpdateHint({ ...onlineA, agentVersion: '1.7.5', agentSystemUpdateSupported: false, agentSystemUpdateError: 'permission denied: /usr/local/bin/qui-update\nexit status 126' }), 'permission denied: /usr/local/bin/qui-update\nexit status 126；请在终端运行 qui-update --component agent；旧更新器可能需再次运行', 'the exact probe error and exit status remain visible beside the migration command');
+assert.equal(versionsA.agentSystemUpdateHint({ ...onlineA, agentVersion: '1.7.5', agentSystemUpdateSupported: false, agentSystemUpdateError: '' }), '请在终端运行 qui-update --component agent；旧更新器可能需再次运行', 'the migration command remains available when the Agent reports no error text');
 const nodesApiP2 = read('modules/nodes/api.ts');
 assert.match(nodesApiP2, /agentSystemUpdateSupported:\s*boolean/, 'NodeView includes complete update support');
 assert.match(nodesApiP2, /agentReleases/, 'nodeAPI exposes agentReleases');
-assert.match(nodesApiP2, /importAgentRelease/, 'nodeAPI exposes importAgentRelease');
-console.log('PASS P2 AGENT: complete Agent upgrade capability, terminal migration and retained legacy catalogue API');
+assert.match(readFileSync(new URL('../../internal/panel/deployment/agent_releases_http.go', import.meta.url), 'utf8'), /mux\.Handle\("POST \/api\/v1\/agent-releases\/\{version\}\/import", h\.Auth\.Require\(http\.HandlerFunc\(h\.importRelease\), true\)\)/, 'the published catalogue import endpoint remains authenticated even though the unused frontend wrapper was removed');
+console.log('PASS P2 AGENT: complete Agent upgrade capability, terminal migration and retained authenticated catalogue endpoint');
 
 // A13: the chosen version reaches the common updater; platform and signed
 // component enforcement belong to the node's real installation path.

@@ -36,27 +36,28 @@ await metadata.loadNodeMeta('a', false);
 assert.equal(writes, 0);
 assert.equal(metadata.getNodeMeta('a').region, undefined);
 await metadata.loadNodeMeta('a', true);
-assert.equal(writes, 1);
-assert.equal(metadata.getNodeMeta('a').region, 'JP');
-assert.equal(metadata.getNodeMeta('a').renewPrice, '12');
-assert.equal(metadata.getNodeMeta('a').renewNoticeDays, 0);
-assert.equal(local.has('qui_node_meta_a'), false);
+assert.equal(writes, 0);
+assert.equal(metadata.getNodeMeta('a').region, undefined);
+assert.equal(metadata.getNodeMeta('a').renewPrice, undefined);
+assert.equal(metadata.getNodeMeta('a').renewNoticeDays, undefined);
+assert.equal(local.has('qui_node_meta_a'), true);
+remote.set('/nodes/a/meta', { region: 'JP' });
 await metadata.loadNodeMeta('a', true);
-assert.equal(writes, 1);
+assert.equal(writes, 0);
 local.set('qui_node_meta_a', JSON.stringify({ region: 'US' }));
 await metadata.loadNodeMeta('a', true);
 assert.equal(metadata.getNodeMeta('a').region, 'JP');
-assert.equal(writes, 1);
+assert.equal(writes, 0);
 local.set('qui_node_meta_b', JSON.stringify({ region: 'GB' }));
 const transport = globalThis.nodeMetaRequest;
-globalThis.nodeMetaRequest = async (path, method, body) => { if (method === 'PUT') throw new Error('offline'); return transport(path, method, body); };
+globalThis.nodeMetaRequest = async (path, method, body) => { if (path === '/nodes/b/meta') throw new Error('offline'); return transport(path, method, body); };
 await assert.rejects(metadata.loadNodeMeta('b', true), /offline/);
 assert.equal(local.has('qui_node_meta_b'), true);
 globalThis.nodeMetaRequest = transport;
 await metadata.saveNodeMeta('a', { region: 'SG', renewNoticeDays: 3 });
 await metadata.loadNodeMeta('a', false);
 assert.equal(metadata.getNodeMeta('a').region, 'SG');
-console.log('PASS B3: Viewer never imports, Owner imports once, server wins, failed import retains local data, saved metadata reloads');
+console.log('PASS B3: reads never import browser metadata, server wins, failed read retains local data, saved metadata reloads');
 
 // F1 dedicated range fields must round-trip, clear, and reject invalid pairs before PUT.
 await metadata.saveNodeMeta('range', { region: 'JP', portRangeStart: 21000, portRangeEnd: 21002 });
@@ -100,8 +101,10 @@ assert.equal(res?.value, (219 / 365 * expectedDays).toFixed(2));
 console.log('PASS FINANCIAL: calculateMonthlyExpenditure and calculateResidualValue compute correct figures');
 
 // Test retransmission rate: null points do not draw as 0
+const bytesCode = ts.transpileModule(readFileSync(new URL('../src/app/bytes.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const metricsModelSource = readFileSync(new URL('../src/modules/nodes/components/serverMetricsModel.ts', import.meta.url), 'utf8')
   .replace("import { authState } from '../../../app/auth';", "const authState = { timezone: 'Asia/Shanghai' };")
+  .replace("from '../../../app/bytes'", "from 'data:text/javascript;base64," + Buffer.from(bytesCode).toString('base64') + "'")
   .replace("import { hostMetrics } from '../metrics';", 'const hostMetrics = node => node.heartbeat;');
 const metricsModelCode = ts.transpileModule(metricsModelSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const metricsModel = await import(`data:text/javascript;base64,${Buffer.from(metricsModelCode).toString('base64')}`);

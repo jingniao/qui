@@ -124,12 +124,26 @@ async function performRequest<T>(path: string, method: string, body: unknown, op
   try {
     response = await fetch('/api/v1' + path, { method, headers, credentials: 'same-origin',
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(options.timeoutMs ?? 15000) });
-  } catch { throw new APIError(0, 'unavailable', '无法连接中央服务，请检查服务是否启动。'); }
+  } catch (error) { throw new APIError(0, 'unavailable', `无法连接中央服务（${path}）：${(error as Error).message}`); }
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    const code = data.error?.code || 'request_failed';
     if (response.status === 401 && scope === adminScope && !path.startsWith('/auth/')) window.dispatchEvent(new Event('auth-expired'));
-    throw new APIError(response.status, code, messages[code] || translateAPIMessage(data.error?.message || '请求失败'), data.error || {});
+    const context = `请求 ${path} 失败（HTTP ${response.status}${response.statusText ? ' ' + response.statusText : ''}）`;
+    const body = await response.text().catch(error => {
+      throw new APIError(response.status, 'request_failed', `${context}：读取错误响应失败：${error.message}`);
+    });
+    const contentType = response.headers.get('Content-Type') || '';
+    if (contentType.includes('text/html') || /^\s*(?:<!doctype html|<html\b)/i.test(body)) {
+      const title = body.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim();
+      throw new APIError(response.status, 'request_failed', `${context}：服务器或代理返回 HTML 错误页${title ? '：' + title : '，未提供接口错误详情'}`);
+    }
+    let data;
+    try { data = JSON.parse(body); }
+    catch (error) {
+      const reason = body.trim() || '响应正文为空，未提供错误详情';
+      throw new APIError(response.status, 'request_failed', `${context}：${contentType.includes('json') ? '错误响应 JSON 解析失败：' + (error as Error).message + '；响应正文：' : ''}${reason}`);
+    }
+    const code = data?.error?.code || 'request_failed';
+    throw new APIError(response.status, code, messages[code] || (data?.error?.message ? translateAPIMessage(data.error.message) : `${context}：未提供错误详情；响应正文：${body}`), data?.error || {});
   }
   return response.status === 204 ? undefined as T : response.json();
 }

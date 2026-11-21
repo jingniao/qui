@@ -139,7 +139,11 @@ assert.equal(external.form.secret, '');
 assert.ok(external.events.some(e => e[0] === 'created' && e[1].id === 'external'));
 
 globalThis.__u1bNodeAddress = await load(read('modules/nodes/nodeAddress.ts'));
+const coreSummaryURL = 'data:text/javascript;base64,' + Buffer.from(ts.transpileModule(read('modules/nodes/coreSummary.ts'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64');
+const serverStatusSource = read('modules/nodes/components/serverListModel.ts').match(/export function serverStatus[\s\S]*?\n}/)[0];
+const serverStatusURL = 'data:text/javascript;base64,' + Buffer.from(ts.transpileModule(`import { unhealthyCores } from ${JSON.stringify(coreSummaryURL)};\n${serverStatusSource}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64');
 const api = await load(read('modules/proxy/api.ts')
+  .replace("'../nodes/components/serverListModel'", JSON.stringify(serverStatusURL))
   .replace("import { reactive } from 'vue';", 'const reactive = value => value;')
   .replace("import { connectAddress } from '../nodes/nodeAddress';", 'const { connectAddress } = globalThis.__u1bNodeAddress;')
   .replace("import { request, type Page } from '../../app/apiClient';", 'const request = () => {};'));

@@ -34,6 +34,7 @@ type Node struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Region string `json:"region"`
+	Status string `json:"status"`
 	Online bool   `json:"online"`
 	// Protocols lists the subscription endpoint protocols this user can use on the node.
 	Protocols []string `json:"protocols"`

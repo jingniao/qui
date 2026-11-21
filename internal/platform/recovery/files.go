@@ -44,14 +44,6 @@ type authenticatedPlan struct {
 	MAC  string          `json:"mac"`
 }
 
-// InstallFiles replaces a fully prepared file set while retaining originals.
-// Callers must close every database/service handle and validate evidence
-// freshness first. Validation must not run proxy control or accept writes.
-// A failure or process exit before commitment restores the original file set.
-func installFiles(ctx context.Context, owner *panelstore.Ownership, files []archive.RestoreFile, sources map[string]string, validate func() error, checkpoint func(string)) (resultErr error) {
-	return installFilesWithCleanup(ctx, owner, files, sources, validate, checkpoint, nil)
-}
-
 func installFilesWithCleanup(ctx context.Context, owner *panelstore.Ownership, files []archive.RestoreFile, sources map[string]string, validate func() error, checkpoint func(string), beforeRollback func() error) (resultErr error) {
 	if err := owner.AssertHeld(owner.Database, owner.IdentityDirectory); err != nil {
 		return err

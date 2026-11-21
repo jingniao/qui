@@ -37,7 +37,7 @@ func TestK3bNodeCountersRequireIndependentNegotiationAndAckExactly(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			enrolled, err := pb.NewAgentControlClient(trustedClient(t, address, app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "test"})
+			enrolled, err := pb.NewAgentControlClient(trustedClient(t, address, app.Authority.PEM, nil)).Enroll(ctx, &pb.EnrollRequest{EnrollmentToken: token, CsrPem: csr, Hostname: "host", OperatingSystem: "linux/amd64", AgentVersion: "1.7.5"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -52,7 +52,7 @@ func TestK3bNodeCountersRequireIndependentNegotiationAndAckExactly(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{MultiCoreSupported: true, NodeTrafficSupported: negotiated}}}); err != nil {
+			if err := stream.Send(&pb.AgentMessage{NodeId: n.ID, MessageId: "hello", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{AgentVersion: "1.7.5", MultiCoreSupported: true, NodeTrafficSupported: negotiated}}}); err != nil {
 				t.Fatal(err)
 			}
 			welcome, err := stream.Recv()

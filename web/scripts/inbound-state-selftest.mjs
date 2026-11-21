@@ -35,7 +35,7 @@ const watchServers = ref([{ id: 'server', heartbeat: { current_revision: 7 } }])
 const visibleNodes = ref([{ sourceId: 'server', sourceType: 'self_hosted' }]);
 const draftRows = ref([]);
 let configurationReads = 0, configurationInvalidations = 0;
-new Function('displayMode', 'pagedNodes', 'filteredNodes', 'servers', 'serverInbounds', 'watch', 'loadServerPublishStates', 'publishStateReads',
+new Function('displayMode', 'pagedNodes', 'filteredNodes', 'displayServers', 'serverInbounds', 'watch', 'loadServerPublishStates', 'publishStateReads',
   ts.transpileModule(keyCode + '\n' + bindWatch, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(
   ref('list'), visibleNodes, visibleNodes, watchServers, draftRows, watch, () => configurationReads++, { invalidate: () => configurationInvalidations++ });
 for (let beat = 0; beat < 12; beat++) {
@@ -76,7 +76,7 @@ const labels = await import(`data:text/javascript;base64,${Buffer.from(outputTex
 assert.equal(labels.revisionResult('apply_failed'), '应用失败');
 assert.equal(labels.revisionResult('whatever'), 'whatever');
 assert.equal(labels.revisionResult(''), '—');
-for (const path of ['modules/proxy/pages/ProxyNodeListPage.vue', 'modules/system/pages/RevisionPage.vue', 'modules/nodes/components/detail/serverDetailModel.ts']) {
+for (const path of ['modules/proxy/pages/ProxyNodeListPage.vue', 'modules/nodes/components/detail/serverDetailModel.ts']) {
   assert.match(read(path), /from '(\.\.\/)+(system\/)?revisionResult'/, path);
   assert.doesNotMatch(read(path), /已应用且健康/, path);
 }
@@ -87,7 +87,7 @@ const draftEvent = list.match(/let draftTimer:[\s\S]*?\n}/)[0];
 const transpile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 const schedulerSource = read('modules/proxy/inboundStateReads.ts').replace(/^import type .*;\r?\n/m, '').replace('export function', 'function');
 const createInboundStateReads = new Function(transpile(schedulerSource) + '\nreturn createInboundStateReads;')();
-const buildState = new Function('ref', 'document', 'displayMode', 'pagedNodes', 'filteredNodes', 'servers', 'serverInbounds',
+const buildState = new Function('ref', 'document', 'displayMode', 'pagedNodes', 'filteredNodes', 'displayServers', 'serverInbounds',
   'deploymentAPI', 'revisionResult', 'createInboundStateReads', 'watch', 'setTimeout', 'clearTimeout', 'loadData',
   transpile(stateBlock + '\n' + publishEvent + '\n' + draftEvent) + `
   const refreshDeployment = () => { void loadServerPublishStates(); };
@@ -187,7 +187,7 @@ assert.equal(unmounted.inboundBadge(extra), undefined, 'an obsolete failure cann
 assert.equal(ending.length, 1, 'disposing cancels queued reads');
 assert.match(list, /onUnmounted\(\(\) => \{[\s\S]*?publishStateReads\.dispose\(\)/);
 
-assert.match(list, /serverStatus\(srv,\s*now\.value\)/, 'proxy list shares heartbeat expiry with server list');
+assert.match(list, /serverStatus\(srv,\s*statusNow\.value\)/, 'proxy list shares heartbeat expiry with server list');
 const refresh = list.match(/async function refreshServersOnNodeStatus\(\)[\s\S]*?\n}/)?.[0] || '';
 assert.match(refresh, /inventory\.readServers/);
 assert.match(list, /throttleTrailing\([\s\S]*refreshServersOnNodeStatus/);
@@ -197,8 +197,8 @@ console.log('PASS inbound read failure retention, recovery, shared status and se
 const statusSource = read('modules/nodes/components/serverListModel.ts').match(/export function serverStatus[\s\S]*?\n}/)[0];
 const serverStatus = new Function('unhealthyCores', ts.transpileModule(statusSource.replace('export ', '') + '\nreturn serverStatus;', { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText)(() => []);
 const clock = Date.parse('2026-11-14T12:00:00Z');
-const mapping = list.match(/const state = serverStatus.*;\s*const status = .*ib.enabled.*;/)[0];
-const mapStatus = new Function('srv', 'now', 'ib', 'serverStatus', mapping + '\nreturn status;');
+const mapping = list.match(/const displayStatus = serverStatus.*;\s*const state = .*;\s*const status = .*ib.enabled.*;/)[0];
+const mapStatus = new Function('srv', 'statusNow', 'ib', 'serverStatus', mapping + '\nreturn status;');
 for (const [age, expected] of [[0, 'online'], [44999, 'online'], [45000, 'offline'], [-5001, 'offline']]) {
   const srv = { enabled: true, status: 'online', lastHeartbeat: new Date(clock - age).toISOString() };
   assert.equal(mapStatus(srv, { value: clock }, { enabled: true }, serverStatus), expected);

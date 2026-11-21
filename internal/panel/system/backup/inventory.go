@@ -105,14 +105,8 @@ type Reader interface {
 
 func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	result := Inventory{Nodes: map[string]NodeRecord{}, Identities: map[string]IdentityRecord{}, Users: map[string]UserRecord{}}
-	var routeIndexApplied int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0158_subscription_route_dependencies.sql'").Scan(&routeIndexApplied); err != nil {
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM subscription_route_dependencies").Scan(&result.Totals.SubscriptionRoutes); err != nil {
 		return Inventory{}, err
-	}
-	if routeIndexApplied == 1 {
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM subscription_route_dependencies").Scan(&result.Totals.SubscriptionRoutes); err != nil {
-			return Inventory{}, err
-		}
 	}
 	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM system_settings WHERE key='client_policy_active'").Scan(&result.Totals.ClientPolicyActive); err != nil {
 		return Inventory{}, err
@@ -138,22 +132,16 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 		}
 	}
 	var updatePending int64
-	var systemPresent int
-	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version='0157_agent_system_updates.sql'").Scan(&systemPresent); err != nil {
-		return Inventory{}, err
-	}
-	if systemPresent > 0 {
-		for _, item := range []struct {
-			table string
-			count *int64
-		}{{"agent_system_update_tasks", &result.Totals.AgentSystemUpdateTasks}, {"agent_system_update_attempts", &result.Totals.AgentSystemUpdateAttempts}, {"agent_system_update_logs", &result.Totals.AgentSystemUpdateLogs}} {
-			if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+item.table).Scan(item.count); err != nil {
-				return Inventory{}, err
-			}
-		}
-		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM agent_system_update_tasks WHERE status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1)").Scan(&updatePending); err != nil {
+	for _, item := range []struct {
+		table string
+		count *int64
+	}{{"agent_system_update_tasks", &result.Totals.AgentSystemUpdateTasks}, {"agent_system_update_attempts", &result.Totals.AgentSystemUpdateAttempts}, {"agent_system_update_logs", &result.Totals.AgentSystemUpdateLogs}} {
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+item.table).Scan(item.count); err != nil {
 			return Inventory{}, err
 		}
+	}
+	if err := r.QueryRowContext(ctx, "SELECT count(*) FROM agent_system_update_tasks WHERE status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1)").Scan(&updatePending); err != nil {
+		return Inventory{}, err
 	}
 
 	for _, table := range []string{"core_remove_tasks", "core_update_tasks", "agent_update_tasks"} {

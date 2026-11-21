@@ -476,73 +476,8 @@ export function fromConfig(config: ClientPolicyConfig): RuleTemplate {
   };
 }
 
-// The browser-only template of earlier builds. It never reached a client; the
-// page offers it once as an unsaved draft and forgets it after a save.
-const LEGACY_POLICY_KEY = 'qui_client_policy_config_v1';
-const LEGACY_CLASH_KEY = 'qui_clash_rules_config';
-
 export const clientPolicyAPI = {
   get: async (): Promise<ClientPolicyConfig> => toConfig(await request<StoredRuleTemplate>('/subscription-rules')),
-  save: async (config: ClientPolicyConfig): Promise<ClientPolicyConfig> =>
-    toConfig(await request<StoredRuleTemplate>('/subscription-rules', 'PUT', { template: fromConfig(config), expectedRevision: config.version })),
-  presets: () => request<{ items: RulePreset[]; recommendedDns?: RuleTemplateDNS }>('/subscription-rules/presets'),
-  legacyDraft(): Pick<ClientPolicyConfig, 'settings' | 'proxyGroups' | 'rules'> | null {
-    try {
-      const raw = localStorage.getItem(LEGACY_POLICY_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (!parsed || !Array.isArray(parsed.rules) || !Array.isArray(parsed.proxyGroups) || !parsed.settings) return null;
-      return {
-        settings: parsed.settings,
-        proxyGroups: parsed.proxyGroups.map((group: any) => ({ name: String(group?.name || ''), type: String(group?.type || 'select'), proxies: String(group?.proxies || ''), url: group?.url, interval: group?.interval })),
-        rules: parsed.rules.map((rule: any, index: number) => ({
-          id: String(rule?.id || `cr-${index + 1}`),
-          // The old page offered PORT with comma lists; mihomo's rule is DST-PORT with '/'.
-          type: (rule?.type === 'PORT' ? 'DST-PORT' : rule?.type) as ClientRuleType,
-          payload: rule?.type === 'PORT' ? String(rule?.payload || '').replace(/\s*,\s*/g, '/') : String(rule?.payload || ''),
-          target: String(rule?.target || 'DIRECT'),
-          noResolve: !!rule?.noResolve,
-          enabled: rule?.enabled !== false,
-          priority: Number(rule?.priority) || (index + 1) * 5,
-          description: rule?.description ? String(rule.description) : ''
-        }))
-      };
-    } catch {
-      return null;
-    }
-  },
-  forgetLegacyDraft() {
-    localStorage.removeItem(LEGACY_POLICY_KEY);
-    localStorage.removeItem(LEGACY_CLASH_KEY);
-  }
-};
-
-// 客户端动作语义说明
-export const clientActionLabels: Record<string, { label: string; desc: string; tone: string }> = {
-  DIRECT: {
-    label: '用户设备直连 (DIRECT)',
-    desc: '用户客户端直接发起连接，不经任何代理服务器，免流量且低延迟。',
-    tone: 'text-emerald-700 bg-emerald-50 border-emerald-200'
-  },
-  REJECT: {
-    label: '客户端阻断 (REJECT)',
-    desc: '客户端本地直接丢弃连接请求，阻断广告追踪或恶意请求。',
-    tone: 'text-red-700 bg-red-50 border-red-200'
-  },
-  PROXY: {
-    label: '策略组 · PROXY',
-    desc: '交由用户在客户端自行选择的服务器节点出站。',
-    tone: 'text-blue-700 bg-blue-50 border-blue-200'
-  },
-  AUTO: {
-    label: '策略组 · 自动测速 (AUTO)',
-    desc: '客户端自动测速 URL-Test，优选延迟最低的节点转发。',
-    tone: 'text-purple-700 bg-purple-50 border-purple-200'
-  },
-  FALLBACK: {
-    label: '策略组 · 故障转移 (FALLBACK)',
-    desc: '主节点不可用时自动按顺序切换至备用可用节点。',
-    tone: 'text-amber-700 bg-amber-50 border-amber-200'
-  }
+  presets: () => request<{ items: RulePreset[]; recommendedDns?: RuleTemplateDNS }>('/subscription-rules/presets')
 };
 

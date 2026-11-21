@@ -28,7 +28,7 @@
         <div class="absolute left-0 right-0 top-full z-20 hidden pt-2 group-hover:block group-focus-within:block">
       <div id="server-value-details" role="tooltip" class="space-y-1 rounded-xl border border-black/[0.08] bg-white p-3 shadow-lg">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="text-xs text-ios-tertiary">今日汇率（1 {{ currency }} 可兑换）</span>
+          <span class="text-xs text-ios-tertiary">最新汇率（1 {{ currency }} 可兑换）</span>
         </div>
         <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
           <div v-for="item in CURRENCY_LIST" :key="item.code" class="flex flex-wrap justify-between gap-x-1">
@@ -64,10 +64,11 @@ import { computed, ref, watch } from 'vue';
 import { dashboardAPI, type ExchangeRates } from '../api';
 import type { NodeView } from '../../nodes/api';
 import {
-  CURRENCY_LIST, CURRENCY_SYMBOLS, loadNodeMetadata, parseRenewPrice,
+  CURRENCY_LIST, CURRENCY_SYMBOLS, loadNodeMetadata, nodeFinanceRevisions, parseRenewPrice,
   calculateMonthlyExpenditure, calculateResidualValue, calculateRemainingDays, type NodeMeta
 } from '../../nodes/nodeMeta';
 import { authState } from '../../../app/auth';
+import { APIError } from '../../../app/apiClient';
 import AppSelect from '../../../components/AppSelect.vue';
 
 const props = defineProps<{ nodes: NodeView[]; nodesError: string }>();
@@ -131,18 +132,19 @@ const metrics = computed<Metric[]>(() => [
 // The dashboard refreshes the server list every 30 seconds. Financial data is
 // read once per day in the panel timezone instead: rates and each server's
 // pricing stay in this module's cache (which survives in-app navigation) until
-// the date changes; a server added since the last read is fetched at once.
+// the date or a saved pricing revision changes; new servers are fetched at once.
 // A failed read is not cached, so the next refresh retries it.
 function financeDay(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: authState.timezone || undefined, dateStyle: 'short' }).format(new Date());
 }
 
-watch(() => props.nodes, async (nodes, _previous, onCleanup) => {
+watch([() => props.nodes, () => props.nodes.map(node => nodeFinanceRevisions[node.id] ?? 0)] as const, async ([nodes], _previous, onCleanup) => {
   let current = true;
   onCleanup(() => { current = false; });
   const day = financeDay();
   const ids = nodes.filter(node => !node.deletedAt).map(node => node.id);
-  const staleIds = ids.filter(id => financeCache.metas.get(id)?.day !== day);
+  const revisions = new Map(ids.map(id => [id, nodeFinanceRevisions[id] ?? 0]));
+  const staleIds = ids.filter(id => financeCache.metas.get(id)?.day !== day || financeCache.metas.get(id)?.revision !== revisions.get(id));
   const ratesStale = financeCache.rates?.day !== day;
   if (!ratesStale && !staleIds.length) {
     metadata.value = ids.map(id => financeCache.metas.get(id)!.meta);
@@ -158,7 +160,7 @@ watch(() => props.nodes, async (nodes, _previous, onCleanup) => {
     // A server deleted after the list was read (for example a cancelled pending
     // enrollment) answers 404; it is left out instead of failing the whole card.
     const [fetched, fetchedRates] = await Promise.all([
-      staleIds.length ? loadNodeMetadata(false) : Promise.resolve({} as Record<string, NodeMeta>),
+      staleIds.length ? loadNodeMetadata() : Promise.resolve({} as Record<string, NodeMeta>),
       ratesStale ? dashboardAPI.exchangeRates() : Promise.resolve(financeCache.rates!.value)
     ]);
     const fresh = new Map<string, NodeMeta>();
@@ -177,16 +179,17 @@ watch(() => props.nodes, async (nodes, _previous, onCleanup) => {
       }
     }
     // Cache only a complete, usable read so a failure is retried on the next refresh.
-    fresh.forEach((meta, id) => financeCache.metas.set(id, { day, meta }));
-    financeCache.rates = { day, value: rates };
     if (!current) return;
+    fresh.forEach((meta, id) => financeCache.metas.set(id, { day, revision: revisions.get(id)!, meta }));
+    financeCache.rates = { day, value: rates };
     metadata.value = metas;
     exchangeRates.value = rates;
     error.value = '';
   } catch (e) {
     if (!current) return;
     exchangeRates.value = null;
-    error.value = (e as Error).message;
+    error.value = e instanceof APIError && e.code === 'exchange_rates_unavailable'
+      ? `读取汇率失败（HTTP ${e.status}）：${e.message}` : (e as Error).message;
   } finally {
     if (current) loading.value = false;
   }
@@ -201,6 +204,6 @@ import type { NodeMeta as CachedMeta } from '../../nodes/nodeMeta';
 // does not read the financial data again on the same day.
 const financeCache: {
   rates: { day: string; value: CachedRates } | null;
-  metas: Map<string, { day: string; meta: CachedMeta }>;
+  metas: Map<string, { day: string; revision: number; meta: CachedMeta }>;
 } = { rates: null, metas: new Map() };
 </script>

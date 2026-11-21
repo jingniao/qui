@@ -98,7 +98,7 @@ async function openEditDrawer(node: NodeView) {
   try {
     const [latest, meta, machineSettings] = await Promise.all([
       nodeAPI.get(node.id),
-      loadNodeMeta(node.id, true),
+      loadNodeMeta(node.id),
       nodeAPI.machineTrafficSettings(node.id).catch((e: Error) => {
         throw new Error(`读取整机流量设置失败：${e.message}`);
       })
@@ -160,7 +160,7 @@ async function saveEdit() {
       || traffic.resetDay !== machineBaseline.resetDay;
     const [latest, meta, latestTraffic] = await Promise.all([
       nodeAPI.get(targetID),
-      loadNodeMeta(targetID, true),
+      loadNodeMeta(targetID),
       trafficChanged ? nodeAPI.machineTrafficSettings(targetID).catch((e: Error) => {
         throw new Error(`读取整机流量设置失败：${e.message}`);
       }) : Promise.resolve(null)

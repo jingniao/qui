@@ -189,12 +189,11 @@ func TestGroupEntriesRepositoryAndDerivedServers(t *testing.T) {
 	}
 	input.ServerIDs = []string{}
 	input.InboundIDs = []string{}
-	input.NodeIDs = []string{id} // Explicit entries override legacy servers.
 	g, err = r.SaveGroup(ctx, g.ID, input)
 	if err != nil || len(g.NodeIDs) != 0 {
 		t.Fatal(g, err)
 	}
-	input.InboundIDs = nil
+	input.InboundIDs = []string{"b"}
 	g, err = r.SaveGroup(ctx, g.ID, input)
 	if err != nil || len(g.InboundIDs) != 1 {
 		t.Fatal(g, err)
@@ -231,14 +230,14 @@ func TestExplicitServersUnionLegacyAndDeletion(t *testing.T) {
 	if err != nil || len(g.ServerIDs) != 1 {
 		t.Fatal("omitted explicit servers lost", g, err)
 	}
-	input.NodeIDs = []string{} // Exact payload shape of bulk leave.
+	input.ServerIDs = []string{} // Explicitly leave the server membership.
 	g, err = r.SaveGroup(ctx, g.ID, input)
 	if err != nil || len(g.NodeIDs) != 0 {
 		t.Fatal("bulk leave retained explicit server", g, err)
 	}
 	for _, purpose := range []string{"relay", "egress"} {
 		input.Purpose = purpose
-		input.NodeIDs = []string{n.ID}
+		input.ServerIDs = []string{n.ID}
 		g, err = r.SaveGroup(ctx, g.ID, input)
 		if err != nil || len(g.ServerIDs) != 1 || len(g.InboundIDs) != 0 || g.SubscriptionVisible {
 			t.Fatal(g, err)

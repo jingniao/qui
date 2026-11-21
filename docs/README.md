@@ -1,76 +1,28 @@
 # 文档导航
 
+当前正式版为 **v1.7.5／迁移头 0158**，工作区精简尚未发布，后续兼容底线为 v1.7.5。生产状态以[项目说明书的最近核实记录](project-spec.md#当前状态)为准，操作前须重新实机核实。
+
+## 现行规则与操作
+
 | 目的 | 文档 |
 | --- | --- |
-| 产品需求、架构原则、字段口径与当前状态 | [项目说明书](../AGENTS.md) |
-| 项目首页 | [项目首页](../README.md) |
-| v1.7.5 已发布、未部署；离线时限、完整 Agent 升级与订阅整条线路过滤；迁移 0157–0158 | [发布说明](release-notes-1.7.5.md)、[实施与验证记录](v1.7.5-verification.md) |
-| v1.7.4 已发布、未部署；读取与刷新优化、调优权限探测和 Ubuntu 当前内核模块补装；迁移 0156 | [发布说明](release-notes-1.7.4.md)、[验证记录](remaining-performance-and-tuning-verification.md) |
-| v1.7.3 已发布并部署面板与三台指定 Agent；页面/弹窗提速、CPU 降低但仍有热点；无迁移 | [发布说明](release-notes-1.7.3.md)、[生产部署与性能复测](v1.7.3-production-acceptance.md) |
-| 系统组成、模块边界和数据流 | [架构总览](architecture.md) |
-| 前端设计系统、视觉交互与按钮规范 | [设计系统规范](design-system.md) |
-| 并发设备限制的判定方式与执行范围 | [设备限制](device-limit.md) |
-| 协议与能力支持范围 | [协议支持矩阵](protocol-support-matrix.md) |
-| 安装面板、接入节点、升级 | [部署与升级](deployment.md) |
-| 从零开始：一键安装面板、加节点、日常操作与常见问题 | [项目安装与使用指南](install-guide.md) |
-| 备份恢复、证书、额度、故障处理 | [运维手册](operations.md) |
-| 提交、门禁、发布与升级生产的步骤（交接用） | [发布流程手册](release-runbook.md) |
-| 完成标准、证据要求与实机验收结果 | [验收矩阵](v1-acceptance.md) |
-| 剩余页面加载、面板高 CPU、Agent 覆盖安装与日志上限（已随 v1.7.3 发布，生产覆盖流程未测试） | [实施与验证记录](remaining-loading-and-reinstall-verification.md) |
-| 提前准备展示数据：运行状态推送、精确小时索引、共享统计、总览分区加载（v1.7.2 已发布，面板及三台指定 Agent 已部署；迁移 0155） | [实施与验证记录](superpowers/plans/2026-11-19-prepared-display-data.md)、[发布说明](release-notes-1.7.2.md)、[生产逐页复测](v1.7.2-production-acceptance.md) |
-| 流量存储整理：核心明细 7 天／UTC 小时历史、新回执双方确认后至少 24 小时淘汰（v1.7.0 发布，生产当前使用 v1.7.1） | [设计](superpowers/specs/2026-11-18-traffic-storage-retirement-design.md)、[实施记录](superpowers/plans/2026-11-18-traffic-storage-retirement.md) |
-| v1.7.1 总览慢查询、卡片加载、后台恢复状态、整机流量与终端升级修复（已发布并部署） | [发布说明](release-notes-1.7.1.md)、[逐页性能验收](v1.7.0-performance-acceptance.md) |
-| v1.7.0 四批页面优化、流量存储与受管终端升级（已发布，迁移 0154） | [发布说明](release-notes-1.7.0.md) |
-| v1.6.1 以 v1.6.0 为最低版本精简代码：迁移合并为基线、删除一次性转换与旧归档兼容、删除策略模拟、总览服务器价值与界面调整（已发布 2026-11-18，tag → 306d393，迁移头 0153；生产未升级） | [规划](v1.6.1-plan.md)、[发布说明](release-notes-1.6.1.md)、[前端修改记录](v1.6.1-ui-changes.md) |
-| v1.6.0 服务器方案以导入节点为出口、出站客户端字段、导入节点的快速中转、系统 Reality 预设（已发布 2026-11-16，tag → 4f09e0a，迁移 0152；生产未升级） | [规划](v1.6.0-plan.md)、[发布说明](release-notes-1.6.0.md) |
-| v1.5.9 隧道规则单独授权、新入口安全方式、快速流程纯转发、Clash xhttp ALPN（已发布 2026-11-16，tag → d40ce7b，迁移 0151；生产未升级） | [规划](v1.5.9-plan.md)、[发布说明](release-notes-1.5.9.md) |
-| v1.5.8 中转撤除、连带删除与待清理（已发布 2026-11-15，tag → a1b100b，迁移 0150） | [确认规划](v1.5.8-plan.md)、[发布说明](release-notes-1.5.8.md) |
-| v1.5.7 删除测试修复与节点列表调整（已发布 2026-11-15，tag → bd4fe2f；德国面板及 Agent 已网页升级，CC 修订冲突阻塞，其余暂缓） | [发布说明](release-notes-1.5.7.md)、[验证记录](v1.5.7-acceptance.md)、[生产删除测试记录](v1.5.5-production-relay-cleanup-test.md) |
-| v1.5.6 审计修复（已发布 2026-11-15，tag → b624458） | [确认规划](v1.5.6-audit-fix-plan.md)、[测试记录](v1.5.6-acceptance.md)、[发布说明](release-notes-1.5.6.md) |
-| v1.5.5 发布前验收：实机证据、收尾修复、原始失败与覆盖限制 | [发布前验收](v1.5.5-acceptance.md) |
-| v1.5.5 生产中转／隧道网页删除测试（2026-11-15）：全部删除失败与阻塞链（shlii 校验失败原因待查 → 依赖检查挡住删除；空 Shadowsocks 方法合法）、缺陷与修复方案 | [删除测试记录](v1.5.5-production-relay-cleanup-test.md) |
-| 1.2.0 发布说明 | [发布说明 1.2.0](release-notes-1.2.0.md) |
-| 1.3.0 发布说明 | [发布说明 1.3.0](release-notes-1.3.0.md) |
-| 1.3.1 发布说明（缺陷修复，2026-11-03） | [发布说明 1.3.1](release-notes-1.3.1.md) |
-| 1.4.0 发布说明（2026-11-07） | [发布说明 1.4.0](release-notes-1.4.0.md) |
-| 1.4.1 发布说明（补丁版，2026-11-08） | [发布说明 1.4.1](release-notes-1.4.1.md) |
-| 1.4.2 发布说明（补丁版，2026-11-08） | [发布说明 1.4.2](release-notes-1.4.2.md) |
-| 1.4.3 发布说明（补丁版，2026-11-08） | [发布说明 1.4.3](release-notes-1.4.3.md) |
-| 1.4.4 发布说明（补丁版，2026-11-08） | [发布说明 1.4.4](release-notes-1.4.4.md) |
-| 1.4.6 发布说明（补丁版，2026-11-09） | [发布说明 1.4.6](release-notes-1.4.6.md) |
-| 1.4.7 发布说明（迁移 0135–0137，2026-11-09，生产未升级） | [发布说明 1.4.7](release-notes-1.4.7.md) |
-| 1.5.0 发布说明（迁移 0138–0141，2026-11-11，生产未升级；Agent 从 ≤1.4.7 升级需运行两次 qui-update） | [发布说明 1.5.0](release-notes-1.5.0.md) |
-| 1.5.1 发布说明（补丁版，无迁移，2026-11-11，生产未升级） | [发布说明 1.5.1](release-notes-1.5.1.md) |
-| 1.5.2 发布说明（迁移 0142，2026-11-12，生产未升级；含实机验证与浏览器走查） | [发布说明 1.5.2](release-notes-1.5.2.md) |
-| 1.5.3 发布说明（补丁版，无迁移，2026-11-12，生产已升级；修复大策略发布死锁） | [发布说明 1.5.3](release-notes-1.5.3.md) |
-| 1.5.5 发布说明（迁移 0144–0148，2026-11-14，本次未升级生产） | [发布说明 1.5.5](release-notes-1.5.5.md) |
-| 1.5.4 发布说明（迁移 0143，2026-11-13，生产未升级；按心跳确认修订、节点原生规则集、根地址用户登录与管理员地址自定义、门户改版、按客户端选择订阅格式） | [发布说明 1.5.4](release-notes-1.5.4.md) |
-| v1.5.1 受管 Agent 实机验收（`--web-upgrade` 安装、受管节点发布显式核心入站） | [受管 Agent 实机验收](v1.5.1-managed-agent-verification.md) |
-| v1.5.0 验收：Alpine/OpenRC、systemd 调优、通知、Agent 网页升级、浏览器走查 | [Alpine/OpenRC](v1.5.0-alpine-openrc-verification.md)、[systemd 调优](v1.5.0-systemd-tuning-verification.md)、[通知](v1.5.0-notification-verification.md)、[Agent 网页升级](v1.5.0-agent-web-upgrade-verification.md)、[浏览器走查](v1.5.0-browser-walkthrough.md) |
-| v1.5.0 审计与 Agent 网页升级启用修复方案 | [审计](v1.5.0-audit-2026-11-10.md)、[全面审计](v1.5.0-comprehensive-audit-2026-11-10.md)、[启用修复方案](v1.5.0-agent-supervision-plan.md) |
-| v1.4 当前工作计划、决策与 API 合同 | [v1.4 计划](v1.4-plan.md) |
-| v1.4 订阅导入与 Reality/xhttp 开发验证、未验收边界 | [协议兼容验证记录](v1.4-protocol-verification.md) |
-| v1.4 离线 RC 生产部署、Agent 重连及回滚验收（部分完成） | [A1 主机记录](v1.4-a1-host-report.md) |
-| v1.4 rc.2 面板收尾、恢复点与生产浏览器实际耗时 | [rc.2 收尾报告](v1.4-rc2-closeout.md)、[慢加载复测](page-loading-verification.md) |
-| Alpine NAT 映射和 UK→Alpine 生产加密隧道实流 | [端口检查](alpine-network-verification.md)、[隧道验证](uk-alpine-tunnel-verification.md) |
-| UK→Alpine→US 三节点 GOST 实流、失败回滚及中间 Agent 重启恢复 | [三节点主机验收](three-hop-host-verification.md) |
-| 自建 VLESS / Reality 客户端认证、密钥轮换及历史回滚 | [客户端验收报告](vless-reality-client-verification.md) |
-| 画布 P2/P3、关联规则 P4 的生产客户端实流与错误认证 | [画布及 P4 客户端报告](canvas-p2-p3-p4-client-verification.md) |
-| v1.4 rc.3 面板收尾、导入消费、恢复／降级、浏览器、race 与长测结果 | [最终补充验收](final-v1.4-acceptance.md) |
-| v1.4 GOST 中间跳契约与运行待测项 | [X0 记录](v1.4-x0-findings.md) |
-| v1.4 隧道后端、发布、节点集成与订阅 | [X1a/X1b/N1 报告](v1.4-x1a-report.md) |
-| v1.4 代理中转画布收敛 | [C1 报告](v1.4-c1-report.md) |
-| v1.4 一次性迁移、备份与恢复 | [M1 报告](v1.4-m1-report.md) |
-| 历次修订的完整条目 | [变更记录](changelog.md) |
-| 构建与门禁提速规划（**第 1、2 步已实施，2026-11-12 并入 main**）：测试数据库模板、本地门禁两段并行、GitHub check 分片、慢包测试并行 | [提速规划](build-speedup-plan.md) |
-| 构建与测试提速方案 A（**已被上一行取代**） | [提速方案 A](build-acceleration-plan.md) |
-| v1.4.7 规划（**已发布，待生产升级与实机验收**）：节点组自动下发凭据、节点连接地址、证书来源与自动申请 | [v1.4.7 规划](v1.4.7-plan.md) |
-| v1.5.0 规划（**已发布（见发布说明），生产尚未升级**）：Agent 网页一键升级、多公网地址、通知系统、发布状态、去掉用户协议控制、按域名找证书、Hysteria2 端口跳跃、用途组 @all、规则集外部来源、服务器调优完善 | [v1.5.0 规划](v1.5.0-plan.md) |
-| v1.5.1 规划（**已随 v1.5.1 发布，生产尚未升级**）：规则集页面补关键字与外部来源、修复在该页面保存会清掉关键字；修复受管 Agent 无法发布显式核心入站（`apply_failed`）；安装命令对话框去掉面板地址与端口输入、可勾选启用网页升级并修复新装未真正启用；Windows 上国旗显示；用户详情只列可用订阅节点；监控 CPU／网速大多为空的修复与图表改版；节点列表按入站显示是否生效 | [v1.5.1 规划](v1.5.1-plan.md) |
-| v1.5.2 规划（**已随 v1.5.2 发布，死锁修复见 v1.5.3，生产尚未升级**）：监控页面反复读取历史指标并短暂清空图表、「版本与更新」页国旗、延迟图改为与机器监控一致的 Chart.js 样式、sing-box TCP 入站的 WARN 刷屏、去掉 Xray 不可用的 Reality 预设、HTTP／SOCKS5／Shadowsocks 只允许 TCP 传输 | [v1.5.2 规划](v1.5.2-plan.md) |
-| v1.5.4 规划（**已随 v1.5.4 发布，生产尚未升级；12 项**）：部署结果丢失时按心跳确认修订、访问记录批次被拒时隔离、面板记录批次被拒原因、Agent 发送顺序时序测试、节点侧完整国内名单（核心原生规则集文件，迁移 0143）、规则集匹配规模、保存时检查全部节点、延迟图大屏走查、流程文档 | [v1.5.4 规划](v1.5.4-plan.md) |
-| v1.5.5 规划（**规划中**）：导入的 Clash（mihomo）配置解析不出境外域名（「屏蔽回国」预设的 DNS fallback 无 fallback-filter）、服务器列表页放一会儿就全部显示离线、服务器卡片可拖动排序、服务器列表按标签分组（迁移 0144）、编辑弹窗出现慢、导入的 Reality 节点进不了 Clash 订阅且警告不具体、外部导入对常见分享链接过严、Clash 输出自签名证书与中转跳跃端口、系统总览节点流量与核心运行、客户端策略「调整顺序」弹窗、未发布配置的节点也能直接网页升级、隧道自动补装 GOST 与移除提示、安装弹窗与内核管理选不到 GOST、出站可单独指定源 IP、`qui` 菜单卸载并清除全部数据 | [v1.5.5 规划](v1.5.5-plan.md) |
+| 项目介绍／协作要求 | [项目首页](../README.md)、[AGENTS.md](../AGENTS.md) |
+| 产品规则、字段、权限和数据恢复合同 | [项目说明书](project-spec.md) |
+| 模块、数据流和生命周期 | [架构总览](architecture.md) |
+| 从零安装、节点接入和日常使用 | [安装指南](install-guide.md) |
+| 构建、安装、更新、目录与权限 | [部署与升级](deployment.md) |
+| 日常运维、备份恢复、排错与生产未结记录 | [运维手册](operations.md)、[历史未结记录](operations.md#历史未结记录与恢复材料保护2026-11-20-文档核对) |
+| 协议矩阵、设备执行范围、UI 设计规范 | [协议矩阵](protocol-support-matrix.md)、[设备限制](device-limit.md)、[设计系统](design-system.md) |
+| 检查、门禁与发布流程 | [发布手册](release-runbook.md) |
+| 当前未发布代码精简交接（发版后移除） | [精简实施记录](code-simplification.md) |
 
-历史计划、阶段报告、走查记录与进度日志在 [docs/archive](archive/README.md)，只作追溯。上表 v1.4 计划/报告为当前工作文档，v1.4.0 于 2026-11-07 发布并升级到生产、v1.4.1 于 2026-11-08 发布并升级，v1.4.2 于 2026-11-08 发布并升级到生产，v1.4.3 于 2026-11-08 发布并升级到生产，v1.4.4 于 2026-11-08 发布并升级到生产，v1.4.5（只升面板）与 v1.4.6 于 2026-11-09 发布并升级到生产，v1.4.7 于 2026-11-09 发布、生产尚未升级，v1.5.0 与 v1.5.1 于 2026-11-11 发布、生产尚未升级，A1 验收待补；计划中的阶段状态不代替报告及源码。最新正式版为 v1.7.3，本次未部署；生产面板及三台指定 Agent 保持 v1.7.2，跳过节点保持原版；发布与当前生产状态见对应发布说明。当前事实与已知限制见[项目说明书](../AGENTS.md) 的“当前状态”。
+## 发布、决策与归档
 
-维护规则：现状写结论，计划写任务，验收写证据。日常只看上面表格中的几份文档。文档内容以当前源码为准；文档与源码冲突时以源码为准，并在同一次改动中修正文档。
+| 目的 | 文档 |
+| --- | --- |
+| 当前兼容基线 v1.7.5 | [发布说明](release-notes-1.7.5.md)、[验证记录](v1.7.5-verification.md) |
+| 历次版本变更摘要 | [变更记录](changelog.md)（完整旧发布说明与验收日志留存于 Git 历史及 GitHub Releases） |
+| 核心设计不变式、防踩坑备忘与未验证边界 | [实施决定](implementation-decisions.md) |
+| 保留的两份原始底层探测（v1.1 Phase 0／GOST 3.3.2） | [归档索引](archive/README.md) |
+| 测试夹具生成与维护说明 | [身份 Write=2](../internal/agent/identity/testdata/generate_store/README.md)、[旧备份负向夹具](../internal/platform/server/testdata/generate_prerefactor/README.md) |
+| 第三方资源许可 | [DB-IP](../internal/panel/geoip/LICENSE-DB-IP.md)、[Twemoji 字体](../web/src/styles/fonts/LICENSE-TwemojiCountryFlags.md) |

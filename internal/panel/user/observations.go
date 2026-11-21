@@ -3,28 +3,19 @@ package user
 import (
 	"context"
 	"errors"
-	"sort"
-	"sync"
 
 	"proxycontrol/internal/panel/connections"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/pkg/contracts/traffic"
 )
 
-// ConnectionObserver turns the panel's in-memory live connection snapshots into
-// two derived facts: the observed connection count shown for a user, and the
-// "user is over their soft connection limit" alert. The limit is soft: it only
-// warns, it never disconnects anyone.
+// ConnectionObserver reads live per-user connection counts.
 type ConnectionObserver struct {
 	Repository *Repository
 	Nodes      interface {
 		Group(context.Context, string) (node.Group, error)
 	}
-	Store   *connections.Store
-	Publish func(string, any)
-
-	mu   sync.Mutex
-	over map[string]bool
+	Store *connections.Store
 }
 
 // ForUser returns the live connection count for a user, or nil when it is
@@ -102,99 +93,6 @@ func (o *ConnectionObserver) forUser(ctx context.Context, account User, cache ma
 	}
 	count := int(connections.Sum(snapshots, owned))
 	return &count, nil
-}
-
-// Evaluate re-checks the users affected by a node's fresh snapshot and raises
-// one system.alert per upward crossing of the limit. It is the Control
-// notification hook, so it must never block or fail the agent stream: every
-// error is swallowed.
-func (o *ConnectionObserver) Evaluate(ctx context.Context, nodeID string) {
-	if o == nil || o.Store == nil {
-		return
-	}
-	snapshot, ok := o.Store.Snapshot(nodeID)
-	if !ok {
-		return
-	}
-	credentialIDs := make([]string, 0, len(snapshot.Accounts))
-	for _, account := range snapshot.Accounts {
-		credentialIDs = append(credentialIDs, account.CredentialID)
-	}
-	owners, err := o.Repository.CredentialOwners(ctx, credentialIDs)
-	if err != nil {
-		return
-	}
-	candidates := map[string]bool{}
-	for _, userID := range owners {
-		candidates[userID] = true
-	}
-	// Users already over the limit stay candidates even when this snapshot no
-	// longer names their credentials, so their state can return to normal.
-	o.mu.Lock()
-	for userID, over := range o.over {
-		if over {
-			candidates[userID] = true
-		}
-	}
-	o.mu.Unlock()
-	ordered := make([]string, 0, len(candidates))
-	for userID := range candidates {
-		ordered = append(ordered, userID)
-	}
-	sort.Strings(ordered)
-	for _, userID := range ordered {
-		account, err := o.Repository.Get(ctx, userID)
-		if errors.Is(err, ErrNotFound) {
-			o.retire(userID)
-			continue
-		}
-		if err != nil {
-			continue
-		}
-		count, err := o.ForUser(ctx, account)
-		if err != nil || count == nil {
-			continue
-		}
-		// v1.1 retired the per-user connection soft limit (plan C10); the column
-		// stays for older backups, but no user is ever over it any more. The
-		// online count is still reported.
-		over := false
-		if o.crossedIntoOver(userID, over) {
-			o.alert(account, *count)
-		}
-	}
-}
-
-// crossedIntoOver records the new state and reports whether it is a fresh
-// upward crossing.
-func (o *ConnectionObserver) crossedIntoOver(userID string, over bool) bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.over == nil {
-		o.over = map[string]bool{}
-	}
-	previous := o.over[userID]
-	o.over[userID] = over
-	return over && !previous
-}
-
-func (o *ConnectionObserver) retire(userID string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	delete(o.over, userID)
-}
-
-func (o *ConnectionObserver) alert(account User, count int) {
-	if o.Publish == nil {
-		return
-	}
-	o.Publish("system.alert", map[string]any{
-		"alert":             "connection_limit",
-		"userId":            account.ID,
-		"username":          account.Username,
-		"onlineConnections": count,
-		"maxConnections":    account.MaxConnections,
-	})
 }
 
 // ActiveCredentialIDs returns the user's live credential IDs.

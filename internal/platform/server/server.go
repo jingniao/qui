@@ -207,13 +207,13 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}
 	control.DashboardNotify = func() { eventBus.Publish("dashboard_status", map[string]bool{"changed": true}) }
 	s.connectionStore = connections.NewStore(3 * node.HeartbeatInterval)
-	s.connectionObserver = &user.ConnectionObserver{Repository: users, Nodes: nodeRepository, Store: s.connectionStore, Publish: eventBus.Publish}
+	s.connectionObserver = &user.ConnectionObserver{Repository: users, Nodes: nodeRepository, Store: s.connectionStore}
 	control.Connections = s.connectionStore
 	devices := &user.DeviceObserver{Repository: users, Nodes: nodeRepository, States: deployments, Store: s.connectionStore, Admission: &connections.Admission{}, Publish: eventBus.Publish}
 	s.deviceObserver = devices
 	control.DeviceGates = devices.Command
 	control.GateChanges = devices.Subscribe
-	control.ConnectionsRecorded = func(ctx context.Context, id string) { s.connectionObserver.Evaluate(ctx, id); devices.Record(ctx, id) }
+	control.ConnectionsRecorded = devices.Record
 	s.trafficService = &access.Service{Repository: s.accessRepository, Snapshots: deployments, Users: users}
 	control.AccessRecorder = s.trafficService
 	options := []grpc.ServerOption{grpc.MaxRecvMsgSize(4 << 20), grpc.MaxSendMsgSize(4 << 20), grpc.MaxConcurrentStreams(32), grpc.UnaryInterceptor(node.UnaryAuthentication), grpc.StreamInterceptor(node.StreamAuthentication), grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second}), grpc.KeepaliveParams(keepalive.ServerParameters{Time: 30 * time.Second, Timeout: 10 * time.Second})}
@@ -269,9 +269,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	if _, err := systemRepository.ReadRuntimeSettings(context.Background()); err != nil {
 		return nil, err
 	}
-	var releaseKeys map[string]release.TrustedKey
-	releaseKeys, err = release.PinnedKeys(release.EffectiveKeyPins(c.ReleaseKeys))
-	if err != nil {
+	if _, err = release.PinnedKeys(release.EffectiveKeyPins(c.ReleaseKeys)); err != nil {
 		return nil, err
 	}
 	nodeRepository.CertificateAudit = systemRepository
@@ -296,7 +294,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	authHandler.Register(mux)
 	(&system.ReleaseHandler{Repository: systemRepository, Auth: authHandler}).Register(mux)
 	(&deployment.CoreUpdateHandler{Repository: deployments, Audit: systemRepository, Auth: authHandler}).Register(mux)
-	(&deployment.AgentUpdateHandler{Repository: deployments, Catalogue: systemRepository, Auth: authHandler, Keys: releaseKeys}).Register(mux)
+	(&deployment.AgentUpdateHandler{Repository: deployments, Catalogue: systemRepository, Auth: authHandler}).Register(mux)
 	agentCatalogueDir := filepath.Join(filepath.Dir(c.Database), "releases", "agent-catalogue")
 	agentReleases := &deployment.AgentReleases{
 		Directory: agentCatalogueDir,
@@ -580,16 +578,6 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		}
 	}
 	return s, nil
-}
-
-// SetupToken returns the one-time first-run setup token, or "" once an Owner
-// exists or setup has completed. It exists so tests and deployment tooling can
-// present the token without weakening the HTTP path.
-func (s *Server) SetupToken() string {
-	if s.authService == nil {
-		return ""
-	}
-	return s.authService.CurrentSetupToken()
 }
 
 // prepareSetupToken generates and publishes the one-time first-run token when

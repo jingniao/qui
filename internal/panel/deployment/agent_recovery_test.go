@@ -39,9 +39,17 @@ func TestUnconfirmedAgentRecoveryKeepsLateOriginalResultSeparate(t *testing.T) {
 	if err := r.AgentUpdateResult(ctx, nodeID, &pb.AgentUpdateResult{ResultJson: data}); err != nil {
 		t.Fatal(err)
 	}
-	items, _, err := r.ListAgentUpdates(ctx, 1, 20)
-	if err != nil || len(items) != 1 || items[0].Status != "queued" || items[0].CommandID != next.CommandID || items[0].Result != nil {
+	items, _, err := r.ListAllAgentUpdates(ctx, 1, 20)
+	if err != nil || len(items) != 1 {
 		t.Fatal("late result ended recovery", items, err)
+	}
+	listedData, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed AgentUpdateTask
+	if err := json.Unmarshal(listedData, &listed); err != nil || listed.Status != "queued" || listed.CommandID != next.CommandID || listed.Result != nil {
+		t.Fatal("late result ended recovery", listed, err)
 	}
 	result.ID = next.CommandID
 	data, _ = json.Marshal(result)

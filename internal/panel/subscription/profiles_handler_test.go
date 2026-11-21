@@ -38,7 +38,7 @@ func TestProfilesOwnerCSRFAndLegacyCompatibility(t *testing.T) {
 	if r := p.do(t, "GET", "/api/v1/client-policy-profiles?page=0", "", owner, ""); r.Code != 400 {
 		t.Fatal(r.Code)
 	}
-	if r := p.do(t, "PUT", "/api/v1/subscription-rules", saveBody(t, rules.Presets()[1].Template, 0), owner, csrf); r.Code != 200 {
+	if r := p.do(t, "PUT", "/api/v1/client-policy-profiles/"+list.ActiveProfileID, saveBody(t, rules.Presets()[1].Template, 0), owner, csrf); r.Code != 200 {
 		t.Fatal(r.Code, r.Body.String())
 	}
 	var state rules.ProfileResult

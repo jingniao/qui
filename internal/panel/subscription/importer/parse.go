@@ -99,17 +99,6 @@ func analyzers() []analyzer {
 	return out
 }
 
-// Parse reports a generic diagnostic without echoing untrusted input, which may
-// include a password, a token or the source's private subscription URL. It is
-// Analyze without the report, kept for the format.Parser contract.
-func Parse(b []byte) ([]proxy.Proxy, []proxy.Warning, error) {
-	result, entries := Analyze(b)
-	if result.Outcome == "failed" || len(entries) == 0 {
-		return nil, nil, ErrParse
-	}
-	return entries, []proxy.Warning{proxy.SourceWarning("imported", "Only supported valid proxy entries are imported; unsupported fields and entries are omitted.")}, nil
-}
-
 // Analyze reads one fetched or pasted document and returns its accepted endpoints
 // plus a bounded per-entry report. Counts are always determined once the document
 // was read: total = accepted + rejected + duplicates, and an entry with several
@@ -304,13 +293,6 @@ func validation(p proxy.Proxy) (string, string) {
 		return "", fieldNone
 	}
 	return "unsupported_protocol", fieldNone
-}
-
-// Parse keeps the format.Parser contract: the accepted endpoints of a document,
-// or ErrParse when none survive.
-func (URI) Parse(b []byte) ([]proxy.Proxy, error) {
-	_, entries, err := parseWith(b, URI{})
-	return entries, err
 }
 
 func (uri URI) analyze(content []byte, c *collector) {
@@ -566,10 +548,6 @@ func uriProxy(line string) (proxy.Proxy, string, string) {
 	}
 	return p, "", ""
 }
-func (Base64) Parse(b []byte) ([]proxy.Proxy, error) {
-	_, entries, err := parseWith(b, Base64{})
-	return entries, err
-}
 
 // analyze decodes the document and then reads it as a URI list, so the two
 // entry points cannot disagree about a single payload.
@@ -637,11 +615,6 @@ type clashEntry struct {
 	GRPC *struct {
 		Service string `yaml:"grpc-service-name"`
 	} `yaml:"grpc-opts"`
-}
-
-func (Clash) Parse(b []byte) ([]proxy.Proxy, error) {
-	_, entries, err := parseWith(b, Clash{})
-	return entries, err
 }
 
 func (Clash) analyze(content []byte, c *collector) {
@@ -809,4 +782,21 @@ func bandwidth(n yaml.Node) (int, error) {
 		return 0, ErrParse
 	}
 	return v, nil
+}
+
+// Parse keeps the format.Parser contract: the accepted endpoints of a document,
+// or ErrParse when none survive.
+func (URI) Parse(b []byte) ([]proxy.Proxy, error) {
+	_, entries, err := parseWith(b, URI{})
+	return entries, err
+}
+
+func (Base64) Parse(b []byte) ([]proxy.Proxy, error) {
+	_, entries, err := parseWith(b, Base64{})
+	return entries, err
+}
+
+func (Clash) Parse(b []byte) ([]proxy.Proxy, error) {
+	_, entries, err := parseWith(b, Clash{})
+	return entries, err
 }

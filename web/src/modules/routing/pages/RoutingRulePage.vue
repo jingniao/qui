@@ -221,12 +221,10 @@ withDefaults(
   defineProps<{
     title?: string;
     description?: string;
-    website?: boolean;
   }>(),
   {
     title: '节点策略',
-    description: '合并管理服务器端（Xray / Sing-box）的分流规则与访问控制。通过 Agent 发布到服务器，支持指定用户、节点、直连、阻断、出站与代理链。',
-    website: false
+    description: '合并管理服务器端（Xray / Sing-box）的分流规则与访问控制。通过 Agent 发布到服务器，支持指定用户、节点、直连、阻断、出站与代理链。'
   }
 );
 

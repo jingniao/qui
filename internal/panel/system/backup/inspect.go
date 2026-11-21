@@ -541,63 +541,58 @@ func validateContents(ctx context.Context, work string) error {
 		return ErrArchive
 	}
 	var renewalTable int
-	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='node_certificate_renewals'").Scan(&renewalTable); err != nil {
+	if err := database.QueryRowContext(ctx, "SELECT count(*) FROM node_certificate_renewals p LEFT JOIN node_identities i ON i.node_id=p.node_id WHERE i.node_id IS NULL").Scan(&renewalTable); err != nil || renewalTable != 0 {
 		return ErrArchive
 	}
-	if renewalTable == 1 {
-		if err := database.QueryRowContext(ctx, "SELECT count(*) FROM node_certificate_renewals p LEFT JOIN node_identities i ON i.node_id=p.node_id WHERE i.node_id IS NULL").Scan(&renewalTable); err != nil || renewalTable != 0 {
-			return ErrArchive
-		}
-		rows, err := database.QueryContext(ctx, "SELECT p.node_id,p.previous_fingerprint,CASE WHEN length(p.certificate_pem)<=1048576 THEN p.certificate_pem END,p.fingerprint,i.fingerprint,p.expires_at,i.certificate_pem FROM node_certificate_renewals p JOIN node_identities i ON i.node_id=p.node_id")
-		if err != nil {
-			return ErrArchive
-		}
-		for rows.Next() {
-			var nodeID, previous, encoded, fingerprint, current, expiry, currentPEM string
-			if err := rows.Scan(&nodeID, &previous, &encoded, &fingerprint, &current, &expiry, &currentPEM); err != nil {
-				rows.Close()
-				return ErrArchive
-			}
-			block, rest := pem.Decode([]byte(encoded))
-			if block == nil || len(bytes.TrimSpace(rest)) != 0 || previous != current {
-				rows.Close()
-				return ErrArchive
-			}
-			leaf, err := x509.ParseCertificate(block.Bytes)
-			if err != nil || !authenticatesArchivedCertificate(archivedAuthority, ca, leaf) || leaf.Subject.CommonName != nodeID {
-				rows.Close()
-				return ErrArchive
-			}
-			id, idErr := pki.NodeID(leaf)
-			expires, parseErr := time.Parse(time.RFC3339Nano, expiry)
-			oldBlock, _ := pem.Decode([]byte(currentPEM))
-			if oldBlock == nil {
-				rows.Close()
-				return ErrArchive
-			}
-			old, oldErr := x509.ParseCertificate(oldBlock.Bytes)
-			newPublic, newErr := x509.MarshalPKIXPublicKey(leaf.PublicKey)
-			if oldErr != nil {
-				rows.Close()
-				return ErrArchive
-			}
-			oldPublic, oldErr := x509.MarshalPKIXPublicKey(old.PublicKey)
-			if idErr != nil || id != nodeID || parseErr != nil || !expires.Equal(leaf.NotAfter) || newErr != nil || oldErr != nil || !bytes.Equal(newPublic, oldPublic) {
-				rows.Close()
-				return ErrArchive
-			}
-			digest := sha256.Sum256(block.Bytes)
-			if fingerprint != hex.EncodeToString(digest[:]) {
-				rows.Close()
-				return ErrArchive
-			}
-		}
-		if err := rows.Err(); err != nil {
+	rows, err = database.QueryContext(ctx, "SELECT p.node_id,p.previous_fingerprint,CASE WHEN length(p.certificate_pem)<=1048576 THEN p.certificate_pem END,p.fingerprint,i.fingerprint,p.expires_at,i.certificate_pem FROM node_certificate_renewals p JOIN node_identities i ON i.node_id=p.node_id")
+	if err != nil {
+		return ErrArchive
+	}
+	for rows.Next() {
+		var nodeID, previous, encoded, fingerprint, current, expiry, currentPEM string
+		if err := rows.Scan(&nodeID, &previous, &encoded, &fingerprint, &current, &expiry, &currentPEM); err != nil {
 			rows.Close()
 			return ErrArchive
 		}
-		rows.Close()
+		block, rest := pem.Decode([]byte(encoded))
+		if block == nil || len(bytes.TrimSpace(rest)) != 0 || previous != current {
+			rows.Close()
+			return ErrArchive
+		}
+		leaf, err := x509.ParseCertificate(block.Bytes)
+		if err != nil || !authenticatesArchivedCertificate(archivedAuthority, ca, leaf) || leaf.Subject.CommonName != nodeID {
+			rows.Close()
+			return ErrArchive
+		}
+		id, idErr := pki.NodeID(leaf)
+		expires, parseErr := time.Parse(time.RFC3339Nano, expiry)
+		oldBlock, _ := pem.Decode([]byte(currentPEM))
+		if oldBlock == nil {
+			rows.Close()
+			return ErrArchive
+		}
+		old, oldErr := x509.ParseCertificate(oldBlock.Bytes)
+		newPublic, newErr := x509.MarshalPKIXPublicKey(leaf.PublicKey)
+		if oldErr != nil {
+			rows.Close()
+			return ErrArchive
+		}
+		oldPublic, oldErr := x509.MarshalPKIXPublicKey(old.PublicKey)
+		if idErr != nil || id != nodeID || parseErr != nil || !expires.Equal(leaf.NotAfter) || newErr != nil || oldErr != nil || !bytes.Equal(newPublic, oldPublic) {
+			rows.Close()
+			return ErrArchive
+		}
+		digest := sha256.Sum256(block.Bytes)
+		if fingerprint != hex.EncodeToString(digest[:]) {
+			rows.Close()
+			return ErrArchive
+		}
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return ErrArchive
+	}
+	rows.Close()
 	if err := access.ValidatePendingTraffic(ctx, database, configurationVault); err != nil {
 		return ErrArchive
 	}
@@ -639,7 +634,7 @@ func validateContents(ctx context.Context, work string) error {
 }
 
 func validateMigrations(ctx context.Context, database *sql.DB) error {
-	// Archives from before v1.6.0 fail here with db.ErrPredatesBaseline.
+	// Archives from before v1.7.5 fail here with db.ErrPredatesBaseline.
 	if err := db.ValidateMigrationPrefix(ctx, database, migrations.Files); err != nil {
 		return errors.Join(err, ErrArchive)
 	}

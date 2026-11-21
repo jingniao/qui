@@ -304,7 +304,7 @@ func TestDeletedNodeRefusesEditsAndEnrollment(t *testing.T) {
 	if _, err := r.EnrollmentNode(ctx, Hash("token")); !errors.Is(err, ErrToken) {
 		t.Fatalf("deleted node accepted an enrollment token: %v", err)
 	}
-	if _, err := r.SaveGroup(ctx, "", GroupInput{Name: "Group", Purpose: "subscription", Enabled: true, NodeIDs: []string{n.ID}}); err == nil {
+	if _, err := r.SaveGroup(ctx, "", GroupInput{Name: "Group", Purpose: "subscription", Enabled: true, ServerIDs: []string{n.ID}}); err == nil {
 		t.Fatal("deleted node joined a node group")
 	}
 	var groups int

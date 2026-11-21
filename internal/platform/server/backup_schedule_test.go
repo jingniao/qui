@@ -67,7 +67,7 @@ func TestBackupScheduleOwnerCSRFViewerSecretIsolationAndRuns(t *testing.T) {
 }
 
 func TestRealServerBackupWorkerWakesOnSettingsSaveAndStopsWithServer(t *testing.T) {
-	// Not parallel: its deadlines failed under parallel -race load (docs/build-speedup-plan.md 3).
+	// Not parallel: its deadlines failed under parallel -race load.
 	app := testServer(t)
 	owner := budgetOwner(t, app)
 	httpListener, err := net.Listen("tcp", "127.0.0.1:0")

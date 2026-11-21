@@ -118,12 +118,11 @@ const series = [point(0, { medianMs: 20, sent: 3, failed: 0 }), point(60, { medi
 const entry = [{ target, colorIndex: 0, points: series }];
 const on = { showLatency: true, showLoss: true, showSmooth: false };
 
-// 12H / 24H / 7D: chart.js owns the x ticks; the model never emits a fixed tick list.
-for (const hours of [12, 24, 168]) {
-  const span = hours * 3600000;
+// Chart.js owns the x ticks; the model never emits a fixed tick list.
+{
   const ds = model.buildLatencyDatasets(entry, 60, on);
   assert.ok(ds.every(d => d.data.every(p => Number.isFinite(p.x))));
-  assert.ok(span > 0 && ds[0].data.length >= 2, `${hours}H keeps plotted points`);
+  assert.ok(ds[0].data.length >= 2, 'keeps plotted points');
   assert.equal(model.latencyAxes(on).x, undefined);
 }
 const chartSource = readFileSync(new URL('../src/modules/nodes/components/MetricLineChart.vue', import.meta.url), 'utf8');
@@ -136,7 +135,7 @@ for (const forbidden of ['hourTicks', 'timeTicks', 'viewBox', '<svg']) {
 }
 assert.match(latencySource, /defineAsyncComponent\(\(\) => import\('\.\/MetricLineChart\.vue'\)\)/);
 assert.ok(!/RANGES|selectRange/.test(latencySource), 'no duplicate range buttons');
-console.log('PASS LATENCY chart: 12H/24H/7D use automatic x ticks, no fixed hour-tick config, Chart.js loaded lazily');
+console.log('PASS LATENCY chart: automatic x ticks, no fixed hour-tick config, Chart.js loaded lazily');
 
 // Loss maps to the second axis as percent; gaps and unusable samples break the line.
 const both = model.buildLatencyDatasets(entry, 60, on);

@@ -272,7 +272,7 @@ async function load() {
     } else if (read === inventoryRead) {
       refreshStaticInventory();
     }
-    const [metaResult] = await Promise.allSettled([loadNodeMetadata(isOwner.value, deleted.value)]);
+    const [metaResult] = await Promise.allSettled([loadNodeMetadata(deleted.value)]);
     if (read === inventoryRead && visibleGeneration === visibilityGeneration) {
       inventoryWarnings.value = metaResult.status === 'rejected' ? [`元数据读取失败：${(metaResult.reason as Error).message}`] : [];
       if (metaResult.status === 'fulfilled') confirmInventory(invalidation);
@@ -316,7 +316,7 @@ async function silentRefresh() {
   try {
     const [servers, metadata] = await Promise.allSettled([
       choices((index, size) => nodeAPI.list(index, '', deleted.value, size)),
-      loadNodeMetadata(isOwner.value, deleted.value),
+      loadNodeMetadata(deleted.value),
     ]);
     if (read !== inventoryRead || visibleGeneration !== visibilityGeneration) return;
     const notices: string[] = [];

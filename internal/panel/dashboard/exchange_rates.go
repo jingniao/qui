@@ -68,8 +68,10 @@ func (s *ExchangeRateService) Read(ctx context.Context) (*ExchangeRates, error) 
 	if body.Base != "CNY" || body.Rates["CNY"] != 1 {
 		return nil, fmt.Errorf("汇率服务返回的基准币种无效")
 	}
-	if body.UpdatedAt <= 0 || body.NextUpdate <= body.UpdatedAt || body.NextUpdate <= time.Now().Unix() {
-		return nil, fmt.Errorf("汇率服务返回的更新时间无效或数据已过期")
+	// NextUpdate schedules a fresh read; it is not an expiry for the latest
+	// successful provider response when the provider is late publishing an update.
+	if body.UpdatedAt <= 0 || body.UpdatedAt > time.Now().Unix() || body.NextUpdate <= body.UpdatedAt {
+		return nil, fmt.Errorf("汇率服务返回的更新时间无效（实际更新：%s，下次更新：%s）", time.Unix(body.UpdatedAt, 0).UTC().Format(time.RFC3339), time.Unix(body.NextUpdate, 0).UTC().Format(time.RFC3339))
 	}
 	rates := make(map[string]float64, 8)
 	for _, currency := range []string{"CNY", "USD", "EUR", "HKD", "GBP", "JPY", "TWD", "SGD"} {

@@ -3,11 +3,6 @@ import { hostMetrics, nicRate } from '../metrics';
 import { calculateRemainingDays, formatRenewPrice, getNodeMeta, parseRenewPrice, resolveCountryInfo, type CountryInfo, type NodeMeta } from '../nodeMeta';
 import { coreSummaryLabel, unhealthyCores } from '../coreSummary';
 
-export const statusOptions = [
-  ['all', '全部状态'], ['online', '在线'], ['degraded', '降级'], ['core_error', '核心异常'],
-  ['reconnecting', '等待恢复'], ['offline', '离线'], ['pending', '待登记'], ['applying', '应用配置中'], ['rollback', '回滚中'],
-  ['disabled', '已禁用'], ['error', '异常'], ['maintenance', '维护中'], ['deleted', '已删除']
-];
 export function serverStatus(node: NodeView, now: number) {
   if (node.deletedAt) return { key: 'deleted', tone: 'disabled', label: '已删除' };
   if (!node.enabled || node.status === 'disabled') return { key: 'disabled', tone: 'disabled', label: '已禁用' };

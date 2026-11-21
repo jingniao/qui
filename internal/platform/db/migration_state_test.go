@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -93,10 +94,32 @@ func versions(t *testing.T, database *sql.DB) []string {
 	return out
 }
 
+func migrationFilesThrough(t *testing.T, last string) fstest.MapFS {
+	t.Helper()
+	names, err := fs.Glob(migrations.Files, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := fstest.MapFS{}
+	for _, name := range names {
+		if name > last {
+			continue
+		}
+		data, err := migrations.Files.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = &fstest.MapFile{Data: data}
+	}
+	return files
+}
+
 func TestMigrateAcceptsCompleteLegacyChain(t *testing.T) {
 	ctx := context.Background()
 	database := legacyDatabase(t, nil, 1)
-	if err := Migrate(ctx, database, migrations.Files); err != nil {
+	// Pin v1.7.5 input without changing this case's recorded-version contract.
+	release175 := migrationFilesThrough(t, "0158_subscription_route_dependencies.sql")
+	if err := Migrate(ctx, database, release175); err != nil {
 		t.Fatal(err)
 	}
 	got := versions(t, database)
@@ -112,11 +135,41 @@ func TestMigrateAcceptsCompleteLegacyChain(t *testing.T) {
 	if err := database.QueryRow("SELECT count(*) FROM sqlite_master WHERE name IN ('canvas_forward_reconcile','import_identity_map','app_metadata')").Scan(&markers); err != nil || markers != 0 {
 		t.Fatalf("one-shot tables left: %d %v", markers, err)
 	}
-	if err := ValidateMigrationPrefix(ctx, database, migrations.Files); err != nil {
+	if err := ValidateMigrationPrefix(ctx, database, release175); err != nil {
 		t.Fatal(err)
 	}
-	if err := Migrate(ctx, database, migrations.Files); err != nil {
+	if err := Migrate(ctx, database, release175); err != nil {
 		t.Fatal("second run:", err)
+	}
+}
+
+func TestMigrateLegacy175ToInboundEgress159(t *testing.T) {
+	ctx := context.Background()
+	database := legacyDatabase(t, nil, 1)
+	release180 := migrationFilesThrough(t, "0159_inbound_egress_source.sql")
+	if _, err := database.Exec(`INSERT INTO nodes(id,name,status,created_at) VALUES('n','legacy','online','2026-11-20');
+INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,created_at) VALUES('entry','preserved','n','http','127.0.0.1',1080,1,1,0,'direct','[]',x'00','2026-11-20')`); err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 2; round++ {
+		if err := Migrate(ctx, database, release180); err != nil {
+			t.Fatal(err)
+		}
+		got := versions(t, database)
+		if len(got) != len(legacyMigrations)+7 || got[len(got)-1] != "0159_inbound_egress_source.sql" {
+			t.Fatalf("upgrade recorded %d versions, last %v", len(got), got[len(got)-1:])
+		}
+		var name, source string
+		var port int
+		if err := database.QueryRow(`SELECT name,port,egress_source_ip FROM inbounds WHERE id='entry'`).Scan(&name, &port, &source); err != nil {
+			t.Fatal(err)
+		}
+		if name != "preserved" || port != 1080 || source != "" {
+			t.Fatalf("legacy inbound changed: %s:%d source=%q", name, port, source)
+		}
+		if err := ValidateMigrationPrefix(ctx, database, release180); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

@@ -304,6 +304,11 @@
             </div>
           </div>
 
+          <label v-if="canAutoRenew(metaForm.renewDate, metaForm.renewCycle)" class="flex items-center gap-2 cursor-pointer text-xs font-medium text-neutral-800">
+            <input v-model="metaForm.autoRenew" type="checkbox" class="rounded border-black/20 text-ios-blue" />
+            <span>自动续费（过了到期日按续费周期自动顺延）</span>
+          </label>
+
           <div v-if="metaForm.renewDate" class="bg-black/[0.02] border border-black/[0.04] rounded-lg p-2 text-xs flex items-center justify-between">
             <span class="text-neutral-500 text-xs">到期状态：</span>
             <span class="font-semibold text-neutral-800">{{ calculateRemainingDays(metaForm.renewDate).label }}</span>
@@ -386,7 +391,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { nodeAPI, type NodeView, type NodeSettingsInput } from '../../api';
-import { type NodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice, calculateRemainingDays, CURRENCY_LIST, CYCLE_LIST } from '../../nodeMeta';
+import { type NodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice, calculateRemainingDays, CURRENCY_LIST, CYCLE_LIST, canAutoRenew } from '../../nodeMeta';
 import { isOwner } from '../../../../app/auth';
 import { showToast } from '../../../../app/api';
 import { invalidateStatistics } from '../../../../app/useStatistics';
@@ -416,6 +421,7 @@ const metaForm = reactive({
   renewPrice: '',
   renewCycle: '/年',
   renewNoticeDays: 7,
+  autoRenew: false,
   portRangeStart: undefined as number | undefined,
   portRangeEnd: undefined as number | undefined,
   bandwidthMbps: undefined as number | undefined
@@ -478,6 +484,7 @@ watch(() => props.node.id, () => {
     renewPrice: price.price,
     renewCycle: price.cycle,
     renewNoticeDays: meta.renewNoticeDays ?? 7,
+    autoRenew: meta.autoRenew ?? false,
     portRangeStart: meta.portRangeStart ?? undefined,
     portRangeEnd: meta.portRangeEnd ?? undefined,
     bandwidthMbps: meta.bandwidthMbps ?? undefined
@@ -492,7 +499,7 @@ watch(() => props.meta, (meta) => {
       portRangeStart: meta.portRangeStart ?? undefined, portRangeEnd: meta.portRangeEnd ?? undefined,
       bandwidthMbps: meta.bandwidthMbps ?? undefined },
     renewal: { renewDate: meta.renewDate || '', renewCurrency: price.currency,
-      renewPrice: price.price, renewCycle: price.cycle, renewNoticeDays: meta.renewNoticeDays ?? 7 }
+      renewPrice: price.price, renewCycle: price.cycle, renewNoticeDays: meta.renewNoticeDays ?? 7, autoRenew: meta.autoRenew ?? false }
   };
   // Merge per field: editing the name must not prevent late metadata from filling in.
   for (const group of ['basic', 'renewal'] as const) {
@@ -522,7 +529,8 @@ const snapshots = computed(() => ({
     renewCurrency: metaForm.renewCurrency,
     renewPrice: metaForm.renewPrice,
     renewCycle: metaForm.renewCycle,
-    renewNoticeDays: metaForm.renewNoticeDays
+    renewNoticeDays: metaForm.renewNoticeDays,
+    autoRenew: metaForm.autoRenew
   },
   access: { enabled: form.enabled, allowSubscription: form.allowSubscription, maintenance: form.maintenance },
   network: Object.fromEntries(networkFields.map(field => [field.key, form[field.key]]))

@@ -361,7 +361,16 @@ qui_write_record() {
 qui_agent_core_config() {
   local source=$1 destination=$2 core
   awk '/^["\047]?(cores|core_name|core_path)["\047]?[[:space:]]*:/ {skip=1; next} /^[^[:space:]#]/ {skip=0} !skip {print}' "$source" > "$destination" || return 1
-  printf 'core_name: %s\ncore_path: /usr/local/lib/proxy-agent/%s\ncores:\n' "${record_cores[0]}" "${record_cores[0]}" >> "$destination" || return 1
+  if [[ ${#record_cores[@]} == 0 ]]; then
+    printf 'cores: []\n' >> "$destination" || return 1
+  elif [[ ${record_cores[0]} == gost ]]; then
+    # No user core: the list alone is authoritative (v1.9.0+ Agents only).
+    printf 'cores:\n' >> "$destination" || return 1
+  else
+    # The scalar pair keeps old Agents usable during a rollback; cores is
+    # authoritative for the multi-core Agent. User cores always precede GOST.
+    printf 'core_name: %s\ncore_path: /usr/local/lib/proxy-agent/%s\ncores:\n' "${record_cores[0]}" "${record_cores[0]}" >> "$destination" || return 1
+  fi
   for core in "${record_cores[@]}"; do
     printf '  - name: %s\n    path: /usr/local/lib/proxy-agent/%s\n' "$core" "$core" >> "$destination" || return 1
   done

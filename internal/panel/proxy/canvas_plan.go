@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
@@ -222,6 +223,9 @@ func (s *Service) planCanvas(ctx context.Context, scheme CanvasScheme) (CanvasPl
 	}
 	plan, err := s.canvasBuildPreviewPlan(ctx, scheme)
 	if err != nil {
+		if errors.Is(err, node.ErrNoUserCore) {
+			return result, err
+		}
 		result.OK = false
 		result.Message = err.Error()
 		// Diagnose every row independently so one invalid tunnel does not hide

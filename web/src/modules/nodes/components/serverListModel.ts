@@ -77,6 +77,7 @@ export interface ServerEditFormState {
   enabled: boolean;
   allowSubscription: boolean;
   maintenance: boolean;
+  autoRenew: boolean;
   tags: string[];
 }
 
@@ -96,6 +97,7 @@ export function mergeLatestEditForm(
   if (current.renewCurrency === baseline.renewCurrency) current.renewCurrency = parsed.currency;
   if (current.renewPrice === baseline.renewPrice) current.renewPrice = parsed.price;
   if (current.renewCycle === baseline.renewCycle) current.renewCycle = parsed.cycle;
+  if (current.autoRenew === baseline.autoRenew) current.autoRenew = latestMeta.autoRenew ?? false;
   if (current.enabled === baseline.enabled) current.enabled = latestNode.enabled;
   if (current.allowSubscription === baseline.allowSubscription) current.allowSubscription = latestNode.allowSubscription;
   if (current.maintenance === baseline.maintenance) current.maintenance = latestNode.maintenance;

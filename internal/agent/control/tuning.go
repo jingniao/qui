@@ -23,6 +23,7 @@ func reportCapabilities(s *capability.Sampler, c *capabilityState, hostDirectory
 	result.Host = s.HostInfo()
 	result.TuningSupported = tuning.Supported()
 	result.PanelCatalogueSupported = true
+	result.CoreOptionalSupported = true
 	result.PortHopSupported = hostnet.HelperInstalled()
 	result.HostSourceExtraExemptSupported = hostSourceExtraExemptSupported(hostDirectory, result.PortHopSupported)
 	return result

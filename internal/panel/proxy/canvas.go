@@ -339,6 +339,9 @@ func (layout CanvasLayout) validate() error {
 // longer has. Unresolved import references may stay in drafts; client
 // publication requires each imported ID to exist in the panel cache.
 func (s *Service) validateRefs(ctx context.Context, layout CanvasLayout) error {
+	if err := s.validateCanvasUserCores(ctx, layout); err != nil {
+		return err
+	}
 	if err := s.validateCanvasEntryOwnership(ctx, layout); err != nil {
 		return err
 	}

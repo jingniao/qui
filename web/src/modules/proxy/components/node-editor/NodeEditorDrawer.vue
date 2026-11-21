@@ -24,8 +24,8 @@
         </div>
         <div role="group" aria-labelledby="node-editor-groups" class="space-y-2">
           <p id="node-editor-groups" class="text-xs text-ios-secondary">所属节点组（可多选）</p>
-          <div v-if="memberGroups.length" class="grid max-h-36 gap-2 overflow-y-auto sm:grid-cols-2">
-            <label v-for="group in memberGroups" :key="group.id" class="flex items-start gap-2 rounded-xl border p-3 text-sm text-ios-label cursor-pointer" :class="selectedGroupIds.includes(group.id) ? 'border-ios-blue bg-ios-blue/5' : 'border-ios-border'">
+          <div v-if="memberGroups.length" class="grid max-h-36 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-4">
+            <label v-for="group in memberGroups" :key="group.id" class="flex items-start gap-2 rounded-xl border px-2.5 py-2 text-sm text-ios-label cursor-pointer" :class="selectedGroupIds.includes(group.id) ? 'border-ios-blue bg-ios-blue/5' : 'border-ios-border'">
               <input v-model="selectedGroupIds" :value="group.id" type="checkbox" class="mt-0.5 shrink-0 accent-ios-blue" />
               <span class="min-w-0 break-words">{{ group.name }}<span v-if="group.purpose === 'relay' || group.purpose === 'egress'" class="block text-xs text-ios-secondary">不授予用户接入</span></span>
             </label>
@@ -37,12 +37,14 @@
         <p v-if="state.original" class="text-xs text-ios-secondary">编辑时所属服务器和协议保持不变。</p>
         <p v-if="!eligibleServers.length" class="text-sm text-ios-secondary">没有可用的已登记服务器，请先登记服务器。</p>
         <div v-if="coreSelectable.length > 1" class="space-y-1.5">
-          <label class="block text-xs text-ios-secondary">运行内核
-            <select v-model="f.core" class="form-input-base mt-1.5">
-              <option value="">跟随主核心（{{ primaryCoreLabel }}）</option>
-              <option v-for="core in coreSelectable" :key="core.name" :value="core.name">{{ core.label }} {{ core.version }}{{ core.primary ? '（主核心）' : '' }}</option>
-            </select>
-          </label>
+          <p id="node-editor-core" class="text-xs text-ios-secondary">运行内核</p>
+          <div role="radiogroup" aria-labelledby="node-editor-core" class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <label v-for="option in [{ value: '', title: '跟随主核心', detail: primaryCoreLabel }, ...coreSelectable.map(core => ({ value: core.name, title: core.label, detail: `${core.version}${core.primary ? '（主核心）' : ''}` }))]" :key="option.value || 'primary'"
+              class="flex items-start gap-2 rounded-xl border px-2.5 py-2 text-sm text-ios-label cursor-pointer" :class="f.core === option.value ? 'border-ios-blue bg-ios-blue/5' : 'border-ios-border'">
+              <input v-model="f.core" :value="option.value" type="radio" name="node-editor-core" class="mt-0.5 shrink-0 accent-ios-blue" />
+              <span class="min-w-0 break-words">{{ option.title }}<span class="block text-xs text-ios-secondary">{{ option.detail }}</span></span>
+            </label>
+          </div>
           <p class="text-xs text-ios-secondary">只列出该服务器当前上报为启用、且能承载当前协议的核心；协议选项按所选核心的能力过滤。</p>
         </div>
         <p v-else-if="coreSelectable.length === 1" class="text-xs text-ios-secondary">运行内核：{{ coreSelectable[0].label }} {{ coreSelectable[0].version }}（该服务器没有其他能承载当前协议的核心）</p>
@@ -119,6 +121,7 @@
   </FormDrawer>
 </template>
 <script setup lang="ts">
+import { nodeHasUserCore } from '../../../nodes/coreSummary';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import FormDrawer from '../../../../components/FormDrawer.vue';
@@ -157,10 +160,10 @@ const errorMessage = ref<HTMLElement | null>(null);
 watch(error, async message => { if (message) { await nextTick(); errorMessage.value?.focus(); } });
 const protocols = computed(() => [...new Set([...protocolOptions.inbound, 'forward'])]);
 const selectedServer = computed(() => servers.value.find(s => s.id === f.value.nodeId));
-const eligibleServers = computed(() => servers.value.filter(serverEligible));
+const eligibleServers = computed(() => servers.value.filter(server => serverEligible(server, f.value.protocol)));
 // Only the protocols the selected server's core reports are offered; an edited
 // inbound keeps its stored protocol listed so the select never shows another value.
-const availableProtocols = computed(() => protocolChoices(selectedServer.value, f.value.core, protocols.value, f.value.protocol, !!state.original));
+const availableProtocols = computed(() => selectedServer.value ? protocolChoices(selectedServer.value, f.value.core, protocols.value, f.value.protocol, !!state.original) : protocols.value);
 // Cores the selected server reports as enabled (K3b). One core = read-only text;
 // several = a selector whose empty value follows the node's primary core.
 const coreChoices = computed(() => coreOptions(selectedServer.value));
@@ -205,7 +208,7 @@ watch(() => [f.value.nodeId, f.value.protocol, f.value.port, selectedServer.valu
 watch(() => f.value.nodeId, async (newNodeId) => {
   if (loading.value) return;
   // The selected core belongs to the previous server; reset to its primary.
-  f.value.core = '';
+  f.value.core = !nodeHasUserCore(selectedServer.value) ? 'gost' : '';
   advancedReady.value = ''; advancedError.value = '';
   if (advancedOpen.value && newNodeId) void readAdvanced();
   if (newNodeId) {
@@ -279,8 +282,10 @@ async function load() {
       Promise.resolve(props.serverChoices ?? choices((p, s) => nodeAPI.choices(p, '', s))).then(async value => {
         if (disposed) return;
         servers.value = value;
+        if (!state.original && props.serverId && !nodeHasUserCore(selectedServer.value)) changeProtocol(state, 'forward');
         if (!f.value.nodeId) f.value.nodeId = eligibleServers.value[0]?.id || '';
         else if (!eligibleServers.value.some(s => s.id === f.value.nodeId)) error.value = '预选服务器不可用，请选择其他已登记服务器';
+        if (!nodeHasUserCore(selectedServer.value)) f.value.core = 'gost';
         if (f.value.nodeId) await loadServerResources(f.value.nodeId);
       })
     ]);

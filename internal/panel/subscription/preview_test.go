@@ -32,6 +32,28 @@ const previewUserID = "preview-user"
 const previewDeviceID = "preview-device"
 const previewCA = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ2VydGlmaWNhdGU=\n-----END CERTIFICATE-----"
 
+func TestSubscriptionsExcludeOptionalNodes(t *testing.T) {
+	for _, gostOnly := range []bool{false, true} {
+		s := previewService()
+		// Use the same published endpoints and credentials as the preview fixture.
+		before, _, err := s.Proxies(context.Background(), previewUserID, previewDeviceID)
+		if err != nil || len(before) != 2 {
+			t.Fatal(before, err)
+		}
+		publishedSource := s.Sources.Sources()[0].(*published.Source)
+		nodes := publishedSource.Nodes.(previewNodes)
+		nodes[0].Capabilities = &pb.Capabilities{CoreOptionalSupported: true, MultiCoreSupported: true}
+		if gostOnly {
+			nodes[0].Capabilities.Cores = []*pb.CoreCapability{{Name: "gost", ForwardInboundSupported: true}}
+		}
+		// The published user revision and every other node field stay unchanged.
+		after, _, err := s.Proxies(context.Background(), previewUserID, previewDeviceID)
+		if err != nil || len(after) != 0 {
+			t.Fatal(after, err)
+		}
+	}
+}
+
 // previewUsers, previewNodes and previewPublished are the three interfaces the
 // published source needs. A preview is a pure read, so the stubs are all the
 // handler under test asks for.

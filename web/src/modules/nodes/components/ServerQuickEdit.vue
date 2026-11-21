@@ -58,6 +58,7 @@ const editForm = reactive<ServerEditFormState>({
   enabled: true,
   allowSubscription: true,
   maintenance: false,
+  autoRenew: false,
   tags: []
 });
 let loadToken = 0;
@@ -78,6 +79,7 @@ async function openEditDrawer(node: NodeView) {
   editForm.renewCurrency = parsed.currency;
   editForm.renewPrice = parsed.price;
   editForm.renewCycle = parsed.cycle;
+  editForm.autoRenew = cachedMeta.autoRenew ?? false;
   editForm.enabled = node.enabled;
   editForm.allowSubscription = node.allowSubscription;
   editForm.maintenance = node.maintenance;
@@ -189,6 +191,7 @@ async function saveEdit() {
       renewCurrency: form.renewCurrency,
       renewPrice: String(form.renewPrice).trim(),
       renewCycle: form.renewCycle,
+      autoRenew: form.autoRenew,
       tags: form.tags
     });
 

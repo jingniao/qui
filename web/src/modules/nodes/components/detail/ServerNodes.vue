@@ -3,7 +3,7 @@
     <section class="panel-card p-6 space-y-4">
       <div class="flex justify-between gap-3">
         <h2 class="text-ios-label text-base font-semibold leading-normal">节点（入站）</h2>
-        <button v-if="isOwner && !node.deletedAt" class="ios-btn-primary" @click="$emit('edit', null)">+ 新建节点</button>
+        <button v-if="isOwner && !node.deletedAt && (nodeHasUserCore(node) || nodeCores(node).some(core => core.name === 'gost'))" class="ios-btn-primary" @click="$emit('edit', null)">+ 新建节点</button>
       </div>
       <p v-if="unpublished && isOwner" class="text-sm text-ios-orange">有未发布的更改 · <button class="text-ios-blue" @click="$emit('publish')">发布配置</button></p>
       <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
@@ -32,7 +32,7 @@
             </tr>
           </template>
         </DataTable>
-        <EmptyState v-else-if="inboundReady" title="此服务器尚未创建节点" description="创建节点以配置用户接入协议与端口"><template #action><button v-if="isOwner && !node.deletedAt" class="ios-btn-primary" @click="$emit('edit', null)">+ 新建节点</button></template></EmptyState>
+        <EmptyState v-else-if="inboundReady" title="此服务器尚未创建节点" description="创建节点以配置用户接入协议与端口"><template #action><button v-if="isOwner && !node.deletedAt && (nodeHasUserCore(node) || nodeCores(node).some(core => core.name === 'gost'))" class="ios-btn-primary" @click="$emit('edit', null)">+ 新建节点</button></template></EmptyState>
       </template>
     </section>
     <details v-if="isOwner" class="panel-card p-6 space-y-4">
@@ -68,6 +68,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { nodeHasUserCore, nodeCores } from '../../coreSummary';
 import { ref, watch, onUnmounted, type Ref } from 'vue';
 import type { NodeView } from '../../api';
 import { proxyAPI, choices, strategyNames, type Inbound, type Outbound, type OutboundGroup } from '../../../proxy/api';

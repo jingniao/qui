@@ -67,6 +67,9 @@ func (r *Repository) RetryAgentRecovery(ctx context.Context, catalogue ReleaseAc
 	if err != nil || entry.Signed.Manifest != original.Release.Manifest {
 		return task, release.ErrUpdate
 	}
+	if err := requireAgentVersion(ctx, tx, task.NodeID, original.Release.Manifest.Version); err != nil {
+		return task, err
+	}
 	commandID, err := id.New()
 	if err != nil {
 		return task, err

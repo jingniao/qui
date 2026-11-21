@@ -121,6 +121,9 @@ func (r *Repository) QueueAgentSystemUpdate(ctx context.Context, audit ReleaseAc
 		return AgentSystemUpdateTask{}, err
 	}
 	defer tx.Rollback()
+	if err := requireAgentVersion(ctx, tx, nodeID, target); err != nil {
+		return AgentSystemUpdateTask{}, err
+	}
 	if err = nodeAvailable(ctx, tx, nodeID, ""); err != nil {
 		return AgentSystemUpdateTask{}, fmt.Errorf("node has a conflicting configuration or update operation: %w", err)
 	}
@@ -189,6 +192,9 @@ func (r *Repository) RetryAgentSystemUpdate(ctx context.Context, audit ReleaseAc
 	if t.SystemResult.Recovery.Attempted && (t.SystemResult.Recovery.Success == nil || !*t.SystemResult.Recovery.Success) {
 		return t, fmt.Errorf("original updater recovery is not confirmed successful: %s", t.SystemResult.Recovery.Error)
 	}
+	if err := requireAgentVersion(ctx, tx, t.NodeID, t.TargetVersion); err != nil {
+		return t, err
+	}
 	if err = nodeAvailable(ctx, tx, t.NodeID, ""); err != nil {
 		return t, err
 	}
@@ -230,6 +236,9 @@ func (r *Repository) PendingAgentSystemUpdate(ctx context.Context, nodeID string
 	}
 	if q.NodeID != nodeID {
 		return nil, fmt.Errorf("pending system update node mismatch")
+	}
+	if err := requireAgentVersion(ctx, r.Database, nodeID, q.TargetVersion); err != nil {
+		return nil, err
 	}
 	_, err = r.Database.ExecContext(ctx, "UPDATE agent_system_update_tasks SET status='running',updated_at=? WHERE attempt_id=? AND status='queued'", now(), q.AttemptID)
 	return &pb.AgentSystemUpdateCommand{RequestJson: data}, err

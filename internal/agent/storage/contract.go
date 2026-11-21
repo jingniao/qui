@@ -252,8 +252,8 @@ func activateStorageFormats(directory, nodeID string, reader agentstorage.Contra
 			next.Formats.Spool.Write = max(next.Formats.Spool.Write, 6)
 		}
 		if configuration >= 3 {
-			next.Formats.DesiredState.Write = 3
-			next.Formats.ReleaseHold.Write = 3
+			next.Formats.DesiredState.Write = max(next.Formats.DesiredState.Write, 3)
+			next.Formats.ReleaseHold.Write = max(next.Formats.ReleaseHold.Write, 3)
 		}
 	} else if spoolFormat > 0 {
 		next.Formats.Spool.Write = spoolFormat
@@ -332,6 +332,12 @@ func activateStorageFormats(directory, nodeID string, reader agentstorage.Contra
 // per-core node aggregate counters, unreadable by checkpoint-only readers.
 func ActivateCoreInventoryFormats(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
 	return activateStorageFormats(directory, nodeID, reader, 4, 0, 0)
+}
+
+// ActivateCoreOptionalFormat follows a proof that all retained Agent images can
+// read inventories and configurations without a user core. The floor never falls.
+func ActivateCoreOptionalFormat(directory, nodeID string, reader agentstorage.Contract) (agentstorage.Contract, error) {
+	return activateStorageFormats(directory, nodeID, reader, 6, 0, 0)
 }
 
 // ActivateTrafficDeliveryFormat follows the retained-image compatibility proof.

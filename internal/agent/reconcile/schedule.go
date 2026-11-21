@@ -17,6 +17,9 @@ func (r *Reconciler) Refresh(ctx context.Context) (bool, error) {
 	if r.manifest.Revision == 0 {
 		return false, nil
 	}
+	if multi, ok := r.Adapter.(*core.MultiRuntime); ok && len(multi.Names()) == 0 {
+		return false, nil
+	}
 	data, err := r.readRevision(r.manifest.Revision)
 	if err != nil {
 		return false, err

@@ -158,6 +158,14 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 	if err := state.Validate(); err != nil {
 		return result, err
 	}
+	if multi, ok := r.Adapter.(*core.MultiRuntime); ok && multi.Name() == "" {
+		for _, inbound := range state.Inbounds {
+			if inbound.Core == "" {
+				result.Code, result.Message = "no_user_core", core.ErrNoUserCore.Error()
+				return result, core.ErrNoUserCore
+			}
+		}
+	}
 	if err := r.verifyRequiredSuccessReceipt(r.manifest); err != nil {
 		return result, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/id"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/scheduler"
@@ -107,6 +108,8 @@ func (s *Service) SaveGroup(ctx context.Context, groupID string, input GroupInpu
 	}
 	if n, err := s.Nodes.Get(ctx, input.NodeID); err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Group{}, errors.New("group node unavailable")
+	} else if node.CoreOptional(n.Capabilities) {
+		return Group{}, node.ErrNoUserCore
 	}
 	if input.ProbeURL == "" {
 		input.ProbeURL = "https://www.gstatic.com/generate_204"

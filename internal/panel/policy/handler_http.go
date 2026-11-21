@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/httpapi"
 )
 
@@ -160,6 +161,10 @@ func (h *Handler) refreshSource(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 200, source)
 }
 func (h *Handler) fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, node.ErrNoUserCore) {
+		httpapi.Error(w, 400, "no_user_core", err.Error())
+		return
+	}
 	var referenced *ServiceReferencedError
 	if errors.As(err, &referenced) {
 		httpapi.ErrorDetails(w, 409, "service_set_in_use", err.Error(), map[string]any{"nodePolicies": referenced.References.NodePolicies, "clientProfiles": referenced.References.ClientProfiles})

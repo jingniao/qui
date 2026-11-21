@@ -1,6 +1,6 @@
 import type { CertificateMatches, ForwardSettings, ForwardTarget, Inbound, InboundInput, ProtocolSettings, TLSSource } from '../../api';
 import type { CoreName, NodeView } from '../../../nodes/api';
-import { blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
+import { nodeHasUserCore, blockedCores, findCore, multiCoreSupported, nodeCores, primaryCoreName } from '../../../nodes/coreSummary';
 import { connectAddress } from '../../../nodes/nodeAddress';
 import { generateShortId, internalRelaySettingsReason, nonemptyLines, publicReality, serverSettingsReason, validateServerFields, xhttpSecurityFallback, xhttpSecurityNote } from './serverSettingsModel';
 import type { ManagedCertificate } from '../../../system/certificatesApi';
@@ -350,9 +350,10 @@ export function buildPayload(state: EditorState, server?: NodeView): InboundInpu
   return clone(payload);
 }
 
-export function serverEligible(server: NodeView): boolean {
+export function serverEligible(server: NodeView, protocol?: string): boolean {
   // Agent version is reported only after registration; pending rows have none.
-  return server.enabled && !server.deletedAt && server.status !== 'pending' && !!server.agentVersion;
+  return server.enabled && !server.deletedAt && server.status !== 'pending' && !!server.agentVersion
+    && (nodeHasUserCore(server) || (protocol === 'forward' && nodeCores(server).some(core => core.name === 'gost')));
 }
 // The cores the server currently reports as enabled (K3b). A server without a
 // core list (old Agent) yields exactly its one reported core.
@@ -371,6 +372,7 @@ export function defaultCore(server: NodeView | undefined): CoreName | '' {
 // panel's ValidateInboundCore so the editor refuses before the API does.
 export function coreReason(server: NodeView | undefined, core: CoreName | ''): string {
   if (!server) return '请先选择服务器';
+  if (!nodeHasUserCore(server) && core !== 'gost') return '这台服务器没有用户内核，只能使用 GOST 端口转发';
   const cores = coreOptions(server);
   if (!cores.length) return '尚未上报核心能力';
   if (!core) {
@@ -466,7 +468,7 @@ export function validateStep(step: number, state: EditorState, server: NodeView 
     const role = internalRelaySettingsReason(f.internalRelay, s);
     if (role) return role;
   }
-  if (step === 1 && (!server || !serverEligible(server))) return '请选择可用服务器';
+  if (step === 1 && (!server || !serverEligible(server, f.protocol))) return '请选择可用服务器';
   if (step === 2) {
     const core = coreReason(server, f.core || '');
     if (core) return core;

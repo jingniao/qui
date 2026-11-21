@@ -70,7 +70,7 @@ Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查�
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码迁移头为 **`0159`**（`0159_inbound_egress_source.sql`）；最新正式版 **v1.8.0** 迁移头为 **`0159`**；存储与生命周期见第 8.1 节。已应用迁移（`0152–0159`）的校验和由 `migrations/checksums_test.go` 固定，历史 `0001–0152` 校验和保存在 `internal/platform/db`，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码迁移头为 **`0160`**（`0160_node_meta_auto_renew.sql`）；最新正式版 **v1.8.0** 迁移头为 **`0159`**；存储与生命周期见第 8.1 节。已应用迁移（`0152–0160`）的校验和由 `migrations/checksums_test.go` 固定，历史 `0001–0152` 校验和保存在 `internal/platform/db`，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |
@@ -107,7 +107,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **证书**：节点证书默认 90 天，到期前由 Agent 自动续期（`internal/agent/control/renewal.go`）；轮换与续期也可在节点停机时手工执行（见[运维手册](operations.md)）。
 
-**多核心运行**：`cores: [{name,path}]` 的首项是主核心，必须为 Xray 或 sing-box；GOST 不能是主核心。`cores.json.enc` 持久记录启用/禁用；每核使用 `runtime/<core>/`。一条 Revision 覆盖所有核心，先全部校验再依序切换，失败逆序补偿；发布仍重启该节点全部核心，supervisor 只恢复异常核心。移除须确认退出才删除运行目录与 Agent 自管镜像，安装器二进制与记录保留。
+**多核心运行**：`cores: [{name,path}]` 的第一个用户内核（Xray 或 sing-box）由 `Inventory.Primary` 记录为主核心；GOST 不能是主核心，列表可为空或仅含 GOST，此时主核心为空。面板通过统一的 `node.CoreOptional` 结合 `core_optional_supported` 与启用列表判断，旧 Agent 的未知上报规则保持不变。无用户内核时只允许显式 GOST forward 和 GOST 隧道，不承载用户配置或订阅；没有任何内核时省略核心健康，不因缺主核心而降级。`cores.json.enc` 持久记录启用/禁用；每核使用 `runtime/<core>/`。一条 Revision 覆盖所有核心，先全部校验再依序切换，失败逆序补偿；发布仍重启该节点全部核心，supervisor 只恢复异常核心。移除须确认退出才删除运行目录与 Agent 自管镜像，安装器二进制与记录保留。旧 Agent 移除最后用户内核仍返回 `last_core`；支持可选内核时先检查全部用户内核依赖（409 `user_core_in_use`），再由 Agent 激活格式 6（失败 `fallback_incompatible`）。面板拒绝将无用户内核节点更新到低于 1.9.0 的 Agent（`agent_version_unsupported`）。
 
 **隧道管理（v1.4）**：`tunnels/tunnel_hops` 表达 entry → [mid] → exit，GOST TLS＋mTLS；接收跳各有一个共享监听，每节点只有一个下一跳。两节点要求契约 ≥3，三节点 ≥4，当前 Agent 上报 4。`tunnel_rules` 将入口监听指向隧道或直接目标；直接规则优先 GOST，否则主 Xray/sing-box。linked 目标随目标地址/入站端口变化派生并标 needs_publish，出口等于目标时用 loopback；manual 固定目标。`tunnel_objects` 按 ID 归属生成入站，普通入站编辑/删除返回 managed_by_tunnel。`port_claims` 持久预留，保存草稿不部署，删除已发布对象须再发布移除。
 
@@ -153,7 +153,7 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 用户隐藏身份、门户、导入与设备限制之外，数据库还保存节点目标/指标/调优、多核心任务与计量、共享隧道及归属、整机流量和 GOST 密封材料。表结构与升级兼容规则由[项目说明书](project-spec.md) §26、§31 维护；各版本迁移变更见[变更记录](changelog.md)。恢复结束门户会话，探测任务过期，未确认的调优/组件操作不自动重发。
 
-定时导入、续费提醒、重置周期和额度对账均随面板停止/进程内恢复取消并等待结束。重置以面板时区本地日运算保留月锚点、夹紧短月；恢复保留当前重置边界。可选心跳增加宿主/核心 uptime、网卡计数及只读 sysctl，旧 Agent 缺字段显示未知。月节点流量由 access 统一合并本地月界内的 `node_traffic_samples` 去重视图与核心 UTC 小时历史；接口 scope 仍为 `retained_account_samples`，旧版已删账户回退数据仍无法补回（L9）。核心原始数据保留 7 天，旧小时原子汇总后删除，游标长期保留；历史非整小时边界返回精度错误。该代理样本口径与整机月流量不同；UDP 门控及无用户身份转发限制见[设备限制](device-limit.md)和[协议矩阵](protocol-support-matrix.md)。
+定时导入、自动续费、续费提醒、重置周期和额度对账均随面板停止/进程内恢复取消并等待结束。重置以面板时区本地日运算保留月锚点、夹紧短月；恢复保留当前重置边界。可选心跳增加宿主/核心 uptime、网卡计数及只读 sysctl，旧 Agent 缺字段显示未知。月节点流量由 access 统一合并本地月界内的 `node_traffic_samples` 去重视图与核心 UTC 小时历史；接口 scope 仍为 `retained_account_samples`，旧版已删账户回退数据仍无法补回（L9）。核心原始数据保留 7 天，旧小时原子汇总后删除，游标长期保留；历史非整小时边界返回精度错误。该代理样本口径与整机月流量不同；UDP 门控及无用户身份转发限制见[设备限制](device-limit.md)和[协议矩阵](protocol-support-matrix.md)。
 
 ## 9. 不在本版范围
 

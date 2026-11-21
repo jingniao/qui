@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"strings"
 )
@@ -326,11 +327,17 @@ func (s *Service) canvasBuildPlanInternal(ctx context.Context, scheme CanvasSche
 			if !sourceInfo.Enabled {
 				return nil, fmt.Errorf("连接 %q：node missing or disabled", connection.ID)
 			}
-			if !sourceInfo.Capabilities.GetForwardInboundSupported() {
-				return nil, fmt.Errorf("连接 %q：node Agent/core does not advertise forward inbound support; upgrade it first", connection.ID)
-			}
-			if err := ValidateCoreProtocol(sourceInfo.Capabilities.GetCoreName(), "forward", true); err != nil {
-				return nil, fmt.Errorf("连接 %q：%w", connection.ID, err)
+			if node.CoreOptional(sourceInfo.Capabilities) {
+				if err := ValidateInboundCore(sourceInfo.Capabilities, input.Core, "forward"); err != nil {
+					return nil, fmt.Errorf("连接 %q：%w", connection.ID, err)
+				}
+			} else {
+				if !sourceInfo.Capabilities.GetForwardInboundSupported() {
+					return nil, fmt.Errorf("连接 %q：node Agent/core does not advertise forward inbound support; upgrade it first", connection.ID)
+				}
+				if err := ValidateCoreProtocol(sourceInfo.Capabilities.GetCoreName(), "forward", true); err != nil {
+					return nil, fmt.Errorf("连接 %q：%w", connection.ID, err)
+				}
 			}
 			plan.forwards = append(plan.forwards, input)
 			plan.forwardConnections = append(plan.forwardConnections, connection.ID)

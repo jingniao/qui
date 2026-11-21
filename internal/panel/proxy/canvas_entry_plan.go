@@ -132,6 +132,9 @@ func (s *Service) canvasPlanEntries(ctx context.Context, layout CanvasLayout, pl
 }
 
 func validateCanvasEntryCore(n node.Node, core, protocol string) error {
+	if node.CoreOptional(n.Capabilities) {
+		return node.ErrNoUserCore
+	}
 	if !desiredstate.SupportsInbound(protocol) || protocol == "forward" {
 		return fmt.Errorf("用户入口不支持协议 %s", protocol)
 	}

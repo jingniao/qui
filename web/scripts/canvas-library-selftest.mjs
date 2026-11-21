@@ -128,7 +128,16 @@ assert.deepEqual(library.selfHostedLibraryItems([], inbounds), []);
 
 // The page must use that helper and keep the drop bound to the inbound.
 const canvas = read('pages/RelayCanvasPage.vue');
-assert.ok(canvas.includes('selfHostedLibraryItems(displayServers.value, inbounds.value, resourceSearch.value, statusNow.value)'));
+const selfHostedExpression = canvas.match(/const selfHostedNodes = computed\(\(\) => (.*)\);/)[1];
+const pageLibraryItems = new Function('selfHostedLibraryItems', 'nodeHasUserCore', 'displayServers', 'inbounds', 'resourceSearch', 'statusNow', `return ${selfHostedExpression};`);
+const { nodeHasUserCore } = await import(coreSummaryURL);
+const pageItems = pageLibraryItems(library.selfHostedLibraryItems, nodeHasUserCore, { value: servers }, { value: inbounds }, { value: '' }, { value: Date.now() });
+assert.deepEqual(pageItems.map(item => item.inboundId), items.map(item => item.inboundId));
+for (const cores of [[], [{ name: 'gost' }]]) {
+  const optionalServers = servers.map(server => server.id === 'srv-a' ? { ...server, capabilities: { core_optional_supported: true, cores } } : server);
+  const filteredItems = pageLibraryItems(library.selfHostedLibraryItems, nodeHasUserCore, { value: optionalServers }, { value: inbounds }, { value: '' }, { value: Date.now() });
+  assert.deepEqual(filteredItems.map(item => item.inboundId), ['ib-3', 'ib-6']);
+}
 assert.equal(canvas.includes(".filter(n => n.sourceType === 'self_hosted')"), false);
 assert.ok(canvas.includes('entryBound: true'));
 assert.ok(canvas.includes('const entryBound = draggedPayload.entryBound === true && currentScheme.value.executionLocation === \'server\';'));

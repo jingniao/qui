@@ -2,10 +2,42 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"testing"
 )
+
+func TestNoUserCoreInboundAndOutboundAdmission(t *testing.T) {
+	caps := &pb.Capabilities{CoreOptionalSupported: true, MultiCoreSupported: true, Cores: []*pb.CoreCapability{{Name: "gost", ForwardInboundSupported: true}}}
+	for _, tc := range []struct {
+		core, protocol string
+		allowed        bool
+	}{
+		{"gost", "forward", true}, {"", "forward", false}, {"", "socks5", false}, {"xray", "socks5", false}, {"gost", "socks5", false},
+	} {
+		err := ValidateInboundCore(caps, tc.core, tc.protocol)
+		if tc.allowed && err != nil || !tc.allowed && !errors.Is(err, node.ErrNoUserCore) {
+			t.Fatalf("%+v: %v", tc, err)
+		}
+	}
+	if err := ValidateInboundCore(&pb.Capabilities{}, "", "socks5"); err != nil {
+		t.Fatal("legacy unknown report changed", err)
+	}
+	caps.Cores = nil
+	if err := ValidateInboundCore(caps, "gost", "forward"); err == nil {
+		t.Fatal("absent GOST accepted")
+	}
+	f := setup(t)
+	ctx := context.Background()
+	if _, err := f.nodes.Record(ctx, f.nodeA, &pb.AgentMessage{NodeId: f.nodeA, Sequence: 1, MessageId: "empty", Timestamp: timestamppb.Now(), Payload: &pb.AgentMessage_Capabilities{Capabilities: caps}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.SaveOutbound(ctx, "", OutboundInput{NodeID: f.nodeA, Name: "proxy", Protocol: "socks5", Address: "example.com", Port: 1080, Enabled: true}); !errors.Is(err, node.ErrNoUserCore) {
+		t.Fatal(err)
+	}
+}
 
 func TestInboundSelectedCorePersistsAndValidatesCapabilities(t *testing.T) {
 	f := setup(t)

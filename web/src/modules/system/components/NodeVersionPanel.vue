@@ -130,7 +130,8 @@
             <p v-if="isOwner && agentSystemUpdateHint(node)" class="mt-2 max-w-xs whitespace-pre-wrap break-words text-sm text-ios-orange">{{ agentSystemUpdateHint(node) }}</p>
           </td>
           <td>
-            <div v-if="getNodeInstalledCores(node).length" class="flex flex-wrap gap-1">
+            <p v-if="!nodeHasUserCore(node)" class="text-xs text-ios-secondary">{{ coreSummaryLabel(node) }}</p>
+            <div v-else-if="getNodeInstalledCores(node).length" class="flex flex-wrap gap-1">
               <span
                 v-for="core in getNodeInstalledCores(node)"
                 :key="core.component"
@@ -146,7 +147,7 @@
                 class="text-xs px-1.5 py-0.5 rounded-md bg-ios-blue/10 text-ios-blue font-semibold"
               >{{ corePendingLabel(node, CORE_ORDER[0]) || corePendingLabel(node, CORE_ORDER[1]) }}</span>
             </div>
-            <span v-else class="text-xs px-2 py-0.5 rounded-md text-amber-700 bg-amber-50 font-normal">
+            <span v-else class="text-xs px-2 py-0.5 rounded-md text-ios-secondary bg-ios-fill font-normal">
               未安装内核
             </span>
           </td>
@@ -257,6 +258,7 @@
                 </span>
               </div>
             <p v-if="isOwner && agentSystemUpdateHint(node)" class="whitespace-pre-wrap break-words text-sm text-ios-orange">{{ agentSystemUpdateHint(node) }}</p>
+            <p v-if="!nodeHasUserCore(node) && getNodeInstalledCores(node).length" class="text-xs text-ios-secondary">{{ coreSummaryLabel(node) }}</p>
             <!-- Installed Core State (Supports Multiple Cores Coexisting) -->
             <template v-if="getNodeInstalledCores(node).length">
               <div class="flex items-start justify-between text-xs gap-2">
@@ -309,11 +311,11 @@
             <template v-else>
               <div class="flex items-center justify-between text-xs">
                 <span class="text-neutral-500 font-medium">核心状态</span>
-                <span class="px-2 py-0.5 rounded-lg text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200/60">
-                  尚未上报核心
+                <span class="px-2 py-0.5 rounded-lg text-xs font-medium text-ios-secondary bg-ios-fill">
+                  {{ coreSummaryLabel(node) }}
                 </span>
               </div>
-              <div class="p-2 rounded-xl bg-amber-50/50 border border-amber-100 text-amber-900 text-xs leading-relaxed">
+              <div class="p-2 rounded-xl bg-ios-bg text-ios-secondary text-xs leading-relaxed">
                 当前服务器尚未部署代理内核。支持一键安装 <strong>Xray-core</strong> 与 <strong>sing-box</strong> 核心协同运行以开启转发。
               </div>
             </template>
@@ -456,6 +458,7 @@
             <span class="text-xs text-neutral-400">{{ coreFactsLoading ? '正在读取入站与任务…' : '版本、健康与任务状态均来自后端上报' }}</span>
           </div>
 
+          <p v-if="!nodeHasUserCore(coreManagementTargetNode)" class="text-sm text-ios-secondary">添加 Xray 或 sing-box 后可创建用户入站</p>
           <!-- Empty State when no cores installed -->
           <div v-if="!manageInstalledCores.length" class="p-5 rounded-2xl bg-neutral-50/80 border border-dashed border-neutral-200 text-center space-y-1">
             <div class="text-neutral-500 font-medium text-xs">当前服务器尚未安装任何代理内核</div>
@@ -515,6 +518,7 @@
                     </template>
                     <template v-else>无（可安全移除）</template>
                   </p>
+                  <p v-if="manageCoreRemovalError(core.component)" class="text-sm text-ios-red">{{ manageCoreRemovalError(core.component) }}</p>
                   <p v-if="manageCoreTask(core.component)" class="text-xs text-neutral-500 flex flex-wrap items-center gap-1.5">
                     <span>最近任务</span>
                     <span class="px-1.5 py-0.2 rounded font-semibold" :class="coreTaskTone(manageCoreTask(core.component)?.status || '')">
@@ -546,7 +550,7 @@
                 <!-- Delete Kernel Action Button: hidden while an add/remove task is
                      unsettled or when this is the only enabled core. -->
                 <button
-                  v-if="isOwner && manageInstalledCores.length > 1 && !manageCorePendingLabel(core.component) && multiCoreSupported(coreManagementTargetNode)"
+                  v-if="isOwner && canRemoveCore(core) && !manageCorePendingLabel(core.component) && multiCoreSupported(coreManagementTargetNode)"
                   type="button"
                   title="删除内核"
                   @click="requestRemoveCore(core)"
@@ -571,6 +575,17 @@
           </div>
         </div>
 
+        <div v-if="removeConflictGroups.length" role="alert" class="rounded-2xl border border-ios-red/20 bg-ios-red/10 p-3 text-sm text-ios-red space-y-2">
+          <p>用户内核仍有依赖对象，请先删除或改派：</p>
+          <div v-for="group in removeConflictGroups" :key="group.label" class="space-y-1">
+            <p class="font-medium">{{ group.label }}</p>
+            <div v-for="item in group.items" :key="item.id" class="break-all">
+              <router-link v-if="item.to" :to="item.to" class="text-ios-blue hover:underline">{{ item.name }}</router-link>
+              <span v-else>{{ item.name }}</span>
+            </div>
+          </div>
+          <p v-if="removeConflictNamesError" class="text-xs">{{ removeConflictNamesError }}</p>
+        </div>
         <!-- SECTION 2: 添加内核 (需要 Agent 协商多核心支持) -->
         <div class="pt-4 border-t border-black/[0.06] space-y-3.5">
           <div class="flex items-center justify-between">
@@ -614,7 +629,7 @@
                 <span v-if="option.hint" class="text-xs text-ios-tertiary">（{{ option.hint }}）</span>
               </label>
             </div>
-            <p v-if="pendingCoreError" role="alert" class="text-xs text-ios-red">{{ pendingCoreError }}</p>
+            <p v-if="pendingCoreDescription" class="text-xs text-ios-secondary">{{ pendingCoreDescription }}</p>
 
             <div class="space-y-1.5">
               <WebUpgradeOption v-model="pendingWebUpgrade" />
@@ -759,7 +774,7 @@
       v-model="removeConfirmVisible"
       title="移除内核"
       :message="removeConfirmMessage"
-      warning-details="只会禁用安装器持有的核心文件；如果当前草稿或已发布配置仍有入站使用该内核，后端会以 core_in_use 拒绝并列出这些入站。"
+      warning-details="当前草稿或已发布配置仍有入站使用该内核时会拒绝移除；移除最后一个用户内核前，还会检查出站、出口组、代理链、中转线路和画布方案等依赖对象。"
       confirm-text="确认移除"
       :is-danger="true"
       @confirm="confirmRemoveCore"
@@ -959,19 +974,20 @@
 </template>
 
 <script setup lang="ts">
+import { coreRemovalBlockers, resolveCoreRemovalBlockerNames, type CoreRemovalBlockerGroup } from '../../nodes/coreRemovalBlockers';
 import { needsBaseline, publishBaselineAndWait } from '../nodeBaseline';
 import { onMounted, onUnmounted, ref, reactive, computed } from 'vue';
 import { isOwner, formatTime } from '../../../app/auth';
 import { throttleTrailing } from '../../../app/nodeStatusEvents';
 import { showToast } from '../../../app/api';
 import { deploymentAPI } from '../deploymentApi';
-import { CORE_INSTALL_OPTIONS, sortInstallCores, validateInstallCores } from '../../nodes/coreInstallOptions';
-import { APIError } from '../../../app/apiClient';
+import { CORE_INSTALL_OPTIONS, sortInstallCores, installCoresDescription } from '../../nodes/coreInstallOptions';
+import { translateAPIMessage, APIError } from '../../../app/apiClient';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView, type AgentReleaseVersion } from '../../nodes/api';
 import { applyServerOrder } from '../../nodes/serverOrder';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../../nodes/installEndpoint';
 import { proxyAPI, type Inbound } from '../../proxy/api';
-import { blockedCores, coreLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
+import { nodeHasUserCore, coreSummaryLabel, blockedCores, coreLabel, isCoreName, multiCoreSupported, nodeCores, primaryCoreName } from '../../nodes/coreSummary';
 import { getNodeMeta, resolveCountryInfo, countryTitle, type CountryInfo } from '../../nodes/nodeMeta';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { serverStatus } from '../../nodes/components/serverListModel';
@@ -1272,6 +1288,13 @@ function manageCoreTask(component: CoreName): CoreUpdateTask | undefined {
   const node = coreManagementTargetNode.value;
   return node ? latestCoreTask(node.id, component) : undefined;
 }
+function manageCoreRemovalError(component: CoreName): string {
+  const node = coreManagementTargetNode.value;
+  const task = node ? coreRemovals.value[node.id + ':' + component]?.[0] : undefined;
+  if (!task || !['rejected', 'unconfirmed'].includes(task.status)) return '';
+  const code = task.result?.code || task.code;
+  return REMOVE_ERROR_TEXT[code] || translateAPIMessage(code);
+}
 function manageCorePendingLabel(component: CoreName): string {
   const node = coreManagementTargetNode.value;
   return node ? corePendingLabel(node, component) : '';
@@ -1303,6 +1326,7 @@ async function readAllCoreTasks(): Promise<CoreUpdateTask[]> {
 async function loadCoreFacts(node: NodeView) {
   coreFactsLoading.value = true;
   removeConflictInbounds.value = [];
+  removeConflictGroups.value = []; removeConflictNamesError.value = '';
   try {
     const [inbounds, tasks] = await Promise.all([readAllInbounds(node.id), readAllCoreTasks()]);
     coreInbounds.value = inbounds;
@@ -1327,6 +1351,14 @@ async function loadCoreFacts(node: NodeView) {
 // ========================================================
 // REMOVE CORE (删除内核): Owner + CSRF + confirmNodeId on the real API
 // ========================================================
+function canRemoveCore(core: InstalledCoreInfo): boolean {
+  const node = coreManagementTargetNode.value;
+  if (node?.capabilities?.core_optional_supported) return true;
+  // Legacy Agents must keep at least one user core, even when GOST is installed.
+  return core.component === 'gost' || manageInstalledCores.value.filter(item => item.component !== 'gost').length > 1;
+}
+const removeConflictGroups = ref<CoreRemovalBlockerGroup[]>([]);
+const removeConflictNamesError = ref('');
 const removeConfirmVisible = ref(false);
 const removeTargetCore = ref<InstalledCoreInfo | null>(null);
 const removeBusy = ref(false);
@@ -1335,15 +1367,19 @@ const removeConflictInbounds = ref<{ id: string; name: string }[]>([]);
 const removeConfirmMessage = computed(() => {
   const node = coreManagementTargetNode.value, core = removeTargetCore.value;
   if (!node || !core) return '';
-  return `确认从「${node.name}」移除 ${core.name} 内核？Agent 只会禁用安装器持有的文件，之后重新安装同一内核会再次启用；移除后无法回滚到使用该内核的历史配置版本。`;
+  const lastUserCore = core.component !== 'gost' && manageInstalledCores.value.filter(item => item.component !== 'gost').length === 1;
+  return `${lastUserCore ? '移除后这台机器不再承载用户，只能做 GOST 转发或不运行内核。' : ''}确认从「${node.name}」移除 ${core.name} 内核？Agent 将停止该内核并移除安装器管理的运行文件；移除后无法回滚到使用该内核的历史配置版本。`;
 });
 function requestRemoveCore(core: InstalledCoreInfo) {
   if (!isOwner.value || !coreManagementTargetNode.value) return;
   removeConflictInbounds.value = [];
+  removeConflictGroups.value = []; removeConflictNamesError.value = '';
   removeTargetCore.value = core;
   removeConfirmVisible.value = true;
 }
 const REMOVE_ERROR_TEXT: Record<string, string> = {
+  user_core_in_use: '用户内核仍有下列依赖对象，请先删除或改派后再移除。',
+  fallback_incompatible: '这台机器保留了旧版 Agent 回退镜像，暂时不能移除最后一个用户内核。',
   core_in_use: '该内核仍有入站使用（含已禁用的入站），请先删除或改派下列入站后再移除内核。',
   core_pending: '该内核正在添加、移除或升级中，请等待 Agent 回报后再试。',
   last_core: '这是该服务器最后一个已启用的内核，不能移除。',
@@ -1356,6 +1392,7 @@ async function confirmRemoveCore() {
   if (!isOwner.value || !node || !core || removeBusy.value) return;
   removeBusy.value = true;
   removeConflictInbounds.value = [];
+  removeConflictGroups.value = []; removeConflictNamesError.value = '';
   try {
     requireCoreTarget(node, core.component);
     await coreUpdatesAPI.remove(node.id, core.component, node.heartbeat!.current_revision!);
@@ -1372,6 +1409,17 @@ async function confirmRemoveCore() {
         return { id, name: match ? `${match.name} (${match.protocol.toUpperCase()} :${match.port})` : id };
       });
     }
+    if (error.code === 'user_core_in_use') {
+      const groups = coreRemovalBlockers(error.details, node.id);
+      removeConflictGroups.value = groups;
+      const currentGroups = removeConflictGroups.value;
+      const failures = await resolveCoreRemovalBlockerNames(currentGroups, node.id);
+      // Do not write results into a different dialog opened while reading names.
+      if (coreManagementTargetNode.value?.id === node.id && removeConflictGroups.value === currentGroups) {
+        removeConflictGroups.value = [...currentGroups];
+        removeConflictNamesError.value = failures.length ? '部分对象名称读取失败，已显示 ID：' + failures.join('；') : '';
+      }
+    }
     showToast(REMOVE_ERROR_TEXT[error.code] || error.message || '移除内核失败', 'error');
     if (error.code === 'revision_mismatch') void load();
   } finally {
@@ -1383,6 +1431,7 @@ function openCoreManagementModal(node: NodeView) {
   if (!isOwner.value) return;
   addCoreForm.sha256 = ''; addCoreForm.url = '';
   removeConflictInbounds.value = [];
+  removeConflictGroups.value = []; removeConflictNamesError.value = '';
   coreInbounds.value = []; coreTasks.value = [];
   coreManagementTargetNode.value = node;
   // This dialog adds a core, so a core the server already reports is never
@@ -1396,7 +1445,7 @@ function openCoreManagementModal(node: NodeView) {
 
   if (node.status === 'pending') {
     pendingEnrollmentLoading.value = true;
-    pendingWebUpgrade.value = false;
+    pendingWebUpgrade.value = true;
     // Show the browser address at once and swap in the saved one when it
     // arrives, so the command never waits on the settings request.
     const fallback = browserInstallEndpoint();
@@ -1631,7 +1680,7 @@ const coreBatchTargets = computed(() => eligibleOnlineNodes.value.filter(node =>
 // Pending node enrollment state for 1-click install command
 const pendingEnrollment = ref<Enrollment | null>(null);
 const pendingEnrollmentLoading = ref(false);
-const pendingWebUpgrade = ref(false);
+const pendingWebUpgrade = ref(true);
 // The install command defaults to 系统设置 → 节点安装连接地址 when the Owner saved
 // one, otherwise to the address this browser reached the panel on.
 const installEndpointHost = ref(browserInstallEndpoint().host);
@@ -1643,10 +1692,10 @@ const installEndpointGrpcPort = ref<number | null>(null);
 const installEndpointFromSettings = ref(false);
 
 const pendingCores = ref<CoreName[]>(['xray']);
-const pendingCoreError = computed(() => validateInstallCores(pendingCores.value).error || '');
+const pendingCoreDescription = computed(() => installCoresDescription(pendingCores.value));
 const pendingEnrollmentCommand = computed(() => {
   const item = pendingEnrollment.value;
-  if (!item || !item.install?.version || !item.install?.caSha256 || pendingCoreError.value) return '';
+  if (!item || !item.install?.version || !item.install?.caSha256) return '';
   const host = installEndpointHost.value;
   const port = installEndpointPort.value;
   return installCommand({
@@ -1933,7 +1982,7 @@ function changePage(value: number) {
 // per-core rows are what the Owner needs to see. Unknown stays "尚未上报".
 function coreHealth(node: NodeView) {
   const cores = getNodeInstalledCores(node);
-  if (!cores.length) return '尚未上报';
+  if (!cores.length) return nodeHasUserCore(node) ? '尚未上报' : '未安装内核';
   const unhealthy = cores.filter(core => core.healthy === false);
   if (unhealthy.length) return `${unhealthy.map(core => core.name).join('、')} 异常`;
   if (cores.every(core => core.healthy === true)) return cores.length > 1 ? '全部内核正常' : '最近上报正常';

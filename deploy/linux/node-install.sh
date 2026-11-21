@@ -51,6 +51,7 @@ usage() {
   --grpc-host HOST      Agent 连接的 gRPC 地址（默认与 --panel 相同；必须是
                         面板证书覆盖、且不经终止 TLS 的反向代理／CDN 的地址）
   --core xray|sing-box|gost  可重复，例如 --core xray --core sing-box（默认 xray）
+  --no-core             仅安装 Agent，不安装核心；与 --core 互斥
   --core-source qui|official  sing-box 来源（默认 qui，同版本发布）
   --replace-agent       在旧 Agent 所在机器停止代理，上传最后数据。面板确认后删除旧 Agent 本机数据并重新登记。
   --web-upgrade         安装完成后启用 Agent 网页升级（默认不启用；之后也可在本机运行 qui-update --component agent 启用）
@@ -74,6 +75,7 @@ grpc_port=18880
 ca_sha256=''
 token=''
 cores=(); core=''
+no_core=false
 core_source=qui
 bundle_file=''
 sums_file=''
@@ -81,6 +83,7 @@ web_upgrade=false
 replace_agent=false
 while (($#)); do
   case $1 in
+    --no-core) no_core=true; shift;;
     --replace-agent) replace_agent=true; shift;;
     --web-upgrade) web_upgrade=true; shift;;
     --version|--panel|--grpc-host|--http-port|--grpc-port|--ca-sha256|--token|--core|--bundle|--sums|--core-source)
@@ -97,6 +100,7 @@ while (($#)); do
   esac
 done
 
+if $no_core && [[ ${#cores[@]} != 0 ]]; then fail '--no-core 与 --core 不能同时使用。'; fi
 [[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
 [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ ]] || fail '版本号必须是 X.Y.Z 或 X.Y.Z-rc.N（N 为无前导零的正整数）。'
 [[ $panel =~ ^[A-Za-z0-9.-]+$ ]] || fail '面板地址只能是域名或 IPv4（字母、数字、点、连字符，不含端口）。'
@@ -114,13 +118,11 @@ done
 ((10#$http_port != 10#$grpc_port)) || fail '--http-port 与 --grpc-port 不能是同一个端口：--http-port 是面板 Web（HTTPS）端口，本脚本用它下载 /install/ca.pem 并登记，也就是面板 config.yaml 里 http_address 的端口（默认 22550）；--grpc-port 是 Agent 的 gRPC 端口（默认 18880）。同一块面板上这两个端口不同，请照面板注册对话框给出的命令原样执行。'
 [[ $ca_sha256 =~ ^[0-9a-f]{64}$ ]] || fail '面板证书 SHA-256 必须是 64 位小写十六进制。'
 [[ $token =~ ^[A-Za-z0-9_-]{16,128}$ ]] || fail '注册码必须是 16-128 位 URL 安全字符。'
-if [[ ${#cores[@]} == 0 ]]; then cores=(xray); fi
+if [[ ${#cores[@]} == 0 && $no_core == false ]]; then cores=(xray); fi
 seen=' '
 for core in "${cores[@]}"; do
   [[ $core == xray || $core == sing-box || $core == gost ]] || fail 'Core must be xray, sing-box or gost.'
   [[ $seen != *" $core "* ]] || fail 'Duplicate --core.'
-  # GOST only serves port forwards, so it can never be the first (primary) core.
-  [[ $seen != ' ' || $core != gost ]] || fail 'GOST cannot be the first core; list --core xray or --core sing-box first.'
   seen+="$core "
 done
 # An offline installation supplies both files: the archive is checked against the
@@ -284,6 +286,7 @@ binary=$source_dir/bin/proxy-agent
 digest=$(sha256sum -- "$binary"); digest=${digest%% *}
 [[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
 core_arguments=(--core-source "$core_source" --qui-version "$version")
+if $no_core; then core_arguments+=(--no-core); fi
 for core in "${cores[@]}"; do
   case $core in
     xray)
@@ -640,7 +643,13 @@ printf 'proxy-agent 服务状态：%s\n' "$(service_state proxy-agent)"
 if [[ $web_upgrade == true ]]; then
   agent_enable_web_upgrade || true
 fi
-printf '\n节点已安装并登记：面板 %s，核心 %s。\n' "$panel" "${cores[*]}"
+if [[ " ${cores[*]} " == *' xray '* || " ${cores[*]} " == *' sing-box '* ]]; then
+  printf '\n节点已安装并登记：面板 %s，核心 %s。\n' "$panel" "${cores[*]}"
+else
+  printf '\n节点已安装并登记：面板 %s。\n' "$panel"
+  if [[ " ${cores[*]} " == *' gost '* ]]; then printf '已安装 GOST，仅用于端口转发与隧道。\n'; fi
+  printf '未安装用户内核，可在面板 内核管理 添加。\n'
+fi
 if [[ $web_upgrade != true ]]; then
   printf '网页升级未启用；需要在面板网页上升级 Agent 时，在本机运行一次 qui-update --component agent。\n'
 fi

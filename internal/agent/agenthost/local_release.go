@@ -217,6 +217,9 @@ func (r *jobRunner) prepareLocal(signed release.Signed) (LocalAgentStatus, error
 // install never run concurrently. Store.Queue additionally reserves against a
 // web request arriving while this preflight is in progress.
 func (r *jobRunner) handleLocal(request localRequest, lease <-chan struct{}) (status LocalAgentStatus, resultErr error) {
+	if request.Operation == "activate-core-optional" {
+		return LocalAgentStatus{NodeID: r.nodeID}, r.activateCoreOptional()
+	}
 	if request.Operation == "receipt" {
 		receipt, err := r.localInstallReceipt(request.RequestID)
 		if err == nil && receipt.Request.Release != request.Release {

@@ -30,6 +30,9 @@ type networkAvailable func(desiredstate.Network) error
 // render, before any runtime or retained revision is changed. The node binding
 // also applies to core-owned internal outbounds, so it is checked separately.
 func (r *Reconciler) verifyOutboundNetworks(state desiredstate.State) error {
+	if multi, ok := r.Adapter.(*core.MultiRuntime); ok && multi.Name() == "" {
+		return nil
+	}
 	available := r.NetworkAvailable
 	if available == nil {
 		available = verifyNetworkAvailable

@@ -17,6 +17,9 @@ func (m *MultiRuntime) AddIdle(r Runtime) error {
 	m.runtimes[r.Name()] = r
 	m.names = append(m.names, r.Name())
 	m.expected[r.Name()] = false
+	if m.primary == "" && CarriesUsers(r.Name()) {
+		m.primary = r.Name()
+	}
 	return nil
 }
 func (m *MultiRuntime) RemoveIdle(name string) error {
@@ -26,7 +29,7 @@ func (m *MultiRuntime) RemoveIdle(name string) error {
 	if r == nil {
 		return errors.New("unknown core")
 	}
-	if len(m.names) == 1 || m.expected[name] {
+	if m.expected[name] {
 		return errors.New("core is required")
 	}
 	if err := r.Close(); err != nil {
@@ -43,9 +46,8 @@ func (m *MultiRuntime) RemoveIdle(name string) error {
 	}
 	if m.primary == name {
 		// GOST only serves forwards: the primary is the core that serves inbounds
-		// without an explicit core, so it is never handed to GOST. Removing the
-		// last core that carries users is refused before this point.
-		m.primary = m.names[0]
+		// without an explicit core, so it is never handed to GOST.
+		m.primary = ""
 		for _, remaining := range m.names {
 			if CarriesUsers(remaining) {
 				m.primary = remaining

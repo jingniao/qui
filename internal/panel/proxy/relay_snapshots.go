@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"proxycontrol/internal/panel/node"
 	"sort"
 )
 
@@ -77,6 +78,9 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 		n, err := s.Nodes.Get(ctx, nodeID)
 		if err != nil || !n.Enabled {
 			return nil, errors.New("associated node unavailable")
+		}
+		if node.CoreOptional(n.Capabilities) {
+			return nil, node.ErrNoUserCore
 		}
 		for _, inbound := range state.Inbounds {
 			if !inbound.Enabled {

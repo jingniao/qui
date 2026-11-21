@@ -135,6 +135,7 @@
 </template>
 
 <script setup lang="ts">
+import { nodeHasUserCore } from '../../nodes/coreSummary';
 import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import EntrySecurityEditor from './relay/EntrySecurityEditor.vue';
@@ -188,7 +189,7 @@ const quicImport = computed(() => exitImport.value?.protocol === 'hysteria2' || 
 watch([mode, importExitReasons], ([value]) => { if (value === 'proxy' && exitImportId.value && !convertible(exitImportId.value)) exitImportId.value = ''; });
 const saving = ref(false), planning = ref(false), error = ref('');
 const plan = ref<QuickRelayPlan | null>(null), created = ref<QuickRelayResult | null>(null), createdName = ref('');
-const liveServers = computed(() => props.servers.filter(server => server.enabled && !server.deletedAt));
+const liveServers = computed(() => props.servers.filter(server => server.enabled && !server.deletedAt && nodeHasUserCore(server)));
 const exitOptions = computed(() => props.inbounds.filter(inbound => isUserEntry(inbound) && inbound.protocol !== 'forward' && inbound.enabled && liveServers.value.some(server => server.id === inbound.nodeId)));
 const exit = computed(() => exitOptions.value.find(inbound => inbound.id === form.exitInboundId));
 const exitKey = computed({

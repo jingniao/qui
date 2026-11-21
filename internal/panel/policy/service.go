@@ -64,6 +64,8 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 	for _, id := range input.Scope.NodeIDs {
 		if n, err := s.Nodes.Get(ctx, id); err != nil || n.DeletedAt != "" {
 			return Record{}, errors.New("policy node not found")
+		} else if node.CoreOptional(n.Capabilities) {
+			return Record{}, node.ErrNoUserCore
 		}
 	}
 	for _, id := range input.Scope.GroupIDs {
@@ -92,6 +94,13 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 			return Record{}, err
 		}
 		if len(input.Scope.NodeIDs) == 0 {
+			n, err := s.Nodes.Get(ctx, owner)
+			if err != nil {
+				return Record{}, err
+			}
+			if node.CoreOptional(n.Capabilities) {
+				return Record{}, node.ErrNoUserCore
+			}
 			input.Scope.NodeIDs = []string{owner}
 		} else if len(input.Scope.NodeIDs) != 1 || input.Scope.NodeIDs[0] != owner {
 			return Record{}, errors.New("proxy target policy must apply to its owning entry node")
@@ -275,8 +284,11 @@ func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy, native 
 	return rule, shared.ValidateExpanded(&rule)
 }
 func (s *Service) ForNode(ctx context.Context, nodeID string) ([]desiredstate.Policy, error) {
-	if _, err := s.Nodes.Get(ctx, nodeID); err != nil {
+	if n, err := s.Nodes.Get(ctx, nodeID); err != nil {
 		return nil, err
+	} else if node.CoreOptional(n.Capabilities) {
+		// Global and group policies have no user runtime on this node.
+		return []desiredstate.Policy{}, nil
 	}
 	groups, err := s.Nodes.GroupIDsForNode(ctx, nodeID)
 	if err != nil {

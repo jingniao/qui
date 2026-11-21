@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/httpapi"
 	"strings"
@@ -62,6 +63,10 @@ func (h *Handler) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshots, err := planner.ChainSnapshots(r.Context(), body.ChainID, h.Users)
 	if err != nil {
+		if errors.Is(err, node.ErrNoUserCore) {
+			h.fail(w, err)
+			return
+		}
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
@@ -116,6 +121,10 @@ func (h *Handler) changeBatch(w http.ResponseWriter, r *http.Request, rollback b
 		err = h.Repository.StartBatch(r.Context(), batch.ID)
 	}
 	if err != nil {
+		if errors.Is(err, node.ErrNoUserCore) {
+			h.fail(w, err)
+			return
+		}
 		httpapi.Error(w, 409, "deployment_conflict", err.Error())
 		return
 	}
@@ -146,6 +155,10 @@ func (h *Handler) rollbackNode(w http.ResponseWriter, r *http.Request) {
 	}
 	command, err := h.Repository.RollbackNode(r.Context(), n.ID, body.Revision)
 	if err != nil {
+		if errors.Is(err, node.ErrNoUserCore) {
+			h.fail(w, err)
+			return
+		}
 		httpapi.Error(w, 409, "deployment_conflict", err.Error())
 		return
 	}

@@ -4,13 +4,14 @@
       <h2 class="text-ios-label text-base font-semibold leading-normal">节点</h2>
       <div class="flex gap-2">
         <button class="ios-action-btn-secondary text-xs px-2.5 py-1" @click="$emit('manage')">管理</button>
-        <button v-if="isOwner && !node.deletedAt" class="ios-action-btn-primary text-xs px-2.5 py-1" @click="$emit('create')">+ 新建节点</button>
+        <button v-if="isOwner && !node.deletedAt && (nodeHasUserCore(node) || nodeCores(node).some(core => core.name === 'gost'))" class="ios-action-btn-primary text-xs px-2.5 py-1" @click="$emit('create')">+ 新建节点</button>
       </div>
     </div>
     <p class="text-xs sm:text-sm text-ios-secondary">{{ error || (isOwner ? summary : '当前权限无法读取节点配置') }}</p>
   </section>
 </template>
 <script setup lang="ts">
+import { nodeHasUserCore, nodeCores } from '../../coreSummary';
 import { computed, ref, watch, onUnmounted } from 'vue';
 import type { NodeView } from '../../api';
 import { proxyAPI, choices, type Inbound } from '../../../proxy/api';

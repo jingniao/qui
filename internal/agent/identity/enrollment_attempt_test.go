@@ -8,6 +8,18 @@ import (
 	"testing"
 )
 
+func TestEnrollmentDirectoryAcceptsInstalledSystemUpdateDirectory(t *testing.T) {
+	directory := t.TempDir()
+	for _, name := range []string{"identity", "system-update"} {
+		if err := os.Mkdir(filepath.Join(directory, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := requireEnrollmentDirectory(context.Background(), directory, false); err != nil {
+		t.Fatalf("fresh installed system-update directory rejected: %v", err)
+	}
+}
+
 // install.sh --node creates host-network/ and tuning/ before the first
 // enrollment, so a fresh data directory with only those folders must still
 // accept an enrollment.

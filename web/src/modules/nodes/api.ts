@@ -50,7 +50,7 @@ export interface NodeView extends NodeNetworkSettings {
   // Set once the node was logically deleted; an empty string means "live".
   deletedAt: string;
   coreSelectionBlocked?:CoreName[];
-  capabilities: { inbound_egress_source_supported?: boolean; multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; tls_certificate_files_supported?: boolean; server_settings_contract_version?: number; server_settings_combinations?: ServerSettingsCombination[]; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[]; panel_catalogue_supported?: boolean; port_hop_supported?: boolean; };
+  capabilities: { core_optional_supported?: boolean; inbound_egress_source_supported?: boolean; multi_core_supported?:boolean; cores?:CoreCapability[]; host?: HostInfo; tuningSupported?: boolean; core_name?: string; core_version?: string; singbox_user_stats?: boolean; tls_certificate_files_supported?: boolean; server_settings_contract_version?: number; server_settings_combinations?: ServerSettingsCombination[]; protocols?: { protocol: string; inbound?: boolean; outbound?: boolean; tcp?: boolean; udp?: boolean }[]; panel_catalogue_supported?: boolean; port_hop_supported?: boolean; };
   heartbeat: { bootId?: string; defaultRouteInterface?: string; cores?:CoreStatus[]; load1?: number; load5?: number; load15?: number; processCount?: string; tcpConnections?: string; udpSockets?: string; memoryUsedBytes?: string; swapUsedBytes?: string; diskUsedBytes?: string; tuningCurrent?: Record<string,string>; traffic_source_status?:TrafficSourceStatus; collector_status?:CollectorStatus; spool_status?: { failure_code?: "queue_unavailable"|"capacity_unavailable"|"capacity_invalid"|"access_head_unavailable"|"access_head_invalid"|"traffic_head_unavailable"|"traffic_head_invalid"|"observation_timeout"|"observation_interrupted"; measured?: boolean; payload_bytes?: number; disk_bytes?: number; disk_limit?: number; database_bytes?: number; database_limit?: number; pending_batches?: number; dropped_allowed_rollups?: number; status: "ok" | "near_capacity" | "capacity_exceeded" | "unavailable"; observed_at?: { seconds?: number; nanos?: number } }; cpu_percent?: number; memory_percent?: number; disk_percent?: number; active_connections?: number; active_connections_measured?: boolean; active_connections_scope?: string; active_connections_observed_at?: { seconds?: number; nanos?: number }; upload_bytes?: number; download_bytes?: number; current_revision?: number; successful_revision?: number; core_healthy?: boolean; core_error?: 'core_unhealthy' | 'accounting_interrupted' };
 }
 // The panel publishes the release version, the gRPC port and the digest of the
@@ -76,8 +76,8 @@ export function installCommand(input: { version: string; host: string; httpPort:
   // ships one linux/amd64 archive, so the installer itself refuses that flag on
   // any other platform.
   const selected = [...new Set(input.cores ?? (input.core ? [input.core] : ["xray"]))];
-  if (!selected.length || selected.some(core => core !== 'xray' && core !== 'sing-box' && core !== 'gost')) throw new Error('请至少选择一个运行内核（xray、sing-box 或 gost）');
-  const coreFlags = selected.map(core => ` --core ${core}`).join("");
+  if (selected.some(core => core !== 'xray' && core !== 'sing-box' && core !== 'gost')) throw new Error('运行内核只能选择 xray、sing-box 或 gost');
+  const coreFlags = selected.length ? selected.map(core => ` --core ${core}`).join("") : ' --no-core';
   // Both ports are always passed explicitly so the command never depends on
   // node-install.sh's own defaults (22550 / 18880): a panel that keeps a different
   // port pair still installs a node that connects to the port it actually serves.

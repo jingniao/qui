@@ -30,9 +30,6 @@ func (i *coreInstallation) Close() {
 
 // coreComponent is the managed core of this node.
 func coreComponent(c config.Agent) string {
-	if c.CoreName == "" {
-		return "xray"
-	}
 	return c.CoreName
 }
 
@@ -62,6 +59,9 @@ func openCoreHistory(c config.Agent, nodeID string) (*updater.History, error) {
 // used to finish an interrupted switch. It returns nil when the node has never
 // recorded a core installation.
 func openCoreInstallation(ctx context.Context, c config.Agent, nodeID string) (*coreInstallation, error) {
+	if coreComponent(c) == "" {
+		return nil, nil
+	}
 	directory, checkpoint := coreHistoryPaths(c)
 	_, directoryErr := os.Lstat(directory)
 	_, checkpointErr := os.Lstat(checkpoint)
@@ -160,7 +160,7 @@ func coreHistoryPaths(c config.Agent) (string, string) {
 		}
 	}
 	cores := configuration.Cores(c)
-	if coreComponent(c) != cores[0].Name {
+	if coreComponent(c) != configuration.PrimaryCore(cores).Name || coreComponent(c) == "" {
 		return filepath.Join(c.DataDirectory, "core-release-history", coreComponent(c)), filepath.Join(c.DataDirectory, "identity", "core-release-"+coreComponent(c)+".enc")
 	}
 	return filepath.Join(c.DataDirectory, "release-history"), filepath.Join(c.DataDirectory, "identity", "release-checkpoint.enc")

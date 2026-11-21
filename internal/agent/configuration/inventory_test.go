@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/platform/config"
+	"strings"
 	"testing"
 )
 
@@ -61,16 +62,16 @@ func TestInventoryKeepsPrimaryWhenOriginalCoreIsReenabled(t *testing.T) {
 	}
 }
 
-// An inventory written before the rule existed can name GOST as primary, or leave
-// it first after disabling Xray; the merge refuses both.
+// A GOST-only inventory is valid, but GOST may never be an explicit primary.
 func TestInventoryNeverMakesGostThePrimary(t *testing.T) {
 	c := config.Agent{DataDirectory: t.TempDir(), CoreName: "xray", CorePath: "/installer/xray"}
-	for _, i := range []Inventory{
-		{NodeID: "node", Primary: "gost", Entries: map[string]InventoryCore{"gost": {Path: "/managed/gost"}}},
-		{NodeID: "node", Entries: map[string]InventoryCore{"xray": {Disabled: true}, "gost": {Path: "/managed/gost"}}},
-	} {
-		if _, err := i.Merge(c); err != errGostPrimary {
-			t.Fatalf("%+v merged: %v", i, err)
-		}
+	i := Inventory{NodeID: "node", Entries: map[string]InventoryCore{"xray": {Disabled: true}, "gost": {Path: "/managed/gost"}}}
+	cores, err := i.Merge(c)
+	if err != nil || len(cores) != 1 || cores[0].Name != "gost" || PrimaryCore(cores).Name != "" {
+		t.Fatal(cores, err)
+	}
+	i.Primary = "gost"
+	if _, err := i.Merge(c); err == nil || !strings.Contains(err.Error(), "primary must carry users") {
+		t.Fatal(err)
 	}
 }

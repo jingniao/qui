@@ -1060,6 +1060,7 @@
 </template>
 
 <script setup lang="ts">
+import { nodeHasUserCore } from '../../nodes/coreSummary';
 import { readTogether } from '../../../app/readTogether';
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import CanvasConnectionDialog from '../components/relay/CanvasConnectionDialog.vue';
@@ -1427,7 +1428,7 @@ function instanceNodeId(instance: CanvasNodeInstance): string | undefined {
 }
 const externalOwnerNodes = computed(() => {
   const ids = new Set(currentScheme.value.nodes.filter(n => n.role !== 'exit').map(instanceNodeId));
-  return servers.value.filter(n => ids.has(n.id));
+  return servers.value.filter(n => ids.has(n.id) && nodeHasUserCore(n));
 });
 function openExternalProxy() {
   if (!externalOwnerNodes.value.length) { showToast('请先添加出口前一跳的服务器或自建入站', 'info'); return; }
@@ -1445,6 +1446,7 @@ function placeExternalProxy(outbound: Outbound) {
 // Filtered resources
 const filteredServers = computed(() => {
   return displayServers.value.filter(s => {
+    if (!nodeHasUserCore(s)) return false;
     if (resourceSearch.value.trim()) {
       const q = resourceSearch.value.trim().toLowerCase();
       return (s.name || '').toLowerCase().includes(q) || (s.publicIp || '').includes(q);
@@ -1475,7 +1477,7 @@ const importedNodes = computed(() => {
   });
 });
 
-const selfHostedNodes = computed(() => selfHostedLibraryItems(displayServers.value, inbounds.value, resourceSearch.value, statusNow.value));
+const selfHostedNodes = computed(() => selfHostedLibraryItems(displayServers.value.filter(nodeHasUserCore), inbounds.value, resourceSearch.value, statusNow.value));
 
 const subscriptionNodes = computed(() => {
   return importedNodes.value.filter(n => n.sourceType === 'subscription');

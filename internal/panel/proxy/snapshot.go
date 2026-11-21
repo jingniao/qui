@@ -108,6 +108,9 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 	if err != nil {
 		return state, enabled, err
 	}
+	if node.CoreOptional(n.Capabilities) && (len(configuredGroups) > 0 || len(outbounds) > 0) {
+		return state, enabled, node.ErrNoUserCore
+	}
 	for _, group := range configuredGroups {
 		if group.Enabled {
 			if err := s.validateSavedGroup(ctx, group); err != nil {

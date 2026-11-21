@@ -114,6 +114,10 @@
         <input v-model="form.maintenance" type="checkbox" class="rounded border-black/20 text-ios-blue" />
         <span>设为维护模式（暂时排除在订阅之外）</span>
       </label>
+      <label v-if="canAutoRenew(form.renewDate, form.renewCycle)" class="flex items-center gap-2 cursor-pointer text-xs font-medium text-neutral-800">
+        <input v-model="form.autoRenew" type="checkbox" class="rounded border-black/20 text-ios-blue" />
+        <span>自动续费（过了到期日按续费周期自动顺延）</span>
+      </label>
     </div>
 
   </div>
@@ -121,7 +125,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import AppSelect from '../../../components/AppSelect.vue';
-import { CURRENCY_LIST, CYCLE_LIST } from '../nodeMeta';
+import { CURRENCY_LIST, CYCLE_LIST, canAutoRenew } from '../nodeMeta';
 import { MACHINE_TRAFFIC_METHODS, type MachineTrafficForm } from '../machineTrafficModel';
 import { addTag } from '../serverOrder';
 import { validConnectHost } from '../nodeAddress';

@@ -126,6 +126,22 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger, l
 		return err
 	}
 	controlOnly := baselinePending || state.Phase == "failed_closed" || needsRecovery
+	optional, err := coreOptionalRequired(configPath, c.DataDirectory, node.NodeID)
+	if err != nil {
+		return err
+	}
+	if optional && required.Formats.Configuration.Write < 6 {
+		if controlOnly {
+			return errors.New("fallback_incompatible: core-optional activation requires an idle supervised Agent")
+		}
+		if err := raiseCoreOptionalFormat(ctx, c.DataDirectory, node.NodeID, agentstorage.Current(version), required, history, images, r.Baseline, jobsIdle); err != nil {
+			return fmt.Errorf("fallback_incompatible: %w", err)
+		}
+		required, _, err = storage.Check(c.DataDirectory, node.NodeID, agentstorage.Current(version))
+		if err != nil {
+			return err
+		}
+	}
 	if !controlOnly {
 		// The Worker cannot take the history locks held here, so this process
 		// raises the storage floors, as it does for nothing else, while it still

@@ -27,13 +27,14 @@ import (
 // expected executable, checks its own version and switches under the existing
 // supervised rollback.
 type coreUpdates struct {
-	makeRuntime func(string, string, string, string) core.Runtime
-	children    map[string]*coreUpdates
-	cfg         config.Agent
-	nodeID      string
-	component   string
-	manager     *reconcile.Reconciler
-	source      *updater.CoreSource
+	makeRuntime  func(string, string, string, string) core.Runtime
+	children     map[string]*coreUpdates
+	cfg          config.Agent
+	nodeID       string
+	agentVersion string
+	component    string
+	manager      *reconcile.Reconciler
+	source       *updater.CoreSource
 	// capabilities is the node's shared capability holder and detect re-reads
 	// the installed core, so a committed or rolled-back image immediately
 	// replaces what every later session reports.

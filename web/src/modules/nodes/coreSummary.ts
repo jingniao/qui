@@ -34,6 +34,12 @@ export function isCoreName(value: unknown): value is CoreName {
   return value === 'xray' || value === 'sing-box' || value === 'gost';
 }
 
+// Older Agents keep their existing behaviour when the capability is absent.
+export function nodeHasUserCore(node?: Pick<NodeView, 'capabilities'> | null): boolean {
+  return node?.capabilities?.core_optional_supported !== true
+    || (node.capabilities.cores ?? []).some(core => core.name === 'xray' || core.name === 'sing-box');
+}
+
 export function coreLabel(name: CoreName | string | undefined): string {
   if (name === 'xray') return 'Xray';
   if (name === 'sing-box') return 'sing-box';
@@ -54,7 +60,8 @@ export function nodeCores(node?: NodeView | null): NodeCore[] {
   const statuses = Array.isArray(node.heartbeat?.cores) ? node.heartbeat!.cores! : [];
   const statusOf = (name: string) => statuses.find(item => item && item.name === name);
   const listed = (Array.isArray(caps.cores) ? caps.cores : []).filter(core => core && isCoreName(core.name)) as CoreCapability[];
-  const primaryName = isCoreName(caps.core_name) ? caps.core_name : listed[0]?.name;
+  const primaryName = isCoreName(caps.core_name) ? caps.core_name
+    : caps.core_optional_supported ? undefined : listed[0]?.name;
   if (!listed.length) {
     if (!primaryName) return [];
     const status = statusOf(primaryName);
@@ -95,7 +102,7 @@ export function primaryCoreName(node?: NodeView | null): CoreName | '' {
 
 export function findCore(node: NodeView | undefined | null, name: CoreName | ''): NodeCore | undefined {
   const cores = nodeCores(node);
-  if (!name) return cores.find(core => core.primary) || cores[0];
+  if (!name) return cores.find(core => core.primary) || (node?.capabilities?.core_optional_supported ? undefined : cores[0]);
   return cores.find(core => core.name === name);
 }
 
@@ -111,6 +118,7 @@ export function blockedCores(node?: NodeView | null): CoreName[] {
 // "Xray 26.3.27 · sing-box 1.14.4"; "—" when the Agent reported nothing.
 export function coreSummaryLabel(node?: NodeView | null): string {
   const cores = nodeCores(node);
+  if (!nodeHasUserCore(node)) return cores.some(core => core.name === 'gost') ? '仅 GOST（纯转发）' : '未安装内核';
   if (!cores.length) return '—';
   return cores.map(core => `${core.label} ${core.version}`).join(' · ');
 }

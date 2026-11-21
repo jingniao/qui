@@ -20,6 +20,17 @@ func validateStateCoresTx(ctx context.Context, tx *sql.Tx, state desiredstate.St
 	if err := storedJSON.Unmarshal(raw, c); err != nil {
 		return err
 	}
+	if node.CoreOptional(c) {
+		if len(state.OutboundGroups) > 0 || len(state.ProxyChains) > 0 || len(state.Policies) > 0 {
+			return node.ErrNoUserCore
+		}
+		for _, out := range state.Outbounds {
+			// Baseline direct/block are required even for GOST-only revisions.
+			if (out.ID != "direct" || out.Protocol != "direct") && (out.ID != "block" || out.Protocol != "block") {
+				return node.ErrNoUserCore
+			}
+		}
+	}
 	for _, in := range state.Inbounds {
 		if err := proxy.ValidateInboundCore(c, in.Core, in.Protocol); err != nil {
 			name := in.Core

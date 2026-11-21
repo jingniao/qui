@@ -61,6 +61,9 @@ func (h *Handler) createProxyRevision(ctx context.Context, nodeID, summary, auth
 		return Revision{}, &apiFailure{Status: 503, Code: "unavailable", Message: "Proxy configuration unavailable"}
 	}
 	state, enabled, err := h.Proxy.SnapshotIntent(ctx, nodeID, h.Users)
+	if errors.Is(err, node.ErrNoUserCore) {
+		return Revision{}, err
+	}
 	var capability *node.CapabilityError
 	if errors.As(err, &capability) {
 		return Revision{}, &apiFailure{Status: 409, Code: capability.Code(), Message: capability.Message}

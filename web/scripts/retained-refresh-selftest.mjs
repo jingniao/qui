@@ -314,10 +314,12 @@ test('review: deleting the last row on page two reloads page one and preserves a
 });
 
 test('review: server detail distinguishes unmeasured outbound sections from confirmed empty results', async () => {
+  const coreSummaryCode = ts.transpileModule(read('modules/nodes/coreSummary.ts'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  const { nodeHasUserCore } = await import('data:text/javascript;base64,' + Buffer.from(coreSummaryCode).toString('base64'));
   const path = 'modules/nodes/components/detail/ServerNodes.vue';
   const props = Vue.reactive({ node: { id: 'one' }, refresh: 0 });
   let outbound = deferred(), exits = deferred();
-  const bindings = { ...common, isOwner: Vue.ref(true), defineProps: () => props, defineEmits: () => () => {}, choices: f => f(1, 100),
+  const bindings = { ...common, nodeHasUserCore, isOwner: Vue.ref(true), defineProps: () => props, defineEmits: () => () => {}, choices: f => f(1, 100),
     proxyAPI: { inbounds: async () => [], outbounds: () => outbound.promise, groups: () => exits.promise } };
   const names = 'inbounds,outbounds,exits,error,loading,inboundReady,outboundReady: typeof outboundReady === "undefined" ? undefined : outboundReady, exitsReady: typeof exitsReady === "undefined" ? undefined : exitsReady';
   const p = page(path, bindings, names); const html = () => render(path, { ...bindings, ...p, node: props.node });

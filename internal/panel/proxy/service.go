@@ -125,16 +125,16 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Inbound{}, errors.New("node missing or disabled")
 	}
-	if input.EgressSourceIP != "" {
-		if err := node.RequireOutboundSourceSupport(desiredstate.State{NodeID: n.ID, Inbounds: []desiredstate.Inbound{{Core: input.Core, EgressSourceIP: input.EgressSourceIP, Enabled: input.Enabled}}, Network: desiredstate.NetworkOrNil(n.OutboundSourceIP, n.OutboundInterface, n.HostSourceIPv4, n.HostSourceIPv6)}, n.Capabilities, n.Name); err != nil {
-			return Inbound{}, err
-		}
-	}
 	if node.CoreSelectionIsBlocked(n, input.Core) {
 		return Inbound{}, errors.New("core_pending: wait for success and refreshed capabilities")
 	}
 	if err := ValidateInboundCore(n.Capabilities, input.Core, input.Protocol); err != nil {
 		return Inbound{}, err
+	}
+	if input.EgressSourceIP != "" {
+		if err := node.RequireOutboundSourceSupport(desiredstate.State{NodeID: n.ID, Inbounds: []desiredstate.Inbound{{Core: input.Core, EgressSourceIP: input.EgressSourceIP, Enabled: input.Enabled}}, Network: desiredstate.NetworkOrNil(n.OutboundSourceIP, n.OutboundInterface, n.HostSourceIPv4, n.HostSourceIPv6)}, n.Capabilities, n.Name); err != nil {
+			return Inbound{}, err
+		}
 	}
 	if err := ValidateInboundForwardOptions(n.Capabilities, input.Core, input.Settings); err != nil {
 		return Inbound{}, err
@@ -410,6 +410,9 @@ func (s *Service) saveOutbound(ctx context.Context, id string, input OutboundInp
 		targetNode, err := s.Nodes.Get(ctx, target.NodeID)
 		if err != nil || !targetNode.Enabled || targetNode.DeletedAt != "" || targetNode.PublicIP == "" {
 			return Outbound{}, errors.New("target node needs an enabled public endpoint")
+		}
+		if node.CoreOptional(targetNode.Capabilities) {
+			return Outbound{}, node.ErrNoUserCore
 		}
 		input.TargetNodeID = target.NodeID
 		input.Address = targetNode.PublicIP

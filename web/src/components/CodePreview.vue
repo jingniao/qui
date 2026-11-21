@@ -14,7 +14,7 @@
       </button>
     </div>
     <div class="p-4 overflow-x-auto max-h-96 leading-relaxed selection:bg-indigo-500 selection:text-white">
-      <pre>{{ code }}</pre>
+      <pre :class="wrap ? 'whitespace-pre-wrap break-all' : ''">{{ code }}</pre>
     </div>
   </div>
 </template>
@@ -25,6 +25,8 @@ import { ref } from 'vue';
 const props = defineProps<{
   code: string;
   title?: string;
+  // Wrap a long one-line command so all of it stays visible.
+  wrap?: boolean;
 }>();
 
 const copied = ref(false);

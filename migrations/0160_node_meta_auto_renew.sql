@@ -1,0 +1,1 @@
+ALTER TABLE node_meta ADD COLUMN auto_renew INTEGER NOT NULL DEFAULT 0 CHECK(auto_renew IN (0,1));

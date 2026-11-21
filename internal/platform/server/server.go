@@ -411,7 +411,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		s.certificateDeployer.renewed(ctx, certificateID)
 	}
 	s.latencyScheduler = &node.LatencyScheduler{Repository: nodeRepository, Logger: logger}
-	s.cycleScheduler = &cycleScheduler{users: users, nodes: nodeRepository, settings: systemRepository, quota: s.quotaDeployer, now: time.Now, publish: eventBus.Publish}
+	s.cycleScheduler = &cycleScheduler{users: users, nodes: nodeRepository, settings: systemRepository, quota: s.quotaDeployer, now: time.Now, publish: eventBus.Publish, refresh: runtimeSnapshots.Refresh}
 	users.TrafficApplied = s.quotaDeployer.evaluate
 	// A deploy or rollback re-publishes a stored revision verbatim, so the node's
 	// user access surface is only known to be correct after the Deployment module

@@ -185,6 +185,9 @@ func (s *Service) validateChain(ctx context.Context, chainID string, input Chain
 		if err != nil || !n.Enabled || n.DeletedAt != "" {
 			return Chain{}, errors.New("chain node missing or disabled")
 		}
+		if node.CoreOptional(n.Capabilities) {
+			return Chain{}, node.ErrNoUserCore
+		}
 		nodes[nodeID] = n
 	}
 	hops := []ChainHop{}

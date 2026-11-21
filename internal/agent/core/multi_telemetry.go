@@ -25,13 +25,21 @@ func (m *MultiRuntime) UnconfirmedStop() bool {
 	return false
 }
 func (m *MultiRuntime) CoreStartedAt() time.Time {
-	if r, ok := m.Component("").(interface{ CoreStartedAt() time.Time }); ok {
+	runtime := m.Component("")
+	if runtime == nil {
+		return time.Time{}
+	}
+	if r, ok := runtime.(interface{ CoreStartedAt() time.Time }); ok {
 		return r.CoreStartedAt()
 	}
 	return time.Time{}
 }
 func (m *MultiRuntime) TrafficSourceStatus() *pb.TrafficSourceStatus {
-	if r, ok := m.Component("").(interface {
+	runtime := m.Component("")
+	if runtime == nil {
+		return nil
+	}
+	if r, ok := runtime.(interface {
 		TrafficSourceStatus() *pb.TrafficSourceStatus
 	}); ok {
 		return r.TrafficSourceStatus()

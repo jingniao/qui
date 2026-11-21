@@ -102,6 +102,9 @@ func (s *Source) Proxies(ctx context.Context, viewer source.Viewer) ([]proxy.Pro
 		}
 	}
 	for _, n := range nodes {
+		if node.CoreOptional(n.Capabilities) {
+			continue
+		}
 		state, err := s.Published.Published(ctx, n.ID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue

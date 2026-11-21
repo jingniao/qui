@@ -1,3 +1,4 @@
+import { nodeHasUserCore } from '../nodes/coreSummary';
 import { computed, onUnmounted, ref, type Ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { APIError, requestScope } from '../../app/apiClient';
@@ -121,9 +122,9 @@ function canUseExistingTunnel(node: ProxyNodeItem): boolean {
 }
 function canAddRelay(node: ProxyNodeItem): boolean {
   if (!isOwner.value) return false;
-  if (node.sourceType !== 'self_hosted') return servers.value.some(server => server.enabled && !server.deletedAt);
-  return canUseExistingTunnel(node) && servers.value.some(server => server.id === node.sourceId && server.enabled && !server.deletedAt) && servers.value.some(server =>
-    server.id !== node.sourceId && server.enabled && !server.deletedAt && quickRelayProtocolChoices(server).length > 0);
+  if (node.sourceType !== 'self_hosted') return servers.value.some(server => server.enabled && !server.deletedAt && nodeHasUserCore(server));
+  return canUseExistingTunnel(node) && servers.value.some(server => server.id === node.sourceId && server.enabled && !server.deletedAt && nodeHasUserCore(server)) && servers.value.some(server =>
+    server.id !== node.sourceId && server.enabled && !server.deletedAt && nodeHasUserCore(server) && quickRelayProtocolChoices(server).length > 0);
 }
 function handleAddRelay(node: ProxyNodeItem) {
   if (!canAddRelay(node)) return;

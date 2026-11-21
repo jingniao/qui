@@ -62,11 +62,11 @@ Go 单文件程序，由 systemd 或 Alpine/OpenRC（含 LXC）管理；通过 g
 
 ## 4.4 代理核心
 
-`cores: [{name,path}]` 列出启用核心，首项为主核心（Xray 或 sing-box）。节点均使用 MultiRuntime 与 `runtime/<core>/`；节点绑定的认证清单 `cores.json.enc` 与 YAML 合并并持久覆盖禁用状态。安装/移除/回滚见第 22.2 节；Agent 不改安装器二进制与安装记录。
+`cores: [{name,path}]` 列出启用核心，主核心为第一个用户内核（Xray 或 sing-box），由 `Inventory.Primary` 显式记录；允许空列表或仅 GOST，此时主核心为空。节点均使用 MultiRuntime 与 `runtime/<core>/`；节点绑定的认证清单 `cores.json.enc` 与 YAML 合并并持久覆盖禁用状态。安装/移除/回滚见第 22.2 节；Agent 不改安装器二进制与安装记录。
 
 Xray、sing-box 承载用户接入、身份、分流、Direct/Block、代理出站、中转/链与统计，协议按能力上报（第 11–13 节）。GOST 固定官方 3.3.2（仅 `linux/amd64`），只承载 `forward`（TCP/UDP）与加密中继，不承载用户身份、凭据、订阅、额度、门控、源观测、域名记录、出站资源、策略或出口组；转发按自身目标直连，仅要求启用的 direct 默认出站。
 
-`desiredstate.Validate` 与 `ValidateCoreProtocol` 拒绝 GOST 的非 forward 入站；空 `core` 随主核心；能否安装 GOST 由 `Hello.gost_core_supported` 决定，不从版本号推断。GOST 不可排 `cores` 首项，且必须保留至少一个 Xray/sing-box（`last_core`）。隧道管理要求各跳已启用 GOST，两节点契约 ≥3、三节点 ≥4，接收跳须公网地址或连接地址覆盖（第 14 节）。
+`desiredstate.Validate` 与 `ValidateCoreProtocol` 拒绝 GOST 的非 forward 入站；空 `core` 随主核心；能否安装 GOST 由 `Hello.gost_core_supported` 决定，不从版本号推断。GOST 永不成为主核心；支持 `core_optional_supported=true` 的 Agent 可没有用户内核（Xray/sing-box），旧 Agent 仍保留最后一个用户内核（`last_core`）。隧道管理要求各跳已启用 GOST，两节点契约 ≥3、三节点 ≥4，接收跳须公网地址或连接地址覆盖（第 14 节）。
 
 # 5. 总体架构
 
@@ -231,7 +231,8 @@ Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）
 列表展示节点名称、在线状态、公网 IP、操作系统、CPU/内存/磁盘使用率、当前连接数、今日流量、Agent 版本、代理核心及版本、当前配置版本、最后心跳时间与本月整机流量（第 21 节）。
 
 - **版本与更新页**：合并管理 Agent 与代理核心，展示各节点 Agent 版本、已启用核心版本/健康/协议及升级/编辑/添加入口；顶部提供「升级全部核心」与「升级全部 Agent」。「升级全部 Agent」直接按最新可用正式版下发任务，不再打开版本确认框；逐台升级仍可选版本，失败显示错误提示，执行结果在任务记录中查看。具体徽标配色、按钮样式、卡片排版与视觉细节统一遵循[设计系统](design-system.md)。
-- **服务器视图与表单**：支持卡片/列表切换、按搜索词与服务器分组标签筛选，监听节点状态 SSE（5 秒节流静默刷新，可见时 30 秒刷新，切回前台立即刷新）。离线卡片去色并在延迟区域提示「已离线」，保留点击与操作。新增与编辑服务器共用表单，提供名称、地区、分组标签、备注、客户端连接地址、默认端口范围（`start-end`，1–65535）、续费信息、整机流量设置（编辑弹窗按 GB 展示，保留原始精确字节，未修改不重写，读取失败阻止保存）与维护模式开关。
+- **服务器视图与表单**：支持卡片/列表切换、按搜索词与服务器分组标签筛选，监听节点状态 SSE（5 秒节流静默刷新，可见时 30 秒刷新，切回前台立即刷新）。离线卡片去色并在延迟区域提示「已离线」，保留点击与操作。新增与编辑服务器共用表单，提供名称、地区、分组标签、备注、客户端连接地址、默认端口范围（`start-end`，1–65535）、续费信息（含自动续费）、整机流量设置（编辑弹窗按 GB 展示，保留原始精确字节，未修改不重写，读取失败阻止保存）与维护模式开关。
+- **自动续费**：`node_meta.auto_renew`（`PUT /nodes/{id}/meta` 字段 `autoRenew`，省略保持原值）只在已填续费到期日且周期为 `/月`、`/季`、`/半年`、`/年`、`/2年`、`/3年` 时可开启，否则 400；表单仅在满足条件时显示勾选框，改为一次性或清空日期即关闭。面板每分钟按面板时区检查：到期日早于今天（当天不算过期）时按周期整月顺延，直到不早于今天；每次从原日期计算，月末日期夹紧到短月末日（01-31 → 02-28）。续费提醒先按原日期照常判断与发送（开启自动续费不影响提醒），随后顺延并写入审计 `system`「自动续费 旧日期 → 新日期」。
 - **分组标签与排序**：服务器分组存于 `node_meta.tags_json`，每台最多 10 个标签（1–20 字符、大小写不敏感去重、禁逗号与控制字符），与订阅节点组独立。Owner 拖动卡片调整全局展示顺序，存于 `system_settings.server_order`，「版本与更新」复用同一顺序。标签与顺序不影响授权、订阅或发布。
 - **离线地区识别**：面板内嵌离线 IP→国家表（`internal/panel/geoip`，DB-IP Lite CC BY 4.0，不向外部发请求），按 `publicIp` 推导 `countryCode`（不入库）。显示优先级：管理员指定地区 ＞ `countryCode` ＞ 名称/主机名关键词 ＞ 🌐。
 - **双地址模型**：
@@ -248,18 +249,18 @@ Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）
 
 ## 11.3 节点注册与删除
 
-Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/node-install.sh` 下载同版本发布包、校验 `SHA256SUMS`、建立面板证书信任 → Agent 本地生成私钥并提交 CSR → 面板签证并核销注册码 → 建立 mTLS 长连接（私钥永不上传）。安装命令默认填充「节点安装连接地址」（第 27.14 节），支持可选 `--web-upgrade` 启用网页升级（默认不勾选）。
+Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/node-install.sh` 下载同版本发布包、校验 `SHA256SUMS`、建立面板证书信任 → Agent 本地生成私钥并提交 CSR → 面板签证并核销注册码 → 建立 mTLS 长连接（私钥永不上传）。安装命令默认填充「节点安装连接地址」（第 27.14 节），对话框「启用网页升级」默认勾选，命令带 `--web-upgrade`（脚本本身默认不启用）。
 
 - **原位身份恢复**：主机重装但保留节点身份时，Owner 签发绑定当前指纹的一次性恢复码（300–3600 秒，默认 900 秒，可选立即吊销旧证书；存在未完成任务时返回 409 `node_recovery_blocked` 与 `blockers`）。`node-install.sh --replace-agent` 在同机校验发行包、确认旧服务退出与最终补传后才清理固定数据目录并重新登记。新 Agent 经 `Enroll` 核销恢复码后保留节点 ID 与全部业务配置，旧指纹永久写入 `node_identity_retirements`（备份恢复亦不复活），并在首次能力上报后自动下发当前已发布配置。操作见[运维手册](operations.md#51-原位恢复推荐)。
 - **删除与连带清理**：空白待登记节点取消登记时直接删除；已登记节点逻辑删除（`deleted_at`）、吊销证书、移出分组并关闭本节点待发布/更新/健康检查任务，保留历史流量与访问记录且不可重新启用（不停止远端进程）。删除连带移除该节点全部入站及涉及它的方案、隧道与规则；外部手工出站、出口组、代理链、策略或未收尾发布批次以 409 `node_delete_blocked` 返回 `error.blockers`。预览接口 `GET /api/v1/nodes/{id}/deletion-preview` 列出待删对象与阻塞项；删除成功返回 200 `{pendingNodes:[{nodeId,name,reason}]}`，详见[运维手册](operations.md)。
 
 ## 11.4 节点状态
 
-节点状态统一为：`pending`、`online`、`degraded`、`offline`、`applying`、`rollback`、`disabled`、`error`。
+节点状态统一为：`pending`、`online`、`degraded`、`offline`、`applying`、`rollback`、`disabled`、`error`。带 `core_optional_supported=true` 且启用列表没有 Xray/sing-box 的节点称为无用户内核节点；允许 `core_name` 为空、`cores` 为空或仅含 GOST，非空主核心须为已启用的用户内核。没有任何内核时心跳省略 `core_healthy`，照常 online，不因缺少主核心而降级；GOST 仍按实测健康显示。旧 Agent 不带能力位时，空主核心沿用未知上报规则。节点组服务器成员照常可选；订阅明确排除无用户内核节点。
 
 # 12. 入站代理模块
 
-入站定义用户接入节点或节点间中转的监听协议。单节点支持多入站；内部中转入站须设为订阅隐藏（`subscriptionVisible=false`），隐藏的用户入站不分配用户凭据并渲染为停用。
+无用户内核节点只允许显式 `core=gost` 的 `forward` 入站，且须已启用 GOST；其他入站在保存、画布规划与发布时返回 400 `no_user_core`。空 `core` 不会自动选 GOST。入站定义用户接入节点或节点间中转的监听协议。单节点支持多入站；内部中转入站须设为订阅隐藏（`subscriptionVisible=false`），隐藏的用户入站不分配用户凭据并渲染为停用。
 
 主要字段：名称、所属节点、所属核心（`core`，留空随主核心，填写值须为已上报启用核心且未处于添加/移除 `core_pending`）、协议、监听地址/端口、传输方式、安全方式、允许用户、是否订阅可见、是否启用、默认出站。
 
@@ -287,7 +288,7 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 
 # 13. 出站代理模块
 
-出站定义节点收到流量后的下一跳方式。支持 Direct、Block、HTTP、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard、远程节点、出口组与 Proxy Chain。主要字段含名称、所属节点、类型、目标节点/地址/端口、协议、凭据、TCP/UDP 支持、启用、健康状态与失败策略（Block/Direct/备用出站/备用出口组/备用代理链；固定出口建议 Block 或备用出口，不隐式 Direct）。
+无用户内核节点禁止保存本节点出站（含 Direct/Block 资源）、出口组、代理链跳，以及显式归属该节点的分流与网站控制策略，返回 400 `no_user_core`。中转线路、协议转换中转、画布方案与代理链不能选择这类节点作为中转或出口；GOST 隧道照常。全局/节点组策略保留共享定义，在无用户内核节点上不渲染。出站定义节点收到流量后的下一跳方式。支持 Direct、Block、HTTP、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard、远程节点、出口组与 Proxy Chain。主要字段含名称、所属节点、类型、目标节点/地址/端口、协议、凭据、TCP/UDP 支持、启用、健康状态与失败策略（Block/Direct/备用出站/备用出口组/备用代理链；固定出口建议 Block 或备用出口，不隐式 Direct）。
 
 ## 13.1 节点出站网络
 
@@ -424,7 +425,7 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 - **任务与回执**：按（节点、组件）唯一活跃，同节点不同组件可并发。断线重发同身份；worker 内存队列保留回执至 Ack（连续 3 次永久拒绝则丢弃并 Warn），重启丢失由重连关闭或 Owner 清理兜底。升级成功须等 `Capabilities.cores` 上报后可选，进行中列入 `core_selectionBlocked`（操作拒绝 `core_pending`）。
 - **无修订节点基础配置**：从未发布配置的在线节点升级 Agent 或核心前，调用 `POST /api/v1/nodes/{id}/baseline` 发布仅含节点级必需设置的基础修订（`auto: baseline before upgrade`，无入站不启核），等待确认（最多 3 分钟）后再排队升级。
 
-**核心移除**：`POST /api/v1/nodes/{id}/cores/{component}/remove`（Owner＋CSRF＋`confirmNodeId`＋当前确认修订）创建 `core_remove_tasks`，下发 `RemoveCoreCommand`，移除回执**持久保存**至 Ack。拒绝码：`core_in_use`（草稿/已发布含该核入站，含禁用）、`core_pending`、`last_core`（不可移除最后 Xray/sing-box，GOST 不可作主核心）、`revision_mismatch`。移除须确认进程退出（`ErrCoreStopUnconfirmed` 保留全部现场），随后更新 `cores.json.enc`、删 `runtime/<core>/` 与自管镜像（保留安装器文件）。回滚到已移除核心的历史修订在面板明确拒绝，须重装组件或发布新修订。
+**核心移除**：`POST /api/v1/nodes/{id}/cores/{component}/remove`（Owner＋CSRF＋`confirmNodeId`＋当前确认修订）创建 `core_remove_tasks`，下发 `RemoveCoreCommand`，移除回执**持久保存**至 Ack。拒绝码：`core_in_use`（草稿/已发布含该核入站，含禁用）、`core_pending`、`last_core`（仅不支持可选用户内核的旧 Agent 不可移除最后 Xray/sing-box）、`revision_mismatch`。支持新能力的 Agent 移除最后用户内核前，面板检查全部依赖，任一阻塞返回 409 `user_core_in_use`：非 GOST 入站（草稿及已发布、启用及停用）、本节点出站/出口组/代理链跳、以本节点为中转或出口的中转线路与画布方案；GOST 隧道不阻塞。Agent 先检查回退镜像并激活配置格式 6，失败以 `fallback_incompatible` 结束移除任务，错误码原样保留。移除须确认进程退出（`ErrCoreStopUnconfirmed` 保留全部现场），随后更新 `cores.json.enc`、删 `runtime/<core>/` 与自管镜像（保留安装器文件）。回滚到已移除核心的历史修订在面板明确拒绝，须重装组件或发布新修订。
 
 # 23. Node Agent 模块设计
 
@@ -532,6 +533,7 @@ system        系统设置、备份恢复、证书库、通知与操作日志
 | `0157_agent_system_updates.sql` | `node_update_capabilities` 新增系统更新探测列；新增 `agent_system_update_tasks`/`attempts`/`logs` |
 | `0158_subscription_route_dependencies.sql` | 新增成功发布线路依赖表 `subscription_route_dependencies` |
 | `0159_inbound_egress_source.sql` | 入站新增 `egress_source_ip`，默认空字符串 |
+| `0160_node_meta_auto_renew.sql` | `node_meta` 新增 `auto_renew`（0/1，默认 0） |
 
 **持续生效的运行时与数据兼容合同（v1.7.5 基线）**：
 - **隧道发布收尾（基线 0149 规则）**：部署批次含 Vault 密封收尾 journal 与完成标记，单节点发布亦使用持久批次；请求断开不取消发布，超 300 秒返回 202/`publishing`；终态、周期扫描与重启统一幂等收尾。**启动收尾失败只记日志，不阻止面板启动；未收尾批次继续占用其节点。**
@@ -599,6 +601,12 @@ GET    /install/ca.pem                       # 无需登录，返回面板顶层
 - `metrics`（Owner/Viewer）：默认 24 小时，≤12 小时原始分钟点，>12 小时 epoch 对齐分桶（`intervalSeconds=ceil(hours×60/720)×60`），缺测为 `null`。
 - `tuning` PUT（Owner＋CSRF）：`{settings,clear,confirmNodeId,installMissingModules?}`，拒绝未知字段，202 `{requestId,status:"pending"}`；并发/能力/离线见第 22.0 节。`meta` 支持可选 `bandwidthMbps`（1–100000）与 `portRangeStart`/`portRangeEnd`（须同时设置或清空）。
 - 整机流量：GET 允许 Owner/Viewer，PUT settings 仅 Owner＋CSRF，须提交完整 `{method,interfaceName,allowanceBytes,resetDay}`（拒绝未知字段，字节为十进制字符串，`status` 为 `measured`/`stale`/`unknown`）。
+
+可选用户内核错误合同（Owner 写操作仍要求 CSRF）：
+- 入站、出站、出口组、代理链、节点级分流/网站控制、中转线路与方案的保存及发布门禁返回 **400 `no_user_core`**；显式 GOST forward 与 GOST 隧道按原能力检查。
+- `POST /nodes/{id}/cores/{component}/remove` 移除最后用户内核存在依赖时返回 **409 `user_core_in_use`**。响应为 `{"error":{"code":"user_core_in_use","message":"Core removal refused","inboundIds":[],"outboundIds":[],"outboundGroupIds":[],"proxyChainIds":[],"relayIds":[],"schemeIds":[]}}`，数组始终存在、去重并按 ID 排序；`proxyChainIds` 按涉及本节点的代理链归组（跳无独立 ID），`relayIds` 是 `canvas_tunnels` 中转线路 ID，`schemeIds` 是服务端画布方案 ID。草稿、停用对象同样阻塞。
+- 无用户内核节点的 Agent 单台/批量升级（均走 `/agent-updates`）、重试及历史受管恢复拒绝低于 **1.9.0** 的目标，返回 **400 `agent_version_unsupported`**。配置格式 6 激活后，即使重新添加用户内核，Agent 存储下限仍阻止旧镜像启动。
+- 移除回执 `fallback_incompatible` 保持原码，任务状态为 `rejected`；`core_pending`、`revision_mismatch` 及旧 Agent 的 `last_core` 不变。
 
 ## 27.5 节点组
 

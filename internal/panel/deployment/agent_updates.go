@@ -74,6 +74,9 @@ func (r *Repository) PendingAgentUpdate(ctx context.Context, nodeID string) (*pb
 	if err != nil || request.NodeID != nodeID {
 		return nil, release.ErrUpdate
 	}
+	if err := requireAgentVersion(ctx, r.Database, nodeID, request.Release.Manifest.Version); err != nil {
+		return nil, err
+	}
 	if request.Operation == "recover" {
 		var supported bool
 		if err := r.Database.QueryRowContext(ctx, "SELECT agent_supported AND agent_recovery_supported FROM node_update_capabilities WHERE node_id=?", nodeID).Scan(&supported); err != nil {

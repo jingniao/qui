@@ -16,6 +16,9 @@ import (
 var ErrCoreSelectionPending = errors.New("core selection pending")
 
 func ValidateInboundCore(c *pb.Capabilities, name, protocol string) error {
+	if node.CoreOptional(c) && (name != desiredstate.CoreGost || protocol != "forward") {
+		return node.ErrNoUserCore
+	}
 	core := node.SelectedCore(c, name)
 	if core == nil {
 		if protocol == "forward" {
@@ -30,7 +33,7 @@ func ValidateInboundCore(c *pb.Capabilities, name, protocol string) error {
 		}
 		return errors.New("primary core unavailable")
 	}
-	if name != "" && !c.MultiCoreSupported && name != c.CoreName {
+	if name != "" && !c.MultiCoreSupported && !c.CoreOptionalSupported && name != c.CoreName {
 		return errors.New("multi-core unsupported")
 	}
 	if err := ValidateCoreProtocol(core.Name, protocol, true); err != nil {
@@ -54,6 +57,9 @@ func ValidateInboundCore(c *pb.Capabilities, name, protocol string) error {
 }
 
 func ValidateOutboundCores(c *pb.Capabilities, protocol string) error {
+	if node.CoreOptional(c) {
+		return node.ErrNoUserCore
+	}
 	cores := node.EnabledCores(c)
 	if len(cores) == 0 {
 		return ValidateCoreProtocol(c.GetCoreName(), protocol, false)

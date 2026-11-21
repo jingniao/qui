@@ -65,7 +65,7 @@ type localEndpoint struct {
 }
 
 // The socket is private to the service account and root. The only operations are
-// status, signed release preflight and signed release installation; no caller
+// status, signed release preflight/installation and core-optional activation; no caller
 // supplies a command, executable path, node identity or business revision.
 func listenLocal(parent context.Context, directory string) (*localEndpoint, error) {
 	path := filepath.Join(directory, localSocket)

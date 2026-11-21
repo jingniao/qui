@@ -132,10 +132,10 @@ func (i Inventory) Merge(c config.Agent) ([]Core, error) {
 			result = append(result, Core{Name: n, Path: e.Path})
 		}
 	}
-	if len(result) == 0 {
-		return nil, errors.New("core inventory disables the last core")
-	}
 	if i.Primary != "" {
+		if !core.CarriesUsers(i.Primary) {
+			return nil, errors.New("inventory primary must carry users")
+		}
 		found := false
 		for index, entry := range result {
 			if entry.Name == i.Primary {
@@ -149,8 +149,25 @@ func (i Inventory) Merge(c config.Agent) ([]Core, error) {
 			return nil, errors.New("inventory primary is not enabled")
 		}
 	}
-	if !core.CarriesUsers(result[0].Name) {
-		return nil, errGostPrimary
+	if i.Primary == "" {
+		for index, entry := range result {
+			if core.CarriesUsers(entry.Name) {
+				copy(result[1:index+1], result[:index])
+				result[0] = entry
+				break
+			}
+		}
 	}
 	return result, nil
+}
+
+// PrimaryCore selects the first user core after the authenticated overlay has
+// applied its explicit primary ordering. GOST never owns scalar core fields.
+func PrimaryCore(cores []Core) Core {
+	for _, entry := range cores {
+		if core.CarriesUsers(entry.Name) {
+			return entry
+		}
+	}
+	return Core{}
 }

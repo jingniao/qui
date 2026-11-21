@@ -12,6 +12,31 @@ import (
 	"time"
 )
 
+func TestOptionalAndLegacyCapabilities(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		caps            *pb.Capabilities
+		valid, optional bool
+	}{
+		{"legacy_unknown", &pb.Capabilities{}, true, false},
+		{"legacy_multi_empty", &pb.Capabilities{MultiCoreSupported: true}, false, false},
+		{"optional_empty", &pb.Capabilities{MultiCoreSupported: true, CoreOptionalSupported: true}, true, true},
+		{"optional_gost", &pb.Capabilities{MultiCoreSupported: true, CoreOptionalSupported: true, Cores: []*pb.CoreCapability{{Name: "gost"}}}, true, true},
+		{"optional_user", &pb.Capabilities{MultiCoreSupported: true, CoreOptionalSupported: true, CoreName: "xray", Cores: []*pb.CoreCapability{{Name: "xray"}}}, true, false},
+		{"gost_primary", &pb.Capabilities{MultiCoreSupported: true, CoreOptionalSupported: true, CoreName: "gost", Cores: []*pb.CoreCapability{{Name: "gost"}}}, false, false},
+		{"missing_primary", &pb.Capabilities{MultiCoreSupported: true, CoreOptionalSupported: true, Cores: []*pb.CoreCapability{{Name: "xray"}}}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateMultiCapabilities(tc.caps); (err == nil) != tc.valid {
+				t.Fatal(err)
+			}
+			if tc.valid && CoreOptional(tc.caps) != tc.optional {
+				t.Fatal("wrong optional classification")
+			}
+		})
+	}
+}
+
 func TestMultiCoreCapabilitiesAndHealthPersistWithoutInventedValues(t *testing.T) {
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))

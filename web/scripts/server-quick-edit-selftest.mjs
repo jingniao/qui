@@ -25,7 +25,7 @@ function savingEditor() {
   const editForm = reactive({
     name: 'Edited A', region: ' JP ', remark: ' A note ', renewDate: '2027-01-01',
     renewCurrency: 'USD', renewPrice: '20', renewCycle: '/月',
-    enabled: true, allowSubscription: false, maintenance: true, tags: ['A tag'],
+    enabled: true, allowSubscription: false, maintenance: true, autoRenew: true, tags: ['A tag'],
   });
   const traffic = { method: 'sum', allowanceBytes: null, resetDay: 1 };
   const state = {
@@ -80,7 +80,7 @@ test('saving uses the initial target, a deep form snapshot and the latest node s
   assert.equal(editor.requests.some(request => request.method === 'saveMachineTraffic'), false);
   assert.deepEqual(editor.requests.find(request => request.method === 'saveMeta').input, {
     extra: 'A metadata', region: 'JP', remark: 'A note', renewDate: '2027-01-01',
-    renewCurrency: 'USD', renewPrice: '20', renewCycle: '/月', tags: ['A tag'],
+    renewCurrency: 'USD', renewPrice: '20', renewCycle: '/月', autoRenew: true, tags: ['A tag'],
   });
 });
 

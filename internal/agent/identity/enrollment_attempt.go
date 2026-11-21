@@ -17,9 +17,10 @@ const enrollmentAttemptName = "enrollment-attempt.json"
 // enrollmentHelperDirectories are the helper directories install.sh creates in
 // the data directory before the first enrollment: host-network/ for the
 // enforced-source helper (control.go joins the same name) and tuning/ for the
-// tuning helper. Enrollment checks their names and types but not their
+// tuning helper, and system-update/ for the Agent update bridge.
+// Enrollment checks their names and types but not their
 // contents, which belong to the helpers.
-var enrollmentHelperDirectories = map[string]bool{"host-network": true, "tuning": true}
+var enrollmentHelperDirectories = map[string]bool{"host-network": true, "tuning": true, "system-update": true}
 
 type enrollmentAttempt struct {
 	Version       int    `json:"version"`

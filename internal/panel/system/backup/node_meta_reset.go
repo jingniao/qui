@@ -54,3 +54,30 @@ func validateNodeMetaReset(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+// validateNodeAutoRenew skips archives that predate the auto renewal column.
+// An enabled row must have the date and recurring cycle the scheduler needs.
+func validateNodeAutoRenew(ctx context.Context, database *sql.DB) error {
+	var applied bool
+	if err := database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)", "0160_node_meta_auto_renew.sql").Scan(&applied); err != nil {
+		return ErrArchive
+	}
+	if !applied {
+		return nil
+	}
+	rows, err := database.QueryContext(ctx, "SELECT renew_date,renew_cycle,renew_notice_days FROM node_meta WHERE auto_renew=1")
+	if err != nil {
+		return ErrArchive
+	}
+	defer rows.Close()
+	for rows.Next() {
+		m := node.Meta{AutoRenew: true}
+		if rows.Scan(&m.RenewDate, &m.RenewCycle, &m.RenewNoticeDays) != nil || m.Validate() != nil {
+			return ErrArchive
+		}
+	}
+	if rows.Err() != nil {
+		return ErrArchive
+	}
+	return nil
+}

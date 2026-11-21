@@ -14,6 +14,7 @@ import (
 // restore. Add new migrations here; never change an existing entry. The
 // checksums of the legacy files 0001-0152 live in internal/platform/db.
 var applied = map[string]string{
+	"0160_node_meta_auto_renew.sql":            "afea945dbdf676b704d7e7e1ad85452d4b5ff9b8b2f9d50c413bb0eeb6787c4f",
 	"0159_inbound_egress_source.sql":           "e568b6cebfd53dcaa985602d1155c36bc52d57c8a757f6ed998669473b1efe89",
 	"0157_agent_system_updates.sql":            "486a6a6e1bbbe2de813d798f7285749d8628efea23cee1ff00f223172988f4ea",
 	"0158_subscription_route_dependencies.sql": "ac4ac430cc66e6abdff537ac1fc12df6e5cc9d9549e1e72099a8489e4143ec0a",

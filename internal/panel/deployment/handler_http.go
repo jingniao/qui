@@ -176,6 +176,9 @@ func (h *Handler) deployRevision(ctx context.Context, id int64) error {
 		return &apiFailure{Status: 409, Code: "dependency_not_ready", Message: err.Error()}
 	}
 	if err := h.Repository.Deploy(ctx, id); err != nil {
+		if errors.Is(err, node.ErrNoUserCore) {
+			return err
+		}
 		return &apiFailure{Status: 409, Code: "deployment_conflict", Message: err.Error()}
 	}
 	return nil
@@ -208,6 +211,10 @@ func withRevision(err error, revision int64) error {
 }
 
 func (h *Handler) fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, node.ErrNoUserCore) {
+		httpapi.Error(w, 400, "no_user_core", err.Error())
+		return
+	}
 	var failure *apiFailure
 	if errors.As(err, &failure) {
 		if len(failure.Details) == 0 {

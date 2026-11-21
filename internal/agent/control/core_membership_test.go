@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,8 +11,10 @@ import (
 	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/reconcile"
+	"proxycontrol/internal/agent/storage"
 	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/agentstorage"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
 	"strings"
@@ -316,7 +319,7 @@ func TestCoreRemovalRefusals(t *testing.T) {
 	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	ctx := context.Background()
-	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "last", Component: "sing-box", Revision: 2}); r.Code != "last_core" {
+	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "last", Component: "sing-box", Revision: 2}); r.Code != "fallback_incompatible" {
 		t.Fatal(r)
 	}
 	if err := multi.AddIdle(&fakeCoreRuntime{name: "xray", selected: original}); err != nil {
@@ -362,21 +365,35 @@ func TestCoreRemovalRefusals(t *testing.T) {
 	}
 }
 
-// TestGostCannotBeTheLastUserCore pins the removal order: GOST only serves
-// forwards, so a node always keeps Xray or sing-box and removing the last one of
-// those is the existing last-core refusal, while removing GOST itself is allowed.
-func TestGostCannotBeTheLastUserCore(t *testing.T) {
+// The last user core requires format 6; GOST remains a forward-only runtime.
+func TestLastUserCoreRemovalRequiresOptionalFormat(t *testing.T) {
 	t.Parallel()
 	w, multi, dir, original := membershipHarness(t)
 	ctx := context.Background()
 	if err := multi.AddIdle(&fakeCoreRuntime{name: "gost", version: "3.3.2", selected: original}); err != nil {
 		t.Fatal(err)
 	}
-	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_user_core", Component: "sing-box", Revision: 2}); r.Code != "last_core" {
+	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_user_core", Component: "sing-box", Revision: 2}); r.Code != "fallback_incompatible" {
 		t.Fatal(r)
 	}
 	if multi.Component("sing-box") == nil {
 		t.Fatal("refused removal detached the user core")
+	}
+	w.agentVersion = "1.9.0"
+	if err := os.MkdirAll(filepath.Join(dir, "identity"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Ensure(dir, w.nodeID, agentstorage.Current(w.agentVersion)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.ActivateCoreOptionalFormat(dir, w.nodeID, agentstorage.Current(w.agentVersion)); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_user_after_activation", Component: "sing-box", Revision: 2}); !r.Success {
+		t.Fatal(r)
+	}
+	if multi.Name() != "" || multi.Component("") != nil || multi.Component("gost") == nil {
+		t.Fatal("last user core removal did not clear primary")
 	}
 	if r := w.removeCore(ctx, &pb.RemoveCoreCommand{Id: "remove_gost", Component: "gost", Revision: 2}); !r.Success {
 		t.Fatal(r)
@@ -385,8 +402,30 @@ func TestGostCannotBeTheLastUserCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if multi.Component("gost") != nil || inventory.Primary != "sing-box" {
+	if multi.Component("gost") != nil || inventory.Primary != "" {
 		t.Fatalf("gost removal left runtime %v and primary %q", multi.Component("gost"), inventory.Primary)
+	}
+}
+
+func TestCorelessRevisionRejectsImplicitInboundAndKeepsSuccess(t *testing.T) {
+	multi, err := core.NewMultiRuntime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := reconcile.New(t.TempDir(), "coreless", multi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	s := desiredstate.State{SchemaVersion: 1, NodeID: "coreless", Revision: 1, Logging: desiredstate.Logging{DomainOnly: true}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}}}
+	if result, err := m.Apply(ctx, s); err != nil || !result.Success {
+		t.Fatal(result, err)
+	}
+	s.Revision = 2
+	s.Inbounds = []desiredstate.Inbound{{ID: "implicit", Protocol: "socks5", Listen: "127.0.0.1", Port: 1080, DefaultOutbound: "direct", Enabled: true}}
+	result, err := m.Apply(ctx, s)
+	if !errors.Is(err, core.ErrNoUserCore) || result.Code != "no_user_core" || result.Success || m.Current() != 1 {
+		t.Fatal(result, m.Current(), err)
 	}
 }
 

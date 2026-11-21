@@ -25,6 +25,7 @@ async function moduleUrl(url, cache = new Map()) {
   return moduleUrlValue;
 }
 const api = await load('../src/modules/proxy/components/node-editor/nodeEditorModel.ts');
+const { nodeHasUserCore } = await load('../src/modules/nodes/coreSummary.ts');
 const { legacyList } = await load('./fixtures/node-editor-legacy.ts');
 const json = value => JSON.parse(JSON.stringify(value));
 
@@ -732,6 +733,7 @@ const setupCode = ts.transpileModule(setup, { compilerOptions: { target: ts.Scri
 function saveHarness(mode, overrides = {}) {
   const calls = [], events = [];
   const deps = {
+    nodeHasUserCore,
     computed, reactive, ref, watch: () => {}, onMounted: () => {}, onUnmounted: () => {},
     defineProps: () => ({ serverId: 'server', inbound: null, origin: 'list' }), withDefaults: props => props,
     defineEmits: () => event => events.push(event), useRoute: () => ({ query: {} }), isOwner: { value: true },

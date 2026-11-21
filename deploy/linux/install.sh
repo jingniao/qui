@@ -23,6 +23,8 @@ Usage: install.sh --panel|--node --binary FILE --sha256 DIGEST [options]
                          (default: the packaged examples/<component>.yaml)
   --core xray|sing-box|gost   repeatable; default xray on a new node (gost is
                          amd64-only and always the official pinned release)
+  --no-core             skip core installation on a new node; exclusive with --core
+                         upgrades retain the recorded cores
   --core-source qui|official  sing-box source (default: qui; Xray stays official)
   --qui-version VERSION same qui release as the Agent (required for qui source)
   --core-bundle FILE --core-sums FILE  local qui core archive and SHA256SUMS
@@ -54,6 +56,7 @@ if [[ ! -f $service_library ]]; then service_library=/usr/local/lib/proxycontrol
 
 mode=''; binary=''; digest=''; config=''; core=''; core_version=''; core_digest=''; core_url=''; reinstall=false
 cores=(); declare -A core_versions=() core_digests=() core_urls=()
+no_core=false
 core_source=qui; qui_version=''; core_bundle=''; core_sums=''
 replacement_token=''; replacement_manifest=''
 
@@ -70,6 +73,7 @@ qui_release_version() {
 }
 while (($#)); do
   case $1 in
+    --no-core) no_core=true; shift;;
     --panel|--node)
       [[ -z $mode ]] || fail 'Choose exactly one of --panel and --node.'
       mode=$1; shift;;
@@ -80,9 +84,6 @@ while (($#)); do
         --core)
           [[ $2 == xray || $2 == sing-box || $2 == gost ]] || fail 'Core must be xray, sing-box or gost.'
           [[ " ${cores[*]} " != *" $2 "* ]] || fail 'Duplicate --core.'
-          # GOST only serves port forwards, so it can never be the first (primary)
-          # core: a node always keeps Xray or sing-box there.
-          [[ ${#cores[@]} != 0 || $2 != gost ]] || fail 'GOST cannot be the first core; list --core xray or --core sing-box first.'
           core=$2; cores+=("$core");;
         --core-version) [[ -n $core ]] || fail 'Put --core before its options.'; core_versions[$core]=$2;;
         --core-sha256) [[ -n $core ]] || fail 'Put --core before its options.'; core_digests[$core]=${2,,};;
@@ -97,6 +98,14 @@ while (($#)); do
     *) fail "Unknown option $1";;
   esac
 done
+if $no_core && [[ ${#cores[@]} != 0 ]]; then fail '--no-core and --core are mutually exclusive.'; fi
+# GOST never leads when a user core is selected, so the recorded order keeps
+# the layout older Agents accept (a user core first).
+if [[ " ${cores[*]} " == *' gost '* && ${#cores[@]} -gt 1 ]]; then
+  ordered=()
+  for core in "${cores[@]}"; do [[ $core == gost ]] || ordered+=("$core"); done
+  cores=("${ordered[@]}" gost)
+fi
 [[ -n $mode ]] || { usage >&2; exit 2; }
 component=panel
 if [[ $mode == --node ]]; then component=agent; fi
@@ -272,8 +281,8 @@ select_core() {
 [[ $core_source == qui || $core_source == official ]] || fail 'Invalid core source.'
 # Defaults apply only to first installs; an upgrade without --core carries the
 # recorded set without downloading or changing core binaries.
-if [[ $component == agent && ${#cores[@]} == 0 && ! -e $record ]]; then cores=(xray); fi
-if [[ $component != agent && ${#cores[@]} != 0 ]]; then fail 'A core is only installed with --node.'; fi
+if [[ $component == agent && ${#cores[@]} == 0 && $no_core == false && ! -e $record ]]; then cores=(xray); fi
+if [[ $component != agent && ( ${#cores[@]} != 0 || $no_core == true ) ]]; then fail '--core and --no-core require --node.'; fi
 for core in "${cores[@]}"; do
   select_core "$core"
   if [[ $core == sing-box && $core_source == qui ]]; then
@@ -701,9 +710,10 @@ for core in "${cores[@]}"; do
 done
 
 # An upgrade without core selection preserves existing configuration verbatim.
-# When installing cores, preserve other settings. The scalar pair keeps old Agents
-# usable during a rollback; cores is authoritative for the multi-core Agent.
-if [[ $component == agent && ${#record_cores[@]} -gt 0 && ( ${#cores[@]} -gt 0 || -n $config_source ) ]]; then
+# First installs always write an explicit list, including cores: [].
+# When installing cores, preserve other settings; qui_agent_core_config keeps
+# the legacy scalar pair whenever a user core leads the list.
+if [[ $component == agent && ( ${#cores[@]} -gt 0 || $no_core == true || -n $config_source ) ]]; then
   if [[ -z $config_source ]]; then
     [[ -f $etc/config.yaml && ! -L $etc/config.yaml ]] || fail 'Unsafe Agent configuration.'
     config_source=$etc/config.yaml
@@ -796,6 +806,7 @@ publish "$stage/uninstall" /usr/local/lib/proxycontrol/uninstall.sh root root 07
 if [[ $component == agent ]]; then
   # The request directory belongs to the Agent. Never follow its writable
   # names with root's mkdir/chown during a later installation.
+  install -d -o root -g root -m 0755 /usr/local/lib/proxy-agent
   runuser -u "$account" -- mkdir -p -- "$data/system-update"
   runuser -u "$account" -- chmod 0700 -- "$data/system-update"
   [[ ! -L /var/lib/proxy-agent-update && ! -L $registry/agent-system-updates ]] || fail 'Symlinked Agent update publication or registry directory.'

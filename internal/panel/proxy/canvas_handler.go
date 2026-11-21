@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/httpapi"
 )
 
@@ -127,6 +128,10 @@ func (h *Handler) publishCanvasScheme(w http.ResponseWriter, r *http.Request) {
 // failCanvas maps the canvas errors the generic handler cannot express: a
 // scheme another canvas already changed is a conflict, not a bad request.
 func (h *Handler) failCanvas(w http.ResponseWriter, err error) {
+	if errors.Is(err, node.ErrNoUserCore) {
+		httpapi.Error(w, 400, "no_user_core", err.Error())
+		return
+	}
 	var entryError *tunnelError
 	if errors.As(err, &entryError) && entryError.Code == "inbound_is_scheme_entry" {
 		httpapi.Error(w, entryError.Status, entryError.Code, entryError.Message)

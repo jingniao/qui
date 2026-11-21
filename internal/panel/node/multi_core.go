@@ -11,12 +11,28 @@ import (
 
 func CoreNameValid(name string) bool { return desiredstate.KnownCore(name) }
 
+var ErrNoUserCore = errors.New("no_user_core: node has no enabled user core")
+
+// CoreOptional distinguishes a confirmed empty user-core inventory from an
+// unknown legacy report. Legacy Agents keep their existing admission rules.
+func CoreOptional(c *pb.Capabilities) bool {
+	if !c.GetCoreOptionalSupported() {
+		return false
+	}
+	for _, core := range EnabledCores(c) {
+		if desiredstate.CarriesUsers(core.GetName()) {
+			return false
+		}
+	}
+	return true
+}
+
 // EnabledCores models legacy reports without inventing observations.
 func EnabledCores(c *pb.Capabilities) []*pb.CoreCapability {
 	if c == nil {
 		return nil
 	}
-	if c.MultiCoreSupported {
+	if c.MultiCoreSupported || c.CoreOptionalSupported {
 		return c.Cores
 	}
 	if c.CoreName == "" {
@@ -73,7 +89,14 @@ func validateMultiCapabilities(c *pb.Capabilities) error {
 			return err
 		}
 	}
-	if c.MultiCoreSupported && (!seen[c.CoreName] || len(c.Cores) == 0) {
+	if c.CoreOptionalSupported {
+		if c.CoreName != "" && (!seen[c.CoreName] || !desiredstate.CarriesUsers(c.CoreName)) {
+			return errors.New("primary core must be an enabled user core")
+		}
+		if c.CoreName == "" && !CoreOptional(c) {
+			return errors.New("primary core missing")
+		}
+	} else if c.MultiCoreSupported && (!seen[c.CoreName] || len(c.Cores) == 0) {
 		return errors.New("primary core missing")
 	}
 	if !c.MultiCoreSupported && len(c.Cores) == 1 && c.CoreName != "" && c.Cores[0].Name != c.CoreName {

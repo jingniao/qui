@@ -81,8 +81,8 @@ func LoadAgent(path string) (config.Agent, error) {
 	c.TLS.ClientCA = resolve(c.TLS.ClientCA)
 	c.Updates.CA = resolve(c.Updates.CA)
 	if doc.Cores != nil {
-		if len(doc.Cores) == 0 || len(doc.Cores) > 3 {
-			return c, errors.New("cores requires one to three cores")
+		if len(doc.Cores) > 3 {
+			return c, errors.New("cores permits at most three cores")
 		}
 		seen := map[string]bool{}
 		for _, entry := range doc.Cores {
@@ -91,10 +91,16 @@ func LoadAgent(path string) (config.Agent, error) {
 			}
 			seen[entry.Name] = true
 		}
-		c.CoreName, c.CorePath = doc.Cores[0].Name, doc.Cores[0].Path
+		c.CoreName, c.CorePath = "", ""
+		for _, entry := range doc.Cores {
+			if core.CarriesUsers(entry.Name) {
+				c.CoreName, c.CorePath = entry.Name, entry.Path
+				break
+			}
+		}
 	}
 	// Covers both the cores list and the legacy scalar core_name.
-	if !core.CarriesUsers(c.CoreName) {
+	if doc.Cores == nil && !core.CarriesUsers(c.CoreName) {
 		return c, errGostPrimary
 	}
 	if err := c.Validate(); err != nil {

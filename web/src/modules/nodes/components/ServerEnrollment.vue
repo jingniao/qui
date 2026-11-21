@@ -4,7 +4,9 @@
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
   </FormDrawer>
   <FormDrawer v-model="installOpen" title="一键安装命令" description="② 在服务器终端以 root 用户运行命令，完成 Agent 部署与证书信任配置。" :show-footer="false" width="2xl">
-    <div v-if="installAvailable" class="space-y-3">
+    <div v-if="installAvailable" class="space-y-5">
+      <section class="space-y-3">
+      <h3 class="text-sm font-semibold text-ios-label">1. 安装选项</h3>
       <div class="text-xs text-ios-secondary">运行内核
         <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-ios-bg px-3 py-2">
           <label v-for="option in CORE_INSTALL_OPTIONS" :key="option.name" class="inline-flex items-center gap-1.5 text-ios-label cursor-pointer">
@@ -14,7 +16,7 @@
           </label>
         </div>
       </div>
-      <p v-if="coreValidationError" role="alert" class="text-xs text-ios-red">{{ coreValidationError }}</p>
+      <p v-if="coreDescription" class="text-xs text-ios-secondary">{{ coreDescription }}</p>
       <fieldset v-if="recoveryId" class="space-y-2 text-sm">
         <legend class="font-semibold">安装位置</legend>
         <label class="mr-4 inline-flex items-center gap-1"><input v-model="replacementTarget" type="radio" value="current" /> 覆盖当前机器</label>
@@ -23,17 +25,23 @@
       <p v-if="recoveryId && replacementTarget === 'new'" role="note" class="text-sm text-ios-orange">请在干净的新机器执行。新 Agent 登记成功后旧证书立即失效。旧机队列仍留在旧机，此命令不会补传或清理旧机数据。</p>
       <p v-else-if="recoveryId" role="note" class="text-sm text-ios-orange">请在旧 Agent 所在服务器运行。命令会停止代理，最后一批流量和访问记录经面板确认后，删除旧 Agent 的本机数据并重新登记。面板配置和历史保留。</p>
       <WebUpgradeOption v-model="webUpgrade" />
-      <p class="text-xs text-ios-tertiary">面板地址：<code class="font-mono">{{ host }}:{{ port }}</code>（{{ fromSettings ? '取自 系统设置 → 节点安装连接地址' : '当前浏览器地址' }}）；如需修改请到 系统设置 → 节点安装连接地址。</p>
-      <p class="text-xs text-ios-tertiary">Agent gRPC 地址与端口默认取面板地址与面板实际监听端口，可在 系统设置 → 节点安装连接地址 里覆盖。命令按所选内核写入重复的 <code class="font-mono">--core</code> 参数（例如 <code class="font-mono">--core xray --core sing-box</code>）；sing-box 仍使用默认的 qui 同版本来源。</p>
-      <CodePreview v-if="command" :code="command" title="一键安装命令" />
-      <p v-else class="text-sm text-ios-red">面板地址无效，请在 系统设置 → 节点安装连接地址 中设置</p>
+      </section>
+      <section class="space-y-2">
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h3 class="text-sm font-semibold text-ios-label">2. 以 root 在服务器终端运行</h3>
+          <span class="text-xs text-ios-tertiary">注册码一次性，{{ formatTime(enrollment?.expiresAt || '') }} 前有效</span>
+        </div>
+        <CodePreview v-if="command" :code="command" title="一键安装命令" wrap />
+        <p v-else class="text-sm text-ios-red">面板地址无效，请在 系统设置 → 节点安装连接地址 中设置</p>
+        <p class="text-xs text-ios-tertiary">面板 <code class="font-mono">{{ host }}:{{ port }}</code> · Agent gRPC <code class="font-mono">{{ grpcEndpoint }}</code>（{{ fromSettings ? '取自 系统设置 → 节点安装连接地址' : '当前浏览器地址，可在 系统设置 → 节点安装连接地址 修改' }}）。重新生成会撤销旧注册码。</p>
+      </section>
     </div>
     <p v-else-if="recoveryId" role="alert" class="text-sm text-ios-red">当前面板缺少发布版本或证书摘要，无法生成重装命令。</p>
     <div v-else class="space-y-2">
       <CodePreview :code="enrollment?.enrollmentToken || ''" />
       <p class="text-xs text-ios-tertiary">本地 / 开发构建无法生成一键命令，请使用注册码手动登记。</p>
     </div>
-    <p class="text-xs text-ios-tertiary">命令含一次性注册码，{{ formatTime(enrollment?.expiresAt || '') }} 前有效。重新生成会撤销旧注册码。</p>
+    <p v-if="!installAvailable" class="text-xs text-ios-tertiary">命令含一次性注册码，{{ formatTime(enrollment?.expiresAt || '') }} 前有效。重新生成会撤销旧注册码。</p>
     <p v-if="metaWarning" role="alert" class="text-sm text-ios-orange">{{ metaWarning }}</p>
     <div v-if="enrollmentStageInfo" class="rounded-xl border border-black/[0.08] bg-black/[0.02] p-3 text-xs flex items-center justify-between">
       <span class="text-ios-secondary">登记状态：<span class="font-semibold text-ios-label">{{ enrollmentStageInfo.label }}</span></span>
@@ -47,7 +55,7 @@
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { enrollmentStage, recoveryEnrollmentStage, type EnrollmentStage } from '../enrollmentStage';
 import { nodeAPI, installCommand, type CoreName, type Enrollment, type NodeView } from '../api';
-import { CORE_INSTALL_OPTIONS, sortInstallCores, reportedInstallCores, validateInstallCores, setReissuingNodeId, reissuingNodeId } from '../coreInstallOptions';
+import { CORE_INSTALL_OPTIONS, sortInstallCores, reportedInstallCores, installCoresDescription, setReissuingNodeId, reissuingNodeId } from '../coreInstallOptions';
 import { browserInstallEndpoint, resolveInstallEndpoint } from '../installEndpoint';
 import { saveNodeMeta } from '../nodeMeta';
 import { formFromSettings, payloadFromForm } from '../machineTrafficModel';
@@ -64,7 +72,7 @@ withDefaults(defineProps<{ knownTags?: string[] }>(), { knownTags: () => [] });
 
 const createOpen = ref(false), installOpen = ref(false), creating = ref(false);
 const fields = ref<InstanceType<typeof ServerFormFields>>();
-const form = reactive<ServerEditFormState>({ name: '', region: '', remark: '', renewDate: '', renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年', enabled: true, allowSubscription: true, maintenance: false, tags: [] });
+const form = reactive<ServerEditFormState>({ name: '', region: '', remark: '', renewDate: '', renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年', enabled: true, allowSubscription: true, maintenance: false, autoRenew: false, tags: [] });
 const connectionForm = reactive({ connectHost: '', portRange: '' });
 const machineForm = ref(formFromSettings(null, 'GB'));
 const error = ref(''), metaWarning = ref('');
@@ -72,16 +80,16 @@ const recoveryId = ref('');
 const reportedPrimary = ref<CoreName>();
 const replacementTarget = ref<'current' | 'new'>('current');
 const enrollment = ref<Enrollment | null>(null);
-const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), webUpgrade = ref(false), fromSettings = ref(false);
+const host = ref(''), port = ref(443), grpcHost = ref(''), grpcPort = ref(0), cores = ref<CoreName[]>(['xray']), webUpgrade = ref(true), fromSettings = ref(false);
 const installAvailable = computed(() => Boolean(enrollment.value?.install?.version && enrollment.value?.install?.caSha256));
+// Same defaults as the command: empty host/zero port fall back to the panel address and reported port.
+const grpcEndpoint = computed(() => `${grpcHost.value || host.value}:${grpcPort.value || enrollment.value?.install.grpcPort}`);
 
-const coreValidation = computed(() => validateInstallCores(cores.value));
-const coreValidationError = computed(() => coreValidation.value.error || '');
+const coreDescription = computed(() => installCoresDescription(cores.value));
 
 const command = computed(() => {
   const item = enrollment.value;
   if (!item || !installAvailable.value || !/^[A-Za-z0-9.-]+$/.test(host.value) || !Number.isInteger(port.value) || port.value < 1 || port.value > 65535) return '';
-  if (!coreValidation.value.valid) return '';
   const orderedCores = sortInstallCores(cores.value, reportedPrimary.value);
   // grpcHost '' keeps the panel address; grpcPort 0 keeps the listening port the
   // enrollment response reported. Both are overridden only by the saved setting.
@@ -183,7 +191,7 @@ function showInstall(item: Enrollment, replacement = '', installedCores: CoreNam
   grpcPort.value = 0;
   fromSettings.value = false;
   cores.value = installedCores;
-  webUpgrade.value = false;
+  webUpgrade.value = true;
   installOpen.value = true;
   void resolveInstallEndpoint().then(endpoint => {
     if (current !== showGeneration) return;
@@ -207,7 +215,7 @@ async function create() {
     try {
       await saveNodeMeta(item.node.id, { region: settings.region.trim(), remark: settings.remark.trim(),
         renewDate: settings.renewDate, renewCurrency: settings.renewCurrency,
-        renewPrice: String(settings.renewPrice).trim(), renewCycle: settings.renewCycle, tags: settings.tags, ...range });
+        renewPrice: String(settings.renewPrice).trim(), renewCycle: settings.renewCycle, autoRenew: settings.autoRenew, tags: settings.tags, ...range });
     } catch (e) { metaWarning.value = `服务器已创建，服务器信息保存失败：${(e as Error).message}。请在编辑服务器中补填。`; }
     if (settings.maintenance) {
       try {
@@ -244,7 +252,7 @@ async function reissue(node: NodeView) {
 function installCode(id: string) { return enrollment.value?.node.id === id ? installAvailable.value ? command.value : recoveryId.value ? '' : enrollment.value.enrollmentToken : ''; }
 function open() {
   error.value = '';
-  Object.assign(form, { name: '', region: '', remark: '', renewDate: '', renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年', enabled: true, allowSubscription: true, maintenance: false, tags: [] });
+  Object.assign(form, { name: '', region: '', remark: '', renewDate: '', renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年', enabled: true, allowSubscription: true, maintenance: false, autoRenew: false, tags: [] });
   Object.assign(connectionForm, { connectHost: '', portRange: '' });
   machineForm.value = formFromSettings(null, 'GB');
   createOpen.value = true;

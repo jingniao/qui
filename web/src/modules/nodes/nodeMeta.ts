@@ -9,6 +9,8 @@ export interface NodeMeta {
   renewPrice?: string | number; // e.g. '120' or 120
   renewCycle?: string; // e.g. '/年' | '/月' | '/季' | '/半年' | '/2年' | '/3年' | '一次性'
   renewNoticeDays?: number;
+  // Moves a passed renewal date forward by whole cycles (panel scheduler).
+  autoRenew?: boolean;
   portRangeStart?: number | null;
   portRangeEnd?: number | null;
   bandwidthMbps?: number | null;
@@ -39,6 +41,11 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
 };
 
 export const CYCLE_LIST = ['/年', '/月', '/季', '/半年', '/2年', '/3年', '一次性'] as const;
+
+// Auto renewal needs a date and a recurring cycle; the backend checks the same rule.
+export function canAutoRenew(renewDate?: string, renewCycle?: string): boolean {
+  return Boolean(renewDate) && renewCycle !== undefined && renewCycle !== '一次性' && (CYCLE_LIST as readonly string[]).includes(renewCycle);
+}
 
 const CYCLE_PERIODS = [
   { name: '3年', months: 36, days: 1095 },
@@ -174,7 +181,10 @@ export async function saveNodeMeta(nodeId: string, meta: NodeMeta): Promise<void
     renewCurrency: meta.renewCurrency ?? '', renewPrice: String(meta.renewPrice ?? ''),
     renewNoticeDays: meta.renewNoticeDays ?? 7, portRangeStart: start, portRangeEnd: end,
     bandwidthMbps: bandwidth,
-    ...(meta.tags === undefined ? {} : { tags: meta.tags })
+    ...(meta.tags === undefined ? {} : { tags: meta.tags }),
+    // Omitted keeps the stored choice. A one-time cycle or a cleared date turns
+    // it off, since the checkbox is hidden then.
+    ...(meta.autoRenew === undefined ? {} : { autoRenew: meta.autoRenew && canAutoRenew(meta.renewDate, meta.renewCycle) })
   });
   requireMetaScope(scope);
   const financeChanged = financeKeys.some((key, index) => previousFinance[index] !== String(result.meta[key] ?? ''));

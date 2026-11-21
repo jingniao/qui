@@ -15,11 +15,12 @@ func TestCoreConfigMapping(t *testing.T) {
 	}{
 		{"core_name: sing-box\ncore_path: /bin/sing-box\n", "sing-box", false},
 		{"cores:\n - name: xray\n   path: /bin/xray\n - name: sing-box\n   path: /bin/sing-box\n", "xray,sing-box", false},
-		{"cores:\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n", "", true},
-		{"cores:\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n - name: xray\n   path: /bin/xray\n", "", true},
+		{"cores:\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n", "gost", false},
+		{"cores:\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n - name: xray\n   path: /bin/xray\n", "gost,xray", false},
 		{"cores:\n - name: sing-box\n   path: /bin/sing-box\n - name: xray\n   path: /bin/xray\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n", "sing-box,xray,gost", false},
 		{"cores:\n - name: xray\n   path: /bin/xray\n - name: sing-box\n   path: /bin/sing-box\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n - name: gost\n   path: /usr/local/lib/proxy-agent/other\n", "", true},
-		{"cores: []\n", "", true},
+		{"cores: []\n", "", false},
+		{"# no cores field\n", "xray", false},
 		{"cores:\n - name: xray\n   path: /bin/xray\n - name: xray\n   path: /bin/other\n", "", true},
 		{"cores:\n - name: shell\n   path: /bin/sh\n", "", true},
 		{"cores:\n - name: xray\n   path: /bin/xray\n   args: test\n", "", true},
@@ -48,23 +49,24 @@ func TestCoreConfigMapping(t *testing.T) {
 			if strings.Join(names, ",") != tc.names {
 				t.Fatal(cores)
 			}
-			if len(cores) > 1 && (c.CoreName != cores[0].Name || c.CorePath != cores[0].Path) {
+			primary := PrimaryCore(cores)
+			if tc.yaml != "# no cores field\n" && (c.CoreName != primary.Name || c.CorePath != primary.Path) {
 				t.Fatal("primary compatibility fields differ")
 			}
 		})
 	}
 }
 
-// GOST only serves port forwards, so a node never adopts it as the first core:
-// that slot is the primary one, and inbounds without an explicit core follow it.
-func TestGostCannotBeTheFirstCore(t *testing.T) {
+// GOST may lead the list, while the first user core owns the scalar fields.
+func TestFirstUserCoreBecomesPrimary(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	body := "development: true\ntls:\n client_ca: ''\ncores:\n - name: gost\n   path: /usr/local/lib/proxy-agent/gost\n - name: sing-box\n   path: /bin/sing-box\n"
 	if err := os.WriteFile(p, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadAgent(p); err == nil || !strings.Contains(err.Error(), "GOST cannot be the first core") {
-		t.Fatal(err)
+	c, err := LoadAgent(p)
+	if err != nil || c.CoreName != "sing-box" || c.CorePath != "/bin/sing-box" {
+		t.Fatal(c, err)
 	}
 }
 

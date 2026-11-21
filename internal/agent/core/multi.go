@@ -17,7 +17,7 @@ import (
 )
 
 // MultiRuntime is one revision transaction over independent, fixed adapters.
-// Ordering is config ordering; the first adapter is the compatibility primary.
+// Ordering is config ordering; the first user adapter is the compatibility primary.
 type MultiRuntime struct {
 	hooks       RuntimeHooks
 	history     map[int64]RenderedConfig
@@ -31,13 +31,15 @@ type MultiRuntime struct {
 	initialized bool
 }
 
+var ErrNoUserCore = errors.New("no user core is enabled for an inbound without an explicit core")
+
 func NewMultiRuntime(runtimes ...Runtime) (*MultiRuntime, error) {
 	m := &MultiRuntime{runtimes: map[string]Runtime{}, current: map[string]RenderedConfig{}, history: map[int64]RenderedConfig{}, expected: map[string]bool{}, ports: &PortAllocator{}}
 	for _, r := range runtimes {
 		if r == nil || !KnownName(r.Name()) || m.runtimes[r.Name()] != nil {
 			return nil, errors.New("invalid multi-core adapter set")
 		}
-		if m.primary == "" {
+		if m.primary == "" && CarriesUsers(r.Name()) {
 			m.primary = r.Name()
 		}
 		m.names = append(m.names, r.Name())
@@ -45,9 +47,6 @@ func NewMultiRuntime(runtimes ...Runtime) (*MultiRuntime, error) {
 		if a, ok := r.(interface{ SetPortAllocator(*PortAllocator) }); ok {
 			a.SetPortAllocator(m.ports)
 		}
-	}
-	if m.primary == "" {
-		return nil, errors.New("empty multi-core adapter set")
 	}
 	return m, nil
 }
@@ -71,7 +70,7 @@ func (m *MultiRuntime) ConfigureRuntime(h RuntimeHooks) {
 func (m *MultiRuntime) DetectCapabilities(ctx context.Context) (*pb.Capabilities, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var result *pb.Capabilities
+	result := &pb.Capabilities{}
 	var cores []*pb.CoreCapability
 	for _, name := range m.names {
 		c, err := m.runtimes[name].DetectCapabilities(ctx)
@@ -84,6 +83,7 @@ func (m *MultiRuntime) DetectCapabilities(ctx context.Context) (*pb.Capabilities
 		cores = append(cores, &pb.CoreCapability{Name: name, Version: c.CoreVersion, Protocols: c.Protocols, SingboxUserStats: c.SingboxUserStats, ForwardInboundSupported: c.ForwardInboundSupported, DeviceGateSupported: c.DeviceGateSupported, ObservationContractVersion: c.ObservationContractVersion, GostContractVersion: gostContract(name), ServerSettingsContractVersion: c.ServerSettingsContractVersion, ServerSettingsCombinations: c.ServerSettingsCombinations, TlsCertificateFilesSupported: c.TlsCertificateFilesSupported, DomainKeywordSupported: c.DomainKeywordSupported, ExpandedPolicySupported: c.ExpandedPolicySupported, NativeRuleSetsSupported: c.NativeRuleSetsSupported, InboundEgressSourceSupported: c.InboundEgressSourceSupported, OutboundSourceSupported: c.OutboundSourceSupported})
 	}
 	result.Cores, result.MultiCoreSupported = cores, true
+	result.CoreOptionalSupported = true
 	return result, nil
 }
 
@@ -178,6 +178,9 @@ func (m *MultiRuntime) render(ctx context.Context, s desiredstate.State) (Render
 		name := in.Core
 		if name == "" {
 			name = m.primary
+			if name == "" {
+				return RenderedConfig{}, ErrNoUserCore
+			}
 		}
 		if m.runtimes[name] == nil {
 			return RenderedConfig{}, fmt.Errorf("inbound assigns unavailable core %s", name)

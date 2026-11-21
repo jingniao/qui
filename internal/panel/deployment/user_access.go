@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/user"
 	"proxycontrol/internal/platform/httpapi"
@@ -35,6 +36,10 @@ func (h *Handler) userAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	state, enabled, err := h.EnsureUserAccess(r.Context(), input)
 	if err != nil {
+		if errors.Is(err, node.ErrNoUserCore) {
+			h.fail(w, err)
+			return
+		}
 		httpapi.Error(w, 400, "invalid_request", err.Error())
 		return
 	}
@@ -73,6 +78,9 @@ func (h *Handler) EnsureUserAccess(ctx context.Context, input UserAccessInput) (
 	n, err := h.Nodes.Get(ctx, input.NodeID)
 	if err != nil || !n.Enabled {
 		return desiredstate.State{}, nil, errors.New("target node missing or disabled")
+	}
+	if node.CoreOptional(n.Capabilities) {
+		return desiredstate.State{}, nil, node.ErrNoUserCore
 	}
 	groups, err := h.Nodes.SubscriptionGroups(ctx, n.ID)
 	if err != nil {

@@ -97,7 +97,7 @@ const runtimeSelect = `SELECT n.id,n.status,n.enabled,n.maintenance,coalesce(n.d
  coalesce(json_extract(n.capabilities_json,'$.multiCoreSupported'),json_extract(n.capabilities_json,'$.multi_core_supported'),0),
  json_array(n.name,n.hostname,n.operating_system,n.agent_version,n.public_ip,n.connect_host,n.capabilities_json,n.allow_subscription,
  n.outbound_source_ip,n.outbound_interface,n.host_source_ipv4,n.host_source_ipv6,
- m.region,m.remark,m.renew_date,m.renew_price,m.renew_currency,m.renew_cycle,m.renew_notice_days,m.tags_json,m.bandwidth_mbps,
+ m.region,m.remark,m.renew_date,m.renew_price,m.renew_currency,m.renew_cycle,m.renew_notice_days,m.tags_json,m.bandwidth_mbps,m.auto_renew,
  coalesce(json_extract(n.heartbeat_json,'$.tuningCurrent'),json_extract(n.heartbeat_json,'$.tuning_current')),
  (SELECT json_group_array(json_array(key,value,rules_version)) FROM (
    SELECT key,value,rules_version FROM node_tuning_dismissals WHERE node_id=n.id ORDER BY key)),

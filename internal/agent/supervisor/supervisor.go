@@ -240,6 +240,9 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			if reconciler.Current() == 0 {
 				continue
 			}
+			if multi, ok := adapter.(*core.MultiRuntime); ok && len(multi.Names()) == 0 {
+				continue
+			}
 			if multi, ok := adapter.(interface {
 				CoreHealths(context.Context) []core.CoreHealth
 			}); ok {

@@ -247,7 +247,23 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	if err != nil {
 		return err
 	}
-	c.CoreName, c.CorePath = configuredCores[0].Name, configuredCores[0].Path
+	primary := configuration.PrimaryCore(configuredCores)
+	c.CoreName, c.CorePath = primary.Name, primary.Path
+	if _, err := storage.Ensure(c.DataDirectory, state.NodeID, storageContract); err != nil {
+		return err
+	}
+	if c.CoreName == "" && requiredStorage.Formats.Configuration.Write < 6 {
+		if startup != nil {
+			return errors.New("fallback_incompatible: the supervisor did not activate core-optional configuration")
+		}
+		if err := agenthost.CheckCoreOptionalActivation(ctx, c.DataDirectory, state.NodeID, agentVersion); err != nil {
+			return fmt.Errorf("fallback_incompatible: cannot activate core-optional configuration: %w", err)
+		}
+		requiredStorage, err = storage.ActivateCoreOptionalFormat(c.DataDirectory, state.NodeID, storageContract)
+		if err != nil {
+			return err
+		}
+	}
 	installation, err := openCoreInstallation(ctx, c, state.NodeID)
 	if err != nil {
 		return fmt.Errorf("load installed core release: %w", err)
@@ -265,7 +281,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	if NewRuntime == nil {
 
 		for i, entry := range configuredCores {
-			if i == 0 {
+			if entry.Name == c.CoreName {
 				continue
 			}
 			cfg := c
@@ -316,9 +332,6 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		}
 		return check(ctx, c.DataDirectory, state.NodeID, agentVersion)
 	}
-	if _, err := storage.Ensure(c.DataDirectory, state.NodeID, storageContract); err != nil {
-		return err
-	}
 	// Raising the durable core-run lifetime marker ABI would strand an older
 	// fallback image if that image cannot read the new write. Raise the floor only
 	// after every retained image (original baseline, current and previous signed
@@ -352,6 +365,12 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 			if _, err := storage.ActivateCoreInventoryFormats(c.DataDirectory, state.NodeID, storageContract); err != nil {
 				return err
 			}
+		}
+	}
+	if NewRuntime == nil && !controlOnly && primary.Name != "" && inventory.Primary == "" {
+		inventory.Primary = primary.Name
+		if err := configuration.WriteInventory(c.DataDirectory, inventory); err != nil {
+			return err
 		}
 	}
 	newManager := reconcile.New
@@ -489,6 +508,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	if err != nil {
 		return err
 	}
+	updates.agentVersion = agentVersion
 	defer updates.Close()
 	var agentUpdates *agentUpdates
 	if startup != nil && startup.AgentUpdates {
@@ -1139,7 +1159,7 @@ heartbeatLoop:
 			Health(context.Context) (core.HealthStatus, error)
 		}); ok {
 			status, healthErr := source.Health(ctx)
-			if manager.Current() > 0 || errors.Is(healthErr, core.ErrCoreStopUnconfirmed) {
+			if (manager.Current() > 0 && (len(heartbeat.Cores) > 0 || capabilities.Snapshot().CoreName != "")) || errors.Is(healthErr, core.ErrCoreStopUnconfirmed) {
 				healthy := healthErr == nil && status.Healthy
 				heartbeat.CoreHealthy = &healthy
 				if !healthy {

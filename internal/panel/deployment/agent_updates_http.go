@@ -1,6 +1,7 @@
 package deployment
 
 import (
+	"errors"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
@@ -58,6 +59,10 @@ func (h *AgentUpdateHandler) recover(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.Repository.RetryAgentRecovery(r.Context(), h.Catalogue, r.PathValue("id"), auth.Actor(r.Context()).Username, r.RemoteAddr, input)
 	if err != nil {
+		if errors.Is(err, ErrAgentVersionUnsupported) {
+			httpapi.Error(w, 400, "agent_version_unsupported", err.Error())
+			return
+		}
 		httpapi.Error(w, 409, "agent_recovery_conflict", "恢复能力、原任务或运行配置不符合恢复条件")
 		return
 	}

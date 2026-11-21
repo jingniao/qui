@@ -26,6 +26,15 @@ for (const file of ['modules/proxy/pages/LineGroupPage.vue', 'modules/proxy/comp
 }
 assert.ok(!meta.includes('[ports:'), 'port ranges must use dedicated API fields');
 assert.doesNotMatch(meta, /qui_node_ports_/, 'port ranges must not use browser storage');
+
+const cycleList = meta.match(/export const CYCLE_LIST = [^\n]+/)[0];
+const autoRenewFunction = meta.match(/export function canAutoRenew[^]*?^}/m)[0];
+const autoRenewCode = ts.transpileModule(cycleList + '\n' + autoRenewFunction, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+const { canAutoRenew } = await import('data:text/javascript;base64,' + Buffer.from(autoRenewCode).toString('base64'));
+for (const cycle of ['/月', '/季', '/半年', '/年', '/2年', '/3年']) assert.equal(canAutoRenew('2025-01-31', cycle), true);
+for (const [date, cycle] of [['', '/月'], [undefined, '/年'], ['2025-01-31', '一次性'], ['2025-01-31', 'custom'], ['2025-01-31', undefined]]) assert.equal(canAutoRenew(date, cycle), false);
+console.log('PASS auto renewal eligibility');
+
 console.log('All UI regression self-tests passed');
 
 const tuningF2 = read('modules/nodes/components/detail/ServerTuning.vue');
@@ -146,14 +155,14 @@ assert.match(nodesApi.installCommand({ ...install, httpPort: 443 }), /--http-por
 assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'sing-box'] }), /--core xray --core sing-box$/, 'one --core flag per selected core');
 assert.match(nodesApi.installCommand({ ...install, cores: ['sing-box', 'sing-box'] }), /--core sing-box$/, 'the selection is deduplicated');
 assert.match(nodesApi.installCommand({ ...install, httpPort: 8443 }), /--http-port 8443/, 'a custom panel port is passed');
-assert.throws(() => nodesApi.installCommand({ ...install, cores: [] }), /内核/, 'an empty selection is refused');
+assert.match(nodesApi.installCommand({ ...install, cores: [] }), / --no-core$/, 'an empty selection installs only Agent');
 assert.match(nodesApi.installCommand({ ...install, cores: ['xray', 'gost'] }), /--core xray --core gost$/, 'GOST joined the installer cores in v1.3');
 assert.throws(() => nodesApi.installCommand({ ...install, cores: ['v2ray'] }), /内核/, 'an unknown core name is refused');
 assert.match(nodesApi.installCommand({ ...install, grpcHost: 'grpc.example.com' }), /--panel panel\.example\.com --grpc-host grpc\.example\.com --http-port 22550 --grpc-port 18880/, 'a separate gRPC address is passed as --grpc-host');
 assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: 'panel.example.com' }), /--grpc-host/, 'the installer already defaults --grpc-host to --panel, so an equal value is omitted');
 assert.doesNotMatch(nodesApi.installCommand({ ...install, grpcHost: '' }), /--grpc-host/, 'an unset gRPC address keeps the panel address');
-// Web upgrade is opt-in: the flag is emitted only when asked, and each dialog starts
-// unchecked, resets on every new token and passes the choice into the command.
+// The command emits the flag only when requested. Both dialogs default to checked,
+// reset on every new token and pass the selected choice into the command.
 assert.doesNotMatch(defaultCommand, /--web-upgrade/, 'web upgrade is not enabled by default');
 for (const view of ['modules/nodes/components/ServerEnrollment.vue']) {
   assert.match(read(view), /sortInstallCores\(cores\.value, (?:reportedPrimary\.value|props\.node\.capabilities\?\.core_name)\)/, 'command generation preserves reported primary');
@@ -169,8 +178,8 @@ assert.match(webUpgradeOption, /class="mt-1 text-ios-tertiary"/, 'the helper lin
 for (const [file, ref_] of [['modules/nodes/components/ServerEnrollment.vue', 'webUpgrade'], ['modules/system/components/NodeVersionPanel.vue', 'pendingWebUpgrade']]) {
   const source = read(file);
   assert.match(source, new RegExp(`<WebUpgradeOption [^>]*v-model="${ref_}"`), file + ' shows the web upgrade option');
-  assert.match(source, new RegExp(`${ref_} = ref\\(false\\)`), file + ' starts unchecked');
-  assert.match(source, new RegExp(`${ref_}\\.value = false;`), file + ' resets the choice for each new token');
+  assert.match(source, new RegExp(`${ref_} = ref\\(true\\)`), file + ' starts checked');
+  assert.match(source, new RegExp(`${ref_}\\.value = true;`), file + ' resets the choice for each new token');
   assert.match(source, new RegExp(`webUpgrade: ${ref_}\\.value`), file + ' passes the choice into installCommand');
 }
 console.log('PASS F3 INSTALL: repeated --core flags, xray default, deduplicated allowlist, both ports always explicit');

@@ -40,6 +40,7 @@
 </template>
 
 <script setup lang="ts">
+import { nodeHasUserCore } from '../../../nodes/coreSummary';
 import { computed, reactive, ref, watch } from 'vue';
 import type { CoreName, NodeView } from '../../../nodes/api';
 import { primaryCoreName } from '../../../nodes/coreSummary';
@@ -53,7 +54,7 @@ import PortControl from '../../../tunnels/components/PortControl.vue';
 const props = defineProps<{ nodeId: string; binding?: CanvasEntryBinding; servers: NodeView[]; inbounds: Inbound[]; groups: NodeGroup[]; exitProtocol: string; exitInbound?: Inbound; schemeId: string; bindingStateReady: boolean; bindingStateError?: string; materializedInboundId?: string }>();
 const emit = defineEmits<{ apply: [nodeId: string, binding: CanvasEntryBinding] }>();
 const form = reactive({ nodeId: props.nodeId, protocol: '', core: '', portMode: 'auto' as 'auto' | 'manual', port: undefined as number | undefined, groupMode: 'exit_groups' as CanvasEntryBinding['groupMode'], groupIds: [] as string[] });
-const serverOptions = computed(() => props.servers.filter(server => server.enabled && !server.deletedAt));
+const serverOptions = computed(() => props.servers.filter(server => server.enabled && !server.deletedAt && nodeHasUserCore(server)));
 const server = computed(() => serverOptions.value.find(item => item.id === form.nodeId));
 const security = ref<CanvasEntrySecurity>({});
 const selectedCore = computed(() => (form.core || '') as CoreName | '');

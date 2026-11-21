@@ -174,6 +174,7 @@
             </button>
             <span v-else-if="customNetwork" class="text-xs text-ios-secondary">出站网络已自定义</span>
           </div>
+          <p v-if="!nodeHasUserCore(node)" class="text-xs text-ios-secondary">{{ coreSummaryLabel(node) }}</p>
           <div v-if="cores.length" class="space-y-1">
             <div v-for="core in cores" :key="core.name" class="flex items-center justify-between gap-2 rounded-xl bg-ios-bg px-2.5 py-1.5">
               <span class="text-xs font-semibold text-ios-label truncate">
@@ -190,7 +191,7 @@
               </span>
             </div>
           </div>
-          <p v-else class="text-xs text-ios-secondary">尚未上报运行内核</p>
+          <p v-else-if="nodeHasUserCore(node)" class="text-xs text-ios-secondary">旧版 Agent 尚未上报运行内核</p>
           <div v-if="node.capabilities?.protocols?.length" class="flex flex-wrap gap-1.5">
             <ProtocolBadge
               v-for="p in node.capabilities.protocols"
@@ -242,7 +243,7 @@ import { hostMetrics, uptime } from '../../metrics';
 import { formatTime } from '../../../../app/auth';
 import { serverStatus, relativeHeartbeat } from '../serverListModel';
 import { revisionEventText } from './serverDetailModel';
-import { nodeCores } from '../../coreSummary';
+import { nodeCores, nodeHasUserCore, coreSummaryLabel } from '../../coreSummary';
 import type { NodeGroup } from '../../groupsApi';
 import StatusBadge from '../../../../components/StatusBadge.vue';
 import ProtocolBadge from '../../../../components/ProtocolBadge.vue';

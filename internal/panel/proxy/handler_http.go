@@ -165,6 +165,10 @@ func (h *Handler) deleteOutbound(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (h *Handler) fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, node.ErrNoUserCore) {
+		httpapi.Error(w, 400, "no_user_core", err.Error())
+		return
+	}
 	var managed *tunnelError
 	if errors.As(err, &managed) {
 		h.failTunnel(w, err)

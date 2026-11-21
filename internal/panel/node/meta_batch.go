@@ -23,7 +23,7 @@ func (r *Repository) Metadata(ctx context.Context, deleted bool) ([]MetaItem, er
 	if deleted {
 		scope = "n.deleted_at IS NOT NULL"
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT n.id,m.node_id IS NOT NULL,coalesce(m.region,''),coalesce(m.remark,''),coalesce(m.renew_date,''),coalesce(m.renew_cycle,''),coalesce(m.renew_price,''),coalesce(m.renew_currency,''),coalesce(m.renew_notice_days,7),m.port_range_start,m.port_range_end,m.bandwidth_mbps,coalesce(m.tags_json,'[]') FROM nodes n LEFT JOIN node_meta m ON m.node_id=n.id WHERE `+scope+` ORDER BY n.id`)
+	rows, err := tx.QueryContext(ctx, `SELECT n.id,m.node_id IS NOT NULL,coalesce(m.region,''),coalesce(m.remark,''),coalesce(m.renew_date,''),coalesce(m.renew_cycle,''),coalesce(m.renew_price,''),coalesce(m.renew_currency,''),coalesce(m.renew_notice_days,7),m.port_range_start,m.port_range_end,m.bandwidth_mbps,coalesce(m.tags_json,'[]'),coalesce(m.auto_renew,0) FROM nodes n LEFT JOIN node_meta m ON m.node_id=n.id WHERE `+scope+` ORDER BY n.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func (r *Repository) Metadata(ctx context.Context, deleted bool) ([]MetaItem, er
 		var item MetaItem
 		var tags string
 		m := &item.Meta
-		if err := rows.Scan(&item.NodeID, &item.Present, &m.Region, &m.Remark, &m.RenewDate, &m.RenewCycle, &m.RenewPrice, &m.RenewCurrency, &m.RenewNoticeDays, &m.PortRangeStart, &m.PortRangeEnd, &m.BandwidthMbps, &tags); err != nil {
+		if err := rows.Scan(&item.NodeID, &item.Present, &m.Region, &m.Remark, &m.RenewDate, &m.RenewCycle, &m.RenewPrice, &m.RenewCurrency, &m.RenewNoticeDays, &m.PortRangeStart, &m.PortRangeEnd, &m.BandwidthMbps, &tags, &m.AutoRenew); err != nil {
 			return nil, err
 		}
 		m.Tags, err = DecodeTags(tags)

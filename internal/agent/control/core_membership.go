@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"proxycontrol/internal/agent/agenthost"
 	"proxycontrol/internal/agent/configuration"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/core/gost"
 	"proxycontrol/internal/agent/core/singbox"
 	"proxycontrol/internal/agent/core/xray"
+	"proxycontrol/internal/agent/storage"
 	"proxycontrol/internal/agent/updater"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/agentstorage"
 	"proxycontrol/pkg/contracts/release"
 	"strings"
 )
@@ -253,16 +257,31 @@ func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreComm
 		if runtime == nil {
 			return errors.New("core_not_found")
 		}
-		// GOST only serves forwards, so the last core that carries users can never
-		// be removed: the node keeps Xray or sing-box as its first (primary) core.
+		// The last user core requires the irreversible format 6 activation before
+		// stopping the process or changing the authenticated inventory.
 		userCore := false
 		for _, name := range m.Names() {
 			if name != command.Component && core.CarriesUsers(name) {
 				userCore = true
 			}
 		}
-		if !userCore {
-			return errors.New("last_core")
+		if core.CarriesUsers(command.Component) && !userCore {
+			reader := agentstorage.Current(w.agentVersion)
+			required, present, err := storage.Check(w.cfg.DataDirectory, w.nodeID, reader)
+			if err != nil || !present {
+				slog.Error("core-optional storage floor unavailable", "error", errors.Join(err, storage.ErrStorage))
+				return errors.New("fallback_incompatible")
+			}
+			if required.Formats.Configuration.Write < 6 {
+				if err := agenthost.CheckCoreOptionalActivation(ctx, w.cfg.DataDirectory, w.nodeID, reader.AgentVersion); err != nil {
+					slog.Error("core-optional activation refused", "error", err)
+					return errors.New("fallback_incompatible")
+				}
+				if _, err := storage.ActivateCoreOptionalFormat(w.cfg.DataDirectory, w.nodeID, reader); err != nil {
+					slog.Error("core-optional storage activation failed", "error", err)
+					return errors.New("fallback_incompatible")
+				}
+			}
 		}
 		if err = runtime.Close(); err != nil {
 			return err
@@ -281,6 +300,7 @@ func (w *coreUpdates) removeCore(ctx context.Context, command *pb.RemoveCoreComm
 		inventory.Primary = m.Name()
 		if inventory.Primary == command.Component {
 			inventory.PrimaryChangedRevision = command.Revision
+			inventory.Primary = ""
 			for _, name := range m.Names() {
 				if name != command.Component && core.CarriesUsers(name) {
 					inventory.Primary = name

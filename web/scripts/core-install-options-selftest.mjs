@@ -32,33 +32,16 @@ const gostOption = mod.CORE_INSTALL_OPTIONS.find(o => o.name === 'gost');
 assert.ok(gostOption, '必须包含 GOST 选项');
 assert.match(gostOption.hint, /仅 linux\/amd64/);
 assert.match(gostOption.hint, /端口转发与隧道/);
-assert.match(gostOption.hint, /需同时选择 Xray 或 sing-box/);
-
-// 2. 验证校验规则：只选 GOST 不允许生成
-const onlyGost = mod.validateInstallCores(['gost']);
-assert.equal(onlyGost.valid, false, '只选 GOST 必须校验失败');
-assert.ok(onlyGost.error, '只选 GOST 必须返回错误说明');
-assert.match(onlyGost.error, /需同时选择 Xray 或 sing-box/);
-
-// 3. 验证校验规则：空列表校验失败
-const empty = mod.validateInstallCores([]);
-assert.equal(empty.valid, false, '空列表必须校验失败');
-assert.ok(empty.error, '空列表必须返回错误提示');
-
-// 4. 验证校验规则：合法选择
-assert.equal(mod.validateInstallCores(['xray']).valid, true);
-assert.equal(mod.validateInstallCores(['sing-box']).valid, true);
-assert.equal(mod.validateInstallCores(['xray', 'gost']).valid, true);
-assert.equal(mod.validateInstallCores(['sing-box', 'gost']).valid, true);
-assert.equal(mod.validateInstallCores(['xray', 'sing-box', 'gost']).valid, true);
-
-// 5. 验证排序规则：GOST 永远排在最后（安装器要求 GOST 不能是首项）
+assert.match(mod.installCoresDescription([]), /仅安装 Agent/);
+assert.match(mod.installCoresDescription(['gost']), /纯转发节点/);
+assert.equal(mod.installCoresDescription(['xray']), '');
+assert.deepEqual(mod.sortInstallCores([]), []);
+assert.deepEqual(mod.sortInstallCores(['gost']), ['gost']);
 assert.deepEqual(mod.sortInstallCores(['gost', 'xray']), ['xray', 'gost']);
 assert.deepEqual(mod.sortInstallCores(['gost', 'sing-box']), ['sing-box', 'gost']);
 assert.deepEqual(mod.sortInstallCores(['gost', 'sing-box', 'xray']), ['xray', 'sing-box', 'gost']);
 assert.deepEqual(mod.sortInstallCores(['xray', 'gost']), ['xray', 'gost']);
 
-// 6. 验证安装按钮签发状态管理
 assert.equal(mod.isNodeReissuing('n1'), false);
 mod.setReissuingNodeId('n1');
 assert.equal(mod.isNodeReissuing('n1'), true);
@@ -76,3 +59,21 @@ assert.deepEqual(mod.sortInstallCores(['gost','xray'], singBoxPrimary[0]), ['xra
 assert.deepEqual(mod.reportedInstallCores({}), []);
 
 console.log('PASS CORE INSTALL OPTIONS: selftest passed successfully');
+
+const summary = await import(await tsModuleUrl(new URL('../src/modules/nodes/coreSummary.ts', import.meta.url)));
+assert.equal(summary.nodeHasUserCore({}), true);
+assert.equal(summary.nodeHasUserCore({ capabilities: { core_name: 'xray' } }), true);
+assert.equal(summary.nodeHasUserCore({ capabilities: { core_optional_supported: true, cores: [] } }), false);
+assert.equal(summary.nodeHasUserCore({ capabilities: { core_optional_supported: true, cores: [{ name: 'gost' }] } }), false);
+assert.equal(summary.nodeHasUserCore({ capabilities: { core_optional_supported: true, cores: [{ name: 'gost' }, { name: 'sing-box' }] } }), true);
+// Only the pure blocker mapping is exercised; its network imports must stay unused.
+const blockerSource = readFileSync(new URL('../src/modules/nodes/coreRemovalBlockers.ts', import.meta.url), 'utf8').replace(/^import .*;$/gm, '');
+const blockerCode = ts.transpileModule(blockerSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
+const blockers = await import('data:text/javascript;base64,' + Buffer.from(blockerCode).toString('base64'));
+const fields = ['inboundIds', 'outboundIds', 'outboundGroupIds', 'proxyChainIds', 'relayIds', 'schemeIds'];
+const groups = blockers.coreRemovalBlockers(Object.fromEntries(fields.map((key, i) => [key, ['id/' + i]])), 'node/a');
+assert.deepEqual(groups.map(group => group.label), ['入站', '出站', '出口组', '代理链', '中转线路', '画布方案']);
+assert.deepEqual(groups.map(group => group.items[0].id), fields.map((_, i) => 'id/' + i));
+assert.deepEqual(groups.map(group => group.items[0].to), ['/nodes/node%2Fa?tab=nodes', '/nodes/node%2Fa?tab=nodes', '/nodes/node%2Fa?tab=nodes', undefined, '/proxy/relay', '/proxy/relay?schemeId=id%2F5']);
+assert.deepEqual(blockers.coreRemovalBlockers({ inboundIds: [], outboundIds: null, unknown: ['x'] }, 'node'), []);
+console.log('PASS optional cores: legacy classification and all six removal blocker fields');

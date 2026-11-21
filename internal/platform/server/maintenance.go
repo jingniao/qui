@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/panel/user"
@@ -15,6 +16,8 @@ type cycleScheduler struct {
 	quota    *quotaDeployer
 	now      func() time.Time
 	publish  func(string, any)
+	// refresh pushes a node whose renewal date moved to the runtime display.
+	refresh func(context.Context, string) error
 }
 
 func (s *cycleScheduler) step(ctx context.Context) error {
@@ -34,12 +37,25 @@ func (s *cycleScheduler) step(ctx context.Context) error {
 	if len(ids) > 0 {
 		s.quota.evaluate(ctx, ids)
 	}
+	// Alerts read the date before renewal: auto renewal does not suppress the
+	// usual renewal notices, including the one for the passed date.
 	nodes, err := s.nodes.RenewalAlerts(ctx, now, location)
 	if err != nil {
 		return err
 	}
 	for _, id := range nodes {
 		s.publish("system.alert", map[string]string{"alert": "node_renewal", "nodeId": id})
+	}
+	renewed, err := s.nodes.AutoRenew(ctx, now, location, func(ctx context.Context, tx *sql.Tx, item node.RenewedNode) error {
+		return s.settings.RecordTx(ctx, tx, "system", "自动续费 "+item.From+" → "+item.To, item.NodeID, "成功", "")
+	})
+	if err != nil {
+		return err
+	}
+	for _, item := range renewed {
+		if err := s.refresh(ctx, item.NodeID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

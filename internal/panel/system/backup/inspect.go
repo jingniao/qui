@@ -378,6 +378,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateInboundEgress(ctx, database); err != nil {
 		return err
 	}
+	if err := validateNodeAutoRenew(ctx, database); err != nil {
+		return err
+	}
 	if err := validateOutboundSource(ctx, database); err != nil {
 		return err
 	}

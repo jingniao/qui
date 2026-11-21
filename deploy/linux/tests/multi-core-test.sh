@@ -82,12 +82,23 @@ qui_agent_core_config "$T/new" "$T/new2"
 check 'config rewrite no duplicate cores' test "$(grep -c '^cores:' "$T/new2")" = 1
 check 'config rewrite no duplicate fallback' test "$(grep -c '^core_path:' "$T/new2")" = 1
 
+# Configuration without user cores has no legacy primary scalars.
+record_cores=(); record_digests=()
+qui_agent_core_config "$T/config" "$T/empty-config"
+check 'empty config is explicit' grep -qx 'cores: \[\]' "$T/empty-config"
+if grep -Eq '^core_(name|path):' "$T/empty-config"; then fail 'empty config has primary'; fi
+record_cores=(gost); record_digests=("$digest")
+qui_agent_core_config "$T/config" "$T/gost-config"
+check 'GOST-only config entry' grep -qx '  - name: gost' "$T/gost-config"
+if grep -Eq '^core_(name|path):' "$T/gost-config"; then fail 'GOST-only config has primary'; fi
+
 # Execute the real argument parser only, stopping before any host operation.
 installer_args() (
   mode=''; binary=''; digest=''; config=''; core=''; cores=()
-  core_source=qui; qui_version=''; core_bundle=''; core_sums=''; reinstall=false
+  core_source=qui; qui_version=''; core_bundle=''; core_sums=''; reinstall=false; no_core=false
   declare -A core_versions=() core_digests=() core_urls=()
   eval "$(sed -n '/^while ((\$#)); do/,/^done/p' "$repo/deploy/linux/install.sh")"
+  eval "$(sed -n '/^if \$no_core/,/^fi/p' "$repo/deploy/linux/install.sh")"
   printf '%s|%s|%s' "${cores[*]}" "${core_versions[xray]:-}" "${core_versions[sing-box]:-}"
 )
 check 'repeatable CLI with per-core versions' test "$(installer_args --node --core xray --core-version 26.3.27 --core sing-box --core-version 1.14.4)" = 'xray sing-box|26.3.27|1.14.4'
@@ -95,14 +106,17 @@ check 'repeatable CLI accepts the third core' test "$(installer_args --node --co
 # Direct subshell call: fail exits the parser subshell without ending this test.
 if installer_args --core xray --core xray >/dev/null 2>&1; then exit 1; fi
 printf 'ok - duplicate CLI refused\n'; passes=$((passes+1))
-# GOST only serves port forwards, so it can never be the first (primary) core.
-if installer_args --node --core gost >/dev/null 2>&1; then exit 1; fi
-if installer_args --node --core gost --core xray >/dev/null 2>&1; then exit 1; fi
-printf 'ok - GOST as the first core refused\n'; passes=$((passes+1))
+check 'GOST-only CLI accepted' test "$(installer_args --node --core gost)" = 'gost||'
+check 'GOST sorted last' test "$(installer_args --node --core gost --core xray)" = 'xray gost||'
+check 'empty core CLI accepted' test "$(installer_args --node --no-core)" = '||'
+if installer_args --node --no-core --core xray >/dev/null 2>&1; then fail 'mixed core flags accepted'; fi
+if installer_args --node --core gost --no-core >/dev/null 2>&1; then fail 'reverse mixed core flags accepted'; fi
 
 node_args() (
-  cores=(); core_source=qui
+  cores=(); core_source=qui; no_core=false
+  core_arguments=(); version=1.9.0; bundle_file=''; sums_file=''; architecture=amd64
   eval "$(sed -n '/^while ((\$#)); do/,/^done/p' "$repo/deploy/linux/node-install.sh")"
+  eval "$(sed -n '/^if \$no_core /p' "$repo/deploy/linux/node-install.sh")"
   eval "$(sed -n '/^if \[\[ ${#cores\[@\]} == 0 /,/^done/p' "$repo/deploy/linux/node-install.sh")"
   printf '%s' "${cores[*]}"
 )
@@ -111,10 +125,20 @@ check 'one-click repeats core flags' test "$(node_args --core xray --core sing-b
 check 'one-click accepts the third core' test "$(node_args --core xray --core sing-box --core gost)" = 'xray sing-box gost'
 if node_args --core xray --core xray >/dev/null 2>&1; then exit 1; fi
 printf 'ok - one-click duplicate CLI refused\n'; passes=$((passes+1))
-# GOST only serves port forwards, so it can never be the first (primary) core.
-if node_args --core gost >/dev/null 2>&1; then exit 1; fi
-if node_args --core gost --core sing-box >/dev/null 2>&1; then exit 1; fi
-printf 'ok - one-click GOST as the first core refused\n'; passes=$((passes+1))
+check 'one-click GOST-only accepted' test "$(node_args --core gost)" = gost
+check 'one-click GOST-first accepted' test "$(node_args --core gost --core sing-box)" = 'gost sing-box'
+check 'one-click empty selection' test "$(node_args --no-core)" = ''
+if node_args --no-core --core xray >/dev/null 2>&1; then fail 'one-click mixed flags accepted'; fi
+if node_args --core gost --no-core >/dev/null 2>&1; then fail 'one-click reverse mixed flags accepted'; fi
+# Execute the production construction of arguments passed to install.sh.
+node_install_arguments() (
+  cores=(); no_core=true; core_source=qui; version=1.9.0
+  eval "$(sed -n '/^core_arguments=(/,/^done/p' "$repo/deploy/linux/node-install.sh")"
+  printf '%s\n' "${core_arguments[@]}"
+)
+node_install_arguments > "$T/no-core-arguments"
+check 'no-core forwarded to install.sh' grep -qx -- '--no-core' "$T/no-core-arguments"
+if grep -qx -- '--core' "$T/no-core-arguments"; then fail 'no-core forwarded a --core flag'; fi
 
 # Execute the installer's EXIT cleanup against all supported staged cores.
 registry=$T/registry

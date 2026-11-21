@@ -1074,6 +1074,7 @@ type Capabilities struct {
 	OutboundSourceSupported        bool                   `protobuf:"varint,31,opt,name=outbound_source_supported,json=outboundSourceSupported,proto3" json:"outbound_source_supported,omitempty"`
 	HostSourceExtraExemptSupported bool                   `protobuf:"varint,32,opt,name=host_source_extra_exempt_supported,json=hostSourceExtraExemptSupported,proto3" json:"host_source_extra_exempt_supported,omitempty"`
 	InboundEgressSourceSupported   bool                   `protobuf:"varint,33,opt,name=inbound_egress_source_supported,json=inboundEgressSourceSupported,proto3" json:"inbound_egress_source_supported,omitempty"`
+	CoreOptionalSupported          bool                   `protobuf:"varint,34,opt,name=core_optional_supported,json=coreOptionalSupported,proto3" json:"core_optional_supported,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -1335,6 +1336,13 @@ func (x *Capabilities) GetHostSourceExtraExemptSupported() bool {
 func (x *Capabilities) GetInboundEgressSourceSupported() bool {
 	if x != nil {
 		return x.InboundEgressSourceSupported
+	}
+	return false
+}
+
+func (x *Capabilities) GetCoreOptionalSupported() bool {
+	if x != nil {
+		return x.CoreOptionalSupported
 	}
 	return false
 }
@@ -6322,7 +6330,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12\x1a\n" +
 	"\bsecurity\x18\x03 \x01(\tR\bsecurity\x12\x1c\n" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12\x12\n" +
-	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xc0\x0f\n" +
+	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xf8\x0f\n" +
 	"\fCapabilities\x12\x1b\n" +
 	"\tcore_name\x18\x01 \x01(\tR\bcoreName\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12G\n" +
@@ -6357,7 +6365,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x1anative_rule_sets_supported\x18\x1e \x01(\bR\x17nativeRuleSetsSupported\x12:\n" +
 	"\x19outbound_source_supported\x18\x1f \x01(\bR\x17outboundSourceSupported\x12J\n" +
 	"\"host_source_extra_exempt_supported\x18  \x01(\bR\x1ehostSourceExtraExemptSupported\x12E\n" +
-	"\x1finbound_egress_source_supported\x18! \x01(\bR\x1cinboundEgressSourceSupported\"\xfa\a\n" +
+	"\x1finbound_egress_source_supported\x18! \x01(\bR\x1cinboundEgressSourceSupported\x126\n" +
+	"\x17core_optional_supported\x18\" \x01(\bR\x15coreOptionalSupported\"\xfa\a\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +

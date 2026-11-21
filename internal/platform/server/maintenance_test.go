@@ -9,6 +9,73 @@ import (
 	"time"
 )
 
+func TestAutoRenewOmissionAndSchedulerOrder(t *testing.T) {
+	app := testServer(t)
+	owner := budgetOwner(t, app)
+	ctx := context.Background()
+	n, _, _, err := app.nodeRepository.CreateEnrollment(ctx, "auto renewal", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/nodes/" + n.ID + "/meta"
+	meta := map[string]any{"renewDate": "2025-01-31", "renewCycle": "/月", "autoRenew": true, "renewNoticeDays": 0}
+	if res := owner.call("PUT", path, meta); res.Code != 200 {
+		t.Fatal(res.Code, res.Body.String())
+	}
+	delete(meta, "autoRenew")
+	if res := owner.call("PUT", path, meta); res.Code != 200 {
+		t.Fatal(res.Code, res.Body.String())
+	}
+	stored, _, err := app.nodeRepository.Meta(ctx, n.ID)
+	if err != nil || !stored.AutoRenew {
+		t.Fatal(stored, err)
+	}
+	meta["renewCycle"] = "一次性"
+	if res := owner.call("PUT", path, meta); res.Code != 400 {
+		t.Fatal(res.Code, res.Body.String())
+	}
+	stored, _, err = app.nodeRepository.Meta(ctx, n.ID)
+	if err != nil || !stored.AutoRenew || stored.RenewCycle != "/月" {
+		t.Fatal("rejected write changed metadata", stored, err)
+	}
+	scheduler := app.cycleScheduler
+	count := 0
+	scheduler.publish = func(event string, payload any) {
+		if event != "system.alert" {
+			t.Fatalf("unexpected event %s", event)
+		}
+		data := payload.(map[string]string)
+		if data["alert"] != "node_renewal" || data["nodeId"] != n.ID {
+			t.Fatal(payload)
+		}
+		m, _, err := app.nodeRepository.Meta(ctx, n.ID)
+		if err != nil || m.RenewDate != "2025-01-31" {
+			t.Fatal("date advanced before reminder", m, err)
+		}
+		count++
+	}
+	scheduler.now = func() time.Time { return time.Date(2025, 1, 31, 12, 0, 0, 0, time.UTC) }
+	if err := scheduler.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stored, _, err = app.nodeRepository.Meta(ctx, n.ID)
+	if err != nil || stored.RenewDate != "2025-01-31" || count != 1 {
+		t.Fatal(stored, count, err)
+	}
+	scheduler.now = func() time.Time { return time.Date(2025, 2, 1, 12, 0, 0, 0, time.UTC) }
+	if err := scheduler.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stored, _, err = app.nodeRepository.Meta(ctx, n.ID)
+	if err != nil || stored.RenewDate != "2025-02-28" || count != 2 {
+		t.Fatal(stored, count, err)
+	}
+	var audits int
+	if err := app.Database.QueryRow("SELECT COUNT(*) FROM admin_operations WHERE operator='system' AND action=? AND target=?", "自动续费 2025-01-31 → 2025-02-28", n.ID).Scan(&audits); err != nil || audits != 1 {
+		t.Fatal(audits, err)
+	}
+}
+
 func TestCycleSchedulerReactivatesThroughAutomaticRevision(t *testing.T) {
 	t.Parallel()
 	f := newQuotaFixture(t)

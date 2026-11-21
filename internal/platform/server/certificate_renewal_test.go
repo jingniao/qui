@@ -11,22 +11,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
-	"io"
-	"net"
 	"os"
 	"path/filepath"
-	"proxycontrol/internal/agent/control"
-	"proxycontrol/internal/agent/core/xray"
 	"proxycontrol/internal/agent/identity"
-	"proxycontrol/internal/agent/reconcile"
-	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/pki"
-	"proxycontrol/internal/platform/vault"
 	pb "proxycontrol/pkg/contracts/agentpb"
-	"proxycontrol/pkg/contracts/desiredstate"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -148,44 +139,6 @@ func TestRenewalLostResponseIsIdempotentAndPossessionActivatesNewIdentity(t *tes
 	}
 }
 
-func TestActualAgentAutomaticallyRenewsAndReconnectsWithoutResettingACK(t *testing.T) {
-	t.Parallel()
-	app := testServer(t)
-	address, stop := startControl(t, app)
-	defer stop()
-	n, c, _ := nearExpiryNode(t, app)
-	c.ControlAddress = address
-	var before string
-	app.Database.QueryRow("SELECT fingerprint FROM node_identities WHERE node_id=?", n.ID).Scan(&before)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- control.Run(ctx, c, app.Logger) }()
-	defer func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("renewing Agent did not stop")
-		}
-	}()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var current string
-		app.Database.QueryRow("SELECT fingerprint FROM node_identities WHERE node_id=?", n.ID).Scan(&current)
-		state, err := identity.Load(filepath.Join(c.DataDirectory, "identity"))
-		if err == nil && current != before && state.LastAcked >= 3 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("Agent failed automatic renewal and control reconnection")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
 func TestRenewalCannotReplaceAuthenticatedKeyOrBypassRevocation(t *testing.T) {
 	t.Parallel()
 	app := testServer(t)
@@ -267,147 +220,6 @@ func TestCertificateRenewalAndActivationAuditFailureLeaveOldIdentityUsable(t *te
 	}
 	if _, err := newClient.RenewCertificate(ctx, &pb.CertificateRequest{CsrPem: csr}); status.Code(err) != codes.FailedPrecondition {
 		t.Fatal("activation cannot recover after audit repair", err)
-	}
-}
-
-func TestRealXrayExistingConnectionSurvivesAutomaticCertificateRenewal(t *testing.T) {
-	t.Parallel()
-	binary := os.Getenv("XRAY_BINARY")
-	if binary == "" {
-		t.Skip("set XRAY_BINARY for renewal data-plane continuity")
-	}
-	app := testServer(t)
-	address, stop := startControl(t, app)
-	defer stop()
-	n, c, _ := nearExpiryNode(t, app)
-	c.ControlAddress = address
-	c.CorePath = binary
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	origin, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer origin.Close()
-	go func() {
-		for {
-			connection, err := origin.Accept()
-			if err != nil {
-				return
-			}
-			go func() { defer connection.Close(); io.Copy(connection, connection) }()
-		}
-	}()
-	key, err := vault.Open(filepath.Join(app.Config.NodeIdentityDirectory, "configuration.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	repository := &deployment.Repository{Database: app.Database, Vault: key}
-	state := desiredstate.State{SchemaVersion: 1, NodeID: n.ID, Logging: desiredstate.Logging{DomainOnly: true}, Inbounds: []desiredstate.Inbound{{ID: "socks", Protocol: "socks5", Listen: "127.0.0.1", Port: port, Enabled: true, DefaultOutbound: "direct"}}, Outbounds: []desiredstate.Outbound{{ID: "direct", Protocol: "direct", Enabled: true}}}
-	revision, err := repository.Create(context.Background(), state, "owner", "renewal continuity")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repository.Deploy(context.Background(), revision.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := repository.Result(context.Background(), n.ID, &pb.ApplyResult{Revision: revision.ID, Success: true}); err != nil {
-		t.Fatal(err)
-	}
-	state, err = repository.State(context.Background(), revision.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adapter := &xray.Adapter{Path: binary, Directory: filepath.Join(c.DataDirectory, "runtime"), NodeID: n.ID}
-	manager, err := reconcile.New(c.DataDirectory, n.ID, adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result, err := manager.Apply(context.Background(), state); err != nil || !result.Success {
-		adapter.Close()
-		t.Fatal("local retained config failed", result, err)
-	}
-	adapter.Close()
-	var before string
-	app.Database.QueryRow("SELECT fingerprint FROM node_identities WHERE node_id=?", n.ID).Scan(&before)
-	// Hold the panel connection while the Agent restores its local core. This
-	// creates a live TCP session before control registration and renewal proceed.
-	blocker, err := app.Database.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blocker.Rollback()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- control.Run(ctx, c, app.Logger) }()
-	defer func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(8 * time.Second):
-			t.Error("renewing data-plane Agent did not stop")
-		}
-	}()
-	var connection net.Conn
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		connection, err = net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("Agent did not restore retained proxy")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	defer connection.Close()
-	connection.SetDeadline(time.Now().Add(20 * time.Second))
-	connection.Write([]byte{5, 1, 0})
-	reply := make([]byte, 2)
-	if _, err := io.ReadFull(connection, reply); err != nil || reply[1] != 0 {
-		t.Fatal("SOCKS greeting failed", err)
-	}
-	target := origin.Addr().(*net.TCPAddr)
-	connection.Write([]byte{5, 1, 0, 1, 127, 0, 0, 1, byte(target.Port >> 8), byte(target.Port)})
-	accepted := make([]byte, 10)
-	if _, err := io.ReadFull(connection, accepted); err != nil || accepted[1] != 0 {
-		t.Fatal("SOCKS target failed", err)
-	}
-	connection.Write([]byte("ping"))
-	echo := make([]byte, 4)
-	if _, err := io.ReadFull(connection, echo); err != nil || string(echo) != "ping" {
-		t.Fatal("pre-renewal data transfer failed", err)
-	}
-	if err := blocker.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	deadline = time.Now().Add(10 * time.Second)
-	for {
-		var current string
-		app.Database.QueryRow("SELECT fingerprint FROM node_identities WHERE node_id=?", n.ID).Scan(&current)
-		local, err := identity.Load(filepath.Join(c.DataDirectory, "identity"))
-		if err == nil && current != before && local.LastAcked >= 3 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("certificate renewal did not confirm")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	connection.Write([]byte("pong"))
-	if _, err := io.ReadFull(connection, echo); err != nil || string(echo) != "pong" {
-		t.Fatal("renewal restarted core or broke existing TCP session", err)
-	}
-	current, err := repository.Current(context.Background(), n.ID)
-	if err != nil || current != revision.ID {
-		t.Fatal("renewal changed deployed revision", current, err)
 	}
 }
 

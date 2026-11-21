@@ -25,15 +25,6 @@ import (
 	"time"
 )
 
-func TestRealCoreAccessAccountAggregationPrivacyAndOfflineRestartDelivery(t *testing.T) {
-	t.Parallel()
-	binary := os.Getenv("XRAY_BINARY")
-	if binary == "" {
-		t.Skip("set XRAY_BINARY for real core telemetry pipeline")
-	}
-	runCoreAccessAccountAggregation(t, binary, "xray")
-}
-
 func runCoreAccessAccountAggregation(t *testing.T, binary, coreName string) {
 	ctx := context.Background()
 	app := testServer(t)

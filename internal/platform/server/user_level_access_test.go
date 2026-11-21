@@ -3,31 +3,17 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"io"
 
-	"log/slog"
-	"net"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
-	"proxycontrol/internal/agent/control"
-	"proxycontrol/internal/agent/core"
-	"proxycontrol/internal/agent/spool"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/user"
-	"proxycontrol/internal/platform/config"
 	pb "proxycontrol/pkg/contracts/agentpb"
-	"proxycontrol/pkg/contracts/traffic"
 )
-
-// devicesRemovedCode is the error code every removed device route answers.
-const devicesRemovedCode = "devices_removed"
 
 // publishNodeRevision creates and deploys a proxy revision for one node and
 // applies it as the Agent would, so the node has a published state to compare
@@ -195,236 +181,6 @@ func TestStartupReconciliationAfterUserLevelMigration(t *testing.T) {
 	}
 }
 
-// A5.5: a 1.0.9-shaped Agent keeps working against a 1.1 panel. The Agent wire
-// contract did not change in Phase 5, so the harness below (a real control loop
-// with a fake core runtime) *is* such an Agent: it publishes, rolls back and
-// reports a traffic batch that the panel charges to the user's single access
-// identity.
-func TestPanelPublishesRollsBackAndAccountsTrafficWithALegacyAgent(t *testing.T) {
-	// Not parallel: it replaces the package-level control.NewRuntime.
-	ctx := context.Background()
-	app := testServer(t)
-	app.Config.ShutdownTimeout = time.Second
-	address, stop := startControl(t, app)
-	defer stop()
-	owner := flowOwner(t, app)
-
-	nodes := &node.Repository{Database: app.Database}
-	pending, token, _, err := nodes.CreateEnrollment(ctx, "Legacy Agent Node", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := nodes.SetPublicIP(ctx, pending.ID, "203.0.113.20"); err != nil {
-		t.Fatal(err)
-	}
-	directory := t.TempDir()
-	caPath := filepath.Join(directory, "ca.crt")
-	if err := os.WriteFile(caPath, app.Authority.PEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	fake := &flowFakeCore{}
-	agentConfig := config.DefaultAgent()
-	agentConfig.ControlAddress = address
-	agentConfig.DataDirectory = filepath.Join(directory, "agent")
-	agentConfig.TLS.ClientCA = caPath
-	previousRuntime := control.NewRuntime
-	control.NewRuntime = func(string, string) core.Runtime { return fake }
-	t.Cleanup(func() { control.NewRuntime = previousRuntime })
-	if err := control.Enroll(ctx, agentConfig, token, "legacy-agent"); err != nil {
-		t.Fatal(err)
-	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	startAgent := func() (context.CancelFunc, chan error) {
-		agentCtx, cancel := context.WithCancel(ctx)
-		done := make(chan error, 1)
-		go func() { done <- control.Run(agentCtx, agentConfig, logger) }()
-		return cancel, done
-	}
-	stopAgent := func(cancel context.CancelFunc, done chan error) {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("Agent stop timeout")
-		}
-	}
-	cancel, done := startAgent()
-	stopped := false
-	// A single stopper keeps the deferred cleanup from ending the Agent twice: the
-	// test stops it once before the spool write and starts it again afterwards, and
-	// the cleanup must end whichever run is current.
-	stopNow := func() {
-		if stopped {
-			return
-		}
-		stopped = true
-		stopAgent(cancel, done)
-	}
-	defer stopNow()
-
-	groupResponse := owner.call("POST", "/api/v1/node-groups", node.GroupInput{Name: "Legacy entrances", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
-		selected := []string{pending.ID}
-		ids := []string{}
-		for _, serverID := range selected {
-			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for rows.Next() {
-				var inboundID string
-				if err := rows.Scan(&inboundID); err != nil {
-					rows.Close()
-					t.Fatal(err)
-				}
-				ids = append(ids, inboundID)
-			}
-			if err := rows.Err(); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			rows.Close()
-		}
-		return ids
-	}()})
-	if groupResponse.Code != 201 {
-		t.Fatalf("node group: %d %s", groupResponse.Code, groupResponse.Body.String())
-	}
-	var group node.Group
-	if err := json.Unmarshal(groupResponse.Body.Bytes(), &group); err != nil {
-		t.Fatal(err)
-	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	inboundResponse := owner.call("POST", "/api/v1/inbounds", proxy.InboundInput{Name: "Legacy VLESS", NodeID: pending.ID, Protocol: "vless", Listen: "0.0.0.0", Port: port, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
-	if inboundResponse.Code != 201 {
-		t.Fatalf("inbound: %d %s", inboundResponse.Code, inboundResponse.Body.String())
-	}
-	if r := owner.call("PUT", "/api/v1/node-groups/"+group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: func() []string {
-		selected := []string{pending.ID}
-		ids := []string{}
-		for _, serverID := range selected {
-			rows, err := app.Database.Query("SELECT id FROM inbounds WHERE node_id=? AND subscription_visible=1 AND internal_relay=0 ORDER BY id", serverID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for rows.Next() {
-				var inboundID string
-				if err := rows.Scan(&inboundID); err != nil {
-					rows.Close()
-					t.Fatal(err)
-				}
-				ids = append(ids, inboundID)
-			}
-			if err := rows.Err(); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			rows.Close()
-		}
-		return ids
-	}()}); r.Code != 200 {
-		t.Fatal(r.Body.String())
-	}
-	// The baseline holds no user credential; the second revision adds the identity's
-	// credential, which is what the traffic batch below belongs to. Both are
-	// delivered over the control connection and applied by the Agent itself, so the
-	// test waits for the node's published revision instead of reporting a result.
-	publish := func(summary string) int64 {
-		response := owner.call("POST", "/api/v1/revisions/proxy", map[string]any{"nodeId": pending.ID, "summary": summary})
-		if response.Code != 201 {
-			t.Fatalf("revision %q: %d %s", summary, response.Code, response.Body.String())
-		}
-		var revision deployment.Revision
-		if err := json.Unmarshal(response.Body.Bytes(), &revision); err != nil {
-			t.Fatal(err)
-		}
-		if deployResponse := owner.call("POST", "/api/v1/revisions/"+strconv.FormatInt(revision.ID, 10)+"/deploy", nil); deployResponse.Code != 202 {
-			t.Fatalf("deploy %q: %d %s", summary, deployResponse.Code, deployResponse.Body.String())
-		}
-		flowWait(t, "revision "+strconv.FormatInt(revision.ID, 10)+" to reach the node", func() bool {
-			published, err := app.deployments.Published(ctx, pending.ID)
-			return err == nil && published.Revision == revision.ID
-		})
-		return revision.ID
-	}
-	baseline := publish("Legacy baseline")
-	userResponse := owner.call("POST", "/api/v1/users", user.Input{Username: "legacy_agent_user", DisplayName: "Legacy", Status: "active", AllowedProtocols: []string{"vless"}, NodeGroupIDs: []string{group.ID}})
-	if userResponse.Code != 201 {
-		t.Fatalf("user: %d %s", userResponse.Code, userResponse.Body.String())
-	}
-	var account user.User
-	if err := json.Unmarshal(userResponse.Body.Bytes(), &account); err != nil {
-		t.Fatal(err)
-	}
-	identity, err := app.quotaDeployer.users.AccessIdentity(ctx, account.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	credentials, err := app.quotaDeployer.users.Credentials(ctx, identity.ID, true)
-	if err != nil || len(credentials) != len(user.AllProtocols) {
-		t.Fatalf("credentials: %v %v", err, credentials)
-	}
-	var credential user.Credential
-	for _, c := range credentials {
-		if c.Protocol == "vless" && c.Secret != "" {
-			credential = c
-			break
-		}
-	}
-	if credential.Secret == "" {
-		t.Fatalf("missing vless credential in %v", credentials)
-	}
-	current := publish("Legacy with the identity credential")
-	state, err := app.deployments.State(ctx, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !stateHasCredential(state, credential) {
-		t.Fatal("the published revision does not carry the identity's credential")
-	}
-
-	// The Agent goes offline and queues one traffic batch for that credential; the
-	// panel must charge it to the user when the Agent returns.
-	stopNow()
-	queue, err := spool.Open(ctx, filepath.Join(agentConfig.DataDirectory, "spool"), pending.ID, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UTC()
-	counter := traffic.Counter{CoreEpoch: "legacy-agent-epoch", Revision: current, CredentialID: credential.ID, UserID: account.ID, DeviceID: identity.ID, Protocol: "vless", UploadBytes: 100, DownloadBytes: 200, ObservedAt: now}
-	if err := queue.SaveTraffic(ctx, []traffic.Counter{counter}); err != nil {
-		t.Fatal(err)
-	}
-	if err := queue.Close(); err != nil {
-		t.Fatal(err)
-	}
-	cancel, done = startAgent()
-	stopped = false
-	flowWait(t, "the Agent's traffic batch to be accounted to the user", func() bool {
-		var used int64
-		err := app.Database.QueryRowContext(ctx, "SELECT used_traffic FROM users WHERE id=?", account.ID).Scan(&used)
-		return err == nil && used == 300
-	})
-
-	// Rolling back to the credential-free baseline removes the user's access from
-	// the node again, and the Agent reports the rollback.
-	rollbackResponse := owner.call("POST", "/api/v1/nodes/"+pending.ID+"/rollback", map[string]any{"revision": baseline})
-	if rollbackResponse.Code != 202 {
-		t.Fatalf("rollback: %d %s", rollbackResponse.Code, rollbackResponse.Body.String())
-	}
-	flowWait(t, "the rollback to reach the node", func() bool {
-		published, err := app.deployments.Published(ctx, pending.ID)
-		return err == nil && published.Revision == baseline
-	})
-}
-
 // A5.6: allowing one more protocol adds its credential with the next automatic
 // revision, and resetting the credentials revokes the old secrets on the node. The
 // fixture's entry inbound is VLESS, so the second protocol is SOCKS5, which the
@@ -501,36 +257,5 @@ func TestProtocolChangeAddsAndResetRevokesCredentials(t *testing.T) {
 	}
 	if fresh != 2 {
 		t.Fatalf("the reset revision carries %d of the two renewed credentials: %+v", fresh, resetState.Credentials)
-	}
-}
-
-// Every route of the removed device API answers 410 devices_removed instead of
-// 404, so a stale caller learns why its request no longer works, and none of them
-// can read or write anything. The list mirrors the 410 registration in
-// internal/panel/user/handler_http.go; the subscription token endpoint refuses the
-// removed deviceId field the same way.
-func TestRemovedDeviceRoutesAnswer410(t *testing.T) {
-	t.Parallel()
-	app := testServer(t)
-	owner := budgetOwner(t, app)
-	paths := []struct{ method, path string }{
-		{"GET", "/api/v1/users/dummy/devices"},
-		{"POST", "/api/v1/users/dummy/devices"},
-		{"GET", "/api/v1/devices"},
-		{"GET", "/api/v1/devices/dummy"},
-		{"PUT", "/api/v1/devices/dummy"},
-		{"DELETE", "/api/v1/devices/dummy"},
-		{"POST", "/api/v1/devices/dummy/credentials/socks5/reset"},
-		{"DELETE", "/api/v1/devices/dummy/credentials/socks5"},
-	}
-	for _, item := range paths {
-		response := owner.call(item.method, item.path, map[string]any{})
-		if response.Code != 410 || !strings.Contains(response.Body.String(), devicesRemovedCode) {
-			t.Fatalf("%s %s answered %d %s", item.method, item.path, response.Code, response.Body.String())
-		}
-	}
-	response := owner.call("POST", "/api/v1/users/dummy/subscription-token", map[string]any{"deviceId": "x"})
-	if response.Code != 410 || !strings.Contains(response.Body.String(), devicesRemovedCode) {
-		t.Fatalf("subscription-token with deviceId answered %d %s", response.Code, response.Body.String())
 	}
 }

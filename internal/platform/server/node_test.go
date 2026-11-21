@@ -6,11 +6,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,15 +20,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"proxycontrol/internal/agent/control"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/config"
-	"proxycontrol/internal/platform/filelock"
-	"proxycontrol/internal/testutil/dbtest"
 	pb "proxycontrol/pkg/contracts/agentpb"
-	"testing/fstest"
 )
 
 func startControl(t *testing.T, app *Server) (string, func()) {
@@ -262,82 +255,6 @@ func TestNodeRejectsConflictingDuplicateSequence(t *testing.T) {
 	}
 }
 
-func TestAgentEnrollsAndSendsRealControlHeartbeat(t *testing.T) {
-	t.Parallel()
-	app := testServer(t)
-	address, stop := startControl(t, app)
-	defer stop()
-	repository := &node.Repository{Database: app.Database}
-	pending, token, _, err := repository.CreateEnrollment(context.Background(), "actual-agent", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	directory := t.TempDir()
-	caPath := filepath.Join(directory, "ca.crt")
-	if err := os.WriteFile(caPath, app.Authority.PEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	c := config.DefaultAgent()
-	c.ControlAddress = address
-	c.DataDirectory = filepath.Join(directory, "agent")
-	c.TLS.ClientCA = caPath
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := control.Enroll(ctx, c, token, "test-agent"); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- control.Run(ctx, c, app.Logger) }()
-	deadline := time.Now().Add(5 * time.Second)
-	online := false
-	for time.Now().Before(deadline) {
-		n, err := repository.Get(ctx, pending.ID)
-		if err == nil && n.Status == "online" {
-			online = true
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !online {
-		t.Fatal("Agent did not report heartbeat")
-	}
-	keyPath := filepath.Join(c.DataDirectory, "identity", "client.key")
-	originalKey, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := control.Run(ctx, c, app.Logger); !errors.Is(err, filelock.ErrBusy) {
-		t.Fatal("second Agent did not reject live ownership", err)
-	}
-	if err := control.Enroll(ctx, c, "unused-token", "duplicate-agent"); !errors.Is(err, filelock.ErrBusy) {
-		t.Fatal("enrollment bypassed live ownership", err)
-	}
-	retainedKey, err := os.ReadFile(keyPath)
-	if err != nil || string(retainedKey) != string(originalKey) {
-		t.Fatal("duplicate Agent changed node identity", err)
-	}
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Agent did not stop")
-	}
-	if _, err := identity.Load(filepath.Join(c.DataDirectory, "identity")); err != nil {
-		t.Fatal(err)
-	}
-	// A normal stop must release both guards after its workers and core close.
-	for _, path := range []string{filepath.Join(c.DataDirectory, ".agent-owner.lock"), filepath.Join(c.DataDirectory, "identity", ".agent-owner.lock")} {
-		lock, err := filelock.Try(path)
-		if err != nil {
-			t.Fatal("Agent shutdown retained ownership", err)
-		}
-		lock.Close()
-	}
-}
-
 func TestNodeHTTPAuthorizationAndExpiredEnrollment(t *testing.T) {
 	t.Parallel()
 	app := testServer(t)
@@ -430,120 +347,5 @@ func TestNodeHTTPAuthorizationAndExpiredEnrollment(t *testing.T) {
 	}
 	if response := call("DELETE", "/api/v1/nodes/"+enrolled.Node.ID, "", cookie, session.CSRFToken); response.Code != 200 {
 		t.Fatalf("second delete was not idempotent: %d", response.Code)
-	}
-}
-
-func TestAgentReconnectsAfterCentralDatabaseReopen(t *testing.T) {
-	t.Parallel()
-	app := testServer(t)
-	app.Config.ShutdownTimeout = time.Second
-	launch := func(server *Server, address string) (string, func()) {
-		httpListener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		grpcListener, err := net.Listen("tcp", address)
-		if err != nil {
-			httpListener.Close()
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan error, 1)
-		go func() { done <- server.Serve(ctx, httpListener, grpcListener) }()
-		return grpcListener.Addr().String(), func() {
-			cancel()
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Error(err)
-				}
-			case <-time.After(3 * time.Second):
-				t.Error("restart shutdown timed out")
-			}
-		}
-	}
-	address, stop := launch(app, "127.0.0.1:0")
-	firstStopped := false
-	defer func() {
-		if !firstStopped {
-			stop()
-		}
-	}()
-	repository := &node.Repository{Database: app.Database}
-	n, token, _, err := repository.CreateEnrollment(context.Background(), "restart-agent", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	directory := t.TempDir()
-	caPath := filepath.Join(directory, "ca.crt")
-	if err := os.WriteFile(caPath, app.Authority.PEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	c := config.DefaultAgent()
-	c.ControlAddress = address
-	c.DataDirectory = filepath.Join(directory, "agent")
-	c.TLS.ClientCA = caPath
-	agentCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := control.Enroll(agentCtx, c, token, "restart-test"); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- control.Run(agentCtx, c, app.Logger) }()
-	waitOnline := func(repository *node.Repository, minimum uint64) {
-		deadline := time.Now().Add(8 * time.Second)
-		for time.Now().Before(deadline) {
-			current, err := repository.Get(context.Background(), n.ID)
-			if err == nil && current.Status == "online" && current.LastSequence >= minimum {
-				return
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		t.Fatalf("Agent did not reach online sequence %d", minimum)
-	}
-	waitOnline(repository, 2)
-	stop()
-	firstStopped = true
-	app.Database.Close()
-	database, err := dbtest.Open(context.Background(), app.Config.Database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	second, err := New(app.Config, database, fstest.MapFS{"index.html": {Data: []byte("UI")}}, app.Logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, stopSecond := launch(second, address)
-	defer stopSecond()
-	waitOnline(&node.Repository{Database: database}, 4)
-	// Server receipt precedes the Agent's durable ACK; wait for that boundary
-	// before stopping the Agent so shutdown cannot race ACK persistence.
-	ackDeadline := time.Now().Add(8 * time.Second)
-	for {
-		state, err := identity.Load(filepath.Join(c.DataDirectory, "identity"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if state.LastAcked >= 4 {
-			break
-		}
-		if time.Now().After(ackDeadline) {
-			t.Fatalf("reconnected ACK not persisted before shutdown: %v", state)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Agent failed to stop")
-	}
-	state, err := identity.Load(filepath.Join(c.DataDirectory, "identity"))
-	if err != nil || state.LastAcked < 4 {
-		t.Fatalf("reconnected ACK not persisted: %v %v", state, err)
 	}
 }

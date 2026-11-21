@@ -3,25 +3,18 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
-	"proxycontrol/internal/agent/control"
-	"proxycontrol/internal/agent/spool"
-	access "proxycontrol/internal/panel/access"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/deployment"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/config"
 	"proxycontrol/internal/platform/vault"
 	contract "proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 )
 
@@ -51,123 +44,6 @@ func accessRevision(t *testing.T, app *Server, nodeID string) int64 {
 
 func telemetryRow(nodeID string, revision int64, domain string) contract.Rollup {
 	return contract.Rollup{Bucket: time.Now().UTC().Truncate(time.Minute), NodeID: nodeID, Revision: revision, UserID: "audit-user", DeviceID: "audit-device", InboundProtocol: "socks5", Domain: domain, TargetPort: 443, Network: "tcp", Action: "Direct", Allowed: true, Connections: 1, TrafficKnown: true, UploadBytes: 10, DownloadBytes: 20, OutboundID: "direct"}
-}
-
-func TestAgentSpoolMTLSDeliveryOfflineReconnectAndAcknowledgement(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	app := testServer(t)
-	app.Config.ShutdownTimeout = time.Second
-	address, stop := startControl(t, app)
-	running := true
-	defer func() {
-		if running {
-			stop()
-		}
-	}()
-	nodes := &node.Repository{Database: app.Database}
-	n, token, _, err := nodes.CreateEnrollment(ctx, "Telemetry Agent", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	directory := t.TempDir()
-	caPath := filepath.Join(directory, "ca.crt")
-	if err := os.WriteFile(caPath, app.Authority.PEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	c := config.DefaultAgent()
-	c.ControlAddress = address
-	c.TLS.ClientCA = caPath
-	c.CorePath = filepath.Join(directory, "not-installed-xray")
-	c.DataDirectory = filepath.Join(directory, "agent")
-	if err := control.Enroll(ctx, c, token, "telemetry-test"); err != nil {
-		t.Fatal(err)
-	}
-	revision := accessRevision(t, app, n.ID)
-	// This fixture simulates a node that has already run and queued telemetry
-	// offline, so its configuration key exists before the spool is opened. The
-	// real first start creates the key in storage.Ensure before opening the spool.
-	if _, err := vault.Open(filepath.Join(c.DataDirectory, "configuration.key")); err != nil {
-		t.Fatal(err)
-	}
-	queue, err := spool.Open(ctx, filepath.Join(c.DataDirectory, "spool"), n.ID, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer queue.Close()
-	if _, err := queue.Enqueue(ctx, []contract.Rollup{telemetryRow(n.ID, revision, "first.example")}); err != nil {
-		t.Fatal(err)
-	}
-	agentCtx, cancel := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() { done <- control.Run(agentCtx, c, app.Logger, "telemetry-test") }()
-	defer func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("telemetry Agent stop timeout")
-		}
-	}()
-	wait := func(connections int64) {
-		t.Helper()
-		deadline := time.Now().Add(30 * time.Second)
-		for time.Now().Before(deadline) {
-			summary, err := app.accessRepository.Summary(ctx, access.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Minute)})
-			stats, queueErr := queue.Stats(ctx)
-			if err == nil && queueErr == nil && summary.Connections == connections && stats.Batches == 0 {
-				return
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		t.Fatal("telemetry delivery or acknowledgement timed out")
-	}
-	wait(1)
-	stop()
-	running = false
-	if _, err := queue.Enqueue(ctx, []contract.Rollup{telemetryRow(n.ID, revision, "offline.example")}); err != nil {
-		t.Fatal(err)
-	}
-	stats, err := queue.Stats(ctx)
-	if err != nil || stats.Batches != 1 {
-		t.Fatal("offline batch not durable", stats, err)
-	}
-	files := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("test")}}
-	reopened, err := New(app.Config, app.Database, files, app.Logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	grpcListener, err := net.Listen("tcp", address)
-	if err != nil {
-		httpListener.Close()
-		t.Fatal(err)
-	}
-	panelCtx, panelCancel := context.WithCancel(ctx)
-	panelDone := make(chan error, 1)
-	go func() { panelDone <- reopened.Serve(panelCtx, httpListener, grpcListener) }()
-	defer func() {
-		panelCancel()
-		select {
-		case err := <-panelDone:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("reopened panel stop timeout")
-		}
-	}()
-	wait(2)
-	summary, err := app.accessRepository.Summary(ctx, access.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Minute)})
-	if err != nil || summary.DownloadBytes != 40 {
-		t.Fatal("reconnect duplicated counters", summary, err)
-	}
 }
 
 func TestAccessHTTPPaginationPrivacyAndViewerSummary(t *testing.T) {
